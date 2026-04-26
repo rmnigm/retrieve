@@ -214,9 +214,14 @@ uv run python -m scripts.upload_checkpoints \
 uv run python -m scripts.upload_checkpoints --owner <hf-user-or-org> --checkpoint all --private
 ```
 
-Useful flags: `--public` (instead of `--private`), `--repo-name OTHER` to
-override the default name (single checkpoint only), `--no-write-card` to skip
-the auto-generated README.
+By default the script skips the epoch-tagged `gsasrec-ep*-ndcg*.pt` snapshot
+because it has the same bytes as `best_model.pt` (just saved at a different
+moment in the training loop). That halves what gets pushed to Hub. Pass
+`--include-epoch-snapshots` if you want both copies.
+
+Other useful flags: `--public` (instead of `--private`), `--repo-name OTHER`
+to override the default name (single checkpoint only), `--no-write-card` to
+skip the auto-generated README.
 
 ## Hyperparameter notes
 

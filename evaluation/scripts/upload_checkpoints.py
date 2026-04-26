@@ -23,8 +23,8 @@ Upload all runs (one repo each) and dry-run first:
 
 from __future__ import annotations
 
+import fnmatch
 import json
-import os
 from pathlib import Path
 
 import click
@@ -34,8 +34,20 @@ from loguru import logger
 
 CHECKPOINT_ROOT = Path(__file__).resolve().parents[1] / "checkpoints"
 
+# `gsasrec-ep{N}-ndcg10{X}.pt` is saved at the best val epoch and then copied
+# to `best_model.pt` at training end — same bytes, twice the storage. Skip the
+# epoch-tagged copy by default; pass --include-epoch-snapshots to keep it.
+EPOCH_SNAPSHOT_PATTERN = "gsasrec-ep*-ndcg*.pt"
 
-def _build_model_card(ckpt_dir: Path, repo_id: str) -> str:
+
+def _filter_files(ckpt_dir: Path, ignore_patterns: list[str]) -> list[Path]:
+    return [
+        p for p in sorted(ckpt_dir.iterdir())
+        if p.is_file() and not any(fnmatch.fnmatch(p.name, pat) for pat in ignore_patterns)
+    ]
+
+
+def _build_model_card(ckpt_dir: Path, repo_id: str, files: list[Path]) -> str:
     """Generate a minimal model-card README from local metadata files."""
     parts: list[str] = [f"# {ckpt_dir.name}\n"]
 
@@ -60,7 +72,7 @@ def _build_model_card(ckpt_dir: Path, repo_id: str) -> str:
         parts.append("```\n")
 
     parts.append("## Files\n")
-    for p in sorted(ckpt_dir.iterdir()):
+    for p in files:
         size_mb = p.stat().st_size / (1024 * 1024)
         parts.append(f"- `{p.name}` ({size_mb:.1f} MB)")
 
@@ -129,6 +141,14 @@ def _resolve_checkpoints(selector: str) -> list[Path]:
     help="Generate README.md from eval_quality.json/config.json if absent.",
 )
 @click.option(
+    "--include-epoch-snapshots",
+    is_flag=True,
+    help=(
+        "Also upload the epoch-tagged `gsasrec-ep*-ndcg*.pt` snapshot. "
+        "By default it is skipped because best_model.pt is the same bytes."
+    ),
+)
+@click.option(
     "--token",
     default=None,
     envvar="HF_TOKEN",
@@ -141,6 +161,7 @@ def main(
     private: bool,
     dry_run: bool,
     write_card: bool,
+    include_epoch_snapshots: bool,
     token: str | None,
 ) -> None:
     """Upload checkpoint directories to the Hugging Face Hub."""
@@ -148,19 +169,32 @@ def main(
     if repo_name and len(ckpt_dirs) != 1:
         raise click.ClickException("--repo-name only valid with a single --checkpoint")
 
+    ignore_patterns: list[str] = [] if include_epoch_snapshots else [EPOCH_SNAPSHOT_PATTERN]
+
     api = HfApi(token=token)
 
     for ckpt_dir in ckpt_dirs:
         target_name = repo_name or ckpt_dir.name
         repo_id = f"{owner}/{target_name}"
-        size_mb = sum(p.stat().st_size for p in ckpt_dir.rglob("*") if p.is_file()) / (1024 * 1024)
+        files = _filter_files(ckpt_dir, ignore_patterns)
+        skipped = [p.name for p in sorted(ckpt_dir.iterdir())
+                   if p.is_file() and p not in files]
+        if not files:
+            logger.warning(
+                "{} has no files after filtering (skipped: {}) — not uploading.",
+                ckpt_dir.name, ", ".join(skipped) or "none",
+            )
+            continue
+        size_mb = sum(p.stat().st_size for p in files) / (1024 * 1024)
         logger.info(
-            "Uploading {} ({:.1f} MB) -> {} (private={})",
-            ckpt_dir.name, size_mb, repo_id, private,
+            "Uploading {} ({:.1f} MB, {} files) -> {} (private={})",
+            ckpt_dir.name, size_mb, len(files), repo_id, private,
         )
+        if skipped:
+            logger.info("  skipping: {}", ", ".join(skipped))
 
         if dry_run:
-            for p in sorted(ckpt_dir.iterdir()):
+            for p in files:
                 logger.info("  would upload: {}", p.name)
             continue
 
@@ -172,8 +206,9 @@ def main(
         readme_path = ckpt_dir / "README.md"
         wrote_card = False
         if write_card and not readme_path.exists():
-            readme_path.write_text(_build_model_card(ckpt_dir, repo_id))
+            readme_path.write_text(_build_model_card(ckpt_dir, repo_id, files))
             wrote_card = True
+            files = files + [readme_path]
             logger.info("  generated model card: {}", readme_path)
 
         try:
@@ -182,6 +217,7 @@ def main(
                 repo_id=repo_id,
                 repo_type="model",
                 commit_message=f"Upload {ckpt_dir.name}",
+                ignore_patterns=ignore_patterns or None,
             )
         finally:
             if wrote_card:
