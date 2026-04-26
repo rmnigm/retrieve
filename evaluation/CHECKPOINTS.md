@@ -145,6 +145,79 @@ print(evaluate(m, str(DATA / 'test.parquet'), num_items=n,
 "
 ```
 
+## Hugging Face Hub
+
+The `.pt` files are **not** stored in git (see `.gitignore`). Each checkpoint
+dir lives as its own model repo on the Hub:
+
+| Local dir | HF repo |
+|---|---|
+| `checkpoints/gsasrec-500m-listens-v1/` | `<owner>/gsasrec-500m-listens-v1` |
+| `checkpoints/gsasrec-500m-listens-d128-drop0.5/` | `<owner>/gsasrec-500m-listens-d128-drop0.5` |
+| `checkpoints/smoke-50m-listens/` | `<owner>/smoke-50m-listens` |
+
+Replace `<owner>` with the HF username/org you uploaded under.
+
+### Auth (one-time setup)
+
+Either log in interactively (token cached under `~/.cache/huggingface/`):
+```bash
+uv run hf auth login   # paste a write-scoped token
+```
+or set `HF_TOKEN` in the environment (e.g. in a `.env` or shell profile).
+For private repos you need a token with **read** access to download and
+**write** access to upload.
+
+### Downloading a checkpoint
+
+```python
+from huggingface_hub import snapshot_download
+
+local = snapshot_download(
+    repo_id="<owner>/gsasrec-500m-listens-d128-drop0.5",
+    local_dir="checkpoints/gsasrec-500m-listens-d128-drop0.5",
+    # local_dir_use_symlinks=False,  # uncomment to copy instead of symlink
+)
+```
+After this the loading recipe above works unchanged. To grab a single file
+without the whole snapshot (~1.8 GB rather than ~3.6 GB if you only want
+`best_model.pt`):
+```python
+from huggingface_hub import hf_hub_download
+hf_hub_download(repo_id="<owner>/gsasrec-500m-listens-d128-drop0.5",
+                filename="best_model.pt",
+                local_dir="checkpoints/gsasrec-500m-listens-d128-drop0.5")
+```
+
+### Uploading a new checkpoint
+
+After a training run finishes, push the resulting dir with the helper at
+[`scripts/upload_checkpoints.py`](scripts/upload_checkpoints.py). It creates
+one HF model repo per checkpoint dir, generates a minimal model card from
+`eval_quality.json` / `config.json`, and uses LFS automatically for the
+large `.pt` files.
+
+```bash
+# Dry-run first to confirm the file list:
+uv run python -m scripts.upload_checkpoints \
+    --owner <hf-user-or-org> \
+    --checkpoint gsasrec-500m-listens-d128-drop0.5 \
+    --private --dry-run
+
+# Real upload:
+uv run python -m scripts.upload_checkpoints \
+    --owner <hf-user-or-org> \
+    --checkpoint gsasrec-500m-listens-d128-drop0.5 \
+    --private
+
+# Upload every dir under checkpoints/ in one go:
+uv run python -m scripts.upload_checkpoints --owner <hf-user-or-org> --checkpoint all --private
+```
+
+Useful flags: `--public` (instead of `--private`), `--repo-name OTHER` to
+override the default name (single checkpoint only), `--no-write-card` to skip
+the auto-generated README.
+
 ## Hyperparameter notes
 
 - `mask_history=False` is the correct default for re-consumption tasks (music
