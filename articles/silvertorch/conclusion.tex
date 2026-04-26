@@ -1,0 +1,3 @@
+\section{Conclusion}
+\label{sec:8}
+SilverTorch, a model-based recommendation serving system on GPUs, simplifies client-side logic and eliminates dependencies on standalone services. We propose a fused Int8 ANN index, Bloom index for feature filtering as model layers, and a co-designed index. SilverTorch extends retrieval models with OverArch and in-model Value Model, enhancing recall while maintaining latency budget, employs item embedding caching to reduce online computation. Our experiments demonstrate scaling to millions of items across multiple GPUs with $23.7\times$ throughput improvement and $13.35\times$ better cost-efficiency compared to state-of-the-art systems. %SilverTorch represents an important step toward GPU-based serving for recommendation models.

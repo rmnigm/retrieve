@@ -1,0 +1,873 @@
+%%
+%% This is file `sample-sigconf.tex',
+%% generated with the docstrip utility.
+%%
+%% The original source files were:
+%%
+%% samples.dtx  (with options: `all,proceedings,bibtex,sigconf')
+%% 
+%% IMPORTANT NOTICE:
+%% 
+%% For the copyright see the source file.
+%% 
+%% Any modified versions of this file must be renamed
+%% with new filenames distinct from sample-sigconf.tex.
+%% 
+%% For distribution of the original source see the terms
+%% for copying and modification in the file samples.dtx.
+%% 
+%% This generated file may be distributed as long as the
+%% original source files, as listed above, are part of the
+%% same distribution. (The sources need not necessarily be
+%% in the same archive or directory.)
+%%
+%%
+%% Commands for TeXCount
+%TC:macro \cite [option:text,text]
+%TC:macro \citep [option:text,text]
+%TC:macro \citet [option:text,text]
+%TC:envir table 0 1
+%TC:envir table* 0 1
+%TC:envir tabular [ignore] word
+%TC:envir displaymath 0 word
+%TC:envir math 0 word
+%TC:envir comment 0 0
+%%
+%% The first command in your LaTeX source must be the \documentclass
+%% command.
+%%
+%% For submission and review of your manuscript please change the
+%% command to \documentclass[manuscript, screen, review]{acmart}.
+%%
+%% When submitting camera ready or to TAPS, please change the command
+%% to \documentclass[sigconf]{acmart} or whichever template is required
+%% for your publication.
+%%
+%%
+\documentclass[sigconf,natbib=true,anonymous=false,nonacm]{acmart}
+
+\let\Bbbk\relax
+\usepackage{algorithm}
+%\usepackage[noend]{algorithmic}
+\usepackage{algpseudocode}
+\usepackage{amsmath, amssymb}
+\usepackage{multirow}
+\algrenewcommand\alglinenumber[1]{\tiny #1:}
+
+
+%%
+%% \BibTeX command to typeset BibTeX logo in the docs
+\AtBeginDocument{%
+  \providecommand\BibTeX{{%
+    Bib\TeX}}}
+
+%% Rights management information.  This information is sent to you
+%% when you complete the rights form.  These commands have SAMPLE
+%% values in them; it is your responsibility as an author to replace
+%% the commands and values with those provided to you when you
+%% complete the rights form.
+\settopmatter{printacmref=false}
+\setcopyright{none}
+%\setcopyright{acmlicensed}
+%\copyrightyear{2026}
+%\acmYear{2026}
+\acmDOI{XXXXXXX.XXXXXXX}
+%% These commands are for a PROCEEDINGS abstract or paper.
+\acmConference[SIGIR '26]{the 49th International ACM SIGIR Conference on Research and Development in Information Retrieval}{Jul 20-24, 2026}{Melbourne, Australia}
+%%
+%%  Uncomment \acmBooktitle if the title of the proceedings is different
+%%  from ``Proceedings of ...''!
+%%
+%%\acmBooktitle{Woodstock '18: ACM Symposium on Neural Gaze Detection,
+%%  June 03--05, 2018, Woodstock, NY}
+\acmISBN{978-1-4503-XXXX-X/2026/07}
+
+
+%%
+%% Submission ID.
+%% Use this when submitting an article to a sponsored event. You'll
+%% receive a unique submission ID from the organizers
+%% of the event, and this ID should be used as the parameter to this command.
+%%\acmSubmissionID{123-A56-BU3}
+
+%%
+%% For managing citations, it is recommended to use bibliography
+%% files in BibTeX format.
+%%
+%% You can then either use BibTeX with the ACM-Reference-Format style,
+%% or BibLaTeX with the acmnumeric or acmauthoryear sytles, that include
+%% support for advanced citation of software artefact from the
+%% biblatex-software package, also separately available on CTAN.
+%%
+%% Look at the sample-*-biblatex.tex files for templates showcasing
+%% the biblatex styles.
+%%
+
+%%
+%% The majority of ACM publications use numbered citations and
+%% references.  The command \citestyle{authoryear} switches to the
+%% "author year" style.
+%%
+%% If you are preparing content for an event
+%% sponsored by ACM SIGGRAPH, you must use the "author year" style of
+%% citations and references.
+%% Uncommenting
+%% the next command will enable that style.
+%%\citestyle{acmauthoryear}
+
+
+%%
+%% end of the preamble, start of the body of the document source.
+\begin{document}
+
+%%
+%% The "title" command has an optional parameter,
+%% allowing the author to define a "short title" to be used in page headers.
+\title{SilverTorch: A Unified Model-based System to Democratize Large-Scale Recommendation on GPUs}
+
+%%
+%% The "author" command and its associated commands are used to define
+%% the authors and their affiliations.
+%% Of note is the shared affiliation of the first two authors, and the
+%% "authornote" and "authornotemark" commands
+%% used to denote shared contribution to the research.
+%%
+\begin{comment}
+
+\author{
+$^{\dagger}$Bi Xue$^{1}$,
+$^{\dagger}$Hong Wu$^{1}$,
+$^{\dagger}$Lei Chen$^{1}$,
+$^{\dagger}$Chao Yang$^{1}$,
+Yiming Ma$^{1}$,
+Fei Ding$^{1}$,
+Zhen Wang$^{1}$,
+Liang Wang$^{1}$,
+Xiaoheng Mao$^{1}$,
+Ke Huang$^{1}$,
+Xialu Li$^{1}$,
+Peng Xia$^{1}$,
+Rui Jian$^{1}$,
+Yanli Zhao$^{1}$,
+Yanzun Huang$^{1}$,\\
+Yijie Deng$^{1}$,
+Harry Tran$^{1}$,
+Ryan Chang$^{1}$,
+Min Yu$^{1}$,
+Eric Dong$^{1}$,
+Jiazhou Wang$^{1}$,
+Qianqian Zhang$^{1}$,
+Keke Zhai$^{1}$,
+Hongzhang Yin$^{1}$,
+Pawel Garbacki$^{2}$,
+Zheng Fang$^{1}$,
+Yiyi Pan$^{1}$,
+Min Ni$^{1}$ \\
+[1ex]
+$^{1}$ Meta Platforms \quad $^{2}$ Fireworks AI \\
+\{bixue, 
+ hongwu, leich, chaoyang, yma007, phillipding, zhenwang, liangw\}@meta.com\\
+\{seanmao, huangke, xialuli, pengxia, rjian, yanlizhao, yanzunh\}@meta.com\\
+\{yijied, harrytran, ryanchang, miyu58, ericdong, jiazhouwang, lillianz, zhaikeke, hzyin\}@meta.com\\
+pawel@gmail.com\\
+\{zhengfang, yiyipan, minn\}@meta.com\\
+({ $\dagger$ equal contributions})\\
+}
+\end{comment}
+
+
+\author{Bi Xue$^{\ast}$, Hong Wu$^{\ast}$, Lei Chen$^{\ast}$, Chao Yang$^{\ast}$, Yiming Ma, Fei Ding, Zhen Wang, Liang Wang, Xiaoheng Mao, Ke Huang, Xialu Li, Peng Xia, Rui Jian, Yanli Zhao, Yanzun Huang, Yijie Deng, Harry Tran, Ryan Chang, Min Yu, Eric Dong, Jiazhou Wang, Qianqian Zhang, Keke Zhai, Hongzhang Yin, Pawel Garbacki$^{\dagger}$, Zheng Fang, Yiyi Pan, Min Ni, Kevin Greer$^{\dagger}$, Rui Zhang, Yang Liu}
+\thanks{$^{\ast}$Equal Contribution}
+\thanks{$^{\dagger}$Work done while at Meta Platforms}
+\affiliation{%
+  \institution{Meta Platforms}
+  \city{Menlo Park}
+  \state{California}
+  \country{USA}
+}
+\email{{bixue, hongwu, leich, chaoyang, yma007, phillipding, zhenwang, liangw}@meta.com}
+\email{{seanmao, huangke, xialuli, pengxia, rjian, yanlizhao, yanzunh, yijied, harrytran}@meta.com}
+\email{{ryanchang, miyu58, ericdong, jiazhouwang, lillianz, zhaikeke, hzyin}@meta.com}
+\email{pawel@gmail.com, {zhengfang, yiyipan, minn}@meta.com, kevinegreer@gmail.com, {ruizhangsc, yangliu991}@meta.com}
+
+
+%%
+%% By default, the full list of authors will be used in the page
+%% headers. Often, this list is too long, and will overlap
+%% other information printed in the page headers. This command allows
+%% the author to define a more concise list
+%% of authors' names for this purpose.
+% \renewcommand{\shortauthors}{Trovato et al.}
+
+%%
+%% The abstract is a short summary of the work to be presented in the
+%% article.
+\begin{abstract}
+\input{abstract} 
+\end{abstract}
+
+%%
+%% The code below is generated by the tool at http://dl.acm.org/ccs.cfm.
+%% Please copy and paste the code instead of the example below.
+%%
+\begin{comment}
+\begin{CCSXML}
+<ccs2012>
+ <concept>
+  <concept_id>00000000.0000000.0000000</concept_id>
+  <concept_desc>Do Not Use This Code, Generate the Correct Terms for Your Paper</concept_desc>
+  <concept_significance>500</concept_significance>
+ </concept>
+ <concept>
+  <concept_id>00000000.00000000.00000000</concept_id>
+  <concept_desc>Do Not Use This Code, Generate the Correct Terms for Your Paper</concept_desc>
+  <concept_significance>300</concept_significance>
+ </concept>
+ <concept>
+  <concept_id>00000000.00000000.00000000</concept_id>
+  <concept_desc>Do Not Use This Code, Generate the Correct Terms for Your Paper</concept_desc>
+  <concept_significance>100</concept_significance>
+ </concept>
+ <concept>
+  <concept_id>00000000.00000000.00000000</concept_id>
+  <concept_desc>Do Not Use This Code, Generate the Correct Terms for Your Paper</concept_desc>
+  <concept_significance>100</concept_significance>
+ </concept>
+</ccs2012>
+\end{CCSXML}
+
+\ccsdesc[500]{Do Not Use This Code~Generate the Correct Terms for Your Paper}
+\ccsdesc[300]{Do Not Use This Code~Generate the Correct Terms for Your Paper}
+\ccsdesc{Do Not Use This Code~Generate the Correct Terms for Your Paper}
+\ccsdesc[100]{Do Not Use This Code~Generate the Correct Terms for Your Paper}
+
+\end{comment}
+
+\begin{CCSXML}
+<ccs2012>
+<concept>
+<concept_id>10002951.10003317.10003338.10010403</concept_id>
+<concept_desc>Information systems~Novelty in information retrieval</concept_desc>
+<concept_significance>500</concept_significance>
+</concept>
+</ccs2012>
+\end{CCSXML}
+
+\ccsdesc[500]{Information systems~Novelty in information retrieval}
+
+%%
+%% Keywords. The author(s) should pick words that accurately describe
+%% the work being presented. Separate the keywords with commas.
+\keywords{Large-scale recommendation serving, GPU-based indexing, Model-based Retrieval, Multi-task Retrieval}
+%% A "teaser" image appears between the author and affiliation
+%% information and the body of the document, and typically spans the
+%% page.
+%\begin{teaserfigure}
+%  \includegraphics[width=\textwidth]{sampleteaser}
+%  \caption{Seattle Mariners at Spring Training, 2010.}
+%  \Description{Enjoying the baseball game from the third-base
+%  seats. Ichiro Suzuki preparing to bat.}
+%  \label{fig:teaser}
+%\end{teaserfigure}
+
+%\received{20 February 2007}
+%\received[revised]{12 March 2009}
+%\received[accepted]{5 June 2009}
+
+%%
+%% This command processes the author and affiliation and title
+%% information and builds the first part of the formatted document.
+\maketitle
+\pagestyle{plain} % <--- ADD THIS LINE HERE
+
+\input{introduction.tex}
+
+
+\input{background-related-work.tex}
+
+\input{overview.tex}
+
+\input{system-design1}
+
+\input{system-design2}
+
+\input{evaluation}
+
+\input{discussion}
+
+\input{conclusion}
+%%
+%% The acknowledgments section is defined using the "acks" environment
+%% (and NOT an unnumbered section). This ensures the proper
+%% identification of the section in the article metadata, and the
+%% consistent spelling of the heading.
+%\begin{acks}
+%To Robert, for the bagels and explaining CMYK and color spaces.
+%\end{acks}
+
+%%
+%% The next two lines define the bibliography style to be used, and
+%% the bibliography file.
+%\bibliographystyle{ACM-Reference-Format}
+%\bibliography{sample}
+
+%%% -*-BibTeX-*-
+%%% Do NOT edit. File created by BibTeX with style
+%%% ACM-Reference-Format-Journals [18-Jan-2012].
+
+\begin{thebibliography}{41}
+
+%%% ====================================================================
+%%% NOTE TO THE USER: you can override these defaults by providing
+%%% customized versions of any of these macros before the \bibliography
+%%% command.  Each of them MUST provide its own final punctuation,
+%%% except for \shownote{} and \showURL{}.  The latter two
+%%% do not use final punctuation, in order to avoid confusing it with
+%%% the Web address.
+%%%
+%%% To suppress output of a particular field, define its macro to expand
+%%% to an empty string, or better, \unskip, like this:
+%%%
+%%% \newcommand{\showURL}[1]{\unskip}   % LaTeX syntax
+%%%
+%%% \def \showURL #1{\unskip}           % plain TeX syntax
+%%%
+%%% ====================================================================
+
+\ifx \showCODEN    \undefined \def \showCODEN     #1{\unskip}     \fi
+\ifx \showISBNx    \undefined \def \showISBNx     #1{\unskip}     \fi
+\ifx \showISBNxiii \undefined \def \showISBNxiii  #1{\unskip}     \fi
+\ifx \showISSN     \undefined \def \showISSN      #1{\unskip}     \fi
+\ifx \showLCCN     \undefined \def \showLCCN      #1{\unskip}     \fi
+\ifx \shownote     \undefined \def \shownote      #1{#1}          \fi
+\ifx \showarticletitle \undefined \def \showarticletitle #1{#1}   \fi
+\ifx \showURL      \undefined \def \showURL       {\relax}        \fi
+% The following commands are used for tagged output and should be
+% invisible to TeX
+\providecommand\bibfield[2]{#2}
+\providecommand\bibinfo[2]{#2}
+\providecommand\natexlab[1]{#1}
+\providecommand\showeprint[2][]{arXiv:#2}
+
+\bibitem[Abadi et~al\mbox{.}(2016)]%
+        {abadi2016tensorflow}
+\bibfield{author}{\bibinfo{person}{Mart{\'\i}n Abadi}, \bibinfo{person}{Paul
+  Barham}, \bibinfo{person}{Jianmin Chen}, \bibinfo{person}{Zhifeng Chen},
+  \bibinfo{person}{Andy Davis}, \bibinfo{person}{Jeffrey Dean},
+  \bibinfo{person}{Matthieu Devin}, \bibinfo{person}{Sanjay Ghemawat},
+  \bibinfo{person}{Geoffrey Irving}, \bibinfo{person}{Michael Isard},
+  {et~al\mbox{.}}} \bibinfo{year}{2016}\natexlab{}.
+\newblock \showarticletitle{$\{$TensorFlow$\}$: a system for
+  $\{$Large-Scale$\}$ machine learning}. In \bibinfo{booktitle}{\emph{12th
+  USENIX symposium on operating systems design and implementation (OSDI 16)}}.
+  \bibinfo{pages}{265--283}.
+\newblock
+
+
+\bibitem[Ardalani et~al\mbox{.}(2022)]%
+        {ardalani2022understanding}
+\bibfield{author}{\bibinfo{person}{Newsha Ardalani},
+  \bibinfo{person}{Carole-Jean Wu}, \bibinfo{person}{Zeliang Chen},
+  \bibinfo{person}{Bhargav Bhushanam}, {and} \bibinfo{person}{Adnan Aziz}.}
+  \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{Understanding scaling laws for recommendation
+  models}.
+\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2208.08489}}
+  (\bibinfo{year}{2022}).
+\newblock
+
+
+\bibitem[Arthur and Vassilvitskii(2006)]%
+        {arthur2006k}
+\bibfield{author}{\bibinfo{person}{David Arthur} {and} \bibinfo{person}{Sergei
+  Vassilvitskii}.} \bibinfo{year}{2006}\natexlab{}.
+\newblock \bibinfo{booktitle}{\emph{k-means++: The advantages of careful
+  seeding}}.
+\newblock \bibinfo{type}{{T}echnical {R}eport}.
+  \bibinfo{institution}{Stanford}.
+\newblock
+
+
+\bibitem[Baltescu et~al\mbox{.}(2022)]%
+        {baltescu2022itemsage}
+\bibfield{author}{\bibinfo{person}{Paul Baltescu}, \bibinfo{person}{Haoyu
+  Chen}, \bibinfo{person}{Nikil Pancha}, \bibinfo{person}{Andrew Zhai},
+  \bibinfo{person}{Jure Leskovec}, {and} \bibinfo{person}{Charles Rosenberg}.}
+  \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{Itemsage: Learning product embeddings for shopping
+  recommendations at pinterest}. In \bibinfo{booktitle}{\emph{Proceedings of
+  the 28th ACM SIGKDD Conference on Knowledge Discovery and Data Mining}}.
+  \bibinfo{pages}{2703--2711}.
+\newblock
+
+
+\bibitem[Borisyuk et~al\mbox{.}(2024)]%
+        {borisyuk2024linr}
+\bibfield{author}{\bibinfo{person}{Fedor Borisyuk}, \bibinfo{person}{Qingquan
+  Song}, \bibinfo{person}{Mingzhou Zhou}, \bibinfo{person}{Ganesh
+  Parameswaran}, \bibinfo{person}{Madhu Arun}, \bibinfo{person}{Siva Popuri},
+  \bibinfo{person}{Tugrul Bingol}, \bibinfo{person}{Zhuotao Pei},
+  \bibinfo{person}{Kuang-Hsuan Lee}, \bibinfo{person}{Lu Zheng},
+  {et~al\mbox{.}}} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{LiNR: Model Based Neural Retrieval on GPUs at
+  LinkedIn}. In \bibinfo{booktitle}{\emph{Proceedings of the 33rd ACM
+  International Conference on Information and Knowledge Management}}.
+  \bibinfo{pages}{4366--4373}.
+\newblock
+
+
+\bibitem[Brin and Page(1998)]%
+        {brin1998anatomy}
+\bibfield{author}{\bibinfo{person}{Sergey Brin} {and} \bibinfo{person}{Lawrence
+  Page}.} \bibinfo{year}{1998}\natexlab{}.
+\newblock \showarticletitle{The anatomy of a large-scale hypertextual web
+  search engine}.
+\newblock \bibinfo{journal}{\emph{Computer networks and ISDN systems}}
+  \bibinfo{volume}{30}, \bibinfo{number}{1-7} (\bibinfo{year}{1998}),
+  \bibinfo{pages}{107--117}.
+\newblock
+
+
+\bibitem[Cambazoglu and Baeza-Yates(2016)]%
+        {cambazoglu2016scalability}
+\bibfield{author}{\bibinfo{person}{B~Barla Cambazoglu} {and}
+  \bibinfo{person}{Ricardo Baeza-Yates}.} \bibinfo{year}{2016}\natexlab{}.
+\newblock \showarticletitle{Scalability and efficiency challenges in
+  large-scale web search engines}. In \bibinfo{booktitle}{\emph{Proceedings of
+  the 39th International ACM SIGIR conference on Research and Development in
+  Information Retrieval}}. \bibinfo{pages}{1223--1226}.
+\newblock
+
+
+\bibitem[Covington et~al\mbox{.}(2016)]%
+        {covington2016deep}
+\bibfield{author}{\bibinfo{person}{Paul Covington}, \bibinfo{person}{Jay
+  Adams}, {and} \bibinfo{person}{Emre Sargin}.}
+  \bibinfo{year}{2016}\natexlab{}.
+\newblock \showarticletitle{Deep neural networks for youtube recommendations}.
+  In \bibinfo{booktitle}{\emph{Proceedings of the 10th ACM conference on
+  recommender systems}}. \bibinfo{pages}{191--198}.
+\newblock
+
+
+\bibitem[Ding and Zhai(2025)]%
+        {ding2025retrieval}
+\bibfield{author}{\bibinfo{person}{Bailu Ding} {and} \bibinfo{person}{Jiaqi
+  Zhai}.} \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{Retrieval with Learned Similarities}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the ACM on Web Conference 2025}}.
+  \bibinfo{pages}{1626--1637}.
+\newblock
+
+
+\bibitem[Douze et~al\mbox{.}(2024)]%
+        {douze2024faiss}
+\bibfield{author}{\bibinfo{person}{Matthijs Douze}, \bibinfo{person}{Alexandr
+  Guzhva}, \bibinfo{person}{Chengqi Deng}, \bibinfo{person}{Jeff Johnson},
+  \bibinfo{person}{Gergely Szilvasy}, \bibinfo{person}{Pierre-Emmanuel
+  Mazaré}, \bibinfo{person}{Maria Lomeli}, \bibinfo{person}{Lucas Hosseini},
+  {and} \bibinfo{person}{Hervé Jégou}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{The Faiss library}.
+\newblock  (\bibinfo{year}{2024}).
+\newblock
+\showeprint[arxiv]{2401.08281}~[cs.LG]
+
+
+\bibitem[Frostig et~al\mbox{.}(2019)]%
+        {frostig2019compiling}
+\bibfield{author}{\bibinfo{person}{Roy Frostig}, \bibinfo{person}{Matthew~James
+  Johnson}, {and} \bibinfo{person}{Chris Leary}.}
+  \bibinfo{year}{2019}\natexlab{}.
+\newblock \showarticletitle{Compiling machine learning programs via high-level
+  tracing}. In \bibinfo{booktitle}{\emph{SysML conference 2018}}.
+\newblock
+
+
+\bibitem[github(2023)]%
+        {FaissGPULimitation}
+github \bibinfo{year}{2023}\natexlab{}.
+\newblock \bibinfo{title}{Faiss on the GPU Limitations}.
+\newblock
+  \bibinfo{howpublished}{\url{https://github.com/facebookresearch/faiss/wiki/Faiss-on-the-GPU\#limitations}}
+\newblock
+
+
+\bibitem[Goodwin et~al\mbox{.}(2017)]%
+        {goodwin2017bitfunnel}
+\bibfield{author}{\bibinfo{person}{Bob Goodwin}, \bibinfo{person}{Michael
+  Hopcroft}, \bibinfo{person}{Dan Luu}, \bibinfo{person}{Alex Clemmer},
+  \bibinfo{person}{Mihaela Curmei}, \bibinfo{person}{Sameh Elnikety}, {and}
+  \bibinfo{person}{Yuxiong He}.} \bibinfo{year}{2017}\natexlab{}.
+\newblock \showarticletitle{Bitfunnel: Revisiting signatures for search}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the 40th International ACM SIGIR
+  Conference on Research and Development in Information Retrieval}}.
+  \bibinfo{pages}{605--614}.
+\newblock
+
+
+\bibitem[Huang et~al\mbox{.}(2020)]%
+        {huang2020embedding}
+\bibfield{author}{\bibinfo{person}{Jui-Ting Huang}, \bibinfo{person}{Ashish
+  Sharma}, \bibinfo{person}{Shuying Sun}, \bibinfo{person}{Li Xia},
+  \bibinfo{person}{David Zhang}, \bibinfo{person}{Philip Pronin},
+  \bibinfo{person}{Janani Padmanabhan}, \bibinfo{person}{Giuseppe Ottaviano},
+  {and} \bibinfo{person}{Linjun Yang}.} \bibinfo{year}{2020}\natexlab{}.
+\newblock \showarticletitle{Embedding-based retrieval in facebook search}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the 26th ACM SIGKDD International
+  Conference on Knowledge Discovery \& Data Mining}}.
+  \bibinfo{pages}{2553--2561}.
+\newblock
+
+
+\bibitem[Ivchenko et~al\mbox{.}(2022)]%
+        {ivchenko2022torchrec}
+\bibfield{author}{\bibinfo{person}{Dmytro Ivchenko}, \bibinfo{person}{Dennis
+  Van Der~Staay}, \bibinfo{person}{Colin Taylor}, \bibinfo{person}{Xing Liu},
+  \bibinfo{person}{Will Feng}, \bibinfo{person}{Rahul Kindi},
+  \bibinfo{person}{Anirudh Sudarshan}, {and} \bibinfo{person}{Shahin Sefati}.}
+  \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{Torchrec: a pytorch domain library for
+  recommendation systems}. In \bibinfo{booktitle}{\emph{Proceedings of the 16th
+  ACM Conference on Recommender Systems}}. \bibinfo{pages}{482--483}.
+\newblock
+
+
+\bibitem[Jayaram~Subramanya et~al\mbox{.}(2019)]%
+        {jayaram2019diskann}
+\bibfield{author}{\bibinfo{person}{Suhas Jayaram~Subramanya},
+  \bibinfo{person}{Fnu Devvrit}, \bibinfo{person}{Harsha~Vardhan Simhadri},
+  \bibinfo{person}{Ravishankar Krishnawamy}, {and} \bibinfo{person}{Rohan
+  Kadekodi}.} \bibinfo{year}{2019}\natexlab{}.
+\newblock \showarticletitle{Diskann: Fast accurate billion-point nearest
+  neighbor search on a single node}.
+\newblock \bibinfo{journal}{\emph{Advances in neural information processing
+  Systems}}  \bibinfo{volume}{32} (\bibinfo{year}{2019}).
+\newblock
+
+
+\bibitem[Johnson et~al\mbox{.}(2019)]%
+        {johnson2019billion}
+\bibfield{author}{\bibinfo{person}{Jeff Johnson}, \bibinfo{person}{Matthijs
+  Douze}, {and} \bibinfo{person}{Herv{\'e} J{\'e}gou}.}
+  \bibinfo{year}{2019}\natexlab{}.
+\newblock \showarticletitle{Billion-scale similarity search with {GPUs}}.
+\newblock \bibinfo{journal}{\emph{IEEE Transactions on Big Data}}
+  \bibinfo{volume}{7}, \bibinfo{number}{3} (\bibinfo{year}{2019}),
+  \bibinfo{pages}{535--547}.
+\newblock
+
+
+\bibitem[Lewis et~al\mbox{.}(2020)]%
+        {lewis2020retrieval}
+\bibfield{author}{\bibinfo{person}{Patrick Lewis}, \bibinfo{person}{Ethan
+  Perez}, \bibinfo{person}{Aleksandra Piktus}, \bibinfo{person}{Fabio Petroni},
+  \bibinfo{person}{Vladimir Karpukhin}, \bibinfo{person}{Naman Goyal},
+  \bibinfo{person}{Heinrich K{\"u}ttler}, \bibinfo{person}{Mike Lewis},
+  \bibinfo{person}{Wen-tau Yih}, \bibinfo{person}{Tim Rockt{\"a}schel},
+  {et~al\mbox{.}}} \bibinfo{year}{2020}\natexlab{}.
+\newblock \showarticletitle{Retrieval-augmented generation for
+  knowledge-intensive nlp tasks}.
+\newblock \bibinfo{journal}{\emph{Advances in neural information processing
+  systems}}  \bibinfo{volume}{33} (\bibinfo{year}{2020}),
+  \bibinfo{pages}{9459--9474}.
+\newblock
+
+
+\bibitem[Milvus(2023)]%
+        {MilvusGPULimitation}
+Milvus \bibinfo{year}{2023}\natexlab{}.
+\newblock \bibinfo{title}{Milvus GPU Limitations}.
+\newblock \bibinfo{howpublished}{\url{https://milvus.io/docs/gpu_index.md}}.
+\newblock
+
+
+\bibitem[Moritz et~al\mbox{.}(2018)]%
+        {moritz2018ray}
+\bibfield{author}{\bibinfo{person}{Philipp Moritz}, \bibinfo{person}{Robert
+  Nishihara}, \bibinfo{person}{Stephanie Wang}, \bibinfo{person}{Alexey
+  Tumanov}, \bibinfo{person}{Richard Liaw}, \bibinfo{person}{Eric Liang},
+  \bibinfo{person}{Melih Elibol}, \bibinfo{person}{Zongheng Yang},
+  \bibinfo{person}{William Paul}, \bibinfo{person}{Michael~I Jordan},
+  {et~al\mbox{.}}} \bibinfo{year}{2018}\natexlab{}.
+\newblock \showarticletitle{Ray: A distributed framework for emerging
+  $\{$AI$\}$ applications}. In \bibinfo{booktitle}{\emph{13th USENIX symposium
+  on operating systems design and implementation (OSDI 18)}}.
+  \bibinfo{pages}{561--577}.
+\newblock
+
+
+\bibitem[Mudigere et~al\mbox{.}(2022)]%
+        {mudigere2022software}
+\bibfield{author}{\bibinfo{person}{Dheevatsa Mudigere}, \bibinfo{person}{Yuchen
+  Hao}, \bibinfo{person}{Jianyu Huang}, \bibinfo{person}{Zhihao Jia},
+  \bibinfo{person}{Andrew Tulloch}, \bibinfo{person}{Srinivas Sridharan},
+  \bibinfo{person}{Xing Liu}, \bibinfo{person}{Mustafa Ozdal},
+  \bibinfo{person}{Jade Nie}, \bibinfo{person}{Jongsoo Park}, {et~al\mbox{.}}}
+  \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{Software-hardware co-design for fast and scalable
+  training of deep learning recommendation models}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the 49th Annual International
+  Symposium on Computer Architecture}}. \bibinfo{pages}{993--1011}.
+\newblock
+
+
+\bibitem[Naumov et~al\mbox{.}(2019)]%
+        {naumov2019deep}
+\bibfield{author}{\bibinfo{person}{Maxim Naumov}, \bibinfo{person}{Dheevatsa
+  Mudigere}, \bibinfo{person}{Hao-Jun~Michael Shi}, \bibinfo{person}{Jianyu
+  Huang}, \bibinfo{person}{Narayanan Sundaraman}, \bibinfo{person}{Jongsoo
+  Park}, \bibinfo{person}{Xiaodong Wang}, \bibinfo{person}{Udit Gupta},
+  \bibinfo{person}{Carole-Jean Wu}, \bibinfo{person}{Alisson~G Azzolini},
+  {et~al\mbox{.}}} \bibinfo{year}{2019}\natexlab{}.
+\newblock \showarticletitle{Deep learning recommendation model for
+  personalization and recommendation systems}.
+\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:1906.00091}}
+  (\bibinfo{year}{2019}).
+\newblock
+
+
+\bibitem[Oldridge et~al\mbox{.}(2020)]%
+        {oldridge2020merlin}
+\bibfield{author}{\bibinfo{person}{Even Oldridge}, \bibinfo{person}{Julio
+  Perez}, \bibinfo{person}{Ben Frederickson}, \bibinfo{person}{Nicolas
+  Koumchatzky}, \bibinfo{person}{Minseok Lee}, \bibinfo{person}{Zehuan Wang},
+  \bibinfo{person}{Lei Wu}, \bibinfo{person}{Fan Yu}, \bibinfo{person}{Rick
+  Zamora}, \bibinfo{person}{Onur Yilmaz}, {et~al\mbox{.}}}
+  \bibinfo{year}{2020}\natexlab{}.
+\newblock \showarticletitle{Merlin: a gpu accelerated recommendation
+  framework}. In \bibinfo{booktitle}{\emph{Proceedings of IRS}}.
+\newblock
+
+
+\bibitem[Ootomo et~al\mbox{.}(2024)]%
+        {ootomo2024cagra}
+\bibfield{author}{\bibinfo{person}{Hiroyuki Ootomo}, \bibinfo{person}{Akira
+  Naruse}, \bibinfo{person}{Corey Nolet}, \bibinfo{person}{Ray Wang},
+  \bibinfo{person}{Tamas Feher}, {and} \bibinfo{person}{Yong Wang}.}
+  \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Cagra: Highly parallel graph construction and
+  approximate nearest neighbor search for gpus}. In
+  \bibinfo{booktitle}{\emph{2024 IEEE 40th International Conference on Data
+  Engineering (ICDE)}}. IEEE, \bibinfo{pages}{4236--4247}.
+\newblock
+
+
+\bibitem[Pace et~al\mbox{.}(2025)]%
+        {pace2025lance}
+\bibfield{author}{\bibinfo{person}{Weston Pace}, \bibinfo{person}{Chang She},
+  \bibinfo{person}{Lei Xu}, \bibinfo{person}{Will Jones},
+  \bibinfo{person}{Albert Lockett}, \bibinfo{person}{Jun Wang}, {and}
+  \bibinfo{person}{Raunak Shah}.} \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{Lance: Efficient Random Access in Columnar Storage
+  through Adaptive Structural Encodings}.
+\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2504.15247}}
+  (\bibinfo{year}{2025}).
+\newblock
+
+
+\bibitem[Paszke(2019)]%
+        {paszke2019pytorch}
+\bibfield{author}{\bibinfo{person}{A Paszke}.} \bibinfo{year}{2019}\natexlab{}.
+\newblock \showarticletitle{Pytorch: An imperative style, high-performance deep
+  learning library}.
+\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:1912.01703}}
+  (\bibinfo{year}{2019}).
+\newblock
+
+
+\bibitem[Pinterest(2023)]%
+        {PinterestANN}
+\bibfield{author}{\bibinfo{person}{Pinterest}.}
+  \bibinfo{year}{2023}\natexlab{}.
+\newblock \bibinfo{title}{Manas HNSW Realtime: Powering Realtime
+  Embedding-Based Retrieval}.
+\newblock
+  \bibinfo{howpublished}{\url{https://medium.com/pinterest-engineering/manas-hnsw-realtime-powering-realtime-embedding-based-retrieval-dc71dfd6afdd}}.
+\newblock
+
+
+\bibitem[Rapidsai(2022)]%
+        {rapidsai}
+\bibfield{author}{\bibinfo{person}{Rapidsai}.} \bibinfo{year}{2022}\natexlab{}.
+\newblock \bibinfo{title}{Rapidsai/raft: RAFT contains fundamental widely-used
+  algorithms and primitives for data science, Graph and machine learning.}
+\newblock
+\urldef\tempurl%
+\url{https://github.com/rapidsai/raft}
+\showURL{%
+Retrieved Oct 21, 2025 from \tempurl}
+
+
+\bibitem[vantage(2025a)]%
+        {p4d24xlarge}
+\bibfield{author}{\bibinfo{person}{vantage}.} \bibinfo{year}{2025}\natexlab{a}.
+\newblock \bibinfo{title}{AWS p4d.24xlarge Instance Cost}.
+\newblock
+  \bibinfo{howpublished}{\url{https://instances.vantage.sh/aws/ec2/p4d.24xlarge?region=us-west-2}}.
+\newblock
+
+
+\bibitem[vantage(2025b)]%
+        {r6i8xlarge}
+\bibfield{author}{\bibinfo{person}{vantage}.} \bibinfo{year}{2025}\natexlab{b}.
+\newblock \bibinfo{title}{AWS r6i.8xlarge Instance Cost}.
+\newblock
+  \bibinfo{howpublished}{\url{https://instances.vantage.sh/aws/ec2/r6i.8xlarge?region=us-west-1}}.
+\newblock
+
+
+\bibitem[vantage(2025c)]%
+        {x2idn24xlarge}
+\bibfield{author}{\bibinfo{person}{vantage}.} \bibinfo{year}{2025}\natexlab{c}.
+\newblock \bibinfo{title}{AWS x2idn.24xlarge Instance Cost}.
+\newblock
+  \bibinfo{howpublished}{\url{https://instances.vantage.sh/aws/ec2/x2idn.24xlarge?region=us-west-1}}.
+\newblock
+
+
+\bibitem[Wang et~al\mbox{.}(2018)]%
+        {wang2018billion}
+\bibfield{author}{\bibinfo{person}{Jizhe Wang}, \bibinfo{person}{Pipei Huang},
+  \bibinfo{person}{Huan Zhao}, \bibinfo{person}{Zhibo Zhang},
+  \bibinfo{person}{Binqiang Zhao}, {and} \bibinfo{person}{Dik~Lun Lee}.}
+  \bibinfo{year}{2018}\natexlab{}.
+\newblock \showarticletitle{Billion-scale commodity embedding for e-commerce
+  recommendation in alibaba}. In \bibinfo{booktitle}{\emph{Proceedings of the
+  24th ACM SIGKDD international conference on knowledge discovery \& data
+  mining}}. \bibinfo{pages}{839--848}.
+\newblock
+
+
+\bibitem[Wang et~al\mbox{.}(2021)]%
+        {wang2021milvus}
+\bibfield{author}{\bibinfo{person}{Jianguo Wang}, \bibinfo{person}{Xiaomeng
+  Yi}, \bibinfo{person}{Rentong Guo}, \bibinfo{person}{Hai Jin},
+  \bibinfo{person}{Peng Xu}, \bibinfo{person}{Shengjun Li},
+  \bibinfo{person}{Xiangyu Wang}, \bibinfo{person}{Xiangzhou Guo},
+  \bibinfo{person}{Chengming Li}, \bibinfo{person}{Xiaohai Xu},
+  {et~al\mbox{.}}} \bibinfo{year}{2021}\natexlab{}.
+\newblock \showarticletitle{Milvus: A purpose-built vector data management
+  system}. In \bibinfo{booktitle}{\emph{Proceedings of the 2021 International
+  Conference on Management of Data}}. \bibinfo{pages}{2614--2627}.
+\newblock
+
+
+\bibitem[Yi et~al\mbox{.}(2019)]%
+        {yi2019sampling}
+\bibfield{author}{\bibinfo{person}{Xinyang Yi}, \bibinfo{person}{Ji Yang},
+  \bibinfo{person}{Lichan Hong}, \bibinfo{person}{Derek~Zhiyuan Cheng},
+  \bibinfo{person}{Lukasz Heldt}, \bibinfo{person}{Aditee Kumthekar},
+  \bibinfo{person}{Zhe Zhao}, \bibinfo{person}{Li Wei}, {and}
+  \bibinfo{person}{Ed Chi}.} \bibinfo{year}{2019}\natexlab{}.
+\newblock \showarticletitle{Sampling-bias-corrected neural modeling for large
+  corpus item recommendations}. In \bibinfo{booktitle}{\emph{Proceedings of the
+  13th ACM conference on recommender systems}}. \bibinfo{pages}{269--277}.
+\newblock
+
+
+\bibitem[Zhai et~al\mbox{.}(2019)]%
+        {zhai2019learning}
+\bibfield{author}{\bibinfo{person}{Andrew Zhai}, \bibinfo{person}{Hao-Yu Wu},
+  \bibinfo{person}{Eric Tzeng}, \bibinfo{person}{Dong~Huk Park}, {and}
+  \bibinfo{person}{Charles Rosenberg}.} \bibinfo{year}{2019}\natexlab{}.
+\newblock \showarticletitle{Learning a unified embedding for visual search at
+  pinterest}. In \bibinfo{booktitle}{\emph{Proceedings of the 25th ACM SIGKDD
+  international conference on knowledge discovery \& data mining}}.
+  \bibinfo{pages}{2412--2420}.
+\newblock
+
+
+\bibitem[Zhai et~al\mbox{.}(2023)]%
+        {zhai2023revisiting}
+\bibfield{author}{\bibinfo{person}{Jiaqi Zhai}, \bibinfo{person}{Zhaojie Gong},
+  \bibinfo{person}{Yueming Wang}, \bibinfo{person}{Xiao Sun},
+  \bibinfo{person}{Zheng Yan}, \bibinfo{person}{Fu Li}, {and}
+  \bibinfo{person}{Xing Liu}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{Revisiting neural retrieval on accelerators}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the 29th ACM SIGKDD Conference on
+  Knowledge Discovery and Data Mining}}. \bibinfo{pages}{5520--5531}.
+\newblock
+
+
+\bibitem[Zhai et~al\mbox{.}(2024)]%
+        {zhai2024actions}
+\bibfield{author}{\bibinfo{person}{Jiaqi Zhai}, \bibinfo{person}{Lucy Liao},
+  \bibinfo{person}{Xing Liu}, \bibinfo{person}{Yueming Wang},
+  \bibinfo{person}{Rui Li}, \bibinfo{person}{Xuan Cao}, \bibinfo{person}{Leon
+  Gao}, \bibinfo{person}{Zhaojie Gong}, \bibinfo{person}{Fangda Gu},
+  \bibinfo{person}{Michael He}, {et~al\mbox{.}}}
+  \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Actions speak louder than words: Trillion-parameter
+  sequential transducers for generative recommendations}.
+\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2402.17152}}
+  (\bibinfo{year}{2024}).
+\newblock
+
+
+\bibitem[Zhang et~al\mbox{.}(2024)]%
+        {zhang2024wukong}
+\bibfield{author}{\bibinfo{person}{Buyun Zhang}, \bibinfo{person}{Liang Luo},
+  \bibinfo{person}{Yuxin Chen}, \bibinfo{person}{Jade Nie}, \bibinfo{person}{Xi
+  Liu}, \bibinfo{person}{Daifeng Guo}, \bibinfo{person}{Yanli Zhao},
+  \bibinfo{person}{Shen Li}, \bibinfo{person}{Yuchen Hao},
+  \bibinfo{person}{Yantao Yao}, {et~al\mbox{.}}}
+  \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Wukong: Towards a scaling law for large-scale
+  recommendation}.
+\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2403.02545}}
+  (\bibinfo{year}{2024}).
+\newblock
+
+
+\bibitem[Zhang et~al\mbox{.}(2025)]%
+        {zhang2025optimizing}
+\bibfield{author}{\bibinfo{person}{Jiang Zhang}, \bibinfo{person}{Sumit Kumar},
+  \bibinfo{person}{Wei Chang}, \bibinfo{person}{Yubo Wang},
+  \bibinfo{person}{Feng Zhang}, \bibinfo{person}{Weize Mao},
+  \bibinfo{person}{Hanchao Yu}, \bibinfo{person}{Aashu Singh},
+  \bibinfo{person}{Min Li}, {and} \bibinfo{person}{Qifan Wang}.}
+  \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{Optimizing Recall or Relevance? A Multi-Task
+  Multi-Head Approach for Item-to-Item Retrieval in Recommendation}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the 31st ACM SIGKDD Conference on
+  Knowledge Discovery and Data Mining V. 2}}. \bibinfo{pages}{5194--5204}.
+\newblock
+
+
+\bibitem[Zhao et~al\mbox{.}(2023)]%
+        {zhao2023embedding}
+\bibfield{author}{\bibinfo{person}{Xiangyu Zhao}, \bibinfo{person}{Maolin
+  Wang}, \bibinfo{person}{Xinjian Zhao}, \bibinfo{person}{Jiansheng Li},
+  \bibinfo{person}{Shucheng Zhou}, \bibinfo{person}{Dawei Yin},
+  \bibinfo{person}{Qing Li}, \bibinfo{person}{Jiliang Tang}, {and}
+  \bibinfo{person}{Ruocheng Guo}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{Embedding in recommender systems: A survey}.
+\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2310.18608}}
+  (\bibinfo{year}{2023}).
+\newblock
+
+
+\bibitem[Zhou et~al\mbox{.}(2018)]%
+        {zhou2018deep}
+\bibfield{author}{\bibinfo{person}{Guorui Zhou}, \bibinfo{person}{Xiaoqiang
+  Zhu}, \bibinfo{person}{Chenru Song}, \bibinfo{person}{Ying Fan},
+  \bibinfo{person}{Han Zhu}, \bibinfo{person}{Xiao Ma},
+  \bibinfo{person}{Yanghui Yan}, \bibinfo{person}{Junqi Jin},
+  \bibinfo{person}{Han Li}, {and} \bibinfo{person}{Kun Gai}.}
+  \bibinfo{year}{2018}\natexlab{}.
+\newblock \showarticletitle{Deep interest network for click-through rate
+  prediction}. In \bibinfo{booktitle}{\emph{Proceedings of the 24th ACM SIGKDD
+  international conference on knowledge discovery \& data mining}}.
+  \bibinfo{pages}{1059--1068}.
+\newblock
+
+
+\end{thebibliography}
+
+
+%%
+%% If your work has an appendix, this is the place to put it.
+\end{document}
+\endinput
+%%
+%% End of file `sample-sigconf.tex'.

@@ -1,0 +1,50 @@
+{
+  "algo": "silvertorch",
+  "cell": "B=16,N=65536,D=128,K=1024,n_lists=64,n_probe=16",
+  "correctness": {
+    "correct": true,
+    "vs": "exact_fullscan"
+  },
+  "device": {
+    "capability": "8.0",
+    "memory_total_mib": 40441,
+    "name": "NVIDIA A100-SXM4-40GB"
+  },
+  "extra": {
+    "pass_rate_measured": 0.0254,
+    "recall@K": 0.1737
+  },
+  "impl": "composed_ivf_bloom",
+  "memory": {
+    "forward_baseline_bytes": 22152704,
+    "forward_peak_bytes": 203510272,
+    "index_bytes": 13427712,
+    "input_data_bytes": 49079296,
+    "transient_peak_bytes": 181357568
+  },
+  "params": {
+    "b": 16,
+    "d": 128,
+    "filter_mode": "bloom",
+    "k": 1024,
+    "k_hash": 5,
+    "m_bits": 512,
+    "n": 65536,
+    "n_lists": 64,
+    "n_probe": 16
+  },
+  "run_id": "20260426-220353",
+  "timestamp": "2026-04-26T22:03:56.094449+00:00",
+  "timing": {
+    "median_ms": 1.0567679405212402,
+    "p20_ms": 1.0557440519332886,
+    "p80_ms": 1.0577919483184814,
+    "rep_ms": 200.0,
+    "warmup_iters": 20
+  },
+  "versions": {
+    "git_sha": "",
+    "torch": "2.10.0+cu128",
+    "triton": "3.6.0"
+  }
+}

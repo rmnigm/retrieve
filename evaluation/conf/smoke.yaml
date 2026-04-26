@@ -1,0 +1,29 @@
+checkpoint: checkpoints/smoke-50m-listens/best_model.pt
+data_dir: data/yambda/50m-listens
+output: null                  # null → <ckpt-dir>/eval_yambda_retrieval.json
+split: test
+device: cuda
+ks: [100]
+
+encode:
+  batch_size: 512
+  num_workers: 8
+  max_seq_length: 200
+
+algorithms:
+  - torch_fullscan
+  - triton_knn
+  - linr_v3_then_v2
+  - silvertorch
+
+# N=631K → sqrt(N)≈794; 512 lists × ~1230 items/cluster avg.
+# n_probe=8 visits ~10K items per query (~1.6% of N).
+algo_params:
+  linr_v3_then_v2:
+    candidate_pool: 5000
+    v3_seed: 0
+  silvertorch:
+    n_lists: 512
+    n_probe: 8
+    n_iter: 10
+    seed: 0

@@ -1,0 +1,36 @@
+{
+  "algos": [
+    "kernels",
+    "linr",
+    "silvertorch"
+  ],
+  "failures": [
+    {
+      "algo": "kernels",
+      "returncode": 5
+    }
+  ],
+  "finished": "2026-04-26T21:46:18.513924+00:00",
+  "records": [
+    "linr_v1_full__B=16_N=1048576_D=128_K=200__torch.json",
+    "linr_v1_full__B=16_N=1048576_D=128_K=200__triton.json",
+    "linr_v1_full__B=16_N=2097152_D=128_K=200__torch.json",
+    "linr_v1_full__B=16_N=2097152_D=128_K=200__triton.json",
+    "linr_v1_full__B=1_N=1048576_D=128_K=200__torch.json",
+    "linr_v1_full__B=1_N=1048576_D=128_K=200__triton.json",
+    "linr_v1_full__B=1_N=2097152_D=128_K=200__torch.json",
+    "linr_v1_full__B=1_N=2097152_D=128_K=200__triton.json",
+    "silvertorch__B=16_N=1048576_D=128_K=1024_n_lists=1024_n_probe=16__codesigned.json",
+    "silvertorch__B=16_N=1048576_D=128_K=1024_n_lists=1024_n_probe=16__composed_ivf_bloom.json",
+    "silvertorch__B=16_N=1048576_D=128_K=1024_n_lists=1024_n_probe=64__codesigned.json",
+    "silvertorch__B=16_N=1048576_D=128_K=1024_n_lists=1024_n_probe=64__composed_ivf_bloom.json",
+    "silvertorch__B=16_N=2097152_D=128_K=1024_n_lists=2048_n_probe=16__codesigned.json",
+    "silvertorch__B=16_N=2097152_D=128_K=1024_n_lists=2048_n_probe=16__composed_ivf_bloom.json",
+    "silvertorch__B=16_N=2097152_D=128_K=1024_n_lists=2048_n_probe=64__codesigned.json",
+    "silvertorch__B=16_N=2097152_D=128_K=1024_n_lists=2048_n_probe=64__composed_ivf_bloom.json"
+  ],
+  "rep_ms": 200.0,
+  "run_id": "20260426-214541",
+  "select": "1048576 or 2097152",
+  "started": "2026-04-26T21:45:41.166812+00:00"
+}

@@ -1,0 +1,320 @@
+%%
+%% This is file `sample-sigconf.tex',
+%% generated with the docstrip utility.
+%%
+%% The original source files were:
+%%
+%% samples.dtx  (with options: `sigconf')
+%% 
+%% IMPORTANT NOTICE:
+%% 
+%% For the copyright see the source file.
+%% 
+%% Any modified versions of this file must be renamed
+%% with new filenames distinct from sample-sigconf.tex.
+%% 
+%% For distribution of the original source see the terms
+%% for copying and modification in the file samples.dtx.
+%% 
+%% This generated file may be distributed as long as the
+%% original source files, as listed above, are part of the
+%% same distribution. (The sources need not necessarily be
+%% in the same archive or directory.)
+%%
+%% The first command in your LaTeX source must be the \documentclass command.
+%\documentclass[sigconf]{acmart}
+%\documentclass[sigconf,natbib=true,anonymous=true]{acmart}
+\documentclass[sigconf,natbib=true]{acmart}
+\settopmatter{authorsperrow=4}
+%%
+%% \BibTeX command to typeset BibTeX logo in the docs
+\AtBeginDocument{%
+  \providecommand\BibTeX{{%
+    \normalfont B\kern-0.5em{\scshape i\kern-0.25em b}\kern-0.8em\TeX}}}
+
+%\newcommand{\systemname}{\textit{LiRAR}}
+\newcommand{\systemname}{\textit{LiNR}}
+%\newcommand{\systemname}{\textit{LiRAR}}
+\newcommand{\etal}{\textit{et~al.}}
+\newcommand{\todo}[1]{\textcolor{blue}{[{\em {\bf TODO:} #1}]}}
+%\newcommand{\todo}[1]{\textcolor{blue}{[{\em {\bf } }]}}
+\usepackage{enumitem} % QQ added
+\usepackage{multirow}
+\usepackage{adjustbox}
+\usepackage{array}
+\newcolumntype{R}[2]{%
+    >{\adjustbox{angle=#1,lap=\width-(#2)}\bgroup}%
+    l%
+    <{\egroup}%
+}
+\newcommand*\rot{\multicolumn{1}{R{45}{1em}}}
+\usepackage{tablefootnote}
+\usepackage{varwidth}
+\usepackage{stmaryrd}
+\DeclareCaptionFormat{myformat}{%
+  % #1: label (e.g. "Table 1")
+  % #2: separator (e.g. ": ")
+  % #3: caption text
+  \begin{varwidth}{\linewidth}%
+    \centering
+    #1#2#3%
+  \end{varwidth}%
+}
+% Paper compression - makes paper shorter (we will adjust it depending on the content amount)
+% \renewcommand{\baselinestretch}{0.99}
+% \usepackage{geometry}
+%  \geometry{
+%  a4paper,
+%  total={170mm,257mm},
+%  left=20mm,
+%  top=20mm,
+%  }
+
+\def\onedot{.}  
+\def\eg{\emph{e.g}\onedot} \def\Eg{\emph{E.g}\onedot}
+\def\ie{\emph{i.e}\onedot} \def\Ie{\emph{I.e}\onedot}
+\def\cf{\emph{cf}\onedot} \def\Cf{\emph{Cf}\onedot}
+\def\etc{\emph{etc}\onedot} \def\vs{\emph{vs}\onedot}
+\def\wrt{w.r.t\onedot} \def\dof{d.o.f\onedot}
+\def\etal{\emph{et~al}\onedot}
+\def\click{\text{click}}
+\def\session{\text{session}}
+\def\position{\text{position}}
+%\def\new{\text{new}}
+\def\new{\np}
+%\def\orig{\text{orig}}
+\def\orig{\hp}
+\def\sign{\text{sign}}
+\def\rank{\text{rank}}
+\def\DCG{\text{DCG}}
+\def\abs{\text{abs}}
+
+\def\Sess{\mathcal{S}} % set of sessions
+\def\sess{s} % session
+\def\x{X} % user context
+\def\X{\mathcal{X}} % set of user contexts
+\def\D{D} % ordered list of recommended documents
+\def\d{d} % a single document
+\def\p{p} % document position
+\def\C{C} % set of documents with clicks
+\def\c{c} % a single document with a click
+\def\E{E} % set of eligible documents
+\def\eCR{\widehat{\mathtt{CR}}} % estimated click rate
+\def\CR{\mathtt{CR}} % click rate
+\def\I{\mathcal{I}} % indicator function
+\def\hp{\pi} % historical policy
+\def\np{h} % new policy
+\def\cond{~\vert~} % conditional symbol
+\def\score{s} % score
+\def\Exp{\mathlarger{\mathbb{E}}} % Expectation symbol
+\def\Query{Q} % set of possible queries
+\def\query{q} % query
+
+%% Rights management information.  This information is sent to you
+%% when you complete the rights form.  These commands have SAMPLE
+%% values in them; it is your responsibility as an author to replace
+%% the commands and values with those provided to you when you
+%% complete the rights form.
+
+
+%% These commands are for a PROCEEDINGS abstract or paper.
+%Conference
+\copyrightyear{2024}
+\acmYear{2024}
+\setcopyright{acmlicensed}\acmConference[CIKM '24]{Proceedings of the 33rd ACM International Conference on Information and Knowledge Management}{October 21--25, 2024}{Boise, ID, USA}
+\acmBooktitle{Proceedings of the 33rd ACM International Conference on Information and Knowledge Management (CIKM '24), October 21--25, 2024, Boise, ID, USA}
+\acmDOI{10.1145/3627673.3680091}
+\acmISBN{979-8-4007-0436-9/24/10}
+
+
+\newcounter{def_count}
+\setcounter{def_count}{0}
+\newtheorem{definition}[def_count]{Definition}
+
+\newenvironment{compact_enum}{
+\begin{itemize}
+  \setlength{\itemsep}{-0pt}
+  \setlength{\parskip}{-0pt}
+  \setlength{\parsep}{-0pt}
+  \setlength{\itemindent}{-0pt}
+  \labelsep=12pt
+}{\end{itemize}}
+%\renewcommand{\baselinestretch}{0.985}
+
+%%
+%% Submission ID.
+%% Use this when submitting an article to a sponsored event. You'll
+%% receive a unique submission ID from the organizers
+%% of the event, and this ID should be used as the parameter to this command.
+%%\acmSubmissionID{123-A56-BU3}
+
+%%
+%% The majority of ACM publications use numbered citations and
+%% references.  The command \citestyle{authoryear} switches to the
+%% "author year" style.
+%%
+%% If you are preparing content for an event
+%% sponsored by ACM SIGGRAPH, you must use the "author year" style of
+%% citations and references.
+%% Uncommenting
+%% the next command will enable that style.
+%%\citestyle{acmauthoryear}
+
+%%
+%% end of the preamble, start of the body of the document source.
+\begin{document}
+%\fancyhead{}
+%%
+%% The "title" command has an optional parameter,
+%% allowing the author to define a "short title" to be used in page headers.
+%\title{LiRAR: Retrieval as Ranking on GPUs at LinkedIn}
+\title{LiNR: Model Based Neural Retrieval on GPUs at LinkedIn}
+%%
+%% The "author" command and its associated commands are used to define
+%% the authors and their affiliations.
+%% Of note is the shared affiliation of the first two authors, and the
+%% "authornote" and "authornotemark" commands
+%% used to denote shared contribution to the research.
+
+\author{Fedor Borisyuk}
+\authornote{Authors contributed equally to this research.}
+\author{Qingquan Song}
+\authornotemark[1]
+\author{Mingzhou Zhou}
+\authornotemark[1]
+\author{Ganesh Parameswaran}
+\authornotemark[1]
+\affiliation{%\small
+ \institution{LinkedIn}
+ \city{Mountain View}
+ \state{CA}
+ \country{USA}}
+\email{fedorvb@gmail.com}
+
+\author{Madhu Arun}
+\author{Siva Popuri}
+\author{Tugrul Bingol}
+\affiliation{%\small
+ \institution{LinkedIn}
+ \city{Mountain View}
+ \state{CA}
+ \country{USA}}
+\email{maarun@linkedin.com}
+
+\author{Zhuotao Pei}
+\author{Kuang-Hsuan Lee}
+\author{Lu Zheng}
+\affiliation{%
+ \institution{LinkedIn}
+ \city{Mountain View}
+ \state{CA}
+ \country{USA}}
+\email{zpei@linkedin.com}
+
+\author{Qizhan Shao}
+\author{Ali Naqvi}
+\author{Sen Zhou}
+\author{Aman Gupta}
+\affiliation{%
+ \institution{LinkedIn}
+ \city{Mountain View}
+ \state{CA}
+ \country{USA}}
+\email{hshao@linkedin.com}
+
+%\author{Fedor Borisyuk, Qingquan Song, Mingzhou Zhou, Ganesh Parameswaran, Madhu Arun, Siva Popuri, \\ Tugrul Bingol, Zhuotao Pei, Kuang-Hsuan Lee, Lu Zheng, Qizhan Shao, Ali Naqvi, Sen Zhou, Aman Gupta}
+%\affiliation{\institution{LinkedIn Inc.}}
+
+%%
+%% By default, the full list of authors will be used in the page
+%% headers. Often, this list is too long, and will overlap
+%% other information printed in the page headers. This command allows
+%% the author to define a more concise list
+%% of authors' names for this purpose.
+\renewcommand{\shortauthors}{Fedor Borisyuk et al.}
+%% No italics
+%% If needed use a foot or authornote to identify equal contribution
+
+%%
+%% The abstract is a short summary of the work to be presented in the
+%% article.
+\begin{abstract}
+\input{abstract}
+
+\end{abstract}
+
+%%
+%% The code below is generated by the tool at http://dl.acm.org/ccs.cfm.
+%% Please copy and paste the code instead of the example below.
+%%
+\begin{CCSXML}
+<ccs2012>
+<concept>
+<concept_id>10002951.10003317.10003338.10003342</concept_id>
+<concept_desc>Information systems~Similarity measures</concept_desc>
+<concept_significance>500</concept_significance>
+</concept>
+<concept>
+<concept_id>10002951.10003317.10003365.10003366</concept_id>
+<concept_desc>Information systems~Search engine indexing</concept_desc>
+<concept_significance>500</concept_significance>
+</concept>
+<concept>
+<concept_id>10002951.10003317.10003338.10003343</concept_id>
+<concept_desc>Information systems~Learning to rank</concept_desc>
+<concept_significance>500</concept_significance>
+</concept>
+<concept>
+%<concept_id>10010147.10010257.10010321</concept_id>
+%<concept_desc>Computing methodologies~Machine learning algorithms</concept_desc>
+%<concept_significance>500</concept_significance>
+%</concept>
+</ccs2012>
+\end{CCSXML}
+
+\ccsdesc[500]{Information systems~Similarity measures}
+\ccsdesc[500]{Information systems~Search engine indexing}
+\ccsdesc[500]{Information systems~Learning to rank}
+%\ccsdesc[500]{Computing methodologies~Machine learning algorithms}
+
+
+%%
+%% Keywords. The author(s) should pick words that accurately describe
+%% the work being presented. Separate the keywords with commas.
+\keywords{information retrieval, recommender systems, candidate generation, nearest neighbor search, neural retrieval}
+
+%%
+%% This command processes the author and affiliation and title
+%% information and builds the first part of the formatted document.
+\maketitle
+
+\input{intro.tex}
+
+\input{related_work.tex}
+
+\input{overview.tex}
+
+\input{system_deployment.tex}
+
+\input{experiments.tex}
+
+\input{deployment_lessons.tex}
+
+\section{Conclusion}\label{sec:conclusion}
+\input{conclusion.tex}
+
+\section{Acknowledgements}\label{sec:acknowledgements}
+\input{acknowledgements.tex}
+
+%%
+%% The next two lines define the bibliography style to be used, and
+%% the bibliography file.
+\balance
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{bibliography}
+
+\end{document}
+\endinput
+%%
+%% End of file.

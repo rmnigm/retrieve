@@ -1,0 +1,246 @@
+%%% -*-BibTeX-*-
+%%% Do NOT edit. File created by BibTeX with style
+%%% ACM-Reference-Format-Journals [18-Jan-2012].
+
+\begin{thebibliography}{25}
+
+%%% ====================================================================
+%%% NOTE TO THE USER: you can override these defaults by providing
+%%% customized versions of any of these macros before the \bibliography
+%%% command.  Each of them MUST provide its own final punctuation,
+%%% except for \shownote{}, \showDOI{}, and \showURL{}.  The latter two
+%%% do not use final punctuation, in order to avoid confusing it with
+%%% the Web address.
+%%%
+%%% To suppress output of a particular field, define its macro to expand
+%%% to an empty string, or better, \unskip, like this:
+%%%
+%%% \newcommand{\showDOI}[1]{\unskip}   % LaTeX syntax
+%%%
+%%% \def \showDOI #1{\unskip}           % plain TeX syntax
+%%%
+%%% ====================================================================
+
+\ifx \showCODEN    \undefined \def \showCODEN     #1{\unskip}     \fi
+\ifx \showDOI      \undefined \def \showDOI       #1{#1}\fi
+\ifx \showISBNx    \undefined \def \showISBNx     #1{\unskip}     \fi
+\ifx \showISBNxiii \undefined \def \showISBNxiii  #1{\unskip}     \fi
+\ifx \showISSN     \undefined \def \showISSN      #1{\unskip}     \fi
+\ifx \showLCCN     \undefined \def \showLCCN      #1{\unskip}     \fi
+\ifx \shownote     \undefined \def \shownote      #1{#1}          \fi
+\ifx \showarticletitle \undefined \def \showarticletitle #1{#1}   \fi
+\ifx \showURL      \undefined \def \showURL       {\relax}        \fi
+% The following commands are used for tagged output and should be
+% invisible to TeX
+\providecommand\bibfield[2]{#2}
+\providecommand\bibinfo[2]{#2}
+\providecommand\natexlab[1]{#1}
+\providecommand\showeprint[2][]{arXiv:#2}
+
+\bibitem[Borisyuk et~al\mbox{.}(2024)]%
+        {borisyuk2024lignn}
+\bibfield{author}{\bibinfo{person}{Fedor Borisyuk}, \bibinfo{person}{Shihai He}, \bibinfo{person}{Yunbo Ouyang}, \bibinfo{person}{Morteza Ramezani}, \bibinfo{person}{Peng Du}, \bibinfo{person}{Xiaochen Hou}, \bibinfo{person}{Chengming Jiang}, \bibinfo{person}{Nitin Pasumarthy}, \bibinfo{person}{Priya Bannur}, \bibinfo{person}{Birjodh Tiwana}, \bibinfo{person}{Ping Liu}, \bibinfo{person}{Siddharth Dangi}, \bibinfo{person}{Daqi Sun}, \bibinfo{person}{Zhoutao Pei}, \bibinfo{person}{Xiao Shi}, \bibinfo{person}{Sirou Zhu}, \bibinfo{person}{Qianqi Shen}, \bibinfo{person}{Kuang-Hsuan Lee}, \bibinfo{person}{David Stein}, \bibinfo{person}{Baolei Li}, \bibinfo{person}{Haichao Wei}, \bibinfo{person}{Amol Ghoting}, {and} \bibinfo{person}{Souvik Ghosh}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{LiGNN: Graph Neural Networks at LinkedIn}. In \bibinfo{booktitle}{\emph{KDD}}.
+\newblock
+
+
+\bibitem[Chen et~al\mbox{.}(2023)]%
+        {Lucene_chen2023endtoend}
+\bibfield{author}{\bibinfo{person}{Haonan Chen}, \bibinfo{person}{Carlos Lassance}, {and} \bibinfo{person}{Jimmy Lin}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \bibinfo{title}{End-to-End Retrieval with Learned Dense and Sparse Representations Using Lucene}.
+\newblock
+\newblock
+\showeprint[arxiv]{2311.18503}~[cs.IR]
+
+
+\bibitem[Curtiss et~al\mbox{.}(2013)]%
+        {unicorn_paper}
+\bibfield{author}{\bibinfo{person}{Michael Curtiss}, \bibinfo{person}{Iain Becker}, \bibinfo{person}{Tudor Bosman}, \bibinfo{person}{Sergey Doroshenko}, \bibinfo{person}{Lucian Grijincu}, \bibinfo{person}{Tom Jackson}, \bibinfo{person}{Sandhya Kunnatur}, \bibinfo{person}{Soren Lassen}, \bibinfo{person}{Philip Pronin}, \bibinfo{person}{Sriram Sankar}, \bibinfo{person}{Guanghao Shen}, \bibinfo{person}{Gintaras Woss}, \bibinfo{person}{Chao Yang}, {and} \bibinfo{person}{Ning Zhang}.} \bibinfo{year}{2013}\natexlab{}.
+\newblock \showarticletitle{Unicorn: A System for Searching the Social Graph}. In \bibinfo{booktitle}{\emph{VLDB}}.
+\newblock
+
+
+\bibitem[Guo et~al\mbox{.}(2020)]%
+        {scann_google_paper}
+\bibfield{author}{\bibinfo{person}{Ruiqi Guo}, \bibinfo{person}{Philip Sun}, \bibinfo{person}{Erik Lindgren}, \bibinfo{person}{Quan Geng}, \bibinfo{person}{David Simcha}, \bibinfo{person}{Felix Chern}, {and} \bibinfo{person}{Sanjiv Kumar}.} \bibinfo{year}{2020}\natexlab{}.
+\newblock \showarticletitle{Accelerating Large-Scale Inference with Anisotropic Vector Quantization}. \bibinfo{publisher}{ICML}.
+\newblock
+
+
+\bibitem[GV(2008)]%
+        {veniceDB}
+\bibfield{author}{\bibinfo{person}{Félix GV}.} \bibinfo{year}{2008}\natexlab{}.
+\newblock \bibinfo{title}{Open Sourcing Venice – LinkedIn’s Derived Data Platform}.
+\newblock
+\newblock
+\newblock
+\shownote{https://www.linkedin.com/blog/engineering/open-source/open-sourcing-venice-linkedin-s-derived-data-platform}.
+
+
+\bibitem[Huang et~al\mbox{.}(2020)]%
+        {fb_search_embeddings_paper}
+\bibfield{author}{\bibinfo{person}{Jui-Ting Huang}, \bibinfo{person}{Ashish Sharma}, \bibinfo{person}{Shuying Sun}, \bibinfo{person}{Li Xia}, \bibinfo{person}{David Zhang}, \bibinfo{person}{Philip Pronin}, \bibinfo{person}{Janani Padmanabhan}, \bibinfo{person}{Giuseppe Ottaviano}, {and} \bibinfo{person}{Linjun Yang}.} \bibinfo{year}{2020}\natexlab{}.
+\newblock \showarticletitle{Embedding-Based Retrieval in Facebook Search}. In \bibinfo{booktitle}{\emph{KDD}}.
+\newblock
+
+
+\bibitem[Jiang et~al\mbox{.}(2019)]%
+        {XDL_paper}
+\bibfield{author}{\bibinfo{person}{Biye Jiang}, \bibinfo{person}{Chao Deng}, \bibinfo{person}{Huimin Yi}, \bibinfo{person}{Zelin Hu}, \bibinfo{person}{Guorui Zhou}, \bibinfo{person}{Yang Zheng}, \bibinfo{person}{Sui Huang}, \bibinfo{person}{Xinyang Guo}, \bibinfo{person}{Dongyue Wang}, \bibinfo{person}{Yue Song}, \bibinfo{person}{Liqin Zhao}, \bibinfo{person}{Zhi Wang}, \bibinfo{person}{Peng Sun}, \bibinfo{person}{Yu Zhang}, \bibinfo{person}{Di Zhang}, \bibinfo{person}{Jinhui Li}, \bibinfo{person}{Jian Xu}, \bibinfo{person}{Xiaoqiang Zhu}, {and} \bibinfo{person}{Kun Gai}.} \bibinfo{year}{2019}\natexlab{}.
+\newblock \showarticletitle{XDL: An Industrial Deep Learning Framework for High-Dimensional Sparse Data}. \bibinfo{publisher}{KDD}.
+\newblock
+
+
+\bibitem[Johnson et~al\mbox{.}(2021)]%
+        {FAISS_paper}
+\bibfield{author}{\bibinfo{person}{Jeff Johnson}, \bibinfo{person}{Matthijs Douze}, {and} \bibinfo{person}{Hervé Jégou}.} \bibinfo{year}{2021}\natexlab{}.
+\newblock \showarticletitle{Billion-Scale Similarity Search with GPUs}.
+\newblock \bibinfo{journal}{\emph{IEEE Transactions on Big Data}} (\bibinfo{year}{2021}).
+\newblock
+
+
+\bibitem[Jégou et~al\mbox{.}(2011)]%
+        {pq_paper}
+\bibfield{author}{\bibinfo{person}{Herve Jégou}, \bibinfo{person}{Matthijs Douze}, {and} \bibinfo{person}{Cordelia Schmid}.} \bibinfo{year}{2011}\natexlab{}.
+\newblock \showarticletitle{Product Quantization for Nearest Neighbor Search}.
+\newblock \bibinfo{journal}{\emph{IEEE Transactions on Pattern Analysis and Machine Intelligence}} (\bibinfo{year}{2011}).
+\newblock
+
+
+\bibitem[Li and Li(2023)]%
+        {li2023oporp}
+\bibfield{author}{\bibinfo{person}{Ping Li} {and} \bibinfo{person}{Xiaoyun Li}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{OPORP: One permutation+ one random projection}.
+\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2302.03505}} (\bibinfo{year}{2023}).
+\newblock
+
+
+\bibitem[Lian et~al\mbox{.}(2022)]%
+        {persia_paper}
+\bibfield{author}{\bibinfo{person}{Xiangru Lian}, \bibinfo{person}{Binhang Yuan}, \bibinfo{person}{Xuefeng Zhu}, \bibinfo{person}{Yulong Wang}, \bibinfo{person}{Yongjun He}, \bibinfo{person}{Honghuan Wu}, \bibinfo{person}{Lei Sun}, \bibinfo{person}{Haodong Lyu}, \bibinfo{person}{Chengjun Liu}, \bibinfo{person}{Xing Dong}, \bibinfo{person}{Yiqiao Liao}, \bibinfo{person}{Mingnan Luo}, \bibinfo{person}{Congfei Zhang}, \bibinfo{person}{Jingru Xie}, \bibinfo{person}{Haonan Li}, \bibinfo{person}{Lei Chen}, \bibinfo{person}{Renjie Huang}, \bibinfo{person}{Jianying Lin}, \bibinfo{person}{Chengchun Shu}, \bibinfo{person}{Xuezhong Qiu}, \bibinfo{person}{Zhishan Liu}, \bibinfo{person}{Dongying Kong}, \bibinfo{person}{Lei Yuan}, \bibinfo{person}{Hai Yu}, \bibinfo{person}{Sen Yang}, \bibinfo{person}{Ce Zhang}, {and} \bibinfo{person}{Ji Liu}.} \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{Persia: An Open, Hybrid System Scaling Deep Learning-Based Recommenders up to 100 Trillion Parameters}. In \bibinfo{booktitle}{\emph{KDD}}.
+\newblock
+
+
+\bibitem[Liu et~al\mbox{.}(2021)]%
+        {Que2Search_paper}
+\bibfield{author}{\bibinfo{person}{Yiqun Liu}, \bibinfo{person}{Kaushik Rangadurai}, \bibinfo{person}{Yunzhong He}, \bibinfo{person}{Siddarth Malreddy}, \bibinfo{person}{Xunlong Gui}, \bibinfo{person}{Xiaoyi Liu}, {and} \bibinfo{person}{Fedor Borisyuk}.} \bibinfo{year}{2021}\natexlab{}.
+\newblock \showarticletitle{Que2Search: Fast and Accurate Query and Document Understanding for Search at Facebook}. \bibinfo{publisher}{KDD}.
+\newblock
+
+
+\bibitem[Liu et~al\mbox{.}(2022)]%
+        {liu2022monolith}
+\bibfield{author}{\bibinfo{person}{Zhuoran Liu}, \bibinfo{person}{Leqi Zou}, \bibinfo{person}{Xuan Zou}, \bibinfo{person}{Caihua Wang}, \bibinfo{person}{Biao Zhang}, \bibinfo{person}{Da Tang}, \bibinfo{person}{Bolin Zhu}, \bibinfo{person}{Yijie Zhu}, \bibinfo{person}{Peng Wu}, \bibinfo{person}{Ke Wang}, {and} \bibinfo{person}{Youlong Cheng}.} \bibinfo{year}{2022}\natexlab{}.
+\newblock \bibinfo{title}{Monolith: Real Time Recommendation System With Collisionless Embedding Table}.
+\newblock
+\newblock
+\showeprint[arxiv]{2209.07663}~[cs.IR]
+
+
+\bibitem[Malkov and Yashunin(2020)]%
+        {hnsw_paper}
+\bibfield{author}{\bibinfo{person}{Yu~A. Malkov} {and} \bibinfo{person}{D.~A. Yashunin}.} \bibinfo{year}{2020}\natexlab{}.
+\newblock \showarticletitle{Efficient and Robust Approximate Nearest Neighbor Search Using Hierarchical Navigable Small World Graphs}.
+\newblock \bibinfo{journal}{\emph{IEEE Trans. Pattern Anal. Mach. Intell.}} (\bibinfo{year}{2020}).
+\newblock
+
+
+\bibitem[Nolet(2023)]%
+        {RAFT_paper}
+\bibfield{author}{\bibinfo{person}{Corey Nolet}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \bibinfo{booktitle}{\emph{Reusable Computational Patterns for Machine Learning and Information Retrieval with RAPIDS RAFT}}.
+\newblock
+\urldef\tempurl%
+\url{https://developer.nvidia.com/blog/reusable-computational-patterns-for-machine-learning-and-data-analytics-with-rapids-raft/}
+\showURL{%
+\tempurl}
+
+
+\bibitem[Ootomo et~al\mbox{.}(2023)]%
+        {ootomo2023cagra}
+\bibfield{author}{\bibinfo{person}{Hiroyuki Ootomo}, \bibinfo{person}{Akira Naruse}, \bibinfo{person}{Corey Nolet}, \bibinfo{person}{Ray Wang}, \bibinfo{person}{Tamas Feher}, {and} \bibinfo{person}{Yong Wang}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \bibinfo{title}{CAGRA: Highly Parallel Graph Construction and Approximate Nearest Neighbor Search for GPUs}.
+\newblock
+\newblock
+\showeprint[arxiv]{2308.15136}~[cs.DS]
+
+
+\bibitem[Pal et~al\mbox{.}(2020)]%
+        {PinnerSage_paper}
+\bibfield{author}{\bibinfo{person}{Aditya Pal}, \bibinfo{person}{Chantat Eksombatchai}, \bibinfo{person}{Yitong Zhou}, \bibinfo{person}{Bo Zhao}, \bibinfo{person}{Charles Rosenberg}, {and} \bibinfo{person}{Jure Leskovec}.} \bibinfo{year}{2020}\natexlab{}.
+\newblock \showarticletitle{PinnerSage: Multi-Modal User Embedding Framework for Recommendations at Pinterest}. \bibinfo{publisher}{KDD}.
+\newblock
+
+
+\bibitem[Rajput et~al\mbox{.}(2023)]%
+        {rajput2023recommender}
+\bibfield{author}{\bibinfo{person}{Shashank Rajput}, \bibinfo{person}{Nikhil Mehta}, \bibinfo{person}{Anima Singh}, \bibinfo{person}{Raghunandan~H. Keshavan}, \bibinfo{person}{Trung Vu}, \bibinfo{person}{Lukasz Heldt}, \bibinfo{person}{Lichan Hong}, \bibinfo{person}{Yi Tay}, \bibinfo{person}{Vinh~Q. Tran}, \bibinfo{person}{Jonah Samost}, \bibinfo{person}{Maciej Kula}, \bibinfo{person}{Ed~H. Chi}, {and} \bibinfo{person}{Maheswaran Sathiamoorthy}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \bibinfo{title}{Recommender Systems with Generative Retrieval}.
+\newblock
+\newblock
+\showeprint[arxiv]{2305.05065}~[cs.IR]
+
+
+\bibitem[Rangadurai et~al\mbox{.}(2022)]%
+        {nxtpost_paper}
+\bibfield{author}{\bibinfo{person}{Kaushik Rangadurai}, \bibinfo{person}{Yiqun Liu}, \bibinfo{person}{Siddarth Malreddy}, \bibinfo{person}{Xiaoyi Liu}, \bibinfo{person}{Piyush Maheshwari}, \bibinfo{person}{Vishwanath Sangale}, {and} \bibinfo{person}{Fedor Borisyuk}.} \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{NxtPost: User To Post Recommendations In Facebook Groups}. In \bibinfo{booktitle}{\emph{KDD}}.
+\newblock
+
+
+\bibitem[Shen et~al\mbox{.}(2024)]%
+        {shen2024learningretrievejobmatching}
+\bibfield{author}{\bibinfo{person}{Jianqiang Shen}, \bibinfo{person}{Yuchin Juan}, \bibinfo{person}{Shaobo Zhang}, \bibinfo{person}{Ping Liu}, \bibinfo{person}{Wen Pu}, \bibinfo{person}{Sriram Vasudevan}, \bibinfo{person}{Qingquan Song}, \bibinfo{person}{Fedor Borisyuk}, \bibinfo{person}{Kay~Qianqi Shen}, \bibinfo{person}{Haichao Wei}, \bibinfo{person}{Yunxiang Ren}, \bibinfo{person}{Yeou~S. Chiou}, \bibinfo{person}{Sicong Kuang}, \bibinfo{person}{Yuan Yin}, \bibinfo{person}{Ben Zheng}, \bibinfo{person}{Muchen Wu}, \bibinfo{person}{Shaghayegh Gharghabi}, \bibinfo{person}{Xiaoqing Wang}, \bibinfo{person}{Huichao Xue}, \bibinfo{person}{Qi Guo}, \bibinfo{person}{Daniel Hewlett}, \bibinfo{person}{Luke Simon}, \bibinfo{person}{Liangjie Hong}, {and} \bibinfo{person}{Wenjing Zhang}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \bibinfo{title}{Learning to Retrieve for Job Matching}.
+\newblock
+\newblock
+\showeprint[arxiv]{2402.13435}~[cs.IR]
+\urldef\tempurl%
+\url{https://arxiv.org/abs/2402.13435}
+\showURL{%
+\tempurl}
+
+
+\bibitem[Tay et~al\mbox{.}(2022)]%
+        {tay2022transformer}
+\bibfield{author}{\bibinfo{person}{Yi Tay}, \bibinfo{person}{Vinh~Q. Tran}, \bibinfo{person}{Mostafa Dehghani}, \bibinfo{person}{Jianmo Ni}, \bibinfo{person}{Dara Bahri}, \bibinfo{person}{Harsh Mehta}, \bibinfo{person}{Zhen Qin}, \bibinfo{person}{Kai Hui}, \bibinfo{person}{Zhe Zhao}, \bibinfo{person}{Jai Gupta}, \bibinfo{person}{Tal Schuster}, \bibinfo{person}{William~W. Cohen}, {and} \bibinfo{person}{Donald Metzler}.} \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{Transformer Memory as a Differentiable Search Index}. \bibinfo{publisher}{NEURIPS}.
+\newblock
+
+
+\bibitem[Zhai et~al\mbox{.}(2023)]%
+        {MoL_paper}
+\bibfield{author}{\bibinfo{person}{Jiaqi Zhai}, \bibinfo{person}{Zhaojie Gong}, \bibinfo{person}{Yueming Wang}, \bibinfo{person}{Xiao Sun}, \bibinfo{person}{Zheng Yan}, \bibinfo{person}{Fu Li}, {and} \bibinfo{person}{Xing Liu}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{Revisiting Neural Retrieval on Accelerators}. In \bibinfo{booktitle}{\emph{Proceedings of the 29th ACM SIGKDD Conference on Knowledge Discovery and Data Mining}} \emph{(\bibinfo{series}{KDD '23})}. \bibinfo{publisher}{Association for Computing Machinery}, \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{5520–5531}.
+\newblock
+\showISBNx{9798400701030}
+\urldef\tempurl%
+\url{https://doi.org/10.1145/3580305.3599897}
+\showDOI{\tempurl}
+
+
+\bibitem[Zhang et~al\mbox{.}(2023)]%
+        {zhang2023modelenhanced}
+\bibfield{author}{\bibinfo{person}{Hailin Zhang}, \bibinfo{person}{Yujing Wang}, \bibinfo{person}{Qi Chen}, \bibinfo{person}{Ruiheng Chang}, \bibinfo{person}{Ting Zhang}, \bibinfo{person}{Ziming Miao}, \bibinfo{person}{Yingyan Hou}, \bibinfo{person}{Yang Ding}, \bibinfo{person}{Xupeng Miao}, \bibinfo{person}{Haonan Wang}, \bibinfo{person}{Bochen Pang}, \bibinfo{person}{Yuefeng Zhan}, \bibinfo{person}{Hao Sun}, \bibinfo{person}{Weiwei Deng}, \bibinfo{person}{Qi Zhang}, \bibinfo{person}{Fan Yang}, \bibinfo{person}{Xing Xie}, \bibinfo{person}{Mao Yang}, {and} \bibinfo{person}{Bin Cui}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \bibinfo{title}{Model-enhanced Vector Index}.
+\newblock
+\newblock
+
+
+\bibitem[Zhao et~al\mbox{.}(2020)]%
+        {song_paper}
+\bibfield{author}{\bibinfo{person}{Weijie Zhao}, \bibinfo{person}{Shulong Tan}, {and} \bibinfo{person}{Ping Li}.} \bibinfo{year}{2020}\natexlab{}.
+\newblock \showarticletitle{SONG: Approximate Nearest Neighbor Search on GPU}. In \bibinfo{booktitle}{\emph{ICDE}}.
+\newblock
+
+
+\bibitem[Zhao et~al\mbox{.}(2022)]%
+        {zhao2022constrained}
+\bibfield{author}{\bibinfo{person}{Weijie Zhao}, \bibinfo{person}{Shulong Tan}, {and} \bibinfo{person}{Ping Li}.} \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{Constrained Approximate Similarity Search on Proximity Graph}.
+\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2210.14958}} (\bibinfo{year}{2022}).
+\newblock
+
+
+\end{thebibliography}
