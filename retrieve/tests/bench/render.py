@@ -63,11 +63,15 @@ def render(run_dir: Path) -> str:
     # Header summary
     first = records[0]
     out.append(f"_run id_: `{first['run_id']}`")
-    out.append(f"_device_: `{first['device'].get('name', '?')}` "
-               f"({first['device'].get('memory_total_mib', '?')} MiB)")
-    out.append(f"_versions_: torch=`{first['versions'].get('torch', '?')}` "
-               f"triton=`{first['versions'].get('triton', '?')}` "
-               f"git=`{first['versions'].get('git_sha', '?')}`")
+    out.append(
+        f"_device_: `{first['device'].get('name', '?')}` "
+        f"({first['device'].get('memory_total_mib', '?')} MiB)"
+    )
+    out.append(
+        f"_versions_: torch=`{first['versions'].get('torch', '?')}` "
+        f"triton=`{first['versions'].get('triton', '?')}` "
+        f"git=`{first['versions'].get('git_sha', '?')}`"
+    )
     out.append("")
 
     for algo in sorted(by_algo):
@@ -120,8 +124,7 @@ def render(run_dir: Path) -> str:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("run_dir", type=Path)
-    p.add_argument("--out", type=Path, default=None,
-                   help="output markdown file (default: stdout)")
+    p.add_argument("--out", type=Path, default=None, help="output markdown file (default: stdout)")
     args = p.parse_args(argv)
 
     if not args.run_dir.is_dir():

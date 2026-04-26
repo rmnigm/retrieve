@@ -297,9 +297,11 @@ def main(
                 "peak={:.1f}MiB index={:.1f}MiB fwd_scratch={:.1f}MiB",
                 k, recall, k, ndcg, med, peak, index_mem, scratch,
             )
-            del forward
-            for m in modules:
-                del m
+            # `for m in modules: del m` only drops the loop var — the list
+            # itself still holds refs, leaking the index into the next cell's
+            # mem_before snapshot. Drop the bindings explicitly.
+            modules.clear()
+            del forward, modules
             torch.cuda.empty_cache()
 
     with open(out_path, "w") as f:

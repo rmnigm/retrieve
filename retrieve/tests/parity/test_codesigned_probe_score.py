@@ -69,9 +69,7 @@ def test_codesigned_no_filters_matches_ref(n, d, p, k, b):
     query = make_query(b, d)
     flat = _make_flat_probed(b, n, p)
 
-    out_ids, out_scores = codesigned_probe_score(
-        query, flat, codes, scales, k
-    )
+    out_ids, out_scores = codesigned_probe_score(query, flat, codes, scales, k)
     ref_ids, ref_scores = _ref_phase23(query, flat, codes, scales, k)
     assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores)
 
@@ -88,16 +86,12 @@ def test_codesigned_with_bloom_matches_ref(n, d, p, k, b):
     q_attrs = make_query_attrs(b, c=2)
     seeds = _generate_seeds(k_hash=5, device=embs.device)
     sigs = _build_signatures(attrs.long(), seeds, m_bits=512, k_hash=5, word_count=8)
-    qb = _build_signatures(
-        q_attrs.long().unsqueeze(-1), seeds, m_bits=512, k_hash=5, word_count=8
-    )
+    qb = _build_signatures(q_attrs.long().unsqueeze(-1), seeds, m_bits=512, k_hash=5, word_count=8)
 
     out_ids, out_scores = codesigned_probe_score(
         query, flat, codes, scales, k, query_bits=qb, bloom_sigs=sigs
     )
-    ref_ids, ref_scores = _ref_phase23(
-        query, flat, codes, scales, k, qb=qb, bloom_sigs=sigs
-    )
+    ref_ids, ref_scores = _ref_phase23(query, flat, codes, scales, k, qb=qb, bloom_sigs=sigs)
     assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores)
 
 
@@ -110,9 +104,7 @@ def test_codesigned_with_external_mask_matches_ref(n, d, p, k, b):
     flat = _make_flat_probed(b, n, p)
     mask = make_mask(b, n, pass_rate=0.3)
 
-    out_ids, out_scores = codesigned_probe_score(
-        query, flat, codes, scales, k, mask=mask
-    )
+    out_ids, out_scores = codesigned_probe_score(query, flat, codes, scales, k, mask=mask)
     ref_ids, ref_scores = _ref_phase23(query, flat, codes, scales, k, mask=mask)
     assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores)
 
@@ -130,9 +122,7 @@ def test_codesigned_bloom_and_mask_matches_ref(n, d, p, k, b):
     q_attrs = make_query_attrs(b, c=2)
     seeds = _generate_seeds(k_hash=5, device=embs.device)
     sigs = _build_signatures(attrs.long(), seeds, m_bits=512, k_hash=5, word_count=8)
-    qb = _build_signatures(
-        q_attrs.long().unsqueeze(-1), seeds, m_bits=512, k_hash=5, word_count=8
-    )
+    qb = _build_signatures(q_attrs.long().unsqueeze(-1), seeds, m_bits=512, k_hash=5, word_count=8)
 
     out_ids, out_scores = codesigned_probe_score(
         query, flat, codes, scales, k, query_bits=qb, bloom_sigs=sigs, mask=mask

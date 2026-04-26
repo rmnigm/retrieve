@@ -14,8 +14,8 @@ from retrieve.layers.linr import (
     build_linr_v3_triton,
 )
 from retrieve.layers.silvertorch import (
-    BloomIndex,
     IVF_INT8_ANN,
+    BloomIndex,
     SilverTorch,
     build_ivf_int8,
     build_silvertorch,

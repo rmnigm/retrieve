@@ -68,9 +68,7 @@ def make_attrs(
 ) -> torch.Tensor:
     """Random per-item clause attributes ``[N, C, A_max]`` with -1 padding."""
     g = torch.Generator(device="cuda").manual_seed(seed)
-    attrs = torch.randint(
-        0, n_vocab, (n, c, a_max), generator=g, dtype=torch.long, device="cuda"
-    )
+    attrs = torch.randint(0, n_vocab, (n, c, a_max), generator=g, dtype=torch.long, device="cuda")
     pad = torch.rand(n, c, a_max, generator=g, device="cuda") < pad_rate
     attrs[pad] = -1
     return attrs
@@ -86,9 +84,7 @@ def make_query_attrs(
 ) -> torch.Tensor:
     """Random query clause attributes ``[B, C]`` with some clauses inactive (-1)."""
     g = torch.Generator(device="cuda").manual_seed(seed)
-    q = torch.randint(
-        0, n_vocab, (b, c), generator=g, dtype=torch.long, device="cuda"
-    )
+    q = torch.randint(0, n_vocab, (b, c), generator=g, dtype=torch.long, device="cuda")
     inactive = torch.rand(b, c, generator=g, device="cuda") < inactive_rate
     q[inactive] = -1
     return q
@@ -103,9 +99,7 @@ def valid_id_set(ids: torch.Tensor, scores: torch.Tensor, b: int) -> set[int]:
 def recall_at_k(approx_ids: torch.Tensor, exact_ids: torch.Tensor) -> float:
     """Mean per-row set overlap of ``approx`` vs ``exact``, divided by K."""
     b, k = approx_ids.shape
-    overlap = sum(
-        len(set(approx_ids[i].tolist()) & set(exact_ids[i].tolist())) for i in range(b)
-    )
+    overlap = sum(len(set(approx_ids[i].tolist()) & set(exact_ids[i].tolist())) for i in range(b))
     return overlap / (b * k)
 
 

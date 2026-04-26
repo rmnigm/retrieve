@@ -36,7 +36,6 @@ from tests.conftest import (
     recall_at_k,
 )
 
-
 # ---------------------------------------------------------------------------
 # Cell parameter matrices
 # ---------------------------------------------------------------------------
@@ -139,8 +138,15 @@ def _run_cell(
     fn = forward_factory(module)
     fwd = measure_forward(fn, rep_ms=rep_ms)
     rec = make_record(
-        run_id=bench_run_id, algo=algo, impl=impl, cell=cell, params=params,
-        mem=mem, fwd=fwd, correctness=correctness, extra=extra,
+        run_id=bench_run_id,
+        algo=algo,
+        impl=impl,
+        cell=cell,
+        params=params,
+        mem=mem,
+        fwd=fwd,
+        correctness=correctness,
+        extra=extra,
     )
     write_record(rec, bench_out_dir)
 
@@ -166,12 +172,15 @@ def test_linr_v1_full_torch(b, n, d, k, bench_run_id, bench_out_dir, request):
         return m, [embs]
 
     _run_cell(
-        bench_run_id=bench_run_id, bench_out_dir=bench_out_dir,
+        bench_run_id=bench_run_id,
+        bench_out_dir=bench_out_dir,
         rep_ms=float(request.config.getoption("--bench-rep")),
-        algo="linr_v1_full", impl="torch",
-        cell=_cell_full(b, n, d, k), params=_params_full(b, n, d, k),
+        algo="linr_v1_full",
+        impl="torch",
+        cell=_cell_full(b, n, d, k),
+        params=_params_full(b, n, d, k),
         build_and_register=build,
-        forward_factory=lambda mod: (lambda: mod(query)),
+        forward_factory=lambda mod: lambda: mod(query),
     )
 
 
@@ -187,12 +196,15 @@ def test_linr_v1_full_triton(b, n, d, k, bench_run_id, bench_out_dir, request):
         return m, [embs]
 
     _run_cell(
-        bench_run_id=bench_run_id, bench_out_dir=bench_out_dir,
+        bench_run_id=bench_run_id,
+        bench_out_dir=bench_out_dir,
         rep_ms=float(request.config.getoption("--bench-rep")),
-        algo="linr_v1_full", impl="triton",
-        cell=_cell_full(b, n, d, k), params=_params_full(b, n, d, k),
+        algo="linr_v1_full",
+        impl="triton",
+        cell=_cell_full(b, n, d, k),
+        params=_params_full(b, n, d, k),
         build_and_register=build,
-        forward_factory=lambda mod: (lambda: mod(query)),
+        forward_factory=lambda mod: lambda: mod(query),
     )
 
 
@@ -213,12 +225,15 @@ def test_linr_v1_masked_torch(b, n, d, k, pr, bench_run_id, bench_out_dir, reque
         return m, [embs]
 
     _run_cell(
-        bench_run_id=bench_run_id, bench_out_dir=bench_out_dir,
+        bench_run_id=bench_run_id,
+        bench_out_dir=bench_out_dir,
         rep_ms=float(request.config.getoption("--bench-rep")),
-        algo="linr_v1_masked", impl="torch",
-        cell=_cell_masked(b, n, d, k, pr), params=_params_masked(b, n, d, k, pr),
+        algo="linr_v1_masked",
+        impl="torch",
+        cell=_cell_masked(b, n, d, k, pr),
+        params=_params_masked(b, n, d, k, pr),
         build_and_register=build,
-        forward_factory=lambda mod: (lambda: mod(query, mask=mask)),
+        forward_factory=lambda mod: lambda: mod(query, mask=mask),
     )
 
 
@@ -234,12 +249,15 @@ def test_linr_v1_masked_triton(b, n, d, k, pr, bench_run_id, bench_out_dir, requ
         return m, [embs]
 
     _run_cell(
-        bench_run_id=bench_run_id, bench_out_dir=bench_out_dir,
+        bench_run_id=bench_run_id,
+        bench_out_dir=bench_out_dir,
         rep_ms=float(request.config.getoption("--bench-rep")),
-        algo="linr_v1_masked", impl="triton",
-        cell=_cell_masked(b, n, d, k, pr), params=_params_masked(b, n, d, k, pr),
+        algo="linr_v1_masked",
+        impl="triton",
+        cell=_cell_masked(b, n, d, k, pr),
+        params=_params_masked(b, n, d, k, pr),
         build_and_register=build,
-        forward_factory=lambda mod: (lambda: mod(query, mask=mask)),
+        forward_factory=lambda mod: lambda: mod(query, mask=mask),
     )
 
 
@@ -261,12 +279,15 @@ def test_linr_v2_masked_torch(b, n, d, k, pr, bench_run_id, bench_out_dir, reque
         return m, [embs]
 
     _run_cell(
-        bench_run_id=bench_run_id, bench_out_dir=bench_out_dir,
+        bench_run_id=bench_run_id,
+        bench_out_dir=bench_out_dir,
         rep_ms=float(request.config.getoption("--bench-rep")),
-        algo="linr_v2_masked", impl="torch",
-        cell=_cell_masked(b, n, d, k, pr), params=_params_masked(b, n, d, k, pr),
+        algo="linr_v2_masked",
+        impl="torch",
+        cell=_cell_masked(b, n, d, k, pr),
+        params=_params_masked(b, n, d, k, pr),
         build_and_register=build,
-        forward_factory=lambda mod: (lambda: mod(query, candidate_ids=cand, counts=counts)),
+        forward_factory=lambda mod: lambda: mod(query, candidate_ids=cand, counts=counts),
     )
 
 
@@ -283,12 +304,15 @@ def test_linr_v2_masked_triton(b, n, d, k, pr, bench_run_id, bench_out_dir, requ
         return m, [embs]
 
     _run_cell(
-        bench_run_id=bench_run_id, bench_out_dir=bench_out_dir,
+        bench_run_id=bench_run_id,
+        bench_out_dir=bench_out_dir,
         rep_ms=float(request.config.getoption("--bench-rep")),
-        algo="linr_v2_masked", impl="triton",
-        cell=_cell_masked(b, n, d, k, pr), params=_params_masked(b, n, d, k, pr),
+        algo="linr_v2_masked",
+        impl="triton",
+        cell=_cell_masked(b, n, d, k, pr),
+        params=_params_masked(b, n, d, k, pr),
         build_and_register=build,
-        forward_factory=lambda mod: (lambda: mod(query, candidate_ids=cand, counts=counts)),
+        forward_factory=lambda mod: lambda: mod(query, candidate_ids=cand, counts=counts),
     )
 
 
@@ -299,7 +323,14 @@ def test_linr_v2_masked_triton(b, n, d, k, pr, bench_run_id, bench_out_dir, requ
 
 @pytest.mark.parametrize("b,n,d,k", V3_FULL_CELLS)
 def test_linr_v3_full_torch(
-    b, n, d, k, bench_run_id, bench_out_dir, linr_full_ref_loader, request,
+    b,
+    n,
+    d,
+    k,
+    bench_run_id,
+    bench_out_dir,
+    linr_full_ref_loader,
+    request,
 ):
     ex_ids_cpu = linr_full_ref_loader(b, n, d, k)
     query = make_query(b, d)
@@ -317,9 +348,13 @@ def test_linr_v3_full_torch(
 
     fwd = measure_forward(fn, rep_ms=float(request.config.getoption("--bench-rep")))
     rec = make_record(
-        run_id=bench_run_id, algo="linr_v3_full", impl="torch",
-        cell=_cell_full(b, n, d, k), params=_params_full(b, n, d, k),
-        mem=mem, fwd=fwd,
+        run_id=bench_run_id,
+        algo="linr_v3_full",
+        impl="torch",
+        cell=_cell_full(b, n, d, k),
+        params=_params_full(b, n, d, k),
+        mem=mem,
+        fwd=fwd,
         correctness={"correct": True, "vs": "exact_fullscan"},
         extra={"recall@K": round(recall, 4)},
     )
@@ -328,7 +363,14 @@ def test_linr_v3_full_torch(
 
 @pytest.mark.parametrize("b,n,d,k", V3_FULL_CELLS)
 def test_linr_v3_full_triton(
-    b, n, d, k, bench_run_id, bench_out_dir, linr_full_ref_loader, request,
+    b,
+    n,
+    d,
+    k,
+    bench_run_id,
+    bench_out_dir,
+    linr_full_ref_loader,
+    request,
 ):
     ex_ids_cpu = linr_full_ref_loader(b, n, d, k)
     query = make_query(b, d)
@@ -346,9 +388,13 @@ def test_linr_v3_full_triton(
 
     fwd = measure_forward(fn, rep_ms=float(request.config.getoption("--bench-rep")))
     rec = make_record(
-        run_id=bench_run_id, algo="linr_v3_full", impl="triton",
-        cell=_cell_full(b, n, d, k), params=_params_full(b, n, d, k),
-        mem=mem, fwd=fwd,
+        run_id=bench_run_id,
+        algo="linr_v3_full",
+        impl="triton",
+        cell=_cell_full(b, n, d, k),
+        params=_params_full(b, n, d, k),
+        mem=mem,
+        fwd=fwd,
         correctness={"correct": True, "vs": "exact_fullscan"},
         extra={"recall@K": round(recall, 4)},
     )
@@ -374,13 +420,15 @@ def test_linr_v3_candidates_torch(b, n, d, k, bench_run_id, bench_out_dir, reque
         return m, [embs]
 
     _run_cell(
-        bench_run_id=bench_run_id, bench_out_dir=bench_out_dir,
+        bench_run_id=bench_run_id,
+        bench_out_dir=bench_out_dir,
         rep_ms=float(request.config.getoption("--bench-rep")),
-        algo="linr_v3_candidates", impl="torch",
+        algo="linr_v3_candidates",
+        impl="torch",
         cell=f"B={b},N={n},D={d},P={p},K={k}",
         params={"b": b, "n": n, "d": d, "k": k, "p": p},
         build_and_register=build,
-        forward_factory=lambda mod: (lambda: mod(query, candidate_ids=cand)),
+        forward_factory=lambda mod: lambda: mod(query, candidate_ids=cand),
     )
 
 
@@ -398,11 +446,13 @@ def test_linr_v3_candidates_triton(b, n, d, k, bench_run_id, bench_out_dir, requ
         return m, [embs]
 
     _run_cell(
-        bench_run_id=bench_run_id, bench_out_dir=bench_out_dir,
+        bench_run_id=bench_run_id,
+        bench_out_dir=bench_out_dir,
         rep_ms=float(request.config.getoption("--bench-rep")),
-        algo="linr_v3_candidates", impl="triton",
+        algo="linr_v3_candidates",
+        impl="triton",
         cell=f"B={b},N={n},D={d},P={p},K={k}",
         params={"b": b, "n": n, "d": d, "k": k, "p": p},
         build_and_register=build,
-        forward_factory=lambda mod: (lambda: mod(query, candidate_ids=cand)),
+        forward_factory=lambda mod: lambda: mod(query, candidate_ids=cand),
     )

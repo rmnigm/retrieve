@@ -24,9 +24,9 @@ def test_clause_index_and_or_semantics():
 
     q = torch.tensor(
         [
-            [1, 50],   # items 0..99 ∩ all-have-50 → 0..99
-            [2, 50],   # items 100..199
-            [3, -1],   # items in [50, 70) (multi-value clause), any 2nd-clause
+            [1, 50],  # items 0..99 ∩ all-have-50 → 0..99
+            [2, 50],  # items 100..199
+            [3, -1],  # items in [50, 70) (multi-value clause), any 2nd-clause
             [-1, -1],  # both inactive → all
         ],
         dtype=torch.long,

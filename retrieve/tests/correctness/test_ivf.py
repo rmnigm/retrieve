@@ -113,9 +113,7 @@ class TestRecallVsExact:
 
 class TestBuilder:
     def test_build_helper(self, data):
-        m = build_ivf_int8(
-            data["embs"], k=K, n_lists=N_LISTS, n_probe=N_PROBE, n_iter=3
-        )
+        m = build_ivf_int8(data["embs"], k=K, n_lists=N_LISTS, n_probe=N_PROBE, n_iter=3)
         assert isinstance(m, IVF_INT8_ANN)
         ids, _ = m(data["query"])
         assert ids.shape == (B, K)

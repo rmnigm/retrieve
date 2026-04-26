@@ -20,7 +20,6 @@ import argparse
 import json
 import os
 import subprocess
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -28,8 +27,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 BENCH_DIR = REPO_ROOT / "tests" / "bench"
 
 ALGO_FILES = {
-    "kernels":     "bench_kernels.py",
-    "linr":        "bench_linr.py",
+    "kernels": "bench_kernels.py",
+    "linr": "bench_linr.py",
     "silvertorch": "bench_silvertorch.py",
 }
 
@@ -55,7 +54,10 @@ def run(algos: list[str], select: str | None, rep_ms: float, render: bool) -> in
         print(f"\n[bench] === {algo} ({rel}) ===", flush=True)
 
         cmd = [
-            "uv", "run", "pytest", str(path),
+            "uv",
+            "run",
+            "pytest",
+            str(path),
             "--bench",
             f"--bench-run-id={run_id}",
             f"--bench-out-dir={out_dir}",
@@ -75,7 +77,7 @@ def run(algos: list[str], select: str | None, rep_ms: float, render: bool) -> in
     records = sorted(p.name for p in out_dir.glob("*.json") if p.name != "manifest.json")
     manifest = {
         "run_id": run_id,
-        "started":  started.isoformat(),
+        "started": started.isoformat(),
         "finished": datetime.now(timezone.utc).isoformat(),
         "algos": algos,
         "select": select,
@@ -85,11 +87,15 @@ def run(algos: list[str], select: str | None, rep_ms: float, render: bool) -> in
     }
     with (out_dir / "manifest.json").open("w") as f:
         json.dump(manifest, f, indent=2, sort_keys=True)
-    print(f"\n[bench] wrote manifest: {len(records)} records, {len(failures)} algo failures", flush=True)
+    print(
+        f"\n[bench] wrote manifest: {len(records)} records, {len(failures)} algo failures",
+        flush=True,
+    )
 
     if render:
         # Import from sibling file by path; avoids needing tests/ on sys.path.
         import importlib.util
+
         spec = importlib.util.spec_from_file_location(
             "_bench_render", Path(__file__).parent / "render.py"
         )
@@ -106,7 +112,9 @@ def run(algos: list[str], select: str | None, rep_ms: float, render: bool) -> in
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument(
-        "--algos", nargs="+", default=list(ALGO_FILES),
+        "--algos",
+        nargs="+",
+        default=list(ALGO_FILES),
         choices=list(ALGO_FILES),
         help="which algorithm groups to run (default: all)",
     )

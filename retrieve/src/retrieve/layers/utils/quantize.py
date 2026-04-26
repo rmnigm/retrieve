@@ -36,7 +36,7 @@ def quantize_int8(embs: Tensor) -> tuple[Tensor, Tensor]:
 def _build_oporp(d: int, seed: int, device: torch.device) -> tuple[Tensor, Tensor]:
     g = torch.Generator(device=device)
     g.manual_seed(int(seed))
-    signs = (torch.randint(0, 2, (d,), generator=g, device=device, dtype=torch.int8) * 2 - 1)
+    signs = torch.randint(0, 2, (d,), generator=g, device=device, dtype=torch.int8) * 2 - 1
     perm = torch.randperm(d, generator=g, device=device)
     return signs, perm
 

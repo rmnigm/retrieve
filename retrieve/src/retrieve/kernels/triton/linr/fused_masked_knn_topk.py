@@ -60,9 +60,7 @@ def _fused_masked_knn_topk_kernel(
     ).to(tl.int64)
 
     emb_rows = tl.load(
-        item_embs_ptr
-        + item_ids[:, None] * stride_in
-        + d_offsets[None, :] * stride_id,
+        item_embs_ptr + item_ids[:, None] * stride_in + d_offsets[None, :] * stride_id,
         mask=in_count[:, None],
         other=0.0,
     )
@@ -112,9 +110,7 @@ def fused_masked_knn_topk(
     positive_indices = positive_indices.contiguous()
     counts = counts.contiguous()
 
-    all_scores = torch.full(
-        (b, p), float("-inf"), dtype=torch.float32, device=query.device
-    )
+    all_scores = torch.full((b, p), float("-inf"), dtype=torch.float32, device=query.device)
 
     grid = lambda meta: (b, triton.cdiv(p, meta["BLOCK_N"]))
 
@@ -152,9 +148,7 @@ def fused_masked_knn_topk(
         topk_scores = torch.cat(
             [
                 topk_scores,
-                torch.full(
-                    (b, pad), float("-inf"), dtype=torch.float32, device=query.device
-                ),
+                torch.full((b, pad), float("-inf"), dtype=torch.float32, device=query.device),
             ],
             dim=1,
         )

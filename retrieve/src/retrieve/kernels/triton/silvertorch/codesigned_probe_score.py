@@ -76,9 +76,7 @@ def _codesigned_probe_score_kernel(
         w_off = tl.arange(0, W)
         qb = tl.load(qb_ptr + bid * stride_qbb + w_off * stride_qbw)
         sigs = tl.load(
-            bloom_sigs_ptr
-            + safe_ids[:, None] * stride_bn
-            + w_off[None, :] * stride_bw,
+            bloom_sigs_ptr + safe_ids[:, None] * stride_bn + w_off[None, :] * stride_bw,
             mask=valid[:, None],
             other=0,
         )
@@ -97,9 +95,7 @@ def _codesigned_probe_score_kernel(
         keep = keep & mvals
 
     codes = tl.load(
-        item_codes_ptr
-        + safe_ids[:, None] * stride_cn
-        + d_off[None, :] * stride_cd,
+        item_codes_ptr + safe_ids[:, None] * stride_cn + d_off[None, :] * stride_cd,
         mask=keep[:, None],
         other=0,
     ).to(tl.float32)
@@ -188,9 +184,7 @@ def codesigned_probe_score(
     else:
         mask = torch.empty(1, 1, dtype=torch.bool, device=query.device)
 
-    all_scores = torch.full(
-        (b, p), float("-inf"), dtype=torch.float32, device=query.device
-    )
+    all_scores = torch.full((b, p), float("-inf"), dtype=torch.float32, device=query.device)
 
     grid = lambda meta: (b, triton.cdiv(p, meta["BLOCK_P"]))
 
@@ -241,9 +235,7 @@ def codesigned_probe_score(
         topk_scores = torch.cat(
             [
                 topk_scores,
-                torch.full(
-                    (b, pad), float("-inf"), dtype=torch.float32, device=query.device
-                ),
+                torch.full((b, pad), float("-inf"), dtype=torch.float32, device=query.device),
             ],
             dim=1,
         )

@@ -22,9 +22,9 @@ from pathlib import Path
 import pytest
 import torch
 
+from retrieve.layers.silvertorch import SilverTorch
 from retrieve.layers.silvertorch.bloom import BloomIndex
 from retrieve.layers.silvertorch.ivf import IVF_INT8_ANN
-from retrieve.layers.silvertorch import SilverTorch
 from tests.bench.conftest import (
     make_record,
     measure_forward,
@@ -41,7 +41,6 @@ from tests.conftest import (
     make_query_attrs,
     recall_at_k,
 )
-
 
 # ---------------------------------------------------------------------------
 # Cell parameter matrices
@@ -60,8 +59,7 @@ _BLOOM_CELLS = [
 # tractable. n_probe=64 only — at very low pass rates and small n_probe, IVF
 # routinely returns < K hits which makes the comparison noisy.
 _MASK_CELLS = [
-    pytest.param(b, n, d, k, n_probe, pr,
-                 id=f"B{b}_N{n}_D{d}_K{k}_np{n_probe}_pr{pr}")
+    pytest.param(b, n, d, k, n_probe, pr, id=f"B{b}_N{n}_D{d}_K{k}_np{n_probe}_pr{pr}")
     for b, d, k in [(16, 128, 1024)]
     for n in [65_536, 262_144, 1_048_576]
     for n_probe in [64]
@@ -74,22 +72,33 @@ def _cell_str_bloom(b, n, d, k, n_lists, n_probe) -> str:
 
 
 def _cell_str_mask(b, n, d, k, n_lists, n_probe, pr) -> str:
-    return (
-        f"B={b},N={n},D={d},K={k},n_lists={n_lists},n_probe={n_probe},pass={pr}"
-    )
+    return f"B={b},N={n},D={d},K={k},n_lists={n_lists},n_probe={n_probe},pass={pr}"
 
 
 def _params_bloom(b, n, d, k, n_lists, n_probe) -> dict:
     return {
-        "b": b, "n": n, "d": d, "k": k, "n_lists": n_lists, "n_probe": n_probe,
-        "m_bits": 512, "k_hash": 5, "filter_mode": "bloom",
+        "b": b,
+        "n": n,
+        "d": d,
+        "k": k,
+        "n_lists": n_lists,
+        "n_probe": n_probe,
+        "m_bits": 512,
+        "k_hash": 5,
+        "filter_mode": "bloom",
     }
 
 
 def _params_mask(b, n, d, k, n_lists, n_probe, pr) -> dict:
     return {
-        "b": b, "n": n, "d": d, "k": k, "n_lists": n_lists, "n_probe": n_probe,
-        "filter_mode": "mask", "pass_rate_target": pr,
+        "b": b,
+        "n": n,
+        "d": d,
+        "k": k,
+        "n_lists": n_lists,
+        "n_probe": n_probe,
+        "filter_mode": "mask",
+        "pass_rate_target": pr,
     }
 
 
@@ -102,7 +111,9 @@ def _n_lists_for(n: int) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _prefilter_topk(query: torch.Tensor, embs: torch.Tensor, mask: torch.Tensor, k: int) -> torch.Tensor:
+def _prefilter_topk(
+    query: torch.Tensor, embs: torch.Tensor, mask: torch.Tensor, k: int
+) -> torch.Tensor:
     """True pre-filter top-K: mask scores BEFORE topk. Matches IVF/codesigned semantics.
 
     ``FullScanKNN.forward(query, mask=...)`` does *post-filter* (top-K then drop
@@ -197,8 +208,15 @@ def silvertorch_mask_ref_loader(bench_out_dir: Path):
 
 @pytest.mark.parametrize("b,n,d,k,n_probe", _BLOOM_CELLS)
 def test_silvertorch_bloom_ref(
-    b, n, d, k, n_probe,
-    bench_run_id, bench_out_dir, silvertorch_bloom_ref_loader, request,
+    b,
+    n,
+    d,
+    k,
+    n_probe,
+    bench_run_id,
+    bench_out_dir,
+    silvertorch_bloom_ref_loader,
+    request,
 ):
     """Materialize bloom-mode reference. No timing."""
     n_lists = _n_lists_for(n)
@@ -210,8 +228,15 @@ def test_silvertorch_bloom_ref(
 
 @pytest.mark.parametrize("b,n,d,k,n_probe", _BLOOM_CELLS)
 def test_silvertorch_bloom_composed(
-    b, n, d, k, n_probe,
-    bench_run_id, bench_out_dir, silvertorch_bloom_ref_loader, request,
+    b,
+    n,
+    d,
+    k,
+    n_probe,
+    bench_run_id,
+    bench_out_dir,
+    silvertorch_bloom_ref_loader,
+    request,
 ):
     n_lists = _n_lists_for(n)
     if n_probe > n_lists:
@@ -241,10 +266,13 @@ def test_silvertorch_bloom_composed(
 
     fwd = measure_forward(fn, rep_ms=float(request.config.getoption("--bench-rep")))
     rec = make_record(
-        run_id=bench_run_id, algo="silvertorch", impl="composed_ivf_bloom",
+        run_id=bench_run_id,
+        algo="silvertorch",
+        impl="composed_ivf_bloom",
         cell=_cell_str_bloom(b, n, d, k, n_lists, n_probe),
         params=_params_bloom(b, n, d, k, n_lists, n_probe),
-        mem=mem, fwd=fwd,
+        mem=mem,
+        fwd=fwd,
         correctness={"correct": True, "vs": "exact_fullscan"},
         extra={
             "recall@K": round(recall, 4),
@@ -256,8 +284,15 @@ def test_silvertorch_bloom_composed(
 
 @pytest.mark.parametrize("b,n,d,k,n_probe", _BLOOM_CELLS)
 def test_silvertorch_bloom_codesigned(
-    b, n, d, k, n_probe,
-    bench_run_id, bench_out_dir, silvertorch_bloom_ref_loader, request,
+    b,
+    n,
+    d,
+    k,
+    n_probe,
+    bench_run_id,
+    bench_out_dir,
+    silvertorch_bloom_ref_loader,
+    request,
 ):
     n_lists = _n_lists_for(n)
     if n_probe > n_lists:
@@ -272,9 +307,7 @@ def test_silvertorch_bloom_codesigned(
     def build_and_register():
         embs = make_index(n, d)
         attrs = make_attrs(n, c=2, a_max=2)
-        st = SilverTorch(
-            k=k, n_lists=n_lists, n_probe=n_probe, m_bits=512, k_hash=5, n_iter=3
-        )
+        st = SilverTorch(k=k, n_lists=n_lists, n_probe=n_probe, m_bits=512, k_hash=5, n_iter=3)
         st.register_index(embs, attrs)
         return st, [embs, attrs]
 
@@ -287,9 +320,13 @@ def test_silvertorch_bloom_codesigned(
     fwd = measure_forward(fn, rep_ms=float(request.config.getoption("--bench-rep")))
     cell = _cell_str_bloom(b, n, d, k, n_lists, n_probe)
     rec = make_record(
-        run_id=bench_run_id, algo="silvertorch", impl="codesigned",
-        cell=cell, params=_params_bloom(b, n, d, k, n_lists, n_probe),
-        mem=mem, fwd=fwd,
+        run_id=bench_run_id,
+        algo="silvertorch",
+        impl="codesigned",
+        cell=cell,
+        params=_params_bloom(b, n, d, k, n_lists, n_probe),
+        mem=mem,
+        fwd=fwd,
         correctness={"correct": True, "vs": "exact_fullscan"},
         extra={
             "recall@K": round(recall, 4),
@@ -309,8 +346,16 @@ def test_silvertorch_bloom_codesigned(
 
 @pytest.mark.parametrize("b,n,d,k,n_probe,pr", _MASK_CELLS)
 def test_silvertorch_mask_ref(
-    b, n, d, k, n_probe, pr,
-    bench_run_id, bench_out_dir, silvertorch_mask_ref_loader, request,
+    b,
+    n,
+    d,
+    k,
+    n_probe,
+    pr,
+    bench_run_id,
+    bench_out_dir,
+    silvertorch_mask_ref_loader,
+    request,
 ):
     """Materialize mask-mode reference at a target pass rate. No timing."""
     n_lists = _n_lists_for(n)
@@ -322,8 +367,16 @@ def test_silvertorch_mask_ref(
 
 @pytest.mark.parametrize("b,n,d,k,n_probe,pr", _MASK_CELLS)
 def test_silvertorch_mask_composed(
-    b, n, d, k, n_probe, pr,
-    bench_run_id, bench_out_dir, silvertorch_mask_ref_loader, request,
+    b,
+    n,
+    d,
+    k,
+    n_probe,
+    pr,
+    bench_run_id,
+    bench_out_dir,
+    silvertorch_mask_ref_loader,
+    request,
 ):
     n_lists = _n_lists_for(n)
     if n_probe > n_lists:
@@ -349,10 +402,13 @@ def test_silvertorch_mask_composed(
 
     fwd = measure_forward(fn, rep_ms=float(request.config.getoption("--bench-rep")))
     rec = make_record(
-        run_id=bench_run_id, algo="silvertorch_mask", impl="composed_ivf",
+        run_id=bench_run_id,
+        algo="silvertorch_mask",
+        impl="composed_ivf",
         cell=_cell_str_mask(b, n, d, k, n_lists, n_probe, pr),
         params=_params_mask(b, n, d, k, n_lists, n_probe, pr),
-        mem=mem, fwd=fwd,
+        mem=mem,
+        fwd=fwd,
         correctness={"correct": True, "vs": "exact_fullscan"},
         extra={
             "recall@K": round(recall, 4),
@@ -364,8 +420,16 @@ def test_silvertorch_mask_composed(
 
 @pytest.mark.parametrize("b,n,d,k,n_probe,pr", _MASK_CELLS)
 def test_silvertorch_mask_codesigned(
-    b, n, d, k, n_probe, pr,
-    bench_run_id, bench_out_dir, silvertorch_mask_ref_loader, request,
+    b,
+    n,
+    d,
+    k,
+    n_probe,
+    pr,
+    bench_run_id,
+    bench_out_dir,
+    silvertorch_mask_ref_loader,
+    request,
 ):
     n_lists = _n_lists_for(n)
     if n_probe > n_lists:
@@ -381,9 +445,7 @@ def test_silvertorch_mask_codesigned(
         embs = make_index(n, d)
         # No clause attrs → SilverTorch builds zero bloom_sigs (small overhead);
         # the mask-only forward bypasses the bloom check entirely.
-        st = SilverTorch(
-            k=k, n_lists=n_lists, n_probe=n_probe, m_bits=512, k_hash=5, n_iter=3
-        )
+        st = SilverTorch(k=k, n_lists=n_lists, n_probe=n_probe, m_bits=512, k_hash=5, n_iter=3)
         st.register_index(embs, item_clause_attrs=None)
         return st, [embs]
 
@@ -395,10 +457,13 @@ def test_silvertorch_mask_codesigned(
 
     fwd = measure_forward(fn, rep_ms=float(request.config.getoption("--bench-rep")))
     rec = make_record(
-        run_id=bench_run_id, algo="silvertorch_mask", impl="codesigned",
+        run_id=bench_run_id,
+        algo="silvertorch_mask",
+        impl="codesigned",
         cell=_cell_str_mask(b, n, d, k, n_lists, n_probe, pr),
         params=_params_mask(b, n, d, k, n_lists, n_probe, pr),
-        mem=mem, fwd=fwd,
+        mem=mem,
+        fwd=fwd,
         correctness={"correct": True, "vs": "exact_fullscan"},
         extra={
             "recall@K": round(recall, 4),

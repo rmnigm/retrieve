@@ -52,9 +52,7 @@ def _ref_indices(
         topk_scores = torch.cat(
             [
                 topk_scores,
-                torch.full(
-                    (b, pad), float("-inf"), dtype=torch.float32, device=pos.device
-                ),
+                torch.full((b, pad), float("-inf"), dtype=torch.float32, device=pos.device),
             ],
             dim=1,
         )

@@ -21,7 +21,6 @@ import triton
 import triton.language as tl
 from torch import Tensor
 
-
 # NOTE: no @triton.autotune — atomic_add accumulates across autotune trials
 # and corrupts ``counts``. A single fixed config is correct and fast enough
 # for now; if a larger sweep matters, re-enable autotune with
@@ -33,17 +32,17 @@ _NUM_WARPS = 4
 
 @triton.jit
 def _clause_compact_kernel(
-    item_attrs_ptr,        # [N, C, A_max] int64
-    is_reverse_ptr,        # [C] bool (stored as int8 in torch)
-    query_attrs_ptr,       # [B, C] int64
-    out_indices_ptr,       # [B, N] int64 (worst-case scratch)
-    counts_ptr,            # [B] int64 (init 0)
+    item_attrs_ptr,  # [N, C, A_max] int64
+    is_reverse_ptr,  # [C] bool (stored as int8 in torch)
+    query_attrs_ptr,  # [B, C] int64
+    out_indices_ptr,  # [B, N] int64 (worst-case scratch)
+    counts_ptr,  # [B] int64 (init 0)
     N,
     C: tl.constexpr,
     A_MAX: tl.constexpr,
-    stride_in,             # item_attrs.stride(0)
-    stride_ic,             # item_attrs.stride(1)
-    stride_ia,             # item_attrs.stride(2)
+    stride_in,  # item_attrs.stride(0)
+    stride_ic,  # item_attrs.stride(1)
+    stride_ia,  # item_attrs.stride(2)
     stride_qb,
     stride_qc,
     stride_ob,
@@ -61,15 +60,12 @@ def _clause_compact_kernel(
 
     for c in tl.static_range(C):
         q_c = tl.load(query_attrs_ptr + bid * stride_qb + c * stride_qc)  # scalar
-        rev_c = tl.load(is_reverse_ptr + c).to(tl.int1)                    # scalar
+        rev_c = tl.load(is_reverse_ptr + c).to(tl.int1)  # scalar
 
         clause_match = tl.full([BLOCK_N], 0, tl.int1)
         for a in tl.static_range(A_MAX):
             ia = tl.load(
-                item_attrs_ptr
-                + n_offsets * stride_in
-                + c * stride_ic
-                + a * stride_ia,
+                item_attrs_ptr + n_offsets * stride_in + c * stride_ic + a * stride_ia,
                 mask=n_valid,
                 other=-1,
             )
@@ -103,9 +99,9 @@ def _clause_compact_kernel(
 
 
 def clause_compact(
-    item_clause_attrs: Tensor,    # [N, C, A_max] int64
-    clause_is_reverse: Tensor,    # [C] bool
-    query_clause_attrs: Tensor,   # [B, C] int64
+    item_clause_attrs: Tensor,  # [N, C, A_max] int64
+    clause_is_reverse: Tensor,  # [C] bool
+    query_clause_attrs: Tensor,  # [B, C] int64
 ) -> tuple[Tensor, Tensor]:
     """Fused clause evaluation + compaction.
 

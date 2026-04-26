@@ -163,9 +163,7 @@ class TestCrossBackendAgreement:
         ref.register_index(data["embs"])
         tri = LiNR_V3_Triton(k=K, seed=11)
         tri.register_index(data["embs"])
-        mask = (
-            None if mask_pass_rate is None else make_mask(B, N, pass_rate=mask_pass_rate)
-        )
+        mask = None if mask_pass_rate is None else make_mask(B, N, pass_rate=mask_pass_rate)
         ids_ref, sc_ref = ref(data["query"], mask=mask)
         ids_tri, sc_tri = tri(data["query"], mask=mask)
         for b in range(B):

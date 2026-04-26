@@ -30,9 +30,7 @@ class ClauseIndex(torch.nn.Module):
         c = item_clause_attrs.shape[1]
         self.register_buffer("item_clause_attrs", item_clause_attrs)
         if clause_is_reverse is None:
-            clause_is_reverse = torch.zeros(
-                c, dtype=torch.bool, device=item_clause_attrs.device
-            )
+            clause_is_reverse = torch.zeros(c, dtype=torch.bool, device=item_clause_attrs.device)
         self.register_buffer("clause_is_reverse", clause_is_reverse)
 
     def evaluate_mask(self, query_clause_attrs: Tensor) -> Tensor:
@@ -47,9 +45,7 @@ class ClauseIndex(torch.nn.Module):
         clause_pass = clause_pass | inactive
         return clause_pass.all(dim=-1)
 
-    def evaluate_indices(
-        self, query_clause_attrs: Tensor
-    ) -> tuple[Tensor, Tensor]:
+    def evaluate_indices(self, query_clause_attrs: Tensor) -> tuple[Tensor, Tensor]:
         """Returns ``(positive_indices [B, P] int64, counts [B] int64)``.
 
         On CUDA: routes to the fused ``clause_compact`` Triton kernel — no
@@ -61,6 +57,7 @@ class ClauseIndex(torch.nn.Module):
             from retrieve.kernels.triton.filters.clause_compact import (
                 clause_compact,
             )
+
             return clause_compact(
                 self.item_clause_attrs,
                 self.clause_is_reverse,

@@ -150,9 +150,7 @@ def oporp_1bit_match_topk(
         if n_loop == 0:
             return (
                 torch.full((b, k), -1, dtype=torch.long, device=query_bits.device),
-                torch.full(
-                    (b, k), float("-inf"), dtype=torch.float32, device=query_bits.device
-                ),
+                torch.full((b, k), float("-inf"), dtype=torch.float32, device=query_bits.device),
             )
         all_scores = torch.full(
             (b, n_loop), float("-inf"), dtype=torch.float32, device=query_bits.device
@@ -163,9 +161,7 @@ def oporp_1bit_match_topk(
         stride_pp = positive_indices.stride(1)
     else:
         n_loop = n_items_total
-        all_scores = torch.empty(
-            b, n_loop, dtype=torch.float32, device=query_bits.device
-        )
+        all_scores = torch.empty(b, n_loop, dtype=torch.float32, device=query_bits.device)
         # Dummy tensors — pointers never dereferenced because HAS_INDICES guards the load.
         pos_arg = torch.empty(1, 1, dtype=torch.int64, device=query_bits.device)
         counts_arg = torch.empty(1, dtype=torch.int64, device=query_bits.device)

@@ -9,10 +9,10 @@ from __future__ import annotations
 import pytest
 import torch
 
+from retrieve.layers.silvertorch import SilverTorch, build_silvertorch
 from retrieve.layers.silvertorch.bloom import BloomIndex
 from retrieve.layers.silvertorch.ivf import IVF_INT8_ANN
 from retrieve.layers.utils.retrieval import FullScanKNN
-from retrieve.layers.silvertorch import SilverTorch, build_silvertorch
 from tests.conftest import (
     assert_recall_monotone,
     make_attrs,
@@ -74,9 +74,7 @@ class TestEquivalence:
     def test_matches_composed_ivf_plus_bloom(self, data):
         """SilverTorch ⇔ IVF_INT8_ANN(mask=BloomIndex.evaluate(...))."""
         st = _build(with_attrs=True, data=data)
-        ivf = IVF_INT8_ANN(
-            k=K, n_lists=N_LISTS, n_probe=N_PROBE, n_iter=3
-        )
+        ivf = IVF_INT8_ANN(k=K, n_lists=N_LISTS, n_probe=N_PROBE, n_iter=3)
         ivf.register_index(data["embs"])
         bi = BloomIndex()
         bi.register_index(data["attrs"], m_bits=M_BITS, k_hash=K_HASH)

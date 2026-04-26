@@ -24,10 +24,11 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import pytest
 import torch
@@ -35,7 +36,6 @@ import triton
 import triton.testing as ttesting
 
 from tests.conftest import recall_at_k as recall_at_k  # re-export for bench files
-
 
 # ---------------------------------------------------------------------------
 # Tunables
@@ -122,9 +122,7 @@ def bench_run_id(request) -> str:
 
 @pytest.fixture(scope="session")
 def bench_out_dir(request, bench_run_id) -> Path:
-    explicit = request.config.getoption("--bench-out-dir") or os.environ.get(
-        "BENCH_OUT_DIR"
-    )
+    explicit = request.config.getoption("--bench-out-dir") or os.environ.get("BENCH_OUT_DIR")
     out = Path(explicit) if explicit else Path("bench_results") / bench_run_id
     out.mkdir(parents=True, exist_ok=True)
     (out / "refs").mkdir(exist_ok=True)
@@ -261,7 +259,9 @@ def measure_index(build_and_register: Callable[[], Any]) -> tuple[Any, dict[str,
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     after_register = _allocated()
-    input_data_bytes = max(0, after_register - baseline)  # not strictly clean — may include transients
+    input_data_bytes = max(
+        0, after_register - baseline
+    )  # not strictly clean — may include transients
 
     # Drop the local refs the caller created. The caller is expected to clear
     # any closure-captured refs *before* returning, so this is the last live
@@ -318,9 +318,7 @@ def measure_forward(
     # stable per-call latency.
     if torch.cuda.is_available():
         torch.cuda.empty_cache()  # release any output tensors held by allocator pool
-    median, p20, p80 = ttesting.do_bench(
-        fn, quantiles=[0.5, 0.2, 0.8], rep=rep_ms, warmup=50
-    )
+    median, p20, p80 = ttesting.do_bench(fn, quantiles=[0.5, 0.2, 0.8], rep=rep_ms, warmup=50)
     if torch.cuda.is_available():
         torch.cuda.synchronize()
 
@@ -459,12 +457,8 @@ def topk_matches(
     ref_sorted, _ = ref_scores.sort(dim=1, descending=True)
     out_sorted = out_sorted[:, :common_k]
     ref_sorted = ref_sorted[:, :common_k]
-    out_finite = torch.where(
-        torch.isfinite(out_sorted), out_sorted, torch.zeros_like(out_sorted)
-    )
-    ref_finite = torch.where(
-        torch.isfinite(ref_sorted), ref_sorted, torch.zeros_like(ref_sorted)
-    )
+    out_finite = torch.where(torch.isfinite(out_sorted), out_sorted, torch.zeros_like(out_sorted))
+    ref_finite = torch.where(torch.isfinite(ref_sorted), ref_sorted, torch.zeros_like(ref_sorted))
     if not torch.allclose(out_finite, ref_finite, atol=score_atol, rtol=score_rtol):
         return False
 
@@ -472,16 +466,8 @@ def topk_matches(
     out_k = out_ids.shape[1]
     ref_k = ref_ids.shape[1]
     for bi in range(b):
-        out_set = {
-            out_ids[bi, j].item()
-            for j in range(out_k)
-            if torch.isfinite(out_scores[bi, j])
-        }
-        ref_set = {
-            ref_ids[bi, j].item()
-            for j in range(ref_k)
-            if torch.isfinite(ref_scores[bi, j])
-        }
+        out_set = {out_ids[bi, j].item() for j in range(out_k) if torch.isfinite(out_scores[bi, j])}
+        ref_set = {ref_ids[bi, j].item() for j in range(ref_k) if torch.isfinite(ref_scores[bi, j])}
         diff = out_set.symmetric_difference(ref_set)
         if diff:
             ref_min = (
@@ -506,9 +492,7 @@ def skip_if_insufficient_memory(required_bytes: int, headroom_frac: float = 0.15
     free, _ = torch.cuda.mem_get_info()
     budget = free * (1 - headroom_frac)
     if required_bytes > budget:
-        pytest.skip(
-            f"need ~{required_bytes / 2**30:.1f} GiB, only {free / 2**30:.1f} GiB free"
-        )
+        pytest.skip(f"need ~{required_bytes / 2**30:.1f} GiB, only {free / 2**30:.1f} GiB free")
 
 
 # ---------------------------------------------------------------------------

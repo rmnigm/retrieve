@@ -102,9 +102,7 @@ def fused_matmul_topk(
     if query.dim() != 2 or item_embs.dim() != 2:
         raise ValueError("query must be [B, D] and item_embs [N, D]")
     if query.shape[1] != item_embs.shape[1]:
-        raise ValueError(
-            f"query D={query.shape[1]} != item_embs D={item_embs.shape[1]}"
-        )
+        raise ValueError(f"query D={query.shape[1]} != item_embs D={item_embs.shape[1]}")
     b, d = query.shape
     n = item_embs.shape[0]
 

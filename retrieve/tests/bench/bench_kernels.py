@@ -34,7 +34,6 @@ from tests.bench.conftest import (
 )
 from tests.conftest import make_attrs, make_index, make_mask, make_query, make_query_attrs
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -57,8 +56,13 @@ def _run_kernel_cell(
     fn = forward_factory(inputs)
     fwd = measure_forward(fn, rep_ms=rep_ms)
     rec = make_record(
-        run_id=bench_run_id, algo=algo, impl=impl, cell=cell, params=params,
-        mem=mem, fwd=fwd,
+        run_id=bench_run_id,
+        algo=algo,
+        impl=impl,
+        cell=cell,
+        params=params,
+        mem=mem,
+        fwd=fwd,
     )
     write_record(rec, bench_out_dir)
 
@@ -79,30 +83,37 @@ def _matmul_inputs(b, n, d):
         query = make_query(b, d)
         # Both are persistent kernel inputs; nothing to free.
         return (embs, query), []
+
     return _build
 
 
 @pytest.mark.parametrize("b,n,d,k", _MATMUL_CELLS)
 def test_kern_fused_matmul_topk_torch(b, n, d, k, bench_run_id, bench_out_dir, request):
     _run_kernel_cell(
-        bench_run_id=bench_run_id, bench_out_dir=bench_out_dir,
+        bench_run_id=bench_run_id,
+        bench_out_dir=bench_out_dir,
         rep_ms=float(request.config.getoption("--bench-rep")),
-        algo="fused_matmul_topk", impl="torch",
-        cell=f"B={b},N={n},D={d},K={k}", params={"b": b, "n": n, "d": d, "k": k},
+        algo="fused_matmul_topk",
+        impl="torch",
+        cell=f"B={b},N={n},D={d},K={k}",
+        params={"b": b, "n": n, "d": d, "k": k},
         build_inputs=_matmul_inputs(b, n, d),
-        forward_factory=lambda inputs: (lambda: torch.topk(inputs[1] @ inputs[0].t(), k, dim=1)),
+        forward_factory=lambda inputs: lambda: torch.topk(inputs[1] @ inputs[0].t(), k, dim=1),
     )
 
 
 @pytest.mark.parametrize("b,n,d,k", _MATMUL_CELLS)
 def test_kern_fused_matmul_topk_triton(b, n, d, k, bench_run_id, bench_out_dir, request):
     _run_kernel_cell(
-        bench_run_id=bench_run_id, bench_out_dir=bench_out_dir,
+        bench_run_id=bench_run_id,
+        bench_out_dir=bench_out_dir,
         rep_ms=float(request.config.getoption("--bench-rep")),
-        algo="fused_matmul_topk", impl="triton",
-        cell=f"B={b},N={n},D={d},K={k}", params={"b": b, "n": n, "d": d, "k": k},
+        algo="fused_matmul_topk",
+        impl="triton",
+        cell=f"B={b},N={n},D={d},K={k}",
+        params={"b": b, "n": n, "d": d, "k": k},
         build_inputs=_matmul_inputs(b, n, d),
-        forward_factory=lambda inputs: (lambda: fused_matmul_topk(inputs[1], inputs[0], k)),
+        forward_factory=lambda inputs: lambda: fused_matmul_topk(inputs[1], inputs[0], k),
     )
 
 
@@ -124,6 +135,7 @@ def _masked_inputs(b, n, d, pr):
         mask = make_mask(b, n, pass_rate=pr)
         pos, counts = compact_mask(mask)
         return (embs, query, mask, pos, counts), []
+
     return _build
 
 
@@ -131,15 +143,20 @@ def _masked_inputs(b, n, d, pr):
 def test_kern_fused_masked_knn_topk_torch(b, n, d, k, pr, bench_run_id, bench_out_dir, request):
     def fwd_factory(inputs):
         embs, query, mask, _, _ = inputs
+
         def fn():
             scores = query @ embs.t()
             scores = scores.masked_fill(~mask, float("-inf"))
             return torch.topk(scores, k, dim=1)
+
         return fn
+
     _run_kernel_cell(
-        bench_run_id=bench_run_id, bench_out_dir=bench_out_dir,
+        bench_run_id=bench_run_id,
+        bench_out_dir=bench_out_dir,
         rep_ms=float(request.config.getoption("--bench-rep")),
-        algo="fused_masked_knn_topk", impl="torch",
+        algo="fused_masked_knn_topk",
+        impl="torch",
         cell=f"B={b},N={n},D={d},K={k},pass={pr}",
         params={"b": b, "n": n, "d": d, "k": k, "pass_rate": pr},
         build_inputs=_masked_inputs(b, n, d, pr),
@@ -152,10 +169,13 @@ def test_kern_fused_masked_knn_topk_triton(b, n, d, k, pr, bench_run_id, bench_o
     def fwd_factory(inputs):
         embs, query, _, pos, counts = inputs
         return lambda: fused_masked_knn_topk(query, embs, pos, counts, k)
+
     _run_kernel_cell(
-        bench_run_id=bench_run_id, bench_out_dir=bench_out_dir,
+        bench_run_id=bench_run_id,
+        bench_out_dir=bench_out_dir,
         rep_ms=float(request.config.getoption("--bench-rep")),
-        algo="fused_masked_knn_topk", impl="triton",
+        algo="fused_masked_knn_topk",
+        impl="triton",
         cell=f"B={b},N={n},D={d},K={k},pass={pr}",
         params={"b": b, "n": n, "d": d, "k": k, "pass_rate": pr},
         build_inputs=_masked_inputs(b, n, d, pr),
@@ -168,9 +188,7 @@ def test_kern_fused_masked_knn_topk_triton(b, n, d, k, pr, bench_run_id, bench_o
 # ---------------------------------------------------------------------------
 
 _BLOOM_CELLS = [
-    pytest.param(b, n, mb, id=f"B{b}_N{n}_m{mb}")
-    for b, n in [(64, 65_536)]
-    for mb in [512, 1024]
+    pytest.param(b, n, mb, id=f"B{b}_N{n}_m{mb}") for b, n in [(64, 65_536)] for mb in [512, 1024]
 ]
 
 
@@ -181,10 +199,15 @@ def _bloom_inputs(b, n, mb):
         bi.register_index(attrs, m_bits=mb, k_hash=5)
         q = make_query_attrs(b, c=2, n_vocab=200, inactive_rate=0.0)
         qb_sigs = _build_signatures(
-            q.long().unsqueeze(-1), bi.hash_seeds, bi.m_bits, bi.k_hash, bi.word_count,
+            q.long().unsqueeze(-1),
+            bi.hash_seeds,
+            bi.m_bits,
+            bi.k_hash,
+            bi.word_count,
         )
         # bi keeps its own bloom_sigs; attrs/q can be freed.
         return (bi, qb_sigs), [attrs, q]
+
     return _build
 
 
@@ -192,15 +215,21 @@ def _bloom_inputs(b, n, mb):
 def test_kern_bloom_match_torch(b, n, mb, bench_run_id, bench_out_dir, request):
     def fwd_factory(inputs):
         bi, qb_sigs = inputs
+
         def fn():
             match = (qb_sigs.unsqueeze(1) & bi.bloom_sigs.unsqueeze(0)) == qb_sigs.unsqueeze(1)
             return match.all(dim=-1)
+
         return fn
+
     _run_kernel_cell(
-        bench_run_id=bench_run_id, bench_out_dir=bench_out_dir,
+        bench_run_id=bench_run_id,
+        bench_out_dir=bench_out_dir,
         rep_ms=float(request.config.getoption("--bench-rep")),
-        algo="bloom_match", impl="torch",
-        cell=f"B={b},N={n},m_bits={mb}", params={"b": b, "n": n, "m_bits": mb},
+        algo="bloom_match",
+        impl="torch",
+        cell=f"B={b},N={n},m_bits={mb}",
+        params={"b": b, "n": n, "m_bits": mb},
         build_inputs=_bloom_inputs(b, n, mb),
         forward_factory=fwd_factory,
     )
@@ -211,11 +240,15 @@ def test_kern_bloom_match_triton(b, n, mb, bench_run_id, bench_out_dir, request)
     def fwd_factory(inputs):
         bi, qb_sigs = inputs
         return lambda: bloom_match(qb_sigs, bi.bloom_sigs)
+
     _run_kernel_cell(
-        bench_run_id=bench_run_id, bench_out_dir=bench_out_dir,
+        bench_run_id=bench_run_id,
+        bench_out_dir=bench_out_dir,
         rep_ms=float(request.config.getoption("--bench-rep")),
-        algo="bloom_match", impl="triton",
-        cell=f"B={b},N={n},m_bits={mb}", params={"b": b, "n": n, "m_bits": mb},
+        algo="bloom_match",
+        impl="triton",
+        cell=f"B={b},N={n},m_bits={mb}",
+        params={"b": b, "n": n, "m_bits": mb},
         build_inputs=_bloom_inputs(b, n, mb),
         forward_factory=fwd_factory,
     )
@@ -237,6 +270,7 @@ def _int8_inputs(b, n, d, p):
         pos = torch.randint(0, n, (b, p), generator=g, device="cuda", dtype=torch.long)
         counts = torch.full((b,), p, dtype=torch.long, device="cuda")
         return (codes, scales, query, pos, counts), [embs]
+
     return _build
 
 
@@ -244,16 +278,21 @@ def _int8_inputs(b, n, d, p):
 def test_kern_int8_ann_fused_torch(b, n, d, p, k, bench_run_id, bench_out_dir, request):
     def fwd_factory(inputs):
         codes, scales, query, pos, _ = inputs
+
         def fn():
             cand_codes = codes[pos].float()
             cand_scales = scales[pos]
             scores = torch.einsum("bd,bpd->bp", query, cand_codes) * cand_scales
             return torch.topk(scores, k, dim=1)
+
         return fn
+
     _run_kernel_cell(
-        bench_run_id=bench_run_id, bench_out_dir=bench_out_dir,
+        bench_run_id=bench_run_id,
+        bench_out_dir=bench_out_dir,
         rep_ms=float(request.config.getoption("--bench-rep")),
-        algo="int8_ann_fused", impl="torch",
+        algo="int8_ann_fused",
+        impl="torch",
         cell=f"B={b},N={n},D={d},P={p},K={k}",
         params={"b": b, "n": n, "d": d, "p": p, "k": k},
         build_inputs=_int8_inputs(b, n, d, p),
@@ -266,10 +305,13 @@ def test_kern_int8_ann_fused_triton(b, n, d, p, k, bench_run_id, bench_out_dir, 
     def fwd_factory(inputs):
         codes, scales, query, pos, counts = inputs
         return lambda: int8_ann_fused(query, codes, scales, pos, counts, k)
+
     _run_kernel_cell(
-        bench_run_id=bench_run_id, bench_out_dir=bench_out_dir,
+        bench_run_id=bench_run_id,
+        bench_out_dir=bench_out_dir,
         rep_ms=float(request.config.getoption("--bench-rep")),
-        algo="int8_ann_fused", impl="triton",
+        algo="int8_ann_fused",
+        impl="triton",
         cell=f"B={b},N={n},D={d},P={p},K={k}",
         params={"b": b, "n": n, "d": d, "p": p, "k": k},
         build_inputs=_int8_inputs(b, n, d, p),
@@ -294,6 +336,7 @@ def _oporp_inputs(b, n, d):
         item_bits, signs, perm = quantize_oporp_1bit(embs, seed=0)
         query_bits = project_oporp_1bit_query(query, signs, perm)
         return (item_bits, query_bits), [embs, query, signs, perm]
+
     return _build
 
 
@@ -302,18 +345,25 @@ def test_kern_oporp_1bit_torch(b, n, d, k, bench_run_id, bench_out_dir, request)
     def fwd_factory(inputs):
         item_bits, query_bits = inputs
         d_total = 64 * item_bits.shape[1]
+
         def fn():
             xor = query_bits.unsqueeze(1) ^ item_bits.unsqueeze(0)
             from retrieve.layers.utils.quantize import popcount_int64
+
             hamming = popcount_int64(xor).sum(dim=-1)
             scores = (d_total - 2 * hamming).to(torch.float32)
             return torch.topk(scores, k, dim=1)
+
         return fn
+
     _run_kernel_cell(
-        bench_run_id=bench_run_id, bench_out_dir=bench_out_dir,
+        bench_run_id=bench_run_id,
+        bench_out_dir=bench_out_dir,
         rep_ms=float(request.config.getoption("--bench-rep")),
-        algo="oporp_1bit_match_topk", impl="torch",
-        cell=f"B={b},N={n},D={d},K={k}", params={"b": b, "n": n, "d": d, "k": k},
+        algo="oporp_1bit_match_topk",
+        impl="torch",
+        cell=f"B={b},N={n},D={d},K={k}",
+        params={"b": b, "n": n, "d": d, "k": k},
         build_inputs=_oporp_inputs(b, n, d),
         forward_factory=fwd_factory,
     )
@@ -324,11 +374,15 @@ def test_kern_oporp_1bit_triton(b, n, d, k, bench_run_id, bench_out_dir, request
     def fwd_factory(inputs):
         item_bits, query_bits = inputs
         return lambda: oporp_1bit_match_topk(query_bits, item_bits, k)
+
     _run_kernel_cell(
-        bench_run_id=bench_run_id, bench_out_dir=bench_out_dir,
+        bench_run_id=bench_run_id,
+        bench_out_dir=bench_out_dir,
         rep_ms=float(request.config.getoption("--bench-rep")),
-        algo="oporp_1bit_match_topk", impl="triton",
-        cell=f"B={b},N={n},D={d},K={k}", params={"b": b, "n": n, "d": d, "k": k},
+        algo="oporp_1bit_match_topk",
+        impl="triton",
+        cell=f"B={b},N={n},D={d},K={k}",
+        params={"b": b, "n": n, "d": d, "k": k},
         build_inputs=_oporp_inputs(b, n, d),
         forward_factory=fwd_factory,
     )
@@ -358,6 +412,7 @@ def _codesigned_inputs(b, n, d, p):
         pad = torch.rand(b, p, generator=g, device="cuda") < 0.05
         flat[pad] = -1
         return (codes, scales, query, qb, sigs, flat), [embs, attrs, q_attrs, seeds]
+
     return _build
 
 
@@ -365,6 +420,7 @@ def _codesigned_inputs(b, n, d, p):
 def test_kern_codesigned_probe_torch(b, n, d, p, k, bench_run_id, bench_out_dir, request):
     def fwd_factory(inputs):
         codes, scales, query, qb, sigs, flat = inputs
+
         def fn():
             valid = flat >= 0
             safe = flat.clamp(min=0)
@@ -379,11 +435,15 @@ def test_kern_codesigned_probe_torch(b, n, d, p, k, bench_run_id, bench_out_dir,
             topk_scores, topk_local = torch.topk(scores, actual_k, dim=1)
             topk_ids = flat.gather(1, topk_local)
             return topk_ids, topk_scores
+
         return fn
+
     _run_kernel_cell(
-        bench_run_id=bench_run_id, bench_out_dir=bench_out_dir,
+        bench_run_id=bench_run_id,
+        bench_out_dir=bench_out_dir,
         rep_ms=float(request.config.getoption("--bench-rep")),
-        algo="codesigned_probe_score", impl="torch",
+        algo="codesigned_probe_score",
+        impl="torch",
         cell=f"B={b},N={n},D={d},P={p},K={k}",
         params={"b": b, "n": n, "d": d, "p": p, "k": k},
         build_inputs=_codesigned_inputs(b, n, d, p),
@@ -398,10 +458,13 @@ def test_kern_codesigned_probe_triton(b, n, d, p, k, bench_run_id, bench_out_dir
         return lambda: codesigned_probe_score(
             query, flat, codes, scales, k, query_bits=qb, bloom_sigs=sigs
         )
+
     _run_kernel_cell(
-        bench_run_id=bench_run_id, bench_out_dir=bench_out_dir,
+        bench_run_id=bench_run_id,
+        bench_out_dir=bench_out_dir,
         rep_ms=float(request.config.getoption("--bench-rep")),
-        algo="codesigned_probe_score", impl="triton",
+        algo="codesigned_probe_score",
+        impl="triton",
         cell=f"B={b},N={n},D={d},P={p},K={k}",
         params={"b": b, "n": n, "d": d, "p": p, "k": k},
         build_inputs=_codesigned_inputs(b, n, d, p),

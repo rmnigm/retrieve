@@ -35,9 +35,7 @@ class LiNR_V2_Triton(LiNR_V2):
             )
         if counts is None:
             counts = torch.full((b,), p, dtype=torch.long, device=query.device)
-        return fused_masked_knn_topk(
-            query, self.item_embs, candidate_ids, counts, self.k
-        )
+        return fused_masked_knn_topk(query, self.item_embs, candidate_ids, counts, self.k)
 
 
 def build_linr_v2_triton(item_embs: Tensor, k: int) -> LiNR_V2_Triton:
