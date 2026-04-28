@@ -67,7 +67,8 @@ def get_train_dataloader(
         shuffle=True,
         collate_fn=collate_fn,
         drop_last=True,
-        num_workers=16,
+        num_workers=32,
         pin_memory=True,
         persistent_workers=True,
+        prefetch_factor=4,
     )

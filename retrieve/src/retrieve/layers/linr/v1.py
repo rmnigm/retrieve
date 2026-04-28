@@ -12,7 +12,7 @@ class LiNR_V1(RetrievalModule):
     Computes the full ``query @ item_embs.T`` similarity matrix, applies an
     optional boolean mask via ``masked_fill(-inf)``, and selects the top-K.
     The Triton-fused equivalent lives in ``linr_v1_triton.LiNR_V1_Triton``.
-    See docs/ARCHITECTURE.md.
+    See docs/architecture.md (formerly docs/ARCHITECTURE.md).
     """
 
     item_embs: Tensor

@@ -28,6 +28,12 @@ def set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
+def _enable_tf32() -> None:
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    torch.set_float32_matmul_precision("high")
+
+
 def _wandb_init(config: GSASRecConfig):
     if not config.wandb_enabled:
         return None
@@ -46,6 +52,7 @@ def _wandb_init(config: GSASRecConfig):
 
 def train(config: GSASRecConfig) -> None:
     set_seed(config.seed)
+    _enable_tf32()
     device = torch.device(config.device)
 
     with open(Path(config.data_dir) / "item_id_map.json") as f:
@@ -77,13 +84,13 @@ def train(config: GSASRecConfig) -> None:
         else min(config.max_batches_per_epoch, len(loader))
     )
 
+    use_cuda = device.type == "cuda"
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=config.learning_rate,
         weight_decay=config.weight_decay,
+        fused=use_cuda,
     )
-    use_cuda = device.type == "cuda"
-    scaler = torch.amp.GradScaler("cuda", enabled=use_cuda)
 
     if use_cuda:
         torch.cuda.reset_peak_memory_stats(device)
@@ -117,7 +124,7 @@ def train(config: GSASRecConfig) -> None:
             negatives = negatives.to(device, non_blocking=True)
             mask = target_seq != 0
 
-            with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=use_cuda):
+            with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=use_cuda):
                 hidden = model(input_seq)
                 loss = gbce_loss(
                     hidden, target_seq, mask,
@@ -126,10 +133,9 @@ def train(config: GSASRecConfig) -> None:
                     gbce_t=config.gbce_t,
                 )
 
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
 
             loss_val = loss.item()
             epoch_loss += loss_val

@@ -1,5 +1,10 @@
 # Benchmark results
 
+> Previously: `retrieve/bench.md`. Bench tooling (`retrieve/tests/bench/run.py`,
+> `retrieve/tests/bench/render.py`) still defaults to writing `bench.md` in the
+> caller's cwd; pass `--bench-output docs/bench.md` (or `--out docs/bench.md`)
+> to refresh this file in place.
+
 ## linr_v1_unmasked
 
 | cell | impl | median (ms) | p20 (ms) | p80 (ms) | peak mem (MiB) | correct | verdict | notes |

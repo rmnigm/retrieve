@@ -2,6 +2,8 @@
 
 # `retrieve` architecture
 
+> Previously: `retrieve/docs/ARCHITECTURE.md`.
+
 ## Clause / attribute data layout
 
 Items have `C` clauses. Each clause holds up to `A_max` int64 attribute IDs,
@@ -60,7 +62,7 @@ return `(ids[B, K], scores[B, K])`.
 
 ## Triton kernels
 
-Both kernels live in [retrieve/kernels/triton/](../kernels/triton/) and
+Both kernels live in [retrieve/src/retrieve/kernels/triton/](../retrieve/src/retrieve/kernels/triton/) and
 launch one program per query in the batch, holding the query vector in
 SRAM to cut HBM traffic.
 
@@ -99,11 +101,11 @@ Compared with the PyTorch paths:
 
 ## Builder layout
 
-- `quantize_int8` lives in [`retrieve.layers.quantize`](../src/retrieve/layers/quantize.py)
+- `quantize_int8` lives in [`retrieve.layers.quantize`](../retrieve/src/retrieve/layers/quantize.py)
   and is consumed by `LiNR_V3.register_index`.
 - Per-version builders live next to their classes:
   `build_linr_v1` in `linr_v1.py`, `build_linr_v2` in `linr_v2.py`,
   `build_linr_v3` in `linr_v3.py`.
-- [`retrieve.layers.builder`](../src/retrieve/layers/builder.py) is a thin
+- [`retrieve.layers.builder`](../retrieve/src/retrieve/layers/builder.py) is a thin
   dispatcher: `build_linr_index(version, …)` looks up the right per-version
   builder in a small table and forwards kwargs.

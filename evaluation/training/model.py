@@ -77,8 +77,9 @@ class GSASRec(nn.Module):
         seq_emb = self.embedding_dropout(seq_emb)
 
         padding_mask = item_seq == self.padding_idx
-        causal_mask = nn.Transformer.generate_square_subsequent_mask(
-            seq_len, device=item_seq.device
+        causal_mask = torch.triu(
+            torch.ones(seq_len, seq_len, dtype=torch.bool, device=item_seq.device),
+            diagonal=1,
         )
         hidden = self.encoder(
             seq_emb,
@@ -89,6 +90,7 @@ class GSASRec(nn.Module):
         return self.final_norm(hidden)
 
     def predict_last(self, item_seq: torch.Tensor) -> torch.Tensor:
-        hidden = self.forward(item_seq)
-        seq_lens = ((item_seq != self.padding_idx).sum(dim=1) - 1).clamp(min=0)
-        return hidden[torch.arange(hidden.size(0), device=hidden.device), seq_lens]
+        # Sequences are LEFT-padded (real tokens at the tail), so the last real
+        # token always sits at index -1 — `seq_lens = K - 1` would point into
+        # the padding region for any user with K < max_seq_length.
+        return self.forward(item_seq)[:, -1]

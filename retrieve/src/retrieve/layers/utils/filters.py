@@ -7,7 +7,7 @@ from retrieve.layers.utils.compact import compact_mask
 
 
 class ClauseIndex(torch.nn.Module):
-    """Standalone clause-attribute filter. See docs/ARCHITECTURE.md.
+    """Standalone clause-attribute filter. See docs/architecture.md (formerly docs/ARCHITECTURE.md).
 
     Decoupled from any retrieval module — callers compose:
 

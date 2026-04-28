@@ -17,8 +17,14 @@ dependencies = [
     "wandb>=0.16",
 ]
 
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
 [tool.uv.sources]
 retrieve = { path = "../retrieve", editable = true }
+torch = { index = "pytorch-cu128" }
 
 [tool.ruff]
 line-length = 100

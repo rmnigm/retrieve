@@ -2,6 +2,8 @@
 
 # Sharding `retrieve` modules across GPUs
 
+> Previously: `retrieve/docs/SHARDING.md`.
+
 Notes on what the SilverTorch paper does, what's easy to implement against
 the current codebase, and the trade-offs of each design. Not implemented
 yet — captured here so the next pass doesn't re-derive it.
@@ -57,7 +59,7 @@ A thin wrapper that owns one underlying `SilverTorch` per device:
 
 - **`register_index(item_embs, item_clause_attrs)`** — partition along
   `N` (default: contiguous slices of size `ceil(N / world_size)`), then
-  for each device construct a [`SilverTorch`](../src/retrieve/layers/silvertorch/main.py)
+  for each device construct a [`SilverTorch`](../retrieve/src/retrieve/layers/silvertorch/main.py)
   pointed at its slice. Store per-shard `id_offset = shard_idx *
   shard_size` so local ids can be mapped back to global.
 - **`forward(query, query_clause_attrs=None, mask=None)`** —
@@ -85,7 +87,7 @@ For typical bench cells (B=16, k=1024, fp32 scores + int64 ids):
 
 - Per-shard payload: `B * k * (4 + 8) = 192 KiB`.
 - Two shards on the same node: ~10 µs over NVLink. Negligible vs the
-  single-shard kernel times in [bench.md](../bench.md).
+  single-shard kernel times in [bench.md](bench.md).
 
 The merge `topk(2k → k)` runs on `[B, 2k]` = 32 KiB and is essentially
 free.

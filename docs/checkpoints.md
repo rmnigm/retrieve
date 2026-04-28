@@ -1,26 +1,35 @@
 # GSASRec checkpoints
 
-Trained on Yambda **500M** Listen+ (50% played-ratio threshold). Both runs use
-the same architecture and gBCE loss; they differ only in dropout. Eval is full
-catalog ranking against all 1,866,170 items, no history masking — matches the
+> Previously: `evaluation/CHECKPOINTS.md`.
+
+Trained on Yambda **500M** Listen+ (50% played-ratio threshold). All runs share
+the same architecture and gBCE loss; they differ in `embedding_dim` (and
+`ffn_hidden_dim = 4 × embedding_dim`) and dropout. Eval is full catalog ranking
+against all 1,866,170 items, no history masking — matches the
 [Yambda paper](https://arxiv.org/abs/2505.22238) Table 2 (Listen+) protocol.
 
 ## Available checkpoints
 
-| Path | Dropout | Best epoch | Test NDCG@10 | NDCG@100 | Recall@10 | Recall@100 | Notes |
-|---|---|---|---|---|---|---|---|
-| `checkpoints/gsasrec-500m-listens-v1/` | 0.2 | 37 | 0.0724 | 0.0929 | 0.0339 | 0.1354 | matches paper, slight overfit observed |
-| `checkpoints/gsasrec-500m-listens-d128-drop0.5/` | 0.5 | 54 | **0.0751** | **0.0946** | **0.0353** | **0.1362** | best run, beats paper on every metric except NDCG@10 (tie); was still climbing when stopped |
+| Path | Dim | Dropout | Best epoch | Test NDCG@10 | NDCG@100 | Recall@10 | Recall@100 | Notes |
+|---|---|---|---|---|---|---|---|---|
+| `checkpoints/gsasrec-500m-listens-v1/` | 128 | 0.2 | 37 | 0.0724 | 0.0929 | 0.0339 | 0.1354 | matches paper, slight overfit observed |
+| `checkpoints/gsasrec-500m-listens-d128-drop0.5/` | 128 | 0.5 | 54 | 0.0751 | 0.0946 | 0.0353 | 0.1362 | beats paper on every metric except NDCG@10 (tie); was still climbing when stopped |
+| `checkpoints/gsasrec-500m-listens-d64-drop0.5/` | 64 | 0.5 | 99 | **0.0813** | **0.1029** | **0.0384** | **0.1489** | bf16 + fused AdamW recipe; was still climbing at the 100-epoch budget cap; **best on every quality metric** |
+| `checkpoints/gsasrec-500m-listens-d256-drop0.5/` | 256 | 0.5 | 95 | 0.0753 | 0.0910 | 0.0364 | 0.1284 | same recipe as d64; higher coverage (0.126 vs 0.124) but worse R@100 — extra capacity hurts here |
 
 Paper Yambda-500M Listen+ SASRec target: NDCG@10 0.0754 · NDCG@100 0.0884 ·
 Recall@10 0.0336 · Recall@100 0.1240.
 
 Common hyperparameters:
 ```
-embedding_dim=128  num_blocks=2  num_heads=2  ffn_hidden_dim=512
+num_blocks=2  num_heads=2  ffn_hidden_dim=4×embedding_dim
 max_seq_length=200  batch_size=256  negs_per_pos=256  gbce_t=0.75
-lr=1e-3  weight_decay=0  optimizer=AdamW
+lr=1e-3  weight_decay=0  optimizer=AdamW (fused on cuda)
+autocast=bfloat16   tf32=on
 ```
+
+The `-d64-drop0.5` run was the first to use the bf16/fused-AdamW/TF32 stack.
+The two earlier `d128` runs predated it and used fp16+GradScaler.
 
 ## What's in each checkpoint dir
 
