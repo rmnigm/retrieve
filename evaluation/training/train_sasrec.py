@@ -50,7 +50,7 @@ def _wandb_init(config: GSASRecConfig):
     return run
 
 
-def train(config: GSASRecConfig) -> None:
+def train(config: GSASRecConfig, resume: bool = False) -> None:
     set_seed(config.seed)
     _enable_tf32()
     device = torch.device(config.device)
@@ -70,7 +70,6 @@ def train(config: GSASRecConfig) -> None:
         ffn_hidden_dim=config.ffn_hidden_dim,
         dropout=config.dropout,
         reuse_item_embeddings=config.reuse_item_embeddings,
-        sparse_embeddings=config.sparse_embeddings,
     ).to(device)
 
     loader = get_train_dataloader(
@@ -79,7 +78,6 @@ def train(config: GSASRecConfig) -> None:
         max_length=config.max_seq_length,
         num_items=num_items,
         negs_per_pos=config.negs_per_pos,
-        shared_batch_negatives=config.shared_batch_negatives,
     )
     batches_per_epoch = (
         len(loader) if config.max_batches_per_epoch is None
@@ -87,29 +85,12 @@ def train(config: GSASRecConfig) -> None:
     )
 
     use_cuda = device.type == "cuda"
-    if config.sparse_embeddings:
-        embedding_params = list(model.item_embedding.parameters())
-        if model.output_embedding is not None:
-            embedding_params += list(model.output_embedding.parameters())
-        embed_ids = {id(p) for p in embedding_params}
-        dense_params = [p for p in model.parameters() if id(p) not in embed_ids]
-        sparse_optim = torch.optim.SparseAdam(embedding_params, lr=config.learning_rate)
-        dense_optim = torch.optim.AdamW(
-            dense_params,
-            lr=config.learning_rate,
-            weight_decay=config.weight_decay,
-            fused=use_cuda,
-        )
-        optimizers = [sparse_optim, dense_optim]
-    else:
-        optimizers = [
-            torch.optim.AdamW(
-                model.parameters(),
-                lr=config.learning_rate,
-                weight_decay=config.weight_decay,
-                fused=use_cuda,
-            )
-        ]
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=config.learning_rate,
+        weight_decay=config.weight_decay,
+        fused=use_cuda,
+    )
 
     if use_cuda:
         torch.cuda.reset_peak_memory_stats(device)
@@ -127,9 +108,31 @@ def train(config: GSASRecConfig) -> None:
     best_path: Path | None = None
     steps_not_improved = 0
     global_step = 0
+    start_epoch = 0
+    resume_path = ckpt_dir / "_resume.pt"
+    if resume and resume_path.exists():
+        logger.info("Resuming from {}", resume_path)
+        state = torch.load(resume_path, weights_only=False, map_location=device)
+        model.load_state_dict(state["model"])
+        optimizer.load_state_dict(state["optimizer"])
+        random.setstate(state["py_rng"])
+        np.random.set_state(state["np_rng"])
+        torch.set_rng_state(state["torch_rng"])
+        if use_cuda and state.get("cuda_rng") is not None:
+            torch.cuda.set_rng_state_all(state["cuda_rng"])
+        start_epoch = state["next_epoch"]
+        best_metric = state["best_metric"]
+        steps_not_improved = state["steps_not_improved"]
+        global_step = state.get("global_step", 0)
+        bp = state.get("best_path")
+        best_path = Path(bp) if bp else None
+        logger.info(
+            "Resumed: start_epoch={} best_metric={:.4f} steps_not_improved={} global_step={}",
+            start_epoch, best_metric, steps_not_improved, global_step,
+        )
     t0 = time.perf_counter()
 
-    for epoch in range(config.num_epochs):
+    for epoch in range(start_epoch, config.num_epochs):
         model.train()
         iterator = iter(loader)
         epoch_loss = 0.0
@@ -150,13 +153,11 @@ def train(config: GSASRecConfig) -> None:
                     model.get_output_embeddings(),
                     uniform_negatives=negatives,
                     gbce_t=config.gbce_t,
-                    sparse_path=config.sparse_embeddings,
                 )
 
             loss.backward()
-            for opt in optimizers:
-                opt.step()
-                opt.zero_grad(set_to_none=True)
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
 
             loss_val = loss.item()
             epoch_loss += loss_val
@@ -167,7 +168,7 @@ def train(config: GSASRecConfig) -> None:
                 wandb_run.log(
                     {
                         "train/loss_step": loss_val,
-                        "train/lr": optimizers[-1].param_groups[0]["lr"],
+                        "train/lr": optimizer.param_groups[0]["lr"],
                         "train/epoch": epoch,
                     },
                     step=global_step,
@@ -230,9 +231,27 @@ def train(config: GSASRecConfig) -> None:
                 torch.save(model.state_dict(), best_path)
             else:
                 steps_not_improved += 1
-                if steps_not_improved >= config.patience:
-                    logger.info("Early stopping at epoch {}.", epoch)
-                    break
+
+        torch.save(
+            {
+                "model": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "next_epoch": epoch + 1,
+                "best_metric": best_metric,
+                "steps_not_improved": steps_not_improved,
+                "best_path": str(best_path) if best_path else None,
+                "global_step": global_step,
+                "py_rng": random.getstate(),
+                "np_rng": np.random.get_state(),
+                "torch_rng": torch.get_rng_state(),
+                "cuda_rng": torch.cuda.get_rng_state_all() if use_cuda else None,
+            },
+            resume_path,
+        )
+
+        if val_metrics and steps_not_improved >= config.patience:
+            logger.info("Early stopping at epoch {}.", epoch)
+            break
 
     total_time = time.perf_counter() - t0
     peak_mem = int(torch.cuda.max_memory_allocated(device)) if use_cuda else 0
@@ -316,8 +335,6 @@ def train(config: GSASRecConfig) -> None:
 @click.option("--max-batches-per-epoch", type=int, default=None)
 @click.option("--patience", type=int, default=20)
 @click.option("--negs-per-pos", type=int, default=256)
-@click.option("--shared-batch-negatives", is_flag=True, default=False)
-@click.option("--sparse-embeddings", is_flag=True, default=False)
 @click.option("--reuse-item-embeddings", is_flag=True, default=False)
 @click.option("--device", type=str, default="cuda")
 @click.option("--seed", type=int, default=42)
@@ -332,6 +349,7 @@ def train(config: GSASRecConfig) -> None:
 @click.option("--wandb-project", type=str, default="yambda-gsasrec")
 @click.option("--wandb-run-name", type=str, default=None)
 @click.option("--log-every", type=int, default=50)
+@click.option("--resume", is_flag=True, default=False)
 def main(
     data_dir: str,
     checkpoint_dir: str,
@@ -348,8 +366,6 @@ def main(
     max_batches_per_epoch: int | None,
     patience: int,
     negs_per_pos: int,
-    shared_batch_negatives: bool,
-    sparse_embeddings: bool,
     reuse_item_embeddings: bool,
     device: str,
     seed: int,
@@ -364,6 +380,7 @@ def main(
     wandb_project: str,
     wandb_run_name: str | None,
     log_every: int,
+    resume: bool,
 ) -> None:
     train(
         GSASRecConfig(
@@ -377,8 +394,6 @@ def main(
             dropout=dropout,
             reuse_item_embeddings=reuse_item_embeddings,
             negs_per_pos=negs_per_pos,
-            shared_batch_negatives=shared_batch_negatives,
-            sparse_embeddings=sparse_embeddings,
             gbce_t=gbce_t,
             batch_size=batch_size,
             learning_rate=lr,
@@ -399,7 +414,8 @@ def main(
             wandb_project=wandb_project,
             wandb_run_name=wandb_run_name,
             log_every=log_every,
-        )
+        ),
+        resume=resume,
     )
 
 

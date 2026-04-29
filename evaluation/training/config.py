@@ -18,8 +18,6 @@ class GSASRecConfig:
     reuse_item_embeddings: bool = False
 
     negs_per_pos: int = 256
-    shared_batch_negatives: bool = False
-    sparse_embeddings: bool = False
     gbce_t: float = 0.75
     batch_size: int = 256
     learning_rate: float = 1e-3

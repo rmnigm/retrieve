@@ -63,7 +63,7 @@ def evaluate(
     ks: tuple[int, ...] = (10, 100),
     device: str | torch.device = "cuda",
     mask_history: bool = False,
-    num_workers: int = 8,
+    num_workers: int = 4,
     use_amp: bool = True,
     max_users: int | None = None,
     score_chunk: int = 262_144,

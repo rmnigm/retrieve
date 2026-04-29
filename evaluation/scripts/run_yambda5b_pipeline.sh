@@ -24,13 +24,14 @@ uv run python -m scripts.prep_yambda \
 echo "[pipeline] $(date) starting train → ${train_log}"
 uv run python -m training.train_sasrec \
     --data-dir /workspace/yambda/5b-listens-plus \
-    --checkpoint-dir checkpoints/gsasrec-5b-listens-d64-sparse \
-    --embedding-dim 64 --num-blocks 2 --num-heads 2 --dropout 0.5 \
-    --batch-size 256 --lr 1e-3 \
-    --negs-per-pos 512 --shared-batch-negatives --sparse-embeddings \
-    --num-epochs 30 --eval-every 2 --patience 5 \
-    --eval-max-users 100000 --eval-batch-size 64 --eval-score-chunk 262144 \
-    --wandb-run-name yambda-5b-d64-sparse \
+    --checkpoint-dir checkpoints/gsasrec-5b-listens-d64 \
+    --embedding-dim 64 --num-blocks 2 --num-heads 2 --dropout 0.1 \
+    --reuse-item-embeddings \
+    --batch-size 2048 --lr 1e-3 \
+    --negs-per-pos 256 --gbce-t 0.75 \
+    --num-epochs 100 --eval-every 2 --patience 5 \
+    --eval-max-users 100000 --eval-batch-size 512 --eval-score-chunk 1048576 \
+    --wandb-run-name yambda-5b-d64 \
     2>&1 | tee -a "${train_log}"
 
 echo "[pipeline] $(date) done"
