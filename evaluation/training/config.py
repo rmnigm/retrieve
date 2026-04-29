@@ -18,6 +18,8 @@ class GSASRecConfig:
     reuse_item_embeddings: bool = False
 
     negs_per_pos: int = 256
+    shared_batch_negatives: bool = False
+    sparse_embeddings: bool = False
     gbce_t: float = 0.75
     batch_size: int = 256
     learning_rate: float = 1e-3
@@ -29,6 +31,8 @@ class GSASRecConfig:
     eval_batch_size: int = 512
     eval_ks: tuple[int, ...] = (10, 100)
     eval_every: int = 1
+    eval_max_users: int | None = None
+    eval_score_chunk: int = 262_144
     mask_history: bool = False
     early_stop_metric: str = "ndcg@10"
 

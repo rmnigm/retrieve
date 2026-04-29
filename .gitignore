@@ -219,7 +219,7 @@ evaluation/checkpoints/
 retrieve.zip
 
 # Datasets (fetched/derived, not source code)
-evaluation/data/
+evaluation/data/*.parquet
 
 # Experiment tracking logs
 evaluation/wandb/

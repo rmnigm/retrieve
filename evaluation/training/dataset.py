@@ -36,15 +36,22 @@ def collate_train_with_negatives(
     batch: list[torch.Tensor],
     num_items: int,
     num_negatives: int,
+    shared_batch_negatives: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     stacked = torch.stack(batch, dim=0)
     input_seq = stacked[:, :-1]
     target_seq = stacked[:, 1:]
-    negatives = torch.randint(
-        low=1,
-        high=num_items + 1,
-        size=(input_seq.size(0), input_seq.size(1), num_negatives),
-    )
+    if shared_batch_negatives:
+        # One [K] sample per batch, broadcast across all (B, L) positions in gbce_loss.
+        # Touches B*L*K -> K unique negatives per step → ~150× fewer rows in the
+        # embedding-table grad on Yambda-5B (9.39M items).
+        negatives = torch.randint(low=1, high=num_items + 1, size=(num_negatives,))
+    else:
+        negatives = torch.randint(
+            low=1,
+            high=num_items + 1,
+            size=(input_seq.size(0), input_seq.size(1), num_negatives),
+        )
     return input_seq, target_seq, negatives
 
 
@@ -54,12 +61,14 @@ def get_train_dataloader(
     max_length: int,
     num_items: int,
     negs_per_pos: int,
+    shared_batch_negatives: bool = False,
 ) -> DataLoader:
     dataset = SequenceDataset(parquet_path, max_length=max_length)
     collate_fn = partial(
         collate_train_with_negatives,
         num_items=num_items,
         num_negatives=negs_per_pos,
+        shared_batch_negatives=shared_batch_negatives,
     )
     return DataLoader(
         dataset,

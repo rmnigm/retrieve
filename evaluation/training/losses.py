@@ -11,17 +11,42 @@ def gbce_loss(
     output_embeddings: torch.nn.Embedding,
     uniform_negatives: torch.Tensor,
     gbce_t: float = 0.75,
+    sparse_path: bool = False,
 ) -> torch.Tensor:
     queries = hidden_states[mask]
     pos_ids = target_ids[mask]
-    pos_scores = (queries * output_embeddings(pos_ids)).sum(-1, keepdim=True)
 
-    neg_ids = uniform_negatives[mask]
-    negs_per_pos = neg_ids.shape[1]
+    # `uniform_negatives` is either [B, L, K] (per-position) or [K]
+    # (shared-batch, broadcast to every (b, l) position).
+    if uniform_negatives.dim() == 1:
+        neg_ids = uniform_negatives
+        negs_per_pos = neg_ids.shape[0]
+    else:
+        neg_ids = uniform_negatives[mask]
+        negs_per_pos = neg_ids.shape[1]
+
+    if sparse_path:
+        # SparseAdam needs fp32 sparse grads. Force fp32 around the embedding
+        # gathers + the scoring matmuls so the backward graph stays in fp32.
+        device_type = output_embeddings.weight.device.type
+        with torch.amp.autocast(device_type=device_type, enabled=False):
+            queries_f = queries.float()
+            pos_embs = output_embeddings(pos_ids).float()
+            pos_scores = (queries_f * pos_embs).sum(-1, keepdim=True)
+            neg_embs = output_embeddings(neg_ids).float()
+            if neg_ids.dim() == 1:
+                neg_scores = queries_f @ neg_embs.T
+            else:
+                neg_scores = torch.einsum("pd,pkd->pk", queries_f, neg_embs)
+    else:
+        pos_scores = (queries * output_embeddings(pos_ids)).sum(-1, keepdim=True)
+        neg_embs = output_embeddings(neg_ids)
+        if neg_ids.dim() == 1:
+            neg_scores = queries @ neg_embs.T
+        else:
+            neg_scores = torch.einsum("pd,pkd->pk", queries, neg_embs)
+
     num_items = output_embeddings.num_embeddings - 1
-    neg_embs = output_embeddings(neg_ids)
-    neg_scores = torch.einsum("pd,pkd->pk", queries, neg_embs)
-
     alpha = negs_per_pos / (num_items - 1)
     beta = alpha * ((1 - 1 / alpha) * gbce_t + 1 / alpha)
     eps = 1e-10

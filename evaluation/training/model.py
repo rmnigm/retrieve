@@ -15,15 +15,20 @@ class GSASRec(nn.Module):
         ffn_hidden_dim: int = 512,
         dropout: float = 0.5,
         reuse_item_embeddings: bool = False,
+        sparse_embeddings: bool = False,
     ):
         super().__init__()
         self.num_items = num_items
         self.max_seq_length = max_seq_length
         self.embedding_dim = embedding_dim
         self.padding_idx = 0
+        self.sparse_embeddings = sparse_embeddings
 
         self.item_embedding = nn.Embedding(
-            num_items + 1, embedding_dim, padding_idx=self.padding_idx
+            num_items + 1,
+            embedding_dim,
+            padding_idx=self.padding_idx,
+            sparse=sparse_embeddings,
         )
         self.position_embedding = nn.Embedding(max_seq_length, embedding_dim)
         self.embedding_dropout = nn.Dropout(dropout)
@@ -42,7 +47,9 @@ class GSASRec(nn.Module):
 
         self.reuse_item_embeddings = reuse_item_embeddings
         if not reuse_item_embeddings:
-            self.output_embedding = nn.Embedding(num_items + 1, embedding_dim)
+            self.output_embedding = nn.Embedding(
+                num_items + 1, embedding_dim, sparse=sparse_embeddings
+            )
         else:
             self.output_embedding = None
 

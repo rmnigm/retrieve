@@ -70,6 +70,7 @@ def train(config: GSASRecConfig) -> None:
         ffn_hidden_dim=config.ffn_hidden_dim,
         dropout=config.dropout,
         reuse_item_embeddings=config.reuse_item_embeddings,
+        sparse_embeddings=config.sparse_embeddings,
     ).to(device)
 
     loader = get_train_dataloader(
@@ -78,6 +79,7 @@ def train(config: GSASRecConfig) -> None:
         max_length=config.max_seq_length,
         num_items=num_items,
         negs_per_pos=config.negs_per_pos,
+        shared_batch_negatives=config.shared_batch_negatives,
     )
     batches_per_epoch = (
         len(loader) if config.max_batches_per_epoch is None
@@ -85,12 +87,29 @@ def train(config: GSASRecConfig) -> None:
     )
 
     use_cuda = device.type == "cuda"
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=config.learning_rate,
-        weight_decay=config.weight_decay,
-        fused=use_cuda,
-    )
+    if config.sparse_embeddings:
+        embedding_params = list(model.item_embedding.parameters())
+        if model.output_embedding is not None:
+            embedding_params += list(model.output_embedding.parameters())
+        embed_ids = {id(p) for p in embedding_params}
+        dense_params = [p for p in model.parameters() if id(p) not in embed_ids]
+        sparse_optim = torch.optim.SparseAdam(embedding_params, lr=config.learning_rate)
+        dense_optim = torch.optim.AdamW(
+            dense_params,
+            lr=config.learning_rate,
+            weight_decay=config.weight_decay,
+            fused=use_cuda,
+        )
+        optimizers = [sparse_optim, dense_optim]
+    else:
+        optimizers = [
+            torch.optim.AdamW(
+                model.parameters(),
+                lr=config.learning_rate,
+                weight_decay=config.weight_decay,
+                fused=use_cuda,
+            )
+        ]
 
     if use_cuda:
         torch.cuda.reset_peak_memory_stats(device)
@@ -131,11 +150,13 @@ def train(config: GSASRecConfig) -> None:
                     model.get_output_embeddings(),
                     uniform_negatives=negatives,
                     gbce_t=config.gbce_t,
+                    sparse_path=config.sparse_embeddings,
                 )
 
             loss.backward()
-            optimizer.step()
-            optimizer.zero_grad(set_to_none=True)
+            for opt in optimizers:
+                opt.step()
+                opt.zero_grad(set_to_none=True)
 
             loss_val = loss.item()
             epoch_loss += loss_val
@@ -146,7 +167,7 @@ def train(config: GSASRecConfig) -> None:
                 wandb_run.log(
                     {
                         "train/loss_step": loss_val,
-                        "train/lr": optimizer.param_groups[0]["lr"],
+                        "train/lr": optimizers[-1].param_groups[0]["lr"],
                         "train/epoch": epoch,
                     },
                     step=global_step,
@@ -171,6 +192,8 @@ def train(config: GSASRecConfig) -> None:
                 ks=eval_ks,
                 device=device,
                 mask_history=config.mask_history,
+                max_users=config.eval_max_users,
+                score_chunk=config.eval_score_chunk,
             )
             val_metrics_per_epoch.append({"epoch": epoch, **val_metrics})
             logger.info(
@@ -240,6 +263,7 @@ def train(config: GSASRecConfig) -> None:
             ks=eval_ks,
             device=device,
             mask_history=config.mask_history,
+            score_chunk=config.eval_score_chunk,
         )
         logger.info("Test metrics: {}", json.dumps(test_metrics, indent=2))
         with open(ckpt_dir / "eval_quality.json", "w") as f:
@@ -292,12 +316,16 @@ def train(config: GSASRecConfig) -> None:
 @click.option("--max-batches-per-epoch", type=int, default=None)
 @click.option("--patience", type=int, default=20)
 @click.option("--negs-per-pos", type=int, default=256)
+@click.option("--shared-batch-negatives", is_flag=True, default=False)
+@click.option("--sparse-embeddings", is_flag=True, default=False)
 @click.option("--reuse-item-embeddings", is_flag=True, default=False)
 @click.option("--device", type=str, default="cuda")
 @click.option("--seed", type=int, default=42)
 @click.option("--eval-batch-size", type=int, default=512)
 @click.option("--eval-k", "eval_ks", type=int, multiple=True, default=[10, 100])
 @click.option("--eval-every", type=int, default=1)
+@click.option("--eval-max-users", type=int, default=None)
+@click.option("--eval-score-chunk", type=int, default=262144)
 @click.option("--mask-history/--no-mask-history", default=False)
 @click.option("--early-stop-metric", type=str, default="ndcg@10")
 @click.option("--wandb/--no-wandb", "wandb_enabled", default=True)
@@ -320,12 +348,16 @@ def main(
     max_batches_per_epoch: int | None,
     patience: int,
     negs_per_pos: int,
+    shared_batch_negatives: bool,
+    sparse_embeddings: bool,
     reuse_item_embeddings: bool,
     device: str,
     seed: int,
     eval_batch_size: int,
     eval_ks: tuple[int, ...],
     eval_every: int,
+    eval_max_users: int | None,
+    eval_score_chunk: int,
     mask_history: bool,
     early_stop_metric: str,
     wandb_enabled: bool,
@@ -345,6 +377,8 @@ def main(
             dropout=dropout,
             reuse_item_embeddings=reuse_item_embeddings,
             negs_per_pos=negs_per_pos,
+            shared_batch_negatives=shared_batch_negatives,
+            sparse_embeddings=sparse_embeddings,
             gbce_t=gbce_t,
             batch_size=batch_size,
             learning_rate=lr,
@@ -357,6 +391,8 @@ def main(
             eval_batch_size=eval_batch_size,
             eval_ks=tuple(sorted(eval_ks)),
             eval_every=eval_every,
+            eval_max_users=eval_max_users,
+            eval_score_chunk=eval_score_chunk,
             mask_history=mask_history,
             early_stop_metric=early_stop_metric,
             wandb_enabled=wandb_enabled,

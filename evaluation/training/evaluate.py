@@ -65,12 +65,18 @@ def evaluate(
     mask_history: bool = False,
     num_workers: int = 8,
     use_amp: bool = True,
+    max_users: int | None = None,
+    score_chunk: int = 262_144,
 ) -> dict[str, float]:
     dev = torch.device(device)
     was_training = model.training
     model.eval()
 
     dataset = EvalDataset(parquet_path, max_length=max_length)
+    if max_users is not None and max_users < len(dataset):
+        # Deterministic prefix; the parquet rows are already in user-id order so
+        # this is reproducible across calls without needing a generator.
+        dataset = torch.utils.data.Subset(dataset, range(max_users))
     loader = DataLoader(
         dataset,
         batch_size=batch_size,
@@ -82,6 +88,8 @@ def evaluate(
     )
 
     item_embs = model.get_output_embeddings().weight.detach()  # [N+1, D]
+    n_total = item_embs.shape[0]
+    chunk = min(max(score_chunk, 1), n_total)
     coverage_seen = {
         k: torch.zeros(num_items + 1, dtype=torch.bool, device=dev) for k in ks
     }
@@ -96,13 +104,35 @@ def evaluate(
 
         with torch.autocast(device_type=dev.type, dtype=torch.float16, enabled=amp_enabled):
             query = model.predict_last(item_seqs)  # [B, D]
-            scores = query @ item_embs.T  # [B, N+1]
-        scores = scores.float()
-        scores[:, 0] = float("-inf")
-        if mask_history:
-            scores.scatter_(1, item_seqs, float("-inf"))
+        query = query.float()
 
-        _, topk = scores.topk(k_max, dim=1)  # [B, k_max]
+        # Chunked scoring: keeps the [B, N+1] score matrix from materializing
+        # all at once for large catalogs (Yambda-5B has 9.39M items).
+        b = query.shape[0]
+        topk_vals = torch.full((b, k_max), float("-inf"), device=dev)
+        topk_idx = torch.zeros((b, k_max), dtype=torch.long, device=dev)
+        for start in range(0, n_total, chunk):
+            end = min(start + chunk, n_total)
+            scores_chunk = query @ item_embs[start:end].T.float()  # [B, chunk]
+            if start == 0:
+                scores_chunk[:, 0] = float("-inf")  # padding row
+            if mask_history:
+                rel = item_seqs - start
+                in_chunk = (rel >= 0) & (rel < (end - start))
+                if in_chunk.any():
+                    rows = torch.arange(b, device=dev).unsqueeze(1).expand_as(rel)[in_chunk]
+                    cols = rel[in_chunk]
+                    scores_chunk[rows, cols] = float("-inf")
+            kk = min(k_max, end - start)
+            chunk_vals, chunk_idx = scores_chunk.topk(kk, dim=1)
+            chunk_idx = chunk_idx + start
+            cat_vals = torch.cat([topk_vals, chunk_vals], dim=1)
+            cat_idx = torch.cat([topk_idx, chunk_idx], dim=1)
+            sel = cat_vals.topk(k_max, dim=1)
+            topk_vals = sel.values
+            topk_idx = cat_idx.gather(1, sel.indices)
+
+        topk = topk_idx
         accum = accumulate_metrics(topk, targets, num_targets, list(ks), accum)
         for k in ks:
             coverage_seen[k].scatter_(0, topk[:, :k].reshape(-1), True)
