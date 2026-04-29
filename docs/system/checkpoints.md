@@ -1,6 +1,6 @@
 # GSASRec checkpoints
 
-> Previously: `evaluation/CHECKPOINTS.md`.
+> Previously: `retrieve/docs/checkpoints.md` (originally `evaluation/CHECKPOINTS.md`).
 
 Trained on Yambda **500M** Listen+ (50% played-ratio threshold). All runs share
 the same architecture and gBCE loss; they differ in `embedding_dim` (and

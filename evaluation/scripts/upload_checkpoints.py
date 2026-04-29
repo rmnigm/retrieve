@@ -78,7 +78,7 @@ def _build_model_card(ckpt_dir: Path, repo_id: str, files: list[Path]) -> str:
 
     parts.append(
         "\n## Loading\n"
-        "See [`docs/checkpoints.md`]"
+        "See [`docs/system/checkpoints.md`]"
         "(https://github.com/) in the source repo for the full loading recipe.\n"
         f"\nDownload locally with:\n"
         "```python\n"
@@ -222,7 +222,7 @@ def main(
         finally:
             if wrote_card:
                 # Don't leave the auto-generated card in the working tree —
-                # the source of truth is docs/checkpoints.md (formerly evaluation/CHECKPOINTS.md).
+                # the source of truth is docs/system/checkpoints.md (formerly evaluation/CHECKPOINTS.md).
                 readme_path.unlink(missing_ok=True)
 
         logger.success("Uploaded https://huggingface.co/{}", repo_id)

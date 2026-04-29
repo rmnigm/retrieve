@@ -1,0 +1,174 @@
+<!-- claude code generated file -->
+
+# `retrieve` architecture
+
+> Previously: `retrieve/docs/architecture.md` (originally `retrieve/docs/ARCHITECTURE.md`).
+
+This is the high-level map of the `retrieve` package: what each retrieval
+module does, how filters compose, and which Triton kernels back which paths.
+For per-kernel detail (launch grids, tile shapes, autotune keys, numerics)
+see [kernels.md](kernels.md).
+
+## Module families
+
+Two retrieval families live side by side, both implementing the
+[`RetrievalModule`](../../retrieve/src/retrieve/interfaces.py) interface:
+
+- **LiNR** ([`layers/linr/`](../../retrieve/src/retrieve/layers/linr/)) — three
+  versions (V1 dense, V2 sparse pre-filter, V3 1-bit OPORP) with separate
+  pure-torch and Triton-fused backends. Filtering is **decoupled**: each
+  forward takes a mask or a candidate-id buffer the caller computed via
+  [`ClauseIndex`](../../retrieve/src/retrieve/layers/utils/filters.py),
+  [`compact_mask`](../../retrieve/src/retrieve/layers/utils/compact.py), or any
+  upstream cascade.
+- **SilverTorch** ([`layers/silvertorch/`](../../retrieve/src/retrieve/layers/silvertorch/)) —
+  co-designed IVF + INT8 ANN + Bloom attribute filter, all fused in one
+  Triton kernel. Filtering is **inline** (Bloom signatures live on the
+  module); no standalone `ClauseIndex` is wired in.
+
+Utility modules live in [`layers/utils/`](../../retrieve/src/retrieve/layers/utils/):
+`ClauseIndex`, `compact_mask`, `FullScanKNN`, `DotProductScorer`, and the
+quantizers (`quantize_int8`, `quantize_oporp_1bit`).
+
+## Clause / attribute data layout
+
+`ClauseIndex` stores items with `C` clauses, each holding up to `A_max`
+int64 attribute IDs padded with `-1`. Two buffers:
+
+- `item_clause_attrs` — `[N, C, A_max]` int64.
+- `clause_is_reverse` — `[C]` bool, `True` marks a *reverse* clause.
+
+At query time a query supplies one attribute ID per clause in
+`query_clause_attrs[B, C]`.
+
+Semantics:
+
+- A clause **passes** for an item if **any** of the item's attribute IDs for
+  that clause equals the query attribute (OR within a clause). Padded `-1`
+  slots never equal a valid query attribute, so they are inert.
+- For a **reverse** clause the outcome is inverted: the item passes iff it
+  does *not* match.
+- A query attribute of `-1` marks the clause **inactive** — it always passes.
+- An item passes overall when **all** clauses pass (AND between clauses).
+
+## Filter composition
+
+`ClauseIndex` exposes two evaluators with no implicit conversion between
+them — callers pick the one that matches the LiNR variant they're feeding:
+
+- `evaluate_mask(query_clause_attrs) → [B, N] bool` — dense path, used by
+  V1 (which masks scores in place). Pure torch.
+- `evaluate_indices(query_clause_attrs) → (positive_indices[B, P] int64,
+  counts[B] int64)` — sparse path, used by V2 and V3's masked-Triton path.
+  On CUDA this routes to the fused `clause_compact` Triton kernel; on CPU
+  it falls back to `evaluate_mask` followed by [`compact_mask`](../../retrieve/src/retrieve/layers/utils/compact.py).
+
+Callers that already have a bool mask from some other source (a Bloom
+filter, a hand-rolled predicate, an external mask passed through the API)
+use [`compact_mask`](../../retrieve/src/retrieve/layers/utils/compact.py)
+directly to convert it to the `(positive_indices, counts)` form V2 wants.
+
+There is no `combine_masks` helper today — the unified filter API
+(including AND-of-masks composition) is proposed in
+[filtering-api.md](../plans/filtering-api.md).
+
+## LiNR variants
+
+All three return `(ids[B, K], scores[B, K])`. Backends ship in pairs: a
+`LiNR_V*` torch reference and a `LiNR_V*_Triton` fused subclass.
+
+- **V1 — dense similarity, optional mask.** Full `query @ item_embs.T`,
+  masked scores set to `-inf`, then top-K. Forward takes
+  `(query, mask=None)`. Wins when the mask is dense or absent. Triton
+  backend uses `fused_matmul_topk` with the mask folded inline.
+- **V2 — sparse pre-filter.** Forward takes
+  `(query, candidate_ids=None, counts=None)` — passing item ids per query,
+  precompacted by the caller (typically `ClauseIndex.evaluate_indices`).
+  V2 itself does **no** mask handling: it gathers the passing rows, runs
+  a reduced `bmm`, top-K's locally, and maps back to global ids. Without
+  `candidate_ids` it falls back to a V1-style exhaustive matmul. Triton
+  backend uses `fused_masked_knn_topk` for the sparse path and
+  `fused_matmul_topk` for the unmasked fallback.
+- **V3 — 1-bit Sign-OPORP.** [`quantize_oporp_1bit`](../../retrieve/src/retrieve/layers/utils/quantize.py)
+  builds three buffers at index time: `item_bits[N, W]` int64
+  (`W = D / 64`), `oporp_signs[D]` int8, `oporp_perm[D]` int64. Scoring
+  is `D - 2 * popcount(query_bits ^ item_bits)`, so retrieval is purely
+  bitwise — `D/8` bytes per item, ~16× smaller than fp16. Forward takes
+  `(query, mask=None, candidate_ids=None)` and resolves three paths:
+  1. `candidate_ids` provided — gather the passing `item_bits`, score,
+     top-K, map back. `mask` is ignored on this path.
+  2. `mask` provided — score the full corpus, mask scores to `-inf`,
+     top-K. (The Triton backend instead compacts the mask first via
+     `compact_mask` and uses the indirect-load kernel path — popcount is
+     cheap enough that the gather always wins.)
+  3. Neither provided — full exhaustive popcount scan.
+
+  All three paths in the Triton backend share the same kernel
+  (`oporp_1bit_match_topk`) — only the addressing changes.
+
+## SilverTorch
+
+[`SilverTorch`](../../retrieve/src/retrieve/layers/silvertorch/main.py)
+implements the SilverTorch paper's Algorithm 1: IVF clustering over INT8-
+quantized item codes, with a per-item Bloom signature for attribute
+filtering, all fused into a single Triton kernel
+[`codesigned_probe_score`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py).
+Constructed via `build_silvertorch(item_embs, k, n_lists, n_probe, m_bits,
+k_hash, ...)`. Forward takes
+`(query, query_clause_attrs=None, mask=None, candidate_ids=None)` —
+`query_clause_attrs=None` is a documented fast path that skips bloom
+evaluation entirely.
+
+The bloom filter is private to SilverTorch: signatures are derived from
+`item_clause_attrs` at `register_index` time and stored as
+`bloom_sigs[N, W]` plus per-row `hash_seeds`. There is no `ClauseIndex`
+on this path. The standalone INT8 ANN-only variant
+[`IVF_INT8_ANN`](../../retrieve/src/retrieve/layers/silvertorch/ivf.py)
+(via `build_ivf_int8`) is the same module without the bloom term.
+
+## Utility modules
+
+- [`FullScanKNN`](../../retrieve/src/retrieve/layers/utils/retrieval.py) —
+  exhaustive `query @ item_embs.T` + top-K with optional post-mask or
+  candidate_ids, used as a baseline / sanity check.
+- [`DotProductScorer`](../../retrieve/src/retrieve/layers/utils/scorers.py) —
+  `ScorerModule` for candidate-set rerank (`bmm` over gathered item rows).
+- [`post_filter_topk`](../../retrieve/src/retrieve/layers/utils/retrieval.py) —
+  applies a post-filter to already-computed top-K results.
+- Three abstract bases in [`interfaces.py`](../../retrieve/src/retrieve/interfaces.py):
+  `RetrievalModule`, `FilterModule`, `ScorerModule`.
+
+## Triton kernels
+
+Kernels live under [`kernels/triton/`](../../retrieve/src/retrieve/kernels/triton/)
+in three subtrees by domain. One launch per `forward()`, host-side
+`torch.topk` over the score buffer (CUB beats anything we can write in
+pure Triton). Full per-kernel detail in [kernels.md](kernels.md).
+
+| subtree                                                                                              | kernel                                                                                                                                | consumer                          |
+|------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------|
+| [`linr/`](../../retrieve/src/retrieve/kernels/triton/linr/)                                             | [`fused_matmul_topk`](../../retrieve/src/retrieve/kernels/triton/linr/fused_matmul_topk.py) — fp32 dot + inline mask                       | `LiNR_V1_Triton`, `LiNR_V2_Triton` (unmasked fallback) |
+| [`linr/`](../../retrieve/src/retrieve/kernels/triton/linr/)                                             | [`fused_masked_knn_topk`](../../retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py) — gather + dot over `positive_indices` | `LiNR_V2_Triton` (masked path)    |
+| [`linr/`](../../retrieve/src/retrieve/kernels/triton/linr/)                                             | [`oporp_1bit_match_topk`](../../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py) — XOR + popcount, all V3 paths         | `LiNR_V3_Triton`                  |
+| [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/)                                       | [`clause_compact`](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py) — fused clause eval + stream compaction          | `ClauseIndex.evaluate_indices`    |
+| [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`codesigned_probe_score`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py) — fused IVF + INT8 + Bloom    | `SilverTorch`, `IVF_INT8_ANN`     |
+| [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`bloom_match`](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py) — bool subset test (standalone)                     | bench-only, no production caller  |
+| [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`int8_ann_fused`](../../retrieve/src/retrieve/kernels/triton/silvertorch/int8_ann_fused.py) — INT8 candidate scorer (standalone)          | bench-only, no production caller  |
+
+## Builder layout
+
+- LiNR per-version classes and torch builders live next to each version:
+  `LiNR_V1` / `build_linr_v1` in [`v1.py`](../../retrieve/src/retrieve/layers/linr/v1.py),
+  same for `v2.py` and `v3.py`. Triton subclasses and their builders mirror
+  the layout in `v1_triton.py`, `v2_triton.py`, `v3_triton.py`.
+- [`layers/linr/builder.py`](../../retrieve/src/retrieve/layers/linr/builder.py)
+  exposes `build_linr_index(version, item_embs, k, *, backend="triton",
+  **kwargs)` and dispatches via a `(version, backend)` table. Triton
+  modules are imported lazily so a torch-only caller never pays the
+  triton-import cost.
+- SilverTorch builders (`build_silvertorch`, `build_ivf_int8`) live next to
+  their classes in [`layers/silvertorch/`](../../retrieve/src/retrieve/layers/silvertorch/).
+- Quantizers ship from [`layers/utils/quantize.py`](../../retrieve/src/retrieve/layers/utils/quantize.py):
+  `quantize_int8` (consumed by `IVF_INT8_ANN` / `SilverTorch`) and
+  `quantize_oporp_1bit` (consumed by `LiNR_V3`). They share the file but
+  no caller; LiNR never sees INT8, SilverTorch never sees OPORP.

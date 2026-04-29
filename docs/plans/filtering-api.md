@@ -4,22 +4,22 @@
 
 Two filtering paths grew up independently in `retrieve/`:
 
-- `ClauseIndex` ([retrieve/src/retrieve/layers/utils/filters.py:9-66](../retrieve/src/retrieve/layers/utils/filters.py#L9-L66)) —
+- `ClauseIndex` ([retrieve/src/retrieve/layers/utils/filters.py:9-66](../../retrieve/src/retrieve/layers/utils/filters.py#L9-L66)) —
   exact, supports reverse clauses, `[N, C, A_max]` int64 items + `[B, C]`
   query. Caller composes mask / indices and threads them into LiNR.
 - Silvertorch's bloom — encoding private to the silvertorch package, inlined
-  inside `SilverTorch.forward` ([silvertorch/main.py:138-161](../retrieve/src/retrieve/layers/silvertorch/main.py#L138-L161)).
-  The standalone `bloom_match` Triton kernel ([kernels/triton/silvertorch/bloom_match.py](../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py))
-  works but has no consumer ([kernels.md](./kernels.md)).
+  inside `SilverTorch.forward` ([silvertorch/main.py:138-161](../../retrieve/src/retrieve/layers/silvertorch/main.py#L138-L161)).
+  The standalone `bloom_match` Triton kernel ([kernels/triton/silvertorch/bloom_match.py](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py))
+  works but has no consumer ([kernels.md](../system/kernels.md)).
 
 Today neither implementation subclasses the existing `FilterModule` ABC
-([retrieve/src/retrieve/interfaces.py:8-19](../retrieve/src/retrieve/interfaces.py#L8-L19)),
+([retrieve/src/retrieve/interfaces.py:8-19](../../retrieve/src/retrieve/interfaces.py#L8-L19)),
 the bloom helpers can't be used outside silvertorch, the eval harness
 declares `--use-attrs` but `algorithms.py` wraps every algorithm as
 `lambda q: idx(q)` so attrs never reach the index, and `combine_masks` is
-docs-only ([architecture.md](./architecture.md)).
+docs-only ([architecture.md](../system/architecture.md)).
 
-This doc specifies the unified API. Scope is the [filtering.md](./filtering.md)
+This doc specifies the unified API. Scope is the [filtering.md](../system/filtering.md)
 single-PR sketch: paper-strict bloom (conjunctive only, no DSL, no NOT,
 no reverse), reverse stays a `ClauseIndex`-only feature, and SilverTorch's
 fused in-cluster bloom is untouched.
@@ -28,12 +28,12 @@ fused in-cluster bloom is untouched.
 
 Within a single filter, multi-clause AND is already one kernel:
 
-- `clause_compact` ([clause_compact.py:61](../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py#L61)) —
+- `clause_compact` ([clause_compact.py:61](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py#L61)) —
   `for c in tl.static_range(C)` evaluates all clauses against `BLOCK_N`
   items, AND'ing per-item; the same kernel does cumsum + atomic_add to
   emit compact `(positive_indices[B, P], counts[B])` directly. No
   `[B, N]` ever materialized.
-- `bloom_match` ([bloom_match.py:39-41](../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py#L39-L41)) —
+- `bloom_match` ([bloom_match.py:39-41](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py#L39-L41)) —
   all clauses fold into one bloom signature at register time; subset
   test `(qb & sigs) == qb` is one masked-AND-reduce per item. Outputs
   a `[B, N]` bool today (no compact path yet).
@@ -54,7 +54,7 @@ Two corollaries:
 1. `evaluate_indices` must not be implemented as `evaluate_mask` →
    `compact_mask` for filters that have a direct compact kernel.
    `ClauseIndex` already does the right thing
-   ([filters.py:48-66](../retrieve/src/retrieve/layers/utils/filters.py#L48-L66)).
+   ([filters.py:48-66](../../retrieve/src/retrieve/layers/utils/filters.py#L48-L66)).
    `BloomFilter`'s first cut may use `bloom_match` + `compact_mask`,
    but the API leaves room for a future fused `bloom_compact` kernel
    without touching callers.
@@ -121,7 +121,7 @@ papers. Multi-value query (`[B, C, Q_max]`) is out of scope for this PR.
 ### `ClauseIndex(FilterModule)` — exact, reverse-supporting
 
 Body is the current code at
-[filters.py:9-66](../retrieve/src/retrieve/layers/utils/filters.py#L9-L66),
+[filters.py:9-66](../../retrieve/src/retrieve/layers/utils/filters.py#L9-L66),
 moved to `clause.py` and declared as `FilterModule`. Native fast paths:
 
 - `evaluate_mask` — pure-torch broadcast + AND across clauses.
@@ -138,7 +138,7 @@ New ~50 LoC. Constructor takes `(m_bits, k_hash)`. `register_index`
 calls `_build_signatures` to get `bloom_sigs: [N, W]` int64. Native:
 
 - `evaluate_mask` — `bloom_match` Triton kernel
-  ([bloom_match.py:51-85](../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py#L51-L85)),
+  ([bloom_match.py:51-85](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py#L51-L85)),
   the now-no-longer-dead primitive.
 - `evaluate_indices` — first cut: `compact_mask(evaluate_mask(.))`.
   Doc-noted follow-up: a `bloom_compact` Triton kernel modelled on
@@ -199,14 +199,14 @@ Cross-compatibility (filter producer → retrieval consumer):
 ## Why filters live external to retrieval modules
 
 LiNR's `forward` is decoupled — it accepts `mask` (V1, V3) or
-`candidate_ids + counts` (V2, V3) ([v1.py:27-36](../retrieve/src/retrieve/layers/linr/v1.py#L27-L36),
-[v2.py:33-41](../retrieve/src/retrieve/layers/linr/v2.py#L33-L41),
-[v3.py:54-62](../retrieve/src/retrieve/layers/linr/v3.py#L54-L62)). Any
+`candidate_ids + counts` (V2, V3) ([v1.py:27-36](../../retrieve/src/retrieve/layers/linr/v1.py#L27-L36),
+[v2.py:33-41](../../retrieve/src/retrieve/layers/linr/v2.py#L33-L41),
+[v3.py:54-62](../../retrieve/src/retrieve/layers/linr/v3.py#L54-L62)). Any
 filter that produces those shapes plugs in. No LiNR kernel changes are
 required for either filter to work with any LiNR variant.
 
 SilverTorch is asymmetric: bloom is fused into `codesigned_probe_score`
-([silvertorch/main.py:152-161](../retrieve/src/retrieve/layers/silvertorch/main.py#L152-L161))
+([silvertorch/main.py:152-161](../../retrieve/src/retrieve/layers/silvertorch/main.py#L152-L161))
 because the silvertorch paper's whole co-design point is in-cluster
 filtering. Replacing that bloom with `ClauseIndex` would require a new
 fused kernel, not a wrapping. Out of scope for this PR. The natural
@@ -238,16 +238,16 @@ Modify:
 - `retrieve/src/retrieve/__init__.py` and `layers/__init__.py` —
   expose `BloomFilter`, `combine_masks`, `combine_indices`,
   `FilterModule`.
-- [filtering.md](./filtering.md) — update §"Implementation status";
+- [filtering.md](../system/filtering.md) — update §"Implementation status";
   cross-link this design doc.
-- [architecture.md](./architecture.md) — replace docs-only
+- [architecture.md](../system/architecture.md) — replace docs-only
   `combine_masks` description with code links.
 
 ## Verification
 
 1. `pytest retrieve/tests/correctness/test_bloom_filter.py` — bloom is
    strict superset of clause on a synthetic 100k corpus; FPR ≤ paper
-   numbers ([silvertorch.md, line 336](../articles/silvertorch.md))
+   numbers ([silvertorch.md, line 336](../../articles/silvertorch.md))
    for `(1024 bits, 5 hashes)`.
 2. `pytest retrieve/tests/correctness/test_combine_filters.py` —
    `combine_indices` equals `compact_mask(combine_masks(...))` on small
@@ -264,14 +264,14 @@ Modify:
    measure `evaluate_mask` and `evaluate_indices` for both filters at
    N = 1M, 10M; confirm `clause_compact` indices path is faster than
    `compact_mask(bloom_match(.))` when P ≪ N. Numbers feed
-   [bench.md](./bench.md).
+   [bench.md](../system/bench.md).
 
 ## Out of scope (explicit non-goals)
 
 - Multi-value query (`[B, C, Q_max]`) — both papers describe it on the
   item side; query side is paper-side single-value. Defer.
-- DSL / RPN walker — explicit per [filtering.md](./filtering.md).
-- NOT inside bloom — explicit per [filtering.md](./filtering.md).
+- DSL / RPN walker — explicit per [filtering.md](../system/filtering.md).
+- NOT inside bloom — explicit per [filtering.md](../system/filtering.md).
 - Range / prefix / numeric predicates — neither paper supports them.
 - Replacing bloom inside `codesigned_probe_score` — would need a new
   fused kernel.

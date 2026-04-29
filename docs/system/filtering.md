@@ -2,12 +2,12 @@
 
 # Filtering in `retrieve` — brief for another agent
 
-> Previously: `retrieve/docs/FILTERING.md`.
+> Previously: `retrieve/docs/filtering.md` (originally `retrieve/docs/FILTERING.md`).
 
 This repo reproduces two retrieval papers — SilverTorch (IVF + INT8 + Bloom)
-at [retrieve/src/retrieve/layers/silvertorch/](../retrieve/src/retrieve/layers/silvertorch/)
+at [retrieve/src/retrieve/layers/silvertorch/](../../retrieve/src/retrieve/layers/silvertorch/)
 and LiNR (V1 dense / V2 sparse pre-filter / V3 1-bit OPORP) at
-[retrieve/src/retrieve/layers/linr/](../retrieve/src/retrieve/layers/linr/). This brief
+[retrieve/src/retrieve/layers/linr/](../../retrieve/src/retrieve/layers/linr/). This brief
 covers **filtering only**; KNN scoring, quantization, and training are out of
 scope here.
 
@@ -44,21 +44,21 @@ boolean composition.
 
 | component | path | notes |
 |---|---|---|
-| LiNR clause filter | [layers/utils/filters.py](../retrieve/src/retrieve/layers/utils/filters.py) | `evaluate_mask → [B, N]` bool; `evaluate_indices → (pos_idx, counts)` |
-| LiNR clause Triton kernel | [kernels/triton/filters/clause_compact.py](../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py) | fused eval + stream compaction; richer than what the paper describes |
-| Bloom build helpers | [layers/silvertorch/bloom.py](../retrieve/src/retrieve/layers/silvertorch/bloom.py) | `_build_signatures`, `_generate_seeds`; private to the silvertorch package |
-| Bloom standalone Triton kernel | [kernels/triton/silvertorch/bloom_match.py](../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py) | `(qb & sigs) == qb` → `[B, N]` bool; **no consumer in the serving path** |
-| Bloom fused into score kernel | [kernels/triton/silvertorch/codesigned_probe_score.py](../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py) | conjunctive only (single `QB`), part of co-designed Algorithm 1 |
-| `FilterModule` ABC | [interfaces.py:8-19](../retrieve/src/retrieve/interfaces.py#L8-L19) | defined; no concrete filter subclasses it yet |
-| `combine_masks(clause_mask, external_mask)` | docs-only ([architecture.md:31](architecture.md#L31)) | missing |
+| LiNR clause filter | [layers/utils/filters.py](../../retrieve/src/retrieve/layers/utils/filters.py) | `evaluate_mask → [B, N]` bool; `evaluate_indices → (pos_idx, counts)` |
+| LiNR clause Triton kernel | [kernels/triton/filters/clause_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py) | fused eval + stream compaction; richer than what the paper describes |
+| Bloom build helpers | [layers/silvertorch/bloom.py](../../retrieve/src/retrieve/layers/silvertorch/bloom.py) | `_build_signatures`, `_generate_seeds`; private to the silvertorch package |
+| Bloom standalone Triton kernel | [kernels/triton/silvertorch/bloom_match.py](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py) | `(qb & sigs) == qb` → `[B, N]` bool; **no consumer in the serving path** |
+| Bloom fused into score kernel | [kernels/triton/silvertorch/codesigned_probe_score.py](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py) | conjunctive only (single `QB`), part of co-designed Algorithm 1 |
+| `FilterModule` ABC | [interfaces.py:8-19](../../retrieve/src/retrieve/interfaces.py#L8-L19) | defined; no concrete filter subclasses it yet |
+| `combine_masks(clause_mask, external_mask)` | proposed in [filtering-api.md](../plans/filtering-api.md) | missing |
 
 ## Key observation: LiNR can host *both* filter types
 
 LiNR's `forward` is decoupled from the filter — it accepts `mask: [B, N]`
 or `candidate_ids: [B, P]` as input
-([v1.py](../retrieve/src/retrieve/layers/linr/v1.py),
-[v2.py](../retrieve/src/retrieve/layers/linr/v2.py),
-[v3.py](../retrieve/src/retrieve/layers/linr/v3.py)). Any filter that produces
+([v1.py](../../retrieve/src/retrieve/layers/linr/v1.py),
+[v2.py](../../retrieve/src/retrieve/layers/linr/v2.py),
+[v3.py](../../retrieve/src/retrieve/layers/linr/v3.py)). Any filter that produces
 those shapes plugs in.
 
 Asymmetry: SilverTorch fuses Bloom *into* its score kernel
@@ -108,9 +108,8 @@ ids, scores = linr_v2(query, mask=mask)
 
 Side benefits:
 
-- Retires the "`bloom_match` is dead code" footnote at
-  [kernels.md:227](kernels.md#L227) — it's the right primitive, just
-  had no consumer.
+- Retires the "`bloom_match` is dead code" footnote in
+  [kernels.md](kernels.md) — it's the right primitive, just had no consumer.
 - Make `ClauseIndex` officially subclass `FilterModule` (it almost does).
 - `combine_masks(clause_mask, external_mask)` — the missing helper —
   becomes the natural way to AND two filter outputs together.

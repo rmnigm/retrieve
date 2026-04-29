@@ -2,8 +2,8 @@
 
 ## Why this exists
 
-Yambda is interaction-only ([data/yambda.py](../evaluation/data/yambda.py),
-[algorithms.py:13-17](../evaluation/retrieval/algorithms.py#L13-L17)) — no
+Yambda is interaction-only ([data/yambda.py](../../evaluation/data/yambda.py),
+[algorithms.py:13-17](../../evaluation/retrieval/algorithms.py#L13-L17)) — no
 item attributes, so the whole filter path is dark on that benchmark.
 The Amazon big5 prep ([amazon-prompt.md](./amazon-prompt.md)) is design-only
 and would need a from-scratch GSASRec encoder run to generate item embeddings
@@ -20,7 +20,7 @@ the 5M-item subsample ourselves on a rented A100.
 The other reason to prefer YFCC over Amazon: YFCC carries **two
 disjoint tag schemas natively** — fixed-enum autotags (1,570 visual
 concepts) and free-form user tags (200k+ vocabulary) — which directly
-map onto the [filtering.md](./filtering.md) two-predicate-shape thesis:
+map onto the [filtering.md](../system/filtering.md) two-predicate-shape thesis:
 narrow exact (autotags) → `ClauseIndex` expected to win; wide free-form
 (user tags) → `BloomFilter` expected to win. Same corpus, both predicate
 shapes — minimum-confound bench. The unified API the bench targets is
@@ -204,7 +204,7 @@ The bench config (`yfcc-5m.yaml`) picks which file via an
 `output_dim`, `modalities` (`["image", "text", "fused"]`), and the
 date of the run. The bench config loads the corresponding
 `item_embs_*.pt` by encoder name, so swapping encoders is a config
-change, not a code change. Recall numbers in [bench.md](./bench.md)
+change, not a code change. Recall numbers in [bench.md](../system/bench.md)
 are tagged with the encoder. The most likely future swap is to a
 **Matryoshka multimodal model** (`nomic-ai/nomic-embed-vision-v1.5`,
 `jinaai/jina-clip-v2`) — these train at 768/1024 but support
@@ -215,7 +215,7 @@ ablate `D` with a single re-run.
 
 Encoded as two separate `[N, C, A_max]` tensors so each sweep can load
 exactly the schema it needs. Both shapes share `evaluate_quality.py`'s
-`item_attrs` contract ([eval_quality.py:46-56](../evaluation/retrieval/eval_quality.py#L46-L56)).
+`item_attrs` contract ([eval_quality.py:46-56](../../evaluation/retrieval/eval_quality.py#L46-L56)).
 
 ### Narrow, exact (autotags + structured) — `item_attrs_narrow.pt`
 
@@ -255,7 +255,7 @@ the harness rejects `--filter bloom --reverse-path …`).
 
 ## Pipeline (`evaluation/data/yfcc.py`)
 
-CLI mirrors [evaluation/data/yambda.py](../evaluation/data/yambda.py):
+CLI mirrors [evaluation/data/yambda.py](../../evaluation/data/yambda.py):
 
 ```
 python -m data.yfcc \
@@ -300,7 +300,7 @@ This stage produces three things per query: a query **vector**, a query
 top-K** answer set. The vector and the answer set together let us
 measure recall@K; the attribute spec is what `FilterModule` evaluates
 against. Yambda's eval harness builds the same triple
-([eval_quality.py:35-57](../evaluation/retrieval/eval_quality.py#L35-L57)),
+([eval_quality.py:35-57](../../evaluation/retrieval/eval_quality.py#L35-L57)),
 but Yambda is sequential (last item of a sequence = ground truth) and
 YFCC is not, so we have to manufacture the supervision ourselves. The
 choice has two parts: where vectors come from, and what counts as the
@@ -400,7 +400,7 @@ gt_topk_ids, _ = torch.topk(scores, K_GT, dim=1)   # K_GT = 1000
 ```
 
 `K_GT = 1000` covers `recall@10`, `recall@100`, `recall@500` (the
-default `ks` in [500m-d128.yaml](../evaluation/conf/500m-d128.yaml));
+default `ks` in [500m-d128.yaml](../../evaluation/conf/500m-d128.yaml));
 larger K_GT lets us add `recall@500/1000` later without re-running.
 Persist as `gt_topk_<shape>_<sweep>.pt` — one file per
 `(predicate shape, active-clause set)` because the mask depends on
@@ -477,7 +477,7 @@ bag) using only the metadata we are already re-embedding.
 
 ## New eval config — `evaluation/conf/yfcc-5m.yaml`
 
-Mirrors the existing [500m-d128.yaml](../evaluation/conf/500m-d128.yaml)
+Mirrors the existing [500m-d128.yaml](../../evaluation/conf/500m-d128.yaml)
 shape; new `filters:` block. Two sweeps (one per predicate shape):
 
 ```yaml
@@ -559,7 +559,7 @@ Modify:
   - For LiNR variants, the wrapper builds a mask via the configured
     `FilterModule` (per algo entry) and threads `mask=` /
     `candidate_ids=` into the LinR forward; this fixes the bug noted
-    in [algorithms.py:13-17](../evaluation/retrieval/algorithms.py#L13-L17)
+    in [algorithms.py:13-17](../../evaluation/retrieval/algorithms.py#L13-L17)
     where attrs never reached the index.
   - For `silvertorch`, switch from `IVF_INT8_ANN` to `SilverTorch`
     whenever a filter dataset is provided.
@@ -587,12 +587,12 @@ Modify:
    relevant items).
 5. **Quality smoke (wide)** — same with `--filter bloom`,
    `--active-clauses 0` against `item_attrs_wide.pt`.
-6. **Bench thesis** — run [tests/bench/run.py](../retrieve/tests/bench/run.py)
+6. **Bench thesis** — run [tests/bench/run.py](../../retrieve/tests/bench/run.py)
    on the full sweep matrix `(linr_v3_then_v2, silvertorch) ×
    (clause, bloom) × (narrow, wide) × (fused, image, text)`. Predict +
-   verify per [filtering.md](./filtering.md): `ClauseIndex` wins
+   verify per [filtering.md](../system/filtering.md): `ClauseIndex` wins
    narrow on latency at any selectivity; `BloomFilter` wins wide.
-   Numbers go into [bench.md](./bench.md).
+   Numbers go into [bench.md](../system/bench.md).
 7. **Reverse-clause hard-error** — `eval_quality.py --filter bloom
    --reverse-path …` exits non-zero with a clear error message.
 

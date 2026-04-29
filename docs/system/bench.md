@@ -1,8 +1,9 @@
 # Benchmark results
 
-> Previously: `retrieve/bench.md`. Bench tooling (`retrieve/tests/bench/run.py`,
-> `retrieve/tests/bench/render.py`) still defaults to writing `bench.md` in the
-> caller's cwd; pass `--bench-output docs/bench.md` (or `--out docs/bench.md`)
+> Previously: `retrieve/docs/bench.md` (originally `retrieve/bench.md`).
+> Bench tooling (`retrieve/tests/bench/run.py`, `retrieve/tests/bench/render.py`)
+> still defaults to writing `bench.md` in the caller's cwd; pass
+> `--bench-output docs/system/bench.md` (or `--out docs/system/bench.md`)
 > to refresh this file in place.
 
 ## linr_v1_unmasked

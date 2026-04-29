@@ -1,6 +1,6 @@
 # Refactor the Yambda retrieval evaluation pipeline + add a faiss-cpu baseline
 
-> Previously: `evaluation/docs/REFACTOR_PLAN.md`.
+> Previously: `retrieve/docs/refactor-plan.md` (originally `evaluation/docs/REFACTOR_PLAN.md`).
 
 ## Context
 
@@ -31,7 +31,7 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(cfg.seed)
 ```
 
-Add `seed: int = 0` to `EvalConfig` in [retrieval/config.py](../evaluation/retrieval/config.py). This locks `torch.topk` tie-order and any default-RNG draws.
+Add `seed: int = 0` to `EvalConfig` in [retrieval/config.py](../../evaluation/retrieval/config.py). This locks `torch.topk` tie-order and any default-RNG draws.
 
 ### 2. Fix the memory-snapshot ordering
 
@@ -121,7 +121,7 @@ ALGORITHMS = (
 )
 ```
 
-Implementation lives in a new file [retrieval/faiss_baselines.py](../evaluation/retrieval/faiss_baselines.py) with two `nn.Module` subclasses that conform to the `forward(query) -> (ids, scores)` shape. They keep CPU `numpy` buffers and convert per call:
+Implementation lives in a new file [retrieval/faiss_baselines.py](../../evaluation/retrieval/faiss_baselines.py) with two `nn.Module` subclasses that conform to the `forward(query) -> (ids, scores)` shape. They keep CPU `numpy` buffers and convert per call:
 
 - `FaissFlatIP(k)`: wraps `faiss.IndexFlatIP(d)`; on `register_index(item_embs)` does `index.add(item_embs.detach().cpu().numpy().astype(np.float32))` and zeros row 0 to mirror the GPU pad treatment. `forward(query)` does `q_np = query.detach().cpu().numpy().astype(np.float32, copy=False)`, calls `index.search(q_np, k)`, and returns `(ids_t.to(query.device), scores_t.to(query.device))`.
 - `FaissIVFFlat(k, nlist, nprobe, seed)`: trains `IndexIVFFlat(quantizer=IndexFlatIP, d, nlist, METRIC_INNER_PRODUCT)` on the full catalog (1.87M is small enough — no need to subsample), sets `index.nprobe = nprobe`. Set `faiss.cvar.indexIVF_stats.reset()` and use `faiss.RandomGenerator(seed)` indirectly via `faiss.normalize_L2`-free flow (faiss seeds k-means deterministically when `numpy.random.seed` is set; we set both at module init).
@@ -245,20 +245,20 @@ Append to `evaluation/pyproject.toml` `[project].dependencies`:
 
 | File | Change |
 |---|---|
-| [evaluation/retrieval/eval_yambda_retrieval.py](../evaluation/retrieval/eval_yambda_retrieval.py) | seed at start of `main`; reorder mem snapshot; replace `measure`/`forward_memory_mib` with the conftest-aligned `measure_forward`; multi-query perf pass with bs∈{1,8,16}; hoist quality pass out of the bs loop; CPU-vs-CUDA branch in `perf_pass_cached`; add `device`/`seed`/`batch_size`/`k` fields to result row |
-| [evaluation/retrieval/config.py](../evaluation/retrieval/config.py) | add `seed: int = 0` and `batch_sizes: list[int] = [1, 8, 16]` to `EvalConfig` |
-| [evaluation/retrieval/algorithms.py](../evaluation/retrieval/algorithms.py) | add `faiss_flat_ip` and `faiss_ivf_flat` to `ALGORITHMS` and `build_algorithm` |
-| [evaluation/retrieval/faiss_baselines.py](../evaluation/retrieval/faiss_baselines.py) | NEW — `FaissFlatIP`, `FaissIVFFlat` `nn.Module` wrappers |
-| [evaluation/conf/smoke.yaml](../evaluation/conf/smoke.yaml) | refactor with `&defaults` anchor; add faiss baselines |
-| [evaluation/conf/500m-d64.yaml](../evaluation/conf/500m-d64.yaml) | same |
-| [evaluation/conf/500m-d128.yaml](../evaluation/conf/500m-d128.yaml) | same |
-| [evaluation/conf/500m-d256.yaml](../evaluation/conf/500m-d256.yaml) | same |
-| [evaluation/pyproject.toml](../evaluation/pyproject.toml) | add `faiss-cpu>=1.8` |
+| [evaluation/retrieval/eval_yambda_retrieval.py](../../evaluation/retrieval/eval_yambda_retrieval.py) | seed at start of `main`; reorder mem snapshot; replace `measure`/`forward_memory_mib` with the conftest-aligned `measure_forward`; multi-query perf pass with bs∈{1,8,16}; hoist quality pass out of the bs loop; CPU-vs-CUDA branch in `perf_pass_cached`; add `device`/`seed`/`batch_size`/`k` fields to result row |
+| [evaluation/retrieval/config.py](../../evaluation/retrieval/config.py) | add `seed: int = 0` and `batch_sizes: list[int] = [1, 8, 16]` to `EvalConfig` |
+| [evaluation/retrieval/algorithms.py](../../evaluation/retrieval/algorithms.py) | add `faiss_flat_ip` and `faiss_ivf_flat` to `ALGORITHMS` and `build_algorithm` |
+| [evaluation/retrieval/faiss_baselines.py](../../evaluation/retrieval/faiss_baselines.py) | NEW — `FaissFlatIP`, `FaissIVFFlat` `nn.Module` wrappers |
+| [evaluation/conf/smoke.yaml](../../evaluation/conf/smoke.yaml) | refactor with `&defaults` anchor; add faiss baselines |
+| [evaluation/conf/500m-d64.yaml](../../evaluation/conf/500m-d64.yaml) | same |
+| [evaluation/conf/500m-d128.yaml](../../evaluation/conf/500m-d128.yaml) | same |
+| [evaluation/conf/500m-d256.yaml](../../evaluation/conf/500m-d256.yaml) | same |
+| [evaluation/pyproject.toml](../../evaluation/pyproject.toml) | add `faiss-cpu>=1.8` |
 
 ## Reused existing utilities
 
 - `RetrievalModule` interface (`retrieve/src/retrieve/interfaces.py:22`) — `FaissFlatIP` / `FaissIVFFlat` subclass it; the `(forward, modules)` contract in `algorithms.py:46` is the only shape we have to match.
-- `accumulate_metrics` / `finalize_metrics` ([metrics.py:124](../evaluation/retrieval/metrics.py)) — the new baselines feed the same `(ids, scores)` tensors into them.
+- `accumulate_metrics` / `finalize_metrics` ([metrics.py:124](../../evaluation/retrieval/metrics.py)) — the new baselines feed the same `(ids, scores)` tensors into them.
 - `measure_forward` body (`retrieve/tests/bench/conftest.py:281`) — the canonical bench primitive we copy into the eval driver to replace the over-warmed local version.
 
 ## Verification

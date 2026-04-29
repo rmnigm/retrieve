@@ -2,12 +2,15 @@
 
 # `retrieve` kernels
 
-> Previously: `retrieve/docs/KERNELS.md`.
+> Previously: `retrieve/docs/kernels.md` (originally `retrieve/docs/KERNELS.md`).
 
-The Triton kernels split into two trees by domain: [`linr/`](../retrieve/src/retrieve/kernels/triton/linr/)
-holds the kernels used by LinR V1/V2/V3, and [`silvertorch/`](../retrieve/src/retrieve/kernels/triton/silvertorch/)
+The Triton kernels split into three trees by domain: [`linr/`](../../retrieve/src/retrieve/kernels/triton/linr/)
+holds the kernels used by LinR V1/V2/V3, [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/)
+holds the standalone clause-evaluation kernel that powers
+`ClauseIndex.evaluate_indices`, and [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)
 holds those used by SilverTorch. The LinR kernels are the focus of this doc;
-the SilverTorch kernels are described briefly at the end for context.
+`clause_compact` and the SilverTorch kernels are covered briefly at the
+end for context.
 
 All kernels follow the same conventions:
 
@@ -31,14 +34,14 @@ All kernels follow the same conventions:
 
 ## OPORP layout
 
-Used only by V3. Built once at index time by [`quantize_oporp_1bit`](../retrieve/src/retrieve/layers/utils/quantize.py):
+Used only by V3. Built once at index time by [`quantize_oporp_1bit`](../../retrieve/src/retrieve/layers/utils/quantize.py):
 
 - `signs[D]` int8 ∈ {-1, +1} — Rademacher (random sign vector).
 - `perm[D]` int64 — permutation of `[0, D)`.
 - `item_bits[N, W]` int64, `W = D // 64`. Bit `b` of word `w` is set iff
   `(items * signs)[perm][..., 64*w + b] > 0`.
 
-Queries land in the same bit space via [`project_oporp_1bit_query`](../retrieve/src/retrieve/layers/utils/quantize.py):
+Queries land in the same bit space via [`project_oporp_1bit_query`](../../retrieve/src/retrieve/layers/utils/quantize.py):
 `query_bits = pack_signs(((query * signs)[perm]) > 0)`.
 
 The projection is **deterministic**: the seed determines `signs` and `perm`,
@@ -49,7 +52,7 @@ byte identical bits.
 
 ## `fused_matmul_topk` — V1 dense path
 
-[`kernels/triton/linr/fused_matmul_topk.py`](../retrieve/src/retrieve/kernels/triton/linr/fused_matmul_topk.py).
+[`kernels/triton/linr/fused_matmul_topk.py`](../../retrieve/src/retrieve/kernels/triton/linr/fused_matmul_topk.py).
 
 Computes `query @ item_embs.T`, optionally masks, and writes a `[B, N]`
 score buffer. The host calls `torch.topk` on the buffer.
@@ -79,7 +82,7 @@ num_warps ∈ {4, 8})` keyed on `(B, N, D)`.
 
 ## `fused_masked_knn_topk` — V2 sparse path
 
-[`kernels/triton/linr/fused_masked_knn_topk.py`](../retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py).
+[`kernels/triton/linr/fused_masked_knn_topk.py`](../../retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py).
 
 Scores only the items in a precompacted `positive_indices` buffer (gather
 + dot + write). Returns `(ids[B, K], scores[B, K])` with `-1` / `-inf`
@@ -121,7 +124,7 @@ keyed on `(P, D)`.
 
 ## `oporp_1bit_match_topk` — V3 (all paths)
 
-[`kernels/triton/linr/oporp_1bit_match_topk.py`](../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py).
+[`kernels/triton/linr/oporp_1bit_match_topk.py`](../../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py).
 
 Computes Hamming-similarity scores from packed sign bits. Single kernel
 covers both the full-scan and the candidate / masked path via a
@@ -141,9 +144,9 @@ return:   ids               [B, K]     int64
 **Inner op**: per (b, n) cell, `tl.sum(_popcount_int64(qb ^ item_row),
 axis=W) → hamming`, then `score = D_TOTAL - 2 * hamming`.
 
-**Popcount** is the [SWAR bit-twiddle](../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py)
+**Popcount** is the [SWAR bit-twiddle](../../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py)
 (`_popcount_int64`): five mask-shift-add steps, no libdevice dependency.
-The matching torch reference [`popcount_int64`](../retrieve/src/retrieve/layers/utils/quantize.py)
+The matching torch reference [`popcount_int64`](../../retrieve/src/retrieve/layers/utils/quantize.py)
 uses the exact same algorithm so torch and Triton produce **bit-exact**
 identical scores.
 
@@ -157,6 +160,52 @@ candidate-set rerank and for the masked V3 path (after `compact_mask`).
 **Autotune** searches `(BLOCK_N ∈ {64, 128, 256, 512}, num_warps ∈ {4, 8})`
 keyed on `(n, W, HAS_INDICES)`.
 
+## `clause_compact` — fused clause eval + stream compaction
+
+[`kernels/triton/filters/clause_compact.py`](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py).
+
+Powers `ClauseIndex.evaluate_indices`. Avoids materializing the dense
+`[B, N]` bool that `evaluate_mask` would otherwise produce, then doing a
+host-side argsort to compact it. One launch produces the `(positive_indices,
+counts)` pair the V2/V3 sparse paths consume.
+
+```
+inputs:   item_clause_attrs   [N, C, A_max]  int64
+          clause_is_reverse   [C]            bool
+          query_clause_attrs  [B, C]         int64
+output:   out_indices         [B, N]         int64  (worst-case scratch)
+          counts              [B]            int64
+return:   positive_indices    [B, P]         int64  (P = max(counts.max(), 1))
+          counts              [B]            int64
+```
+
+**Launch grid** `(B, cdiv(N, BLOCK_N))`. Each program owns one
+`(query, n-tile)` cell and produces:
+
+```
+per program (b, tile):
+    pass_mask = AND over clauses of (any item attr == query attr) ^ reverse
+    intra     = tl.cumsum(pass_mask) - 1               # intra-tile offset
+    base      = tl.atomic_add(counts[b], tile_sum)     # row base offset
+    tl.store(positive_indices[b, base + intra], item_id, mask=pass_mask)
+```
+
+**Clause loop** is fully unrolled (`C` and `A_MAX` are `tl.constexpr`):
+inner OR over the `A_MAX` attribute slots per clause, outer AND over the
+`C` clauses, with the reverse flag XORed in per-clause and `q_c == -1`
+overriding to "always passes."
+
+**Output ordering** within a row is **unspecified** — atomics across tiles
+race with each other. Downstream consumers (`fused_masked_knn_topk`,
+`oporp_1bit_match_topk` HAS_INDICES path) only care about the *set* of
+passing ids, so this is fine. Callers that need a deterministic order must
+sort.
+
+**No autotune.** A single fixed config (`BLOCK_N=256`, `num_warps=4`) is
+hard-coded — `tl.atomic_add` accumulates across autotune trials and would
+corrupt `counts`. If a sweep is needed later, re-enable autotune with
+`reset_to_zero` covering both `counts_ptr` and `out_indices_ptr`.
+
 ## Layer dispatch
 
 Each LinR Triton subclass is a thin router from the `forward()` signature
@@ -167,10 +216,10 @@ mask shape, not the one that benches best on a given input.
 
 | layer                       | path         | kernel(s) called                                  |
 |-----------------------------|--------------|---------------------------------------------------|
-| [`LiNR_V1_Triton`](../retrieve/src/retrieve/layers/linr/v1_triton.py)   | always dense | `fused_matmul_topk` (with optional inline mask)   |
-| [`LiNR_V2_Triton`](../retrieve/src/retrieve/layers/linr/v2_triton.py)   | masked       | `compact_mask` → `fused_masked_knn_topk`          |
+| [`LiNR_V1_Triton`](../../retrieve/src/retrieve/layers/linr/v1_triton.py)   | always dense | `fused_matmul_topk` (with optional inline mask)   |
+| [`LiNR_V2_Triton`](../../retrieve/src/retrieve/layers/linr/v2_triton.py)   | masked       | `compact_mask` → `fused_masked_knn_topk`          |
 |                                                                | unmasked     | `fused_matmul_topk` (V2 has nothing to pre-filter)|
-| [`LiNR_V3_Triton`](../retrieve/src/retrieve/layers/linr/v3_triton.py)   | full         | `oporp_1bit_match_topk` (HAS_INDICES=False)       |
+| [`LiNR_V3_Triton`](../../retrieve/src/retrieve/layers/linr/v3_triton.py)   | full         | `oporp_1bit_match_topk` (HAS_INDICES=False)       |
 |                                                                | masked       | `compact_mask` → `oporp_1bit_match_topk` (HAS_INDICES=True) |
 |                                                                | candidates   | `oporp_1bit_match_topk` (HAS_INDICES=True)        |
 
@@ -181,7 +230,7 @@ so V1's dense + inline-mask wins; that argument doesn't transfer to V3.)
 
 ## Helpers
 
-### [`compact_mask`](../retrieve/src/retrieve/layers/utils/compact.py)
+### [`compact_mask`](../../retrieve/src/retrieve/layers/utils/compact.py)
 
 Bool `[B, N]` → `(positive_indices[B, P], counts[B])` where
 `P = max(counts)`. Implementation: `mask.sum(1)` for counts, then
@@ -191,14 +240,14 @@ indices. Sync point — does `int(counts.max().item())` to size the slice.
 Rows shorter than `P` carry arbitrary item ids past `counts[b]`; downstream
 kernels must use `counts` to bound valid reads.
 
-### [`popcount_int64`](../retrieve/src/retrieve/layers/utils/quantize.py)
+### [`popcount_int64`](../../retrieve/src/retrieve/layers/utils/quantize.py)
 
 Torch-side SWAR popcount. Required because this PyTorch (2.10.0+cu128)
 lacks `Tensor.bitwise_count`. Returns int32 to keep the downstream sum
 narrow. Matches the kernel's `_popcount_int64` step-for-step — useful
 property for any future torch-vs-Triton bit-exact assertion.
 
-### [`quantize_oporp_1bit`](../retrieve/src/retrieve/layers/utils/quantize.py)
+### [`quantize_oporp_1bit`](../../retrieve/src/retrieve/layers/utils/quantize.py)
 
 Build-time only. `O(D)` parameter cost — the `signs` vector and `perm`
 permutation are the entire projection. Apply with one elementwise multiply
@@ -213,8 +262,8 @@ Two failure modes worth keeping in mind:
 1. **`tl.dot` reduction order vs cuBLAS.** `fused_matmul_topk` reduces in
    tensor-core tile order; cuBLAS reduces in row-major order. fp32 scores
    drift ~1e-4–1e-3 absolute, which can flip top-K ordering at ties near
-   the K-th boundary. Parity tests use [`assert_topk_matches`](../retrieve/tests/parity/conftest.py)
-   (set + sorted-score tolerance); the bench harness uses [`topk_matches`](../retrieve/tests/bench/conftest.py).
+   the K-th boundary. Parity tests use [`assert_topk_matches`](../../retrieve/tests/parity/conftest.py)
+   (set + sorted-score tolerance); the bench harness uses [`topk_matches`](../../retrieve/tests/bench/conftest.py).
    Bit-exact parity is **not** an invariant for V1/V2 and never was.
 
 2. **OPORP popcount is bit-exact.** V3's torch reference and the Triton
@@ -226,14 +275,25 @@ Two failure modes worth keeping in mind:
 
 ## SilverTorch kernels (out of scope, kept for completeness)
 
-[`bloom_match`](../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py)
-is the bloom-filter subset test — `(qb & sigs) == qb` reduced over W
-int64 words. 2-D grid, the structural model the OPORP kernel was based
-on. Wins 10–20× over the torch broadcast version.
+[`codesigned_probe_score`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py)
+is the actively-used SilverTorch kernel and powers
+[`SilverTorch.forward`](../../retrieve/src/retrieve/layers/silvertorch/main.py).
+Fuses three steps into one launch: probe the top-`n_probe` IVF clusters,
+score the union of their items via INT8 dequantize + dot, AND the bloom
+attribute filter inline (skipped entirely when `query_clause_attrs=None`).
+Autotune key includes `HAS_QB` and `HAS_MASK` so the cluster-only,
+bloom+cluster, and externally-masked paths each get their own configs.
 
-[`int8_ann_fused`](../retrieve/src/retrieve/kernels/triton/silvertorch/int8_ann_fused.py)
-is the int8 candidate scorer (gather codes → cast fp32 → dot → scale).
-After V3's pivot to 1-bit, no LinR layer consumes this kernel; it remains
-in the SilverTorch tree pending a focused SilverTorch pass that should
-either move it to a `dp4a`/`mma.s8` int32 accumulator path (per the
-SilverTorch paper) or remove it. Untouched in this run.
+[`bloom_match`](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py)
+is the standalone bloom-filter subset test — `(qb & sigs) == qb` reduced
+over W int64 words. 2-D grid, the structural model the OPORP kernel was
+based on. Wins 10–20× over the torch broadcast version. SilverTorch fuses
+this primitive inline into `codesigned_probe_score`, so the standalone
+kernel currently has no production caller — only bench tests.
+
+[`int8_ann_fused`](../../retrieve/src/retrieve/kernels/triton/silvertorch/int8_ann_fused.py)
+is the standalone int8 candidate scorer (gather codes → cast fp32 → dot
+→ scale). After V3's pivot to 1-bit, no LinR layer consumes this kernel
+either; it remains in the SilverTorch tree pending a focused SilverTorch
+pass that should either move it to a `dp4a`/`mma.s8` int32 accumulator
+path (per the SilverTorch paper) or remove it. Untouched in this run.

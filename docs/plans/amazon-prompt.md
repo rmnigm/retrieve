@@ -1,12 +1,12 @@
 # Amazon Reviews 2023: Attribute Filtering Research for GPU Retrieval Benchmarks
 
-> Previously: `evaluation/docs/AMAZON_PROMPT.md`.
+> Previously: `retrieve/docs/amazon-prompt.md` (originally `evaluation/docs/AMAZON_PROMPT.md`).
 
 ## Context
 
-The repo has a complete GPU retrieval stack with attribute filtering (`ClauseIndex` at [retrieve/src/retrieve/layers/utils/filters.py](../retrieve/src/retrieve/layers/utils/filters.py), Triton fused `clause_compact` kernel, IVF+INT8 index in [retrieve/src/retrieve/layers/silvertorch/ivf.py](../retrieve/src/retrieve/layers/silvertorch/ivf.py)). The current production benchmark uses Yambda‑500M (N≈1.87M, d=128); see [evaluation/conf/500m.yaml](../evaluation/conf/500m.yaml).
+The repo has a complete GPU retrieval stack with attribute filtering (`ClauseIndex` at [retrieve/src/retrieve/layers/utils/filters.py](../../retrieve/src/retrieve/layers/utils/filters.py), Triton fused `clause_compact` kernel, IVF+INT8 index in [retrieve/src/retrieve/layers/silvertorch/ivf.py](../../retrieve/src/retrieve/layers/silvertorch/ivf.py)). The current production benchmark uses Yambda‑500M (N≈1.87M, d=128); see [evaluation/conf/500m.yaml](../../evaluation/conf/500m.yaml).
 
-A GSASRec training/eval pipeline for Amazon Reviews 2023 is documented at [amazon-prompt.md](amazon-prompt.md) but the data‑prep script `data/amazon.py` does not exist on disk yet, and `--download-attrs` (which would emit `item_attrs.parquet`) has never been wired up. The eval harness already accepts an `[N, C, A_max]` int tensor at [evaluation/retrieval/eval_quality.py:48-56](../evaluation/retrieval/eval_quality.py#L48-L56) — each item has `C` clauses (filter fields) of up to `A_max` values, with `-1` padding; per‑query filter values are taken from the test target's attrs.
+A GSASRec training/eval pipeline for Amazon Reviews 2023 is documented at [amazon-prompt.md](amazon-prompt.md) but the data‑prep script `data/amazon.py` does not exist on disk yet, and `--download-attrs` (which would emit `item_attrs.parquet`) has never been wired up. The eval harness already accepts an `[N, C, A_max]` int tensor at [evaluation/retrieval/eval_quality.py:48-56](../../evaluation/retrieval/eval_quality.py#L48-L56) — each item has `C` clauses (filter fields) of up to `A_max` values, with `-1` padding; per‑query filter values are taken from the test target's attrs.
 
 This document is the research output to design the filter set for the Amazon benchmark: which attributes are available, their cardinality, expected selectivity at retrieval time, how to map them onto `ClauseIndex`, and what `data/amazon.py` needs to produce.
 
@@ -63,7 +63,7 @@ Practical implications:
 
 ## 3. Filter design — mapping attributes to ClauseIndex
 
-The filter tensor expected by the index is `item_clause_attrs: [N, C, A_max]` int64 with `-1` padding ([retrieve/src/retrieve/layers/utils/filters.py:25-34](../retrieve/src/retrieve/layers/utils/filters.py#L25-L34)). Within a clause, item values are OR'd against the query value; clauses are AND'd. `clause_is_reverse[c]=True` flips the c'th clause's result before the AND. Query side is `[B, C]` int64 — one value per clause, or `-1` to deactivate.
+The filter tensor expected by the index is `item_clause_attrs: [N, C, A_max]` int64 with `-1` padding ([retrieve/src/retrieve/layers/utils/filters.py:25-34](../../retrieve/src/retrieve/layers/utils/filters.py#L25-L34)). Within a clause, item values are OR'd against the query value; clauses are AND'd. `clause_is_reverse[c]=True` flips the c'th clause's result before the AND. Query side is `[B, C]` int64 — one value per clause, or `-1` to deactivate.
 
 **Six clauses, exercising all three semantics, no price:**
 
@@ -147,15 +147,15 @@ python -m data.amazon \
 
 ### Reuse / patterns
 
-- The polars + parquet pattern matches [evaluation/training/dataset.py](../evaluation/training/dataset.py) (`pl.read_parquet`, `item_ids` column).
-- The `[N, C, A_max]` tensor convention is enforced by [evaluation/retrieval/eval_quality.py:46-56](../evaluation/retrieval/eval_quality.py#L46-L56) — produce exactly that shape and it drops in.
+- The polars + parquet pattern matches [evaluation/training/dataset.py](../../evaluation/training/dataset.py) (`pl.read_parquet`, `item_ids` column).
+- The `[N, C, A_max]` tensor convention is enforced by [evaluation/retrieval/eval_quality.py:46-56](../../evaluation/retrieval/eval_quality.py#L46-L56) — produce exactly that shape and it drops in.
 - For the negation clause (C5), eval‑time semantics differ from the leave‑last‑out target convention: `eval_quality.EvalDataset.__getitem__` currently copies the target's attr value. For a reverse clause, that would say "exclude items with the same main_category as the target" which is the **opposite** of what's wanted. Two clean options — pick one before coding:
   1. Make EvalDataset clause‑aware: read `clause_is_reverse` and for reverse clauses, set the query value to a randomly picked **other** category id rather than the target's own value.
   2. For the C5 reverse experiment, set the query value to a fixed exclude‑target chosen offline (e.g., always exclude Electronics) — simpler but covers only one slice of the reverse benchmark.
 
 ## 5. New eval config — `evaluation/conf/amazon-big5.yaml`
 
-Mirror [evaluation/conf/500m.yaml](../evaluation/conf/500m.yaml). The numbers below assume final N≈4.5M post rating‑≥4 + 3‑core; refine after Stage 1 prints actual N.
+Mirror [evaluation/conf/500m.yaml](../../evaluation/conf/500m.yaml). The numbers below assume final N≈4.5M post rating‑≥4 + 3‑core; refine after Stage 1 prints actual N.
 
 ```yaml
 checkpoint: checkpoints/gsasrec-amazon-big5-d128-drop0.5/best_model.pt
@@ -222,10 +222,10 @@ filters:
 
 Read‑only references:
 - [amazon-prompt.md](amazon-prompt.md) — pipeline spec, rating ≥ 4, 5‑core, leave‑last‑out
-- [evaluation/retrieval/eval_quality.py:17-73](../evaluation/retrieval/eval_quality.py#L17-L73) — EvalDataset already builds `query_attrs` from the first target's attrs; the only thing missing is the producer
-- [retrieve/src/retrieve/layers/utils/filters.py:25-66](../retrieve/src/retrieve/layers/utils/filters.py#L25-L66) — exact tensor shape contract for ClauseIndex
-- [retrieve/src/retrieve/kernels/triton/filters/clause_compact.py](../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py) — fused kernel; confirm A_max and C upper bounds before sizing the tensor
-- [evaluation/conf/500m.yaml](../evaluation/conf/500m.yaml) — template
+- [evaluation/retrieval/eval_quality.py:17-73](../../evaluation/retrieval/eval_quality.py#L17-L73) — EvalDataset already builds `query_attrs` from the first target's attrs; the only thing missing is the producer
+- [retrieve/src/retrieve/layers/utils/filters.py:25-66](../../retrieve/src/retrieve/layers/utils/filters.py#L25-L66) — exact tensor shape contract for ClauseIndex
+- [retrieve/src/retrieve/kernels/triton/filters/clause_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py) — fused kernel; confirm A_max and C upper bounds before sizing the tensor
+- [evaluation/conf/500m.yaml](../../evaluation/conf/500m.yaml) — template
 
 Files to create:
 - `evaluation/data/amazon.py` — Stage 1 + Stage 2 above
@@ -248,7 +248,7 @@ Files to extend:
    - `torch.bincount(item_attrs[:, 3, 0].clamp(min=0))[1:].topk(20)` — top‑20 stores; should be different from top brands (resellers vs manufacturers).
 3. **Filter selectivity smoke:** run one query through `clause_compact` for each sweep entry on the full corpus; the returned `counts` mean should match §3's table within an order of magnitude.
 4. **Quality smoke:** run `eval_quality.py --use-attrs --active-clauses 4 --index silvertorch` — recall@10 should be ≥ the no‑filter case (filtering to plausible candidates can only help when the target shares attrs with relevant items).
-5. **Latency benchmark:** run the full `amazon-big5.yaml` sweep through the existing bench harness ([retrieve/tests/bench/run.py](../retrieve/tests/bench/run.py)). Plot latency, recall, and visit rate against selectivity. Compare the silvertorch curve at ~1.0 % visit rate against [evaluation/conf/500m.yaml](../evaluation/conf/500m.yaml)'s same setting on Yambda — per‑query latency should scale roughly linearly with N (Amazon ~2.4× larger than Yambda).
+5. **Latency benchmark:** run the full `amazon-big5.yaml` sweep through the existing bench harness ([retrieve/tests/bench/run.py](../../retrieve/tests/bench/run.py)). Plot latency, recall, and visit rate against selectivity. Compare the silvertorch curve at ~1.0 % visit rate against [evaluation/conf/500m.yaml](../../evaluation/conf/500m.yaml)'s same setting on Yambda — per‑query latency should scale roughly linearly with N (Amazon ~2.4× larger than Yambda).
 
 ## 8. Open question — the negation semantics
 

@@ -93,7 +93,7 @@ _D128_DROP05 = {
 
 def load_model(checkpoint_path: Path, num_items: int, device: torch.device) -> GSASRec:
     """Read sibling config.json when present (smoke ckpt has it); fall back to
-    the d128-drop0.5 hyperparams from docs/checkpoints.md (formerly CHECKPOINTS.md;
+    the d128-drop0.5 hyperparams from docs/system/checkpoints.md (formerly CHECKPOINTS.md;
     500M ckpts don't ship one).
     """
     cfg_path = checkpoint_path.parent / "config.json"
