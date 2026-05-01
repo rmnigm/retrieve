@@ -33,7 +33,7 @@ class EvalDataset(Dataset):
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, list[int]]:
         seq = self.sequences[idx]
         if len(seq) > self.max_length:
-            seq = seq[-self.max_length:]
+            seq = seq[-self.max_length :]
         if len(seq) < self.max_length:
             seq = [self.padding_value] * (self.max_length - len(seq)) + seq
         return torch.tensor(seq, dtype=torch.long), self.targets[idx]
@@ -90,9 +90,7 @@ def evaluate(
     item_embs = model.get_output_embeddings().weight.detach()  # [N+1, D]
     n_total = item_embs.shape[0]
     chunk = min(max(score_chunk, 1), n_total)
-    coverage_seen = {
-        k: torch.zeros(num_items + 1, dtype=torch.bool, device=dev) for k in ks
-    }
+    coverage_seen = {k: torch.zeros(num_items + 1, dtype=torch.bool, device=dev) for k in ks}
     accum: dict[str, list[float]] | None = None
     k_max = min(max(ks), num_items)
     amp_enabled = use_amp and dev.type == "cuda"
@@ -139,8 +137,7 @@ def evaluate(
 
     out_full = finalize_metrics(accum) if accum is not None else {}
     out: dict[str, float] = {
-        key: val for key, val in out_full.items()
-        if key.startswith(("ndcg@", "recall@"))
+        key: val for key, val in out_full.items() if key.startswith(("ndcg@", "recall@"))
     }
     for k in ks:
         out[f"coverage@{k}"] = float(coverage_seen[k][1:].sum().item()) / max(num_items, 1)

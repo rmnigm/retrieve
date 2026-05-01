@@ -3,11 +3,11 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
-from retrieve.layers.utils.compact import compact_mask
+from retrieve.interfaces import FilterModule
 
 
-class ClauseIndex(torch.nn.Module):
-    """Standalone clause-attribute filter. See docs/system/architecture.md (formerly docs/ARCHITECTURE.md).
+class ClauseIndex(FilterModule):
+    """Standalone clause-attribute filter.
 
     Decoupled from any retrieval module — callers compose:
 
@@ -16,8 +16,8 @@ class ClauseIndex(torch.nn.Module):
         ids, cs = ci.evaluate_indices(qa)     # for V2 (sparse path)
     """
 
-    item_clause_attrs: Tensor
-    clause_is_reverse: Tensor
+    item_clause_attrs: Tensor  # [N, C, A_max] int64
+    clause_is_reverse: Tensor  # [C] bool
 
     def __init__(self) -> None:
         super().__init__()
@@ -26,6 +26,7 @@ class ClauseIndex(torch.nn.Module):
         self,
         item_clause_attrs: Tensor,
         clause_is_reverse: Tensor | None = None,
+        item_embs: Tensor | None = None,
     ) -> None:
         c = item_clause_attrs.shape[1]
         self.register_buffer("item_clause_attrs", item_clause_attrs)
@@ -63,4 +64,27 @@ class ClauseIndex(torch.nn.Module):
                 self.clause_is_reverse,
                 query_clause_attrs,
             )
+        from retrieve.layers.utils.compact import compact_mask
+
         return compact_mask(self.evaluate_mask(query_clause_attrs))
+
+    def evaluate_subset(
+        self,
+        query_clause_attrs: Tensor,
+        candidate_ids: Tensor,
+    ) -> Tensor:
+        """Apply this filter only to ``candidate_ids: [B, P]``.
+
+        Gathers ``item_clause_attrs[candidate_ids]`` to ``[B, P, C, A_max]``
+        and broadcasts equality with ``q[:, None, :, None]``. No full-N scan.
+        Reverse-clause and inactive-query (-1) semantics match ``evaluate_mask``.
+        """
+        gathered = self.item_clause_attrs[candidate_ids]  # [B, P, C, A_max]
+        q = query_clause_attrs.unsqueeze(1).unsqueeze(-1)  # [B, 1, C, 1]
+        match = gathered == q  # [B, P, C, A_max]
+        clause_pass = match.any(dim=-1)  # [B, P, C]
+        rev = self.clause_is_reverse.unsqueeze(0).unsqueeze(0)  # [1, 1, C]
+        clause_pass = torch.where(rev, ~clause_pass, clause_pass)
+        inactive = (query_clause_attrs == -1).unsqueeze(1)  # [B, 1, C]
+        clause_pass = clause_pass | inactive
+        return clause_pass.all(dim=-1)  # [B, P]

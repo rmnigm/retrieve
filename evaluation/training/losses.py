@@ -28,9 +28,7 @@ def gbce_loss(
     pos_probs = torch.clamp(torch.sigmoid(pos_scores.double()), eps, 1 - eps)
     pos_adj = torch.clamp(pos_probs.pow(-beta), 1 + eps, torch.finfo(torch.float64).max)
     pos_transformed = (
-        torch.clamp(1.0 / (pos_adj - 1), eps, torch.finfo(torch.float64).max)
-        .log()
-        .float()
+        torch.clamp(1.0 / (pos_adj - 1), eps, torch.finfo(torch.float64).max).log().float()
     )
 
     logits = torch.cat([pos_transformed, neg_scores], dim=1)

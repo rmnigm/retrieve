@@ -2,7 +2,7 @@
 
 Fixture sizes mirror the LinR paper's small evaluation slice (D=128,
 batch=16, K=200) at a smaller N so the suite stays interactive on a single
-GPU. Larger-N latency lives in ``tests/bench/``.
+GPU. Latency / recall-vs-N benchmarks live in ``evaluation/``.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 import torch
 
+from retrieve.layers.filters import ClauseIndex
 from retrieve.layers.linr.builder import build_linr_index
 from retrieve.layers.linr.v1 import LiNR_V1
 from retrieve.layers.linr.v1_triton import LiNR_V1_Triton
@@ -18,7 +19,6 @@ from retrieve.layers.linr.v2_triton import LiNR_V2_Triton
 from retrieve.layers.linr.v3 import LiNR_V3
 from retrieve.layers.linr.v3_triton import LiNR_V3_Triton
 from retrieve.layers.utils.compact import compact_mask
-from retrieve.layers.utils.filters import ClauseIndex
 from retrieve.layers.utils.retrieval import FullScanKNN
 from tests.conftest import (
     make_attrs,
@@ -291,3 +291,68 @@ class TestClauseDecoupledComposition:
         for b in range(B):
             valid = torch.isfinite(scores[b]) & (ids[b] >= 0)
             assert expected_mask[b, ids[b][valid]].all()
+
+
+# ---------------------------------------------------------------------------
+# Edge cases — boundary conditions every retrieval module should handle.
+# ---------------------------------------------------------------------------
+
+
+class TestEdgeCases:
+    @pytest.mark.parametrize("cls", [LiNR_V1, LiNR_V1_Triton, LiNR_V3, LiNR_V3_Triton])
+    def test_mask_all_true_equals_unmasked(self, data, cls):
+        """All-True mask path returns the same top-K id set as the unmasked path."""
+        m = cls(k=K)
+        m.register_index(data["embs"])
+        ids_no_mask, _ = m(data["query"])
+        all_true = torch.ones(B, N, dtype=torch.bool, device="cuda")
+        ids_masked, _ = m(data["query"], mask=all_true)
+        for b in range(B):
+            assert set(ids_no_mask[b].tolist()) == set(ids_masked[b].tolist())
+
+    @pytest.mark.parametrize("cls", [LiNR_V1, LiNR_V1_Triton, LiNR_V3, LiNR_V3_Triton])
+    def test_mask_all_false_returns_no_finite_scores(self, data, cls):
+        """All-False mask → every score is -inf; no valid (finite-score) result."""
+        m = cls(k=K)
+        m.register_index(data["embs"])
+        all_false = torch.zeros(B, N, dtype=torch.bool, device="cuda")
+        _, scores = m(data["query"], mask=all_false)
+        assert not torch.isfinite(scores).any()
+
+    @pytest.mark.parametrize("cls", [LiNR_V2, LiNR_V2_Triton])
+    def test_v2_candidate_ids_p_zero(self, data, cls):
+        """``candidate_ids`` with shape [B, 0] → all-padding return."""
+        m = cls(k=K)
+        m.register_index(data["embs"])
+        empty = torch.empty(B, 0, dtype=torch.long, device="cuda")
+        ids, scores = m(data["query"], candidate_ids=empty)
+        assert ids.shape == (B, K)
+        assert (ids == -1).all()
+        assert not torch.isfinite(scores).any()
+
+    @pytest.mark.parametrize("cls", [LiNR_V1, LiNR_V1_Triton])
+    def test_b_one(self, data, cls):
+        """Single-query batch — Triton tile-parallel path masks padded rows."""
+        m = cls(k=K)
+        m.register_index(data["embs"])
+        q = data["query"][:1]
+        ids, scores = m(q)
+        assert ids.shape == (1, K)
+        assert torch.isfinite(scores).all()
+        # Returned ids must match a torch reference top-K (set equality, fp32 ties).
+        ref_scores = q @ data["embs"].t()
+        _, ref_ids = torch.topk(ref_scores, K, dim=1)
+        assert set(ids[0].tolist()) == set(ref_ids[0].tolist())
+
+    @pytest.mark.parametrize("cls", [LiNR_V1, LiNR_V1_Triton])
+    def test_k_equals_n(self, data, cls):
+        """K=N — every item returned, no padding, scores still descending."""
+        m = cls(k=N)
+        m.register_index(data["embs"])
+        ids, scores = m(data["query"])
+        assert ids.shape == (B, N)
+        # Each row is a permutation of [0, N).
+        for b in range(B):
+            assert sorted(ids[b].tolist()) == list(range(N))
+        # Scores descending.
+        assert (scores[:, :-1] >= scores[:, 1:]).all()

@@ -107,7 +107,7 @@ and feed it the user's recent listen sequence.
 
 ## Running offline evaluation
 
-Reuses [`training/evaluate.py`](training/evaluate.py) — full-catalog ranking + NDCG/Recall/Coverage
+Reuses [`training/evaluate.py`](../../evaluation/training/evaluate.py) — full-catalog ranking + NDCG/Recall/Coverage
 @10/100 against `val.parquet` / `test.parquet`. Defaults to no history masking,
 which is the correct setting for re-listen tasks like Listen+.
 
@@ -201,26 +201,26 @@ hf_hub_download(repo_id="<owner>/gsasrec-500m-listens-d128-drop0.5",
 ### Uploading a new checkpoint
 
 After a training run finishes, push the resulting dir with the helper at
-[`scripts/upload_checkpoints.py`](scripts/upload_checkpoints.py). It creates
+[`scripts/upload_checkpoints.py`](../../evaluation/scripts/upload_checkpoints.py). It creates
 one HF model repo per checkpoint dir, generates a minimal model card from
 `eval_quality.json` / `config.json`, and uses LFS automatically for the
 large `.pt` files.
 
 ```bash
 # Dry-run first to confirm the file list:
-uv run python -m scripts.upload_checkpoints \
+uv run upload-checkpoints \
     --owner <hf-user-or-org> \
     --checkpoint gsasrec-500m-listens-d128-drop0.5 \
     --private --dry-run
 
 # Real upload:
-uv run python -m scripts.upload_checkpoints \
+uv run upload-checkpoints \
     --owner <hf-user-or-org> \
     --checkpoint gsasrec-500m-listens-d128-drop0.5 \
     --private
 
 # Upload every dir under checkpoints/ in one go:
-uv run python -m scripts.upload_checkpoints --owner <hf-user-or-org> --checkpoint all --private
+uv run upload-checkpoints --owner <hf-user-or-org> --checkpoint all --private
 ```
 
 By default the script skips the epoch-tagged `gsasrec-ep*-ndcg*.pt` snapshot

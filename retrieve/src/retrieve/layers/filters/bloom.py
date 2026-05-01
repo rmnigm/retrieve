@@ -3,39 +3,43 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
+from retrieve.interfaces import FilterModule
 
-class BloomIndex(torch.nn.Module):
-    """Per-item Bloom-signature attribute filter."""
 
-    bloom_sigs: Tensor
-    hash_seeds: Tensor
+class BloomFilter(FilterModule):
+    """Per-item Bloom-signature attribute filter (paper-strict, conjunctive).
 
-    def __init__(self) -> None:
+    Items: ``[N, C, A_max]`` int64 with ``-1`` padding. Each item's signature is
+    the OR of ``k_hash`` hash positions per non-pad attribute, packed into
+    ``W = m_bits // 64`` int64 words. Query: ``[B, C]`` int64 (single attribute
+    per clause; ``-1`` is inactive). Subset test ``(qb & sigs) == qb`` per word,
+    AND-reduced.
+
+    No reverse / NOT — that path stays in ``ClauseIndex``.
+    """
+
+    bloom_sigs: Tensor  # [N, W] int64
+    hash_seeds: Tensor  # [k_hash, 2] int64
+
+    def __init__(self, m_bits: int, k_hash: int) -> None:
         super().__init__()
-        self.m_bits: int = 0
-        self.k_hash: int = 0
-        self.word_count: int = 0
-
-    def register_index(
-        self,
-        item_clause_attrs: Tensor,
-        m_bits: int,
-        k_hash: int,
-    ) -> None:
         if m_bits <= 0 or (m_bits & (m_bits - 1)) != 0:
             raise ValueError(f"m_bits must be a positive power of 2, got {m_bits}")
         if m_bits % 64 != 0:
             raise ValueError(f"m_bits must be a multiple of 64, got {m_bits}")
         if k_hash <= 0:
             raise ValueError(f"k_hash must be positive, got {k_hash}")
-
         self.m_bits = m_bits
         self.k_hash = k_hash
         self.word_count = m_bits // 64
 
-        seeds = _generate_seeds(k_hash, device=item_clause_attrs.device)
+    def register_index(
+        self,
+        item_clause_attrs: Tensor,
+        item_embs: Tensor | None = None,
+    ) -> None:
+        seeds = _generate_seeds(self.k_hash, device=item_clause_attrs.device)
         self.register_buffer("hash_seeds", seeds)
-
         sigs = _build_signatures(
             item_clause_attrs.long(),
             seeds,
@@ -45,17 +49,32 @@ class BloomIndex(torch.nn.Module):
         )
         self.register_buffer("bloom_sigs", sigs)
 
-    def evaluate(self, query_clause_attrs: Tensor) -> Tensor:
-        attrs_3d = query_clause_attrs.long().unsqueeze(-1)  # [B, C, 1]
-        qb = _build_signatures(
-            attrs_3d,
+    def _build_query_sigs(self, query_clause_attrs: Tensor) -> Tensor:
+        return _build_signatures(
+            query_clause_attrs.long().unsqueeze(-1),
             self.hash_seeds,
             self.m_bits,
             self.k_hash,
             self.word_count,
         )
-        # qb: [B, W]; sigs: [N, W]; subset test: (qb & sig) == qb
+
+    def evaluate_mask(self, query_clause_attrs: Tensor) -> Tensor:
+        qb = self._build_query_sigs(query_clause_attrs)  # [B, W]
+        if qb.is_cuda:
+            from retrieve.kernels.triton.silvertorch.bloom_match import bloom_match
+
+            return bloom_match(qb, self.bloom_sigs)
         match = (qb.unsqueeze(1) & self.bloom_sigs.unsqueeze(0)) == qb.unsqueeze(1)
+        return match.all(dim=-1)
+
+    def evaluate_subset(
+        self,
+        query_clause_attrs: Tensor,
+        candidate_ids: Tensor,
+    ) -> Tensor:
+        qb = self._build_query_sigs(query_clause_attrs)  # [B, W]
+        sigs = self.bloom_sigs[candidate_ids]  # [B, P, W]
+        match = (qb.unsqueeze(1) & sigs) == qb.unsqueeze(1)  # [B, P, W]
         return match.all(dim=-1)
 
 

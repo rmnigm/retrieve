@@ -17,18 +17,25 @@ Two retrieval families live side by side, both implementing the
 - **LiNR** ([`layers/linr/`](../../retrieve/src/retrieve/layers/linr/)) — three
   versions (V1 dense, V2 sparse pre-filter, V3 1-bit OPORP) with separate
   pure-torch and Triton-fused backends. Filtering is **decoupled**: each
-  forward takes a mask or a candidate-id buffer the caller computed via
-  [`ClauseIndex`](../../retrieve/src/retrieve/layers/utils/filters.py),
-  [`compact_mask`](../../retrieve/src/retrieve/layers/utils/compact.py), or any
-  upstream cascade.
+  forward takes a mask or a candidate-id buffer the caller computed via a
+  [`FilterModule`](../../retrieve/src/retrieve/interfaces.py)
+  ([`ClauseIndex`](../../retrieve/src/retrieve/layers/filters/clause.py) /
+  [`BloomFilter`](../../retrieve/src/retrieve/layers/filters/bloom.py)),
+  [`compact_mask`](../../retrieve/src/retrieve/layers/utils/compact.py), or
+  any upstream cascade composed via
+  [`combine_masks` / `combine_indices`](../../retrieve/src/retrieve/layers/filters/__init__.py).
 - **SilverTorch** ([`layers/silvertorch/`](../../retrieve/src/retrieve/layers/silvertorch/)) —
   co-designed IVF + INT8 ANN + Bloom attribute filter, all fused in one
   Triton kernel. Filtering is **inline** (Bloom signatures live on the
   module); no standalone `ClauseIndex` is wired in.
 
-Utility modules live in [`layers/utils/`](../../retrieve/src/retrieve/layers/utils/):
-`ClauseIndex`, `compact_mask`, `FullScanKNN`, `DotProductScorer`, and the
-quantizers (`quantize_int8`, `quantize_oporp_1bit`).
+Filter modules live in [`layers/filters/`](../../retrieve/src/retrieve/layers/filters/):
+`ClauseIndex` (exact, supports reverse), `BloomFilter` (approximate,
+conjunctive), and the `combine_masks` / `combine_indices` composition
+helpers. Both filters subclass [`FilterModule`](../../retrieve/src/retrieve/interfaces.py).
+Other utilities live in [`layers/utils/`](../../retrieve/src/retrieve/layers/utils/):
+`compact_mask`, `FullScanKNN`, `DotProductScorer`, and the quantizers
+(`quantize_int8`, `quantize_oporp_1bit`).
 
 ## Clause / attribute data layout
 
@@ -53,24 +60,38 @@ Semantics:
 
 ## Filter composition
 
-`ClauseIndex` exposes two evaluators with no implicit conversion between
-them — callers pick the one that matches the LiNR variant they're feeding:
+The [`FilterModule`](../../retrieve/src/retrieve/interfaces.py) contract
+exposes three native evaluators; concrete filters override whichever has
+a fused kernel and inherit cheap defaults for the rest:
 
 - `evaluate_mask(query_clause_attrs) → [B, N] bool` — dense path, used by
-  V1 (which masks scores in place). Pure torch.
+  V1 (which masks scores in place) and V3's mask path. ClauseIndex: pure
+  torch broadcast. BloomFilter: routes to the `bloom_match` Triton kernel
+  on CUDA, pure-torch subset test on CPU.
 - `evaluate_indices(query_clause_attrs) → (positive_indices[B, P] int64,
   counts[B] int64)` — sparse path, used by V2 and V3's masked-Triton path.
-  On CUDA this routes to the fused `clause_compact` Triton kernel; on CPU
-  it falls back to `evaluate_mask` followed by [`compact_mask`](../../retrieve/src/retrieve/layers/utils/compact.py).
+  ClauseIndex routes to the fused `clause_compact` Triton kernel on CUDA;
+  default falls back to `compact_mask(evaluate_mask)`.
+- `evaluate_subset(query_clause_attrs, candidate_ids) → [B, P] bool` —
+  apply a filter only to the given candidate ids. Both filters override
+  this for cheap-when-P-small paths via gather + broadcast/word-wise
+  subset test; default is `evaluate_mask(...).gather(1, candidate_ids)`.
 
-Callers that already have a bool mask from some other source (a Bloom
-filter, a hand-rolled predicate, an external mask passed through the API)
-use [`compact_mask`](../../retrieve/src/retrieve/layers/utils/compact.py)
+Callers that already have a bool mask from some other source (a hand-rolled
+predicate, an external mask passed through the API) use
+[`compact_mask`](../../retrieve/src/retrieve/layers/utils/compact.py)
 directly to convert it to the `(positive_indices, counts)` form V2 wants.
 
-There is no `combine_masks` helper today — the unified filter API
-(including AND-of-masks composition) is proposed in
-[filtering-api.md](../plans/filtering-api.md).
+Two composition helpers ship in
+[`layers/filters/__init__.py`](../../retrieve/src/retrieve/layers/filters/__init__.py):
+
+- `combine_masks(*masks)` — element-wise AND of N optional `[B, N]` masks,
+  None-tolerant; one torch op, no kernel.
+- `combine_indices(filters, queries)` — sparse cascade. The first filter
+  produces `(ids, counts)` via its native compact path; each subsequent
+  filter is invoked via `evaluate_subset` on those ids and the survivors
+  are re-compacted. No `[B, N]` from the cascade itself. Caller orders
+  filters most-selective first.
 
 ## LiNR variants
 
@@ -152,8 +173,26 @@ pure Triton). Full per-kernel detail in [kernels.md](kernels.md).
 | [`linr/`](../../retrieve/src/retrieve/kernels/triton/linr/)                                             | [`oporp_1bit_match_topk`](../../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py) — XOR + popcount, all V3 paths         | `LiNR_V3_Triton`                  |
 | [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/)                                       | [`clause_compact`](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py) — fused clause eval + stream compaction          | `ClauseIndex.evaluate_indices`    |
 | [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`codesigned_probe_score`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py) — fused IVF + INT8 + Bloom    | `SilverTorch`, `IVF_INT8_ANN`     |
-| [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`bloom_match`](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py) — bool subset test (standalone)                     | bench-only, no production caller  |
-| [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`int8_ann_fused`](../../retrieve/src/retrieve/kernels/triton/silvertorch/int8_ann_fused.py) — INT8 candidate scorer (standalone)          | bench-only, no production caller  |
+| [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`bloom_match`](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py) — bool subset test (standalone)                     | `BloomFilter.evaluate_mask`       |
+| [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`int8_ann_fused`](../../retrieve/src/retrieve/kernels/triton/silvertorch/int8_ann_fused.py) — INT8 candidate scorer (standalone)          | parity test only, no production caller |
+
+Two filter-tree kernels are designed but deliberately not shipped —
+`bloom_compact` (`BloomFilter.evaluate_indices` fused) and `clause_mask`
+(`ClauseIndex.evaluate_mask` fused). Both are pure perf swaps over the
+existing `FilterModule` contract: callers don't change when they land.
+Triggers and design sketches in
+[filter-kernels-followup.md](../plans/filter-kernels-followup.md).
+
+## Testing
+
+Tests live in [`retrieve/tests/`](../../retrieve/tests/) and split by purpose,
+not by module: [`correctness/`](../../retrieve/tests/correctness/) for module-
+level semantics against torch baselines, [`parity/`](../../retrieve/tests/parity/)
+for Triton kernel vs pure-torch agreement. The suite is GPU-only and skipped
+without CUDA via the root [`conftest.py`](../../retrieve/tests/conftest.py)
+gate. Performance characterization (latency, memory, recall sweeps) lives in
+[`evaluation/`](../../evaluation/), not in `tests/`. Full reference in
+[testing.md](testing.md).
 
 ## Builder layout
 

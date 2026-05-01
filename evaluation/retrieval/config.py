@@ -29,6 +29,8 @@ class EvalConfig:
     split: str = "test"
     device: str = "cuda"
     ks: list[int] = field(default_factory=lambda: [100, 500])
+    batch_sizes: list[int] = field(default_factory=lambda: [1, 8, 16])
+    seed: int = 0
     encode: EncodeConfig = field(default_factory=EncodeConfig)
     algorithms: list[str] = field(default_factory=list)
     algo_params: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -37,5 +39,8 @@ class EvalConfig:
 def load_eval_config(path: Path) -> EvalConfig:
     with open(path) as f:
         raw = yaml.safe_load(f) or {}
+    # YAML anchor scratch keys (e.g. `_defaults: &defaults …`) live at the
+    # top level after parsing; drop them before constructing the dataclass.
+    raw = {k: v for k, v in raw.items() if not k.startswith("_")}
     encode = EncodeConfig(**(raw.pop("encode", None) or {}))
     return EvalConfig(encode=encode, **raw)

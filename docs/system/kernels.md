@@ -4,13 +4,26 @@
 
 > Previously: `retrieve/docs/kernels.md` (originally `retrieve/docs/KERNELS.md`).
 
-The Triton kernels split into three trees by domain: [`linr/`](../../retrieve/src/retrieve/kernels/triton/linr/)
-holds the kernels used by LinR V1/V2/V3, [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/)
-holds the standalone clause-evaluation kernel that powers
-`ClauseIndex.evaluate_indices`, and [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)
-holds those used by SilverTorch. The LinR kernels are the focus of this doc;
-`clause_compact` and the SilverTorch kernels are covered briefly at the
-end for context.
+The Triton kernels split into three trees by domain:
+
+- [`linr/`](../../retrieve/src/retrieve/kernels/triton/linr/) — kernels
+  used by LinR V1/V2/V3 (`fused_matmul_topk`, `fused_masked_knn_topk`,
+  `oporp_1bit_match_topk`).
+- [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/) —
+  standalone filter primitives consumed by the `FilterModule` family.
+  Today: `clause_compact` (powers `ClauseIndex.evaluate_indices`).
+  Designed-but-deferred: `bloom_compact` and `clause_mask` — see
+  §[Deferred kernels](#deferred-kernels) and
+  [filter-kernels-followup.md](../plans/filter-kernels-followup.md).
+- [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/) —
+  `codesigned_probe_score` (the IVF + INT8 + Bloom co-design) plus
+  `bloom_match` (lives in this tree for historical reasons but is now a
+  cross-tree filter primitive consumed by `BloomFilter`) and the
+  unattached `int8_ann_fused`.
+
+The LinR kernels are the focus of this doc; the filter primitives
+(`clause_compact`, `bloom_match`) are covered next, and the SilverTorch-
+only kernels at the end for context.
 
 All kernels follow the same conventions:
 
@@ -71,8 +84,9 @@ queries land on tensor cores — the kernel masks the padded rows on store.
 **Inner loop** is a single `tl.dot(q_tile, item_tile.T)` over the full `D`
 axis (no K-loop because `D=128` fits in one tile). The matmul lands on
 tensor cores. Tile-blocked reduction order means scores can drift ~1e-4
-fp32 vs cuBLAS's row-major reduction — bench tests use a tolerant
-top-K matcher; bit-exact parity is **not** asserted for this kernel.
+fp32 vs cuBLAS's row-major reduction — parity tests use a tolerant
+top-K matcher (set + sorted-score); bit-exact parity is **not** asserted
+for this kernel.
 
 **Mask path** (`HAS_MASK=True`): a single `tl.load` of `mask[m, n]` and
 `tl.where(m, scores, -inf)` in the same program. No second pass.
@@ -206,6 +220,47 @@ hard-coded — `tl.atomic_add` accumulates across autotune trials and would
 corrupt `counts`. If a sweep is needed later, re-enable autotune with
 `reset_to_zero` covering both `counts_ptr` and `out_indices_ptr`.
 
+## `bloom_match` — Bloom subset test
+
+[`kernels/triton/silvertorch/bloom_match.py`](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py).
+Lives in the SilverTorch kernel tree for historical reasons (it was
+written when only SilverTorch's bench tests consumed it) but is now a
+standalone filter primitive: powers
+[`BloomFilter.evaluate_mask`](../../retrieve/src/retrieve/layers/filters/bloom.py)
+on CUDA. SilverTorch's in-cluster bloom is fused separately into
+`codesigned_probe_score`; the two paths are independent.
+
+Implements the conjunctive subset test `(qb & sigs) == qb` reduced over
+`W` int64 words. Both inputs are pre-built host-side via
+`_build_signatures` ([layers/filters/bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py))
+so the kernel is purely a bitwise reduction.
+
+```
+inputs:    qb     [B, W]     int64    packed query bloom signature
+           sigs   [N, W]     int64    packed item bloom signatures
+output:    mask   [B, N]     bool     (qb & sigs[n]) == qb, AND over W
+```
+
+**Launch grid** `(B, cdiv(N, BLOCK_N))`, identical 2-D shape to
+`oporp_1bit_match_topk` (this kernel is the structural ancestor of
+that one — the popcount step is the only material difference). Each
+program loads `qb[b, :]` once, then a `[BLOCK_N, W]` tile of `sigs`,
+and emits `[BLOCK_N]` bool to the output buffer.
+
+**Inner op**: `(qb[None, :] & sigs) == qb[None, :]` per-word, then
+`tl.min` over the `W` axis to AND-reduce. The min-of-int trick avoids a
+boolean reduction Triton doesn't have; the cast back to bool is on store.
+
+**Wins** 10–20× over the pure-torch broadcast `(qb.unsqueeze(1) & sigs)
+== qb.unsqueeze(1)).all(-1)` because the broadcast materializes
+`[B, N, W]` int64 (24 GiB at `B=64, N=2M, W=16` worst case) before the
+reduction; the kernel keeps the tile in registers.
+
+**No autotune** today — fixed `BLOCK_N = 128 if N >= 128 else
+next_power_of_2(N)`. The `bloom_compact` follow-up
+([§Deferred kernels](#deferred-kernels)) will use the same launch shape
+plus the cumsum + atomic_add tail from `clause_compact`.
+
 ## Layer dispatch
 
 Each LinR Triton subclass is a thin router from the `forward()` signature
@@ -263,17 +318,23 @@ Two failure modes worth keeping in mind:
    tensor-core tile order; cuBLAS reduces in row-major order. fp32 scores
    drift ~1e-4–1e-3 absolute, which can flip top-K ordering at ties near
    the K-th boundary. Parity tests use [`assert_topk_matches`](../../retrieve/tests/parity/conftest.py)
-   (set + sorted-score tolerance); the bench harness uses [`topk_matches`](../../retrieve/tests/bench/conftest.py).
-   Bit-exact parity is **not** an invariant for V1/V2 and never was.
+   (set + sorted-score tolerance). Bit-exact parity is **not** an
+   invariant for V1/V2 and never was.
 
 2. **OPORP popcount is bit-exact.** V3's torch reference and the Triton
    kernel both use the same SWAR popcount on the same packed bits, so
-   `recall@K_torch` and `recall@K_triton` agree to the third decimal
-   in [bench.md](bench.md). If they ever diverge, a popcount or packing
-   bug has been introduced — the kernel's correctness depends on bit
-   identity here.
+   the parity test in
+   [`test_oporp_1bit_match_topk.py`](../../retrieve/tests/parity/test_oporp_1bit_match_topk.py)
+   asserts strict equality on returned ids and scores. If they ever
+   diverge, a popcount or packing bug has been introduced — the kernel's
+   correctness depends on bit identity here.
 
-## SilverTorch kernels (out of scope, kept for completeness)
+## SilverTorch kernels
+
+Two kernels live in the SilverTorch tree without a non-SilverTorch
+consumer; described briefly for context. (`bloom_match` also lives in
+this tree but is documented above as a filter primitive — it has a
+non-SilverTorch consumer now.)
 
 [`codesigned_probe_score`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py)
 is the actively-used SilverTorch kernel and powers
@@ -284,16 +345,30 @@ attribute filter inline (skipped entirely when `query_clause_attrs=None`).
 Autotune key includes `HAS_QB` and `HAS_MASK` so the cluster-only,
 bloom+cluster, and externally-masked paths each get their own configs.
 
-[`bloom_match`](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py)
-is the standalone bloom-filter subset test — `(qb & sigs) == qb` reduced
-over W int64 words. 2-D grid, the structural model the OPORP kernel was
-based on. Wins 10–20× over the torch broadcast version. SilverTorch fuses
-this primitive inline into `codesigned_probe_score`, so the standalone
-kernel currently has no production caller — only bench tests.
-
 [`int8_ann_fused`](../../retrieve/src/retrieve/kernels/triton/silvertorch/int8_ann_fused.py)
 is the standalone int8 candidate scorer (gather codes → cast fp32 → dot
 → scale). After V3's pivot to 1-bit, no LinR layer consumes this kernel
 either; it remains in the SilverTorch tree pending a focused SilverTorch
 pass that should either move it to a `dp4a`/`mma.s8` int32 accumulator
 path (per the SilverTorch paper) or remove it. Untouched in this run.
+
+## Deferred kernels
+
+Two filter-tree kernels are designed but deliberately not shipped — both
+gated on profile data, both pure perf swaps over a stable
+`FilterModule` contract (callers don't change when they land):
+
+- **`bloom_compact`** — fused subset-test + stream-compaction for
+  `BloomFilter.evaluate_indices`. Today the default falls through to
+  `compact_mask(bloom_match(.))`, materializing `[B, N]` bool plus a
+  host-side argsort. The fused kernel would copy `clause_compact`'s
+  cumsum + `atomic_add` tail with `bloom_match`'s subset-test inner loop.
+- **`clause_mask`** — fused clause evaluation that emits `[B, N]` bool
+  directly, replacing `ClauseIndex.evaluate_mask`'s pure-torch broadcast
+  (which materializes a `[B, N, C, A_max]` intermediate). Structurally
+  `clause_compact` minus the cumsum + `atomic_add` epilogue.
+
+Triggers, kernel sketches, parity-test plans, and the touch list for
+each are in [filter-kernels-followup.md](../plans/filter-kernels-followup.md).
+Don't ship speculatively — the contract guarantees we can drop them in
+later as a perf swap, not an API change.

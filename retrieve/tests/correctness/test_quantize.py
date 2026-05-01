@@ -91,3 +91,112 @@ def test_oporp_d_must_be_multiple_of_64():
         assert "multiple of 64" in str(e)
         return
     raise AssertionError("expected ValueError for non-multiple-of-64 D")
+
+
+def test_int8_clamp_at_extremes():
+    """Inputs at ±abs_max round to exactly ±127 with no overflow."""
+    embs = torch.tensor(
+        [
+            [1.0, -1.0, 0.5, -0.25, 1e-8, 0.0, 0.7, -0.7],
+            [2.0, -2.0, 1.0, -0.5, 1e-8, 0.0, 1.4, -1.4],
+        ],
+        device="cuda",
+    )
+    codes, scales = quantize_int8(embs)
+    # The two ±abs_max columns must round to ±127 exactly.
+    assert codes[0, 0].item() == 127
+    assert codes[0, 1].item() == -127
+    assert codes[1, 0].item() == 127
+    assert codes[1, 1].item() == -127
+    # No overflow into the int8 range past 127.
+    assert codes.max() <= 127
+    assert codes.min() >= -127
+    # Scale equals abs_max / 127 (per-row).
+    assert torch.allclose(scales, torch.tensor([1.0, 2.0], device="cuda") / 127.0, atol=1e-6)
+
+
+def test_int8_zero_input_no_nan():
+    """All-zero input must not divide by zero (clamp_min(1e-8) guard)."""
+    embs = torch.zeros(4, 8, device="cuda")
+    codes, scales = quantize_int8(embs)
+    assert torch.all(codes == 0)
+    assert torch.isfinite(scales).all()
+
+
+def test_oporp_seed_determinism():
+    """Same seed → identical (bits, signs, perm); different seed → different bits."""
+    embs = make_index(n=128, d=128, seed=0)
+    a = quantize_oporp_1bit(embs, seed=42)
+    b = quantize_oporp_1bit(embs, seed=42)
+    assert torch.equal(a[0], b[0])  # bits
+    assert torch.equal(a[1], b[1])  # signs
+    assert torch.equal(a[2], b[2])  # perm
+
+    c = quantize_oporp_1bit(embs, seed=43)
+    # Bits should almost certainly differ at this size; signs and perm definitely.
+    assert not torch.equal(a[1], c[1]) or not torch.equal(a[2], c[2])
+
+
+def test_project_oporp_query_alone():
+    """Direct test of the query projection helper, separate from V3."""
+    embs = make_index(n=64, d=128, seed=0)
+    bits, signs, perm = quantize_oporp_1bit(embs, seed=0)
+
+    # Applying the same projection to the original embs must reproduce ``bits``.
+    requeried = project_oporp_1bit_query(embs, signs, perm)
+    assert torch.equal(requeried, bits)
+
+    # Independent query batch — shape and dtype.
+    query = make_query(b=4, d=128, seed=1)
+    out = project_oporp_1bit_query(query, signs, perm)
+    assert out.shape == (4, 128 // 64)
+    assert out.dtype == torch.int64
+
+
+def test_project_oporp_query_d_must_match_perm():
+    """Mismatched D between query and OPORP buffers should raise (perm dim mismatch)."""
+    embs = make_index(n=64, d=128, seed=0)
+    _, signs, perm = quantize_oporp_1bit(embs, seed=0)
+    bad_query = torch.randn(4, 64, device="cuda")
+    try:
+        project_oporp_1bit_query(bad_query, signs, perm)
+    except (RuntimeError, IndexError):
+        return
+    raise AssertionError("expected an error when query D differs from OPORP D")
+
+
+def test_popcount_int64_against_python_reference():
+    """Cross-check the SWAR popcount against ``bin(x).count('1')`` row-wise."""
+    g = torch.Generator(device="cuda").manual_seed(0)
+    x = torch.randint(
+        torch.iinfo(torch.int64).min,
+        torch.iinfo(torch.int64).max,
+        (32,),
+        generator=g,
+        dtype=torch.int64,
+        device="cuda",
+    )
+    got = popcount_int64(x).cpu().tolist()
+
+    expected = []
+    for v in x.cpu().tolist():
+        # bin() on negatives loses the sign bit; reinterpret as unsigned 64-bit.
+        u = v & 0xFFFFFFFFFFFFFFFF
+        expected.append(bin(u).count("1"))
+    assert got == expected
+
+
+def test_popcount_int64_known_constants():
+    x = torch.tensor([0, 1, 2, 3, -1, 0x5555555555555555], dtype=torch.int64, device="cuda")
+    expected = torch.tensor([0, 1, 1, 2, 64, 32], dtype=torch.int32, device="cuda")
+    got = popcount_int64(x)
+    assert torch.equal(got, expected)
+
+
+def test_popcount_int64_rejects_non_int64():
+    x = torch.zeros(4, dtype=torch.int32, device="cuda")
+    try:
+        popcount_int64(x)
+    except TypeError:
+        return
+    raise AssertionError("expected TypeError for non-int64 input")

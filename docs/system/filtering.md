@@ -1,15 +1,14 @@
 <!-- claude code generated file -->
 
-# Filtering in `retrieve` — brief for another agent
-
-> Previously: `retrieve/docs/filtering.md` (originally `retrieve/docs/FILTERING.md`).
+# Filtering in `retrieve`
 
 This repo reproduces two retrieval papers — SilverTorch (IVF + INT8 + Bloom)
 at [retrieve/src/retrieve/layers/silvertorch/](../../retrieve/src/retrieve/layers/silvertorch/)
 and LiNR (V1 dense / V2 sparse pre-filter / V3 1-bit OPORP) at
-[retrieve/src/retrieve/layers/linr/](../../retrieve/src/retrieve/layers/linr/). This brief
-covers **filtering only**; KNN scoring, quantization, and training are out of
-scope here.
+[retrieve/src/retrieve/layers/linr/](../../retrieve/src/retrieve/layers/linr/).
+Filtering is its own subpackage: [retrieve/src/retrieve/layers/filters/](../../retrieve/src/retrieve/layers/filters/).
+This brief covers **filtering only**; KNN scoring, quantization, and training
+are out of scope here.
 
 ## What each paper specifies
 
@@ -40,102 +39,70 @@ downstream), schema-free, equality only.
 **Exact**, schema-bound, equality only. No nesting, no parens, no per-query
 boolean composition.
 
-## Implementation status in this repo
+## Implementation status
 
 | component | path | notes |
 |---|---|---|
-| LiNR clause filter | [layers/utils/filters.py](../../retrieve/src/retrieve/layers/utils/filters.py) | `evaluate_mask → [B, N]` bool; `evaluate_indices → (pos_idx, counts)` |
-| LiNR clause Triton kernel | [kernels/triton/filters/clause_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py) | fused eval + stream compaction; richer than what the paper describes |
-| Bloom build helpers | [layers/silvertorch/bloom.py](../../retrieve/src/retrieve/layers/silvertorch/bloom.py) | `_build_signatures`, `_generate_seeds`; private to the silvertorch package |
-| Bloom standalone Triton kernel | [kernels/triton/silvertorch/bloom_match.py](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py) | `(qb & sigs) == qb` → `[B, N]` bool; **no consumer in the serving path** |
-| Bloom fused into score kernel | [kernels/triton/silvertorch/codesigned_probe_score.py](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py) | conjunctive only (single `QB`), part of co-designed Algorithm 1 |
-| `FilterModule` ABC | [interfaces.py:8-19](../../retrieve/src/retrieve/interfaces.py#L8-L19) | defined; no concrete filter subclasses it yet |
-| `combine_masks(clause_mask, external_mask)` | proposed in [filtering-api.md](../plans/filtering-api.md) | missing |
+| `FilterModule` ABC | [interfaces.py](../../retrieve/src/retrieve/interfaces.py) | three native paths: `evaluate_mask`, `evaluate_indices`, `evaluate_subset`; `forward` aliases `evaluate_mask` |
+| `ClauseIndex` (exact, supports reverse) | [layers/filters/clause.py](../../retrieve/src/retrieve/layers/filters/clause.py) | `FilterModule` subclass; native `evaluate_indices` via fused kernel; `evaluate_subset` via gather + broadcast |
+| `BloomFilter` (approximate, conjunctive) | [layers/filters/bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py) | `FilterModule` subclass; paper-strict (no reverse, no DSL); native `evaluate_mask` via `bloom_match` kernel; `evaluate_subset` via gathered subset test |
+| LiNR clause Triton kernel | [kernels/triton/filters/clause_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py) | fused eval + stream compaction; consumed by `ClauseIndex.evaluate_indices` on CUDA |
+| Bloom Triton kernel | [kernels/triton/silvertorch/bloom_match.py](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py) | `(qb & sigs) == qb` → `[B, N]` bool; consumed by `BloomFilter.evaluate_mask` on CUDA |
+| Bloom fused into score kernel | [kernels/triton/silvertorch/codesigned_probe_score.py](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py) | conjunctive only (single `QB`), part of co-designed Algorithm 1; **separate path** from `BloomFilter` |
+| `combine_masks` / `combine_indices` | [layers/filters/__init__.py](../../retrieve/src/retrieve/layers/filters/__init__.py) | mask-AND composition; sparse cascade via `evaluate_subset` |
 
-## Key observation: LiNR can host *both* filter types
+## Key observation: LiNR hosts *both* filter types
 
 LiNR's `forward` is decoupled from the filter — it accepts `mask: [B, N]`
 or `candidate_ids: [B, P]` as input
 ([v1.py](../../retrieve/src/retrieve/layers/linr/v1.py),
 [v2.py](../../retrieve/src/retrieve/layers/linr/v2.py),
-[v3.py](../../retrieve/src/retrieve/layers/linr/v3.py)). Any filter that produces
-those shapes plugs in.
+[v3.py](../../retrieve/src/retrieve/layers/linr/v3.py)). Any `FilterModule`
+that produces those shapes plugs in. Both `ClauseIndex` and `BloomFilter`
+do, and they compose via `combine_masks` / `combine_indices`.
 
 Asymmetry: SilverTorch fuses Bloom *into* its score kernel
 (`codesigned_probe_score`), so swapping its filter would require a new
 fused kernel, not a wrapping. The natural extension only goes one
 direction — bring Bloom into the LiNR side as an alternative
-`FilterModule`.
+`FilterModule`. That is what `BloomFilter` is.
 
-## Proposed work — single PR
-
-### `BloomFilter` as a `FilterModule` for LiNR (~50 LoC + test)
-
-**Scope: conjunctive only.** AND of required `(feature, value)` predicates
-via `(qb & sigs) == qb`. **No DSL, no RPN walker, no NOT inside Bloom.**
-Reverse / NOT remains the `ClauseIndex` job; the two filters are
-complementary, not overlapping.
-
-Lift the existing helpers out of the silvertorch private namespace and
-wrap the standalone `bloom_match` kernel:
+## Caller patterns
 
 ```python
-class BloomFilter(FilterModule):
-    def register_index(self, item_attrs, item_embs=None):
-        seeds = _generate_seeds(self.k_hash, device=item_attrs.device)
-        self.register_buffer("hash_seeds", seeds)
-        self.register_buffer(
-            "bloom_sigs",
-            _build_signatures(item_attrs, seeds,
-                              self.m_bits, self.k_hash, self.W),
-        )
+from retrieve import (
+    BloomFilter, ClauseIndex,
+    LiNR_V1_Triton, LiNR_V2_Triton, LiNR_V3_Triton,
+    combine_indices, combine_masks,
+)
 
-    def forward(self, query_attrs):                      # [B, t] int64
-        qb = _build_signatures(
-            query_attrs.unsqueeze(-1),
-            self.hash_seeds, self.m_bits, self.k_hash, self.W,
-        )
-        return bloom_match(qb, self.bloom_sigs)           # [B, N] bool
+ci = ClauseIndex().to("cuda")
+ci.register_index(item_attrs, clause_is_reverse=is_reverse)
+
+bf = BloomFilter(m_bits=1024, k_hash=5).to("cuda")
+bf.register_index(item_attrs)
+
+# V1 / V3 mask path — combine exact + approximate.
+mask = combine_masks(ci.evaluate_mask(qa), bf.evaluate_mask(qa))
+ids, scores = linr_v1(query, mask=mask)
+
+# V2 / V3 candidate-id path — sparse cascade, most-selective filter first.
+cand_ids, counts = combine_indices([ci, bf], [qa, qa])
+ids, scores = linr_v2(query, candidate_ids=cand_ids, counts=counts)
 ```
-
-Caller pattern (no LiNR kernel changes):
-
-```python
-mask = bloom_filter(query_features)         # OR
-mask = clause_filter.evaluate_mask(query_clause_attrs)
-ids, scores = linr_v2(query, mask=mask)
-```
-
-Side benefits:
-
-- Retires the "`bloom_match` is dead code" footnote in
-  [kernels.md](kernels.md) — it's the right primitive, just had no consumer.
-- Make `ClauseIndex` officially subclass `FilterModule` (it almost does).
-- `combine_masks(clause_mask, external_mask)` — the missing helper —
-  becomes the natural way to AND two filter outputs together.
-
-## What a thesis bench should show
-
-Run both filters against any LiNR backend (V1 / V2 / V3) on two predicate
-shapes:
-
-1. **Narrow, exact** (geo + company + title, ≤ 4 attrs/clause) — expect
-   `ClauseIndex` wins on latency, exact recall.
-2. **Wide, free-form** (item-has-any-of-N tags, no fixed schema) — expect
-   `BloomFilter` wins on latency, recall asterisk for hash collisions.
-
-Neither paper does this head-to-head. It's the natural empirical
-contribution for "two filter types under one retrieval engine."
 
 ## Out of scope
 
-- DSL / nested AND/OR/NOT / RPN walker — explicit decision, keeps the PR
-  small. If full predicate-tree support is ever needed, it would be a
-  host-side parser feeding multiple `bloom_match` calls.
+- DSL / nested AND/OR/NOT / RPN walker — kept out of the filter API. If
+  full predicate-tree support is ever needed, it would be a host-side
+  parser feeding multiple `evaluate_mask` calls into `combine_masks`.
 - NOT inside Bloom — exact reverse semantics live in `ClauseIndex` and
   stay there.
 - Range / prefix / numeric predicates — neither paper supports them; both
   are equality-on-int64-hash.
 - Replacing Bloom with `ClauseIndex` inside `codesigned_probe_score` —
   would require a new fused kernel, not a wrapping.
-- Filter quality / training-time concerns.
+- A fused `bloom_compact` Triton kernel for `BloomFilter.evaluate_indices`
+  — first cut uses the ABC default (`compact_mask(evaluate_mask)`); add
+  the fused kernel only if profiling shows the compact pass is the
+  bottleneck.

@@ -1,7 +1,7 @@
 from retrieve.interfaces import FilterModule, RetrievalModule, ScorerModule
 from retrieve.layers import (
     IVF_INT8_ANN,
-    BloomIndex,
+    BloomFilter,
     ClauseIndex,
     DotProductScorer,
     FullScanKNN,
@@ -21,13 +21,15 @@ from retrieve.layers import (
     build_linr_v3,
     build_linr_v3_triton,
     build_silvertorch,
+    combine_indices,
+    combine_masks,
     post_filter_topk,
     quantize_int8,
     quantize_oporp_1bit,
 )
 
 __all__ = [
-    "BloomIndex",
+    "BloomFilter",
     "ClauseIndex",
     "DotProductScorer",
     "FilterModule",
@@ -51,6 +53,8 @@ __all__ = [
     "build_linr_v3",
     "build_linr_v3_triton",
     "build_silvertorch",
+    "combine_indices",
+    "combine_masks",
     "post_filter_topk",
     "quantize_int8",
     "quantize_oporp_1bit",

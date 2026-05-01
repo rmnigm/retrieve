@@ -80,7 +80,8 @@ def train(config: GSASRecConfig, resume: bool = False) -> None:
         negs_per_pos=config.negs_per_pos,
     )
     batches_per_epoch = (
-        len(loader) if config.max_batches_per_epoch is None
+        len(loader)
+        if config.max_batches_per_epoch is None
         else min(config.max_batches_per_epoch, len(loader))
     )
 
@@ -128,7 +129,10 @@ def train(config: GSASRecConfig, resume: bool = False) -> None:
         best_path = Path(bp) if bp else None
         logger.info(
             "Resumed: start_epoch={} best_metric={:.4f} steps_not_improved={} global_step={}",
-            start_epoch, best_metric, steps_not_improved, global_step,
+            start_epoch,
+            best_metric,
+            steps_not_improved,
+            global_step,
         )
     t0 = time.perf_counter()
 
@@ -149,7 +153,9 @@ def train(config: GSASRecConfig, resume: bool = False) -> None:
             with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=use_cuda):
                 hidden = model(input_seq)
                 loss = gbce_loss(
-                    hidden, target_seq, mask,
+                    hidden,
+                    target_seq,
+                    mask,
                     model.get_output_embeddings(),
                     uniform_negatives=negatives,
                     gbce_t=config.gbce_t,
@@ -177,9 +183,7 @@ def train(config: GSASRecConfig, resume: bool = False) -> None:
         avg_loss = epoch_loss / batches_per_epoch
         epoch_losses.append(avg_loss)
         epoch_time = time.perf_counter() - ep_t0
-        peak_mem_gb = (
-            torch.cuda.max_memory_allocated(device) / (1024**3) if use_cuda else 0.0
-        )
+        peak_mem_gb = torch.cuda.max_memory_allocated(device) / (1024**3) if use_cuda else 0.0
 
         do_eval = ((epoch + 1) % config.eval_every == 0) or (epoch + 1 == config.num_epochs)
         val_metrics: dict[str, float] = {}
@@ -199,7 +203,10 @@ def train(config: GSASRecConfig, resume: bool = False) -> None:
             val_metrics_per_epoch.append({"epoch": epoch, **val_metrics})
             logger.info(
                 "Epoch {} — loss: {:.4f} | {}: {:.4f} | val: {}",
-                epoch, avg_loss, metric, val_metrics.get(metric, float("nan")),
+                epoch,
+                avg_loss,
+                metric,
+                val_metrics.get(metric, float("nan")),
                 json.dumps({k: round(v, 4) for k, v in val_metrics.items()}),
             )
         else:
@@ -297,9 +304,7 @@ def train(config: GSASRecConfig, resume: bool = False) -> None:
                 indent=2,
             )
         if wandb_run is not None:
-            wandb_run.log(
-                {f"test/{k}": v for k, v in test_metrics.items()}, step=global_step
-            )
+            wandb_run.log({f"test/{k}": v for k, v in test_metrics.items()}, step=global_step)
 
     with open(ckpt_dir / "train_metrics.json", "w") as f:
         json.dump(

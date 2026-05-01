@@ -117,3 +117,46 @@ class TestBuilder:
         assert isinstance(m, IVF_INT8_ANN)
         ids, _ = m(data["query"])
         assert ids.shape == (B, K)
+
+
+class TestEdgeCases:
+    def test_mask_all_false_returns_no_finite_scores(self, data):
+        """All-False mask masks every item; every score is ``-inf``."""
+        m = IVF_INT8_ANN(k=K, n_lists=N_LISTS, n_probe=N_LISTS, n_iter=3)
+        m.register_index(data["embs"])
+        all_false = torch.zeros(B, N, dtype=torch.bool, device="cuda")
+        _, scores = m(data["query"], mask=all_false)
+        assert not torch.isfinite(scores).any()
+
+    def test_n_lists_equals_n(self, data):
+        """Degenerate clustering (one item per cluster); full probe → recall ≈ 1."""
+        from retrieve.layers.utils.retrieval import FullScanKNN
+        from tests.conftest import recall_at_k
+
+        # Use a smaller N so kmeans with n_lists=N stays cheap.
+        small_n, d = 256, D
+        embs = data["embs"][:small_n]
+        m = IVF_INT8_ANN(k=K, n_lists=small_n, n_probe=small_n, n_iter=2)
+        m.register_index(embs)
+        ids, _ = m(data["query"])
+
+        exact = FullScanKNN(k=K)
+        exact.register_index(embs)
+        ex_ids, _ = exact(data["query"])
+        # int8 quant + kmeans degeneracy can shuffle near-ties; allow modest slack.
+        assert recall_at_k(ids, ex_ids) >= 0.85
+
+    def test_candidate_ids_p_less_than_k(self, data):
+        """``candidate_ids`` smaller than K — forward returns ``actual_k = p`` columns."""
+        m = IVF_INT8_ANN(k=K, n_lists=N_LISTS, n_probe=N_PROBE, n_iter=3)
+        m.register_index(data["embs"])
+        p = K // 2
+        g = torch.Generator(device="cuda").manual_seed(42)
+        cand = torch.randint(0, N, (B, p), generator=g, dtype=torch.long, device="cuda")
+        ids, scores = m(data["query"], candidate_ids=cand)
+        assert ids.shape == (B, p)
+        assert scores.shape == (B, p)
+        for b in range(B):
+            allowed = set(cand[b].tolist())
+            for j in range(p):
+                assert int(ids[b, j].item()) in allowed

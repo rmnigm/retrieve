@@ -21,12 +21,9 @@ packages = ["src/retrieve"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-python_files = ["test_*.py", "bench_*.py"]
+python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-markers = [
-    "bench: random-vector benchmark cell (skipped without --bench)",
-]
 
 [tool.ruff]
 line-length = 100
@@ -39,10 +36,6 @@ select = ["E", "W", "F", "I", "UP"]
 known-first-party = ["retrieve"]
 
 [tool.ruff.lint.per-file-ignores]
-# Bench harnesses build zero-arg closures (`fn = lambda: module(query)`) that
-# get reused for a correctness call and then handed to the timing helper —
-# the standard Triton/PyTorch bench pattern.
-"tests/bench/*.py" = ["E731"]
 # Triton kernel launches use `grid = lambda meta: (...)` — the canonical form
 # from Triton's own tutorials; `meta` is the autotuned config.
 "src/retrieve/kernels/triton/**/*.py" = ["E731"]

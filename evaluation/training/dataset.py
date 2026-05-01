@@ -25,7 +25,7 @@ class SequenceDataset(Dataset):
     def __getitem__(self, idx: int) -> torch.Tensor:
         seq = self.sequences[idx]
         if len(seq) > self.max_length + 1:
-            seq = seq[-(self.max_length + 1):]
+            seq = seq[-(self.max_length + 1) :]
         if len(seq) < self.max_length + 1:
             pad = [self.padding_value] * (self.max_length + 1 - len(seq))
             seq = pad + seq

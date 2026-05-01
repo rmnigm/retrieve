@@ -42,7 +42,8 @@ EPOCH_SNAPSHOT_PATTERN = "gsasrec-ep*-ndcg*.pt"
 
 def _filter_files(ckpt_dir: Path, ignore_patterns: list[str]) -> list[Path]:
     return [
-        p for p in sorted(ckpt_dir.iterdir())
+        p
+        for p in sorted(ckpt_dir.iterdir())
         if p.is_file() and not any(fnmatch.fnmatch(p.name, pat) for pat in ignore_patterns)
     ]
 
@@ -58,7 +59,7 @@ def _build_model_card(ckpt_dir: Path, repo_id: str, files: list[Path]) -> str:
         parts.append("## Test metrics\n")
         for k, v in metrics.items():
             parts.append(f"- **{k}**: {v:.4f}")
-        if (target := meta.get("paper_target")):
+        if target := meta.get("paper_target"):
             parts.append("\n## Paper target\n")
             for k, v in target.items():
                 parts.append(f"- {k}: {v:.4f}")
@@ -109,9 +110,7 @@ def _resolve_checkpoints(selector: str) -> list[Path]:
     target = CHECKPOINT_ROOT / selector
     if not target.is_dir():
         available = ", ".join(p.name for p in all_dirs) or "(none)"
-        raise click.ClickException(
-            f"Checkpoint dir not found: {target}\nAvailable: {available}"
-        )
+        raise click.ClickException(f"Checkpoint dir not found: {target}\nAvailable: {available}")
     if not _has_files(target):
         raise click.ClickException(f"Checkpoint dir is empty: {target}")
     return [target]
@@ -177,18 +176,22 @@ def main(
         target_name = repo_name or ckpt_dir.name
         repo_id = f"{owner}/{target_name}"
         files = _filter_files(ckpt_dir, ignore_patterns)
-        skipped = [p.name for p in sorted(ckpt_dir.iterdir())
-                   if p.is_file() and p not in files]
+        skipped = [p.name for p in sorted(ckpt_dir.iterdir()) if p.is_file() and p not in files]
         if not files:
             logger.warning(
                 "{} has no files after filtering (skipped: {}) — not uploading.",
-                ckpt_dir.name, ", ".join(skipped) or "none",
+                ckpt_dir.name,
+                ", ".join(skipped) or "none",
             )
             continue
         size_mb = sum(p.stat().st_size for p in files) / (1024 * 1024)
         logger.info(
             "Uploading {} ({:.1f} MB, {} files) -> {} (private={})",
-            ckpt_dir.name, size_mb, len(files), repo_id, private,
+            ckpt_dir.name,
+            size_mb,
+            len(files),
+            repo_id,
+            private,
         )
         if skipped:
             logger.info("  skipping: {}", ", ".join(skipped))

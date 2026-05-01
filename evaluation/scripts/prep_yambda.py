@@ -25,7 +25,7 @@ import polars as pl
 from huggingface_hub import hf_hub_download
 from loguru import logger
 
-from data.preprocess import preprocess
+from data.yambda import preprocess
 
 
 def _concat_then_tail(history: pl.Expr, more: pl.Expr, n: int) -> pl.Expr:
@@ -75,10 +75,7 @@ def main(
     logger.info("Wrote {} ({} entries)", map_path, n_items)
 
     # train.parquet: just rename item_id → item_ids and keep one row per user.
-    train_out = (
-        train_lf.select(pl.col("item_id").alias("item_ids"))
-        .collect(engine="streaming")
-    )
+    train_out = train_lf.select(pl.col("item_id").alias("item_ids")).collect(engine="streaming")
     train_path = output / "train.parquet"
     train_out.write_parquet(train_path, compression="zstd")
     logger.info("Wrote {} (n_users={})", train_path, train_out.height)
@@ -88,7 +85,9 @@ def main(
 
     # val.parquet: history = train item_ids, targets = val item_ids (intact list).
     val_join = (
-        train_hist.join(val_lf.select("uid", pl.col("item_id").alias("targets")), on="uid", how="inner")
+        train_hist.join(
+            val_lf.select("uid", pl.col("item_id").alias("targets")), on="uid", how="inner"
+        )
         .select(pl.col("history").alias("item_ids"), pl.col("targets"))
         .collect(engine="streaming")
     )
@@ -98,7 +97,9 @@ def main(
 
     # test.parquet: history = (train_history ++ val_items) last max_seq_len; targets = test items.
     train_plus_val = (
-        train_hist.join(val_lf.select("uid", pl.col("item_id").alias("val_items")), on="uid", how="left")
+        train_hist.join(
+            val_lf.select("uid", pl.col("item_id").alias("val_items")), on="uid", how="left"
+        )
         .with_columns(
             pl.when(pl.col("val_items").is_null())
             .then(pl.col("history"))
@@ -108,7 +109,9 @@ def main(
         .select("uid", "history")
     )
     test_join = (
-        train_plus_val.join(test_lf.select("uid", pl.col("item_id").alias("targets")), on="uid", how="inner")
+        train_plus_val.join(
+            test_lf.select("uid", pl.col("item_id").alias("targets")), on="uid", how="inner"
+        )
         .select(pl.col("history").alias("item_ids"), pl.col("targets"))
         .collect(engine="streaming")
     )

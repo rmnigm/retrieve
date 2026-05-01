@@ -1,10 +1,16 @@
 # Unified attribute-filter API
 
+> **Status: implemented.** See [docs/system/filtering.md](../system/filtering.md)
+> for the shipped API. This file remains as the design record; the file
+> paths it references (notably `layers/utils/filters.py` and
+> `layers/silvertorch/bloom.py`) describe the pre-refactor layout and are
+> intentionally left unchanged for historical context.
+
 ## Why this exists
 
 Two filtering paths grew up independently in `retrieve/`:
 
-- `ClauseIndex` ([retrieve/src/retrieve/layers/utils/filters.py:9-66](../../retrieve/src/retrieve/layers/utils/filters.py#L9-L66)) —
+- `ClauseIndex` (`retrieve/src/retrieve/layers/utils/filters.py:9-66`) —
   exact, supports reverse clauses, `[N, C, A_max]` int64 items + `[B, C]`
   query. Caller composes mask / indices and threads them into LiNR.
 - Silvertorch's bloom — encoding private to the silvertorch package, inlined
@@ -15,7 +21,7 @@ Two filtering paths grew up independently in `retrieve/`:
 Today neither implementation subclasses the existing `FilterModule` ABC
 ([retrieve/src/retrieve/interfaces.py:8-19](../../retrieve/src/retrieve/interfaces.py#L8-L19)),
 the bloom helpers can't be used outside silvertorch, the eval harness
-declares `--use-attrs` but `algorithms.py` wraps every algorithm as
+declares `--use-attrs` but `registry.py` wraps every algorithm as
 `lambda q: idx(q)` so attrs never reach the index, and `combine_masks` is
 docs-only ([architecture.md](../system/architecture.md)).
 
@@ -54,7 +60,7 @@ Two corollaries:
 1. `evaluate_indices` must not be implemented as `evaluate_mask` →
    `compact_mask` for filters that have a direct compact kernel.
    `ClauseIndex` already does the right thing
-   ([filters.py:48-66](../../retrieve/src/retrieve/layers/utils/filters.py#L48-L66)).
+   (`filters.py:48-66`).
    `BloomFilter`'s first cut may use `bloom_match` + `compact_mask`,
    but the API leaves room for a future fused `bloom_compact` kernel
    without touching callers.
@@ -121,7 +127,7 @@ papers. Multi-value query (`[B, C, Q_max]`) is out of scope for this PR.
 ### `ClauseIndex(FilterModule)` — exact, reverse-supporting
 
 Body is the current code at
-[filters.py:9-66](../../retrieve/src/retrieve/layers/utils/filters.py#L9-L66),
+`filters.py:9-66`,
 moved to `clause.py` and declared as `FilterModule`. Native fast paths:
 
 - `evaluate_mask` — pure-torch broadcast + AND across clauses.
@@ -260,11 +266,9 @@ Modify:
    build both filters from a synthetic `[N, 4, 4]` attr tensor, and
    confirm `linr_v3(q, mask=combine_masks(clause_mask, bloom_mask))`
    returns ids whose attrs satisfy the conjunction.
-5. Latency micro-bench in `tests/bench/bench_filters.py` (new) —
-   measure `evaluate_mask` and `evaluate_indices` for both filters at
-   N = 1M, 10M; confirm `clause_compact` indices path is faster than
-   `compact_mask(bloom_match(.))` when P ≪ N. Numbers feed
-   [bench.md](../system/bench.md).
+
+Performance characterization (latency / memory / recall vs corpus size)
+lives in [`evaluation/`](../../evaluation/), not in the test suite.
 
 ## Out of scope (explicit non-goals)
 
@@ -279,4 +283,4 @@ Modify:
   follow-up.
 - A `bloom_compact` Triton kernel — first PR ships compact via
   `compact_mask(bloom_match)`. Add the fused kernel only if profiling
-  on YFCC-5M shows the compact pass is the bottleneck for V2 / V3.
+  shows the compact pass is the bottleneck for V2 / V3.

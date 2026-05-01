@@ -1,7 +1,7 @@
 """SilverTorch correctness — IVF + Bloom co-design.
 
 Fixtures shrink the SilverTorch paper's eval (D=128, K=2048, n_probe=64) to
-sizes that fit well on a single GPU; the bench suite scales up.
+sizes that fit well on a single GPU; larger sweeps live in ``evaluation/``.
 """
 
 from __future__ import annotations
@@ -9,8 +9,8 @@ from __future__ import annotations
 import pytest
 import torch
 
+from retrieve.layers.filters import BloomFilter
 from retrieve.layers.silvertorch import SilverTorch, build_silvertorch
-from retrieve.layers.silvertorch.bloom import BloomIndex
 from retrieve.layers.silvertorch.ivf import IVF_INT8_ANN
 from retrieve.layers.utils.retrieval import FullScanKNN
 from tests.conftest import (
@@ -72,14 +72,14 @@ class TestShape:
 
 class TestEquivalence:
     def test_matches_composed_ivf_plus_bloom(self, data):
-        """SilverTorch ⇔ IVF_INT8_ANN(mask=BloomIndex.evaluate(...))."""
+        """SilverTorch ⇔ IVF_INT8_ANN(mask=BloomFilter.evaluate_mask(...))."""
         st = _build(with_attrs=True, data=data)
         ivf = IVF_INT8_ANN(k=K, n_lists=N_LISTS, n_probe=N_PROBE, n_iter=3)
         ivf.register_index(data["embs"])
-        bi = BloomIndex()
-        bi.register_index(data["attrs"], m_bits=M_BITS, k_hash=K_HASH)
+        bf = BloomFilter(m_bits=M_BITS, k_hash=K_HASH)
+        bf.register_index(data["attrs"])
 
-        bloom_mask = bi.evaluate(data["q_attrs"])
+        bloom_mask = bf.evaluate_mask(data["q_attrs"])
         ref_ids, ref_scores = ivf(data["query"], mask=bloom_mask)
         st_ids, st_scores = st(data["query"], data["q_attrs"])
 
@@ -142,3 +142,31 @@ class TestBuilder:
             item_clause_attrs=data["attrs"],
         )
         assert isinstance(m, SilverTorch)
+
+
+class TestEdgeCases:
+    def test_query_clause_attrs_none_equals_ivf(self, data):
+        """``query_clause_attrs=None`` is the documented fast path: SilverTorch ≡ IVF.
+
+        With ``with_attrs=False`` the bloom buffer is zero-filled and the kernel's
+        bloom path is skipped; the result must match ``IVF_INT8_ANN`` exactly.
+        """
+        st = _build(with_attrs=False, data=data)
+        ivf = IVF_INT8_ANN(k=K, n_lists=N_LISTS, n_probe=N_PROBE, n_iter=3)
+        ivf.register_index(data["embs"])
+
+        st_ids, st_scores = st(data["query"])
+        ivf_ids, ivf_scores = ivf(data["query"])
+
+        for b in range(B):
+            assert sorted(st_ids[b].tolist()) == sorted(ivf_ids[b].tolist())
+        st_sorted, _ = st_scores.sort(dim=1, descending=True)
+        ivf_sorted, _ = ivf_scores.sort(dim=1, descending=True)
+        assert torch.allclose(st_sorted, ivf_sorted, atol=1e-3)
+
+    def test_mask_all_false_with_bloom(self, data):
+        """External mask rejects everything; every result score is ``-inf``."""
+        st = _build(with_attrs=True, data=data)
+        all_false = torch.zeros(B, N, dtype=torch.bool, device="cuda")
+        _, scores = st(data["query"], data["q_attrs"], mask=all_false)
+        assert not torch.isfinite(scores).any()

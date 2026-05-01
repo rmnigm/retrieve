@@ -8,7 +8,7 @@ import torch
 from retrieve.kernels.triton.silvertorch.codesigned_probe_score import (
     codesigned_probe_score,
 )
-from retrieve.layers.silvertorch.bloom import _build_signatures, _generate_seeds
+from retrieve.layers.filters.bloom import _build_signatures, _generate_seeds
 from retrieve.layers.utils.quantize import quantize_int8
 from tests.conftest import (
     make_attrs,

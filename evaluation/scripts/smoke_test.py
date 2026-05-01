@@ -49,17 +49,21 @@ def build_synthetic_dataset(
         val_targets = _make_user_seq(rng, num_items, 3)
         test_targets = _make_user_seq(rng, num_items, 3)
         val_rows.append({"item_ids": history, "targets": val_targets})
-        test_rows.append({
-            "item_ids": history + val_targets,
-            "targets": test_targets,
-        })
+        test_rows.append(
+            {
+                "item_ids": history + val_targets,
+                "targets": test_targets,
+            }
+        )
 
     pl.DataFrame(train_rows).write_parquet(output_dir / "train.parquet")
     pl.DataFrame(val_rows).write_parquet(output_dir / "val.parquet")
     pl.DataFrame(test_rows).write_parquet(output_dir / "test.parquet")
     with open(output_dir / "item_id_map.json", "w") as f:
         json.dump({str(i): i for i in range(1, num_items + 1)}, f)
-    logger.info("Wrote synthetic dataset to {} (users={}, items={})", output_dir, num_users, num_items)
+    logger.info(
+        "Wrote synthetic dataset to {} (users={}, items={})", output_dir, num_users, num_items
+    )
 
 
 def main() -> int:
@@ -106,9 +110,7 @@ def main() -> int:
         logger.info("Test metrics: {}", test_metrics)
 
         assert len(epoch_losses) >= 2, "expected >=2 epochs"
-        assert epoch_losses[1] < epoch_losses[0], (
-            f"loss did not decrease: {epoch_losses}"
-        )
+        assert epoch_losses[1] < epoch_losses[0], f"loss did not decrease: {epoch_losses}"
         assert test_metrics.get("ndcg@10", 0.0) >= 0.0, "ndcg@10 unexpectedly missing"
         logger.info("smoke OK: loss decreased {:.4f} -> {:.4f}", epoch_losses[0], epoch_losses[1])
         return 0

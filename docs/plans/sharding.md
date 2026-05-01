@@ -87,7 +87,8 @@ For typical bench cells (B=16, k=1024, fp32 scores + int64 ids):
 
 - Per-shard payload: `B * k * (4 + 8) = 192 KiB`.
 - Two shards on the same node: ~10 µs over NVLink. Negligible vs the
-  single-shard kernel times in [bench.md](../system/bench.md).
+  single-shard kernel times reported by the `evaluation/` benchmark
+  harness ([evaluation.md](../system/evaluation.md)).
 
 The merge `topk(2k → k)` runs on `[B, 2k]` = 32 KiB and is essentially
 free.

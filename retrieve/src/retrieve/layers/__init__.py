@@ -1,3 +1,9 @@
+from retrieve.layers.filters import (
+    BloomFilter,
+    ClauseIndex,
+    combine_indices,
+    combine_masks,
+)
 from retrieve.layers.linr import (
     LiNR_V1,
     LiNR_V1_Triton,
@@ -15,13 +21,11 @@ from retrieve.layers.linr import (
 )
 from retrieve.layers.silvertorch import (
     IVF_INT8_ANN,
-    BloomIndex,
     SilverTorch,
     build_ivf_int8,
     build_silvertorch,
 )
 from retrieve.layers.utils import (
-    ClauseIndex,
     DotProductScorer,
     FullScanKNN,
     post_filter_topk,
@@ -30,7 +34,7 @@ from retrieve.layers.utils import (
 )
 
 __all__ = [
-    "BloomIndex",
+    "BloomFilter",
     "ClauseIndex",
     "DotProductScorer",
     "FullScanKNN",
@@ -51,6 +55,8 @@ __all__ = [
     "build_linr_v3",
     "build_linr_v3_triton",
     "build_silvertorch",
+    "combine_indices",
+    "combine_masks",
     "post_filter_topk",
     "quantize_int8",
     "quantize_oporp_1bit",

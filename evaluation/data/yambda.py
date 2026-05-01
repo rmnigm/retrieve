@@ -12,8 +12,8 @@ from dataclasses import dataclass
 
 import polars as pl
 
+from . import timesplit
 from .constants import Constants
-from .processing import timesplit
 
 
 @dataclass
@@ -75,9 +75,7 @@ def preprocess(
             .lazy()
         )
 
-    train = train.select(
-        "uid", pl.all().exclude("uid").list.slice(-max_seq_len, max_seq_len)
-    )
+    train = train.select("uid", pl.all().exclude("uid").list.slice(-max_seq_len, max_seq_len))
     train = replace_strict(train)
     if val is not None:
         val = replace_strict(val)

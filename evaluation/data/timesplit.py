@@ -47,7 +47,9 @@ def flat_split_train_val_test(
 
         return (
             df.with_columns(
-                pl.col("item_id").is_in(unique_train_item_ids.get_column("item_id").implode()).alias("item_id_in_train")
+                pl.col("item_id")
+                .is_in(unique_train_item_ids.get_column("item_id").implode())
+                .alias("item_id_in_train")
             )
             .filter("item_id_in_train")
             .drop("item_id_in_train")
@@ -75,7 +77,9 @@ def flat_split_train_val_test(
             )
             #
             .with_columns(
-                pl.col("uid").is_in(unique_train_uids.get_column("uid").implode()).alias("uid_in_train")
+                pl.col("uid")
+                .is_in(unique_train_uids.get_column("uid").implode())
+                .alias("uid_in_train")
             )  # to prevent filter reordering
             .filter("uid_in_train")
             .drop("uid_in_train")
@@ -146,7 +150,9 @@ def sequential_split_train_val_test(
             .exclude("uid")
             .list.gather(
                 pl.col("item_id").list.eval(
-                    pl.arg_where(pl.element().is_in(unique_train_item_ids.get_column("item_id").implode()))
+                    pl.arg_where(
+                        pl.element().is_in(unique_train_item_ids.get_column("item_id").implode())
+                    )
                 )
             ),
         ).filter(pl.col("item_id").list.len() > 0)
@@ -167,7 +173,9 @@ def sequential_split_train_val_test(
     ).filter(pl.col("item_id").list.len() > 0)
 
     unique_train_uids = train.select("uid").unique().collect(engine=engine)
-    unique_train_item_ids = train.explode("item_id").select("item_id").unique().collect(engine=engine)
+    unique_train_item_ids = (
+        train.explode("item_id").select("item_id").unique().collect(engine=engine)
+    )
 
     validation = None
     if val_size != 0:
@@ -186,20 +194,26 @@ def sequential_split_train_val_test(
                 ),
             )
             .with_columns(
-                pl.col("uid").is_in(unique_train_uids.get_column("uid").implode()).alias("uid_in_train")
+                pl.col("uid")
+                .is_in(unique_train_uids.get_column("uid").implode())
+                .alias("uid_in_train")
             )  # to prevent filter reordering
             .filter("uid_in_train")
             .drop("uid_in_train")
         )
 
-        validation = drop(validation, unique_train_item_ids).filter(pl.col("item_id").list.len() > 0)
+        validation = drop(validation, unique_train_item_ids).filter(
+            pl.col("item_id").list.len() > 0
+        )
 
     test = (
         df_lazy.select(
             "uid",
             pl.all()
             .exclude("uid")
-            .list.gather(pl.col("timestamp").list.eval(pl.arg_where(pl.element() >= test_timestamp))),
+            .list.gather(
+                pl.col("timestamp").list.eval(pl.arg_where(pl.element() >= test_timestamp))
+            ),
         )
         #
         .with_columns(

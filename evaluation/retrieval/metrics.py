@@ -97,17 +97,13 @@ def ndcg_at_k(
         [B] float tensor.
     """
     hits = _hits_mask(candidate_ids, targets, k)  # [B, k]
-    positions = torch.arange(
-        1, k + 1, device=candidate_ids.device, dtype=torch.float32
-    )
+    positions = torch.arange(1, k + 1, device=candidate_ids.device, dtype=torch.float32)
     discounts = 1.0 / torch.log2(positions + 1)  # [k]
     dcg = (hits.float() * discounts.unsqueeze(0)).sum(dim=1)  # [B]
 
     # IDCG: best possible DCG given num_targets relevant items
     # ideal_hits[i] = 1 if i < min(num_targets, k) else 0
-    ideal_hits = (
-        positions.unsqueeze(0) <= num_targets.unsqueeze(1).float().clamp(max=k)
-    )  # [B, k]
+    ideal_hits = positions.unsqueeze(0) <= num_targets.unsqueeze(1).float().clamp(max=k)  # [B, k]
     idcg = (ideal_hits.float() * discounts.unsqueeze(0)).sum(dim=1)  # [B]
 
     return dcg / idcg.clamp(min=1e-8)
