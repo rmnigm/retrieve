@@ -15,14 +15,13 @@ _defaults: &defaults
     - triton_knn
     - linr_v3_then_v2
     - silvertorch
-    - faiss_flat_ip
-    - faiss_ivf_flat
+    - voyager_hnsw
   # N≈1.87M → sqrt(N)≈1366. 1024 lists × ~1825 items/cluster avg.
   # n_probe=16 visits ~29K items per query (~1.6% of N).
   algo_params:
     linr_v3_then_v2: { candidate_pool: 5000, v3_seed: 0 }
     silvertorch:     { n_lists: 1024, n_probe: 16, n_iter: 10, seed: 0 }
-    faiss_ivf_flat:  { nlist: 2048, nprobe: 16, seed: 0 }
+    voyager_hnsw:    { m: 32, ef_construction: 200, ef_query: 1000, num_threads: 16, seed: 0 }
 
 <<: *defaults
 checkpoint: checkpoints/gsasrec-500m-listens-d256-drop0.5/best_model.pt

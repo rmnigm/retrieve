@@ -17,7 +17,7 @@ class LiNR_V3(RetrievalModule):
     Item embeddings are projected via a deterministic Sign-OPORP transform
     (cheap O(D) sign vector + permutation) and sign-quantized to 1 bit per
     dim. Scoring is ``D - 2 * popcount(query_bits ^ item_bits)`` — purely
-    bitwise, 16× memory reduction vs fp16. See docs/system/architecture.md (formerly docs/ARCHITECTURE.md).
+    bitwise, 16× memory reduction vs fp16. See docs/system/architecture.md.
 
     Decoupled from any filter — callers compute ``mask`` or ``candidate_ids``
     upstream.

@@ -220,6 +220,8 @@ retrieve.zip
 
 # Datasets (fetched/derived, not source code)
 evaluation/data/*.parquet
+evaluation/data/yambda/
+evaluation/data/goodreads/
 
 # Experiment tracking logs
 evaluation/wandb/

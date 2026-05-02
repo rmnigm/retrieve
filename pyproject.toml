@@ -1,0 +1,19 @@
+[project]
+name = "retrieve-workspace"
+version = "0"
+description = "Workspace meta-package: retrieve + evaluation share one .venv."
+requires-python = ">=3.10"
+dependencies = [
+    "retrieve",
+    "retrieve-evaluation",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["retrieve", "evaluation"]
+
+[tool.uv.sources]
+retrieve = { workspace = true }
+retrieve-evaluation = { workspace = true }

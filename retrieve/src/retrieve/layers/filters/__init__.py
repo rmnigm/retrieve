@@ -51,8 +51,11 @@ def combine_indices(
         b, p = ids.shape
         if p == 0:
             return ids, counts
-        sub_mask = f.evaluate_subset(q, ids)  # [B, P] bool
         valid = torch.arange(p, device=ids.device).unsqueeze(0) < counts.unsqueeze(1)
+        # ids past counts[b] are scratch from clause_compact's torch.empty() —
+        # gather them safely as 0; sub_mask & valid zeroes those positions out.
+        safe_ids = torch.where(valid, ids, ids.new_zeros(()))
+        sub_mask = f.evaluate_subset(q, safe_ids)  # [B, P] bool
         sub_mask = sub_mask & valid
         new_counts = sub_mask.sum(dim=1)
         new_p = int(new_counts.max().item())

@@ -3,7 +3,7 @@
 Each entry returns a ``(forward, modules, is_cpu)`` triple: ``forward(query) ->
 (ids, scores)``, the list of underlying ``nn.Module``\\s holding device buffers
 (so callers can ``del`` them between cells to release memory), and a flag
-indicating whether the index lives on CPU (faiss baselines) or GPU (everything
+indicating whether the index lives on CPU (``voyager_hnsw``) or GPU (everything
 else). ``is_cpu`` lets the driver pick the right perf-measurement primitive
 and zero out CUDA-only memory columns.
 
@@ -13,14 +13,17 @@ absent as a stage-2 — V1's dense matmul does the same work as ``triton_knn``
 alone, so a V3→V1 cascade is strictly slower than the unfiltered baseline
 (measured ~1.22 ms vs 0.89 ms at 500M scale).
 
-``silvertorch`` here is ``IVF_INT8_ANN`` (no bloom) since Yambda has no item
-attributes — running the bloom-fused ``SilverTorch`` against zero signatures
-would measure only the degenerate code path. Build cost is dominated by
-k-means: expect ~30–90 s on a single A100/H100 for the 500M catalog (N≈1.87M,
-n_lists=1024, n_iter=10).
+``silvertorch`` here is ``SilverTorch`` with ``m_bits``/``k_hash`` left unset
+(bloom disabled) since Yambda has no item attributes — running the bloom-fused
+configuration against zero signatures would measure only the degenerate code
+path. Build cost is dominated by k-means: expect ~30–90 s on a single A100/H100
+for the 500M catalog (N≈1.87M, n_lists=1024, n_iter=10).
 
-The two ``faiss_*`` baselines are CPU-only, single-thread by construction;
-they exist as an apples-to-apples reference for the GPU implementations.
+``voyager_hnsw`` is the lone CPU baseline — Spotify's HNSW (multi-threaded by
+default, what production deployments actually run). The PyPI ``faiss-cpu``
+wheel was tried and dropped: its bundled libgomp does not parallelize
+correctly in this environment (>10× slowdown at 32+ threads vs 1), so its
+single-thread numbers were not meaningful as a "realistic CPU" baseline.
 """
 
 from __future__ import annotations
@@ -31,13 +34,13 @@ from typing import Any
 import torch
 from torch import Tensor
 
-from retrieval.faiss_baselines import FaissFlatIP, FaissIVFFlat
+from retrieval.voyager_baseline import VoyagerHNSW
 from retrieve import (
-    IVF_INT8_ANN,
     FullScanKNN,
     LiNR_V1_Triton,
     LiNR_V2_Triton,
     LiNR_V3_Triton,
+    SilverTorch,
 )
 
 ALGORITHMS = (
@@ -45,11 +48,10 @@ ALGORITHMS = (
     "triton_knn",
     "linr_v3_then_v2",
     "silvertorch",
-    "faiss_flat_ip",
-    "faiss_ivf_flat",
+    "voyager_hnsw",
 )
 
-_CPU_ALGOS = frozenset({"faiss_flat_ip", "faiss_ivf_flat"})
+_CPU_ALGOS = frozenset({"voyager_hnsw"})
 
 ForwardFn = Callable[[Tensor], tuple[Tensor, Tensor]]
 
@@ -100,7 +102,7 @@ def build_algorithm(
         n_probe = int(p.get("n_probe", 16))
         n_iter = int(p.get("n_iter", 10))
         seed = int(p.get("seed", 0))
-        idx = IVF_INT8_ANN(
+        idx = SilverTorch(
             k=k,
             n_lists=n_lists,
             n_probe=n_probe,
@@ -110,16 +112,21 @@ def build_algorithm(
         idx.register_index(item_embs)
         return (lambda q: idx(q)), [idx], is_cpu
 
-    if name == "faiss_flat_ip":
-        idx = FaissFlatIP(k=k)
-        idx.register_index(item_embs)
-        return (lambda q: idx(q)), [idx], is_cpu
-
-    if name == "faiss_ivf_flat":
-        nlist = int(p.get("nlist", 2048))
-        nprobe = int(p.get("nprobe", 16))
+    if name == "voyager_hnsw":
+        m = int(p.get("m", 16))
+        ef_construction = int(p.get("ef_construction", 200))
+        ef_query = p.get("ef_query")
+        ef_query = int(ef_query) if ef_query is not None else None
+        num_threads = int(p.get("num_threads", -1))
         seed = int(p.get("seed", 0))
-        idx = FaissIVFFlat(k=k, nlist=nlist, nprobe=nprobe, seed=seed)
+        idx = VoyagerHNSW(
+            k=k,
+            m=m,
+            ef_construction=ef_construction,
+            ef_query=ef_query,
+            num_threads=num_threads,
+            seed=seed,
+        )
         idx.register_index(item_embs)
         return (lambda q: idx(q)), [idx], is_cpu
 

@@ -29,12 +29,11 @@ retrieve/tests/
 │   ├── test_combine_filters.py
 │   ├── test_compact.py
 │   ├── test_filters.py             (ClauseIndex)
-│   ├── test_ivf.py                 (IVF_INT8_ANN)
 │   ├── test_linr.py                (V1, V2, V3 × torch / Triton)
 │   ├── test_quantize.py            (int8, OPORP, popcount)
 │   ├── test_retrieval_utils.py     (FullScanKNN, post_filter_topk)
 │   ├── test_scorers.py             (DotProductScorer)
-│   └── test_silvertorch.py
+│   └── test_silvertorch.py         (SilverTorch, both bloom-on and bloom-off)
 └── parity/                # Triton kernel vs pure-torch reference
     ├── conftest.py        # assert_topk_matches helper
     ├── test_bloom_match.py
@@ -158,9 +157,9 @@ module under test.
 | `BloomFilter.evaluate_subset` | `evaluate_mask(q).gather(1, ids)` |
 | `combine_masks`            | iterated `&` of non-`None` inputs |
 | `combine_indices`          | `compact_mask(combine_masks(*[f.evaluate_mask(q)]))` |
-| `IVF_INT8_ANN`             | `FullScanKNN` for recall (asserts ≥ 0.85 at full probe) + recall monotone in `n_probe` |
-| `SilverTorch` (with bloom) | `IVF_INT8_ANN(mask=BloomFilter.evaluate_mask(qa))` — component composition |
-| `SilverTorch` (no bloom)   | `IVF_INT8_ANN` directly — `query_clause_attrs=None` is a documented fast path |
+| `SilverTorch` (no bloom)   | `FullScanKNN` for recall (asserts ≥ 0.85 at full probe) + recall monotone in `n_probe` |
+| `SilverTorch` (with bloom) | `SilverTorch (no bloom)(mask=BloomFilter.evaluate_mask(qa))` — component composition |
+| `SilverTorch` (qa=None)    | `SilverTorch (no bloom)` directly — `query_clause_attrs=None` is a documented fast path |
 | `LiNR_V1` semantics        | `(q @ x.T).masked_fill(~mask, -inf).topk(k)` |
 | `LiNR_V2` semantics        | gather + bmm + local topk + scatter |
 | `LiNR_V3` semantics        | `FullScanKNN` recall (asserts ≥ 0.4 at K=200, N=2048) |
@@ -322,39 +321,34 @@ LiNR V1, V2, V3 in both backends.
   - `B = 1` single-query.
   - `K = N` returns every item (a permutation of `[0, N)`).
 
-### [`test_ivf.py`](../../retrieve/tests/correctness/test_ivf.py)
-
-`IVF_INT8_ANN`.
-
-- Forward shape `(B, K)`; ids long, scores float32.
-- INT8 buffers (`item_codes` int8, `item_scales` float32, centroid /
-  cluster shapes).
-- `n_lists > N` and `n_probe > n_lists` raise `ValueError`.
-- Mask honored at `pass_rate ∈ {0.05, 0.5}`.
-- Externally-composed `ClauseIndex` mask gives ids ⊆ passing items.
-- Candidate-ids path returns ids ⊆ candidates.
-- Recall vs `FullScanKNN` monotone in `n_probe`; ≥ 0.85 at full probe.
-- Edge cases:
-  - mask-all-False → no finite scores.
-  - `n_lists = N` (one item per cluster) → recall ≥ 0.85 at full probe.
-  - `candidate_ids` with `p < k` returns `actual_k = p` columns.
-
 ### [`test_silvertorch.py`](../../retrieve/tests/correctness/test_silvertorch.py)
 
-`SilverTorch`.
+`SilverTorch` — bloom-configured and bloom-disabled paths in one file.
 
-- Output shape with / without `query_clause_attrs`.
-- `m_bits` non-power-of-2 and `k_hash <= 0` raise `ValueError`.
+- Output shape `(B, K)` with `query_clause_attrs`, without it, and on a
+  bloom-disabled module; ids long, scores float32.
+- INT8 buffers on the bloom-disabled module: `item_codes` int8,
+  `item_scales` float32, centroid / cluster shapes; `bloom_sigs` and
+  `hash_seeds` are *not* allocated.
+- Param validation: `m_bits` non-power-of-2, `k_hash <= 0`, partial
+  bloom config (only one of `m_bits`/`k_hash` set), `n_lists > N`, and
+  `n_probe > n_lists` all raise `ValueError`. Passing
+  `query_clause_attrs` or `item_clause_attrs` to a bloom-disabled
+  module raises.
+- Mask honored at `pass_rate ∈ {0.05, 0.5}` (no-bloom path); externally-
+  composed `ClauseIndex` mask gives ids ⊆ passing items.
 - **Equivalence**: `SilverTorch(q, qa)` ≡
-  `IVF_INT8_ANN(q, mask=BloomFilter.evaluate_mask(qa))` — sorted ids
-  match exactly, sorted scores `allclose` (atol=1e-3).
-- Recall ≥ 0.90 at `n_probe = n_lists`; recall monotone in `n_probe`.
-- Candidate-ids path returns ids ⊆ candidates.
+  `SilverTorch(no bloom)(q, mask=BloomFilter.evaluate_mask(qa))` —
+  sorted ids match exactly, sorted scores `allclose` (atol=1e-3). Also,
+  `query_clause_attrs=None` on a bloom-configured module ≡ a freshly
+  built no-bloom module with the same kmeans seed.
+- Recall ≥ 0.90 at `n_probe = n_lists`; recall ≥ 0.85 at full probe and
+  monotone in `n_probe`.
+- Candidate-ids path returns ids ⊆ candidates (with bloom, without
+  bloom, and with `p < k`).
 - Edge cases:
-  - `query_clause_attrs = None` ≡ `IVF_INT8_ANN` (the documented fast
-    path is now byte-equivalent — sorted ids match, sorted scores
-    `allclose`).
-  - mask-all-False with bloom → no finite scores.
+  - mask-all-False → no finite scores (with and without bloom).
+  - `n_lists = N` (one item per cluster) → recall ≥ 0.85 at full probe.
 
 ## What each parity file asserts
 
@@ -421,8 +415,10 @@ exact-by-construction kernels, which use stricter assertions.
 
 CUDA is required. The whole suite is GPU-gated.
 
+The repo is a uv workspace ([root pyproject](../../pyproject.toml)); `retrieve/` and `evaluation/` share a single `.venv` at the workspace root. Running `uv` from inside `retrieve/` discovers the workspace root automatically — no per-subdir sync needed.
+
 ```bash
-cd retrieve
+cd retrieve   # or, from the root: uv run --directory retrieve <cmd>
 
 # Full suite (correctness + parity)
 uv run pytest tests/ -x -q

@@ -15,15 +15,12 @@ _defaults: &defaults
     - triton_knn
     - linr_v3_then_v2
     - silvertorch
-    - faiss_flat_ip
-    - faiss_ivf_flat
   # 5B Listen+ catalog is order-of-magnitude larger than 500M; clustering knobs
   # tuned to ~sqrt(N) heuristic with N assumed mid-tens-of-millions. Re-tune
   # after first run once exact `num_items` is known (`item_id_map.json`).
   algo_params:
     linr_v3_then_v2: { candidate_pool: 5000, v3_seed: 0 }
     silvertorch:     { n_lists: 4096, n_probe: 32, n_iter: 10, seed: 0 }
-    faiss_ivf_flat:  { nlist: 8192, nprobe: 32, seed: 0 }
 
 <<: *defaults
 checkpoint: checkpoints/gsasrec-5b-listens-d64/best_model.pt

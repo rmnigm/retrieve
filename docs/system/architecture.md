@@ -143,9 +143,9 @@ evaluation entirely.
 The bloom filter is private to SilverTorch: signatures are derived from
 `item_clause_attrs` at `register_index` time and stored as
 `bloom_sigs[N, W]` plus per-row `hash_seeds`. There is no `ClauseIndex`
-on this path. The standalone INT8 ANN-only variant
-[`IVF_INT8_ANN`](../../retrieve/src/retrieve/layers/silvertorch/ivf.py)
-(via `build_ivf_int8`) is the same module without the bloom term.
+on this path. Constructing `SilverTorch` without `m_bits`/`k_hash`
+yields the bloom-free variant — `register_index` skips bloom buffer
+allocation, and `forward` requires `query_clause_attrs=None`.
 
 ## Utility modules
 
@@ -172,7 +172,7 @@ pure Triton). Full per-kernel detail in [kernels.md](kernels.md).
 | [`linr/`](../../retrieve/src/retrieve/kernels/triton/linr/)                                             | [`fused_masked_knn_topk`](../../retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py) — gather + dot over `positive_indices` | `LiNR_V2_Triton` (masked path)    |
 | [`linr/`](../../retrieve/src/retrieve/kernels/triton/linr/)                                             | [`oporp_1bit_match_topk`](../../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py) — XOR + popcount, all V3 paths         | `LiNR_V3_Triton`                  |
 | [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/)                                       | [`clause_compact`](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py) — fused clause eval + stream compaction          | `ClauseIndex.evaluate_indices`    |
-| [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`codesigned_probe_score`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py) — fused IVF + INT8 + Bloom    | `SilverTorch`, `IVF_INT8_ANN`     |
+| [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`codesigned_probe_score`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py) — fused IVF + INT8 + Bloom    | `SilverTorch`                     |
 | [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`bloom_match`](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py) — bool subset test (standalone)                     | `BloomFilter.evaluate_mask`       |
 | [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`int8_ann_fused`](../../retrieve/src/retrieve/kernels/triton/silvertorch/int8_ann_fused.py) — INT8 candidate scorer (standalone)          | parity test only, no production caller |
 
@@ -205,9 +205,9 @@ gate. Performance characterization (latency, memory, recall sweeps) lives in
   **kwargs)` and dispatches via a `(version, backend)` table. Triton
   modules are imported lazily so a torch-only caller never pays the
   triton-import cost.
-- SilverTorch builders (`build_silvertorch`, `build_ivf_int8`) live next to
-  their classes in [`layers/silvertorch/`](../../retrieve/src/retrieve/layers/silvertorch/).
+- The SilverTorch builder (`build_silvertorch`) lives next to its class
+  in [`layers/silvertorch/`](../../retrieve/src/retrieve/layers/silvertorch/).
 - Quantizers ship from [`layers/utils/quantize.py`](../../retrieve/src/retrieve/layers/utils/quantize.py):
-  `quantize_int8` (consumed by `IVF_INT8_ANN` / `SilverTorch`) and
+  `quantize_int8` (consumed by `SilverTorch`) and
   `quantize_oporp_1bit` (consumed by `LiNR_V3`). They share the file but
   no caller; LiNR never sees INT8, SilverTorch never sees OPORP.

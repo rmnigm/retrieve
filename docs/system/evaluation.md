@@ -142,7 +142,7 @@ GPU; the last two are CPU-resident faiss baselines.
 | `torch_fullscan` | `FullScanKNN` | GPU | Reference exhaustive IP scan. |
 | `triton_knn` | `LiNR_V1_Triton` | GPU | Single-pass Triton KNN. |
 | `linr_v3_then_v2` | `LiNR_V3_Triton` → `LiNR_V2_Triton` | GPU | Quantized V3 pre-filters to top-`candidate_pool`; V2 reranks at full precision. V1-as-stage-2 is intentionally absent — it's strictly slower than `triton_knn` alone on this workload. |
-| `silvertorch` | `IVF_INT8_ANN` | GPU | The bloom-fused `SilverTorch` is *not* used because Yambda has no item attributes; running it against zero signatures would degenerate. |
+| `silvertorch` | `SilverTorch` (`m_bits=None`, `k_hash=None`) | GPU | The bloom-fused configuration is *not* used because Yambda has no item attributes; running it against zero signatures would degenerate. With both bloom params left unset, `SilverTorch` skips bloom buffer allocation and runs as a plain IVF + INT8 ANN. |
 | `faiss_flat_ip` | `FaissFlatIP` | CPU | Single-thread (`faiss.omp_set_num_threads(1)` at import). Apples-to-apples flat baseline. |
 | `faiss_ivf_flat` | `FaissIVFFlat` | CPU | Single-thread IVF baseline. K-means trained on the full catalog with `numpy.random.seed(seed)` for determinism. |
 
@@ -258,6 +258,8 @@ other separately from CPU baselines; group by `(impl, k)` and span `bs`
 to read scaling behavior.
 
 ## How to run
+
+The repo is a uv workspace ([root pyproject](../../pyproject.toml)); `evaluation/` shares a single `.venv` with `retrieve/` at the workspace root. `uv run` from inside `evaluation/` discovers the workspace root automatically; equivalently use `uv run --directory evaluation …` from the root.
 
 End-to-end smoke (~2 min, single-GPU host):
 

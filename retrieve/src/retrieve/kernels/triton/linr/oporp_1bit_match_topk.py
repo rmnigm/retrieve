@@ -194,6 +194,10 @@ def oporp_1bit_match_topk(
     topk_scores, topk_local = torch.topk(all_scores, actual_k, dim=1)
     if has_indices:
         topk_ids = positive_indices.gather(1, topk_local)
+        # Per-row short case: counts[r] < k. Slots beyond counts[r] have
+        # score=-inf but `positive_indices` padding holds valid (non-passing)
+        # item ids — mask those out per the "rows that ran short" contract.
+        topk_ids = torch.where(torch.isfinite(topk_scores), topk_ids, topk_ids.new_full((), -1))
     else:
         topk_ids = topk_local.to(torch.long)
 

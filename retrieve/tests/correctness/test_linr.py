@@ -21,12 +21,12 @@ from retrieve.layers.linr.v3_triton import LiNR_V3_Triton
 from retrieve.layers.utils.compact import compact_mask
 from retrieve.layers.utils.retrieval import FullScanKNN
 from tests.conftest import (
+    assert_topk_id_sets_match,
     make_attrs,
     make_index,
     make_mask,
     make_query,
     recall_at_k,
-    valid_id_set,
 )
 
 N, D, B, K = 2048, 128, 16, 200
@@ -130,7 +130,7 @@ class TestCrossBackendAgreement:
         ids_ref, sc_ref = ref(data["query"], mask=mask)
         ids_tri, sc_tri = tri(data["query"], mask=mask)
         for b in range(B):
-            assert valid_id_set(ids_ref, sc_ref, b) == valid_id_set(ids_tri, sc_tri, b)
+            assert_topk_id_sets_match(ids_tri, sc_tri, ids_ref, sc_ref, b)
         sc_ref_sorted, ref_counts = _valid_scores_sorted(sc_ref)
         sc_tri_sorted, tri_counts = _valid_scores_sorted(sc_tri)
         assert torch.equal(ref_counts, tri_counts)
@@ -154,7 +154,7 @@ class TestCrossBackendAgreement:
         ids_ref, sc_ref = ref(data["query"], candidate_ids=cand, counts=counts)
         ids_tri, sc_tri = tri(data["query"], candidate_ids=cand, counts=counts)
         for b in range(B):
-            assert valid_id_set(ids_ref, sc_ref, b) == valid_id_set(ids_tri, sc_tri, b)
+            assert_topk_id_sets_match(ids_tri, sc_tri, ids_ref, sc_ref, b)
 
     @pytest.mark.parametrize("mask_pass_rate", [None, 0.01, 0.1, 0.8])
     def test_v3_torch_matches_v3_triton(self, data, mask_pass_rate):
@@ -167,7 +167,7 @@ class TestCrossBackendAgreement:
         ids_ref, sc_ref = ref(data["query"], mask=mask)
         ids_tri, sc_tri = tri(data["query"], mask=mask)
         for b in range(B):
-            assert valid_id_set(ids_ref, sc_ref, b) == valid_id_set(ids_tri, sc_tri, b)
+            assert_topk_id_sets_match(ids_tri, sc_tri, ids_ref, sc_ref, b)
 
     @pytest.mark.parametrize("pass_rate", [0.01, 0.1, 0.8])
     def test_v1_matches_v2_topk_set(self, data, pass_rate):
@@ -181,7 +181,7 @@ class TestCrossBackendAgreement:
         ids1, sc1 = v1(data["query"], mask=mask)
         ids2, sc2 = v2(data["query"], candidate_ids=cand, counts=counts)
         for b in range(B):
-            assert valid_id_set(ids1, sc1, b) == valid_id_set(ids2, sc2, b)
+            assert_topk_id_sets_match(ids2, sc2, ids1, sc1, b)
 
 
 # ---------------------------------------------------------------------------
@@ -304,11 +304,11 @@ class TestEdgeCases:
         """All-True mask path returns the same top-K id set as the unmasked path."""
         m = cls(k=K)
         m.register_index(data["embs"])
-        ids_no_mask, _ = m(data["query"])
+        ids_no_mask, sc_no_mask = m(data["query"])
         all_true = torch.ones(B, N, dtype=torch.bool, device="cuda")
-        ids_masked, _ = m(data["query"], mask=all_true)
+        ids_masked, sc_masked = m(data["query"], mask=all_true)
         for b in range(B):
-            assert set(ids_no_mask[b].tolist()) == set(ids_masked[b].tolist())
+            assert_topk_id_sets_match(ids_masked, sc_masked, ids_no_mask, sc_no_mask, b)
 
     @pytest.mark.parametrize("cls", [LiNR_V1, LiNR_V1_Triton, LiNR_V3, LiNR_V3_Triton])
     def test_mask_all_false_returns_no_finite_scores(self, data, cls):
@@ -339,10 +339,12 @@ class TestEdgeCases:
         ids, scores = m(q)
         assert ids.shape == (1, K)
         assert torch.isfinite(scores).all()
-        # Returned ids must match a torch reference top-K (set equality, fp32 ties).
-        ref_scores = q @ data["embs"].t()
-        _, ref_ids = torch.topk(ref_scores, K, dim=1)
-        assert set(ids[0].tolist()) == set(ref_ids[0].tolist())
+        # Returned ids must match a torch reference top-K. Tensor-core matmul
+        # in V1_Triton differs from torch `@` in fp accumulator order, so allow
+        # boundary-tied ids to swap (scores within atol of the K-th score).
+        ref_full = q @ data["embs"].t()
+        ref_scores, ref_ids = torch.topk(ref_full, K, dim=1)
+        assert_topk_id_sets_match(ids, scores, ref_ids, ref_scores, 0)
 
     @pytest.mark.parametrize("cls", [LiNR_V1, LiNR_V1_Triton])
     def test_k_equals_n(self, data, cls):

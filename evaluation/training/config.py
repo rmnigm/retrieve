@@ -43,6 +43,9 @@ class GSASRecConfig:
     checkpoint_dir: str = "checkpoints"
     seed: int = 42
 
+    text_embedding_path: str | None = None
+    tie_content_output: bool = False
+
     @property
     def num_items(self) -> int:
         with open(Path(self.data_dir) / "item_id_map.json") as f:

@@ -1,6 +1,6 @@
 import polars as pl
 
-from ..constants import Constants
+from .constants import Constants
 
 
 def flat_split_train_val_test(

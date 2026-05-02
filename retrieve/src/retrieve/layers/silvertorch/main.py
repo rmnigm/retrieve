@@ -8,18 +8,18 @@ from retrieve.kernels.triton.silvertorch.codesigned_probe_score import (
     codesigned_probe_score,
 )
 from retrieve.layers.filters.bloom import _build_signatures, _generate_seeds
-from retrieve.layers.silvertorch.ivf import _kmeans_torch
+from retrieve.layers.utils.kmeans import KMeansTorch
 from retrieve.layers.utils.quantize import quantize_int8
 
 
 class SilverTorch(RetrievalModule):
-    """Co-designed IVF + Bloom attribute filter (Algorithm 1).
+    """Co-designed IVF + INT8 ANN + (optional) Bloom attribute filter (Algorithm 1).
 
-    The bloom filter is fused into the ``codesigned_probe_score`` Triton
-    kernel — there is no standalone ``ClauseIndex`` here. When
-    ``register_index`` is called with ``item_clause_attrs=None``, the bloom
-    signature buffer is populated with zeros and the module behaves as an
-    unfiltered IVF + INT8 ANN at query time.
+    With ``m_bits`` and ``k_hash`` set, the bloom filter is fused into the
+    ``codesigned_probe_score`` Triton kernel. Leave both unset (or both
+    ``None``) to build a bloom-free IVF + INT8 ANN — no signature buffers
+    are allocated and the bloom branch is skipped at query time. ``mask`` is
+    honored independently in either configuration.
     """
 
     centroids: Tensor
@@ -35,39 +35,54 @@ class SilverTorch(RetrievalModule):
         k: int,
         n_lists: int,
         n_probe: int,
-        m_bits: int,
-        k_hash: int,
+        m_bits: int | None = None,
+        k_hash: int | None = None,
         n_iter: int = 10,
         seed: int = 0,
     ) -> None:
         super().__init__()
-        if m_bits <= 0 or (m_bits & (m_bits - 1)) != 0:
-            raise ValueError(f"m_bits must be a positive power of 2, got {m_bits}")
-        if m_bits % 64 != 0:
-            raise ValueError(f"m_bits must be a multiple of 64, got {m_bits}")
-        if k_hash <= 0:
-            raise ValueError(f"k_hash must be positive, got {k_hash}")
+        if (m_bits is None) ^ (k_hash is None):
+            raise ValueError("m_bits and k_hash must be set together (or both left unset)")
+        self.has_bloom = m_bits is not None
+        if self.has_bloom:
+            assert m_bits is not None and k_hash is not None  # narrow for type-checkers
+            if m_bits <= 0 or (m_bits & (m_bits - 1)) != 0:
+                raise ValueError(f"m_bits must be a positive power of 2, got {m_bits}")
+            if m_bits % 64 != 0:
+                raise ValueError(f"m_bits must be a multiple of 64, got {m_bits}")
+            if k_hash <= 0:
+                raise ValueError(f"k_hash must be positive, got {k_hash}")
+            self.m_bits = m_bits
+            self.k_hash = k_hash
+            self.word_count = m_bits // 64
+        else:
+            self.m_bits = 0
+            self.k_hash = 0
+            self.word_count = 0
         self.k = k
         self.n_lists = n_lists
         self.n_probe = n_probe
         self.n_iter = n_iter
         self.seed = seed
-        self.m_bits = m_bits
-        self.k_hash = k_hash
-        self.word_count = m_bits // 64
 
     def register_index(
         self,
         item_embs: Tensor,
         item_clause_attrs: Tensor | None = None,
     ) -> None:
+        if not self.has_bloom and item_clause_attrs is not None:
+            raise ValueError(
+                "item_clause_attrs requires bloom config — pass m_bits and k_hash to __init__"
+            )
         n, _ = item_embs.shape
         if self.n_lists > n:
             raise ValueError(f"n_lists ({self.n_lists}) cannot exceed N ({n}).")
         if self.n_probe > self.n_lists:
             raise ValueError(f"n_probe ({self.n_probe}) cannot exceed n_lists ({self.n_lists}).")
 
-        centroids, assignments = _kmeans_torch(item_embs, self.n_lists, self.n_iter, self.seed)
+        centroids, assignments = KMeansTorch(
+            n_lists=self.n_lists, n_iter=self.n_iter, seed=self.seed
+        ).fit(item_embs)
         cluster_sizes = torch.bincount(assignments, minlength=self.n_lists)
         max_size = int(cluster_sizes.max().item())
 
@@ -87,25 +102,26 @@ class SilverTorch(RetrievalModule):
 
         codes, scales = quantize_int8(item_embs)
 
-        seeds = _generate_seeds(self.k_hash, device=item_embs.device)
-        if item_clause_attrs is None:
-            sigs = torch.zeros(n, self.word_count, dtype=torch.int64, device=item_embs.device)
-        else:
-            sigs = _build_signatures(
-                item_clause_attrs.long(),
-                seeds,
-                self.m_bits,
-                self.k_hash,
-                self.word_count,
-            )
-
         self.register_buffer("centroids", centroids)
         self.register_buffer("item_codes", codes)
         self.register_buffer("item_scales", scales)
         self.register_buffer("padded_cluster_items", padded)
         self.register_buffer("cluster_sizes", cluster_sizes)
-        self.register_buffer("bloom_sigs", sigs)
-        self.register_buffer("hash_seeds", seeds)
+
+        if self.has_bloom:
+            seeds = _generate_seeds(self.k_hash, device=item_embs.device)
+            if item_clause_attrs is None:
+                sigs = torch.zeros(n, self.word_count, dtype=torch.int64, device=item_embs.device)
+            else:
+                sigs = _build_signatures(
+                    item_clause_attrs.long(),
+                    seeds,
+                    self.m_bits,
+                    self.k_hash,
+                    self.word_count,
+                )
+            self.register_buffer("bloom_sigs", sigs)
+            self.register_buffer("hash_seeds", seeds)
 
     def forward(
         self,
@@ -114,15 +130,20 @@ class SilverTorch(RetrievalModule):
         mask: Tensor | None = None,
         candidate_ids: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
-        """IVF + Bloom-fused retrieval.
+        """IVF + (optional) Bloom-fused retrieval.
 
-        ``query_clause_attrs=None`` is a documented first-class fast path:
-        the kernel skips bloom evaluation entirely (``query_bits`` and
-        ``bloom_sigs`` are passed as ``None``), making the module behave as
-        a plain IVF + INT8 ANN. ``mask`` is still honored independently.
+        ``query_clause_attrs`` is only valid when the index was built with a
+        bloom config. With it ``None``, the kernel skips bloom evaluation
+        entirely (``query_bits`` and ``bloom_sigs`` are passed as ``None``).
+        ``mask`` is honored independently.
         """
         if candidate_ids is not None:
             return self._forward_candidates(query, candidate_ids)
+
+        if not self.has_bloom and query_clause_attrs is not None:
+            raise ValueError(
+                "query_clause_attrs requires bloom config — pass m_bits and k_hash to __init__"
+            )
 
         b = query.shape[0]
 
@@ -135,7 +156,7 @@ class SilverTorch(RetrievalModule):
         flat_items = probed.reshape(b, -1)  # [B, P], -1 padding marks empty slots
 
         # Build query bloom signature once per call (cheap, host-side).
-        if query_clause_attrs is not None:
+        if self.has_bloom and query_clause_attrs is not None:
             qb = _build_signatures(
                 query_clause_attrs.long().unsqueeze(-1),
                 self.hash_seeds,
@@ -143,8 +164,10 @@ class SilverTorch(RetrievalModule):
                 self.k_hash,
                 self.word_count,
             )  # [B, W]
+            sigs = self.bloom_sigs
         else:
             qb = None
+            sigs = None
 
         # Phase 2 + 3 fused: per (b, p-tile) bloom subset test, optional external
         # mask, int8 dequant dot, score store. No [B, P, W] / [B, P, D]
@@ -156,7 +179,7 @@ class SilverTorch(RetrievalModule):
             self.item_scales,
             self.k,
             query_bits=qb,
-            bloom_sigs=self.bloom_sigs if qb is not None else None,
+            bloom_sigs=sigs,
             mask=mask,
         )
 
@@ -182,8 +205,8 @@ def build_silvertorch(
     *,
     n_lists: int,
     n_probe: int,
-    m_bits: int,
-    k_hash: int,
+    m_bits: int | None = None,
+    k_hash: int | None = None,
     n_iter: int = 10,
     seed: int = 0,
     item_clause_attrs: Tensor | None = None,

@@ -96,6 +96,52 @@ def valid_id_set(ids: torch.Tensor, scores: torch.Tensor, b: int) -> set[int]:
     return set(ids[b][valid].tolist())
 
 
+def assert_topk_id_sets_match(
+    out_ids: torch.Tensor,
+    out_scores: torch.Tensor,
+    ref_ids: torch.Tensor,
+    ref_scores: torch.Tensor,
+    b: int,
+    *,
+    atol: float = 1e-3,
+    rtol: float = 1e-3,
+) -> None:
+    """Per-row id-set comparison with tie tolerance at the K-th boundary.
+
+    Tensor-core matmul (`tl.dot`) and torch `@` differ in accumulator order
+    enough to flip the K-th-place tiebreak when two items have ~atol score
+    spread. Symmetric-difference ids must lie within `atol` of their side's
+    finite-score minimum.
+    """
+    k = out_ids.shape[1]
+    out_pairs = [
+        (out_ids[b, j].item(), out_scores[b, j].item())
+        for j in range(k)
+        if torch.isfinite(out_scores[b, j]) and out_ids[b, j].item() >= 0
+    ]
+    ref_pairs = [
+        (ref_ids[b, j].item(), ref_scores[b, j].item())
+        for j in range(k)
+        if torch.isfinite(ref_scores[b, j]) and ref_ids[b, j].item() >= 0
+    ]
+    out_set = {p[0] for p in out_pairs}
+    ref_set = {p[0] for p in ref_pairs}
+    if out_set == ref_set:
+        return
+    out_min = min(s for _, s in out_pairs) if out_pairs else float("-inf")
+    ref_min = min(s for _, s in ref_pairs) if ref_pairs else float("-inf")
+    for i in ref_set - out_set:
+        s = next(sc for idx, sc in ref_pairs if idx == i)
+        assert s <= ref_min + atol + rtol * abs(ref_min), (
+            f"row {b}: ref-only id {i} score={s:.6f} not at boundary {ref_min:.6f}"
+        )
+    for i in out_set - ref_set:
+        s = next(sc for idx, sc in out_pairs if idx == i)
+        assert s <= out_min + atol + rtol * abs(out_min), (
+            f"row {b}: out-only id {i} score={s:.6f} not at boundary {out_min:.6f}"
+        )
+
+
 def recall_at_k(approx_ids: torch.Tensor, exact_ids: torch.Tensor) -> float:
     """Mean per-row set overlap of ``approx`` vs ``exact``, divided by K."""
     b, k = approx_ids.shape

@@ -15,13 +15,10 @@ _defaults: &defaults
     - triton_knn
     - linr_v3_then_v2
     - silvertorch
-    - faiss_flat_ip
-    - faiss_ivf_flat
   # N≈631K → sqrt(N)≈794. 512 lists × ~1230 items/cluster avg.
   algo_params:
     linr_v3_then_v2: { candidate_pool: 5000, v3_seed: 0 }
     silvertorch:     { n_lists: 512, n_probe: 8, n_iter: 10, seed: 0 }
-    faiss_ivf_flat:  { nlist: 512, nprobe: 8, seed: 0 }
 
 <<: *defaults
 checkpoint: checkpoints/smoke-50m-listens/best_model.pt

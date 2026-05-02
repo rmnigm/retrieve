@@ -20,14 +20,13 @@ from retrieve.layers.linr import (
     build_linr_v3_triton,
 )
 from retrieve.layers.silvertorch import (
-    IVF_INT8_ANN,
     SilverTorch,
-    build_ivf_int8,
     build_silvertorch,
 )
 from retrieve.layers.utils import (
     DotProductScorer,
     FullScanKNN,
+    KMeansTorch,
     post_filter_topk,
     quantize_int8,
     quantize_oporp_1bit,
@@ -38,7 +37,7 @@ __all__ = [
     "ClauseIndex",
     "DotProductScorer",
     "FullScanKNN",
-    "IVF_INT8_ANN",
+    "KMeansTorch",
     "LiNR_V1",
     "LiNR_V1_Triton",
     "LiNR_V2",
@@ -46,7 +45,6 @@ __all__ = [
     "LiNR_V3",
     "LiNR_V3_Triton",
     "SilverTorch",
-    "build_ivf_int8",
     "build_linr_index",
     "build_linr_v1",
     "build_linr_v1_triton",
