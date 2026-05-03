@@ -15,9 +15,11 @@ _defaults: &defaults
     - linr_v2_filter_compact  # filter suite only (exact via filter compact indices)
     - linr_v3_then_v2         # both suites (V3 1-bit cascade, approx)
     - silvertorch             # quality + wide/combined filter (approx; skipped on narrow)
+    - voyager_hnsw            # CPU baseline (Spotify HNSW, multi-threaded); post-filter on filter sweeps
   algo_params:
     linr_v3_then_v2: {candidate_pool: 8000, v3_seed: 0}
     silvertorch:     {n_lists: 1024, n_probe: 24, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}
+    voyager_hnsw:    {m: 32, ef_construction: 200, ef_query: 1000, num_threads: 16, seed: 0}
   filters:
     none:
       sweeps:

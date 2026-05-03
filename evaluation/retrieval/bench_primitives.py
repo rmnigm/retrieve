@@ -203,9 +203,15 @@ def encode_queries(
     )
     q_chunks: list[torch.Tensor] = []
     t_lists: list[list[int]] = []
+    amp_enabled = device.type == "cuda"
     for item_seqs, targets, num_targets in tqdm(loader, desc="encode queries"):
         item_seqs = item_seqs.to(device, non_blocking=True)
-        q = model.predict_last(item_seqs).detach().cpu()
+        # Match training/evaluate.py: fp32 attention NaNs out on left-padded
+        # rows where the first positions are fully masked; autocast dispatches
+        # to a SDPA kernel that handles the all-masked-keys case.
+        with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
+            q = model.predict_last(item_seqs)
+        q = q.float().detach().cpu()
         q_chunks.append(q)
         for row, n in zip(targets, num_targets, strict=True):
             t_lists.append(row[:n].tolist())
