@@ -4,17 +4,17 @@ import torch
 from torch import Tensor
 
 from retrieve.kernels.triton.linr.fused_masked_knn_topk import fused_masked_knn_topk
-from retrieve.kernels.triton.linr.fused_matmul_topk import fused_matmul_topk
 from retrieve.layers.linr.v2 import LiNR_V2
 
 
 class LiNR_V2_Triton(LiNR_V2):
-    """LiNR V2 (explicit pre-filtering) with the fused Triton kernel.
+    """LiNR V2 with the fused Triton prefilter kernel.
 
     Sparse path: ``fused_masked_knn_topk`` reads only the passing rows by
     indirect load, no dense ``[B, N]`` materialization. Without
-    ``candidate_ids``, falls back to the dense matmul kernel ``fused_matmul_topk``
-    (V1's path), since there's nothing to pre-filter.
+    ``candidate_ids`` there's nothing to pre-filter, so the unmasked
+    fallback runs the parent's pure-torch dense matmul + top-K (the same
+    code as ``LiNR_V1``).
     """
 
     def forward(
@@ -24,7 +24,7 @@ class LiNR_V2_Triton(LiNR_V2):
         counts: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
         if candidate_ids is None:
-            return fused_matmul_topk(query, self.item_embs, self.k)
+            return super()._forward_full(query)
 
         b, p = candidate_ids.shape
         if p == 0:

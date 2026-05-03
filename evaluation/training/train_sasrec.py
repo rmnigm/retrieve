@@ -61,40 +61,16 @@ def train(config: GSASRecConfig, resume: bool = False) -> None:
     ckpt_dir = Path(config.checkpoint_dir)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-    if config.text_embedding_path is not None:
-        from training.model_content import GSASRecContent
-
-        text_emb = torch.load(config.text_embedding_path, map_location="cpu")
-        logger.info(
-            "Using content embeddings from {} (shape={}, tie_output={}, proj_type={})",
-            config.text_embedding_path,
-            tuple(text_emb.shape),
-            config.tie_content_output,
-            config.content_proj_type,
-        )
-        model = GSASRecContent(
-            num_items=num_items,
-            text_emb=text_emb,
-            tie_content_output=config.tie_content_output,
-            content_proj_type=config.content_proj_type,
-            max_seq_length=config.max_seq_length,
-            embedding_dim=config.embedding_dim,
-            num_heads=config.num_heads,
-            num_blocks=config.num_blocks,
-            ffn_hidden_dim=config.ffn_hidden_dim,
-            dropout=config.dropout,
-        ).to(device)
-    else:
-        model = GSASRec(
-            num_items=num_items,
-            max_seq_length=config.max_seq_length,
-            embedding_dim=config.embedding_dim,
-            num_heads=config.num_heads,
-            num_blocks=config.num_blocks,
-            ffn_hidden_dim=config.ffn_hidden_dim,
-            dropout=config.dropout,
-            reuse_item_embeddings=config.reuse_item_embeddings,
-        ).to(device)
+    model = GSASRec(
+        num_items=num_items,
+        max_seq_length=config.max_seq_length,
+        embedding_dim=config.embedding_dim,
+        num_heads=config.num_heads,
+        num_blocks=config.num_blocks,
+        ffn_hidden_dim=config.ffn_hidden_dim,
+        dropout=config.dropout,
+        reuse_item_embeddings=config.reuse_item_embeddings,
+    ).to(device)
 
     loader = get_train_dataloader(
         parquet_path=str(Path(config.data_dir) / "train.parquet"),
@@ -186,6 +162,7 @@ def train(config: GSASRecConfig, resume: bool = False) -> None:
                 )
 
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
 

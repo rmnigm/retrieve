@@ -7,8 +7,9 @@
 The Triton kernels split into three trees by domain:
 
 - [`linr/`](../../retrieve/src/retrieve/kernels/triton/linr/) — kernels
-  used by LinR V1/V2/V3 (`fused_matmul_topk`, `fused_masked_knn_topk`,
-  `oporp_1bit_match_topk`).
+  used by LinR V2/V3 (`fused_masked_knn_topk`, `oporp_1bit_match_topk`).
+  V1's dense matmul + top-K is pure torch — there's no real fusion to
+  win over cuBLAS + CUB.
 - [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/) —
   standalone filter primitives consumed by the `FilterModule` family:
   `clause_compact` (powers `ClauseIndex.evaluate_indices`), `clause_mask`
@@ -19,8 +20,7 @@ The Triton kernels split into three trees by domain:
 - [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/) —
   `codesigned_probe_score` (the IVF + INT8 + Bloom co-design) plus
   `bloom_match` (lives in this tree for historical reasons but is now a
-  cross-tree filter primitive consumed by `BloomFilter`) and the
-  unattached `int8_ann_fused`.
+  cross-tree filter primitive consumed by `BloomFilter`).
 
 The LinR kernels are the focus of this doc; the filter primitives
 (`clause_compact`, `clause_mask`, `bloom_match`, `bloom_compact`) are
@@ -64,36 +64,16 @@ so loading the same checkpoint produces the same bits. V3 store (`item_bits`,
 on every forward, so the torch reference and the Triton kernel see byte-for-
 byte identical bits.
 
-## `fused_matmul_topk` — V1 dense path
+## V1 dense path — pure torch, no kernel
 
-[`kernels/triton/linr/fused_matmul_topk.py`](../../retrieve/src/retrieve/kernels/triton/linr/fused_matmul_topk.py).
-
-Computes `query @ item_embs.T`, optionally masks, and writes a `[B, N]`
-score buffer. The host calls `torch.topk` on the buffer.
-
-```
-inputs:    query     [B, D]  fp32
-           item_embs [N, D]  fp32
-           mask      [B, N]  bool   (optional, gated by HAS_MASK)
-output:    scores    [B, N]  fp32
-```
-
-**Launch grid** `(cdiv(B, BLOCK_M), cdiv(N, BLOCK_N))`. Each program owns
-one `[BLOCK_M, BLOCK_N]` output tile. With `BLOCK_M ≥ 16` even `B=1`
-queries land on tensor cores — the kernel masks the padded rows on store.
-
-**Inner loop** is a single `tl.dot(q_tile, item_tile.T)` over the full `D`
-axis (no K-loop because `D=128` fits in one tile). The matmul lands on
-tensor cores. Tile-blocked reduction order means scores can drift ~1e-4
-fp32 vs cuBLAS's row-major reduction — parity tests use a tolerant
-top-K matcher (set + sorted-score); bit-exact parity is **not** asserted
-for this kernel.
-
-**Mask path** (`HAS_MASK=True`): a single `tl.load` of `mask[m, n]` and
-`tl.where(m, scores, -inf)` in the same program. No second pass.
-
-**Autotune** searches `(BLOCK_M ∈ {16, 32}, BLOCK_N ∈ {64, 128, 256},
-num_warps ∈ {4, 8})` keyed on `(B, N, D)`.
+V1's forward is `query @ item_embs.T` + optional `masked_fill(-inf)` +
+`torch.topk` — implemented directly in [`LiNR_V1`](../../retrieve/src/retrieve/layers/linr/v1.py).
+An earlier `fused_matmul_topk` Triton kernel sat in this slot, but it only
+fused the matmul: it materialized the full `[B, N]` score buffer to global
+memory and then called the same host-side `torch.topk`, so its memory
+traffic and selection cost matched cuBLAS + CUB exactly. With no fusion
+benefit, the kernel was removed; `LiNR_V1_Triton` is retained as a
+backend-dispatch alias that runs the same pure-torch code as `LiNR_V1`.
 
 ## `fused_masked_knn_topk` — V2 sparse path
 
@@ -337,17 +317,18 @@ mask shape, not the one that benches best on a given input.
 
 | layer                       | path         | kernel(s) called                                  |
 |-----------------------------|--------------|---------------------------------------------------|
-| [`LiNR_V1_Triton`](../../retrieve/src/retrieve/layers/linr/v1_triton.py)   | always dense | `fused_matmul_topk` (with optional inline mask)   |
+| [`LiNR_V1_Triton`](../../retrieve/src/retrieve/layers/linr/v1_triton.py)   | always dense | none — pure torch `(q @ x.T).masked_fill(...).topk` |
 | [`LiNR_V2_Triton`](../../retrieve/src/retrieve/layers/linr/v2_triton.py)   | masked       | `compact_mask` → `fused_masked_knn_topk`          |
-|                                                                | unmasked     | `fused_matmul_topk` (V2 has nothing to pre-filter)|
+|                                                                | unmasked     | none — pure torch dense path (nothing to pre-filter) |
 | [`LiNR_V3_Triton`](../../retrieve/src/retrieve/layers/linr/v3_triton.py)   | full         | `oporp_1bit_match_topk` (HAS_INDICES=False)       |
 |                                                                | masked       | `compact_mask` → `oporp_1bit_match_topk` (HAS_INDICES=True) |
 |                                                                | candidates   | `oporp_1bit_match_topk` (HAS_INDICES=True)        |
 
 V3's masked path always compacts and uses HAS_INDICES — popcount is cheap
 enough that the gather penalty never crosses the dense-fallback break-even
-point that V1 would hit. (The fp32 dot has a much higher per-item cost,
-so V1's dense + inline-mask wins; that argument doesn't transfer to V3.)
+point. V1's dense fp32 path is also kept as the default (no compaction)
+because cuBLAS + `torch.topk` already handle the inline-mask case at the
+same cost a tile-fused kernel would.
 
 ## Helpers
 
@@ -378,26 +359,25 @@ helper packs the sign-quantized output into `[..., W]` int64 words using
 
 ## Numerics
 
-Two failure modes worth keeping in mind:
+V1's pure-torch dense path uses cuBLAS for the matmul, so the torch and
+Triton-backend classes go through identical kernels and produce
+bit-identical scores. V2's sparse path uses `tl.dot` only inside
+`fused_masked_knn_topk`'s elementwise per-cell reduction (not a tile
+matmul), so it doesn't share the tensor-core tile-reduction order
+quirks; parity tests still use [`assert_topk_matches`](../../retrieve/tests/parity/conftest.py)
+(set + sorted-score tolerance) for V2 because gather order can vary.
 
-1. **`tl.dot` reduction order vs cuBLAS.** `fused_matmul_topk` reduces in
-   tensor-core tile order; cuBLAS reduces in row-major order. fp32 scores
-   drift ~1e-4–1e-3 absolute, which can flip top-K ordering at ties near
-   the K-th boundary. Parity tests use [`assert_topk_matches`](../../retrieve/tests/parity/conftest.py)
-   (set + sorted-score tolerance). Bit-exact parity is **not** an
-   invariant for V1/V2 and never was.
-
-2. **OPORP popcount is bit-exact.** V3's torch reference and the Triton
-   kernel both use the same SWAR popcount on the same packed bits, so
-   the parity test in
-   [`test_oporp_1bit_match_topk.py`](../../retrieve/tests/parity/test_oporp_1bit_match_topk.py)
-   asserts strict equality on returned ids and scores. If they ever
-   diverge, a popcount or packing bug has been introduced — the kernel's
-   correctness depends on bit identity here.
+**OPORP popcount is bit-exact.** V3's torch reference and the Triton
+kernel both use the same SWAR popcount on the same packed bits, so the
+parity test in
+[`test_oporp_1bit_match_topk.py`](../../retrieve/tests/parity/test_oporp_1bit_match_topk.py)
+asserts strict equality on returned ids and scores. If they ever
+diverge, a popcount or packing bug has been introduced — the kernel's
+correctness depends on bit identity here.
 
 ## SilverTorch kernels
 
-Two kernels live in the SilverTorch tree without a non-SilverTorch
+One kernel lives in the SilverTorch tree without a non-SilverTorch
 consumer; described briefly for context. (`bloom_match` also lives in
 this tree but is documented above as a filter primitive — it has a
 non-SilverTorch consumer now.)
@@ -411,12 +391,16 @@ attribute filter inline (skipped entirely when `query_clause_attrs=None`).
 Autotune key includes `HAS_QB` and `HAS_MASK` so the cluster-only,
 bloom+cluster, and externally-masked paths each get their own configs.
 
-[`int8_ann_fused`](../../retrieve/src/retrieve/kernels/triton/silvertorch/int8_ann_fused.py)
-is the standalone int8 candidate scorer (gather codes → cast fp32 → dot
-→ scale). After V3's pivot to 1-bit, no LinR layer consumes this kernel
-either; it remains in the SilverTorch tree pending a focused SilverTorch
-pass that should either move it to a `dp4a`/`mma.s8` int32 accumulator
-path (per the SilverTorch paper) or remove it. Untouched in this run.
+[`codesigned_probe_score_fp32`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score_fp32.py)
+is the fp32 sibling and powers
+[`SilverTorchFp32.forward`](../../retrieve/src/retrieve/layers/silvertorch/fp32.py).
+Same launch shape, IVF + bloom + mask fusion, autotune key, and `HAS_QB` /
+`HAS_MASK` paths as the int8 kernel — only the scoring step differs: loads
+`item_embs[N, D]` fp32 directly (no `int8 → fp32` cast, no per-item
+`scales` multiply). Trades **~4× the HBM traffic** in the scoring inner
+loop for exact-up-to-IVF recall (no quantization error). Use when the
+index fits comfortably in HBM and recall ceiling matters more than
+bandwidth; stay on the int8 kernel when bandwidth- or capacity-bound.
 
 ## Filter kernel history
 

@@ -13,13 +13,14 @@ Subcommands:
              header. Writes raw/MANIFEST.txt with sha256s.
   convert    Stream raw → ZSTD parquet under processed/. Idempotent.
   prep       processed/ → yambda-format trainer inputs (train/val/test/item_id_map).
+  attrs      Build narrow + wide attribute tensors + eval_split for the filter bench.
   all        download → convert.
 
 Examples::
 
-    uv run goodreads.py all
-    uv run goodreads.py download --force goodreads_books.json.gz
-    python -m data.goodreads prep \\
+    uv run goodreads all
+    uv run goodreads download --force goodreads_books.json.gz
+    uv run goodreads prep \\
       --processed-dir ~/datasets/goodreads-ucsd/processed \\
       --output-dir data/goodreads/work-id
 
@@ -36,6 +37,7 @@ import argparse
 import gzip
 import hashlib
 import json
+import re
 import sys
 import time
 import urllib.error
@@ -45,6 +47,8 @@ from pathlib import Path
 import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
+
+from .common import sample_rare_biased_wide, synthesize_qa_narrow
 
 ROOT = Path.home() / "datasets" / "goodreads-ucsd"
 RAW_DIR = ROOT / "raw"
@@ -404,8 +408,6 @@ def cmd_prep(args) -> int:
     DAY = 24 * 60 * 60
     processed = Path(args.processed_dir).expanduser().resolve()
     output = Path(args.output_dir).expanduser()
-    if args.smoke:
-        output = output.parent / (output.name + "-smoke")
     output.mkdir(parents=True, exist_ok=True)
 
     interactions_path = processed / "goodreads_interactions_dedup.parquet"
@@ -417,7 +419,7 @@ def cmd_prep(args) -> int:
         print(f"ERROR missing {books_path}", flush=True)
         return 1
 
-    log: dict = {"output_dir": str(output), "smoke": bool(args.smoke)}
+    log: dict = {"output_dir": str(output)}
     overall_t0 = time.monotonic()
 
     # ---- step 1-3: scan, filter is_read, parse date_added ----
@@ -465,14 +467,6 @@ def cmd_prep(args) -> int:
 
     inter = inter.filter(pl.col("dt").is_not_null() & (pl.col("dt").dt.year() >= 2007))
     inter = inter.select("user_id", "book_id", "ts")
-
-    # ---- smoke subsample BEFORE the heavy join + n-core ----
-    if args.smoke:
-        print("STEP smoke subsample (100k random users)", flush=True)
-        u_unique = inter.select("user_id").unique().collect(engine="streaming")
-        n_take = min(100_000, u_unique.height)
-        u_sample = u_unique.sample(n=n_take, seed=42)
-        inter = inter.join(u_sample.lazy(), on="user_id", how="inner")
 
     # ---- step 4: book_id → work_id ----
     # In `goodreads_books.parquet`, both book_id and work_id are strings (some
@@ -604,7 +598,7 @@ def cmd_prep(args) -> int:
     # Collect train/val/test eagerly first — once the time-split chain has run,
     # operating on small DataFrames (one row per user) is cheap. Doing the
     # joins lazily through the streaming engine triggered list-op explosions
-    # past the 129 GB cgroup limit on the smoke dataset.
+    # past the 129 GB cgroup limit.
     print("STEP compose train/val/test parquets", flush=True)
     train_df = (
         train_lf.select("uid", pl.col("item_id").list.tail(max_seq).alias("item_ids"))
@@ -729,13 +723,11 @@ SHELF_BLOCKLIST = frozenset({
 })
 
 # Regex drops applied AFTER the lowercase-name lookup against SHELF_BLOCKLIST.
-import re as _re
-
-_SHELF_RE_DROPS = (
-    _re.compile(r"^read-(in-)?\d{4}$"),
-    _re.compile(r"^\d-?stars?$"),
-    _re.compile(r"^[a-z]{2}-\d{4}$"),
-    _re.compile(r"^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$"),
+SHELF_RE_DROPS = (
+    re.compile(r"^read-(in-)?\d{4}$"),
+    re.compile(r"^\d-?stars?$"),
+    re.compile(r"^[a-z]{2}-\d{4}$"),
+    re.compile(r"^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$"),
 )
 
 C_NARROW = 5  # genre, lang, format, year, author
@@ -800,7 +792,7 @@ def _shelf_keep(name: str | None) -> bool:
     n = name.lower().strip()
     if not n or n in SHELF_BLOCKLIST:
         return False
-    for r in _SHELF_RE_DROPS:
+    for r in SHELF_RE_DROPS:
         if r.match(n):
             return False
     return True
@@ -1249,64 +1241,10 @@ def cmd_attrs(args) -> int:
     targets_lists = test_df["targets"].to_list()
     target_first = [t[0] if t else 0 for t in targets_lists]
 
-    # query_attrs_narrow per user: first non-pad value of item_attrs_narrow[target, c, :]
-    qa_narrow = torch.full((n_users, C_NARROW), -1, dtype=torch.long)
-    for u, tgt in enumerate(target_first):
-        if tgt <= 0:
-            continue
-        for c in range(C_NARROW):
-            row = narrow_t[tgt, c]
-            for v in row.tolist():
-                if v != -1:
-                    qa_narrow[u, c] = v
-                    break
-
-    # wide sampling: per user, look at item_attrs_wide[target, 0, :], drop -1s.
-    # 1-shelf: bias ∝ 1/sqrt(global_freq). 2-shelf: one common (∝ sqrt(freq))
-    # + one rare (∝ 1/sqrt(freq)). Both -1 if drop conditions trip.
-    import numpy as _np
-
-    rng = _np.random.default_rng(args.seed)
-    wide_global_freq_np = _np.asarray(wide_counts, dtype=_np.int64)
-    qa_wide_1 = _np.full((n_users,), -1, dtype=_np.int64)
-    qa_wide_2 = _np.full((n_users, 2), -1, dtype=_np.int64)
-    n_drop_1 = 0
-    n_drop_2 = 0
-    wide_t_np = wide_t.numpy()
-    for u, tgt in enumerate(target_first):
-        if tgt <= 0:
-            n_drop_1 += 1
-            n_drop_2 += 1
-            continue
-        bag = wide_t_np[tgt, 0]
-        bag = bag[bag != -1]
-        if len(bag) == 0:
-            n_drop_1 += 1
-            n_drop_2 += 1
-            continue
-        freq = wide_global_freq_np[bag].astype(_np.float64)
-        # rare-bias for 1-shelf
-        w_rare = 1.0 / _np.sqrt(_np.maximum(freq, 1.0))
-        w_rare = w_rare / w_rare.sum()
-        qa_wide_1[u] = int(rng.choice(bag, p=w_rare))
-        # 2-shelf: only if bag has ≥ 2 distinct shelves
-        if len(bag) < 2:
-            n_drop_2 += 1
-            continue
-        w_common = _np.sqrt(freq)
-        w_common = w_common / w_common.sum()
-        common_idx = int(rng.choice(len(bag), p=w_common))
-        common_id = int(bag[common_idx])
-        # mask out the chosen common from the rare pool
-        rest = _np.array([i for i in range(len(bag)) if i != common_idx])
-        if len(rest) == 0:
-            n_drop_2 += 1
-            continue
-        w_rare2 = 1.0 / _np.sqrt(_np.maximum(freq[rest], 1.0))
-        w_rare2 = w_rare2 / w_rare2.sum()
-        rare_id = int(bag[rest[int(rng.choice(len(rest), p=w_rare2))]])
-        qa_wide_2[u, 0] = common_id
-        qa_wide_2[u, 1] = rare_id
+    qa_narrow = synthesize_qa_narrow(target_first, narrow_t, C_NARROW)
+    qa_wide_1, qa_wide_2, n_drop_1, n_drop_2 = sample_rare_biased_wide(
+        target_first, wide_t, wide_counts, seed=args.seed
+    )
 
     log["eval_n_users"] = n_users
     log["eval_drop_1shelf"] = int(n_drop_1)
@@ -1394,11 +1332,6 @@ def main() -> int:
     )
     sp_pp.add_argument("--n-core", type=int, default=5)
     sp_pp.add_argument("--max-seq-len", type=int, default=200)
-    sp_pp.add_argument(
-        "--smoke",
-        action="store_true",
-        help="subsample to 100k random users; output goes to <output-dir>-smoke/",
-    )
     sp_pp.set_defaults(func=cmd_prep)
 
     sp_at = sub.add_parser(
@@ -1433,3 +1366,6 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+__all__ = ["main"]

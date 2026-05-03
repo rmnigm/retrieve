@@ -7,12 +7,13 @@ from retrieve.interfaces import RetrievalModule
 
 
 class LiNR_V1(RetrievalModule):
-    """LiNR V1, pure-torch reference.
+    """LiNR V1, pure-torch dense scoring + top-K.
 
     Computes the full ``query @ item_embs.T`` similarity matrix, applies an
     optional boolean mask via ``masked_fill(-inf)``, and selects the top-K.
-    The Triton-fused equivalent lives in ``linr_v1_triton.LiNR_V1_Triton``.
-    See docs/system/architecture.md (formerly docs/ARCHITECTURE.md).
+    ``LiNR_V1_Triton`` exists as a backend-dispatch alias but runs this same
+    code — V1's dense matmul + top-K has no real fusion benefit over
+    cuBLAS + CUB. See docs/system/architecture.md.
     """
 
     item_embs: Tensor

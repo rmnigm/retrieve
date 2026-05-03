@@ -102,20 +102,23 @@ Two composition helpers ship in
 ## LiNR variants
 
 All three return `(ids[B, K], scores[B, K])`. Backends ship in pairs: a
-`LiNR_V*` torch reference and a `LiNR_V*_Triton` fused subclass.
+`LiNR_V*` torch reference and a `LiNR_V*_Triton` subclass. V2 and V3
+have real fused kernels; V1's `_Triton` subclass is a backend-dispatch
+alias only — its dense matmul + top-K runs in pure torch (cuBLAS + CUB
+already do the right thing; there's no fusion to win).
 
 - **V1 — dense similarity, optional mask.** Full `query @ item_embs.T`,
   masked scores set to `-inf`, then top-K. Forward takes
-  `(query, mask=None)`. Wins when the mask is dense or absent. Triton
-  backend uses `fused_matmul_topk` with the mask folded inline.
+  `(query, mask=None)`. Wins when the mask is dense or absent. Both
+  backends share the same pure-torch implementation.
 - **V2 — sparse pre-filter.** Forward takes
   `(query, candidate_ids=None, counts=None)` — passing item ids per query,
   precompacted by the caller (typically `ClauseIndex.evaluate_indices`).
   V2 itself does **no** mask handling: it gathers the passing rows, runs
   a reduced `bmm`, top-K's locally, and maps back to global ids. Without
   `candidate_ids` it falls back to a V1-style exhaustive matmul. Triton
-  backend uses `fused_masked_knn_topk` for the sparse path and
-  `fused_matmul_topk` for the unmasked fallback.
+  backend uses `fused_masked_knn_topk` for the sparse path and the
+  parent's pure-torch dense matmul for the unmasked fallback.
 - **V3 — 1-bit Sign-OPORP.** [`quantize_oporp_1bit`](../../retrieve/src/retrieve/layers/utils/quantize.py)
   builds three buffers at index time: `item_bits[N, W]` int64
   (`W = D / 64`), `oporp_signs[D]` int8, `oporp_perm[D]` int64. Scoring
@@ -154,6 +157,19 @@ on this path. Constructing `SilverTorch` without `m_bits`/`k_hash`
 yields the bloom-free variant — `register_index` skips bloom buffer
 allocation, and `forward` requires `query_clause_attrs=None`.
 
+[`SilverTorchFp32`](../../retrieve/src/retrieve/layers/silvertorch/fp32.py)
+is a sibling class that runs the same IVF + bloom co-design over **fp32
+item embeddings** instead of int8 codes, backed by the
+[`codesigned_probe_score_fp32`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score_fp32.py)
+kernel. Constructed via `build_silvertorch_fp32(...)` with the same
+keyword surface as `build_silvertorch`. Trade-off: ~4× the HBM traffic
+and 4× the index size (`N × D × 4` bytes vs `N × D + N × 4`) for
+exact-up-to-IVF recall — no quantization error contributes to recall
+loss, only the IVF approximation. Use when the index fits comfortably
+in HBM and recall ceiling matters more than bandwidth; the int8
+`SilverTorch` remains the default for bandwidth- or capacity-bound
+deployments.
+
 ## Utility modules
 
 - [`FullScanKNN`](../../retrieve/src/retrieve/layers/utils/retrieval.py) —
@@ -175,15 +191,14 @@ pure Triton). Full per-kernel detail in [kernels.md](kernels.md).
 
 | subtree                                                                                              | kernel                                                                                                                                | consumer                          |
 |------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------|
-| [`linr/`](../../retrieve/src/retrieve/kernels/triton/linr/)                                             | [`fused_matmul_topk`](../../retrieve/src/retrieve/kernels/triton/linr/fused_matmul_topk.py) — fp32 dot + inline mask                       | `LiNR_V1_Triton`, `LiNR_V2_Triton` (unmasked fallback) |
 | [`linr/`](../../retrieve/src/retrieve/kernels/triton/linr/)                                             | [`fused_masked_knn_topk`](../../retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py) — gather + dot over `positive_indices` | `LiNR_V2_Triton` (masked path)    |
 | [`linr/`](../../retrieve/src/retrieve/kernels/triton/linr/)                                             | [`oporp_1bit_match_topk`](../../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py) — XOR + popcount, all V3 paths         | `LiNR_V3_Triton`                  |
 | [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/)                                       | [`clause_compact`](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py) — fused clause eval + stream compaction          | `ClauseIndex.evaluate_indices`    |
 | [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/)                                       | [`clause_mask`](../../retrieve/src/retrieve/kernels/triton/filters/clause_mask.py) — fused clause eval emitting `[B, N]` bool             | `ClauseIndex.evaluate_mask`       |
 | [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/)                                       | [`bloom_compact`](../../retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py) — fused subset-test + stream compaction            | `BloomFilter.evaluate_indices`    |
 | [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`codesigned_probe_score`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py) — fused IVF + INT8 + Bloom    | `SilverTorch`                     |
+| [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`codesigned_probe_score_fp32`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score_fp32.py) — fused IVF + FP32 + Bloom | `SilverTorchFp32`                 |
 | [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`bloom_match`](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py) — bool subset test (standalone)                     | `BloomFilter.evaluate_mask`       |
-| [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`int8_ann_fused`](../../retrieve/src/retrieve/kernels/triton/silvertorch/int8_ann_fused.py) — INT8 candidate scorer (standalone)          | parity test only, no production caller |
 
 ## Testing
 

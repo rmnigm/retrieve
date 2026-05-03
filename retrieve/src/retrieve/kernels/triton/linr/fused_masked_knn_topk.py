@@ -91,8 +91,10 @@ def fused_masked_knn_topk(
 
     Per-cell scoring is elementwise (``tl.sum``) rather than ``tl.dot``: the
     gathered rows differ per (B, p) cell so a true GEMM would re-load rows
-    per query column. Use ``fused_matmul_topk`` for the dense (high pass
-    rate) path.
+    per query column. For the dense (high pass rate) path with no
+    pre-filter, callers should fall back to ``query @ item_embs.T`` +
+    ``torch.topk`` — there's no fused-kernel equivalent because cuBLAS +
+    CUB already cover that case.
     """
     if query.dim() != 2 or item_embs.dim() != 2:
         raise ValueError("query must be [B, D] and item_embs [N, D]")

@@ -11,9 +11,10 @@ _defaults: &defaults
     num_workers: 8
     max_seq_length: 200
   algorithms:
-    - torch_fullscan
-    - linr_v3_then_v2
-    - silvertorch
+    - torch_fullscan          # quality suite only (= filtered-FullScan oracle, dropped from filter sweeps)
+    - linr_v2_filter_compact  # filter suite only (exact via filter compact indices)
+    - linr_v3_then_v2         # both suites (V3 1-bit cascade, approx)
+    - silvertorch             # quality + wide/combined filter (approx; skipped on narrow)
   algo_params:
     linr_v3_then_v2: {candidate_pool: 8000, v3_seed: 0}
     silvertorch:     {n_lists: 1024, n_probe: 24, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}
@@ -50,4 +51,4 @@ _defaults: &defaults
         - {name: c0_genre_x_1shelf, active_clauses: [0], query_attrs_field: query_attrs_wide_1shelf}
 
 <<: *defaults
-checkpoint: checkpoints/goodreads-gsasrec-d64-drop0.5/best_model.pt
+checkpoint: checkpoints/goodreads-gsasrec-d64-drop0.5-id/best_model.pt

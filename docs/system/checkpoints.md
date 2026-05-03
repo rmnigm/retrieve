@@ -52,7 +52,7 @@ from training.model import GSASRec
 DATA_DIR = Path("data/yambda/500m-listens")
 CKPT_DIR = Path("checkpoints/gsasrec-500m-listens-d128-drop0.5")
 
-# num_items comes from the data dir's id map (written by scripts/prep_yambda.py).
+# num_items comes from the data dir's id map (written by `data/yambda.py` prep).
 with open(DATA_DIR / "item_id_map.json") as f:
     num_items = len(json.load(f))
 
@@ -87,9 +87,9 @@ torch.save(item_embs, CKPT_DIR / "item_embs.pt")
 Use this tensor as the index for ANN search, dot-product retrieval, or
 clustering. The id mapping (dense_id → raw_yandex_id) is the
 `item_id_map.json` written by
-[`scripts/prep_yambda.py`](../../evaluation/scripts/prep_yambda.py)
-(the library function in `data/yambda.py` returns `Data.item_id_to_idx`
-in memory; the prep script persists it to disk alongside the parquets).
+the [`data/yambda.py`](../../evaluation/data/yambda.py) `prep` subcommand
+(the library function `preprocess()` returns `Data.item_id_to_idx` in
+memory; the CLI persists it to disk alongside the parquets).
 
 ## Encoding a user history into a query
 
@@ -172,7 +172,6 @@ dir lives as its own model repo on the Hub:
 |---|---|
 | `checkpoints/gsasrec-500m-listens-v1/` | `<owner>/gsasrec-500m-listens-v1` |
 | `checkpoints/gsasrec-500m-listens-d128-drop0.5/` | `<owner>/gsasrec-500m-listens-d128-drop0.5` |
-| `checkpoints/smoke-50m-listens/` | `<owner>/smoke-50m-listens` |
 
 Replace `<owner>` with the HF username/org you uploaded under.
 
@@ -210,7 +209,7 @@ hf_hub_download(repo_id="<owner>/gsasrec-500m-listens-d128-drop0.5",
 ### Uploading a new checkpoint
 
 After a training run finishes, push the resulting dir with the helper at
-[`scripts/upload_checkpoints.py`](../../evaluation/scripts/upload_checkpoints.py). It creates
+[`training/upload_checkpoints.py`](../../evaluation/training/upload_checkpoints.py). It creates
 one HF model repo per checkpoint dir, generates a minimal model card from
 `eval_quality.json` / `config.json`, and uses LFS automatically for the
 large `.pt` files.

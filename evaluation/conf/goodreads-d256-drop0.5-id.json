@@ -1,13 +1,13 @@
 {
   "data_dir": "data/goodreads/work-id",
   "max_seq_length": 200,
-  "embedding_dim": 128,
+  "embedding_dim": 256,
   "num_blocks": 2,
   "num_heads": 2,
-  "ffn_hidden_dim": 512,
-  "dropout": 0.2,
+  "ffn_hidden_dim": 1024,
+  "dropout": 0.5,
   "reuse_item_embeddings": false,
-  "negs_per_pos": 128,
+  "negs_per_pos": 256,
   "gbce_t": 0.75,
   "batch_size": 256,
   "learning_rate": 0.001,
@@ -24,12 +24,9 @@
   "early_stop_metric": "recall@100",
   "wandb_enabled": true,
   "wandb_project": "goodreads-gsasrec",
-  "wandb_run_name": "goodreads-d128-drop0.2-content-tied-mlp",
+  "wandb_run_name": "goodreads-d256-drop0.5-id",
   "log_every": 50,
   "device": "cuda",
-  "checkpoint_dir": "checkpoints/goodreads-gsasrec-d128-drop0.2-content-tied-mlp",
-  "seed": 42,
-  "text_embedding_path": "data/goodreads/work-id/content/work_text_emb.pt",
-  "tie_content_output": true,
-  "content_proj_type": "mlp"
+  "checkpoint_dir": "checkpoints/goodreads-gsasrec-d256-drop0.5-id",
+  "seed": 42
 }

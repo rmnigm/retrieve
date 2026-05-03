@@ -222,6 +222,7 @@ retrieve.zip
 evaluation/data/*.parquet
 evaluation/data/yambda/
 evaluation/data/goodreads/
+evaluation/data/arxiv/
 
 # Experiment tracking logs
 evaluation/wandb/

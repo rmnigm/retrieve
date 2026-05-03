@@ -109,40 +109,7 @@ class TestLiNR_V2:
 # ---------------------------------------------------------------------------
 
 
-def _valid_scores_sorted(scores):
-    """Per-row finite scores, sorted descending; rows zero-padded to common length."""
-    finite = torch.isfinite(scores)
-    counts = finite.sum(dim=1)
-    p = int(counts.max().item())
-    masked = scores.masked_fill(~finite, float("-inf"))
-    sorted_scores, _ = torch.topk(masked, p, dim=1)
-    return sorted_scores, counts
-
-
 class TestCrossBackendAgreement:
-    @pytest.mark.parametrize("pass_rate", [None, 0.01, 0.1, 0.8])
-    def test_v1_torch_matches_v1_triton(self, data, pass_rate):
-        ref = LiNR_V1(k=K)
-        ref.register_index(data["embs"])
-        tri = LiNR_V1_Triton(k=K)
-        tri.register_index(data["embs"])
-        mask = None if pass_rate is None else make_mask(B, N, pass_rate=pass_rate)
-        ids_ref, sc_ref = ref(data["query"], mask=mask)
-        ids_tri, sc_tri = tri(data["query"], mask=mask)
-        for b in range(B):
-            assert_topk_id_sets_match(ids_tri, sc_tri, ids_ref, sc_ref, b)
-        sc_ref_sorted, ref_counts = _valid_scores_sorted(sc_ref)
-        sc_tri_sorted, tri_counts = _valid_scores_sorted(sc_tri)
-        assert torch.equal(ref_counts, tri_counts)
-        for b in range(B):
-            n_valid = int(ref_counts[b].item())
-            assert torch.allclose(
-                sc_ref_sorted[b, :n_valid],
-                sc_tri_sorted[b, :n_valid],
-                atol=1e-3,
-                rtol=1e-3,
-            )
-
     @pytest.mark.parametrize("pass_rate", [0.01, 0.1, 0.8])
     def test_v2_torch_matches_v2_triton(self, data, pass_rate):
         ref = LiNR_V2(k=K)

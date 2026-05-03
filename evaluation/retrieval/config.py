@@ -57,7 +57,7 @@ class FilterCfg:
     k_hash: int = 5
 
 
-def _filter_cfg_from_dict(d: dict[str, Any]) -> FilterCfg:
+def filter_cfg_from_dict(d: dict[str, Any]) -> FilterCfg:
     """Build a FilterCfg from a YAML dict; sweeps are upgraded from bare
     dicts to FilterSweepCfg dataclasses so downstream consumers don't have
     to re-parse."""
@@ -68,8 +68,13 @@ def _filter_cfg_from_dict(d: dict[str, Any]) -> FilterCfg:
 
 @dataclass
 class EvalConfig:
-    checkpoint: str
     data_dir: str
+    # Optional for harnesses that don't load a SASRec checkpoint
+    # (e.g. eval_arxiv_retrieval.py uses pre-encoded text embeddings on disk).
+    checkpoint: str | None = None
+    # Optional path to a pre-encoded query embedding tensor; defaults to
+    # ``<data_dir>/content/query_emb.pt`` when a harness needs one.
+    query_emb_path: str | None = None
     output: str | None = None
     split: str = "test"
     device: str = "cuda"
@@ -79,7 +84,8 @@ class EvalConfig:
     encode: EncodeConfig = field(default_factory=EncodeConfig)
     algorithms: list[str] = field(default_factory=list)
     algo_params: dict[str, dict[str, Any]] = field(default_factory=dict)
-    # Optional filter-bench block; consumed only by eval_goodreads_retrieval.py.
+    # Optional filter-bench block; consumed by eval_goodreads_retrieval.py and
+    # eval_arxiv_retrieval.py.
     filters: dict[str, FilterCfg] | None = None
 
 
@@ -93,5 +99,15 @@ def load_eval_config(path: Path) -> EvalConfig:
     raw_filters = raw.pop("filters", None)
     filters: dict[str, FilterCfg] | None = None
     if raw_filters is not None:
-        filters = {kind: _filter_cfg_from_dict(dict(d)) for kind, d in raw_filters.items()}
+        filters = {kind: filter_cfg_from_dict(dict(d)) for kind, d in raw_filters.items()}
     return EvalConfig(encode=encode, filters=filters, **raw)
+
+
+__all__ = [
+    "EncodeConfig",
+    "EvalConfig",
+    "FilterCfg",
+    "FilterSweepCfg",
+    "filter_cfg_from_dict",
+    "load_eval_config",
+]

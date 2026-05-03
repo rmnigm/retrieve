@@ -8,17 +8,17 @@ or set ``HF_TOKEN`` in the environment.
 
 Examples
 --------
-Upload one run to a private repo:
+Upload one run to a private repo::
 
-    uv run python -m scripts.upload_checkpoints \\
+    uv run upload-checkpoints \\
         --owner my-hf-username \\
         --checkpoint gsasrec-500m-listens-d128-drop0.5 \\
         --private
 
-Upload all runs (one repo each) and dry-run first:
+Upload all runs (one repo each) and dry-run first::
 
-    uv run python -m scripts.upload_checkpoints --owner my-hf-username --checkpoint all --dry-run
-    uv run python -m scripts.upload_checkpoints --owner my-hf-username --checkpoint all
+    uv run upload-checkpoints --owner my-hf-username --checkpoint all --dry-run
+    uv run upload-checkpoints --owner my-hf-username --checkpoint all
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ CHECKPOINT_ROOT = Path(__file__).resolve().parents[1] / "checkpoints"
 EPOCH_SNAPSHOT_PATTERN = "gsasrec-ep*-ndcg*.pt"
 
 
-def _filter_files(ckpt_dir: Path, ignore_patterns: list[str]) -> list[Path]:
+def filter_files(ckpt_dir: Path, ignore_patterns: list[str]) -> list[Path]:
     return [
         p
         for p in sorted(ckpt_dir.iterdir())
@@ -48,7 +48,7 @@ def _filter_files(ckpt_dir: Path, ignore_patterns: list[str]) -> list[Path]:
     ]
 
 
-def _build_model_card(ckpt_dir: Path, repo_id: str, files: list[Path]) -> str:
+def build_model_card(ckpt_dir: Path, repo_id: str, files: list[Path]) -> str:
     """Generate a minimal model-card README from local metadata files."""
     parts: list[str] = [f"# {ckpt_dir.name}\n"]
 
@@ -90,7 +90,7 @@ def _build_model_card(ckpt_dir: Path, repo_id: str, files: list[Path]) -> str:
     return "\n".join(parts)
 
 
-def _resolve_checkpoints(selector: str) -> list[Path]:
+def resolve_checkpoints(selector: str) -> list[Path]:
     if not CHECKPOINT_ROOT.exists():
         raise click.ClickException(f"Checkpoint root not found: {CHECKPOINT_ROOT}")
 
@@ -164,7 +164,7 @@ def main(
     token: str | None,
 ) -> None:
     """Upload checkpoint directories to the Hugging Face Hub."""
-    ckpt_dirs = _resolve_checkpoints(checkpoint)
+    ckpt_dirs = resolve_checkpoints(checkpoint)
     if repo_name and len(ckpt_dirs) != 1:
         raise click.ClickException("--repo-name only valid with a single --checkpoint")
 
@@ -175,7 +175,7 @@ def main(
     for ckpt_dir in ckpt_dirs:
         target_name = repo_name or ckpt_dir.name
         repo_id = f"{owner}/{target_name}"
-        files = _filter_files(ckpt_dir, ignore_patterns)
+        files = filter_files(ckpt_dir, ignore_patterns)
         skipped = [p.name for p in sorted(ckpt_dir.iterdir()) if p.is_file() and p not in files]
         if not files:
             logger.warning(
@@ -209,7 +209,7 @@ def main(
         readme_path = ckpt_dir / "README.md"
         wrote_card = False
         if write_card and not readme_path.exists():
-            readme_path.write_text(_build_model_card(ckpt_dir, repo_id, files))
+            readme_path.write_text(build_model_card(ckpt_dir, repo_id, files))
             wrote_card = True
             files = files + [readme_path]
             logger.info("  generated model card: {}", readme_path)
@@ -233,3 +233,6 @@ def main(
 
 if __name__ == "__main__":
     main()
+
+
+__all__ = ["main"]

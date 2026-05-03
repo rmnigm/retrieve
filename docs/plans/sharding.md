@@ -78,8 +78,8 @@ A thin wrapper that owns one underlying `SilverTorch` per device:
      way the existing kernel wrappers do (`gather(1, topk_local)`).
 
 Scope: ~80–120 lines for `ShardedSilverTorch`, similar for the other
-two. Only depends on existing kernels — `codesigned_probe_score`,
-`int8_ann_fused`, `bloom_match` all run unchanged on each shard.
+two. Only depends on existing kernels — `codesigned_probe_score` and
+`bloom_match` all run unchanged on each shard.
 
 ### Cost of the merge step
 

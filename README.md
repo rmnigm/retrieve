@@ -20,11 +20,11 @@ After `uv sync`, run from anywhere in the workspace:
 ```bash
 # from the root, targeting a member:
 uv run --directory retrieve pytest tests/
-uv run --directory evaluation benchmark --config conf/smoke.yaml
+uv run --directory evaluation evaluate --config conf/500m-d128.yaml
 
 # or cd in (uv finds the workspace root automatically):
 cd retrieve   && uv run pytest tests/
-cd evaluation && uv run benchmark --config conf/smoke.yaml
+cd evaluation && uv run evaluate --config conf/500m-d128.yaml
 ```
 
 The lockfile lives at the root (`uv.lock`); the per-member lockfiles are obsolete.

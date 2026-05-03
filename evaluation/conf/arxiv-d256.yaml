@@ -1,0 +1,61 @@
+_defaults: &defaults
+  data_dir: data/arxiv/papers
+  # No `checkpoint:` field — arxiv has no SASRec model; queries come from
+  # data/arxiv/papers/content/query_emb.pt (built by `arxiv.py encode_queries`).
+  output: null                  # null → <data_dir>/eval_arxiv_retrieval.json
+  split: test
+  device: cuda
+  ks: [10, 100, 500]
+  batch_sizes: [1, 8, 16]
+  seed: 0
+
+  # The `encode:` block is a no-op for this harness (no SASRec model to
+  # forward through), but the EvalConfig dataclass keeps a default value
+  # so omitting it is fine. Left here as a placeholder for future use.
+  # encode: {batch_size: 512, num_workers: 8, max_seq_length: 200}
+
+  algorithms:
+    - torch_fullscan
+    - linr_v3_then_v2
+    - silvertorch                 # used only on wide / combined sweeps; skipped on narrow
+
+  # N≈2.7M → sqrt(N)≈1643; round to 1664 lists. n_probe=32 visits ~52K
+  # items per query (~2% of N), matching goodreads selectivity.
+  algo_params:
+    linr_v3_then_v2: {candidate_pool: 12000, v3_seed: 0}
+    silvertorch:     {n_lists: 1664, n_probe: 32, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}
+
+  filters:
+    none:
+      sweeps:
+        - {name: full_scan}
+    clause:
+      attrs_path:    data/arxiv/papers/item_attrs_narrow.pt
+      reverse_path:  data/arxiv/papers/clause_is_reverse_narrow.pt
+      sweeps:
+        - {name: c0_maincat,    active_clauses: [0]}
+        - {name: c2_year,       active_clauses: [2]}
+        - {name: c3_nversions,  active_clauses: [3]}
+        - {name: c4_author,     active_clauses: [4]}
+        - {name: c0c2,          active_clauses: [0, 2]}
+        - {name: c0c4,          active_clauses: [0, 4]}
+        - {name: all5,          active_clauses: [0, 1, 2, 3, 4]}
+    bloom:
+      attrs_path:   data/arxiv/papers/item_attrs_wide.pt
+      reverse_path: null
+      m_bits: 1024
+      k_hash: 5
+      sweeps:
+        - {name: '1shelf', query_attrs_field: query_attrs_wide_1shelf}
+        - {name: '2shelf', query_attrs_field: query_attrs_wide_2shelf}
+    combined:
+      attrs_narrow: data/arxiv/papers/item_attrs_narrow.pt
+      attrs_wide:   data/arxiv/papers/item_attrs_wide.pt
+      reverse_path: data/arxiv/papers/clause_is_reverse_narrow.pt
+      m_bits: 1024
+      k_hash: 5
+      sweeps:
+        - {name: c0_maincat_x_1shelf, active_clauses: [0], query_attrs_field: query_attrs_wide_1shelf}
+        - {name: c2_year_x_2shelf,    active_clauses: [2], query_attrs_field: query_attrs_wide_2shelf}
+
+<<: *defaults

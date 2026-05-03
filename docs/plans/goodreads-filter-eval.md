@@ -8,10 +8,10 @@ attributes**, so it's the first that can exercise `BloomFilter` and
 [benchmark.py](../../evaluation/retrieval/benchmark.py).
 Its purpose is filter-**absent** retrieval benchmarking: encode the
 test set once into a query cache, then run each algorithm in
-[registry.py](../../evaluation/retrieval/registry.py) at `bs=1`
+[registry.py](../../evaluation/retrieval/algo_registry.py) at `bs=1`
 against a single shared `item_embs`, recording recall@K / NDCG@K /
 latency / peak GPU memory. Per the existing comment
-([registry.py L13-L17](../../evaluation/retrieval/registry.py#L13-L17)):
+([registry.py L13-L17](../../evaluation/retrieval/algo_registry.py#L13-L17)):
 
 > `silvertorch` here is `IVF_INT8_ANN` (no bloom) since Yambda has no
 > item attributes — running the bloom-fused `SilverTorch` against zero
@@ -47,7 +47,7 @@ end-to-end, the contract has six pieces:
    `model.predict_last` over the full eval split → `(queries [N, D],
    targets [N, T_max], num_targets [N])` cached on CPU. The
    transformer is freed before the perf passes.
-4. **Index build** (`build_algorithm`, [registry.py](../../evaluation/retrieval/registry.py)):
+4. **Index build** (`build_algorithm`, [registry.py](../../evaluation/retrieval/algo_registry.py)):
    one of `torch_fullscan / triton_knn / linr_v3_then_v2 /
    silvertorch (IVF_INT8_ANN)`; returns `(forward, modules)`.
 5. **Quality pass** (`quality_pass_cached`, L165-L186): streams
@@ -367,7 +367,7 @@ Three configs × three filter kinds × average 4 sweeps × 3 algos × 3 Ks
 - [retrieve/src/retrieve/layers/filters/](../../retrieve/src/retrieve/layers/filters/)
   — `ClauseIndex`, `BloomFilter`, `combine_masks`, `combine_indices`
   already implement the contract this plan needs.
-- [evaluation/retrieval/registry.py](../../evaluation/retrieval/registry.py)
+- [evaluation/retrieval/algo_registry.py](../../evaluation/retrieval/algo_registry.py)
   — yambda harness untouched; filter harness wraps it from outside.
 
 ## Verification

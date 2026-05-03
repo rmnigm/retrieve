@@ -1,23 +1,14 @@
-"""Shared primitives for the retrieval benchmark harnesses.
+"""Shared primitives for the unified retrieval benchmark.
 
-Both [benchmark.py](benchmark.py) (yambda) and
-[eval_goodreads_retrieval.py](eval_goodreads_retrieval.py) (filter-bench)
-import from here. Keeping them in one place means a perf or quality bug
-gets fixed once and both harnesses inherit it.
-
-The `forward` contract supported here is the union of:
+The single driver in [evaluate.py](evaluate.py) imports from here. The
+`forward` contract supported by the passes is the union of:
 
   - bare yambda: ``forward(q) -> (ids, scores)``
   - filtered:    ``forward(q, qa_narrow=..., qa_wide=...) -> (ids, scores)``
 
 `quality_pass_cached` / `perf_pass_cached` only pass `qa_*` kwargs when
-the caller supplied corresponding pool tensors — yambda's bare lambdas
-keep working unmodified.
-
-`load_model_for_eval` auto-detects content-tied checkpoints via
-``config.json["text_embedding_path"]`` and instantiates `GSASRecContent`
-with the frozen text matrix re-supplied (it's a non-persistent buffer
-in the saved state_dict).
+the caller supplied corresponding pool tensors — yambda's bare-`q`
+lambdas keep working unmodified.
 """
 
 from __future__ import annotations
@@ -33,27 +24,25 @@ from loguru import logger
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from retrieval.metrics import accumulate_metrics, finalize_metrics
 from training.evaluate import EvalDataset, collate_eval
 from training.model import GSASRec
-
-from retrieval.metrics import accumulate_metrics, finalize_metrics
-
 
 # Long enough to settle triton autotune, short enough to keep cells <60 s of overhead.
 WARMUP_ITERS = 20
 DEFAULT_REP_MS = 200.0
 
 
-# ---------- perf primitives ---------------------------------------------------
+# ----- perf primitives --------------------------------------------------------
 
 
-def _allocated() -> int:
+def allocated_bytes() -> int:
     if not torch.cuda.is_available():
         return 0
     return int(torch.cuda.memory_allocated())
 
 
-def _peak() -> int:
+def peak_bytes() -> int:
     if not torch.cuda.is_available():
         return 0
     return int(torch.cuda.max_memory_allocated())
@@ -68,9 +57,9 @@ def measure_forward_cuda(
 ) -> tuple[float, float, float, float, float]:
     """Warmup, capture transient peak in a clean window, then time via do_bench.
 
-    The peak window does NOT use ``do_bench`` because do_bench allocates a ~256 MiB L2 cache-buster
-    each call, which would dominate the reported transient peak for any small
-    kernel. We measure memory in isolation, then time separately.
+    The peak window does NOT use ``do_bench`` because do_bench allocates a ~256 MiB
+    L2 cache-buster each call, which would dominate the reported transient peak
+    for any small kernel. We measure memory in isolation, then time separately.
 
     Returns ``(median_ms, p20_ms, p80_ms, peak_mib, transient_mib)``.
     """
@@ -85,13 +74,13 @@ def measure_forward_cuda(
 
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
-    baseline = _allocated()
+    baseline = allocated_bytes()
     for _ in range(mem_reps):
         out = fn()
         del out
     if torch.cuda.is_available():
         torch.cuda.synchronize()
-    peak = _peak()
+    peak = peak_bytes()
 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -146,11 +135,11 @@ def cuda_allocated_mib() -> float:
     return torch.cuda.memory_allocated() / (1024 * 1024)
 
 
-# ---------- model load --------------------------------------------------------
+# ----- model load -------------------------------------------------------------
 
 # Fallback hyperparams for the legacy 500M ckpts that don't ship a config.json
 # alongside the .pt — they all happen to share these.
-_D128_DROP05 = {
+D128_DROP05_DEFAULTS = {
     "max_seq_length": 200,
     "embedding_dim": 128,
     "num_heads": 2,
@@ -160,83 +149,23 @@ _D128_DROP05 = {
     "reuse_item_embeddings": False,
 }
 
-_GSASREC_HPARAM_KEYS = (
-    "max_seq_length",
-    "embedding_dim",
-    "num_heads",
-    "num_blocks",
-    "ffn_hidden_dim",
-    "dropout",
-    "reuse_item_embeddings",
-)
-
 
 def load_model_for_eval(
     checkpoint_path: Path, num_items: int, device: torch.device
-) -> nn.Module:
-    """Load a `GSASRec` (or `GSASRecContent`) from disk for retrieval eval.
+) -> GSASRec:
+    """Load a `GSASRec` from disk for retrieval eval.
 
-    Detection: if a sibling ``config.json`` carries a non-null
-    ``text_embedding_path``, instantiate `GSASRecContent` with the frozen
-    text matrix re-supplied (the matrix is non-persistent in the state
-    dict so we have to load it from its own .pt). Otherwise fall back to
-    the standard `GSASRec` path.
-
-    For tied content checkpoints (``tie_content_output: true``),
-    ``model.get_output_embeddings().weight`` materializes
-    ``proj(text_emb)`` on access — so the existing
-    ``item_embs = ...weight.detach()`` line in the harness keeps working.
+    Reads the sibling ``config.json`` when present (5B / freshly-trained
+    ckpts have it via ``GSASRecConfig.save``); falls back to the
+    d128-drop0.5 hyperparams for the legacy 500M ckpts that don't ship one.
     """
     cfg_path = checkpoint_path.parent / "config.json"
-    cfg: dict | None = None
     if cfg_path.exists():
         with open(cfg_path) as f:
             cfg = json.load(f)
-
-    if cfg is not None and cfg.get("text_embedding_path"):
-        # Content-tied / content-output path. text_embedding_path may be a
-        # relative or absolute path; resolve against the ckpt dir if relative.
-        text_path = Path(cfg["text_embedding_path"]).expanduser()
-        if not text_path.is_absolute():
-            text_path = (checkpoint_path.parent / text_path).resolve()
-            if not text_path.exists():
-                # Fall back to interpreting the original string as cwd-relative.
-                text_path = Path(cfg["text_embedding_path"]).expanduser().resolve()
-        from training.model_content import GSASRecContent  # local import: avoid hard dep
-
-        text_emb = torch.load(str(text_path), map_location="cpu")
-        params = {k: cfg[k] for k in _GSASREC_HPARAM_KEYS if k in cfg}
-        # GSASRecContent overrides reuse_item_embeddings internally; drop it.
-        params.pop("reuse_item_embeddings", None)
-        content_kwargs: dict = {}
-        if "content_proj_type" in cfg:
-            content_kwargs["content_proj_type"] = cfg["content_proj_type"]
-        logger.info(
-            "model: GSASRecContent (text_emb shape={}, tie={}, proj={}) params={}",
-            tuple(text_emb.shape),
-            cfg.get("tie_content_output", False),
-            content_kwargs.get("content_proj_type", "linear"),
-            params,
-        )
-        model = GSASRecContent(
-            num_items=num_items,
-            text_emb=text_emb,
-            tie_content_output=bool(cfg.get("tie_content_output", False)),
-            **content_kwargs,
-            **params,
-        ).to(device).eval()
-        # text_emb is registered as a non-persistent buffer; load_state_dict
-        # with strict=True would refuse the missing key. strict=False matches
-        # what train_sasrec.py does at resume.
-        state = torch.load(str(checkpoint_path), map_location=str(device), weights_only=True)
-        model.load_state_dict(state, strict=False)
-        return model
-
-    # Standard GSASRec path
-    if cfg is not None:
-        params = {k: cfg[k] for k in _D128_DROP05 if k in cfg}
+        params = {k: cfg[k] for k in D128_DROP05_DEFAULTS if k in cfg}
     else:
-        params = dict(_D128_DROP05)
+        params = dict(D128_DROP05_DEFAULTS)
     logger.info("model: GSASRec params={}", params)
     model = GSASRec(num_items=num_items, **params).to(device).eval()
     state = torch.load(str(checkpoint_path), map_location=str(device), weights_only=True)
@@ -244,11 +173,7 @@ def load_model_for_eval(
     return model
 
 
-# Backward-compatible alias for existing call sites.
-load_model = load_model_for_eval
-
-
-# ---------- query cache (encode the test set once) ---------------------------
+# ----- query cache (encode the test set once) --------------------------------
 
 
 @torch.inference_mode()
@@ -296,7 +221,7 @@ def encode_queries(
     return queries, targets, n_targets
 
 
-# ---------- passes ------------------------------------------------------------
+# ----- passes -----------------------------------------------------------------
 
 
 @torch.inference_mode()
@@ -372,11 +297,8 @@ def perf_pass_cached(
     g = torch.Generator(device="cpu").manual_seed(seed)
     n = queries.shape[0]
     if skip_mask is not None:
-        # Only sample from rows that aren't skipped, otherwise perf may be
-        # measured on degenerate (e.g. zero-bag) queries.
         keep_idx = (~skip_mask.bool()).nonzero(as_tuple=False).reshape(-1)
         if keep_idx.numel() == 0:
-            # Pathological — skip the whole sweep cell.
             return 0.0, 0.0, 0.0, 0.0, 0.0
         rows_local = torch.randint(0, keep_idx.numel(), (n_pool, batch_size), generator=g)
         rows = keep_idx[rows_local.reshape(-1)].reshape(n_pool, batch_size)
@@ -419,3 +341,12 @@ def perf_pass_cached(
     if is_cpu:
         return measure_forward_cpu(perf_fn)
     return measure_forward_cuda(perf_fn)
+
+
+__all__ = [
+    "cuda_allocated_mib",
+    "encode_queries",
+    "load_model_for_eval",
+    "perf_pass_cached",
+    "quality_pass_cached",
+]

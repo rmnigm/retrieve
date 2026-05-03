@@ -40,8 +40,6 @@ retrieve/tests/
     ├── test_clause_compact.py
     ├── test_codesigned_probe_score.py
     ├── test_fused_masked_knn_topk.py
-    ├── test_fused_matmul_topk.py
-    ├── test_int8_ann_fused.py
     └── test_oporp_1bit_match_topk.py
 ```
 
@@ -173,13 +171,11 @@ module under test.
 | `LiNR_V2` semantics        | gather + bmm + local topk + scatter |
 | `LiNR_V3` semantics        | `FullScanKNN` recall (asserts ≥ 0.4 at K=200, N=2048) |
 | `LiNR_*_Triton`            | the corresponding torch `LiNR_V*` class |
-| `fused_matmul_topk`        | `(q @ x.T).topk(k)` |
 | `fused_masked_knn_topk`    | `compact_mask(mask)` → `bmm(q.unsqueeze(1), embs[ids].transpose(1,2)).squeeze(1)` → topk |
 | `oporp_1bit_match_topk`    | `popcount_int64(xor) → D - 2*hamming` → topk (bit-exact) |
 | `bloom_match`              | `(qb & sigs) == qb` per word, AND-reduced — computed on CPU to avoid tautology with the kernel-routed `BloomFilter.evaluate_mask`  |
 | `clause_compact`           | `ClauseIndex.evaluate_mask(...)` + `compact_mask` |
 | `codesigned_probe_score`   | `_ref_phase23` in the parity file: bloom subset + INT8 dequant + dot + topk |
-| `int8_ann_fused`           | gather codes + cast fp32 + bmm + topk (kernel exists but has no production caller — parity test only) |
 
 ## What each correctness file asserts
 
@@ -368,12 +364,10 @@ exact-by-construction kernels, which use stricter assertions.
 
 | File | Kernel | Reference | Notes |
 |------|--------|-----------|-------|
-| [`test_fused_matmul_topk.py`](../../retrieve/tests/parity/test_fused_matmul_topk.py)         | `fused_matmul_topk`         | `(q @ x.T).masked_fill(~mask, -inf).topk(k)` | parametrize on `(b, n, d, k)` and `pass_rate ∈ {0.05, 0.5}` |
 | [`test_fused_masked_knn_topk.py`](../../retrieve/tests/parity/test_fused_masked_knn_topk.py) | `fused_masked_knn_topk`     | `compact_mask` → gather + bmm + topk         | mirrors `LiNR_V2._forward_prefilter` |
 | [`test_oporp_1bit_match_topk.py`](../../retrieve/tests/parity/test_oporp_1bit_match_topk.py) | `oporp_1bit_match_topk`     | `popcount_int64(xor).sum(W)` → topk          | popcount is bit-exact by construction (SWAR matches between torch and Triton) |
 | [`test_bloom_match.py`](../../retrieve/tests/parity/test_bloom_match.py)                     | `bloom_match`               | `(qb & sigs) == qb` per word, AND-reduced — computed on CPU to keep the test from tautologically routing through the kernel via `BloomFilter.evaluate_mask` | parametrize on `(n, m_bits, k_hash)` |
 | [`test_clause_compact.py`](../../retrieve/tests/parity/test_clause_compact.py)               | `clause_compact`            | `ClauseIndex.evaluate_mask(...)` + `compact_mask` | row-set match (kernel order is unspecified — atomic stream compaction); cases for reverse clauses, all-inactive query, no-passing-items, `B=1` grid corner |
-| [`test_int8_ann_fused.py`](../../retrieve/tests/parity/test_int8_ann_fused.py)               | `int8_ann_fused`            | gather codes + cast fp32 + bmm + topk        | kernel has no production caller (per [architecture.md](architecture.md)); parity is asserted but no live module routes through it |
 | [`test_codesigned_probe_score.py`](../../retrieve/tests/parity/test_codesigned_probe_score.py) | `codesigned_probe_score`  | `_ref_phase23`: bloom subset + INT8 dequant + dot + topk | the SilverTorch fused path; cases for `(qb, no qb) × (mask, no mask)` |
 
 ## Adding a new test
