@@ -4,7 +4,7 @@
 
 ## Context
 
-The `retrieve` module ships 7 Triton kernels and ~9 `nn.Module` retrieval layers under [retrieve/src/retrieve/](../../retrieve/src/retrieve/). `evaluation/retrieval/build_export.py` already calls `torch.export.export()` on those layers via thin `IndexWrapper` / `AttrIndexWrapper` adapters, but the export is fragile:
+The `retrieve` module ships 9 Triton kernels and ~9 `nn.Module` retrieval layers under [retrieve/src/retrieve/](../../retrieve/src/retrieve/). `evaluation/retrieval/build_export.py` already calls `torch.export.export()` on those layers via thin `IndexWrapper` / `AttrIndexWrapper` adapters, but the export is fragile:
 
 - Kernels use `@triton.autotune` with lambda-meta grids (`grid=lambda meta: (b, triton.cdiv(p, meta["BLOCK_P"]))`), which inductor's compile-time autotuner cannot serialize portably.
 - Host wrappers branch on `Optional[Tensor]` arguments and rebind to dummy `1×1` tensors keyed by `HAS_X: tl.constexpr` flags.
@@ -180,9 +180,10 @@ Phases 1 and 4 have no in-refactor dependencies and can be started independently
 
 These are intentional; do not "fix" them while refactoring:
 
-- **`clause_compact` has no `@triton.autotune`** because `tl.atomic_add` corrupts state across autotune trials (each trial would see partially-mutated buffers). The fixed `BLOCK_N=256, num_warps=4` is correct. Phase 1 must NOT add autotune; the REGISTRY has one row.
+- **`clause_compact` has no `@triton.autotune`** because `tl.atomic_add` corrupts state across autotune trials (each trial would see partially-mutated buffers). The fixed `BLOCK_N=256, num_warps=4` is correct. Phase 1 must NOT add autotune; the REGISTRY has one row. **Same gotcha applies to `bloom_compact`** (Phase 2): also no autotune, also fixed `BLOCK_N=256, num_warps=4`, same atomic_add tail.
+- **`clause_mask` has no autotune *yet*** but it *could* — atomics are absent, so a future autotune pass is safe. The fixed `BLOCK_N=256, num_warps=4` was chosen to match `clause_compact`'s body. Phase 1 should treat its REGISTRY the same way as `clause_compact` (one row) and only widen the grid if the tune script shows benefit.
 - **`oporp_1bit_match_topk` has a custom `_popcount_int64`** bit-twiddle helper instead of using libdevice. This is portability across Triton versions — leave it alone.
-- **`bloom_match` picks BLOCK from input shape** (`128 if n >= 128 else next_power_of_2(n)`) because Triton requires `BLOCK` to be a power of two ≥ the working size. Phase 2 must address this via bucketed-compile (see "Design principles" #7), not by stripping the shape-dependent logic.
+- **`bloom_match` picks BLOCK from input shape** (`128 if n >= 128 else next_power_of_2(n)`) because Triton requires `BLOCK` to be a power of two ≥ the working size. Phase 2 must address this via bucketed-compile (see "Design principles" #7), not by stripping the shape-dependent logic. **`bloom_compact` does *not* have this quirk** — it uses fixed `BLOCK_N=256` and tail-masks via `n_valid`; Phase 2's bucket policy applies to `bloom_match` only.
 - **`int8_ann_fused.py` is parity-only dead code** — it has no production caller (the silvertorch path runs through `codesigned_probe_score`, see [architecture.md](../system/architecture.md)). It is *out of scope* for this refactor; whether to delete it is a separate cleanup decision.
 
 ### `interfaces.py` contract decision
@@ -203,14 +204,17 @@ If anything outside your phase's intended surface area is now red, you have a re
 
 ---
 
-## Phase 1 — `clause_compact` + `ClauseIndex` (prototype, establishes conventions)
+## Phase 1 — `clause_compact` + `clause_mask` + `ClauseIndex` (prototype, establishes conventions)
 
 **Why first**: introduces the `.item()`-removal pattern via `counts` propagation, which Phases 3, 5, and 6 reuse. Also introduces the device-routing-via-build-factory pattern that Phases 2 and 3 reuse, and the shared `KernelConfig` + REGISTRY + `lookup` shape that every later phase clones.
+
+`ClauseIndex` today routes BOTH `evaluate_indices` (→ `clause_compact`) AND `evaluate_mask` (→ `clause_mask`) on `is_cuda`. Both kernels are part of this phase — they share inner-loop structure (`clause_mask` is `clause_compact` minus the cumsum + atomic_add tail), so refactoring them together avoids re-deriving the same conventions twice.
 
 ### Files
 
 Modify:
 - [retrieve/src/retrieve/kernels/triton/filters/clause_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py)
+- [retrieve/src/retrieve/kernels/triton/filters/clause_mask.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_mask.py)
 - [retrieve/src/retrieve/layers/filters/clause.py](../../retrieve/src/retrieve/layers/filters/clause.py)
 - [retrieve/src/retrieve/layers/utils/__init__.py](../../retrieve/src/retrieve/layers/utils/__init__.py) — `combine_indices` AND `combine_masks` consumers (verify both, the latter may need a parallel update)
 - [retrieve/src/retrieve/__init__.py](../../retrieve/src/retrieve/__init__.py) — re-exports
@@ -218,7 +222,8 @@ Modify:
 - [retrieve/tests/correctness/test_filters.py](../../retrieve/tests/correctness/test_filters.py)
 - [retrieve/tests/correctness/test_compact.py](../../retrieve/tests/correctness/test_compact.py)
 - [retrieve/tests/parity/test_clause_compact.py](../../retrieve/tests/parity/test_clause_compact.py)
-- `evaluation/scripts/tune_kernels.py` — **create new**, add `tune_clause_compact`
+- [retrieve/tests/parity/test_clause_mask.py](../../retrieve/tests/parity/test_clause_mask.py)
+- `evaluation/scripts/tune_kernels.py` — **create new**, add `tune_clause_compact` and `tune_clause_mask`
 - [docs/system/kernels.md](../../docs/system/kernels.md), [docs/system/filtering.md](../../docs/system/filtering.md)
 
 ### Steps
@@ -227,9 +232,11 @@ Modify:
    - Old behavior: kernel writes `[B, N]` indices buffer, host slices `out_indices[:, :p]` where `p = int(counts.max().item())`.
    - New behavior: kernel writes the same `[B, N]` buffer; host returns `(out_indices, counts)` with full `N` width. Consumers honor `counts` to know how many entries are valid per row.
 
-2. **Define `ClauseCompactConfig`** with `block_n: int = 256, num_warps: int = 4`. The kernel does not autotune currently; one REGISTRY entry per arch suffices (likely the same `BLOCK_N=256` everywhere). Add the dataclass + REGISTRY + `lookup()` per shared shape.
+2. **Define `ClauseCompactConfig` and `ClauseMaskConfig`** with `block_n: int = 256, num_warps: int = 4` each. Neither kernel autotunes today; one REGISTRY entry per arch suffices (likely the same `BLOCK_N=256` everywhere). Two parallel dataclasses + REGISTRY + `lookup()` shapes — the kernels share inner-loop structure but have different output epilogues, so keep them as separate configs even if the values match initially. (`clause_mask` *could* eventually autotune since it has no atomics — Phase 1 doesn't need to, but the config split leaves room for that later without re-touching `clause_compact`.)
 
-3. **Pure-launch core**: replace the existing `clause_compact(...)` function with `_clause_compact_launch(item_clause_attrs, clause_is_reverse, query_clause_attrs, out_indices, counts, *, block_n, num_warps, num_stages) -> None`. Caller allocates `out_indices [B, N] int64` and `counts [B] int64` and passes them in; kernel mutates.
+3. **Pure-launch cores**: replace the existing wrappers with
+   - `_clause_compact_launch(item_clause_attrs, clause_is_reverse, query_clause_attrs, out_indices, counts, *, block_n, num_warps, num_stages) -> None`. Caller allocates `out_indices [B, N] int64` and `counts [B] int64` and passes them in; kernel mutates.
+   - `_clause_mask_launch(item_clause_attrs, clause_is_reverse, query_clause_attrs, out_mask, *, block_n, num_warps, num_stages) -> None`. Caller allocates `out_mask [B, N] bool`; kernel mutates.
 
 4. **Update consumers** of the old `clause_compact(...)` API:
    - [retrieve/src/retrieve/layers/utils/__init__.py](../../retrieve/src/retrieve/layers/utils/__init__.py) — `combine_indices`: update call sites to pass full-width `(indices, counts)` through, no slicing.
@@ -237,12 +244,12 @@ Modify:
    - Any `fused_masked_knn_topk`, `oporp_1bit_match_topk` call sites that consume these — verify they accept full-width indices keyed by `counts`. (They should already; the kernels already iterate over `counts[b]` per row.)
 
 5. **Split `ClauseIndex`** at [clause.py](../../retrieve/src/retrieve/layers/filters/clause.py):
-   - Rename current `ClauseIndex` body's torch fallback path → `ClauseIndexTorch(FilterModule)`.
-   - Extract the Triton-using path → `ClauseIndexTriton(FilterModule)`. Constructor takes `kernel_config: ClauseCompactConfig | None = None`.
+   - Rename current `ClauseIndex` body's torch fallback path → `ClauseIndexTorch(FilterModule)`. `evaluate_mask` is the pure-torch broadcast; `evaluate_indices` is `compact_mask(self.evaluate_mask(...))`.
+   - Extract the Triton-using path → `ClauseIndexTriton(FilterModule)`. Constructor takes `compact_config: ClauseCompactConfig | None = None, mask_config: ClauseMaskConfig | None = None`. `evaluate_mask` calls `_clause_mask_launch`; `evaluate_indices` calls `_clause_compact_launch`.
    - Both implement the same `FilterModule` interface (`register_index`, `evaluate_mask`, `evaluate_indices`, `evaluate_subset`).
-   - **Drop the `is_cuda` branch from each method** — `ClauseIndexTorch` does only the torch implementation; `ClauseIndexTriton` does only the Triton implementation.
+   - **Drop both `is_cuda` branches from each method** — there are now two: one in `evaluate_mask` (routes to `clause_mask`) and one in `evaluate_indices` (routes to `clause_compact`). `ClauseIndexTorch` does only the torch implementation for both; `ClauseIndexTriton` does only the Triton implementation for both.
 
-6. **Add build factory** `build_clause_index(item_clause_attrs, clause_is_reverse=None, *, device=None, kernel_config=None) -> ClauseIndexTorch | ClauseIndexTriton`:
+6. **Add build factory** `build_clause_index(item_clause_attrs, clause_is_reverse=None, *, device=None, compact_config=None, mask_config=None) -> ClauseIndexTorch | ClauseIndexTriton`:
    - If `device.type == "cuda"`: return `ClauseIndexTriton`.
    - Else: return `ClauseIndexTorch`.
    - Both call `register_index` before returning.
@@ -252,39 +259,44 @@ Modify:
 8. **Update tests**:
    - [test_filters.py](../../retrieve/tests/correctness/test_filters.py), [test_compact.py](../../retrieve/tests/correctness/test_compact.py): instantiate via the build factory; assertions over `(indices, counts)` use full-width indices.
    - [test_clause_compact.py](../../retrieve/tests/parity/test_clause_compact.py): import `_clause_compact_launch` directly, allocate `out_indices` and `counts` in the test, assert against torch reference.
+   - [test_clause_mask.py](../../retrieve/tests/parity/test_clause_mask.py): import `_clause_mask_launch` directly, allocate `out_mask` in the test, assert against torch broadcast reference.
 
-9. **Add `tune_clause_compact`** to `tune_kernels.py`.
+9. **Add `tune_clause_compact` and `tune_clause_mask`** to `tune_kernels.py`.
 
 ### Verification
 
 ```bash
-cd retrieve && uv run pytest tests/correctness/test_filters.py tests/correctness/test_compact.py tests/parity/test_clause_compact.py -v
-grep -rn "\.item()" retrieve/src/retrieve/layers/filters/clause.py retrieve/src/retrieve/kernels/triton/filters/clause_compact.py
+cd retrieve && uv run pytest tests/correctness/test_filters.py tests/correctness/test_compact.py tests/parity/test_clause_compact.py tests/parity/test_clause_mask.py -v
+grep -rn "\.item()" retrieve/src/retrieve/layers/filters/clause.py retrieve/src/retrieve/kernels/triton/filters/clause_compact.py retrieve/src/retrieve/kernels/triton/filters/clause_mask.py
 grep -rn "is_cuda" retrieve/src/retrieve/layers/filters/clause.py
-# All three should have zero hits in forward / evaluate_* paths.
+# All four greps should have zero hits in forward / evaluate_* paths.
 ```
 
 ### Acceptance criteria
 
-- [ ] No `.item()` calls in [clause_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py) or [clause.py](../../retrieve/src/retrieve/layers/filters/clause.py).
-- [ ] No `is_cuda` checks in `ClauseIndexTorch` / `ClauseIndexTriton` methods.
+- [ ] No `.item()` calls in [clause_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py), [clause_mask.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_mask.py), or [clause.py](../../retrieve/src/retrieve/layers/filters/clause.py).
+- [ ] No `is_cuda` checks in `ClauseIndexTorch` / `ClauseIndexTriton` methods (both `evaluate_mask` and `evaluate_indices` had branches that need removing).
 - [ ] `build_clause_index` factory exists and returns the correct subclass per device.
 - [ ] Downstream consumers (`combine_indices`, others) updated to consume full-width indices + counts. Eager-mode behavior unchanged.
 - [ ] All correctness + parity tests pass.
 
 ---
 
-## Phase 2 — `bloom_match` + `BloomFilter`
+## Phase 2 — `bloom_match` + `bloom_compact` + `BloomFilter`
+
+`BloomFilter` today routes BOTH `evaluate_mask` (→ `bloom_match`) AND `evaluate_indices` (→ `bloom_compact`) on `is_cuda`. Both kernels are part of this phase. They share inner structure (`bloom_compact` is `bloom_match`'s subset-test inner loop + `clause_compact`'s cumsum + atomic_add tail), so the bucket policy decided for `bloom_match` directly informs whether `bloom_compact` needs the same bucket family.
 
 ### Files
 
 Modify:
 - [retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py)
+- [retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py)
 - [retrieve/src/retrieve/layers/filters/bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py)
 - [retrieve/src/retrieve/__init__.py](../../retrieve/src/retrieve/__init__.py)
 - [retrieve/src/retrieve/layers/__init__.py](../../retrieve/src/retrieve/layers/__init__.py)
 - [retrieve/tests/correctness/test_bloom_filter.py](../../retrieve/tests/correctness/test_bloom_filter.py)
 - [retrieve/tests/parity/test_bloom_match.py](../../retrieve/tests/parity/test_bloom_match.py)
+- [retrieve/tests/parity/test_bloom_compact.py](../../retrieve/tests/parity/test_bloom_compact.py)
 - `evaluation/scripts/tune_kernels.py`
 - [docs/system/kernels.md](../../docs/system/kernels.md), [docs/system/filtering.md](../../docs/system/filtering.md)
 
@@ -292,26 +304,29 @@ Modify:
 
 1. **Pre-flight check**: verify `_build_signatures` / `_build_query_sigs` (host helpers in [bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py) using `scatter_` into `[B, m_bits+1]` bool grids) trace cleanly under `torch.export`. Run a one-off `torch.export.export(BloomFilterTriton(...), (example_query_attrs,))` and inspect for tracer-incompatible ops. **If they don't trace**, this phase grows to add a query-side bloom-build kernel; document and re-scope before proceeding. Estimated 50/50 odds based on the `scatter_` usage.
 
-2. **Define `BloomMatchConfig`** with `block_n: int, num_warps: int, num_stages: int = 3`. The current kernel picks `BLOCK_N` from input shape (`128 if n >= 128 else next_power_of_2(n)`); decide bucket strategy. Recommend **bucketed-compile**: 3-4 buckets `BLOCK_N ∈ {16, 64, 128, 256}` selected by a small Python if-ladder in the layer. Each bucket exports as one variant; one `.pt2` per bucket per arch. Document.
+2. **Define `BloomMatchConfig` and `BloomCompactConfig`**, each with `block_n: int, num_warps: int, num_stages: int = 3`. The current `bloom_match` kernel picks `BLOCK_N` from input shape (`128 if n >= 128 else next_power_of_2(n)`); decide bucket strategy. Recommend **bucketed-compile**: 3-4 buckets `BLOCK_N ∈ {16, 64, 128, 256}` selected by a small Python if-ladder in the layer. Each bucket exports as one variant; one `.pt2` per bucket per arch. Document. **`bloom_compact` does *not* need bucketing** — it uses fixed `BLOCK_N=256` and tail-masks via `n_valid` (same shape as `clause_compact`); one REGISTRY row per arch suffices, and it must NOT autotune for the same atomic_add reason as `clause_compact`.
 
-3. **Pure-launch core**: `_bloom_match_launch(qb, sigs, out_mask, *, block_n, num_warps, num_stages) -> None`. Caller allocates `out_mask [B, N] bool`. Kernel mutates.
+3. **Pure-launch cores**:
+   - `_bloom_match_launch(qb, sigs, out_mask, *, block_n, num_warps, num_stages) -> None`. Caller allocates `out_mask [B, N] bool`. Kernel mutates.
+   - `_bloom_compact_launch(qb, sigs, out_indices, counts, *, block_n, num_warps, num_stages) -> None`. Caller allocates `out_indices [B, N] int64` and `counts [B] int64` zeros. Kernel mutates. Same full-width-indices + counts-propagation policy as `_clause_compact_launch` from Phase 1 — there must be no `.item()` slice, downstream consumers honor `counts` per row.
 
-4. **Split `BloomFilter`** into `BloomFilterTorch` (torch-only fallback: `(qb.unsqueeze(1) & sigs) == qb` then `.all(dim=-1)`) and `BloomFilterTriton` (CUDA + kernel). Both implement `FilterModule`. Drop the `is_cuda` branch from each `evaluate_mask`.
+4. **Split `BloomFilter`** into `BloomFilterTorch` (torch-only fallback: `evaluate_mask` is `(qb.unsqueeze(1) & sigs) == qb` then `.all(dim=-1)`; `evaluate_indices` is `compact_mask(self.evaluate_mask(...))`) and `BloomFilterTriton` (CUDA + both kernels). Both implement `FilterModule`. **Drop both `is_cuda` branches** — `evaluate_mask` (routes to `bloom_match`) and `evaluate_indices` (routes to `bloom_compact`).
 
-5. **Build factory**: `build_bloom_filter(item_clause_attrs, *, m_bits, k_hash, device=None, kernel_config=None)`.
+5. **Build factory**: `build_bloom_filter(item_clause_attrs, *, m_bits, k_hash, device=None, match_config=None, compact_config=None)`.
 
-6. **Bucket dispatcher**: in `BloomFilterTriton.evaluate_mask`, the bucket selection (`next_pow2(n)` clamped) is a Python `if` ladder on `n` (which is a SymInt under dynamic export). For export, the layer commits to one bucket per export — passed at construction time as part of `kernel_config`. The runtime dispatcher (in eager mode) picks the bucket from input `n`; the export trace specializes to one bucket via the constructor arg.
+6. **Bucket dispatcher**: in `BloomFilterTriton.evaluate_mask`, the `bloom_match` bucket selection (`next_pow2(n)` clamped) is a Python `if` ladder on `n` (which is a SymInt under dynamic export). For export, the layer commits to one bucket per export — passed at construction time as `match_config`. The runtime dispatcher (in eager mode) picks the bucket from input `n`; the export trace specializes to one bucket via the constructor arg. `bloom_compact` has no bucket — `compact_config` is a single fixed config.
 
-7. **Update tests**: `test_bloom_filter.py` and `test_bloom_match.py` use the factory + the new launch signature. The `_build_signatures` helper unit tests should remain unchanged.
+7. **Update tests**: `test_bloom_filter.py`, `test_bloom_match.py`, and `test_bloom_compact.py` use the factory + the new launch signatures. The `_build_signatures` helper unit tests should remain unchanged.
 
-8. **Tune script**: add `tune_bloom_match` per kernel + per bucket.
+8. **Tune script**: add `tune_bloom_match` (per bucket) and `tune_bloom_compact` (single row, parallels `tune_clause_compact`).
 
 ### Verification
 
 ```bash
-cd retrieve && uv run pytest tests/correctness/test_bloom_filter.py tests/parity/test_bloom_match.py -v
+cd retrieve && uv run pytest tests/correctness/test_bloom_filter.py tests/parity/test_bloom_match.py tests/parity/test_bloom_compact.py -v
 grep -rn "is_cuda" retrieve/src/retrieve/layers/filters/bloom.py
-# Should be zero hits.
+grep -rn "\.item()" retrieve/src/retrieve/layers/filters/bloom.py retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py
+# Both greps should be zero hits.
 # Verify export of one BloomFilterTriton instance works (smoke):
 uv run python -c "import torch; from retrieve.layers.filters.bloom import build_bloom_filter, BloomFilterTriton; ..."
 ```
@@ -320,8 +335,9 @@ uv run python -c "import torch; from retrieve.layers.filters.bloom import build_
 
 - [ ] `BloomFilterTorch` and `BloomFilterTriton` exist; old `BloomFilter` either deleted or aliased.
 - [ ] `build_bloom_filter` factory exists.
-- [ ] No `is_cuda` checks in the layer's forward path.
-- [ ] Bucket policy chosen and documented.
+- [ ] No `is_cuda` checks in the layer's forward path (both `evaluate_mask` and `evaluate_indices` had branches).
+- [ ] No `.item()` calls in `bloom_compact.py` or `bloom.py`.
+- [ ] Bucket policy chosen and documented for `bloom_match`; `bloom_compact` documented as fixed single-config.
 - [ ] Tests pass.
 
 ---

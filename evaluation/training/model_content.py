@@ -18,10 +18,28 @@ class ContentItemEmbedding(nn.Module):
     state_dict stays small; callers must re-supply it at load time.
     """
 
-    def __init__(self, text_emb: torch.Tensor, embedding_dim: int):
+    def __init__(
+        self,
+        text_emb: torch.Tensor,
+        embedding_dim: int,
+        proj_type: str = "linear",
+        mlp_hidden_mult: int = 2,
+    ):
         super().__init__()
         self.register_buffer("text_emb", text_emb.float(), persistent=False)
-        self.proj = nn.Linear(text_emb.shape[1], embedding_dim, bias=False)
+        d_in = text_emb.shape[1]
+        if proj_type == "linear":
+            self.proj = nn.Linear(d_in, embedding_dim, bias=False)
+        elif proj_type == "mlp":
+            d_hidden = mlp_hidden_mult * embedding_dim
+            self.proj = nn.Sequential(
+                nn.Linear(d_in, d_hidden, bias=True),
+                nn.GELU(),
+                nn.Linear(d_hidden, embedding_dim, bias=False),
+            )
+        else:
+            raise ValueError(f"Unknown proj_type: {proj_type!r}")
+        self.proj_type = proj_type
 
     def forward(self, ids: torch.Tensor) -> torch.Tensor:
         return self.proj(self.text_emb[ids])
@@ -50,6 +68,7 @@ class GSASRecContent(GSASRec):
         num_items: int,
         text_emb: torch.Tensor,
         tie_content_output: bool = False,
+        content_proj_type: str = "linear",
         **kwargs,
     ):
         # We manage tying ourselves, so the parent's reuse path stays off.
@@ -62,13 +81,18 @@ class GSASRecContent(GSASRec):
             )
 
         embedding_dim = kwargs.get("embedding_dim", self.embedding_dim)
-        self.item_embedding = ContentItemEmbedding(text_emb, embedding_dim)
+        self.item_embedding = ContentItemEmbedding(
+            text_emb, embedding_dim, proj_type=content_proj_type
+        )
 
         if tie_content_output:
             self.output_embedding = self.item_embedding
 
         # Match the trunc-normal scheme the parent uses for its other weights;
         # nn.Linear's default kaiming-uniform init lands at a different scale.
-        nn.init.trunc_normal_(
-            self.item_embedding.proj.weight, std=0.02, a=-0.04, b=0.04
-        )
+        for m in self.item_embedding.proj.modules() if content_proj_type == "mlp" \
+                else [self.item_embedding.proj]:
+            if isinstance(m, nn.Linear):
+                nn.init.trunc_normal_(m.weight, std=0.02, a=-0.04, b=0.04)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)

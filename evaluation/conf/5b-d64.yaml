@@ -4,7 +4,7 @@ _defaults: &defaults
   split: test
   device: cuda
   ks: [100, 500]
-  batch_sizes: [1, 8, 16]
+  batch_sizes: [1, 4, 8, 16]
   seed: 0
   encode:
     batch_size: 512
@@ -16,11 +16,19 @@ _defaults: &defaults
     - linr_v3_then_v2
     - silvertorch
   # 5B Listen+ catalog is order-of-magnitude larger than 500M; clustering knobs
-  # tuned to ~sqrt(N) heuristic with N assumed mid-tens-of-millions. Re-tune
-  # after first run once exact `num_items` is known (`item_id_map.json`).
+  # tuned to ~sqrt(N) heuristic with N assumed mid-tens-of-millions. Sweep
+  # ranges scaled up accordingly. List-valued entries become sweep axes
+  # (cartesian product); scalars stay fixed. Invalid silvertorch combos
+  # (n_probe > n_lists) are skipped with a warning.
   algo_params:
-    linr_v3_then_v2: { candidate_pool: 5000, v3_seed: 0 }
-    silvertorch:     { n_lists: 4096, n_probe: 32, n_iter: 10, seed: 0 }
+    linr_v3_then_v2:
+      candidate_pool: [1000, 2500, 5000, 10000]
+      v3_seed: 0
+    silvertorch:
+      n_lists: [2048, 4096, 8192, 16384]
+      n_probe: [16, 32, 64, 128]
+      n_iter: 10
+      seed: 0
 
 <<: *defaults
 checkpoint: checkpoints/gsasrec-5b-listens-d64/best_model.pt

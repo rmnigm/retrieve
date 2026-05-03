@@ -43,7 +43,7 @@ evaluation/retrieval/
 ├── benchmark.py               # driver (main)
 ├── registry.py                # algorithm registry: name → (forward, modules, is_cpu)
 ├── config.py                  # EvalConfig dataclass + yaml loader
-├── faiss_baselines.py         # FaissFlatIP, FaissIVFFlat (CPU)
+├── voyager_baseline.py        # VoyagerHNSW (CPU)
 └── metrics.py                 # accumulate_metrics, finalize_metrics
 
 evaluation/conf/
@@ -54,6 +54,10 @@ evaluation/conf/
 ├── 5b-d64.yaml                # 5B Listen+, d=64 checkpoint
 └── 5b-d128.yaml               # 5B Listen+, d=128 checkpoint
 ```
+
+`evaluation/conf/` also contains `goodreads-*.json` files; those are
+training-pipeline configs, not benchmark configs (`config.py` is
+`yaml.safe_load`-only).
 
 ## Configuration
 
@@ -85,12 +89,11 @@ _defaults: &defaults
     - triton_knn
     - linr_v3_then_v2
     - silvertorch
-    - faiss_flat_ip
-    - faiss_ivf_flat
+    - voyager_hnsw
   algo_params:
     linr_v3_then_v2: { candidate_pool: 5000, v3_seed: 0 }
     silvertorch:     { n_lists: 1024, n_probe: 16, n_iter: 10, seed: 0 }
-    faiss_ivf_flat:  { nlist: 2048, nprobe: 16, seed: 0 }
+    voyager_hnsw:    { m: 16, ef_construction: 200, ef_query: null, num_threads: -1, seed: 0 }
 
 <<: *defaults
 checkpoint: checkpoints/gsasrec-500m-listens-d128-drop0.5/best_model.pt
@@ -129,13 +132,13 @@ list. Useful for narrowing a sweep to one baseline:
 ```
 uv run benchmark \
     --config conf/smoke.yaml \
-    --algorithms faiss_flat_ip --algorithms faiss_ivf_flat
+    --algorithms voyager_hnsw
 ```
 
 ## Algorithms
 
-Six algorithms are registered as of this writing. The first four run on
-GPU; the last two are CPU-resident faiss baselines.
+Five algorithms are registered as of this writing. The first four run
+on GPU; `voyager_hnsw` is the lone CPU baseline.
 
 | Name | Class | Lives where | Notes |
 |---|---|---|---|
@@ -143,8 +146,7 @@ GPU; the last two are CPU-resident faiss baselines.
 | `triton_knn` | `LiNR_V1_Triton` | GPU | Single-pass Triton KNN. |
 | `linr_v3_then_v2` | `LiNR_V3_Triton` → `LiNR_V2_Triton` | GPU | Quantized V3 pre-filters to top-`candidate_pool`; V2 reranks at full precision. V1-as-stage-2 is intentionally absent — it's strictly slower than `triton_knn` alone on this workload. |
 | `silvertorch` | `SilverTorch` (`m_bits=None`, `k_hash=None`) | GPU | The bloom-fused configuration is *not* used because Yambda has no item attributes; running it against zero signatures would degenerate. With both bloom params left unset, `SilverTorch` skips bloom buffer allocation and runs as a plain IVF + INT8 ANN. |
-| `faiss_flat_ip` | `FaissFlatIP` | CPU | Single-thread (`faiss.omp_set_num_threads(1)` at import). Apples-to-apples flat baseline. |
-| `faiss_ivf_flat` | `FaissIVFFlat` | CPU | Single-thread IVF baseline. K-means trained on the full catalog with `numpy.random.seed(seed)` for determinism. |
+| `voyager_hnsw` | `VoyagerHNSW` | CPU | Spotify HNSW (`voyager.Index`, InnerProduct space), multi-threaded by default — what production deployments actually run. `faiss-cpu` was tried first and dropped: its bundled libgomp regressed >10× at high thread counts in this environment, so its single-thread numbers were no longer a meaningful "realistic CPU" baseline. |
 
 The build pipeline lives in [registry.py:build_algorithm](../../evaluation/retrieval/registry.py),
 which returns `(forward, modules, is_cpu)`. The `is_cpu` flag drives:
@@ -179,18 +181,20 @@ algorithm lives on. It is split between two primitives:
   `mem_reps=5` calls (without `do_bench`'s 256 MiB L2-buster polluting
   peak), then times via `triton.testing.do_bench(rep=200ms, warmup=50)`.
   Returns `(median_ms, p20_ms, p80_ms, peak_mib, transient_mib)`.
-- **`measure_forward_cpu`** (the CPU path for faiss): 3 warmup calls,
-  then a `time.perf_counter` loop within a 200 ms budget. Returns the
-  same tuple shape with peak/transient = 0.
+- **`measure_forward_cpu`** (the CPU path, used today by
+  `voyager_hnsw`): 3 warmup calls, then a `time.perf_counter` loop
+  within a 200 ms budget. Returns the same tuple shape with
+  peak/transient = 0.
 
 ### Multi-query pool — why p20/p80 are over queries
 
 The perf pass times against a **fixed-seed pool of 64 query batches**,
 round-robin'd into the timed function. This matters for IVF-style
-algorithms (`silvertorch`, `faiss_ivf_flat`) where a single fixed query
-collapses p20/p80 to one cluster's traversal cost — degenerate
-percentiles. With the pool, p20/p80 reflect cluster diversity (the
-intended workload variance), not CUDA scheduling jitter.
+algorithms (`silvertorch`) and graph-walk ANN (`voyager_hnsw`) where a
+single fixed query collapses p20/p80 to one cluster's / one path's
+traversal cost — degenerate percentiles. With the pool, p20/p80
+reflect query diversity (the intended workload variance), not CUDA
+scheduling jitter.
 
 The pool itself is built per `(algo, k, bs)` cell:
 
@@ -227,7 +231,7 @@ next cell's `mem_before`.
 `torch.cuda.manual_seed_all(cfg.seed)` before any allocation. The
 perf-query-pool generator uses the same seed. Algo seeds are wired
 through `algo_params` (e.g. `silvertorch.seed`,
-`linr_v3_then_v2.v3_seed`, `faiss_ivf_flat.seed`).
+`linr_v3_then_v2.v3_seed`, `voyager_hnsw.seed`).
 
 Quality columns must be **byte-identical** across reruns with the same
 seed. Latency may drift within ~5% due to clock noise, NVML thermal
@@ -280,28 +284,29 @@ uv run benchmark --config conf/500m-d128.yaml
 uv run benchmark --config conf/5b-d64.yaml
 ```
 
-Subset baseline check:
+CPU baseline only:
 
 ```bash
 uv run benchmark \
     --config conf/smoke.yaml \
-    --algorithms faiss_flat_ip --algorithms faiss_ivf_flat
+    --algorithms voyager_hnsw
 ```
 
 ### Sanity checks to run after a sweep
 
-1. `device == "cpu"` and `index_mem_mib == 0` for the two faiss rows.
-2. `faiss_flat_ip` recall/ndcg within ~0.5 pp of `torch_fullscan`
-   (both are exhaustive IP — should match).
-3. `faiss_ivf_flat` recall/ndcg within ~0.5 pp of `silvertorch` at
-   comparable `(nlist, nprobe)`.
-4. GPU `median_ms(bs=8)` < `8 × median_ms(bs=1)` (sub-linear scaling —
+1. `device == "cpu"` and `index_mem_mib == 0` for the `voyager_hnsw`
+   row.
+2. `voyager_hnsw` `recall@K` within ~2 pp of `silvertorch` at
+   comparable settings (`m`/`ef_query` vs `n_lists`/`n_probe`) — both
+   are approximate, so a wider band than an exact-vs-exact comparison
+   is expected.
+3. GPU `median_ms(bs=8)` < `8 × median_ms(bs=1)` (sub-linear scaling —
    the proof point of the GPU implementations).
-5. CPU faiss `median_ms(bs=8)` ≈ `8 × median_ms(bs=1)` (near-linear —
-   single-thread, no SIMD-level batching benefit on flat IP).
-6. `recall@K` and `ndcg@K` columns identical across the bs rows of the
+4. `voyager_hnsw` `median_ms(bs=8)` scales near-linearly with `bs`
+   (HNSW's per-query graph walk doesn't share work across queries).
+5. `recall@K` and `ndcg@K` columns identical across the bs rows of the
    same `(algo, k)` cell.
-7. Two reruns with the same seed: quality columns byte-identical;
+6. Two reruns with the same seed: quality columns byte-identical;
    latency columns within ~5%.
 
 ## Extending
@@ -322,9 +327,10 @@ uv run benchmark \
 ### Add a new config (new checkpoint)
 
 Copy an existing YAML, update `checkpoint:` and any catalog-size-driven
-knobs (`silvertorch.n_lists/n_probe`, `faiss_ivf_flat.nlist/nprobe`).
-The model loader reads hyperparams from `<ckpt-dir>/config.json`, so
-the YAML never carries `embedding_dim` etc.
+knobs (`silvertorch.n_lists/n_probe`,
+`voyager_hnsw.m/ef_construction/ef_query`). The model loader reads
+hyperparams from `<ckpt-dir>/config.json`, so the YAML never carries
+`embedding_dim` etc.
 
 ### Add a new dataset (e.g. with-filters)
 

@@ -10,10 +10,11 @@ The Triton kernels split into three trees by domain:
   used by LinR V1/V2/V3 (`fused_matmul_topk`, `fused_masked_knn_topk`,
   `oporp_1bit_match_topk`).
 - [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/) —
-  standalone filter primitives consumed by the `FilterModule` family.
-  Today: `clause_compact` (powers `ClauseIndex.evaluate_indices`).
-  Designed-but-deferred: `bloom_compact` and `clause_mask` — see
-  §[Deferred kernels](#deferred-kernels) and
+  standalone filter primitives consumed by the `FilterModule` family:
+  `clause_compact` (powers `ClauseIndex.evaluate_indices`), `clause_mask`
+  (powers `ClauseIndex.evaluate_mask`), and `bloom_compact` (powers
+  `BloomFilter.evaluate_indices`). Design rationale and the original
+  deferred-shipping plan in
   [filter-kernels-followup.md](../plans/filter-kernels-followup.md).
 - [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/) —
   `codesigned_probe_score` (the IVF + INT8 + Bloom co-design) plus
@@ -22,8 +23,8 @@ The Triton kernels split into three trees by domain:
   unattached `int8_ann_fused`.
 
 The LinR kernels are the focus of this doc; the filter primitives
-(`clause_compact`, `bloom_match`) are covered next, and the SilverTorch-
-only kernels at the end for context.
+(`clause_compact`, `clause_mask`, `bloom_match`, `bloom_compact`) are
+covered next, and the SilverTorch-only kernels at the end for context.
 
 All kernels follow the same conventions:
 
@@ -220,6 +221,37 @@ hard-coded — `tl.atomic_add` accumulates across autotune trials and would
 corrupt `counts`. If a sweep is needed later, re-enable autotune with
 `reset_to_zero` covering both `counts_ptr` and `out_indices_ptr`.
 
+## `clause_mask` — fused clause eval emitting `[B, N]` bool
+
+[`kernels/triton/filters/clause_mask.py`](../../retrieve/src/retrieve/kernels/triton/filters/clause_mask.py).
+
+Powers `ClauseIndex.evaluate_mask` on CUDA. Same inner loop as
+`clause_compact` minus the cumsum + `atomic_add` epilogue — emits the
+`[B, N]` bool directly without the host-side argsort the dense path used
+to need. Replaces the pure-torch broadcast that materialized
+`[B, N, C, A_max]` bool — `C·A_max`× the output mask — before reducing.
+
+```
+inputs:   item_clause_attrs   [N, C, A_max]  int64
+          clause_is_reverse   [C]            bool
+          query_clause_attrs  [B, C]         int64
+return:   mask                [B, N]         bool
+```
+
+**Launch grid** `(B, cdiv(N, BLOCK_N))`, identical to `clause_compact`.
+Each program loads `query_clause_attrs[b, :]` once and reduces over the
+`C × A_max` clause-attribute grid in registers. No `[B, N, C, A_max]`
+intermediate ever materializes.
+
+**Inner loop** is the same as `clause_compact`'s (lines 55–84): inner OR
+over `A_MAX` slots, outer AND over `C` clauses, reverse XOR, inactive
+override. The epilogue is a single `tl.store` of the `pass_mask` tile —
+no cumsum, no atomics.
+
+**No autotune.** Fixed `BLOCK_N=256`, `num_warps=4`. Atomics absent so
+autotune would be safe, but the compile-time cost has not been justified
+yet; revisit if a profile shows the kernel is hot.
+
 ## `bloom_match` — Bloom subset test
 
 [`kernels/triton/silvertorch/bloom_match.py`](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py).
@@ -257,9 +289,43 @@ boolean reduction Triton doesn't have; the cast back to bool is on store.
 reduction; the kernel keeps the tile in registers.
 
 **No autotune** today — fixed `BLOCK_N = 128 if N >= 128 else
-next_power_of_2(N)`. The `bloom_compact` follow-up
-([§Deferred kernels](#deferred-kernels)) will use the same launch shape
-plus the cumsum + atomic_add tail from `clause_compact`.
+next_power_of_2(N)`. The fused `bloom_compact` (next section) shares
+this launch shape and adds `clause_compact`'s cumsum + `atomic_add`
+tail.
+
+## `bloom_compact` — fused subset test + stream compaction
+
+[`kernels/triton/filters/bloom_compact.py`](../../retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py).
+
+Powers `BloomFilter.evaluate_indices` on CUDA. Combines `bloom_match`'s
+subset-test inner loop with `clause_compact`'s cumsum + `atomic_add`
+epilogue, so the dense `[B, N]` bool plus host-side argsort that the
+ABC fallback (`compact_mask(bloom_match(.))`) would otherwise produce
+never materializes.
+
+```
+inputs:    qb     [B, W]   int64    packed query bloom signature
+           sigs   [N, W]   int64    packed item bloom signatures
+output:    out_indices [B, N]   int64    (worst-case scratch)
+           counts      [B]      int64
+return:    positive_indices [B, P] int64  (P = max(counts.max(), 1))
+           counts           [B]    int64
+```
+
+**Launch grid** `(B, cdiv(N, BLOCK_N))`, identical to both `bloom_match`
+and `clause_compact`. Each program loads `qb[b, :]` once, the `[BLOCK_N,
+W]` `sigs` tile, computes `(qb & sigs) == qb` AND-reduced over `W`
+(lifted from `bloom_match`), then runs the same `cumsum → atomic_add →
+store` epilogue as `clause_compact`.
+
+**Output ordering** within a row is **unspecified** — same convention as
+`clause_compact`. V2's `fused_masked_knn_topk` and V3's HAS_INDICES path
+consume the *set*, not the order.
+
+**No autotune.** Fixed `BLOCK_N=256`, `num_warps=4` — same atomic-add
+hazard as `clause_compact`. `qb` is built host-side via
+`_build_signatures`; folding it into the kernel adds register pressure
+with no obvious win and is explicitly out of scope.
 
 ## Layer dispatch
 
@@ -352,23 +418,11 @@ either; it remains in the SilverTorch tree pending a focused SilverTorch
 pass that should either move it to a `dp4a`/`mma.s8` int32 accumulator
 path (per the SilverTorch paper) or remove it. Untouched in this run.
 
-## Deferred kernels
+## Filter kernel history
 
-Two filter-tree kernels are designed but deliberately not shipped — both
-gated on profile data, both pure perf swaps over a stable
-`FilterModule` contract (callers don't change when they land):
-
-- **`bloom_compact`** — fused subset-test + stream-compaction for
-  `BloomFilter.evaluate_indices`. Today the default falls through to
-  `compact_mask(bloom_match(.))`, materializing `[B, N]` bool plus a
-  host-side argsort. The fused kernel would copy `clause_compact`'s
-  cumsum + `atomic_add` tail with `bloom_match`'s subset-test inner loop.
-- **`clause_mask`** — fused clause evaluation that emits `[B, N]` bool
-  directly, replacing `ClauseIndex.evaluate_mask`'s pure-torch broadcast
-  (which materializes a `[B, N, C, A_max]` intermediate). Structurally
-  `clause_compact` minus the cumsum + `atomic_add` epilogue.
-
-Triggers, kernel sketches, parity-test plans, and the touch list for
-each are in [filter-kernels-followup.md](../plans/filter-kernels-followup.md).
-Don't ship speculatively — the contract guarantees we can drop them in
-later as a perf swap, not an API change.
+`bloom_compact` and `clause_mask` were originally designed-but-deferred
+in [filter-kernels-followup.md](../plans/filter-kernels-followup.md) and
+have since shipped — they're documented above next to their structural
+twins (`clause_compact` and `bloom_match`). The plan doc remains as the
+written-down rationale for the API split that lets these land as pure
+perf swaps without touching callers.

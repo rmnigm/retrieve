@@ -35,7 +35,19 @@ class ClauseIndex(FilterModule):
         self.register_buffer("clause_is_reverse", clause_is_reverse)
 
     def evaluate_mask(self, query_clause_attrs: Tensor) -> Tensor:
-        """Returns ``[B, N]`` bool. Pure-torch dense evaluation."""
+        """Returns ``[B, N]`` bool.
+
+        On CUDA: routes to the fused ``clause_mask`` Triton kernel — no
+        ``[B, N, C, A_max]`` intermediate. On CPU: pure-torch broadcast.
+        """
+        if query_clause_attrs.is_cuda:
+            from retrieve.kernels.triton.filters.clause_mask import clause_mask
+
+            return clause_mask(
+                self.item_clause_attrs,
+                self.clause_is_reverse,
+                query_clause_attrs,
+            )
         q = query_clause_attrs.unsqueeze(1).unsqueeze(-1)
         ic = self.item_clause_attrs.unsqueeze(0)
         match = q == ic

@@ -45,6 +45,7 @@ class GSASRecConfig:
 
     text_embedding_path: str | None = None
     tie_content_output: bool = False
+    content_proj_type: str = "linear"
 
     @property
     def num_items(self) -> int:

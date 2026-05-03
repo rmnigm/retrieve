@@ -670,6 +670,694 @@ def cmd_prep(args) -> int:
     return 0
 
 
+# ----- attrs -----------------------------------------------------------------
+#
+# Builds per-work narrow + wide attribute tensors for the filter-bench harness
+# (see docs/plans/goodreads-filter-eval.md). Reuses `prep` outputs:
+#
+#     <output-dir>/book_to_work.parquet      (book_id → work_id, all editions)
+#     <output-dir>/item_id_map.json          (work_id → 1-indexed dense int)
+#     <output-dir>/test.parquet              (item_ids, targets) — for eval_split
+#
+# Reads the catalog parquets:
+#
+#     <processed-dir>/goodreads_books.parquet
+#     <processed-dir>/goodreads_book_genres_initial.parquet
+#
+# Writes:
+#
+#     item_attrs_narrow.pt       [N+1, 5, 4] int64 ; row 0 = -1 padding
+#     item_attrs_wide.pt         [N+1, 1, 32] int64 ; row 0 = -1 padding
+#     clause_is_reverse_narrow.pt [5] bool = [F, T, F, F, F]
+#     lang_vocab.json
+#     format_vocab.json
+#     author_vocab.json
+#     wide_shelf_vocab.json
+#     wide_shelf_global_freq.pt  [V_wide] int64 ; per-shelf global count (used
+#                                                 by wide-eval rare-biased sampling)
+#     eval_split.parquet         (target_id, query_attrs_narrow,
+#                                 query_attrs_wide_1shelf, query_attrs_wide_2shelf)
+#                                aligned 1:1 with rows of test.parquet.
+#     prep_log.json              extended with an "attrs" section if it exists,
+#                                else a fresh file.
+
+# 10 fixed buckets in goodreads_book_genres_initial. Order is the dense id.
+GENRE_KEYS = [
+    "children",
+    "comics, graphic",
+    "fantasy, paranormal",
+    "fiction",
+    "history, historical fiction, biography",
+    "mystery, thriller, crime",
+    "non-fiction",
+    "poetry",
+    "romance",
+    "young-adult",
+]
+
+# 5 buckets for `format`. Index = dense id.
+FORMAT_BUCKETS = ["paperback", "hardcover", "ebook", "audio", "other"]
+
+# Wide-shelf blocklist: shelves that say "I want to read this", "I own this",
+# or "this is a book", carrying no topical signal.
+SHELF_BLOCKLIST = frozenset({
+    "to-read", "currently-reading", "owned", "owned-books", "books-i-own",
+    "default", "favorites", "favourites", "kindle", "ebook", "audiobook",
+    "library", "library-book", "wishlist", "want-to-read", "dnf",
+    "did-not-finish", "unread", "read", "my-books", "my-library",
+    "all-books", "books", "fiction", "non-fiction",
+})
+
+# Regex drops applied AFTER the lowercase-name lookup against SHELF_BLOCKLIST.
+import re as _re
+
+_SHELF_RE_DROPS = (
+    _re.compile(r"^read-(in-)?\d{4}$"),
+    _re.compile(r"^\d-?stars?$"),
+    _re.compile(r"^[a-z]{2}-\d{4}$"),
+    _re.compile(r"^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$"),
+)
+
+C_NARROW = 5  # genre, lang, format, year, author
+A_MAX_NARROW = 4  # widest = genre top-4
+WIDE_BAG_SIZE = 32
+
+
+def _format_to_bucket(s: str | None) -> int:
+    """Map a raw `format` string to a bucket id, or -1 if unknown/empty."""
+    if not s:
+        return -1
+    n = s.lower().strip()
+    if not n:
+        return -1
+    if "audio" in n or "cassette" in n or "cd-audio" in n or n in {"cd"}:
+        return FORMAT_BUCKETS.index("audio")
+    if (
+        "ebook" in n
+        or "e-book" in n
+        or "kindle" in n
+        or "epub" in n
+        or "digital" in n
+        or "nook" in n
+    ):
+        return FORMAT_BUCKETS.index("ebook")
+    if "hardcover" in n or "hardback" in n or "library binding" in n:
+        return FORMAT_BUCKETS.index("hardcover")
+    if (
+        "paperback" in n
+        or "softcover" in n
+        or "mass market" in n
+        or n in {"paper", "trade pb"}
+    ):
+        return FORMAT_BUCKETS.index("paperback")
+    return FORMAT_BUCKETS.index("other")
+
+
+def _year_to_bucket(y: int | None) -> int:
+    """Map a publication_year int to one of {0,1,2,3} or -1 if missing/oor.
+
+    Buckets: <1990, 1990-2000, 2001-2010, 2011-2017+. Years before 1500 or
+    after 2025 are treated as parse-junk → -1 (Goodreads has a long tail
+    of obviously-wrong entries — placeholder dates, future-dated reissues).
+    """
+    if y is None:
+        return -1
+    if y < 1500 or y > 2025:
+        return -1
+    if y < 1990:
+        return 0
+    if y <= 2000:
+        return 1
+    if y <= 2010:
+        return 2
+    return 3  # 2011+ folds 2018-2025 into the 2011-2017 bucket
+
+
+def _shelf_keep(name: str | None) -> bool:
+    """Apply blocklist + regex drops; return True iff this shelf survives."""
+    if not name:
+        return False
+    n = name.lower().strip()
+    if not n or n in SHELF_BLOCKLIST:
+        return False
+    for r in _SHELF_RE_DROPS:
+        if r.match(n):
+            return False
+    return True
+
+
+def cmd_attrs(args) -> int:
+    """Build per-work narrow + wide attribute tensors + eval_split."""
+    import torch
+
+    processed = Path(args.processed_dir).expanduser().resolve()
+    output = Path(args.output_dir).expanduser()
+    if not output.exists():
+        print(f"ERROR output dir {output} does not exist (run `prep` first)", flush=True)
+        return 1
+
+    books_path = processed / "goodreads_books.parquet"
+    genres_path = processed / "goodreads_book_genres_initial.parquet"
+    book_to_work_path = output / "book_to_work.parquet"
+    item_id_map_path = output / "item_id_map.json"
+    test_path = output / "test.parquet"
+    for p in (books_path, genres_path, book_to_work_path, item_id_map_path, test_path):
+        if not p.exists():
+            print(f"ERROR missing {p}", flush=True)
+            return 1
+
+    overall_t0 = time.monotonic()
+    log: dict = {}
+
+    # ---- catalog map ------------------------------------------------------
+    print("STEP load item_id_map + book_to_work", flush=True)
+    with open(item_id_map_path) as f:
+        item_id_map = {int(k): int(v) for k, v in json.load(f).items()}
+    n_items = len(item_id_map)
+    log["n_items"] = n_items
+    print(f"  catalog has {n_items:,} works", flush=True)
+
+    iim_df = pl.DataFrame(
+        {
+            "work_id": list(item_id_map.keys()),
+            "item_id": list(item_id_map.values()),
+        },
+        schema={"work_id": pl.Int64, "item_id": pl.Int64},
+    )
+    book_to_work = (
+        pl.read_parquet(book_to_work_path)
+        .join(iim_df, on="work_id", how="inner")
+        .select("book_id", "item_id")
+    )
+    print(f"  in-catalog book→work pairs: {book_to_work.height:,}", flush=True)
+
+    # ---- per-book frame: project narrow+wide source columns ----------------
+    print("STEP load books and join to catalog", flush=True)
+    books = (
+        pl.read_parquet(
+            books_path,
+            columns=[
+                "book_id",
+                "language_code",
+                "format",
+                "publication_year",
+                "authors",
+                "popular_shelves",
+            ],
+        )
+        .with_columns(pl.col("book_id").cast(pl.Int64, strict=False))
+        .filter(pl.col("book_id").is_not_null())
+        .join(book_to_work, on="book_id", how="inner")
+    )
+    print(f"  books in-catalog: {books.height:,}", flush=True)
+
+    # ---- C1 lang vocab + per-book c1 ---------------------------------------
+    print("STEP C1 lang vocab", flush=True)
+    lang_freq = (
+        books.filter(pl.col("language_code") != "")
+        .group_by("language_code")
+        .len()
+        .sort("len", descending=True)
+        .head(30)
+    )
+    lang_codes_top30 = lang_freq["language_code"].to_list()
+    lang_vocab = {c: i for i, c in enumerate(lang_codes_top30)}
+    with open(output / "lang_vocab.json", "w") as f:
+        json.dump(lang_vocab, f, indent=2)
+    log["lang_vocab_size"] = len(lang_vocab)
+    print(f"  top-30 lang vocab[:5] = {lang_codes_top30[:5]}", flush=True)
+
+    # ---- C2 format vocab + per-book c2 -------------------------------------
+    print("STEP C2 format buckets", flush=True)
+    fmt_unique = books.select(pl.col("format")).unique()["format"].to_list()
+    fmt_lookup = {f: _format_to_bucket(f) for f in fmt_unique}
+    with open(output / "format_vocab.json", "w") as f:
+        json.dump(
+            {
+                "buckets": FORMAT_BUCKETS,
+                "string_to_id": {(k or ""): v for k, v in fmt_lookup.items()},
+            },
+            f,
+            indent=2,
+        )
+    log["format_vocab_size"] = len(FORMAT_BUCKETS)
+
+    # ---- C4 author dense remap (over in-catalog editions only) -------------
+    print("STEP C4 author vocab (top-2 per book)", flush=True)
+    # explode author lists, dense-remap by global frequency
+    ab_pairs = (
+        books.select(
+            pl.col("book_id"),
+            pl.col("item_id"),
+            pl.col("authors").list.head(2).alias("authors_top2"),
+        )
+        .explode("authors_top2")
+        .filter(pl.col("authors_top2").is_not_null())
+        .with_columns(
+            pl.col("authors_top2").struct.field("author_id").alias("author_id_str")
+        )
+        .filter(pl.col("author_id_str").is_not_null() & (pl.col("author_id_str") != ""))
+    )
+    # global author frequency (only counting in-catalog editions)
+    auth_freq = (
+        ab_pairs.group_by("author_id_str")
+        .agg(pl.len().alias("freq"))
+        .sort("freq", descending=True)
+    )
+    author_ids_str = auth_freq["author_id_str"].to_list()
+    # 0-indexed dense ids; -1 reserved as padding sentinel.
+    author_vocab = {a: i for i, a in enumerate(author_ids_str)}
+    with open(output / "author_vocab.json", "w") as f:
+        json.dump({"size": len(author_vocab), "ids": author_ids_str}, f)
+    log["author_vocab_size"] = len(author_vocab)
+    print(f"  author vocab size = {len(author_vocab):,}", flush=True)
+
+    # ---- per-book attribute frame ------------------------------------------
+    print("STEP per-book narrow attrs", flush=True)
+    # Pre-build replace-tables as small DataFrames for join (faster than
+    # replace_strict on 830k+ keys).
+    auth_remap = pl.DataFrame(
+        {"author_id_str": author_ids_str, "author_id": list(range(len(author_ids_str)))},
+        schema={"author_id_str": pl.Utf8, "author_id": pl.Int64},
+    )
+    fmt_remap = pl.DataFrame(
+        {
+            "format": list(fmt_lookup.keys()),
+            "format_id": [fmt_lookup[k] for k in fmt_lookup.keys()],
+        },
+        schema={"format": pl.Utf8, "format_id": pl.Int64},
+    )
+    lang_remap = pl.DataFrame(
+        {
+            "language_code": lang_codes_top30,
+            "lang_id": list(range(len(lang_codes_top30))),
+        },
+        schema={"language_code": pl.Utf8, "lang_id": pl.Int64},
+    )
+
+    # Build c1, c2, c3 per book (single value each).
+    pb = (
+        books.select(
+            "book_id",
+            "item_id",
+            "language_code",
+            "format",
+            pl.col("publication_year").cast(pl.Int64, strict=False).alias("year_int"),
+        )
+        .join(lang_remap, on="language_code", how="left")
+        .join(fmt_remap, on="format", how="left")
+        .with_columns(
+            pl.col("lang_id").fill_null(-1).cast(pl.Int64),
+            pl.col("format_id").fill_null(-1).cast(pl.Int64),
+        )
+    )
+    pb = pb.with_columns(
+        pl.col("year_int")
+        .map_elements(_year_to_bucket, return_dtype=pl.Int64)
+        .alias("year_id")
+    ).select("book_id", "item_id", "lang_id", "format_id", "year_id")
+
+    # Top-2 author ids per book.
+    pb_authors = (
+        ab_pairs.join(auth_remap, on="author_id_str", how="inner")
+        .group_by("book_id", maintain_order=True)
+        .agg(pl.col("author_id").head(2).alias("author_ids"))
+    )
+    pb = pb.join(pb_authors, on="book_id", how="left")
+    pb = pb.with_columns(
+        pl.col("author_ids").fill_null([]).alias("author_ids"),
+    )
+
+    # ---- per-book genres top-4 (separate parquet) --------------------------
+    print("STEP per-book genres top-4", flush=True)
+    genres = (
+        pl.read_parquet(genres_path)
+        .with_columns(pl.col("book_id").cast(pl.Int64, strict=False))
+        .filter(pl.col("book_id").is_not_null())
+        .join(book_to_work, on="book_id", how="inner")
+    )
+    # `genres` column is a struct with the 10 keys above (counts may be null).
+    # Unnest → long-form (book_id, item_id, genre_name, count) → top-4.
+    genres = genres.unnest("genres")
+    genre_value_cols = [c for c in genres.columns if c not in ("book_id", "item_id")]
+    glong = genres.unpivot(
+        index=["book_id", "item_id"],
+        on=genre_value_cols,
+        variable_name="genre_name",
+        value_name="count",
+    ).filter(pl.col("count").is_not_null() & (pl.col("count") > 0))
+    genre_remap = pl.DataFrame(
+        {"genre_name": GENRE_KEYS, "genre_id": list(range(len(GENRE_KEYS)))},
+        schema={"genre_name": pl.Utf8, "genre_id": pl.Int64},
+    )
+    glong = glong.join(genre_remap, on="genre_name", how="inner")
+    # per-book top-4 by count
+    glong = glong.sort(["book_id", "count"], descending=[False, True])
+    pb_genres = glong.group_by("book_id", maintain_order=True).agg(
+        pl.col("genre_id").head(4).alias("genre_ids"),
+        pl.col("count").head(4).alias("genre_counts"),
+    )
+    pb = pb.join(pb_genres, on="book_id", how="left").with_columns(
+        pl.col("genre_ids").fill_null([]).alias("genre_ids"),
+        pl.col("genre_counts").fill_null([]).alias("genre_counts"),
+    )
+
+    # ---- per-work narrow aggregation --------------------------------------
+    print("STEP per-work narrow aggregation", flush=True)
+    # Group editions by item_id; aggregate per-clause.
+    # C0 genre: union top-4 across editions, sum counts per genre, take top-4 by total.
+    # C1 lang / C2 format / C3 year: mode (most-common non-`-1` value), break ties by first.
+    # C4 author: union top-2 across editions, take 2 by in-catalog frequency rank
+    #   (already encoded — lower id = more frequent).
+
+    # genre roll-up
+    g_explode = pb.select("item_id", "genre_ids", "genre_counts").explode(
+        ["genre_ids", "genre_counts"]
+    ).filter(pl.col("genre_ids").is_not_null())
+    g_per_work = (
+        g_explode.group_by(["item_id", "genre_ids"])
+        .agg(pl.col("genre_counts").sum().alias("total"))
+        .sort(["item_id", "total"], descending=[False, True])
+        .group_by("item_id", maintain_order=True)
+        .agg(pl.col("genre_ids").head(4).alias("c0_genre"))
+    )
+
+    # author roll-up: union, dedup, sort by author_id asc (smaller id = more-frequent),
+    # take 2.
+    a_explode = pb.select("item_id", "author_ids").explode("author_ids").filter(
+        pl.col("author_ids").is_not_null()
+    )
+    a_per_work = (
+        a_explode.unique(subset=["item_id", "author_ids"])
+        .sort(["item_id", "author_ids"])
+        .group_by("item_id", maintain_order=True)
+        .agg(pl.col("author_ids").head(2).alias("c4_author"))
+    )
+
+    # lang/format/year mode: count occurrences of each non-`-1` value per work,
+    # take the value with the highest count (ties: smallest id).
+    def _mode_perwork(df: pl.DataFrame, value_col: str, out_name: str) -> pl.DataFrame:
+        nz = df.filter(pl.col(value_col) != -1)
+        if nz.height == 0:
+            return pl.DataFrame(
+                {"item_id": [], out_name: []},
+                schema={"item_id": pl.Int64, out_name: pl.Int64},
+            )
+        return (
+            nz.group_by(["item_id", value_col])
+            .agg(pl.len().alias("ct"))
+            .sort(["item_id", "ct", value_col], descending=[False, True, False])
+            .group_by("item_id", maintain_order=True)
+            .agg(pl.col(value_col).first().alias(out_name))
+        )
+
+    c1 = _mode_perwork(pb.select("item_id", "lang_id"), "lang_id", "c1_lang")
+    c2 = _mode_perwork(pb.select("item_id", "format_id"), "format_id", "c2_format")
+    c3 = _mode_perwork(pb.select("item_id", "year_id"), "year_id", "c3_year")
+
+    # ---- assemble per-work narrow tensor ----------------------------------
+    print("STEP assemble item_attrs_narrow", flush=True)
+    # Start from a frame of every catalog item_id (so works with no editions
+    # in-catalog still get a row of -1s — should be 0 in practice).
+    all_items = pl.DataFrame(
+        {"item_id": list(range(1, n_items + 1))}, schema={"item_id": pl.Int64}
+    )
+    narrow = (
+        all_items.join(g_per_work, on="item_id", how="left")
+        .join(c1, on="item_id", how="left")
+        .join(c2, on="item_id", how="left")
+        .join(c3, on="item_id", how="left")
+        .join(a_per_work, on="item_id", how="left")
+    )
+
+    # Materialize as int64 [N+1, 5, 4] tensor (row 0 = all -1).
+    narrow_t = torch.full((n_items + 1, C_NARROW, A_MAX_NARROW), -1, dtype=torch.long)
+    item_id_arr = narrow["item_id"].to_numpy()
+    g0 = narrow["c0_genre"].to_list()
+    c1l = narrow["c1_lang"].to_list()
+    c2f = narrow["c2_format"].to_list()
+    c3y = narrow["c3_year"].to_list()
+    c4a = narrow["c4_author"].to_list()
+    cov = [0, 0, 0, 0, 0]
+    for row_i, item_id in enumerate(item_id_arr.tolist()):
+        # C0
+        gv = g0[row_i] or []
+        if gv:
+            cov[0] += 1
+            for j, v in enumerate(gv[:A_MAX_NARROW]):
+                narrow_t[item_id, 0, j] = int(v)
+        # C1
+        v = c1l[row_i]
+        if v is not None:
+            cov[1] += 1
+            narrow_t[item_id, 1, 0] = int(v)
+        # C2
+        v = c2f[row_i]
+        if v is not None:
+            cov[2] += 1
+            narrow_t[item_id, 2, 0] = int(v)
+        # C3
+        v = c3y[row_i]
+        if v is not None:
+            cov[3] += 1
+            narrow_t[item_id, 3, 0] = int(v)
+        # C4
+        av = c4a[row_i] or []
+        if av:
+            cov[4] += 1
+            for j, v in enumerate(av[:A_MAX_NARROW]):
+                narrow_t[item_id, 4, j] = int(v)
+
+    coverage = {f"c{i}": round(cov[i] / max(n_items, 1), 4) for i in range(5)}
+    log["narrow_coverage"] = coverage
+    print(f"  per-clause coverage = {coverage}", flush=True)
+
+    torch.save(narrow_t, output / "item_attrs_narrow.pt")
+    clause_is_reverse_narrow = torch.tensor(
+        [False, True, False, False, False], dtype=torch.bool
+    )
+    torch.save(clause_is_reverse_narrow, output / "clause_is_reverse_narrow.pt")
+    print(
+        f"  wrote item_attrs_narrow.pt {tuple(narrow_t.shape)} + clause_is_reverse_narrow.pt",
+        flush=True,
+    )
+
+    # ---- wide shelves ------------------------------------------------------
+    print("STEP wide shelves (per-book filter + per-work top-32)", flush=True)
+    # Explode popular_shelves struct per book; apply blocklist + regex drops;
+    # parse count → int. Then aggregate to per-work sum, take top-32 by sum.
+    shelves_long = (
+        books.select("item_id", "popular_shelves")
+        .explode("popular_shelves")
+        .filter(pl.col("popular_shelves").is_not_null())
+        .with_columns(
+            pl.col("popular_shelves").struct.field("name").alias("name"),
+            pl.col("popular_shelves").struct.field("count").alias("count_str"),
+        )
+        .with_columns(
+            pl.col("count_str").cast(pl.Int64, strict=False).fill_null(0).alias("count"),
+        )
+        .select("item_id", "name", "count")
+    )
+    # Apply Python predicate via map_elements — the regex+blocklist is awkward
+    # to express purely in polars.  ~5M rows after explode; ~30 s on the user's
+    # box, fine for one-shot.
+    shelves_long = shelves_long.with_columns(
+        pl.col("name")
+        .map_elements(_shelf_keep, return_dtype=pl.Boolean)
+        .alias("keep")
+    ).filter(pl.col("keep")).drop("keep")
+    # lower-case the surviving names (blocklist matched lowercase but the raw
+    # name might mix case; canonicalize for the per-work group-by).
+    shelves_long = shelves_long.with_columns(pl.col("name").str.to_lowercase().alias("name"))
+
+    # per-work total per shelf-name → top-32 by count
+    work_shelf = (
+        shelves_long.group_by(["item_id", "name"])
+        .agg(pl.col("count").sum().alias("count"))
+        .sort(["item_id", "count"], descending=[False, True])
+    )
+    # Build wide-shelf vocab from the union of all per-work top-32 names
+    # (sorted by global aggregated count desc; 0-indexed dense ids).
+    work_shelf_top = (
+        work_shelf.group_by("item_id", maintain_order=True)
+        .agg(
+            pl.col("name").head(WIDE_BAG_SIZE).alias("names"),
+            pl.col("count").head(WIDE_BAG_SIZE).alias("counts"),
+        )
+    )
+    used_names_freq = (
+        work_shelf_top.select(pl.col("names").alias("name"), pl.col("counts").alias("count"))
+        .explode(["name", "count"])
+        .group_by("name")
+        .agg(pl.col("count").sum().alias("global_count"))
+        .sort("global_count", descending=True)
+    )
+    wide_names = used_names_freq["name"].to_list()
+    wide_counts = used_names_freq["global_count"].to_list()
+    wide_vocab = {n: i for i, n in enumerate(wide_names)}
+    with open(output / "wide_shelf_vocab.json", "w") as f:
+        json.dump({"size": len(wide_vocab), "names": wide_names}, f)
+    torch.save(
+        torch.tensor(wide_counts, dtype=torch.long),
+        output / "wide_shelf_global_freq.pt",
+    )
+    log["wide_vocab_size"] = len(wide_vocab)
+    print(f"  wide vocab size = {len(wide_vocab):,}", flush=True)
+
+    # Materialize per-work [item_id, names_top32 (ids), counts_top32].
+    print("STEP assemble item_attrs_wide", flush=True)
+    wide_remap = pl.DataFrame(
+        {"name": wide_names, "shelf_id": list(range(len(wide_names)))},
+        schema={"name": pl.Utf8, "shelf_id": pl.Int64},
+    )
+    work_shelf_ids = (
+        work_shelf.join(wide_remap, on="name", how="inner")
+        .group_by("item_id", maintain_order=True)
+        .agg(pl.col("shelf_id").head(WIDE_BAG_SIZE).alias("shelf_ids"))
+    )
+    wide_t = torch.full((n_items + 1, 1, WIDE_BAG_SIZE), -1, dtype=torch.long)
+    wide_cov = 0
+    wide_bag_size_hist = [0] * (WIDE_BAG_SIZE + 1)
+    for row in work_shelf_ids.iter_rows(named=True):
+        item_id = int(row["item_id"])
+        ids = row["shelf_ids"] or []
+        bag = ids[:WIDE_BAG_SIZE]
+        if bag:
+            wide_cov += 1
+        wide_bag_size_hist[min(len(bag), WIDE_BAG_SIZE)] += 1
+        for j, v in enumerate(bag):
+            wide_t[item_id, 0, j] = int(v)
+    log["wide_coverage"] = round(wide_cov / max(n_items, 1), 4)
+    log["wide_bag_size_hist"] = wide_bag_size_hist
+    print(
+        f"  wide coverage = {log['wide_coverage']}; "
+        f"avg bag size = "
+        f"{sum(i * c for i, c in enumerate(wide_bag_size_hist)) / max(n_items, 1):.1f}",
+        flush=True,
+    )
+
+    torch.save(wide_t, output / "item_attrs_wide.pt")
+    print(f"  wrote item_attrs_wide.pt {tuple(wide_t.shape)}", flush=True)
+
+    # ---- eval_split.parquet -----------------------------------------------
+    print("STEP build eval_split.parquet (rare-biased wide sampling)", flush=True)
+    test_df = pl.read_parquet(test_path)
+    n_users = test_df.height
+    print(f"  test users: {n_users:,}", flush=True)
+
+    targets_lists = test_df["targets"].to_list()
+    target_first = [t[0] if t else 0 for t in targets_lists]
+
+    # query_attrs_narrow per user: first non-pad value of item_attrs_narrow[target, c, :]
+    qa_narrow = torch.full((n_users, C_NARROW), -1, dtype=torch.long)
+    for u, tgt in enumerate(target_first):
+        if tgt <= 0:
+            continue
+        for c in range(C_NARROW):
+            row = narrow_t[tgt, c]
+            for v in row.tolist():
+                if v != -1:
+                    qa_narrow[u, c] = v
+                    break
+
+    # wide sampling: per user, look at item_attrs_wide[target, 0, :], drop -1s.
+    # 1-shelf: bias ∝ 1/sqrt(global_freq). 2-shelf: one common (∝ sqrt(freq))
+    # + one rare (∝ 1/sqrt(freq)). Both -1 if drop conditions trip.
+    import numpy as _np
+
+    rng = _np.random.default_rng(args.seed)
+    wide_global_freq_np = _np.asarray(wide_counts, dtype=_np.int64)
+    qa_wide_1 = _np.full((n_users,), -1, dtype=_np.int64)
+    qa_wide_2 = _np.full((n_users, 2), -1, dtype=_np.int64)
+    n_drop_1 = 0
+    n_drop_2 = 0
+    wide_t_np = wide_t.numpy()
+    for u, tgt in enumerate(target_first):
+        if tgt <= 0:
+            n_drop_1 += 1
+            n_drop_2 += 1
+            continue
+        bag = wide_t_np[tgt, 0]
+        bag = bag[bag != -1]
+        if len(bag) == 0:
+            n_drop_1 += 1
+            n_drop_2 += 1
+            continue
+        freq = wide_global_freq_np[bag].astype(_np.float64)
+        # rare-bias for 1-shelf
+        w_rare = 1.0 / _np.sqrt(_np.maximum(freq, 1.0))
+        w_rare = w_rare / w_rare.sum()
+        qa_wide_1[u] = int(rng.choice(bag, p=w_rare))
+        # 2-shelf: only if bag has ≥ 2 distinct shelves
+        if len(bag) < 2:
+            n_drop_2 += 1
+            continue
+        w_common = _np.sqrt(freq)
+        w_common = w_common / w_common.sum()
+        common_idx = int(rng.choice(len(bag), p=w_common))
+        common_id = int(bag[common_idx])
+        # mask out the chosen common from the rare pool
+        rest = _np.array([i for i in range(len(bag)) if i != common_idx])
+        if len(rest) == 0:
+            n_drop_2 += 1
+            continue
+        w_rare2 = 1.0 / _np.sqrt(_np.maximum(freq[rest], 1.0))
+        w_rare2 = w_rare2 / w_rare2.sum()
+        rare_id = int(bag[rest[int(rng.choice(len(rest), p=w_rare2))]])
+        qa_wide_2[u, 0] = common_id
+        qa_wide_2[u, 1] = rare_id
+
+    log["eval_n_users"] = n_users
+    log["eval_drop_1shelf"] = int(n_drop_1)
+    log["eval_drop_2shelf"] = int(n_drop_2)
+    print(
+        f"  1-shelf drops = {n_drop_1:,} ({100 * n_drop_1 / max(n_users, 1):.1f}%); "
+        f"2-shelf drops = {n_drop_2:,} ({100 * n_drop_2 / max(n_users, 1):.1f}%)",
+        flush=True,
+    )
+
+    eval_split = pl.DataFrame(
+        {
+            "target_id": target_first,
+            "query_attrs_narrow": qa_narrow.tolist(),
+            "query_attrs_wide_1shelf": qa_wide_1.tolist(),
+            "query_attrs_wide_2shelf": qa_wide_2.tolist(),
+        },
+        schema={
+            "target_id": pl.Int64,
+            "query_attrs_narrow": pl.List(pl.Int64),
+            "query_attrs_wide_1shelf": pl.Int64,
+            "query_attrs_wide_2shelf": pl.List(pl.Int64),
+        },
+    )
+    eval_split.write_parquet(output / "eval_split.parquet", compression="zstd")
+    print(f"  wrote eval_split.parquet ({eval_split.height} rows)", flush=True)
+
+    # ---- log file ---------------------------------------------------------
+    log["wall_clock_sec"] = round(time.monotonic() - overall_t0, 1)
+    prep_log_path = output / "prep_log.json"
+    if prep_log_path.exists():
+        with open(prep_log_path) as f:
+            existing = json.load(f)
+        existing["attrs"] = log
+        with open(prep_log_path, "w") as f:
+            json.dump(existing, f, indent=2)
+    else:
+        with open(prep_log_path, "w") as f:
+            json.dump({"attrs": log}, f, indent=2)
+
+    print(
+        f"ALL DONE attrs in {log['wall_clock_sec']:.0f}s — narrow_cov={coverage} "
+        f"wide_cov={log['wide_coverage']} "
+        f"vocab(lang/fmt/auth/wide)="
+        f"{log['lang_vocab_size']}/{log['format_vocab_size']}/"
+        f"{log['author_vocab_size']}/{log['wide_vocab_size']}",
+        flush=True,
+    )
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Mirror the UCSD Goodreads dataset (download → parquet → trainer prep).",
@@ -712,6 +1400,32 @@ def main() -> int:
         help="subsample to 100k random users; output goes to <output-dir>-smoke/",
     )
     sp_pp.set_defaults(func=cmd_prep)
+
+    sp_at = sub.add_parser(
+        "attrs",
+        help="build narrow + wide attribute tensors + eval_split for the filter bench",
+    )
+    sp_at.add_argument(
+        "--processed-dir",
+        type=str,
+        required=True,
+        help="path to the directory `convert` wrote into (must contain "
+        "goodreads_books.parquet and goodreads_book_genres_initial.parquet)",
+    )
+    sp_at.add_argument(
+        "--output-dir",
+        type=str,
+        required=True,
+        help="same dir prep wrote into; reuses book_to_work.parquet, "
+        "item_id_map.json, test.parquet",
+    )
+    sp_at.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="rng seed for wide-eval shelf sampling",
+    )
+    sp_at.set_defaults(func=cmd_attrs)
 
     args = parser.parse_args()
     return args.func(args)

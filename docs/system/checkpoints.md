@@ -52,7 +52,7 @@ from training.model import GSASRec
 DATA_DIR = Path("data/yambda/500m-listens")
 CKPT_DIR = Path("checkpoints/gsasrec-500m-listens-d128-drop0.5")
 
-# num_items comes from the data dir's id map (saved by data/yambda.py).
+# num_items comes from the data dir's id map (written by scripts/prep_yambda.py).
 with open(DATA_DIR / "item_id_map.json") as f:
     num_items = len(json.load(f))
 
@@ -86,7 +86,10 @@ torch.save(item_embs, CKPT_DIR / "item_embs.pt")
 
 Use this tensor as the index for ANN search, dot-product retrieval, or
 clustering. The id mapping (dense_id → raw_yandex_id) is the
-`item_id_map.json` produced by `data/yambda.py`.
+`item_id_map.json` written by
+[`scripts/prep_yambda.py`](../../evaluation/scripts/prep_yambda.py)
+(the library function in `data/yambda.py` returns `Data.item_id_to_idx`
+in memory; the prep script persists it to disk alongside the parquets).
 
 ## Encoding a user history into a query
 
@@ -128,6 +131,12 @@ print(metrics)
 # {'ndcg@10': 0.0751, 'ndcg@100': 0.0946, 'recall@10': 0.0353,
 #  'recall@100': 0.1362, 'coverage@10': 0.0399, 'coverage@100': 0.1049}
 ```
+
+`evaluate()` also takes `num_workers=4` (DataLoader workers),
+`use_amp=True` (bf16 autocast on the forward pass), `max_users=None`
+(deterministic prefix subset, useful for quick iteration on the 5B
+catalog), and `score_chunk=262_144` (chunk size for the per-batch
+score matmul — drop it for OOM, raise it for throughput).
 
 For quick re-eval of an existing checkpoint without retraining, the smallest
 script is:

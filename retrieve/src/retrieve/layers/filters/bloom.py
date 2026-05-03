@@ -67,6 +67,23 @@ class BloomFilter(FilterModule):
         match = (qb.unsqueeze(1) & self.bloom_sigs.unsqueeze(0)) == qb.unsqueeze(1)
         return match.all(dim=-1)
 
+    def evaluate_indices(self, query_clause_attrs: Tensor) -> tuple[Tensor, Tensor]:
+        """Returns ``(positive_indices [B, P] int64, counts [B] int64)``.
+
+        On CUDA: routes to the fused ``bloom_compact`` Triton kernel — no
+        ``[B, N]`` bool intermediate ever materialized. On CPU: ABC default
+        (``compact_mask(self.evaluate_mask(qa))``). Output id order within a
+        row is unspecified (atomics) — callers that care must sort.
+        """
+        qb = self._build_query_sigs(query_clause_attrs)  # [B, W]
+        if qb.is_cuda:
+            from retrieve.kernels.triton.filters.bloom_compact import bloom_compact
+
+            return bloom_compact(qb, self.bloom_sigs)
+        from retrieve.layers.utils.compact import compact_mask
+
+        return compact_mask(self.evaluate_mask(query_clause_attrs))
+
     def evaluate_subset(
         self,
         query_clause_attrs: Tensor,

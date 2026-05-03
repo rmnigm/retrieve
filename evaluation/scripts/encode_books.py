@@ -66,6 +66,8 @@ from tqdm import tqdm
 )
 @click.option("--batch-size", type=int, default=256, show_default=True)
 @click.option("--device", type=str, default="cuda", show_default=True)
+@click.option("--num-workers", type=int, default=8, show_default=True,
+              help="DataLoader workers for parallel tokenization.")
 @click.option(
     "--output-name",
     type=str,
@@ -81,6 +83,7 @@ def main(
     description_chars: int,
     batch_size: int,
     device: str,
+    num_workers: int,
     output_name: str,
 ) -> None:
     data_path = Path(data_dir)
@@ -128,22 +131,63 @@ def main(
 
     text_emb = torch.zeros((num_items + 1, d_text), dtype=torch.float16)
 
-    encoded_ct = 0
-    for start in tqdm(range(0, len(texts), batch_size), desc="encode"):
-        chunk = texts[start : start + batch_size]
-        with torch.inference_mode():
-            embs = model.encode(
-                chunk,
-                batch_size=batch_size,
-                normalize_embeddings=True,
-                convert_to_tensor=True,
-                show_progress_bar=False,
+    # Length-sort for batch packing efficiency, then unsort at the end.
+    order = sorted(range(len(texts)), key=lambda i: len(texts[i]))
+    sorted_texts = [texts[i] for i in order]
+
+    tokenizer = model.tokenizer
+    max_seq_length = model.max_seq_length
+
+    class _TextDS(torch.utils.data.Dataset):
+        def __init__(self, items): self.items = items
+        def __len__(self): return len(self.items)
+        def __getitem__(self, i): return self.items[i]
+
+    def _collate(batch):
+        return tokenizer(
+            batch, padding=True, truncation=True,
+            max_length=max_seq_length, return_tensors="pt",
+        )
+
+    loader = torch.utils.data.DataLoader(
+        _TextDS(sorted_texts),
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=(device == "cuda"),
+        collate_fn=_collate,
+        persistent_workers=False,
+    )
+
+    model.to(device).eval()
+    autocast_dtype = torch.bfloat16 if device == "cuda" else torch.float32
+    sorted_embs = torch.zeros((len(texts), d_text), dtype=torch.float16)
+
+    pos = 0
+    for batch in tqdm(loader, total=len(loader), desc="encode"):
+        batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
+        with (
+            torch.inference_mode(),
+            torch.autocast(device_type=device, dtype=autocast_dtype,
+                           enabled=device == "cuda"),
+        ):
+            features = model(batch)
+            embs = torch.nn.functional.normalize(
+                features["sentence_embedding"], dim=-1,
             )
-        embs = embs.detach().to(dtype=torch.float16, device="cpu")
-        for i, work_id in enumerate(work_ids[start : start + batch_size]):
-            row = item_id_map[work_id]
-            text_emb[row] = embs[i]
-            encoded_ct += 1
+        n = embs.shape[0]
+        sorted_embs[pos : pos + n] = embs.detach().to(dtype=torch.float16, device="cpu")
+        pos += n
+
+    # Unsort: row at original index `order[k]` should hold sorted_embs[k].
+    order_t = torch.tensor(order, dtype=torch.long)
+    text_emb_local = torch.empty_like(sorted_embs)
+    text_emb_local[order_t] = sorted_embs
+
+    encoded_ct = 0
+    for i, work_id in enumerate(work_ids):
+        text_emb[item_id_map[work_id]] = text_emb_local[i]
+        encoded_ct += 1
 
     num_missing = num_items - encoded_ct
 

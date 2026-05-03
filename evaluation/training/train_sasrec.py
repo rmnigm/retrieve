@@ -66,15 +66,17 @@ def train(config: GSASRecConfig, resume: bool = False) -> None:
 
         text_emb = torch.load(config.text_embedding_path, map_location="cpu")
         logger.info(
-            "Using content embeddings from {} (shape={}, tie_output={})",
+            "Using content embeddings from {} (shape={}, tie_output={}, proj_type={})",
             config.text_embedding_path,
             tuple(text_emb.shape),
             config.tie_content_output,
+            config.content_proj_type,
         )
         model = GSASRecContent(
             num_items=num_items,
             text_emb=text_emb,
             tie_content_output=config.tie_content_output,
+            content_proj_type=config.content_proj_type,
             max_seq_length=config.max_seq_length,
             embedding_dim=config.embedding_dim,
             num_heads=config.num_heads,

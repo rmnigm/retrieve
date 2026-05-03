@@ -3,6 +3,13 @@
 Boring dataclass + ``yaml.safe_load``. No env-var interpolation, no schema
 versioning, no validation framework — bad keys raise ``TypeError`` from the
 dataclass constructor with a useful message.
+
+The optional ``filters:`` block (used only by `eval_goodreads_retrieval.py`)
+mirrors the bench design in
+[goodreads-filter-eval.md](../../docs/plans/goodreads-filter-eval.md):
+each ``filter_kind ∈ {none, clause, bloom, combined}`` lists one or more
+named ``sweeps``, plus the paths to the on-disk attribute tensors. The
+yambda harness ignores the field entirely.
 """
 
 from __future__ import annotations
@@ -22,6 +29,44 @@ class EncodeConfig:
 
 
 @dataclass
+class FilterSweepCfg:
+    """One filter sweep (a named active-clause set or a wide-shelf field)."""
+
+    name: str
+    # narrow sweeps: which clauses to activate (others passed through as -1).
+    active_clauses: list[int] | None = None
+    # wide sweeps: name of the eval_split.parquet column carrying the
+    # per-user wide query attributes (e.g. ``query_attrs_wide_1shelf``).
+    query_attrs_field: str | None = None
+
+
+@dataclass
+class FilterCfg:
+    """Configuration for one filter_kind."""
+
+    sweeps: list[FilterSweepCfg] = field(default_factory=list)
+    # narrow / clause: path to item_attrs_narrow.pt
+    attrs_path: str | None = None
+    # combined: narrow + wide paths
+    attrs_narrow: str | None = None
+    attrs_wide: str | None = None
+    # narrow / combined: path to clause_is_reverse_narrow.pt
+    reverse_path: str | None = None
+    # bloom params (used by `bloom` and `combined` to instantiate BloomFilter)
+    m_bits: int = 1024
+    k_hash: int = 5
+
+
+def _filter_cfg_from_dict(d: dict[str, Any]) -> FilterCfg:
+    """Build a FilterCfg from a YAML dict; sweeps are upgraded from bare
+    dicts to FilterSweepCfg dataclasses so downstream consumers don't have
+    to re-parse."""
+    raw_sweeps = d.pop("sweeps", []) or []
+    sweeps = [FilterSweepCfg(**s) for s in raw_sweeps]
+    return FilterCfg(sweeps=sweeps, **d)
+
+
+@dataclass
 class EvalConfig:
     checkpoint: str
     data_dir: str
@@ -34,6 +79,8 @@ class EvalConfig:
     encode: EncodeConfig = field(default_factory=EncodeConfig)
     algorithms: list[str] = field(default_factory=list)
     algo_params: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Optional filter-bench block; consumed only by eval_goodreads_retrieval.py.
+    filters: dict[str, FilterCfg] | None = None
 
 
 def load_eval_config(path: Path) -> EvalConfig:
@@ -43,4 +90,8 @@ def load_eval_config(path: Path) -> EvalConfig:
     # top level after parsing; drop them before constructing the dataclass.
     raw = {k: v for k, v in raw.items() if not k.startswith("_")}
     encode = EncodeConfig(**(raw.pop("encode", None) or {}))
-    return EvalConfig(encode=encode, **raw)
+    raw_filters = raw.pop("filters", None)
+    filters: dict[str, FilterCfg] | None = None
+    if raw_filters is not None:
+        filters = {kind: _filter_cfg_from_dict(dict(d)) for kind, d in raw_filters.items()}
+    return EvalConfig(encode=encode, filters=filters, **raw)

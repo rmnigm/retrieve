@@ -1,0 +1,53 @@
+_defaults: &defaults
+  data_dir: data/goodreads/work-id
+  output: null
+  split: test
+  device: cuda
+  ks: [10, 100, 500]
+  batch_sizes: [1, 8, 16]
+  seed: 0
+  encode:
+    batch_size: 512
+    num_workers: 8
+    max_seq_length: 200
+  algorithms:
+    - torch_fullscan
+    - linr_v3_then_v2
+    - silvertorch
+  algo_params:
+    linr_v3_then_v2: {candidate_pool: 8000, v3_seed: 0}
+    silvertorch:     {n_lists: 1024, n_probe: 24, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}
+  filters:
+    none:
+      sweeps:
+        - {name: full_scan}
+    clause:
+      attrs_path:    data/goodreads/work-id/item_attrs_narrow.pt
+      reverse_path:  data/goodreads/work-id/clause_is_reverse_narrow.pt
+      sweeps:
+        - {name: c0_genre,        active_clauses: [0]}
+        - {name: c1_lang_reverse, active_clauses: [1]}
+        - {name: c3_year,         active_clauses: [3]}
+        - {name: c0c1,            active_clauses: [0, 1]}
+        - {name: c0c3,            active_clauses: [0, 3]}
+        - {name: c0c4_author,     active_clauses: [0, 4]}
+        - {name: all5,            active_clauses: [0, 1, 2, 3, 4]}
+    bloom:
+      attrs_path:   data/goodreads/work-id/item_attrs_wide.pt
+      reverse_path: null
+      m_bits: 1024
+      k_hash: 5
+      sweeps:
+        - {name: '1shelf', query_attrs_field: query_attrs_wide_1shelf}
+        - {name: '2shelf', query_attrs_field: query_attrs_wide_2shelf}
+    combined:
+      attrs_narrow: data/goodreads/work-id/item_attrs_narrow.pt
+      attrs_wide:   data/goodreads/work-id/item_attrs_wide.pt
+      reverse_path: data/goodreads/work-id/clause_is_reverse_narrow.pt
+      m_bits: 1024
+      k_hash: 5
+      sweeps:
+        - {name: c0_genre_x_1shelf, active_clauses: [0], query_attrs_field: query_attrs_wide_1shelf}
+
+<<: *defaults
+checkpoint: checkpoints/goodreads-gsasrec-d64-drop0.5/best_model.pt

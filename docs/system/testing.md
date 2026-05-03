@@ -87,6 +87,15 @@ Three evaluation helpers:
 - `assert_recall_monotone(recalls, *, slack=0.02)` — non-decreasing
   check with absolute slack; used to verify ANN recall grows with
   `n_probe`.
+- `assert_topk_id_sets_match(out_ids, out_scores, ref_ids, ref_scores,
+  b, *, atol=1e-3, rtol=1e-3)` — per-row id-set comparison with tie
+  tolerance at the K-th boundary. Used from the **correctness** tree
+  (e.g. `test_linr.py`) when comparing two retrieval calls (typically
+  torch backend vs Triton backend) on a specific row; symmetric-
+  difference ids must lie within `atol` of their side's finite-score
+  minimum, which absorbs the tiebreak flip caused by `tl.dot` vs torch
+  `@` accumulator-order drift. The parity tree's `assert_topk_matches`
+  is the all-rows analogue.
 
 The CUDA gate is implemented as
 `pytest_collection_modifyitems` — every collected item gets a

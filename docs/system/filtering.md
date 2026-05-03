@@ -44,10 +44,10 @@ boolean composition.
 | component | path | notes |
 |---|---|---|
 | `FilterModule` ABC | [interfaces.py](../../retrieve/src/retrieve/interfaces.py) | three native paths: `evaluate_mask`, `evaluate_indices`, `evaluate_subset`; `forward` aliases `evaluate_mask` |
-| `ClauseIndex` (exact, supports reverse) | [layers/filters/clause.py](../../retrieve/src/retrieve/layers/filters/clause.py) | `FilterModule` subclass; native `evaluate_indices` via fused kernel; `evaluate_subset` via gather + broadcast |
-| `BloomFilter` (approximate, conjunctive) | [layers/filters/bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py) | `FilterModule` subclass; paper-strict (no reverse, no DSL); native `evaluate_mask` via `bloom_match` kernel; `evaluate_subset` via gathered subset test |
-| LiNR clause Triton kernel | [kernels/triton/filters/clause_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py) | fused eval + stream compaction; consumed by `ClauseIndex.evaluate_indices` on CUDA |
-| Bloom Triton kernel | [kernels/triton/silvertorch/bloom_match.py](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py) | `(qb & sigs) == qb` → `[B, N]` bool; consumed by `BloomFilter.evaluate_mask` on CUDA |
+| `ClauseIndex` (exact, supports reverse) | [layers/filters/clause.py](../../retrieve/src/retrieve/layers/filters/clause.py) | `FilterModule` subclass; native `evaluate_mask` via `clause_mask` kernel; native `evaluate_indices` via `clause_compact` kernel; `evaluate_subset` via gather + broadcast |
+| `BloomFilter` (approximate, conjunctive) | [layers/filters/bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py) | `FilterModule` subclass; paper-strict (no reverse, no DSL); native `evaluate_mask` via `bloom_match` kernel; native `evaluate_indices` via `bloom_compact` kernel; `evaluate_subset` via gathered subset test |
+| LiNR clause Triton kernels | [kernels/triton/filters/clause_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py), [clause_mask.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_mask.py) | fused eval + stream compaction (compact); fused eval emitting `[B, N]` bool (mask). No `[B, N, C, A_max]` intermediate either way |
+| Bloom Triton kernels | [kernels/triton/silvertorch/bloom_match.py](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py), [kernels/triton/filters/bloom_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py) | `(qb & sigs) == qb` → `[B, N]` bool (match); fused subset-test + stream compaction (compact). Consumed by `BloomFilter.evaluate_mask` / `evaluate_indices` on CUDA |
 | Bloom fused into score kernel | [kernels/triton/silvertorch/codesigned_probe_score.py](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py) | conjunctive only (single `QB`), part of co-designed Algorithm 1; **separate path** from `BloomFilter` |
 | `combine_masks` / `combine_indices` | [layers/filters/__init__.py](../../retrieve/src/retrieve/layers/filters/__init__.py) | mask-AND composition; sparse cascade via `evaluate_subset` |
 
@@ -102,7 +102,3 @@ ids, scores = linr_v2(query, candidate_ids=cand_ids, counts=counts)
   are equality-on-int64-hash.
 - Replacing Bloom with `ClauseIndex` inside `codesigned_probe_score` —
   would require a new fused kernel, not a wrapping.
-- A fused `bloom_compact` Triton kernel for `BloomFilter.evaluate_indices`
-  — first cut uses the ABC default (`compact_mask(evaluate_mask)`); add
-  the fused kernel only if profiling shows the compact pass is the
-  bottleneck.
