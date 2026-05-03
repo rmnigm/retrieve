@@ -36,6 +36,9 @@ class ContentItemEmbedding(nn.Module):
                 nn.Linear(d_in, d_hidden, bias=True),
                 nn.GELU(),
                 nn.Linear(d_hidden, embedding_dim, bias=False),
+                # affine=False: normalize the rep without learning a scale
+                # that fights the gBCE dot-product objective.
+                nn.LayerNorm(embedding_dim, elementwise_affine=False),
             )
         else:
             raise ValueError(f"Unknown proj_type: {proj_type!r}")
