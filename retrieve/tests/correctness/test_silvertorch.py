@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve import ClauseIndex
+from retrieve import ExactAttributeFilter
 from retrieve.layers.filters import BloomFilter
 from retrieve.layers.silvertorch import SilverTorch, build_silvertorch
 from retrieve.layers.utils.retrieval import FullScanKNN
@@ -154,7 +154,7 @@ class TestMask:
 
     def test_clause_index_composed_externally(self, data):
         attrs = make_attrs(N, c=1, a_max=1, n_vocab=10)
-        ci = ClauseIndex()
+        ci = ExactAttributeFilter()
         ci.register_index(attrs)
         m = _build_no_bloom(data, n_probe=N_LISTS)
         q_attrs = torch.full((B, 1), 1, dtype=torch.long, device="cuda")

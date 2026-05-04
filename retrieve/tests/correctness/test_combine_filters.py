@@ -6,7 +6,7 @@ import torch
 
 from retrieve.layers.filters import (
     BloomFilter,
-    ClauseIndex,
+    ExactAttributeFilter,
     combine_indices,
     combine_masks,
 )
@@ -16,7 +16,7 @@ from tests.conftest import make_attrs, make_query_attrs
 
 def _mk_filters(n=512, c=2, a_max=3, n_vocab=80, pad_rate=0.2, seed=0):
     attrs = make_attrs(n, c=c, a_max=a_max, n_vocab=n_vocab, pad_rate=pad_rate, seed=seed)
-    ci = ClauseIndex().to("cuda")
+    ci = ExactAttributeFilter().to("cuda")
     ci.register_index(attrs)
     bf = BloomFilter(m_bits=2048, k_hash=7).to("cuda")
     bf.register_index(attrs)
@@ -82,7 +82,7 @@ def test_combine_indices_empty_intermediate():
     """If the first filter passes nothing for any row, the cascade short-circuits."""
     n, c = 256, 2
     attrs = torch.full((n, c, 1), 7, dtype=torch.long, device="cuda")
-    ci = ClauseIndex().to("cuda")
+    ci = ExactAttributeFilter().to("cuda")
     ci.register_index(attrs)
     bf = BloomFilter(m_bits=512, k_hash=5).to("cuda")
     bf.register_index(attrs)
@@ -137,7 +137,7 @@ def test_combine_indices_subsequent_filter_drains():
     """First filter passes some items; second filter rejects them all → empty out."""
     n, c = 256, 2
     attrs = torch.full((n, c, 1), 7, dtype=torch.long, device="cuda")
-    ci = ClauseIndex().to("cuda")
+    ci = ExactAttributeFilter().to("cuda")
     ci.register_index(attrs)
     bf = BloomFilter(m_bits=512, k_hash=5).to("cuda")
     bf.register_index(attrs)

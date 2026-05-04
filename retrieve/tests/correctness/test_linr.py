@@ -1,4 +1,5 @@
-"""LiNR correctness — V1, V2, V3 in both torch and Triton backends.
+"""LiNR correctness — SimilarityMasking / PrefilterKNN / OneBitKNN in both
+torch and Triton backends.
 
 Fixture sizes mirror the LinR paper's small evaluation slice (D=128,
 batch=16, K=200) at a smaller N so the suite stays interactive on a single
@@ -10,14 +11,13 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.layers.filters import ClauseIndex
-from retrieve.layers.linr.builder import build_linr_index
-from retrieve.layers.linr.v1 import LiNR_V1
-from retrieve.layers.linr.v1_triton import LiNR_V1_Triton
-from retrieve.layers.linr.v2 import LiNR_V2
-from retrieve.layers.linr.v2_triton import LiNR_V2_Triton
-from retrieve.layers.linr.v3 import LiNR_V3
-from retrieve.layers.linr.v3_triton import LiNR_V3_Triton
+from retrieve.layers.filters import ExactAttributeFilter
+from retrieve.layers.linr.one_bit_knn import OneBitKNN
+from retrieve.layers.linr.one_bit_knn_triton import OneBitKNNTriton
+from retrieve.layers.linr.prefilter_knn import PrefilterKNN
+from retrieve.layers.linr.prefilter_knn_triton import PrefilterKNNTriton
+from retrieve.layers.linr.similarity_masking import SimilarityMasking
+from retrieve.layers.linr.similarity_masking_triton import SimilarityMaskingTriton
 from retrieve.layers.utils.compact import compact_mask
 from retrieve.layers.utils.retrieval import FullScanKNN
 from tests.conftest import (
@@ -40,12 +40,12 @@ def data():
 
 
 # ---------------------------------------------------------------------------
-# V1: full matmul + topk (mask-based filtering only)
+# SimilarityMasking: full matmul + topk (mask-based filtering only)
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("cls", [LiNR_V1, LiNR_V1_Triton])
-class TestLiNR_V1:
+@pytest.mark.parametrize("cls", [SimilarityMasking, SimilarityMaskingTriton])
+class TestSimilarityMasking:
     def test_no_mask_returns_topk(self, data, cls):
         m = cls(k=K)
         m.register_index(data["embs"])
@@ -66,12 +66,12 @@ class TestLiNR_V1:
 
 
 # ---------------------------------------------------------------------------
-# V2: pre-filter via candidate_ids + scoped topk
+# PrefilterKNN: pre-filter via candidate_ids + scoped topk
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("cls", [LiNR_V2, LiNR_V2_Triton])
-class TestLiNR_V2:
+@pytest.mark.parametrize("cls", [PrefilterKNN, PrefilterKNNTriton])
+class TestPrefilterKNN:
     def test_no_candidates_full_path(self, data, cls):
         m = cls(k=K)
         m.register_index(data["embs"])
@@ -111,10 +111,10 @@ class TestLiNR_V2:
 
 class TestCrossBackendAgreement:
     @pytest.mark.parametrize("pass_rate", [0.01, 0.1, 0.8])
-    def test_v2_torch_matches_v2_triton(self, data, pass_rate):
-        ref = LiNR_V2(k=K)
+    def test_prefilter_torch_matches_prefilter_triton(self, data, pass_rate):
+        ref = PrefilterKNN(k=K)
         ref.register_index(data["embs"])
-        tri = LiNR_V2_Triton(k=K)
+        tri = PrefilterKNNTriton(k=K)
         tri.register_index(data["embs"])
         mask = make_mask(B, N, pass_rate=pass_rate)
         cand, counts = compact_mask(mask)
@@ -124,11 +124,11 @@ class TestCrossBackendAgreement:
             assert_topk_id_sets_match(ids_tri, sc_tri, ids_ref, sc_ref, b)
 
     @pytest.mark.parametrize("mask_pass_rate", [None, 0.01, 0.1, 0.8])
-    def test_v3_torch_matches_v3_triton(self, data, mask_pass_rate):
-        """V3 torch and Triton must produce identical bits → identical top-K."""
-        ref = LiNR_V3(k=K, seed=11)
+    def test_one_bit_torch_matches_one_bit_triton(self, data, mask_pass_rate):
+        """OneBitKNN torch and Triton must produce identical bits → identical top-K."""
+        ref = OneBitKNN(k=K, seed=11)
         ref.register_index(data["embs"])
-        tri = LiNR_V3_Triton(k=K, seed=11)
+        tri = OneBitKNNTriton(k=K, seed=11)
         tri.register_index(data["embs"])
         mask = None if mask_pass_rate is None else make_mask(B, N, pass_rate=mask_pass_rate)
         ids_ref, sc_ref = ref(data["query"], mask=mask)
@@ -137,27 +137,27 @@ class TestCrossBackendAgreement:
             assert_topk_id_sets_match(ids_tri, sc_tri, ids_ref, sc_ref, b)
 
     @pytest.mark.parametrize("pass_rate", [0.01, 0.1, 0.8])
-    def test_v1_matches_v2_topk_set(self, data, pass_rate):
-        """V1 (mask) and V2 (candidate_ids of same passing set) return the same top-K."""
-        v1 = LiNR_V1(k=K)
-        v1.register_index(data["embs"])
-        v2 = LiNR_V2(k=K)
-        v2.register_index(data["embs"])
+    def test_similarity_masking_matches_prefilter_topk_set(self, data, pass_rate):
+        """Mask-based path and candidate_ids path on the same passing set → same top-K."""
+        sm = SimilarityMasking(k=K)
+        sm.register_index(data["embs"])
+        pf = PrefilterKNN(k=K)
+        pf.register_index(data["embs"])
         mask = make_mask(B, N, pass_rate=pass_rate)
         cand, counts = compact_mask(mask)
-        ids1, sc1 = v1(data["query"], mask=mask)
-        ids2, sc2 = v2(data["query"], candidate_ids=cand, counts=counts)
+        ids1, sc1 = sm(data["query"], mask=mask)
+        ids2, sc2 = pf(data["query"], candidate_ids=cand, counts=counts)
         for b in range(B):
             assert_topk_id_sets_match(ids2, sc2, ids1, sc1, b)
 
 
 # ---------------------------------------------------------------------------
-# V3: 1-bit Sign-OPORP scoring.
+# OneBitKNN: 1-bit Sign-OPORP scoring.
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("cls", [LiNR_V3, LiNR_V3_Triton])
-class TestLiNR_V3:
+@pytest.mark.parametrize("cls", [OneBitKNN, OneBitKNNTriton])
+class TestOneBitKNN:
     def test_full_scan_topk_recall_against_exact(self, data, cls):
         m = cls(k=K)
         m.register_index(data["embs"])
@@ -168,7 +168,7 @@ class TestLiNR_V3:
         ex_ids, _ = exact(data["query"])
 
         recall = recall_at_k(ids, ex_ids)
-        assert recall >= 0.4, f"V3 recall@{K} = {recall:.3f}"
+        assert recall >= 0.4, f"OneBitKNN recall@{K} = {recall:.3f}"
 
     def test_candidate_ids_subset(self, data, cls):
         m = cls(k=8)
@@ -185,29 +185,7 @@ class TestLiNR_V3:
 
 
 # ---------------------------------------------------------------------------
-# Builder
-# ---------------------------------------------------------------------------
-
-
-class TestBuilder:
-    @pytest.mark.parametrize("version", [1, 2, 3])
-    @pytest.mark.parametrize("backend", ["torch", "triton"])
-    def test_builds(self, data, version, backend):
-        m = build_linr_index(version, data["embs"], K, backend=backend)
-        ids, _ = m(data["query"])
-        assert ids.shape == (B, K)
-
-    def test_invalid_version(self, data):
-        with pytest.raises(ValueError, match="Unknown LiNR version"):
-            build_linr_index(4, data["embs"], K)
-
-    def test_invalid_backend(self, data):
-        with pytest.raises(ValueError, match="Unknown backend"):
-            build_linr_index(1, data["embs"], K, backend="cuda")  # type: ignore[arg-type]
-
-
-# ---------------------------------------------------------------------------
-# Decoupled clause filter: caller composes ClauseIndex with retriever.
+# Decoupled clause filter: caller composes ExactAttributeFilter with retriever.
 # ---------------------------------------------------------------------------
 
 
@@ -216,14 +194,14 @@ class TestClauseDecoupledComposition:
         attrs = make_attrs(N, c=2, a_max=2, n_vocab=20)
         q_attrs = torch.full((B, 2), 5, dtype=torch.long, device="cuda")
         extra_mask = make_mask(B, N, pass_rate=0.3, seed=42)
-        ci = ClauseIndex()
-        ci.register_index(attrs)
-        return ci, q_attrs, extra_mask
+        f = ExactAttributeFilter()
+        f.register_index(attrs)
+        return f, q_attrs, extra_mask
 
-    @pytest.mark.parametrize("cls", [LiNR_V1, LiNR_V1_Triton])
-    def test_v1_with_clause_and_external_mask(self, data, cls):
-        ci, q_attrs, extra = self._setup()
-        mask = ci.evaluate_mask(q_attrs) & extra
+    @pytest.mark.parametrize("cls", [SimilarityMasking, SimilarityMaskingTriton])
+    def test_similarity_masking_with_clause_and_external_mask(self, data, cls):
+        f, q_attrs, extra = self._setup()
+        mask = f.evaluate_mask(q_attrs) & extra
         m = cls(k=K)
         m.register_index(data["embs"])
         ids, scores = m(data["query"], mask=mask)
@@ -231,12 +209,12 @@ class TestClauseDecoupledComposition:
             valid = torch.isfinite(scores[b]) & (ids[b] >= 0)
             assert mask[b, ids[b][valid]].all()
 
-    @pytest.mark.parametrize("cls", [LiNR_V2, LiNR_V2_Triton])
-    def test_v2_with_clause_via_evaluate_indices(self, data, cls):
-        ci, q_attrs, extra = self._setup()
+    @pytest.mark.parametrize("cls", [PrefilterKNN, PrefilterKNNTriton])
+    def test_prefilter_with_clause_via_evaluate_indices(self, data, cls):
+        f, q_attrs, extra = self._setup()
         # When combining with an external mask, just AND the two masks first
         # then compact (callers compose explicitly).
-        combined = ci.evaluate_mask(q_attrs) & extra
+        combined = f.evaluate_mask(q_attrs) & extra
         cand, counts = compact_mask(combined)
         m = cls(k=K)
         m.register_index(data["embs"])
@@ -245,13 +223,13 @@ class TestClauseDecoupledComposition:
             valid = torch.isfinite(scores[b]) & (ids[b] >= 0)
             assert combined[b, ids[b][valid]].all()
 
-    @pytest.mark.parametrize("cls", [LiNR_V2, LiNR_V2_Triton])
-    def test_v2_with_evaluate_indices_kernel_path(self, data, cls):
-        """Direct fused-kernel path: ClauseIndex.evaluate_indices → V2."""
-        ci, q_attrs, _ = self._setup()
-        cand, counts = ci.evaluate_indices(q_attrs)
+    @pytest.mark.parametrize("cls", [PrefilterKNN, PrefilterKNNTriton])
+    def test_prefilter_with_evaluate_indices_kernel_path(self, data, cls):
+        """Direct fused-kernel path: ExactAttributeFilter.evaluate_indices → PrefilterKNN."""
+        f, q_attrs, _ = self._setup()
+        cand, counts = f.evaluate_indices(q_attrs)
         # Cross-check against the dense path.
-        expected_mask = ci.evaluate_mask(q_attrs)
+        expected_mask = f.evaluate_mask(q_attrs)
         m = cls(k=K)
         m.register_index(data["embs"])
         ids, scores = m(data["query"], candidate_ids=cand, counts=counts)
@@ -266,7 +244,10 @@ class TestClauseDecoupledComposition:
 
 
 class TestEdgeCases:
-    @pytest.mark.parametrize("cls", [LiNR_V1, LiNR_V1_Triton, LiNR_V3, LiNR_V3_Triton])
+    @pytest.mark.parametrize(
+        "cls",
+        [SimilarityMasking, SimilarityMaskingTriton, OneBitKNN, OneBitKNNTriton],
+    )
     def test_mask_all_true_equals_unmasked(self, data, cls):
         """All-True mask path returns the same top-K id set as the unmasked path."""
         m = cls(k=K)
@@ -277,7 +258,10 @@ class TestEdgeCases:
         for b in range(B):
             assert_topk_id_sets_match(ids_masked, sc_masked, ids_no_mask, sc_no_mask, b)
 
-    @pytest.mark.parametrize("cls", [LiNR_V1, LiNR_V1_Triton, LiNR_V3, LiNR_V3_Triton])
+    @pytest.mark.parametrize(
+        "cls",
+        [SimilarityMasking, SimilarityMaskingTriton, OneBitKNN, OneBitKNNTriton],
+    )
     def test_mask_all_false_returns_no_finite_scores(self, data, cls):
         """All-False mask → every score is -inf; no valid (finite-score) result."""
         m = cls(k=K)
@@ -286,8 +270,8 @@ class TestEdgeCases:
         _, scores = m(data["query"], mask=all_false)
         assert not torch.isfinite(scores).any()
 
-    @pytest.mark.parametrize("cls", [LiNR_V2, LiNR_V2_Triton])
-    def test_v2_candidate_ids_p_zero(self, data, cls):
+    @pytest.mark.parametrize("cls", [PrefilterKNN, PrefilterKNNTriton])
+    def test_prefilter_candidate_ids_p_zero(self, data, cls):
         """``candidate_ids`` with shape [B, 0] → all-padding return."""
         m = cls(k=K)
         m.register_index(data["embs"])
@@ -297,7 +281,7 @@ class TestEdgeCases:
         assert (ids == -1).all()
         assert not torch.isfinite(scores).any()
 
-    @pytest.mark.parametrize("cls", [LiNR_V1, LiNR_V1_Triton])
+    @pytest.mark.parametrize("cls", [SimilarityMasking, SimilarityMaskingTriton])
     def test_b_one(self, data, cls):
         """Single-query batch — Triton tile-parallel path masks padded rows."""
         m = cls(k=K)
@@ -307,13 +291,13 @@ class TestEdgeCases:
         assert ids.shape == (1, K)
         assert torch.isfinite(scores).all()
         # Returned ids must match a torch reference top-K. Tensor-core matmul
-        # in V1_Triton differs from torch `@` in fp accumulator order, so allow
-        # boundary-tied ids to swap (scores within atol of the K-th score).
+        # in the Triton path differs from torch ``@`` in fp accumulator order,
+        # so allow boundary-tied ids to swap (scores within atol of the K-th).
         ref_full = q @ data["embs"].t()
         ref_scores, ref_ids = torch.topk(ref_full, K, dim=1)
         assert_topk_id_sets_match(ids, scores, ref_ids, ref_scores, 0)
 
-    @pytest.mark.parametrize("cls", [LiNR_V1, LiNR_V1_Triton])
+    @pytest.mark.parametrize("cls", [SimilarityMasking, SimilarityMaskingTriton])
     def test_k_equals_n(self, data, cls):
         """K=N — every item returned, no padding, scores still descending."""
         m = cls(k=N)

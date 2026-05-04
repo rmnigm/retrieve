@@ -7,9 +7,9 @@ dataclass constructor with a useful message.
 The optional ``filters:`` block (used only by `eval_goodreads_retrieval.py`)
 mirrors the bench design in
 [goodreads-filter-eval.md](../../docs/plans/goodreads-filter-eval.md):
-each ``filter_kind ∈ {none, clause, bloom, combined}`` lists one or more
-named ``sweeps``, plus the paths to the on-disk attribute tensors. The
-yambda harness ignores the field entirely.
+each ``filter_kind ∈ {none, clause, bloom}`` lists one or more named
+``sweeps``, plus the paths to the on-disk attribute tensors. The yambda
+harness ignores the field entirely.
 """
 
 from __future__ import annotations
@@ -30,14 +30,12 @@ class EncodeConfig:
 
 @dataclass
 class FilterSweepCfg:
-    """One filter sweep (a named active-clause set or a wide-shelf field)."""
+    """One filter sweep — a named subset of active narrow clauses."""
 
     name: str
-    # narrow sweeps: which clauses to activate (others passed through as -1).
+    # Which clauses to activate (others passed through as -1, treated as
+    # "always pass" by ExactAttributeFilter / "no bits queried" by BloomFilter).
     active_clauses: list[int] | None = None
-    # wide sweeps: name of the eval_split.parquet column carrying the
-    # per-user wide query attributes (e.g. ``query_attrs_wide_1shelf``).
-    query_attrs_field: str | None = None
 
 
 @dataclass
@@ -45,14 +43,12 @@ class FilterCfg:
     """Configuration for one filter_kind."""
 
     sweeps: list[FilterSweepCfg] = field(default_factory=list)
-    # narrow / clause: path to item_attrs_narrow.pt
+    # narrow / clause: path to item_attrs_narrow.pt OR
+    # bloom: path to item_attrs_wide.pt
     attrs_path: str | None = None
-    # combined: narrow + wide paths
-    attrs_narrow: str | None = None
-    attrs_wide: str | None = None
-    # narrow / combined: path to clause_is_reverse_narrow.pt
+    # narrow only: path to clause_is_reverse_narrow.pt
     reverse_path: str | None = None
-    # bloom params (used by `bloom` and `combined` to instantiate BloomFilter)
+    # bloom params
     m_bits: int = 1024
     k_hash: int = 5
 
@@ -87,6 +83,11 @@ class EvalConfig:
     # Optional filter-bench block; consumed by eval_goodreads_retrieval.py and
     # eval_arxiv_retrieval.py.
     filters: dict[str, FilterCfg] | None = None
+    # Optional cap on the number of users for filter sweeps only (the
+    # unfiltered `none/full_scan` cell still uses all users). Goodreads has
+    # 313k test users which makes the bs=1 quality stream the wall-clock
+    # bottleneck; arxiv only has 10k so leave this null there.
+    filter_users_limit: int | None = None
 
 
 def load_eval_config(path: Path) -> EvalConfig:

@@ -1,0 +1,47 @@
+_defaults: &defaults
+  data_dir: data/arxiv/papers
+  # No `checkpoint:` field — arxiv has no SASRec model; queries come from
+  # data/arxiv/papers/content/query_emb.pt (built by `arxiv.py encode_queries`).
+  output: null
+  split: test
+  device: cuda
+  ks: [10, 100, 500]
+  batch_sizes: [1, 8, 16]
+  seed: 0
+
+  algorithms:
+    - linr_v1_filter_mask
+    - linr_v3
+    - silvertorch          # auto-skipped on filter_kind=clause; runs on bloom sweeps only
+
+  algo_params:
+    linr_v3: {candidate_pool: 12000, v3_seed: 0}
+    silvertorch:     {n_lists: 1664, n_probe: 32, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}
+
+  filters:
+    clause:
+      attrs_path:    data/arxiv/papers/item_attrs_narrow.pt
+      reverse_path:  data/arxiv/papers/clause_is_reverse_narrow.pt
+      sweeps:
+        - {name: c0_maincat,    active_clauses: [0]}
+        - {name: c2_year,       active_clauses: [2]}
+        - {name: c3_nversions,  active_clauses: [3]}
+        - {name: c0c2,          active_clauses: [0, 2]}
+        - {name: all4,          active_clauses: [0, 1, 2, 3]}
+    bloom:
+      # Bloom over the SAME narrow attrs as the clause sweeps — paper-strict
+      # set-membership approximation of the exact-equality predicate.
+      # All arxiv clauses are forward (no reverse), so every active set is
+      # bloom-eligible.
+      attrs_path:   data/arxiv/papers/item_attrs_narrow.pt
+      reverse_path: data/arxiv/papers/clause_is_reverse_narrow.pt
+      m_bits: 1024
+      k_hash: 5
+      sweeps:
+        - {name: c0_maincat,    active_clauses: [0]}
+        - {name: c2_year,       active_clauses: [2]}
+        - {name: c3_nversions,  active_clauses: [3]}
+        - {name: c0c2,          active_clauses: [0, 2]}
+        - {name: all4,          active_clauses: [0, 1, 2, 3]}
+
+<<: *defaults

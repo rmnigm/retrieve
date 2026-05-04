@@ -103,7 +103,11 @@ def bloom_compact(qb: Tensor, sigs: Tensor) -> tuple[Tensor, Tensor]:
     qb = qb.contiguous()
     sigs = sigs.contiguous()
 
-    out_indices = torch.empty((b, n), dtype=torch.int64, device=qb.device)
+    # Initialise to -1 sentinel; see clause_compact.py for the rationale.
+    # Positions past counts[bid] are not written by the kernel, and -1
+    # propagates as "no item" through fused_masked_knn_topk's gather when
+    # counts[b] < k.
+    out_indices = torch.full((b, n), -1, dtype=torch.int64, device=qb.device)
     counts = torch.zeros((b,), dtype=torch.int64, device=qb.device)
 
     grid = (b, triton.cdiv(n, _BLOCK_N))

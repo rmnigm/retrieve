@@ -1,7 +1,7 @@
 """Fused clause evaluation + stream compaction.
 
-Avoids materializing the dense ``[B, N]`` bool that ``ClauseIndex.evaluate_mask``
-would otherwise produce. One kernel launch:
+Avoids materializing the dense ``[B, N]`` bool that
+``ExactAttributeFilter.evaluate_mask`` would otherwise produce. One kernel launch:
 
   per program (b, tile):
       evaluate clauses for BLOCK_N items against query_clause_attrs[b]
@@ -123,7 +123,14 @@ def clause_compact(
     clause_is_reverse = clause_is_reverse.contiguous().to(torch.int8)
     query_clause_attrs = query_clause_attrs.contiguous()
 
-    out_indices = torch.empty((b, n), dtype=torch.int64, device=device)
+    # Initialise to -1 sentinel: the kernel only writes at positions
+    # `[base, base + tile_sum)` for passing items, so positions beyond
+    # `counts[bid]` remain at their initial value. With `torch.empty` those
+    # positions held uninitialised memory, which leaks into V2's gather when
+    # `counts[b] < k` and `torch.topk` falls back to padding slots tied at
+    # -inf. -1 is the canonical "no item" sentinel (unmatched against any
+    # real id by `_hits_mask`).
+    out_indices = torch.full((b, n), -1, dtype=torch.int64, device=device)
     counts = torch.zeros((b,), dtype=torch.int64, device=device)
 
     grid = (b, triton.cdiv(n, _BLOCK_N))

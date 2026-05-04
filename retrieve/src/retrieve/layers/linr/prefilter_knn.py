@@ -6,19 +6,20 @@ from torch import Tensor
 from retrieve.interfaces import RetrievalModule
 
 
-class LiNR_V2(RetrievalModule):
-    """LiNR V2, pure-torch reference.
+class PrefilterKNN(RetrievalModule):
+    """Sparse-rescore KNN, pure-torch reference.
 
     Sparse path: takes ``candidate_ids: [B, P]`` (passing item ids per query)
     and an optional ``counts: [B]`` (number of valid columns per row, defaults
     to all P). Gathers the passing rows into ``[B, P, D]`` via fancy indexing,
     scores with ``bmm``, top-K locally, gathers back to global ids.
 
-    Without ``candidate_ids``, falls back to V1's dense full matmul.
+    Without ``candidate_ids``, falls back to a dense full matmul.
 
     Decoupled from any filter — callers compute ``(candidate_ids, counts)``
-    upstream (e.g. ``ClauseIndex.evaluate_indices``, ``compact_mask`` of an
-    external mask, or directly from a quantized cascade like V3).
+    upstream (e.g. ``ExactAttributeFilter.evaluate_indices``, ``compact_mask``
+    of an external mask, or directly from a quantized cascade like
+    ``OneBitKNN``).
     """
 
     item_embs: Tensor
@@ -83,9 +84,3 @@ class LiNR_V2(RetrievalModule):
                 dim=1,
             )
         return topk_ids, topk_scores
-
-
-def build_linr_v2(item_embs: Tensor, k: int) -> LiNR_V2:
-    module = LiNR_V2(k=k)
-    module.register_index(item_embs)
-    return module

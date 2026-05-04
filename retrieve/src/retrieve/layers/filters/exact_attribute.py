@@ -6,14 +6,14 @@ from torch import Tensor
 from retrieve.interfaces import FilterModule
 
 
-class ClauseIndex(FilterModule):
-    """Standalone clause-attribute filter.
+class ExactAttributeFilter(FilterModule):
+    """Standalone exact clause-attribute filter.
 
     Decoupled from any retrieval module — callers compose:
 
-        ci = ClauseIndex(); ci.register_index(item_attrs)
-        mask = ci.evaluate_mask(qa)           # for V1 (dense path)
-        ids, cs = ci.evaluate_indices(qa)     # for V2 (sparse path)
+        f = ExactAttributeFilter(); f.register_index(item_attrs)
+        mask = f.evaluate_mask(qa)            # for the dense path
+        ids, cs = f.evaluate_indices(qa)      # for the sparse path
     """
 
     item_clause_attrs: Tensor  # [N, C, A_max] int64

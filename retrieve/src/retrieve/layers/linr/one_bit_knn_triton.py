@@ -4,12 +4,12 @@ import torch
 from torch import Tensor
 
 from retrieve.kernels.triton.linr.oporp_1bit_match_topk import oporp_1bit_match_topk
-from retrieve.layers.linr.v3 import LiNR_V3
+from retrieve.layers.linr.one_bit_knn import OneBitKNN
 from retrieve.layers.utils.compact import compact_mask
 
 
-class LiNR_V3_Triton(LiNR_V3):
-    """LiNR V3 with the fused 1-bit Sign-OPORP Triton kernel.
+class OneBitKNNTriton(OneBitKNN):
+    """1-bit Sign-OPORP scoring with the fused Triton kernel.
 
     All three paths (full, masked, candidates) route through
     ``oporp_1bit_match_topk``: full path scans every item with contiguous
@@ -17,9 +17,10 @@ class LiNR_V3_Triton(LiNR_V3):
     positive-indices buffer. Same operation in either case — XOR + popcount
     + ``D - 2 * hamming`` — so there's no separate dequant or fp32 dot.
 
-    Unlike V1/V2, V3 does not branch on pass rate: 1-bit popcount is roughly
-    10× cheaper per item than an fp32 dot, so the gather overhead never
-    crosses the dense matmul break-even and a single sparse path is fine.
+    Unlike the fp32 paths, this module does not branch on pass rate: 1-bit
+    popcount is roughly 10× cheaper per item than an fp32 dot, so the gather
+    overhead never crosses the dense matmul break-even and a single sparse
+    path is fine.
     """
 
     def forward(
@@ -63,9 +64,3 @@ class LiNR_V3_Triton(LiNR_V3):
             positive_indices=positive_indices,
             counts=counts,
         )
-
-
-def build_linr_v3_triton(item_embs: Tensor, k: int, *, seed: int = 0) -> LiNR_V3_Triton:
-    module = LiNR_V3_Triton(k=k, seed=seed)
-    module.register_index(item_embs)
-    return module

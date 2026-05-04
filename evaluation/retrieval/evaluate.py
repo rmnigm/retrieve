@@ -9,14 +9,15 @@ sweep loop vs a single unfiltered cell.
 |-------------------------------------------|----------------------------------------|
 | `checkpoint` set, `query_emb_path` unset  | Encode queries via SASRec (yambda/gr)  |
 | `query_emb_path` set, `checkpoint` unset  | Load pre-encoded text embs (arxiv)     |
-| `filters: null`                           | No filter loop (yambda)                |
-| `filters: {none, clause, bloom, combined}`| Filter sweeps (goodreads, arxiv)       |
+| `filters: null`                           | Quality run, single unfiltered cell    |
+| `filters: {clause, bloom}`                | Filter run, per-kind sweeps            |
 
 Usage::
 
-    uv run evaluate --config conf/500m-d128.yaml
-    uv run evaluate --config conf/goodreads-d128-drop0.5-id.yaml
-    uv run evaluate --config conf/arxiv-d256.yaml
+    uv run evaluate --config conf/500m/d128-quality.yaml
+    uv run evaluate --config conf/goodreads/d128-quality.yaml
+    uv run evaluate --config conf/goodreads/d128-filter.yaml
+    uv run evaluate --config conf/arxiv/d256-filter.yaml
 """
 
 from __future__ import annotations
@@ -33,13 +34,7 @@ import torch.nn.functional as F
 from loguru import logger
 from tqdm import tqdm
 
-from retrieval.algo_registry import (
-    SilvertorchSkippedOnNarrow,
-    build_algorithm,
-    build_filter_modules,
-    build_filtered_algorithm,
-    synthesize_query_attrs_narrow,
-)
+from retrieval.algos import build_algorithm, build_filter
 from retrieval.bench_primitives import (
     cuda_allocated_mib,
     encode_queries,
@@ -48,7 +43,7 @@ from retrieval.bench_primitives import (
     quality_pass_cached,
 )
 from retrieval.config import EvalConfig, FilterCfg, FilterSweepCfg, load_eval_config
-from retrieve.layers.filters import combine_masks
+from retrieve.interfaces import FilterModule
 
 # Per-dataset narrow clause counts. Both happen to be 5 today (genre/lang/
 # format/year/author for goodreads; main_cat/license/year/n_versions/author
@@ -182,16 +177,20 @@ def load_sasrec_embeddings(
 
 def load_query_attrs(
     eval_split_path: Path, n_queries: int
-) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
-    """Load per-user `(qa_narrow, qa_wide_1shelf, qa_wide_2shelf)` from
-    `eval_split.parquet`. Returns triple of `None` if file is absent.
+) -> torch.Tensor | None:
+    """Load per-user ``query_attrs_narrow`` from ``eval_split.parquet``.
+
+    Returns None if the parquet is absent (then only ``filter_kind=none``
+    is runnable). The wide-shelf columns in the parquet (``_1shelf`` /
+    ``_2shelf``) are unused by the current bench — kept on disk for now
+    in case wide-bloom sweeps come back.
     """
     if not eval_split_path.exists():
         logger.warning(
             "no eval_split.parquet at {} — only filter_kind=none is runnable",
             eval_split_path,
         )
-        return None, None, None
+        return None
     eval_split = pl.read_parquet(eval_split_path)
     if eval_split.height != n_queries:
         raise RuntimeError(
@@ -199,58 +198,38 @@ def load_query_attrs(
             "regen eval_split.parquet via the dataset CLI's `attrs` subcommand"
         )
     qa_narrow = torch.tensor(eval_split["query_attrs_narrow"].to_list(), dtype=torch.long)
-    qa_wide_1 = torch.tensor(eval_split["query_attrs_wide_1shelf"].to_list(), dtype=torch.long)
-    qa_wide_2 = torch.tensor(eval_split["query_attrs_wide_2shelf"].to_list(), dtype=torch.long)
-    logger.info(
-        "loaded eval_split.parquet: qa_narrow={} qa_wide_1={} qa_wide_2={}",
-        tuple(qa_narrow.shape),
-        tuple(qa_wide_1.shape),
-        tuple(qa_wide_2.shape),
-    )
-    return qa_narrow, qa_wide_1, qa_wide_2
+    logger.info("loaded eval_split.parquet: qa_narrow={}", tuple(qa_narrow.shape))
+    return qa_narrow
 
 
 def build_sweep_qa(
     sweep: FilterSweepCfg,
     filter_kind: str,
     qa_narrow_all: torch.Tensor | None,
-    qa_wide_1: torch.Tensor | None,
-    qa_wide_2: torch.Tensor | None,
     n_clauses: int,
-) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
+) -> tuple[torch.Tensor | None, torch.Tensor | None]:
     """Per-sweep query attribute synthesis.
 
-    Returns ``(qa_narrow_sweep, qa_wide_sweep, skip_mask)``. `skip_mask` is
-    True for users to drop (target had no surviving narrow clauses or empty
-    wide bag).
+    Returns ``(qa_narrow_sweep, skip_mask)``. ``skip_mask`` is True for
+    users to drop (target had no surviving narrow clauses). Inactive
+    clauses are coded as ``-1`` — ExactAttributeFilter treats that as
+    "match anything"; BloomFilter as "no bits queried". Reverse semantics
+    live in the index, not in the query.
     """
-    qa_n_sweep: torch.Tensor | None = None
-    qa_w_sweep: torch.Tensor | None = None
-    skip_mask: torch.Tensor | None = None
-
-    if filter_kind in ("clause", "combined") and sweep.active_clauses:
-        if qa_narrow_all is None:
-            raise ValueError(f"sweep {sweep.name!r} needs qa_narrow but eval_split has none")
-        qa_n_sweep = synthesize_query_attrs_narrow(qa_narrow_all, sweep, n_clauses=n_clauses)
-        sweep_skip = (qa_n_sweep == -1).all(dim=1)
-        skip_mask = sweep_skip if skip_mask is None else (skip_mask | sweep_skip)
-
-    if filter_kind in ("bloom", "combined") and sweep.query_attrs_field:
-        field = sweep.query_attrs_field
-        if field == "query_attrs_wide_1shelf":
-            if qa_wide_1 is None:
-                raise ValueError("sweep references query_attrs_wide_1shelf but none loaded")
-            qa_w_sweep = qa_wide_1.unsqueeze(-1)
-        elif field == "query_attrs_wide_2shelf":
-            if qa_wide_2 is None:
-                raise ValueError("sweep references query_attrs_wide_2shelf but none loaded")
-            qa_w_sweep = qa_wide_2
-        else:
-            raise ValueError(f"unknown query_attrs_field: {field}")
-        sweep_skip = (qa_w_sweep == -1).any(dim=-1)
-        skip_mask = sweep_skip if skip_mask is None else (skip_mask | sweep_skip)
-
-    return qa_n_sweep, qa_w_sweep, skip_mask
+    if filter_kind not in ("clause", "bloom") or not sweep.active_clauses:
+        return None, None
+    if qa_narrow_all is None:
+        raise ValueError(f"sweep {sweep.name!r} needs qa_narrow but eval_split has none")
+    qa_n_sweep = qa_narrow_all.clone()
+    inactive_mask = torch.ones(n_clauses, dtype=torch.bool)
+    for c in sweep.active_clauses:
+        if not (0 <= c < n_clauses):
+            raise ValueError(f"sweep {sweep.name!r}: active clause {c} out of range")
+        inactive_mask[c] = False
+    if inactive_mask.any():
+        qa_n_sweep[:, inactive_mask] = -1
+    skip_mask = (qa_n_sweep == -1).all(dim=1)
+    return qa_n_sweep, skip_mask
 
 
 # ----- ground-truth oracle (filter sweeps only) -------------------------------
@@ -261,46 +240,28 @@ def load_filter_assets(
     fcfg: FilterCfg,
     data_dir: Path,
     device: torch.device,
-) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
-    """Load ``(item_attrs_narrow, item_attrs_wide, clause_is_reverse)`` for a
-    filter_kind. Paths come from the config; None for sides this kind doesn't
-    use.
+) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    """Load ``(item_attrs_narrow, clause_is_reverse)`` for a filter_kind.
+
+    Both `clause` and `bloom` filter_kinds run over the same narrow
+    attribute tensor; only the algo on top differs. The wide-shelf
+    tensor is currently unused — see goodreads-filter-eval.md.
     """
     item_attrs_narrow: torch.Tensor | None = None
-    item_attrs_wide: torch.Tensor | None = None
     clause_is_reverse: torch.Tensor | None = None
 
-    if filter_kind == "clause":
+    if filter_kind in ("clause", "bloom"):
         if fcfg.attrs_path is None:
             raise ValueError(f"filter_kind={filter_kind} requires attrs_path")
         item_attrs_narrow = torch.load(
             str(resolve_path(data_dir, fcfg.attrs_path)), map_location=device
-        )
-        if fcfg.reverse_path:
-            clause_is_reverse = torch.load(
-                str(resolve_path(data_dir, fcfg.reverse_path)), map_location=device
-            )
-    elif filter_kind == "bloom":
-        if fcfg.attrs_path is None:
-            raise ValueError(f"filter_kind={filter_kind} requires attrs_path")
-        item_attrs_wide = torch.load(
-            str(resolve_path(data_dir, fcfg.attrs_path)), map_location=device
-        )
-    elif filter_kind == "combined":
-        if fcfg.attrs_narrow is None or fcfg.attrs_wide is None:
-            raise ValueError("filter_kind=combined requires attrs_narrow and attrs_wide")
-        item_attrs_narrow = torch.load(
-            str(resolve_path(data_dir, fcfg.attrs_narrow)), map_location=device
-        )
-        item_attrs_wide = torch.load(
-            str(resolve_path(data_dir, fcfg.attrs_wide)), map_location=device
         )
         if fcfg.reverse_path:
             clause_is_reverse = torch.load(
                 str(resolve_path(data_dir, fcfg.reverse_path)), map_location=device
             )
 
-    return item_attrs_narrow, item_attrs_wide, clause_is_reverse
+    return item_attrs_narrow, clause_is_reverse
 
 
 def resolve_path(data_dir: Path, path_str: str) -> Path:
@@ -320,10 +281,8 @@ def compute_filtered_oracle(
     item_embs: torch.Tensor,
     queries: torch.Tensor,
     qa_narrow_sweep: torch.Tensor | None,
-    qa_wide_sweep: torch.Tensor | None,
     skip_mask: torch.Tensor | None,
-    ci,
-    bf,
+    filter_mod: FilterModule | None,
     K_GT: int,
     *,
     batch_size: int = 64,
@@ -332,6 +291,9 @@ def compute_filtered_oracle(
     """Brute-force filtered FullScan: returns ``[N_users, K_GT]`` int64 ids.
 
     Skipped rows get all -1. `id 0` is masked out (padding row of `item_embs`).
+    ``filter_mod`` must be an *exact* mask source — i.e. ``ExactAttributeFilter``
+    even on bloom-suite runs, so bloom's false positives do not leak
+    into the ground truth.
     """
     n_users = queries.shape[0]
     out = torch.full((n_users, K_GT), -1, dtype=torch.long)
@@ -352,23 +314,25 @@ def compute_filtered_oracle(
             if qa_narrow_sweep is not None
             else None
         )
-        qa_w = (
-            qa_wide_sweep[batch_idx].to(device, non_blocking=True)
-            if qa_wide_sweep is not None
+        mask = (
+            filter_mod.evaluate_mask(qa_n)
+            if (filter_mod is not None and qa_n is not None)
             else None
         )
-        masks: list[torch.Tensor | None] = []
-        if ci is not None and qa_n is not None:
-            masks.append(ci.evaluate_mask(qa_n))
-        if bf is not None and qa_w is not None:
-            for j in range(qa_w.shape[1]):
-                masks.append(bf.evaluate_mask(qa_w[:, j : j + 1]))
-        mask = combine_masks(*masks)
         scores = q @ item_embs_t
         if mask is not None:
             scores = scores.masked_fill(~mask, float("-inf"))
         scores[:, 0] = float("-inf")
-        topk_ids = torch.topk(scores, K_eff, dim=1).indices
+        topk = torch.topk(scores, K_eff, dim=1)
+        # When the filter passes fewer than K_eff items, the bottom slots tie
+        # at -inf and torch.topk picks the lowest-indexed padding items
+        # (0, 1, 2, ...). Force those to -1 so they don't get scored as real
+        # ground-truth candidates against the algos' -1 padding.
+        topk_ids = torch.where(
+            torch.isfinite(topk.values),
+            topk.indices,
+            torch.full_like(topk.indices, -1),
+        )
         out[batch_idx, :K_eff] = topk_ids.cpu()
 
     if torch.cuda.is_available():
@@ -404,41 +368,36 @@ def is_valid_combo(algo: str, params: dict[str, Any]) -> bool:
     return True
 
 
-# ----- algo eligibility -------------------------------------------------------
-
-
-def algo_skip(filter_kind: str, algo: str) -> str | None:
-    """Return a non-empty reason string if `(filter_kind, algo)` should skip;
-    None otherwise.
-
-    The two rules:
-    * filter_kind == "none" + linr_v2_filter_compact → no candidate source.
-    * filter_kind != "none" + torch_fullscan → equals the filtered-FullScan
-      oracle by construction (recall=1.0); ``linr_v2_filter_compact`` covers
-      the same exact-filter cell with a more relevant perf profile.
-    """
-    if filter_kind == "none" and algo == "linr_v2_filter_compact":
-        return "linr_v2_filter_compact requires a filter"
-    if filter_kind != "none" and algo == "torch_fullscan":
-        return "torch_fullscan equals filtered-FullScan oracle on filter sweeps"
-    return None
-
-
 # ----- driver -----------------------------------------------------------------
 
 
 @click.command()
 @click.option("--config", "config_path", type=str, required=True)
 @click.option("--algorithms", "algos_override", multiple=True, type=str, default=())
-@click.option("--filter-kind", "filter_kind_filter", type=str, default=None)
+@click.option(
+    "--filter-kind",
+    "filter_kinds",
+    multiple=True,
+    type=str,
+    default=(),
+    help="Restrict to one or more filter_kinds (repeat the flag); empty = run all.",
+)
 @click.option("--sweep", "sweep_filter", type=str, default=None)
 @click.option("--output", "output_override", type=str, default=None)
+@click.option(
+    "--skip-quality",
+    is_flag=True,
+    default=False,
+    help="Skip the bs=1 quality stream and report recall=ndcg=NaN. "
+    "Perf timing rows are still emitted. Useful for fast latency/memory sweeps.",
+)
 def main(
     config_path: str,
     algos_override: tuple[str, ...],
-    filter_kind_filter: str | None,
+    filter_kinds: tuple[str, ...],
     sweep_filter: str | None,
     output_override: str | None,
+    skip_quality: bool,
 ) -> None:
     cfg = load_eval_config(Path(config_path))
     if algos_override:
@@ -449,6 +408,14 @@ def main(
     torch.manual_seed(cfg.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(cfg.seed)
+        # Disable TF32 so the oracle (cuBLAS `q @ E_t`) and the algos
+        # (per-impl Triton GEMM, generally fp32) compute scores in the
+        # same precision. Otherwise exact-mask algos like
+        # `linr_v1_filter_mask` show ~1e-3 recall drift vs the oracle
+        # on narrow filters where top-K boundaries land on items
+        # within TF32's 10-bit mantissa noise band.
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
 
     data_path = Path(cfg.data_dir)
     dev = torch.device(cfg.device)
@@ -473,10 +440,8 @@ def main(
 
     # 3. Optional per-query attributes (None for yambda).
     qa_narrow_all: torch.Tensor | None = None
-    qa_wide_1: torch.Tensor | None = None
-    qa_wide_2: torch.Tensor | None = None
     if cfg.filters is not None:
-        qa_narrow_all, qa_wide_1, qa_wide_2 = load_query_attrs(
+        qa_narrow_all = load_query_attrs(
             data_path / "eval_split.parquet", queries.shape[0]
         )
 
@@ -488,12 +453,11 @@ def main(
         targets,
         n_targets,
         qa_narrow_all,
-        qa_wide_1,
-        qa_wide_2,
         data_path=data_path,
         device=dev,
-        filter_kind_filter=filter_kind_filter,
+        filter_kinds=filter_kinds,
         sweep_filter=sweep_filter,
+        skip_quality=skip_quality,
     )
 
     # 5. Write JSON.
@@ -510,21 +474,20 @@ def run_sweep(
     targets: torch.Tensor,
     n_targets: torch.Tensor,
     qa_narrow_all: torch.Tensor | None,
-    qa_wide_1: torch.Tensor | None,
-    qa_wide_2: torch.Tensor | None,
     *,
     data_path: Path,
     device: torch.device,
-    filter_kind_filter: str | None = None,
+    filter_kinds: tuple[str, ...] = (),
     sweep_filter: str | None = None,
+    skip_quality: bool = False,
 ) -> list[dict]:
     """Loop over (filter_kind, sweep, algo, k, batch_size) and emit rows.
 
     Yambda (cfg.filters is None) iterates a single synthetic
     ``("none", FilterSweepCfg(name="full_scan"))`` cell so the loop body
-    stays uniform; that path uses `build_algorithm` directly. Filtered
-    datasets (goodreads/arxiv) iterate the actual filter sweeps and use
-    `build_filtered_algorithm`.
+    stays uniform. Filtered datasets (goodreads/arxiv) iterate the
+    configured filter sweeps; both clause and bloom filter_kinds run
+    over the same narrow attribute tensor — only the algo differs.
     """
     rows: list[dict] = []
     K_GT = max(cfg.ks)
@@ -544,29 +507,68 @@ def run_sweep(
         gt_dir.mkdir(parents=True, exist_ok=True)
 
     for filter_kind, fcfg in filter_iter:
-        if filter_kind_filter and filter_kind != filter_kind_filter:
+        if filter_kinds and filter_kind not in filter_kinds:
             continue
 
-        ci = bf = None
-        item_attrs_narrow = item_attrs_wide = clause_is_reverse = None
+        # Optional subsample for filter sweeps only (goodreads has 313k test
+        # users; the bs=1 quality stream is wall-clock-dominant). Unfiltered
+        # cell keeps all users so the yambda parity gate still holds.
+        if (
+            filter_kind != "none"
+            and cfg.filter_users_limit is not None
+            and cfg.filter_users_limit < queries.shape[0]
+        ):
+            n_keep = int(cfg.filter_users_limit)
+            queries_f = queries[:n_keep].contiguous()
+            targets_f = targets[:n_keep].contiguous()
+            n_targets_f = n_targets[:n_keep].contiguous()
+            qa_narrow_f = qa_narrow_all[:n_keep] if qa_narrow_all is not None else None
+            logger.info(
+                "  filter_users_limit={}: subsampling {}→{} users for filter sweeps",
+                n_keep,
+                queries.shape[0],
+                n_keep,
+            )
+        else:
+            queries_f = queries
+            targets_f = targets
+            n_targets_f = n_targets
+            qa_narrow_f = qa_narrow_all
+
+        filter_mod: FilterModule | None = None
+        oracle_filter: FilterModule | None = None
+        item_attrs_narrow = clause_is_reverse = None
         if cfg.filters is not None:
-            item_attrs_narrow, item_attrs_wide, clause_is_reverse = load_filter_assets(
+            item_attrs_narrow, clause_is_reverse = load_filter_assets(
                 filter_kind, fcfg, data_path, device
             )
-            ci, bf = build_filter_modules(
+            filter_mod = build_filter(
                 filter_kind,
                 item_attrs_narrow=item_attrs_narrow,
-                item_attrs_wide=item_attrs_wide,
                 clause_is_reverse=clause_is_reverse,
                 bloom_m_bits=fcfg.m_bits,
                 bloom_k_hash=fcfg.k_hash,
                 device=device,
             )
-            if ci is not None or bf is not None:
+            # Oracle always uses exact ExactAttributeFilter semantics, even on
+            # filter_kind="bloom" — bloom's false positives must NOT leak
+            # into the ground truth. On filter_kind="clause" the wired
+            # filter_mod is already an ExactAttributeFilter; reuse it. On
+            # bloom we build a separate exact filter over the same attrs.
+            if filter_kind == "clause":
+                oracle_filter = filter_mod
+            elif filter_kind == "bloom":
+                oracle_filter = build_filter(
+                    "clause",
+                    item_attrs_narrow=item_attrs_narrow,
+                    clause_is_reverse=clause_is_reverse,
+                    device=device,
+                )
+            if filter_mod is not None:
                 logger.info(
-                    "  filter modules built: ClauseIndex={} BloomFilter={}",
-                    ci is not None,
-                    bf is not None,
+                    "  filter module built: {} (oracle: {})",
+                    type(filter_mod).__name__,
+                    type(oracle_filter).__name__ if oracle_filter is not None else "none",
                 )
             if item_attrs_narrow is not None:
                 n_clauses = int(item_attrs_narrow.shape[1])
@@ -577,19 +579,21 @@ def run_sweep(
             logger.info("=== filter_kind={} sweep={} ===", filter_kind, sweep.name)
 
             if cfg.filters is None or filter_kind == "none":
-                qa_n_sweep = qa_w_sweep = skip_mask = None
+                qa_n_sweep = skip_mask = None
             else:
-                qa_n_sweep, qa_w_sweep, skip_mask = build_sweep_qa(
-                    sweep, filter_kind, qa_narrow_all, qa_wide_1, qa_wide_2, n_clauses
+                qa_n_sweep, skip_mask = build_sweep_qa(
+                    sweep, filter_kind, qa_narrow_f, n_clauses
                 )
 
-            n_users = queries.shape[0]
+            n_users = queries_f.shape[0]
             n_kept = int((~skip_mask).sum().item()) if skip_mask is not None else n_users
             logger.info("  kept users: {} / {}", n_kept, n_users)
 
             # Build (and cache) the filtered-FullScan oracle for filtered cells.
+            # Skipped when --skip-quality is on: oracle is only used to score
+            # recall, never for perf timing or skip-mask synthesis.
             oracle_topk: torch.Tensor | None = None
-            if cfg.filters is not None and filter_kind != "none":
+            if cfg.filters is not None and filter_kind != "none" and not skip_quality:
                 gt_path = gt_dir / f"gt_topk_{sweep.name}.pt"
                 if gt_path.exists():
                     oracle_topk = torch.load(str(gt_path), map_location="cpu")
@@ -604,12 +608,10 @@ def run_sweep(
                     logger.info("  building filtered oracle (K_GT={})", K_GT)
                     oracle_topk = compute_filtered_oracle(
                         item_embs,
-                        queries,
+                        queries_f,
                         qa_n_sweep,
-                        qa_w_sweep,
                         skip_mask,
-                        ci,
-                        bf,
+                        oracle_filter,
                         K_GT=K_GT,
                         device=device,
                     )
@@ -617,11 +619,6 @@ def run_sweep(
                     logger.info("  saved oracle → {}", gt_path)
 
             for algo in cfg.algorithms:
-                reason = algo_skip(filter_kind, algo)
-                if reason is not None:
-                    logger.debug("  skipping {}: {}", algo, reason)
-                    continue
-
                 raw_params = cfg.algo_params.get(algo, {})
                 combos = expand_param_combos(raw_params)
                 for params in combos:
@@ -629,7 +626,6 @@ def run_sweep(
                         logger.warning("skipping invalid combo {}: {}", algo, params)
                         continue
 
-                    first_build = True
                     for k in cfg.ks:
                         if torch.cuda.is_available():
                             torch.cuda.synchronize()
@@ -638,60 +634,35 @@ def run_sweep(
                         mem_before = cuda_allocated_mib()
 
                         try:
-                            if cfg.filters is None:
-                                forward, modules, is_cpu = build_algorithm(
-                                    algo, item_embs, k=k, params=params
-                                )
-                            else:
-                                forward, modules, is_cpu = build_filtered_algorithm(
-                                    algo,
-                                    item_embs,
-                                    k=k,
-                                    filter_kind=filter_kind,
-                                    sweep=sweep,
-                                    ci=ci,
-                                    bf=bf,
-                                    clause_is_reverse=clause_is_reverse,
-                                    item_attrs_wide=item_attrs_wide,
-                                    bloom_m_bits=fcfg.m_bits,
-                                    bloom_k_hash=fcfg.k_hash,
-                                    algo_params=params,
-                                )
-                        except SilvertorchSkippedOnNarrow:
-                            if first_build:
-                                logger.info(
-                                    "  skipping silvertorch on narrow sweep {}", sweep.name
-                                )
-                                rows.append(
-                                    {
-                                        "suite": suite,
-                                        "cell": f"{filter_kind}_{sweep.name}",
-                                        "filter_kind": filter_kind,
-                                        "sweep": sweep.name,
-                                        "impl": algo,
-                                        "skipped": True,
-                                        "reason": "silvertorch_skipped_on_narrow",
-                                    }
-                                )
-                            first_build = False
+                            algo_obj = build_algorithm(
+                                algo,
+                                item_embs,
+                                k=k,
+                                filter_kind=filter_kind,
+                                filter_mod=filter_mod,
+                                item_attrs_narrow=item_attrs_narrow,
+                                params=params,
+                            )
+                        except ValueError as e:
+                            logger.debug("  skipping {}: {}", algo, e)
                             continue
-                        first_build = False
 
                         if torch.cuda.is_available():
                             torch.cuda.synchronize()
-                        index_mem = 0.0 if is_cpu else cuda_allocated_mib() - mem_before
+                        index_mem = 0.0 if algo_obj.is_cpu else cuda_allocated_mib() - mem_before
 
-                        if cfg.filters is None or filter_kind == "none":
+                        if skip_quality:
+                            recall, ndcg = float("nan"), float("nan")
+                        elif cfg.filters is None or filter_kind == "none":
                             recall, ndcg = quality_pass_cached(
-                                forward,
-                                queries,
-                                targets,
-                                n_targets,
+                                algo_obj.forward,
+                                queries_f,
+                                targets_f,
+                                n_targets_f,
                                 k=k,
                                 device=device,
                                 desc=f"{filter_kind}/{sweep.name}/{algo} k={k}",
                                 qa_narrow=qa_n_sweep,
-                                qa_wide=qa_w_sweep,
                                 skip_mask=skip_mask,
                             )
                         else:
@@ -699,28 +670,26 @@ def run_sweep(
                             ot_k = oracle_topk[:, :k].contiguous()
                             nt_k = torch.full((n_users,), k, dtype=torch.long)
                             recall, ndcg = quality_pass_cached(
-                                forward,
-                                queries,
+                                algo_obj.forward,
+                                queries_f,
                                 ot_k,
                                 nt_k,
                                 k=k,
                                 device=device,
                                 desc=f"{filter_kind}/{sweep.name}/{algo} k={k}",
                                 qa_narrow=qa_n_sweep,
-                                qa_wide=qa_w_sweep,
                                 skip_mask=skip_mask,
                             )
 
                         for bs in cfg.batch_sizes:
                             med, p20, p80, peak, scratch = perf_pass_cached(
-                                forward,
-                                queries,
+                                algo_obj.forward,
+                                queries_f,
                                 batch_size=bs,
                                 device=device,
-                                is_cpu=is_cpu,
+                                is_cpu=algo_obj.is_cpu,
                                 seed=cfg.seed,
                                 qa_narrow=qa_n_sweep,
-                                qa_wide=qa_w_sweep,
                                 skip_mask=skip_mask,
                             )
                             row = {
@@ -729,7 +698,7 @@ def run_sweep(
                                 "filter_kind": filter_kind,
                                 "sweep": sweep.name,
                                 "impl": algo,
-                                "device": "cpu" if is_cpu else "cuda",
+                                "device": "cpu" if algo_obj.is_cpu else "cuda",
                                 "seed": cfg.seed,
                                 "batch_size": bs,
                                 "k": k,
@@ -762,13 +731,13 @@ def run_sweep(
                                 recall,
                                 ndcg,
                             )
-                        modules.clear()
-                        del forward, modules
+                        algo_obj.modules.clear()
+                        del algo_obj
                         if torch.cuda.is_available():
                             torch.cuda.empty_cache()
 
         if cfg.filters is not None:
-            del ci, bf
+            del filter_mod, oracle_filter
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 

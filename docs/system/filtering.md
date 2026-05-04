@@ -44,7 +44,7 @@ boolean composition.
 | component | path | notes |
 |---|---|---|
 | `FilterModule` ABC | [interfaces.py](../../retrieve/src/retrieve/interfaces.py) | three native paths: `evaluate_mask`, `evaluate_indices`, `evaluate_subset`; `forward` aliases `evaluate_mask` |
-| `ClauseIndex` (exact, supports reverse) | [layers/filters/clause.py](../../retrieve/src/retrieve/layers/filters/clause.py) | `FilterModule` subclass; native `evaluate_mask` via `clause_mask` kernel; native `evaluate_indices` via `clause_compact` kernel; `evaluate_subset` via gather + broadcast |
+| `ExactAttributeFilter` (exact, supports reverse) | [layers/filters/exact_attribute.py](../../retrieve/src/retrieve/layers/filters/exact_attribute.py) | `FilterModule` subclass; native `evaluate_mask` via `clause_mask` kernel; native `evaluate_indices` via `clause_compact` kernel; `evaluate_subset` via gather + broadcast |
 | `BloomFilter` (approximate, conjunctive) | [layers/filters/bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py) | `FilterModule` subclass; paper-strict (no reverse, no DSL); native `evaluate_mask` via `bloom_match` kernel; native `evaluate_indices` via `bloom_compact` kernel; `evaluate_subset` via gathered subset test |
 | LiNR clause Triton kernels | [kernels/triton/filters/clause_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py), [clause_mask.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_mask.py) | fused eval + stream compaction (compact); fused eval emitting `[B, N]` bool (mask). No `[B, N, C, A_max]` intermediate either way |
 | Bloom Triton kernels | [kernels/triton/silvertorch/bloom_match.py](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py), [kernels/triton/filters/bloom_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py) | `(qb & sigs) == qb` → `[B, N]` bool (match); fused subset-test + stream compaction (compact). Consumed by `BloomFilter.evaluate_mask` / `evaluate_indices` on CUDA |
@@ -55,11 +55,12 @@ boolean composition.
 
 LiNR's `forward` is decoupled from the filter — it accepts `mask: [B, N]`
 or `candidate_ids: [B, P]` as input
-([v1.py](../../retrieve/src/retrieve/layers/linr/v1.py),
-[v2.py](../../retrieve/src/retrieve/layers/linr/v2.py),
-[v3.py](../../retrieve/src/retrieve/layers/linr/v3.py)). Any `FilterModule`
-that produces those shapes plugs in. Both `ClauseIndex` and `BloomFilter`
-do, and they compose via `combine_masks` / `combine_indices`.
+([similarity_masking.py](../../retrieve/src/retrieve/layers/linr/similarity_masking.py),
+[prefilter_knn.py](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py),
+[one_bit_knn.py](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py)). Any
+`FilterModule` that produces those shapes plugs in. Both
+`ExactAttributeFilter` and `BloomFilter` do, and they compose via
+`combine_masks` / `combine_indices`.
 
 Asymmetry: SilverTorch fuses Bloom *into* its score kernel
 (`codesigned_probe_score`), so swapping its filter would require a new
@@ -71,24 +72,24 @@ direction — bring Bloom into the LiNR side as an alternative
 
 ```python
 from retrieve import (
-    BloomFilter, ClauseIndex,
-    LiNR_V1_Triton, LiNR_V2_Triton, LiNR_V3_Triton,
+    BloomFilter, ExactAttributeFilter,
+    SimilarityMaskingTriton, PrefilterKNNTriton, OneBitKNNTriton,
     combine_indices, combine_masks,
 )
 
-ci = ClauseIndex().to("cuda")
-ci.register_index(item_attrs, clause_is_reverse=is_reverse)
+ef = ExactAttributeFilter().to("cuda")
+ef.register_index(item_attrs, clause_is_reverse=is_reverse)
 
 bf = BloomFilter(m_bits=1024, k_hash=5).to("cuda")
 bf.register_index(item_attrs)
 
-# V1 / V3 mask path — combine exact + approximate.
-mask = combine_masks(ci.evaluate_mask(qa), bf.evaluate_mask(qa))
-ids, scores = linr_v1(query, mask=mask)
+# Mask path — combine exact + approximate, feed SimilarityMasking / OneBitKNN.
+mask = combine_masks(ef.evaluate_mask(qa), bf.evaluate_mask(qa))
+ids, scores = similarity_masking(query, mask=mask)
 
-# V2 / V3 candidate-id path — sparse cascade, most-selective filter first.
-cand_ids, counts = combine_indices([ci, bf], [qa, qa])
-ids, scores = linr_v2(query, candidate_ids=cand_ids, counts=counts)
+# Candidate-id path — sparse cascade (most-selective filter first), feed PrefilterKNN.
+cand_ids, counts = combine_indices([ef, bf], [qa, qa])
+ids, scores = prefilter_knn(query, candidate_ids=cand_ids, counts=counts)
 ```
 
 ## Out of scope
@@ -96,9 +97,9 @@ ids, scores = linr_v2(query, candidate_ids=cand_ids, counts=counts)
 - DSL / nested AND/OR/NOT / RPN walker — kept out of the filter API. If
   full predicate-tree support is ever needed, it would be a host-side
   parser feeding multiple `evaluate_mask` calls into `combine_masks`.
-- NOT inside Bloom — exact reverse semantics live in `ClauseIndex` and
-  stay there.
+- NOT inside Bloom — exact reverse semantics live in `ExactAttributeFilter`
+  and stay there.
 - Range / prefix / numeric predicates — neither paper supports them; both
   are equality-on-int64-hash.
-- Replacing Bloom with `ClauseIndex` inside `codesigned_probe_score` —
+- Replacing Bloom with `ExactAttributeFilter` inside `codesigned_probe_score` —
   would require a new fused kernel, not a wrapping.

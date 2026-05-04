@@ -11,8 +11,8 @@ from retrieve.layers.utils.quantize import (
 )
 
 
-class LiNR_V3(RetrievalModule):
-    """LiNR V3: 1-bit Sign-OPORP scoring (Hamming similarity).
+class OneBitKNN(RetrievalModule):
+    """1-bit Sign-OPORP scoring (Hamming similarity).
 
     Item embeddings are projected via a deterministic Sign-OPORP transform
     (cheap O(D) sign vector + permutation) and sign-quantized to 1 bit per
@@ -88,9 +88,3 @@ class LiNR_V3(RetrievalModule):
         topk_scores, topk_local = torch.topk(scores, actual_k, dim=1)
         topk_ids = candidate_ids.gather(1, topk_local)
         return topk_ids, topk_scores
-
-
-def build_linr_v3(item_embs: Tensor, k: int, *, seed: int = 0) -> LiNR_V3:
-    module = LiNR_V3(k=k, seed=seed)
-    module.register_index(item_embs)
-    return module

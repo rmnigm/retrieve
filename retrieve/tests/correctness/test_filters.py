@@ -1,11 +1,11 @@
-"""ClauseIndex correctness — evaluate_mask + evaluate_indices."""
+"""ExactAttributeFilter correctness — evaluate_mask + evaluate_indices."""
 
 from __future__ import annotations
 
 import torch
 
-from retrieve.layers.filters import BloomFilter, ClauseIndex, combine_masks
-from retrieve.layers.linr.v3_triton import LiNR_V3_Triton
+from retrieve.layers.filters import BloomFilter, ExactAttributeFilter, combine_masks
+from retrieve.layers.linr.one_bit_knn_triton import OneBitKNNTriton
 from retrieve.layers.utils.compact import compact_mask
 from tests.conftest import make_attrs, make_index, make_query, make_query_attrs
 
@@ -20,7 +20,7 @@ def test_clause_index_and_or_semantics():
     # Some items in [50, 70) also carry clause-0 attr=3 → multi-value clause.
     attrs[50:70, 0, 1] = 3
 
-    ci = ClauseIndex()
+    ci = ExactAttributeFilter()
     ci.register_index(attrs)
 
     q = torch.tensor(
@@ -46,7 +46,7 @@ def test_evaluate_indices_matches_compact_evaluate_mask():
     """The fused kernel path must produce the same passing-set as the dense path."""
     n = 4096
     attrs = make_attrs(n, c=3, a_max=4, n_vocab=20, pad_rate=0.3, seed=99)
-    ci = ClauseIndex()
+    ci = ExactAttributeFilter()
     ci.register_index(attrs)
     q = make_query_attrs(b=8, c=3, n_vocab=20, inactive_rate=0.2, seed=100)
 
@@ -73,7 +73,7 @@ def test_evaluate_indices_with_reverse_clauses():
     n = 1024
     attrs = make_attrs(n, c=2, a_max=3, n_vocab=10, pad_rate=0.2, seed=7)
     is_reverse = torch.tensor([True, False], device="cuda")
-    ci = ClauseIndex()
+    ci = ExactAttributeFilter()
     ci.register_index(attrs, clause_is_reverse=is_reverse)
     q = make_query_attrs(b=4, c=2, n_vocab=10, inactive_rate=0.5, seed=8)
 
@@ -90,7 +90,7 @@ def test_evaluate_indices_with_reverse_clauses():
 def test_evaluate_indices_all_inactive_passes_all():
     n = 256
     attrs = make_attrs(n, c=2, a_max=2, n_vocab=8, pad_rate=0.0, seed=1)
-    ci = ClauseIndex()
+    ci = ExactAttributeFilter()
     ci.register_index(attrs)
     q = torch.full((3, 2), -1, dtype=torch.long, device="cuda")
     cand, counts = ci.evaluate_indices(q)
@@ -104,7 +104,7 @@ def test_clause_index_all_reverse():
     n, c = 256, 2
     attrs = make_attrs(n, c=c, a_max=2, n_vocab=20, pad_rate=0.0, seed=51)
     is_reverse = torch.ones(c, dtype=torch.bool, device="cuda")
-    ci = ClauseIndex().to("cuda")
+    ci = ExactAttributeFilter().to("cuda")
     ci.register_index(attrs, clause_is_reverse=is_reverse)
 
     q = make_query_attrs(b=4, c=c, n_vocab=20, inactive_rate=0.0, seed=52)
@@ -121,7 +121,7 @@ def test_clause_index_all_reverse():
 def test_clause_index_single_item_index():
     """N=1 — broadcast and the fused kernel both must handle the corner cleanly."""
     attrs = torch.tensor([[[5, -1], [10, -1]]], dtype=torch.long, device="cuda")
-    ci = ClauseIndex().to("cuda")
+    ci = ExactAttributeFilter().to("cuda")
     ci.register_index(attrs)
     q = torch.tensor([[5, 10], [5, 11], [-1, -1]], dtype=torch.long, device="cuda")
     mask = ci.evaluate_mask(q)
@@ -137,7 +137,7 @@ def test_clause_index_single_item_index():
 def test_clause_index_evaluate_subset_p_zero():
     n = 128
     attrs = make_attrs(n, c=2, a_max=2, n_vocab=10, pad_rate=0.0, seed=61)
-    ci = ClauseIndex().to("cuda")
+    ci = ExactAttributeFilter().to("cuda")
     ci.register_index(attrs)
     q = make_query_attrs(b=4, c=2, n_vocab=10, inactive_rate=0.0, seed=62)
     empty = torch.empty(4, 0, dtype=torch.long, device="cuda")
@@ -146,15 +146,15 @@ def test_clause_index_evaluate_subset_p_zero():
     assert out.dtype == torch.bool
 
 
-def test_linr_v3_with_combined_filter_mask():
-    """Cross-compat smoke: BloomFilter & ClauseIndex AND'd together feed LiNR_V3."""
+def test_one_bit_knn_with_combined_filter_mask():
+    """Cross-compat smoke: BloomFilter & ExactAttributeFilter AND'd together feed OneBitKNN."""
     n, d, b, k = 4096, 128, 8, 32
     embs = make_index(n, d)
     query = make_query(b, d)
     attrs = make_attrs(n, c=3, a_max=3, n_vocab=40, pad_rate=0.2, seed=21)
     q_attrs = make_query_attrs(b, c=3, n_vocab=40, inactive_rate=0.2, seed=22)
 
-    ci = ClauseIndex().to("cuda")
+    ci = ExactAttributeFilter().to("cuda")
     ci.register_index(attrs)
     bf = BloomFilter(m_bits=1024, k_hash=5).to("cuda")
     bf.register_index(attrs)
@@ -165,9 +165,9 @@ def test_linr_v3_with_combined_filter_mask():
     # Combined mask must be the clause mask exactly (bloom is a superset).
     assert torch.equal(mask, clause_mask)
 
-    v3 = LiNR_V3_Triton(k=k).to("cuda")
-    v3.register_index(embs)
-    ids, _ = v3(query, mask=mask)
+    knn = OneBitKNNTriton(k=k).to("cuda")
+    knn.register_index(embs)
+    ids, _ = knn(query, mask=mask)
     assert ids.shape == (b, k)
 
     # Every returned id must satisfy the clause conjunction (where the row had any).

@@ -1,0 +1,54 @@
+_defaults: &defaults
+  data_dir: data/goodreads/work-id
+  output: null
+  split: test
+  device: cuda
+  ks: [10, 100, 500]
+  batch_sizes: [1, 8, 16]
+  seed: 0
+  encode:
+    batch_size: 512
+    num_workers: 8
+    max_seq_length: 200
+  algorithms:
+    - linr_v1_filter_mask
+    - linr_v3
+    - silvertorch          # auto-skipped on filter_kind=clause; runs on bloom sweeps only
+  # N≈1.5M → sqrt(N)≈1225; 1024 lists × ~1465 items/cluster avg.
+  # n_probe=24 visits ~35K items per query (~2.3% of N).
+  algo_params:
+    linr_v3: {candidate_pool: 8000, v3_seed: 0}
+    silvertorch:     {n_lists: 1024, n_probe: 24, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}
+  filter_users_limit: 50000
+
+  # See docs/plans/goodreads-filter-eval.md for the predicate spec.
+  filters:
+    clause:
+      attrs_path:    data/goodreads/work-id/item_attrs_narrow.pt
+      reverse_path:  data/goodreads/work-id/clause_is_reverse_narrow.pt
+      sweeps:
+        - {name: c0_genre,        active_clauses: [0]}
+        - {name: c1_lang_reverse, active_clauses: [1]}
+        - {name: c2_format,       active_clauses: [2]}
+        - {name: c3_year,         active_clauses: [3]}
+        - {name: c0c1,            active_clauses: [0, 1]}
+        - {name: c0c3,            active_clauses: [0, 3]}
+        - {name: all_fwd,         active_clauses: [0, 2, 3]}
+        - {name: all4,            active_clauses: [0, 1, 2, 3]}
+    bloom:
+      # Bloom over the SAME narrow attrs as the clause sweeps — paper-strict
+      # set-membership approximation of the exact-equality predicate.
+      # `c1_lang_reverse` is excluded: BloomFilter is forward-only (no NOT).
+      attrs_path:   data/goodreads/work-id/item_attrs_narrow.pt
+      reverse_path: data/goodreads/work-id/clause_is_reverse_narrow.pt
+      m_bits: 1024
+      k_hash: 5
+      sweeps:
+        - {name: c0_genre, active_clauses: [0]}
+        - {name: c2_format, active_clauses: [2]}
+        - {name: c3_year,  active_clauses: [3]}
+        - {name: c0c3,     active_clauses: [0, 3]}
+        - {name: all_fwd,  active_clauses: [0, 2, 3]}
+
+<<: *defaults
+checkpoint: checkpoints/goodreads-gsasrec-d128-drop0.5-id/best_model.pt

@@ -1,0 +1,24 @@
+_defaults: &defaults
+  data_dir: data/goodreads/work-id
+  output: null
+  split: test
+  device: cuda
+  ks: [10, 100, 500]
+  batch_sizes: [1, 8, 16]
+  seed: 0
+  encode:
+    batch_size: 512
+    num_workers: 8
+    max_seq_length: 200
+  algorithms:
+    - torch_knn
+    - linr_v3
+    - silvertorch
+    - voyager_hnsw
+  algo_params:
+    linr_v3: {candidate_pool: 8000, v3_seed: 0}
+    silvertorch:     {n_lists: 1024, n_probe: 24, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}
+    voyager_hnsw:    {m: 32, ef_construction: 200, ef_query: 1000, num_threads: 16, seed: 0}
+
+<<: *defaults
+checkpoint: checkpoints/goodreads-gsasrec-d256-drop0.5-id/best_model.pt

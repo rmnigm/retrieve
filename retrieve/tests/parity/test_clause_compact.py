@@ -1,6 +1,6 @@
-"""Triton ``clause_compact`` vs the pure-torch ``ClauseIndex.evaluate_mask`` baseline.
+"""Triton ``clause_compact`` vs the pure-torch ``ExactAttributeFilter.evaluate_mask`` baseline.
 
-``ClauseIndex.evaluate_indices`` already routes to ``clause_compact`` on CUDA,
+``ExactAttributeFilter.evaluate_indices`` already routes to ``clause_compact`` on CUDA,
 so we call the kernel directly to keep this a true kernel-vs-pure-torch parity
 check. Output id ordering is unspecified per the kernel doc — we compare row
 *sets* of returned ids, not positions.
@@ -12,13 +12,13 @@ import pytest
 import torch
 
 from retrieve.kernels.triton.filters.clause_compact import clause_compact
-from retrieve.layers.filters import ClauseIndex
+from retrieve.layers.filters import ExactAttributeFilter
 from retrieve.layers.utils.compact import compact_mask
 from tests.conftest import make_attrs, make_query_attrs
 
 
 def _ref(attrs: torch.Tensor, is_reverse: torch.Tensor, q: torch.Tensor):
-    ci = ClauseIndex().to("cuda")
+    ci = ExactAttributeFilter().to("cuda")
     ci.register_index(attrs, clause_is_reverse=is_reverse)
     ref_mask = ci.evaluate_mask(q)
     ref_ids, ref_counts = compact_mask(ref_mask)

@@ -1,14 +1,15 @@
 """Shared primitives for the unified retrieval benchmark.
 
 The single driver in [evaluate.py](evaluate.py) imports from here. The
-`forward` contract supported by the passes is the union of:
+`forward` contract is uniform across all algos:
 
-  - bare yambda: ``forward(q) -> (ids, scores)``
-  - filtered:    ``forward(q, qa_narrow=..., qa_wide=...) -> (ids, scores)``
+  ``forward(q, qa_narrow=None) -> (ids, scores)``
 
-`quality_pass_cached` / `perf_pass_cached` only pass `qa_*` kwargs when
-the caller supplied corresponding pool tensors — yambda's bare-`q`
-lambdas keep working unmodified.
+Unfiltered cells pass ``qa_narrow=None`` and the algo runs without
+masking. Filter cells pass the synthesised per-sweep narrow attrs.
+``quality_pass_cached`` / ``perf_pass_cached`` only pass the kwarg
+when the caller supplied a tensor — yambda's bare-`q` lambdas keep
+working unmodified.
 """
 
 from __future__ import annotations
@@ -230,6 +231,9 @@ def encode_queries(
 # ----- passes -----------------------------------------------------------------
 
 
+QUALITY_BATCH_SIZE = 64
+
+
 @torch.inference_mode()
 def quality_pass_cached(
     forward,
@@ -241,33 +245,41 @@ def quality_pass_cached(
     device: torch.device,
     desc: str,
     qa_narrow: torch.Tensor | None = None,  # [N, C_narrow] on cpu, optional
-    qa_wide: torch.Tensor | None = None,  # [N, Q_wide]    on cpu, optional
     skip_mask: torch.Tensor | None = None,  # [N] bool on cpu, optional
+    batch_size: int = QUALITY_BATCH_SIZE,
 ) -> tuple[float, float]:
-    """Stream cached queries through the index at bs=1 and accumulate metrics.
+    """Stream cached queries through the index in batches and accumulate metrics.
 
-    Quality is invariant to perf batch size (same scoring math), so we pay
-    the bs=1 stream once per ``(algo, k)`` cell and attach the result to every
-    bs row of that cell.
+    Quality is invariant to batch size (same per-row scoring math), so we
+    can amortise the per-call CUDA-launch + Python overhead across a wide
+    batch — at bs=1 the launch overhead dominates wall on the 313k goodreads
+    test stream. Default ``batch_size=64`` cut per-cell wall ~50× in
+    benchmarking. Perf rows still report the bs=1/8/16 latencies separately
+    via ``perf_pass_cached``.
 
-    For filter-bench rows: pass ``qa_narrow`` and/or ``qa_wide`` on CPU and
-    they're routed to ``forward(q, qa_narrow=..., qa_wide=...)``. ``skip_mask``
-    drops users (e.g. wide eval rows where the target had zero surviving
-    shelves).
+    For filter-bench rows: pass ``qa_narrow`` on CPU and it's routed to
+    ``forward(q, qa_narrow=...)``. ``skip_mask`` drops users whose
+    synthesised qa was all -1 for the active clauses.
     """
     accum = None
     n = queries.shape[0]
-    for i in tqdm(range(n), desc=desc, leave=False):
-        if skip_mask is not None and bool(skip_mask[i].item()):
-            continue
-        q = queries[i : i + 1].to(device, non_blocking=True)
-        t = targets[i : i + 1].to(device, non_blocking=True)
-        nt = num_targets[i : i + 1].to(device, non_blocking=True)
+    for s in tqdm(range(0, n, batch_size), desc=desc, leave=False):
+        e = min(s + batch_size, n)
+        # Build a per-batch kept index: ranges are contiguous, but skip_mask
+        # may punch holes. Materialise the surviving rows once per chunk.
+        if skip_mask is not None:
+            keep_local = ~skip_mask[s:e].bool()
+            if not bool(keep_local.any().item()):
+                continue
+            sel = keep_local.nonzero(as_tuple=False).reshape(-1) + s
+        else:
+            sel = torch.arange(s, e)
+        q = queries[sel].to(device, non_blocking=True)
+        t = targets[sel].to(device, non_blocking=True)
+        nt = num_targets[sel].to(device, non_blocking=True)
         kw: dict = {}
         if qa_narrow is not None:
-            kw["qa_narrow"] = qa_narrow[i : i + 1].to(device, non_blocking=True)
-        if qa_wide is not None:
-            kw["qa_wide"] = qa_wide[i : i + 1].to(device, non_blocking=True)
+            kw["qa_narrow"] = qa_narrow[sel].to(device, non_blocking=True)
         topk_ids, _ = forward(q, **kw)
         accum = accumulate_metrics(topk_ids, t, nt, [k], accum)
     metrics = finalize_metrics(accum) if accum is not None else {}
@@ -282,9 +294,8 @@ def perf_pass_cached(
     device: torch.device,
     is_cpu: bool,
     seed: int,
-    n_pool: int = 64,
+    n_pool: int = 4096,
     qa_narrow: torch.Tensor | None = None,  # [N, C_narrow] on cpu, optional
-    qa_wide: torch.Tensor | None = None,  # [N, Q_wide]    on cpu, optional
     skip_mask: torch.Tensor | None = None,  # [N] bool on cpu, optional
 ) -> tuple[float, float, float, float, float]:
     """Time the index forward at the given ``batch_size`` over a query pool.
@@ -294,9 +305,9 @@ def perf_pass_cached(
     and round-robin through them inside the timing loop so each iteration
     sees a different cluster.
 
-    For filter-bench rows: pass ``qa_narrow`` and/or ``qa_wide`` and a
-    matching pool of attribute batches is sampled from the same row indices,
-    so the scored items are realistic for the perf measurement.
+    For filter-bench rows: pass ``qa_narrow`` and a matching pool of
+    attribute batches is sampled from the same row indices, so the scored
+    items are realistic for the perf measurement.
 
     Returns ``(median_ms, p20_ms, p80_ms, peak_mib, transient_mib)``.
     """
@@ -314,17 +325,9 @@ def perf_pass_cached(
     pool = queries[flat].reshape(n_pool, batch_size, -1).to(device).contiguous()
 
     qa_narrow_pool = None
-    qa_wide_pool = None
     if qa_narrow is not None:
         qa_narrow_pool = (
             qa_narrow[flat]
-            .reshape(n_pool, batch_size, -1)
-            .to(device)
-            .contiguous()
-        )
-    if qa_wide is not None:
-        qa_wide_pool = (
-            qa_wide[flat]
             .reshape(n_pool, batch_size, -1)
             .to(device)
             .contiguous()
@@ -339,8 +342,6 @@ def perf_pass_cached(
         kw: dict = {}
         if qa_narrow_pool is not None:
             kw["qa_narrow"] = qa_narrow_pool[idx]
-        if qa_wide_pool is not None:
-            kw["qa_wide"] = qa_wide_pool[idx]
         with torch.inference_mode():
             forward(q, **kw)
 

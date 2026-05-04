@@ -7,13 +7,14 @@
 The Triton kernels split into three trees by domain:
 
 - [`linr/`](../../retrieve/src/retrieve/kernels/triton/linr/) — kernels
-  used by LinR V2/V3 (`fused_masked_knn_topk`, `oporp_1bit_match_topk`).
-  V1's dense matmul + top-K is pure torch — there's no real fusion to
-  win over cuBLAS + CUB.
+  used by `PrefilterKNN` / `OneBitKNN` (`fused_masked_knn_topk`,
+  `oporp_1bit_match_topk`). `SimilarityMasking`'s dense matmul + top-K is
+  pure torch — there's no real fusion to win over cuBLAS + CUB.
 - [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/) —
   standalone filter primitives consumed by the `FilterModule` family:
-  `clause_compact` (powers `ClauseIndex.evaluate_indices`), `clause_mask`
-  (powers `ClauseIndex.evaluate_mask`), and `bloom_compact` (powers
+  `clause_compact` (powers `ExactAttributeFilter.evaluate_indices`),
+  `clause_mask` (powers `ExactAttributeFilter.evaluate_mask`), and
+  `bloom_compact` (powers
   `BloomFilter.evaluate_indices`). Design rationale and the original
   deferred-shipping plan in
   [filter-kernels-followup.md](../plans/filter-kernels-followup.md).
@@ -64,18 +65,20 @@ so loading the same checkpoint produces the same bits. V3 store (`item_bits`,
 on every forward, so the torch reference and the Triton kernel see byte-for-
 byte identical bits.
 
-## V1 dense path — pure torch, no kernel
+## SimilarityMasking dense path — pure torch, no kernel
 
-V1's forward is `query @ item_embs.T` + optional `masked_fill(-inf)` +
-`torch.topk` — implemented directly in [`LiNR_V1`](../../retrieve/src/retrieve/layers/linr/v1.py).
+`SimilarityMasking`'s forward is `query @ item_embs.T` + optional
+`masked_fill(-inf)` + `torch.topk` — implemented directly in
+[`SimilarityMasking`](../../retrieve/src/retrieve/layers/linr/similarity_masking.py).
 An earlier `fused_matmul_topk` Triton kernel sat in this slot, but it only
 fused the matmul: it materialized the full `[B, N]` score buffer to global
 memory and then called the same host-side `torch.topk`, so its memory
 traffic and selection cost matched cuBLAS + CUB exactly. With no fusion
-benefit, the kernel was removed; `LiNR_V1_Triton` is retained as a
-backend-dispatch alias that runs the same pure-torch code as `LiNR_V1`.
+benefit, the kernel was removed; `SimilarityMaskingTriton` is retained as a
+backend-dispatch alias that runs the same pure-torch code as
+`SimilarityMasking`.
 
-## `fused_masked_knn_topk` — V2 sparse path
+## `fused_masked_knn_topk` — PrefilterKNN sparse path
 
 [`kernels/triton/linr/fused_masked_knn_topk.py`](../../retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py).
 
@@ -110,12 +113,31 @@ If `P` ever grows large enough that bandwidth becomes saturated *and* the
 gather is dense in id-space, this can revisit a tiled `tl.dot`.
 
 **Counts handling**: positions past `counts[b]` get score `-inf` via
-`tl.where(in_count, dots, -inf)`. Positions past `P` (block tail) are
-masked at store time. The host then `torch.topk(scores, min(k, P))` and
-gathers global ids from `positive_indices`.
+`tl.where(in_count, dots, -inf)`. The `pos_indices` load is also gated
+by `mask=in_count` — lanes past `count[b]` are never dereferenced, so the
+caller's `positive_indices` buffer doesn't need any padding past
+`counts[b]` (and the host wrapper doesn't materialize a padded copy).
+Positions past `P_real` (block tail) are masked at store time. The host
+then `torch.topk(scores, min(k, P_real))` and gathers global ids from
+`positive_indices`.
+
+**Score buffer is uninitialized.** The host wrapper allocates `[B,
+P_real]` via `torch.empty` — every in-bounds lane is overwritten by the
+kernel (real dot or `-inf`), so the post-topk `where(isfinite(scores),
+…, -1)` mask sees deterministic values without a `torch.full(-inf)`
+pre-fill kernel launch.
 
 **Autotune** searches `(BLOCK_N ∈ {32, 64, 128, 256}, num_warps ∈ {4, 8})`
-keyed on `(P, D)`.
+keyed on `(P_BUCKET, D)`. `P_BUCKET` is the actual `P` rounded up via
+`_bucket_p` to one of `{256, 2048, 16384, 131072, 1048576}`, so the
+autotune cache compiles once per bucket regardless of how
+`counts.max()` shifts across calls. The runtime mask uses `P_REAL`
+(actual width), passed as a non-constexpr int with
+`@triton.jit(do_not_specialize=["P_REAL"])` so it doesn't re-trigger
+specialization on every distinct width. Net: caller passes
+`positive_indices[B, P_real]`, kernel grid is `cdiv(P_real, BLOCK_N)`,
+score buffer is `[B, P_real]`, and the only thing that crosses bucket
+boundaries is recompilation.
 
 ## `oporp_1bit_match_topk` — V3 (all paths)
 
@@ -159,10 +181,11 @@ keyed on `(n, W, HAS_INDICES)`.
 
 [`kernels/triton/filters/clause_compact.py`](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py).
 
-Powers `ClauseIndex.evaluate_indices`. Avoids materializing the dense
-`[B, N]` bool that `evaluate_mask` would otherwise produce, then doing a
-host-side argsort to compact it. One launch produces the `(positive_indices,
-counts)` pair the V2/V3 sparse paths consume.
+Powers `ExactAttributeFilter.evaluate_indices`. Avoids materializing the
+dense `[B, N]` bool that `evaluate_mask` would otherwise produce, then doing
+a host-side argsort to compact it. One launch produces the
+`(positive_indices, counts)` pair that `PrefilterKNN` and `OneBitKNN`'s
+sparse paths consume.
 
 ```
 inputs:   item_clause_attrs   [N, C, A_max]  int64
@@ -205,7 +228,7 @@ corrupt `counts`. If a sweep is needed later, re-enable autotune with
 
 [`kernels/triton/filters/clause_mask.py`](../../retrieve/src/retrieve/kernels/triton/filters/clause_mask.py).
 
-Powers `ClauseIndex.evaluate_mask` on CUDA. Same inner loop as
+Powers `ExactAttributeFilter.evaluate_mask` on CUDA. Same inner loop as
 `clause_compact` minus the cumsum + `atomic_add` epilogue — emits the
 `[B, N]` bool directly without the host-side argsort the dense path used
 to need. Replaces the pure-torch broadcast that materialized
@@ -310,25 +333,26 @@ with no obvious win and is explicitly out of scope.
 ## Layer dispatch
 
 Each LinR Triton subclass is a thin router from the `forward()` signature
-to one of the three kernels above. The dispatch is **design-time** — V1
-is always dense, V2 is always sparse, V3 always uses popcount — not a
-runtime sparsity heuristic. Pick the version that matches your expected
-mask shape, not the one that benches best on a given input.
+to one of the three kernels above. The dispatch is **design-time** —
+`SimilarityMasking` is always dense, `PrefilterKNN` is always sparse,
+`OneBitKNN` always uses popcount — not a runtime sparsity heuristic. Pick
+the variant that matches your expected mask shape, not the one that benches
+best on a given input.
 
 | layer                       | path         | kernel(s) called                                  |
 |-----------------------------|--------------|---------------------------------------------------|
-| [`LiNR_V1_Triton`](../../retrieve/src/retrieve/layers/linr/v1_triton.py)   | always dense | none — pure torch `(q @ x.T).masked_fill(...).topk` |
-| [`LiNR_V2_Triton`](../../retrieve/src/retrieve/layers/linr/v2_triton.py)   | masked       | `compact_mask` → `fused_masked_knn_topk`          |
+| [`SimilarityMaskingTriton`](../../retrieve/src/retrieve/layers/linr/similarity_masking_triton.py) | always dense | none — pure torch `(q @ x.T).masked_fill(...).topk` |
+| [`PrefilterKNNTriton`](../../retrieve/src/retrieve/layers/linr/prefilter_knn_triton.py)         | masked       | `compact_mask` → `fused_masked_knn_topk`          |
 |                                                                | unmasked     | none — pure torch dense path (nothing to pre-filter) |
-| [`LiNR_V3_Triton`](../../retrieve/src/retrieve/layers/linr/v3_triton.py)   | full         | `oporp_1bit_match_topk` (HAS_INDICES=False)       |
+| [`OneBitKNNTriton`](../../retrieve/src/retrieve/layers/linr/one_bit_knn_triton.py)             | full         | `oporp_1bit_match_topk` (HAS_INDICES=False)       |
 |                                                                | masked       | `compact_mask` → `oporp_1bit_match_topk` (HAS_INDICES=True) |
 |                                                                | candidates   | `oporp_1bit_match_topk` (HAS_INDICES=True)        |
 
-V3's masked path always compacts and uses HAS_INDICES — popcount is cheap
-enough that the gather penalty never crosses the dense-fallback break-even
-point. V1's dense fp32 path is also kept as the default (no compaction)
-because cuBLAS + `torch.topk` already handle the inline-mask case at the
-same cost a tile-fused kernel would.
+`OneBitKNN`'s masked path always compacts and uses HAS_INDICES — popcount is
+cheap enough that the gather penalty never crosses the dense-fallback
+break-even point. `SimilarityMasking`'s dense fp32 path is also kept as the
+default (no compaction) because cuBLAS + `torch.topk` already handle the
+inline-mask case at the same cost a tile-fused kernel would.
 
 ## Helpers
 

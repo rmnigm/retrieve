@@ -1,8 +1,9 @@
 """Triton ``fused_masked_knn_topk`` vs gather + bmm + topk reference.
 
-The reference impl mirrors ``LiNR_V2._forward_prefilter``: gather the passing
-rows into ``[B, P, D]``, score with bmm, top-K locally. Both V2 and this test
-take ``(positive_indices, counts)`` directly — kernel never sees a bool mask.
+The reference impl mirrors ``PrefilterKNN._forward_prefilter``: gather the
+passing rows into ``[B, P, D]``, score with bmm, top-K locally. Both
+``PrefilterKNN`` and this test take ``(positive_indices, counts)`` directly —
+the kernel never sees a bool mask.
 The local helper here ``compact_mask``-s a random mask only to construct test
 inputs.
 """
@@ -32,7 +33,16 @@ def _ref(query, item_embs, mask, k):
     return topk_ids, topk_scores
 
 
-@pytest.mark.parametrize("b,n,d,k", [(1, 1024, 64, 16), (16, 16_384, 128, 200)])
+@pytest.mark.parametrize(
+    "b,n,d,k",
+    [
+        (1, 1024, 64, 16),
+        (16, 16_384, 128, 200),
+        # P_real << P_bucket case: pass_rate keeps P_real around ~400-800
+        # while bucket=2048; exercises Phase 2's smaller score buffer + grid.
+        (8, 8_192, 64, 16),
+    ],
+)
 @pytest.mark.parametrize("pass_rate", [0.05, 0.5])
 def test_matches_pure_torch(b, n, d, k, pass_rate):
     embs = make_index(n, d)
@@ -43,3 +53,188 @@ def test_matches_pure_torch(b, n, d, k, pass_rate):
     out_ids, out_scores = fused_masked_knn_topk(query, embs, pos, counts, k)
     ref_ids, ref_scores = _ref(query, embs, mask, k)
     assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores)
+
+
+def test_padding_uses_minus_one_when_counts_below_k():
+    """Regression: when counts[b] < k, the padding slots must be -1.
+
+    The original bug had two compounding faults:
+
+    1. ``clause_compact`` / ``bloom_compact`` allocated their candidate
+       buffer via ``torch.empty`` — uninitialised memory past
+       ``counts[bid]``.
+    2. After ``torch.topk`` over the ``[B, P]`` score matrix, the bottom
+       slots tied at -inf and the gather pulled from those uninitialised
+       positions, leaking random int64 values into top-K (e.g.
+       ``-4785944168570074265``).
+
+    On goodreads ``c0c4_author`` ~23% of users had counts[b] < 10, so
+    ``linr_v2_filter_compact`` reported recall@10 = 0.77 against the
+    oracle (which has the same flaw on the symmetric side: torch.topk
+    with -inf scores tie-breaks to the lowest item ids 0, 1, 2, …, so
+    its padding slots and v2's padding slots disagreed).
+
+    Fix surface: both ``*_compact`` allocate with ``torch.full(..., -1)``
+    AND the wrapper post-masks topk_ids to -1 on -inf scores. This test
+    exercises the *wrapper* explicitly with a hand-built positive_indices
+    buffer that contains plausible-looking-but-stale ids past
+    ``counts[b]`` — the wrapper must not return them.
+    """
+    b, n, d, k = 4, 64, 32, 10
+    p = 32  # padded width of the candidate buffer
+    embs = make_index(n, d)
+    query = make_query(b, d)
+
+    # Build a positive_indices buffer where each row's prefix is real
+    # in-range ids and the suffix is "stale" plausible ids. The kernel
+    # must respect counts[b] and ignore the stale suffix.
+    pos = torch.zeros((b, p), dtype=torch.int64, device=embs.device)
+    counts = torch.tensor([3, 5, 0, k], dtype=torch.int64, device=embs.device)
+    for bi in range(b):
+        cnt = int(counts[bi].item())
+        if cnt > 0:
+            pos[bi, :cnt] = torch.arange(cnt, device=embs.device, dtype=torch.int64)
+        # Stale-but-plausible suffix: real in-range ids that are NOT in
+        # the candidate set. A buggy gather will return these.
+        pos[bi, cnt:] = torch.arange(n - (p - cnt), n, device=embs.device, dtype=torch.int64)
+
+    out_ids, out_scores = fused_masked_knn_topk(query, embs, pos, counts, k)
+
+    for bi in range(b):
+        cnt = int(counts[bi].item())
+        # First `cnt` slots: real candidate ids in [0, cnt).
+        for slot in range(min(cnt, k)):
+            id_ = int(out_ids[bi, slot].item())
+            assert 0 <= id_ < cnt, (
+                f"row={bi} slot={slot}: expected real candidate in [0,{cnt}), got {id_}"
+            )
+            assert torch.isfinite(out_scores[bi, slot]), (
+                f"row={bi} slot={slot}: real candidate has non-finite score"
+            )
+        # Remaining slots: must be -1 sentinel, NOT garbage from `pos[bi, cnt:]`.
+        for slot in range(cnt, k):
+            assert int(out_ids[bi, slot].item()) == -1, (
+                f"row={bi} slot={slot}: padding leaked id "
+                f"{int(out_ids[bi, slot].item())}, expected -1"
+            )
+            assert not torch.isfinite(out_scores[bi, slot]), (
+                f"row={bi} slot={slot}: padding has finite score"
+            )
+
+
+def test_empty_score_buffer_does_not_leak(monkeypatch):
+    """Phase 1 regression: ``all_scores`` is allocated via ``torch.empty``,
+    relying on the kernel to write every slot in ``[0, P)`` (real dot or
+    ``-inf`` past ``counts[bid]``). Poison every fresh ``torch.empty``
+    float32 2-D buffer with ``+1e30`` before the kernel runs — if the
+    kernel skipped any slot, top-K would surface that poison value
+    (``+1e30`` beats every cosine in ``[-1, 1]``).
+    """
+    real_empty = torch.empty
+    poison = 1e30
+
+    def poisoned_empty(*args, **kwargs):
+        t = real_empty(*args, **kwargs)
+        if t.dtype == torch.float32 and t.dim() == 2:
+            t.fill_(poison)
+        return t
+
+    monkeypatch.setattr(torch, "empty", poisoned_empty)
+
+    b, n, d, k = 8, 1024, 64, 10
+    embs = make_index(n, d)
+    query = make_query(b, d)
+    # Mix of pass rates per row so some rows have counts < k (stresses
+    # the padding-region writes) and some have counts > k.
+    mask = make_mask(b, n, pass_rate=0.05)
+    pos, counts = compact_mask(mask)
+
+    out_ids, out_scores = fused_masked_knn_topk(query, embs, pos, counts, k)
+
+    finite = torch.isfinite(out_scores)
+    assert finite.any(), "test setup degenerate — no finite scores"
+    assert (out_scores[finite] != poison).all(), (
+        "torch.empty's +1e30 poison leaked into top-K — kernel left a slot unwritten"
+    )
+    assert (out_scores[finite].abs() <= 1.5).all(), (
+        f"finite scores out of cosine range: max={out_scores[finite].abs().max().item()}"
+    )
+
+
+def test_autotune_cache_stays_bucketed():
+    """Phase 2 regression: ``P_REAL`` is passed as a runtime int with
+    ``do_not_specialize``, so the autotune cache key is driven by
+    ``P_BUCKET`` (and ``D``), not by every distinct ``P_real``. Sweeping
+    ``P_real`` across values that all map to the same bucket must not
+    grow the cache.
+    """
+    from retrieve.kernels.triton.linr.fused_masked_knn_topk import (
+        _fused_masked_knn_topk_kernel,
+        _bucket_p,
+    )
+
+    n, d, k = 2048, 64, 16
+    embs = make_index(n, d)
+    query = make_query(4, d)
+
+    # Pick four pass_rates that all keep counts.max() in (256, 2048] →
+    # bucket=2048 for all of them.
+    p_reals = []
+    for pass_rate in (0.18, 0.22, 0.30, 0.42):
+        mask = make_mask(4, n, pass_rate=pass_rate)
+        pos, counts = compact_mask(mask)
+        assert _bucket_p(pos.shape[1]) == 2048, (
+            f"setup precondition: pass_rate={pass_rate} → P_real={pos.shape[1]} "
+            f"must bucket to 2048"
+        )
+        p_reals.append(pos.shape[1])
+        _ = fused_masked_knn_topk(query, embs, pos, counts, k)
+
+    assert len(set(p_reals)) > 1, (
+        f"setup precondition: P_real should vary across the sweep, got {p_reals}"
+    )
+    # All sweep entries share one autotune cache slot — keyed on (P_BUCKET=2048, D=64, dtypes).
+    bucket_2048_keys = [
+        key for key in _fused_masked_knn_topk_kernel.cache.keys() if key[0] == 2048 and key[1] == d
+    ]
+    assert len(bucket_2048_keys) == 1, (
+        f"expected exactly 1 cache entry for (P_BUCKET=2048, D={d}); "
+        f"got {len(bucket_2048_keys)}: {bucket_2048_keys}. "
+        f"P_REAL specialization may have leaked into the cache key."
+    )
+
+
+def test_compact_kernel_initialises_buffer_to_minus_one():
+    """Regression: clause_compact / bloom_compact must not return
+    uninitialised memory past `counts[bid]`. We feed a mask that passes
+    far fewer than ``n`` items per row and assert the compact buffer's
+    suffix is filled with -1.
+    """
+    from retrieve.kernels.triton.filters.clause_compact import clause_compact
+
+    b, n, c, a_max = 4, 1024, 2, 1
+    # Items: each item has a fixed value per clause; we build sparse matches.
+    item_attrs = torch.full((n, c, a_max), -1, dtype=torch.int64, device="cuda")
+    # Make item i have clause-0 value (i % 8). Only items where i % 8 == q_c match.
+    item_attrs[:, 0, 0] = torch.arange(n, device="cuda", dtype=torch.int64) % 8
+    item_attrs[:, 1, 0] = 0  # clause 1 always matches when query asks for 0
+    is_reverse = torch.zeros(c, dtype=torch.bool, device="cuda")
+    # Each query: clause 0 = bid (only items i where i%8 == bid match), clause 1 inactive (-1).
+    query_attrs = torch.full((b, c), -1, dtype=torch.int64, device="cuda")
+    query_attrs[:, 0] = torch.arange(b, device="cuda", dtype=torch.int64)
+
+    indices, counts = clause_compact(item_attrs, is_reverse, query_attrs)
+
+    # Each row should have exactly n/8 = 128 passing items, leaving most slots empty.
+    assert (counts == n // 8).all(), f"counts={counts.tolist()} expected {n // 8}"
+    p = indices.shape[1]
+    assert p >= n // 8
+
+    # Slots beyond counts[b] must be -1, not random uninitialised memory.
+    for bi in range(b):
+        cnt = int(counts[bi].item())
+        suffix = indices[bi, cnt:]
+        assert (suffix == -1).all(), (
+            f"row={bi}: clause_compact left non-(-1) values past counts={cnt}; "
+            f"sample suffix={suffix[:5].tolist()}"
+        )

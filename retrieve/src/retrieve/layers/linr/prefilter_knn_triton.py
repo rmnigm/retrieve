@@ -4,17 +4,17 @@ import torch
 from torch import Tensor
 
 from retrieve.kernels.triton.linr.fused_masked_knn_topk import fused_masked_knn_topk
-from retrieve.layers.linr.v2 import LiNR_V2
+from retrieve.layers.linr.prefilter_knn import PrefilterKNN
 
 
-class LiNR_V2_Triton(LiNR_V2):
-    """LiNR V2 with the fused Triton prefilter kernel.
+class PrefilterKNNTriton(PrefilterKNN):
+    """Sparse-rescore KNN with the fused Triton prefilter kernel.
 
     Sparse path: ``fused_masked_knn_topk`` reads only the passing rows by
     indirect load, no dense ``[B, N]`` materialization. Without
     ``candidate_ids`` there's nothing to pre-filter, so the unmasked
     fallback runs the parent's pure-torch dense matmul + top-K (the same
-    code as ``LiNR_V1``).
+    code as ``SimilarityMasking`` without the mask).
     """
 
     def forward(
@@ -36,9 +36,3 @@ class LiNR_V2_Triton(LiNR_V2):
         if counts is None:
             counts = torch.full((b,), p, dtype=torch.long, device=query.device)
         return fused_masked_knn_topk(query, self.item_embs, candidate_ids, counts, self.k)
-
-
-def build_linr_v2_triton(item_embs: Tensor, k: int) -> LiNR_V2_Triton:
-    module = LiNR_V2_Triton(k=k)
-    module.register_index(item_embs)
-    return module

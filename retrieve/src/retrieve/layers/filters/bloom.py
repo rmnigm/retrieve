@@ -15,7 +15,7 @@ class BloomFilter(FilterModule):
     per clause; ``-1`` is inactive). Subset test ``(qb & sigs) == qb`` per word,
     AND-reduced.
 
-    No reverse / NOT — that path stays in ``ClauseIndex``.
+    No reverse / NOT — that path stays in ``ExactAttributeFilter``.
     """
 
     bloom_sigs: Tensor  # [N, W] int64
@@ -37,7 +37,13 @@ class BloomFilter(FilterModule):
         self,
         item_clause_attrs: Tensor,
         item_embs: Tensor | None = None,
+        clause_is_reverse: Tensor | None = None,
     ) -> None:
+        if clause_is_reverse is not None and bool(clause_is_reverse.any().item()):
+            raise ValueError(
+                "BloomFilter is paper-strict: clause_is_reverse must be all-False "
+                "(no NOT). Use ExactAttributeFilter (filter_kind='clause') for reverse clauses."
+            )
         seeds = _generate_seeds(self.k_hash, device=item_clause_attrs.device)
         self.register_buffer("hash_seeds", seeds)
         sigs = _build_signatures(
@@ -118,6 +124,9 @@ def _mix64(x: Tensor, c1: Tensor, c2: Tensor) -> Tensor:
     return h
 
 
+_BUILD_SIGS_BATCH = 131072  # rows per chunk; bounds peak alloc to ~B*word_count*64*8 bytes
+
+
 def _build_signatures(
     attrs: Tensor,
     seeds: Tensor,
@@ -133,26 +142,30 @@ def _build_signatures(
     a_max = attrs.shape[-1]
 
     flat = attrs.reshape(n, c_dim * a_max)
-    valid = flat != -1
-
     seed_c1 = seeds[:, 0].view(1, 1, k_hash)
     seed_c2 = seeds[:, 1].view(1, 1, k_hash)
-
-    h = _mix64(flat.unsqueeze(-1) + seed_c1, seed_c1, seed_c2)
-    positions = h & (m_bits - 1)
-
-    flat_pos = positions.reshape(n, c_dim * a_max * k_hash)
-    valid_expanded = valid.unsqueeze(-1).expand(-1, -1, k_hash).reshape(n, -1)
-    safe_pos = torch.where(valid_expanded, flat_pos, torch.full_like(flat_pos, m_bits))
-
-    bit_grid = torch.zeros(n, m_bits + 1, dtype=torch.bool, device=attrs.device)
-    src = torch.ones_like(safe_pos, dtype=torch.bool)
-    bit_grid.scatter_(1, safe_pos, src)
-    bit_grid = bit_grid[:, :m_bits]
-
-    bit_grid = bit_grid.view(n, word_count, 64).long()
     shifts = torch.arange(64, dtype=torch.int64, device=attrs.device)
-    sigs = (bit_grid << shifts).sum(dim=-1)
+
+    # The dense path materializes ``[N, word_count, 64]`` int64 (~22 GiB at
+    # N=2.7M, m_bits=1024). Process in chunks: per-batch peak is bounded by
+    # ``batch_size * c * a * k_hash`` int64 + ``batch_size * word_count * 64``
+    # int64. At batch=131072 that's ~1 GiB scratch — fits comfortably even
+    # alongside the loaded item embeddings + ExactAttributeFilter on a 40 GiB GPU.
+    out = torch.empty(n, word_count, dtype=torch.int64, device=attrs.device)
+    for s in range(0, n, _BUILD_SIGS_BATCH):
+        e = min(s + _BUILD_SIGS_BATCH, n)
+        b = e - s
+        batch = flat[s:e]
+        valid = batch != -1
+        h = _mix64(batch.unsqueeze(-1) + seed_c1, seed_c1, seed_c2)
+        positions = h & (m_bits - 1)
+        flat_pos = positions.reshape(b, c_dim * a_max * k_hash)
+        valid_expanded = valid.unsqueeze(-1).expand(-1, -1, k_hash).reshape(b, -1)
+        safe_pos = torch.where(valid_expanded, flat_pos, torch.full_like(flat_pos, m_bits))
+        bit_grid = torch.zeros(b, m_bits + 1, dtype=torch.bool, device=attrs.device)
+        bit_grid.scatter_(1, safe_pos, torch.ones_like(safe_pos, dtype=torch.bool))
+        bit_grid = bit_grid[:, :m_bits].view(b, word_count, 64).long()
+        out[s:e] = (bit_grid << shifts).sum(dim=-1)
 
     out_shape = list(leading) + [word_count]
-    return sigs.reshape(out_shape) if leading else sigs.reshape(word_count)
+    return out.reshape(out_shape) if leading else out.reshape(word_count)

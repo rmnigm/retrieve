@@ -28,8 +28,8 @@ retrieve/tests/
 │   ├── test_bloom_filter.py
 │   ├── test_combine_filters.py
 │   ├── test_compact.py
-│   ├── test_filters.py             (ClauseIndex)
-│   ├── test_linr.py                (V1, V2, V3 × torch / Triton)
+│   ├── test_filters.py             (ExactAttributeFilter)
+│   ├── test_linr.py                (SimilarityMasking, PrefilterKNN, OneBitKNN × torch / Triton)
 │   ├── test_quantize.py            (int8, OPORP, popcount)
 │   ├── test_retrieval_utils.py     (FullScanKNN, post_filter_topk)
 │   ├── test_scorers.py             (DotProductScorer)
@@ -119,7 +119,7 @@ position-equality assertion for fp32 score paths.
 - **Framework**: vanilla `pytest`. No `hypothesis`, no `unittest`.
 - **Parametrize**: `@pytest.mark.parametrize` for shape and pass-rate
   matrices; class-level parametrize for backend cross-product
-  (`@pytest.mark.parametrize("cls", [LiNR_V1, LiNR_V1_Triton])`).
+  (`@pytest.mark.parametrize("cls", [SimilarityMasking, SimilarityMaskingTriton])`).
 - **No marks**: there is no `slow`, `gpu`, or `bench` marker. Every
   test is GPU-bound and runs in CI; the CUDA skip gate handles
   no-GPU hosts globally.
@@ -134,9 +134,9 @@ position-equality assertion for fp32 score paths.
   position-by-position. Tie-breaking on equal scores is implementation-
   specific and is not asserted.
 - **Score tolerance**: `atol=1e-3, rtol=1e-3` for fp32 tile-blocked
-  reductions (V1/V2 path); strict `torch.equal` only for V3
-  (popcount is exact by construction) and for path-isolated comparisons
-  on identical reductions.
+  reductions (`SimilarityMasking` / `PrefilterKNN` paths); strict
+  `torch.equal` only for `OneBitKNN` (popcount is exact by construction)
+  and for path-isolated comparisons on identical reductions.
 - **Module-scope fixtures**: heavy index builds (IVF, LiNR with N>1k)
   use `@pytest.fixture(scope="module")` to amortize across the file.
   Per-test mutation of these fixtures is forbidden.
@@ -158,23 +158,23 @@ module under test.
 | `quantize_int8`            | known constants + reconstruction error bounded by `abs_max / 127` |
 | `quantize_oporp_1bit`      | self-consistency (item-side bits == `project_oporp_1bit_query` of same emb) + Pearson correlation with cosine similarity |
 | `popcount_int64`           | Python `bin(x & 0xFFFFFFFFFFFFFFFF).count("1")` — true external oracle |
-| `ClauseIndex.evaluate_mask`| dense broadcast `(item == query.unsqueeze).any(-1).all(-1)` written explicitly in `test_clause_index_all_reverse` |
-| `ClauseIndex.evaluate_indices` | `compact_mask(evaluate_mask(...))` (the ABC default path) |
-| `BloomFilter.evaluate_mask`| `ClauseIndex.evaluate_mask` ⊆ result (no-FN invariant) + analytic FPR `(1 - exp(-k/m))^k` |
+| `ExactAttributeFilter.evaluate_mask`| dense broadcast `(item == query.unsqueeze).any(-1).all(-1)` written explicitly in `test_clause_index_all_reverse` |
+| `ExactAttributeFilter.evaluate_indices` | `compact_mask(evaluate_mask(...))` (the ABC default path) |
+| `BloomFilter.evaluate_mask`| `ExactAttributeFilter.evaluate_mask` ⊆ result (no-FN invariant) + analytic FPR `(1 - exp(-k/m))^k` |
 | `BloomFilter.evaluate_subset` | `evaluate_mask(q).gather(1, ids)` |
 | `combine_masks`            | iterated `&` of non-`None` inputs |
 | `combine_indices`          | `compact_mask(combine_masks(*[f.evaluate_mask(q)]))` |
 | `SilverTorch` (no bloom)   | `FullScanKNN` for recall (asserts ≥ 0.85 at full probe) + recall monotone in `n_probe` |
 | `SilverTorch` (with bloom) | `SilverTorch (no bloom)(mask=BloomFilter.evaluate_mask(qa))` — component composition |
 | `SilverTorch` (qa=None)    | `SilverTorch (no bloom)` directly — `query_clause_attrs=None` is a documented fast path |
-| `LiNR_V1` semantics        | `(q @ x.T).masked_fill(~mask, -inf).topk(k)` |
-| `LiNR_V2` semantics        | gather + bmm + local topk + scatter |
-| `LiNR_V3` semantics        | `FullScanKNN` recall (asserts ≥ 0.4 at K=200, N=2048) |
-| `LiNR_*_Triton`            | the corresponding torch `LiNR_V*` class |
+| `SimilarityMasking` semantics | `(q @ x.T).masked_fill(~mask, -inf).topk(k)` |
+| `PrefilterKNN` semantics      | gather + bmm + local topk + scatter |
+| `OneBitKNN` semantics         | `FullScanKNN` recall (asserts ≥ 0.4 at K=200, N=2048) |
+| `*Triton` siblings            | the corresponding torch reference class |
 | `fused_masked_knn_topk`    | `compact_mask(mask)` → `bmm(q.unsqueeze(1), embs[ids].transpose(1,2)).squeeze(1)` → topk |
 | `oporp_1bit_match_topk`    | `popcount_int64(xor) → D - 2*hamming` → topk (bit-exact) |
 | `bloom_match`              | `(qb & sigs) == qb` per word, AND-reduced — computed on CPU to avoid tautology with the kernel-routed `BloomFilter.evaluate_mask`  |
-| `clause_compact`           | `ClauseIndex.evaluate_mask(...)` + `compact_mask` |
+| `clause_compact`           | `ExactAttributeFilter.evaluate_mask(...)` + `compact_mask` |
 | `codesigned_probe_score`   | `_ref_phase23` in the parity file: bloom subset + INT8 dequant + dot + topk |
 
 ## What each correctness file asserts
@@ -240,7 +240,7 @@ INT8 + OPORP + popcount.
 
 ### [`test_filters.py`](../../retrieve/tests/correctness/test_filters.py)
 
-`ClauseIndex` semantics.
+`ExactAttributeFilter` semantics.
 
 - AND/OR semantics: per-clause OR over `A_max` slot, AND across `C`
   clauses. Verified against a hardcoded item layout and four hand-
@@ -254,7 +254,7 @@ INT8 + OPORP + popcount.
   `(~matched).all(dim=-1)`.
 - `N = 1` corner.
 - `evaluate_subset` with `[B, 0]` candidates returns `[B, 0]`.
-- `LiNR_V3_Triton(mask=combine_masks(clause_mask, bloom_mask))`
+- `OneBitKNNTriton(mask=combine_masks(clause_mask, bloom_mask))`
   cross-compat smoke (combined mask should equal clause mask, since
   bloom is a strict superset).
 
@@ -311,17 +311,19 @@ LiNR V1, V2, V3 in both backends.
 - V3: full-scan recall vs `FullScanKNN` ≥ 0.4; candidate path
   returns ids ⊆ candidates.
 - Cross-backend: torch ↔ Triton return identical valid-id sets per
-  row for V1, V2, V3 across `pass_rate ∈ {None, 0.01, 0.1, 0.8}`.
-  Sorted scores `allclose` (atol=1e-3) for V1; bit-exact for V3.
-- V1 (mask path) ≡ V2 (compact_mask of same mask) as id sets.
-- Builder dispatches on `(version, backend)`; bad version / backend
-  raises `ValueError`.
-- `ClauseIndex` decoupled composition: V1 with `mask = ci.evaluate_mask & extra`,
-  V2 with `compact_mask(combined)`, V2 with `ci.evaluate_indices`.
+  row for `SimilarityMasking`, `PrefilterKNN`, `OneBitKNN` across
+  `pass_rate ∈ {None, 0.01, 0.1, 0.8}`. Sorted scores `allclose`
+  (atol=1e-3) for fp32 paths; bit-exact for `OneBitKNN`.
+- `SimilarityMasking` (mask path) ≡ `PrefilterKNN` (compact_mask of same
+  mask) as id sets.
+- `ExactAttributeFilter` decoupled composition: `SimilarityMasking` with
+  `mask = ef.evaluate_mask & extra`, `PrefilterKNN` with
+  `compact_mask(combined)`, `PrefilterKNN` with `ef.evaluate_indices`.
 - Edge cases (`TestEdgeCases`):
-  - mask-all-True ≡ unmasked path (V1, V3 × torch / Triton).
+  - mask-all-True ≡ unmasked path (`SimilarityMasking`, `OneBitKNN` ×
+    torch / Triton).
   - mask-all-False produces no finite scores.
-  - V2 `candidate_ids` shape `[B, 0]` returns full padding
+  - `PrefilterKNN` `candidate_ids` shape `[B, 0]` returns full padding
     (`(-1, -inf)` × K).
   - `B = 1` single-query.
   - `K = N` returns every item (a permutation of `[0, N)`).
@@ -341,7 +343,7 @@ LiNR V1, V2, V3 in both backends.
   `query_clause_attrs` or `item_clause_attrs` to a bloom-disabled
   module raises.
 - Mask honored at `pass_rate ∈ {0.05, 0.5}` (no-bloom path); externally-
-  composed `ClauseIndex` mask gives ids ⊆ passing items.
+  composed `ExactAttributeFilter` mask gives ids ⊆ passing items.
 - **Equivalence**: `SilverTorch(q, qa)` ≡
   `SilverTorch(no bloom)(q, mask=BloomFilter.evaluate_mask(qa))` —
   sorted ids match exactly, sorted scores `allclose` (atol=1e-3). Also,
@@ -364,10 +366,10 @@ exact-by-construction kernels, which use stricter assertions.
 
 | File | Kernel | Reference | Notes |
 |------|--------|-----------|-------|
-| [`test_fused_masked_knn_topk.py`](../../retrieve/tests/parity/test_fused_masked_knn_topk.py) | `fused_masked_knn_topk`     | `compact_mask` → gather + bmm + topk         | mirrors `LiNR_V2._forward_prefilter` |
+| [`test_fused_masked_knn_topk.py`](../../retrieve/tests/parity/test_fused_masked_knn_topk.py) | `fused_masked_knn_topk`     | `compact_mask` → gather + bmm + topk         | mirrors `PrefilterKNN._forward_prefilter` |
 | [`test_oporp_1bit_match_topk.py`](../../retrieve/tests/parity/test_oporp_1bit_match_topk.py) | `oporp_1bit_match_topk`     | `popcount_int64(xor).sum(W)` → topk          | popcount is bit-exact by construction (SWAR matches between torch and Triton) |
 | [`test_bloom_match.py`](../../retrieve/tests/parity/test_bloom_match.py)                     | `bloom_match`               | `(qb & sigs) == qb` per word, AND-reduced — computed on CPU to keep the test from tautologically routing through the kernel via `BloomFilter.evaluate_mask` | parametrize on `(n, m_bits, k_hash)` |
-| [`test_clause_compact.py`](../../retrieve/tests/parity/test_clause_compact.py)               | `clause_compact`            | `ClauseIndex.evaluate_mask(...)` + `compact_mask` | row-set match (kernel order is unspecified — atomic stream compaction); cases for reverse clauses, all-inactive query, no-passing-items, `B=1` grid corner |
+| [`test_clause_compact.py`](../../retrieve/tests/parity/test_clause_compact.py)               | `clause_compact`            | `ExactAttributeFilter.evaluate_mask(...)` + `compact_mask` | row-set match (kernel order is unspecified — atomic stream compaction); cases for reverse clauses, all-inactive query, no-passing-items, `B=1` grid corner |
 | [`test_codesigned_probe_score.py`](../../retrieve/tests/parity/test_codesigned_probe_score.py) | `codesigned_probe_score`  | `_ref_phase23`: bloom subset + INT8 dequant + dot + topk | the SilverTorch fused path; cases for `(qb, no qb) × (mask, no mask)` |
 
 ## Adding a new test

@@ -1,6 +1,6 @@
 """Triton ``clause_mask`` vs the pure-torch broadcast baseline.
 
-``ClauseIndex.evaluate_mask`` now routes to ``clause_mask`` on CUDA, so we
+``ExactAttributeFilter.evaluate_mask`` now routes to ``clause_mask`` on CUDA, so we
 compute the broadcast reference inline (intentionally materializing the
 ``[B, N, C, A_max]`` intermediate this kernel exists to avoid) and assert
 byte-exact equality. No compaction → ordering is unambiguous.

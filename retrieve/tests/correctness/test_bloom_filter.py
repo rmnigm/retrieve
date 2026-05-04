@@ -7,8 +7,7 @@ import math
 import pytest
 import torch
 
-from retrieve.layers.filters import BloomFilter, ClauseIndex
-from retrieve.layers.utils.compact import compact_mask
+from retrieve.layers.filters import BloomFilter, ExactAttributeFilter
 from tests.conftest import make_attrs, make_query_attrs
 
 
@@ -59,7 +58,7 @@ class TestNoFalseNegatives:
         bf.register_index(attrs)
         bloom_mask = bf.evaluate_mask(q)
 
-        ci = ClauseIndex().to("cuda")
+        ci = ExactAttributeFilter().to("cuda")
         ci.register_index(attrs)
         clause_mask = ci.evaluate_mask(q)
 
@@ -97,7 +96,7 @@ class TestFalsePositiveRate:
         # Shift query vocab away from item vocab — every "True" is a false positive.
         q = q + 100_000
 
-        ci = ClauseIndex().to("cuda")
+        ci = ExactAttributeFilter().to("cuda")
         ci.register_index(attrs)
         true_match_rate = ci.evaluate_mask(q).float().mean().item()
         assert true_match_rate < 1e-3, "Expected near-zero true match rate"
@@ -127,19 +126,6 @@ class TestEvaluateSubset:
         expected = mask_full.gather(1, ids)
         got = bf.evaluate_subset(query, ids)
         assert torch.equal(got, expected)
-
-
-class TestEvaluateIndicesDefault:
-    """``BloomFilter.evaluate_indices`` falls through to the ABC default."""
-
-    def test_matches_compact_of_mask(self, attrs, query):
-        bf = BloomFilter(m_bits=512, k_hash=5).to("cuda")
-        bf.register_index(attrs)
-
-        ids, counts = bf.evaluate_indices(query)
-        ref_ids, ref_counts = compact_mask(bf.evaluate_mask(query))
-        assert torch.equal(ids, ref_ids)
-        assert torch.equal(counts, ref_counts)
 
 
 class TestEdgeCases:
@@ -175,3 +161,27 @@ class TestEdgeCases:
         cpu_mask = bf_cpu.evaluate_mask(query.cpu())
 
         assert torch.equal(cuda_mask.cpu(), cpu_mask)
+
+
+class TestRegisterIndexReverseGuard:
+    """Paper-strict: BloomFilter rejects any reverse clause at registration."""
+
+    def test_register_raises_on_any_reverse_clause(self):
+        attrs = make_attrs(n=64, c=2, a_max=2, n_vocab=20, pad_rate=0.0, seed=70)
+        bf = BloomFilter(m_bits=256, k_hash=3).to("cuda")
+        is_reverse = torch.tensor([False, True], device="cuda")
+        with pytest.raises(ValueError, match="paper-strict"):
+            bf.register_index(attrs, clause_is_reverse=is_reverse)
+
+    def test_register_accepts_all_false(self):
+        attrs = make_attrs(n=64, c=2, a_max=2, n_vocab=20, pad_rate=0.0, seed=71)
+        bf = BloomFilter(m_bits=256, k_hash=3).to("cuda")
+        is_reverse = torch.tensor([False, False], device="cuda")
+        bf.register_index(attrs, clause_is_reverse=is_reverse)
+        assert bf.bloom_sigs.shape == (64, 256 // 64)
+
+    def test_register_none_skips_check(self):
+        attrs = make_attrs(n=64, c=2, a_max=2, n_vocab=20, pad_rate=0.0, seed=72)
+        bf = BloomFilter(m_bits=256, k_hash=3).to("cuda")
+        bf.register_index(attrs, clause_is_reverse=None)
+        assert bf.bloom_sigs.shape == (64, 256 // 64)

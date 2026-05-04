@@ -52,13 +52,10 @@ evaluation/retrieval/
 └── metrics.py                 # accumulate_metrics, finalize_metrics
 
 evaluation/conf/
-├── 500m-d64.yaml              # 500M Listen+, d=64 SASRec checkpoint
-├── 500m-d128.yaml             # 500M Listen+, d=128 SASRec checkpoint
-├── 500m-d256.yaml             # 500M Listen+, d=256 SASRec checkpoint
-├── 5b-d64.yaml                # 5B Listen+, d=64 SASRec checkpoint
-├── 5b-d128.yaml               # 5B Listen+, d=128 SASRec checkpoint
-├── arxiv-d256.yaml            # arxiv filter bench, nomic-embed-text-v1.5 d=256
-└── goodreads-d{64,128,256}-drop0.5-id.yaml  # goodreads filter bench
+├── 500m/d{64,128,256}-quality.yaml          # 500M Listen+, SASRec checkpoints
+├── 5b/d{64,128}-quality.yaml                # 5B Listen+, SASRec checkpoints
+├── arxiv/d256-{quality,filter}.yaml         # arxiv, nomic-embed-text-v1.5 d=256
+└── goodreads/d{64,128,256}-{quality,filter}.yaml  # goodreads filter+quality bench
 ```
 
 ## Configuration
@@ -152,9 +149,9 @@ filter and is only listed in goodreads/arxiv configs.
 | Name | Class | Notes |
 |---|---|---|
 | `torch_fullscan` | `FullScanKNN` | Reference exhaustive IP scan; mask post-filter on filtered cells (skipped on the goodreads filter suite — equals the oracle). |
-| `triton_knn` | `LiNR_V1_Triton` | Pure-torch full-scan KNN — `LiNR_V1_Triton` is a backend-dispatch alias over the same `query @ x.T + topk` path as `LiNR_V1`. |
-| `linr_v3_then_v2` | `LiNR_V3_Triton` → `LiNR_V2_Triton` | Quantized V3 pre-filters to top-`candidate_pool`; V2 reranks at full precision. Approximate. |
-| `linr_v2_filter_compact` | `LiNR_V2_Triton` | Exact filtered top-K via the filter primitive's native compact `(candidate_ids, counts)` path. Recall=1.0 by construction; headline is speed/memory. Filter suite only. |
+| `triton_knn` | `SimilarityMaskingTriton` | Pure-torch full-scan KNN — `SimilarityMaskingTriton` is a backend-dispatch alias over the same `query @ x.T + topk` path as `SimilarityMasking`. |
+| `linr_v3_then_v2` | `OneBitKNNTriton` → `PrefilterKNNTriton` | Quantized 1-bit pre-filter to top-`candidate_pool`; full-precision rerank. Approximate. |
+| `linr_v2_filter_compact` | `PrefilterKNNTriton` | Exact filtered top-K via the filter primitive's native compact `(candidate_ids, counts)` path. Recall=1.0 by construction; headline is speed/memory. Filter suite only. |
 | `silvertorch` | `SilverTorch` | Bloom-disabled on yambda/quality; bloom-fused (`m_bits`/`k_hash` set) on wide and combined filter sweeps. Skipped on narrow-only filter sweeps via `SilvertorchSkippedOnNarrow`. Approximate. |
 | `voyager_hnsw` | `VoyagerHNSW` | Spotify HNSW (`voyager.Index`, InnerProduct space), multi-threaded by default. Yambda only — filtered configs apply a post-mask. |
 
@@ -295,32 +292,32 @@ Yambda 500M sweep:
 
 ```bash
 cd evaluation
-uv run evaluate --config conf/500m-d128.yaml
+uv run evaluate --config conf/500m/d128-quality.yaml
 ```
 
 5B sweep (gated on the 5B checkpoint having been trained):
 
 ```bash
-uv run evaluate --config conf/5b-d64.yaml
+uv run evaluate --config conf/5b/d64-quality.yaml
 ```
 
 Goodreads filter bench:
 
 ```bash
-uv run evaluate --config conf/goodreads-d128-drop0.5-id.yaml
+uv run evaluate --config conf/goodreads/d128-filter.yaml
 ```
 
 Arxiv filter bench:
 
 ```bash
-uv run evaluate --config conf/arxiv-d256.yaml
+uv run evaluate --config conf/arxiv/d256-filter.yaml
 ```
 
 CPU baseline only on yambda:
 
 ```bash
 uv run evaluate \
-    --config conf/500m-d128.yaml \
+    --config conf/500m/d128-quality.yaml \
     --algorithms voyager_hnsw
 ```
 

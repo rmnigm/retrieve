@@ -1,8 +1,8 @@
 """Fused clause evaluation emitting ``[B, N]`` bool directly.
 
 Avoids the ``[B, N, C, A_max]`` intermediate that
-``ClauseIndex.evaluate_mask``'s pure-torch broadcast materializes. Same inner
-loop as ``clause_compact`` minus the cumsum + atomic_add epilogue.
+``ExactAttributeFilter.evaluate_mask``'s pure-torch broadcast materializes.
+Same inner loop as ``clause_compact`` minus the cumsum + atomic_add epilogue.
 """
 
 from __future__ import annotations

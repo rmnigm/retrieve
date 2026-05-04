@@ -7,7 +7,7 @@ from torch import Tensor
 
 from retrieve.interfaces import FilterModule
 from retrieve.layers.filters.bloom import BloomFilter
-from retrieve.layers.filters.clause import ClauseIndex
+from retrieve.layers.filters.exact_attribute import ExactAttributeFilter
 
 
 def combine_masks(*masks: Tensor | None) -> Tensor | None:
@@ -72,7 +72,7 @@ def combine_indices(
 
 __all__ = [
     "BloomFilter",
-    "ClauseIndex",
+    "ExactAttributeFilter",
     "combine_indices",
     "combine_masks",
 ]
