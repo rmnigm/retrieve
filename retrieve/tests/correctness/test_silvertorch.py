@@ -12,15 +12,12 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve import ExactAttributeFilter
-from retrieve.layers.filters import BloomFilter
 from retrieve.layers.silvertorch import SilverTorch, build_silvertorch
 from retrieve.layers.utils.retrieval import FullScanKNN
 from tests.conftest import (
     assert_recall_monotone,
     make_attrs,
     make_index,
-    make_mask,
     make_query,
     make_query_attrs,
     recall_at_k,
@@ -130,62 +127,7 @@ class TestParamValidation:
             m.register_index(data["embs"], item_clause_attrs=attrs)
 
 
-class TestMask:
-    @pytest.mark.parametrize("pass_rate", [0.05, 0.5])
-    def test_mask_is_honored(self, data, pass_rate):
-        m = _build_no_bloom(data, n_probe=N_LISTS)
-        mask = make_mask(B, N, pass_rate=pass_rate)
-        ids, scores = m(data["query"], mask=mask)
-        for b in range(B):
-            valid = torch.isfinite(scores[b]) & (ids[b] >= 0)
-            assert mask[b, ids[b][valid]].all()
-
-    def test_mask_all_false_no_bloom(self, data):
-        m = _build_no_bloom(data, n_probe=N_LISTS)
-        all_false = torch.zeros(B, N, dtype=torch.bool, device="cuda")
-        _, scores = m(data["query"], mask=all_false)
-        assert not torch.isfinite(scores).any()
-
-    def test_mask_all_false_with_bloom(self, data):
-        st = _build(with_attrs=True, data=data)
-        all_false = torch.zeros(B, N, dtype=torch.bool, device="cuda")
-        _, scores = st(data["query"], data["q_attrs"], mask=all_false)
-        assert not torch.isfinite(scores).any()
-
-    def test_clause_index_composed_externally(self, data):
-        attrs = make_attrs(N, c=1, a_max=1, n_vocab=10)
-        ci = ExactAttributeFilter()
-        ci.register_index(attrs)
-        m = _build_no_bloom(data, n_probe=N_LISTS)
-        q_attrs = torch.full((B, 1), 1, dtype=torch.long, device="cuda")
-        mask = ci.evaluate_mask(q_attrs)
-        ids, _ = m(data["query"], mask=mask)
-        passing = (attrs[:, 0, 0] == 1).nonzero(as_tuple=True)[0]
-        passing_set = set(passing.tolist())
-        for b in range(B):
-            for j in range(K):
-                if ids[b, j].item() >= 0:
-                    assert ids[b, j].item() in passing_set
-
-
 class TestEquivalence:
-    def test_bloom_matches_no_bloom_plus_external_mask(self, data):
-        """SilverTorch(qa) ⇔ SilverTorch (no bloom)(mask=BloomFilter.evaluate_mask(...))."""
-        st = _build(with_attrs=True, data=data)
-        ref = _build_no_bloom(data)
-        bf = BloomFilter(m_bits=M_BITS, k_hash=K_HASH)
-        bf.register_index(data["attrs"])
-
-        bloom_mask = bf.evaluate_mask(data["q_attrs"])
-        ref_ids, ref_scores = ref(data["query"], mask=bloom_mask)
-        st_ids, st_scores = st(data["query"], data["q_attrs"])
-
-        for b in range(B):
-            assert sorted(st_ids[b].tolist()) == sorted(ref_ids[b].tolist())
-        st_sorted, _ = st_scores.sort(dim=1, descending=True)
-        ref_sorted, _ = ref_scores.sort(dim=1, descending=True)
-        assert torch.allclose(st_sorted, ref_sorted, atol=1e-3)
-
     def test_query_clause_attrs_none_equals_no_bloom(self, data):
         """``query_clause_attrs=None`` on a bloom-configured module ≡ no-bloom module.
 

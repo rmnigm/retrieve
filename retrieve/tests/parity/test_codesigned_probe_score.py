@@ -13,7 +13,6 @@ from retrieve.layers.utils.quantize import quantize_int8
 from tests.conftest import (
     make_attrs,
     make_index,
-    make_mask,
     make_query,
     make_query_attrs,
 )
@@ -29,7 +28,6 @@ def _ref_phase23(
     *,
     qb=None,
     bloom_sigs=None,
-    mask=None,
 ):
     valid = flat_items >= 0
     safe = flat_items.clamp(min=0)
@@ -39,8 +37,6 @@ def _ref_phase23(
         probed_sigs = bloom_sigs[safe]
         match = (qb.unsqueeze(1) & probed_sigs) == qb.unsqueeze(1)
         keep = keep & match.all(dim=-1)
-    if mask is not None:
-        keep = keep & mask.gather(1, safe)
 
     codes = item_codes[safe].float()
     scales = item_scales[safe]
@@ -92,44 +88,6 @@ def test_codesigned_with_bloom_matches_ref(n, d, p, k, b):
         query, flat, codes, scales, k, query_bits=qb, bloom_sigs=sigs
     )
     ref_ids, ref_scores = _ref_phase23(query, flat, codes, scales, k, qb=qb, bloom_sigs=sigs)
-    assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores)
-
-
-@pytest.mark.parametrize("n,d,p,k", [(2048, 64, 256, 16), (8192, 128, 512, 32)])
-@pytest.mark.parametrize("b", [1, 16])
-def test_codesigned_with_external_mask_matches_ref(n, d, p, k, b):
-    embs = make_index(n, d)
-    codes, scales = quantize_int8(embs)
-    query = make_query(b, d)
-    flat = _make_flat_probed(b, n, p)
-    mask = make_mask(b, n, pass_rate=0.3)
-
-    out_ids, out_scores = codesigned_probe_score(query, flat, codes, scales, k, mask=mask)
-    ref_ids, ref_scores = _ref_phase23(query, flat, codes, scales, k, mask=mask)
-    assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores)
-
-
-@pytest.mark.parametrize("n,d,p,k", [(2048, 64, 256, 16)])
-@pytest.mark.parametrize("b", [16])
-def test_codesigned_bloom_and_mask_matches_ref(n, d, p, k, b):
-    embs = make_index(n, d)
-    codes, scales = quantize_int8(embs)
-    query = make_query(b, d)
-    flat = _make_flat_probed(b, n, p)
-    mask = make_mask(b, n, pass_rate=0.5)
-
-    attrs = make_attrs(n, c=2, a_max=2)
-    q_attrs = make_query_attrs(b, c=2)
-    seeds = _generate_seeds(k_hash=5, device=embs.device)
-    sigs = _build_signatures(attrs.long(), seeds, m_bits=512, k_hash=5, word_count=8)
-    qb = _build_signatures(q_attrs.long().unsqueeze(-1), seeds, m_bits=512, k_hash=5, word_count=8)
-
-    out_ids, out_scores = codesigned_probe_score(
-        query, flat, codes, scales, k, query_bits=qb, bloom_sigs=sigs, mask=mask
-    )
-    ref_ids, ref_scores = _ref_phase23(
-        query, flat, codes, scales, k, qb=qb, bloom_sigs=sigs, mask=mask
-    )
     assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores)
 
 

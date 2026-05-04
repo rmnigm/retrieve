@@ -9,7 +9,7 @@ The `retrieve` module ships **7 Triton kernels** and ~9 `nn.Module` retrieval/fi
 - **5 of 7 kernels** use `@triton.autotune` with lambda-meta grids (`grid=lambda meta: (b, triton.cdiv(p, meta["BLOCK_P"]))`), which inductor's compile-time autotuner cannot serialize portably. The 2 atomics-tail kernels (`clause_compact`, `bloom_compact`) deliberately do not autotune — they share a tail that would corrupt under autotune trials.
 - **3 host wrappers** (`codesigned_probe_score`, `oporp_1bit_match_topk`) branch on `Optional[Tensor]` arguments and rebind to dummy `1×1` tensors keyed by `HAS_X: tl.constexpr` flags.
 - Filter layer `forward`/`evaluate_*` methods branch on `is_cuda` ([clause.py](../../retrieve/src/retrieve/layers/filters/clause.py), [bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py)).
-- Retrieval layer `forward` methods branch on Optional tensor args (`candidate_ids is not None`, `query_clause_attrs is not None`, `mask is not None`) — **`SilverTorch.forward` now carries three Optionals: `query_clause_attrs`, `mask`, `candidate_ids`** (see [silvertorch/main.py:126](../../retrieve/src/retrieve/layers/silvertorch/main.py#L126)).
+- Retrieval layer `forward` methods branch on Optional tensor args (`candidate_ids is not None`, `query_clause_attrs is not None`) — **`SilverTorch.forward` now carries two Optionals: `query_clause_attrs`, `candidate_ids`** (see [silvertorch/main.py:126](../../retrieve/src/retrieve/layers/silvertorch/main.py#L126)).
 - Two host wrappers compute Python-int values via `.item()` and use them to slice tensors (`out_indices[:, :p]` at [clause_compact.py:151](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py#L151) and [bloom_compact.py:128](../../retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py#L128)).
 - Several layers compute `min(self.k, scores.shape[1])` for variable-K topk, producing data-dependent output shapes (`SilverTorch._forward_candidates`, `LiNR_V2._forward_prefilter`, `LiNR_V3._forward_candidates`, `FullScanKNN._forward_candidates`).
 - `LiNR_V3_Triton.forward` calls `int(counts.max().item()) == 0` as an early-return guard ([v3_triton.py:52](../../retrieve/src/retrieve/layers/linr/v3_triton.py#L52)). Same `.item()` ban on the export path applies.
@@ -367,15 +367,15 @@ uv run python -c "import torch; from retrieve.layers.filters.bloom import build_
 
 ## Phase 3 — `codesigned_probe_score` + `SilverTorch`
 
-**Largest blast radius**: 3 Optionals (`query_bits`, `bloom_sigs`, `mask`) inside the kernel host wrapper, plus the `candidate_ids` branch and the `query_clause_attrs is not None` / `mask is not None` triple in `SilverTorch.forward`. Save until Phases 1–2 have settled the conventions.
+**Largest blast radius**: 2 Optionals (`query_bits`, `bloom_sigs`) inside the kernel host wrapper, plus the `candidate_ids` branch and the `query_clause_attrs is not None` check in `SilverTorch.forward`. Save until Phases 1–2 have settled the conventions.
 
 The current `SilverTorch.forward` signature is:
 
 ```python
-forward(query, query_clause_attrs=None, mask=None, candidate_ids=None) -> tuple[Tensor, Tensor]
+forward(query, query_clause_attrs=None, candidate_ids=None) -> tuple[Tensor, Tensor]
 ```
 
-Three Optionals. The bloom kernel (`codesigned_probe_score`) takes another three Optionals (`query_bits`, `bloom_sigs`, `mask`) as kwargs. The `candidate_ids` branch dispatches to `_forward_candidates` ([main.py:140-141](../../retrieve/src/retrieve/layers/silvertorch/main.py#L140-L141)), which has its own `min(self.k, scores.shape[1])` variable-K topk.
+Two Optionals. The bloom kernel (`codesigned_probe_score`) takes another two Optionals (`query_bits`, `bloom_sigs`) as kwargs. The `candidate_ids` branch dispatches to `_forward_candidates` ([main.py:140-141](../../retrieve/src/retrieve/layers/silvertorch/main.py#L140-L141)), which has its own `min(self.k, scores.shape[1])` variable-K topk.
 
 ### Files
 
@@ -392,11 +392,11 @@ Modify:
 
 ### Steps
 
-1. **Strip `@triton.autotune`** from [codesigned_probe_score.py:23](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py#L23). The current key includes `HAS_QB, HAS_MASK` — these become construction-time mode flags, not autotune keys.
+1. **Strip `@triton.autotune`** from [codesigned_probe_score.py:23](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py#L23). The current key includes `HAS_QB` — this becomes a construction-time mode flag, not an autotune key.
 
 2. **Define `CodesignedProbeScoreConfig`**: `block_p, num_warps, num_stages`. `problem_hint = P (n_probe * max_cluster_size)`. REGISTRY.
 
-3. **Pure-launch core**: `_codesigned_probe_score_launch(query, query_bits_or_dummy, flat_items, item_codes, item_scales, bloom_sigs_or_dummy, mask_or_dummy, out_scores, *, has_qb: bool, has_mask: bool, block_p, num_warps, num_stages) -> None`. Caller allocates dummies for unused tensors (size `1×1`); `has_qb`/`has_mask` become `tl.constexpr` flags inside the kernel. No Python `if x is None` in the launch. (The kernel already guards on `HAS_QB`/`HAS_MASK` constexpr flags internally; the Optional → dummy-tensor binding is what moves out of the launch site.)
+3. **Pure-launch core**: `_codesigned_probe_score_launch(query, query_bits_or_dummy, flat_items, item_codes, item_scales, bloom_sigs_or_dummy, out_scores, *, has_qb: bool, block_p, num_warps, num_stages) -> None`. Caller allocates dummies for unused tensors (size `1×1`); `has_qb` becomes a `tl.constexpr` flag inside the kernel. No Python `if x is None` in the launch. (The kernel already guards on `HAS_QB` constexpr internally; the Optional → dummy-tensor binding is what moves out of the launch site.)
 
 4. **`SilverTorch.__init__` mode flag**:
    ```python
@@ -405,29 +405,23 @@ Modify:
            ...
            self.mode = mode
    ```
-   Drop the `if self.has_bloom and query_clause_attrs is not None` branch in `forward` ([main.py:159](../../retrieve/src/retrieve/layers/silvertorch/main.py#L159)). `mode="ivf_only"` exports as one `.pt2` (signature: `forward(query, mask)`); `mode="ivf_bloom"` exports as another (signature: `forward(query, query_clause_attrs, mask)`). The `mask` parameter is independent of mode and remains in both signatures (today `mask` is honored independently regardless of bloom config — see the [main.py docstring at line 22](../../retrieve/src/retrieve/layers/silvertorch/main.py#L22)).
+   Drop the `if self.has_bloom and query_clause_attrs is not None` branch in `forward` ([main.py:159](../../retrieve/src/retrieve/layers/silvertorch/main.py#L159)). `mode="ivf_only"` exports as one `.pt2` (signature: `forward(query)`); `mode="ivf_bloom"` exports as another (signature: `forward(query, query_clause_attrs)`).
 
    Note: today `SilverTorch.__init__` already has bloom-optional construction (`m_bits`/`k_hash` default to `None`) — `has_bloom` ([main.py:46](../../retrieve/src/retrieve/layers/silvertorch/main.py#L46)) is the existing semantic equivalent of the `mode` flag. The refactor formalizes it into a `Literal["ivf_only", "ivf_bloom"]` for export specialization; the underlying allocation logic in `register_index` is already conditional and stays the same.
 
-5. **Mask handling**: `mask` stays an Optional today across both bloom configs. To keep the trace clean, either:
-   - Keep `mask` as an explicit *required* arg in the per-mode forward signatures (`forward(query, mask)` for ivf_only; `forward(query, query_clause_attrs, mask)` for ivf_bloom). Callers pass an all-True mask when no mask is desired. **Recommended.**
-   - Or split `mode` into 4 (`ivf_only` × `{masked, unmasked}`, `ivf_bloom` × `{masked, unmasked}`). More `.pt2` files, but each is a tighter trace.
+5. **Always-allocate buffers**: in `register_index` ([main.py:111-124](../../retrieve/src/retrieve/layers/silvertorch/main.py#L111-L124)), when `mode="ivf_bloom"`, populate `bloom_sigs` (zeros if `item_clause_attrs` is None — the existing `has_bloom` branch already does this at [main.py:113-114](../../retrieve/src/retrieve/layers/silvertorch/main.py#L113-L114)). When `mode="ivf_only"`, skip allocation entirely (also existing). The `mode` flag controls whether the kernel reads them, via `has_qb` constexpr.
 
-   Pick option 1 unless the all-True mask path measures noticeably slower than the no-mask path; if it does, fall back to option 2.
-
-6. **Always-allocate buffers**: in `register_index` ([main.py:111-124](../../retrieve/src/retrieve/layers/silvertorch/main.py#L111-L124)), when `mode="ivf_bloom"`, populate `bloom_sigs` (zeros if `item_clause_attrs` is None — the existing `has_bloom` branch already does this at [main.py:113-114](../../retrieve/src/retrieve/layers/silvertorch/main.py#L113-L114)). When `mode="ivf_only"`, skip allocation entirely (also existing). The `mode` flag controls whether the kernel reads them, via `has_qb` constexpr.
-
-7. **Drop `_forward_candidates` from `SilverTorch.forward`**. Either:
+6. **Drop `_forward_candidates` from `SilverTorch.forward`**. Either:
    - Add a `mode="candidates"` variant (separate export entry), or
    - Extract to a sibling `forward_candidates(self, query, candidate_ids)` method that's a separate export entry.
 
-   Recommended: separate method, kept on the same class. Three export entries total: `forward(q, mask)` for `ivf_only`, `forward(q, attrs, mask)` for `ivf_bloom`, `forward_candidates(q, cand)` for either. The `min(self.k, scores.shape[1])` at [main.py:196](../../retrieve/src/retrieve/layers/silvertorch/main.py#L196) inside `_forward_candidates` needs the pad-to-K treatment from Step 8.
+   Recommended: separate method, kept on the same class. Three export entries total: `forward(q)` for `ivf_only`, `forward(q, attrs)` for `ivf_bloom`, `forward_candidates(q, cand)` for either. The `min(self.k, scores.shape[1])` at [main.py:196](../../retrieve/src/retrieve/layers/silvertorch/main.py#L196) inside `_forward_candidates` needs the pad-to-K treatment from Step 7.
 
-8. **Move post-launch topk + gather + pad to `SilverTorch.forward`**. Pad-to-K policy: build `flat_items` with at least K slots per query (allocate `n_probe × max_size ≥ K`); then `topk(scores, k)` always returns K columns. If P < K is genuinely possible for some configurations, fall back to topk over P then `torch.cat`-pad with `-1` / `-inf` to width K — produces a static `[B, K]` shape because K is a Python int.
+7. **Move post-launch topk + gather + pad to `SilverTorch.forward`**. Pad-to-K policy: build `flat_items` with at least K slots per query (allocate `n_probe × max_size ≥ K`); then `topk(scores, k)` always returns K columns. If P < K is genuinely possible for some configurations, fall back to topk over P then `torch.cat`-pad with `-1` / `-inf` to width K — produces a static `[B, K]` shape because K is a Python int.
 
-9. **Update `build_silvertorch`** ([main.py:202-224](../../retrieve/src/retrieve/layers/silvertorch/main.py#L202-L224)) to require `mode` as a kwarg (or to derive it from `m_bits/k_hash` for backward-compat with existing call sites in [registry.py:105](../../evaluation/retrieval/algo_registry.py#L105)). The registry currently builds `SilverTorch` directly, not via the builder — update that call site to pass `mode="ivf_only"` (since Yambda has no item attributes; see the [registry comment block at line 16-20](../../evaluation/retrieval/algo_registry.py#L16-L20)).
+8. **Update `build_silvertorch`** ([main.py:202-224](../../retrieve/src/retrieve/layers/silvertorch/main.py#L202-L224)) to require `mode` as a kwarg (or to derive it from `m_bits/k_hash` for backward-compat with existing call sites in [registry.py:105](../../evaluation/retrieval/algo_registry.py#L105)). The registry currently builds `SilverTorch` directly, not via the builder — update that call site to pass `mode="ivf_only"` (since Yambda has no item attributes; see the [registry comment block at line 16-20](../../evaluation/retrieval/algo_registry.py#L16-L20)).
 
-10. **Create `evaluation/retrieval/build_export.py`**. Scaffold:
+9. **Create `evaluation/retrieval/build_export.py`**. Scaffold:
     ```python
     def export_silvertorch(
         checkpoint_path: Path,
@@ -438,9 +432,9 @@ Modify:
     ) -> Path:
         idx = build_silvertorch(item_embs, k=K, mode=mode, ...)
         if mode == "ivf_only":
-            ep = torch.export.export(idx, (query, mask), dynamic_shapes=...)
+            ep = torch.export.export(idx, (query,), dynamic_shapes=...)
         elif mode == "ivf_bloom":
-            ep = torch.export.export(idx, (query, query_clause_attrs, mask), dynamic_shapes=...)
+            ep = torch.export.export(idx, (query, query_clause_attrs), dynamic_shapes=...)
         elif mode == "candidates":
             ep = torch.export.export(idx.forward_candidates, (query, candidate_ids), dynamic_shapes=...)
         out = out_dir / f"silvertorch_{mode}.pt2"
@@ -449,7 +443,7 @@ Modify:
     ```
     Plus a Click CLI surface to drive it. Minimal scope: just `silvertorch` for Phase 3; Phases 5–6 add `linr_v*` entries.
 
-11. **Update tests**: split tests by mode where applicable; parametrize over `mode`. Add a smoke-test that the new `build_export.py` round-trips for each mode (export → save → load → run → compare to eager).
+10. **Update tests**: split tests by mode where applicable; parametrize over `mode`. Add a smoke-test that the new `build_export.py` round-trips for each mode (export → save → load → run → compare to eager).
 
 ### Verification
 

@@ -1,6 +1,6 @@
 _defaults: &defaults
   data_dir: data/yambda-5b
-  output: null                # null → <ckpt-dir>/benchmark.json
+  output: results/yambda/5b-d64.json
   split: test
   device: cuda
   ks: [100, 200, 400]
@@ -26,15 +26,12 @@ _defaults: &defaults
       - {candidate_pool: 5000, v3_seed: 0}
       - {candidate_pool: 10000, v3_seed: 0}
     silvertorch:
-      - {n_lists: 4096, n_probe: 32, n_iter: 10, seed: 0}
-      - {n_lists: 4096, n_probe: 64, n_iter: 10, seed: 0}
-      - {n_lists: 4096, n_probe: 128, n_iter: 10, seed: 0}
-      - {n_lists: 8192, n_probe: 32, n_iter: 10, seed: 0}
-      - {n_lists: 8192, n_probe: 64, n_iter: 10, seed: 0}
-      - {n_lists: 8192, n_probe: 128, n_iter: 10, seed: 0}
-      - {n_lists: 16384, n_probe: 32, n_iter: 10, seed: 0}
-      - {n_lists: 16384, n_probe: 64, n_iter: 10, seed: 0}
-      - {n_lists: 16384, n_probe: 128, n_iter: 10, seed: 0}
+      # Recall curve — Layout A (n_lists≈√N, paper-faithful, ~2440-item clusters).
+      - {n_lists: 4096,  n_probe: 16,  n_iter: 10, seed: 0}  # P≈39k
+      - {n_lists: 4096,  n_probe: 64,  n_iter: 10, seed: 0}  # P≈156k
+      - {n_lists: 4096,  n_probe: 256, n_iter: 10, seed: 0}  # P≈625k
+      # CUDA-edge point — Layout B (n_lists=16384, ~610-item clusters).
+      - {n_lists: 16384, n_probe: 16,  n_iter: 10, seed: 0}  # P≈10k
 
 <<: *defaults
 checkpoint: data/yambda-5b/checkpoints/gsasrec-d64/best_model.pt

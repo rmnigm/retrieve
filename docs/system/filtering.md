@@ -45,7 +45,7 @@ boolean composition.
 |---|---|---|
 | `FilterModule` ABC | [interfaces.py](../../retrieve/src/retrieve/interfaces.py) | three native paths: `evaluate_mask`, `evaluate_indices`, `evaluate_subset`; `forward` aliases `evaluate_mask` |
 | `ExactAttributeFilter` (exact, supports reverse) | [layers/filters/exact_attribute.py](../../retrieve/src/retrieve/layers/filters/exact_attribute.py) | `FilterModule` subclass; native `evaluate_mask` via `clause_mask` kernel; native `evaluate_indices` via `clause_compact` kernel; `evaluate_subset` via gather + broadcast |
-| `BloomFilter` (approximate, conjunctive) | [layers/filters/bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py) | `FilterModule` subclass; paper-strict (no reverse, no DSL) — `register_index` accepts an optional `clause_is_reverse` and raises `ValueError` if any entry is `True`; native `evaluate_mask` via `bloom_match` kernel; native `evaluate_indices` via `bloom_compact` kernel; `evaluate_subset` via gathered subset test |
+| `BloomFilter` (approximate, conjunctive) | [layers/filters/bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py) | `FilterModule` subclass; paper-strict (no reverse, no DSL) — `register_index` accepts an optional `clause_is_reverse` and raises `ValueError` if any entry is `True`; native `evaluate_mask` via `bloom_match` kernel; native `evaluate_indices` via `bloom_compact` kernel; `evaluate_subset` via gathered subset test. Hashes `(clause_idx, value)` pairs, **not** raw values — see ["Bloom hash keys"](#bloom-hash-keys-clause_idx-value) |
 | LiNR clause Triton kernels | [kernels/triton/filters/clause_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py), [clause_mask.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_mask.py) | fused eval + stream compaction (compact); fused eval emitting `[B, N]` bool (mask). No `[B, N, C, A_max]` intermediate either way |
 | Bloom Triton kernels | [kernels/triton/silvertorch/bloom_match.py](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py), [kernels/triton/filters/bloom_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py) | `(qb & sigs) == qb` → `[B, N]` bool (match); fused subset-test + stream compaction (compact). Consumed by `BloomFilter.evaluate_mask` / `evaluate_indices` on CUDA |
 | Bloom fused into score kernel | [kernels/triton/silvertorch/codesigned_probe_score.py](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py) | conjunctive only (single `QB`), part of co-designed Algorithm 1; **separate path** from `BloomFilter` |
@@ -91,6 +91,42 @@ ids, scores = similarity_masking(query, mask=mask)
 cand_ids, counts = combine_indices([ef, bf], [qa, qa])
 ids, scores = prefilter_knn(query, candidate_ids=cand_ids, counts=counts)
 ```
+
+## Bloom hash keys: `(clause_idx, value)`
+
+The paper says *"for each feature, we apply K hash functions"* — and a
+feature is a `(key, value)` pair. The implementation reflects this:
+[`_build_signatures`](../../retrieve/src/retrieve/layers/filters/bloom.py)
+mixes a per-clause salt (`_mix64(clause_id, …)`) into the post-hash bits
+before the position mask, so value `V` in clause C0 lands on different
+bits than the same `V` in clause C3. Without this, single-clause queries
+on overlapping value vocabularies (common in real schemas — year buckets,
+version counts, license codes all share small integer ranges) leak
+~25–30% of non-matching items as false positives via cross-clause value
+collision. The salt is shared between item-side `register_index` and
+query-side `_build_query_sigs`, so the subset test is symmetric. No
+runtime cost worth measuring (one extra elementwise XOR inside an already
+chunked loop) and zero kernel impact —
+[`bloom_match`](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py),
+[`bloom_compact`](../../retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py),
+and the bloom branch of
+[`codesigned_probe_score`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py)
+all consume opaque `[N, W]` / `[B, W]` int64 buffers and are unchanged.
+
+**Index vs query build paths.** The item index goes through
+`_build_signatures` (chunk loop, bandwidth-bound, ~128 ms for N=3M, paid
+once at `register_index`). The per-forward query build is a separate
+loop-free `_build_query_signatures` wrapped with
+`torch.compile(dynamic=True, mode='reduce-overhead')`. Eager builds were
+launch-overhead-bound (~0.4 ms flat in B from ~15 small CUDA kernels);
+the compiled cudagraph_trees path collapses that to ~0.09 ms — ~4×
+speedup at all batch sizes, ~80% of `SilverTorch.forward` at bs=1. CPU
+callers transparently fall back to eager (`mode='reduce-overhead'` is
+CUDA-only). The hash math is identical, so outputs are bit-equal across
+both paths.
+
+`bloom_sigs` snapshots persisted before this keying was added are stale
+and must be rebuilt; the bench harness rebuilds on every run.
 
 ## Out of scope
 

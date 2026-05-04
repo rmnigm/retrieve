@@ -1,6 +1,6 @@
 _defaults: &defaults
   data_dir: data/goodreads-work-id
-  output: null
+  output: results/goodreads/d128-quality.json
   split: test
   device: cuda
   ks: [100, 200, 400]
@@ -23,9 +23,12 @@ _defaults: &defaults
       - {candidate_pool: 8000, v3_seed: 0}
       - {candidate_pool: 16000, v3_seed: 0}
     silvertorch:
-      - {n_lists: 1024, n_probe: 24,  n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}
-      - {n_lists: 1024, n_probe: 64,  n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}
-      - {n_lists: 1024, n_probe: 128, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}
+      # Recall curve — Layout A (n_lists≈√N, paper-faithful, ~780-item clusters).
+      - {n_lists: 1024, n_probe: 8,   n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈6k
+      - {n_lists: 1024, n_probe: 32,  n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈25k
+      - {n_lists: 1024, n_probe: 128, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈100k
+      # CUDA-friendly point — Layout B (n_lists=4096, ~195-item clusters).
+      - {n_lists: 4096, n_probe: 8,   n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈1.5k
     voyager_hnsw:
       - {m: 32, ef_construction: 200, ef_query: 1000, num_threads: 16, seed: 0}
 

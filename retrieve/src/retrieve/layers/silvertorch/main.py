@@ -7,7 +7,11 @@ from retrieve.interfaces import RetrievalModule
 from retrieve.kernels.triton.silvertorch.codesigned_probe_score import (
     codesigned_probe_score,
 )
-from retrieve.layers.filters.bloom import _build_signatures, _generate_seeds
+from retrieve.layers.filters.bloom import (
+    _build_query_signatures,
+    _build_signatures,
+    _generate_seeds,
+)
 from retrieve.layers.utils.kmeans import KMeansTorch
 from retrieve.layers.utils.quantize import quantize_int8
 
@@ -18,8 +22,7 @@ class SilverTorch(RetrievalModule):
     With ``m_bits`` and ``k_hash`` set, the bloom filter is fused into the
     ``codesigned_probe_score`` Triton kernel. Leave both unset (or both
     ``None``) to build a bloom-free IVF + INT8 ANN — no signature buffers
-    are allocated and the bloom branch is skipped at query time. ``mask`` is
-    honored independently in either configuration.
+    are allocated and the bloom branch is skipped at query time.
     """
 
     centroids: Tensor
@@ -127,7 +130,6 @@ class SilverTorch(RetrievalModule):
         self,
         query: Tensor,
         query_clause_attrs: Tensor | None = None,
-        mask: Tensor | None = None,
         candidate_ids: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
         """IVF + (optional) Bloom-fused retrieval.
@@ -135,7 +137,6 @@ class SilverTorch(RetrievalModule):
         ``query_clause_attrs`` is only valid when the index was built with a
         bloom config. With it ``None``, the kernel skips bloom evaluation
         entirely (``query_bits`` and ``bloom_sigs`` are passed as ``None``).
-        ``mask`` is honored independently.
         """
         if candidate_ids is not None:
             return self._forward_candidates(query, candidate_ids)
@@ -155,9 +156,11 @@ class SilverTorch(RetrievalModule):
         probed = self.padded_cluster_items[probe_ids]  # [B, n_probe, max_size]
         flat_items = probed.reshape(b, -1)  # [B, P], -1 padding marks empty slots
 
-        # Build query bloom signature once per call (cheap, host-side).
+        # Build query bloom signature once per call (cheap, host-side). Routes
+        # to the cudagraph-trees compiled query path on CUDA — eager fires ~15
+        # separate kernels (~0.4 ms launch-overhead tax); compiled is ~0.09 ms.
         if self.has_bloom and query_clause_attrs is not None:
-            qb = _build_signatures(
+            qb = _build_query_signatures(
                 query_clause_attrs.long().unsqueeze(-1),
                 self.hash_seeds,
                 self.m_bits,
@@ -169,9 +172,9 @@ class SilverTorch(RetrievalModule):
             qb = None
             sigs = None
 
-        # Phase 2 + 3 fused: per (b, p-tile) bloom subset test, optional external
-        # mask, int8 dequant dot, score store. No [B, P, W] / [B, P, D]
-        # intermediates ever land in HBM.
+        # Phase 2 + 3 fused: per (b, p-tile) bloom subset test, int8 dequant
+        # dot, score store. No [B, P, W] / [B, P, D] intermediates ever land
+        # in HBM.
         return codesigned_probe_score(
             query,
             flat_items,
@@ -180,7 +183,6 @@ class SilverTorch(RetrievalModule):
             self.k,
             query_bits=qb,
             bloom_sigs=sigs,
-            mask=mask,
         )
 
     def _forward_candidates(

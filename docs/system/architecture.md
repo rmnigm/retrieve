@@ -140,6 +140,17 @@ backend-dispatch alias only — its dense matmul + top-K runs in pure torch
   All three paths in the Triton backend share the same kernel
   (`oporp_1bit_match_topk`) — only the addressing changes.
 
+  The pure-torch reference (`OneBitKNN`, used by tests and as a fallback
+  when the Triton backend isn't selected) wraps two hot bodies with
+  `torch.compile(dynamic=True, mode='reduce-overhead')`:
+  [`project_oporp_1bit_query`](../../retrieve/src/retrieve/layers/utils/quantize.py)
+  (per-call query projection) and `OneBitKNN._score_full`'s xor + popcount
+  + reduce body. Both follow the same dispatch pattern as the bloom query
+  build — CUDA-only, eager fallback on CPU. The `_score_full` win is
+  driven by Inductor fusing the 6-op SWAR popcount chain into one elementwise
+  pass over the `[B, N, W]` xor tensor; the projection win is launch-overhead
+  elision.
+
 ## SilverTorch
 
 [`SilverTorch`](../../retrieve/src/retrieve/layers/silvertorch/main.py)
@@ -161,26 +172,6 @@ The bloom filter is private to SilverTorch: signatures are derived from
 `m_bits`/`k_hash`
 yields the bloom-free variant — `register_index` skips bloom buffer
 allocation, and `forward` requires `query_clause_attrs=None`.
-
-[`SilverTorchFp32`](../../retrieve/src/retrieve/layers/silvertorch/fp32.py)
-is a sibling class that runs the same IVF + bloom co-design over **fp32
-item embeddings** instead of int8 codes. The fp32 kernel lives alongside
-the int8 one in
-[`codesigned_probe_score.py`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py)
-and is exposed through a tiny re-export shim
-([`codesigned_probe_score_fp32.py`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score_fp32.py)).
-Constructed via `build_silvertorch_fp32(...)` with the same keyword surface
-as `build_silvertorch`. Trade-off: ~4× the HBM traffic and 4× the index
-size (`N × D × 4` bytes vs `N × D + N × 4`) for exact-up-to-IVF recall —
-no quantization error contributes to recall loss, only the IVF
-approximation. Use when the index fits comfortably in HBM and recall
-ceiling matters more than bandwidth; the int8 `SilverTorch` remains the
-default for bandwidth- or capacity-bound deployments.
-
-`SilverTorchFp32` and `build_silvertorch_fp32` are not on the top-level
-`retrieve` public surface yet — import them from
-`retrieve.layers.silvertorch.fp32` directly. The int8 `SilverTorch` and
-`build_silvertorch` are exported from the package root.
 
 ## Utility modules
 
@@ -209,7 +200,6 @@ pure Triton). Full per-kernel detail in [kernels.md](kernels.md).
 | [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/)                                       | [`clause_mask`](../../retrieve/src/retrieve/kernels/triton/filters/clause_mask.py) — fused clause eval emitting `[B, N]` bool             | `ExactAttributeFilter.evaluate_mask` |
 | [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/)                                       | [`bloom_compact`](../../retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py) — fused subset-test + stream compaction            | `BloomFilter.evaluate_indices`    |
 | [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`codesigned_probe_score`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py) — fused IVF + INT8 + Bloom    | `SilverTorch`                     |
-| [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`codesigned_probe_score_fp32`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score_fp32.py) — fused IVF + FP32 + Bloom | `SilverTorchFp32`                 |
 | [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`bloom_match`](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py) — bool subset test (standalone)                     | `BloomFilter.evaluate_mask`       |
 
 ## Testing

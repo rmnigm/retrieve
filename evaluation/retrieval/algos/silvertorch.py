@@ -75,5 +75,5 @@ class SilvertorchAlgo:
     def forward(self, q: Tensor, qa_narrow: Tensor | None = None) -> tuple[Tensor, Tensor]:
         if self._fused:
             assert qa_narrow is not None
-            return self.idx(q, query_clause_attrs=qa_narrow, mask=None)
-        return self.idx(q, query_clause_attrs=None, mask=None)
+            return self.idx(q, query_clause_attrs=qa_narrow)
+        return self.idx(q, query_clause_attrs=None)

@@ -11,6 +11,33 @@ from retrieve.layers.utils.quantize import (
 )
 
 
+def _score_full_oporp_eager(
+    query_bits: Tensor,
+    item_bits: Tensor,
+) -> Tensor:
+    """Loop-free body of ``OneBitKNN._score_full``.
+
+    Free-function form so ``torch.compile`` traces a single graph reused
+    across instances. ``d_total`` is derived from ``item_bits.shape[1]``
+    inside the body so it stays symbolic under ``dynamic=True``.
+    """
+    d_total = 64 * item_bits.shape[1]
+    xor = query_bits.unsqueeze(1) ^ item_bits.unsqueeze(0)
+    hamming = popcount_int64(xor).sum(dim=-1)
+    return d_total - 2 * hamming.to(torch.float32)
+
+
+# Compile the xor + popcount + reduce chain. The win here is *fusion*: eager
+# materializes the [B, N, W] int64 xor once, then re-reads it through six
+# popcount bit-twiddle ops; Inductor fuses the popcount chain into one
+# elementwise triton kernel that streams the xor tensor in a single pass.
+# ``dynamic=True`` keeps B/N/W symbolic so a single graph handles every
+# OneBitKNN instance and query batch size.
+_score_full_oporp_compiled = torch.compile(
+    _score_full_oporp_eager, dynamic=True, mode="reduce-overhead"
+)
+
+
 class OneBitKNN(RetrievalModule):
     """1-bit Sign-OPORP scoring (Hamming similarity).
 
@@ -47,9 +74,9 @@ class OneBitKNN(RetrievalModule):
 
     def _score_full(self, query_bits: Tensor) -> Tensor:
         # [B, 1, W] xor [N, W] -> [B, N, W]; popcount + sum over W; convert.
-        xor = query_bits.unsqueeze(1) ^ self.item_bits.unsqueeze(0)
-        hamming = popcount_int64(xor).sum(dim=-1)
-        return self.d_total - 2 * hamming.to(torch.float32)
+        if query_bits.is_cuda:
+            return _score_full_oporp_compiled(query_bits, self.item_bits)
+        return _score_full_oporp_eager(query_bits, self.item_bits)
 
     def forward(
         self,

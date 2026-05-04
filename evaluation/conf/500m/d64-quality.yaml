@@ -1,6 +1,6 @@
 _defaults: &defaults
   data_dir: data/yambda-500m
-  output: null                # null → <ckpt-dir>/benchmark.json
+  output: results/yambda/500m-d64.json
   split: test
   device: cuda
   ks: [100, 200, 400]
@@ -26,18 +26,12 @@ _defaults: &defaults
       - {candidate_pool: 5000, v3_seed: 0}
       - {candidate_pool: 10000, v3_seed: 0}
     silvertorch:
-      - {n_lists: 512, n_probe: 16, n_iter: 10, seed: 0}
-      - {n_lists: 512, n_probe: 32, n_iter: 10, seed: 0}
-      - {n_lists: 512, n_probe: 64, n_iter: 10, seed: 0}
-      - {n_lists: 1024, n_probe: 16, n_iter: 10, seed: 0}
-      - {n_lists: 1024, n_probe: 32, n_iter: 10, seed: 0}
-      - {n_lists: 1024, n_probe: 64, n_iter: 10, seed: 0}
-      - {n_lists: 2048, n_probe: 16, n_iter: 10, seed: 0}
-      - {n_lists: 2048, n_probe: 32, n_iter: 10, seed: 0}
-      - {n_lists: 2048, n_probe: 64, n_iter: 10, seed: 0}
-      - {n_lists: 4096, n_probe: 16, n_iter: 10, seed: 0}
-      - {n_lists: 4096, n_probe: 32, n_iter: 10, seed: 0}
-      - {n_lists: 4096, n_probe: 64, n_iter: 10, seed: 0}
+      # Recall curve — Layout A (n_lists≈√N, paper-faithful, ~1700-item clusters).
+      - {n_lists: 1024, n_probe: 8,   n_iter: 10, seed: 0}  # P≈14k
+      - {n_lists: 1024, n_probe: 32,  n_iter: 10, seed: 0}  # P≈53k
+      - {n_lists: 1024, n_probe: 128, n_iter: 10, seed: 0}  # P≈213k
+      # CUDA-friendly point — Layout B (n_lists=4096, ~415-item clusters).
+      - {n_lists: 4096, n_probe: 8,   n_iter: 10, seed: 0}  # P≈3.3k
     voyager_hnsw:
       - {m: 32, ef_construction: 200, ef_query: 1000, num_threads: 16, seed: 0}
 

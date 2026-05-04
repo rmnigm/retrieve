@@ -265,9 +265,41 @@ on CUDA. SilverTorch's in-cluster bloom is fused separately into
 `codesigned_probe_score`; the two paths are independent.
 
 Implements the conjunctive subset test `(qb & sigs) == qb` reduced over
-`W` int64 words. Both inputs are pre-built host-side via
+`W` int64 words. The item-side sigs come from
 `_build_signatures` ([layers/filters/bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py))
-so the kernel is purely a bitwise reduction.
+at `register_index` time; the per-call query bits go through the
+loop-free `_build_query_signatures` path (same module). The kernel is
+purely a bitwise reduction.
+
+**Query-build path.** `_build_signatures` is a python `range()`-driven
+chunk loop over the index — fine at register time (bandwidth-bound,
+~128 ms for N=3M) but a poor fit for the per-forward query build, where
+n=B is always small and the loop's trip count makes dynamo specialize on
+shape. `_build_query_signatures` mirrors the body without the loop and
+is wrapped at module load with
+`torch.compile(dynamic=True, mode='reduce-overhead')`. The eager body
+fires ~15 separate CUDA kernels per call (~0.4 ms wall-clock, **flat in
+B**) — pure launch overhead, since the actual work is microseconds. The
+compiled path collapses to one cudagraph_trees-replayable graph at
+**~0.09 ms (~4× speedup)**, also flat in B. Output is bit-identical to
+eager. CPU callers fall back to the eager body — `mode='reduce-overhead'`
+is CUDA-only. First call after import pays compile time
+(a few hundred ms); production callers should warm once at process
+start.
+
+**Hash invariant.** `_build_signatures` keys each hash on `(clause_idx,
+value)` (paper §4.1: "for each feature" — a *feature* is a `(key, value)`
+pair). It does this by XOR-ing a per-clause salt — `_mix64(clause_id, …)` —
+into the post-`_mix64` hash, before the position mask. This is what
+prevents value `V` in clause C0 from colliding with the same `V` in clause
+C3 when clauses share a value vocabulary; without it, single-clause
+queries on overlapping vocabularies leak ~25–30% of non-matching items as
+false positives. The kernel itself is untouched: it consumes `[N, W]` /
+`[B, W]` int64 buffers as opaque bits. The salt costs one extra elementwise
+XOR per chunk inside `_build_signatures` (well under measurement noise vs
+the existing scatter + word-pack reduction); kernel HBM traffic and launch
+shape are unchanged. `bloom_sigs` buffers persisted from any pre-fix run
+are stale and must be rebuilt.
 
 ```
 inputs:    qb     [B, W]     int64    packed query bloom signature
@@ -327,7 +359,9 @@ consume the *set*, not the order.
 **No autotune.** Fixed `BLOCK_N=256`, `num_warps=4` — same atomic-add
 hazard as `clause_compact`. `qb` is built host-side via
 `_build_signatures`; folding it into the kernel adds register pressure
-with no obvious win and is explicitly out of scope.
+with no obvious win and is explicitly out of scope. The same
+`(clause_idx, value)` keying invariant documented under `bloom_match`
+applies — kernel is opaque to bits, so no kernel-side change.
 
 ## Layer dispatch
 
@@ -380,6 +414,36 @@ and one `index_select`, no matmul needed. The `_pack_signs_to_int64`
 helper packs the sign-quantized output into `[..., W]` int64 words using
 `<<` and `sum(-1)`; same packing used both at index time and at query time.
 
+### Compile wrappers on the V3 torch reference
+
+The two pure-torch hot bodies on V3's reference path are wrapped with
+`torch.compile(dynamic=True, mode='reduce-overhead')` — same recipe as
+[`_build_query_signatures`](../../retrieve/src/retrieve/layers/filters/bloom.py)
+in the bloom filter:
+
+- **`project_oporp_1bit_query`** ([`quantize.py`](../../retrieve/src/retrieve/layers/utils/quantize.py)).
+  Per-query OPORP projection: `multiply → index_select → sign-pack`
+  (~5 small kernels in eager). The compiled cudagraph_trees path collapses
+  the launch tax — measured ~2.5× speedup at B=8 and B=64. Output is
+  consumed inside the same forward (fed into `_score_full`), so no clone
+  is needed.
+- **`OneBitKNN._score_full`** ([`one_bit_knn.py`](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py)).
+  `xor → popcount → reduce` over the full corpus. The win here is
+  *fusion*, not launch elision: eager materializes the `[B, N, W]` xor
+  once and re-streams it through six SWAR popcount ops; Inductor fuses
+  those into a single elementwise triton kernel. Measured ~3× at B=8,
+  ~43× at B=64, N=50k — by far the largest compile win in the repo.
+  ``d_total`` is derived from `item_bits.shape[1]` inside the body so it
+  stays symbolic under `dynamic=True` (one graph across all `(B, N, W)`).
+
+Both follow the bloom dispatch pattern: a free-function eager body, a
+module-level compiled wrapper, and a thin shim that picks compiled-on-CUDA
+and falls through to eager on CPU (`mode='reduce-overhead'` is CUDA-only).
+The matmul-bearing references (`SimilarityMasking`, `FullScanKNN`,
+`DotProductScorer`) were tried and reverted — cuBLAS + CUB already win
+the heavy op, and the cudagraph capture + mandatory output clone (to
+escape the `reduce-overhead` buffer pool) cost more than they save.
+
 ## Numerics
 
 V1's pure-torch dense path uses cuBLAS for the matmul, so the torch and
@@ -402,48 +466,36 @@ correctness depends on bit identity here.
 
 ## SilverTorch kernels
 
-Two SilverTorch-only scoring kernels live in
-[`silvertorch/codesigned_probe_score.py`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py):
-the int8 path (`codesigned_probe_score`) and the fp32 path
-(`codesigned_probe_score_fp32`). Both ship as Python wrappers in the
-same module; the fp32 wrapper is also re-exported through a thin shim
-file (`codesigned_probe_score_fp32.py`) to preserve the
-historic import path used by `layers/silvertorch/fp32.py`. (`bloom_match`
-also lives in this tree but is documented above as a filter primitive —
-it has a non-SilverTorch consumer now.)
-
-[`codesigned_probe_score`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py)
-is the actively-used INT8 SilverTorch kernel and powers
+The SilverTorch INT8 scoring kernel lives in
+[`silvertorch/codesigned_probe_score.py`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py)
+and powers
 [`SilverTorch.forward`](../../retrieve/src/retrieve/layers/silvertorch/main.py).
+(`bloom_match` also lives in this tree but is documented above as a
+filter primitive — it has a non-SilverTorch consumer now.)
+
 Phase 1 (centroid `q @ centroids^T + topk` to pick the top-`n_probe`
 clusters) runs **host-side** in `SilverTorch.forward`; the kernel is
 "phase-2+3 fused" — for each `(query, probed-item)` cell it optionally
-runs the bloom subset test, optionally ANDs an external mask, and
-(when both pass) scores via INT8 dequantize + dot. Items with `id == -1`
-(cluster padding) and items failing either filter get score `-inf`.
+runs the bloom subset test and (when it passes) scores via INT8
+dequantize + dot. Items with `id == -1` (cluster padding) and items
+failing the filter get score `-inf`.
 The bloom intermediate (`[B, P, W]` sigs / bool match) and the
 `int8 → fp32` code cast (`[B, P, D]`) never touch HBM — they live in
 registers/SRAM. Bloom subset uses an OR-reduce trick:
 `(qb & sig) == qb ⇔ qb & ~sig == 0` per word, OR-reduce over `W`,
 saves the int32 cast + min reduction the equality form required.
 
+The bloom inputs (`query_bits`, `bloom_sigs`) inherit the
+`(clause_idx, value)` keying invariant from
+[`_build_signatures`](../../retrieve/src/retrieve/layers/filters/bloom.py)
+documented under `bloom_match` — same shared host-side path. Kernel is
+unchanged.
+
 The launch grid is `(cdiv(P, BLOCK_P), B)` — tile axis on **grid_x**
 (≤ 2³¹) since `n_probe × max_cluster_size` can exceed the 65,535 limit
 on grid_y/grid_z at large catalogs. Autotune key is
-`["P", "D", "W", "HAS_QB", "HAS_MASK"]`, so the bloom-only,
-external-mask-only, both-on, and neither-on paths each get their own
-configs. Score buffer is `torch.empty([B, P])` — every in-bounds lane
-is overwritten (real dot or `-inf`), so no pre-fill kernel is needed.
-The host then `torch.topk` on it and gathers global ids; if `P < K` the
-output is padded with `-1` / `-inf` to width `K`.
-
-[`codesigned_probe_score_fp32`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py)
-is the fp32 sibling and powers
-[`SilverTorchFp32.forward`](../../retrieve/src/retrieve/layers/silvertorch/fp32.py).
-Same launch grid, autotune key, and `HAS_QB` / `HAS_MASK` paths as the
-int8 kernel — only the scoring step differs: loads `item_embs[N, D]`
-fp32 directly (no `int8 → fp32` cast, no per-item `scales` multiply).
-Trades **~4× the HBM traffic** in the scoring inner loop for
-exact-up-to-IVF recall (no quantization error). Use when the index fits
-comfortably in HBM and recall ceiling matters more than bandwidth; stay
-on the int8 kernel when bandwidth- or capacity-bound.
+`["P", "D", "W", "HAS_QB"]`, so the bloom-on and bloom-off paths each
+get their own configs. Score buffer is `torch.empty([B, P])` — every
+in-bounds lane is overwritten (real dot or `-inf`), so no pre-fill
+kernel is needed. The host then `torch.topk` on it and gathers global
+ids; if `P < K` the output is padded with `-1` / `-inf` to width `K`.

@@ -4,7 +4,7 @@ _defaults: &defaults
   gt_subdir: gt_d64
   # No `checkpoint:` field — arxiv has no SASRec model; queries come from
   # data/arxiv-papers/content_d64/query_emb.pt (built by `arxiv.py encode_queries`).
-  output: data/arxiv-papers/evaluate_quality_d64.json
+  output: results/arxiv/d64-quality.json
   split: test
   device: cuda
   ks: [100, 200, 400]
@@ -21,7 +21,12 @@ _defaults: &defaults
     linr_v3:
       - {candidate_pool: 12000, v3_seed: 0}
     silvertorch:
-      - {n_lists: 1664, n_probe: 32, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}
+      # Recall curve — Layout A (n_lists≈√N, paper-faithful, ~1800-item clusters).
+      - {n_lists: 1664, n_probe: 8,   n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈14k, recall≈0.74
+      - {n_lists: 1664, n_probe: 32,  n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈58k, recall≈0.89
+      - {n_lists: 1664, n_probe: 128, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈232k, recall≈0.95
+      # CUDA-friendly point — Layout B (n_lists=8192, ~365-item clusters).
+      - {n_lists: 8192, n_probe: 8,   n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈2.6k
     voyager_hnsw:
       - {m: 32, ef_construction: 200, ef_query: 1000, num_threads: 16, seed: 0}
 

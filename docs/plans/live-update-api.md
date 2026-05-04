@@ -1,243 +1,223 @@
-# Live-update (Upsert / Delete) API — LiNR-style, post-torch.export
+# Live-update (Upsert / Delete) API — eager-only, no torch.export dependency
 
 ## Context
 
-The LiNR paper at [articles/linr.md](../../articles/linr.md) describes a model-based GPU retriever whose key freshness mechanism is a pair of `Upsert` / `Delete` APIs **on the model itself**. The Updator subscribes to a Venice CDC stream, classifies events as upserts or deletes, and calls those methods concurrently with `forward`. Implementation tricks the paper highlights: pre-allocated larger tensors, a high-water mark for the working set, and minimal serialization between updaters and the inference path. Enabling live updates was worth **+6%** in their A/B (deployment-lessons section).
+The previous version of this plan was gated on **all 6 phases of the torch-export refactor landing first** ([torch-export-refactor.md](torch-export-refactor.md)). That refactor has not landed: modules under [retrieve/src/retrieve/layers/](../../retrieve/src/retrieve/layers/) still carry `Optional[Tensor]` args, `is_cuda` device-routing branches, and one `.item()` call ([one_bit_knn_triton.py:53](../../retrieve/src/retrieve/layers/linr/one_bit_knn_triton.py#L53)); there is no `evaluation/retrieval/build_export.py` and no `torch.export` usage anywhere in the repo.
 
-Our modules today do **not** support this. Every retrieval / filter module re-allocates its buffers from scratch in `register_index`. Buffer sizes are exact (`[N, D]`, `[N, C, A_max]`, etc.), there is no over-allocation, no active-row count, and no tombstone/valid mask. To get live updates, we need:
+This replan delivers the **same eager-mode behavior** (capacity-aware buffers, in-place upsert / delete, valid-mask folded into forward) **without requiring the export refactor as a prerequisite**. Per the LiNR paper's deployment-lessons section, enabling live updates was worth +6% in their production A/B — the value driver is freshness, not the `.pt2` packaging step. The export refactor remains a separate, parallel effort; this plan is designed to compose cleanly with it later (no Optionals or `.item()` introduced on the new upsert / delete code paths) but does not depend on it.
 
-1. Capacity-aware buffer allocation (`capacity ≥ N`).
-2. A scalar `n_active` watermark + a `[capacity] bool valid_mask` per retrieval module.
-3. `upsert(rows, embs, ...)` and `delete(rows)` methods that mutate buffers in-place.
-4. Forward paths that respect `valid_mask`.
+**What changes vs. the previous version:**
 
-The paper points at this exact stack: the article's "Inference on Native Stack" section says they started on TorchScript and are moving to `torch.export`. Their model has multiple traceable methods (`forward`, `upsert`, `delete`) — under torch.export, each becomes its own `.pt2`. That maps directly onto the convention established by [torch-export-refactor.md](torch-export-refactor.md): **one signature → one trace → one `.pt2`**. So this work is built on top of the export refactor, not in tension with it.
-
-This plan assumes **all 6 phases of the torch-export refactor have landed**.
-
-## Is it hard to combine with torch.export?
-
-**Medium difficulty, mostly already paid for by the export refactor.** The disciplines the export refactor enforces — no `.item()` on the export path, no `Optional[Tensor]` in launch / forward signatures, mode-pinned methods, post-launch host code in the layer, build-factory device routing — apply identically to `upsert` / `delete`. Once those are in place, adding the live-update methods is mostly:
-
-- A `capacity` kwarg on `register_index` (off the export path).
-- Two new buffers per retrieval module: `n_active: Tensor[()] int64` and `valid_mask: Tensor[capacity] bool`.
-- One in-place AND of `valid_mask` into every forward's existing mask path.
-- Method bodies that take row-index inputs and mutate buffers via `index_copy_` / `scatter_` (both export-traceable).
-
-Genuinely new constraints (none individually hard):
-
-- **`n_active` is a scalar tensor, not a Python int.** Updating it as `n_active.fill_(torch.maximum(n_active, rows.max() + 1))` keeps it on-device, no `.item()`.
-- **`valid_mask` threads into forward.** Today only `LiNR_V2` / `V3` / `FullScanKNN` accept an external `mask`; they need to AND it with `self.valid_mask[None, :]` before topk. That's one additional line per `_forward_full`.
-- **`LiNR_V3`'s OPORP must quantize new rows on-device** at upsert time using the existing `oporp_signs` / `oporp_perm` buffers. Same `quantize_oporp_1bit` op as `register_index`, just on a `[K, D]` slice.
-- **`BloomFilter` recomputes signatures per upsert row** using existing `hash_seeds`. Per-row independent — just a smaller call to `_build_signatures`.
-
-Genuinely deferred (out of scope):
-
-- **`SilverTorch` (IVF) live update.** Per the article, this is where most of LiNR's engineering effort went: per-cluster overcommit, route-by-centroid on upsert, periodic cluster rebalancing. Substantial enough to be its own plan; deferring.
-- **GPU-side ID→row hash table.** The paper's Updator runs in the host (Apache Beam → Updator → GPU); the application layer owns the ID map. Module APIs take row indices.
-- **Concurrent updates from multiple streams.** We promise correctness only when forward and upsert/delete are issued on the same CUDA stream (or serialized via a stream sync). The article's "minimal data access serialization" matches this; the inside of the module does no locking.
+- Targets the **current module set**: `OneBitKNN` + `OneBitKNNTriton`, `PrefilterKNN` + `PrefilterKNNTriton`, `SimilarityMasking` + `SimilarityMaskingTriton`, `FullScanKNN`, `BloomFilter`, `ExactAttributeFilter`. (`LiNR_V2 / V3 / ClauseIndex` no longer exist.)
+- **Drops the `build_export.py` extension phase** — no export entry point exists today, so there is nothing to extend. Re-add later once the export refactor lands.
+- **`SilverTorch` is still deferred** — same reasoning as before: per-cluster overcommit + route-by-centroid is its own substantial effort, and the current `register_index` does kmeans + padded-cluster construction which doesn't live-update cleanly.
+- Forward integration adapts to today's `mask: Tensor | None = None` signatures instead of a post-refactor "mask is required" signature. We fold `valid_mask` in regardless of whether the caller passed a mask.
 
 ## Approach
 
-### Phase A — Shared scaffolding (interfaces, base buffers)
+### Phase A — Shared scaffolding (`LiveIndexMixin`, interface tweaks)
 
 **Files:**
-- [retrieve/src/retrieve/interfaces.py](../../retrieve/src/retrieve/interfaces.py)
 - `retrieve/src/retrieve/layers/utils/live_update.py` — new
-- [docs/system/architecture.md](../system/architecture.md)
+- [retrieve/src/retrieve/interfaces.py](../../retrieve/src/retrieve/interfaces.py)
 
 **Steps:**
 
-1. Add a small `LiveIndexMixin` in a new `live_update.py`:
+1. Add `LiveIndexMixin` in a new `live_update.py`:
 
    ```python
    class LiveIndexMixin:
-       """Provides n_active + valid_mask buffers and a free-row helper.
-       Modules that mix this in must call _alloc_live_buffers(capacity) inside
-       their register_index, after computing the initial item count N."""
+       """Provides n_active + valid_mask buffers and a live_enabled flag.
+       Subclasses call _alloc_live_buffers(capacity, n_initial) inside
+       register_index after computing the initial item count N."""
 
-       def _alloc_live_buffers(self, capacity: int, n_initial: int) -> None:
-           self.register_buffer("n_active", torch.tensor(n_initial, dtype=torch.int64))
-           valid = torch.zeros(capacity, dtype=torch.bool)
+       n_active: Tensor
+       valid_mask: Tensor
+
+       def _alloc_live_buffers(self, capacity: int, n_initial: int, device) -> None:
+           self.register_buffer("n_active", torch.tensor(n_initial, dtype=torch.int64, device=device))
+           valid = torch.zeros(capacity, dtype=torch.bool, device=device)
            valid[:n_initial] = True
            self.register_buffer("valid_mask", valid)
-           self._capacity = int(capacity)  # python attr, frozen at export time
+           self._capacity = int(capacity)
+           self._live_enabled = True
 
        def _bump_watermark(self, rows: Tensor) -> None:
-           """In-place watermark update; no .item(). Export-safe."""
+           # In-place; no .item(). Keeps upsert export-clean.
            self.n_active.copy_(torch.maximum(self.n_active, rows.max() + 1))
+
+       def _effective_mask(self, B: int, mask: Tensor | None) -> Tensor | None:
+           # Layer-side helper: AND caller mask with valid_mask. Returns None
+           # when live-update is off AND caller did not pass a mask, preserving
+           # today's fast path (no mask materialized).
+           if not getattr(self, "_live_enabled", False):
+               return mask
+           vm = self.valid_mask.unsqueeze(0).expand(B, -1)
+           return vm if mask is None else (mask & vm)
    ```
 
-2. Extend `RetrievalModule` and `FilterModule` (in [interfaces.py](../../retrieve/src/retrieve/interfaces.py)) with optional declarations: `register_index(item_embs, *, capacity: int | None = None)`. Default `capacity=None` means `capacity=N` (no overcommit, identical to today).
+2. **Add non-abstract `upsert` / `delete` defaults** to `RetrievalModule` and `FilterModule` in [interfaces.py](../../retrieve/src/retrieve/interfaces.py): both raise `NotImplementedError`. Subclasses opt in. Do **not** add `mode=` or other export-refactor signature changes here — those belong to the export refactor.
 
-3. Add `upsert` and `delete` to `RetrievalModule` as **non-abstract** methods that raise `NotImplementedError`. Subclasses opt in. Filters get the same on `FilterModule` where applicable.
+3. **Extend the abstract `register_index` signature** with an optional `capacity: int | None = None` kwarg. Default `capacity=None` means "no overcommit, no live updates" → buffers sized at exactly `N` (today's behavior, byte-for-byte).
 
-### Phase B — `LiNR_V2` / `LiNR_V2_Triton`, `LiNR_V3` / `LiNR_V3_Triton`, `FullScanKNN`
+### Phase B — Retrieval modules: `OneBitKNN(Triton)`, `PrefilterKNN(Triton)`, `SimilarityMasking(Triton)`, `FullScanKNN`
 
 **Files:**
-- [retrieve/src/retrieve/layers/linr/v2.py](../../retrieve/src/retrieve/layers/linr/v2.py), [v2_triton.py](../../retrieve/src/retrieve/layers/linr/v2_triton.py)
-- [retrieve/src/retrieve/layers/linr/v3.py](../../retrieve/src/retrieve/layers/linr/v3.py), [v3_triton.py](../../retrieve/src/retrieve/layers/linr/v3_triton.py)
-- [retrieve/src/retrieve/layers/utils/retrieval.py](../../retrieve/src/retrieve/layers/utils/retrieval.py)
-- [retrieve/src/retrieve/layers/linr/builder.py](../../retrieve/src/retrieve/layers/linr/builder.py)
-- [retrieve/tests/correctness/test_linr.py](../../retrieve/tests/correctness/test_linr.py), `test_full_scan_knn.py` *(or wherever FullScan is tested)*
+- [retrieve/src/retrieve/layers/linr/one_bit_knn.py](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py), [one_bit_knn_triton.py](../../retrieve/src/retrieve/layers/linr/one_bit_knn_triton.py)
+- [retrieve/src/retrieve/layers/linr/prefilter_knn.py](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py), [prefilter_knn_triton.py](../../retrieve/src/retrieve/layers/linr/prefilter_knn_triton.py)
+- [retrieve/src/retrieve/layers/linr/similarity_masking.py](../../retrieve/src/retrieve/layers/linr/similarity_masking.py), [similarity_masking_triton.py](../../retrieve/src/retrieve/layers/linr/similarity_masking_triton.py)
+- [retrieve/src/retrieve/layers/utils/retrieval.py](../../retrieve/src/retrieve/layers/utils/retrieval.py) — `FullScanKNN`
+- [retrieve/tests/correctness/test_linr.py](../../retrieve/tests/correctness/test_linr.py), [test_retrieval_utils.py](../../retrieve/tests/correctness/test_retrieval_utils.py), new `test_live_update.py`
 
 **Steps:**
 
-1. **`register_index` capacity-aware.** Each module's `register_index(item_embs, *, capacity=None)` allocates `item_embs` at `[capacity, D]`, copies the initial `[:N]` rows, leaves the rest zero, then calls `_alloc_live_buffers(capacity, N)`. For `LiNR_V3`, `item_bits` is `[capacity, W]` — quantize the initial slice, leave the rest zero (they're masked by `valid_mask` anyway).
+1. **Capacity-aware `register_index`**. For each retrieval module, accept `capacity: int | None = None`:
+   - `OneBitKNN`: `quantize_oporp_1bit(item_embs)` returns the initial bits/signs/perm. Allocate `item_bits` at `[capacity, W]`, copy initial `[:N]`, leave the rest zero (masked by `valid_mask` anyway). Reuse [quantize_oporp_1bit](../../retrieve/src/retrieve/layers/utils/quantize.py) — `signs` / `perm` are frozen at `register_index` time, exactly what upsert needs.
+   - `PrefilterKNN`, `FullScanKNN`: allocate `item_embs` at `[capacity, D]`, copy initial slice.
+   - `SimilarityMasking`: layout is pre-transposed `[D, capacity]` — keep the layout, upsert writes a column slice.
+   - All call `self._alloc_live_buffers(capacity, N, device)` after the initial copy. When `capacity is None`, skip both the over-allocation and the mixin call (legacy path stays byte-identical).
 
-2. **`upsert(rows: Tensor[K], embs: Tensor[K, D]) -> None`** (eager + traceable):
-   - **V2 / FullScan**: `self.item_embs.index_copy_(0, rows, embs)`, `self.valid_mask.index_fill_(0, rows, True)`, `self._bump_watermark(rows)`.
-   - **V3**: `bits = quantize_oporp_1bit(embs, self.oporp_signs, self.oporp_perm)`, then `self.item_bits.index_copy_(0, rows, bits)` + same valid_mask + watermark.
-   - The Triton subclasses inherit `upsert` from their torch base — no kernel work; the operation is pure tensor mutation.
+2. **`upsert(rows: Tensor[K], embs: Tensor[K, D]) -> None`** — eager, in-place:
+   - `OneBitKNN` / `OneBitKNNTriton`: `bits = _pack_signs_to_int64((embs * signs.to(embs.dtype)).index_select(1, perm))` — same op `quantize_oporp_1bit` does for the initial fill, just over `[K, D]`. Then `self.item_bits.index_copy_(0, rows, bits)`, `self.valid_mask.index_fill_(0, rows, True)`, `self._bump_watermark(rows)`. Triton subclass inherits — no kernel work, just buffer mutation.
+   - `PrefilterKNN` / `PrefilterKNNTriton`, `FullScanKNN`: `self.item_embs.index_copy_(0, rows, embs)` + valid_mask + watermark.
+   - `SimilarityMasking` / `SimilarityMaskingTriton`: `self.item_embs_t.index_copy_(1, rows, embs.t().contiguous())` + valid_mask + watermark. (Triton variant inherits unchanged.)
 
-3. **`delete(rows: Tensor[K]) -> None`**: `self.valid_mask.index_fill_(0, rows, False)`. We do **not** clear the embedding row — it's masked, and reclaim happens on the next `upsert` to that row. This avoids a redundant write and keeps `delete` a single op.
+3. **`delete(rows: Tensor[K]) -> None`**: `self.valid_mask.index_fill_(0, rows, False)`. Tombstone only — embedding row stays; reuse happens on next upsert to that row. One op.
 
-4. **Forward integration.** Every `_forward_full` / `_forward_filtered` AND-folds `valid_mask` into the score path:
-   - V2 (`_forward_full`): apply `mask & self.valid_mask[None, :]`. The post-export-refactor signature already requires `mask` (Phase 3 of the export refactor), so the AND becomes unconditional.
-   - V3 (`_forward_full` and `_forward_masked`): same pattern. The kernel-side mask path (`oporp_1bit_match_topk`) already accepts a mask tensor.
-   - V2 / V3 candidates path: gather `valid_mask[candidate_ids]` and zero-out tombstoned candidate scores before topk.
-   - FullScanKNN: same as V2.
+4. **Forward integration — fold `valid_mask` into the existing mask path** without breaking today's signatures or the no-live-update fast path:
 
-5. **Builder updates.** [builder.py](../../retrieve/src/retrieve/layers/linr/builder.py) `build_linr_v*` factories pass `capacity` through. Default behavior unchanged when `capacity` is omitted.
+   - `OneBitKNN._forward_full`: replace `if mask is not None: scores.masked_fill_(~mask, -inf)` with `effective = self._effective_mask(query.shape[0], mask); if effective is not None: scores.masked_fill_(~effective, -inf)`. Keep the `where(isfinite, topk_ids, -1)` wrap-up — works because tombstoned slots get `-inf` scores.
+   - `OneBitKNN._forward_candidates`: when live-update is on, do `valid = self.valid_mask[candidate_ids]; scores.masked_fill_(~valid, -inf)` before the topk; the post-topk `gather` already uses these scores.
+   - `OneBitKNNTriton.forward`: today routes to the unmasked Triton kernel when `mask is None`. With live-update on, treat valid_mask as the mask: `effective = self._effective_mask(B, mask)`; if `effective is None`, take the existing unmasked fast path; otherwise `compact_mask(effective)` → masked kernel. **Performance note**: the masked path is slower than the unmasked one (gather + compact), so live-update is opt-in by capacity and pays its own cost. Document in the docstring.
+     - The pre-existing `int(counts.max().item()) == 0` short-circuit at [one_bit_knn_triton.py:53](../../retrieve/src/retrieve/layers/linr/one_bit_knn_triton.py#L53) is **not regressed** by this plan — it's already on the eager path today. The export refactor will remove it later.
+   - `PrefilterKNN._forward_full`: when live-update is on, `effective = self.valid_mask[None, :].expand(B, -1)`; apply `masked_fill_(~effective, -inf)` on `scores`. Otherwise unchanged.
+   - `PrefilterKNN._forward_prefilter`: gather `valid_in_cand = self.valid_mask[safe_ids]` (`[B, P]`), `scores.masked_fill_(~valid_in_cand, -inf)` before the topk. Tombstoned candidates fall out naturally.
+   - `PrefilterKNNTriton.forward`: same treatment in the prefilter Triton path — gather `valid_in_cand` host-side, AND it row-wise into `counts` (or trim `candidate_ids` so only live rows reach the kernel). Pass `(candidate_ids, counts)` to `fused_masked_knn_topk` unchanged.
+   - `SimilarityMasking.forward`: same `_effective_mask` substitution as `OneBitKNN._forward_full`.
+   - `FullScanKNN.forward`: today applies mask post-topk via [post_filter_topk](../../retrieve/src/retrieve/layers/utils/retrieval.py#L9). Extend that: build effective mask from caller's `mask` AND `valid_mask`, post-filter as today.
+   - `FullScanKNN._forward_candidates`: gather `valid_mask[candidate_ids]`, `masked_fill_` before the local topk.
 
-### Phase C — `ClauseIndex`, `BloomFilter`
+5. **Watermark accuracy**: `n_active` is a soft watermark (per the article — "high-water mark to track the working set"). It is monotonic-increasing; `delete` does not lower it. That's intentional — the watermark bounds the effective row range for compaction-time scans, not for forward correctness (forward correctness is `valid_mask`-only).
+
+6. **Tests** in new `retrieve/tests/correctness/test_live_update.py`:
+   - **Rebuild-vs-incremental parity**: insert N items via N `upsert` calls and assert forward output exactly matches `register_index([all N items])`-then-forward.
+   - **Delete tombstones**: `register_index(N)` → `delete(some_rows)` → assert deleted ids never appear in topk.
+   - **Reuse on upsert**: delete row r, upsert different embedding into row r, assert forward returns the new embedding's neighbors.
+   - **Capacity exhausted**: `next_free_rows(too_many)` raises.
+   - **No-live-update legacy path**: `register_index(item_embs)` with `capacity=None` produces buffers, forward, and shapes byte-for-byte identical to today (regression guard against accidentally turning live-update on).
+
+### Phase C — Filters: `BloomFilter`, `ExactAttributeFilter`
 
 **Files:**
-- [retrieve/src/retrieve/layers/filters/clause.py](../../retrieve/src/retrieve/layers/filters/clause.py)
 - [retrieve/src/retrieve/layers/filters/bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py)
-- [retrieve/tests/correctness/test_filters.py](../../retrieve/tests/correctness/test_filters.py), [test_bloom_filter.py](../../retrieve/tests/correctness/test_bloom_filter.py)
+- [retrieve/src/retrieve/layers/filters/exact_attribute.py](../../retrieve/src/retrieve/layers/filters/exact_attribute.py)
+- [retrieve/tests/correctness/test_bloom_filter.py](../../retrieve/tests/correctness/test_bloom_filter.py), [test_filters.py](../../retrieve/tests/correctness/test_filters.py)
 
 **Steps:**
 
-1. Filters do **not** carry their own `valid_mask` — they trust the retrieval module's mask. They only need to keep their per-row state (`item_clause_attrs`, `bloom_sigs`) consistent with the retrieval module's row indexing.
+1. Filters do **not** maintain their own `valid_mask`. The retrieval module's `valid_mask` is the single source of truth for liveness; the filter only mutates its per-row state to match the retrieval module's row indexing.
 
-2. **`upsert(rows: Tensor[K], item_clause_attrs: Tensor[K, C, A_max]) -> None`**:
-   - `ClauseIndexTorch` / `ClauseIndexTriton`: `self.item_clause_attrs.index_copy_(0, rows, item_clause_attrs)`. `A_max` is fixed at `register_index` time; caller pads / truncates to it.
-   - `BloomFilterTorch` / `BloomFilterTriton`: recompute signatures for the K rows on-device via the same `_build_signatures` op already used at register time, then `self.bloom_sigs.index_copy_(0, rows, new_sigs)`. Per-row independent — no global rebuild.
+2. **`upsert(rows, item_clause_attrs)`**:
+   - `ExactAttributeFilter`: `self.item_clause_attrs.index_copy_(0, rows, item_clause_attrs)`. `A_max` is fixed at `register_index` time; caller pads / truncates to fit. `clause_is_reverse` is per-clause, not row-dependent — left untouched.
+   - `BloomFilter`: recompute signatures for the K rows on-device by calling [_build_signatures](../../retrieve/src/retrieve/layers/filters/bloom.py#L130) on a `[K, C, A_max]` slice — the function is shape-generic and chunked. Then `self.bloom_sigs.index_copy_(0, rows, new_sigs)`. Per-row independent; no global rebuild.
 
-3. **`delete(rows)`**: no-op for filters. Documented in the docstring; the retrieval-side `valid_mask` is the source of truth for liveness.
+3. **`delete(rows)`**: no-op for both filters. Documented in docstring; tombstoning lives on the retrieval-side `valid_mask`.
 
-4. Both filters expose `register_index(item_clause_attrs, *, capacity=None)`.
+4. Both filters' `register_index` accepts `capacity: int | None = None`. When set, `item_clause_attrs` / `bloom_sigs` allocate at `[capacity, ...]`. Initial slice copied; rest zero. Filters do not call `_alloc_live_buffers` (they have no `valid_mask` of their own); they just over-allocate the row dimension to match the retrieval module's capacity.
 
-### Phase D — Host-only helpers (not exported)
+### Phase D — Host-only helpers (not in forward)
 
-**Files:**
-- `retrieve/src/retrieve/layers/utils/live_update.py` (same file as Phase A)
+**File:** `retrieve/src/retrieve/layers/utils/live_update.py` (same file as Phase A).
 
-**Steps:**
+**Add to `LiveIndexMixin`:**
 
-1. **`next_free_rows(self, n_new: int) -> Tensor[n_new]`** — Python-side helper on `LiveIndexMixin`. Walks `valid_mask` (CPU copy) to find tombstoned slots first, then extends past `n_active` up to `_capacity`. Raises if `_capacity` exhausted. Caller uses the returned rows as input to `upsert`. **Not on the export path** — it's the application's row-allocator and uses `.item()` / `.tolist()` freely.
+1. **`next_free_rows(self, n_new: int) -> Tensor[n_new]`** — host-side row allocator. Walks `valid_mask` (CPU copy via `.cpu()`) to find tombstoned slots first, then extends past `n_active` up to `_capacity`. Raises `RuntimeError` if `_capacity` exhausted. Caller passes the returned rows into `upsert`. Uses `.tolist()` / Python loops freely — **off the export path**, so the constraints there don't apply.
 
-2. **`compact(self) -> Tensor[capacity]`** — optional, host-side. Rebuilds buffers to put live rows in `[0:n_active)` order; returns an old→new row map so the caller can rewrite their ID→row table. Implemented per-module (each knows its own buffers) but follows a shared interface.
+2. **`compact(self) -> Tensor[capacity]`** — optional host-side helper. Rebuilds the module's row-indexed buffers so live rows occupy `[0:n_active)` densely; returns an old→new row map so the application can rewrite its ID→row table. Implemented per-module (each one knows its own buffer set); the mixin provides the `valid_mask` walk + remap logic. Reuse [compact_mask](../../retrieve/src/retrieve/layers/utils/compact.py) — it derives the dense old→new permutation from the `[capacity]` valid bool.
 
-### Phase E — Export entries (`build_export.py` extension)
+### Deferred — `SilverTorch` IVF live updates
 
-**Files:**
-- `evaluation/retrieval/build_export.py` (created in Phase 3 of the export refactor; extended by Phases 5–6)
+Out of scope. The current [silvertorch/main.py register_index](../../retrieve/src/retrieve/layers/silvertorch/main.py#L68) runs kmeans + builds `padded_cluster_items` with a per-cluster `max_size`; live update there needs per-cluster overcommit, route-by-centroid on upsert, and periodic rebalance. Standalone follow-up plan.
 
-**Steps:**
+### Deferred — Export entries (`.pt2` per algo × {upsert, delete})
 
-For each retrieval algo with live-update support, add two entries alongside its existing forward `.pt2`:
+Drop from this plan. Re-add as a follow-up once the torch-export refactor lands and `evaluation/retrieval/build_export.py` exists. The upsert / delete code introduced here is **deliberately written to not block future export**: no `.item()` in `upsert` / `delete` bodies, no `Optional[Tensor]` in their signatures (`embs` and `rows` are required, K-row tensors), the watermark update is on-device. The `_effective_mask` helper is layer-side host code — that's fine; the kernel-facing tensors stay clean.
 
-```python
-def export_linr_v3_upsert(idx, out_dir):
-    rows_ex = torch.zeros(8, dtype=torch.int64)
-    embs_ex = torch.zeros(8, D, dtype=torch.float32)
-    ep = torch.export.export(
-        idx.upsert,
-        (rows_ex, embs_ex),
-        dynamic_shapes=({0: Dim("k", min=1, max=idx._capacity)}, {0: Dim("k", ...)}),
-    )
-    torch.export.save(ep, out_dir / "linr_v3_upsert.pt2")
-
-def export_linr_v3_delete(idx, out_dir):
-    rows_ex = torch.zeros(8, dtype=torch.int64)
-    ep = torch.export.export(idx.delete, (rows_ex,), dynamic_shapes=({0: Dim("k", ...)},))
-    torch.export.save(ep, out_dir / "linr_v3_delete.pt2")
-```
-
-Final `.pt2` zoo (concatenating with what the export refactor produces):
-
-- `linr_v2_full.pt2`, `linr_v2_candidates.pt2`, **`linr_v2_upsert.pt2`**, **`linr_v2_delete.pt2`**
-- `linr_v3_full.pt2`, `linr_v3_masked.pt2`, `linr_v3_candidates.pt2`, **`linr_v3_upsert.pt2`**, **`linr_v3_delete.pt2`**
-- `full_scan_full.pt2`, **`full_scan_upsert.pt2`**, **`full_scan_delete.pt2`** (only if FullScanKNN gets exported per the export refactor's "out of scope" note)
-- `clause_filter_upsert.pt2`, `bloom_filter_upsert.pt2` (delete is a no-op for filters; no entry)
-
-The native serving stack loads all entries for an algo as parallel AOTI artifacts and dispatches per the article's classification of CDC events into upserts vs deletes.
-
-### Phase F — Documentation + concurrency contract
+### Phase E — Documentation + concurrency contract
 
 **Files:**
 - [docs/system/architecture.md](../system/architecture.md)
-- [docs/system/checkpoints.md](../system/checkpoints.md) (capacity restoration on load)
-- New: `docs/system/live-updates.md` — short doc on the contract.
+- [docs/system/checkpoints.md](../system/checkpoints.md) — capacity restoration on load
+- New: `docs/system/live-updates.md`
 
 **Document:**
 
-- The `capacity` parameter and how to pick it (article: "pre-allocating larger tensors").
+- The `capacity=` parameter and how to pick it (paper: "pre-allocating larger tensors").
 - The application layer owns the ID→row map; module APIs take rows.
-- Forward + upsert + delete must share a CUDA stream OR be serialized via stream sync. Inside the module there is no locking. (Matches the article's "minimal data access serialization.")
+- Forward + `upsert` + `delete` must share a CUDA stream OR be serialized via stream sync. Inside the module there is no locking. (Matches the article's "minimal data access serialization.")
 - `delete` is a tombstone, not a row free; reuse happens at next `upsert(row, ...)` to that row.
-- SilverTorch (IVF) does **not** support live updates yet; deferred to a follow-up plan.
+- `SilverTorch` does not support live updates yet; deferred.
+- **Note**: this plan's API is eager-only; `torch.export` compatibility is preserved at the per-method level (no `.item()` / no `Optional` in `upsert` / `delete` themselves) but no `.pt2` is produced today. That ships with the future export refactor.
 
 ## Critical files to modify
 
 | File | Reason |
 |---|---|
-| [retrieve/src/retrieve/interfaces.py](../../retrieve/src/retrieve/interfaces.py) | Add `capacity=` to `register_index`; non-abstract `upsert` / `delete` declarations |
-| `retrieve/src/retrieve/layers/utils/live_update.py` (new) | `LiveIndexMixin` with `n_active` / `valid_mask` / `_bump_watermark` / `next_free_rows` / `compact` |
-| [retrieve/src/retrieve/layers/linr/v2.py](../../retrieve/src/retrieve/layers/linr/v2.py), [v3.py](../../retrieve/src/retrieve/layers/linr/v3.py), [v2_triton.py](../../retrieve/src/retrieve/layers/linr/v2_triton.py), [v3_triton.py](../../retrieve/src/retrieve/layers/linr/v3_triton.py) | Capacity-aware register_index, upsert / delete impls, valid_mask in forward |
+| [retrieve/src/retrieve/interfaces.py](../../retrieve/src/retrieve/interfaces.py) | Add `capacity=None` to abstract `register_index`; non-abstract `upsert` / `delete` defaults |
+| `retrieve/src/retrieve/layers/utils/live_update.py` (new) | `LiveIndexMixin` (`n_active`, `valid_mask`, `_bump_watermark`, `_effective_mask`, `next_free_rows`, `compact`) |
+| [retrieve/src/retrieve/layers/linr/one_bit_knn.py](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py), [one_bit_knn_triton.py](../../retrieve/src/retrieve/layers/linr/one_bit_knn_triton.py) | Capacity-aware register_index, `upsert` / `delete`, valid_mask in forward |
+| [retrieve/src/retrieve/layers/linr/prefilter_knn.py](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py), [prefilter_knn_triton.py](../../retrieve/src/retrieve/layers/linr/prefilter_knn_triton.py) | Same |
+| [retrieve/src/retrieve/layers/linr/similarity_masking.py](../../retrieve/src/retrieve/layers/linr/similarity_masking.py), [similarity_masking_triton.py](../../retrieve/src/retrieve/layers/linr/similarity_masking_triton.py) | Same; column-slice upsert into `[D, capacity]` |
 | [retrieve/src/retrieve/layers/utils/retrieval.py](../../retrieve/src/retrieve/layers/utils/retrieval.py) | Same for `FullScanKNN` |
-| [retrieve/src/retrieve/layers/filters/clause.py](../../retrieve/src/retrieve/layers/filters/clause.py), [bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py) | Capacity-aware register_index, upsert (no delete) on filters |
-| [retrieve/src/retrieve/layers/linr/builder.py](../../retrieve/src/retrieve/layers/linr/builder.py) | Thread `capacity` through factories |
-| `evaluation/retrieval/build_export.py` | Add `_upsert.pt2` and `_delete.pt2` entries per algo |
-| [retrieve/tests/correctness/test_linr.py](../../retrieve/tests/correctness/test_linr.py), [test_filters.py](../../retrieve/tests/correctness/test_filters.py), [test_bloom_filter.py](../../retrieve/tests/correctness/test_bloom_filter.py) + new `test_live_update.py` | Coverage |
+| [retrieve/src/retrieve/layers/filters/bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py), [exact_attribute.py](../../retrieve/src/retrieve/layers/filters/exact_attribute.py) | Capacity-aware register_index, `upsert` (no delete) |
+| `retrieve/tests/correctness/test_live_update.py` (new) | Rebuild-vs-incremental parity, delete tombstone, reuse, capacity-exhausted, no-live-update regression |
+| [retrieve/tests/correctness/test_linr.py](../../retrieve/tests/correctness/test_linr.py), [test_filters.py](../../retrieve/tests/correctness/test_filters.py), [test_bloom_filter.py](../../retrieve/tests/correctness/test_bloom_filter.py) | Add `capacity=` smoke cases; existing default-path coverage stays green |
 
 ## Reused existing utilities
 
-- **`quantize_oporp_1bit`** at [retrieve/src/retrieve/layers/utils/quantize.py](../../retrieve/src/retrieve/layers/utils/quantize.py) — reused inside `LiNR_V3.upsert` to quantize new rows with the existing per-module `oporp_signs` / `oporp_perm`.
-- **`_build_signatures`** at [retrieve/src/retrieve/layers/filters/bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py) — reused inside `BloomFilter.upsert` for per-row signature recompute.
-- **`compact_mask`** at [retrieve/src/retrieve/layers/utils/compact.py](../../retrieve/src/retrieve/layers/utils/compact.py) — reused inside `compact()` host helper to rebuild dense indices.
-- **`build_*` factories** in each layer file — extended in place; same signature shape established by the export refactor's Phase 1 conventions.
+- **[quantize_oporp_1bit](../../retrieve/src/retrieve/layers/utils/quantize.py#L59)** + **[_pack_signs_to_int64](../../retrieve/src/retrieve/layers/utils/quantize.py#L44)** — `OneBitKNN.upsert` re-uses the pack-signs routine over `[K, D]` with the existing per-module `oporp_signs` / `oporp_perm`.
+- **[_build_signatures](../../retrieve/src/retrieve/layers/filters/bloom.py#L130)** — `BloomFilter.upsert` re-uses it for per-row signature recompute (already chunked + shape-generic).
+- **[compact_mask](../../retrieve/src/retrieve/layers/utils/compact.py)** — `LiveIndexMixin.compact` host helper uses it to derive the dense old→new permutation from `valid_mask`. Also already used by `OneBitKNNTriton.forward` for the masked path — `_effective_mask` produces an input shape that works with it.
+- **[post_filter_topk](../../retrieve/src/retrieve/layers/utils/retrieval.py#L9)** — `FullScanKNN` already uses it; we just feed it the AND-folded effective mask.
+
+No new factories needed — current modules are instantiated directly via constructor + `register_index`. (No `build_*` factory exists for these layers today; the previous plan's "thread `capacity` through factories" step is moot.)
 
 ## Verification
 
 End-to-end correctness:
 
 ```bash
-# 1. Functional: rebuild-vs-incremental parity. Insert N items via N upsert calls
-#    and assert forward output matches a single register_index of the same N items.
+# 1. Functional: rebuild-vs-incremental parity for each retrieval module + filter.
 cd retrieve && uv run pytest tests/correctness/test_live_update.py -v
 
-# 2. Eager regressions: full suite still green.
+# 2. No regressions in eager paths: full suite green with capacity=None default.
 cd retrieve && uv run pytest tests/ -v
 
 # 3. Recall@k unchanged for the registered algorithms (no upsert traffic):
-cd evaluation && uv run python -m retrieval.benchmark --config conf/<yaml> \
+cd evaluation && uv run evaluate --config conf/<yaml> \
     --algorithms linr_v3_then_v2 silvertorch torch_fullscan triton_knn
 
-# 4. Export round-trip per (algo, op):
-cd evaluation && uv run python -m retrieval.build_export \
-    --algo linr_v3 --mode upsert --checkpoint-dir <path> --out-dir <path>
-cd evaluation && uv run python -m retrieval.build_export \
-    --algo linr_v3 --mode delete --checkpoint-dir <path> --out-dir <path>
-# Then load each .pt2, run a synthetic upsert+delete+forward sequence,
-# and assert the live-updated forward result matches an eager-mode reference.
+# 4. Manual smoke (Python REPL):
+#   idx = OneBitKNNTriton(k=K); idx.register_index(item_embs, capacity=2*N)
+#   ids0, _ = idx(query)
+#   new_rows = idx.next_free_rows(100)
+#   idx.upsert(new_rows, fresh_embs)
+#   idx.delete(rows_to_remove)
+#   ids1, _ = idx(query)
+#   ids1 should differ from ids0 only in upserted/deleted/displaced rows.
 
-# 5. No-.item() / no-Optional sweeps stay clean (continues the export refactor's bar):
-grep -rn "\.item()" retrieve/src/retrieve/layers/  # only register_index / host-helper hits
-grep -rn "Optional\[Tensor\]\|Tensor | None" retrieve/src/retrieve/layers/  # zero on upsert / delete
+# 5. (Forward-looking) the upsert/delete bodies stay export-clean:
+grep -n "\.item()" retrieve/src/retrieve/layers/utils/live_update.py \
+    retrieve/src/retrieve/layers/linr/one_bit_knn*.py \
+    retrieve/src/retrieve/layers/linr/prefilter_knn*.py \
+    retrieve/src/retrieve/layers/linr/similarity_masking*.py
+# Only host-helper (next_free_rows / compact) hits permitted; upsert / delete must be clean.
 ```
 
-End-to-end live-update demo (manual smoke):
+## What's explicitly NOT in this plan
 
-```python
-idx = build_linr_v3_triton(item_embs, k=K, capacity=2 * len(item_embs))
-ids0, _ = idx(query)                          # baseline
-new_rows = idx.next_free_rows(100)            # host-side allocator
-idx.upsert(new_rows, fresh_embs)              # inserts
-idx.delete(rows_to_remove)                    # tombstones
-ids1, _ = idx(query)                          # reflects the live update
-```
-
-The live-updated `ids1` should differ from `ids0` only in rows whose embeddings were upserted, deleted, or pushed off the top-K.
+- `evaluation/retrieval/build_export.py`, `_upsert.pt2`, `_delete.pt2` — no export entry exists today; revisit after the torch-export refactor lands.
+- `SilverTorch` IVF live updates — separate plan.
+- Mode-flag refactor of `forward` signatures (`Optional[Tensor]` → required + `mode=`) — that's the export refactor's job, not this one.
+- Removing the existing `int(counts.max().item()) == 0` short-circuit at [one_bit_knn_triton.py:53](../../retrieve/src/retrieve/layers/linr/one_bit_knn_triton.py#L53) — already in eager; not regressed by this plan; export refactor will address.
+- A GPU-side ID→row hash table — application-layer concern; module APIs take row indices.

@@ -6,7 +6,13 @@
 
 Notes on what the SilverTorch paper does, what's easy to implement against
 the current codebase, and the trade-offs of each design. Not implemented
-yet — captured here so the next pass doesn't re-derive it.
+yet — no `Sharded*` class, no `world_size` / NCCL references anywhere in
+the source tree as of this refresh. Captured here so the next pass doesn't
+re-derive it.
+
+Adjacent deferred plans ([live-update-api.md](live-update-api.md),
+[mask-compact-kernel.md](mask-compact-kernel.md)) are orthogonal to shard
+topology and don't change this design.
 
 ## What the paper actually does
 
@@ -53,19 +59,24 @@ What the paper does **not** do:
 This is dramatically simpler than tensor-parallel. **Zero kernel changes
 required** for any path.
 
-### `ShardedSilverTorch` (and analogous wrappers for `IVF_INT8_ANN`, `FullScanKNN`)
+### `ShardedSilverTorch` (and analogous wrapper for `FullScanKNN`)
 
-A thin wrapper that owns one underlying `SilverTorch` per device:
+A thin wrapper that owns one underlying `SilverTorch` per device. Same
+pattern applies to
+[`FullScanKNN`](../../retrieve/src/retrieve/layers/utils/retrieval.py)
+— both are concrete `RetrievalModule` implementations
+([`interfaces.py`](../../retrieve/src/retrieve/interfaces.py)) and share
+the same shard topology.
 
 - **`register_index(item_embs, item_clause_attrs)`** — partition along
   `N` (default: contiguous slices of size `ceil(N / world_size)`), then
   for each device construct a [`SilverTorch`](../../retrieve/src/retrieve/layers/silvertorch/main.py)
   pointed at its slice. Store per-shard `id_offset = shard_idx *
   shard_size` so local ids can be mapped back to global.
-- **`forward(query, query_clause_attrs=None, mask=None)`** —
-  1. Replicate `query` (and `query_clause_attrs` / `mask` if present) to
-     every device. Mask needs a per-shard slice along the `N` axis so
-     each shard sees only its own items.
+- **`forward(query, query_clause_attrs=None, candidate_ids=None)`** —
+  matches `SilverTorch.forward` ([`main.py:126-132`](../../retrieve/src/retrieve/layers/silvertorch/main.py)).
+  1. Replicate `query` (and `query_clause_attrs` if present) to every
+     device.
   2. Dispatch each shard's `forward` on its own
      [`torch.cuda.Stream`](https://pytorch.org/docs/stable/generated/torch.cuda.Stream.html)
      — they run concurrently because there is no cross-shard data
@@ -76,6 +87,15 @@ A thin wrapper that owns one underlying `SilverTorch` per device:
   4. Concatenate scores along dim 1 (`[B, world_size * k]`), run one
      final `torch.topk(merged, k, dim=1)`, gather merged ids the same
      way the existing kernel wrappers do (`gather(1, topk_local)`).
+  - **Candidate-id routing (V2 path).** When `candidate_ids` is passed,
+    partition each row by `shard = candidate_ids // shard_size`,
+    subtract `id_offset` to get local ids, dispatch each shard's
+    [`_forward_candidates`](../../retrieve/src/retrieve/layers/silvertorch/main.py)
+    (which indexes `self.item_codes[candidate_ids]` directly — local
+    ids are required, not optional), and run the same `topk(world_size
+    * k → k)` merge. Empty per-shard subsets must still return the
+    `(id = -1, score = -inf)` sentinel rows defined by `RetrievalModule`
+    so the merge stays well-defined.
 
 Scope: ~80–120 lines for `ShardedSilverTorch`, similar for the other
 two. Only depends on existing kernels — `codesigned_probe_score` and
@@ -117,10 +137,11 @@ clearly tolerable for production. Default to the paper's design.
 - **Mask shape on the API.** External `mask` is `[B, N]` global. The
   wrapper needs to slice it per shard; cheap, but worth keeping in mind
   for tests.
-- **`candidate_ids` path.** If a caller passes global candidate ids,
-  route each id to the owning shard (`shard = id // shard_size`) and
-  gather. The current `_forward_candidates` works on local ids; the
-  wrapper needs a tiny scatter step.
+- **Empty-slot sentinel through the merge.** The merge `topk(world_size
+  * k → k)` must not promote a `-inf` slot from one shard above a real
+  score from another. Concretely: post-merge, mask any output position
+  whose pre-topk score is `-inf` back to `id = -1`, matching the
+  `RetrievalModule` contract.
 - **Per-shard recall metric in benches.** `recall@K` should be measured
   vs an exact full-scan on the *unsharded* index, so the per-shard
   kmeans loss is visible in the bench output. Otherwise the regression

@@ -33,8 +33,7 @@ retrieve/tests/
 │   ├── test_quantize.py            (int8, OPORP, popcount)
 │   ├── test_retrieval_utils.py     (FullScanKNN, post_filter_topk)
 │   ├── test_scorers.py             (DotProductScorer)
-│   ├── test_silvertorch.py         (SilverTorch, both bloom-on and bloom-off)
-│   └── test_silvertorch_fp32.py    (SilverTorchFp32, both bloom-on and bloom-off)
+│   └── test_silvertorch.py         (SilverTorch, both bloom-on and bloom-off)
 └── parity/                # Triton kernel vs pure-torch reference
     ├── conftest.py        # assert_topk_matches helper
     ├── test_bloom_compact.py
@@ -168,10 +167,7 @@ module under test.
 | `combine_masks`            | iterated `&` of non-`None` inputs |
 | `combine_indices`          | `compact_mask(combine_masks(*[f.evaluate_mask(q)]))` |
 | `SilverTorch` (no bloom)   | `FullScanKNN` for recall (asserts ≥ 0.85 at full probe) + recall monotone in `n_probe` |
-| `SilverTorch` (with bloom) | `SilverTorch (no bloom)(mask=BloomFilter.evaluate_mask(qa))` — component composition |
 | `SilverTorch` (qa=None)    | `SilverTorch (no bloom)` directly — `query_clause_attrs=None` is a documented fast path |
-| `SilverTorchFp32` (no bloom) | `FullScanKNN` for recall (asserts ≥ 0.999 at full probe — no quantization slack) + recall monotone in `n_probe` |
-| `SilverTorchFp32` (with bloom) | Same composition test as the int8 path — `(q, qa)` ≡ `no-bloom(mask=BloomFilter.evaluate_mask(qa))` to fp32 atol |
 | `SimilarityMasking` semantics | `(q @ x.T).masked_fill(~mask, -inf).topk(k)` |
 | `PrefilterKNN` semantics      | gather + bmm + local topk + scatter |
 | `OneBitKNN` semantics         | `FullScanKNN` recall (asserts ≥ 0.4 at K=200, N=2048) |
@@ -349,20 +345,14 @@ LiNR V1, V2, V3 in both backends.
   `n_probe > n_lists` all raise `ValueError`. Passing
   `query_clause_attrs` or `item_clause_attrs` to a bloom-disabled
   module raises.
-- Mask honored at `pass_rate ∈ {0.05, 0.5}` (no-bloom path); externally-
-  composed `ExactAttributeFilter` mask gives ids ⊆ passing items.
-- **Equivalence**: `SilverTorch(q, qa)` ≡
-  `SilverTorch(no bloom)(q, mask=BloomFilter.evaluate_mask(qa))` —
-  sorted ids match exactly, sorted scores `allclose` (atol=1e-3). Also,
-  `query_clause_attrs=None` on a bloom-configured module ≡ a freshly
-  built no-bloom module with the same kmeans seed.
+- **Equivalence**: `query_clause_attrs=None` on a bloom-configured module
+  ≡ a freshly built no-bloom module with the same kmeans seed.
 - Recall ≥ 0.90 at `n_probe = n_lists`; recall ≥ 0.85 at full probe and
   monotone in `n_probe`.
 - Candidate-ids path returns ids ⊆ candidates (with bloom, without
   bloom, and with `p < k`).
-- Edge cases:
-  - mask-all-False → no finite scores (with and without bloom).
-  - `n_lists = N` (one item per cluster) → recall ≥ 0.85 at full probe.
+- Edge case: `n_lists = N` (one item per cluster) → recall ≥ 0.85 at
+  full probe.
 
 ## What each parity file asserts
 
@@ -379,7 +369,7 @@ exact-by-construction kernels, which use stricter assertions.
 | [`test_bloom_compact.py`](../../retrieve/tests/parity/test_bloom_compact.py)                 | `bloom_compact`             | `compact_mask(bloom_match(qb, sigs))` with hand-built `qb` | row-set match (kernel order is unspecified — atomic stream compaction); covers `B=1`, all-inactive query, `N < BLOCK_N`, and a routed-via-`BloomFilter.evaluate_indices` smoke check |
 | [`test_clause_mask.py`](../../retrieve/tests/parity/test_clause_mask.py)                     | `clause_mask`               | Pure-torch `[B, N, C, A_max]` broadcast inlined as `_ref_mask` | bit-exact via `torch.equal`; covers reverse clauses, all-reverse, all-inactive query, `A_max=1`, `B=1`, `N < BLOCK_N` |
 | [`test_clause_compact.py`](../../retrieve/tests/parity/test_clause_compact.py)               | `clause_compact`            | `ExactAttributeFilter.evaluate_mask(...)` + `compact_mask` (transitively goes through `clause_mask` on CUDA) | row-set match (kernel order is unspecified — atomic stream compaction); cases for reverse clauses, all-inactive query, no-passing-items, `B=1` grid corner |
-| [`test_codesigned_probe_score.py`](../../retrieve/tests/parity/test_codesigned_probe_score.py) | `codesigned_probe_score`  | `_ref_phase23`: bloom subset + INT8 dequant + dot + topk | the SilverTorch fused path; cases for `(qb, no qb) × (mask, no mask)` |
+| [`test_codesigned_probe_score.py`](../../retrieve/tests/parity/test_codesigned_probe_score.py) | `codesigned_probe_score`  | `_ref_phase23`: bloom subset + INT8 dequant + dot + topk | the SilverTorch fused path; cases for `(qb, no qb)` |
 
 ## Adding a new test
 

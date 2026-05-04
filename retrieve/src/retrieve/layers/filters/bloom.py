@@ -56,7 +56,7 @@ class BloomFilter(FilterModule):
         self.register_buffer("bloom_sigs", sigs)
 
     def _build_query_sigs(self, query_clause_attrs: Tensor) -> Tensor:
-        return _build_signatures(
+        return _build_query_signatures(
             query_clause_attrs.long().unsqueeze(-1),
             self.hash_seeds,
             self.m_bits,
@@ -146,6 +146,24 @@ def _build_signatures(
     seed_c2 = seeds[:, 1].view(1, 1, k_hash)
     shifts = torch.arange(64, dtype=torch.int64, device=attrs.device)
 
+    # Per-clause salt to namespace the hash by feature key. Without this, value V
+    # in clause C0 hashes to the same bits as V in any other clause — a query
+    # ``c3=V`` then matches items whose c0/c1/c2 happens to equal V (cross-clause
+    # collision). The paper hashes "features" = (key, value) pairs (eq. 3); this
+    # XOR after _mix64 is the keying step. Padding (-1) is detected on the raw
+    # input below before any keying, so the m_bits sentinel sink is unaffected.
+    clause_ids = (
+        torch.arange(c_dim, dtype=torch.int64, device=attrs.device)
+        .view(c_dim, 1)
+        .expand(c_dim, a_max)
+        .reshape(1, c_dim * a_max, 1)
+    )
+    clause_salt = _mix64(
+        clause_ids,
+        torch.tensor(0x9E3779B97F4A7C15 - (1 << 64), dtype=torch.int64, device=attrs.device),
+        torch.tensor(0xBF58476D1CE4E5B9 - (1 << 64), dtype=torch.int64, device=attrs.device),
+    )
+
     # The dense path materializes ``[N, word_count, 64]`` int64 (~22 GiB at
     # N=2.7M, m_bits=1024). Process in chunks: per-batch peak is bounded by
     # ``batch_size * c * a * k_hash`` int64 + ``batch_size * word_count * 64``
@@ -158,6 +176,7 @@ def _build_signatures(
         batch = flat[s:e]
         valid = batch != -1
         h = _mix64(batch.unsqueeze(-1) + seed_c1, seed_c1, seed_c2)
+        h = h ^ clause_salt
         positions = h & (m_bits - 1)
         flat_pos = positions.reshape(b, c_dim * a_max * k_hash)
         valid_expanded = valid.unsqueeze(-1).expand(-1, -1, k_hash).reshape(b, -1)
@@ -169,3 +188,91 @@ def _build_signatures(
 
     out_shape = list(leading) + [word_count]
     return out.reshape(out_shape) if leading else out.reshape(word_count)
+
+
+def _build_query_signatures_eager(
+    attrs: Tensor,
+    seeds: Tensor,
+    m_bits: int,
+    k_hash: int,
+    word_count: int,
+) -> Tensor:
+    """Loop-free signature build for query batches.
+
+    Same hash + per-clause salt + bit-pack as ``_build_signatures``, but
+    without the chunk loop — query batches are always small (B << the
+    131k-item chunk used for the index build), so chunking buys nothing
+    and its Python ``range()`` made dynamo specialize on the trip count.
+    Keeping the body purely tensor-flow lets ``torch.compile(dynamic=True)``
+    install a single symbolic-shape graph that's reused for all B.
+    """
+    leading = attrs.shape[:-2]
+    n = 1
+    for d in leading:
+        n *= d
+    c_dim = attrs.shape[-2]
+    a_max = attrs.shape[-1]
+
+    flat = attrs.reshape(n, c_dim * a_max)
+    seed_c1 = seeds[:, 0].view(1, 1, k_hash)
+    seed_c2 = seeds[:, 1].view(1, 1, k_hash)
+    shifts = torch.arange(64, dtype=torch.int64, device=attrs.device)
+
+    clause_ids = (
+        torch.arange(c_dim, dtype=torch.int64, device=attrs.device)
+        .view(c_dim, 1)
+        .expand(c_dim, a_max)
+        .reshape(1, c_dim * a_max, 1)
+    )
+    clause_salt = _mix64(
+        clause_ids,
+        torch.tensor(0x9E3779B97F4A7C15 - (1 << 64), dtype=torch.int64, device=attrs.device),
+        torch.tensor(0xBF58476D1CE4E5B9 - (1 << 64), dtype=torch.int64, device=attrs.device),
+    )
+
+    valid = flat != -1
+    h = _mix64(flat.unsqueeze(-1) + seed_c1, seed_c1, seed_c2)
+    h = h ^ clause_salt
+    positions = h & (m_bits - 1)
+    flat_pos = positions.reshape(n, c_dim * a_max * k_hash)
+    valid_expanded = valid.unsqueeze(-1).expand(-1, -1, k_hash).reshape(n, -1)
+    safe_pos = torch.where(valid_expanded, flat_pos, torch.full_like(flat_pos, m_bits))
+    bit_grid = torch.zeros(n, m_bits + 1, dtype=torch.bool, device=attrs.device)
+    bit_grid.scatter_(1, safe_pos, torch.ones_like(safe_pos, dtype=torch.bool))
+    bit_grid = bit_grid[:, :m_bits].view(n, word_count, 64).long()
+    out = (bit_grid << shifts).sum(dim=-1)
+
+    out_shape = list(leading) + [word_count]
+    return out.reshape(out_shape) if leading else out.reshape(word_count)
+
+
+# CUDA-graph-backed compile of the query path. ``mode='reduce-overhead'``
+# (cudagraph_trees) is what cuts the launch-overhead tax: the eager path
+# fires ~15 separate CUDA kernels per call (~0.4 ms wall-clock dominated by
+# launch latency, flat in B); the compiled path collapses to one replayable
+# graph (~0.09 ms, also flat in B). ``dynamic=True`` installs symbolic
+# shape guards so a single graph variant covers all B values without
+# recompile churn — see ``recompile_limit`` discussion in
+# ``docs/system/filtering.md``.
+_build_query_signatures_compiled = torch.compile(
+    _build_query_signatures_eager, dynamic=True, mode="reduce-overhead"
+)
+
+
+def _build_query_signatures(
+    attrs: Tensor,
+    seeds: Tensor,
+    m_bits: int,
+    k_hash: int,
+    word_count: int,
+) -> Tensor:
+    """Dispatch wrapper: compiled path on CUDA, eager body on CPU.
+
+    ``mode='reduce-overhead'`` requires CUDA graphs, so on CPU we route
+    around it. The eager body is identical so outputs are bit-equal across
+    devices — the parity check in ``test_cpu_eval_mask_matches_cuda``
+    exercises this.
+    """
+    if attrs.is_cuda:
+        return _build_query_signatures_compiled(attrs, seeds, m_bits, k_hash, word_count)
+    return _build_query_signatures_eager(attrs, seeds, m_bits, k_hash, word_count)

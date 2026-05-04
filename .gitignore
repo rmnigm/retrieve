@@ -225,6 +225,8 @@ evaluation/data/goodreads/
 evaluation/data/arxiv/
 evaluation/data/arxiv-papers/
 evaluation/data/goodreads-work-id/
+evaluation/data/yambda-500m/
+evaluation/data/yambda-5b/
 
 # Experiment tracking logs
 evaluation/wandb/

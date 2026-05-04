@@ -108,6 +108,53 @@ class TestFalsePositiveRate:
             analytic_fpr * 4, 1e-6
         ), f"observed FPR={bloom_match_rate:.4g}, analytic≤{analytic_fpr:.4g}"
 
+    def test_no_cross_clause_collision(self):
+        # All clauses share the same value vocabulary {0..7}. Without per-clause
+        # salt in the hash, value V in clause 0 hashes to the same bits as V in
+        # any other clause, so a query asking c_k=V matches any item whose other
+        # clauses happen to equal V. Empirically this leaks ~25-30% on real data;
+        # the analytic bound for an unsalted hash here is ~25% (~7/8 chance some
+        # other clause equals V). With per-clause salt the rate must collapse
+        # back to the analytic random-collision bound for a single-clause query.
+        n = 8192
+        c, a_max = 4, 1
+        m_bits, k_hash = 1024, 5
+        # n_vocab=8 → values shared across all clauses; pad_rate=0 so every
+        # clause-slot is populated and cross-clause leakage is maximally likely.
+        attrs = make_attrs(n, c, a_max, n_vocab=8, pad_rate=0.0, seed=40)
+
+        bf = BloomFilter(m_bits=m_bits, k_hash=k_hash).to("cuda")
+        bf.register_index(attrs)
+
+        ci = ExactAttributeFilter().to("cuda")
+        ci.register_index(attrs)
+
+        # Query activates exactly one clause at a time; the others stay at -1.
+        b = 64
+        g = torch.Generator(device="cuda").manual_seed(41)
+        for active in range(c):
+            q = torch.full((b, c), -1, dtype=torch.long, device="cuda")
+            q[:, active] = torch.randint(0, 8, (b,), generator=g, device="cuda")
+
+            bm = bf.evaluate_mask(q)
+            em = ci.evaluate_mask(q)
+            non_match = ~em
+            denom = non_match.float().sum().item()
+            if denom == 0:
+                continue
+            fp_rate = (bm & non_match).float().sum().item() / denom
+
+            # With salt: per-item bloom holds c*a_max = 4 inserted values, so
+            # ``analytic_fpr ≈ (1 - exp(-k*4/m))^k`` ≈ ~3e-9 here. Allow a
+            # generous slack so the test isn't seed-fragile but still flags any
+            # regression to the unsalted ~25% rate.
+            per_item_fill = 1.0 - math.exp(-k_hash * c * a_max / m_bits)
+            analytic_fpr = per_item_fill**k_hash
+            assert fp_rate <= max(analytic_fpr * 100, 1e-3), (
+                f"clause {active}: observed FP rate {fp_rate:.4g} >> analytic "
+                f"{analytic_fpr:.4g} — cross-clause collision regression?"
+            )
+
 
 class TestEvaluateSubset:
     def test_subset_parity_with_mask_gather(self, attrs, query):
