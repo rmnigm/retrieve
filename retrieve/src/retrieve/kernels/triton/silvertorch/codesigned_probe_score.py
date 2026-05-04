@@ -72,8 +72,10 @@ def _codesigned_probe_score_kernel(
     HAS_MASK: tl.constexpr,
     BLOCK_P: tl.constexpr,
 ):
-    bid = tl.program_id(0)
-    tile_id = tl.program_id(1)
+    # tile on axis-0 (CUDA grid_x ≤ 2^31), batch on axis-1 (grid_y ≤ 65535):
+    # n_probe × max_cluster_size can be millions, which would overflow grid_y.
+    tile_id = tl.program_id(0)
+    bid = tl.program_id(1)
 
     p_off = tile_id * BLOCK_P + tl.arange(0, BLOCK_P)
     p_valid = p_off < P
@@ -169,8 +171,10 @@ def _codesigned_probe_score_fp32_kernel(
     HAS_MASK: tl.constexpr,
     BLOCK_P: tl.constexpr,
 ):
-    bid = tl.program_id(0)
-    tile_id = tl.program_id(1)
+    # tile on axis-0 (CUDA grid_x ≤ 2^31), batch on axis-1 (grid_y ≤ 65535):
+    # n_probe × max_cluster_size can be millions, which would overflow grid_y.
+    tile_id = tl.program_id(0)
+    bid = tl.program_id(1)
 
     p_off = tile_id * BLOCK_P + tl.arange(0, BLOCK_P)
     p_valid = p_off < P
@@ -303,7 +307,9 @@ def codesigned_probe_score(
     # sees deterministic values.
     all_scores = torch.empty((b, p), dtype=torch.float32, device=query.device)
 
-    grid = lambda meta: (b, triton.cdiv(p, meta["BLOCK_P"]))
+    # Tile axis on grid_x (≤ 2^31) since num_tiles can exceed grid_y/grid_z's
+    # 65535 limit at large n_probe × max_cluster_size.
+    grid = lambda meta: (triton.cdiv(p, meta["BLOCK_P"]), b)
 
     _codesigned_probe_score_kernel[grid](
         query,
@@ -401,7 +407,9 @@ def codesigned_probe_score_fp32(
 
     all_scores = torch.empty((b, p), dtype=torch.float32, device=query.device)
 
-    grid = lambda meta: (b, triton.cdiv(p, meta["BLOCK_P"]))
+    # Tile axis on grid_x (≤ 2^31) since num_tiles can exceed grid_y/grid_z's
+    # 65535 limit at large n_probe × max_cluster_size.
+    grid = lambda meta: (triton.cdiv(p, meta["BLOCK_P"]), b)
 
     _codesigned_probe_score_fp32_kernel[grid](
         query,

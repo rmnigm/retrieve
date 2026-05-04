@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -116,20 +115,16 @@ def concat_then_tail(history: pl.Expr, more: pl.Expr, n: int) -> pl.Expr:
 
 
 def cmd_prep(args) -> int:
-    from huggingface_hub import hf_hub_download
     from loguru import logger
+
+    from data.hf_io import download_raw_file
 
     output = Path(args.output_dir).expanduser()
     output.mkdir(parents=True, exist_ok=True)
 
     hf_path = f"sequential/{args.variant}/{args.interaction}.parquet"
-    logger.info("Downloading {} from HF dataset {}…", hf_path, args.hf_repo)
-    local = hf_hub_download(
-        repo_id=args.hf_repo,
-        repo_type="dataset",
-        filename=hf_path,
-        cache_dir=os.environ.get("HF_HOME"),
-    )
+    logger.info("Downloading {} from HF dataset 'yambda'…", hf_path)
+    local = download_raw_file("yambda", hf_path)
     logger.info("Got parquet at {}", local)
 
     df = pl.scan_parquet(local)
@@ -202,7 +197,6 @@ def main() -> int:
     sp_pp = sub.add_parser("prep", help="download + preprocess into trainer-format parquets")
     sp_pp.add_argument("--variant", choices=["50m", "500m", "5b"], required=True)
     sp_pp.add_argument("--interaction", choices=["listens"], default="listens")
-    sp_pp.add_argument("--hf-repo", default="yandex/yambda")
     sp_pp.add_argument("--output-dir", type=str, required=True)
     sp_pp.add_argument("--max-seq-len", type=int, default=200)
     sp_pp.set_defaults(func=cmd_prep)

@@ -8,14 +8,28 @@ the same architecture and gBCE loss; they differ in `embedding_dim` (and
 against all 1,866,170 items, no history masking — matches the
 [Yambda paper](https://arxiv.org/abs/2505.22238) Table 2 (Listen+) protocol.
 
+Checkpoints now live under each dataset's data dir:
+`data/<dataset>/checkpoints/<ckpt-id>/` (e.g.
+`data/yambda-500m/checkpoints/gsasrec-d128-drop0.5/`). The eval CLI
+configs in [`evaluation/conf/`](../../evaluation/conf/) point at these
+paths verbatim.
+
 ## Available checkpoints
 
 | Path | Dim | Dropout | Best epoch | Test NDCG@10 | NDCG@100 | Recall@10 | Recall@100 | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `checkpoints/gsasrec-500m-listens-v1/` | 128 | 0.2 | 37 | 0.0724 | 0.0929 | 0.0339 | 0.1354 | matches paper, slight overfit observed |
-| `checkpoints/gsasrec-500m-listens-d128-drop0.5/` | 128 | 0.5 | 54 | 0.0751 | 0.0946 | 0.0353 | 0.1362 | beats paper on every metric except NDCG@10 (tie); was still climbing when stopped |
-| `checkpoints/gsasrec-500m-listens-d64-drop0.5/` | 64 | 0.5 | 99 | **0.0813** | **0.1029** | **0.0384** | **0.1489** | bf16 + fused AdamW recipe; was still climbing at the 100-epoch budget cap; **best on every quality metric** |
-| `checkpoints/gsasrec-500m-listens-d256-drop0.5/` | 256 | 0.5 | 95 | 0.0753 | 0.0910 | 0.0364 | 0.1284 | same recipe as d64; higher coverage (0.126 vs 0.124) but worse R@100 — extra capacity hurts here |
+| `data/yambda-500m/checkpoints/gsasrec-d128-drop0.5/` | 128 | 0.5 | 54 | 0.0751 | 0.0946 | 0.0353 | 0.1362 | beats paper on every metric except NDCG@10 (tie); was still climbing when stopped |
+| `data/yambda-500m/checkpoints/gsasrec-d64-drop0.5/` | 64 | 0.5 | 99 | **0.0813** | **0.1029** | **0.0384** | **0.1489** | bf16 + fused AdamW recipe; was still climbing at the 100-epoch budget cap; **best on every quality metric** |
+| `data/yambda-500m/checkpoints/gsasrec-d256-drop0.5/` | 256 | 0.5 | 95 | 0.0753 | 0.0910 | 0.0364 | 0.1284 | same recipe as d64; higher coverage (0.126 vs 0.124) but worse R@100 — extra capacity hurts here |
+
+The original `gsasrec-500m-listens-v1/` (dim 128, dropout 0.2, ep 37 — paper
+parity) was retired when the dropout=0.5 variants subsumed it.
+
+Other datasets follow the same `data/<dataset>/checkpoints/<ckpt-id>/`
+layout: 5B runs at `data/yambda-5b/checkpoints/gsasrec-d{64,128}/`,
+goodreads at `data/goodreads-work-id/checkpoints/gsasrec-d{64,128,256}-drop0.5-id/`.
+Arxiv has no SASRec checkpoint — its queries come from a pre-encoded text
+embedding tensor (see [evaluation.md](evaluation.md)).
 
 Paper Yambda-500M Listen+ SASRec target: NDCG@10 0.0754 · NDCG@100 0.0884 ·
 Recall@10 0.0336 · Recall@100 0.1240.
@@ -49,8 +63,8 @@ import json, torch
 from pathlib import Path
 from training.model import GSASRec
 
-DATA_DIR = Path("data/yambda/500m-listens")
-CKPT_DIR = Path("checkpoints/gsasrec-500m-listens-d128-drop0.5")
+DATA_DIR = Path("data/yambda-500m")
+CKPT_DIR = DATA_DIR / "checkpoints/gsasrec-d128-drop0.5"
 
 # num_items comes from the data dir's id map (written by `data/yambda.py` prep).
 with open(DATA_DIR / "item_id_map.json") as f:
@@ -148,8 +162,8 @@ from pathlib import Path
 from training.model import GSASRec
 from training.evaluate import evaluate
 
-DATA = Path('data/yambda/500m-listens')
-CKPT = Path('checkpoints/gsasrec-500m-listens-d128-drop0.5')
+DATA = Path('data/yambda-500m')
+CKPT = DATA / 'checkpoints/gsasrec-d128-drop0.5'
 n = len(json.load(open(DATA / 'item_id_map.json')))
 
 m = GSASRec(num_items=n, max_seq_length=200, embedding_dim=128,
@@ -165,15 +179,26 @@ print(evaluate(m, str(DATA / 'test.parquet'), num_items=n,
 
 ## Hugging Face Hub
 
-The `.pt` files are **not** stored in git (see `.gitignore`). Each checkpoint
-dir lives as its own model repo on the Hub:
+The `.pt` files are **not** stored in git (see `.gitignore`). HF storage is
+**one repo per dataset**, with all checkpoints living under that repo's
+`checkpoints/<ckpt-id>/` subtree (alongside the dataset's eval inputs).
+The registry lives in
+[`evaluation/data/hf_io.py`](../../evaluation/data/hf_io.py) as
+`EVAL_REPOS`:
 
-| Local dir | HF repo |
+| Dataset key | HF repo (dataset type) |
 |---|---|
-| `checkpoints/gsasrec-500m-listens-v1/` | `<owner>/gsasrec-500m-listens-v1` |
-| `checkpoints/gsasrec-500m-listens-d128-drop0.5/` | `<owner>/gsasrec-500m-listens-d128-drop0.5` |
+| `yambda-500m` | `pinkmeme/eval-yambda-500m` |
+| `yambda-5b` | `pinkmeme/eval-yambda-5b` |
+| `goodreads-work-id` | `pinkmeme/eval-goodreads-work-id` |
+| `arxiv-papers` | `pinkmeme/eval-arxiv-papers` |
 
-Replace `<owner>` with the HF username/org you uploaded under.
+A given checkpoint then lands at
+`pinkmeme/eval-<dataset>/tree/main/checkpoints/<ckpt-id>/` rather than its
+own model repo. Local layout mirrors that:
+`data/<dataset>/checkpoints/<ckpt-id>/`. Override the local root with
+`RETRIEVE_DATA_ROOT=/some/path`; otherwise it resolves to
+`evaluation/data/`.
 
 ### Auth (one-time setup)
 
@@ -187,58 +212,64 @@ For private repos you need a token with **read** access to download and
 
 ### Downloading a checkpoint
 
-```python
-from huggingface_hub import snapshot_download
+`hf_io.download_checkpoint` pulls a single `checkpoints/<ckpt-id>/` subtree:
 
-local = snapshot_download(
-    repo_id="<owner>/gsasrec-500m-listens-d128-drop0.5",
-    local_dir="checkpoints/gsasrec-500m-listens-d128-drop0.5",
-    # local_dir_use_symlinks=False,  # uncomment to copy instead of symlink
-)
-```
-After this the loading recipe above works unchanged. To grab a single file
-without the whole snapshot (~1.8 GB rather than ~3.6 GB if you only want
-`best_model.pt`):
 ```python
-from huggingface_hub import hf_hub_download
-hf_hub_download(repo_id="<owner>/gsasrec-500m-listens-d128-drop0.5",
-                filename="best_model.pt",
-                local_dir="checkpoints/gsasrec-500m-listens-d128-drop0.5")
+from data.hf_io import download_checkpoint
+
+local = download_checkpoint("yambda-500m", "gsasrec-d128-drop0.5")
+# → data/yambda-500m/checkpoints/gsasrec-d128-drop0.5/
+```
+
+The matching CLI is `eval-fetch` (whole dataset, optionally including
+checkpoints) — for a single ckpt it's currently easier to call the function
+above. To grab the dataset's eval inputs (item embeddings, attrs, etc.)
+without checkpoints:
+
+```bash
+uv run eval-fetch yambda-500m
+uv run eval-fetch goodreads-work-id --dims d64,d128 --include-checkpoints
 ```
 
 ### Uploading a new checkpoint
 
-After a training run finishes, push the resulting dir with the helper at
-[`training/upload_checkpoints.py`](../../evaluation/training/upload_checkpoints.py). It creates
-one HF model repo per checkpoint dir, generates a minimal model card from
-`eval_quality.json` / `config.json`, and uses LFS automatically for the
-large `.pt` files.
+Push the resulting dir with the
+[`upload-checkpoints`](../../evaluation/training/upload_checkpoints.py)
+console script — a thin wrapper over `hf_io.upload_checkpoint`. It reuses
+the per-dataset eval repo (creating it if absent), uploads the checkpoint
+subtree at `checkpoints/<ckpt-id>/`, generates a minimal model card from
+`eval_quality.json` / `config.json` when `README.md` is absent, and uses
+LFS automatically for `.pt` files.
 
 ```bash
 # Dry-run first to confirm the file list:
 uv run upload-checkpoints \
-    --owner <hf-user-or-org> \
-    --checkpoint gsasrec-500m-listens-d128-drop0.5 \
-    --private --dry-run
+    --dataset yambda-500m \
+    --ckpt-id gsasrec-d128-drop0.5 \
+    --dry-run
 
 # Real upload:
 uv run upload-checkpoints \
-    --owner <hf-user-or-org> \
-    --checkpoint gsasrec-500m-listens-d128-drop0.5 \
-    --private
+    --dataset yambda-500m \
+    --ckpt-id gsasrec-d128-drop0.5
 
-# Upload every dir under checkpoints/ in one go:
-uv run upload-checkpoints --owner <hf-user-or-org> --checkpoint all --private
+# Upload every checkpoint dir under data/<dataset>/checkpoints/ in one go:
+uv run upload-checkpoints --dataset yambda-500m --ckpt-id all
 ```
 
-By default the script skips the epoch-tagged `gsasrec-ep*-ndcg*.pt` snapshot
+By default the script skips the epoch-tagged `gsasrec-ep*.pt` snapshot
 because it has the same bytes as `best_model.pt` (just saved at a different
-moment in the training loop). That halves what gets pushed to Hub. Pass
-`--include-epoch-snapshots` if you want both copies.
+moment in the training loop). That halves what gets pushed. Pass
+`--include-epoch-snapshots` if you want both copies. Other flags:
+`--public` (instead of the default `--private`), `--no-write-card` to skip
+the auto-generated README.
 
-Other useful flags: `--public` (instead of `--private`), `--repo-name OTHER`
-to override the default name (single checkpoint only), `--no-write-card` to
-skip the auto-generated README.
+The lower-level `eval-publish-checkpoint` console script exposes the same
+upload helper without the `all` selector:
+
+```bash
+uv run eval-publish-checkpoint yambda-500m gsasrec-d128-drop0.5 --dry-run
+```
 
 ## Hyperparameter notes
 

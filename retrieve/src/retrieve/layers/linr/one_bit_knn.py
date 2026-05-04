@@ -71,6 +71,12 @@ class OneBitKNN(RetrievalModule):
         if mask is not None:
             scores = scores.masked_fill(~mask, float("-inf"))
         topk_scores, topk_ids = torch.topk(scores, self.k, dim=1)
+        if mask is not None:
+            topk_ids = torch.where(
+                torch.isfinite(topk_scores),
+                topk_ids,
+                topk_ids.new_full((), -1),
+            )
         return topk_ids, topk_scores
 
     def _forward_candidates(

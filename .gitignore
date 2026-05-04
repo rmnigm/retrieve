@@ -223,6 +223,8 @@ evaluation/data/*.parquet
 evaluation/data/yambda/
 evaluation/data/goodreads/
 evaluation/data/arxiv/
+evaluation/data/arxiv-papers/
+evaluation/data/goodreads-work-id/
 
 # Experiment tracking logs
 evaluation/wandb/

@@ -69,8 +69,16 @@ class EvalConfig:
     # (e.g. eval_arxiv_retrieval.py uses pre-encoded text embeddings on disk).
     checkpoint: str | None = None
     # Optional path to a pre-encoded query embedding tensor; defaults to
-    # ``<data_dir>/content/query_emb.pt`` when a harness needs one.
+    # ``<data_dir>/<content_subdir>/query_emb.pt`` when a harness needs one.
     query_emb_path: str | None = None
+    # Subdir under data_dir that holds {text_emb,query_emb}.pt + meta sidecars.
+    # Arxiv ships variants at content_d64 / content_d128 / content (= d=256);
+    # other datasets keep the default "content".
+    content_subdir: str = "content"
+    # Subdir under data_dir that holds gt_topk_<sweep>.pt oracle caches. Must
+    # vary with content_subdir (oracle scores depend on item_embs which depend
+    # on dim), so set per-yaml when running multiple dims off the same data_dir.
+    gt_subdir: str = "gt"
     output: str | None = None
     split: str = "test"
     device: str = "cuda"
@@ -79,15 +87,15 @@ class EvalConfig:
     seed: int = 0
     encode: EncodeConfig = field(default_factory=EncodeConfig)
     algorithms: list[str] = field(default_factory=list)
-    algo_params: dict[str, dict[str, Any]] = field(default_factory=dict)
+    algo_params: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     # Optional filter-bench block; consumed by eval_goodreads_retrieval.py and
     # eval_arxiv_retrieval.py.
     filters: dict[str, FilterCfg] | None = None
-    # Optional cap on the number of users for filter sweeps only (the
-    # unfiltered `none/full_scan` cell still uses all users). Goodreads has
-    # 313k test users which makes the bs=1 quality stream the wall-clock
-    # bottleneck; arxiv only has 10k so leave this null there.
-    filter_users_limit: int | None = None
+    # Optional cap on the number of users for ALL cells (quality and
+    # filter alike). Goodreads has 313k test users which makes the bs=1
+    # quality stream the wall-clock bottleneck; cap to e.g. 50000 to
+    # speed runs up. Leave null to use the full split.
+    users_limit: int | None = None
 
 
 def load_eval_config(path: Path) -> EvalConfig:

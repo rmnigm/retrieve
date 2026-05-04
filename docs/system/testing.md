@@ -33,11 +33,14 @@ retrieve/tests/
 │   ├── test_quantize.py            (int8, OPORP, popcount)
 │   ├── test_retrieval_utils.py     (FullScanKNN, post_filter_topk)
 │   ├── test_scorers.py             (DotProductScorer)
-│   └── test_silvertorch.py         (SilverTorch, both bloom-on and bloom-off)
+│   ├── test_silvertorch.py         (SilverTorch, both bloom-on and bloom-off)
+│   └── test_silvertorch_fp32.py    (SilverTorchFp32, both bloom-on and bloom-off)
 └── parity/                # Triton kernel vs pure-torch reference
     ├── conftest.py        # assert_topk_matches helper
+    ├── test_bloom_compact.py
     ├── test_bloom_match.py
     ├── test_clause_compact.py
+    ├── test_clause_mask.py
     ├── test_codesigned_probe_score.py
     ├── test_fused_masked_knn_topk.py
     └── test_oporp_1bit_match_topk.py
@@ -167,6 +170,8 @@ module under test.
 | `SilverTorch` (no bloom)   | `FullScanKNN` for recall (asserts ≥ 0.85 at full probe) + recall monotone in `n_probe` |
 | `SilverTorch` (with bloom) | `SilverTorch (no bloom)(mask=BloomFilter.evaluate_mask(qa))` — component composition |
 | `SilverTorch` (qa=None)    | `SilverTorch (no bloom)` directly — `query_clause_attrs=None` is a documented fast path |
+| `SilverTorchFp32` (no bloom) | `FullScanKNN` for recall (asserts ≥ 0.999 at full probe — no quantization slack) + recall monotone in `n_probe` |
+| `SilverTorchFp32` (with bloom) | Same composition test as the int8 path — `(q, qa)` ≡ `no-bloom(mask=BloomFilter.evaluate_mask(qa))` to fp32 atol |
 | `SimilarityMasking` semantics | `(q @ x.T).masked_fill(~mask, -inf).topk(k)` |
 | `PrefilterKNN` semantics      | gather + bmm + local topk + scatter |
 | `OneBitKNN` semantics         | `FullScanKNN` recall (asserts ≥ 0.4 at K=200, N=2048) |
@@ -174,7 +179,9 @@ module under test.
 | `fused_masked_knn_topk`    | `compact_mask(mask)` → `bmm(q.unsqueeze(1), embs[ids].transpose(1,2)).squeeze(1)` → topk |
 | `oporp_1bit_match_topk`    | `popcount_int64(xor) → D - 2*hamming` → topk (bit-exact) |
 | `bloom_match`              | `(qb & sigs) == qb` per word, AND-reduced — computed on CPU to avoid tautology with the kernel-routed `BloomFilter.evaluate_mask`  |
-| `clause_compact`           | `ExactAttributeFilter.evaluate_mask(...)` + `compact_mask` |
+| `bloom_compact`            | `compact_mask(bloom_match(qb, sigs))` — kernel called directly with a hand-built `qb` to keep the parity check honest |
+| `clause_mask`              | Pure-torch `[B, N, C, A_max]` broadcast inlined as `_ref_mask` — intentionally materializes the intermediate this kernel exists to avoid; bit-exact via `torch.equal` since no compaction order ambiguity |
+| `clause_compact`           | `ExactAttributeFilter.evaluate_mask(...)` + `compact_mask` (the mask path itself routes to `clause_mask` on CUDA, so this transitively cross-checks both kernels) |
 | `codesigned_probe_score`   | `_ref_phase23` in the parity file: bloom subset + INT8 dequant + dot + topk |
 
 ## What each correctness file asserts
@@ -369,7 +376,9 @@ exact-by-construction kernels, which use stricter assertions.
 | [`test_fused_masked_knn_topk.py`](../../retrieve/tests/parity/test_fused_masked_knn_topk.py) | `fused_masked_knn_topk`     | `compact_mask` → gather + bmm + topk         | mirrors `PrefilterKNN._forward_prefilter` |
 | [`test_oporp_1bit_match_topk.py`](../../retrieve/tests/parity/test_oporp_1bit_match_topk.py) | `oporp_1bit_match_topk`     | `popcount_int64(xor).sum(W)` → topk          | popcount is bit-exact by construction (SWAR matches between torch and Triton) |
 | [`test_bloom_match.py`](../../retrieve/tests/parity/test_bloom_match.py)                     | `bloom_match`               | `(qb & sigs) == qb` per word, AND-reduced — computed on CPU to keep the test from tautologically routing through the kernel via `BloomFilter.evaluate_mask` | parametrize on `(n, m_bits, k_hash)` |
-| [`test_clause_compact.py`](../../retrieve/tests/parity/test_clause_compact.py)               | `clause_compact`            | `ExactAttributeFilter.evaluate_mask(...)` + `compact_mask` | row-set match (kernel order is unspecified — atomic stream compaction); cases for reverse clauses, all-inactive query, no-passing-items, `B=1` grid corner |
+| [`test_bloom_compact.py`](../../retrieve/tests/parity/test_bloom_compact.py)                 | `bloom_compact`             | `compact_mask(bloom_match(qb, sigs))` with hand-built `qb` | row-set match (kernel order is unspecified — atomic stream compaction); covers `B=1`, all-inactive query, `N < BLOCK_N`, and a routed-via-`BloomFilter.evaluate_indices` smoke check |
+| [`test_clause_mask.py`](../../retrieve/tests/parity/test_clause_mask.py)                     | `clause_mask`               | Pure-torch `[B, N, C, A_max]` broadcast inlined as `_ref_mask` | bit-exact via `torch.equal`; covers reverse clauses, all-reverse, all-inactive query, `A_max=1`, `B=1`, `N < BLOCK_N` |
+| [`test_clause_compact.py`](../../retrieve/tests/parity/test_clause_compact.py)               | `clause_compact`            | `ExactAttributeFilter.evaluate_mask(...)` + `compact_mask` (transitively goes through `clause_mask` on CUDA) | row-set match (kernel order is unspecified — atomic stream compaction); cases for reverse clauses, all-inactive query, no-passing-items, `B=1` grid corner |
 | [`test_codesigned_probe_score.py`](../../retrieve/tests/parity/test_codesigned_probe_score.py) | `codesigned_probe_score`  | `_ref_phase23`: bloom subset + INT8 dequant + dot + topk | the SilverTorch fused path; cases for `(qb, no qb) × (mask, no mask)` |
 
 ## Adding a new test

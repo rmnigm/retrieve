@@ -32,6 +32,15 @@ from training.model import GSASRec
 # Long enough to settle triton autotune, short enough to keep cells <60 s of overhead.
 WARMUP_ITERS = 20
 DEFAULT_REP_MS = 200.0
+# Sample count below which median == p20 == p80 starts collapsing into a single
+# cold-start point. Auto-extending the rep budget guarantees enough samples for
+# meaningful quantiles, capped at MAX_REP_MS so any genuinely-slow kernel still
+# terminates.
+MIN_SAMPLES = 30
+MAX_REP_MS = 3000.0
+# Repeat count for the memory-window. Wider than 5 so filter-bench cells with
+# variable mask cardinality don't undersample the worst-case transient.
+MEM_REPS = 16
 
 
 # ----- perf primitives --------------------------------------------------------
@@ -49,18 +58,67 @@ def peak_bytes() -> int:
     return int(torch.cuda.max_memory_allocated())
 
 
+def pin_precision_globals() -> None:
+    """Pin TF32/matmul-precision flags so two runs on the same box don't drift.
+
+    Without this, anything earlier in the process (an upstream import, an
+    unrelated model load) could flip ``allow_tf32`` and silently change both
+    numerics and throughput. Eval rows must be comparable across runs, so we
+    pin to the strict path. Callers that explicitly want TF32 can override
+    after this returns.
+    """
+    torch.set_float32_matmul_precision("highest")
+    if torch.cuda.is_available():
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+
+
+def warm_gpu_once(device: torch.device) -> None:
+    """One-shot pre-warm to absorb cuBLAS / kernel-loader / pinned-mem init.
+
+    The very first GPU op in a process pays cuBLAS-handle init, kernel-module
+    load, and pinned-memory allocator setup — typically 0.5–1.5 s. Per-cell
+    warmup loops absorb this on whichever cell happens to run first, which
+    is unfair to that cell. Run a tiny mat-mul once at top-of-suite so the
+    cost is paid outside any measured window.
+    """
+    if device.type != "cuda" or not torch.cuda.is_available():
+        return
+    a = torch.randn(64, 64, device=device)
+    b = torch.randn(64, 64, device=device)
+    for _ in range(3):
+        (a @ b).sum().item()  # .item() forces a sync per iter
+    torch.cuda.synchronize()
+    del a, b
+
+
 def measure_forward_cuda(
     fn,
     *,
     rep_ms: float = DEFAULT_REP_MS,
     warmup_iters: int = WARMUP_ITERS,
-    mem_reps: int = 5,
+    mem_reps: int = MEM_REPS,
+    min_samples: int = MIN_SAMPLES,
+    max_rep_ms: float = MAX_REP_MS,
 ) -> tuple[float, float, float, float, float]:
     """Warmup, capture transient peak in a clean window, then time via do_bench.
 
     The peak window does NOT use ``do_bench`` because do_bench allocates a ~256 MiB
     L2 cache-buster each call, which would dominate the reported transient peak
     for any small kernel. We measure memory in isolation, then time separately.
+
+    The timing window auto-extends ``rep_ms`` (capped at ``max_rep_ms``) until
+    at least ``min_samples`` complete iterations fit. Without this, kernels
+    whose single-call latency exceeds ``rep_ms`` collapse to one sample and
+    return ``median == p20 == p80`` — a cold-start fingerprint that's
+    indistinguishable from a real measurement. The do_bench ``warmup`` budget
+    is set to ~half the rep so any cold-start cost (e.g. a last-mile autotune
+    config that escaped the upstream warmup) is absorbed before timing.
+
+    No ``empty_cache()`` between warmup and timing: it would force a
+    ``cudaMalloc`` on the first measured call, which lands inside do_bench's
+    window. Pool reuse across warmup → mem-window → timing is the desired
+    behaviour for steady-state numbers.
 
     Returns ``(median_ms, p20_ms, p80_ms, peak_mib, transient_mib)``.
     """
@@ -70,22 +128,37 @@ def measure_forward_cuda(
         fn()
     if torch.cuda.is_available():
         torch.cuda.synchronize()
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
 
+    # Memory window. ``empty_cache()`` is intentionally NOT called here:
+    # ``memory_allocated()`` is unaffected by it (it only releases pooled-free
+    # blocks), and dropping the pool would conflate first-malloc latency into
+    # the next mem-window iteration's transient.
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
     baseline = allocated_bytes()
+    keep_alive: list = []  # hold last out across iters so peak captures result+scratch
     for _ in range(mem_reps):
         out = fn()
-        del out
+        if out is not None:
+            keep_alive.append(out)
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     peak = peak_bytes()
+    keep_alive.clear()
 
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    median, p20, p80 = ttesting.do_bench(fn, quantiles=[0.5, 0.2, 0.8], rep=rep_ms, warmup=50)
+    # Timing window. Auto-extend rep_ms until ≥ min_samples are collected.
+    cur_rep = float(rep_ms)
+    median = p20 = p80 = 0.0
+    while True:
+        warmup_ms = max(50.0, cur_rep * 0.5)
+        median, p20, p80 = ttesting.do_bench(
+            fn, quantiles=[0.5, 0.2, 0.8], rep=cur_rep, warmup=warmup_ms
+        )
+        if median <= 0 or cur_rep >= max_rep_ms:
+            break
+        if cur_rep / median >= min_samples:
+            break
+        cur_rep = min(max_rep_ms, median * min_samples * 1.2)
     if torch.cuda.is_available():
         torch.cuda.synchronize()
 
@@ -99,25 +172,42 @@ def measure_forward_cpu(
     *,
     rep_ms: float = DEFAULT_REP_MS,
     warmup_iters: int = 3,
+    min_samples: int = MIN_SAMPLES,
+    max_rep_ms: float = MAX_REP_MS,
 ) -> tuple[float, float, float, float, float]:
     """Time a CPU forward via wall-clock samples within a ``rep_ms`` budget.
+
+    The deadline is auto-extended (capped at ``max_rep_ms``) when fewer than
+    ``min_samples`` iterations fit, mirroring ``measure_forward_cuda`` so a
+    slow CPU baseline can't collapse to a single-sample measurement.
 
     Returns ``(median_ms, p20_ms, p80_ms, 0.0, 0.0)`` — peak/transient memory
     are GPU-only and reported as 0 for CPU rows.
     """
     for _ in range(warmup_iters):
         fn()
+
     times: list[float] = []
-    deadline = time.perf_counter() + rep_ms / 1000.0
-    while time.perf_counter() < deadline:
-        t0 = time.perf_counter()
-        fn()
-        times.append((time.perf_counter() - t0) * 1000.0)
-    if not times:
-        # Pathological case: rep_ms < single-call latency.
-        t0 = time.perf_counter()
-        fn()
-        times.append((time.perf_counter() - t0) * 1000.0)
+    budget = float(rep_ms)
+    while True:
+        deadline = time.perf_counter() + budget / 1000.0
+        while time.perf_counter() < deadline:
+            t0 = time.perf_counter()
+            fn()
+            times.append((time.perf_counter() - t0) * 1000.0)
+        if not times:
+            # rep_ms shorter than a single-call latency; force one sample
+            # and let the convergence check below decide on extending.
+            t0 = time.perf_counter()
+            fn()
+            times.append((time.perf_counter() - t0) * 1000.0)
+        if len(times) >= min_samples or budget >= max_rep_ms:
+            break
+        # Estimate next budget from current median so we converge in one extension.
+        cur_med = sorted(times)[len(times) // 2]
+        budget = min(max_rep_ms, max(budget * 2, cur_med * min_samples * 1.2))
+        times.clear()  # collected times under the old budget aren't representative
+
     times.sort()
     n = len(times)
     median = times[n // 2]
@@ -335,7 +425,7 @@ def perf_pass_cached(
 
     counter = {"i": 0}
 
-    def perf_fn() -> None:
+    def perf_fn():
         idx = counter["i"] % n_pool
         counter["i"] += 1
         q = pool[idx]
@@ -343,7 +433,10 @@ def perf_pass_cached(
         if qa_narrow_pool is not None:
             kw["qa_narrow"] = qa_narrow_pool[idx]
         with torch.inference_mode():
-            forward(q, **kw)
+            # Returning the (ids, scores) tuple lets the memory window capture
+            # the marginal cost of one forward including its outputs, not just
+            # the in-kernel scratch. ``do_bench`` discards the return value.
+            return forward(q, **kw)
 
     if is_cpu:
         return measure_forward_cpu(perf_fn)
@@ -355,5 +448,7 @@ __all__ = [
     "encode_queries",
     "load_model_for_eval",
     "perf_pass_cached",
+    "pin_precision_globals",
     "quality_pass_cached",
+    "warm_gpu_once",
 ]

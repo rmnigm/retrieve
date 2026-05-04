@@ -23,11 +23,14 @@ dependencies = [
 ]
 
 [project.scripts]
-evaluate           = "retrieval.evaluate:main"
-yambda             = "data.yambda:main"
-arxiv              = "data.arxiv:main"
-goodreads          = "data.goodreads:main"
-upload-checkpoints = "training.upload_checkpoints:main"
+evaluate                = "retrieval.evaluate:main"
+yambda                  = "data.yambda:main"
+arxiv                   = "data.arxiv:main"
+goodreads               = "data.goodreads:main"
+upload-checkpoints      = "training.upload_checkpoints:main"
+eval-fetch              = "data.hf_io:fetch_cli"
+eval-publish            = "data.hf_io:publish_cli"
+eval-publish-checkpoint = "data.hf_io:publish_checkpoint_cli"
 
 [build-system]
 requires = ["hatchling"]

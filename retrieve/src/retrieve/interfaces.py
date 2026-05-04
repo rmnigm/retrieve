@@ -60,6 +60,12 @@ class RetrievalModule(nn.Module, abc.ABC):
     Concrete subclasses extend ``forward`` with whichever filter representation
     they consume (e.g. ``mask`` for V1's dense path, ``candidate_ids`` for V2,
     both for V3). The base contract is just ``forward(query)``.
+
+    Empty-slot sentinel: when fewer than ``K`` items are available (tight
+    filter, small candidate pool), trailing slots carry ``id = -1`` and
+    ``score = -inf``. Downstream metrics use ``-1`` to detect padding;
+    leaking real ids (e.g. lowest-indexed -inf items from a raw ``torch.topk``)
+    causes spurious id-set mismatches against the filtered-FullScan oracle.
     """
 
     @abc.abstractmethod

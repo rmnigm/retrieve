@@ -326,7 +326,7 @@ Use `jq` to extract; one-liner per row. Do **not** paste the raw JSON.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `RuntimeError: query_emb dim=X ≠ item_embs dim=Y` | encoder/dim mismatch | re-run `arxiv encode_text` and `arxiv encode_queries` with matching `--truncate-dim` |
+| `RuntimeError: query_emb dim=X ≠ item_embs dim=Y` | encoder/dim mismatch | re-run `arxiv encode_text` and `arxiv encode_queries` with matching `--truncate-dims` |
 | `RuntimeError: query_emb rows=X ≠ heldout rows=Y` | stale `query_emb.pt` after heldout regen | re-run `arxiv encode_queries` |
 | `RuntimeError: text_emb.meta.json prefix=...` mismatch | doc/query prefix swap | re-run `arxiv encode_*` with the correct prefix |
 | `eval_split rows ≠ test rows` | stale `eval_split.parquet` | regen: `uv run arxiv attrs --output-dir data/arxiv/papers` |

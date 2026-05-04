@@ -1,8 +1,10 @@
 _defaults: &defaults
   data_dir: data/arxiv-papers
+  content_subdir: content_d128
+  gt_subdir: gt_d128
   # No `checkpoint:` field — arxiv has no SASRec model; queries come from
-  # data/arxiv-papers/content/query_emb.pt (built by `arxiv.py encode_queries`).
-  output: data/arxiv-papers/evaluate_quality.json
+  # data/arxiv-papers/content_d128/query_emb.pt (built by `arxiv.py encode_queries`).
+  output: data/arxiv-papers/evaluate_quality_d128.json
   split: test
   device: cuda
   ks: [100, 200, 400]
@@ -15,8 +17,6 @@ _defaults: &defaults
     - silvertorch
     - voyager_hnsw
 
-  # N≈2.7M → sqrt(N)≈1643; round to 1664 lists. n_probe=32 visits ~52K
-  # items per query (~2% of N), matching goodreads selectivity.
   algo_params:
     linr_v3:
       - {candidate_pool: 12000, v3_seed: 0}

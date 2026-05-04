@@ -38,11 +38,10 @@ Examples::
     uv run arxiv all --output-dir data/arxiv/papers
     uv run arxiv encode_text --output-dir data/arxiv/papers --batch-size 256
 
-Layout::
+Layout (under $RETRIEVE_DATA_ROOT, default <repo>/data)::
 
-    ~/datasets/arxiv/
-    ├── raw/         <- snapshot_download destination (data/YYYY/YYYY-MM.parquet)
-    └── processed/   <- arxiv_papers.parquet (merged)
+    data/_raw/arxiv/      <- snapshot_download destination (data/YYYY/YYYY-MM.parquet)
+    data/_raw/arxiv/processed/   <- arxiv_papers.parquet (merged)
 """
 
 from __future__ import annotations
@@ -55,14 +54,13 @@ from pathlib import Path
 
 import polars as pl
 
+from data.hf_io import download_raw, raw_dir
+
 from .common import sample_rare_biased_wide, synthesize_qa_narrow
 
-ROOT = Path.home() / "datasets" / "arxiv"
-RAW_DIR = ROOT / "raw"
+ROOT = raw_dir("arxiv")
+RAW_DIR = ROOT
 PROCESSED_DIR = ROOT / "processed"
-
-HF_REPO_ID = "open-index/open-arxiv"
-HF_REPO_TYPE = "dataset"
 
 # Narrow attribute layout — identical shape to goodreads' (5 clauses, A_max=4).
 C_NARROW = 5
@@ -159,15 +157,10 @@ def _category_to_main(leaf: str) -> str:
 
 
 def cmd_download(args) -> int:
-    from huggingface_hub import snapshot_download
-
-    RAW_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"START snapshot_download {HF_REPO_ID} → {RAW_DIR}", flush=True)
+    print(f"START download_raw 'arxiv' → {RAW_DIR}", flush=True)
     t0 = time.monotonic()
-    snapshot_download(
-        repo_id=HF_REPO_ID,
-        repo_type=HF_REPO_TYPE,
-        local_dir=str(RAW_DIR),
+    download_raw(
+        "arxiv",
         allow_patterns=["data/*/*.parquet", "README.md"],
         max_workers=args.max_workers,
     )
@@ -366,7 +359,7 @@ def _encode_with_prefix(
     device: str,
     num_workers: int,
     max_seq_length: int,
-    truncate_dim: int,
+    truncate_dims: list[int],
 ) -> dict:
     """Shared encode pass for items and queries.
 
@@ -377,8 +370,15 @@ def _encode_with_prefix(
     row order, `n_rows_out = N_heldout`, output is `[N_heldout, D]`
     indexed by heldout-row.
 
-    Returns the meta dict that the caller writes alongside the .pt.
+    Encodes once at ``max(truncate_dims)`` and writes one variant per dim:
+    the largest dim goes to ``content/``; smaller dims go to ``content_d{k}/``,
+    derived by slicing + L2-renormalizing (Matryoshka L2-post-truncate is
+    composable with re-normalization, so the result equals a fresh d=k
+    encode modulo fp16 round-trip noise).
+
+    Returns the meta dict for the largest-dim variant.
     """
+    import torch.nn.functional as F
     import torch
     from sentence_transformers import SentenceTransformer
     from tqdm import tqdm
@@ -416,16 +416,21 @@ def _encode_with_prefix(
     n_to_encode = len(texts)
     print(f"  encoding {n_to_encode:,} texts (skipped empty: {len(item_ids) - n_to_encode})", flush=True)
 
-    print(f"STEP load encoder {encoder} (truncate_dim={truncate_dim})", flush=True)
+    if not truncate_dims:
+        raise ValueError("truncate_dims must contain at least one dim")
+    dims_sorted = sorted(set(int(d) for d in truncate_dims))
+    d_max = dims_sorted[-1]
+
+    print(f"STEP load encoder {encoder} (truncate_dims={dims_sorted})", flush=True)
     if device == "cuda":
         torch.set_float32_matmul_precision("high")  # tensor cores on the proj layer
     model = SentenceTransformer(encoder, device=device, trust_remote_code=True)
     model.max_seq_length = max_seq_length
 
     d_native = int(model.get_sentence_embedding_dimension())
-    if truncate_dim > d_native:
+    if d_max > d_native:
         raise ValueError(
-            f"truncate_dim={truncate_dim} > native dim={d_native} for {encoder}"
+            f"max(truncate_dims)={d_max} > native dim={d_native} for {encoder}"
         )
 
     # Length-sort for batch packing efficiency, then unsort at the end.
@@ -458,7 +463,7 @@ def _encode_with_prefix(
 
     model.to(device).eval()
     autocast_dtype = torch.bfloat16 if device == "cuda" else torch.float32
-    sorted_embs = torch.zeros((len(texts), truncate_dim), dtype=torch.float16)
+    sorted_embs = torch.zeros((len(texts), d_max), dtype=torch.float16)
 
     pos = 0
     for batch in tqdm(loader, total=len(loader), desc=f"encode/{prefix.strip(': ')}"):
@@ -470,9 +475,9 @@ def _encode_with_prefix(
         ):
             features = model(batch)
             embs = features["sentence_embedding"].float()
-            # Matryoshka truncation: slice then re-normalize.
-            embs = embs[:, :truncate_dim]
-            embs = torch.nn.functional.normalize(embs, dim=-1)
+            # Matryoshka truncation at the max requested dim: slice then re-normalize.
+            embs = embs[:, :d_max]
+            embs = F.normalize(embs, dim=-1)
         n = embs.shape[0]
         sorted_embs[pos : pos + n] = embs.detach().to(dtype=torch.float16, device="cpu")
         pos += n
@@ -482,49 +487,76 @@ def _encode_with_prefix(
     text_emb_local = torch.empty_like(sorted_embs)
     text_emb_local[order_t] = sorted_embs
 
-    # Scatter into the final output tensor.
-    out = torch.zeros((n_rows_out, truncate_dim), dtype=torch.float16)
+    # Scatter into the final d_max output tensor.
+    out_dmax = torch.zeros((n_rows_out, d_max), dtype=torch.float16)
     if out_basename == "text_emb":
-        # Items: scatter by item_id.
+        # Items: scatter by item_id (row 0 stays zero-padded for item_id=0).
         for j, k in enumerate(valid_local_idx):
             iid = int(item_ids[k])
-            out[iid] = text_emb_local[j]
+            out_dmax[iid] = text_emb_local[j]
+        skip_row0 = True
     else:
         # Queries: scatter by heldout-row index.
         for j, k in enumerate(valid_local_idx):
-            out[k] = text_emb_local[j]
+            out_dmax[k] = text_emb_local[j]
+        skip_row0 = False
 
-    out_dir = output_dir / "content"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    pt_path = out_dir / f"{out_basename}.pt"
-    meta_path = out_dir / f"{out_basename}.meta.json"
+    last_meta: dict = {}
+    for k in dims_sorted:
+        # Largest dim → content/ ; smaller dims → content_d{k}/ .
+        subdir = "content" if k == d_max else f"content_d{k}"
+        out_dir = output_dir / subdir
+        out_dir.mkdir(parents=True, exist_ok=True)
+        pt_path = out_dir / f"{out_basename}.pt"
+        meta_path = out_dir / f"{out_basename}.meta.json"
 
-    import torch as _torch
-    _torch.save(out, pt_path)
+        if k == d_max:
+            out_k = out_dmax
+        else:
+            sliced = out_dmax[:, :k].float()
+            if skip_row0:
+                # Row 0 is the item_id=0 padding row; leave it as zeros so
+                # the index keeps its 1-indexed dense layout.
+                sliced[1:] = F.normalize(sliced[1:], dim=-1)
+            else:
+                sliced = F.normalize(sliced, dim=-1)
+            out_k = sliced.half().contiguous()
 
-    meta = {
-        "encoder": encoder,
-        "dim_native": d_native,
-        "dim_truncated": truncate_dim,
-        "normalization": "l2_post_truncate",
-        "prefix": prefix,
-        "text_template": text_template,
-        "description_chars": description_chars,
-        "max_seq_length": max_seq_length,
-        "batch_size": batch_size,
-        "n_rows": int(n_rows_out),
-        "n_encoded": int(n_to_encode),
-        "n_skipped_empty": int(len(item_ids) - n_to_encode),
-        "shape": list(out.shape),
-        "dtype": "float16",
-    }
-    with open(meta_path, "w") as f:
-        json.dump(meta, f, indent=2)
-    print(
-        f"  wrote {pt_path} {tuple(out.shape)} + {meta_path.name}",
-        flush=True,
-    )
-    return meta
+        torch.save(out_k, pt_path)
+
+        meta = {
+            "encoder": encoder,
+            "dim_native": d_native,
+            "dim_truncated": int(k),
+            "normalization": "l2_post_truncate",
+            "prefix": prefix,
+            "text_template": text_template,
+            "description_chars": description_chars,
+            "max_seq_length": max_seq_length,
+            "batch_size": batch_size,
+            "n_rows": int(n_rows_out),
+            "n_encoded": int(n_to_encode),
+            "n_skipped_empty": int(len(item_ids) - n_to_encode),
+            "shape": list(out_k.shape),
+            "dtype": "float16",
+        }
+        if k != d_max:
+            meta["derived_from"] = f"content/{out_basename}.pt"
+            meta["derivation"] = (
+                "slice [:k] then F.normalize (fp32) then cast to fp16; "
+                "Matryoshka L2-post-truncate is composable so result = fresh d=k "
+                "encode (modulo fp16 round-trip noise)."
+            )
+            if skip_row0:
+                meta["derivation"] += " row 0 of text_emb left as zeros for item_id=0 padding."
+        with open(meta_path, "w") as f:
+            json.dump(meta, f, indent=2)
+        print(
+            f"  wrote {pt_path} {tuple(out_k.shape)} + {meta_path.name}",
+            flush=True,
+        )
+        last_meta = meta
+    return last_meta
 
 
 def cmd_encode_text(args) -> int:
@@ -551,11 +583,11 @@ def cmd_encode_text(args) -> int:
         device=args.device,
         num_workers=args.num_workers,
         max_seq_length=args.max_seq_length,
-        truncate_dim=args.truncate_dim,
+        truncate_dims=args.truncate_dims,
     )
     print(
         f"ALL DONE encode_text in {time.monotonic() - overall_t0:.0f}s — "
-        f"{meta['n_encoded']:,} encoded, dim={meta['dim_truncated']}",
+        f"{meta['n_encoded']:,} encoded, dims={sorted(set(args.truncate_dims))}",
         flush=True,
     )
     return 0
@@ -585,11 +617,11 @@ def cmd_encode_queries(args) -> int:
         device=args.device,
         num_workers=args.num_workers,
         max_seq_length=args.max_seq_length,
-        truncate_dim=args.truncate_dim,
+        truncate_dims=args.truncate_dims,
     )
     print(
         f"ALL DONE encode_queries in {time.monotonic() - overall_t0:.0f}s — "
-        f"{meta['n_encoded']:,} encoded, dim={meta['dim_truncated']}",
+        f"{meta['n_encoded']:,} encoded, dims={sorted(set(args.truncate_dims))}",
         flush=True,
     )
     return 0
@@ -957,7 +989,14 @@ def main() -> int:
     # ---- common encode args (shared by encode_text / encode_queries / all)
     def _add_encode_args(p):
         p.add_argument("--encoder", type=str, default="nomic-ai/nomic-embed-text-v1.5")
-        p.add_argument("--truncate-dim", type=int, default=256)
+        p.add_argument(
+            "--truncate-dims",
+            type=int,
+            nargs="+",
+            default=[64, 128, 256],
+            help="Matryoshka dims to write. Largest goes to content/, smaller "
+                 "dims go to content_d{k}/ (slice + L2-renormalize).",
+        )
         p.add_argument("--description-chars", type=int, default=1500)
         p.add_argument("--batch-size", type=int, default=256)
         p.add_argument("--device", type=str, default="cuda")

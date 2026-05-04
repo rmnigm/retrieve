@@ -164,16 +164,23 @@ allocation, and `forward` requires `query_clause_attrs=None`.
 
 [`SilverTorchFp32`](../../retrieve/src/retrieve/layers/silvertorch/fp32.py)
 is a sibling class that runs the same IVF + bloom co-design over **fp32
-item embeddings** instead of int8 codes, backed by the
-[`codesigned_probe_score_fp32`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score_fp32.py)
-kernel. Constructed via `build_silvertorch_fp32(...)` with the same
-keyword surface as `build_silvertorch`. Trade-off: ~4× the HBM traffic
-and 4× the index size (`N × D × 4` bytes vs `N × D + N × 4`) for
-exact-up-to-IVF recall — no quantization error contributes to recall
-loss, only the IVF approximation. Use when the index fits comfortably
-in HBM and recall ceiling matters more than bandwidth; the int8
-`SilverTorch` remains the default for bandwidth- or capacity-bound
-deployments.
+item embeddings** instead of int8 codes. The fp32 kernel lives alongside
+the int8 one in
+[`codesigned_probe_score.py`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py)
+and is exposed through a tiny re-export shim
+([`codesigned_probe_score_fp32.py`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score_fp32.py)).
+Constructed via `build_silvertorch_fp32(...)` with the same keyword surface
+as `build_silvertorch`. Trade-off: ~4× the HBM traffic and 4× the index
+size (`N × D × 4` bytes vs `N × D + N × 4`) for exact-up-to-IVF recall —
+no quantization error contributes to recall loss, only the IVF
+approximation. Use when the index fits comfortably in HBM and recall
+ceiling matters more than bandwidth; the int8 `SilverTorch` remains the
+default for bandwidth- or capacity-bound deployments.
+
+`SilverTorchFp32` and `build_silvertorch_fp32` are not on the top-level
+`retrieve` public surface yet — import them from
+`retrieve.layers.silvertorch.fp32` directly. The int8 `SilverTorch` and
+`build_silvertorch` are exported from the package root.
 
 ## Utility modules
 

@@ -25,10 +25,15 @@ def _hits_mask(candidate_ids: Tensor, targets: Tensor, k: int) -> Tensor:
 
     Returns:
         [B, k] bool tensor — True where candidate matches any target.
+
+    Both sides may carry ``-1`` padding (algos signal "no item at this rank"
+    that way; targets pad shorter ground-truth lists). Require both operands
+    to be non-padding so ``-1 == -1`` does not spuriously register as a hit.
     """
     topk = candidate_ids[:, :k]  # [B, k]
-    # [B, k, 1] == [B, 1, T] -> [B, k, T] -> any over T -> [B, k]
-    return (topk.unsqueeze(2) == targets.unsqueeze(1)).any(dim=2)
+    eq = topk.unsqueeze(2) == targets.unsqueeze(1)  # [B, k, T]
+    valid = (topk.unsqueeze(2) != -1) & (targets.unsqueeze(1) != -1)
+    return (eq & valid).any(dim=2)
 
 
 def recall_at_k(

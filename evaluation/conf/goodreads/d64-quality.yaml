@@ -1,9 +1,9 @@
 _defaults: &defaults
-  data_dir: data/goodreads/work-id
+  data_dir: data/goodreads-work-id
   output: null
   split: test
   device: cuda
-  ks: [10, 100, 500]
+  ks: [100, 200, 400]
   batch_sizes: [1, 8, 16]
   seed: 0
   encode:
@@ -15,10 +15,19 @@ _defaults: &defaults
     - linr_v3
     - silvertorch
     - voyager_hnsw
+  # N≈1.5M items. n_lists=1024 fixed (~sqrt(N)); sweep candidate_pool and
+  # n_probe to map the recall-vs-latency curves.
   algo_params:
-    linr_v3: {candidate_pool: 8000, v3_seed: 0}
-    silvertorch:     {n_lists: 1024, n_probe: 24, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}
-    voyager_hnsw:    {m: 32, ef_construction: 200, ef_query: 1000, num_threads: 16, seed: 0}
+    linr_v3:
+      - {candidate_pool: 4000, v3_seed: 0}
+      - {candidate_pool: 8000, v3_seed: 0}
+      - {candidate_pool: 16000, v3_seed: 0}
+    silvertorch:
+      - {n_lists: 1024, n_probe: 24,  n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}
+      - {n_lists: 1024, n_probe: 64,  n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}
+      - {n_lists: 1024, n_probe: 128, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}
+    voyager_hnsw:
+      - {m: 32, ef_construction: 200, ef_query: 1000, num_threads: 16, seed: 0}
 
 <<: *defaults
-checkpoint: checkpoints/goodreads-gsasrec-d64-drop0.5-id/best_model.pt
+checkpoint: data/goodreads-work-id/checkpoints/gsasrec-d64-drop0.5-id/best_model.pt

@@ -333,7 +333,7 @@ Use `jq` to extract; one-liner per row. Do **not** paste the raw JSON.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `recall@10` near 0 on yambda parity check | encoder NaN (check `bench_primitives.encode_queries` autocast) | encoder regression; escalate |
+| `recall@10` near 0 on yambda parity check | encoder NaN (check `bench_tools.encode_queries` autocast) | encoder regression; escalate |
 | `linr_v1_filter_mask recall < 0.999` on any cell | item-0 sentinel desync between oracle and combined_mask | escalate; this is a regression in `algo_registry.combined_mask` |
 | `eval_split rows ≠ test rows` | stale `eval_split.parquet` after `prep` regen | regen via `uv run python -m data.goodreads attrs --processed-dir <…> --output-dir data/goodreads/work-id` |
 | `RuntimeError: CUDA out of memory` during oracle | batch too large at d256 | drop `compute_filtered_oracle(batch_size=)` from 64 to 32 in `evaluate.py` |
@@ -343,7 +343,7 @@ Use `jq` to extract; one-liner per row. Do **not** paste the raw JSON.
 ## Out of scope
 
 - Code changes — the harness is functionally complete. Do not touch
-  `algo_registry.py`, `evaluate.py`, `bench_primitives.py`, or the
+  `algo_registry.py`, `evaluate.py`, `bench_tools.py`, or the
   YAMLs beyond the per-cell debug flags above.
 - Hyperparam tuning — current `candidate_pool=8000`, `n_lists=1024`,
   `n_probe=24`, `m_bits=1024`, `k_hash=5`, `voyager (m=32, ef_c=200,

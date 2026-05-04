@@ -15,9 +15,8 @@ The Triton kernels split into three trees by domain:
   `clause_compact` (powers `ExactAttributeFilter.evaluate_indices`),
   `clause_mask` (powers `ExactAttributeFilter.evaluate_mask`), and
   `bloom_compact` (powers
-  `BloomFilter.evaluate_indices`). Design rationale and the original
-  deferred-shipping plan in
-  [filter-kernels-followup.md](../plans/filter-kernels-followup.md).
+  `BloomFilter.evaluate_indices`). The mask/compact split mirrors the
+  filter API split documented in [filtering.md](filtering.md).
 - [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/) —
   `codesigned_probe_score` (the IVF + INT8 + Bloom co-design) plus
   `bloom_match` (lives in this tree for historical reasons but is now a
@@ -385,11 +384,13 @@ helper packs the sign-quantized output into `[..., W]` int64 words using
 
 V1's pure-torch dense path uses cuBLAS for the matmul, so the torch and
 Triton-backend classes go through identical kernels and produce
-bit-identical scores. V2's sparse path uses `tl.dot` only inside
-`fused_masked_knn_topk`'s elementwise per-cell reduction (not a tile
-matmul), so it doesn't share the tensor-core tile-reduction order
-quirks; parity tests still use [`assert_topk_matches`](../../retrieve/tests/parity/conftest.py)
-(set + sorted-score tolerance) for V2 because gather order can vary.
+bit-identical scores. V2's sparse path scores per-cell with
+`tl.sum(emb_rows * q[None, :], axis=1)` — elementwise multiply +
+reduction, not `tl.dot` — so it doesn't share the tensor-core
+tile-reduction order quirks. Parity tests still use
+[`assert_topk_matches`](../../retrieve/tests/parity/conftest.py)
+(set + sorted-score tolerance) for V2 because gather order across
+duplicate scores can vary.
 
 **OPORP popcount is bit-exact.** V3's torch reference and the Triton
 kernel both use the same SWAR popcount on the same packed bits, so the
@@ -401,36 +402,48 @@ correctness depends on bit identity here.
 
 ## SilverTorch kernels
 
-One kernel lives in the SilverTorch tree without a non-SilverTorch
-consumer; described briefly for context. (`bloom_match` also lives in
-this tree but is documented above as a filter primitive — it has a
-non-SilverTorch consumer now.)
+Two SilverTorch-only scoring kernels live in
+[`silvertorch/codesigned_probe_score.py`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py):
+the int8 path (`codesigned_probe_score`) and the fp32 path
+(`codesigned_probe_score_fp32`). Both ship as Python wrappers in the
+same module; the fp32 wrapper is also re-exported through a thin shim
+file (`codesigned_probe_score_fp32.py`) to preserve the
+historic import path used by `layers/silvertorch/fp32.py`. (`bloom_match`
+also lives in this tree but is documented above as a filter primitive —
+it has a non-SilverTorch consumer now.)
 
 [`codesigned_probe_score`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py)
-is the actively-used SilverTorch kernel and powers
+is the actively-used INT8 SilverTorch kernel and powers
 [`SilverTorch.forward`](../../retrieve/src/retrieve/layers/silvertorch/main.py).
-Fuses three steps into one launch: probe the top-`n_probe` IVF clusters,
-score the union of their items via INT8 dequantize + dot, AND the bloom
-attribute filter inline (skipped entirely when `query_clause_attrs=None`).
-Autotune key includes `HAS_QB` and `HAS_MASK` so the cluster-only,
-bloom+cluster, and externally-masked paths each get their own configs.
+Phase 1 (centroid `q @ centroids^T + topk` to pick the top-`n_probe`
+clusters) runs **host-side** in `SilverTorch.forward`; the kernel is
+"phase-2+3 fused" — for each `(query, probed-item)` cell it optionally
+runs the bloom subset test, optionally ANDs an external mask, and
+(when both pass) scores via INT8 dequantize + dot. Items with `id == -1`
+(cluster padding) and items failing either filter get score `-inf`.
+The bloom intermediate (`[B, P, W]` sigs / bool match) and the
+`int8 → fp32` code cast (`[B, P, D]`) never touch HBM — they live in
+registers/SRAM. Bloom subset uses an OR-reduce trick:
+`(qb & sig) == qb ⇔ qb & ~sig == 0` per word, OR-reduce over `W`,
+saves the int32 cast + min reduction the equality form required.
 
-[`codesigned_probe_score_fp32`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score_fp32.py)
+The launch grid is `(cdiv(P, BLOCK_P), B)` — tile axis on **grid_x**
+(≤ 2³¹) since `n_probe × max_cluster_size` can exceed the 65,535 limit
+on grid_y/grid_z at large catalogs. Autotune key is
+`["P", "D", "W", "HAS_QB", "HAS_MASK"]`, so the bloom-only,
+external-mask-only, both-on, and neither-on paths each get their own
+configs. Score buffer is `torch.empty([B, P])` — every in-bounds lane
+is overwritten (real dot or `-inf`), so no pre-fill kernel is needed.
+The host then `torch.topk` on it and gathers global ids; if `P < K` the
+output is padded with `-1` / `-inf` to width `K`.
+
+[`codesigned_probe_score_fp32`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py)
 is the fp32 sibling and powers
 [`SilverTorchFp32.forward`](../../retrieve/src/retrieve/layers/silvertorch/fp32.py).
-Same launch shape, IVF + bloom + mask fusion, autotune key, and `HAS_QB` /
-`HAS_MASK` paths as the int8 kernel — only the scoring step differs: loads
-`item_embs[N, D]` fp32 directly (no `int8 → fp32` cast, no per-item
-`scales` multiply). Trades **~4× the HBM traffic** in the scoring inner
-loop for exact-up-to-IVF recall (no quantization error). Use when the
-index fits comfortably in HBM and recall ceiling matters more than
-bandwidth; stay on the int8 kernel when bandwidth- or capacity-bound.
-
-## Filter kernel history
-
-`bloom_compact` and `clause_mask` were originally designed-but-deferred
-in [filter-kernels-followup.md](../plans/filter-kernels-followup.md) and
-have since shipped — they're documented above next to their structural
-twins (`clause_compact` and `bloom_match`). The plan doc remains as the
-written-down rationale for the API split that lets these land as pure
-perf swaps without touching callers.
+Same launch grid, autotune key, and `HAS_QB` / `HAS_MASK` paths as the
+int8 kernel — only the scoring step differs: loads `item_embs[N, D]`
+fp32 directly (no `int8 → fp32` cast, no per-item `scales` multiply).
+Trades **~4× the HBM traffic** in the scoring inner loop for
+exact-up-to-IVF recall (no quantization error). Use when the index fits
+comfortably in HBM and recall ceiling matters more than bandwidth; stay
+on the int8 kernel when bandwidth- or capacity-bound.
