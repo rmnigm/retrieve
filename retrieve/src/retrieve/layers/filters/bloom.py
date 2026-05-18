@@ -194,7 +194,7 @@ def _build_signatures(
     return out.reshape(out_shape) if leading else out.reshape(word_count)
 
 
-def _build_query_signatures_eager(
+def _build_query_signatures(
     attrs: Tensor,
     seeds: Tensor,
     m_bits: int,
@@ -203,12 +203,14 @@ def _build_query_signatures_eager(
 ) -> Tensor:
     """Loop-free signature build for query batches.
 
-    Same hash + per-clause salt + bit-pack as ``_build_signatures``, but
-    without the chunk loop — query batches are always small (B << the
-    131k-item chunk used for the index build), so chunking buys nothing
-    and its Python ``range()`` made dynamo specialize on the trip count.
-    Keeping the body purely tensor-flow lets ``torch.compile(dynamic=True)``
-    install a single symbolic-shape graph that's reused for all B.
+    Same hash + per-clause salt + bit-pack as ``_build_signatures``,
+    but without the chunk loop — query batches are always small
+    (B << the 131k-item chunk used for the index build), so chunking
+    buys nothing and its Python ``range()`` made dynamo specialize on
+    the trip count. Pure tensor flow so the outer
+    ``torch.compile(dynamic=True)`` on each eval-side algo installs a
+    single symbolic-shape graph reused across all B. Standalone use of
+    ``BloomFilter`` runs this eagerly.
     """
     leading = attrs.shape[:-2]
     n = 1
@@ -248,35 +250,3 @@ def _build_query_signatures_eager(
 
     out_shape = list(leading) + [word_count]
     return out.reshape(out_shape) if leading else out.reshape(word_count)
-
-
-# CUDA-graph-backed compile of the query path. ``mode='reduce-overhead'``
-# (cudagraph_trees) is what cuts the launch-overhead tax: the eager path
-# fires ~15 separate CUDA kernels per call (~0.4 ms wall-clock dominated by
-# launch latency, flat in B); the compiled path collapses to one replayable
-# graph (~0.09 ms, also flat in B). ``dynamic=True`` installs symbolic
-# shape guards so a single graph variant covers all B values without
-# recompile churn — see ``recompile_limit`` discussion in
-# ``docs/system/filtering.md``.
-_build_query_signatures_compiled = torch.compile(
-    _build_query_signatures_eager, dynamic=True, mode="reduce-overhead"
-)
-
-
-def _build_query_signatures(
-    attrs: Tensor,
-    seeds: Tensor,
-    m_bits: int,
-    k_hash: int,
-    word_count: int,
-) -> Tensor:
-    """Dispatch wrapper: compiled path on CUDA, eager body on CPU.
-
-    ``mode='reduce-overhead'`` requires CUDA graphs, so on CPU we route
-    around it. The eager body is identical so outputs are bit-equal across
-    devices — the parity check in ``test_cpu_eval_mask_matches_cuda``
-    exercises this.
-    """
-    if attrs.is_cuda:
-        return _build_query_signatures_compiled(attrs, seeds, m_bits, k_hash, word_count)
-    return _build_query_signatures_eager(attrs, seeds, m_bits, k_hash, word_count)

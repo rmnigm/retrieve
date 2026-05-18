@@ -28,7 +28,7 @@ from typing import Any
 import torch
 from loguru import logger
 
-from retrieval.algos import build_algorithm, build_filter
+from retrieval.algos import BACKEND_CAPABLE_ALGOS, build_algorithm, build_filter
 from retrieval.bench_tools import (
     cuda_allocated_mib,
     perf_pass_cached,
@@ -39,7 +39,7 @@ from retrieval.bench_tools import (
 from retrieval.config import EvalConfig, FilterCfg, FilterSweepCfg
 from retrieval.loaders import build_sweep_qa, load_filter_assets
 from retrieval.oracle import load_or_build_oracle
-from retrieve.interfaces import FilterModule
+from retrieve.interfaces import Backend, FilterModule
 
 # ----- top-level driver -------------------------------------------------------
 
@@ -55,6 +55,7 @@ def run_sweep(
     data_path: Path,
     device: torch.device,
     filter_kinds: tuple[str, ...] = (),
+    backends: tuple[Backend, ...] = (),
     sweep_filter: str | None = None,
     skip_quality: bool = False,
 ) -> list[dict]:
@@ -72,6 +73,12 @@ def run_sweep(
     gt_dir = data_path / cfg.gt_subdir
     if cfg.filters is not None:
         gt_dir.mkdir(parents=True, exist_ok=True)
+
+    active_backends: list[Backend] = (
+        list(backends) if backends else list(cfg.backends)
+    )
+    if not active_backends:
+        active_backends = ["triton"]
 
     rows: list[dict] = []
     for filter_kind, fcfg in _select_filter_iter(cfg, filter_kinds):
@@ -92,6 +99,7 @@ def run_sweep(
                 gt_dir=gt_dir,
                 K_GT=K_GT,
                 suite=suite,
+                backends=active_backends,
             )
         )
     return rows
@@ -134,13 +142,19 @@ def run_filter_kind(
     gt_dir: Path,
     K_GT: int,
     suite: str,
+    backends: list[Backend],
 ) -> list[dict]:
-    """Subsample users, build filter+oracle modules, iterate sweeps."""
+    """Subsample users, build filter+oracle modules, iterate sweeps.
+
+    Builds one ``filter_mod`` per backend so the filter kernel backend
+    matches the algo's. The oracle-side exact filter is built once
+    (always triton if available — it's only used to build cached
+    ground truth and is not part of the comparison)."""
     queries_f, targets_f, n_targets_f, qa_narrow_f = _apply_users_limit(
         cfg, queries, targets, n_targets, qa_narrow_all
     )
-    filter_mod, oracle_filter, item_attrs_narrow, n_clauses = _build_filter_modules(
-        filter_kind, fcfg, cfg, data_path, device
+    filter_mods, oracle_filter, item_attrs_narrow, n_clauses = _build_filter_modules(
+        filter_kind, fcfg, cfg, data_path, device, backends
     )
 
     rows: list[dict] = []
@@ -157,7 +171,7 @@ def run_filter_kind(
                 targets_f=targets_f,
                 n_targets_f=n_targets_f,
                 qa_narrow_f=qa_narrow_f,
-                filter_mod=filter_mod,
+                filter_mods=filter_mods,
                 oracle_filter=oracle_filter,
                 item_attrs_narrow=item_attrs_narrow,
                 n_clauses=n_clauses,
@@ -166,11 +180,12 @@ def run_filter_kind(
                 suite=suite,
                 device=device,
                 skip_quality=skip_quality,
+                backends=backends,
             )
         )
 
     if cfg.filters is not None:
-        del filter_mod, oracle_filter
+        del filter_mods, oracle_filter
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
     return rows
@@ -211,47 +226,66 @@ def _build_filter_modules(
     cfg: EvalConfig,
     data_path: Path,
     device: torch.device,
-) -> tuple[FilterModule | None, FilterModule | None, torch.Tensor | None, int]:
-    """Build the index-side filter and the oracle-side exact filter.
+    backends: list[Backend],
+) -> tuple[
+    dict[Backend, FilterModule | None],
+    FilterModule | None,
+    torch.Tensor | None,
+    int,
+]:
+    """Build per-backend index-side filters and the oracle-side exact filter.
 
-    On ``filter_kind="clause"`` the wired filter is already an exact filter,
-    so the oracle reuses it. On ``"bloom"`` we build a separate
-    ``ExactAttributeFilter`` over the same attrs — bloom's false positives
-    must NOT leak into the ground truth.
+    One ``FilterModule`` per backend so the filter kernel backend matches
+    the algo's in each cell. The oracle-side exact filter is always
+    triton (or torch on CPU); on ``filter_kind="clause"`` it reuses the
+    triton variant of the index-side filter when available. On
+    ``"bloom"`` we always build a separate ``ExactAttributeFilter``
+    over the same attrs — bloom's false positives must NOT leak into the
+    ground truth.
     """
     if cfg.filters is None:
-        return None, None, None, 0
+        return {}, None, None, 0
 
     item_attrs_narrow, clause_is_reverse = load_filter_assets(
         filter_kind, fcfg, data_path, device
     )
-    filter_mod = build_filter(
-        filter_kind,
-        item_attrs_narrow=item_attrs_narrow,
-        clause_is_reverse=clause_is_reverse,
-        bloom_m_bits=fcfg.m_bits,
-        bloom_k_hash=fcfg.k_hash,
-        device=device,
-    )
+
+    filter_mods: dict[Backend, FilterModule | None] = {}
+    for backend in backends:
+        filter_mods[backend] = build_filter(
+            filter_kind,
+            item_attrs_narrow=item_attrs_narrow,
+            clause_is_reverse=clause_is_reverse,
+            bloom_m_bits=fcfg.m_bits,
+            bloom_k_hash=fcfg.k_hash,
+            device=device,
+            backend=backend,
+        )
+
+    oracle_backend: Backend = "triton" if "triton" in backends else backends[0]
     if filter_kind == "clause":
-        oracle_filter: FilterModule | None = filter_mod
+        oracle_filter: FilterModule | None = filter_mods[oracle_backend]
     elif filter_kind == "bloom":
         oracle_filter = build_filter(
             "clause",
             item_attrs_narrow=item_attrs_narrow,
             clause_is_reverse=clause_is_reverse,
             device=device,
+            backend=oracle_backend,
         )
     else:
         oracle_filter = None
-    if filter_mod is not None:
-        logger.info(
-            "  filter module built: {} (oracle: {})",
-            type(filter_mod).__name__,
-            type(oracle_filter).__name__ if oracle_filter is not None else "none",
-        )
+    if filter_mods:
+        any_mod = next(iter(filter_mods.values()))
+        if any_mod is not None:
+            logger.info(
+                "  filter modules built: {} × {} (oracle: {})",
+                type(any_mod).__name__,
+                len(filter_mods),
+                type(oracle_filter).__name__ if oracle_filter is not None else "none",
+            )
     n_clauses = int(item_attrs_narrow.shape[1]) if item_attrs_narrow is not None else 0
-    return filter_mod, oracle_filter, item_attrs_narrow, n_clauses
+    return filter_mods, oracle_filter, item_attrs_narrow, n_clauses
 
 
 # ----- per sweep --------------------------------------------------------------
@@ -267,7 +301,7 @@ def run_one_sweep(
     targets_f: torch.Tensor,
     n_targets_f: torch.Tensor,
     qa_narrow_f: torch.Tensor | None,
-    filter_mod: FilterModule | None,
+    filter_mods: dict[Backend, FilterModule | None],
     oracle_filter: FilterModule | None,
     item_attrs_narrow: torch.Tensor | None,
     n_clauses: int,
@@ -276,8 +310,15 @@ def run_one_sweep(
     suite: str,
     device: torch.device,
     skip_quality: bool,
+    backends: list[Backend],
 ) -> list[dict]:
-    """Synthesise per-sweep qa, load/build oracle, iterate (algo, params, k)."""
+    """Synthesise per-sweep qa, load/build oracle, iterate (backend, algo, params, k).
+
+    The oracle is shared across backends (built once per sweep), so backend
+    is the **innermost** loop level above ``(algo, params, k)``. For algos
+    not in ``BACKEND_CAPABLE_ALGOS`` (currently only ``torch_knn``) we
+    emit only one row regardless of how many backends were requested.
+    """
     logger.info("=== filter_kind={} sweep={} ===", filter_kind, sweep.name)
 
     if cfg.filters is None or filter_kind == "none":
@@ -310,34 +351,39 @@ def run_one_sweep(
 
     rows: list[dict] = []
     for algo in cfg.algorithms:
-        for params in expand_param_combos(cfg.algo_params.get(algo, [{}])):
-            if not is_valid_combo(algo, params):
-                logger.warning("skipping invalid combo {}: {}", algo, params)
-                continue
-            for k in cfg.ks:
-                rows.extend(
-                    evaluate_cell(
-                        algo,
-                        params,
-                        k,
-                        sweep,
-                        filter_kind,
-                        cfg=cfg,
-                        item_embs=item_embs,
-                        queries_f=queries_f,
-                        targets_f=targets_f,
-                        n_targets_f=n_targets_f,
-                        qa_n_sweep=qa_n_sweep,
-                        skip_mask=skip_mask,
-                        oracle_topk=oracle_topk,
-                        filter_mod=filter_mod,
-                        item_attrs_narrow=item_attrs_narrow,
-                        n_kept=n_kept,
-                        suite=suite,
-                        device=device,
-                        skip_quality=skip_quality,
+        algo_backends = (
+            backends if algo in BACKEND_CAPABLE_ALGOS else [backends[0]]
+        )
+        for backend in algo_backends:
+            for params in expand_param_combos(cfg.algo_params.get(algo, [{}])):
+                if not is_valid_combo(algo, params):
+                    logger.warning("skipping invalid combo {}: {}", algo, params)
+                    continue
+                for k in cfg.ks:
+                    rows.extend(
+                        evaluate_cell(
+                            algo,
+                            params,
+                            k,
+                            sweep,
+                            filter_kind,
+                            cfg=cfg,
+                            item_embs=item_embs,
+                            queries_f=queries_f,
+                            targets_f=targets_f,
+                            n_targets_f=n_targets_f,
+                            qa_n_sweep=qa_n_sweep,
+                            skip_mask=skip_mask,
+                            oracle_topk=oracle_topk,
+                            filter_mod=filter_mods.get(backend),
+                            item_attrs_narrow=item_attrs_narrow,
+                            n_kept=n_kept,
+                            suite=suite,
+                            device=device,
+                            skip_quality=skip_quality,
+                            backend=backend,
+                        )
                     )
-                )
     return rows
 
 
@@ -365,6 +411,7 @@ def evaluate_cell(
     suite: str,
     device: torch.device,
     skip_quality: bool,
+    backend: Backend = "triton",
 ) -> list[dict]:
     """Build the algo, score quality, prewarm autotune, time each batch size."""
     _reset_cuda_state_for_cell()
@@ -378,6 +425,7 @@ def evaluate_cell(
         filter_mod=filter_mod,
         item_attrs_narrow=item_attrs_narrow,
         params=params,
+        backend=backend,
     )
     if algo_obj is None:
         return []
@@ -408,7 +456,7 @@ def evaluate_cell(
     rows: list[dict] = []
     for bs in cfg.batch_sizes:
         med, p20, p80, peak, scratch = perf_pass_cached(
-            algo_obj.forward,
+            algo_obj,
             queries_f,
             batch_size=bs,
             device=device,
@@ -437,10 +485,11 @@ def evaluate_cell(
                 scratch=scratch,
                 recall=recall,
                 ndcg=ndcg,
+                backend=backend,
             )
         )
         _log_perf_line(
-            filter_kind, sweep.name, algo, params, k, bs, med, p20, p80, peak, recall, ndcg
+            filter_kind, sweep.name, algo, backend, params, k, bs, med, p20, p80, peak, recall, ndcg
         )
 
     _release_algo(algo_obj)
@@ -467,6 +516,7 @@ def _try_build_algo(
     filter_mod: FilterModule | None,
     item_attrs_narrow: torch.Tensor | None,
     params: dict[str, Any],
+    backend: Backend,
 ) -> Any | None:
     """Wrap ``build_algorithm`` with the ``ValueError → skip cell`` contract.
 
@@ -482,6 +532,7 @@ def _try_build_algo(
             filter_mod=filter_mod,
             item_attrs_narrow=item_attrs_narrow,
             params=params,
+            backend=backend,
         )
     except ValueError as e:
         logger.debug("  skipping {}: {}", algo, e)
@@ -512,7 +563,7 @@ def _run_quality(
     desc = f"{filter_kind}/{sweep.name}/{algo} k={k}"
     if cfg.filters is None or filter_kind == "none":
         return quality_pass_cached(
-            algo_obj.forward,
+            algo_obj,
             queries_f,
             targets_f,
             n_targets_f,
@@ -533,7 +584,7 @@ def _run_quality(
     zero_target = nt_k == 0
     combined_skip = zero_target if skip_mask is None else (skip_mask | zero_target)
     return quality_pass_cached(
-        algo_obj.forward,
+        algo_obj,
         queries_f,
         ot_k,
         nt_k,
@@ -569,7 +620,7 @@ def _autotune_prewarm(
             kw: dict = {}
             if qa_n_sweep is not None:
                 kw["qa_narrow"] = qa_n_sweep[:bs].to(device, non_blocking=True)
-            algo_obj.forward(q, **kw)
+            algo_obj(q, **kw)
     torch.cuda.synchronize()
 
 
@@ -593,14 +644,17 @@ def _make_perf_row(
     scratch: float,
     recall: float,
     ndcg: float,
+    backend: Backend,
 ) -> dict:
-    """Build one perf-row dict. Keys/order MUST match the pre-refactor schema."""
+    """Build one perf-row dict. ``backend`` is included in both the ``cell``
+    string (for unique cross-row joins) and as a top-level field."""
     return {
         "suite": suite,
-        "cell": f"{filter_kind}_{sweep_name}_bs{bs}_k{k}",
+        "cell": f"{filter_kind}_{sweep_name}_{backend}_bs{bs}_k{k}",
         "filter_kind": filter_kind,
         "sweep": sweep_name,
         "impl": algo,
+        "backend": backend,
         "device": "cpu" if is_cpu else "cuda",
         "seed": seed,
         "batch_size": bs,
@@ -622,6 +676,7 @@ def _log_perf_line(
     filter_kind: str,
     sweep_name: str,
     algo: str,
+    backend: Backend,
     params: dict[str, Any],
     k: int,
     bs: int,
@@ -632,16 +687,17 @@ def _log_perf_line(
     recall: float,
     ndcg: float,
 ) -> None:
-    """Single-line per-cell summary. Format MUST match pre-refactor logs."""
+    """Single-line per-cell summary."""
     params_str = (
         " " + ",".join(f"{pk}={pv}" for pk, pv in params.items()) if params else ""
     )
     logger.info(
-        "{}/{}/{}{} k={} bs={} median={:.3f}ms p20={:.3f} p80={:.3f} "
+        "{}/{}/{}[{}]{} k={} bs={} median={:.3f}ms p20={:.3f} p80={:.3f} "
         "peak={:.1f}MiB recall={:.4f} ndcg={:.4f}",
         filter_kind,
         sweep_name,
         algo,
+        backend,
         params_str,
         k,
         bs,
@@ -656,7 +712,7 @@ def _log_perf_line(
 
 def _release_algo(algo_obj: Any) -> None:
     """Drop algo's modules and reclaim GPU pool. Called at end of every cell."""
-    algo_obj.modules.clear()
+    algo_obj.algo_modules.clear()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 

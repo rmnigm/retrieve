@@ -321,7 +321,12 @@ def encode_queries(
 # ----- passes -----------------------------------------------------------------
 
 
-QUALITY_BATCH_SIZE = 64
+QUALITY_BATCH_SIZE = 16  # was 64; reduced because PrefilterKNN[backend="torch"]
+# on arxiv/d256 (N≈3M, dim=256) materialises ``[B, P, D]`` fp32 = ~110 GiB at
+# bs=64 on loose clause filters (e.g. c3_nversions, P≈1.7M items) and OOMs an
+# 80 GB card. bs=16 keeps the same allocation shape as the perf-pass bs=16
+# rows which already fit. The 4× chunking reduction lengthens the quality
+# stream proportionally but it's a small fraction of total wall-clock.
 
 
 @torch.inference_mode()

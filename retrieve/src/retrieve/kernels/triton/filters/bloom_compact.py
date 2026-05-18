@@ -78,6 +78,7 @@ def _bloom_compact_kernel(
     )
 
 
+@torch._dynamo.disable
 def bloom_compact(qb: Tensor, sigs: Tensor) -> tuple[Tensor, Tensor]:
     """Fused bloom subset-test + compaction.
 

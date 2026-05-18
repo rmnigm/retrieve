@@ -14,7 +14,6 @@ _defaults: &defaults
     - torch_knn
     - linr_v3
     - silvertorch
-    - voyager_hnsw
   # N≈1.5M items. n_lists=1024 fixed (~sqrt(N)); sweep candidate_pool and
   # n_probe to map the recall-vs-latency curves.
   algo_params:
@@ -29,8 +28,6 @@ _defaults: &defaults
       - {n_lists: 1024, n_probe: 128, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈100k
       # CUDA-friendly point — Layout B (n_lists=4096, ~195-item clusters).
       - {n_lists: 4096, n_probe: 8,   n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈1.5k
-    voyager_hnsw:
-      - {m: 32, ef_construction: 200, ef_query: 1000, num_threads: 16, seed: 0}
 
 <<: *defaults
 checkpoint: data/goodreads-work-id/checkpoints/gsasrec-d64-drop0.5-id/best_model.pt

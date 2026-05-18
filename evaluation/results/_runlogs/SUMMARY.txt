@@ -1,0 +1,5 @@
+started at: 2026-05-18T23:27:13Z
+host:       9104822d32fe
+gpu:        NVIDIA A100-SXM4-80GB
+
+=== 2026-05-18T23:27:13Z starting conf/arxiv/d64-filter.yaml ===

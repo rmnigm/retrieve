@@ -1,10 +1,17 @@
 """Algorithm registry for the retrieval benchmark.
 
-One class per algo, duck-typed protocol::
+One ``nn.Module`` subclass per algo, with::
 
-    algo.modules: list[nn.Module]               # for memory cleanup
+    algo.algo_modules: list[nn.Module]          # for memory cleanup
     algo.is_cpu: bool                           # CPU baseline marker
-    algo.forward(q, qa_narrow=None) -> (ids, scores)
+    algo(q, qa_narrow=None) -> (ids, scores)    # via Module.__call__
+
+Each algo's ``__init__`` calls ``self.compile(dynamic=True,
+mode="reduce-overhead")`` so the whole forward (filter + index +
+cascade) becomes one cudagraph capture. ``algo_modules`` is a
+separately maintained list (distinct from ``nn.Module.modules()``)
+that the sweep driver iterates for explicit per-cell GPU-memory
+cleanup.
 
 ``build_algorithm`` is a thin factory: it picks the class for ``name``,
 unpacks ``params`` into its constructor, and forwards
@@ -23,15 +30,15 @@ from typing import Any
 
 from torch import Tensor
 
-from retrieve.interfaces import FilterModule
+from retrieve.interfaces import Backend, FilterModule
 
+from ._helpers import collect_modules
 from .filter import build_filter, make_mask
 from .linr_v1 import LinrV1Algo
 from .linr_v2 import LinrV2Algo
 from .linr_v3 import LinrV3Algo
 from .silvertorch import SilvertorchAlgo
 from .torch_knn import TorchKnnAlgo
-from .voyager import VoyagerHNSWAlgo
 
 ALGORITHMS = (
     "torch_knn",
@@ -40,7 +47,13 @@ ALGORITHMS = (
     "linr_v3",
     "linr_v2",
     "silvertorch",
-    "voyager_hnsw",
+)
+
+
+# Algos that accept a `backend` parameter. Algos outside this set (currently
+# only `torch_knn`) emit a single row regardless of `cfg.backends`.
+BACKEND_CAPABLE_ALGOS = frozenset(
+    {"triton_knn", "linr_v1_filter_mask", "linr_v2", "linr_v3", "silvertorch"}
 )
 
 
@@ -53,11 +66,14 @@ def build_algorithm(
     filter_mod: FilterModule | None = None,
     item_attrs_narrow: Tensor | None = None,
     params: dict[str, Any] | None = None,
+    backend: Backend = "triton",
 ) -> Any:
-    """Return an algo instance for one ``(name, filter_kind)`` cell.
+    """Return an algo instance for one ``(name, filter_kind, backend)`` cell.
 
     Raises ``ValueError`` when the algo is incompatible with
-    ``filter_kind``; the driver catches and skips that cell.
+    ``filter_kind``; the driver catches and skips that cell. ``backend``
+    is forwarded to algos in ``BACKEND_CAPABLE_ALGOS`` (which thread it
+    into the underlying ``RetrievalModule``); other algos ignore it.
     """
     p = params or {}
 
@@ -65,7 +81,7 @@ def build_algorithm(
         return TorchKnnAlgo(item_embs, k, filter_mod=filter_mod)
 
     if name in ("triton_knn", "linr_v1_filter_mask"):
-        return LinrV1Algo(item_embs, k, filter_mod=filter_mod)
+        return LinrV1Algo(item_embs, k, filter_mod=filter_mod, backend=backend)
 
     if name == "linr_v3":
         return LinrV3Algo(
@@ -74,12 +90,13 @@ def build_algorithm(
             candidate_pool=int(p.get("candidate_pool", 5000)),
             v3_seed=int(p.get("v3_seed", 0)),
             filter_mod=filter_mod,
+            backend=backend,
         )
 
     if name == "linr_v2":
         if filter_mod is None:
             raise ValueError("linr_v2 requires a filter (clause or bloom)")
-        return LinrV2Algo(item_embs, k, filter_mod=filter_mod)
+        return LinrV2Algo(item_embs, k, filter_mod=filter_mod, backend=backend)
 
     if name == "silvertorch":
         return SilvertorchAlgo(
@@ -93,19 +110,7 @@ def build_algorithm(
             m_bits=int(p.get("m_bits", 1024)),
             k_hash=int(p.get("k_hash", 5)),
             seed=int(p.get("seed", 0)),
-        )
-
-    if name == "voyager_hnsw":
-        ef_query = p.get("ef_query")
-        return VoyagerHNSWAlgo(
-            item_embs,
-            k,
-            m=int(p.get("m", 16)),
-            ef_construction=int(p.get("ef_construction", 200)),
-            ef_query=int(ef_query) if ef_query is not None else None,
-            num_threads=int(p.get("num_threads", -1)),
-            seed=int(p.get("seed", 0)),
-            filter_mod=filter_mod,
+            backend=backend,
         )
 
     raise ValueError(f"unknown algorithm: {name!r}")
@@ -113,7 +118,9 @@ def build_algorithm(
 
 __all__ = [
     "ALGORITHMS",
+    "BACKEND_CAPABLE_ALGOS",
     "build_algorithm",
     "build_filter",
+    "collect_modules",
     "make_mask",
 ]

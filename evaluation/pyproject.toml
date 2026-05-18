@@ -24,6 +24,7 @@ dependencies = [
 
 [project.scripts]
 evaluate                = "retrieval.evaluate:main"
+evaluate-voyager        = "retrieval.voyager.evaluate:main"
 yambda                  = "data.yambda:main"
 arxiv                   = "data.arxiv:main"
 goodreads               = "data.goodreads:main"

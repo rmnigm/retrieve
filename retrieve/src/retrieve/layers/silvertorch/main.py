@@ -8,7 +8,7 @@ from retrieve.kernels.triton.silvertorch.codesigned_probe_score import (
     codesigned_probe_score,
 )
 from retrieve.layers.filters.bloom import (
-    _build_query_signatures_eager,
+    _build_query_signatures,
     _build_signatures,
     _generate_seeds,
 )
@@ -178,11 +178,6 @@ class SilverTorch(RetrievalModule):
     ) -> tuple[Tensor, Tensor]:
         flat_items = self._phase1_probe(query)
         if self.has_bloom and query_clause_attrs is not None:
-            # On the Triton path the bloom-sig build runs through the existing
-            # cudagraph-trees compiled helper; the kernel that consumes its
-            # output is opaque to cudagraph trees so the chain is safe.
-            from retrieve.layers.filters.bloom import _build_query_signatures
-
             qb = _build_query_signatures(
                 query_clause_attrs.long().unsqueeze(-1),
                 self.hash_seeds,
@@ -225,7 +220,7 @@ class SilverTorch(RetrievalModule):
 
         keep = valid
         if self.has_bloom and query_clause_attrs is not None:
-            qb = _build_query_signatures_eager(
+            qb = _build_query_signatures(
                 query_clause_attrs.long().unsqueeze(-1),
                 self.hash_seeds,
                 self.m_bits,

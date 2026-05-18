@@ -7,7 +7,6 @@ from retrieve.interfaces import Backend, RetrievalModule
 from retrieve.kernels.triton.linr.oporp_1bit_match_topk import oporp_1bit_match_topk
 from retrieve.layers.utils.compact import compact_mask
 from retrieve.layers.utils.quantize import (
-    _project_oporp_1bit_query_eager,
     popcount_int64,
     project_oporp_1bit_query,
     quantize_oporp_1bit,
@@ -69,11 +68,7 @@ class OneBitKNN(RetrievalModule):
         return 64 * self.item_bits.shape[1]
 
     def _project_query(self, query: Tensor) -> Tensor:
-        """Triton-backend query projection — routes through the standalone
-        ``project_oporp_1bit_query`` (compiled on CUDA, eager on CPU). The
-        torch backend traces ``_project_oporp_1bit_query_eager`` directly
-        inside ``_forward_torch_eager`` to avoid a compile chain.
-        """
+        """Pure tensor-flow query projection — shared by both backends."""
         return project_oporp_1bit_query(query, self.oporp_signs, self.oporp_perm)
 
     def forward(
@@ -92,9 +87,7 @@ class OneBitKNN(RetrievalModule):
         mask: Tensor | None,
         candidate_ids: Tensor | None,
     ) -> tuple[Tensor, Tensor]:
-        query_bits = _project_oporp_1bit_query_eager(
-            query, self.oporp_signs, self.oporp_perm
-        )
+        query_bits = project_oporp_1bit_query(query, self.oporp_signs, self.oporp_perm)
         if candidate_ids is not None:
             cand_bits = self.item_bits[candidate_ids]  # [B, P, W]
             xor = query_bits.unsqueeze(1) ^ cand_bits

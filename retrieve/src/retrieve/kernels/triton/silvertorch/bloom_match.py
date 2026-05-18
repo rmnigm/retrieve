@@ -48,6 +48,7 @@ def _bloom_match_kernel(
     )
 
 
+@torch._dynamo.disable
 def bloom_match(qb: Tensor, sigs: Tensor) -> Tensor:
     """Compute (qb & sig) == qb across W int64 words.
 
@@ -65,7 +66,7 @@ def bloom_match(qb: Tensor, sigs: Tensor) -> Tensor:
         raise ValueError(f"qb has W={w} but sigs has W={sigs.shape[1]}")
 
     out = torch.empty(b, n, dtype=torch.bool, device=qb.device)
-    block_n = 128 if n >= 128 else triton.next_power_of_2(n)
+    block_n = 128 if n >= 128 else triton.next_power_of_2(int(n))
     grid = (b, triton.cdiv(n, block_n))
 
     _bloom_match_kernel[grid](

@@ -98,6 +98,7 @@ def _clause_compact_kernel(
     )
 
 
+@torch._dynamo.disable
 def clause_compact(
     item_clause_attrs: Tensor,  # [N, C, A_max] int64
     clause_is_reverse: Tensor,  # [C] bool

@@ -275,17 +275,17 @@ purely a bitwise reduction.
 chunk loop over the index — fine at register time (bandwidth-bound,
 ~128 ms for N=3M) but a poor fit for the per-forward query build, where
 n=B is always small and the loop's trip count makes dynamo specialize on
-shape. `_build_query_signatures` mirrors the body without the loop and
-is wrapped at module load with
-`torch.compile(dynamic=True, mode='reduce-overhead')`. The eager body
-fires ~15 separate CUDA kernels per call (~0.4 ms wall-clock, **flat in
-B**) — pure launch overhead, since the actual work is microseconds. The
-compiled path collapses to one cudagraph_trees-replayable graph at
-**~0.09 ms (~4× speedup)**, also flat in B. Output is bit-identical to
-eager. CPU callers fall back to the eager body — `mode='reduce-overhead'`
-is CUDA-only. First call after import pays compile time
-(a few hundred ms); production callers should warm once at process
-start.
+shape. `_build_query_signatures` mirrors the body without the loop;
+keeping it purely tensor-flow lets the outer
+`torch.compile(dynamic=True, mode="reduce-overhead")` wrapped around
+each algo's forward in `evaluation/retrieval/algos/` install a single
+symbolic-shape graph that's reused for all B. The eager body fires
+~15 separate CUDA kernels per call (~0.4 ms wall-clock, **flat in
+B**) — pure launch overhead, since the actual work is microseconds;
+under the algo-level cudagraph_trees capture the same work collapses
+into one replay. Standalone use of `BloomFilter` (not via an Algo
+wrapper) runs the function eagerly — wrap externally with
+`torch.compile` if you want the cudagraph win there too.
 
 **Hash invariant.** `_build_signatures` keys each hash on `(clause_idx,
 value)` (paper §4.1: "for each feature" — a *feature* is a `(key, value)`
@@ -418,19 +418,19 @@ and one `index_select`, no matmul needed. The `_pack_signs_to_int64`
 helper packs the sign-quantized output into `[..., W]` int64 words using
 `<<` and `sum(-1)`; same packing used both at index time and at query time.
 
-### Compile wrappers on the V3 torch reference
+### Compile on the V3 torch reference
 
-The two pure-torch hot bodies on V3's reference path are wrapped with
-`torch.compile(dynamic=True, mode='reduce-overhead')` — same recipe as
-[`_build_query_signatures`](../../retrieve/src/retrieve/layers/filters/bloom.py)
-in the bloom filter:
+The pure-torch hot bodies on V3's reference path —
+`project_oporp_1bit_query` and `OneBitKNN._score_full` — are pure
+tensor-flow free of `.item()` and Python control flow, so the outer
+`torch.compile(dynamic=True, mode="reduce-overhead")` wrapped around
+each algo's forward in `evaluation/retrieval/algos/` traces them into
+its cudagraph capture cleanly:
 
 - **`project_oporp_1bit_query`** ([`quantize.py`](../../retrieve/src/retrieve/layers/utils/quantize.py)).
   Per-query OPORP projection: `multiply → index_select → sign-pack`
-  (~5 small kernels in eager). The compiled cudagraph_trees path collapses
-  the launch tax — measured ~2.5× speedup at B=8 and B=64. Output is
-  consumed inside the same forward (fed into `_score_full`), so no clone
-  is needed.
+  (~5 small kernels in eager). Under the outer cudagraph_trees the
+  launch tax collapses — measured ~2.5× speedup at B=8 and B=64.
 - **`OneBitKNN._score_full`** ([`one_bit_knn.py`](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py)).
   `xor → popcount → reduce` over the full corpus. The win here is
   *fusion*, not launch elision: eager materializes the `[B, N, W]` xor
@@ -440,13 +440,11 @@ in the bloom filter:
   ``d_total`` is derived from `item_bits.shape[1]` inside the body so it
   stays symbolic under `dynamic=True` (one graph across all `(B, N, W)`).
 
-Both follow the bloom dispatch pattern: a free-function eager body, a
-module-level compiled wrapper, and a thin shim that picks compiled-on-CUDA
-and falls through to eager on CPU (`mode='reduce-overhead'` is CUDA-only).
 The matmul-bearing references (`SimilarityMasking`, `FullScanKNN`,
-`DotProductScorer`) were tried and reverted — cuBLAS + CUB already win
-the heavy op, and the cudagraph capture + mandatory output clone (to
-escape the `reduce-overhead` buffer pool) cost more than they save.
+`DotProductScorer`) were tried with their own dedicated compile
+wrappers and reverted — cuBLAS + CUB already win the heavy op, and the
+cudagraph capture + mandatory output clone (to escape the
+`reduce-overhead` buffer pool) cost more than they save.
 
 ## Numerics
 

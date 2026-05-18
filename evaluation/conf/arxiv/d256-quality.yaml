@@ -13,7 +13,6 @@ _defaults: &defaults
     - torch_knn
     - linr_v3
     - silvertorch
-    - voyager_hnsw
 
   # N≈2.7M → sqrt(N)≈1643; round to 1664 lists. n_probe=32 visits ~52K
   # items per query (~2% of N), matching goodreads selectivity.
@@ -27,7 +26,5 @@ _defaults: &defaults
       - {n_lists: 1664, n_probe: 128, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈232k, recall≈0.95
       # CUDA-friendly point — Layout B (n_lists=8192, ~365-item clusters).
       - {n_lists: 8192, n_probe: 8,   n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈2.6k
-    voyager_hnsw:
-      - {m: 32, ef_construction: 200, ef_query: 1000, num_threads: 16, seed: 0}
 
 <<: *defaults

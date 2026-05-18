@@ -86,31 +86,6 @@ def quantize_oporp_1bit(
     return bits, signs, perm
 
 
-def _project_oporp_1bit_query_eager(
-    query: Tensor,
-    signs: Tensor,
-    perm: Tensor,
-) -> Tensor:
-    """Loop-free OPORP query projection — see ``project_oporp_1bit_query``.
-
-    Pulled out as a free function so ``torch.compile(dynamic=True)`` installs
-    a single symbolic-shape graph reused across all B without per-instance
-    re-tracing. Matches the bloom.py compile pattern.
-    """
-    proj = (query * signs.to(query.dtype)).index_select(1, perm)
-    return _pack_signs_to_int64(proj)
-
-
-# CUDA-graph-backed compile of the per-query OPORP projection. Same rationale
-# as ``_build_query_signatures_compiled`` in filters/bloom.py — eager fires a
-# handful of small kernels (multiply, index_select, > 0, reshape, shifted sum)
-# whose launch overhead dominates at typical query batch sizes; cudagraph_trees
-# collapses them into one replay. ``dynamic=True`` covers all B with one graph.
-_project_oporp_1bit_query_compiled = torch.compile(
-    _project_oporp_1bit_query_eager, dynamic=True, mode="reduce-overhead"
-)
-
-
 def project_oporp_1bit_query(
     query: Tensor,
     signs: Tensor,
@@ -120,11 +95,12 @@ def project_oporp_1bit_query(
 
     Returns ``[B, W]`` int64 packed sign bits.
 
-    Dispatches to the compiled CUDA-graph path on CUDA, eager body on CPU
-    (``mode='reduce-overhead'`` requires CUDA graphs).
+    Pure tensor flow — multiply, index_select, > 0, reshape, shifted
+    sum. Called from inside ``OneBitKNN.forward``; the eval-side algo
+    wrapper compiles its forward with ``mode="reduce-overhead"``, so
+    this work is captured into the outer cudagraph.
     """
     if query.dim() != 2:
         raise ValueError(f"expected 2-D [B, D] query, got shape {tuple(query.shape)}")
-    if query.is_cuda:
-        return _project_oporp_1bit_query_compiled(query, signs, perm)
-    return _project_oporp_1bit_query_eager(query, signs, perm)
+    proj = (query * signs.to(query.dtype)).index_select(1, perm)
+    return _pack_signs_to_int64(proj)

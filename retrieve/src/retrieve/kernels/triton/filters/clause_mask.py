@@ -73,12 +73,20 @@ def _clause_mask_kernel(
     )
 
 
+@torch._dynamo.disable
 def clause_mask(
     item_clause_attrs: Tensor,  # [N, C, A_max] int64
     clause_is_reverse: Tensor,  # [C] bool
     query_clause_attrs: Tensor,  # [B, C] int64
 ) -> Tensor:
-    """Fused clause evaluation → ``[B, N]`` bool. No intermediate."""
+    """Fused clause evaluation → ``[B, N]`` bool. No intermediate.
+
+    Int args (shapes, strides) are cast through ``int(...)`` at the kernel
+    launch site: under ``torch.compile(dynamic=True)`` they arrive as
+    ``torch.SymInt`` and ``triton.jit`` can't construct ``ConstantVariable``
+    from those. The cast forces specialization at trace time; values are
+    static per index instance so it costs nothing.
+    """
     if item_clause_attrs.dim() != 3:
         raise ValueError("item_clause_attrs must be [N, C, A_max]")
     if query_clause_attrs.dim() != 2:

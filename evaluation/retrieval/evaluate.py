@@ -52,6 +52,14 @@ from retrieval.sweep import run_sweep
     default=(),
     help="Restrict to one or more filter_kinds (repeat the flag); empty = run all.",
 )
+@click.option(
+    "--backend",
+    "backend_override",
+    multiple=True,
+    type=click.Choice(["triton", "torch"]),
+    default=(),
+    help="Restrict to one or more backends (repeat the flag); empty = use cfg.backends.",
+)
 @click.option("--sweep", "sweep_filter", type=str, default=None)
 @click.option("--output", "output_override", type=str, default=None)
 @click.option(
@@ -65,6 +73,7 @@ def main(
     config_path: str,
     algos_override: tuple[str, ...],
     filter_kinds: tuple[str, ...],
+    backend_override: tuple[str, ...],
     sweep_filter: str | None,
     output_override: str | None,
     skip_quality: bool,
@@ -74,6 +83,16 @@ def main(
         cfg.algorithms = list(algos_override)
     if output_override:
         cfg.output = output_override
+
+    # Dynamo's default recompile_limit (8) is too low for our sweep — each
+    # `(k, bs)` combo and each grad-context (inference_mode on/off across the
+    # autotune-prewarm / quality / perf passes) is a fresh trace. Hitting the
+    # limit silently falls back to eager and erases the torch-backend
+    # `torch.compile` benefit. 64 gives every shape × dispatch-key variant
+    # in the worst-case cell its own compiled path with margin.
+    import torch._dynamo  # noqa: PLC0415
+
+    torch._dynamo.config.recompile_limit = 64
 
     torch.manual_seed(cfg.seed)
     if torch.cuda.is_available():
@@ -113,6 +132,7 @@ def main(
         data_path=data_path,
         device=dev,
         filter_kinds=filter_kinds,
+        backends=backend_override,  # type: ignore[arg-type]
         sweep_filter=sweep_filter,
         skip_quality=skip_quality,
     )

@@ -89,6 +89,7 @@ def _fused_masked_knn_topk_kernel(
     )
 
 
+@torch._dynamo.disable
 def fused_masked_knn_topk(
     query: Tensor,
     item_embs: Tensor,

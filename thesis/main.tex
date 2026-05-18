@@ -1,0 +1,392 @@
+% Compile with XeLaTeX or LuaLaTeX
+\documentclass[14pt,a4paper]{extreport}
+
+% -------------------------
+% Language and font setup
+% -------------------------
+\usepackage{fontspec}
+\usepackage{polyglossia}
+\setmainlanguage{russian}
+\setotherlanguage{english}
+
+\setmainfont{Times New Roman}
+
+% -------------------------
+% Page layout
+% -------------------------
+\usepackage[
+    a4paper,
+    left=25mm,   % left margin >= 20mm
+    right=15mm,
+    top=20mm,
+    bottom=20mm
+]{geometry}
+
+% -------------------------
+% Paragraph formatting
+% -------------------------
+\usepackage{setspace}
+\setstretch{1.5}                 % allowed range: 1.3--1.5
+\setlength{\parindent}{1cm}      % red line / paragraph indentation
+\setlength{\parskip}{0pt}
+
+\usepackage{ragged2e}
+\justifying
+
+% -------------------------
+% Math, figures, tables
+% -------------------------
+\usepackage{amsmath, amssymb}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{caption}
+\usepackage{chngcntr}
+
+% Number figures, tables, and equations inside chapters: 2.3, 2.4, etc.
+\numberwithin{figure}{chapter}
+\numberwithin{table}{chapter}
+\numberwithin{equation}{chapter}
+
+% Figure captions: below, centered, "Рис. 2.3."
+\captionsetup[figure]{
+    name=Рис.,
+    labelsep=period,
+    justification=centering,
+    singlelinecheck=false
+}
+
+% Table captions: above, right-aligned, "Таблица 2.3."
+\captionsetup[table]{
+    name=Таблица,
+    labelsep=period,
+    justification=raggedleft,
+    singlelinecheck=false,
+    position=top
+}
+
+% -------------------------
+% Section heading formatting
+% -------------------------
+\usepackage{titlesec}
+
+\titleformat{\chapter}
+    {\normalfont\bfseries\centering}
+    {\thechapter}
+    {1em}
+    {}
+
+\titleformat{\section}
+    {\normalfont\bfseries}
+    {\thesection}
+    {1em}
+    {}
+
+\titleformat{\subsection}
+    {\normalfont\bfseries}
+    {\thesubsection}
+    {1em}
+    {}
+
+% -------------------------
+% Table of contents formatting
+% -------------------------
+\usepackage{tocloft}
+\renewcommand{\contentsname}{Содержание}
+
+% -------------------------
+% Bibliography: GOST-style references
+% -------------------------
+% Requires biblatex-gost package.
+% Compile sequence:
+% xelatex main.tex
+% biber main
+% xelatex main.tex
+% xelatex main.tex
+\usepackage[
+    backend=biber,
+    style=gost-numeric,
+    sorting=none
+]{biblatex}
+
+\addbibresource{references.bib}
+
+% -------------------------
+% Hyperlinks and cross-references
+% -------------------------
+\usepackage[hidelinks]{hyperref}
+
+% -------------------------
+% Appendix formatting
+% -------------------------
+\usepackage{appendix}
+
+\renewcommand{\appendixname}{Приложение}
+\renewcommand{\appendixtocname}{Приложения}
+\renewcommand{\appendixpagename}{Приложения}
+
+% -------------------------
+% Helper commands
+% -------------------------
+
+% Unnumbered annotation page
+\newcommand{\annotationpage}[2]{
+    \clearpage
+    \thispagestyle{empty}
+    \begin{center}
+        \textbf{#1}
+    \end{center}
+
+    #2
+}
+
+% Standard chapter conclusion section
+\newcommand{\chapterconclusions}{
+    \section{Выводы и результаты по главе}
+}
+
+% Formula legend helper
+\newenvironment{formulalegend}{
+    \par\noindent\textit{где:}
+    \begin{itemize}
+}{
+    \end{itemize}
+}
+
+% -------------------------
+% Document begins
+% -------------------------
+\begin{document}
+
+% =========================================================
+% Title page: not numbered
+% =========================================================
+\pagenumbering{gobble}
+
+\begin{titlepage}
+    \begin{center}
+        Федеральное государственное автономное образовательное учреждение\\
+        высшего образования\\
+        «Национальный исследовательский университет\\
+        “Высшая школа экономики”»\\[1.5cm]
+
+        Факультет Компьютерных Наук\\
+        Образовательная программа «Современные Компьютерные Науки»\\[2.5cm]
+
+        \textbf{ВЫПУСКНАЯ КВАЛИФИКАЦИОННАЯ РАБОТА}\\[0.5cm]
+
+        на тему:\\[0.5cm]
+
+        \textbf{Квантизация и сжатие генеративных диффузионных моделей}\\[2cm]
+    \end{center}
+
+    \begin{flushright}
+        Выполнил студент группы мСКН241:\\
+        Пыж Владислав Александрович\\[0.5cm]
+
+        Научный руководитель:\\
+        канд. наук, доцент\\
+        Аланов Айбек
+    \end{flushright}
+
+    \vfill
+
+    \begin{center}
+        Москва, 2026
+    \end{center}
+\end{titlepage}
+
+% =========================================================
+% Russian annotation: not numbered
+% Requirement: 1500--2000 characters including spaces
+% =========================================================
+\annotationpage{Аннотация}{
+Аннотация представляет собой краткую характеристику выпускной квалификационной работы.
+В ней необходимо описать цель и задачи исследования, объект и предмет работы,
+используемые методы, эмпирическую базу при наличии прикладного исследования,
+а также основные результаты, полученные в ходе выполнения работы.
+
+Текст данной аннотации следует заменить на собственный текст объемом от 1500
+до 2000 знаков с учетом пробелов. Аннотация должна быть написана на русском
+языке и размещена на отдельном листе после титульного листа.
+}
+
+% =========================================================
+% English annotation: not numbered
+% Requirement: 1500--2000 characters including spaces
+% =========================================================
+\annotationpage{\textenglish{Abstract}}{
+\begin{english}
+The abstract is a concise summary of the graduation thesis. It should describe
+the purpose and objectives of the research, the object and subject of the study,
+the methodology, the empirical basis if the work includes applied research,
+and the main results obtained in the thesis.
+
+Replace this placeholder with your own English abstract. The required length is
+from 1500 to 2000 characters including spaces. The English abstract should be
+placed on a separate page after the Russian annotation.
+\end{english}
+}
+
+% =========================================================
+% Main part starts here
+% =========================================================
+\clearpage
+\pagenumbering{arabic}
+
+\tableofcontents
+\clearpage
+
+% =========================================================
+% Introduction
+% =========================================================
+\chapter*{Введение}
+\addcontentsline{toc}{chapter}{Введение}
+
+Во введении необходимо раскрыть тему работы, объект, предмет и методы
+исследования, кратко обосновать актуальность и значимость темы, сформулировать
+цель и основные задачи, описать основной результат и структуру работы.
+
+Пример ссылки на источник: \cite{example-source}.
+Пример перекрестной ссылки: см. рисунок~\ref{fig:example} и таблицу~\ref{tab:example}.
+
+% =========================================================
+% Chapter 1
+% =========================================================
+\chapter{Название первой главы}
+
+Текст первой главы. Заголовки разделов не должны содержать сокращений и
+аббревиатур, за исключением общепринятых.
+
+\section{Название раздела}
+
+Пример рисунка приведен ниже.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.65\textwidth]{example-image}
+    \caption{Пример визуализации полученных данных}
+    \label{fig:example}
+\end{figure}
+
+Пример таблицы приведен ниже.
+
+\begin{table}[H]
+    \caption{Объемные характеристики программных модулей}
+    \label{tab:example}
+    \centering
+    \begin{tabular}{lcc}
+        \toprule
+        Модуль & Количество строк & Количество функций \\
+        \midrule
+        Модуль A & 120 & 8 \\
+        Модуль B & 250 & 15 \\
+        Модуль C & 180 & 11 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Пример выделенной формулы:
+
+\begin{equation}
+    y = f(x; \theta)
+    \label{eq:model}
+\end{equation}
+
+\begin{formulalegend}
+    \item $x$ --- входные данные;
+    \item $y$ --- результат работы модели;
+    \item $\theta$ --- параметры модели;
+    \item $f$ --- функция преобразования входных данных.
+\end{formulalegend}
+
+\chapterconclusions
+
+В данном разделе необходимо кратко изложить результаты главы и обеспечить
+логический переход к следующей главе.
+
+% =========================================================
+% Chapter 2
+% =========================================================
+\chapter{Название второй главы}
+
+Текст второй главы.
+
+\section{Пример длинной таблицы}
+
+Если таблица занимает более одной страницы, можно использовать окружение
+\texttt{longtable}. Подпись будет повторяться на следующих страницах с пометкой
+«продолжение».
+
+\begin{longtable}{p{0.25\textwidth}p{0.6\textwidth}}
+    \caption{Пример длинной таблицы}
+    \label{tab:long-example}
+    \\
+    \toprule
+    Параметр & Описание \\
+    \midrule
+    \endfirsthead
+
+    \caption*{\raggedleft Таблица \thetable. Пример длинной таблицы (продолжение)}
+    \\
+    \toprule
+    Параметр & Описание \\
+    \midrule
+    \endhead
+
+    \bottomrule
+    \endfoot
+
+    Параметр 1 & Описание параметра 1. \\
+    Параметр 2 & Описание параметра 2. \\
+    Параметр 3 & Описание параметра 3. \\
+    Параметр 4 & Описание параметра 4. \\
+    Параметр 5 & Описание параметра 5. \\
+\end{longtable}
+
+\chapterconclusions
+
+Краткие выводы и результаты по второй главе.
+
+% =========================================================
+% Conclusion
+% =========================================================
+\chapter*{Заключение}
+\addcontentsline{toc}{chapter}{Заключение}
+
+В заключении необходимо кратко описать полученные результаты, степень достижения
+цели и решения поставленных задач, а также перспективы дальнейшей работы.
+
+% =========================================================
+% Bibliography
+% =========================================================
+\printbibliography[title={Библиографический список}]
+
+% =========================================================
+% Appendices
+% =========================================================
+\begin{appendices}
+
+\chapter{Терминологический словарь}
+
+Пример приложения. Приложения должны быть пронумерованы и перечислены в
+содержании работы.
+
+\chapter{Список сокращений}
+
+\begin{description}
+    \item[ВКР] выпускная квалификационная работа;
+    \item[НИУ ВШЭ] Национальный исследовательский университет «Высшая школа экономики».
+\end{description}
+
+\chapter{Ключевые фрагменты исходного кода}
+
+Не рекомендуется включать полный исходный код всех разработанных программ.
+Можно включать только ключевые фрагменты, необходимые для демонстрации
+оригинальных решений.
+
+\end{appendices}
+
+\end{document}
