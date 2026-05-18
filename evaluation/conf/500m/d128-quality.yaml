@@ -15,7 +15,6 @@ _defaults: &defaults
     - triton_knn
     - linr_v3
     - silvertorch
-    - voyager_hnsw
   # N≈1.87M → sqrt(N)≈1366. Each algo's params block is a list of dicts;
   # each dict is one explicit (n_lists, n_probe) combo. Sweep is the
   # cross of linr_v3 × silvertorch params.
@@ -32,8 +31,6 @@ _defaults: &defaults
       - {n_lists: 1024, n_probe: 128, n_iter: 10, seed: 0}  # P≈213k
       # CUDA-friendly point — Layout B (n_lists=4096, ~415-item clusters).
       - {n_lists: 4096, n_probe: 8,   n_iter: 10, seed: 0}  # P≈3.3k
-    voyager_hnsw:
-      - {m: 32, ef_construction: 200, ef_query: 1000, num_threads: 16, seed: 0}
 
 <<: *defaults
 checkpoint: data/yambda-500m/checkpoints/gsasrec-d128-drop0.5/best_model.pt

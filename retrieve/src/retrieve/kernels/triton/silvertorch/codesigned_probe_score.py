@@ -128,6 +128,7 @@ def _codesigned_probe_score_kernel(
     )
 
 
+@torch._dynamo.disable
 def codesigned_probe_score(
     query: Tensor,
     flat_probed_items: Tensor,
@@ -196,7 +197,7 @@ def codesigned_probe_score(
 
     # Tile axis on grid_x (≤ 2^31) since num_tiles can exceed grid_y/grid_z's
     # 65535 limit at large n_probe × max_cluster_size.
-    grid = lambda meta: (triton.cdiv(p, meta["BLOCK_P"]), b)
+    grid = lambda meta: (triton.cdiv(int(p), meta["BLOCK_P"]), int(b))
 
     _codesigned_probe_score_kernel[grid](
         query,

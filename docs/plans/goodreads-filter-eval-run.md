@@ -61,8 +61,8 @@ bench signal).
 ```
 filters:
   none:   [full_scan]
-  clause: [c0_genre, c1_lang_reverse, c2_format, c3_year, c0c1, c0c3, all_fwd, all4]
-  bloom:  [c0_genre,                  c2_format, c3_year,       c0c3, all_fwd        ]
+  clause: [c0_genre, c1_lang_reverse, c2_format, c3_year, c0c1, all4]
+  bloom:  [c0_genre,                  c2_format, c3_year]
 ```
 
 `bloom` excludes any sweep that activates the reverse clause (c1) —

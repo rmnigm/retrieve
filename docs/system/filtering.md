@@ -116,14 +116,14 @@ all consume opaque `[N, W]` / `[B, W]` int64 buffers and are unchanged.
 **Index vs query build paths.** The item index goes through
 `_build_signatures` (chunk loop, bandwidth-bound, ~128 ms for N=3M, paid
 once at `register_index`). The per-forward query build is a separate
-loop-free `_build_query_signatures` wrapped with
-`torch.compile(dynamic=True, mode='reduce-overhead')`. Eager builds were
-launch-overhead-bound (~0.4 ms flat in B from ~15 small CUDA kernels);
-the compiled cudagraph_trees path collapses that to ~0.09 ms — ~4×
-speedup at all batch sizes, ~80% of `SilverTorch.forward` at bs=1. CPU
-callers transparently fall back to eager (`mode='reduce-overhead'` is
-CUDA-only). The hash math is identical, so outputs are bit-equal across
-both paths.
+loop-free `_build_query_signatures` written as pure tensor flow so the
+outer `torch.compile(dynamic=True, mode="reduce-overhead")` wrapped
+around each algo in `evaluation/retrieval/algos/` captures it into one
+cudagraph. Eager standalone (no algo wrapper) is launch-overhead-bound
+(~0.4 ms flat in B from ~15 small CUDA kernels); under the algo-level
+cudagraph_trees capture it collapses to ~0.09 ms — ~4× at all batch
+sizes, ~80% of `SilverTorch.forward` at bs=1. The hash math is
+identical across both paths, so outputs are bit-equal.
 
 `bloom_sigs` snapshots persisted before this keying was added are stale
 and must be rebuilt; the bench harness rebuilds on every run.

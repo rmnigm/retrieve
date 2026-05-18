@@ -2,21 +2,27 @@
 
 The candidate source IS the filter: ``filter_mod.evaluate_indices(qa)``
 returns ``(ids [B, P], counts [B])`` with no ``[B, N]`` mask
-materialized. ``PrefilterKNN(backend="triton")`` then rescores those P
-candidates at fp32. ``filter_mod`` is required (no unfiltered mode) —
-that's the whole point of the compact path.
+materialized. ``PrefilterKNN`` then rescores those P candidates at
+fp32 (``backend="triton"`` default; ``"torch"`` available too).
+The whole algo forward (filter compact-indices build + index call) is
+wrapped with ``torch.compile(dynamic=True, mode="reduce-overhead")``
+in ``__init__`` regardless of backend — Inductor fuses gather +
+matmul + topk and cudagraph_trees replay collapses launch overhead.
+``filter_mod`` is required (no unfiltered mode) — that's the whole
+point of the compact path.
 """
 
 from __future__ import annotations
 
-import torch.nn as nn
-from torch import Tensor
+from torch import Tensor, nn
 
 from retrieve import PrefilterKNN
-from retrieve.interfaces import FilterModule
+from retrieve.interfaces import Backend, FilterModule
+
+from ._helpers import collect_modules
 
 
-class LinrV2Algo:
+class LinrV2Algo(nn.Module):
     is_cpu = False
 
     def __init__(
@@ -25,11 +31,14 @@ class LinrV2Algo:
         k: int,
         *,
         filter_mod: FilterModule,
+        backend: Backend = "triton",
     ) -> None:
-        self.idx = PrefilterKNN(k=k, backend="triton").to(item_embs.device)
+        super().__init__()
+        self.idx = PrefilterKNN(k=k, backend=backend).to(item_embs.device)
         self.idx.register_index(item_embs)
         self.filter_mod = filter_mod
-        self.modules: list[nn.Module] = [self.idx, filter_mod]
+        self.algo_modules = collect_modules(self.idx, filter_mod=filter_mod)
+        self.compile(dynamic=True, mode="reduce-overhead")
 
     def forward(self, q: Tensor, qa_narrow: Tensor) -> tuple[Tensor, Tensor]:
         cand, counts = self.filter_mod.evaluate_indices(qa_narrow)

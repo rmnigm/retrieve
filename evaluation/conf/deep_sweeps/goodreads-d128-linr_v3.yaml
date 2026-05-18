@@ -1,32 +1,36 @@
 _defaults: &defaults
   data_dir: data/goodreads-work-id
-  output: results/goodreads/d64-filter.json
+  output: results/deep_sweeps/goodreads-d128-linr_v3.json
   split: test
   device: cuda
   ks: [100, 200, 400]
   batch_sizes: [1, 8, 16]
   seed: 0
+  users_limit: 10000
   encode:
     batch_size: 512
     num_workers: 8
     max_seq_length: 200
+
+  # linr_v3-only param sweep — companion to the main filter configs which
+  # carry a single canonical `candidate_pool`. This config traces the
+  # recall-vs-latency curve across multiple candidate_pool sizes on the
+  # goodreads d128 SASRec checkpoint.
   algorithms:
-    - linr_v1_filter_mask
-    - linr_v2              # exact filtered top-K — recall=1.0 baseline; speed/memory headline
     - linr_v3
-    - silvertorch          # auto-skipped on filter_kind=clause; runs on bloom sweeps only
-  # Backends to sweep — both wrapped with torch.compile(mode="reduce-overhead")
-  # (see the Algo classes for the call site).
+
   backends: [triton, torch]
-  # N≈1.5M items. One canonical combo per approximate algo — recall-vs-latency
-  # curves live in conf/deep_sweeps/.
+
   algo_params:
     linr_v3:
-      - {candidate_pool: 8000, v3_seed: 0}
-    silvertorch:
-      # Layout A, mid-recall n_probe (paper-faithful).
-      - {n_lists: 1024, n_probe: 32, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈25k
-  users_limit: 10000
+      # Candidate-pool sweep — small pool = fast but lossy stage-1, large
+      # pool = approaches the exact baseline at higher cost.
+      - {candidate_pool: 2000,  v3_seed: 0}
+      - {candidate_pool: 4000,  v3_seed: 0}
+      - {candidate_pool: 8000,  v3_seed: 0}
+      - {candidate_pool: 16000, v3_seed: 0}
+      - {candidate_pool: 32000, v3_seed: 0}
+
   filters:
     clause:
       attrs_path:    data/goodreads-work-id/item_attrs_narrow.pt
@@ -39,9 +43,8 @@ _defaults: &defaults
         - {name: c0c1,            active_clauses: [0, 1]}
         - {name: all4,            active_clauses: [0, 1, 2, 3]}
     bloom:
-      # Bloom over the SAME narrow attrs as the clause sweeps — paper-strict
-      # set-membership approximation of the exact-equality predicate.
-      # `c1_lang_reverse` is excluded: BloomFilter is forward-only (no NOT).
+      # Bloom over the SAME narrow attrs; reverse-clause sweeps omitted
+      # (BloomFilter is forward-only).
       attrs_path:   data/goodreads-work-id/item_attrs_narrow.pt
       reverse_path: data/goodreads-work-id/clause_is_reverse_narrow.pt
       m_bits: 1024
@@ -52,4 +55,4 @@ _defaults: &defaults
         - {name: c3_year,  active_clauses: [3]}
 
 <<: *defaults
-checkpoint: data/goodreads-work-id/checkpoints/gsasrec-d64-drop0.5-id/best_model.pt
+checkpoint: data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/best_model.pt

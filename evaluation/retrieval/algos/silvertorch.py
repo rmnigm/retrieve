@@ -15,13 +15,15 @@ clusters never get scored — silvertorch is meant to do the filtering
 
 from __future__ import annotations
 
-import torch.nn as nn
-from torch import Tensor
+from torch import Tensor, nn
 
 from retrieve import SilverTorch
+from retrieve.interfaces import Backend
+
+from ._helpers import collect_modules
 
 
-class SilvertorchAlgo:
+class SilvertorchAlgo(nn.Module):
     is_cpu = False
 
     def __init__(
@@ -37,7 +39,9 @@ class SilvertorchAlgo:
         m_bits: int = 1024,
         k_hash: int = 5,
         seed: int = 0,
+        backend: Backend = "triton",
     ) -> None:
+        super().__init__()
         if filter_kind not in ("none", "bloom"):
             raise ValueError(
                 f"silvertorch supports filter_kind in (none, bloom); "
@@ -59,6 +63,7 @@ class SilvertorchAlgo:
                 k_hash=k_hash,
                 n_iter=n_iter,
                 seed=seed,
+                backend=backend,
             ).to(device)
             self.idx.register_index(item_embs, item_clause_attrs=item_attrs_narrow)
         else:
@@ -68,9 +73,11 @@ class SilvertorchAlgo:
                 n_probe=n_probe,
                 n_iter=n_iter,
                 seed=seed,
+                backend=backend,
             ).to(device)
             self.idx.register_index(item_embs)
-        self.modules: list[nn.Module] = [self.idx]
+        self.algo_modules = collect_modules(self.idx, filter_mod=None)
+        self.compile(dynamic=True, mode="reduce-overhead")
 
     def forward(self, q: Tensor, qa_narrow: Tensor | None = None) -> tuple[Tensor, Tensor]:
         if self._fused:

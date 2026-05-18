@@ -13,19 +13,24 @@ _defaults: &defaults
 
   algorithms:
     - linr_v1_filter_mask
+    - linr_v2              # exact filtered top-K — recall=1.0 baseline; speed/memory headline
     - linr_v3
     - silvertorch          # auto-skipped on filter_kind=clause; runs on bloom sweeps only
+
+  # Backends to sweep — both wrapped with torch.compile(mode="reduce-overhead")
+  # (see the Algo classes for the call site).
+  backends: [triton, torch]
+  # Cap arxiv users to match goodreads — quality + oracle now scale with 10k
+  # rather than the full ~50k heldout split, ~5× speedup on this config.
+  users_limit: 10000
 
   algo_params:
     linr_v3:
       - {candidate_pool: 12000, v3_seed: 0}
     silvertorch:
-      # Recall curve — Layout A (n_lists≈√N, paper-faithful, ~1800-item clusters).
-      - {n_lists: 1664, n_probe: 8,   n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈14k, recall≈0.74
-      - {n_lists: 1664, n_probe: 32,  n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈58k, recall≈0.89
-      - {n_lists: 1664, n_probe: 128, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈232k, recall≈0.95
-      # CUDA-friendly point — Layout B (n_lists=8192, ~365-item clusters).
-      - {n_lists: 8192, n_probe: 8,   n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈2.6k
+      # One canonical combo — paper-faithful Layout A, mid-recall n_probe.
+      # The deep recall-vs-latency curve lives in d128-silvertorch.yaml.
+      - {n_lists: 1664, n_probe: 32, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈58k, recall≈0.89
 
   filters:
     clause:

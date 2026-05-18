@@ -3,19 +3,23 @@ _defaults: &defaults
   content_subdir: content_d128
   gt_subdir: gt_d128
   # No `checkpoint:` field — arxiv has no SASRec model; queries come from
-  # data/arxiv-papers/content_d128/query_emb.pt (built by `arxiv.py encode_queries`).
-  output: results/arxiv/d128-silvertorch.json
+  # data/arxiv-papers/content_d128/query_emb.pt (built by `arxiv encode_queries`).
+  output: results/deep_sweeps/arxiv-d128-silvertorch.json
   split: test
   device: cuda
   ks: [100, 200, 400]
   batch_sizes: [1, 8, 16]
   seed: 0
+  users_limit: 10000
 
-  # Silvertorch-only deep sweep — companion to the broader d128-filter.yaml
-  # cross-algo eval. Maps the recall-vs-latency curve thoroughly across two
-  # cluster-count layouts.
+  # Silvertorch-only param sweep — companion to the main filter configs
+  # (conf/arxiv/d*-filter.yaml) which carry a single canonical silvertorch
+  # combo. This config maps the full recall-vs-latency curve across two
+  # cluster-count layouts and a wide n_probe range.
   algorithms:
-    - silvertorch          # auto-skipped on filter_kind=clause; runs on bloom sweeps only
+    - silvertorch
+
+  backends: [triton, torch]
 
   algo_params:
     silvertorch:
@@ -34,9 +38,8 @@ _defaults: &defaults
       - {n_lists: 8192, n_probe: 128, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈42k
       - {n_lists: 8192, n_probe: 256, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈84k
 
-  # Bloom filter sweeps mirror d128-filter.yaml so the deep grid is exercised
-  # across the same predicate set as the production filter eval. clause-style
-  # sweeps are omitted (silvertorch only handles the bloom-fused path).
+  # Silvertorch only handles the bloom-fused path — clause sweeps would be
+  # auto-skipped, so omit them entirely.
   filters:
     bloom:
       attrs_path:   data/arxiv-papers/item_attrs_narrow.pt

@@ -12,18 +12,3 @@ class Constants:
     TRACK_LISTEN_THRESHOLD = 50
 
     NUM_RANKED_ITEMS = 100
-
-    METRICS = [
-        "ndcg@10",
-        "ndcg@50",
-        "ndcg@100",
-        "dcg@10",
-        "dcg@50",
-        "dcg@100",
-        "recall@10",
-        "recall@50",
-        "recall@100",
-        "coverage@10",
-        "coverage@50",
-        "coverage@100",
-    ]

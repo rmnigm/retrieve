@@ -100,6 +100,7 @@ def _oporp_1bit_match_topk_kernel(
     )
 
 
+@torch._dynamo.disable
 def oporp_1bit_match_topk(
     query_bits: Tensor,
     item_bits: Tensor,
