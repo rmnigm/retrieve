@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT.parent / "retrieve" / "src"))
 
-from retrieve import SimilarityMaskingTriton  # noqa: E402
+from retrieve import SimilarityMasking  # noqa: E402
 from retrieval.algos.filter import build_filter, make_mask  # noqa: E402
 
 DATA = ROOT / "data" / "arxiv-papers"
@@ -109,8 +109,8 @@ topk_oracle_ids_post = torch.where(
     torch.full_like(topk_oracle.indices, -1),
 )
 
-# ---- ALGO path: SimilarityMaskingTriton with our new contiguous-T buffer ----
-algo = SimilarityMaskingTriton(k=K).to(dev)
+# ---- ALGO path: SimilarityMasking(backend="triton") with our new contiguous-T buffer ----
+algo = SimilarityMasking(k=K, backend="triton").to(dev)
 algo.register_index(item_embs)
 print(f"algo.item_embs_t: shape={tuple(algo.item_embs_t.shape)} "
       f"strides={algo.item_embs_t.stride()} contig={algo.item_embs_t.is_contiguous()}")

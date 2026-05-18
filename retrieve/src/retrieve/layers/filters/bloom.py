@@ -3,7 +3,10 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
-from retrieve.interfaces import FilterModule
+from retrieve.interfaces import Backend, FilterModule
+from retrieve.kernels.triton.filters.bloom_compact import bloom_compact
+from retrieve.kernels.triton.silvertorch.bloom_match import bloom_match
+from retrieve.layers.utils.compact import compact_mask
 
 
 class BloomFilter(FilterModule):
@@ -15,13 +18,18 @@ class BloomFilter(FilterModule):
     per clause; ``-1`` is inactive). Subset test ``(qb & sigs) == qb`` per word,
     AND-reduced.
 
+    ``backend="triton"`` (default) routes the dense / compact paths through
+    the fused ``bloom_match`` / ``bloom_compact`` Triton kernels. With
+    ``backend="torch"`` the same semantics run via a pure-torch broadcast
+    bitwise test, which materializes a ``[B, N, W]`` int64 intermediate.
+
     No reverse / NOT — that path stays in ``ExactAttributeFilter``.
     """
 
     bloom_sigs: Tensor  # [N, W] int64
     hash_seeds: Tensor  # [k_hash, 2] int64
 
-    def __init__(self, m_bits: int, k_hash: int) -> None:
+    def __init__(self, m_bits: int, k_hash: int, backend: Backend = "triton") -> None:
         super().__init__()
         if m_bits <= 0 or (m_bits & (m_bits - 1)) != 0:
             raise ValueError(f"m_bits must be a positive power of 2, got {m_bits}")
@@ -32,6 +40,7 @@ class BloomFilter(FilterModule):
         self.m_bits = m_bits
         self.k_hash = k_hash
         self.word_count = m_bits // 64
+        self.backend = backend
 
     def register_index(
         self,
@@ -66,9 +75,7 @@ class BloomFilter(FilterModule):
 
     def evaluate_mask(self, query_clause_attrs: Tensor) -> Tensor:
         qb = self._build_query_sigs(query_clause_attrs)  # [B, W]
-        if qb.is_cuda:
-            from retrieve.kernels.triton.silvertorch.bloom_match import bloom_match
-
+        if self.backend == "triton":
             return bloom_match(qb, self.bloom_sigs)
         match = (qb.unsqueeze(1) & self.bloom_sigs.unsqueeze(0)) == qb.unsqueeze(1)
         return match.all(dim=-1)
@@ -76,18 +83,15 @@ class BloomFilter(FilterModule):
     def evaluate_indices(self, query_clause_attrs: Tensor) -> tuple[Tensor, Tensor]:
         """Returns ``(positive_indices [B, P] int64, counts [B] int64)``.
 
-        On CUDA: routes to the fused ``bloom_compact`` Triton kernel — no
-        ``[B, N]`` bool intermediate ever materialized. On CPU: ABC default
-        (``compact_mask(self.evaluate_mask(qa))``). Output id order within a
-        row is unspecified (atomics) — callers that care must sort.
+        ``backend="triton"``: fused ``bloom_compact`` kernel — no ``[B, N]``
+        bool intermediate ever materialized. ``backend="torch"``: ABC
+        default (``compact_mask(self.evaluate_mask(qa))``). Output id order
+        within a row is unspecified (atomics on the triton path) — callers
+        that care must sort.
         """
         qb = self._build_query_sigs(query_clause_attrs)  # [B, W]
-        if qb.is_cuda:
-            from retrieve.kernels.triton.filters.bloom_compact import bloom_compact
-
+        if self.backend == "triton":
             return bloom_compact(qb, self.bloom_sigs)
-        from retrieve.layers.utils.compact import compact_mask
-
         return compact_mask(self.evaluate_mask(query_clause_attrs))
 
     def evaluate_subset(

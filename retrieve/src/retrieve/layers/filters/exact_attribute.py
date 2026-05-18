@@ -3,7 +3,10 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
-from retrieve.interfaces import FilterModule
+from retrieve.interfaces import Backend, FilterModule
+from retrieve.kernels.triton.filters.clause_compact import clause_compact
+from retrieve.kernels.triton.filters.clause_mask import clause_mask
+from retrieve.layers.utils.compact import compact_mask
 
 
 class ExactAttributeFilter(FilterModule):
@@ -14,13 +17,20 @@ class ExactAttributeFilter(FilterModule):
         f = ExactAttributeFilter(); f.register_index(item_attrs)
         mask = f.evaluate_mask(qa)            # for the dense path
         ids, cs = f.evaluate_indices(qa)      # for the sparse path
+
+    ``backend="triton"`` (default) routes the dense / compact paths through
+    the fused ``clause_mask`` / ``clause_compact`` Triton kernels. With
+    ``backend="torch"``, the same semantics run via a broadcast equality +
+    reduction — but materializes ``[B, N, C, A_max]`` bool intermediate, so
+    expect HBM spikes at large N.
     """
 
     item_clause_attrs: Tensor  # [N, C, A_max] int64
     clause_is_reverse: Tensor  # [C] bool
 
-    def __init__(self) -> None:
+    def __init__(self, backend: Backend = "triton") -> None:
         super().__init__()
+        self.backend = backend
 
     def register_index(
         self,
@@ -37,12 +47,12 @@ class ExactAttributeFilter(FilterModule):
     def evaluate_mask(self, query_clause_attrs: Tensor) -> Tensor:
         """Returns ``[B, N]`` bool.
 
-        On CUDA: routes to the fused ``clause_mask`` Triton kernel — no
-        ``[B, N, C, A_max]`` intermediate. On CPU: pure-torch broadcast.
+        ``backend="triton"``: fused ``clause_mask`` kernel — no
+        ``[B, N, C, A_max]`` intermediate. ``backend="torch"``: broadcast
+        equality + AND/OR reductions; materializes the full
+        ``[B, N, C, A_max]`` bool grid.
         """
-        if query_clause_attrs.is_cuda:
-            from retrieve.kernels.triton.filters.clause_mask import clause_mask
-
+        if self.backend == "triton":
             return clause_mask(
                 self.item_clause_attrs,
                 self.clause_is_reverse,
@@ -61,23 +71,18 @@ class ExactAttributeFilter(FilterModule):
     def evaluate_indices(self, query_clause_attrs: Tensor) -> tuple[Tensor, Tensor]:
         """Returns ``(positive_indices [B, P] int64, counts [B] int64)``.
 
-        On CUDA: routes to the fused ``clause_compact`` Triton kernel — no
-        ``[B, N]`` bool intermediate ever materialized. On CPU / fallback:
+        ``backend="triton"``: fused ``clause_compact`` kernel — no
+        ``[B, N]`` bool intermediate ever materialized. ``backend="torch"``:
         ``compact_mask(self.evaluate_mask(qa))``. Output id order within a row
-        is unspecified (atomics) — callers that care must sort.
+        is unspecified (atomics on the triton path) — callers that care must
+        sort.
         """
-        if query_clause_attrs.is_cuda:
-            from retrieve.kernels.triton.filters.clause_compact import (
-                clause_compact,
-            )
-
+        if self.backend == "triton":
             return clause_compact(
                 self.item_clause_attrs,
                 self.clause_is_reverse,
                 query_clause_attrs,
             )
-        from retrieve.layers.utils.compact import compact_mask
-
         return compact_mask(self.evaluate_mask(query_clause_attrs))
 
     def evaluate_subset(

@@ -3,12 +3,12 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
-from retrieve.interfaces import RetrievalModule
+from retrieve.interfaces import Backend, RetrievalModule
 from retrieve.kernels.triton.silvertorch.codesigned_probe_score import (
     codesigned_probe_score,
 )
 from retrieve.layers.filters.bloom import (
-    _build_query_signatures,
+    _build_query_signatures_eager,
     _build_signatures,
     _generate_seeds,
 )
@@ -20,9 +20,19 @@ class SilverTorch(RetrievalModule):
     """Co-designed IVF + INT8 ANN + (optional) Bloom attribute filter (Algorithm 1).
 
     With ``m_bits`` and ``k_hash`` set, the bloom filter is fused into the
-    ``codesigned_probe_score`` Triton kernel. Leave both unset (or both
-    ``None``) to build a bloom-free IVF + INT8 ANN — no signature buffers
-    are allocated and the bloom branch is skipped at query time.
+    ``codesigned_probe_score`` Triton kernel (or its torch equivalent —
+    see ``backend=`` below). Leave both unset (or both ``None``) to build a
+    bloom-free IVF + INT8 ANN — no signature buffers are allocated and the
+    bloom branch is skipped at query time.
+
+    ``backend="triton"`` (default) routes phase 2+3 through the fused
+    ``codesigned_probe_score`` kernel — no ``[B, P, W]`` / ``[B, P, D]``
+    intermediates touch HBM. ``backend="torch"`` runs the same semantics
+    via pure torch ops, eager — callers that want Inductor fusion + cudagraph
+    capture should wrap the module with ``torch.compile`` themselves (the
+    evaluation harness already does this). The torch path materializes
+    ``[B, P, D]`` fp32 inside the dot product, so configurations with
+    large ``P × B × D`` must use the Triton backend.
     """
 
     centroids: Tensor
@@ -42,6 +52,7 @@ class SilverTorch(RetrievalModule):
         k_hash: int | None = None,
         n_iter: int = 10,
         seed: int = 0,
+        backend: Backend = "triton",
     ) -> None:
         super().__init__()
         if (m_bits is None) ^ (k_hash is None):
@@ -67,6 +78,7 @@ class SilverTorch(RetrievalModule):
         self.n_probe = n_probe
         self.n_iter = n_iter
         self.seed = seed
+        self.backend = backend
 
     def register_index(
         self,
@@ -135,46 +147,53 @@ class SilverTorch(RetrievalModule):
         """IVF + (optional) Bloom-fused retrieval.
 
         ``query_clause_attrs`` is only valid when the index was built with a
-        bloom config. With it ``None``, the kernel skips bloom evaluation
-        entirely (``query_bits`` and ``bloom_sigs`` are passed as ``None``).
+        bloom config. With it ``None``, the bloom branch is skipped entirely.
         """
         if candidate_ids is not None:
             return self._forward_candidates(query, candidate_ids)
-
         if not self.has_bloom and query_clause_attrs is not None:
             raise ValueError(
                 "query_clause_attrs requires bloom config — pass m_bits and k_hash to __init__"
             )
+        if self.backend == "triton":
+            return self._forward_triton(query, query_clause_attrs)
+        return self._forward_torch_eager(query, query_clause_attrs)
 
+    def _phase1_probe(self, query: Tensor) -> Tensor:
+        """Phase 1: centroid top-``n_probe``, gather padded probed items.
+
+        Returns ``flat_items[B, P]`` (P = n_probe × max_cluster_size); ``-1``
+        slots mark empty cluster padding.
+        """
         b = query.shape[0]
-
-        # Phase 1: centroid top-n_probe
         cent_scores = query @ self.centroids.t()
-        _, probe_ids = torch.topk(cent_scores, self.n_probe, dim=1)  # [B, n_probe]
+        _, probe_ids = torch.topk(cent_scores, self.n_probe, dim=1)
+        probed = self.padded_cluster_items[probe_ids]
+        return probed.reshape(b, -1)
 
-        # Gather probed item ids; flatten cluster axis.
-        probed = self.padded_cluster_items[probe_ids]  # [B, n_probe, max_size]
-        flat_items = probed.reshape(b, -1)  # [B, P], -1 padding marks empty slots
-
-        # Build query bloom signature once per call (cheap, host-side). Routes
-        # to the cudagraph-trees compiled query path on CUDA — eager fires ~15
-        # separate kernels (~0.4 ms launch-overhead tax); compiled is ~0.09 ms.
+    def _forward_triton(
+        self,
+        query: Tensor,
+        query_clause_attrs: Tensor | None,
+    ) -> tuple[Tensor, Tensor]:
+        flat_items = self._phase1_probe(query)
         if self.has_bloom and query_clause_attrs is not None:
+            # On the Triton path the bloom-sig build runs through the existing
+            # cudagraph-trees compiled helper; the kernel that consumes its
+            # output is opaque to cudagraph trees so the chain is safe.
+            from retrieve.layers.filters.bloom import _build_query_signatures
+
             qb = _build_query_signatures(
                 query_clause_attrs.long().unsqueeze(-1),
                 self.hash_seeds,
                 self.m_bits,
                 self.k_hash,
                 self.word_count,
-            )  # [B, W]
+            )
             sigs = self.bloom_sigs
         else:
             qb = None
             sigs = None
-
-        # Phase 2 + 3 fused: per (b, p-tile) bloom subset test, int8 dequant
-        # dot, score store. No [B, P, W] / [B, P, D] intermediates ever land
-        # in HBM.
         return codesigned_probe_score(
             query,
             flat_items,
@@ -184,6 +203,57 @@ class SilverTorch(RetrievalModule):
             query_bits=qb,
             bloom_sigs=sigs,
         )
+
+    def _forward_torch_eager(
+        self,
+        query: Tensor,
+        query_clause_attrs: Tensor | None,
+    ) -> tuple[Tensor, Tensor]:
+        """Pure-torch forward — compiled in ``__init__``.
+
+        Mirrors the Triton kernel's semantics: phase 1 IVF probe, optional
+        bloom subset test, INT8 dequant + dot, mask + topk + ``-1 / -inf``
+        pad. Calls the eager bloom-sig body directly so the whole forward
+        traces into one graph.
+        """
+        b = query.shape[0]
+        flat_items = self._phase1_probe(query)
+        p = flat_items.shape[1]
+
+        valid = flat_items >= 0
+        safe = flat_items.clamp_min(0)
+
+        keep = valid
+        if self.has_bloom and query_clause_attrs is not None:
+            qb = _build_query_signatures_eager(
+                query_clause_attrs.long().unsqueeze(-1),
+                self.hash_seeds,
+                self.m_bits,
+                self.k_hash,
+                self.word_count,
+            )  # [B, W]
+            probed_sigs = self.bloom_sigs[safe]  # [B, P, W]
+            match = (qb.unsqueeze(1) & probed_sigs) == qb.unsqueeze(1)
+            keep = keep & match.all(dim=-1)
+
+        codes = self.item_codes[safe].to(torch.float32)  # [B, P, D]
+        scales = self.item_scales[safe]  # [B, P]
+        scores = torch.einsum("bd,bpd->bp", query, codes) * scales
+        scores = scores.masked_fill(~keep, float("-inf"))
+
+        actual_k = min(self.k, p)
+        topk_scores, topk_local = torch.topk(scores, actual_k, dim=1)
+        topk_ids = flat_items.gather(1, topk_local)
+
+        if actual_k == self.k:
+            return topk_ids, topk_scores
+
+        device = query.device
+        out_ids = torch.full((b, self.k), -1, dtype=torch.long, device=device)
+        out_scores = torch.full((b, self.k), float("-inf"), dtype=torch.float32, device=device)
+        out_ids[:, :actual_k] = topk_ids
+        out_scores[:, :actual_k] = topk_scores
+        return out_ids, out_scores
 
     def _forward_candidates(
         self,
@@ -212,6 +282,7 @@ def build_silvertorch(
     n_iter: int = 10,
     seed: int = 0,
     item_clause_attrs: Tensor | None = None,
+    backend: Backend = "triton",
 ) -> SilverTorch:
     module = SilverTorch(
         k=k,
@@ -221,6 +292,7 @@ def build_silvertorch(
         k_hash=k_hash,
         n_iter=n_iter,
         seed=seed,
+        backend=backend,
     )
     module.register_index(item_embs, item_clause_attrs)
     return module

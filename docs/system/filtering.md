@@ -73,14 +73,14 @@ direction — bring Bloom into the LiNR side as an alternative
 ```python
 from retrieve import (
     BloomFilter, ExactAttributeFilter,
-    SimilarityMaskingTriton, PrefilterKNNTriton, OneBitKNNTriton,
+    SimilarityMasking, PrefilterKNN, OneBitKNN,
     combine_indices, combine_masks,
 )
 
-ef = ExactAttributeFilter().to("cuda")
+ef = ExactAttributeFilter(backend="triton").to("cuda")
 ef.register_index(item_attrs, clause_is_reverse=is_reverse)
 
-bf = BloomFilter(m_bits=1024, k_hash=5).to("cuda")
+bf = BloomFilter(m_bits=1024, k_hash=5, backend="triton").to("cuda")
 bf.register_index(item_attrs)
 
 # Mask path — combine exact + approximate, feed SimilarityMasking / OneBitKNN.

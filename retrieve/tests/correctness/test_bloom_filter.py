@@ -194,20 +194,25 @@ class TestEdgeCases:
         assert mask.shape == (4, 1)
         assert mask.dtype == torch.bool
 
-    def test_cpu_eval_mask_matches_cuda(self, attrs, query):
+    def test_torch_backend_matches_triton_backend(self, attrs, query):
         """The torch-side broadcast subset path must agree with the Triton kernel."""
-        bf = BloomFilter(m_bits=512, k_hash=5).to("cuda")
-        bf.register_index(attrs)
+        bf_triton = BloomFilter(m_bits=512, k_hash=5, backend="triton").to("cuda")
+        bf_triton.register_index(attrs)
+        triton_mask = bf_triton.evaluate_mask(query)
 
-        # CUDA path → bloom_match kernel.
-        cuda_mask = bf.evaluate_mask(query)
+        bf_torch = BloomFilter(m_bits=512, k_hash=5, backend="torch").to("cuda")
+        bf_torch.register_index(attrs)
+        torch_mask = bf_torch.evaluate_mask(query)
 
-        # CPU path → pure-torch broadcast subset.
-        bf_cpu = BloomFilter(m_bits=512, k_hash=5)
-        bf_cpu.register_index(attrs.cpu())
-        cpu_mask = bf_cpu.evaluate_mask(query.cpu())
-
-        assert torch.equal(cuda_mask.cpu(), cpu_mask)
+        assert torch.equal(triton_mask, torch_mask)
+        # And the compact path agrees on the per-row id set (atomics shuffle order on the
+        # triton path, so compare counts + sets rather than full tensors).
+        tri_ids, tri_counts = bf_triton.evaluate_indices(query)
+        tor_ids, tor_counts = bf_torch.evaluate_indices(query)
+        assert torch.equal(tri_counts, tor_counts)
+        for b in range(query.shape[0]):
+            cnt = int(tri_counts[b].item())
+            assert set(tri_ids[b, :cnt].tolist()) == set(tor_ids[b, :cnt].tolist())
 
 
 class TestRegisterIndexReverseGuard:

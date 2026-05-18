@@ -12,13 +12,14 @@ see [kernels.md](kernels.md).
 ## Module families
 
 Two retrieval families live side by side, both implementing the
-[`RetrievalModule`](../../retrieve/src/retrieve/interfaces.py) interface:
+[`RetrievalModule`](../../retrieve/src/retrieve/interfaces.py) interface
+and selecting between Triton kernels and pure-torch ops via a
+`backend="torch" | "triton"` flag on `__init__`:
 
 - **LiNR** ([`layers/linr/`](../../retrieve/src/retrieve/layers/linr/)) — three
   variants (`SimilarityMasking` dense, `PrefilterKNN` sparse pre-filter,
-  `OneBitKNN` 1-bit OPORP) with separate pure-torch and Triton-fused
-  backends. Filtering is **decoupled**: each forward takes a mask or a
-  candidate-id buffer the caller computed via a
+  `OneBitKNN` 1-bit OPORP). Filtering is **decoupled**: each forward takes
+  a mask or a candidate-id buffer the caller computed via a
   [`FilterModule`](../../retrieve/src/retrieve/interfaces.py)
   ([`ExactAttributeFilter`](../../retrieve/src/retrieve/layers/filters/exact_attribute.py) /
   [`BloomFilter`](../../retrieve/src/retrieve/layers/filters/bloom.py)),
@@ -27,8 +28,11 @@ Two retrieval families live side by side, both implementing the
   [`combine_masks` / `combine_indices`](../../retrieve/src/retrieve/layers/filters/__init__.py).
 - **SilverTorch** ([`layers/silvertorch/`](../../retrieve/src/retrieve/layers/silvertorch/)) —
   co-designed IVF + INT8 ANN + Bloom attribute filter, all fused in one
-  Triton kernel. Filtering is **inline** (Bloom signatures live on the
-  module); no standalone `ExactAttributeFilter` is wired in.
+  Triton kernel under `backend="triton"`; with `backend="torch"` the same
+  semantics run in pure torch (phase 1 IVF probe + bloom subset + INT8
+  dequant + dot + topk), materializing a `[B, P, D]` intermediate.
+  Filtering is **inline** (Bloom signatures live on the module); no
+  standalone `ExactAttributeFilter` is wired in.
 
 Filter modules live in [`layers/filters/`](../../retrieve/src/retrieve/layers/filters/):
 `ExactAttributeFilter` (exact, supports reverse), `BloomFilter` (approximate,
@@ -104,25 +108,29 @@ Two composition helpers ship in
 
 ## LiNR variants
 
-All three return `(ids[B, K], scores[B, K])`. Backends ship in pairs: a
-torch reference and a `*Triton` subclass. `PrefilterKNN` and `OneBitKNN`
-have real fused kernels; `SimilarityMasking`'s `*Triton` subclass is a
-backend-dispatch alias only — its dense matmul + top-K runs in pure torch
-(cuBLAS + CUB already do the right thing; there's no fusion to win).
+All three return `(ids[B, K], scores[B, K])`. Each module takes a
+`backend="torch" | "triton"` arg in `__init__`; `"triton"` is the default
+(the eval harness and the original paper experiments target Triton). The
+torch backend is eager — callers wanting Inductor fusion or cudagraph
+capture wrap the module with `torch.compile` themselves. The library does
+not bind compile internally.
 
 - **`SimilarityMasking` — dense similarity, optional mask.** Full
   `query @ item_embs.T`, masked scores set to `-inf`, then top-K. Forward
-  takes `(query, mask=None)`. Wins when the mask is dense or absent. Both
-  backends share the same pure-torch implementation.
+  takes `(query, mask=None)`. The original Triton kernel was removed
+  because cuBLAS + CUB already deliver the same memory traffic; the
+  `backend=` flag is accepted for API symmetry but is a no-op on this
+  class.
 - **`PrefilterKNN` — sparse pre-filter.** Forward takes
   `(query, candidate_ids=None, counts=None)` — passing item ids per query,
   precompacted by the caller (typically
   `ExactAttributeFilter.evaluate_indices`). The module itself does **no**
   mask handling: it gathers the passing rows, runs a reduced `bmm`, top-K's
   locally, and maps back to global ids. Without `candidate_ids` it falls
-  back to a `SimilarityMasking`-style exhaustive matmul. Triton backend uses
-  `fused_masked_knn_topk` for the sparse path and the parent's pure-torch
-  dense matmul for the unmasked fallback.
+  back to a `SimilarityMasking`-style exhaustive matmul. With
+  `backend="triton"` the sparse path uses `fused_masked_knn_topk`; the
+  unmasked path runs the pure-torch dense matmul on either backend
+  (nothing to fuse over cuBLAS).
 - **`OneBitKNN` — 1-bit Sign-OPORP.** [`quantize_oporp_1bit`](../../retrieve/src/retrieve/layers/utils/quantize.py)
   builds three buffers at index time: `item_bits[N, W]` int64
   (`W = D / 64`), `oporp_signs[D]` int8, `oporp_perm[D]` int64. Scoring
@@ -138,18 +146,9 @@ backend-dispatch alias only — its dense matmul + top-K runs in pure torch
   3. Neither provided — full exhaustive popcount scan.
 
   All three paths in the Triton backend share the same kernel
-  (`oporp_1bit_match_topk`) — only the addressing changes.
-
-  The pure-torch reference (`OneBitKNN`, used by tests and as a fallback
-  when the Triton backend isn't selected) wraps two hot bodies with
-  `torch.compile(dynamic=True, mode='reduce-overhead')`:
-  [`project_oporp_1bit_query`](../../retrieve/src/retrieve/layers/utils/quantize.py)
-  (per-call query projection) and `OneBitKNN._score_full`'s xor + popcount
-  + reduce body. Both follow the same dispatch pattern as the bloom query
-  build — CUDA-only, eager fallback on CPU. The `_score_full` win is
-  driven by Inductor fusing the 6-op SWAR popcount chain into one elementwise
-  pass over the `[B, N, W]` xor tensor; the projection win is launch-overhead
-  elision.
+  (`oporp_1bit_match_topk`) — only the addressing changes. The torch
+  backend runs the eager xor + popcount + reduce chain over the same
+  packed bits and produces bit-equal scores.
 
 ## SilverTorch
 
@@ -194,8 +193,8 @@ pure Triton). Full per-kernel detail in [kernels.md](kernels.md).
 
 | subtree                                                                                              | kernel                                                                                                                                | consumer                          |
 |------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------|
-| [`linr/`](../../retrieve/src/retrieve/kernels/triton/linr/)                                             | [`fused_masked_knn_topk`](../../retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py) — gather + dot over `positive_indices` | `PrefilterKNNTriton` (masked path) |
-| [`linr/`](../../retrieve/src/retrieve/kernels/triton/linr/)                                             | [`oporp_1bit_match_topk`](../../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py) — XOR + popcount, all `OneBitKNN` paths | `OneBitKNNTriton`                 |
+| [`linr/`](../../retrieve/src/retrieve/kernels/triton/linr/)                                             | [`fused_masked_knn_topk`](../../retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py) — gather + dot over `positive_indices` | `PrefilterKNN(backend="triton")` (masked path) |
+| [`linr/`](../../retrieve/src/retrieve/kernels/triton/linr/)                                             | [`oporp_1bit_match_topk`](../../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py) — XOR + popcount, all `OneBitKNN` paths | `OneBitKNN(backend="triton")`     |
 | [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/)                                       | [`clause_compact`](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py) — fused clause eval + stream compaction          | `ExactAttributeFilter.evaluate_indices` |
 | [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/)                                       | [`clause_mask`](../../retrieve/src/retrieve/kernels/triton/filters/clause_mask.py) — fused clause eval emitting `[B, N]` bool             | `ExactAttributeFilter.evaluate_mask` |
 | [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/)                                       | [`bloom_compact`](../../retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py) — fused subset-test + stream compaction            | `BloomFilter.evaluate_indices`    |
@@ -215,14 +214,14 @@ gate. Performance characterization (latency, memory, recall sweeps) lives in
 
 ## Module layout
 
-- LiNR variants ship one file per class, paired with a `_triton.py`
-  sibling that subclasses the torch reference. The torch references live
-  in [`similarity_masking.py`](../../retrieve/src/retrieve/layers/linr/similarity_masking.py),
+- LiNR variants ship one file per class — no separate `_triton.py`
+  siblings. Each module
+  ([`similarity_masking.py`](../../retrieve/src/retrieve/layers/linr/similarity_masking.py),
   [`prefilter_knn.py`](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py),
-  and [`one_bit_knn.py`](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py);
-  the Triton subclasses mirror them as `*_triton.py`. Construct a module
-  directly (`SimilarityMaskingTriton(k=...)` etc.) — there's no version-
-  numbered builder; the v1/v2/v3 naming lives only at the evaluation-algo
+  [`one_bit_knn.py`](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py))
+  takes a `backend="torch" | "triton"` flag in `__init__`. Construct
+  directly (`OneBitKNN(k=..., backend="triton")`); there's no version-
+  numbered builder, and v1/v2/v3 naming lives only at the evaluation-algo
   layer.
 - The SilverTorch builder (`build_silvertorch`) lives next to its class
   in [`layers/silvertorch/`](../../retrieve/src/retrieve/layers/silvertorch/).

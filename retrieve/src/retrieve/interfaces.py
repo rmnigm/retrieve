@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import abc
+from typing import Literal
 
 from torch import Tensor, nn
+
+Backend = Literal["torch", "triton"]
 
 
 class FilterModule(nn.Module, abc.ABC):

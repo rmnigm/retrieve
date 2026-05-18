@@ -5,7 +5,7 @@ from __future__ import annotations
 import torch
 
 from retrieve.layers.filters import BloomFilter, ExactAttributeFilter, combine_masks
-from retrieve.layers.linr.one_bit_knn_triton import OneBitKNNTriton
+from retrieve.layers.linr.one_bit_knn import OneBitKNN
 from retrieve.layers.utils.compact import compact_mask
 from tests.conftest import make_attrs, make_index, make_query, make_query_attrs
 
@@ -165,7 +165,7 @@ def test_one_bit_knn_with_combined_filter_mask():
     # Combined mask must be the clause mask exactly (bloom is a superset).
     assert torch.equal(mask, clause_mask)
 
-    knn = OneBitKNNTriton(k=k).to("cuda")
+    knn = OneBitKNN(k=k, backend="triton").to("cuda")
     knn.register_index(embs)
     ids, _ = knn(query, mask=mask)
     assert ids.shape == (b, k)

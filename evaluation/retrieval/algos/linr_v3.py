@@ -1,8 +1,9 @@
 """LiNR V3 → V2 cascade: 1-bit Hamming pre-filter, fp32 rerank.
 
-Stage 1 (LiNR §4.3, Fig knn-v3): ``OneBitKNNTriton`` produces a
-top-``candidate_pool`` list at 1-bit precision. Stage 2:
-``PrefilterKNNTriton`` rescores those candidates at full precision.
+Stage 1 (LiNR §4.3, Fig knn-v3): ``OneBitKNN(backend="triton")``
+produces a top-``candidate_pool`` list at 1-bit precision. Stage 2:
+``PrefilterKNN(backend="triton")`` rescores those candidates at full
+precision.
 The dense ``SimilarityMasking`` path is intentionally absent as stage-2 —
 its full matmul does the same work as ``triton_knn`` alone, so a 1-bit
 prefilter into a dense rescore is strictly slower than the unfiltered
@@ -14,7 +15,7 @@ from __future__ import annotations
 import torch.nn as nn
 from torch import Tensor
 
-from retrieve import OneBitKNNTriton, PrefilterKNNTriton
+from retrieve import OneBitKNN, PrefilterKNN
 from retrieve.interfaces import FilterModule
 
 from .filter import make_mask
@@ -33,9 +34,9 @@ class LinrV3Algo:
         filter_mod: FilterModule | None = None,
     ) -> None:
         device = item_embs.device
-        self.stage1 = OneBitKNNTriton(k=candidate_pool, seed=v3_seed).to(device)
+        self.stage1 = OneBitKNN(k=candidate_pool, seed=v3_seed, backend="triton").to(device)
         self.stage1.register_index(item_embs)
-        self.stage2 = PrefilterKNNTriton(k=k).to(device)
+        self.stage2 = PrefilterKNN(k=k, backend="triton").to(device)
         self.stage2.register_index(item_embs)
         self.filter_mod = filter_mod
         self.modules: list[nn.Module] = [self.stage1, self.stage2]

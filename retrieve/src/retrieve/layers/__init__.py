@@ -6,11 +6,8 @@ from retrieve.layers.filters import (
 )
 from retrieve.layers.linr import (
     OneBitKNN,
-    OneBitKNNTriton,
     PrefilterKNN,
-    PrefilterKNNTriton,
     SimilarityMasking,
-    SimilarityMaskingTriton,
 )
 from retrieve.layers.silvertorch import (
     SilverTorch,
@@ -32,12 +29,9 @@ __all__ = [
     "FullScanKNN",
     "KMeansTorch",
     "OneBitKNN",
-    "OneBitKNNTriton",
     "PrefilterKNN",
-    "PrefilterKNNTriton",
     "SilverTorch",
     "SimilarityMasking",
-    "SimilarityMaskingTriton",
     "build_silvertorch",
     "combine_indices",
     "combine_masks",

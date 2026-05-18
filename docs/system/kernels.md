@@ -73,9 +73,9 @@ An earlier `fused_matmul_topk` Triton kernel sat in this slot, but it only
 fused the matmul: it materialized the full `[B, N]` score buffer to global
 memory and then called the same host-side `torch.topk`, so its memory
 traffic and selection cost matched cuBLAS + CUB exactly. With no fusion
-benefit, the kernel was removed; `SimilarityMaskingTriton` is retained as a
-backend-dispatch alias that runs the same pure-torch code as
-`SimilarityMasking`.
+benefit, the kernel was removed; `SimilarityMasking` accepts the
+`backend=` flag for API symmetry but both values dispatch to this same
+pure-torch path.
 
 ## `fused_masked_knn_topk` — PrefilterKNN sparse path
 
@@ -372,12 +372,16 @@ to one of the three kernels above. The dispatch is **design-time** —
 the variant that matches your expected mask shape, not the one that benches
 best on a given input.
 
+Each LinR class accepts `backend="torch" | "triton"` on `__init__`; the
+table below describes the `backend="triton"` path. With `backend="torch"`
+each module runs the same op chain in pure torch (no kernels), eager.
+
 | layer                       | path         | kernel(s) called                                  |
 |-----------------------------|--------------|---------------------------------------------------|
-| [`SimilarityMaskingTriton`](../../retrieve/src/retrieve/layers/linr/similarity_masking_triton.py) | always dense | none — pure torch `(q @ x.T).masked_fill(...).topk` |
-| [`PrefilterKNNTriton`](../../retrieve/src/retrieve/layers/linr/prefilter_knn_triton.py)         | masked       | `compact_mask` → `fused_masked_knn_topk`          |
+| [`SimilarityMasking`](../../retrieve/src/retrieve/layers/linr/similarity_masking.py) | always dense | none — pure torch `(q @ x.T).masked_fill(...).topk` |
+| [`PrefilterKNN`](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py)         | masked       | `compact_mask` → `fused_masked_knn_topk`          |
 |                                                                | unmasked     | none — pure torch dense path (nothing to pre-filter) |
-| [`OneBitKNNTriton`](../../retrieve/src/retrieve/layers/linr/one_bit_knn_triton.py)             | full         | `oporp_1bit_match_topk` (HAS_INDICES=False)       |
+| [`OneBitKNN`](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py)             | full         | `oporp_1bit_match_topk` (HAS_INDICES=False)       |
 |                                                                | masked       | `compact_mask` → `oporp_1bit_match_topk` (HAS_INDICES=True) |
 |                                                                | candidates   | `oporp_1bit_match_topk` (HAS_INDICES=True)        |
 

@@ -121,7 +121,8 @@ position-equality assertion for fp32 score paths.
 - **Framework**: vanilla `pytest`. No `hypothesis`, no `unittest`.
 - **Parametrize**: `@pytest.mark.parametrize` for shape and pass-rate
   matrices; class-level parametrize for backend cross-product
-  (`@pytest.mark.parametrize("cls", [SimilarityMasking, SimilarityMaskingTriton])`).
+  (`@pytest.mark.parametrize("backend", ["torch", "triton"])`, then
+  construct `Cls(..., backend=backend)`).
 - **No marks**: there is no `slow`, `gpu`, or `bench` marker. Every
   test is GPU-bound and runs in CI; the CUDA skip gate handles
   no-GPU hosts globally.
@@ -257,7 +258,7 @@ INT8 + OPORP + popcount.
   `(~matched).all(dim=-1)`.
 - `N = 1` corner.
 - `evaluate_subset` with `[B, 0]` candidates returns `[B, 0]`.
-- `OneBitKNNTriton(mask=combine_masks(clause_mask, bloom_mask))`
+- `OneBitKNN(backend="triton", mask=combine_masks(clause_mask, bloom_mask))`
   cross-compat smoke (combined mask should equal clause mask, since
   bloom is a strict superset).
 

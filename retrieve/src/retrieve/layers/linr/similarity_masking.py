@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
-from retrieve.interfaces import RetrievalModule
+from retrieve.interfaces import Backend, RetrievalModule
 
 
 class SimilarityMasking(RetrievalModule):
@@ -11,16 +11,21 @@ class SimilarityMasking(RetrievalModule):
 
     Computes the full ``query @ item_embs.T`` similarity matrix, applies an
     optional boolean mask via ``masked_fill(-inf)``, and selects the top-K.
-    ``SimilarityMaskingTriton`` exists as a backend-dispatch alias but runs this
-    same code — dense matmul + top-K has no real fusion benefit over
-    cuBLAS + CUB. See docs/system/architecture.md.
+
+    The ``backend=`` flag is accepted for API symmetry with the other
+    retrieval modules but has no effect here: the original
+    ``fused_matmul_topk`` Triton kernel was removed because cuBLAS + CUB
+    already deliver the same memory traffic and selection cost. Both
+    ``backend="torch"`` and ``backend="triton"`` run this code.
+    See ``docs/system/kernels.md`` for the historical rationale.
     """
 
     item_embs_t: Tensor
 
-    def __init__(self, k: int) -> None:
+    def __init__(self, k: int, backend: Backend = "triton") -> None:
         super().__init__()
         self.k = k
+        self.backend = backend
 
     def register_index(self, item_embs: Tensor) -> None:
         # Pre-transpose to a contiguous D×N buffer so cuBLAS sees the same

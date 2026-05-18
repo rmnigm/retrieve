@@ -3,7 +3,8 @@
 Covers two registered names: ``linr_v1_filter_mask`` (canonical for
 filter cells) and ``triton_knn`` (historic alias used by yambda
 configs). Same implementation; the alias exists so both YAML lineages
-keep working without a rename. Backed by ``SimilarityMaskingTriton``.
+keep working without a rename. Backed by ``SimilarityMasking`` with
+``backend="triton"``.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from __future__ import annotations
 import torch.nn as nn
 from torch import Tensor
 
-from retrieve import SimilarityMaskingTriton
+from retrieve import SimilarityMasking
 from retrieve.interfaces import FilterModule
 
 from .filter import make_mask
@@ -27,7 +28,7 @@ class LinrV1Algo:
         *,
         filter_mod: FilterModule | None = None,
     ) -> None:
-        self.idx = SimilarityMaskingTriton(k=k).to(item_embs.device)
+        self.idx = SimilarityMasking(k=k, backend="triton").to(item_embs.device)
         self.idx.register_index(item_embs)
         self.filter_mod = filter_mod
         self.modules: list[nn.Module] = [self.idx]

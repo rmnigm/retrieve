@@ -1,4 +1,4 @@
-from retrieve.interfaces import FilterModule, RetrievalModule, ScorerModule
+from retrieve.interfaces import Backend, FilterModule, RetrievalModule, ScorerModule
 from retrieve.layers import (
     BloomFilter,
     DotProductScorer,
@@ -6,12 +6,9 @@ from retrieve.layers import (
     FullScanKNN,
     KMeansTorch,
     OneBitKNN,
-    OneBitKNNTriton,
     PrefilterKNN,
-    PrefilterKNNTriton,
     SilverTorch,
     SimilarityMasking,
-    SimilarityMaskingTriton,
     build_silvertorch,
     combine_indices,
     combine_masks,
@@ -21,6 +18,7 @@ from retrieve.layers import (
 )
 
 __all__ = [
+    "Backend",
     "BloomFilter",
     "DotProductScorer",
     "ExactAttributeFilter",
@@ -28,14 +26,11 @@ __all__ = [
     "FullScanKNN",
     "KMeansTorch",
     "OneBitKNN",
-    "OneBitKNNTriton",
     "PrefilterKNN",
-    "PrefilterKNNTriton",
     "RetrievalModule",
     "ScorerModule",
     "SilverTorch",
     "SimilarityMasking",
-    "SimilarityMaskingTriton",
     "build_silvertorch",
     "combine_indices",
     "combine_masks",
