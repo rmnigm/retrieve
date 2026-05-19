@@ -11,9 +11,7 @@ This refresh:
 - Targets the current module set (single class per file) with `upsert` / `delete` added to that class directly.
 - Includes the filter side (`BloomFilter`, `ExactAttributeFilter`) so V2 end-to-end can be live-updated.
 - Stays export-clean (no `.item()`, no `.cpu()`, no `Optional[Tensor]` in upsert/delete bodies) without depending on the export refactor.
-- Defers `.pt2` export entries (no `build_export.py` exists today).
-
-> **Scope note (2026-05-19):** silvertorch is out of scope across all plans (see [00-roadmap.md](00-roadmap.md)). The original plan deferred SilverTorch live updates to a separate plan; that plan will not be written. See [../plans-silvertorch-backup/live-update-api.md](../plans-silvertorch-backup/live-update-api.md) for the original deferral notes.
+- Defers SilverTorch (kmeans + per-cluster overcommit is a separate plan) and `.pt2` export entries (no `build_export.py` exists today).
 
 ## Approach
 
@@ -147,7 +145,7 @@ Capacity-aware register_index over-allocates as `[capacity, W]` filled with zero
 
 ### Out of scope
 
-- **SilverTorch IVF live updates** — out of scope; silvertorch deprecated. See [../plans-silvertorch-backup/live-update-api.md](../plans-silvertorch-backup/live-update-api.md) for the original deferral note.
+- **SilverTorch IVF live updates** — [silvertorch/main.py register_index](../../retrieve/src/retrieve/layers/silvertorch/main.py#L68) runs kmeans + builds `padded_cluster_items`; live update there needs per-cluster overcommit and route-by-centroid logic. Separate plan.
 - **`torch.export` / `.pt2` packaging.** No `build_export.py` exists today. The upsert/delete bodies stay export-clean (no `.item()`, no `.cpu()`, no `Optional[Tensor]`) so the future export refactor composes cleanly.
 - **GPU-side ID→row hash table.** Application-layer concern; module APIs take row indices.
 - **Removing the `int(counts.max().item()) == 0` short-circuit at [one_bit_knn.py:156](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py#L156).** Already on the eager path today; not regressed; export refactor's job.
@@ -212,7 +210,7 @@ grep -nE "\.item\(\)|\.cpu\(\)|Optional\[Tensor\]" \
 
 # 4. End-to-end recall regression (no upsert traffic).
 cd /workspace/retrieve/evaluation && uv run evaluate --config conf/<yaml> \
-    --algorithms linr_v3_then_v2 torch_fullscan triton_knn
+    --algorithms linr_v3_then_v2 silvertorch torch_fullscan triton_knn
 
 # 5. Manual smoke:
 #   m = OneBitKNN(k=200, backend="triton")

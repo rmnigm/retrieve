@@ -1,14 +1,12 @@
 # Kernel optimization research — proposals across the Triton tree
 
-> **Scope note (2026-05-19):** silvertorch is out of scope; see [00-roadmap.md](00-roadmap.md). Original research surveyed 7 kernels; items below have been trimmed to the 5 in-scope kernels. Silvertorch-only kernels (`bloom_match`, `codesigned_probe_score`) and silvertorch-only proposals (INT8 IVF tensor-core, phase-1 centroid topk) are preserved in [../plans-silvertorch-backup/kernel-optimization-research.md](../plans-silvertorch-backup/kernel-optimization-research.md).
-
 ## Context
 
 User asked for a research-only pass over every Triton kernel in `retrieve/`,
 with a specific question on whether the deferred `mask_compact` plan
 ([docs/plans/mask-compact-kernel.md](/workspace/retrieve/docs/plans/mask-compact-kernel.md))
 should ship now. No benches were run; arxiv was consulted for prior art on
-GPU stream compaction, batched top-K, and 1-bit Hamming retrieval.
+GPU stream compaction, batched top-K, INT8 IVF, and 1-bit Hamming retrieval.
 
 Goal: a prioritized list of optimizations with cost/benefit notes that the
 user can pick from, plus a clear go/no-go on `mask_compact`.
@@ -22,6 +20,8 @@ user can pick from, plus a clear go/no-go on `mask_compact`.
 | `bloom_compact` | [filters/bloom_compact.py](/workspace/retrieve/retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py) | host-sync + scratch-buffer leverage |
 | `clause_compact` | [filters/clause_compact.py](/workspace/retrieve/retrieve/src/retrieve/kernels/triton/filters/clause_compact.py) | same as bloom_compact |
 | `clause_mask` | [filters/clause_mask.py](/workspace/retrieve/retrieve/src/retrieve/kernels/triton/filters/clause_mask.py) | autotune candidate (low priority) |
+| `bloom_match` | [silvertorch/bloom_match.py](/workspace/retrieve/retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py) | already at the minimum surface |
+| `codesigned_probe_score` (INT8 + fp32) | [silvertorch/codesigned_probe_score.py](/workspace/retrieve/retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py) | nothing left structurally |
 
 ## Headline decision: **defer `mask_compact`**
 
@@ -140,10 +140,10 @@ a. [`oporp_1bit_match_topk.py:155-157`](/workspace/retrieve/retrieve/src/retriev
 b. The `torch.cat`-to-pad tail in
    [oporp_1bit_match_topk.py:204-224](/workspace/retrieve/retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py#L204-L224)
    and [fused_masked_knn_topk.py:178-193](/workspace/retrieve/retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py#L178-L193)
-   does 4 allocations under `P < K`. Apply a 2-allocation pre-allocate-and-slice-assign
-   pattern: pre-allocate `[B, K]` outputs, slice-assign the kernel result, leave
-   the tail as `-1` / `-inf`. The two host wrappers share the same shape; lift
-   the helper rather than duplicating.
+   does 4 allocations under `P < K`. Port the pre-allocate-and-slice-assign
+   pattern from
+   [codesigned_probe_score.py:354-358](/workspace/retrieve/retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py#L354-L358)
+   (2 allocations).
 
 c. [`bloom_compact.py:133`](/workspace/retrieve/retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py#L133)
    and [`clause_compact.py:159`](/workspace/retrieve/retrieve/src/retrieve/kernels/triton/filters/clause_compact.py#L159):
@@ -162,14 +162,12 @@ d. Stale comment cleanup: [fused_masked_knn_topk.py:170-171](/workspace/retrieve
 
 ### 5. Adopt dynamic `BLOCK_N` in `bloom_compact` / `clause_compact` for small-N callers — **TRIVIAL**
 
-The two compact kernels use a fixed `BLOCK_N=256`, which wastes a tile when
-`combine_indices`
+[`bloom_match.py:68`](/workspace/retrieve/retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py#L68)
+uses `block_n = 128 if n >= 128 else next_power_of_2(n)`. The two compact
+kernels use a fixed 256, which wastes a tile when `combine_indices`
 ([__init__.py:50-68](/workspace/retrieve/retrieve/src/retrieve/layers/filters/__init__.py#L50-L68))
-runs subsequent filters with small `P`. The simplest fix is the
-`block_n = 128 if n >= 128 else next_power_of_2(n)` ladder applied host-side.
-Atomic-add hazard remains, so no autotune — just dynamic sizing on the host side.
-After [01-autotune-separation.md](01-autotune-separation.md) this becomes a
-REGISTRY-row widening instead.
+runs subsequent filters with small `P`. Atomic-add hazard remains, so no
+autotune — just dynamic sizing on the host side.
 
 ### 6. Autotune `clause_mask` — **LOW priority**
 
@@ -198,10 +196,14 @@ fired) so a future reader doesn't re-evaluate from scratch.
   The doc at
   [docs/system/kernels.md §"Top-K selection is not in-kernel"](/workspace/retrieve/docs/system/kernels.md)
   already records this trade-off explicitly; the analysis still holds.
-- **Silvertorch-only proposals** (phase-1 centroid topk Triton port, INT8 `tl.dot`
-  tensor-core for `codesigned_probe_score`). Silvertorch is out of scope; see
-  [../plans-silvertorch-backup/kernel-optimization-research.md](../plans-silvertorch-backup/kernel-optimization-research.md)
-  for the prior write-up.
+- **Migrate phase-1 centroid topk into a Triton kernel.**
+  [`silvertorch/main.py:151-152`](/workspace/retrieve/retrieve/src/retrieve/layers/silvertorch/main.py)
+  is `B × n_lists` matmul + topk. cuBLAS + CUB are exactly the right
+  tools; a Triton port adds maintenance with no realistic upside.
+- **Tensor-core (`tl.dot` with int8) for `codesigned_probe_score`.**
+  The scoring is `[P, D] × [D]` per query — a single column, no benefit
+  from tensor cores. Considered tiling B inside the kernel; bookkeeping
+  cost dominates the win at our typical `B ≤ 64`.
 - **CPU `mask_compact` primitive.** Same rationale as the deferred plan.
 - **Subsume `clause_compact` / `bloom_compact` via `evaluate_mask` +
   `mask_compact`.** Re-introduces the `[B, N]` bool intermediate the
@@ -237,7 +239,7 @@ For each change actually picked up:
    risk, immediate sync removal.
 3. Item 4a + 4b + 4d (allocator hygiene) — mechanical pass across two
    files; low risk.
-4. Item 5 (dynamic `BLOCK_N` in compacts) — `block_n = 128 if n >= 128 else next_power_of_2(n)` host-side ladder.
+4. Item 5 (dynamic `BLOCK_N` in compacts) — copy `bloom_match` pattern.
 5. Item 3 (PTX dump for popcount; swap if libdevice exposes `popcll`).
 6. Item 2 (kill the host sync end-to-end). Largest design change; do
    last so it can build on the cleaned-up wrappers from steps 2–4.
