@@ -183,6 +183,13 @@ def run_filter_kind(
                 backends=backends,
             )
         )
+        # Release dynamo compile cache + CUDA-graph private pools between
+        # sweeps. Without this, graphs from earlier sweeps stay pinned and
+        # large-N configs OOM (observed on arxiv/d256). Costs ~30-60s
+        # recompile at the start of the next sweep.
+        torch._dynamo.reset()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     if cfg.filters is not None:
         del filter_mods, oracle_filter

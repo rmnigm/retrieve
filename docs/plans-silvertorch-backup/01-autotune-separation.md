@@ -2,11 +2,9 @@
 
 > See [00-roadmap.md](00-roadmap.md). This is the first of three main-thread stages.
 
-> **Scope note (2026-05-19):** silvertorch is out of scope; see [00-roadmap.md](00-roadmap.md). The original step ordering had **7 kernels**; steps **4 (`bloom_match`)** and **7 (`codesigned_probe_score`)** are silvertorch-only and have been replaced with one-line stubs below. Step numbers are preserved so cross-doc references stay stable. Active kernels: 5.
-
 ## Context
 
-Every in-scope Triton kernel in [retrieve/src/retrieve/kernels/triton/](../../retrieve/src/retrieve/kernels/triton/) makes its tuning decisions at the host-wrapper call site — two of them via `@triton.autotune` (`fused_masked_knn_topk`, `oporp_1bit_match_topk`), the rest via module-level `_BLOCK_N` / `_NUM_WARPS` constants tuned by hand. The autotune key on `fused_masked_knn_topk` is stabilized by a `_bucket_p` ladder so the cache doesn't compile-per-shape; `oporp_1bit_match_topk` includes an Optional-presence bool (`HAS_INDICES`) in its autotune key.
+Every Triton kernel in [retrieve/src/retrieve/kernels/triton/](../../retrieve/src/retrieve/kernels/triton/) makes its tuning decisions at the host-wrapper call site — three of them via `@triton.autotune` (`codesigned_probe_score`, `fused_masked_knn_topk`, `oporp_1bit_match_topk`), one via a shape-dependent `BLOCK_N` if-ladder (`bloom_match`), the rest via module-level `_BLOCK_N` / `_NUM_WARPS` constants tuned by hand. The autotune key on `fused_masked_knn_topk` is stabilized by a `_bucket_p` ladder so the cache doesn't compile-per-shape; `oporp_1bit_match_topk` and `codesigned_probe_score` include Optional-presence bools (`HAS_INDICES`, `HAS_QB`) in their autotune keys.
 
 This sprawl works fine for eager execution but blocks the next two stages:
 
@@ -55,7 +53,7 @@ The kernel's `@triton.jit` body stays exactly as-is. The change is purely at the
 
 ### Layer-side plumbing
 
-Each consumer layer (`ExactAttributeFilter`, `BloomFilter`, `OneBitKNN`, `PrefilterKNN`) accepts an optional `<kernel>_config: <Kernel>Config | None = None` in `__init__`, resolves via `lookup(device, problem_hint)` at `register_index` time (when `N` and device are both concrete), and stores the resolved config as a plain Python attribute. The host wrapper takes a `config: <Kernel>Config` arg and pulls `block_n` / `num_warps` / `num_stages` out of it. No autotune at runtime.
+Each consumer layer (`ExactAttributeFilter`, `BloomFilter`, `SilverTorch`, `OneBitKNN`, `PrefilterKNN`) accepts an optional `<kernel>_config: <Kernel>Config | None = None` in `__init__`, resolves via `lookup(device, problem_hint)` at `register_index` time (when `N` and device are both concrete), and stores the resolved config as a plain Python attribute. The host wrapper takes a `config: <Kernel>Config` arg and pulls `block_n` / `num_warps` / `num_stages` out of it. No autotune at runtime.
 
 ### `tune-kernels` script
 
@@ -81,9 +79,9 @@ Order: easy → hard. Each kernel ships as its own commit (or PR), measured agai
 
 [kernels/triton/filters/bloom_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py). Same shape and same atomic-add constraint as `clause_compact`. Same recipe.
 
-### 4. `bloom_match` — (removed — silvertorch out of scope)
+### 4. `bloom_match` — medium
 
-Originally medium. See [../plans-silvertorch-backup/01-autotune-separation.md](../plans-silvertorch-backup/01-autotune-separation.md) for the prior write-up.
+[kernels/triton/silvertorch/bloom_match.py](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py). The `block_n = 128 if n >= 128 else triton.next_power_of_2(int(n))` ladder ([line 68](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py#L68)) becomes 3-4 REGISTRY rows keyed by `(arch, "n_<bucket>")`. Layer-side: `BloomFilter` resolves `lookup(device, n)` once in `register_index` (when `N` is concrete) and stores. The if-ladder vanishes from the host wrapper.
 
 ### 5. `fused_masked_knn_topk` — medium
 
@@ -97,9 +95,11 @@ Caller side: `PrefilterKNN.register_index` (in `prefilter_knn.py`) gets the kern
 
 Note: the cleaner long-term shape is to split the no-indices and has-indices paths into separate kernels (or to wait until stage 2 collapses the Optional via a layer-side `mode` flag and the dummy-tensor trick). For stage 1, just expand the REGISTRY key by one bool dimension. Don't restructure the kernel.
 
-### 7. `codesigned_probe_score` — (removed — silvertorch out of scope)
+### 7. `codesigned_probe_score` — hard
 
-Originally hard. See [../plans-silvertorch-backup/01-autotune-separation.md](../plans-silvertorch-backup/01-autotune-separation.md) for the prior write-up.
+[kernels/triton/silvertorch/codesigned_probe_score.py](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py). Strip autotune ([line 42](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py#L42)). Same `HAS_QB` constexpr issue as `oporp_1bit_match_topk`'s `HAS_INDICES` — extend REGISTRY key by one bool. `problem_hint = P (n_probe * max_cluster_size)`.
+
+The kernel's two Optional inputs (`query_bits`, `bloom_sigs`) still bind to dummy tensors at the host wrapper ([lines 187-190](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py#L187-L190)). Don't move the dummy-bind into the layer yet — that's stage 2's job.
 
 ## Critical files
 
@@ -108,15 +108,18 @@ Originally hard. See [../plans-silvertorch-backup/01-autotune-separation.md](../
 | Per-kernel | [retrieve/src/retrieve/kernels/triton/filters/clause_mask.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_mask.py) | Add `ClauseMaskConfig` + REGISTRY + lookup. Host wrapper takes `config`. |
 | Per-kernel | [retrieve/src/retrieve/kernels/triton/filters/clause_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py) | Same. Document atomic-add ⇒ no autotune. |
 | Per-kernel | [retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py) | Same. |
+| Per-kernel | [retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py) | Replace shape-dependent BLOCK_N ladder with REGISTRY lookup at register_index time. |
 | Per-kernel | [retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py](../../retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py) | Strip autotune; migrate `_P_BUCKETS` ladder to REGISTRY key; drop `do_not_specialize`. |
 | Per-kernel | [retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py](../../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py) | Strip autotune; REGISTRY key includes `has_indices: bool`. |
+| Per-kernel | [retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py) | Strip autotune; REGISTRY key includes `has_qb: bool`. |
 | Layer | [retrieve/src/retrieve/layers/filters/exact_attribute.py](../../retrieve/src/retrieve/layers/filters/exact_attribute.py) | `__init__` accepts optional configs; resolve in `register_index`. |
-| Layer | [retrieve/src/retrieve/layers/filters/bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py) | Same; resolves `bloom_compact` config in `register_index`. |
+| Layer | [retrieve/src/retrieve/layers/filters/bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py) | Same. Bucket lookup for `bloom_match` lives here, not in the kernel host. |
+| Layer | [retrieve/src/retrieve/layers/silvertorch/main.py](../../retrieve/src/retrieve/layers/silvertorch/main.py) | Same; resolves `codesigned_probe_score` config in `register_index`. |
 | Layer | [retrieve/src/retrieve/layers/linr/one_bit_knn.py](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py) | Same; resolves `oporp_1bit_match_topk` config. |
 | Layer | [retrieve/src/retrieve/layers/linr/prefilter_knn.py](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py) | Same; resolves `fused_masked_knn_topk` config. |
 | New | [evaluation/scripts/tune_kernels.py](../../evaluation/scripts/tune_kernels.py) | Click CLI; `triton.testing.do_bench`; one `tune_<kernel>` per kernel. |
 | New | [evaluation/pyproject.toml](../../evaluation/pyproject.toml) | Add `tune-kernels` script entry; `scripts` to packages. |
-| Tests | [retrieve/tests/parity/test_*.py](../../retrieve/tests/parity/) | All in-scope parity tests update kernel-call sites to pass `config=DEFAULT_CONFIG` (or a deliberately-different config to check the plumbing). |
+| Tests | [retrieve/tests/parity/test_*.py](../../retrieve/tests/parity/) | All seven parity tests update kernel-call sites to pass `config=DEFAULT_CONFIG` (or a deliberately-different config to check the plumbing). |
 | Docs | [docs/system/kernels.md](../../docs/system/kernels.md) | Document the per-kernel `Config` + REGISTRY convention; note the `tune-kernels` workflow. |
 
 ## What this stage explicitly does NOT do
@@ -148,17 +151,18 @@ grep -n "@triton.autotune" retrieve/src/retrieve/kernels/triton/<path>/<file>.py
 # Expect zero.
 ```
 
-End-of-stage check after all in-scope kernels:
+End-of-stage check after all seven kernels:
 
 ```bash
-# Scoped to in-scope kernel dirs (filters/, linr/); silvertorch/ is out of scope.
-grep -rn "@triton.autotune" retrieve/src/retrieve/kernels/triton/filters/ retrieve/src/retrieve/kernels/triton/linr/   # zero hits
-grep -rn "do_not_specialize" retrieve/src/retrieve/kernels/triton/filters/ retrieve/src/retrieve/kernels/triton/linr/  # zero hits
+grep -rn "@triton.autotune" retrieve/src/retrieve/kernels/triton/   # zero hits
+grep -rn "next_power_of_2" retrieve/src/retrieve/kernels/triton/    # zero hits (the bloom_match shape branch is gone)
+grep -rn "do_not_specialize" retrieve/src/retrieve/kernels/triton/  # zero hits
 ```
 
 Also: confirm `tune-kernels` runs cleanly on the local arch and produces REGISTRY-pasteable output for each kernel.
 
 ## Risks
 
-- **`HAS_INDICES` REGISTRY blowup**: the Optional-bool dimension on `oporp_1bit_match_topk` doubles its row count. Manageable. If stage 2 collapses the Optional via a mode flag, the rows collapse back.
+- **`bloom_match` bucket policy too coarse**: a 3-4 bucket REGISTRY for BLOCK_N may underperform the current shape-tight `next_power_of_2(n)` selection on workloads with `n < 16`. Likely irrelevant in practice (production `n` is in the millions), but the tune script should include sub-128 shapes to verify.
+- **`HAS_INDICES` / `HAS_QB` REGISTRY blowup**: each Optional-bool dimension doubles the row count. With two booleans across two kernels that's 4× rows, manageable. If stage 2 collapses the Optionals via mode flags, the rows collapse back.
 - **Eager autotune was masking a config bug**: if removing autotune surfaces a kernel that was silently relying on the autotuner finding a working config (e.g., a config the hand-written REGISTRY initially misses), parity tests catch it but stack traces may be cryptic. Mitigation: ship the per-kernel changes in dependency order; verify each independently.

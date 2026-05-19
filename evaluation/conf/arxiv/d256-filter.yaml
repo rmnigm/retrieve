@@ -13,7 +13,7 @@ _defaults: &defaults
     - linr_v1_filter_mask
     - linr_v2              # exact filtered top-K — recall=1.0 baseline; speed/memory headline
     - linr_v3
-    - silvertorch          # auto-skipped on filter_kind=clause; runs on bloom sweeps only
+    # silvertorch dropped per user direction (2026-05-19)
 
   # Backends to sweep — both wrapped with torch.compile(mode="reduce-overhead")
   # (see the Algo classes for the call site).

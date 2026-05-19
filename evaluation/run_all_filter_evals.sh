@@ -39,7 +39,7 @@ CONFIGS=(
     "conf/goodreads/d64-filter.yaml"
     "conf/goodreads/d128-filter.yaml"
     "conf/goodreads/d256-filter.yaml"
-    "conf/deep_sweeps/arxiv-d128-silvertorch.yaml"
+    # "conf/deep_sweeps/arxiv-d128-silvertorch.yaml"  # silvertorch dropped 2026-05-19
     "conf/deep_sweeps/goodreads-d128-linr_v3.yaml"
 )
 

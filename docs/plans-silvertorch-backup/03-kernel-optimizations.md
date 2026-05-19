@@ -49,7 +49,7 @@ Three sub-items, all mechanical.
 
 #### 2b. Replace `cat`-to-pad with pre-allocate-and-slice
 
-[oporp_1bit_match_topk.py:204-224](../../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py#L204-L224) and [fused_masked_knn_topk.py:178-193](../../retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py#L178-L193) do 4 allocations under `P < K`. Apply a 2-allocation pattern: pre-allocate `[B, K]` outputs, slice-assign the kernel result, leave the tail as `-1` / `-inf`. The two host wrappers share the same shape; lift the helper rather than duplicating.
+[oporp_1bit_match_topk.py:204-224](../../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py#L204-L224) and [fused_masked_knn_topk.py:178-193](../../retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py#L178-L193) do 4 allocations under `P < K`. Port the 2-allocation pattern from [codesigned_probe_score.py:354-358](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py#L354-L358) (pre-allocate `[B, K]` outputs, slice-assign the kernel result, leave the tail as `-1` / `-inf`).
 
 #### 2c. Stale-comment cleanup
 
@@ -69,10 +69,11 @@ If both unmet, annotate the doc as "subsumed by 02-triton-op-migration.md" with 
 ## Out of scope (don't bundle here)
 
 - **In-kernel top-K to eliminate the `[B, n]` HBM round-trip.** `kernel-optimization-research.md` "Explicit non-recommendations" §1 covers the rationale: at our K range (10-200) CUB's `torch.topk` is near-HBM-bandwidth; the realistic saving is one read of a `[B, n]` fp32 buffer, not the full round-trip. The trade-off doc in [docs/system/kernels.md §"Top-K selection is not in-kernel"](../system/kernels.md) still holds.
+- **Tensor-core (`tl.dot` with int8) for `codesigned_probe_score`.** Scoring is `[P, D] × [D]` per query — single column, no tensor-core benefit at our `B ≤ 64`.
+- **Migrating phase-1 centroid topk into a Triton kernel.** cuBLAS + CUB are the right tools.
 - **CPU `mask_compact` primitive.** Not the target audience.
 - **Subsuming `clause_compact` / `bloom_compact` via `evaluate_mask` + `mask_compact`.** Re-introduces the `[B, N]` bool intermediate that the fused kernels exist to avoid.
-- **Anything in [live-update-api.md](live-update-api.md), [torch-export-refactor.md](torch-export-refactor.md).** Separate concerns.
-- **Silvertorch kernel optimizations (`codesigned_probe_score` tensor-core, phase-1 centroid topk).** Silvertorch is out of scope; see [../plans-silvertorch-backup/03-kernel-optimizations.md](../plans-silvertorch-backup/03-kernel-optimizations.md) for the prior write-up.
+- **Anything in [live-update-api.md](live-update-api.md), [sharding.md](sharding.md), [torch-export-refactor.md](torch-export-refactor.md).** Separate concerns.
 
 ## Verification
 

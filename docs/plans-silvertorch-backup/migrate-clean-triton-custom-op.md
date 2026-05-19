@@ -1,14 +1,12 @@
 # Migrate clean triton kernels to `torch.library.custom_op` to recover single-cudagraph capture
 
-> **Scope note (2026-05-19):** silvertorch is out of scope; see [00-roadmap.md](00-roadmap.md). The original prototype migrated **3 "clean" kernels** (`clause_mask`, `bloom_match`, `fused_masked_knn_topk`); `bloom_match` is silvertorch-only and has been replaced with a stub below. Active prototype: 2 kernels. See [../plans-silvertorch-backup/migrate-clean-triton-custom-op.md](../plans-silvertorch-backup/migrate-clean-triton-custom-op.md) for the original 3-kernel write-up (including the `bloom_match` recipe and bench path).
-
 ## Context
 
-Every linr eval-side Algo (`linr_v1`, `linr_v2`, `linr_v3`) is an `nn.Module` that calls `self.compile(dynamic=True, mode="reduce-overhead")` in `__init__`. Each algo forward (filter + index + cascade) is supposed to capture as a single cudagraph_trees graph.
+Every eval-side Algo (`linr_v1`, `linr_v2`, `linr_v3`, `silvertorch`) is an `nn.Module` that calls `self.compile(dynamic=True, mode="reduce-overhead")` in `__init__`. Each algo forward (filter + index + cascade) is supposed to capture as a single cudagraph_trees graph.
 
 Today every triton kernel host wrapper carries `@torch._dynamo.disable`, which works around a known dynamo bug (`AssertionError: Cannot construct ConstantVariable for value of type torch.SymInt` inside `_method_size_stride` when `tensor.stride(i)` is passed as a kwarg under `dynamic=True`). The workaround forces a graph break per kernel call, fragmenting the cudagraph capture. Measured cost on the `linr_v1+clause` path: **0.314 ms/call (disabled) vs 0.170 ms/call (no graph break)** — ~85% slower.
 
-This change replaces `@torch._dynamo.disable` with a `torch.library.custom_op` registration on two "clean" kernels whose output shapes are fully derivable from input shapes. Dynamo then models them as opaque ops (no graph break, single cudagraph stays intact) without needing to trace into them or into `.stride()`. The remaining in-scope kernels (data-dependent output shapes or `Optional[Tensor]` args) keep `@torch._dynamo.disable` — they need caller-side refactors that are out of scope here and handled in [02-triton-op-migration.md](02-triton-op-migration.md).
+This change replaces `@torch._dynamo.disable` with a `torch.library.custom_op` registration on three "clean" kernels whose output shapes are fully derivable from input shapes. Dynamo then models them as opaque ops (no graph break, single cudagraph stays intact) without needing to trace into them or into `.stride()`. The four remaining kernels (data-dependent output shapes or `Optional[Tensor]` args) keep `@torch._dynamo.disable` — they need caller-side refactors that are out of scope.
 
 ## Decision: `custom_op` over `triton_op`
 
@@ -20,13 +18,18 @@ This change replaces `@torch._dynamo.disable` with a `torch.library.custom_op` r
 result.register_fake(fn)
 ```
 
-`triton_op` auto-registers the user's `fn` itself as the fake/meta impl. Under `dynamic=True` compile, the fake runs with FakeTensors that carry SymInt shapes. The `fused_masked_knn_topk` wrapper branches on shape ints at the host (`if p == 0: return (...)`), which under SymInt tracing either triggers an unwanted specialization guard or fails outright. The `triton_op` body is also re-traced under `FunctionalTensorMode` for AOTDispatcher decomposition (`torch/_library/triton.py:209-251`), repeating the same exposure.
+`triton_op` auto-registers the user's `fn` itself as the fake/meta impl. Under `dynamic=True` compile, the fake runs with FakeTensors that carry SymInt shapes. Two of our three kernel wrappers branch on shape ints at the host:
+
+- `bloom_match`: `block_n = 128 if n >= 128 else triton.next_power_of_2(int(n))`
+- `fused_masked_knn_topk`: `if p == 0: return (...)`
+
+Branching on a SymInt either triggers an unwanted specialization guard or fails outright. The `triton_op` body is also re-traced under `FunctionalTensorMode` for AOTDispatcher decomposition (`torch/_library/triton.py:209-251`), repeating the same exposure.
 
 `custom_op` treats the op as fully opaque — no fake re-tracing of the body. We supply an explicit `register_fake` that just allocates the output tensors. The body runs eagerly inside the op boundary on real tensors, where the shape branches are concrete Python ints and work as written. This matches the "opaque-but-not-graph-breaking" intent exactly and avoids any subtle dynamic-shape interaction in the kernel bodies.
 
-Trade-off: Inductor can't inline/fuse the kernel into surrounding ops. For these two kernels there's nothing meaningful to inline (the kernel itself is the work, and the post-kernel `topk`/`gather`/`where`/`cat` in `fused_masked_knn_topk` was already opaque under `@torch._dynamo.disable`), so we lose nothing relative to the baseline.
+Trade-off: Inductor can't inline/fuse the kernel into surrounding ops. For these three kernels there's nothing meaningful to inline (the kernel itself is the work, and the post-kernel `topk`/`gather`/`where`/`cat` in `fused_masked_knn_topk` was already opaque under `@torch._dynamo.disable`), so we lose nothing relative to the baseline.
 
-## Files to modify (2 in-scope kernels — decorator + register_fake only)
+## Files to modify (3 kernels — decorator + register_fake only)
 
 ### 1. [clause_mask.py](retrieve/retrieve/src/retrieve/kernels/triton/filters/clause_mask.py)
 
@@ -43,9 +46,18 @@ Trade-off: Inductor can't inline/fuse the kernel into surrounding ops. For these
   ```
 - Existing type annotations (`Tensor`, returns `Tensor`) are sufficient for schema inference.
 
-### 2. `bloom_match` — (removed — silvertorch out of scope)
+### 2. [bloom_match.py](retrieve/retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py)
 
-See [../plans-silvertorch-backup/migrate-clean-triton-custom-op.md](../plans-silvertorch-backup/migrate-clean-triton-custom-op.md) for the prior recipe.
+- Same recipe. Register name: `retrieve::bloom_match`.
+- Fake:
+  ```python
+  @bloom_match.register_fake
+  def _(qb, sigs):
+      b = qb.shape[0]
+      n = sigs.shape[0]
+      return torch.empty((b, n), dtype=torch.bool, device=qb.device)
+  ```
+- Existing annotations (`qb: Tensor, sigs: Tensor) -> Tensor`) are sufficient.
 
 ### 3. [fused_masked_knn_topk.py](retrieve/retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py)
 
@@ -65,8 +77,7 @@ See [../plans-silvertorch-backup/migrate-clean-triton-custom-op.md](../plans-sil
 
 ### Files NOT to touch
 
-- `bloom_compact.py`, `clause_compact.py`, `oporp_1bit_match_topk.py` — keep `@torch._dynamo.disable`. Out of scope here (data-dependent shapes or `Optional[Tensor]` args); handled in [02-triton-op-migration.md](02-triton-op-migration.md).
-- Silvertorch kernels (`bloom_match.py`, `codesigned_probe_score.py`) — silvertorch is out of scope across all plans.
+- `bloom_compact.py`, `clause_compact.py`, `oporp_1bit_match_topk.py`, `codesigned_probe_score.py` — keep `@torch._dynamo.disable`. Out of scope (data-dependent shapes or `Optional[Tensor]` args).
 - Any `@triton.jit` body. Any algo wrapper in `evaluation/retrieval/algos/`.
 - The algo-level `self.compile(dynamic=True, mode="reduce-overhead")`.
 
@@ -74,9 +85,10 @@ See [../plans-silvertorch-backup/migrate-clean-triton-custom-op.md](../plans-sil
 
 ### Step 1 — Pre-change baseline (must run before any edit)
 
-Write `bench_kernel_migration.py` at `/workspace/retrieve/`. For each of the 2 in-scope target paths below, construct the algo on synthetic GPU tensors, run 20 warmup iters, then time 200 iters with `torch.cuda.synchronize()` boundaries and record the median ms/call:
+Write `bench_kernel_migration.py` at `/workspace/retrieve/`. For each of the 3 target paths below, construct the algo on synthetic GPU tensors, run 20 warmup iters, then time 200 iters with `torch.cuda.synchronize()` boundaries and record the median ms/call:
 
 - **clause_mask path**: `LinrV1Algo(item_embs, k=100, filter_mod=ExactAttributeFilter(...), backend="triton")`. Constructor and registration mirror the eval harness (`evaluation/retrieval/algos/__init__.py:60-116`).
+- **bloom_match path**: `LinrV1Algo(item_embs, k=100, filter_mod=BloomFilter(m_bits=1024, k_hash=5, ...), backend="triton")`. (LinrV1 uses the *dense* mask path, which calls `bloom_match`. LinrV2/V3 use the sparse `bloom_compact` path, out of scope.)
 - **fused_masked_knn_topk path**: `LinrV2Algo(item_embs, k=100, filter_mod=BloomFilter(...), backend="triton")`. PrefilterKNN inside LinrV2 calls `fused_masked_knn_topk` regardless of which filter kind feeds it.
 
 Reuse `measure_forward_cuda()` from [evaluation/retrieval/bench_tools.py](retrieve/evaluation/retrieval/bench_tools.py). Synthetic data: ~100k items, D=64, batch_size=32, plausible attr/bloom shapes.
@@ -87,7 +99,7 @@ Save the three median numbers to a JSON sidecar (`bench_before.json`) so the aft
 
 ### Step 3 — Post-change measurement
 
-Re-run the same bench, save to `bench_after.json`, print a table with `before`, `after`, `delta_ms`, `delta_pct`. Expected: ~40-90% reduction on each path. If either path regresses or moves <10%, stop and diagnose — likely a graph break still exists or the fake shape is wrong.
+Re-run the same bench, save to `bench_after.json`, print a table with `before`, `after`, `delta_ms`, `delta_pct`. Expected: ~40-90% reduction on each path. If any of the three regress or move <10%, stop and diagnose — likely a graph break still exists or the fake shape is wrong.
 
 ### Step 4 — Cudagraph capture check
 
@@ -97,22 +109,22 @@ import torch._inductor.config
 torch._inductor.config.triton.cudagraph_trees = True
 torch._logging.set_logs(inductor=logging.INFO, dynamo=logging.INFO)
 ```
-Capture stderr. Grep for `skipping cudagraphs due to mutated inputs` and `graph break` referencing the migrated kernels. Today these appear; after the migration they should be absent on the two migrated paths (the still-disabled kernels will still produce them — expected; they're handled in [02-triton-op-migration.md](02-triton-op-migration.md)).
+Capture stderr. Grep for `skipping cudagraphs due to mutated inputs` and `graph break` referencing the migrated kernels. Today these appear; after the migration they should be absent on the three migrated paths (the four still-disabled kernels will still produce them — expected).
 
 ### Step 5 — Correctness
 
-1. **Existing parity tests** — `cd retrieve && uv run pytest tests/ -v` must pass 242/242. The parity files [tests/parity/test_clause_mask.py](retrieve/retrieve/tests/parity/test_clause_mask.py) and [tests/parity/test_fused_masked_knn_topk.py](retrieve/retrieve/tests/parity/test_fused_masked_knn_topk.py) directly cover the two migrated kernels.
+1. **Existing parity tests** — `cd retrieve && uv run pytest tests/ -v` must pass 242/242. The parity files [tests/parity/test_clause_mask.py](retrieve/retrieve/tests/parity/test_clause_mask.py), [tests/parity/test_bloom_match.py](retrieve/retrieve/tests/parity/test_bloom_match.py), [tests/parity/test_fused_masked_knn_topk.py](retrieve/retrieve/tests/parity/test_fused_masked_knn_topk.py) (and `test_bloom_compact.py` which calls `bloom_match` as the reference oracle) directly cover the three migrated kernels.
 
 2. **Fake-impl shape parity check** — call each new op once on real tensors and assert `out.shape == expected_shape` and `out.dtype == expected_dtype` and `out.device == expected_device`. This catches a wrong `register_fake` *eagerly* (before compile-time symbolic-shape divergence makes it a silent recall@k regression).
 
-3. **Algo × backend × filter smoke** — programmatic loop over the linr combinations from [evaluation/retrieval/algos/__init__.py](retrieve/evaluation/retrieval/algos/__init__.py) (`"torch_knn", "triton_knn", "linr_v1_filter_mask", "linr_v3", "linr_v2"`) × backend `("torch", "triton")` × filter_kind `("none", "bloom", "clause")`. Skip combos the eval framework already rejects (e.g., `linr_v2+none`). For each combo: build the algo, run one forward, assert finite scores and id range. Build the filter via `build_filter()` from [evaluation/retrieval/sweep.py:223-288](retrieve/evaluation/retrieval/sweep.py#L223-L288) so the wiring matches production.
+3. **Algo × backend × filter smoke** — programmatic loop over all combinations from [evaluation/retrieval/algos/__init__.py](retrieve/evaluation/retrieval/algos/__init__.py) `ALGORITHMS = ("torch_knn", "triton_knn", "linr_v1_filter_mask", "linr_v3", "linr_v2", "silvertorch")` × backend `("torch", "triton")` × filter_kind `("none", "bloom", "clause")`. Skip combos the eval framework already rejects (silvertorch+clause, linr_v2+none). For each combo: build the algo, run one forward, assert finite scores and id range. Build the filter via `build_filter()` from [evaluation/retrieval/sweep.py:223-288](retrieve/evaluation/retrieval/sweep.py#L223-L288) so the wiring matches production.
 
 4. **Top-K parity against eager reference** — for one query on the `LinrV2 + bloom` path (the most complex, involves `fused_masked_knn_topk`'s tuple return and topk/gather/where/cat tail), build the compiled algo and a parallel uncompiled instance with the same weights; assert `compiled_ids == eager_ids` and `torch.allclose(compiled_scores, eager_scores, rtol=1e-5)`. This is the safety net the user explicitly called out: a wrong `register_fake` for `fused_masked_knn_topk` would silently shift top-K under compile.
 
 ## Report at end
 
 - Per-kernel: confirmation that `custom_op` was used (and why `triton_op` was rejected, per the Decision section).
-- Before/after timing table for the 2 algo paths with delta_pct.
+- Before/after timing table for the 3 algo paths with delta_pct.
 - Confirmation that `skipping cudagraphs`/`graph break` warnings are absent on the migrated paths.
 - `pytest tests/ -v` result (must be 242/242).
 - Smoke-test result for all valid algo × backend × filter combos.
