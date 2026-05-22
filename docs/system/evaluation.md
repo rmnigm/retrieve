@@ -80,7 +80,8 @@ evaluation/retrieval/
 │   ├── linr_v1.py             # LinrV1Algo — covers triton_knn + linr_v1_filter_mask
 │   ├── linr_v2.py             # LinrV2Algo — exact filtered top-K via PrefilterKNN
 │   ├── linr_v3.py             # LinrV3Algo — V3 → V2 cascade (1-bit prefilter, fp32 rerank)
-│   ├── silvertorch.py         # SilvertorchAlgo — IVF + INT8 + (optional) bloom
+│   ├── linr_v4.py             # LinrV4Algo — single-stage int8 dense (Int8SimilarityMasking)
+│   ├── silvertorch.py         # SilvertorchAlgo — IVF + INT8 + (none / bloom / exact) filter
 │   └── torch_knn.py           # TorchKnnAlgo — FullScanKNN reference
 ├── voyager/                   # CPU quality baseline, separate CLI
 │   ├── baseline.py            # VoyagerHNSW (voyager.Index wrapper)
@@ -210,7 +211,7 @@ To run the whole `algorithms` list:
 
 ## Algorithms
 
-Six algorithm names are registered (one duplicate alias). The classes
+Seven algorithm names are registered (one duplicate alias). The classes
 live in [`evaluation/retrieval/algos/`](../../evaluation/retrieval/algos/),
 one per file, all duck-typed:
 
@@ -233,7 +234,8 @@ cell.
 | `linr_v1_filter_mask` | [`LinrV1Algo`](../../evaluation/retrieval/algos/linr_v1.py) | Same class as `triton_knn`; canonical name on filter cells. |
 | `linr_v3` | [`LinrV3Algo`](../../evaluation/retrieval/algos/linr_v3.py) | V3 → V2 cascade: `OneBitKNN(backend="triton")` produces top-`candidate_pool` at 1-bit precision; `PrefilterKNN(backend="triton")` rescores at fp32. Approximate. |
 | `linr_v2` | [`LinrV2Algo`](../../evaluation/retrieval/algos/linr_v2.py) | Exact filtered top-K — candidate set IS the filter (`filter_mod.evaluate_indices`). Recall=1.0 by construction; headline is speed/memory. Filter cells only — raises `ValueError` on `filter_kind="none"`. |
-| `silvertorch` | [`SilvertorchAlgo`](../../evaluation/retrieval/algos/silvertorch.py) | IVF + INT8 ANN. `filter_kind="bloom"` → codesigned bloom-fused IVF (item bloom signatures over narrow attrs baked in at register time, kernel checks bloom inline). `filter_kind="none"` → plain IVF + INT8. `filter_kind="clause"` is rejected — post-mask IVF systematically under-recalls because masked-in items outside the `n_probe` nearest clusters never get scored. |
+| `linr_v4` | [`LinrV4Algo`](../../evaluation/retrieval/algos/linr_v4.py) | Single-stage int8 dense + optional mask + topk via `Int8SimilarityMasking`. `torch._int_mm` (int8×int8 → int32, IMMA on Ampere+) directly to `torch.topk` with no scale recovery (global per-tensor scale is rank-preserving). Twin of `triton_knn`/`linr_v1_filter_mask` at int8 storage; ≥0.99 recall on unit-norm embeddings at D=128. |
+| `silvertorch` | [`SilvertorchAlgo`](../../evaluation/retrieval/algos/silvertorch.py) | IVF + INT8 ANN with `SilverTorch.filter` selected per `filter_kind`: `"bloom"` → bloom-fused IVF (codesigned `codesigned_probe_score`, item signatures over narrow attrs baked in at register time); `"clause"` → exact-AND-of-OR-fused IVF (codesigned `codesigned_probe_score_exact`, narrow attrs baked in); `"none"` → plain IVF + INT8. All three modes routed through the same algo class. |
 
 The CPU quality baseline (`voyager_hnsw`, Spotify HNSW via `voyager.Index`)
 is **not** in this registry — it lives in its own subpackage with its own

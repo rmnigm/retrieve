@@ -25,32 +25,32 @@ real-eval shapes (read from `evaluation/data/<dataset>/item_attrs_narrow.pt`
 + `evaluation/retrieval/config.py`) and emits a pasteable
 `DEFAULT_CONFIG = ...` line. Covered: `clause_mask`, `clause_compact`,
 `bloom_compact`, `fused_masked_knn_topk`, `oporp_1bit_match_topk`,
-`codesigned_probe_score`. (`bloom_match` retains its hard-coded tile —
-the per-call width is dictated by `N`.) See
+`codesigned_probe_score`, `codesigned_probe_score_exact`. (`bloom_match`
+retains its hard-coded tile — the per-call width is dictated by `N`.)
+See
 [../system/kernels.md → Autotune separation](../system/kernels.md#autotune-separation)
 for the convention. The original plan doc has been deleted as superseded.
 
-### Stage 2 — `torch.compile` fixes via `triton_op` / `custom_op`
+### Stage 2 — `torch.compile` fixes via `triton_op` / `custom_op` — 🟡 **in progress (4 of 5 shipped, 2026-05-22)**
 
 [02-triton-op-migration.md](02-triton-op-migration.md)
 
 Replace every `@torch._dynamo.disable` on a kernel host wrapper with `@torch.library.custom_op` + explicit `register_fake`. End state: each linr algo's `self.compile(dynamic=True, mode="reduce-overhead")` captures a single cudagraph_trees graph across the whole filter + index + cascade — no graph breaks per kernel call.
 
-Extends the prototype work in [migrate-clean-triton-custom-op.md](migrate-clean-triton-custom-op.md) to all 5 in-scope kernels by absorbing two caller-side refactors that the original plan deferred:
-- Compact kernels (`bloom_compact`, `clause_compact`) return full-width `[B, N]` `(ids, counts)` instead of `[B, P]` (removes the `counts.max().item()` host sync).
-- `oporp_1bit_match_topk`'s `Optional[Tensor]` arg requires a pre-allocated dummy tensor from the caller + a Python `bool` for the constexpr flag.
+Shipped on `clause_mask`, `clause_compact`, `bloom_compact`, `fused_masked_knn_topk`, and (outside the original five-kernel scope) `bloom_match`. The compact kernels were refactored to return full-width `[B, N]` `(ids, counts)` along the way, removing the `counts.max().item()` host sync.
 
-Preserves the measurement protocol from `migrate-clean-triton-custom-op.md` verbatim (before / after timing per algo path; cudagraph-warning grep; algo × backend × filter smoke; top-K parity against eager reference).
+**Remaining**: `oporp_1bit_match_topk`. The Optional-to-dummy-tensor caller-side refactor in `OneBitKNN` is still to land. After that, Stage 2 closes and Stage 3 items 1 + 2 are unblocked.
+
+Silvertorch kernels (`codesigned_probe_score`, `codesigned_probe_score_exact`) keep `@torch._dynamo.disable` — silvertorch is explicitly out of Stage 2 scope per the scope note above.
 
 ### Stage 3 — Kernel optimizations on the clean base
 
 [03-kernel-optimizations.md](03-kernel-optimizations.md)
 
-The surviving items from [kernel-optimization-research.md](kernel-optimization-research.md) after stages 1+2 subsume the big-lever ones (the `counts.max().item()` host sync across the compact family; the `.item()` guard in `OneBitKNNTriton.forward`; the `out_indices[:, :p].contiguous()` slice). Three small items remain:
+Stages 1+2 subsumed the big-lever items (the `counts.max().item()` host sync across the compact family; the `.item()` guard in `OneBitKNNTriton.forward`; the `out_indices[:, :p].contiguous()` slice). Two items remain:
 
 1. Hardware popcount in `oporp_1bit_match_topk` (PTX dump → maybe swap SWAR for `popc.b64`).
 2. Allocator hygiene in `oporp_1bit_match_topk` / `fused_masked_knn_topk` (kill the `torch.full(-inf)` pre-fill; replace `cat`-to-pad with pre-allocate-and-slice).
-3. Archive [mask-compact-kernel.md](mask-compact-kernel.md) — stage 2 eliminates its only hot caller, both "When to actually do this" triggers should now be unmet.
 
 ---
 
@@ -62,11 +62,6 @@ The surviving items from [kernel-optimization-research.md](kernel-optimization-r
 
 ---
 
-## Cleanup once the main thread lands
+## Cleanup status
 
-After stages 1-3 ship, several existing plans are partly or fully subsumed and can be annotated or archived:
-
-- [migrate-clean-triton-custom-op.md](migrate-clean-triton-custom-op.md) → annotate "superseded by 02-triton-op-migration.md" (the 3-kernel migration is the prototype that stage 2 generalizes).
-- [kernel-optimization-research.md](kernel-optimization-research.md) → annotate "items 1-2 done by stage 2; items 4c / 5 / 6 subsumed by stages 1-2; items 3 / 4a / 4b / 4d are stage 3" with pointers.
-- [mask-compact-kernel.md](mask-compact-kernel.md) → archive (stage 3 action item).
-- [torch-export-refactor.md](torch-export-refactor.md) → keep, but trim Phase 1's KernelConfig+REGISTRY section (now lifted into stage 1) and note that the remainder is what's left. The original Phase 3 (silvertorch) is already stubbed out — the `build_export.py` scaffold authoring now lives in Phase 4 (PrefilterKNN).
+Cleanup tasks finished as of 2026-05-22: the prototype custom_op migration doc, the per-item research doc, and the deferred mask-compact-kernel doc have all been deleted (subsumed by the active plans above and the system docs). The `torch-export-refactor.md` plan retains its Phase 1 KernelConfig section as a back-reference — the structure shipped as part of Stage 1 — and the rest of its phases are still pending; Phase 3 (silvertorch) is stubbed out per the scope note above.

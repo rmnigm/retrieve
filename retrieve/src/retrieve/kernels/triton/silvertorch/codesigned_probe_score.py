@@ -6,22 +6,9 @@ import torch
 import triton
 import triton.language as tl
 from torch import Tensor
+from torch.library import custom_op
 
 from retrieve.layers.utils.quantize import quantize_int8
-
-# Cached singleton placeholders for absent qb/sigs. The kernel never
-# dereferences these pointers (HAS_QB gates every load), so one 1x1 tensor
-# per (device, dtype) is enough — avoids fresh allocs per call.
-_DUMMIES: dict[tuple[torch.device, torch.dtype], Tensor] = {}
-
-
-def _dummy(device: torch.device, dtype: torch.dtype) -> Tensor:
-    key = (device, dtype)
-    t = _DUMMIES.get(key)
-    if t is None:
-        t = torch.empty(1, 1, dtype=dtype, device=device)
-        _DUMMIES[key] = t
-    return t
 
 
 @triton.jit
@@ -39,7 +26,7 @@ class CodesignedProbeScoreConfig:
 # Single default the library ships with. Re-tune on a new arch by
 # running ``evaluation/scripts/tune_kernels.py`` and pasting the
 # resulting line in. Callers who want a different tile config pass
-# ``config=`` through to the wrapper.
+# ``config=`` through to ``_codesigned_probe_score_impl``.
 # Tuned on A100 (sm_80) against the int8×int8 ``tl.dot`` path:
 # block_p=256 wins plurality (3/6 regimes); num_warps=4 wins all 6.
 DEFAULT_CONFIG = CodesignedProbeScoreConfig(block_p=256, num_warps=4)
@@ -152,8 +139,7 @@ def _codesigned_probe_score_kernel(
     )
 
 
-@torch._dynamo.disable
-def codesigned_probe_score(
+def _codesigned_probe_score_impl(
     query: Tensor,
     flat_probed_items: Tensor,
     item_codes: Tensor,
@@ -192,6 +178,10 @@ def codesigned_probe_score(
     Returns ``(ids[B, K], scores[B, K])``; pads with ``-1`` / ``-inf`` when
     fewer than K candidates pass.
 
+    Internal tune/test entry point — production callers go through the
+    ``@custom_op`` wrapper ``codesigned_probe_score`` below, which always
+    passes concrete tensors + ``has_bloom`` and ``config=None``.
+
     **Quality knob.** Global scale is paper-default; for higher recall on
     non-uniform-norm indexes, switch to per-item scales (``quantize_int8`` in
     place of ``quantize_int8_global``) and add an ``item_scales [N]`` arg —
@@ -206,19 +196,11 @@ def codesigned_probe_score(
     b, d = query.shape
     p = flat_probed_items.shape[1]
 
-    if p == 0:
-        return (
-            torch.full((b, k), -1, dtype=torch.long, device=query.device),
-            torch.full((b, k), float("-inf"), dtype=torch.float32, device=query.device),
-        )
-
     has_qb = query_bits is not None
     if has_qb and bloom_sigs is None:
         raise ValueError("bloom_sigs is required when query_bits is provided")
 
-    # Per-batch query int8 quantization. One amax + scalar div per row —
-    # cheap, and inside the dynamo-disabled wrapper so the caller's compile
-    # graph doesn't have to know about it.
+    # Per-batch query int8 quantization. One amax + scalar div per row.
     q_codes, q_scales = quantize_int8(query)
     q_codes = q_codes.contiguous()
     q_scales = q_scales.contiguous()
@@ -230,10 +212,14 @@ def codesigned_probe_score(
         bloom_sigs = bloom_sigs.contiguous()
         w = query_bits.shape[1]
     else:
-        # Cached singleton dummies — pointer never dereferenced (HAS_QB guards
-        # the load), so one 1x1 tensor per (device, dtype) is reused.
-        query_bits = _dummy(query.device, torch.int64)
-        bloom_sigs = _dummy(query.device, torch.int64)
+        # 1×1 int64 placeholders so Triton has a valid pointer to bind.
+        # ``HAS_QB`` constexpr gates every load, so the pointers are never
+        # dereferenced. Production callers (the ``SilverTorch`` layer) pass
+        # layer-owned dummies through the ``@custom_op`` wrapper, avoiding
+        # this alloc on the cudagraph path — this branch fires only when
+        # tune scripts / parity tests call ``_impl`` with ``query_bits=None``.
+        query_bits = torch.empty(1, 1, dtype=torch.int64, device=query.device)
+        bloom_sigs = torch.empty(1, 1, dtype=torch.int64, device=query.device)
         w = 1
 
     # `torch.empty` is safe: the kernel writes every slot in [0, P) — either a
@@ -292,3 +278,79 @@ def codesigned_probe_score(
     out_ids[:, :actual_k] = topk_ids
     out_scores[:, :actual_k] = topk_scores
     return out_ids, out_scores
+
+
+@custom_op("retrieve::codesigned_probe_score", mutates_args=())
+def codesigned_probe_score(
+    query: Tensor,
+    flat_probed_items: Tensor,
+    item_codes: Tensor,
+    global_scale: float,
+    k: int,
+) -> tuple[Tensor, Tensor]:
+    """Plain int8 ANN scoring — no attribute filter. Registered as an opaque
+    ``custom_op`` so dynamo can stitch the caller's compiled forward into a
+    single cudagraph (no graph break per call). The ``config=`` keyword is
+    dropped because ``custom_op``'s schema inference doesn't accept dataclass
+    args; tune scripts and parity tests that need a non-default config call
+    ``_codesigned_probe_score_impl`` directly.
+    """
+    return _codesigned_probe_score_impl(
+        query, flat_probed_items, item_codes, global_scale, k, config=None
+    )
+
+
+@codesigned_probe_score.register_fake
+def _codesigned_probe_score_fake(
+    query: Tensor,
+    flat_probed_items: Tensor,
+    item_codes: Tensor,
+    global_scale: float,
+    k: int,
+) -> tuple[Tensor, Tensor]:
+    b = query.shape[0]
+    device = query.device
+    ids = torch.empty((b, k), dtype=torch.long, device=device)
+    scores = torch.empty((b, k), dtype=torch.float32, device=device)
+    return ids, scores
+
+
+@custom_op("retrieve::codesigned_probe_score_bloom", mutates_args=())
+def codesigned_probe_score_bloom(
+    query: Tensor,
+    flat_probed_items: Tensor,
+    item_codes: Tensor,
+    query_bits: Tensor,
+    bloom_sigs: Tensor,
+    global_scale: float,
+    k: int,
+) -> tuple[Tensor, Tensor]:
+    """Int8 ANN scoring fused with the paper's bloom subset test.
+
+    Sibling of ``codesigned_probe_score`` for the bloom-filtered path. Split
+    into a separate ``custom_op`` (rather than one op with an
+    ``Optional[Tensor]`` / ``has_bloom`` flag + dummies) so the layer just
+    routes to the right op — no dummy buffers, no constexpr-flag plumbing.
+    Mirrors the ``oporp_1bit_match_topk_full`` / ``_indirect`` split in linr.
+    """
+    return _codesigned_probe_score_impl(
+        query, flat_probed_items, item_codes, global_scale, k,
+        query_bits=query_bits, bloom_sigs=bloom_sigs, config=None,
+    )
+
+
+@codesigned_probe_score_bloom.register_fake
+def _codesigned_probe_score_bloom_fake(
+    query: Tensor,
+    flat_probed_items: Tensor,
+    item_codes: Tensor,
+    query_bits: Tensor,
+    bloom_sigs: Tensor,
+    global_scale: float,
+    k: int,
+) -> tuple[Tensor, Tensor]:
+    b = query.shape[0]
+    device = query.device
+    ids = torch.empty((b, k), dtype=torch.long, device=device)
+    scores = torch.empty((b, k), dtype=torch.float32, device=device)
+    return ids, scores

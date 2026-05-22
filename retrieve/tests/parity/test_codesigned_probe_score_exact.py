@@ -7,6 +7,7 @@ import torch
 
 from retrieve.kernels.triton.silvertorch.codesigned_probe_score_exact import (
     CodesignedProbeScoreExactConfig,
+    _codesigned_probe_score_exact_impl,
     codesigned_probe_score_exact,
 )
 from retrieve.layers.utils.quantize import quantize_int8, quantize_int8_global
@@ -86,14 +87,7 @@ def test_codesigned_exact_matches_ref(n, d, p, k, c, a_max, b):
     rev = torch.zeros(c, dtype=torch.bool, device="cuda")
 
     out_ids, out_scores = codesigned_probe_score_exact(
-        query,
-        flat,
-        codes,
-        global_scale,
-        k,
-        item_clause_attrs=attrs,
-        clause_is_reverse=rev,
-        query_clause_attrs=q_attrs,
+        query, flat, codes, attrs, rev, q_attrs, global_scale, k,
     )
     ref_ids, ref_scores = _ref_phase23_exact(
         query,
@@ -120,14 +114,7 @@ def test_codesigned_exact_pads_when_p_less_than_k():
     rev = torch.zeros(c, dtype=torch.bool, device="cuda")
 
     out_ids, out_scores = codesigned_probe_score_exact(
-        query,
-        flat,
-        codes,
-        global_scale,
-        k,
-        item_clause_attrs=attrs,
-        clause_is_reverse=rev,
-        query_clause_attrs=q_attrs,
+        query, flat, codes, attrs, rev, q_attrs, global_scale, k,
     )
     assert out_ids.shape == (b, k)
     assert out_scores.shape == (b, k)
@@ -153,12 +140,10 @@ def test_codesigned_exact_reverse_clause():
     rev_on = torch.tensor([True, False], dtype=torch.bool, device="cuda")
 
     ids_off, scores_off = codesigned_probe_score_exact(
-        query, flat, codes, global_scale, k,
-        item_clause_attrs=attrs, clause_is_reverse=rev_off, query_clause_attrs=q_attrs,
+        query, flat, codes, attrs, rev_off, q_attrs, global_scale, k,
     )
     ids_on, scores_on = codesigned_probe_score_exact(
-        query, flat, codes, global_scale, k,
-        item_clause_attrs=attrs, clause_is_reverse=rev_on, query_clause_attrs=q_attrs,
+        query, flat, codes, attrs, rev_on, q_attrs, global_scale, k,
     )
     # Parity against the reference for both reverse configs.
     ref_off_ids, ref_off_scores = _ref_phase23_exact(
@@ -189,14 +174,15 @@ def test_codesigned_exact_inactive_query():
     # the no-filter codesigned_probe_score path on the same inputs.
     q_attrs = torch.full((b, c), -1, dtype=torch.long, device="cuda")
     out_ids, out_scores = codesigned_probe_score_exact(
-        query, flat, codes, global_scale, k,
-        item_clause_attrs=attrs, clause_is_reverse=rev, query_clause_attrs=q_attrs,
+        query, flat, codes, attrs, rev, q_attrs, global_scale, k,
     )
 
     from retrieve.kernels.triton.silvertorch.codesigned_probe_score import (
-        codesigned_probe_score,
+        _codesigned_probe_score_impl,
     )
-    ref_ids, ref_scores = codesigned_probe_score(query, flat, codes, global_scale, k)
+    ref_ids, ref_scores = _codesigned_probe_score_impl(
+        query, flat, codes, global_scale, k
+    )
     assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores)
 
 
@@ -217,12 +203,12 @@ def test_config_override_matches_default():
     cfg_b = CodesignedProbeScoreExactConfig(block_p=128, num_warps=8)
     assert cfg_a != cfg_b
 
-    ids_a, scores_a = codesigned_probe_score_exact(
+    ids_a, scores_a = _codesigned_probe_score_exact_impl(
         query, flat, codes, global_scale, k,
         item_clause_attrs=attrs, clause_is_reverse=rev, query_clause_attrs=q_attrs,
         config=cfg_a,
     )
-    ids_b, scores_b = codesigned_probe_score_exact(
+    ids_b, scores_b = _codesigned_probe_score_exact_impl(
         query, flat, codes, global_scale, k,
         item_clause_attrs=attrs, clause_is_reverse=rev, query_clause_attrs=q_attrs,
         config=cfg_b,

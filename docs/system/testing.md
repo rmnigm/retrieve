@@ -29,11 +29,11 @@ retrieve/tests/
 │   ├── test_combine_filters.py
 │   ├── test_compact.py
 │   ├── test_filters.py             (ExactAttributeFilter)
-│   ├── test_linr.py                (SimilarityMasking, PrefilterKNN, OneBitKNN × torch / Triton)
+│   ├── test_linr.py                (SimilarityMasking, Int8SimilarityMasking, PrefilterKNN, OneBitKNN × torch / Triton)
 │   ├── test_quantize.py            (int8, OPORP, popcount)
 │   ├── test_retrieval_utils.py     (FullScanKNN, post_filter_topk)
 │   ├── test_scorers.py             (DotProductScorer)
-│   └── test_silvertorch.py         (SilverTorch, both bloom-on and bloom-off)
+│   └── test_silvertorch.py         (SilverTorch, all three filter modes: none / bloom / exact)
 └── parity/                # Triton kernel vs pure-torch reference
     ├── conftest.py        # assert_topk_matches helper
     ├── test_bloom_compact.py
@@ -41,6 +41,7 @@ retrieve/tests/
     ├── test_clause_compact.py
     ├── test_clause_mask.py
     ├── test_codesigned_probe_score.py
+    ├── test_codesigned_probe_score_exact.py
     ├── test_fused_masked_knn_topk.py
     └── test_oporp_1bit_match_topk.py
 ```
@@ -180,6 +181,7 @@ module under test.
 | `clause_mask`              | Pure-torch `[B, N, C, A_max]` broadcast inlined as `_ref_mask` — intentionally materializes the intermediate this kernel exists to avoid; bit-exact via `torch.equal` since no compaction order ambiguity |
 | `clause_compact`           | `ExactAttributeFilter.evaluate_mask(...)` + `compact_mask` (the mask path itself routes to `clause_mask` on CUDA, so this transitively cross-checks both kernels) |
 | `codesigned_probe_score`   | `_ref_phase23` in the parity file: bloom subset + INT8 dequant + dot + topk |
+| `codesigned_probe_score_exact` | `_ref_phase23` in the parity file: exact AND-of-OR predicate + INT8 dequant + dot + topk |
 
 ## What each correctness file asserts
 
@@ -305,27 +307,33 @@ INT8 + OPORP + popcount.
 
 ### [`test_linr.py`](../../retrieve/tests/correctness/test_linr.py)
 
-LiNR V1, V2, V3 in both backends.
+LiNR V1, V2, V3, V4 in both backends.
 
-- V1: top-K is sorted descending; mask path returns ids satisfying
-  the mask.
-- V2: full path (no candidates) returns sorted top-K; candidate path
-  returns ids ⊆ candidates and respects `counts`; default `counts`
-  (all P) treated as all-valid.
-- V3: full-scan recall vs `FullScanKNN` ≥ 0.4; candidate path
-  returns ids ⊆ candidates.
+- V1 (`SimilarityMasking`): top-K is sorted descending; mask path
+  returns ids satisfying the mask.
+- V2 (`PrefilterKNN`): full path (no candidates) returns sorted top-K;
+  candidate path returns ids ⊆ candidates and respects `counts`;
+  default `counts` (all P) treated as all-valid.
+- V3 (`OneBitKNN`): full-scan recall vs `FullScanKNN` ≥ 0.4; candidate
+  path returns ids ⊆ candidates.
+- V4 (`Int8SimilarityMasking`): full-scan recall vs `FullScanKNN` ≥
+  0.95 at K=10 on unit-norm random embeddings (the int8 quantization
+  preserves topk ordering modulo per-element rounding); mask path
+  returns ids satisfying the mask.
 - Cross-backend: torch ↔ Triton return identical valid-id sets per
   row for `SimilarityMasking`, `PrefilterKNN`, `OneBitKNN` across
   `pass_rate ∈ {None, 0.01, 0.1, 0.8}`. Sorted scores `allclose`
-  (atol=1e-3) for fp32 paths; bit-exact for `OneBitKNN`.
+  (atol=1e-3) for fp32 paths; bit-exact for `OneBitKNN`. (For
+  `Int8SimilarityMasking` the `backend=` flag is a no-op — cuBLAS
+  LtGemm runs the same code on both paths.)
 - `SimilarityMasking` (mask path) ≡ `PrefilterKNN` (compact_mask of same
   mask) as id sets.
 - `ExactAttributeFilter` decoupled composition: `SimilarityMasking` with
   `mask = ef.evaluate_mask & extra`, `PrefilterKNN` with
   `compact_mask(combined)`, `PrefilterKNN` with `ef.evaluate_indices`.
 - Edge cases (`TestEdgeCases`):
-  - mask-all-True ≡ unmasked path (`SimilarityMasking`, `OneBitKNN` ×
-    torch / Triton).
+  - mask-all-True ≡ unmasked path (`SimilarityMasking`,
+    `Int8SimilarityMasking`, `OneBitKNN` × torch / Triton).
   - mask-all-False produces no finite scores.
   - `PrefilterKNN` `candidate_ids` shape `[B, 0]` returns full padding
     (`(-1, -inf)` × K).
@@ -334,24 +342,32 @@ LiNR V1, V2, V3 in both backends.
 
 ### [`test_silvertorch.py`](../../retrieve/tests/correctness/test_silvertorch.py)
 
-`SilverTorch` — bloom-configured and bloom-disabled paths in one file.
+`SilverTorch` — all three filter modes (`"none"`, `"bloom"`, `"exact"`) in one file.
 
-- Output shape `(B, K)` with `query_clause_attrs`, without it, and on a
-  bloom-disabled module; ids long, scores float32.
-- INT8 buffers on the bloom-disabled module: `item_codes` int8,
-  `item_scales` float32, centroid / cluster shapes; `bloom_sigs` and
-  `hash_seeds` are *not* allocated.
-- Param validation: `m_bits` non-power-of-2, `k_hash <= 0`, partial
-  bloom config (only one of `m_bits`/`k_hash` set), `n_lists > N`, and
-  `n_probe > n_lists` all raise `ValueError`. Passing
-  `query_clause_attrs` or `item_clause_attrs` to a bloom-disabled
-  module raises.
+- Output shape `(B, K)` with `query_clause_attrs`, without it, on
+  `filter="none"`, and on `filter="exact"`; ids long, scores float32.
+- INT8 buffers on the no-filter module: `item_codes` int8,
+  `item_scales` float32, centroid / cluster shapes; `bloom_sigs` /
+  `hash_seeds` / `item_clause_attrs_narrow` are *not* allocated. The
+  exact-mode module allocates `item_clause_attrs_narrow` instead of
+  bloom buffers.
+- Param validation: unknown `filter`, `m_bits` non-power-of-2, `k_hash
+  <= 0`, partial bloom config (only one of `m_bits`/`k_hash` set),
+  bloom params passed with `filter="none"` or `filter="exact"`,
+  `filter="exact"` without `item_clause_attrs`, `clause_is_reverse`
+  outside `filter="exact"`, `n_lists > N`, and `n_probe > n_lists` all
+  raise `ValueError`. Passing `query_clause_attrs` or
+  `item_clause_attrs` to a no-filter module raises.
 - **Equivalence**: `query_clause_attrs=None` on a bloom-configured module
-  ≡ a freshly built no-bloom module with the same kmeans seed.
+  ≡ a freshly built no-filter module with the same kmeans seed; same
+  invariant holds for `filter="exact"`, plus an all-inactive query
+  (`[-1, ...]`) on `filter="exact"` matches the no-filter result.
 - Recall ≥ 0.90 at `n_probe = n_lists`; recall ≥ 0.85 at full probe and
   monotone in `n_probe`.
-- Candidate-ids path returns ids ⊆ candidates (with bloom, without
-  bloom, and with `p < k`).
+- Candidate-ids path returns ids ⊆ candidates (with bloom, with exact,
+  without filter, and with `p < k`).
+- Cross-backend (`torch` vs `triton`) agreement on all three modes plus
+  reverse clauses on `filter="exact"`.
 - Edge case: `n_lists = N` (one item per cluster) → recall ≥ 0.85 at
   full probe.
 
@@ -370,7 +386,8 @@ exact-by-construction kernels, which use stricter assertions.
 | [`test_bloom_compact.py`](../../retrieve/tests/parity/test_bloom_compact.py)                 | `bloom_compact`             | `compact_mask(bloom_match(qb, sigs))` with hand-built `qb` | row-set match (kernel order is unspecified — atomic stream compaction); covers `B=1`, all-inactive query, `N < BLOCK_N`, and a routed-via-`BloomFilter.evaluate_indices` smoke check |
 | [`test_clause_mask.py`](../../retrieve/tests/parity/test_clause_mask.py)                     | `clause_mask`               | Pure-torch `[B, N, C, A_max]` broadcast inlined as `_ref_mask` | bit-exact via `torch.equal`; covers reverse clauses, all-reverse, all-inactive query, `A_max=1`, `B=1`, `N < BLOCK_N` |
 | [`test_clause_compact.py`](../../retrieve/tests/parity/test_clause_compact.py)               | `clause_compact`            | `ExactAttributeFilter.evaluate_mask(...)` + `compact_mask` (transitively goes through `clause_mask` on CUDA) | row-set match (kernel order is unspecified — atomic stream compaction); cases for reverse clauses, all-inactive query, no-passing-items, `B=1` grid corner |
-| [`test_codesigned_probe_score.py`](../../retrieve/tests/parity/test_codesigned_probe_score.py) | `codesigned_probe_score`  | `_ref_phase23`: bloom subset + INT8 dequant + dot + topk | the SilverTorch fused path; cases for `(qb, no qb)` |
+| [`test_codesigned_probe_score.py`](../../retrieve/tests/parity/test_codesigned_probe_score.py) | `codesigned_probe_score`  | `_ref_phase23`: bloom subset + INT8 dequant + dot + topk | the SilverTorch bloom-fused path; cases for `(qb, no qb)` |
+| [`test_codesigned_probe_score_exact.py`](../../retrieve/tests/parity/test_codesigned_probe_score_exact.py) | `codesigned_probe_score_exact` | `_ref_phase23`: exact AND-of-OR predicate over narrow attrs + INT8 dequant + dot + topk | the SilverTorch exact-fused path; cases for active vs all-inactive query clauses |
 
 ## Adding a new test
 

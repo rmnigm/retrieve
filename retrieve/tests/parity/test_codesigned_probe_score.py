@@ -7,7 +7,9 @@ import torch
 
 from retrieve.kernels.triton.silvertorch.codesigned_probe_score import (
     CodesignedProbeScoreConfig,
+    _codesigned_probe_score_impl,
     codesigned_probe_score,
+    codesigned_probe_score_bloom,
 )
 from retrieve.layers.filters.bloom import _build_signatures, _generate_seeds
 from retrieve.layers.utils.quantize import quantize_int8, quantize_int8_global
@@ -91,8 +93,8 @@ def test_codesigned_with_bloom_matches_ref(n, d, p, k, b):
     sigs = _build_signatures(attrs.long(), seeds, m_bits=512, k_hash=5, word_count=8)
     qb = _build_signatures(q_attrs.long().unsqueeze(-1), seeds, m_bits=512, k_hash=5, word_count=8)
 
-    out_ids, out_scores = codesigned_probe_score(
-        query, flat, codes, global_scale, k, query_bits=qb, bloom_sigs=sigs
+    out_ids, out_scores = codesigned_probe_score_bloom(
+        query, flat, codes, qb, sigs, global_scale, k
     )
     ref_ids, ref_scores = _ref_phase23(
         query, flat, codes, global_scale, k, qb=qb, bloom_sigs=sigs
@@ -129,9 +131,13 @@ def test_config_override_matches_default():
     cfg_b = CodesignedProbeScoreConfig(block_p=128, num_warps=8)
     assert cfg_a != cfg_b
 
-    # No-bloom path.
-    ids_a, scores_a = codesigned_probe_score(query, flat, codes, global_scale, k, config=cfg_a)
-    ids_b, scores_b = codesigned_probe_score(query, flat, codes, global_scale, k, config=cfg_b)
+    # No-bloom path (via _impl since the public op drops config=).
+    ids_a, scores_a = _codesigned_probe_score_impl(
+        query, flat, codes, global_scale, k, config=cfg_a
+    )
+    ids_b, scores_b = _codesigned_probe_score_impl(
+        query, flat, codes, global_scale, k, config=cfg_b
+    )
     torch.testing.assert_close(ids_a, ids_b)
     torch.testing.assert_close(scores_a, scores_b)
 
@@ -141,10 +147,10 @@ def test_config_override_matches_default():
     seeds = _generate_seeds(k_hash=5, device=embs.device)
     sigs = _build_signatures(attrs.long(), seeds, m_bits=512, k_hash=5, word_count=8)
     qb = _build_signatures(q_attrs.long().unsqueeze(-1), seeds, m_bits=512, k_hash=5, word_count=8)
-    ids_a, scores_a = codesigned_probe_score(
+    ids_a, scores_a = _codesigned_probe_score_impl(
         query, flat, codes, global_scale, k, query_bits=qb, bloom_sigs=sigs, config=cfg_a
     )
-    ids_b, scores_b = codesigned_probe_score(
+    ids_b, scores_b = _codesigned_probe_score_impl(
         query, flat, codes, global_scale, k, query_bits=qb, bloom_sigs=sigs, config=cfg_b
     )
     torch.testing.assert_close(ids_a, ids_b)

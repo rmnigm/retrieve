@@ -13,7 +13,7 @@ import torch
 import triton
 import triton.language as tl
 from torch import Tensor
-from torch.library import custom_op
+from torch.library import triton_op, wrap_triton
 
 
 @dataclass(frozen=True)
@@ -26,7 +26,7 @@ class ClauseMaskConfig:
 # Single default the library ships with. Re-tune on a new arch by running
 # ``evaluation/scripts/tune_kernels.py --kernel clause_mask`` and pasting
 # the resulting line in. Callers who want a different tile pass ``config=``
-# to ``_clause_mask_impl`` (the public ``@custom_op`` wrapper has a fixed
+# to ``_clause_mask_impl`` (the public ``@triton_op`` wrapper has a fixed
 # schema and always uses the default).
 # Tuned on A100 (sm_80) against real-eval shapes (Goodreads N=797K /
 # arXiv N=3M / arXiv-synth N=15M, C∈{4,5}, A_MAX=4, B∈{1, 16}):
@@ -104,9 +104,9 @@ def _clause_mask_impl(
     *,
     config: ClauseMaskConfig | None = None,
 ) -> Tensor:
-    """Real body for ``clause_mask``. Takes an optional ``config=`` so the
-    offline tuner and unit tests can sweep tile parameters. The public
-    ``@custom_op``-wrapped ``clause_mask`` always passes ``config=None``."""
+    """Direct-launch body used by the offline tuner and unit tests. Takes an
+    optional ``config=`` so tile parameters can be swept; the public
+    ``@triton_op``-wrapped ``clause_mask`` always uses ``DEFAULT_CONFIG``."""
     if item_clause_attrs.dim() != 3:
         raise ValueError("item_clause_attrs must be [N, C, A_max]")
     if query_clause_attrs.dim() != 2:
@@ -157,7 +157,7 @@ def _clause_mask_impl(
     return out
 
 
-@custom_op("retrieve::clause_mask", mutates_args=())
+@triton_op("retrieve::clause_mask", mutates_args=())
 def clause_mask(
     item_clause_attrs: Tensor,  # [N, C, A_max] int64
     clause_is_reverse: Tensor,  # [C] bool
@@ -165,22 +165,46 @@ def clause_mask(
 ) -> Tensor:
     """Fused clause evaluation → ``[B, N]`` bool. No intermediate.
 
-    Registered as an opaque ``custom_op`` so dynamo doesn't trace into the
-    Triton launch (it can't construct ``ConstantVariable`` from the
-    ``torch.SymInt`` shapes/strides under ``dynamic=True``). Delegates to
-    ``_clause_mask_impl`` with the shipped ``DEFAULT_CONFIG``.
-    """
-    return _clause_mask_impl(
-        item_clause_attrs, clause_is_reverse, query_clause_attrs, config=None
+    Registered as ``triton_op`` so the kernel launch is captured as a HOP
+    that ``torch.compile`` can stitch into surrounding cudagraphs; the
+    ``torch.empty`` allocation inside the body acts as the fake/meta kernel.
+    Mirrors ``_clause_mask_impl`` but routes the launch through
+    ``wrap_triton`` for HOP capture and hard-codes ``DEFAULT_CONFIG``."""
+    cfg = DEFAULT_CONFIG
+
+    n, c, a_max = item_clause_attrs.shape
+    b, _ = query_clause_attrs.shape
+
+    item_clause_attrs = item_clause_attrs.contiguous()
+    clause_is_reverse = clause_is_reverse.contiguous().to(torch.int8)
+    query_clause_attrs = query_clause_attrs.contiguous()
+
+    out = torch.empty((b, n), dtype=torch.bool, device=query_clause_attrs.device)
+
+    tiles = triton.cdiv(n, cfg.block_n)
+    tiles_x = triton.cdiv(tiles, 65535)
+    tiles_y = triton.cdiv(tiles, tiles_x)
+    grid = (b, tiles_y, tiles_x)
+
+    wrap_triton(_clause_mask_kernel)[grid](
+        item_clause_attrs,
+        clause_is_reverse,
+        query_clause_attrs,
+        out,
+        N=n,
+        tiles_y=tiles_y,
+        C=c,
+        A_MAX=a_max,
+        stride_in=item_clause_attrs.stride(0),
+        stride_ic=item_clause_attrs.stride(1),
+        stride_ia=item_clause_attrs.stride(2),
+        stride_qb=query_clause_attrs.stride(0),
+        stride_qc=query_clause_attrs.stride(1),
+        stride_ob=out.stride(0),
+        stride_on=out.stride(1),
+        BLOCK_N=cfg.block_n,
+        num_warps=cfg.num_warps,
+        num_stages=cfg.num_stages,
     )
 
-
-@clause_mask.register_fake
-def _clause_mask_fake(
-    item_clause_attrs: Tensor,
-    clause_is_reverse: Tensor,
-    query_clause_attrs: Tensor,
-) -> Tensor:
-    n = item_clause_attrs.shape[0]
-    b = query_clause_attrs.shape[0]
-    return torch.empty((b, n), dtype=torch.bool, device=query_clause_attrs.device)
+    return out

@@ -14,12 +14,14 @@ see [kernels.md](kernels.md).
 Two retrieval families live side by side, both implementing the
 [`RetrievalModule`](../../retrieve/src/retrieve/interfaces.py) interface
 and selecting between Triton kernels and pure-torch ops via a
-`backend="torch" | "triton"` flag on `__init__`:
+`backend="torch" | "triton"` flag on `__init__` (the literal alias is
+exported as `Backend` from [`interfaces.py`](../../retrieve/src/retrieve/interfaces.py)):
 
-- **LiNR** ([`layers/linr/`](../../retrieve/src/retrieve/layers/linr/)) — three
-  variants (`SimilarityMasking` dense, `PrefilterKNN` sparse pre-filter,
-  `OneBitKNN` 1-bit OPORP). Filtering is **decoupled**: each forward takes
-  a mask or a candidate-id buffer the caller computed via a
+- **LiNR** ([`layers/linr/`](../../retrieve/src/retrieve/layers/linr/)) — four
+  variants (`SimilarityMasking` dense fp16, `Int8SimilarityMasking` dense
+  int8, `PrefilterKNN` sparse pre-filter, `OneBitKNN` 1-bit OPORP).
+  Filtering is **decoupled**: each forward takes a mask or a candidate-id
+  buffer the caller computed via a
   [`FilterModule`](../../retrieve/src/retrieve/interfaces.py)
   ([`ExactAttributeFilter`](../../retrieve/src/retrieve/layers/filters/exact_attribute.py) /
   [`BloomFilter`](../../retrieve/src/retrieve/layers/filters/bloom.py)),
@@ -27,20 +29,26 @@ and selecting between Triton kernels and pure-torch ops via a
   any upstream cascade composed via
   [`combine_masks` / `combine_indices`](../../retrieve/src/retrieve/layers/filters/__init__.py).
 - **SilverTorch** ([`layers/silvertorch/`](../../retrieve/src/retrieve/layers/silvertorch/)) —
-  co-designed IVF + INT8 ANN + Bloom attribute filter, all fused in one
-  Triton kernel under `backend="triton"`; with `backend="torch"` the same
-  semantics run in pure torch (phase 1 IVF probe + bloom subset + INT8
-  dequant + dot + topk), materializing a `[B, P, D]` intermediate.
-  Filtering is **inline** (Bloom signatures live on the module); no
-  standalone `ExactAttributeFilter` is wired in.
+  co-designed IVF + INT8 ANN with an inline attribute filter selected by
+  a `filter ∈ {"none", "bloom", "exact"}` mode. `"bloom"` fuses Bloom
+  subset tests into [`codesigned_probe_score`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py);
+  `"exact"` fuses an exact AND-of-OR attribute predicate into
+  [`codesigned_probe_score_exact`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score_exact.py);
+  `"none"` runs plain IVF + INT8. All three modes share the IVF probe and
+  INT8 dot-product path; only the predicate inside the fused kernel
+  changes. With `backend="torch"` the same semantics run in pure torch
+  (phase 1 IVF probe + predicate + INT8 dequant + dot + topk),
+  materializing a `[B, P, D]` intermediate. Filtering is **inline**: bloom
+  signatures or narrow clause attrs live on the module; no standalone
+  `ExactAttributeFilter` / `BloomFilter` instance is wired in.
 
 Filter modules live in [`layers/filters/`](../../retrieve/src/retrieve/layers/filters/):
 `ExactAttributeFilter` (exact, supports reverse), `BloomFilter` (approximate,
 conjunctive), and the `combine_masks` / `combine_indices` composition
 helpers. Both filters subclass [`FilterModule`](../../retrieve/src/retrieve/interfaces.py).
 Other utilities live in [`layers/utils/`](../../retrieve/src/retrieve/layers/utils/):
-`compact_mask`, `FullScanKNN`, `DotProductScorer`, and the quantizers
-(`quantize_int8`, `quantize_oporp_1bit`).
+`compact_mask`, `post_filter_topk`, `FullScanKNN`, `DotProductScorer`,
+`KMeansTorch`, and the quantizers (`quantize_int8`, `quantize_oporp_1bit`).
 
 ## Clause / attribute data layout
 
@@ -108,7 +116,7 @@ Two composition helpers ship in
 
 ## LiNR variants
 
-All three return `(ids[B, K], scores[B, K])`. Each module takes a
+All four return `(ids[B, K], scores[B, K])`. Each module takes a
 `backend="torch" | "triton"` arg in `__init__`; `"triton"` is the default
 (the eval harness and the original paper experiments target Triton). The
 torch backend is eager — callers wanting Inductor fusion or cudagraph
@@ -121,6 +129,18 @@ not bind compile internally.
   because cuBLAS + CUB already deliver the same memory traffic; the
   `backend=` flag is accepted for API symmetry but is a no-op on this
   class.
+- **`Int8SimilarityMasking` — dense int8 similarity, optional mask.**
+  Single-stage int8 dense matmul + optional mask + top-K, int32
+  end-to-end. Items and queries are int8-quantized with one global scale
+  each (SilverTorch §3.2); the matmul runs through `torch._int_mm`
+  (cuBLAS LtGemm, IMMA tensor cores on Ampere+) and the int32 result
+  feeds `torch.topk` directly — no rescale to fp32, no scale recovery,
+  because two global scalars are a positive monotonic transform of the
+  true dot product (topk ordering exact modulo int8 rounding). Storage
+  is one `[D, N]` int8 buffer — half the memory of `SimilarityMasking`'s
+  fp16 layout. Forward takes `(query, mask=None)`. The `backend=` flag
+  is accepted for API symmetry but is a no-op (cuBLAS LtGemm runs the
+  same code on both paths).
 - **`PrefilterKNN` — sparse pre-filter.** Forward takes
   `(query, candidate_ids=None, counts=None)` — passing item ids per query,
   precompacted by the caller (typically
@@ -154,23 +174,42 @@ not bind compile internally.
 
 [`SilverTorch`](../../retrieve/src/retrieve/layers/silvertorch/main.py)
 implements the SilverTorch paper's Algorithm 1: IVF clustering over INT8-
-quantized item codes, with a per-item Bloom signature for attribute
-filtering, all fused into a single Triton kernel
-[`codesigned_probe_score`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py).
-Constructed via `build_silvertorch(item_embs, k, *, n_lists, n_probe,
-m_bits=None, k_hash=None, n_iter=10, seed=0, item_clause_attrs=None)`
-— everything after `k` is keyword-only. Forward takes
-`(query, query_clause_attrs=None, mask=None, candidate_ids=None)` —
-`query_clause_attrs=None` is a documented fast path that skips bloom
-evaluation entirely.
+quantized item codes (global per-tensor scale, paper §3.2), with an
+inline attribute predicate fused into a single Triton kernel. The
+predicate is selected at construction by `filter ∈ {"none", "bloom",
+"exact"}`:
 
-The bloom filter is private to SilverTorch: signatures are derived from
-`item_clause_attrs` at `register_index` time and stored as
-`bloom_sigs[N, W]` plus per-row `hash_seeds`. There is no
-`ExactAttributeFilter` on this path. Constructing `SilverTorch` without
-`m_bits`/`k_hash`
-yields the bloom-free variant — `register_index` skips bloom buffer
-allocation, and `forward` requires `query_clause_attrs=None`.
+- `"none"` — plain IVF + INT8 ANN, no attribute filter
+  ([`codesigned_probe_score`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py)
+  with `HAS_QB=False`).
+- `"bloom"` — paper's bloom subset test fused into
+  [`codesigned_probe_score`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py);
+  one false-positive-tolerant filter shared across all clauses
+  (`m_bits`, `k_hash` required).
+- `"exact"` — exact AND-of-OR predicate fused into
+  [`codesigned_probe_score_exact`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score_exact.py);
+  no false positives, bandwidth-cheaper per item at small `C × A_max`,
+  trades the bloom hash flexibility for exact-value match.
+
+Constructed via `build_silvertorch(item_embs, k, *, n_lists, n_probe,
+filter="none", m_bits=None, k_hash=None, n_iter=10, seed=0,
+item_clause_attrs=None, item_clause_attrs_narrow=None)` — everything
+after `k` is keyword-only. Forward takes
+`(query, query_clause_attrs=None, mask=None, candidate_ids=None)` —
+`query_clause_attrs=None` is a documented fast path that skips
+predicate evaluation entirely.
+
+The filter is private to SilverTorch — no standalone `FilterModule`
+instance is wired in:
+
+- For `"bloom"`, signatures are derived from `item_clause_attrs` at
+  `register_index` time and stored as `bloom_sigs[N, W]` plus per-row
+  `hash_seeds`.
+- For `"exact"`, the narrow `[N, C, A_max]` attribute tensor is stored
+  as `item_clause_attrs_narrow` and consumed directly by the exact
+  kernel.
+- For `"none"`, both attribute buffers are skipped and `forward`
+  requires `query_clause_attrs=None`.
 
 ## Utility modules
 
@@ -181,8 +220,11 @@ allocation, and `forward` requires `query_clause_attrs=None`.
   `ScorerModule` for candidate-set rerank (`bmm` over gathered item rows).
 - [`post_filter_topk`](../../retrieve/src/retrieve/layers/utils/retrieval.py) —
   applies a post-filter to already-computed top-K results.
-- Three abstract bases in [`interfaces.py`](../../retrieve/src/retrieve/interfaces.py):
-  `RetrievalModule`, `FilterModule`, `ScorerModule`.
+- [`KMeansTorch`](../../retrieve/src/retrieve/layers/utils/kmeans.py) —
+  pure-torch k-means used by `SilverTorch` for IVF index building.
+- Three abstract bases plus the `Backend` literal alias in
+  [`interfaces.py`](../../retrieve/src/retrieve/interfaces.py):
+  `RetrievalModule`, `FilterModule`, `ScorerModule`, `Backend = Literal["torch", "triton"]`.
 
 ## Triton kernels
 
@@ -198,7 +240,8 @@ pure Triton). Full per-kernel detail in [kernels.md](kernels.md).
 | [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/)                                       | [`clause_compact`](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py) — fused clause eval + stream compaction          | `ExactAttributeFilter.evaluate_indices` |
 | [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/)                                       | [`clause_mask`](../../retrieve/src/retrieve/kernels/triton/filters/clause_mask.py) — fused clause eval emitting `[B, N]` bool             | `ExactAttributeFilter.evaluate_mask` |
 | [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/)                                       | [`bloom_compact`](../../retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py) — fused subset-test + stream compaction            | `BloomFilter.evaluate_indices`    |
-| [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`codesigned_probe_score`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py) — fused IVF + INT8 + Bloom    | `SilverTorch`                     |
+| [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`codesigned_probe_score`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py) — fused IVF + INT8 + Bloom    | `SilverTorch(filter="none" \| "bloom")` |
+| [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`codesigned_probe_score_exact`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score_exact.py) — fused IVF + INT8 + exact AND-of-OR | `SilverTorch(filter="exact")`     |
 | [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)                               | [`bloom_match`](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py) — bool subset test (standalone)                     | `BloomFilter.evaluate_mask`       |
 
 ## Testing
@@ -217,15 +260,17 @@ gate. Performance characterization (latency, memory, recall sweeps) lives in
 - LiNR variants ship one file per class — no separate `_triton.py`
   siblings. Each module
   ([`similarity_masking.py`](../../retrieve/src/retrieve/layers/linr/similarity_masking.py),
+  [`int8_similarity_masking.py`](../../retrieve/src/retrieve/layers/linr/int8_similarity_masking.py),
   [`prefilter_knn.py`](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py),
   [`one_bit_knn.py`](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py))
   takes a `backend="torch" | "triton"` flag in `__init__`. Construct
   directly (`OneBitKNN(k=..., backend="triton")`); there's no version-
-  numbered builder, and v1/v2/v3 naming lives only at the evaluation-algo
-  layer.
+  numbered builder, and v1/v2/v3/v4 naming lives only at the
+  evaluation-algo layer.
 - The SilverTorch builder (`build_silvertorch`) lives next to its class
   in [`layers/silvertorch/`](../../retrieve/src/retrieve/layers/silvertorch/).
 - Quantizers ship from [`layers/utils/quantize.py`](../../retrieve/src/retrieve/layers/utils/quantize.py):
-  `quantize_int8` (consumed by `SilverTorch`) and
-  `quantize_oporp_1bit` (consumed by `OneBitKNN`). They share the file but
-  no caller; LiNR never sees INT8, SilverTorch never sees OPORP.
+  `quantize_int8` / `quantize_int8_global` (consumed by `SilverTorch`
+  and `Int8SimilarityMasking`) and `quantize_oporp_1bit` (consumed by
+  `OneBitKNN`). They share the file but no caller across families;
+  `OneBitKNN` never sees INT8, `SilverTorch` never sees OPORP.

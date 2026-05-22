@@ -8,7 +8,9 @@ import torch
 from retrieve.kernels.triton.linr.oporp_1bit_match_topk import (
     Oporp1BitMatchTopkConfig,
     _bucket_n,
-    oporp_1bit_match_topk,
+    _oporp_1bit_match_topk_impl,
+    oporp_1bit_match_topk_full,
+    oporp_1bit_match_topk_indirect,
 )
 from retrieve.layers.utils.quantize import (
     popcount_int64,
@@ -71,7 +73,7 @@ def test_oporp_1bit_full_matches_torch(n, d, k, b):
     item_bits, signs, perm = quantize_oporp_1bit(embs, seed=0)
     query_bits = project_oporp_1bit_query(query, signs, perm)
 
-    out_ids, out_scores = oporp_1bit_match_topk(query_bits, item_bits, k)
+    out_ids, out_scores = oporp_1bit_match_topk_full(query_bits, item_bits, k)
     ref_ids, ref_scores = _ref_full(query_bits, item_bits, k)
     assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores)
 
@@ -88,8 +90,8 @@ def test_oporp_1bit_indices_matches_torch(n, d, p, k, b):
     pos = torch.randint(0, n, (b, p), generator=g, device="cuda", dtype=torch.long)
     counts = torch.full((b,), p, dtype=torch.long, device="cuda")
 
-    out_ids, out_scores = oporp_1bit_match_topk(
-        query_bits, item_bits, k, positive_indices=pos, counts=counts
+    out_ids, out_scores = oporp_1bit_match_topk_indirect(
+        query_bits, item_bits, k, pos, counts
     )
     ref_ids, ref_scores = _ref_indices(query_bits, item_bits, pos, counts, k)
     assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores)
@@ -106,8 +108,8 @@ def test_partial_counts_handled():
     pos = torch.randint(0, n, (b, p), generator=g, device="cuda", dtype=torch.long)
     counts = torch.tensor([p, p // 2, 4, 1], dtype=torch.long, device="cuda")
 
-    out_ids, out_scores = oporp_1bit_match_topk(
-        query_bits, item_bits, k, positive_indices=pos, counts=counts
+    out_ids, out_scores = oporp_1bit_match_topk_indirect(
+        query_bits, item_bits, k, pos, counts
     )
     for bi in range(b):
         valid_pool = set(pos[bi, : counts[bi].item()].tolist())
@@ -124,7 +126,7 @@ def test_score_relation_holds():
     item_bits, signs, perm = quantize_oporp_1bit(embs, seed=0)
     query_bits = project_oporp_1bit_query(query, signs, perm)
 
-    out_ids, out_scores = oporp_1bit_match_topk(query_bits, item_bits, k)
+    out_ids, out_scores = oporp_1bit_match_topk_full(query_bits, item_bits, k)
     for bi in range(b):
         for j in range(k):
             iid = int(out_ids[bi, j].item())
@@ -151,7 +153,9 @@ def test_bucket_n_ladder():
 def test_config_override_matches_default_full_and_indexed():
     """Plumbing check: a deliberately-different ``config`` reaches the
     launch and produces identical ids / scores. Exercises both
-    full-scan and has-indices paths."""
+    full-scan and has-indices paths. The public custom_ops drop the
+    ``config`` kwarg (schema can't carry dataclasses), so this calls
+    ``_oporp_1bit_match_topk_impl`` directly."""
     n, d, p, k, b = 1024, 128, 128, 8, 4
     embs = make_index(n, d)
     query = make_query(b, d)
@@ -163,8 +167,12 @@ def test_config_override_matches_default_full_and_indexed():
     assert cfg_a != cfg_b
 
     # Full-scan path.
-    ids_a, scores_a = oporp_1bit_match_topk(query_bits, item_bits, k, config=cfg_a)
-    ids_b, scores_b = oporp_1bit_match_topk(query_bits, item_bits, k, config=cfg_b)
+    ids_a, scores_a = _oporp_1bit_match_topk_impl(
+        query_bits, item_bits, k, None, None, config=cfg_a
+    )
+    ids_b, scores_b = _oporp_1bit_match_topk_impl(
+        query_bits, item_bits, k, None, None, config=cfg_b
+    )
     torch.testing.assert_close(ids_a, ids_b)
     torch.testing.assert_close(scores_a, scores_b)
 
@@ -172,11 +180,11 @@ def test_config_override_matches_default_full_and_indexed():
     g = torch.Generator(device="cuda").manual_seed(42)
     pos = torch.randint(0, n, (b, p), generator=g, device="cuda", dtype=torch.long)
     counts = torch.full((b,), p, dtype=torch.long, device="cuda")
-    ids_a, scores_a = oporp_1bit_match_topk(
-        query_bits, item_bits, k, positive_indices=pos, counts=counts, config=cfg_a
+    ids_a, scores_a = _oporp_1bit_match_topk_impl(
+        query_bits, item_bits, k, pos, counts, config=cfg_a
     )
-    ids_b, scores_b = oporp_1bit_match_topk(
-        query_bits, item_bits, k, positive_indices=pos, counts=counts, config=cfg_b
+    ids_b, scores_b = _oporp_1bit_match_topk_impl(
+        query_bits, item_bits, k, pos, counts, config=cfg_b
     )
     torch.testing.assert_close(ids_a, ids_b)
     torch.testing.assert_close(scores_a, scores_b)

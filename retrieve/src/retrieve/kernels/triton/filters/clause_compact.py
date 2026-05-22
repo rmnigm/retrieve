@@ -22,7 +22,7 @@ import torch
 import triton
 import triton.language as tl
 from torch import Tensor
-from torch.library import custom_op
+from torch.library import triton_op, wrap_triton
 
 
 @dataclass(frozen=True)
@@ -131,9 +131,9 @@ def _clause_compact_impl(
     *,
     config: ClauseCompactConfig | None = None,
 ) -> tuple[Tensor, Tensor]:
-    """Real body for ``clause_compact``. Takes an optional ``config=`` so
-    the offline tuner and unit tests can sweep tile parameters. The public
-    ``@custom_op``-wrapped ``clause_compact`` always passes ``config=None``."""
+    """Direct-launch body used by the offline tuner and unit tests. Takes an
+    optional ``config=`` so tile parameters can be swept; the public
+    ``@triton_op``-wrapped ``clause_compact`` always uses ``DEFAULT_CONFIG``."""
     if item_clause_attrs.dim() != 3:
         raise ValueError("item_clause_attrs must be [N, C, A_max]")
     if query_clause_attrs.dim() != 2:
@@ -191,7 +191,7 @@ def _clause_compact_impl(
     return out_indices, counts
 
 
-@custom_op("retrieve::clause_compact", mutates_args=())
+@triton_op("retrieve::clause_compact", mutates_args=())
 def clause_compact(
     item_clause_attrs: Tensor,  # [N, C, A_max] int64
     clause_is_reverse: Tensor,  # [C] bool
@@ -206,27 +206,53 @@ def clause_compact(
     buffer never costs a re-read. Indices within a row are unordered
     (atomic-add writes).
 
-    Registered as an opaque ``custom_op`` so the algo-level
-    ``torch.compile(dynamic=True, mode="reduce-overhead")`` can stitch
-    this kernel into a single cudagraph_trees graph (no per-call graph
-    break, no ``.item()`` host sync). Delegates to ``_clause_compact_impl``
-    with the shipped ``DEFAULT_CONFIG``.
+    Registered as ``triton_op`` so the kernel launch is captured as a HOP
+    that ``torch.compile(dynamic=True, mode="reduce-overhead")`` can stitch
+    into a single cudagraph_trees graph; the ``torch.full``/``torch.zeros``
+    allocations inside the body act as the fake/meta kernel. Mirrors
+    ``_clause_compact_impl`` but routes the launch through ``wrap_triton``
+    for HOP capture and hard-codes ``DEFAULT_CONFIG``.
     """
-    return _clause_compact_impl(
-        item_clause_attrs, clause_is_reverse, query_clause_attrs, config=None
-    )
+    cfg = DEFAULT_CONFIG
 
+    n, c, a_max = item_clause_attrs.shape
+    b, _ = query_clause_attrs.shape
 
-@clause_compact.register_fake
-def _clause_compact_fake(
-    item_clause_attrs: Tensor,
-    clause_is_reverse: Tensor,
-    query_clause_attrs: Tensor,
-) -> tuple[Tensor, Tensor]:
-    n = item_clause_attrs.shape[0]
-    b = query_clause_attrs.shape[0]
+    item_clause_attrs = item_clause_attrs.contiguous()
+    clause_is_reverse = clause_is_reverse.contiguous().to(torch.int8)
+    query_clause_attrs = query_clause_attrs.contiguous()
+
+    # ``-1`` sentinel + zero counts: see initialisation note in
+    # ``_clause_compact_impl``.
     device = query_clause_attrs.device
-    return (
-        torch.empty((b, n), dtype=torch.int64, device=device),
-        torch.empty((b,), dtype=torch.int64, device=device),
+    out_indices = torch.full((b, n), -1, dtype=torch.int64, device=device)
+    counts = torch.zeros((b,), dtype=torch.int64, device=device)
+
+    tiles = triton.cdiv(n, cfg.block_n)
+    tiles_x = triton.cdiv(tiles, 65535)
+    tiles_y = triton.cdiv(tiles, tiles_x)
+    grid = (b, tiles_y, tiles_x)
+
+    wrap_triton(_clause_compact_kernel)[grid](
+        item_clause_attrs,
+        clause_is_reverse,
+        query_clause_attrs,
+        out_indices,
+        counts,
+        N=n,
+        tiles_y=tiles_y,
+        C=c,
+        A_MAX=a_max,
+        stride_in=item_clause_attrs.stride(0),
+        stride_ic=item_clause_attrs.stride(1),
+        stride_ia=item_clause_attrs.stride(2),
+        stride_qb=query_clause_attrs.stride(0),
+        stride_qc=query_clause_attrs.stride(1),
+        stride_ob=out_indices.stride(0),
+        stride_on=out_indices.stride(1),
+        BLOCK_N=cfg.block_n,
+        num_warps=cfg.num_warps,
+        num_stages=cfg.num_stages,
     )
+
+    return out_indices, counts

@@ -4,8 +4,10 @@ import torch
 from torch import Tensor
 
 from retrieve.interfaces import Backend, RetrievalModule
-from retrieve.kernels.triton.linr.oporp_1bit_match_topk import oporp_1bit_match_topk
-from retrieve.layers.utils.compact import compact_mask
+from retrieve.kernels.triton.linr.oporp_1bit_match_topk import (
+    oporp_1bit_match_topk_full,
+    oporp_1bit_match_topk_indirect,
+)
 from retrieve.layers.utils.quantize import (
     popcount_int64,
     project_oporp_1bit_query,
@@ -43,14 +45,16 @@ class OneBitKNN(RetrievalModule):
     identical packed-bit buffers either way. No internal cast is needed —
     input precision is discarded at bit-pack time.
 
-    With ``backend="triton"`` (default), all three paths route through the
-    fused ``oporp_1bit_match_topk`` kernel: full-scan and indirect-load
-    versions share one kernel via the ``HAS_INDICES`` constexpr.
+    With ``backend="triton"`` (default), both paths route through fused
+    custom_ops — ``oporp_1bit_match_topk_full`` for the dense case,
+    ``oporp_1bit_match_topk_indirect`` when ``candidate_ids`` is given.
+    Both delegate to the same underlying Triton kernel (shared via the
+    ``HAS_INDICES`` constexpr).
 
     With ``backend="torch"``, the same op chain runs eager — callers that
     want Inductor fusion + cudagraph capture should wrap the module with
     ``torch.compile`` themselves. Decoupled from any filter — callers
-    compute ``mask`` or ``candidate_ids`` upstream.
+    compute ``candidate_ids`` (and optionally per-row ``counts``) upstream.
     """
 
     item_bits: Tensor
@@ -80,18 +84,18 @@ class OneBitKNN(RetrievalModule):
     def forward(
         self,
         query: Tensor,
-        mask: Tensor | None = None,
         candidate_ids: Tensor | None = None,
+        counts: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
         if self.backend == "triton":
-            return self._forward_triton(query, mask, candidate_ids)
-        return self._forward_torch_eager(query, mask, candidate_ids)
+            return self._forward_triton(query, candidate_ids, counts)
+        return self._forward_torch_eager(query, candidate_ids, counts)
 
     def _forward_torch_eager(
         self,
         query: Tensor,
-        mask: Tensor | None,
         candidate_ids: Tensor | None,
+        counts: Tensor | None,
     ) -> tuple[Tensor, Tensor]:
         query_bits = project_oporp_1bit_query(query, self.oporp_signs, self.oporp_perm)
         if candidate_ids is not None:
@@ -99,63 +103,56 @@ class OneBitKNN(RetrievalModule):
             xor = query_bits.unsqueeze(1) ^ cand_bits
             hamming = popcount_int64(xor).sum(dim=-1)
             scores = (self.d_total - 2 * hamming).to(torch.float32)
+            if counts is not None:
+                p = candidate_ids.shape[1]
+                valid = (
+                    torch.arange(p, device=candidate_ids.device).unsqueeze(0)
+                    < counts.unsqueeze(1)
+                )
+                scores = scores.masked_fill(~valid, float("-inf"))
             actual_k = min(self.k, scores.shape[1])
             topk_scores, topk_local = torch.topk(scores, actual_k, dim=1)
             topk_ids = candidate_ids.gather(1, topk_local)
+            if counts is not None:
+                topk_ids = torch.where(
+                    torch.isfinite(topk_scores),
+                    topk_ids,
+                    topk_ids.new_full((), -1),
+                )
             return topk_ids, topk_scores
 
         scores = _score_full_oporp_eager(query_bits, self.item_bits)
-        if mask is not None:
-            scores = scores.masked_fill(~mask, float("-inf"))
         topk_scores, topk_ids = torch.topk(scores, self.k, dim=1)
-        if mask is not None:
-            topk_ids = torch.where(
-                torch.isfinite(topk_scores),
-                topk_ids,
-                topk_ids.new_full((), -1),
-            )
         return topk_ids, topk_scores
 
     def _forward_triton(
         self,
         query: Tensor,
-        mask: Tensor | None,
         candidate_ids: Tensor | None,
+        counts: Tensor | None,
     ) -> tuple[Tensor, Tensor]:
-        """Fused-kernel path for all three sub-cases.
+        """Fused-kernel path for full-scan and indirect-load.
 
-        Full path scans every item with contiguous int64-word loads; masked /
-        candidate paths use indirect loads through a positive-indices buffer.
-        Same operation either way — XOR + popcount + ``D - 2 * hamming`` — so
-        there's no separate dequant or fp32 dot. Popcount is cheap enough
-        that the gather penalty never crosses the dense-fallback break-even
-        point; a single sparse path covers all cases.
+        Full path scans every item with contiguous int64-word loads; the
+        indirect path uses indirect loads through ``candidate_ids`` gated
+        by per-row ``counts``. Same operation either way — XOR + popcount
+        + ``D - 2 * hamming`` — so there's no separate dequant or fp32
+        dot. Popcount is cheap enough that the gather penalty never
+        crosses the dense-fallback break-even point; a single sparse path
+        covers all cases.
         """
         query_bits = self._project_query(query)
 
-        if candidate_ids is not None:
+        if candidate_ids is None:
+            return oporp_1bit_match_topk_full(query_bits, self.item_bits, self.k)
+
+        if counts is None:
             counts = torch.full(
                 (candidate_ids.shape[0],),
                 candidate_ids.shape[1],
                 dtype=torch.long,
                 device=query.device,
             )
-            return oporp_1bit_match_topk(
-                query_bits,
-                self.item_bits,
-                self.k,
-                positive_indices=candidate_ids,
-                counts=counts,
-            )
-
-        if mask is None:
-            return oporp_1bit_match_topk(query_bits, self.item_bits, self.k)
-
-        positive_indices, counts = compact_mask(mask)
-        return oporp_1bit_match_topk(
-            query_bits,
-            self.item_bits,
-            self.k,
-            positive_indices=positive_indices,
-            counts=counts,
+        return oporp_1bit_match_topk_indirect(
+            query_bits, self.item_bits, self.k, candidate_ids, counts
         )

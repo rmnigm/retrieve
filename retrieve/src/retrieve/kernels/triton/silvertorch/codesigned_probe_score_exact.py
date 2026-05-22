@@ -6,6 +6,7 @@ import torch
 import triton
 import triton.language as tl
 from torch import Tensor
+from torch.library import custom_op
 
 from retrieve.layers.utils.quantize import quantize_int8
 
@@ -128,8 +129,7 @@ def _codesigned_probe_score_exact_kernel(
     )
 
 
-@torch._dynamo.disable
-def codesigned_probe_score_exact(
+def _codesigned_probe_score_exact_impl(
     query: Tensor,
     flat_probed_items: Tensor,
     item_codes: Tensor,
@@ -168,6 +168,10 @@ def codesigned_probe_score_exact(
 
     Returns ``(ids[B, K], scores[B, K])``; pads with ``-1`` / ``-inf`` when
     fewer than K candidates pass.
+
+    Internal tune/test entry point — production callers go through the
+    ``@custom_op`` wrapper ``codesigned_probe_score_exact`` below, which drops
+    the ``config=`` kwarg.
     """
     if query.dim() != 2 or flat_probed_items.dim() != 2:
         raise ValueError("query must be [B, D] and flat_probed_items [B, P]")
@@ -189,15 +193,7 @@ def codesigned_probe_score_exact(
     if clause_is_reverse.shape != (c,):
         raise ValueError(f"clause_is_reverse must be [{c}], got {tuple(clause_is_reverse.shape)}")
 
-    if p == 0:
-        return (
-            torch.full((b, k), -1, dtype=torch.long, device=query.device),
-            torch.full((b, k), float("-inf"), dtype=torch.float32, device=query.device),
-        )
-
-    # Per-batch query int8 quantization. One amax + scalar div per row —
-    # cheap, and inside the dynamo-disabled wrapper so the caller's compile
-    # graph doesn't have to know about it.
+    # Per-batch query int8 quantization. One amax + scalar div per row.
     q_codes, q_scales = quantize_int8(query)
     q_codes = q_codes.contiguous()
     q_scales = q_scales.contiguous()
@@ -266,3 +262,53 @@ def codesigned_probe_score_exact(
     out_ids[:, :actual_k] = topk_ids
     out_scores[:, :actual_k] = topk_scores
     return out_ids, out_scores
+
+
+@custom_op("retrieve::codesigned_probe_score_exact", mutates_args=())
+def codesigned_probe_score_exact(
+    query: Tensor,
+    flat_probed_items: Tensor,
+    item_codes: Tensor,
+    item_clause_attrs: Tensor,
+    clause_is_reverse: Tensor,
+    query_clause_attrs: Tensor,
+    global_scale: float,
+    k: int,
+) -> tuple[Tensor, Tensor]:
+    """Production wrapper for ``_codesigned_probe_score_exact_impl`` with the
+    default tile config. Registered as an opaque ``custom_op`` so dynamo can
+    stitch the caller's compiled forward into a single cudagraph (no graph
+    break per call). The ``config=`` keyword is dropped because ``custom_op``'s
+    schema inference doesn't accept dataclass args; tune scripts and parity
+    tests that need a non-default config call
+    ``_codesigned_probe_score_exact_impl`` directly.
+    """
+    return _codesigned_probe_score_exact_impl(
+        query,
+        flat_probed_items,
+        item_codes,
+        global_scale,
+        k,
+        item_clause_attrs=item_clause_attrs,
+        clause_is_reverse=clause_is_reverse,
+        query_clause_attrs=query_clause_attrs,
+        config=None,
+    )
+
+
+@codesigned_probe_score_exact.register_fake
+def _codesigned_probe_score_exact_fake(
+    query: Tensor,
+    flat_probed_items: Tensor,
+    item_codes: Tensor,
+    item_clause_attrs: Tensor,
+    clause_is_reverse: Tensor,
+    query_clause_attrs: Tensor,
+    global_scale: float,
+    k: int,
+) -> tuple[Tensor, Tensor]:
+    b = query.shape[0]
+    device = query.device
+    ids = torch.empty((b, k), dtype=torch.long, device=device)
+    scores = torch.empty((b, k), dtype=torch.float32, device=device)
+    return ids, scores
