@@ -37,6 +37,7 @@ from .filter import build_filter, make_mask
 from .linr_v1 import LinrV1Algo
 from .linr_v2 import LinrV2Algo
 from .linr_v3 import LinrV3Algo
+from .linr_v4 import LinrV4Algo
 from .silvertorch import SilvertorchAlgo
 from .torch_knn import TorchKnnAlgo
 
@@ -45,6 +46,7 @@ ALGORITHMS = (
     "triton_knn",
     "linr_v1_filter_mask",
     "linr_v3",
+    "linr_v4",
     "linr_v2",
     "silvertorch",
 )
@@ -53,7 +55,7 @@ ALGORITHMS = (
 # Algos that accept a `backend` parameter. Algos outside this set (currently
 # only `torch_knn`) emit a single row regardless of `cfg.backends`.
 BACKEND_CAPABLE_ALGOS = frozenset(
-    {"triton_knn", "linr_v1_filter_mask", "linr_v2", "linr_v3", "silvertorch"}
+    {"triton_knn", "linr_v1_filter_mask", "linr_v2", "linr_v3", "linr_v4", "silvertorch"}
 )
 
 
@@ -92,6 +94,9 @@ def build_algorithm(
             filter_mod=filter_mod,
             backend=backend,
         )
+
+    if name == "linr_v4":
+        return LinrV4Algo(item_embs, k, filter_mod=filter_mod, backend=backend)
 
     if name == "linr_v2":
         if filter_mod is None:

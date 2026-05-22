@@ -5,6 +5,7 @@ from retrieve.layers.filters import (
     combine_masks,
 )
 from retrieve.layers.linr import (
+    Int8SimilarityMasking,
     OneBitKNN,
     PrefilterKNN,
     SimilarityMasking,
@@ -27,6 +28,7 @@ __all__ = [
     "DotProductScorer",
     "ExactAttributeFilter",
     "FullScanKNN",
+    "Int8SimilarityMasking",
     "KMeansTorch",
     "OneBitKNN",
     "PrefilterKNN",

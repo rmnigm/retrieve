@@ -19,7 +19,14 @@ class PrefilterKNN(RetrievalModule):
     backend (no fusion to win over cuBLAS).
 
     With ``backend="triton"``, the sparse path uses the
-    ``fused_masked_knn_topk`` kernel — no ``[B, P, D]`` intermediate.
+    ``fused_masked_knn_topk`` kernel — no ``[B, P, D]`` intermediate. The
+    kernel casts loaded operands to fp32 inside its scalar accumulator, so
+    dot-product precision is identical regardless of storage dtype.
+
+    **Precision.** ``item_embs`` and ``query`` may be fp32 or fp16; both are
+    cast to fp16 internally (storage is fp16). torch ``bmm`` / matmul on
+    fp16 uses tensor cores with a fp32 accumulator; the Triton sparse path
+    casts to fp32 inside the reduction. See the layer-package docstring.
 
     Decoupled from any filter — callers compute ``(candidate_ids, counts)``
     upstream (e.g. ``ExactAttributeFilter.evaluate_indices``, ``compact_mask``
@@ -35,7 +42,7 @@ class PrefilterKNN(RetrievalModule):
         self.backend = backend
 
     def register_index(self, item_embs: Tensor) -> None:
-        self.register_buffer("item_embs", item_embs)
+        self.register_buffer("item_embs", item_embs.to(torch.float16))
 
     def forward(
         self,
@@ -43,6 +50,7 @@ class PrefilterKNN(RetrievalModule):
         candidate_ids: Tensor | None = None,
         counts: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
+        query = query.to(torch.float16)
         if candidate_ids is None:
             return self._forward_full(query)
         if self.backend == "triton":

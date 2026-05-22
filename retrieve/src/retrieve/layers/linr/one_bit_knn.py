@@ -37,6 +37,12 @@ class OneBitKNN(RetrievalModule):
     dim. Scoring is ``D - 2 * popcount(query_bits ^ item_bits)`` — purely
     bitwise, 16× memory reduction vs fp16. See docs/system/architecture.md.
 
+    **Precision.** ``item_embs`` and ``query`` may be fp32 or fp16; the
+    Sign-OPORP projection is sign-stable across float dtypes (sign of a
+    non-zero fp32 value equals sign of its fp16 round) and produces
+    identical packed-bit buffers either way. No internal cast is needed —
+    input precision is discarded at bit-pack time.
+
     With ``backend="triton"`` (default), all three paths route through the
     fused ``oporp_1bit_match_topk`` kernel: full-scan and indirect-load
     versions share one kernel via the ``HAS_INDICES`` constexpr.

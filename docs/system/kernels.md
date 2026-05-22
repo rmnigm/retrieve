@@ -35,8 +35,13 @@ All kernels follow the same conventions:
   buffer and the host calls `torch.topk` on it. CUB's top-K (under torch)
   is faster than anything we can implement in pure Triton without a
   warp-level radix-select primitive.
-- Autotune key is shape-only (`B`, `N`, `D`, `P`, `W`, `HAS_INDICES`,
-  etc.). Block sizes and `num_warps` are searched; `num_stages=3` is fixed.
+- Tile config (`BLOCK_N`, `num_warps`, `num_stages`) is offline-tuned per
+  kernel and shipped as a single `DEFAULT_CONFIG` constant on the
+  kernel module. No runtime `@triton.autotune`. Callers who want a
+  non-default tile pass `config=<Kernel>Config(...)` to the host
+  wrapper; the `evaluation/scripts/tune_kernels.py` CLI sweeps the
+  candidate grid on a given arch and prints the line to paste into the
+  kernel file.
 
 ## Score conventions
 
@@ -126,17 +131,24 @@ kernel (real dot or `-inf`), so the post-topk `where(isfinite(scores),
 …, -1)` mask sees deterministic values without a `torch.full(-inf)`
 pre-fill kernel launch.
 
-**Autotune** searches `(BLOCK_N ∈ {32, 64, 128, 256}, num_warps ∈ {4, 8})`
-keyed on `(P_BUCKET, D)`. `P_BUCKET` is the actual `P` rounded up via
-`_bucket_p` to one of `{256, 2048, 16384, 131072, 1048576}`, so the
-autotune cache compiles once per bucket regardless of how
-`counts.max()` shifts across calls. The runtime mask uses `P_REAL`
-(actual width), passed as a non-constexpr int with
-`@triton.jit(do_not_specialize=["P_REAL"])` so it doesn't re-trigger
-specialization on every distinct width. Net: caller passes
-`positive_indices[B, P_real]`, kernel grid is `cdiv(P_real, BLOCK_N)`,
-score buffer is `[B, P_real]`, and the only thing that crosses bucket
-boundaries is recompilation.
+**Tile config.** `FusedMaskedKnnTopkConfig(block_n, num_warps,
+num_stages)` — shipped as `DEFAULT_CONFIG` on the kernel module; pass
+`config=` to override. Re-tune on a new arch via `uv run tune-kernels
+--kernel fused_masked_knn_topk` and paste the printed
+`DEFAULT_CONFIG = ...` line.
+
+**Bucketing.** `P` is rounded up via `_bucket_p` to one of `{256, 2048,
+16384, 131072, 1048576}` and passed as `tl.constexpr` to the kernel,
+so the JIT cache compiles once per bucket × D regardless of how
+`counts.max()` shifts across calls (the role this used to play as the
+autotune cache key). The host wrapper allocates the score buffer at
+`[B, P_BUCKET]` so the kernel's `n_offsets < P` store mask sees a
+stable width; lanes in `[P_real, P_BUCKET)` get `-inf` automatically
+because `count[bid] <= P_real`, so the `in_count` mask gates them. The
+caller-supplied `positive_indices` stays at width `P_real`; the
+post-topk `gather` clamps `topk_local` to `P_real - 1` before
+indexing (the `where(isfinite, …, -1)` mask then overwrites those
+slots with the `-1` sentinel).
 
 ## `oporp_1bit_match_topk` — V3 (all paths)
 
@@ -173,8 +185,21 @@ already-winning kernel of identical shape: int64-word reduction over `W`).
 indirect `pos_indices[b, n_off]` lookup; otherwise identical. Used for
 candidate-set rerank and for the masked V3 path (after `compact_mask`).
 
-**Autotune** searches `(BLOCK_N ∈ {64, 128, 256, 512}, num_warps ∈ {4, 8})`
-keyed on `(n, W, HAS_INDICES)`.
+**Tile config.** `Oporp1BitMatchTopkConfig(block_n, num_warps,
+num_stages)` — shipped as `DEFAULT_CONFIG` on the kernel module; pass
+`config=` to override. Re-tune on a new arch via `uv run tune-kernels
+--kernel oporp_1bit_match_topk`.
+
+**Bucketing.** For the `HAS_INDICES=True` path, the candidate width
+`n_loop = positive_indices.shape[1]` is rounded up via `_bucket_n` to
+one of `{4096, 65536, 1048576, 16777216}` and passed as `tl.constexpr
+N` — same JIT-cache invariant as `fused_masked_knn_topk`. The score
+buffer is allocated at the bucketed width; `positive_indices` stays at
+its caller width. The kernel's indirect `pos_indices` load is gated by
+`in_count = (n_off < count[bid])` (not `n_valid = (n_off < N)`)
+so it never reads OOB when `N > n_loop`. For `HAS_INDICES=False`,
+`N = item_bits.shape[0]` is fixed per registered index — no bucketing
+needed.
 
 ## `clause_compact` — fused clause eval + stream compaction
 
@@ -495,9 +520,14 @@ unchanged.
 
 The launch grid is `(cdiv(P, BLOCK_P), B)` — tile axis on **grid_x**
 (≤ 2³¹) since `n_probe × max_cluster_size` can exceed the 65,535 limit
-on grid_y/grid_z at large catalogs. Autotune key is
-`["P", "D", "W", "HAS_QB"]`, so the bloom-on and bloom-off paths each
-get their own configs. Score buffer is `torch.empty([B, P])` — every
+on grid_y/grid_z at large catalogs. **Tile config.**
+`CodesignedProbeScoreConfig(block_p, num_warps, num_stages)` — shipped
+as `DEFAULT_CONFIG` on the kernel module; pass `config=` to override.
+Re-tune on a new arch via `uv run tune-kernels --kernel
+codesigned_probe_score`. `P = n_probe * max_cluster_size` is fixed per
+registered SilverTorch index, so no bucketing is needed; `HAS_QB`
+remains a body-level constexpr (the bloom-on and bloom-off paths still
+JIT-specialise on it). Score buffer is `torch.empty([B, P])` — every
 in-bounds lane is overwritten (real dot or `-inf`), so no pre-fill
 kernel is needed. The host then `torch.topk` on it and gathers global
 ids; if `P < K` the output is padded with `-1` / `-inf` to width `K`.
