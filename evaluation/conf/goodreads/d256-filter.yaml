@@ -14,6 +14,7 @@ _defaults: &defaults
     - linr_v1_filter_mask
     - linr_v2
     - linr_v3
+    - linr_v4
     - silvertorch
   # Backends to sweep — both wrapped with torch.compile(mode="reduce-overhead")
   # (see the Algo classes for the call site).
