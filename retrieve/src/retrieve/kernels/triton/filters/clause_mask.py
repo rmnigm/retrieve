@@ -11,6 +11,7 @@ import torch
 import triton
 import triton.language as tl
 from torch import Tensor
+from torch.library import custom_op
 
 # No atomics — autotune would be safe but compile-time cost is not yet
 # justified. Start with a fixed config; benchmark before tuning.
@@ -73,7 +74,7 @@ def _clause_mask_kernel(
     )
 
 
-@torch._dynamo.disable
+@custom_op("retrieve::clause_mask", mutates_args=())
 def clause_mask(
     item_clause_attrs: Tensor,  # [N, C, A_max] int64
     clause_is_reverse: Tensor,  # [C] bool
@@ -81,11 +82,13 @@ def clause_mask(
 ) -> Tensor:
     """Fused clause evaluation → ``[B, N]`` bool. No intermediate.
 
-    Int args (shapes, strides) are cast through ``int(...)`` at the kernel
-    launch site: under ``torch.compile(dynamic=True)`` they arrive as
-    ``torch.SymInt`` and ``triton.jit`` can't construct ``ConstantVariable``
-    from those. The cast forces specialization at trace time; values are
-    static per index instance so it costs nothing.
+    Registered as an opaque ``custom_op`` so dynamo doesn't trace into the
+    Triton launch (it can't construct ``ConstantVariable`` from the
+    ``torch.SymInt`` shapes/strides under ``dynamic=True``). The op body
+    runs on real tensors with concrete Python ints — the inner cast through
+    ``int(...)`` on shape/stride kwargs stays since ``triton.jit`` requires
+    Python ints for ``tl.constexpr`` lanes (free specialization since
+    values are static per index instance).
     """
     if item_clause_attrs.dim() != 3:
         raise ValueError("item_clause_attrs must be [N, C, A_max]")
@@ -126,3 +129,14 @@ def clause_mask(
     )
 
     return out
+
+
+@clause_mask.register_fake
+def _clause_mask_fake(
+    item_clause_attrs: Tensor,
+    clause_is_reverse: Tensor,
+    query_clause_attrs: Tensor,
+) -> Tensor:
+    n = item_clause_attrs.shape[0]
+    b = query_clause_attrs.shape[0]
+    return torch.empty((b, n), dtype=torch.bool, device=query_clause_attrs.device)

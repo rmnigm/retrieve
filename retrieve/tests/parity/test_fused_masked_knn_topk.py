@@ -13,7 +13,12 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.kernels.triton.linr.fused_masked_knn_topk import fused_masked_knn_topk
+from retrieve.kernels.triton.linr.fused_masked_knn_topk import (
+    FusedMaskedKnnTopkConfig,
+    _bucket_p,
+    _fused_masked_knn_topk_impl,
+    fused_masked_knn_topk,
+)
 from retrieve.layers.utils.compact import compact_mask
 from tests.conftest import make_index, make_mask, make_query
 from tests.parity.conftest import assert_topk_matches
@@ -161,47 +166,45 @@ def test_empty_score_buffer_does_not_leak(monkeypatch):
     )
 
 
-def test_autotune_cache_stays_bucketed():
-    """Phase 2 regression: ``P_REAL`` is passed as a runtime int with
-    ``do_not_specialize``, so the autotune cache key is driven by
-    ``P_BUCKET`` (and ``D``), not by every distinct ``P_real``. Sweeping
-    ``P_real`` across values that all map to the same bucket must not
-    grow the cache.
+def test_bucket_p_ladder():
+    """``_bucket_p`` rounds runtime P up to a fixed ladder. The kernel's
+    ``P: tl.constexpr`` is sized by this value, so two distinct runtime
+    widths in the same bucket compile once (autotune's prior cache
+    invariant — now a JIT-cache invariant)."""
+    assert _bucket_p(1) == 256
+    assert _bucket_p(256) == 256
+    assert _bucket_p(257) == 2048
+    assert _bucket_p(2000) == 2048
+    assert _bucket_p(2048) == 2048
+    assert _bucket_p(2049) == 16384
+    assert _bucket_p(131072) == 131072
+    # Past the last static bucket: next power of 2.
+    assert _bucket_p(1_048_577) == 1 << 21
+
+
+def test_config_override_matches_default():
+    """Plumbing check: a deliberately-different ``config`` reaches the
+    launch and produces the same ids / scores as the default. The
+    ``cfg_a != cfg_b`` assertion makes the override observable to a
+    reviewer; if the wrapper ignored ``config`` (e.g. forgot to thread
+    it to the ``BLOCK_N`` kwarg) the cfg_a/cfg_b run would silently
+    use the same tile.
     """
-    from retrieve.kernels.triton.linr.fused_masked_knn_topk import (
-        _fused_masked_knn_topk_kernel,
-        _bucket_p,
-    )
-
-    n, d, k = 2048, 64, 16
+    b, n, d, k = 4, 1024, 64, 16
     embs = make_index(n, d)
-    query = make_query(4, d)
+    query = make_query(b, d)
+    mask = make_mask(b, n, pass_rate=0.1)
+    pos, counts = compact_mask(mask)
 
-    # Pick four pass_rates that all keep counts.max() in (256, 2048] →
-    # bucket=2048 for all of them.
-    p_reals = []
-    for pass_rate in (0.18, 0.22, 0.30, 0.42):
-        mask = make_mask(4, n, pass_rate=pass_rate)
-        pos, counts = compact_mask(mask)
-        assert _bucket_p(pos.shape[1]) == 2048, (
-            f"setup precondition: pass_rate={pass_rate} → P_real={pos.shape[1]} "
-            f"must bucket to 2048"
-        )
-        p_reals.append(pos.shape[1])
-        _ = fused_masked_knn_topk(query, embs, pos, counts, k)
+    cfg_a = FusedMaskedKnnTopkConfig(block_n=64, num_warps=4)
+    cfg_b = FusedMaskedKnnTopkConfig(block_n=256, num_warps=8)
+    assert cfg_a != cfg_b
 
-    assert len(set(p_reals)) > 1, (
-        f"setup precondition: P_real should vary across the sweep, got {p_reals}"
-    )
-    # All sweep entries share one autotune cache slot — keyed on (P_BUCKET=2048, D=64, dtypes).
-    bucket_2048_keys = [
-        key for key in _fused_masked_knn_topk_kernel.cache.keys() if key[0] == 2048 and key[1] == d
-    ]
-    assert len(bucket_2048_keys) == 1, (
-        f"expected exactly 1 cache entry for (P_BUCKET=2048, D={d}); "
-        f"got {len(bucket_2048_keys)}: {bucket_2048_keys}. "
-        f"P_REAL specialization may have leaked into the cache key."
-    )
+    ids_a, scores_a = _fused_masked_knn_topk_impl(query, embs, pos, counts, k, config=cfg_a)
+    ids_b, scores_b = _fused_masked_knn_topk_impl(query, embs, pos, counts, k, config=cfg_b)
+    # Same inputs → identical output regardless of tile config.
+    torch.testing.assert_close(ids_a, ids_b)
+    torch.testing.assert_close(scores_a, scores_b)
 
 
 def test_compact_kernel_initialises_buffer_to_minus_one():

@@ -5,7 +5,11 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.kernels.triton.linr.oporp_1bit_match_topk import oporp_1bit_match_topk
+from retrieve.kernels.triton.linr.oporp_1bit_match_topk import (
+    Oporp1BitMatchTopkConfig,
+    _bucket_n,
+    oporp_1bit_match_topk,
+)
 from retrieve.layers.utils.quantize import (
     popcount_int64,
     project_oporp_1bit_query,
@@ -128,3 +132,51 @@ def test_score_relation_holds():
             hamming = int(popcount_int64(xor).sum().item())
             expected = d - 2 * hamming
             assert abs(out_scores[bi, j].item() - expected) < 1e-3
+
+
+def test_bucket_n_ladder():
+    """``_bucket_n`` rounds runtime candidate width up to a fixed ladder so
+    the kernel's ``N: tl.constexpr`` only takes a handful of distinct
+    values (one JIT compile per bucket × W)."""
+    assert _bucket_n(1) == 4096
+    assert _bucket_n(4096) == 4096
+    assert _bucket_n(4097) == 65536
+    assert _bucket_n(65536) == 65536
+    assert _bucket_n(1_000_000) == 1_048_576
+    assert _bucket_n(1_048_577) == 16_777_216
+    # Past the last static bucket: next power of 2.
+    assert _bucket_n(20_000_000) == 1 << 25
+
+
+def test_config_override_matches_default_full_and_indexed():
+    """Plumbing check: a deliberately-different ``config`` reaches the
+    launch and produces identical ids / scores. Exercises both
+    full-scan and has-indices paths."""
+    n, d, p, k, b = 1024, 128, 128, 8, 4
+    embs = make_index(n, d)
+    query = make_query(b, d)
+    item_bits, signs, perm = quantize_oporp_1bit(embs, seed=0)
+    query_bits = project_oporp_1bit_query(query, signs, perm)
+
+    cfg_a = Oporp1BitMatchTopkConfig(block_n=64, num_warps=4)
+    cfg_b = Oporp1BitMatchTopkConfig(block_n=256, num_warps=8)
+    assert cfg_a != cfg_b
+
+    # Full-scan path.
+    ids_a, scores_a = oporp_1bit_match_topk(query_bits, item_bits, k, config=cfg_a)
+    ids_b, scores_b = oporp_1bit_match_topk(query_bits, item_bits, k, config=cfg_b)
+    torch.testing.assert_close(ids_a, ids_b)
+    torch.testing.assert_close(scores_a, scores_b)
+
+    # Has-indices path.
+    g = torch.Generator(device="cuda").manual_seed(42)
+    pos = torch.randint(0, n, (b, p), generator=g, device="cuda", dtype=torch.long)
+    counts = torch.full((b,), p, dtype=torch.long, device="cuda")
+    ids_a, scores_a = oporp_1bit_match_topk(
+        query_bits, item_bits, k, positive_indices=pos, counts=counts, config=cfg_a
+    )
+    ids_b, scores_b = oporp_1bit_match_topk(
+        query_bits, item_bits, k, positive_indices=pos, counts=counts, config=cfg_b
+    )
+    torch.testing.assert_close(ids_a, ids_b)
+    torch.testing.assert_close(scores_a, scores_b)
