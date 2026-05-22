@@ -1,16 +1,20 @@
-"""SilverTorch — IVF + INT8 ANN, two valid construction modes.
+"""SilverTorch — IVF + INT8 ANN, three valid construction modes.
 
 * ``filter_kind="bloom"``: codesigned bloom-fused IVF. Item bloom
   signatures over the narrow attrs are baked into the IVF at register
   time and filter during the probe; the query forward passes
   ``query_clause_attrs=qa_narrow`` so the kernel checks bloom bits inline.
+* ``filter_kind="clause"``: codesigned exact-clause-fused IVF. Item
+  clause attributes are stored as ``[N, C, A_max]`` int64 alongside the
+  IVF and the AND/OR/XOR predicate is evaluated inside the probe — same
+  fused-filter shape as the bloom path, no false positives. Enabled by
+  the ``codesigned_probe_score_exact`` kernel.
 * ``filter_kind="none"``: plain IVF + INT8, no filter.
 
-``filter_kind="clause"`` is rejected at construction. Post-mask IVF
-probe (mask gated outside the kernel after probe) systematically
-under-recalls because masked-in items outside the ``n_probe`` nearest
-clusters never get scored — silvertorch is meant to do the filtering
-*inside* the probe (codesigned bloom) or not at all.
+A pre-existing "post-mask IVF" composition was rejected because masked-in
+items outside the ``n_probe`` nearest clusters never get scored. The
+codesigned exact kernel sidesteps that — filtering happens *inside* the
+probe, never after it.
 """
 
 from __future__ import annotations
@@ -42,14 +46,14 @@ class SilvertorchAlgo(nn.Module):
         backend: Backend = "triton",
     ) -> None:
         super().__init__()
-        if filter_kind not in ("none", "bloom"):
+        if filter_kind not in ("none", "bloom", "clause"):
             raise ValueError(
-                f"silvertorch supports filter_kind in (none, bloom); "
-                f"got {filter_kind!r} — use codesigned bloom or no filter."
+                f"silvertorch supports filter_kind in (none, bloom, clause); "
+                f"got {filter_kind!r}."
             )
-        self._fused = filter_kind == "bloom"
+        self._filter_kind = filter_kind
         device = item_embs.device
-        if self._fused:
+        if filter_kind == "bloom":
             if item_attrs_narrow is None:
                 raise ValueError(
                     "silvertorch on filter_kind=bloom needs item_attrs_narrow "
@@ -59,8 +63,25 @@ class SilvertorchAlgo(nn.Module):
                 k=k,
                 n_lists=n_lists,
                 n_probe=n_probe,
+                filter="bloom",
                 m_bits=m_bits,
                 k_hash=k_hash,
+                n_iter=n_iter,
+                seed=seed,
+                backend=backend,
+            ).to(device)
+            self.idx.register_index(item_embs, item_clause_attrs=item_attrs_narrow)
+        elif filter_kind == "clause":
+            if item_attrs_narrow is None:
+                raise ValueError(
+                    "silvertorch on filter_kind=clause needs item_attrs_narrow "
+                    "for the codesigned exact-clause IVF build"
+                )
+            self.idx = SilverTorch(
+                k=k,
+                n_lists=n_lists,
+                n_probe=n_probe,
+                filter="exact",
                 n_iter=n_iter,
                 seed=seed,
                 backend=backend,
@@ -80,7 +101,7 @@ class SilvertorchAlgo(nn.Module):
         self.compile(dynamic=True, mode="reduce-overhead")
 
     def forward(self, q: Tensor, qa_narrow: Tensor | None = None) -> tuple[Tensor, Tensor]:
-        if self._fused:
+        if self._filter_kind in ("bloom", "clause"):
             assert qa_narrow is not None
             return self.idx(q, query_clause_attrs=qa_narrow)
         return self.idx(q, query_clause_attrs=None)

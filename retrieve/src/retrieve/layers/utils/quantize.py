@@ -33,6 +33,28 @@ def quantize_int8(embs: Tensor) -> tuple[Tensor, Tensor]:
     return codes, scales
 
 
+def quantize_int8_global(embs: Tensor) -> tuple[Tensor, float]:
+    """Symmetric per-tensor INT8 quantization — one scalar scale for the index.
+
+    The SilverTorch paper's int8 ANN scheme (§4.2): "compute global min/max
+    values across all embeddings, scale them to [-128, 127], and assign
+    integer representations accordingly." A single scalar lets the kernel
+    apply one scalar multiply per item in the dequant epilogue, vs a
+    per-item gather under per-row scales — at the cost of coarser
+    reconstruction (an outlier row stretches the global scale, narrowing
+    the int8 lattice for every other row).
+
+    Returns ``(codes[N, D] int8, scale: float)`` with reconstruction
+    ``embs ≈ codes.float() * scale``. For higher quality at the cost of an
+    extra ``[N]`` fp32 buffer + a per-item gather in the kernel, use
+    ``quantize_int8`` and store its per-row scales instead.
+    """
+    abs_max = embs.abs().amax().clamp(min=1e-8)
+    scale = float((abs_max / 127.0).item())
+    codes = (embs / abs_max * 127.0).round().clamp(-128, 127).to(torch.int8)
+    return codes, scale
+
+
 def _build_oporp(d: int, seed: int, device: torch.device) -> tuple[Tensor, Tensor]:
     g = torch.Generator(device=device)
     g.manual_seed(int(seed))

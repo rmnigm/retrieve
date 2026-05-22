@@ -4,6 +4,7 @@ import torch
 import triton
 import triton.language as tl
 from torch import Tensor
+from torch.library import custom_op
 
 
 @triton.jit
@@ -48,7 +49,7 @@ def _bloom_match_kernel(
     )
 
 
-@torch._dynamo.disable
+@custom_op("retrieve::bloom_match", mutates_args=())
 def bloom_match(qb: Tensor, sigs: Tensor) -> Tensor:
     """Compute (qb & sig) == qb across W int64 words.
 
@@ -57,6 +58,11 @@ def bloom_match(qb: Tensor, sigs: Tensor) -> Tensor:
         sigs: [N, W] int64 — packed item bloom signatures.
 
     Returns BoolTensor [B, N].
+
+    Registered as an opaque ``custom_op`` so the algo-level
+    ``torch.compile(dynamic=True, mode="reduce-overhead")`` can stitch
+    this kernel into a single cudagraph_trees graph (no per-call graph
+    break).
     """
     b, w = qb.shape
     n = sigs.shape[0]
@@ -84,3 +90,10 @@ def bloom_match(qb: Tensor, sigs: Tensor) -> Tensor:
         BLOCK_N=block_n,
     )
     return out
+
+
+@bloom_match.register_fake
+def _bloom_match_fake(qb: Tensor, sigs: Tensor) -> Tensor:
+    b = qb.shape[0]
+    n = sigs.shape[0]
+    return torch.empty((b, n), dtype=torch.bool, device=qb.device)

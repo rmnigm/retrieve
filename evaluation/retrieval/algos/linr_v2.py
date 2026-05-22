@@ -34,6 +34,8 @@ class LinrV2Algo(nn.Module):
         backend: Backend = "triton",
     ) -> None:
         super().__init__()
+        # PrefilterKNN handles the fp32→fp16 cast; see retrieve.layers.linr
+        # package docstring.
         self.idx = PrefilterKNN(k=k, backend=backend).to(item_embs.device)
         self.idx.register_index(item_embs)
         self.filter_mod = filter_mod

@@ -47,6 +47,10 @@ class LinrV3Algo(nn.Module):
     ) -> None:
         super().__init__()
         device = item_embs.device
+        # Stage 1 (OneBitKNN) is dtype-agnostic — sign-OPORP discards float
+        # precision at bit-pack time. Stage 2 (PrefilterKNN) casts to fp16
+        # internally for paper-faithful storage. See retrieve.layers.linr
+        # package docstring for the full precision contract.
         self.stage1 = OneBitKNN(k=candidate_pool, seed=v3_seed, backend=backend).to(device)
         self.stage1.register_index(item_embs)
         self.stage2 = PrefilterKNN(k=k, backend=backend).to(device)
