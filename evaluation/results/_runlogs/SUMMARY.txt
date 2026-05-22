@@ -1,20 +1,11 @@
-started at: 2026-05-18T23:27:13Z
-host:       9104822d32fe
+started at: 2026-05-22T22:47:15Z
+host:       fd4a94de96b9
 gpu:        NVIDIA A100-SXM4-80GB
 
-=== 2026-05-18T23:27:13Z starting conf/arxiv/d64-filter.yaml ===
-conf/arxiv/d64-filter.yaml  exit=0  duration=7803s (2h10m)  log=results/_runlogs/arxiv_d64-filter.log
-=== 2026-05-19T01:37:16Z starting conf/arxiv/d128-filter.yaml ===
-conf/arxiv/d128-filter.yaml  exit=0  duration=7478s (2h4m)  log=results/_runlogs/arxiv_d128-filter.log
-=== 2026-05-19T03:41:54Z starting conf/arxiv/d256-filter.yaml ===
-conf/arxiv/d256-filter.yaml  exit=1  duration=3239s (0h53m)  log=results/_runlogs/arxiv_d256-filter.log
-=== 2026-05-19T04:35:53Z starting conf/goodreads/d64-filter.yaml ===
-conf/goodreads/d64-filter.yaml  exit=0  duration=5296s (1h28m)  log=results/_runlogs/goodreads_d64-filter.log
-=== 2026-05-19T06:04:09Z starting conf/goodreads/d128-filter.yaml ===
-conf/goodreads/d128-filter.yaml  exit=0  duration=5386s (1h29m)  log=results/_runlogs/goodreads_d128-filter.log
-=== 2026-05-19T07:33:55Z starting conf/goodreads/d256-filter.yaml ===
-
---- resume run @ 2026-05-19T09:38:41Z ---
-=== 2026-05-19T09:38:41Z starting conf/arxiv/d256-filter.yaml ===
-conf/arxiv/d256-filter.yaml  exit=0  duration=15173s (4h12m)  log=results/_runlogs/arxiv_d256-filter.log
-=== 2026-05-19T13:51:34Z starting conf/goodreads/d256-filter.yaml ===
+=== 2026-05-22T22:47:15Z starting conf/arxiv/d64-filter.yaml ===
+conf/arxiv/d64-filter.yaml  exit=0  duration=12s (0h0m)  log=results/_runlogs/arxiv_d64-filter.log
+=== 2026-05-22T22:47:27Z starting conf/arxiv/d128-filter.yaml ===
+conf/arxiv/d128-filter.yaml  exit=0  duration=13s (0h0m)  log=results/_runlogs/arxiv_d128-filter.log
+=== 2026-05-22T22:47:40Z starting conf/arxiv/d256-filter.yaml ===
+conf/arxiv/d256-filter.yaml  exit=0  duration=13s (0h0m)  log=results/_runlogs/arxiv_d256-filter.log
+=== 2026-05-22T22:47:53Z starting conf/goodreads/d64-filter.yaml ===
