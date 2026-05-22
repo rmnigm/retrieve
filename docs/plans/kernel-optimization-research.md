@@ -2,6 +2,8 @@
 
 > **Scope note (2026-05-19):** silvertorch is out of scope; see [00-roadmap.md](00-roadmap.md). Original research surveyed 7 kernels; items below have been trimmed to the 5 in-scope kernels. Silvertorch-only kernels (`bloom_match`, `codesigned_probe_score`) and silvertorch-only proposals (INT8 IVF tensor-core, phase-1 centroid topk) are preserved in [../plans-silvertorch-backup/kernel-optimization-research.md](../plans-silvertorch-backup/kernel-optimization-research.md).
 
+> **Stage 1 status (2026-05-22):** §5 and §6 (autotune-shape work on the compact + mask filter kernels) are **shipped** as part of the autotune-separation effort. Every in-scope kernel now has a `<Name>Config` dataclass + `DEFAULT_CONFIG` tuned offline against real-eval shapes; the filter compact kernels also gained a 3D launch grid so they scale to the 15M-row catalog. See [../system/kernels.md → Autotune separation](../system/kernels.md#autotune-separation). The remaining items below stand as written.
+
 ## Context
 
 User asked for a research-only pass over every Triton kernel in `retrieve/`,
@@ -160,23 +162,17 @@ d. Stale comment cleanup: [fused_masked_knn_topk.py:170-171](/workspace/retrieve
 
 **Files**: as inlined above.
 
-### 5. Adopt dynamic `BLOCK_N` in `bloom_compact` / `clause_compact` for small-N callers — **TRIVIAL**
+### 5. Adopt dynamic `BLOCK_N` in `bloom_compact` / `clause_compact` for small-N callers — **shipped**
 
-The two compact kernels use a fixed `BLOCK_N=256`, which wastes a tile when
-`combine_indices`
-([__init__.py:50-68](/workspace/retrieve/retrieve/src/retrieve/layers/filters/__init__.py#L50-L68))
-runs subsequent filters with small `P`. The simplest fix is the
-`block_n = 128 if n >= 128 else next_power_of_2(n)` ladder applied host-side.
-Atomic-add hazard remains, so no autotune — just dynamic sizing on the host side.
-After [01-autotune-separation.md](01-autotune-separation.md) this becomes a
-REGISTRY-row widening instead.
+Stage 1 (autotune separation) replaced the fixed `BLOCK_N=256` constants
+with `BloomCompactConfig` / `ClauseCompactConfig` dataclasses + a
+`DEFAULT_CONFIG` tuned offline by `uv run tune-kernels --kernel <name>`
+on real-eval shape regimes. Re-tune if a small-N caller becomes hot.
 
-### 6. Autotune `clause_mask` — **LOW priority**
+### 6. Autotune `clause_mask` — **shipped**
 
-[`clause_mask.py:15-18`](/workspace/retrieve/retrieve/src/retrieve/kernels/triton/filters/clause_mask.py#L15-L18)
-has fixed `BLOCK_N=256, num_warps=4`. No atomics → autotune is safe (the
-file's own comment acknowledges this). Defer until profiling shows
-`clause_mask` in a hot path.
+Same story: `ClauseMaskConfig` + offline-tuned `DEFAULT_CONFIG`. See
+[../system/kernels.md → Autotune separation](../system/kernels.md#autotune-separation).
 
 ### 7. Doc-only fix — `mask-compact-kernel.md`
 

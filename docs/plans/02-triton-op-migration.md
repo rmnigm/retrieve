@@ -1,6 +1,6 @@
 # Stage 2 — `torch.compile` fixes via `triton_op` / `custom_op`
 
-> See [00-roadmap.md](00-roadmap.md). Second main-thread stage. Depends on [01-autotune-separation.md](01-autotune-separation.md).
+> See [00-roadmap.md](00-roadmap.md). Second main-thread stage. Stage 1 (autotune separation) has shipped — `@triton.autotune` has been lifted out of every in-scope linr/filter kernel into `<Name>Config + DEFAULT_CONFIG` per [../system/kernels.md → Autotune separation](../system/kernels.md#autotune-separation), so the wrappers are already clean for the custom_op decoration step.
 
 > **Scope note (2026-05-19):** silvertorch is out of scope; see [00-roadmap.md](00-roadmap.md). The original migration order had **7 kernels** (1–7); steps for `bloom_match` (originally step 2) and `codesigned_probe_score` (originally step 7) are stubbed out below. Step numbers are preserved so cross-doc references stay stable. Active migration order: 5 kernels.
 
@@ -115,7 +115,7 @@ See [../plans-silvertorch-backup/02-triton-op-migration.md](../plans-silvertorch
 
 ### 3. `fused_masked_knn_topk`
 
-Already specified in detail in [migrate-clean-triton-custom-op.md](migrate-clean-triton-custom-op.md). Use that plan verbatim. The decoration step is decorator + `register_fake` only — no body changes. Stage 1 has already removed `@triton.autotune` from `fused_masked_knn_topk` so the wrapper is already clean.
+Already specified in detail in [migrate-clean-triton-custom-op.md](migrate-clean-triton-custom-op.md). Use that plan verbatim. The decoration step is decorator + `register_fake` only — no body changes. Stage 1 already lifted `@triton.autotune` out of `fused_masked_knn_topk` into a `FusedMaskedKnnTopkConfig + DEFAULT_CONFIG + per-bucket bucketed N` pattern, so the wrapper is already clean.
 
 ### 4. `bloom_compact` — refactor compact API + migrate
 

@@ -11,7 +11,11 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.kernels.triton.filters.clause_mask import clause_mask
+from retrieve.kernels.triton.filters.clause_mask import (
+    ClauseMaskConfig,
+    _clause_mask_impl,
+    clause_mask,
+)
 from tests.conftest import make_attrs, make_query_attrs
 
 
@@ -110,5 +114,21 @@ def test_clause_mask_n_smaller_than_block():
     q = make_query_attrs(b=4, c=c, n_vocab=15, inactive_rate=0.0, seed=72)
 
     out = clause_mask(attrs, is_reverse, q)
+    ref = _ref_mask(attrs, is_reverse, q)
+    assert torch.equal(out, ref)
+
+
+@pytest.mark.parametrize("block_n, num_warps", [(128, 2), (512, 8), (1024, 4)])
+def test_clause_mask_config_override(block_n, num_warps):
+    """Non-default ``ClauseMaskConfig`` produces the same logical mask —
+    proves the ``config=`` kwarg plumbs through ``_clause_mask_impl`` to
+    the kernel launch."""
+    n, c = 4096, 3
+    attrs = make_attrs(n, c=c, a_max=2, n_vocab=30, pad_rate=0.2, seed=81)
+    is_reverse = torch.zeros(c, dtype=torch.bool, device="cuda")
+    q = make_query_attrs(b=8, c=c, n_vocab=30, inactive_rate=0.2, seed=82)
+
+    cfg = ClauseMaskConfig(block_n=block_n, num_warps=num_warps)
+    out = _clause_mask_impl(attrs, is_reverse, q, config=cfg)
     ref = _ref_mask(attrs, is_reverse, q)
     assert torch.equal(out, ref)

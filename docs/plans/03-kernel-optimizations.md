@@ -1,6 +1,6 @@
 # Stage 3 — Kernel optimizations on the clean base
 
-> See [00-roadmap.md](00-roadmap.md). Third main-thread stage. Depends on [01-autotune-separation.md](01-autotune-separation.md) and [02-triton-op-migration.md](02-triton-op-migration.md).
+> See [00-roadmap.md](00-roadmap.md). Third main-thread stage. Stage 1 (autotune separation) has shipped — see [../system/kernels.md → Autotune separation](../system/kernels.md#autotune-separation). Depends on [02-triton-op-migration.md](02-triton-op-migration.md).
 
 ## Context
 
@@ -15,8 +15,8 @@
 | §4b Pre-allocate-and-slice the pad-to-K tail in `oporp_1bit_match_topk` / `fused_masked_knn_topk` | **Survives.** Local to the host wrapper bodies. |
 | §4c Replace `out_indices[:, :p].contiguous()` with `narrow()` view | **Eliminated by stage 2** (no `.contiguous()` slice in the new full-width API). |
 | §4d Stale comment cleanup in `fused_masked_knn_topk` | **Survives** (mechanical). |
-| §5 Dynamic `BLOCK_N` in `bloom_compact` / `clause_compact` for small-N callers | **Subsumed by stage 1** (one REGISTRY row per problem-size regime; the small-N case becomes a new regime row). |
-| §6 Autotune `clause_mask` | **Subsumed by stage 1** (one REGISTRY row today; widen the REGISTRY only if `tune-kernels` shows benefit). |
+| §5 Dynamic `BLOCK_N` in `bloom_compact` / `clause_compact` for small-N callers | **Subsumed by stage 1** (kernel-file `DEFAULT_CONFIG` now picked offline against real-eval shapes; re-tune via `uv run tune-kernels --kernel bloom_compact` / `clause_compact` if shapes shift). |
+| §6 Autotune `clause_mask` | **Subsumed by stage 1** (kernel-file `DEFAULT_CONFIG` shipped, re-tune the same way). |
 | §7 Doc fix in `mask-compact-kernel.md` | **Survives** (annotation note; or just archive the doc — see below). |
 
 What remains as actual stage 3 work is small and focused: hardware popcount investigation + allocator hygiene in two host wrappers + a doc fix.

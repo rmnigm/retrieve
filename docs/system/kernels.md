@@ -35,13 +35,65 @@ All kernels follow the same conventions:
   buffer and the host calls `torch.topk` on it. CUB's top-K (under torch)
   is faster than anything we can implement in pure Triton without a
   warp-level radix-select primitive.
-- Tile config (`BLOCK_N`, `num_warps`, `num_stages`) is offline-tuned per
+- Tile config (`block_n`, `num_warps`, `num_stages`) is offline-tuned per
   kernel and shipped as a single `DEFAULT_CONFIG` constant on the
   kernel module. No runtime `@triton.autotune`. Callers who want a
-  non-default tile pass `config=<Kernel>Config(...)` to the host
-  wrapper; the `evaluation/scripts/tune_kernels.py` CLI sweeps the
-  candidate grid on a given arch and prints the line to paste into the
-  kernel file.
+  non-default tile pass `config=<Kernel>Config(...)`; for
+  `@custom_op`-wrapped kernels the override goes to the private
+  `_<name>_impl(..., config=)` companion (the public op has a fixed
+  schema and always uses `DEFAULT_CONFIG`). The
+  `evaluation/scripts/tune_kernels.py` CLI sweeps the candidate grid on
+  a given arch and prints the line to paste into the kernel file. The
+  same convention applies uniformly across linr, filter, and silvertorch
+  kernels — see [Autotune separation](#autotune-separation) below for
+  the rationale.
+
+## Autotune separation
+
+The kernels were originally tuned via `@triton.autotune` (linr) or
+module-level `_BLOCK_N` / `_NUM_WARPS` constants (filters). Both
+patterns had drawbacks:
+
+- `@triton.autotune` re-tunes at every cache-key shape change, leaking
+  compile pressure into the cudagraph-trees capture for
+  `torch.compile(dynamic=True, mode="reduce-overhead")` and re-running
+  the autotune sweep across `tl.atomic_add` kernels corrupts output
+  buffers across trials (the compact kernels can't safely autotune
+  in-kernel).
+- Hard-coded `_BLOCK_N = 256` etc. were guesses, not measurements;
+  picked once and never re-checked against real-eval shapes.
+
+The shipped pattern, applied uniformly to every kernel in this tree:
+
+1. A `@dataclass(frozen=True) class <Name>Config` next to the
+   `@triton.jit` body holds `block_n`, `num_warps`, `num_stages`.
+2. A `DEFAULT_CONFIG` module constant holds the single curated
+   default for the current arch (sm_80 / A100 in this repo).
+3. The host wrapper takes `config: <Name>Config | None = None`;
+   `cfg = config if config is not None else DEFAULT_CONFIG` resolves it.
+4. For `@custom_op`-wrapped kernels (`clause_mask`, `clause_compact`,
+   `bloom_compact`, `bloom_match`, the linr trio), the real body lives
+   in a private `_<name>_impl(..., *, config: ...Config | None = None)`
+   that the public op delegates to with `config=None`. The schema
+   doesn't carry the dataclass; tests and the tuner reach `_impl`
+   directly to pass an override.
+5. Tuning is offline: `evaluation/scripts/tune_kernels.py` (`uv run
+   tune-kernels --kernel <name>`) sweeps a hard-coded `(block_n,
+   num_warps)` grid against a hard-coded shape regime list mirroring
+   real-eval workloads (catalog sizes read from
+   `evaluation/data/<dataset>/item_attrs_narrow.pt`, batch sizes from
+   `evaluation/retrieval/config.py`). Picks one default per arch via
+   plurality vote across regime winners; emits a pasteable
+   `DEFAULT_CONFIG = ...` line. Re-run once per new arch; commit the
+   line.
+
+For the compact kernels, the offline tuner avoids the `atomic_add`
+hazard naturally: it calls the host wrapper, which allocates fresh
+`out_indices` (`-1`-filled) and `counts` (zeros) on every call — `do_bench`
+reps each pay one allocation, so no cross-rep accumulation. The
+warning that lived on the kernel files about
+`@triton.autotune`-time corruption still applies to in-kernel
+autotune; the offline path is unaffected.
 
 ## Score conventions
 
@@ -221,8 +273,13 @@ return:   positive_indices    [B, P]         int64  (P = max(counts.max(), 1))
           counts              [B]            int64
 ```
 
-**Launch grid** `(B, cdiv(N, BLOCK_N))`. Each program owns one
-`(query, n-tile)` cell and produces:
+**Launch grid** `(B, tiles_y, tiles_x)` — batch on `grid_x` so adjacent
+dispatched programs share the same item tile (good L2 reuse on the
+`[N, C, A_MAX]` item-attrs read); the `cdiv(N, BLOCK_N)` tile count is
+split across `grid_y × grid_z` to dodge the 65,535 cap on a single
+axis (which would otherwise overflow at N>~16M with `block_n=256`). The
+kernel reconstructs `tile_id = tile_x * tiles_y + tile_y`. Each program
+owns one `(query, n-tile)` cell and produces:
 
 ```
 per program (b, tile):
@@ -243,10 +300,12 @@ race with each other. Downstream consumers (`fused_masked_knn_topk`,
 passing ids, so this is fine. Callers that need a deterministic order must
 sort.
 
-**No autotune.** A single fixed config (`BLOCK_N=256`, `num_warps=4`) is
-hard-coded — `tl.atomic_add` accumulates across autotune trials and would
-corrupt `counts`. If a sweep is needed later, re-enable autotune with
-`reset_to_zero` covering both `counts_ptr` and `out_indices_ptr`.
+**Tile config.** `ClauseCompactConfig(block_n, num_warps, num_stages)`
+— shipped as `DEFAULT_CONFIG` on the kernel module; tests/tuner override
+via `_clause_compact_impl(..., config=)`. Re-tune on a new arch via
+`uv run tune-kernels --kernel clause_compact`. The `@triton.autotune`
+hazard around `tl.atomic_add` accumulating across trials does **not**
+apply to the offline tuner — see [Autotune separation](#autotune-separation).
 
 ## `clause_mask` — fused clause eval emitting `[B, N]` bool
 
@@ -265,19 +324,20 @@ inputs:   item_clause_attrs   [N, C, A_max]  int64
 return:   mask                [B, N]         bool
 ```
 
-**Launch grid** `(B, cdiv(N, BLOCK_N))`, identical to `clause_compact`.
-Each program loads `query_clause_attrs[b, :]` once and reduces over the
-`C × A_max` clause-attribute grid in registers. No `[B, N, C, A_max]`
-intermediate ever materializes.
+**Launch grid** `(B, tiles_y, tiles_x)`, identical shape to
+`clause_compact`. Each program loads `query_clause_attrs[b, :]` once and
+reduces over the `C × A_max` clause-attribute grid in registers. No
+`[B, N, C, A_max]` intermediate ever materializes.
 
-**Inner loop** is the same as `clause_compact`'s (lines 55–84): inner OR
+**Inner loop** is the same as `clause_compact`'s: inner OR
 over `A_MAX` slots, outer AND over `C` clauses, reverse XOR, inactive
 override. The epilogue is a single `tl.store` of the `pass_mask` tile —
 no cumsum, no atomics.
 
-**No autotune.** Fixed `BLOCK_N=256`, `num_warps=4`. Atomics absent so
-autotune would be safe, but the compile-time cost has not been justified
-yet; revisit if a profile shows the kernel is hot.
+**Tile config.** `ClauseMaskConfig(block_n, num_warps, num_stages)` —
+shipped as `DEFAULT_CONFIG` on the kernel module; tests/tuner override
+via `_clause_mask_impl(..., config=)`. Re-tune on a new arch via
+`uv run tune-kernels --kernel clause_mask`.
 
 ## `bloom_match` — Bloom subset test
 
@@ -349,8 +409,9 @@ reduction; the kernel keeps the tile in registers.
 
 **No autotune** today — fixed `BLOCK_N = 128 if N >= 128 else
 next_power_of_2(N)`. The fused `bloom_compact` (next section) shares
-this launch shape and adds `clause_compact`'s cumsum + `atomic_add`
-tail.
+this kernel's inner subset-test loop and adds `clause_compact`'s
+cumsum + `atomic_add` tail, but uses the 3D launch grid the compact
+kernels need at large N.
 
 ## `bloom_compact` — fused subset test + stream compaction
 
@@ -371,18 +432,27 @@ return:    positive_indices [B, P] int64  (P = max(counts.max(), 1))
            counts           [B]    int64
 ```
 
-**Launch grid** `(B, cdiv(N, BLOCK_N))`, identical to both `bloom_match`
-and `clause_compact`. Each program loads `qb[b, :]` once, the `[BLOCK_N,
-W]` `sigs` tile, computes `(qb & sigs) == qb` AND-reduced over `W`
-(lifted from `bloom_match`), then runs the same `cumsum → atomic_add →
-store` epilogue as `clause_compact`.
+**Launch grid** `(B, tiles_y, tiles_x)`, same 3D shape as the clause
+compact/mask kernels (`tile_id = tile_x * tiles_y + tile_y`). Each
+program loads `qb[b, :]` once, the `[BLOCK_N, W]` `sigs` tile, computes
+`(qb & sigs) == qb` AND-reduced over `W` (lifted from `bloom_match`),
+then runs the same `cumsum → atomic_add → store` epilogue as
+`clause_compact`. Wide `W` (=16 at the default `m_bits=1024`) makes
+this kernel register-pressure-bound; at large `block_n` with few warps
+it spills catastrophically (5–15× slowdown observed at `block_n≥512,
+num_warps≤4`). The shipped default keeps `block_n` moderate and warps
+high to stay off that cliff.
 
 **Output ordering** within a row is **unspecified** — same convention as
 `clause_compact`. V2's `fused_masked_knn_topk` and V3's HAS_INDICES path
 consume the *set*, not the order.
 
-**No autotune.** Fixed `BLOCK_N=256`, `num_warps=4` — same atomic-add
-hazard as `clause_compact`. `qb` is built host-side via
+**Tile config.** `BloomCompactConfig(block_n, num_warps, num_stages)` —
+shipped as `DEFAULT_CONFIG`; tests/tuner override via
+`_bloom_compact_impl(..., config=)`. Re-tune via `uv run tune-kernels
+--kernel bloom_compact`. The atomic-add hazard around in-kernel autotune
+is real but does not affect the offline tuner — see
+[Autotune separation](#autotune-separation). `qb` is built host-side via
 `_build_signatures`; folding it into the kernel adds register pressure
 with no obvious win and is explicitly out of scope. The same
 `(clause_idx, value)` keying invariant documented under `bloom_match`

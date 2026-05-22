@@ -152,13 +152,6 @@ class OneBitKNN(RetrievalModule):
             return oporp_1bit_match_topk(query_bits, self.item_bits, self.k)
 
         positive_indices, counts = compact_mask(mask)
-        if int(counts.max().item()) == 0:
-            b = query.shape[0]
-            device = query.device
-            return (
-                torch.full((b, self.k), -1, dtype=torch.long, device=device),
-                torch.full((b, self.k), float("-inf"), device=device),
-            )
         return oporp_1bit_match_topk(
             query_bits,
             self.item_bits,
