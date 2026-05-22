@@ -16,11 +16,28 @@ gates kernel changes is documented in [testing.md](testing.md).
 ## Scope
 
 [`evaluation/retrieval/evaluate.py`](../../evaluation/retrieval/evaluate.py)
-is the main retrieval benchmark driver — GPU algos × backends × filter
-kinds across yambda, goodreads, and arxiv. The CPU quality baseline
-([voyager HNSW](../../evaluation/retrieval/voyager/)) lives in its own
-subpackage with its own CLI ([`evaluate-voyager`](#cpu-quality-baseline-evaluate-voyager));
-see that section below.
+is the **single-algo** retrieval benchmark CLI — GPU algos × backends ×
+filter kinds across yambda, goodreads, and arxiv. One invocation runs
+exactly one algorithm's cells and writes one JSON file. The shell
+wrapper [`run_per_algo.sh`](../../evaluation/run_per_algo.sh) reads the
+YAML's ``algorithms`` list and loops, writing per-algo JSONs into
+``cfg.output`` (now a **directory**, not a file). Downstream analysis
+reads them back via
+[`retrieval.results_io.load_results`](../../evaluation/retrieval/results_io.py).
+
+Per-algo process isolation is the point: every algo gets a fresh Python
+interpreter, which wipes torch.compile / Triton autotune / CUDA-graph
+private-pool state that ``_release_algo`` and ``torch._dynamo.reset()``
+can't reclaim between algos in the same process. The SASRec encode
+pass is cached on disk by
+[`queries_cache.py`](../../evaluation/retrieval/queries_cache.py)
+(``<ckpt-dir>/encoded_queries_<split>.pt``, keyed on ckpt mtime and
+``max_seq_length``), so the N subprocesses don't pay N × encode cost.
+
+The CPU quality baseline ([voyager HNSW](../../evaluation/retrieval/voyager/))
+lives in its own subpackage with its own CLI
+([`evaluate-voyager`](#cpu-quality-baseline-evaluate-voyager)) and is
+NOT subject to the per-algo loop — it writes its own single JSON.
 
 It dispatches by config shape across three datasets:
 
@@ -50,8 +67,12 @@ in [`retrieve/tests/`](../../retrieve/tests/) and gates CI separately.
 ## Files
 
 ```
+evaluation/
+├── run_per_algo.sh            # shell wrapper: loops algos from cfg, one subprocess each
 evaluation/retrieval/
-├── evaluate.py                # main driver (GPU algos): config → loop → JSON
+├── evaluate.py                # single-algo CLI: --config X --algo Y --output <file>
+├── queries_cache.py           # disk cache for the SASRec encode pass
+├── results_io.py              # load_results(dir) — concatenate per-algo JSONs
 ├── algos/                     # one class per GPU algo, duck-typed protocol
 │   ├── __init__.py            # build_algorithm + ALGORITHMS + build_filter
 │   ├── _helpers.py            # collect_modules
@@ -138,7 +159,7 @@ filter API.
 | `data_dir` | path | Holds `item_id_map.json`, `<split>.parquet`, optional `eval_split.parquet` + filter attrs. |
 | `content_subdir` | str | Subdir under `data_dir` for `{text_emb,query_emb}.pt` + meta sidecars (arxiv only). Defaults to `content`. Arxiv ships `content_d64`, `content_d128`, `content` (= d=256). |
 | `gt_subdir` | str | Subdir under `data_dir` for `gt_topk_<sweep>.pt` oracle caches. Default `gt`. Must vary with `content_subdir` (oracle scores depend on `item_embs` which depend on dim) — set per-yaml when running multiple dims off the same `data_dir`. |
-| `output` | path or `null` | Output JSON path. `null` → `<ckpt-dir>/evaluate.json` (SASRec datasets) or `<data_dir>/evaluate.json` (arxiv). |
+| `output` | dir path | Directory that holds the per-algo JSONs written by `evaluate`. `run_per_algo.sh` reads it and creates `<output>/<algo>.json` per algo. The voyager CLI still writes a single JSON file at its `output` path (see [voyager configs](#cpu-quality-baseline-evaluate-voyager)). |
 | `split` | str | `test` (default) or `val`. |
 | `device` | str | `cuda` (only meaningful value today). |
 | `ks` | list[int] | K-cutoffs to evaluate. Each emits `recall@K`, `ndcg@K` on its own row. |
@@ -166,20 +187,26 @@ Two CUDA settings the driver flips at startup, in addition to seeds:
 ```
 uv run evaluate \
     --config conf/<name>.yaml \
-    [--algorithms <name> ...] \
+    --algo <name> \
+    --output <output-dir>/<algo>.json \
     [--filter-kind {none|clause|bloom} ...] \
     [--sweep <sweep_name>] \
-    [--output <path>] \
     [--skip-quality]
 ```
 
-`--algorithms` *replaces* (does not merge into) the YAML's algorithms
-list. `--filter-kind` is repeatable and narrows the run to those
-kinds; empty = all. `--sweep` narrows to a single sweep — useful for
-iterating on one cell without re-encoding queries for the rest.
-`--skip-quality` drops the bs=1-style quality stream (`recall@K` /
-`ndcg@K` reported as NaN); perf rows still emit. Useful for fast
-latency/memory sweeps after correctness has been pinned.
+`--algo` is required and runs a single algorithm — the wrapper
+[`run_per_algo.sh`](../../evaluation/run_per_algo.sh) is what loops
+over the YAML's `algorithms` list. `--filter-kind` is repeatable and
+narrows to those kinds; empty = all. `--sweep` narrows to a single
+sweep — useful for iterating on one cell without re-encoding queries.
+`--skip-quality` drops the quality stream (`recall@K` / `ndcg@K` →
+NaN); perf rows still emit. Useful for fast latency/memory sweeps.
+
+To run the whole `algorithms` list:
+
+```
+./run_per_algo.sh conf/<name>.yaml [extra flags forwarded to evaluate]
+```
 
 ## Algorithms
 
@@ -361,25 +388,25 @@ Yambda 500M sweep:
 
 ```bash
 cd evaluation
-uv run evaluate --config conf/500m/d128-quality.yaml
+./run_per_algo.sh conf/500m/d128-quality.yaml
 ```
 
 5B sweep (gated on the 5B checkpoint having been trained):
 
 ```bash
-uv run evaluate --config conf/5b/d128-quality.yaml
+./run_per_algo.sh conf/5b/d128-quality.yaml
 ```
 
 Goodreads filter bench:
 
 ```bash
-uv run evaluate --config conf/goodreads/d128-filter.yaml
+./run_per_algo.sh conf/goodreads/d128-filter.yaml
 ```
 
 Arxiv filter bench:
 
 ```bash
-uv run evaluate --config conf/arxiv/d256-filter.yaml
+./run_per_algo.sh conf/arxiv/d256-filter.yaml
 ```
 
 CPU quality baseline (voyager HNSW) — separate CLI, see
@@ -394,6 +421,8 @@ One filter cell only (faster iteration):
 ```bash
 uv run evaluate \
     --config conf/goodreads/d128-filter.yaml \
+    --algo linr_v3 \
+    --output results/goodreads/d128-filter/linr_v3.json \
     --filter-kind bloom --sweep c0_genre
 ```
 

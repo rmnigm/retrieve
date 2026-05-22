@@ -1,6 +1,6 @@
 _defaults: &defaults
   data_dir: data/yambda-5b
-  output: results/yambda/5b-d64.json
+  output: results/yambda/5b-d64
   split: test
   device: cuda
   ks: [100, 200, 400]

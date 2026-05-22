@@ -1,6 +1,6 @@
 _defaults: &defaults
   data_dir: data/goodreads-work-id
-  output: results/goodreads/d64-quality.json
+  output: results/goodreads/d64-quality
   split: test
   device: cuda
   ks: [100, 200, 400]

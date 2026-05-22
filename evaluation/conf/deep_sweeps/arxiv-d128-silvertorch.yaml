@@ -4,7 +4,7 @@ _defaults: &defaults
   gt_subdir: gt_d128
   # No `checkpoint:` field — arxiv has no SASRec model; queries come from
   # data/arxiv-papers/content_d128/query_emb.pt (built by `arxiv encode_queries`).
-  output: results/deep_sweeps/arxiv-d128-silvertorch.json
+  output: results/deep_sweeps/arxiv-d128-silvertorch
   split: test
   device: cuda
   ks: [100, 200, 400]

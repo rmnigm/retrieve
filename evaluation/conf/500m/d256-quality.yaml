@@ -1,6 +1,6 @@
 _defaults: &defaults
   data_dir: data/yambda-500m
-  output: results/yambda/500m-d256.json
+  output: results/yambda/500m-d256
   split: test
   device: cuda
   ks: [100, 200, 400]

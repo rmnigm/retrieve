@@ -1,30 +1,15 @@
-"""Unified retrieval benchmark driver.
+"""Per-algo retrieval benchmark CLI.
 
-One config-driven entry point spanning yambda, goodreads, and arxiv. Dispatch
-is implicit: config shape decides whether to encode queries from a SASRec
-checkpoint vs load pre-encoded text embeddings, and whether to run the filter
-sweep loop vs a single unfiltered cell.
+Runs exactly one algorithm's cells against the dataset's queries (cached
+on disk via ``queries_cache.py`` after the first build) and writes its
+rows to a single JSON file. The shell wrapper ``run_per_algo.sh`` loops
+over algos from the YAML config and writes per-algo JSONs into the
+``cfg.output`` directory; downstream analysis reads them back via
+``retrieval.results_io.load_results``.
 
-| Config shape                              | Mode                                   |
-|-------------------------------------------|----------------------------------------|
-| `checkpoint` set, `query_emb_path` unset  | Encode queries via SASRec (yambda/gr)  |
-| `query_emb_path` set, `checkpoint` unset  | Load pre-encoded text embs (arxiv)     |
-| `filters: null`                           | Quality run, single unfiltered cell    |
-| `filters: {clause, bloom}`                | Filter run, per-kind sweeps            |
-
-Usage::
-
-    uv run evaluate --config conf/500m/d128-quality.yaml
-    uv run evaluate --config conf/goodreads/d128-quality.yaml
-    uv run evaluate --config conf/goodreads/d128-filter.yaml
-    uv run evaluate --config conf/arxiv/d256-filter.yaml
-
-Implementation lives in sibling modules:
-
-- ``loaders.py``  — disk I/O (embeddings, query attrs, filter assets)
-- ``oracle.py``   — filtered-FullScan ground truth and disk cache
-- ``sweep.py``    — nested per-(filter_kind, sweep, algo, k, bs) loop
-- ``bench_tools.py`` — perf timing primitives, query encoding, ckpt load
+Each invocation is a fresh Python process, which is the point — torch
+compile / Triton autotune / CUDA-graph private pools that survive
+``torch._dynamo.reset()`` get cleared between algos by the OS.
 """
 
 from __future__ import annotations
@@ -36,60 +21,38 @@ import click
 import torch
 from loguru import logger
 
-from retrieval.config import EvalConfig, load_eval_config
-from retrieval.loaders import load_item_and_queries, load_query_attrs
+from retrieval.config import load_eval_config
+from retrieval.loaders import load_query_attrs
+from retrieval.queries_cache import load_or_cache_queries
 from retrieval.sweep import run_sweep
 
 
 @click.command()
 @click.option("--config", "config_path", type=str, required=True)
-@click.option("--algorithms", "algos_override", multiple=True, type=str, default=())
-@click.option(
-    "--filter-kind",
-    "filter_kinds",
-    multiple=True,
-    type=str,
-    default=(),
-    help="Restrict to one or more filter_kinds (repeat the flag); empty = run all.",
-)
+@click.option("--algo", type=str, required=True)
+@click.option("--output", "output_path", type=str, required=True)
+@click.option("--filter-kind", "filter_kinds", multiple=True, type=str, default=())
 @click.option(
     "--backend",
     "backend_override",
     multiple=True,
     type=click.Choice(["triton", "torch"]),
     default=(),
-    help="Restrict to one or more backends (repeat the flag); empty = use cfg.backends.",
 )
 @click.option("--sweep", "sweep_filter", type=str, default=None)
-@click.option("--output", "output_override", type=str, default=None)
-@click.option(
-    "--skip-quality",
-    is_flag=True,
-    default=False,
-    help="Skip the bs=1 quality stream and report recall=ndcg=NaN. "
-    "Perf timing rows are still emitted. Useful for fast latency/memory sweeps.",
-)
+@click.option("--skip-quality", is_flag=True, default=False)
 def main(
     config_path: str,
-    algos_override: tuple[str, ...],
+    algo: str,
+    output_path: str,
     filter_kinds: tuple[str, ...],
     backend_override: tuple[str, ...],
     sweep_filter: str | None,
-    output_override: str | None,
     skip_quality: bool,
 ) -> None:
     cfg = load_eval_config(Path(config_path))
-    if algos_override:
-        cfg.algorithms = list(algos_override)
-    if output_override:
-        cfg.output = output_override
+    cfg.algorithms = [algo]
 
-    # Dynamo's default recompile_limit (8) is too low for our sweep — each
-    # `(k, bs)` combo and each grad-context (inference_mode on/off across the
-    # autotune-prewarm / quality / perf passes) is a fresh trace. Hitting the
-    # limit silently falls back to eager and erases the torch-backend
-    # `torch.compile` benefit. 64 gives every shape × dispatch-key variant
-    # in the worst-case cell its own compiled path with margin.
     import torch._dynamo  # noqa: PLC0415
 
     torch._dynamo.config.recompile_limit = 64
@@ -97,24 +60,14 @@ def main(
     torch.manual_seed(cfg.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(cfg.seed)
-        # Disable TF32 so the oracle (cuBLAS `q @ E_t`) and the algos
-        # (per-impl Triton GEMM, generally fp32) compute scores in the
-        # same precision. Otherwise exact-mask algos like
-        # `linr_v1_filter_mask` show ~1e-3 recall drift vs the oracle
-        # on narrow filters where top-K boundaries land on items
-        # within TF32's 10-bit mantissa noise band. ``run_sweep`` also
-        # calls ``pin_precision_globals`` — keep this here as a safety
-        # net for direct callers that bypass ``run_sweep``.
         torch.backends.cuda.matmul.allow_tf32 = False
         torch.backends.cudnn.allow_tf32 = False
 
     data_path = Path(cfg.data_dir)
     dev = torch.device(cfg.device)
-
-    item_embs, queries, targets, n_targets, ckpt_path = load_item_and_queries(
+    item_embs, queries, targets, n_targets, _ = load_or_cache_queries(
         cfg, data_path, dev
     )
-    out_path = _resolve_output_path(cfg, ckpt_path, data_path)
 
     qa_narrow_all: torch.Tensor | None = None
     if cfg.filters is not None:
@@ -137,24 +90,11 @@ def main(
         skip_quality=skip_quality,
     )
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, "w") as f:
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "w") as f:
         json.dump(rows, f, indent=2)
-    logger.info("wrote {} rows to {}", len(rows), out_path)
-
-
-def _resolve_output_path(cfg: EvalConfig, ckpt_path: Path | None, data_path: Path) -> Path:
-    """Pick the output JSON path.
-
-    Explicit ``cfg.output`` wins. Otherwise default next to the SASRec
-    checkpoint (so each ckpt has a colocated ``evaluate.json``); arxiv
-    runs without a checkpoint fall back to ``<data_dir>/evaluate.json``.
-    """
-    if cfg.output:
-        return Path(cfg.output)
-    if ckpt_path is not None:
-        return ckpt_path.parent / "evaluate.json"
-    return data_path / "evaluate.json"
+    logger.info("wrote {} rows to {}", len(rows), out)
 
 
 if __name__ == "__main__":

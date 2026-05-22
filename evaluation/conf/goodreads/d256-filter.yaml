@@ -1,9 +1,9 @@
 _defaults: &defaults
   data_dir: data/goodreads-work-id
-  output: results/goodreads/d256-filter.json
+  output: results/goodreads/d256-filter
   split: test
   device: cuda
-  ks: [100, 200, 400]
+  ks: [100, 500, 1000]
   batch_sizes: [1, 8, 16]
   seed: 0
   encode:
@@ -12,20 +12,12 @@ _defaults: &defaults
     max_seq_length: 200
   algorithms:
     - linr_v1_filter_mask
-    - linr_v2              # exact filtered top-K — recall=1.0 baseline; speed/memory headline
+    - linr_v2
     - linr_v3
-    - silvertorch          # auto-skipped on filter_kind=clause; runs on bloom sweeps only
+    - silvertorch
   # Backends to sweep — both wrapped with torch.compile(mode="reduce-overhead")
   # (see the Algo classes for the call site).
   backends: [triton, torch]
-  # N≈1.5M items. One canonical combo per approximate algo — recall-vs-latency
-  # curves live in conf/deep_sweeps/.
-  algo_params:
-    linr_v3:
-      - {candidate_pool: 8000, v3_seed: 0}
-    silvertorch:
-      # Layout A, mid-recall n_probe (paper-faithful).
-      - {n_lists: 1024, n_probe: 32, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈25k
   users_limit: 10000
   filters:
     clause:
