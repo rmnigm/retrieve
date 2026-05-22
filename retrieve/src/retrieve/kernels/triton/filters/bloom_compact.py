@@ -20,6 +20,7 @@ import torch
 import triton
 import triton.language as tl
 from torch import Tensor
+from torch.library import custom_op
 
 # NOTE: no @triton.autotune — atomic_add accumulates across autotune trials and
 # corrupts ``counts``. Same gotcha that bit ``clause_compact``.
@@ -78,7 +79,7 @@ def _bloom_compact_kernel(
     )
 
 
-@torch._dynamo.disable
+@custom_op("retrieve::bloom_compact", mutates_args=())
 def bloom_compact(qb: Tensor, sigs: Tensor) -> tuple[Tensor, Tensor]:
     """Fused bloom subset-test + compaction.
 
@@ -86,8 +87,17 @@ def bloom_compact(qb: Tensor, sigs: Tensor) -> tuple[Tensor, Tensor]:
         qb:   [B, W] int64 — packed query bloom signatures.
         sigs: [N, W] int64 — packed item bloom signatures.
 
-    Returns ``(positive_indices [B, P] int64, counts [B] int64)`` where
-    ``P = max(counts.max(), 1)``. Indices within a row are unordered.
+    Returns ``(positive_indices [B, N] int64, counts [B] int64)``. The full
+    item-width ``[B, N]`` indices buffer is returned with ``-1`` sentinels
+    in the unused tail; downstream consumers (``fused_masked_knn_topk``,
+    ``oporp_1bit_match_topk``) row-bound by ``counts[b]`` so the wider
+    buffer never costs a re-read. Indices within a row are unordered
+    (atomic-add writes).
+
+    Registered as an opaque ``custom_op`` so the algo-level
+    ``torch.compile(dynamic=True, mode="reduce-overhead")`` can stitch
+    this kernel into a single cudagraph_trees graph (no per-call graph
+    break, no ``.item()`` host sync).
     """
     if qb.dim() != 2:
         raise ValueError("qb must be [B, W]")
@@ -130,5 +140,14 @@ def bloom_compact(qb: Tensor, sigs: Tensor) -> tuple[Tensor, Tensor]:
         num_warps=_NUM_WARPS,
     )
 
-    p = max(int(counts.max().item()), 1)
-    return out_indices[:, :p].contiguous(), counts
+    return out_indices, counts
+
+
+@bloom_compact.register_fake
+def _bloom_compact_fake(qb: Tensor, sigs: Tensor) -> tuple[Tensor, Tensor]:
+    b = qb.shape[0]
+    n = sigs.shape[0]
+    return (
+        torch.empty((b, n), dtype=torch.int64, device=qb.device),
+        torch.empty((b,), dtype=torch.int64, device=qb.device),
+    )

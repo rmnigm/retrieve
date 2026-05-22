@@ -20,6 +20,7 @@ import torch
 import triton
 import triton.language as tl
 from torch import Tensor
+from torch.library import custom_op
 
 # NOTE: no @triton.autotune — atomic_add accumulates across autotune trials
 # and corrupts ``counts``. A single fixed config is correct and fast enough
@@ -98,7 +99,7 @@ def _clause_compact_kernel(
     )
 
 
-@torch._dynamo.disable
+@custom_op("retrieve::clause_compact", mutates_args=())
 def clause_compact(
     item_clause_attrs: Tensor,  # [N, C, A_max] int64
     clause_is_reverse: Tensor,  # [C] bool
@@ -106,8 +107,17 @@ def clause_compact(
 ) -> tuple[Tensor, Tensor]:
     """Fused clause evaluation + compaction.
 
-    Returns ``(positive_indices [B, P] int64, counts [B] int64)`` where
-    ``P = max(counts.max(), 1)``. Indices within a row are unordered.
+    Returns ``(positive_indices [B, N] int64, counts [B] int64)``. The full
+    item-width ``[B, N]`` indices buffer is returned with ``-1`` sentinels
+    in the unused tail; downstream consumers (``fused_masked_knn_topk``,
+    ``oporp_1bit_match_topk``) row-bound by ``counts[b]`` so the wider
+    buffer never costs a re-read. Indices within a row are unordered
+    (atomic-add writes).
+
+    Registered as an opaque ``custom_op`` so the algo-level
+    ``torch.compile(dynamic=True, mode="reduce-overhead")`` can stitch
+    this kernel into a single cudagraph_trees graph (no per-call graph
+    break, no ``.item()`` host sync).
     """
     if item_clause_attrs.dim() != 3:
         raise ValueError("item_clause_attrs must be [N, C, A_max]")
@@ -156,5 +166,19 @@ def clause_compact(
         num_warps=_NUM_WARPS,
     )
 
-    p = max(int(counts.max().item()), 1)
-    return out_indices[:, :p].contiguous(), counts
+    return out_indices, counts
+
+
+@clause_compact.register_fake
+def _clause_compact_fake(
+    item_clause_attrs: Tensor,
+    clause_is_reverse: Tensor,
+    query_clause_attrs: Tensor,
+) -> tuple[Tensor, Tensor]:
+    n = item_clause_attrs.shape[0]
+    b = query_clause_attrs.shape[0]
+    device = query_clause_attrs.device
+    return (
+        torch.empty((b, n), dtype=torch.int64, device=device),
+        torch.empty((b,), dtype=torch.int64, device=device),
+    )

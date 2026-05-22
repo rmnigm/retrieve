@@ -22,15 +22,16 @@ def _per_row_set_match(ids: torch.Tensor, counts: torch.Tensor, mask: torch.Tens
 
 
 def test_shape_and_counts_match_mask_sum():
-    mask = make_mask(b=8, n=512, pass_rate=0.3, seed=0)
+    b, n = 8, 512
+    mask = make_mask(b=b, n=n, pass_rate=0.3, seed=0)
     ids, counts = compact_mask(mask)
 
-    assert counts.shape == (8,)
+    assert counts.shape == (b,)
     assert counts.dtype == torch.int64
     assert torch.equal(counts, mask.sum(dim=1))
 
-    p = int(counts.max().item())
-    assert ids.shape == (8, p)
+    # Full-width return: matches the bloom_compact / clause_compact contract.
+    assert ids.shape == (b, n)
     assert ids.dtype == torch.int64
 
 
@@ -54,7 +55,9 @@ def test_all_false_returns_empty():
     b, n = 4, 256
     mask = torch.zeros(b, n, dtype=torch.bool, device="cuda")
     ids, counts = compact_mask(mask)
-    assert ids.shape == (b, 0)
+    # Full-width return: shape is [b, n] but counts is all-zero so the row
+    # contents are unspecified.
+    assert ids.shape == (b, n)
     assert torch.equal(counts, torch.zeros(b, dtype=torch.int64, device="cuda"))
 
 
@@ -74,7 +77,8 @@ def test_mixed_rows_padded_to_max():
 
     ids, counts = compact_mask(mask)
     assert torch.equal(counts, torch.tensor([2, 6, 0], dtype=torch.int64, device="cuda"))
-    assert ids.shape == (3, 6)
+    # Full-width return: 16, not the row-max of 6.
+    assert ids.shape == (3, 16)
     # Valid id sets per row.
     assert set(ids[0, :2].tolist()) == {1, 5}
     assert set(ids[1, :6].tolist()) == {0, 2, 4, 6, 8, 10}
