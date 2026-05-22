@@ -2,7 +2,9 @@
 
 > See [00-roadmap.md](00-roadmap.md). Second main-thread stage. Stage 1 (autotune separation) has shipped — `@triton.autotune` has been lifted out of every in-scope linr/filter kernel into `<Name>Config + DEFAULT_CONFIG` per [../system/kernels.md → Autotune separation](../system/kernels.md#autotune-separation), so the wrappers are already clean for the custom_op decoration step.
 
-> **Scope note (2026-05-19):** silvertorch is out of scope; see [00-roadmap.md](00-roadmap.md). The original migration order had **7 kernels** (1–7); steps for `bloom_match` (originally step 2) and `codesigned_probe_score` (originally step 7) are stubbed out below. Step numbers are preserved so cross-doc references stay stable. Active migration order: 5 kernels.
+> **Status (2026-05-22):** 4 of 5 originally-scoped kernels shipped — `clause_mask`, `fused_masked_knn_topk`, `bloom_compact`, `clause_compact`. The full-width `[B, N]` `(ids, counts)` return shape from the compact pair also shipped along with their migrations. `bloom_match` (originally stubbed out as silvertorch-side) also picked up `@custom_op` along the way and is no longer pending. **Only `oporp_1bit_match_topk` remains** — the Optional-to-dummy-tensor caller-side refactor in `OneBitKNN` is the last load-bearing piece. Steps 1, 3, 4, 5 below are now reference material; step 6 is the active scope.
+
+> **Scope note (2026-05-19):** silvertorch is out of scope; see [00-roadmap.md](00-roadmap.md). The original migration order had **7 kernels** (1–7); steps for `bloom_match` (originally step 2) and `codesigned_probe_score` (originally step 7) are stubbed out below. Step numbers are preserved so cross-doc references stay stable.
 
 ## Context
 
@@ -14,10 +16,10 @@ The current workaround: `@torch._dynamo.disable` on every Triton kernel host wra
 
 This stage replaces every `@torch._dynamo.disable` with a `torch.library.custom_op` registration so dynamo treats the kernel as an opaque traced op (no graph break) while still letting the compiled forward stitch into one cudagraph.
 
-[migrate-clean-triton-custom-op.md](migrate-clean-triton-custom-op.md) covered the "clean" kernels (`clause_mask`, `fused_masked_knn_topk`) and deferred the others because of `Optional[Tensor]` args or data-dependent output shapes. Both blockers go away here:
+An earlier prototype migrated the two "clean" kernels (`clause_mask`, `fused_masked_knn_topk`) and deferred the others because of `Optional[Tensor]` args or data-dependent output shapes. Both blockers were resolved as this stage shipped:
 
-- **Data-dependent output shape** (`P = max(counts.max().item(), 1)` in `bloom_compact` / `clause_compact`) → return full-width `[B, N]` indices + `counts` tensor. Caller honors `counts` per row. Downstream kernels (`fused_masked_knn_topk`, `oporp_1bit_match_topk`) already iterate over `counts[b]` per row, so they accept wider `positive_indices` without correctness change. Removes the `.item()` host sync — a side-benefit that subsumes [mask-compact-kernel.md](mask-compact-kernel.md) and most of `kernel-optimization-research.md` §2.
-- **`Optional[Tensor]` args** (`positive_indices` / `counts` in `oporp_1bit_match_topk`) → pre-allocate dummy `1×1` tensors at the layer, always pass them in, gate the kernel body via a Python `bool` → `tl.constexpr`. The kernel body already does this (`HAS_INDICES` constexpr); only the host wrapper / layer caller need to change.
+- **Data-dependent output shape** (`P = max(counts.max().item(), 1)` in `bloom_compact` / `clause_compact`) → return full-width `[B, N]` indices + `counts` tensor. Caller honors `counts` per row. Downstream kernels (`fused_masked_knn_topk`, `oporp_1bit_match_topk`) already iterate over `counts[b]` per row, so they accept wider `positive_indices` without correctness change. Removes the `.item()` host sync — the side-benefit that retires both the deferred standalone mask-compact kernel and the prior kernel-optimization research backlog entirely.
+- **`Optional[Tensor]` args** (`positive_indices` / `counts` in `oporp_1bit_match_topk`) → pre-allocate dummy `1×1` tensors at the layer, always pass them in, gate the kernel body via a Python `bool` → `tl.constexpr`. The kernel body already does this (`HAS_INDICES` constexpr); only the host wrapper / layer caller need to change. **This is the remaining work.**
 
 After this stage, the full algo forward captures as a single cudagraph_trees graph for every linr algo × backend × filter combo.
 
@@ -105,31 +107,27 @@ Files: [fused_masked_knn_topk.py:118-122](../../retrieve/src/retrieve/kernels/tr
 
 Order: existing "clean" kernels first (smallest blast radius, validates the recipe end-to-end including the measurement protocol), then refactor + migrate the "dirty" ones. Original numbering is preserved; step 2 (`bloom_match`) and step 7 (`codesigned_probe_score`) are stubbed out as silvertorch-only.
 
-### 1. `clause_mask`
+### 1. `clause_mask` — ✅ shipped
 
-Already specified in detail in [migrate-clean-triton-custom-op.md](migrate-clean-triton-custom-op.md). Use that plan verbatim. The decoration step is decorator + `register_fake` only — no body changes.
+Decorator + `register_fake` only, no body changes. See the in-tree code at [clause_mask.py:160](../../retrieve/src/retrieve/kernels/triton/filters/clause_mask.py#L160) for the final form.
 
-### 2. `bloom_match` — (removed — silvertorch out of scope)
+### 2. `bloom_match` — ✅ shipped (outside original Stage 2 scope)
 
-See [../plans-silvertorch-backup/02-triton-op-migration.md](../plans-silvertorch-backup/02-triton-op-migration.md) for the prior write-up.
+Migrated along the way; carries `@custom_op` today at [bloom_match.py:52](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py#L52). Silvertorch's own probe-and-score kernels (`codesigned_probe_score`, `codesigned_probe_score_exact`) remain on `@torch._dynamo.disable` per the scope note above.
 
-### 3. `fused_masked_knn_topk`
+### 3. `fused_masked_knn_topk` — ✅ shipped
 
-Already specified in detail in [migrate-clean-triton-custom-op.md](migrate-clean-triton-custom-op.md). Use that plan verbatim. The decoration step is decorator + `register_fake` only — no body changes. Stage 1 already lifted `@triton.autotune` out of `fused_masked_knn_topk` into a `FusedMaskedKnnTopkConfig + DEFAULT_CONFIG + per-bucket bucketed N` pattern, so the wrapper is already clean.
+Decorator + `register_fake`, no body changes. Stage 1 had already lifted `@triton.autotune` out into a `FusedMaskedKnnTopkConfig + DEFAULT_CONFIG + per-bucket bucketed N` pattern, so the wrapper was already clean by the time of migration.
 
-### 4. `bloom_compact` — refactor compact API + migrate
+### 4. `bloom_compact` — ✅ shipped (refactor compact API + migrate)
 
-Step A: change return shape from `[B, P]` to `[B, N]` (full-width). Drop `.item()` slice at [bloom_compact.py:132](../../retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py#L132). The kernel body already writes to full width before the slice — just don't slice.
+Full-width `[B, N]` return shipped along with the `@custom_op` migration. Downstream kernels were already row-bounded by `counts`. The torch fallback in `BloomFilter.evaluate_indices` (CPU path) composes a full-width result manually; the live code at [bloom_compact.py:166](../../retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py#L166) is the reference.
 
-Step B: verify callers (`BloomFilter.evaluate_indices`, downstream kernels) still work. The downstream kernels already row-bound by `counts`. The torch fallback in `BloomFilter.evaluate_indices` (CPU path) needs updating to compose a full-width result manually (see `clause_compact` example in `torch-export-refactor.md` Phase 1 step 4 for the pattern).
+### 5. `clause_compact` — ✅ shipped (same as bloom_compact)
 
-Step C: apply standard `custom_op` recipe.
+Same three-step refactor + migration, shipped together with `bloom_compact`. Live code at [clause_compact.py:194](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py#L194).
 
-### 5. `clause_compact` — same as bloom_compact
-
-Same three-step refactor + migration. Files mirror.
-
-### 6. `oporp_1bit_match_topk` — Optional collapse + migrate
+### 6. `oporp_1bit_match_topk` — 🟡 pending (Optional collapse + migrate)
 
 Step A: at the caller side in [layers/linr/one_bit_knn.py](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py), pre-allocate dummy tensors for `positive_indices` / `counts` when the layer's mode is `full` (no indices) or `masked` (after stage 2's compact-kernel refactor returns `(ids, counts)`, this mode passes real values).
 
@@ -147,7 +145,7 @@ See [../plans-silvertorch-backup/02-triton-op-migration.md](../plans-silvertorch
 
 | File | Touch |
 |---|---|
-| [retrieve/src/retrieve/kernels/triton/filters/clause_mask.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_mask.py) | Decorator + register_fake. Per [migrate-clean-triton-custom-op.md](migrate-clean-triton-custom-op.md). |
+| [retrieve/src/retrieve/kernels/triton/filters/clause_mask.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_mask.py) | Decorator + register_fake. ✅ Shipped. |
 | [retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py](../../retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py) | Decorator + register_fake. Remove `if p == 0` early return. |
 | [retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py) | Return full-width `(ids[B, N], counts[B])`. Drop `.item()` slice. Decorator + register_fake. |
 | [retrieve/src/retrieve/kernels/triton/filters/clause_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py) | Same. |
@@ -160,7 +158,7 @@ See [../plans-silvertorch-backup/02-triton-op-migration.md](../plans-silvertorch
 
 ## Verification (per kernel and end-of-stage)
 
-Mirrors and extends the protocol in `migrate-clean-triton-custom-op.md`.
+The protocol below is the one used for steps 1–5 (now shipped) and is the verification template for step 6 (oporp).
 
 ### Per-kernel
 

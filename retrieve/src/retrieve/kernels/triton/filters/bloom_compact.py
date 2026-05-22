@@ -22,7 +22,7 @@ import torch
 import triton
 import triton.language as tl
 from torch import Tensor
-from torch.library import custom_op
+from torch.library import triton_op, wrap_triton
 
 
 @dataclass(frozen=True)
@@ -109,9 +109,9 @@ def _bloom_compact_impl(
     *,
     config: BloomCompactConfig | None = None,
 ) -> tuple[Tensor, Tensor]:
-    """Real body for ``bloom_compact``. Takes an optional ``config=`` so
-    the offline tuner and unit tests can sweep tile parameters. The public
-    ``@custom_op``-wrapped ``bloom_compact`` always passes ``config=None``."""
+    """Direct-launch body used by the offline tuner and unit tests. Takes an
+    optional ``config=`` so tile parameters can be swept; the public
+    ``@triton_op``-wrapped ``bloom_compact`` always uses ``DEFAULT_CONFIG``."""
     if qb.dim() != 2:
         raise ValueError("qb must be [B, W]")
     if sigs.dim() != 2:
@@ -163,7 +163,7 @@ def _bloom_compact_impl(
     return out_indices, counts
 
 
-@custom_op("retrieve::bloom_compact", mutates_args=())
+@triton_op("retrieve::bloom_compact", mutates_args=())
 def bloom_compact(qb: Tensor, sigs: Tensor) -> tuple[Tensor, Tensor]:
     """Fused bloom subset-test + compaction.
 
@@ -178,20 +178,48 @@ def bloom_compact(qb: Tensor, sigs: Tensor) -> tuple[Tensor, Tensor]:
     buffer never costs a re-read. Indices within a row are unordered
     (atomic-add writes).
 
-    Registered as an opaque ``custom_op`` so the algo-level
-    ``torch.compile(dynamic=True, mode="reduce-overhead")`` can stitch
-    this kernel into a single cudagraph_trees graph (no per-call graph
-    break, no ``.item()`` host sync). Delegates to ``_bloom_compact_impl``
-    with the shipped ``DEFAULT_CONFIG``.
+    Registered as ``triton_op`` so the kernel launch is captured as a HOP
+    that ``torch.compile(dynamic=True, mode="reduce-overhead")`` can stitch
+    into a single cudagraph_trees graph; the ``torch.full``/``torch.zeros``
+    allocations inside the body act as the fake/meta kernel. Mirrors
+    ``_bloom_compact_impl`` but routes the launch through ``wrap_triton``
+    for HOP capture and hard-codes ``DEFAULT_CONFIG``.
     """
-    return _bloom_compact_impl(qb, sigs, config=None)
+    cfg = DEFAULT_CONFIG
 
-
-@bloom_compact.register_fake
-def _bloom_compact_fake(qb: Tensor, sigs: Tensor) -> tuple[Tensor, Tensor]:
-    b = qb.shape[0]
+    b, w = qb.shape
     n = sigs.shape[0]
-    return (
-        torch.empty((b, n), dtype=torch.int64, device=qb.device),
-        torch.empty((b,), dtype=torch.int64, device=qb.device),
+
+    qb = qb.contiguous()
+    sigs = sigs.contiguous()
+
+    # ``-1`` sentinel + zero counts: see initialisation note in
+    # ``_bloom_compact_impl``.
+    out_indices = torch.full((b, n), -1, dtype=torch.int64, device=qb.device)
+    counts = torch.zeros((b,), dtype=torch.int64, device=qb.device)
+
+    tiles = triton.cdiv(n, cfg.block_n)
+    tiles_x = triton.cdiv(tiles, 65535)
+    tiles_y = triton.cdiv(tiles, tiles_x)
+    grid = (b, tiles_y, tiles_x)
+
+    wrap_triton(_bloom_compact_kernel)[grid](
+        qb,
+        sigs,
+        out_indices,
+        counts,
+        N=n,
+        tiles_y=tiles_y,
+        W=w,
+        stride_qb_b=qb.stride(0),
+        stride_qb_w=qb.stride(1),
+        stride_s_n=sigs.stride(0),
+        stride_s_w=sigs.stride(1),
+        stride_ob=out_indices.stride(0),
+        stride_on=out_indices.stride(1),
+        BLOCK_N=cfg.block_n,
+        num_warps=cfg.num_warps,
+        num_stages=cfg.num_stages,
     )
+
+    return out_indices, counts

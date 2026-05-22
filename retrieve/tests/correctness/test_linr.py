@@ -130,9 +130,14 @@ class TestCrossBackendAgreement:
         ref.register_index(data["embs"])
         tri = OneBitKNN(k=K, seed=11, backend="triton")
         tri.register_index(data["embs"])
-        mask = None if mask_pass_rate is None else make_mask(B, N, pass_rate=mask_pass_rate)
-        ids_ref, sc_ref = ref(data["query"], mask=mask)
-        ids_tri, sc_tri = tri(data["query"], mask=mask)
+        if mask_pass_rate is None:
+            ids_ref, sc_ref = ref(data["query"])
+            ids_tri, sc_tri = tri(data["query"])
+        else:
+            mask = make_mask(B, N, pass_rate=mask_pass_rate)
+            cand, counts = compact_mask(mask)
+            ids_ref, sc_ref = ref(data["query"], candidate_ids=cand, counts=counts)
+            ids_tri, sc_tri = tri(data["query"], candidate_ids=cand, counts=counts)
         for b in range(B):
             assert_topk_id_sets_match(ids_tri, sc_tri, ids_ref, sc_ref, b)
 
@@ -182,6 +187,30 @@ class TestOneBitKNN:
             for j in range(8):
                 if ids[b, j].item() >= 0:
                     assert ids[b, j].item() in allowed
+
+    def test_torch_compile_fullgraph_no_break(self, data, backend):
+        """``torch.compile(fullgraph=True)`` must not graph-break on either
+        path. The triton path goes through the
+        ``retrieve::oporp_1bit_match_topk_full`` / ``_indirect`` custom_ops
+        (opaque to Dynamo); the torch path is all native ops."""
+        m = OneBitKNN(k=K, backend=backend)
+        m.register_index(data["embs"])
+        compiled = torch.compile(m, fullgraph=True, dynamic=True)
+
+        # Full-scan path.
+        ids_eager, sc_eager = m(data["query"])
+        ids_comp, sc_comp = compiled(data["query"])
+        torch.testing.assert_close(ids_eager, ids_comp)
+        torch.testing.assert_close(sc_eager, sc_comp)
+
+        # Candidates path (mirrors the LinrV3 cascade call shape).
+        g = torch.Generator(device="cuda").manual_seed(11)
+        cand = torch.randint(0, N, (B, 64), generator=g, device="cuda")
+        counts = torch.full((B,), 64, dtype=torch.long, device="cuda")
+        ids_eager, sc_eager = m(data["query"], candidate_ids=cand, counts=counts)
+        ids_comp, sc_comp = compiled(data["query"], candidate_ids=cand, counts=counts)
+        torch.testing.assert_close(ids_eager, ids_comp)
+        torch.testing.assert_close(sc_eager, sc_comp)
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +317,7 @@ class TestClauseDecoupledComposition:
 
 class TestEdgeCases:
     @pytest.mark.parametrize("backend", BACKENDS)
-    @pytest.mark.parametrize("cls", [SimilarityMasking, OneBitKNN, Int8SimilarityMasking])
+    @pytest.mark.parametrize("cls", [SimilarityMasking, Int8SimilarityMasking])
     def test_mask_all_true_equals_unmasked(self, data, cls, backend):
         """All-True mask path returns the same top-K id set as the unmasked path."""
         m = cls(k=K, backend=backend)
@@ -300,7 +329,7 @@ class TestEdgeCases:
             assert_topk_id_sets_match(ids_masked, sc_masked, ids_no_mask, sc_no_mask, b)
 
     @pytest.mark.parametrize("backend", BACKENDS)
-    @pytest.mark.parametrize("cls", [SimilarityMasking, OneBitKNN, Int8SimilarityMasking])
+    @pytest.mark.parametrize("cls", [SimilarityMasking, Int8SimilarityMasking])
     def test_mask_all_false_returns_no_finite_scores(self, data, cls, backend):
         """All-False mask → every slot is padded (``id == -1``)."""
         m = cls(k=K, backend=backend)
@@ -310,6 +339,27 @@ class TestEdgeCases:
         # Sentinel is ``id == -1``; ``Int8SimilarityMasking`` returns int32
         # scores so the previous ``torch.isfinite(scores)`` check would be
         # vacuously True for it.
+        assert (ids == -1).all()
+
+    @pytest.mark.parametrize("backend", BACKENDS)
+    def test_one_bit_knn_all_candidates_equals_unmasked(self, data, backend):
+        """OneBitKNN with candidate_ids = arange(N) per row matches full-scan."""
+        m = OneBitKNN(k=K, backend=backend)
+        m.register_index(data["embs"])
+        ids_full, sc_full = m(data["query"])
+        all_cand = torch.arange(N, device="cuda").unsqueeze(0).expand(B, N).contiguous()
+        ids_cand, sc_cand = m(data["query"], candidate_ids=all_cand)
+        for b in range(B):
+            assert_topk_id_sets_match(ids_cand, sc_cand, ids_full, sc_full, b)
+
+    @pytest.mark.parametrize("backend", BACKENDS)
+    def test_one_bit_knn_zero_counts_returns_sentinels(self, data, backend):
+        """OneBitKNN with counts=0 per row → every slot is padded (``id == -1``)."""
+        m = OneBitKNN(k=K, backend=backend)
+        m.register_index(data["embs"])
+        cand = torch.zeros(B, 8, dtype=torch.long, device="cuda")
+        counts = torch.zeros(B, dtype=torch.long, device="cuda")
+        ids, _ = m(data["query"], candidate_ids=cand, counts=counts)
         assert (ids == -1).all()
 
     @pytest.mark.parametrize("backend", BACKENDS)

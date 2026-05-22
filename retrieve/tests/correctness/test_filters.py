@@ -165,9 +165,10 @@ def test_one_bit_knn_with_combined_filter_mask():
     # Combined mask must be the clause mask exactly (bloom is a superset).
     assert torch.equal(mask, clause_mask)
 
+    cand, counts = compact_mask(mask)
     knn = OneBitKNN(k=k, backend="triton").to("cuda")
     knn.register_index(embs)
-    ids, _ = knn(query, mask=mask)
+    ids, _ = knn(query, candidate_ids=cand, counts=counts)
     assert ids.shape == (b, k)
 
     # Every returned id must satisfy the clause conjunction (where the row had any).

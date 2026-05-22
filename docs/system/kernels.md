@@ -8,8 +8,10 @@ The Triton kernels split into three trees by domain:
 
 - [`linr/`](../../retrieve/src/retrieve/kernels/triton/linr/) — kernels
   used by `PrefilterKNN` / `OneBitKNN` (`fused_masked_knn_topk`,
-  `oporp_1bit_match_topk`). `SimilarityMasking`'s dense matmul + top-K is
-  pure torch — there's no real fusion to win over cuBLAS + CUB.
+  `oporp_1bit_match_topk`). `SimilarityMasking`'s dense fp16 matmul +
+  top-K and `Int8SimilarityMasking`'s int8 `_int_mm` + int32 top-K are
+  both pure torch — there's no real fusion to win over cuBLAS LtGemm +
+  CUB.
 - [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/) —
   standalone filter primitives consumed by the `FilterModule` family:
   `clause_compact` (powers `ExactAttributeFilter.evaluate_indices`),
@@ -18,9 +20,12 @@ The Triton kernels split into three trees by domain:
   `BloomFilter.evaluate_indices`). The mask/compact split mirrors the
   filter API split documented in [filtering.md](filtering.md).
 - [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/) —
-  `codesigned_probe_score` (the IVF + INT8 + Bloom co-design) plus
-  `bloom_match` (lives in this tree for historical reasons but is now a
-  cross-tree filter primitive consumed by `BloomFilter`).
+  the two co-designed IVF probe+score kernels (`codesigned_probe_score`
+  for the IVF + INT8 + Bloom co-design, `codesigned_probe_score_exact`
+  for the IVF + INT8 + exact AND-of-OR variant — `SilverTorch.filter`
+  picks one) plus `bloom_match` (lives in this tree for historical
+  reasons but is now a cross-tree filter primitive consumed by
+  `BloomFilter`).
 
 The LinR kernels are the focus of this doc; the filter primitives
 (`clause_compact`, `clause_mask`, `bloom_match`, `bloom_compact`) are
@@ -35,18 +40,29 @@ All kernels follow the same conventions:
   buffer and the host calls `torch.topk` on it. CUB's top-K (under torch)
   is faster than anything we can implement in pure Triton without a
   warp-level radix-select primitive.
-- Tile config (`block_n`, `num_warps`, `num_stages`) is offline-tuned per
-  kernel and shipped as a single `DEFAULT_CONFIG` constant on the
-  kernel module. No runtime `@triton.autotune`. Callers who want a
-  non-default tile pass `config=<Kernel>Config(...)`; for
-  `@custom_op`-wrapped kernels the override goes to the private
-  `_<name>_impl(..., config=)` companion (the public op has a fixed
-  schema and always uses `DEFAULT_CONFIG`). The
-  `evaluation/scripts/tune_kernels.py` CLI sweeps the candidate grid on
-  a given arch and prints the line to paste into the kernel file. The
-  same convention applies uniformly across linr, filter, and silvertorch
-  kernels — see [Autotune separation](#autotune-separation) below for
-  the rationale.
+- Tile config (`block_n`, `num_warps`, `num_stages`; `block_p` for the
+  silvertorch kernels) is offline-tuned per kernel and shipped as a
+  single `DEFAULT_CONFIG` constant on the kernel module. No runtime
+  `@triton.autotune`. Callers who want a non-default tile pass
+  `config=<Kernel>Config(...)`; for `@custom_op`-wrapped kernels the
+  override goes to the private `_<name>_impl(..., config=)` companion
+  (the public op has a fixed schema and always uses `DEFAULT_CONFIG`).
+  The `evaluation/scripts/tune_kernels.py` CLI sweeps the candidate
+  grid on a given arch and prints the line to paste into the kernel
+  file. The same convention applies uniformly across linr, filter, and
+  silvertorch kernels — see [Autotune separation](#autotune-separation)
+  below for the rationale.
+- Graph-break behavior. The five "main-thread" host wrappers
+  (`clause_mask`, `clause_compact`, `bloom_compact`, `bloom_match`,
+  `fused_masked_knn_topk`) are decorated with
+  `@torch.library.custom_op` + `register_fake` so they pass through
+  `torch.compile(dynamic=True, mode="reduce-overhead")` as opaque ops —
+  no graph break — and each LiNR algo's full forward captures into one
+  cudagraph_trees graph. The remaining three (`oporp_1bit_match_topk`,
+  `codesigned_probe_score`, `codesigned_probe_score_exact`) still use
+  `@torch._dynamo.disable`; oporp is the last Stage 2 item in
+  [docs/plans/02-triton-op-migration.md](../plans/02-triton-op-migration.md),
+  and the two silvertorch kernels are explicitly out of Stage 2 scope.
 
 ## Autotune separation
 
@@ -72,11 +88,14 @@ The shipped pattern, applied uniformly to every kernel in this tree:
 3. The host wrapper takes `config: <Name>Config | None = None`;
    `cfg = config if config is not None else DEFAULT_CONFIG` resolves it.
 4. For `@custom_op`-wrapped kernels (`clause_mask`, `clause_compact`,
-   `bloom_compact`, `bloom_match`, the linr trio), the real body lives
-   in a private `_<name>_impl(..., *, config: ...Config | None = None)`
-   that the public op delegates to with `config=None`. The schema
-   doesn't carry the dataclass; tests and the tuner reach `_impl`
-   directly to pass an override.
+   `bloom_compact`, `bloom_match`, `fused_masked_knn_topk`), the real
+   body lives in a private `_<name>_impl(..., *, config: ...Config |
+   None = None)` that the public op delegates to with `config=None`.
+   The schema doesn't carry the dataclass; tests and the tuner reach
+   `_impl` directly to pass an override. The `@torch._dynamo.disable`
+   kernels (`oporp_1bit_match_topk`, `codesigned_probe_score`,
+   `codesigned_probe_score_exact`) take `config=` on the public host
+   wrapper directly since they have no fixed `custom_op` schema.
 5. Tuning is offline: `evaluation/scripts/tune_kernels.py` (`uv run
    tune-kernels --kernel <name>`) sweeps a hard-coded `(block_n,
    num_warps)` grid against a hard-coded shape regime list mirroring
@@ -133,6 +152,24 @@ traffic and selection cost matched cuBLAS + CUB exactly. With no fusion
 benefit, the kernel was removed; `SimilarityMasking` accepts the
 `backend=` flag for API symmetry but both values dispatch to this same
 pure-torch path.
+
+## Int8SimilarityMasking dense path — pure torch, no kernel
+
+`Int8SimilarityMasking`'s forward is `torch._int_mm(query_codes,
+item_codes_T)` (int8×int8 → int32, cuBLAS LtGemm, IMMA tensor cores on
+sm_80+) + optional `masked_fill(int32_min)` + `torch.topk` on the int32
+result — implemented directly in
+[`Int8SimilarityMasking`](../../retrieve/src/retrieve/layers/linr/int8_similarity_masking.py).
+Items and queries are int8-quantized with one global scalar scale each
+(SilverTorch §3.2); because both scales are global constants per call,
+the int32 dot product is a positive monotonic transform of the true
+fp32 dot, so topk ordering is exact (modulo per-element int8 rounding)
+without rescaling to fp32. Storage is one `[D, N]` int8 buffer — half
+of `SimilarityMasking`'s fp16 layout. `torch._int_mm` requires `M >=
+17`, so small batches are zero-padded before the matmul and sliced
+after; quantization runs **before** padding so the padded zero rows
+don't shift the global scale. No Triton kernel; `backend=` is accepted
+for API symmetry but both values dispatch here.
 
 ## `fused_masked_knn_topk` — PrefilterKNN sparse path
 
@@ -474,6 +511,7 @@ each module runs the same op chain in pure torch (no kernels), eager.
 | layer                       | path         | kernel(s) called                                  |
 |-----------------------------|--------------|---------------------------------------------------|
 | [`SimilarityMasking`](../../retrieve/src/retrieve/layers/linr/similarity_masking.py) | always dense | none — pure torch `(q @ x.T).masked_fill(...).topk` |
+| [`Int8SimilarityMasking`](../../retrieve/src/retrieve/layers/linr/int8_similarity_masking.py) | always dense | none — pure torch `torch._int_mm(...).masked_fill(...).topk` (int8×int8 → int32, IMMA) |
 | [`PrefilterKNN`](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py)         | masked       | `compact_mask` → `fused_masked_knn_topk`          |
 |                                                                | unmasked     | none — pure torch dense path (nothing to pre-filter) |
 | [`OneBitKNN`](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py)             | full         | `oporp_1bit_match_topk` (HAS_INDICES=False)       |
@@ -563,19 +601,26 @@ correctness depends on bit identity here.
 
 ## SilverTorch kernels
 
-The SilverTorch INT8 scoring kernel lives in
-[`silvertorch/codesigned_probe_score.py`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py)
-and powers
+Two co-designed IVF probe + INT8 scoring kernels live in
+[`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/),
+selected by `SilverTorch.filter`: `codesigned_probe_score` for
+`filter ∈ {"none", "bloom"}`, `codesigned_probe_score_exact` for
+`filter="exact"`. Both power
 [`SilverTorch.forward`](../../retrieve/src/retrieve/layers/silvertorch/main.py).
 (`bloom_match` also lives in this tree but is documented above as a
-filter primitive — it has a non-SilverTorch consumer now.)
+standalone filter primitive — it has a non-SilverTorch consumer now.)
 
 Phase 1 (centroid `q @ centroids^T + topk` to pick the top-`n_probe`
-clusters) runs **host-side** in `SilverTorch.forward`; the kernel is
-"phase-2+3 fused" — for each `(query, probed-item)` cell it optionally
-runs the bloom subset test and (when it passes) scores via INT8
+clusters) runs **host-side** in `SilverTorch.forward`; both kernels are
+"phase-2+3 fused" — for each `(query, probed-item)` cell each kernel
+runs its predicate inline and (when it passes) scores via INT8
 dequantize + dot. Items with `id == -1` (cluster padding) and items
-failing the filter get score `-inf`.
+failing the predicate get score `-inf`.
+
+### `codesigned_probe_score` — IVF + INT8 + Bloom
+
+[`silvertorch/codesigned_probe_score.py`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py).
+
 The bloom intermediate (`[B, P, W]` sigs / bool match) and the
 `int8 → fp32` code cast (`[B, P, D]`) never touch HBM — they live in
 registers/SRAM. Bloom subset uses an OR-reduce trick:
@@ -601,3 +646,32 @@ JIT-specialise on it). Score buffer is `torch.empty([B, P])` — every
 in-bounds lane is overwritten (real dot or `-inf`), so no pre-fill
 kernel is needed. The host then `torch.topk` on it and gathers global
 ids; if `P < K` the output is padded with `-1` / `-inf` to width `K`.
+
+### `codesigned_probe_score_exact` — IVF + INT8 + exact AND-of-OR
+
+[`silvertorch/codesigned_probe_score_exact.py`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score_exact.py).
+
+Same launch shape and IVF + INT8 scoring path as `codesigned_probe_score`;
+swaps the bloom subset test for an exact AND-of-OR attribute predicate
+fully unrolled over `(C, A_max)` against the `[N, C, A_max]` narrow item
+attrs (`item_clause_attrs_narrow`) and `[B, C]` query attrs. Per program:
+inner OR over `A_max` attribute slots per clause, outer AND over `C`
+clauses, with `q_c == -1` overriding to "always passes" — the same inner
+loop as the standalone `clause_mask` kernel, but fused into the score
+path and applied only to the IVF-probed item subset. No false
+positives (cf. bloom mode); bandwidth-cheaper per item at small
+`C × A_max` because there's no `W`-word signature read. Trades the
+bloom hash flexibility for exact-value match — schema-bound,
+equality-only.
+
+**Launch grid.** `(cdiv(P, BLOCK_P), B)` — identical to
+`codesigned_probe_score`. `P = n_probe * max_cluster_size` is again
+fixed per registered SilverTorch index, so no bucketing.
+
+**Tile config.** `CodesignedProbeScoreExactConfig(block_p, num_warps,
+num_stages=3)` — shipped as `DEFAULT_CONFIG` on the kernel module;
+default `block_p=256, num_warps=4` mirrors the `codesigned_probe_score`
+A100 tuning. Pass `config=` to override. Re-tune on a new arch via
+`uv run tune-kernels --kernel codesigned_probe_score_exact`. Score
+buffer is `torch.empty([B, P])` — same convention as
+`codesigned_probe_score`, no pre-fill kernel.

@@ -6,6 +6,7 @@ import torch
 import triton
 import triton.language as tl
 from torch import Tensor
+from torch.library import custom_op
 
 
 # N-bucket ladder for the HAS_INDICES path. Clamps runtime candidate
@@ -124,13 +125,12 @@ def _oporp_1bit_match_topk_kernel(
     )
 
 
-@torch._dynamo.disable
-def oporp_1bit_match_topk(
+def _oporp_1bit_match_topk_impl(
     query_bits: Tensor,
     item_bits: Tensor,
     k: int,
-    positive_indices: Tensor | None = None,
-    counts: Tensor | None = None,
+    positive_indices: Tensor | None,
+    counts: Tensor | None,
     config: Oporp1BitMatchTopkConfig | None = None,
 ) -> tuple[Tensor, Tensor]:
     """Fused Sign-OPORP 1-bit Hamming similarity + top-K.
@@ -141,8 +141,9 @@ def oporp_1bit_match_topk(
         query_bits: ``[B, W]`` int64 packed query sign bits.
         item_bits: ``[N, W]`` int64 packed item sign bits.
         k: top-K to return.
-        positive_indices: optional ``[B, P]`` int64 — when given, scores only
-            those candidate ids per row; ``counts[b]`` bounds valid columns.
+        positive_indices: ``[B, P]`` int64 or ``None``. When given, scores
+            only those candidate ids per row; ``counts[b]`` bounds valid
+            columns. When ``None``, runs full-scan over ``item_bits``.
         counts: ``[B]`` int64 valid counts; required iff ``positive_indices``
             is given.
         config: optional ``Oporp1BitMatchTopkConfig`` override; default
@@ -157,6 +158,11 @@ def oporp_1bit_match_topk(
     ``@triton.autotune``'s cache key). The full-scan path uses
     ``N=item_bits.shape[0]`` directly — the registered index size is
     fixed per process.
+
+    This is the shared launcher behind the two public custom_ops
+    ``oporp_1bit_match_topk_full`` and ``oporp_1bit_match_topk_indirect``.
+    Tune scripts and parity tests that need a non-default tile config call
+    it directly (the custom_op wrappers can't carry dataclass kwargs).
     """
     if query_bits.dim() != 2 or item_bits.dim() != 2:
         raise ValueError("query_bits must be [B, W] and item_bits [N, W]")
@@ -177,17 +183,12 @@ def oporp_1bit_match_topk(
 
     query_bits = query_bits.contiguous()
     item_bits = item_bits.contiguous()
+    cfg = config if config is not None else DEFAULT_CONFIG
 
     if has_indices:
         positive_indices = positive_indices.contiguous()
         counts = counts.contiguous()
         n_loop = positive_indices.shape[1]
-        if n_loop == 0:
-            return (
-                torch.full((b, k), -1, dtype=torch.long, device=query_bits.device),
-                torch.full((b, k), float("-inf"), dtype=torch.float32, device=query_bits.device),
-            )
-        cfg = config if config is not None else DEFAULT_CONFIG
         n_kernel = _bucket_n(n_loop)
         # Allocate at bucketed width — same trick as fused_masked_knn_topk.
         # Lanes in [n_loop, n_bucket) get -inf because in_count = (n_off <
@@ -200,14 +201,14 @@ def oporp_1bit_match_topk(
         stride_pb = positive_indices.stride(0)
         stride_pp = positive_indices.stride(1)
     else:
-        n_loop = n_items_total
-        cfg = config if config is not None else DEFAULT_CONFIG
         # No bucketing for full-scan: ``n_items_total`` is fixed per
         # registered index. Pass N=n_items_total as constexpr; JIT
         # compiles once per registered corpus size.
+        n_loop = n_items_total
         n_kernel = n_loop
         all_scores = torch.empty(b, n_kernel, dtype=torch.float32, device=query_bits.device)
-        # Dummy tensors — pointers never dereferenced because HAS_INDICES guards the load.
+        # Dummies: HAS_INDICES=False gates the load so these are never
+        # dereferenced. Allocated locally so the public surface stays clean.
         pos_arg = torch.empty(1, 1, dtype=torch.int64, device=query_bits.device)
         counts_arg = torch.empty(1, dtype=torch.int64, device=query_bits.device)
         stride_pb = pos_arg.stride(0)
@@ -277,3 +278,66 @@ def oporp_1bit_match_topk(
         )
 
     return topk_ids, topk_scores
+
+
+@custom_op("retrieve::oporp_1bit_match_topk_full", mutates_args=())
+def oporp_1bit_match_topk_full(
+    query_bits: Tensor,
+    item_bits: Tensor,
+    k: int,
+) -> tuple[Tensor, Tensor]:
+    """Full-scan custom_op wrapper for ``_oporp_1bit_match_topk_impl``.
+
+    Registered as an opaque ``custom_op`` so dynamo can stitch the algo
+    forward into a single cudagraph (no graph break per call). The
+    ``config=`` keyword is dropped because ``custom_op``'s schema
+    inference doesn't accept dataclass args; tune scripts and parity tests
+    that need a non-default config call ``_oporp_1bit_match_topk_impl``
+    directly.
+    """
+    return _oporp_1bit_match_topk_impl(
+        query_bits, item_bits, k, None, None, config=None
+    )
+
+
+@oporp_1bit_match_topk_full.register_fake
+def _oporp_1bit_match_topk_full_fake(
+    query_bits: Tensor,
+    item_bits: Tensor,
+    k: int,
+) -> tuple[Tensor, Tensor]:
+    b = query_bits.shape[0]
+    device = query_bits.device
+    ids = torch.empty((b, k), dtype=torch.long, device=device)
+    scores = torch.empty((b, k), dtype=torch.float32, device=device)
+    return ids, scores
+
+
+@custom_op("retrieve::oporp_1bit_match_topk_indirect", mutates_args=())
+def oporp_1bit_match_topk_indirect(
+    query_bits: Tensor,
+    item_bits: Tensor,
+    k: int,
+    positive_indices: Tensor,
+    counts: Tensor,
+) -> tuple[Tensor, Tensor]:
+    """Indirect-load custom_op wrapper. Scores only the ids in
+    ``positive_indices[b, :counts[b]]`` per row."""
+    return _oporp_1bit_match_topk_impl(
+        query_bits, item_bits, k, positive_indices, counts, config=None
+    )
+
+
+@oporp_1bit_match_topk_indirect.register_fake
+def _oporp_1bit_match_topk_indirect_fake(
+    query_bits: Tensor,
+    item_bits: Tensor,
+    k: int,
+    positive_indices: Tensor,
+    counts: Tensor,
+) -> tuple[Tensor, Tensor]:
+    b = query_bits.shape[0]
+    device = query_bits.device
+    ids = torch.empty((b, k), dtype=torch.long, device=device)
+    scores = torch.empty((b, k), dtype=torch.float32, device=device)
+    return ids, scores

@@ -5,8 +5,14 @@ top-``candidate_pool`` list at 1-bit precision. Stage 2:
 ``PrefilterKNN`` rescores those candidates at full precision. Both
 stages share the same ``backend`` (default ``"triton"``).
 
-The whole algo forward (filter mask build + stage 1 + ``(cand_ids
->= 0).sum`` stitch + stage 2) is wrapped with ``torch.compile(
+When filtered, the cascade calls ``filter_mod.evaluate_indices``
+(single fused compact kernel — ``clause_compact`` / ``bloom_compact``
+on triton) and passes the ``(candidate_ids, counts)`` directly into
+stage 1's indirect-load path. No ``[B, N]`` mask materialized; the
+filter is consulted in exactly one place. Stage 1 itself no longer
+takes a ``mask=`` arg. The whole algo forward (filter compact +
+stage 1 + ``(cand_ids >= 0).sum`` stitch + stage 2) is wrapped with
+``torch.compile(
 dynamic=True, mode="reduce-overhead")`` in ``__init__`` regardless of
 backend. Inductor fuses popcount + reduce in stage 1 and gather +
 matmul + topk in stage 2; one cudagraph captures both stages, so
@@ -29,7 +35,6 @@ from retrieve import OneBitKNN, PrefilterKNN
 from retrieve.interfaces import Backend, FilterModule
 
 from ._helpers import collect_modules
-from .filter import make_mask
 
 
 class LinrV3Algo(nn.Module):
@@ -60,14 +65,27 @@ class LinrV3Algo(nn.Module):
         self.compile(dynamic=True, mode="reduce-overhead")
 
     def forward(self, q: Tensor, qa_narrow: Tensor | None = None) -> tuple[Tensor, Tensor]:
-        mask = make_mask(self.filter_mod, qa_narrow)
-        cand_ids, _ = self.stage1(q, mask=mask)
-        # When the mask admits < candidate_pool items stage 1's trailing slots
-        # are -1; the stage-2 fused_masked_knn_topk does indirect loads via raw
-        # pointer arithmetic, so item_embs_ptr + (-1)*stride walks off the
-        # buffer. Pass per-row counts when masked so stage 2 only scores the
-        # valid prefix.
-        if mask is not None:
+        filtered = self.filter_mod is not None and qa_narrow is not None
+        if filtered:
+            # Single fused compact straight from the filter — no [B, N] bool
+            # intermediate. On backend="triton" this is the clause_compact /
+            # bloom_compact custom_op; on backend="torch" it falls back to
+            # compact_mask(evaluate_mask(...)). Either way: one filter call,
+            # one place. The item-0 padding-row sentinel that filter.make_mask
+            # applies is omitted here on purpose — item 0 is the zero vector,
+            # so stage 2's fp32 rerank assigns it score 0 and it never ranks
+            # in the final top-K (cascade-vs-oracle parity confirmed by the
+            # eval-side recall@k checks).
+            pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+            cand_ids, _ = self.stage1(q, candidate_ids=pos_idx, counts=pcounts)
+        else:
+            cand_ids, _ = self.stage1(q)
+        # When the filter admits < candidate_pool items stage 1's trailing
+        # slots are -1; the stage-2 fused_masked_knn_topk does indirect loads
+        # via raw pointer arithmetic, so item_embs_ptr + (-1)*stride walks
+        # off the buffer. Pass per-row counts when filtered so stage 2 only
+        # scores the valid prefix.
+        if filtered:
             counts = (cand_ids >= 0).sum(dim=1)
             return self.stage2(q, candidate_ids=cand_ids, counts=counts)
         return self.stage2(q, candidate_ids=cand_ids)

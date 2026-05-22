@@ -8,6 +8,7 @@ from torch import Tensor
 from retrieve.interfaces import Backend, RetrievalModule
 from retrieve.kernels.triton.silvertorch.codesigned_probe_score import (
     codesigned_probe_score,
+    codesigned_probe_score_bloom,
 )
 from retrieve.kernels.triton.silvertorch.codesigned_probe_score_exact import (
     codesigned_probe_score_exact,
@@ -177,6 +178,11 @@ class SilverTorch(RetrievalModule):
             "global_scale",
             torch.tensor(global_scale, dtype=torch.float32, device=item_embs.device),
         )
+        # Plain Python float for the cudagraph-captured forward path: passing
+        # ``self.global_scale.item()`` per call forces a device→host sync that
+        # breaks cudagraph_trees capture even after the kernel is opaque to
+        # dynamo. Cached once at index build.
+        self._global_scale_f = float(global_scale)
         self.register_buffer("padded_cluster_items", padded)
         self.register_buffer("cluster_sizes", cluster_sizes)
 
@@ -250,11 +256,11 @@ class SilverTorch(RetrievalModule):
                 query,
                 flat_items,
                 self.item_codes,
-                float(self.global_scale.item()),
+                self.item_clause_attrs,
+                self.clause_is_reverse,
+                query_clause_attrs.long(),
+                self._global_scale_f,
                 self.k,
-                item_clause_attrs=self.item_clause_attrs,
-                clause_is_reverse=self.clause_is_reverse,
-                query_clause_attrs=query_clause_attrs.long(),
             )
 
         if self.has_bloom and query_clause_attrs is not None:
@@ -265,18 +271,21 @@ class SilverTorch(RetrievalModule):
                 self.k_hash,
                 self.word_count,
             )
-            sigs = self.bloom_sigs
-        else:
-            qb = None
-            sigs = None
+            return codesigned_probe_score_bloom(
+                query,
+                flat_items,
+                self.item_codes,
+                qb,
+                self.bloom_sigs,
+                self._global_scale_f,
+                self.k,
+            )
         return codesigned_probe_score(
             query,
             flat_items,
             self.item_codes,
-            float(self.global_scale.item()),
+            self._global_scale_f,
             self.k,
-            query_bits=qb,
-            bloom_sigs=sigs,
         )
 
     def _forward_torch_eager(
