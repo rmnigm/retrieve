@@ -11,7 +11,11 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.kernels.triton.filters.clause_compact import clause_compact
+from retrieve.kernels.triton.filters.clause_compact import (
+    ClauseCompactConfig,
+    _clause_compact_impl,
+    clause_compact,
+)
 from retrieve.layers.filters import ExactAttributeFilter
 from retrieve.layers.utils.compact import compact_mask
 from tests.conftest import make_attrs, make_query_attrs
@@ -95,5 +99,22 @@ def test_clause_compact_b_one():
     q = make_query_attrs(b=1, c=c, n_vocab=20, inactive_rate=0.2, seed=100)
 
     out_ids, out_counts = clause_compact(attrs, is_reverse, q)
+    ref_ids, ref_counts = _ref(attrs, is_reverse, q)
+    _set_match(out_ids, out_counts, ref_ids, ref_counts)
+
+
+@pytest.mark.parametrize("block_n, num_warps", [(128, 2), (512, 8), (1024, 4)])
+def test_clause_compact_config_override(block_n, num_warps):
+    """Non-default ``ClauseCompactConfig`` produces the same row-id sets —
+    proves the ``config=`` kwarg plumbs through ``_clause_compact_impl``
+    to the kernel launch and the atomic_add compaction stays correct
+    under non-default tiles."""
+    n, c = 4096, 3
+    attrs = make_attrs(n, c=c, a_max=2, n_vocab=30, pad_rate=0.2, seed=121)
+    is_reverse = torch.zeros(c, dtype=torch.bool, device="cuda")
+    q = make_query_attrs(b=8, c=c, n_vocab=30, inactive_rate=0.2, seed=122)
+
+    cfg = ClauseCompactConfig(block_n=block_n, num_warps=num_warps)
+    out_ids, out_counts = _clause_compact_impl(attrs, is_reverse, q, config=cfg)
     ref_ids, ref_counts = _ref(attrs, is_reverse, q)
     _set_match(out_ids, out_counts, ref_ids, ref_counts)

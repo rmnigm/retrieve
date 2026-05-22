@@ -12,15 +12,23 @@ Everything else — `torch.export` readiness, the standalone feature plans — i
 
 ## Main thread
 
-### Stage 1 — Autotune separation
+### Stage 1 — Autotune separation — ✅ **done (2026-05-22)**
 
-[01-autotune-separation.md](01-autotune-separation.md)
-
-Move every in-scope Triton kernel's tuning surface (`@triton.autotune` configs, the `fused_masked_knn_topk` `_bucket_p` ladder, `do_not_specialize` hints) out of the kernel host-call site into a per-kernel `Config` dataclass + arch-keyed `REGISTRY` + `lookup(device, problem_hint)` helper. Stand up an offline `tune-kernels` script that benchmarks the config grid on the local arch and emits REGISTRY-pasteable rows. In-scope kernels: `clause_mask`, `clause_compact`, `bloom_compact`, `fused_masked_knn_topk`, `oporp_1bit_match_topk`. (`bloom_match` and `codesigned_probe_score` are silvertorch-only — out of scope.)
-
-Structural, not perf. Acceptance: parity tests pass, eager perf within ±5% of the prior autotune-selected configs.
-
-Lifts the KernelConfig pattern out of [torch-export-refactor.md](torch-export-refactor.md) Phase 1; strips all other Phase 1-5 concerns (mode flags, `.item()` removal, `build_export.py`).
+Shipped: every in-scope kernel now exposes a `<Name>Config` dataclass +
+`DEFAULT_CONFIG` (single per-arch curated default, no REGISTRY/lookup)
+next to the `@triton.jit` body. The `@custom_op`-wrapped kernels
+delegate to a private `_<name>_impl(..., *, config=None)` so the public
+op keeps its fixed schema. Offline tuning via
+[evaluation/scripts/tune_kernels.py](../../evaluation/scripts/tune_kernels.py)
+(`uv run tune-kernels --kernel <name>`) sweeps a hard-coded grid on
+real-eval shapes (read from `evaluation/data/<dataset>/item_attrs_narrow.pt`
++ `evaluation/retrieval/config.py`) and emits a pasteable
+`DEFAULT_CONFIG = ...` line. Covered: `clause_mask`, `clause_compact`,
+`bloom_compact`, `fused_masked_knn_topk`, `oporp_1bit_match_topk`,
+`codesigned_probe_score`. (`bloom_match` retains its hard-coded tile —
+the per-call width is dictated by `N`.) See
+[../system/kernels.md → Autotune separation](../system/kernels.md#autotune-separation)
+for the convention. The original plan doc has been deleted as superseded.
 
 ### Stage 2 — `torch.compile` fixes via `triton_op` / `custom_op`
 

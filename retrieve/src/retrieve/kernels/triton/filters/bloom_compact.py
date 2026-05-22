@@ -16,16 +16,33 @@ the *set*, not the order.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import torch
 import triton
 import triton.language as tl
 from torch import Tensor
 from torch.library import custom_op
 
-# NOTE: no @triton.autotune — atomic_add accumulates across autotune trials and
-# corrupts ``counts``. Same gotcha that bit ``clause_compact``.
-_BLOCK_N = 256
-_NUM_WARPS = 4
+
+@dataclass(frozen=True)
+class BloomCompactConfig:
+    block_n: int
+    num_warps: int
+    num_stages: int = 3
+
+
+# Single default the library ships with. Re-tune on a new arch by running
+# ``evaluation/scripts/tune_kernels.py --kernel bloom_compact`` and pasting
+# the resulting line in. Same atomic_add gotcha as ``clause_compact`` is
+# avoided the same way: the host wrapper allocates fresh ``out_indices``
+# and ``counts`` per call, so tuner reps don't accumulate.
+# Tuned on A100 (sm_80) against real-eval shapes (Goodreads N=797K /
+# arXiv N=3M / arXiv-synth N=15M, W=16 from m_bits=1024 default,
+# B∈{1, 16}): block_n=256, num_warps=8 wins all batched regimes; the
+# B=1 regimes prefer block_n=128 by ~5%. Wide W=16 still causes severe
+# register spill at block_n≥512 with num_warps≤4 (3–15× slowdown).
+DEFAULT_CONFIG = BloomCompactConfig(block_n=256, num_warps=8)
 
 
 @triton.jit
@@ -35,6 +52,7 @@ def _bloom_compact_kernel(
     out_indices_ptr,  # [B, N] int64 (worst-case scratch)
     counts_ptr,  # [B] int64 (init 0)
     N,
+    tiles_y,
     W: tl.constexpr,
     stride_qb_b,
     stride_qb_w,
@@ -44,8 +62,14 @@ def _bloom_compact_kernel(
     stride_on,
     BLOCK_N: tl.constexpr,
 ):
+    # 3D grid: batch on grid_x (small, restores L2 reuse on sigs because
+    # adjacent dispatched programs share the same tile), tiles split
+    # across grid_y × grid_z to dodge the 65535 cap on a single axis.
+    # `tile_id = tile_x * tiles_y + tile_y` keeps tiles contiguous.
     bid = tl.program_id(0)
-    tile_id = tl.program_id(1)
+    tile_y = tl.program_id(1)
+    tile_x = tl.program_id(2)
+    tile_id = tile_x * tiles_y + tile_y
 
     n_offsets = tile_id * BLOCK_N + tl.arange(0, BLOCK_N)
     n_valid = n_offsets < N
@@ -79,26 +103,15 @@ def _bloom_compact_kernel(
     )
 
 
-@custom_op("retrieve::bloom_compact", mutates_args=())
-def bloom_compact(qb: Tensor, sigs: Tensor) -> tuple[Tensor, Tensor]:
-    """Fused bloom subset-test + compaction.
-
-    Inputs:
-        qb:   [B, W] int64 — packed query bloom signatures.
-        sigs: [N, W] int64 — packed item bloom signatures.
-
-    Returns ``(positive_indices [B, N] int64, counts [B] int64)``. The full
-    item-width ``[B, N]`` indices buffer is returned with ``-1`` sentinels
-    in the unused tail; downstream consumers (``fused_masked_knn_topk``,
-    ``oporp_1bit_match_topk``) row-bound by ``counts[b]`` so the wider
-    buffer never costs a re-read. Indices within a row are unordered
-    (atomic-add writes).
-
-    Registered as an opaque ``custom_op`` so the algo-level
-    ``torch.compile(dynamic=True, mode="reduce-overhead")`` can stitch
-    this kernel into a single cudagraph_trees graph (no per-call graph
-    break, no ``.item()`` host sync).
-    """
+def _bloom_compact_impl(
+    qb: Tensor,
+    sigs: Tensor,
+    *,
+    config: BloomCompactConfig | None = None,
+) -> tuple[Tensor, Tensor]:
+    """Real body for ``bloom_compact``. Takes an optional ``config=`` so
+    the offline tuner and unit tests can sweep tile parameters. The public
+    ``@custom_op``-wrapped ``bloom_compact`` always passes ``config=None``."""
     if qb.dim() != 2:
         raise ValueError("qb must be [B, W]")
     if sigs.dim() != 2:
@@ -121,7 +134,12 @@ def bloom_compact(qb: Tensor, sigs: Tensor) -> tuple[Tensor, Tensor]:
     out_indices = torch.full((b, n), -1, dtype=torch.int64, device=qb.device)
     counts = torch.zeros((b,), dtype=torch.int64, device=qb.device)
 
-    grid = (b, triton.cdiv(n, _BLOCK_N))
+    cfg = config if config is not None else DEFAULT_CONFIG
+    # 3D grid (batch, tiles_y, tiles_x) — see kernel comment.
+    tiles = triton.cdiv(n, cfg.block_n)
+    tiles_x = triton.cdiv(tiles, 65535)
+    tiles_y = triton.cdiv(tiles, tiles_x)
+    grid = (b, tiles_y, tiles_x)
 
     _bloom_compact_kernel[grid](
         qb,
@@ -129,6 +147,7 @@ def bloom_compact(qb: Tensor, sigs: Tensor) -> tuple[Tensor, Tensor]:
         out_indices,
         counts,
         N=n,
+        tiles_y=tiles_y,
         W=w,
         stride_qb_b=qb.stride(0),
         stride_qb_w=qb.stride(1),
@@ -136,11 +155,36 @@ def bloom_compact(qb: Tensor, sigs: Tensor) -> tuple[Tensor, Tensor]:
         stride_s_w=sigs.stride(1),
         stride_ob=out_indices.stride(0),
         stride_on=out_indices.stride(1),
-        BLOCK_N=_BLOCK_N,
-        num_warps=_NUM_WARPS,
+        BLOCK_N=cfg.block_n,
+        num_warps=cfg.num_warps,
+        num_stages=cfg.num_stages,
     )
 
     return out_indices, counts
+
+
+@custom_op("retrieve::bloom_compact", mutates_args=())
+def bloom_compact(qb: Tensor, sigs: Tensor) -> tuple[Tensor, Tensor]:
+    """Fused bloom subset-test + compaction.
+
+    Inputs:
+        qb:   [B, W] int64 — packed query bloom signatures.
+        sigs: [N, W] int64 — packed item bloom signatures.
+
+    Returns ``(positive_indices [B, N] int64, counts [B] int64)``. The full
+    item-width ``[B, N]`` indices buffer is returned with ``-1`` sentinels
+    in the unused tail; downstream consumers (``fused_masked_knn_topk``,
+    ``oporp_1bit_match_topk``) row-bound by ``counts[b]`` so the wider
+    buffer never costs a re-read. Indices within a row are unordered
+    (atomic-add writes).
+
+    Registered as an opaque ``custom_op`` so the algo-level
+    ``torch.compile(dynamic=True, mode="reduce-overhead")`` can stitch
+    this kernel into a single cudagraph_trees graph (no per-call graph
+    break, no ``.item()`` host sync). Delegates to ``_bloom_compact_impl``
+    with the shipped ``DEFAULT_CONFIG``.
+    """
+    return _bloom_compact_impl(qb, sigs, config=None)
 
 
 @bloom_compact.register_fake

@@ -11,7 +11,11 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.kernels.triton.filters.bloom_compact import bloom_compact
+from retrieve.kernels.triton.filters.bloom_compact import (
+    BloomCompactConfig,
+    _bloom_compact_impl,
+    bloom_compact,
+)
 from retrieve.kernels.triton.silvertorch.bloom_match import bloom_match
 from retrieve.layers.filters import BloomFilter
 from retrieve.layers.filters.bloom import _build_signatures
@@ -118,3 +122,24 @@ def test_bloom_compact_routed_via_layer():
     got_ids, got_counts = bf.evaluate_indices(q)
     ref_ids, ref_counts = compact_mask(bf.evaluate_mask(q))
     _set_match(got_ids, got_counts, ref_ids, ref_counts)
+
+
+@pytest.mark.parametrize("block_n, num_warps", [(128, 2), (512, 8), (1024, 4)])
+def test_bloom_compact_config_override(block_n, num_warps):
+    """Non-default ``BloomCompactConfig`` produces the same row-id sets —
+    proves the ``config=`` kwarg plumbs through ``_bloom_compact_impl``
+    to the kernel launch and the atomic_add compaction stays correct
+    under non-default tiles."""
+    n = 4096
+    attrs = make_attrs(n, c=2, a_max=3, n_vocab=200, pad_rate=0.1, seed=141)
+    bf = BloomFilter(m_bits=512, k_hash=5).to("cuda")
+    bf.register_index(attrs)
+
+    q = make_query_attrs(b=8, c=2, n_vocab=200, inactive_rate=0.2, seed=142)
+    qb = _build_qb(bf, q)
+
+    cfg = BloomCompactConfig(block_n=block_n, num_warps=num_warps)
+    out_ids, out_counts = _bloom_compact_impl(qb, bf.bloom_sigs, config=cfg)
+    ref_mask = bloom_match(qb, bf.bloom_sigs)
+    ref_ids, ref_counts = compact_mask(ref_mask)
+    _set_match(out_ids, out_counts, ref_ids, ref_counts)
