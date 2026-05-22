@@ -39,8 +39,6 @@ CONFIGS=(
     "conf/goodreads/d64-filter.yaml"
     "conf/goodreads/d128-filter.yaml"
     "conf/goodreads/d256-filter.yaml"
-    # "conf/deep_sweeps/arxiv-d128-silvertorch.yaml"  # silvertorch dropped 2026-05-19
-    "conf/deep_sweeps/goodreads-d128-linr_v3.yaml"
 )
 
 for cfg in "${CONFIGS[@]}"; do
@@ -54,7 +52,7 @@ for cfg in "${CONFIGS[@]}"; do
     SECONDS=0
     # tee both to the per-config log and the combined log; preserve exit code
     # via PIPESTATUS so a tee failure doesn't mask the real result.
-    uv run evaluate --config "$cfg" 2>&1 | tee "$log" | tee -a "$FULL"
+    ./run_per_algo.sh "$cfg" 2>&1 | tee "$log" | tee -a "$FULL"
     rc=${PIPESTATUS[0]}
     dur=$SECONDS
     line=$(printf "%s  exit=%d  duration=%ds (%dh%dm)  log=%s" \

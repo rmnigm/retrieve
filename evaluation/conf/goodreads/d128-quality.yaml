@@ -1,6 +1,6 @@
 _defaults: &defaults
   data_dir: data/goodreads-work-id
-  output: results/goodreads/d128-quality.json
+  output: results/goodreads/d128-quality
   split: test
   device: cuda
   ks: [100, 200, 400]
@@ -13,6 +13,7 @@ _defaults: &defaults
   algorithms:
     - torch_knn
     - linr_v3
+    - linr_v4
     - silvertorch
   # N≈1.5M items. n_lists=1024 fixed (~sqrt(N)); sweep candidate_pool and
   # n_probe to map the recall-vs-latency curves.
@@ -21,6 +22,9 @@ _defaults: &defaults
       - {candidate_pool: 4000, v3_seed: 0}
       - {candidate_pool: 8000, v3_seed: 0}
       - {candidate_pool: 16000, v3_seed: 0}
+    linr_v4:
+      # linr_v4 is single-stage int8 dense + mask (no candidate_pool).
+      - {}
     silvertorch:
       # Recall curve — Layout A (n_lists≈√N, paper-faithful, ~780-item clusters).
       - {n_lists: 1024, n_probe: 8,   n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈6k

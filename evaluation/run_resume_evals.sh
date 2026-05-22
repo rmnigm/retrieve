@@ -28,7 +28,7 @@ for cfg in "${CONFIGS[@]}"; do
     echo "$banner" | tee -a "$SUMMARY" "$FULL"
 
     SECONDS=0
-    uv run evaluate --config "$cfg" 2>&1 | tee "$log" | tee -a "$FULL"
+    ./run_per_algo.sh "$cfg" 2>&1 | tee "$log" | tee -a "$FULL"
     rc=${PIPESTATUS[0]}
     dur=$SECONDS
     line=$(printf "%s  exit=%d  duration=%ds (%dh%dm)  log=%s" \

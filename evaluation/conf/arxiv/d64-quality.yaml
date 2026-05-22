@@ -4,7 +4,7 @@ _defaults: &defaults
   gt_subdir: gt_d64
   # No `checkpoint:` field — arxiv has no SASRec model; queries come from
   # data/arxiv-papers/content_d64/query_emb.pt (built by `arxiv.py encode_queries`).
-  output: results/arxiv/d64-quality.json
+  output: results/arxiv/d64-quality
   split: test
   device: cuda
   ks: [100, 200, 400]

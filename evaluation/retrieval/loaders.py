@@ -80,10 +80,56 @@ def assert_arxiv_prefixes(content_dir: Path) -> None:
 # ----- embedding loaders ------------------------------------------------------
 
 
+def _load_sharded_text_emb(
+    shard_index_path: Path, device: torch.device
+) -> torch.Tensor:
+    """Reassemble ``content/text_emb_shard_*.pt`` into one ``[N+1, D]`` tensor.
+
+    Synth catalogs from ``evaluation/data/synth_arxiv.py`` write the item
+    embeddings sharded so the per-file size stays under torch's implicit
+    serialization ceilings; the sidecar ``shard_index.json`` lists shard
+    offsets and lengths.
+    """
+    with open(shard_index_path) as f:
+        idx = json.load(f)
+    n = int(idx["n_items_plus_one"])
+    d = int(idx["dim"])
+    dtype = getattr(torch, idx["dtype"])
+    if n > 100_000_000 and device.type == "cuda":
+        logger.warning(
+            "shard_index reports n={:,} > 100M; this catalog needs ~{:.0f} GB "
+            "on device at {} ({} bytes per element). If load OOMs, switch to "
+            "the int8/1-bit path described in docs/plans/linr-int8-quantization.md.",
+            n, n * d * dtype.itemsize / 1e9, idx["dtype"], dtype.itemsize,
+        )
+    out = torch.empty((n, d), dtype=dtype, device=device)
+    content_dir = shard_index_path.parent
+    for s in idx["shards"]:
+        shard_path = content_dir / s["filename"]
+        start = int(s["start_id"])
+        n_rows = int(s["n_rows"])
+        shard = torch.load(str(shard_path), map_location=device)
+        if shard.shape != (n_rows, d):
+            raise RuntimeError(
+                f"{shard_path}: shape {tuple(shard.shape)} != ({n_rows}, {d})"
+            )
+        out[start : start + n_rows].copy_(shard)
+        del shard
+    logger.info(
+        "loaded sharded text_emb: {} shards → [{}, {}] dtype={}",
+        len(idx["shards"]), n, d, idx["dtype"],
+    )
+    return out
+
+
 def load_pre_encoded_arxiv(
     cfg: EvalConfig, data_path: Path, device: torch.device
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Arxiv path: load ``text_emb.pt`` (items) and ``query_emb.pt`` (queries) on disk.
+
+    Detects sharded synth catalogs via ``content/shard_index.json`` and
+    reassembles them on the fly. Otherwise loads the single-file layout
+    written by the upstream arxiv ETL.
 
     Returns ``(item_embs [N+1, D] on device, queries [N_users, D] on cpu,
     targets [N_users, 1] on cpu, num_targets [N_users] on cpu)``.
@@ -91,8 +137,12 @@ def load_pre_encoded_arxiv(
     content_dir = data_path / cfg.content_subdir
     assert_arxiv_prefixes(content_dir)
 
-    text_emb_path = content_dir / "text_emb.pt"
-    item_embs = torch.load(str(text_emb_path), map_location=device)
+    shard_index_path = content_dir / "shard_index.json"
+    if shard_index_path.exists():
+        item_embs = _load_sharded_text_emb(shard_index_path, device)
+    else:
+        text_emb_path = content_dir / "text_emb.pt"
+        item_embs = torch.load(str(text_emb_path), map_location=device)
     item_embs[0] = 0.0
     # fp16 on disk → fp32 on device for oracle math
     item_embs = item_embs.float().contiguous()
