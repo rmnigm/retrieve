@@ -1,0 +1,61 @@
+{
+  "arxiv": {
+    "c0_maincat": {
+      "selectivity": 0.132623,
+      "n_clauses": 1,
+      "tier": "mid"
+    },
+    "c0c2": {
+      "selectivity": 0.036979,
+      "n_clauses": 2,
+      "tier": "high"
+    },
+    "c2_year": {
+      "selectivity": 0.235648,
+      "n_clauses": 1,
+      "tier": "mid"
+    },
+    "c3_nversions": {
+      "selectivity": 0.446153,
+      "n_clauses": 1,
+      "tier": "low"
+    },
+    "all4": {
+      "selectivity": 0.008681,
+      "n_clauses": 4,
+      "tier": "high"
+    }
+  },
+  "goodreads": {
+    "c0_genre": {
+      "selectivity": 0.341659,
+      "n_clauses": 1,
+      "tier": "low"
+    },
+    "c0c1": {
+      "selectivity": 0.199478,
+      "n_clauses": 2,
+      "tier": "mid"
+    },
+    "c1_lang_reverse": {
+      "selectivity": 0.646231,
+      "n_clauses": 1,
+      "tier": "low"
+    },
+    "c2_format": {
+      "selectivity": 0.431244,
+      "n_clauses": 1,
+      "tier": "low"
+    },
+    "c3_year": {
+      "selectivity": 0.402969,
+      "n_clauses": 1,
+      "tier": "low"
+    },
+    "all4": {
+      "selectivity": 0.044714,
+      "n_clauses": 4,
+      "tier": "high"
+    }
+  }
+}
