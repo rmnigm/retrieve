@@ -5,17 +5,16 @@ from retrieve.layers.filters import (
     combine_masks,
 )
 from retrieve.layers.linr import (
-    Int8SimilarityMasking,
     OneBitKNN,
+    PostfilterKNN,
+    PostfilterKNNInt8,
     PrefilterKNN,
-    SimilarityMasking,
 )
 from retrieve.layers.silvertorch import (
     SilverTorch,
     build_silvertorch,
 )
 from retrieve.layers.utils import (
-    DotProductScorer,
     FullScanKNN,
     KMeansTorch,
     post_filter_topk,
@@ -25,15 +24,14 @@ from retrieve.layers.utils import (
 
 __all__ = [
     "BloomFilter",
-    "DotProductScorer",
     "ExactAttributeFilter",
     "FullScanKNN",
-    "Int8SimilarityMasking",
     "KMeansTorch",
     "OneBitKNN",
+    "PostfilterKNN",
+    "PostfilterKNNInt8",
     "PrefilterKNN",
     "SilverTorch",
-    "SimilarityMasking",
     "build_silvertorch",
     "combine_indices",
     "combine_masks",

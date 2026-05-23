@@ -1,4 +1,4 @@
-"""LiNR correctness — SimilarityMasking / PrefilterKNN / OneBitKNN in both
+"""LiNR correctness — PostfilterKNN / PrefilterKNN / OneBitKNN in both
 torch and Triton backends.
 
 Fixture sizes mirror the LinR paper's small evaluation slice (D=128,
@@ -12,10 +12,10 @@ import pytest
 import torch
 
 from retrieve.layers.filters import ExactAttributeFilter
-from retrieve.layers.linr.int8_similarity_masking import Int8SimilarityMasking
 from retrieve.layers.linr.one_bit_knn import OneBitKNN
+from retrieve.layers.linr.postfilter_knn import PostfilterKNN
+from retrieve.layers.linr.postfilter_knn_int8 import PostfilterKNNInt8
 from retrieve.layers.linr.prefilter_knn import PrefilterKNN
-from retrieve.layers.linr.similarity_masking import SimilarityMasking
 from retrieve.layers.utils.compact import compact_mask
 from retrieve.layers.utils.retrieval import FullScanKNN
 from tests.conftest import (
@@ -40,14 +40,14 @@ def data():
 
 
 # ---------------------------------------------------------------------------
-# SimilarityMasking: full matmul + topk (mask-based filtering only)
+# PostfilterKNN: full matmul + topk (mask-based filtering only)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
-class TestSimilarityMasking:
+class TestPostfilterKNN:
     def test_no_mask_returns_topk(self, data, backend):
-        m = SimilarityMasking(k=K, backend=backend)
+        m = PostfilterKNN(k=K, backend=backend)
         m.register_index(data["embs"])
         ids, scores = m(data["query"])
         assert ids.shape == (B, K)
@@ -56,7 +56,7 @@ class TestSimilarityMasking:
 
     @pytest.mark.parametrize("pass_rate", [0.01, 0.1, 0.8])
     def test_external_mask(self, data, backend, pass_rate):
-        m = SimilarityMasking(k=K, backend=backend)
+        m = PostfilterKNN(k=K, backend=backend)
         m.register_index(data["embs"])
         mask = make_mask(B, N, pass_rate=pass_rate)
         ids, scores = m(data["query"], mask=mask)
@@ -142,9 +142,9 @@ class TestCrossBackendAgreement:
             assert_topk_id_sets_match(ids_tri, sc_tri, ids_ref, sc_ref, b)
 
     @pytest.mark.parametrize("pass_rate", [0.01, 0.1, 0.8])
-    def test_similarity_masking_matches_prefilter_topk_set(self, data, pass_rate):
+    def test_postfilter_knn_matches_prefilter_topk_set(self, data, pass_rate):
         """Mask-based path and candidate_ids path on the same passing set → same top-K."""
-        sm = SimilarityMasking(k=K)
+        sm = PostfilterKNN(k=K)
         sm.register_index(data["embs"])
         pf = PrefilterKNN(k=K)
         pf.register_index(data["embs"])
@@ -214,16 +214,16 @@ class TestOneBitKNN:
 
 
 # ---------------------------------------------------------------------------
-# Int8SimilarityMasking: per-item symmetric int8 + per-query symmetric int8
+# PostfilterKNNInt8: per-item symmetric int8 + per-query symmetric int8
 # + cuBLAS int8 GEMM (paper-faithful). Single-stage analog of
-# SimilarityMasking — full-scan dense scoring + optional mask + topk.
+# PostfilterKNN — full-scan dense scoring + optional mask + topk.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
-class TestInt8SimilarityMasking:
+class TestPostfilterKNNInt8:
     def test_no_mask_returns_topk(self, data, backend):
-        m = Int8SimilarityMasking(k=K, backend=backend)
+        m = PostfilterKNNInt8(k=K, backend=backend)
         m.register_index(data["embs"])
         ids, scores = m(data["query"])
         assert ids.shape == (B, K)
@@ -231,7 +231,7 @@ class TestInt8SimilarityMasking:
         assert (scores[:, :-1] >= scores[:, 1:]).all()
 
     def test_full_scan_topk_recall_against_exact(self, data, backend):
-        m = Int8SimilarityMasking(k=K, backend=backend)
+        m = PostfilterKNNInt8(k=K, backend=backend)
         m.register_index(data["embs"])
         ids, _ = m(data["query"])
 
@@ -243,11 +243,11 @@ class TestInt8SimilarityMasking:
         # Dual int8 (query + items) on unit-norm D=128 data: ≥0.95 typical
         # (paper notes the dual-int8 path "cannot reach 0.95 recall" at
         # production scale, but on random data the noise floor is lower).
-        assert recall >= 0.95, f"Int8SimilarityMasking recall@{K} = {recall:.3f}"
+        assert recall >= 0.95, f"PostfilterKNNInt8 recall@{K} = {recall:.3f}"
 
     @pytest.mark.parametrize("pass_rate", [0.01, 0.1, 0.8])
     def test_external_mask(self, data, backend, pass_rate):
-        m = Int8SimilarityMasking(k=K, backend=backend)
+        m = PostfilterKNNInt8(k=K, backend=backend)
         m.register_index(data["embs"])
         mask = make_mask(B, N, pass_rate=pass_rate)
         ids, scores = m(data["query"], mask=mask)
@@ -271,10 +271,10 @@ class TestClauseDecoupledComposition:
         return f, q_attrs, extra_mask
 
     @pytest.mark.parametrize("backend", BACKENDS)
-    def test_similarity_masking_with_clause_and_external_mask(self, data, backend):
+    def test_postfilter_knn_with_clause_and_external_mask(self, data, backend):
         f, q_attrs, extra = self._setup()
         mask = f.evaluate_mask(q_attrs) & extra
-        m = SimilarityMasking(k=K, backend=backend)
+        m = PostfilterKNN(k=K, backend=backend)
         m.register_index(data["embs"])
         ids, scores = m(data["query"], mask=mask)
         for b in range(B):
@@ -317,7 +317,7 @@ class TestClauseDecoupledComposition:
 
 class TestEdgeCases:
     @pytest.mark.parametrize("backend", BACKENDS)
-    @pytest.mark.parametrize("cls", [SimilarityMasking, Int8SimilarityMasking])
+    @pytest.mark.parametrize("cls", [PostfilterKNN, PostfilterKNNInt8])
     def test_mask_all_true_equals_unmasked(self, data, cls, backend):
         """All-True mask path returns the same top-K id set as the unmasked path."""
         m = cls(k=K, backend=backend)
@@ -329,14 +329,14 @@ class TestEdgeCases:
             assert_topk_id_sets_match(ids_masked, sc_masked, ids_no_mask, sc_no_mask, b)
 
     @pytest.mark.parametrize("backend", BACKENDS)
-    @pytest.mark.parametrize("cls", [SimilarityMasking, Int8SimilarityMasking])
+    @pytest.mark.parametrize("cls", [PostfilterKNN, PostfilterKNNInt8])
     def test_mask_all_false_returns_no_finite_scores(self, data, cls, backend):
         """All-False mask → every slot is padded (``id == -1``)."""
         m = cls(k=K, backend=backend)
         m.register_index(data["embs"])
         all_false = torch.zeros(B, N, dtype=torch.bool, device="cuda")
         ids, _ = m(data["query"], mask=all_false)
-        # Sentinel is ``id == -1``; ``Int8SimilarityMasking`` returns int32
+        # Sentinel is ``id == -1``; ``PostfilterKNNInt8`` returns int32
         # scores so the previous ``torch.isfinite(scores)`` check would be
         # vacuously True for it.
         assert (ids == -1).all()
@@ -375,14 +375,14 @@ class TestEdgeCases:
 
     @pytest.mark.parametrize("backend", BACKENDS)
     @pytest.mark.parametrize("small_b", [1, 8, 16])
-    def test_int8_similarity_masking_small_batch_padding(self, data, backend, small_b):
+    def test_postfilter_knn_int8_small_batch_padding(self, data, backend, small_b):
         """``torch._int_mm`` requires M >= 17; the layer pads small batches
         with zero rows and slices back. Verify the padded path returns
         sensible top-K (high recall vs the exact fp32 baseline) — can't
-        compare against another ``Int8SimilarityMasking`` call because
+        compare against another ``PostfilterKNNInt8`` call because
         the global query scale depends on batch contents and would
         change between calls."""
-        m = Int8SimilarityMasking(k=K, backend=backend)
+        m = PostfilterKNNInt8(k=K, backend=backend)
         m.register_index(data["embs"])
         ids, _ = m(data["query"][:small_b])
         assert ids.shape == (small_b, K)
@@ -397,7 +397,7 @@ class TestEdgeCases:
     @pytest.mark.parametrize("backend", BACKENDS)
     def test_b_one(self, data, backend):
         """Single-query batch — Triton tile-parallel path masks padded rows."""
-        m = SimilarityMasking(k=K, backend=backend)
+        m = PostfilterKNN(k=K, backend=backend)
         m.register_index(data["embs"])
         q = data["query"][:1]
         ids, scores = m(q)
@@ -413,7 +413,7 @@ class TestEdgeCases:
     @pytest.mark.parametrize("backend", BACKENDS)
     def test_k_equals_n(self, data, backend):
         """K=N — every item returned, no padding, scores still descending."""
-        m = SimilarityMasking(k=N, backend=backend)
+        m = PostfilterKNN(k=N, backend=backend)
         m.register_index(data["embs"])
         ids, scores = m(data["query"])
         assert ids.shape == (B, N)

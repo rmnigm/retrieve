@@ -29,10 +29,9 @@ retrieve/tests/
 │   ├── test_combine_filters.py
 │   ├── test_compact.py
 │   ├── test_filters.py             (ExactAttributeFilter)
-│   ├── test_linr.py                (SimilarityMasking, Int8SimilarityMasking, PrefilterKNN, OneBitKNN × torch / Triton)
+│   ├── test_linr.py                (PostfilterKNN, PostfilterKNNInt8, PrefilterKNN, OneBitKNN × torch / Triton)
 │   ├── test_quantize.py            (int8, OPORP, popcount)
 │   ├── test_retrieval_utils.py     (FullScanKNN, post_filter_topk)
-│   ├── test_scorers.py             (DotProductScorer)
 │   └── test_silvertorch.py         (SilverTorch, all three filter modes: none / bloom / exact)
 └── parity/                # Triton kernel vs pure-torch reference
     ├── conftest.py        # assert_topk_matches helper
@@ -138,7 +137,7 @@ position-equality assertion for fp32 score paths.
   position-by-position. Tie-breaking on equal scores is implementation-
   specific and is not asserted.
 - **Score tolerance**: `atol=1e-3, rtol=1e-3` for fp32 tile-blocked
-  reductions (`SimilarityMasking` / `PrefilterKNN` paths); strict
+  reductions (`PostfilterKNN` / `PrefilterKNN` paths); strict
   `torch.equal` only for `OneBitKNN` (popcount is exact by construction)
   and for path-isolated comparisons on identical reductions.
 - **Module-scope fixtures**: heavy index builds (IVF, LiNR with N>1k)
@@ -156,7 +155,6 @@ module under test.
 | Component                  | Baseline / oracle |
 |----------------------------|-------------------|
 | `FullScanKNN`              | `(q @ x.T).topk(k)` written inline in `_topk_reference`. The single test that breaks the otherwise-circular use of `FullScanKNN` as suite oracle. |
-| `DotProductScorer`         | `torch.einsum("bd,bpd->bp", q, embs[cand])` |
 | `compact_mask`             | `mask.nonzero` per row + length comparison |
 | `post_filter_topk`         | per-row `mask.gather` + `(~keep).fill(-1)` |
 | `quantize_int8`            | known constants + reconstruction error bounded by `abs_max / 127` |
@@ -170,7 +168,7 @@ module under test.
 | `combine_indices`          | `compact_mask(combine_masks(*[f.evaluate_mask(q)]))` |
 | `SilverTorch` (no bloom)   | `FullScanKNN` for recall (asserts ≥ 0.85 at full probe) + recall monotone in `n_probe` |
 | `SilverTorch` (qa=None)    | `SilverTorch (no bloom)` directly — `query_clause_attrs=None` is a documented fast path |
-| `SimilarityMasking` semantics | `(q @ x.T).masked_fill(~mask, -inf).topk(k)` |
+| `PostfilterKNN` semantics | `(q @ x.T).masked_fill(~mask, -inf).topk(k)` |
 | `PrefilterKNN` semantics      | gather + bmm + local topk + scatter |
 | `OneBitKNN` semantics         | `FullScanKNN` recall (asserts ≥ 0.4 at K=200, N=2048) |
 | `*Triton` siblings            | the corresponding torch reference class |
@@ -199,18 +197,6 @@ or hunting a regression.
 - `pass_rate = 1.0` → `ids` covers all `[0, N)`, `counts == N`.
 - `pass_rate = 0.0` → `ids.shape == [B, 0]`, `counts == 0`.
 - `B = 1` and mixed-row-pad-to-max corners.
-
-### [`test_scorers.py`](../../retrieve/tests/correctness/test_scorers.py)
-
-`DotProductScorer`.
-
-- Buffer shape / dtype / device after `register_index`.
-- Output equals `torch.einsum("bd,bpd->bp", q, embs[cand])` (atol=1e-5).
-- `B = 1` path.
-- `P = 0` returns `[B, 0]`.
-- `candidate_ids = -1` reads the last item via Python negative
-  indexing (contract is "caller must mask post-hoc"; pinned so a
-  stricter implementation is a deliberate change).
 
 ### [`test_retrieval_utils.py`](../../retrieve/tests/correctness/test_retrieval_utils.py)
 
@@ -309,31 +295,31 @@ INT8 + OPORP + popcount.
 
 LiNR V1, V2, V3, V4 in both backends.
 
-- V1 (`SimilarityMasking`): top-K is sorted descending; mask path
+- V1 (`PostfilterKNN`): top-K is sorted descending; mask path
   returns ids satisfying the mask.
 - V2 (`PrefilterKNN`): full path (no candidates) returns sorted top-K;
   candidate path returns ids ⊆ candidates and respects `counts`;
   default `counts` (all P) treated as all-valid.
 - V3 (`OneBitKNN`): full-scan recall vs `FullScanKNN` ≥ 0.4; candidate
   path returns ids ⊆ candidates.
-- V4 (`Int8SimilarityMasking`): full-scan recall vs `FullScanKNN` ≥
+- V4 (`PostfilterKNNInt8`): full-scan recall vs `FullScanKNN` ≥
   0.95 at K=10 on unit-norm random embeddings (the int8 quantization
   preserves topk ordering modulo per-element rounding); mask path
   returns ids satisfying the mask.
 - Cross-backend: torch ↔ Triton return identical valid-id sets per
-  row for `SimilarityMasking`, `PrefilterKNN`, `OneBitKNN` across
+  row for `PostfilterKNN`, `PrefilterKNN`, `OneBitKNN` across
   `pass_rate ∈ {None, 0.01, 0.1, 0.8}`. Sorted scores `allclose`
   (atol=1e-3) for fp32 paths; bit-exact for `OneBitKNN`. (For
-  `Int8SimilarityMasking` the `backend=` flag is a no-op — cuBLAS
+  `PostfilterKNNInt8` the `backend=` flag is a no-op — cuBLAS
   LtGemm runs the same code on both paths.)
-- `SimilarityMasking` (mask path) ≡ `PrefilterKNN` (compact_mask of same
+- `PostfilterKNN` (mask path) ≡ `PrefilterKNN` (compact_mask of same
   mask) as id sets.
-- `ExactAttributeFilter` decoupled composition: `SimilarityMasking` with
+- `ExactAttributeFilter` decoupled composition: `PostfilterKNN` with
   `mask = ef.evaluate_mask & extra`, `PrefilterKNN` with
   `compact_mask(combined)`, `PrefilterKNN` with `ef.evaluate_indices`.
 - Edge cases (`TestEdgeCases`):
-  - mask-all-True ≡ unmasked path (`SimilarityMasking`,
-    `Int8SimilarityMasking`, `OneBitKNN` × torch / Triton).
+  - mask-all-True ≡ unmasked path (`PostfilterKNN`,
+    `PostfilterKNNInt8`, `OneBitKNN` × torch / Triton).
   - mask-all-False produces no finite scores.
   - `PrefilterKNN` `candidate_ids` shape `[B, 0]` returns full padding
     (`(-1, -inf)` × K).
@@ -394,7 +380,7 @@ exact-by-construction kernels, which use stricter assertions.
 ### New correctness test for a public class
 
 1. One file per class or helper group. Match an existing file's shape
-   (e.g. [`test_scorers.py`](../../retrieve/tests/correctness/test_scorers.py))
+   (e.g. [`test_retrieval_utils.py`](../../retrieve/tests/correctness/test_retrieval_utils.py))
    for a small surface, [`test_linr.py`](../../retrieve/tests/correctness/test_linr.py)
    for cross-backend / cross-version coverage.
 2. Use the fixtures from `tests.conftest` — `make_index`, `make_query`,
@@ -412,7 +398,7 @@ exact-by-construction kernels, which use stricter assertions.
 
 1. One file per kernel, named `test_<kernel_name>.py`.
 2. Import the kernel directly from
-   `retrieve.kernels.triton.<subtree>.<kernel>`.
+   `retrieve.kernels.<subtree>.<kernel>`.
 3. Write `_ref(...)` as a pure-torch implementation that does the
    same computation step by step.
 4. Use `from tests.parity.conftest import assert_topk_matches` for the

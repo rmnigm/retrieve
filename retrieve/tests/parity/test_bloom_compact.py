@@ -11,12 +11,12 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.kernels.triton.filters.bloom_compact import (
+from retrieve.kernels.filters.bloom_compact import (
     BloomCompactConfig,
     _bloom_compact_impl,
     bloom_compact,
 )
-from retrieve.kernels.triton.silvertorch.bloom_match import bloom_match
+from retrieve.kernels.silvertorch.bloom_match import bloom_match
 from retrieve.layers.filters import BloomFilter
 from retrieve.layers.filters.bloom import _build_signatures
 from retrieve.layers.utils.compact import compact_mask

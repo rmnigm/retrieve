@@ -1,6 +1,6 @@
 # Stage 3 — Kernel optimizations on the clean base
 
-> See [00-roadmap.md](00-roadmap.md). Third main-thread stage. Stage 1 (autotune separation) has shipped — see [../system/kernels.md → Autotune separation](../system/kernels.md#autotune-separation). Depends on [02-triton-op-migration.md](02-triton-op-migration.md).
+> See [00-roadmap.md](00-roadmap.md). Third main-thread stage. Stages 1 (autotune separation) and 2 (`custom_op`/`triton_op` migration) have shipped — see [../system/kernels.md → Autotune separation](../system/kernels.md#autotune-separation) and [00-roadmap.md → Stage 2](00-roadmap.md).
 
 ## Context
 
@@ -12,7 +12,7 @@ What remains is small and focused: hardware popcount investigation + allocator h
 
 ### 1. Hardware popcount in `oporp_1bit_match_topk` — investigation, then maybe swap
 
-[oporp_1bit_match_topk.py:10-19](../../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py#L10-L19) implements a 5-step SWAR popcount inside the `@triton.jit` body. NVIDIA hardware has single-cycle `popc.b64` (PTX); if the SWAR doesn't already lower to it, swapping in `tl.extra.libdevice.popcll` (or whatever the current Triton API surfaces) is a real win on a kernel that dominates the V3 hot path.
+[oporp_1bit_match_topk.py:10-19](../../retrieve/src/retrieve/kernels/linr/oporp_1bit_match_topk.py#L10-L19) implements a 5-step SWAR popcount inside the `@triton.jit` body. NVIDIA hardware has single-cycle `popc.b64` (PTX); if the SWAR doesn't already lower to it, swapping in `tl.extra.libdevice.popcll` (or whatever the current Triton API surfaces) is a real win on a kernel that dominates the V3 hot path.
 
 **Steps**:
 
@@ -24,7 +24,7 @@ What remains is small and focused: hardware popcount investigation + allocator h
 
 4. If the swap happens, re-dump PTX to confirm `popc.b64` is actually emitted. Bench the V3 hot path before / after on the local arch.
 
-**Files**: [retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py](../../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py).
+**Files**: [retrieve/src/retrieve/kernels/linr/oporp_1bit_match_topk.py](../../retrieve/src/retrieve/kernels/linr/oporp_1bit_match_topk.py).
 
 ### 2. Allocator hygiene in `oporp_1bit_match_topk` and `fused_masked_knn_topk`
 
@@ -32,15 +32,15 @@ Three sub-items, all mechanical.
 
 #### 2a. Drop the `torch.full(-inf)` pre-fill on the HAS_INDICES path
 
-[oporp_1bit_match_topk.py:155-157](../../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py#L155-L157): pre-fills with `-inf` even though every in-bounds slot is overwritten by the kernel. Switch to `torch.empty`, matching the analogous allocation in [fused_masked_knn_topk.py:141](../../retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py#L141). The `where(isfinite, ...)` mask at [line 200](../../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py#L200) already handles padding lanes.
+[oporp_1bit_match_topk.py:155-157](../../retrieve/src/retrieve/kernels/linr/oporp_1bit_match_topk.py#L155-L157): pre-fills with `-inf` even though every in-bounds slot is overwritten by the kernel. Switch to `torch.empty`, matching the analogous allocation in [fused_masked_knn_topk.py:141](../../retrieve/src/retrieve/kernels/linr/fused_masked_knn_topk.py#L141). The `where(isfinite, ...)` mask at [line 200](../../retrieve/src/retrieve/kernels/linr/oporp_1bit_match_topk.py#L200) already handles padding lanes.
 
 #### 2b. Replace `cat`-to-pad with pre-allocate-and-slice
 
-[oporp_1bit_match_topk.py:204-224](../../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py#L204-L224) and [fused_masked_knn_topk.py:178-193](../../retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py#L178-L193) do 4 allocations under `P < K`. Apply a 2-allocation pattern: pre-allocate `[B, K]` outputs, slice-assign the kernel result, leave the tail as `-1` / `-inf`. The two host wrappers share the same shape; lift the helper rather than duplicating.
+[oporp_1bit_match_topk.py:204-224](../../retrieve/src/retrieve/kernels/linr/oporp_1bit_match_topk.py#L204-L224) and [fused_masked_knn_topk.py:178-193](../../retrieve/src/retrieve/kernels/linr/fused_masked_knn_topk.py#L178-L193) do 4 allocations under `P < K`. Apply a 2-allocation pattern: pre-allocate `[B, K]` outputs, slice-assign the kernel result, leave the tail as `-1` / `-inf`. The two host wrappers share the same shape; lift the helper rather than duplicating.
 
 #### 2c. Stale-comment cleanup
 
-[fused_masked_knn_topk.py:170-171](../../retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py#L170-L171) says `clause_compact / bloom_compact allocate via torch.empty`, but both now allocate via `torch.full(..., -1)`. The defensive `where(isfinite, ...)` is still correct (rows with `counts[b] < k` need it) but the rationale is wrong. Fix the comment.
+[fused_masked_knn_topk.py:170-171](../../retrieve/src/retrieve/kernels/linr/fused_masked_knn_topk.py#L170-L171) says `clause_compact / bloom_compact allocate via torch.empty`, but both now allocate via `torch.full(..., -1)`. The defensive `where(isfinite, ...)` is still correct (rows with `counts[b] < k` need it) but the rationale is wrong. Fix the comment.
 
 **Files**: as inlined.
 

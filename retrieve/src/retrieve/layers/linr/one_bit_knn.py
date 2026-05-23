@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 
-from retrieve.interfaces import Backend, RetrievalModule
-from retrieve.kernels.triton.linr.oporp_1bit_match_topk import (
+from retrieve.interfaces import Backend
+from retrieve.kernels.linr.oporp_1bit_match_topk import (
     oporp_1bit_match_topk_full,
     oporp_1bit_match_topk_indirect,
 )
@@ -31,7 +31,7 @@ def _score_full_oporp_eager(
     return d_total - 2 * hamming.to(torch.float32)
 
 
-class OneBitKNN(RetrievalModule):
+class OneBitKNN(nn.Module):
     """1-bit Sign-OPORP scoring (Hamming similarity), selectable backend.
 
     Item embeddings are projected via a deterministic Sign-OPORP transform

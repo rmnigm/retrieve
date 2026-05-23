@@ -75,7 +75,7 @@ def build_algorithm(
     Raises ``ValueError`` when the algo is incompatible with
     ``filter_kind``; the driver catches and skips that cell. ``backend``
     is forwarded to algos in ``BACKEND_CAPABLE_ALGOS`` (which thread it
-    into the underlying ``RetrievalModule``); other algos ignore it.
+    into the underlying retrieval module); other algos ignore it.
     """
     p = params or {}
 
