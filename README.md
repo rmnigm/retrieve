@@ -2,14 +2,28 @@
 
 GPU retrieval framework for recommender systems (PyTorch + Triton). My master's thesis.
 
+The library half ships on PyPI as [`torchretrieve`](https://pypi.org/project/torchretrieve/); this repo also holds the training / evaluation harness used in the thesis.
+
 ## Layout
 
 This repo is a [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/) with two members sharing a single `.venv` at the workspace root:
 
-- [`retrieve/`](retrieve/) — the library: kernels, modules, correctness tests.
-- [`evaluation/`](evaluation/) — training and benchmark harness; depends on `retrieve` editable.
+- [`retrieve/`](retrieve/) — the library: kernels, modules, correctness tests. Published to PyPI as `torchretrieve`; imports as `retrieve`.
+- [`evaluation/`](evaluation/) — training and benchmark harness; depends on `retrieve` editable. Not published.
 
-## Setup
+## Install (library only)
+
+If you just want the modules:
+
+```bash
+pip install torchretrieve
+```
+
+Source-only distribution — Triton kernels JIT-compile on first call. Requires a CUDA-capable GPU. See [`retrieve/README.md`](retrieve/README.md) for the quick example and module list.
+
+## Setup (full workspace)
+
+For working on the library or running the evaluation harness:
 
 ```bash
 uv sync   # from this directory — populates ./.venv with both packages installed editable
