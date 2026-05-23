@@ -1,0 +1,24 @@
+started at:  2026-05-23T09:52:29Z
+host:        fd4a94de96b9
+gpu:         NVIDIA A100-SXM4-80GB
+eval-type:   (ad-hoc)
+stage:       True
+
+=== 2026-05-23T09:52:29Z starting config/arxiv/d64-quality.yaml ===
+config/arxiv/d64-quality.yaml  exit=0  duration=100s (0h1m)  log=/workspace/retrieve/evaluation/results/_runlogs/arxiv_d64-quality.log
+=== 2026-05-23T09:54:10Z starting config/arxiv/d128-quality.yaml ===
+config/arxiv/d128-quality.yaml  exit=0  duration=106s (0h1m)  log=/workspace/retrieve/evaluation/results/_runlogs/arxiv_d128-quality.log
+=== 2026-05-23T09:55:56Z starting config/arxiv/d256-quality.yaml ===
+config/arxiv/d256-quality.yaml  exit=0  duration=200s (0h3m)  log=/workspace/retrieve/evaluation/results/_runlogs/arxiv_d256-quality.log
+=== 2026-05-23T09:59:17Z starting config/goodreads/d64-quality.yaml ===
+config/goodreads/d64-quality.yaml  exit=0  duration=2166s (0h36m)  log=/workspace/retrieve/evaluation/results/_runlogs/goodreads_d64-quality.log
+=== 2026-05-23T10:35:23Z starting config/goodreads/d128-quality.yaml ===
+config/goodreads/d128-quality.yaml  exit=0  duration=2430s (0h40m)  log=/workspace/retrieve/evaluation/results/_runlogs/goodreads_d128-quality.log
+=== 2026-05-23T11:15:53Z starting config/goodreads/d256-quality.yaml ===
+config/goodreads/d256-quality.yaml  exit=0  duration=2932s (0h48m)  log=/workspace/retrieve/evaluation/results/_runlogs/goodreads_d256-quality.log
+=== 2026-05-23T12:04:46Z starting config/deep_sweeps/arxiv-d128-silvertorch.yaml ===
+config/deep_sweeps/arxiv-d128-silvertorch.yaml  exit=0  duration=4012s (1h6m)  log=/workspace/retrieve/evaluation/results/_runlogs/deep_sweeps_arxiv-d128-silvertorch.log
+=== 2026-05-23T13:11:39Z starting config/deep_sweeps/goodreads-d128-linr_v3.yaml ===
+config/deep_sweeps/goodreads-d128-linr_v3.yaml  exit=0  duration=3302s (0h55m)  log=/workspace/retrieve/evaluation/results/_runlogs/deep_sweeps_goodreads-d128-linr_v3.log
+
+finished at: 2026-05-23T14:06:41Z
