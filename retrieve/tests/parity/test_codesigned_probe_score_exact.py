@@ -102,27 +102,6 @@ def test_codesigned_exact_matches_ref(n, d, p, k, c, a_max, b):
     assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores)
 
 
-def test_codesigned_exact_pads_when_p_less_than_k():
-    n, d, p, k, b, c, a_max = 1024, 64, 8, 32, 4, 2, 2
-    embs = make_index(n, d)
-    codes, global_scale = quantize_int8_global(embs)
-    query = make_query(b, d)
-    flat = _make_flat_probed(b, n, p, pad_rate=0.0)
-
-    attrs = make_attrs(n, c=c, a_max=a_max).long()
-    q_attrs = make_query_attrs(b, c=c).long()
-    rev = torch.zeros(c, dtype=torch.bool, device="cuda")
-
-    out_ids, out_scores = codesigned_probe_score_exact(
-        query, flat, codes, attrs, rev, q_attrs, global_scale, k,
-    )
-    assert out_ids.shape == (b, k)
-    assert out_scores.shape == (b, k)
-    # Last (k - p) entries on every row must be padding (-1 / -inf).
-    assert (out_ids[:, p:] == -1).all()
-    assert torch.isinf(out_scores[:, p:]).all()
-
-
 def test_codesigned_exact_reverse_clause():
     """Setting clause_is_reverse[c]=True inverts the clause's match —
     items previously kept are now dropped (and vice versa) for that clause.

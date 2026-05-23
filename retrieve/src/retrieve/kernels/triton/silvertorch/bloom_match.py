@@ -4,7 +4,7 @@ import torch
 import triton
 import triton.language as tl
 from torch import Tensor
-from torch.library import custom_op
+from torch.library import triton_op, wrap_triton
 
 
 @triton.jit
@@ -49,7 +49,7 @@ def _bloom_match_kernel(
     )
 
 
-@custom_op("retrieve::bloom_match", mutates_args=())
+@triton_op("retrieve::bloom_match", mutates_args=())
 def bloom_match(qb: Tensor, sigs: Tensor) -> Tensor:
     """Compute (qb & sig) == qb across W int64 words.
 
@@ -59,23 +59,19 @@ def bloom_match(qb: Tensor, sigs: Tensor) -> Tensor:
 
     Returns BoolTensor [B, N].
 
-    Registered as an opaque ``custom_op`` so the algo-level
-    ``torch.compile(dynamic=True, mode="reduce-overhead")`` can stitch
-    this kernel into a single cudagraph_trees graph (no per-call graph
-    break).
+    Registered as ``triton_op`` so the kernel launch is captured as a HOP
+    that ``torch.compile(dynamic=True, mode="reduce-overhead")`` can stitch
+    into a single cudagraph_trees graph — same shape as the other in-scope
+    linr kernels. ``BLOCK_N`` is constexpr 128; the kernel's tile-tail mask
+    handles ``N < 128`` correctness-safely.
     """
     b, w = qb.shape
     n = sigs.shape[0]
-    if qb.dtype != torch.int64 or sigs.dtype != torch.int64:
-        raise TypeError("qb and sigs must be int64")
-    if sigs.shape[1] != w:
-        raise ValueError(f"qb has W={w} but sigs has W={sigs.shape[1]}")
 
     out = torch.empty(b, n, dtype=torch.bool, device=qb.device)
-    block_n = 128 if n >= 128 else triton.next_power_of_2(int(n))
-    grid = (b, triton.cdiv(n, block_n))
+    grid = (b, triton.cdiv(n, 128))
 
-    _bloom_match_kernel[grid](
+    wrap_triton(_bloom_match_kernel)[grid](
         qb,
         sigs,
         out,
@@ -87,13 +83,6 @@ def bloom_match(qb: Tensor, sigs: Tensor) -> Tensor:
         stride_s_w=sigs.stride(1),
         stride_o_b=out.stride(0),
         stride_o_n=out.stride(1),
-        BLOCK_N=block_n,
+        BLOCK_N=128,
     )
     return out
-
-
-@bloom_match.register_fake
-def _bloom_match_fake(qb: Tensor, sigs: Tensor) -> Tensor:
-    b = qb.shape[0]
-    n = sigs.shape[0]
-    return torch.empty((b, n), dtype=torch.bool, device=qb.device)

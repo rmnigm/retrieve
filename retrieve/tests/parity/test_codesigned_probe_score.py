@@ -102,21 +102,6 @@ def test_codesigned_with_bloom_matches_ref(n, d, p, k, b):
     assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores)
 
 
-def test_codesigned_pads_when_p_less_than_k():
-    n, d, p, k, b = 1024, 64, 8, 32, 4
-    embs = make_index(n, d)
-    codes, global_scale = quantize_int8_global(embs)
-    query = make_query(b, d)
-    flat = _make_flat_probed(b, n, p, pad_rate=0.0)
-
-    out_ids, out_scores = codesigned_probe_score(query, flat, codes, global_scale, k)
-    assert out_ids.shape == (b, k)
-    assert out_scores.shape == (b, k)
-    # Last (k - p) entries on every row must be padding (-1 / -inf).
-    assert (out_ids[:, p:] == -1).all()
-    assert torch.isinf(out_scores[:, p:]).all()
-
-
 def test_config_override_matches_default():
     """Plumbing check: a deliberately-different ``config`` reaches the
     launch and produces identical ids / scores. Exercises both the

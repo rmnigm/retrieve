@@ -6,7 +6,7 @@ import torch
 import triton
 import triton.language as tl
 from torch import Tensor
-from torch.library import custom_op
+from torch.library import triton_op, wrap_triton
 
 
 _P_BUCKETS = (256, 2048, 16384, 131072, 1048576)
@@ -216,7 +216,7 @@ def _fused_masked_knn_topk_impl(
     return topk_ids, topk_scores
 
 
-@custom_op("retrieve::fused_masked_knn_topk", mutates_args=())
+@triton_op("retrieve::fused_masked_knn_topk", mutates_args=())
 def fused_masked_knn_topk(
     query: Tensor,
     item_embs: Tensor,
@@ -224,29 +224,62 @@ def fused_masked_knn_topk(
     counts: Tensor,
     k: int,
 ) -> tuple[Tensor, Tensor]:
-    """Production wrapper for ``_fused_masked_knn_topk_impl`` with the default
-    tile config. Registered as an opaque ``custom_op`` so dynamo can stitch
-    the algo forward into a single cudagraph (no graph break per call). The
-    ``config=`` keyword is dropped here because ``custom_op``'s schema
-    inference doesn't accept dataclass args; tune scripts and parity tests
-    that need a non-default config call ``_fused_masked_knn_topk_impl``
-    directly.
+    """Production wrapper for ``_fused_masked_knn_topk_impl``.
+
+    Registered as ``triton_op`` so the kernel launch is captured as a HOP
+    inside the compiled algo forward. Mirrors ``_fused_masked_knn_topk_impl``
+    but: (i) hard-codes ``DEFAULT_CONFIG`` so ``config=`` isn't on the
+    schema; (ii) skips bucketing — callers hit a single ``p`` per deployment
+    (catalog size is fixed at module construction), so the once-per-deploy
+    JIT compile cost is amortised; (iii) assumes ``p >= k`` and ``p > 0``,
+    which ``PrefilterKNN`` guarantees by construction. ``_impl`` keeps the
+    bucketing + ``p == 0`` short-circuit + cat-pad branch for the offline
+    tuner and the parity test that exercises ``p < k`` directly.
     """
-    return _fused_masked_knn_topk_impl(
-        query, item_embs, positive_indices, counts, k, config=None
+    cfg = DEFAULT_CONFIG
+    b, d = query.shape
+    p = positive_indices.shape[1]
+
+    query = query.contiguous()
+    item_embs = item_embs.contiguous()
+    positive_indices = positive_indices.contiguous()
+    counts = counts.contiguous()
+
+    all_scores = torch.empty((b, p), dtype=torch.float32, device=query.device)
+
+    # N axis on grid_x (cap ~2^31), batch on grid_y (cap 65535) — see kernel comment.
+    grid = (triton.cdiv(p, cfg.block_n), b)
+
+    wrap_triton(_fused_masked_knn_topk_kernel)[grid](
+        query,
+        item_embs,
+        positive_indices,
+        counts,
+        all_scores,
+        P=p,
+        D=d,
+        stride_qb=query.stride(0),
+        stride_qd=query.stride(1),
+        stride_in=item_embs.stride(0),
+        stride_id=item_embs.stride(1),
+        stride_pb=positive_indices.stride(0),
+        stride_pp=positive_indices.stride(1),
+        stride_sb=all_scores.stride(0),
+        stride_sp=all_scores.stride(1),
+        BLOCK_N=cfg.block_n,
+        num_warps=cfg.num_warps,
+        num_stages=cfg.num_stages,
     )
 
-
-@fused_masked_knn_topk.register_fake
-def _fused_masked_knn_topk_fake(
-    query: Tensor,
-    item_embs: Tensor,
-    positive_indices: Tensor,
-    counts: Tensor,
-    k: int,
-) -> tuple[Tensor, Tensor]:
-    b = query.shape[0]
-    device = query.device
-    ids = torch.empty((b, k), dtype=torch.long, device=device)
-    scores = torch.empty((b, k), dtype=torch.float32, device=device)
-    return ids, scores
+    topk_scores, topk_local = torch.topk(all_scores, k, dim=1)
+    topk_ids = positive_indices.gather(1, topk_local)
+    # When counts[b] < k, the bottom slots tie at -inf and torch.topk picks
+    # padding positions whose ids in ``positive_indices`` may be stale (the
+    # compact kernels pre-fill with -1, but other callers may pass empty
+    # buffers). Force those slots to -1 to match the oracle's sentinel.
+    topk_ids = torch.where(
+        torch.isfinite(topk_scores),
+        topk_ids,
+        topk_ids.new_full((), -1),
+    )
+    return topk_ids, topk_scores

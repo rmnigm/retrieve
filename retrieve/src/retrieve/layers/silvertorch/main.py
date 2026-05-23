@@ -154,6 +154,17 @@ class SilverTorch(RetrievalModule):
         cluster_sizes = torch.bincount(assignments, minlength=self.n_lists)
         max_size = int(cluster_sizes.max().item())
 
+        # P (probe pool width) = n_probe × max_cluster_size is the score
+        # buffer's column count in the codesigned kernels. The kernel
+        # wrappers run ``torch.topk(all_scores, self.k)`` without a pad
+        # tail, so the index must supply at least k candidate slots per
+        # query.
+        if self.n_probe * max_size < self.k:
+            raise ValueError(
+                f"k={self.k} exceeds probe pool n_probe * max_cluster_size = "
+                f"{self.n_probe} * {max_size} = {self.n_probe * max_size}"
+            )
+
         sort_idx = torch.argsort(assignments)
         sorted_clusters = assignments[sort_idx]
         offsets = torch.zeros(self.n_lists + 1, dtype=torch.long, device=item_embs.device)

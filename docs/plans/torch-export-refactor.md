@@ -4,7 +4,7 @@
 
 > **Scope note (2026-05-19):** silvertorch is no longer in scope. The original plan had **5 phases** covering 7 kernels and 6 layer classes; this version covers the 5 in-scope kernels and 5 layer classes (drop `SilverTorch`). **Phase 3 (`codesigned_probe_score` + `SilverTorch`)** is replaced with a stub; the `build_export.py` scaffold authoring has moved to Phase 4 (`fused_masked_knn_topk` + `PrefilterKNN`). Phase numbers are preserved so cross-doc references stay stable. See [../plans-silvertorch-backup/torch-export-refactor.md](../plans-silvertorch-backup/torch-export-refactor.md) for the original silvertorch content. Phase 2's `bloom_match` content is also stubbed (silvertorch-only kernel); `bloom_compact` + the `_build_query_signatures` export bypass remain in Phase 2 because they serve linr.
 
-> **Stage 1 status (2026-05-22):** the autotune-separation piece of every phase below has **shipped** as part of the main-thread Stage 1 ([00-roadmap.md](00-roadmap.md)). Every in-scope kernel now has a `<Name>Config` dataclass + `DEFAULT_CONFIG` (single curated default per arch, no per-arch REGISTRY — that turned out to be ceremony) tuned offline via `uv run tune-kernels --kernel <name>`. The compact filter kernels also gained a 3D launch grid so they scale to the 15M-row catalog. The Phase 1 / 2 / 4 / 5 sub-steps below that describe REGISTRY+lookup wiring, `_BLOCK_N` constants, or `@triton.autotune` stripping are **superseded** by the convention documented in [../system/kernels.md → Autotune separation](../system/kernels.md#autotune-separation); follow that. What remains in scope here is everything *else* the phases call out: `.item()` removal, full-width `(ids, counts)` API, Optional collapse / `mode` flag wiring, `_build_query_signatures_eager` / `_project_oporp_1bit_query_eager` export bypasses, and `build_export.py` scaffolding.
+> **Status (2026-05-23):** **significantly easier than the original brief.** Stages 1+2 of the main-thread roadmap ([00-roadmap.md](00-roadmap.md)) shipped the entire kernel-side surface of this plan as a side effect. Concretely, every in-scope kernel now has: (i) a `<Name>Config` dataclass + `DEFAULT_CONFIG` (single curated per-arch default, no REGISTRY — that turned out to be ceremony); (ii) a `@torch.library.custom_op` / `triton_op` production wrapper with explicit `register_fake` and a non-Optional schema; (iii) zero `@triton.autotune`; (iv) zero `.item()` on the host path; (v) full-width `[B, N] (ids, counts)` on the compact family. `oporp_1bit_match_topk` was split into **two** custom_ops (`_full` + `_indirect`) at the kernel-wrapper level, which collapses the `HAS_INDICES`-driven mode matrix the original brief called the highest-difficulty piece. The `torch.compile(reduce-overhead)` wrappers in [bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py) and [quantize.py](../../retrieve/src/retrieve/layers/utils/quantize.py) — the "new since prior plan" export-blocking concern — were deleted entirely (cudagraph capture moved up to the algo wrapper), so the constructor-flag bypass mechanism the plan called for is moot. The `OneBitKNN` `.item()` empty-mask guard at the cited `one_bit_knn.py:156` is also gone. **What remains is a single PR**: layer-side `mode: Literal[...]` flag on [PrefilterKNN](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py) and [OneBitKNN](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py) (collapses the Optional matrices in `forward`), thread `mode=` through [linr_v2](../../evaluation/retrieval/algos/linr_v2.py) / [linr_v3](../../evaluation/retrieval/algos/linr_v3.py) algo builders (or build a dedicated export-target algo variant per [user direction](#)), and write [evaluation/retrieval/build_export.py](../../evaluation/retrieval/build_export.py) from scratch (Phase 4's stub at lines 444-499 is still the right shape). Phase 1 (`ExactAttributeFilter`) and Phase 2 (`BloomFilter`) are **fully done** — the filter classes don't need a mode flag because their `evaluate_*` methods are already one signature each. See the **"Remaining work — consolidated"** section after Phase 5 for the concrete checklist; the per-phase bodies below are preserved as the historical execution brief.
 
 ## Context
 
@@ -241,7 +241,9 @@ Document the phase's bucket / mode / config decisions in the PR description and 
 
 ---
 
-## Phase 1 — `clause_compact` + `clause_mask` + `ExactAttributeFilter` (prototype, establishes conventions)
+## Phase 1 — `clause_compact` + `clause_mask` + `ExactAttributeFilter` (prototype, establishes conventions) — ✅ **DONE (2026-05-22 via Stages 1+2)**
+
+> **Shipped.** Both kernels have `ClauseCompactConfig` / `ClauseMaskConfig` + `DEFAULT_CONFIG`, the `[B, N] (ids, counts)` full-width API, `triton_op` wrappers with `register_fake`, zero `.item()` on the host path. `ExactAttributeFilter.evaluate_indices` returns full-width and routes via the existing `backend` flag — no mode flag needed because its API is one signature per evaluator. Body preserved below as historical execution brief.
 
 **Why first**: introduces the `.item()`-removal pattern via `counts` propagation, which Phases 2, 4, and 5 reuse. Also introduces the shared `KernelConfig` + REGISTRY + `lookup` shape that every later phase clones. `ExactAttributeFilter` has the simplest forward path of the consumer classes (no `mode`, no Optionals in `evaluate_*` — just one signature each).
 
@@ -324,7 +326,9 @@ grep -rn "\.item()" retrieve/src/retrieve/layers/filters/exact_attribute.py retr
 
 ---
 
-## Phase 2 — `bloom_compact` + `BloomFilter` + the `_build_query_signatures` export bypass
+## Phase 2 — `bloom_compact` + `BloomFilter` + the `_build_query_signatures` export bypass — ✅ **DONE (2026-05-22 via Stages 1+2)**
+
+> **Shipped.** `BloomCompactConfig` + `DEFAULT_CONFIG`, `triton_op` wrapper with `register_fake`, full-width `(ids, counts)` API. The `_build_query_signatures_compiled` wrapper was deleted outright (cudagraph capture lifted to the algo-level `torch.compile`) — the constructor-flag bypass the plan called for is unnecessary. `BloomFilter._build_query_sigs` ([bloom.py:67-74](../../retrieve/src/retrieve/layers/filters/bloom.py#L67-L74)) now calls the plain function directly. Body preserved below as historical execution brief.
 
 **Difficulty: medium.** `_build_query_signatures` is wrapped in `torch.compile(mode="reduce-overhead")` and reached from `BloomFilter.evaluate_mask` / `evaluate_indices`; the export path has to switch to the eager twin without breaking the eager runtime caller.
 
@@ -406,7 +410,9 @@ See [../plans-silvertorch-backup/torch-export-refactor.md](../plans-silvertorch-
 
 ---
 
-## Phase 4 — `fused_masked_knn_topk` + `PrefilterKNN`
+## Phase 4 — `fused_masked_knn_topk` + `PrefilterKNN` — 🟡 **kernel DONE, layer + scaffold REMAIN**
+
+> **Kernel shipped via Stage 2.** `FusedMaskedKnnTopkConfig` + `_bucket_p`, `triton_op` wrapper with `register_fake` and non-Optional schema, the production wrapper skips the `p == 0` short-circuit by docstring contract ([fused_masked_knn_topk.py:219](../../retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py#L219)). **Still pending**: (1) add `mode: Literal["full", "candidates"]` to `PrefilterKNN.__init__`; drop the `candidate_ids is None` branch ([prefilter_knn.py:54](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py#L54)) and the `counts is None → torch.full(p, ...)` fallback ([prefilter_knn.py:117-118](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py#L117-L118)). (2) Drop the layer-side `p == 0` early returns on the export-targeted branch ([prefilter_knn.py:74-78](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py#L74-L78), [prefilter_knn.py:111-116](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py#L111-L116)) — the kernel handles per-row empty already. (3) Write [evaluation/retrieval/build_export.py](../../evaluation/retrieval/build_export.py) from scratch (stub at lines 444-499 still applies). Body preserved below as historical execution brief.
 
 **Difficulty: medium.** Strip autotune (move `_bucket_p`'s logic into REGISTRY); the `do_not_specialize=["P_REAL"]` JIT hint goes away once the autotune key does. Two coupled Optionals in `PrefilterKNN.forward` (`candidate_ids=None, counts=None`) collapse into two modes. **This phase also authors `evaluation/retrieval/build_export.py` from scratch** (originally Phase 3's job; Phase 3 is now a no-op stub, so the scaffold lands here).
 
@@ -520,7 +526,9 @@ cd evaluation && uv run build-export --algo linr_v2 --mode candidates --checkpoi
 
 ---
 
-## Phase 5 — `oporp_1bit_match_topk` + `OneBitKNN`
+## Phase 5 — `oporp_1bit_match_topk` + `OneBitKNN` — 🟡 **kernel DONE, layer REMAINS (much easier than original brief)**
+
+> **Kernel shipped via Stages 1+2 with a structural simplification the brief didn't anticipate.** Instead of one custom_op with an `Optional[Tensor]` + `HAS_INDICES` constexpr matrix, the kernel was split into **two** custom_ops: `oporp_1bit_match_topk_full` ([oporp_1bit_match_topk.py:283](../../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py#L283)) and `oporp_1bit_match_topk_indirect` ([oporp_1bit_match_topk.py:316](../../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py#L316)). Each has a non-Optional schema and explicit `register_fake`. That's the export-level shape the brief wanted, achieved at the kernel wrapper layer — so the `HAS_INDICES`-constexpr collapse, the dummy-tensor binding, and the `.item()` guard removal are all moot. `_project_oporp_1bit_query_compiled` was deleted (cudagraph capture lifted to the algo wrapper), so the export-bypass swap is also moot. The masked third mode the brief planned around folded naturally into `mode="candidates"` with a real `counts` tensor (option (A) from Phase 5 step 5). **Still pending**: add `mode: Literal["full", "candidates"]` to `OneBitKNN.__init__` and dispatch to the two existing custom_ops (`_full` for `mode="full"`, `_indirect` for `mode="candidates"`); apply the same dispatch in `_forward_torch_eager`; drop the `counts is None → torch.full(p, ...)` fallback at [one_bit_knn.py:149-155](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py#L149-L155); extend `build_export.py` with the `linr_v3` entries. Body preserved below as historical execution brief (much of it now over-specified relative to what's actually left).
 
 **Difficulty: high.** Last because it has the most combinations: `HAS_INDICES` constexpr drives an autotune key today, the layer has three modes (full / masked / candidates) folded into two coupled Optionals, the masked path has a `.item()` early-return guard, and the query-projection path goes through a `torch.compile(reduce-overhead)` wrapper (same as Phase 2's bloom-sig issue).
 
@@ -579,6 +587,65 @@ cd evaluation && uv run build-export --algo linr_v3 --mode full --checkpoint-dir
 - [ ] `OneBitKNN` export path bypasses `_project_oporp_1bit_query_compiled`.
 - [ ] `compact_mask` is not reached from any export-path forward.
 - [ ] All tests pass; `linr_v3` recall@k unchanged.
+
+---
+
+## Remaining work — consolidated single PR (2026-05-23)
+
+The historical phase bodies above were sized assuming Stages 1+2 hadn't run yet. They have. What's actually left fits in one PR:
+
+### Layer-side mode flags
+
+**[PrefilterKNN](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py)** — add `mode: Literal["full", "candidates"]` to `__init__`. `forward` becomes one of:
+
+```python
+def forward(self, query: Tensor) -> tuple[Tensor, Tensor]:                                       # mode="full"
+def forward(self, query: Tensor, candidate_ids: Tensor, counts: Tensor) -> tuple[Tensor, Tensor]: # mode="candidates"
+```
+
+Drop: the `candidate_ids is None` branch ([prefilter_knn.py:54](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py#L54)); the `counts is None → torch.full(p, ...)` fallback ([prefilter_knn.py:117-118](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py#L117-L118)); the two layer-side `if p == 0` early returns ([prefilter_knn.py:74-78](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py#L74-L78), [prefilter_knn.py:111-116](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py#L111-L116)). The kernel handles per-row empty already.
+
+**[OneBitKNN](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py)** — add `mode: Literal["full", "candidates"]` to `__init__`. `forward` dispatches to the existing custom_ops 1:1:
+
+```python
+def forward(self, query):                                # mode="full"     → oporp_1bit_match_topk_full
+def forward(self, query, candidate_ids, counts):         # mode="candidates" → oporp_1bit_match_topk_indirect
+```
+
+Same dispatch in `_forward_torch_eager`. Drop the `counts is None` fallback at [one_bit_knn.py:149-155](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py#L149-L155).
+
+### Algo wiring
+
+Per the user's direction, the export targets can be a separate algo construction path — eager-runtime algos pass one shape, export-target algos pass another. Two options, both small:
+
+- **(A) Inline `mode=` kwarg:** [linr_v2.py](../../evaluation/retrieval/algos/linr_v2.py) passes `mode="candidates"` (V2 is sparse-rescore by definition). [linr_v3.py](../../evaluation/retrieval/algos/linr_v3.py) stage 1 picks `mode="full"` or `mode="candidates"` based on whether a filter is wired; stage 2 always `mode="candidates"`. Minimal blast radius — recommended.
+- **(B) Sibling export-target algos** (`linr_v2_export`, `linr_v3_export`) that hard-code modes and skip the eager-runtime `torch.compile` step. Use only if (A) introduces eager-side churn (it shouldn't).
+
+### `build_export.py` scaffold — create new
+
+Drop the Phase 4 stub (lines 444-499) into [evaluation/retrieval/build_export.py](../../evaluation/retrieval/build_export.py). Add `[project.scripts]` entry `build-export = "retrieval.build_export:main"` to [evaluation/pyproject.toml](../../evaluation/pyproject.toml). Entries to ship in this PR: `linr_v2_full.pt2`, `linr_v2_candidates.pt2`, `linr_v3_full.pt2`, `linr_v3_candidates.pt2`. No AOTI compile (separate later effort).
+
+### Tests
+
+Parametrize [retrieve/tests/correctness/test_linr.py](../../retrieve/tests/correctness/test_linr.py) over `mode`. Add a smoke test in `evaluation/` that exercises `build_export.py` end-to-end on a tiny synthetic index and round-trips via `torch.export.load`.
+
+### Out of scope for this PR
+
+- [SimilarityMasking](../../retrieve/src/retrieve/layers/linr/similarity_masking.py) and [FullScanKNN](../../retrieve/src/retrieve/layers/utils/retrieval.py) — pure-torch Optional-arg `forward`s. Export trivially via `dynamic_shapes` spec without a `mode` flag if/when a consumer asks. Defer.
+- AOTI bump (`torch>=2.5`, `aoti_compile_and_package`). Separate later effort.
+- `tune_kernels.py` extension — already exists and covers every in-scope kernel.
+
+### Verification (when executed)
+
+```bash
+cd retrieve && uv run pytest tests/ -v
+cd evaluation && uv run evaluate --config conf/goodreads/d128-filter.yaml --algorithms linr_v2 --backend triton
+cd evaluation && uv run evaluate --config conf/500m/d128-quality.yaml --algorithms linr_v3 --backend triton
+cd evaluation && uv run build-export --algo linr_v2 --mode candidates --checkpoint-dir <path> --out-dir <path>
+cd evaluation && uv run build-export --algo linr_v3 --mode full       --checkpoint-dir <path> --out-dir <path>
+cd evaluation && uv run build-export --algo linr_v3 --mode candidates --checkpoint-dir <path> --out-dir <path>
+# Each .pt2 loads via torch.export.load and produces equal outputs to the eager module on a smoke batch.
+```
 
 ---
 
@@ -650,10 +717,12 @@ grep -rn "is_cuda" retrieve/src/retrieve/layers/filters/ retrieve/src/retrieve/l
 
 ## Phase-difficulty summary (one-line each)
 
-| Phase | Kernels | Layer | Difficulty | Why                                                                                                                |
-|-------|---------|-------|------------|--------------------------------------------------------------------------------------------------------------------|
-| 1     | `clause_compact`, `clause_mask` | `ExactAttributeFilter` | **easy**   | No autotune to strip, no Optionals in launch. Just `.item()` removal + KernelConfig plumbing.                       |
-| 2     | `bloom_compact`                 | `BloomFilter`          | **medium** | Introduces the cudagraph-trees compile bypass pattern (reused in Phase 5). `bloom_match` was originally here — out of scope (silvertorch). |
-| 3     | — (out of scope)                | — (silvertorch)        | **n/a**    | Originally `codesigned_probe_score` + `SilverTorch`. Out of scope; `build_export.py` scaffold authored in Phase 4 instead. |
-| 4     | `fused_masked_knn_topk`         | `PrefilterKNN`         | **medium** | Strip autotune (migrate `_bucket_p` to REGISTRY), one mode flag, two coupled Optionals collapse, `p==0` removal. Authors `build_export.py`. |
-| 5     | `oporp_1bit_match_topk`         | `OneBitKNN`            | **high**   | Three modes, `.item()` guard removal, `compact_mask` bypass, OPORP query-side compile bypass.                       |
+Updated 2026-05-23 — kernel-side work has shipped via Stages 1+2; original difficulties shown in parentheses for historical context.
+
+| Phase | Kernels | Layer | Status (2026-05-23) | Why                                                                                                                |
+|-------|---------|-------|---------------------|--------------------------------------------------------------------------------------------------------------------|
+| 1     | `clause_compact`, `clause_mask` | `ExactAttributeFilter` | ✅ **done** (was easy) | No autotune to strip, no Optionals in launch. Just `.item()` removal + KernelConfig plumbing. Filter API needed no mode flag. |
+| 2     | `bloom_compact`                 | `BloomFilter`          | ✅ **done** (was medium) | The compiled query-sig wrapper that needed bypassing was deleted entirely — cudagraph capture moved up to the algo wrapper. |
+| 3     | — (out of scope)                | — (silvertorch)        | **n/a**    | Originally `codesigned_probe_score` + `SilverTorch`. Out of scope; `build_export.py` scaffold authoring shifted to Phase 4. |
+| 4     | `fused_masked_knn_topk`         | `PrefilterKNN`         | 🟡 **kernel done, layer + scaffold remain** (was medium) | Kernel `triton_op` + non-Optional schema shipped. Layer needs `mode` flag; `build_export.py` is still unwritten. |
+| 5     | `oporp_1bit_match_topk`         | `OneBitKNN`            | 🟡 **kernel done, layer remains** (was high) | Kernel split into `_full` + `_indirect` custom_ops — already the export shape. `.item()` guard and compile-wrapper bypass are moot. Layer needs `mode` flag. |
