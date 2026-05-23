@@ -4,8 +4,8 @@ import torch
 from torch import Tensor
 
 from retrieve.interfaces import Backend, FilterModule
-from retrieve.kernels.triton.filters.clause_compact import clause_compact
-from retrieve.kernels.triton.filters.clause_mask import clause_mask
+from retrieve.kernels.filters.clause_compact import clause_compact
+from retrieve.kernels.filters.clause_mask import clause_mask
 from retrieve.layers.utils.compact import compact_mask
 
 

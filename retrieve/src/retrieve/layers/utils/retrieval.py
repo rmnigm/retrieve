@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import torch
-from torch import Tensor
-
-from retrieve.interfaces import RetrievalModule
+from torch import Tensor, nn
 
 
 def post_filter_topk(
@@ -21,7 +19,7 @@ def post_filter_topk(
     return topk_ids, counts
 
 
-class FullScanKNN(RetrievalModule):
+class FullScanKNN(nn.Module):
     """Exhaustive matmul + top-K. Optional post-filter mask or candidate_ids path."""
 
     item_embs: Tensor

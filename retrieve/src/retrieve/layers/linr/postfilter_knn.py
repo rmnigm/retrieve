@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 
-from retrieve.interfaces import Backend, RetrievalModule
+from retrieve.interfaces import Backend
 
 
-class SimilarityMasking(RetrievalModule):
+class PostfilterKNN(nn.Module):
     """Pure-torch dense scoring + boolean mask + top-K.
 
     Computes the full ``query @ item_embs.T`` similarity matrix, applies an

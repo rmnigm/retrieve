@@ -55,38 +55,3 @@ class FilterModule(nn.Module, abc.ABC):
 
     def forward(self, query_clause_attrs: Tensor) -> Tensor:
         return self.evaluate_mask(query_clause_attrs)
-
-
-class RetrievalModule(nn.Module, abc.ABC):
-    """Produces ``(ids[B, K], scores[B, K])`` from the full item pool.
-
-    Concrete subclasses extend ``forward`` with whichever filter representation
-    they consume (e.g. ``mask`` for V1's dense path, ``candidate_ids`` for V2,
-    both for V3). The base contract is just ``forward(query)``.
-
-    Empty-slot sentinel: when fewer than ``K`` items are available (tight
-    filter, small candidate pool), trailing slots carry ``id = -1`` and
-    ``score = -inf``. Downstream metrics use ``-1`` to detect padding;
-    leaking real ids (e.g. lowest-indexed -inf items from a raw ``torch.topk``)
-    causes spurious id-set mismatches against the filtered-FullScan oracle.
-    """
-
-    @abc.abstractmethod
-    def register_index(self, item_embs: Tensor) -> None: ...
-
-    @abc.abstractmethod
-    def forward(self, query: Tensor) -> tuple[Tensor, Tensor]: ...
-
-
-class ScorerModule(nn.Module, abc.ABC):
-    """Re-scores a set of candidate items: returns ``scores[B, K]``."""
-
-    @abc.abstractmethod
-    def register_index(self, item_embs: Tensor) -> None: ...
-
-    @abc.abstractmethod
-    def forward(
-        self,
-        query: Tensor,
-        candidate_ids: Tensor,
-    ) -> Tensor: ...

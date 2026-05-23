@@ -1,4 +1,4 @@
-"""Offline tuner for the Triton kernels in ``retrieve.kernels.triton``.
+"""Offline tuner for the Triton kernels in ``retrieve.kernels``.
 
 Run once on the target arch; paste the printed ``DEFAULT_CONFIG = ...``
 line into the corresponding kernel file, or pass the resulting config
@@ -35,29 +35,29 @@ import click
 import torch
 import triton.testing as ttesting
 
-from retrieve.kernels.triton.filters.bloom_compact import (
+from retrieve.kernels.filters.bloom_compact import (
     BloomCompactConfig,
     _bloom_compact_impl,
 )
-from retrieve.kernels.triton.filters.clause_compact import (
+from retrieve.kernels.filters.clause_compact import (
     ClauseCompactConfig,
     _clause_compact_impl,
 )
-from retrieve.kernels.triton.filters.clause_mask import (
+from retrieve.kernels.filters.clause_mask import (
     ClauseMaskConfig,
     _clause_mask_impl,
 )
-from retrieve.kernels.triton.linr.fused_masked_knn_topk import (
+from retrieve.kernels.linr.fused_masked_knn_topk import (
     _P_BUCKETS,
     FusedMaskedKnnTopkConfig,
     _fused_masked_knn_topk_impl,
 )
-from retrieve.kernels.triton.linr.oporp_1bit_match_topk import (
+from retrieve.kernels.linr.oporp_1bit_match_topk import (
     _N_BUCKETS,
     Oporp1BitMatchTopkConfig,
     _oporp_1bit_match_topk_impl,
 )
-from retrieve.kernels.triton.silvertorch.codesigned_probe_score import (
+from retrieve.kernels.silvertorch.codesigned_probe_score import (
     CodesignedProbeScoreConfig,
     codesigned_probe_score,
 )
@@ -195,7 +195,7 @@ def _print_fmkt(arch: str, result: dict) -> None:
     bn, nw = result["default"]
     click.echo("")
     click.echo(
-        "# Paste into retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py"
+        "# Paste into retrieve/src/retrieve/kernels/linr/fused_masked_knn_topk.py"
     )
     click.echo(f"# Tuned on {arch}; per-bucket details in JSON output if --json-out was used.")
     click.echo(
@@ -292,7 +292,7 @@ def _print_oporp(arch: str, result: dict) -> None:
     bn, nw = result["default"]
     click.echo("")
     click.echo(
-        "# Paste into retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py"
+        "# Paste into retrieve/src/retrieve/kernels/linr/oporp_1bit_match_topk.py"
     )
     click.echo(f"# Tuned on {arch}; per-regime details in JSON output if --json-out was used.")
     click.echo(
@@ -396,7 +396,7 @@ def _print_cps(arch: str, result: dict) -> None:
     click.echo("")
     click.echo(
         "# Paste into "
-        "retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py"
+        "retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py"
     )
     click.echo(f"# Tuned on {arch}; per-regime details in JSON output if --json-out was used.")
     click.echo(
@@ -474,7 +474,7 @@ def _print_clause_mask(arch: str, result: dict) -> None:
     bn, nw = result["default"]
     click.echo("")
     click.echo(
-        "# Paste into retrieve/src/retrieve/kernels/triton/filters/clause_mask.py"
+        "# Paste into retrieve/src/retrieve/kernels/filters/clause_mask.py"
     )
     click.echo(f"# Tuned on {arch}; per-regime details in JSON output if --json-out was used.")
     click.echo(f"DEFAULT_CONFIG = ClauseMaskConfig(block_n={bn}, num_warps={nw})")
@@ -532,7 +532,7 @@ def _print_clause_compact(arch: str, result: dict) -> None:
     bn, nw = result["default"]
     click.echo("")
     click.echo(
-        "# Paste into retrieve/src/retrieve/kernels/triton/filters/clause_compact.py"
+        "# Paste into retrieve/src/retrieve/kernels/filters/clause_compact.py"
     )
     click.echo(f"# Tuned on {arch}; per-regime details in JSON output if --json-out was used.")
     click.echo(f"DEFAULT_CONFIG = ClauseCompactConfig(block_n={bn}, num_warps={nw})")
@@ -598,7 +598,7 @@ def _print_bloom_compact(arch: str, result: dict) -> None:
     bn, nw = result["default"]
     click.echo("")
     click.echo(
-        "# Paste into retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py"
+        "# Paste into retrieve/src/retrieve/kernels/filters/bloom_compact.py"
     )
     click.echo(f"# Tuned on {arch}; per-regime details in JSON output if --json-out was used.")
     click.echo(f"DEFAULT_CONFIG = BloomCompactConfig(block_n={bn}, num_warps={nw})")

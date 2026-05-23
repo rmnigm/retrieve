@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.kernels.triton.silvertorch.codesigned_probe_score import (
+from retrieve.kernels.silvertorch.codesigned_probe_score import (
     CodesignedProbeScoreConfig,
     _codesigned_probe_score_impl,
     codesigned_probe_score,

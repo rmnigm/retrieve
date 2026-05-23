@@ -39,7 +39,7 @@ known-first-party = ["retrieve"]
 [tool.ruff.lint.per-file-ignores]
 # Triton kernel launches use `grid = lambda meta: (...)` — the canonical form
 # from Triton's own tutorials; `meta` is the autotuned config.
-"src/retrieve/kernels/triton/**/*.py" = ["E731"]
+"src/retrieve/kernels/**/*.py" = ["E731"]
 
 [dependency-groups]
 dev = [

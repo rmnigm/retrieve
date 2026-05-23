@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.kernels.triton.filters.clause_mask import (
+from retrieve.kernels.filters.clause_mask import (
     ClauseMaskConfig,
     _clause_mask_impl,
     clause_mask,

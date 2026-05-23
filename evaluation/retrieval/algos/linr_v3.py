@@ -21,7 +21,7 @@ the inter-stage ``cand_ids`` tensor stays inside a single graph
 tensor output of CUDAGraphs that has been overwritten by a subsequent
 run``).
 
-The dense ``SimilarityMasking`` path is intentionally absent as stage-2 —
+The dense ``PostfilterKNN`` path is intentionally absent as stage-2 —
 its full matmul does the same work as ``triton_knn`` alone, so a 1-bit
 prefilter into a dense rescore is strictly slower than the unfiltered
 baseline (measured ~1.22 ms vs 0.89 ms at 500M scale).

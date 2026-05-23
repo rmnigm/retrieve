@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 
-from retrieve.interfaces import Backend, RetrievalModule
+from retrieve.interfaces import Backend
 
 
 _INT32_NEG_INF = torch.iinfo(torch.int32).min
@@ -26,7 +26,7 @@ def _quantize_int8_global(t: Tensor) -> Tensor:
     return (t / abs_max * 127.0).round().clamp(-128, 127).to(torch.int8)
 
 
-class Int8SimilarityMasking(RetrievalModule):
+class PostfilterKNNInt8(nn.Module):
     """Single-stage int8 dense scoring + optional mask + top-K, int32 end-to-end.
 
     Items and queries are int8-quantized using one global scale each
@@ -39,7 +39,7 @@ class Int8SimilarityMasking(RetrievalModule):
     int8 rounding noise on each element).
 
     Storage: one ``[D, N]`` int8 buffer. Half the memory of
-    ``SimilarityMasking``'s fp16 transposed embs.
+    ``PostfilterKNN``'s fp16 transposed embs.
 
     Notes:
 
@@ -79,7 +79,7 @@ class Int8SimilarityMasking(RetrievalModule):
             pad = codes.new_zeros((pad_n, codes.shape[1]))
             codes = torch.cat([codes, pad], dim=0)
         # Pre-transpose to [D, N_padded] contiguous — matches
-        # SimilarityMasking's layout convention and what _int_mm expects
+        # PostfilterKNN's layout convention and what _int_mm expects
         # for B (== K) input.
         self.register_buffer("item_codes_t", codes.t().contiguous())
 

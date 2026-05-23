@@ -82,7 +82,7 @@ model-based retrieval: квантизационные (PQ, IVF/PQ), графов
 
 **Содержание раздела.** Разбираются существующие GPU-ANN библиотеки, их ограничения по top-k,
 n_probe и кастомизируемости фильтров. Эти ограничения и являются мотивацией для построения
-собственных Triton-ядер в пакете (см. [`retrieve/src/retrieve/kernels/triton/silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/)).
+собственных Triton-ядер в пакете (см. [`retrieve/src/retrieve/kernels/silvertorch/`](../../retrieve/src/retrieve/kernels/silvertorch/)).
 
 **Ключевые ссылки:**
 - Johnson, Douze, Jégou 2019/2021 — *Billion-Scale Similarity Search with GPUs (FAISS-GPU)*.
@@ -110,13 +110,13 @@ GPU-стек, MoL и HSTU как развитие dot-product similarity, и gen
 **Ключевые ссылки (прямые предшественники):**
 - Borisyuk et al. 2024 — *LiNR: Model Based Neural Retrieval on GPUs at LinkedIn* (CIKM'24) —
   оригинал LiNR-подмножества (V1 similarity masking, V2 prefilter, V3 1-bit OPORP). Файлы пакета:
-  [`similarity_masking.py`](../../retrieve/src/retrieve/layers/linr/similarity_masking.py),
+  [`postfilter_knn.py`](../../retrieve/src/retrieve/layers/linr/postfilter_knn.py),
   [`prefilter_knn.py`](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py),
   [`one_bit_knn.py`](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py).
 - SilverTorch (Meta) — статья из [`articles/silvertorch.md`](../../articles/silvertorch.md);
   первоисточник co-designed IVF+INT8+Bloom, реимплементированного в
   [`main.py`](../../retrieve/src/retrieve/layers/silvertorch/main.py) +
-  [`codesigned_probe_score.py`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py).
+  [`codesigned_probe_score.py`](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py).
 - Oldridge et al. 2020 — *Merlin: A GPU-Accelerated Recommendation Framework* (NVIDIA) — broader
   GPU-стек для RecSys.
 

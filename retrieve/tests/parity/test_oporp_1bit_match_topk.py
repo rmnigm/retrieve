@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.kernels.triton.linr.oporp_1bit_match_topk import (
+from retrieve.kernels.linr.oporp_1bit_match_topk import (
     Oporp1BitMatchTopkConfig,
     _bucket_n,
     _oporp_1bit_match_topk_impl,

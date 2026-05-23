@@ -3,7 +3,7 @@
 Covers two registered names: ``linr_v1_filter_mask`` (canonical for
 filter cells) and ``triton_knn`` (historic alias used by yambda
 configs). Same implementation; the alias exists so both YAML lineages
-keep working without a rename. Backed by ``SimilarityMasking`` with
+keep working without a rename. Backed by ``PostfilterKNN`` with
 ``backend="triton"`` (default) or ``"torch"``.
 
 The whole algo forward (filter mask build + index call) is wrapped
@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from torch import Tensor, nn
 
-from retrieve import SimilarityMasking
+from retrieve import PostfilterKNN
 from retrieve.interfaces import Backend, FilterModule
 
 from ._helpers import collect_modules
@@ -36,9 +36,9 @@ class LinrV1Algo(nn.Module):
         backend: Backend = "triton",
     ) -> None:
         super().__init__()
-        # SimilarityMasking handles the fp32→fp16 cast for paper-faithful
+        # PostfilterKNN handles the fp32→fp16 cast for paper-faithful
         # storage; see retrieve.layers.linr package docstring.
-        self.idx = SimilarityMasking(k=k, backend=backend).to(item_embs.device)
+        self.idx = PostfilterKNN(k=k, backend=backend).to(item_embs.device)
         self.idx.register_index(item_embs)
         self.filter_mod = filter_mod
         self.algo_modules = collect_modules(self.idx, filter_mod=filter_mod)

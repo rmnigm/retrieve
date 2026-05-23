@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.kernels.triton.silvertorch.bloom_match import bloom_match
+from retrieve.kernels.silvertorch.bloom_match import bloom_match
 from retrieve.layers.filters import BloomFilter
 from retrieve.layers.filters.bloom import _build_signatures
 from tests.conftest import make_attrs, make_query_attrs

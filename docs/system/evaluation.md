@@ -75,7 +75,7 @@ evaluation/retrieval/
 │   ├── linr_v1.py             # LinrV1Algo — covers triton_knn + linr_v1_filter_mask
 │   ├── linr_v2.py             # LinrV2Algo — exact filtered top-K via PrefilterKNN
 │   ├── linr_v3.py             # LinrV3Algo — V3 → V2 cascade (1-bit prefilter, fp32 rerank)
-│   ├── linr_v4.py             # LinrV4Algo — single-stage int8 dense (Int8SimilarityMasking)
+│   ├── linr_v4.py             # LinrV4Algo — single-stage int8 dense (PostfilterKNNInt8)
 │   ├── silvertorch.py         # SilvertorchAlgo — IVF + INT8 + (none / bloom / exact) filter
 │   └── torch_knn.py           # TorchKnnAlgo — FullScanKNN reference
 ├── bench_tools.py             # encode_queries, quality_pass_cached, perf_pass_cached
@@ -221,11 +221,11 @@ cell.
 | Name | Class / file | Notes |
 |---|---|---|
 | `torch_knn` | [`TorchKnnAlgo`](../../evaluation/retrieval/algos/torch_knn.py) | Reference exhaustive IP scan via `FullScanKNN`; mask post-filter on filtered cells (skipped on the goodreads filter suite — equals the oracle). |
-| `triton_knn` | [`LinrV1Algo`](../../evaluation/retrieval/algos/linr_v1.py) | Pure-torch full-scan KNN — uses `SimilarityMasking(backend="triton")`, but the original Triton kernel was removed, so both backends run the same `query @ x.T + topk` path. Yambda-config alias. |
+| `triton_knn` | [`LinrV1Algo`](../../evaluation/retrieval/algos/linr_v1.py) | Pure-torch full-scan KNN — uses `PostfilterKNN(backend="triton")`, but the original Triton kernel was removed, so both backends run the same `query @ x.T + topk` path. Yambda-config alias. |
 | `linr_v1_filter_mask` | [`LinrV1Algo`](../../evaluation/retrieval/algos/linr_v1.py) | Same class as `triton_knn`; canonical name on filter cells. |
 | `linr_v3` | [`LinrV3Algo`](../../evaluation/retrieval/algos/linr_v3.py) | V3 → V2 cascade: `OneBitKNN(backend="triton")` produces top-`candidate_pool` at 1-bit precision; `PrefilterKNN(backend="triton")` rescores at fp32. Approximate. |
 | `linr_v2` | [`LinrV2Algo`](../../evaluation/retrieval/algos/linr_v2.py) | Exact filtered top-K — candidate set IS the filter (`filter_mod.evaluate_indices`). Recall=1.0 by construction; headline is speed/memory. Filter cells only — raises `ValueError` on `filter_kind="none"`. |
-| `linr_v4` | [`LinrV4Algo`](../../evaluation/retrieval/algos/linr_v4.py) | Single-stage int8 dense + optional mask + topk via `Int8SimilarityMasking`. `torch._int_mm` (int8×int8 → int32, IMMA on Ampere+) directly to `torch.topk` with no scale recovery (global per-tensor scale is rank-preserving). Twin of `triton_knn`/`linr_v1_filter_mask` at int8 storage; ≥0.99 recall on unit-norm embeddings at D=128. |
+| `linr_v4` | [`LinrV4Algo`](../../evaluation/retrieval/algos/linr_v4.py) | Single-stage int8 dense + optional mask + topk via `PostfilterKNNInt8`. `torch._int_mm` (int8×int8 → int32, IMMA on Ampere+) directly to `torch.topk` with no scale recovery (global per-tensor scale is rank-preserving). Twin of `triton_knn`/`linr_v1_filter_mask` at int8 storage; ≥0.99 recall on unit-norm embeddings at D=128. |
 | `silvertorch` | [`SilvertorchAlgo`](../../evaluation/retrieval/algos/silvertorch.py) | IVF + INT8 ANN with `SilverTorch.filter` selected per `filter_kind`: `"bloom"` → bloom-fused IVF (codesigned `codesigned_probe_score`, item signatures over narrow attrs baked in at register time); `"clause"` → exact-AND-of-OR-fused IVF (codesigned `codesigned_probe_score_exact`, narrow attrs baked in); `"none"` → plain IVF + INT8. All three modes routed through the same algo class. |
 
 `make_mask(filter_mod, qa_narrow)` (in [`algos/filter.py`](../../evaluation/retrieval/algos/filter.py))

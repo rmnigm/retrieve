@@ -3,14 +3,14 @@ from __future__ import annotations
 from typing import Literal
 
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 
-from retrieve.interfaces import Backend, RetrievalModule
-from retrieve.kernels.triton.silvertorch.codesigned_probe_score import (
+from retrieve.interfaces import Backend
+from retrieve.kernels.silvertorch.codesigned_probe_score import (
     codesigned_probe_score,
     codesigned_probe_score_bloom,
 )
-from retrieve.kernels.triton.silvertorch.codesigned_probe_score_exact import (
+from retrieve.kernels.silvertorch.codesigned_probe_score_exact import (
     codesigned_probe_score_exact,
 )
 from retrieve.layers.filters.bloom import (
@@ -24,7 +24,7 @@ from retrieve.layers.utils.quantize import quantize_int8, quantize_int8_global
 FilterMode = Literal["none", "bloom", "exact"]
 
 
-class SilverTorch(RetrievalModule):
+class SilverTorch(nn.Module):
     """Co-designed IVF + INT8 ANN + (optional) attribute filter (Algorithm 1).
 
     Paper-faithful int8 ANN: the index stores ``[N, D]`` int8 codes with a

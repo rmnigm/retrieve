@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.kernels.triton.silvertorch.codesigned_probe_score_exact import (
+from retrieve.kernels.silvertorch.codesigned_probe_score_exact import (
     CodesignedProbeScoreExactConfig,
     _codesigned_probe_score_exact_impl,
     codesigned_probe_score_exact,
@@ -156,7 +156,7 @@ def test_codesigned_exact_inactive_query():
         query, flat, codes, attrs, rev, q_attrs, global_scale, k,
     )
 
-    from retrieve.kernels.triton.silvertorch.codesigned_probe_score import (
+    from retrieve.kernels.silvertorch.codesigned_probe_score import (
         _codesigned_probe_score_impl,
     )
     ref_ids, ref_scores = _codesigned_probe_score_impl(

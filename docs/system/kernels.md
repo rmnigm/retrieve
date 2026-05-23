@@ -6,20 +6,20 @@
 
 The Triton kernels split into three trees by domain:
 
-- [`linr/`](../../retrieve/src/retrieve/kernels/triton/linr/) — kernels
+- [`linr/`](../../retrieve/src/retrieve/kernels/linr/) — kernels
   used by `PrefilterKNN` / `OneBitKNN` (`fused_masked_knn_topk`,
-  `oporp_1bit_match_topk`). `SimilarityMasking`'s dense fp16 matmul +
-  top-K and `Int8SimilarityMasking`'s int8 `_int_mm` + int32 top-K are
+  `oporp_1bit_match_topk`). `PostfilterKNN`'s dense fp16 matmul +
+  top-K and `PostfilterKNNInt8`'s int8 `_int_mm` + int32 top-K are
   both pure torch — there's no real fusion to win over cuBLAS LtGemm +
   CUB.
-- [`filters/`](../../retrieve/src/retrieve/kernels/triton/filters/) —
+- [`filters/`](../../retrieve/src/retrieve/kernels/filters/) —
   standalone filter primitives consumed by the `FilterModule` family:
   `clause_compact` (powers `ExactAttributeFilter.evaluate_indices`),
   `clause_mask` (powers `ExactAttributeFilter.evaluate_mask`), and
   `bloom_compact` (powers
   `BloomFilter.evaluate_indices`). The mask/compact split mirrors the
   filter API split documented in [filtering.md](filtering.md).
-- [`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/) —
+- [`silvertorch/`](../../retrieve/src/retrieve/kernels/silvertorch/) —
   the two co-designed IVF probe+score kernels (`codesigned_probe_score`
   for the IVF + INT8 + Bloom co-design, `codesigned_probe_score_exact`
   for the IVF + INT8 + exact AND-of-OR variant — `SilverTorch.filter`
@@ -148,32 +148,32 @@ so loading the same checkpoint produces the same bits. V3 store (`item_bits`,
 on every forward, so the torch reference and the Triton kernel see byte-for-
 byte identical bits.
 
-## SimilarityMasking dense path — pure torch, no kernel
+## PostfilterKNN dense path — pure torch, no kernel
 
-`SimilarityMasking`'s forward is `query @ item_embs.T` + optional
+`PostfilterKNN`'s forward is `query @ item_embs.T` + optional
 `masked_fill(-inf)` + `torch.topk` — implemented directly in
-[`SimilarityMasking`](../../retrieve/src/retrieve/layers/linr/similarity_masking.py).
+[`PostfilterKNN`](../../retrieve/src/retrieve/layers/linr/postfilter_knn.py).
 An earlier `fused_matmul_topk` Triton kernel sat in this slot, but it only
 fused the matmul: it materialized the full `[B, N]` score buffer to global
 memory and then called the same host-side `torch.topk`, so its memory
 traffic and selection cost matched cuBLAS + CUB exactly. With no fusion
-benefit, the kernel was removed; `SimilarityMasking` accepts the
+benefit, the kernel was removed; `PostfilterKNN` accepts the
 `backend=` flag for API symmetry but both values dispatch to this same
 pure-torch path.
 
-## Int8SimilarityMasking dense path — pure torch, no kernel
+## PostfilterKNNInt8 dense path — pure torch, no kernel
 
-`Int8SimilarityMasking`'s forward is `torch._int_mm(query_codes,
+`PostfilterKNNInt8`'s forward is `torch._int_mm(query_codes,
 item_codes_T)` (int8×int8 → int32, cuBLAS LtGemm, IMMA tensor cores on
 sm_80+) + optional `masked_fill(int32_min)` + `torch.topk` on the int32
 result — implemented directly in
-[`Int8SimilarityMasking`](../../retrieve/src/retrieve/layers/linr/int8_similarity_masking.py).
+[`PostfilterKNNInt8`](../../retrieve/src/retrieve/layers/linr/postfilter_knn_int8.py).
 Items and queries are int8-quantized with one global scalar scale each
 (SilverTorch §3.2); because both scales are global constants per call,
 the int32 dot product is a positive monotonic transform of the true
 fp32 dot, so topk ordering is exact (modulo per-element int8 rounding)
 without rescaling to fp32. Storage is one `[D, N]` int8 buffer — half
-of `SimilarityMasking`'s fp16 layout. `torch._int_mm` requires `M >=
+of `PostfilterKNN`'s fp16 layout. `torch._int_mm` requires `M >=
 17`, so small batches are zero-padded before the matmul and sliced
 after; quantization runs **before** padding so the padded zero rows
 don't shift the global scale. No Triton kernel; `backend=` is accepted
@@ -181,7 +181,7 @@ for API symmetry but both values dispatch here.
 
 ## `fused_masked_knn_topk` — PrefilterKNN sparse path
 
-[`kernels/triton/linr/fused_masked_knn_topk.py`](../../retrieve/src/retrieve/kernels/triton/linr/fused_masked_knn_topk.py).
+[`kernels/linr/fused_masked_knn_topk.py`](../../retrieve/src/retrieve/kernels/linr/fused_masked_knn_topk.py).
 
 Scores only the items in a precompacted `positive_indices` buffer (gather
 + dot + write). Returns `(ids[B, K], scores[B, K])` with `-1` / `-inf`
@@ -249,7 +249,7 @@ slots with the `-1` sentinel).
 
 ## `oporp_1bit_match_topk` — V3 (all paths)
 
-[`kernels/triton/linr/oporp_1bit_match_topk.py`](../../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py).
+[`kernels/linr/oporp_1bit_match_topk.py`](../../retrieve/src/retrieve/kernels/linr/oporp_1bit_match_topk.py).
 
 Computes Hamming-similarity scores from packed sign bits. Single kernel
 covers both the full-scan and the candidate / masked path via a
@@ -269,7 +269,7 @@ return:   ids               [B, K]     int64
 **Inner op**: per (b, n) cell, `tl.sum(_popcount_int64(qb ^ item_row),
 axis=W) → hamming`, then `score = D_TOTAL - 2 * hamming`.
 
-**Popcount** is the [SWAR bit-twiddle](../../retrieve/src/retrieve/kernels/triton/linr/oporp_1bit_match_topk.py)
+**Popcount** is the [SWAR bit-twiddle](../../retrieve/src/retrieve/kernels/linr/oporp_1bit_match_topk.py)
 (`_popcount_int64`): five mask-shift-add steps, no libdevice dependency.
 The matching torch reference [`popcount_int64`](../../retrieve/src/retrieve/layers/utils/quantize.py)
 uses the exact same algorithm so torch and Triton produce **bit-exact**
@@ -307,7 +307,7 @@ bucketing needed.
 
 ## `clause_compact` — fused clause eval + stream compaction
 
-[`kernels/triton/filters/clause_compact.py`](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py).
+[`kernels/filters/clause_compact.py`](../../retrieve/src/retrieve/kernels/filters/clause_compact.py).
 
 Powers `ExactAttributeFilter.evaluate_indices`. Avoids materializing the
 dense `[B, N]` bool that `evaluate_mask` would otherwise produce, then doing
@@ -361,7 +361,7 @@ apply to the offline tuner — see [Autotune separation](#autotune-separation).
 
 ## `clause_mask` — fused clause eval emitting `[B, N]` bool
 
-[`kernels/triton/filters/clause_mask.py`](../../retrieve/src/retrieve/kernels/triton/filters/clause_mask.py).
+[`kernels/filters/clause_mask.py`](../../retrieve/src/retrieve/kernels/filters/clause_mask.py).
 
 Powers `ExactAttributeFilter.evaluate_mask` on CUDA. Same inner loop as
 `clause_compact` minus the cumsum + `atomic_add` epilogue — emits the
@@ -393,7 +393,7 @@ via `_clause_mask_impl(..., config=)`. Re-tune on a new arch via
 
 ## `bloom_match` — Bloom subset test
 
-[`kernels/triton/silvertorch/bloom_match.py`](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py).
+[`kernels/silvertorch/bloom_match.py`](../../retrieve/src/retrieve/kernels/silvertorch/bloom_match.py).
 Lives in the SilverTorch kernel tree for historical reasons (it was
 written when only SilverTorch's bench tests consumed it) but is now a
 standalone filter primitive: powers
@@ -467,7 +467,7 @@ kernels need at large N.
 
 ## `bloom_compact` — fused subset test + stream compaction
 
-[`kernels/triton/filters/bloom_compact.py`](../../retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py).
+[`kernels/filters/bloom_compact.py`](../../retrieve/src/retrieve/kernels/filters/bloom_compact.py).
 
 Powers `BloomFilter.evaluate_indices` on CUDA. Combines `bloom_match`'s
 subset-test inner loop with `clause_compact`'s cumsum + `atomic_add`
@@ -514,7 +514,7 @@ applies — kernel is opaque to bits, so no kernel-side change.
 
 Each LinR Triton subclass is a thin router from the `forward()` signature
 to one of the three kernels above. The dispatch is **design-time** —
-`SimilarityMasking` is always dense, `PrefilterKNN` is always sparse,
+`PostfilterKNN` is always dense, `PrefilterKNN` is always sparse,
 `OneBitKNN` always uses popcount — not a runtime sparsity heuristic. Pick
 the variant that matches your expected mask shape, not the one that benches
 best on a given input.
@@ -525,8 +525,8 @@ each module runs the same op chain in pure torch (no kernels), eager.
 
 | layer                       | path         | kernel(s) called                                  |
 |-----------------------------|--------------|---------------------------------------------------|
-| [`SimilarityMasking`](../../retrieve/src/retrieve/layers/linr/similarity_masking.py) | always dense | none — pure torch `(q @ x.T).masked_fill(...).topk` |
-| [`Int8SimilarityMasking`](../../retrieve/src/retrieve/layers/linr/int8_similarity_masking.py) | always dense | none — pure torch `torch._int_mm(...).masked_fill(...).topk` (int8×int8 → int32, IMMA) |
+| [`PostfilterKNN`](../../retrieve/src/retrieve/layers/linr/postfilter_knn.py) | always dense | none — pure torch `(q @ x.T).masked_fill(...).topk` |
+| [`PostfilterKNNInt8`](../../retrieve/src/retrieve/layers/linr/postfilter_knn_int8.py) | always dense | none — pure torch `torch._int_mm(...).masked_fill(...).topk` (int8×int8 → int32, IMMA) |
 | [`PrefilterKNN`](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py)         | masked       | `compact_mask` → `fused_masked_knn_topk`          |
 |                                                                | unmasked     | none — pure torch dense path (nothing to pre-filter) |
 | [`OneBitKNN`](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py)             | full         | `oporp_1bit_match_topk` (HAS_INDICES=False)       |
@@ -535,7 +535,7 @@ each module runs the same op chain in pure torch (no kernels), eager.
 
 `OneBitKNN`'s masked path always compacts and uses HAS_INDICES — popcount is
 cheap enough that the gather penalty never crosses the dense-fallback
-break-even point. `SimilarityMasking`'s dense fp32 path is also kept as the
+break-even point. `PostfilterKNN`'s dense fp32 path is also kept as the
 default (no compaction) because cuBLAS + `torch.topk` already handle the
 inline-mask case at the same cost a tile-fused kernel would.
 
@@ -588,8 +588,8 @@ its cudagraph capture cleanly:
   ``d_total`` is derived from `item_bits.shape[1]` inside the body so it
   stays symbolic under `dynamic=True` (one graph across all `(B, N, W)`).
 
-The matmul-bearing references (`SimilarityMasking`, `FullScanKNN`,
-`DotProductScorer`) were tried with their own dedicated compile
+The matmul-bearing references (`PostfilterKNN`, `FullScanKNN`) were
+tried with their own dedicated compile
 wrappers and reverted — cuBLAS + CUB already win the heavy op, and the
 cudagraph capture + mandatory output clone (to escape the
 `reduce-overhead` buffer pool) cost more than they save.
@@ -617,7 +617,7 @@ correctness depends on bit identity here.
 ## SilverTorch kernels
 
 Two co-designed IVF probe + INT8 scoring kernels live in
-[`silvertorch/`](../../retrieve/src/retrieve/kernels/triton/silvertorch/),
+[`silvertorch/`](../../retrieve/src/retrieve/kernels/silvertorch/),
 selected by `SilverTorch.filter`: `codesigned_probe_score` for
 `filter ∈ {"none", "bloom"}`, `codesigned_probe_score_exact` for
 `filter="exact"`. Both power
@@ -634,7 +634,7 @@ failing the predicate get score `-inf`.
 
 ### `codesigned_probe_score` — IVF + INT8 + Bloom
 
-[`silvertorch/codesigned_probe_score.py`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py).
+[`silvertorch/codesigned_probe_score.py`](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py).
 
 The bloom intermediate (`[B, P, W]` sigs / bool match) and the
 `int8 → fp32` code cast (`[B, P, D]`) never touch HBM — they live in
@@ -668,7 +668,7 @@ and broke under `triton_op` SymInt tracing).
 
 ### `codesigned_probe_score_exact` — IVF + INT8 + exact AND-of-OR
 
-[`silvertorch/codesigned_probe_score_exact.py`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score_exact.py).
+[`silvertorch/codesigned_probe_score_exact.py`](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_exact.py).
 
 Same launch shape and IVF + INT8 scoring path as `codesigned_probe_score`;
 swaps the bloom subset test for an exact AND-of-OR attribute predicate

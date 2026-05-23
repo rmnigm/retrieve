@@ -48,16 +48,16 @@ boolean composition.
 | `FilterModule` ABC | [interfaces.py](../../retrieve/src/retrieve/interfaces.py) | three native paths: `evaluate_mask`, `evaluate_indices`, `evaluate_subset`; `forward` aliases `evaluate_mask` |
 | `ExactAttributeFilter` (exact, supports reverse) | [layers/filters/exact_attribute.py](../../retrieve/src/retrieve/layers/filters/exact_attribute.py) | `FilterModule` subclass; native `evaluate_mask` via `clause_mask` kernel; native `evaluate_indices` via `clause_compact` kernel; `evaluate_subset` via gather + broadcast |
 | `BloomFilter` (approximate, conjunctive) | [layers/filters/bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py) | `FilterModule` subclass; paper-strict (no reverse, no DSL) — `register_index` accepts an optional `clause_is_reverse` and raises `ValueError` if any entry is `True`; native `evaluate_mask` via `bloom_match` kernel; native `evaluate_indices` via `bloom_compact` kernel; `evaluate_subset` via gathered subset test. Hashes `(clause_idx, value)` pairs, **not** raw values — see ["Bloom hash keys"](#bloom-hash-keys-clause_idx-value) |
-| LiNR clause Triton kernels | [kernels/triton/filters/clause_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_compact.py), [clause_mask.py](../../retrieve/src/retrieve/kernels/triton/filters/clause_mask.py) | fused eval + stream compaction (compact); fused eval emitting `[B, N]` bool (mask). No `[B, N, C, A_max]` intermediate either way |
-| Bloom Triton kernels | [kernels/triton/silvertorch/bloom_match.py](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py), [kernels/triton/filters/bloom_compact.py](../../retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py) | `(qb & sigs) == qb` → `[B, N]` bool (match); fused subset-test + stream compaction (compact). Consumed by `BloomFilter.evaluate_mask` / `evaluate_indices` on CUDA |
-| Filter fused into SilverTorch score kernel | [kernels/triton/silvertorch/codesigned_probe_score.py](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py), [codesigned_probe_score_exact.py](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score_exact.py) | Selected by `SilverTorch.filter`. `"bloom"` → conjunctive bloom subset test (single `QB`), part of co-designed Algorithm 1; `"exact"` → exact AND-of-OR over `[N, C, A_max]` narrow attrs, same inner loop as `clause_mask` but fused into the probe-and-score path. Both are **separate paths** from the standalone `BloomFilter` / `ExactAttributeFilter`. |
+| LiNR clause Triton kernels | [kernels/filters/clause_compact.py](../../retrieve/src/retrieve/kernels/filters/clause_compact.py), [clause_mask.py](../../retrieve/src/retrieve/kernels/filters/clause_mask.py) | fused eval + stream compaction (compact); fused eval emitting `[B, N]` bool (mask). No `[B, N, C, A_max]` intermediate either way |
+| Bloom Triton kernels | [kernels/silvertorch/bloom_match.py](../../retrieve/src/retrieve/kernels/silvertorch/bloom_match.py), [kernels/filters/bloom_compact.py](../../retrieve/src/retrieve/kernels/filters/bloom_compact.py) | `(qb & sigs) == qb` → `[B, N]` bool (match); fused subset-test + stream compaction (compact). Consumed by `BloomFilter.evaluate_mask` / `evaluate_indices` on CUDA |
+| Filter fused into SilverTorch score kernel | [kernels/silvertorch/codesigned_probe_score.py](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py), [codesigned_probe_score_exact.py](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_exact.py) | Selected by `SilverTorch.filter`. `"bloom"` → conjunctive bloom subset test (single `QB`), part of co-designed Algorithm 1; `"exact"` → exact AND-of-OR over `[N, C, A_max]` narrow attrs, same inner loop as `clause_mask` but fused into the probe-and-score path. Both are **separate paths** from the standalone `BloomFilter` / `ExactAttributeFilter`. |
 | `combine_masks` / `combine_indices` | [layers/filters/__init__.py](../../retrieve/src/retrieve/layers/filters/__init__.py) | mask-AND composition; sparse cascade via `evaluate_subset` |
 
 ## Key observation: LiNR hosts *both* filter types
 
 LiNR's `forward` is decoupled from the filter — it accepts `mask: [B, N]`
 or `candidate_ids: [B, P]` as input
-([similarity_masking.py](../../retrieve/src/retrieve/layers/linr/similarity_masking.py),
+([postfilter_knn.py](../../retrieve/src/retrieve/layers/linr/postfilter_knn.py),
 [prefilter_knn.py](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py),
 [one_bit_knn.py](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py)). Any
 `FilterModule` that produces those shapes plugs in. Both
@@ -80,7 +80,7 @@ to add new fused predicate variants.
 ```python
 from retrieve import (
     BloomFilter, ExactAttributeFilter,
-    SimilarityMasking, PrefilterKNN, OneBitKNN,
+    PostfilterKNN, PrefilterKNN, OneBitKNN,
     combine_indices, combine_masks,
 )
 
@@ -90,9 +90,9 @@ ef.register_index(item_attrs, clause_is_reverse=is_reverse)
 bf = BloomFilter(m_bits=1024, k_hash=5, backend="triton").to("cuda")
 bf.register_index(item_attrs)
 
-# Mask path — combine exact + approximate, feed SimilarityMasking / OneBitKNN.
+# Mask path — combine exact + approximate, feed PostfilterKNN / OneBitKNN.
 mask = combine_masks(ef.evaluate_mask(qa), bf.evaluate_mask(qa))
-ids, scores = similarity_masking(query, mask=mask)
+ids, scores = postfilter_knn(query, mask=mask)
 
 # Candidate-id path — sparse cascade (most-selective filter first), feed PrefilterKNN.
 cand_ids, counts = combine_indices([ef, bf], [qa, qa])
@@ -114,10 +114,10 @@ collision. The salt is shared between item-side `register_index` and
 query-side `_build_query_sigs`, so the subset test is symmetric. No
 runtime cost worth measuring (one extra elementwise XOR inside an already
 chunked loop) and zero kernel impact —
-[`bloom_match`](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py),
-[`bloom_compact`](../../retrieve/src/retrieve/kernels/triton/filters/bloom_compact.py),
+[`bloom_match`](../../retrieve/src/retrieve/kernels/silvertorch/bloom_match.py),
+[`bloom_compact`](../../retrieve/src/retrieve/kernels/filters/bloom_compact.py),
 and the bloom branch of
-[`codesigned_probe_score`](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py)
+[`codesigned_probe_score`](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py)
 all consume opaque `[N, W]` / `[B, W]` int64 buffers and are unchanged.
 
 **Index vs query build paths.** The item index goes through

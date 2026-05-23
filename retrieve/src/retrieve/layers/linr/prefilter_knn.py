@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 
-from retrieve.interfaces import Backend, RetrievalModule
-from retrieve.kernels.triton.linr.fused_masked_knn_topk import fused_masked_knn_topk
+from retrieve.interfaces import Backend
+from retrieve.kernels.linr.fused_masked_knn_topk import fused_masked_knn_topk
 
 
-class PrefilterKNN(RetrievalModule):
+class PrefilterKNN(nn.Module):
     """Sparse-rescore KNN with selectable backend.
 
     Sparse path: takes ``candidate_ids: [B, P]`` (passing item ids per query)

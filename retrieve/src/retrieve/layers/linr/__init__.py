@@ -1,7 +1,7 @@
 """LiNR retrieval layers.
 
 **Precision contract.** All three layers accept ``item_embs`` and ``query`` as
-either ``torch.float32`` or ``torch.float16``. ``SimilarityMasking`` and
+either ``torch.float32`` or ``torch.float16``. ``PostfilterKNN`` and
 ``PrefilterKNN`` cast inputs to fp16 internally — storage is fp16 (paper-
 faithful, §6.1 of the LiNR paper: *"embedding dimension is 128, stored as
 fp16"*) and PyTorch matmul / bmm + the fused Triton kernel both accumulate the
@@ -13,14 +13,14 @@ Callers that want strict-fp32 numerics for a parity comparison should run the
 oracle directly (``evaluation/retrieval/oracle.py``) — it explicitly upcasts.
 """
 
-from retrieve.layers.linr.int8_similarity_masking import Int8SimilarityMasking
 from retrieve.layers.linr.one_bit_knn import OneBitKNN
+from retrieve.layers.linr.postfilter_knn import PostfilterKNN
+from retrieve.layers.linr.postfilter_knn_int8 import PostfilterKNNInt8
 from retrieve.layers.linr.prefilter_knn import PrefilterKNN
-from retrieve.layers.linr.similarity_masking import SimilarityMasking
 
 __all__ = [
-    "Int8SimilarityMasking",
     "OneBitKNN",
+    "PostfilterKNN",
+    "PostfilterKNNInt8",
     "PrefilterKNN",
-    "SimilarityMasking",
 ]

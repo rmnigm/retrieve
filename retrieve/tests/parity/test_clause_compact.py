@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.kernels.triton.filters.clause_compact import (
+from retrieve.kernels.filters.clause_compact import (
     ClauseCompactConfig,
     _clause_compact_impl,
     clause_compact,
