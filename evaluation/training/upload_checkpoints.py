@@ -24,7 +24,7 @@ from __future__ import annotations
 import click
 from loguru import logger
 
-from data.hf_io import EVAL_REPOS, ckpt_dir, eval_dir, upload_checkpoint
+from datasets.hf_io import EVAL_REPOS, ckpt_dir, eval_dir, upload_checkpoint
 
 
 def _resolve_ckpt_ids(dataset: str, selector: str) -> list[str]:

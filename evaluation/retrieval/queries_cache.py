@@ -1,7 +1,8 @@
 """Disk cache for the SASRec encode pass.
 
-``run_per_algo.sh`` spawns one ``evaluate`` subprocess per algo in a
-config. Without this cache each subprocess would re-encode every query
+``retrieval.cli.run_evaluation`` (``uv run run-evaluation``) spawns one
+``evaluate`` subprocess per algo in a config. Without this cache each
+subprocess would re-encode every query
 from scratch (~1–2 min on goodreads' 313k users). Arxiv configs have
 no checkpoint so they bypass the cache — their embeddings are already
 disk-resident via ``load_pre_encoded_arxiv``.

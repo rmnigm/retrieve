@@ -5,41 +5,41 @@ description = "Training and evaluation for retrieve framework"
 requires-python = ">=3.10"
 dependencies = [
     "retrieve",
+    "torch>=2.4,<3",
+    "polars>=1.0",
+    "pyarrow>=15",
+    "tqdm>=4.66",
     "click>=8.1",
-    "datasets>=3.0",
     "huggingface-hub>=0.24",
     "loguru>=0.7",
     "numpy>=1.26",
-    "polars>=1.0",
-    "pyarrow>=15",
     "pyyaml>=6.0",
-    "torch>=2.4,<3",
     "torchvision>=0.19,<1",
-    "tqdm>=4.66",
     "wandb>=0.16",
-    "voyager>=2.1.0",
     "sentence-transformers>=3.0",
     "einops>=0.7",
+    "matplotlib>=3.8",
 ]
 
 [project.scripts]
-evaluate                = "retrieval.evaluate:main"
-evaluate-voyager        = "retrieval.voyager.evaluate:main"
-yambda                  = "data.yambda:main"
-arxiv                   = "data.arxiv:main"
-goodreads               = "data.goodreads:main"
+evaluate                = "retrieval.cli.evaluate:main"
+run-evaluation          = "retrieval.cli.run_evaluation:main"
+stage-results           = "retrieval.cli.stage_results:main"
+upload-results          = "retrieval.cli.upload_results:main"
+yambda                  = "datasets.yambda:main"
+arxiv                   = "datasets.arxiv:main"
+goodreads               = "datasets.goodreads:main"
 upload-checkpoints      = "training.upload_checkpoints:main"
-eval-fetch              = "data.hf_io:fetch_cli"
-eval-publish            = "data.hf_io:publish_cli"
-eval-publish-checkpoint = "data.hf_io:publish_checkpoint_cli"
-tune-kernels           = "scripts.tune_kernels:main"
+eval-fetch              = "datasets.hf_io:fetch_cli"
+eval-publish            = "datasets.hf_io:publish_cli"
+eval-publish-checkpoint = "datasets.hf_io:publish_checkpoint_cli"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["data", "retrieval", "training", "scripts"]
+packages = ["datasets", "retrieval", "training"]
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
@@ -59,4 +59,4 @@ target-version = "py310"
 select = ["E", "W", "F", "I", "UP"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["data", "training", "retrieval", "retrieve"]
+known-first-party = ["datasets", "training", "retrieval", "retrieve"]

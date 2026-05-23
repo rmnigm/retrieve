@@ -85,7 +85,7 @@ def _load_sharded_text_emb(
 ) -> torch.Tensor:
     """Reassemble ``content/text_emb_shard_*.pt`` into one ``[N+1, D]`` tensor.
 
-    Synth catalogs from ``evaluation/data/synth_arxiv.py`` write the item
+    Synth catalogs from ``evaluation/datasets/synth_arxiv.py`` write the item
     embeddings sharded so the per-file size stays under torch's implicit
     serialization ceilings; the sidecar ``shard_index.json`` lists shard
     offsets and lengths.

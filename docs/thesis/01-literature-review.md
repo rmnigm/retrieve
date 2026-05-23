@@ -62,8 +62,7 @@ retrieval (LiNR, SilverTorch, Merlin), (б) классических ANN-алг�
 
 **Содержание раздела.** Здесь систематизируются «model-free» индексы, с которыми сравнивается
 model-based retrieval: квантизационные (PQ, IVF/PQ), графовые (HNSW, DiskANN) и гибридные
-(IVF+PQ). Особое внимание уделяется HNSW, поскольку он используется как CPU-baseline в
-[`evaluation/retrieval/algos/voyager.py`](../../evaluation/retrieval/algos/voyager.py).
+(IVF+PQ). HNSW рассматривается как доминирующий графовый ANN в обзоре литературы.
 
 **Ключевые ссылки:**
 - Jégou, Douze, Schmid 2011 — *Product Quantization for Nearest Neighbor Search* — основа
@@ -93,8 +92,6 @@ n_probe и кастомизируемости фильтров. Эти огра�
 - Nolet 2023 — *Reusable Computational Patterns for ML and IR with RAPIDS RAFT* (NVIDIA blog).
 - Zhao, Tan, Li 2022 — *Constrained Approximate Similarity Search on Proximity Graph* —
   filtered HNSW, релевантно нашему filter benchmark.
-- Spotify Engineering 2023 — *Introducing Voyager: Spotify's New Nearest-Neighbor Search
-  Library* — фактический CPU-baseline в [`voyager.py`](../../evaluation/retrieval/algos/voyager.py).
 - Pinterest 2023 — *Manas HNSW Realtime: Powering Realtime Embedding-Based Retrieval* (блог).
 - *Faiss on the GPU — Limitations* (FAISS Wiki) и *Milvus GPU Index Limitations* (docs) —
   фиксация ограничений top-k и probe, мотивирующих собственный Triton-стек.
@@ -310,7 +307,6 @@ filter sweep matrix в Goodreads/ArXiv (см. [`docs/system/filtering.md`](../sy
 | Wang et al. — *Milvus* | SIGMOD | 2021 | **[S]** Vector database. |
 | Zhao, Tan, Li — *SONG* | ICDE | 2020 | **[L]** ANN на GPU. |
 | Nolet — *RAPIDS RAFT* | NVIDIA dev blog | 2023 | **[L]** GPU primitives. |
-| Spotify — *Voyager: Spotify's NN Search Library* | Spotify Engineering blog + GitHub | 2023 | **[+]** CPU-baseline в [`voyager.py`](../../evaluation/retrieval/algos/voyager.py). |
 | Pinterest — *Manas HNSW Realtime* | Pinterest blog | 2023 | **[S]** Production HNSW. |
 | Pace et al. — *Lance* | arXiv:2504.15247 | 2025 | **[S]** Columnar storage с random access. |
 

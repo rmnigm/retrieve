@@ -2,7 +2,7 @@
 
 Library entrypoint:
 
-    from data.yambda import preprocess
+    from datasets.yambda import preprocess
 
 CLI (replaces the old `scripts/prep_yambda.py`):
 
@@ -117,7 +117,7 @@ def concat_then_tail(history: pl.Expr, more: pl.Expr, n: int) -> pl.Expr:
 def cmd_prep(args) -> int:
     from loguru import logger
 
-    from data.hf_io import download_raw_file
+    from datasets.hf_io import download_raw_file
 
     output = Path(args.output_dir).expanduser()
     output.mkdir(parents=True, exist_ok=True)

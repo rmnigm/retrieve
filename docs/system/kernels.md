@@ -47,9 +47,9 @@ All kernels follow the same conventions:
   `config=<Kernel>Config(...)`; for `@custom_op`-wrapped kernels the
   override goes to the private `_<name>_impl(..., config=)` companion
   (the public op has a fixed schema and always uses `DEFAULT_CONFIG`).
-  The `evaluation/scripts/tune_kernels.py` CLI sweeps the candidate
-  grid on a given arch and prints the line to paste into the kernel
-  file. The same convention applies uniformly across linr, filter, and
+  The `tune-kernels` CLI (shipped with the library at
+  `retrieve.tune:main`) sweeps the candidate grid on a given arch and
+  prints the line to paste into the kernel file. The same convention applies uniformly across linr, filter, and
   silvertorch kernels — see [Autotune separation](#autotune-separation)
   below for the rationale.
 - Graph-break behavior. Every host wrapper in this tree is decorated
@@ -102,13 +102,15 @@ The shipped pattern, applied uniformly to every kernel in this tree:
    `torch.export`'s kernel registry walks to preserve the kernel
    reference. The schema doesn't carry the dataclass either way; tests
    and the tuner reach `_impl` directly to pass an override.
-5. Tuning is offline: `evaluation/scripts/tune_kernels.py` (`uv run
-   tune-kernels --kernel <name>`) sweeps a hard-coded `(block_n,
-   num_warps)` grid against a hard-coded shape regime list mirroring
-   real-eval workloads (catalog sizes read from
+5. Tuning is offline: `retrieve/src/retrieve/tune.py` (`uv run
+   tune-kernels <kernel-subcommand>`) sweeps a hard-coded `(block_n,
+   num_warps)` grid against a built-in shape regime list mirroring
+   real-eval workloads (catalog sizes from
    `evaluation/data/<dataset>/item_attrs_narrow.pt`, batch sizes from
-   `evaluation/retrieval/config.py`). Picks one default per arch via
-   plurality vote across regime winners; emits a pasteable
+   `evaluation/retrieval/config.py`). Filter-kernel subcommands also
+   accept repeatable `--regime N,B,C,A_MAX` (or `N,B,W`) flags so
+   end-users can tune for their own catalog shapes. Picks one default
+   per arch via plurality vote across regime winners; emits a pasteable
    `DEFAULT_CONFIG = ...` line. Re-run once per new arch; commit the
    line.
 
@@ -229,7 +231,7 @@ pre-fill kernel launch.
 **Tile config.** `FusedMaskedKnnTopkConfig(block_n, num_warps,
 num_stages)` — shipped as `DEFAULT_CONFIG` on the kernel module; pass
 `config=` to override. Re-tune on a new arch via `uv run tune-kernels
---kernel fused_masked_knn_topk` and paste the printed
+fused-masked-knn-topk` and paste the printed
 `DEFAULT_CONFIG = ...` line.
 
 **Bucketing.** `P` is rounded up via `_bucket_p` to one of `{256, 2048,
@@ -283,7 +285,7 @@ candidate-set rerank and for the masked V3 path (after `compact_mask`).
 **Tile config.** `Oporp1BitMatchTopkConfig(block_n, num_warps,
 num_stages)` — shipped as `DEFAULT_CONFIG` on the kernel module; pass
 `config=` to override. Re-tune on a new arch via `uv run tune-kernels
---kernel oporp_1bit_match_topk`.
+oporp-1bit-match-topk`.
 
 **Bucketing.** For the `HAS_INDICES=True` path, the score-buffer
 width is `n_kernel = max(_bucket_n(positive_indices.shape[1]),
@@ -353,7 +355,7 @@ sort.
 **Tile config.** `ClauseCompactConfig(block_n, num_warps, num_stages)`
 — shipped as `DEFAULT_CONFIG` on the kernel module; tests/tuner override
 via `_clause_compact_impl(..., config=)`. Re-tune on a new arch via
-`uv run tune-kernels --kernel clause_compact`. The `@triton.autotune`
+`uv run tune-kernels clause-compact`. The `@triton.autotune`
 hazard around `tl.atomic_add` accumulating across trials does **not**
 apply to the offline tuner — see [Autotune separation](#autotune-separation).
 
@@ -387,7 +389,7 @@ no cumsum, no atomics.
 **Tile config.** `ClauseMaskConfig(block_n, num_warps, num_stages)` —
 shipped as `DEFAULT_CONFIG` on the kernel module; tests/tuner override
 via `_clause_mask_impl(..., config=)`. Re-tune on a new arch via
-`uv run tune-kernels --kernel clause_mask`.
+`uv run tune-kernels clause-mask`.
 
 ## `bloom_match` — Bloom subset test
 
@@ -500,7 +502,7 @@ consume the *set*, not the order.
 **Tile config.** `BloomCompactConfig(block_n, num_warps, num_stages)` —
 shipped as `DEFAULT_CONFIG`; tests/tuner override via
 `_bloom_compact_impl(..., config=)`. Re-tune via `uv run tune-kernels
---kernel bloom_compact`. The atomic-add hazard around in-kernel autotune
+bloom-compact`. The atomic-add hazard around in-kernel autotune
 is real but does not affect the offline tuner — see
 [Autotune separation](#autotune-separation). `qb` is built host-side via
 `_build_signatures`; folding it into the kernel adds register pressure
@@ -651,8 +653,8 @@ The launch grid is `(cdiv(P, BLOCK_P), B)` — tile axis on **grid_x**
 on grid_y/grid_z at large catalogs. **Tile config.**
 `CodesignedProbeScoreConfig(block_p, num_warps, num_stages)` — shipped
 as `DEFAULT_CONFIG` on the kernel module; pass `config=` to override.
-Re-tune on a new arch via `uv run tune-kernels --kernel
-codesigned_probe_score`. `P = n_probe * max_cluster_size` is fixed per
+Re-tune on a new arch via `uv run tune-kernels
+codesigned-probe-score`. `P = n_probe * max_cluster_size` is fixed per
 registered SilverTorch index, so no bucketing is needed; `HAS_QB`
 remains a body-level constexpr (the bloom-on and bloom-off paths still
 JIT-specialise on it). Score buffer is `torch.empty([B, P])` — every
@@ -688,7 +690,7 @@ fixed per registered SilverTorch index, so no bucketing.
 **Tile config.** `CodesignedProbeScoreExactConfig(block_p, num_warps,
 num_stages=3)` — shipped as `DEFAULT_CONFIG` on the kernel module;
 default `block_p=256, num_warps=4` mirrors the `codesigned_probe_score`
-A100 tuning. Pass `config=` to override. Re-tune on a new arch via
-`uv run tune-kernels --kernel codesigned_probe_score_exact`. Score
+A100 tuning. Pass `config=` to override. Re-tune (it mirrors the
+regular variant) via `uv run tune-kernels codesigned-probe-score`. Score
 buffer is `torch.empty([B, P])` — same convention as
 `codesigned_probe_score`, no pre-fill kernel.
