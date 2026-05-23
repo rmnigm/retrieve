@@ -4,34 +4,19 @@ _defaults: &defaults
   split: test
   device: cuda
   ks: [100, 200, 400]
-  batch_sizes: [1, 4, 8, 16]
+  batch_sizes: [1]
   seed: 0
   encode:
     batch_size: 512
     num_workers: 8
     max_seq_length: 200
   algorithms:
-    - torch_knn
-    - triton_knn
-    - linr_v3
+    - linr_v1_filter_mask
+    - linr_v4
     - silvertorch
-  # 5B Listen+ catalog is order-of-magnitude larger than 500M; clustering knobs
-  # tuned to ~sqrt(N) heuristic with N assumed mid-tens-of-millions. Sweep
-  # ranges scaled up accordingly. Each algo's params block is a list of
-  # dicts; each dict is one explicit (n_lists, n_probe) combo.
-  algo_params:
-    linr_v3:
-      - {candidate_pool: 1000, v3_seed: 0}
-      - {candidate_pool: 2500, v3_seed: 0}
-      - {candidate_pool: 5000, v3_seed: 0}
-      - {candidate_pool: 10000, v3_seed: 0}
-    silvertorch:
-      # Recall curve — Layout A (n_lists≈√N, paper-faithful, ~2440-item clusters).
-      - {n_lists: 4096,  n_probe: 16,  n_iter: 10, seed: 0}  # P≈39k
-      - {n_lists: 4096,  n_probe: 64,  n_iter: 10, seed: 0}  # P≈156k
-      - {n_lists: 4096,  n_probe: 256, n_iter: 10, seed: 0}  # P≈625k
-      # CUDA-edge point — Layout B (n_lists=16384, ~610-item clusters).
-      - {n_lists: 16384, n_probe: 16,  n_iter: 10, seed: 0}  # P≈10k
+    - linr_v3
+
+  backends: [triton, torch]
 
 <<: *defaults
 checkpoint: data/yambda-5b/checkpoints/gsasrec-d64/best_model.pt
