@@ -32,7 +32,7 @@ class Oporp1BitMatchTopkConfig:
 
 
 # Single default the library ships with. Re-tune on a new arch by
-# running ``evaluation/scripts/tune_kernels.py`` and pasting the
+# running ``uv run tune-kernels oporp-1bit-match-topk`` and pasting the
 # resulting line in. Callers who want a different tile config pass
 # ``config=`` through to the wrapper.
 # Tuned on A100 (sm_80): block_n=512 dominates at N >= 65k (5/8 regimes);

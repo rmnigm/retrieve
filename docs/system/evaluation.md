@@ -34,11 +34,6 @@ pass is cached on disk by
 (``<ckpt-dir>/encoded_queries_<split>.pt``, keyed on ckpt mtime and
 ``max_seq_length``), so the N subprocesses don't pay N × encode cost.
 
-The CPU quality baseline ([voyager HNSW](../../evaluation/retrieval/voyager/))
-lives in its own subpackage with its own CLI
-([`evaluate-voyager`](#cpu-quality-baseline-evaluate-voyager)) and is
-NOT subject to the per-algo loop — it writes its own single JSON.
-
 It dispatches by config shape across three datasets:
 
 | Config shape                              | Mode                                   |
@@ -83,9 +78,6 @@ evaluation/retrieval/
 │   ├── linr_v4.py             # LinrV4Algo — single-stage int8 dense (Int8SimilarityMasking)
 │   ├── silvertorch.py         # SilvertorchAlgo — IVF + INT8 + (none / bloom / exact) filter
 │   └── torch_knn.py           # TorchKnnAlgo — FullScanKNN reference
-├── voyager/                   # CPU quality baseline, separate CLI
-│   ├── baseline.py            # VoyagerHNSW (voyager.Index wrapper)
-│   └── evaluate.py            # `evaluate-voyager` driver
 ├── bench_tools.py             # encode_queries, quality_pass_cached, perf_pass_cached
 ├── config.py                  # EvalConfig dataclass + yaml loader
 ├── hf_io.py                   # HF download / upload helpers + console scripts
@@ -95,8 +87,7 @@ evaluation/conf/
 ├── 500m/d{64,128,256}-quality.yaml                # 500M Listen+, SASRec checkpoints
 ├── 5b/d{64,128}-quality.yaml                      # 5B Listen+, SASRec checkpoints
 ├── arxiv/d{64,128,256}-{quality,filter}.yaml      # arxiv, nomic-embed-text-v1.5
-├── goodreads/d{64,128,256}-{quality,filter}.yaml  # goodreads filter+quality bench
-└── voyager/{yambda-500m,goodreads,arxiv}-d{64,128,256}.yaml  # voyager-only CPU baseline
+└── goodreads/d{64,128,256}-{quality,filter}.yaml  # goodreads filter+quality bench
 ```
 
 ## Configuration
@@ -160,7 +151,7 @@ filter API.
 | `data_dir` | path | Holds `item_id_map.json`, `<split>.parquet`, optional `eval_split.parquet` + filter attrs. |
 | `content_subdir` | str | Subdir under `data_dir` for `{text_emb,query_emb}.pt` + meta sidecars (arxiv only). Defaults to `content`. Arxiv ships `content_d64`, `content_d128`, `content` (= d=256). |
 | `gt_subdir` | str | Subdir under `data_dir` for `gt_topk_<sweep>.pt` oracle caches. Default `gt`. Must vary with `content_subdir` (oracle scores depend on `item_embs` which depend on dim) — set per-yaml when running multiple dims off the same `data_dir`. |
-| `output` | dir path | Directory that holds the per-algo JSONs written by `evaluate`. `run_per_algo.sh` reads it and creates `<output>/<algo>.json` per algo. The voyager CLI still writes a single JSON file at its `output` path (see [voyager configs](#cpu-quality-baseline-evaluate-voyager)). |
+| `output` | dir path | Directory that holds the per-algo JSONs written by `evaluate`. `run_per_algo.sh` reads it and creates `<output>/<algo>.json` per algo. |
 | `split` | str | `test` (default) or `val`. |
 | `device` | str | `cuda` (only meaningful value today). |
 | `ks` | list[int] | K-cutoffs to evaluate. Each emits `recall@K`, `ndcg@K` on its own row. |
@@ -237,10 +228,6 @@ cell.
 | `linr_v4` | [`LinrV4Algo`](../../evaluation/retrieval/algos/linr_v4.py) | Single-stage int8 dense + optional mask + topk via `Int8SimilarityMasking`. `torch._int_mm` (int8×int8 → int32, IMMA on Ampere+) directly to `torch.topk` with no scale recovery (global per-tensor scale is rank-preserving). Twin of `triton_knn`/`linr_v1_filter_mask` at int8 storage; ≥0.99 recall on unit-norm embeddings at D=128. |
 | `silvertorch` | [`SilvertorchAlgo`](../../evaluation/retrieval/algos/silvertorch.py) | IVF + INT8 ANN with `SilverTorch.filter` selected per `filter_kind`: `"bloom"` → bloom-fused IVF (codesigned `codesigned_probe_score`, item signatures over narrow attrs baked in at register time); `"clause"` → exact-AND-of-OR-fused IVF (codesigned `codesigned_probe_score_exact`, narrow attrs baked in); `"none"` → plain IVF + INT8. All three modes routed through the same algo class. |
 
-The CPU quality baseline (`voyager_hnsw`, Spotify HNSW via `voyager.Index`)
-is **not** in this registry — it lives in its own subpackage with its own
-CLI; see [CPU quality baseline](#cpu-quality-baseline-evaluate-voyager) below.
-
 `make_mask(filter_mod, qa_narrow)` (in [`algos/filter.py`](../../evaluation/retrieval/algos/filter.py))
 is the one-line helper most algos call: it routes per-batch query attrs
 through `filter_mod.evaluate_mask`, then forces the padding-row sentinel
@@ -278,28 +265,21 @@ shapes are detected and recomputed.
 ### Perf pass
 
 The perf pass measures the index forward in isolation, on the device the
-algorithm lives on. It is split between two primitives:
-
-- **`measure_forward_cuda`** (the GPU path): runs `WARMUP_ITERS=20`
-  calls to settle Triton autotune and JIT, then takes a clean
-  `torch.cuda.max_memory_allocated()` window over `mem_reps=5` calls
-  (without `do_bench`'s 256 MiB L2-buster polluting peak), then times via
-  `triton.testing.do_bench(rep=200ms, warmup=50)`.
-  Returns `(median_ms, p20_ms, p80_ms, peak_mib, transient_mib)`.
-- **`measure_forward_cpu`** (the CPU path; no current caller in the main
-  driver — the voyager baseline runs through its own quality-only CLI
-  which doesn't need perf timing): 3 warmup calls, then a
-  `time.perf_counter` loop within a 200 ms budget. Returns the same
-  tuple shape with peak/transient = 0.
+algorithm lives on, via **`measure_forward_cuda`**: it runs
+`WARMUP_ITERS=20` calls to settle Triton autotune and JIT, then takes a
+clean `torch.cuda.max_memory_allocated()` window over `mem_reps=5` calls
+(without `do_bench`'s 256 MiB L2-buster polluting peak), then times via
+`triton.testing.do_bench(rep=200ms, warmup=50)`. Returns
+`(median_ms, p20_ms, p80_ms, peak_mib, transient_mib)`.
 
 ### Multi-query pool — why p20/p80 are over queries
 
 The perf pass times against a **fixed-seed pool of `n_pool=4096` query
 batches**, round-robin'd into the timed function. This matters for
-IVF-style algorithms (`silvertorch`) and graph-walk ANN (`voyager_hnsw`)
-where a single fixed query collapses p20/p80 to one cluster's traversal
-cost — degenerate percentiles. With the pool, p20/p80 reflect query
-diversity (the intended workload variance), not CUDA scheduling jitter.
+IVF-style algorithms (`silvertorch`) where a single fixed query collapses
+p20/p80 to one cluster's traversal cost — degenerate percentiles. With
+the pool, p20/p80 reflect query diversity (the intended workload
+variance), not CUDA scheduling jitter.
 
 The pool itself is built per `(algo, params, k, bs)` cell:
 
@@ -411,13 +391,6 @@ Arxiv filter bench:
 ./run_per_algo.sh conf/arxiv/d256-filter.yaml
 ```
 
-CPU quality baseline (voyager HNSW) — separate CLI, see
-[CPU quality baseline](#cpu-quality-baseline-evaluate-voyager) below:
-
-```bash
-uv run evaluate-voyager --config conf/voyager/yambda-500m-d128.yaml
-```
-
 One filter cell only (faster iteration):
 
 ```bash
@@ -436,66 +409,6 @@ uv run evaluate \
    same `(algo, params, k)` cell.
 3. Two reruns with the same seed: quality columns byte-identical;
    latency columns within ~5%.
-4. Cross-check against the voyager CPU baseline:
-   `evaluate-voyager`'s `recall@K` should land within ~2 pp of
-   `silvertorch` at comparable approximation settings (`m`/`ef_query`
-   vs `n_lists`/`n_probe`).
-
-## CPU quality baseline: `evaluate-voyager`
-
-Voyager HNSW is the only CPU baseline in the bench. It runs in its own
-subpackage with its own CLI because folding it into the unified GPU
-driver bought nothing: it shares no kernels, has its own timing path,
-doesn't participate in filter sweeps, and forced every cell to carry
-an `is_cpu` branch.
-
-```bash
-uv run evaluate-voyager --config conf/voyager/yambda-500m-d128.yaml
-uv run evaluate-voyager --config conf/voyager/goodreads-d128.yaml
-uv run evaluate-voyager --config conf/voyager/arxiv-d128.yaml
-```
-
-The CLI reuses the `EvalConfig` schema and the same
-`load_item_and_queries` / `quality_pass_cached` helpers as the main
-driver — only the sweep machinery is bespoke. Configs declare a single
-`voyager_hnsw` entry under `algo_params:`; the script iterates the
-cross-product of `algo_params.voyager_hnsw × ks` and emits one row per
-combo. No `algorithms:` / `backends:` / `batch_sizes:` / `filters:`
-needed.
-
-Example config — yambda 500M, d=128:
-
-```yaml
-data_dir: data/yambda-500m
-output: results/voyager/yambda-500m-d128.json
-split: test
-device: cuda                   # for SASRec query encoding; the HNSW itself is CPU
-ks: [100, 200, 400]
-seed: 0
-encode:
-  batch_size: 512
-  num_workers: 8
-  max_seq_length: 200
-algo_params:
-  voyager_hnsw:
-    - {m: 32, ef_construction: 200, ef_query: 1000, num_threads: 16, seed: 0}
-checkpoint: data/yambda-500m/checkpoints/gsasrec-d128-drop0.5/best_model.pt
-```
-
-Output schema is slim (no `batch_size`, `median_ms`, `peak_mem_mib`,
-`backend`, `filter_kind`, `sweep` — none apply to a quality-only CPU
-sweep). Each row has `suite: "voyager"`, `impl: "voyager_hnsw"`,
-`device: "cpu"`, `seed`, `k`, `n_users`, `recall@<k>`, `ndcg@<k>`, and
-`extra.params`. Plotting code that unions the voyager JSON with the
-main `evaluate.json` should treat missing fields as not-applicable.
-
-Configs ship for yambda 500m × {d64, d128, d256}, goodreads × {d64,
-d128, d256}, arxiv × {d64, d128, d256} — nine total. 5B is omitted
-because HNSW build is prohibitively long at that scale; the 5B configs
-in `conf/5b/` likewise never listed voyager. Filter sweeps are not
-covered: the filter-aware `VoyagerHNSWAlgo` wrapper from before this
-refactor would post-filter via mask gather, but the user-facing point
-of voyager in this bench is the unfiltered-quality baseline.
 
 ## Extending
 
@@ -530,11 +443,10 @@ of voyager in this bench is the unfiltered-quality baseline.
 ### Add a new config (new checkpoint)
 
 Copy an existing YAML, update `checkpoint:` (or `query_emb_path:`) and
-any catalog-size-driven knobs (`silvertorch.n_lists/n_probe`). For a
-matching voyager CPU baseline, also drop a YAML into `conf/voyager/`
-(set `voyager_hnsw.m/ef_construction/ef_query`). The model loader reads
-hyperparams from `<ckpt-dir>/config.json`, so the YAML never carries
-`embedding_dim` etc. (legacy 500M checkpoints without `config.json`
+any catalog-size-driven knobs (`silvertorch.n_lists/n_probe`). The model
+loader reads hyperparams from `<ckpt-dir>/config.json`, so the YAML
+never carries `embedding_dim` etc. (legacy 500M checkpoints without
+`config.json`
 get the `D128_DROP05_DEFAULTS` fallback in
 [`bench_tools.py`](../../evaluation/retrieval/bench_tools.py)).
 

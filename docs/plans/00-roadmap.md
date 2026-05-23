@@ -19,11 +19,13 @@ Shipped: every in-scope kernel now exposes a `<Name>Config` dataclass +
 next to the `@triton.jit` body. The `@custom_op`-wrapped kernels
 delegate to a private `_<name>_impl(..., *, config=None)` so the public
 op keeps its fixed schema. Offline tuning via
-[evaluation/scripts/tune_kernels.py](../../evaluation/scripts/tune_kernels.py)
-(`uv run tune-kernels --kernel <name>`) sweeps a hard-coded grid on
+[retrieve/src/retrieve/tune.py](../../retrieve/src/retrieve/tune.py)
+(`uv run tune-kernels <kernel-subcommand>`) sweeps a hard-coded grid on
 real-eval shapes (read from `evaluation/data/<dataset>/item_attrs_narrow.pt`
 + `evaluation/retrieval/config.py`) and emits a pasteable
-`DEFAULT_CONFIG = ...` line. Covered: `clause_mask`, `clause_compact`,
+`DEFAULT_CONFIG = ...` line. The filter-kernel subcommands also accept
+repeatable `--regime N,B,C,A_MAX` / `--regime N,B,W` flags so downstream
+consumers can re-tune against their own catalog shapes. Covered: `clause_mask`, `clause_compact`,
 `bloom_compact`, `fused_masked_knn_topk`, `oporp_1bit_match_topk`,
 `codesigned_probe_score`, `codesigned_probe_score_exact`. (`bloom_match`
 retains its hard-coded tile — the per-call width is dictated by `N`.)
@@ -58,7 +60,7 @@ Stages 1+2 subsumed the big-lever items (the `counts.max().item()` host sync acr
 
 ## Later (deferred behind the main thread)
 
-- [torch-export-refactor.md](torch-export-refactor.md) — the broader plan to make every linr kernel + layer `torch.export`-ready. **Significantly shrunk after Stages 1+2 (2026-05-23 reassessment).** All kernel-side work (Configs, `triton_op`/`custom_op` + `register_fake`, full-width `(ids, counts)` API, no `.item()` on host) shipped as a side effect of Stages 1+2; the `_build_query_signatures_compiled` / `_project_oporp_1bit_query_compiled` wrappers the original plan needed to bypass were deleted entirely; `oporp_1bit_match_topk` is now two custom_ops (`_full` + `_indirect`) which is the export-level mode shape. **Remaining: ~1 PR** — `mode: Literal[...]` flag on `PrefilterKNN` and `OneBitKNN`, algo wiring, `evaluation/retrieval/build_export.py` scaffold. See [the doc's "Remaining work — consolidated" section](torch-export-refactor.md#remaining-work--consolidated-single-pr-2026-05-23). AOTI wiring (`torch>=2.5` + `aoti_compile_and_package`) stays a separate later effort. Revisit when there's a concrete consumer for `.pt2` artifacts.
+- [torch-export-refactor.md](torch-export-refactor.md) — the broader plan to make every linr + silvertorch kernel + layer `torch.export`-ready. **Significantly shrunk after Stages 1+2+2b (2026-05-23 reassessment).** All kernel-side work (Configs, `triton_op`/`custom_op` decoration, full-width `(ids, counts)` API, no `.item()` on host, host-side `pad` tail eliminated) shipped as a side effect of Stages 1+2+2b. The `_build_query_signatures_compiled` / `_project_oporp_1bit_query_compiled` wrappers the original plan needed to bypass were deleted entirely; `oporp_1bit_match_topk` is now two custom_ops (`_full` + `_indirect`); `codesigned_probe_score` is now two `triton_op`s (`_probe_score` + `_probe_score_bloom`) plus the separate `_exact` variant. **Remaining: 1–2 PRs** — `mode: Literal[...]` flag on `PrefilterKNN` and `OneBitKNN`, sibling-method `forward_*` per filter mode on `SilverTorch` (plus `forward_candidates` extraction), algo wiring across the three algos, `evaluation/retrieval/build_export.py` scaffold. See [the doc's "Remaining work — consolidated" section](torch-export-refactor.md#remaining-work--consolidated-2026-05-23). AOTI wiring (`torch>=2.5` + `aoti_compile_and_package`) and `ShardedSilverTorch` stay separate later efforts. Revisit when there's a concrete consumer for `.pt2` artifacts.
 - [live-update-api.md](live-update-api.md) — upsert/delete API for V1/V2/V3 + filters. Standalone feature work, independent of stages 1-3 (no kernel surgery; just a `LiveIndexMixin` on the layers).
 - [yambda-hf-migration.md](yambda-hf-migration.md) — data migration, blocked on a host with the yambda data + checkpoints locally. Code is already in place.
 
@@ -66,4 +68,4 @@ Stages 1+2 subsumed the big-lever items (the `counts.max().item()` host sync acr
 
 ## Cleanup status
 
-Cleanup tasks finished as of 2026-05-22: the prototype custom_op migration doc, the per-item research doc, and the deferred mask-compact-kernel doc have all been deleted (subsumed by the active plans above and the system docs). The `torch-export-refactor.md` plan's per-phase bodies are preserved as historical execution briefs; the 2026-05-23 status block at the top of that doc supersedes them — Phases 1 and 2 are fully shipped, Phases 4 and 5 have their kernel work shipped (only layer-side `mode` flag and `build_export.py` scaffold remain), Phase 3 is permanently stubbed out (silvertorch).
+Cleanup tasks finished as of 2026-05-22: the prototype custom_op migration doc, the per-item research doc, and the deferred mask-compact-kernel doc have all been deleted (subsumed by the active plans above and the system docs). The `torch-export-refactor.md` plan's per-phase bodies are preserved as historical execution briefs; the 2026-05-23 status block at the top of that doc supersedes them — Phases 1 and 2 are fully shipped, Phases 3, 4, and 5 have their kernel work shipped (only layer-side `mode` flag / sibling-method surgery and `build_export.py` scaffold remain). Phase 3 (silvertorch) was restored alongside the 2026-05-23 scope-note revision; `ShardedSilverTorch` and the shelved native-CUDA experiment stay in [../plans-silvertorch-backup/](plans-silvertorch-backup/).

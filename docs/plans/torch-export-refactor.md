@@ -1,10 +1,10 @@
-# Concern-separation refactor: `retrieve` module → torch.export-ready (linr)
+# Concern-separation refactor: `retrieve` module → torch.export-ready (linr + silvertorch)
 
 > **Document audience**: Each phase below is a self-contained brief intended to be executed by a separate SWE agent without access to this conversation's history. Phases are ordered and depend on prior phases for shared conventions; do not run later phases out of order, but each phase's PR is reviewed and merged independently.
 
-> **Scope note (2026-05-19):** silvertorch is no longer in scope. The original plan had **5 phases** covering 7 kernels and 6 layer classes; this version covers the 5 in-scope kernels and 5 layer classes (drop `SilverTorch`). **Phase 3 (`codesigned_probe_score` + `SilverTorch`)** is replaced with a stub; the `build_export.py` scaffold authoring has moved to Phase 4 (`fused_masked_knn_topk` + `PrefilterKNN`). Phase numbers are preserved so cross-doc references stay stable. See [../plans-silvertorch-backup/torch-export-refactor.md](../plans-silvertorch-backup/torch-export-refactor.md) for the original silvertorch content. Phase 2's `bloom_match` content is also stubbed (silvertorch-only kernel); `bloom_compact` + the `_build_query_signatures` export bypass remain in Phase 2 because they serve linr.
+> **Scope note (2026-05-19, revised 2026-05-23):** silvertorch (IVF + codesigned probe) is back in scope for this plan. The original 2026-05-19 deprecation was reversed on 2026-05-23 alongside the Stage 2b kernel migration. The plan covers **7 in-scope kernels** (linr's 5 + silvertorch's 2: `codesigned_probe_score`, `codesigned_probe_score_exact`; `bloom_match` is back in Phase 2 too) and **6 layer classes** (5 linr + `SilverTorch`). IVF-side sharding and `ShardedSilverTorch` remain shelved — see [../plans-silvertorch-backup/](../plans-silvertorch-backup/) for those plus the shelved native-CUDA `codesigned_probe_score` experiment. Phase numbers are preserved so cross-doc references stay stable. Phase 3 (`codesigned_probe_score` + `SilverTorch`) is restored from the backup but trimmed against current code — see the per-phase status notes below.
 
-> **Status (2026-05-23):** **significantly easier than the original brief.** Stages 1+2 of the main-thread roadmap ([00-roadmap.md](00-roadmap.md)) shipped the entire kernel-side surface of this plan as a side effect. Concretely, every in-scope kernel now has: (i) a `<Name>Config` dataclass + `DEFAULT_CONFIG` (single curated per-arch default, no REGISTRY — that turned out to be ceremony); (ii) a `@torch.library.custom_op` / `triton_op` production wrapper with explicit `register_fake` and a non-Optional schema; (iii) zero `@triton.autotune`; (iv) zero `.item()` on the host path; (v) full-width `[B, N] (ids, counts)` on the compact family. `oporp_1bit_match_topk` was split into **two** custom_ops (`_full` + `_indirect`) at the kernel-wrapper level, which collapses the `HAS_INDICES`-driven mode matrix the original brief called the highest-difficulty piece. The `torch.compile(reduce-overhead)` wrappers in [bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py) and [quantize.py](../../retrieve/src/retrieve/layers/utils/quantize.py) — the "new since prior plan" export-blocking concern — were deleted entirely (cudagraph capture moved up to the algo wrapper), so the constructor-flag bypass mechanism the plan called for is moot. The `OneBitKNN` `.item()` empty-mask guard at the cited `one_bit_knn.py:156` is also gone. **What remains is a single PR**: layer-side `mode: Literal[...]` flag on [PrefilterKNN](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py) and [OneBitKNN](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py) (collapses the Optional matrices in `forward`), thread `mode=` through [linr_v2](../../evaluation/retrieval/algos/linr_v2.py) / [linr_v3](../../evaluation/retrieval/algos/linr_v3.py) algo builders (or build a dedicated export-target algo variant per [user direction](#)), and write [evaluation/retrieval/build_export.py](../../evaluation/retrieval/build_export.py) from scratch (Phase 4's stub at lines 444-499 is still the right shape). Phase 1 (`ExactAttributeFilter`) and Phase 2 (`BloomFilter`) are **fully done** — the filter classes don't need a mode flag because their `evaluate_*` methods are already one signature each. See the **"Remaining work — consolidated"** section after Phase 5 for the concrete checklist; the per-phase bodies below are preserved as the historical execution brief.
+> **Status (2026-05-23):** **significantly easier than the original brief.** Stages 1+2+2b of the main-thread roadmap ([00-roadmap.md](00-roadmap.md)) shipped the entire kernel-side surface of this plan as a side effect. Concretely, every in-scope kernel now has: (i) a `<Name>Config` dataclass + `DEFAULT_CONFIG` (single curated per-arch default, no REGISTRY — that turned out to be ceremony); (ii) a `@torch.library.custom_op` / `triton_op` production wrapper with a non-Optional schema (linr/filter wrappers carry explicit `register_fake`; silvertorch wrappers use `triton_op` + `wrap_triton`, which makes the underlying `@triton.jit` body visible to `torch.export` and removes the need for a separate `register_fake`); (iii) zero `@triton.autotune`; (iv) zero `.item()` on the host path; (v) full-width `[B, N] (ids, counts)` on the compact family. `oporp_1bit_match_topk` was split into **two** custom_ops (`_full` + `_indirect`) at the kernel-wrapper level, and `codesigned_probe_score` was similarly split into `_probe_score` + `_probe_score_bloom` — collapses the `HAS_INDICES` / `HAS_QB` constexpr matrices the original brief called the highest-difficulty pieces. The host-side `if actual_k < k: pad` tail in every silvertorch/onebitknn wrapper was eliminated outright — `oporp_1bit_match_topk_indirect` widens the score buffer to `max(_bucket_n(n_loop), _bucket_n(k))`; the silvertorch wrappers + `_full` rely on `register_index`-time asserts (`k <= n_probe * max_cluster_size` for SilverTorch, `k <= corpus_size` for OneBitKNN). The `torch.compile(reduce-overhead)` wrappers in [bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py) and [quantize.py](../../retrieve/src/retrieve/layers/utils/quantize.py) — the "new since prior plan" export-blocking concern — were deleted entirely (cudagraph capture moved up to the algo wrapper), so the constructor-flag bypass mechanism the plan called for is moot. The `OneBitKNN` `.item()` empty-mask guard at the cited `one_bit_knn.py:156` is also gone. **What remains is a single PR-ish surface across three layers**: layer-side `mode: Literal[...]` flag on [PrefilterKNN](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py) and [OneBitKNN](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py) (collapses the Optional matrices in `forward`); for [SilverTorch](../../retrieve/src/retrieve/layers/silvertorch/main.py) the `filter: FilterMode` enum is already half the mode dimension — what's left is collapsing the `query_clause_attrs` / `candidate_ids` Optionals into either explicit modes or sibling `forward_candidates` methods. Thread `mode=` through [linr_v2](../../evaluation/retrieval/algos/linr_v2.py) / [linr_v3](../../evaluation/retrieval/algos/linr_v3.py) / [silvertorch](../../evaluation/retrieval/algos/silvertorch.py) algo builders, and write [evaluation/retrieval/build_export.py](../../evaluation/retrieval/build_export.py) from scratch (Phase 4's stub at lines 444-499 + Phase 3's stub at lines 460-531 of the [backup doc](../plans-silvertorch-backup/torch-export-refactor.md) are still the right shapes). Phase 1 (`ExactAttributeFilter`) and Phase 2 (`BloomFilter` + `bloom_match`) are **fully done** — the filter classes don't need a mode flag because their `evaluate_*` methods are already one signature each. See the **"Remaining work — consolidated"** section after Phase 5 for the concrete checklist; the per-phase bodies below are preserved as the historical execution brief.
 
 ## Context
 
@@ -201,7 +201,7 @@ There is no Phase 6: `SimilarityMasking` and `FullScanKNN` are pure-torch with o
 
 - **Repo layout note**: the repo root is `/workspace/retrieve/`. The Python package lives at [`/workspace/retrieve/retrieve/`](../../retrieve/) — top-level (note: NOT nested under a `retrieve/retrieve/src/retrieve/` triple; the previous version of this plan said "nested", which was outdated). The source root is [`/workspace/retrieve/retrieve/src/retrieve/`](../../retrieve/src/retrieve/). The eval app is its own package at [`/workspace/retrieve/evaluation/`](../../evaluation/). Plan paths are written relative to `/workspace/retrieve/docs/plans/`, so `../../retrieve/src/retrieve/...` resolves to the package source and `../../evaluation/...` to the eval app.
 - **Test runner**: `cd retrieve && uv run pytest tests/` (or scope to `tests/correctness/test_X.py`). Both projects use `uv`; do not invoke `pip` or raw `pytest`.
-- **Eval entry point**: `cd evaluation && uv run evaluate --config conf/<yaml>`. Algorithms come from the YAML config; override with `--algorithms <name>`. Valid in-scope algorithm names are listed in [evaluation/retrieval/algos/__init__.py:36-44](../../evaluation/retrieval/algos/__init__.py#L36-L44): `torch_knn`, `triton_knn` (alias for `linr_v1_filter_mask`), `linr_v1_filter_mask`, `linr_v3`, `linr_v2`, `voyager_hnsw`. (`silvertorch` is out of scope.) Use `--backend triton` / `--backend torch` to pin a backend. Configs live under [evaluation/conf/](../../evaluation/conf/) (e.g. `conf/500m/d128-quality.yaml`, `conf/goodreads/d128-filter.yaml`). Run benchmarks before AND after the refactor for the affected algorithm and diff recall@k metrics.
+- **Eval entry point**: `cd evaluation && uv run evaluate --config conf/<yaml>`. Algorithms come from the YAML config; override with `--algorithms <name>`. Valid in-scope algorithm names are listed in [evaluation/retrieval/algos/__init__.py:36-44](../../evaluation/retrieval/algos/__init__.py#L36-L44): `torch_knn`, `triton_knn` (alias for `linr_v1_filter_mask`), `linr_v1_filter_mask`, `linr_v3`, `linr_v2`. (`silvertorch` is out of scope.) Use `--backend triton` / `--backend torch` to pin a backend. Configs live under [evaluation/conf/](../../evaluation/conf/) (e.g. `conf/500m/d128-quality.yaml`, `conf/goodreads/d128-filter.yaml`). Run benchmarks before AND after the refactor for the affected algorithm and diff recall@k metrics.
 - **No CI**. Locally-green is the entire bar. There is no `.github/workflows/` directory in this repo, so a phase PR cannot rely on CI to catch regressions — run the full `tests/` suite, not just the touched test files.
 - **Triton ≥ 3.0, torch ≥ 2.4 (capped <3)** (see [retrieve/pyproject.toml](../../retrieve/pyproject.toml)). Do not rely on torch 2.5+ features (e.g. `torch.library.triton_op`) in this refactor — those land in a later AOTI-wiring effort.
 
@@ -334,7 +334,7 @@ grep -rn "\.item()" retrieve/src/retrieve/layers/filters/exact_attribute.py retr
 
 `BloomFilter` today already routes via the `backend` flag in `__init__` ([bloom.py:32](../../retrieve/src/retrieve/layers/filters/bloom.py#L32)). Same as Phase 1: no `is_cuda` branches in `forward` / `evaluate_*` to remove; the class-split step from the old plan is already obviated.
 
-> **Scope note:** `bloom_match` (silvertorch-only kernel) was originally part of this phase. It is out of scope; the `evaluate_mask` path that linr's V1 uses today calls `bloom_match` only on the silvertorch IVF path. For linr, `BloomFilter.evaluate_indices` (driven by `bloom_compact`) is the relevant route. The `_build_query_signatures` export bypass remains in scope because `OneBitKNN._project_query` / `BloomFilter.evaluate_indices` reach it on the linr path. See [../plans-silvertorch-backup/torch-export-refactor.md](../plans-silvertorch-backup/torch-export-refactor.md) for the original `bloom_match` bucket-policy write-up.
+> **Scope note (revised 2026-05-23):** `bloom_match` is back in this phase — silvertorch was re-scoped, and Stage 2 shipped `bloom_match` as a `triton_op` ([bloom_match.py:52](../../retrieve/src/retrieve/kernels/triton/silvertorch/bloom_match.py#L52)). The bucket-policy concern in the [backup doc](../plans-silvertorch-backup/torch-export-refactor.md) turned out to be moot — the per-call width is dictated by `N` and the kernel retains its hard-coded tile. The `_build_query_signatures` export bypass is moot too (compiled wrappers deleted). For linr, `BloomFilter.evaluate_indices` (driven by `bloom_compact`) is the linr-side route.
 
 ### Files
 
@@ -400,13 +400,53 @@ print(ep.graph_module.code[:1000])
 
 ---
 
-## Phase 3 — `codesigned_probe_score` + `SilverTorch`
+## Phase 3 — `codesigned_probe_score` + `SilverTorch` — 🟡 **kernel DONE, layer REMAINS (much easier than original brief)**
 
-**Out of scope — silvertorch deprecated (2026-05-19).**
+> **Restored 2026-05-23 after the silvertorch un-deprecation.** **Kernel side shipped via Stages 1+2b** with the same structural simplification the brief didn't anticipate: instead of one host wrapper with an `Optional[Tensor]` query_bits / bloom_sigs matrix + `HAS_QB` constexpr autotune key, `codesigned_probe_score` was split into **two** `triton_op` wrappers — `retrieve::codesigned_probe_score` (no bloom) and `retrieve::codesigned_probe_score_bloom` ([codesigned_probe_score.py:278](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score.py#L278)) — each with a non-Optional schema. `codesigned_probe_score_exact` is its own `triton_op` ([codesigned_probe_score_exact.py:263](../../retrieve/src/retrieve/kernels/triton/silvertorch/codesigned_probe_score_exact.py#L263)). All three use `triton_op` + `wrap_triton` instead of `custom_op` + `register_fake` — the underlying `@triton.jit` body stays visible to `torch.export`, so the `HAS_QB`-constexpr collapse, dummy-tensor binding, and `register_fake` authoring the brief planned are moot. The host-side `if p == 0` early return at the cited `codesigned_probe_score.py:167-171` is gone. The `if actual_k < k: pad` tail was eliminated rather than moved caller-side ([Stage 2b note](00-roadmap.md)): `SilverTorch.register_index` asserts `k <= n_probe * max_cluster_size`, so the top-K always has ≥ k lanes by construction. `compact_mask`-style host syncs are absent (`global_scale.item()` is cached once at `register_index` time as `self._global_scale_f`, a plain Python float — see [main.py:183-185](../../retrieve/src/retrieve/layers/silvertorch/main.py#L183-L185)). The compile parity test ([test_silvertorch_compile.py:73](../../retrieve/tests/compile/test_silvertorch_compile.py#L73)) confirms zero graph breaks across all three filter modes.
 
-This phase originally exported `SilverTorch` and authored the `build_export.py` scaffold starting from silvertorch. With silvertorch out of scope, Phase 3 is dropped; the `build_export.py` scaffold is instead authored in Phase 4 (PrefilterKNN). The phase number is preserved so cross-doc references stay stable.
+**What remains is layer-side.** [SilverTorch.__init__](../../retrieve/src/retrieve/layers/silvertorch/main.py) already has `filter: FilterMode = "none"` (a `Literal["none", "bloom", "clause"]` enum — half the mode dimension the brief asked for) and `has_bloom` is exposed as a `@property` derived from `filter == "bloom"` ([main.py:120-122](../../retrieve/src/retrieve/layers/silvertorch/main.py#L120-L122)). What's left:
 
-See [../plans-silvertorch-backup/torch-export-refactor.md](../plans-silvertorch-backup/torch-export-refactor.md) for the original Phase 3 write-up (autotune-strip on `codesigned_probe_score`, `SilverTorch` mode flag, three export entries, original `build_export.py` scaffold).
+### Files
+
+Modify:
+- [retrieve/src/retrieve/layers/silvertorch/main.py](../../retrieve/src/retrieve/layers/silvertorch/main.py) — collapse the two `forward` Optionals and `_forward_candidates` branch into explicit signatures.
+- [retrieve/tests/correctness/test_silvertorch.py](../../retrieve/tests/correctness/test_silvertorch.py) — parametrize over `(filter, candidates)` modes.
+- [evaluation/retrieval/algos/silvertorch.py](../../evaluation/retrieval/algos/silvertorch.py) — pass-through whatever construction shape the new layer API expects (the algo already maps `filter_kind` → `filter`).
+- `evaluation/retrieval/build_export.py` — add silvertorch entries (created in Phase 4; Phase 3 only extends).
+
+### Steps
+
+1. **Collapse the `query_clause_attrs: Tensor | None = None` Optional in [main.py:224-244](../../retrieve/src/retrieve/layers/silvertorch/main.py#L224-L244).** Two approaches; pick one:
+   - **(A) Sibling forward per filter mode** — `forward_ivf_only(self, query)`, `forward_bloom(self, query, query_clause_attrs)`, `forward_clause(self, query, query_clause_attrs)`. Each is a clean export entry; the existing `forward` becomes a Python dispatcher (`if self.filter == "bloom": return self.forward_bloom(...)`) for eager runtime. Maps 1:1 to `filter`. Recommended.
+   - **(B) Require a real tensor argument always; let `filter="none"` ignore it.** Smaller surface but bakes in awkward "pass an unused tensor" semantics for the no-filter case. Skip unless (A) is too much churn.
+2. **Extract `_forward_candidates` to a public `forward_candidates(self, query, candidate_ids)`** method ([main.py:358-373](../../retrieve/src/retrieve/layers/silvertorch/main.py#L358-L373)). Same pattern as the planned `forward_candidates` exception in the `interfaces.py` contract note. Drop the `candidate_ids is not None` branch in `forward` ([main.py:236](../../retrieve/src/retrieve/layers/silvertorch/main.py#L236)). `forward_candidates` is its own export entry (one per arch).
+3. **`build_export.py` silvertorch entries** — extend the Phase 4 scaffold with `silvertorch_ivf_only.pt2`, `silvertorch_bloom.pt2`, `silvertorch_clause.pt2`, `silvertorch_candidates.pt2` (the last one shares across filter modes — exports `forward_candidates`, which doesn't depend on `filter`). The Phase 3 stub at lines 460-531 of the [backup doc](../plans-silvertorch-backup/torch-export-refactor.md) is the right shape; trim `mode="ivf_only|ivf_bloom"` to match the new `(A)` mode names.
+4. **Tests**: parametrize [test_silvertorch.py](../../retrieve/tests/correctness/test_silvertorch.py) over `filter ∈ {"none", "bloom", "clause"}` × `candidates ∈ {False, True}`. Add a smoke test in `evaluation/` that round-trips each `.pt2` via `torch.export.load` and compares to the eager module on a tiny synthetic index.
+
+### Out of scope for Phase 3
+
+- **ShardedSilverTorch** — explicitly shelved per the [roadmap scope note (revised 2026-05-23)](00-roadmap.md). If it ever returns, it adds another mode dimension on top.
+- **Native-CUDA `codesigned_probe_score`** — shelved experiment; see [../plans-silvertorch-backup/silvertorch-cuda-shelved.md](../plans-silvertorch-backup/silvertorch-cuda-shelved.md).
+- **AOTI bump** (`torch>=2.5` + `aoti_compile_and_package`) — separate later effort.
+
+### Verification
+
+```bash
+cd retrieve && uv run pytest tests/correctness/test_silvertorch.py tests/parity/test_codesigned_probe_score.py tests/parity/test_codesigned_probe_score_exact.py tests/compile/test_silvertorch_compile.py -v
+cd evaluation && uv run evaluate --config conf/500m/d128-quality.yaml --algorithms silvertorch --backend triton
+cd evaluation && uv run build-export --algo silvertorch --mode ivf_only --checkpoint-dir <path> --out-dir <path>
+cd evaluation && uv run build-export --algo silvertorch --mode bloom --checkpoint-dir <path> --out-dir <path>
+cd evaluation && uv run build-export --algo silvertorch --mode clause --checkpoint-dir <path> --out-dir <path>
+cd evaluation && uv run build-export --algo silvertorch --mode candidates --checkpoint-dir <path> --out-dir <path>
+```
+
+### Acceptance criteria
+
+- [ ] `SilverTorch` has a sibling-method `forward_*` per filter mode (or pinned-args variant), with non-Optional signatures.
+- [ ] `forward_candidates` is a public method, separate from `forward`.
+- [ ] `build_export.py` produces a `.pt2` per silvertorch entry.
+- [ ] `test_silvertorch_compile.py` still asserts zero graph breaks across all modes.
+- [ ] All tests pass; `silvertorch` recall@k unchanged on at least one [evaluation/conf/](../../evaluation/conf/) YAML.
 
 ---
 
@@ -590,9 +630,9 @@ cd evaluation && uv run build-export --algo linr_v3 --mode full --checkpoint-dir
 
 ---
 
-## Remaining work — consolidated single PR (2026-05-23)
+## Remaining work — consolidated (2026-05-23)
 
-The historical phase bodies above were sized assuming Stages 1+2 hadn't run yet. They have. What's actually left fits in one PR:
+The historical phase bodies above were sized assuming Stages 1+2+2b hadn't run yet. They have. What's actually left is layer-side surgery on three classes + the `build_export.py` scaffold — roughly 1–2 PRs depending on how silvertorch's three filter-mode forwards are split.
 
 ### Layer-side mode flags
 
@@ -614,26 +654,33 @@ def forward(self, query, candidate_ids, counts):         # mode="candidates" →
 
 Same dispatch in `_forward_torch_eager`. Drop the `counts is None` fallback at [one_bit_knn.py:149-155](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py#L149-L155).
 
+**[SilverTorch](../../retrieve/src/retrieve/layers/silvertorch/main.py)** — `filter: FilterMode = "none"` already exists ([main.py:75-119](../../retrieve/src/retrieve/layers/silvertorch/main.py#L75-L119)) and `has_bloom` is a derived `@property` ([main.py:120-122](../../retrieve/src/retrieve/layers/silvertorch/main.py#L120-L122)). What's left:
+
+- Collapse the `query_clause_attrs: Tensor | None = None` Optional in [main.py:224-244](../../retrieve/src/retrieve/layers/silvertorch/main.py#L224-L244) into sibling `forward_ivf_only(query)` / `forward_bloom(query, qa)` / `forward_clause(query, qa)` methods (one export entry per filter mode) — `forward` becomes a Python dispatcher for eager.
+- Extract `_forward_candidates` ([main.py:358-373](../../retrieve/src/retrieve/layers/silvertorch/main.py#L358-L373)) to a public `forward_candidates(query, candidate_ids)`. Drop the `candidate_ids is not None` branch in `forward` ([main.py:236](../../retrieve/src/retrieve/layers/silvertorch/main.py#L236)).
+
 ### Algo wiring
 
 Per the user's direction, the export targets can be a separate algo construction path — eager-runtime algos pass one shape, export-target algos pass another. Two options, both small:
 
-- **(A) Inline `mode=` kwarg:** [linr_v2.py](../../evaluation/retrieval/algos/linr_v2.py) passes `mode="candidates"` (V2 is sparse-rescore by definition). [linr_v3.py](../../evaluation/retrieval/algos/linr_v3.py) stage 1 picks `mode="full"` or `mode="candidates"` based on whether a filter is wired; stage 2 always `mode="candidates"`. Minimal blast radius — recommended.
-- **(B) Sibling export-target algos** (`linr_v2_export`, `linr_v3_export`) that hard-code modes and skip the eager-runtime `torch.compile` step. Use only if (A) introduces eager-side churn (it shouldn't).
+- **(A) Inline `mode=` kwarg:** [linr_v2.py](../../evaluation/retrieval/algos/linr_v2.py) passes `mode="candidates"`. [linr_v3.py](../../evaluation/retrieval/algos/linr_v3.py) stage 1 picks `mode="full"` or `mode="candidates"` based on whether a filter is wired; stage 2 always `mode="candidates"`. [silvertorch.py](../../evaluation/retrieval/algos/silvertorch.py) already maps `filter_kind` → `filter`; just route to the new sibling-method or pinned-mode constructor. Minimal blast radius — recommended.
+- **(B) Sibling export-target algos** (`linr_v2_export`, `linr_v3_export`, `silvertorch_export`) that hard-code modes and skip the eager-runtime `torch.compile` step. Use only if (A) introduces eager-side churn (it shouldn't).
 
 ### `build_export.py` scaffold — create new
 
-Drop the Phase 4 stub (lines 444-499) into [evaluation/retrieval/build_export.py](../../evaluation/retrieval/build_export.py). Add `[project.scripts]` entry `build-export = "retrieval.build_export:main"` to [evaluation/pyproject.toml](../../evaluation/pyproject.toml). Entries to ship in this PR: `linr_v2_full.pt2`, `linr_v2_candidates.pt2`, `linr_v3_full.pt2`, `linr_v3_candidates.pt2`. No AOTI compile (separate later effort).
+Drop the Phase 4 stub (lines 444-499) into [evaluation/retrieval/build_export.py](../../evaluation/retrieval/build_export.py). Add `[project.scripts]` entry `build-export = "retrieval.build_export:main"` to [evaluation/pyproject.toml](../../evaluation/pyproject.toml). Entries to ship: `linr_v2_full.pt2`, `linr_v2_candidates.pt2`, `linr_v3_full.pt2`, `linr_v3_candidates.pt2`, `silvertorch_ivf_only.pt2`, `silvertorch_bloom.pt2`, `silvertorch_clause.pt2`, `silvertorch_candidates.pt2`. No AOTI compile (separate later effort).
 
 ### Tests
 
-Parametrize [retrieve/tests/correctness/test_linr.py](../../retrieve/tests/correctness/test_linr.py) over `mode`. Add a smoke test in `evaluation/` that exercises `build_export.py` end-to-end on a tiny synthetic index and round-trips via `torch.export.load`.
+Parametrize [retrieve/tests/correctness/test_linr.py](../../retrieve/tests/correctness/test_linr.py) and [retrieve/tests/correctness/test_silvertorch.py](../../retrieve/tests/correctness/test_silvertorch.py) over `mode`. Keep [retrieve/tests/compile/test_silvertorch_compile.py](../../retrieve/tests/compile/test_silvertorch_compile.py)'s zero-graph-breaks assertion intact. Add a smoke test in `evaluation/` that exercises `build_export.py` end-to-end on a tiny synthetic index and round-trips via `torch.export.load`.
 
-### Out of scope for this PR
+### Out of scope
 
 - [SimilarityMasking](../../retrieve/src/retrieve/layers/linr/similarity_masking.py) and [FullScanKNN](../../retrieve/src/retrieve/layers/utils/retrieval.py) — pure-torch Optional-arg `forward`s. Export trivially via `dynamic_shapes` spec without a `mode` flag if/when a consumer asks. Defer.
+- `ShardedSilverTorch` — still shelved per the [roadmap scope note (revised 2026-05-23)](00-roadmap.md). Doesn't exist in the tree.
+- Native-CUDA `codesigned_probe_score` experiment — shelved; see [../plans-silvertorch-backup/silvertorch-cuda-shelved.md](../plans-silvertorch-backup/silvertorch-cuda-shelved.md).
 - AOTI bump (`torch>=2.5`, `aoti_compile_and_package`). Separate later effort.
-- `tune_kernels.py` extension — already exists and covers every in-scope kernel.
+- `tune_kernels.py` extension — already exists and covers every in-scope kernel including `codesigned_probe_score` + `codesigned_probe_score_exact`.
 
 ### Verification (when executed)
 
@@ -641,9 +688,14 @@ Parametrize [retrieve/tests/correctness/test_linr.py](../../retrieve/tests/corre
 cd retrieve && uv run pytest tests/ -v
 cd evaluation && uv run evaluate --config conf/goodreads/d128-filter.yaml --algorithms linr_v2 --backend triton
 cd evaluation && uv run evaluate --config conf/500m/d128-quality.yaml --algorithms linr_v3 --backend triton
-cd evaluation && uv run build-export --algo linr_v2 --mode candidates --checkpoint-dir <path> --out-dir <path>
-cd evaluation && uv run build-export --algo linr_v3 --mode full       --checkpoint-dir <path> --out-dir <path>
-cd evaluation && uv run build-export --algo linr_v3 --mode candidates --checkpoint-dir <path> --out-dir <path>
+cd evaluation && uv run evaluate --config conf/500m/d128-quality.yaml --algorithms silvertorch --backend triton
+cd evaluation && uv run build-export --algo linr_v2     --mode candidates --checkpoint-dir <path> --out-dir <path>
+cd evaluation && uv run build-export --algo linr_v3     --mode full       --checkpoint-dir <path> --out-dir <path>
+cd evaluation && uv run build-export --algo linr_v3     --mode candidates --checkpoint-dir <path> --out-dir <path>
+cd evaluation && uv run build-export --algo silvertorch --mode ivf_only   --checkpoint-dir <path> --out-dir <path>
+cd evaluation && uv run build-export --algo silvertorch --mode bloom      --checkpoint-dir <path> --out-dir <path>
+cd evaluation && uv run build-export --algo silvertorch --mode clause     --checkpoint-dir <path> --out-dir <path>
+cd evaluation && uv run build-export --algo silvertorch --mode candidates --checkpoint-dir <path> --out-dir <path>
 # Each .pt2 loads via torch.export.load and produces equal outputs to the eager module on a smoke batch.
 ```
 
@@ -688,7 +740,7 @@ cd evaluation && uv run build-export --algo linr_v3 --mode candidates --checkpoi
 - [retrieve/src/retrieve/layers/filters/__init__.py](../../retrieve/src/retrieve/layers/filters/__init__.py) `combine_indices` — sparse-cascade helper, uses `.item()` for compaction width. Not on the per-call export path; consumers are offline pipelines.
 - The `_build_query_signatures_compiled` / `_project_oporp_1bit_query_compiled` wrappers themselves — they **stay** as eager-runtime helpers. Phases 2 and 5 only add a **bypass mechanism** so the export path calls the eager body; the compiled wrapper continues to win 4× wall-clock on the eager benchmark path documented in [docs/system/kernels.md:278-289](../../docs/system/kernels.md#L278-L289).
 - [retrieve/src/retrieve/interfaces.py](../../retrieve/src/retrieve/interfaces.py) — base class signatures stay; `forward_candidates`, if it becomes worth declaring on `RetrievalModule`, is a small in-PR change inside whichever phase adds it (most likely Phase 3).
-- [evaluation/retrieval/algos/torch_knn.py](../../evaluation/retrieval/algos/torch_knn.py), [voyager.py](../../evaluation/retrieval/algos/voyager.py), [linr_v1.py](../../evaluation/retrieval/algos/linr_v1.py) — pure-torch / external-library wrappers; no kernel surgery, no Optional collapsing required unless an export entry is wanted.
+- [evaluation/retrieval/algos/torch_knn.py](../../evaluation/retrieval/algos/torch_knn.py), [linr_v1.py](../../evaluation/retrieval/algos/linr_v1.py) — pure-torch wrappers; no kernel surgery, no Optional collapsing required unless an export entry is wanted.
 
 ## End-state verification (after all 5 phases)
 
@@ -722,7 +774,7 @@ Updated 2026-05-23 — kernel-side work has shipped via Stages 1+2; original dif
 | Phase | Kernels | Layer | Status (2026-05-23) | Why                                                                                                                |
 |-------|---------|-------|---------------------|--------------------------------------------------------------------------------------------------------------------|
 | 1     | `clause_compact`, `clause_mask` | `ExactAttributeFilter` | ✅ **done** (was easy) | No autotune to strip, no Optionals in launch. Just `.item()` removal + KernelConfig plumbing. Filter API needed no mode flag. |
-| 2     | `bloom_compact`                 | `BloomFilter`          | ✅ **done** (was medium) | The compiled query-sig wrapper that needed bypassing was deleted entirely — cudagraph capture moved up to the algo wrapper. |
-| 3     | — (out of scope)                | — (silvertorch)        | **n/a**    | Originally `codesigned_probe_score` + `SilverTorch`. Out of scope; `build_export.py` scaffold authoring shifted to Phase 4. |
+| 2     | `bloom_compact`, `bloom_match`  | `BloomFilter`          | ✅ **done** (was medium) | The compiled query-sig wrapper that needed bypassing was deleted entirely — cudagraph capture moved up to the algo wrapper. `bloom_match` shipped via Stage 2 (silvertorch un-scoped 2026-05-23). |
+| 3     | `codesigned_probe_score` (`_bloom` variant), `codesigned_probe_score_exact` | `SilverTorch` | 🟡 **kernel done, layer remains** (was high) | Restored 2026-05-23. Kernel split into `_probe_score` + `_probe_score_bloom` `triton_op`s with `wrap_triton` (no separate `register_fake` needed). `if p == 0`, `if actual_k < k: pad`, and `.item()` guards eliminated. Layer needs sibling-method `forward_*` per filter mode + `forward_candidates` extraction. |
 | 4     | `fused_masked_knn_topk`         | `PrefilterKNN`         | 🟡 **kernel done, layer + scaffold remain** (was medium) | Kernel `triton_op` + non-Optional schema shipped. Layer needs `mode` flag; `build_export.py` is still unwritten. |
 | 5     | `oporp_1bit_match_topk`         | `OneBitKNN`            | 🟡 **kernel done, layer remains** (was high) | Kernel split into `_full` + `_indirect` custom_ops — already the export shape. `.item()` guard and compile-wrapper bypass are moot. Layer needs `mode` flag. |

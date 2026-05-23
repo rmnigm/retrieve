@@ -33,8 +33,7 @@ class ClauseCompactConfig:
 
 
 # Single default the library ships with. Re-tune on a new arch by running
-# ``evaluation/scripts/tune_kernels.py --kernel clause_compact`` and pasting
-# the resulting line in.
+# ``uv run tune-kernels clause-compact`` and pasting the resulting line in.
 #
 # Sweeping tiles in-kernel via ``@triton.autotune`` is unsafe here: the
 # ``tl.atomic_add(counts_ptr + bid, ...)`` accumulates across trials, and

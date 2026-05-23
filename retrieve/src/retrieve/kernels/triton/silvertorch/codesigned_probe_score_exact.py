@@ -19,7 +19,8 @@ class CodesignedProbeScoreExactConfig:
 
 
 # Single default the library ships with. Mirrors ``codesigned_probe_score``'s
-# A100 tuning; re-tune on a new arch via ``evaluation/scripts/tune_kernels.py``.
+# A100 tuning; re-tune on a new arch via
+# ``uv run tune-kernels codesigned-probe-score``.
 DEFAULT_CONFIG = CodesignedProbeScoreExactConfig(block_p=256, num_warps=4)
 
 

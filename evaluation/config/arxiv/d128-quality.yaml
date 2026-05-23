@@ -1,0 +1,22 @@
+_defaults: &defaults
+  data_dir: data/arxiv-papers
+  content_subdir: content_d128
+  gt_subdir: gt_d128
+  # No `checkpoint:` field — arxiv has no SASRec model; queries come from
+  # data/arxiv-papers/content_d128/query_emb.pt (built by `arxiv.py encode_queries`).
+  output: results/arxiv/d128-quality
+  split: test
+  device: cuda
+  ks: [100, 200, 400]
+  batch_sizes: [1]
+  seed: 0
+
+  algorithms:
+    - linr_v1_filter_mask
+    - linr_v4
+    - silvertorch
+    - linr_v3
+
+  backends: [triton, torch]
+
+<<: *defaults

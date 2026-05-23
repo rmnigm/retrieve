@@ -33,10 +33,10 @@ class BloomCompactConfig:
 
 
 # Single default the library ships with. Re-tune on a new arch by running
-# ``evaluation/scripts/tune_kernels.py --kernel bloom_compact`` and pasting
-# the resulting line in. Same atomic_add gotcha as ``clause_compact`` is
-# avoided the same way: the host wrapper allocates fresh ``out_indices``
-# and ``counts`` per call, so tuner reps don't accumulate.
+# ``uv run tune-kernels bloom-compact`` and pasting the resulting line in.
+# Same atomic_add gotcha as ``clause_compact`` is avoided the same way: the
+# host wrapper allocates fresh ``out_indices`` and ``counts`` per call, so
+# tuner reps don't accumulate.
 # Tuned on A100 (sm_80) against real-eval shapes (Goodreads N=797K /
 # arXiv N=3M / arXiv-synth N=15M, W=16 from m_bits=1024 default,
 # B∈{1, 16}): block_n=256, num_warps=8 wins all batched regimes; the

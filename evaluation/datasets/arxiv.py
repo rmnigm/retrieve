@@ -54,7 +54,7 @@ from pathlib import Path
 
 import polars as pl
 
-from data.hf_io import download_raw, raw_dir
+from datasets.hf_io import download_raw, raw_dir
 
 from .common import sample_rare_biased_wide, synthesize_qa_narrow
 

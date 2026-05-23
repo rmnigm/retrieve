@@ -33,7 +33,7 @@ class FusedMaskedKnnTopkConfig:
 
 
 # Single default the library ships with. Re-tune on a new arch by
-# running ``evaluation/scripts/tune_kernels.py`` and pasting the
+# running ``uv run tune-kernels fused-masked-knn-topk`` and pasting the
 # resulting line in. Callers who want a different tile config pass
 # ``config=`` through to the wrapper.
 # Tuned on A100 (sm_80): block_n=32 wins all but the 1M-bucket; num_warps=8 wins everywhere.

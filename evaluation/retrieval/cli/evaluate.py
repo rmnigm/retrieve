@@ -2,10 +2,10 @@
 
 Runs exactly one algorithm's cells against the dataset's queries (cached
 on disk via ``queries_cache.py`` after the first build) and writes its
-rows to a single JSON file. The shell wrapper ``run_per_algo.sh`` loops
-over algos from the YAML config and writes per-algo JSONs into the
-``cfg.output`` directory; downstream analysis reads them back via
-``retrieval.results_io.load_results``.
+rows to a single JSON file. The driver ``retrieval.cli.run_evaluation``
+(``uv run run-evaluation``) loops over algos from the YAML config and
+writes per-algo JSONs into the ``cfg.output`` directory; downstream
+analysis reads them back via ``retrieval.results_io.load_results``.
 
 Each invocation is a fresh Python process, which is the point — torch
 compile / Triton autotune / CUDA-graph private pools that survive

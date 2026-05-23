@@ -24,9 +24,9 @@ class ClauseMaskConfig:
 
 
 # Single default the library ships with. Re-tune on a new arch by running
-# ``evaluation/scripts/tune_kernels.py --kernel clause_mask`` and pasting
-# the resulting line in. Callers who want a different tile pass ``config=``
-# to ``_clause_mask_impl`` (the public ``@triton_op`` wrapper has a fixed
+# ``uv run tune-kernels clause-mask`` and pasting the resulting line in.
+# Callers who want a different tile pass ``config=`` to
+# ``_clause_mask_impl`` (the public ``@triton_op`` wrapper has a fixed
 # schema and always uses the default).
 # Tuned on A100 (sm_80) against real-eval shapes (Goodreads N=797K /
 # arXiv N=3M / arXiv-synth N=15M, C∈{4,5}, A_MAX=4, B∈{1, 16}):

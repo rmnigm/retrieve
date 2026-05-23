@@ -24,7 +24,7 @@ class CodesignedProbeScoreConfig:
 
 
 # Single default the library ships with. Re-tune on a new arch by
-# running ``evaluation/scripts/tune_kernels.py`` and pasting the
+# running ``uv run tune-kernels codesigned-probe-score`` and pasting the
 # resulting line in. Callers who want a different tile config pass
 # ``config=`` through to ``_codesigned_probe_score_impl``.
 # Tuned on A100 (sm_80) against the int8×int8 ``tl.dot`` path:
