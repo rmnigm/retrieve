@@ -52,17 +52,20 @@ All kernels follow the same conventions:
   file. The same convention applies uniformly across linr, filter, and
   silvertorch kernels — see [Autotune separation](#autotune-separation)
   below for the rationale.
-- Graph-break behavior. The five "main-thread" host wrappers
-  (`clause_mask`, `clause_compact`, `bloom_compact`, `bloom_match`,
-  `fused_masked_knn_topk`) are decorated with
-  `@torch.library.custom_op` + `register_fake` so they pass through
-  `torch.compile(dynamic=True, mode="reduce-overhead")` as opaque ops —
-  no graph break — and each LiNR algo's full forward captures into one
-  cudagraph_trees graph. The remaining three (`oporp_1bit_match_topk`,
-  `codesigned_probe_score`, `codesigned_probe_score_exact`) still use
-  `@torch._dynamo.disable`; oporp is the last Stage 2 item in
-  [docs/plans/02-triton-op-migration.md](../plans/02-triton-op-migration.md),
-  and the two silvertorch kernels are explicitly out of Stage 2 scope.
+- Graph-break behavior. Every host wrapper in this tree is decorated
+  with either `@torch.library.custom_op` + `register_fake` (the five
+  filter/compact kernels — `clause_mask`, `clause_compact`,
+  `bloom_compact`, `fused_masked_knn_topk`) or
+  `@torch.library.triton_op` + inline `wrap_triton(_kernel)[grid](...)`
+  (the silvertorch + onebitknn kernels — `bloom_match`,
+  `codesigned_probe_score`, `codesigned_probe_score_bloom`,
+  `codesigned_probe_score_exact`, `oporp_1bit_match_topk_full`,
+  `oporp_1bit_match_topk_indirect`). Both decorators stop dynamo from
+  graph-breaking at the wrapper boundary, so each layer's full forward
+  captures into one cudagraph_trees graph; `triton_op` additionally
+  lets inductor see the underlying `@triton.jit` kernel (preserves the
+  reference under `torch.export`; opens epilogue-fusion headroom for
+  Stage 3).
 
 ## Autotune separation
 
@@ -87,15 +90,18 @@ The shipped pattern, applied uniformly to every kernel in this tree:
    default for the current arch (sm_80 / A100 in this repo).
 3. The host wrapper takes `config: <Name>Config | None = None`;
    `cfg = config if config is not None else DEFAULT_CONFIG` resolves it.
-4. For `@custom_op`-wrapped kernels (`clause_mask`, `clause_compact`,
-   `bloom_compact`, `bloom_match`, `fused_masked_knn_topk`), the real
-   body lives in a private `_<name>_impl(..., *, config: ...Config |
-   None = None)` that the public op delegates to with `config=None`.
-   The schema doesn't carry the dataclass; tests and the tuner reach
-   `_impl` directly to pass an override. The `@torch._dynamo.disable`
-   kernels (`oporp_1bit_match_topk`, `codesigned_probe_score`,
-   `codesigned_probe_score_exact`) take `config=` on the public host
-   wrapper directly since they have no fixed `custom_op` schema.
+4. For both decoration styles the same private `_<name>_impl(..., *,
+   config: ...Config | None = None)` lives next to the public wrapper.
+   `@custom_op`-wrapped kernels (`clause_mask`, `clause_compact`,
+   `bloom_compact`, `fused_masked_knn_topk`) delegate to `_impl` with
+   `config=None`. `@triton_op`-wrapped kernels (`bloom_match`, the two
+   `codesigned_probe_score*` files, `oporp_1bit_match_topk`) instead
+   inline a near-duplicate of `_impl`'s body — the duplication is
+   intentional so that `wrap_triton(_kernel)[grid](...)` appears
+   textually in the decorated function's source, which is what
+   `torch.export`'s kernel registry walks to preserve the kernel
+   reference. The schema doesn't carry the dataclass either way; tests
+   and the tuner reach `_impl` directly to pass an override.
 5. Tuning is offline: `evaluation/scripts/tune_kernels.py` (`uv run
    tune-kernels --kernel <name>`) sweeps a hard-coded `(block_n,
    num_warps)` grid against a hard-coded shape regime list mirroring
@@ -279,16 +285,23 @@ num_stages)` — shipped as `DEFAULT_CONFIG` on the kernel module; pass
 `config=` to override. Re-tune on a new arch via `uv run tune-kernels
 --kernel oporp_1bit_match_topk`.
 
-**Bucketing.** For the `HAS_INDICES=True` path, the candidate width
-`n_loop = positive_indices.shape[1]` is rounded up via `_bucket_n` to
-one of `{4096, 65536, 1048576, 16777216}` and passed as `tl.constexpr
-N` — same JIT-cache invariant as `fused_masked_knn_topk`. The score
-buffer is allocated at the bucketed width; `positive_indices` stays at
-its caller width. The kernel's indirect `pos_indices` load is gated by
-`in_count = (n_off < count[bid])` (not `n_valid = (n_off < N)`)
-so it never reads OOB when `N > n_loop`. For `HAS_INDICES=False`,
-`N = item_bits.shape[0]` is fixed per registered index — no bucketing
-needed.
+**Bucketing.** For the `HAS_INDICES=True` path, the score-buffer
+width is `n_kernel = max(_bucket_n(positive_indices.shape[1]),
+_bucket_n(k))` (buckets `{4096, 65536, 1048576, 16777216}`), passed
+as `tl.constexpr N`. Bucketing `n_loop` gives the same JIT-cache
+invariant as `fused_masked_knn_topk`; taking the max with
+`_bucket_n(k)` guarantees the buffer always has at least K lanes so
+`torch.topk(all_scores, k)` works directly without a host-side pad
+tail. `positive_indices` stays at its caller width; the kernel's
+indirect `pos_indices` load is gated by `in_count = (n_off <
+count[bid])` (not `n_valid = (n_off < N)`) so it never reads OOB
+when `N > n_loop`. The post-topk
+`safe_local.clamp_max(n_loop - 1)` + `where(isfinite(scores), ids,
+-1)` tail handles the per-row "ran short" case (rows where
+`counts[b] < k` get `-1` sentinels in the bottom slots). For
+`HAS_INDICES=False`, `N = item_bits.shape[0]` is fixed per
+registered index — `OneBitKNN.register_index` asserts `k <= N`, no
+bucketing needed.
 
 ## `clause_compact` — fused clause eval + stream compaction
 
@@ -644,8 +657,12 @@ registered SilverTorch index, so no bucketing is needed; `HAS_QB`
 remains a body-level constexpr (the bloom-on and bloom-off paths still
 JIT-specialise on it). Score buffer is `torch.empty([B, P])` — every
 in-bounds lane is overwritten (real dot or `-inf`), so no pre-fill
-kernel is needed. The host then `torch.topk` on it and gathers global
-ids; if `P < K` the output is padded with `-1` / `-inf` to width `K`.
+kernel is needed. The host then `torch.topk(scores, K)` directly and
+gathers global ids. `SilverTorch.register_index` asserts
+`K <= n_probe * max_cluster_size` so `P >= K` is structurally
+guaranteed; the wrapper has no host-side pad tail (the prior
+"`P < K` ⇒ pad to width K" path is gone — it was dead in production
+and broke under `triton_op` SymInt tracing).
 
 ### `codesigned_probe_score_exact` — IVF + INT8 + exact AND-of-OR
 

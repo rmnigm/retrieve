@@ -6,7 +6,7 @@ import torch
 import triton
 import triton.language as tl
 from torch import Tensor
-from torch.library import custom_op
+from torch.library import triton_op, wrap_triton
 
 from retrieve.layers.utils.quantize import quantize_int8
 
@@ -166,12 +166,16 @@ def _codesigned_probe_score_exact_impl(
         clause_is_reverse:   [C]               bool — invert match per clause.
         query_clause_attrs:  [B, C]            int64 — per-query clause values (-1 inactive).
 
-    Returns ``(ids[B, K], scores[B, K])``; pads with ``-1`` / ``-inf`` when
-    fewer than K candidates pass.
+    Returns ``(ids[B, K], scores[B, K])``. Requires ``P >= k`` (the layer's
+    ``__init__`` asserts ``k <= n_probe * max_cluster_size``); per-row "no
+    candidate passed" cells already get ``-inf`` / ``-1`` from the kernel +
+    ``flat_probed_items`` padding semantics.
 
-    Internal tune/test entry point — production callers go through the
-    ``@custom_op`` wrapper ``codesigned_probe_score_exact`` below, which drops
-    the ``config=`` kwarg.
+    Eager entry point for tune scripts and parity tests. The compiled
+    path goes through the ``@triton_op`` wrapper ``codesigned_probe_score_exact``
+    which mirrors this body inline so that ``wrap_triton`` is textually in
+    the decorated function's source — torch.export's kernel registry
+    requires that.
     """
     if query.dim() != 2 or flat_probed_items.dim() != 2:
         raise ValueError("query must be [B, D] and flat_probed_items [B, P]")
@@ -214,7 +218,7 @@ def _codesigned_probe_score_exact_impl(
 
     # Tile axis on grid_x (≤ 2^31) since num_tiles can exceed grid_y/grid_z's
     # 65535 limit at large n_probe × max_cluster_size.
-    grid = (triton.cdiv(int(p), cfg.block_p), int(b))
+    grid = (triton.cdiv(p, cfg.block_p), b)
 
     _codesigned_probe_score_exact_kernel[grid](
         q_codes,
@@ -249,22 +253,14 @@ def _codesigned_probe_score_exact_impl(
         num_stages=cfg.num_stages,
     )
 
-    actual_k = min(k, p)
-    topk_scores, topk_local = torch.topk(all_scores, actual_k, dim=1)
+    # P (= n_probe × max_cluster_size) >= k by layer-construction assert,
+    # so topk(k) works directly with no min/pad path.
+    topk_scores, topk_local = torch.topk(all_scores, k, dim=1)
     topk_ids = flat_probed_items.gather(1, topk_local)
-
-    if actual_k == k:
-        return topk_ids, topk_scores
-
-    # P < K: pad to the requested width with sentinel rows.
-    out_ids = torch.full((b, k), -1, dtype=torch.long, device=query.device)
-    out_scores = torch.full((b, k), float("-inf"), dtype=torch.float32, device=query.device)
-    out_ids[:, :actual_k] = topk_ids
-    out_scores[:, :actual_k] = topk_scores
-    return out_ids, out_scores
+    return topk_ids, topk_scores
 
 
-@custom_op("retrieve::codesigned_probe_score_exact", mutates_args=())
+@triton_op("retrieve::codesigned_probe_score_exact", mutates_args=())
 def codesigned_probe_score_exact(
     query: Tensor,
     flat_probed_items: Tensor,
@@ -275,40 +271,69 @@ def codesigned_probe_score_exact(
     global_scale: float,
     k: int,
 ) -> tuple[Tensor, Tensor]:
-    """Production wrapper for ``_codesigned_probe_score_exact_impl`` with the
-    default tile config. Registered as an opaque ``custom_op`` so dynamo can
-    stitch the caller's compiled forward into a single cudagraph (no graph
-    break per call). The ``config=`` keyword is dropped because ``custom_op``'s
-    schema inference doesn't accept dataclass args; tune scripts and parity
-    tests that need a non-default config call
-    ``_codesigned_probe_score_exact_impl`` directly.
+    """Production ``@triton_op`` for exact-clause-filtered int8 ANN scoring.
+
+    Mirrors ``_codesigned_probe_score_exact_impl`` inline so ``wrap_triton``
+    appears textually in the decorated source — required by torch.export's
+    kernel registry. Uses ``DEFAULT_CONFIG``; tune scripts and parity tests
+    that need a non-default config call ``_codesigned_probe_score_exact_impl``
+    directly.
+
+    Layer-construction asserts ``k <= n_probe * max_cluster_size`` so
+    ``torch.topk(all_scores, k)`` always has >= k lanes with no pad tail.
     """
-    return _codesigned_probe_score_exact_impl(
-        query,
+    b, d = query.shape
+    p = flat_probed_items.shape[1]
+    _, c, a_max = item_clause_attrs.shape
+
+    q_codes, q_scales = quantize_int8(query)
+    q_codes = q_codes.contiguous()
+    q_scales = q_scales.contiguous()
+    flat_probed_items = flat_probed_items.contiguous()
+    item_codes = item_codes.contiguous()
+    item_clause_attrs = item_clause_attrs.contiguous()
+    # Triton can't load native torch.bool; mirror clause_mask.py.
+    clause_is_reverse = clause_is_reverse.contiguous().to(torch.int8)
+    query_clause_attrs = query_clause_attrs.contiguous()
+
+    all_scores = torch.empty((b, p), dtype=torch.float32, device=query.device)
+
+    def grid(meta):
+        return (triton.cdiv(p, meta["BLOCK_P"]), b)
+
+    wrap_triton(_codesigned_probe_score_exact_kernel)[grid](
+        q_codes,
+        q_scales,
         flat_probed_items,
         item_codes,
-        global_scale,
-        k,
-        item_clause_attrs=item_clause_attrs,
-        clause_is_reverse=clause_is_reverse,
-        query_clause_attrs=query_clause_attrs,
-        config=None,
+        item_clause_attrs,
+        clause_is_reverse,
+        query_clause_attrs,
+        all_scores,
+        float(global_scale),
+        P=p,
+        D=d,
+        C=c,
+        A_MAX=a_max,
+        stride_qcb=q_codes.stride(0),
+        stride_qcd=q_codes.stride(1),
+        stride_qs=q_scales.stride(0),
+        stride_fb=flat_probed_items.stride(0),
+        stride_fp=flat_probed_items.stride(1),
+        stride_cn=item_codes.stride(0),
+        stride_cd=item_codes.stride(1),
+        stride_ian=item_clause_attrs.stride(0),
+        stride_iac=item_clause_attrs.stride(1),
+        stride_iaa=item_clause_attrs.stride(2),
+        stride_qab=query_clause_attrs.stride(0),
+        stride_qac=query_clause_attrs.stride(1),
+        stride_ob=all_scores.stride(0),
+        stride_op=all_scores.stride(1),
+        BLOCK_P=DEFAULT_CONFIG.block_p,
+        num_warps=DEFAULT_CONFIG.num_warps,
+        num_stages=DEFAULT_CONFIG.num_stages,
     )
 
-
-@codesigned_probe_score_exact.register_fake
-def _codesigned_probe_score_exact_fake(
-    query: Tensor,
-    flat_probed_items: Tensor,
-    item_codes: Tensor,
-    item_clause_attrs: Tensor,
-    clause_is_reverse: Tensor,
-    query_clause_attrs: Tensor,
-    global_scale: float,
-    k: int,
-) -> tuple[Tensor, Tensor]:
-    b = query.shape[0]
-    device = query.device
-    ids = torch.empty((b, k), dtype=torch.long, device=device)
-    scores = torch.empty((b, k), dtype=torch.float32, device=device)
-    return ids, scores
+    topk_scores, topk_local = torch.topk(all_scores, k, dim=1)
+    topk_ids = flat_probed_items.gather(1, topk_local)
+    return topk_ids, topk_scores

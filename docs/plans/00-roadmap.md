@@ -6,7 +6,7 @@ The main thread is a three-stage kernel cleanup: **separate autotune from kernel
 
 Everything else — `torch.export` readiness, the standalone feature plans — is deferred behind the main thread.
 
-> **Scope note (2026-05-19):** silvertorch (IVF + codesigned probe + IVF-side sharding) is **no longer a planning target**. Historical plans covering silvertorch, the shelved native-CUDA `codesigned_probe_score` experiment, and `ShardedSilverTorch` are preserved in [../plans-silvertorch-backup/](../plans-silvertorch-backup/). Active work below targets the **linr** family only (`SimilarityMasking` / `PrefilterKNN` / `OneBitKNN`) plus the filter layers (`ExactAttributeFilter`, `BloomFilter`).
+> **Scope note (2026-05-19, revised 2026-05-23):** silvertorch (IVF + codesigned probe) is back in scope for kernel-decoration cleanup only — its three `triton_op` migrations (`codesigned_probe_score`, `codesigned_probe_score_bloom`, `codesigned_probe_score_exact`) shipped under Stage 2b alongside the linr work. IVF-side sharding and `ShardedSilverTorch` remain shelved; the historical plans for those (and the shelved native-CUDA `codesigned_probe_score` experiment) are preserved in [../plans-silvertorch-backup/](../plans-silvertorch-backup/). Active main-thread work below targets the **linr** family (`SimilarityMasking` / `PrefilterKNN` / `OneBitKNN`), the filter layers (`ExactAttributeFilter`, `BloomFilter`), and silvertorch's three probe-score kernels.
 
 ---
 
@@ -31,17 +31,19 @@ See
 [../system/kernels.md → Autotune separation](../system/kernels.md#autotune-separation)
 for the convention. The original plan doc has been deleted as superseded.
 
-### Stage 2 — `torch.compile` fixes via `triton_op` / `custom_op` — 🟡 **in progress (4 of 5 shipped, 2026-05-22)**
+### Stage 2 — `torch.compile` fixes via `custom_op` — ✅ **done (2026-05-22)**
 
 [02-triton-op-migration.md](02-triton-op-migration.md)
 
-Replace every `@torch._dynamo.disable` on a kernel host wrapper with `@torch.library.custom_op` + explicit `register_fake`. End state: each linr algo's `self.compile(dynamic=True, mode="reduce-overhead")` captures a single cudagraph_trees graph across the whole filter + index + cascade — no graph breaks per kernel call.
+Replaced `@torch._dynamo.disable` on every in-scope kernel host wrapper with `@torch.library.custom_op` + explicit `register_fake`, so each linr algo's `self.compile(dynamic=True, mode="reduce-overhead")` captures a single cudagraph_trees graph across the whole filter + index + cascade — no graph breaks per kernel call. Shipped on `clause_mask`, `clause_compact`, `bloom_compact`, `fused_masked_knn_topk`, `bloom_match`, and `oporp_1bit_match_topk`. The compact kernels were refactored to return full-width `[B, N]` `(ids, counts)` along the way, removing the `counts.max().item()` host sync.
 
-Shipped on `clause_mask`, `clause_compact`, `bloom_compact`, `fused_masked_knn_topk`, and (outside the original five-kernel scope) `bloom_match`. The compact kernels were refactored to return full-width `[B, N]` `(ids, counts)` along the way, removing the `counts.max().item()` host sync.
+### Stage 2b — `custom_op` → `triton_op` for the silvertorch + onebitknn family — ✅ **done (2026-05-23)**
 
-**Remaining**: `oporp_1bit_match_topk`. The Optional-to-dummy-tensor caller-side refactor in `OneBitKNN` is still to land. After that, Stage 2 closes and Stage 3 items 1 + 2 are unblocked.
+`@custom_op` is opaque — inductor and `torch.export` can't see the underlying `@triton.jit` kernel. Stage 2b flipped the silvertorch + onebitknn wrappers to `@torch.library.triton_op` + textually-inline `wrap_triton(_kernel)[grid](...)` so that (a) inductor can fuse around the kernel for Stage 3 optimizations, (b) `torch.export` preserves the kernel reference in the exported program.
 
-Silvertorch kernels (`codesigned_probe_score`, `codesigned_probe_score_exact`) keep `@torch._dynamo.disable` — silvertorch is explicitly out of Stage 2 scope per the scope note above.
+Migrated: `bloom_match` (already done), `codesigned_probe_score` + `codesigned_probe_score_bloom`, `codesigned_probe_score_exact`, `oporp_1bit_match_topk_full` + `oporp_1bit_match_topk_indirect`. The `@custom_op`-wrapped filter/compact kernels (`clause_mask`, `clause_compact`, `bloom_compact`, `fused_masked_knn_topk`) stay on `@custom_op` — their bodies have shape-branching prep work that doesn't trace cleanly under `triton_op`'s make_fx-traceable fake-impl requirement, and they don't sit on the kernel-fusion or kernel-export critical path.
+
+The host-side `if actual_k < k: pad` tail (formerly in every silvertorch/onebitknn wrapper) was eliminated rather than moved caller-side: `oporp_1bit_match_topk_indirect` widens the score buffer to `max(_bucket_n(n_loop), _bucket_n(k))` so `torch.topk(., k)` always has ≥ k lanes; the silvertorch wrappers and `oporp_1bit_match_topk_full` rely on layer-construction asserts (`SilverTorch.register_index` checks `k <= n_probe * max_cluster_size`; `OneBitKNN.register_index` checks `k <= corpus_size`). The pad branch was dead in production anyway. See [../system/kernels.md → Graph-break behavior](../system/kernels.md) for the as-built shape.
 
 ### Stage 3 — Kernel optimizations on the clean base
 
@@ -56,7 +58,7 @@ Stages 1+2 subsumed the big-lever items (the `counts.max().item()` host sync acr
 
 ## Later (deferred behind the main thread)
 
-- [torch-export-refactor.md](torch-export-refactor.md) — the broader plan to make every linr kernel + layer `torch.export`-ready. After stage 1 lifts the KernelConfig pattern out, what remains is layer-side: per-layer `mode` flag (Optional collapse), `forward_candidates` extraction, `_build_query_signatures_eager` / `_project_oporp_1bit_query_eager` export-path bypasses, `evaluation/retrieval/build_export.py` scaffold, AOTI wiring. Revisit when there's a concrete consumer for `.pt2` artifacts.
+- [torch-export-refactor.md](torch-export-refactor.md) — the broader plan to make every linr kernel + layer `torch.export`-ready. **Significantly shrunk after Stages 1+2 (2026-05-23 reassessment).** All kernel-side work (Configs, `triton_op`/`custom_op` + `register_fake`, full-width `(ids, counts)` API, no `.item()` on host) shipped as a side effect of Stages 1+2; the `_build_query_signatures_compiled` / `_project_oporp_1bit_query_compiled` wrappers the original plan needed to bypass were deleted entirely; `oporp_1bit_match_topk` is now two custom_ops (`_full` + `_indirect`) which is the export-level mode shape. **Remaining: ~1 PR** — `mode: Literal[...]` flag on `PrefilterKNN` and `OneBitKNN`, algo wiring, `evaluation/retrieval/build_export.py` scaffold. See [the doc's "Remaining work — consolidated" section](torch-export-refactor.md#remaining-work--consolidated-single-pr-2026-05-23). AOTI wiring (`torch>=2.5` + `aoti_compile_and_package`) stays a separate later effort. Revisit when there's a concrete consumer for `.pt2` artifacts.
 - [live-update-api.md](live-update-api.md) — upsert/delete API for V1/V2/V3 + filters. Standalone feature work, independent of stages 1-3 (no kernel surgery; just a `LiveIndexMixin` on the layers).
 - [yambda-hf-migration.md](yambda-hf-migration.md) — data migration, blocked on a host with the yambda data + checkpoints locally. Code is already in place.
 
@@ -64,4 +66,4 @@ Stages 1+2 subsumed the big-lever items (the `counts.max().item()` host sync acr
 
 ## Cleanup status
 
-Cleanup tasks finished as of 2026-05-22: the prototype custom_op migration doc, the per-item research doc, and the deferred mask-compact-kernel doc have all been deleted (subsumed by the active plans above and the system docs). The `torch-export-refactor.md` plan retains its Phase 1 KernelConfig section as a back-reference — the structure shipped as part of Stage 1 — and the rest of its phases are still pending; Phase 3 (silvertorch) is stubbed out per the scope note above.
+Cleanup tasks finished as of 2026-05-22: the prototype custom_op migration doc, the per-item research doc, and the deferred mask-compact-kernel doc have all been deleted (subsumed by the active plans above and the system docs). The `torch-export-refactor.md` plan's per-phase bodies are preserved as historical execution briefs; the 2026-05-23 status block at the top of that doc supersedes them — Phases 1 and 2 are fully shipped, Phases 4 and 5 have their kernel work shipped (only layer-side `mode` flag and `build_export.py` scaffold remain), Phase 3 is permanently stubbed out (silvertorch).

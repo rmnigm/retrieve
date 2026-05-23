@@ -1,10 +1,12 @@
-# Stage 2 — `torch.compile` fixes via `triton_op` / `custom_op`
+# Stage 2 — `torch.compile` fixes via `custom_op` — ✅ closed
 
-> See [00-roadmap.md](00-roadmap.md). Second main-thread stage. Stage 1 (autotune separation) has shipped — `@triton.autotune` has been lifted out of every in-scope linr/filter kernel into `<Name>Config + DEFAULT_CONFIG` per [../system/kernels.md → Autotune separation](../system/kernels.md#autotune-separation), so the wrappers are already clean for the custom_op decoration step.
+> See [00-roadmap.md](00-roadmap.md). Second main-thread stage. Stage 1 (autotune separation) shipped first — `@triton.autotune` had been lifted out of every in-scope linr/filter kernel into `<Name>Config + DEFAULT_CONFIG` per [../system/kernels.md → Autotune separation](../system/kernels.md#autotune-separation), so the wrappers were clean for the custom_op decoration step.
 
-> **Status (2026-05-22):** 4 of 5 originally-scoped kernels shipped — `clause_mask`, `fused_masked_knn_topk`, `bloom_compact`, `clause_compact`. The full-width `[B, N]` `(ids, counts)` return shape from the compact pair also shipped along with their migrations. `bloom_match` (originally stubbed out as silvertorch-side) also picked up `@custom_op` along the way and is no longer pending. **Only `oporp_1bit_match_topk` remains** — the Optional-to-dummy-tensor caller-side refactor in `OneBitKNN` is the last load-bearing piece. Steps 1, 3, 4, 5 below are now reference material; step 6 is the active scope.
+> **Status (closed 2026-05-22):** all six kernels shipped on `@custom_op` + `register_fake` — `clause_mask`, `clause_compact`, `bloom_compact`, `bloom_match`, `fused_masked_knn_topk`, and `oporp_1bit_match_topk` (both `_full` and `_indirect`). The full-width `[B, N]` `(ids, counts)` return shape from the compact pair shipped along with their migrations.
 
-> **Scope note (2026-05-19):** silvertorch is out of scope; see [00-roadmap.md](00-roadmap.md). The original migration order had **7 kernels** (1–7); steps for `bloom_match` (originally step 2) and `codesigned_probe_score` (originally step 7) are stubbed out below. Step numbers are preserved so cross-doc references stay stable.
+> **Follow-up (2026-05-23):** Stage 2b flipped the silvertorch + onebitknn wrappers from `@custom_op` to `@torch.library.triton_op` (inductor + `torch.export` visibility) and brought silvertorch back into scope. See [00-roadmap.md → Stage 2b](00-roadmap.md) and [../system/kernels.md → Graph-break behavior](../system/kernels.md). The kernel-by-kernel migration notes below are preserved as reference for the original Stage 2 work.
+
+> **Original scope note (2026-05-19):** silvertorch was out of scope at the time of Stage 2 shipping; that exclusion has since been lifted for the Stage 2b `triton_op` pass — see [00-roadmap.md](00-roadmap.md). The original migration order had **7 kernels** (1–7); steps for `bloom_match` (originally step 2) and `codesigned_probe_score` (originally step 7) are stubbed out below. Step numbers are preserved so cross-doc references stay stable.
 
 ## Context
 

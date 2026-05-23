@@ -68,6 +68,15 @@ class OneBitKNN(RetrievalModule):
         self.backend = backend
 
     def register_index(self, item_embs: Tensor) -> None:
+        n = item_embs.shape[0]
+        # The full-scan ``@triton_op`` wrapper runs ``torch.topk(all_scores,
+        # self.k)`` over an ``[B, n_items_total]`` buffer with no pad tail,
+        # so the corpus must hold at least k items. The indirect path is
+        # safe at any candidate width — its score buffer is widened to
+        # ``max(_bucket_n(n_loop), _bucket_n(k))`` inside the kernel
+        # wrapper.
+        if self.k > n:
+            raise ValueError(f"k={self.k} exceeds corpus size N={n}")
         bits, signs, perm = quantize_oporp_1bit(item_embs, seed=self.seed)
         self.register_buffer("item_bits", bits)
         self.register_buffer("oporp_signs", signs)

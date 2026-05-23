@@ -6,7 +6,7 @@ import torch
 import triton
 import triton.language as tl
 from torch import Tensor
-from torch.library import custom_op
+from torch.library import triton_op, wrap_triton
 
 
 # N-bucket ladder for the HAS_INDICES path. Clamps runtime candidate
@@ -152,17 +152,20 @@ def _oporp_1bit_match_topk_impl(
     Returns ``(ids[B, K], scores[B, K])``. ``ids`` are global item ids; rows
     that ran short are padded with ``-1`` / ``-inf``.
 
-    The HAS_INDICES path runs over a bucketed width ``n_bucket =
-    _bucket_n(positive_indices.shape[1])`` so the JIT cache compiles
-    once per bucket × W (the role formerly played by
-    ``@triton.autotune``'s cache key). The full-scan path uses
+    The HAS_INDICES path runs over a bucketed width ``n_kernel =
+    max(_bucket_n(positive_indices.shape[1]), _bucket_n(k))`` so the JIT
+    cache compiles once per bucket × W (the role formerly played by
+    ``@triton.autotune``'s cache key) and the buffer always has >= k
+    lanes for ``torch.topk(scores, k)``. The full-scan path uses
     ``N=item_bits.shape[0]`` directly — the registered index size is
-    fixed per process.
+    fixed per process and the layer asserts ``k <= n_items_total``.
 
-    This is the shared launcher behind the two public custom_ops
-    ``oporp_1bit_match_topk_full`` and ``oporp_1bit_match_topk_indirect``.
-    Tune scripts and parity tests that need a non-default tile config call
-    it directly (the custom_op wrappers can't carry dataclass kwargs).
+    Eager entry point for tune scripts and parity tests. The compiled
+    path goes through the two ``@triton_op`` wrappers
+    (``oporp_1bit_match_topk_full`` / ``oporp_1bit_match_topk_indirect``)
+    which mirror this body inline so that ``wrap_triton`` is textually
+    in the decorated function's source — torch.export's kernel registry
+    requires that.
     """
     if query_bits.dim() != 2 or item_bits.dim() != 2:
         raise ValueError("query_bits must be [B, W] and item_bits [N, W]")
@@ -189,10 +192,12 @@ def _oporp_1bit_match_topk_impl(
         positive_indices = positive_indices.contiguous()
         counts = counts.contiguous()
         n_loop = positive_indices.shape[1]
-        n_kernel = _bucket_n(n_loop)
-        # Allocate at bucketed width — same trick as fused_masked_knn_topk.
-        # Lanes in [n_loop, n_bucket) get -inf because in_count = (n_off <
-        # count[bid]) <= (n_off < n_loop), so valid_score=False.
+        # Widen to max(bucket(n_loop), bucket(k)) so the topk(k) below
+        # always has >= k lanes to draw from. Lanes in [n_loop, n_kernel)
+        # get -inf via the kernel's `in_count = n_off < count[bid]` gate,
+        # so the extra width carries -inf scores that `where(isfinite,
+        # ..., -1)` masks to the per-row "ran short" sentinel.
+        n_kernel = max(_bucket_n(n_loop), _bucket_n(k))
         all_scores = torch.empty(
             (b, n_kernel), dtype=torch.float32, device=query_bits.device
         )
@@ -240,80 +245,85 @@ def _oporp_1bit_match_topk_impl(
         num_stages=cfg.num_stages,
     )
 
-    actual_k = min(k, n_loop)
-    topk_scores, topk_local = torch.topk(all_scores, actual_k, dim=1)
+    # n_kernel >= k by construction (indirect: widened above; full:
+    # corpus size >> k by layer-construction assert). topk(k) works
+    # directly; no min/pad path needed.
+    topk_scores, topk_local = torch.topk(all_scores, k, dim=1)
     if has_indices:
         # ``topk_local`` may index into [n_loop, n_kernel) when
-        # counts[b] < actual_k (bottom slots tie at -inf). Clamp before
-        # gather; the where() below masks those slots to -1 regardless.
+        # counts[b] < k (bottom slots tie at -inf). Clamp before gather;
+        # the where() below masks those slots to -1 regardless.
         safe_local = topk_local.clamp_max(n_loop - 1)
         topk_ids = positive_indices.gather(1, safe_local)
-        # Per-row short case: counts[r] < k. Slots beyond counts[r] have
-        # score=-inf but `positive_indices` padding holds valid (non-passing)
-        # item ids — mask those out per the "rows that ran short" contract.
         topk_ids = torch.where(torch.isfinite(topk_scores), topk_ids, topk_ids.new_full((), -1))
     else:
         topk_ids = topk_local.to(torch.long)
 
-    if actual_k < k:
-        pad = k - actual_k
-        topk_ids = torch.cat(
-            [
-                topk_ids,
-                torch.full((b, pad), -1, dtype=torch.long, device=query_bits.device),
-            ],
-            dim=1,
-        )
-        topk_scores = torch.cat(
-            [
-                topk_scores,
-                torch.full(
-                    (b, pad),
-                    float("-inf"),
-                    dtype=torch.float32,
-                    device=query_bits.device,
-                ),
-            ],
-            dim=1,
-        )
-
     return topk_ids, topk_scores
 
 
-@custom_op("retrieve::oporp_1bit_match_topk_full", mutates_args=())
+@triton_op("retrieve::oporp_1bit_match_topk_full", mutates_args=())
 def oporp_1bit_match_topk_full(
     query_bits: Tensor,
     item_bits: Tensor,
     k: int,
 ) -> tuple[Tensor, Tensor]:
-    """Full-scan custom_op wrapper for ``_oporp_1bit_match_topk_impl``.
+    """Full-scan Sign-OPORP 1-bit Hamming top-K.
 
-    Registered as an opaque ``custom_op`` so dynamo can stitch the algo
-    forward into a single cudagraph (no graph break per call). The
-    ``config=`` keyword is dropped because ``custom_op``'s schema
-    inference doesn't accept dataclass args; tune scripts and parity tests
-    that need a non-default config call ``_oporp_1bit_match_topk_impl``
-    directly.
+    Mirrors ``_oporp_1bit_match_topk_impl(has_indices=False)`` inline so
+    ``wrap_triton`` appears textually in the decorated source — required
+    by torch.export's kernel registry. Uses ``DEFAULT_CONFIG``; for tune
+    grids call ``_oporp_1bit_match_topk_impl`` directly.
+
+    Layer-construction asserts ``k <= n_items_total`` so the score
+    buffer is always >= k wide and ``torch.topk(all_scores, k)`` works
+    without a pad tail.
     """
-    return _oporp_1bit_match_topk_impl(
-        query_bits, item_bits, k, None, None, config=None
+    b, w = query_bits.shape
+    d_total = 64 * w
+    n_kernel = item_bits.shape[0]
+
+    query_bits = query_bits.contiguous()
+    item_bits = item_bits.contiguous()
+    all_scores = torch.empty((b, n_kernel), dtype=torch.float32, device=query_bits.device)
+    # Dummies for the HAS_INDICES=False kernel path: gated by the
+    # constexpr so never dereferenced. Allocated locally so the public
+    # surface stays clean (and the @triton_op signature stays Optional-free).
+    pos_arg = torch.empty(1, 1, dtype=torch.int64, device=query_bits.device)
+    counts_arg = torch.empty(1, dtype=torch.int64, device=query_bits.device)
+
+    def grid(meta):
+        return (triton.cdiv(n_kernel, meta["BLOCK_N"]), b)
+
+    wrap_triton(_oporp_1bit_match_topk_kernel)[grid](
+        query_bits,
+        item_bits,
+        pos_arg,
+        counts_arg,
+        all_scores,
+        N=n_kernel,
+        W=w,
+        D_TOTAL=d_total,
+        stride_qb_b=query_bits.stride(0),
+        stride_qb_w=query_bits.stride(1),
+        stride_ib_n=item_bits.stride(0),
+        stride_ib_w=item_bits.stride(1),
+        stride_pb=pos_arg.stride(0),
+        stride_pp=pos_arg.stride(1),
+        stride_sb=all_scores.stride(0),
+        stride_sn=all_scores.stride(1),
+        HAS_INDICES=False,
+        BLOCK_N=DEFAULT_CONFIG.block_n,
+        num_warps=DEFAULT_CONFIG.num_warps,
+        num_stages=DEFAULT_CONFIG.num_stages,
     )
 
-
-@oporp_1bit_match_topk_full.register_fake
-def _oporp_1bit_match_topk_full_fake(
-    query_bits: Tensor,
-    item_bits: Tensor,
-    k: int,
-) -> tuple[Tensor, Tensor]:
-    b = query_bits.shape[0]
-    device = query_bits.device
-    ids = torch.empty((b, k), dtype=torch.long, device=device)
-    scores = torch.empty((b, k), dtype=torch.float32, device=device)
-    return ids, scores
+    topk_scores, topk_local = torch.topk(all_scores, k, dim=1)
+    topk_ids = topk_local.to(torch.long)
+    return topk_ids, topk_scores
 
 
-@custom_op("retrieve::oporp_1bit_match_topk_indirect", mutates_args=())
+@triton_op("retrieve::oporp_1bit_match_topk_indirect", mutates_args=())
 def oporp_1bit_match_topk_indirect(
     query_bits: Tensor,
     item_bits: Tensor,
@@ -321,23 +331,58 @@ def oporp_1bit_match_topk_indirect(
     positive_indices: Tensor,
     counts: Tensor,
 ) -> tuple[Tensor, Tensor]:
-    """Indirect-load custom_op wrapper. Scores only the ids in
-    ``positive_indices[b, :counts[b]]`` per row."""
-    return _oporp_1bit_match_topk_impl(
-        query_bits, item_bits, k, positive_indices, counts, config=None
+    """Indirect-load Sign-OPORP 1-bit Hamming top-K.
+
+    Scores only the ids in ``positive_indices[b, :counts[b]]`` per row.
+    Mirrors ``_oporp_1bit_match_topk_impl(has_indices=True)`` inline for
+    export-discovery reasons (see the full wrapper docstring).
+
+    Buffer width is ``max(_bucket_n(positive_indices.shape[1]),
+    _bucket_n(k))`` so ``torch.topk(all_scores, k)`` always has >= k
+    lanes. Lanes in ``[n_loop, n_kernel)`` carry ``-inf``; the
+    ``where(isfinite, ..., -1)`` tail masks them to the per-row "ran
+    short" sentinel.
+    """
+    b, w = query_bits.shape
+    d_total = 64 * w
+
+    query_bits = query_bits.contiguous()
+    item_bits = item_bits.contiguous()
+    positive_indices = positive_indices.contiguous()
+    counts = counts.contiguous()
+
+    n_loop = positive_indices.shape[1]
+    n_kernel = max(_bucket_n(n_loop), _bucket_n(k))
+    all_scores = torch.empty((b, n_kernel), dtype=torch.float32, device=query_bits.device)
+
+    def grid(meta):
+        return (triton.cdiv(n_kernel, meta["BLOCK_N"]), b)
+
+    wrap_triton(_oporp_1bit_match_topk_kernel)[grid](
+        query_bits,
+        item_bits,
+        positive_indices,
+        counts,
+        all_scores,
+        N=n_kernel,
+        W=w,
+        D_TOTAL=d_total,
+        stride_qb_b=query_bits.stride(0),
+        stride_qb_w=query_bits.stride(1),
+        stride_ib_n=item_bits.stride(0),
+        stride_ib_w=item_bits.stride(1),
+        stride_pb=positive_indices.stride(0),
+        stride_pp=positive_indices.stride(1),
+        stride_sb=all_scores.stride(0),
+        stride_sn=all_scores.stride(1),
+        HAS_INDICES=True,
+        BLOCK_N=DEFAULT_CONFIG.block_n,
+        num_warps=DEFAULT_CONFIG.num_warps,
+        num_stages=DEFAULT_CONFIG.num_stages,
     )
 
-
-@oporp_1bit_match_topk_indirect.register_fake
-def _oporp_1bit_match_topk_indirect_fake(
-    query_bits: Tensor,
-    item_bits: Tensor,
-    k: int,
-    positive_indices: Tensor,
-    counts: Tensor,
-) -> tuple[Tensor, Tensor]:
-    b = query_bits.shape[0]
-    device = query_bits.device
-    ids = torch.empty((b, k), dtype=torch.long, device=device)
-    scores = torch.empty((b, k), dtype=torch.float32, device=device)
-    return ids, scores
+    topk_scores, topk_local = torch.topk(all_scores, k, dim=1)
+    safe_local = topk_local.clamp_max(n_loop - 1)
+    topk_ids = positive_indices.gather(1, safe_local)
+    topk_ids = torch.where(torch.isfinite(topk_scores), topk_ids, topk_ids.new_full((), -1))
+    return topk_ids, topk_scores
