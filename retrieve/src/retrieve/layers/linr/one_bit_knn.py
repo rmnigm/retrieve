@@ -114,10 +114,9 @@ class OneBitKNN(nn.Module):
             scores = (self.d_total - 2 * hamming).to(torch.float32)
             if counts is not None:
                 p = candidate_ids.shape[1]
-                valid = (
-                    torch.arange(p, device=candidate_ids.device).unsqueeze(0)
-                    < counts.unsqueeze(1)
-                )
+                valid = torch.arange(p, device=candidate_ids.device).unsqueeze(
+                    0
+                ) < counts.unsqueeze(1)
                 scores = scores.masked_fill(~valid, float("-inf"))
             actual_k = min(self.k, scores.shape[1])
             topk_scores, topk_local = torch.topk(scores, actual_k, dim=1)

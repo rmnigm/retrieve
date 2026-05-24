@@ -54,9 +54,9 @@ def test_fullscan_with_mask_post_filters():
             i = int(ids[b, j].item())
             if i == -1:
                 continue
-            assert (
-                int(unmasked_ids[b, j].item()) == i
-            ), "mask is post-filter: surviving ids keep their original positions"
+            assert int(unmasked_ids[b, j].item()) == i, (
+                "mask is post-filter: surviving ids keep their original positions"
+            )
             assert bool(mask[b, i].item()), f"row {b} pos {j}: id {i} fails mask"
 
 

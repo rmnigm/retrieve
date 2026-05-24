@@ -90,10 +90,7 @@ def _codesigned_probe_score_exact_kernel(
         clause_match = tl.full([BLOCK_P], 0, tl.int1)
         for a in tl.static_range(A_MAX):
             ia = tl.load(
-                item_attrs_ptr
-                + safe_ids * stride_ian
-                + c * stride_iac
-                + a * stride_iaa,
+                item_attrs_ptr + safe_ids * stride_ian + c * stride_iac + a * stride_iaa,
                 mask=valid,
                 other=-1,
             )

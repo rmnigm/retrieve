@@ -96,9 +96,7 @@ def test_codesigned_with_bloom_matches_ref(n, d, p, k, b):
     out_ids, out_scores = codesigned_probe_score_bloom(
         query, flat, codes, qb, sigs, global_scale, k
     )
-    ref_ids, ref_scores = _ref_phase23(
-        query, flat, codes, global_scale, k, qb=qb, bloom_sigs=sigs
-    )
+    ref_ids, ref_scores = _ref_phase23(query, flat, codes, global_scale, k, qb=qb, bloom_sigs=sigs)
     assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores)
 
 

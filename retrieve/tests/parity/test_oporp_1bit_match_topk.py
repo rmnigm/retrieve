@@ -90,9 +90,7 @@ def test_oporp_1bit_indices_matches_torch(n, d, p, k, b):
     pos = torch.randint(0, n, (b, p), generator=g, device="cuda", dtype=torch.long)
     counts = torch.full((b,), p, dtype=torch.long, device="cuda")
 
-    out_ids, out_scores = oporp_1bit_match_topk_indirect(
-        query_bits, item_bits, k, pos, counts
-    )
+    out_ids, out_scores = oporp_1bit_match_topk_indirect(query_bits, item_bits, k, pos, counts)
     ref_ids, ref_scores = _ref_indices(query_bits, item_bits, pos, counts, k)
     assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores)
 
@@ -108,9 +106,7 @@ def test_partial_counts_handled():
     pos = torch.randint(0, n, (b, p), generator=g, device="cuda", dtype=torch.long)
     counts = torch.tensor([p, p // 2, 4, 1], dtype=torch.long, device="cuda")
 
-    out_ids, out_scores = oporp_1bit_match_topk_indirect(
-        query_bits, item_bits, k, pos, counts
-    )
+    out_ids, out_scores = oporp_1bit_match_topk_indirect(query_bits, item_bits, k, pos, counts)
     for bi in range(b):
         valid_pool = set(pos[bi, : counts[bi].item()].tolist())
         for j in range(k):

@@ -3,7 +3,7 @@ repos:
     rev: v0.15.6
     hooks:
       - id: ruff
-        args: [--fix]
+        args: [--select, I, --fix]
         files: ^retrieve/
       - id: ruff-format
         files: ^retrieve/

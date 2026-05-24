@@ -104,9 +104,9 @@ class TestFalsePositiveRate:
         bloom_match_rate = bf.evaluate_mask(q).float().mean().item()
         per_item_fill = 1.0 - math.exp(-k_hash / m_bits)
         analytic_fpr = per_item_fill**k_hash
-        assert bloom_match_rate <= max(
-            analytic_fpr * 4, 1e-6
-        ), f"observed FPR={bloom_match_rate:.4g}, analytic≤{analytic_fpr:.4g}"
+        assert bloom_match_rate <= max(analytic_fpr * 4, 1e-6), (
+            f"observed FPR={bloom_match_rate:.4g}, analytic≤{analytic_fpr:.4g}"
+        )
 
     def test_no_cross_clause_collision(self):
         # All clauses share the same value vocabulary {0..7}. Without per-clause

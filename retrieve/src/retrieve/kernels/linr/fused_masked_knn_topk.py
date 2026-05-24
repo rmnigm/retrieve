@@ -8,7 +8,6 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
-
 _P_BUCKETS = (256, 2048, 16384, 131072, 1048576)
 
 
@@ -47,7 +46,7 @@ def _fused_masked_knn_topk_kernel(
     pos_indices_ptr,
     counts_ptr,
     out_scores_ptr,
-    P: tl.constexpr,           # bucketed width (constexpr); see _bucket_p
+    P: tl.constexpr,  # bucketed width (constexpr); see _bucket_p
     D: tl.constexpr,
     stride_qb,
     stride_qd,

@@ -5,7 +5,6 @@ from torch import Tensor, nn
 
 from retrieve.interfaces import Backend
 
-
 _INT32_NEG_INF = torch.iinfo(torch.int32).min
 
 
@@ -57,7 +56,7 @@ class PostfilterKNNInt8(nn.Module):
 
     _PAD_M = 17
 
-    item_codes_t: Tensor   # [D, N_padded] int8
+    item_codes_t: Tensor  # [D, N_padded] int8
 
     def __init__(self, k: int, backend: Backend = "triton") -> None:
         super().__init__()
@@ -66,7 +65,7 @@ class PostfilterKNNInt8(nn.Module):
         self._n_real = 0
 
     def register_index(self, item_embs: Tensor) -> None:
-        codes = _quantize_int8_global(item_embs)   # [N, D] int8
+        codes = _quantize_int8_global(item_embs)  # [N, D] int8
         # cuBLAS _int_mm requires mat2.size(1) (== N after the transpose
         # to [D, N]) to be a multiple of 8. Pad N with zero items here;
         # the padded columns produce dot=0 and are sliced off in forward

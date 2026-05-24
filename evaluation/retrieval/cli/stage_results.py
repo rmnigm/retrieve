@@ -13,10 +13,12 @@ and rebuilds from whatever's in <output_dir>/. If <output_dir>/ is gone but
 Usage: stage_results.py <config_path>
 """
 from __future__ import annotations
+
 import json
 import shutil
 import sys
 from pathlib import Path
+
 import yaml
 
 from retrieval.results_io import load_rows
