@@ -17,10 +17,12 @@ from retrieve.layers.linr.one_bit_knn import OneBitKNN
 from retrieve.layers.linr.postfilter_knn import PostfilterKNN
 from retrieve.layers.linr.postfilter_knn_int8 import PostfilterKNNInt8
 from retrieve.layers.linr.prefilter_knn import PrefilterKNN
+from retrieve.layers.linr.simhash_knn import SimHashKNN
 
 __all__ = [
     "OneBitKNN",
     "PostfilterKNN",
     "PostfilterKNNInt8",
     "PrefilterKNN",
+    "SimHashKNN",
 ]

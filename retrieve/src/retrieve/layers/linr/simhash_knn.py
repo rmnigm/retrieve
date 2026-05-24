@@ -10,12 +10,12 @@ from retrieve.kernels.linr.oporp_1bit_match_topk import (
 )
 from retrieve.layers.utils.quantize import (
     popcount_int64,
-    project_oporp_1bit_query,
-    quantize_oporp_1bit,
+    project_simhash_1bit_query,
+    quantize_simhash_1bit,
 )
 
 
-def _score_full_oporp_eager(
+def _score_full_simhash_eager(
     query_bits: Tensor,
     item_bits: Tensor,
 ) -> Tensor:
@@ -31,69 +31,48 @@ def _score_full_oporp_eager(
     return d_total - 2 * hamming.to(torch.float32)
 
 
-class OneBitKNN(nn.Module):
-    """1-bit Sign-OPORP scoring (Hamming similarity), selectable backend.
+class SimHashKNN(nn.Module):
+    """SimHash 1-bit Hamming scoring (Charikar 2002 / Manku 2007), selectable backend.
 
-    Item embeddings are projected via a deterministic Sign-OPORP transform
-    (cheap O(D) sign vector + permutation) and sign-quantized to 1 bit per
-    dim. Scoring is ``D - 2 * popcount(query_bits ^ item_bits)`` — purely
-    bitwise, 16× memory reduction vs fp16. See docs/system/architecture.md.
+    Item embeddings are projected via a fixed Gaussian ``R ∈ R^{k_bits × D}``
+    and sign-quantized to 1 bit per output dim. Scoring is
+    ``k_bits - 2 * popcount(query_bits ^ item_bits)`` — purely bitwise, the
+    same kernel as ``OneBitKNN``.
 
-    **Precision.** ``item_embs`` and ``query`` may be fp32 or fp16; the
-    Sign-OPORP projection is sign-stable across float dtypes (sign of a
-    non-zero fp32 value equals sign of its fp16 round) and produces
-    identical packed-bit buffers either way. No internal cast is needed —
-    input precision is discarded at bit-pack time.
+    Unlike Sign-OPORP, ``k_bits`` can exceed ``D`` for a recall-vs-memory
+    trade — each output bit mixes all input coordinates. Cost is one fp32
+    matmul (``[N, D] @ [D, k_bits]``) at register time plus a per-query
+    matmul + bit-pack in forward.
 
-    With ``backend="triton"`` (default), both paths route through fused
-    custom_ops — ``oporp_1bit_match_topk_full`` for the dense case,
-    ``oporp_1bit_match_topk_indirect`` when ``candidate_ids`` is given.
-    Both delegate to the same underlying Triton kernel (shared via the
-    ``HAS_INDICES`` constexpr).
-
-    With ``backend="torch"``, the same op chain runs eager — callers that
-    want Inductor fusion + cudagraph capture should wrap the module with
-    ``torch.compile`` themselves. Decoupled from any filter — callers
-    compute ``candidate_ids`` (and optionally per-row ``counts``) upstream.
+    Reuses the OPORP Triton kernel — the kernel reads only
+    ``W = item_bits.shape[1]``; the algorithm that produced the bits is opaque.
+    SimHash at k_bits=512 → W=8; OPORP at k_bits=64 with D=128 → W=1; same
+    kernel both cases.
     """
 
     item_bits: Tensor
-    oporp_signs: Tensor
-    oporp_perm: Tensor
+    simhash_R: Tensor
 
     def __init__(
         self,
         k: int,
+        k_bits: int,
         seed: int = 0,
         backend: Backend = "triton",
-        k_bits: int = 0,
     ) -> None:
         super().__init__()
         self.k = k
+        self.k_bits = k_bits
         self.seed = seed
         self.backend = backend
-        # k_bits=0 is the "use D from register_index" sentinel — kept as a
-        # plain int (never None) so Dynamo never sees an Optional attribute.
-        self.k_bits = k_bits
 
     def register_index(self, item_embs: Tensor) -> None:
         n = item_embs.shape[0]
-        # The full-scan ``@triton_op`` wrapper runs ``torch.topk(all_scores,
-        # self.k)`` over an ``[B, n_items_total]`` buffer with no pad tail,
-        # so the corpus must hold at least k items. The indirect path is
-        # safe at any candidate width — its score buffer is widened to
-        # ``max(_bucket_n(n_loop), _bucket_n(k))`` inside the kernel
-        # wrapper.
         if self.k > n:
             raise ValueError(f"k={self.k} exceeds corpus size N={n}")
-        bits, signs, perm = quantize_oporp_1bit(item_embs, seed=self.seed, k_bits=self.k_bits)
-        # Resolve the 0 sentinel to a concrete int before any forward call —
-        # ``_project_query`` always sees a stable Python int under Dynamo.
-        if self.k_bits == 0:
-            self.k_bits = item_embs.shape[1]
+        bits, r = quantize_simhash_1bit(item_embs, self.k_bits, self.seed)
         self.register_buffer("item_bits", bits)
-        self.register_buffer("oporp_signs", signs)
-        self.register_buffer("oporp_perm", perm)
+        self.register_buffer("simhash_R", r)
 
     @property
     def d_total(self) -> int:
@@ -101,7 +80,7 @@ class OneBitKNN(nn.Module):
 
     def _project_query(self, query: Tensor) -> Tensor:
         """Pure tensor-flow query projection — shared by both backends."""
-        return project_oporp_1bit_query(query, self.oporp_signs, self.oporp_perm, self.k_bits)
+        return project_simhash_1bit_query(query, self.simhash_R)
 
     def forward(
         self,
@@ -119,9 +98,7 @@ class OneBitKNN(nn.Module):
         candidate_ids: Tensor | None,
         counts: Tensor | None,
     ) -> tuple[Tensor, Tensor]:
-        query_bits = project_oporp_1bit_query(
-            query, self.oporp_signs, self.oporp_perm, self.k_bits
-        )
+        query_bits = project_simhash_1bit_query(query, self.simhash_R)
         if candidate_ids is not None:
             cand_bits = self.item_bits[candidate_ids]  # [B, P, W]
             xor = query_bits.unsqueeze(1) ^ cand_bits
@@ -144,7 +121,7 @@ class OneBitKNN(nn.Module):
                 )
             return topk_ids, topk_scores
 
-        scores = _score_full_oporp_eager(query_bits, self.item_bits)
+        scores = _score_full_simhash_eager(query_bits, self.item_bits)
         topk_scores, topk_ids = torch.topk(scores, self.k, dim=1)
         return topk_ids, topk_scores
 
@@ -156,13 +133,9 @@ class OneBitKNN(nn.Module):
     ) -> tuple[Tensor, Tensor]:
         """Fused-kernel path for full-scan and indirect-load.
 
-        Full path scans every item with contiguous int64-word loads; the
-        indirect path uses indirect loads through ``candidate_ids`` gated
-        by per-row ``counts``. Same operation either way — XOR + popcount
-        + ``D - 2 * hamming`` — so there's no separate dequant or fp32
-        dot. Popcount is cheap enough that the gather penalty never
-        crosses the dense-fallback break-even point; a single sparse path
-        covers all cases.
+        Same kernel as ``OneBitKNN`` — XOR + popcount + ``D - 2 * hamming``.
+        Kernel input is ``[N, W]`` int64; the projection algorithm that
+        produced the bits is opaque to it.
         """
         query_bits = self._project_query(query)
 
