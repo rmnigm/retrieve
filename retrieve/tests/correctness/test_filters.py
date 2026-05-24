@@ -56,9 +56,9 @@ def test_evaluate_indices_matches_compact_evaluate_mask():
     got_ids, got_counts = ci.evaluate_indices(q)
 
     # counts must match exactly.
-    assert torch.equal(
-        got_counts, expected_counts
-    ), f"counts mismatch: got {got_counts.tolist()} vs {expected_counts.tolist()}"
+    assert torch.equal(got_counts, expected_counts), (
+        f"counts mismatch: got {got_counts.tolist()} vs {expected_counts.tolist()}"
+    )
 
     # ids per row must match as sets (kernel order is unspecified).
     for b in range(q.shape[0]):

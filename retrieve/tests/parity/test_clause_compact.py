@@ -30,15 +30,15 @@ def _ref(attrs: torch.Tensor, is_reverse: torch.Tensor, q: torch.Tensor):
 
 
 def _set_match(out_ids, out_counts, ref_ids, ref_counts) -> None:
-    assert torch.equal(
-        out_counts, ref_counts
-    ), f"counts: {out_counts.tolist()} vs {ref_counts.tolist()}"
+    assert torch.equal(out_counts, ref_counts), (
+        f"counts: {out_counts.tolist()} vs {ref_counts.tolist()}"
+    )
     b = ref_counts.shape[0]
     for r in range(b):
         c = int(ref_counts[r].item())
-        assert set(out_ids[r, :c].tolist()) == set(
-            ref_ids[r, :c].tolist()
-        ), f"row {r}: id-set mismatch"
+        assert set(out_ids[r, :c].tolist()) == set(ref_ids[r, :c].tolist()), (
+            f"row {r}: id-set mismatch"
+        )
 
 
 @pytest.mark.parametrize("n", [256, 4096])

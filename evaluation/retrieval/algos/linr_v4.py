@@ -20,8 +20,8 @@ from __future__ import annotations
 
 from torch import Tensor, nn
 
-from retrieve.layers.linr.postfilter_knn_int8 import PostfilterKNNInt8
 from retrieve.interfaces import Backend, FilterModule
+from retrieve.layers.linr.postfilter_knn_int8 import PostfilterKNNInt8
 
 from ._helpers import collect_modules
 from .filter import make_mask

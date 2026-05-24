@@ -55,14 +55,14 @@ def test_combine_indices_matches_compact_of_combined_masks():
     exp_ids, exp_counts = compact_mask(expected_mask)
     got_ids, got_counts = combine_indices([ci, bf], [qc, qb])
 
-    assert torch.equal(
-        got_counts, exp_counts
-    ), f"counts mismatch {got_counts.tolist()} vs {exp_counts.tolist()}"
+    assert torch.equal(got_counts, exp_counts), (
+        f"counts mismatch {got_counts.tolist()} vs {exp_counts.tolist()}"
+    )
     for r in range(qc.shape[0]):
         c = int(exp_counts[r].item())
-        assert set(got_ids[r, :c].tolist()) == set(
-            exp_ids[r, :c].tolist()
-        ), f"row {r}: id-set mismatch"
+        assert set(got_ids[r, :c].tolist()) == set(exp_ids[r, :c].tolist()), (
+            f"row {r}: id-set mismatch"
+        )
 
 
 def test_combine_indices_filter_order_independent_for_set():

@@ -8,7 +8,6 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
-
 # N-bucket ladder for the HAS_INDICES path. Clamps runtime candidate
 # width onto a small set of constexpr values so the JIT cache compiles
 # once per bucket × W. The HAS_INDICES=False path uses
@@ -198,9 +197,7 @@ def _oporp_1bit_match_topk_impl(
         # so the extra width carries -inf scores that `where(isfinite,
         # ..., -1)` masks to the per-row "ran short" sentinel.
         n_kernel = max(_bucket_n(n_loop), _bucket_n(k))
-        all_scores = torch.empty(
-            (b, n_kernel), dtype=torch.float32, device=query_bits.device
-        )
+        all_scores = torch.empty((b, n_kernel), dtype=torch.float32, device=query_bits.device)
         pos_arg = positive_indices
         counts_arg = counts
         stride_pb = positive_indices.stride(0)

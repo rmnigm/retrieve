@@ -132,9 +132,7 @@ class SilverTorch(nn.Module):
         clause_is_reverse: Tensor | None = None,
     ) -> None:
         if self.filter == "none" and item_clause_attrs is not None:
-            raise ValueError(
-                "item_clause_attrs requires filter='bloom' or filter='exact'"
-            )
+            raise ValueError("item_clause_attrs requires filter='bloom' or filter='exact'")
         if self.filter == "none" and clause_is_reverse is not None:
             raise ValueError("clause_is_reverse requires filter='exact'")
         if self.filter == "exact" and item_clause_attrs is None:
@@ -236,9 +234,7 @@ class SilverTorch(nn.Module):
         if candidate_ids is not None:
             return self._forward_candidates(query, candidate_ids)
         if self.filter == "none" and query_clause_attrs is not None:
-            raise ValueError(
-                "query_clause_attrs requires filter='bloom' or filter='exact'"
-            )
+            raise ValueError("query_clause_attrs requires filter='bloom' or filter='exact'")
         if self.backend == "triton":
             return self._forward_triton(query, query_clause_attrs)
         return self._forward_torch_eager(query, query_clause_attrs)

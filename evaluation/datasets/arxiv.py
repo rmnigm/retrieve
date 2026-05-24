@@ -378,8 +378,8 @@ def _encode_with_prefix(
 
     Returns the meta dict for the largest-dim variant.
     """
-    import torch.nn.functional as F
     import torch
+    import torch.nn.functional as F
     from sentence_transformers import SentenceTransformer
     from tqdm import tqdm
 

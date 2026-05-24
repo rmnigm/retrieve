@@ -198,8 +198,13 @@ class TestParamValidation:
     def test_clause_is_reverse_rejected_outside_exact(self, data):
         rev = torch.zeros(C, dtype=torch.bool, device="cuda")
         m_bloom = SilverTorch(
-            k=K, n_lists=N_LISTS, n_probe=N_PROBE,
-            filter="bloom", m_bits=M_BITS, k_hash=K_HASH, n_iter=3,
+            k=K,
+            n_lists=N_LISTS,
+            n_probe=N_PROBE,
+            filter="bloom",
+            m_bits=M_BITS,
+            k_hash=K_HASH,
+            n_iter=3,
         )
         with pytest.raises(ValueError, match="clause_is_reverse"):
             m_bloom.register_index(data["embs"], data["attrs"], clause_is_reverse=rev)
@@ -435,9 +440,7 @@ class TestEdgeCases:
         """Degenerate clustering (one item per cluster); full probe → recall ≈ 1."""
         small_n = 256
         embs = data["embs"][:small_n]
-        m = SilverTorch(
-            k=K, n_lists=small_n, n_probe=small_n, n_iter=2, backend=backend
-        )
+        m = SilverTorch(k=K, n_lists=small_n, n_probe=small_n, n_iter=2, backend=backend)
         m.register_index(embs)
         ids, _ = m(data["query"])
 

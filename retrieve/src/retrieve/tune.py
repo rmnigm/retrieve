@@ -62,7 +62,6 @@ from retrieve.kernels.silvertorch.codesigned_probe_score import (
     codesigned_probe_score,
 )
 
-
 # Mirror the autotune grids that lived in the kernel files before this
 # stage. Same product as the deleted ``_autotune_configs()`` helpers.
 _FMKT_GRID = [(bn, nw) for bn in (32, 64, 128, 256) for nw in (4, 8)]
@@ -84,17 +83,17 @@ _BLOOM_COMPACT_GRID = [(bn, nw) for bn in (128, 256, 512, 1024) for nw in (2, 4,
 # different catalog shapes override via ``--regime`` flags.
 _DEFAULT_CLAUSE_REGIMES = (
     # (N, B, C, A_MAX)
-    (797_085,    1, 4, 4),  # goodreads, single-query
-    (797_085,   16, 4, 4),  # goodreads, batched
-    (2_988_997,  1, 5, 4),  # arxiv-retrieval, single-query
+    (797_085, 1, 4, 4),  # goodreads, single-query
+    (797_085, 16, 4, 4),  # goodreads, batched
+    (2_988_997, 1, 5, 4),  # arxiv-retrieval, single-query
     (2_988_997, 16, 5, 4),  # arxiv-retrieval, batched
     (15_000_001, 16, 5, 4),  # arxiv-synth-15m, batched (DRAM-streaming extreme)
 )
 _DEFAULT_BLOOM_REGIMES = (
     # (N, B, W) — W=16 from m_bits=1024 default
-    (797_085,    1, 16),
-    (797_085,   16, 16),
-    (2_988_997,  1, 16),
+    (797_085, 1, 16),
+    (797_085, 16, 16),
+    (2_988_997, 1, 16),
     (2_988_997, 16, 16),
     (15_000_001, 16, 16),  # arxiv-synth-15m, batched (DRAM-streaming extreme)
 )
@@ -171,15 +170,13 @@ def _tune_fmkt(dev: torch.device, d: int, b: int) -> dict:
                 best_ms = ms
                 best = (block_n, num_warps)
             click.echo(
-                f"  [P={p:>7}] block_n={block_n:<4} num_warps={num_warps}  "
-                f"-> {ms:.3f} ms",
+                f"  [P={p:>7}] block_n={block_n:<4} num_warps={num_warps}  -> {ms:.3f} ms",
                 err=True,
             )
         assert best is not None
         per_bucket[p] = {"winner": best, "winner_ms": best_ms, "all": results}
         click.echo(
-            f"  [P={p:>7}] winner: block_n={best[0]} num_warps={best[1]} "
-            f"({best_ms:.3f} ms)",
+            f"  [P={p:>7}] winner: block_n={best[0]} num_warps={best[1]} ({best_ms:.3f} ms)",
             err=True,
         )
 
@@ -194,13 +191,9 @@ def _tune_fmkt(dev: torch.device, d: int, b: int) -> dict:
 def _print_fmkt(arch: str, result: dict) -> None:
     bn, nw = result["default"]
     click.echo("")
-    click.echo(
-        "# Paste into retrieve/src/retrieve/kernels/linr/fused_masked_knn_topk.py"
-    )
+    click.echo("# Paste into retrieve/src/retrieve/kernels/linr/fused_masked_knn_topk.py")
     click.echo(f"# Tuned on {arch}; per-bucket details in JSON output if --json-out was used.")
-    click.echo(
-        f"DEFAULT_CONFIG = FusedMaskedKnnTopkConfig(block_n={bn}, num_warps={nw})"
-    )
+    click.echo(f"DEFAULT_CONFIG = FusedMaskedKnnTopkConfig(block_n={bn}, num_warps={nw})")
 
 
 # ---------------------------------------------------------------------
@@ -270,15 +263,13 @@ def _tune_oporp(dev: torch.device, w: int, b: int) -> dict:
                     best_ms = ms
                     best = (block_n, num_warps)
                 click.echo(
-                    f"  [{key}] block_n={block_n:<4} num_warps={num_warps}  "
-                    f"-> {ms:.3f} ms",
+                    f"  [{key}] block_n={block_n:<4} num_warps={num_warps}  -> {ms:.3f} ms",
                     err=True,
                 )
             assert best is not None
             per_regime[key] = {"winner": best, "winner_ms": best_ms, "all": results}
             click.echo(
-                f"  [{key}] winner: block_n={best[0]} num_warps={best[1]} "
-                f"({best_ms:.3f} ms)",
+                f"  [{key}] winner: block_n={best[0]} num_warps={best[1]} ({best_ms:.3f} ms)",
                 err=True,
             )
 
@@ -291,13 +282,9 @@ def _tune_oporp(dev: torch.device, w: int, b: int) -> dict:
 def _print_oporp(arch: str, result: dict) -> None:
     bn, nw = result["default"]
     click.echo("")
-    click.echo(
-        "# Paste into retrieve/src/retrieve/kernels/linr/oporp_1bit_match_topk.py"
-    )
+    click.echo("# Paste into retrieve/src/retrieve/kernels/linr/oporp_1bit_match_topk.py")
     click.echo(f"# Tuned on {arch}; per-regime details in JSON output if --json-out was used.")
-    click.echo(
-        f"DEFAULT_CONFIG = Oporp1BitMatchTopkConfig(block_n={bn}, num_warps={nw})"
-    )
+    click.echo(f"DEFAULT_CONFIG = Oporp1BitMatchTopkConfig(block_n={bn}, num_warps={nw})")
 
 
 # ---------------------------------------------------------------------
@@ -373,15 +360,13 @@ def _tune_cps(dev: torch.device, d: int, b: int, w: int) -> dict:
                     best_ms = ms
                     best = (block_p, num_warps)
                 click.echo(
-                    f"  [{key}] block_p={block_p:<4} num_warps={num_warps}  "
-                    f"-> {ms:.3f} ms",
+                    f"  [{key}] block_p={block_p:<4} num_warps={num_warps}  -> {ms:.3f} ms",
                     err=True,
                 )
             assert best is not None
             per_regime[key] = {"winner": best, "winner_ms": best_ms, "all": results}
             click.echo(
-                f"  [{key}] winner: block_p={best[0]} num_warps={best[1]} "
-                f"({best_ms:.3f} ms)",
+                f"  [{key}] winner: block_p={best[0]} num_warps={best[1]} ({best_ms:.3f} ms)",
                 err=True,
             )
 
@@ -394,14 +379,9 @@ def _tune_cps(dev: torch.device, d: int, b: int, w: int) -> dict:
 def _print_cps(arch: str, result: dict) -> None:
     bp, nw = result["default"]
     click.echo("")
-    click.echo(
-        "# Paste into "
-        "retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py"
-    )
+    click.echo("# Paste into retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py")
     click.echo(f"# Tuned on {arch}; per-regime details in JSON output if --json-out was used.")
-    click.echo(
-        f"DEFAULT_CONFIG = CodesignedProbeScoreConfig(block_p={bp}, num_warps={nw})"
-    )
+    click.echo(f"DEFAULT_CONFIG = CodesignedProbeScoreConfig(block_p={bp}, num_warps={nw})")
 
 
 # ---------------------------------------------------------------------
@@ -424,9 +404,7 @@ def _make_clause_inputs(
     return item_attrs, is_reverse, query_attrs
 
 
-def _tune_clause_mask(
-    dev: torch.device, regimes: tuple[tuple[int, int, int, int], ...]
-) -> dict:
+def _tune_clause_mask(dev: torch.device, regimes: tuple[tuple[int, int, int, int], ...]) -> dict:
     """Sweep (N, B, C, A_MAX) regimes; aggregate per-regime winners to a
     single DEFAULT_CONFIG via plurality vote (ties → lower num_warps)."""
     per_regime: dict[str, dict] = {}
@@ -443,24 +421,20 @@ def _tune_clause_mask(
                 _clause_mask_impl(item_attrs, is_reverse, query_attrs, config=cfg)
             torch.cuda.synchronize()
             ms = _bench(
-                lambda c=cfg: _clause_mask_impl(
-                    item_attrs, is_reverse, query_attrs, config=c
-                )
+                lambda c=cfg: _clause_mask_impl(item_attrs, is_reverse, query_attrs, config=c)
             )
             results.append({"block_n": block_n, "num_warps": num_warps, "ms": ms})
             if ms < best_ms:
                 best_ms = ms
                 best = (block_n, num_warps)
             click.echo(
-                f"  [{key}] block_n={block_n:<4} num_warps={num_warps}  "
-                f"-> {ms:.3f} ms",
+                f"  [{key}] block_n={block_n:<4} num_warps={num_warps}  -> {ms:.3f} ms",
                 err=True,
             )
         assert best is not None
         per_regime[key] = {"winner": best, "winner_ms": best_ms, "all": results}
         click.echo(
-            f"  [{key}] winner: block_n={best[0]} num_warps={best[1]} "
-            f"({best_ms:.3f} ms)",
+            f"  [{key}] winner: block_n={best[0]} num_warps={best[1]} ({best_ms:.3f} ms)",
             err=True,
         )
 
@@ -473,16 +447,12 @@ def _tune_clause_mask(
 def _print_clause_mask(arch: str, result: dict) -> None:
     bn, nw = result["default"]
     click.echo("")
-    click.echo(
-        "# Paste into retrieve/src/retrieve/kernels/filters/clause_mask.py"
-    )
+    click.echo("# Paste into retrieve/src/retrieve/kernels/filters/clause_mask.py")
     click.echo(f"# Tuned on {arch}; per-regime details in JSON output if --json-out was used.")
     click.echo(f"DEFAULT_CONFIG = ClauseMaskConfig(block_n={bn}, num_warps={nw})")
 
 
-def _tune_clause_compact(
-    dev: torch.device, regimes: tuple[tuple[int, int, int, int], ...]
-) -> dict:
+def _tune_clause_compact(dev: torch.device, regimes: tuple[tuple[int, int, int, int], ...]) -> dict:
     """Same regime grid as clause_mask; calls ``_clause_compact_impl`` which
     allocates fresh out_indices (-1 filled) and counts (zeros) per call —
     the atomic_add accumulation worry in the kernel doc does NOT apply to
@@ -501,24 +471,20 @@ def _tune_clause_compact(
                 _clause_compact_impl(item_attrs, is_reverse, query_attrs, config=cfg)
             torch.cuda.synchronize()
             ms = _bench(
-                lambda c=cfg: _clause_compact_impl(
-                    item_attrs, is_reverse, query_attrs, config=c
-                )
+                lambda c=cfg: _clause_compact_impl(item_attrs, is_reverse, query_attrs, config=c)
             )
             results.append({"block_n": block_n, "num_warps": num_warps, "ms": ms})
             if ms < best_ms:
                 best_ms = ms
                 best = (block_n, num_warps)
             click.echo(
-                f"  [{key}] block_n={block_n:<4} num_warps={num_warps}  "
-                f"-> {ms:.3f} ms",
+                f"  [{key}] block_n={block_n:<4} num_warps={num_warps}  -> {ms:.3f} ms",
                 err=True,
             )
         assert best is not None
         per_regime[key] = {"winner": best, "winner_ms": best_ms, "all": results}
         click.echo(
-            f"  [{key}] winner: block_n={best[0]} num_warps={best[1]} "
-            f"({best_ms:.3f} ms)",
+            f"  [{key}] winner: block_n={best[0]} num_warps={best[1]} ({best_ms:.3f} ms)",
             err=True,
         )
 
@@ -531,16 +497,12 @@ def _tune_clause_compact(
 def _print_clause_compact(arch: str, result: dict) -> None:
     bn, nw = result["default"]
     click.echo("")
-    click.echo(
-        "# Paste into retrieve/src/retrieve/kernels/filters/clause_compact.py"
-    )
+    click.echo("# Paste into retrieve/src/retrieve/kernels/filters/clause_compact.py")
     click.echo(f"# Tuned on {arch}; per-regime details in JSON output if --json-out was used.")
     click.echo(f"DEFAULT_CONFIG = ClauseCompactConfig(block_n={bn}, num_warps={nw})")
 
 
-def _tune_bloom_compact(
-    dev: torch.device, regimes: tuple[tuple[int, int, int], ...]
-) -> dict:
+def _tune_bloom_compact(dev: torch.device, regimes: tuple[tuple[int, int, int], ...]) -> dict:
     """Sweep (N, B, W) bloom regimes. Same fresh-buffer-per-call story as
     ``_tune_clause_compact`` — atomic_add is safe across reps."""
     per_regime: dict[str, dict] = {}
@@ -576,15 +538,13 @@ def _tune_bloom_compact(
                 best_ms = ms
                 best = (block_n, num_warps)
             click.echo(
-                f"  [{key}] block_n={block_n:<4} num_warps={num_warps}  "
-                f"-> {ms:.3f} ms",
+                f"  [{key}] block_n={block_n:<4} num_warps={num_warps}  -> {ms:.3f} ms",
                 err=True,
             )
         assert best is not None
         per_regime[key] = {"winner": best, "winner_ms": best_ms, "all": results}
         click.echo(
-            f"  [{key}] winner: block_n={best[0]} num_warps={best[1]} "
-            f"({best_ms:.3f} ms)",
+            f"  [{key}] winner: block_n={best[0]} num_warps={best[1]} ({best_ms:.3f} ms)",
             err=True,
         )
 
@@ -597,9 +557,7 @@ def _tune_bloom_compact(
 def _print_bloom_compact(arch: str, result: dict) -> None:
     bn, nw = result["default"]
     click.echo("")
-    click.echo(
-        "# Paste into retrieve/src/retrieve/kernels/filters/bloom_compact.py"
-    )
+    click.echo("# Paste into retrieve/src/retrieve/kernels/filters/bloom_compact.py")
     click.echo(f"# Tuned on {arch}; per-regime details in JSON output if --json-out was used.")
     click.echo(f"DEFAULT_CONFIG = BloomCompactConfig(block_n={bn}, num_warps={nw})")
 
@@ -715,9 +673,7 @@ def _bloom_regimes(specs: tuple[str, ...]) -> tuple[tuple[int, int, int], ...]:
 @_regime_clause_opt
 @_device_opt
 @_json_out_opt
-def _cmd_clause_mask(
-    regime_specs: tuple[str, ...], device: str, json_out: Path | None
-) -> None:
+def _cmd_clause_mask(regime_specs: tuple[str, ...], device: str, json_out: Path | None) -> None:
     dev = _resolve_device(device)
     arch = _arch_str(dev)
     click.echo(f"# Tuning clause_mask on {arch} ({dev})", err=True)
@@ -730,9 +686,7 @@ def _cmd_clause_mask(
 @_regime_clause_opt
 @_device_opt
 @_json_out_opt
-def _cmd_clause_compact(
-    regime_specs: tuple[str, ...], device: str, json_out: Path | None
-) -> None:
+def _cmd_clause_compact(regime_specs: tuple[str, ...], device: str, json_out: Path | None) -> None:
     dev = _resolve_device(device)
     arch = _arch_str(dev)
     click.echo(f"# Tuning clause_compact on {arch} ({dev})", err=True)
@@ -745,9 +699,7 @@ def _cmd_clause_compact(
 @_regime_bloom_opt
 @_device_opt
 @_json_out_opt
-def _cmd_bloom_compact(
-    regime_specs: tuple[str, ...], device: str, json_out: Path | None
-) -> None:
+def _cmd_bloom_compact(regime_specs: tuple[str, ...], device: str, json_out: Path | None) -> None:
     dev = _resolve_device(device)
     arch = _arch_str(dev)
     click.echo(f"# Tuning bloom_compact on {arch} ({dev})", err=True)

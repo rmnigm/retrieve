@@ -22,14 +22,20 @@ def _build(filter_mode, *, n=512, d=64, n_lists=16, n_probe=4, k=8, c=2, a_max=2
     if filter_mode == "bloom":
         attrs = make_attrs(n, c=c, a_max=a_max)
         return build_silvertorch(
-            embs, filter="bloom", m_bits=512, k_hash=4,
-            item_clause_attrs=attrs, **kw,
+            embs,
+            filter="bloom",
+            m_bits=512,
+            k_hash=4,
+            item_clause_attrs=attrs,
+            **kw,
         )
     if filter_mode == "exact":
         attrs = make_attrs(n, c=c, a_max=a_max)
         return build_silvertorch(
-            embs, filter="exact",
-            item_clause_attrs=attrs, **kw,
+            embs,
+            filter="exact",
+            item_clause_attrs=attrs,
+            **kw,
         )
     return build_silvertorch(embs, **kw)
 
