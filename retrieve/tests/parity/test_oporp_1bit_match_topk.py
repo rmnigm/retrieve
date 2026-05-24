@@ -15,10 +15,29 @@ from retrieve.kernels.linr.oporp_1bit_match_topk import (
 from retrieve.layers.utils.quantize import (
     popcount_int64,
     project_oporp_1bit_query,
+    project_simhash_1bit_query,
     quantize_oporp_1bit,
+    quantize_simhash_1bit,
 )
 from tests.conftest import make_index, make_query
 from tests.parity.conftest import assert_topk_matches
+
+
+def _make_bits(quant: str, embs: torch.Tensor, query: torch.Tensor, k_bits: int):
+    """Build (item_bits, query_bits) for either quantizer at the given k_bits.
+
+    SimHash uses ``r`` instead of ``(signs, perm)``; the kernel only sees
+    ``[N, W]`` int64 bit-words, so the algorithm is opaque to it.
+    """
+    if quant == "oporp":
+        item_bits, signs, perm = quantize_oporp_1bit(embs, seed=0, k_bits=k_bits)
+        query_bits = project_oporp_1bit_query(query, signs, perm, k_bits=k_bits)
+    elif quant == "simhash":
+        item_bits, r = quantize_simhash_1bit(embs, k_bits=k_bits, seed=0)
+        query_bits = project_simhash_1bit_query(query, r)
+    else:
+        raise ValueError(f"unknown quant: {quant}")
+    return item_bits, query_bits
 
 
 def _ref_full(query_bits: torch.Tensor, item_bits: torch.Tensor, k: int):
@@ -65,26 +84,26 @@ def _ref_indices(
     return topk_ids, topk_scores
 
 
+@pytest.mark.parametrize("quant", ["oporp", "simhash"])
 @pytest.mark.parametrize("n,d,k", [(1024, 128, 8), (8192, 128, 32), (4096, 256, 16)])
 @pytest.mark.parametrize("b", [1, 16])
-def test_oporp_1bit_full_matches_torch(n, d, k, b):
+def test_oporp_1bit_full_matches_torch(n, d, k, b, quant):
     embs = make_index(n, d)
     query = make_query(b, d)
-    item_bits, signs, perm = quantize_oporp_1bit(embs, seed=0)
-    query_bits = project_oporp_1bit_query(query, signs, perm)
+    item_bits, query_bits = _make_bits(quant, embs, query, k_bits=d)
 
     out_ids, out_scores = oporp_1bit_match_topk_full(query_bits, item_bits, k)
     ref_ids, ref_scores = _ref_full(query_bits, item_bits, k)
     assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores)
 
 
+@pytest.mark.parametrize("quant", ["oporp", "simhash"])
 @pytest.mark.parametrize("n,d,p,k", [(1024, 128, 128, 8), (8192, 128, 512, 32)])
 @pytest.mark.parametrize("b", [1, 16])
-def test_oporp_1bit_indices_matches_torch(n, d, p, k, b):
+def test_oporp_1bit_indices_matches_torch(n, d, p, k, b, quant):
     embs = make_index(n, d)
     query = make_query(b, d)
-    item_bits, signs, perm = quantize_oporp_1bit(embs, seed=0)
-    query_bits = project_oporp_1bit_query(query, signs, perm)
+    item_bits, query_bits = _make_bits(quant, embs, query, k_bits=d)
 
     g = torch.Generator(device="cuda").manual_seed(n + d + p + k + b)
     pos = torch.randint(0, n, (b, p), generator=g, device="cuda", dtype=torch.long)

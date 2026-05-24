@@ -9,12 +9,14 @@ from retrieve.layers import (
     PostfilterKNNInt8,
     PrefilterKNN,
     SilverTorch,
+    SimHashKNN,
     build_silvertorch,
     combine_indices,
     combine_masks,
     post_filter_topk,
     quantize_int8,
     quantize_oporp_1bit,
+    quantize_simhash_1bit,
 )
 
 __all__ = [
@@ -29,10 +31,12 @@ __all__ = [
     "PostfilterKNNInt8",
     "PrefilterKNN",
     "SilverTorch",
+    "SimHashKNN",
     "build_silvertorch",
     "combine_indices",
     "combine_masks",
     "post_filter_topk",
     "quantize_int8",
     "quantize_oporp_1bit",
+    "quantize_simhash_1bit",
 ]

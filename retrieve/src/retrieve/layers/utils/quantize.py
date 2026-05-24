@@ -81,48 +81,126 @@ def _pack_signs_to_int64(values: Tensor) -> Tensor:
 def quantize_oporp_1bit(
     embs: Tensor,
     seed: int = 0,
+    k_bits: int = 0,
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Sign-OPORP 1-bit quantization.
 
     OPORP = One Permutation + One Random projection (Li et al., 2019). For each
-    item ``x``, the projection is ``(signs * x)[perm]``; the result is then
-    sign-quantized and packed into 64-bit words. Cheap: O(D) state, not O(D²).
+    item ``x``, the projection is ``(signs * x)[perm]``, then binned into
+    ``k_bits`` groups of ``D / k_bits`` and summed, L2-normalized, and
+    sign-quantized into packed 64-bit words. Cheap: O(D) state, not O(D²).
+
+    ``k_bits=0`` (the default) resolves to ``D`` — the operating point at
+    which the bin-sum is the identity reshape and output bits equal
+    ``sign((signs * x)[perm])``. At ``k_bits = D`` the L2 normalize divides
+    each row by a positive scalar and ``sign(x/|x|) = sign(x)``, so the L2
+    step is a no-op on the bits and the output is byte-identical to the
+    pre-fix implementation. Choose ``k_bits < D`` (must divide ``D`` and be
+    a multiple of 64) to follow the paper's full sketch — a smaller bit
+    budget at higher distortion.
 
     Returns:
-        bits: ``[N, W]`` int64 packed sign bits, ``W = D // 64``.
+        bits: ``[N, k_bits // 64]`` int64 packed sign bits.
         signs: ``[D]`` int8 in {-1, +1} — Rademacher sign vector.
         perm: ``[D]`` int64 — permutation applied after the sign flip.
 
-    Apply the same ``(signs, perm)`` to a query via ``project_oporp_1bit_query``
-    to land in the same bit space. Similarity is then
-    ``D - 2 * popcount(query_bits ^ item_bits)``.
+    Apply the same ``(signs, perm, k_bits)`` to a query via
+    ``project_oporp_1bit_query`` to land in the same bit space. Similarity is
+    then ``k_bits - 2 * popcount(query_bits ^ item_bits)``.
     """
     if embs.dim() != 2:
         raise ValueError(f"expected 2-D [N, D] embeddings, got shape {tuple(embs.shape)}")
     n, d = embs.shape
     if d % 64 != 0:
         raise ValueError(f"D must be a multiple of 64 for 1-bit packing, got {d}")
+    if k_bits == 0:
+        k_bits = d
+    if d % k_bits != 0:
+        raise ValueError(f"k_bits must divide D; got k_bits={k_bits}, D={d}")
+    if k_bits % 64 != 0:
+        raise ValueError(f"k_bits must be a multiple of 64, got {k_bits}")
+    b = d // k_bits
     signs, perm = _build_oporp(d, seed, embs.device)
     proj = (embs * signs.to(embs.dtype)).index_select(1, perm)
-    bits = _pack_signs_to_int64(proj)
-    return bits, signs, perm
+    binned = proj.view(n, k_bits, b).sum(dim=-1)
+    sketch = binned / binned.norm(dim=-1, keepdim=True).clamp_min(1e-8)
+    return _pack_signs_to_int64(sketch), signs, perm
 
 
 def project_oporp_1bit_query(
     query: Tensor,
     signs: Tensor,
     perm: Tensor,
+    k_bits: int = 0,
 ) -> Tensor:
     """Apply the same Sign-OPORP projection to a query batch.
 
-    Returns ``[B, W]`` int64 packed sign bits.
+    ``k_bits`` must match the value passed to ``quantize_oporp_1bit`` at
+    register time (``signs`` and ``perm`` are both ``[D]`` and do not encode
+    it). ``k_bits=0`` (the default) resolves to ``D = query.shape[1]`` — the
+    bit-stable operating point.
 
-    Pure tensor flow — multiply, index_select, > 0, reshape, shifted
-    sum. Called from inside ``OneBitKNN.forward``; the eval-side algo
-    wrapper compiles its forward with ``mode="reduce-overhead"``, so
-    this work is captured into the outer cudagraph.
+    Returns ``[B, k_bits // 64]`` int64 packed sign bits.
+
+    Pure tensor flow — multiply, index_select, bin-sum, L2 normalize, > 0,
+    reshape, shifted sum. Called from inside ``OneBitKNN.forward``; the
+    eval-side algo wrapper compiles its forward with ``mode="reduce-overhead"``,
+    so this work is captured into the outer cudagraph.
     """
     if query.dim() != 2:
         raise ValueError(f"expected 2-D [B, D] query, got shape {tuple(query.shape)}")
+    b_size, d = query.shape
+    if k_bits == 0:
+        k_bits = d
+    if d % k_bits != 0:
+        raise ValueError(f"k_bits must divide D; got k_bits={k_bits}, D={d}")
+    if k_bits % 64 != 0:
+        raise ValueError(f"k_bits must be a multiple of 64, got {k_bits}")
+    bin_w = d // k_bits
     proj = (query * signs.to(query.dtype)).index_select(1, perm)
-    return _pack_signs_to_int64(proj)
+    binned = proj.view(b_size, k_bits, bin_w).sum(dim=-1)
+    sketch = binned / binned.norm(dim=-1, keepdim=True).clamp_min(1e-8)
+    return _pack_signs_to_int64(sketch)
+
+
+def _build_simhash_R(d: int, k_bits: int, seed: int, device: torch.device) -> Tensor:
+    g = torch.Generator(device=device).manual_seed(int(seed))
+    return torch.randn(k_bits, d, generator=g, device=device)
+
+
+def quantize_simhash_1bit(
+    embs: Tensor,
+    k_bits: int,
+    seed: int = 0,
+) -> tuple[Tensor, Tensor]:
+    """SimHash 1-bit quantization (Charikar 2002 / Manku 2007).
+
+    Each output bit = ``sign(r_j · x)`` for independent ``r_j ~ N(0, I_D)``.
+    Cost is one fp32 matmul plus a bit-pack. Unlike Sign-OPORP at ``k = D``,
+    SimHash admits ``k_bits > D`` for recall-vs-memory trades the OPORP family
+    cannot reach — each output bit mixes all input coordinates.
+
+    Returns:
+        bits: ``[N, k_bits // 64]`` int64 packed sign bits.
+        r: ``[k_bits, D]`` fp32 Gaussian projection matrix.
+
+    Apply the same ``r`` to a query via ``project_simhash_1bit_query`` to land
+    in the same bit space. Similarity is then
+    ``k_bits - 2 * popcount(query_bits ^ item_bits)``.
+    """
+    if embs.dim() != 2:
+        raise ValueError(f"expected 2-D [N, D] embeddings, got shape {tuple(embs.shape)}")
+    if k_bits % 64 != 0:
+        raise ValueError(f"k_bits must be a multiple of 64, got {k_bits}")
+    r = _build_simhash_R(embs.shape[1], k_bits, seed, embs.device)
+    return _pack_signs_to_int64(embs @ r.t()), r
+
+
+def project_simhash_1bit_query(query: Tensor, r: Tensor) -> Tensor:
+    """Apply the same SimHash projection to a query batch.
+
+    Returns ``[B, k_bits // 64]`` int64 packed sign bits.
+    """
+    if query.dim() != 2:
+        raise ValueError(f"expected 2-D [B, D] query, got shape {tuple(query.shape)}")
+    return _pack_signs_to_int64(query @ r.t())

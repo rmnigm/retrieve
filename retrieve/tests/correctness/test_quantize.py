@@ -1,14 +1,19 @@
-"""Quantizer correctness: int8 roundtrip and 1-bit Sign-OPORP properties."""
+"""Quantizer correctness: int8 roundtrip and 1-bit Sign-OPORP / SimHash properties."""
 
 from __future__ import annotations
 
+import pytest
 import torch
 
 from retrieve.layers.utils.quantize import (
+    _build_oporp,
+    _pack_signs_to_int64,
     popcount_int64,
     project_oporp_1bit_query,
+    project_simhash_1bit_query,
     quantize_int8,
     quantize_oporp_1bit,
+    quantize_simhash_1bit,
 )
 from tests.conftest import make_index, make_query
 
@@ -200,3 +205,157 @@ def test_popcount_int64_rejects_non_int64():
     except TypeError:
         return
     raise AssertionError("expected TypeError for non-int64 input")
+
+
+# ---------------------------------------------------------------------------
+# OPORP k_bits parameter: regression at default, paper-faithful at k_bits<D.
+# ---------------------------------------------------------------------------
+
+
+def _oporp_legacy_bits(embs: torch.Tensor, seed: int) -> torch.Tensor:
+    """Reference for the pre-fix Sign-OPORP path: no bin-sum, no L2."""
+    signs, perm = _build_oporp(embs.shape[1], seed, embs.device)
+    proj = (embs * signs.to(embs.dtype)).index_select(1, perm)
+    return _pack_signs_to_int64(proj)
+
+
+def test_oporp_default_kbits_matches_today():
+    """Regression: default k_bits → bits byte-identical to the pre-fix path
+    (Rademacher signs cancel in XOR, perm is a popcount-axis bijection, and
+    the L2 normalize divides by a positive scalar — sign-invariant)."""
+    embs = make_index(n=512, d=128, seed=0)
+    legacy = _oporp_legacy_bits(embs, seed=0)
+    new_default, _, _ = quantize_oporp_1bit(embs, seed=0)
+    assert torch.equal(legacy, new_default)
+
+
+def test_oporp_kbits_lt_d_matches_torch_reference():
+    """k_bits=64 on D=128: lib output equals a pure-torch paper-pipeline
+    reference (bin-sum → L2 normalize → sign-pack). Covers both item and
+    query paths."""
+    embs = make_index(n=128, d=128, seed=0)
+    query = make_query(b=8, d=128, seed=1)
+    k_bits = 64
+
+    bits, signs, perm = quantize_oporp_1bit(embs, seed=3, k_bits=k_bits)
+
+    # Pure-torch reference (item side).
+    proj = (embs * signs.to(embs.dtype)).index_select(1, perm)
+    binned_ref = proj.view(embs.shape[0], k_bits, 128 // k_bits).sum(dim=-1)
+    sketch_ref = binned_ref / binned_ref.norm(dim=-1, keepdim=True).clamp_min(1e-8)
+    bits_ref = _pack_signs_to_int64(sketch_ref)
+    assert bits.shape == (128, k_bits // 64)
+    assert torch.equal(bits, bits_ref)
+
+    # Query path mirrors.
+    q_bits = project_oporp_1bit_query(query, signs, perm, k_bits=k_bits)
+    qproj = (query * signs.to(query.dtype)).index_select(1, perm)
+    qbin = qproj.view(query.shape[0], k_bits, 128 // k_bits).sum(dim=-1)
+    qsketch = qbin / qbin.norm(dim=-1, keepdim=True).clamp_min(1e-8)
+    q_ref = _pack_signs_to_int64(qsketch)
+    assert torch.equal(q_bits, q_ref)
+
+
+@pytest.mark.parametrize("k_bits", [128, 64])
+def test_oporp_l2_normalize_is_bit_invariant(k_bits):
+    """L2 normalize divides each row by a positive scalar — sign-invariant.
+    Bits with the L2 step equal bits without it. Pins the paper-faithful +
+    bit-stable property at any k_bits."""
+    d = 128
+    embs = make_index(n=64, d=d, seed=5)
+    bits_with_l2, signs, perm = quantize_oporp_1bit(embs, seed=2, k_bits=k_bits)
+
+    # Reference: same pipeline but skip the L2 normalize.
+    proj = (embs * signs.to(embs.dtype)).index_select(1, perm)
+    binned = proj.view(embs.shape[0], k_bits, d // k_bits).sum(dim=-1)
+    bits_without_l2 = _pack_signs_to_int64(binned)
+
+    assert torch.equal(bits_with_l2, bits_without_l2)
+
+
+def test_oporp_kbits_validation():
+    """Raise on indivisible k_bits and on k_bits not a multiple of 64."""
+    embs = make_index(n=4, d=128, seed=0)
+    with pytest.raises(ValueError, match="k_bits must divide D"):
+        quantize_oporp_1bit(embs, k_bits=96)  # 128 % 96 != 0
+    with pytest.raises(ValueError, match="multiple of 64"):
+        quantize_oporp_1bit(embs, k_bits=32)  # divides 128 but not %64==0
+
+    # Query path mirrors the same validation.
+    _, signs, perm = quantize_oporp_1bit(embs, k_bits=128)
+    query = make_query(b=2, d=128, seed=1)
+    with pytest.raises(ValueError, match="k_bits must divide D"):
+        project_oporp_1bit_query(query, signs, perm, k_bits=96)
+    with pytest.raises(ValueError, match="multiple of 64"):
+        project_oporp_1bit_query(query, signs, perm, k_bits=32)
+
+
+# ---------------------------------------------------------------------------
+# SimHash 1-bit quantization.
+# ---------------------------------------------------------------------------
+
+
+def test_simhash_shapes_and_dtypes():
+    embs = make_index(n=256, d=128, seed=0)
+    bits, r = quantize_simhash_1bit(embs, k_bits=256, seed=0)
+    assert bits.dtype == torch.int64
+    assert bits.shape == (256, 256 // 64)
+    assert r.dtype == torch.float32
+    assert r.shape == (256, 128)
+
+
+def test_simhash_query_consistency():
+    """Applying ``project_simhash_1bit_query`` to ``embs`` reproduces the
+    register-time bits (mirrors ``test_oporp_query_consistency``)."""
+    embs = make_index(n=64, d=128, seed=0)
+    query = make_query(b=4, d=128, seed=1)
+    bits, r = quantize_simhash_1bit(embs, k_bits=256, seed=11)
+
+    bits_via_query_path = project_simhash_1bit_query(embs, r)
+    assert torch.equal(bits, bits_via_query_path)
+
+    q_bits = project_simhash_1bit_query(query, r)
+    assert q_bits.shape == (4, 256 // 64)
+    assert q_bits.dtype == torch.int64
+
+
+def test_simhash_dot_product_proxy():
+    """At k_bits = 4D, SimHash Hamming similarity should correlate with
+    cosine similarity (per-row Pearson > 0.5) on isotropic data."""
+    d = 128
+    embs = make_index(n=512, d=d, seed=0)
+    query = make_index(n=8, d=d, seed=1)
+
+    k_bits = 4 * d
+    bits, r = quantize_simhash_1bit(embs, k_bits=k_bits, seed=7)
+    q_bits = project_simhash_1bit_query(query, r)
+
+    xor = q_bits.unsqueeze(1) ^ bits.unsqueeze(0)
+    d_total = 64 * bits.shape[1]
+    hamming_sim = (d_total - 2 * popcount_int64(xor).sum(dim=-1)).to(torch.float32)
+    cosine = query @ embs.t()
+
+    for i in range(query.shape[0]):
+        h = hamming_sim[i] - hamming_sim[i].mean()
+        c = cosine[i] - cosine[i].mean()
+        denom = (h.norm() * c.norm()).clamp_min(1e-8)
+        corr = (h * c).sum() / denom
+        assert corr > 0.5, f"row {i}: corr={corr:.3f} too low"
+
+
+def test_simhash_kbits_validation():
+    embs = make_index(n=4, d=128, seed=0)
+    with pytest.raises(ValueError, match="multiple of 64"):
+        quantize_simhash_1bit(embs, k_bits=100)
+
+
+def test_simhash_seed_determinism():
+    """Same seed → identical (bits, R); different seed → different R."""
+    embs = make_index(n=64, d=128, seed=0)
+    a_bits, a_r = quantize_simhash_1bit(embs, k_bits=128, seed=42)
+    b_bits, b_r = quantize_simhash_1bit(embs, k_bits=128, seed=42)
+    assert torch.equal(a_bits, b_bits)
+    assert torch.equal(a_r, b_r)
+
+    _, c_r = quantize_simhash_1bit(embs, k_bits=128, seed=43)
+    assert not torch.equal(a_r, c_r)
