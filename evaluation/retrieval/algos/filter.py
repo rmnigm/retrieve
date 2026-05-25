@@ -60,13 +60,10 @@ def make_mask(
     """Per-batch ``[B, N]`` bool mask for algos that consume one.
 
     Returns ``None`` if either input is ``None`` (unfiltered cell or
-    pure-IVF batch). Item 0 is the padding row (``item_embs[0] = 0``)
-    and the filtered-FullScan oracle sets ``scores[:, 0] = -inf``;
-    forcing the sentinel False here keeps every algo's mask in agreement
-    with the oracle even when reverse clauses would otherwise admit it.
+    pure-IVF batch). The retrieve library is 0-indexed over real items
+    (training-side padding row is dropped at the loaders boundary), so
+    no item-0 fixup is needed here.
     """
     if filter_mod is None or qa_narrow is None:
         return None
-    m = filter_mod.evaluate_mask(qa_narrow)
-    m[:, 0] = False
-    return m
+    return filter_mod.evaluate_mask(qa_narrow)

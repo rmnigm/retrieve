@@ -36,10 +36,13 @@ def compute_filtered_oracle(
 ) -> torch.Tensor:
     """Brute-force filtered FullScan: returns ``[N_users, K_GT]`` int64 ids.
 
-    Skipped rows get all -1. ``id 0`` is masked out (padding row of
-    ``item_embs``). ``filter_mod`` must be an *exact* mask source — i.e.
-    ``ExactAttributeFilter`` even on bloom-suite runs, so bloom's false
-    positives do not leak into the ground truth.
+    Skipped rows get all -1. ``filter_mod`` must be an *exact* mask
+    source — i.e. ``ExactAttributeFilter`` even on bloom-suite runs, so
+    bloom's false positives do not leak into the ground truth.
+
+    Indices are 0-indexed positions in the (already pad-row-dropped)
+    ``item_embs`` — the loaders strip the training-side padding row
+    before any retrieval-time tensor leaves the harness.
     """
     n_users = queries.shape[0]
     out = torch.full((n_users, K_GT), -1, dtype=torch.long)
@@ -68,7 +71,6 @@ def compute_filtered_oracle(
         scores = q @ item_embs_t
         if mask is not None:
             scores = scores.masked_fill(~mask, float("-inf"))
-        scores[:, 0] = float("-inf")
         topk = torch.topk(scores, K_eff, dim=1)
         # When the filter passes fewer than K_eff items, the bottom slots tie
         # at -inf and torch.topk picks the lowest-indexed padding items
@@ -101,12 +103,15 @@ def load_or_build_oracle(
 ) -> torch.Tensor:
     """Load cached oracle from disk; recompute and cache on shape mismatch.
 
-    Disk cache lives at ``<gt_dir>/gt_topk_<sweep_name>.pt``. A stale cache
-    (different ``n_users`` or ``K_GT``) is recomputed and overwritten — the
-    common cause is changing ``content_subdir`` between runs (item_embs
-    differ → oracle scores differ).
+    Disk cache lives at ``<gt_dir>/gt_topk_v2_<sweep_name>.pt``. The
+    ``_v2`` suffix invalidates pre-pad-drop caches written under the
+    legacy ``[N+1, D]`` layout — those stored 1-indexed item_ids and
+    would mismatch every algo's 0-indexed top-K under the new layout.
+    A stale cache (different ``n_users`` or ``K_GT``) is recomputed and
+    overwritten — the common cause is changing ``content_subdir`` between
+    runs (item_embs differ → oracle scores differ).
     """
-    gt_path = gt_dir / f"gt_topk_{sweep_name}.pt"
+    gt_path = gt_dir / f"gt_topk_v2_{sweep_name}.pt"
     oracle_topk: torch.Tensor | None = None
     if gt_path.exists():
         oracle_topk = torch.load(str(gt_path), map_location="cpu")

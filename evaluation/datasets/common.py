@@ -25,9 +25,13 @@ def synthesize_qa_narrow(
     """Build per-user `query_attrs_narrow` of shape `[n_users, n_clauses]`.
 
     For each clause `c`, take the first non-pad value of
-    `narrow_t[target, c, :]` (i.e. the most-frequent or first-listed
+    `narrow_t[target - 1, c, :]` (i.e. the most-frequent or first-listed
     attribute the held-out target carries). Users with `target <= 0`
     (no held-out item) get all `-1`.
+
+    ``narrow_t`` is the ``[N, n_clauses, A]`` 0-indexed dense item-attr
+    tensor (row ``i`` = item_id ``i + 1``). ``target_first[u]`` is a
+    1-indexed item_id (matching ``item_id_map.json``).
     """
     n_users = len(target_first)
     qa = torch.full((n_users, n_clauses), -1, dtype=torch.long)
@@ -35,7 +39,7 @@ def synthesize_qa_narrow(
         if tgt <= 0:
             continue
         for c in range(n_clauses):
-            row = narrow_t[tgt, c]
+            row = narrow_t[tgt - 1, c]
             for v in row.tolist():
                 if v != -1:
                     qa[u, c] = v
@@ -67,12 +71,14 @@ def sample_rare_biased_wide(
     n_drop_1 = 0
     n_drop_2 = 0
     wide_np = wide_t.numpy()
+    # ``wide_t`` is ``[N, 1, BAG]`` 0-indexed dense; ``tgt`` is a 1-indexed
+    # item_id, so index at ``tgt - 1``.
     for u, tgt in enumerate(target_first):
         if tgt <= 0:
             n_drop_1 += 1
             n_drop_2 += 1
             continue
-        bag = wide_np[tgt, 0]
+        bag = wide_np[tgt - 1, 0]
         bag = bag[bag != -1]
         if len(bag) == 0:
             n_drop_1 += 1

@@ -138,15 +138,15 @@ def _build_csr_members(
     """Build CSR (offsets, members) for a per-item cluster assignment.
 
     ``assignment`` is ``[N_real]`` int32 with values in ``[0, k)``. The members
-    list stores **item_ids** (1-indexed) — i.e. ``sort_idx + 1`` so callers
-    can index directly into ``text_emb`` (which has a zero pad row at index 0).
+    list stores 0-indexed positions into ``text_emb`` (no padding row;
+    ``text_emb`` is ``[N, D]`` real items only).
     """
     a64 = assignment.to(torch.int64)
     sort_idx = torch.argsort(a64, stable=True).to(torch.int32)
     offsets = torch.zeros(k + 1, dtype=torch.int64)
     counts = torch.bincount(a64, minlength=k)
     offsets[1:] = counts.cumsum(0)
-    cluster_members = sort_idx + 1
+    cluster_members = sort_idx
     return offsets, cluster_members
 
 
@@ -188,8 +188,8 @@ def cmd_cluster(args) -> int:
     t0 = time.monotonic()
 
     text_emb = torch.load(str(text_emb_path), map_location=device)
-    text_emb[0] = 0.0
-    items = text_emb[1:]
+    # text_emb is [N, D] — no padding row (writer drops it at the boundary).
+    items = text_emb
     n_real, d = items.shape
     k = args.n_clusters if args.n_clusters else max(2, int(n_real**0.5))
     print(f"  n_real={n_real:,} dim={d} k={k}", flush=True)
@@ -200,15 +200,11 @@ def cmd_cluster(args) -> int:
 
     cluster_offsets, cluster_members = _build_csr_members(assignment.cpu(), k)
 
-    # Compose full N+1 assignment with a -1 sentinel at row 0.
-    assignment_full = torch.full((n_real + 1,), -1, dtype=torch.int32)
-    assignment_full[1:] = assignment.cpu()
-
     out_path = source_content / "clusters.pt"
     torch.save(
         {
             "centroids": centroids.cpu(),
-            "assignment": assignment_full,
+            "assignment": assignment.cpu().to(torch.int32),
             "cluster_offsets": cluster_offsets,
             "cluster_members": cluster_members,
             "n_clusters": int(k),
@@ -266,14 +262,13 @@ def cmd_synth(args) -> int:
 
     print("STEP load source text_emb + clusters", flush=True)
     text_emb = torch.load(str(text_emb_path), map_location=device)
-    text_emb[0] = 0.0
-    n_real_plus_one, dim = text_emb.shape
-    n_real = n_real_plus_one - 1
+    # text_emb is [N_real, D] — no padding row.
+    n_real, dim = text_emb.shape
     if args.target_n < n_real:
         print(f"ERROR target-n={args.target_n} < n_real={n_real}", flush=True)
         return 1
     n_synth = args.target_n - n_real
-    n_total_plus_one = args.target_n + 1
+    n_total = args.target_n
     print(
         f"  n_real={n_real:,} dim={dim} target_n={args.target_n:,} "
         f"n_synth={n_synth:,}",
@@ -305,16 +300,16 @@ def cmd_synth(args) -> int:
     print("STEP load source narrow attrs", flush=True)
     source_narrow = torch.load(str(source_narrow_path), map_location="cpu")
 
-    narrow_bytes = n_total_plus_one * C_NARROW * A_MAX_NARROW * 8
+    narrow_bytes = n_total * C_NARROW * A_MAX_NARROW * 8
     print(
-        f"  allocating target narrow [{n_total_plus_one}, {C_NARROW}, {A_MAX_NARROW}] "
+        f"  allocating target narrow [{n_total}, {C_NARROW}, {A_MAX_NARROW}] "
         f"≈ {narrow_bytes / 1e9:.2f} GB",
         flush=True,
     )
     target_narrow = torch.empty(
-        (n_total_plus_one, C_NARROW, A_MAX_NARROW), dtype=torch.long
+        (n_total, C_NARROW, A_MAX_NARROW), dtype=torch.long
     )
-    target_narrow[:n_real_plus_one] = source_narrow
+    target_narrow[:n_real] = source_narrow
 
     def _gen_synth_block(
         n_block: int,
@@ -360,16 +355,16 @@ def cmd_synth(args) -> int:
         flush=True,
     )
     pbar = tqdm(total=n_synth, desc="synth", unit="items")
-    while item_offset < n_total_plus_one:
-        end = min(item_offset + args.shard_size, n_total_plus_one)
+    while item_offset < n_total:
+        end = min(item_offset + args.shard_size, n_total)
         shard_rows = end - item_offset
         shard_buf = torch.empty((shard_rows, dim), dtype=torch.float16)
 
-        real_lo, real_hi = item_offset, min(end, n_real_plus_one)
+        real_lo, real_hi = item_offset, min(end, n_real)
         if real_hi > real_lo:
             shard_buf[: real_hi - real_lo] = text_emb[real_lo:real_hi].cpu()
 
-        synth_lo = max(item_offset, n_real_plus_one)
+        synth_lo = max(item_offset, n_real)
         synth_hi = end
         n_synth_in_shard = synth_hi - synth_lo
         shard_pos = synth_lo - item_offset
@@ -382,7 +377,7 @@ def cmd_synth(args) -> int:
             pick_a = torch.rand(sub_n, generator=g_cpu) < 0.5
             inherit_ids = torch.where(pick_a, parent_a, parent_b)
 
-            synth_id_lo = n_real_plus_one + synth_offset
+            synth_id_lo = n_real + synth_offset
             synth_id_hi = synth_id_lo + sub_n
             target_narrow[synth_id_lo:synth_id_hi] = source_narrow[inherit_ids]
 
@@ -435,14 +430,14 @@ def cmd_synth(args) -> int:
 
     print("STEP write shard_index.json", flush=True)
     shard_index = {
-        "n_items_plus_one": int(n_total_plus_one),
+        "n_items": int(n_total),
         "dim": int(dim),
         "dtype": "float16",
         "shard_size": int(args.shard_size),
         "n_shards": len(shards_meta),
         "shards": shards_meta,
-        "n_real_plus_one": int(n_real_plus_one),
-        "synth_id_range": [int(n_real_plus_one), int(args.target_n)],
+        "n_real": int(n_real),
+        "synth_id_range": [int(n_real), int(args.target_n)],
         "source_dir": str(source),
         "source_content_subdir": args.source_content_subdir,
         "seed": int(args.seed),
