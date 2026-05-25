@@ -83,16 +83,16 @@ def assert_arxiv_prefixes(content_dir: Path) -> None:
 def _load_sharded_text_emb(
     shard_index_path: Path, device: torch.device
 ) -> torch.Tensor:
-    """Reassemble ``content/text_emb_shard_*.pt`` into one ``[N+1, D]`` tensor.
+    """Reassemble ``content/text_emb_shard_*.pt`` into one ``[N, D]`` tensor.
 
     Synth catalogs from ``evaluation/datasets/synth_arxiv.py`` write the item
     embeddings sharded so the per-file size stays under torch's implicit
     serialization ceilings; the sidecar ``shard_index.json`` lists shard
-    offsets and lengths.
+    offsets and lengths. The shards are real items only — no padding row.
     """
     with open(shard_index_path) as f:
         idx = json.load(f)
-    n = int(idx["n_items_plus_one"])
+    n = int(idx["n_items"])
     d = int(idx["dim"])
     dtype = getattr(torch, idx["dtype"])
     if n > 100_000_000 and device.type == "cuda":
@@ -131,8 +131,14 @@ def load_pre_encoded_arxiv(
     reassembles them on the fly. Otherwise loads the single-file layout
     written by the upstream arxiv ETL.
 
-    Returns ``(item_embs [N+1, D] on device, queries [N_users, D] on cpu,
+    Returns ``(item_embs [N, D] on device, queries [N_users, D] on cpu,
     targets [N_users, 1] on cpu, num_targets [N_users] on cpu)``.
+
+    The on-disk text_emb is ``[N, D]`` — real items only (the dataset
+    builders 0-index over real items; the training-side padding-token
+    convention lives only inside the encoder's ``nn.Embedding``).
+    Held-out target ids in heldout.parquet are stored as 1-indexed item
+    ids and are shifted ``-1`` here to align with the 0-indexed layout.
     """
     content_dir = data_path / cfg.content_subdir
     assert_arxiv_prefixes(content_dir)
@@ -143,7 +149,6 @@ def load_pre_encoded_arxiv(
     else:
         text_emb_path = content_dir / "text_emb.pt"
         item_embs = torch.load(str(text_emb_path), map_location=device)
-    item_embs[0] = 0.0
     # fp16 on disk → fp32 on device for oracle math
     item_embs = item_embs.float().contiguous()
     item_embs = F.normalize(item_embs, dim=-1)
@@ -164,7 +169,9 @@ def load_pre_encoded_arxiv(
 
     heldout = pl.read_parquet(heldout_path)
     n_users = heldout.height
-    target_ids = torch.tensor(heldout["item_id"].to_list(), dtype=torch.long).unsqueeze(-1)
+    # heldout stores 1-indexed item_ids (the encoder's pad-aware space);
+    # shift to the 0-indexed layout that matches the sliced item_embs.
+    target_ids = torch.tensor(heldout["item_id"].to_list(), dtype=torch.long).unsqueeze(-1) - 1
     n_targets = torch.ones(n_users, dtype=torch.long)
 
     queries = torch.load(str(query_emb_path), map_location="cpu")
@@ -196,8 +203,11 @@ def load_sasrec_embeddings(
 
     model = load_model_for_eval(ckpt_path, num_items=num_items, device=device)
     item_embs = model.get_output_embeddings().weight.detach().to(device).contiguous()
-    item_embs[0] = 0.0
-    logger.info("item_embs shape={} dtype={}", tuple(item_embs.shape), item_embs.dtype)
+    # Drop the training-side padding row (item_id 0). The encoder still
+    # needs row 0 in its embedding table for sequence-padding lookups,
+    # but retrieval is 0-indexed over real items only.
+    item_embs = item_embs[1:].contiguous()
+    logger.info("item_embs shape={} dtype={} (pad row dropped)", tuple(item_embs.shape), item_embs.dtype)
 
     eval_parquet = data_path / f"{cfg.split}.parquet"
     queries, targets, n_targets = encode_queries(
@@ -208,6 +218,10 @@ def load_sasrec_embeddings(
         num_workers=cfg.encode.num_workers,
         device=device,
     )
+    # encode_queries returns 1-indexed item_ids padded with -1; shift the
+    # real ids by -1 to match the sliced item_embs layout, leaving the -1
+    # padding sentinel as-is.
+    targets = torch.where(targets >= 0, targets - 1, targets)
     logger.info("encoded queries: {} users, dim={}", queries.shape[0], queries.shape[1])
     del model
     if torch.cuda.is_available():
@@ -314,6 +328,8 @@ def load_filter_assets(
         item_attrs_narrow = torch.load(
             str(resolve_path(data_dir, fcfg.attrs_path)), map_location=device
         )
+        # item_attrs_narrow is [N, C, A] 0-indexed dense (the dataset
+        # builders write real items only). No slice needed.
         if fcfg.reverse_path:
             clause_is_reverse = torch.load(
                 str(resolve_path(data_dir, fcfg.reverse_path)), map_location=device

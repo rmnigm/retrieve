@@ -1,6 +1,10 @@
 _defaults: &defaults
   data_dir: data/goodreads-work-id
   output: results/deep_sweeps/goodreads-d128-linr_v3
+  # Share the d128 oracle cache with config/goodreads/d128-filter.yaml — same
+  # checkpoint, same item_embs. Per-dim slot to avoid colliding with d64/d256
+  # under the shared data_dir.
+  gt_subdir: gt_d128
   split: test
   device: cuda
   ks: [100, 200, 400]

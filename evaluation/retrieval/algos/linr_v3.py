@@ -71,11 +71,9 @@ class LinrV3Algo(nn.Module):
             # intermediate. On backend="triton" this is the clause_compact /
             # bloom_compact custom_op; on backend="torch" it falls back to
             # compact_mask(evaluate_mask(...)). Either way: one filter call,
-            # one place. The item-0 padding-row sentinel that filter.make_mask
-            # applies is omitted here on purpose — item 0 is the zero vector,
-            # so stage 2's fp32 rerank assigns it score 0 and it never ranks
-            # in the final top-K (cascade-vs-oracle parity confirmed by the
-            # eval-side recall@k checks).
+            # one place. The retrieve library is 0-indexed over real items
+            # (loaders.py drops the training-side padding row), so no item-0
+            # fixup is needed.
             pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
             cand_ids, _ = self.stage1(q, candidate_ids=pos_idx, counts=pcounts)
         else:

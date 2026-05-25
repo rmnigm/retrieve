@@ -679,8 +679,8 @@ def cmd_prep(args) -> int:
 #
 # Writes:
 #
-#     item_attrs_narrow.pt       [N+1, 5, 4] int64 ; row 0 = -1 padding
-#     item_attrs_wide.pt         [N+1, 1, 32] int64 ; row 0 = -1 padding
+#     item_attrs_narrow.pt       [N, 5, 4] int64 ; 0-indexed dense (row i = item_id i+1)
+#     item_attrs_wide.pt         [N, 1, 32] int64 ; 0-indexed dense (row i = item_id i+1)
 #     clause_is_reverse_narrow.pt [5] bool = [F, T, F, F, F]
 #     lang_vocab.json
 #     format_vocab.json
@@ -1081,8 +1081,8 @@ def cmd_attrs(args) -> int:
         .join(a_per_work, on="item_id", how="left")
     )
 
-    # Materialize as int64 [N+1, 5, 4] tensor (row 0 = all -1).
-    narrow_t = torch.full((n_items + 1, C_NARROW, A_MAX_NARROW), -1, dtype=torch.long)
+    # [N, 5, 4] 0-indexed dense (row i = item_id i+1); no padding row.
+    narrow_t = torch.full((n_items, C_NARROW, A_MAX_NARROW), -1, dtype=torch.long)
     item_id_arr = narrow["item_id"].to_numpy()
     g0 = narrow["c0_genre"].to_list()
     c1l = narrow["c1_lang"].to_list()
@@ -1091,33 +1091,34 @@ def cmd_attrs(args) -> int:
     c4a = narrow["c4_author"].to_list()
     cov = [0, 0, 0, 0, 0]
     for row_i, item_id in enumerate(item_id_arr.tolist()):
+        pos = item_id - 1
         # C0
         gv = g0[row_i] or []
         if gv:
             cov[0] += 1
             for j, v in enumerate(gv[:A_MAX_NARROW]):
-                narrow_t[item_id, 0, j] = int(v)
+                narrow_t[pos, 0, j] = int(v)
         # C1
         v = c1l[row_i]
         if v is not None:
             cov[1] += 1
-            narrow_t[item_id, 1, 0] = int(v)
+            narrow_t[pos, 1, 0] = int(v)
         # C2
         v = c2f[row_i]
         if v is not None:
             cov[2] += 1
-            narrow_t[item_id, 2, 0] = int(v)
+            narrow_t[pos, 2, 0] = int(v)
         # C3
         v = c3y[row_i]
         if v is not None:
             cov[3] += 1
-            narrow_t[item_id, 3, 0] = int(v)
+            narrow_t[pos, 3, 0] = int(v)
         # C4
         av = c4a[row_i] or []
         if av:
             cov[4] += 1
             for j, v in enumerate(av[:A_MAX_NARROW]):
-                narrow_t[item_id, 4, j] = int(v)
+                narrow_t[pos, 4, j] = int(v)
 
     coverage = {f"c{i}": round(cov[i] / max(n_items, 1), 4) for i in range(5)}
     log["narrow_coverage"] = coverage
@@ -1207,7 +1208,8 @@ def cmd_attrs(args) -> int:
         .group_by("item_id", maintain_order=True)
         .agg(pl.col("shelf_id").head(WIDE_BAG_SIZE).alias("shelf_ids"))
     )
-    wide_t = torch.full((n_items + 1, 1, WIDE_BAG_SIZE), -1, dtype=torch.long)
+    # [N, 1, BAG] 0-indexed dense (row i = item_id i+1); no padding row.
+    wide_t = torch.full((n_items, 1, WIDE_BAG_SIZE), -1, dtype=torch.long)
     wide_cov = 0
     wide_bag_size_hist = [0] * (WIDE_BAG_SIZE + 1)
     for row in work_shelf_ids.iter_rows(named=True):
@@ -1218,7 +1220,7 @@ def cmd_attrs(args) -> int:
             wide_cov += 1
         wide_bag_size_hist[min(len(bag), WIDE_BAG_SIZE)] += 1
         for j, v in enumerate(bag):
-            wide_t[item_id, 0, j] = int(v)
+            wide_t[item_id - 1, 0, j] = int(v)
     log["wide_coverage"] = round(wide_cov / max(n_items, 1), 4)
     log["wide_bag_size_hist"] = wide_bag_size_hist
     print(

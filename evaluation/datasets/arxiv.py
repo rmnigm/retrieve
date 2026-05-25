@@ -363,8 +363,11 @@ def _encode_with_prefix(
 ) -> dict:
     """Shared encode pass for items and queries.
 
-    For items: ``item_ids`` is range(1, N+1), `n_rows_out = N+1`, output
-    is `[N+1, D]` indexed by item_id (row 0 is zero padding).
+    For items: ``item_ids`` is range(1, N+1), `n_rows_out = N`, output
+    is `[N, D]` indexed by ``item_id - 1`` (0-indexed dense layout, no
+    padding row — the training-side ``padding_idx=0`` convention lives
+    only inside the encoder's ``nn.Embedding``; retrieval files are
+    real-items-only).
 
     For queries: ``item_ids`` is the held-out item_ids in heldout.parquet
     row order, `n_rows_out = N_heldout`, output is `[N_heldout, D]`
@@ -490,16 +493,15 @@ def _encode_with_prefix(
     # Scatter into the final d_max output tensor.
     out_dmax = torch.zeros((n_rows_out, d_max), dtype=torch.float16)
     if out_basename == "text_emb":
-        # Items: scatter by item_id (row 0 stays zero-padded for item_id=0).
+        # Items: 1-indexed item_ids stored at the 0-indexed dense position
+        # ``item_id - 1``. No padding row — retrieval files are real-items-only.
         for j, k in enumerate(valid_local_idx):
             iid = int(item_ids[k])
-            out_dmax[iid] = text_emb_local[j]
-        skip_row0 = True
+            out_dmax[iid - 1] = text_emb_local[j]
     else:
         # Queries: scatter by heldout-row index.
         for j, k in enumerate(valid_local_idx):
             out_dmax[k] = text_emb_local[j]
-        skip_row0 = False
 
     last_meta: dict = {}
     for k in dims_sorted:
@@ -514,12 +516,7 @@ def _encode_with_prefix(
             out_k = out_dmax
         else:
             sliced = out_dmax[:, :k].float()
-            if skip_row0:
-                # Row 0 is the item_id=0 padding row; leave it as zeros so
-                # the index keeps its 1-indexed dense layout.
-                sliced[1:] = F.normalize(sliced[1:], dim=-1)
-            else:
-                sliced = F.normalize(sliced, dim=-1)
+            sliced = F.normalize(sliced, dim=-1)
             out_k = sliced.half().contiguous()
 
         torch.save(out_k, pt_path)
@@ -547,8 +544,6 @@ def _encode_with_prefix(
                 "Matryoshka L2-post-truncate is composable so result = fresh d=k "
                 "encode (modulo fp16 round-trip noise)."
             )
-            if skip_row0:
-                meta["derivation"] += " row 0 of text_emb left as zeros for item_id=0 padding."
         with open(meta_path, "w") as f:
             json.dump(meta, f, indent=2)
         print(
@@ -575,7 +570,7 @@ def cmd_encode_text(args) -> int:
         prefix="search_document: ",
         out_basename="text_emb",
         item_ids=item_ids,
-        n_rows_out=n_items + 1,
+        n_rows_out=n_items,
         encoder=args.encoder,
         text_template="{prefix}{title}. {abstract}",
         description_chars=args.description_chars,
@@ -790,32 +785,34 @@ def cmd_attrs(args) -> int:
         )
     )
 
-    # ---- assemble item_attrs_narrow [N+1, 5, 4] --------------------------
+    # ---- assemble item_attrs_narrow [N, 5, 4] ----------------------------
+    # 1-indexed item_ids stored at 0-indexed position ``item_id - 1``.
+    # No padding row — retrieval files are real-items-only.
     print("STEP assemble item_attrs_narrow", flush=True)
-    narrow_t = torch.full((n_items + 1, C_NARROW, A_MAX_NARROW), -1, dtype=torch.long)
+    narrow_t = torch.full((n_items, C_NARROW, A_MAX_NARROW), -1, dtype=torch.long)
 
     # Fast bulk fill for single-value clauses via numpy index assignment.
     # C0 main
     main_arr = pmain["main_id"].to_numpy()
-    main_iid = pmain["item_id"].to_numpy()
+    main_iid = pmain["item_id"].to_numpy() - 1
     narrow_t[main_iid, 0, 0] = torch.from_numpy(main_arr.astype(np.int64))
-    cov0 = int((narrow_t[1:, 0, 0] != -1).sum().item())
+    cov0 = int((narrow_t[:, 0, 0] != -1).sum().item())
 
     # C1 license
     lic_arr = plic["lic_id"].to_numpy()
-    lic_iid = plic["item_id"].to_numpy()
+    lic_iid = plic["item_id"].to_numpy() - 1
     narrow_t[lic_iid, 1, 0] = torch.from_numpy(lic_arr.astype(np.int64))
     # license "none" is its own bucket — coverage counts as ANY non-pad value.
-    cov1 = int((narrow_t[1:, 1, 0] != -1).sum().item())
+    cov1 = int((narrow_t[:, 1, 0] != -1).sum().item())
 
     # C2 year + C3 versions
     year_arr = pyv["year_id"].to_numpy()
     ver_arr = pyv["ver_id"].to_numpy()
-    yv_iid = pyv["item_id"].to_numpy()
+    yv_iid = pyv["item_id"].to_numpy() - 1
     narrow_t[yv_iid, 2, 0] = torch.from_numpy(year_arr.astype(np.int64))
     narrow_t[yv_iid, 3, 0] = torch.from_numpy(ver_arr.astype(np.int64))
-    cov2 = int((narrow_t[1:, 2, 0] != -1).sum().item())
-    cov3 = int((narrow_t[1:, 3, 0] != -1).sum().item())
+    cov2 = int((narrow_t[:, 2, 0] != -1).sum().item())
+    cov3 = int((narrow_t[:, 3, 0] != -1).sum().item())
 
     # C4 authors (up to 2 per paper). Loop, but only rows that have authors.
     a_iids = pa_authors["item_id"].to_list()
@@ -826,7 +823,7 @@ def cmd_attrs(args) -> int:
             continue
         cov4 += 1
         for j, v in enumerate(alist[:A_MAX_NARROW]):
-            narrow_t[int(iid), 4, j] = int(v)
+            narrow_t[int(iid) - 1, 4, j] = int(v)
 
     coverage = {
         "c0_main": round(cov0 / max(n_items, 1), 4),
@@ -891,7 +888,8 @@ def cmd_attrs(args) -> int:
     )
 
     print("STEP assemble item_attrs_wide", flush=True)
-    wide_t = torch.full((n_items + 1, 1, WIDE_BAG_SIZE), -1, dtype=torch.long)
+    # [N, 1, BAG] 0-indexed dense (row i = item_id i+1); no padding row.
+    wide_t = torch.full((n_items, 1, WIDE_BAG_SIZE), -1, dtype=torch.long)
     bag_iids = paper_bag["item_id"].to_list()
     bag_lists = paper_bag["shelf_ids"].to_list()
     wide_cov = 0
@@ -903,7 +901,7 @@ def cmd_attrs(args) -> int:
             continue
         wide_cov += 1
         for j, v in enumerate(bag):
-            wide_t[int(iid), 0, j] = int(v)
+            wide_t[int(iid) - 1, 0, j] = int(v)
     log["wide_coverage"] = round(wide_cov / max(n_items, 1), 4)
     log["wide_bag_size_hist"] = bag_size_hist
     avg_bag = sum(i * c for i, c in enumerate(bag_size_hist)) / max(n_items, 1)
