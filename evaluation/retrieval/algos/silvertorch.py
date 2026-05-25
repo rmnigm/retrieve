@@ -11,10 +11,12 @@
   the ``codesigned_probe_score_exact`` kernel.
 * ``filter_kind="none"``: plain IVF + INT8, no filter.
 
-A pre-existing "post-mask IVF" composition was rejected because masked-in
-items outside the ``n_probe`` nearest clusters never get scored. The
-codesigned exact kernel sidesteps that — filtering happens *inside* the
-probe, never after it.
+When ``filter_kind="clause"``, the wrapper threads ``clause_is_reverse``
+into ``SilverTorch.register_index`` so sweeps with reverse predicates
+(e.g., Goodreads ``c1_lang_reverse``) are evaluated correctly via the
+codesigned exact-clause kernel's per-clause XOR. Without this kwarg the
+kernel would treat every clause as a positive equality, collapsing
+recall to ~0 on reverse-clause sweeps.
 """
 
 from __future__ import annotations
@@ -37,6 +39,7 @@ class SilvertorchAlgo(nn.Module):
         *,
         filter_kind: str = "none",
         item_attrs_narrow: Tensor | None = None,
+        clause_is_reverse: Tensor | None = None,
         n_lists: int = 1024,
         n_probe: int = 24,
         n_iter: int = 10,
@@ -86,7 +89,11 @@ class SilvertorchAlgo(nn.Module):
                 seed=seed,
                 backend=backend,
             ).to(device)
-            self.idx.register_index(item_embs, item_clause_attrs=item_attrs_narrow)
+            self.idx.register_index(
+                item_embs,
+                item_clause_attrs=item_attrs_narrow,
+                clause_is_reverse=clause_is_reverse,
+            )
         else:
             self.idx = SilverTorch(
                 k=k,
