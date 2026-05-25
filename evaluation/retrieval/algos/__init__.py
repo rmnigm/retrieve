@@ -15,13 +15,14 @@ cleanup.
 
 ``build_algorithm`` is a thin factory: it picks the class for ``name``,
 unpacks ``params`` into its constructor, and forwards
-``filter_kind``/``filter_mod``/``item_attrs_narrow`` so each class can
-opt in to whichever inputs it actually consumes.
+``filter_kind``/``filter_mod``/``item_attrs_narrow``/``clause_is_reverse``
+so each class can opt in to whichever inputs it actually consumes.
 
 The only construction-time eligibility rule: ``linr_v2`` requires a
-filter and raises on ``filter_kind="none"``. Silvertorch on
-reverse-clause sweeps is skipped by the driver itself
-(``evaluate.py``), not here.
+filter and raises on ``filter_kind="none"``. Silvertorch with
+``filter_kind='clause'`` now accepts ``clause_is_reverse`` and supports
+reverse-clause sweeps end-to-end via the fused codesigned exact-clause
+kernel.
 """
 
 from __future__ import annotations
@@ -67,6 +68,7 @@ def build_algorithm(
     filter_kind: str = "none",
     filter_mod: FilterModule | None = None,
     item_attrs_narrow: Tensor | None = None,
+    clause_is_reverse: Tensor | None = None,
     params: dict[str, Any] | None = None,
     backend: Backend = "triton",
 ) -> Any:
@@ -109,6 +111,7 @@ def build_algorithm(
             k,
             filter_kind=filter_kind,
             item_attrs_narrow=item_attrs_narrow,
+            clause_is_reverse=clause_is_reverse,
             n_lists=int(p.get("n_lists", 1024)),
             n_probe=int(p.get("n_probe", 24)),
             n_iter=int(p.get("n_iter", 10)),

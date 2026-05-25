@@ -153,9 +153,13 @@ def run_filter_kind(
     queries_f, targets_f, n_targets_f, qa_narrow_f = _apply_users_limit(
         cfg, queries, targets, n_targets, qa_narrow_all
     )
-    filter_mods, oracle_filter, item_attrs_narrow, n_clauses = _build_filter_modules(
-        filter_kind, fcfg, cfg, data_path, device, backends
-    )
+    (
+        filter_mods,
+        oracle_filter,
+        item_attrs_narrow,
+        clause_is_reverse,
+        n_clauses,
+    ) = _build_filter_modules(filter_kind, fcfg, cfg, data_path, device, backends)
 
     rows: list[dict] = []
     for sweep in fcfg.sweeps:
@@ -174,6 +178,7 @@ def run_filter_kind(
                 filter_mods=filter_mods,
                 oracle_filter=oracle_filter,
                 item_attrs_narrow=item_attrs_narrow,
+                clause_is_reverse=clause_is_reverse,
                 n_clauses=n_clauses,
                 gt_dir=gt_dir,
                 K_GT=K_GT,
@@ -238,6 +243,7 @@ def _build_filter_modules(
     dict[Backend, FilterModule | None],
     FilterModule | None,
     torch.Tensor | None,
+    torch.Tensor | None,
     int,
 ]:
     """Build per-backend index-side filters and the oracle-side exact filter.
@@ -251,7 +257,7 @@ def _build_filter_modules(
     ground truth.
     """
     if cfg.filters is None:
-        return {}, None, None, 0
+        return {}, None, None, None, 0
 
     item_attrs_narrow, clause_is_reverse = load_filter_assets(
         filter_kind, fcfg, data_path, device
@@ -292,7 +298,7 @@ def _build_filter_modules(
                 type(oracle_filter).__name__ if oracle_filter is not None else "none",
             )
     n_clauses = int(item_attrs_narrow.shape[1]) if item_attrs_narrow is not None else 0
-    return filter_mods, oracle_filter, item_attrs_narrow, n_clauses
+    return filter_mods, oracle_filter, item_attrs_narrow, clause_is_reverse, n_clauses
 
 
 # ----- per sweep --------------------------------------------------------------
@@ -311,6 +317,7 @@ def run_one_sweep(
     filter_mods: dict[Backend, FilterModule | None],
     oracle_filter: FilterModule | None,
     item_attrs_narrow: torch.Tensor | None,
+    clause_is_reverse: torch.Tensor | None,
     n_clauses: int,
     gt_dir: Path,
     K_GT: int,
@@ -384,6 +391,7 @@ def run_one_sweep(
                             oracle_topk=oracle_topk,
                             filter_mod=filter_mods.get(backend),
                             item_attrs_narrow=item_attrs_narrow,
+                            clause_is_reverse=clause_is_reverse,
                             n_kept=n_kept,
                             suite=suite,
                             device=device,
@@ -414,6 +422,7 @@ def evaluate_cell(
     oracle_topk: torch.Tensor | None,
     filter_mod: FilterModule | None,
     item_attrs_narrow: torch.Tensor | None,
+    clause_is_reverse: torch.Tensor | None,
     n_kept: int,
     suite: str,
     device: torch.device,
@@ -431,6 +440,7 @@ def evaluate_cell(
         filter_kind=filter_kind,
         filter_mod=filter_mod,
         item_attrs_narrow=item_attrs_narrow,
+        clause_is_reverse=clause_is_reverse,
         params=params,
         backend=backend,
     )
@@ -522,6 +532,7 @@ def _try_build_algo(
     filter_kind: str,
     filter_mod: FilterModule | None,
     item_attrs_narrow: torch.Tensor | None,
+    clause_is_reverse: torch.Tensor | None,
     params: dict[str, Any],
     backend: Backend,
 ) -> Any | None:
@@ -538,6 +549,7 @@ def _try_build_algo(
             filter_kind=filter_kind,
             filter_mod=filter_mod,
             item_attrs_narrow=item_attrs_narrow,
+            clause_is_reverse=clause_is_reverse,
             params=params,
             backend=backend,
         )
