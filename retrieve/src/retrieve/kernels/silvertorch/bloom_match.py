@@ -51,20 +51,11 @@ def _bloom_match_kernel(
 
 @triton_op("retrieve::bloom_match", mutates_args=())
 def bloom_match(qb: Tensor, sigs: Tensor) -> Tensor:
-    """Compute (qb & sig) == qb across W int64 words.
+    """Compute (qb & sig) == qb across W int64 words; qb [B, W] int64, sigs [N, W] int64 →
+    BoolTensor [B, N].
 
-    Inputs:
-        qb:   [B, W] int64 — packed query bloom signatures.
-        sigs: [N, W] int64 — packed item bloom signatures.
-
-    Returns BoolTensor [B, N].
-
-    Registered as ``triton_op`` so the kernel launch is captured as a HOP
-    that ``torch.compile(dynamic=True, mode="reduce-overhead")`` can stitch
-    into a single cudagraph_trees graph — same shape as the other in-scope
-    linr kernels. ``BLOCK_N`` is constexpr 128; the kernel's tile-tail mask
-    handles ``N < 128`` correctness-safely.
-    """
+    Registered as a ``triton_op`` so the launch is captured into a single cudagraph under
+    ``torch.compile``; ``BLOCK_N`` is constexpr 128 with a tile-tail mask for ``N < 128``."""
     b, w = qb.shape
     n = sigs.shape[0]
 

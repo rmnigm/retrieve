@@ -12,11 +12,8 @@ _P_BUCKETS = (256, 2048, 16384, 131072, 1048576)
 
 
 def _bucket_p(p: int) -> int:
-    """Round P up to the nearest static bucket so the kernel JIT cache
-    compiles once across many sweeps (instead of once per distinct
-    ``counts.max()``). Same role the value used to play as ``P_BUCKET``
-    in the autotune key; now it sizes ``P`` directly as a ``tl.constexpr``.
-    """
+    """Round P up to the nearest static bucket so the kernel's ``P`` constexpr (hence its JIT cache)
+    compiles once across many sweeps instead of once per distinct ``counts.max()``."""
     for b in _P_BUCKETS:
         if p <= b:
             return b
@@ -31,11 +28,7 @@ class FusedMaskedKnnTopkConfig:
     num_stages: int = 3
 
 
-# Single default the library ships with. Re-tune on a new arch by
-# running ``uv run tune-kernels fused-masked-knn-topk`` and pasting the
-# resulting line in. Callers who want a different tile config pass
-# ``config=`` through to the wrapper.
-# Tuned on A100 (sm_80): block_n=32 wins all but the 1M-bucket; num_warps=8 wins everywhere.
+# Default tile config (tuned on A100/sm_80); pass config= to the wrapper to override.
 DEFAULT_CONFIG = FusedMaskedKnnTopkConfig(block_n=32, num_warps=8)
 
 
@@ -58,8 +51,8 @@ def _fused_masked_knn_topk_kernel(
     stride_sp,
     BLOCK_N: tl.constexpr,
 ):
-    # tile on grid_x (<=2^31), batch on grid_y (<=65535): cdiv(P, BLOCK_N)
-    # can overflow grid_y at large P with small BLOCK_N.
+    # Tile on grid_x (≤ 2³¹), batch on grid_y (≤ 65535): cdiv(P, BLOCK_N) can overflow grid_y at
+    # large P.
     tile_id = tl.program_id(0)
     bid = tl.program_id(1)
 
@@ -103,27 +96,12 @@ def _fused_masked_knn_topk_impl(
     k: int,
     config: FusedMaskedKnnTopkConfig | None = None,
 ) -> tuple[Tensor, Tensor]:
-    """Fused masked gather + dot + topk. Returns ``(ids[B, K], scores[B, K])``.
-
-    2-D launch over ``(B, cdiv(P_BUCKET, BLOCK_N))``. Each program holds one
-    query in registers and gathers a ``BLOCK_N``-wide slab of candidate
-    item ids via indirect load. Items past ``counts[b]`` get score
-    ``-inf``. The post-kernel ``torch.topk`` selects K from the
-    ``[B, P_BUCKET]`` score buffer.
-
-    Per-cell scoring is elementwise (``tl.sum``) rather than ``tl.dot``: the
-    gathered rows differ per (B, p) cell so a true GEMM would re-load rows
-    per query column. For the dense (high pass rate) path with no
-    pre-filter, callers should fall back to ``query @ item_embs.T`` +
-    ``torch.topk`` — there's no fused-kernel equivalent because cuBLAS +
-    CUB already cover that case.
-
-    The kernel runs over a bucketed width ``P_BUCKET = _bucket_p(P)`` so
-    the JIT cache compiles once per bucket × D (the role formerly played
-    by ``@triton.autotune``'s cache key). ``positive_indices`` stays at
-    its caller-supplied width; the ``in_count`` indirect-load mask keeps
-    the tail in-bounds.
-    """
+    """Fused masked gather + dot + topk → (ids [B, K], scores [B, K]). 2-D launch over ``(B,
+    cdiv(P_BUCKET, BLOCK_N))``; each program holds one query and gathers a ``BLOCK_N`` slab of
+    candidate ids by indirect load, items past ``counts[b]`` scoring ``-inf``. Scoring is
+    elementwise (``tl.sum``, not ``tl.dot``) since rows differ per cell — the dense no-filter
+    path should use ``query @ item_embs.T`` instead. Runs over a bucketed width ``P_BUCKET =
+    _bucket_p(P)`` so the JIT cache compiles once per bucket × D."""
     if query.dim() != 2 or item_embs.dim() != 2:
         raise ValueError("query must be [B, D] and item_embs [N, D]")
     b, d = query.shape
@@ -143,11 +121,9 @@ def _fused_masked_knn_topk_impl(
     cfg = config if config is not None else DEFAULT_CONFIG
     p_bucket = _bucket_p(p)
 
-    # Allocate at bucketed width so the kernel's ``P: tl.constexpr`` is
-    # stable across sweeps. Lanes past ``counts[bid]`` get ``-inf``
-    # (via the ``in_count`` branch); lanes in ``[p, p_bucket)`` also
-    # fail ``in_count`` because ``counts[bid] <= p <= p_bucket``, so
-    # the padding tail is correctly ``-inf`` without a pre-fill.
+    # Allocate at bucketed width so P (constexpr) is stable across sweeps. Lanes past counts[bid] —
+    # including [p, p_bucket) since counts[bid] <= p — fail in_count and get -inf, so the tail is
+    # correct without a pre-fill.
     all_scores = torch.empty((b, p_bucket), dtype=torch.float32, device=query.device)
 
     # Tile axis on grid_x, batch on grid_y — see kernel comment.
@@ -176,19 +152,13 @@ def _fused_masked_knn_topk_impl(
 
     actual_k = min(k, p)
     topk_scores, topk_local = torch.topk(all_scores, actual_k, dim=1)
-    # ``topk_local`` indexes into [0, p_bucket). When counts[b] < actual_k
-    # the bottom slots tie at -inf and torch.topk can pick positions in
-    # [p, p_bucket) — out-of-bounds for ``positive_indices`` (width p).
-    # Clamp before gather; the where() below masks those slots to -1
-    # regardless of the gathered value, so the clamp value is irrelevant
-    # for correctness (it only avoids the OOB read).
+    # topk_local indexes [0, p_bucket); when counts[b] < actual_k, ties at -inf can pick [p,
+    # p_bucket) — OOB for positive_indices. Clamp before gather (the where() below masks these to
+    # -1, so the clamp value only matters for avoiding the OOB read).
     safe_local = topk_local.clamp_max(p - 1)
     topk_ids = positive_indices.gather(1, safe_local)
-    # When counts[b] < actual_k, the bottom slots tie at -inf and topk picks
-    # padding positions whose ids in `positive_indices` are uninitialized
-    # memory (clause_compact / bloom_compact allocate via torch.empty). Force
-    # those slots to -1 so they match the oracle's -1 sentinel and don't leak
-    # garbage into top-K.
+    # When counts[b] < actual_k, ties at -inf can pick padding positions whose ids are uninitialised
+    # (compact kernels use torch.empty); force those to -1 to match the oracle's sentinel.
     topk_ids = torch.where(
         torch.isfinite(topk_scores),
         topk_ids,
@@ -223,18 +193,10 @@ def fused_masked_knn_topk(
     counts: Tensor,
     k: int,
 ) -> tuple[Tensor, Tensor]:
-    """Production wrapper for ``_fused_masked_knn_topk_impl``.
-
-    Registered as ``triton_op`` so the kernel launch is captured as a HOP
-    inside the compiled algo forward. Mirrors ``_fused_masked_knn_topk_impl``
-    but: (i) hard-codes ``DEFAULT_CONFIG`` so ``config=`` isn't on the
-    schema; (ii) skips bucketing — callers hit a single ``p`` per deployment
-    (catalog size is fixed at module construction), so the once-per-deploy
-    JIT compile cost is amortised; (iii) assumes ``p >= k`` and ``p > 0``,
-    which ``PrefilterKNN`` guarantees by construction. ``_impl`` keeps the
-    bucketing + ``p == 0`` short-circuit + cat-pad branch for the offline
-    tuner and the parity test that exercises ``p < k`` directly.
-    """
+    """Production wrapper for ``_fused_masked_knn_topk_impl``, registered as a ``triton_op`` for
+    ``torch.compile`` capture. Differs from ``_impl``: hard-codes ``DEFAULT_CONFIG``, skips
+    bucketing (catalog size is fixed per deployment), and assumes ``p >= k > 0`` (guaranteed by
+    ``PrefilterKNN``)."""
     cfg = DEFAULT_CONFIG
     b, d = query.shape
     p = positive_indices.shape[1]
@@ -246,7 +208,7 @@ def fused_masked_knn_topk(
 
     all_scores = torch.empty((b, p), dtype=torch.float32, device=query.device)
 
-    # N axis on grid_x (cap ~2^31), batch on grid_y (cap 65535) — see kernel comment.
+    # grid_x tiles P (≤ 2³¹), batch on grid_y — see kernel comment.
     grid = (triton.cdiv(p, cfg.block_n), b)
 
     wrap_triton(_fused_masked_knn_topk_kernel)[grid](
@@ -272,10 +234,8 @@ def fused_masked_knn_topk(
 
     topk_scores, topk_local = torch.topk(all_scores, k, dim=1)
     topk_ids = positive_indices.gather(1, topk_local)
-    # When counts[b] < k, the bottom slots tie at -inf and torch.topk picks
-    # padding positions whose ids in ``positive_indices`` may be stale (the
-    # compact kernels pre-fill with -1, but other callers may pass empty
-    # buffers). Force those slots to -1 to match the oracle's sentinel.
+    # When counts[b] < k, ties at -inf can pick padding positions with stale ids; force those to -1
+    # to match the oracle's sentinel.
     topk_ids = torch.where(
         torch.isfinite(topk_scores),
         topk_ids,

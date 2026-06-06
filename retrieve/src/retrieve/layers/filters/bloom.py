@@ -10,21 +10,12 @@ from retrieve.layers.utils.compact import compact_mask
 
 
 class BloomFilter(FilterModule):
-    """Per-item Bloom-signature attribute filter (paper-strict, conjunctive).
-
-    Items: ``[N, C, A_max]`` int64 with ``-1`` padding. Each item's signature is
-    the OR of ``k_hash`` hash positions per non-pad attribute, packed into
-    ``W = m_bits // 64`` int64 words. Query: ``[B, C]`` int64 (single attribute
-    per clause; ``-1`` is inactive). Subset test ``(qb & sigs) == qb`` per word,
-    AND-reduced.
-
-    ``backend="triton"`` (default) routes the dense / compact paths through
-    the fused ``bloom_match`` / ``bloom_compact`` Triton kernels. With
-    ``backend="torch"`` the same semantics run via a pure-torch broadcast
-    bitwise test, which materializes a ``[B, N, W]`` int64 intermediate.
-
-    No reverse / NOT — that path stays in ``ExactAttributeFilter``.
-    """
+    """Per-item Bloom-signature attribute filter (paper-strict, conjunctive). Items ``[N, C,
+    A_max]`` int64 (``-1`` pad) become per-item signatures of ``W = m_bits // 64`` words; a query
+    ``[B, C]`` int64 (``-1`` inactive) matches by the subset test ``(qb & sigs) == qb`` per word,
+    AND-reduced. No reverse / NOT — that stays in ``ExactAttributeFilter``. ``backend="triton"``
+    (default) fuses via ``bloom_match``/``bloom_compact``; ``backend="torch"`` runs the same test
+    eager."""
 
     bloom_sigs: Tensor  # [N, W] int64
     hash_seeds: Tensor  # [k_hash, 2] int64
@@ -81,14 +72,8 @@ class BloomFilter(FilterModule):
         return match.all(dim=-1)
 
     def evaluate_indices(self, query_clause_attrs: Tensor) -> tuple[Tensor, Tensor]:
-        """Returns ``(positive_indices [B, P] int64, counts [B] int64)``.
-
-        ``backend="triton"``: fused ``bloom_compact`` kernel — no ``[B, N]``
-        bool intermediate ever materialized. ``backend="torch"``: ABC
-        default (``compact_mask(self.evaluate_mask(qa))``). Output id order
-        within a row is unspecified (atomics on the triton path) — callers
-        that care must sort.
-        """
+        """Returns (positive_indices [B, P] int64, counts [B] int64); within-row id order is
+        unspecified (triton atomics), so callers that care must sort."""
         qb = self._build_query_sigs(query_clause_attrs)  # [B, W]
         if self.backend == "triton":
             return bloom_compact(qb, self.bloom_sigs)
@@ -150,12 +135,9 @@ def _build_signatures(
     seed_c2 = seeds[:, 1].view(1, 1, k_hash)
     shifts = torch.arange(64, dtype=torch.int64, device=attrs.device)
 
-    # Per-clause salt to namespace the hash by feature key. Without this, value V
-    # in clause C0 hashes to the same bits as V in any other clause — a query
-    # ``c3=V`` then matches items whose c0/c1/c2 happens to equal V (cross-clause
-    # collision). The paper hashes "features" = (key, value) pairs (eq. 3); this
-    # XOR after _mix64 is the keying step. Padding (-1) is detected on the raw
-    # input below before any keying, so the m_bits sentinel sink is unaffected.
+    # Per-clause salt namespaces the hash by feature key (paper eq. 3): without it, value V in any
+    # clause collides with V in another. Padding (-1) is detected before keying, so the m_bits
+    # sentinel sink is unaffected.
     clause_ids = (
         torch.arange(c_dim, dtype=torch.int64, device=attrs.device)
         .view(c_dim, 1)
@@ -168,11 +150,8 @@ def _build_signatures(
         torch.tensor(0xBF58476D1CE4E5B9 - (1 << 64), dtype=torch.int64, device=attrs.device),
     )
 
-    # The dense path materializes ``[N, word_count, 64]`` int64 (~22 GiB at
-    # N=2.7M, m_bits=1024). Process in chunks: per-batch peak is bounded by
-    # ``batch_size * c * a * k_hash`` int64 + ``batch_size * word_count * 64``
-    # int64. At batch=131072 that's ~1 GiB scratch — fits comfortably even
-    # alongside the loaded item embeddings + ExactAttributeFilter on a 40 GiB GPU.
+    # Dense [N, word_count, 64] int64 would be ~22 GiB at N=2.7M, m_bits=1024; chunk so per-batch
+    # peak (~1 GiB at 131072 rows) fits alongside the index.
     out = torch.empty(n, word_count, dtype=torch.int64, device=attrs.device)
     for s in range(0, n, _BUILD_SIGS_BATCH):
         e = min(s + _BUILD_SIGS_BATCH, n)
@@ -201,17 +180,10 @@ def _build_query_signatures(
     k_hash: int,
     word_count: int,
 ) -> Tensor:
-    """Loop-free signature build for query batches.
-
-    Same hash + per-clause salt + bit-pack as ``_build_signatures``,
-    but without the chunk loop — query batches are always small
-    (B << the 131k-item chunk used for the index build), so chunking
-    buys nothing and its Python ``range()`` made dynamo specialize on
-    the trip count. Pure tensor flow so the outer
-    ``torch.compile(dynamic=True)`` on each eval-side algo installs a
-    single symbolic-shape graph reused across all B. Standalone use of
-    ``BloomFilter`` runs this eagerly.
-    """
+    """Loop-free signature build for query batches — same hash + per-clause salt + bit-pack as
+    ``_build_signatures`` but without the chunk loop, since query batches are small and a Python
+    ``range()`` would make dynamo specialize on the trip count under
+    ``torch.compile(dynamic=True)``."""
     leading = attrs.shape[:-2]
     n = 1
     for d in leading:

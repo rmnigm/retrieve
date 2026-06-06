@@ -50,7 +50,13 @@ Triton is the default backend; modules that have a pure-PyTorch path accept `bac
 
 ## Docs
 
-Full system documentation lives in the repository under `docs/system/`:
+User guide (in this package, under [`docs/`](docs/)):
+
+- [`getting-started.md`](docs/getting-started.md) — install, the shared lifecycle, first examples.
+- [`modules.md`](docs/modules.md) — which module to pick + per-module API reference.
+- [`filtering-and-quantization.md`](docs/filtering-and-quantization.md) — attribute-filtered retrieval and the quantization utilities.
+
+System / internals documentation lives in the repository under `docs/system/`:
 
 - `architecture.md` — module map, what each retrieval family does.
 - `kernels.md` — Triton kernel internals.

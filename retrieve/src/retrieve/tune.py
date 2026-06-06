@@ -1,29 +1,7 @@
-"""Offline tuner for the Triton kernels in ``retrieve.kernels``.
-
-Run once on the target arch; paste the printed ``DEFAULT_CONFIG = ...``
-line into the corresponding kernel file, or pass the resulting config
-through the wrapper's ``config=`` kwarg at call sites. The library
-ships a single default per kernel — there is no REGISTRY of pre-baked
-configs.
-
-Usage (one subcommand per kernel):
-
-    uv run tune-kernels fused-masked-knn-topk [--d 128] [--b 16]
-    uv run tune-kernels oporp-1bit-match-topk [--w 2] [--b 16]
-    uv run tune-kernels codesigned-probe-score [--d 128] [--b 16] [--w 4]
-    uv run tune-kernels clause-mask    [--regime N,B,C,A_MAX]...
-    uv run tune-kernels clause-compact [--regime N,B,C,A_MAX]...
-    uv run tune-kernels bloom-compact  [--regime N,B,W]...
-
-Each subcommand also accepts ``--device cuda:0`` and ``--json-out PATH``
-for an optional full per-shape sweep dump.
-
-The ``--regime`` flag for the filter kernels is repeatable and falls
-back to the built-in eval-shape regimes when omitted, so end-users
-running ``tune-kernels`` against their own catalog dimensions just pass
-their shapes; repo contributors re-tuning against the curated regimes
-pass nothing.
-"""
+"""Offline tuner for the Triton kernels in ``retrieve.kernels``: run once on the target arch and
+paste the printed ``DEFAULT_CONFIG = ...`` line into the kernel file (or pass it via the
+wrapper's ``config=``). Each kernel is a subcommand (see ``--help``); ``--regime`` overrides the
+built-in eval shapes for the filter kernels."""
 
 from __future__ import annotations
 
@@ -62,25 +40,17 @@ from retrieve.kernels.silvertorch.codesigned_probe_score import (
     codesigned_probe_score,
 )
 
-# Mirror the autotune grids that lived in the kernel files before this
-# stage. Same product as the deleted ``_autotune_configs()`` helpers.
 _FMKT_GRID = [(bn, nw) for bn in (32, 64, 128, 256) for nw in (4, 8)]
 _OPORP_GRID = [(bn, nw) for bn in (64, 128, 256, 512) for nw in (4, 8)]
 _CPS_GRID = [(bp, nw) for bp in (32, 64, 128, 256) for nw in (4, 8)]
-# Filter-index kernels share the same loop shape (grid over [B, cdiv(N,
-# BLOCK_N)]); sweep a wider BLOCK_N range since the inner body varies
-# (clause loop vs bloom subset-test) and the optimum can land far from 256.
+# Filter-index kernels sweep a wider BLOCK_N range since the inner body varies and the optimum can
+# land far from 256.
 _CLAUSE_MASK_GRID = [(bn, nw) for bn in (128, 256, 512, 1024) for nw in (2, 4, 8)]
 _CLAUSE_COMPACT_GRID = [(bn, nw) for bn in (128, 256, 512, 1024) for nw in (2, 4, 8)]
 _BLOOM_COMPACT_GRID = [(bn, nw) for bn in (128, 256, 512, 1024) for nw in (2, 4, 8)]
 
-# Default regime sweeps for the filter kernels — mirror the real-eval
-# shapes from ``evaluation/data/{goodreads-work-id,arxiv-retrieval}/item_attrs_narrow.pt``
-# (N≈800K / 3M, C=4 / 5, A_MAX=4) and ``evaluation/retrieval/config.py``
-# ``batch_sizes=[1, 8, 16]`` (we test both B extremes). Bloom uses W=16
-# from the default ``m_bits=1024`` in
-# ``evaluation/retrieval/algos/filter.py:build_filter``. End-users with
-# different catalog shapes override via ``--regime`` flags.
+# Default filter regimes mirror real-eval shapes (goodreads N≈800K C=4, arxiv N≈3M C=5, A_MAX=4;
+# bloom W=16 from m_bits=1024). End-users override via --regime.
 _DEFAULT_CLAUSE_REGIMES = (
     # (N, B, C, A_MAX)
     (797_085, 1, 4, 4),  # goodreads, single-query
@@ -98,9 +68,7 @@ _DEFAULT_BLOOM_REGIMES = (
     (15_000_001, 16, 16),  # arxiv-synth-15m, batched (DRAM-streaming extreme)
 )
 
-# Default CPS P-grid: spans typical IVF sizings (small/medium/large
-# catalog × small/large probes). Kept hard-coded — the kernel is not
-# bucketed on P so this is a structural sweep, not a user-shape input.
+# Default CPS P-grid spanning typical IVF sizings; hard-coded since the kernel isn't bucketed on P.
 _DEFAULT_CPS_P_GRID = (1024, 8192, 65536)
 
 
@@ -110,9 +78,8 @@ def _arch_str(device: torch.device) -> str:
 
 
 def _bench(fn) -> float:
-    """Median ms for ``fn`` under do_bench. Long enough to settle the
-    JIT cache; short enough to keep the full sweep under a few minutes.
-    """
+    """Median ms for ``fn`` under do_bench — long enough to settle the JIT cache, short enough to
+    keep the sweep quick."""
     median, _, _ = ttesting.do_bench(fn, quantiles=[0.5, 0.2, 0.8], rep=500, warmup=100)
     return float(median)
 
@@ -130,15 +97,9 @@ def _parse_regime(spec: str, arity: int) -> tuple[int, ...]:
         raise click.BadParameter(f"non-integer field in {spec!r}: {e}") from e
 
 
-# ---------------------------------------------------------------------
-# fused_masked_knn_topk
-
-
 def _tune_fmkt(dev: torch.device, d: int, b: int) -> dict:
-    """For each bucket, pick the (block_n, num_warps) with the lowest
-    median latency. Aggregate the per-bucket winners into a single
-    DEFAULT_CONFIG via plurality vote (ties broken by lower num_warps).
-    """
+    """Per bucket pick the lowest-latency (block_n, num_warps), then aggregate winners into one
+    DEFAULT_CONFIG by plurality vote (ties → lower num_warps)."""
     per_bucket: dict[int, dict] = {}
     for p in _P_BUCKETS:
         # Need N >= P; pick generous N so the gather is realistic.
@@ -146,7 +107,6 @@ def _tune_fmkt(dev: torch.device, d: int, b: int) -> dict:
         torch.manual_seed(0)
         query = torch.randn(b, d, device=dev)
         embs = torch.randn(n, d, device=dev)
-        # Fill positive_indices with random valid ids; counts at full p.
         pos = torch.randint(0, n, (b, p), dtype=torch.long, device=dev)
         counts = torch.full((b,), p, dtype=torch.long, device=dev)
         k = min(64, p)
@@ -156,9 +116,8 @@ def _tune_fmkt(dev: torch.device, d: int, b: int) -> dict:
         best_ms = float("inf")
         for block_n, num_warps in _FMKT_GRID:
             cfg = FusedMaskedKnnTopkConfig(block_n=block_n, num_warps=num_warps)
-            # Warm the JIT cache for this (P_bucket, BLOCK_N, num_warps)
-            # before measuring; do_bench's own warmup is generous, but a
-            # cold compile would still leak into the first measured rep.
+            # Warm the JIT cache before measuring; do_bench's warmup wouldn't cover a cold compile
+            # of this config.
             for _ in range(3):
                 _fused_masked_knn_topk_impl(query, embs, pos, counts, k, config=cfg)
             torch.cuda.synchronize()
@@ -180,9 +139,8 @@ def _tune_fmkt(dev: torch.device, d: int, b: int) -> dict:
             err=True,
         )
 
-    # Aggregate to a single default: plurality among per-bucket winners.
     votes = Counter(per_bucket[p]["winner"] for p in _P_BUCKETS)
-    # Ties: prefer lower num_warps (cheaper register pressure).
+    # Ties → lower num_warps (cheaper register pressure).
     top = sorted(votes.items(), key=lambda kv: (-kv[1], kv[0][1]))
     default = top[0][0]
     return {"per_bucket": per_bucket, "default": default}
@@ -196,14 +154,9 @@ def _print_fmkt(arch: str, result: dict) -> None:
     click.echo(f"DEFAULT_CONFIG = FusedMaskedKnnTopkConfig(block_n={bn}, num_warps={nw})")
 
 
-# ---------------------------------------------------------------------
-# oporp_1bit_match_topk
-
-
 def _tune_oporp(dev: torch.device, w: int, b: int) -> dict:
-    """Sweep across (n_bucket × has_indices) regimes, pick winning tile
-    per regime, aggregate to a single DEFAULT_CONFIG.
-    """
+    """Sweep (n_bucket × has_indices) regimes, pick the winning tile per regime, aggregate to one
+    DEFAULT_CONFIG."""
     per_regime: dict[str, dict] = {}
     for n_bucket in _N_BUCKETS:
         for has_indices in (False, True):
@@ -287,16 +240,9 @@ def _print_oporp(arch: str, result: dict) -> None:
     click.echo(f"DEFAULT_CONFIG = Oporp1BitMatchTopkConfig(block_n={bn}, num_warps={nw})")
 
 
-# ---------------------------------------------------------------------
-# codesigned_probe_score (silvertorch)
-
-
 def _tune_cps(dev: torch.device, d: int, b: int, w: int) -> dict:
-    """SilverTorch's phase-2+3 fused kernel. ``P = n_probe * max_cluster_size``
-    is fixed per registered index, so no bucketing — sweep a few
-    representative P values that span typical IVF sizings (small, medium,
-    large catalog × small/large probes), plus has_qb on/off.
-    """
+    """SilverTorch phase-2+3 kernel: P is fixed per index (no bucketing), so sweep representative P
+    values (× has_qb on/off) and aggregate to one DEFAULT_CONFIG."""
     per_regime: dict[str, dict] = {}
     for p in _DEFAULT_CPS_P_GRID:
         n = max(p * 4, 1 << 16)
@@ -384,18 +330,11 @@ def _print_cps(arch: str, result: dict) -> None:
     click.echo(f"DEFAULT_CONFIG = CodesignedProbeScoreConfig(block_p={bp}, num_warps={nw})")
 
 
-# ---------------------------------------------------------------------
-# clause_mask / clause_compact / bloom_compact (shared regime shape)
-
-
 def _make_clause_inputs(
     dev: torch.device, n: int, b: int, c: int, a_max: int
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Build realistic (item_attrs, is_reverse, query_attrs) on ``dev``.
-
-    Item attribute vocab is small enough that random queries get a
-    non-trivial mix of pass/fail per row — mimics real eval shapes.
-    """
+    """Build realistic (item_attrs, is_reverse, query_attrs) on ``dev`` — small vocab so random
+    queries get a non-trivial pass/fail mix."""
     torch.manual_seed(0)
     n_vocab = 40
     item_attrs = torch.randint(0, n_vocab, (n, c, a_max), dtype=torch.int64, device=dev)
@@ -405,8 +344,8 @@ def _make_clause_inputs(
 
 
 def _tune_clause_mask(dev: torch.device, regimes: tuple[tuple[int, int, int, int], ...]) -> dict:
-    """Sweep (N, B, C, A_MAX) regimes; aggregate per-regime winners to a
-    single DEFAULT_CONFIG via plurality vote (ties → lower num_warps)."""
+    """Sweep (N, B, C, A_MAX) regimes; aggregate per-regime winners to one DEFAULT_CONFIG
+    (plurality, ties → lower num_warps)."""
     per_regime: dict[str, dict] = {}
     for n, b, c, a_max in regimes:
         key = f"N={n},B={b},C={c},A_MAX={a_max}"
@@ -453,10 +392,8 @@ def _print_clause_mask(arch: str, result: dict) -> None:
 
 
 def _tune_clause_compact(dev: torch.device, regimes: tuple[tuple[int, int, int, int], ...]) -> dict:
-    """Same regime grid as clause_mask; calls ``_clause_compact_impl`` which
-    allocates fresh out_indices (-1 filled) and counts (zeros) per call —
-    the atomic_add accumulation worry in the kernel doc does NOT apply to
-    the offline tuner."""
+    """Same regime grid as clause_mask; ``_clause_compact_impl`` allocates fresh buffers per call,
+    so the kernel's atomic_add accumulation warning doesn't apply to the tuner."""
     per_regime: dict[str, dict] = {}
     for n, b, c, a_max in regimes:
         key = f"N={n},B={b},C={c},A_MAX={a_max}"
@@ -503,8 +440,8 @@ def _print_clause_compact(arch: str, result: dict) -> None:
 
 
 def _tune_bloom_compact(dev: torch.device, regimes: tuple[tuple[int, int, int], ...]) -> dict:
-    """Sweep (N, B, W) bloom regimes. Same fresh-buffer-per-call story as
-    ``_tune_clause_compact`` — atomic_add is safe across reps."""
+    """Sweep (N, B, W) bloom regimes; fresh buffers per call, so atomic_add is safe across reps
+    (like ``_tune_clause_compact``)."""
     per_regime: dict[str, dict] = {}
     for n, b, w in regimes:
         key = f"N={n},B={b},W={w}"
@@ -562,10 +499,6 @@ def _print_bloom_compact(arch: str, result: dict) -> None:
     click.echo(f"DEFAULT_CONFIG = BloomCompactConfig(block_n={bn}, num_warps={nw})")
 
 
-# ---------------------------------------------------------------------
-# CLI
-
-
 def _resolve_device(device: str) -> torch.device:
     if not torch.cuda.is_available():
         raise click.ClickException("CUDA is required to tune Triton kernels.")
@@ -590,12 +523,8 @@ _json_out_opt = click.option(
 
 @click.group()
 def main() -> None:
-    """Offline tuner for retrieve's Triton kernels.
-
-    Pick a kernel subcommand; flags vary per kernel. Output is a
-    `DEFAULT_CONFIG = …` line to paste into the kernel source, or to
-    pass through the wrapper's `config=` kwarg at call sites.
-    """
+    """Offline tuner for retrieve's Triton kernels: pick a kernel subcommand (flags vary) and paste
+    the printed ``DEFAULT_CONFIG = …`` line into the kernel source."""
 
 
 @main.command("fused-masked-knn-topk")

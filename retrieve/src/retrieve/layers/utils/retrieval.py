@@ -10,9 +10,8 @@ def post_filter_topk(
 ) -> tuple[Tensor, Tensor]:
     """Apply a post-filter to pre-computed top-K results.
 
-    Returns ``(ids, counts)`` where filtered positions carry ``id = -1`` and
-    *counts* is the number of surviving items per query.
-    """
+    Returns ``(ids, counts)`` where filtered positions carry ``id = -1`` and *counts* is the
+    number of surviving items per query."""
     keep = post_mask.gather(1, topk_ids)
     topk_ids = topk_ids.masked_fill(~keep, -1)
     counts = keep.sum(dim=1)

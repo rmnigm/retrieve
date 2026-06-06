@@ -8,31 +8,13 @@ from retrieve.kernels.linr.fused_masked_knn_topk import fused_masked_knn_topk
 
 
 class PrefilterKNN(nn.Module):
-    """Sparse-rescore KNN with selectable backend.
+    """Sparse-rescore KNN with selectable backend. Given ``candidate_ids: [B, P]`` (and optional
+    per-row ``counts: [B]``) it scores only the passing rows and top-Ks them back to global ids;
+    without ``candidate_ids`` it falls back to a dense full matmul. ``backend="triton"`` fuses
+    the sparse path (no ``[B, P, D]`` intermediate); inputs are stored fp16 with fp32-accumulated
+    dots.
 
-    Sparse path: takes ``candidate_ids: [B, P]`` (passing item ids per query)
-    and an optional ``counts: [B]`` (number of valid columns per row, defaults
-    to all P). Gathers the passing rows into ``[B, P, D]`` via fancy indexing,
-    scores with ``bmm``, top-K locally, gathers back to global ids.
-
-    Without ``candidate_ids``, falls back to a dense full matmul on either
-    backend (no fusion to win over cuBLAS).
-
-    With ``backend="triton"``, the sparse path uses the
-    ``fused_masked_knn_topk`` kernel — no ``[B, P, D]`` intermediate. The
-    kernel casts loaded operands to fp32 inside its scalar accumulator, so
-    dot-product precision is identical regardless of storage dtype.
-
-    **Precision.** ``item_embs`` and ``query`` may be fp32 or fp16; both are
-    cast to fp16 internally (storage is fp16). torch ``bmm`` / matmul on
-    fp16 uses tensor cores with a fp32 accumulator; the Triton sparse path
-    casts to fp32 inside the reduction. See the layer-package docstring.
-
-    Decoupled from any filter — callers compute ``(candidate_ids, counts)``
-    upstream (e.g. ``ExactAttributeFilter.evaluate_indices``, ``compact_mask``
-    of an external mask, or directly from a quantized cascade like
-    ``OneBitKNN``).
-    """
+    Decoupled from filtering — callers compute ``(candidate_ids, counts)`` upstream."""
 
     item_embs: Tensor
 

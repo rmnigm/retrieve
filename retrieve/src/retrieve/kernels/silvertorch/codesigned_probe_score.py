@@ -23,12 +23,8 @@ class CodesignedProbeScoreConfig:
     num_stages: int = 3
 
 
-# Single default the library ships with. Re-tune on a new arch by
-# running ``uv run tune-kernels codesigned-probe-score`` and pasting the
-# resulting line in. Callers who want a different tile config pass
-# ``config=`` through to ``_codesigned_probe_score_impl``.
-# Tuned on A100 (sm_80) against the int8×int8 ``tl.dot`` path:
-# block_p=256 wins plurality (3/6 regimes); num_warps=4 wins all 6.
+# Default tile config (tuned on A100/sm_80); pass config= to _codesigned_probe_score_impl to
+# override.
 DEFAULT_CONFIG = CodesignedProbeScoreConfig(block_p=256, num_warps=4)
 
 
@@ -61,8 +57,8 @@ def _codesigned_probe_score_kernel(
     HAS_QB: tl.constexpr,
     BLOCK_P: tl.constexpr,
 ):
-    # tile on axis-0 (CUDA grid_x ≤ 2^31), batch on axis-1 (grid_y ≤ 65535):
-    # n_probe × max_cluster_size can be millions, which would overflow grid_y.
+    # Tile on grid_x (≤ 2³¹), batch on grid_y (≤ 65535): P = n_probe × max_cluster_size can overflow
+    # grid_y.
     tile_id = tl.program_id(0)
     bid = tl.program_id(1)
 
@@ -70,10 +66,8 @@ def _codesigned_probe_score_kernel(
     p_valid = p_off < P
 
     d_off = tl.arange(0, D)
-    # Query is pre-quantized in the wrapper — symmetric per-row int8 with a
-    # fp32 scale, paying one amax + div per batch row outside the loop.
-    # Quantizing inside the kernel would recompute the amax in every
-    # (P_tile, bid) program, redundant by a factor of cdiv(P, BLOCK_P).
+    # Query is pre-quantized in the wrapper (per-row int8 + fp32 scale); quantizing in-kernel would
+    # redundantly recompute amax per P-tile.
     q_codes = tl.load(q_codes_ptr + bid * stride_qcb + d_off * stride_qcd)
     q_scale = tl.load(q_scales_ptr + bid * stride_qs)
 
@@ -96,9 +90,7 @@ def _codesigned_probe_score_kernel(
             mask=valid[:, None],
             other=0,
         )
-        # (qb & sig) == qb  ⇔  qb & ~sig == 0 (per word). OR-reduce → 0 iff all
-        # words pass — saves the int32 cast + min reduction the equality form
-        # required.
+        # (qb & sig) == qb ⇔ qb & ~sig == 0 (per word); OR-reduce → 0 iff all words pass.
         diff = qb[None, :] & ~sigs
         any_diff = tl.reduce(diff, axis=1, combine_fn=_or_combine)
         bloom_pass = any_diff == 0
@@ -110,25 +102,14 @@ def _codesigned_probe_score_kernel(
         other=0,
     )
 
-    # int8 × int8 → int32 matmul (paper §4.2). Shapes: q[1, D] @ codes^T[D, BLOCK_P]
-    # → out[1, BLOCK_P] int32. With M=1 (single query row per program) IMMA
-    # tensor cores can't fit, so Triton lowers this to the dp4a / int8 CUDA-core
-    # path — the exact instruction the paper claims. Win over the old
-    # dequant-then-fp32 design: 4× less code bandwidth (int8 stays narrow
-    # through the reduction) and dp4a's 4-mul-add throughput per CUDA core.
-    #
-    # To trade global-scale quality loss for an [N] gather, pass per-item
-    # ``item_scales`` instead of ``global_scale`` and replace the final
-    # ``* global_scale`` with ``* tl.load(item_scales_ptr + safe_ids ...)``.
+    # int8 × int8 → int32 (paper §4.2): q[1,D] @ codes^T[D,BLOCK_P]. M=1 can't use IMMA tensor
+    # cores, so Triton lowers to the dp4a int8 path the paper claims.
     q_codes_2d = q_codes[None, :]
     codes_T = tl.trans(codes)
     dots_2d = tl.dot(q_codes_2d, codes_T, out_dtype=tl.int32)
-    # Squeeze the length-1 M axis. ``tl.sum`` over length-1 is the standard
-    # Triton idiom — no reshape primitive for dropping a dim.
+    # Squeeze the length-1 M axis: tl.sum over length-1 (Triton has no reshape to drop a dim).
     dots_i32 = tl.sum(dots_2d, axis=0)
 
-    # Two scalar fp32 multiplies per item: per-row q_scale and the global
-    # tensor scale. With per-item scales this would be three.
     dots = dots_i32.to(tl.float32) * q_scale * global_scale
     dots = tl.where(keep, dots, float("-inf"))
 
@@ -150,50 +131,19 @@ def _codesigned_probe_score_impl(
     bloom_sigs: Tensor | None = None,
     config: CodesignedProbeScoreConfig | None = None,
 ) -> tuple[Tensor, Tensor]:
-    """Fused phase-2+3 of SilverTorch's co-designed ANN+bloom (Algorithm 1).
+    """Fused phase-2+3 of SilverTorch's co-designed int8 ANN + optional bloom filter (paper
+    Algorithm 1, §4.2): query and items stay int8 through an int32-accumulated dot, dequantized
+    by ``q_scale[b] * global_scale``; the bloom subset test ``(qb & sig) == qb`` is fused in
+    (failing or padding items score ``-inf``). The ``[B, P, W]`` sigs and ``[B, P, D]`` code tile
+    never touch HBM.
 
-    Paper-faithful int8 ANN scoring: both query and items stay in int8 through
-    the dot product (int32 accumulator), with one global per-tensor scale and
-    a per-row query scale collapsed in the dequant epilogue. The bloom subset
-    test is fused into the same kernel — items that fail get ``-inf`` without
-    a separate scratch pass.
+    Inputs: query [B, D] fp32 (int8-quantized in the wrapper), flat_probed_items [B, P] int64 (-1
+    pad), item_codes [N, D] int8, global_scale float, query_bits [B, W] int64 (optional; skips
+    bloom when None), bloom_sigs [N, W] int64 (required iff query_bits given). Returns (ids [B,
+    K], scores [B, K]); requires P >= k.
 
-    For each (query, probed-item) cell: optionally evaluate
-    ``(qb & sig) == qb`` against the item's bloom signature, and (if it
-    passes) score ``(item_codes[id] · q_codes[b])_i32 * q_scale[b] * global_scale``.
-    Items failing the filter or with id == -1 (cluster padding) get score
-    ``-inf``.
-
-    The bloom intermediate (``[B, P, W]`` sigs / bool match) and the int8
-    item-code tile (``[B, P, D]``) never touch HBM — they live in registers/SRAM.
-
-    Inputs:
-        query:             [B, D]  fp32 — quantized to int8 in the wrapper.
-        flat_probed_items: [B, P]  int64 (-1 padding for empty cluster slots).
-        item_codes:        [N, D]  int8 — symmetric per-tensor codes.
-        global_scale:      Python float — single scale, paired with item_codes.
-        query_bits:        [B, W]  int64, optional (skip bloom filter when None).
-        bloom_sigs:        [N, W]  int64, required iff query_bits is not None.
-
-    Returns ``(ids[B, K], scores[B, K])``. Requires ``P >= k`` (the layer's
-    ``__init__`` asserts ``k <= n_probe * max_cluster_size``); per-row "no
-    candidate passed" cells already get ``-inf`` / ``-1`` from the kernel +
-    ``flat_probed_items`` padding semantics.
-
-    Eager entry point for tune scripts and parity tests. The compiled
-    path goes through the ``@triton_op`` wrappers
-    (``codesigned_probe_score`` / ``codesigned_probe_score_bloom``) which
-    mirror this body inline so that ``wrap_triton`` is textually in the
-    decorated function's source — torch.export's kernel registry
-    requires that.
-
-    **Quality knob.** Global scale is paper-default; for higher recall on
-    non-uniform-norm indexes, switch to per-item scales (``quantize_int8`` in
-    place of ``quantize_int8_global``) and add an ``item_scales [N]`` arg —
-    the kernel needs a ``tl.load(item_scales_ptr + safe_ids ...)`` plus a
-    third scalar multiply in the epilogue. See bench results in
-    ``_agent_scratch/bench_results/silvertorch_int8mm_quality.json``.
-    """
+    Eager entry point for tune scripts / parity tests; the compiled path goes through the
+    ``@triton_op`` wrappers."""
     if query.dim() != 2 or flat_probed_items.dim() != 2:
         raise ValueError("query must be [B, D] and flat_probed_items [B, P]")
     if item_codes.dtype != torch.int8:
@@ -205,7 +155,6 @@ def _codesigned_probe_score_impl(
     if has_qb and bloom_sigs is None:
         raise ValueError("bloom_sigs is required when query_bits is provided")
 
-    # Per-batch query int8 quantization. One amax + scalar div per row.
     q_codes, q_scales = quantize_int8(query)
     q_codes = q_codes.contiguous()
     q_scales = q_scales.contiguous()
@@ -217,24 +166,18 @@ def _codesigned_probe_score_impl(
         bloom_sigs = bloom_sigs.contiguous()
         w = query_bits.shape[1]
     else:
-        # 1×1 int64 placeholders so Triton has a valid pointer to bind.
-        # ``HAS_QB`` constexpr gates every load, so the pointers are never
-        # dereferenced. Production callers go through the ``@triton_op``
-        # wrappers which inline their own dummies — this branch fires only
-        # when tune scripts / parity tests call ``_impl`` with ``query_bits=None``.
+        # 1×1 int64 dummies: HAS_QB gates every load, so these pointers are never dereferenced.
         query_bits = torch.empty(1, 1, dtype=torch.int64, device=query.device)
         bloom_sigs = torch.empty(1, 1, dtype=torch.int64, device=query.device)
         w = 1
 
-    # `torch.empty` is safe: the kernel writes every slot in [0, P) — either a
-    # real dot product or -inf for filtered/padding lanes — so downstream topk
-    # sees deterministic values.
+    # torch.empty is safe: the kernel writes every slot in [0, P) (real dot or -inf), so topk sees
+    # deterministic values.
     all_scores = torch.empty((b, p), dtype=torch.float32, device=query.device)
 
     cfg = config if config is not None else DEFAULT_CONFIG
 
-    # Tile axis on grid_x (≤ 2^31) since num_tiles can exceed grid_y/grid_z's
-    # 65535 limit at large n_probe × max_cluster_size.
+    # grid_x tiles P (≤ 2³¹); P can exceed grid_y's 65535 limit.
     grid = (triton.cdiv(int(p), cfg.block_p), int(b))
 
     _codesigned_probe_score_kernel[grid](
@@ -268,8 +211,8 @@ def _codesigned_probe_score_impl(
         num_stages=cfg.num_stages,
     )
 
-    # P (= n_probe × max_cluster_size) >= k by layer-construction assert,
-    # so topk(k) works directly with no min/pad path.
+    # P = n_probe × max_cluster_size >= k by layer-construction assert, so topk(k) needs no min/pad
+    # path.
     topk_scores, topk_local = torch.topk(all_scores, k, dim=1)
     topk_ids = flat_probed_items.gather(1, topk_local)
     return topk_ids, topk_scores
@@ -283,16 +226,9 @@ def codesigned_probe_score(
     global_scale: float,
     k: int,
 ) -> tuple[Tensor, Tensor]:
-    """Plain int8 ANN scoring — no attribute filter.
-
-    Mirrors ``_codesigned_probe_score_impl(query_bits=None, bloom_sigs=None)``
-    inline so ``wrap_triton`` appears textually in the decorated source —
-    required by torch.export's kernel registry. Uses ``DEFAULT_CONFIG``;
-    for tune grids call ``_codesigned_probe_score_impl`` directly.
-
-    Layer-construction asserts ``k <= n_probe * max_cluster_size`` so
-    ``torch.topk(all_scores, k)`` always has >= k lanes with no pad tail.
-    """
+    """Plain int8 ANN scoring (no attribute filter); mirrors
+    ``_codesigned_probe_score_impl(query_bits=None)`` inline (``wrap_triton`` must appear
+    textually in the decorated source for torch.export). Requires P >= k."""
     b, d = query.shape
     p = flat_probed_items.shape[1]
 
@@ -301,9 +237,7 @@ def codesigned_probe_score(
     q_scales = q_scales.contiguous()
     flat_probed_items = flat_probed_items.contiguous()
     item_codes = item_codes.contiguous()
-    # 1×1 int64 dummies: HAS_QB=False gates every load, so the pointers
-    # are never dereferenced. Kept in the op body so the public schema
-    # stays bloom-free.
+    # 1×1 int64 dummies: HAS_QB=False gates every load, so these pointers are never dereferenced.
     query_bits = torch.empty(1, 1, dtype=torch.int64, device=query.device)
     bloom_sigs = torch.empty(1, 1, dtype=torch.int64, device=query.device)
 
@@ -358,14 +292,9 @@ def codesigned_probe_score_bloom(
     global_scale: float,
     k: int,
 ) -> tuple[Tensor, Tensor]:
-    """Int8 ANN scoring fused with the paper's bloom subset test.
-
-    Sibling of ``codesigned_probe_score`` for the bloom-filtered path. Split
-    into a separate op (rather than one op with an ``Optional[Tensor]`` /
-    ``has_bloom`` flag + dummies) so the layer just routes to the right op
-    — no dummy buffers, no constexpr-flag plumbing on the layer side.
-    Mirrors the ``oporp_1bit_match_topk_full`` / ``_indirect`` split in linr.
-    """
+    """Int8 ANN scoring fused with the paper's bloom subset test — sibling of
+    ``codesigned_probe_score``, split into a separate op (not one op with an Optional/flag) so
+    the layer just routes to the right op."""
     b, d = query.shape
     p = flat_probed_items.shape[1]
     w = query_bits.shape[1]

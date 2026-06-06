@@ -10,20 +10,10 @@ from retrieve.layers.utils.compact import compact_mask
 
 
 class ExactAttributeFilter(FilterModule):
-    """Standalone exact clause-attribute filter.
-
-    Decoupled from any retrieval module — callers compose:
-
-        f = ExactAttributeFilter(); f.register_index(item_attrs)
-        mask = f.evaluate_mask(qa)            # for the dense path
-        ids, cs = f.evaluate_indices(qa)      # for the sparse path
-
-    ``backend="triton"`` (default) routes the dense / compact paths through
-    the fused ``clause_mask`` / ``clause_compact`` Triton kernels. With
-    ``backend="torch"``, the same semantics run via a broadcast equality +
-    reduction — but materializes ``[B, N, C, A_max]`` bool intermediate, so
-    expect HBM spikes at large N.
-    """
+    """Standalone exact clause-attribute filter, decoupled from retrieval (compose via
+    ``evaluate_mask`` / ``evaluate_indices``). ``backend="triton"`` (default) fuses the
+    dense/compact paths via ``clause_mask``/``clause_compact``; ``backend="torch"`` runs
+    broadcast equality over a ``[B, N, C, A_max]`` bool intermediate."""
 
     item_clause_attrs: Tensor  # [N, C, A_max] int64
     clause_is_reverse: Tensor  # [C] bool
@@ -45,13 +35,8 @@ class ExactAttributeFilter(FilterModule):
         self.register_buffer("clause_is_reverse", clause_is_reverse)
 
     def evaluate_mask(self, query_clause_attrs: Tensor) -> Tensor:
-        """Returns ``[B, N]`` bool.
-
-        ``backend="triton"``: fused ``clause_mask`` kernel — no
-        ``[B, N, C, A_max]`` intermediate. ``backend="torch"``: broadcast
-        equality + AND/OR reductions; materializes the full
-        ``[B, N, C, A_max]`` bool grid.
-        """
+        """Returns [B, N] bool. ``backend="triton"`` uses the fused ``clause_mask`` kernel;
+        ``backend="torch"`` materializes the full ``[B, N, C, A_max]`` bool grid."""
         if self.backend == "triton":
             return clause_mask(
                 self.item_clause_attrs,
@@ -69,14 +54,8 @@ class ExactAttributeFilter(FilterModule):
         return clause_pass.all(dim=-1)
 
     def evaluate_indices(self, query_clause_attrs: Tensor) -> tuple[Tensor, Tensor]:
-        """Returns ``(positive_indices [B, P] int64, counts [B] int64)``.
-
-        ``backend="triton"``: fused ``clause_compact`` kernel — no
-        ``[B, N]`` bool intermediate ever materialized. ``backend="torch"``:
-        ``compact_mask(self.evaluate_mask(qa))``. Output id order within a row
-        is unspecified (atomics on the triton path) — callers that care must
-        sort.
-        """
+        """Returns (positive_indices [B, P] int64, counts [B] int64); within-row id order is
+        unspecified (triton atomics), so callers that care must sort."""
         if self.backend == "triton":
             return clause_compact(
                 self.item_clause_attrs,
@@ -90,12 +69,8 @@ class ExactAttributeFilter(FilterModule):
         query_clause_attrs: Tensor,
         candidate_ids: Tensor,
     ) -> Tensor:
-        """Apply this filter only to ``candidate_ids: [B, P]``.
-
-        Gathers ``item_clause_attrs[candidate_ids]`` to ``[B, P, C, A_max]``
-        and broadcasts equality with ``q[:, None, :, None]``. No full-N scan.
-        Reverse-clause and inactive-query (-1) semantics match ``evaluate_mask``.
-        """
+        """Apply this filter only to ``candidate_ids: [B, P]`` (gather + broadcast equality, no
+        full-N scan); reverse-clause and inactive-query (-1) semantics match ``evaluate_mask``."""
         gathered = self.item_clause_attrs[candidate_ids]  # [B, P, C, A_max]
         q = query_clause_attrs.unsqueeze(1).unsqueeze(-1)  # [B, 1, C, 1]
         match = gathered == q  # [B, P, C, A_max]

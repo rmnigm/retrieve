@@ -18,9 +18,7 @@ class CodesignedProbeScoreExactConfig:
     num_stages: int = 3
 
 
-# Single default the library ships with. Mirrors ``codesigned_probe_score``'s
-# A100 tuning; re-tune on a new arch via
-# ``uv run tune-kernels codesigned-probe-score``.
+# Default tile config (mirrors codesigned_probe_score's A100 tuning).
 DEFAULT_CONFIG = CodesignedProbeScoreExactConfig(block_p=256, num_warps=4)
 
 
@@ -55,8 +53,8 @@ def _codesigned_probe_score_exact_kernel(
     stride_op,
     BLOCK_P: tl.constexpr,
 ):
-    # tile on axis-0 (CUDA grid_x ≤ 2^31), batch on axis-1 (grid_y ≤ 65535):
-    # n_probe × max_cluster_size can be millions, which would overflow grid_y.
+    # Tile on grid_x (≤ 2³¹), batch on grid_y (≤ 65535): P = n_probe × max_cluster_size can overflow
+    # grid_y.
     tile_id = tl.program_id(0)
     bid = tl.program_id(1)
 
@@ -64,8 +62,7 @@ def _codesigned_probe_score_exact_kernel(
     p_valid = p_off < P
 
     d_off = tl.arange(0, D)
-    # Query is pre-quantized in the wrapper — symmetric per-row int8 with a
-    # fp32 scale, paying one amax + div per batch row outside the loop.
+    # Query is pre-quantized in the wrapper (per-row int8 + fp32 scale).
     q_codes = tl.load(q_codes_ptr + bid * stride_qcb + d_off * stride_qcd)
     q_scale = tl.load(q_scales_ptr + bid * stride_qs)
 
@@ -78,10 +75,8 @@ def _codesigned_probe_score_exact_kernel(
     valid = item_ids >= 0
     safe_ids = tl.where(valid, item_ids, 0)
 
-    # --- exact-clause filter (AND across C, OR over A_max within each clause) ---
-    # Per-item gather is C × A_max int64 — at C=2, A_max=2 that's 32 B/item vs
-    # the bloom variant's W × 8 = 128 B/item at M=1024. The clause loop is
-    # static-unrolled by Triton; the AND/OR/XOR chain stays in registers.
+    # Exact-clause filter: AND across C clauses, OR over A_max values per clause. Clause loop is
+    # static-unrolled by Triton; AND/OR/XOR stays in registers.
     keep = valid
     for c in tl.static_range(C):
         q_c = tl.load(query_attrs_ptr + bid * stride_qab + c * stride_qac)
@@ -109,9 +104,7 @@ def _codesigned_probe_score_exact_kernel(
         other=0,
     )
 
-    # int8 × int8 → int32 matmul (paper §4.2). dp4a path identical to the
-    # bloom-variant kernel; see codesigned_probe_score.py for the bandwidth
-    # rationale.
+    # int8 × int8 → int32 (paper §4.2); same dp4a path as codesigned_probe_score.py.
     q_codes_2d = q_codes[None, :]
     codes_T = tl.trans(codes)
     dots_2d = tl.dot(q_codes_2d, codes_T, out_dtype=tl.int32)
@@ -139,42 +132,19 @@ def _codesigned_probe_score_exact_impl(
     query_clause_attrs: Tensor,
     config: CodesignedProbeScoreExactConfig | None = None,
 ) -> tuple[Tensor, Tensor]:
-    """Fused phase-2+3 with an **exact-clause** filter instead of Bloom.
+    """Fused phase-2+3 with an exact-clause filter instead of Bloom — sibling of
+    ``codesigned_probe_score`` with the same int8×int8 → int32 dp4a path and ``-inf`` + top-K
+    epilogue. The predicate (from ``clause_mask``) is AND across ``C`` clauses, OR across
+    ``A_max`` values per clause, XOR with ``clause_is_reverse``, OR with the ``q_c == -1``
+    inactive sentinel; the ``[BLOCK_P, C, A_max]`` gather stays off HBM.
 
-    Sibling of ``codesigned_probe_score``: same int8×int8 → int32 dp4a path,
-    same ``-inf`` masking + top-K epilogue. The filter is the exact-clause
-    predicate from ``clause_mask`` — AND across ``C`` clauses, OR across
-    ``A_max`` attribute values per clause, XOR with ``clause_is_reverse``,
-    OR with the ``q_c == -1`` inactive-clause sentinel.
+    Inputs: query [B, D] fp32 (int8-quantized in the wrapper), flat_probed_items [B, P] int64 (-1
+    pad), item_codes [N, D] int8, global_scale float, item_clause_attrs [N, C, A_max] int64 (-1
+    pad), clause_is_reverse [C] bool, query_clause_attrs [B, C] int64 (-1 inactive). Returns (ids
+    [B, K], scores [B, K]); requires P >= k.
 
-    For each (query, probed-item) cell: evaluate the clause predicate
-    against ``item_clause_attrs[item_id]``, and (if it passes) score
-    ``(item_codes[id] · q_codes[b])_i32 * q_scale[b] * global_scale``. Items
-    failing the filter or with id == -1 get score ``-inf``.
-
-    The per-item clause gather (``[BLOCK_P, C, A_max]`` int64) never touches
-    HBM — it lives in registers/SRAM, same memory win as the bloom variant.
-
-    Inputs:
-        query:               [B, D]            fp32 — quantized to int8 in the wrapper.
-        flat_probed_items:   [B, P]            int64 (-1 padding for empty cluster slots).
-        item_codes:          [N, D]            int8 — symmetric per-tensor codes.
-        global_scale:        Python float — single scale, paired with item_codes.
-        item_clause_attrs:   [N, C, A_max]     int64 — per-item clause values (-1 pad).
-        clause_is_reverse:   [C]               bool — invert match per clause.
-        query_clause_attrs:  [B, C]            int64 — per-query clause values (-1 inactive).
-
-    Returns ``(ids[B, K], scores[B, K])``. Requires ``P >= k`` (the layer's
-    ``__init__`` asserts ``k <= n_probe * max_cluster_size``); per-row "no
-    candidate passed" cells already get ``-inf`` / ``-1`` from the kernel +
-    ``flat_probed_items`` padding semantics.
-
-    Eager entry point for tune scripts and parity tests. The compiled
-    path goes through the ``@triton_op`` wrapper ``codesigned_probe_score_exact``
-    which mirrors this body inline so that ``wrap_triton`` is textually in
-    the decorated function's source — torch.export's kernel registry
-    requires that.
-    """
+    Eager entry point for tune scripts / parity tests; the compiled path goes through the
+    ``@triton_op`` wrapper."""
     if query.dim() != 2 or flat_probed_items.dim() != 2:
         raise ValueError("query must be [B, D] and flat_probed_items [B, P]")
     if item_codes.dtype != torch.int8:
@@ -195,7 +165,6 @@ def _codesigned_probe_score_exact_impl(
     if clause_is_reverse.shape != (c,):
         raise ValueError(f"clause_is_reverse must be [{c}], got {tuple(clause_is_reverse.shape)}")
 
-    # Per-batch query int8 quantization. One amax + scalar div per row.
     q_codes, q_scales = quantize_int8(query)
     q_codes = q_codes.contiguous()
     q_scales = q_scales.contiguous()
@@ -207,15 +176,12 @@ def _codesigned_probe_score_exact_impl(
     clause_is_reverse = clause_is_reverse.contiguous().to(torch.int8)
     query_clause_attrs = query_clause_attrs.contiguous()
 
-    # `torch.empty` is safe: the kernel writes every slot in [0, P) — either a
-    # real dot product or -inf for filtered/padding lanes — so downstream topk
-    # sees deterministic values.
+    # torch.empty is safe: the kernel writes every slot in [0, P) (real dot or -inf).
     all_scores = torch.empty((b, p), dtype=torch.float32, device=query.device)
 
     cfg = config if config is not None else DEFAULT_CONFIG
 
-    # Tile axis on grid_x (≤ 2^31) since num_tiles can exceed grid_y/grid_z's
-    # 65535 limit at large n_probe × max_cluster_size.
+    # grid_x tiles P (≤ 2³¹); P can exceed grid_y's 65535 limit.
     grid = (triton.cdiv(p, cfg.block_p), b)
 
     _codesigned_probe_score_exact_kernel[grid](
@@ -251,8 +217,8 @@ def _codesigned_probe_score_exact_impl(
         num_stages=cfg.num_stages,
     )
 
-    # P (= n_probe × max_cluster_size) >= k by layer-construction assert,
-    # so topk(k) works directly with no min/pad path.
+    # P = n_probe × max_cluster_size >= k by layer-construction assert, so topk(k) needs no min/pad
+    # path.
     topk_scores, topk_local = torch.topk(all_scores, k, dim=1)
     topk_ids = flat_probed_items.gather(1, topk_local)
     return topk_ids, topk_scores
@@ -269,17 +235,9 @@ def codesigned_probe_score_exact(
     global_scale: float,
     k: int,
 ) -> tuple[Tensor, Tensor]:
-    """Production ``@triton_op`` for exact-clause-filtered int8 ANN scoring.
-
-    Mirrors ``_codesigned_probe_score_exact_impl`` inline so ``wrap_triton``
-    appears textually in the decorated source — required by torch.export's
-    kernel registry. Uses ``DEFAULT_CONFIG``; tune scripts and parity tests
-    that need a non-default config call ``_codesigned_probe_score_exact_impl``
-    directly.
-
-    Layer-construction asserts ``k <= n_probe * max_cluster_size`` so
-    ``torch.topk(all_scores, k)`` always has >= k lanes with no pad tail.
-    """
+    """Production ``@triton_op`` for exact-clause-filtered int8 ANN scoring; mirrors
+    ``_codesigned_probe_score_exact_impl`` inline (``wrap_triton`` must appear textually in the
+    decorated source for torch.export). Requires P >= k."""
     b, d = query.shape
     p = flat_probed_items.shape[1]
     _, c, a_max = item_clause_attrs.shape
