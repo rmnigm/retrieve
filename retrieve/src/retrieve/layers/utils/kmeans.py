@@ -5,12 +5,8 @@ from torch import Tensor
 
 
 class KMeansTorch:
-    """Lloyd's k-means with chunked centroid assignment.
-
-    Standalone so it can be reused or swapped (kmeans++, mini-batch, ...)
-    without touching downstream retrieval modules. ``fit`` returns
-    ``(centroids[n_lists, D], assignments[N])``.
-    """
+    """Lloyd's k-means with chunked centroid assignment; ``fit`` returns (centroids [n_lists, D],
+    assignments [N])."""
 
     def __init__(self, n_lists: int, n_iter: int = 10, seed: int = 0) -> None:
         self.n_lists = n_lists

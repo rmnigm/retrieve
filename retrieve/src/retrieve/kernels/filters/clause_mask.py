@@ -1,9 +1,6 @@
-"""Fused clause evaluation emitting ``[B, N]`` bool directly.
-
-Avoids the ``[B, N, C, A_max]`` intermediate that
-``ExactAttributeFilter.evaluate_mask``'s pure-torch broadcast materializes.
-Same inner loop as ``clause_compact`` minus the cumsum + atomic_add epilogue.
-"""
+"""Fused clause evaluation emitting ``[B, N]`` bool directly, avoiding the ``[B, N, C, A_max]``
+intermediate of the pure-torch path; same inner loop as ``clause_compact`` minus the compaction
+epilogue."""
 
 from __future__ import annotations
 
@@ -23,15 +20,8 @@ class ClauseMaskConfig:
     num_stages: int = 3
 
 
-# Single default the library ships with. Re-tune on a new arch by running
-# ``uv run tune-kernels clause-mask`` and pasting the resulting line in.
-# Callers who want a different tile pass ``config=`` to
-# ``_clause_mask_impl`` (the public ``@triton_op`` wrapper has a fixed
-# schema and always uses the default).
-# Tuned on A100 (sm_80) against real-eval shapes (Goodreads N=797K /
-# arXiv N=3M / arXiv-synth N=15M, C∈{4,5}, A_MAX=4, B∈{1, 16}):
-# block_n=512, num_warps=2 wins both batched regimes at N≥3M and stays
-# within ~10% of the per-regime winner at small-N / B=1.
+# Default tile config (tuned on A100/sm_80 against real-eval shapes); pass config= to
+# _clause_mask_impl to override.
 DEFAULT_CONFIG = ClauseMaskConfig(block_n=512, num_warps=2)
 
 
@@ -54,10 +44,8 @@ def _clause_mask_kernel(
     stride_on,
     BLOCK_N: tl.constexpr,
 ):
-    # 3D grid: batch on grid_x (small, restores L2 reuse on item_attrs
-    # because adjacent dispatched programs share the same tile), tiles
-    # split across grid_y × grid_z to dodge the 65535 cap on a single
-    # axis. `tile_id = tile_x * tiles_y + tile_y` keeps tiles contiguous.
+    # 3D grid: batch on grid_x (L2 reuse on item_attrs), tiles split across grid_y × grid_z to dodge
+    # the 65535 single-axis cap; tile_id = tile_x * tiles_y + tile_y keeps tiles contiguous.
     bid = tl.program_id(0)
     tile_y = tl.program_id(1)
     tile_x = tl.program_id(2)
@@ -69,8 +57,8 @@ def _clause_mask_kernel(
     pass_mask = tl.full([BLOCK_N], 1, tl.int1)
 
     for c in tl.static_range(C):
-        q_c = tl.load(query_attrs_ptr + bid * stride_qb + c * stride_qc)  # scalar
-        rev_c = tl.load(is_reverse_ptr + c).to(tl.int1)  # scalar
+        q_c = tl.load(query_attrs_ptr + bid * stride_qb + c * stride_qc)
+        rev_c = tl.load(is_reverse_ptr + c).to(tl.int1)
 
         clause_match = tl.full([BLOCK_N], 0, tl.int1)
         for a in tl.static_range(A_MAX):
@@ -104,9 +92,9 @@ def _clause_mask_impl(
     *,
     config: ClauseMaskConfig | None = None,
 ) -> Tensor:
-    """Direct-launch body used by the offline tuner and unit tests. Takes an
-    optional ``config=`` so tile parameters can be swept; the public
-    ``@triton_op``-wrapped ``clause_mask`` always uses ``DEFAULT_CONFIG``."""
+    """Direct-launch body used by the offline tuner and unit tests. Takes an optional ``config=`` so
+    tile parameters can be swept; the public ``@triton_op``-wrapped ``clause_mask`` always uses
+    ``DEFAULT_CONFIG``."""
     if item_clause_attrs.dim() != 3:
         raise ValueError("item_clause_attrs must be [N, C, A_max]")
     if query_clause_attrs.dim() != 2:
@@ -125,9 +113,8 @@ def _clause_mask_impl(
     out = torch.empty((b, n), dtype=torch.bool, device=device)
 
     cfg = config if config is not None else DEFAULT_CONFIG
-    # 3D grid (batch, tiles_y, tiles_x) — keeps batch on grid_x for L2
-    # reuse on item_attrs while letting tiles overflow into grid_z when
-    # they don't fit a single 65535-cap axis. See kernel comment.
+    # 3D grid (batch, tiles_y, tiles_x): batch on grid_x for L2 reuse, tiles overflow into grid_z
+    # past the 65535 cap. See kernel comment.
     tiles = triton.cdiv(n, cfg.block_n)
     tiles_x = triton.cdiv(tiles, 65535)
     tiles_y = triton.cdiv(tiles, tiles_x)
@@ -163,13 +150,9 @@ def clause_mask(
     clause_is_reverse: Tensor,  # [C] bool
     query_clause_attrs: Tensor,  # [B, C] int64
 ) -> Tensor:
-    """Fused clause evaluation → ``[B, N]`` bool. No intermediate.
-
-    Registered as ``triton_op`` so the kernel launch is captured as a HOP
-    that ``torch.compile`` can stitch into surrounding cudagraphs; the
-    ``torch.empty`` allocation inside the body acts as the fake/meta kernel.
-    Mirrors ``_clause_mask_impl`` but routes the launch through
-    ``wrap_triton`` for HOP capture and hard-codes ``DEFAULT_CONFIG``."""
+    """Fused clause evaluation → ``[B, N]`` bool, no intermediate. Registered as a ``triton_op`` so
+    the launch is captured for ``torch.compile``; mirrors ``_clause_mask_impl`` with
+    ``DEFAULT_CONFIG``."""
     cfg = DEFAULT_CONFIG
 
     n, c, a_max = item_clause_attrs.shape

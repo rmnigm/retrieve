@@ -19,12 +19,8 @@ def _score_full_simhash_eager(
     query_bits: Tensor,
     item_bits: Tensor,
 ) -> Tensor:
-    """Loop-free xor + popcount + reduce body, shared by both backends.
-
-    ``d_total`` is derived from ``item_bits.shape[1]`` inside the body so it
-    stays symbolic when this function is called inside a ``dynamic=True``
-    parent compile.
-    """
+    """Loop-free xor + popcount + reduce, shared by both backends; ``d_total`` is computed inside
+    the body so it stays symbolic under a ``dynamic=True`` parent compile."""
     d_total = 64 * item_bits.shape[1]
     xor = query_bits.unsqueeze(1) ^ item_bits.unsqueeze(0)
     hamming = popcount_int64(xor).sum(dim=-1)
@@ -32,23 +28,10 @@ def _score_full_simhash_eager(
 
 
 class SimHashKNN(nn.Module):
-    """SimHash 1-bit Hamming scoring (Charikar 2002 / Manku 2007), selectable backend.
-
-    Item embeddings are projected via a fixed Gaussian ``R ∈ R^{k_bits × D}``
-    and sign-quantized to 1 bit per output dim. Scoring is
-    ``k_bits - 2 * popcount(query_bits ^ item_bits)`` — purely bitwise, the
-    same kernel as ``OneBitKNN``.
-
-    Unlike Sign-OPORP, ``k_bits`` can exceed ``D`` for a recall-vs-memory
-    trade — each output bit mixes all input coordinates. Cost is one fp32
-    matmul (``[N, D] @ [D, k_bits]``) at register time plus a per-query
-    matmul + bit-pack in forward.
-
-    Reuses the OPORP Triton kernel — the kernel reads only
-    ``W = item_bits.shape[1]``; the algorithm that produced the bits is opaque.
-    SimHash at k_bits=512 → W=8; OPORP at k_bits=64 with D=128 → W=1; same
-    kernel both cases.
-    """
+    """SimHash 1-bit Hamming scoring (Charikar 2002 / Manku 2007) with selectable backend: fixed
+    Gaussian projection ``R ∈ R^{k_bits × D}`` then sign-quantize, scored as ``k_bits -
+    2*popcount(q ^ item)`` by the same kernel as ``OneBitKNN``. Unlike Sign-OPORP, ``k_bits`` may
+    exceed ``D`` for a recall-vs-memory trade since every bit mixes all coordinates."""
 
     item_bits: Tensor
     simhash_R: Tensor
@@ -131,12 +114,9 @@ class SimHashKNN(nn.Module):
         candidate_ids: Tensor | None,
         counts: Tensor | None,
     ) -> tuple[Tensor, Tensor]:
-        """Fused-kernel path for full-scan and indirect-load.
-
-        Same kernel as ``OneBitKNN`` — XOR + popcount + ``D - 2 * hamming``.
-        Kernel input is ``[N, W]`` int64; the projection algorithm that
-        produced the bits is opaque to it.
-        """
+        """Fused-kernel path (same kernel as ``OneBitKNN``): full-scan or indirect loads through
+        ``candidate_ids``. Kernel input is ``[N, W]`` int64; the projection that produced the
+        bits is opaque."""
         query_bits = self._project_query(query)
 
         if candidate_ids is None:

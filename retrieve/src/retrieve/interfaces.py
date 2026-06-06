@@ -9,23 +9,11 @@ Backend = Literal["torch", "triton"]
 
 
 class FilterModule(nn.Module, abc.ABC):
-    """Boolean predicate over an item index.
+    """Boolean predicate over a registered item index; ``forward`` aliases ``evaluate_mask``.
 
-    Concrete filters expose three native paths over a registered item set,
-    keyed by the consumer's preferred shape:
-
-    - ``evaluate_mask(q) -> [B, N] bool`` — dense; consumed by V1 / V3 mask path,
-      and by ``combine_masks`` for AND-of-masks composition.
-    - ``evaluate_indices(q) -> ([B, P] int64, [B] int64)`` — compact; consumed by
-      V2 / V3 candidate path. Default falls back to ``compact_mask(evaluate_mask)``;
-      override when a fused compact kernel exists.
-    - ``evaluate_subset(q, candidate_ids) -> [B, P] bool`` — apply this filter
-      only to the given candidate ids. Default gathers columns of
-      ``evaluate_mask``; override when a per-row check is much cheaper than full
-      evaluation (e.g. P ≪ N).
-
-    ``forward`` is an alias to ``evaluate_mask``.
-    """
+    Three eval paths: ``evaluate_mask(q) -> [B, N] bool`` (dense), ``evaluate_indices(q) -> ([B,
+    P] int64, [B] int64)`` (compact candidates), ``evaluate_subset(q, candidate_ids) -> [B, P]
+    bool`` (check only the given ids)."""
 
     @abc.abstractmethod
     def register_index(

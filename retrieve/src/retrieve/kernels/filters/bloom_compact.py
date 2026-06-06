@@ -1,18 +1,7 @@
-"""Fused bloom subset-test + stream compaction.
-
-Avoids materializing the dense ``[B, N]`` bool that
-``compact_mask(bloom_match(.))`` would otherwise produce. One kernel launch:
-
-  per program (b, tile):
-      subset-test BLOCK_N items against query bloom signature qb[b]
-      tl.cumsum within tile to get intra-tile write offsets
-      tl.atomic_add into counts[b] to get the row's base offset
-      tl.store passing item ids at positive_indices[b, base + intra]
-
-Output ordering within a row is unspecified (atomics across tiles) — same
-convention as ``clause_compact``. V2's ``fused_masked_knn_topk`` only consumes
-the *set*, not the order.
-"""
+"""Fused bloom subset-test + stream compaction in one launch (cumsum for intra-tile offsets,
+atomic_add for the per-row base), avoiding the dense ``[B, N]`` bool of
+``compact_mask(bloom_match(.))``. Output ordering within a row is unspecified (atomics across
+tiles); callers that need order must sort."""
 
 from __future__ import annotations
 
@@ -32,16 +21,9 @@ class BloomCompactConfig:
     num_stages: int = 3
 
 
-# Single default the library ships with. Re-tune on a new arch by running
-# ``uv run tune-kernels bloom-compact`` and pasting the resulting line in.
-# Same atomic_add gotcha as ``clause_compact`` is avoided the same way: the
-# host wrapper allocates fresh ``out_indices`` and ``counts`` per call, so
-# tuner reps don't accumulate.
-# Tuned on A100 (sm_80) against real-eval shapes (Goodreads N=797K /
-# arXiv N=3M / arXiv-synth N=15M, W=16 from m_bits=1024 default,
-# B∈{1, 16}): block_n=256, num_warps=8 wins all batched regimes; the
-# B=1 regimes prefer block_n=128 by ~5%. Wide W=16 still causes severe
-# register spill at block_n≥512 with num_warps≤4 (3–15× slowdown).
+# Default tile config (tuned on A100/sm_80). Same atomic_add gotcha as clause_compact (host
+# allocates fresh buffers per call). Wide W=16 spills registers badly at block_n≥512 with
+# num_warps≤4.
 DEFAULT_CONFIG = BloomCompactConfig(block_n=256, num_warps=8)
 
 
@@ -62,10 +44,8 @@ def _bloom_compact_kernel(
     stride_on,
     BLOCK_N: tl.constexpr,
 ):
-    # 3D grid: batch on grid_x (small, restores L2 reuse on sigs because
-    # adjacent dispatched programs share the same tile), tiles split
-    # across grid_y × grid_z to dodge the 65535 cap on a single axis.
-    # `tile_id = tile_x * tiles_y + tile_y` keeps tiles contiguous.
+    # 3D grid: batch on grid_x (L2 reuse on sigs), tiles split across grid_y × grid_z to dodge the
+    # 65535 single-axis cap; tile_id = tile_x * tiles_y + tile_y keeps tiles contiguous.
     bid = tl.program_id(0)
     tile_y = tl.program_id(1)
     tile_x = tl.program_id(2)
@@ -109,9 +89,9 @@ def _bloom_compact_impl(
     *,
     config: BloomCompactConfig | None = None,
 ) -> tuple[Tensor, Tensor]:
-    """Direct-launch body used by the offline tuner and unit tests. Takes an
-    optional ``config=`` so tile parameters can be swept; the public
-    ``@triton_op``-wrapped ``bloom_compact`` always uses ``DEFAULT_CONFIG``."""
+    """Direct-launch body used by the offline tuner and unit tests. Takes an optional ``config=`` so
+    tile parameters can be swept; the public ``@triton_op``-wrapped ``bloom_compact`` always uses
+    ``DEFAULT_CONFIG``."""
     if qb.dim() != 2:
         raise ValueError("qb must be [B, W]")
     if sigs.dim() != 2:
@@ -127,10 +107,8 @@ def _bloom_compact_impl(
     qb = qb.contiguous()
     sigs = sigs.contiguous()
 
-    # Initialise to -1 sentinel; see clause_compact.py for the rationale.
-    # Positions past counts[bid] are not written by the kernel, and -1
-    # propagates as "no item" through fused_masked_knn_topk's gather when
-    # counts[b] < k.
+    # Init to -1 sentinel (see clause_compact.py): positions past counts[bid] aren't written and -1
+    # propagates as "no item" through the gather when counts[b] < k.
     out_indices = torch.full((b, n), -1, dtype=torch.int64, device=qb.device)
     counts = torch.zeros((b,), dtype=torch.int64, device=qb.device)
 
@@ -165,26 +143,11 @@ def _bloom_compact_impl(
 
 @triton_op("retrieve::bloom_compact", mutates_args=())
 def bloom_compact(qb: Tensor, sigs: Tensor) -> tuple[Tensor, Tensor]:
-    """Fused bloom subset-test + compaction.
-
-    Inputs:
-        qb:   [B, W] int64 — packed query bloom signatures.
-        sigs: [N, W] int64 — packed item bloom signatures.
-
-    Returns ``(positive_indices [B, N] int64, counts [B] int64)``. The full
-    item-width ``[B, N]`` indices buffer is returned with ``-1`` sentinels
-    in the unused tail; downstream consumers (``fused_masked_knn_topk``,
-    ``oporp_1bit_match_topk``) row-bound by ``counts[b]`` so the wider
-    buffer never costs a re-read. Indices within a row are unordered
-    (atomic-add writes).
-
-    Registered as ``triton_op`` so the kernel launch is captured as a HOP
-    that ``torch.compile(dynamic=True, mode="reduce-overhead")`` can stitch
-    into a single cudagraph_trees graph; the ``torch.full``/``torch.zeros``
-    allocations inside the body act as the fake/meta kernel. Mirrors
-    ``_bloom_compact_impl`` but routes the launch through ``wrap_triton``
-    for HOP capture and hard-codes ``DEFAULT_CONFIG``.
-    """
+    """Fused bloom subset-test + compaction; qb [B, W] int64, sigs [N, W] int64 → (positive_indices
+    [B, N] int64, counts [B] int64). The ``[B, N]`` buffer has ``-1`` sentinels in the unused
+    tail (consumers row-bound by ``counts[b]``); within-row order is unspecified (atomic writes).
+    Registered as a ``triton_op`` for ``torch.compile``; mirrors ``_bloom_compact_impl`` with
+    ``DEFAULT_CONFIG``."""
     cfg = DEFAULT_CONFIG
 
     b, w = qb.shape
@@ -193,8 +156,7 @@ def bloom_compact(qb: Tensor, sigs: Tensor) -> tuple[Tensor, Tensor]:
     qb = qb.contiguous()
     sigs = sigs.contiguous()
 
-    # ``-1`` sentinel + zero counts: see initialisation note in
-    # ``_bloom_compact_impl``.
+    # -1 sentinel + zero counts: see init note in _bloom_compact_impl.
     out_indices = torch.full((b, n), -1, dtype=torch.int64, device=qb.device)
     counts = torch.zeros((b,), dtype=torch.int64, device=qb.device)
 

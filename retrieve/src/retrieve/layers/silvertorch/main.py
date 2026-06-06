@@ -25,42 +25,15 @@ FilterMode = Literal["none", "bloom", "exact"]
 
 
 class SilverTorch(nn.Module):
-    """Co-designed IVF + INT8 ANN + (optional) attribute filter (Algorithm 1).
+    """Co-designed IVF + INT8 ANN + optional attribute filter (paper Algorithm 1, §4.2): an ``[N,
+    D]`` int8 index with one global scale, per-row int8-quantized queries, and an int8×int8 →
+    int32 dot dequantized once. ``filter`` fuses a predicate into the probe+score kernel —
+    ``"none"`` (plain ANN), ``"bloom"`` (subset test, needs ``m_bits``/``k_hash``), or
+    ``"exact"`` (exact-clause, no false positives).
 
-    Paper-faithful int8 ANN: the index stores ``[N, D]`` int8 codes with a
-    single global per-tensor ``global_scale``; the query is int8-quantized
-    per-row at forward time; the dot product runs int8×int8 → int32 (dp4a
-    / IMMA-fallback path inside the codesigned kernel) and dequantizes
-    once with ``q_scale * global_scale``. See SilverTorch paper §4.2.
-
-    ``filter`` selects the predicate fused into the codesigned probe+score
-    kernel:
-
-    - ``"none"``: plain IVF + INT8 ANN, no attribute filter.
-    - ``"bloom"``: paper's bloom subset test (``m_bits``/``k_hash`` required);
-      one false-positive-tolerant filter shared across all clauses, fused
-      into ``codesigned_probe_score``.
-    - ``"exact"``: exact-clause predicate (no false positives), fused into
-      ``codesigned_probe_score_exact``. Bandwidth-cheaper per item at small
-      ``C × A_max``; trades the bloom hash flexibility for exact-value match.
-
-    ``backend="triton"`` (default) routes phase 2+3 through the fused kernel
-    — no ``[B, P, W]`` / ``[B, P, C, A_max]`` / ``[B, P, D]`` intermediates
-    touch HBM. ``backend="torch"`` runs the same semantics via pure torch
-    ops, eager — callers that want Inductor fusion + cudagraph capture
-    should wrap the module with ``torch.compile`` themselves. The torch
-    path materializes ``[B, P, D]`` fp32 inside the dot product, so
-    configurations with large ``P × B × D`` must use the Triton backend.
-
-    **Quality knob.** Global scale matches the paper; on indexes with a
-    long-tailed row-norm distribution it can drop ~1–2% recall@K vs a
-    per-item-scale variant (`quantize_int8`). To swap: store
-    ``item_scales [N] fp32`` from ``quantize_int8`` instead of
-    ``global_scale``, propagate it through the three forward paths, and
-    have the kernel gather ``item_scales[safe_ids]`` in place of the scalar
-    ``global_scale`` in the dequant epilogue. Bench numbers in
-    ``_agent_scratch/bench_results/silvertorch_int8mm_quality.json``.
-    """
+    ``backend="triton"`` (default) keeps all probe intermediates off HBM; ``backend="torch"``
+    runs the same semantics eager but materializes ``[B, P, D]``, so large ``P·B·D`` needs the
+    Triton backend."""
 
     centroids: Tensor
     item_codes: Tensor
@@ -152,11 +125,8 @@ class SilverTorch(nn.Module):
         cluster_sizes = torch.bincount(assignments, minlength=self.n_lists)
         max_size = int(cluster_sizes.max().item())
 
-        # P (probe pool width) = n_probe × max_cluster_size is the score
-        # buffer's column count in the codesigned kernels. The kernel
-        # wrappers run ``torch.topk(all_scores, self.k)`` without a pad
-        # tail, so the index must supply at least k candidate slots per
-        # query.
+        # P (probe pool width) = n_probe × max_cluster_size; topk runs with no pad tail, so the
+        # index must supply >= k candidate slots per query.
         if self.n_probe * max_size < self.k:
             raise ValueError(
                 f"k={self.k} exceeds probe pool n_probe * max_cluster_size = "
@@ -181,16 +151,14 @@ class SilverTorch(nn.Module):
 
         self.register_buffer("centroids", centroids)
         self.register_buffer("item_codes", codes)
-        # 0-d fp32 buffer: moves with .to(device), parameterizes the kernel's
-        # epilogue without forcing a recompile per index.
+        # 0-d fp32 buffer: moves with .to(device) and parameterizes the kernel epilogue without a
+        # per-index recompile.
         self.register_buffer(
             "global_scale",
             torch.tensor(global_scale, dtype=torch.float32, device=item_embs.device),
         )
-        # Plain Python float for the cudagraph-captured forward path: passing
-        # ``self.global_scale.item()`` per call forces a device→host sync that
-        # breaks cudagraph_trees capture even after the kernel is opaque to
-        # dynamo. Cached once at index build.
+        # Plain Python float: passing self.global_scale.item() per call forces a device→host sync
+        # that breaks cudagraph capture. Cached once at index build.
         self._global_scale_f = float(global_scale)
         self.register_buffer("padded_cluster_items", padded)
         self.register_buffer("cluster_sizes", cluster_sizes)
@@ -225,12 +193,9 @@ class SilverTorch(nn.Module):
         query_clause_attrs: Tensor | None = None,
         candidate_ids: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
-        """IVF + (optional) attribute-filter-fused retrieval.
-
-        ``query_clause_attrs`` is only valid when ``filter`` is ``"bloom"`` or
-        ``"exact"``. With it ``None``, the filter branch is skipped entirely
-        and the kernel runs as plain IVF + INT8 ANN.
-        """
+        """IVF + (optional) attribute-filter-fused retrieval; ``query_clause_attrs`` is valid only
+        for ``filter="bloom"|"exact"`` and when ``None`` the filter branch is skipped (plain IVF
+        + INT8 ANN)."""
         if candidate_ids is not None:
             return self._forward_candidates(query, candidate_ids)
         if self.filter == "none" and query_clause_attrs is not None:
@@ -240,11 +205,8 @@ class SilverTorch(nn.Module):
         return self._forward_torch_eager(query, query_clause_attrs)
 
     def _phase1_probe(self, query: Tensor) -> Tensor:
-        """Phase 1: centroid top-``n_probe``, gather padded probed items.
-
-        Returns ``flat_items[B, P]`` (P = n_probe × max_cluster_size); ``-1``
-        slots mark empty cluster padding.
-        """
+        """Phase 1: centroid top-``n_probe`` then gather padded probed items; returns ``flat_items
+        [B, P]`` (P = n_probe × max_cluster_size) with ``-1`` marking empty-cluster padding."""
         b = query.shape[0]
         cent_scores = query @ self.centroids.t()
         _, probe_ids = torch.topk(cent_scores, self.n_probe, dim=1)
@@ -300,19 +262,10 @@ class SilverTorch(nn.Module):
         query: Tensor,
         query_clause_attrs: Tensor | None,
     ) -> tuple[Tensor, Tensor]:
-        """Pure-torch forward — compiled in ``__init__``.
-
-        Mirrors the Triton kernel semantics: phase 1 IVF probe, optional
-        bloom subset test OR exact-clause predicate, int8×int8 → int32 dot +
-        per-row × global rescale, mask + topk + ``-1 / -inf`` pad. Calls
-        the eager bloom-sig body directly so the whole forward traces into
-        one graph.
-
-        The dot is computed in fp32 (cast from int8) rather than via
-        ``torch._int_mm`` because the kernel reference uses fp32 here — at
-        D=128 the integer products fit in fp32 mantissa exactly, so the
-        result is bit-identical to an int32-then-cast accumulator.
-        """
+        """Pure-torch forward (compiled in ``__init__``) mirroring the Triton kernel: IVF probe,
+        optional bloom/exact filter, int8×int8 dot + rescale, mask + topk + ``-1``/``-inf`` pad.
+        The dot runs in fp32 (not ``torch._int_mm``) — at D=128 the integer products fit the fp32
+        mantissa exactly, so it's bit-identical to an int32 accumulator."""
         b = query.shape[0]
         flat_items = self._phase1_probe(query)
         p = flat_items.shape[1]
@@ -395,6 +348,7 @@ def build_silvertorch(
     clause_is_reverse: Tensor | None = None,
     backend: Backend = "triton",
 ) -> SilverTorch:
+    """Construct a ``SilverTorch`` and run ``register_index(item_embs, ...)`` in one call."""
     module = SilverTorch(
         k=k,
         n_lists=n_lists,
