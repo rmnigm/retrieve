@@ -1,0 +1,48 @@
+_defaults: &defaults
+  data_dir: data/goodreads-work-id
+  output: results/goodreads/d256-filter
+  split: test
+  device: cuda
+  ks: [100, 500, 1000]
+  batch_sizes: [1, 8, 16]
+  seed: 0
+  encode:
+    batch_size: 512
+    num_workers: 8
+    max_seq_length: 200
+  algorithms:
+    - linr_v1_filter_mask
+    - linr_v2
+    - linr_v3
+    - linr_v4
+    - silvertorch
+  # Backends to sweep — both wrapped with torch.compile(mode="reduce-overhead")
+  # (see the Algo classes for the call site).
+  backends: [triton, torch]
+  users_limit: 10000
+  filters:
+    clause:
+      attrs_path:    data/goodreads-work-id/item_attrs_narrow.pt
+      reverse_path:  data/goodreads-work-id/clause_is_reverse_narrow.pt
+      sweeps:
+        - {name: c0_genre,        active_clauses: [0]}
+        - {name: c1_lang_reverse, active_clauses: [1]}
+        - {name: c2_format,       active_clauses: [2]}
+        - {name: c3_year,         active_clauses: [3]}
+        - {name: c0c1,            active_clauses: [0, 1]}
+        - {name: all4,            active_clauses: [0, 1, 2, 3]}
+    bloom:
+      # Bloom over the SAME narrow attrs as the clause sweeps — paper-strict
+      # set-membership approximation of the exact-equality predicate.
+      # `c1_lang_reverse` is excluded: BloomFilter is forward-only (no NOT).
+      attrs_path:   data/goodreads-work-id/item_attrs_narrow.pt
+      reverse_path: data/goodreads-work-id/clause_is_reverse_narrow.pt
+      m_bits: 1024
+      k_hash: 5
+      sweeps:
+        - {name: c0_genre, active_clauses: [0]}
+        - {name: c2_format, active_clauses: [2]}
+        - {name: c3_year,  active_clauses: [3]}
+
+<<: *defaults
+checkpoint: data/goodreads-work-id/checkpoints/gsasrec-d256-drop0.5-id/best_model.pt

@@ -1,0 +1,56 @@
+_defaults: &defaults
+  data_dir: data/arxiv-papers
+  content_subdir: content_d128
+  gt_subdir: gt_d128
+  # No `checkpoint:` field — arxiv has no SASRec model; queries come from
+  # data/arxiv-papers/content_d128/query_emb.pt (built by `arxiv encode_queries`).
+  output: results/deep_sweeps/arxiv-d128-silvertorch
+  split: test
+  device: cuda
+  ks: [100, 200, 400]
+  batch_sizes: [1, 8, 16]
+  seed: 0
+  users_limit: 10000
+
+  # Silvertorch-only param sweep — companion to the main filter configs
+  # (conf/arxiv/d*-filter.yaml) which carry a single canonical silvertorch
+  # combo. This config maps the full recall-vs-latency curve across two
+  # cluster-count layouts and a wide n_probe range.
+  algorithms:
+    - silvertorch
+
+  backends: [triton, torch]
+
+  algo_params:
+    silvertorch:
+      # Layout A — n_lists≈√N=1664 (paper-faithful, ~1800-item clusters).
+      # Power-of-2 n_probe sweep traces the recall curve from ~0.5 to ~0.97.
+      - {n_lists: 1664, n_probe: 4,   n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈6.5k
+      - {n_lists: 1664, n_probe: 8,   n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈14k
+      - {n_lists: 1664, n_probe: 32,  n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈58k
+      - {n_lists: 1664, n_probe: 128, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈232k
+      - {n_lists: 1664, n_probe: 256, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈415k
+      # Layout B — n_lists=8192 (~365-item clusters; small-P regime).
+      # Lower recall at same n_probe vs Layout A, but smaller P → faster.
+      - {n_lists: 8192, n_probe: 4,   n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈1.3k
+      - {n_lists: 8192, n_probe: 8,   n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈2.6k
+      - {n_lists: 8192, n_probe: 32,  n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈11k
+      - {n_lists: 8192, n_probe: 128, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈42k
+      - {n_lists: 8192, n_probe: 256, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈84k
+
+  # Silvertorch only handles the bloom-fused path — clause sweeps would be
+  # auto-skipped, so omit them entirely.
+  filters:
+    bloom:
+      attrs_path:   data/arxiv-papers/item_attrs_narrow.pt
+      reverse_path: data/arxiv-papers/clause_is_reverse_narrow.pt
+      m_bits: 1024
+      k_hash: 5
+      sweeps:
+        - {name: c0_maincat,    active_clauses: [0]}
+        - {name: c2_year,       active_clauses: [2]}
+        - {name: c3_nversions,  active_clauses: [3]}
+        - {name: c0c2,          active_clauses: [0, 2]}
+        - {name: all4,          active_clauses: [0, 1, 2, 3]}
+
+<<: *defaults
