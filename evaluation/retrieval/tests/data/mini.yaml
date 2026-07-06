@@ -1,0 +1,35 @@
+# Tiny self-contained config for test_config.py — mirrors the SHAPE of
+# config/goodreads/d128-filter.yaml (anchor scratch key + merge, filters
+# block with clause+bloom sweeps) without touching any real data files.
+# `encode:` is deliberately omitted to exercise EncodeConfig defaults.
+_defaults: &defaults
+  data_dir: data/mini
+  output: results/mini
+  gt_subdir: gt_mini
+  split: test
+  device: cpu
+  ks: [10, 50]
+  batch_sizes: [1, 2]
+  seed: 7
+  algorithms:
+    - linr_v3
+    - silvertorch
+  backends: [triton, torch]
+  users_limit: 100
+
+  filters:
+    clause:
+      attrs_path:    data/mini/item_attrs_narrow.pt
+      reverse_path:  data/mini/clause_is_reverse_narrow.pt
+      sweeps:
+        - {name: c0, active_clauses: [0]}
+        - {name: c0c1, active_clauses: [0, 1]}
+    bloom:
+      attrs_path: data/mini/item_attrs_narrow.pt
+      m_bits: 64
+      k_hash: 3
+      sweeps:
+        - {name: c0, active_clauses: [0]}
+
+<<: *defaults
+checkpoint: data/mini/checkpoints/best_model.pt
