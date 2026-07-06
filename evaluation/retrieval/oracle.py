@@ -13,6 +13,8 @@ runs build a separate exact filter over the same attrs at the call site.
 
 from __future__ import annotations
 
+import hashlib
+import sys
 from pathlib import Path
 
 import torch
@@ -20,6 +22,29 @@ from loguru import logger
 from tqdm import tqdm
 
 from retrieve.interfaces import FilterModule
+
+_FP_SAMPLE_ROWS = 64
+
+
+def _oracle_fingerprint(
+    item_embs: torch.Tensor,
+    queries: torch.Tensor,
+    qa_narrow_sweep: torch.Tensor | None,
+    k_gt: int,
+) -> str:
+    """Cheap deterministic content hash: shapes + dtypes + a fixed row sample.
+
+    Sampling (vs hashing 3M×256 fp32 fully) keeps this <10 ms; linspace rows
+    catch dim changes, re-encodes, attr regens, and checkpoint swaps — any of
+    which perturb sampled bytes. Not adversarially robust; doesn't need to be."""
+    h = hashlib.sha256()
+    tensors = [item_embs, queries] + ([qa_narrow_sweep] if qa_narrow_sweep is not None else [])
+    for t in tensors:
+        h.update(repr((tuple(t.shape), str(t.dtype))).encode())
+        idx = torch.linspace(0, t.shape[0] - 1, steps=min(_FP_SAMPLE_ROWS, t.shape[0])).long()
+        h.update(t[idx].detach().float().cpu().contiguous().numpy().tobytes())
+    h.update(str(k_gt).encode())
+    return h.hexdigest()
 
 
 @torch.inference_mode()
@@ -55,7 +80,12 @@ def compute_filtered_oracle(
     n_total = int(item_embs.shape[0])
     K_eff = min(K_GT, n_total)
 
-    for s in tqdm(range(0, keep_idx.numel(), batch_size), desc="oracle", leave=False):
+    for s in tqdm(
+        range(0, keep_idx.numel(), batch_size),
+        desc="oracle",
+        leave=False,
+        disable=not sys.stderr.isatty(),
+    ):
         batch_idx = keep_idx[s : s + batch_size]
         q = queries[batch_idx].to(device, non_blocking=True)
         qa_n = (
@@ -91,7 +121,6 @@ def compute_filtered_oracle(
 def load_or_build_oracle(
     gt_dir: Path,
     sweep_name: str,
-    n_users: int,
     K_GT: int,
     *,
     item_embs: torch.Tensor,
@@ -101,40 +130,40 @@ def load_or_build_oracle(
     oracle_filter: FilterModule | None,
     device: torch.device,
 ) -> torch.Tensor:
-    """Load cached oracle from disk; recompute and cache on shape mismatch.
+    """Load cached oracle from disk; recompute on content-fingerprint mismatch.
 
-    Disk cache lives at ``<gt_dir>/gt_topk_v2_<sweep_name>.pt``. The
-    ``_v2`` suffix invalidates pre-pad-drop caches written under the
-    legacy ``[N+1, D]`` layout — those stored 1-indexed item_ids and
-    would mismatch every algo's 0-indexed top-K under the new layout.
-    A stale cache (different ``n_users`` or ``K_GT``) is recomputed and
-    overwritten — the common cause is changing ``content_subdir`` between
-    runs (item_embs differ → oracle scores differ).
+    Disk cache lives at ``<gt_dir>/gt_topk_v3_<sweep_name>.pt`` as a dict
+    blob ``{"topk", "fingerprint", "k_gt"}``. The fingerprint hashes the
+    post-``users_limit`` tensors the oracle is actually built from, so
+    same-shape content changes — a different ``content_subdir`` dim off
+    the same ``data_dir``, regenerated attrs, a retrained checkpoint —
+    invalidate the cache instead of silently reusing stale ground truth
+    (per-dim ``gt_subdir`` remains cheap defense-in-depth, not a
+    correctness requirement). Legacy ``gt_topk_v2_`` bare-tensor caches
+    are ignored by name and can be deleted; a bare tensor or stale dict
+    found at the v3 path is recomputed and overwritten, never migrated
+    in-place.
     """
-    gt_path = gt_dir / f"gt_topk_v2_{sweep_name}.pt"
-    oracle_topk: torch.Tensor | None = None
+    gt_path = gt_dir / f"gt_topk_v3_{sweep_name}.pt"
+    fp = _oracle_fingerprint(item_embs, queries, qa_narrow_sweep, K_GT)
     if gt_path.exists():
-        oracle_topk = torch.load(str(gt_path), map_location="cpu")
-        if oracle_topk.shape != (n_users, K_GT):
-            logger.warning(
-                "stale oracle at {} (shape={}); recomputing",
-                gt_path,
-                tuple(oracle_topk.shape),
-            )
-            oracle_topk = None
-    if oracle_topk is None:
-        logger.info("  building filtered oracle (K_GT={})", K_GT)
-        oracle_topk = compute_filtered_oracle(
-            item_embs,
-            queries,
-            qa_narrow_sweep,
-            skip_mask,
-            oracle_filter,
-            K_GT=K_GT,
-            device=device,
-        )
-        torch.save(oracle_topk, str(gt_path))
-        logger.info("  saved oracle → {}", gt_path)
+        blob = torch.load(str(gt_path), map_location="cpu", weights_only=True)
+        if isinstance(blob, dict) and blob.get("fingerprint") == fp:
+            logger.info("  loaded oracle from cache: {}", gt_path)
+            return blob["topk"]
+        logger.warning("stale/legacy oracle at {} (fingerprint mismatch); recomputing", gt_path)
+    logger.info("  building filtered oracle (K_GT={})", K_GT)
+    oracle_topk = compute_filtered_oracle(
+        item_embs,
+        queries,
+        qa_narrow_sweep,
+        skip_mask,
+        oracle_filter,
+        K_GT=K_GT,
+        device=device,
+    )
+    torch.save({"topk": oracle_topk, "fingerprint": fp, "k_gt": K_GT}, str(gt_path))
+    logger.info("  saved oracle → {}", gt_path)
     return oracle_topk
 
 

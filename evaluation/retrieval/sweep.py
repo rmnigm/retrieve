@@ -23,7 +23,9 @@ narrow attribute tensor — only the algo on top differs.
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Iterator
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast, get_args
 
@@ -37,17 +39,17 @@ from retrieval.algos import (
     is_valid_combo,
     supports,
 )
-from retrieval.bench_tools import (
-    cuda_allocated_mib,
-    perf_pass_cached,
-    pin_precision_globals,
-    quality_pass_cached,
-    warm_gpu_once,
-)
 from retrieval.config import EvalConfig, FilterCfg, FilterKind, FilterSweepCfg
 from retrieval.context import EMPTY_ASSETS, FilterAssets, SweepContext
 from retrieval.loaders import build_sweep_qa, load_filter_assets
+from retrieval.measure import (
+    PerfStats,
+    cuda_allocated_mib,
+    pin_precision_globals,
+    warm_gpu_once,
+)
 from retrieval.oracle import load_or_build_oracle
+from retrieval.passes import QualityStats, perf_pass_cached, quality_pass_cached
 from retrieve.interfaces import Backend, FilterModule
 
 # ----- top-level driver -------------------------------------------------------
@@ -225,7 +227,6 @@ def run_one_sweep(
         oracle_topk = load_or_build_oracle(
             ctx.gt_dir,
             sweep.name,
-            n_users,
             ctx.k_gt,
             item_embs=ctx.item_embs,
             queries=ctx.queries,
@@ -293,13 +294,13 @@ def evaluate_cell(
     index_mem = cuda_allocated_mib() - mem_before
 
     desc = f"{filter_kind}/{sweep.name}/{algo} k={k}"
-    recall, ndcg = _run_quality(algo_obj, k, desc, ctx, assets)
+    quality = _run_quality(algo_obj, k, desc, ctx, assets)
 
     _autotune_prewarm(algo_obj, ctx, assets)
 
     rows: list[dict] = []
     for bs in ctx.cfg.batch_sizes:
-        med, p20, p80, peak, scratch = perf_pass_cached(
+        stats = perf_pass_cached(
             algo_obj,
             ctx.queries,
             batch_size=bs,
@@ -319,20 +320,13 @@ def evaluate_cell(
                 suite=ctx.suite,
                 n_kept=assets.n_kept,
                 seed=ctx.cfg.seed,
-                med=med,
-                p20=p20,
-                p80=p80,
-                peak=peak,
+                stats=stats,
                 index_mem=index_mem,
-                scratch=scratch,
-                recall=recall,
-                ndcg=ndcg,
+                quality=quality,
                 backend=backend,
             )
         )
-        _log_perf_line(
-            filter_kind, sweep.name, algo, backend, params, k, bs, med, p20, p80, peak, recall, ndcg
-        )
+        _log_perf_line(filter_kind, sweep.name, algo, backend, params, k, bs, stats, quality)
 
     _release_algo(algo_obj)
     return rows
@@ -384,10 +378,11 @@ def _run_quality(
     desc: str,
     ctx: SweepContext,
     assets: FilterAssets,
-) -> tuple[float, float]:
+) -> QualityStats:
     """Dispatch quality pass: NaN, held-out targets, or oracle top-K."""
     if ctx.skip_quality:
-        return float("nan"), float("nan")
+        nan = float("nan")
+        return QualityStats(recall=nan, ndcg=nan, precision=nan, mrr=nan)
 
     if assets.oracle_topk is None:
         # No oracle was built — run_one_sweep builds one exactly when
@@ -431,10 +426,13 @@ def _run_quality(
 def _autotune_prewarm(
     algo_obj: RetrievalAlgo, ctx: SweepContext, assets: FilterAssets
 ) -> None:
-    """Call forward once per batch size before any bs is timed.
+    """Call forward once per batch size before timing so Triton JIT
+    compilation and the per-shape cudagraph capture happen outside the
+    timed window.
 
-    Per-bs warmup inside ``perf_pass_cached`` is supposed to populate Triton's
-    autotune cache, but a slow last-mile autotune config has been observed
+    The kernels ship offline-tuned ``DEFAULT_CONFIG``s (no runtime
+    autotune), but ``reduce-overhead`` still compiles + captures a
+    cudagraph per batch-size shape; that cold cost has been observed
     leaking into the timing window (median collapsing to a single ~1.5 s
     sample on the first cell). Belt-and-suspenders defense.
     """
@@ -452,6 +450,26 @@ def _autotune_prewarm(
     torch.cuda.synchronize()
 
 
+@lru_cache(maxsize=1)
+def _provenance() -> dict[str, str]:
+    """Hardware/software provenance stamped into every row's ``extra``.
+
+    Computed once per process (all rows of a run share it) so cross-machine
+    result pooling doesn't have to consult run logs. ``commit`` degrades to
+    "unknown" outside a git checkout / without git on PATH."""
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=Path(__file__).resolve().parent,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except (OSError, subprocess.SubprocessError):
+        commit = "unknown"
+    gpu = torch.cuda.get_device_name() if torch.cuda.is_available() else "cpu"
+    return {"gpu": gpu, "torch": torch.__version__, "commit": commit}
+
+
 def _make_perf_row(
     *,
     filter_kind: FilterKind,
@@ -463,18 +481,17 @@ def _make_perf_row(
     suite: str,
     n_kept: int,
     seed: int,
-    med: float,
-    p20: float,
-    p80: float,
-    peak: float,
+    stats: PerfStats,
     index_mem: float,
-    scratch: float,
-    recall: float,
-    ndcg: float,
+    quality: QualityStats,
     backend: Backend,
 ) -> dict:
     """Build one perf-row dict. ``backend`` is included in both the ``cell``
-    string (for unique cross-row joins) and as a top-level field."""
+    string (for unique cross-row joins) and as a top-level field.
+
+    Column names are load-bearing for downstream joins: never rename an
+    existing field. ``precision@k`` / ``mrr@k`` and the
+    ``extra.gpu/torch/commit`` provenance fields are additive."""
     return {
         "suite": suite,
         "cell": f"{filter_kind}_{sweep_name}_{backend}_bs{bs}_k{k}",
@@ -487,15 +504,16 @@ def _make_perf_row(
         "batch_size": bs,
         "k": k,
         "n_users_kept": n_kept,
-        "median_ms": med,
-        "p20_ms": p20,
-        "p80_ms": p80,
-        "peak_mem_mib": peak,
+        **stats.as_row_fields(),
         "index_mem_mib": index_mem,
-        "fwd_scratch_mib": scratch,
-        f"recall@{k}": recall,
-        f"ndcg@{k}": ndcg,
-        "extra": {"params": {str(pk): str(pv) for pk, pv in params.items()}},
+        f"recall@{k}": quality.recall,
+        f"ndcg@{k}": quality.ndcg,
+        f"precision@{k}": quality.precision,
+        f"mrr@{k}": quality.mrr,
+        "extra": {
+            "params": {str(pk): str(pv) for pk, pv in params.items()},
+            **_provenance(),
+        },
     }
 
 
@@ -507,12 +525,8 @@ def _log_perf_line(
     params: dict[str, Any],
     k: int,
     bs: int,
-    med: float,
-    p20: float,
-    p80: float,
-    peak: float,
-    recall: float,
-    ndcg: float,
+    stats: PerfStats,
+    quality: QualityStats,
 ) -> None:
     """Single-line per-cell summary."""
     params_str = (
@@ -528,12 +542,12 @@ def _log_perf_line(
         params_str,
         k,
         bs,
-        med,
-        p20,
-        p80,
-        peak,
-        recall,
-        ndcg,
+        stats.median_ms,
+        stats.p20_ms,
+        stats.p80_ms,
+        stats.peak_mib,
+        quality.recall,
+        quality.ndcg,
     )
 
 
