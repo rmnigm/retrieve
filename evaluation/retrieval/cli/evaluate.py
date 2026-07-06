@@ -22,7 +22,8 @@ import torch
 from loguru import logger
 
 from retrieval.config import load_eval_config
-from retrieval.loaders import load_query_attrs
+from retrieval.context import SweepContext
+from retrieval.loaders import apply_users_limit, load_query_attrs
 from retrieval.queries_cache import load_or_cache_queries
 from retrieval.sweep import run_sweep
 
@@ -51,7 +52,6 @@ def main(
     skip_quality: bool,
 ) -> None:
     cfg = load_eval_config(Path(config_path))
-    cfg.algorithms = [algo]
 
     import torch._dynamo  # noqa: PLC0415
 
@@ -75,20 +75,33 @@ def main(
             data_path / "eval_split.parquet", queries.shape[0]
         )
 
-    rows = run_sweep(
-        cfg,
-        item_embs,
-        queries,
-        targets,
-        n_targets,
-        qa_narrow_all,
-        data_path=data_path,
-        device=dev,
-        filter_kinds=filter_kinds,
-        backends=backend_override,  # type: ignore[arg-type]
-        sweep_filter=sweep_filter,
-        skip_quality=skip_quality,
+    # queries_cache already trims checkpoint-path tensors to users_limit
+    # (no-op guard there); this is the real trim on the arxiv path.
+    queries, targets, n_targets, qa_narrow_all = apply_users_limit(
+        cfg, queries, targets, n_targets, qa_narrow_all
     )
+
+    backends = backend_override or tuple(cfg.backends) or ("triton",)
+
+    ctx = SweepContext(
+        cfg=cfg,
+        algorithms=(algo,),
+        item_embs=item_embs,
+        queries=queries,
+        targets=targets,
+        n_targets=n_targets,
+        qa_narrow_all=qa_narrow_all,
+        device=dev,
+        gt_dir=data_path / cfg.gt_subdir,
+        k_gt=max(cfg.ks),
+        suite="yambda" if cfg.filters is None else "filter",
+        backends=backends,  # type: ignore[arg-type]
+        skip_quality=skip_quality,
+        sweep_filter=sweep_filter,
+        filter_kinds=filter_kinds,
+    )
+
+    rows = run_sweep(ctx)
 
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
