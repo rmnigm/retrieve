@@ -51,7 +51,9 @@ def load_or_cache_queries(
     users_limit = cfg.users_limit
 
     if cache_path.exists():
-        blob = torch.load(str(cache_path), map_location="cpu", weights_only=False)
+        # Blob is dict-of-tensors + scalar cache keys (see torch.save below),
+        # so the safe weights_only load path handles it.
+        blob = torch.load(str(cache_path), map_location="cpu", weights_only=True)
         if (
             blob.get("ckpt_mtime") == ckpt_mtime
             and blob.get("max_seq_length") == max_seq
@@ -91,7 +93,8 @@ def load_or_cache_queries(
     budget_bytes = max(0, int(free_bytes * _CACHE_FREE_FRACTION) - _CACHE_RESERVE_BYTES)
     if est_bytes > budget_bytes:
         logger.warning(
-            "  skipping cache write: est={:.1f}GB > budget={:.1f}GB (free={:.1f}GB); subsequent algos will re-encode",
+            "  skipping cache write: est={:.1f}GB > budget={:.1f}GB (free={:.1f}GB); "
+            "subsequent algos will re-encode",
             est_bytes / 2**30, budget_bytes / 2**30, free_bytes / 2**30,
         )
     else:

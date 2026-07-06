@@ -25,8 +25,8 @@ import torch
 import torch.nn.functional as F
 from loguru import logger
 
-from retrieval.bench_tools import encode_queries, load_model_for_eval
 from retrieval.config import EvalConfig, FilterCfg, FilterSweepCfg
+from retrieval.encode import encode_queries, load_model_for_eval
 
 EXPECTED_DOC_PREFIX = "search_document: "
 EXPECTED_QUERY_PREFIX = "search_query: "
@@ -36,15 +36,18 @@ EXPECTED_QUERY_PREFIX = "search_query: "
 
 
 def resolve_path(data_dir: Path, path_str: str) -> Path:
-    """Treat YAML paths as cwd-relative if they point at a real file; otherwise
-    resolve them against ``data_dir`` (so ``data/<dataset>/foo.pt`` works
-    whether the harness runs from ``evaluation/`` or anywhere else)."""
+    """cwd-relative if it exists; else data_dir-relative (full relative path,
+    not basename); else raise listing both candidates.
+
+    The old basename fallback (``data_dir / p.name``) could silently load a
+    same-named tensor from the wrong subdir — a missing path must be loud."""
     p = Path(path_str).expanduser()
-    if p.is_absolute() and p.exists():
-        return p
     if p.exists():
         return p
-    return (data_dir / p.name).resolve()
+    candidate = (data_dir / p).resolve()
+    if candidate.exists():
+        return candidate
+    raise FileNotFoundError(f"{path_str!r}: tried {p.resolve()} and {candidate}")
 
 
 # ----- arxiv-only sanity check ------------------------------------------------
@@ -356,7 +359,7 @@ def load_filter_assets(
 
     Both ``clause`` and ``bloom`` filter_kinds run over the same narrow
     attribute tensor; only the algo on top differs. The wide-shelf
-    tensor is currently unused — see goodreads-filter-eval.md.
+    tensor the dataset builders also write is currently unused.
     """
     item_attrs_narrow: torch.Tensor | None = None
     clause_is_reverse: torch.Tensor | None = None
@@ -365,13 +368,17 @@ def load_filter_assets(
         if fcfg.attrs_path is None:
             raise ValueError(f"filter_kind={filter_kind} requires attrs_path")
         item_attrs_narrow = torch.load(
-            str(resolve_path(data_dir, fcfg.attrs_path)), map_location=device
+            str(resolve_path(data_dir, fcfg.attrs_path)),
+            map_location=device,
+            weights_only=True,
         )
         # item_attrs_narrow is [N, C, A] 0-indexed dense (the dataset
         # builders write real items only). No slice needed.
         if fcfg.reverse_path:
             clause_is_reverse = torch.load(
-                str(resolve_path(data_dir, fcfg.reverse_path)), map_location=device
+                str(resolve_path(data_dir, fcfg.reverse_path)),
+                map_location=device,
+                weights_only=True,
             )
 
     return item_attrs_narrow, clause_is_reverse

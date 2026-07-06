@@ -19,8 +19,7 @@ import shutil
 import sys
 from pathlib import Path
 
-import yaml
-
+from retrieval.config import load_raw_config
 from retrieval.results_io import load_rows
 
 
@@ -30,8 +29,7 @@ def main() -> int:
         return 2
 
     cfg_path = Path(sys.argv[1])
-    cfg = yaml.safe_load(open(cfg_path)) or {}
-    cfg = {k: v for k, v in cfg.items() if not k.startswith("_")}
+    cfg = load_raw_config(cfg_path)
 
     out_dir = Path(cfg["output"])
     combined_path = out_dir.parent / f"{out_dir.name}.json"

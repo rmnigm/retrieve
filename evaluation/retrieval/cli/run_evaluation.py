@@ -20,13 +20,13 @@ import socket
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO, Iterator
+from typing import IO
 
-import yaml
-
+from retrieval.config import load_raw_config
 from retrieval.results_io import load_rows
 
 EVAL_DIR = Path(__file__).resolve().parents[2]
@@ -78,9 +78,11 @@ def _cfg_name(cfg: Path) -> str:
 
 
 def _load_cfg(path: Path) -> tuple[Path, list[str]]:
-    with open(path) as f:
-        data = yaml.safe_load(f) or {}
-    data = {k: v for k, v in data.items() if not k.startswith("_")}
+    data = load_raw_config(path)
+    if data.get("output") is None:
+        raise SystemExit(
+            f"{path}: config must set output: (a directory) to be orchestrated"
+        )
     out = Path(data["output"])
     return (out if out.is_absolute() else EVAL_DIR / out), list(data["algorithms"])
 
@@ -139,14 +141,16 @@ class LogSinks:
 
     def stream(self, line: str) -> None:
         """Write a raw line (already newline-terminated) to all active sinks."""
-        sys.stdout.write(line); sys.stdout.flush()
+        sys.stdout.write(line)
+        sys.stdout.flush()
         self._write(self.full_f, line)
         if self.per_f is not None:
             self._write(self.per_f, line)
 
     @staticmethod
     def _write(f: IO[str], s: str) -> None:
-        f.write(s); f.flush()
+        f.write(s)
+        f.flush()
 
     @contextmanager
     def per_config(self, cfg: Path) -> Iterator[Path]:
@@ -195,7 +199,8 @@ def _parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
                    help="Named eval-type preset (mutually exclusive with positional configs)")
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--resume", action="store_true",
-                      help="Skip (config, algo) whose output JSON exists and parses as a non-empty list")
+                      help="Skip (config, algo) whose output JSON exists and parses "
+                           "as a non-empty list")
     mode.add_argument("--force", action="store_true",
                       help="Overwrite existing outputs without prompting")
     p.add_argument("--stage", action="store_true",
