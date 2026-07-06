@@ -2,9 +2,9 @@
 
 # `evaluation/` retrieval harness
 
-Live reference for the in-process retrieval benchmark used to compare
-algorithms across yambda, goodreads, and arxiv. Covers the driver layout, the
-YAML config format, the measurement methodology, the output schema, and the
+Live reference for the retrieval benchmark used to compare algorithms
+across yambda, goodreads, and arxiv. Covers the driver layout, the YAML
+config format, the measurement methodology, the output schema, and the
 extension points for adding a new algorithm, config, or dataset.
 
 For the algorithm internals (what each `forward(query)` does) see
@@ -15,118 +15,183 @@ gates kernel changes is documented in [testing.md](testing.md).
 
 ## Scope
 
-[`evaluation/retrieval/evaluate.py`](../../evaluation/retrieval/evaluate.py)
-is the **single-algo** retrieval benchmark CLI — GPU algos × backends ×
-filter kinds across yambda, goodreads, and arxiv. One invocation runs
-exactly one algorithm's cells and writes one JSON file. The shell
-wrapper [`run_per_algo.sh`](../../evaluation/run_per_algo.sh) reads the
-YAML's ``algorithms`` list and loops, writing per-algo JSONs into
-``cfg.output`` (now a **directory**, not a file). Downstream analysis
-reads them back via
+[`evaluation/retrieval/cli/evaluate.py`](../../evaluation/retrieval/cli/evaluate.py)
+is the **single-algo** retrieval benchmark CLI — one invocation runs
+exactly one algorithm's cells against one YAML config and writes one
+JSON file. The orchestrator
+[`cli/run_evaluation.py`](../../evaluation/retrieval/cli/run_evaluation.py)
+(`uv run run-evaluation`) reads the YAML's `algorithms` list and spawns
+`uv run evaluate` once per algo, writing per-algo JSONs into
+`cfg.output` (a **directory**). Downstream analysis reads them back via
 [`retrieval.results_io.load_results`](../../evaluation/retrieval/results_io.py).
 
 Per-algo process isolation is the point: every algo gets a fresh Python
-interpreter, which wipes torch.compile / Triton autotune / CUDA-graph
-private-pool state that ``_release_algo`` and ``torch._dynamo.reset()``
+interpreter, which wipes torch.compile / Triton JIT / CUDA-graph
+private-pool state that `_release_algo` and `torch._dynamo.reset()`
 can't reclaim between algos in the same process. The SASRec encode
 pass is cached on disk by
 [`queries_cache.py`](../../evaluation/retrieval/queries_cache.py)
-(``<ckpt-dir>/encoded_queries_<split>.pt``, keyed on ckpt mtime and
-``max_seq_length``), so the N subprocesses don't pay N × encode cost.
+(`<ckpt-dir>/encoded_queries_<split>.pt`, keyed on
+`(ckpt mtime, max_seq_length, users_limit)` — `users_limit` is applied
+**before** caching so the cache scales with the limited user set), so
+the N subprocesses don't pay N × encode cost.
 
-It dispatches by config shape across three datasets:
+The driver dispatches by config shape across three datasets:
 
 | Config shape                              | Mode                                   |
 |-------------------------------------------|----------------------------------------|
 | `checkpoint` set, `query_emb_path` unset  | Encode queries via SASRec (yambda/goodreads) |
 | `query_emb_path` set, `checkpoint` unset  | Load pre-encoded text embeddings (arxiv) |
 | `filters: null`                           | No filter loop (yambda)                |
-| `filters: {none, clause, bloom}`          | Filter sweeps (goodreads, arxiv)       |
+| `filters: {clause, bloom}` block          | Filter sweeps (goodreads, arxiv)       |
 
-For each `(filter_kind, sweep, algo, params, K, batch_size)` cell:
+For each `(filter_kind, sweep, algo, backend, params, K, batch_size)`
+cell:
 
 1. Builds the index on top of the dataset's item embeddings.
-2. Streams every query through the index in chunks (default
-   `QUALITY_BATCH_SIZE = 64`) to compute recall@K and ndcg@K (the
-   **quality pass**) — vs the held-out test target on `filter_kind=none`,
-   vs the cached filtered-FullScan top-K oracle on filtered cells.
+2. Streams every query through the index in chunks
+   (`QUALITY_BATCH_SIZE = 16`) to compute recall/ndcg/precision/mrr@K
+   (the **quality pass**) — vs the held-out test targets on
+   `filter_kind=none`, vs the cached filtered-FullScan top-K oracle on
+   filtered cells.
 3. Times the index forward at the configured batch size against a
-   fixed-seed pool of cached queries (the **perf pass**, default
-   `n_pool = 4096`), capturing median / p20 / p80 latency plus peak /
-   transient GPU memory.
-4. Writes one row per cell to the configured output JSON.
+   fixed-seed pool of cached queries (the **perf pass**, `n_pool = 4096`),
+   capturing median / p20 / p80 latency plus peak / transient GPU memory.
+4. Writes one row per cell to the per-algo output JSON.
 
-The harness reports numbers and never fails a build; correctness lives
-in [`retrieve/tests/`](../../retrieve/tests/) and gates CI separately.
+Cell eligibility is declarative (`SUPPORTED_FILTER_KINDS` +
+`supports(algo, filter_kind)` checked before building); anything that
+*does* raise during construction is a genuine error and kills the run
+loudly — silently-vanishing cells were a real failure mode and are gone.
+Correctness of the library itself lives in
+[`retrieve/tests/`](../../retrieve/tests/) and gates CI separately;
+the harness's own CPU-only unit tests live in
+[`evaluation/retrieval/tests/`](../../evaluation/retrieval/tests/)
+(metrics, sweep helpers, oracle fingerprint, config loader — run with
+`cd evaluation && uv run pytest retrieval/tests/ -v`, no GPU needed).
 
 ## Files
 
 ```
-evaluation/
-├── run_per_algo.sh            # shell wrapper: loops algos from cfg, one subprocess each
 evaluation/retrieval/
-├── evaluate.py                # single-algo CLI: --config X --algo Y --output <file>
+├── cli/
+│   ├── evaluate.py            # single-algo CLI: --config X --algo Y --output <file>
+│   ├── run_evaluation.py      # orchestrator: subprocess per (config, algo); --eval-type presets; tee'd logs
+│   ├── stage_results.py       # per-algo JSONs → combined <name>.json + .perkernel/ + .yaml
+│   └── upload_results.py      # staged results/ → HF dataset repo (--repo-id required)
+├── context.py                 # SweepContext / FilterAssets frozen dataclasses
+├── sweep.py                   # loop driver: run_sweep → run_filter_kind → run_one_sweep → evaluate_cell
+├── loaders.py                 # embedding/attr loaders, apply_users_limit, build_sweep_qa, resolve_path
+├── oracle.py                  # filtered-FullScan ground truth + content-fingerprint disk cache
 ├── queries_cache.py           # disk cache for the SASRec encode pass
-├── results_io.py              # load_results(dir) — concatenate per-algo JSONs
-├── algos/                     # one class per GPU algo, duck-typed protocol
-│   ├── __init__.py            # build_algorithm + ALGORITHMS + build_filter
-│   ├── _helpers.py            # collect_modules
-│   ├── filter.py              # build_filter (None/clause/bloom) + make_mask
+├── measure.py                 # PerfStats + CUDA timing/memory primitives (imports torch + triton.testing ONLY)
+├── encode.py                  # SASRec model load + query encode (the ONE file that imports training.*)
+├── passes.py                  # QualityStats + quality_pass_cached / perf_pass_cached
+├── metrics.py                 # recall / precision / mrr / ndcg accumulators
+├── results_io.py              # load_rows(file) / load_results(dir)
+├── config.py                  # EvalConfig dataclass + load_raw_config / load_eval_config
+├── algos/                     # one class per algo, all AlgoBase subclasses
+│   ├── __init__.py            # ALGORITHMS + SUPPORTED_FILTER_KINDS + build_algorithm factory
+│   ├── _helpers.py            # RetrievalAlgo protocol + AlgoBase (the one torch.compile call)
+│   ├── filter.py              # build_filter (clause/bloom → FilterModule) + make_mask
 │   ├── linr_v1.py             # LinrV1Algo — covers triton_knn + linr_v1_filter_mask
 │   ├── linr_v2.py             # LinrV2Algo — exact filtered top-K via PrefilterKNN
 │   ├── linr_v3.py             # LinrV3Algo — V3 → V2 cascade (1-bit prefilter, fp32 rerank)
 │   ├── linr_v4.py             # LinrV4Algo — single-stage int8 dense (PostfilterKNNInt8)
-│   ├── silvertorch.py         # SilvertorchAlgo — IVF + INT8 + (none / bloom / exact) filter
-│   └── torch_knn.py           # TorchKnnAlgo — FullScanKNN reference
-├── bench_tools.py             # encode_queries, quality_pass_cached, perf_pass_cached
-├── config.py                  # EvalConfig dataclass + yaml loader
-├── hf_io.py                   # HF download / upload helpers + console scripts
-└── metrics.py                 # accumulate_metrics, finalize_metrics
+│   └── silvertorch.py         # SilvertorchAlgo — IVF + INT8 + (none / bloom / exact) filter_mode
+└── tests/                     # CPU-only unit tests (no GPU required)
+    ├── test_config.py
+    ├── test_metrics.py
+    ├── test_oracle.py
+    ├── test_silvertorch_algo_reverse.py
+    └── test_sweep_helpers.py
 
-evaluation/conf/
-├── 500m/d{64,128,256}-quality.yaml                # 500M Listen+, SASRec checkpoints
-├── 5b/d{64,128}-quality.yaml                      # 5B Listen+, SASRec checkpoints
-├── arxiv/d{64,128,256}-{quality,filter}.yaml      # arxiv, nomic-embed-text-v1.5
-└── goodreads/d{64,128,256}-{quality,filter}.yaml  # goodreads filter+quality bench
+evaluation/eval_datasets/      # dataset ETL package (renamed from `datasets` —
+│                              # the old name shadowed HuggingFace `datasets` in the venv)
+├── yambda.py / goodreads.py / arxiv.py / synth_arxiv.py
+├── common.py / constants.py / timesplit.py
+└── hf_io.py                   # HF fetch/publish helpers + console scripts
+
+evaluation/config/
+├── yambda-500m/d{64,128,256}-quality.yaml
+├── yambda-5b/d{64,128}-quality.yaml
+├── arxiv/d{64,128,256}-{quality,filter}.yaml
+├── goodreads/d{64,128,256}-{quality,filter}.yaml
+└── deep_sweeps/{arxiv-d128-silvertorch,goodreads-d128-linr_v3}.yaml
 ```
+
+Console scripts ([`evaluation/pyproject.toml`](../../evaluation/pyproject.toml)):
+`evaluate`, `run-evaluation`, `stage-results`, `upload-results`,
+`yambda`, `arxiv`, `goodreads`, `upload-checkpoints`, `eval-fetch`,
+`eval-publish`, `eval-publish-checkpoint`.
+
+### Driver flow
+
+`cli/evaluate.py::main` → seeds + TF32 off +
+`torch._dynamo.config.recompile_limit = 64` →
+`queries_cache.load_or_cache_queries` (SASRec encode or arxiv
+pre-encoded load) → `loaders.load_query_attrs` (filter configs only) →
+`loaders.apply_users_limit` (idempotent no-op on the cache path, the
+real trim on arxiv) → build a `SweepContext` → `sweep.run_sweep(ctx)` →
+JSON dump to `--output`.
+
+Run-wide inputs travel in a frozen
+[`SweepContext`](../../evaluation/retrieval/context.py) (config,
+post-limit query/target tensors, device, `gt_dir`, `k_gt = max(ks)`,
+suite, backends, CLI narrows); per-filter_kind filter modules and
+attrs travel in a frozen `FilterAssets`, whose per-sweep fields
+(`qa_n_sweep`, `skip_mask`, `oracle_topk`, `n_kept`) are stamped by
+`run_one_sweep` via `assets.for_sweep(...)`. Adding a new run-wide
+input = one field in `context.py`, visible at every loop level.
+
+**Loop nest** ([`sweep.py`](../../evaluation/retrieval/sweep.py)):
+
+```
+run_sweep(ctx)                       # pin TF32/matmul precision, warm GPU once
+└─ run_filter_kind(kind, fcfg, ctx)  # build one FilterModule per backend + oracle filter
+   └─ run_one_sweep(sweep, ...)      # build_sweep_qa → load_or_build_oracle → algo/backend/params/k loops
+      └─ evaluate_cell(...)          # reset CUDA state → build algo → quality → prewarm → per-bs perf rows
+```
+
+Yambda (`filters: null`) iterates a single synthetic
+`("none", full_scan)` cell so the loop body stays uniform. An unknown
+`filter_kind` key in the YAML raises at `_select_filter_iter` (it would
+otherwise silently fail every `supports` check). Between sweeps the
+driver calls `torch._dynamo.reset()` + `empty_cache()` — compiled
+graphs from earlier sweeps otherwise stay pinned and OOM large-N
+configs.
 
 ## Configuration
 
-Configs are YAML, parsed with `yaml.safe_load` and slammed into the
+Configs are YAML, parsed with `yaml.safe_load` into the
 [`EvalConfig`](../../evaluation/retrieval/config.py) dataclass.
-Each file declares a `_defaults: &defaults` anchor block, then merges that
-block at the top level with `<<: *defaults` and adds dataset-specific
-fields (`checkpoint:` for SASRec datasets, `query_emb_path:` for arxiv).
-The loader strips keys starting with `_` so the anchor scratch key doesn't
-break the dataclass constructor.
+Each file declares a `_defaults: &defaults` anchor block, merges it at
+the top level with `<<: *defaults`, and adds dataset-specific fields
+(`checkpoint:` for SASRec datasets, `query_emb_path:` for arxiv).
+`load_raw_config` strips top-level keys starting with `_` (the one
+place that rule lives — the orchestrator and `stage-results` reuse it).
 
-Example yambda config:
+Example yambda config (`config/yambda-500m/d128-quality.yaml`):
 
 ```yaml
 _defaults: &defaults
   data_dir: data/yambda-500m
-  output: null                # null → <ckpt-dir>/evaluate.json
+  output: results/yambda/500m-d128
   split: test
   device: cuda
   ks: [100, 200, 400]
-  batch_sizes: [1, 4, 8, 16]
+  batch_sizes: [1]
   seed: 0
   encode:
     batch_size: 512
     num_workers: 8
     max_seq_length: 200
   algorithms:
-    - torch_knn
-    - triton_knn
-    - linr_v3
+    - linr_v1_filter_mask
+    - linr_v4
     - silvertorch
-  algo_params:
-    linr_v3:
-      - {candidate_pool: 5000, v3_seed: 0}
-      - {candidate_pool: 10000, v3_seed: 0}
-    silvertorch:
-      - {n_lists: 1024, n_probe: 32, n_iter: 10, seed: 0}
-      - {n_lists: 2048, n_probe: 64, n_iter: 10, seed: 0}
+    - linr_v3
+  backends: [triton, torch]
 
 <<: *defaults
 checkpoint: data/yambda-500m/checkpoints/gsasrec-d128-drop0.5/best_model.pt
@@ -134,279 +199,330 @@ checkpoint: data/yambda-500m/checkpoints/gsasrec-d128-drop0.5/best_model.pt
 
 `algo_params[algo]` is a **list of dicts** — each dict is one explicit
 combo, taken as-is. Algos with no entry iterate over `[{}]` so the
-caller's loop stays uniform. The cross-product is only over `(algos,
-combos, ks, batch_sizes)`.
+loop stays uniform. The cross-product is only over `(algos, backends,
+combos, ks, batch_sizes)`; `is_valid_combo` drops combos the library
+would assert on (`n_probe > n_lists`).
 
-Filter-bench configs (`goodreads-*.yaml`, `arxiv-*.yaml`) add a `filters:`
-block declaring `clause` and `bloom` filter kinds, each with attribute
-paths and named sweeps; see [filtering.md](filtering.md) for the
-filter API.
+Filter-bench configs (`goodreads/*-filter.yaml`, `arxiv/*-filter.yaml`)
+add a `filters:` block declaring `clause` and `bloom` filter kinds,
+each with attribute paths and named sweeps (`active_clauses` subsets);
+see [filtering.md](filtering.md) for the filter API.
 
 ### Field reference
 
 | Field | Type | Purpose |
 |---|---|---|
-| `checkpoint` | path | SASRec `best_model.pt` path. Required for yambda/goodreads, omit for arxiv. The trainer writes a sibling `config.json` (via `GSASRecConfig.save`) which the loader reads to pick up `embedding_dim`, `dropout`, `reuse_item_embeddings`, etc. — no hyperparams in the eval YAML. Legacy 500M ckpts that don't ship a `config.json` fall back to `D128_DROP05_DEFAULTS` in `bench_tools.py`. |
+| `checkpoint` | path | SASRec `best_model.pt`. Required for yambda/goodreads, omit for arxiv. The trainer writes a sibling `config.json` which the loader reads for hyperparams; legacy 500M ckpts without one fall back to `D128_DROP05_DEFAULTS` in [`encode.py`](../../evaluation/retrieval/encode.py). |
 | `query_emb_path` | path or `null` | Pre-encoded query tensor for arxiv. Defaults to `<data_dir>/<content_subdir>/query_emb.pt` when unset. |
 | `data_dir` | path | Holds `item_id_map.json`, `<split>.parquet`, optional `eval_split.parquet` + filter attrs. |
-| `content_subdir` | str | Subdir under `data_dir` for `{text_emb,query_emb}.pt` + meta sidecars (arxiv only). Defaults to `content`. Arxiv ships `content_d64`, `content_d128`, `content` (= d=256). |
-| `gt_subdir` | str | Subdir under `data_dir` for `gt_topk_<sweep>.pt` oracle caches. Default `gt`. Must vary with `content_subdir` (oracle scores depend on `item_embs` which depend on dim) — set per-yaml when running multiple dims off the same `data_dir`. |
-| `output` | dir path | Directory that holds the per-algo JSONs written by `evaluate`. `run_per_algo.sh` reads it and creates `<output>/<algo>.json` per algo. |
+| `content_subdir` | str | Subdir under `data_dir` for `{text_emb,query_emb}.pt` + meta sidecars (arxiv only). Default `content`; arxiv ships `content_d64`, `content_d128`, `content` (= d=256). Sharded synth catalogs (`shard_index.json`) are reassembled on load. |
+| `gt_subdir` | str | Subdir under `data_dir` for `gt_topk_v3_<sweep>.pt` oracle caches. Default `gt`. Varying it per dim keeps caches tidy; **correctness no longer depends on it** — the oracle blob carries a content fingerprint and stale caches recompute automatically. |
+| `output` | dir path | Directory for the per-algo JSONs. The orchestrator requires it to be set (a `output: null` config exits with a clear error rather than a bare TypeError). |
 | `split` | str | `test` (default) or `val`. |
 | `device` | str | `cuda` (only meaningful value today). |
-| `ks` | list[int] | K-cutoffs to evaluate. Each emits `recall@K`, `ndcg@K` on its own row. |
+| `ks` | list[int] | K-cutoffs. Each emits `recall@K`, `ndcg@K`, `precision@K`, `mrr@K` on its own row. `max(ks)` is the oracle depth `K_GT`. |
 | `batch_sizes` | list[int] | Perf-pass batch sizes. Quality is invariant to bs and computed once per `(algo, params, k)`; emitted on every bs row. |
-| `seed` | int | Drives `torch.manual_seed`, `torch.cuda.manual_seed_all`, the perf-query-pool generator, and any algo seeds that read from `algo_params`. |
-| `encode.batch_size` | int | Forward-pass batch size for the SASRec query encode. Independent of perf bs. |
-| `encode.num_workers` | int | DataLoader workers for the encode pass. |
-| `encode.max_seq_length` | int | History truncation length; must match the trained checkpoint. |
+| `seed` | int | Drives `torch.manual_seed`, `torch.cuda.manual_seed_all`, the perf-query-pool generator, and any algo seeds in `algo_params`. |
+| `encode.batch_size` / `num_workers` / `max_seq_length` | | SASRec encode-pass knobs; `max_seq_length` must match the trained checkpoint (it is part of the cache key). |
 | `algorithms` | list[str] | Subset of [`ALGORITHMS`](../../evaluation/retrieval/algos/__init__.py). |
-| `algo_params` | dict[str, list[dict]] | Per-algo parameter combos. Each dict is one explicit combo; no implicit cross-product. |
+| `algo_params` | dict[str, list[dict]] | Per-algo parameter combos; no implicit cross-product. |
+| `backends` | list ("triton"/"torch") | Backend fan-out: each backend adds a row per cell with a `backend` column (default `[triton]`). |
 | `filters` | dict or `null` | Optional filter-bench block. See [filtering.md](filtering.md). |
-| `users_limit` | int or `null` | Optional cap on users for ALL cells (quality and filter alike). Goodreads has 313k test users which makes the bs=1 quality stream the wall-clock bottleneck; cap to e.g. 50000 to speed runs up. Leave `null` to use the full split. |
+| `users_limit` | int or `null` | Optional cap on users for ALL cells. Goodreads has 313k test users; cap to e.g. 10000 to speed runs up. Part of the encode-cache key. |
 
-Two CUDA settings the driver flips at startup, in addition to seeds:
-
-- `torch.backends.cuda.matmul.allow_tf32 = False` and
-  `torch.backends.cudnn.allow_tf32 = False` — keeps the oracle (cuBLAS
-  `q @ E_t`) and the algos in the same precision so exact-mask paths
-  (`linr_v1_filter_mask`) don't show ~1e-3 recall drift on narrow
-  filters where top-K boundaries land within TF32's 10-bit mantissa
-  band.
+Two CUDA settings the driver pins at startup, in addition to seeds:
+`torch.backends.cuda.matmul.allow_tf32 = False` and
+`torch.backends.cudnn.allow_tf32 = False` (re-pinned with
+`torch.set_float32_matmul_precision("highest")` in
+`pin_precision_globals`) — keeps the oracle (cuBLAS `q @ E_t`) and the
+algos in the same precision so exact-mask paths don't show ~1e-3 recall
+drift on narrow filters.
 
 ### CLI overrides
 
 ```
 uv run evaluate \
-    --config conf/<name>.yaml \
+    --config config/<dataset>/<name>.yaml \
     --algo <name> \
     --output <output-dir>/<algo>.json \
     [--filter-kind {none|clause|bloom} ...] \
+    [--backend {triton|torch} ...] \
     [--sweep <sweep_name>] \
     [--skip-quality]
 ```
 
-`--algo` is required and runs a single algorithm — the wrapper
-[`run_per_algo.sh`](../../evaluation/run_per_algo.sh) is what loops
-over the YAML's `algorithms` list. `--filter-kind` is repeatable and
-narrows to those kinds; empty = all. `--sweep` narrows to a single
-sweep — useful for iterating on one cell without re-encoding queries.
-`--skip-quality` drops the quality stream (`recall@K` / `ndcg@K` →
-NaN); perf rows still emit. Useful for fast latency/memory sweeps.
+`--algo` is required and runs a single algorithm — the orchestrator is
+what loops over the YAML's `algorithms` list. `--filter-kind` and
+`--backend` are repeatable and narrow the run; empty = all configured.
+`--sweep` narrows to a single sweep — useful for iterating on one cell
+without re-encoding queries. `--skip-quality` drops the quality stream
+(quality columns → NaN; the oracle is neither loaded nor built); perf
+rows still emit.
 
-To run the whole `algorithms` list:
+### The orchestrator
 
 ```
-./run_per_algo.sh conf/<name>.yaml [extra flags forwarded to evaluate]
+uv run run-evaluation --eval-type {filter|quality|param-sweeps} [--resume|--force]
+uv run run-evaluation CONFIG [CONFIG ...] [--stage] [--resume|--force]
+                      [-- extra args forwarded to evaluate]
 ```
+
+`--eval-type` presets expand to the config lists in `EVAL_TYPES`
+(`filter` → the six arxiv/goodreads filter YAMLs; `quality` → the six
+quality YAMLs + staging; `param-sweeps` → the two deep-sweep YAMLs +
+staging). Positional configs accept globs. `--resume` skips any
+`(config, algo)` whose output JSON exists and parses as a non-empty
+list; `--force` overwrites; with neither, existing outputs abort the
+run up front. Everything after `--` is forwarded verbatim to each
+`evaluate` subprocess (e.g. `-- --skip-quality --sweep c0_genre`).
+
+Output is tee'd to `results/_runlogs/`: `full.log` (everything),
+`SUMMARY.txt` (per-config exit/duration lines + host/GPU header),
+`<cfg_name>.log` per config, and a `current.log` symlink while running.
+
+`stage-results <config>` restructures one config's finished outputs
+into the campaign layout: concatenates per-algo JSONs into
+`<output>.json`, renames the directory to `<output>.perkernel/`, and
+copies the YAML to `<output>.yaml` (idempotent). `upload-results
+--repo-id <user/repo> [--notes-file notes.md] [--private|--public]
+[--dry-run]` mirrors the staged `results/` layout to a HF dataset repo
+— the repo id is a required flag, and campaign-specific prose belongs
+in the notes file, not in code.
 
 ## Algorithms
 
-Seven algorithm names are registered (one duplicate alias). The classes
-live in [`evaluation/retrieval/algos/`](../../evaluation/retrieval/algos/),
-one per file, all duck-typed:
+Six algorithm names are registered (one duplicate alias: `triton_knn` /
+`linr_v1_filter_mask` share `LinrV1Algo`). The classes live in
+[`evaluation/retrieval/algos/`](../../evaluation/retrieval/algos/),
+one per file, all subclassing
+[`AlgoBase`](../../evaluation/retrieval/algos/_helpers.py) and
+structurally typed by the `RetrievalAlgo` protocol:
 
 ```
-algo.modules: list[nn.Module]                 # for memory cleanup
-algo.is_cpu: bool                             # CPU baseline marker
-algo.forward(q, qa_narrow=None) -> (ids, scores)
+algo.algo_modules: list[nn.Module]            # for per-cell memory cleanup
+algo(q, qa_narrow=None) -> (ids, scores)      # via Module.__call__
 ```
 
-`build_algorithm(name, item_embs, k, *, filter_kind, filter_mod,
-item_attrs_narrow, params)` is a single factory for all cells —
-filtered or not. Algos that can't run on the requested `filter_kind`
-raise `ValueError` at construction; the driver catches and skips that
-cell.
+Each algo's `__init__` builds its `retrieve` layers and ends with
+`self._finalize(*modules, filter_mod=...)` — the base wires the
+`algo_modules` cleanup list and applies the one canonical
+`self.compile(dynamic=True, mode="reduce-overhead")` call, so the whole
+forward (filter + index + cascade) becomes a single cudagraph capture.
+
+Eligibility is a table, not exception control flow:
+
+```python
+SUPPORTED_FILTER_KINDS = {
+    "triton_knn":          {"none", "clause", "bloom"},
+    "linr_v1_filter_mask": {"none", "clause", "bloom"},
+    "linr_v2":             {"clause", "bloom"},   # candidate source IS the filter
+    "linr_v3":             {"none", "clause", "bloom"},
+    "linr_v4":             {"none", "clause", "bloom"},
+    "silvertorch":         {"none", "clause", "bloom"},
+}
+```
+
+`run_one_sweep` checks `supports(algo, filter_kind)` and logs one info
+line per skip. `build_algorithm(name, item_embs, k, *, filter_kind,
+filter_mod, item_attrs_narrow, clause_is_reverse, params, backend)` is
+the single factory; any exception it raises is a genuine construction
+error and **propagates** (the orchestrator records rc≠0; `--resume`
+continues after a fix).
 
 | Name | Class / file | Notes |
 |---|---|---|
-| `torch_knn` | [`TorchKnnAlgo`](../../evaluation/retrieval/algos/torch_knn.py) | Reference exhaustive IP scan via `FullScanKNN`; mask post-filter on filtered cells (skipped on the goodreads filter suite — equals the oracle). |
-| `triton_knn` | [`LinrV1Algo`](../../evaluation/retrieval/algos/linr_v1.py) | Pure-torch full-scan KNN — uses `PostfilterKNN(backend="triton")`, but the original Triton kernel was removed, so both backends run the same `query @ x.T + topk` path. Yambda-config alias. |
-| `linr_v1_filter_mask` | [`LinrV1Algo`](../../evaluation/retrieval/algos/linr_v1.py) | Same class as `triton_knn`; canonical name on filter cells. |
-| `linr_v3` | [`LinrV3Algo`](../../evaluation/retrieval/algos/linr_v3.py) | V3 → V2 cascade: `OneBitKNN(backend="triton")` produces top-`candidate_pool` at 1-bit precision; `PrefilterKNN(backend="triton")` rescores at fp32. Approximate. |
-| `linr_v2` | [`LinrV2Algo`](../../evaluation/retrieval/algos/linr_v2.py) | Exact filtered top-K — candidate set IS the filter (`filter_mod.evaluate_indices`). Recall=1.0 by construction; headline is speed/memory. Filter cells only — raises `ValueError` on `filter_kind="none"`. |
-| `linr_v4` | [`LinrV4Algo`](../../evaluation/retrieval/algos/linr_v4.py) | Single-stage int8 dense + optional mask + topk via `PostfilterKNNInt8`. `torch._int_mm` (int8×int8 → int32, IMMA on Ampere+) directly to `torch.topk` with no scale recovery (global per-tensor scale is rank-preserving). Twin of `triton_knn`/`linr_v1_filter_mask` at int8 storage; ≥0.99 recall on unit-norm embeddings at D=128. |
-| `silvertorch` | [`SilvertorchAlgo`](../../evaluation/retrieval/algos/silvertorch.py) | IVF + INT8 ANN with `SilverTorch.filter` selected per `filter_kind`: `"bloom"` → bloom-fused IVF (codesigned `codesigned_probe_score`, item signatures over narrow attrs baked in at register time); `"clause"` → exact-AND-of-OR-fused IVF (codesigned `codesigned_probe_score_exact`, narrow attrs baked in); `"none"` → plain IVF + INT8. All three modes routed through the same algo class. |
+| `triton_knn` | [`LinrV1Algo`](../../evaluation/retrieval/algos/linr_v1.py) | Pure-torch full-scan KNN via `PostfilterKNN` (the original Triton kernel was removed; both backends run the same `query @ x.T + topk` path). Yambda-config alias. |
+| `linr_v1_filter_mask` | [`LinrV1Algo`](../../evaluation/retrieval/algos/linr_v1.py) | Same class as `triton_knn`; canonical name on filter cells (exact mask baseline). |
+| `linr_v2` | [`LinrV2Algo`](../../evaluation/retrieval/algos/linr_v2.py) | Exact filtered top-K — the candidate set IS the filter (`filter_mod.evaluate_indices` → `PrefilterKNN`). Recall=1.0 by construction; headline is speed/memory. Filter cells only. |
+| `linr_v3` | [`LinrV3Algo`](../../evaluation/retrieval/algos/linr_v3.py) | V3 → V2 cascade: `OneBitKNN(backend=...)` produces top-`candidate_pool` at 1-bit precision; `PrefilterKNN` rescores at full precision. Approximate. Params: `candidate_pool`, `v3_seed`. |
+| `linr_v4` | [`LinrV4Algo`](../../evaluation/retrieval/algos/linr_v4.py) | Single-stage int8 dense + optional mask via `PostfilterKNNInt8` (`torch._int_mm`, int8×int8 → int32, IMMA on Ampere+). |
+| `silvertorch` | [`SilvertorchAlgo`](../../evaluation/retrieval/algos/silvertorch.py) | IVF + INT8 ANN with `SilverTorch.filter_mode` mapped from `filter_kind`: `"bloom"` → bloom-fused `codesigned_probe_score`; `"clause"` → exact-AND-of-OR-fused `codesigned_probe_score_exact` (accepts `clause_is_reverse` — reverse-clause sweeps run end-to-end); `"none"` → plain IVF + INT8. Params: `n_lists`, `n_probe`, `n_iter`, `m_bits`, `k_hash`, `seed`. |
 
-`make_mask(filter_mod, qa_narrow)` (in [`algos/filter.py`](../../evaluation/retrieval/algos/filter.py))
-is the one-line helper most algos call: it routes per-batch query attrs
-through `filter_mod.evaluate_mask`, then forces the padding-row sentinel
-`mask[:, 0] = False` so reverse clauses don't admit the padding item the
-oracle deliberately excludes.
+`make_mask(filter_mod, qa_narrow)` (in
+[`algos/filter.py`](../../evaluation/retrieval/algos/filter.py)) is the
+one-line helper the mask-based algos call: it routes per-batch query
+attrs through `filter_mod.evaluate_mask`, then forces the padding-row
+sentinel `mask[:, 0] = False` so reverse clauses don't admit the
+padding item the oracle deliberately excludes.
 
 ## Measurement methodology
 
 ### Quality pass
 
-[`quality_pass_cached`](../../evaluation/retrieval/bench_tools.py)
+[`quality_pass_cached`](../../evaluation/retrieval/passes.py)
 streams every cached query through the index in chunks of
-`QUALITY_BATCH_SIZE = 64` and accumulates per-row recall@K / ndcg@K via
-[`accumulate_metrics`](../../evaluation/retrieval/metrics.py). Quality is
-invariant to perf batch size (same per-row scoring math), so we run this
-**once per `(algo, params, k)` cell** and attach the result to every `bs`
-row of the same cell — and the larger chunk amortises CUDA-launch +
-Python overhead vs the bs=1 stream that would otherwise dominate
-goodreads' 313k test pass.
+`QUALITY_BATCH_SIZE = 16` and accumulates per-row metrics via
+[`accumulate_metrics`](../../evaluation/retrieval/metrics.py),
+returning a `QualityStats(recall, ndcg, precision, mrr)`. Quality is
+invariant to perf batch size (same per-row scoring math), so it runs
+**once per `(algo, params, k)` cell** and attaches to every `bs` row —
+the chunk amortises CUDA-launch + Python overhead vs a bs=1 stream.
+The constant is 16 (not 64) because `PrefilterKNN[backend="torch"]` on
+arxiv/d256 materialises `[B, P, D]` fp32 ≈ 110 GiB at bs=64 on loose
+clause filters and OOMs an 80 GB card; bs=16 matches the perf-pass
+allocation shape that already fits. Rows whose synthesised qa is all
+`-1` for the active clauses are dropped via `skip_mask` (reported as
+`n_users_kept`).
 
-For filtered cells the targets passed in are the cached filtered-FullScan
-top-K oracle (`<data_dir>/<gt_subdir>/gt_topk_<sweep>.pt`); for
-`filter_kind=none` and yambda they are the held-out test items.
+For filtered cells the targets are the cached filtered-FullScan top-K
+oracle; for `filter_kind=none` and yambda they are the held-out test
+items. Recall's denominator is the per-row count of *valid* oracle
+targets (`(oracle_row != -1).sum().clamp(max=k)`), not a flat `k` —
+tight filters can pass fewer than K items and the oracle pads with
+`-1`; zero-target rows fold into the skip mask.
+
+### Oracle
 
 The oracle is built by
-[`compute_filtered_oracle`](../../evaluation/retrieval/evaluate.py) on
+[`compute_filtered_oracle`](../../evaluation/retrieval/oracle.py) on
 first run: brute-force `q @ E_t` with the *exact* filter mask
-(ExactAttributeFilter even on bloom cells — bloom's false positives must
-not leak into ground truth), then `topk` with the padding-row score
-forced to `-inf` and the remaining `-inf` ties mapped back to `-1` so
-short-fill rows don't score against the algos' `-1` sentinel. The
-oracle is cached at `<data_dir>/<gt_subdir>/gt_topk_<sweep>.pt`; stale
-shapes are detected and recomputed.
+(`ExactAttributeFilter` even on bloom cells — bloom's false positives
+must not leak into ground truth), then top-`K_GT` with `-inf` ties
+mapped back to `-1` so short-fill rows don't score against the algos'
+`-1` sentinel. Indices are 0-indexed positions in the (already
+pad-row-dropped) `item_embs`.
+
+Disk cache: `<data_dir>/<gt_subdir>/gt_topk_v3_<sweep>.pt`, a dict blob
+`{"topk", "fingerprint", "k_gt"}`. The **content fingerprint** hashes
+shapes + dtypes + a fixed 64-row linspace sample of `item_embs`,
+`queries`, and the sweep's `qa_narrow`, plus `K_GT` — so same-shape
+content changes (a different dim off the same `data_dir`, regenerated
+attrs, a retrained checkpoint, a changed `users_limit`) invalidate the
+cache instead of silently reusing stale ground truth (the failure mode
+behind the goodreads stale-cache incident). Legacy `gt_topk_v2_`
+bare-tensor caches are ignored by name and can be deleted; the first
+run after the v3 change rebuilds each sweep's oracle once.
 
 ### Perf pass
 
-The perf pass measures the index forward in isolation, on the device the
-algorithm lives on, via **`measure_forward_cuda`**: it runs
-`WARMUP_ITERS=20` calls to settle Triton autotune and JIT, then takes a
-clean `torch.cuda.max_memory_allocated()` window over `mem_reps=5` calls
-(without `do_bench`'s 256 MiB L2-buster polluting peak), then times via
-`triton.testing.do_bench(rep=200ms, warmup=50)`. Returns
-`(median_ms, p20_ms, p80_ms, peak_mib, transient_mib)`.
+[`perf_pass_cached`](../../evaluation/retrieval/passes.py) measures the
+index forward in isolation via
+[`measure_forward_cuda`](../../evaluation/retrieval/measure.py): it
+runs `WARMUP_ITERS = 20` calls to settle JIT compile + cudagraph
+capture, takes a clean `max_memory_allocated()` window over
+`MEM_REPS = 16` calls (without `do_bench`'s ~256 MiB L2-buster
+polluting peak; outputs are kept alive so the window includes
+result + scratch), then times via `triton.testing.do_bench` starting
+at `rep = 200 ms` and **auto-extending** the budget until at least
+`MIN_SAMPLES = 30` iterations fit (capped at `MAX_REP_MS = 3000`) —
+otherwise slow kernels collapse to a single cold sample with
+`median == p20 == p80`. Returns a `PerfStats(median_ms, p20_ms, p80_ms,
+peak_mib, transient_mib)`; Stage 4a fields (`mean_ms`, `p99_ms`,
+`throughput_qps`, per-query samples) land on the dataclass additively.
+
+Before timing, `_autotune_prewarm` calls the forward once per batch
+size: the kernels ship offline-tuned `DEFAULT_CONFIG`s (no runtime
+autotune), but `reduce-overhead` still compiles + captures a cudagraph
+per batch-size shape, and that cold cost has been observed leaking into
+the first cell's timing window.
 
 ### Multi-query pool — why p20/p80 are over queries
 
-The perf pass times against a **fixed-seed pool of `n_pool=4096` query
-batches**, round-robin'd into the timed function. This matters for
-IVF-style algorithms (`silvertorch`) where a single fixed query collapses
-p20/p80 to one cluster's traversal cost — degenerate percentiles. With
-the pool, p20/p80 reflect query diversity (the intended workload
-variance), not CUDA scheduling jitter.
-
-The pool itself is built per `(algo, params, k, bs)` cell:
-
-```python
-g = torch.Generator(device="cpu").manual_seed(seed)
-rows = torch.randint(0, n_users, (n_pool, batch_size), generator=g)
-pool = queries[rows.reshape(-1)].reshape(n_pool, batch_size, -1).to(device)
-```
-
-so the *same query indices* are sampled across reruns with the same seed.
-On filter cells, `qa_narrow` is sampled from the same row indices so the
-filter shape matches the queries.
+The perf pass times against a **fixed-seed pool of `n_pool = 4096`
+query batches**, round-robin'd into the timed function. This matters
+for IVF-style algorithms (`silvertorch`) where a single fixed query
+collapses p20/p80 to one cluster's traversal cost. The pool is sampled
+with `torch.Generator(cpu).manual_seed(cfg.seed)` so the same query
+indices recur across reruns; on filter cells, `qa_narrow` batches are
+sampled from the same row indices, and `skip_mask` rows are excluded
+from the pool.
 
 ### Memory snapshot ordering
 
-Reading allocator state immediately around `build_algorithm(...)` is
-brittle: residue from the previous cell's k-means / topk transients can
-inflate `index_mem`. Per-cell ordering is therefore:
+Reading allocator state around `build_algorithm(...)` is brittle;
+per-cell ordering is:
 
 ```
 sync → empty_cache → reset_peak_memory_stats → mem_before
 build_algorithm
 sync → index_mem = allocated() - mem_before
 quality_pass
+autotune_prewarm
 for bs in batch_sizes: perf_pass
-algo_obj.modules.clear(); del algo_obj; empty_cache
+algo_obj.algo_modules.clear(); empty_cache      # _release_algo
 ```
 
-`modules.clear()` is required — `for m in modules: del m` only drops the
-loop variable, not the list's references, leaking the index into the
-next cell's `mem_before`.
+`algo_modules.clear()` is required — dropping the loop variable alone
+leaves the list's references alive and leaks the index into the next
+cell's `mem_before`.
 
 ### Determinism
 
-`main()` calls `torch.manual_seed(cfg.seed)` and
-`torch.cuda.manual_seed_all(cfg.seed)` before any allocation. The
-perf-query-pool generator uses the same seed. Algo seeds are wired
-through `algo_params` (e.g. `silvertorch.seed`, `linr_v3.v3_seed`).
-TF32 is disabled at startup so the oracle and the algos compute scores
-at the same precision.
-
-Quality columns must be **byte-identical** across reruns with the same
-seed. Latency may drift within ~5% due to clock noise, NVML thermal
-state, and (for Triton autotune) JIT cache state.
+`main()` seeds torch + CUDA from `cfg.seed` before any allocation; the
+perf-pool generator uses the same seed; algo seeds thread through
+`algo_params` (`silvertorch.seed`, `linr_v3.v3_seed`). TF32 is pinned
+off. Quality columns must be **byte-identical** across reruns with the
+same seed; latency may drift within ~5%.
 
 ## Output schema
 
-One row per `(filter_kind, sweep, algo, params, k, bs)` cell. Fields:
+One row per `(filter_kind, sweep, algo, backend, params, k, bs)` cell.
+Column names are load-bearing for downstream joins — existing fields
+are never renamed; new fields are additive.
 
 | Field | Type | Notes |
 |---|---|---|
 | `suite` | str | `yambda` (no filters) or `filter`. |
-| `cell` | str | `<filter_kind>_<sweep>_bs<N>_k<K>` for cross-row joins. |
+| `cell` | str | `<filter_kind>_<sweep>_<backend>_bs<N>_k<K>` for cross-row joins (the backend segment was added with the backend fan-out). |
 | `filter_kind` | str | `none`, `clause`, or `bloom`. |
-| `sweep` | str | Filter sweep name from the config (e.g. `c0_genre`, `c0_maincat`). |
+| `sweep` | str | Filter sweep name from the config (e.g. `c0_genre`), or `full_scan` on yambda. |
 | `impl` | str | Algorithm name. |
-| `device` | str | `"cuda"` or `"cpu"`. |
+| `backend` | str | `triton` or `torch` — the `retrieve`-layer backend for this row. |
+| `device` | str | Always `"cuda"` (the CPU-timing path was removed; the column stays for schema stability). |
 | `seed` | int | The `cfg.seed` that produced this row. |
-| `batch_size` | int | First-class column. |
-| `k` | int | Same. |
-| `n_users_kept` | int | Number of users this sweep evaluated (skip mask drops users with no surviving narrow clauses). |
+| `batch_size`, `k` | int | First-class columns. |
+| `n_users_kept` | int | Users this sweep evaluated (skip mask drops users with no surviving narrow clauses). |
 | `median_ms`, `p20_ms`, `p80_ms` | float | Latency over the multi-query pool. |
-| `peak_mem_mib` | float | `max_memory_allocated()` over the perf window. 0 for CPU rows. |
-| `index_mem_mib` | float | `allocated()` delta around `build_algorithm`. 0 for CPU rows. |
-| `fwd_scratch_mib` | float | Peak − baseline within the forward call. 0 for CPU rows. |
-| `recall@<k>`, `ndcg@<k>` | float | Quality, identical across all bs rows of the same `(algo, params, k)` cell. NaN when `--skip-quality`. |
+| `peak_mem_mib` | float | `max_memory_allocated()` over the perf window. |
+| `index_mem_mib` | float | `allocated()` delta around `build_algorithm`. |
+| `fwd_scratch_mib` | float | Peak − baseline within the forward call. |
+| `recall@<k>`, `ndcg@<k>` | float | Quality, identical across the bs rows of one `(algo, params, k)` cell. NaN when `--skip-quality`. |
+| `precision@<k>`, `mrr@<k>` | float | Additive quality columns (the metrics were always computed; now emitted). |
 | `extra.params` | dict[str, str] | Per-algo `algo_params` for traceability. |
+| `extra.gpu`, `extra.torch`, `extra.commit` | str | Additive provenance columns (GPU name, torch version, short git commit) for cross-machine result pooling. |
 
-Algos that raise `ValueError` at construction (e.g. `linr_v2` with
-`filter_kind="none"`, `silvertorch` with `filter_kind="clause"`) silently
-skip their cells — no stub row is emitted.
-
-Downstream analysis: filter by `device` to compare GPU rows against each
-other separately from CPU baselines; group by `(impl, k)` and span `bs`
-to read scaling behavior; group by `(filter_kind, sweep)` to compare
-filter shapes; group by `extra.params` to read parameter sweeps for one
-algo.
+Cells whose `(algo, filter_kind)` pair is unsupported per
+`SUPPORTED_FILTER_KINDS` are skipped up front with a log line — no stub
+row. Construction failures no longer skip silently; they kill the run.
 
 ## How to run
 
 The repo is a uv workspace ([root pyproject](../../pyproject.toml));
 `evaluation/` shares a single `.venv` with `retrieve/` at the workspace
 root. `uv run` from inside `evaluation/` discovers the workspace root
-automatically; equivalently use `uv run --directory evaluation …` from
-the root.
+automatically.
 
-Yambda 500M sweep:
+Named campaigns:
 
 ```bash
 cd evaluation
-./run_per_algo.sh conf/500m/d128-quality.yaml
+uv run run-evaluation --eval-type filter --resume
+uv run run-evaluation --eval-type quality --resume       # + stage-results per config
+uv run run-evaluation --eval-type param-sweeps --resume
 ```
 
-5B sweep (gated on the 5B checkpoint having been trained):
+One config:
 
 ```bash
-./run_per_algo.sh conf/5b/d128-quality.yaml
+uv run run-evaluation config/goodreads/d128-filter.yaml --resume
 ```
 
-Goodreads filter bench:
-
-```bash
-./run_per_algo.sh conf/goodreads/d128-filter.yaml
-```
-
-Arxiv filter bench:
-
-```bash
-./run_per_algo.sh conf/arxiv/d256-filter.yaml
-```
-
-One filter cell only (faster iteration):
+One filter cell only (fastest iteration):
 
 ```bash
 uv run evaluate \
-    --config conf/goodreads/d128-filter.yaml \
+    --config config/goodreads/d128-filter.yaml \
     --algo linr_v3 \
     --output results/goodreads/d128-filter/linr_v3.json \
-    --filter-kind bloom --sweep c0_genre
+    --filter-kind clause --sweep c0_genre
 ```
 
 ### Sanity checks to run after a sweep
 
 1. GPU `median_ms(bs=8)` < `8 × median_ms(bs=1)` (sub-linear scaling —
    the proof point of the GPU implementations).
-2. `recall@K` and `ndcg@K` columns identical across the bs rows of the
-   same `(algo, params, k)` cell.
+2. Quality columns identical across the bs rows of the same
+   `(algo, params, k)` cell.
 3. Two reruns with the same seed: quality columns byte-identical;
    latency columns within ~5%.
 
@@ -414,47 +530,37 @@ uv run evaluate \
 
 ### Add a new algorithm
 
-1. Add a new file `evaluation/retrieval/algos/<name>.py` with an
-   `nn.Module` subclass exposing `algo_modules`, `is_cpu`, and
-   `forward(q, qa_narrow=None) -> (ids, scores)`. Wrap a
-   `RetrievalModule` from `retrieve` (see
-   [interfaces.py:RetrievalModule](../../retrieve/src/retrieve/interfaces.py))
-   or roll your own. Use `collect_modules(*base, filter_mod=...)` from
-   [`algos/_helpers.py`](../../evaluation/retrieval/algos/_helpers.py)
-   to build `self.algo_modules` (single source for the
-   optional-filter-append rule the driver iterates for memory cleanup),
-   then call `self.compile(dynamic=True, mode="reduce-overhead")` at
-   the end of `__init__` so the whole forward (filter + index + any
-   cascade stages) gets compiled into one cudagraph capture — applied
-   the same way on both retrieval backends.
-2. Import it from
-   [`algos/__init__.py`](../../evaluation/retrieval/algos/__init__.py),
-   add the name to `ALGORITHMS`, and add a branch in `build_algorithm`
-   that unpacks the parameters you need (raise `ValueError` for
-   incompatible `filter_kind`s; the driver catches and skips). If the
-   class threads `backend` through to its underlying `RetrievalModule`,
-   also add the name to `BACKEND_CAPABLE_ALGOS` so the driver fans
-   out per-backend rows.
+1. Add `evaluation/retrieval/algos/<name>.py` with an `AlgoBase`
+   subclass: build your `retrieve` layers in `__init__`, then call
+   `self._finalize(*modules, filter_mod=...)` **as the last statement**
+   — it wires `algo_modules` and applies the canonical
+   `torch.compile(dynamic=True, mode="reduce-overhead")`. Keep
+   `forward(q, qa_narrow=None) -> (ids, scores)` in the file — the
+   per-algo forwards are the readable specification of each cascade.
+2. Register it in
+   [`algos/__init__.py`](../../evaluation/retrieval/algos/__init__.py):
+   import, add to `ALGORITHMS`, add its filter-kind set to
+   `SUPPORTED_FILTER_KINDS`, and add a `build_algorithm` branch that
+   unpacks the params you need. `backend` should thread through to the
+   underlying `retrieve` module (every current algo does).
 3. Add it to the `algorithms:` list in any config that should sweep it,
    plus an `algo_params` entry if it takes knobs.
-4. No driver changes needed — the perf primitive is selected by
-   `is_cpu`, and the schema columns are written uniformly.
+4. No driver changes — the schema columns are written uniformly.
 
 ### Add a new config (new checkpoint)
 
 Copy an existing YAML, update `checkpoint:` (or `query_emb_path:`) and
-any catalog-size-driven knobs (`silvertorch.n_lists/n_probe`). The model
-loader reads hyperparams from `<ckpt-dir>/config.json`, so the YAML
-never carries `embedding_dim` etc. (legacy 500M checkpoints without
-`config.json`
-get the `D128_DROP05_DEFAULTS` fallback in
-[`bench_tools.py`](../../evaluation/retrieval/bench_tools.py)).
+any catalog-size-driven knobs (`silvertorch.n_lists/n_probe`). The
+model loader reads hyperparams from `<ckpt-dir>/config.json`, so the
+YAML never carries `embedding_dim` etc. (legacy 500M checkpoints
+without one get the `D128_DROP05_DEFAULTS` fallback in
+[`encode.py`](../../evaluation/retrieval/encode.py)).
 
 ### Add a new dataset
 
-The driver dispatches on config shape, not a `dataset:` field, so adding
-a new dataset is a question of producing the on-disk artifacts the
-driver consumes. The dataset CLIs live in [`evaluation/data/`](../../evaluation/data/)
+The driver dispatches on config shape, not a `dataset:` field, so a new
+dataset is a question of producing the on-disk artifacts. The dataset
+CLIs live in [`evaluation/eval_datasets/`](../../evaluation/eval_datasets/)
 and produce, for the yambda layout:
 
 ```
@@ -474,7 +580,7 @@ data/<dataset>/
 ├── heldout.parquet
 ├── content/                   # default; varies via cfg.content_subdir
 │   ├── text_emb.pt            # item-side, "search_document: " prefix
-│   ├── text_emb.meta.json
+│   ├── text_emb.meta.json     # prefix drift is asserted at load
 │   ├── query_emb.pt           # query-side, "search_query: " prefix
 │   └── query_emb.meta.json
 └── eval_split.parquet         # optional — only needed for filter sweeps
@@ -492,22 +598,21 @@ data/<dataset>/
 └── <gt_subdir>/                 # auto-built by the driver, oracle cache
 ```
 
-The CLIs that build all of the above are exposed as console scripts:
-`uv run yambda prep ...`, `uv run arxiv all ...`, `uv run goodreads all ...`.
+Attr/reverse paths in the YAML resolve cwd-relative first, then
+`data_dir`-relative — a missing path **raises** listing both candidates
+(the old silent basename fallback that could load the wrong same-named
+tensor is gone).
+
+The CLIs are console scripts: `uv run yambda prep ...`,
+`uv run arxiv all ...`, `uv run goodreads all ...`.
 
 ### HuggingFace I/O
 
-[`hf_io.py`](../../evaluation/data/hf_io.py) is the single source
-of truth for HF reads / writes. Two entry points:
-
-- `EVAL_REPOS` maps each dataset to a `pinkmeme/eval-<dataset>` HF
-  dataset repo holding eval inputs and (under `checkpoints/<ckpt-id>/`)
-  model checkpoints.
-- `RAW_REPOS` maps each upstream raw source (yambda, arxiv) to its
-  upstream HF repo and `repo_type`, downloaded into `data/_raw/<source>/`.
-
-Console scripts (registered in
-[`evaluation/pyproject.toml`](../../evaluation/pyproject.toml)):
+[`eval_datasets/hf_io.py`](../../evaluation/eval_datasets/hf_io.py) is
+the single source of truth for HF reads / writes: `EVAL_REPOS` maps
+each dataset to its `pinkmeme/eval-<dataset>` HF dataset repo (eval
+inputs + `checkpoints/<ckpt-id>/`), `RAW_REPOS` maps upstream raw
+sources into `data/_raw/<source>/`.
 
 ```bash
 uv run eval-fetch yambda-500m            # pull eval inputs to data/yambda-500m/
@@ -523,10 +628,9 @@ with `RETRIEVE_DATA_ROOT=/some/path`.
 
 - [architecture.md](architecture.md) — package layout and the
   `RetrievalModule` / `FilterModule` contracts.
-- [kernels.md](kernels.md) — Triton kernel internals for V1/V2/V3,
-  IVF-INT8, IVF-FP32, bloom-match.
+- [kernels.md](kernels.md) — Triton kernel internals.
 - [filtering.md](filtering.md) — filter API and the with-filters story.
 - [checkpoints.md](checkpoints.md) — the trainer pipeline that produces
   the checkpoints consumed here.
-- [testing.md](testing.md) — the correctness suite (separate from this
-  perf harness).
+- [testing.md](testing.md) — the library correctness suite (separate
+  from this perf harness).

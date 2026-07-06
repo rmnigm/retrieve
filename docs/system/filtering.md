@@ -45,12 +45,13 @@ boolean composition.
 
 | component | path | notes |
 |---|---|---|
-| `FilterModule` ABC | [interfaces.py](../../retrieve/src/retrieve/interfaces.py) | three native paths: `evaluate_mask`, `evaluate_indices`, `evaluate_subset`; `forward` aliases `evaluate_mask` |
-| `ExactAttributeFilter` (exact, supports reverse) | [layers/filters/exact_attribute.py](../../retrieve/src/retrieve/layers/filters/exact_attribute.py) | `FilterModule` subclass; native `evaluate_mask` via `clause_mask` kernel; native `evaluate_indices` via `clause_compact` kernel; `evaluate_subset` via gather + broadcast |
-| `BloomFilter` (approximate, conjunctive) | [layers/filters/bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py) | `FilterModule` subclass; paper-strict (no reverse, no DSL) — `register_index` accepts an optional `clause_is_reverse` and raises `ValueError` if any entry is `True`; native `evaluate_mask` via `bloom_match` kernel; native `evaluate_indices` via `bloom_compact` kernel; `evaluate_subset` via gathered subset test. Hashes `(clause_idx, value)` pairs, **not** raw values — see ["Bloom hash keys"](#bloom-hash-keys-clause_idx-value) |
+| `FilterModule` ABC | [interfaces.py](../../retrieve/src/retrieve/interfaces.py) | three native paths: `evaluate_mask`, `evaluate_indices`, `evaluate_subset`; `forward` aliases `evaluate_mask`. Unified signature `register_index(item_clause_attrs, *, clause_is_reverse=None)` — keyword-only after the first arg on the ABC and both subclasses |
+| `ExactAttributeFilter` (exact, supports reverse) | [layers/filters/exact_attribute.py](../../retrieve/src/retrieve/layers/filters/exact_attribute.py) | `FilterModule` subclass; native `evaluate_mask` via `clause_mask` kernel; native `evaluate_indices` via `clause_compact` kernel; `evaluate_subset` via gather + `clause_subset_match` (the module-level torch predicate SilverTorch's eager exact path also uses) |
+| `BloomFilter` (approximate, conjunctive) | [layers/filters/bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py) | `FilterModule` subclass; paper-strict (no reverse, no DSL) — `register_index` accepts an optional keyword-only `clause_is_reverse` and raises `ValueError` if any entry is `True`; native `evaluate_mask` via `bloom_match` kernel; native `evaluate_indices` via `bloom_compact` kernel; `evaluate_subset` via gather + `bloom_subset_match`. Hashes `(clause_idx, value)` pairs, **not** raw values — see ["Bloom hash keys"](#bloom-hash-keys-clause_idx-value) |
+| Bloom hash math | [layers/filters/bloom_hash.py](../../retrieve/src/retrieve/layers/filters/bloom_hash.py) | the single home of the signature builders: public `generate_seeds` / `build_signatures` (index-side, chunked) / `build_query_signatures` (query-side, loop-free) plus `bloom_subset_match`; consumed by `BloomFilter` **and** `SilverTorch`'s fused bloom mode (no private cross-module imports). Hash math is pinned — changing it invalidates every persisted `bloom_sigs` buffer |
 | LiNR clause Triton kernels | [kernels/filters/clause_compact.py](../../retrieve/src/retrieve/kernels/filters/clause_compact.py), [clause_mask.py](../../retrieve/src/retrieve/kernels/filters/clause_mask.py) | fused eval + stream compaction (compact); fused eval emitting `[B, N]` bool (mask). No `[B, N, C, A_max]` intermediate either way |
 | Bloom Triton kernels | [kernels/silvertorch/bloom_match.py](../../retrieve/src/retrieve/kernels/silvertorch/bloom_match.py), [kernels/filters/bloom_compact.py](../../retrieve/src/retrieve/kernels/filters/bloom_compact.py) | `(qb & sigs) == qb` → `[B, N]` bool (match); fused subset-test + stream compaction (compact). Consumed by `BloomFilter.evaluate_mask` / `evaluate_indices` on CUDA |
-| Filter fused into SilverTorch score kernel | [kernels/silvertorch/codesigned_probe_score.py](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py), [codesigned_probe_score_exact.py](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_exact.py) | Selected by `SilverTorch.filter`. `"bloom"` → conjunctive bloom subset test (single `QB`), part of co-designed Algorithm 1; `"exact"` → exact AND-of-OR over `[N, C, A_max]` narrow attrs, same inner loop as `clause_mask` but fused into the probe-and-score path. Both are **separate paths** from the standalone `BloomFilter` / `ExactAttributeFilter`. |
+| Filter fused into SilverTorch score kernel | [kernels/silvertorch/codesigned_probe_score.py](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py), [codesigned_probe_score_exact.py](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_exact.py) | Selected by `SilverTorch.filter_mode`. `"bloom"` → conjunctive bloom subset test (single `QB`), part of co-designed Algorithm 1; `"exact"` → exact AND-of-OR over `[N, C, A_max]` narrow attrs (reverse clauses supported), same `common.clause_pass` inner loop as `clause_mask` but fused into the probe-and-score path. Both are **separate paths** from the standalone `BloomFilter` / `ExactAttributeFilter` — SilverTorch shares the predicate math and hash builders, not the module classes. |
 | `combine_masks` / `combine_indices` | [layers/filters/__init__.py](../../retrieve/src/retrieve/layers/filters/__init__.py) | mask-AND composition; sparse cascade via `evaluate_subset` |
 
 ## Key observation: LiNR hosts *both* filter types
@@ -69,7 +70,7 @@ kernel, so swapping its filter requires a new fused kernel — not a
 wrapping. Two such kernels ship today: `codesigned_probe_score` (bloom
 predicate) and `codesigned_probe_score_exact` (exact AND-of-OR
 predicate over the same `[N, C, A_max]` narrow attrs as
-`ExactAttributeFilter`); `SilverTorch.filter` selects between them.
+`ExactAttributeFilter`); `SilverTorch.filter_mode` selects between them.
 The LiNR side, by contrast, decouples the filter entirely — any
 `FilterModule` plugs in. The natural extension along the LiNR axis is
 to add new `FilterModule` subclasses; along the SilverTorch axis it is
@@ -103,15 +104,17 @@ ids, scores = prefilter_knn(query, candidate_ids=cand_ids, counts=counts)
 
 The paper says *"for each feature, we apply K hash functions"* — and a
 feature is a `(key, value)` pair. The implementation reflects this:
-[`_build_signatures`](../../retrieve/src/retrieve/layers/filters/bloom.py)
+[`bloom_hash._signature_batch`](../../retrieve/src/retrieve/layers/filters/bloom_hash.py)
+(the shared core both builders wrap)
 mixes a per-clause salt (`_mix64(clause_id, …)`) into the post-hash bits
 before the position mask, so value `V` in clause C0 lands on different
 bits than the same `V` in clause C3. Without this, single-clause queries
 on overlapping value vocabularies (common in real schemas — year buckets,
 version counts, license codes all share small integer ranges) leak
 ~25–30% of non-matching items as false positives via cross-clause value
-collision. The salt is shared between item-side `register_index` and
-query-side `_build_query_sigs`, so the subset test is symmetric. No
+collision. The salt lives in the shared core, so item-side
+`build_signatures` and query-side `build_query_signatures` are
+symmetric by construction. No
 runtime cost worth measuring (one extra elementwise XOR inside an already
 chunked loop) and zero kernel impact —
 [`bloom_match`](../../retrieve/src/retrieve/kernels/silvertorch/bloom_match.py),
@@ -121,16 +124,18 @@ and the bloom branch of
 all consume opaque `[N, W]` / `[B, W]` int64 buffers and are unchanged.
 
 **Index vs query build paths.** The item index goes through
-`_build_signatures` (chunk loop, bandwidth-bound, ~128 ms for N=3M, paid
-once at `register_index`). The per-forward query build is a separate
-loop-free `_build_query_signatures` written as pure tensor flow so the
+`build_signatures` (chunk loop over `_BUILD_SIGS_BATCH` rows,
+bandwidth-bound, ~128 ms for N=3M, paid once at `register_index`). The
+per-forward query build is the separate loop-free
+`build_query_signatures`, written as pure tensor flow so the
 outer `torch.compile(dynamic=True, mode="reduce-overhead")` wrapped
 around each algo in `evaluation/retrieval/algos/` captures it into one
 cudagraph. Eager standalone (no algo wrapper) is launch-overhead-bound
 (~0.4 ms flat in B from ~15 small CUDA kernels); under the algo-level
 cudagraph_trees capture it collapses to ~0.09 ms — ~4× at all batch
-sizes, ~80% of `SilverTorch.forward` at bs=1. The hash math is
-identical across both paths, so outputs are bit-equal.
+sizes, ~80% of `SilverTorch.forward` at bs=1. Both builders wrap the
+same `_signature_batch` core, so outputs are bit-equal (asserted by
+[`test_bloom_hash.py`](../../retrieve/tests/correctness/test_bloom_hash.py)).
 
 `bloom_sigs` snapshots persisted before this keying was added are stale
 and must be rebuilt; the bench harness rebuilds on every run.

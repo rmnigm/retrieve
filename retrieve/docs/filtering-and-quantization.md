@@ -14,7 +14,7 @@ A filter evaluates a conjunction of **clauses** (attribute keys) against each it
 - `query_clause_attrs: [B, C]` int64 — one queried value per clause per query; `-1` means the
   clause is **inactive** (always passes).
 - `clause_is_reverse: [C]` bool — invert (NOT) a clause. Only `ExactAttributeFilter` /
-  `SilverTorch(filter="exact")` support reverse; `BloomFilter` is paper-strict and rejects it.
+  `SilverTorch(filter_mode="exact")` support reverse; `BloomFilter` is paper-strict and rejects it.
 
 Semantics: a query passes an item iff, for **every** active clause, the query value appears among
 that item's values (OR over the `A_max` slot, AND across clauses).
@@ -39,7 +39,7 @@ item_attrs = ...  # [N, C, A_max] int64, -1 padded
 
 # Bloom: false-positive-tolerant, needs m_bits (power of 2, mult. of 64) and k_hash.
 ann = SilverTorch(k=10, n_lists=1024, n_probe=16,
-                  filter="bloom", m_bits=1024, k_hash=4).cuda()
+                  filter_mode="bloom", m_bits=1024, k_hash=4).cuda()
 ann.register_index(item_embs, item_clause_attrs=item_attrs)
 
 query = torch.randn(4, 128, device="cuda")
@@ -50,7 +50,7 @@ topk_ids, topk_scores = ann(query, query_clause_attrs=query_attrs)
 For exact-clause filtering (no false positives, supports reverse):
 
 ```python
-ann = SilverTorch(k=10, n_lists=1024, n_probe=16, filter="exact").cuda()
+ann = SilverTorch(k=10, n_lists=1024, n_probe=16, filter_mode="exact").cuda()
 ann.register_index(item_embs, item_clause_attrs=item_attrs,
                    clause_is_reverse=clause_is_reverse)   # [C] bool, optional
 topk_ids, topk_scores = ann(query, query_clause_attrs=query_attrs)
