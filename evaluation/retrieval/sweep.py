@@ -25,12 +25,18 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast, get_args
 
 import torch
 from loguru import logger
 
-from retrieval.algos import build_algorithm, build_filter
+from retrieval.algos import (
+    RetrievalAlgo,
+    build_algorithm,
+    build_filter,
+    is_valid_combo,
+    supports,
+)
 from retrieval.bench_tools import (
     cuda_allocated_mib,
     perf_pass_cached,
@@ -38,7 +44,7 @@ from retrieval.bench_tools import (
     quality_pass_cached,
     warm_gpu_once,
 )
-from retrieval.config import EvalConfig, FilterCfg, FilterSweepCfg
+from retrieval.config import EvalConfig, FilterCfg, FilterKind, FilterSweepCfg
 from retrieval.context import EMPTY_ASSETS, FilterAssets, SweepContext
 from retrieval.loaders import build_sweep_qa, load_filter_assets
 from retrieval.oracle import load_or_build_oracle
@@ -68,25 +74,30 @@ def run_sweep(ctx: SweepContext) -> list[dict]:
 
 def _select_filter_iter(
     cfg: EvalConfig, filter_kinds: tuple[str, ...]
-) -> Iterator[tuple[str, FilterCfg]]:
+) -> Iterator[tuple[FilterKind, FilterCfg]]:
     """Yield ``(filter_kind, FilterCfg)`` for each enabled filter kind.
 
     Yambda inserts a single synthetic ``("none", …)`` cell. ``--filter-kind``
-    on the CLI restricts which kinds are yielded; empty tuple = all.
+    on the CLI restricts which kinds are yielded; empty tuple = all. YAML
+    keys are plain strings; this is the one place they are narrowed to
+    ``FilterKind`` — an unknown kind raises here rather than silently
+    failing every ``supports`` check downstream.
     """
     if cfg.filters is None:
         yield "none", FilterCfg(sweeps=[FilterSweepCfg(name="full_scan")])
         return
     for filter_kind, fcfg in cfg.filters.items():
+        if filter_kind not in get_args(FilterKind):
+            raise ValueError(f"unknown filter_kind in config: {filter_kind!r}")
         if filter_kinds and filter_kind not in filter_kinds:
             continue
-        yield filter_kind, fcfg
+        yield cast(FilterKind, filter_kind), fcfg
 
 
 # ----- per filter_kind --------------------------------------------------------
 
 
-def run_filter_kind(filter_kind: str, fcfg: FilterCfg, ctx: SweepContext) -> list[dict]:
+def run_filter_kind(filter_kind: FilterKind, fcfg: FilterCfg, ctx: SweepContext) -> list[dict]:
     """Build filter+oracle modules, iterate sweeps.
 
     Builds one ``filter_mod`` per backend so the filter kernel backend
@@ -117,7 +128,7 @@ def run_filter_kind(filter_kind: str, fcfg: FilterCfg, ctx: SweepContext) -> lis
 
 
 def _build_filter_modules(
-    filter_kind: str, fcfg: FilterCfg, ctx: SweepContext
+    filter_kind: FilterKind, fcfg: FilterCfg, ctx: SweepContext
 ) -> FilterAssets:
     """Build per-backend index-side filters and the oracle-side exact filter.
 
@@ -185,7 +196,7 @@ def _build_filter_modules(
 
 def run_one_sweep(
     sweep: FilterSweepCfg,
-    filter_kind: str,
+    filter_kind: FilterKind,
     ctx: SweepContext,
     assets: FilterAssets,
 ) -> list[dict]:
@@ -233,6 +244,9 @@ def run_one_sweep(
 
     rows: list[dict] = []
     for algo in ctx.algorithms:
+        if not supports(algo, filter_kind):
+            logger.info("skipping {}: unsupported filter_kind {}", algo, filter_kind)
+            continue
         for backend in ctx.backends:
             for params in ctx.cfg.algo_params.get(algo, [{}]):
                 params = dict(params)  # defensive copy; combos are reused across k/bs loops
@@ -264,7 +278,7 @@ def evaluate_cell(
     k: int,
     backend: Backend,
     sweep: FilterSweepCfg,
-    filter_kind: str,
+    filter_kind: FilterKind,
     ctx: SweepContext,
     assets: FilterAssets,
 ) -> list[dict]:
@@ -272,9 +286,7 @@ def evaluate_cell(
     _reset_cuda_state_for_cell()
     mem_before = cuda_allocated_mib()
 
-    algo_obj = _try_build_algo(algo, params, k, backend, filter_kind, ctx, assets)
-    if algo_obj is None:
-        return []
+    algo_obj = _build_algo(algo, params, k, backend, filter_kind, ctx, assets)
 
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -337,39 +349,37 @@ def _reset_cuda_state_for_cell() -> None:
         torch.cuda.reset_peak_memory_stats()
 
 
-def _try_build_algo(
+def _build_algo(
     algo: str,
     params: dict[str, Any],
     k: int,
     backend: Backend,
-    filter_kind: str,
+    filter_kind: FilterKind,
     ctx: SweepContext,
     assets: FilterAssets,
-) -> Any | None:
-    """Wrap ``build_algorithm`` with the ``ValueError → skip cell`` contract.
+) -> RetrievalAlgo:
+    """Construct one cell's algo from the run context.
 
-    Algos like ``linr_v2`` raise on ``filter_kind="none"``; the caller treats
-    that as "this combo isn't applicable" and moves on.
+    Eligibility is decided declaratively before this point (``supports``
+    in ``run_one_sweep``), so any exception here is a genuine construction
+    error — a typo'd param, a library-level shape error — and propagates
+    to kill the run loudly instead of silently dropping the cell.
     """
-    try:
-        return build_algorithm(
-            algo,
-            ctx.item_embs,
-            k=k,
-            filter_kind=filter_kind,
-            filter_mod=assets.filter_mods.get(backend),
-            item_attrs_narrow=assets.item_attrs_narrow,
-            clause_is_reverse=assets.clause_is_reverse,
-            params=params,
-            backend=backend,
-        )
-    except ValueError as e:
-        logger.debug("  skipping {}: {}", algo, e)
-        return None
+    return build_algorithm(
+        algo,
+        ctx.item_embs,
+        k=k,
+        filter_kind=filter_kind,
+        filter_mod=assets.filter_mods.get(backend),
+        item_attrs_narrow=assets.item_attrs_narrow,
+        clause_is_reverse=assets.clause_is_reverse,
+        params=params,
+        backend=backend,
+    )
 
 
 def _run_quality(
-    algo_obj: Any,
+    algo_obj: RetrievalAlgo,
     k: int,
     desc: str,
     ctx: SweepContext,
@@ -418,7 +428,9 @@ def _run_quality(
     )
 
 
-def _autotune_prewarm(algo_obj: Any, ctx: SweepContext, assets: FilterAssets) -> None:
+def _autotune_prewarm(
+    algo_obj: RetrievalAlgo, ctx: SweepContext, assets: FilterAssets
+) -> None:
     """Call forward once per batch size before any bs is timed.
 
     Per-bs warmup inside ``perf_pass_cached`` is supposed to populate Triton's
@@ -442,7 +454,7 @@ def _autotune_prewarm(algo_obj: Any, ctx: SweepContext, assets: FilterAssets) ->
 
 def _make_perf_row(
     *,
-    filter_kind: str,
+    filter_kind: FilterKind,
     sweep_name: str,
     algo: str,
     params: dict[str, Any],
@@ -488,7 +500,7 @@ def _make_perf_row(
 
 
 def _log_perf_line(
-    filter_kind: str,
+    filter_kind: FilterKind,
     sweep_name: str,
     algo: str,
     backend: Backend,
@@ -525,29 +537,15 @@ def _log_perf_line(
     )
 
 
-def _release_algo(algo_obj: Any) -> None:
+def _release_algo(algo_obj: RetrievalAlgo) -> None:
     """Drop algo's modules and reclaim GPU pool. Called at end of every cell."""
     algo_obj.algo_modules.clear()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
 
-# ----- param-combo utilities ---------------------------------------------------
-
-
-def is_valid_combo(algo: str, params: dict[str, Any]) -> bool:
-    """Skip combos the underlying algo would assert on."""
-    if algo == "silvertorch":
-        n_lists = params.get("n_lists")
-        n_probe = params.get("n_probe")
-        if n_lists is not None and n_probe is not None and n_probe > n_lists:
-            return False
-    return True
-
-
 __all__ = [
     "evaluate_cell",
-    "is_valid_combo",
     "run_filter_kind",
     "run_one_sweep",
     "run_sweep",

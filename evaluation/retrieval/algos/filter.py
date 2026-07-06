@@ -12,12 +12,13 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
+from retrieval.config import FilterKind
 from retrieve.interfaces import Backend, FilterModule
 from retrieve.layers.filters import BloomFilter, ExactAttributeFilter
 
 
 def build_filter(
-    filter_kind: str,
+    filter_kind: FilterKind,
     *,
     item_attrs_narrow: Tensor | None = None,
     clause_is_reverse: Tensor | None = None,

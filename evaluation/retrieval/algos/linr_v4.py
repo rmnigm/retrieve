@@ -18,16 +18,16 @@ with ``torch.compile(dynamic=True, mode="reduce-overhead")`` in
 
 from __future__ import annotations
 
-from torch import Tensor, nn
+from torch import Tensor
 
 from retrieve.interfaces import Backend, FilterModule
 from retrieve.layers.linr.postfilter_knn_int8 import PostfilterKNNInt8
 
-from ._helpers import collect_modules
+from ._helpers import AlgoBase
 from .filter import make_mask
 
 
-class LinrV4Algo(nn.Module):
+class LinrV4Algo(AlgoBase):
     def __init__(
         self,
         item_embs: Tensor,
@@ -39,9 +39,7 @@ class LinrV4Algo(nn.Module):
         super().__init__()
         self.idx = PostfilterKNNInt8(k=k, backend=backend).to(item_embs.device)
         self.idx.register_index(item_embs)
-        self.filter_mod = filter_mod
-        self.algo_modules = collect_modules(self.idx, filter_mod=filter_mod)
-        self.compile(dynamic=True, mode="reduce-overhead")
+        self._finalize(self.idx, filter_mod=filter_mod)
 
     def forward(self, q: Tensor, qa_narrow: Tensor | None = None) -> tuple[Tensor, Tensor]:
         return self.idx(q, mask=make_mask(self.filter_mod, qa_narrow))

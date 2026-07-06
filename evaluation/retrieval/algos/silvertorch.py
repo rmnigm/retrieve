@@ -21,21 +21,22 @@ recall to ~0 on reverse-clause sweeps.
 
 from __future__ import annotations
 
-from torch import Tensor, nn
+from torch import Tensor
 
+from retrieval.config import FilterKind
 from retrieve import SilverTorch
 from retrieve.interfaces import Backend
 
-from ._helpers import collect_modules
+from ._helpers import AlgoBase
 
 
-class SilvertorchAlgo(nn.Module):
+class SilvertorchAlgo(AlgoBase):
     def __init__(
         self,
         item_embs: Tensor,
         k: int,
         *,
-        filter_kind: str = "none",
+        filter_kind: FilterKind = "none",
         item_attrs_narrow: Tensor | None = None,
         clause_is_reverse: Tensor | None = None,
         n_lists: int = 1024,
@@ -102,8 +103,7 @@ class SilvertorchAlgo(nn.Module):
                 backend=backend,
             ).to(device)
             self.idx.register_index(item_embs)
-        self.algo_modules = collect_modules(self.idx, filter_mod=None)
-        self.compile(dynamic=True, mode="reduce-overhead")
+        self._finalize(self.idx, filter_mod=None)
 
     def forward(self, q: Tensor, qa_narrow: Tensor | None = None) -> tuple[Tensor, Tensor]:
         if self._filter_kind in ("bloom", "clause"):

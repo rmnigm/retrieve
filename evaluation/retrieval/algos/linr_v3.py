@@ -29,15 +29,15 @@ baseline (measured ~1.22 ms vs 0.89 ms at 500M scale).
 
 from __future__ import annotations
 
-from torch import Tensor, nn
+from torch import Tensor
 
 from retrieve import OneBitKNN, PrefilterKNN
 from retrieve.interfaces import Backend, FilterModule
 
-from ._helpers import collect_modules
+from ._helpers import AlgoBase
 
 
-class LinrV3Algo(nn.Module):
+class LinrV3Algo(AlgoBase):
     def __init__(
         self,
         item_embs: Tensor,
@@ -58,9 +58,7 @@ class LinrV3Algo(nn.Module):
         self.stage1.register_index(item_embs)
         self.stage2 = PrefilterKNN(k=k, backend=backend).to(device)
         self.stage2.register_index(item_embs)
-        self.filter_mod = filter_mod
-        self.algo_modules = collect_modules(self.stage1, self.stage2, filter_mod=filter_mod)
-        self.compile(dynamic=True, mode="reduce-overhead")
+        self._finalize(self.stage1, self.stage2, filter_mod=filter_mod)
 
     def forward(self, q: Tensor, qa_narrow: Tensor | None = None) -> tuple[Tensor, Tensor]:
         filtered = self.filter_mod is not None and qa_narrow is not None
