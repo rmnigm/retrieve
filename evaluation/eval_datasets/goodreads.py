@@ -387,7 +387,7 @@ def cmd_all(args) -> int:
 #
 # Filters Listen+-equivalent (`is_read=true`), parses `date_added`, collapses to
 # work_id catalog, runs an iterative n-core, then time-splits via
-# `datasets.timesplit.sequential_split_train_val_test`.
+# `eval_datasets.timesplit.sequential_split_train_val_test`.
 
 
 def _import_timesplit():
@@ -395,9 +395,9 @@ def _import_timesplit():
     try:
         from .timesplit import sequential_split_train_val_test as f
     except ImportError:
-        # uv-run-script mode: `datasets` isn't on sys.path as a package.
+        # uv-run-script mode: `eval_datasets` isn't on sys.path as a package.
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-        from datasets.timesplit import sequential_split_train_val_test as f
+        from eval_datasets.timesplit import sequential_split_train_val_test as f
     return f
 
 

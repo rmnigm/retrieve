@@ -30,8 +30,6 @@ from ._helpers import collect_modules
 
 
 class SilvertorchAlgo(nn.Module):
-    is_cpu = False
-
     def __init__(
         self,
         item_embs: Tensor,

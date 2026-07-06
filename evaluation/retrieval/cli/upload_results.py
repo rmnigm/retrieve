@@ -3,18 +3,24 @@
 Mirrors the local ``results/`` layout (staged by ``stage_results``):
   <dataset>/<name>.json        (concat of per-algo rows for that config)
   <dataset>/<name>.yaml        (the YAML config used for that run)
-  README.md                    (campaign tables)
+  README.md                    (per-kind tables + optional campaign notes)
 
 Skips ``*.perkernel/`` (per-algo originals, redundant with combined) and
 ``_runlogs/`` (campaign-internal). Idempotent: re-runs replace files.
 
+Campaign-specific prose (section descriptions, caveats) belongs in a
+markdown file passed via ``--notes-file``; it is appended verbatim to the
+generated README.
+
 Usage:
-  uv run upload-results [--dry-run]
+  uv run upload-results --repo-id <user/repo> [--notes-file notes.md]
+                        [--private | --public] [--dry-run]
 """
 from __future__ import annotations
 
 import argparse
 import collections
+import datetime as dt
 import json
 import shutil
 import sys
@@ -24,9 +30,7 @@ EVAL_DIR = Path(__file__).resolve().parents[2]
 RESULTS_DIR = EVAL_DIR / "results"
 STAGE_DIR = EVAL_DIR / "upload_staging"
 
-REPO_ID = "pinkmeme/retrieval-filter-evals-2026-05-23"
 REPO_TYPE = "dataset"
-PRIVATE = False
 
 
 def _find_combined_jsons() -> list[Path]:
@@ -93,7 +97,11 @@ def stage_all() -> list[dict]:
     return stats
 
 
-def write_readme(stats: list[dict]) -> None:
+def write_readme(stats: list[dict], notes_file: Path | None) -> None:
+    """Generated part: front matter + per-kind tables derived from ``stats``.
+
+    Campaign-specific prose comes from ``notes_file`` (appended verbatim).
+    """
     by_kind: dict[str, list[dict]] = collections.defaultdict(list)
     for s in stats:
         by_kind[s["kind"]].append(s)
@@ -105,51 +113,35 @@ def write_readme(stats: list[dict]) -> None:
         "- retrieval",
         "- benchmark",
         "- filtered-knn",
-        "size_categories:",
-        "- 10K<n<100K",
         "---",
         "",
-        "# Retrieval eval results (campaign of 2026-05-23)",
+        f"# Retrieval eval results ({dt.date.today().isoformat()})",
         "",
-        "JSON outputs from the retrieval benchmark in `/workspace/retrieve/evaluation/`.",
+        "JSON outputs from the retrieval benchmark in `retrieve/evaluation/`.",
         "Each row is one (filter_kind, sweep, impl, backend, k, batch_size) cell.",
-        "Schema reference: [pinkmeme/retrieval-filter-evals-2026-05-20](https://huggingface.co/datasets/pinkmeme/retrieval-filter-evals-2026-05-20).",
         "",
         "Each combined `<config>.json` has its YAML alongside (`<config>.yaml`) describing exactly the run that produced it.",
         "",
     ]
 
-    sections = [
-        ("filter", "Filter evals", "Clause + bloom filter sweeps × 5 algos. `ks=[100, 500, 1000]`, `bs=[1, 8, 16]`, `users_limit=10000`."),
-        ("quality", "Quality evals (arxiv + goodreads)", "No filter; recall vs full-catalog top-K. 4 algos. `ks=[100, 200, 400]`, `bs=[1]`, `backends=[triton, torch]`. arxiv uses pre-encoded queries (~10k); goodreads uses full test split (313k users) with no `users_limit`."),
-        ("yambda", "Yambda quality evals", "No filter; full test users (yambda-500m: ~46k; yambda-5b: 459k). 4 algos. `ks=[100, 200, 400]`, `bs=[1]`, `backends=[triton, torch]`."),
-        ("deep_sweeps", "Deep parameter sweeps", "Single-algo recall-vs-latency curves with filters on. silvertorch n_lists × n_probe layouts and linr_v3 `candidate_pool` sweep on d=128."),
-    ]
-    for key, title, desc in sections:
-        if not by_kind.get(key):
-            continue
-        lines.append(f"## {title}")
-        lines.append("")
-        lines.append(desc)
+    for kind in sorted(by_kind):
+        lines.append(f"## {kind}")
         lines.append("")
         lines.append("| Path | Rows | Impls |")
         lines.append("|---|---:|---|")
-        for s in sorted(by_kind[key], key=lambda x: x["path"]):
+        for s in sorted(by_kind[kind], key=lambda x: x["path"]):
             impls = ", ".join(sorted(s["impls"].keys()))
             lines.append(f"| `{s['path']}` | {s['rows']} | {impls} |")
         lines.append("")
 
-    lines.append("## Notes")
-    lines.append("")
-    lines.append("- `linr_v2` only appears in filter results (it requires a filter context).")
-    lines.append("- `torch_knn` was dropped from quality YAMLs in favor of `linr_v1_filter_mask` (also exact) + `linr_v4` (exact int8).")
-    lines.append("- yambda-5b cache writes are skipped at runtime when they'd exceed disk budget; algos re-encode queries per-subprocess (~1–2 min overhead, negligible vs total).")
-    lines.append("")
+    if notes_file is not None:
+        lines.append(notes_file.read_text())
+        lines.append("")
 
     (STAGE_DIR / "README.md").write_text("\n".join(lines))
 
 
-def upload(dry_run: bool) -> None:
+def upload(*, repo_id: str, private: bool, dry_run: bool) -> None:
     if dry_run:
         print("\n[dry-run] would upload:")
         total_bytes = 0
@@ -160,33 +152,53 @@ def upload(dry_run: bool) -> None:
                 total_bytes += sz
                 print(f"  {rel} ({sz:,} bytes)")
         print(f"\n  total: {total_bytes:,} bytes")
-        print(f"  → repo: {REPO_ID} (private={PRIVATE})")
+        print(f"  → repo: {repo_id} (private={private})")
         return
 
     from huggingface_hub import HfApi  # lazy import
 
     api = HfApi()
-    print(f"\ncreate_repo (exist_ok): {REPO_ID}")
-    api.create_repo(repo_id=REPO_ID, repo_type=REPO_TYPE, private=PRIVATE, exist_ok=True)
-    print(f"upload_folder: {STAGE_DIR} → {REPO_ID}")
+    print(f"\ncreate_repo (exist_ok): {repo_id}")
+    api.create_repo(repo_id=repo_id, repo_type=REPO_TYPE, private=private, exist_ok=True)
+    print(f"upload_folder: {STAGE_DIR} → {repo_id}")
     api.upload_folder(
         folder_path=str(STAGE_DIR),
-        repo_id=REPO_ID,
+        repo_id=repo_id,
         repo_type=REPO_TYPE,
-        commit_message="Extend with quality + deep_sweeps + yambda results (2026-05-23 campaign)",
+        commit_message=f"Upload results ({dt.date.today().isoformat()})",
     )
-    print(f"\ndone: https://huggingface.co/datasets/{REPO_ID}")
+    print(f"\ndone: https://huggingface.co/datasets/{repo_id}")
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--repo-id", required=True, help="target HF dataset repo, e.g. user/retrieval-evals"
+    )
+    ap.add_argument(
+        "--notes-file",
+        type=Path,
+        default=None,
+        help="markdown appended verbatim to the generated README (campaign notes)",
+    )
+    vis = ap.add_mutually_exclusive_group()
+    vis.add_argument(
+        "--private", dest="private", action="store_true", help="create the repo as private"
+    )
+    vis.add_argument(
+        "--public", dest="private", action="store_false", help="create the repo as public (default)"
+    )
+    ap.set_defaults(private=False)
     ap.add_argument("--dry-run", action="store_true", help="stage files but don't upload")
     args = ap.parse_args()
 
+    if args.notes_file is not None and not args.notes_file.exists():
+        ap.error(f"--notes-file {args.notes_file} does not exist")
+
     stats = stage_all()
-    write_readme(stats)
+    write_readme(stats, args.notes_file)
     print(f"\nwrote {STAGE_DIR}/README.md")
-    upload(dry_run=args.dry_run)
+    upload(repo_id=args.repo_id, private=args.private, dry_run=args.dry_run)
     return 0
 
 
