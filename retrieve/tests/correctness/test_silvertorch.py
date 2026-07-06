@@ -47,7 +47,7 @@ def _build(with_attrs: bool, data, backend: str = "triton", **overrides):
         "k": K,
         "n_lists": N_LISTS,
         "n_probe": N_PROBE,
-        "filter": "bloom",
+        "filter_mode": "bloom",
         "m_bits": M_BITS,
         "k_hash": K_HASH,
         "n_iter": 3,
@@ -72,7 +72,7 @@ def _build_exact(data, backend: str = "triton", clause_is_reverse=None, **overri
         "k": K,
         "n_lists": N_LISTS,
         "n_probe": N_PROBE,
-        "filter": "exact",
+        "filter_mode": "exact",
         "n_iter": 3,
         "backend": backend,
     }
@@ -114,7 +114,7 @@ class TestShape:
         assert scores.dtype == torch.float32
 
     def test_exact_without_attrs(self, data, backend):
-        """``filter='exact'`` with ``query_clause_attrs=None`` skips the
+        """``filter_mode='exact'`` with ``query_clause_attrs=None`` skips the
         filter branch and returns plain IVF results."""
         m = _build_exact(data, backend=backend)
         ids, _ = m(data["query"])
@@ -150,25 +150,25 @@ class TestShape:
 class TestParamValidation:
     def test_invalid_bloom_params_rejected(self):
         with pytest.raises(ValueError, match="power of 2"):
-            SilverTorch(k=5, n_lists=8, n_probe=4, filter="bloom", m_bits=500, k_hash=5)
+            SilverTorch(k=5, n_lists=8, n_probe=4, filter_mode="bloom", m_bits=500, k_hash=5)
         with pytest.raises(ValueError, match="k_hash"):
-            SilverTorch(k=5, n_lists=8, n_probe=4, filter="bloom", m_bits=512, k_hash=0)
+            SilverTorch(k=5, n_lists=8, n_probe=4, filter_mode="bloom", m_bits=512, k_hash=0)
 
     def test_partial_bloom_config_rejected(self):
         with pytest.raises(ValueError, match="m_bits and k_hash"):
-            SilverTorch(k=5, n_lists=8, n_probe=4, filter="bloom", m_bits=512)
+            SilverTorch(k=5, n_lists=8, n_probe=4, filter_mode="bloom", m_bits=512)
         with pytest.raises(ValueError, match="m_bits and k_hash"):
-            SilverTorch(k=5, n_lists=8, n_probe=4, filter="bloom", k_hash=4)
+            SilverTorch(k=5, n_lists=8, n_probe=4, filter_mode="bloom", k_hash=4)
 
     def test_bloom_params_outside_bloom_filter_rejected(self):
-        with pytest.raises(ValueError, match="only apply to filter='bloom'"):
+        with pytest.raises(ValueError, match="only apply to filter_mode='bloom'"):
             SilverTorch(k=5, n_lists=8, n_probe=4, m_bits=512, k_hash=5)
-        with pytest.raises(ValueError, match="only apply to filter='bloom'"):
-            SilverTorch(k=5, n_lists=8, n_probe=4, filter="exact", m_bits=512, k_hash=5)
+        with pytest.raises(ValueError, match="only apply to filter_mode='bloom'"):
+            SilverTorch(k=5, n_lists=8, n_probe=4, filter_mode="exact", m_bits=512, k_hash=5)
 
     def test_unknown_filter_rejected(self):
-        with pytest.raises(ValueError, match="filter must be"):
-            SilverTorch(k=5, n_lists=8, n_probe=4, filter="invalid")  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="filter_mode must be"):
+            SilverTorch(k=5, n_lists=8, n_probe=4, filter_mode="invalid")  # type: ignore[arg-type]
 
     def test_invalid_ivf_params_rejected(self, data):
         m = SilverTorch(k=5, n_lists=10_000, n_probe=4)
@@ -191,7 +191,7 @@ class TestParamValidation:
             m.register_index(data["embs"], item_clause_attrs=attrs)
 
     def test_exact_requires_item_clause_attrs(self, data):
-        m = SilverTorch(k=K, n_lists=N_LISTS, n_probe=N_PROBE, filter="exact", n_iter=3)
+        m = SilverTorch(k=K, n_lists=N_LISTS, n_probe=N_PROBE, filter_mode="exact", n_iter=3)
         with pytest.raises(ValueError, match="requires item_clause_attrs"):
             m.register_index(data["embs"])
 
@@ -201,7 +201,7 @@ class TestParamValidation:
             k=K,
             n_lists=N_LISTS,
             n_probe=N_PROBE,
-            filter="bloom",
+            filter_mode="bloom",
             m_bits=M_BITS,
             k_hash=K_HASH,
             n_iter=3,
@@ -410,7 +410,7 @@ class TestBuilder:
             k=K,
             n_lists=N_LISTS,
             n_probe=N_PROBE,
-            filter="bloom",
+            filter_mode="bloom",
             m_bits=M_BITS,
             k_hash=K_HASH,
             n_iter=3,
@@ -439,13 +439,13 @@ class TestBuilder:
             k=K,
             n_lists=N_LISTS,
             n_probe=N_PROBE,
-            filter="exact",
+            filter_mode="exact",
             n_iter=3,
             item_clause_attrs=data["attrs"],
             clause_is_reverse=rev,
         )
         assert isinstance(m, SilverTorch)
-        assert m.filter == "exact"
+        assert m.filter_mode == "exact"
         ids, _ = m(data["query"], data["q_attrs"])
         assert ids.shape == (B, K)
 

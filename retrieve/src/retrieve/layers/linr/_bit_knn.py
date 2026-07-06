@@ -85,9 +85,7 @@ class _PackedBitsKNN(RetrievalModule):
             xor = query_bits.unsqueeze(1) ^ cand_bits
             hamming = popcount_int64(xor).sum(dim=-1)
             scores = (self.d_total - 2 * hamming).to(torch.float32)
-            valid = (
-                counts_to_valid(counts, candidate_ids.shape[1]) if counts is not None else None
-            )
+            valid = counts_to_valid(counts, candidate_ids.shape[1]) if counts is not None else None
             # pad_to_k=False: the candidates path returns min(k, P) columns (no -1/-inf tail) —
             # frozen behavior; callers bound short rows by counts.
             return masked_topk(

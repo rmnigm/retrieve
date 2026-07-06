@@ -30,7 +30,7 @@ FilterMode = Literal["none", "bloom", "exact"]
 class SilverTorch(RetrievalModule):
     """Co-designed IVF + INT8 ANN + optional attribute filter (paper Algorithm 1, §4.2): an ``[N,
     D]`` int8 index with one global scale, per-row int8-quantized queries, and an int8×int8 →
-    int32 dot dequantized once. ``filter`` fuses a predicate into the probe+score kernel —
+    int32 dot dequantized once. ``filter_mode`` fuses a predicate into the probe+score kernel —
     ``"none"`` (plain ANN), ``"bloom"`` (subset test, needs ``m_bits``/``k_hash``), or
     ``"exact"`` (exact-clause, no false positives).
 
@@ -53,7 +53,7 @@ class SilverTorch(RetrievalModule):
         k: int,
         n_lists: int,
         n_probe: int,
-        filter: FilterMode = "none",
+        filter_mode: FilterMode = "none",
         m_bits: int | None = None,
         k_hash: int | None = None,
         n_iter: int = 10,
@@ -61,12 +61,14 @@ class SilverTorch(RetrievalModule):
         backend: Backend = "triton",
     ) -> None:
         super().__init__()
-        if filter not in ("none", "bloom", "exact"):
-            raise ValueError(f"filter must be 'none', 'bloom', or 'exact', got {filter!r}")
+        if filter_mode not in ("none", "bloom", "exact"):
+            raise ValueError(
+                f"filter_mode must be 'none', 'bloom', or 'exact', got {filter_mode!r}"
+            )
 
-        if filter == "bloom":
+        if filter_mode == "bloom":
             if m_bits is None or k_hash is None:
-                raise ValueError("filter='bloom' requires both m_bits and k_hash")
+                raise ValueError("filter_mode='bloom' requires both m_bits and k_hash")
             if m_bits <= 0 or (m_bits & (m_bits - 1)) != 0:
                 raise ValueError(f"m_bits must be a positive power of 2, got {m_bits}")
             if m_bits % 64 != 0:
@@ -79,13 +81,14 @@ class SilverTorch(RetrievalModule):
         else:
             if m_bits is not None or k_hash is not None:
                 raise ValueError(
-                    f"m_bits/k_hash only apply to filter='bloom', got filter={filter!r}"
+                    f"m_bits/k_hash only apply to filter_mode='bloom', got "
+                    f"filter_mode={filter_mode!r}"
                 )
             self.m_bits = 0
             self.k_hash = 0
             self.word_count = 0
 
-        self.filter: FilterMode = filter
+        self.filter_mode: FilterMode = filter_mode
         self.k = k
         self.n_lists = n_lists
         self.n_probe = n_probe
@@ -95,11 +98,11 @@ class SilverTorch(RetrievalModule):
 
     @property
     def has_bloom(self) -> bool:
-        return self.filter == "bloom"
+        return self.filter_mode == "bloom"
 
     @property
     def has_exact(self) -> bool:
-        return self.filter == "exact"
+        return self.filter_mode == "exact"
 
     def register_index(
         self,
@@ -123,14 +126,16 @@ class SilverTorch(RetrievalModule):
         item_clause_attrs: Tensor | None,
         clause_is_reverse: Tensor | None,
     ) -> None:
-        if self.filter == "none" and item_clause_attrs is not None:
-            raise ValueError("item_clause_attrs requires filter='bloom' or filter='exact'")
-        if self.filter == "none" and clause_is_reverse is not None:
-            raise ValueError("clause_is_reverse requires filter='exact'")
-        if self.filter == "exact" and item_clause_attrs is None:
-            raise ValueError("filter='exact' requires item_clause_attrs at register_index")
-        if self.filter == "bloom" and clause_is_reverse is not None:
-            raise ValueError("clause_is_reverse is only used with filter='exact'")
+        if self.filter_mode == "none" and item_clause_attrs is not None:
+            raise ValueError(
+                "item_clause_attrs requires filter_mode='bloom' or filter_mode='exact'"
+            )
+        if self.filter_mode == "none" and clause_is_reverse is not None:
+            raise ValueError("clause_is_reverse requires filter_mode='exact'")
+        if self.filter_mode == "exact" and item_clause_attrs is None:
+            raise ValueError("filter_mode='exact' requires item_clause_attrs at register_index")
+        if self.filter_mode == "bloom" and clause_is_reverse is not None:
+            raise ValueError("clause_is_reverse is only used with filter_mode='exact'")
 
         n = item_embs.shape[0]
         if self.n_lists > n:
@@ -193,7 +198,7 @@ class SilverTorch(RetrievalModule):
         clause_is_reverse: Tensor | None,
     ) -> None:
         device = self.item_codes.device  # same device as item_embs
-        if self.filter == "bloom":
+        if self.filter_mode == "bloom":
             seeds = generate_seeds(self.k_hash, device=device)
             if item_clause_attrs is None:
                 sigs = torch.zeros(n, self.word_count, dtype=torch.int64, device=device)
@@ -207,7 +212,7 @@ class SilverTorch(RetrievalModule):
                 )
             self.register_buffer("bloom_sigs", sigs)
             self.register_buffer("hash_seeds", seeds)
-        elif self.filter == "exact":
+        elif self.filter_mode == "exact":
             assert item_clause_attrs is not None  # narrowed by _validate_register_args
             c = item_clause_attrs.shape[1]
             if clause_is_reverse is None:
@@ -224,8 +229,8 @@ class SilverTorch(RetrievalModule):
         candidate_ids: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
         """IVF + (optional) attribute-filter-fused retrieval; ``query_clause_attrs`` is valid only
-        for ``filter="bloom"|"exact"`` and when ``None`` the filter branch is skipped (plain IVF
-        + INT8 ANN)."""
+        for ``filter_mode="bloom"|"exact"`` and when ``None`` the filter branch is skipped (plain
+        IVF + INT8 ANN)."""
         if candidate_ids is not None:
             if query_clause_attrs is not None:
                 raise ValueError(
@@ -233,8 +238,10 @@ class SilverTorch(RetrievalModule):
                     "attribute filter; pass query_clause_attrs OR candidate_ids, not both"
                 )
             return self._forward_candidates(query, candidate_ids)
-        if self.filter == "none" and query_clause_attrs is not None:
-            raise ValueError("query_clause_attrs requires filter='bloom' or filter='exact'")
+        if self.filter_mode == "none" and query_clause_attrs is not None:
+            raise ValueError(
+                "query_clause_attrs requires filter_mode='bloom' or filter_mode='exact'"
+            )
         if self.backend == "triton":
             return self._forward_triton(query, query_clause_attrs)
         return self._forward_torch_eager(query, query_clause_attrs)
@@ -352,7 +359,7 @@ def build_silvertorch(
     *,
     n_lists: int,
     n_probe: int,
-    filter: FilterMode = "none",
+    filter_mode: FilterMode = "none",
     m_bits: int | None = None,
     k_hash: int | None = None,
     n_iter: int = 10,
@@ -366,7 +373,7 @@ def build_silvertorch(
         k=k,
         n_lists=n_lists,
         n_probe=n_probe,
-        filter=filter,
+        filter_mode=filter_mode,
         m_bits=m_bits,
         k_hash=k_hash,
         n_iter=n_iter,

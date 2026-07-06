@@ -80,11 +80,19 @@ def _codesigned_probe_score_exact_kernel(
     # gates loads with `valid`, and seeds `keep` from `valid` — matching the previously inlined
     # loop bit for bit.
     keep = common.clause_pass(
-        item_attrs_ptr, is_reverse_ptr, query_attrs_ptr,
-        ids=safe_ids, load_mask=valid, bid=bid,
-        stride_in=stride_ian, stride_ic=stride_iac, stride_ia=stride_iaa,
-        stride_qb=stride_qab, stride_qc=stride_qac,
-        C=C, A_MAX=A_MAX,
+        item_attrs_ptr,
+        is_reverse_ptr,
+        query_attrs_ptr,
+        ids=safe_ids,
+        load_mask=valid,
+        bid=bid,
+        stride_in=stride_ian,
+        stride_ic=stride_iac,
+        stride_ia=stride_iaa,
+        stride_qb=stride_qab,
+        stride_qc=stride_qac,
+        C=C,
+        A_MAX=A_MAX,
     )
 
     codes = tl.load(
@@ -167,24 +175,40 @@ def _cpse_prep(
     all_scores = torch.empty((b, p), dtype=torch.float32, device=query.device)
 
     kwargs: dict[str, object] = dict(
-        q_codes_ptr=q_codes, q_scales_ptr=q_scales,
-        flat_items_ptr=flat_probed_items, item_codes_ptr=item_codes,
-        item_attrs_ptr=item_clause_attrs, is_reverse_ptr=clause_is_reverse,
-        query_attrs_ptr=query_clause_attrs, out_scores_ptr=all_scores,
+        q_codes_ptr=q_codes,
+        q_scales_ptr=q_scales,
+        flat_items_ptr=flat_probed_items,
+        item_codes_ptr=item_codes,
+        item_attrs_ptr=item_clause_attrs,
+        is_reverse_ptr=clause_is_reverse,
+        query_attrs_ptr=query_clause_attrs,
+        out_scores_ptr=all_scores,
         global_scale=float(global_scale),
-        P=p, D=d, C=c, A_MAX=a_max,
-        stride_qcb=q_codes.stride(0), stride_qcd=q_codes.stride(1),
+        P=p,
+        D=d,
+        C=c,
+        A_MAX=a_max,
+        stride_qcb=q_codes.stride(0),
+        stride_qcd=q_codes.stride(1),
         stride_qs=q_scales.stride(0),
-        stride_fb=flat_probed_items.stride(0), stride_fp=flat_probed_items.stride(1),
-        stride_cn=item_codes.stride(0), stride_cd=item_codes.stride(1),
-        stride_ian=item_clause_attrs.stride(0), stride_iac=item_clause_attrs.stride(1),
+        stride_fb=flat_probed_items.stride(0),
+        stride_fp=flat_probed_items.stride(1),
+        stride_cn=item_codes.stride(0),
+        stride_cd=item_codes.stride(1),
+        stride_ian=item_clause_attrs.stride(0),
+        stride_iac=item_clause_attrs.stride(1),
         stride_iaa=item_clause_attrs.stride(2),
-        stride_qab=query_clause_attrs.stride(0), stride_qac=query_clause_attrs.stride(1),
-        stride_ob=all_scores.stride(0), stride_op=all_scores.stride(1),
-        BLOCK_P=cfg.block_p, num_warps=cfg.num_warps, num_stages=cfg.num_stages,
+        stride_qab=query_clause_attrs.stride(0),
+        stride_qac=query_clause_attrs.stride(1),
+        stride_ob=all_scores.stride(0),
+        stride_op=all_scores.stride(1),
+        BLOCK_P=cfg.block_p,
+        num_warps=cfg.num_warps,
+        num_stages=cfg.num_stages,
     )
-    return _CpseLaunch(p=p, b=b, kwargs=kwargs, all_scores=all_scores,
-                       flat_probed_items=flat_probed_items)
+    return _CpseLaunch(
+        p=p, b=b, kwargs=kwargs, all_scores=all_scores, flat_probed_items=flat_probed_items
+    )
 
 
 def _cpse_finish(launch: _CpseLaunch, k: int) -> tuple[Tensor, Tensor]:
@@ -221,9 +245,16 @@ def _codesigned_probe_score_exact_impl(
     Eager entry point for tune scripts / parity tests; the compiled path goes through the
     ``@triton_op`` wrapper."""
     cfg = config if config is not None else DEFAULT_CONFIG
-    launch = _cpse_prep(query, flat_probed_items, item_codes, global_scale,
-                        item_clause_attrs=item_clause_attrs, clause_is_reverse=clause_is_reverse,
-                        query_clause_attrs=query_clause_attrs, cfg=cfg)
+    launch = _cpse_prep(
+        query,
+        flat_probed_items,
+        item_codes,
+        global_scale,
+        item_clause_attrs=item_clause_attrs,
+        clause_is_reverse=clause_is_reverse,
+        query_clause_attrs=query_clause_attrs,
+        cfg=cfg,
+    )
     # grid_x tiles P (≤ 2³¹); P can exceed grid_y's 65535 limit.
     grid = (triton.cdiv(launch.p, cfg.block_p), launch.b)
     _codesigned_probe_score_exact_kernel[grid](**launch.kwargs)
@@ -245,9 +276,16 @@ def codesigned_probe_score_exact(
     ``_cpse_prep``/``_cpse_finish`` with ``_codesigned_probe_score_exact_impl``, keeping the
     launch inline (``wrap_triton`` must appear textually in the decorated source for
     torch.export). Requires P >= k."""
-    launch = _cpse_prep(query, flat_probed_items, item_codes, global_scale,
-                        item_clause_attrs=item_clause_attrs, clause_is_reverse=clause_is_reverse,
-                        query_clause_attrs=query_clause_attrs, cfg=DEFAULT_CONFIG)
+    launch = _cpse_prep(
+        query,
+        flat_probed_items,
+        item_codes,
+        global_scale,
+        item_clause_attrs=item_clause_attrs,
+        clause_is_reverse=clause_is_reverse,
+        query_clause_attrs=query_clause_attrs,
+        cfg=DEFAULT_CONFIG,
+    )
     p, b = launch.p, launch.b
 
     def grid(meta):

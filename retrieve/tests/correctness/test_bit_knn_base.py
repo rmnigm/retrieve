@@ -60,9 +60,7 @@ class TestConstruction:
 
 
 class TestRegisterIndex:
-    @pytest.mark.parametrize(
-        "make", [make_one_bit, make_simhash], ids=["one_bit", "simhash"]
-    )
+    @pytest.mark.parametrize("make", [make_one_bit, make_simhash], ids=["one_bit", "simhash"])
     def test_k_gt_n_raises(self, make):
         """The k > n guard lives in the base register_index (full-scan topk has no pad tail)."""
         m = make(k=N + 1)
@@ -85,9 +83,7 @@ class TestRegisterIndex:
         m.register_index(make_cpu_embs())
         assert [name for name, _ in m.named_buffers()] == ["item_bits", "simhash_R"]
 
-    @pytest.mark.parametrize(
-        "make", [make_one_bit, make_simhash], ids=["one_bit", "simhash"]
-    )
+    @pytest.mark.parametrize("make", [make_one_bit, make_simhash], ids=["one_bit", "simhash"])
     def test_item_bits_shape_and_d_total(self, make):
         m = make()
         m.register_index(make_cpu_embs())
@@ -124,9 +120,7 @@ class TestTorchEagerCandidatesPath:
     """Frozen epilogue of the candidates path: pad_to_k=False — min(k, P) columns, no -1/-inf
     tail; the -1 sentinel applies only to masked/short rows."""
 
-    @pytest.mark.parametrize(
-        "make", [make_one_bit, make_simhash], ids=["one_bit", "simhash"]
-    )
+    @pytest.mark.parametrize("make", [make_one_bit, make_simhash], ids=["one_bit", "simhash"])
     def test_p_lt_k_returns_p_columns(self, make):
         m = make(k=6)
         m.register_index(make_cpu_embs())
@@ -137,9 +131,7 @@ class TestTorchEagerCandidatesPath:
         assert scores.shape == (B, 3)
         assert torch.isfinite(scores).all()
 
-    @pytest.mark.parametrize(
-        "make", [make_one_bit, make_simhash], ids=["one_bit", "simhash"]
-    )
+    @pytest.mark.parametrize("make", [make_one_bit, make_simhash], ids=["one_bit", "simhash"])
     def test_zero_counts_returns_sentinels(self, make):
         m = make(k=4)
         m.register_index(make_cpu_embs())
@@ -150,9 +142,7 @@ class TestTorchEagerCandidatesPath:
         assert (ids == -1).all()
         assert not torch.isfinite(scores).any()
 
-    @pytest.mark.parametrize(
-        "make", [make_one_bit, make_simhash], ids=["one_bit", "simhash"]
-    )
+    @pytest.mark.parametrize("make", [make_one_bit, make_simhash], ids=["one_bit", "simhash"])
     def test_returned_ids_come_from_candidates(self, make):
         m = make(k=4)
         m.register_index(make_cpu_embs())
@@ -163,9 +153,7 @@ class TestTorchEagerCandidatesPath:
             allowed = set(cand[b].tolist())
             assert all(i in allowed for i in ids[b].tolist() if i >= 0)
 
-    @pytest.mark.parametrize(
-        "make", [make_one_bit, make_simhash], ids=["one_bit", "simhash"]
-    )
+    @pytest.mark.parametrize("make", [make_one_bit, make_simhash], ids=["one_bit", "simhash"])
     def test_full_scan_shape(self, make):
         m = make(k=4)
         m.register_index(make_cpu_embs())
