@@ -8,6 +8,24 @@ from torch import Tensor, nn
 Backend = Literal["torch", "triton"]
 
 
+class RetrievalModule(nn.Module, abc.ABC):
+    """A top-K retriever over a registered item index.
+
+    Contract: construct with k (+ knobs) → register_index(item_embs, ...)
+    exactly once → forward(query, ...) → (ids [B, k] int64, scores [B, k]).
+    -1 / -inf are the "no item" sentinels. register_index is called exactly
+    once; re-registration is unsupported. Forward signatures vary by family
+    (mask vs candidates vs fused-filter) and are being unified per-mode by
+    the torch-export plan; this ABC intentionally constrains only the
+    lifecycle, not forward.
+    """
+
+    k: int
+
+    @abc.abstractmethod
+    def register_index(self, item_embs: Tensor, **kwargs) -> None: ...
+
+
 class FilterModule(nn.Module, abc.ABC):
     """Boolean predicate over a registered item index; ``forward`` aliases ``evaluate_mask``.
 
@@ -19,7 +37,8 @@ class FilterModule(nn.Module, abc.ABC):
     def register_index(
         self,
         item_clause_attrs: Tensor,
-        item_embs: Tensor | None = None,
+        *,
+        clause_is_reverse: Tensor | None = None,
     ) -> None: ...
 
     @abc.abstractmethod
