@@ -1,4 +1,4 @@
-from retrieve.interfaces import Backend, FilterModule
+from retrieve.interfaces import Backend, FilterModule, RetrievalModule
 from retrieve.layers import (
     BloomFilter,
     ExactAttributeFilter,
@@ -30,6 +30,7 @@ __all__ = [
     "PostfilterKNN",
     "PostfilterKNNInt8",
     "PrefilterKNN",
+    "RetrievalModule",
     "SilverTorch",
     "SimHashKNN",
     "build_silvertorch",
