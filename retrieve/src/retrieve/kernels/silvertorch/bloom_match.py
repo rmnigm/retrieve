@@ -6,6 +6,8 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
+from retrieve.kernels import common
+
 
 @triton.jit
 def _bloom_match_kernel(
@@ -37,10 +39,9 @@ def _bloom_match_kernel(
         other=0,
     )
 
-    masked = qb[None, :] & sigs
-    eq_per_word = (masked == qb[None, :]).to(tl.int32)
-    all_eq = tl.min(eq_per_word, axis=1)
-    pass_all = all_eq != 0
+    # Shared subset test (qb & ~sig OR-reduce form — boolean-identical to the old
+    # equality + min-reduce). OOB lanes never leak: the store below is masked with `valid`.
+    pass_all = common.bloom_subset_pass(qb, sigs)
 
     tl.store(
         out_ptr + bid * stride_o_b + n_off * stride_o_n,

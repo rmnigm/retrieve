@@ -12,6 +12,8 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
+from retrieve.kernels import common
+
 
 @dataclass(frozen=True)
 class ClauseMaskConfig:
@@ -54,35 +56,90 @@ def _clause_mask_kernel(
     n_offsets = tile_id * BLOCK_N + tl.arange(0, BLOCK_N)
     n_valid = n_offsets < N
 
-    pass_mask = tl.full([BLOCK_N], 1, tl.int1)
-
-    for c in tl.static_range(C):
-        q_c = tl.load(query_attrs_ptr + bid * stride_qb + c * stride_qc)
-        rev_c = tl.load(is_reverse_ptr + c).to(tl.int1)
-
-        clause_match = tl.full([BLOCK_N], 0, tl.int1)
-        for a in tl.static_range(A_MAX):
-            ia = tl.load(
-                item_attrs_ptr + n_offsets * stride_in + c * stride_ic + a * stride_ia,
-                mask=n_valid,
-                other=-1,
-            )
-            clause_match = clause_match | (ia == q_c)
-
-        clause_match = clause_match ^ rev_c
-
-        inactive = q_c == -1
-        clause_match = clause_match | inactive
-
-        pass_mask = pass_mask & clause_match
-
-    pass_mask = pass_mask & n_valid
+    # Result is already ANDed with n_valid inside the helper (keep seeds from load_mask).
+    pass_mask = common.clause_pass(
+        item_attrs_ptr,
+        is_reverse_ptr,
+        query_attrs_ptr,
+        n_offsets,
+        n_valid,
+        bid,
+        stride_in,
+        stride_ic,
+        stride_ia,
+        stride_qb,
+        stride_qc,
+        C=C,
+        A_MAX=A_MAX,
+    )
 
     tl.store(
         out_ptr + bid * stride_ob + n_offsets * stride_on,
         pass_mask,
         mask=n_valid,
     )
+
+
+@dataclass(frozen=True)
+class _ClauseMaskLaunch:
+    grid: tuple[int, int, int]
+    kwargs: dict[str, object]  # every kernel arg: tensors, strides, constexprs, cfg
+    out: Tensor
+
+
+def _clause_mask_prep(
+    item_clause_attrs: Tensor,  # [N, C, A_max] int64
+    clause_is_reverse: Tensor,  # [C] bool
+    query_clause_attrs: Tensor,  # [B, C] int64
+    *,
+    cfg: ClauseMaskConfig,
+) -> _ClauseMaskLaunch:
+    """Validation + contiguity + output buffer + the full launch-arg dict. THE single place input
+    checking happens — shared by ``_clause_mask_impl`` and the public op."""
+    if item_clause_attrs.dim() != 3:
+        raise ValueError("item_clause_attrs must be [N, C, A_max]")
+    if query_clause_attrs.dim() != 2:
+        raise ValueError("query_clause_attrs must be [B, C]")
+
+    n, c, a_max = item_clause_attrs.shape
+    b, c_q = query_clause_attrs.shape
+    if c != c_q:
+        raise ValueError(f"clause-count mismatch: items C={c}, query C={c_q}")
+
+    item_clause_attrs = item_clause_attrs.contiguous()
+    clause_is_reverse = clause_is_reverse.contiguous().to(torch.int8)
+    query_clause_attrs = query_clause_attrs.contiguous()
+
+    out = torch.empty((b, n), dtype=torch.bool, device=query_clause_attrs.device)
+
+    # 3D grid (batch, tiles_y, tiles_x): batch on grid_x for L2 reuse, tiles overflow into grid_z
+    # past the 65535 cap. See kernel comment.
+    tiles = triton.cdiv(n, cfg.block_n)
+    tiles_x = triton.cdiv(tiles, 65535)
+    tiles_y = triton.cdiv(tiles, tiles_x)
+    grid = (b, tiles_y, tiles_x)
+
+    kwargs = dict(
+        item_attrs_ptr=item_clause_attrs,
+        is_reverse_ptr=clause_is_reverse,
+        query_attrs_ptr=query_clause_attrs,
+        out_ptr=out,
+        N=n,
+        tiles_y=tiles_y,
+        C=c,
+        A_MAX=a_max,
+        stride_in=item_clause_attrs.stride(0),
+        stride_ic=item_clause_attrs.stride(1),
+        stride_ia=item_clause_attrs.stride(2),
+        stride_qb=query_clause_attrs.stride(0),
+        stride_qc=query_clause_attrs.stride(1),
+        stride_ob=out.stride(0),
+        stride_on=out.stride(1),
+        BLOCK_N=cfg.block_n,
+        num_warps=cfg.num_warps,
+        num_stages=cfg.num_stages,
+    )
+    return _ClauseMaskLaunch(grid, kwargs, out)
 
 
 def _clause_mask_impl(
@@ -95,53 +152,10 @@ def _clause_mask_impl(
     """Direct-launch body used by the offline tuner and unit tests. Takes an optional ``config=`` so
     tile parameters can be swept; the public ``@triton_op``-wrapped ``clause_mask`` always uses
     ``DEFAULT_CONFIG``."""
-    if item_clause_attrs.dim() != 3:
-        raise ValueError("item_clause_attrs must be [N, C, A_max]")
-    if query_clause_attrs.dim() != 2:
-        raise ValueError("query_clause_attrs must be [B, C]")
-
-    n, c, a_max = item_clause_attrs.shape
-    b, c_q = query_clause_attrs.shape
-    if c != c_q:
-        raise ValueError(f"clause-count mismatch: items C={c}, query C={c_q}")
-
-    device = query_clause_attrs.device
-    item_clause_attrs = item_clause_attrs.contiguous()
-    clause_is_reverse = clause_is_reverse.contiguous().to(torch.int8)
-    query_clause_attrs = query_clause_attrs.contiguous()
-
-    out = torch.empty((b, n), dtype=torch.bool, device=device)
-
     cfg = config if config is not None else DEFAULT_CONFIG
-    # 3D grid (batch, tiles_y, tiles_x): batch on grid_x for L2 reuse, tiles overflow into grid_z
-    # past the 65535 cap. See kernel comment.
-    tiles = triton.cdiv(n, cfg.block_n)
-    tiles_x = triton.cdiv(tiles, 65535)
-    tiles_y = triton.cdiv(tiles, tiles_x)
-    grid = (b, tiles_y, tiles_x)
-
-    _clause_mask_kernel[grid](
-        item_clause_attrs,
-        clause_is_reverse,
-        query_clause_attrs,
-        out,
-        N=n,
-        tiles_y=tiles_y,
-        C=c,
-        A_MAX=a_max,
-        stride_in=item_clause_attrs.stride(0),
-        stride_ic=item_clause_attrs.stride(1),
-        stride_ia=item_clause_attrs.stride(2),
-        stride_qb=query_clause_attrs.stride(0),
-        stride_qc=query_clause_attrs.stride(1),
-        stride_ob=out.stride(0),
-        stride_on=out.stride(1),
-        BLOCK_N=cfg.block_n,
-        num_warps=cfg.num_warps,
-        num_stages=cfg.num_stages,
-    )
-
-    return out
+    launch = _clause_mask_prep(item_clause_attrs, clause_is_reverse, query_clause_attrs, cfg=cfg)
+    _clause_mask_kernel[launch.grid](**launch.kwargs)
+    return launch.out
 
 
 @triton_op("retrieve::clause_mask", mutates_args=())
@@ -153,41 +167,8 @@ def clause_mask(
     """Fused clause evaluation → ``[B, N]`` bool, no intermediate. Registered as a ``triton_op`` so
     the launch is captured for ``torch.compile``; mirrors ``_clause_mask_impl`` with
     ``DEFAULT_CONFIG``."""
-    cfg = DEFAULT_CONFIG
-
-    n, c, a_max = item_clause_attrs.shape
-    b, _ = query_clause_attrs.shape
-
-    item_clause_attrs = item_clause_attrs.contiguous()
-    clause_is_reverse = clause_is_reverse.contiguous().to(torch.int8)
-    query_clause_attrs = query_clause_attrs.contiguous()
-
-    out = torch.empty((b, n), dtype=torch.bool, device=query_clause_attrs.device)
-
-    tiles = triton.cdiv(n, cfg.block_n)
-    tiles_x = triton.cdiv(tiles, 65535)
-    tiles_y = triton.cdiv(tiles, tiles_x)
-    grid = (b, tiles_y, tiles_x)
-
-    wrap_triton(_clause_mask_kernel)[grid](
-        item_clause_attrs,
-        clause_is_reverse,
-        query_clause_attrs,
-        out,
-        N=n,
-        tiles_y=tiles_y,
-        C=c,
-        A_MAX=a_max,
-        stride_in=item_clause_attrs.stride(0),
-        stride_ic=item_clause_attrs.stride(1),
-        stride_ia=item_clause_attrs.stride(2),
-        stride_qb=query_clause_attrs.stride(0),
-        stride_qc=query_clause_attrs.stride(1),
-        stride_ob=out.stride(0),
-        stride_on=out.stride(1),
-        BLOCK_N=cfg.block_n,
-        num_warps=cfg.num_warps,
-        num_stages=cfg.num_stages,
+    launch = _clause_mask_prep(
+        item_clause_attrs, clause_is_reverse, query_clause_attrs, cfg=DEFAULT_CONFIG
     )
-
-    return out
+    wrap_triton(_clause_mask_kernel)[launch.grid](**launch.kwargs)  # inline, K2 invariant
+    return launch.out

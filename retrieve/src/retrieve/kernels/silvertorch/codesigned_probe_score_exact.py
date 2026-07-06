@@ -8,6 +8,7 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
+from retrieve.kernels import common
 from retrieve.layers.utils.quantize import quantize_int8
 
 
@@ -75,28 +76,16 @@ def _codesigned_probe_score_exact_kernel(
     valid = item_ids >= 0
     safe_ids = tl.where(valid, item_ids, 0)
 
-    # Exact-clause filter: AND across C clauses, OR over A_max values per clause. Clause loop is
-    # static-unrolled by Triton; AND/OR/XOR stays in registers.
-    keep = valid
-    for c in tl.static_range(C):
-        q_c = tl.load(query_attrs_ptr + bid * stride_qab + c * stride_qac)
-        rev_c = tl.load(is_reverse_ptr + c).to(tl.int1)
-
-        clause_match = tl.full([BLOCK_P], 0, tl.int1)
-        for a in tl.static_range(A_MAX):
-            ia = tl.load(
-                item_attrs_ptr + safe_ids * stride_ian + c * stride_iac + a * stride_iaa,
-                mask=valid,
-                other=-1,
-            )
-            clause_match = clause_match | (ia == q_c)
-
-        clause_match = clause_match ^ rev_c
-        # ``q_c == -1`` marks an inactive clause — always passes.
-        inactive = q_c == -1
-        clause_match = clause_match | inactive
-
-        keep = keep & clause_match
+    # Exact-clause filter (shared AND-of-OR predicate): the helper gathers attrs via `safe_ids`,
+    # gates loads with `valid`, and seeds `keep` from `valid` — matching the previously inlined
+    # loop bit for bit.
+    keep = common.clause_pass(
+        item_attrs_ptr, is_reverse_ptr, query_attrs_ptr,
+        ids=safe_ids, load_mask=valid, bid=bid,
+        stride_in=stride_ian, stride_ic=stride_iac, stride_ia=stride_iaa,
+        stride_qb=stride_qab, stride_qc=stride_qac,
+        C=C, A_MAX=A_MAX,
+    )
 
     codes = tl.load(
         item_codes_ptr + safe_ids[:, None] * stride_cn + d_off[None, :] * stride_cd,
@@ -118,6 +107,92 @@ def _codesigned_probe_score_exact_kernel(
         dots,
         mask=p_valid,
     )
+
+
+@dataclass(frozen=True)
+class _CpseLaunch:
+    p: int  # probe width — grid_x tiles over it
+    b: int  # batch — grid_y
+    kwargs: dict[str, object]  # every kernel arg: tensors, strides, constexprs, cfg
+    all_scores: Tensor
+    flat_probed_items: Tensor  # post-contiguous, for the epilogue gather
+
+
+def _cpse_prep(
+    query: Tensor,
+    flat_probed_items: Tensor,
+    item_codes: Tensor,
+    global_scale: float,
+    *,
+    item_clause_attrs: Tensor,
+    clause_is_reverse: Tensor,
+    query_clause_attrs: Tensor,
+    cfg: CodesignedProbeScoreExactConfig,
+) -> _CpseLaunch:
+    """Validation + contiguity + buffers + the full launch-kwarg dict.
+
+    THE single place input checking happens — shared by
+    ``_codesigned_probe_score_exact_impl`` and the ``@triton_op`` wrapper (which keeps only its
+    textually-inline ``wrap_triton`` launch)."""
+    if query.dim() != 2 or flat_probed_items.dim() != 2:
+        raise ValueError("query must be [B, D] and flat_probed_items [B, P]")
+    if item_codes.dtype != torch.int8:
+        raise TypeError(f"item_codes must be int8, got {item_codes.dtype}")
+    if item_clause_attrs.dim() != 3:
+        raise ValueError("item_clause_attrs must be [N, C, A_max]")
+    if query_clause_attrs.dim() != 2:
+        raise ValueError("query_clause_attrs must be [B, C]")
+
+    b, d = query.shape
+    p = flat_probed_items.shape[1]
+    _, c, a_max = item_clause_attrs.shape
+    b_q, c_q = query_clause_attrs.shape
+    if c != c_q:
+        raise ValueError(f"clause-count mismatch: items C={c}, query C={c_q}")
+    if b_q != b:
+        raise ValueError(f"batch mismatch: query B={b}, query_clause_attrs B={b_q}")
+    if clause_is_reverse.shape != (c,):
+        raise ValueError(f"clause_is_reverse must be [{c}], got {tuple(clause_is_reverse.shape)}")
+
+    q_codes, q_scales = quantize_int8(query)
+    q_codes, q_scales = q_codes.contiguous(), q_scales.contiguous()
+    flat_probed_items = flat_probed_items.contiguous()
+    item_codes = item_codes.contiguous()
+    item_clause_attrs = item_clause_attrs.contiguous()
+    # Triton can't load native torch.bool; mirror clause_mask.py.
+    clause_is_reverse = clause_is_reverse.contiguous().to(torch.int8)
+    query_clause_attrs = query_clause_attrs.contiguous()
+
+    # torch.empty is safe: the kernel writes every slot in [0, P) (real dot or -inf).
+    all_scores = torch.empty((b, p), dtype=torch.float32, device=query.device)
+
+    kwargs: dict[str, object] = dict(
+        q_codes_ptr=q_codes, q_scales_ptr=q_scales,
+        flat_items_ptr=flat_probed_items, item_codes_ptr=item_codes,
+        item_attrs_ptr=item_clause_attrs, is_reverse_ptr=clause_is_reverse,
+        query_attrs_ptr=query_clause_attrs, out_scores_ptr=all_scores,
+        global_scale=float(global_scale),
+        P=p, D=d, C=c, A_MAX=a_max,
+        stride_qcb=q_codes.stride(0), stride_qcd=q_codes.stride(1),
+        stride_qs=q_scales.stride(0),
+        stride_fb=flat_probed_items.stride(0), stride_fp=flat_probed_items.stride(1),
+        stride_cn=item_codes.stride(0), stride_cd=item_codes.stride(1),
+        stride_ian=item_clause_attrs.stride(0), stride_iac=item_clause_attrs.stride(1),
+        stride_iaa=item_clause_attrs.stride(2),
+        stride_qab=query_clause_attrs.stride(0), stride_qac=query_clause_attrs.stride(1),
+        stride_ob=all_scores.stride(0), stride_op=all_scores.stride(1),
+        BLOCK_P=cfg.block_p, num_warps=cfg.num_warps, num_stages=cfg.num_stages,
+    )
+    return _CpseLaunch(p=p, b=b, kwargs=kwargs, all_scores=all_scores,
+                       flat_probed_items=flat_probed_items)
+
+
+def _cpse_finish(launch: _CpseLaunch, k: int) -> tuple[Tensor, Tensor]:
+    # P = n_probe × max_cluster_size >= k by layer-construction assert, so topk(k) needs no min/pad
+    # path.
+    topk_scores, topk_local = torch.topk(launch.all_scores, k, dim=1)
+    topk_ids = launch.flat_probed_items.gather(1, topk_local)
+    return topk_ids, topk_scores
 
 
 def _codesigned_probe_score_exact_impl(
@@ -145,83 +220,14 @@ def _codesigned_probe_score_exact_impl(
 
     Eager entry point for tune scripts / parity tests; the compiled path goes through the
     ``@triton_op`` wrapper."""
-    if query.dim() != 2 or flat_probed_items.dim() != 2:
-        raise ValueError("query must be [B, D] and flat_probed_items [B, P]")
-    if item_codes.dtype != torch.int8:
-        raise TypeError(f"item_codes must be int8, got {item_codes.dtype}")
-    if item_clause_attrs.dim() != 3:
-        raise ValueError("item_clause_attrs must be [N, C, A_max]")
-    if query_clause_attrs.dim() != 2:
-        raise ValueError("query_clause_attrs must be [B, C]")
-
-    b, d = query.shape
-    p = flat_probed_items.shape[1]
-    _, c, a_max = item_clause_attrs.shape
-    b_q, c_q = query_clause_attrs.shape
-    if c != c_q:
-        raise ValueError(f"clause-count mismatch: items C={c}, query C={c_q}")
-    if b_q != b:
-        raise ValueError(f"batch mismatch: query B={b}, query_clause_attrs B={b_q}")
-    if clause_is_reverse.shape != (c,):
-        raise ValueError(f"clause_is_reverse must be [{c}], got {tuple(clause_is_reverse.shape)}")
-
-    q_codes, q_scales = quantize_int8(query)
-    q_codes = q_codes.contiguous()
-    q_scales = q_scales.contiguous()
-
-    flat_probed_items = flat_probed_items.contiguous()
-    item_codes = item_codes.contiguous()
-    item_clause_attrs = item_clause_attrs.contiguous()
-    # Triton can't load native torch.bool; mirror clause_mask.py.
-    clause_is_reverse = clause_is_reverse.contiguous().to(torch.int8)
-    query_clause_attrs = query_clause_attrs.contiguous()
-
-    # torch.empty is safe: the kernel writes every slot in [0, P) (real dot or -inf).
-    all_scores = torch.empty((b, p), dtype=torch.float32, device=query.device)
-
     cfg = config if config is not None else DEFAULT_CONFIG
-
+    launch = _cpse_prep(query, flat_probed_items, item_codes, global_scale,
+                        item_clause_attrs=item_clause_attrs, clause_is_reverse=clause_is_reverse,
+                        query_clause_attrs=query_clause_attrs, cfg=cfg)
     # grid_x tiles P (≤ 2³¹); P can exceed grid_y's 65535 limit.
-    grid = (triton.cdiv(p, cfg.block_p), b)
-
-    _codesigned_probe_score_exact_kernel[grid](
-        q_codes,
-        q_scales,
-        flat_probed_items,
-        item_codes,
-        item_clause_attrs,
-        clause_is_reverse,
-        query_clause_attrs,
-        all_scores,
-        float(global_scale),
-        P=p,
-        D=d,
-        C=c,
-        A_MAX=a_max,
-        stride_qcb=q_codes.stride(0),
-        stride_qcd=q_codes.stride(1),
-        stride_qs=q_scales.stride(0),
-        stride_fb=flat_probed_items.stride(0),
-        stride_fp=flat_probed_items.stride(1),
-        stride_cn=item_codes.stride(0),
-        stride_cd=item_codes.stride(1),
-        stride_ian=item_clause_attrs.stride(0),
-        stride_iac=item_clause_attrs.stride(1),
-        stride_iaa=item_clause_attrs.stride(2),
-        stride_qab=query_clause_attrs.stride(0),
-        stride_qac=query_clause_attrs.stride(1),
-        stride_ob=all_scores.stride(0),
-        stride_op=all_scores.stride(1),
-        BLOCK_P=cfg.block_p,
-        num_warps=cfg.num_warps,
-        num_stages=cfg.num_stages,
-    )
-
-    # P = n_probe × max_cluster_size >= k by layer-construction assert, so topk(k) needs no min/pad
-    # path.
-    topk_scores, topk_local = torch.topk(all_scores, k, dim=1)
-    topk_ids = flat_probed_items.gather(1, topk_local)
-    return topk_ids, topk_scores
+    grid = (triton.cdiv(launch.p, cfg.block_p), launch.b)
+    _codesigned_probe_score_exact_kernel[grid](**launch.kwargs)
+    return _cpse_finish(launch, k)
 
 
 @triton_op("retrieve::codesigned_probe_score_exact", mutates_args=())
@@ -235,61 +241,17 @@ def codesigned_probe_score_exact(
     global_scale: float,
     k: int,
 ) -> tuple[Tensor, Tensor]:
-    """Production ``@triton_op`` for exact-clause-filtered int8 ANN scoring; mirrors
-    ``_codesigned_probe_score_exact_impl`` inline (``wrap_triton`` must appear textually in the
-    decorated source for torch.export). Requires P >= k."""
-    b, d = query.shape
-    p = flat_probed_items.shape[1]
-    _, c, a_max = item_clause_attrs.shape
-
-    q_codes, q_scales = quantize_int8(query)
-    q_codes = q_codes.contiguous()
-    q_scales = q_scales.contiguous()
-    flat_probed_items = flat_probed_items.contiguous()
-    item_codes = item_codes.contiguous()
-    item_clause_attrs = item_clause_attrs.contiguous()
-    # Triton can't load native torch.bool; mirror clause_mask.py.
-    clause_is_reverse = clause_is_reverse.contiguous().to(torch.int8)
-    query_clause_attrs = query_clause_attrs.contiguous()
-
-    all_scores = torch.empty((b, p), dtype=torch.float32, device=query.device)
+    """Production ``@triton_op`` for exact-clause-filtered int8 ANN scoring; shares
+    ``_cpse_prep``/``_cpse_finish`` with ``_codesigned_probe_score_exact_impl``, keeping the
+    launch inline (``wrap_triton`` must appear textually in the decorated source for
+    torch.export). Requires P >= k."""
+    launch = _cpse_prep(query, flat_probed_items, item_codes, global_scale,
+                        item_clause_attrs=item_clause_attrs, clause_is_reverse=clause_is_reverse,
+                        query_clause_attrs=query_clause_attrs, cfg=DEFAULT_CONFIG)
+    p, b = launch.p, launch.b
 
     def grid(meta):
         return (triton.cdiv(p, meta["BLOCK_P"]), b)
 
-    wrap_triton(_codesigned_probe_score_exact_kernel)[grid](
-        q_codes,
-        q_scales,
-        flat_probed_items,
-        item_codes,
-        item_clause_attrs,
-        clause_is_reverse,
-        query_clause_attrs,
-        all_scores,
-        float(global_scale),
-        P=p,
-        D=d,
-        C=c,
-        A_MAX=a_max,
-        stride_qcb=q_codes.stride(0),
-        stride_qcd=q_codes.stride(1),
-        stride_qs=q_scales.stride(0),
-        stride_fb=flat_probed_items.stride(0),
-        stride_fp=flat_probed_items.stride(1),
-        stride_cn=item_codes.stride(0),
-        stride_cd=item_codes.stride(1),
-        stride_ian=item_clause_attrs.stride(0),
-        stride_iac=item_clause_attrs.stride(1),
-        stride_iaa=item_clause_attrs.stride(2),
-        stride_qab=query_clause_attrs.stride(0),
-        stride_qac=query_clause_attrs.stride(1),
-        stride_ob=all_scores.stride(0),
-        stride_op=all_scores.stride(1),
-        BLOCK_P=DEFAULT_CONFIG.block_p,
-        num_warps=DEFAULT_CONFIG.num_warps,
-        num_stages=DEFAULT_CONFIG.num_stages,
-    )
-
-    topk_scores, topk_local = torch.topk(all_scores, k, dim=1)
-    topk_ids = flat_probed_items.gather(1, topk_local)
-    return topk_ids, topk_scores
+    wrap_triton(_codesigned_probe_score_exact_kernel)[grid](**launch.kwargs)
+    return _cpse_finish(launch, k)
