@@ -23,7 +23,7 @@ def _build(filter_mode, *, n=512, d=64, n_lists=16, n_probe=4, k=8, c=2, a_max=2
         attrs = make_attrs(n, c=c, a_max=a_max)
         return build_silvertorch(
             embs,
-            filter="bloom",
+            filter_mode="bloom",
             m_bits=512,
             k_hash=4,
             item_clause_attrs=attrs,
@@ -33,7 +33,7 @@ def _build(filter_mode, *, n=512, d=64, n_lists=16, n_probe=4, k=8, c=2, a_max=2
         attrs = make_attrs(n, c=c, a_max=a_max)
         return build_silvertorch(
             embs,
-            filter="exact",
+            filter_mode="exact",
             item_clause_attrs=attrs,
             **kw,
         )
@@ -77,6 +77,6 @@ def test_no_graph_breaks_on_forward(filter_mode):
 
     explanation = torch._dynamo.explain(eager.forward)(query, q_attrs)
     assert explanation.graph_break_count == 0, (
-        f"filter={filter_mode}: expected 0 graph breaks, got "
+        f"filter_mode={filter_mode}: expected 0 graph breaks, got "
         f"{explanation.graph_break_count}\n{explanation}"
     )

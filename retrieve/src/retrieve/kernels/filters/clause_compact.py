@@ -164,9 +164,7 @@ def _clause_compact_impl(
     tile parameters can be swept; the public ``@triton_op``-wrapped ``clause_compact`` always
     uses ``DEFAULT_CONFIG``."""
     cfg = config if config is not None else DEFAULT_CONFIG
-    launch = _clause_compact_prep(
-        item_clause_attrs, clause_is_reverse, query_clause_attrs, cfg=cfg
-    )
+    launch = _clause_compact_prep(item_clause_attrs, clause_is_reverse, query_clause_attrs, cfg=cfg)
     _clause_compact_kernel[launch.grid](**launch.kwargs)
     return launch.out_indices, launch.counts
 

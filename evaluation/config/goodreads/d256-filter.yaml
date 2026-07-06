@@ -1,9 +1,9 @@
 _defaults: &defaults
   data_dir: data/goodreads-work-id
   output: results/goodreads/d256-filter
-  # Per-dim oracle cache: goodreads d64/d128/d256 share the same data_dir, so
-  # gt_subdir MUST vary by dim or the (n_users, K_GT)-shape-only stale check
-  # will reuse another dim's oracle silently.
+  # Per-dim oracle cache: goodreads d64/d128/d256 share the same data_dir;
+  # a per-dim gt_subdir keeps caches tidy per dim. Correctness is protected
+  # by the oracle content fingerprint, which invalidates stale caches.
   gt_subdir: gt_d256
   split: test
   device: cuda

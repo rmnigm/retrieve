@@ -39,13 +39,9 @@ def masked_topk(
     topk_scores, topk_local = torch.topk(scores, actual_k, dim=1)
     topk_ids = gather_ids.gather(1, topk_local) if gather_ids is not None else topk_local
     if valid is not None or actual_k < k:
-        topk_ids = torch.where(
-            torch.isfinite(topk_scores), topk_ids, topk_ids.new_full((), -1)
-        )
+        topk_ids = torch.where(torch.isfinite(topk_scores), topk_ids, topk_ids.new_full((), -1))
     if pad_to_k and actual_k < k:
         pad = k - actual_k
         topk_ids = torch.cat([topk_ids, topk_ids.new_full((b, pad), -1)], dim=1)
-        topk_scores = torch.cat(
-            [topk_scores, topk_scores.new_full((b, pad), float("-inf"))], dim=1
-        )
+        topk_scores = torch.cat([topk_scores, topk_scores.new_full((b, pad), float("-inf"))], dim=1)
     return topk_ids, topk_scores

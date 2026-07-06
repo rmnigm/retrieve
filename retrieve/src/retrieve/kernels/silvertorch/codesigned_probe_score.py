@@ -168,23 +168,38 @@ def _cps_prep(
     all_scores = torch.empty((b, p), dtype=torch.float32, device=query.device)
 
     kwargs: dict[str, object] = dict(
-        q_codes_ptr=q_codes, q_scales_ptr=q_scales, qb_ptr=query_bits,
-        flat_items_ptr=flat_probed_items, item_codes_ptr=item_codes,
-        bloom_sigs_ptr=bloom_sigs, out_scores_ptr=all_scores,
+        q_codes_ptr=q_codes,
+        q_scales_ptr=q_scales,
+        qb_ptr=query_bits,
+        flat_items_ptr=flat_probed_items,
+        item_codes_ptr=item_codes,
+        bloom_sigs_ptr=bloom_sigs,
+        out_scores_ptr=all_scores,
         global_scale=float(global_scale),
-        P=p, D=d, W=w,
-        stride_qcb=q_codes.stride(0), stride_qcd=q_codes.stride(1),
+        P=p,
+        D=d,
+        W=w,
+        stride_qcb=q_codes.stride(0),
+        stride_qcd=q_codes.stride(1),
         stride_qs=q_scales.stride(0),
-        stride_qbb=query_bits.stride(0), stride_qbw=query_bits.stride(1),
-        stride_fb=flat_probed_items.stride(0), stride_fp=flat_probed_items.stride(1),
-        stride_cn=item_codes.stride(0), stride_cd=item_codes.stride(1),
-        stride_bn=bloom_sigs.stride(0), stride_bw=bloom_sigs.stride(1),
-        stride_ob=all_scores.stride(0), stride_op=all_scores.stride(1),
+        stride_qbb=query_bits.stride(0),
+        stride_qbw=query_bits.stride(1),
+        stride_fb=flat_probed_items.stride(0),
+        stride_fp=flat_probed_items.stride(1),
+        stride_cn=item_codes.stride(0),
+        stride_cd=item_codes.stride(1),
+        stride_bn=bloom_sigs.stride(0),
+        stride_bw=bloom_sigs.stride(1),
+        stride_ob=all_scores.stride(0),
+        stride_op=all_scores.stride(1),
         HAS_QB=has_qb,
-        BLOCK_P=cfg.block_p, num_warps=cfg.num_warps, num_stages=cfg.num_stages,
+        BLOCK_P=cfg.block_p,
+        num_warps=cfg.num_warps,
+        num_stages=cfg.num_stages,
     )
-    return _CpsLaunch(p=p, b=b, kwargs=kwargs, all_scores=all_scores,
-                      flat_probed_items=flat_probed_items)
+    return _CpsLaunch(
+        p=p, b=b, kwargs=kwargs, all_scores=all_scores, flat_probed_items=flat_probed_items
+    )
 
 
 def _cps_finish(launch: _CpsLaunch, k: int) -> tuple[Tensor, Tensor]:
@@ -220,8 +235,15 @@ def _codesigned_probe_score_impl(
     Eager entry point for tune scripts / parity tests; the compiled path goes through the
     ``@triton_op`` wrappers."""
     cfg = config if config is not None else DEFAULT_CONFIG
-    launch = _cps_prep(query, flat_probed_items, item_codes, global_scale,
-                       query_bits=query_bits, bloom_sigs=bloom_sigs, cfg=cfg)
+    launch = _cps_prep(
+        query,
+        flat_probed_items,
+        item_codes,
+        global_scale,
+        query_bits=query_bits,
+        bloom_sigs=bloom_sigs,
+        cfg=cfg,
+    )
     # grid_x tiles P (≤ 2³¹); P can exceed grid_y's 65535 limit.
     grid = (triton.cdiv(int(launch.p), cfg.block_p), int(launch.b))
     _codesigned_probe_score_kernel[grid](**launch.kwargs)
@@ -239,8 +261,15 @@ def codesigned_probe_score(
     """Plain int8 ANN scoring (no attribute filter); shares ``_cps_prep``/``_cps_finish`` with
     ``_codesigned_probe_score_impl``, keeping the launch inline (``wrap_triton`` must appear
     textually in the decorated source for torch.export). Requires P >= k."""
-    launch = _cps_prep(query, flat_probed_items, item_codes, global_scale,
-                       query_bits=None, bloom_sigs=None, cfg=DEFAULT_CONFIG)
+    launch = _cps_prep(
+        query,
+        flat_probed_items,
+        item_codes,
+        global_scale,
+        query_bits=None,
+        bloom_sigs=None,
+        cfg=DEFAULT_CONFIG,
+    )
     p, b = launch.p, launch.b
 
     def grid(meta):
@@ -263,8 +292,15 @@ def codesigned_probe_score_bloom(
     """Int8 ANN scoring fused with the paper's bloom subset test — sibling of
     ``codesigned_probe_score``, split into a separate op (not one op with an Optional/flag) so
     the layer just routes to the right op."""
-    launch = _cps_prep(query, flat_probed_items, item_codes, global_scale,
-                       query_bits=query_bits, bloom_sigs=bloom_sigs, cfg=DEFAULT_CONFIG)
+    launch = _cps_prep(
+        query,
+        flat_probed_items,
+        item_codes,
+        global_scale,
+        query_bits=query_bits,
+        bloom_sigs=bloom_sigs,
+        cfg=DEFAULT_CONFIG,
+    )
     p, b = launch.p, launch.b
 
     def grid(meta):
