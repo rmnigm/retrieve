@@ -90,10 +90,9 @@ class EvalConfig:
     encode: EncodeConfig = field(default_factory=EncodeConfig)
     algorithms: list[str] = field(default_factory=list)
     algo_params: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
-    # Backends to sweep over for each backend-capable algo. Each backend
-    # adds a row per cell (with the same `recall@k`/`ndcg@k` columns plus
-    # a `backend` field). Algos that aren't backend-parameterised
-    # (currently only `torch_knn`) ignore this and emit one row.
+    # Backends to sweep over for each algo. Each backend adds a row per
+    # cell (with the same `recall@k`/`ndcg@k` columns plus a `backend`
+    # field).
     backends: list[Backend] = field(default_factory=lambda: ["triton"])
     # Optional filter-bench block; consumed by eval_goodreads_retrieval.py and
     # eval_arxiv_retrieval.py.

@@ -28,7 +28,7 @@ from typing import Any
 import torch
 from loguru import logger
 
-from retrieval.algos import BACKEND_CAPABLE_ALGOS, build_algorithm, build_filter
+from retrieval.algos import build_algorithm, build_filter
 from retrieval.bench_tools import (
     cuda_allocated_mib,
     perf_pass_cached,
@@ -329,9 +329,7 @@ def run_one_sweep(
     """Synthesise per-sweep qa, load/build oracle, iterate (backend, algo, params, k).
 
     The oracle is shared across backends (built once per sweep), so backend
-    is the **innermost** loop level above ``(algo, params, k)``. For algos
-    not in ``BACKEND_CAPABLE_ALGOS`` (currently only ``torch_knn``) we
-    emit only one row regardless of how many backends were requested.
+    is the **innermost** loop level above ``(algo, params, k)``.
     """
     logger.info("=== filter_kind={} sweep={} ===", filter_kind, sweep.name)
 
@@ -365,11 +363,9 @@ def run_one_sweep(
 
     rows: list[dict] = []
     for algo in cfg.algorithms:
-        algo_backends = (
-            backends if algo in BACKEND_CAPABLE_ALGOS else [backends[0]]
-        )
-        for backend in algo_backends:
-            for params in expand_param_combos(cfg.algo_params.get(algo, [{}])):
+        for backend in backends:
+            for params in cfg.algo_params.get(algo, [{}]):
+                params = dict(params)  # defensive copy; combos are reused across k/bs loops
                 if not is_valid_combo(algo, params):
                     logger.warning("skipping invalid combo {}: {}", algo, params)
                     continue
@@ -449,7 +445,7 @@ def evaluate_cell(
 
     if torch.cuda.is_available():
         torch.cuda.synchronize()
-    index_mem = 0.0 if algo_obj.is_cpu else cuda_allocated_mib() - mem_before
+    index_mem = cuda_allocated_mib() - mem_before
 
     recall, ndcg = _run_quality(
         algo_obj,
@@ -477,7 +473,6 @@ def evaluate_cell(
             queries_f,
             batch_size=bs,
             device=device,
-            is_cpu=algo_obj.is_cpu,
             seed=cfg.seed,
             qa_narrow=qa_n_sweep,
             skip_mask=skip_mask,
@@ -491,7 +486,6 @@ def evaluate_cell(
                 k=k,
                 bs=bs,
                 suite=suite,
-                is_cpu=algo_obj.is_cpu,
                 n_kept=n_kept,
                 seed=cfg.seed,
                 med=med,
@@ -629,7 +623,7 @@ def _autotune_prewarm(
     leaking into the timing window (median collapsing to a single ~1.5 s
     sample on the first cell). Belt-and-suspenders defense.
     """
-    if algo_obj.is_cpu or not torch.cuda.is_available():
+    if not torch.cuda.is_available():
         return
     with torch.inference_mode():
         for bs in batch_sizes:
@@ -652,7 +646,6 @@ def _make_perf_row(
     k: int,
     bs: int,
     suite: str,
-    is_cpu: bool,
     n_kept: int,
     seed: int,
     med: float,
@@ -674,7 +667,7 @@ def _make_perf_row(
         "sweep": sweep_name,
         "impl": algo,
         "backend": backend,
-        "device": "cpu" if is_cpu else "cuda",
+        "device": "cuda",
         "seed": seed,
         "batch_size": bs,
         "k": k,
@@ -736,15 +729,7 @@ def _release_algo(algo_obj: Any) -> None:
         torch.cuda.empty_cache()
 
 
-# ----- param-combo utilities (used by run_one_sweep and external tests) -------
-
-
-def expand_param_combos(combos: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """``algo_params[algo]`` is a list of dicts; each dict is one explicit
-    combo, taken as-is. Algos without a params entry iterate over ``[{}]``
-    so the caller's loop stays uniform.
-    """
-    return [dict(combo) for combo in combos]
+# ----- param-combo utilities ---------------------------------------------------
 
 
 def is_valid_combo(algo: str, params: dict[str, Any]) -> bool:
@@ -759,7 +744,6 @@ def is_valid_combo(algo: str, params: dict[str, Any]) -> bool:
 
 __all__ = [
     "evaluate_cell",
-    "expand_param_combos",
     "is_valid_combo",
     "run_filter_kind",
     "run_one_sweep",

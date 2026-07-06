@@ -329,7 +329,7 @@ def _build_model_card(ckpt_path: Path, repo_id: str, ckpt_id: str, files: list[P
     parts.append(
         "\n## Loading\n"
         "```python\n"
-        "from datasets.hf_io import download_checkpoint\n"
+        "from eval_datasets.hf_io import download_checkpoint\n"
         f'download_checkpoint({repo_id.split("/")[-1].removeprefix("eval-")!r}, {ckpt_id!r})\n'
         "```\n"
     )

@@ -28,8 +28,6 @@ from .filter import make_mask
 
 
 class LinrV4Algo(nn.Module):
-    is_cpu = False
-
     def __init__(
         self,
         item_embs: Tensor,

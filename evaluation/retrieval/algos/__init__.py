@@ -3,7 +3,6 @@
 One ``nn.Module`` subclass per algo, with::
 
     algo.algo_modules: list[nn.Module]          # for memory cleanup
-    algo.is_cpu: bool                           # CPU baseline marker
     algo(q, qa_narrow=None) -> (ids, scores)    # via Module.__call__
 
 Each algo's ``__init__`` calls ``self.compile(dynamic=True,
@@ -40,23 +39,14 @@ from .linr_v2 import LinrV2Algo
 from .linr_v3 import LinrV3Algo
 from .linr_v4 import LinrV4Algo
 from .silvertorch import SilvertorchAlgo
-from .torch_knn import TorchKnnAlgo
 
 ALGORITHMS = (
-    "torch_knn",
     "triton_knn",
     "linr_v1_filter_mask",
     "linr_v3",
     "linr_v4",
     "linr_v2",
     "silvertorch",
-)
-
-
-# Algos that accept a `backend` parameter. Algos outside this set (currently
-# only `torch_knn`) emit a single row regardless of `cfg.backends`.
-BACKEND_CAPABLE_ALGOS = frozenset(
-    {"triton_knn", "linr_v1_filter_mask", "linr_v2", "linr_v3", "linr_v4", "silvertorch"}
 )
 
 
@@ -76,13 +66,9 @@ def build_algorithm(
 
     Raises ``ValueError`` when the algo is incompatible with
     ``filter_kind``; the driver catches and skips that cell. ``backend``
-    is forwarded to algos in ``BACKEND_CAPABLE_ALGOS`` (which thread it
-    into the underlying retrieval module); other algos ignore it.
+    is threaded into the underlying retrieval module by every algo.
     """
     p = params or {}
-
-    if name == "torch_knn":
-        return TorchKnnAlgo(item_embs, k, filter_mod=filter_mod)
 
     if name in ("triton_knn", "linr_v1_filter_mask"):
         return LinrV1Algo(item_embs, k, filter_mod=filter_mod, backend=backend)
@@ -126,7 +112,6 @@ def build_algorithm(
 
 __all__ = [
     "ALGORITHMS",
-    "BACKEND_CAPABLE_ALGOS",
     "build_algorithm",
     "build_filter",
     "collect_modules",

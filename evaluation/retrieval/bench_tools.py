@@ -15,7 +15,6 @@ working unmodified.
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
 
 import torch
@@ -165,55 +164,6 @@ def measure_forward_cuda(
     peak_mib = peak / (1024 * 1024)
     transient_mib = max(0, peak - baseline) / (1024 * 1024)
     return float(median), float(p20), float(p80), peak_mib, transient_mib
-
-
-def measure_forward_cpu(
-    fn,
-    *,
-    rep_ms: float = DEFAULT_REP_MS,
-    warmup_iters: int = 3,
-    min_samples: int = MIN_SAMPLES,
-    max_rep_ms: float = MAX_REP_MS,
-) -> tuple[float, float, float, float, float]:
-    """Time a CPU forward via wall-clock samples within a ``rep_ms`` budget.
-
-    The deadline is auto-extended (capped at ``max_rep_ms``) when fewer than
-    ``min_samples`` iterations fit, mirroring ``measure_forward_cuda`` so a
-    slow CPU baseline can't collapse to a single-sample measurement.
-
-    Returns ``(median_ms, p20_ms, p80_ms, 0.0, 0.0)`` — peak/transient memory
-    are GPU-only and reported as 0 for CPU rows.
-    """
-    for _ in range(warmup_iters):
-        fn()
-
-    times: list[float] = []
-    budget = float(rep_ms)
-    while True:
-        deadline = time.perf_counter() + budget / 1000.0
-        while time.perf_counter() < deadline:
-            t0 = time.perf_counter()
-            fn()
-            times.append((time.perf_counter() - t0) * 1000.0)
-        if not times:
-            # rep_ms shorter than a single-call latency; force one sample
-            # and let the convergence check below decide on extending.
-            t0 = time.perf_counter()
-            fn()
-            times.append((time.perf_counter() - t0) * 1000.0)
-        if len(times) >= min_samples or budget >= max_rep_ms:
-            break
-        # Estimate next budget from current median so we converge in one extension.
-        cur_med = sorted(times)[len(times) // 2]
-        budget = min(max_rep_ms, max(budget * 2, cur_med * min_samples * 1.2))
-        times.clear()  # collected times under the old budget aren't representative
-
-    times.sort()
-    n = len(times)
-    median = times[n // 2]
-    p20 = times[max(0, (n * 20) // 100)]
-    p80 = times[min(n - 1, (n * 80) // 100)]
-    return float(median), float(p20), float(p80), 0.0, 0.0
 
 
 def cuda_allocated_mib() -> float:
@@ -387,7 +337,6 @@ def perf_pass_cached(
     *,
     batch_size: int,
     device: torch.device,
-    is_cpu: bool,
     seed: int,
     n_pool: int = 4096,
     qa_narrow: torch.Tensor | None = None,  # [N, C_narrow] on cpu, optional
@@ -443,8 +392,6 @@ def perf_pass_cached(
             # the in-kernel scratch. ``do_bench`` discards the return value.
             return forward(q, **kw)
 
-    if is_cpu:
-        return measure_forward_cpu(perf_fn)
     return measure_forward_cuda(perf_fn)
 
 

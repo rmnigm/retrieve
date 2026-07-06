@@ -25,8 +25,6 @@ from .filter import make_mask
 
 
 class LinrV1Algo(nn.Module):
-    is_cpu = False
-
     def __init__(
         self,
         item_embs: Tensor,
