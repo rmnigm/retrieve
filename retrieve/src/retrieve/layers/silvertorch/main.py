@@ -3,9 +3,9 @@ from __future__ import annotations
 from typing import Literal
 
 import torch
-from torch import Tensor, nn
+from torch import Tensor
 
-from retrieve.interfaces import Backend
+from retrieve.interfaces import Backend, RetrievalModule
 from retrieve.kernels.silvertorch.codesigned_probe_score import (
     codesigned_probe_score,
     codesigned_probe_score_bloom,
@@ -13,18 +13,21 @@ from retrieve.kernels.silvertorch.codesigned_probe_score import (
 from retrieve.kernels.silvertorch.codesigned_probe_score_exact import (
     codesigned_probe_score_exact,
 )
-from retrieve.layers.filters.bloom import (
-    _build_query_signatures,
-    _build_signatures,
-    _generate_seeds,
+from retrieve.layers.filters.bloom_hash import (
+    bloom_subset_match,
+    build_query_signatures,
+    build_signatures,
+    generate_seeds,
 )
+from retrieve.layers.filters.exact_attribute import clause_subset_match
 from retrieve.layers.utils.kmeans import KMeansTorch
 from retrieve.layers.utils.quantize import quantize_int8, quantize_int8_global
+from retrieve.layers.utils.topk import masked_topk
 
 FilterMode = Literal["none", "bloom", "exact"]
 
 
-class SilverTorch(nn.Module):
+class SilverTorch(RetrievalModule):
     """Co-designed IVF + INT8 ANN + optional attribute filter (paper Algorithm 1, §4.2): an ``[N,
     D]`` int8 index with one global scale, per-row int8-quantized queries, and an int8×int8 →
     int32 dot dequantized once. ``filter`` fuses a predicate into the probe+score kernel —
@@ -104,6 +107,22 @@ class SilverTorch(nn.Module):
         item_clause_attrs: Tensor | None = None,
         clause_is_reverse: Tensor | None = None,
     ) -> None:
+        self._validate_register_args(item_embs, item_clause_attrs, clause_is_reverse)
+        padded, cluster_sizes = self._build_ivf(item_embs)
+        self._quantize_items(item_embs)
+        # Buffer registration order is frozen (state-dict key order): centroids, item_codes,
+        # global_scale, padded_cluster_items, cluster_sizes, then the filter buffers — hence the
+        # two IVF buffers computed by _build_ivf are registered here, after the quant buffers.
+        self.register_buffer("padded_cluster_items", padded)
+        self.register_buffer("cluster_sizes", cluster_sizes)
+        self._register_filter_buffers(item_embs.shape[0], item_clause_attrs, clause_is_reverse)
+
+    def _validate_register_args(
+        self,
+        item_embs: Tensor,
+        item_clause_attrs: Tensor | None,
+        clause_is_reverse: Tensor | None,
+    ) -> None:
         if self.filter == "none" and item_clause_attrs is not None:
             raise ValueError("item_clause_attrs requires filter='bloom' or filter='exact'")
         if self.filter == "none" and clause_is_reverse is not None:
@@ -113,12 +132,16 @@ class SilverTorch(nn.Module):
         if self.filter == "bloom" and clause_is_reverse is not None:
             raise ValueError("clause_is_reverse is only used with filter='exact'")
 
-        n, _ = item_embs.shape
+        n = item_embs.shape[0]
         if self.n_lists > n:
             raise ValueError(f"n_lists ({self.n_lists}) cannot exceed N ({n}).")
         if self.n_probe > self.n_lists:
             raise ValueError(f"n_probe ({self.n_probe}) cannot exceed n_lists ({self.n_lists}).")
 
+    def _build_ivf(self, item_embs: Tensor) -> tuple[Tensor, Tensor]:
+        """K-means clustering; registers ``centroids`` and returns ``(padded_cluster_items,
+        cluster_sizes)`` for registration after the quantization buffers (frozen order)."""
+        n = item_embs.shape[0]
         centroids, assignments = KMeansTorch(
             n_lists=self.n_lists, n_iter=self.n_iter, seed=self.seed
         ).fit(item_embs)
@@ -147,9 +170,11 @@ class SilverTorch(nn.Module):
         within_slot = torch.arange(n, device=item_embs.device) - offsets[sorted_clusters]
         padded[sorted_clusters, within_slot] = sort_idx
 
-        codes, global_scale = quantize_int8_global(item_embs)
-
         self.register_buffer("centroids", centroids)
+        return padded, cluster_sizes
+
+    def _quantize_items(self, item_embs: Tensor) -> None:
+        codes, global_scale = quantize_int8_global(item_embs)
         self.register_buffer("item_codes", codes)
         # 0-d fp32 buffer: moves with .to(device) and parameterizes the kernel epilogue without a
         # per-index recompile.
@@ -160,15 +185,20 @@ class SilverTorch(nn.Module):
         # Plain Python float: passing self.global_scale.item() per call forces a device→host sync
         # that breaks cudagraph capture. Cached once at index build.
         self._global_scale_f = float(global_scale)
-        self.register_buffer("padded_cluster_items", padded)
-        self.register_buffer("cluster_sizes", cluster_sizes)
 
+    def _register_filter_buffers(
+        self,
+        n: int,
+        item_clause_attrs: Tensor | None,
+        clause_is_reverse: Tensor | None,
+    ) -> None:
+        device = self.item_codes.device  # same device as item_embs
         if self.filter == "bloom":
-            seeds = _generate_seeds(self.k_hash, device=item_embs.device)
+            seeds = generate_seeds(self.k_hash, device=device)
             if item_clause_attrs is None:
-                sigs = torch.zeros(n, self.word_count, dtype=torch.int64, device=item_embs.device)
+                sigs = torch.zeros(n, self.word_count, dtype=torch.int64, device=device)
             else:
-                sigs = _build_signatures(
+                sigs = build_signatures(
                     item_clause_attrs.long(),
                     seeds,
                     self.m_bits,
@@ -178,7 +208,7 @@ class SilverTorch(nn.Module):
             self.register_buffer("bloom_sigs", sigs)
             self.register_buffer("hash_seeds", seeds)
         elif self.filter == "exact":
-            assert item_clause_attrs is not None  # narrowed by the validation above
+            assert item_clause_attrs is not None  # narrowed by _validate_register_args
             c = item_clause_attrs.shape[1]
             if clause_is_reverse is None:
                 clause_is_reverse = torch.zeros(
@@ -197,6 +227,11 @@ class SilverTorch(nn.Module):
         for ``filter="bloom"|"exact"`` and when ``None`` the filter branch is skipped (plain IVF
         + INT8 ANN)."""
         if candidate_ids is not None:
+            if query_clause_attrs is not None:
+                raise ValueError(
+                    "candidate_ids path scores the given candidates without the fused "
+                    "attribute filter; pass query_clause_attrs OR candidate_ids, not both"
+                )
             return self._forward_candidates(query, candidate_ids)
         if self.filter == "none" and query_clause_attrs is not None:
             raise ValueError("query_clause_attrs requires filter='bloom' or filter='exact'")
@@ -233,7 +268,7 @@ class SilverTorch(nn.Module):
             )
 
         if self.has_bloom and query_clause_attrs is not None:
-            qb = _build_query_signatures(
+            qb = build_query_signatures(
                 query_clause_attrs.long().unsqueeze(-1),
                 self.hash_seeds,
                 self.m_bits,
@@ -266,54 +301,32 @@ class SilverTorch(nn.Module):
         optional bloom/exact filter, int8×int8 dot + rescale, mask + topk + ``-1``/``-inf`` pad.
         The dot runs in fp32 (not ``torch._int_mm``) — at D=128 the integer products fit the fp32
         mantissa exactly, so it's bit-identical to an int32 accumulator."""
-        b = query.shape[0]
         flat_items = self._phase1_probe(query)
-        p = flat_items.shape[1]
 
         valid = flat_items >= 0
         safe = flat_items.clamp_min(0)
 
         keep = valid
         if self.has_bloom and query_clause_attrs is not None:
-            qb = _build_query_signatures(
+            qb = build_query_signatures(
                 query_clause_attrs.long().unsqueeze(-1),
                 self.hash_seeds,
                 self.m_bits,
                 self.k_hash,
                 self.word_count,
             )  # [B, W]
-            probed_sigs = self.bloom_sigs[safe]  # [B, P, W]
-            match = (qb.unsqueeze(1) & probed_sigs) == qb.unsqueeze(1)
-            keep = keep & match.all(dim=-1)
+            keep = keep & bloom_subset_match(qb, self.bloom_sigs[safe])
         elif self.has_exact and query_clause_attrs is not None:
-            qa = query_clause_attrs.long()
             gathered = self.item_clause_attrs[safe]  # [B, P, C, A_max]
-            q = qa.unsqueeze(1).unsqueeze(-1)  # [B, 1, C, 1]
-            clause_match = (gathered == q).any(dim=-1)  # [B, P, C]
-            rev = self.clause_is_reverse.unsqueeze(0).unsqueeze(0)  # [1, 1, C]
-            clause_match = torch.where(rev, ~clause_match, clause_match)
-            inactive = (qa == -1).unsqueeze(1)  # [B, 1, C]
-            keep = keep & (clause_match | inactive).all(dim=-1)
+            keep = keep & clause_subset_match(
+                gathered, query_clause_attrs.long(), self.clause_is_reverse
+            )
 
         q_codes, q_scales = quantize_int8(query)  # [B, D] int8, [B] fp32
         codes = self.item_codes[safe].to(torch.float32)  # [B, P, D]
         scores = torch.einsum("bd,bpd->bp", q_codes.to(torch.float32), codes)
         scores = scores * q_scales.unsqueeze(1) * self.global_scale
-        scores = scores.masked_fill(~keep, float("-inf"))
-
-        actual_k = min(self.k, p)
-        topk_scores, topk_local = torch.topk(scores, actual_k, dim=1)
-        topk_ids = flat_items.gather(1, topk_local)
-
-        if actual_k == self.k:
-            return topk_ids, topk_scores
-
-        device = query.device
-        out_ids = torch.full((b, self.k), -1, dtype=torch.long, device=device)
-        out_scores = torch.full((b, self.k), float("-inf"), dtype=torch.float32, device=device)
-        out_ids[:, :actual_k] = topk_ids
-        out_scores[:, :actual_k] = topk_scores
-        return out_ids, out_scores
+        return masked_topk(scores, self.k, valid=keep, gather_ids=flat_items)
 
     def _forward_candidates(
         self,
@@ -327,10 +340,10 @@ class SilverTorch(nn.Module):
         ).squeeze(1)
         scores = scores * q_scales.unsqueeze(1) * self.global_scale
 
-        actual_k = min(self.k, scores.shape[1])
-        topk_scores, topk_local = torch.topk(scores, actual_k, dim=1)
-        topk_ids = candidate_ids.gather(1, topk_local)
-        return topk_ids, topk_scores
+        # Scores here are always finite (int8 dot × finite scales), so masked_topk's
+        # non-finite → -1 sentinel never fires; pad_to_k=False keeps the current
+        # min(k, P)-column, no-pad, no-sentinel semantics when P < k.
+        return masked_topk(scores, self.k, gather_ids=candidate_ids, pad_to_k=False)
 
 
 def build_silvertorch(

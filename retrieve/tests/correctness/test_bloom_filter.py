@@ -174,6 +174,18 @@ class TestEvaluateSubset:
         got = bf.evaluate_subset(query, ids)
         assert torch.equal(got, expected)
 
+    def test_subset_parity_with_inactive_queries(self, attrs):
+        """-1-inactive query slots honored identically on subset and dense paths."""
+        bf = BloomFilter(m_bits=512, k_hash=5).to("cuda")
+        bf.register_index(attrs)
+        q = make_query_attrs(b=32, c=2, n_vocab=100, inactive_rate=0.5, seed=55)
+        g = torch.Generator(device="cuda").manual_seed(56)
+        ids = torch.randint(
+            0, attrs.shape[0], (32, 64), generator=g, dtype=torch.long, device="cuda"
+        )
+        expected = bf.evaluate_mask(q).gather(1, ids)
+        assert torch.equal(bf.evaluate_subset(q, ids), expected)
+
 
 class TestEdgeCases:
     def test_evaluate_subset_p_zero(self, attrs, query):
@@ -237,3 +249,12 @@ class TestRegisterIndexReverseGuard:
         bf = BloomFilter(m_bits=256, k_hash=3).to("cuda")
         bf.register_index(attrs, clause_is_reverse=None)
         assert bf.bloom_sigs.shape == (64, 256 // 64)
+
+    def test_positional_clause_is_reverse_raises(self):
+        """clause_is_reverse is keyword-only on the unified FilterModule signature —
+        a positional pass used to land silently in the dropped item_embs slot."""
+        attrs = make_attrs(n=64, c=2, a_max=2, n_vocab=20, pad_rate=0.0, seed=73)
+        bf = BloomFilter(m_bits=256, k_hash=3).to("cuda")
+        rev = torch.zeros(2, dtype=torch.bool, device="cuda")
+        with pytest.raises(TypeError):
+            bf.register_index(attrs, rev)

@@ -28,7 +28,10 @@ def combine_indices(
 ) -> tuple[Tensor, Tensor]:
     """Sparse cascade across filters: the first produces ``(ids, counts)`` via its compact path,
     then each subsequent filter is applied to those ids via ``evaluate_subset`` and survivors
-    re-compacted (no ``[B, N]`` materialized by the cascade). Order filters most-selective first."""
+    re-compacted (no ``[B, N]`` materialized by the cascade). Order filters most-selective first.
+
+    Each cascade stage does a host sync (``new_counts.max().item()``) to size the next id
+    tensor — don't put this in a cudagraph-captured path; it's meant for offline composition."""
     if len(filters) == 0:
         raise ValueError("combine_indices requires at least one filter")
     if len(filters) != len(query_clause_attrs):

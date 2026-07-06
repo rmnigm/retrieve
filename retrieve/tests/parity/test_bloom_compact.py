@@ -18,13 +18,13 @@ from retrieve.kernels.filters.bloom_compact import (
 )
 from retrieve.kernels.silvertorch.bloom_match import bloom_match
 from retrieve.layers.filters import BloomFilter
-from retrieve.layers.filters.bloom import _build_signatures
+from retrieve.layers.filters.bloom_hash import build_signatures
 from retrieve.layers.utils.compact import compact_mask
 from tests.conftest import make_attrs, make_query_attrs
 
 
 def _build_qb(bf: BloomFilter, q: torch.Tensor) -> torch.Tensor:
-    return _build_signatures(
+    return build_signatures(
         q.long().unsqueeze(-1),
         bf.hash_seeds,
         bf.m_bits,

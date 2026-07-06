@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
 
 from retrieve.layers.filters import BloomFilter, ExactAttributeFilter, combine_masks
@@ -132,6 +133,33 @@ def test_clause_index_single_item_index():
 
     ids, counts = ci.evaluate_indices(q)
     assert counts.tolist() == [1, 0, 1]
+
+
+def test_evaluate_subset_matches_mask_gather():
+    """``evaluate_subset(q, ids)`` ≡ ``evaluate_mask(q).gather(1, ids)`` — direct
+    coverage incl. reverse clauses and -1-inactive query slots."""
+    n = 1024
+    attrs = make_attrs(n, c=3, a_max=3, n_vocab=15, pad_rate=0.2, seed=81)
+    is_reverse = torch.tensor([True, False, True], device="cuda")
+    ci = ExactAttributeFilter().to("cuda")
+    ci.register_index(attrs, clause_is_reverse=is_reverse)
+
+    q = make_query_attrs(b=8, c=3, n_vocab=15, inactive_rate=0.4, seed=82)
+    g = torch.Generator(device="cuda").manual_seed(83)
+    ids = torch.randint(0, n, (8, 128), generator=g, dtype=torch.long, device="cuda")
+
+    expected = ci.evaluate_mask(q).gather(1, ids)
+    assert torch.equal(ci.evaluate_subset(q, ids), expected)
+
+
+def test_register_index_clause_is_reverse_keyword_only():
+    """clause_is_reverse is keyword-only on the unified FilterModule signature —
+    positional passes must TypeError instead of being accepted silently."""
+    attrs = make_attrs(64, c=2, a_max=2, n_vocab=10, pad_rate=0.0, seed=84)
+    rev = torch.zeros(2, dtype=torch.bool, device="cuda")
+    ci = ExactAttributeFilter().to("cuda")
+    with pytest.raises(TypeError):
+        ci.register_index(attrs, rev)
 
 
 def test_clause_index_evaluate_subset_p_zero():

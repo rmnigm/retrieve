@@ -12,7 +12,7 @@ import torch
 
 from retrieve.kernels.silvertorch.bloom_match import bloom_match
 from retrieve.layers.filters import BloomFilter
-from retrieve.layers.filters.bloom import _build_signatures
+from retrieve.layers.filters.bloom_hash import build_signatures
 from tests.conftest import make_attrs, make_query_attrs
 
 
@@ -27,7 +27,7 @@ def test_bloom_match_matches_pure_torch(n, m_bits, k_hash):
     q = make_query_attrs(b=64, c=2, n_vocab=200, inactive_rate=0.0, seed=m_bits)
 
     # Pure-torch reference: subset test on CPU.
-    qb_sigs_cpu = _build_signatures(
+    qb_sigs_cpu = build_signatures(
         q.cpu().long().unsqueeze(-1),
         bf.hash_seeds.cpu(),
         bf.m_bits,
@@ -41,7 +41,7 @@ def test_bloom_match_matches_pure_torch(n, m_bits, k_hash):
         .to("cuda")
     )
 
-    qb_sigs = _build_signatures(
+    qb_sigs = build_signatures(
         q.long().unsqueeze(-1),
         bf.hash_seeds,
         bf.m_bits,

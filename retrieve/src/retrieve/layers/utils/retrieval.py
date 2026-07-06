@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import torch
-from torch import Tensor, nn
+from torch import Tensor
+
+from retrieve.interfaces import RetrievalModule
 
 
 def post_filter_topk(
@@ -18,8 +20,18 @@ def post_filter_topk(
     return topk_ids, counts
 
 
-class FullScanKNN(nn.Module):
-    """Exhaustive matmul + top-K. Optional post-filter mask or candidate_ids path."""
+class FullScanKNN(RetrievalModule):
+    """Exhaustive matmul + top-K.
+
+    `mask` implements POST-filter semantics (LiNR baseline): top-K is selected
+    over the full corpus first, then masked hits are tombstoned to id=-1 — they
+    are NOT replaced by the next-best passing items, and their scores remain in
+    the returned score tensor. Recall against a pre-filter oracle is therefore
+    expected to be < 1 by design. For pre-filter semantics use PostfilterKNN
+    (mask before top-K) or PrefilterKNN (candidates path).
+
+    ``post_filter_topk`` also returns the per-row survivor count; ``forward``
+    discards it — callers needing counts call ``post_filter_topk`` directly."""
 
     item_embs: Tensor
 
