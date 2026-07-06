@@ -69,7 +69,7 @@ Constructor → `register_index` → `forward`. Unless noted, `item_embs` is `[N
 ## SilverTorch
 
 ```python
-SilverTorch(k, n_lists, n_probe, filter="none",
+SilverTorch(k, n_lists, n_probe, filter_mode="none",
             m_bits=None, k_hash=None, n_iter=10, seed=0, backend="triton")
 ```
 
@@ -80,14 +80,14 @@ Parameters:
 
 - `n_lists` — number of IVF clusters (k-means runs `n_iter` iterations at register time).
 - `n_probe` — clusters scanned per query (≤ `n_lists`). Higher = more recall, more work.
-- `filter` — `"none"`, `"bloom"`, or `"exact"`. `"bloom"` requires `m_bits` (power of 2, multiple
-  of 64) and `k_hash`. The filter is fused into the probe+score kernel — see the
+- `filter_mode` — `"none"`, `"bloom"`, or `"exact"`. `"bloom"` requires `m_bits` (power of 2,
+  multiple of 64) and `k_hash`. The filter is fused into the probe+score kernel — see the
   [filtering guide](filtering-and-quantization.md).
 
 Constraint: `n_probe * max_cluster_size >= k` (raised at `register_index` otherwise).
 
-`build_silvertorch(item_embs, k, *, n_lists, n_probe, filter="none", ...)` is a convenience that
-constructs the module and calls `register_index` in one step.
+`build_silvertorch(item_embs, k, *, n_lists, n_probe, filter_mode="none", ...)` is a convenience
+that constructs the module and calls `register_index` in one step.
 
 ## KMeansTorch
 
