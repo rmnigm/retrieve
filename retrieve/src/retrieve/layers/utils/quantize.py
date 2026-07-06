@@ -7,8 +7,8 @@ from torch import Tensor
 def popcount_int64(x: Tensor) -> Tensor:
     """Hamming weight (popcount) over an int64 tensor of any shape.
 
-    Bit-twiddle algorithm — matches the Triton-side ``_popcount_int64`` so torch reference and
-    Triton kernel agree bit-exact."""
+    Bit-twiddle algorithm — matches the Triton-side ``retrieve.kernels.common.popcount_int64``
+    so torch reference and Triton kernel agree bit-exact."""
     if x.dtype != torch.int64:
         raise TypeError(f"popcount_int64 expects int64, got {x.dtype}")
     M1 = 0x5555555555555555
@@ -65,6 +65,24 @@ def _pack_signs_to_int64(values: Tensor) -> Tensor:
     return (bits << shifts).sum(dim=-1)
 
 
+def _oporp_project(x: Tensor, signs: Tensor, perm: Tensor, k_bits: int) -> Tensor:
+    """Shared Sign-OPORP chain (index- and query-side): sign-flip → permute → bin into ``k_bits``
+    groups → L2-normalize → pack to 64-bit words, with the shared ``k_bits`` validation
+    (``k_bits=0`` resolves to ``D``)."""
+    b_or_n, d = x.shape
+    if k_bits == 0:
+        k_bits = d
+    if d % k_bits != 0:
+        raise ValueError(f"k_bits must divide D; got k_bits={k_bits}, D={d}")
+    if k_bits % 64 != 0:
+        raise ValueError(f"k_bits must be a multiple of 64, got {k_bits}")
+    bin_w = d // k_bits
+    proj = (x * signs.to(x.dtype)).index_select(1, perm)
+    binned = proj.view(b_or_n, k_bits, bin_w).sum(dim=-1)
+    sketch = binned / binned.norm(dim=-1, keepdim=True).clamp_min(1e-8)
+    return _pack_signs_to_int64(sketch)
+
+
 def quantize_oporp_1bit(
     embs: Tensor,
     seed: int = 0,
@@ -77,21 +95,11 @@ def quantize_oporp_1bit(
     2*popcount(q ^ item)."""
     if embs.dim() != 2:
         raise ValueError(f"expected 2-D [N, D] embeddings, got shape {tuple(embs.shape)}")
-    n, d = embs.shape
+    d = embs.shape[1]
     if d % 64 != 0:
         raise ValueError(f"D must be a multiple of 64 for 1-bit packing, got {d}")
-    if k_bits == 0:
-        k_bits = d
-    if d % k_bits != 0:
-        raise ValueError(f"k_bits must divide D; got k_bits={k_bits}, D={d}")
-    if k_bits % 64 != 0:
-        raise ValueError(f"k_bits must be a multiple of 64, got {k_bits}")
-    b = d // k_bits
     signs, perm = _build_oporp(d, seed, embs.device)
-    proj = (embs * signs.to(embs.dtype)).index_select(1, perm)
-    binned = proj.view(n, k_bits, b).sum(dim=-1)
-    sketch = binned / binned.norm(dim=-1, keepdim=True).clamp_min(1e-8)
-    return _pack_signs_to_int64(sketch), signs, perm
+    return _oporp_project(embs, signs, perm, k_bits), signs, perm
 
 
 def project_oporp_1bit_query(
@@ -107,18 +115,7 @@ def project_oporp_1bit_query(
     Returns [B, k_bits//64] int64 packed sign bits."""
     if query.dim() != 2:
         raise ValueError(f"expected 2-D [B, D] query, got shape {tuple(query.shape)}")
-    b_size, d = query.shape
-    if k_bits == 0:
-        k_bits = d
-    if d % k_bits != 0:
-        raise ValueError(f"k_bits must divide D; got k_bits={k_bits}, D={d}")
-    if k_bits % 64 != 0:
-        raise ValueError(f"k_bits must be a multiple of 64, got {k_bits}")
-    bin_w = d // k_bits
-    proj = (query * signs.to(query.dtype)).index_select(1, perm)
-    binned = proj.view(b_size, k_bits, bin_w).sum(dim=-1)
-    sketch = binned / binned.norm(dim=-1, keepdim=True).clamp_min(1e-8)
-    return _pack_signs_to_int64(sketch)
+    return _oporp_project(query, signs, perm, k_bits)
 
 
 def _build_simhash_R(d: int, k_bits: int, seed: int, device: torch.device) -> Tensor:

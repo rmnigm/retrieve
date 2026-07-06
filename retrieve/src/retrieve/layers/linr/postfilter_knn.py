@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import torch
-from torch import Tensor, nn
+from torch import Tensor
 
-from retrieve.interfaces import Backend
+from retrieve.interfaces import Backend, RetrievalModule
+from retrieve.layers.utils.topk import masked_topk
 
 
-class PostfilterKNN(nn.Module):
+class PostfilterKNN(RetrievalModule):
     """Pure-torch dense scoring (``query @ item_embs.T``) + optional boolean mask + top-K; inputs
     are cast to fp16 (storage fp16, fp32 accumulate). The ``backend=`` flag is accepted for API
     symmetry but has no effect — cuBLAS + CUB already match a fused kernel here."""
@@ -29,13 +30,7 @@ class PostfilterKNN(nn.Module):
         mask: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
         scores = query.to(torch.float16) @ self.item_embs_t
+        # Mask-optional dense form; the torch-export mode-split will dissolve this branch.
         if mask is not None:
-            scores = scores.masked_fill(~mask, float("-inf"))
-        topk_scores, topk_ids = torch.topk(scores, self.k, dim=1)
-        if mask is not None:
-            topk_ids = torch.where(
-                torch.isfinite(topk_scores),
-                topk_ids,
-                topk_ids.new_full((), -1),
-            )
-        return topk_ids, topk_scores
+            return masked_topk(scores, self.k, valid=mask)
+        return masked_topk(scores, self.k)

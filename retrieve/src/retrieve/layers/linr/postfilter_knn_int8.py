@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import torch
-from torch import Tensor, nn
+from torch import Tensor
 
-from retrieve.interfaces import Backend
-
-_INT32_NEG_INF = torch.iinfo(torch.int32).min
+from retrieve.interfaces import Backend, RetrievalModule
+from retrieve.layers.utils.topk import masked_topk
 
 
 def _quantize_int8_global(t: Tensor) -> Tensor:
@@ -16,13 +15,16 @@ def _quantize_int8_global(t: Tensor) -> Tensor:
     return (t / abs_max * 127.0).round().clamp(-128, 127).to(torch.int8)
 
 
-class PostfilterKNNInt8(nn.Module):
+class PostfilterKNNInt8(RetrievalModule):
     """Single-stage int8 dense scoring + optional mask + top-K, int32 end-to-end (SilverTorch §3.2):
     ``torch._int_mm`` (int8×int8 → int32) feeds ``torch.topk`` directly with no fp32
-    intermediate, and the global scales make ``dot_int`` a monotonic transform of cosine so topk
-    order is exact. Storage is one ``[D, N]`` int8 buffer, half of ``PostfilterKNN``;
-    ``backend=`` has no effect."""
+    intermediate, and the global scales make ``dot_int`` a monotonic transform of cosine, so
+    topk ordering is exact up to ties introduced by the ``>>5`` range compression (boundary
+    ties are quality-equivalent). Storage is one ``[D, N]`` int8 buffer, half of
+    ``PostfilterKNN``; ``backend=`` has no effect."""
 
+    # cuBLAS LtGemm's int8 kernel requires M >= 17 (see docs/system/kernels.md →
+    # PostfilterKNNInt8); smaller batches are zero-padded to this M and sliced back.
     _PAD_M = 17
 
     item_codes_t: Tensor  # [D, N_padded] int8
@@ -65,14 +67,7 @@ class PostfilterKNNInt8(nn.Module):
         # int32 → fp16 for topk: >>5 brings worst-case |dot| ≈ D·127² (~2²¹) under fp16's ~2¹⁶ range
         # while preserving order; fp16 also halves CUB radix-select passes (2 vs 4).
         scores = (dots >> 5).to(torch.float16)
+        # Mask-optional dense form; the torch-export mode-split will dissolve this branch.
         if mask is not None:
-            scores = scores.masked_fill(~mask, float("-inf"))
-
-        topk_scores, topk_ids = torch.topk(scores, self.k, dim=1)
-        if mask is not None:
-            topk_ids = torch.where(
-                torch.isfinite(topk_scores),
-                topk_ids,
-                topk_ids.new_full((), -1),
-            )
-        return topk_ids, topk_scores
+            return masked_topk(scores, self.k, valid=mask)
+        return masked_topk(scores, self.k)

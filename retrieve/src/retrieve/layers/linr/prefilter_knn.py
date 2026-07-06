@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import torch
-from torch import Tensor, nn
+from torch import Tensor
 
-from retrieve.interfaces import Backend
+from retrieve.interfaces import Backend, RetrievalModule
 from retrieve.kernels.linr.fused_masked_knn_topk import fused_masked_knn_topk
+from retrieve.layers.utils.topk import counts_to_valid, masked_topk
 
 
-class PrefilterKNN(nn.Module):
+class PrefilterKNN(RetrievalModule):
     """Sparse-rescore KNN with selectable backend. Given ``candidate_ids: [B, P]`` (and optional
     per-row ``counts: [B]``) it scores only the passing rows and top-Ks them back to global ids;
     without ``candidate_ids`` it falls back to a dense full matmul. ``backend="triton"`` fuses
@@ -63,25 +64,8 @@ class PrefilterKNN(nn.Module):
         reduced_embs = self.item_embs[safe_ids]
         scores = torch.bmm(query.unsqueeze(1), reduced_embs.transpose(1, 2)).squeeze(1)
 
-        if counts is not None:
-            valid = torch.arange(p, device=device).unsqueeze(0) < counts.unsqueeze(1)
-            scores = scores.masked_fill(~valid, float("-inf"))
-
-        actual_k = min(self.k, p)
-        topk_scores, topk_local = torch.topk(scores, actual_k, dim=1)
-        topk_ids = candidate_ids.gather(1, topk_local)
-
-        if actual_k < self.k:
-            pad = self.k - actual_k
-            topk_ids = torch.cat(
-                [topk_ids, torch.full((b, pad), -1, dtype=torch.long, device=device)],
-                dim=1,
-            )
-            topk_scores = torch.cat(
-                [topk_scores, torch.full((b, pad), float("-inf"), device=device)],
-                dim=1,
-            )
-        return topk_ids, topk_scores
+        valid = counts_to_valid(counts, p) if counts is not None else None
+        return masked_topk(scores, self.k, valid=valid, gather_ids=candidate_ids)
 
     def _forward_prefilter_triton(
         self,
