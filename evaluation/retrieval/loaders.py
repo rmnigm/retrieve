@@ -207,7 +207,9 @@ def load_sasrec_embeddings(
     # needs row 0 in its embedding table for sequence-padding lookups,
     # but retrieval is 0-indexed over real items only.
     item_embs = item_embs[1:].contiguous()
-    logger.info("item_embs shape={} dtype={} (pad row dropped)", tuple(item_embs.shape), item_embs.dtype)
+    logger.info(
+        "item_embs shape={} dtype={} (pad row dropped)", tuple(item_embs.shape), item_embs.dtype
+    )
 
     eval_parquet = data_path / f"{cfg.split}.parquet"
     queries, targets, n_targets = encode_queries(
@@ -244,6 +246,43 @@ def load_item_and_queries(
         item_embs, queries, targets, n_targets = load_pre_encoded_arxiv(cfg, data_path, device)
         return item_embs, queries, targets, n_targets, None
     return load_sasrec_embeddings(cfg, data_path, device)
+
+
+# ----- users limit --------------------------------------------------------------
+
+
+def apply_users_limit(
+    cfg: EvalConfig,
+    queries: torch.Tensor,
+    targets: torch.Tensor,
+    n_targets: torch.Tensor,
+    qa_narrow_all: torch.Tensor | None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
+    """Apply ``cfg.users_limit`` uniformly to quality and filter tensors.
+
+    Goodreads has 313k test users; the bs=1 quality stream is the wall-clock
+    bottleneck so capping speeds runs up substantially.
+
+    ``queries_cache.load_or_cache_queries`` already trims checkpoint-path
+    tensors to ``users_limit`` before caching, so on that path this second
+    trim is an idempotent no-op guard; on the pre-encoded (arxiv) path,
+    which bypasses the cache, it does the real subsampling.
+    """
+    if cfg.users_limit is None or cfg.users_limit >= queries.shape[0]:
+        return queries, targets, n_targets, qa_narrow_all
+    n_keep = int(cfg.users_limit)
+    logger.info(
+        "  users_limit={}: subsampling {}→{} users",
+        n_keep,
+        queries.shape[0],
+        n_keep,
+    )
+    return (
+        queries[:n_keep].contiguous(),
+        targets[:n_keep].contiguous(),
+        n_targets[:n_keep].contiguous(),
+        qa_narrow_all[:n_keep] if qa_narrow_all is not None else None,
+    )
 
 
 # ----- query attributes -------------------------------------------------------
@@ -339,6 +378,7 @@ def load_filter_assets(
 
 
 __all__ = [
+    "apply_users_limit",
     "assert_arxiv_prefixes",
     "build_sweep_qa",
     "load_filter_assets",
