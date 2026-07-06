@@ -8,12 +8,8 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
+from retrieve.kernels import common
 from retrieve.layers.utils.quantize import quantize_int8
-
-
-@triton.jit
-def _or_combine(a, b):
-    return a | b
 
 
 @dataclass(frozen=True)
@@ -90,11 +86,9 @@ def _codesigned_probe_score_kernel(
             mask=valid[:, None],
             other=0,
         )
-        # (qb & sig) == qb ⇔ qb & ~sig == 0 (per word); OR-reduce → 0 iff all words pass.
-        diff = qb[None, :] & ~sigs
-        any_diff = tl.reduce(diff, axis=1, combine_fn=_or_combine)
-        bloom_pass = any_diff == 0
-        keep = keep & bloom_pass
+        # Shared subset test (qb & ~sig OR-reduce form); AND with `keep` supplies the
+        # caller-side validity mask the helper contract requires.
+        keep = keep & common.bloom_subset_pass(qb, sigs)
 
     codes = tl.load(
         item_codes_ptr + safe_ids[:, None] * stride_cn + d_off[None, :] * stride_cd,
@@ -118,6 +112,87 @@ def _codesigned_probe_score_kernel(
         dots,
         mask=p_valid,
     )
+
+
+@dataclass(frozen=True)
+class _CpsLaunch:
+    p: int  # probe width — grid_x tiles over it
+    b: int  # batch — grid_y
+    kwargs: dict[str, object]  # every kernel arg: tensors, strides, constexprs, cfg
+    all_scores: Tensor
+    flat_probed_items: Tensor  # post-contiguous, for the epilogue gather
+
+
+def _cps_prep(
+    query: Tensor,
+    flat_probed_items: Tensor,
+    item_codes: Tensor,
+    global_scale: float,
+    *,
+    query_bits: Tensor | None,
+    bloom_sigs: Tensor | None,
+    cfg: CodesignedProbeScoreConfig,
+) -> _CpsLaunch:
+    """Validation + contiguity + buffers + the full launch-kwarg dict.
+
+    THE single place input checking happens — shared by ``_codesigned_probe_score_impl`` and
+    both ``@triton_op`` wrappers (which keep only their textually-inline ``wrap_triton``
+    launch)."""
+    if query.dim() != 2 or flat_probed_items.dim() != 2:
+        raise ValueError("query must be [B, D] and flat_probed_items [B, P]")
+    if item_codes.dtype != torch.int8:
+        raise TypeError(f"item_codes must be int8, got {item_codes.dtype}")
+    has_qb = query_bits is not None
+    if has_qb and bloom_sigs is None:
+        raise ValueError("bloom_sigs is required when query_bits is provided")
+
+    b, d = query.shape
+    p = flat_probed_items.shape[1]
+
+    q_codes, q_scales = quantize_int8(query)
+    q_codes, q_scales = q_codes.contiguous(), q_scales.contiguous()
+    flat_probed_items = flat_probed_items.contiguous()
+    item_codes = item_codes.contiguous()
+    if has_qb:
+        query_bits, bloom_sigs = query_bits.contiguous(), bloom_sigs.contiguous()
+        w = query_bits.shape[1]
+    else:
+        # 1×1 int64 dummies: HAS_QB=False gates every load, so these pointers are never
+        # dereferenced.
+        query_bits = torch.empty(1, 1, dtype=torch.int64, device=query.device)
+        bloom_sigs = torch.empty(1, 1, dtype=torch.int64, device=query.device)
+        w = 1
+
+    # torch.empty is safe: the kernel writes every slot in [0, P) (real dot or -inf), so topk sees
+    # deterministic values.
+    all_scores = torch.empty((b, p), dtype=torch.float32, device=query.device)
+
+    kwargs: dict[str, object] = dict(
+        q_codes_ptr=q_codes, q_scales_ptr=q_scales, qb_ptr=query_bits,
+        flat_items_ptr=flat_probed_items, item_codes_ptr=item_codes,
+        bloom_sigs_ptr=bloom_sigs, out_scores_ptr=all_scores,
+        global_scale=float(global_scale),
+        P=p, D=d, W=w,
+        stride_qcb=q_codes.stride(0), stride_qcd=q_codes.stride(1),
+        stride_qs=q_scales.stride(0),
+        stride_qbb=query_bits.stride(0), stride_qbw=query_bits.stride(1),
+        stride_fb=flat_probed_items.stride(0), stride_fp=flat_probed_items.stride(1),
+        stride_cn=item_codes.stride(0), stride_cd=item_codes.stride(1),
+        stride_bn=bloom_sigs.stride(0), stride_bw=bloom_sigs.stride(1),
+        stride_ob=all_scores.stride(0), stride_op=all_scores.stride(1),
+        HAS_QB=has_qb,
+        BLOCK_P=cfg.block_p, num_warps=cfg.num_warps, num_stages=cfg.num_stages,
+    )
+    return _CpsLaunch(p=p, b=b, kwargs=kwargs, all_scores=all_scores,
+                      flat_probed_items=flat_probed_items)
+
+
+def _cps_finish(launch: _CpsLaunch, k: int) -> tuple[Tensor, Tensor]:
+    # P = n_probe × max_cluster_size >= k by layer-construction assert, so topk(k) needs no min/pad
+    # path.
+    topk_scores, topk_local = torch.topk(launch.all_scores, k, dim=1)
+    topk_ids = launch.flat_probed_items.gather(1, topk_local)
+    return topk_ids, topk_scores
 
 
 def _codesigned_probe_score_impl(
@@ -144,78 +219,13 @@ def _codesigned_probe_score_impl(
 
     Eager entry point for tune scripts / parity tests; the compiled path goes through the
     ``@triton_op`` wrappers."""
-    if query.dim() != 2 or flat_probed_items.dim() != 2:
-        raise ValueError("query must be [B, D] and flat_probed_items [B, P]")
-    if item_codes.dtype != torch.int8:
-        raise TypeError(f"item_codes must be int8, got {item_codes.dtype}")
-    b, d = query.shape
-    p = flat_probed_items.shape[1]
-
-    has_qb = query_bits is not None
-    if has_qb and bloom_sigs is None:
-        raise ValueError("bloom_sigs is required when query_bits is provided")
-
-    q_codes, q_scales = quantize_int8(query)
-    q_codes = q_codes.contiguous()
-    q_scales = q_scales.contiguous()
-
-    flat_probed_items = flat_probed_items.contiguous()
-    item_codes = item_codes.contiguous()
-    if has_qb:
-        query_bits = query_bits.contiguous()
-        bloom_sigs = bloom_sigs.contiguous()
-        w = query_bits.shape[1]
-    else:
-        # 1×1 int64 dummies: HAS_QB gates every load, so these pointers are never dereferenced.
-        query_bits = torch.empty(1, 1, dtype=torch.int64, device=query.device)
-        bloom_sigs = torch.empty(1, 1, dtype=torch.int64, device=query.device)
-        w = 1
-
-    # torch.empty is safe: the kernel writes every slot in [0, P) (real dot or -inf), so topk sees
-    # deterministic values.
-    all_scores = torch.empty((b, p), dtype=torch.float32, device=query.device)
-
     cfg = config if config is not None else DEFAULT_CONFIG
-
+    launch = _cps_prep(query, flat_probed_items, item_codes, global_scale,
+                       query_bits=query_bits, bloom_sigs=bloom_sigs, cfg=cfg)
     # grid_x tiles P (≤ 2³¹); P can exceed grid_y's 65535 limit.
-    grid = (triton.cdiv(int(p), cfg.block_p), int(b))
-
-    _codesigned_probe_score_kernel[grid](
-        q_codes,
-        q_scales,
-        query_bits,
-        flat_probed_items,
-        item_codes,
-        bloom_sigs,
-        all_scores,
-        float(global_scale),
-        P=p,
-        D=d,
-        W=w,
-        stride_qcb=q_codes.stride(0),
-        stride_qcd=q_codes.stride(1),
-        stride_qs=q_scales.stride(0),
-        stride_qbb=query_bits.stride(0),
-        stride_qbw=query_bits.stride(1),
-        stride_fb=flat_probed_items.stride(0),
-        stride_fp=flat_probed_items.stride(1),
-        stride_cn=item_codes.stride(0),
-        stride_cd=item_codes.stride(1),
-        stride_bn=bloom_sigs.stride(0),
-        stride_bw=bloom_sigs.stride(1),
-        stride_ob=all_scores.stride(0),
-        stride_op=all_scores.stride(1),
-        HAS_QB=has_qb,
-        BLOCK_P=cfg.block_p,
-        num_warps=cfg.num_warps,
-        num_stages=cfg.num_stages,
-    )
-
-    # P = n_probe × max_cluster_size >= k by layer-construction assert, so topk(k) needs no min/pad
-    # path.
-    topk_scores, topk_local = torch.topk(all_scores, k, dim=1)
-    topk_ids = flat_probed_items.gather(1, topk_local)
-    return topk_ids, topk_scores
+    grid = (triton.cdiv(int(launch.p), cfg.block_p), int(launch.b))
+    _codesigned_probe_score_kernel[grid](**launch.kwargs)
+    return _cps_finish(launch, k)
 
 
 @triton_op("retrieve::codesigned_probe_score", mutates_args=())
@@ -226,60 +236,18 @@ def codesigned_probe_score(
     global_scale: float,
     k: int,
 ) -> tuple[Tensor, Tensor]:
-    """Plain int8 ANN scoring (no attribute filter); mirrors
-    ``_codesigned_probe_score_impl(query_bits=None)`` inline (``wrap_triton`` must appear
+    """Plain int8 ANN scoring (no attribute filter); shares ``_cps_prep``/``_cps_finish`` with
+    ``_codesigned_probe_score_impl``, keeping the launch inline (``wrap_triton`` must appear
     textually in the decorated source for torch.export). Requires P >= k."""
-    b, d = query.shape
-    p = flat_probed_items.shape[1]
-
-    q_codes, q_scales = quantize_int8(query)
-    q_codes = q_codes.contiguous()
-    q_scales = q_scales.contiguous()
-    flat_probed_items = flat_probed_items.contiguous()
-    item_codes = item_codes.contiguous()
-    # 1×1 int64 dummies: HAS_QB=False gates every load, so these pointers are never dereferenced.
-    query_bits = torch.empty(1, 1, dtype=torch.int64, device=query.device)
-    bloom_sigs = torch.empty(1, 1, dtype=torch.int64, device=query.device)
-
-    all_scores = torch.empty((b, p), dtype=torch.float32, device=query.device)
+    launch = _cps_prep(query, flat_probed_items, item_codes, global_scale,
+                       query_bits=None, bloom_sigs=None, cfg=DEFAULT_CONFIG)
+    p, b = launch.p, launch.b
 
     def grid(meta):
         return (triton.cdiv(p, meta["BLOCK_P"]), b)
 
-    wrap_triton(_codesigned_probe_score_kernel)[grid](
-        q_codes,
-        q_scales,
-        query_bits,
-        flat_probed_items,
-        item_codes,
-        bloom_sigs,
-        all_scores,
-        float(global_scale),
-        P=p,
-        D=d,
-        W=1,
-        stride_qcb=q_codes.stride(0),
-        stride_qcd=q_codes.stride(1),
-        stride_qs=q_scales.stride(0),
-        stride_qbb=query_bits.stride(0),
-        stride_qbw=query_bits.stride(1),
-        stride_fb=flat_probed_items.stride(0),
-        stride_fp=flat_probed_items.stride(1),
-        stride_cn=item_codes.stride(0),
-        stride_cd=item_codes.stride(1),
-        stride_bn=bloom_sigs.stride(0),
-        stride_bw=bloom_sigs.stride(1),
-        stride_ob=all_scores.stride(0),
-        stride_op=all_scores.stride(1),
-        HAS_QB=False,
-        BLOCK_P=DEFAULT_CONFIG.block_p,
-        num_warps=DEFAULT_CONFIG.num_warps,
-        num_stages=DEFAULT_CONFIG.num_stages,
-    )
-
-    topk_scores, topk_local = torch.topk(all_scores, k, dim=1)
-    topk_ids = flat_probed_items.gather(1, topk_local)
-    return topk_ids, topk_scores
+    wrap_triton(_codesigned_probe_score_kernel)[grid](**launch.kwargs)
+    return _cps_finish(launch, k)
 
 
 @triton_op("retrieve::codesigned_probe_score_bloom", mutates_args=())
@@ -295,54 +263,12 @@ def codesigned_probe_score_bloom(
     """Int8 ANN scoring fused with the paper's bloom subset test — sibling of
     ``codesigned_probe_score``, split into a separate op (not one op with an Optional/flag) so
     the layer just routes to the right op."""
-    b, d = query.shape
-    p = flat_probed_items.shape[1]
-    w = query_bits.shape[1]
-
-    q_codes, q_scales = quantize_int8(query)
-    q_codes = q_codes.contiguous()
-    q_scales = q_scales.contiguous()
-    flat_probed_items = flat_probed_items.contiguous()
-    item_codes = item_codes.contiguous()
-    query_bits = query_bits.contiguous()
-    bloom_sigs = bloom_sigs.contiguous()
-
-    all_scores = torch.empty((b, p), dtype=torch.float32, device=query.device)
+    launch = _cps_prep(query, flat_probed_items, item_codes, global_scale,
+                       query_bits=query_bits, bloom_sigs=bloom_sigs, cfg=DEFAULT_CONFIG)
+    p, b = launch.p, launch.b
 
     def grid(meta):
         return (triton.cdiv(p, meta["BLOCK_P"]), b)
 
-    wrap_triton(_codesigned_probe_score_kernel)[grid](
-        q_codes,
-        q_scales,
-        query_bits,
-        flat_probed_items,
-        item_codes,
-        bloom_sigs,
-        all_scores,
-        float(global_scale),
-        P=p,
-        D=d,
-        W=w,
-        stride_qcb=q_codes.stride(0),
-        stride_qcd=q_codes.stride(1),
-        stride_qs=q_scales.stride(0),
-        stride_qbb=query_bits.stride(0),
-        stride_qbw=query_bits.stride(1),
-        stride_fb=flat_probed_items.stride(0),
-        stride_fp=flat_probed_items.stride(1),
-        stride_cn=item_codes.stride(0),
-        stride_cd=item_codes.stride(1),
-        stride_bn=bloom_sigs.stride(0),
-        stride_bw=bloom_sigs.stride(1),
-        stride_ob=all_scores.stride(0),
-        stride_op=all_scores.stride(1),
-        HAS_QB=True,
-        BLOCK_P=DEFAULT_CONFIG.block_p,
-        num_warps=DEFAULT_CONFIG.num_warps,
-        num_stages=DEFAULT_CONFIG.num_stages,
-    )
-
-    topk_scores, topk_local = torch.topk(all_scores, k, dim=1)
-    topk_ids = flat_probed_items.gather(1, topk_local)
-    return topk_ids, topk_scores
+    wrap_triton(_codesigned_probe_score_kernel)[grid](**launch.kwargs)
+    return _cps_finish(launch, k)
