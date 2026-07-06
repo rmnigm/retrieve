@@ -9,6 +9,22 @@ from retrieve.kernels.filters.clause_mask import clause_mask
 from retrieve.layers.utils.compact import compact_mask
 
 
+def clause_subset_match(
+    gathered_attrs: Tensor,
+    query_attrs: Tensor,
+    clause_is_reverse: Tensor,
+) -> Tensor:
+    """``[B, P, C, A]`` attrs vs ``[B, C]`` query → ``[B, P]`` bool. Reverse-XOR and
+    ``q == -1`` inactive semantics — the single torch-side definition, shared by
+    ``ExactAttributeFilter.evaluate_subset`` and SilverTorch's eager exact path."""
+    q = query_attrs.unsqueeze(1).unsqueeze(-1)  # [B, 1, C, 1]
+    clause_match = (gathered_attrs == q).any(dim=-1)  # [B, P, C]
+    rev = clause_is_reverse.unsqueeze(0).unsqueeze(0)  # [1, 1, C]
+    clause_match = torch.where(rev, ~clause_match, clause_match)
+    inactive = (query_attrs == -1).unsqueeze(1)  # [B, 1, C]
+    return (clause_match | inactive).all(dim=-1)  # [B, P]
+
+
 class ExactAttributeFilter(FilterModule):
     """Standalone exact clause-attribute filter, decoupled from retrieval (compose via
     ``evaluate_mask`` / ``evaluate_indices``). ``backend="triton"`` (default) fuses the
@@ -25,8 +41,8 @@ class ExactAttributeFilter(FilterModule):
     def register_index(
         self,
         item_clause_attrs: Tensor,
+        *,
         clause_is_reverse: Tensor | None = None,
-        item_embs: Tensor | None = None,
     ) -> None:
         c = item_clause_attrs.shape[1]
         self.register_buffer("item_clause_attrs", item_clause_attrs)
@@ -72,11 +88,4 @@ class ExactAttributeFilter(FilterModule):
         """Apply this filter only to ``candidate_ids: [B, P]`` (gather + broadcast equality, no
         full-N scan); reverse-clause and inactive-query (-1) semantics match ``evaluate_mask``."""
         gathered = self.item_clause_attrs[candidate_ids]  # [B, P, C, A_max]
-        q = query_clause_attrs.unsqueeze(1).unsqueeze(-1)  # [B, 1, C, 1]
-        match = gathered == q  # [B, P, C, A_max]
-        clause_pass = match.any(dim=-1)  # [B, P, C]
-        rev = self.clause_is_reverse.unsqueeze(0).unsqueeze(0)  # [1, 1, C]
-        clause_pass = torch.where(rev, ~clause_pass, clause_pass)
-        inactive = (query_clause_attrs == -1).unsqueeze(1)  # [B, 1, C]
-        clause_pass = clause_pass | inactive
-        return clause_pass.all(dim=-1)  # [B, P]
+        return clause_subset_match(gathered, query_clause_attrs, self.clause_is_reverse)

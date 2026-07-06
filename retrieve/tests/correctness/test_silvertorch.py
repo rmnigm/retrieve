@@ -347,9 +347,10 @@ class TestRecallVsExact:
 @pytest.mark.parametrize("backend", BACKENDS)
 class TestCandidates:
     def test_candidate_ids_with_bloom(self, data, backend):
+        """Candidate-id path on a bloom-configured module — pure re-rank, no filter."""
         m = _build(with_attrs=True, data=data, k=2, backend=backend)
         cand = torch.tensor([[10, 20, 30]] * B, dtype=torch.long, device="cuda")
-        ids, _ = m(data["query"], data["q_attrs"], candidate_ids=cand)
+        ids, _ = m(data["query"], candidate_ids=cand)
         allowed = {10, 20, 30}
         assert all(i.item() in allowed for row in ids for i in row)
 
@@ -365,12 +366,23 @@ class TestCandidates:
                 assert ids[b, j].item() in allowed
 
     def test_candidate_ids_with_exact(self, data, backend):
-        """Candidate-id path ignores the filter — it's a re-rank, not a search."""
+        """Candidate-id path on an exact-configured module — pure re-rank, no filter."""
         m = _build_exact(data, k=2, backend=backend)
         cand = torch.tensor([[10, 20, 30]] * B, dtype=torch.long, device="cuda")
-        ids, _ = m(data["query"], data["q_attrs"], candidate_ids=cand)
+        ids, _ = m(data["query"], candidate_ids=cand)
         allowed = {10, 20, 30}
         assert all(i.item() in allowed for row in ids for i in row)
+
+    def test_candidates_with_query_attrs_raises(self, data, backend):
+        """The candidate_ids path scores without the fused filter, so passing
+        query_clause_attrs alongside would be a silent filter-skip — must raise."""
+        cand = torch.tensor([[10, 20, 30]] * B, dtype=torch.long, device="cuda")
+        for m in (
+            _build(with_attrs=True, data=data, k=2, backend=backend),
+            _build_exact(data, k=2, backend=backend),
+        ):
+            with pytest.raises(ValueError, match="not both"):
+                m(data["query"], data["q_attrs"], candidate_ids=cand)
 
     def test_candidate_ids_p_less_than_k(self, data, backend):
         """``candidate_ids`` smaller than K — forward returns ``actual_k = p`` columns."""
@@ -381,6 +393,10 @@ class TestCandidates:
         ids, scores = m(data["query"], candidate_ids=cand)
         assert ids.shape == (B, p)
         assert scores.shape == (B, p)
+        # Current-semantics pin: min(k, P) columns, no pad tail and no sentinels —
+        # every score finite, every id a real candidate.
+        assert torch.isfinite(scores).all()
+        assert (ids >= 0).all()
         for b in range(B):
             allowed = set(cand[b].tolist())
             for j in range(p):

@@ -11,7 +11,7 @@ from retrieve.kernels.silvertorch.codesigned_probe_score import (
     codesigned_probe_score,
     codesigned_probe_score_bloom,
 )
-from retrieve.layers.filters.bloom import _build_signatures, _generate_seeds
+from retrieve.layers.filters.bloom_hash import build_signatures, generate_seeds
 from retrieve.layers.utils.quantize import quantize_int8, quantize_int8_global
 from tests.conftest import (
     make_attrs,
@@ -89,9 +89,9 @@ def test_codesigned_with_bloom_matches_ref(n, d, p, k, b):
 
     attrs = make_attrs(n, c=2, a_max=2)
     q_attrs = make_query_attrs(b, c=2)
-    seeds = _generate_seeds(k_hash=5, device=embs.device)
-    sigs = _build_signatures(attrs.long(), seeds, m_bits=512, k_hash=5, word_count=8)
-    qb = _build_signatures(q_attrs.long().unsqueeze(-1), seeds, m_bits=512, k_hash=5, word_count=8)
+    seeds = generate_seeds(k_hash=5, device=embs.device)
+    sigs = build_signatures(attrs.long(), seeds, m_bits=512, k_hash=5, word_count=8)
+    qb = build_signatures(q_attrs.long().unsqueeze(-1), seeds, m_bits=512, k_hash=5, word_count=8)
 
     out_ids, out_scores = codesigned_probe_score_bloom(
         query, flat, codes, qb, sigs, global_scale, k
@@ -127,9 +127,9 @@ def test_config_override_matches_default():
     # Bloom path.
     attrs = make_attrs(n, c=2, a_max=2)
     q_attrs = make_query_attrs(b, c=2)
-    seeds = _generate_seeds(k_hash=5, device=embs.device)
-    sigs = _build_signatures(attrs.long(), seeds, m_bits=512, k_hash=5, word_count=8)
-    qb = _build_signatures(q_attrs.long().unsqueeze(-1), seeds, m_bits=512, k_hash=5, word_count=8)
+    seeds = generate_seeds(k_hash=5, device=embs.device)
+    sigs = build_signatures(attrs.long(), seeds, m_bits=512, k_hash=5, word_count=8)
+    qb = build_signatures(q_attrs.long().unsqueeze(-1), seeds, m_bits=512, k_hash=5, word_count=8)
     ids_a, scores_a = _codesigned_probe_score_impl(
         query, flat, codes, global_scale, k, query_bits=qb, bloom_sigs=sigs, config=cfg_a
     )
