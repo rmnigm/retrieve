@@ -37,7 +37,7 @@ from retrieve.kernels.linr.oporp_1bit_match_topk import (
 )
 from retrieve.kernels.silvertorch.codesigned_probe_score import (
     CodesignedProbeScoreConfig,
-    codesigned_probe_score,
+    _codesigned_probe_score_impl,
 )
 
 _FMKT_GRID = [(bn, nw) for bn in (32, 64, 128, 256) for nw in (4, 8)]
@@ -278,7 +278,7 @@ def _tune_cps(dev: torch.device, d: int, b: int, w: int) -> dict:
             for block_p, num_warps in _CPS_GRID:
                 cfg = CodesignedProbeScoreConfig(block_p=block_p, num_warps=num_warps)
                 for _ in range(3):
-                    codesigned_probe_score(
+                    _codesigned_probe_score_impl(
                         query,
                         flat_items,
                         item_codes,
@@ -290,7 +290,7 @@ def _tune_cps(dev: torch.device, d: int, b: int, w: int) -> dict:
                     )
                 torch.cuda.synchronize()
                 ms = _bench(
-                    lambda c=cfg: codesigned_probe_score(
+                    lambda c=cfg: _codesigned_probe_score_impl(
                         query,
                         flat_items,
                         item_codes,
@@ -568,6 +568,12 @@ def _cmd_cps(d: int, b: int, w: int, device: str, json_out: Path | None) -> None
     result = _tune_cps(dev, d=d, b=b, w=w)
     _print_cps(arch, result)
     _dump_json(json_out, arch, "codesigned_probe_score", result)
+
+
+# TODO(Phase K7): `codesigned_probe_score_exact` has no subcommand — its regime axes are
+# (C, A_MAX) clause shapes, not bloom-word W, so it isn't a copy of the one above. Add it
+# declaratively when this module is reworked into a spec registry rather than hand-writing a
+# seventh sweep loop.
 
 
 _regime_clause_opt = click.option(
