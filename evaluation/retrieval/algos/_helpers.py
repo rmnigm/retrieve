@@ -1,22 +1,56 @@
 """Shared algo-construction helpers.
 
-Lives in its own module (rather than ``__init__.py``) so individual algo
+Lives in its own module (rather than ``algos/__init__.py``) so individual algo
 files can import it without triggering a circular import through
 ``algos/__init__.py``'s class re-exports.
 """
 
 from __future__ import annotations
 
+from typing import Protocol, runtime_checkable
+
 import torch.nn as nn
+from torch import Tensor
 
 from retrieve.interfaces import FilterModule
 
 
-def collect_modules(
-    *base: nn.Module, filter_mod: FilterModule | None
-) -> list[nn.Module]:
-    """Build the ``algo.algo_modules`` list the driver iterates for memory cleanup."""
-    mods = list(base)
-    if filter_mod is not None:
-        mods.append(filter_mod)
-    return mods
+@runtime_checkable
+class RetrievalAlgo(Protocol):
+    """Structural type of one benchmark algo instance.
+
+    The sweep driver only ever needs two things from an algo: the
+    ``algo_modules`` cleanup list (iterated by ``_release_algo`` for
+    explicit per-cell GPU-memory release) and the compiled forward
+    ``algo(q, qa_narrow=None) -> (ids, scores)``. ``runtime_checkable``
+    lets ``build_algorithm`` assert ``isinstance(obj, RetrievalAlgo)``
+    in one place.
+    """
+
+    algo_modules: list[nn.Module]
+
+    def __call__(
+        self, q: Tensor, qa_narrow: Tensor | None = None
+    ) -> tuple[Tensor, Tensor]: ...
+
+
+class AlgoBase(nn.Module):
+    """Shared tail for eval algo wrappers.
+
+    Subclasses build their retrieve-layer modules in ``__init__`` and then
+    call ``_finalize(...)`` exactly once as the LAST statement — it wires
+    the ``algo_modules`` cleanup list and applies the one canonical
+    ``torch.compile`` call (``dynamic=True`` + ``reduce-overhead`` →
+    single cudagraph capture of the full forward: filter + index +
+    cascade)."""
+
+    filter_mod: FilterModule | None
+    algo_modules: list[nn.Module]
+
+    def _finalize(self, *modules: nn.Module, filter_mod: FilterModule | None) -> None:
+        self.filter_mod = filter_mod
+        mods = list(modules)
+        if filter_mod is not None:
+            mods.append(filter_mod)
+        self.algo_modules = mods
+        self.compile(dynamic=True, mode="reduce-overhead")

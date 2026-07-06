@@ -14,15 +14,15 @@ point of the compact path.
 
 from __future__ import annotations
 
-from torch import Tensor, nn
+from torch import Tensor
 
 from retrieve import PrefilterKNN
 from retrieve.interfaces import Backend, FilterModule
 
-from ._helpers import collect_modules
+from ._helpers import AlgoBase
 
 
-class LinrV2Algo(nn.Module):
+class LinrV2Algo(AlgoBase):
     def __init__(
         self,
         item_embs: Tensor,
@@ -36,9 +36,7 @@ class LinrV2Algo(nn.Module):
         # package docstring.
         self.idx = PrefilterKNN(k=k, backend=backend).to(item_embs.device)
         self.idx.register_index(item_embs)
-        self.filter_mod = filter_mod
-        self.algo_modules = collect_modules(self.idx, filter_mod=filter_mod)
-        self.compile(dynamic=True, mode="reduce-overhead")
+        self._finalize(self.idx, filter_mod=filter_mod)
 
     def forward(self, q: Tensor, qa_narrow: Tensor) -> tuple[Tensor, Tensor]:
         cand, counts = self.filter_mod.evaluate_indices(qa_narrow)

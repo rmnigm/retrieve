@@ -3,8 +3,10 @@
 ``build_sweep_qa`` (loaders.py) synthesises per-sweep query attributes from
 the full ``qa_narrow`` tensor: inactive clauses are coded ``-1`` ("always
 pass" / "no bits queried") and rows left with no live clause are skip-masked.
-``is_valid_combo`` (sweep.py) encodes the silvertorch ``n_probe <= n_lists``
-constraint. Locked here so the E1/E2 refactors are falsifiable without a GPU.
+``is_valid_combo`` (algos/__init__.py) encodes the silvertorch
+``n_probe <= n_lists`` constraint; ``supports`` reads the declarative
+``SUPPORTED_FILTER_KINDS`` eligibility table. Locked here so the E1/E2/E3
+refactors are falsifiable without a GPU.
 """
 
 from __future__ import annotations
@@ -12,9 +14,14 @@ from __future__ import annotations
 import pytest
 import torch
 
+from retrieval.algos import (
+    ALGORITHMS,
+    SUPPORTED_FILTER_KINDS,
+    is_valid_combo,
+    supports,
+)
 from retrieval.config import FilterSweepCfg
 from retrieval.loaders import build_sweep_qa
-from retrieval.sweep import is_valid_combo
 
 # ----- build_sweep_qa -----------------------------------------------------
 
@@ -83,3 +90,25 @@ def test_is_valid_combo_silvertorch_probe_constraint():
 def test_is_valid_combo_other_algos_always_valid():
     assert is_valid_combo("linr_v3", {"n_lists": 4, "n_probe": 100})
     assert is_valid_combo("linr_v1_filter_mask", {})
+
+
+# ----- supports --------------------------------------------------------------
+
+
+def test_supports_linr_v2_is_filter_only():
+    # The compact-candidate path's source IS the filter — no unfiltered mode.
+    assert not supports("linr_v2", "none")
+    assert supports("linr_v2", "clause")
+    assert supports("linr_v2", "bloom")
+
+
+def test_supports_full_coverage_algos():
+    for algo in ("triton_knn", "linr_v1_filter_mask", "linr_v3", "linr_v4", "silvertorch"):
+        for kind in ("none", "clause", "bloom"):
+            assert supports(algo, kind)
+
+
+def test_supports_table_covers_registry():
+    # Every registered algo has an eligibility row (and no stale extras),
+    # so run_one_sweep's supports() gate can never KeyError on a valid algo.
+    assert set(SUPPORTED_FILTER_KINDS) == set(ALGORITHMS)
