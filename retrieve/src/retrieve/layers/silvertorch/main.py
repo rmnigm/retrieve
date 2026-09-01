@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import Literal
 
 import torch
@@ -9,6 +10,12 @@ from retrieve.interfaces import Backend, RetrievalModule
 from retrieve.kernels.silvertorch.codesigned_probe_score import (
     codesigned_probe_score,
     codesigned_probe_score_bloom,
+)
+from retrieve.kernels.silvertorch.codesigned_probe_score_cuda import (
+    build_transposed_sigs,
+    codesigned_probe_score_bloom_cuda,
+    codesigned_probe_score_cuda,
+    codesigned_probe_score_exact_cuda,
 )
 from retrieve.kernels.silvertorch.codesigned_probe_score_exact import (
     codesigned_probe_score_exact,
@@ -36,7 +43,11 @@ class SilverTorch(RetrievalModule):
 
     ``backend="triton"`` (default) keeps all probe intermediates off HBM; ``backend="torch"``
     runs the same semantics eager but materializes ``[B, P, D]``, so large ``P·B·D`` needs the
-    Triton backend."""
+    Triton backend. ``backend="cuda"`` runs the CUDA C++ implementation of all three filter
+    modes, JIT-compiling on first forward and returning bit-identical results to the Triton
+    backend; see docs/system/kernels.md for its design and constraints. Only the ``"bloom"``
+    index differs across backends (cuda registers the transposed ``bloom_sigs_t`` instead of
+    ``bloom_sigs``) — a cuda ``"exact"`` module's state_dict is identical to a triton one's."""
 
     centroids: Tensor
     item_codes: Tensor
@@ -44,6 +55,7 @@ class SilverTorch(RetrievalModule):
     padded_cluster_items: Tensor
     cluster_sizes: Tensor
     bloom_sigs: Tensor
+    bloom_sigs_t: Tensor
     hash_seeds: Tensor
     item_clause_attrs: Tensor
     clause_is_reverse: Tensor
@@ -152,6 +164,12 @@ class SilverTorch(RetrievalModule):
         ).fit(item_embs)
         cluster_sizes = torch.bincount(assignments, minlength=self.n_lists)
         max_size = int(cluster_sizes.max().item())
+        # Plain Python int, cached for the same reason as _global_scale_f below: the
+        # cuda exact op takes the padded cluster width as a scalar argument, and
+        # reading it back off padded_cluster_items.shape[1] inside forward would hand
+        # dynamo a SymInt under `torch.compile(dynamic=True)` — which the custom op's
+        # `int` schema slot would then have to specialize or graph-break on.
+        self._max_cluster_size = max_size
 
         # P (probe pool width) = n_probe × max_cluster_size; topk runs with no pad tail, so the
         # index must supply >= k candidate slots per query.
@@ -210,7 +228,34 @@ class SilverTorch(RetrievalModule):
                     self.k_hash,
                     self.word_count,
                 )
-            self.register_buffer("bloom_sigs", sigs)
+            if self.backend == "cuda":
+                # The cuda path reads only the transposed index; row-wise sigs are a
+                # build-time intermediate. Registering both would double the filter
+                # index memory. Note this changes the state-dict key set — see
+                # docs/system/architecture.md on cross-backend checkpoint portability.
+                #
+                # Size: bloom_sigs_t is [m_bits, n_lists * wpc] int64, i.e.
+                #   W * 8 * n_lists * wpc * 64 bytes  =  bloom_sigs * (n_lists * wpc * 64 / N)
+                # The factor is the IVF *padding* slack: n_lists * max_size / N rounded
+                # up to whole 64-slot words. It is ~1.0-1.1x for a balanced index but
+                # grows without bound as clusters get more uneven, because every cluster
+                # is padded out to the largest one.
+                slack = self.padded_cluster_items.numel() / max(n, 1)
+                if slack > 2.0:
+                    warnings.warn(
+                        f"cuda+bloom transposed index is {slack:.1f}x the row-wise "
+                        f"bloom_sigs size: n_lists * max_cluster_size = "
+                        f"{self.padded_cluster_items.numel()} padded slots for N={n} "
+                        f"items. Cluster sizes are very uneven — re-cluster (more "
+                        f"n_iter, a different n_lists/seed) to bring this down.",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                self.register_buffer(
+                    "bloom_sigs_t", build_transposed_sigs(sigs, self.padded_cluster_items)
+                )
+            else:
+                self.register_buffer("bloom_sigs", sigs)
             self.register_buffer("hash_seeds", seeds)
         elif self.filter_mode == "exact":
             assert item_clause_attrs is not None  # narrowed by _validate_register_args
@@ -244,16 +289,22 @@ class SilverTorch(RetrievalModule):
             )
         if self.backend == "triton":
             return self._forward_triton(query, query_clause_attrs)
+        if self.backend == "cuda":
+            return self._forward_cuda(query, query_clause_attrs)
         return self._forward_torch_eager(query, query_clause_attrs)
 
-    def _phase1_probe(self, query: Tensor) -> Tensor:
-        """Phase 1: centroid top-``n_probe`` then gather padded probed items; returns ``flat_items
-        [B, P]`` (P = n_probe × max_cluster_size) with ``-1`` marking empty-cluster padding."""
+    def _phase1_probe_with_ids(self, query: Tensor) -> tuple[Tensor, Tensor]:
+        """Phase 1: centroid top-``n_probe`` then gather padded probed items; returns
+        ``(probe_ids [B, n_probe], flat_items [B, P])`` (P = n_probe × max_cluster_size)
+        with ``-1`` marking empty-cluster padding in ``flat_items``."""
         b = query.shape[0]
         cent_scores = query @ self.centroids.t()
         _, probe_ids = torch.topk(cent_scores, self.n_probe, dim=1)
         probed = self.padded_cluster_items[probe_ids]
-        return probed.reshape(b, -1)
+        return probe_ids, probed.reshape(b, -1)
+
+    def _phase1_probe(self, query: Tensor) -> Tensor:
+        return self._phase1_probe_with_ids(query)[1]
 
     def _forward_triton(
         self,
@@ -299,15 +350,70 @@ class SilverTorch(RetrievalModule):
             self.k,
         )
 
+    def _forward_cuda(
+        self,
+        query: Tensor,
+        query_clause_attrs: Tensor | None,
+    ) -> tuple[Tensor, Tensor]:
+        """CUDA C++ backend, paper Algorithm 1: phase 1 host-side, then a two-kernel
+        filtered path (partial 1-bit masks over the probed clusters → masked dp4a
+        scoring) or plain mask-free scoring. Bloom and exact share the scoring kernel
+        and differ only in which phase-2 kernel builds the mask; the exact path reads
+        ids straight from ``flat_items``, so it needs the padded cluster width rather
+        than the probed cluster ids."""
+        probe_ids, flat_items = self._phase1_probe_with_ids(query)
+
+        if self.has_exact and query_clause_attrs is not None:
+            return codesigned_probe_score_exact_cuda(
+                query,
+                flat_items,
+                self.item_codes,
+                self.item_clause_attrs,
+                self.clause_is_reverse,
+                query_clause_attrs.long(),
+                self._global_scale_f,
+                self.k,
+                # Python int cached at index build (_build_ivf) — no device read and
+                # no tensor-shape read, so cudagraph capture stays clean and dynamic
+                # compilation cannot turn it into a SymInt.
+                self._max_cluster_size,
+            )
+
+        if self.has_bloom and query_clause_attrs is not None:
+            qb = build_query_signatures(
+                query_clause_attrs.long().unsqueeze(-1),
+                self.hash_seeds,
+                self.m_bits,
+                self.k_hash,
+                self.word_count,
+            )
+            return codesigned_probe_score_bloom_cuda(
+                query,
+                flat_items,
+                self.item_codes,
+                qb,
+                self.bloom_sigs_t,
+                probe_ids,
+                self._global_scale_f,
+                self.k,
+            )
+        return codesigned_probe_score_cuda(
+            query,
+            flat_items,
+            self.item_codes,
+            self._global_scale_f,
+            self.k,
+        )
+
     def _forward_torch_eager(
         self,
         query: Tensor,
         query_clause_attrs: Tensor | None,
     ) -> tuple[Tensor, Tensor]:
-        """Pure-torch forward (compiled in ``__init__``) mirroring the Triton kernel: IVF probe,
-        optional bloom/exact filter, int8×int8 dot + rescale, mask + topk + ``-1``/``-inf`` pad.
-        The dot runs in fp32 (not ``torch._int_mm``) — at D=128 the integer products fit the fp32
-        mantissa exactly, so it's bit-identical to an int32 accumulator."""
+        """Eager pure-torch forward mirroring the Triton kernel: IVF probe, optional
+        bloom/exact filter, int8xint8 dot + rescale, mask + topk + ``-1``/``-inf`` pad.
+        The dot runs in fp32 (not ``torch._int_mm``) — at D=128 the integer products fit the
+        fp32 mantissa exactly, so it is bit-identical to an int32 accumulator."""
         flat_items = self._phase1_probe(query)
 
         valid = flat_items >= 0

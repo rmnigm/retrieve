@@ -19,6 +19,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/retrieve"]
+# CUDA sources are JIT-compiled at runtime (torch.utils.cpp_extension.load), so the
+# wheel must ship them; `packages` already includes non-.py files, this guards against
+# a future ignore pattern excluding them.
+artifacts = ["*.cu", "*.cuh"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -43,6 +47,7 @@ known-first-party = ["retrieve"]
 
 [dependency-groups]
 dev = [
+    "ninja>=1.11",
     "pytest>=9.0.3",
     "setuptools>=82.0.1",
 ]

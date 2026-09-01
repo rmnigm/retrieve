@@ -34,6 +34,12 @@ from retrieve.kernels.silvertorch.codesigned_probe_score import (
     CodesignedProbeScoreConfig,
     _codesigned_probe_score_impl,
 )
+from retrieve.kernels.silvertorch.codesigned_probe_score_cuda import (
+    CodesignedProbeScoreCudaConfig,
+    _codesigned_probe_score_cuda_impl,
+    _codesigned_probe_score_exact_cuda_impl,
+    words_per_cluster,
+)
 from retrieve.kernels.silvertorch.codesigned_probe_score_exact import (
     CodesignedProbeScoreExactConfig,
     _codesigned_probe_score_exact_impl,
@@ -42,6 +48,17 @@ from retrieve.kernels.silvertorch.codesigned_probe_score_exact import (
 _FMKT_GRID = tuple((bn, nw) for bn in (32, 64, 128, 256) for nw in (4, 8))
 _OPORP_GRID = tuple((bn, nw) for bn in (64, 128, 256, 512) for nw in (4, 8))
 _CPS_GRID = tuple((bp, nw) for bp in (32, 64, 128, 256) for nw in (4, 8))
+# Starts at 128, not 32 like _CPS_GRID: not a constraint (every _CPS_GRID point
+# already satisfies block_p % num_warps == 0), but amortization. A CUDA block does a
+# fixed amount of per-block setup — query words into registers, the (cluster, slot)
+# divide, the tile bookkeeping — and at block_p=32 with num_warps=8 a warp scores 4
+# items before exiting, so that setup dominates. The Triton kernel has no equivalent
+# per-block register preload, which is why its grid can start lower.
+# Third axis is the CUDA scorer's UNROLL (items in flight per segment), a template
+# parameter of the .cu kernel — hence the fixed {1, 2, 4} rather than a range.
+_CPS_CUDA_GRID = tuple(
+    (bp, nw, un) for bp in (128, 256, 512, 1024) for nw in (4, 8) for un in (1, 2, 4)
+)
 # Filter-index kernels sweep a wider BLOCK_N range since the inner body varies and the optimum can
 # land far from 256.
 _FILTER_GRID = tuple((bn, nw) for bn in (128, 256, 512, 1024) for nw in (2, 4, 8))
@@ -148,6 +165,73 @@ def _cps_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
     )
 
 
+def _cps_cuda_probe_family(
+    dev: torch.device, p: int, b: int, n_target: int
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int, int]:
+    """Synthetic padded IVF layout shared by both cuda CPS specs — the shape the phase-2
+    mask kernels decode, which the Triton specs' flat random ids cannot stand in for.
+
+    Clusters hold ``max_size = min(P, 1024)`` slots and each id at most once (randperm);
+    ``n_probe = P / max_size`` clusters are probed per row so ``flat`` is exactly ``[B, P]``.
+    Every slot holds a real id — there is **no** ``-1`` cluster padding here, unlike a real
+    index — so the scorer's ``id < 0`` early-out never fires and the sweep measures the
+    worst case for it. Deliberate: a padding rate is deployment-specific, and tuning
+    against the fully-populated case cannot pick a config that only wins on empty slots.
+    ``n_target`` is the corpus size to aim for; the returned ``N`` rounds it down to a whole
+    number of clusters (and up to ``P``, since every probed slot must hold a real id).
+    Returns ``(padded, probe_ids, flat, N, max_size)``; seed the caller's RNG first."""
+    max_size = min(p, 1024)
+    if p % max_size:
+        raise click.ClickException(f"P must be a multiple of {max_size} for the cuda regimes")
+    n_probe = p // max_size
+    n_lists = max(n_target, p) // max_size
+    n = n_lists * max_size
+    padded = torch.randperm(n, device=dev).reshape(n_lists, max_size)
+    probe_ids = torch.randint(0, n_lists, (b, n_probe), dtype=torch.int64, device=dev)
+    return padded, probe_ids, padded[probe_ids].reshape(b, -1), n, max_size
+
+
+def _cps_cuda_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
+    """CUDA-backend inputs for the same ``(P, HAS_QB, D, B, W)`` regimes as ``_cps_inputs``:
+    a synthetic padded IVF layout, probed cluster ids, a sparse query signature, and a
+    transposed index tuned to a ~20% pass rate.
+
+    The HAS_QB=1 inputs deliberately differ from ``_cps_inputs``; see
+    docs/system/kernels.md on comparing tuner output across the two backends."""
+    p, has_qb, d, b, w = regime
+    torch.manual_seed(0)
+    _, probe_ids, flat, n, max_size = _cps_cuda_probe_family(dev, p, b, max(p * 4, 1 << 16))
+    n_lists = n // max_size
+    inputs: dict[str, Any] = dict(
+        query=torch.randn(b, d, device=dev),
+        flat_probed_items=flat,
+        item_codes=torch.randint(-128, 128, (n, d), dtype=torch.int8, device=dev),
+        global_scale=0.01,
+        k=min(64, p),
+        query_bits=None,
+        bloom_sigs_t=None,
+        probe_ids=None,
+    )
+    if has_qb:
+        m_bits = w * 64
+        n_set = min(25, m_bits)  # ~ k_hash=5 × 5 active values
+        qb = torch.zeros(b, w, dtype=torch.int64, device=dev)
+        pos = torch.randint(0, m_bits, (b, n_set), device=dev)
+        rows = torch.arange(b, device=dev)
+        for i in range(n_set):
+            qb[rows, pos[:, i] // 64] |= torch.tensor(1, dtype=torch.int64, device=dev) << (
+                pos[:, i] % 64
+            )
+        # OR of 4 uniform words → per-bit density 1 - 2^-4 = 0.9375 → pass rate
+        # ≈ 0.9375^25 ≈ 0.2 at 25 set query bits.
+        cols = n_lists * words_per_cluster(max_size)
+        sigs_t = _rand_bits((m_bits, cols), dev)
+        for _ in range(3):
+            sigs_t |= _rand_bits((m_bits, cols), dev)
+        inputs.update(query_bits=qb, bloom_sigs_t=sigs_t, probe_ids=probe_ids)
+    return inputs
+
+
 def _clause_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
     """Build realistic (item_attrs, is_reverse, query_attrs) on ``dev`` — small vocab so random
     queries get a non-trivial pass/fail mix."""
@@ -178,6 +262,32 @@ def _cpse_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
     return inputs
 
 
+def _cpse_cuda_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
+    """CUDA-backend twin of ``_cpse_inputs``: the same ``(N, B, C, A_MAX)`` clause regimes
+    and the same D=128 / P stand-ins, but over the padded IVF probe family the phase-2
+    clause-mask kernel decodes. ``max_size`` is the only extra input — the mask kernel reads
+    ids from ``flat_probed_items``, so no cluster-major attribute copy exists.
+
+    Unlike the bloom pair, these rows *are* comparable with ``codesigned-probe-score-exact``:
+    both backends see the same attrs distribution and the same predicate."""
+    n, b, c, a_max = regime
+    torch.manual_seed(0)
+    # D mirrors the codesigned-probe-score default (--d 128); P as in _cpse_inputs.
+    d = 128
+    p = min(n, 8192)
+    _, _, flat, n_items, max_size = _cps_cuda_probe_family(dev, p, b, n)
+    inputs = _clause_inputs(dev, (n_items, b, c, a_max))
+    inputs.update(
+        query=torch.randn(b, d, device=dev),
+        flat_probed_items=flat,
+        item_codes=torch.randint(-128, 128, (n_items, d), dtype=torch.int8, device=dev),
+        global_scale=0.01,
+        k=min(64, p),
+        max_size=max_size,
+    )
+    return inputs
+
+
 def _bloom_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
     n, b, w = regime
     torch.manual_seed(0)
@@ -195,7 +305,10 @@ class KernelTuneSpec:
 
     name: str  # click subcommand, e.g. "clause-mask"
     config_cls: type  # ClauseMaskConfig, ... — first dataclass field is the block size
-    grid: tuple[tuple[int, int], ...]  # (block, num_warps) candidates
+    # Candidate configs as positional field values: (block, num_warps) for most kernels,
+    # (block_p, num_warps, unroll) for the CUDA scorer. Entries are splatted into
+    # config_cls, so their order must match the dataclass field order.
+    grid: tuple[tuple[int, ...], ...]
     regime_labels: tuple[str, ...]  # names for the regime fields, e.g. ("N", "B", "C", "A_MAX")
     make_inputs: Callable[[torch.device, tuple[int, ...]], dict[str, Any]]  # regime → kwargs
     run: Callable[[dict[str, Any], Any], Any]  # (inputs, config) → one _impl call
@@ -210,60 +323,68 @@ class KernelTuneSpec:
     expand_regimes: Callable[..., tuple[tuple[int, ...], ...]] | None = None
 
 
-def _sweep(spec: KernelTuneSpec, dev: torch.device, regimes: tuple[tuple[int, ...], ...]) -> dict:
-    """Per regime pick the lowest-latency ``(block, num_warps)`` from ``spec.grid``, then aggregate
-    the winners into one DEFAULT_CONFIG by plurality vote (ties → lower num_warps).
+def _config_fields(spec: KernelTuneSpec, entry: tuple[int, ...]) -> tuple[str, ...]:
+    """Dataclass field names for a grid entry, positionally — the grid may be shorter than
+    the config (the Triton kernels never sweep ``num_stages``)."""
+    return tuple(f.name for f in fields(spec.config_cls))[: len(entry)]
 
-    atomic_add safety (clause_compact / bloom_compact): in-kernel ``@triton.autotune`` would be
-    unsafe for the compact kernels — ``atomic_add`` into ``counts`` accumulates across trials and
-    ``out_indices`` is written in place — but every ``spec.run`` call goes through an ``_impl``
-    that allocates fresh output buffers, so this offline sweep is safe."""
-    block_field = fields(spec.config_cls)[0].name
+
+def _fmt_entry(spec: KernelTuneSpec, entry: tuple[int, ...]) -> str:
+    """One grid entry as ``block_p=256  num_warps=4  unroll=1``, padded so the sweep log
+    stays column-aligned across block sizes."""
+    return " ".join(
+        f"{name}={v:<4}" for name, v in zip(_config_fields(spec, entry), entry)
+    ).rstrip()
+
+
+def _sweep(spec: KernelTuneSpec, dev: torch.device, regimes: tuple[tuple[int, ...], ...]) -> dict:
+    """Per regime pick the lowest-latency grid entry from ``spec.grid``, then aggregate to one
+    default by plurality vote (ties → lower ``num_warps``, then lower remaining fields).
+
+    Tuning is offline and out-of-kernel on purpose; see
+    docs/system/kernels.md § Autotune separation."""
     per_regime: dict[str, dict] = {}
     for regime in regimes:
         key = ",".join(f"{label}={v}" for label, v in zip(spec.regime_labels, regime))
         inputs = spec.make_inputs(dev, regime)
 
         results: list[dict] = []
-        best: tuple[int, int] | None = None
+        best: tuple[int, ...] | None = None
         best_ms = float("inf")
-        for block, num_warps in spec.grid:
-            cfg = spec.config_cls(block, num_warps)
+        for entry in spec.grid:
+            cfg = spec.config_cls(*entry)
             # Warm the JIT cache before measuring; do_bench's warmup wouldn't cover a cold compile
             # of this config.
             for _ in range(3):
                 spec.run(inputs, cfg)
             torch.cuda.synchronize()
             ms = _bench(lambda c=cfg: spec.run(inputs, c))
-            results.append({block_field: block, "num_warps": num_warps, "ms": ms})
+            results.append({**dict(zip(_config_fields(spec, entry), entry)), "ms": ms})
             if ms < best_ms:
                 best_ms = ms
-                best = (block, num_warps)
-            click.echo(
-                f"  [{key}] {block_field}={block:<4} num_warps={num_warps}  -> {ms:.3f} ms",
-                err=True,
-            )
+                best = entry
+            click.echo(f"  [{key}] {_fmt_entry(spec, entry)}  -> {ms:.3f} ms", err=True)
         assert best is not None
         per_regime[key] = {"winner": best, "winner_ms": best_ms, "all": results}
         click.echo(
-            f"  [{key}] winner: {block_field}={best[0]} num_warps={best[1]} ({best_ms:.3f} ms)",
+            f"  [{key}] winner: {_fmt_entry(spec, best)} ({best_ms:.3f} ms)",
             err=True,
         )
 
     votes = Counter(per_regime[k]["winner"] for k in per_regime)
-    # Ties → lower num_warps (cheaper register pressure).
-    top = sorted(votes.items(), key=lambda kv: (-kv[1], kv[0][1]))
+    # Ties → lower num_warps (cheaper register pressure), then lower everything after it.
+    top = sorted(votes.items(), key=lambda kv: (-kv[1], kv[0][1:]))
     return {"per_regime": per_regime, "default": top[0][0]}
 
 
 def _print(spec: KernelTuneSpec, arch: str, result: dict) -> None:
-    block, num_warps = result["default"]
-    block_field = fields(spec.config_cls)[0].name
+    entry = result["default"]
+    args = ", ".join(f"{name}={v}" for name, v in zip(_config_fields(spec, entry), entry))
     cls_name = spec.config_cls.__name__
     click.echo("")
     click.echo(f"# Paste into {spec.paste_path}")
     click.echo(f"# Tuned on {arch}; per-regime details in JSON output if --json-out was used.")
-    click.echo(f"DEFAULT_CONFIG = {cls_name}({block_field}={block}, num_warps={num_warps})")
+    click.echo(f"DEFAULT_CONFIG = {cls_name}({args})")
 
 
 KERNELS: tuple[KernelTuneSpec, ...] = (
@@ -309,6 +430,27 @@ KERNELS: tuple[KernelTuneSpec, ...] = (
             (p, hq, d, b, w) for p in _DEFAULT_CPS_P_GRID for hq in (0, 1)
         ),
     ),
+    # Shares regime axes with codesigned-probe-score so the two --json-out files join on
+    # identical keys — but the HAS_QB=1 rows are NOT comparable (different input
+    # distributions by design). See docs/system/kernels.md before comparing them.
+    KernelTuneSpec(
+        name="codesigned-probe-score-cuda",
+        config_cls=CodesignedProbeScoreCudaConfig,
+        grid=_CPS_CUDA_GRID,
+        regime_labels=("P", "HAS_QB", "D", "B", "W"),
+        make_inputs=_cps_cuda_inputs,
+        run=lambda inputs, config: _codesigned_probe_score_cuda_impl(**inputs, config=config),
+        paste_path="retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_cuda.py",
+        smoke_regime=(1024, 1, 64, 2, 4),
+        dims=(
+            ("d", 128, "Embedding dimension."),
+            ("b", 16, "Batch size."),
+            ("w", 4, "int64 words per bloom signature."),
+        ),
+        expand_regimes=lambda d, b, w: tuple(
+            (p, hq, d, b, w) for p in _DEFAULT_CPS_P_GRID for hq in (0, 1)
+        ),
+    ),
     # (N, B, C, A_MAX) defaults mirror the shipped clause regimes; the exact kernel's optimum also
     # tracks P = n_probe × max_cluster_size (approximated inside _cpse_inputs), so re-tune with
     # --regime per deployment rather than trusting these defaults.
@@ -320,6 +462,24 @@ KERNELS: tuple[KernelTuneSpec, ...] = (
         make_inputs=_cpse_inputs,
         run=lambda inputs, config: _codesigned_probe_score_exact_impl(**inputs, config=config),
         paste_path="retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_exact.py",
+        smoke_regime=(4096, 2, 2, 2),
+        default_regimes=_DEFAULT_CLAUSE_REGIMES,
+        regime_arity=4,
+        regime_fmt="N,B,C,A_MAX",
+    ),
+    # Same regime axes as codesigned-probe-score-exact, and unlike the bloom pair these
+    # rows ARE comparable head-to-head (same attrs, same predicate). Shares
+    # CodesignedProbeScoreCudaConfig — and therefore the single DEFAULT_CONFIG line in
+    # codesigned_probe_score_cuda.py — with codesigned-probe-score-cuda, so reconcile the
+    # two sweeps before pasting.
+    KernelTuneSpec(
+        name="codesigned-probe-score-exact-cuda",
+        config_cls=CodesignedProbeScoreCudaConfig,
+        grid=_CPS_CUDA_GRID,
+        regime_labels=("N", "B", "C", "A_MAX"),
+        make_inputs=_cpse_cuda_inputs,
+        run=lambda inputs, config: _codesigned_probe_score_exact_cuda_impl(**inputs, config=config),
+        paste_path="retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_cuda.py",
         smoke_regime=(4096, 2, 2, 2),
         default_regimes=_DEFAULT_CLAUSE_REGIMES,
         regime_arity=4,
