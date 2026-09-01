@@ -413,8 +413,9 @@ Harness:
   `0x5555555555555555` as *test data* — the "SWAR constants appear only in
   `kernels/common.py` + `layers/utils/quantize.py`" grep gate has exactly this one benign
   extra hit.
-- **`retrieve/docs/filtering-and-quantization.md`** still shows `filter=` in three examples
-  (lines 17/42/53) — outside this doc sweep's file allowlist; one-line fixes post-merge.
+- ~~**`retrieve/docs/filtering-and-quantization.md`** still shows `filter=`~~ — **fixed**;
+  the doc sweep caught these and the later `retrieve/README.md` occurrence too. No `filter=`
+  remains anywhere in the docs (`grep -rn 'filter=' --include='*.md' .` is clean).
 - **Latent bug (observed, NOT fixed — do not silently patch mid-validation)**:
   `users_limit` + `filters:` on a checkpoint dataset can raise the `eval_split` row-count
   check in `load_query_attrs` because the queries cache returns pre-trimmed tensors (see the

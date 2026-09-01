@@ -39,7 +39,7 @@ QUALITY_BATCH_SIZE = 16  # was 64; reduced because PrefilterKNN[backend="torch"]
 @dataclass(frozen=True)
 class QualityStats:
     """Mean quality metrics at one k. ``metrics.accumulate_metrics`` already
-    computes all four per batch; emit them all instead of discarding
+    computes all four per batch, so all four are emitted
     precision/mrr."""
 
     recall: float

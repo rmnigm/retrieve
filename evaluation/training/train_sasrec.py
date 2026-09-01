@@ -1,3 +1,13 @@
+"""gSASRec trainer — produces the checkpoints the sequential benchmarks encode with.
+
+bf16 autocast + gBCE + fused AdamW, chunked full-catalog eval every ``eval_every``
+epochs, best-metric checkpointing with resumable RNG state. Note TF32 is *enabled*
+here, unlike the benchmark harness which pins it off for measurement determinism.
+
+Usage, the config surface, and what a finished run writes out:
+docs/system/datasets.md § Training.
+"""
+
 from __future__ import annotations
 
 import dataclasses

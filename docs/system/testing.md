@@ -1,5 +1,3 @@
-<!-- claude code generated file -->
-
 # `retrieve` testing
 
 Live reference for the `retrieve` test suite. Covers layout, fixtures,
@@ -34,22 +32,23 @@ retrieve/tests/
 │   ├── test_linr.py                (PostfilterKNN, PostfilterKNNInt8, PrefilterKNN, OneBitKNN, SimHashKNN × torch / Triton)
 │   ├── test_quantize.py            (int8, OPORP, popcount)
 │   ├── test_retrieval_utils.py     (FullScanKNN, post_filter_topk)
-│   ├── test_silvertorch.py         (SilverTorch, all three filter_modes: none / bloom / exact)
+│   ├── test_silvertorch.py         (SilverTorch × filter_mode {none,bloom,exact} × backend {triton,torch,cuda})
 │   ├── test_topk_util.py           (masked_topk / counts_to_valid)
-│   └── test_tune_smoke.py          (one tiny sweep point per tune-kernels spec; CUDA-gated)
-├── parity/                # Triton kernel vs pure-torch reference
-│   ├── conftest.py        # assert_topk_matches helper
+│   └── test_tune_smoke.py          (one tiny sweep point per tune-kernels spec, all 8; CUDA-gated)
+├── parity/                # kernel vs pure-torch reference
+│   ├── conftest.py        # assert_topk_matches + ref_cps_phase23
 │   ├── test_bloom_compact.py
 │   ├── test_bloom_match.py
 │   ├── test_clause_compact.py
 │   ├── test_clause_mask.py
 │   ├── test_codesigned_probe_score.py
+│   ├── test_codesigned_probe_score_cuda.py  (CUDA backend vs ref *and* bit-exact vs Triton)
 │   ├── test_codesigned_probe_score_exact.py
 │   ├── test_fused_masked_knn_topk.py
 │   └── test_oporp_1bit_match_topk.py
 └── compile/               # torch.compile / torch.export gates
-    ├── test_silvertorch_compile.py # compiled == eager + zero graph breaks, all three filter_modes
-    └── test_export_kernel_ref.py   # torch.export preserves the triton_op kernel reference
+    ├── test_silvertorch_compile.py # compiled == eager + zero graph breaks, filter_mode × backend
+    └── test_export_kernel_ref.py   # torch.export preserves the kernel reference (triton_op + cuda custom_op)
 ```
 
 The split is **by purpose**, not by module:
@@ -58,17 +57,24 @@ The split is **by purpose**, not by module:
   The oracle is a hand-rolled torch reference (matmul + topk, broadcast
   subset, brute-force compaction). One file per public class or helper
   group.
-- `parity/` answers *"does the Triton kernel match the torch path on
-  the same inputs?"* The oracle is a pure-torch implementation living
-  inside the test file (`_ref`). One file per kernel.
+- `parity/` answers *"does the kernel match the torch path on the same
+  inputs?"* The oracle is a pure-torch implementation living inside the
+  test file (`_ref`), or — where two backends share one — in
+  `parity/conftest.py`. One file per kernel.
 - `compile/` answers *"does the compile/export machinery still see the
   kernels?"* — `test_silvertorch_compile.py` asserts the compiled
-  forward matches eager and captures with **zero graph breaks** on all
-  three filter_modes; `test_export_kernel_ref.py` exports a module
-  calling `codesigned_probe_score_exact` and asserts the exported graph
-  keeps a live reference to the Triton kernel *and* replays
-  bit-identically (the regression gate for the "`wrap_triton` stays
-  textually inline" invariant).
+  forward matches eager and captures with **zero graph breaks** across
+  nine `(filter_mode, backend, D)` rows: all three modes on `"triton"`
+  at `D=64`, and all three on `"cuda"` at both `D=64` and `D=128`
+  (whose `custom_op`s carry the same opacity contract, and where `D`
+  selects a different kernel instantiation);
+  `test_export_kernel_ref.py` exports a module
+  calling `codesigned_probe_score_exact` — on `"triton"` and on
+  `"cuda"` — and asserts the exported graph keeps a live reference to
+  the kernel *and* replays bit-identically. On triton that is the
+  regression gate for the "`wrap_triton` stays textually inline"
+  invariant; on cuda it is the gate that export keeps the C++ custom op
+  as one opaque node (there is no decomposed form to fall back on).
 
 A module that has both a torch and a Triton backend (like LiNR V1/V2/V3)
 appears in both trees: `test_linr.py` covers semantics, the parity
@@ -117,9 +123,34 @@ The CUDA gate is implemented as
 `skip` marker if CUDA is missing. No marker is needed on individual
 tests.
 
+A second, narrower gate covers the CUDA C++ backend:
+
+- `require_cps_cuda()` — call it from a test (or an `autouse` fixture)
+  that needs `SilverTorch(backend="cuda")`. It splits the two ways the
+  extension can be absent, and the split is the point:
+  - **no toolchain** (no CUDA device, or no `nvcc` on PATH / under
+    `$CUDA_HOME`) → `skip`. A machine can have a GPU and still lack
+    `nvcc`; the suite is expected to run there.
+  - **a toolchain that exists and failed to build** → `pytest.fail`
+    carrying the nvcc/ninja output. A compile error that silently skipped
+    is exactly what a broken first GPU run would look like, and it would
+    look green.
+
+  The first call pays the one-time JIT compile; later calls hit the
+  outcome memo in the wrapper (and the ninja cache). The wrapper also
+  checks the `nvcc` major against `torch.version.cuda` before building,
+  because `cpp_extension.load`'s JIT path never runs torch's own
+  `_check_cuda_version`.
+
+Note the import inside it is a full module path
+(`retrieve.kernels.silvertorch.codesigned_probe_score_cuda`) on purpose:
+the package `__init__` re-exports the *op* under the same name as the
+module, so a package-level import would bind the op and shadow the
+module.
+
 ### [`tests/parity/conftest.py`](../../retrieve/tests/parity/conftest.py)
 
-One helper:
+Three helpers:
 
 - `assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores, *,
   atol=1e-3, rtol=1e-3)` — the standard kernel-vs-torch assertion.
@@ -127,9 +158,45 @@ One helper:
   permutation differs between backends, so position-equality is not
   asserted) and **sorted descending scores** with `allclose` (with
   `-inf` replaced by 0 so padded rows still compare cleanly).
+- `assert_ids_equal_up_to_ties(ids_a, ids_b, scores)` — the id half of a
+  bit-exact backend comparison. The caller asserts
+  `torch.equal(scores_a, scores_b)` first and passes that tensor in; ids
+  must then be equal, or differ only at positions inside a run of tied
+  scores whose id multisets match. `torch.topk` documents its tie order
+  as "not guaranteed stable across invocations", and ties do occur in
+  this data (int32 dots of ~±1e5 over P≈768 → about one tied pair per
+  row), so a tie permutation is a top-K property, not a kernel bug.
+- `ref_cps_phase23(query, flat_items, item_codes, global_scale, k, *,
+  qb=None, bloom_sigs=None)` — the shared pure-torch reference for
+  SilverTorch phases 2+3: int8 × int8 → int32 dot with one global scale
+  and a per-row query scale, plus an optional row-wise bloom subset
+  test. Computed in fp32 because at these `D` the integer products fit
+  the fp32 mantissa exactly, so it is bit-identical to an int32
+  accumulator. Both the Triton and the CUDA parity suites score against
+  it — the CUDA backend consumes a *transposed* bloom index and a
+  cluster-major clause mask, but both predicates are boolean-identical to
+  the row-wise forms here, which is what makes one reference legitimate
+  for all of them.
 
 Use `assert_topk_matches` for any new parity test; do not write a
 position-equality assertion for fp32 score paths.
+
+**The one exception** is
+[`test_codesigned_probe_score_cuda.py`](../../retrieve/tests/parity/test_codesigned_probe_score_cuda.py),
+which asserts `torch.equal` on the **scores** between the CUDA and
+Triton backends (and `assert_ids_equal_up_to_ties` on the ids). That is
+deliberate and stronger than the tolerance-based comparison: the two
+backends are provably bit-identical on scores (exact int32 dot,
+boolean-identical predicate, same left-associated fp32 dequant — see
+[kernels.md](kernels.md#numerics-bit-identical-to-triton-and-how-that-is-kept)),
+so any score drift is a real regression rather than accumulator-order
+noise.
+It also covers the pieces that have no Triton analogue:
+`test_build_transposed_sigs_bits` checks the transposed layout bit by
+bit against the row-wise index, and `test_bloom_mask_matches_rowwise` /
+`test_clause_mask_matches_rowwise` check each phase-2 mask alone —
+unpacking every bit of the packed word against the torch predicate, at a
+`max_size` that is not a multiple of 64 so the pad tail is exercised.
 
 ## Conventions
 
@@ -190,7 +257,7 @@ module under test.
 | `masked_topk` / `counts_to_valid` | hand-built score/mask tensors per edge case (empty rows, `counts < k`, all-masked, `-inf` ties, `gather_ids` mapping, `pad_to_k` both ways) |
 | `bloom_hash` builders         | chunked `build_signatures` vs loop-free `build_query_signatures` row-wise equality (incl. across the chunk boundary via a monkeypatched batch size) |
 | `backend="torch"` vs `"triton"` | cross-backend agreement within each class (same module, both backends) |
-| `tune.py` specs               | one tiny regime per `KernelTuneSpec` runs end-to-end; registry covers all seven kernels |
+| `tune.py` specs               | one tiny regime per `KernelTuneSpec` runs end-to-end; registry covers all eight kernel specs (incl. the CUDA backend) |
 | `fused_masked_knn_topk`    | `compact_mask(mask)` → `bmm(q.unsqueeze(1), embs[ids].transpose(1,2)).squeeze(1)` → topk |
 | `oporp_1bit_match_topk`    | `popcount_int64(xor) → D - 2*hamming` → topk (bit-exact) |
 | `bloom_match`              | `(qb & sigs) == qb` per word, AND-reduced — computed on CPU to avoid tautology with the kernel-routed `BloomFilter.evaluate_mask`  |
@@ -198,7 +265,7 @@ module under test.
 | `clause_mask`              | Pure-torch `[B, N, C, A_max]` broadcast inlined as `_ref_mask` — intentionally materializes the intermediate this kernel exists to avoid; bit-exact via `torch.equal` since no compaction order ambiguity |
 | `clause_compact`           | `ExactAttributeFilter.evaluate_mask(...)` + `compact_mask` (the mask path itself routes to `clause_mask` on CUDA, so this transitively cross-checks both kernels) |
 | `codesigned_probe_score`   | `_ref_phase23` in the parity file: bloom subset + INT8 dequant + dot + topk |
-| `codesigned_probe_score_exact` | `_ref_phase23` in the parity file: exact AND-of-OR predicate + INT8 dequant + dot + topk |
+| `codesigned_probe_score_exact` | `ref_cps_phase23` in `parity/conftest.py`, exact-predicate keywords: `clause_subset_match` over the gathered attrs + INT8 dequant + dot + topk. The cuda twin (`codesigned_probe_score_exact_cuda`) shares it, and additionally asserts `torch.equal` against the Triton op |
 
 ## What each correctness file asserts
 
@@ -359,7 +426,11 @@ LiNR V1, V2, V3, V4 plus `SimHashKNN` in both backends.
 
 ### [`test_silvertorch.py`](../../retrieve/tests/correctness/test_silvertorch.py)
 
-`SilverTorch` — all three filter modes (`"none"`, `"bloom"`, `"exact"`) in one file.
+`SilverTorch` — all three filter modes (`"none"`, `"bloom"`, `"exact"`)
+across all three backends (`"torch"`, `"triton"`, `"cuda"`) in one file.
+Cuda cells call `require_cps_cuda()`, which skips only when there is no
+toolchain at all (a build *failure* fails the test); every mode/backend
+combination is otherwise exercised.
 
 - Output shape `(B, K)` with `query_clause_attrs`, without it, on
   `filter_mode="none"`, and on `filter_mode="exact"`; ids long, scores
@@ -388,8 +459,13 @@ LiNR V1, V2, V3, V4 plus `SimHashKNN` in both backends.
   `min(k, P)` columns, no pad). Passing `query_clause_attrs` together
   with `candidate_ids` raises `ValueError` (the candidates path would
   silently skip the fused filter otherwise).
-- Cross-backend (`torch` vs `triton`) agreement on all three modes plus
-  reverse clauses on `filter_mode="exact"`.
+- Cross-backend agreement: `torch` vs `triton` and `cuda` vs `triton`,
+  each on all three modes plus reverse clauses on
+  `filter_mode="exact"`. Layer-level cross-backend checks
+  compare **id sets** (accumulator order may flip ties); the
+  kernel-level parity suite separately proves cuda↔triton scores
+  bit-identical on a shared probe family (and ids equal up to tie
+  permutation).
 - `build_silvertorch` builder round-trips (bloom / no-filter / exact /
   torch backend).
 - Edge case: `n_lists = N` (one item per cluster) → recall ≥ 0.85 at
@@ -435,7 +511,7 @@ epilogue every layer's torch path routes through.
 
 ### [`test_tune_smoke.py`](../../retrieve/tests/correctness/test_tune_smoke.py)
 
-CUDA-gated tuner smoke: `KERNELS` registry covers all seven kernel
+CUDA-gated tuner smoke: `KERNELS` registry covers all eight kernel
 specs, and each spec's `run(make_inputs(dev, smoke_regime), config)`
 executes one tiny sweep point — schema drift between `tune.py` and the
 kernel `_impl`s breaks CI instead of a tuning session.
@@ -457,6 +533,7 @@ exact-by-construction kernels, which use stricter assertions.
 | [`test_clause_compact.py`](../../retrieve/tests/parity/test_clause_compact.py)               | `clause_compact`            | `ExactAttributeFilter.evaluate_mask(...)` + `compact_mask` (transitively goes through `clause_mask` on CUDA) | row-set match (kernel order is unspecified — atomic stream compaction); cases for reverse clauses, all-inactive query, no-passing-items, `B=1` grid corner |
 | [`test_codesigned_probe_score.py`](../../retrieve/tests/parity/test_codesigned_probe_score.py) | `codesigned_probe_score`  | `_ref_phase23`: bloom subset + INT8 dequant + dot + topk | the SilverTorch bloom-fused path; cases for `(qb, no qb)` |
 | [`test_codesigned_probe_score_exact.py`](../../retrieve/tests/parity/test_codesigned_probe_score_exact.py) | `codesigned_probe_score_exact` | `_ref_phase23`: exact AND-of-OR predicate over narrow attrs + INT8 dequant + dot + topk | the SilverTorch exact-fused path; cases for active vs all-inactive query clauses |
+| [`test_codesigned_probe_score_cuda.py`](../../retrieve/tests/parity/test_codesigned_probe_score_cuda.py) | `codesigned_probe_score_cuda`, `..._bloom_cuda`, `..._exact_cuda` | shared `ref_cps_phase23` **and** the Triton kernels themselves | two gates per filter mode: tolerance-based vs the reference, and vs Triton at `D ∈ {64, 128, 256}` × `(bloom, no bloom)` / × `(reverse, no reverse)` for exact — `torch.equal` on scores, `assert_ids_equal_up_to_ties` on ids. Also covers `build_transposed_sigs` bit layout, both phase-2 mask kernels alone vs their torch predicates (with a non-multiple-of-64 `max_size` for the pad tail), config plumbing (`block_p`/`num_warps`/`unroll` change nothing observable), the launcher's must-reject configs, the tiny-`max_size` carry-loop stress, and `opcheck` at `d ∈ {64, 128, 256, 96}`. Gated by `require_cps_cuda()` |
 
 ## Adding a new test
 

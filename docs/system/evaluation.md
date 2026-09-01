@@ -1,5 +1,3 @@
-<!-- claude code generated file -->
-
 # `evaluation/` retrieval harness
 
 Live reference for the retrieval benchmark used to compare algorithms
@@ -8,10 +6,12 @@ config format, the measurement methodology, the output schema, and the
 extension points for adding a new algorithm, config, or dataset.
 
 For the algorithm internals (what each `forward(query)` does) see
-[kernels.md](kernels.md) and [architecture.md](architecture.md). For the
-training pipeline that produces the SASRec checkpoints consumed here, see
-[checkpoints.md](checkpoints.md). The correctness-only test suite that
-gates kernel changes is documented in [testing.md](testing.md).
+[kernels.md](kernels.md) and [architecture.md](architecture.md). For how
+the datasets on disk got there and how the SASRec checkpoints are
+trained, see [datasets.md](datasets.md); for the checkpoint inventory
+itself, [checkpoints.md](checkpoints.md). The correctness-only test
+suite that gates kernel changes is documented in
+[testing.md](testing.md).
 
 ## Scope
 
@@ -36,14 +36,27 @@ pass is cached on disk by
 **before** caching so the cache scales with the limited user set), so
 the N subprocesses don't pay N × encode cost.
 
+The cache write is guarded by a free-disk budget: if the estimated blob
+would exceed `0.7 × free − 4 GiB`, caching is **skipped silently** and
+every subsequent algo subprocess re-encodes from scratch (minutes each).
+A campaign that feels inexplicably slow on a full disk is usually this.
+
 The driver dispatches by config shape across three datasets:
 
-| Config shape                              | Mode                                   |
-|-------------------------------------------|----------------------------------------|
-| `checkpoint` set, `query_emb_path` unset  | Encode queries via SASRec (yambda/goodreads) |
-| `query_emb_path` set, `checkpoint` unset  | Load pre-encoded text embeddings (arxiv) |
-| `filters: null`                           | No filter loop (yambda)                |
-| `filters: {clause, bloom}` block          | Filter sweeps (goodreads, arxiv)       |
+| Config shape                     | Mode                                         |
+|----------------------------------|----------------------------------------------|
+| `checkpoint` set                 | Encode queries via SASRec (yambda/goodreads) |
+| `checkpoint` unset (`null`)      | Load pre-encoded text embeddings (arxiv)     |
+| `filters: null`                  | No filter loop (yambda)                      |
+| `filters: {clause, bloom}` block | Filter sweeps (goodreads, arxiv)             |
+
+The query-source branch keys on **`checkpoint` alone**
+([`queries_cache.load_or_cache_queries`](../../evaluation/retrieval/queries_cache.py)).
+`query_emb_path` only names *where* the pre-encoded tensor lives on the
+arxiv path; it does not select the path, and no shipped config sets it.
+Setting both `checkpoint` and `query_emb_path` is not a supported
+combination — the cache layer would take the SASRec branch and
+`query_emb_path` would be ignored.
 
 For each `(filter_kind, sweep, algo, backend, params, K, batch_size)`
 cell:
@@ -65,10 +78,13 @@ Cell eligibility is declarative (`SUPPORTED_FILTER_KINDS` +
 loudly — silently-vanishing cells were a real failure mode and are gone.
 Correctness of the library itself lives in
 [`retrieve/tests/`](../../retrieve/tests/) and gates CI separately;
-the harness's own CPU-only unit tests live in
-[`evaluation/retrieval/tests/`](../../evaluation/retrieval/tests/)
-(metrics, sweep helpers, oracle fingerprint, config loader — run with
-`cd evaluation && uv run pytest retrieval/tests/ -v`, no GPU needed).
+the harness's own unit tests live in
+[`evaluation/retrieval/tests/`](../../evaluation/retrieval/tests/) — run
+with `cd evaluation && uv run pytest retrieval/tests/ -v`. Four of the
+five files (metrics, sweep helpers, oracle fingerprint, config loader)
+are CPU-only; `test_silvertorch_algo_reverse.py` allocates on `cuda` and
+fails rather than skips on a CPU box, so deselect it there
+(`--ignore=retrieval/tests/test_silvertorch_algo_reverse.py`).
 
 ## Files
 
@@ -99,7 +115,7 @@ evaluation/retrieval/
 │   ├── linr_v3.py             # LinrV3Algo — V3 → V2 cascade (1-bit prefilter, fp32 rerank)
 │   ├── linr_v4.py             # LinrV4Algo — single-stage int8 dense (PostfilterKNNInt8)
 │   └── silvertorch.py         # SilvertorchAlgo — IVF + INT8 + (none / bloom / exact) filter_mode
-└── tests/                     # CPU-only unit tests (no GPU required)
+└── tests/                     # harness unit tests (all CPU-only except test_silvertorch_algo_reverse.py)
     ├── test_config.py
     ├── test_metrics.py
     ├── test_oracle.py
@@ -213,20 +229,20 @@ see [filtering.md](filtering.md) for the filter API.
 | Field | Type | Purpose |
 |---|---|---|
 | `checkpoint` | path | SASRec `best_model.pt`. Required for yambda/goodreads, omit for arxiv. The trainer writes a sibling `config.json` which the loader reads for hyperparams; legacy 500M ckpts without one fall back to `D128_DROP05_DEFAULTS` in [`encode.py`](../../evaluation/retrieval/encode.py). |
-| `query_emb_path` | path or `null` | Pre-encoded query tensor for arxiv. Defaults to `<data_dir>/<content_subdir>/query_emb.pt` when unset. |
+| `query_emb_path` | path or `null` | Override for the pre-encoded query tensor location on the arxiv path. Defaults to `<data_dir>/<content_subdir>/query_emb.pt`. No shipped config sets it; it does **not** select the pre-encoded path (`checkpoint` does). |
 | `data_dir` | path | Holds `item_id_map.json`, `<split>.parquet`, optional `eval_split.parquet` + filter attrs. |
 | `content_subdir` | str | Subdir under `data_dir` for `{text_emb,query_emb}.pt` + meta sidecars (arxiv only). Default `content`; arxiv ships `content_d64`, `content_d128`, `content` (= d=256). Sharded synth catalogs (`shard_index.json`) are reassembled on load. |
 | `gt_subdir` | str | Subdir under `data_dir` for `gt_topk_v3_<sweep>.pt` oracle caches. Default `gt`. Varying it per dim keeps caches tidy; **correctness no longer depends on it** — the oracle blob carries a content fingerprint and stale caches recompute automatically. |
 | `output` | dir path | Directory for the per-algo JSONs. The orchestrator requires it to be set (a `output: null` config exits with a clear error rather than a bare TypeError). |
-| `split` | str | `test` (default) or `val`. |
-| `device` | str | `cuda` (only meaningful value today). |
+| `split` | str | `test` (default) or `val`. Inert on the arxiv path (the held-out set is fixed at `heldout.parquet`); it selects the parquet on SASRec paths and is part of the encode-cache filename. |
+| `device` | str | `cuda`. The only supported value — output rows hard-code `"device": "cuda"` regardless of what is set here, so a `cpu` config produces mislabelled rows rather than a CPU run. |
 | `ks` | list[int] | K-cutoffs. Each emits `recall@K`, `ndcg@K`, `precision@K`, `mrr@K` on its own row. `max(ks)` is the oracle depth `K_GT`. |
 | `batch_sizes` | list[int] | Perf-pass batch sizes. Quality is invariant to bs and computed once per `(algo, params, k)`; emitted on every bs row. |
 | `seed` | int | Drives `torch.manual_seed`, `torch.cuda.manual_seed_all`, the perf-query-pool generator, and any algo seeds in `algo_params`. |
 | `encode.batch_size` / `num_workers` / `max_seq_length` | | SASRec encode-pass knobs; `max_seq_length` must match the trained checkpoint (it is part of the cache key). |
 | `algorithms` | list[str] | Subset of [`ALGORITHMS`](../../evaluation/retrieval/algos/__init__.py). |
 | `algo_params` | dict[str, list[dict]] | Per-algo parameter combos; no implicit cross-product. |
-| `backends` | list ("triton"/"torch") | Backend fan-out: each backend adds a row per cell with a `backend` column (default `[triton]`). |
+| `backends` | list of `triton` / `torch` / `cuda` | Backend fan-out: each backend adds a row per cell with a `backend` column (default `[triton]`). `cuda` only changes what runs for `silvertorch` — see [The `cuda` backend in sweeps](#the-cuda-backend-in-sweeps). |
 | `filters` | dict or `null` | Optional filter-bench block. See [filtering.md](filtering.md). |
 | `users_limit` | int or `null` | Optional cap on users for ALL cells. Goodreads has 313k test users; cap to e.g. 10000 to speed runs up. Part of the encode-cache key. |
 
@@ -245,8 +261,8 @@ uv run evaluate \
     --config config/<dataset>/<name>.yaml \
     --algo <name> \
     --output <output-dir>/<algo>.json \
-    [--filter-kind {none|clause|bloom} ...] \
-    [--backend {triton|torch} ...] \
+    [--filter-kind <none|clause|bloom> ...] \
+    [--backend {triton|torch|cuda} ...] \
     [--sweep <sweep_name>] \
     [--skip-quality]
 ```
@@ -254,6 +270,9 @@ uv run evaluate \
 `--algo` is required and runs a single algorithm — the orchestrator is
 what loops over the YAML's `algorithms` list. `--filter-kind` and
 `--backend` are repeatable and narrow the run; empty = all configured.
+`--backend` is a `click.Choice` and rejects unknown values;
+`--filter-kind` is **not** validated — a typo'd kind silently matches
+no configured filter and the run writes an empty JSON.
 `--sweep` narrows to a single sweep — useful for iterating on one cell
 without re-encoding queries. `--skip-quality` drops the quality stream
 (quality columns → NaN; the oracle is neither loaded nor built); perf
@@ -264,13 +283,16 @@ rows still emit.
 ```
 uv run run-evaluation --eval-type {filter|quality|param-sweeps} [--resume|--force]
 uv run run-evaluation CONFIG [CONFIG ...] [--stage] [--resume|--force]
+                      [--logdir PATH]
                       [-- extra args forwarded to evaluate]
 ```
 
 `--eval-type` presets expand to the config lists in `EVAL_TYPES`
-(`filter` → the six arxiv/goodreads filter YAMLs; `quality` → the six
-quality YAMLs + staging; `param-sweeps` → the two deep-sweep YAMLs +
-staging). Positional configs accept globs. `--resume` skips any
+(`filter` → the six arxiv/goodreads filter YAMLs, **no** staging;
+`quality` → the six quality YAMLs + staging; `param-sweeps` → the two
+deep-sweep YAMLs + staging). The `yambda-500m` / `yambda-5b` configs are
+not covered by any preset — pass them positionally. Positional configs
+accept globs; `--logdir` relocates the run-log tree. `--resume` skips any
 `(config, algo)` whose output JSON exists and parses as a non-empty
 list; `--force` overwrites; with neither, existing outputs abort the
 run up front. Everything after `--` is forwarded verbatim to each
@@ -341,9 +363,50 @@ continues after a fix).
 `make_mask(filter_mod, qa_narrow)` (in
 [`algos/filter.py`](../../evaluation/retrieval/algos/filter.py)) is the
 one-line helper the mask-based algos call: it routes per-batch query
-attrs through `filter_mod.evaluate_mask`, then forces the padding-row
-sentinel `mask[:, 0] = False` so reverse clauses don't admit the
-padding item the oracle deliberately excludes.
+attrs through `filter_mod.evaluate_mask` and returns `None` when either
+input is `None` (unfiltered cell or pure-IVF batch). No item-0 fixup is
+needed — the training-side padding row is dropped at the loaders
+boundary, so the library is 0-indexed over real items throughout.
+
+### The `cuda` backend in sweeps
+
+`backends: [..., cuda]` is not a uniform third measurement. Two things
+about it are easy to misread:
+
+**Only `silvertorch` actually changes.** `backend="cuda"` selects a real
+CUDA C++ path inside `SilverTorch` only. Every other layer dispatches
+`if backend == "triton": … else: <torch>`, so a `cuda` row for
+`linr_v1`/`v2`/`v3`/`v4` is a **torch-path measurement labelled
+`backend: "cuda"`**. Do not read those rows as a CUDA-vs-Triton
+comparison. See
+[architecture.md](architecture.md#backend-dispatch) for the dispatch
+table.
+
+**Filter modules are built with Triton on `cuda` cells.** There are no
+CUDA C++ filter kernels — only SilverTorch's fused probe scoring exists
+in C++. So `_build_filter_modules` maps `cuda → triton` when
+constructing the standalone `FilterModule`s, keeping the filter kernel
+GPU-fast instead of silently dropping to torch. Consequence worth
+knowing when reading memory columns: a config with
+`backends: [triton, cuda, torch]` builds **two identical Triton filter
+indexes** (one keyed `"triton"`, one keyed `"cuda"`), so filter-index
+GPU memory for the run is doubled.
+
+The oracle filter is always exact and always Triton-or-first-backend for
+the same reason; bloom's false positives must never leak into ground
+truth.
+
+**`silvertorch` + `clause` + `cuda` now builds.** It used to be a
+footgun: `SUPPORTED_FILTER_KINDS` is backend-blind and `SilverTorch`
+rejected `filter_mode="exact"` under `backend="cuda"` at construction, so
+a clause sweep with `--backend cuda` killed the run. The cuda backend has
+a clause-mask kernel now, so clause cells build and run on it like any
+other. The shipped
+[`config/deep_sweeps/arxiv-d128-silvertorch.yaml`](../../evaluation/config/deep_sweeps/arxiv-d128-silvertorch.yaml)
+is still bloom-only; add cuda to a clause config only after the
+correctness gates in
+[cuda-silvertorch-handoff.md](../plans/cuda-silvertorch-handoff.md) §5
+have passed on the target box.
 
 ## Measurement methodology
 
@@ -389,9 +452,8 @@ shapes + dtypes + a fixed 64-row linspace sample of `item_embs`,
 content changes (a different dim off the same `data_dir`, regenerated
 attrs, a retrained checkpoint, a changed `users_limit`) invalidate the
 cache instead of silently reusing stale ground truth (the failure mode
-behind the goodreads stale-cache incident). Legacy `gt_topk_v2_`
-bare-tensor caches are ignored by name and can be deleted; the first
-run after the v3 change rebuilds each sweep's oracle once.
+behind the goodreads stale-cache incident). These caches are local
+build artifacts — delete the `gt_subdir` to force a rebuild.
 
 ### Perf pass
 
@@ -407,8 +469,9 @@ at `rep = 200 ms` and **auto-extending** the budget until at least
 `MIN_SAMPLES = 30` iterations fit (capped at `MAX_REP_MS = 3000`) —
 otherwise slow kernels collapse to a single cold sample with
 `median == p20 == p80`. Returns a `PerfStats(median_ms, p20_ms, p80_ms,
-peak_mib, transient_mib)`; Stage 4a fields (`mean_ms`, `p99_ms`,
-`throughput_qps`, per-query samples) land on the dataclass additively.
+peak_mib, transient_mib)`. The dataclass is the extension point: new
+statistics are added as fields and picked up by `_make_perf_row`
+without changing the measurement path.
 
 Before timing, `_autotune_prewarm` calls the forward once per batch
 size: the kernels ship offline-tuned `DEFAULT_CONFIG`s (no runtime
@@ -467,7 +530,7 @@ are never renamed; new fields are additive.
 | `filter_kind` | str | `none`, `clause`, or `bloom`. |
 | `sweep` | str | Filter sweep name from the config (e.g. `c0_genre`), or `full_scan` on yambda. |
 | `impl` | str | Algorithm name. |
-| `backend` | str | `triton` or `torch` — the `retrieve`-layer backend for this row. |
+| `backend` | str | `triton`, `torch`, or `cuda` — the `retrieve`-layer backend *requested* for this row. For anything but `silvertorch`, a `cuda` row ran the torch path; see [The `cuda` backend in sweeps](#the-cuda-backend-in-sweeps). |
 | `device` | str | Always `"cuda"` (the CPU-timing path was removed; the column stays for schema stability). |
 | `seed` | int | The `cfg.seed` that produced this row. |
 | `batch_size`, `k` | int | First-class columns. |
@@ -484,6 +547,15 @@ are never renamed; new fields are additive.
 Cells whose `(algo, filter_kind)` pair is unsupported per
 `SUPPORTED_FILTER_KINDS` are skipped up front with a log line — no stub
 row. Construction failures no longer skip silently; they kill the run.
+
+> **Checked-in results predate part of this schema.** The files under
+> [`evaluation/results/`](../../evaluation/results/) were produced before
+> `precision@k`, `mrr@k`, and the `extra.gpu` / `extra.torch` /
+> `extra.commit` provenance columns were emitted; their rows carry only
+> `recall@k` / `ndcg@k` and `extra: {params: …}`. Code that joins on the
+> full schema must tolerate missing keys, or the campaign needs a rerun.
+> `extra.commit` is best-effort: `git rev-parse` run from the harness
+> directory, falling back to `"unknown"`.
 
 ## How to run
 
@@ -591,7 +663,7 @@ For filter sweeps either layout adds:
 ```
 data/<dataset>/
 ├── item_attrs_narrow.pt
-├── item_attrs_wide.pt           # currently unused; kept for future wide bloom sweeps
+├── item_attrs_wide.pt           # DEAD: never loaded by load_filter_assets; wide-shelf query columns are explicitly skipped
 ├── clause_is_reverse_narrow.pt
 ├── eval_split.parquet
 ├── ... (per-clause vocab JSONs)
@@ -628,9 +700,11 @@ with `RETRIEVE_DATA_ROOT=/some/path`.
 
 - [architecture.md](architecture.md) — package layout and the
   `RetrievalModule` / `FilterModule` contracts.
-- [kernels.md](kernels.md) — Triton kernel internals.
+- [kernels.md](kernels.md) — Triton and CUDA C++ kernel internals.
 - [filtering.md](filtering.md) — filter API and the with-filters story.
-- [checkpoints.md](checkpoints.md) — the trainer pipeline that produces
-  the checkpoints consumed here.
+- [datasets.md](datasets.md) — the ETL that produces the on-disk layout
+  read here, and the SASRec training pipeline.
+- [checkpoints.md](checkpoints.md) — the trained checkpoint inventory
+  and the HF Hub workflow.
 - [testing.md](testing.md) — the library correctness suite (separate
   from this perf harness).

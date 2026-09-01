@@ -37,7 +37,6 @@ class PerfStats:
     p80_ms: float
     peak_mib: float
     transient_mib: float
-    # Stage 4a fields land here (mean_ms, p99_ms, throughput_qps, samples) —
     # additive, no call-site churn.
 
     def as_row_fields(self) -> dict[str, float]:
@@ -66,13 +65,10 @@ def peak_bytes() -> int:
 
 
 def pin_precision_globals() -> None:
-    """Pin TF32/matmul-precision flags so two runs on the same box don't drift.
+    """Pin TF32/matmul-precision so two runs on the same box can't drift.
 
-    Without this, anything earlier in the process (an upstream import, an
-    unrelated model load) could flip ``allow_tf32`` and silently change both
-    numerics and throughput. Eval rows must be comparable across runs, so we
-    pin to the strict path. Callers that explicitly want TF32 can override
-    after this returns.
+    Anything earlier in the process could have flipped ``allow_tf32``, changing both
+    numerics and throughput. Callers who want TF32 override after this returns.
     """
     torch.set_float32_matmul_precision("highest")
     if torch.cuda.is_available():
@@ -81,13 +77,9 @@ def pin_precision_globals() -> None:
 
 
 def warm_gpu_once(device: torch.device) -> None:
-    """One-shot pre-warm to absorb cuBLAS / kernel-loader / pinned-mem init.
-
-    The very first GPU op in a process pays cuBLAS-handle init, kernel-module
-    load, and pinned-memory allocator setup — typically 0.5–1.5 s. Per-cell
-    warmup loops absorb this on whichever cell happens to run first, which
-    is unfair to that cell. Run a tiny mat-mul once at top-of-suite so the
-    cost is paid outside any measured window.
+    """One-shot pre-warm so process-level GPU init (cuBLAS handle, kernel module load,
+    pinned-memory allocator — typically 0.5-1.5 s) is paid outside any measured window,
+    rather than by whichever cell happens to run first.
     """
     if device.type != "cuda" or not torch.cuda.is_available():
         return
@@ -110,24 +102,18 @@ def measure_forward_cuda(
 ) -> PerfStats:
     """Warmup, capture transient peak in a clean window, then time via do_bench.
 
-    The peak window does NOT use ``do_bench`` because do_bench allocates a ~256 MiB
-    L2 cache-buster each call, which would dominate the reported transient peak
-    for any small kernel. We measure memory in isolation, then time separately.
+    Three details that look like mistakes but are not (full methodology in
+    docs/system/evaluation.md § Perf pass):
 
-    The timing window auto-extends ``rep_ms`` (capped at ``max_rep_ms``) until
-    at least ``min_samples`` complete iterations fit. Without this, kernels
-    whose single-call latency exceeds ``rep_ms`` collapse to one sample and
-    return ``median == p20 == p80`` — a cold-start fingerprint that's
-    indistinguishable from a real measurement. The do_bench ``warmup`` budget
-    is set to ~half the rep so any cold-start cost (e.g. a last-mile autotune
-    config that escaped the upstream warmup) is absorbed before timing.
-
-    No ``empty_cache()`` between warmup and timing: it would force a
-    ``cudaMalloc`` on the first measured call, which lands inside do_bench's
-    window. Pool reuse across warmup → mem-window → timing is the desired
-    behaviour for steady-state numbers.
-
-    Returns a ``PerfStats``.
+    - The peak window does NOT use ``do_bench``: its ~256 MiB L2 cache-buster would
+      dominate the reported transient peak for any small kernel.
+    - The timing window auto-extends ``rep_ms`` (capped at ``max_rep_ms``) until at
+      least ``min_samples`` iterations fit. Otherwise a kernel slower than ``rep_ms``
+      returns ``median == p20 == p80`` — a cold-start fingerprint indistinguishable
+      from a real measurement.
+    - No ``empty_cache()`` anywhere: it would force a ``cudaMalloc`` inside the
+      measured window. Pool reuse across warmup -> mem window -> timing is what we
+      want for steady-state numbers.
     """
     # Warmup must happen BEFORE the peak counter reset, otherwise autotune
     # compile-window peak pollutes the metric.
@@ -136,10 +122,9 @@ def measure_forward_cuda(
     if torch.cuda.is_available():
         torch.cuda.synchronize()
 
-    # Memory window. ``empty_cache()`` is intentionally NOT called here:
-    # ``memory_allocated()`` is unaffected by it (it only releases pooled-free
-    # blocks), and dropping the pool would conflate first-malloc latency into
-    # the next mem-window iteration's transient.
+    # Memory window. empty_cache() is deliberately NOT called: it would conflate
+    # first-malloc latency into the next iteration's transient, and
+    # memory_allocated() is unaffected by it anyway.
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
     baseline = allocated_bytes()

@@ -76,7 +76,6 @@ def _clause_compact_kernel(
         A_MAX=A_MAX,
     )
 
-    # Stream compaction: cumsum gives intra-tile offsets; atomic_add gives base.
     common.compact_store(
         pass_mask, n_offsets, counts_ptr, out_indices_ptr, bid, stride_ob, stride_on
     )
@@ -183,5 +182,5 @@ def clause_compact(
     launch = _clause_compact_prep(
         item_clause_attrs, clause_is_reverse, query_clause_attrs, cfg=DEFAULT_CONFIG
     )
-    wrap_triton(_clause_compact_kernel)[launch.grid](**launch.kwargs)  # inline, K2 invariant
+    wrap_triton(_clause_compact_kernel)[launch.grid](**launch.kwargs)  # keep inline (export)
     return launch.out_indices, launch.counts

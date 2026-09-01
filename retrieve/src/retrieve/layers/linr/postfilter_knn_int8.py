@@ -67,7 +67,6 @@ class PostfilterKNNInt8(RetrievalModule):
         # int32 → fp16 for topk: >>5 brings worst-case |dot| ≈ D·127² (~2²¹) under fp16's ~2¹⁶ range
         # while preserving order; fp16 also halves CUB radix-select passes (2 vs 4).
         scores = (dots >> 5).to(torch.float16)
-        # Mask-optional dense form; the torch-export mode-split will dissolve this branch.
         if mask is not None:
             return masked_topk(scores, self.k, valid=mask)
         return masked_topk(scores, self.k)

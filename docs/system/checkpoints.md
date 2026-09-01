@@ -1,7 +1,5 @@
 # GSASRec checkpoints
 
-> Previously: `retrieve/docs/checkpoints.md` (originally `evaluation/CHECKPOINTS.md`).
-
 Trained on Yambda **500M** Listen+ (50% played-ratio threshold). All runs share
 the same architecture and gBCE loss; they differ in `embedding_dim` (and
 `ffn_hidden_dim = 4 × embedding_dim`) and dropout. Eval is full catalog ranking
@@ -11,8 +9,13 @@ against all 1,866,170 items, no history masking — matches the
 Checkpoints now live under each dataset's data dir:
 `data/<dataset>/checkpoints/<ckpt-id>/` (e.g.
 `data/yambda-500m/checkpoints/gsasrec-d128-drop0.5/`). The eval CLI
-configs in [`evaluation/conf/`](../../evaluation/conf/) point at these
+configs in [`evaluation/config/`](../../evaluation/config/) point at these
 paths verbatim.
+
+This document is the **inventory** — which checkpoints exist, how they
+scored, and how to move them around. For how the trainer itself works
+(the loss, the loop, the config, what a finished run writes out) see
+[datasets.md](datasets.md#training--evaluationtraining).
 
 ## Available checkpoints
 
@@ -66,7 +69,7 @@ from training.model import GSASRec
 DATA_DIR = Path("data/yambda-500m")
 CKPT_DIR = DATA_DIR / "checkpoints/gsasrec-d128-drop0.5"
 
-# num_items comes from the data dir's id map (written by `data/yambda.py` prep).
+# num_items comes from the data dir's id map (written by `eval_datasets/yambda.py` prep).
 with open(DATA_DIR / "item_id_map.json") as f:
     num_items = len(json.load(f))
 
@@ -101,7 +104,7 @@ torch.save(item_embs, CKPT_DIR / "item_embs.pt")
 Use this tensor as the index for ANN search, dot-product retrieval, or
 clustering. The id mapping (dense_id → raw_yandex_id) is the
 `item_id_map.json` written by
-the [`data/yambda.py`](../../evaluation/data/yambda.py) `prep` subcommand
+the [`eval_datasets/yambda.py`](../../evaluation/eval_datasets/yambda.py) `prep` subcommand
 (the library function `preprocess()` returns `Data.item_id_to_idx` in
 memory; the CLI persists it to disk alongside the parquets).
 
@@ -183,7 +186,7 @@ The `.pt` files are **not** stored in git (see `.gitignore`). HF storage is
 **one repo per dataset**, with all checkpoints living under that repo's
 `checkpoints/<ckpt-id>/` subtree (alongside the dataset's eval inputs).
 The registry lives in
-[`evaluation/data/hf_io.py`](../../evaluation/data/hf_io.py) as
+[`evaluation/eval_datasets/hf_io.py`](../../evaluation/eval_datasets/hf_io.py) as
 `EVAL_REPOS`:
 
 | Dataset key | HF repo (dataset type) |
@@ -198,7 +201,7 @@ A given checkpoint then lands at
 own model repo. Local layout mirrors that:
 `data/<dataset>/checkpoints/<ckpt-id>/`. Override the local root with
 `RETRIEVE_DATA_ROOT=/some/path`; otherwise it resolves to
-`evaluation/data/`.
+`evaluation/eval_datasets/`.
 
 ### Auth (one-time setup)
 
@@ -215,7 +218,7 @@ For private repos you need a token with **read** access to download and
 `hf_io.download_checkpoint` pulls a single `checkpoints/<ckpt-id>/` subtree:
 
 ```python
-from data.hf_io import download_checkpoint
+from eval_datasets.hf_io import download_checkpoint
 
 local = download_checkpoint("yambda-500m", "gsasrec-d128-drop0.5")
 # → data/yambda-500m/checkpoints/gsasrec-d128-drop0.5/

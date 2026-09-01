@@ -26,9 +26,7 @@ from huggingface_hub import HfApi, snapshot_download
 from huggingface_hub.utils import HfHubHTTPError
 from loguru import logger
 
-# ---------------------------------------------------------------------------
 # Registry
-# ---------------------------------------------------------------------------
 
 EVAL_REPOS: dict[str, str] = {
     "arxiv-papers":      "pinkmeme/eval-arxiv-papers",
@@ -82,9 +80,7 @@ CKPT_ALWAYS_IGNORE: list[str] = [
 ]
 
 
-# ---------------------------------------------------------------------------
 # Path helpers
-# ---------------------------------------------------------------------------
 
 def _repo_root() -> Path:
     # evaluation/data/hf_io.py -> evaluation/
@@ -117,9 +113,7 @@ def _require_dataset(dataset: str) -> str:
         raise ValueError(f"Unknown dataset {dataset!r}. Known: {avail}") from e
 
 
-# ---------------------------------------------------------------------------
 # Downloads
-# ---------------------------------------------------------------------------
 
 def download_eval_dataset(
     dataset: str,
@@ -223,9 +217,7 @@ def download_raw_file(source: str, filename: str) -> Path:
     )
 
 
-# ---------------------------------------------------------------------------
 # Uploads
-# ---------------------------------------------------------------------------
 
 def _ignored(rel: str, name: str, patterns: list[str]) -> bool:
     """Match `rel` (posix relative path) against fnmatch patterns. Handles
@@ -400,9 +392,7 @@ def upload_checkpoint(
     logger.success("Uploaded https://huggingface.co/datasets/{}/tree/main/checkpoints/{}", repo_id, ckpt_id)
 
 
-# ---------------------------------------------------------------------------
 # CLI entry points (used by pyproject.toml [project.scripts])
-# ---------------------------------------------------------------------------
 
 def fetch_cli() -> None:
     import click

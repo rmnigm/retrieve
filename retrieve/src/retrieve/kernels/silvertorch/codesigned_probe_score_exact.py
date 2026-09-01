@@ -76,9 +76,8 @@ def _codesigned_probe_score_exact_kernel(
     valid = item_ids >= 0
     safe_ids = tl.where(valid, item_ids, 0)
 
-    # Exact-clause filter (shared AND-of-OR predicate): the helper gathers attrs via `safe_ids`,
-    # gates loads with `valid`, and seeds `keep` from `valid` — matching the previously inlined
-    # loop bit for bit.
+    # Indirect addressing over probed items: gather via `safe_ids`, gate loads with
+    # `valid`, and seed `keep` from `valid`.
     keep = common.clause_pass(
         item_attrs_ptr,
         is_reverse_ptr,

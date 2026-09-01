@@ -1,15 +1,9 @@
-"""LiNR V2 + compact filter primitive — exact filtered top-K, sparse path.
+"""LiNR V2 — exact filtered top-K over the sparse path.
 
-The candidate source IS the filter: ``filter_mod.evaluate_indices(qa)``
-returns ``(ids [B, P], counts [B])`` with no ``[B, N]`` mask
-materialized. ``PrefilterKNN`` then rescores those P candidates at
-fp32 (``backend="triton"`` default; ``"torch"`` available too).
-The whole algo forward (filter compact-indices build + index call) is
-wrapped with ``torch.compile(dynamic=True, mode="reduce-overhead")``
-in ``__init__`` regardless of backend — Inductor fuses gather +
-matmul + topk and cudagraph_trees replay collapses launch overhead.
-``filter_mod`` is required (no unfiltered mode) — that's the whole
-point of the compact path.
+The candidate source IS the filter: ``filter_mod.evaluate_indices(qa)`` returns
+``(ids [B, P], counts [B])`` with no ``[B, N]`` mask materialized, and
+``PrefilterKNN`` rescores those P candidates at fp32. ``filter_mod`` is therefore
+required — an unfiltered mode would defeat the point of the compact path.
 """
 
 from __future__ import annotations

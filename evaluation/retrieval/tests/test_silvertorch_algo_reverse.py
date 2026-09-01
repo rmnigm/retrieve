@@ -2,7 +2,7 @@
 
 Regression test for the bug where SilvertorchAlgo dropped clause_is_reverse
 on the floor, causing Recall ≈ 0 on reverse-clause sweeps. See
-docs/plans/silvertorch-reverse-clause-wrapper-fix.md.
+docs/plans/archive/silvertorch-reverse-clause-wrapper-fix.md.
 """
 
 import torch

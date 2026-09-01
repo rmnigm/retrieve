@@ -25,7 +25,7 @@ _defaults: &defaults
   backends: [triton, torch]
   users_limit: 10000
 
-  # See docs/plans/goodreads-filter-eval.md for the predicate spec.
+  # See docs/system/datasets.md for the predicate spec.
   filters:
     clause:
       attrs_path:    data/goodreads-work-id/item_attrs_narrow.pt

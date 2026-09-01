@@ -98,16 +98,9 @@ def preprocess(
 
 # ----- CLI -------------------------------------------------------------------
 #
-# Downloads `<variant>/sequential/listens.parquet` from `yandex/yambda` on HF,
-# runs `preprocess()`, and writes the four artifacts the trainer expects:
-#
-#     <output>/train.parquet     item_ids: list[int64]
-#     <output>/val.parquet       item_ids: list[int64], targets: list[int64]
-#     <output>/test.parquet      item_ids: list[int64], targets: list[int64]
-#     <output>/item_id_map.json  {raw_yandex_id: dense_int}
-#
-# Val history = train portion (already sliced to last 200 in preprocess()).
-# Test history = train ++ val concatenated, last 200 items.
+# Downloads `<variant>/sequential/listens.parquet`, runs preprocess(), writes the
+# four trainer artifacts. Val history = train portion; test history = train ++ val,
+# last 200. See docs/system/datasets.md § yambda.
 
 
 def concat_then_tail(history: pl.Expr, more: pl.Expr, n: int) -> pl.Expr:

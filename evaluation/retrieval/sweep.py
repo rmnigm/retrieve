@@ -1,12 +1,5 @@
 """Nested loop driver for the retrieval benchmark.
 
-Decomposes the cross-product
-``(filter_kind, sweep, algo, params, k, batch_size)`` into one function per
-loop level, so each piece reads top-to-bottom and can be reasoned about in
-isolation. Run-wide inputs travel in a ``SweepContext`` (built once by
-``cli/evaluate.py``, post ``users_limit``); per-filter_kind modules and the
-per-sweep tensors stamped onto them travel in a ``FilterAssets``.
-
 ```
 run_sweep                    # pin globals, warm GPU, dispatch
 └─ run_filter_kind           # build filter modules
@@ -14,11 +7,8 @@ run_sweep                    # pin globals, warm GPU, dispatch
       └─ evaluate_cell       # build algo, quality, prewarm, per-bs perf rows
 ```
 
-Yambda (``cfg.filters is None``) iterates a single synthetic
-``("none", FilterSweepCfg(name="full_scan"))`` cell so the loop body stays
-uniform. Filtered datasets (goodreads / arxiv) iterate the configured
-filter sweeps; both ``clause`` and ``bloom`` filter_kinds run over the same
-narrow attribute tensor — only the algo on top differs.
+Run-wide inputs travel in a ``SweepContext``, per-filter_kind state in a
+``FilterAssets``. See docs/system/evaluation.md for the driver flow.
 """
 
 from __future__ import annotations
@@ -57,11 +47,6 @@ from retrieve.interfaces import Backend, FilterModule
 
 def run_sweep(ctx: SweepContext) -> list[dict]:
     """Loop over (filter_kind, sweep, algo, k, batch_size) and emit rows."""
-    # Pin TF32/matmul-precision so two runs on the same box don't silently
-    # diverge depending on what code earlier in the process touched these
-    # globals. Pre-warm the GPU once so cuBLAS-init / kernel-load / pinned-mem
-    # one-time costs are paid outside any cell's measured window — without
-    # this, whichever cell runs first absorbs them and reports inflated time.
     pin_precision_globals()
     warm_gpu_once(ctx.device)
 
@@ -100,12 +85,7 @@ def _select_filter_iter(
 
 
 def run_filter_kind(filter_kind: FilterKind, fcfg: FilterCfg, ctx: SweepContext) -> list[dict]:
-    """Build filter+oracle modules, iterate sweeps.
-
-    Builds one ``filter_mod`` per backend so the filter kernel backend
-    matches the algo's. The oracle-side exact filter is built once
-    (always triton if available — it's only used to build cached
-    ground truth and is not part of the comparison)."""
+    """Build filter+oracle modules, iterate sweeps."""
     assets = _build_filter_modules(filter_kind, fcfg, ctx)
 
     rows: list[dict] = []
@@ -133,6 +113,9 @@ def _build_filter_modules(
     filter_kind: FilterKind, fcfg: FilterCfg, ctx: SweepContext
 ) -> FilterAssets:
     """Build per-backend index-side filters and the oracle-side exact filter.
+
+    The oracle filter is always **exact**: bloom's false positives must never leak
+    into ground truth.
 
     One ``FilterModule`` per backend so the filter kernel backend matches
     the algo's in each cell. The oracle-side exact filter is always
@@ -209,16 +192,12 @@ def run_one_sweep(
     ctx: SweepContext,
     assets: FilterAssets,
 ) -> list[dict]:
-    """Synthesise per-sweep qa, load/build oracle, iterate (backend, algo, params, k).
+    """Synthesise per-sweep qa, load/build oracle, then iterate algo x backend x params x k.
 
-    The oracle is shared across backends (built once per sweep), so backend
-    is the **innermost** loop level above ``(algo, params, k)``.
+    The oracle is built once per sweep and shared across every cell below it.
     """
     logger.info("=== filter_kind={} sweep={} ===", filter_kind, sweep.name)
 
-    # build_sweep_qa returns (None, None) for filter_kind not in
-    # {clause, bloom} or when the sweep has no active clauses — this covers
-    # the yambda synthetic "none" cell without a separate branch.
     qa_n_sweep, skip_mask = build_sweep_qa(
         sweep, filter_kind, ctx.qa_narrow_all, assets.n_clauses
     )
@@ -361,10 +340,8 @@ def _build_algo(
 ) -> RetrievalAlgo:
     """Construct one cell's algo from the run context.
 
-    Eligibility is decided declaratively before this point (``supports``
-    in ``run_one_sweep``), so any exception here is a genuine construction
-    error — a typo'd param, a library-level shape error — and propagates
-    to kill the run loudly instead of silently dropping the cell.
+    Eligibility is decided by ``supports`` in ``run_one_sweep``, so any exception
+    here is a genuine construction error and propagates rather than dropping the cell.
     """
     return build_algorithm(
         algo,
@@ -392,7 +369,7 @@ def _run_quality(
         return QualityStats(recall=nan, ndcg=nan, precision=nan, mrr=nan)
 
     if assets.oracle_topk is None:
-        # No oracle was built — run_one_sweep builds one exactly when
+        # No oracle: run_one_sweep builds one exactly when
         # cfg.filters is set and filter_kind != "none"; otherwise (yambda /
         # the "none" cell) quality is scored against the held-out targets.
         return quality_pass_cached(
@@ -433,15 +410,11 @@ def _run_quality(
 def _autotune_prewarm(
     algo_obj: RetrievalAlgo, ctx: SweepContext, assets: FilterAssets
 ) -> None:
-    """Call forward once per batch size before timing so Triton JIT
-    compilation and the per-shape cudagraph capture happen outside the
-    timed window.
+    """Call forward once per batch size before timing, so compilation and the
+    per-shape cudagraph capture happen outside the timed window.
 
-    The kernels ship offline-tuned ``DEFAULT_CONFIG``s (no runtime
-    autotune), but ``reduce-overhead`` still compiles + captures a
-    cudagraph per batch-size shape; that cold cost has been observed
-    leaking into the timing window (median collapsing to a single ~1.5 s
-    sample on the first cell). Belt-and-suspenders defense.
+    ``reduce-overhead`` captures a cudagraph per batch-size shape; that cold cost
+    has been observed collapsing a cell's median to a single ~1.5 s sample.
     """
     if not torch.cuda.is_available():
         return
@@ -493,12 +466,10 @@ def _make_perf_row(
     quality: QualityStats,
     backend: Backend,
 ) -> dict:
-    """Build one perf-row dict. ``backend`` is included in both the ``cell``
-    string (for unique cross-row joins) and as a top-level field.
+    """Build one perf-row dict.
 
-    Column names are load-bearing for downstream joins: never rename an
-    existing field. ``precision@k`` / ``mrr@k`` and the
-    ``extra.gpu/torch/commit`` provenance fields are additive."""
+    Column names are load-bearing for downstream joins: add fields, never rename
+    them. ``backend`` appears both in the ``cell`` join key and as its own field."""
     return {
         "suite": suite,
         "cell": f"{filter_kind}_{sweep_name}_{backend}_bs{bs}_k{k}",

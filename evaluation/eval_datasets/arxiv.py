@@ -233,16 +233,9 @@ def cmd_all(args) -> int:
 
 # ----- prep ------------------------------------------------------------------
 #
-# Builds the bench-side dataset directory:
-#
-#     <output-dir>/item_id_map.json     (arxiv_id_str → 1-indexed dense int)
-#     <output-dir>/papers.parquet       (one row per item_id, all source cols)
-#     <output-dir>/heldout.parquet      (sampled held-out queries)
-#     <output-dir>/prep_log.json        stats
-#
-# No interactions, no time-split — arxiv has no user sequences. The
-# held-out items remain in the index; nomic's two-prefix divergence makes
-# the cross-check sweep (filter_kind=none) meaningful (see plan §"Held-out").
+# processed/ -> bench-side <output-dir>/. No interactions and no time-split: arxiv
+# has no user sequences, and held-out items stay in the index. Output file list:
+# docs/system/datasets.md § arxiv.
 
 
 def cmd_prep(args) -> int:

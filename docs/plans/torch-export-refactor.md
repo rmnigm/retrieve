@@ -1,6 +1,23 @@
 # `retrieve` module → torch.export-clean (library promise)
 
-> **Scope (2026-05-23):** every layer that backs an algo registered in [evaluation/retrieval/algos/__init__.py](../../evaluation/retrieval/algos/__init__.py) (`torch_knn`, `triton_knn` / `linr_v1_filter_mask`, `linr_v2`, `linr_v3`, `linr_v4`, `silvertorch`). 6 layer classes (5 linr + `SilverTorch`). `ShardedSilverTorch` and the shelved native-CUDA `codesigned_probe_score` experiment stay in [../plans-silvertorch-backup/](../plans-silvertorch-backup/).
+> **Status: NOT STARTED. Anchors are stale — re-scope before executing.** Written 2026-05-23,
+> before the K/E refactor track and the CUDA backend landed. What rotted:
+>
+> - the `torch_knn` algo it plans work on **was deleted** (E1.1); its row in the mode map below
+>   and the algo-wiring bullet are dead,
+> - `SilverTorch(filter=...)` is now `filter_mode=`,
+> - the kernels are `@triton_op`, not `@custom_op`,
+> - verification commands use `conf/` and `--algorithms`; the real paths are `config/` and
+>   `--algo` (singular, required),
+> - the "shelved native-CUDA experiment" is no longer shelved — it shipped as
+>   `SilverTorch(backend="cuda")`, see [../system/kernels.md](../system/kernels.md).
+>
+> The *goal* below is still valid and the design sketch is still the best thinking on it.
+> Treat the line references and command examples as archaeology.
+>
+> **Scope:** every layer that backs an algo registered in
+> [evaluation/retrieval/algos/__init__.py](../../evaluation/retrieval/algos/__init__.py). 6 layer
+> classes (5 linr + `SilverTorch`). `ShardedSilverTorch` remains out of scope.
 
 ## Goal
 
@@ -12,7 +29,7 @@ Kernel-side surface is already in shape (`triton_op` / `custom_op` wrappers with
 
 | Algo (eval name)                       | Layer                          | Modes                                                          |
 |----------------------------------------|--------------------------------|----------------------------------------------------------------|
-| `torch_knn`                            | `FullScanKNN`                  | `full`, `masked`, `candidates`                                  |
+| ~~`torch_knn`~~ (algo deleted)          | `FullScanKNN`                  | `full`, `masked`, `candidates` — layer still exists, no algo uses it |
 | `triton_knn` / `linr_v1_filter_mask`   | `PostfilterKNN`                | `full`, `masked`                                                |
 | `linr_v2`                              | `PrefilterKNN`                 | `candidates` only (filter required)                             |
 | `linr_v3`                              | `OneBitKNN` + `PrefilterKNN`   | stage 1: `full` or `candidates`; stage 2: `candidates`          |
@@ -95,7 +112,7 @@ Sibling-method form rather than a `mode=` flag because each filter mode has a di
 
 Eval algos thread the chosen `mode=` into the layer constructor so the eager benchmark path exercises the export-clean code paths. Minimal blast radius — mode is fixed per algo cell:
 
-- [torch_knn.py](../../evaluation/retrieval/algos/torch_knn.py): pick `mode="full"` / `"masked"` / `"candidates"` from whether `filter_mod` is wired and which cell is being benched.
+- `torch_knn.py`: pick `mode="full"` / `"masked"` / `"candidates"` from whether `filter_mod` is wired and which cell is being benched.
 - [linr_v1.py](../../evaluation/retrieval/algos/linr_v1.py): `mode="full"` if `filter_mod is None` else `"masked"`.
 - [linr_v4.py](../../evaluation/retrieval/algos/linr_v4.py): same shape as linr_v1.
 - [linr_v2.py](../../evaluation/retrieval/algos/linr_v2.py): always `mode="candidates"` (filter required).
@@ -104,7 +121,7 @@ Eval algos thread the chosen `mode=` into the layer constructor so the eager ben
 
 ## Verifying the library promise
 
-Not a deployable script; just a smoke harness that proves the library promise — every (layer, mode) round-trips through `torch.export.export()` + `torch.export.load()` and produces equal outputs to the eager module. Lives under [retrieve/tests/export/](../../retrieve/tests/export/) (new dir) alongside the parity / correctness suites; reuses the existing test fixtures.
+Not a deployable script; just a smoke harness that proves the library promise — every (layer, mode) round-trips through `torch.export.export()` + `torch.export.load()` and produces equal outputs to the eager module. Lives under `retrieve/tests/export/` (not yet created) (new dir) alongside the parity / correctness suites; reuses the existing test fixtures.
 
 ```python
 # tests/export/test_export_roundtrip.py — parametrized over (layer_cls, mode)
@@ -136,10 +153,10 @@ def test_export_roundtrip(layer_cls, mode, build_args):
 
 
 # Plus the four silvertorch entries (sibling methods, not a mode flag):
-# torch.export.export(SilverTorch(filter="none"),  (query,), method="forward_ivf_only")
-# torch.export.export(SilverTorch(filter="bloom"), (query, qa), method="forward_bloom")
-# torch.export.export(SilverTorch(filter="exact"), (query, qa), method="forward_exact")
-# torch.export.export(SilverTorch(filter="none"),  (query, cand), method="forward_candidates")
+# torch.export.export(SilverTorch(filter_mode="none"),  (query,), method="forward_ivf_only")
+# torch.export.export(SilverTorch(filter_mode="bloom"), (query, qa), method="forward_bloom")
+# torch.export.export(SilverTorch(filter_mode="exact"), (query, qa), method="forward_exact")
+# torch.export.export(SilverTorch(filter_mode="none"),  (query, cand), method="forward_candidates")
 ```
 
 Failure mode: if the consumer's `torch.export.export()` raises on one of these layers, the regression is reproducible from this test in-tree.
@@ -158,7 +175,7 @@ Failure mode: if the consumer's `torch.export.export()` raises on one of these l
 - **`build_export.py` in `evaluation/`.** Not authored. Eval-time benches use eager / `torch.compile` paths, not `.pt2`.
 - **End-to-end-algo bundling** (cascade + filter build captured in one graph). A consumer can do this themselves by composing the exported layers in their model code.
 - `ShardedSilverTorch` — shelved per the [roadmap scope note (revised 2026-05-23)](00-roadmap.md). Doesn't exist in the tree.
-- Native-CUDA `codesigned_probe_score` — shelved; see [../plans-silvertorch-backup/silvertorch-cuda-shelved.md](../plans-silvertorch-backup/silvertorch-cuda-shelved.md).
+- Native-CUDA `codesigned_probe_score` — shelved; see the CUDA backend section of [../system/kernels.md](../system/kernels.md).
 - AOTI bump (`torch>=2.5`, `aoti_compile_and_package`). Separate later effort.
 - Live-update API ([live-update-api.md](live-update-api.md)) — independent feature track; upsert/delete bodies stay export-clean so the two plans compose.
 

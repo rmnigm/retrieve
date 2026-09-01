@@ -13,11 +13,10 @@ class RetrievalModule(nn.Module, abc.ABC):
 
     Contract: construct with k (+ knobs) → register_index(item_embs, ...)
     exactly once → forward(query, ...) → (ids [B, k] int64, scores [B, k]).
-    -1 / -inf are the "no item" sentinels. register_index is called exactly
-    once; re-registration is unsupported. Forward signatures vary by family
-    (mask vs candidates vs fused-filter) and are being unified per-mode by
-    the torch-export plan; this ABC intentionally constrains only the
-    lifecycle, not forward.
+    -1 / -inf are the "no item" sentinels. Re-registration is unsupported.
+
+    This ABC constrains only the lifecycle. Forward signatures deliberately vary
+    by family (mask vs candidates vs fused-filter).
     """
 
     k: int
