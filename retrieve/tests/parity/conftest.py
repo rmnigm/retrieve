@@ -4,6 +4,96 @@ from __future__ import annotations
 
 import torch
 
+from retrieve.layers.filters.exact_attribute import clause_subset_match
+from retrieve.layers.utils.quantize import quantize_int8
+
+
+def ref_cps_phase23(
+    query,
+    flat_items,
+    item_codes,
+    global_scale,
+    k,
+    *,
+    qb=None,
+    bloom_sigs=None,
+    item_clause_attrs=None,
+    clause_is_reverse=None,
+    query_clause_attrs=None,
+):
+    """Reference for the paper-faithful int8 ANN (SilverTorch phases 2+3): int8 × int8
+    → int32 dot with one global scale + per-row query scale, optionally gated by a
+    filter — the row-wise bloom subset test (``qb`` / ``bloom_sigs``) or the exact
+    AND-of-OR clause predicate (``item_clause_attrs`` / ``clause_is_reverse`` /
+    ``query_clause_attrs``: AND over clauses, OR over ``A_max`` within a clause, XOR
+    with reverse, OR with the ``-1`` inactive sentinel). Computed in fp32 because the
+    integer products fit in fp32 mantissa at this D — bit-identical to an int32
+    accumulator. Shared by the Triton and CUDA parity suites; both CUDA filter kernels
+    read a different layout (transposed index / cluster-major mask) but compute a
+    boolean-identical predicate to these row-wise forms."""
+    valid = flat_items >= 0
+    safe = flat_items.clamp(min=0)
+
+    keep = valid
+    if qb is not None:
+        probed_sigs = bloom_sigs[safe]
+        match = (qb.unsqueeze(1) & probed_sigs) == qb.unsqueeze(1)
+        keep = keep & match.all(dim=-1)
+    if query_clause_attrs is not None:
+        gathered = item_clause_attrs[safe]  # [B, P, C, A_max]
+        keep = keep & clause_subset_match(gathered, query_clause_attrs.long(), clause_is_reverse)
+
+    q_codes, q_scales = quantize_int8(query)
+    codes = item_codes[safe].float()  # [B, P, D]
+    scores = torch.einsum("bd,bpd->bp", q_codes.float(), codes)
+    scores = scores * q_scales.unsqueeze(1) * global_scale
+    scores = scores.masked_fill(~keep, float("-inf"))
+
+    actual_k = min(k, scores.shape[1])
+    topk_scores, topk_local = torch.topk(scores, actual_k, dim=1)
+    topk_ids = flat_items.gather(1, topk_local)
+    return topk_ids, topk_scores
+
+
+def assert_ids_equal_up_to_ties(
+    ids_a: torch.Tensor,
+    ids_b: torch.Tensor,
+    scores: torch.Tensor,
+) -> None:
+    """Assert two top-K id tensors agree, allowing permutation *within tied scores*.
+
+    For the bit-exact backend comparisons the score tensor is the hard gate: the
+    caller asserts ``torch.equal(scores_a, scores_b)`` first and passes that tensor
+    here. Ids are one notch weaker on purpose — ``torch.topk``'s documentation says
+    tie order is "not guaranteed stable across invocations", and ties genuinely occur
+    in this data (int32 dots of ~±1e5 magnitude over P≈768 candidates land on roughly
+    one tied pair per row). So the honest gate is: ids equal, or every mismatching
+    position lies inside a run of equal scores whose id *multisets* match.
+
+    ``scores`` comes from ``topk`` and is therefore sorted descending, so tie runs are
+    contiguous; a run of length 1 makes the comparison exact equality at that slot."""
+    assert ids_a.shape == ids_b.shape == scores.shape, "ids/scores shape mismatch"
+    if torch.equal(ids_a, ids_b):
+        return
+    k = ids_a.shape[1]
+    for bi in range(ids_a.shape[0]):
+        row_s = scores[bi].tolist()
+        row_a = ids_a[bi].tolist()
+        row_b = ids_b[bi].tolist()
+        if row_a == row_b:
+            continue
+        start = 0
+        while start < k:
+            end = start + 1
+            while end < k and row_s[end] == row_s[start]:
+                end += 1
+            assert sorted(row_a[start:end]) == sorted(row_b[start:end]), (
+                f"row {bi}: ids differ at positions [{start}, {end}) where the scores "
+                f"are not tied (score {row_s[start]}): {row_a[start:end]} vs "
+                f"{row_b[start:end]}"
+            )
+            start = end
+
 
 def assert_topk_matches(
     out_ids: torch.Tensor,

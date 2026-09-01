@@ -19,6 +19,38 @@ def pytest_collection_modifyitems(config, items):
             it.add_marker(skip)
 
 
+def require_cps_cuda() -> None:
+    """Gate the calling test on the CUDA C++ extension, distinguishing the two ways it
+    can be absent.
+
+    - **No toolchain** (no CUDA device, or no ``nvcc`` on PATH / under ``$CUDA_HOME``)
+      → ``skip``. The suite is expected to run on boxes that cannot build it.
+    - **A toolchain that failed to build** → ``fail``, with the nvcc/ninja output.
+      This is the case worth being loud about: a compile error silently skipping is
+      exactly what a broken first GPU run would look like, and it would look green.
+
+    The first call pays the one-time JIT compile; later calls hit the memoized
+    outcome in the wrapper (and the ninja cache)."""
+    # Full-module-path import: the package __init__ re-exports the *op* under the
+    # same name as the module, so `from retrieve.kernels.silvertorch import ...`
+    # would grab the op and shadow the module.
+    from retrieve.kernels.silvertorch.codesigned_probe_score_cuda import (
+        ToolchainMissing,
+        ensure_built,
+    )
+
+    try:
+        ensure_built()
+    except ToolchainMissing as e:
+        pytest.skip(f"retrieve CUDA extension unavailable: {e}")
+    except ImportError as e:
+        pytest.fail(
+            f"the CUDA toolchain is present but the retrieve CUDA extension failed "
+            f"to build — this is a real failure, not a skip:\n{e}",
+            pytrace=False,
+        )
+
+
 def make_index(
     n: int,
     d: int,

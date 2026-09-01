@@ -12,7 +12,7 @@ from retrieve.kernels.silvertorch.codesigned_probe_score import (
     codesigned_probe_score_bloom,
 )
 from retrieve.layers.filters.bloom_hash import build_signatures, generate_seeds
-from retrieve.layers.utils.quantize import quantize_int8, quantize_int8_global
+from retrieve.layers.utils.quantize import quantize_int8_global
 from tests.conftest import (
     make_attrs,
     make_index,
@@ -20,42 +20,7 @@ from tests.conftest import (
     make_query_attrs,
 )
 from tests.parity.conftest import assert_topk_matches
-
-
-def _ref_phase23(
-    query,
-    flat_items,
-    item_codes,
-    global_scale,
-    k,
-    *,
-    qb=None,
-    bloom_sigs=None,
-):
-    """Reference for the paper-faithful int8 ANN: int8 × int8 → int32 dot
-    with one global scale + per-row query scale. Computed in fp32 because
-    the integer products fit in fp32 mantissa at this D — bit-identical to
-    an int32 accumulator after the rescale.
-    """
-    valid = flat_items >= 0
-    safe = flat_items.clamp(min=0)
-
-    keep = valid
-    if qb is not None:
-        probed_sigs = bloom_sigs[safe]
-        match = (qb.unsqueeze(1) & probed_sigs) == qb.unsqueeze(1)
-        keep = keep & match.all(dim=-1)
-
-    q_codes, q_scales = quantize_int8(query)
-    codes = item_codes[safe].float()  # [B, P, D]
-    scores = torch.einsum("bd,bpd->bp", q_codes.float(), codes)
-    scores = scores * q_scales.unsqueeze(1) * global_scale
-    scores = scores.masked_fill(~keep, float("-inf"))
-
-    actual_k = min(k, scores.shape[1])
-    topk_scores, topk_local = torch.topk(scores, actual_k, dim=1)
-    topk_ids = flat_items.gather(1, topk_local)
-    return topk_ids, topk_scores
+from tests.parity.conftest import ref_cps_phase23 as _ref_phase23
 
 
 def _make_flat_probed(b, n, p, *, pad_rate=0.1, seed=7):
