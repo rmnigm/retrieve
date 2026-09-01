@@ -4,8 +4,9 @@ Fixtures shrink the SilverTorch paper's eval (D=128, K=2048, n_probe=64) to
 sizes that fit well on a single GPU; larger sweeps live in ``evaluation/``.
 Tests cover three filter modes — ``"none"`` (plain IVF), ``"bloom"`` (paper's
 bloom subset test), ``"exact"`` (clause-attribute predicate fused into the
-codesigned kernel). All forward paths are exercised with ``backend="torch"``
-and ``backend="triton"``.
+codesigned kernel). All forward paths are exercised with ``backend="torch"``,
+``backend="triton"``, and ``backend="cuda"`` across all three filter
+modes; cuda cells skip only when the C++ extension can't build here.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from tests.conftest import (
     make_query,
     make_query_attrs,
     recall_at_k,
+    require_cps_cuda,
 )
 
 N, D, B, K = 4096, 128, 16, 64
@@ -30,7 +32,7 @@ N_LISTS, N_PROBE = 64, 8
 M_BITS, K_HASH = 512, 5
 C, A_MAX = 2, 2
 
-BACKENDS = ["torch", "triton"]
+BACKENDS = ["torch", "triton", "cuda"]
 
 
 @pytest.fixture(scope="module")
@@ -43,6 +45,8 @@ def data():
 
 
 def _build(with_attrs: bool, data, backend: str = "triton", **overrides):
+    if backend == "cuda":
+        require_cps_cuda()
     kw = {
         "k": K,
         "n_lists": N_LISTS,
@@ -60,6 +64,8 @@ def _build(with_attrs: bool, data, backend: str = "triton", **overrides):
 
 
 def _build_no_bloom(data, backend: str = "triton", **overrides):
+    if backend == "cuda":
+        require_cps_cuda()
     kw = {"k": K, "n_lists": N_LISTS, "n_probe": N_PROBE, "n_iter": 3, "backend": backend}
     kw.update(overrides)
     m = SilverTorch(**kw)
@@ -68,6 +74,8 @@ def _build_no_bloom(data, backend: str = "triton", **overrides):
 
 
 def _build_exact(data, backend: str = "triton", clause_is_reverse=None, **overrides):
+    if backend == "cuda":
+        require_cps_cuda()
     kw = {
         "k": K,
         "n_lists": N_LISTS,
@@ -265,7 +273,9 @@ class TestEquivalence:
 
 
 class TestCrossBackend:
-    """torch and Triton SilverTorch agree on id sets (accumulator order may flip ties)."""
+    """torch and Triton SilverTorch agree on id sets (accumulator order may flip ties);
+    cuda and Triton agree on id sets through the whole layer (the kernel-level parity
+    suite additionally proves the scores bit-identical on a shared probe family)."""
 
     def test_with_bloom(self, data):
         tri = _build(with_attrs=True, data=data, backend="triton")
@@ -283,6 +293,22 @@ class TestCrossBackend:
         for b in range(B):
             assert_topk_id_sets_match(ids_trc, sc_trc, ids_tri, sc_tri, b)
 
+    def test_cuda_with_bloom(self, data):
+        tri = _build(with_attrs=True, data=data, backend="triton")
+        cud = _build(with_attrs=True, data=data, backend="cuda")
+        ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
+        ids_cud, sc_cud = cud(data["query"], data["q_attrs"])
+        for b in range(B):
+            assert_topk_id_sets_match(ids_cud, sc_cud, ids_tri, sc_tri, b)
+
+    def test_cuda_no_bloom(self, data):
+        tri = _build_no_bloom(data, backend="triton")
+        cud = _build_no_bloom(data, backend="cuda")
+        ids_tri, sc_tri = tri(data["query"])
+        ids_cud, sc_cud = cud(data["query"])
+        for b in range(B):
+            assert_topk_id_sets_match(ids_cud, sc_cud, ids_tri, sc_tri, b)
+
     def test_with_exact(self, data):
         tri = _build_exact(data, backend="triton")
         trc = _build_exact(data, backend="torch")
@@ -299,6 +325,23 @@ class TestCrossBackend:
         ids_trc, sc_trc = trc(data["query"], data["q_attrs"])
         for b in range(B):
             assert_topk_id_sets_match(ids_trc, sc_trc, ids_tri, sc_tri, b)
+
+    def test_cuda_with_exact(self, data):
+        tri = _build_exact(data, backend="triton")
+        cud = _build_exact(data, backend="cuda")
+        ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
+        ids_cud, sc_cud = cud(data["query"], data["q_attrs"])
+        for b in range(B):
+            assert_topk_id_sets_match(ids_cud, sc_cud, ids_tri, sc_tri, b)
+
+    def test_cuda_with_exact_reverse(self, data):
+        rev = torch.tensor([True, False], dtype=torch.bool, device="cuda")
+        tri = _build_exact(data, backend="triton", clause_is_reverse=rev)
+        cud = _build_exact(data, backend="cuda", clause_is_reverse=rev)
+        ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
+        ids_cud, sc_cud = cud(data["query"], data["q_attrs"])
+        for b in range(B):
+            assert_topk_id_sets_match(ids_cud, sc_cud, ids_tri, sc_tri, b)
 
 
 @pytest.mark.parametrize("backend", BACKENDS)

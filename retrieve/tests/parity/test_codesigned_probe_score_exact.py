@@ -1,4 +1,5 @@
-"""Triton ``codesigned_probe_score_exact`` vs pure-torch reference."""
+"""Triton ``codesigned_probe_score_exact`` vs the shared pure-torch phase-2+3
+reference (``tests/parity/conftest.py::ref_cps_phase23``, exact-predicate form)."""
 
 from __future__ import annotations
 
@@ -10,53 +11,14 @@ from retrieve.kernels.silvertorch.codesigned_probe_score_exact import (
     _codesigned_probe_score_exact_impl,
     codesigned_probe_score_exact,
 )
-from retrieve.layers.utils.quantize import quantize_int8, quantize_int8_global
+from retrieve.layers.utils.quantize import quantize_int8_global
 from tests.conftest import (
     make_attrs,
     make_index,
     make_query,
     make_query_attrs,
 )
-from tests.parity.conftest import assert_topk_matches
-
-
-def _ref_phase23_exact(
-    query,
-    flat_items,
-    item_codes,
-    global_scale,
-    k,
-    *,
-    item_clause_attrs,
-    clause_is_reverse,
-    query_clause_attrs,
-):
-    """Reference: int8×int8 → int32 dot with one global scale + per-row query
-    scale, gated by the exact-clause predicate (AND over clauses, OR over
-    A_max within each clause, XOR with reverse, OR with inactive sentinel).
-    """
-    valid = flat_items >= 0
-    safe = flat_items.clamp(min=0)
-
-    qa = query_clause_attrs.long()
-    gathered = item_clause_attrs[safe]  # [B, P, C, A_max]
-    q = qa.unsqueeze(1).unsqueeze(-1)  # [B, 1, C, 1]
-    clause_match = (gathered == q).any(dim=-1)  # [B, P, C]
-    rev = clause_is_reverse.unsqueeze(0).unsqueeze(0)  # [1, 1, C]
-    clause_match = torch.where(rev, ~clause_match, clause_match)
-    inactive = (qa == -1).unsqueeze(1)  # [B, 1, C]
-    keep = valid & (clause_match | inactive).all(dim=-1)
-
-    q_codes, q_scales = quantize_int8(query)
-    codes = item_codes[safe].float()  # [B, P, D]
-    scores = torch.einsum("bd,bpd->bp", q_codes.float(), codes)
-    scores = scores * q_scales.unsqueeze(1) * global_scale
-    scores = scores.masked_fill(~keep, float("-inf"))
-
-    actual_k = min(k, scores.shape[1])
-    topk_scores, topk_local = torch.topk(scores, actual_k, dim=1)
-    topk_ids = flat_items.gather(1, topk_local)
-    return topk_ids, topk_scores
+from tests.parity.conftest import assert_topk_matches, ref_cps_phase23
 
 
 def _make_flat_probed(b, n, p, *, pad_rate=0.1, seed=7):
@@ -96,7 +58,7 @@ def test_codesigned_exact_matches_ref(n, d, p, k, c, a_max, b):
         global_scale,
         k,
     )
-    ref_ids, ref_scores = _ref_phase23_exact(
+    ref_ids, ref_scores = ref_cps_phase23(
         query,
         flat,
         codes,
@@ -146,7 +108,7 @@ def test_codesigned_exact_reverse_clause():
         k,
     )
     # Parity against the reference for both reverse configs.
-    ref_off_ids, ref_off_scores = _ref_phase23_exact(
+    ref_off_ids, ref_off_scores = ref_cps_phase23(
         query,
         flat,
         codes,
@@ -156,7 +118,7 @@ def test_codesigned_exact_reverse_clause():
         clause_is_reverse=rev_off,
         query_clause_attrs=q_attrs,
     )
-    ref_on_ids, ref_on_scores = _ref_phase23_exact(
+    ref_on_ids, ref_on_scores = ref_cps_phase23(
         query,
         flat,
         codes,
