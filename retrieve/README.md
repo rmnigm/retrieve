@@ -10,7 +10,7 @@ A library for the candidate-generation / ANN stage of a recsys stack: full-scan 
 pip install torchretrieve
 ```
 
-Source-only distribution. Triton kernels JIT-compile on first call against your local toolchain — no prebuilt CUDA wheels to match. You need a CUDA-capable GPU and a working `torch` + `triton` install (declared as dependencies). Modules that ship a pure-PyTorch fallback accept `backend="torch"`.
+Source-only distribution. Triton kernels JIT-compile on first call against your local toolchain — no prebuilt CUDA wheels to match. You need a CUDA-capable GPU and a working `torch` + `triton` install (declared as dependencies). Modules that ship a pure-PyTorch fallback accept `backend="torch"`; `SilverTorch` additionally offers `backend="cuda"`, a hand-written CUDA C++ path that JIT-compiles on first forward and needs a matching CUDA toolkit plus `ninja`.
 
 > **Note.** Install pulls in `torch>=2.4` and `triton>=3.0`; the import name is `retrieve`, not `torchretrieve`.
 
@@ -31,7 +31,7 @@ queries = torch.randn(4, D, device="cuda")
 topk_ids, topk_scores = ann(queries)        # ([4, 10], [4, 10])
 ```
 
-For attribute-filtered retrieval, swap to `filter="bloom"` (with `m_bits` / `k_hash`) or `filter="exact"` and pass `query_clause_attrs` to `forward`. The filter is fused into the same probe+score kernel — no `[B, P, D]` intermediates touch HBM.
+For attribute-filtered retrieval, swap to `filter_mode="bloom"` (with `m_bits` / `k_hash`) or `filter_mode="exact"` and pass `query_clause_attrs` to `forward`. The filter is fused into the same probe+score kernel — no `[B, P, D]` intermediates touch HBM.
 
 ## What's in the box
 
@@ -39,14 +39,17 @@ For attribute-filtered retrieval, swap to `filter="bloom"` (with `m_bits` / `k_h
 | --- | --- |
 | `FullScanKNN` | Exhaustive matmul + top-K. Reference / small-N. |
 | `OneBitKNN` | OPORP 1-bit quantization + Hamming top-K. |
+| `SimHashKNN` | SimHash 1-bit quantization + Hamming top-K; `k_bits` may exceed `D`. |
 | `PostfilterKNN`, `PostfilterKNNInt8` | KNN then attribute filter. |
 | `PrefilterKNN` | Attribute filter then KNN over the candidate set. |
 | `SilverTorch` | IVF + INT8 ANN with optional fused bloom / exact filter (paper Algorithm 1). |
 | `BloomFilter`, `ExactAttributeFilter` | Standalone `FilterModule`s; compose via `combine_masks` / `combine_indices`. |
 | `KMeansTorch` | Index-build helper (clusters for IVF). |
-| `quantize_int8`, `quantize_oporp_1bit` | Quantization utilities used by the modules above. |
+| `quantize_int8`, `quantize_oporp_1bit`, `quantize_simhash_1bit` | Quantization utilities used by the modules above. |
 
-Triton is the default backend; modules that have a pure-PyTorch path accept `backend="torch"` for `torch.compile` / Inductor users.
+Triton is the default backend; modules that have a pure-PyTorch path accept
+`backend="torch"` for `torch.compile` / Inductor users, and `SilverTorch` also
+accepts `backend="cuda"`.
 
 ## Docs
 
@@ -56,13 +59,16 @@ User guide (in this package, under [`docs/`](docs/)):
 - [`modules.md`](docs/modules.md) — which module to pick + per-module API reference.
 - [`filtering-and-quantization.md`](docs/filtering-and-quantization.md) — attribute-filtered retrieval and the quantization utilities.
 
-System / internals documentation lives in the repository under `docs/system/`:
+System / internals documentation lives in the repository (not in the sdist)
+under `docs/system/`:
 
 - `architecture.md` — module map, what each retrieval family does.
-- `kernels.md` — Triton kernel internals.
+- `kernels.md` — Triton and CUDA C++ kernel internals.
 - `filtering.md` — clause / Bloom filter API.
 - `testing.md` — running the correctness suite.
 - `evaluation.md` — running the benchmark harness.
+- `datasets.md` — dataset ETL and the SASRec training pipeline.
+- `checkpoints.md` — trained models + HF Hub workflow.
 
 ## License
 

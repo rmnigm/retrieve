@@ -69,7 +69,6 @@ def _bloom_compact_kernel(
     # with n_valid here.
     pass_mask = common.bloom_subset_pass(qb, sigs) & n_valid
 
-    # Stream compaction: cumsum gives intra-tile offsets; atomic_add gives base.
     common.compact_store(
         pass_mask, n_offsets, counts_ptr, out_indices_ptr, bid, stride_ob, stride_on
     )
@@ -164,5 +163,5 @@ def bloom_compact(qb: Tensor, sigs: Tensor) -> tuple[Tensor, Tensor]:
     Registered as a ``triton_op`` for ``torch.compile``; mirrors ``_bloom_compact_impl`` with
     ``DEFAULT_CONFIG``."""
     launch = _bloom_compact_prep(qb, sigs, cfg=DEFAULT_CONFIG)
-    wrap_triton(_bloom_compact_kernel)[launch.grid](**launch.kwargs)  # inline, K2 invariant
+    wrap_triton(_bloom_compact_kernel)[launch.grid](**launch.kwargs)  # keep inline (export)
     return launch.out_indices, launch.counts

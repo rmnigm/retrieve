@@ -37,12 +37,14 @@ class RetrievalAlgo(Protocol):
 class AlgoBase(nn.Module):
     """Shared tail for eval algo wrappers.
 
-    Subclasses build their retrieve-layer modules in ``__init__`` and then
-    call ``_finalize(...)`` exactly once as the LAST statement — it wires
-    the ``algo_modules`` cleanup list and applies the one canonical
-    ``torch.compile`` call (``dynamic=True`` + ``reduce-overhead`` →
-    single cudagraph capture of the full forward: filter + index +
-    cascade)."""
+    Subclasses build their retrieve-layer modules in ``__init__`` then call
+    ``_finalize(...)`` exactly once, as the LAST statement. It wires the
+    ``algo_modules`` cleanup list and applies **the** ``torch.compile`` call for the
+    whole harness: ``dynamic=True, mode="reduce-overhead"``, which captures one
+    cudagraph over the entire forward (filter + index + cascade).
+
+    This is the single compile site on purpose — every algo gets identical compile
+    treatment, so cross-algo latency rows stay comparable."""
 
     filter_mod: FilterModule | None
     algo_modules: list[nn.Module]

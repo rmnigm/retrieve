@@ -112,8 +112,7 @@ def _clause_mask_prep(
 
     out = torch.empty((b, n), dtype=torch.bool, device=query_clause_attrs.device)
 
-    # 3D grid (batch, tiles_y, tiles_x): batch on grid_x for L2 reuse, tiles overflow into grid_z
-    # past the 65535 cap. See kernel comment.
+    # 3D grid (batch, tiles_y, tiles_x) — see kernel comment.
     tiles = triton.cdiv(n, cfg.block_n)
     tiles_x = triton.cdiv(tiles, 65535)
     tiles_y = triton.cdiv(tiles, tiles_x)
@@ -170,5 +169,5 @@ def clause_mask(
     launch = _clause_mask_prep(
         item_clause_attrs, clause_is_reverse, query_clause_attrs, cfg=DEFAULT_CONFIG
     )
-    wrap_triton(_clause_mask_kernel)[launch.grid](**launch.kwargs)  # inline, K2 invariant
+    wrap_triton(_clause_mask_kernel)[launch.grid](**launch.kwargs)  # keep inline (export)
     return launch.out

@@ -1,30 +1,17 @@
-"""LiNR V3 → V2 cascade: 1-bit Hamming pre-filter, fp32 rerank.
+"""LiNR V3 -> V2 cascade: 1-bit Hamming pre-filter, fp32 rerank.
 
-Stage 1 (LiNR §4.3, Fig knn-v3): ``OneBitKNN`` produces a
-top-``candidate_pool`` list at 1-bit precision. Stage 2:
-``PrefilterKNN`` rescores those candidates at full precision. Both
-stages share the same ``backend`` (default ``"triton"``).
+Stage 1 (LiNR §4.3) ``OneBitKNN`` produces a top-``candidate_pool`` list at 1-bit
+precision; stage 2 ``PrefilterKNN`` rescores it at full precision. When filtered,
+``filter_mod.evaluate_indices`` feeds stage 1's indirect-load path directly, so no
+``[B, N]`` mask is materialized and the filter is consulted in exactly one place.
 
-When filtered, the cascade calls ``filter_mod.evaluate_indices``
-(single fused compact kernel — ``clause_compact`` / ``bloom_compact``
-on triton) and passes the ``(candidate_ids, counts)`` directly into
-stage 1's indirect-load path. No ``[B, N]`` mask materialized; the
-filter is consulted in exactly one place. Stage 1 itself no longer
-takes a ``mask=`` arg. The whole algo forward (filter compact +
-stage 1 + ``(cand_ids >= 0).sum`` stitch + stage 2) is wrapped with
-``torch.compile(
-dynamic=True, mode="reduce-overhead")`` in ``__init__`` regardless of
-backend. Inductor fuses popcount + reduce in stage 1 and gather +
-matmul + topk in stage 2; one cudagraph captures both stages, so
-the inter-stage ``cand_ids`` tensor stays inside a single graph
-(compiling each stage separately trips ``RuntimeError: accessing
-tensor output of CUDAGraphs that has been overwritten by a subsequent
-run``).
+Both stages compile into **one** graph. Compiling them separately trips
+``RuntimeError: accessing tensor output of CUDAGraphs that has been overwritten by
+a subsequent run`` on the inter-stage ``cand_ids`` tensor.
 
-The dense ``PostfilterKNN`` path is intentionally absent as stage-2 —
-its full matmul does the same work as ``triton_knn`` alone, so a 1-bit
-prefilter into a dense rescore is strictly slower than the unfiltered
-baseline (measured ~1.22 ms vs 0.89 ms at 500M scale).
+Stage 2 is deliberately not ``PostfilterKNN``: a full matmul there does the same
+work as ``triton_knn`` alone, making the cascade strictly slower than the
+unfiltered baseline (~1.22 ms vs 0.89 ms at 500M).
 """
 
 from __future__ import annotations

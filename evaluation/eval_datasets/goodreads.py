@@ -375,19 +375,8 @@ def cmd_all(args) -> int:
 
 # ----- prep ------------------------------------------------------------------
 #
-# Turns the staged parquets (interactions_dedup + books) into the yambda-shaped
-# trainer inputs:
-#
-#     <output-dir>/train.parquet         (item_ids: list[int64])
-#     <output-dir>/val.parquet           (item_ids, targets)
-#     <output-dir>/test.parquet          (item_ids, targets)
-#     <output-dir>/item_id_map.json      {work_id: 1-indexed dense int}
-#     <output-dir>/book_to_work.parquet  (book_id, work_id) — reused by filter eval
-#     <output-dir>/prep_log.json         stats
-#
-# Filters Listen+-equivalent (`is_read=true`), parses `date_added`, collapses to
-# work_id catalog, runs an iterative n-core, then time-splits via
-# `eval_datasets.timesplit.sequential_split_train_val_test`.
+# processed/ -> yambda-shaped trainer inputs. Output file list and semantics:
+# docs/system/datasets.md § goodreads.
 
 
 def _import_timesplit():
@@ -665,34 +654,9 @@ def cmd_prep(args) -> int:
 
 # ----- attrs -----------------------------------------------------------------
 #
-# Builds per-work narrow + wide attribute tensors for the filter-bench harness
-# (see docs/plans/goodreads-filter-eval.md). Reuses `prep` outputs:
-#
-#     <output-dir>/book_to_work.parquet      (book_id → work_id, all editions)
-#     <output-dir>/item_id_map.json          (work_id → 1-indexed dense int)
-#     <output-dir>/test.parquet              (item_ids, targets) — for eval_split
-#
-# Reads the catalog parquets:
-#
-#     <processed-dir>/goodreads_books.parquet
-#     <processed-dir>/goodreads_book_genres_initial.parquet
-#
-# Writes:
-#
-#     item_attrs_narrow.pt       [N, 5, 4] int64 ; 0-indexed dense (row i = item_id i+1)
-#     item_attrs_wide.pt         [N, 1, 32] int64 ; 0-indexed dense (row i = item_id i+1)
-#     clause_is_reverse_narrow.pt [5] bool = [F, T, F, F, F]
-#     lang_vocab.json
-#     format_vocab.json
-#     author_vocab.json
-#     wide_shelf_vocab.json
-#     wide_shelf_global_freq.pt  [V_wide] int64 ; per-shelf global count (used
-#                                                 by wide-eval rare-biased sampling)
-#     eval_split.parquet         (target_id, query_attrs_narrow,
-#                                 query_attrs_wide_1shelf, query_attrs_wide_2shelf)
-#                                aligned 1:1 with rows of test.parquet.
-#     prep_log.json              extended with an "attrs" section if it exists,
-#                                else a fresh file.
+# Per-work narrow + wide attribute tensors for the filter bench, from `prep`
+# outputs + the catalog parquets. Input/output file list, tensor shapes, and the
+# reverse-clause convention: docs/system/datasets.md § goodreads.
 
 # 10 fixed buckets in goodreads_book_genres_initial. Order is the dense id.
 GENRE_KEYS = [

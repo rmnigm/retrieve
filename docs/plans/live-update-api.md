@@ -1,5 +1,21 @@
 # Live-update (upsert / delete) API — refresh for V1, V2, and the surrounding LiNR family
 
+> **Status: NOT STARTED. Every line reference is stale — re-scope before executing.** Written
+> 2026-05-23, before the K-phase refactor. What rotted:
+>
+> - its central reuse target, `_build_signatures` in `layers/filters/bloom.py`, **moved**: it is
+>   now public as `build_signatures` in
+>   [`layers/filters/bloom_hash.py`](../../retrieve/src/retrieve/layers/filters/bloom_hash.py) (K5),
+> - `one_bit_knn.py` is now a thin subclass of `_bit_knn.py`; the `.item()` short-circuit this
+>   plan targets is already gone (K4.2),
+> - all `bloom.py` / `one_bit_knn.py` / `prefilter_knn.py` / `quantize.py` line numbers predate K2/K4,
+> - the verification commands use absolute `/workspace/...` paths from another machine and algo
+>   names (`linr_v3_then_v2`, `torch_fullscan`) that no longer exist.
+>
+> Its Phase A dependency **is** satisfied: `RetrievalModule` now exists in
+> [`interfaces.py`](../../retrieve/src/retrieve/interfaces.py), added by K6.2 specifically
+> because this plan assumes it. The design is sound; the anchors are not.
+
 ## Context
 
 The LiNR paper ([articles/linr.md §4.3](../../articles/linr.md), lines 177-181) describes a live-update path: Venice CDC stream → `Live Update Ingestor` → classify upserts/deletes → in-place GPU buffer mutation. Techniques are **pre-allocating larger tensors**, a **high-water mark** to track the working set, and **minimal data-access serialization**. The §5.6.1 ablation (line 317) reports **+6% production lift** from enabling live updates — the value driver is freshness for newly created items, not export packaging. A separate benchmark (line 313) shows no measurable inference-latency impact at production update rates.
@@ -10,7 +26,7 @@ Scope:
 - Stays export-clean (no `.item()`, no `.cpu()`, no `Optional[Tensor]` in upsert/delete bodies) so the in-flight export refactor ([torch-export-refactor.md](torch-export-refactor.md)) composes cleanly.
 - Defers `.pt2` export entries (no `build_export.py` exists today; see torch-export-refactor.md for the in-flight scaffold).
 
-> **SilverTorch (2026-05-23):** silvertorch is back in scope at the roadmap level, but live updates are a separate follow-up — its IVF clustering means upsert requires cluster reassignment / rebalancing, not just a row-slice `index_copy_`. The original deferral notes survive in [../plans-silvertorch-backup/live-update-api.md](../plans-silvertorch-backup/live-update-api.md); reuse the `LiveIndexMixin` shape established here when that lift is scheduled.
+> **SilverTorch (2026-05-23):** silvertorch is back in scope at the roadmap level, but live updates are a separate follow-up — its IVF clustering means upsert requires cluster reassignment / rebalancing, not just a row-slice `index_copy_`. The original deferral notes survive in a deleted backup tree (gone); reuse the `LiveIndexMixin` shape established here when that lift is scheduled.
 
 ## Approach
 
@@ -26,7 +42,7 @@ Scope:
 
 ### Phase A — Shared scaffolding
 
-**New:** [retrieve/src/retrieve/layers/utils/live_update.py](../../retrieve/src/retrieve/layers/utils/live_update.py)
+**New:** `retrieve/src/retrieve/layers/utils/live_update.py`
 
 `LiveIndexMixin` (pure mixin, no `nn.Module` base — concrete classes already subclass `RetrievalModule(nn.Module)`):
 
@@ -152,7 +168,7 @@ Capacity-aware register_index over-allocates as `[capacity, W]` filled with zero
 
 | File | Touch |
 |---|---|
-| [retrieve/src/retrieve/layers/utils/live_update.py](../../retrieve/src/retrieve/layers/utils/live_update.py) (new) | `LiveIndexMixin`: `_alloc_live_buffers`, `_bump_watermark`, `_effective_mask`, `next_free_rows`. All on-device — no `.cpu()`, no `.item()`, no Python loops. |
+| `retrieve/src/retrieve/layers/utils/live_update.py` (new) | `LiveIndexMixin`: `_alloc_live_buffers`, `_bump_watermark`, `_effective_mask`, `next_free_rows`. All on-device — no `.cpu()`, no `.item()`, no Python loops. |
 | [retrieve/src/retrieve/interfaces.py](../../retrieve/src/retrieve/interfaces.py) | `capacity=None` on abstract `register_index` for both `RetrievalModule` and `FilterModule`; non-abstract `upsert` / `delete` defaults; `FilterModule.upsert` default (no `delete`). |
 | [retrieve/src/retrieve/layers/linr/postfilter_knn.py](../../retrieve/src/retrieve/layers/linr/postfilter_knn.py) | Mix in `LiveIndexMixin`. Capacity-aware register_index allocating `[D, capacity]`. `upsert` does **column-slice** `index_copy_(1, rows, embs.t().contiguous())`. Forward folds `_effective_mask`. |
 | [retrieve/src/retrieve/layers/linr/prefilter_knn.py](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py) | Mix in `LiveIndexMixin`. Capacity-aware register_index. `upsert` row-slice. Forward has **no `mask=` arg**: fold `valid_mask` inside `_forward_full` (masked_fill pre-topk), `_forward_prefilter` (`valid_mask[safe_ids]` gather), `_forward_prefilter_triton` (per-row stable-sort permutation of `candidate_ids` + recompute `counts`). |

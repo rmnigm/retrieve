@@ -39,8 +39,7 @@ def _bloom_match_kernel(
         other=0,
     )
 
-    # Shared subset test (qb & ~sig OR-reduce form — boolean-identical to the old
-    # equality + min-reduce). OOB lanes never leak: the store below is masked with `valid`.
+    # OOB lanes never leak: the store below is masked with `valid`.
     pass_all = common.bloom_subset_pass(qb, sigs)
 
     tl.store(

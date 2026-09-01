@@ -30,7 +30,6 @@ class PostfilterKNN(RetrievalModule):
         mask: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
         scores = query.to(torch.float16) @ self.item_embs_t
-        # Mask-optional dense form; the torch-export mode-split will dissolve this branch.
         if mask is not None:
             return masked_topk(scores, self.k, valid=mask)
         return masked_topk(scores, self.k)

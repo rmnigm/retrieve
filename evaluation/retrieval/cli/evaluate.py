@@ -7,7 +7,7 @@ rows to a single JSON file. The driver ``retrieval.cli.run_evaluation``
 writes per-algo JSONs into the ``cfg.output`` directory; downstream
 analysis reads them back via ``retrieval.results_io.load_results``.
 
-Each invocation is a fresh Python process, which is the point — torch
+Each invocation is a fresh Python process — torch
 compile / Triton autotune / CUDA-graph private pools that survive
 ``torch._dynamo.reset()`` get cleared between algos by the OS.
 """

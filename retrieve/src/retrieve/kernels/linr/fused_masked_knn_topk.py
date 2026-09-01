@@ -1,16 +1,7 @@
 """Fused masked gather + dot + top-K over precompacted candidates (linr prefilter path).
 
-Bucketing policy — the shared note for this file and ``oporp_1bit_match_topk.py``:
-``_fused_masked_knn_topk_impl`` buckets P via ``_bucket_p`` while the public
-``fused_masked_knn_topk`` op does not, and ``oporp_1bit_match_topk_indirect``
-buckets in both entry points. Both are correct today: candidate widths are
-static per deployment (the compact kernel family returns full-width ``[B, N]``
-buffers; linr_v3's stage-2 width is the fixed ``candidate_pool``), so the
-public ops compile once either way. The eager ``_impl``s (tune sweeps, parity
-tests) see many distinct widths per process and bucket to keep the JIT cache
-small; oporp's bucket additionally doubles as the >= k-lanes guarantee for
-``topk(k)`` (see ``oporp_1bit_match_topk_indirect``). Written down once, here,
-so the next reader doesn't re-derive it.
+The eager ``_impl`` buckets P but the public op does not; see
+docs/system/kernels.md § Bucketing for why both are correct.
 """
 
 from __future__ import annotations

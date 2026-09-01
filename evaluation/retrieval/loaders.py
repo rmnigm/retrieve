@@ -39,7 +39,6 @@ def resolve_path(data_dir: Path, path_str: str) -> Path:
     """cwd-relative if it exists; else data_dir-relative (full relative path,
     not basename); else raise listing both candidates.
 
-    The old basename fallback (``data_dir / p.name``) could silently load a
     same-named tensor from the wrong subdir — a missing path must be loud."""
     p = Path(path_str).expanduser()
     if p.exists():
@@ -102,7 +101,7 @@ def _load_sharded_text_emb(
         logger.warning(
             "shard_index reports n={:,} > 100M; this catalog needs ~{:.0f} GB "
             "on device at {} ({} bytes per element). If load OOMs, switch to "
-            "the int8/1-bit path described in docs/plans/linr-int8-quantization.md.",
+            "the int8/1-bit path described in docs/system/datasets.md.",
             n, n * d * dtype.itemsize / 1e9, idx["dtype"], dtype.itemsize,
         )
     out = torch.empty((n, d), dtype=dtype, device=device)

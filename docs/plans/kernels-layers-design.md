@@ -1,8 +1,18 @@
 # `retrieve` kernels + layers design improvements
 
-> **Status:** proposed (2026-07-03, detailed 2026-07-03). Written from a full read of
-> `retrieve/src/retrieve/` at commit `2b1ff80`. Line references are against that commit —
-> re-verify before editing; functions are also named so drifted lines are recoverable.
+> **Status: IMPLEMENTED (2026-07-06), pending GPU validation.** All phases K1-K9 are
+> committed on branch `refactor/kernels-eval`. This document is now a **record of intent**, not
+> a work queue — read it to understand *why* the current shape is what it is, not to execute
+> anything. The as-built shape is documented in
+> [../system/architecture.md](../system/architecture.md) and
+> [../system/kernels.md](../system/kernels.md), which are the maintained references.
+>
+> It stays here (rather than in [archive/](archive/)) only until
+> [refactor-validation-handoff.md](refactor-validation-handoff.md) signs off — the fallback
+> recipes there refer back to these sections. Archive it once validation passes.
+>
+> Line references are against commit `2b1ff80` and are **stale**; functions are also named, so
+> drifted references are recoverable by name.
 >
 > Companion plans: [evaluation-refactor.md](evaluation-refactor.md),
 > [future-work-and-research.md](future-work-and-research.md).

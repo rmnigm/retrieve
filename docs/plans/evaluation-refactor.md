@@ -1,8 +1,18 @@
 # Evaluation harness refactor — readability + leanness
 
-> **Status:** proposed (2026-07-03, detailed 2026-07-03). Written from a full read of
-> `evaluation/` at commit `2b1ff80`. Line references are against that commit — re-verify with a
-> quick read before editing; functions are also named so drifted line numbers are recoverable.
+> **Status: IMPLEMENTED (2026-07-06), pending GPU validation.** All phases E1-E8 are committed
+> on branch `refactor/kernels-eval`. This document is now a **record of intent**, not a work
+> queue. The as-built harness is documented in
+> [../system/evaluation.md](../system/evaluation.md), which is the maintained reference — this
+> plan's "Ground truth: actual architecture" section has been superseded by it.
+>
+> It stays here (rather than in [archive/](archive/)) only until
+> [refactor-validation-handoff.md](refactor-validation-handoff.md) signs off. Archive it once
+> validation passes.
+>
+> Line references are against commit `2b1ff80` and are **stale**; several files named here
+> (`bench_tools.py`, `algos/torch_knn.py`, `datasets/`) no longer exist — that is the point of
+> the plan, not an error in it.
 >
 > Companion plans: [kernels-layers-design.md](kernels-layers-design.md) (library side),
 > [future-work-and-research.md](future-work-and-research.md) (post-refactor ideas).
@@ -20,7 +30,7 @@ accumulated:
 1. **Dead weight**: a broken-and-unused algo, an unreachable CPU-timing path, identity-function
    indirection, three unused dependencies, and a one-shot campaign upload script.
 2. **Parameter-threading**: the driver threads 15–20 keyword args through five call levels.
-   [silvertorch-reverse-clause-wrapper-fix.md](silvertorch-reverse-clause-wrapper-fix.md)
+   [silvertorch-reverse-clause-wrapper-fix.md](archive/silvertorch-reverse-clause-wrapper-fix.md)
    §Changes documents the cost concretely: adding **one** field (`clause_is_reverse`) required
    touching **five** function signatures in `sweep.py` alone.
 3. **Doc drift**: [docs/system/evaluation.md](../system/evaluation.md) describes a layout
@@ -78,7 +88,7 @@ Since the system doc is stale, this is the as-built map an implementing agent sh
   quality columns byte-identical, latency within ~5% noise.
 - **`datasets/` CLI internals** (goodreads.py / arxiv.py bucketing, ETL) — domain plumbing,
   largely non-duplicated (the shared numeric core already lives in
-  [datasets/common.py](../../evaluation/datasets/common.py)). Only the package-name hazard
+  `datasets/common.py`). Only the package-name hazard
   (E1.6) touches this tree.
 - **Stage 4a schema extensions themselves** (`throughput_qps`, `p99_ms`, `build_time_s`, …) —
   they stay in [00-roadmap.md](00-roadmap.md) Stage 4a; **but** E5 restructures return types so
@@ -109,10 +119,10 @@ small commits.
 
 ### E1.1 Remove `TorchKnnAlgo` (broken *and* unused)
 
-**Evidence.** [algos/torch_knn.py:14](../../evaluation/retrieval/algos/torch_knn.py#L14) is a
+**Evidence.** `algos/torch_knn.py:14` is a
 **plain class** (not `nn.Module`) with a `forward` method but no `__call__`. The harness
 invokes algo objects directly:
-[bench_tools.py:378](../../evaluation/retrieval/bench_tools.py#L378) `topk_ids, _ = forward(q,
+`bench_tools.py:378` `topk_ids, _ = forward(q,
 **kw)` where `forward` *is* the algo instance, and
 [sweep.py:642](../../evaluation/retrieval/sweep.py#L642) `algo_obj(q, **kw)`. Enabling
 `torch_knn` in any config therefore raises `TypeError: 'TorchKnnAlgo' object is not callable`
@@ -151,15 +161,15 @@ not in code. The oracle does **not** depend on this class
 
 **Evidence.** After E1.1 every algo hard-codes `is_cpu = False`
 (linr_v1.py:28, linr_v2.py:26, linr_v3.py:41, linr_v4.py:31, silvertorch.py:33), so
-`measure_forward_cpu` ([bench_tools.py:170-216](../../evaluation/retrieval/bench_tools.py#L170-L216),
+`measure_forward_cpu` (`bench_tools.py:170-216`,
 47 lines) is unreachable, and every `is_cpu` branch is dead.
 
 **Edits** (exhaustive touch list):
 
 | site | change |
 |---|---|
-| [bench_tools.py:170-216](../../evaluation/retrieval/bench_tools.py#L170-L216) | delete `measure_forward_cpu` |
-| [bench_tools.py:384-395](../../evaluation/retrieval/bench_tools.py#L384-L395) | drop `is_cpu` param from `perf_pass_cached`; delete the `if is_cpu: return measure_forward_cpu(...)` tail (lines 446-447) |
+| `bench_tools.py:170-216` | delete `measure_forward_cpu` |
+| `bench_tools.py:384-395` | drop `is_cpu` param from `perf_pass_cached`; delete the `if is_cpu: return measure_forward_cpu(...)` tail (lines 446-447) |
 | [sweep.py:450-452](../../evaluation/retrieval/sweep.py#L450-L452) | `index_mem = cuda_allocated_mib() - mem_before` unconditionally |
 | [sweep.py:475-484](../../evaluation/retrieval/sweep.py#L475-L484) | drop `is_cpu=algo_obj.is_cpu` kwarg |
 | [sweep.py:494](../../evaluation/retrieval/sweep.py#L494) | `_make_perf_row`: drop `is_cpu` param; hard-code `"device": "cuda"` (line 677) |
@@ -235,7 +245,7 @@ fails with a confusing AttributeError far from the cause.
 3. `grep -rn "from datasets\.\|import datasets" evaluation/` and rewrite (known importers:
    `retrieval/` does **not** import it; `datasets/hf_io.py` self-references via relative
    paths — check `_repo_root()` at
-   [hf_io.py:89](../../evaluation/datasets/hf_io.py#L89) uses `__file__`, unaffected).
+   `hf_io.py:89` uses `__file__`, unaffected).
 4. Console-script *names* (`yambda`, `arxiv`, `goodreads`, `eval-fetch`, …) are unchanged —
    no doc or muscle-memory impact.
 
@@ -513,10 +523,9 @@ the cudagraph-stitching rationale) and must stay visible in their files. Delete
 
 ### E5.1 Split `bench_tools.py` by concern
 
-459 lines mixing four concerns, with a stale module docstring ("The single driver in
-[evaluate.py](evaluate.py) imports from here" — no such file) and a buried cross-package
+459 lines mixing four concerns, with a stale module docstring ("The single driver in `evaluate.py` imports from here" — no such file) and a buried cross-package
 dependency (`retrieval` → `training`,
-[bench_tools.py:29-30](../../evaluation/retrieval/bench_tools.py#L29-L30)).
+`bench_tools.py:29-30`).
 
 | new module | contents (moved verbatim) | imports allowed |
 |---|---|---|
@@ -530,10 +539,10 @@ is a private harness, the three importers are all in-repo:
 `loaders.py:28`, `queries_cache.py` (indirect), `sweep.py:32-38`).
 
 Fix the stale comment pair while moving: the `QUALITY_BATCH_SIZE = 16` rationale
-([bench_tools.py:324-329](../../evaluation/retrieval/bench_tools.py#L324-L329)) is current and
+(`bench_tools.py:324-329`) is current and
 moves with the constant, but `quality_pass_cached`'s docstring still claims "Default
 ``batch_size=64`` cut per-cell wall ~50×"
-([bench_tools.py:349-353](../../evaluation/retrieval/bench_tools.py#L349-L353)) — reword to
+(`bench_tools.py:349-353`) — reword to
 reference the constant instead of a literal.
 
 ### E5.2 `PerfStats` / `QualityStats` instead of tuples
@@ -572,7 +581,7 @@ class QualityStats:
 
 **Why QualityStats**: [metrics.py:150-154](../../evaluation/retrieval/metrics.py#L150-L154)
 already computes recall/precision/mrr/ndcg per batch; the harness then discards precision and
-mrr ([bench_tools.py:381](../../evaluation/retrieval/bench_tools.py#L381)). Emit them —
+mrr (`bench_tools.py:381`). Emit them —
 `_make_perf_row` adds `precision@{k}` / `mrr@{k}` columns (additive, Stage 4a-friendly, zero
 extra compute). `_make_perf_row` slims to
 `row = {**fixed_fields, **stats.as_row_fields(), f"recall@{k}": q.recall, …}`.
@@ -782,7 +791,7 @@ Catalogued during the audit; none blocks the phases above.
   skip *cells*, not just whole algos. Medium effort; do after E2 when rows flow through one
   choke point.
 - **tqdm vs orchestrator logs**: the quality/oracle tqdm bars
-  ([bench_tools.py:361](../../evaluation/retrieval/bench_tools.py#L361),
+  (`bench_tools.py:361`,
   [oracle.py:58](../../evaluation/retrieval/oracle.py#L58)) write control characters into the
   orchestrator's tee'd logs. Pass `disable=not sys.stderr.isatty()` (or
   `TQDM_DISABLE`-aware) to both.
@@ -830,9 +839,9 @@ Catalogued during the audit; none blocks the phases above.
 |---|---|
 | [evaluation/retrieval/sweep.py](../../evaluation/retrieval/sweep.py) | E1.2-3, E2, E3, E5.2 |
 | `evaluation/retrieval/context.py` | E2 — CREATE |
-| [evaluation/retrieval/bench_tools.py](../../evaluation/retrieval/bench_tools.py) | E1.2, E5.1 — split into `measure.py` / `encode.py` / `passes.py`, then DELETE |
+| `evaluation/retrieval/bench_tools.py` | E1.2, E5.1 — split into `measure.py` / `encode.py` / `passes.py`, then DELETE |
 | [evaluation/retrieval/algos/__init__.py](../../evaluation/retrieval/algos/__init__.py) | E1.1, E3 |
-| [evaluation/retrieval/algos/torch_knn.py](../../evaluation/retrieval/algos/torch_knn.py) | E1.1 — DELETE |
+| `evaluation/retrieval/algos/torch_knn.py` | E1.1 — DELETE |
 | [evaluation/retrieval/algos/_helpers.py](../../evaluation/retrieval/algos/_helpers.py) | E3.1, E4 |
 | algos/{linr_v1,linr_v2,linr_v3,linr_v4,silvertorch}.py | E1.2, E4 |
 | [evaluation/retrieval/oracle.py](../../evaluation/retrieval/oracle.py) | E6 |

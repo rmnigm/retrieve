@@ -26,7 +26,7 @@ Subcommands::
 
 Examples::
 
-    uv run synth_arxiv all \\
+    uv run python -m eval_datasets.synth_arxiv all \\
         --source-dir data/arxiv/papers \\
         --output-dir data/arxiv-synth-15m \\
         --target-n 15000000 \\
@@ -71,7 +71,7 @@ A_MAX_NARROW = 4
 
 # Hard cap. Above this the attribute tensors blow past comfortable host RAM
 # and the existing single-file oracle path cannot serve them on a single GPU.
-# See docs/plans/linr-int8-quantization.md for the path needed at 1B.
+# See docs/system/datasets.md for the path needed at 1B.
 MAX_TARGET_N = 200_000_000
 
 # Per-iteration chunk for the assignment matmul in spherical k-means.
@@ -237,7 +237,7 @@ def cmd_synth(args) -> int:
             f"ERROR target-n={args.target_n:,} > {MAX_TARGET_N:,} — at this scale\n"
             f"the attribute tensors exceed comfortable host RAM and the existing\n"
             f"single-file oracle cannot serve the catalog on a single GPU.\n"
-            f"See docs/plans/linr-int8-quantization.md for the int8/1-bit path.",
+            f"See docs/system/datasets.md for the int8/1-bit path.",
             flush=True,
         )
         return 1

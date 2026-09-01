@@ -1,19 +1,12 @@
 """LiNR V4 — int8 dense matmul + optional boolean mask, then topk.
 
-Single-stage twin of ``linr_v1_filter_mask`` with int8 storage and int8
-compute. Items and queries are int8-quantized symmetrically per row;
-scoring is cuBLAS ``_int_mm`` (int8×int8 → int32, IMMA tensor cores on
-Ampere+) followed by a per-row scale recovery to fp32. No quantized
-prefilter cascade — int8 directly preserves cosine signal well enough
-to be the final score (≥0.99 recall on unit-norm embeddings at D=128).
+Single-stage twin of ``linr_v1_filter_mask`` backed by ``PostfilterKNNInt8``:
+cuBLAS ``_int_mm`` (int8xint8 -> int32, IMMA on Ampere+) with per-row scale
+recovery. No prefilter cascade — int8 preserves enough cosine signal to be the
+final score (>=0.99 recall on unit-norm embeddings at D=128).
 
-Backed by :class:`PostfilterKNNInt8`. ``backend`` is accepted for
-API symmetry but has no effect: cuBLAS LtGemm runs the same code on
-both paths.
-
-The whole algo forward (filter mask build + index call) is wrapped
-with ``torch.compile(dynamic=True, mode="reduce-overhead")`` in
-``__init__`` regardless of backend — same pattern as ``linr_v1``.
+``backend`` is accepted for API symmetry but has no effect: cuBLAS LtGemm runs the
+same code on every path.
 """
 
 from __future__ import annotations

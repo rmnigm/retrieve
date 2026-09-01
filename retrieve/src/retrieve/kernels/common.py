@@ -1,31 +1,13 @@
 """Shared ``@triton.jit`` building blocks for the filter / silvertorch / linr kernels.
 
-Every helper is a pure function of already-loaded tiles or takes fully-resolved
-addressing from the caller — no helper decides its own tile shape, launch grid,
-or masking policy. Callers keep their own grids, loads, and epilogue policy.
+Every helper is a pure function of already-loaded tiles, or takes fully-resolved
+addressing from the caller. **No helper decides its own tile shape, launch grid, or
+masking policy** — callers keep their own grids, loads, and epilogue policy. That
+invariant is what lets one helper serve kernels with very different launch shapes.
 
-Contract (the signatures below are the Wave-1 rewrite contract):
-
-- ``or_combine(a, b) -> a | b`` — combine_fn for ``tl.reduce`` OR-reductions.
-- ``popcount_int64(x) -> int32`` — SWAR popcount over int64 lanes.
-  Call site: ``linr/oporp_1bit_match_topk`` (replaces its local ``_popcount_int64``).
-- ``bloom_subset_pass(qb, sigs) -> [BLOCK] int1`` — bloom subset test over
-  loaded tiles ``qb`` [W] int64, ``sigs`` [BLOCK, W] int64.
-  Call sites: ``silvertorch/bloom_match``, ``filters/bloom_compact``,
-  ``silvertorch/codesigned_probe_score`` (standardizes on the ``qb & ~sig``
-  OR-reduce form; boolean-identical to the equality + min-reduce form).
-- ``clause_pass(item_attrs_ptr, is_reverse_ptr, query_attrs_ptr, ids,
-  load_mask, bid, stride_in, stride_ic, stride_ia, stride_qb, stride_qc,
-  C, A_MAX) -> [BLOCK] int1`` — AND-of-OR exact clause predicate, already
-  ANDed with ``load_mask``.
-  Call sites: ``filters/clause_mask`` / ``filters/clause_compact``
-  (``ids=n_offsets``, ``load_mask=n_valid``) and
-  ``silvertorch/codesigned_probe_score_exact`` (``ids=safe_ids``,
-  ``load_mask=valid``).
-- ``compact_store(pass_mask, ids, counts_ptr, out_ptr, bid, stride_ob,
-  stride_on)`` — stream-compaction epilogue (cumsum intra-tile offsets +
-  atomic_add row base + masked store).
-  Call sites: ``filters/clause_compact``, ``filters/bloom_compact``.
+Helpers: ``or_combine``, ``popcount_int64``, ``bloom_subset_pass``, ``clause_pass``,
+``compact_store``. Per-helper semantics and the call-site map live in
+docs/system/kernels.md § Shared kernel helpers.
 """
 
 import triton

@@ -245,7 +245,7 @@ drift + latency vs side-index size; the LiNR +6% freshness lift
 
 LiNR reports 1B×64d fp16 → 1-bit on a single V100 ([linr.md §5.3.2](../../articles/linr.md));
 the repo's measured ceiling so far is the 15M synth-arxiv catalog. The synth generator
-([datasets/synth_arxiv.py](../../evaluation/datasets/synth_arxiv.py) — cluster + slerp
+(`datasets/synth_arxiv.py` — cluster + slerp
 sampling, sharded emission) scales by construction; the eval harness already warns and guides
 at >100M ([loaders.py:98-104](../../evaluation/retrieval/loaders.py#L98-L104)). Experiment
 ladder: 50M → 100M (d=128, 1-bit codes = 800 MB; int8 = 12.8 GB — both fit an 80 GB card

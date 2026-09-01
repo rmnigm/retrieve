@@ -32,22 +32,45 @@ uv sync   # from this directory — populates ./.venv with both packages install
 After `uv sync`, run from anywhere in the workspace:
 
 ```bash
-# from the root, targeting a member:
+# library correctness suite (GPU-only; skips itself without CUDA)
 uv run --directory retrieve pytest tests/
-uv run --directory evaluation -- bash run_per_algo.sh conf/500m/d128-quality.yaml
 
-# or cd in (uv finds the workspace root automatically):
-cd retrieve   && uv run pytest tests/
-cd evaluation && ./run_per_algo.sh conf/500m/d128-quality.yaml
+# one algorithm against one config
+uv run --directory evaluation evaluate \
+    --config config/arxiv/d128-filter.yaml --algo silvertorch --output /tmp/st.json
+
+# a whole campaign (drives `evaluate` per algorithm, then stages results)
+uv run --directory evaluation run-evaluation --eval-type filter
 ```
+
+`cd`-ing into a member works too — uv finds the workspace root automatically.
 
 The lockfile lives at the root (`uv.lock`); the per-member lockfiles are obsolete.
 
 ## Docs
 
-- [`docs/system/architecture.md`](docs/system/architecture.md) — module map, what each retrieval family does.
-- [`docs/system/kernels.md`](docs/system/kernels.md) — Triton kernel internals.
-- [`docs/system/testing.md`](docs/system/testing.md) — running the correctness suite.
-- [`docs/system/evaluation.md`](docs/system/evaluation.md) — running the benchmark harness.
-- [`docs/system/checkpoints.md`](docs/system/checkpoints.md) — trained models + HF Hub workflow.
-- [`docs/system/filtering.md`](docs/system/filtering.md) — clause / Bloom filter API.
+**System design** ([`docs/system/`](docs/system/)) — how the thing works, kept in
+sync with the code:
+
+- [`architecture.md`](docs/system/architecture.md) — module map, what each retrieval family does.
+- [`kernels.md`](docs/system/kernels.md) — Triton + CUDA C++ kernel internals.
+- [`filtering.md`](docs/system/filtering.md) — clause / Bloom filter semantics, paper vs. implementation.
+- [`testing.md`](docs/system/testing.md) — the correctness / parity / compile suites.
+- [`evaluation.md`](docs/system/evaluation.md) — the benchmark harness.
+- [`datasets.md`](docs/system/datasets.md) — dataset ETL and the SASRec training pipeline.
+- [`checkpoints.md`](docs/system/checkpoints.md) — trained models + HF Hub workflow.
+
+**Library user guide** ([`retrieve/docs/`](retrieve/docs/)) — ships in the sdist,
+written for someone who installed `torchretrieve` and does not have this repo:
+[getting-started](retrieve/docs/getting-started.md),
+[modules](retrieve/docs/modules.md),
+[filtering-and-quantization](retrieve/docs/filtering-and-quantization.md).
+
+**Plans** ([`docs/plans/`](docs/plans/)) — the work queue
+([`00-roadmap.md`](docs/plans/00-roadmap.md)), live GPU-validation runbooks, and
+a research-idea catalog. Completed plans are archived under
+[`docs/plans/archive/`](docs/plans/archive/).
+
+**Papers** ([`articles/`](articles/)) — pandoc renderings of the three papers
+this repo reproduces or benchmarks against (SilverTorch, LiNR, Yambda). Frozen
+source material: cited by the docs, never edited.

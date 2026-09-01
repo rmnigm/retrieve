@@ -1,16 +1,8 @@
 """LiNR V1 — dense matmul + optional boolean mask, then topk.
 
-Covers two registered names: ``linr_v1_filter_mask`` (canonical for
-filter cells) and ``triton_knn`` (historic alias used by yambda
-configs). Same implementation; the alias exists so both YAML lineages
-keep working without a rename. Backed by ``PostfilterKNN`` with
-``backend="triton"`` (default) or ``"torch"``.
-
-The whole algo forward (filter mask build + index call) is wrapped
-with ``torch.compile(dynamic=True, mode="reduce-overhead")`` in
-``__init__`` regardless of backend — Inductor fuses the matmul +
-optional mask + topk body and cudagraph_trees replay collapses launch
-overhead.
+Backed by ``PostfilterKNN``. Covers two registered names:
+``linr_v1_filter_mask`` (canonical for filter cells) and ``triton_knn`` (historic
+alias kept so the yambda YAML lineage keeps working).
 """
 
 from __future__ import annotations
