@@ -250,3 +250,14 @@ _agent_scratch/
 
 # JIT-compiled CUDA extension cache (torch.utils.cpp_extension.load)
 .torch_extensions/
+
+# LaTeX build artifacts under docs/ (thesis / presentation sources and PDFs are tracked)
+docs/**/*.aux
+docs/**/*.nav
+docs/**/*.out
+docs/**/*.snm
+docs/**/*.toc
+docs/**/*.vrb
+docs/**/*.fls
+docs/**/*.fdb_latexmk
+docs/**/*.synctex.gz
