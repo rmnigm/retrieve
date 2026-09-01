@@ -37,7 +37,7 @@ from retrieval.sweep import run_sweep
     "--backend",
     "backend_override",
     multiple=True,
-    type=click.Choice(["triton", "torch"]),
+    type=click.Choice(["triton", "torch", "cuda"]),
     default=(),
 )
 @click.option("--sweep", "sweep_filter", type=str, default=None)

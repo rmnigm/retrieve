@@ -1,29 +1,17 @@
 """Algorithm registry for the retrieval benchmark.
 
-One ``AlgoBase`` subclass per algo, with::
+One ``AlgoBase`` subclass per algo, exposing::
 
-    algo.algo_modules: list[nn.Module]          # for memory cleanup
+    algo.algo_modules: list[nn.Module]          # for per-cell memory cleanup
     algo(q, qa_narrow=None) -> (ids, scores)    # via Module.__call__
 
-Each algo's ``__init__`` ends with ``self._finalize(...)`` (see
-``_helpers.AlgoBase``), which applies the one canonical
-``torch.compile(dynamic=True, mode="reduce-overhead")`` call so the
-whole forward (filter + index + cascade) becomes one cudagraph
-capture. ``algo_modules`` is a separately maintained list (distinct
-from ``nn.Module.modules()``) that the sweep driver iterates for
-explicit per-cell GPU-memory cleanup.
+Three things must stay in sync when adding an algo: ``ALGORITHMS``,
+``SUPPORTED_FILTER_KINDS``, and the ``build_algorithm`` branch. A test asserts the
+first two match. See docs/system/evaluation.md § Algorithms.
 
-``build_algorithm`` is a thin factory: it picks the class for ``name``,
-unpacks ``params`` into its constructor, and forwards
-``filter_kind``/``filter_mod``/``item_attrs_narrow``/``clause_is_reverse``
-so each class can opt in to whichever inputs it actually consumes.
-
-Cell eligibility is declared in ``SUPPORTED_FILTER_KINDS``; the sweep
-driver checks ``supports(algo, filter_kind)`` before building a cell,
-so construction-time raises are genuine errors, never control flow.
-Silvertorch with ``filter_kind='clause'`` accepts ``clause_is_reverse``
-and supports reverse-clause sweeps end-to-end via the fused codesigned
-exact-clause kernel.
+``SUPPORTED_FILTER_KINDS`` is backend-blind, and now it does not need to be:
+``silvertorch`` supports every filter kind on every backend, ``cuda`` included
+(the cuda backend gained an exact-clause kernel, so clause sweeps build there).
 """
 
 from __future__ import annotations
@@ -94,10 +82,9 @@ def build_algorithm(
 ) -> RetrievalAlgo:
     """Return an algo instance for one ``(name, filter_kind, backend)`` cell.
 
-    Eligibility is decided up front by ``supports``; any ``ValueError``
-    raised here (e.g. ``linr_v2`` without a filter) is a genuine
-    construction error and propagates to kill the run loudly. ``backend``
-    is threaded into the underlying retrieval module by every algo.
+    Unpacks ``params`` into the chosen class and forwards the filter inputs so each
+    class opts in to what it consumes. Raises here are genuine construction errors,
+    not routing — eligibility was already checked by ``supports``.
     """
     p = params or {}
 
