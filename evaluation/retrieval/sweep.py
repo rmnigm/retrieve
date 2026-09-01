@@ -151,6 +151,9 @@ def _build_filter_modules(
 
     filter_mods: dict[Backend, FilterModule | None] = {}
     for backend in ctx.backends:
+        # No CUDA C++ filter kernels exist (only SilverTorch's fused probe scoring),
+        # so cuda cells get the triton filter rather than silently falling to torch.
+        filter_backend: Backend = "triton" if backend == "cuda" else backend
         filter_mods[backend] = build_filter(
             filter_kind,
             item_attrs_narrow=item_attrs_narrow,
@@ -158,12 +161,16 @@ def _build_filter_modules(
             bloom_m_bits=fcfg.m_bits,
             bloom_k_hash=fcfg.k_hash,
             device=ctx.device,
-            backend=backend,
+            backend=filter_backend,
         )
 
-    oracle_backend: Backend = "triton" if "triton" in ctx.backends else ctx.backends[0]
+    oracle_backend: Backend = (
+        "triton" if ("triton" in ctx.backends or "cuda" in ctx.backends) else ctx.backends[0]
+    )
     if filter_kind == "clause":
-        oracle_filter: FilterModule | None = filter_mods[oracle_backend]
+        oracle_filter: FilterModule | None = filter_mods[
+            "triton" if "triton" in ctx.backends else ctx.backends[0]
+        ]
     elif filter_kind == "bloom":
         oracle_filter = build_filter(
             "clause",

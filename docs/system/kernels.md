@@ -1,8 +1,10 @@
-<!-- claude code generated file -->
-
 # `retrieve` kernels
 
-> Previously: `retrieve/docs/kernels.md` (originally `retrieve/docs/KERNELS.md`).
+Almost every kernel here is Triton. The one exception is a single CUDA
+C++ translation unit under
+[`silvertorch/cuda/`](../../retrieve/src/retrieve/kernels/silvertorch/cuda/),
+which backs `SilverTorch(backend="cuda")` and is documented in
+[its own section](#codesigned_probe_score_cuda--the-cuda-c-backend).
 
 The Triton kernels split into three trees by domain:
 
@@ -26,7 +28,9 @@ The Triton kernels split into three trees by domain:
   for the IVF + INT8 + exact AND-of-OR variant —
   `SilverTorch.filter_mode` picks one) plus `bloom_match` (lives in this
   tree for historical reasons but is now a cross-tree filter primitive
-  consumed by `BloomFilter`).
+  consumed by `BloomFilter`). The `cuda/` subdirectory holds the CUDA
+  C++ alternative to `codesigned_probe_score`, selected by
+  `SilverTorch(backend="cuda")`.
 
 Cross-tree `@triton.jit` building blocks live in
 [`kernels/common.py`](../../retrieve/src/retrieve/kernels/common.py) —
@@ -36,7 +40,10 @@ The LinR kernels are the focus of this doc; the filter primitives
 (`clause_compact`, `clause_mask`, `bloom_match`, `bloom_compact`) are
 covered next, and the SilverTorch-only kernels at the end for context.
 
-All kernels follow the same conventions:
+All **Triton** kernels follow the same conventions. The CUDA backend
+deliberately departs from several of them (two launches, no
+`num_stages`, `@torch.library.custom_op` instead of `@triton_op`); its
+section spells out each divergence.
 
 - One launch per `forward()` call. No persistent threads, no streams.
 - Inputs are CUDA tensors with explicit strides; the host wrapper passes
@@ -46,7 +53,9 @@ All kernels follow the same conventions:
   is faster than anything we can implement in pure Triton without a
   warp-level radix-select primitive.
 - Tile config (`block_n`, `num_warps`, `num_stages`; `block_p` for the
-  silvertorch kernels) is offline-tuned per kernel and shipped as a
+  silvertorch kernels — the CUDA backend's config is `(block_p,
+  num_warps)` only, since `num_stages` is a Triton pipelining concept)
+  is offline-tuned per kernel and shipped as a
   single `DEFAULT_CONFIG` constant on the kernel module. No runtime
   `@triton.autotune`. Callers who want a non-default tile pass
   `config=<Kernel>Config(...)` to the private
@@ -70,12 +79,18 @@ All kernels follow the same conventions:
 - Graph-break behavior. Every host wrapper in this tree is decorated
   with `@torch.library.triton_op` + a textually-inline
   `wrap_triton(_kernel)[grid](**launch.kwargs)` launch — all ten
-  registered ops across the seven kernel files: `clause_mask`,
-  `clause_compact`, `bloom_compact`, `fused_masked_knn_topk`,
-  `bloom_match`, `codesigned_probe_score`,
+  Triton-registered ops across the seven Triton kernel files:
+  `clause_mask`, `clause_compact`, `bloom_compact`,
+  `fused_masked_knn_topk`, `bloom_match`, `codesigned_probe_score`,
   `codesigned_probe_score_bloom`, `codesigned_probe_score_exact`,
-  `oporp_1bit_match_topk_full`, `oporp_1bit_match_topk_indirect`. (No
-  kernel remains on `@custom_op`.) The decorator stops dynamo from
+  `oporp_1bit_match_topk_full`, `oporp_1bit_match_topk_indirect`. The
+  CUDA backend adds three more ops on `@torch.library.custom_op`
+  (`codesigned_probe_score_cuda`, `codesigned_probe_score_bloom_cuda`,
+  `codesigned_probe_score_exact_cuda`) — 13 ops across 8 kernel files in
+  total. `@triton_op` is for Triton
+  kernels specifically; a C++ extension has no `@triton.jit` body for
+  inductor to see, so an opaque custom op is the correct registration
+  there. The decorator stops dynamo from
   graph-breaking at the wrapper boundary, so each layer's full forward
   captures into one cudagraph_trees graph, and lets inductor see the
   underlying `@triton.jit` kernel (preserves the reference under
@@ -123,9 +138,10 @@ The shipped pattern, applied uniformly to every kernel in this tree:
 5. Tuning is offline: `retrieve/src/retrieve/tune.py` (`uv run
    tune-kernels <kernel-subcommand>`) is a declarative registry — one
    `KernelTuneSpec` per kernel in the `KERNELS` tuple, from which the
-   seven click subcommands are generated
+   eight click subcommands are generated
    (`fused-masked-knn-topk`, `oporp-1bit-match-topk`,
-   `codesigned-probe-score`, `codesigned-probe-score-exact`,
+   `codesigned-probe-score`, `codesigned-probe-score-cuda`,
+   `codesigned-probe-score-exact`,
    `clause-mask`, `clause-compact`, `bloom-compact`), all driven by one
    generic `_sweep` + `_print` pair. Each spec sweeps its `(block,
    num_warps)` grid against built-in shape regimes mirroring real-eval
@@ -811,3 +827,339 @@ predicate body is the shared `common.clause_pass`
 (`ids=safe_ids`, `load_mask=valid` — indirect addressing over the
 probed items). Score buffer is `torch.empty([B, P])` — same convention
 as `codesigned_probe_score`, no pre-fill kernel.
+
+
+### `codesigned_probe_score_cuda` — the CUDA C++ backend
+
+[`silvertorch/codesigned_probe_score_cuda.py`](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_cuda.py)
+(host side) +
+[`silvertorch/cuda/codesigned_probe_score.cu`](../../retrieve/src/retrieve/kernels/silvertorch/cuda/codesigned_probe_score.cu)
+(device side), selected by `SilverTorch(backend="cuda")`. All three
+`filter_mode`s run here.
+
+This is the paper-faithful implementation of Algorithm 1
+(`partial_bloom`) phases 2+3. The Triton kernel and this one compute the
+same function by different means, and the difference is the point of the
+backend existing: the Triton kernel fuses a **row-wise** bloom signature
+read into the scoring pass; the paper instead evaluates bloom against a
+**transposed** bit matrix and hands the scorer a 1-bit-per-item mask.
+That needs two kernels, so it cannot be expressed as one fused Triton
+launch.
+
+The split generalizes past bloom. *Any* filter here is a
+1-bit-per-item mask laid out cluster-major over the probed spans (the
+paper's `M_c`), and phase 3 is filter-agnostic — it tests one bit and
+never learns what produced it. So `filter_mode="exact"` is a second
+phase-2 kernel rather than a third scoring kernel: `cps_bloom_mask_kernel`
+and `cps_clause_mask_kernel` write the same layout, and
+`cps_score_kernel<…, HAS_MASK=true>` consumes either unchanged.
+
+#### Phase 2 — the transposed bloom index
+
+The bloom index is stored rotated (paper Fig. 3(b)). `sigs_t[m]` is a
+bit-vector over *items*, 64 items per int64 word, with items laid out
+cluster-major in padded IVF order so that every cluster occupies a
+contiguous, word-aligned span of `wpc = ceil(max_cluster_size / 64)`
+words. `build_transposed_sigs(bloom_sigs, padded_cluster_items)` builds
+it host-side once at `register_index`; bit `s % 64` of word
+`c * wpc + s // 64` in row `m` is bit `m` of
+`bloom_sigs[padded_cluster_items[c, s]]`, with `-1` padding slots
+contributing `0`.
+
+`cps_bloom_mask_kernel` then iterates **only the set bits** of the query
+signature (`__ffsll` / `bits &= bits - 1`) and ANDs the matching rows:
+one `and.b64` decides 64 items. Filter traffic is therefore proportional
+to `popcount(QB)` — typically `k_hash × active clauses`, tens of bits —
+rather than to `m_bits`. At `W=16` (`m_bits=1024`) the row-wise form
+reads 128 B per probed item where this reads `~popcount(QB)/64 × 8` B.
+That gap is the paper's headline bloom win, and it is why the
+transposition is worth a second launch.
+
+The accumulator starts at `~0LL`, the AND identity: a query with no set
+bits passes everything, which is exactly the row-wise `(qb & ~sig) == 0`
+semantics. One thread produces one output mask word; consecutive threads
+walk consecutive words of the same cluster span, so the row reads
+coalesce. Output is `[B, n_probe · wpc]` int64.
+
+One asymmetry with the clause kernel below, deliberate but easy to trip
+over: this kernel does **not** force the pad tail of a span's last word to
+0. `build_transposed_sigs` zero-fills those columns, so any set query bit
+clears them — but an empty `QB` short-circuits to the `~0` identity and
+leaves the tail at 1. Harmless, because phase 3 only ever addresses bit
+`slot` for `slot < max_cluster_size`. Nothing should start depending on a
+zero tail from *this* kernel; the clause kernel's zero tail is a real
+guarantee and is tested.
+
+**Index memory.** `bloom_sigs_t` is `[m_bits, n_lists · wpc]` int64:
+
+```
+bytes(bloom_sigs_t) = W · 8 · n_lists · wpc · 64
+                    = bytes(bloom_sigs) × (n_lists · wpc · 64 / N)
+```
+
+The factor is the IVF *padding slack* — `n_lists · max_cluster_size / N`,
+rounded up to whole 64-slot words — because every cluster is padded out to
+the largest one. On a balanced index it is 1.0–1.1× and, since the cuda
+backend registers `bloom_sigs_t` *instead of* `bloom_sigs` (not alongside),
+total filter memory is roughly unchanged versus triton. It grows without
+bound as clusters get uneven, so `_register_filter_buffers` emits a
+`RuntimeWarning` above 2× pointing at re-clustering. Record the ratio per
+dataset — the runbook's §3.4 / §7 memory-delta gate expects it.
+
+#### Phase 2 (exact) — the clause mask
+
+`cps_clause_mask_kernel` fills the *same* `[B, n_probe · wpc]` layout
+from the exact AND-of-OR clause predicate, so exact mode reuses phase 3
+untouched.
+
+One **warp** owns one output word. Lane `l` evaluates slot `l` of each
+32-slot half of the word and the two halves are packed by two
+`__ballot_sync` calls — `word = lo | (hi << 32)`, stored by lane 0.
+Every lane must reach both ballots, so the early return for
+`word_idx >= mask_words` is warp-uniform (one word per warp) and the
+per-lane work sits in a branch *before* the ballot, never around it.
+
+Ids come from **`flat_items`** — the same `[B, P]` tensor phase 3 reads —
+not from `probe_ids` plus the padded index. Two consequences, both
+deliberate:
+
+- The 32 lanes of a half read 32 consecutive `int64` ids: one coalesced
+  256-byte run, the same access phase 3 makes.
+- Exact mode registers **no new buffer**. Unlike bloom, where cuda swaps
+  `bloom_sigs` for `bloom_sigs_t`, a cuda+exact module's `state_dict` is
+  identical to a triton+exact one's — `item_clause_attrs[N, C, A_max]`
+  int64 and `clause_is_reverse[C]` bool, read in place. The op takes
+  `max_size` (the padded cluster width, `P // n_probe`) as a Python int
+  so it can still lay the mask out cluster-major.
+
+The predicate is bit-identical to `common.clause_pass`: seed `keep` from
+`id >= 0`, OR over the `A_max` values of each clause, XOR the clause's
+reverse flag, then let `q_c == -1` (inactive) override — in that order,
+since the sentinel outranks reverse. Padding slots (`id < 0`) and the pad
+tail of a span's last word get bit `0`.
+
+`C` and `A_max` are runtime kernel arguments here where the Triton kernel
+takes them as `tl.constexpr` — a CUDA C++ template would need one
+instantiation per `(C, A_max)` pair, and the loop is not the bottleneck
+(one `[C, A_max]` int64 row is ~one 32-byte sector at the shipped 2×2 to
+5×4 shapes, the same order as the id read). `clause_is_reverse` is read
+as `torch.bool` storage through an `unsigned char*` because `__ldg` has
+no `bool` overload; `q_c` and the reverse flag are warp-uniform loads
+that broadcast.
+
+#### Phase 3 — masked `__dp4a` scoring
+
+`cps_score_kernel<SEG, WPL, HAS_MASK, UNROLL>` scores one
+`(query, probed slot)` pair per segment: gather the item id (`-1` =
+cluster padding), test one mask bit, and only for passing items stream
+the int8 code row straight from the embedding table into a `__dp4a`
+dot — 4 MACs per instruction, the instruction the paper names. There is
+no intermediate gather tensor and no shared memory anywhere.
+
+The mapping is `D = SEG · WPL · 4` as a compile-time constant, so each
+lane's query words sit in registers for the whole block:
+
+| `D` | `SEG` | `WPL` | note |
+|---|---|---|---|
+| 64 | 16 | 1 | two items in flight per warp |
+| 128 | 32 | 1 | one row = exactly one 128 B cache line |
+| 256 | 32 | 2 | |
+| other, `D % 4 == 0` | 32 | runtime | `cps_score_kernel_generic` fallback |
+
+A `SEG`-lane sub-warp segment cooperates on one item: lane `j` owns
+packed code words `j, j+SEG, …`, so a row read is `SEG` consecutive
+4-byte words, fully coalesced. Warps own contiguous item tiles (the
+paper's "one warp per contiguous tile of items"). The keep verdict is
+**segment-uniform**, so filtered items genuinely skip both the row load
+and the whole dp4a chain — that is where the filter's savings are
+realized. Non-passing slots store `-INFINITY`; every slot in `[0, P)` is
+written, so the score buffer is `torch.empty`, matching the Triton
+convention. Top-K stays host-side (phase 4).
+
+`seg_reduce_add<SEG>` uses `__reduce_add_sync` on `sm_80+` and a
+`__shfl_xor_sync` butterfly below. Both are exact integer sums, so the
+arch split never changes results.
+
+The mask test is **division-free**: a segment tracks the `(cluster, slot)`
+of its base item incrementally — one 64-bit divide before the loop, then
+`slot += SPW·UNROLL` with a carry loop into `cluster` — instead of
+recomputing `p / max_size` per item. The carry loop is bounded by
+`SPW·UNROLL ≤ 8` subtractions and stays correct when `max_size` is
+smaller than one step, i.e. when a single iteration crosses several
+cluster spans.
+
+#### Phase 3 — the `UNROLL` knob
+
+`UNROLL ∈ {1, 2, 4}` (config field, default `1` = the original
+one-item-per-iteration loop) is how many items one segment keeps in
+flight. The loop body runs in three phases — ids and keep verdicts, then
+**all** `UNROLL` row gathers, then the dots — so several independent row
+loads are issued before the first `__dp4a` stalls on one. Rejected items
+are still skipped: the row loads are predicated on the segment-uniform
+keep flag rather than sitting behind serialized `if` blocks.
+
+Why it might pay: by Little's law A100 needs ≈ 1555 GB/s × ~600 ns ≈
+0.9 MB in flight to saturate HBM, ≈ 8.6 KB/SM ≈ 67 rows of 128 B, while
+~50 resident warps × one row each (`D=128`) ≈ 6.4 KB is borderline short.
+Two to four items per segment is the one v2 knob with a first-principles
+case, which is why it is the only one implemented (`int2` row loads and a
+swept mask-kernel block size stay deferred — the kernel is
+bandwidth-bound, so instruction count is not the limiter).
+
+Two caveats. The generic runtime-`D` fallback has **no** `UNROLL`
+parameter and the launcher ignores the config's value there. And the knob
+costs registers: at `UNROLL=4, WPL=2` the body holds 8 row words + 4 ids
++ flags beyond the baseline, an estimated ~55 regs/thread against the
+~35–45 of `UNROLL=1`; above 64 regs/thread occupancy drops below 50% on
+A100 and a win turns into a loss. Confirm with `ptxas -v` (or ncu's
+launch statistics) on the target arch before pasting a tuned
+`unroll > 1` — it has never been measured, only reasoned about.
+
+The arithmetic is identical at every `UNROLL`: same dp4a order over the
+`w·SEG + sl` words, same segment reduction, same two left-associated fp32
+multiplies. So bit-exactness vs Triton is a property of the kernel, not
+of the config, and the parity suite asserts it with `torch.equal` across
+configs.
+
+#### Numerics: bit-identical to Triton, and how that is kept
+
+The int32 dot is exact (`|dot| ≤ D_max · 128² = 2²² ≪ 2³¹`, and integer
+addition is associative in the no-overflow regime, so any accumulation
+order matches `tl.dot` bit-for-bit). The epilogue is two left-associated
+fp32 multiplies matching Triton's
+`dots.to(f32) * q_scale * global_scale`. Both masks are
+boolean-identical to their Triton predicates — the transposed AND to the
+row-wise subset test, the ballot-packed clause bits to `clause_pass`.
+Therefore the `[B, P]` **score tensors are bit-identical** across the two
+backends, and
+[`tests/parity/test_codesigned_probe_score_cuda.py`](../../retrieve/tests/parity/test_codesigned_probe_score_cuda.py)
+asserts that with `torch.equal` rather than an approximate match.
+
+The returned **ids are gated one notch weaker: identical up to permutation
+within tied scores** (`assert_ids_equal_up_to_ties` in
+`tests/parity/conftest.py`). Both backends run the same host
+`torch.topk` + `gather` on the same tensor, but `torch.topk` documents its
+tie order as "not guaranteed stable across invocations", and ties are not
+hypothetical here — int32 dots of ~±1e5 magnitude over P≈768 candidates
+land on roughly one tied pair per row. A tie permutation is a top-K
+property, not a kernel bug; anything outside a tie run still fails.
+
+Two invariants protect it:
+
+- **The build must not pass `--use_fast_math`.** Compiled flags live in
+  `_load_ext` (`extra_cuda_cflags=["-O3", "-lineinfo"]`). Fast-math would
+  license reassociation of the fp32 epilogue and silently break parity.
+- No FMA contraction is possible on a pure product chain, so the
+  left-associated multiply order is stable as written.
+
+#### Constraints the kernels enforce
+
+`TORCH_CHECK` failures, not silent degradation:
+
+| constraint | why |
+|---|---|
+| `D % 4 == 0` | `__dp4a` consumes 4 int8 lanes per word |
+| `unroll ∈ {1, 2, 4}` | it is a kernel *template* parameter, so only the instantiated values dispatch; the launcher rejects anything else instead of silently rounding |
+| `B ≤ 65535` | batch rides `grid.y`. The Triton kernels dodge this by putting the *tile* axis on `grid.x`; this backend reintroduces the limit **on batch size** |
+| `block_p % num_warps == 0` | each warp owns a contiguous `block_p / num_warps` tile |
+| `P % max_size == 0` | slot → `(cluster, offset)` arithmetic in the mask test — and on the exact path `max_size` is an *argument*, not derived from a `probe_ids` width, so this is the only thing tying the two apart |
+| `query_clause_attrs.size(1) == item_clause_attrs.size(1)` and `clause_is_reverse.size(0) == C` | `C` is a runtime kernel argument, not a `constexpr`; a mismatch would read past the attr row |
+| `clause_is_reverse` is `torch.bool` | the kernel reads its one-byte storage directly (`__ldg` has no `bool` overload); the Triton sibling instead converts to int8, so the two wrappers differ here |
+
+Two things that are *not* in that table, because they are not checks:
+
+- **`D ∈ {64, 128, 256}` is dispatch, not a constraint.** Any other
+  `D % 4 == 0` silently takes `cps_score_kernel_generic`, which is correct
+  but slower (runtime word loop, query words re-read per item). Only
+  `D % 4 == 0` itself is a `TORCH_CHECK`.
+- **Ids are trusted.** `probe_ids` entries and `flat_items` ids index the
+  signature / code / attribute tables with no bounds test on the device.
+  They come from the layer's own buffers (`padded_cluster_items` gathered
+  by a `topk` over `n_lists` centroids), so they are in range by
+  construction, and a per-item check would put a branch in the hot loop.
+  A caller who hand-builds them out of range gets an out-of-bounds read,
+  not an exception.
+
+#### Build, ops, and tuning
+
+The extension JIT-compiles on first *use* via
+`torch.utils.cpp_extension.load`, cached in `TORCH_EXTENSIONS_DIR`.
+Importing the module never triggers a build, so CPU-only machines can
+import `retrieve` and collect tests freely; `is_available()` is the
+sanctioned capability probe and `ensure_built()` forces the compile.
+Building needs a system CUDA toolkit whose major version matches the
+torch wheel (cu128 → 12.x `nvcc`), `ninja` (in retrieve's dev dependency
+group), and `CUDA_HOME` if `nvcc` is off PATH.
+
+The build outcome — the module *or* the exception — is memoized once in a
+module global (not `functools.cache`, whose key would include `verbose`),
+and the two ways it can be absent are kept apart. `ToolchainMissing` (no
+CUDA device, or no `nvcc` on PATH / under `$CUDA_HOME`) is "you cannot run
+this here"; anything else is a build that was attempted and broke, and its
+`ImportError` carries the nvcc/ninja output. `tests/conftest`'s
+`require_cps_cuda()` skips on the first and **fails** on the second —
+silently skipping a compile error is precisely how a broken first GPU run
+would read as green. The JIT path in `cpp_extension.load` never runs
+torch's own `_check_cuda_version`, so the wrapper probes `nvcc --version`
+itself and refuses a major-version mismatch with both versions named.
+
+The ops are **not** tagged `torch._C.Tag.cudagraph_unsafe`, and should not
+be. The one thing that could make a first call unsafe to capture is the
+~1-minute JIT build, and that is always absorbed by an eager
+`ensure_built()` / `require_cps_cuda()` / warmup before any capture
+window. Everything else the tag would protect against — non-default
+streams, raw allocation, host syncs — this backend already avoids by
+construction. The handoff's F3 lists the tag as a last-resort fallback if
+capture fails anyway, with its perf cost recorded.
+
+The `.cu` also `#error`s out below **sm_61**: `__dp4a` arrived with
+Pascal in CUDA 8 (declared in `sm_61_intrinsics.h`; see NVIDIA's
+["Mixed-Precision Programming with CUDA 8"](https://developer.nvidia.com/blog/mixed-precision-programming-cuda-8/)),
+and the whole scoring design *is* that instruction, so an older
+`TORCH_CUDA_ARCH_LIST` must fail at compile time rather than fall back to
+something slower and unvalidated. The dispatch table costs
+`3 (D) × 2 (mask) × 3 (unroll) = 18` instantiations of the scoring
+kernel, so the one-time JIT build is correspondingly longer.
+
+All three ops (`codesigned_probe_score_cuda`,
+`codesigned_probe_score_bloom_cuda`,
+`codesigned_probe_score_exact_cuda`) are
+`@torch.library.custom_op(..., device_types="cuda")` with
+`register_fake` — opaque to dynamo and export, cudagraph-safe by
+construction (kernels launch on the current torch stream, all allocation
+goes through `torch.empty`, and `global_scale` / `k` / `max_size` stay
+Python scalars so nothing forces a host sync during capture; `max_size`
+comes off `padded_cluster_items.shape[1]`, a static buffer shape). They
+are three ops rather than one op with optional arguments, so the layer
+just routes to the right op.
+
+Config is `CodesignedProbeScoreCudaConfig(block_p, num_warps, unroll)`,
+shared by both filtered paths; re-tune with `uv run tune-kernels
+codesigned-probe-score-cuda` and `… codesigned-probe-score-exact-cuda`
+(the grid is `{128, 256, 512, 1024} × {4, 8} × {1, 2, 4}`, 24 points).
+Neither phase-2 mask kernel is swept (fixed 256-thread blocks) — their
+traffic is noise next to phase 3. The two subcommands paste into the same
+`DEFAULT_CONFIG` line, so reconcile them before pasting; unlike the bloom
+pair below, `codesigned-probe-score-exact-cuda` *is* directly comparable
+with the Triton `codesigned-probe-score-exact` (same regime axes, same
+attribute distribution, same predicate).
+
+> **Comparing tuner output across backends.** The `codesigned-probe-score`
+> and `codesigned-probe-score-cuda` specs share regime axes
+> `(P, HAS_QB, D, B, W)` so their `--json-out` files join on identical
+> keys — but the `HAS_QB=1` rows are **not** comparable. The CUDA spec
+> feeds a *sparse* query signature (~25 set bits, the workload the
+> set-bit iteration is built for) against a transposed index, while the
+> Triton spec feeds dense random row-wise signatures. Dense bits would be
+> a pathological worst case for phase 2, so equal-input comparison needs
+> the head-to-head methodology in
+> [cuda-silvertorch-handoff.md](../plans/cuda-silvertorch-handoff.md).
+> The CUDA spec also requires `P` to be a multiple of its synthetic
+> `max_size`, so `--regime` values are not freely interchangeable between
+> the two subcommands. And `_cps_cuda_probe_family` fills every probed slot
+> with a real id — it carries **no `-1` cluster padding**, unlike a real
+> index — so the scorer's `id < 0` early-out never fires during a sweep and
+> the tuned config is chosen against the fully-populated worst case.
+
+GPU validation and benchmark runbook:
+[cuda-silvertorch-handoff.md](../plans/cuda-silvertorch-handoff.md).

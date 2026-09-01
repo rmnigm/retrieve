@@ -19,7 +19,7 @@ _defaults: &defaults
   algorithms:
     - silvertorch
 
-  backends: [triton, torch]
+  backends: [triton, cuda, torch]
 
   algo_params:
     silvertorch:
@@ -38,8 +38,9 @@ _defaults: &defaults
       - {n_lists: 8192, n_probe: 128, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈42k
       - {n_lists: 8192, n_probe: 256, n_iter: 10, m_bits: 1024, k_hash: 5, seed: 0}  # P≈84k
 
-  # Silvertorch only handles the bloom-fused path — clause sweeps would be
-  # auto-skipped, so omit them entirely.
+  # Bloom only by design: this config measures the paper's transposed-bloom path
+  # across backends. Clause sweeps are legal on every backend (cuda included, via
+  # its clause-mask kernel) and live in the per-dataset filter configs.
   filters:
     bloom:
       attrs_path:   data/arxiv-papers/item_attrs_narrow.pt
