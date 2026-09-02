@@ -8,7 +8,7 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
-from retrieve.kernels import common
+from retrieve.kernels.common import bloom_subset_pass
 from retrieve.layers.utils.quantize import quantize_int8
 
 
@@ -88,7 +88,7 @@ def _codesigned_probe_score_kernel(
         )
         # Shared subset test (qb & ~sig OR-reduce form); AND with `keep` supplies the
         # caller-side validity mask the helper contract requires.
-        keep = keep & common.bloom_subset_pass(qb, sigs)
+        keep = keep & bloom_subset_pass(qb, sigs)
 
     codes = tl.load(
         item_codes_ptr + safe_ids[:, None] * stride_cn + d_off[None, :] * stride_cd,

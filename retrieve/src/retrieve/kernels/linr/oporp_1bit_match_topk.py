@@ -15,7 +15,7 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
-from retrieve.kernels import common
+from retrieve.kernels.common import popcount_int64
 
 # N-bucket ladder for the HAS_INDICES path: clamps candidate width to constexpr values so the JIT
 # cache compiles once per bucket × W. Full-scan uses item_bits.shape[0] directly (fixed per
@@ -98,7 +98,7 @@ def _oporp_1bit_match_topk_kernel(
         valid_score = n_valid
 
     xor_words = qb[None, :] ^ item_rows
-    pop_words = common.popcount_int64(xor_words)
+    pop_words = popcount_int64(xor_words)
     hamming = tl.sum(pop_words, axis=1)
 
     scores = (D_TOTAL - 2 * hamming).to(tl.float32)

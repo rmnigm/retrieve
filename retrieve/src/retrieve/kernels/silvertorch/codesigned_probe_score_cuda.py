@@ -40,9 +40,9 @@ class CodesignedProbeScoreCudaConfig:
 
 
 # Re-tune on the target arch via `uv run tune-kernels codesigned-probe-score-cuda` and
-# paste the printed line here. The phase-2 mask kernel is not swept (fixed 256-thread
-# blocks).
-DEFAULT_CONFIG = CodesignedProbeScoreCudaConfig(block_p=256, num_warps=4, unroll=1)
+# paste the printed line here. A100 (2026-09-02): best mean cuda/triton kernel-time
+# ratio over P x B x {no filter, bloom}. The phase-2 mask kernels are not swept.
+DEFAULT_CONFIG = CodesignedProbeScoreCudaConfig(block_p=128, num_warps=8, unroll=1)
 
 
 class ToolchainMissing(ImportError):
