@@ -1,0 +1,19 @@
+nvdisasm warning : Disassembling Std Elf to Old format or Old Elf to Std format not supported yet, switching to Old format
+nvdisasm warning : Dataflow analysis disabled due to previous warnings
+nvdisasm warning : Disassembling Std Elf to Old format or Old Elf to Std format not supported yet, switching to Old format
+nvdisasm warning : Dataflow analysis disabled due to previous warnings
+/workspace/retrieve/.venv/lib/python3.11/site-packages/torch/profiler/profiler.py:217: UserWarning: Warning: Profiler clears events at the end of each cycle.Only events from the current cycle will be reported.To keep events across cycles, set acc_events=True.
+  _warn_once(
+[unpinned] none B=16: cuda 89.7 | cute@128.8.1 89.3 | cute@256.8.4 90.6 | cute@128.8.4 92.5 | cute@512.4.1 114.5  (scorer us)
+[unpinned] none B=1: cuda 10.7 | cute@128.8.1 10.5 | cute@256.8.4 12.8 | cute@128.8.4 11.8 | cute@512.4.1 38.6  (scorer us)
+nvdisasm warning : Disassembling Std Elf to Old format or Old Elf to Std format not supported yet, switching to Old format
+nvdisasm warning : Dataflow analysis disabled due to previous warnings
+nvdisasm warning : Disassembling Std Elf to Old format or Old Elf to Std format not supported yet, switching to Old format
+nvdisasm warning : Dataflow analysis disabled due to previous warnings
+nvdisasm warning : Disassembling Std Elf to Old format or Old Elf to Std format not supported yet, switching to Old format
+nvdisasm warning : Dataflow analysis disabled due to previous warnings
+[unpinned] bloom B=16: cuda 50.4 | cute@128.8.1 51.2 | cute@256.8.4 39.9 | cute@128.8.4 47.5 | cute@512.4.1 53.0  (scorer us)
+[unpinned] ('score', 8, False, 1): dp4a x20, ld.global.cs.v4 x5, redux x5
+[unpinned] ('score', 8, False, 4): dp4a x16, ld.global.cs.v4 x4, redux x4
+[unpinned] ('score', 8, True, 1): dp4a x4, ld.global.cs.v4 x1, redux x1
+[unpinned] ('score', 8, True, 4): dp4a x16, ld.global.cs.v4 x4, redux x4

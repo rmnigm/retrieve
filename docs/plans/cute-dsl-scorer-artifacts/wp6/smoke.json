@@ -1,0 +1,72 @@
+[
+ {
+  "mode": "none",
+  "B": 1,
+  "P": 1024,
+  "layout": "S",
+  "backend": "triton",
+  "eager": 0.3230240046977997,
+  "compile": 0.1430719941854477,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaLaunchKernel": 1,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 12
+  },
+  "cudagraph": 0.055743999779224396,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 18
+  },
+  "manual_graph": 0.0647680014371872,
+  "cell_seconds": 51.249818071722984
+ },
+ {
+  "mode": "none",
+  "B": 1,
+  "P": 1024,
+  "layout": "S",
+  "backend": "cuda",
+  "pass_rate": 1.0,
+  "eager": 0.3035520017147064,
+  "compile": 0.3879519999027252,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaLaunchKernel": 1,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 20
+  },
+  "cudagraph": 0.07068800181150436,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 18
+  },
+  "manual_graph": 0.06691200286149979,
+  "cell_seconds": 2.2463635355234146
+ },
+ {
+  "mode": "none",
+  "B": 1,
+  "P": 1024,
+  "layout": "S",
+  "backend": "cute",
+  "eager": 0.33686399459838867,
+  "compile": 0.41126400232315063,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaLaunchKernel": 1,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 20
+  },
+  "cudagraph": 0.0719359964132309,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 18
+  },
+  "manual_graph": 0.06806399673223495,
+  "cell_seconds": 2.1894813627004623
+ }
+]

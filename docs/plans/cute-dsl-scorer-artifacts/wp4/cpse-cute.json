@@ -1,0 +1,781 @@
+{
+  "arch": "sm_80",
+  "kernel": "codesigned_probe_score_exact_cute",
+  "per_regime": {
+    "N=797085,B=1,C=4,A_MAX=4": {
+      "winner": [
+        1024,
+        8,
+        4
+      ],
+      "winner_ms": 0.2248000055551529,
+      "all": [
+        {
+          "block_p": 128,
+          "num_warps": 4,
+          "unroll": 1,
+          "ms": 0.23177599906921387
+        },
+        {
+          "block_p": 128,
+          "num_warps": 4,
+          "unroll": 2,
+          "ms": 0.2306400015950203
+        },
+        {
+          "block_p": 128,
+          "num_warps": 4,
+          "unroll": 4,
+          "ms": 0.23211199790239334
+        },
+        {
+          "block_p": 128,
+          "num_warps": 8,
+          "unroll": 1,
+          "ms": 0.23187200725078583
+        },
+        {
+          "block_p": 128,
+          "num_warps": 8,
+          "unroll": 2,
+          "ms": 0.23233599960803986
+        },
+        {
+          "block_p": 128,
+          "num_warps": 8,
+          "unroll": 4,
+          "ms": 0.23107199370861053
+        },
+        {
+          "block_p": 256,
+          "num_warps": 4,
+          "unroll": 1,
+          "ms": 0.23216000199317932
+        },
+        {
+          "block_p": 256,
+          "num_warps": 4,
+          "unroll": 2,
+          "ms": 0.2327200025320053
+        },
+        {
+          "block_p": 256,
+          "num_warps": 4,
+          "unroll": 4,
+          "ms": 0.2303999960422516
+        },
+        {
+          "block_p": 256,
+          "num_warps": 8,
+          "unroll": 1,
+          "ms": 0.22815999388694763
+        },
+        {
+          "block_p": 256,
+          "num_warps": 8,
+          "unroll": 2,
+          "ms": 0.23227199912071228
+        },
+        {
+          "block_p": 256,
+          "num_warps": 8,
+          "unroll": 4,
+          "ms": 0.22814399749040604
+        },
+        {
+          "block_p": 512,
+          "num_warps": 4,
+          "unroll": 1,
+          "ms": 0.22819200158119202
+        },
+        {
+          "block_p": 512,
+          "num_warps": 4,
+          "unroll": 2,
+          "ms": 0.22643199563026428
+        },
+        {
+          "block_p": 512,
+          "num_warps": 4,
+          "unroll": 4,
+          "ms": 0.22854399681091309
+        },
+        {
+          "block_p": 512,
+          "num_warps": 8,
+          "unroll": 1,
+          "ms": 0.22915199398994446
+        },
+        {
+          "block_p": 512,
+          "num_warps": 8,
+          "unroll": 2,
+          "ms": 0.23337599635124207
+        },
+        {
+          "block_p": 512,
+          "num_warps": 8,
+          "unroll": 4,
+          "ms": 0.22838400304317474
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 4,
+          "unroll": 1,
+          "ms": 0.22854399681091309
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 4,
+          "unroll": 2,
+          "ms": 0.23094399273395538
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 4,
+          "unroll": 4,
+          "ms": 0.2475840002298355
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 8,
+          "unroll": 1,
+          "ms": 0.24959999322891235
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 8,
+          "unroll": 2,
+          "ms": 0.25356799364089966
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 8,
+          "unroll": 4,
+          "ms": 0.2248000055551529
+        }
+      ]
+    },
+    "N=797085,B=16,C=4,A_MAX=4": {
+      "winner": [
+        256,
+        8,
+        4
+      ],
+      "winner_ms": 0.1929599940776825,
+      "all": [
+        {
+          "block_p": 128,
+          "num_warps": 4,
+          "unroll": 1,
+          "ms": 0.25196799635887146
+        },
+        {
+          "block_p": 128,
+          "num_warps": 4,
+          "unroll": 2,
+          "ms": 0.253711998462677
+        },
+        {
+          "block_p": 128,
+          "num_warps": 4,
+          "unroll": 4,
+          "ms": 0.2303999960422516
+        },
+        {
+          "block_p": 128,
+          "num_warps": 8,
+          "unroll": 1,
+          "ms": 0.25299200415611267
+        },
+        {
+          "block_p": 128,
+          "num_warps": 8,
+          "unroll": 2,
+          "ms": 0.2250879928469658
+        },
+        {
+          "block_p": 128,
+          "num_warps": 8,
+          "unroll": 4,
+          "ms": 0.2459840029478073
+        },
+        {
+          "block_p": 256,
+          "num_warps": 4,
+          "unroll": 1,
+          "ms": 0.22377599775791168
+        },
+        {
+          "block_p": 256,
+          "num_warps": 4,
+          "unroll": 2,
+          "ms": 0.22217600047588348
+        },
+        {
+          "block_p": 256,
+          "num_warps": 4,
+          "unroll": 4,
+          "ms": 0.21695999801158905
+        },
+        {
+          "block_p": 256,
+          "num_warps": 8,
+          "unroll": 1,
+          "ms": 0.2173760011792183
+        },
+        {
+          "block_p": 256,
+          "num_warps": 8,
+          "unroll": 2,
+          "ms": 0.23313599824905396
+        },
+        {
+          "block_p": 256,
+          "num_warps": 8,
+          "unroll": 4,
+          "ms": 0.1929599940776825
+        },
+        {
+          "block_p": 512,
+          "num_warps": 4,
+          "unroll": 1,
+          "ms": 0.2134079933166504
+        },
+        {
+          "block_p": 512,
+          "num_warps": 4,
+          "unroll": 2,
+          "ms": 0.24799999594688416
+        },
+        {
+          "block_p": 512,
+          "num_warps": 4,
+          "unroll": 4,
+          "ms": 0.2425599992275238
+        },
+        {
+          "block_p": 512,
+          "num_warps": 8,
+          "unroll": 1,
+          "ms": 0.22121599316596985
+        },
+        {
+          "block_p": 512,
+          "num_warps": 8,
+          "unroll": 2,
+          "ms": 0.2285120040178299
+        },
+        {
+          "block_p": 512,
+          "num_warps": 8,
+          "unroll": 4,
+          "ms": 0.24713599681854248
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 4,
+          "unroll": 1,
+          "ms": 0.25068798661231995
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 4,
+          "unroll": 2,
+          "ms": 0.22643199563026428
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 4,
+          "unroll": 4,
+          "ms": 0.24902400374412537
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 8,
+          "unroll": 1,
+          "ms": 0.23216000199317932
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 8,
+          "unroll": 2,
+          "ms": 0.2502079904079437
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 8,
+          "unroll": 4,
+          "ms": 0.2500480115413666
+        }
+      ]
+    },
+    "N=2988997,B=1,C=5,A_MAX=4": {
+      "winner": [
+        512,
+        4,
+        2
+      ],
+      "winner_ms": 0.22046399861574173,
+      "all": [
+        {
+          "block_p": 128,
+          "num_warps": 4,
+          "unroll": 1,
+          "ms": 0.24481599777936935
+        },
+        {
+          "block_p": 128,
+          "num_warps": 4,
+          "unroll": 2,
+          "ms": 0.22713600099086761
+        },
+        {
+          "block_p": 128,
+          "num_warps": 4,
+          "unroll": 4,
+          "ms": 0.24871999770402908
+        },
+        {
+          "block_p": 128,
+          "num_warps": 8,
+          "unroll": 1,
+          "ms": 0.22360000014305115
+        },
+        {
+          "block_p": 128,
+          "num_warps": 8,
+          "unroll": 2,
+          "ms": 0.2481279969215393
+        },
+        {
+          "block_p": 128,
+          "num_warps": 8,
+          "unroll": 4,
+          "ms": 0.24579200148582458
+        },
+        {
+          "block_p": 256,
+          "num_warps": 4,
+          "unroll": 1,
+          "ms": 0.2492160052061081
+        },
+        {
+          "block_p": 256,
+          "num_warps": 4,
+          "unroll": 2,
+          "ms": 0.24726399779319763
+        },
+        {
+          "block_p": 256,
+          "num_warps": 4,
+          "unroll": 4,
+          "ms": 0.24751999974250793
+        },
+        {
+          "block_p": 256,
+          "num_warps": 8,
+          "unroll": 1,
+          "ms": 0.22750400006771088
+        },
+        {
+          "block_p": 256,
+          "num_warps": 8,
+          "unroll": 2,
+          "ms": 0.22627200186252594
+        },
+        {
+          "block_p": 256,
+          "num_warps": 8,
+          "unroll": 4,
+          "ms": 0.242576003074646
+        },
+        {
+          "block_p": 512,
+          "num_warps": 4,
+          "unroll": 1,
+          "ms": 0.22417599707841873
+        },
+        {
+          "block_p": 512,
+          "num_warps": 4,
+          "unroll": 2,
+          "ms": 0.22046399861574173
+        },
+        {
+          "block_p": 512,
+          "num_warps": 4,
+          "unroll": 4,
+          "ms": 0.24793599545955658
+        },
+        {
+          "block_p": 512,
+          "num_warps": 8,
+          "unroll": 1,
+          "ms": 0.2454719990491867
+        },
+        {
+          "block_p": 512,
+          "num_warps": 8,
+          "unroll": 2,
+          "ms": 0.22191999852657318
+        },
+        {
+          "block_p": 512,
+          "num_warps": 8,
+          "unroll": 4,
+          "ms": 0.24607999622821808
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 4,
+          "unroll": 1,
+          "ms": 0.22441600263118744
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 4,
+          "unroll": 2,
+          "ms": 0.2518079876899719
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 4,
+          "unroll": 4,
+          "ms": 0.24662399291992188
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 8,
+          "unroll": 1,
+          "ms": 0.24582399427890778
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 8,
+          "unroll": 2,
+          "ms": 0.2526559978723526
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 8,
+          "unroll": 4,
+          "ms": 0.2500480115413666
+        }
+      ]
+    },
+    "N=2988997,B=16,C=5,A_MAX=4": {
+      "winner": [
+        256,
+        4,
+        1
+      ],
+      "winner_ms": 0.22524799406528473,
+      "all": [
+        {
+          "block_p": 128,
+          "num_warps": 4,
+          "unroll": 1,
+          "ms": 0.2272000014781952
+        },
+        {
+          "block_p": 128,
+          "num_warps": 4,
+          "unroll": 2,
+          "ms": 0.25648000836372375
+        },
+        {
+          "block_p": 128,
+          "num_warps": 4,
+          "unroll": 4,
+          "ms": 0.25299200415611267
+        },
+        {
+          "block_p": 128,
+          "num_warps": 8,
+          "unroll": 1,
+          "ms": 0.2298240065574646
+        },
+        {
+          "block_p": 128,
+          "num_warps": 8,
+          "unroll": 2,
+          "ms": 0.2295359969139099
+        },
+        {
+          "block_p": 128,
+          "num_warps": 8,
+          "unroll": 4,
+          "ms": 0.22803199291229248
+        },
+        {
+          "block_p": 256,
+          "num_warps": 4,
+          "unroll": 1,
+          "ms": 0.22524799406528473
+        },
+        {
+          "block_p": 256,
+          "num_warps": 4,
+          "unroll": 2,
+          "ms": 0.23375999927520752
+        },
+        {
+          "block_p": 256,
+          "num_warps": 4,
+          "unroll": 4,
+          "ms": 0.23438400030136108
+        },
+        {
+          "block_p": 256,
+          "num_warps": 8,
+          "unroll": 1,
+          "ms": 0.2272000014781952
+        },
+        {
+          "block_p": 256,
+          "num_warps": 8,
+          "unroll": 2,
+          "ms": 0.25334399938583374
+        },
+        {
+          "block_p": 256,
+          "num_warps": 8,
+          "unroll": 4,
+          "ms": 0.24243199825286865
+        },
+        {
+          "block_p": 512,
+          "num_warps": 4,
+          "unroll": 1,
+          "ms": 0.25169599056243896
+        },
+        {
+          "block_p": 512,
+          "num_warps": 4,
+          "unroll": 2,
+          "ms": 0.2372480034828186
+        },
+        {
+          "block_p": 512,
+          "num_warps": 4,
+          "unroll": 4,
+          "ms": 0.24828800559043884
+        },
+        {
+          "block_p": 512,
+          "num_warps": 8,
+          "unroll": 1,
+          "ms": 0.25513601303100586
+        },
+        {
+          "block_p": 512,
+          "num_warps": 8,
+          "unroll": 2,
+          "ms": 0.2359679937362671
+        },
+        {
+          "block_p": 512,
+          "num_warps": 8,
+          "unroll": 4,
+          "ms": 0.23721599578857422
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 4,
+          "unroll": 1,
+          "ms": 0.22711999714374542
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 4,
+          "unroll": 2,
+          "ms": 0.25488001108169556
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 4,
+          "unroll": 4,
+          "ms": 0.2518079876899719
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 8,
+          "unroll": 1,
+          "ms": 0.2290560007095337
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 8,
+          "unroll": 2,
+          "ms": 0.2516639977693558
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 8,
+          "unroll": 4,
+          "ms": 0.2327360063791275
+        }
+      ]
+    },
+    "N=15000001,B=16,C=5,A_MAX=4": {
+      "winner": [
+        512,
+        4,
+        4
+      ],
+      "winner_ms": 0.21887999773025513,
+      "all": [
+        {
+          "block_p": 128,
+          "num_warps": 4,
+          "unroll": 1,
+          "ms": 0.25460800528526306
+        },
+        {
+          "block_p": 128,
+          "num_warps": 4,
+          "unroll": 2,
+          "ms": 0.25071999430656433
+        },
+        {
+          "block_p": 128,
+          "num_warps": 4,
+          "unroll": 4,
+          "ms": 0.24995200335979462
+        },
+        {
+          "block_p": 128,
+          "num_warps": 8,
+          "unroll": 1,
+          "ms": 0.24799999594688416
+        },
+        {
+          "block_p": 128,
+          "num_warps": 8,
+          "unroll": 2,
+          "ms": 0.236175999045372
+        },
+        {
+          "block_p": 128,
+          "num_warps": 8,
+          "unroll": 4,
+          "ms": 0.23244799673557281
+        },
+        {
+          "block_p": 256,
+          "num_warps": 4,
+          "unroll": 1,
+          "ms": 0.25308799743652344
+        },
+        {
+          "block_p": 256,
+          "num_warps": 4,
+          "unroll": 2,
+          "ms": 0.2362239956855774
+        },
+        {
+          "block_p": 256,
+          "num_warps": 4,
+          "unroll": 4,
+          "ms": 0.22457599639892578
+        },
+        {
+          "block_p": 256,
+          "num_warps": 8,
+          "unroll": 1,
+          "ms": 0.23555199801921844
+        },
+        {
+          "block_p": 256,
+          "num_warps": 8,
+          "unroll": 2,
+          "ms": 0.23505599796772003
+        },
+        {
+          "block_p": 256,
+          "num_warps": 8,
+          "unroll": 4,
+          "ms": 0.22566400468349457
+        },
+        {
+          "block_p": 512,
+          "num_warps": 4,
+          "unroll": 1,
+          "ms": 0.25276800990104675
+        },
+        {
+          "block_p": 512,
+          "num_warps": 4,
+          "unroll": 2,
+          "ms": 0.23587200045585632
+        },
+        {
+          "block_p": 512,
+          "num_warps": 4,
+          "unroll": 4,
+          "ms": 0.21887999773025513
+        },
+        {
+          "block_p": 512,
+          "num_warps": 8,
+          "unroll": 1,
+          "ms": 0.24699199944734573
+        },
+        {
+          "block_p": 512,
+          "num_warps": 8,
+          "unroll": 2,
+          "ms": 0.2937279939651489
+        },
+        {
+          "block_p": 512,
+          "num_warps": 8,
+          "unroll": 4,
+          "ms": 0.23120000213384628
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 4,
+          "unroll": 1,
+          "ms": 0.23279999941587448
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 4,
+          "unroll": 2,
+          "ms": 0.23774400353431702
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 4,
+          "unroll": 4,
+          "ms": 0.24745599925518036
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 8,
+          "unroll": 1,
+          "ms": 0.22486400604248047
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 8,
+          "unroll": 2,
+          "ms": 0.2261440008878708
+        },
+        {
+          "block_p": 1024,
+          "num_warps": 8,
+          "unroll": 4,
+          "ms": 0.22864000499248505
+        }
+      ]
+    }
+  },
+  "default": [
+    256,
+    4,
+    1
+  ]
+}

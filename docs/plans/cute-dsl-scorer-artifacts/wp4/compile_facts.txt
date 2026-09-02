@@ -1,0 +1,17 @@
+import host module: 18.361s
+cute: compiled cps_score_kernel<8, false, 1> in 2.83s
+ensure_built total (DSL import + first compile): 9.75s
+cold cute.compile score <8,true,1>       173.3 ms
+cold cute.compile score <8,false,4>      134.4 ms
+cold cute.compile score <8,true,4>       166.6 ms
+cold cute.compile score <4,false,1>      115.5 ms
+cold cute.compile score <16,false,1>     118.4 ms
+cold cute.compile bloom mask             119.6 ms
+cold cute.compile clause mask <2,2>      143.1 ms
+cold cute.compile clause mask <0,0>      152.5 ms
+cold cute.compile generic <false>        123.7 ms
+cold cute.compile generic <true>         123.6 ms
+warm cache lookup: 5.9 us
+none  : first call  784.99 ms, second   0.93 ms; specializations touched: 0 new, keys=[('bloom',), ('clause', 0, 0), ('clause', 2, 2), ('generic', False), ('generic', True), ('score', 4, False, 1), ('score', 8, False, 1), ('score', 8, False, 4), ('score', 8, True, 1), ('score', 8, True, 4), ('score', 16, False, 1)]
+bloom : first call    0.64 ms, second   0.29 ms; specializations touched: 0 new, keys=[('bloom',), ('clause', 0, 0), ('clause', 2, 2), ('generic', False), ('generic', True), ('score', 4, False, 1), ('score', 8, False, 1), ('score', 8, False, 4), ('score', 8, True, 1), ('score', 8, True, 4), ('score', 16, False, 1)]
+exact : first call    0.52 ms, second   0.36 ms; specializations touched: 0 new, keys=[('bloom',), ('clause', 0, 0), ('clause', 2, 2), ('generic', False), ('generic', True), ('score', 4, False, 1), ('score', 8, False, 1), ('score', 8, False, 4), ('score', 8, True, 1), ('score', 8, True, 4), ('score', 16, False, 1)]

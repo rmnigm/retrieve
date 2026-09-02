@@ -1,0 +1,806 @@
+[
+ {
+  "mode": "none",
+  "B": 1,
+  "P": 1024,
+  "layout": "S",
+  "backend": "triton",
+  "eager": 0.3060480058193207,
+  "compile": 0.14361600577831268,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaLaunchKernel": 1,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 12
+  },
+  "cudagraph": 0.05552000179886818,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 18
+  },
+  "manual_graph": 0.06438399851322174,
+  "cell_seconds": 61.00197456777096
+ },
+ {
+  "mode": "none",
+  "B": 1,
+  "P": 1024,
+  "layout": "S",
+  "backend": "cuda",
+  "pass_rate": 1.0,
+  "eager": 0.29955199360847473,
+  "compile": 0.3792000114917755,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaLaunchKernel": 1,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 20
+  },
+  "cudagraph": 0.07062400132417679,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 18
+  },
+  "manual_graph": 0.06656000018119812,
+  "cell_seconds": 1.748896811157465
+ },
+ {
+  "mode": "none",
+  "B": 1,
+  "P": 1024,
+  "layout": "S",
+  "backend": "cute",
+  "eager": 0.32918399572372437,
+  "compile": 0.40568000078201294,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaLaunchKernel": 1,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 20
+  },
+  "cudagraph": 0.0719040036201477,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 18
+  },
+  "manual_graph": 0.0681919977068901,
+  "cell_seconds": 1.7121754083782434
+ },
+ {
+  "mode": "none",
+  "B": 16,
+  "P": 1024,
+  "layout": "S",
+  "backend": "triton",
+  "eager": 0.3678719997406006,
+  "compile": 0.1799200028181076,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaLaunchKernel": 1,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 10
+  },
+  "cudagraph": 0.05936000123620033,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 16
+  },
+  "manual_graph": 0.0748480036854744,
+  "cell_seconds": 9.002568809315562
+ },
+ {
+  "mode": "none",
+  "B": 16,
+  "P": 1024,
+  "layout": "S",
+  "backend": "cuda",
+  "pass_rate": 1.0,
+  "eager": 0.2954240143299103,
+  "compile": 0.36214399337768555,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaLaunchKernel": 1,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 18
+  },
+  "cudagraph": 0.08224000036716461,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 16
+  },
+  "manual_graph": 0.07756800204515457,
+  "cell_seconds": 3.050866775214672
+ },
+ {
+  "mode": "none",
+  "B": 16,
+  "P": 1024,
+  "layout": "S",
+  "backend": "cute",
+  "eager": 0.331712007522583,
+  "compile": 0.4076640009880066,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaLaunchKernel": 1,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 18
+  },
+  "cudagraph": 0.08240000158548355,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 16
+  },
+  "manual_graph": 0.07811199873685837,
+  "cell_seconds": 2.966021755710244
+ },
+ {
+  "mode": "bloom",
+  "B": 1,
+  "P": 1024,
+  "layout": "S",
+  "backend": "triton",
+  "eager": 1.017520010471344,
+  "compile": 0.28336000442504883,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 16
+  },
+  "cudagraph": 0.07894399762153625,
+  "manual_graph": null,
+  "manual_error": "AcceleratorError: CUDA error: operation failed due to a previous error during capture\nSearch for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.\nCUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\nFor debugging consider passing CUDA_LAUNCH_BLOCKIN",
+  "cell_seconds": 10.937929375097156
+ },
+ {
+  "mode": "bloom",
+  "B": 1,
+  "P": 1024,
+  "layout": "S",
+  "backend": "cuda",
+  "pass_rate": 0.0,
+  "eager": 0.948063999414444,
+  "compile": 0.4928639978170395,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 24
+  },
+  "cudagraph": 0.09414400160312653,
+  "manual_graph": null,
+  "manual_error": "AcceleratorError: CUDA error: operation failed due to a previous error during capture\nSearch for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.\nCUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\nFor debugging consider passing CUDA_LAUNCH_BLOCKIN",
+  "cell_seconds": 8.115319924429059
+ },
+ {
+  "mode": "bloom",
+  "B": 1,
+  "P": 1024,
+  "layout": "S",
+  "backend": "cute",
+  "eager": 1.0544960498809814,
+  "compile": 0.5958400070667267,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 24
+  },
+  "cudagraph": 0.09113600105047226,
+  "manual_graph": null,
+  "manual_error": "AcceleratorError: CUDA error: operation failed due to a previous error during capture\nSearch for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.\nCUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\nFor debugging consider passing CUDA_LAUNCH_BLOCKIN",
+  "cell_seconds": 4.493798917159438
+ },
+ {
+  "mode": "bloom",
+  "B": 16,
+  "P": 1024,
+  "layout": "S",
+  "backend": "triton",
+  "eager": 1.042735993862152,
+  "compile": 0.30823999643325806,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 13
+  },
+  "cudagraph": 0.07903999835252762,
+  "manual_graph": null,
+  "manual_error": "AcceleratorError: CUDA error: operation failed due to a previous error during capture\nSearch for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.\nCUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\nFor debugging consider passing CUDA_LAUNCH_BLOCKIN",
+  "cell_seconds": 9.155951606109738
+ },
+ {
+  "mode": "bloom",
+  "B": 16,
+  "P": 1024,
+  "layout": "S",
+  "backend": "cuda",
+  "pass_rate": 0.001953125,
+  "eager": 1.0130239725112915,
+  "compile": 0.5307520031929016,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 22
+  },
+  "cudagraph": 0.10195200145244598,
+  "manual_graph": null,
+  "manual_error": "AcceleratorError: CUDA error: operation failed due to a previous error during capture\nSearch for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.\nCUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\nFor debugging consider passing CUDA_LAUNCH_BLOCKIN",
+  "cell_seconds": 5.539681795984507
+ },
+ {
+  "mode": "bloom",
+  "B": 16,
+  "P": 1024,
+  "layout": "S",
+  "backend": "cute",
+  "eager": 1.178160011768341,
+  "compile": 0.5790719985961914,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 22
+  },
+  "cudagraph": 0.10304000228643417,
+  "manual_graph": null,
+  "manual_error": "AcceleratorError: CUDA error: operation failed due to a previous error during capture\nSearch for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.\nCUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\nFor debugging consider passing CUDA_LAUNCH_BLOCKIN",
+  "cell_seconds": 4.978506293147802
+ },
+ {
+  "mode": "exact",
+  "B": 1,
+  "P": 1024,
+  "layout": "S",
+  "backend": "triton",
+  "eager": 0.42800000309944153,
+  "compile": 0.22259199619293213,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 9
+  },
+  "cudagraph": 0.0594559982419014,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 15
+  },
+  "manual_graph": 0.06758400052785873,
+  "cell_seconds": 4.528044264763594
+ },
+ {
+  "mode": "exact",
+  "B": 1,
+  "P": 1024,
+  "layout": "S",
+  "backend": "cuda",
+  "pass_rate": 0.9609375,
+  "eager": 0.34643200039863586,
+  "compile": 0.4203200042247772,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 17
+  },
+  "cudagraph": 0.08416000008583069,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 15
+  },
+  "manual_graph": 0.070592001080513,
+  "cell_seconds": 3.6370768174529076
+ },
+ {
+  "mode": "exact",
+  "B": 1,
+  "P": 1024,
+  "layout": "S",
+  "backend": "cute",
+  "eager": 0.4052480012178421,
+  "compile": 0.48054400086402893,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 17
+  },
+  "cudagraph": 0.08748800307512283,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 15
+  },
+  "manual_graph": 0.07251200079917908,
+  "cell_seconds": 3.161945091560483
+ },
+ {
+  "mode": "exact",
+  "B": 16,
+  "P": 1024,
+  "layout": "S",
+  "backend": "triton",
+  "eager": 0.42206400632858276,
+  "compile": 0.21884800493717194,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 8
+  },
+  "cudagraph": 0.0660799965262413,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 14
+  },
+  "manual_graph": 0.08035200089216232,
+  "cell_seconds": 4.816716745495796
+ },
+ {
+  "mode": "exact",
+  "B": 16,
+  "P": 1024,
+  "layout": "S",
+  "backend": "cuda",
+  "pass_rate": 0.960205078125,
+  "eager": 0.3511680066585541,
+  "compile": 0.42056000232696533,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 16
+  },
+  "cudagraph": 0.10927999764680862,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 14
+  },
+  "manual_graph": 0.08435200154781342,
+  "cell_seconds": 3.687870789319277
+ },
+ {
+  "mode": "exact",
+  "B": 16,
+  "P": 1024,
+  "layout": "S",
+  "backend": "cute",
+  "eager": 0.4116320013999939,
+  "compile": 0.4862719923257828,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 16
+  },
+  "cudagraph": 0.09849599748849869,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 14
+  },
+  "manual_graph": 0.08550400286912918,
+  "cell_seconds": 2.942304579541087
+ },
+ {
+  "mode": "none",
+  "B": 1,
+  "P": 58368,
+  "layout": "A",
+  "backend": "triton",
+  "eager": 0.5278400182723999,
+  "compile": 0.3357279896736145,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaLaunchKernel": 1,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 26
+  },
+  "cudagraph": 0.11776000261306763,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 32
+  },
+  "manual_graph": 0.12518399953842163,
+  "cell_seconds": 4.840837396681309
+ },
+ {
+  "mode": "none",
+  "B": 1,
+  "P": 58368,
+  "layout": "A",
+  "backend": "cuda",
+  "pass_rate": 1.0,
+  "eager": 0.44467198848724365,
+  "compile": 0.5217439830303192,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaLaunchKernel": 1,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 34
+  },
+  "cudagraph": 0.13023999333381653,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 32
+  },
+  "manual_graph": 0.12742400169372559,
+  "cell_seconds": 3.0177400559186935
+ },
+ {
+  "mode": "none",
+  "B": 1,
+  "P": 58368,
+  "layout": "A",
+  "backend": "cute",
+  "eager": 0.48662400245666504,
+  "compile": 0.5614239871501923,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaLaunchKernel": 1,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 34
+  },
+  "cudagraph": 0.13264000415802002,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 32
+  },
+  "manual_graph": 0.12912000715732574,
+  "cell_seconds": 3.680730275809765
+ },
+ {
+  "mode": "none",
+  "B": 16,
+  "P": 58368,
+  "layout": "A",
+  "backend": "triton",
+  "eager": 0.537088006734848,
+  "compile": 0.3426879942417145,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaLaunchKernel": 1,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 26
+  },
+  "cudagraph": 0.23683199286460876,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 32
+  },
+  "manual_graph": 0.253248006105423,
+  "cell_seconds": 4.1570576261729
+ },
+ {
+  "mode": "none",
+  "B": 16,
+  "P": 58368,
+  "layout": "A",
+  "backend": "cuda",
+  "pass_rate": 1.0,
+  "eager": 0.45187199115753174,
+  "compile": 0.5306879878044128,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaLaunchKernel": 1,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 34
+  },
+  "cudagraph": 0.2556160092353821,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 32
+  },
+  "manual_graph": 0.2505599856376648,
+  "cell_seconds": 3.113678779453039
+ },
+ {
+  "mode": "none",
+  "B": 16,
+  "P": 58368,
+  "layout": "A",
+  "backend": "cute",
+  "eager": 0.48603199422359467,
+  "compile": 0.5680480003356934,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaLaunchKernel": 1,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 34
+  },
+  "cudagraph": 0.25494399666786194,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 32
+  },
+  "manual_graph": 0.2500799894332886,
+  "cell_seconds": 3.045652264729142
+ },
+ {
+  "mode": "bloom",
+  "B": 1,
+  "P": 58368,
+  "layout": "A",
+  "backend": "triton",
+  "eager": 1.220080018043518,
+  "compile": 0.43929600715637207,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 31
+  },
+  "cudagraph": 0.13180799782276154,
+  "manual_graph": null,
+  "manual_error": "AcceleratorError: CUDA error: operation failed due to a previous error during capture\nSearch for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.\nCUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\nFor debugging consider passing CUDA_LAUNCH_BLOCKIN",
+  "cell_seconds": 5.642446834594011
+ },
+ {
+  "mode": "bloom",
+  "B": 1,
+  "P": 58368,
+  "layout": "A",
+  "backend": "cuda",
+  "pass_rate": 0.0014905427631578948,
+  "eager": 1.166975975036621,
+  "compile": 0.6541439890861511,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 40
+  },
+  "cudagraph": 0.17344000190496445,
+  "manual_graph": null,
+  "manual_error": "AcceleratorError: CUDA error: operation failed due to a previous error during capture\nSearch for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.\nCUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\nFor debugging consider passing CUDA_LAUNCH_BLOCKIN",
+  "cell_seconds": 4.838463976979256
+ },
+ {
+  "mode": "bloom",
+  "B": 1,
+  "P": 58368,
+  "layout": "A",
+  "backend": "cute",
+  "eager": 1.2497600317001343,
+  "compile": 0.7140799760818481,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 40
+  },
+  "cudagraph": 0.1420159935951233,
+  "manual_graph": null,
+  "manual_error": "AcceleratorError: CUDA error: operation failed due to a previous error during capture\nSearch for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.\nCUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\nFor debugging consider passing CUDA_LAUNCH_BLOCKIN",
+  "cell_seconds": 3.779938317835331
+ },
+ {
+  "mode": "bloom",
+  "B": 16,
+  "P": 58368,
+  "layout": "A",
+  "backend": "triton",
+  "eager": 1.2864959836006165,
+  "compile": 0.4729920029640198,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 31
+  },
+  "cudagraph": 0.27804800868034363,
+  "manual_graph": null,
+  "manual_error": "AcceleratorError: CUDA error: operation failed due to a previous error during capture\nSearch for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.\nCUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\nFor debugging consider passing CUDA_LAUNCH_BLOCKIN",
+  "cell_seconds": 4.420901548117399
+ },
+ {
+  "mode": "bloom",
+  "B": 16,
+  "P": 58368,
+  "layout": "A",
+  "backend": "cuda",
+  "pass_rate": 0.001530162075109649,
+  "eager": 1.2315200567245483,
+  "compile": 0.7143999934196472,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 39
+  },
+  "cudagraph": 0.2324800044298172,
+  "manual_graph": null,
+  "manual_error": "AcceleratorError: CUDA error: operation failed due to a previous error during capture\nSearch for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.\nCUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\nFor debugging consider passing CUDA_LAUNCH_BLOCKIN",
+  "cell_seconds": 4.0627431236207485
+ },
+ {
+  "mode": "bloom",
+  "B": 16,
+  "P": 58368,
+  "layout": "A",
+  "backend": "cute",
+  "eager": 1.2897919416427612,
+  "compile": 0.7418879866600037,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 39
+  },
+  "cudagraph": 0.2223999947309494,
+  "manual_graph": null,
+  "manual_error": "AcceleratorError: CUDA error: operation failed due to a previous error during capture\nSearch for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.\nCUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\nFor debugging consider passing CUDA_LAUNCH_BLOCKIN",
+  "cell_seconds": 4.508872382342815
+ },
+ {
+  "mode": "exact",
+  "B": 1,
+  "P": 58368,
+  "layout": "A",
+  "backend": "triton",
+  "eager": 0.5942240059375763,
+  "compile": 0.36481599509716034,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 26
+  },
+  "cudagraph": 0.1258240044116974,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 31
+  },
+  "manual_graph": 0.13318400084972382,
+  "cell_seconds": 4.776440205052495
+ },
+ {
+  "mode": "exact",
+  "B": 1,
+  "P": 58368,
+  "layout": "A",
+  "backend": "cuda",
+  "pass_rate": 0.9602350603070176,
+  "eager": 0.5182240009307861,
+  "compile": 0.6227520108222961,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 34
+  },
+  "cudagraph": 0.14176000654697418,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 31
+  },
+  "manual_graph": 0.13619199395179749,
+  "cell_seconds": 3.0023911502212286
+ },
+ {
+  "mode": "exact",
+  "B": 1,
+  "P": 58368,
+  "layout": "A",
+  "backend": "cute",
+  "eager": 0.6140320003032684,
+  "compile": 0.6512320041656494,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 34
+  },
+  "cudagraph": 0.14262400567531586,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 31
+  },
+  "manual_graph": 0.1369599997997284,
+  "cell_seconds": 2.9879236835986376
+ },
+ {
+  "mode": "exact",
+  "B": 16,
+  "P": 58368,
+  "layout": "A",
+  "backend": "triton",
+  "eager": 0.6086879968643188,
+  "compile": 0.3949759900569916,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 26
+  },
+  "cudagraph": 0.28676798939704895,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 31
+  },
+  "manual_graph": 0.30374398827552795,
+  "cell_seconds": 4.11857914365828
+ },
+ {
+  "mode": "exact",
+  "B": 16,
+  "P": 58368,
+  "layout": "A",
+  "backend": "cuda",
+  "pass_rate": 0.9606880054139254,
+  "eager": 0.5351679921150208,
+  "compile": 0.6149759888648987,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 34
+  },
+  "cudagraph": 0.31516799330711365,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 31
+  },
+  "manual_graph": 0.3095040023326874,
+  "cell_seconds": 3.700713589787483
+ },
+ {
+  "mode": "exact",
+  "B": 16,
+  "P": 58368,
+  "layout": "A",
+  "backend": "cute",
+  "eager": 0.5818880200386047,
+  "compile": 0.6611199975013733,
+  "cudagraph_skips": 0,
+  "skip_msgs": [],
+  "ro_launches": {
+   "cudaMemcpyAsync": 2,
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 34
+  },
+  "cudagraph": 0.31564798951148987,
+  "manual_launches": {
+   "cudaGraphLaunch": 1,
+   "cuda_kernels": 31
+  },
+  "manual_graph": 0.3105439990758896,
+  "cell_seconds": 3.0819468423724174
+ }
+]

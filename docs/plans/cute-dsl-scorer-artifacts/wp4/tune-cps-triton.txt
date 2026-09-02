@@ -1,0 +1,60 @@
+# Tuning codesigned_probe_score on sm_80 (cuda:0)
+  [P=1024,HAS_QB=0,D=128,B=16,W=4] block_p=32   num_warps=4  -> 0.135 ms
+  [P=1024,HAS_QB=0,D=128,B=16,W=4] block_p=32   num_warps=8  -> 0.132 ms
+  [P=1024,HAS_QB=0,D=128,B=16,W=4] block_p=64   num_warps=4  -> 0.142 ms
+  [P=1024,HAS_QB=0,D=128,B=16,W=4] block_p=64   num_warps=8  -> 0.137 ms
+  [P=1024,HAS_QB=0,D=128,B=16,W=4] block_p=128  num_warps=4  -> 0.132 ms
+  [P=1024,HAS_QB=0,D=128,B=16,W=4] block_p=128  num_warps=8  -> 0.132 ms
+  [P=1024,HAS_QB=0,D=128,B=16,W=4] block_p=256  num_warps=4  -> 0.133 ms
+  [P=1024,HAS_QB=0,D=128,B=16,W=4] block_p=256  num_warps=8  -> 0.133 ms
+  [P=1024,HAS_QB=0,D=128,B=16,W=4] winner: block_p=32   num_warps=8 (0.132 ms)
+  [P=1024,HAS_QB=1,D=128,B=16,W=4] block_p=32   num_warps=4  -> 0.141 ms
+  [P=1024,HAS_QB=1,D=128,B=16,W=4] block_p=32   num_warps=8  -> 0.130 ms
+  [P=1024,HAS_QB=1,D=128,B=16,W=4] block_p=64   num_warps=4  -> 0.128 ms
+  [P=1024,HAS_QB=1,D=128,B=16,W=4] block_p=64   num_warps=8  -> 0.129 ms
+  [P=1024,HAS_QB=1,D=128,B=16,W=4] block_p=128  num_warps=4  -> 0.136 ms
+  [P=1024,HAS_QB=1,D=128,B=16,W=4] block_p=128  num_warps=8  -> 0.129 ms
+  [P=1024,HAS_QB=1,D=128,B=16,W=4] block_p=256  num_warps=4  -> 0.142 ms
+  [P=1024,HAS_QB=1,D=128,B=16,W=4] block_p=256  num_warps=8  -> 0.132 ms
+  [P=1024,HAS_QB=1,D=128,B=16,W=4] winner: block_p=64   num_warps=4 (0.128 ms)
+  [P=8192,HAS_QB=0,D=128,B=16,W=4] block_p=32   num_warps=4  -> 0.144 ms
+  [P=8192,HAS_QB=0,D=128,B=16,W=4] block_p=32   num_warps=8  -> 0.140 ms
+  [P=8192,HAS_QB=0,D=128,B=16,W=4] block_p=64   num_warps=4  -> 0.142 ms
+  [P=8192,HAS_QB=0,D=128,B=16,W=4] block_p=64   num_warps=8  -> 0.152 ms
+  [P=8192,HAS_QB=0,D=128,B=16,W=4] block_p=128  num_warps=4  -> 0.141 ms
+  [P=8192,HAS_QB=0,D=128,B=16,W=4] block_p=128  num_warps=8  -> 0.141 ms
+  [P=8192,HAS_QB=0,D=128,B=16,W=4] block_p=256  num_warps=4  -> 0.139 ms
+  [P=8192,HAS_QB=0,D=128,B=16,W=4] block_p=256  num_warps=8  -> 0.142 ms
+  [P=8192,HAS_QB=0,D=128,B=16,W=4] winner: block_p=256  num_warps=4 (0.139 ms)
+  [P=8192,HAS_QB=1,D=128,B=16,W=4] block_p=32   num_warps=4  -> 0.136 ms
+  [P=8192,HAS_QB=1,D=128,B=16,W=4] block_p=32   num_warps=8  -> 0.140 ms
+  [P=8192,HAS_QB=1,D=128,B=16,W=4] block_p=64   num_warps=4  -> 0.137 ms
+  [P=8192,HAS_QB=1,D=128,B=16,W=4] block_p=64   num_warps=8  -> 0.135 ms
+  [P=8192,HAS_QB=1,D=128,B=16,W=4] block_p=128  num_warps=4  -> 0.136 ms
+  [P=8192,HAS_QB=1,D=128,B=16,W=4] block_p=128  num_warps=8  -> 0.133 ms
+  [P=8192,HAS_QB=1,D=128,B=16,W=4] block_p=256  num_warps=4  -> 0.138 ms
+  [P=8192,HAS_QB=1,D=128,B=16,W=4] block_p=256  num_warps=8  -> 0.146 ms
+  [P=8192,HAS_QB=1,D=128,B=16,W=4] winner: block_p=128  num_warps=8 (0.133 ms)
+  [P=65536,HAS_QB=0,D=128,B=16,W=4] block_p=32   num_warps=4  -> 0.234 ms
+  [P=65536,HAS_QB=0,D=128,B=16,W=4] block_p=32   num_warps=8  -> 0.268 ms
+  [P=65536,HAS_QB=0,D=128,B=16,W=4] block_p=64   num_warps=4  -> 0.222 ms
+  [P=65536,HAS_QB=0,D=128,B=16,W=4] block_p=64   num_warps=8  -> 0.233 ms
+  [P=65536,HAS_QB=0,D=128,B=16,W=4] block_p=128  num_warps=4  -> 0.223 ms
+  [P=65536,HAS_QB=0,D=128,B=16,W=4] block_p=128  num_warps=8  -> 0.227 ms
+  [P=65536,HAS_QB=0,D=128,B=16,W=4] block_p=256  num_warps=4  -> 0.222 ms
+  [P=65536,HAS_QB=0,D=128,B=16,W=4] block_p=256  num_warps=8  -> 0.223 ms
+  [P=65536,HAS_QB=0,D=128,B=16,W=4] winner: block_p=256  num_warps=4 (0.222 ms)
+  [P=65536,HAS_QB=1,D=128,B=16,W=4] block_p=32   num_warps=4  -> 0.225 ms
+  [P=65536,HAS_QB=1,D=128,B=16,W=4] block_p=32   num_warps=8  -> 0.285 ms
+  [P=65536,HAS_QB=1,D=128,B=16,W=4] block_p=64   num_warps=4  -> 0.209 ms
+  [P=65536,HAS_QB=1,D=128,B=16,W=4] block_p=64   num_warps=8  -> 0.225 ms
+  [P=65536,HAS_QB=1,D=128,B=16,W=4] block_p=128  num_warps=4  -> 0.217 ms
+  [P=65536,HAS_QB=1,D=128,B=16,W=4] block_p=128  num_warps=8  -> 0.212 ms
+  [P=65536,HAS_QB=1,D=128,B=16,W=4] block_p=256  num_warps=4  -> 0.211 ms
+  [P=65536,HAS_QB=1,D=128,B=16,W=4] block_p=256  num_warps=8  -> 0.211 ms
+  [P=65536,HAS_QB=1,D=128,B=16,W=4] winner: block_p=64   num_warps=4 (0.209 ms)
+
+# Paste into retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py
+# Tuned on sm_80; per-regime details in JSON output if --json-out was used.
+DEFAULT_CONFIG = CodesignedProbeScoreConfig(block_p=64, num_warps=4)
+# Full sweep written to /tmp/claude-0/-workspace-retrieve/1a91087e-6afe-4d43-a38e-7d1801b945a5/scratchpad/wp4/cps-triton.json

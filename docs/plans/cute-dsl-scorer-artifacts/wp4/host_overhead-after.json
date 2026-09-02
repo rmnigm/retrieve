@@ -1,0 +1,21 @@
+{
+ "mask": {
+  "cuda _bloom_partial_mask_cuda_impl": 9.862954417864481,
+  "cute _bloom_partial_mask_cute_impl": 20.488376418749493,
+  "cuda _clause_partial_mask_cuda_impl": 10.864585638046265,
+  "cute _clause_partial_mask_cute_impl": 23.997376362482708
+ },
+ "phase3": {
+  "cuda cps_scores (C++ launcher)": 4.036270081996918,
+  "cute _cps_cute_scores (full)": 16.16537570953369,
+  "cute _Launch (pre-packed cells), args prebuilt": 9.019415825605392,
+  "cute DSL JitExecutor.__call__, args prebuilt": 27.386650443077087,
+  "6x gmem_ptr": 5.50268217921257,
+  "with torch.cuda.device(...)": 2.164199948310852,
+  "torch.cuda.current_stream().cuda_stream + cu_stream": 4.711616784334183,
+  "torch._C._cuda_getCurrentRawStream(0) + cu_stream": 0.18338486552238464,
+  "torch.cuda.current_device()": 0.31394511461257935,
+  "compile_score cache lookup": 0.6537623703479767,
+  "torch baseline o.fill_(0)": 5.040261894464493
+ }
+}

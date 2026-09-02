@@ -1,0 +1,14 @@
+[base] wall (do_bench) - GPU busy (profiler, all kernels incl. topk), layout A, us
+none   B=1   | triton  201- 122=  79 | cuda  136- 125=  11 | cute  229- 127= 102
+none   B=16  | triton  249- 242=   7 | cuda  250- 243=   7 | cute  250- 244=   6
+bloom  B=1   | triton  204- 102= 102 | cuda  156- 104=  51 | cute  312- 103= 209
+bloom  B=16  | triton  280- 244=  36 | cuda  213- 175=  37 | cute  317- 165= 153
+exact  B=1   | triton  220- 104= 116 | cuda  160- 109=  52 | cute  317- 109= 209
+exact  B=16  | triton  299- 258=  40 | cuda  306- 266=  40 | cute  327- 265=  62
+[final] wall (do_bench) - GPU busy (profiler, all kernels incl. topk), layout A, us
+none   B=1   | triton  201- 124=  77 | cuda  140- 125=  15 | cute  172- 127=  46
+none   B=16  | triton  250- 243=   7 | cuda  250- 244=   6 | cute  250- 245=   5
+bloom  B=1   | triton  197- 102=  95 | cuda  155- 105=  50 | cute  202- 103=  99
+bloom  B=16  | triton  281- 244=  36 | cuda  213- 175=  38 | cute  203- 165=  38
+exact  B=1   | triton  214- 103= 111 | cuda  156- 108=  49 | cute  209- 108= 100
+exact  B=16  | triton  299- 259=  39 | cuda  306- 266=  40 | cute  305- 265=  40
