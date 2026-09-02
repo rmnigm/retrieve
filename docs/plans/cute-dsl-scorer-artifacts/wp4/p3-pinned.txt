@@ -1,0 +1,7 @@
+[pinned] none B=16: cuda 90.1 | cute@128.8.1 90.6 | cute@256.8.4 90.9 | cute@128.8.4 92.9 | cute@512.4.1 116.1  (scorer us)
+[pinned] none B=1: cuda 10.7 | cute@128.8.1 10.7 | cute@256.8.4 12.8 | cute@128.8.4 11.7 | cute@512.4.1 39.7  (scorer us)
+[pinned] bloom B=16: cuda 50.5 | cute@128.8.1 51.1 | cute@256.8.4 39.9 | cute@128.8.4 47.5 | cute@512.4.1 45.3  (scorer us)
+[pinned] ('score', 8, False, 1): dp4a x4, ld.global.cs.v4 x1, redux x1
+[pinned] ('score', 8, False, 4): dp4a x16, ld.global.cs.v4 x4, redux x4
+[pinned] ('score', 8, True, 1): dp4a x4, ld.global.cs.v4 x1, redux x1
+[pinned] ('score', 8, True, 4): dp4a x16, ld.global.cs.v4 x4, redux x4

@@ -1,0 +1,29 @@
+{
+ "none": {
+  "triton": 2157.5052198022604,
+  "cuda": 1939.1128607094288,
+  "cute": 2037.547705695033
+ },
+ "bloom": {
+  "triton": 2000.9722374379635,
+  "cuda": 1932.2159513831139,
+  "cute": 2088.450165465474
+ },
+ "exact": {
+  "triton": 2050.994308665395,
+  "cuda": 1985.6335036456585,
+  "cute": 2110.088560730219
+ },
+ "phase3": {
+  "cuda cps_scores (C++ launcher)": 4.2389556765556335,
+  "cute _cps_cute_scores (full)": 61.310142278671265,
+  "cute compiled executor, args prebuilt": 26.673153042793274,
+  "6x gmem_ptr": 5.886070430278778,
+  "with torch.cuda.device(...)": 2.1773986518383026,
+  "torch.cuda.current_stream().cuda_stream + cu_stream": 6.44393265247345,
+  "torch._C._cuda_getCurrentRawStream(0) + cu_stream": 0.1891590654850006,
+  "torch.cuda.current_device()": 0.3024190664291382,
+  "compile_score cache lookup": 0.6061047315597534,
+  "torch baseline o.fill_(0)": 23.07603508234024
+ }
+}

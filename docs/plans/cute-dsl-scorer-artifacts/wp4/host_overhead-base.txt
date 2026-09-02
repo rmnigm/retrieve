@@ -1,0 +1,15 @@
+--- full _impl (phase 2 + 3 + topk epilogue), B=16 layout A, enqueue-only us/call
+none   triton=2157.5  cuda=1939.1  cute=2037.5
+bloom  triton=2001.0  cuda=1932.2  cute=2088.5
+exact  triton=2051.0  cuda=1985.6  cute=2110.1
+--- phase-3 launcher only (cps_scores / _cps_cute_scores), B=16 P=8192
+cuda cps_scores (C++ launcher)                              4.2 us
+cute _cps_cute_scores (full)                               61.3 us
+cute compiled executor, args prebuilt                      26.7 us
+6x gmem_ptr                                                 5.9 us
+with torch.cuda.device(...)                                 2.2 us
+torch.cuda.current_stream().cuda_stream + cu_stream         6.4 us
+torch._C._cuda_getCurrentRawStream(0) + cu_stream           0.2 us
+torch.cuda.current_device()                                 0.3 us
+compile_score cache lookup                                  0.6 us
+torch baseline o.fill_(0)                                  23.1 us

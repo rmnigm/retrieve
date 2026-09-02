@@ -1,0 +1,90 @@
+=== triton eager none S B=1: do_bench ['0.2944', '0.2919', '0.2841'] ms
+   aten::abs                                                    cpu_total   1141.1 us  self    876.8 us  n=2  dev=    3.1 us
+   retrieve::codesigned_probe_score                             cpu_total   1358.1 us  self    228.8 us  n=1  dev=   46.7 us
+   Activity Buffer Request                                      cpu_total    145.1 us  self    145.1 us  n=0  dev=    0.3 us
+   cudaLaunchKernel                                             cpu_total    122.0 us  self    122.0 us  n=17  dev=    0.0 us
+   aten::topk                                                   cpu_total     75.0 us  self     39.9 us  n=2  dev=   34.6 us
+   aten::mm                                                     cpu_total    195.1 us  self     31.6 us  n=1  dev=    5.4 us
+   aten::index                                                  cpu_total     33.7 us  self     22.2 us  n=1  dev=    2.3 us
+   aten::clamp                                                  cpu_total     34.2 us  self     20.5 us  n=2  dev=    3.5 us
+   aten::div                                                    cpu_total     31.7 us  self     18.7 us  n=2  dev=    3.5 us
+   aten::gather                                                 cpu_total     29.7 us  self     17.4 us  n=1  dev=    2.7 us
+   aten::empty                                                  cpu_total     17.2 us  self     17.2 us  n=4  dev=    0.0 us
+   aten::amax                                                   cpu_total     20.9 us  self     13.8 us  n=1  dev=    3.4 us
+   aten::mul                                                    cpu_total     15.5 us  self      9.3 us  n=1  dev=    1.6 us
+   aten::copy_                                                  cpu_total     16.7 us  self      9.1 us  n=1  dev=    2.4 us
+=== triton compile none S B=1: do_bench ['0.1989', '0.1756', '0.1700'] ms
+   ## Call CompiledFxGraph fbfmiciqqkphy3n3rlsjztndanahi7l7ebdr cpu_total    442.2 us  self    150.5 us  n=1  dev=   48.7 us
+   Activity Buffer Request                                      cpu_total    123.0 us  self    123.0 us  n=0  dev=    0.0 us
+   cudaLaunchKernel                                             cpu_total     39.0 us  self     39.0 us  n=6  dev=    0.0 us
+   Torch-Compiled Region: 0/0                                   cpu_total    484.2 us  self     35.6 us  n=1  dev=   48.7 us
+   aten::topk                                                   cpu_total     63.7 us  self     33.8 us  n=2  dev=   33.8 us
+   aten::mm                                                     cpu_total     35.5 us  self     19.3 us  n=1  dev=    4.8 us
+   cuLaunchKernel                                               cpu_total     18.3 us  self     18.3 us  n=3  dev=    0.0 us
+   _codesigned_probe_score_kernel_0                             cpu_total     18.4 us  self     13.9 us  n=1  dev=    4.0 us
+   triton_per_fused__to_copy_abs_amax_clamp_div_index_mul_round cpu_total     20.6 us  self     13.6 us  n=1  dev=    1.8 us
+   triton_poi_fused_gather_index_view_2                         cpu_total     16.8 us  self     10.7 us  n=1  dev=    2.1 us
+   TorchDynamo Cache Lookup                                     cpu_total     10.1 us  self     10.1 us  n=1  dev=    0.0 us
+   triton_poi_fused__to_copy_clamp_div_index_mul_round_squeeze_ cpu_total     13.8 us  self      8.6 us  n=1  dev=    2.2 us
+   cuLaunchKernelEx                                             cpu_total      4.5 us  self      4.5 us  n=1  dev=    0.0 us
+   AOTDispatcher Runtime Wrapper Prologue                       cpu_total      3.7 us  self      3.7 us  n=1  dev=    0.0 us
+=== cuda eager none S B=1: do_bench ['0.2477', '0.2735', '0.2834'] ms
+   Activity Buffer Request                                      cpu_total    116.7 us  self    116.7 us  n=0  dev=    0.0 us
+   retrieve::codesigned_probe_score_cuda                        cpu_total    309.0 us  self    107.1 us  n=1  dev=   48.7 us
+   cudaLaunchKernel                                             cpu_total    104.4 us  self    104.4 us  n=18  dev=    0.0 us
+   aten::topk                                                   cpu_total     56.5 us  self     29.2 us  n=2  dev=   33.9 us
+   aten::mm                                                     cpu_total    154.6 us  self     24.1 us  n=1  dev=    4.8 us
+   aten::index                                                  cpu_total     27.3 us  self     17.7 us  n=1  dev=    2.3 us
+   aten::clamp                                                  cpu_total     26.9 us  self     15.4 us  n=2  dev=    3.5 us
+   aten::div                                                    cpu_total     25.9 us  self     14.8 us  n=2  dev=    3.5 us
+   aten::gather                                                 cpu_total     22.0 us  self     12.6 us  n=1  dev=    2.7 us
+   aten::empty                                                  cpu_total     11.2 us  self     11.2 us  n=3  dev=    0.0 us
+   aten::abs                                                    cpu_total     48.0 us  self     11.0 us  n=2  dev=    3.0 us
+   aten::amax                                                   cpu_total     16.8 us  self     10.9 us  n=1  dev=    3.4 us
+   aten::mul                                                    cpu_total     11.8 us  self      7.0 us  n=1  dev=    1.6 us
+   aten::copy_                                                  cpu_total     12.6 us  self      6.6 us  n=1  dev=    2.4 us
+=== cuda compile none S B=1: do_bench ['0.3599', '0.3563', '0.3564'] ms
+   cudaLaunchKernel                                             cpu_total    182.1 us  self    182.1 us  n=17  dev=    0.0 us
+   Activity Buffer Request                                      cpu_total    116.7 us  self    116.7 us  n=0  dev=    0.0 us
+   ## Call CompiledFxGraph fvjj4d65a7cv4krk5nxkdtwdjvzh6kv5xsvj cpu_total    731.1 us  self    115.0 us  n=1  dev=   66.9 us
+   retrieve::codesigned_probe_score_cuda                        cpu_total    321.1 us  self    111.9 us  n=1  dev=   48.3 us
+   Torch-Compiled Region: 0/0                                   cpu_total    775.7 us  self     38.0 us  n=1  dev=   66.9 us
+   aten::topk                                                   cpu_total     60.8 us  self     31.8 us  n=2  dev=   33.9 us
+   aten::mm                                                     cpu_total    117.1 us  self     20.4 us  n=1  dev=    4.8 us
+   triton_poi_fused_codesigned_probe_score_cuda_index_view_0    cpu_total     23.1 us  self     16.5 us  n=1  dev=    2.2 us
+   aten::clamp                                                  cpu_total     26.8 us  self     15.4 us  n=2  dev=    3.5 us
+   aten::div                                                    cpu_total     26.0 us  self     15.0 us  n=2  dev=    3.4 us
+   aten::empty                                                  cpu_total     14.0 us  self     14.0 us  n=3  dev=    0.0 us
+   aten::abs                                                    cpu_total     56.0 us  self     13.3 us  n=2  dev=    3.0 us
+   aten::amax                                                   cpu_total     18.0 us  self     12.3 us  n=1  dev=    3.4 us
+   aten::gather                                                 cpu_total     21.3 us  self     12.2 us  n=1  dev=    2.7 us
+=== cute eager none S B=1: do_bench ['0.3136', '0.3459', '0.3445'] ms
+   cudaLaunchKernel                                             cpu_total    249.8 us  self    249.8 us  n=17  dev=    0.0 us
+   retrieve::codesigned_probe_score_cute                        cpu_total    335.1 us  self    133.7 us  n=1  dev=   49.6 us
+   Activity Buffer Request                                      cpu_total    117.4 us  self    117.4 us  n=0  dev=    0.0 us
+   aten::topk                                                   cpu_total     59.7 us  self     30.9 us  n=2  dev=   33.8 us
+   aten::mm                                                     cpu_total    311.3 us  self     28.4 us  n=1  dev=    4.8 us
+   aten::index                                                  cpu_total     27.3 us  self     17.6 us  n=1  dev=    2.3 us
+   aten::clamp                                                  cpu_total     25.6 us  self     14.7 us  n=2  dev=    3.5 us
+   aten::div                                                    cpu_total     25.2 us  self     14.5 us  n=2  dev=    3.5 us
+   aten::gather                                                 cpu_total     21.9 us  self     12.5 us  n=1  dev=    2.7 us
+   aten::empty                                                  cpu_total     11.0 us  self     11.0 us  n=3  dev=    0.0 us
+   aten::amax                                                   cpu_total     16.6 us  self     10.9 us  n=1  dev=    3.4 us
+   aten::abs                                                    cpu_total     47.4 us  self     10.7 us  n=2  dev=    3.0 us
+   cudaLaunchKernelExC                                          cpu_total      7.7 us  self      7.7 us  n=1  dev=    0.0 us
+   aten::mul                                                    cpu_total     11.7 us  self      6.8 us  n=1  dev=    1.6 us
+=== cute compile none S B=1: do_bench ['0.3972', '0.3940', '0.3964'] ms
+   retrieve::codesigned_probe_score_cute                        cpu_total    359.1 us  self    143.6 us  n=1  dev=   49.6 us
+   Activity Buffer Request                                      cpu_total    122.8 us  self    122.8 us  n=0  dev=    0.0 us
+   cudaLaunchKernel                                             cpu_total    116.2 us  self    116.2 us  n=16  dev=    0.0 us
+   ## Call CompiledFxGraph fjqlnojdjqpc753j5jmm5ldzkazfeehatejf cpu_total    709.9 us  self    113.0 us  n=1  dev=   68.2 us
+   Torch-Compiled Region: 0/0                                   cpu_total    751.7 us  self     35.4 us  n=1  dev=   68.2 us
+   aten::topk                                                   cpu_total     63.6 us  self     33.6 us  n=2  dev=   33.9 us
+   aten::mm                                                     cpu_total     54.2 us  self     21.2 us  n=1  dev=    4.8 us
+   aten::div                                                    cpu_total     28.6 us  self     16.4 us  n=2  dev=    3.4 us
+   triton_poi_fused_codesigned_probe_score_cute_index_view_0    cpu_total     22.4 us  self     15.6 us  n=1  dev=    2.2 us
+   aten::clamp                                                  cpu_total     26.7 us  self     15.3 us  n=2  dev=    3.5 us
+   aten::gather                                                 cpu_total     22.9 us  self     12.7 us  n=1  dev=    2.7 us
+   aten::abs                                                    cpu_total     54.3 us  self     12.5 us  n=2  dev=    3.0 us
+   aten::empty                                                  cpu_total     12.2 us  self     12.2 us  n=3  dev=    0.0 us
+   aten::amax                                                   cpu_total     17.7 us  self     11.7 us  n=1  dev=    3.3 us

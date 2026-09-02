@@ -1,0 +1,969 @@
+W0902 17:23:51.359000 71641 torch/_logging/_internal.py:475] Using TORCH_LOGS environment variable for log settings, ignoring call to set_logs
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] Output code: 
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # AOT ID: ['2_inference']
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from ctypes import c_void_p, c_long, c_int
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import torch
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import math
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import random
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import os
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import tempfile
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from math import inf, nan
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from cmath import nanj
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.hooks import run_intermediate_hooks
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.utils import maybe_profile
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.codegen.memory_planning import _align as align
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch import device, empty_strided
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.async_compile import AsyncCompile
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.select_algorithm import extern_kernels
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import triton
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import triton.language as tl
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.runtime.triton_heuristics import start_graph, end_graph
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] aten = torch.ops.aten
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] inductor_ops = torch.ops.inductor
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] _quantized = torch.ops._quantized
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] assert_alignment = torch._C._dynamo.guards.assert_alignment
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] alloc_from_pool = torch.ops.inductor._alloc_from_pool
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] async_compile = AsyncCompile()
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_p2p = torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # kernel path: /tmp/torchinductor_root/ox/cox7yoh7mdwlnjoed3x3ck5ffszhdcyqlpt2e2wyjo5spivie7q7.py
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # Topologically Sorted Source Nodes: [probed, flat_items, codesigned_probe_score_cuda_default], Original ATen: [aten.index, aten.view, retrieve.codesigned_probe_score_cuda]
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # Source node to ATen node mapping:
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   codesigned_probe_score_cuda_default => codesigned_probe_score_cuda
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   flat_items => view
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   probed => index
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # Graph fragment:
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %getitem_1 : Tensor "i64[1, 32][32, 1]cuda:0" = PlaceHolder[target=getitem_1]
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %arg2_1 : Tensor "i64[64, 32][32, 1]cuda:0" = PlaceHolder[target=arg2_1]
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %index : Tensor "i64[1, 32, 32][1024, 32, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%arg2_1, [%getitem_1]), kwargs = {})
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %view : Tensor "i64[1, 1024][1024, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.reshape.default](args = (%index, [1, -1]), kwargs = {})
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %codesigned_probe_score_cuda : [num_users=2] = call_function[target=torch.ops.retrieve.codesigned_probe_score_cuda.default](args = (%arg0_1, %view, %arg3_1, 0.003354040440171957, 64), kwargs = {})
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   return %buf4
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] triton_poi_fused_codesigned_probe_score_cuda_index_view_0 = async_compile.triton('triton_poi_fused_codesigned_probe_score_cuda_index_view_0', '''
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import triton
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import triton.language as tl
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.runtime import triton_helpers, triton_heuristics
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] triton_helpers.set_driver_to_gpu()
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] @triton_heuristics.pointwise(
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     size_hints={'x': 1024}, 
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     filename=__file__,
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     triton_meta={'signature': {'in_ptr0': '*i64', 'in_ptr1': '*i64', 'out_ptr0': '*i64', 'xnumel': 'i32', 'XBLOCK': 'constexpr'}, 'device': DeviceProperties(type='cuda', index=0, multi_processor_count=108, cc=80, major=8, regs_per_multiprocessor=65536, max_threads_per_multi_processor=2048, max_threads_per_block=1024, warp_size=32), 'constants': {}, 'native_matmul': False, 'configs': [{(0,): [['tt.divisibility', 16]], (1,): [['tt.divisibility', 16]], (2,): [['tt.divisibility', 16]], (3,): [['tt.divisibility', 16]]}], 'enable_fp_fusion': True},
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     inductor_meta={'grid_type': 'Grid1D', 'autotune_hints': set(), 'kernel_name': 'triton_poi_fused_codesigned_probe_score_cuda_index_view_0', 'mutated_arg_names': [], 'optimize_mem': True, 'no_x_dim': False, 'atomic_add_found': False, 'num_load': 1, 'num_store': 1, 'num_reduction': 0, 'backend_hash': '466EC5EAF66110FDA478FF2ED8F7DFA2C711067190FFB95897353D86A3E03048', 'assert_indirect_indexing': True, 'autotune_local_cache': True, 'autotune_pointwise': True, 'autotune_remote_cache': None, 'force_disable_caches': False, 'dynamic_scale_rblock': True, 'max_autotune': False, 'max_autotune_pointwise': False, 'min_split_scan_rblock': 256, 'spill_threshold': 16, 'store_cubin': False, 'deterministic': False, 'force_filter_reduction_configs': False, 'are_deterministic_algorithms_enabled': False},
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     min_elem_per_thread=0
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] )
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] @triton.jit
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] def triton_poi_fused_codesigned_probe_score_cuda_index_view_0(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.constexpr):
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     xnumel = 1024
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     xoffset = tl.program_id(0) * XBLOCK
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     xindex = xoffset + tl.arange(0, XBLOCK)[:]
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     xmask = xindex < xnumel
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     x0 = xindex
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp0 = tl.load(in_ptr0 + (x0 // 32), xmask, eviction_policy='evict_last')
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp1 = tl.full([XBLOCK], 64, tl.int32)
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp2 = tmp0 + tmp1
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp3 = tmp0 < 0
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp4 = tl.where(tmp3, tmp2, tmp0)
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tl.device_assert(((0 <= tmp4) & (tmp4 < 64)) | ~(xmask), "index out of bounds: 0 <= tmp4 < 64")
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp6 = tl.load(in_ptr1 + (32*tmp4 + ((x0 % 32))), xmask)
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tl.store(out_ptr0 + (x0), tmp6, xmask)
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] ''', device_str='cuda')
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] async_compile.wait(globals())
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] del async_compile
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] class Runner:
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     def __init__(self, partitions):
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         self.partitions = partitions
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     def recursively_apply_fns(self, fns):
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         new_callables = []
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         for fn, c in zip(fns, self.partitions):
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             new_callables.append(fn(c))
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         self.partitions = new_callables
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     def call(self, args):
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         arg0_1, arg1_1, arg2_1, arg3_1 = args
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         args.clear()
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         assert_size_stride(arg0_1, (1, 128), (128, 1))
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         assert_size_stride(arg1_1, (64, 128), (128, 1))
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         assert_size_stride(arg2_1, (64, 32), (32, 1))
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         assert_size_stride(arg3_1, (2048, 128), (128, 1))
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         with torch.cuda._DeviceGuard(0):
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             torch.cuda.set_device(0)
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf0 = empty_strided_cuda((1, 64), (64, 1), torch.float32)
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             # Topologically Sorted Source Nodes: [t, cent_scores], Original ATen: [aten.t, aten.mm]
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             extern_kernels.mm(arg0_1, reinterpret_tensor(arg1_1, (128, 64), (1, 128), 0), out=buf0)
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del arg1_1
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             # Topologically Sorted Source Nodes: [topk], Original ATen: [aten.topk]
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf1 = torch.ops.aten.topk.default(buf0, 32, 1)
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del buf0
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf3 = buf1[1]
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_size_stride(buf3, (1, 32), (32, 1), 'torch.ops.aten.topk.default')
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_alignment(buf3, 16, 'torch.ops.aten.topk.default')
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del buf1
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf4 = empty_strided_cuda((1, 1024), (1024, 1), torch.int64)
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             # Topologically Sorted Source Nodes: [probed, flat_items, codesigned_probe_score_cuda_default], Original ATen: [aten.index, aten.view, retrieve.codesigned_probe_score_cuda]
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             stream0 = get_raw_stream(0)
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             triton_poi_fused_codesigned_probe_score_cuda_index_view_0.run(buf3, arg2_1, buf4, 1024, stream=stream0)
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del arg2_1
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del buf3
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             # Topologically Sorted Source Nodes: [probed, flat_items, codesigned_probe_score_cuda_default], Original ATen: [aten.index, aten.view, retrieve.codesigned_probe_score_cuda]
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf5 = torch.ops.retrieve.codesigned_probe_score_cuda.default(arg0_1, buf4, arg3_1, 0.003354040440171957, 64)
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del arg0_1
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del arg3_1
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del buf4
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf6 = buf5[0]
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_size_stride(buf6, (1, 64), (64, 1), 'torch.ops.retrieve.codesigned_probe_score_cuda.default')
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_alignment(buf6, 16, 'torch.ops.retrieve.codesigned_probe_score_cuda.default')
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf7 = buf5[1]
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_size_stride(buf7, (1, 64), (64, 1), 'torch.ops.retrieve.codesigned_probe_score_cuda.default')
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_alignment(buf7, 16, 'torch.ops.retrieve.codesigned_probe_score_cuda.default')
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del buf5
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         return (buf6, buf7, )
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] runner = Runner(partitions=[])
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] call = runner.call
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] recursively_apply_fns = runner.recursively_apply_fns
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] def benchmark_compiled_module(times=10, repeat=10):
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     from torch._dynamo.testing import rand_strided
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     from torch._inductor.utils import print_performance
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     arg0_1 = rand_strided((1, 128), (128, 1), device='cuda:0', dtype=torch.float32)
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     arg1_1 = rand_strided((64, 128), (128, 1), device='cuda:0', dtype=torch.float32)
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     arg2_1 = rand_strided((64, 32), (32, 1), device='cuda:0', dtype=torch.int64)
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     arg3_1 = rand_strided((2048, 128), (128, 1), device='cuda:0', dtype=torch.int8)
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     fn = lambda: call([arg0_1, arg1_1, arg2_1, arg3_1])
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     return print_performance(fn, times=times, repeat=repeat)
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] if __name__ == "__main__":
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     from torch._inductor.wrapper_benchmark import compiled_module_main
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     compiled_module_main('None', benchmark_compiled_module)
+V0902 17:25:05.387000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:05.396000 71641 torch/_inductor/codecache.py:1251] [0/0] [__output_code] Output code written to: /tmp/torchinductor_root/oj/cojnhukya5q5vfcvp6ak3eauibwbi72vnlesko3252pis5ozsyl6.py
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] Output code: 
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] # AOT ID: ['2_inference']
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from ctypes import c_void_p, c_long, c_int
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] import torch
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] import math
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] import random
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] import os
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] import tempfile
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from math import inf, nan
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from cmath import nanj
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch._inductor.hooks import run_intermediate_hooks
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch._inductor.utils import maybe_profile
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch._inductor.codegen.memory_planning import _align as align
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch import device, empty_strided
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch._inductor.async_compile import AsyncCompile
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch._inductor.select_algorithm import extern_kernels
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] import triton
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] import triton.language as tl
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch._inductor.runtime.triton_heuristics import start_graph, end_graph
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] aten = torch.ops.aten
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] inductor_ops = torch.ops.inductor
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] _quantized = torch.ops._quantized
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] assert_alignment = torch._C._dynamo.guards.assert_alignment
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] alloc_from_pool = torch.ops.inductor._alloc_from_pool
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] async_compile = AsyncCompile()
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] empty_strided_p2p = torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] # kernel path: /tmp/torchinductor_root/ox/cox7yoh7mdwlnjoed3x3ck5ffszhdcyqlpt2e2wyjo5spivie7q7.py
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] # Topologically Sorted Source Nodes: [probed, flat_items, codesigned_probe_score_cuda_default], Original ATen: [aten.index, aten.view, retrieve.codesigned_probe_score_cuda]
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] # Source node to ATen node mapping:
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] #   codesigned_probe_score_cuda_default => codesigned_probe_score_cuda
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] #   flat_items => view
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] #   probed => index
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] # Graph fragment:
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] #   %getitem_1 : Tensor "i64[1, 32][32, 1]cuda:0" = PlaceHolder[target=getitem_1]
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] #   %arg2_1 : Tensor "i64[64, 32][32, 1]cuda:0" = PlaceHolder[target=arg2_1]
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] #   %index : Tensor "i64[1, 32, 32][1024, 32, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%arg2_1, [%getitem_1]), kwargs = {})
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] #   %view : Tensor "i64[1, 1024][1024, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.reshape.default](args = (%index, [1, -1]), kwargs = {})
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] #   %codesigned_probe_score_cuda : [num_users=2] = call_function[target=torch.ops.retrieve.codesigned_probe_score_cuda.default](args = (%arg0_1, %view, %arg3_1, 0.003354040440171957, 64), kwargs = {})
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] #   return %buf4
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] triton_poi_fused_codesigned_probe_score_cuda_index_view_0 = async_compile.triton('triton_poi_fused_codesigned_probe_score_cuda_index_view_0', '''
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] import triton
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] import triton.language as tl
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch._inductor.runtime import triton_helpers, triton_heuristics
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] triton_helpers.set_driver_to_gpu()
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] @triton_heuristics.pointwise(
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     size_hints={'x': 1024}, 
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     filename=__file__,
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     triton_meta={'signature': {'in_ptr0': '*i64', 'in_ptr1': '*i64', 'out_ptr0': '*i64', 'xnumel': 'i32', 'XBLOCK': 'constexpr'}, 'device': DeviceProperties(type='cuda', index=0, multi_processor_count=108, cc=80, major=8, regs_per_multiprocessor=65536, max_threads_per_multi_processor=2048, max_threads_per_block=1024, warp_size=32), 'constants': {}, 'native_matmul': False, 'configs': [{(0,): [['tt.divisibility', 16]], (1,): [['tt.divisibility', 16]], (2,): [['tt.divisibility', 16]], (3,): [['tt.divisibility', 16]]}], 'enable_fp_fusion': True},
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     inductor_meta={'grid_type': 'Grid1D', 'autotune_hints': set(), 'kernel_name': 'triton_poi_fused_codesigned_probe_score_cuda_index_view_0', 'mutated_arg_names': [], 'optimize_mem': True, 'no_x_dim': False, 'atomic_add_found': False, 'num_load': 1, 'num_store': 1, 'num_reduction': 0, 'backend_hash': '466EC5EAF66110FDA478FF2ED8F7DFA2C711067190FFB95897353D86A3E03048', 'assert_indirect_indexing': True, 'autotune_local_cache': True, 'autotune_pointwise': True, 'autotune_remote_cache': None, 'force_disable_caches': False, 'dynamic_scale_rblock': True, 'max_autotune': False, 'max_autotune_pointwise': False, 'min_split_scan_rblock': 256, 'spill_threshold': 16, 'store_cubin': False, 'deterministic': False, 'force_filter_reduction_configs': False, 'are_deterministic_algorithms_enabled': False},
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     min_elem_per_thread=0
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] )
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] @triton.jit
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] def triton_poi_fused_codesigned_probe_score_cuda_index_view_0(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.constexpr):
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     xnumel = 1024
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     xoffset = tl.program_id(0) * XBLOCK
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     xindex = xoffset + tl.arange(0, XBLOCK)[:]
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     xmask = xindex < xnumel
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     x0 = xindex
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     tmp0 = tl.load(in_ptr0 + (x0 // 32), xmask, eviction_policy='evict_last')
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     tmp1 = tl.full([XBLOCK], 64, tl.int32)
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     tmp2 = tmp0 + tmp1
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     tmp3 = tmp0 < 0
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     tmp4 = tl.where(tmp3, tmp2, tmp0)
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     tl.device_assert(((0 <= tmp4) & (tmp4 < 64)) | ~(xmask), "index out of bounds: 0 <= tmp4 < 64")
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     tmp6 = tl.load(in_ptr1 + (32*tmp4 + ((x0 % 32))), xmask)
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     tl.store(out_ptr0 + (x0), tmp6, xmask)
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] ''', device_str='cuda')
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] async_compile.wait(globals())
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] del async_compile
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] class Runner:
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     def __init__(self, partitions):
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         self.partitions = partitions
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     def recursively_apply_fns(self, fns):
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         new_callables = []
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         for fn, c in zip(fns, self.partitions):
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             new_callables.append(fn(c))
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         self.partitions = new_callables
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     def call(self, args):
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         arg0_1, arg1_1, arg2_1, arg3_1 = args
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         args.clear()
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         assert_size_stride(arg0_1, (1, 128), (128, 1))
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         assert_size_stride(arg1_1, (64, 128), (128, 1))
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         assert_size_stride(arg2_1, (64, 32), (32, 1))
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         assert_size_stride(arg3_1, (2048, 128), (128, 1))
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         with torch.cuda._DeviceGuard(0):
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             torch.cuda.set_device(0)
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             buf0 = empty_strided_cuda((1, 64), (64, 1), torch.float32)
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             # Topologically Sorted Source Nodes: [t, cent_scores], Original ATen: [aten.t, aten.mm]
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             extern_kernels.mm(arg0_1, reinterpret_tensor(arg1_1, (128, 64), (1, 128), 0), out=buf0)
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             del arg1_1
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             # Topologically Sorted Source Nodes: [topk], Original ATen: [aten.topk]
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             buf1 = torch.ops.aten.topk.default(buf0, 32, 1)
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             del buf0
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             buf3 = buf1[1]
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             assert_size_stride(buf3, (1, 32), (32, 1), 'torch.ops.aten.topk.default')
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             assert_alignment(buf3, 16, 'torch.ops.aten.topk.default')
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             del buf1
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             buf4 = empty_strided_cuda((1, 1024), (1024, 1), torch.int64)
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             # Topologically Sorted Source Nodes: [probed, flat_items, codesigned_probe_score_cuda_default], Original ATen: [aten.index, aten.view, retrieve.codesigned_probe_score_cuda]
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             stream0 = get_raw_stream(0)
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             triton_poi_fused_codesigned_probe_score_cuda_index_view_0.run(buf3, arg2_1, buf4, 1024, stream=stream0)
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             del arg2_1
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             del buf3
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             # Topologically Sorted Source Nodes: [probed, flat_items, codesigned_probe_score_cuda_default], Original ATen: [aten.index, aten.view, retrieve.codesigned_probe_score_cuda]
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             buf5 = torch.ops.retrieve.codesigned_probe_score_cuda.default(arg0_1, buf4, arg3_1, 0.003354040440171957, 64)
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             del arg0_1
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             del arg3_1
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             del buf4
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             buf6 = buf5[0]
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             assert_size_stride(buf6, (1, 64), (64, 1), 'torch.ops.retrieve.codesigned_probe_score_cuda.default')
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             assert_alignment(buf6, 16, 'torch.ops.retrieve.codesigned_probe_score_cuda.default')
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             buf7 = buf5[1]
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             assert_size_stride(buf7, (1, 64), (64, 1), 'torch.ops.retrieve.codesigned_probe_score_cuda.default')
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             assert_alignment(buf7, 16, 'torch.ops.retrieve.codesigned_probe_score_cuda.default')
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             del buf5
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         return (buf6, buf7, )
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] runner = Runner(partitions=[])
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] call = runner.call
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] recursively_apply_fns = runner.recursively_apply_fns
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] def benchmark_compiled_module(times=10, repeat=10):
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     from torch._dynamo.testing import rand_strided
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     from torch._inductor.utils import print_performance
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     arg0_1 = rand_strided((1, 128), (128, 1), device='cuda:0', dtype=torch.float32)
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     arg1_1 = rand_strided((64, 128), (128, 1), device='cuda:0', dtype=torch.float32)
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     arg2_1 = rand_strided((64, 32), (32, 1), device='cuda:0', dtype=torch.int64)
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     arg3_1 = rand_strided((2048, 128), (128, 1), device='cuda:0', dtype=torch.int8)
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     fn = lambda: call([arg0_1, arg1_1, arg2_1, arg3_1])
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     return print_performance(fn, times=times, repeat=repeat)
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] if __name__ == "__main__":
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     from torch._inductor.wrapper_benchmark import compiled_module_main
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     compiled_module_main('None', benchmark_compiled_module)
+V0902 17:25:06.915000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:06.921000 71641 torch/_inductor/codecache.py:1251] [0/1] [__output_code] Output code written to: /tmp/torchinductor_root/oj/cojnhukya5q5vfcvp6ak3eauibwbi72vnlesko3252pis5ozsyl6.py
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] Output code: 
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # AOT ID: ['2_inference']
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from ctypes import c_void_p, c_long, c_int
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import torch
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import math
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import random
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import os
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import tempfile
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from math import inf, nan
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from cmath import nanj
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.hooks import run_intermediate_hooks
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.utils import maybe_profile
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.codegen.memory_planning import _align as align
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch import device, empty_strided
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.async_compile import AsyncCompile
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.select_algorithm import extern_kernels
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import triton
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import triton.language as tl
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.runtime.triton_heuristics import start_graph, end_graph
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] aten = torch.ops.aten
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] inductor_ops = torch.ops.inductor
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] _quantized = torch.ops._quantized
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] assert_alignment = torch._C._dynamo.guards.assert_alignment
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] alloc_from_pool = torch.ops.inductor._alloc_from_pool
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] async_compile = AsyncCompile()
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_p2p = torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # kernel path: /tmp/torchinductor_root/ox/cox7yoh7mdwlnjoed3x3ck5ffszhdcyqlpt2e2wyjo5spivie7q7.py
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # Topologically Sorted Source Nodes: [probed, flat_items, codesigned_probe_score_cuda_default], Original ATen: [aten.index, aten.view, retrieve.codesigned_probe_score_cuda]
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # Source node to ATen node mapping:
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   codesigned_probe_score_cuda_default => codesigned_probe_score_cuda
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   flat_items => view
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   probed => index
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # Graph fragment:
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %getitem_1 : Tensor "i64[1, 32][32, 1]cuda:0" = PlaceHolder[target=getitem_1]
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %arg2_1 : Tensor "i64[64, 32][32, 1]cuda:0" = PlaceHolder[target=arg2_1]
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %index : Tensor "i64[1, 32, 32][1024, 32, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%arg2_1, [%getitem_1]), kwargs = {})
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %view : Tensor "i64[1, 1024][1024, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.reshape.default](args = (%index, [1, -1]), kwargs = {})
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %codesigned_probe_score_cuda : [num_users=2] = call_function[target=torch.ops.retrieve.codesigned_probe_score_cuda.default](args = (%arg0_1, %view, %arg3_1, 0.003354040440171957, 64), kwargs = {})
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   return %buf4
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] triton_poi_fused_codesigned_probe_score_cuda_index_view_0 = async_compile.triton('triton_poi_fused_codesigned_probe_score_cuda_index_view_0', '''
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import triton
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import triton.language as tl
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.runtime import triton_helpers, triton_heuristics
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] triton_helpers.set_driver_to_gpu()
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] @triton_heuristics.pointwise(
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     size_hints={'x': 1024}, 
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     filename=__file__,
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     triton_meta={'signature': {'in_ptr0': '*i64', 'in_ptr1': '*i64', 'out_ptr0': '*i64', 'xnumel': 'i32', 'XBLOCK': 'constexpr'}, 'device': DeviceProperties(type='cuda', index=0, multi_processor_count=108, cc=80, major=8, regs_per_multiprocessor=65536, max_threads_per_multi_processor=2048, max_threads_per_block=1024, warp_size=32), 'constants': {}, 'native_matmul': False, 'configs': [{(0,): [['tt.divisibility', 16]], (1,): [['tt.divisibility', 16]], (2,): [['tt.divisibility', 16]], (3,): [['tt.divisibility', 16]]}], 'enable_fp_fusion': True},
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     inductor_meta={'grid_type': 'Grid1D', 'autotune_hints': set(), 'kernel_name': 'triton_poi_fused_codesigned_probe_score_cuda_index_view_0', 'mutated_arg_names': [], 'optimize_mem': True, 'no_x_dim': False, 'atomic_add_found': False, 'num_load': 1, 'num_store': 1, 'num_reduction': 0, 'backend_hash': '466EC5EAF66110FDA478FF2ED8F7DFA2C711067190FFB95897353D86A3E03048', 'assert_indirect_indexing': True, 'autotune_local_cache': True, 'autotune_pointwise': True, 'autotune_remote_cache': None, 'force_disable_caches': False, 'dynamic_scale_rblock': True, 'max_autotune': False, 'max_autotune_pointwise': False, 'min_split_scan_rblock': 256, 'spill_threshold': 16, 'store_cubin': False, 'deterministic': False, 'force_filter_reduction_configs': False, 'are_deterministic_algorithms_enabled': False},
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     min_elem_per_thread=0
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] )
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] @triton.jit
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] def triton_poi_fused_codesigned_probe_score_cuda_index_view_0(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.constexpr):
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     xnumel = 1024
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     xoffset = tl.program_id(0) * XBLOCK
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     xindex = xoffset + tl.arange(0, XBLOCK)[:]
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     xmask = xindex < xnumel
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     x0 = xindex
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp0 = tl.load(in_ptr0 + (x0 // 32), xmask, eviction_policy='evict_last')
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp1 = tl.full([XBLOCK], 64, tl.int32)
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp2 = tmp0 + tmp1
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp3 = tmp0 < 0
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp4 = tl.where(tmp3, tmp2, tmp0)
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tl.device_assert(((0 <= tmp4) & (tmp4 < 64)) | ~(xmask), "index out of bounds: 0 <= tmp4 < 64")
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp6 = tl.load(in_ptr1 + (32*tmp4 + ((x0 % 32))), xmask)
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tl.store(out_ptr0 + (x0), tmp6, xmask)
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] ''', device_str='cuda')
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] async_compile.wait(globals())
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] del async_compile
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] class Runner:
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     def __init__(self, partitions):
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         self.partitions = partitions
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     def recursively_apply_fns(self, fns):
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         new_callables = []
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         for fn, c in zip(fns, self.partitions):
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             new_callables.append(fn(c))
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         self.partitions = new_callables
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     def call(self, args):
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         arg0_1, arg1_1, arg2_1, arg3_1 = args
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         args.clear()
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         assert_size_stride(arg0_1, (1, 128), (128, 1))
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         assert_size_stride(arg1_1, (64, 128), (128, 1))
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         assert_size_stride(arg2_1, (64, 32), (32, 1))
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         assert_size_stride(arg3_1, (2048, 128), (128, 1))
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         with torch.cuda._DeviceGuard(0):
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             torch.cuda.set_device(0)
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf0 = empty_strided_cuda((1, 64), (64, 1), torch.float32)
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             # Topologically Sorted Source Nodes: [t, cent_scores], Original ATen: [aten.t, aten.mm]
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             extern_kernels.mm(arg0_1, reinterpret_tensor(arg1_1, (128, 64), (1, 128), 0), out=buf0)
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del arg1_1
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             # Topologically Sorted Source Nodes: [topk], Original ATen: [aten.topk]
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf1 = torch.ops.aten.topk.default(buf0, 32, 1)
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del buf0
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf3 = buf1[1]
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_size_stride(buf3, (1, 32), (32, 1), 'torch.ops.aten.topk.default')
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_alignment(buf3, 16, 'torch.ops.aten.topk.default')
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del buf1
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf4 = empty_strided_cuda((1, 1024), (1024, 1), torch.int64)
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             # Topologically Sorted Source Nodes: [probed, flat_items, codesigned_probe_score_cuda_default], Original ATen: [aten.index, aten.view, retrieve.codesigned_probe_score_cuda]
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             stream0 = get_raw_stream(0)
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             triton_poi_fused_codesigned_probe_score_cuda_index_view_0.run(buf3, arg2_1, buf4, 1024, stream=stream0)
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del arg2_1
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del buf3
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             # Topologically Sorted Source Nodes: [probed, flat_items, codesigned_probe_score_cuda_default], Original ATen: [aten.index, aten.view, retrieve.codesigned_probe_score_cuda]
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf5 = torch.ops.retrieve.codesigned_probe_score_cuda.default(arg0_1, buf4, arg3_1, 0.003354040440171957, 64)
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del arg0_1
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del arg3_1
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del buf4
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf6 = buf5[0]
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_size_stride(buf6, (1, 64), (64, 1), 'torch.ops.retrieve.codesigned_probe_score_cuda.default')
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_alignment(buf6, 16, 'torch.ops.retrieve.codesigned_probe_score_cuda.default')
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf7 = buf5[1]
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_size_stride(buf7, (1, 64), (64, 1), 'torch.ops.retrieve.codesigned_probe_score_cuda.default')
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_alignment(buf7, 16, 'torch.ops.retrieve.codesigned_probe_score_cuda.default')
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del buf5
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         return (buf6, buf7, )
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] runner = Runner(partitions=[])
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] call = runner.call
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] recursively_apply_fns = runner.recursively_apply_fns
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] def benchmark_compiled_module(times=10, repeat=10):
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     from torch._dynamo.testing import rand_strided
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     from torch._inductor.utils import print_performance
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     arg0_1 = rand_strided((1, 128), (128, 1), device='cuda:0', dtype=torch.float32)
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     arg1_1 = rand_strided((64, 128), (128, 1), device='cuda:0', dtype=torch.float32)
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     arg2_1 = rand_strided((64, 32), (32, 1), device='cuda:0', dtype=torch.int64)
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     arg3_1 = rand_strided((2048, 128), (128, 1), device='cuda:0', dtype=torch.int8)
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     fn = lambda: call([arg0_1, arg1_1, arg2_1, arg3_1])
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     return print_performance(fn, times=times, repeat=repeat)
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] if __name__ == "__main__":
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     from torch._inductor.wrapper_benchmark import compiled_module_main
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     compiled_module_main('None', benchmark_compiled_module)
+V0902 17:25:07.402000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:07.413000 71641 torch/_inductor/codecache.py:1251] [0/0] [__output_code] Output code written to: /tmp/torchinductor_root/oj/cojnhukya5q5vfcvp6ak3eauibwbi72vnlesko3252pis5ozsyl6.py
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] Output code: 
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # AOT ID: ['4_inference']
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from ctypes import c_void_p, c_long, c_int
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import torch
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import math
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import random
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import os
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import tempfile
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from math import inf, nan
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from cmath import nanj
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.hooks import run_intermediate_hooks
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.utils import maybe_profile
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.codegen.memory_planning import _align as align
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch import device, empty_strided
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.async_compile import AsyncCompile
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.select_algorithm import extern_kernels
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import triton
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import triton.language as tl
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.runtime.triton_heuristics import start_graph, end_graph
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] aten = torch.ops.aten
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] inductor_ops = torch.ops.inductor
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] _quantized = torch.ops._quantized
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] assert_alignment = torch._C._dynamo.guards.assert_alignment
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] alloc_from_pool = torch.ops.inductor._alloc_from_pool
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] async_compile = AsyncCompile()
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_p2p = torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # kernel path: /tmp/torchinductor_root/ld/cldiprg6gbq2i77t7t56u6tn2qpgwdb2sfc6l7vazr6xzrtqmrg6.py
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # Topologically Sorted Source Nodes: [probed, flat_items, codesigned_probe_score_cute_default], Original ATen: [aten.index, aten.view, retrieve.codesigned_probe_score_cute]
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # Source node to ATen node mapping:
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   codesigned_probe_score_cute_default => codesigned_probe_score_cute
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   flat_items => view
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   probed => index
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # Graph fragment:
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %getitem_1 : Tensor "i64[1, 32][32, 1]cuda:0" = PlaceHolder[target=getitem_1]
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %arg2_1 : Tensor "i64[64, 32][32, 1]cuda:0" = PlaceHolder[target=arg2_1]
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %index : Tensor "i64[1, 32, 32][1024, 32, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%arg2_1, [%getitem_1]), kwargs = {})
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %view : Tensor "i64[1, 1024][1024, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.reshape.default](args = (%index, [1, -1]), kwargs = {})
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %codesigned_probe_score_cute : [num_users=2] = call_function[target=torch.ops.retrieve.codesigned_probe_score_cute.default](args = (%arg0_1, %view, %arg3_1, 0.003354040440171957, 64), kwargs = {})
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   return %buf4
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] triton_poi_fused_codesigned_probe_score_cute_index_view_0 = async_compile.triton('triton_poi_fused_codesigned_probe_score_cute_index_view_0', '''
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import triton
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import triton.language as tl
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.runtime import triton_helpers, triton_heuristics
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] triton_helpers.set_driver_to_gpu()
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] @triton_heuristics.pointwise(
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     size_hints={'x': 1024}, 
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     filename=__file__,
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     triton_meta={'signature': {'in_ptr0': '*i64', 'in_ptr1': '*i64', 'out_ptr0': '*i64', 'xnumel': 'i32', 'XBLOCK': 'constexpr'}, 'device': DeviceProperties(type='cuda', index=0, multi_processor_count=108, cc=80, major=8, regs_per_multiprocessor=65536, max_threads_per_multi_processor=2048, max_threads_per_block=1024, warp_size=32), 'constants': {}, 'native_matmul': False, 'configs': [{(0,): [['tt.divisibility', 16]], (1,): [['tt.divisibility', 16]], (2,): [['tt.divisibility', 16]], (3,): [['tt.divisibility', 16]]}], 'enable_fp_fusion': True},
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     inductor_meta={'grid_type': 'Grid1D', 'autotune_hints': set(), 'kernel_name': 'triton_poi_fused_codesigned_probe_score_cute_index_view_0', 'mutated_arg_names': [], 'optimize_mem': True, 'no_x_dim': False, 'atomic_add_found': False, 'num_load': 1, 'num_store': 1, 'num_reduction': 0, 'backend_hash': '466EC5EAF66110FDA478FF2ED8F7DFA2C711067190FFB95897353D86A3E03048', 'assert_indirect_indexing': True, 'autotune_local_cache': True, 'autotune_pointwise': True, 'autotune_remote_cache': None, 'force_disable_caches': False, 'dynamic_scale_rblock': True, 'max_autotune': False, 'max_autotune_pointwise': False, 'min_split_scan_rblock': 256, 'spill_threshold': 16, 'store_cubin': False, 'deterministic': False, 'force_filter_reduction_configs': False, 'are_deterministic_algorithms_enabled': False},
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     min_elem_per_thread=0
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] )
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] @triton.jit
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] def triton_poi_fused_codesigned_probe_score_cute_index_view_0(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.constexpr):
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     xnumel = 1024
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     xoffset = tl.program_id(0) * XBLOCK
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     xindex = xoffset + tl.arange(0, XBLOCK)[:]
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     xmask = xindex < xnumel
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     x0 = xindex
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp0 = tl.load(in_ptr0 + (x0 // 32), xmask, eviction_policy='evict_last')
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp1 = tl.full([XBLOCK], 64, tl.int32)
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp2 = tmp0 + tmp1
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp3 = tmp0 < 0
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp4 = tl.where(tmp3, tmp2, tmp0)
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tl.device_assert(((0 <= tmp4) & (tmp4 < 64)) | ~(xmask), "index out of bounds: 0 <= tmp4 < 64")
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp6 = tl.load(in_ptr1 + (32*tmp4 + ((x0 % 32))), xmask)
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tl.store(out_ptr0 + (x0), tmp6, xmask)
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] ''', device_str='cuda')
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] async_compile.wait(globals())
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] del async_compile
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] class Runner:
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     def __init__(self, partitions):
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         self.partitions = partitions
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     def recursively_apply_fns(self, fns):
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         new_callables = []
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         for fn, c in zip(fns, self.partitions):
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             new_callables.append(fn(c))
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         self.partitions = new_callables
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     def call(self, args):
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         arg0_1, arg1_1, arg2_1, arg3_1 = args
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         args.clear()
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         assert_size_stride(arg0_1, (1, 128), (128, 1))
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         assert_size_stride(arg1_1, (64, 128), (128, 1))
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         assert_size_stride(arg2_1, (64, 32), (32, 1))
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         assert_size_stride(arg3_1, (2048, 128), (128, 1))
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         with torch.cuda._DeviceGuard(0):
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             torch.cuda.set_device(0)
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf0 = empty_strided_cuda((1, 64), (64, 1), torch.float32)
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             # Topologically Sorted Source Nodes: [t, cent_scores], Original ATen: [aten.t, aten.mm]
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             extern_kernels.mm(arg0_1, reinterpret_tensor(arg1_1, (128, 64), (1, 128), 0), out=buf0)
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del arg1_1
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             # Topologically Sorted Source Nodes: [topk], Original ATen: [aten.topk]
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf1 = torch.ops.aten.topk.default(buf0, 32, 1)
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del buf0
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf3 = buf1[1]
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_size_stride(buf3, (1, 32), (32, 1), 'torch.ops.aten.topk.default')
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_alignment(buf3, 16, 'torch.ops.aten.topk.default')
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del buf1
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf4 = empty_strided_cuda((1, 1024), (1024, 1), torch.int64)
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             # Topologically Sorted Source Nodes: [probed, flat_items, codesigned_probe_score_cute_default], Original ATen: [aten.index, aten.view, retrieve.codesigned_probe_score_cute]
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             stream0 = get_raw_stream(0)
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             triton_poi_fused_codesigned_probe_score_cute_index_view_0.run(buf3, arg2_1, buf4, 1024, stream=stream0)
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del arg2_1
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del buf3
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             # Topologically Sorted Source Nodes: [probed, flat_items, codesigned_probe_score_cute_default], Original ATen: [aten.index, aten.view, retrieve.codesigned_probe_score_cute]
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf5 = torch.ops.retrieve.codesigned_probe_score_cute.default(arg0_1, buf4, arg3_1, 0.003354040440171957, 64)
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del arg0_1
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del arg3_1
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del buf4
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf6 = buf5[0]
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_size_stride(buf6, (1, 64), (64, 1), 'torch.ops.retrieve.codesigned_probe_score_cute.default')
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_alignment(buf6, 16, 'torch.ops.retrieve.codesigned_probe_score_cute.default')
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf7 = buf5[1]
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_size_stride(buf7, (1, 64), (64, 1), 'torch.ops.retrieve.codesigned_probe_score_cute.default')
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_alignment(buf7, 16, 'torch.ops.retrieve.codesigned_probe_score_cute.default')
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del buf5
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         return (buf6, buf7, )
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] runner = Runner(partitions=[])
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] call = runner.call
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] recursively_apply_fns = runner.recursively_apply_fns
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] def benchmark_compiled_module(times=10, repeat=10):
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     from torch._dynamo.testing import rand_strided
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     from torch._inductor.utils import print_performance
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     arg0_1 = rand_strided((1, 128), (128, 1), device='cuda:0', dtype=torch.float32)
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     arg1_1 = rand_strided((64, 128), (128, 1), device='cuda:0', dtype=torch.float32)
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     arg2_1 = rand_strided((64, 32), (32, 1), device='cuda:0', dtype=torch.int64)
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     arg3_1 = rand_strided((2048, 128), (128, 1), device='cuda:0', dtype=torch.int8)
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     fn = lambda: call([arg0_1, arg1_1, arg2_1, arg3_1])
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     return print_performance(fn, times=times, repeat=repeat)
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] if __name__ == "__main__":
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     from torch._inductor.wrapper_benchmark import compiled_module_main
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     compiled_module_main('None', benchmark_compiled_module)
+V0902 17:25:10.199000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:10.216000 71641 torch/_inductor/codecache.py:1251] [0/0] [__output_code] Output code written to: /tmp/torchinductor_root/7p/c7pc3srh3y6zvyln7xmsesinvug22z7kk24crzqcixi2ydhbqfo5.py
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] Output code: 
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] # AOT ID: ['4_inference']
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from ctypes import c_void_p, c_long, c_int
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] import torch
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] import math
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] import random
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] import os
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] import tempfile
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from math import inf, nan
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from cmath import nanj
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch._inductor.hooks import run_intermediate_hooks
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch._inductor.utils import maybe_profile
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch._inductor.codegen.memory_planning import _align as align
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch import device, empty_strided
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch._inductor.async_compile import AsyncCompile
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch._inductor.select_algorithm import extern_kernels
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] import triton
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] import triton.language as tl
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch._inductor.runtime.triton_heuristics import start_graph, end_graph
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] aten = torch.ops.aten
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] inductor_ops = torch.ops.inductor
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] _quantized = torch.ops._quantized
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] assert_alignment = torch._C._dynamo.guards.assert_alignment
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] alloc_from_pool = torch.ops.inductor._alloc_from_pool
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] async_compile = AsyncCompile()
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] empty_strided_p2p = torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] # kernel path: /tmp/torchinductor_root/ld/cldiprg6gbq2i77t7t56u6tn2qpgwdb2sfc6l7vazr6xzrtqmrg6.py
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] # Topologically Sorted Source Nodes: [probed, flat_items, codesigned_probe_score_cute_default], Original ATen: [aten.index, aten.view, retrieve.codesigned_probe_score_cute]
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] # Source node to ATen node mapping:
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] #   codesigned_probe_score_cute_default => codesigned_probe_score_cute
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] #   flat_items => view
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] #   probed => index
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] # Graph fragment:
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] #   %getitem_1 : Tensor "i64[1, 32][32, 1]cuda:0" = PlaceHolder[target=getitem_1]
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] #   %arg2_1 : Tensor "i64[64, 32][32, 1]cuda:0" = PlaceHolder[target=arg2_1]
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] #   %index : Tensor "i64[1, 32, 32][1024, 32, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%arg2_1, [%getitem_1]), kwargs = {})
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] #   %view : Tensor "i64[1, 1024][1024, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.reshape.default](args = (%index, [1, -1]), kwargs = {})
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] #   %codesigned_probe_score_cute : [num_users=2] = call_function[target=torch.ops.retrieve.codesigned_probe_score_cute.default](args = (%arg0_1, %view, %arg3_1, 0.003354040440171957, 64), kwargs = {})
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] #   return %buf4
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] triton_poi_fused_codesigned_probe_score_cute_index_view_0 = async_compile.triton('triton_poi_fused_codesigned_probe_score_cute_index_view_0', '''
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] import triton
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] import triton.language as tl
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch._inductor.runtime import triton_helpers, triton_heuristics
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] triton_helpers.set_driver_to_gpu()
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] @triton_heuristics.pointwise(
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     size_hints={'x': 1024}, 
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     filename=__file__,
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     triton_meta={'signature': {'in_ptr0': '*i64', 'in_ptr1': '*i64', 'out_ptr0': '*i64', 'xnumel': 'i32', 'XBLOCK': 'constexpr'}, 'device': DeviceProperties(type='cuda', index=0, multi_processor_count=108, cc=80, major=8, regs_per_multiprocessor=65536, max_threads_per_multi_processor=2048, max_threads_per_block=1024, warp_size=32), 'constants': {}, 'native_matmul': False, 'configs': [{(0,): [['tt.divisibility', 16]], (1,): [['tt.divisibility', 16]], (2,): [['tt.divisibility', 16]], (3,): [['tt.divisibility', 16]]}], 'enable_fp_fusion': True},
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     inductor_meta={'grid_type': 'Grid1D', 'autotune_hints': set(), 'kernel_name': 'triton_poi_fused_codesigned_probe_score_cute_index_view_0', 'mutated_arg_names': [], 'optimize_mem': True, 'no_x_dim': False, 'atomic_add_found': False, 'num_load': 1, 'num_store': 1, 'num_reduction': 0, 'backend_hash': '466EC5EAF66110FDA478FF2ED8F7DFA2C711067190FFB95897353D86A3E03048', 'assert_indirect_indexing': True, 'autotune_local_cache': True, 'autotune_pointwise': True, 'autotune_remote_cache': None, 'force_disable_caches': False, 'dynamic_scale_rblock': True, 'max_autotune': False, 'max_autotune_pointwise': False, 'min_split_scan_rblock': 256, 'spill_threshold': 16, 'store_cubin': False, 'deterministic': False, 'force_filter_reduction_configs': False, 'are_deterministic_algorithms_enabled': False},
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     min_elem_per_thread=0
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] )
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] @triton.jit
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] def triton_poi_fused_codesigned_probe_score_cute_index_view_0(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.constexpr):
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     xnumel = 1024
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     xoffset = tl.program_id(0) * XBLOCK
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     xindex = xoffset + tl.arange(0, XBLOCK)[:]
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     xmask = xindex < xnumel
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     x0 = xindex
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     tmp0 = tl.load(in_ptr0 + (x0 // 32), xmask, eviction_policy='evict_last')
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     tmp1 = tl.full([XBLOCK], 64, tl.int32)
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     tmp2 = tmp0 + tmp1
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     tmp3 = tmp0 < 0
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     tmp4 = tl.where(tmp3, tmp2, tmp0)
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     tl.device_assert(((0 <= tmp4) & (tmp4 < 64)) | ~(xmask), "index out of bounds: 0 <= tmp4 < 64")
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     tmp6 = tl.load(in_ptr1 + (32*tmp4 + ((x0 % 32))), xmask)
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     tl.store(out_ptr0 + (x0), tmp6, xmask)
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] ''', device_str='cuda')
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] async_compile.wait(globals())
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] del async_compile
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] class Runner:
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     def __init__(self, partitions):
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         self.partitions = partitions
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     def recursively_apply_fns(self, fns):
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         new_callables = []
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         for fn, c in zip(fns, self.partitions):
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             new_callables.append(fn(c))
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         self.partitions = new_callables
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     def call(self, args):
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         arg0_1, arg1_1, arg2_1, arg3_1 = args
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         args.clear()
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         assert_size_stride(arg0_1, (1, 128), (128, 1))
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         assert_size_stride(arg1_1, (64, 128), (128, 1))
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         assert_size_stride(arg2_1, (64, 32), (32, 1))
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         assert_size_stride(arg3_1, (2048, 128), (128, 1))
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         with torch.cuda._DeviceGuard(0):
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             torch.cuda.set_device(0)
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             buf0 = empty_strided_cuda((1, 64), (64, 1), torch.float32)
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             # Topologically Sorted Source Nodes: [t, cent_scores], Original ATen: [aten.t, aten.mm]
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             extern_kernels.mm(arg0_1, reinterpret_tensor(arg1_1, (128, 64), (1, 128), 0), out=buf0)
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             del arg1_1
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             # Topologically Sorted Source Nodes: [topk], Original ATen: [aten.topk]
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             buf1 = torch.ops.aten.topk.default(buf0, 32, 1)
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             del buf0
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             buf3 = buf1[1]
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             assert_size_stride(buf3, (1, 32), (32, 1), 'torch.ops.aten.topk.default')
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             assert_alignment(buf3, 16, 'torch.ops.aten.topk.default')
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             del buf1
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             buf4 = empty_strided_cuda((1, 1024), (1024, 1), torch.int64)
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             # Topologically Sorted Source Nodes: [probed, flat_items, codesigned_probe_score_cute_default], Original ATen: [aten.index, aten.view, retrieve.codesigned_probe_score_cute]
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             stream0 = get_raw_stream(0)
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             triton_poi_fused_codesigned_probe_score_cute_index_view_0.run(buf3, arg2_1, buf4, 1024, stream=stream0)
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             del arg2_1
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             del buf3
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             # Topologically Sorted Source Nodes: [probed, flat_items, codesigned_probe_score_cute_default], Original ATen: [aten.index, aten.view, retrieve.codesigned_probe_score_cute]
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             buf5 = torch.ops.retrieve.codesigned_probe_score_cute.default(arg0_1, buf4, arg3_1, 0.003354040440171957, 64)
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             del arg0_1
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             del arg3_1
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             del buf4
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             buf6 = buf5[0]
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             assert_size_stride(buf6, (1, 64), (64, 1), 'torch.ops.retrieve.codesigned_probe_score_cute.default')
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             assert_alignment(buf6, 16, 'torch.ops.retrieve.codesigned_probe_score_cute.default')
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             buf7 = buf5[1]
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             assert_size_stride(buf7, (1, 64), (64, 1), 'torch.ops.retrieve.codesigned_probe_score_cute.default')
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             assert_alignment(buf7, 16, 'torch.ops.retrieve.codesigned_probe_score_cute.default')
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]             del buf5
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]         return (buf6, buf7, )
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] runner = Runner(partitions=[])
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] call = runner.call
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] recursively_apply_fns = runner.recursively_apply_fns
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] def benchmark_compiled_module(times=10, repeat=10):
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     from torch._dynamo.testing import rand_strided
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     from torch._inductor.utils import print_performance
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     arg0_1 = rand_strided((1, 128), (128, 1), device='cuda:0', dtype=torch.float32)
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     arg1_1 = rand_strided((64, 128), (128, 1), device='cuda:0', dtype=torch.float32)
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     arg2_1 = rand_strided((64, 32), (32, 1), device='cuda:0', dtype=torch.int64)
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     arg3_1 = rand_strided((2048, 128), (128, 1), device='cuda:0', dtype=torch.int8)
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     fn = lambda: call([arg0_1, arg1_1, arg2_1, arg3_1])
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     return print_performance(fn, times=times, repeat=repeat)
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] if __name__ == "__main__":
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     from torch._inductor.wrapper_benchmark import compiled_module_main
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code]     compiled_module_main('None', benchmark_compiled_module)
+V0902 17:25:10.732000 71641 torch/_inductor/codecache.py:1250] [0/1] [__output_code] 
+V0902 17:25:10.736000 71641 torch/_inductor/codecache.py:1251] [0/1] [__output_code] Output code written to: /tmp/torchinductor_root/7p/c7pc3srh3y6zvyln7xmsesinvug22z7kk24crzqcixi2ydhbqfo5.py
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] Output code: 
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # AOT ID: ['4_inference']
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from ctypes import c_void_p, c_long, c_int
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import torch
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import math
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import random
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import os
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import tempfile
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from math import inf, nan
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from cmath import nanj
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.hooks import run_intermediate_hooks
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.utils import maybe_profile
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.codegen.memory_planning import _align as align
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch import device, empty_strided
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.async_compile import AsyncCompile
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.select_algorithm import extern_kernels
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import triton
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import triton.language as tl
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.runtime.triton_heuristics import start_graph, end_graph
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] aten = torch.ops.aten
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] inductor_ops = torch.ops.inductor
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] _quantized = torch.ops._quantized
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] assert_alignment = torch._C._dynamo.guards.assert_alignment
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] alloc_from_pool = torch.ops.inductor._alloc_from_pool
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] async_compile = AsyncCompile()
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_p2p = torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # kernel path: /tmp/torchinductor_root/ld/cldiprg6gbq2i77t7t56u6tn2qpgwdb2sfc6l7vazr6xzrtqmrg6.py
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # Topologically Sorted Source Nodes: [probed, flat_items, codesigned_probe_score_cute_default], Original ATen: [aten.index, aten.view, retrieve.codesigned_probe_score_cute]
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # Source node to ATen node mapping:
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   codesigned_probe_score_cute_default => codesigned_probe_score_cute
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   flat_items => view
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   probed => index
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # Graph fragment:
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %getitem_1 : Tensor "i64[1, 32][32, 1]cuda:0" = PlaceHolder[target=getitem_1]
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %arg2_1 : Tensor "i64[64, 32][32, 1]cuda:0" = PlaceHolder[target=arg2_1]
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %index : Tensor "i64[1, 32, 32][1024, 32, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.index.Tensor](args = (%arg2_1, [%getitem_1]), kwargs = {})
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %view : Tensor "i64[1, 1024][1024, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.reshape.default](args = (%index, [1, -1]), kwargs = {})
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %codesigned_probe_score_cute : [num_users=2] = call_function[target=torch.ops.retrieve.codesigned_probe_score_cute.default](args = (%arg0_1, %view, %arg3_1, 0.003354040440171957, 64), kwargs = {})
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   return %buf4
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] triton_poi_fused_codesigned_probe_score_cute_index_view_0 = async_compile.triton('triton_poi_fused_codesigned_probe_score_cute_index_view_0', '''
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import triton
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import triton.language as tl
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.runtime import triton_helpers, triton_heuristics
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] triton_helpers.set_driver_to_gpu()
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] @triton_heuristics.pointwise(
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     size_hints={'x': 1024}, 
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     filename=__file__,
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     triton_meta={'signature': {'in_ptr0': '*i64', 'in_ptr1': '*i64', 'out_ptr0': '*i64', 'xnumel': 'i32', 'XBLOCK': 'constexpr'}, 'device': DeviceProperties(type='cuda', index=0, multi_processor_count=108, cc=80, major=8, regs_per_multiprocessor=65536, max_threads_per_multi_processor=2048, max_threads_per_block=1024, warp_size=32), 'constants': {}, 'native_matmul': False, 'configs': [{(0,): [['tt.divisibility', 16]], (1,): [['tt.divisibility', 16]], (2,): [['tt.divisibility', 16]], (3,): [['tt.divisibility', 16]]}], 'enable_fp_fusion': True},
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     inductor_meta={'grid_type': 'Grid1D', 'autotune_hints': set(), 'kernel_name': 'triton_poi_fused_codesigned_probe_score_cute_index_view_0', 'mutated_arg_names': [], 'optimize_mem': True, 'no_x_dim': False, 'atomic_add_found': False, 'num_load': 1, 'num_store': 1, 'num_reduction': 0, 'backend_hash': '466EC5EAF66110FDA478FF2ED8F7DFA2C711067190FFB95897353D86A3E03048', 'assert_indirect_indexing': True, 'autotune_local_cache': True, 'autotune_pointwise': True, 'autotune_remote_cache': None, 'force_disable_caches': False, 'dynamic_scale_rblock': True, 'max_autotune': False, 'max_autotune_pointwise': False, 'min_split_scan_rblock': 256, 'spill_threshold': 16, 'store_cubin': False, 'deterministic': False, 'force_filter_reduction_configs': False, 'are_deterministic_algorithms_enabled': False},
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     min_elem_per_thread=0
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] )
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] @triton.jit
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] def triton_poi_fused_codesigned_probe_score_cute_index_view_0(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.constexpr):
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     xnumel = 1024
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     xoffset = tl.program_id(0) * XBLOCK
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     xindex = xoffset + tl.arange(0, XBLOCK)[:]
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     xmask = xindex < xnumel
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     x0 = xindex
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp0 = tl.load(in_ptr0 + (x0 // 32), xmask, eviction_policy='evict_last')
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp1 = tl.full([XBLOCK], 64, tl.int32)
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp2 = tmp0 + tmp1
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp3 = tmp0 < 0
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp4 = tl.where(tmp3, tmp2, tmp0)
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tl.device_assert(((0 <= tmp4) & (tmp4 < 64)) | ~(xmask), "index out of bounds: 0 <= tmp4 < 64")
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp6 = tl.load(in_ptr1 + (32*tmp4 + ((x0 % 32))), xmask)
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tl.store(out_ptr0 + (x0), tmp6, xmask)
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] ''', device_str='cuda')
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] async_compile.wait(globals())
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] del async_compile
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] class Runner:
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     def __init__(self, partitions):
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         self.partitions = partitions
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     def recursively_apply_fns(self, fns):
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         new_callables = []
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         for fn, c in zip(fns, self.partitions):
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             new_callables.append(fn(c))
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         self.partitions = new_callables
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     def call(self, args):
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         arg0_1, arg1_1, arg2_1, arg3_1 = args
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         args.clear()
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         assert_size_stride(arg0_1, (1, 128), (128, 1))
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         assert_size_stride(arg1_1, (64, 128), (128, 1))
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         assert_size_stride(arg2_1, (64, 32), (32, 1))
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         assert_size_stride(arg3_1, (2048, 128), (128, 1))
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         with torch.cuda._DeviceGuard(0):
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             torch.cuda.set_device(0)
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf0 = empty_strided_cuda((1, 64), (64, 1), torch.float32)
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             # Topologically Sorted Source Nodes: [t, cent_scores], Original ATen: [aten.t, aten.mm]
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             extern_kernels.mm(arg0_1, reinterpret_tensor(arg1_1, (128, 64), (1, 128), 0), out=buf0)
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del arg1_1
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             # Topologically Sorted Source Nodes: [topk], Original ATen: [aten.topk]
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf1 = torch.ops.aten.topk.default(buf0, 32, 1)
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del buf0
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf3 = buf1[1]
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_size_stride(buf3, (1, 32), (32, 1), 'torch.ops.aten.topk.default')
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_alignment(buf3, 16, 'torch.ops.aten.topk.default')
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del buf1
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf4 = empty_strided_cuda((1, 1024), (1024, 1), torch.int64)
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             # Topologically Sorted Source Nodes: [probed, flat_items, codesigned_probe_score_cute_default], Original ATen: [aten.index, aten.view, retrieve.codesigned_probe_score_cute]
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             stream0 = get_raw_stream(0)
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             triton_poi_fused_codesigned_probe_score_cute_index_view_0.run(buf3, arg2_1, buf4, 1024, stream=stream0)
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del arg2_1
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del buf3
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             # Topologically Sorted Source Nodes: [probed, flat_items, codesigned_probe_score_cute_default], Original ATen: [aten.index, aten.view, retrieve.codesigned_probe_score_cute]
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf5 = torch.ops.retrieve.codesigned_probe_score_cute.default(arg0_1, buf4, arg3_1, 0.003354040440171957, 64)
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del arg0_1
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del arg3_1
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del buf4
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf6 = buf5[0]
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_size_stride(buf6, (1, 64), (64, 1), 'torch.ops.retrieve.codesigned_probe_score_cute.default')
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_alignment(buf6, 16, 'torch.ops.retrieve.codesigned_probe_score_cute.default')
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf7 = buf5[1]
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_size_stride(buf7, (1, 64), (64, 1), 'torch.ops.retrieve.codesigned_probe_score_cute.default')
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             assert_alignment(buf7, 16, 'torch.ops.retrieve.codesigned_probe_score_cute.default')
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del buf5
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         return (buf6, buf7, )
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] runner = Runner(partitions=[])
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] call = runner.call
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] recursively_apply_fns = runner.recursively_apply_fns
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] def benchmark_compiled_module(times=10, repeat=10):
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     from torch._dynamo.testing import rand_strided
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     from torch._inductor.utils import print_performance
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     arg0_1 = rand_strided((1, 128), (128, 1), device='cuda:0', dtype=torch.float32)
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     arg1_1 = rand_strided((64, 128), (128, 1), device='cuda:0', dtype=torch.float32)
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     arg2_1 = rand_strided((64, 32), (32, 1), device='cuda:0', dtype=torch.int64)
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     arg3_1 = rand_strided((2048, 128), (128, 1), device='cuda:0', dtype=torch.int8)
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     fn = lambda: call([arg0_1, arg1_1, arg2_1, arg3_1])
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     return print_performance(fn, times=times, repeat=repeat)
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] if __name__ == "__main__":
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     from torch._inductor.wrapper_benchmark import compiled_module_main
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     compiled_module_main('None', benchmark_compiled_module)
+V0902 17:25:12.268000 71641 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V0902 17:25:12.274000 71641 torch/_inductor/codecache.py:1251] [0/0] [__output_code] Output code written to: /tmp/torchinductor_root/7p/c7pc3srh3y6zvyln7xmsesinvug22z7kk24crzqcixi2ydhbqfo5.py
+=== cuda
+   _impl                                0.0820 ms
+   op object (python)                   0.1220 ms
+   torch.ops...default                  0.1217 ms
+   forward eager                        0.2377 ms
+   forward eager no_grad                0.2673 ms
+   forward compiled                     0.2974 ms
+   forward compiled no_grad             0.3321 ms
+   forward compiled inference_mode      0.2573 ms
+   forward eager inference_mode         0.1863 ms
+=== cute
+   _impl                                0.0992 ms
+   op object (python)                   0.1371 ms
+   torch.ops...default                  0.1372 ms
+   forward eager                        0.2490 ms
+   forward eager no_grad                0.2801 ms
+   forward compiled                     0.3201 ms
+   forward compiled no_grad             0.3577 ms
+   forward compiled inference_mode      0.2835 ms
+   forward eager inference_mode         0.2107 ms

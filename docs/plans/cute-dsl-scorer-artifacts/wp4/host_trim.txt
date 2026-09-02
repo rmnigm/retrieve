@@ -1,0 +1,32 @@
+DSL exe_args: 15 ['int', 'int', 'int'] ...; adapted: ['CudaDriverStreamAdapter']
+exe elem types: ['int', 'int', 'int', 'int', 'int', 'int', 'c_void_p', 'c_void_p', 'c_void_p', 'c_void_p', 'c_void_p', 'c_void_p', 'c_void_p', 'c_void_p', 'int']
+ptr0 deref: 136411816666112 expected 136411816666112
+scalar p deref: 8192 expected 8192
+scalar gs deref: 0.04210629314184189 expected 0.04210629314184189
+stream cell deref: None expected 0
+module _cps_cute_scores (baseline)                            95.0 us  bit-exact
+cuda cps_scores (C++ launcher)                                 4.4 us  bit-exact
+variant = module (sanity)                                     57.1 us  bit-exact
+stream=torch guard=with  validate=full call=bypass            21.2 us  bit-exact
+stream=torch guard=with  validate=min  call=call              54.1 us  bit-exact
+stream=torch guard=with  validate=min  call=bypass            20.9 us  bit-exact
+stream=torch guard=check validate=full call=call              53.9 us  bit-exact
+stream=torch guard=check validate=full call=bypass            20.5 us  bit-exact
+stream=torch guard=check validate=min  call=call              53.6 us  bit-exact
+stream=torch guard=check validate=min  call=bypass            20.1 us  bit-exact
+stream=torch guard=none  validate=full call=call              53.1 us  bit-exact
+stream=torch guard=none  validate=full call=bypass            19.9 us  bit-exact
+stream=torch guard=none  validate=min  call=call              52.9 us  bit-exact
+stream=torch guard=none  validate=min  call=bypass            20.0 us  bit-exact
+stream=raw   guard=with  validate=full call=call              44.9 us  bit-exact
+stream=raw   guard=with  validate=full call=bypass            14.0 us  bit-exact
+stream=raw   guard=with  validate=min  call=call              42.5 us  bit-exact
+stream=raw   guard=with  validate=min  call=bypass            14.0 us  bit-exact
+stream=raw   guard=check validate=full call=call              42.4 us  bit-exact
+stream=raw   guard=check validate=full call=bypass            13.9 us  bit-exact
+stream=raw   guard=check validate=min  call=call              42.0 us  bit-exact
+stream=raw   guard=check validate=min  call=bypass            13.2 us  bit-exact
+stream=raw   guard=none  validate=full call=call              39.9 us  bit-exact
+stream=raw   guard=none  validate=full call=bypass            12.8 us  bit-exact
+stream=raw   guard=none  validate=min  call=call              40.7 us  bit-exact
+stream=raw   guard=none  validate=min  call=bypass            12.3 us  bit-exact

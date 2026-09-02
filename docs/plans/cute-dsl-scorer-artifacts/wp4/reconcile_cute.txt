@@ -1,0 +1,27 @@
+== cute: plurality over 11 regimes: [((512, 4, 4), 2), ((1024, 8, 2), 1), ((256, 8, 2), 1), ((512, 8, 2), 1)]
+   (256, 8, 4): geomean ratio-to-best 1.0565, worst 1.144
+   (256, 4, 4): geomean ratio-to-best 1.0642, worst 1.135
+   (1024, 8, 1): geomean ratio-to-best 1.0659, worst 1.203
+   (128, 8, 2): geomean ratio-to-best 1.0697, worst 1.167
+   (256, 8, 2): geomean ratio-to-best 1.0727, worst 1.208
+   (512, 8, 4): geomean ratio-to-best 1.0748, worst 1.281
+   (256, 4, 1): geomean ratio-to-best 1.0768, worst 1.160
+   (256, 8, 1): geomean ratio-to-best 1.0785, worst 1.194
+   (128,8,1): geomean 1.0861 worst 1.311
+   per-regime max/min spread over the grid: 1.13..1.39
+== cuda: plurality over 11 regimes: [((256, 8, 4), 4), ((128, 8, 4), 2), ((128, 8, 2), 2), ((128, 4, 2), 1)]
+   (128, 4, 4): geomean ratio-to-best 1.0143, worst 1.060
+   (128, 8, 1): geomean ratio-to-best 1.0163, worst 1.066
+   (128, 4, 2): geomean ratio-to-best 1.0165, worst 1.069
+   (128, 8, 2): geomean ratio-to-best 1.0167, worst 1.088
+   (128, 8, 4): geomean ratio-to-best 1.0173, worst 1.092
+   (256, 8, 4): geomean ratio-to-best 1.0176, worst 1.077
+   (256, 8, 2): geomean ratio-to-best 1.0184, worst 1.073
+   (256, 8, 1): geomean ratio-to-best 1.0205, worst 1.065
+   (128,8,1): geomean 1.0163 worst 1.066
+   per-regime max/min spread over the grid: 1.07..1.81
+(512, 4, 4) geomean 1.0813 worst 1.257 178 221 185 234 233 307 229 243 248 248 219
+(512, 4, 1) geomean 1.0894 worst 1.387 173 220 218 234 246 297 228 213 224 252 253
+(256, 4, 1) geomean 1.0768 worst 1.160 171 221 160 260 239 314 232 224 249 225 253
+(128, 8, 1) geomean 1.0861 worst 1.311 179 225 160 236 248 340 232 253 224 230 248
+(256, 8, 4) geomean 1.0565 worst 1.144 159 220 168 259 245 323 228 193 243 242 226

@@ -1,0 +1,16 @@
+--- phase-2 mask launchers (eager _impl), B=16, n_probe=32, max_size=1824 (layout A), enqueue-only us/call
+cuda _bloom_partial_mask_cuda_impl                         11.0 us
+cute _bloom_partial_mask_cute_impl                         63.2 us
+cuda _clause_partial_mask_cuda_impl                        10.6 us
+cute _clause_partial_mask_cute_impl                        72.2 us
+--- phase-3 launcher only (cps_scores / _cps_cute_scores), B=16 P=8192
+cuda cps_scores (C++ launcher)                              4.2 us
+cute _cps_cute_scores (full)                               63.2 us
+cute compiled executor, args prebuilt                      25.9 us
+6x gmem_ptr                                                 5.6 us
+with torch.cuda.device(...)                                 2.1 us
+torch.cuda.current_stream().cuda_stream + cu_stream         4.5 us
+torch._C._cuda_getCurrentRawStream(0) + cu_stream           0.2 us
+torch.cuda.current_device()                                 0.3 us
+compile_score cache lookup                                  0.6 us
+torch baseline o.fill_(0)                                   4.6 us

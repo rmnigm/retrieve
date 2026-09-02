@@ -1,0 +1,3 @@
+imports: 12.18s
+cute: compiled cps_score_kernel<8, false, 1> in 0.24s
+exact: ensure_built 3.22s; first _impl call 432.4 ms; second 0.61 ms; specializations: [('clause', 2, 2), ('score', 8, False, 1), ('score', 8, True, 4)]
