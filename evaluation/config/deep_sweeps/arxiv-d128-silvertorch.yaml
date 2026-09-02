@@ -19,6 +19,9 @@ _defaults: &defaults
   algorithms:
     - silvertorch
 
+  # `cute` (the CuTe DSL port of the cuda backend) is also accepted here and behaves
+  # exactly like `cuda` in the sweep (triton filter modules, same oracle); it is not
+  # in the list so this config keeps measuring what it always measured.
   backends: [triton, cuda, torch]
 
   algo_params:

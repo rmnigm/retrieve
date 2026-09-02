@@ -17,6 +17,11 @@ from retrieve.kernels.silvertorch.codesigned_probe_score_cuda import (
     codesigned_probe_score_cuda,
     codesigned_probe_score_exact_cuda,
 )
+from retrieve.kernels.silvertorch.codesigned_probe_score_cute import (
+    codesigned_probe_score_bloom_cute,
+    codesigned_probe_score_cute,
+    codesigned_probe_score_exact_cute,
+)
 from retrieve.kernels.silvertorch.codesigned_probe_score_exact import (
     codesigned_probe_score_exact,
 )
@@ -33,6 +38,11 @@ from retrieve.layers.utils.topk import masked_topk
 
 FilterMode = Literal["none", "bloom", "exact"]
 
+# Backends that run the paper's two-kernel design (phase-2 partial masks over the probed
+# clusters -> masked dp4a scoring) and therefore read the *transposed* bloom index. The
+# CuTe DSL backend is a port of the CUDA C++ one: same ops, same buffers, same layout.
+_TWO_KERNEL_BACKENDS = ("cuda", "cute")
+
 
 class SilverTorch(RetrievalModule):
     """Co-designed IVF + INT8 ANN + optional attribute filter (paper Algorithm 1, §4.2): an ``[N,
@@ -45,9 +55,12 @@ class SilverTorch(RetrievalModule):
     runs the same semantics eager but materializes ``[B, P, D]``, so large ``P·B·D`` needs the
     Triton backend. ``backend="cuda"`` runs the CUDA C++ implementation of all three filter
     modes, JIT-compiling on first forward and returning bit-identical results to the Triton
-    backend; see docs/system/kernels.md for its design and constraints. Only the ``"bloom"``
-    index differs across backends (cuda registers the transposed ``bloom_sigs_t`` instead of
-    ``bloom_sigs``) — a cuda ``"exact"`` module's state_dict is identical to a triton one's."""
+    backend; ``backend="cute"`` is the CuTe DSL port of that backend (same ops, same buffers,
+    same mask layout, bit-identical to cuda; needs the ``cute`` extra). See
+    docs/system/kernels.md for their design and constraints. Only the ``"bloom"`` index
+    differs across backends (cuda and cute register the transposed ``bloom_sigs_t`` instead
+    of ``bloom_sigs``) — a cuda or cute ``"exact"`` module's state_dict is identical to a
+    triton one's, and a cute checkpoint is byte-identical to a cuda one."""
 
     centroids: Tensor
     item_codes: Tensor
@@ -228,9 +241,9 @@ class SilverTorch(RetrievalModule):
                     self.k_hash,
                     self.word_count,
                 )
-            if self.backend == "cuda":
-                # The cuda path reads only the transposed index; row-wise sigs are a
-                # build-time intermediate. Registering both would double the filter
+            if self.backend in _TWO_KERNEL_BACKENDS:
+                # The cuda/cute path reads only the transposed index; row-wise sigs are
+                # a build-time intermediate. Registering both would double the filter
                 # index memory. Note this changes the state-dict key set — see
                 # docs/system/architecture.md on cross-backend checkpoint portability.
                 #
@@ -243,7 +256,7 @@ class SilverTorch(RetrievalModule):
                 slack = self.padded_cluster_items.numel() / max(n, 1)
                 if slack > 2.0:
                     warnings.warn(
-                        f"cuda+bloom transposed index is {slack:.1f}x the row-wise "
+                        f"{self.backend}+bloom transposed index is {slack:.1f}x the row-wise "
                         f"bloom_sigs size: n_lists * max_cluster_size = "
                         f"{self.padded_cluster_items.numel()} padded slots for N={n} "
                         f"items. Cluster sizes are very uneven — re-cluster (more "
@@ -291,6 +304,8 @@ class SilverTorch(RetrievalModule):
             return self._forward_triton(query, query_clause_attrs)
         if self.backend == "cuda":
             return self._forward_cuda(query, query_clause_attrs)
+        if self.backend == "cute":
+            return self._forward_cute(query, query_clause_attrs)
         return self._forward_torch_eager(query, query_clause_attrs)
 
     def _phase1_probe_with_ids(self, query: Tensor) -> tuple[Tensor, Tensor]:
@@ -355,16 +370,49 @@ class SilverTorch(RetrievalModule):
         query: Tensor,
         query_clause_attrs: Tensor | None,
     ) -> tuple[Tensor, Tensor]:
-        """CUDA C++ backend, paper Algorithm 1: phase 1 host-side, then a two-kernel
-        filtered path (partial 1-bit masks over the probed clusters → masked dp4a
-        scoring) or plain mask-free scoring. Bloom and exact share the scoring kernel
-        and differ only in which phase-2 kernel builds the mask; the exact path reads
-        ids straight from ``flat_items``, so it needs the padded cluster width rather
-        than the probed cluster ids."""
+        """CUDA C++ backend — see ``_forward_two_kernel``."""
+        return self._forward_two_kernel(
+            query,
+            query_clause_attrs,
+            plain=codesigned_probe_score_cuda,
+            bloom=codesigned_probe_score_bloom_cuda,
+            exact=codesigned_probe_score_exact_cuda,
+        )
+
+    def _forward_cute(
+        self,
+        query: Tensor,
+        query_clause_attrs: Tensor | None,
+    ) -> tuple[Tensor, Tensor]:
+        """CuTe DSL backend — the cuda forward with the cute ops; see ``_forward_two_kernel``."""
+        return self._forward_two_kernel(
+            query,
+            query_clause_attrs,
+            plain=codesigned_probe_score_cute,
+            bloom=codesigned_probe_score_bloom_cute,
+            exact=codesigned_probe_score_exact_cute,
+        )
+
+    def _forward_two_kernel(
+        self,
+        query: Tensor,
+        query_clause_attrs: Tensor | None,
+        *,
+        plain,
+        bloom,
+        exact,
+    ) -> tuple[Tensor, Tensor]:
+        """Paper Algorithm 1 as the cuda and cute backends run it: phase 1 host-side,
+        then a two-kernel filtered path (partial 1-bit masks over the probed clusters →
+        masked dp4a scoring) or plain mask-free scoring. Bloom and exact share the
+        scoring kernel and differ only in which phase-2 kernel builds the mask; the
+        exact path reads ids straight from ``flat_items``, so it needs the padded
+        cluster width rather than the probed cluster ids. ``plain`` / ``bloom`` /
+        ``exact`` are the backend's three custom ops (identical signatures)."""
         probe_ids, flat_items = self._phase1_probe_with_ids(query)
 
         if self.has_exact and query_clause_attrs is not None:
-            return codesigned_probe_score_exact_cuda(
+            return exact(
                 query,
                 flat_items,
                 self.item_codes,
@@ -387,7 +435,7 @@ class SilverTorch(RetrievalModule):
                 self.k_hash,
                 self.word_count,
             )
-            return codesigned_probe_score_bloom_cuda(
+            return bloom(
                 query,
                 flat_items,
                 self.item_codes,
@@ -397,7 +445,7 @@ class SilverTorch(RetrievalModule):
                 self._global_scale_f,
                 self.k,
             )
-        return codesigned_probe_score_cuda(
+        return plain(
             query,
             flat_items,
             self.item_codes,

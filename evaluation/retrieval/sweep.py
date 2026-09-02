@@ -42,6 +42,11 @@ from retrieval.oracle import load_or_build_oracle
 from retrieval.passes import QualityStats, perf_pass_cached, quality_pass_cached
 from retrieve.interfaces import Backend, FilterModule
 
+# Backends whose only non-torch kernels are SilverTorch's fused probe scoring (the CUDA C++
+# backend and its CuTe DSL port). They have no filter kernels of their own, so standalone
+# FilterModules — and the oracle — are built with triton for these cells.
+_TRITON_FILTER_BACKENDS: tuple[Backend, ...] = ("cuda", "cute")
+
 # ----- top-level driver -------------------------------------------------------
 
 
@@ -134,9 +139,10 @@ def _build_filter_modules(
 
     filter_mods: dict[Backend, FilterModule | None] = {}
     for backend in ctx.backends:
-        # No CUDA C++ filter kernels exist (only SilverTorch's fused probe scoring),
-        # so cuda cells get the triton filter rather than silently falling to torch.
-        filter_backend: Backend = "triton" if backend == "cuda" else backend
+        # No CUDA C++ / CuTe DSL filter kernels exist (only SilverTorch's fused probe
+        # scoring), so cuda and cute cells get the triton filter rather than silently
+        # falling to torch.
+        filter_backend: Backend = "triton" if backend in _TRITON_FILTER_BACKENDS else backend
         filter_mods[backend] = build_filter(
             filter_kind,
             item_attrs_narrow=item_attrs_narrow,
@@ -148,7 +154,9 @@ def _build_filter_modules(
         )
 
     oracle_backend: Backend = (
-        "triton" if ("triton" in ctx.backends or "cuda" in ctx.backends) else ctx.backends[0]
+        "triton"
+        if any(b == "triton" or b in _TRITON_FILTER_BACKENDS for b in ctx.backends)
+        else ctx.backends[0]
     )
     if filter_kind == "clause":
         oracle_filter: FilterModule | None = filter_mods[

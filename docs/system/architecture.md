@@ -18,6 +18,7 @@ and selecting their compute path via a `backend=` flag on `__init__`
 | `"triton"` | fused Triton kernels. The default everywhere. | every module |
 | `"torch"` | pure-torch eager equivalent, same semantics, larger intermediates | every module |
 | `"cuda"` | hand-written CUDA C++, JIT-compiled on first forward | **`SilverTorch` only** |
+| `"cute"` | CuTe DSL port of the `"cuda"` kernels (same ops, same buffers, bit-identical); needs the `cute` extra | **`SilverTorch` only** |
 
 `"cuda"` is not a universal third path: it exists solely for
 `SilverTorch`'s probe-scoring kernel. Every other class accepts the flag
@@ -372,22 +373,22 @@ top-K; the unfiltered path is a single launch. Full per-kernel detail in
 
 ### Backend dispatch
 
-Only `SilverTorch` branches three ways. Everywhere else the dispatch is
-binary, so a `"cuda"` request lands on the torch path:
+Only `SilverTorch` branches four ways. Everywhere else the dispatch is
+binary, so a `"cuda"` or `"cute"` request lands on the torch path:
 
-| module | `"triton"` | `"torch"` | `"cuda"` |
-|---|---|---|---|
-| `SilverTorch` | fused Triton | eager torch | CUDA C++ |
-| `PrefilterKNN` | `fused_masked_knn_topk` | eager | → torch |
-| `OneBitKNN` / `SimHashKNN` | `oporp_1bit_match_topk` | eager | → torch |
-| `ExactAttributeFilter` | `clause_mask` / `clause_compact` | eager | → torch |
-| `BloomFilter` | `bloom_match` / `bloom_compact` | eager | → torch |
-| `PostfilterKNN` / `PostfilterKNNInt8` | cuBLAS (flag is a no-op) | same | same |
+| module | `"triton"` | `"torch"` | `"cuda"` | `"cute"` |
+|---|---|---|---|---|
+| `SilverTorch` | fused Triton | eager torch | CUDA C++ | CuTe DSL (port of the C++ backend) |
+| `PrefilterKNN` | `fused_masked_knn_topk` | eager | → torch | → torch |
+| `OneBitKNN` / `SimHashKNN` | `oporp_1bit_match_topk` | eager | → torch | → torch |
+| `ExactAttributeFilter` | `clause_mask` / `clause_compact` | eager | → torch | → torch |
+| `BloomFilter` | `bloom_match` / `bloom_compact` | eager | → torch | → torch |
+| `PostfilterKNN` / `PostfilterKNNInt8` | cuBLAS (flag is a no-op) | same | same | same |
 
 This matters when benchmarking: a harness cell labelled `backend="cuda"`
-for anything other than `SilverTorch` is measuring the **torch** path.
-The eval harness works around it by building filter modules for `"cuda"`
-cells with `backend="triton"` — see
+(or `"cute"`) for anything other than `SilverTorch` is measuring the
+**torch** path. The eval harness works around it by building filter
+modules for `"cuda"` / `"cute"` cells with `backend="triton"` — see
 [evaluation.md](evaluation.md#the-cuda-backend-in-sweeps).
 
 ## Testing

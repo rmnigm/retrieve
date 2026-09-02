@@ -4,8 +4,54 @@ from __future__ import annotations
 
 import torch
 
+from retrieve.kernels.silvertorch.codesigned_probe_score_cuda import build_transposed_sigs
+from retrieve.layers.filters.bloom_hash import build_signatures, generate_seeds
 from retrieve.layers.filters.exact_attribute import clause_subset_match
 from retrieve.layers.utils.quantize import quantize_int8
+from tests.conftest import make_attrs, make_query_attrs
+
+
+def make_probe_family(b, n_lists, max_size, n_probe, *, pad_rate=0.1, seed=7):
+    """Synthetic padded IVF layout + probed clusters for the two-kernel (cuda / cute)
+    backends: ``padded [n_lists, max_size]`` holds each item id at most once (scattered
+    via randperm, ``-1`` padding), ``flat = padded[probe_ids].reshape(b, -1)`` mirrors
+    the layer's phase 1. Returns ``(padded, probe_ids, flat, n)``."""
+    g = torch.Generator(device="cuda").manual_seed(seed)
+    n = n_lists * max_size
+    padded = torch.randperm(n, generator=g, device="cuda").reshape(n_lists, max_size)
+    pad = torch.rand(n_lists, max_size, generator=g, device="cuda") < pad_rate
+    padded[pad] = -1
+    probe_ids = torch.randint(0, n_lists, (b, n_probe), generator=g, device="cuda")
+    flat = padded[probe_ids].reshape(b, -1)
+    return padded, probe_ids, flat, n
+
+
+def make_bloom(n, b, padded, *, m_bits=512, k_hash=5):
+    """Row-wise item signatures, their transposed (cluster-major) index over ``padded``,
+    and query signatures: ``(sigs, sigs_t, qb)``."""
+    attrs = make_attrs(n, c=2, a_max=2)
+    q_attrs = make_query_attrs(b, c=2)
+    seeds = generate_seeds(k_hash=k_hash, device=attrs.device)
+    w = m_bits // 64
+    sigs = build_signatures(attrs.long(), seeds, m_bits=m_bits, k_hash=k_hash, word_count=w)
+    qb = build_signatures(
+        q_attrs.long().unsqueeze(-1), seeds, m_bits=m_bits, k_hash=k_hash, word_count=w
+    )
+    sigs_t = build_transposed_sigs(sigs, padded)
+    return sigs, sigs_t, qb
+
+
+def make_exact(n, b, *, c=2, a_max=2, reverse="none", n_vocab=8):
+    """Item / query clause attrs + reverse flags. The small vocabulary keeps the
+    predicate's pass rate high enough that top-K is not all ``-inf``; ``make_query_attrs``
+    leaves ~20% of clauses inactive (``-1``). ``reverse="mixed"`` flips clause 0 only, so
+    one call exercises both branches of the XOR."""
+    attrs = make_attrs(n, c=c, a_max=a_max, n_vocab=n_vocab).long()
+    q_attrs = make_query_attrs(b, c=c, n_vocab=n_vocab).long()
+    rev = torch.zeros(c, dtype=torch.bool, device="cuda")
+    if reverse == "mixed":
+        rev[0] = True
+    return attrs, rev, q_attrs
 
 
 def ref_cps_phase23(

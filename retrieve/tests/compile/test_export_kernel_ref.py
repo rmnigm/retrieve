@@ -19,12 +19,12 @@ This test exports a tiny module whose forward calls the public
    the strongest possible proof that the preserved reference actually reaches the same kernel
    with the same config (the kernel is deterministic: no atomics, fixed reduction order).
 
-The CUDA C++ backend's exact op is parametrized in alongside it. Nothing about
-``@triton_op`` source-walking applies there — it is an ordinary
-``@torch.library.custom_op`` — but the *other* half of this test does: export must
-keep it as one opaque node and the exported module must reproduce eager bit for
-bit. That closes the "``torch.export`` is not a gate for the cuda ops" item the
-handoff §1 recorded as deferred.
+The CUDA C++ backend's exact op, and its CuTe DSL twin, are parametrized in
+alongside it. Nothing about ``@triton_op`` source-walking applies there — they are
+ordinary ``@torch.library.custom_op``s — but the *other* half of this test does:
+export must keep each as one opaque node and the exported module must reproduce
+eager bit for bit. That closes the "``torch.export`` is not a gate for the cuda
+ops" item the handoff §1 recorded as deferred.
 
 Lives under tests/compile/ until the export plan creates tests/export/.
 """
@@ -37,6 +37,9 @@ import torch
 from retrieve.kernels.silvertorch.codesigned_probe_score_cuda import (
     codesigned_probe_score_exact_cuda,
 )
+from retrieve.kernels.silvertorch.codesigned_probe_score_cute import (
+    codesigned_probe_score_exact_cute,
+)
 from retrieve.kernels.silvertorch.codesigned_probe_score_exact import (
     codesigned_probe_score_exact,
 )
@@ -45,15 +48,16 @@ from tests.conftest import (
     make_query,
     make_query_attrs,
     require_cps_cuda,
+    require_cps_cute,
 )
 
 
 class _ExactScorer(torch.nn.Module):
     """Minimal wrapper: index-side state as buffers, forward = one op call.
 
-    ``max_size`` is only meaningful on the cuda backend (the clause-mask kernel needs
-    the padded cluster width to lay its mask out cluster-major); the Triton op derives
-    nothing from it, so it is ignored there."""
+    ``max_size`` is only meaningful on the cuda / cute backends (the clause-mask kernel
+    needs the padded cluster width to lay its mask out cluster-major); the Triton op
+    derives nothing from it, so it is ignored there."""
 
     def __init__(
         self,
@@ -75,8 +79,12 @@ class _ExactScorer(torch.nn.Module):
         self.max_size = max_size
 
     def forward(self, query, flat_probed_items, query_clause_attrs):
-        if self.backend == "cuda":
-            return codesigned_probe_score_exact_cuda(
+        if self.backend in ("cuda", "cute"):
+            op = {
+                "cuda": codesigned_probe_score_exact_cuda,
+                "cute": codesigned_probe_score_exact_cute,
+            }[self.backend]
+            return op(
                 query,
                 flat_probed_items,
                 self.item_codes,
@@ -107,6 +115,8 @@ def _references_kernel(node, backend: str) -> bool:
         # A CUDA C++ custom op has no decomposed form to fall back on: export either
         # preserves the opaque node or the reference is gone.
         return node.target is torch.ops.retrieve.codesigned_probe_score_exact_cuda.default
+    if backend == "cute":
+        return node.target is torch.ops.retrieve.codesigned_probe_score_exact_cute.default
     if node.target is torch.ops.retrieve.codesigned_probe_score_exact.default:
         return True
     # Decomposed form: triton_kernel_wrapper_mutation / _functional HOPs reference the kernel
@@ -114,13 +124,15 @@ def _references_kernel(node, backend: str) -> bool:
     return getattr(node.target, "__name__", "").startswith("triton_kernel_wrapper")
 
 
-@pytest.mark.parametrize("backend", ["triton", "cuda"])
+@pytest.mark.parametrize("backend", ["triton", "cuda", "cute"])
 def test_export_preserves_kernel_reference(backend):
     if backend == "cuda":
         require_cps_cuda()
+    elif backend == "cute":
+        require_cps_cute()
     torch.manual_seed(0)
-    # P = n_probe * max_size: the cuda op rebuilds the cluster-span mask layout from
-    # max_size, so P must stay a whole multiple of it.
+    # P = n_probe * max_size: the cuda / cute op rebuilds the cluster-span mask layout
+    # from max_size, so P must stay a whole multiple of it.
     n, d, b, p, c, a_max, k, max_size = 64, 32, 2, 16, 2, 2, 4, 8
 
     g = torch.Generator(device="cuda").manual_seed(0)

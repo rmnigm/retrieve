@@ -51,6 +51,37 @@ def require_cps_cuda() -> None:
         )
 
 
+def require_cps_cute() -> None:
+    """Gate the calling test on the CuTe DSL backend, with the same split as
+    ``require_cps_cuda``.
+
+    - **No DSL** (``nvidia-cutlass-dsl`` — the ``cute`` extra — not installed, or no
+      CUDA device) → ``skip``. The suite is expected to run on boxes without the extra.
+    - **A DSL that is present and failed to compile a kernel** → ``fail``, with the DSL
+      error text. Skipping here would let a broken port look green.
+
+    The first call pays the one-time import + compile of the ``D=128`` scorer; later
+    calls hit the memoized outcome in the host module."""
+    # Full-module-path import: the package __init__ re-exports the *op* under the
+    # same name as the module, so `from retrieve.kernels.silvertorch import ...`
+    # would grab the op and shadow the module.
+    from retrieve.kernels.silvertorch.codesigned_probe_score_cute import (
+        CuteMissing,
+        ensure_built,
+    )
+
+    try:
+        ensure_built()
+    except CuteMissing as e:
+        pytest.skip(f"retrieve CuTe DSL backend unavailable: {e}")
+    except ImportError as e:
+        pytest.fail(
+            f"the CuTe DSL is present but the retrieve cute kernels failed to import or "
+            f"compile — this is a real failure, not a skip:\n{e}",
+            pytrace=False,
+        )
+
+
 def make_index(
     n: int,
     d: int,
