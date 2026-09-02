@@ -912,12 +912,13 @@ dataset — the runbook's §3.4 / §7 memory-delta gate expects it.
 from the exact AND-of-OR clause predicate, so exact mode reuses phase 3
 untouched.
 
-One **warp** owns one output word. Lane `l` evaluates slot `l` of each
-32-slot half of the word and the two halves are packed by two
-`__ballot_sync` calls — `word = lo | (hi << 32)`, stored by lane 0.
-Every lane must reach both ballots, so the early return for
-`word_idx >= mask_words` is warp-uniform (one word per warp) and the
-per-lane work sits in a branch *before* the ballot, never around it.
+One **thread** owns one slot and one **warp** owns one 32-bit half of an
+output word: lane `l` evaluates slot `l` of the half, one `__ballot_sync`
+packs the 32 verdicts, and lane 0 stores the half through a 32-bit view
+of the int64 word (little-endian: low half at `2·word`, high half at
+`2·word + 1`). Every lane must reach the ballot, so the early return for
+`word_idx >= mask_words` is warp-uniform and the per-lane work sits in a
+branch *before* the ballot, never around it.
 
 Ids come from **`flat_items`** — the same `[B, P]` tensor phase 3 reads —
 not from `probe_ids` plus the padded index. Two consequences, both
@@ -938,43 +939,70 @@ reverse flag, then let `q_c == -1` (inactive) override — in that order,
 since the sentinel outranks reverse. Padding slots (`id < 0`) and the pad
 tail of a span's last word get bit `0`.
 
-`C` and `A_max` are runtime kernel arguments here where the Triton kernel
-takes them as `tl.constexpr` — a CUDA C++ template would need one
-instantiation per `(C, A_max)` pair, and the loop is not the bottleneck
-(one `[C, A_max]` int64 row is ~one 32-byte sector at the shipped 2×2 to
-5×4 shapes, the same order as the id read). `clause_is_reverse` is read
-as `torch.bool` storage through an `unsigned char*` because `__ldg` has
-no `bool` overload; `q_c` and the reverse flag are warp-uniform loads
-that broadcast.
+`C` and `A_max` are **template parameters** on a small dispatch table
+(`C ≤ 4`, `A_max ∈ {1, 2, 4}`, `C · A_max ≤ 8` — ten instantiations);
+any other shape takes the `<0, 0>` instantiation, which is the original
+runtime-bound loop. The fast path loads the query row and reverse flags
+first (independent of the id), then the id, then **all** `C · A_max`
+attribute words of the row into registers with `#pragma unroll`, and only
+then evaluates the predicate. This matters because the per-slot chain is
+`id → attrs → ballot`: with runtime loop bounds each attribute word waited
+on the previous compare, and the first version of the kernel (one warp
+per word, two sequential halves) measured 101 µs at `B=16, P=58 k` on
+A100 for ~40 bytes of traffic per slot. The register version measures
+56 µs, and the same kernel over *sequential* ids runs in ~20 µs — the
+remaining ~35 µs is the random 32-byte gather over an `item_clause_attrs`
+table larger than L2, which the Triton exact kernel also pays (it is the
+~37 µs gap between its no-filter and exact variants). `clause_is_reverse`
+is read as `torch.bool` storage through an `unsigned char*` because
+`__ldg` has no `bool` overload; `q_c` and the reverse flag are
+warp-uniform loads that broadcast.
 
 #### Phase 3 — masked `__dp4a` scoring
 
-`cps_score_kernel<SEG, WPL, HAS_MASK, UNROLL>` scores one
+`cps_score_kernel<SEG, HAS_MASK, UNROLL>` scores one
 `(query, probed slot)` pair per segment: gather the item id (`-1` =
 cluster padding), test one mask bit, and only for passing items stream
 the int8 code row straight from the embedding table into a `__dp4a`
 dot — 4 MACs per instruction, the instruction the paper names. There is
 no intermediate gather tensor and no shared memory anywhere.
 
-The mapping is `D = SEG · WPL · 4` as a compile-time constant, so each
-lane's query words sit in registers for the whole block:
+Each lane owns one **16-byte chunk** of a row (one `int4` load, four
+packed code words) and the four matching query words sit in registers
+for the whole block, so `SEG = D / 16` lanes cover a row and
+`SPW = 32 / SEG` items advance per warp-instruction:
 
-| `D` | `SEG` | `WPL` | note |
+| `D` | `SEG` | items per warp-instruction | note |
 |---|---|---|---|
-| 64 | 16 | 1 | two items in flight per warp |
-| 128 | 32 | 1 | one row = exactly one 128 B cache line |
-| 256 | 32 | 2 | |
-| other, `D % 4 == 0` | 32 | runtime | `cps_score_kernel_generic` fallback |
+| 64 | 4 | 8 | |
+| 128 | 8 | 4 | one row = exactly one 128 B cache line |
+| 256 | 16 | 2 | |
+| other, `D % 4 == 0` | 32 | 1 | `cps_score_kernel_generic` fallback (4-byte words, runtime loop) |
 
-A `SEG`-lane sub-warp segment cooperates on one item: lane `j` owns
-packed code words `j, j+SEG, …`, so a row read is `SEG` consecutive
-4-byte words, fully coalesced. Warps own contiguous item tiles (the
-paper's "one warp per contiguous tile of items"). The keep verdict is
-**segment-uniform**, so filtered items genuinely skip both the row load
-and the whole dp4a chain — that is where the filter's savings are
-realized. Non-passing slots store `-INFINITY`; every slot in `[0, P)` is
-written, so the score buffer is `torch.empty`, matching the Triton
-convention. Top-K stays host-side (phase 4).
+The launcher also routes a table `D` to the generic kernel when the code
+or query base pointer is not 16-byte aligned (a storage-offset view; the
+caching allocator's own tensors always are).
+
+The first version of this kernel mapped a full 32-lane warp to one
+`D=128` row with 4-byte loads. On A100 that left one 128 B row in flight
+per warp and ran at ~1.0 TB/s (188 µs at `B=16, P=58 k`, no filter)
+against Triton's ~1.5 TB/s; with the `int4` layout a warp has
+`SPW · UNROLL` rows outstanding and the same regime measures 88 µs vs
+Triton's 85 µs. Code rows are read with `__ldcs` (evict-first): each row
+is touched once per query, so caching it only displaces the id / mask
+stream.
+
+Warps own contiguous item tiles (the paper's "one warp per contiguous
+tile of items"); segments interleave inside the tile so the `SPW` ids and
+score stores of one instruction stay adjacent. Ids are software-pipelined
+one iteration ahead — the `id -> row` dependency is the loop's only serial
+latency chain, so the next iteration's ids are requested before this
+iteration's row gathers. The keep verdict is **segment-uniform**, so
+filtered items genuinely skip both the row load and the whole dp4a
+chain — that is where the filter's savings are realized. Non-passing
+slots store `-INFINITY`; every slot in `[0, P)` is written, so the score
+buffer is `torch.empty`, matching the Triton convention. Top-K stays
+host-side (phase 4).
 
 `seg_reduce_add<SEG>` uses `__reduce_add_sync` on `sm_80+` and a
 `__shfl_xor_sync` butterfly below. Both are exact integer sums, so the
@@ -984,39 +1012,30 @@ The mask test is **division-free**: a segment tracks the `(cluster, slot)`
 of its base item incrementally — one 64-bit divide before the loop, then
 `slot += SPW·UNROLL` with a carry loop into `cluster` — instead of
 recomputing `p / max_size` per item. The carry loop is bounded by
-`SPW·UNROLL ≤ 8` subtractions and stays correct when `max_size` is
+`SPW·UNROLL ≤ 32` subtractions and stays correct when `max_size` is
 smaller than one step, i.e. when a single iteration crosses several
 cluster spans.
 
 #### Phase 3 — the `UNROLL` knob
 
-`UNROLL ∈ {1, 2, 4}` (config field, default `1` = the original
-one-item-per-iteration loop) is how many items one segment keeps in
-flight. The loop body runs in three phases — ids and keep verdicts, then
-**all** `UNROLL` row gathers, then the dots — so several independent row
-loads are issued before the first `__dp4a` stalls on one. Rejected items
-are still skipped: the row loads are predicated on the segment-uniform
-keep flag rather than sitting behind serialized `if` blocks.
+`UNROLL ∈ {1, 2, 4}` (config field) is how many items one segment keeps
+in flight per iteration. The loop body runs in three phases — ids and
+keep verdicts, then **all** `UNROLL` row gathers, then the dots — so
+several independent row loads are issued before the first `__dp4a`
+stalls on one. Rejected items are still skipped: the row loads are
+predicated on the segment-uniform keep flag rather than sitting behind
+serialized `if` blocks.
 
-Why it might pay: by Little's law A100 needs ≈ 1555 GB/s × ~600 ns ≈
-0.9 MB in flight to saturate HBM, ≈ 8.6 KB/SM ≈ 67 rows of 128 B, while
-~50 resident warps × one row each (`D=128`) ≈ 6.4 KB is borderline short.
-Two to four items per segment is the one v2 knob with a first-principles
-case, which is why it is the only one implemented (`int2` row loads and a
-swept mask-kernel block size stay deferred — the kernel is
-bandwidth-bound, so instruction count is not the limiter).
-
-Two caveats. The generic runtime-`D` fallback has **no** `UNROLL`
-parameter and the launcher ignores the config's value there. And the knob
-costs registers: at `UNROLL=4, WPL=2` the body holds 8 row words + 4 ids
-+ flags beyond the baseline, an estimated ~55 regs/thread against the
-~35–45 of `UNROLL=1`; above 64 regs/thread occupancy drops below 50% on
-A100 and a win turns into a loss. Confirm with `ptxas -v` (or ncu's
-launch statistics) on the target arch before pasting a tuned
-`unroll > 1` — it has never been measured, only reasoned about.
+Measured on A100 (2026-09-02, `D=128`): with the `int4` layout `UNROLL=1`
+already keeps 4 rows per warp in flight and wins or ties at every regime
+except bloom mode at `P ≈ 58 k`, where `256/4/4` gains ~10 % over the
+shipped `128/8/1` at the cost of ~2 µs at small `P`. Registers: 30 at
+`UNROLL=1`, 40 at `UNROLL=4` (`cuobjdump -res-usage`), so occupancy is not
+a concern at any value. The generic runtime-`D` fallback has **no**
+`UNROLL` parameter and the launcher ignores the config's value there.
 
 The arithmetic is identical at every `UNROLL`: same dp4a order over the
-`w·SEG + sl` words, same segment reduction, same two left-associated fp32
+lane's four words, same segment reduction, same two left-associated fp32
 multiplies. So bit-exactness vs Triton is a property of the kernel, not
 of the config, and the parity suite asserts it with `torch.equal` across
 configs.

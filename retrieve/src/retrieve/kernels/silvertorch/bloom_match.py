@@ -6,7 +6,7 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
-from retrieve.kernels import common
+from retrieve.kernels.common import bloom_subset_pass
 
 
 @triton.jit
@@ -40,7 +40,7 @@ def _bloom_match_kernel(
     )
 
     # OOB lanes never leak: the store below is masked with `valid`.
-    pass_all = common.bloom_subset_pass(qb, sigs)
+    pass_all = bloom_subset_pass(qb, sigs)
 
     tl.store(
         out_ptr + bid * stride_o_b + n_off * stride_o_n,

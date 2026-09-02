@@ -8,7 +8,7 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
-from retrieve.kernels import common
+from retrieve.kernels.common import clause_pass
 from retrieve.layers.utils.quantize import quantize_int8
 
 
@@ -78,7 +78,7 @@ def _codesigned_probe_score_exact_kernel(
 
     # Indirect addressing over probed items: gather via `safe_ids`, gate loads with
     # `valid`, and seed `keep` from `valid`.
-    keep = common.clause_pass(
+    keep = clause_pass(
         item_attrs_ptr,
         is_reverse_ptr,
         query_attrs_ptr,

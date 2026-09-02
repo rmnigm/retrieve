@@ -162,7 +162,7 @@ and one `__reduce_add_sync` segment reduction (hardware REDUX, sm_80+,
 [CUDA C++ Programming Guide, warp reduce functions](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#warp-reduce-functions)).
 The keep verdict is segment-uniform, so a filtered item **genuinely skips** its row
 load and the whole dot — not per-lane load predication but a uniform branch.
-Specializations: D=64 → 16-lane segments (2 items in flight/warp), D=128 → 32×1,
+Specializations (superseded 2026-09-02, see §13 and docs/system/kernels.md): D=64 → 16-lane segments, D=128 → 32×1,
 D=256 → 32×2, any other D%4==0 → a generic runtime-D kernel. The mask test carries
 no division: each segment tracks its base item's `(cluster, slot)` incrementally
 (one divide before the loop, then a ≤8-subtraction carry loop).
@@ -757,3 +757,64 @@ Algorithm 1 for the phase structure and the 1-bit mask).
   <https://forums.developer.nvidia.com/t/nvidia-cuda-nvcc-pip-wheel-installation/221307>
 - Hatchling build file selection (wheel `packages` includes non-.py files):
   <https://hatch.pypa.io/latest/config/build/>
+
+## 13. Validation record — 2026-09-02, A100-SXM4-80GB, CUDA 12.4 nvcc / torch 2.10.0+cu128, triton 3.6.0
+
+Executed §4–§6 top-to-bottom (§7 skipped: `evaluation/data/arxiv-papers/` is not on
+the box; §8 ncu blocked by `ERR_NVGPUCTRPERM` in the container, per-kernel times are
+from `torch.profiler` instead).
+
+- build: ok (52 s cold, cache no-op warm). SASS: `IDP.4A.S8.S8` present, no `LDSM`,
+  no `BAR.SYNC` in the scorer.
+- parity: 47/47 bit-exact. Full suite: see the session log (the only failures were
+  two **Triton** compile tests — `common.<jit helper>` attribute references do not
+  survive inductor's kernel re-serialization; fixed by importing `bloom_subset_pass`
+  / `clause_pass` by name).
+- **As shipped, the CUDA path was slower than Triton** at every `B=16` large-`P`
+  regime (scorer 188 µs vs 85 µs without a filter): one 128 B row per warp in flight.
+  Fixes landed in this pass, all keeping the op API, config fields and bit-exactness:
+  1. scorer lane layout `SEG = D/16`, one `int4` per lane (a warp keeps `SPW·UNROLL`
+     rows outstanding), ids software-pipelined one iteration ahead, `__ldcs` row loads;
+  2. clause mask kernel: thread-per-slot, `(C, A_max)` template fast path that loads
+     the whole attribute row into registers before comparing (101 → 56 µs);
+  3. `DEFAULT_CONFIG = (block_p=128, num_warps=8, unroll=1)` (was 256/4/1).
+
+Kernel-only, `D=128`, layout A (`P=58 368`), torch.profiler µs:
+
+| regime | triton | cuda shipped | cuda now |
+|---|---|---|---|
+| no filter, B=1 | 10.0 | 29.0 | 10.5 |
+| no filter, B=16 | 85.5 | 188.5 | 87.8 |
+| bloom (pass 0.19), B=1 | 10.0 | 27.0 | 7.3 |
+| bloom (pass 0.19), B=16 | 124.6 | 147.8 | 58.6 |
+| exact (pass 0.81), B=16 — scorer + clause mask | 121.7 | 225.7 + 101.1 | 95.3 + 56.6 |
+
+Shared-input head-to-head incl. the host `topk` epilogue (`do_bench`, ms; ratio =
+triton / cuda):
+
+| mode | B | P | triton | cuda | ratio |
+|---|---|---|---|---|---|
+| none | 1 | 1024 | 0.119 | 0.065 | 1.84× |
+| none | 1 | 58368 | 0.179 | 0.134 | 1.34× |
+| none | 16 | 1024 | 0.115 | 0.077 | 1.49× |
+| none | 16 | 58368 | 0.247 | 0.248 | 1.00× |
+| bloom | 1 | 58368 | 0.179 | 0.138 | 1.30× |
+| bloom | 16 | 58368 | 0.287 | 0.217 | 1.32× |
+| bloom | 16 | 46720 | 0.261 | 0.203 | 1.28× |
+| exact | 1 | 58368 | 0.189 | 0.144 | 1.31× |
+| exact | 16 | 58368 | 0.285 | 0.296 | 0.97× |
+| exact | 16 | 46720 | 0.262 | 0.270 | 0.97× |
+
+Gates (§9): (1) correctness — pass; (2) bloom ≥ 1.0× everywhere, 1.3× at the large-P
+layouts (kernel-only 2.1×; the `topk` epilogue, ~60 % of the wall time at these
+shapes, is shared and dilutes it); (3) no-filter within ±10 % — pass (−3 % worst);
+(3b) exact within ±10 % — pass (−3 % worst). (4) e2e not run (no dataset).
+
+Notes for the paper claim: the §3.3 expectation of a 2–4× bloom win at the kernel
+level holds only after fix 1 — the transposed-index traffic saving was real from the
+start (the shipped kernel already read ~40× fewer filter bytes), but it was hidden
+behind the scorer's missing memory-level parallelism. The remaining exact-mode gap is
+the standalone clause kernel paying the random attribute gather serially before the
+scorer rather than overlapped with it; fusing the predicate into the scorer (Triton's
+structure) is the next step if exact mode on cuda needs to beat Triton rather than
+match it.

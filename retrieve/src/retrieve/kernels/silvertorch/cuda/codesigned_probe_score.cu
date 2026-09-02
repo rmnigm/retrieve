@@ -103,16 +103,21 @@ __global__ void cps_bloom_mask_kernel(
 // (bit s%64 of word pi*wpc + s/64 = verdict for slot s of the pi-th probed
 // cluster), so cps_score_kernel<..., HAS_MASK=true> consumes it unchanged.
 //
-// One WARP owns one output word: lane l evaluates slot l of each 32-slot half
-// and two __ballot_sync calls pack the halves into the low/high 32 bits. Ids
-// come from flat_items — the very tensor phase 3 reads — so exact mode needs no
-// cluster-major attribute copy and no extra registered buffer; the 32 lanes of
-// a half read 32 consecutive int64 ids, one coalesced 256-byte run.
+// One thread owns one slot, one warp one 32-bit half of an output word: a
+// __ballot_sync packs the 32 verdicts and lane 0 stores the half through a
+// 32-bit view of the int64 word (little-endian: low half at 2*word). Ids come
+// from flat_items, the tensor phase 3 reads, so exact mode registers no extra
+// buffer and a half reads 32 consecutive ids in one coalesced run.
+//
+// C and A are template constants so all C*A attribute words of a slot load
+// into registers before the first compare (the id -> attrs -> ballot chain is
+// latency-bound otherwise). <0, 0> is the runtime-bound fallback.
 //
 // The predicate is bit-identical to retrieve.kernels.common.clause_pass:
 // keep = (id >= 0) AND over clauses of [ (OR over A_MAX values of attr == q_c)
 // XOR rev_c OR (q_c == -1) ]. Padding slots (id < 0) and the pad tail of the
 // last word of a span get bit 0.
+template <int C, int A>
 __global__ void cps_clause_mask_kernel(
     const long long* __restrict__ flat_items,      // [B, P] int64, -1 = pad
     const long long* __restrict__ item_attrs,      // [N, C, A_MAX] int64
@@ -128,72 +133,90 @@ __global__ void cps_clause_mask_kernel(
   const int lane = threadIdx.x & 31;
   const int warp = threadIdx.x >> 5;
   // Warp-uniform (depends only on blockIdx.x and the warp ordinal), so this
-  // early return never leaves a warp partially populated at the ballots below.
-  const long long word_idx =
+  // early return never leaves a warp partially populated at the ballot below.
+  const long long half_idx =
       static_cast<long long>(blockIdx.x) * (blockDim.x >> 5) + warp;
+  const long long word_idx = half_idx >> 1;
   if (word_idx >= mask_words) return;
+  const int h = static_cast<int>(half_idx & 1);  // low / high half of the word
 
   const long long b = blockIdx.y;
   const long long pi = word_idx / wpc;          // probe ordinal
   const long long w_in_c = word_idx - pi * wpc; // word within the cluster span
-  const long long slot0 = w_in_c * 64;          // first slot this word covers
+  const long long slot = w_in_c * 64 + h * 32 + lane;
   const long long span = b * P + pi * max_size; // flat_items base of the span
   const long long* q_row = query_attrs + b * n_clauses;
 
-  unsigned packed[2];
+  int bit = 0;
+  if constexpr (C > 0) {
+    // Query side first: independent of the id and warp-uniform (broadcast).
+    long long q[C];
+    bool rev[C];
 #pragma unroll
-  for (int h = 0; h < 2; ++h) {
-    const long long slot = slot0 + h * 32 + lane;
-    int bit = 0;
+    for (int c = 0; c < C; ++c) {
+      q[c] = __ldg(q_row + c);
+      rev[c] = __ldg(is_reverse + c) != 0;
+    }
+    if (slot < max_size) {  // pad tail of the last word stays 0
+      const long long id = __ldg(flat_items + span + slot);
+      if (id >= 0) {        // cluster padding stays 0
+        const long long* attr = item_attrs + id * (C * A);
+        long long v[C * A];
+#pragma unroll
+        for (int i = 0; i < C * A; ++i) v[i] = __ldg(attr + i);
+        bool keep = true;
+#pragma unroll
+        for (int c = 0; c < C; ++c) {
+          bool match = false;
+#pragma unroll
+          for (int a = 0; a < A; ++a) match |= (v[c * A + a] == q[c]);
+          // XOR the reverse flag first, then let the inactive sentinel
+          // override it — the order clause_pass uses.
+          keep &= (match != rev[c]) || (q[c] == -1);
+        }
+        bit = keep ? 1 : 0;
+      }
+    }
+  } else {
     if (slot < max_size) {  // pad tail of the last word stays 0
       const long long id = __ldg(flat_items + span + slot);
       if (id >= 0) {        // cluster padding stays 0
         bool keep = true;
         for (int c = 0; c < n_clauses; ++c) {
-          // q_c / rev are warp-uniform: 32 lanes hit one address, broadcast.
           const long long q_c = __ldg(q_row + c);
           const bool rev = __ldg(is_reverse + c) != 0;
           const long long* attr =
               item_attrs + (id * n_clauses + c) * a_max;
           bool match = false;
           for (int a = 0; a < a_max; ++a) match |= (__ldg(attr + a) == q_c);
-          // XOR the reverse flag first, then let the inactive sentinel
-          // override it — the order clause_pass uses.
           keep &= (match != rev) || (q_c == -1);
         }
         bit = keep ? 1 : 0;
       }
     }
-    // Outside every lane-divergent branch: all 32 lanes must reach both ballots.
-    packed[h] = __ballot_sync(kFullMask, bit);
   }
+  // Outside every lane-divergent branch: all 32 lanes must reach the ballot.
+  const unsigned packed = __ballot_sync(kFullMask, bit);
   if (lane == 0) {
-    mask[b * mask_words + word_idx] = static_cast<long long>(
-        static_cast<unsigned long long>(packed[0]) |
-        (static_cast<unsigned long long>(packed[1]) << 32));
+    reinterpret_cast<unsigned*>(mask)[(b * mask_words + word_idx) * 2 + h] =
+        packed;
   }
 }
 
-// Phase 3, specialized. D = SEG * WPL * 4 is a compile-time constant, so each
-// lane's query words stay in registers for the whole block. The dispatch
-// switch below depends on this table:
-//   D=64  → SEG=16, WPL=1 (two items in flight per warp)
-//   D=128 → SEG=32, WPL=1 (one 128B line per row)
-//   D=256 → SEG=32, WPL=2
-//
-// UNROLL (1, 2 or 4; config-gated, 1 = the original one-item-per-iteration
-// loop) is how many items one segment keeps in flight per iteration. The body
-// runs in three phases — ids+verdicts, then all UNROLL row loads, then the
-// dots — so UNROLL independent row gathers are issued before the first __dp4a
-// stalls on one. Purely a memory-level-parallelism knob: see
-// docs/system/kernels.md § Phase 3 for the Little's-law argument.
-template <int SEG, int WPL, bool HAS_MASK, int UNROLL>
+// Phase 3, specialized. Each lane owns one 16-byte chunk of a row, so a
+// segment of SEG = D/16 lanes reads a row as one coalesced int4 request and
+// keeps its four query words in registers; no shared memory. SPW = 32/SEG
+// items advance per warp-instruction and UNROLL (1, 2 or 4, config-gated)
+// items per segment stay in flight per iteration, which is the memory-level
+// parallelism this gather needs. Dispatch table:
+//   D=64 → SEG=4, D=128 → SEG=8, D=256 → SEG=16.
+template <int SEG, bool HAS_MASK, int UNROLL>
 __global__ void cps_score_kernel(
-    const int8_t* __restrict__ q_codes,        // [B, D] int8
+    const int8_t* __restrict__ q_codes,        // [B, D] int8, 16 B-aligned rows
     const float* __restrict__ q_scales,        // [B] fp32
     const long long* __restrict__ mask,        // [B, mask_words] (HAS_MASK only)
     const long long* __restrict__ flat_items,  // [B, P] int64, -1 = pad
-    const int8_t* __restrict__ item_codes,     // [N, D] int8
+    const int8_t* __restrict__ item_codes,     // [N, D] int8, 16 B-aligned rows
     float* __restrict__ out,                   // [B, P] fp32
     float global_scale,
     long long P,
@@ -201,34 +224,29 @@ __global__ void cps_score_kernel(
     long long mask_words,
     int wpc,
     int items_per_warp) {
-  constexpr int SPW = 32 / SEG;      // segments per warp
-  constexpr int STEP = SPW * UNROLL; // items one segment covers per iteration
+  constexpr int D = SEG * 16;
+  constexpr int SPW = 32 / SEG;      // segments (items) per warp-instruction
+  constexpr int STEP = SPW * UNROLL; // items one warp covers per iteration
+  static_assert(SEG >= 1 && SEG <= 16 && 32 % SEG == 0, "SEG must divide 32");
 
   const int lane = threadIdx.x & 31;
   const int warp = threadIdx.x >> 5;
   const int seg = lane / SEG;  // segment index within the warp
-  const int sl = lane % SEG;   // lane index within the segment
-  // `if constexpr`, not a ternary: at SEG == 32 the shift arm reads `1u << 32`,
-  // which is undefined even sitting in a dead arm, so it must not be
-  // instantiated at all.
-  unsigned seg_mask = kFullMask;
-  if constexpr (SEG < 32) seg_mask = ((1u << SEG) - 1u) << (seg * SEG);
+  const int sl = lane % SEG;   // lane index within the segment = 16 B chunk
+  const unsigned seg_mask = ((1u << SEG) - 1u) << (seg * SEG);
 
   const long long b = blockIdx.y;
 
-  // Block-lifetime registers: this lane's query words + the row scale.
-  int qw[WPL];
-  const int* q_row = reinterpret_cast<const int*>(q_codes + b * (SEG * WPL * 4));
-#pragma unroll
-  for (int w = 0; w < WPL; ++w) qw[w] = __ldg(q_row + sl + w * SEG);
+  // Block-lifetime registers: this lane's four query words + the row scale.
+  const int4 qv = __ldg(reinterpret_cast<const int4*>(q_codes + b * D) + sl);
   const float q_scale = __ldg(q_scales + b);
-  // `if constexpr` again: without a mask `mask` is a 1x1 dummy, so even forming
+  // `if constexpr`: without a mask `mask` is a 1x1 dummy, so even forming
   // (never mind reading) mask + b*mask_words would be out-of-range.
   const long long* mask_row = nullptr;
   if constexpr (HAS_MASK) mask_row = mask + b * mask_words;
 
   // The warp owns a contiguous item range; segments interleave inside it so
-  // the SPW ids/stores in flight per iteration stay adjacent (one sector).
+  // the SPW ids/stores in flight per instruction stay adjacent (one sector).
   const long long warp_start =
       static_cast<long long>(blockIdx.x) * (items_per_warp * (blockDim.x >> 5)) +
       static_cast<long long>(warp) * items_per_warp;
@@ -238,7 +256,7 @@ __global__ void cps_score_kernel(
 
   // (cluster, slot) of the segment's base item, tracked incrementally so the
   // hot loop carries no 64-bit division: one divide here, then bounded carry
-  // loops of at most STEP (<= 8) subtractions. Correct for any max_size >= 1,
+  // loops of at most STEP subtractions. Correct for any max_size >= 1,
   // including max_size < STEP, where one step crosses several cluster spans.
   long long cl = 0;
   long long slot = 0;
@@ -247,27 +265,36 @@ __global__ void cps_score_kernel(
     slot = p_first - cl * max_size;
   }
 
+  // Ids are prefetched one iteration ahead so the id -> row chain overlaps the
+  // current row gathers. Segment-uniform loads; a dead tail item (p_u >=
+  // warp_end) is never addressed and reads as pad (-1).
+  long long ids_next[UNROLL];
+#pragma unroll
+  for (int u = 0; u < UNROLL; ++u) {
+    const long long p_u = p_first + u * SPW;
+    ids_next[u] = p_u < warp_end ? __ldg(flat_items + b * P + p_u) : -1;
+  }
+
   for (long long p0 = p_first; p0 < warp_end; p0 += STEP) {
-    // (a) ids and keep verdicts for the UNROLL items in flight. Both are
-    // segment-uniform: every lane of a segment reads the same addresses.
+    // (a) ids and keep verdicts, then the next iteration's id prefetch.
     long long ids[UNROLL];
     bool keep[UNROLL];
 #pragma unroll
     for (int u = 0; u < UNROLL; ++u) {
-      const long long p_u = p0 + u * SPW;
-      const bool live = p_u < warp_end;  // tile tail: no load, no store
-      // p0 is always a real slot, so the tail's dead items never so much as
-      // form an out-of-range address; the load itself is predicated off.
-      const long long p_ld = live ? p_u : p0;
-      ids[u] = live ? __ldg(flat_items + b * P + p_ld) : -1;
-      keep[u] = live && ids[u] >= 0;
+      ids[u] = ids_next[u];
+      keep[u] = ids[u] >= 0;  // -1 covers both cluster padding and the tail
+    }
+#pragma unroll
+    for (int u = 0; u < UNROLL; ++u) {
+      const long long p_u = p0 + STEP + u * SPW;
+      ids_next[u] = p_u < warp_end ? __ldg(flat_items + b * P + p_u) : -1;
     }
     if constexpr (HAS_MASK) {
 #pragma unroll
       for (int u = 0; u < UNROLL; ++u) {
         if (keep[u]) {  // segment-uniform
           // Derive this item's (cluster, slot) from the segment's base by the
-          // same carry loop; u * SPW <= 6, so it is a handful of subtractions.
+          // same carry loop; u * SPW < STEP, so it is a handful of subtractions.
           long long slot_u = slot + u * SPW;
           long long cl_u = cl;
           while (slot_u >= max_size) {
@@ -286,14 +313,12 @@ __global__ void cps_score_kernel(
     // blocks: keep[u] is segment-uniform, so this is branch-free and a
     // filtered item still costs no row traffic. A rejected ids[u] is clamped to
     // row 0: the load never happens, and the address stays inside the table.
-    int rw[UNROLL][WPL];
+    int4 rw[UNROLL];
 #pragma unroll
     for (int u = 0; u < UNROLL; ++u) {
-      const int* row = reinterpret_cast<const int*>(
-          item_codes + (keep[u] ? ids[u] : 0) * (SEG * WPL * 4));
-#pragma unroll
-      for (int w = 0; w < WPL; ++w)
-        rw[u][w] = keep[u] ? __ldg(row + sl + w * SEG) : 0;
+      const int4* row = reinterpret_cast<const int4*>(
+          item_codes + (keep[u] ? ids[u] : 0) * D);
+      rw[u] = keep[u] ? __ldcs(row + sl) : make_int4(0, 0, 0, 0);
     }
     // (c) one dot + epilogue + store per item, in item order. Identical
     // arithmetic at every UNROLL, which is what keeps parity config-free.
@@ -303,9 +328,10 @@ __global__ void cps_score_kernel(
       if (p_u >= warp_end) continue;  // segment-uniform: the whole segment skips
       float score = -INFINITY;
       if (keep[u]) {
-        int acc = 0;
-#pragma unroll
-        for (int w = 0; w < WPL; ++w) acc = __dp4a(rw[u][w], qw[w], acc);
+        int acc = __dp4a(rw[u].x, qv.x, 0);
+        acc = __dp4a(rw[u].y, qv.y, acc);
+        acc = __dp4a(rw[u].z, qv.z, acc);
+        acc = __dp4a(rw[u].w, qv.w, acc);
         acc = seg_reduce_add<SEG>(seg_mask, acc);
         // Two fp32 multiplies, left-associated — matches the Triton epilogue.
         score = static_cast<float>(acc) * q_scale * global_scale;
@@ -327,7 +353,7 @@ __global__ void cps_score_kernel(
 // read-only cache (L1-resident — the row gathers dominate traffic anyway).
 // This one has no UNROLL parameter and the launcher ignores the config's
 // value: the fallback exists for correctness on off-table D, and a runtime
-// word loop already has WPL-worth of loads in flight without help.
+// word loop already has D/128 loads in flight per lane without help.
 template <bool HAS_MASK>
 __global__ void cps_score_kernel_generic(
     const int8_t* __restrict__ q_codes,
@@ -482,16 +508,35 @@ void clause_partial_mask(
 
   const c10::cuda::OptionalCUDAGuard device_guard(flat_items.device());
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  constexpr int kWarpsPerBlock = kMaskKernelThreads / 32;  // one warp = one word
-  const dim3 grid(static_cast<unsigned>(cdiv(mask_words, kWarpsPerBlock)),
+  // One warp per 32-bit half word: a block covers kMaskKernelThreads/64 words.
+  constexpr int kWordsPerBlock = kMaskKernelThreads / 64;
+  const dim3 grid(static_cast<unsigned>(cdiv(mask_words, kWordsPerBlock)),
                   static_cast<unsigned>(b));
-  cps_clause_mask_kernel<<<grid, kMaskKernelThreads, 0, stream>>>(
-      i64_ptr(flat_items), i64_ptr(item_attrs),
-      reinterpret_cast<const unsigned char*>(is_reverse.const_data_ptr<bool>()),
-      i64_ptr(query_attrs),
-      reinterpret_cast<long long*>(mask_out.mutable_data_ptr<int64_t>()),
-      p, max_size, mask_words, static_cast<int>(wpc), static_cast<int>(c),
-      static_cast<int>(a_max));
+  // Register fast path for C <= 4, A in {1, 2, 4}, C*A <= 8; else <0, 0>.
+#define CPS_CLAUSE_MASK_LAUNCH(CC, AA)                                        \
+  cps_clause_mask_kernel<CC, AA><<<grid, kMaskKernelThreads, 0, stream>>>(    \
+      i64_ptr(flat_items), i64_ptr(item_attrs),                               \
+      reinterpret_cast<const unsigned char*>(                                 \
+          is_reverse.const_data_ptr<bool>()),                                 \
+      i64_ptr(query_attrs),                                                   \
+      reinterpret_cast<long long*>(mask_out.mutable_data_ptr<int64_t>()),     \
+      p, max_size, mask_words, static_cast<int>(wpc), static_cast<int>(c),    \
+      static_cast<int>(a_max))
+  const int key = (c <= 4 && a_max <= 4) ? static_cast<int>(c * 8 + a_max) : 0;
+  switch (key) {
+    case 1 * 8 + 1: CPS_CLAUSE_MASK_LAUNCH(1, 1); break;
+    case 1 * 8 + 2: CPS_CLAUSE_MASK_LAUNCH(1, 2); break;
+    case 1 * 8 + 4: CPS_CLAUSE_MASK_LAUNCH(1, 4); break;
+    case 2 * 8 + 1: CPS_CLAUSE_MASK_LAUNCH(2, 1); break;
+    case 2 * 8 + 2: CPS_CLAUSE_MASK_LAUNCH(2, 2); break;
+    case 2 * 8 + 4: CPS_CLAUSE_MASK_LAUNCH(2, 4); break;
+    case 3 * 8 + 1: CPS_CLAUSE_MASK_LAUNCH(3, 1); break;
+    case 3 * 8 + 2: CPS_CLAUSE_MASK_LAUNCH(3, 2); break;
+    case 4 * 8 + 1: CPS_CLAUSE_MASK_LAUNCH(4, 1); break;
+    case 4 * 8 + 2: CPS_CLAUSE_MASK_LAUNCH(4, 2); break;
+    default:        CPS_CLAUSE_MASK_LAUNCH(0, 0); break;
+  }
+#undef CPS_CLAUSE_MASK_LAUNCH
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -559,29 +604,33 @@ void cps_scores(
   const long long* flat_p = i64_ptr(flat_items);
   const int8_t* codes_p = item_codes.const_data_ptr<int8_t>();
   float* out_p = out_scores.mutable_data_ptr<float>();
+  // int4 row loads need 16 B-aligned bases (a storage-offset view may not be).
+  const bool vec_ok = (reinterpret_cast<uintptr_t>(codes_p) % 16 == 0) &&
+                      (reinterpret_cast<uintptr_t>(q_codes_p) % 16 == 0);
 
   // Dispatch is {64, 128, 256} x HAS_MASK x {1, 2, 4}: three nested macros, one
-  // per axis, so the table reads top-down as D -> unroll -> launch.
-#define CPS_LAUNCH(SEG, WPL, HASM, UNR)                                               \
-  cps_score_kernel<SEG, WPL, HASM, UNR><<<grid, block, 0, stream>>>(                  \
+  // per axis, so the table reads top-down as D -> unroll -> launch. SEG = D/16
+  // lanes per item (one int4 of the row each).
+#define CPS_LAUNCH(SEG, HASM, UNR)                                                    \
+  cps_score_kernel<SEG, HASM, UNR><<<grid, block, 0, stream>>>(                       \
       q_codes_p, q_scales_p, mask_p, flat_p, codes_p, out_p, gs, p, max_size,         \
       mask_words, static_cast<int>(wpc), items_per_warp)
 #define CPS_LAUNCH_GENERIC(HASM)                                                      \
   cps_score_kernel_generic<HASM><<<grid, block, 0, stream>>>(                         \
       q_codes_p, q_scales_p, mask_p, flat_p, codes_p, out_p, gs, p, max_size,         \
       mask_words, static_cast<int>(wpc), items_per_warp, static_cast<int>(d / 4))
-#define CPS_LAUNCH_UNROLL(SEG, WPL, HASM)                                             \
+#define CPS_LAUNCH_UNROLL(SEG, HASM)                                                  \
   switch (unroll) {                                                                   \
-    case 1: CPS_LAUNCH(SEG, WPL, HASM, 1); break;                                     \
-    case 2: CPS_LAUNCH(SEG, WPL, HASM, 2); break;                                     \
-    case 4: CPS_LAUNCH(SEG, WPL, HASM, 4); break;                                     \
+    case 1: CPS_LAUNCH(SEG, HASM, 1); break;                                          \
+    case 2: CPS_LAUNCH(SEG, HASM, 2); break;                                          \
+    case 4: CPS_LAUNCH(SEG, HASM, 4); break;                                          \
     default: TORCH_CHECK(false, "unroll must be 1, 2 or 4, got ", unroll);            \
   }
 #define CPS_LAUNCH_D(HASM)                                                            \
-  switch (d) {                                                                        \
-    case 64: CPS_LAUNCH_UNROLL(16, 1, HASM); break;                                   \
-    case 128: CPS_LAUNCH_UNROLL(32, 1, HASM); break;                                  \
-    case 256: CPS_LAUNCH_UNROLL(32, 2, HASM); break;                                  \
+  switch (vec_ok ? d : 0) {  /* SEG = D/16; misaligned rows take the generic path */  \
+    case 64: CPS_LAUNCH_UNROLL(4, HASM); break;                                       \
+    case 128: CPS_LAUNCH_UNROLL(8, HASM); break;                                      \
+    case 256: CPS_LAUNCH_UNROLL(16, HASM); break;                                     \
     default: CPS_LAUNCH_GENERIC(HASM); break;  /* ignores unroll */                   \
   }
 
