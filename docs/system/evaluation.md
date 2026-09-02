@@ -242,7 +242,7 @@ see [filtering.md](filtering.md) for the filter API.
 | `encode.batch_size` / `num_workers` / `max_seq_length` | | SASRec encode-pass knobs; `max_seq_length` must match the trained checkpoint (it is part of the cache key). |
 | `algorithms` | list[str] | Subset of [`ALGORITHMS`](../../evaluation/retrieval/algos/__init__.py). |
 | `algo_params` | dict[str, list[dict]] | Per-algo parameter combos; no implicit cross-product. |
-| `backends` | list of `triton` / `torch` / `cuda` | Backend fan-out: each backend adds a row per cell with a `backend` column (default `[triton]`). `cuda` only changes what runs for `silvertorch` — see [The `cuda` backend in sweeps](#the-cuda-backend-in-sweeps). |
+| `backends` | list of `triton` / `torch` / `cuda` / `cute` | Backend fan-out: each backend adds a row per cell with a `backend` column (default `[triton]`). `cuda` (and `cute`, its CuTe DSL port) only changes what runs for `silvertorch` — see [The `cuda` backend in sweeps](#the-cuda-backend-in-sweeps). |
 | `filters` | dict or `null` | Optional filter-bench block. See [filtering.md](filtering.md). |
 | `users_limit` | int or `null` | Optional cap on users for ALL cells. Goodreads has 313k test users; cap to e.g. 10000 to speed runs up. Part of the encode-cache key. |
 
@@ -371,7 +371,9 @@ boundary, so the library is 0-indexed over real items throughout.
 ### The `cuda` backend in sweeps
 
 `backends: [..., cuda]` is not a uniform third measurement. Two things
-about it are easy to misread:
+about it are easy to misread (everything in this section applies verbatim
+to `cute`, the CuTe DSL port of the cuda backend: the sweep treats the two
+identically):
 
 **Only `silvertorch` actually changes.** `backend="cuda"` selects a real
 CUDA C++ path inside `SilverTorch` only. Every other layer dispatches
@@ -530,7 +532,7 @@ are never renamed; new fields are additive.
 | `filter_kind` | str | `none`, `clause`, or `bloom`. |
 | `sweep` | str | Filter sweep name from the config (e.g. `c0_genre`), or `full_scan` on yambda. |
 | `impl` | str | Algorithm name. |
-| `backend` | str | `triton`, `torch`, or `cuda` — the `retrieve`-layer backend *requested* for this row. For anything but `silvertorch`, a `cuda` row ran the torch path; see [The `cuda` backend in sweeps](#the-cuda-backend-in-sweeps). |
+| `backend` | str | `triton`, `torch`, `cuda` or `cute` — the `retrieve`-layer backend *requested* for this row. For anything but `silvertorch`, a `cuda` / `cute` row ran the torch path; see [The `cuda` backend in sweeps](#the-cuda-backend-in-sweeps). |
 | `device` | str | Always `"cuda"` (the CPU-timing path was removed; the column stays for schema stability). |
 | `seed` | int | The `cfg.seed` that produced this row. |
 | `batch_size`, `k` | int | First-class columns. |

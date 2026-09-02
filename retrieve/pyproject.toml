@@ -10,6 +10,11 @@ dependencies = [
     "triton>=3.0",
 ]
 
+[project.optional-dependencies]
+cute = [
+    "nvidia-cutlass-dsl>=4.7",
+]
+
 [project.scripts]
 tune-kernels = "retrieve.tune:main"
 

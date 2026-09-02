@@ -19,8 +19,10 @@ def test_registry_covers_all_kernels():
         "oporp-1bit-match-topk",
         "codesigned-probe-score",
         "codesigned-probe-score-cuda",
+        "codesigned-probe-score-cute",
         "codesigned-probe-score-exact",
         "codesigned-probe-score-exact-cuda",
+        "codesigned-probe-score-exact-cute",
         "clause-mask",
         "clause-compact",
         "bloom-compact",
@@ -35,6 +37,10 @@ def test_tune_bodies_run_one_point(spec):
         from tests.conftest import require_cps_cuda
 
         require_cps_cuda()
+    if spec.name in ("codesigned-probe-score-cute", "codesigned-probe-score-exact-cute"):
+        from tests.conftest import require_cps_cute
+
+        require_cps_cute()
     dev = torch.device("cuda:0")
     cfg = spec.config_cls(*spec.grid[0])
     out = spec.run(spec.make_inputs(dev, spec.smoke_regime), cfg)

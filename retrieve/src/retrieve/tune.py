@@ -40,6 +40,11 @@ from retrieve.kernels.silvertorch.codesigned_probe_score_cuda import (
     _codesigned_probe_score_exact_cuda_impl,
     words_per_cluster,
 )
+from retrieve.kernels.silvertorch.codesigned_probe_score_cute import (
+    CodesignedProbeScoreCuteConfig,
+    _codesigned_probe_score_cute_impl,
+    _codesigned_probe_score_exact_cute_impl,
+)
 from retrieve.kernels.silvertorch.codesigned_probe_score_exact import (
     CodesignedProbeScoreExactConfig,
     _codesigned_probe_score_exact_impl,
@@ -451,6 +456,27 @@ KERNELS: tuple[KernelTuneSpec, ...] = (
             (p, hq, d, b, w) for p in _DEFAULT_CPS_P_GRID for hq in (0, 1)
         ),
     ),
+    # CuTe DSL port of the cuda backend: same grid, same regimes and the same inputs as
+    # codesigned-probe-score-cuda, so the two --json-out files join cell for cell and the
+    # comparison is a comparison of languages, not of configs or data.
+    KernelTuneSpec(
+        name="codesigned-probe-score-cute",
+        config_cls=CodesignedProbeScoreCuteConfig,
+        grid=_CPS_CUDA_GRID,
+        regime_labels=("P", "HAS_QB", "D", "B", "W"),
+        make_inputs=_cps_cuda_inputs,
+        run=lambda inputs, config: _codesigned_probe_score_cute_impl(**inputs, config=config),
+        paste_path="retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py",
+        smoke_regime=(1024, 1, 64, 2, 4),
+        dims=(
+            ("d", 128, "Embedding dimension."),
+            ("b", 16, "Batch size."),
+            ("w", 4, "int64 words per bloom signature."),
+        ),
+        expand_regimes=lambda d, b, w: tuple(
+            (p, hq, d, b, w) for p in _DEFAULT_CPS_P_GRID for hq in (0, 1)
+        ),
+    ),
     # (N, B, C, A_MAX) defaults mirror the shipped clause regimes; the exact kernel's optimum also
     # tracks P = n_probe × max_cluster_size (approximated inside _cpse_inputs), so re-tune with
     # --regime per deployment rather than trusting these defaults.
@@ -480,6 +506,22 @@ KERNELS: tuple[KernelTuneSpec, ...] = (
         make_inputs=_cpse_cuda_inputs,
         run=lambda inputs, config: _codesigned_probe_score_exact_cuda_impl(**inputs, config=config),
         paste_path="retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_cuda.py",
+        smoke_regime=(4096, 2, 2, 2),
+        default_regimes=_DEFAULT_CLAUSE_REGIMES,
+        regime_arity=4,
+        regime_fmt="N,B,C,A_MAX",
+    ),
+    # CuTe twin of codesigned-probe-score-exact-cuda (same inputs, comparable head-to-head
+    # with it and with codesigned-probe-score-exact). Shares CodesignedProbeScoreCuteConfig
+    # with codesigned-probe-score-cute, so reconcile the two cute sweeps before pasting.
+    KernelTuneSpec(
+        name="codesigned-probe-score-exact-cute",
+        config_cls=CodesignedProbeScoreCuteConfig,
+        grid=_CPS_CUDA_GRID,
+        regime_labels=("N", "B", "C", "A_MAX"),
+        make_inputs=_cpse_cuda_inputs,
+        run=lambda inputs, config: _codesigned_probe_score_exact_cute_impl(**inputs, config=config),
+        paste_path="retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py",
         smoke_regime=(4096, 2, 2, 2),
         default_regimes=_DEFAULT_CLAUSE_REGIMES,
         regime_arity=4,
