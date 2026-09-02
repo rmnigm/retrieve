@@ -301,3 +301,50 @@ Triton the port stands where the C++ backend stands: bloom 1.23–1.38× at the 
 layouts (kernel-only 2.5×), no filter and exact within ±3 % at B=16, and faster at
 small P where Triton's own launch overhead dominates — all of it bit-exact on every
 regime above.
+
+### 5.1 Compiled / CUDA-graph replay (WP-6)
+
+2026-09-02, same box as §5. Does the eager host gap survive the deployed path? Full `SilverTorch.forward` (phase 1
++ op + `topk`), `D=128`, `k=64`, modules built with a synthetic balanced IVF (every
+cluster exactly `max_size` wide, registered through the module's own steps, no k-means)
+so `P` is exactly layout A → 58 368 (N = 3 035 136) and the small layout → 1 024;
+attributes as in `bench_common.py` (bloom pass rate 0.0015 at layout A, exact 0.96).
+`do_bench(rep=300)` median ms; **eager** `module(q, attrs)`, **compile**
+`torch.compile(fullgraph=True)` default mode, **graph** `torch.compile(fullgraph=True,
+mode="reduce-overhead")`. `torch.equal` on `(ids, scores)` across the three variants per
+backend and on `scores` across backends asserted before every timing, 36/36 cells.
+Scripts and raw outputs: session scratchpad `wp6/` (`graphs.py`, `graphs.json`,
+`graphs.md`, `diag*.py|txt`).
+
+| mode | B | P | eager tri | cuda | cute | compile tri | cuda | cute | graph tri | cuda | cute | cuda/cute eager | compile | graph |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| none | 1 | 1024 | 0.306 | 0.300 | 0.329 | 0.144 | 0.379 | 0.406 | 0.056 | 0.071 | 0.072 | 0.91× | 0.93× | 0.98× |
+| none | 1 | 58368 | 0.528 | 0.445 | 0.487 | 0.336 | 0.522 | 0.561 | 0.118 | 0.130 | 0.133 | 0.91× | 0.93× | 0.98× |
+| none | 16 | 1024 | 0.368 | 0.295 | 0.332 | 0.180 | 0.362 | 0.408 | 0.059 | 0.082 | 0.082 | 0.89× | 0.89× | 1.00× |
+| none | 16 | 58368 | 0.537 | 0.452 | 0.486 | 0.343 | 0.531 | 0.568 | 0.237 | 0.256 | 0.255 | 0.93× | 0.93× | 1.00× |
+| bloom | 1 | 1024 | 1.018 | 0.948 | 1.054 | 0.283 | 0.493 | 0.596 | 0.079 | 0.094 | 0.091 | 0.90× | 0.83× | 1.03× |
+| bloom | 1 | 58368 | 1.220 | 1.167 | 1.250 | 0.439 | 0.654 | 0.714 | 0.132 | 0.173 | 0.142 | 0.93× | 0.92× | 1.22× |
+| bloom | 16 | 1024 | 1.043 | 1.013 | 1.178 | 0.308 | 0.531 | 0.579 | 0.079 | 0.102 | 0.103 | 0.86× | 0.92× | 0.99× |
+| bloom | 16 | 58368 | 1.286 | 1.232 | 1.290 | 0.473 | 0.714 | 0.742 | 0.278 | 0.232 | 0.222 | 0.95× | 0.96× | 1.05× |
+| exact | 1 | 1024 | 0.428 | 0.346 | 0.405 | 0.223 | 0.420 | 0.481 | 0.059 | 0.084 | 0.087 | 0.85× | 0.87× | 0.96× |
+| exact | 1 | 58368 | 0.594 | 0.518 | 0.614 | 0.365 | 0.623 | 0.651 | 0.126 | 0.142 | 0.143 | 0.84× | 0.96× | 0.99× |
+| exact | 16 | 1024 | 0.422 | 0.351 | 0.412 | 0.219 | 0.421 | 0.486 | 0.066 | 0.109 | 0.098 | 0.85× | 0.86× | 1.11× |
+| exact | 16 | 58368 | 0.609 | 0.535 | 0.582 | 0.395 | 0.615 | 0.661 | 0.287 | 0.315 | 0.316 | 0.92× | 0.93× | 1.00× |
+
+Capture: every cell `cudagraph_skips == 0`, no "skipping cudagraphs" hint, one
+`cudaGraphLaunch` per forward for all three backends (the only other host-side CUDA
+calls are cudagraph trees' input copies); the cute launch lands on the capture stream via
+`torch._C._cuda_getCurrentRawStream`. A manual `torch.cuda.CUDAGraph` of the eager
+forward (pure replay) gives cuda/cute 0.97–1.00× for none and exact and fails to capture
+bloom on every backend — `build_query_signatures` builds its salt constants with
+`torch.tensor(_SALT, device=cuda)`, a pageable H2D copy that invalidates raw capture,
+which inductor folds into the graph. Reading: the gap is an eager-path cost (the forward
+is host-bound, so the DSL launch lands 1:1, on top of ~0.2 ms of layer + `custom_op`
+dispatch — hence milder than the `_impl`-level 0.6–0.8× above); default-mode compile does
+not remove it (the cuda/cute ops are opaque `custom_op`s whose body runs eagerly inside
+the wrapper, which adds its own fixed dispatch; the Triton ops are see-through
+`triton_op`s, hence its default-compile lead); under cudagraph replay it is gone — cuda
+and cute equal within noise, the residual per-backend differences being kernel counts in
+the graph. The harness compiles every algo with `dynamic=True, mode="reduce-overhead"`
+(`AlgoBase._finalize`), so the deployed path never pays the DSL launch cost. Follow-ups
+and levers: [kernels.md § Follow-ups](../system/kernels.md#follow-ups).

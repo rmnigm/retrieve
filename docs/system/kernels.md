@@ -1374,3 +1374,118 @@ Kernel-only and end-to-end numbers, the head-to-head against the Triton
 and cuda backends, and the reading are in the plan's
 [§5](../plans/cute-dsl-scorer.md#5-validation-record-wp-4). This section
 documents mechanism only.
+
+#### Follow-ups
+
+**Where the host-overhead gap matters.** WP-6 (plan
+[§5.1](../plans/cute-dsl-scorer.md#51-compiled--cuda-graph-replay-wp-6))
+timed the full `SilverTorch.forward` — phase-1 matmul/topk/gather, the
+backend's op with its `quantize_int8` prep, the host `topk` — three ways:
+eager, `torch.compile(fullgraph=True)` in default mode, and
+`torch.compile(mode="reduce-overhead")`, which is the harness's single
+compile site (`AlgoBase._finalize` in `evaluation/retrieval/algos/`,
+`dynamic=True, mode="reduce-overhead"`). Every cell captured: zero
+`cudagraph_skips`, one `cudaGraphLaunch` per forward for all three
+backends, the cute launch landing on the capture stream through
+`torch._C._cuda_getCurrentRawStream`. Outputs were `torch.equal` across
+the three variants and across backends before every timing.
+
+| mode | B | P | eager cuda / cute (ms) | compile cuda / cute | graph triton / cuda / cute | cuda÷cute eager · compile · graph |
+|---|---|---|---|---|---|---|
+| none | 1 | 1 024 | 0.300 / 0.329 | 0.379 / 0.406 | 0.056 / 0.071 / 0.072 | 0.91 · 0.93 · 0.98 |
+| none | 1 | 58 368 | 0.445 / 0.487 | 0.522 / 0.561 | 0.118 / 0.130 / 0.133 | 0.91 · 0.93 · 0.98 |
+| none | 16 | 1 024 | 0.295 / 0.332 | 0.362 / 0.408 | 0.059 / 0.082 / 0.082 | 0.89 · 0.89 · 1.00 |
+| none | 16 | 58 368 | 0.452 / 0.486 | 0.531 / 0.568 | 0.237 / 0.256 / 0.255 | 0.93 · 0.93 · 1.00 |
+| bloom | 1 | 1 024 | 0.948 / 1.054 | 0.493 / 0.596 | 0.079 / 0.094 / 0.091 | 0.90 · 0.83 · 1.03 |
+| bloom | 1 | 58 368 | 1.167 / 1.250 | 0.654 / 0.714 | 0.132 / 0.173 / 0.142 | 0.93 · 0.92 · 1.22 |
+| bloom | 16 | 1 024 | 1.013 / 1.178 | 0.531 / 0.579 | 0.079 / 0.102 / 0.103 | 0.86 · 0.92 · 0.99 |
+| bloom | 16 | 58 368 | 1.232 / 1.290 | 0.714 / 0.742 | 0.278 / 0.232 / 0.222 | 0.95 · 0.96 · 1.05 |
+| exact | 1 | 1 024 | 0.346 / 0.405 | 0.420 / 0.481 | 0.059 / 0.084 / 0.087 | 0.85 · 0.87 · 0.96 |
+| exact | 1 | 58 368 | 0.518 / 0.614 | 0.623 / 0.651 | 0.126 / 0.142 / 0.143 | 0.84 · 0.96 · 0.99 |
+| exact | 16 | 1 024 | 0.351 / 0.412 | 0.421 / 0.486 | 0.066 / 0.109 / 0.098 | 0.85 · 0.86 · 1.11 |
+| exact | 16 | 58 368 | 0.535 / 0.582 | 0.615 / 0.661 | 0.287 / 0.315 / 0.316 | 0.92 · 0.93 · 1.00 |
+
+(A100, `D=128`, `k=64`, `do_bench` median; layout A and the small
+layout as in the plan's §5, balanced synthetic IVF.) Three things follow.
+The gap is an *eager* phenomenon: the whole eager forward is host-bound,
+so the extra DSL launch cost lands on the wall clock one to one, but on
+top of ~0.2 ms of layer + `custom_op` dispatch, which is why the ratio
+here is milder than the `_impl`-level 0.6–0.8× of §5. Default-mode
+`torch.compile` does **not** remove it: the cuda and cute ops are opaque
+`custom_op`s, so their body still runs eagerly inside the compiled
+wrapper, which fuses only phase 1 and adds its own fixed dispatch cost
+(the two-kernel backends get slower than eager in no-filter / exact and
+faster only in bloom, where the query-signature builder gets fused; the
+Triton ops are `triton_op`s, so inductor sees through them and fuses
+the prep, hence its default-compile lead). Under cudagraph replay the
+gap is gone: every backend collapses to its GPU time plus cudagraph
+trees' fixed dispatch, cuda and cute are equal within noise, and the
+residual differences are kernel *counts* in the graph — Triton's single
+launch wins at small `P`, the two-kernel backends win bloom at B=16 on
+the large layout exactly as in §5. So the host gap is a cost of the
+tuner / parity / eager path only; the deployed compiled path never pays
+it. (A manual `torch.cuda.CUDAGraph` of the eager forward — pure replay,
+cuda÷cute 0.97–1.00× — captures for none and exact but not for bloom on
+any backend: `build_query_signatures` builds its salt constants with
+`torch.tensor(_SALT, device=cuda)`, a pageable host→device copy that
+invalidates raw capture; inductor folds them into the graph. Hoisting
+those two constants would make the eager bloom forward raw-capturable.)
+
+**Levers for the remaining host gap**, by expected payoff over cost:
+
+1. *CUDA graphs* — done for the deployed path (above); nothing to add
+   there. Eager callers that care can capture manually.
+2. *Fewer kernel arguments.* The DSL executor's per-argument cost is
+   ~1.5 µs and the scorer takes 15 (plus the stream). Pack the eight
+   runtime scalars into one device-side parameter buffer, and fold
+   `wpc` and `items_per_warp` into `Constexpr`s (they are fixed per
+   index build / config, so a cache-key entry each, not a recompile per
+   call). Cheap, kernel-neutral.
+3. *Bypass the DSL executor.* `cute.compile` can export the cubin
+   (`compile_to`); launch it with `cuLaunchKernel` from `cuda-python`
+   with a pre-packed argument buffer, or from the existing C++
+   extension, and the launch reaches the ~4 µs C++ floor instead of the
+   ~9 µs of `_Launch` (host stub + `run_compiled_program`). Removes the
+   executor from the hot path entirely; costs an export step and a
+   second launch path to keep bit-exact.
+4. *Fuse the phase-2 mask into the scorer* — one launch instead of two
+   for bloom / exact. A design change deliberately not made (plan D8:
+   the port compares languages, not designs); it would also change the
+   cuda backend, and the mask kernel's thread-per-word layout does not
+   share the scorer's lane layout, so it is the most expensive lever and
+   the last one to pull.
+
+**Kernel-side follow-ups** (plan PERF-NOTES; none affect results):
+
+- Read-only-cache loads for the scalar `__ldg`s (ids, mask words, query
+  words, scales, attributes, `probe_ids`): `cute.arch.load` has no `nc`
+  operator, so emit `ld.global.nc` through `cute.arch.inline_ptx`, as
+  `dp4a` already is.
+- The predicated row load compiles to a branch plus a `REDUX.OR`
+  uniformity test; the `HAS_MASK, UNROLL=1` scorer is the one build
+  where that shows (+14 % at the exact B=16 regime). `UNROLL=4` covers
+  it (four rows in flight hide the extra latency), which is why it is
+  the default; a `@P LDG` form would need the load expressed without a
+  region, e.g. a select on the address plus an unconditional load.
+- The LLVM pipeline auto-unrolls the no-mask `UNROLL=1` loop 5×.
+  Pinning with `cutlass.range(…, unroll=1)` reproduces the C++ structure
+  and is bit-exact (§5 P3) but marginally slower; left as the DSL emits
+  it. Revisit only if a config sweep needs `UNROLL` columns to be
+  structurally comparable to cuda's.
+- A sub-sm_80 `shfl.bfly` butterfly for `seg_reduce_add` if pre-Ampere
+  GPUs ever matter; the C++ has it, the port reports `CuteMissing`.
+- Disk-cache the compiled specializations (AOT export + load) so a
+  fresh process stops paying ~60–100 ms per `(SEG, HAS_MASK, UNROLL)`
+  / `(C, A)` tuple; the tuner, which spawns a process per config, pays
+  all of them per process today.
+
+**Which backend to pick.** `triton`: one fused launch, no extra
+dependency, the smallest code, and the fastest under default-mode
+`torch.compile` and at small `P` under graphs; the choice unless the
+bloom regime at large `P` / `B` is the workload. `cuda`: the fastest
+eager launch (~4 µs) and the bit-exact reference, but needs `nvcc`
+matching torch's CUDA and a one-minute JIT build. `cute`: the same
+kernels in Python with no toolkit (the DSL ships `ptxas`), equal to cuda
+kernel for kernel and under `torch.compile` / CUDA graphs; its cost is
+the per-launch DSL host overhead in eager mode — the tuner and parity
+paths — and the per-process compile of each specialization.
