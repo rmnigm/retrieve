@@ -41,10 +41,12 @@ everything marked *SIGIR* below is for the ≈ Feb 2027 full version. Six
 weeks from 2026-09-05: the A100 is the bottleneck, so GPU steps are
 ordered first and Mac-side steps run in parallel with them.
 
-**Branch.** `feat/cute-dsl-scorer` = `main` + the `refactor/kernels-eval`
-track + the CUDA and CuTe SilverTorch backends; 23 commits ahead of
-`main`, nothing merged. Step A4 merges it. After that, one branch per
-phase off `main`.
+**Branch.** `development` = `main` + the refactor track (formerly
+`refactor/kernels-eval`) + the CUDA and CuTe SilverTorch backends
+(formerly `feat/cute-dsl-scorer`) + today's plans; 24 commits ahead of
+`main`, nothing merged. Those two feature branches were deleted on
+2026-09-05 after confirming `development` contains them. Step A4 merges
+`development` into `main`. After that, one branch per phase off `main`.
 
 **Decisions already taken (2026-09-05), do not reopen.** Meta's
 `meta-recsys/silvertorch` ops become the reference backend
@@ -82,10 +84,10 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
   the `per_embedding_scale` overflow. Gate: O §3 confirmed or corrected
   in O's record section. Unblocks: B1 (the adapter is written against
   measured facts, not read ones).
-- [ ] **A4 — merge to `main`.** After A1 passes: merge
-  `feat/cute-dsl-scorer` into `main` (library gates passed 2026-09-02,
-  harness golden passed in A1). Delete the merged branches. Everything
-  below happens on phase branches off `main`.
+- [ ] **A4 — merge to `main`.** After A1 passes: merge `development`
+  into `main` (library gates passed 2026-09-02, harness golden passed in
+  A1). Everything below happens on phase branches off `main`, merged
+  back through `development`.
 
 ### Phase B — official backend, parity, deletion (weeks 1–2)
 
