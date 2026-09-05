@@ -274,9 +274,14 @@ API key from the partner form
 ([release listing](https://api.semanticscholar.org/datasets/v1/release/latest)).
 SPECTER2 vectors are 768-d
 ([S2 platform paper](https://arxiv.org/html/2301.10140v2)). Gotchas:
-the listing's "28 GB" for 120M embeddings cannot be raw fp32 (that is
-~370 GB) — file sizes are UNVERIFIED until a key is issued; the
-per-dataset endpoint returned 401 without a key. Attribute fields
+the listing's "28 GB" is **per file**: the 2026-09-01 release lists
+`embeddings-specter_v2` as "120M records in 30 28GB files" (≈ 840 GB of
+JSONL in total, so a 50 M slice is streamed, not downloaded whole),
+`papers` as 200 M records in 30 × 1.5 GB, `citations` as 2.4 B records
+in 30 × 8.5 GB, `abstracts` 100 M in 30 × 1.8 GB (verified 2026-09-05
+from the release listing); the per-dataset download links require the
+API key ("Downloading the full data requires an API key", partner
+form), samples are free. Attribute fields
 (year, venue, fields of study, publication types, open access) are
 documented for the API's paper object, not re-verified for the bulk
 `papers` schema.
@@ -349,12 +354,15 @@ original CLIP `.npy` mirrors are reported dead, so they are out.
 
 ## 4. Recommendation
 
-> **Decision taken 2026-09-05 (supersedes the ranking below).** The study uses arXiv and
-> Goodreads (rerun), **YFCC-10M** (§3.4/§4.5), **OpenAlex ~50 M** (§3.9) and **KuaiRand-27K**
-> (§3.2/§4.3): two semantic-search and two recsys corpora beyond arXiv, all with real filters.
-> Dropped: Amazon Reviews 2023 (§4.2, out in general), Yambda-full and Cohere Wikipedia (§4.3
-> fallback, §4.4 — scale without meaningful filters), PubMed + MedCPT (§4.1, fallback only if the
-> OpenAlex snapshot pass is too heavy). Order and gates: [00-roadmap.md](00-roadmap.md) Phase E.
+> **Decision taken 2026-09-05, final (supersedes the ranking below).** The study uses arXiv and
+> Goodreads (rerun), **YFCC-10M** (§3.4/§4.5), **PubMed + MedCPT** (§3.8/§4.1), **Semantic
+> Scholar SPECTER2** (§3.7; ready vectors + open query encoder + `papers` attributes +
+> `citations`; needs the free research API key — request first) with **OpenAlex** (§3.9) as the
+> fallback if the key is not granted, and **KuaiRand-27K** (§3.2/§4.3). Dropped: Amazon Reviews
+> 2023 (§4.2, out in general), Yambda-full and Cohere Wikipedia (§4.3 fallback, §4.4 — scale
+> without meaningful filters; Cohere's rows carry only `_id/url/title/text/emb` and its query
+> encoder is API-only, verified 2026-09-05). Order and gates: [00-roadmap.md](00-roadmap.md)
+> Phase E.
 
 
 Throughput assumptions used below (*est.*, not measured; the repo's own
