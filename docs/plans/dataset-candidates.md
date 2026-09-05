@@ -50,7 +50,7 @@ is fp16 item embeddings only, at the dim in the embeddings column.
 | 1b | **PubMed + MedCPT embeddings** | ~36M articles *est.* (38 chunks of "about 1M"; chunk 18 = 940,707; chunk 37 partial) | shipped MedCPT-Article-Encoder 768-d (`embeds_chunk_*.npy`, 102 GB, fp32 inferred from 2.9 GB ≈ 944k × 768 × 4) | MeSH terms (`m`, multi-valued, ~30k descriptors), year from `d`, journal / language via MEDLINE baseline join (UNVERIFIED); ~50 %→<0.01 % | open MedCPT-Query-Encoder → any text query set; BioASQ 500 test q (not public in BEIR), NFCorpus 323, item-as-query | public domain (NIH), FTP, no registration | 102 GB npy + 44 GB json | 36M @256 (PCA) = 18.4 GB, @128 = 9.2 GB; @768 = 55 GB | **3** | 0 | [FTP dir](https://ftp.ncbi.nlm.nih.gov/pub/lu/MedCPT/pubmed_embeddings/), [README](https://ftp.ncbi.nlm.nih.gov/pub/lu/MedCPT/pubmed_embeddings/README.txt), [model card](https://huggingface.co/ncbi/MedCPT-Article-Encoder) |
 | 2 | **KuaiRand-27K** | 32,038,725 videos, 27,285 users, 322,278,385 interactions (Apr 8–May 8 2022) | none shipped; gSASRec D=128 from logs, or encode Chinese captions (3.2 GB CSV) with multilingual-e5-small, *est.* 1–2 A100-h | author_id, video_type {NORMAL, AD}, upload_type, visible_status, music_id, music_type, tag (multi-valued), 4-level category hierarchy, upload_dt / duration buckets; cardinalities UNVERIFIED | 27,285 user histories (avg ~12k events) with ms timestamps; 12 feedback signals | CC BY 4.0 on the Zenodo record (site summary says CC BY-SA 4.0 — UNVERIFIED which), captions CC BY 4.0 | 9.9 GB tar.gz (46 GB unpacked) + 6.9 GB supp. | 8.2 GB @128 | 1 | **3** | [kuairand.com](https://kuairand.com/), [paper](https://arxiv.org/abs/2208.08696), [Zenodo supp.](https://zenodo.org/records/18159199) |
 | 3 | **Yambda-5B, full catalog + attrs** | 9,390,623 tracks (all events), 1M users, 4.65B listens | shipped 128-d audio CNN embeddings for 7,721,749 tracks (float64 parquet, 13.8 GB); or gSASRec D=128 as today | artist_id 1,293,394 (median 2 tracks, p99 91, max 75,489), album_id 3,367,691 (median 1, max 1,535), track_length bucket, has-audio-emb; ~40 %→1e-6 | 459k test users (existing split); item-as-query on audio embs | Apache-2.0, HF, not gated | ~100 GB | 2.4 GB @128 | 1 | **3** | [HF yandex/yambda](https://huggingface.co/datasets/yandex/yambda), parquet probe (§ 3.3) |
-| 4 | **YFCC-10M (Big-ANN'23 filtered)** — **ACCESS FAILED, see §3.4** | 10,000,000 images | CLIP 192-d uint8, shipped | bag of tags, vocab 200,386 (description words, camera model, year, country) | 100,000 queries, each 1–2 required tags, filtered GT shipped | public download (fbaipublicfiles), YFCC CC licenses | ~2 GB base | 1.9 GB (uint8) / 3.8 GB fp16 | **3** | 0 | [neurips23 README](https://github.com/harsha-simhadri/big-ann-benchmarks/blob/main/neurips23/README.md) |
+| 4 | **YFCC-10M (Big-ANN'23 filtered)** — access: user's attempt failed, HEAD 200 verified 2026-09-05 (§3.4) | 10,000,000 images | CLIP 192-d uint8, shipped | bag of tags, vocab 200,386 (description words, camera model, year, country) | 100,000 queries, each 1–2 required tags, filtered GT shipped | public download (fbaipublicfiles), YFCC CC licenses | ~2 GB base | 1.9 GB (uint8) / 3.8 GB fp16 | **3** | 0 | [neurips23 README](https://github.com/harsha-simhadri/big-ann-benchmarks/blob/main/neurips23/README.md) |
 | 5 | **Cohere Wikipedia 2023-11 (Embed-v3)** | 247M paragraphs, 300+ langs; en 41,488,110, de 20,772,081, fr 17,813,768, es 12,905,284, it 10,462,162 | shipped 1024-d fp32; must PCA/truncate to ≤256 for 80 GB | language (300+; pick 3–10 → 5–50 %), title/article grouping, paragraph position, text-length bucket; no categories | none native; item-as-query; new text queries need Cohere API | Wikipedia CC BY-SA; card lists no license; HF, not gated | en 97.86 GB, de 48.79 GB, fr 41.20 GB (fp32 parquet) | 80M @128 = 20.5 GB, @256 = 41 GB | 2 | 0 | [HF card](https://huggingface.co/datasets/CohereLabs/wikipedia-2023-11-embed-multilingual-v3), [datasets-server info](https://datasets-server.huggingface.co/info?dataset=CohereLabs/wikipedia-2023-11-embed-multilingual-v3) |
 | 6 | **MS MARCO Web Search 100M** | 100,924,960 docs (ClueWeb22 subset) | shipped SimANS vectors, 289.16 GB `vectors.bin` (≈768-d fp32 inferred, UNVERIFIED) | language tag (207 doc langs), topic tag, URL — all require ClueWeb22 access via Lemur | 9,374 test query vectors + brute-force `truth.txt`; 9.2M train queries | non-commercial research; vectors free, text/tags behind ClueWeb22 agreement | 290 GB vectors | 100M @128 (PCA) = 25.8 GB | 2 | 0 | [GitHub README](https://raw.githubusercontent.com/microsoft/MS-MARCO-Web-Search/main/README.md), [paper](https://arxiv.org/html/2405.07526) |
 | 7 | **Semantic Scholar SPECTER2 + papers** | 120M embedding records; 200M paper records (release 2026-09-01) | shipped SPECTER2 768-d (model-compatible, so queries encodable locally with `allenai/specter2`) | from `papers`: year, venue, fields of study, publication types, open access, citation-count bucket | none native; item-as-query or SPECTER2-encoded text queries | ODC-BY (papers) / Apache-2.0 (embeddings); **API key required** for bulk files | 28 GB listed for embeddings (implausible for 120M×768 fp32; UNVERIFIED) | 50M subset @256 (PCA) = 25.6 GB | 2 | 0 | [datasets release listing](https://api.semanticscholar.org/datasets/v1/release/latest), [S2 platform paper](https://arxiv.org/html/2301.10140v2) |
@@ -190,11 +190,12 @@ the n-core or indexing all tracks while training only on the core.
 
 ### 3.4 YFCC-10M (NeurIPS'23 Big-ANN filtered track)
 
-> **Access failed (user report, 2026-09-05).** The user tried before this survey and could
-> not download or access the files — the URLs below are what the benchmark repo lists, not
-> what was verified to resolve. Treat YFCC-10M as **unavailable** until someone confirms the
-> `dl.fbaipublicfiles.com` paths (or a mirror) actually serve the `.u8bin` / `.spmat` files;
-> do not plan work on it. Everything else in this section is from the repo's README.
+> **Access (2026-09-05).** The user's earlier attempt to download YFCC-10M failed. A `HEAD`
+> request from the dev Mac the same day returned `HTTP/2 200` with full sizes for the four
+> files below (`base.10M.u8bin` 1,920,000,008 B; `query.public.100K.u8bin` 19,200,008 B;
+> `GT.public.ibin` 8,000,008 B; `base.metadata.10M.spmat` 945,683,840 B), so the paths are
+> served right now. Retry with exactly these URLs (`curl -L -O`) before treating it as blocked;
+> `query.metadata.public.100K.spmat` and `unfiltered.GT.public.ibin` were not probed.
 
 10M CLIP vectors, 192-d uint8, L2; each image carries a bag of tags from
 a 200,386-word vocabulary (description words, camera model, year,
@@ -543,11 +544,12 @@ Alternatives if a walled dataset is acceptable: MS MARCO Web Search 100M
 S2 SPECTER2 (API key, § 3.7) — both bring real query sets or rich
 attributes that the Wikipedia dump lacks.
 
-### 4.5 Add for comparability: YFCC-10M — **blocked, access failed (§3.4)**
+### 4.5 Add for comparability: YFCC-10M (retry the download first, §3.4)
 
-Would be the cheapest ingest of all (precomputed uint8 vectors, shipped filtered GT
-for 100k queries) and the set every filtered-ANN paper reports on, **but the user could
-not download it**; keep only if a working mirror turns up. Original reasoning:
+Cheapest ingest of all (precomputed uint8 vectors, shipped filtered GT
+for 100k queries) and the set every filtered-ANN paper reports on; the
+user's first download attempt failed but the files were served on
+2026-09-05 (§3.4), so retry before writing it off. Original reasoning:
 the multi-valued tag bag maps to a single K-wide OR clause. Use it as
 the cross-paper anchor rather than as the headline set, because its
 attributes are one tag vocabulary rather than the multi-feature
