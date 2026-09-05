@@ -51,9 +51,10 @@ silently runs the **torch** path. See
   INT8 dot-product path; only the predicate inside the fused kernel
   changes. With `backend="torch"` the same semantics run in pure torch
   (phase 1 IVF probe + predicate + INT8 dequant + dot + topk),
-  materializing a `[B, P, D]` intermediate; with `backend="cuda"` they run
-  the paper's two-kernel CUDA C++ design (`filter_mode` `"none"` /
-  `"bloom"` only). Filtering is **inline**: bloom
+  materializing a `[B, P, D]` intermediate; with `backend="cuda"` (or its
+  CuTe DSL port, `"cute"`) they run the paper's two-kernel CUDA C++ design
+  in all three modes — a phase-2 mask kernel (bloom or clause) followed by
+  the masked dp4a scorer. Filtering is **inline**: bloom
   signatures or narrow clause attrs live on the module; no standalone
   `ExactAttributeFilter` / `BloomFilter` instance is wired in.
 

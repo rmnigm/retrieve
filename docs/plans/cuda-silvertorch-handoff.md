@@ -1,9 +1,11 @@
 # CUDA SilverTorch backend — validation + benchmark handoff
 
-> **Status:** ready for execution (written 2026-07-06, extended 2026-09-01 with the
-> phase-2 work — exact-on-cuda, the `UNROLL` knob, and the two static reviews of
-> [cuda-silvertorch-phase2.md](cuda-silvertorch-phase2.md). Both passes were authored
-> on a CUDA-less dev machine — nothing below has run on a GPU yet). This is the runbook a GPU session
+> **Status:** **executed 2026-09-02 on an A100** — §4–§6 ran top-to-bottom, the perf
+> fixes it motivated landed in `0f7792c`, and the record is §13. Still open: §7 (the
+> end-to-end sweep; no dataset was on the box) and §8 (ncu, blocked in the container).
+> Written 2026-07-06, extended 2026-09-01 with the phase-2 work — exact-on-cuda, the
+> `UNROLL` knob, and the two static reviews of
+> [cuda-silvertorch-phase2.md](cuda-silvertorch-phase2.md). This is the runbook a GPU session
 > executes **top-to-bottom** to build, validate, and benchmark the new
 > `backend="cuda"` SilverTorch implementation against the Triton backend. Target
 > hardware: **A100/sm_80** (the paper's own eval GPU and the arch the repo's shipped

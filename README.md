@@ -66,10 +66,12 @@ written for someone who installed `torchretrieve` and does not have this repo:
 [modules](retrieve/docs/modules.md),
 [filtering-and-quantization](retrieve/docs/filtering-and-quantization.md).
 
-**Plans** ([`docs/plans/`](docs/plans/)) — the work queue
-([`00-roadmap.md`](docs/plans/00-roadmap.md)), live GPU-validation runbooks, and
-a research-idea catalog. Completed plans are archived under
-[`docs/plans/archive/`](docs/plans/archive/).
+**Plans** ([`docs/plans/`](docs/plans/)) — the master plan
+([`00-roadmap.md`](docs/plans/00-roadmap.md): the one ordered work queue with
+gates and checkboxes), one detail plan per phase, live GPU-validation runbooks,
+and a research-idea catalog. Completed plans are archived under
+[`docs/plans/archive/`](docs/plans/archive/). Agents start at
+[`CLAUDE.md`](CLAUDE.md).
 
 **Papers** ([`articles/`](articles/)) — pandoc renderings of the three papers
 this repo reproduces or benchmarks against (SilverTorch, LiNR, Yambda). Frozen

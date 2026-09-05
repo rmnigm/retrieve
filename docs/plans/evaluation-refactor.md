@@ -1,6 +1,6 @@
 # Evaluation harness refactor — readability + leanness
 
-> **Status: IMPLEMENTED (2026-07-06), pending GPU validation.** All phases E1-E8 are committed
+> **Status: IMPLEMENTED (2026-07-06); library test gates passed on A100 2026-09-02, harness gates pending** (see the roadmap, Open work 1). All phases E1-E8 are committed
 > on branch `refactor/kernels-eval`. This document is now a **record of intent**, not a work
 > queue. The as-built harness is documented in
 > [../system/evaluation.md](../system/evaluation.md), which is the maintained reference — this

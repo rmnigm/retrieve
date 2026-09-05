@@ -1,6 +1,6 @@
 # `retrieve` kernels + layers design improvements
 
-> **Status: IMPLEMENTED (2026-07-06), pending GPU validation.** All phases K1-K9 are
+> **Status: IMPLEMENTED (2026-07-06); library test gates passed on A100 2026-09-02, harness gates pending** (see the roadmap, Open work 1). All phases K1-K9 are
 > committed on branch `refactor/kernels-eval`. This document is now a **record of intent**, not
 > a work queue — read it to understand *why* the current shape is what it is, not to execute
 > anything. The as-built shape is documented in

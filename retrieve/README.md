@@ -10,7 +10,7 @@ A library for the candidate-generation / ANN stage of a recsys stack: full-scan 
 pip install torchretrieve
 ```
 
-Source-only distribution. Triton kernels JIT-compile on first call against your local toolchain — no prebuilt CUDA wheels to match. You need a CUDA-capable GPU and a working `torch` + `triton` install (declared as dependencies). Modules that ship a pure-PyTorch fallback accept `backend="torch"`; `SilverTorch` additionally offers `backend="cuda"`, a hand-written CUDA C++ path that JIT-compiles on first forward and needs a matching CUDA toolkit plus `ninja`.
+Source-only distribution. Triton kernels JIT-compile on first call against your local toolchain — no prebuilt CUDA wheels to match. You need a CUDA-capable GPU and a working `torch` + `triton` install (declared as dependencies). Modules that ship a pure-PyTorch fallback accept `backend="torch"`; `SilverTorch` additionally offers `backend="cuda"`, a hand-written CUDA C++ path that JIT-compiles on first forward and needs a matching CUDA toolkit plus `ninja`, and `backend="cute"`, the same kernels written in NVIDIA's CuTe DSL (no toolkit needed; `pip install "torchretrieve[cute]"`).
 
 > **Note.** Install pulls in `torch>=2.4` and `triton>=3.0`; the import name is `retrieve`, not `torchretrieve`.
 
@@ -49,7 +49,7 @@ For attribute-filtered retrieval, swap to `filter_mode="bloom"` (with `m_bits` /
 
 Triton is the default backend; modules that have a pure-PyTorch path accept
 `backend="torch"` for `torch.compile` / Inductor users, and `SilverTorch` also
-accepts `backend="cuda"`.
+accepts `backend="cuda"` and `backend="cute"`.
 
 ## Docs
 

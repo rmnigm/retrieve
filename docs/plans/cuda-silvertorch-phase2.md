@@ -1,6 +1,9 @@
 # CUDA SilverTorch backend — phase 2 plan (exact filter, perf knobs, pre-GPU review)
 
-> **Status:** planned 2026-09-01 on `refactor/kernels-eval` (working tree). Authored on
+> **Status:** landed and validated — the exact-mode clause-mask kernel, the `UNROLL`
+> knob and the review fixes all passed parity and the perf gates on the A100 on
+> 2026-09-02 ([handoff §13](cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360)).
+> Originally planned 2026-09-01 on `refactor/kernels-eval` (working tree). Authored on
 > the CUDA-less dev Mac — the venv cannot even install the cu128 torch wheel here, so
 > nothing in this plan compiles or runs locally. Every item is "implement + static
 > review now, validate on the A100 box via the runbook". The runbook is

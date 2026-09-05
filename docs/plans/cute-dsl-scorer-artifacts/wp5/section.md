@@ -1,9 +1,9 @@
 
 ### `codesigned_probe_score_cute` — the CuTe DSL backend
 
-[`silvertorch/codesigned_probe_score_cute.py`](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py)
+[`silvertorch/codesigned_probe_score_cute.py`](../../../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py)
 (host side) +
-[`silvertorch/cute/codesigned_probe_score.py`](../../retrieve/src/retrieve/kernels/silvertorch/cute/codesigned_probe_score.py)
+[`silvertorch/cute/codesigned_probe_score.py`](../../../../retrieve/src/retrieve/kernels/silvertorch/cute/codesigned_probe_score.py)
 (device side), selected by `SilverTorch(backend="cute")`. A one-to-one
 port of the CUDA C++ backend above into NVIDIA's CuTe DSL
 (`nvidia-cutlass-dsl`: kernels written as Python, traced to MLIR and
@@ -21,10 +21,10 @@ module rather than copied, so a cute checkpoint is byte-identical to a
 cuda one. Everything the cuda section says about design, layout, the
 perf model and numerics holds here unchanged; this section covers only
 what the language changed. Plan, decisions and the spike record:
-[cute-dsl-scorer.md](../plans/cute-dsl-scorer.md).
+[cute-dsl-scorer.md](../../cute-dsl-scorer.md).
 
 The correctness gate is the cuda one plus a direct cuda-vs-cute check.
-[`tests/parity/test_codesigned_probe_score_cute.py`](../../retrieve/tests/parity/test_codesigned_probe_score_cute.py)
+[`tests/parity/test_codesigned_probe_score_cute.py`](../../../../retrieve/tests/parity/test_codesigned_probe_score_cute.py)
 asserts `torch.equal` on the `[B, P]` score tensor against **Triton**
 (as the cuda file does) and, in `test_cute_matches_cuda_bitexact`,
 against the **cuda** backend on both the raw phase-2 mask words and the
@@ -131,7 +131,7 @@ Per-launch host overhead is higher than the C++ extension's — the DSL
 adapts every pointer and scalar argument in Python on each call, and a
 bloom / exact query launches twice; the measured cost, and what it does
 to end-to-end numbers at small `B`, are in the plan's
-[§5](../plans/cute-dsl-scorer.md#5-validation-record-wp-4). Registers:
+[§5](../../cute-dsl-scorer.md#5-validation-record-wp-4). Registers:
 34 at `UNROLL=1`, 48 at `UNROLL=4` for `cps_score_kernel<8, true, ·>`
 (vs 30 / 40 for the C++ build), no spills, no `BAR.SYNC`, no shared
 memory — read off the loaded cubin via `cuFuncGetAttribute`, since the DSL
@@ -176,5 +176,5 @@ per-device `JitExecutor.to(dev)` fix lands).
 
 Kernel-only and end-to-end numbers, the head-to-head against the Triton
 and cuda backends, and the reading are in the plan's
-[§5](../plans/cute-dsl-scorer.md#5-validation-record-wp-4). This section
+[§5](../../cute-dsl-scorer.md#5-validation-record-wp-4). This section
 documents mechanism only.
