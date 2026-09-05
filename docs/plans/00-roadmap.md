@@ -170,8 +170,11 @@ rewrite then lands for the SIGIR version.
 - [ ] **E3 — campaign cells on E1 / E2.** Partial G10 (real 10 M-class
   data). Needs D1's harness state.
 - [ ] **E4 — *SIGIR*: Amazon Reviews 2023 (48 M, ≈ 11 A100 h encode),
-  KuaiRand-27K (32 M, recsys), Cohere Wikipedia 80 M stretch, YFCC-10M
-  for cross-paper comparability.** D §4.2–§4.5. Plus the synthetic
+  KuaiRand-27K (32 M, recsys), Cohere Wikipedia 80 M stretch, OpenAlex
+  50 M encode-it-yourself (D §3.9: citation-based relevance, richest
+  attributes, ~10 A100 h of encoding after a ~670 GB filter pass).**
+  D §4.2–§4.4. YFCC-10M is **blocked**: the user could not download it
+  (D §3.4). Plus the synthetic
   scale ladder and 240 M / 1 B stress (G10).
 
 ### Phase F — the paper (weeks 4–6; F1 and F3 can start any day)
