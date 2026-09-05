@@ -349,6 +349,14 @@ original CLIP `.npy` mirrors are reported dead, so they are out.
 
 ## 4. Recommendation
 
+> **Decision taken 2026-09-05 (supersedes the ranking below).** The study uses arXiv and
+> Goodreads (rerun), **YFCC-10M** (§3.4/§4.5), **OpenAlex ~50 M** (§3.9) and **KuaiRand-27K**
+> (§3.2/§4.3): two semantic-search and two recsys corpora beyond arXiv, all with real filters.
+> Dropped: Amazon Reviews 2023 (§4.2, out in general), Yambda-full and Cohere Wikipedia (§4.3
+> fallback, §4.4 — scale without meaningful filters), PubMed + MedCPT (§4.1, fallback only if the
+> OpenAlex snapshot pass is too heavy). Order and gates: [00-roadmap.md](00-roadmap.md) Phase E.
+
+
 Throughput assumptions used below (*est.*, not measured; the repo's own
 arXiv encode of 2.99M abstracts at 512 tokens is only described as
 "hours of GPU time" in [datasets.md](../system/datasets.md)):
