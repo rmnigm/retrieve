@@ -26,19 +26,18 @@ plan to `archive/` and shorten its entry here to one line under *Done*.
 
 ---
 
-## 0. Goal, deadline, branch
+## 0. Goal, scheduling rule, branch
 
 **Goal.** A reproducibility paper on SilverTorch (Meta) and LiNR
 (LinkedIn) built on this repository: our from-the-paper Triton
 reimplementation, Meta's official kernels as the reference, one correct
 benchmark harness, public datasets up to the papers' scale.
-Plan: [reproducibility-paper.md](reproducibility-paper.md).
+Plan: [reproducibility-paper.md](reproducibility-paper.md) (venue
+research lives there; it does not order anything here).
 
-**Deadline.** ECIR 2027 Reproducibility track — abstract **12 Oct 2026**,
-paper **19 Oct 2026**, 12 LNCS pages, notification 7 Dec 2026. The
-minimal ECIR cut is the paper plan's P0 gap list (its §B.3 and §C.5);
-everything marked *SIGIR* below is for the ≈ Feb 2027 full version. Six
-weeks from 2026-09-05: the A100 is the bottleneck, so GPU steps are
+**Scheduling rule.** There are no dates in this file. Every step is to
+be done, in the order given; nothing is optional, deferred, or
+conditional on a deadline. The A100 is the bottleneck, so GPU steps are
 ordered first and Mac-side steps run in parallel with them.
 
 **Branch.** `development` = `main` + the refactor track (formerly
@@ -52,8 +51,8 @@ ordered first and Mac-side steps run in parallel with them.
 `meta-recsys/silvertorch` ops become the reference backend
 (`backend="official"`); our CUDA C++ and CuTe DSL backends are deleted
 after the official parity gate; Triton stays and gets the kernel effort;
-the harness is rewritten rather than patched; the paper targets ECIR
-first. Rationale in the four plans and in *Done* below.
+the harness is rewritten rather than patched. Rationale in the four
+plans and in *Done* below.
 
 ## 1. The queue
 
@@ -64,7 +63,7 @@ box. Plan section references: **H** =
 **P** = [reproducibility-paper.md](reproducibility-paper.md) (gaps G1–G16
 in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
 
-### Phase A — unblock the tree (A100, week 1)
+### Phase A — unblock the tree (A100)
 
 - [ ] **A1 — golden baseline on the old harness.** H §6 WP-0 (A100,
   0.5 d). Commit the 3-line `users_limit` row-count fix; run the golden
@@ -89,7 +88,7 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
   A1). Everything below happens on phase branches off `main`, merged
   back through `development`.
 
-### Phase B — official backend, parity, deletion (weeks 1–2)
+### Phase B — official backend, parity, deletion
 
 - [ ] **B1 — adapter + tests.** O §5, §10 WP-2 (Mac, 2 d): `backend=
   "official"` in `SilverTorch`, `require_official`, parity tests T1–T7.
@@ -112,7 +111,7 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
 - [ ] **B5 — salt as a buffer.** O §8 TF-2 (Mac, 0.5 h; validate with
   `test_bloom_hash.py` on the A100). Do before any campaign timing.
 
-### Phase C — harness v2 (Mac work in parallel with B; A100 gate in week 3)
+### Phase C — harness v2 (Mac work in parallel with B; A100 gate at the end)
 
 Backends everywhere in H are now `triton | torch | official` (H's
 amendment). The official backend is eager-only (O D7), so H's `graph`
@@ -134,12 +133,7 @@ mode applies to `triton` and `torch` only.
   runs end to end on goodreads-d128 `c0_genre` with jaccard ≥ 0.99 (O
   WP-6's gate). Unblocks: D1.
 
-**Deadline fallback.** If C4 is not green by the end of week 3, add
-mean / p95 / p99 / QPS and per-query latency vectors to the *old*
-harness's `measure.py` (H §2 protocol, ½ d) and run Phase D on it; the
-rewrite then lands for the SIGIR version.
-
-### Phase D — campaign and baselines (A100, weeks 3–4)
+### Phase D — campaign and baselines (A100)
 
 - [ ] **D1 — full campaign rerun.** H §6 WP-5 + O WP-7 (A100 ≈ 24 h wall
   + 0.5 d): four datasets × dims × `{triton, torch, official}` × seeds
@@ -149,8 +143,9 @@ rewrite then lands for the SIGIR version.
   deep sweeps), old §4b items 1, 3, 4, 5, 7. Gate: H WP-5's.
 - [ ] **D2 — external baselines.** P G5 (A100, 2–3 d): Faiss-GPU
   IVF-Flat, Faiss-CPU IVF-Flat, HNSW, cuBLAS brute-force floor at
-  matched recall, as harness algos. *ECIR: Faiss + HNSW suffice (P
-  §C.5); cuVS / Filtered-DiskANN / ACORN are SIGIR (G13, G14).*
+  matched recall, as harness algos. Then P G13 (cuVS IVF-Flat / IVF-PQ /
+  CAGRA with bitset prefilter) and G14 (Filtered-DiskANN, ACORN on the
+  CPU box, or FANNBench's harness on one of our datasets).
 - [ ] **D3 — bloom FPR and memory vs width.** P G6 (A100, 1–2 d), on
   both blooms (ours and official), real attributes.
 - [ ] **D4 — `report.py`.** H §6 WP-6 (Mac, 1.5 d): thesis/paper tables
@@ -171,8 +166,8 @@ and ingestion plans: [dataset-candidates.md](dataset-candidates.md)
 §3–§4.
 
 - [ ] **E0 — request the Semantic Scholar API key** (D §3.7; free
-  research partner form). Do this **today**: it is the long pole for
-  E3. If it is not granted within two weeks, E3 runs on OpenAlex.
+  research partner form). First thing in this phase: it is the long
+  pole for E3. If it is refused, E3 runs on OpenAlex.
 - [ ] **E1 — YFCC-10M.** D §3.4 / §4.5 (download-bound, ≈ 3 GB; A100
   minutes). Retry the download with the exact URLs in D §3.4 (served on
   2026-09-05). Ingest: uint8 CLIP → fp16/int8 codes; tag bags → the
@@ -180,7 +175,7 @@ and ingestion plans: [dataset-candidates.md](dataset-candidates.md)
   queries with their tag predicates and filtered GT become the query
   set, so this is the one dataset whose filtered ground truth is *not*
   ours. Gate: our exact filtered oracle reproduces the shipped GT on the
-  100k queries; one `none` + one filter cell run. **ECIR.**
+  100k queries; one `none` + one filter cell run.
 - [ ] **E2 — PubMed + MedCPT, ~36 M articles.** D §3.8 / §4.1
   (download-bound: 102 GB of 768-d fp32 embeddings + 44 GB of per-PMID
   JSON from the NCBI FTP, public domain, no registration; no encoding).
@@ -190,7 +185,7 @@ and ingestion plans: [dataset-candidates.md](dataset-candidates.md)
   NFCorpus / TREC-style biomedical query sets plus item-as-query;
   attributes: MeSH descriptors (multi-valued, ~30 k), year, journal /
   language via the MEDLINE join. Gate: layout on disk, oracle built,
-  one `none` + one filter cell. **ECIR.**
+  one `none` + one filter cell.
 - [ ] **E3 — Semantic Scholar SPECTER2, ~50 M slice of 120 M.** D §3.7
   (`embeddings-specter_v2`: 30 files × 28 GB JSONL ≈ 840 GB for 120 M
   papers, 768-d; `papers` for year / venue / fields of study /
@@ -203,7 +198,7 @@ and ingestion plans: [dataset-candidates.md](dataset-candidates.md)
   **Fallback if E0 fails: OpenAlex** (D §3.9: same attribute shape,
   citation links, but ~670 GB snapshot pass + ≈ 9–14 A100 h of nomic
   encoding). Gate: layout on disk, oracle built, one `none` + one filter
-  cell. **ECIR if the D1 campaign is done by week 4, else SIGIR.**
+  cell.
 - [ ] **E4 — KuaiRand-27K, 32 M videos.** D §3.2 / §4.3. ETL to the
   harness layout; train gSASRec D=128 with a *shared* item table (two
   32 M-row tables are ~100 GB fp32 + Adam) or train on the 5-core
@@ -212,11 +207,10 @@ and ingestion plans: [dataset-candidates.md](dataset-candidates.md)
   protocols: target-derived (optimistic) and business-rule (exclude
   ads, duration bucket; pessimistic, LiNR-style pass-rate tiers). Gate:
   checkpoint on HF, layout on disk, one `none` + one filter cell.
-  **SIGIR unless E1–E3 finish early.**
 - [ ] **E5 — campaign cells on E1–E4** on the D1 harness state; extend
   the report. Needs D1.
 
-### Phase F — the paper (weeks 4–6; F1 and F3 can start any day)
+### Phase F — the paper (F1 and F3 can start any time)
 
 - [ ] **F1 — reframe + deviations table.** P G1 (Mac, 1 d): QuantizedIVF
   is SilverTorch Algorithm 1; the deviations table incl. O's findings
@@ -228,19 +222,19 @@ and ingestion plans: [dataset-candidates.md](dataset-candidates.md)
 - [ ] **F4 — artifacts.** P §B.7: tagged `torchretrieve` release, Zenodo
   DOI (incl. the pinned official sdist), HF datasets + oracles + results,
   one-command `reproduce-paper`, anonymised mirror for review.
-- [ ] **F5 — write, per P §C.4 page budget.** Abstract 12 Oct, paper
-  19 Oct 2026.
+- [ ] **F5 — write the paper** per P §C.3 research questions and §C.4
+  section plan, with every table produced by D4's `report.py`.
 
-### Phase G — after ECIR (SIGIR version, ≈ Feb 2027)
+### Phase G — kernel follow-ups and extended experiments (after F)
 
 - [ ] **G-a — Triton transposed bloom (TF-1) + retune (TF-3/4).** O §8,
   WP-8 (2 d + A100). Gate: parity bit-exact, bloom kernel-only within
   1.3× of official. Then rerun B3.
-- [ ] **G-b — P gaps G10–G16** (scale ladder, pass-rate sweep, co-design
-  ablation depth, cuVS, Filtered-DiskANN / ACORN, V3 bit width, extended
-  batch grid) and whatever of E3/E4 did not make ECIR.
-- [ ] **G-c — ECIR 2027 Resource track for the library itself**
-  (deadline 2 Nov 2026 — only if F5 lands early; otherwise skip).
+- [ ] **G-b — P gaps G10–G12, G15, G16** (synthetic scale ladder to
+  240 M / 1 B, controlled pass-rate sweep, co-design ablation depth, V3
+  bit width, extended batch grid). G13/G14 are in D2.
+- [ ] **G-c — resource paper for the library itself** (P §A.1 lists the
+  track), after F5.
 - [ ] **G-d — deferred kernel optimizations** (`oporp_1bit_match_topk`
   hardware popcount; allocator hygiene in the LiNR kernels). No timeline.
 - [ ] **G-e — parked feature plans**:
