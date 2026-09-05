@@ -156,27 +156,49 @@ rewrite then lands for the SIGIR version.
 - [ ] **D4 — `report.py`.** H §6 WP-6 (Mac, 1.5 d): thesis/paper tables
   and figures from the JSONL only, plus the methodology paragraph.
 
-### Phase E — scale (GPU box in parallel with D; ECIR gets E1–E3 if time permits)
+### Phase E — datasets (GPU box in parallel with D)
 
-- [ ] **E1 — Yambda full catalog with attributes.** D §4.3 fallback
-  (A100 ≈ 1 h): 9.39 M tracks, artist / album / duration clauses; the
-  cheapest ≥ 5 M attributed set and a one-line upgrade of the existing
-  pipeline. Gate: `item_attrs_narrow.pt` + oracle built; one filter cell
-  runs.
-- [ ] **E2 — PubMed + MedCPT, ~36 M articles.** D §4.1 (download-bound,
-  102 GB, no encoding): the precomputed ≥ 10 M semantic-search set with
-  year / MeSH / type attributes. Gate: harness layout on disk, `none` +
-  one filter cell run.
-- [ ] **E3 — campaign cells on E1 / E2.** Partial G10 (real 10 M-class
-  data). Needs D1's harness state.
-- [ ] **E4 — *SIGIR*: Amazon Reviews 2023 (48 M, ≈ 11 A100 h encode),
-  KuaiRand-27K (32 M, recsys), Cohere Wikipedia 80 M stretch, OpenAlex
-  50 M encode-it-yourself (D §3.9: citation-based relevance, richest
-  attributes, ~10 A100 h of encoding after a ~670 GB filter pass).**
-  D §4.2–§4.4. YFCC-10M (D §4.5): the user's first download failed but
-  the files were served on 2026-09-05 (D §3.4) — retry; if it downloads,
-  it is the cheapest comparability set and moves up to E1. Plus the synthetic
-  scale ladder and 240 M / 1 B stress (G10).
+**Decision (2026-09-05).** The study's dataset set is fixed: **arXiv**
+and **Goodreads** (rerun on the new harness, D1), **YFCC-10M**,
+**OpenAlex**, **KuaiRand-27K** — two semantic-search corpora and two
+recsys corpora beyond arXiv, all with real filters. Dropped: Amazon
+Reviews 2023 (out in general), Yambda-full and Cohere Wikipedia (scale
+without meaningful filters; the existing Yambda unfiltered runs stay as
+they are), PubMed + MedCPT (kept only as the fallback if E2's snapshot
+pass proves too heavy). Survey and ingestion plans:
+[dataset-candidates.md](dataset-candidates.md) §3–§4.
+
+- [ ] **E1 — YFCC-10M.** D §3.4 / §4.5 (download-bound, ≈ 3 GB; A100
+  minutes). Retry the download with the exact URLs in D §3.4 (served on
+  2026-09-05). Ingest: uint8 CLIP → fp16/int8 codes; tag bags → the
+  narrow clause tensor (cap K per D §3.4 gotcha a); the shipped 100k
+  queries with their tag predicates and filtered GT become the query
+  set, so this is the one dataset whose filtered ground truth is *not*
+  ours. Gate: our exact filtered oracle reproduces the shipped GT on the
+  100k queries; one `none` + one filter cell run. **ECIR.**
+- [ ] **E2 — OpenAlex, ~50 M works.** D §3.9. Snapshot filter pass first
+  (`s3://openalex`, ~670 GB works JSONL, ~1 TB scratch, CPU hours):
+  English, has abstract, type ∈ {article, preprint, review}, year ≥
+  2000, sample 50 M, keep `referenced_works` among the sample. Encode
+  with `nomic-embed-text-v1.5` at 256 tokens (same encoder as arXiv,
+  D = 256/128/64 without PCA; ≈ 9–14 A100 h, about half on an H100).
+  Attributes: topic hierarchy, year, type, oa_status, language, venue,
+  country, citation bucket. Queries: held-out works; relevance =
+  cited works (citation-based, real) *and* the exact filtered oracle;
+  natural filters = year < query year, same field. Gate: layout on
+  disk, oracle built, one `none` + one filter cell. **ECIR if the D1
+  campaign is done by week 4, else SIGIR.**
+- [ ] **E3 — KuaiRand-27K, 32 M videos.** D §3.2 / §4.3. ETL to the
+  harness layout; train gSASRec D=128 with a *shared* item table (two
+  32 M-row tables are ~100 GB fp32 + Adam) or train on the 5-core
+  subset while indexing all 32 M; attributes: video_type, upload_type,
+  category hierarchy, tags, duration / upload-date buckets. Two filter
+  protocols: target-derived (optimistic) and business-rule (exclude
+  ads, duration bucket; pessimistic, LiNR-style pass-rate tiers). Gate:
+  checkpoint on HF, layout on disk, one `none` + one filter cell.
+  **SIGIR unless E1/E2 finish early.**
+- [ ] **E4 — campaign cells on E1–E3** on the D1 harness state; extend
+  the report. Needs D1.
 
 ### Phase F — the paper (weeks 4–6; F1 and F3 can start any day)
 
@@ -200,7 +222,7 @@ rewrite then lands for the SIGIR version.
   1.3× of official. Then rerun B3.
 - [ ] **G-b — P gaps G10–G16** (scale ladder, pass-rate sweep, co-design
   ablation depth, cuVS, Filtered-DiskANN / ACORN, V3 bit width, extended
-  batch grid) and E4.
+  batch grid) and whatever of E2/E3 did not make ECIR.
 - [ ] **G-c — ECIR 2027 Resource track for the library itself**
   (deadline 2 Nov 2026 — only if F5 lands early; otherwise skip).
 - [ ] **G-d — deferred kernel optimizations** (`oporp_1bit_match_topk`
@@ -219,12 +241,13 @@ A1 ─┬─> A4 (merge)
 A2 ─> A3 ─> B1 ─> B2 ─┬─> B4   │   D2, D3 ──┼─> F2, F5
                       └─> B3 ──┘            │
 B5 (any time before D1)                     │
-E1, E2 (any time) ─> E3 (after D1) ─────────┘
+E1, E2, E3 ingest (any time) ─> E4 (after D1) ┘
 F1, F3 (any time); F4 (after D1)
 ```
 
 The A100 critical path is A1 → A2 → A3 → B2 → B3 → C4 → D1 → D2/D3 →
-(E3). Mac work (B1, B4, B5, C1–C3, D4, F1, F3) fills the gaps.
+E4. Mac work (B1, B4, B5, C1–C3, D4, F1, F3) fills the gaps; E1–E3
+ingestion runs on the box whenever it is otherwise idle.
 
 ## 3. Superseded and parked
 
