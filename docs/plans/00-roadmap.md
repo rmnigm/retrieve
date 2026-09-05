@@ -1,137 +1,261 @@
-# Plans roadmap — ordered work queue
+# Plans roadmap — the master plan
 
-Read this first. It orders the other documents in [docs/plans/](.) and
-records what is actually done.
+**Read this first.** This is the single ordered work queue for the
+repository. Every other document in [docs/plans/](.) is detail for one
+phase of this queue; none of them fixes an order, this file does. If you
+are an agent starting a session: read [`../../CLAUDE.md`](../../CLAUDE.md),
+then this file top to bottom, then only the plan section your step names.
 
-**Conventions used here.** A plan lives in this directory while it is
-either a live instruction set or a record of intent whose validation
-hasn't signed off. Once neither is true it moves to
-[archive/](archive/). System behaviour is documented in
-[../system/](../system/), never here — if you want to know how something
-*works*, those are the maintained references; a plan only tells you why
-it was built that way.
+**Conventions.** A plan lives in this directory while it is either a
+live instruction set or a record of intent whose validation hasn't
+signed off. Once neither is true it moves to [archive/](archive/). System
+behaviour is documented in [../system/](../system/), never here — if you
+want to know how something *works*, those are the maintained references;
+a plan only tells you why it was built that way.
+
+**How to keep this file true.** Each step below has a checkbox, the plan
+section it executes, where it runs (`Mac` = this CUDA-less dev machine,
+`A100` = the GPU box), its gate, and what it unblocks. When you finish a
+step: run its gate, append the validation record to the *plan's own*
+record section (the model is
+[cuda-silvertorch-handoff.md §13](cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360)),
+then flip the checkbox here with the date and commit. Do not start a
+step whose dependencies are unchecked. Do not reorder steps without
+rewriting the dependency notes. When a phase is fully checked, move its
+plan to `archive/` and shorten its entry here to one line under *Done*.
 
 ---
 
-## Open work
+## 0. Goal, deadline, branch
 
-Everything in this section is unfinished. Everything below it is history.
+**Goal.** A reproducibility paper on SilverTorch (Meta) and LiNR
+(LinkedIn) built on this repository: our from-the-paper Triton
+reimplementation, Meta's official kernels as the reference, one correct
+benchmark harness, public datasets up to the papers' scale.
+Plan: [reproducibility-paper.md](reproducibility-paper.md).
 
-### 1. GPU validation of the refactor track — **blocking**
+**Deadline.** ECIR 2027 Reproducibility track — abstract **12 Oct 2026**,
+paper **19 Oct 2026**, 12 LNCS pages, notification 7 Dec 2026. The
+minimal ECIR cut is the paper plan's P0 gap list (its §B.3 and §C.5);
+everything marked *SIGIR* below is for the ≈ Feb 2027 full version. Six
+weeks from 2026-09-05: the A100 is the bottleneck, so GPU steps are
+ordered first and Mac-side steps run in parallel with them.
 
-Branch `refactor/kernels-eval` carries the whole K1–K9 / E1–E8 refactor
-plus the new CUDA backend, and **none of it has run on a GPU**. Two
-ordered runbooks, both with empty sign-off blocks:
+**Branch.** `feat/cute-dsl-scorer` = `main` + the `refactor/kernels-eval`
+track + the CUDA and CuTe SilverTorch backends; 23 commits ahead of
+`main`, nothing merged. Step A4 merges it. After that, one branch per
+phase off `main`.
 
-- [refactor-validation-handoff.md](refactor-validation-handoff.md) — 8
-  steps covering the library + harness refactor, with pass criteria,
-  behaviour deltas, and six named fallbacks.
-- [cuda-silvertorch-handoff.md](cuda-silvertorch-handoff.md) — build,
-  parity, and benchmark runbook for `SilverTorch(backend="cuda")`.
+**Decisions already taken (2026-09-05), do not reopen.** Meta's
+`meta-recsys/silvertorch` ops become the reference backend
+(`backend="official"`); our CUDA C++ and CuTe DSL backends are deleted
+after the official parity gate; Triton stays and gets the kernel effort;
+the harness is rewritten rather than patched; the paper targets ECIR
+first. Rationale in the four plans and in *Done* below.
 
-Until these pass, no result produced on this branch is trustworthy and
-the two implemented plan docs stay in place.
+## 1. The queue
 
-### 2. Publication blocker — goodreads oracle rerun
+Effort is in focused days from the plans; "A100 h" is wall time on the
+box. Plan section references: **H** =
+[evaluation-harness-v2.md](evaluation-harness-v2.md), **O** =
+[silvertorch-official-integration.md](silvertorch-official-integration.md),
+**P** = [reproducibility-paper.md](reproducibility-paper.md) (gaps G1–G16
+in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
 
-Goodreads d128 + d256 filter sweeps must be re-run against a fresh
-oracle before their numbers can be cited. The *cause* is fixed (E6: the
-oracle cache is now keyed by a content fingerprint, so same-shape stale
-caches recompute themselves), but the affected runs predate the fix.
-Do this after item 1 passes; the first run rebuilds each sweep's oracle
-once.
+### Phase A — unblock the tree (A100, week 1)
 
-### 3. Deferred kernel optimizations
+- [ ] **A1 — golden baseline on the old harness.** H §6 WP-0 (A100,
+  0.5 d). Commit the 3-line `users_limit` row-count fix; run the golden
+  cells on goodreads-d128 `c0_genre` (all five algos, `triton` + `torch`)
+  and arxiv-d128 `c0_maincat` (`silvertorch`, `triton` only — the cuda /
+  cute columns in H's text are void, see H's amendment). Gate: golden
+  JSONs committed under `evaluation/golden/`. Unblocks: A4, C4. Also
+  closes the harness half of
+  [refactor-validation-handoff.md](refactor-validation-handoff.md)
+  (steps 4–7) — record the result there.
+- [ ] **A2 — pin and build the official package.** O §10 WP-0 (A100,
+  0.5 d). `uv sync --extra official`; upstream suite green; sha, `nvcc`
+  and build log in `docs/plans/official-silvertorch-artifacts/`. Gate:
+  build < 5 min, `torch.ops.st.fused_kmean_ann` exists. Unblocks: A3, B2.
+- [ ] **A3 — official op facts.** O §10 WP-1 (A100, 0.5 d): bit-order
+  probe, syncs and launches per op, graph-capture attempt, parse cost,
+  the `per_embedding_scale` overflow. Gate: O §3 confirmed or corrected
+  in O's record section. Unblocks: B1 (the adapter is written against
+  measured facts, not read ones).
+- [ ] **A4 — merge to `main`.** After A1 passes: merge
+  `feat/cute-dsl-scorer` into `main` (library gates passed 2026-09-02,
+  harness golden passed in A1). Delete the merged branches. Everything
+  below happens on phase branches off `main`.
 
-Stages 1+2 took the big levers. Two remain, no committed timeline:
+### Phase B — official backend, parity, deletion (weeks 1–2)
 
-1. Hardware popcount in `oporp_1bit_match_topk` (PTX dump → maybe swap
-   SWAR for `popc.b64`).
-2. Allocator hygiene in `oporp_1bit_match_topk` /
-   `fused_masked_knn_topk` (drop the `torch.full(-inf)` pre-fill;
-   replace `cat`-to-pad with pre-allocate-and-slice).
+- [ ] **B1 — adapter + tests.** O §5, §10 WP-2 (Mac, 2 d): `backend=
+  "official"` in `SilverTorch`, `require_official`, parity tests T1–T7.
+  Gate: `ruff` clean, suite collects and skips on the Mac. Needs A3.
+- [ ] **B2 — parity gate.** O §10 WP-3 (A100, 0.5 d). Gate: phase-3
+  scores `torch.equal` on the int32 path on every regime, bloom ⊇ check
+  and FPR at matched memory recorded in O's record section. **Unblocks
+  B4 (deletion) — never delete before this is green.**
+- [ ] **B3 — kernel head-to-head, Triton vs official.** O §9a/§9b, WP-4
+  (A100, 1 d). Gate: JSON + tables appended to O. This is paper gap G2.
+- [ ] **B4 — delete the CUDA C++ and CuTe backends.** O §7, WP-5 (Mac,
+  1 d). Tag the parent commit `cuda-cute-backends-final`; move
+  [cuda-silvertorch-handoff.md](cuda-silvertorch-handoff.md),
+  [cuda-silvertorch-phase2.md](cuda-silvertorch-phase2.md),
+  [cute-dsl-scorer.md](cute-dsl-scorer.md) and
+  [cute-dsl-scorer-artifacts/](cute-dsl-scorer-artifacts/README.md) to
+  `archive/`; rewrite the system docs O §7 lists. Gate: suite green on
+  the A100, collect-only on the Mac, `git grep -il "cute\|codesigned_probe_score_cuda"`
+  hits only `docs/plans/archive/`. Needs B2.
+- [ ] **B5 — salt as a buffer.** O §8 TF-2 (Mac, 0.5 h; validate with
+  `test_bloom_hash.py` on the A100). Do before any campaign timing.
 
-### 4. Thesis results expansion
+### Phase C — harness v2 (Mac work in parallel with B; A100 gate in week 3)
 
-> **Note on references.** This section was written against
-> `docs/thesis/*.md` chapter drafts and `docs/thesis/results-data/` CSVs
-> that no longer exist — the thesis moved to LaTeX, and `docs/thesis/`
-> now holds only `main.tex`, `references.bib`, and `figures/`. The work
-> items are still valid; resolve chapter and figure references against
-> the LaTeX sources.
+Backends everywhere in H are now `triton | torch | official` (H's
+amendment). The official backend is eager-only (O D7), so H's `graph`
+mode applies to `triton` and `torch` only.
 
-**4a — Harness schema extensions** (library untouched). New latency /
-memory statistics are additive fields on `PerfStats` in
-[measure.py](../../evaluation/retrieval/measure.py); pass-level items
-land in [passes.py](../../evaluation/retrieval/passes.py). Making these
-one-field changes was E5.2's purpose.
+- [ ] **C1 — `bench.py`, `metrics.py`, `algos.py` + tests.** H §6 WP-1
+  (Mac, 2 d). Needs A1 (golden exists). Includes O §6.2 / WP-6: the
+  `official` path in the `PATHS` table.
+- [ ] **C2 — `config.py`, `data.py`, `oracle.py` + tests.** H §6 WP-2
+  (Mac, 1.5 d).
+- [ ] **C3 — `run.py`, `cli.py`, deletions, docs.** H §6 WP-3 (Mac,
+  1.5 d): delete the old harness files H §5 lists, rewrite
+  [../system/evaluation.md](../system/evaluation.md) to H §2, archive
+  [evaluation-refactor.md](evaluation-refactor.md) and the harness half
+  of the refactor runbook.
+- [ ] **C4 — GPU gate.** H §6 WP-4 (A100, 1 d). Gate: quality within
+  1e-6 of the A1 golden, graph latency within 5 %, `cudagraph_skips ==
+  0`, `jaccard_vs_first@100 == 1.0` torch-vs-triton, one `official` cell
+  runs end to end on goodreads-d128 `c0_genre` with jaccard ≥ 0.99 (O
+  WP-6's gate). Unblocks: D1.
 
-1. `throughput_qps` — removes the rate-statistic ambiguity in the Pareto
-   plots.
-2. `mean_ms` alongside `median_ms`.
-3. `p99_ms` (ideally `p999_ms`) — required for any serving-SLO claim.
-4. `build_time_s`, ideally split per phase (encode / quantize / cluster /
-   assemble).
-5. `topk_ids_jaccard_vs_torch` — a stronger cross-backend parity
-   statistic than `recall_abs_diff`.
-6. Per-kernel timing + occupancy via Nsight Compute. Heaviest item;
-   manual, one-off per kernel.
-7. Per-query latency vectors, not just quantiles — enables violins and
-   paired-permutation tests without re-running.
+**Deadline fallback.** If C4 is not green by the end of week 3, add
+mean / p95 / p99 / QPS and per-query latency vectors to the *old*
+harness's `measure.py` (H §2 protocol, ½ d) and run Phase D on it; the
+rewrite then lands for the SIGIR version.
 
-Roughly ordered by cost: 1–3 cheap, 4–5 next, 6–7 need dedicated
-profiling.
+### Phase D — campaign and baselines (A100, weeks 3–4)
 
-**4b — Measurement gap re-runs** (no schema change, just more cells):
+- [ ] **D1 — full campaign rerun.** H §6 WP-5 + O WP-7 (A100 ≈ 24 h wall
+  + 0.5 d): four datasets × dims × `{triton, torch, official}` × seeds
+  {0, 1, 2} on headline sweeps, `n_probe ∈ {24, 32}`, the S9 co-design
+  ablation cells. Closes in one pass: the goodreads oracle rerun (old
+  open item 2), P gaps G3 (P99/QPS), G4 (seeds), G7, G8 (cross-dataset
+  deep sweeps), old §4b items 1, 3, 4, 5, 7. Gate: H WP-5's.
+- [ ] **D2 — external baselines.** P G5 (A100, 2–3 d): Faiss-GPU
+  IVF-Flat, Faiss-CPU IVF-Flat, HNSW, cuBLAS brute-force floor at
+  matched recall, as harness algos. *ECIR: Faiss + HNSW suffice (P
+  §C.5); cuVS / Filtered-DiskANN / ACORN are SIGIR (G13, G14).*
+- [ ] **D3 — bloom FPR and memory vs width.** P G6 (A100, 1–2 d), on
+  both blooms (ours and official), real attributes.
+- [ ] **D4 — `report.py`.** H §6 WP-6 (Mac, 1.5 d): thesis/paper tables
+  and figures from the JSONL only, plus the methodology paragraph.
 
-1. yambda-5b-d256 quality config.
-2. `SimHashKNN` `k_bits` deep sweep on goodreads-d128.
-3. Multi-seed re-run on one representative cell (goodreads-d128, seeds
-   0–4).
-4. Extended batch-size grid {1, 4, 16, 64, 256, 1024} on arxiv-d128,
-   perf-only (quality is batch-size invariant).
-5. K=10 quality runs on the existing quality configs — a one-line YAML
-   edit.
-6. arXiv per-clause selectivity CSV extraction, mirroring the goodreads
-   one. CPU-bound.
-7. Cross-dataset deep-sweep coverage: only one deep-sweep exists per
-   algorithm (`linr_v3` on goodreads-d128, `silvertorch` on
-   arxiv-d128), so each figure is locked to a single dataset — an
-   obvious "is this dataset-specific?" reviewer question. Add
-   `deep_sweep_linr_v3_arxiv_d128.yaml` and
-   `deep_sweep_silvertorch_goodreads_d128.yaml`, then re-facet the
-   corresponding plots to overlay or grid by dataset.
+### Phase E — scale (GPU box in parallel with D; ECIR gets E1–E3 if time permits)
 
-Item 7 is recommended before submission; the rest unblock specific
-figures.
+- [ ] **E1 — Yambda full catalog with attributes.** D §4.3 fallback
+  (A100 ≈ 1 h): 9.39 M tracks, artist / album / duration clauses; the
+  cheapest ≥ 5 M attributed set and a one-line upgrade of the existing
+  pipeline. Gate: `item_attrs_narrow.pt` + oracle built; one filter cell
+  runs.
+- [ ] **E2 — PubMed + MedCPT, ~36 M articles.** D §4.1 (download-bound,
+  102 GB, no encoding): the precomputed ≥ 10 M semantic-search set with
+  year / MeSH / type attributes. Gate: harness layout on disk, `none` +
+  one filter cell run.
+- [ ] **E3 — campaign cells on E1 / E2.** Partial G10 (real 10 M-class
+  data). Needs D1's harness state.
+- [ ] **E4 — *SIGIR*: Amazon Reviews 2023 (48 M, ≈ 11 A100 h encode),
+  KuaiRand-27K (32 M, recsys), Cohere Wikipedia 80 M stretch, YFCC-10M
+  for cross-paper comparability.** D §4.2–§4.5. Plus the synthetic
+  scale ladder and 240 M / 1 B stress (G10).
 
-### 5. Deferred feature plans
+### Phase F — the paper (weeks 4–6; F1 and F3 can start any day)
 
-Both are **not started**, and both have stale anchors — each carries a
-banner listing what rotted. Re-scope before executing.
+- [ ] **F1 — reframe + deviations table.** P G1 (Mac, 1 d): QuantizedIVF
+  is SilverTorch Algorithm 1; the deviations table incl. O's findings
+  (official bloom hash ≠ ours, official eager-only, the
+  `per_embedding_scale` overflow).
+- [ ] **F2 — "official vs reimplementation" section.** O §10 WP-9 (1 d),
+  from B3 + D1 numbers.
+- [ ] **F3 — provenance + hardware/software disclosure.** P G9 (hours).
+- [ ] **F4 — artifacts.** P §B.7: tagged `torchretrieve` release, Zenodo
+  DOI (incl. the pinned official sdist), HF datasets + oracles + results,
+  one-command `reproduce-paper`, anonymised mirror for review.
+- [ ] **F5 — write, per P §C.4 page budget.** Abstract 12 Oct, paper
+  19 Oct 2026.
 
-- [torch-export-refactor.md](torch-export-refactor.md) — layer-side
-  `mode=` flags / sibling `forward_*` methods so every layer traces
-  under `torch.export`. The kernel-side surface is already in shape.
-  Revisit when there is a concrete consumer for `.pt2` artifacts.
-- [live-update-api.md](live-update-api.md) — upsert / delete for the
-  LiNR family + filters via a `LiveIndexMixin`. Independent of the
-  kernel work. Its `RetrievalModule` dependency is already satisfied.
+### Phase G — after ECIR (SIGIR version, ≈ Feb 2027)
 
-### 6. Research catalog
+- [ ] **G-a — Triton transposed bloom (TF-1) + retune (TF-3/4).** O §8,
+  WP-8 (2 d + A100). Gate: parity bit-exact, bloom kernel-only within
+  1.3× of official. Then rerun B3.
+- [ ] **G-b — P gaps G10–G16** (scale ladder, pass-rate sweep, co-design
+  ablation depth, cuVS, Filtered-DiskANN / ACORN, V3 bit width, extended
+  batch grid) and E4.
+- [ ] **G-c — ECIR 2027 Resource track for the library itself**
+  (deadline 2 Nov 2026 — only if F5 lands early; otherwise skip).
+- [ ] **G-d — deferred kernel optimizations** (`oporp_1bit_match_topk`
+  hardware popcount; allocator hygiene in the LiNR kernels). No timeline.
+- [ ] **G-e — parked feature plans**:
+  [torch-export-refactor.md](torch-export-refactor.md),
+  [live-update-api.md](live-update-api.md). Not started; both carry
+  stale-anchor banners; re-scope before executing. Research menu:
+  [future-work-and-research.md](future-work-and-research.md).
 
-[future-work-and-research.md](future-work-and-research.md) — a vetted
-menu, not a queue: engineering items (GPU CI, fused top-k selection,
-persistent kernels, RaBitQ / int4, AOTI serving demo) and research
-directions with prior-art citations (filter-aware IVF,
-selectivity-adaptive planning, MoL re-ranking, GPU NOT-predicates,
-streaming freshness, 100M–1B scaling). Includes an impact × cost table.
+## 2. Dependencies at a glance
+
+```
+A1 ─┬─> A4 (merge)
+    └─> C1 ─> C2 ─> C3 ─> C4 ─┬─> D1 ─> D4 ─┐
+A2 ─> A3 ─> B1 ─> B2 ─┬─> B4   │   D2, D3 ──┼─> F2, F5
+                      └─> B3 ──┘            │
+B5 (any time before D1)                     │
+E1, E2 (any time) ─> E3 (after D1) ─────────┘
+F1, F3 (any time); F4 (after D1)
+```
+
+The A100 critical path is A1 → A2 → A3 → B2 → B3 → C4 → D1 → D2/D3 →
+(E3). Mac work (B1, B4, B5, C1–C3, D4, F1, F3) fills the gaps.
+
+## 3. Superseded and parked
+
+- **Refactor validation runbook** — library steps passed on the A100
+  2026-09-02 (see *Done*); harness steps 4–7 are replaced by A1. The two
+  implemented plans ([kernels-layers-design.md](kernels-layers-design.md),
+  [evaluation-refactor.md](evaluation-refactor.md)) archive with C3.
+- **Thesis results expansion (old item 4)** — its 4a schema items are H
+  §2/§3, its 4b reruns are D1; the section is gone from this file.
+- **Goodreads oracle rerun (old item 2)** — D1.
+- **Deferred kernel optimizations (old item 3)** — G-d.
 
 ---
 
 ## Done
 
-### CUDA SilverTorch backend — implemented 2026-07-06, **not yet GPU-run**
+### CuTe DSL SilverTorch backend — implemented and benchmarked 2026-09-02
+
+`SilverTorch(backend="cute")`: a one-to-one port of the CUDA C++ backend
+into NVIDIA's CuTe DSL (`nvidia-cutlass-dsl`, optional `cute` extra),
+authored and validated on the A100 in one session on
+`feat/cute-dsl-scorer`. Same three kernels plus the generic fallback,
+same op signatures, same transposed-bloom buffers (imported from the
+cuda module, not copied), so a cute checkpoint is byte-identical to a
+cuda one; bit-exact against both cuda and Triton on every regime.
+`Backend` is now four-valued. The question it answers — kernel size and
+speed of the DSL against C++ — is settled in the plan's §5: kernel-only
+the two are equal, the port's real cost was the DSL launch (63–72 µs of
+host time vs 4–11 µs), trimmed to wall-clock parity at B=16 and gone
+under CUDA-graph replay, which is the harness's deployed path.
+
+Plan, decisions, spike findings and the validation record:
+[cute-dsl-scorer.md](cute-dsl-scorer.md); raw scripts and outputs:
+[cute-dsl-scorer-artifacts/](cute-dsl-scorer-artifacts/README.md);
+mechanism: [../system/kernels.md](../system/kernels.md#codesigned_probe_score_cute--the-cute-dsl-backend).
+
+### CUDA SilverTorch backend — implemented 2026-07-06, **validated + tuned on A100 2026-09-02**
 
 A second implementation of SilverTorch's Algorithm 1 phases 2+3 in CUDA
 C++, selected by `SilverTorch(backend="cuda")`. Where the Triton kernel
@@ -141,7 +265,7 @@ masks, then masked `__dp4a` scoring. Scores are bit-identical to the
 Triton backend by construction; ids match up to permutation within tied
 scores.
 
-**Phase 2 (2026-09-01, also not GPU-run)** closed the three gaps that
+**Phase 2 (2026-09-01)** closed the three gaps that
 first pass left, per
 [cuda-silvertorch-phase2.md](cuda-silvertorch-phase2.md). `filter_mode=
 "exact"` now runs on cuda too — as a *second phase-2 mask kernel*
@@ -158,6 +282,19 @@ real build failure so a compile error can no longer masquerade as a test
 skip, `if constexpr` where a dead ternary arm was doing out-of-range
 pointer arithmetic, and the tie-tolerant id gate above.
 
+**A100 validation (2026-09-02, commit `0f7792c`).** The runbook ran
+§4–§6: 47/47 parity tests bit-exact, `IDP.4A` in SASS, no `LDSM` /
+`BAR.SYNC` in the scorer. As shipped the CUDA path was *slower* than
+Triton at every `B=16` large-`P` regime (one 128 B row per warp in
+flight); the fix — `SEG = D/16` lanes per item with one `int4` per lane,
+ids prefetched one iteration ahead, a thread-per-slot clause-mask kernel,
+`DEFAULT_CONFIG = (128, 8, 1)` — took kernel-only bloom scoring from
+147.8 µs to 58.6 µs against Triton's 124.6 µs (B=16, P=58k, D=128) and
+left no-filter and exact within ±3 % of Triton. Gates (1)–(3b) pass; (4)
+end-to-end was not run (no dataset on the box); ncu was blocked in the
+container. Full record:
+[cuda-silvertorch-handoff.md §13](cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360).
+
 Design and constraints:
 [../system/kernels.md](../system/kernels.md#codesigned_probe_score_cuda--the-cuda-c-backend).
 Phase-2 plan: [cuda-silvertorch-phase2.md](cuda-silvertorch-phase2.md).
@@ -170,7 +307,7 @@ which matters beyond SilverTorch: every other layer dispatches
 there. See
 [../system/architecture.md](../system/architecture.md#backend-dispatch).
 
-### Refactor track — implemented 2026-07-06, pending validation
+### Refactor track — implemented 2026-07-06, library gates passed 2026-09-02, harness gates pending
 
 Two structure-preserving cleanup plans written from a full audit of both
 packages. They change no measured numbers and no op schemas. All code

@@ -30,7 +30,11 @@ Two families:
 Most modules accept `backend="triton"` (default) or `backend="torch"`. The Triton path runs fused
 kernels; the torch path is pure PyTorch (still GPU) and is `torch.compile`-friendly. Results are
 equivalent. `PostfilterKNN` / `PostfilterKNNInt8` accept the flag for API symmetry but always run
-the same code (cuBLAS already covers their case).
+the same code (cuBLAS already covers their case). `SilverTorch` alone also accepts
+`backend="cuda"` (CUDA C++, JIT-built on first forward, needs `nvcc` + `ninja`) and
+`backend="cute"` (the same kernels in the CuTe DSL, `pip install "torchretrieve[cute]"`); both
+are bit-identical to the Triton path in every `filter_mode`. Any other module given `"cuda"` or
+`"cute"` runs its torch path.
 
 ## LiNR modules
 

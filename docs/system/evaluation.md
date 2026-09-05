@@ -262,7 +262,7 @@ uv run evaluate \
     --algo <name> \
     --output <output-dir>/<algo>.json \
     [--filter-kind <none|clause|bloom> ...] \
-    [--backend {triton|torch|cuda} ...] \
+    [--backend {triton|torch|cuda|cute} ...] \
     [--sweep <sweep_name>] \
     [--skip-quality]
 ```

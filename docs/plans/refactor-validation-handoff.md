@@ -1,7 +1,12 @@
 # GPU validation handoff — `refactor/kernels-eval`
 
-> **Status:** ready for execution (written 2026-07-06, verified against the branch's source
-> tree). This is the runbook a GPU test agent executes **top-to-bottom** to validate the
+> **Status:** **partially executed.** Steps 2–3 passed de facto on an A100 on 2026-09-02:
+> the full `retrieve/tests/` suite is green at the branch tip (286 tests,
+> [cute-dsl-scorer-artifacts/wp4/pytest-final.txt](cute-dsl-scorer-artifacts/wp4/pytest-final.txt))
+> and the K2 tracing caveat did not bite. Steps 1 and 4–7 (eval CPU tests, compile gate on a real
+> cell, per-kernel perf gates, golden-run diff, orchestrator smoke) have **not** run — no dataset
+> was on the box. Written 2026-07-06, verified against the branch's source
+> tree. This is the runbook a GPU test agent executes **top-to-bottom** to validate the
 > kernels/layers + evaluation refactor before it merges. The two source plans —
 > [kernels-layers-design.md](kernels-layers-design.md) and
 > [evaluation-refactor.md](evaluation-refactor.md) — stay intact until every gate here passes;
