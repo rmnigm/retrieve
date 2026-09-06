@@ -10,6 +10,12 @@
   (the Triton kernels need CUDA; C4 covers them).
 - ``build`` refuses cells ``PATHS`` marks ``None``, invalid combos and, until roadmap B1
   lands, ``backend="official"``.
+
+The three SilverTorch wrappers (``none`` / ``clause`` / ``bloom``) are built once per session
+with ``n_iter=2`` (``silvertorch_modules``): the k-means build is the cost, not the
+assertions, and every test that shares them is read-only on the module beyond ``.k``, which
+``_check_k_slice`` sets before it reads. ``test_silvertorch_query_params_revalidate`` mutates
+``n_probe`` and builds its own.
 """
 
 from __future__ import annotations
@@ -140,6 +146,23 @@ def _data(seed: int = 0):
     return x, q, attrs, qa
 
 
+ST_PARAMS = {"n_lists": 8, "n_probe": 4, "m_bits": 64, "k_hash": 2, "n_iter": 2}
+
+
+@pytest.fixture(scope="session")
+def silvertorch_modules() -> dict[str, A.Silvertorch]:
+    """``filter_kind -> Silvertorch`` wrapper on the torch path over ``_data()``, built once."""
+    x, _, attrs, _ = _data()
+    out = {}
+    for fk in A.FILTER_KINDS:
+        f = A.build_filter(fk, attrs, backend="torch", m_bits=64, k_hash=2)
+        out[fk] = A.build(
+            "silvertorch", x, k=8, backend="torch", filter_kind=fk, filter_mod=f,
+            item_attrs=attrs, params=ST_PARAMS,
+        )  # fmt: skip
+    return out
+
+
 def _check_k_slice(module, call, k_big: int = 8, k_small: int = 3) -> None:
     module.k = k_big
     before = {n: b.clone() for n, b in module.state_dict().items()}
@@ -196,17 +219,18 @@ def test_layer_one_bit_knn_k_not_baked():
     _check_k_slice(m, lambda: m(q, candidate_ids=cand, counts=counts))
 
 
-@pytest.mark.parametrize("mode", ["none", "exact", "bloom"])
+@pytest.mark.parametrize("fk", ["none", "clause", "bloom"])
 @torch.inference_mode()
-def test_layer_silvertorch_k_not_baked(mode):
-    x, q, attrs, qa = _data()
-    bloom = {"m_bits": 64, "k_hash": 2} if mode == "bloom" else {}
-    m = SilverTorch(k=8, n_lists=8, n_probe=4, filter_mode=mode, backend="torch", **bloom)
-    if mode == "none":
-        m.register_index(x)
+def test_layer_silvertorch_k_not_baked(fk, silvertorch_modules):
+    """The ``SilverTorch`` layer itself (``filter_mode`` none / exact / bloom), reached through
+    the session wrapper's ``.idx`` — the same registered layer, called directly."""
+    _, q, _, qa = _data()
+    m = silvertorch_modules[fk].idx
+    assert isinstance(m, SilverTorch)
+    assert m.filter_mode == {"none": "none", "clause": "exact", "bloom": "bloom"}[fk]
+    if fk == "none":
         _check_k_slice(m, lambda: m(q))
     else:
-        m.register_index(x, item_clause_attrs=attrs)
         _check_k_slice(m, lambda: m(q, query_clause_attrs=qa))
 
 
@@ -219,16 +243,17 @@ def _cells():
 
 @pytest.mark.parametrize("algo,fk", list(_cells()))
 @torch.inference_mode()
-def test_wrapper_k_setter_slices(algo, fk):
+def test_wrapper_k_setter_slices(algo, fk, silvertorch_modules):
     x, q, attrs, qa = _data()
-    f = A.build_filter(fk, attrs, backend="torch", m_bits=64, k_hash=2)
-    params = {
-        "silvertorch": {"n_lists": 8, "n_probe": 4, "m_bits": 64, "k_hash": 2},
-        "linr_v3": {"candidate_pool": 64},
-    }.get(algo, {})
-    m = A.build(
-        algo, x, k=8, backend="torch", filter_kind=fk, filter_mod=f, item_attrs=attrs, params=params
-    )
+    if algo == "silvertorch":
+        m = silvertorch_modules[fk]
+    else:
+        f = A.build_filter(fk, attrs, backend="torch", m_bits=64, k_hash=2)
+        params = {"linr_v3": {"candidate_pool": 64}}.get(algo, {})
+        m = A.build(
+            algo, x, k=8, backend="torch", filter_kind=fk, filter_mod=f, item_attrs=attrs,
+            params=params,
+        )  # fmt: skip
     assert m.backend == "torch" and m.capturable is True
     _check_k_slice(m, lambda: m(q, qa if fk != "none" else None))
 
@@ -236,15 +261,12 @@ def test_wrapper_k_setter_slices(algo, fk):
 # ----- memory, query params, build refusals -----------------------------------------
 
 
-def test_index_bytes_includes_filter_submodule():
+def test_index_bytes_includes_filter_submodule(silvertorch_modules):
     x, _, attrs, _ = _data()
     f = A.build_filter("clause", attrs, backend="torch")
     m = A.build("linr_v1_filter_mask", x, k=4, backend="torch", filter_kind="clause", filter_mod=f)
     assert m.filter is f and index_bytes(m) == index_bytes(m.idx) + index_bytes(f) > 0
-    st = A.build(
-        "silvertorch", x, k=4, backend="torch", filter_kind="bloom", item_attrs=attrs,
-        params={"n_lists": 8, "n_probe": 4, "m_bits": 64, "k_hash": 2},
-    )  # fmt: skip
+    st = silvertorch_modules["bloom"]
     assert st.filter is None and "idx.bloom_sigs" in st.state_dict()
     assert A.build_filter("none", None) is None
 

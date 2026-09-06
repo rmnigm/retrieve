@@ -2,7 +2,10 @@
 
 Plain torch path: scores the model's last-position query against the full item
 catalog, masks history (and padding), takes top-K, and computes
-NDCG/Recall/Coverage at the requested cutoffs. No `retrieve` framework.
+NDCG/Recall/Coverage at the requested cutoffs. No `retrieve` layers; the
+metric sums are `retrieval.metrics` (shared with the harness — the one
+`training → retrieval` import, so the two packages depend on each other
+through that module only; `encode.py` is the import the other way).
 """
 
 from __future__ import annotations
