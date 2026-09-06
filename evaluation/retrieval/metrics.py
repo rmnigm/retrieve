@@ -16,16 +16,13 @@ counts as a hit. Two target modes:
   the old harness's per-``k`` ``nt_k`` semantics, so oracle recall stays
   golden-comparable.
 
-The per-row arithmetic in ``per_row`` is the old ``metrics.py`` verbatim
+The per-row arithmetic in ``per_row`` is the pre-v2 ``metrics.py`` verbatim
 (float32, same op order); ``tests/test_metrics.py`` asserts the running-sum
-means equal the old per-row means to 1e-9. The four ``*_at_k`` functions and
-``accumulate_metrics`` / ``finalize_metrics`` are the old per-row API, kept
-for ``passes.py`` until C3 deletes it.
+means equal the old per-row means to 1e-9. ``training/evaluate.py`` uses the
+same three functions for the per-epoch SASRec evaluation.
 """
 
 from __future__ import annotations
-
-from collections import defaultdict
 
 import torch
 from torch import Tensor
@@ -62,9 +59,7 @@ def per_row(hits: Tensor, num_targets: Tensor, k: int) -> dict[str, Tensor]:
 def accumulator(ks: list[int], device: torch.device | str) -> dict:
     """Zeroed running sums for every ``<metric>@<k>`` plus the row count ``n``."""
     acc: dict = {
-        f"{m}@{k}": torch.zeros((), dtype=torch.float64, device=device)
-        for k in ks
-        for m in METRICS
+        f"{m}@{k}": torch.zeros((), dtype=torch.float64, device=device) for k in ks for m in METRICS
     }
     acc["n"] = 0
     return acc
@@ -114,44 +109,3 @@ def jaccard_at_k(ids_a: Tensor, ids_b: Tensor, k: int) -> float:
     inter = _hits(a, b).sum(dim=1).double()
     union = (a != -1).sum(dim=1) + (b != -1).sum(dim=1) - inter
     return torch.where(union > 0, inter / union.clamp(min=1), torch.ones_like(inter)).mean().item()
-
-
-# ----- old per-row API (consumed by passes.py and the pre-v2 tests; C3 deletes) -----
-
-
-def recall_at_k(candidate_ids: Tensor, targets: Tensor, num_targets: Tensor, k: int) -> Tensor:
-    return per_row(_hits(candidate_ids[:, :k], targets), num_targets, k)["recall"]
-
-
-def precision_at_k(candidate_ids: Tensor, targets: Tensor, num_targets: Tensor, k: int) -> Tensor:
-    return per_row(_hits(candidate_ids[:, :k], targets), num_targets, k)["precision"]
-
-
-def mrr_at_k(candidate_ids: Tensor, targets: Tensor, num_targets: Tensor, k: int) -> Tensor:
-    return per_row(_hits(candidate_ids[:, :k], targets), num_targets, k)["mrr"]
-
-
-def ndcg_at_k(candidate_ids: Tensor, targets: Tensor, num_targets: Tensor, k: int) -> Tensor:
-    return per_row(_hits(candidate_ids[:, :k], targets), num_targets, k)["ndcg"]
-
-
-def accumulate_metrics(
-    candidate_ids: Tensor,
-    targets: Tensor,
-    num_targets: Tensor,
-    ks: list[int],
-    accum: dict[str, list[float]] | None = None,
-) -> dict[str, list[float]]:
-    """Old API: per-row values appended as Python floats (one sync per call)."""
-    if accum is None:
-        accum = defaultdict(list)
-    for k in ks:
-        rows = per_row(_hits(candidate_ids[:, :k], targets), num_targets, k)
-        for m in METRICS:
-            accum[f"{m}@{k}"].extend(rows[m].cpu().tolist())
-    return accum
-
-
-def finalize_metrics(accum: dict[str, list[float]]) -> dict[str, float]:
-    """Old API: plain means of the appended per-row values."""
-    return {key: sum(v) / len(v) if v else 0.0 for key, v in sorted(accum.items())}

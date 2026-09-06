@@ -1,6 +1,6 @@
 # Harness v2 suites (H §3.3, §8.2 A/J; backends per H's amendment: triton | torch | official).
 # A suite = the cells run on every listed dataset × its dims. `algos` maps each algo to the
-# backends it runs on; algos_v2.PATHS collapses backends that run the same code (linr_v1 /
+# backends it runs on; algos.PATHS collapses backends that run the same code (linr_v1 /
 # linr_v4 on `none` are one cuBLAS job) and drops (algo, filter_kind, backend) triples with
 # no code path (linr_v2 on `none`, official on anything but silvertorch).
 # `params.<algo>`: `build:` (rebuilds the index) and `query:` (n_probe / candidate_pool,

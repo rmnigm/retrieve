@@ -22,14 +22,16 @@ import math
 import pytest
 import torch
 
-from retrieval.metrics import (
-    accumulate,
-    accumulator,
-    finalize,
-    jaccard_at_k,
-    ndcg_at_k,
-    recall_at_k,
-)
+from retrieval.metrics import _hits, accumulate, accumulator, finalize, jaccard_at_k, per_row
+
+
+def recall_at_k(cand, tgt, nt, k):
+    return per_row(_hits(cand[:, :k], tgt), nt, k)["recall"]
+
+
+def ndcg_at_k(cand, tgt, nt, k):
+    return per_row(_hits(cand[:, :k], tgt), nt, k)["ndcg"]
+
 
 # ----- old contracts -------------------------------------------------------------
 
