@@ -55,6 +55,18 @@ invoke it as `uv run python -m eval_datasets.synth_arxiv`.
   throughout. This is why no filter mask needs an "item 0" fixup.
 - **Attribute tensors are 0-indexed dense**: row `i` of
   `item_attrs_narrow.pt` describes `item_id i+1`.
+- **Legacy `[N+1, …]` artifacts are accepted, not assumed.** Both layouts
+  exist in the wild: everything switched to `[N, …]` in `3b1b5b3`
+  (2026-05-25), but the copies *published on the Hub* — what `eval-fetch`
+  pulls — are still the older 1-indexed tensors with a padding row at
+  index 0, as their own README and `text_emb.meta.json` say.
+  `retrieval.loaders.drop_legacy_padding_row` recognises that row by its
+  content (all-zero for embeddings, all `-1` for attributes) and drops it,
+  and `load_filter_assets` then checks the attrs row count against
+  `item_embs`. Getting this wrong is not always loud: on the arxiv path
+  attrs and embeddings are *both* 1-indexed, so they agree with each other
+  and only the held-out target shift is wrong — `cos(query, target)` falls
+  from 0.99 to 0.62 with no error anywhere (found in A1, 2026-09-06).
 - Every subcommand writes a `prep_log.json` with row counts and
   filtering statistics next to its outputs.
 - Subcommands are individually re-runnable; `all` chains them.

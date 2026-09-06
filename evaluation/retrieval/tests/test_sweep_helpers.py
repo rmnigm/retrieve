@@ -21,8 +21,13 @@ from retrieval.algos import (
     is_valid_combo,
     supports,
 )
-from retrieval.config import FilterSweepCfg
-from retrieval.loaders import build_sweep_qa, load_query_attrs
+from retrieval.config import FilterCfg, FilterSweepCfg
+from retrieval.loaders import (
+    build_sweep_qa,
+    drop_legacy_padding_row,
+    load_filter_assets,
+    load_query_attrs,
+)
 
 # ----- build_sweep_qa -----------------------------------------------------
 
@@ -168,3 +173,70 @@ def test_load_query_attrs_too_few_rows_raises(tmp_path):
 
 def test_load_query_attrs_missing_parquet_returns_none(tmp_path):
     assert load_query_attrs(tmp_path / "nope.parquet", 10) is None
+
+
+# ----- legacy [N+1] layout ---------------------------------------------------
+#
+# The Hub copies of arxiv-papers and goodreads-work-id predate commit
+# 3b1b5b3 and ship 1-indexed tensors with a padding row at index 0. A1's
+# first GPU attempt died on it (goodreads) / would have run silently wrong
+# (arxiv), so the loader drops that row and then checks the row counts.
+
+
+def test_drop_legacy_padding_row_attrs():
+    legacy = torch.tensor([[[-1, -1]], [[3, 4]], [[5, 6]]])   # [N+1, C, A]
+    out = drop_legacy_padding_row(legacy, kind="attrs", what="t")
+    assert out.shape == (2, 1, 2)
+    assert torch.equal(out, legacy[1:])
+
+
+def test_drop_legacy_padding_row_embeddings():
+    legacy = torch.tensor([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    out = drop_legacy_padding_row(legacy, kind="emb", what="t")
+    assert out.shape == (2, 2)
+    assert torch.equal(out, legacy[1:])
+
+
+def test_drop_legacy_padding_row_leaves_modern_layout_alone():
+    # Row 0 of a 0-indexed attrs tensor may legitimately be a real item.
+    modern = torch.tensor([[[3, 4]], [[5, 6]]])
+    assert torch.equal(drop_legacy_padding_row(modern, kind="attrs", what="t"), modern)
+    # ... and an all-(-1) row that is NOT the padding row is only dropped
+    # when it sits at index 0, which is what the caller's n_items check
+    # then has to agree with.
+    embs = torch.tensor([[1.0, 0.0], [0.0, 0.0]])
+    assert torch.equal(drop_legacy_padding_row(embs, kind="emb", what="t"), embs)
+
+
+def _attrs_file(tmp_path, tensor):
+    p = tmp_path / "item_attrs_narrow.pt"
+    torch.save(tensor, str(p))
+    return FilterCfg(sweeps=[], attrs_path=str(p))
+
+
+def test_load_filter_assets_drops_legacy_pad_row(tmp_path):
+    legacy = torch.full((4, 2, 2), -1)
+    legacy[1:] = 7
+    attrs, _ = load_filter_assets(
+        "clause", _attrs_file(tmp_path, legacy), tmp_path, torch.device("cpu"), n_items=3
+    )
+    assert attrs is not None and attrs.shape[0] == 3
+    assert (attrs == 7).all()
+
+
+def test_load_filter_assets_accepts_modern_layout(tmp_path):
+    modern = torch.full((3, 2, 2), 7)
+    attrs, _ = load_filter_assets(
+        "clause", _attrs_file(tmp_path, modern), tmp_path, torch.device("cpu"), n_items=3
+    )
+    assert attrs is not None and attrs.shape[0] == 3
+
+
+def test_load_filter_assets_raises_on_misalignment(tmp_path):
+    # Neither N nor N+1-with-a-pad-row: a mask built from this would score
+    # every query against the wrong items, so it must not load.
+    wrong = torch.full((5, 2, 2), 7)
+    with pytest.raises(RuntimeError, match="filter mask would be misaligned"):
+        load_filter_assets(
+            "clause", _attrs_file(tmp_path, wrong), tmp_path, torch.device("cpu"), n_items=3
+        )

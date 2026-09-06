@@ -49,6 +49,45 @@ def resolve_path(data_dir: Path, path_str: str) -> Path:
     raise FileNotFoundError(f"{path_str!r}: tried {p.resolve()} and {candidate}")
 
 
+# ----- legacy layout ----------------------------------------------------------
+
+
+def drop_legacy_padding_row(t: torch.Tensor, *, kind: str, what: str) -> torch.Tensor:
+    """Drop row 0 of a pre-``3b1b5b3`` ``[N+1, …]`` retrieval tensor.
+
+    Commit ``3b1b5b3`` (2026-05-25) moved every retrieval-time tensor from
+    ``[N+1, …]`` — 1-indexed with a training-side padding row at index 0 —
+    to ``[N, …]`` 0-indexed dense (``docs/system/datasets.md``, *Shared
+    conventions*). The ETL, the loaders and the local data all moved
+    together, but the copies published on the Hub — the ones ``eval-fetch``
+    pulls — are the **older** artifacts: their README describes ``[N+1, …]``
+    and ``text_emb.meta.json`` still records *"row 0 of text_emb left as
+    zeros for item_id=0 padding"*.
+
+    So a fetched dataset can arrive in either layout, and the difference is
+    not always loud: goodreads crashes on the row count, while arxiv's attrs
+    and embeddings are *both* 1-indexed, agree with each other, and merely
+    shift every held-out target by one — worth ~0.36 of cosine similarity
+    against the right paper, and no error at all.
+
+    A padding row is recognised by its content, never by its position
+    alone: all-zero for an embedding matrix (impossible for an L2-normalised
+    row) and all ``-1`` for an attribute tensor (the -1 fill is "no value").
+    Anything else is returned untouched.
+    """
+    is_pad = bool((t[0] == 0).all()) if kind == "emb" else bool((t[0] == -1).all())
+    if not is_pad:
+        return t
+    logger.warning(
+        "{}: row 0 is a padding row — legacy 1-indexed [N+1, …] layout "
+        "(pre-3b1b5b3, as published on the Hub). Dropping it: {} → {} rows.",
+        what,
+        t.shape[0],
+        t.shape[0] - 1,
+    )
+    return t[1:].contiguous()
+
+
 # ----- arxiv-only sanity check ------------------------------------------------
 
 
@@ -138,7 +177,11 @@ def load_pre_encoded_arxiv(
 
     The on-disk text_emb is ``[N, D]`` — real items only (the dataset
     builders 0-index over real items; the training-side padding-token
-    convention lives only inside the encoder's ``nn.Embedding``).
+    convention lives only inside the encoder's ``nn.Embedding``). A
+    legacy ``[N+1, D]`` file loses its padding row here — see
+    ``drop_legacy_padding_row``, and note that this is the path where the
+    old layout is *silent*: attrs and embeddings agree with each other and
+    only the target shift below is wrong.
     Held-out target ids in heldout.parquet are stored as 1-indexed item
     ids and are shifted ``-1`` here to align with the 0-indexed layout.
     """
@@ -151,6 +194,7 @@ def load_pre_encoded_arxiv(
     else:
         text_emb_path = content_dir / "text_emb.pt"
         item_embs = torch.load(str(text_emb_path), map_location=device)
+    item_embs = drop_legacy_padding_row(item_embs, kind="emb", what="text_emb")
     # fp16 on disk → fp32 on device for oracle math
     item_embs = item_embs.float().contiguous()
     item_embs = F.normalize(item_embs, dim=-1)
@@ -367,12 +411,21 @@ def load_filter_assets(
     fcfg: FilterCfg,
     data_dir: Path,
     device: torch.device,
+    n_items: int | None = None,
 ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
     """Load ``(item_attrs_narrow, clause_is_reverse)`` for a filter_kind.
 
     Both ``clause`` and ``bloom`` filter_kinds run over the same narrow
     attribute tensor; only the algo on top differs. The wide-shelf
     tensor the dataset builders also write is currently unused.
+
+    ``item_attrs_narrow`` must end up ``[N, C, A]`` 0-indexed dense over the
+    same ``N`` items as ``item_embs`` — row ``i`` describes ``item_id i+1``.
+    A legacy ``[N+1, C, A]`` file (see ``drop_legacy_padding_row``) loses its
+    padding row here. Pass ``n_items`` and the agreement is *checked* rather
+    than assumed: a mismatch is a misaligned filter mask, which scores every
+    query against the wrong items, and it must fail here rather than three
+    layers down in the oracle.
     """
     item_attrs_narrow: torch.Tensor | None = None
     clause_is_reverse: torch.Tensor | None = None
@@ -385,8 +438,17 @@ def load_filter_assets(
             map_location=device,
             weights_only=True,
         )
-        # item_attrs_narrow is [N, C, A] 0-indexed dense (the dataset
-        # builders write real items only). No slice needed.
+        item_attrs_narrow = drop_legacy_padding_row(
+            item_attrs_narrow, kind="attrs", what="item_attrs_narrow"
+        )
+        if n_items is not None and item_attrs_narrow.shape[0] != n_items:
+            raise RuntimeError(
+                f"item_attrs_narrow has {item_attrs_narrow.shape[0]} rows but there are "
+                f"{n_items} items: the filter mask would be misaligned. Expected "
+                f"{n_items} (0-indexed dense) or {n_items + 1} (legacy [N+1] with a "
+                "padding row at index 0) — see docs/system/datasets.md and "
+                "retrieval.loaders.drop_legacy_padding_row"
+            )
         if fcfg.reverse_path:
             clause_is_reverse = torch.load(
                 str(resolve_path(data_dir, fcfg.reverse_path)),
@@ -401,6 +463,7 @@ __all__ = [
     "apply_users_limit",
     "assert_arxiv_prefixes",
     "build_sweep_qa",
+    "drop_legacy_padding_row",
     "load_filter_assets",
     "load_item_and_queries",
     "load_pre_encoded_arxiv",
