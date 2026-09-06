@@ -17,7 +17,7 @@ gets is decided by whether it sets `checkpoint`:
 | shape | datasets | query embeddings come from | filters |
 |---|---|---|---|
 | **sequential** | yambda-500m, yambda-5b, goodreads | a trained SASRec checkpoint, encoded at eval time | goodreads only |
-| **text** | arxiv, arxiv-synth | pre-encoded text embeddings on disk | yes |
+| **text** | arxiv, arxiv-synth, pubmed | pre-encoded text embeddings on disk | yes |
 
 A third variant, **synthetic**, is a text dataset grown to arbitrary `N`
 by interpolating between real embeddings — used for scale sweeps where a
@@ -38,6 +38,7 @@ because the latter shadows HuggingFace's `datasets` in the shared venv.
 | [`yambda.py`](../../evaluation/eval_datasets/yambda.py) | `yambda` | HF `yandex/yambda`, Listen+ branch |
 | [`goodreads.py`](../../evaluation/eval_datasets/goodreads.py) | `goodreads` | UCSD Book Graph mirror (HTTPS) |
 | [`arxiv.py`](../../evaluation/eval_datasets/arxiv.py) | `arxiv` | HF `open-index/open-arxiv` (~2.99M papers) |
+| [`pubmed.py`](../../evaluation/eval_datasets/pubmed.py) | `pubmed` | NCBI FTP MedCPT embeddings + MEDLINE baseline (~36M articles) |
 | [`synth_arxiv.py`](../../evaluation/eval_datasets/synth_arxiv.py) | — (run as a module) | an already-encoded arxiv directory |
 | [`hf_io.py`](../../evaluation/eval_datasets/hf_io.py) | `eval-fetch`, `eval-publish`, `eval-publish-checkpoint` | HF Hub push/pull |
 | [`common.py`](../../evaluation/eval_datasets/common.py) | — | shared attribute-synthesis numerics |
@@ -142,6 +143,105 @@ Embeddings are written per dimension:
 
 Configs select one via `content_subdir`.
 
+### pubmed
+
+**Status: skeleton only.** Roadmap E2 is deferred (2026-09-06) — no PubMed data
+is staged and none of the numbers below have been produced, let alone gated.
+
+`download` → `convert` → `medline` → `attrs` → `queries` → `encode_queries`.
+Source is the NCBI FTP MedCPT article-embedding release, public domain, no
+registration:
+`https://ftp.ncbi.nlm.nih.gov/pub/lu/MedCPT/pubmed_embeddings/` — 38 chunks of
+
+- `embeds_chunk_{i}.npy` — `(N_i, 768)` **float32** (verified from the npy
+  header, `descr='<f4'`; ~102 GB total),
+- `pmids_chunk_{i}.json` — the row-aligned PMID list (~400 MB total),
+- `pubmed_chunk_{i}.json` — `{pmid: {"d": date, "t": title, "a": abstract,
+  "m": mesh}}` (~44 GB total).
+
+NCBI publishes **no** checksums for that directory, so `verify` checks the
+shards structurally instead: the npy header must parse, dtype must be float32,
+width 768, and the row count must equal `len(pmids_chunk_i.json)`. The MEDLINE
+baseline *does* publish `.md5` and `verify --medline` checks those.
+
+**No dimensionality reduction.** Every dataset is benchmarked at its encoder's
+native dim (user decision 2026-09-06), so pubmed has exactly one content dir,
+`content_d768`, and `dataset-candidates.md` §4.1's PCA-to-256/128/64 plan is
+**not** implemented.
+
+#### Attribute semantics
+
+The `m` field is a `|`-separated list of `descriptor!qualifier` entries with a
+trailing `*` marking a major topic:
+
+```
+"humans!|rectal neoplasms!|rectal neoplasms*|rectal neoplasms!therapy|"
+```
+
+`parse_mesh_field` keeps the descriptor only, lower-cased and de-duplicated in
+first-seen order — so the three `rectal neoplasms` forms above collapse to one.
+
+Journal and language are **not** in the chunk JSON. They come from a join
+against the MEDLINE baseline (`https://ftp.ncbi.nlm.nih.gov/pubmed/baseline/`,
+1334 × `pubmed26n*.xml.gz`, **51.8 GB**), which `medline` streams into
+`medline/*.parquet` (`pmid`, `journal` = `MedlineTA`, `language`). MeSH tree-top
+category letters come from the MeSH descriptor file
+(`xmlmesh/desc2026.gz`, 17 MB).
+
+`item_attrs_narrow.pt` is `[N, 5, 4]`, the same shape as goodreads and arxiv:
+
+| clause | attribute | cardinality | notes |
+|---|---|---|---|
+| C0 | MeSH descriptor | top-30k vocab | multi-valued OR, K=4 |
+| C1 | MeSH tree-top category | 16 (A–N, V, Z) | from C0's first descriptor |
+| C2 | year bucket | 7 | `<1975 … ≥2020` |
+| C3 | journal (`MedlineTA`) | top-5k | **reverse clause** |
+| C4 | has-abstract flag | 2 | old citations often have none |
+
+`clause_is_reverse_narrow.pt` is `[F, F, F, T, F]` — C3 is the negated
+predicate, the pubmed analogue of goodreads' C1 language clause. It is
+bloom-incompatible, so pubmed bloom sweeps exclude it.
+
+**The MeSH cap.** An article carries 10–15 headings but the narrow tensor holds
+four, so `cap_mesh_by_rarity` keeps the **four globally rarest** in-vocab
+descriptors, *rarest first*, ties broken on vocab id. The order is load-bearing:
+`common.synthesize_qa_narrow` takes the first non-pad entry as the query-side
+clause value, so a frequency-descending order would hand every query "humans"
+(a ~40 % pass rate) instead of the selective heading
+`dataset-candidates.md` §4.1 asks for.
+
+Language is parsed and stored in `articles.parquet` + `lang_vocab.json` but is
+*not* one of the five clauses — §4.1 fixes the layout above.
+
+#### Query sets
+
+`queries` builds `queries.parquet` (`query_id`, `text`, `target_id`) from two
+sources:
+
+- `heldout` — item-as-query: a held-out article's title is the query and the
+  article itself is the single relevant item. Always available.
+- `nfcorpus` — the NFCorpus (BEIR) biomedical query set. NFCorpus document ids
+  *are* PMIDs, so its qrels map straight onto our item ids. BEIR asks that its
+  corpus not be redistributed, so nothing is downloaded automatically: stage
+  `queries.jsonl` + `qrels/test.tsv` under `--nfcorpus-dir` yourself, or the set
+  is skipped with a warning.
+
+`encode_queries` runs `ncbi/MedCPT-Query-Encoder` ([CLS] pooling) and writes
+`content_d768/query_emb.pt`. MedCPT's query and article encoders are
+*asymmetric* — the same load-bearing property as nomic's prefixes on arxiv — so
+the unfiltered cross-check sweep is meaningful rather than an identity lookup.
+
+#### Disk budget
+
+This is the binding constraint and the reason E2 is deferred. Raw is ~198 GB
+(102 GB embeddings + 44 GB chunk JSON + 52 GB MEDLINE baseline) and the fp16
+item matrix at native 768-d is another 55 GB. `convert --delete-raw` folds each
+shard into the matrix and drops it, so the raw mirror never has to be held
+whole, and `--emb-scratch` puts the fp16 accumulator on a disk that can take
+55 GB while only the finished `content_d768/text_emb.pt` lands next to the rest
+of the dataset. The accumulator is a `.npy` memmap, so a killed run resumes
+rather than restarting.
+
 ### synth_arxiv
 
 Grows an encoded arxiv directory to arbitrary `N` (15M / 30M / 50M) by
@@ -214,8 +314,12 @@ EVAL_REPOS = {
     "yambda-500m":       "pinkmeme/eval-yambda-500m",
     "yambda-5b":         "pinkmeme/eval-yambda-5b",
     "goodreads-work-id": "pinkmeme/eval-goodreads-work-id",
+    "pubmed":            "pinkmeme/eval-pubmed",
 }
 ```
+
+`pinkmeme/eval-pubmed` is **registered but not published** — E2 is deferred and
+nothing has been pushed to it.
 
 `eval-fetch` pulls a prepared dataset (optionally a subset of dims),
 `eval-publish` pushes one, `eval-publish-checkpoint` pushes a trained
