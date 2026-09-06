@@ -11,7 +11,6 @@ import torch
 import triton
 import triton.language as tl
 from torch import Tensor
-from torch.library import triton_op, wrap_triton
 
 # By name, not `common.<fn>` — see the note in clause_mask.py.
 from retrieve.kernels.common import bloom_subset_pass, compact_store
@@ -70,9 +69,7 @@ def _bloom_compact_kernel(
     # with n_valid here.
     pass_mask = bloom_subset_pass(qb, sigs) & n_valid
 
-    compact_store(
-        pass_mask, n_offsets, counts_ptr, out_indices_ptr, bid, stride_ob, stride_on
-    )
+    compact_store(pass_mask, n_offsets, counts_ptr, out_indices_ptr, bid, stride_ob, stride_on)
 
 
 @dataclass(frozen=True)
@@ -156,13 +153,19 @@ def _bloom_compact_impl(
     return launch.out_indices, launch.counts
 
 
-@triton_op("retrieve::bloom_compact", mutates_args=())
+@torch.library.custom_op("retrieve::bloom_compact", mutates_args=(), device_types="cuda")
 def bloom_compact(qb: Tensor, sigs: Tensor) -> tuple[Tensor, Tensor]:
     """Fused bloom subset-test + compaction; qb [B, W] int64, sigs [N, W] int64 → (positive_indices
     [B, N] int64, counts [B] int64). The ``[B, N]`` buffer has ``-1`` sentinels in the unused
     tail (consumers row-bound by ``counts[b]``); within-row order is unspecified (atomic writes).
-    Registered as a ``triton_op`` for ``torch.compile``; mirrors ``_bloom_compact_impl`` with
-    ``DEFAULT_CONFIG``."""
-    launch = _bloom_compact_prep(qb, sigs, cfg=DEFAULT_CONFIG)
-    wrap_triton(_bloom_compact_kernel)[launch.grid](**launch.kwargs)  # keep inline (export)
-    return launch.out_indices, launch.counts
+    Mirrors ``_bloom_compact_impl`` with ``DEFAULT_CONFIG``. An opaque ``custom_op`` rather than
+    a ``triton_op`` for the reason given on ``clause_compact``: the compaction address depends
+    on the pass mask, so inductor's TTIR mutation analysis flags ``sigs`` (an index buffer) as
+    mutated and cudagraph trees skip the forward."""
+    return _bloom_compact_impl(qb, sigs)
+
+
+@bloom_compact.register_fake
+def _(qb, sigs):
+    b, n = qb.shape[0], sigs.shape[0]
+    return qb.new_empty((b, n), dtype=torch.int64), qb.new_empty((b,), dtype=torch.int64)
