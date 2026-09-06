@@ -1,0 +1,22 @@
+2026-09-06 15:06:29.249 | INFO     | retrieval.loaders:assert_arxiv_prefixes:118 - prefixes OK: doc='search_document: ', query='search_query: '
+2026-09-06 15:06:31.706 | WARNING  | retrieval.loaders:drop_legacy_padding_row:81 - text_emb: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 2988997 → 2988996 rows.
+2026-09-06 15:06:31.912 | INFO     | retrieval.loaders:load_pre_encoded_arxiv:201 - item_embs shape=(2988996, 128) dtype=torch.float32 (fp16 on disk → fp32 on device)
+2026-09-06 15:06:32.693 | INFO     | retrieval.loaders:load_query_attrs:372 - loaded eval_split.parquet: qa_narrow=(10000, 4)
+2026-09-06 15:06:34.052 | WARNING  | retrieval.loaders:drop_legacy_padding_row:81 - item_attrs_narrow: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 2988997 → 2988996 rows.
+2026-09-06 15:06:34.063 | INFO     | retrieval.sweep:_build_filter_modules:184 -   filter modules built: ExactAttributeFilter × 1 (oracle: ExactAttributeFilter)
+2026-09-06 15:06:34.063 | INFO     | retrieval.sweep:run_one_sweep:213 - === filter_kind=clause sweep=c0_maincat ===
+2026-09-06 15:06:34.435 | INFO     | retrieval.sweep:run_one_sweep:221 -   kept users: 10000 / 10000
+2026-09-06 15:06:34.547 | INFO     | retrieval.oracle:load_or_build_oracle:155 -   building filtered oracle (K_GT=1000)
+2026-09-06 15:07:10.466 | INFO     | retrieval.oracle:load_or_build_oracle:166 -   saved oracle → data/arxiv-papers/gt_d128/gt_topk_v3_c0_maincat.pt
+/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/_inductor/compile_fx.py:321: UserWarning: TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. Consider setting `torch.set_float32_matmul_precision('high')` for better performance.
+  warnings.warn(
+2026-09-06 15:08:58.827 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_maincat/silvertorch[triton] k=100 bs=1 median=0.187ms p20=0.184 p80=0.190 peak=2248.2MiB recall=0.8840 ndcg=0.9137
+2026-09-06 15:09:00.287 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_maincat/silvertorch[triton] k=100 bs=8 median=0.310ms p20=0.306 p80=0.314 peak=2263.1MiB recall=0.8840 ndcg=0.9137
+2026-09-06 15:09:00.815 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_maincat/silvertorch[triton] k=100 bs=16 median=0.470ms p20=0.465 p80=0.476 peak=2280.1MiB recall=0.8840 ndcg=0.9137
+2026-09-06 15:10:02.340 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_maincat/silvertorch[triton] k=500 bs=1 median=0.201ms p20=0.169 p80=0.204 peak=2248.2MiB recall=0.8473 ndcg=0.8754
+2026-09-06 15:10:03.161 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_maincat/silvertorch[triton] k=500 bs=8 median=0.320ms p20=0.316 p80=0.323 peak=2263.1MiB recall=0.8473 ndcg=0.8754
+2026-09-06 15:10:03.722 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_maincat/silvertorch[triton] k=500 bs=16 median=0.479ms p20=0.474 p80=0.484 peak=2280.1MiB recall=0.8473 ndcg=0.8754
+2026-09-06 15:11:05.289 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_maincat/silvertorch[triton] k=1000 bs=1 median=0.202ms p20=0.170 p80=0.206 peak=2669.5MiB recall=0.8197 ndcg=0.8483
+2026-09-06 15:11:06.158 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_maincat/silvertorch[triton] k=1000 bs=8 median=0.320ms p20=0.316 p80=0.324 peak=2684.4MiB recall=0.8197 ndcg=0.8483
+2026-09-06 15:11:06.732 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_maincat/silvertorch[triton] k=1000 bs=16 median=0.480ms p20=0.475 p80=0.486 peak=2701.4MiB recall=0.8197 ndcg=0.8483
+2026-09-06 15:11:06.761 | INFO     | retrieval.cli.evaluate:main:110 - wrote 9 rows to /workspace/wt/a1-golden/evaluation/golden/arxiv-d128-c0_maincat-silvertorch-triton.json

@@ -1,0 +1,20 @@
+2026-09-06 14:33:11.842 | INFO     | retrieval.queries_cache:load_or_cache_queries:62 - loaded encoded_queries from cache: data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/encoded_queries_test.pt
+2026-09-06 14:33:12.521 | INFO     | retrieval.loaders:load_query_attrs:365 -   eval_split rows=313178 > queries=10000 (users_limit prefix): trimming attrs
+2026-09-06 14:33:12.696 | INFO     | retrieval.loaders:load_query_attrs:372 - loaded eval_split.parquet: qa_narrow=(10000, 4)
+2026-09-06 14:33:13.735 | WARNING  | retrieval.loaders:drop_legacy_padding_row:81 - item_attrs_narrow: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 797085 → 797084 rows.
+2026-09-06 14:33:13.755 | INFO     | retrieval.sweep:_build_filter_modules:184 -   filter modules built: ExactAttributeFilter × 1 (oracle: ExactAttributeFilter)
+2026-09-06 14:33:13.755 | INFO     | retrieval.sweep:run_one_sweep:213 - === filter_kind=clause sweep=c0_genre ===
+2026-09-06 14:33:14.233 | INFO     | retrieval.sweep:run_one_sweep:221 -   kept users: 9859 / 10000
+2026-09-06 14:33:14.653 | INFO     | retrieval.oracle:load_or_build_oracle:152 -   loaded oracle from cache: data/goodreads-work-id/gt_d128/gt_topk_v3_c0_genre.pt
+/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/_inductor/compile_fx.py:321: UserWarning: TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. Consider setting `torch.set_float32_matmul_precision('high')` for better performance.
+  warnings.warn(
+2026-09-06 14:33:46.644 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[triton] k=100 bs=1 median=0.211ms p20=0.209 p80=0.212 peak=787.9MiB recall=0.9128 ndcg=0.9359
+2026-09-06 14:33:48.059 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[triton] k=100 bs=8 median=0.451ms p20=0.448 p80=0.454 peak=802.8MiB recall=0.9128 ndcg=0.9359
+2026-09-06 14:33:48.655 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[triton] k=100 bs=16 median=0.857ms p20=0.854 p80=0.860 peak=819.8MiB recall=0.9128 ndcg=0.9359
+2026-09-06 14:34:46.843 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[triton] k=500 bs=1 median=0.272ms p20=0.226 p80=0.277 peak=787.9MiB recall=0.8472 ndcg=0.8763
+2026-09-06 14:34:47.718 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[triton] k=500 bs=8 median=0.469ms p20=0.466 p80=0.471 peak=802.8MiB recall=0.8472 ndcg=0.8763
+2026-09-06 14:34:48.251 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[triton] k=500 bs=16 median=0.873ms p20=0.870 p80=0.876 peak=819.8MiB recall=0.8472 ndcg=0.8763
+2026-09-06 14:35:47.909 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[triton] k=1000 bs=1 median=0.278ms p20=0.229 p80=0.281 peak=1085.7MiB recall=0.7891 ndcg=0.8234
+2026-09-06 14:35:48.845 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[triton] k=1000 bs=8 median=0.477ms p20=0.474 p80=0.480 peak=1100.6MiB recall=0.7891 ndcg=0.8234
+2026-09-06 14:35:49.454 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[triton] k=1000 bs=16 median=0.886ms p20=0.883 p80=0.889 peak=1117.6MiB recall=0.7891 ndcg=0.8234
+2026-09-06 14:35:49.519 | INFO     | retrieval.cli.evaluate:main:110 - wrote 9 rows to /workspace/wt/a1-golden/evaluation/golden/goodreads-d128-c0_genre-silvertorch-triton.json

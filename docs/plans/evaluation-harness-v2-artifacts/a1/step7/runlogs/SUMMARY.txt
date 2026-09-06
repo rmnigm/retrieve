@@ -1,0 +1,9 @@
+
+--- resume run @ 2026-09-06T14:48:31Z ---
+=== 2026-09-06T14:48:31Z starting /workspace/wt/a1-golden/evaluation/config/goodreads/_a1_step7-d128-filter.yaml ===
+
+--- resume run @ 2026-09-06T14:52:25Z ---
+=== 2026-09-06T14:52:25Z starting /workspace/wt/a1-golden/evaluation/config/goodreads/_a1_step7-d128-filter.yaml ===
+/workspace/wt/a1-golden/evaluation/config/goodreads/_a1_step7-d128-filter.yaml  exit=0  duration=707s (0h11m)  log=/workspace/wt/a1-golden/docs/plans/evaluation-harness-v2-artifacts/a1/step7/runlogs/goodreads__a1_step7-d128-filter.log
+
+finished at: 2026-09-06T15:04:12Z
