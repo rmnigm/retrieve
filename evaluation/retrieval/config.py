@@ -14,9 +14,6 @@ Backends that run the same code collapse to one job (``PATHS``: ``linr_v1``/``li
 ``PATHS`` marks ``None`` are skipped; both are logged once. Sweep entries accept the long
 form ``{clauses: [...], disabled: true}`` (§8.2 J). No anchors, no env interpolation, no
 schema library: unknown keys and malformed values raise ``ConfigError`` naming the file.
-
-The old ``EvalConfig`` API below the divider is what ``cli/evaluate.py`` / ``sweep.py`` /
-``loaders.py`` still run; C3 deletes it with them.
 """
 
 from __future__ import annotations
@@ -25,13 +22,12 @@ import itertools
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import yaml
 from loguru import logger
 
-from retrieval.algos_v2 import ALGOS, BACKENDS, FILTER_KINDS, PATHS, is_valid_combo
-from retrieve.interfaces import Backend
+from retrieval.algos import ALGOS, BACKENDS, FILTER_KINDS, PATHS, is_valid_combo
 
 QUERY_PARAMS = frozenset({"n_probe", "candidate_pool"})  # set_query_params, never a rebuild
 NONE_SWEEP = "full_scan"  # the one sweep of filter_kind ``none`` (the old harness's name)
@@ -80,7 +76,7 @@ class Job:
     clauses: tuple[int, ...] | None  # None on ``none`` cells
     algo: str
     backend: str
-    path: str  # the code path that runs (algos_v2.PATHS)
+    path: str  # the code path that runs (algos.PATHS)
     build: dict[str, Any]  # build-time params
     query: tuple[dict[str, Any], ...]  # query-time combos, each measured against this build
     ks: tuple[int, ...]
@@ -366,99 +362,4 @@ __all__ = [
     "Job",
     "load_dataset",
     "load_matrix",
-]
-
-
-# ----- old harness API (cli/evaluate.py, sweep.py, loaders.py, context.py; C3 deletes) -----
-
-# The three filter kinds a sweep cell can have. YAML config dicts stay keyed
-# by plain str; ``_select_filter_iter`` (sweep.py) narrows to this on load.
-FilterKind = Literal["none", "clause", "bloom"]
-
-
-@dataclass
-class EncodeConfig:
-    batch_size: int = 512
-    num_workers: int = 8
-    max_seq_length: int = 200
-
-
-@dataclass
-class FilterSweepCfg:
-    """One filter sweep — a named subset of active narrow clauses."""
-
-    name: str
-    # Which clauses to activate (others passed through as -1, treated as
-    # "always pass" by ExactAttributeFilter / "no bits queried" by BloomFilter).
-    active_clauses: list[int] | None = None
-
-
-@dataclass
-class FilterCfg:
-    """Configuration for one filter_kind."""
-
-    sweeps: list[FilterSweepCfg] = field(default_factory=list)
-    attrs_path: str | None = None
-    reverse_path: str | None = None
-    m_bits: int = 1024
-    k_hash: int = 5
-
-
-def filter_cfg_from_dict(d: dict[str, Any]) -> FilterCfg:
-    """Build a FilterCfg from a YAML dict; sweeps are upgraded from bare
-    dicts to FilterSweepCfg dataclasses so downstream consumers don't have
-    to re-parse."""
-    raw_sweeps = d.pop("sweeps", []) or []
-    sweeps = [FilterSweepCfg(**s) for s in raw_sweeps]
-    return FilterCfg(sweeps=sweeps, **d)
-
-
-@dataclass
-class EvalConfig:
-    data_dir: str
-    checkpoint: str | None = None
-    query_emb_path: str | None = None
-    content_subdir: str = "content"
-    gt_subdir: str = "gt"
-    output: str | None = None
-    split: str = "test"
-    device: str = "cuda"
-    ks: list[int] = field(default_factory=lambda: [100, 500])
-    batch_sizes: list[int] = field(default_factory=lambda: [1, 8, 16])
-    seed: int = 0
-    encode: EncodeConfig = field(default_factory=EncodeConfig)
-    algorithms: list[str] = field(default_factory=list)
-    algo_params: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
-    backends: list[Backend] = field(default_factory=lambda: ["triton"])
-    filters: dict[str, FilterCfg] | None = None
-    users_limit: int | None = None
-
-
-def load_raw_config(path: Path) -> dict:
-    """yaml.safe_load + drop ``_``-prefixed anchor scratch keys (e.g.
-    ``_defaults: &defaults …`` left at the top level after parsing)."""
-    with open(path) as f:
-        raw = yaml.safe_load(f) or {}
-    return {k: v for k, v in raw.items() if not k.startswith("_")}
-
-
-def load_eval_config(path: Path) -> EvalConfig:
-    raw = load_raw_config(path)
-    encode = EncodeConfig(**(raw.pop("encode", None) or {}))
-    raw_filters = raw.pop("filters", None)
-    filters: dict[str, FilterCfg] | None = None
-    if raw_filters is not None:
-        filters = {kind: filter_cfg_from_dict(dict(d)) for kind, d in raw_filters.items()}
-    return EvalConfig(encode=encode, filters=filters, **raw)
-
-
-__all__ += [
-    "EncodeConfig",
-    "EvalConfig",
-    "FilterCfg",
-    "FilterKind",
-    "FilterSweepCfg",
-    "filter_cfg_from_dict",
-    "load_eval_config",
-    "load_raw_config",
 ]

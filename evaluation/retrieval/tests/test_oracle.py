@@ -18,7 +18,7 @@ import pytest
 import torch
 
 from retrieval import bench, oracle
-from retrieval.oracle import compute, compute_filtered_oracle, load_or_build, load_or_build_oracle
+from retrieval.oracle import compute, load_or_build
 
 CPU = torch.device("cpu")
 
@@ -50,9 +50,9 @@ def test_oracle_pads_short_rows_with_minus_one():
     item_embs = torch.eye(3)
     queries = torch.tensor([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
     qa = torch.zeros(2, 1, dtype=torch.long)
-    out = compute_filtered_oracle(
+    out = compute(
         item_embs, queries, qa, None, _FixedMaskFilter([False, True, False]), 2, device=CPU
-    )
+    )["topk"]
     assert out.dtype == torch.long and out.tolist() == [[1, -1], [1, -1]]
 
 
@@ -74,9 +74,8 @@ def test_oracle_skip_mask_rows_stay_minus_one():
 
 
 def test_oracle_k_gt_beyond_catalog_pads_tail():
-    out = compute_filtered_oracle(
-        torch.eye(3), torch.tensor([[3.0, 2.0, 1.0]]), None, None, None, 5, device=CPU
-    )
+    out = compute(torch.eye(3), torch.tensor([[3.0, 2.0, 1.0]]), None, None, None, 5, device=CPU)
+    out = out["topk"]
     assert out.shape == (1, 5) and out[0].tolist() == [0, 1, 2, -1, -1]
 
 
@@ -218,24 +217,6 @@ def test_non_v4_file_at_the_v4_path_is_rebuilt(tmp_path):
     assert blob["topk"].tolist() == [[0, 1], [2, -1], [-1, -1]]
     stored = torch.load(str(path), map_location="cpu", weights_only=True)
     assert isinstance(stored, dict) and stored["version"] == 4
-
-
-def test_old_wrapper_returns_topk_from_a_v4_blob(tmp_path):
-    item_embs = torch.eye(3)
-    queries = torch.tensor([[3.0, 2.0, 1.0]])
-    out = load_or_build_oracle(
-        tmp_path,
-        "s",
-        2,
-        item_embs=item_embs,
-        queries=queries,
-        qa_narrow_sweep=None,
-        skip_mask=None,
-        oracle_filter=None,
-        device=CPU,
-    )
-    assert out.tolist() == [[0, 1]]
-    assert len(list(tmp_path.glob("oracle_v4_s_*.pt"))) == 1
 
 
 # ----- code_version / resume_key ----------------------------------------------------------

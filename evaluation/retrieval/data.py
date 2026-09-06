@@ -30,7 +30,7 @@ import torch
 import torch.nn.functional as F
 from loguru import logger
 
-from retrieval.algos_v2 import FILTER_BACKEND, build_filter
+from retrieval.algos import FILTER_BACKEND, build_filter
 from retrieval.config import Dataset
 from retrieval.encode import encode_queries, load_model_for_eval
 from retrieve.interfaces import FilterModule

@@ -1,6 +1,4 @@
-"""Benchmark algorithms for harness v2 (H §3.1 ``algos.py``; renamed to ``algos.py`` in C3
-once the old ``algos/`` package is deleted — a module and a package of the same name
-cannot coexist).
+"""Benchmark algorithms for harness v2 (H §3.1 ``algos.py``).
 
 Five ``nn.Module`` wrappers, one per paper variant, with the filter module registered as a
 submodule (so ``module.buffers()`` — and ``bench.index_bytes`` — covers index *and* filter,

@@ -1,4 +1,4 @@
-"""CPU-only tests for ``retrieval.algos_v2`` (harness v2 WP-1).
+"""CPU-only tests for ``retrieval.algos`` (harness v2 WP-1).
 
 - ``PATHS`` covers ``ALGOS × FILTER_KINDS × BACKENDS`` and agrees with the dispatch table
   in ``docs/system/architecture.md`` (parsed from the markdown, not mirrored in a fixture,
@@ -21,7 +21,7 @@ from typing import get_args
 import pytest
 import torch
 
-from retrieval import algos_v2 as A
+from retrieval import algos as A
 from retrieval.bench import index_bytes
 from retrieve import OneBitKNN, PostfilterKNN, PostfilterKNNInt8, PrefilterKNN, SilverTorch
 from retrieve.interfaces import Backend

@@ -27,9 +27,6 @@ The **fingerprint** hashes shapes, dtypes and a fixed 64-row linspace sample of
 ``users_limit`` — change the file name, so a stale blob is never *read*; the hash in the name
 is what makes the blob a portable artifact (§8.2 I). Bloom pass rates are not cached: they
 depend on ``m_bits`` / ``k_hash`` and cost one mask pass (``pass_counts``).
-
-The two old names at the bottom (``compute_filtered_oracle``, ``load_or_build_oracle``) are
-thin wrappers for ``sweep.py``; C3 deletes them.
 """
 
 from __future__ import annotations
@@ -253,61 +250,14 @@ KEY_FIELDS = (
 )
 
 
-# ----- old API (sweep.py; C3 deletes) --------------------------------------------------
-
-
-def compute_filtered_oracle(
-    item_embs, queries, qa_narrow_sweep, skip_mask, filter_mod, K_GT, *, batch_size=64, device
-) -> torch.Tensor:
-    return compute(
-        item_embs,
-        queries,
-        qa_narrow_sweep,
-        skip_mask,
-        filter_mod,
-        K_GT,
-        batch_size=batch_size,
-        device=device,
-    )["topk"]
-
-
-def load_or_build_oracle(
-    gt_dir,
-    sweep_name,
-    K_GT,
-    *,
-    item_embs,
-    queries,
-    qa_narrow_sweep,
-    skip_mask,
-    oracle_filter,
-    device,
-) -> torch.Tensor:
-    return load_or_build(
-        gt_dir,
-        sweep_name,
-        K_GT,
-        item_embs=item_embs,
-        queries=queries,
-        targets=None,
-        qa_sweep=qa_narrow_sweep,
-        skip_mask=skip_mask,
-        clauses=None,
-        filter_mod=oracle_filter,
-        device=device,
-    )["topk"]
-
-
 __all__ = [
     "BLOB_VERSION",
     "KEY_FIELDS",
     "blob_path",
     "bloom_fp_rate",
     "compute",
-    "compute_filtered_oracle",
     "fingerprint",
     "load_or_build",
-    "load_or_build_oracle",
     "pass_counts",
     "pass_rate",
     "resume_key",
