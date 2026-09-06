@@ -34,7 +34,10 @@ one process, in this order. Everything below is `eager` unless labelled `graph`.
    hostname, UTC start, `nvidia-smi --query-gpu=clocks.sm,clocks.mem,clocks.max.sm,power.limit`
    sampled *after* warm-up. Clock locking is recommended, not enforced (`nvidia-smi -pm 1 &&
    nvidia-smi -lgc 1410` in the runbook); the harness warns when `clocks.sm` drifts >5 % from the
-   first cell. One 3-matmul GPU warm-up (keep `warm_gpu_once`).
+   first cell. **On the current A100 container locking is impossible** (`-lgc` is denied, no
+   sudo; verified 2026-09-06): every number so far was taken at the unlocked application clock
+   (≈ 1140 MHz under load, recorded per cell as `env.sm_mhz`), and cross-run latency comparisons
+   must check that field first. One 3-matmul GPU warm-up (keep `warm_gpu_once`).
 2. **Inputs, once per (dataset, dim).** Item embeddings, queries, held-out targets, query attrs;
    `users_limit` applied in exactly one place (prefix, as today, so quality stays golden-comparable).
    Filter modules: one per *filter backend* (`triton` for triton/cuda/cute cells, `torch` for torch

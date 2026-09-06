@@ -27,6 +27,36 @@ plan to `archive/` and shorten its entry here to one line under *Done*.
 
 ---
 
+> **Session status 2026-09-06 (evening, A100 VM, coordinator record).**
+> Done and merged into `development`: A1, A2, A3, B1, B2, B5, C1, C2,
+> C3, E1's gate; E2 deferred (skeleton merged); two architecture
+> reviews ([library](architecture-review-2026-09-06-library.md),
+> [evaluation](architecture-review-2026-09-06-evaluation.md)) with their
+> "now" findings applied. **Not merged, on branches:**
+> `dev/b4-delete-cuda-cute` (B4 authored, CPU gates green, GPU suite not
+> run — merge after `uv run --directory retrieve pytest tests/ -q` is
+> green with the official extra; tag `cuda-cute-backends-final` marks
+> the parent `41d4479`) and `dev/c4-harness-gate` (C4 partial: the 14
+> goodreads cells ran, a cudagraph-skip failure on compiled
+> `linr_v2`/`linr_v3` triton was found and a fix drafted but not
+> verified; arxiv cell, resume check and golden comparison not run).
+> Runs were stopped on the user's instruction ("code now, heavy evals
+> later"). Next GPU lane, in order: B4's suite → finish C4 → B3 → the
+> Triton epilogue `-1` sentinel (O §14.7) → D4.
+> **Environment facts that bind everything below:** the VM *is* the
+> A100 box; SM clocks cannot be locked (`nvidia-smi -lgc` denied, no
+> sudo — timing uses H §7's fallback: sampled `sm_mhz` + `unstable`);
+> `/workspace` is a 100 GB quota volume plus 100 GB local disk —
+> per-worktree venvs go under `/venvs/`, and PubMed / Semantic Scholar
+> cannot be staged at native dims until disk grows; the fetched HF
+> datasets are the pre-`3b1b5b3` 1-indexed layout (handled in
+> `data.py`); Meta's package is built with nvcc 12.8 against the cu128
+> wheel (`CUDA_HOME=/usr/local/cuda-12.8`).
+> **Decisions taken 2026-09-06, do not reopen:** no Mac target (A0
+> dropped); **no PCA anywhere — every dataset at its encoder's native
+> dim**; big datasets (E2, E3) deferred until disk allows; A4's local
+> merge into `main` is on hold until the user says so.
+
 ## 0. Goal, scheduling rule, branch
 
 **Goal.** A reproducibility paper on SilverTorch (Meta) and LiNR
@@ -41,12 +71,13 @@ be done, in the order given; nothing is optional, deferred, or
 conditional on a deadline. The A100 is the bottleneck, so GPU steps are
 ordered first and Mac-side steps run in parallel with them.
 
-**Branch.** `development` = `main` + the refactor track (formerly
-`refactor/kernels-eval`) + the CUDA and CuTe SilverTorch backends
-(formerly `feat/cute-dsl-scorer`) + today's plans; 24 commits ahead of
-`main`, nothing merged. Those two feature branches were deleted on
-2026-09-05 after confirming `development` contains them. Step A4 merges
-`development` into `main`. After that, one branch per phase off `main`.
+**Branch.** `development` = `main` + the refactor track + the CUDA/CuTe
+backends (deleted on `dev/b4-delete-cuda-cute`, pending merge) +
+everything the 2026-09-06 session merged (status block above); ≈ 146
+commits ahead of `main`, nothing pushed to `main`. Work happens on
+`dev/<step>` branches in git worktrees under `/workspace/wt/`, merged into
+`development` by the coordinator once a step's gates and the review fixes
+are in; A4 (merge into `main`) is on hold.
 
 **Decisions already taken (2026-09-05), do not reopen.** Meta's
 `meta-recsys/silvertorch` ops become the reference backend
@@ -119,7 +150,7 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
   (D7 unchanged). Parse cost at B=16: 58.7 µs/call, 3.67 µs/query. Record:
   O §13.2; script and raw output in
   [official-silvertorch-artifacts/](official-silvertorch-artifacts/README.md).
-- [ ] **A4 — merge to `main`.** After A1 passes: merge `development`
+- [ ] **A4 — merge to `main`** (**on hold 2026-09-06 — user decides when**). After A1 passes: merge `development`
   into `main` (library gates passed 2026-09-02, harness golden passed in
   A1). Everything below happens on phase branches off `main`, merged
   back through `development`.
@@ -168,6 +199,11 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
   `archive/`; rewrite the system docs O §7 lists. Gate: suite green on
   the A100, collect-only on the Mac, `git grep -il "cute\|codesigned_probe_score_cuda"`
   hits only `docs/plans/archive/`. Needs B2.
+  **Status 2026-09-06:** authored on `dev/b4-delete-cuda-cute`
+  (`4d92432`, `010681d`, `6698b4a`; O §15 record): 5,460 lines deleted,
+  `Backend` split into `LinrBackend` / `SilverTorchBackend` with table
+  dispatch, CPU bit-identity verified, collect-only 504, evaluation suite
+  green. **GPU suite not run; not merged.**
 - [x] **B5 — salt as a buffer.** O §8 TF-2 (Mac, 0.5 h; validate with
   `test_bloom_hash.py` on the A100). Do before any campaign timing.
   Authored 2026-09-06 on `dev/b1-official-adapter` (commit `2dbee72`).
@@ -227,6 +263,9 @@ bit-exactness stays where it belongs, in B2's library parity suite.
   0`, `jaccard_vs_first@100 == 1.0` torch-vs-triton, one `official` cell
   runs end to end on goodreads-d128 `c0_genre` with jaccard ≥ 0.99 (O
   WP-6's gate). Unblocks: D1.
+  **Status 2026-09-06:** partial, on `dev/c4-harness-gate` — see the
+  session status block at the top; results JSONL under
+  `evaluation-harness-v2-artifacts/c4/` on that branch.
 
 ### Phase D — campaign and baselines (A100)
 

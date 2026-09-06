@@ -52,9 +52,12 @@ LiNR variants are V1–V4 as in the paper.
    CPU emulators, shim headers, or simulations of device code, and do not
    add test scaffolding beyond the existing pytest suites — the user
    rejected that explicitly. Every GPU claim is validated on this box:
-   lock clocks with `sudo nvidia-smi -lgc 1410` before timing (`-rgc`
-   after); `ncu` is blocked in the container, use `torch.profiler`. The
-   GPU is shared: serialize GPU work, one job at a time.
+   SM clocks **cannot be locked** in this container (`nvidia-smi -lgc`
+   is denied, no sudo) — record the sampled `sm_mhz` and the `unstable`
+   flag instead, as `docs/plans/evaluation-harness-v2.md` §7 prescribes;
+   `ncu` is blocked, use `torch.profiler`. The GPU is shared: serialize
+   GPU work, one job at a time. Disk: `/workspace` is a 100 GB quota
+   volume; put venvs under `/venvs/` on the local disk.
 2. **Nothing is citable until its gate passed.** Harness numbers from a
    branch are not paper material until the roadmap's golden gate for that
    harness is green. Say "not yet validated" rather than quoting them.
