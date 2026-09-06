@@ -1,11 +1,42 @@
 # GPU validation handoff — `refactor/kernels-eval`
 
-> **Status:** **partially executed.** Steps 2–3 passed de facto on an A100 on 2026-09-02:
-> the full `retrieve/tests/` suite is green at the branch tip (286 tests,
+> **Status:** **steps 1–4 and 7 executed; 5 and 6 deferred.** Steps 2–3 passed de facto on an
+> A100 on 2026-09-02: the full `retrieve/tests/` suite is green at the branch tip (286 tests,
 > [cute-dsl-scorer-artifacts/wp4/pytest-final.txt](cute-dsl-scorer-artifacts/wp4/pytest-final.txt))
-> and the K2 tracing caveat did not bite. Steps 1 and 4–7 (eval CPU tests, compile gate on a real
-> cell, per-kernel perf gates, golden-run diff, orchestrator smoke) have **not** run — no dataset
-> was on the box. Written 2026-07-06, verified against the branch's source
+> and the K2 tracing caveat did not bite.
+>
+> **2026-09-06, under roadmap A1** (branch `dev/a1-golden`; record in
+> [evaluation-harness-v2.md](evaluation-harness-v2.md) §6 WP-0): **step 1** (eval CPU tests)
+> passes, and **steps 4 and 7** ran on the A100 for the first time — see the A1 record for the
+> per-step result. Getting there took two found-and-fixed bugs, both of which had been invisible
+> precisely because steps 1 and 4–7 had never run:
+>
+> 1. **Filter-attrs misalignment** (`fix(A1): accept the legacy 1-indexed dataset layout`). The
+>    datasets *published on the Hub* are the pre-`3b1b5b3` `[N+1, …]` 1-indexed artifacts, while
+>    the loaders, the ETL and `docs/system/datasets.md` expect `[N, …]` 0-indexed dense. goodreads
+>    crashed in the oracle (`797085` vs `797084`); arxiv did **not** crash — its attrs and
+>    embeddings were both 1-indexed, so only the held-out target shift was wrong, worth
+>    `cos(query, target)` 0.99 → 0.62 with no error. Not a refactor regression: `main` and
+>    `development` have byte-identical `load_filter_assets`.
+> 2. **`common.clause_pass` under inductor** (`fix(A1): import the shared triton helpers by name,
+>    not via the module`). K3's shared `@triton.jit` predicates were called as
+>    `common.clause_pass(...)`; eager Triton resolves the attribute, but `torch.compile` rebuilds
+>    the kernel's globals and captures `@triton.jit` callees *by name*, so every compiled filter
+>    algo died with `NameError('common is not defined')`. **This is exactly what step 4's compile
+>    gate exists to catch**, and it is the concrete instance of this file's own `Watch:` note on
+>    `clause_pass`.
+>
+> **Step 5** (per-kernel `tune-kernels` ±5 % gates) and the `main`-side half of **step 6**
+> (the golden-run diff) are **deferred 2026-09-06 (user: heavy evals later)**. Both are scripted
+> and ready: `docs/plans/evaluation-harness-v2-artifacts/a1_golden_run.sh` stages `step5` and
+> `step6`, with `a1_step5_compare.py` and `a1_step6_diff.py` encoding their pass criteria, and the
+> throwaway worktree `tmp/main-users-limit-fix` (at `/workspace/wt/main-golden`) carries main's
+> port of the `users_limit` fix. **Before step 6 can run, that worktree also needs the two fixes
+> above** — main's `load_filter_assets` / `load_pre_encoded_arxiv` / `kernels/filters/*` are the
+> unfixed versions, so a main-side cell would hit both bugs. Step 5's wall-time estimate is
+> 332 sweep points per side, ~44 min for both at 4 s/point.
+>
+> Written 2026-07-06, verified against the branch's source
 > tree. This is the runbook a GPU test agent executes **top-to-bottom** to validate the
 > kernels/layers + evaluation refactor before it merges. The two source plans —
 > [kernels-layers-design.md](kernels-layers-design.md) and

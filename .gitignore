@@ -248,7 +248,7 @@ retrieve/bench_results/
 # A1 golden-baseline run logs are provenance, not scratch: they are the only
 # record of which HEAD, box and clocks produced evaluation/golden/*.json
 # (evaluation/golden/README.md). Overrides the blanket `*.log` above.
-!evaluation/golden/_logs/*.log
+!evaluation/golden/_logs/**/*.log
 
 # The `main`-side half of A1's handoff-step-6 diff: the same 11 cells run from
 # a throwaway worktree off `main`. Only the diff report is worth keeping (it
@@ -260,6 +260,10 @@ evaluation/golden/_main/
 # (run_evaluation._cfg_name insists the config lives under evaluation/); the
 # runbook deletes it, this is the belt-and-braces.
 evaluation/config/**/_a1_step7*.yaml
+
+# A1's step-4/5/6/7 artifacts are the evidence behind the WP-0 validation
+# record (graph-break dumps, the orchestrator's run logs). Overrides `*.log`.
+!docs/plans/evaluation-harness-v2-artifacts/a1/**/*.log
 
 # Ad-hoc agent-created scratch (one-off benches, sweep dumps, tune logs)
 _agent_scratch/

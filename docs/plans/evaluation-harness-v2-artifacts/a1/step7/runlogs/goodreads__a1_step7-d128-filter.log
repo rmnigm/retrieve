@@ -1,0 +1,465 @@
+=== 2026-09-06T14:48:31Z linr_v1_filter_mask ===
+2026-09-06 14:49:54.126 | INFO     | retrieval.queries_cache:load_or_cache_queries:62 - loaded encoded_queries from cache: data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/encoded_queries_test.pt
+2026-09-06 14:50:04.930 | INFO     | retrieval.loaders:load_query_attrs:365 -   eval_split rows=313178 > queries=10000 (users_limit prefix): trimming attrs
+2026-09-06 14:50:06.834 | INFO     | retrieval.loaders:load_query_attrs:372 - loaded eval_split.parquet: qa_narrow=(10000, 4)
+2026-09-06 14:50:07.894 | WARNING  | retrieval.loaders:drop_legacy_padding_row:81 - item_attrs_narrow: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 797085 → 797084 rows.
+2026-09-06 14:50:07.918 | INFO     | retrieval.sweep:_build_filter_modules:184 -   filter modules built: ExactAttributeFilter × 2 (oracle: ExactAttributeFilter)
+2026-09-06 14:50:07.918 | INFO     | retrieval.sweep:run_one_sweep:213 - === filter_kind=clause sweep=c0_genre ===
+2026-09-06 14:50:08.534 | INFO     | retrieval.sweep:run_one_sweep:221 -   kept users: 9859 / 10000
+2026-09-06 14:50:40.093 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v1_filter_mask[triton] k=100 bs=1 median=0.530ms p20=0.462 p80=0.532 peak=684.7MiB recall=nan ndcg=nan
+2026-09-06 14:50:40.889 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v1_filter_mask[triton] k=100 bs=8 median=1.092ms p20=1.090 p80=1.097 peak=699.6MiB recall=nan ndcg=nan
+2026-09-06 14:50:41.501 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v1_filter_mask[triton] k=100 bs=16 median=1.896ms p20=1.892 p80=1.901 peak=716.6MiB recall=nan ndcg=nan
+2026-09-06 14:50:42.544 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v1_filter_mask[triton] k=500 bs=1 median=0.476ms p20=0.475 p80=0.477 peak=879.3MiB recall=nan ndcg=nan
+2026-09-06 14:50:43.383 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v1_filter_mask[triton] k=500 bs=8 median=1.104ms p20=1.102 p80=1.109 peak=894.2MiB recall=nan ndcg=nan
+2026-09-06 14:50:44.001 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v1_filter_mask[triton] k=500 bs=16 median=1.908ms p20=1.904 p80=1.911 peak=911.2MiB recall=nan ndcg=nan
+2026-09-06 14:50:44.954 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v1_filter_mask[triton] k=1000 bs=1 median=0.477ms p20=0.476 p80=0.479 peak=1073.9MiB recall=nan ndcg=nan
+2026-09-06 14:50:45.740 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v1_filter_mask[triton] k=1000 bs=8 median=1.104ms p20=1.102 p80=1.109 peak=1088.8MiB recall=nan ndcg=nan
+2026-09-06 14:50:46.496 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v1_filter_mask[triton] k=1000 bs=16 median=1.910ms p20=1.905 p80=1.915 peak=1105.8MiB recall=nan ndcg=nan
+2026-09-06 14:50:47.680 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v1_filter_mask[torch] k=100 bs=1 median=0.436ms p20=0.435 p80=0.437 peak=1268.5MiB recall=nan ndcg=nan
+2026-09-06 14:50:48.503 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v1_filter_mask[torch] k=100 bs=8 median=0.946ms p20=0.944 p80=0.948 peak=1283.4MiB recall=nan ndcg=nan
+2026-09-06 14:50:49.060 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v1_filter_mask[torch] k=100 bs=16 median=1.626ms p20=1.622 p80=1.631 peak=1300.4MiB recall=nan ndcg=nan
+2026-09-06 14:50:50.363 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v1_filter_mask[torch] k=500 bs=1 median=0.449ms p20=0.448 p80=0.450 peak=684.7MiB recall=nan ndcg=nan
+2026-09-06 14:50:51.203 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v1_filter_mask[torch] k=500 bs=8 median=0.958ms p20=0.956 p80=0.961 peak=699.6MiB recall=nan ndcg=nan
+2026-09-06 14:50:51.853 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v1_filter_mask[torch] k=500 bs=16 median=1.637ms p20=1.634 p80=1.641 peak=716.6MiB recall=nan ndcg=nan
+2026-09-06 14:50:52.966 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v1_filter_mask[torch] k=1000 bs=1 median=0.451ms p20=0.450 p80=0.452 peak=879.3MiB recall=nan ndcg=nan
+2026-09-06 14:50:53.799 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v1_filter_mask[torch] k=1000 bs=8 median=0.958ms p20=0.956 p80=0.960 peak=894.2MiB recall=nan ndcg=nan
+2026-09-06 14:50:54.384 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v1_filter_mask[torch] k=1000 bs=16 median=1.638ms p20=1.635 p80=1.641 peak=911.2MiB recall=nan ndcg=nan
+2026-09-06 14:50:54.495 | WARNING  | retrieval.loaders:drop_legacy_padding_row:81 - item_attrs_narrow: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 797085 → 797084 rows.
+2026-09-06 14:50:54.746 | INFO     | retrieval.sweep:_build_filter_modules:184 -   filter modules built: BloomFilter × 2 (oracle: ExactAttributeFilter)
+2026-09-06 14:50:54.746 | INFO     | retrieval.sweep:run_one_sweep:213 - === filter_kind=bloom sweep=c0_genre ===
+2026-09-06 14:50:55.028 | INFO     | retrieval.sweep:run_one_sweep:221 -   kept users: 9859 / 10000
+2026-09-06 14:51:03.661 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v1_filter_mask[triton] k=100 bs=1 median=0.434ms p20=0.433 p80=0.436 peak=880.0MiB recall=nan ndcg=nan
+2026-09-06 14:51:05.913 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v1_filter_mask[triton] k=100 bs=8 median=0.679ms p20=0.676 p80=0.681 peak=894.9MiB recall=nan ndcg=nan
+2026-09-06 14:51:06.531 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v1_filter_mask[triton] k=100 bs=16 median=0.903ms p20=0.900 p80=0.906 peak=912.6MiB recall=nan ndcg=nan
+2026-09-06 14:51:11.046 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v1_filter_mask[triton] k=500 bs=1 median=0.450ms p20=0.449 p80=0.504 peak=880.0MiB recall=nan ndcg=nan
+2026-09-06 14:51:13.686 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v1_filter_mask[triton] k=500 bs=8 median=0.605ms p20=0.603 p80=0.613 peak=894.9MiB recall=nan ndcg=nan
+2026-09-06 14:51:14.457 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v1_filter_mask[triton] k=500 bs=16 median=0.913ms p20=0.910 p80=0.916 peak=912.6MiB recall=nan ndcg=nan
+2026-09-06 14:51:20.150 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v1_filter_mask[triton] k=1000 bs=1 median=0.455ms p20=0.454 p80=0.456 peak=880.0MiB recall=nan ndcg=nan
+2026-09-06 14:51:22.552 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v1_filter_mask[triton] k=1000 bs=8 median=0.605ms p20=0.604 p80=0.606 peak=894.9MiB recall=nan ndcg=nan
+2026-09-06 14:51:23.155 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v1_filter_mask[triton] k=1000 bs=16 median=0.914ms p20=0.911 p80=0.917 peak=912.6MiB recall=nan ndcg=nan
+2026-09-06 14:51:33.329 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v1_filter_mask[torch] k=100 bs=1 median=0.480ms p20=0.479 p80=0.481 peak=1074.6MiB recall=nan ndcg=nan
+2026-09-06 14:51:49.624 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v1_filter_mask[torch] k=100 bs=8 median=0.874ms p20=0.871 p80=0.962 peak=894.9MiB recall=nan ndcg=nan
+2026-09-06 14:51:51.123 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v1_filter_mask[torch] k=100 bs=16 median=1.473ms p20=1.469 p80=1.478 peak=912.6MiB recall=nan ndcg=nan
+2026-09-06 14:51:58.607 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v1_filter_mask[torch] k=500 bs=1 median=0.497ms p20=0.442 p80=0.499 peak=1074.7MiB recall=nan ndcg=nan
+2026-09-06 14:52:00.507 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v1_filter_mask[torch] k=500 bs=8 median=0.883ms p20=0.880 p80=0.885 peak=1089.5MiB recall=nan ndcg=nan
+2026-09-06 14:52:01.082 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v1_filter_mask[torch] k=500 bs=16 median=1.483ms p20=1.479 p80=1.489 peak=1107.2MiB recall=nan ndcg=nan
+2026-09-06 14:52:05.245 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v1_filter_mask[torch] k=1000 bs=1 median=0.498ms p20=0.443 p80=0.500 peak=880.1MiB recall=nan ndcg=nan
+2026-09-06 14:52:07.288 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v1_filter_mask[torch] k=1000 bs=8 median=0.970ms p20=0.885 p80=0.977 peak=894.9MiB recall=nan ndcg=nan
+2026-09-06 14:52:07.986 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v1_filter_mask[torch] k=1000 bs=16 median=1.485ms p20=1.482 p80=1.491 peak=912.6MiB recall=nan ndcg=nan
+2026-09-06 14:52:08.047 | INFO     | retrieval.cli.evaluate:main:110 - wrote 36 rows to /workspace/wt/a1-golden/docs/plans/evaluation-harness-v2-artifacts/a1/step7/out/linr_v1_filter_mask.json
+resume: skipping linr_v1_filter_mask (/workspace/wt/a1-golden/docs/plans/evaluation-harness-v2-artifacts/a1/step7/out/linr_v1_filter_mask.json already complete)
+=== 2026-09-06T14:52:25Z linr_v2 ===
+2026-09-06 14:52:48.010 | INFO     | retrieval.queries_cache:load_or_cache_queries:62 - loaded encoded_queries from cache: data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/encoded_queries_test.pt
+2026-09-06 14:52:48.617 | INFO     | retrieval.loaders:load_query_attrs:365 -   eval_split rows=313178 > queries=10000 (users_limit prefix): trimming attrs
+2026-09-06 14:52:48.805 | INFO     | retrieval.loaders:load_query_attrs:372 - loaded eval_split.parquet: qa_narrow=(10000, 4)
+2026-09-06 14:52:49.086 | WARNING  | retrieval.loaders:drop_legacy_padding_row:81 - item_attrs_narrow: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 797085 → 797084 rows.
+2026-09-06 14:52:49.092 | INFO     | retrieval.sweep:_build_filter_modules:184 -   filter modules built: ExactAttributeFilter × 2 (oracle: ExactAttributeFilter)
+2026-09-06 14:52:49.092 | INFO     | retrieval.sweep:run_one_sweep:213 - === filter_kind=clause sweep=c0_genre ===
+2026-09-06 14:52:49.333 | INFO     | retrieval.sweep:run_one_sweep:221 -   kept users: 9859 / 10000
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v2.py", line 36, in forward
+    cand, counts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v2.py", line 36, in forward
+    cand, counts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v2.py", line 36, in forward
+    cand, counts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v2.py", line 36, in forward
+    cand, counts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:53:23.235 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[triton] k=100 bs=1 median=0.442ms p20=0.437 p80=0.455 peak=703.1MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v2.py", line 36, in forward
+    cand, counts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:53:27.507 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[triton] k=100 bs=8 median=1.735ms p20=1.666 p80=1.985 peak=781.2MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v2.py", line 36, in forward
+    cand, counts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:53:28.229 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[triton] k=100 bs=16 median=3.228ms p20=3.192 p80=3.282 peak=872.1MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v2.py", line 36, in forward
+    cand, counts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v2.py", line 36, in forward
+    cand, counts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v2.py", line 36, in forward
+    cand, counts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v2.py", line 36, in forward
+    cand, counts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:53:35.225 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[triton] k=500 bs=1 median=0.462ms p20=0.457 p80=0.476 peak=897.7MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v2.py", line 36, in forward
+    cand, counts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:53:38.923 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[triton] k=500 bs=8 median=1.696ms p20=1.672 p80=1.983 peak=976.4MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v2.py", line 36, in forward
+    cand, counts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:53:40.423 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[triton] k=500 bs=16 median=3.247ms p20=3.207 p80=3.315 peak=1067.9MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v2.py", line 36, in forward
+    cand, counts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v2.py", line 36, in forward
+    cand, counts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v2.py", line 36, in forward
+    cand, counts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v2.py", line 36, in forward
+    cand, counts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:53:42.439 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[triton] k=1000 bs=1 median=0.386ms p20=0.382 p80=0.403 peak=1092.4MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v2.py", line 36, in forward
+    cand, counts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:53:43.260 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[triton] k=1000 bs=8 median=1.689ms p20=1.668 p80=1.715 peak=1171.7MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v2.py", line 36, in forward
+    cand, counts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:53:44.039 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[triton] k=1000 bs=16 median=3.254ms p20=3.217 p80=3.308 peak=1263.9MiB recall=nan ndcg=nan
+2026-09-06 14:53:45.924 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[torch] k=100 bs=1 median=0.824ms p20=0.822 p80=0.826 peak=1268.5MiB recall=nan ndcg=nan
+2026-09-06 14:53:47.239 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[torch] k=100 bs=8 median=4.645ms p20=4.641 p80=4.653 peak=699.6MiB recall=nan ndcg=nan
+2026-09-06 14:53:48.732 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[torch] k=100 bs=16 median=9.119ms p20=9.110 p80=9.133 peak=716.6MiB recall=nan ndcg=nan
+2026-09-06 14:53:50.153 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[torch] k=500 bs=1 median=0.838ms p20=0.836 p80=0.840 peak=879.3MiB recall=nan ndcg=nan
+2026-09-06 14:53:51.236 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[torch] k=500 bs=8 median=4.658ms p20=4.653 p80=4.665 peak=894.2MiB recall=nan ndcg=nan
+2026-09-06 14:53:52.812 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[torch] k=500 bs=16 median=9.125ms p20=9.120 p80=9.133 peak=911.2MiB recall=nan ndcg=nan
+2026-09-06 14:53:54.009 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[torch] k=1000 bs=1 median=0.839ms p20=0.837 p80=0.841 peak=1073.9MiB recall=nan ndcg=nan
+2026-09-06 14:53:55.039 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[torch] k=1000 bs=8 median=4.659ms p20=4.655 p80=4.664 peak=1088.8MiB recall=nan ndcg=nan
+2026-09-06 14:53:56.524 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[torch] k=1000 bs=16 median=9.131ms p20=9.123 p80=9.145 peak=1105.8MiB recall=nan ndcg=nan
+2026-09-06 14:53:56.663 | WARNING  | retrieval.loaders:drop_legacy_padding_row:81 - item_attrs_narrow: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 797085 → 797084 rows.
+2026-09-06 14:53:56.769 | INFO     | retrieval.sweep:_build_filter_modules:184 -   filter modules built: BloomFilter × 2 (oracle: ExactAttributeFilter)
+2026-09-06 14:53:56.769 | INFO     | retrieval.sweep:run_one_sweep:213 - === filter_kind=bloom sweep=c0_genre ===
+2026-09-06 14:53:57.023 | INFO     | retrieval.sweep:run_one_sweep:221 -   kept users: 9859 / 10000
+2026-09-06 14:54:05.315 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v2[triton] k=100 bs=1 median=0.336ms p20=0.320 p80=0.366 peak=880.0MiB recall=nan ndcg=nan
+2026-09-06 14:54:07.793 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v2[triton] k=100 bs=8 median=1.147ms p20=1.122 p80=1.174 peak=894.9MiB recall=nan ndcg=nan
+2026-09-06 14:54:08.408 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v2[triton] k=100 bs=16 median=2.225ms p20=2.185 p80=2.270 peak=912.6MiB recall=nan ndcg=nan
+2026-09-06 14:54:14.519 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v2[triton] k=500 bs=1 median=0.360ms p20=0.333 p80=0.390 peak=1074.6MiB recall=nan ndcg=nan
+2026-09-06 14:54:16.818 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v2[triton] k=500 bs=8 median=1.160ms p20=1.137 p80=1.187 peak=894.9MiB recall=nan ndcg=nan
+2026-09-06 14:54:17.504 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v2[triton] k=500 bs=16 median=2.241ms p20=2.203 p80=2.285 peak=912.6MiB recall=nan ndcg=nan
+2026-09-06 14:54:22.999 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v2[triton] k=1000 bs=1 median=0.353ms p20=0.334 p80=0.387 peak=1074.6MiB recall=nan ndcg=nan
+2026-09-06 14:54:25.020 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v2[triton] k=1000 bs=8 median=1.168ms p20=1.145 p80=1.193 peak=1089.5MiB recall=nan ndcg=nan
+2026-09-06 14:54:25.706 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v2[triton] k=1000 bs=16 median=2.248ms p20=2.205 p80=2.290 peak=1107.2MiB recall=nan ndcg=nan
+2026-09-06 14:54:33.300 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v2[torch] k=100 bs=1 median=0.825ms p20=0.823 p80=0.828 peak=880.0MiB recall=nan ndcg=nan
+2026-09-06 14:54:36.281 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v2[torch] k=100 bs=8 median=4.588ms p20=4.584 p80=4.598 peak=894.9MiB recall=nan ndcg=nan
+2026-09-06 14:54:37.718 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v2[torch] k=100 bs=16 median=9.001ms p20=8.986 p80=9.008 peak=912.6MiB recall=nan ndcg=nan
+2026-09-06 14:54:44.449 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v2[torch] k=500 bs=1 median=0.948ms p20=0.839 p80=0.953 peak=880.1MiB recall=nan ndcg=nan
+2026-09-06 14:54:47.126 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v2[torch] k=500 bs=8 median=4.599ms p20=4.593 p80=4.602 peak=894.9MiB recall=nan ndcg=nan
+2026-09-06 14:54:48.796 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v2[torch] k=500 bs=16 median=9.009ms p20=9.004 p80=9.020 peak=912.6MiB recall=nan ndcg=nan
+2026-09-06 14:54:55.541 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v2[torch] k=1000 bs=1 median=0.842ms p20=0.839 p80=0.955 peak=880.1MiB recall=nan ndcg=nan
+2026-09-06 14:54:58.274 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v2[torch] k=1000 bs=8 median=4.603ms p20=4.596 p80=4.610 peak=894.9MiB recall=nan ndcg=nan
+2026-09-06 14:54:59.711 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v2[torch] k=1000 bs=16 median=9.015ms p20=9.009 p80=9.033 peak=912.6MiB recall=nan ndcg=nan
+2026-09-06 14:54:59.747 | INFO     | retrieval.cli.evaluate:main:110 - wrote 36 rows to /workspace/wt/a1-golden/docs/plans/evaluation-harness-v2-artifacts/a1/step7/out/linr_v2.json
+=== 2026-09-06T14:55:04Z linr_v3 ===
+2026-09-06 14:55:27.251 | INFO     | retrieval.queries_cache:load_or_cache_queries:62 - loaded encoded_queries from cache: data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/encoded_queries_test.pt
+2026-09-06 14:55:27.944 | INFO     | retrieval.loaders:load_query_attrs:365 -   eval_split rows=313178 > queries=10000 (users_limit prefix): trimming attrs
+2026-09-06 14:55:28.123 | INFO     | retrieval.loaders:load_query_attrs:372 - loaded eval_split.parquet: qa_narrow=(10000, 4)
+2026-09-06 14:55:28.394 | WARNING  | retrieval.loaders:drop_legacy_padding_row:81 - item_attrs_narrow: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 797085 → 797084 rows.
+2026-09-06 14:55:28.410 | INFO     | retrieval.sweep:_build_filter_modules:184 -   filter modules built: ExactAttributeFilter × 2 (oracle: ExactAttributeFilter)
+2026-09-06 14:55:28.410 | INFO     | retrieval.sweep:run_one_sweep:213 - === filter_kind=clause sweep=c0_genre ===
+2026-09-06 14:55:28.639 | INFO     | retrieval.sweep:run_one_sweep:221 -   kept users: 9859 / 10000
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:55:49.647 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[triton] k=100 bs=1 median=0.436ms p20=0.430 p80=0.527 peak=715.5MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:55:50.605 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[triton] k=100 bs=8 median=1.379ms p20=1.372 p80=1.391 peak=802.8MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:55:51.277 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[triton] k=100 bs=16 median=2.470ms p20=2.460 p80=2.480 peak=902.8MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:55:52.372 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[triton] k=500 bs=1 median=0.457ms p20=0.450 p80=0.467 peak=923.1MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:55:53.274 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[triton] k=500 bs=8 median=1.405ms p20=1.400 p80=1.410 peak=1011.0MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:55:53.915 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[triton] k=500 bs=16 median=2.485ms p20=2.481 p80=2.492 peak=1111.4MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:55:55.154 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[triton] k=1000 bs=1 median=0.469ms p20=0.458 p80=0.471 peak=715.6MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:55:56.063 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[triton] k=1000 bs=8 median=1.404ms p20=1.400 p80=1.412 peak=804.1MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:55:56.718 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[triton] k=1000 bs=16 median=2.487ms p20=2.482 p80=2.492 peak=905.9MiB recall=nan ndcg=nan
+2026-09-06 14:55:58.584 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[torch] k=100 bs=1 median=0.471ms p20=0.467 p80=0.475 peak=904.5MiB recall=nan ndcg=nan
+2026-09-06 14:55:59.681 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[torch] k=100 bs=8 median=1.877ms p20=1.873 p80=1.883 peak=919.3MiB recall=nan ndcg=nan
+2026-09-06 14:56:00.361 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[torch] k=100 bs=16 median=3.404ms p20=3.398 p80=3.410 peak=936.3MiB recall=nan ndcg=nan
+2026-09-06 14:56:01.867 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[torch] k=500 bs=1 median=0.490ms p20=0.488 p80=0.493 peak=1111.2MiB recall=nan ndcg=nan
+2026-09-06 14:56:03.009 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[torch] k=500 bs=8 median=1.892ms p20=1.889 p80=1.897 peak=1126.1MiB recall=nan ndcg=nan
+2026-09-06 14:56:03.713 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[torch] k=500 bs=16 median=3.424ms p20=3.420 p80=3.430 peak=1143.1MiB recall=nan ndcg=nan
+2026-09-06 14:56:05.383 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[torch] k=1000 bs=1 median=0.490ms p20=0.488 p80=0.493 peak=697.7MiB recall=nan ndcg=nan
+2026-09-06 14:56:06.634 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[torch] k=1000 bs=8 median=1.894ms p20=1.890 p80=1.919 peak=712.6MiB recall=nan ndcg=nan
+2026-09-06 14:56:07.366 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[torch] k=1000 bs=16 median=3.423ms p20=3.417 p80=3.435 peak=729.6MiB recall=nan ndcg=nan
+2026-09-06 14:56:07.509 | WARNING  | retrieval.loaders:drop_legacy_padding_row:81 - item_attrs_narrow: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 797085 → 797084 rows.
+2026-09-06 14:56:07.585 | INFO     | retrieval.sweep:_build_filter_modules:184 -   filter modules built: BloomFilter × 2 (oracle: ExactAttributeFilter)
+2026-09-06 14:56:07.585 | INFO     | retrieval.sweep:run_one_sweep:213 - === filter_kind=bloom sweep=c0_genre ===
+2026-09-06 14:56:07.826 | INFO     | retrieval.sweep:run_one_sweep:221 -   kept users: 9859 / 10000
+2026-09-06 14:56:18.807 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v3[triton] k=100 bs=1 median=0.364ms p20=0.361 p80=0.372 peak=891.5MiB recall=nan ndcg=nan
+2026-09-06 14:56:21.669 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v3[triton] k=100 bs=8 median=0.930ms p20=0.926 p80=0.947 peak=906.4MiB recall=nan ndcg=nan
+2026-09-06 14:56:22.281 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v3[triton] k=100 bs=16 median=1.426ms p20=1.415 p80=1.431 peak=923.4MiB recall=nan ndcg=nan
+2026-09-06 14:56:29.581 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v3[triton] k=500 bs=1 median=0.424ms p20=0.385 p80=0.472 peak=1099.1MiB recall=nan ndcg=nan
+2026-09-06 14:56:32.493 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v3[triton] k=500 bs=8 median=0.867ms p20=0.864 p80=0.870 peak=907.2MiB recall=nan ndcg=nan
+2026-09-06 14:56:33.083 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v3[triton] k=500 bs=16 median=1.446ms p20=1.443 p80=1.453 peak=924.2MiB recall=nan ndcg=nan
+2026-09-06 14:56:39.562 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v3[triton] k=1000 bs=1 median=0.473ms p20=0.455 p80=0.477 peak=1099.1MiB recall=nan ndcg=nan
+2026-09-06 14:56:42.531 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v3[triton] k=1000 bs=8 median=0.854ms p20=0.851 p80=0.857 peak=906.4MiB recall=nan ndcg=nan
+2026-09-06 14:56:43.178 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v3[triton] k=1000 bs=16 median=1.447ms p20=1.444 p80=1.450 peak=923.4MiB recall=nan ndcg=nan
+2026-09-06 14:56:52.821 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v3[torch] k=100 bs=1 median=0.543ms p20=0.539 p80=0.549 peak=892.3MiB recall=nan ndcg=nan
+2026-09-06 14:56:56.395 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v3[torch] k=100 bs=8 median=1.821ms p20=1.816 p80=1.831 peak=907.2MiB recall=nan ndcg=nan
+2026-09-06 14:56:57.052 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v3[torch] k=100 bs=16 median=3.276ms p20=3.270 p80=3.283 peak=924.2MiB recall=nan ndcg=nan
+2026-09-06 14:57:06.149 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v3[torch] k=500 bs=1 median=0.573ms p20=0.485 p80=0.580 peak=891.5MiB recall=nan ndcg=nan
+2026-09-06 14:57:09.823 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v3[torch] k=500 bs=8 median=1.835ms p20=1.831 p80=2.047 peak=906.4MiB recall=nan ndcg=nan
+2026-09-06 14:57:10.566 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v3[torch] k=500 bs=16 median=3.292ms p20=3.288 p80=3.298 peak=923.4MiB recall=nan ndcg=nan
+2026-09-06 14:57:18.854 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v3[torch] k=1000 bs=1 median=0.491ms p20=0.488 p80=0.579 peak=892.3MiB recall=nan ndcg=nan
+2026-09-06 14:57:22.366 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v3[torch] k=1000 bs=8 median=1.836ms p20=1.833 p80=1.844 peak=907.2MiB recall=nan ndcg=nan
+2026-09-06 14:57:23.092 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v3[torch] k=1000 bs=16 median=3.294ms p20=3.288 p80=3.304 peak=924.2MiB recall=nan ndcg=nan
+2026-09-06 14:57:23.162 | INFO     | retrieval.cli.evaluate:main:110 - wrote 36 rows to /workspace/wt/a1-golden/docs/plans/evaluation-harness-v2-artifacts/a1/step7/out/linr_v3.json
+=== 2026-09-06T14:57:26Z linr_v4 ===
+2026-09-06 14:57:56.314 | INFO     | retrieval.queries_cache:load_or_cache_queries:62 - loaded encoded_queries from cache: data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/encoded_queries_test.pt
+2026-09-06 14:57:56.907 | INFO     | retrieval.loaders:load_query_attrs:365 -   eval_split rows=313178 > queries=10000 (users_limit prefix): trimming attrs
+2026-09-06 14:57:57.049 | INFO     | retrieval.loaders:load_query_attrs:372 - loaded eval_split.parquet: qa_narrow=(10000, 4)
+2026-09-06 14:57:57.269 | WARNING  | retrieval.loaders:drop_legacy_padding_row:81 - item_attrs_narrow: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 797085 → 797084 rows.
+2026-09-06 14:57:57.281 | INFO     | retrieval.sweep:_build_filter_modules:184 -   filter modules built: ExactAttributeFilter × 2 (oracle: ExactAttributeFilter)
+2026-09-06 14:57:57.281 | INFO     | retrieval.sweep:run_one_sweep:213 - === filter_kind=clause sweep=c0_genre ===
+2026-09-06 14:57:57.533 | INFO     | retrieval.sweep:run_one_sweep:221 -   kept users: 9859 / 10000
+2026-09-06 14:58:18.221 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v4[triton] k=100 bs=1 median=0.627ms p20=0.626 p80=0.763 peak=587.4MiB recall=nan ndcg=nan
+2026-09-06 14:58:19.118 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v4[triton] k=100 bs=8 median=1.300ms p20=1.297 p80=1.305 peak=602.3MiB recall=nan ndcg=nan
+2026-09-06 14:58:20.050 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v4[triton] k=100 bs=16 median=2.086ms p20=2.083 p80=2.091 peak=619.3MiB recall=nan ndcg=nan
+2026-09-06 14:58:21.420 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v4[triton] k=500 bs=1 median=0.641ms p20=0.640 p80=0.642 peak=685.5MiB recall=nan ndcg=nan
+2026-09-06 14:58:22.323 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v4[triton] k=500 bs=8 median=1.312ms p20=1.310 p80=1.318 peak=700.4MiB recall=nan ndcg=nan
+2026-09-06 14:58:23.275 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v4[triton] k=500 bs=16 median=2.096ms p20=2.094 p80=2.102 peak=717.4MiB recall=nan ndcg=nan
+2026-09-06 14:58:25.131 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v4[triton] k=1000 bs=1 median=0.642ms p20=0.641 p80=0.644 peak=587.4MiB recall=nan ndcg=nan
+2026-09-06 14:58:26.041 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v4[triton] k=1000 bs=8 median=1.312ms p20=1.310 p80=1.317 peak=602.3MiB recall=nan ndcg=nan
+2026-09-06 14:58:26.999 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v4[triton] k=1000 bs=16 median=2.097ms p20=2.093 p80=2.102 peak=619.3MiB recall=nan ndcg=nan
+2026-09-06 14:58:28.526 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v4[torch] k=100 bs=1 median=0.599ms p20=0.598 p80=0.600 peak=685.5MiB recall=nan ndcg=nan
+2026-09-06 14:58:29.474 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v4[torch] k=100 bs=8 median=1.142ms p20=1.140 p80=1.144 peak=700.4MiB recall=nan ndcg=nan
+2026-09-06 14:58:30.476 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v4[torch] k=100 bs=16 median=1.846ms p20=1.842 p80=1.849 peak=717.4MiB recall=nan ndcg=nan
+2026-09-06 14:58:32.146 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v4[torch] k=500 bs=1 median=0.613ms p20=0.612 p80=0.614 peak=782.8MiB recall=nan ndcg=nan
+2026-09-06 14:58:33.082 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v4[torch] k=500 bs=8 median=1.153ms p20=1.151 p80=1.155 peak=797.7MiB recall=nan ndcg=nan
+2026-09-06 14:58:34.095 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v4[torch] k=500 bs=16 median=1.857ms p20=1.853 p80=1.862 peak=814.7MiB recall=nan ndcg=nan
+2026-09-06 14:58:36.038 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v4[torch] k=1000 bs=1 median=0.614ms p20=0.613 p80=0.615 peak=587.4MiB recall=nan ndcg=nan
+2026-09-06 14:58:36.961 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v4[torch] k=1000 bs=8 median=1.154ms p20=1.151 p80=1.157 peak=602.3MiB recall=nan ndcg=nan
+2026-09-06 14:58:37.912 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v4[torch] k=1000 bs=16 median=1.856ms p20=1.853 p80=1.860 peak=619.3MiB recall=nan ndcg=nan
+2026-09-06 14:58:38.032 | WARNING  | retrieval.loaders:drop_legacy_padding_row:81 - item_attrs_narrow: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 797085 → 797084 rows.
+2026-09-06 14:58:38.107 | INFO     | retrieval.sweep:_build_filter_modules:184 -   filter modules built: BloomFilter × 2 (oracle: ExactAttributeFilter)
+2026-09-06 14:58:38.108 | INFO     | retrieval.sweep:run_one_sweep:213 - === filter_kind=bloom sweep=c0_genre ===
+2026-09-06 14:58:38.325 | INFO     | retrieval.sweep:run_one_sweep:221 -   kept users: 9859 / 10000
+2026-09-06 14:58:50.067 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v4[triton] k=100 bs=1 median=0.617ms p20=0.601 p80=0.619 peak=782.1MiB recall=nan ndcg=nan
+2026-09-06 14:58:52.709 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v4[triton] k=100 bs=8 median=0.803ms p20=0.801 p80=0.979 peak=797.0MiB recall=nan ndcg=nan
+2026-09-06 14:58:54.994 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v4[triton] k=100 bs=16 median=1.091ms p20=1.088 p80=1.095 peak=814.0MiB recall=nan ndcg=nan
+2026-09-06 14:59:02.643 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v4[triton] k=500 bs=1 median=0.651ms p20=0.650 p80=0.652 peak=782.1MiB recall=nan ndcg=nan
+2026-09-06 14:59:04.908 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v4[triton] k=500 bs=8 median=0.993ms p20=0.815 p80=0.996 peak=797.0MiB recall=nan ndcg=nan
+2026-09-06 14:59:06.988 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v4[triton] k=500 bs=16 median=1.105ms p20=1.101 p80=1.339 peak=814.0MiB recall=nan ndcg=nan
+2026-09-06 14:59:14.335 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v4[triton] k=1000 bs=1 median=0.743ms p20=0.625 p80=0.744 peak=782.1MiB recall=nan ndcg=nan
+2026-09-06 14:59:16.608 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v4[triton] k=1000 bs=8 median=0.817ms p20=0.813 p80=0.995 peak=797.0MiB recall=nan ndcg=nan
+2026-09-06 14:59:18.695 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v4[triton] k=1000 bs=16 median=1.103ms p20=1.100 p80=1.107 peak=814.0MiB recall=nan ndcg=nan
+2026-09-06 14:59:27.157 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v4[torch] k=100 bs=1 median=0.591ms p20=0.590 p80=0.592 peak=782.2MiB recall=nan ndcg=nan
+2026-09-06 14:59:29.323 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v4[torch] k=100 bs=8 median=1.068ms p20=1.065 p80=1.081 peak=797.0MiB recall=nan ndcg=nan
+2026-09-06 14:59:31.547 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v4[torch] k=100 bs=16 median=1.710ms p20=1.707 p80=1.715 peak=814.0MiB recall=nan ndcg=nan
+2026-09-06 14:59:38.049 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v4[torch] k=500 bs=1 median=0.728ms p20=0.726 p80=0.730 peak=782.2MiB recall=nan ndcg=nan
+2026-09-06 14:59:40.227 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v4[torch] k=500 bs=8 median=1.079ms p20=1.077 p80=1.081 peak=797.0MiB recall=nan ndcg=nan
+2026-09-06 14:59:42.428 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v4[torch] k=500 bs=16 median=1.721ms p20=1.718 p80=1.724 peak=814.0MiB recall=nan ndcg=nan
+2026-09-06 14:59:48.835 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v4[torch] k=1000 bs=1 median=0.606ms p20=0.605 p80=0.609 peak=782.2MiB recall=nan ndcg=nan
+2026-09-06 14:59:50.998 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v4[torch] k=1000 bs=8 median=1.082ms p20=1.078 p80=1.226 peak=797.0MiB recall=nan ndcg=nan
+2026-09-06 14:59:53.195 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/linr_v4[torch] k=1000 bs=16 median=1.728ms p20=1.720 p80=1.903 peak=814.0MiB recall=nan ndcg=nan
+2026-09-06 14:59:53.228 | INFO     | retrieval.cli.evaluate:main:110 - wrote 36 rows to /workspace/wt/a1-golden/docs/plans/evaluation-harness-v2-artifacts/a1/step7/out/linr_v4.json
+=== 2026-09-06T14:59:56Z silvertorch ===
+2026-09-06 15:00:21.553 | INFO     | retrieval.queries_cache:load_or_cache_queries:62 - loaded encoded_queries from cache: data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/encoded_queries_test.pt
+2026-09-06 15:00:22.188 | INFO     | retrieval.loaders:load_query_attrs:365 -   eval_split rows=313178 > queries=10000 (users_limit prefix): trimming attrs
+2026-09-06 15:00:22.349 | INFO     | retrieval.loaders:load_query_attrs:372 - loaded eval_split.parquet: qa_narrow=(10000, 4)
+2026-09-06 15:00:22.604 | WARNING  | retrieval.loaders:drop_legacy_padding_row:81 - item_attrs_narrow: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 797085 → 797084 rows.
+2026-09-06 15:00:22.618 | INFO     | retrieval.sweep:_build_filter_modules:184 -   filter modules built: ExactAttributeFilter × 2 (oracle: ExactAttributeFilter)
+2026-09-06 15:00:22.618 | INFO     | retrieval.sweep:run_one_sweep:213 - === filter_kind=clause sweep=c0_genre ===
+2026-09-06 15:00:22.933 | INFO     | retrieval.sweep:run_one_sweep:221 -   kept users: 9859 / 10000
+/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/_inductor/compile_fx.py:321: UserWarning: TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. Consider setting `torch.set_float32_matmul_precision('high')` for better performance.
+  warnings.warn(
+2026-09-06 15:02:04.845 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[triton] k=100 bs=1 median=0.255ms p20=0.211 p80=0.258 peak=787.9MiB recall=nan ndcg=nan
+2026-09-06 15:02:05.766 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[triton] k=100 bs=8 median=0.449ms p20=0.446 p80=0.451 peak=802.8MiB recall=nan ndcg=nan
+2026-09-06 15:02:06.350 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[triton] k=100 bs=16 median=0.854ms p20=0.852 p80=0.858 peak=819.8MiB recall=nan ndcg=nan
+2026-09-06 15:02:09.335 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[triton] k=500 bs=1 median=0.265ms p20=0.264 p80=0.268 peak=1085.7MiB recall=nan ndcg=nan
+2026-09-06 15:02:10.127 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[triton] k=500 bs=8 median=0.465ms p20=0.463 p80=0.468 peak=1100.6MiB recall=nan ndcg=nan
+2026-09-06 15:02:10.749 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[triton] k=500 bs=16 median=0.869ms p20=0.867 p80=0.872 peak=1117.6MiB recall=nan ndcg=nan
+2026-09-06 15:02:14.737 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[triton] k=1000 bs=1 median=0.227ms p20=0.226 p80=0.231 peak=787.9MiB recall=nan ndcg=nan
+2026-09-06 15:02:15.525 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[triton] k=1000 bs=8 median=0.472ms p20=0.469 p80=0.475 peak=802.8MiB recall=nan ndcg=nan
+2026-09-06 15:02:16.148 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[triton] k=1000 bs=16 median=0.884ms p20=0.881 p80=0.887 peak=819.8MiB recall=nan ndcg=nan
+2026-09-06 15:02:22.423 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[torch] k=100 bs=1 median=0.585ms p20=0.581 p80=0.588 peak=1085.7MiB recall=nan ndcg=nan
+2026-09-06 15:02:23.659 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[torch] k=100 bs=8 median=3.425ms p20=3.413 p80=3.438 peak=1100.6MiB recall=nan ndcg=nan
+2026-09-06 15:02:25.113 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[torch] k=100 bs=16 median=6.790ms p20=6.776 p80=6.810 peak=1117.6MiB recall=nan ndcg=nan
+2026-09-06 15:02:27.141 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[torch] k=500 bs=1 median=0.600ms p20=0.597 p80=0.604 peak=787.9MiB recall=nan ndcg=nan
+2026-09-06 15:02:28.277 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[torch] k=500 bs=8 median=3.447ms p20=3.440 p80=3.456 peak=802.8MiB recall=nan ndcg=nan
+2026-09-06 15:02:29.601 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[torch] k=500 bs=16 median=6.818ms p20=6.806 p80=6.831 peak=819.8MiB recall=nan ndcg=nan
+2026-09-06 15:02:35.647 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[torch] k=1000 bs=1 median=0.600ms p20=0.597 p80=0.604 peak=1085.7MiB recall=nan ndcg=nan
+2026-09-06 15:02:36.807 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[torch] k=1000 bs=8 median=3.447ms p20=3.435 p80=3.457 peak=1100.6MiB recall=nan ndcg=nan
+2026-09-06 15:02:38.104 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[torch] k=1000 bs=16 median=6.815ms p20=6.805 p80=6.827 peak=1117.6MiB recall=nan ndcg=nan
+2026-09-06 15:02:38.475 | WARNING  | retrieval.loaders:drop_legacy_padding_row:81 - item_attrs_narrow: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 797085 → 797084 rows.
+2026-09-06 15:02:38.644 | INFO     | retrieval.sweep:_build_filter_modules:184 -   filter modules built: BloomFilter × 2 (oracle: ExactAttributeFilter)
+2026-09-06 15:02:38.645 | INFO     | retrieval.sweep:run_one_sweep:213 - === filter_kind=bloom sweep=c0_genre ===
+2026-09-06 15:02:38.933 | INFO     | retrieval.sweep:run_one_sweep:221 -   kept users: 9859 / 10000
+2026-09-06 15:02:47.291 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/silvertorch[triton] k=100 bs=1 median=0.226ms p20=0.224 p80=0.274 peak=1079.8MiB recall=nan ndcg=nan
+2026-09-06 15:02:49.345 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/silvertorch[triton] k=100 bs=8 median=0.517ms p20=0.515 p80=0.521 peak=1094.7MiB recall=nan ndcg=nan
+2026-09-06 15:02:50.032 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/silvertorch[triton] k=100 bs=16 median=0.984ms p20=0.982 p80=0.987 peak=1112.4MiB recall=nan ndcg=nan
+2026-09-06 15:02:55.564 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/silvertorch[triton] k=500 bs=1 median=0.243ms p20=0.242 p80=0.246 peak=1079.7MiB recall=nan ndcg=nan
+2026-09-06 15:02:57.606 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/silvertorch[triton] k=500 bs=8 median=0.570ms p20=0.568 p80=0.574 peak=1094.6MiB recall=nan ndcg=nan
+2026-09-06 15:02:58.165 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/silvertorch[triton] k=500 bs=16 median=1.073ms p20=1.070 p80=1.076 peak=1112.3MiB recall=nan ndcg=nan
+2026-09-06 15:03:06.030 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/silvertorch[triton] k=1000 bs=1 median=0.262ms p20=0.261 p80=0.265 peak=1079.9MiB recall=nan ndcg=nan
+2026-09-06 15:03:08.322 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/silvertorch[triton] k=1000 bs=8 median=0.647ms p20=0.645 p80=0.648 peak=1094.7MiB recall=nan ndcg=nan
+2026-09-06 15:03:09.329 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/silvertorch[triton] k=1000 bs=16 median=1.188ms p20=1.002 p80=1.192 peak=1112.4MiB recall=nan ndcg=nan
+2026-09-06 15:03:17.980 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/silvertorch[torch] k=100 bs=1 median=0.603ms p20=0.600 p80=0.606 peak=1079.7MiB recall=nan ndcg=nan
+2026-09-06 15:03:20.547 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/silvertorch[torch] k=100 bs=8 median=3.585ms p20=3.578 p80=3.592 peak=1094.6MiB recall=nan ndcg=nan
+2026-09-06 15:03:21.844 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/silvertorch[torch] k=100 bs=16 median=7.144ms p20=7.123 p80=7.159 peak=1112.3MiB recall=nan ndcg=nan
+2026-09-06 15:03:52.483 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/silvertorch[torch] k=500 bs=1 median=0.620ms p20=0.617 p80=0.623 peak=1079.9MiB recall=nan ndcg=nan
+2026-09-06 15:03:55.227 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/silvertorch[torch] k=500 bs=8 median=3.601ms p20=3.593 p80=3.609 peak=1094.7MiB recall=nan ndcg=nan
+2026-09-06 15:03:56.633 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/silvertorch[torch] k=500 bs=16 median=7.147ms p20=7.138 p80=7.156 peak=1112.4MiB recall=nan ndcg=nan
+2026-09-06 15:04:03.892 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/silvertorch[torch] k=1000 bs=1 median=0.624ms p20=0.621 p80=0.627 peak=1079.7MiB recall=nan ndcg=nan
+2026-09-06 15:04:06.331 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/silvertorch[torch] k=1000 bs=8 median=3.640ms p20=3.632 p80=3.653 peak=1094.6MiB recall=nan ndcg=nan
+2026-09-06 15:04:07.650 | INFO     | retrieval.sweep:_log_perf_line:527 - bloom/c0_genre/silvertorch[torch] k=1000 bs=16 median=7.225ms p20=7.206 p80=7.240 peak=1112.3MiB recall=nan ndcg=nan
+2026-09-06 15:04:07.696 | INFO     | retrieval.cli.evaluate:main:110 - wrote 36 rows to /workspace/wt/a1-golden/docs/plans/evaluation-harness-v2-artifacts/a1/step7/out/silvertorch.json
+/workspace/wt/a1-golden/evaluation/config/goodreads/_a1_step7-d128-filter.yaml  exit=0  duration=707s (0h11m)  log=/workspace/wt/a1-golden/docs/plans/evaluation-harness-v2-artifacts/a1/step7/runlogs/goodreads__a1_step7-d128-filter.log

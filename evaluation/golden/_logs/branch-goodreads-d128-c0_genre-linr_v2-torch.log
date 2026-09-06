@@ -1,0 +1,18 @@
+2026-09-06 14:10:33.266 | INFO     | retrieval.queries_cache:load_or_cache_queries:62 - loaded encoded_queries from cache: data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/encoded_queries_test.pt
+2026-09-06 14:10:34.015 | INFO     | retrieval.loaders:load_query_attrs:365 -   eval_split rows=313178 > queries=10000 (users_limit prefix): trimming attrs
+2026-09-06 14:10:34.208 | INFO     | retrieval.loaders:load_query_attrs:372 - loaded eval_split.parquet: qa_narrow=(10000, 4)
+2026-09-06 14:10:35.004 | WARNING  | retrieval.loaders:drop_legacy_padding_row:81 - item_attrs_narrow: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 797085 → 797084 rows.
+2026-09-06 14:10:35.024 | INFO     | retrieval.sweep:_build_filter_modules:184 -   filter modules built: ExactAttributeFilter × 1 (oracle: ExactAttributeFilter)
+2026-09-06 14:10:35.024 | INFO     | retrieval.sweep:run_one_sweep:213 - === filter_kind=clause sweep=c0_genre ===
+2026-09-06 14:10:35.534 | INFO     | retrieval.sweep:run_one_sweep:221 -   kept users: 9859 / 10000
+2026-09-06 14:10:36.035 | INFO     | retrieval.oracle:load_or_build_oracle:152 -   loaded oracle from cache: data/goodreads-work-id/gt_d128/gt_topk_v3_c0_genre.pt
+2026-09-06 14:12:26.733 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[torch] k=100 bs=1 median=0.932ms p20=0.826 p80=0.937 peak=684.7MiB recall=0.9997 ndcg=0.9998
+2026-09-06 14:12:27.993 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[torch] k=100 bs=8 median=4.648ms p20=4.642 p80=4.655 peak=699.6MiB recall=0.9997 ndcg=0.9998
+2026-09-06 14:12:29.437 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[torch] k=100 bs=16 median=9.123ms p20=9.113 p80=9.141 peak=716.6MiB recall=0.9997 ndcg=0.9998
+2026-09-06 14:13:37.825 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[torch] k=500 bs=1 median=0.909ms p20=0.836 p80=0.949 peak=684.7MiB recall=0.9997 ndcg=0.9997
+2026-09-06 14:13:38.906 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[torch] k=500 bs=8 median=4.656ms p20=4.650 p80=4.662 peak=699.6MiB recall=0.9997 ndcg=0.9997
+2026-09-06 14:13:40.328 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[torch] k=500 bs=16 median=9.141ms p20=9.131 p80=9.148 peak=716.6MiB recall=0.9997 ndcg=0.9997
+2026-09-06 14:14:50.705 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[torch] k=1000 bs=1 median=0.841ms p20=0.839 p80=0.843 peak=879.3MiB recall=0.9996 ndcg=0.9997
+2026-09-06 14:14:51.789 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[torch] k=1000 bs=8 median=4.658ms p20=4.655 p80=4.668 peak=894.2MiB recall=0.9996 ndcg=0.9997
+2026-09-06 14:14:53.345 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v2[torch] k=1000 bs=16 median=9.137ms p20=9.129 p80=9.147 peak=911.2MiB recall=0.9996 ndcg=0.9997
+2026-09-06 14:14:53.393 | INFO     | retrieval.cli.evaluate:main:110 - wrote 9 rows to /workspace/wt/a1-golden/evaluation/golden/goodreads-d128-c0_genre-linr_v2-torch.json

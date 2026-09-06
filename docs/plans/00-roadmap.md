@@ -99,15 +99,22 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
   check that in the `uv.lock` diff. Nothing citable comes off the Mac
   anyway (rule 2) — this only affects whether a green Mac test means
   anything about the box. Unblocks: **every `Mac` step in this file.**
-- [ ] **A1 — golden baseline on the old harness.** H §6 WP-0 (A100,
-  0.5 d). Commit the 3-line `users_limit` row-count fix; run the golden
-  cells on goodreads-d128 `c0_genre` (all five algos, `triton` + `torch`)
-  and arxiv-d128 `c0_maincat` (`silvertorch`, `triton` only — the cuda /
-  cute columns in H's text are void, see H's amendment). Gate: golden
-  JSONs committed under `evaluation/golden/`. Unblocks: A4, C4. Also
-  closes the harness half of
-  [refactor-validation-handoff.md](refactor-validation-handoff.md)
-  (steps 4–7) — record the result there.
+- [x] **A1 — golden baseline on the old harness.** H §6 WP-0 (A100,
+  0.5 d). Done 2026-09-06 on `dev/a1-golden`; golden JSONs and the run
+  record are under `evaluation/golden/`, the validation record is in
+  [evaluation-harness-v2.md](evaluation-harness-v2.md) §6 WP-0. The
+  `users_limit` row-count fix landed, plus **two bugs the golden run
+  found**, both of which had been hidden by steps 4–7 never having run:
+  the fetched datasets are the pre-`3b1b5b3` 1-indexed `[N+1, …]`
+  artifacts (loud on goodreads, *silent* on arxiv — `cos(query, target)`
+  0.99 → 0.62), and K3's `common.clause_pass` is a `NameError` under
+  inductor, which failed every compiled filter algo. Backends are
+  `triton` + `torch` only; the cuda / cute columns in H's text are void
+  (H's amendment). Of the harness half of
+  [refactor-validation-handoff.md](refactor-validation-handoff.md),
+  **steps 1, 4 and 7 passed**; **steps 5 and 6 are deferred 2026-09-06
+  (user: heavy evals later)** — scripted and ready, see that file's
+  status. Unblocks: A4, C4.
 - [ ] **A2 — pin and build the official package.** O §10 WP-0 (A100,
   0.5 d). `uv sync --extra official`; upstream suite green; sha, `nvcc`
   and build log in `docs/plans/official-silvertorch-artifacts/`. Gate:

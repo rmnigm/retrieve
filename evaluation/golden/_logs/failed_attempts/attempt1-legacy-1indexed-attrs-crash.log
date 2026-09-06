@@ -1,0 +1,53 @@
+2026-09-06 13:22:36.877 | INFO     | retrieval.loaders:load_sasrec_embeddings:204 - num_items=797084
+2026-09-06 13:22:36.882 | INFO     | retrieval.encode:load_model_for_eval:55 - model: GSASRec params={'max_seq_length': 200, 'embedding_dim': 128, 'num_heads': 2, 'num_blocks': 2, 'ffn_hidden_dim': 512, 'dropout': 0.5, 'reuse_item_embeddings': False}
+/workspace/wt/a1-golden/evaluation/training/model.py:42: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_blocks)
+2026-09-06 13:22:45.776 | INFO     | retrieval.loaders:load_sasrec_embeddings:212 - item_embs shape=(797084, 128) dtype=torch.float32 (pad row dropped)
+encode queries:   0%|          | 0/612 [00:00<?, ?it/s]encode queries:   0%|          | 1/612 [00:01<15:42,  1.54s/it]encode queries:   2%|▏         | 10/612 [00:01<01:13,  8.15it/s]encode queries:   3%|▎         | 18/612 [00:01<00:37, 15.84it/s]encode queries:   4%|▍         | 25/612 [00:02<00:44, 13.08it/s]encode queries:   6%|▌         | 36/612 [00:02<00:25, 22.47it/s]encode queries:   8%|▊         | 47/612 [00:02<00:17, 32.89it/s]encode queries:  10%|▉         | 59/612 [00:02<00:12, 45.46it/s]encode queries:  12%|█▏        | 71/612 [00:02<00:09, 58.31it/s]encode queries:  14%|█▎        | 84/612 [00:02<00:07, 71.43it/s]encode queries:  16%|█▌        | 96/612 [00:03<00:06, 81.25it/s]encode queries:  18%|█▊        | 108/612 [00:03<00:05, 89.63it/s]encode queries:  20%|█▉        | 120/612 [00:03<00:05, 96.30it/s]encode queries:  22%|██▏       | 133/612 [00:03<00:04, 102.88it/s]encode queries:  24%|██▎       | 145/612 [00:03<00:04, 107.23it/s]encode queries:  26%|██▌       | 157/612 [00:03<00:04, 109.80it/s]encode queries:  28%|██▊       | 169/612 [00:03<00:03, 111.09it/s]encode queries:  30%|██▉       | 181/612 [00:03<00:03, 113.04it/s]encode queries:  32%|███▏      | 193/612 [00:03<00:03, 114.74it/s]encode queries:  33%|███▎      | 205/612 [00:03<00:03, 113.42it/s]encode queries:  36%|███▌      | 218/612 [00:04<00:03, 116.05it/s]encode queries:  38%|███▊      | 231/612 [00:04<00:03, 117.79it/s]encode queries:  40%|███▉      | 244/612 [00:04<00:03, 119.48it/s]encode queries:  42%|████▏     | 257/612 [00:04<00:03, 117.70it/s]encode queries:  44%|████▍     | 269/612 [00:04<00:02, 117.25it/s]encode queries:  46%|████▌     | 281/612 [00:04<00:02, 116.18it/s]encode queries:  48%|████▊     | 293/612 [00:04<00:02, 114.46it/s]encode queries:  50%|████▉     | 305/612 [00:04<00:02, 113.69it/s]encode queries:  52%|█████▏    | 317/612 [00:04<00:02, 113.43it/s]encode queries:  54%|█████▍    | 329/612 [00:05<00:02, 112.52it/s]encode queries:  56%|█████▌    | 341/612 [00:05<00:02, 111.74it/s]encode queries:  58%|█████▊    | 353/612 [00:05<00:02, 111.94it/s]encode queries:  60%|█████▉    | 365/612 [00:05<00:02, 113.91it/s]encode queries:  62%|██████▏   | 377/612 [00:06<00:05, 43.84it/s] encode queries:  64%|██████▎   | 389/612 [00:06<00:04, 53.67it/s]encode queries:  65%|██████▌   | 400/612 [00:06<00:03, 62.05it/s]encode queries:  67%|██████▋   | 411/612 [00:06<00:02, 70.40it/s]encode queries:  69%|██████▉   | 422/612 [00:06<00:02, 78.50it/s]encode queries:  71%|███████   | 434/612 [00:06<00:02, 86.47it/s]encode queries:  73%|███████▎  | 446/612 [00:06<00:01, 93.14it/s]encode queries:  75%|███████▍  | 458/612 [00:06<00:01, 98.81it/s]encode queries:  77%|███████▋  | 470/612 [00:06<00:01, 103.02it/s]encode queries:  79%|███████▉  | 482/612 [00:06<00:01, 105.83it/s]encode queries:  81%|████████  | 494/612 [00:07<00:01, 107.13it/s]encode queries:  83%|████████▎ | 506/612 [00:07<00:00, 109.15it/s]encode queries:  85%|████████▍ | 518/612 [00:07<00:00, 110.68it/s]encode queries:  87%|████████▋ | 530/612 [00:07<00:00, 110.78it/s]encode queries:  89%|████████▊ | 542/612 [00:07<00:00, 110.25it/s]encode queries:  91%|█████████ | 554/612 [00:07<00:00, 111.33it/s]encode queries:  92%|█████████▏| 566/612 [00:07<00:00, 112.17it/s]encode queries:  94%|█████████▍| 578/612 [00:07<00:00, 112.31it/s]encode queries:  96%|█████████▋| 590/612 [00:07<00:00, 113.06it/s]encode queries:  98%|█████████▊| 602/612 [00:08<00:00, 114.48it/s]encode queries: 100%|██████████| 612/612 [00:08<00:00, 73.92it/s] 
+2026-09-06 13:23:55.230 | INFO     | retrieval.loaders:load_sasrec_embeddings:229 - encoded queries: 313178 users, dim=128
+2026-09-06 13:23:55.272 | INFO     | retrieval.queries_cache:load_or_cache_queries:79 -   users_limit=10000: trimming cache to 10000 users (was 313178)
+2026-09-06 13:23:58.266 | INFO     | retrieval.queries_cache:load_or_cache_queries:113 - wrote encoded_queries → data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/encoded_queries_test.pt (0.4GB)
+2026-09-06 13:23:58.355 | INFO     | retrieval.loaders:load_query_attrs:321 -   eval_split rows=313178 > queries=10000 (users_limit prefix): trimming attrs
+2026-09-06 13:23:58.367 | INFO     | retrieval.loaders:load_query_attrs:328 - loaded eval_split.parquet: qa_narrow=(10000, 4)
+2026-09-06 13:23:58.919 | INFO     | retrieval.sweep:_build_filter_modules:178 -   filter modules built: ExactAttributeFilter × 1 (oracle: ExactAttributeFilter)
+2026-09-06 13:23:58.919 | INFO     | retrieval.sweep:run_one_sweep:207 - === filter_kind=clause sweep=c0_genre ===
+2026-09-06 13:23:59.239 | INFO     | retrieval.sweep:run_one_sweep:215 -   kept users: 9859 / 10000
+2026-09-06 13:23:59.523 | INFO     | retrieval.oracle:load_or_build_oracle:155 -   building filtered oracle (K_GT=1000)
+Traceback (most recent call last):
+  File "/workspace/wt/a1-golden/.venv/bin/evaluate", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/click/core.py", line 1514, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/click/core.py", line 1435, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/click/core.py", line 1298, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/click/core.py", line 853, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/evaluation/retrieval/cli/evaluate.py", line 104, in main
+    rows = run_sweep(ctx)
+           ^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/evaluation/retrieval/sweep.py", line 63, in run_sweep
+    rows.extend(run_filter_kind(filter_kind, fcfg, ctx))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/evaluation/retrieval/sweep.py", line 100, in run_filter_kind
+    rows.extend(run_one_sweep(sweep, filter_kind, ctx, assets))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/evaluation/retrieval/sweep.py", line 221, in run_one_sweep
+    oracle_topk = load_or_build_oracle(
+                  ^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/evaluation/retrieval/oracle.py", line 156, in load_or_build_oracle
+    oracle_topk = compute_filtered_oracle(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/evaluation/retrieval/oracle.py", line 103, in compute_filtered_oracle
+    scores = scores.masked_fill(~mask, float("-inf"))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: The size of tensor a (797085) must match the size of tensor b (797084) at non-singleton dimension 1
