@@ -228,7 +228,9 @@ class Silvertorch(nn.Module):
         self.idx.n_probe = int(n_probe)
 
     def _check_probe_pool(self, n_probe: int, k: int) -> None:
-        max_size = self.idx.padded_cluster_items.shape[1]
+        # The layer's own cached scalar (set by register_index on every layout, re-derived
+        # after load_state_dict): the official CSR layout has no padded_cluster_items.
+        max_size = int(self.idx._max_cluster_size)
         if n_probe * max_size < k:
             raise ValueError(
                 f"k={k} exceeds probe pool n_probe * max_cluster_size = {n_probe} * {max_size}"
