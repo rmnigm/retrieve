@@ -16,6 +16,10 @@ for md in sorted(ROOT.rglob("*.md")):
     rel = md.relative_to(ROOT).as_posix()
     if only and not any(rel.startswith(o) for o in only):
         continue
+    # Archived plans are frozen records (CLAUDE.md: "not maintained, links may rot");
+    # they keep pointing at files that have since been deleted or moved.
+    if rel.startswith("docs/plans/archive/"):
+        continue
     in_fence = False
     for lineno, line in enumerate(md.read_text().splitlines(), 1):
         if FENCE.match(line):

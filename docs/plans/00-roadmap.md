@@ -19,7 +19,7 @@ legacy label, needs no GPU time and runs on the box's CPUs — there is no
 Mac target since 2026-09-06), its gate, and what it unblocks. When you finish a
 step: run its gate, append the validation record to the *plan's own*
 record section (the model is
-[cuda-silvertorch-handoff.md §13](cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360)),
+[cuda-silvertorch-handoff.md §13](archive/cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360)),
 then flip the checkbox here with the date and commit. Do not start a
 step whose dependencies are unchecked. Do not reorder steps without
 rewriting the dependency notes. When a phase is fully checked, move its
@@ -161,10 +161,10 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
   (A100, 1 d). Gate: JSON + tables appended to O. This is paper gap G2.
 - [ ] **B4 — delete the CUDA C++ and CuTe backends.** O §7, WP-5 (Mac,
   1 d). Tag the parent commit `cuda-cute-backends-final`; move
-  [cuda-silvertorch-handoff.md](cuda-silvertorch-handoff.md),
-  [cuda-silvertorch-phase2.md](cuda-silvertorch-phase2.md),
-  [cute-dsl-scorer.md](cute-dsl-scorer.md) and
-  [cute-dsl-scorer-artifacts/](cute-dsl-scorer-artifacts/README.md) to
+  [cuda-silvertorch-handoff.md](archive/cuda-silvertorch-handoff.md),
+  [cuda-silvertorch-phase2.md](archive/cuda-silvertorch-phase2.md),
+  [cute-dsl-scorer.md](archive/cute-dsl-scorer.md) and
+  [cute-dsl-scorer-artifacts/](archive/cute-dsl-scorer-artifacts/README.md) to
   `archive/`; rewrite the system docs O §7 lists. Gate: suite green on
   the A100, collect-only on the Mac, `git grep -il "cute\|codesigned_probe_score_cuda"`
   hits only `docs/plans/archive/`. Needs B2.
@@ -438,8 +438,8 @@ host time vs 4–11 µs), trimmed to wall-clock parity at B=16 and gone
 under CUDA-graph replay, which is the harness's deployed path.
 
 Plan, decisions, spike findings and the validation record:
-[cute-dsl-scorer.md](cute-dsl-scorer.md); raw scripts and outputs:
-[cute-dsl-scorer-artifacts/](cute-dsl-scorer-artifacts/README.md);
+[cute-dsl-scorer.md](archive/cute-dsl-scorer.md); raw scripts and outputs:
+[cute-dsl-scorer-artifacts/](archive/cute-dsl-scorer-artifacts/README.md);
 mechanism: [../system/kernels.md](../system/kernels.md#codesigned_probe_score_cute--the-cute-dsl-backend).
 
 ### CUDA SilverTorch backend — implemented 2026-07-06, **validated + tuned on A100 2026-09-02**
@@ -454,7 +454,7 @@ scores.
 
 **Phase 2 (2026-09-01)** closed the three gaps that
 first pass left, per
-[cuda-silvertorch-phase2.md](cuda-silvertorch-phase2.md). `filter_mode=
+[cuda-silvertorch-phase2.md](archive/cuda-silvertorch-phase2.md). `filter_mode=
 "exact"` now runs on cuda too — as a *second phase-2 mask kernel*
 (`cps_clause_mask_kernel`, one warp per output word, two ballots) rather
 than a third scoring kernel, since the scorer is filter-agnostic and any
@@ -480,13 +480,13 @@ ids prefetched one iteration ahead, a thread-per-slot clause-mask kernel,
 left no-filter and exact within ±3 % of Triton. Gates (1)–(3b) pass; (4)
 end-to-end was not run (no dataset on the box); ncu was blocked in the
 container. Full record:
-[cuda-silvertorch-handoff.md §13](cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360).
+[cuda-silvertorch-handoff.md §13](archive/cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360).
 
 Design and constraints:
 [../system/kernels.md](../system/kernels.md#codesigned_probe_score_cuda--the-cuda-c-backend).
-Phase-2 plan: [cuda-silvertorch-phase2.md](cuda-silvertorch-phase2.md).
+Phase-2 plan: [cuda-silvertorch-phase2.md](archive/cuda-silvertorch-phase2.md).
 Validation runbook:
-[cuda-silvertorch-handoff.md](cuda-silvertorch-handoff.md).
+[cuda-silvertorch-handoff.md](archive/cuda-silvertorch-handoff.md).
 
 This also made `Backend` three-valued (`"torch" | "triton" | "cuda"`),
 which matters beyond SilverTorch: every other layer dispatches

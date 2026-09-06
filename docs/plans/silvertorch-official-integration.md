@@ -123,7 +123,7 @@ is stateless; neither adds anything our adapter needs, so we call `torch.ops.st.
   alongside as deployed-best-case (harness-v2 §2.7).
 - **D8 — The paper question is Triton vs official** (phase 3 kernel, phase 2 kernel, end to end),
   `torch` eager as the floor. CUDA/CuTe numbers appear only as quotes from the archived
-  [cuda-silvertorch-handoff.md §13](cuda-silvertorch-handoff.md) and [cute-dsl-scorer.md §5](cute-dsl-scorer.md).
+  [cuda-silvertorch-handoff.md §13](archive/cuda-silvertorch-handoff.md) and [cute-dsl-scorer.md §5](archive/cute-dsl-scorer.md).
 - **D9 — Deletion happens after the official parity gate (WP-3), never before** (§9).
 - **D10 — Timing protocol is harness-v2 §2 verbatim**, extended with the official sha, `nvcc --version`,
   and the parse-cost row (§8e).
@@ -243,8 +243,8 @@ and parses one large expression per call) and reported as its own row.
 
 - `retrieve/src/retrieve/kernels/silvertorch/official.py` (new, ≈ 250 lines): `is_available()` /
   `ensure_loaded()` (distinguishes "not installed" from "op missing", as
-  [codesigned_probe_score_cuda.py:161-176](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_cuda.py)
-  does today); `attrs_to_features(attrs_sorted)`; `queries_to_expressions(qa, clause_is_reverse)`;
+  `codesigned_probe_score_cuda.py:161-176` did at the time — that wrapper went at B4, tag
+  `cuda-cute-backends-final`); `attrs_to_features(attrs_sorted)`; `queries_to_expressions(qa, clause_is_reverse)`;
   `parse_plans(expressions, hash_k)` with an LRU keyed by the string tuple; `pack_mask_high_first(bool
   [B, N]) -> int64 [B, ceil(N/64)]`; eager `official_scores(...)` / `official_bloom_partial(...)`
   returning `[B, P]` fp32 scores + int64 ids (`-inf`/`-1` pads) so `masked_topk` applies unchanged.
@@ -772,7 +772,7 @@ excluded: **99 passed, 3 subtests passed in 2.58 s** — the same 99 as the 12.4
 
 Every skip is a `cute` cell: `nvidia-cutlass-dsl` (the `cute` extra) is not installed in
 the B2 venv, so those rows skip exactly as `require_cps_cute` promises; the last full cute
-validation stays [cute-dsl-scorer.md §5](cute-dsl-scorer.md) (2026-09-02) and B4 deletes
+validation stays [cute-dsl-scorer.md §5](archive/cute-dsl-scorer.md) (2026-09-02) and B4 deletes
 the backend. The `cuda` rows ran (parity + compile + export).
 
 **The three pre-existing red cells** (A2's finding 7; all red on `development` before B1):
