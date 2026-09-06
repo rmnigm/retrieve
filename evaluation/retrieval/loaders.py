@@ -297,6 +297,13 @@ def load_query_attrs(eval_split_path: Path, n_queries: int) -> torch.Tensor | No
     is runnable). The wide-shelf columns in the parquet (``_1shelf`` /
     ``_2shelf``) are unused by the current bench — kept on disk for now
     in case wide-bloom sweeps come back.
+
+    ``n_queries`` is the row count of the query tensor the caller already
+    holds. On the checkpoint path that tensor is *already* trimmed to
+    ``cfg.users_limit`` (``queries_cache.load_or_cache_queries``) while the
+    parquet always holds the full split; ``users_limit`` is a prefix, so the
+    attrs are trimmed to the same prefix here. Only a parquet with *fewer*
+    rows than the queries is an error.
     """
     if not eval_split_path.exists():
         logger.warning(
@@ -305,11 +312,18 @@ def load_query_attrs(eval_split_path: Path, n_queries: int) -> torch.Tensor | No
         )
         return None
     eval_split = pl.read_parquet(eval_split_path)
-    if eval_split.height != n_queries:
+    if eval_split.height < n_queries:
         raise RuntimeError(
-            f"eval_split rows={eval_split.height} ≠ queries={n_queries}; "
+            f"eval_split rows={eval_split.height} < queries={n_queries}; "
             "regen eval_split.parquet via the dataset CLI's `attrs` subcommand"
         )
+    if eval_split.height > n_queries:
+        logger.info(
+            "  eval_split rows={} > queries={} (users_limit prefix): trimming attrs",
+            eval_split.height,
+            n_queries,
+        )
+        eval_split = eval_split.head(n_queries)
     qa_narrow = torch.tensor(eval_split["query_attrs_narrow"].to_list(), dtype=torch.long)
     logger.info("loaded eval_split.parquet: qa_narrow={}", tuple(qa_narrow.shape))
     return qa_narrow
