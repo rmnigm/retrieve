@@ -327,7 +327,11 @@ or hunting a regression.
 - Mask path: post-filter, not in-loop. Surviving ids retain their
   original positions; failed positions become `-1`.
 - Candidate-ids path: gather + bmm reference; `p < k` returns
-  `actual_k = p` columns (no padding, by current contract).
+  `actual_k = p` columns (no padding, by current contract). A `-1`-tailed
+  candidate tensor (row `b` keeps `2 + b` real ids of 24) never returns
+  item `N-1` (where a raw `-1` would wrap), has exactly the real ids
+  finite and the tail `-1` / `-inf`, and its finite part matches a
+  pad-free re-rank of the same row.
 - `post_filter_topk` — drop-failed (`counts == mask.sum`), all-pass
   (`out_ids == topk_ids`), all-fail (`(out_ids == -1).all()`).
 
@@ -506,7 +510,12 @@ live in `test_official.py`.
   `load_state_dict` checks shapes.
 - Candidate-ids path returns ids ⊆ candidates (with bloom, with exact,
   without filter, and with `p < k` — the short-`P` case returns
-  `min(k, P)` columns, no pad). Passing `query_clause_attrs` together
+  `min(k, P)` columns, no pad). A `-1`-tailed candidate tensor (row `b`
+  keeps `2 + b` real ids of 24, `k = 8`) never returns item `N-1` (where
+  a raw `-1` would wrap — through `inv_perm` on official), has `-1` ids
+  exactly where scores are `-inf`, `min(k, 2 + b)` finite slots, and a
+  finite part `torch.equal` to a pad-free re-rank of the same row (ids
+  up to ties). Passing `query_clause_attrs` together
   with `candidate_ids` raises `ValueError` (the candidates path would
   silently skip the fused filter otherwise).
 - Cross-backend agreement: `torch` vs `triton`, `cuda` vs `triton` and

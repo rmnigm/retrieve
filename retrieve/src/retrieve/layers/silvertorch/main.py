@@ -417,7 +417,8 @@ class SilverTorch(RetrievalModule):
     ) -> tuple[Tensor, Tensor]:
         """IVF + (optional) attribute-filter-fused retrieval; ``query_clause_attrs`` is valid only
         for ``filter_mode="bloom"|"exact"`` and when ``None`` the filter branch is skipped (plain
-        IVF + INT8 ANN)."""
+        IVF + INT8 ANN). ``candidate_ids [B, P]`` (``-1`` = padding) switches to a pure
+        re-rank of the given original ids with no filter."""
         if candidate_ids is not None:
             if query_clause_attrs is not None:
                 raise ValueError(
@@ -699,20 +700,24 @@ class SilverTorch(RetrievalModule):
         query: Tensor,
         candidate_ids: Tensor,
     ) -> tuple[Tensor, Tensor]:
+        """Re-rank ``candidate_ids [B, P]`` (original item ids; ``-1`` = padding, as every
+        compact producer in the library emits) with the int8 dot: pads are never gathered
+        (``clamp_min(0)``), never scored (``-inf``) and never returned (``-1`` sentinel).
+        Rows with fewer than ``min(k, P)`` real candidates carry ``-1`` / ``-inf`` in the
+        tail; ``pad_to_k=False`` keeps ``min(k, P)`` columns when ``P < k``. Pure tensor
+        flow, no host sync."""
+        valid = candidate_ids >= 0
+        safe = candidate_ids.clamp_min(0)
         if self.backend == "official":
             # item_codes is cluster-sorted on this backend; candidate ids are original ids.
-            candidate_ids = self.inv_perm[candidate_ids]
-        cand_codes = self.item_codes[candidate_ids].to(torch.float32)
+            safe = self.inv_perm[safe]
+        cand_codes = self.item_codes[safe].to(torch.float32)
         q_codes, q_scales = quantize_int8(query)
         scores = torch.bmm(
             q_codes.to(torch.float32).unsqueeze(1), cand_codes.transpose(1, 2)
         ).squeeze(1)
         scores = scores * q_scales.unsqueeze(1) * self.global_scale
-
-        # Scores here are always finite (int8 dot × finite scales), so masked_topk's
-        # non-finite → -1 sentinel never fires; pad_to_k=False keeps the current
-        # min(k, P)-column, no-pad, no-sentinel semantics when P < k.
-        return masked_topk(scores, self.k, gather_ids=candidate_ids, pad_to_k=False)
+        return masked_topk(scores, self.k, valid=valid, gather_ids=candidate_ids, pad_to_k=False)
 
 
 def _rederive_cached_scalars(module: SilverTorch, incompatible_keys) -> None:
