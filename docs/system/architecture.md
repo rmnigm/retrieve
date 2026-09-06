@@ -20,6 +20,17 @@ and selecting their compute path via a `backend=` flag on `__init__`
 | `"cuda"` | hand-written CUDA C++, JIT-compiled on first forward | **`SilverTorch` only** |
 | `"cute"` | CuTe DSL port of the `"cuda"` kernels (same ops, same buffers, bit-identical); needs the `cute` extra | **`SilverTorch` only** |
 
+There is also an optional extra with **no backend behind it yet**:
+`torchretrieve[official]` (`uv sync --extra official`) installs Meta's own
+`meta-recsys/silvertorch`, pinned by sha in the workspace root's
+`[tool.uv.sources]`, which builds a CUDA extension and registers nine
+`torch.ops.st.*` ops. Nothing in `retrieve` imports it today — the
+`backend="official"` adapter is Phase B of
+[../plans/00-roadmap.md](../plans/00-roadmap.md). Installing it needs `nvcc`
+(12.x), `ninja` and `setuptools`; see
+[../plans/official-silvertorch-artifacts/README.md](../plans/official-silvertorch-artifacts/README.md)
+for the pin, the build record and the upstream-suite result.
+
 `"cuda"` is not a universal third path: it exists solely for
 `SilverTorch`'s probe-scoring kernel. Every other class accepts the flag
 for API symmetry, but its dispatch is `if backend == "triton": … else:

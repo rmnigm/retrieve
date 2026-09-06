@@ -1,0 +1,56 @@
+### upstream pytest, silvertorch @ 21aa35e28b6dd9a91e9ee35efb0857715e86bda7
+### 2026-09-06T12:35:46Z  A100-SXM4-80GB, torch 2.10.0+cu128, nvcc 12.4, python 3.11.10
+### checkout: fresh clone at the pinned sha with the built _C.so copied in (same wheel uv installed)
+
+===== (1) README's command: pytest silvertorch/  =====
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.cache/uv/archive-v0/jiUgZbN7UVY4p_TO/lib/python3.11/site-packages/_pytest/assertion/rewrite.py:357: in _rewrite_test
+    tree = ast.parse(source, filename=strfn)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.11/ast.py:50: in parse
+    return compile(source, filename, mode, flags,
+E     File "/tmp/claude-0/-workspace-retrieve/ad71225d-1adc-4d97-be8b-134adf16d04c/scratchpad/silvertorch/silvertorch/ops/csrc/tests/test_fresh_index_post_processing.py", line 25
+E       torch.ops.load_library(
+E                             ^
+E   SyntaxError: '(' was never closed
+_________ ERROR collecting silvertorch/ops/csrc/tests/test_is_topk.py __________
+.venv/lib/python3.11/site-packages/torch/_ops.py:1442: in load_library
+    ctypes.CDLL(path)
+/usr/lib/python3.11/ctypes/__init__.py:376: in __init__
+    self._handle = _dlopen(self._name, mode)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+E   OSError: /silvertorch/oss/ops/csrc:is_topk: cannot open shared object file: No such file or directory
+
+The above exception was the direct cause of the following exception:
+/tmp/claude-0/-workspace-retrieve/ad71225d-1adc-4d97-be8b-134adf16d04c/scratchpad/silvertorch/silvertorch/ops/csrc/tests/test_is_topk.py:24: in <module>
+    torch.ops.load_library("//silvertorch/oss/ops/csrc:is_topk")
+.venv/lib/python3.11/site-packages/torch/_ops.py:1444: in load_library
+    raise OSError(f"Could not load this library: {path}") from e
+E   OSError: Could not load this library: /silvertorch/oss/ops/csrc:is_topk
+=========================== short test summary info ============================
+ERROR ../../../tmp/claude-0/-workspace-retrieve/ad71225d-1adc-4d97-be8b-134adf16d04c/scratchpad/silvertorch/silvertorch/ops/csrc/tests/test_bloom_search_integration.py
+ERROR ../../../tmp/claude-0/-workspace-retrieve/ad71225d-1adc-4d97-be8b-134adf16d04c/scratchpad/silvertorch/silvertorch/ops/csrc/tests/test_fresh_index_post_processing.py
+ERROR ../../../tmp/claude-0/-workspace-retrieve/ad71225d-1adc-4d97-be8b-134adf16d04c/scratchpad/silvertorch/silvertorch/ops/csrc/tests/test_is_topk.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 3 errors during collection !!!!!!!!!!!!!!!!!!!!
+3 errors in 13.78s
+
+===== (2) same, minus the three files that cannot be imported at this sha =====
+........................................................................ [ 72%]
+...........................                                           [100%]
+99 passed, 3 subtests passed in 11.56s
+
+===== (3) the three excluded files, with the broken @oss-disable load_library lines
+          removed in a scratch copy (upstream NOT modified; this only quantifies the defect) =====
+FAILED ../../../tmp/claude-0/-workspace-retrieve/ad71225d-1adc-4d97-be8b-134adf16d04c/scratchpad/silvertorch-patched/silvertorch/ops/csrc/tests/test_is_topk.py::TestIsTopk::test_random_large
+FAILED ../../../tmp/claude-0/-workspace-retrieve/ad71225d-1adc-4d97-be8b-134adf16d04c/scratchpad/silvertorch-patched/silvertorch/ops/csrc/tests/test_is_topk.py::TestIsTopk::test_random_single_row
+FAILED ../../../tmp/claude-0/-workspace-retrieve/ad71225d-1adc-4d97-be8b-134adf16d04c/scratchpad/silvertorch-patched/silvertorch/ops/csrc/tests/test_is_topk.py::TestIsTopk::test_registered
+FAILED ../../../tmp/claude-0/-workspace-retrieve/ad71225d-1adc-4d97-be8b-134adf16d04c/scratchpad/silvertorch-patched/silvertorch/ops/csrc/tests/test_is_topk.py::TestIsTopk::test_simple_largest
+FAILED ../../../tmp/claude-0/-workspace-retrieve/ad71225d-1adc-4d97-be8b-134adf16d04c/scratchpad/silvertorch-patched/silvertorch/ops/csrc/tests/test_is_topk.py::TestIsTopk::test_simple_smallest
+14 failed, 9 passed in 11.06s
+
+  test_bloom_search_integration.py : 9 passed  -> the file is sound; only the @oss-disable
+                                     comment-stripping left an unbalanced load_library call.
+  test_is_topk.py (11) and test_fresh_index_post_processing.py (3): fail with
+  "'_OpNamespace' 'st' object has no attribute ..." because is_topk.{cpp,cu} and
+  fresh_index_post_processing.{cpp,cu} are NOT in setup.py's cpu_sources/cuda_sources
+  at this sha, so those two ops are never compiled into silvertorch._C.
