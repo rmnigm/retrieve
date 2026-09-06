@@ -597,3 +597,69 @@ class TestEdgeCases:
         ex_ids, _ = exact(data["query"])
         # int8 quant + kmeans degeneracy can shuffle near-ties; allow modest slack.
         assert recall_at_k(ids, ex_ids) >= 0.85
+
+
+class TestFewSurvivorsSentinel:
+    """``-inf`` slots carry the ``-1`` id on every backend (O §14.7).
+
+    ``interfaces.py`` names ``-1 / -inf`` as the "no item" sentinels. The ``torch`` and
+    ``official`` backends get there through ``masked_topk``; the Triton epilogues
+    (``_cps_finish`` / ``_cpse_finish``) used to return whatever item id the probe pool held at
+    that slot, so on a row with fewer than K survivors the two backends' ``ids`` tensors were not
+    comparable without normalising through score finiteness first. The epilogues now apply the
+    sentinel themselves.
+
+    The index here is built so the survivor count is *known*: one clause, one attribute slot, a
+    value carried by exactly five items, and a query row asking for a value no item carries.
+    """
+
+    K_SMALL = 8
+    N_SMALL = 1024
+
+    @pytest.fixture(scope="class")
+    def few(self):
+        embs = make_index(self.N_SMALL, D, seed=11)
+        attrs = torch.full((self.N_SMALL, 1, 1), 7, dtype=torch.long, device="cuda")
+        attrs[:5, 0, 0] = 3  # exactly five items carry value 3 — fewer than K_SMALL
+        # rows: 5 survivors / every item / no item at all.
+        q_attrs = torch.tensor([[3], [7], [99]], dtype=torch.long, device="cuda")
+        return {"embs": embs, "attrs": attrs, "q_attrs": q_attrs, "query": make_query(3, D)}
+
+    def _build_few(self, few, filter_mode, backend):
+        kw = dict(
+            k=self.K_SMALL, n_lists=8, n_probe=8, n_iter=3, filter_mode=filter_mode, backend=backend
+        )
+        if filter_mode == "bloom":
+            kw.update(m_bits=M_BITS, k_hash=K_HASH)
+        m = SilverTorch(**kw)
+        m.register_index(few["embs"], few["attrs"])
+        return m
+
+    @pytest.mark.parametrize("filter_mode", ["exact", "bloom"])
+    def test_triton_writes_minus_one_at_inf_slots(self, few, filter_mode):
+        m = self._build_few(few, filter_mode, "triton")
+        ids, scores = m(few["query"], few["q_attrs"])
+
+        dead = ~torch.isfinite(scores)
+        assert dead.any(), "fixture no longer produces rows with fewer than K survivors"
+        assert torch.equal(ids[dead], torch.full_like(ids[dead], -1)), (
+            f"{filter_mode}: Triton epilogue left probe-pool ids at -inf slots: "
+            f"{sorted(set(ids[dead].tolist()))}"
+        )
+        # The last query row asks for a value no item carries: the exact filter admits nobody.
+        if filter_mode == "exact":
+            assert bool(dead[2].all()), "row 2 should have no survivors at all"
+            assert torch.equal(ids[2], torch.full_like(ids[2], -1))
+
+    @pytest.mark.parametrize("filter_mode", ["exact", "bloom"])
+    def test_triton_ids_match_torch_without_normalisation(self, few, filter_mode):
+        """The two backends' ids now compare directly — no finiteness normalisation first."""
+        tri = self._build_few(few, filter_mode, "triton")
+        trc = self._build_few(few, filter_mode, "torch")
+        ids_tri, sc_tri = tri(few["query"], few["q_attrs"])
+        ids_trc, sc_trc = trc(few["query"], few["q_attrs"])
+
+        assert torch.equal(sc_tri, sc_trc), (
+            f"{filter_mode}: scores differ between triton and torch on the shared int8 index"
+        )
+        assert_ids_equal_up_to_ties(ids_tri, ids_trc, sc_tri)

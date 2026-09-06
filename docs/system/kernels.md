@@ -231,6 +231,13 @@ to the inlined predicate with a
 - 1-bit Sign-OPORP (V3): `D - 2 * popcount(query_bits ^ item_bits)`, fp32.
   `D = 64 * W`. This is the standard Hamming-to-dot-product relation for
   sign-quantized vectors. Higher is better. Same `-inf` sentinel.
+- The **id** returned alongside a `-inf` score is always `-1`, on every
+  backend — `interfaces.py` names `-1 / -inf` as the paired "no item"
+  sentinels. The torch and official backends get there through
+  `masked_topk`; the two SilverTorch Triton epilogues apply it themselves
+  (see below). So a caller can read either tensor to find the dead slots,
+  and ids from two backends compare directly on rows with fewer than K
+  survivors.
 
 ## OPORP layout
 
@@ -821,7 +828,12 @@ remains a body-level constexpr (the bloom-on and bloom-off paths still
 JIT-specialise on it). Score buffer is `torch.empty([B, P])` — every
 in-bounds lane is overwritten (real dot or `-inf`), so no pre-fill
 kernel is needed. The host then `torch.topk(scores, K)` directly and
-gathers global ids. `SilverTorch.register_index` asserts
+gathers global ids, and `_cps_finish` overwrites the id at every non-finite
+slot with `-1` — one capture-safe `torch.where(isfinite(topk_scores),
+topk_ids, -1)`, no host sync. Without it the epilogue returned whatever
+item the probe pool held at a bloom-rejected or `-1`-padded slot, which
+diverged from the `masked_topk` contract the other two backends meet
+(plan O §14.7). `SilverTorch.register_index` asserts
 `K <= n_probe * max_cluster_size` so `P >= K` is structurally
 guaranteed; the wrapper has no host-side pad tail (the prior
 "`P < K` ⇒ pad to width K" path is gone — it was dead in production
@@ -861,7 +873,8 @@ optimum also tracks `P = n_probe × max_cluster_size`, so re-tune with
 predicate body is the shared `common.clause_pass`
 (`ids=safe_ids`, `load_mask=valid` — indirect addressing over the
 probed items). Score buffer is `torch.empty([B, P])` — same convention
-as `codesigned_probe_score`, no pre-fill kernel.
+as `codesigned_probe_score`, no pre-fill kernel, and `_cpse_finish` applies
+the same `-1` id sentinel at non-finite slots.
 
 
 ### `official` — Meta's `torch.ops.st.*` kernels as the reference backend
