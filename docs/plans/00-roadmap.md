@@ -41,8 +41,24 @@ plan to `archive/` and shorten its entry here to one line under *Done*.
 > `linr_v2`/`linr_v3` triton was found and a fix drafted but not
 > verified; arxiv cell, resume check and golden comparison not run).
 > Runs were stopped on the user's instruction ("code now, heavy evals
-> later"). Next GPU lane, in order: B4's suite → finish C4 → B3 → the
-> Triton epilogue `-1` sentinel (O §14.7) → D4.
+> later"). **Three C4 findings the next session must act on** (details
+> in the C4 agent's commits on that branch): (i) GPU k-means is not
+> deterministic — two seed-0 builds differ by 1.8e-2 in centroids
+> (`index_add_` atomics), so SilverTorch quality reproduces only to
+> ~1e-4 and the 1e-6 golden gate cannot pass on it until the library's
+> k-means reduction is made deterministic (a library change, not a
+> tolerance change); LiNR V2/V3 triton reproduce to 1e-6..5e-6 for the
+> same reason (unordered atomic compaction). (ii) The `graph` numbers in
+> A1's golden for `linr_v2`/`linr_v3` triton were compiled-eager: inductor
+> skipped cudagraphs ("mutated inputs", a false positive from the
+> compaction kernels' data-dependent stores); the WIP fix wraps the two
+> compact kernels as opaque custom ops. (iii) Unlocked clocks differ
+> between runs: golden ran at 1140 MHz, C4 at 1410 MHz under load, so
+> latency comparisons must normalise on `env.sm_mhz`, and 9 cells came
+> out `unstable` from the idle-first-sample drift rule. Next GPU lane,
+> in order: B4's suite → finish C4 (verify the WIP, deterministic k-means
+> decision, rerun) → B3 → the Triton epilogue `-1` sentinel (O §14.7) →
+> D4.
 > **Environment facts that bind everything below:** the VM *is* the
 > A100 box; SM clocks cannot be locked (`nvidia-smi -lgc` denied, no
 > sudo — timing uses H §7's fallback: sampled `sm_mhz` + `unstable`);
