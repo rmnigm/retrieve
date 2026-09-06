@@ -1,9 +1,10 @@
 """CPU-only tests for ``retrieval.data`` (harness v2 WP-2).
 
-A tiny pre-encoded (arxiv-shaped) dataset is written into ``tmp_path`` — ``content/`` with
-``text_emb.pt`` / ``query_emb.pt`` and their meta sidecars, ``heldout.parquet``,
-``item_attrs_narrow.pt``, ``clause_is_reverse_narrow.pt``, ``eval_split.parquet`` — so
-``load_inputs`` can be checked end to end: fp16 → fp32 + normalisation, the −1 shift of
+A tiny pre-encoded (arxiv-shaped) dataset is written into ``tmp_path`` by
+``conftest.write_tiny_dataset`` — ``content/`` with ``text_emb.pt`` / ``query_emb.pt`` and
+their meta sidecars, ``heldout.parquet``, ``item_attrs_narrow.pt``,
+``clause_is_reverse_narrow.pt``, ``eval_split.parquet`` — so ``load_inputs`` can be checked
+end to end: fp16 → fp32 + normalisation, the −1 shift of
 held-out ids, the prefix assertion, the eval_split row-count check against the *full* split,
 and ``users_limit`` applied once to queries / targets / attrs together. Then ``sweep_qa``
 (the old ``build_sweep_qa`` semantics), ``build_filters`` keyed by *filter* backend on the
@@ -13,12 +14,11 @@ checkpoint and is exercised in C4.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-import polars as pl
 import pytest
 import torch
+from conftest import write_tiny_dataset  # pytest puts this directory on sys.path
 
 from retrieval import data, oracle
 from retrieval.config import Dataset
@@ -28,27 +28,14 @@ N, U, D, C = 12, 6, 8, 2
 
 
 def _write_dataset(root: Path, *, doc_prefix="search_document: ", n_split=U) -> Dataset:
-    content = root / "content"
-    content.mkdir(parents=True)
-    g = torch.Generator().manual_seed(0)
-    torch.save(torch.randn(N, D, generator=g).half(), content / "text_emb.pt")
-    torch.save(torch.randn(U, D, generator=g).half(), content / "query_emb.pt")
-    (content / "text_emb.meta.json").write_text(json.dumps({"prefix": doc_prefix}))
-    (content / "query_emb.meta.json").write_text(json.dumps({"prefix": "search_query: "}))
-    pl.DataFrame({"item_id": list(range(1, U + 1))}).write_parquet(root / "heldout.parquet")
-    attrs = torch.full((N, C, 1), -1, dtype=torch.long)
-    attrs[:, 0, 0] = torch.arange(N) % 3  # clause 0: three values
-    attrs[:, 1, 0] = torch.arange(N) % 2  # clause 1: two values (reverse)
-    torch.save(attrs, root / "item_attrs_narrow.pt")
-    torch.save(torch.tensor([False, True]), root / "clause_is_reverse_narrow.pt")
-    qa = [[i % 3, i % 2] if i != 4 else [-1, -1] for i in range(n_split)]
-    pl.DataFrame({"query_attrs_narrow": qa}).write_parquet(root / "eval_split.parquet")
+    """The conftest writer at this file's smaller shape, as a resolved ``Dataset``."""
+    write_tiny_dataset(root, n=N, u=U, doc_prefix=doc_prefix, n_split=n_split)
     return Dataset(
         name="tiny",
         dim=D,
         data_dir=root,
         checkpoint=None,
-        content_dir=content,
+        content_dir=root / "content",
         users_limit=None,
         encode={},
         attrs=root / "item_attrs_narrow.pt",

@@ -115,8 +115,10 @@ boundary at `(dataset, dim, algo, backend)`.
   the key block minus `backend` (which includes `suite`, `filter_kind` and
   `sweep` — the ids differ per sweep). `bench run` never deletes the
   directory (the next backend's run needs it); `bench campaign` does, when
-  the `(dataset, dim, algo)` group closes. A missing reference (the first
-  backend's cells were skipped by `--resume`) records `null` values.
+  the `(dataset, dim, algo)` group closes. There is no "missing reference"
+  state: whichever backend runs a cell first writes the spill file
+  (`parity: "reference"`), so with `--resume` after the triton cells are
+  done, `torch` becomes the reference and `official` records `vs_torch`.
 - **Samples go to a JSONL sidecar** (`<name>.samples.jsonl`, one line per
   perf entry with the key block, `k`, `bs`, `mode`, `ms: [...]`), not a
   parquet: parquet cannot be appended per cell. `bench report` (D4) converts.
@@ -133,10 +135,21 @@ boundary at `(dataset, dim, algo, backend)`.
 - `build_s` is recorded on every cell of a build (a `deep` job with six
   `n_probe` values repeats the same `build_s` six times).
 
+Two things to read the numbers with, stated rather than changed:
+
+- **Per-call `*_ms` is closed-loop latency, not kernel time.** The CUDA
+  events bracket the GPU timeline between the two `record`s; when the
+  GPU idles waiting for the host (eager, `bs = 1`) the interval includes
+  launch latency and `host_gap_ms ≈ 0`. That is the latency the papers
+  report; `--profile` (`kernels`) is the kernel-time view.
+- **Clocks are sampled between cells with the GPU idle.** Without
+  `nvidia-smi -lgc` that reads the idle clock and the 5 % drift warning
+  fires spuriously; with locked clocks (the runbook) it is right.
+
 ## Architecture
 
 Ten modules under [`evaluation/retrieval/`](../../evaluation/retrieval/),
-2,657 lines including docstrings (`wc -l`) + 1,699 of tests, against H
+2,838 lines including docstrings (`wc -l`) + 2,034 of tests, against H
 §3.1's budget of 1,450 + 350. The tests are over budget by design — C1/C2
 locked the metrics, the `PATHS` table and the config expansion against the
 old harness — and the code is over mostly in `run.py`'s record assembly
@@ -144,16 +157,16 @@ and `data.py`'s two loaders; docstrings are a third of the count.
 
 | module | lines | owns |
 |---|---:|---|
-| [`bench.py`](../../evaluation/retrieval/bench.py) | 349 | `setup`, `warm_gpu_once`, `provenance` (GPU, driver, CUDA, torch, triton, commit, `dirty` = `subtree_dirty()` over `retrieve/src/retrieve`, `repo_dirty`, branch, `code_version` = the subtree's tree hash, or `files:<sha256>` of the sources on disk when the subtree is dirty, host, python, started), `clocks(expected_sm_mhz)` (`clocks_locked` = within 2 % of the expectation), `timed_build`, `index_bytes` (Σ buffers, submodules included, deduplicated), `stats`, `latency(fn, bs=, mode=)` (§2.5 windows, IQR + outlier counts, `load: closed_loop`, `peak_fwd_mib`), `graph_callable` (raises `NotCapturable` with the record's `reason`), `profile_once` |
+| [`bench.py`](../../evaluation/retrieval/bench.py) | 399 | `setup`, `warm_gpu_once`, `provenance` (GPU, driver, CUDA, torch, triton, commit, `dirty` = `subtree_dirty()` over `retrieve/src/retrieve`, `repo_dirty`, branch, `code_version` = the subtree's tree hash, or `files:<sha256>` of the sources on disk when the subtree is dirty, host, python, started), `clocks(expected_sm_mhz)` (`clocks_locked` = within 2 % of the expectation), `timed_build`, `index_bytes` (Σ buffers, submodules included, deduplicated), `stats`, `latency(fn, bs=, mode=)` (§2.5 windows, IQR + outlier counts, `load: closed_loop`, `peak_fwd_mib`), `graph_callable` (raises `NotCapturable` with the record's `reason`), `profile_once` |
 | [`metrics.py`](../../evaluation/retrieval/metrics.py) | 111 | `accumulator(ks, device)` / `accumulate(acc, ids, targets, num_targets=None, ranked=False)` / `finalize(acc)` — recall, ndcg, precision, mrr at every `k` from one top-`k_max` list as float64 running sums on device; `ranked=True` scores against the oracle's own top-`k` prefix (the old per-`k` `nt_k`); `per_row`, `jaccard_at_k`. `training/evaluate.py` shares it |
 | [`algos.py`](../../evaluation/retrieval/algos.py) | 328 | the five `nn.Module` wrappers (`LinrV1`, `LinrV2`, `LinrV3`, `LinrV4`, `Silvertorch`) with the filter as a submodule, `k` settable, `set_query_params` (`n_probe`, `candidate_pool`); `ALGOS`, `FILTER_KINDS`, `BACKENDS`, `FILTER_BACKEND`, `CAPTURABLE`, `PATHS`; `build`, `build_filter`, `is_valid_combo` |
-| [`config.py`](../../evaluation/retrieval/config.py) | 365 | `Dataset`, `Job`, `load_dataset`, `load_matrix` — the config matrix below |
-| [`data.py`](../../evaluation/retrieval/data.py) | 291 | `load_inputs` (SASRec encode cached on the full split, or pre-encoded text; `users_limit` once, as a prefix), `sweep_qa`, `build_filters` (keyed by filter backend), `exact_filter`, `query_pool` |
-| [`oracle.py`](../../evaluation/retrieval/oracle.py) | 264 | the exact filtered oracle as blob v4, `pass_counts`, `pass_rate`, `bloom_fp_rate`, `resume_key`, `KEY_FIELDS` |
-| [`run.py`](../../evaluation/retrieval/run.py) | 582 | `run(jobs, out_dir=...)` — the cell loop, `append_record`, `read_keys`, `record_path`; `SCHEMA_VERSION = 1`, `MODES`, `QUALITY_CHUNK = 16`, `EXACT_ALGOS`, `PERF_STAT_KEYS` |
-| [`cli.py`](../../evaluation/retrieval/cli.py) | 190 | `bench run` / `bench campaign` / `bench report` |
+| [`config.py`](../../evaluation/retrieval/config.py) | 375 | `Dataset`, `Job`, `load_dataset`, `load_matrix` — the config matrix below |
+| [`data.py`](../../evaluation/retrieval/data.py) | 295 | `load_inputs` (SASRec encode cached on the full split, or pre-encoded text; `users_limit` once, as a prefix), `sweep_qa`, `build_filters` (keyed by filter backend), `exact_filter`, `query_pool` |
+| [`oracle.py`](../../evaluation/retrieval/oracle.py) | 293 | the exact filtered oracle as blob v4, `pass_counts`, `pass_rate`, `bloom_fp_rate`, `resume_key`, `KEY_FIELDS` |
+| [`run.py`](../../evaluation/retrieval/run.py) | 635 | `run(jobs, out_dir=...)` — the cell loop, `append_record`, `read_keys`, `record_path`; `SCHEMA_VERSION = 1`, `MODES`, `QUALITY_CHUNK = 16`, `EXACT_ALGOS`, `PERF_STAT_KEYS` |
+| [`cli.py`](../../evaluation/retrieval/cli.py) | 227 | `bench run` / `bench campaign` / `bench report` |
 | [`upload.py`](../../evaluation/retrieval/upload.py) | 60 | `upload-results`: mirror `results/` to a HF dataset repo |
-| [`encode.py`](../../evaluation/retrieval/encode.py) | 117 | `load_model_for_eval`, `encode_queries` — the one file that imports `training.*` |
+| [`encode.py`](../../evaluation/retrieval/encode.py) | 115 | `load_model_for_eval`, `encode_queries` — the one file that imports `training.*` |
 
 Two things are classes, on purpose (H §3.1): `Job` — the fully resolved
 build spec whose `key(params)` *is* the record's key block and the resume
@@ -517,14 +530,14 @@ cd evaluation && CUDA_VISIBLE_DEVICES="" uv run pytest retrieval/tests/ -q
 
 | file | checks |
 |---|---|
-| `test_bench.py` | `stats` vs numpy, `latency` control flow, `index_bytes` dedup, `provenance` git fields, `clocks` shape, `graph_callable` refusals |
+| `test_bench.py` | `stats` vs numpy, `latency` control flow, `index_bytes` dedup, `provenance` git fields, `dirty` scoped to the library subtree with the `files:` fallback, `repo_dirty` excluding `results/`, `atomic_write`, `clocks` shape, `graph_callable` refusals |
 | `test_metrics.py` | padding / IDCG / denominator contracts; running sums equal the pre-v2 per-row means to 1e-9 (fixed and ranked targets); `jaccard_at_k` |
-| `test_algos.py` | `PATHS` covers the grid and agrees with architecture.md's dispatch table (parsed from the markdown); `k`-slice invariance of every layer and wrapper (no buffer changes with `k`); `set_query_params`; build refusals |
-| `test_config.py` | job counts and keys per suite on `tests/data/{mini,text,suites}.yaml`; `disabled`; build/query split; seeds; narrows; the real `goodreads` / `arxiv` d128 cell sets equal the deleted YAMLs' |
-| `test_data.py` | the pre-encoded loader on a tmp fixture, `users_limit` once, prefix and row-count checks, `sweep_qa`, filters by filter backend, `query_pool` |
-| `test_oracle.py` | padding, v4 fields and arithmetic, fingerprint in the file name, bloom FP rate, `code_version`, `resume_key` |
-| `test_run.py` | end to end on `conftest.py`'s tiny fixture: record schema, resume, `code_version` invalidation, a failed cell + continue, the quality gate, the parity spill, JSON sanitising |
-| `test_cli.py` | `bench run` via `CliRunner`, a real one-child `bench campaign` (`--skip-perf`), the `report` stub |
+| `test_algos.py` | `PATHS` covers the grid and agrees with architecture.md's dispatch table (parsed from the markdown); `k`-slice invariance of every layer and wrapper (no buffer changes with `k`) — the three SilverTorch wrappers are built once per session with `n_iter=2` (`silvertorch_modules`) and shared by the read-only tests; `set_query_params`; build refusals |
+| `test_config.py` | job counts and keys per suite on `tests/data/{mini,text,suites}.yaml`; `disabled`; build/query split; seeds; narrows and `Job.narrowed`; the real `goodreads` / `arxiv` d128 cell sets equal the deleted YAMLs' (kept until C4 agrees with A1's golden) |
+| `test_data.py` | the pre-encoded loader on the conftest writer at a smaller shape, `users_limit` once, prefix and row-count checks, `attrs_digest`, `sweep_qa`, filters by filter backend, `query_pool` |
+| `test_oracle.py` | padding, v4 fields and arithmetic, fingerprint in the file name (item side included: one edited attr value or a flipped reverse flag names a new blob), an unreadable blob rebuilt, bloom FP rate, `code_version`, `resume_key` |
+| `test_run.py` | end to end on `conftest.py`'s tiny fixture, both modes (`graph` = the CPU null entry with `reason: cuda_unavailable`): record schema, resume, `code_version` invalidation, `partial` for `--mode` / `--k` narrows and resume re-running them, a failed cell + continue, a sticky CUDA error ending the process after recording, the quality gate, the parity spill, held-out targets masked to the reachable ones, a torn trailing JSONL line, JSON sanitising |
+| `test_cli.py` | `bench run` via `CliRunner`, a real one-child `bench campaign` (suite `e2e1`, `--skip-quality --skip-perf`), a faked timed-out child (`rc=timeout`, exit 124), zero cells → exit 1, the `report` stub |
 
 ## How to run
 

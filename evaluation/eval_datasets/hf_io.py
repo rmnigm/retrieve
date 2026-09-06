@@ -1,8 +1,8 @@
 """Single source of truth for HuggingFace I/O in the evaluation harness.
 
-Replaces the three independent HF call sites (`data/arxiv.py`, `data/yambda.py`,
-`training/upload_checkpoints.py`) with one registry + one set of download/upload
-helpers. All local paths resolve under a single `data_root()`.
+Replaces the three independent HF call sites (`eval_datasets/arxiv.py`,
+`eval_datasets/yambda.py`, `training/upload_checkpoints.py`) with one registry + one set
+of download/upload helpers. All local paths resolve under a single `data_root()`.
 
 Layout:
 

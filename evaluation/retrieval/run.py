@@ -32,7 +32,9 @@ Cross-backend parity (§2.4, amended by §8.2 K): the first backend to run a cel
 top-``k_max`` ids and scores to ``<out_dir>/_parity/<hash>.npz`` (hash over the key minus
 ``backend``); later backends record ``jaccard_vs_first@k`` and ``score_max_abs_diff``
 against it. ``bench campaign`` deletes the directory when the ``(dataset, dim, algo)`` group
-closes; a missing reference records ``null`` with ``parity: "no_reference"``.
+closes. There is no "no reference" state: whichever backend runs a cell first *writes* the
+reference (``parity: "reference"``), so after ``--resume`` skips the triton cells, ``torch``
+becomes the reference and ``official`` is compared against torch (``parity: "vs_torch"``).
 """
 
 from __future__ import annotations

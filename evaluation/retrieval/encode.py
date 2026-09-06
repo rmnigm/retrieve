@@ -4,9 +4,9 @@ The one place the eval harness is allowed to import ``training.*`` — the
 retrieval → training coupling lives entirely in this file. Yambda /
 goodreads configs point at a SASRec checkpoint; ``load_model_for_eval``
 rebuilds the model and ``encode_queries`` runs ``predict_last`` over the
-eval split once (``queries_cache.py`` persists the result so per-algo
-subprocesses don't re-encode). Pre-encoded datasets (arxiv) never call
-into this module.
+eval split once (``data._sasrec`` caches the result next to the checkpoint
+as ``encoded_queries_v2.pt`` so per-group child processes don't re-encode).
+Pre-encoded datasets (arxiv) never call into this module.
 """
 
 from __future__ import annotations

@@ -155,8 +155,8 @@ def test_narrowed_runs_are_partial_and_resume_reruns_them(tiny_configs, tmp_path
 
 
 def test_failed_cell_is_recorded_and_the_loop_continues(tiny_configs, tmp_path, monkeypatch):
-    jobs = _jobs(tiny_configs, sweeps=[NONE_SWEEP, "c0"])  # v1 (none, c0), v4 (none, c0)
-    assert [j.algo for j in jobs] == ["linr_v1_filter_mask"] * 2 + ["linr_v4"] * 2
+    jobs = _jobs(tiny_configs, sweeps=[NONE_SWEEP])  # v1 none, v4 none (int8 on CPU is slow)
+    assert [j.algo for j in jobs] == ["linr_v1_filter_mask", "linr_v4"]
     real = run.algos.build
 
     def flaky(algo, *a, **kw):
@@ -167,17 +167,17 @@ def test_failed_cell_is_recorded_and_the_loop_continues(tiny_configs, tmp_path, 
     monkeypatch.setattr(run.algos, "build", flaky)
     out = tmp_path / "results"
     counts = run.run(jobs, out_dir=out, **KW)
-    assert dict(counts) == {"ok": 2, "failed": 2}
+    assert dict(counts) == {"ok": 1, "failed": 1}
     recs = _records(out / "e2e" / "tiny-d8.jsonl")
-    assert [r["status"] for r in recs] == ["ok", "ok", "failed", "failed"]
-    for r in recs[2:]:
-        assert r["algo"] == "linr_v4" and r["stage"] == "build"
-        assert "boom: int8 path unavailable" in r["error"] and "Traceback" in r["error"]
-        assert r["env"]["code_version"] == bench.code_version()
-    # A failed record does not count as done: resume re-runs it.
+    assert [r["status"] for r in recs] == ["ok", "failed"]
+    r = recs[1]
+    assert r["algo"] == "linr_v4" and r["stage"] == "build"
+    assert "boom: int8 path unavailable" in r["error"] and "Traceback" in r["error"]
+    assert r["env"]["code_version"] == bench.code_version()
+    # A failed record does not count as done: resume re-runs it (v4 for real this time).
     monkeypatch.setattr(run.algos, "build", real)
     counts = run.run(jobs, out_dir=out, **KW)
-    assert dict(counts) == {"skipped": 2, "ok": 2}
+    assert dict(counts) == {"skipped": 1, "ok": 1}
 
 
 def test_sticky_cuda_error_is_recorded_then_ends_the_process(tiny_configs, tmp_path, monkeypatch):

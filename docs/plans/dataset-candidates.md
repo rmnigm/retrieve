@@ -598,3 +598,40 @@ conjunctions SilverTorch and LiNR describe.
    or a ClueWeb22 agreement obtainable within the paper timeline?
 8. Host RAM: `int64 [N, C, K]` at 48M–80M items (9–15 GB) plus the
    fp32 → fp16 conversion buffers; the attrs step must stream.
+
+## 6. Layout contract for the E-phase loaders (stub — not implemented)
+
+> Added 2026-09-06 from the harness architecture review
+> ([architecture-review-2026-09-06-evaluation.md](architecture-review-2026-09-06-evaluation.md)
+> §1.11). Plan text only; nothing here is built. It lands with E1 (the first loader rebased
+> onto the C3 harness), not before.
+
+The harness's on-disk contract is implicit and re-derived by every loader:
+`data._pre_encoded` asserts `query_emb.pt` rows == `heldout.parquet` rows ==
+`eval_split.parquet` rows, 1-indexed `item_id`, `-1`-coded attrs and nomic
+prefixes in the `*.meta.json` sidecars, while arXiv, YFCC and PubMed each
+hand-build the parquets with different extra columns. Two of the E-branches
+already break it (PubMed's `cmd_queries` drops empty-title rows and may append
+NFCorpus rows, so `query_emb.pt` will not align; YFCC omits the sidecars and
+relies on the prefix *warning* path). The missing shared thing is the
+contract, not a base class:
+
+- `eval_datasets/layout.py` (≈ 80 lines): `write_query_set(output, item_ids |
+  item_id_lists, qa, extra_cols)`, `merge_prep_log(...)`, and
+  `validate_layout(data_dir, content_dir) -> list[str]` — the same checks
+  `retrieval.data` makes plus row alignment — exposed as `bench check
+  --dataset X` so a loader author sees the harness's verdict without a GPU.
+- `retry_download` / `checksum` / `year_to_bucket(edges)` into `common.py`
+  (each exists three times today); `goodreads.ROOT` through `hf_io.data_root()`.
+- An optional `item_ids` list column in `heldout.parquet`, read by
+  `_pre_encoded` into `[U, T]` targets (PubMed's NFCorpus qrels and E3's
+  citation relevance are multi-target; today the text path is `[U, 1]`).
+- An explicit prefix policy: `prefix: null` in `meta.json` means "no prefix";
+  a *missing* sidecar is an error, not a warning.
+- Rebase `dev/e1-yfcc` and `dev/e2-pubmed` onto C3 first (both predate the
+  harness rewrite and cite `loaders.assert_arxiv_prefixes()`, which no longer
+  exists).
+
+Gate: `bench check` green on arXiv, Goodreads and every E-phase dataset
+before its first campaign cell; E2 additionally needs the fp16-items +
+chunked-oracle change of review §2.8 (36 M × 768 fp32 does not fit).

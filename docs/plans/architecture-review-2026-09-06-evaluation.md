@@ -481,3 +481,55 @@ not exist, so say so in a comment rather than in a monkeypatch; the architecture
 | 2.4 | `test_run.py::test_parity_spill_compares_the_second_backend` |
 | 1.6 | `test_run.py::test_quality_gate_kills_the_run_after_recording` |
 | ≤ 1.5 | everything else (`test_bench`, `test_config`, `test_data`, `test_metrics`, `test_oracle`, the LinR V1/V4 cases) |
+
+## Applied 2026-09-06 (`dev/c1-harness-v2`, CPU only)
+
+Six commits on top of `8dd317b`, each gated on the CPU suite (`CUDA_VISIBLE_DEVICES=""`),
+`ruff check` clean and `scripts/check_doc_links.py` at zero; `docs/system/evaluation.md`
+updated in the same commit as each behaviour change. Nothing here ran on a GPU (CLAUDE.md
+rule 1); C4 remains the gate for every number.
+
+| # | finding | commit | what landed |
+|---|---|---|---|
+| 1 | §2.1 `dirty` / `code_version` | `64c1508` | `env.dirty` = `git status --porcelain -- retrieve/src/retrieve` (untracked included — a new kernel module is measured code, and the `files:` hash sees it too); `env.repo_dirty` = tracked files elsewhere, `--untracked-files=no`, **excluding `evaluation/results/`**; `code_version()` → `files:<sha256>` whenever the subtree is dirty. Results are *not* gitignored: H §3.2 / §8.2 G / §8.2 I treat the harness outputs as data (committed, mirrored by `upload-results`), so the results directory is excluded from the dirty computation instead. Both flags `null` outside git. |
+| 2 | §2.2 oracle fingerprint | `1191e6d` | `oracle.attrs_digest(item_attrs, clause_is_reverse)`: full bytes, computed once per `(dataset, dim)` in `data.load_inputs` (`inputs["attrs_digest"]`), a required keyword of `fingerprint` / `load_or_build`. Docstring fixed. No v4 blob existed, so no migration. |
+| 3 | §2.4 / §3.4 narrows, zero jobs | `2d53edc` | `Job.narrowed` (set when `--k` / `--bs` differ from the suite's *sets*); `status: partial` + `partial_reasons` (`skip_quality`, `skip_perf`, `modes`, `ks_bs`); `bench run` exits 1 on zero cells, `bench campaign` exits 1 on no groups / no child (`finished children=N rc=M`). The CPU tests now run both modes, which covers the graph-null path §4.4 listed as untested. |
+| 4 | §2.3 held-out targets | `26b4d78` | `run.quality` masks unreachable targets to `-1` on filter cells and derives `nt`; `n_targets_in_filter` recorded. Unit test on hand-built inputs. |
+| 5 | §2.9, §5.3–5.5 watchdogs | `23228c5` | `bench campaign --timeout` (h, default 6; `rc=timeout`, exit 124); `STICKY_CUDA` re-raise after recording; `bench.atomic_write` for the oracle blob, encode cache and parity spill; corrupt blob → rebuild + warn; samples line before its record; `read_keys` tolerates one torn trailing line and raises on corruption elsewhere. |
+| 6 | §3.6 docs, §4.2–4.3 tests, §1.11 stub | this commit | `run.py` parity docstring (a later backend *writes* the reference), `encode.py` cache citation, `datasets.md` (`load_inputs`, one YAML per dataset, `data/arxiv-papers`), `training/evaluate.py` and `hf_io.py` docstrings, the §2.10 timing / clock notes in `evaluation.md`; session-scoped SilverTorch builds with `n_iter=2`, one-child campaign test, `test_failed_cell…` on the `none` sweep, one dataset writer; §1.11's layout contract as [dataset-candidates.md §6](dataset-candidates.md) (plan text only). |
+
+**Deliberate departures from the review's letter.**
+
+- *JSONL "atomic append".* An append cannot be tmp + `os.replace` without rewriting the whole
+  file per cell, which is neither append-only nor cheap over a 24-h campaign; the append
+  stays one `write` + `fsync` per line, with the samples line first and a tolerant `read_keys`.
+  The record itself (≈ 5 KB) fits one `write(2)`; a torn *samples* line is what `report.py`
+  (D4) must tolerate, as §(d) already says.
+- *Subtree `dirty` counts untracked files* (the review's sketch, not `--untracked-files=no`):
+  an untracked new kernel `.py` is imported and measured, and the `files:` fallback hashes it,
+  so the two must agree. `repo_dirty` uses `--untracked-files=no` as sketched.
+- *The ≈ 300 lines of one-off tests are kept*: `test_config.py`'s `_OLD_FILTER` / `_OLD_ALGOS`
+  tables are the only thing that ties the v2 cell sets to the deleted YAMLs until C4 and A1's
+  golden agree — that guarantee is not yet preserved elsewhere (§1.3's own condition). The five
+  per-layer `k`-slice tests cost < 1.5 s each and cover call paths the wrappers do not
+  (`OneBitKNN` with candidates, `PostfilterKNN` unmasked *and* masked on one module); the
+  SilverTorch one now runs on the session wrapper's `.idx`. Only the duplicated dataset writer
+  (§4.2) went.
+
+**Deferred, unchanged from §(d).** After C4 / before D1: 2.5 (`module.k = k_max` before
+`set_query_params` — one line, but it changes cell order semantics and belongs with the C4
+rerun), 2.6 encode-cache key, 1.5 bloom params in `params`, 1.6 campaign narrows, 2.13
+provenance additions, `compile_s` / `hidden_syncs`, 3.1 `run.run` split, 3.4 `--out` vs
+`EVAL_DIR`, 1.4 `resume_key` → `config.py`, 1.13 `upload.py` filters, 2.7
+`bloom_fp_rate_standalone`, 5.6 `np.ndarray` / `np.bool_` in `_clean`, 4.4's remaining
+untested paths (multi-combo build, bloom e2e, failing campaign child, clock drift). E-phase:
+§6 of `dataset-candidates.md`. Later: 1.2, 1.12, 3.7, 3.8.
+
+**Suite.** Before: 82 passed in 206 s on this box (the review's 319 s was another box).
+After: **94 passed in 99.8 s** (`--durations`: campaign test 21 s, `test_failed_cell…` 15 s,
+the three session SilverTorch builds 5.8 s *total*; the seven separate builds are gone).
+Gates per commit: 84 / 85 / 88 / 89 / 94 passed, `ruff check evaluation/retrieval` clean,
+0 broken links. The C4 gate command (`bench run --dataset goodreads --dim 128 --suite filter
+--filter-kind clause --sweep c0_genre --seed 0`) still parses: `--help` ok, dry
+`load_matrix` expansion → 11 jobs / 14 cells over the five algos × {triton, torch} plus
+`silvertorch/official`, none `narrowed`.
