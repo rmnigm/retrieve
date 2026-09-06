@@ -127,7 +127,8 @@ def sweep_assets(job: Job, inputs: dict[str, Any], k_max: int, device: torch.dev
     exact oracle blob (filter cells), bloom pass counts (bloom cells) and the row masks the
     quality pass scores: ``keep`` (not skip-masked), ``oracle_rows`` (kept and ≥ 1
     survivor — the old harness's zero-target skip), ``heldout_rows`` (kept, ≥ 1 target and,
-    on filter cells, ``target_in_filter``)."""
+    on filter cells, ``target_in_filter``), and ``n_targets_in_filter`` — the held-out
+    targets those rows score (on filter cells only the ones the exact mask admits)."""
     fk, n = job.filter_kind, inputs["n_queries"]
     qa_s, skip = data.sweep_qa(inputs["qa"], job.clauses)
     filters = data.build_filters(fk, inputs, [job.backend], bloom=job.bloom)
@@ -159,6 +160,7 @@ def sweep_assets(job: Job, inputs: dict[str, Any], k_max: int, device: torch.dev
             assert filter_mod is not None
             counts = oracle.pass_counts(filter_mod, qa_s, skip, device=device)
             bloom_fp = oracle.bloom_fp_rate(counts, blob["pass_counts"], inputs["n_items"])
+    n_tif = (inputs["n_targets"] if blob is None else blob["targets_in_filter"])[heldout].sum()
     return {
         "qa_s": qa_s,
         "skip": skip,
@@ -167,6 +169,7 @@ def sweep_assets(job: Job, inputs: dict[str, Any], k_max: int, device: torch.dev
         "keep": keep,
         "oracle_rows": oracle_rows,
         "heldout_rows": heldout,
+        "n_targets_in_filter": int(n_tif),
         "pass_rate": blob["pass_rate"] if blob is not None else 1.0,
         "bloom_fp_rate": bloom_fp,
     }
@@ -199,9 +202,12 @@ def quality(
 ) -> tuple[dict[str, Any], torch.Tensor, torch.Tensor]:
     """§2.4: stream the kept rows in chunks of 16 through ``module`` at ``k_max``, accumulate
     every ``k`` from the one top-``k_max`` list (oracle: ranked prefix targets; held-out:
-    fixed targets) as device running sums, one sync at the end. Row selection uses CPU
-    masks and ``index_select``, so no chunk syncs. Returns the metrics and the ``[n_kept,
-    k_max]`` ids / scores (for the parity spill)."""
+    fixed targets) as device running sums, one sync at the end. On filter cells a held-out
+    target the exact mask excludes can never be retrieved, so it is masked to ``-1`` and
+    ``nt`` counts only the reachable ones (``blob["targets_in_filter"]``) — Goodreads
+    targets are lists, and scoring the unreachable ones biases recall down. Row selection
+    uses CPU masks and ``index_select``, so no chunk syncs. Returns the metrics and the
+    ``[n_kept, k_max]`` ids / scores (for the parity spill)."""
     rows = assets["keep"].nonzero().reshape(-1)
     blob = assets["blob"]
     acc_o = accumulator(list(ks), device) if blob is not None else None
@@ -230,8 +236,9 @@ def quality(
         if bool(m.any()):
             idx = m.nonzero().reshape(-1).to(device, non_blocking=True)
             t = inputs["targets"][sel][m].to(device, non_blocking=True)
-            nt = inputs["n_targets"][sel][m].to(device, non_blocking=True)
-            accumulate(acc_h, ids.index_select(0, idx), t, nt)
+            if blob is not None:  # reachable targets only
+                t = t.masked_fill(~blob["targets_in_filter"][sel][m].to(device), -1)
+            accumulate(acc_h, ids.index_select(0, idx), t, (t != -1).sum(dim=1))
     out: dict[str, Any] = {"heldout": finalize(acc_h)}
     if acc_o is not None:
         out["oracle"] = finalize(acc_o)
@@ -501,6 +508,7 @@ def run(
                     "n_queries": inputs["n_queries"],
                     "n_kept": int(assets["keep"].sum()),
                     "n_queries_heldout": int(assets["heldout_rows"].sum()),
+                    "n_targets_in_filter": assets["n_targets_in_filter"],
                     "n_queries_oracle": int(assets["oracle_rows"].sum())
                     if assets["oracle_rows"] is not None
                     else None,
