@@ -38,7 +38,8 @@ kernels are checked against, eager-only (`torch.compile` raises), and its bloom 
 bloom index rather than ours (`m_bits` is optional; `official=OfficialConfig(...)` carries
 `b_multiplier`, `n_stored_hashes`, the `"int32"` bit-exact vs `"fp16"` serving score path, the
 partial-vs-full bloom path, and `cache_plans` — set it `False` when timing so every forward pays
-the expression parse). Any other module given `"official"` runs its torch path.
+the expression parse). Any other module given `"official"` — or any string outside its
+backend literal — raises `ValueError` at construction.
 
 ## LiNR modules
 

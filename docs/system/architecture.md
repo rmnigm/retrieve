@@ -10,8 +10,11 @@ see [kernels.md](kernels.md).
 Two retrieval families live side by side, both implementing the
 [`RetrievalModule`](../../retrieve/src/retrieve/interfaces.py) interface
 and selecting their compute path via a `backend=` flag on `__init__`
-(the literal alias is exported as `Backend` from
-[`interfaces.py`](../../retrieve/src/retrieve/interfaces.py)):
+(two literal aliases are exported from
+[`interfaces.py`](../../retrieve/src/retrieve/interfaces.py):
+`LinrBackend = Literal["torch", "triton"]` for the LiNR layers and the
+standalone filters, `SilverTorchBackend = Literal["torch", "triton",
+"official"]` for `SilverTorch`; every constructor validates its own):
 
 | `backend=` | meaning | who accepts it |
 |---|---|---|
@@ -32,10 +35,9 @@ for the cu128 wheel — upstream's README insists on the match), `ninja` and
 for the pin, the build record and the upstream-suite result.
 
 `"official"` is not a universal third path: it exists solely for
-`SilverTorch`'s probe-scoring kernel. Every other class accepts the flag
-for API symmetry, but its dispatch is `if backend == "triton": … else:
-<torch>`, so passing `"official"` to a LiNR module or a standalone
-filter silently runs the **torch** path. See
+`SilverTorch`'s probe-scoring kernel. Every other class takes
+`LinrBackend` and raises `ValueError` on anything else — `"official"`
+included — so there is no silent torch fallback. See
 [Backend dispatch](#backend-dispatch) below.
 
 - **LiNR** ([`layers/linr/`](../../retrieve/src/retrieve/layers/linr/)) — five
@@ -163,7 +165,7 @@ Two composition helpers ship in
 
 All five return `(ids[B, K], scores[B, K])`; `-1` / `-inf` are the
 "no item" sentinels for masked-out or short rows. Each module takes a
-`backend=` arg in `__init__` (`"official"` resolves to the torch path here —
+`backend=` arg in `__init__` (`LinrBackend`: `"official"` is rejected here —
 see [Backend dispatch](#backend-dispatch)); `"triton"` is the default
 (the eval harness and the original paper experiments target Triton). The
 torch backend is eager — callers wanting Inductor fusion or cudagraph
@@ -371,14 +373,14 @@ builders with the filters package, not the module classes:
 - [`KMeansTorch`](../../retrieve/src/retrieve/layers/utils/kmeans.py) —
   pure-torch Lloyd's k-means used by `SilverTorch` for IVF index
   building (not a `RetrievalModule`).
-- Two abstract bases plus the `Backend` literal alias in
+- Two abstract bases plus the two backend literals and their validator in
   [`interfaces.py`](../../retrieve/src/retrieve/interfaces.py):
   `RetrievalModule` (a minimal lifecycle ABC — `k` attr + abstract
   `register_index`, called exactly once; forward signatures deliberately
-  unconstrained), `FilterModule`, and
-  `Backend = Literal["torch", "triton", "official"]`
-  (only `SilverTorch` validates it — see [Backend
-  dispatch](#backend-dispatch)). All retrieval layers
+  unconstrained), `FilterModule`, `LinrBackend = Literal["torch",
+  "triton"]`, `SilverTorchBackend = Literal["torch", "triton",
+  "official"]` and `check_backend(backend, literal)` (every constructor
+  calls it — see [Backend dispatch](#backend-dispatch)). All retrieval layers
   (`PostfilterKNN`, `PostfilterKNNInt8`, `PrefilterKNN`,
   `_PackedBitsKNN` and its two subclasses, `SilverTorch`, `FullScanKNN`)
   subclass `RetrievalModule`.
@@ -419,22 +421,22 @@ with bloom — plan §13.2). Full per-kernel detail in
 
 ### Backend dispatch
 
-Only `SilverTorch` branches three ways. Everywhere else the dispatch is
-binary, so an `"official"` request lands on the torch path:
+Only `SilverTorch` branches three ways, through a table built once in
+`__init__` (`self._forward_impl`). Everywhere else the dispatch is
+binary over `LinrBackend`, and the constructor rejects anything else:
 
 | module | `"triton"` | `"torch"` | `"official"` |
 |---|---|---|---|
 | `SilverTorch` | fused Triton | eager torch | Meta's `torch.ops.st.*` (eager-only) |
-| `PrefilterKNN` | `fused_masked_knn_topk` | eager | → torch |
-| `OneBitKNN` / `SimHashKNN` | `oporp_1bit_match_topk` | eager | → torch |
-| `ExactAttributeFilter` | `clause_mask` / `clause_compact` | eager | → torch |
-| `BloomFilter` | `bloom_match` / `bloom_compact` | eager | → torch |
-| `PostfilterKNN` / `PostfilterKNNInt8` | cuBLAS (flag is a no-op) | same | same |
+| `PrefilterKNN` | `fused_masked_knn_topk` | eager | raises `ValueError` |
+| `OneBitKNN` / `SimHashKNN` | `oporp_1bit_match_topk` | eager | raises `ValueError` |
+| `ExactAttributeFilter` | `clause_mask` / `clause_compact` | eager | raises `ValueError` |
+| `BloomFilter` | `bloom_match` / `bloom_compact` | eager | raises `ValueError` |
+| `PostfilterKNN` / `PostfilterKNNInt8` | cuBLAS (flag is a no-op) | same | raises `ValueError` |
 
-This matters when benchmarking: a cell labelled `backend="official"`
-for anything other than `SilverTorch`
-would be measuring the **torch** path. The eval harness therefore refuses
-such cells instead of mislabelling them: its `PATHS` table maps every
+A cell labelled `backend="official"` for anything other than
+`SilverTorch` therefore cannot exist. The eval harness mirrors that
+rather than catching the error: its `PATHS` table maps every
 `(algo, filter_kind, backend)` to the code path that actually runs
 (`cublas`, `triton`, `torch`, `cublas+triton`, `official`, or `None`),
 collapses backends that run the same code into one job, and builds the

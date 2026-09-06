@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
-from retrieve.interfaces import Backend, RetrievalModule
+from retrieve.interfaces import LinrBackend, RetrievalModule, check_backend
 from retrieve.kernels.linr.fused_masked_knn_topk import fused_masked_knn_topk
 from retrieve.layers.utils.topk import counts_to_valid, masked_topk
 
@@ -19,8 +19,9 @@ class PrefilterKNN(RetrievalModule):
 
     item_embs: Tensor
 
-    def __init__(self, k: int, backend: Backend = "triton") -> None:
+    def __init__(self, k: int, backend: LinrBackend = "triton") -> None:
         super().__init__()
+        check_backend(backend, LinrBackend)
         self.k = k
         self.backend = backend
 

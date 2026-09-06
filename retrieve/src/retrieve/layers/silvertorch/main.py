@@ -5,7 +5,7 @@ from typing import Literal
 import torch
 from torch import Tensor
 
-from retrieve.interfaces import Backend, RetrievalModule
+from retrieve.interfaces import RetrievalModule, SilverTorchBackend, check_backend
 from retrieve.kernels.filters.clause_mask import clause_mask
 from retrieve.kernels.silvertorch import official as official_mod
 from retrieve.kernels.silvertorch.codesigned_probe_score import (
@@ -86,7 +86,7 @@ class SilverTorch(RetrievalModule):
         k_hash: int | None = None,
         n_iter: int = 10,
         seed: int = 0,
-        backend: Backend = "triton",
+        backend: SilverTorchBackend = "triton",
         official: OfficialConfig | None = None,
     ) -> None:
         super().__init__()
@@ -94,8 +94,7 @@ class SilverTorch(RetrievalModule):
             raise ValueError(
                 f"filter_mode must be 'none', 'bloom', or 'exact', got {filter_mode!r}"
             )
-        if backend not in ("triton", "torch", "official"):
-            raise ValueError(f"unknown backend {backend!r}")
+        check_backend(backend, SilverTorchBackend)
         if official is not None and backend != "official":
             raise ValueError("official=OfficialConfig(...) only applies to backend='official'")
         if backend == "official":
@@ -145,6 +144,12 @@ class SilverTorch(RetrievalModule):
         self.n_iter = n_iter
         self.seed = seed
         self.backend = backend
+        # Dispatch table built once; forward calls the bound method for this backend.
+        self._forward_impl = {
+            "triton": self._forward_triton,
+            "torch": self._forward_torch_eager,
+            "official": self._forward_official,
+        }[backend]
         # The two Python-scalar caches below (_global_scale_f, _max_cluster_size) are set by
         # register_index; a state-dict load replaces the buffers they were derived from, so
         # they are re-derived after every load_state_dict.
@@ -178,7 +183,9 @@ class SilverTorch(RetrievalModule):
             self.register_buffer("cluster_sizes", cluster_sizes)
             self.register_buffer("sort_perm", sort_perm)
             self.register_buffer("inv_perm", inv_perm)
-            self._register_official_filter_buffers(item_clause_attrs, clause_is_reverse)
+            self._register_filter_buffers(
+                item_embs.shape[0], item_clause_attrs, clause_is_reverse, perm=sort_perm
+            )
             return
         self._quantize_items(item_embs)
         # Buffer registration order is frozen (state-dict key order): centroids, item_codes,
@@ -280,9 +287,38 @@ class SilverTorch(RetrievalModule):
         n: int,
         item_clause_attrs: Tensor | None,
         clause_is_reverse: Tensor | None,
+        *,
+        perm: Tensor | None = None,
     ) -> None:
+        """Filter buffers for this backend's index layout. ``perm`` is the official
+        backend's ``sort_perm``: with it the attribute buffers live in the cluster-sorted
+        doc space so the official scorer's ``cluster_offsets`` address the same items;
+        without it they keep original ids. ``bloom`` → our row-wise ``bloom_sigs`` +
+        ``hash_seeds`` + ``clause_salt`` on triton / torch, or the official
+        ``bloom_index`` / ``bundle_b_offsets`` built by ``torch.ops.st.bloom_index_build``
+        (their hash; ``k_hash`` is the search ``k``, ``OfficialConfig.build_k`` the build
+        ``k``); ``exact`` → the narrow attrs (permuted when ``perm`` is given) +
+        ``clause_is_reverse``, read by our kernels or, on official, by ``clause_mask``."""
         device = self.item_codes.device  # same device as item_embs
-        if self.filter_mode == "bloom":
+        if self.filter_mode == "bloom" and self.backend == "official":
+            cfg = self.official
+            if item_clause_attrs is None:
+                # No attributes at build time: an empty index. A later query with
+                # attributes has nothing to search and raises in _forward_official.
+                bloom_index = torch.empty(0, dtype=torch.int64, device=device)
+                bundle_b_offsets = torch.zeros(1, dtype=torch.int64, device=device)
+            else:
+                assert perm is not None  # the official layout always sorts
+                attrs_sorted = item_clause_attrs.long()[perm]
+                bloom_index, bundle_b_offsets = official_mod.build_bloom_index(
+                    attrs_sorted,
+                    b_multiplier=cfg.b_multiplier,
+                    build_k=cfg.build_k if cfg.build_k is not None else self.k_hash,
+                    fast_build=cfg.fast_build,
+                )
+            self.register_buffer("bloom_index", bloom_index)
+            self.register_buffer("bundle_b_offsets", bundle_b_offsets)
+        elif self.filter_mode == "bloom":
             seeds = generate_seeds(self.k_hash, device=device)
             if item_clause_attrs is None:
                 # No attributes at build time: all-zero signatures and an empty salt
@@ -309,49 +345,11 @@ class SilverTorch(RetrievalModule):
             assert item_clause_attrs is not None  # narrowed by _validate_register_args
             c = item_clause_attrs.shape[1]
             if clause_is_reverse is None:
-                clause_is_reverse = torch.zeros(
-                    c, dtype=torch.bool, device=item_clause_attrs.device
-                )
-            self.register_buffer("item_clause_attrs", item_clause_attrs.long())
-            self.register_buffer("clause_is_reverse", clause_is_reverse)
-
-    def _register_official_filter_buffers(
-        self,
-        item_clause_attrs: Tensor | None,
-        clause_is_reverse: Tensor | None,
-    ) -> None:
-        """Filter buffers of the official backend, in the cluster-sorted doc space so the
-        scorer's ``cluster_offsets`` address the same items: ``bloom`` → the official
-        ``bloom_index`` / ``bundle_b_offsets`` built by ``torch.ops.st.bloom_index_build``
-        (their hash; ``k_hash`` is the search ``k``, ``OfficialConfig.build_k`` the build
-        ``k``); ``exact`` → the narrow attrs (sorted) + ``clause_is_reverse`` read by our
-        ``clause_mask``."""
-        device = self.item_codes.device
-        cfg = self.official
-        if self.filter_mode == "bloom":
-            if item_clause_attrs is None:
-                # No attributes at build time: an empty index. A later query with
-                # attributes has nothing to search and raises in _forward_official.
-                bloom_index = torch.empty(0, dtype=torch.int64, device=device)
-                bundle_b_offsets = torch.zeros(1, dtype=torch.int64, device=device)
-            else:
-                attrs_sorted = item_clause_attrs.long()[self.sort_perm]
-                bloom_index, bundle_b_offsets = official_mod.build_bloom_index(
-                    attrs_sorted,
-                    b_multiplier=cfg.b_multiplier,
-                    build_k=cfg.build_k if cfg.build_k is not None else self.k_hash,
-                    fast_build=cfg.fast_build,
-                )
-            self.register_buffer("bloom_index", bloom_index)
-            self.register_buffer("bundle_b_offsets", bundle_b_offsets)
-        elif self.filter_mode == "exact":
-            assert item_clause_attrs is not None  # narrowed by _validate_register_args
-            c = item_clause_attrs.shape[1]
-            if clause_is_reverse is None:
                 clause_is_reverse = torch.zeros(c, dtype=torch.bool, device=device)
-            self.register_buffer(
-                "item_clause_attrs", item_clause_attrs.long()[self.sort_perm].contiguous()
-            )
+            attrs = item_clause_attrs.long()
+            if perm is not None:
+                attrs = attrs[perm].contiguous()
+            self.register_buffer("item_clause_attrs", attrs)
             self.register_buffer("clause_is_reverse", clause_is_reverse)
 
     def compile(self, *args, **kwargs):
@@ -385,17 +383,13 @@ class SilverTorch(RetrievalModule):
             raise ValueError(
                 "query_clause_attrs requires filter_mode='bloom' or filter_mode='exact'"
             )
-        if self.backend == "triton":
-            return self._forward_triton(query, query_clause_attrs)
-        if self.backend == "official":
-            if torch.compiler.is_compiling():
-                raise RuntimeError(
-                    "SilverTorch(backend='official') is eager-only and cannot be traced by "
-                    "torch.compile / torch.export (plan D7): every official op syncs the host. "
-                    "Call the module eagerly, or use backend='triton' / 'torch'."
-                )
-            return self._forward_official(query, query_clause_attrs)
-        return self._forward_torch_eager(query, query_clause_attrs)
+        if self.backend == "official" and torch.compiler.is_compiling():
+            raise RuntimeError(
+                "SilverTorch(backend='official') is eager-only and cannot be traced by "
+                "torch.compile / torch.export (plan D7): every official op syncs the host. "
+                "Call the module eagerly, or use backend='triton' / 'torch'."
+            )
+        return self._forward_impl(query, query_clause_attrs)
 
     def _phase1_probe_ids(self, query: Tensor) -> Tensor:
         """Phase 1 proper: centroid scores → top-``n_probe`` cluster ids ``[B, n_probe]``."""
@@ -625,7 +619,7 @@ def build_silvertorch(
     seed: int = 0,
     item_clause_attrs: Tensor | None = None,
     clause_is_reverse: Tensor | None = None,
-    backend: Backend = "triton",
+    backend: SilverTorchBackend = "triton",
     official: OfficialConfig | None = None,
 ) -> SilverTorch:
     """Construct a ``SilverTorch`` and run ``register_index(item_embs, ...)`` in one call."""

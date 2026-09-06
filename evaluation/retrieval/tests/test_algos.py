@@ -30,7 +30,7 @@ import torch
 from retrieval import algos as A
 from retrieval.bench import index_bytes
 from retrieve import OneBitKNN, PostfilterKNN, PostfilterKNNInt8, PrefilterKNN, SilverTorch
-from retrieve.interfaces import Backend
+from retrieve.interfaces import SilverTorchBackend
 
 ARCH_MD = Path(__file__).resolve().parents[3] / "docs" / "system" / "architecture.md"
 N, D = 256, 64
@@ -66,6 +66,8 @@ def _dispatch_table() -> tuple[list[str], dict[str, list[str]]]:
 
 def _classify(cell: str) -> str:
     c = cell.lower()
+    if "valueerror" in c or "raises" in c:
+        return "rejected"
     if "cublas" in c:
         return "cublas"
     if "eager" in c or "torch" in c:
@@ -86,7 +88,6 @@ _FILTER = {"clause": "ExactAttributeFilter", "bloom": "BloomFilter"}
 def test_paths_agree_with_architecture_dispatch_table():
     header, table = _dispatch_table()
     cols = {name: i for i, name in enumerate(header[1:])}
-    third = "official" if "official" in cols else "cuda"  # O §7 renames the column in B-phase
 
     def row(module: str) -> list[str]:
         matches = [cells for key, cells in table.items() if module in key]
@@ -99,11 +100,11 @@ def test_paths_agree_with_architecture_dispatch_table():
     for (algo, fk, backend), path in A.PATHS.items():
         if backend == "official":
             if algo != "silvertorch":
-                # The table says a third backend runs these modules' torch path (or the
-                # flag is a no-op) — no official code — so PATHS refuses the cell rather
-                # than mislabelling a torch/cuBLAS number.
+                # The table says these modules reject "official" at construction — no
+                # official code — so PATHS refuses the cell rather than mislabelling a
+                # torch/cuBLAS number.
                 for m in _MODULES[algo]:
-                    assert _classify(row(m)[cols[third]]) in ("torch", "cublas"), (algo, m)
+                    assert _classify(row(m)[cols["official"]]) == "rejected", (algo, m)
                 assert path is None
             continue
         if algo == "linr_v2" and fk == "none":
@@ -310,7 +311,7 @@ def test_build_refusals():
         A.build("silvertorch", x, k=4, backend="torch", params={"n_lists": 4, "n_probe": 8})
     assert A.is_valid_combo("silvertorch", {"n_lists": 16, "n_probe": 16})
     assert A.is_valid_combo("linr_v3", {"n_probe": 100}) and A.is_valid_combo("silvertorch", {})
-    if "official" in get_args(Backend):
+    if "official" in get_args(SilverTorchBackend):
         pytest.skip("official backend integrated in retrieve — its cell is C4's gate")
     with pytest.raises(NotImplementedError, match="official"):
         A.build("silvertorch", x, k=4, backend="official", params={"n_lists": 8, "n_probe": 4})
