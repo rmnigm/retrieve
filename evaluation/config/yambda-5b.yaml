@@ -1,0 +1,5 @@
+# Yambda 5B (Listen+) — harness v2 dataset file; no filters (quality suite only).
+data_dir: data/yambda-5b
+checkpoint: data/yambda-5b/checkpoints/gsasrec-d{dim}/best_model.pt
+dims: [64, 128]
+encode: {batch_size: 512, num_workers: 8, max_seq_length: 200}

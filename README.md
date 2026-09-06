@@ -35,12 +35,11 @@ After `uv sync`, run from anywhere in the workspace:
 # library correctness suite (GPU-only; skips itself without CUDA)
 uv run --directory retrieve pytest tests/
 
-# one algorithm against one config
-uv run --directory evaluation evaluate \
-    --config config/arxiv/d128-filter.yaml --algo silvertorch --output /tmp/st.json
+# one algorithm on one dataset / suite (harness v2; every option after --suite narrows)
+uv run --directory evaluation bench run --dataset arxiv --dim 128 --suite filter --algo silvertorch
 
-# a whole campaign (drives `evaluate` per algorithm, then stages results)
-uv run --directory evaluation run-evaluation --eval-type filter
+# a whole campaign: one child process per (dataset, dim, algo, backend), JSONL under results/
+uv run --directory evaluation bench campaign --suite filter --resume
 ```
 
 `cd`-ing into a member works too — uv finds the workspace root automatically.

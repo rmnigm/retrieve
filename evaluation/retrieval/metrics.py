@@ -1,171 +1,111 @@
-"""Retrieval quality metrics for recommendation evaluation.
+"""Retrieval quality metrics as device-side running sums (harness v2, H §2.4).
 
-Supports both single-target (leave-last-out) and multi-target (time-based
-split) evaluation. All per-query functions return [B] tensors.
+The quality pass streams chunks of ``(ids [B, K_max], targets [B, T])`` through
+``accumulate``; every ``k`` in ``ks`` is scored from the one top-``K_max`` list
+(the algos return ``torch.topk``-sorted rows, so the top-``k`` prefix *is* the
+top-``k`` result). Sums live on the device as float64 and are read back once,
+in ``finalize`` — one sync per pass instead of one per chunk.
 
-Target format: ``targets [B, T]`` padded with -1, ``num_targets [B]``.
-For single-target evaluation, T=1 and num_targets is all ones.
+Targets are ``[B, T]`` int64 padded with ``-1``; ``-1`` on either side never
+counts as a hit. Two target modes:
+
+* fixed (held-out items): the target set is the same at every ``k``; pass
+  ``num_targets`` (or let it be derived as the count of non-``-1`` entries);
+* ``ranked=True`` (oracle top-``K_max`` list): the target set at ``k`` is the
+  oracle's own top-``k`` prefix and ``num_targets`` is its non-``-1`` count —
+  the old harness's per-``k`` ``nt_k`` semantics, so oracle recall stays
+  golden-comparable.
+
+The per-row arithmetic in ``per_row`` is the pre-v2 ``metrics.py`` verbatim
+(float32, same op order); ``tests/test_metrics.py`` asserts the running-sum
+means equal the old per-row means to 1e-9. ``training/evaluate.py`` uses the
+same three functions for the per-epoch SASRec evaluation.
 """
 
 from __future__ import annotations
 
-from collections import defaultdict
-
 import torch
 from torch import Tensor
 
+METRICS = ("recall", "ndcg", "precision", "mrr")
 
-def _hits_mask(candidate_ids: Tensor, targets: Tensor, k: int) -> Tensor:
-    """Boolean mask of which top-k candidates are relevant.
 
-    Args:
-        candidate_ids: [B, K_max] retrieved item IDs.
-        targets: [B, T] ground-truth item IDs, padded with -1.
-        k: cutoff.
-
-    Returns:
-        [B, k] bool tensor — True where candidate matches any target.
-
-    Both sides may carry ``-1`` padding (algos signal "no item at this rank"
-    that way; targets pad shorter ground-truth lists). Require both operands
-    to be non-padding so ``-1 == -1`` does not spuriously register as a hit.
-    """
-    topk = candidate_ids[:, :k]  # [B, k]
-    eq = topk.unsqueeze(2) == targets.unsqueeze(1)  # [B, k, T]
-    valid = (topk.unsqueeze(2) != -1) & (targets.unsqueeze(1) != -1)
+def _hits(ids: Tensor, targets: Tensor) -> Tensor:
+    """``[B, K]`` bool: candidate at rank r is one of the row's (non-``-1``) targets."""
+    eq = ids.unsqueeze(2) == targets.unsqueeze(1)  # [B, K, T]
+    valid = (ids.unsqueeze(2) != -1) & (targets.unsqueeze(1) != -1)
     return (eq & valid).any(dim=2)
 
 
-def recall_at_k(
-    candidate_ids: Tensor,
+def per_row(hits: Tensor, num_targets: Tensor, k: int) -> dict[str, Tensor]:
+    """The four per-row metrics ([B] float32) at cutoff ``k`` from ``hits[:, :k]``."""
+    h = hits[:, :k]
+    n_hits = h.sum(dim=1).float()
+    found = h.any(dim=1)
+    rank = h.float().argmax(dim=1) + 1  # 1-indexed rank of the first hit (masked by found)
+    positions = torch.arange(1, k + 1, device=h.device, dtype=torch.float32)
+    discounts = 1.0 / torch.log2(positions + 1)
+    dcg = (h.float() * discounts.unsqueeze(0)).sum(dim=1)
+    ideal = positions.unsqueeze(0) <= num_targets.unsqueeze(1).float().clamp(max=k)
+    idcg = (ideal.float() * discounts.unsqueeze(0)).sum(dim=1)
+    return {
+        "recall": n_hits / num_targets.float().clamp(min=1),
+        "ndcg": dcg / idcg.clamp(min=1e-8),
+        "precision": n_hits / k,
+        "mrr": (1.0 / rank.float()) * found.float(),
+    }
+
+
+def accumulator(ks: list[int], device: torch.device | str) -> dict:
+    """Zeroed running sums for every ``<metric>@<k>`` plus the row count ``n``."""
+    acc: dict = {
+        f"{m}@{k}": torch.zeros((), dtype=torch.float64, device=device) for k in ks for m in METRICS
+    }
+    acc["n"] = 0
+    return acc
+
+
+def accumulate(
+    acc: dict,
+    ids: Tensor,
     targets: Tensor,
-    num_targets: Tensor,
-    k: int,
-) -> Tensor:
-    """Recall@K — fraction of relevant items retrieved in top-k.
-
-    For single-target this equals hit rate.
-
-    Returns:
-        [B] float tensor.
-    """
-    hits = _hits_mask(candidate_ids, targets, k)  # [B, k]
-    n_hits = hits.sum(dim=1).float()  # [B]
-    return n_hits / num_targets.float().clamp(min=1)
-
-
-def precision_at_k(
-    candidate_ids: Tensor,
-    targets: Tensor,
-    num_targets: Tensor,
-    k: int,
-) -> Tensor:
-    """Precision@K — fraction of top-k that are relevant.
-
-    Returns:
-        [B] float tensor.
-    """
-    hits = _hits_mask(candidate_ids, targets, k)  # [B, k]
-    return hits.sum(dim=1).float() / k
+    num_targets: Tensor | None = None,
+    *,
+    ranked: bool = False,
+) -> None:
+    """Add one chunk's per-row metrics to ``acc`` (in place, no host sync)."""
+    ks = sorted({int(key.split("@")[1]) for key in acc if "@" in key})
+    if ranked:
+        for k in ks:
+            t = targets[:, :k]
+            rows = per_row(_hits(ids[:, :k], t), (t != -1).sum(dim=1), k)
+            for m in METRICS:
+                acc[f"{m}@{k}"] += rows[m].double().sum()
+    else:
+        if num_targets is None:
+            num_targets = (targets != -1).sum(dim=1)
+        hits = _hits(ids, targets)
+        for k in ks:
+            rows = per_row(hits, num_targets, k)
+            for m in METRICS:
+                acc[f"{m}@{k}"] += rows[m].double().sum()
+    acc["n"] += int(ids.shape[0])
 
 
-def mrr_at_k(
-    candidate_ids: Tensor,
-    targets: Tensor,
-    num_targets: Tensor,
-    k: int,
-) -> Tensor:
-    """Mean Reciprocal Rank@K — 1/rank of first relevant item in top-k.
-
-    Returns:
-        [B] float tensor, 0.0 if no relevant item found.
-    """
-    hits = _hits_mask(candidate_ids, targets, k)  # [B, k]
-    found = hits.any(dim=1)  # [B]
-    # argmax returns index of first True (0 if none, masked below)
-    rank = hits.float().argmax(dim=1) + 1  # [B], 1-indexed
-    return (1.0 / rank.float()) * found.float()
+def finalize(acc: dict) -> dict[str, float]:
+    """Means over the accumulated rows — one device→host copy for all keys."""
+    keys = [key for key in acc if key != "n"]
+    n = max(acc["n"], 1)
+    values = torch.stack([acc[key] for key in keys]).div(n).tolist() if keys else []
+    out = dict(zip(keys, values))
+    out["n"] = acc["n"]
+    return out
 
 
-def ndcg_at_k(
-    candidate_ids: Tensor,
-    targets: Tensor,
-    num_targets: Tensor,
-    k: int,
-) -> Tensor:
-    """NDCG@K — normalized discounted cumulative gain.
-
-    IDCG is computed per query based on the number of relevant items:
-    IDCG = sum_{i=1}^{min(num_targets, k)} 1/log2(i+1).
-
-    Returns:
-        [B] float tensor.
-    """
-    hits = _hits_mask(candidate_ids, targets, k)  # [B, k]
-    positions = torch.arange(1, k + 1, device=candidate_ids.device, dtype=torch.float32)
-    discounts = 1.0 / torch.log2(positions + 1)  # [k]
-    dcg = (hits.float() * discounts.unsqueeze(0)).sum(dim=1)  # [B]
-
-    # IDCG: best possible DCG given num_targets relevant items
-    # ideal_hits[i] = 1 if i < min(num_targets, k) else 0
-    ideal_hits = positions.unsqueeze(0) <= num_targets.unsqueeze(1).float().clamp(max=k)  # [B, k]
-    idcg = (ideal_hits.float() * discounts.unsqueeze(0)).sum(dim=1)  # [B]
-
-    return dcg / idcg.clamp(min=1e-8)
-
-
-_METRIC_FNS = {
-    "recall": recall_at_k,
-    "precision": precision_at_k,
-    "mrr": mrr_at_k,
-    "ndcg": ndcg_at_k,
-}
-
-
-def accumulate_metrics(
-    candidate_ids: Tensor,
-    targets: Tensor,
-    num_targets: Tensor,
-    ks: list[int],
-    accum: dict[str, list[float]] | None = None,
-) -> dict[str, list[float]]:
-    """Compute per-query metrics and append to accumulator.
-
-    Call once per batch. Values are moved to CPU and stored as Python
-    floats so GPU memory stays bounded.
-
-    Args:
-        candidate_ids: [B, K_max] retrieved item IDs.
-        targets: [B, T] ground-truth item IDs, padded with -1.
-        num_targets: [B] number of valid targets per query.
-        ks: list of cutoff values.
-        accum: existing accumulator dict, or None to create a new one.
-
-    Returns:
-        Updated accumulator.
-    """
-    if accum is None:
-        accum = defaultdict(list)
-
-    for k in ks:
-        for name, fn in _METRIC_FNS.items():
-            key = f"{name}@{k}"
-            values = fn(candidate_ids, targets, num_targets, k)
-            accum[key].extend(values.cpu().tolist())
-
-    return accum
-
-
-def finalize_metrics(accum: dict[str, list[float]]) -> dict[str, float]:
-    """Average accumulated per-query metric values.
-
-    Args:
-        accum: accumulator from accumulate_metrics.
-
-    Returns:
-        Dict mapping metric names to mean values.
-    """
-    results = {}
-    for key, values in sorted(accum.items()):
-        results[key] = sum(values) / len(values) if values else 0.0
-    return results
+def jaccard_at_k(ids_a: Tensor, ids_b: Tensor, k: int) -> float:
+    """Mean per-row Jaccard of the top-``k`` id sets (``-1`` ignored; two empty sets → 1.0).
+    The harness's cross-backend wiring check (H §2.4 ``jaccard_vs_first@k``)."""
+    a, b = ids_a[:, :k], ids_b[:, :k]
+    inter = _hits(a, b).sum(dim=1).double()
+    union = (a != -1).sum(dim=1) + (b != -1).sum(dim=1) - inter
+    return torch.where(union > 0, inter / union.clamp(min=1), torch.ones_like(inter)).mean().item()

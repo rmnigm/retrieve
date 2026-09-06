@@ -135,7 +135,8 @@ goodreads bloom sweeps exclude it.
 ### arxiv
 
 `download` → `convert` → `prep` → `encode_text` → `encode_queries` →
-`attrs`, or `uv run arxiv all --output-dir data/arxiv/papers`.
+`attrs`, or `uv run arxiv all --output-dir data/arxiv-papers` (the
+`data_dir` of [`config/arxiv.yaml`](../../evaluation/config/arxiv.yaml)).
 
 Arxiv has **no user sequences**, so `prep` does no interactions and no
 time-split — it emits `item_id_map.json`, `papers.parquet`, and a
@@ -326,11 +327,11 @@ data/<dataset>/<variant>/
 Text datasets:
 
 ```
-data/arxiv/papers/
+data/arxiv-papers/                       # config/arxiv.yaml: data_dir
 ├── item_id_map.json
 ├── papers.parquet
 ├── heldout.parquet
-└── content{,_d128,_d64}/
+└── content{,_d128,_d64}/                # content_dir per dim: {256: content, 128: content_d128, 64: content_d64}
     ├── text_emb.pt + text_emb.meta.json
     └── query_emb.pt + query_emb.meta.json
 ```
@@ -353,8 +354,8 @@ Filter sweeps additionally need:
 `item_attrs_wide.pt`, `wide_shelf_vocab.json`,
 `wide_shelf_global_freq.pt`, and the `query_attrs_wide_1shelf` /
 `_2shelf` columns of `eval_split.parquet` are **built but never read**:
-`load_filter_assets` does not load them and `load_query_attrs` skips the
-wide columns explicitly. They exist for a wide-bloom sweep that was
+`retrieval.data.load_inputs` does not load them and `load_query_attrs`
+reads only the `query_attrs_narrow` column. They exist for a wide-bloom sweep that was
 never run. Keep or drop them as a unit — they are only meaningful
 together.
 
@@ -467,8 +468,11 @@ Checkpoints trained before it was written fall back to
    `item_attrs_narrow.pt`, `clause_is_reverse_narrow.pt`, the vocab
    JSONs, and `eval_split.parquet` aligned 1:1 with `test.parquet`.
 3. Add an entry to `EVAL_REPOS` in `hf_io.py`.
-4. Add configs under `evaluation/config/<name>/`. Set `checkpoint` for
-   the sequential shape, leave it unset for the text shape.
+4. Add one `evaluation/config/<name>.yaml` (harness v2: one YAML per
+   dataset, see [evaluation.md](evaluation.md#config-one-yaml-per-dataset--suitesyaml))
+   and list the dataset in the suites it belongs to in
+   `evaluation/config/suites.yaml`. Set `checkpoint` for the sequential
+   shape, `content_dir` for the text shape.
 5. Train a checkpoint if sequential; otherwise encode embeddings into
    `content*/` with meta sidecars.
 

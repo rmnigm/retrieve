@@ -1,0 +1,12 @@
+# arXiv (open-index/open-arxiv, nomic-embed-text-v1.5) — harness v2 dataset file (H §3.3).
+# Pre-encoded text embeddings: no checkpoint; content_dir is per dim (d256 is the
+# untruncated `content`). Values are the old config/arxiv/d*-{filter,quality}.yaml ones.
+data_dir: data/arxiv-papers
+content_dir: {64: content_d64, 128: content_d128, 256: content}   # relative to data_dir
+dims: [64, 128, 256]
+users_limit: 10000
+filters:
+  attrs: item_attrs_narrow.pt
+  reverse: clause_is_reverse_narrow.pt
+  clause: {c0_maincat: [0], c2_year: [2], c3_nversions: [3], c0c2: [0, 2], all4: [0, 1, 2, 3]}
+  bloom: {c0_maincat: [0], c2_year: [2], c3_nversions: [3], c0c2: [0, 2], all4: [0, 1, 2, 3]}

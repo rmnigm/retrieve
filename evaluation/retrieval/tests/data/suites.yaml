@@ -1,0 +1,45 @@
+# Suites fixture; job counts are hand-derived in test_config_v2.py.
+quality:
+  datasets: [mini, text]
+  filter_kinds: [none]
+  ks: [10, 50]
+  batch_sizes: [1]
+  algos:
+    linr_v1_filter_mask: [triton, torch]      # collapses to one cuBLAS job
+    linr_v3: [triton, torch]
+    silvertorch: [triton, torch, official]
+filter:
+  datasets: [mini]
+  filter_kinds: [clause, bloom]
+  ks: [10, 50]
+  batch_sizes: [1, 2]
+  algos:
+    linr_v2: [triton, torch]
+    linr_v3: [torch]
+    silvertorch: [triton, official]
+  seeds:
+    default: [0]
+    headline: {sweeps: [c0], dims: [32], seeds: [0, 1, 2]}
+deep:
+  datasets: [mini]
+  dims: [32]
+  filter_kinds: [bloom]
+  ks: [10]
+  batch_sizes: [1]
+  seeds: [0, 1]
+  algos:
+    silvertorch: [triton]
+    linr_v3: [torch]
+  params:
+    silvertorch: {build: {n_lists: [8, 64]}, query: {n_probe: [4, 16, 64]}}
+    linr_v3: {query: [{candidate_pool: 20}, {candidate_pool: 40}]}
+  bloom: {m_bits: 128}
+bad_params:
+  datasets: [mini]
+  filter_kinds: [none]
+  ks: [10]
+  batch_sizes: [1]
+  algos: {silvertorch: [triton]}
+  params:
+    silvertorch: {build: {n_probe: [4]}}     # n_probe is a query param → ConfigError
+bloom: {m_bits: 64, k_hash: 3}

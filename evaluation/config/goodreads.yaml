@@ -1,0 +1,14 @@
+# Goodreads (UCSD Book Graph, work-id catalog) — harness v2 dataset file (H §3.3).
+# Values are the old config/goodreads/d*-{filter,quality}.yaml ones; `{dim}` is
+# substituted per entry of `dims`. Suites (ks, batch sizes, algos, backends,
+# params, seeds) live in suites.yaml. gt_dir is derived: <data_dir>/gt_d{dim}.
+data_dir: data/goodreads-work-id
+checkpoint: data/goodreads-work-id/checkpoints/gsasrec-d{dim}-drop0.5-id/best_model.pt
+dims: [64, 128, 256]
+encode: {batch_size: 512, num_workers: 8, max_seq_length: 200}
+users_limit: 10000
+filters:
+  attrs: item_attrs_narrow.pt            # relative to data_dir
+  reverse: clause_is_reverse_narrow.pt
+  clause: {c0_genre: [0], c1_lang_reverse: [1], c2_format: [2], c3_year: [3], c0c1: [0, 1], all4: [0, 1, 2, 3]}
+  bloom: {c0_genre: [0], c2_format: [2], c3_year: [3]}   # forward-only: no reverse clause (c1)

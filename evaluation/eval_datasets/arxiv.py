@@ -35,8 +35,8 @@ Subcommands::
 
 Examples::
 
-    uv run arxiv all --output-dir data/arxiv/papers
-    uv run arxiv encode_text --output-dir data/arxiv/papers --batch-size 256
+    uv run arxiv all --output-dir data/arxiv-papers
+    uv run arxiv encode_text --output-dir data/arxiv-papers --batch-size 256
 
 Layout (under $RETRIEVE_DATA_ROOT, default <repo>/data)::
 
