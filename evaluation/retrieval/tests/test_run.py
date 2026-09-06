@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -84,6 +85,7 @@ def test_end_to_end_records(tiny_configs, tmp_path):
     # Unfiltered: held-out only, everything passes, no filter memory.
     assert "oracle" not in none["quality"] and none["pass_rate"] == 1.0
     assert none["n_kept"] == 8 == none["n_queries_heldout"] and none["n_queries_oracle"] is None
+    assert none["n_targets_in_filter"] == 8  # one target per query, every one reachable
     assert none["filter_mib"] == 0.0 and none["bloom"] is None
     metrics = {f"{m}@{k}" for m in ("recall", "ndcg", "precision", "mrr") for k in (2, 4)}
     assert set(none["quality"]["heldout"]) == metrics | {"n"}
@@ -95,6 +97,7 @@ def test_end_to_end_records(tiny_configs, tmp_path):
         assert 0.0 < rec["pass_rate"] < 1.0 and rec["bloom_fp_rate"] is None
         assert rec["n_queries_heldout"] <= rec["n_kept"] and rec["n_queries_oracle"] == 7
         assert rec["quality"]["heldout"]["n"] == rec["n_queries_heldout"]
+        assert rec["n_targets_in_filter"] == rec["n_queries_heldout"]  # 1 target, in filter
         assert rec["quality"]["parity"] == "reference"
         assert rec["quality"]["jaccard_vs_first@4"] is None
     assert c0["quality"]["heldout"]["recall@4"] >= 0.0
@@ -214,6 +217,50 @@ def test_parity_spill_compares_the_second_backend(tiny_configs, tmp_path, monkey
     assert recs[1]["quality"]["jaccard_vs_first@4"] == 1.0
     assert recs[1]["quality"]["score_max_abs_diff"] == 0.0
     assert recs[1]["status"] == "partial" and recs[1]["perf"] is None  # skip_perf
+
+
+class _Fixed(torch.nn.Module):
+    """Returns items 0..3 for every query, whatever the attrs."""
+
+    def forward(self, q, qa=None):
+        ids = torch.tensor([[0, 1, 2, 3]]).repeat(q.shape[0], 1)
+        return ids, torch.linspace(1.0, 0.7, 4).repeat(q.shape[0], 1)
+
+
+def test_heldout_recall_counts_only_reachable_targets():
+    """Review §2.3: on a filter cell a held-out target the exact mask excludes cannot be
+    retrieved by any algo. Three queries with targets {0, 5}, {1, 5}, {5}; the mask admits
+    items 0–3, so item 5 is unreachable everywhere and query 2 has no reachable target."""
+    inputs = {
+        "queries": torch.zeros(3, 2),
+        "targets": torch.tensor([[0, 5], [1, 5], [5, -1]]),
+        "n_targets": torch.tensor([2, 2, 1]),
+    }
+    keep = torch.ones(3, dtype=torch.bool)
+    tif = torch.tensor([[True, False], [True, False], [False, False]])
+    blob = {"topk": torch.tensor([[0, 1, 2, 3]] * 3), "targets_in_filter": tif}
+    assets = {
+        "qa_s": None,
+        "keep": keep,
+        "blob": blob,
+        "oracle_rows": keep,
+        "heldout_rows": keep & tif.any(dim=1),
+    }
+    out, ids, _ = run.quality(_Fixed(), inputs, assets, [2, 4], torch.device("cpu"))
+    assert ids.shape == (3, 4)
+    h = out["heldout"]
+    assert h["n"] == 2  # query 2 has no reachable target: not scored
+    # Each scored row has one reachable target, found: recall 1/1 (was 1/2 over both targets).
+    assert h["recall@4"] == pytest.approx(1.0) and h["recall@2"] == pytest.approx(1.0)
+    assert h["precision@4"] == pytest.approx(0.25) and h["mrr@4"] == pytest.approx(0.75)
+    assert h["ndcg@2"] == pytest.approx((1.0 + 1.0 / math.log2(3)) / 2)  # ranks 1 and 2
+    # The oracle side is untouched by the masking.
+    assert out["oracle"]["recall@4"] == pytest.approx(1.0)
+    # On a ``none`` cell every target is reachable and every one counts.
+    assets_none = {**assets, "blob": None, "oracle_rows": None, "heldout_rows": keep}
+    out, *_ = run.quality(_Fixed(), inputs, assets_none, [4], torch.device("cpu"))
+    assert out["heldout"]["n"] == 3
+    assert out["heldout"]["recall@4"] == pytest.approx((0.5 + 0.5 + 0.0) / 3)
 
 
 def test_append_record_writes_valid_json_for_non_finite_and_tensors(tmp_path):

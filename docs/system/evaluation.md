@@ -340,7 +340,10 @@ order:
    (drift > 5 % from the first sample → warning + `clocks_drift`); quality
    (`module.k = k_max`, chunks of 16 kept rows, `accumulate(...,
    ranked=True)` against the oracle prefix for `oracle_rows`,
-   `accumulate(..., targets, n_targets)` for `heldout_rows`; row selection
+   `accumulate(..., targets, n_targets)` for `heldout_rows` — on filter
+   cells the targets the exact mask excludes are set to `-1` first and
+   `n_targets` counts only the reachable ones (`blob["targets_in_filter"]`),
+   since no algo can retrieve a masked-out item; row selection
    by CPU masks + `index_select`, so no per-chunk sync); the parity spill;
    the exact-algo gate; perf per `(bs, k, mode)` (`query_pool` per bs,
    `module.k = k`, `graph_callable` or a null entry with `reason`,
@@ -375,6 +378,7 @@ perf entries.
 | `n_kept` | int | queries not skip-masked (every query on `none` cells) |
 | `n_queries_oracle` | int / null | kept queries with ≥ 1 survivor (the oracle metrics' `n`); `null` on `none` cells |
 | `n_queries_heldout` | int | queries the held-out metrics cover (kept, ≥ 1 target, `target_in_filter` on filter cells) |
+| `n_targets_in_filter` | int | held-out targets those queries are scored against: every valid target on `none` cells, only the ones the exact mask admits on filter cells |
 | `pass_rate` | float | exact mask pass rate over kept queries (`1.0` on `none`) |
 | `bloom_fp_rate` | float / null | mean per-query `(bloom − exact) / (N − exact)`; bloom cells only |
 | `bloom` | dict / null | `{m_bits, k_hash}` on bloom cells |
