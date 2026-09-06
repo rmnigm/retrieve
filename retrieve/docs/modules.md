@@ -31,9 +31,6 @@ Most modules accept `backend="triton"` (default) or `backend="torch"`. The Trito
 kernels; the torch path is pure PyTorch (still GPU) and is `torch.compile`-friendly. Results are
 equivalent. `PostfilterKNN` / `PostfilterKNNInt8` accept the flag for API symmetry but always run
 the same code (cuBLAS already covers their case). `SilverTorch` alone also accepts
-`backend="cuda"` (CUDA C++, JIT-built on first forward, needs `nvcc` + `ninja`) and
-`backend="cute"` (the same kernels in the CuTe DSL, `pip install "torchretrieve[cute]"`); both
-are bit-identical to the Triton path in every `filter_mode`. `SilverTorch` also accepts
 `backend="official"`: Meta's own `meta-recsys/silvertorch` kernels (`torch.ops.st.*`, the
 `official` extra — built from source, needs a CUDA toolkit matching your torch) for the scoring
 and bloom phases, with our k-means and quantization in front; it is the reference the Triton
@@ -41,8 +38,7 @@ kernels are checked against, eager-only (`torch.compile` raises), and its bloom 
 bloom index rather than ours (`m_bits` is optional; `official=OfficialConfig(...)` carries
 `b_multiplier`, `n_stored_hashes`, the `"int32"` bit-exact vs `"fp16"` serving score path, the
 partial-vs-full bloom path, and `cache_plans` — set it `False` when timing so every forward pays
-the expression parse). Any other module given `"cuda"`, `"cute"` or `"official"` runs its
-torch path.
+the expression parse). Any other module given `"official"` runs its torch path.
 
 ## LiNR modules
 

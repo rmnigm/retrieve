@@ -19,72 +19,9 @@ def pytest_collection_modifyitems(config, items):
             it.add_marker(skip)
 
 
-def require_cps_cuda() -> None:
-    """Gate the calling test on the CUDA C++ extension, distinguishing the two ways it
-    can be absent.
-
-    - **No toolchain** (no CUDA device, or no ``nvcc`` on PATH / under ``$CUDA_HOME``)
-      → ``skip``. The suite is expected to run on boxes that cannot build it.
-    - **A toolchain that failed to build** → ``fail``, with the nvcc/ninja output.
-      This is the case worth being loud about: a compile error silently skipping is
-      exactly what a broken first GPU run would look like, and it would look green.
-
-    The first call pays the one-time JIT compile; later calls hit the memoized
-    outcome in the wrapper (and the ninja cache)."""
-    # Full-module-path import: the package __init__ re-exports the *op* under the
-    # same name as the module, so `from retrieve.kernels.silvertorch import ...`
-    # would grab the op and shadow the module.
-    from retrieve.kernels.silvertorch.codesigned_probe_score_cuda import (
-        ToolchainMissing,
-        ensure_built,
-    )
-
-    try:
-        ensure_built()
-    except ToolchainMissing as e:
-        pytest.skip(f"retrieve CUDA extension unavailable: {e}")
-    except ImportError as e:
-        pytest.fail(
-            f"the CUDA toolchain is present but the retrieve CUDA extension failed "
-            f"to build — this is a real failure, not a skip:\n{e}",
-            pytrace=False,
-        )
-
-
-def require_cps_cute() -> None:
-    """Gate the calling test on the CuTe DSL backend, with the same split as
-    ``require_cps_cuda``.
-
-    - **No DSL** (``nvidia-cutlass-dsl`` — the ``cute`` extra — not installed, or no
-      CUDA device) → ``skip``. The suite is expected to run on boxes without the extra.
-    - **A DSL that is present and failed to compile a kernel** → ``fail``, with the DSL
-      error text. Skipping here would let a broken port look green.
-
-    The first call pays the one-time import + compile of the ``D=128`` scorer; later
-    calls hit the memoized outcome in the host module."""
-    # Full-module-path import: the package __init__ re-exports the *op* under the
-    # same name as the module, so `from retrieve.kernels.silvertorch import ...`
-    # would grab the op and shadow the module.
-    from retrieve.kernels.silvertorch.codesigned_probe_score_cute import (
-        CuteMissing,
-        ensure_built,
-    )
-
-    try:
-        ensure_built()
-    except CuteMissing as e:
-        pytest.skip(f"retrieve CuTe DSL backend unavailable: {e}")
-    except ImportError as e:
-        pytest.fail(
-            f"the CuTe DSL is present but the retrieve cute kernels failed to import or "
-            f"compile — this is a real failure, not a skip:\n{e}",
-            pytrace=False,
-        )
-
-
 def require_official() -> None:
     """Gate the calling test on Meta's official SilverTorch ops (``torch.ops.st.*``,
-    the ``official`` extra), with the same split as ``require_cps_cuda``:
+    the ``official`` extra). Two ways it can be absent, and the split is the point:
 
     - **Not runnable here** (``silvertorch`` not installed, or no CUDA device) →
       ``skip``. The suite is expected to run on boxes without the extra — the Mac
@@ -95,8 +32,6 @@ def require_official() -> None:
       green on the first GPU run.
 
     The first call pays the extension load; later calls hit the memo in the adapter."""
-    # Full-module-path import, as for the cuda / cute gates: the package __init__
-    # re-exports ops under module names, so import the module explicitly.
     from retrieve.kernels.silvertorch.official import OfficialMissing, ensure_loaded
 
     try:

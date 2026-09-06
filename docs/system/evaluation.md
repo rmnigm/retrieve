@@ -22,8 +22,8 @@ SASRec checkpoints, [datasets.md](datasets.md) and
 ## Measurement protocol
 
 Reproduced verbatim from H §2 (the amendment at the top of H applies: read
-every `cuda` / `cute` as `official`, whose `graph` mode is recorded as
-`null` with reason `not_capturable`). Where the code deviates, the
+every mention of the two deleted SilverTorch backends as `official`, whose
+`graph` mode is recorded as `null` with reason `not_capturable`). Where the code deviates, the
 [Deviations](#deviations-from-h) section says so.
 
 One **cell** = `(dataset, dim, filter_kind, sweep, algo, backend, params, seed)`. Per cell, in
@@ -37,7 +37,7 @@ one process, in this order. Everything below is `eager` unless labelled `graph`.
    first cell. One 3-matmul GPU warm-up (keep `warm_gpu_once`).
 2. **Inputs, once per (dataset, dim).** Item embeddings, queries, held-out targets, query attrs;
    `users_limit` applied in exactly one place (prefix, as today, so quality stays golden-comparable).
-   Filter modules: one per *filter backend* (`triton` for triton/cuda/cute cells, `torch` for torch
+   Filter modules: one per *filter backend* (`triton` for triton and official cells, `torch` for torch
    cells). Per sweep: synthesised query attrs, skip mask, exact oracle top-`max(ks)` (fingerprint
    cache as today) **plus** `target_in_filter[u]` (held-out item passes the exact mask) and
    `pass_rate` (exact; bloom cells also record the bloom rate → `bloom_fp_rate`) — the axis both

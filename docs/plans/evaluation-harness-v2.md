@@ -683,7 +683,7 @@ mid-run; the per-cell wall time (§2.8's 2 min estimate). The C4 command:
 
 ## 10. Validation record — WP-0 / roadmap A1, 2026-09-06, A100-SXM4-80GB
 
-> Model: [cuda-silvertorch-handoff.md §13](cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360).
+> Model: [cuda-silvertorch-handoff.md §13](archive/cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360).
 
 **Environment.** A100-SXM4-80GB, driver 570.195.03, CUDA 12.8, torch
 2.10.0+cu128, triton 3.6.0, Python 3.11. Branch `dev/a1-golden`; every row
