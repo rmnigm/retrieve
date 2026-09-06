@@ -12,7 +12,14 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
-from retrieve.kernels import common
+# Imported by name, not as `common.<fn>`: torch.compile re-compiles a
+# @triton_op's kernel through inductor, which rebuilds the kernel's global
+# namespace from the JITFunction's globals and captures @triton.jit callees
+# by name. A module object is not captured, so `clause_pass(...)`
+# raises NameError('common is not defined') at ast_to_ttir time — eager
+# Triton resolves the attribute and never sees it. Found by A1's golden run,
+# 2026-09-06; this is what handoff step 4's compile gate exists to catch.
+from retrieve.kernels.common import clause_pass
 
 
 @dataclass(frozen=True)
@@ -57,7 +64,7 @@ def _clause_mask_kernel(
     n_valid = n_offsets < N
 
     # Result is already ANDed with n_valid inside the helper (keep seeds from load_mask).
-    pass_mask = common.clause_pass(
+    pass_mask = clause_pass(
         item_attrs_ptr,
         is_reverse_ptr,
         query_attrs_ptr,

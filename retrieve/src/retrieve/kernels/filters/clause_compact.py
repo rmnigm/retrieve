@@ -13,7 +13,10 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
-from retrieve.kernels import common
+# By name, not `common.<fn>` — see the note in clause_mask.py: inductor's
+# re-compilation of a @triton_op kernel captures @triton.jit callees from
+# the kernel's globals by name, and a module object is not one.
+from retrieve.kernels.common import clause_pass, compact_store
 
 
 @dataclass(frozen=True)
@@ -60,7 +63,7 @@ def _clause_compact_kernel(
     n_valid = n_offsets < N
 
     # Result is already ANDed with n_valid inside the helper (keep seeds from load_mask).
-    pass_mask = common.clause_pass(
+    pass_mask = clause_pass(
         item_attrs_ptr,
         is_reverse_ptr,
         query_attrs_ptr,
@@ -76,7 +79,7 @@ def _clause_compact_kernel(
         A_MAX=A_MAX,
     )
 
-    common.compact_store(
+    compact_store(
         pass_mask, n_offsets, counts_ptr, out_indices_ptr, bid, stride_ob, stride_on
     )
 
