@@ -10,6 +10,11 @@ and ``users_limit`` applied once to queries / targets / attrs together. Then ``s
 (the old ``build_sweep_qa`` semantics), ``build_filters`` keyed by *filter* backend on the
 torch path, ``exact_filter``, and the fixed-seed ``query_pool``. The SASRec path needs a
 checkpoint and is exercised in C4.
+
+The legacy ``[N+1, …]`` layout (roadmap A1's ``df6db40``, ported to v2 in C4): the writer's
+``legacy=True`` prepends the padding rows, and a legacy load must equal the modern one
+tensor for tensor; the modern layout is left alone; any other row-count disagreement between
+``item_attrs_narrow`` and the item embeddings raises at load.
 """
 
 from __future__ import annotations
@@ -27,9 +32,11 @@ from retrieve import BloomFilter, ExactAttributeFilter
 N, U, D, C = 12, 6, 8, 2
 
 
-def _write_dataset(root: Path, *, doc_prefix="search_document: ", n_split=U) -> Dataset:
+def _write_dataset(
+    root: Path, *, doc_prefix="search_document: ", n_split=U, legacy: bool = False
+) -> Dataset:
     """The conftest writer at this file's smaller shape, as a resolved ``Dataset``."""
-    write_tiny_dataset(root, n=N, u=U, doc_prefix=doc_prefix, n_split=n_split)
+    write_tiny_dataset(root, n=N, u=U, doc_prefix=doc_prefix, n_split=n_split, legacy=legacy)
     return Dataset(
         name="tiny",
         dim=D,
@@ -89,6 +96,83 @@ def test_load_inputs_checks_prefix_and_eval_split_rows(tmp_path):
     ds = Dataset(**{**ds.__dict__, "users_limit": 2})
     with pytest.raises(RuntimeError, match="rows=5 != queries=6"):
         data.load_inputs(ds, torch.device("cpu"))
+
+
+# ----- legacy [N+1] layout ---------------------------------------------------------------
+#
+# The Hub copies of arxiv-papers and goodreads-work-id predate commit 3b1b5b3 and ship
+# 1-indexed tensors with a padding row at index 0. A1's first GPU attempt died on it
+# (goodreads) / would have run silently wrong (arxiv), so the loader drops that row by its
+# content and then checks the row counts.
+
+
+def test_drop_legacy_padding_row_attrs():
+    legacy = torch.tensor([[[-1, -1]], [[3, 4]], [[5, 6]]])  # [N+1, C, A]
+    out = data.drop_legacy_padding_row(legacy, kind="attrs", what="t")
+    assert out.shape == (2, 1, 2) and torch.equal(out, legacy[1:]) and out.is_contiguous()
+
+
+def test_drop_legacy_padding_row_embeddings():
+    legacy = torch.tensor([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    out = data.drop_legacy_padding_row(legacy, kind="emb", what="t")
+    assert out.shape == (2, 2) and torch.equal(out, legacy[1:])
+    # The recognition is by content per kind: an all-zero row is not an attrs pad row and
+    # an all-(-1) row is not an embedding pad row.
+    assert torch.equal(data.drop_legacy_padding_row(legacy, kind="attrs", what="t"), legacy)
+    neg = torch.tensor([[-1.0, -1.0], [1.0, 0.0]])
+    assert torch.equal(data.drop_legacy_padding_row(neg, kind="emb", what="t"), neg)
+    with pytest.raises(ValueError, match="kind"):
+        data.drop_legacy_padding_row(neg, kind="ids", what="t")
+
+
+def test_drop_legacy_padding_row_leaves_modern_layout_alone():
+    # Row 0 of a 0-indexed attrs tensor may legitimately be a real item.
+    modern = torch.tensor([[[3, 4]], [[5, 6]]])
+    assert torch.equal(data.drop_legacy_padding_row(modern, kind="attrs", what="t"), modern)
+    # A pad-looking row anywhere but index 0 is data, not padding.
+    embs = torch.tensor([[1.0, 0.0], [0.0, 0.0]])
+    assert torch.equal(data.drop_legacy_padding_row(embs, kind="emb", what="t"), embs)
+    empty = torch.empty(0, 3)
+    assert data.drop_legacy_padding_row(empty, kind="emb", what="t").shape == (0, 3)
+
+
+def test_load_inputs_legacy_layout_equals_modern(tmp_path):
+    """The same items written both ways load to the same tensors: N rows, the −1 target
+    shift unchanged (ids are 1-indexed on disk in both layouts), attrs aligned."""
+    modern = data.load_inputs(_write_dataset(tmp_path / "modern"), torch.device("cpu"))
+    legacy = data.load_inputs(_write_dataset(tmp_path / "legacy", legacy=True), torch.device("cpu"))
+    on_disk = torch.load(tmp_path / "legacy" / "content" / "text_emb.pt")
+    assert on_disk.shape == (N + 1, D) and (on_disk[0] == 0).all()  # the fixture is legacy
+    assert torch.load(tmp_path / "legacy" / "item_attrs_narrow.pt").shape == (N + 1, C, 1)
+    assert legacy["n_items"] == modern["n_items"] == N
+    for key in ("item_embs", "item_attrs", "clause_is_reverse", "queries", "targets", "qa"):
+        assert torch.equal(legacy[key], modern[key]), key
+    assert legacy["attrs_digest"] == modern["attrs_digest"]
+    assert legacy["item_embs"].is_contiguous() and legacy["item_attrs"].is_contiguous()
+    # Mixed — modern embeddings, legacy attrs (goodreads' shape of the problem): the attrs
+    # lose their pad row and align with the N items the embeddings have.
+    ds = _write_dataset(tmp_path / "mixed")
+    attrs = torch.load(ds.attrs)
+    torch.save(torch.cat([torch.full((1, C, 1), -1, dtype=torch.long), attrs]), ds.attrs)
+    mixed = data.load_inputs(ds, torch.device("cpu"))
+    assert mixed["n_items"] == N and torch.equal(mixed["item_attrs"], modern["item_attrs"])
+
+
+@pytest.mark.parametrize("n_attr_rows", [N - 1, N + 2])
+def test_load_inputs_raises_on_attrs_misalignment(tmp_path, n_attr_rows):
+    """Neither N nor N+1-with-a-pad-row: a mask built from this would score every query
+    against the wrong items, so it must not load — and the error names both counts."""
+    ds = _write_dataset(tmp_path)
+    wrong = torch.full((n_attr_rows, C, 1), 7, dtype=torch.long)
+    torch.save(wrong, ds.attrs)
+    with pytest.raises(RuntimeError, match=rf"{n_attr_rows} rows but there are {N} items"):
+        data.load_inputs(ds, torch.device("cpu"))
+    # An N+1 file whose row 0 is *not* a pad row is a misalignment too, not a legacy file.
+    torch.save(torch.full((N + 1, C, 1), 7, dtype=torch.long), ds.attrs)
+    with pytest.raises(RuntimeError, match="filter mask would be misaligned"):
+        data.load_inputs(ds, torch.device("cpu"))
+    # Without filters the attrs are never read, so nothing is checked.
+    assert data.load_inputs(ds, torch.device("cpu"), with_filters=False)["item_attrs"] is None
 
 
 # ----- sweep_qa ---------------------------------------------------------------------------

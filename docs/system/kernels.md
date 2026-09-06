@@ -71,24 +71,48 @@ All kernels follow the same conventions.
   production ops, not just `_impl`. (`bloom_match` is the one
   exception: a single-op ~80-line file with no `_impl`, no Config, no
   prep — see its section.)
-- Graph-break behavior. Every host wrapper in this tree is decorated
-  with `@torch.library.triton_op` + a textually-inline
-  `wrap_triton(_kernel)[grid](**launch.kwargs)` launch — all ten
-  Triton-registered ops across the seven Triton kernel files:
-  `clause_mask`, `clause_compact`, `bloom_compact`,
+- Graph-break behavior. Ten ops are registered across the seven Triton
+  kernel files (the official backend registers no op of ours; it calls
+  `torch.ops.st.*`), in two flavours.
+
+  **Eight on `@torch.library.triton_op`**, each with a textually-inline
+  `wrap_triton(_kernel)[grid](**launch.kwargs)` launch: `clause_mask`,
   `fused_masked_knn_topk`, `bloom_match`, `codesigned_probe_score`,
   `codesigned_probe_score_bloom`, `codesigned_probe_score_exact`,
-  `oporp_1bit_match_topk_full`, `oporp_1bit_match_topk_indirect` — ten
-  ops across seven kernel files (the official backend registers no op of
-  ours; it calls `torch.ops.st.*`). The decorator stops dynamo from
-  graph-breaking at the wrapper boundary, so each layer's full forward
-  captures into one cudagraph_trees graph, and lets inductor see the
-  underlying `@triton.jit` kernel (preserves the reference under
-  `torch.export` — gated by
+  `oporp_1bit_match_topk_full`, `oporp_1bit_match_topk_indirect`. The
+  decorator stops dynamo from graph-breaking at the wrapper boundary, so
+  each layer's full forward captures into one cudagraph_trees graph, and
+  lets inductor see the underlying `@triton.jit` kernel (preserves the
+  reference under `torch.export` — gated by
   [`tests/compile/test_export_kernel_ref.py`](../../retrieve/tests/compile/test_export_kernel_ref.py);
   opens epilogue-fusion headroom for Stage 3). The `wrap_triton` call
   must stay textually inside each decorated body — dedup targets the
   code around it, never the launch line itself.
+
+  **Two on `@torch.library.custom_op`** (`mutates_args=()`,
+  `device_types="cuda"`, plus a `register_fake`), opaque to inductor and
+  calling the shared `_impl`: the two **stream-compaction** kernels,
+  `clause_compact` and `bloom_compact`. Under `triton_op`, inductor
+  analyses the kernel's TTIR for mutated pointers, and its provenance
+  walk follows a store address back through every argument of the
+  `tt.call` that produced it. `compact_store`'s address is
+  `row_base + intra` — data-dependent on the pass mask, which is the
+  result of the `clause_pass` / `bloom_subset_pass` call whose arguments
+  include the index buffers — so `item_attrs_ptr` / `query_attrs_ptr` /
+  `is_reverse_ptr` (graph inputs) are reported as mutated and
+  cudagraph trees skip the *whole* forward with "skipping cudagraphs due
+  to mutated inputs", silently falling back to compiled-eager. That is
+  what made A1's golden `graph` cells for `linr_v2` / `linr_v3` not graph
+  numbers (roadmap C4). `clause_mask` stores at a data-independent
+  address and is unaffected, which is why it stays a `triton_op`. As
+  custom ops the launches are opaque, the ops are functional as declared,
+  and the forward captures — gated by
+  [`tests/compile/test_linr_compile.py`](../../retrieve/tests/compile/test_linr_compile.py),
+  which asserts `cudagraph_skips == 0` for compiled `linr_v1`/`v2`/`v3`
+  × clause/bloom. The cost is one custom-op dispatch instead of an
+  inlined launch, and the exported graph holds the op node rather than a
+  Triton HOP (export and its bit-exact round-trip still work; the kernel
+  is simply reached through the op).
 
 ## Autotune separation
 
@@ -120,7 +144,8 @@ The shipped pattern, applied uniformly to every kernel in this tree:
    `wrap_triton(_kernel)[grid](**kwargs)` in the `@triton_op` body —
    the launch must appear textually in the decorated function's source,
    which is what `torch.export`'s kernel registry walks to preserve the
-   kernel reference) and, where policies intentionally diverge, in
+   kernel reference; the two `custom_op`-registered compaction kernels
+   have no launch line of their own and just call `_impl`) and, where policies intentionally diverge, in
    explicit prep/finish flags (e.g. `fused_masked_knn_topk`'s
    `bucket=` / `pad_to_k=`). The op schema doesn't carry the config
    dataclass; tests and the tuner reach `_impl` directly to pass an
@@ -206,6 +231,13 @@ to the inlined predicate with a
 - 1-bit Sign-OPORP (V3): `D - 2 * popcount(query_bits ^ item_bits)`, fp32.
   `D = 64 * W`. This is the standard Hamming-to-dot-product relation for
   sign-quantized vectors. Higher is better. Same `-inf` sentinel.
+- The **id** returned alongside a `-inf` score is always `-1`, on every
+  backend — `interfaces.py` names `-1 / -inf` as the paired "no item"
+  sentinels. The torch and official backends get there through
+  `masked_topk`; the two SilverTorch Triton epilogues apply it themselves
+  (see below). So a caller can read either tensor to find the dead slots,
+  and ids from two backends compare directly on rows with fewer than K
+  survivors.
 
 ## OPORP layout
 
@@ -446,6 +478,14 @@ race with each other. Downstream consumers (`fused_masked_knn_topk`,
 passing ids, so this is fine. Callers that need a deterministic order must
 sort.
 
+**Op registration** is `@torch.library.custom_op`, not `@triton_op` — this
+kernel and `bloom_compact` are the two exceptions in the tree. The
+data-dependent `base + intra` store address above is exactly what makes
+inductor's TTIR mutation analysis report the index buffers as mutated, which
+makes cudagraph trees skip the compiled forward; the "Graph-break behavior"
+bullet in the conventions list at the top of this file has the full mechanism
+and names the regression test.
+
 **Tile config.** `ClauseCompactConfig(block_n, num_warps, num_stages)`
 — shipped as `DEFAULT_CONFIG` on the kernel module; tests/tuner override
 via `_clause_compact_impl(..., config=)`. Re-tune on a new arch via
@@ -595,7 +635,10 @@ return:    positive_indices [B, N] int64  (full width, -1 tails)
 ```
 
 Same full-width `[B, N]` return contract as `clause_compact` — bound
-reads by `counts[b]`, tails keep the `-1` prefill.
+reads by `counts[b]`, tails keep the `-1` prefill. Registered as a
+`@torch.library.custom_op` for the same reason `clause_compact` is (the
+compaction store address is data-dependent), so both compaction kernels
+capture under cudagraph trees.
 
 **Launch grid** `(B, tiles_y, tiles_x)`, same 3D shape as the clause
 compact/mask kernels (`tile_id = tile_x * tiles_y + tile_y`). Each
@@ -785,7 +828,12 @@ remains a body-level constexpr (the bloom-on and bloom-off paths still
 JIT-specialise on it). Score buffer is `torch.empty([B, P])` — every
 in-bounds lane is overwritten (real dot or `-inf`), so no pre-fill
 kernel is needed. The host then `torch.topk(scores, K)` directly and
-gathers global ids. `SilverTorch.register_index` asserts
+gathers global ids, and `_cps_finish` overwrites the id at every non-finite
+slot with `-1` — one capture-safe `torch.where(isfinite(topk_scores),
+topk_ids, -1)`, no host sync. Without it the epilogue returned whatever
+item the probe pool held at a bloom-rejected or `-1`-padded slot, which
+diverged from the `masked_topk` contract the other two backends meet
+(plan O §14.7). `SilverTorch.register_index` asserts
 `K <= n_probe * max_cluster_size` so `P >= K` is structurally
 guaranteed; the wrapper has no host-side pad tail (the prior
 "`P < K` ⇒ pad to width K" path is gone — it was dead in production
@@ -825,7 +873,8 @@ optimum also tracks `P = n_probe × max_cluster_size`, so re-tune with
 predicate body is the shared `common.clause_pass`
 (`ids=safe_ids`, `load_mask=valid` — indirect addressing over the
 probed items). Score buffer is `torch.empty([B, P])` — same convention
-as `codesigned_probe_score`, no pre-fill kernel.
+as `codesigned_probe_score`, no pre-fill kernel, and `_cpse_finish` applies
+the same `-1` id sentinel at non-finite slots.
 
 
 ### `official` — Meta's `torch.ops.st.*` kernels as the reference backend

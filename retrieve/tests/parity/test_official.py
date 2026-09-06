@@ -559,10 +559,11 @@ def _layer(data, backend, filter_mode="none", *, reverse=None, official=None, **
 
 
 def _transplant(off: SilverTorch, tri: SilverTorch) -> None:
-    """Give the official module the Triton module's index (GPU k-means is not
-    bit-deterministic across runs — the float ``index_add_`` atomics in ``KMeansTorch``'s
-    centroid update and ``torch.cdist`` — so bit-exact layer comparisons share one
-    index): centroids and codes verbatim, the CSR rebuilt from the padded layout."""
+    """Give the official module the Triton module's index, so a bit-exact layer comparison is
+    of the *kernels* and not of two index builds: centroids and codes verbatim, the CSR
+    rebuilt from the padded layout. (``KMeansTorch.fit`` is reproducible run to run since
+    roadmap C4, so the two builds would now agree anyway; sharing the index keeps this test
+    independent of that and of any future change to the layout path.)"""
     sort_perm, offsets, sizes = csr_from_padded(tri.padded_cluster_items)
     inv = torch.empty_like(sort_perm)
     inv[sort_perm] = torch.arange(sort_perm.numel(), device="cuda")

@@ -23,15 +23,22 @@ def write_tiny_dataset(
     u: int = U,
     doc_prefix: str = "search_document: ",
     n_split: int | None = None,
+    legacy: bool = False,
 ) -> Path:
     """``data_dir/`` with ``content/{text_emb,query_emb}.pt`` + meta sidecars,
     ``heldout.parquet``, narrow attrs (clause 0: three values; clause 1: two values,
     reverse) and ``eval_split.parquet`` (``n_split`` rows, default ``u``; query 4 has no
-    live attrs). Returns ``data_dir``."""
+    live attrs). ``legacy=True`` writes the pre-``3b1b5b3`` ``[N+1, …]`` layout the Hub
+    copies still have — an all-zero row 0 in ``text_emb`` and an all-``-1`` row 0 in the
+    attrs — over the *same* items (held-out ids are 1-indexed in both layouts), so a legacy
+    load must equal a modern one. Returns ``data_dir``."""
     content = data_dir / "content"
     content.mkdir(parents=True)
     g = torch.Generator().manual_seed(0)
-    torch.save(torch.randn(n, D, generator=g).half(), content / "text_emb.pt")
+    text_emb = torch.randn(n, D, generator=g).half()
+    if legacy:
+        text_emb = torch.cat([torch.zeros(1, D, dtype=text_emb.dtype), text_emb])
+    torch.save(text_emb, content / "text_emb.pt")
     torch.save(torch.randn(u, D, generator=g).half(), content / "query_emb.pt")
     (content / "text_emb.meta.json").write_text(json.dumps({"prefix": doc_prefix}))
     (content / "query_emb.meta.json").write_text(json.dumps({"prefix": "search_query: "}))
@@ -39,6 +46,8 @@ def write_tiny_dataset(
     attrs = torch.full((n, C, 1), -1, dtype=torch.long)
     attrs[:, 0, 0] = torch.arange(n) % 3
     attrs[:, 1, 0] = torch.arange(n) % 2
+    if legacy:
+        attrs = torch.cat([torch.full((1, C, 1), -1, dtype=torch.long), attrs])
     torch.save(attrs, data_dir / "item_attrs_narrow.pt")
     torch.save(torch.tensor([False, True]), data_dir / "clause_is_reverse_narrow.pt")
     qa = [[i % 3, i % 2] if i != 4 else [-1, -1] for i in range(u if n_split is None else n_split)]

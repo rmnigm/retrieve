@@ -681,6 +681,116 @@ vs triton across the process boundary; reserved memory flat across a group; kill
 mid-run; the per-cell wall time (§2.8's 2 min estimate). The C4 command:
 `uv run bench run --dataset goodreads --dim 128 --suite filter --filter-kind clause --sweep c0_genre`.
 
+### C4 library prerequisites — validation record, 2026-09-06, A100 (`dev/c4-library-fixes`)
+
+The three library changes the C4 gate needs before it can be re-run, from the coordinator's
+three C4 findings. Branch `dev/c4-library-fixes` = `development` + B4's deletion +
+`dev/c4-harness-gate`. Environment: A100-SXM4-80GB, torch 2.10.0+cu128, triton 3.6.0, nvcc
+12.8, Python 3.11, venv `/venvs/c4` built with `--extra official`. Clocks unlocked (H §7
+fallback applies to anything timed here). **No evaluation was run** — tests and small probes
+only, so nothing here is citable (CLAUDE.md rule 2).
+
+**1. Compaction kernels as opaque custom ops** (`dd8b7b5`, verifying the drafted `5815275`).
+`clause_compact` / `bloom_compact` are `@torch.library.custom_op` (`mutates_args=()`,
+`device_types="cuda"`, `register_fake`) instead of `@triton_op`: under `triton_op`, inductor's
+TTIR mutation analysis walks a store address back through every argument of the `tt.call` that
+produced it, and `compact_store`'s address is `base + intra`, data-dependent on the pass mask,
+so the index buffers (graph inputs) are reported as mutated and cudagraph trees skip the whole
+forward. New gate
+[`retrieve/tests/compile/test_linr_compile.py`](../../retrieve/tests/compile/test_linr_compile.py)
+mirrors `algos.py`'s LiNR builds and `bench.py:graph_callable`'s compile settings
+(`mode="reduce-overhead"`, `dynamic=False`, `fullgraph=True`, 5 warm-ups) and reads the same
+`counters["inductor"]["cudagraph_skips"]`.
+
+| cell | skips, on `custom_op` | skips, on `triton_op` (negative control) |
+|---|---|---|
+| `linr_v1` × clause / bloom | 0 / 0 | 0 / 0 |
+| `linr_v2` × clause / bloom | 0 / 0 | **1** / 0 |
+| `linr_v3` × clause / bloom | 0 / 0 | **1** / 0 |
+
+Scores `torch.equal` to eager on all six, ids equal up to ties. Only `clause_compact` actually
+tripped the analysis at these shapes; `bloom_compact` is converted anyway — same
+data-dependent store, and the failure mode is silent. `torch.export` still works on the
+custom-op form (the graph holds `torch.ops.retrieve.clause_compact.default` and round-trips
+bit-exact); what is lost is the `triton_kernel_wrapper` HOP.
+`tests/compile/test_export_kernel_ref.py` gates `codesigned_probe_score_exact`, still a
+`triton_op`, and passes. **Tests:** `parity/test_clause_compact.py` +
+`test_bloom_compact.py` + `correctness/test_compact.py` + `test_filters.py` + `tests/compile/`
+= **67 passed**.
+
+**2. Deterministic k-means** (`d5d824b`). `KMeansTorch._cluster_sums` replaces `index_add_`'s
+float atomics with `bincount` (counts) + a float64 one-hot GEMM `onehot[n_lists, W] @
+embs[W, D]` accumulated panel by panel with `addmm_`. No floating-point atomics and no
+scheduling-dependent order: a GEMM's reduction order is a function of its shapes alone.
+float64 costs 8 % over float32 here (DMMA runs at the float32 SIMT rate) and cannot be demoted
+to TF32 by a caller's `set_float32_matmul_precision("high")`, so **nothing global is toggled**.
+Initialisation, iteration count, chunked assignment and the float32 result dtype are unchanged.
+
+Measured at N=200k, D=128, n_lists=1024, n_iter=10 (`torch.cuda.synchronize`, sampled clock
+not recorded — this is a ratio, not a citable latency):
+
+| | wall time | two seed-0 fits |
+|---|---|---|
+| old (`index_add_`) | 142.3 ms | not equal in general |
+| new (order-fixed) | 173.7 ms — **1.22×** | `torch.equal` on centroids *and* assignments |
+
+Centroid delta vs the atomic implementation: **one update from a fixed assignment** (the
+chaos-free measure) is max abs **3.3e-6** on sums of order 1e2, and that residual is the
+*atomic* side's float32 accumulation error. A **full fit** is not compared elementwise: Lloyd
+is chaotic and the two were seen both 6.0e-8 and 2.1e-2 apart on different runs, purely by
+which side flipped an assignment first — the atomic reference is not stable against itself.
+What is asserted instead is the objective: mean squared distance to the assigned centroid
+differs by **5.4e-9 relative**. **Tests:** `correctness/test_kmeans.py` = **5 passed in 10.0 s**;
+`parity/test_official.py` = 43 passed.
+
+**3. `-1` id sentinel in the Triton SilverTorch epilogue** (`8df7e9a`, plan O §14.7).
+`_cps_finish` / `_cpse_finish` apply `torch.where(torch.isfinite(topk_scores), topk_ids, -1)` —
+one capture-safe elementwise op, no host sync — so the Triton backend meets `interfaces.py`'s
+`-1 / -inf` contract the way `masked_topk` does for `torch` and `official`. New
+`TestFewSurvivorsSentinel` in `correctness/test_silvertorch.py` builds an index with a known
+survivor count (5 items carry the queried value; one query row asks for a value no item
+carries) and asserts, for exact and bloom mode, that every `-inf` slot has id `-1` and that
+triton vs torch ids compare with no finiteness normalisation first (scores `torch.equal`, ids
+equal up to ties). All 4 fail without the change. `test_official.py`'s T6 `-inf`-slot
+normalisation is left in place and still passes — it is now a no-op. **Tests:**
+`parity/test_codesigned_probe_score.py` + `test_codesigned_probe_score_exact.py` +
+`correctness/test_silvertorch.py` + `tests/compile/` + `parity/test_official.py` =
+**167 passed**.
+
+**Suites.** Full library suite on the A100: `516 passed, 3 failed` in 100 s. The three failures
+are **pre-existing on `dev/b4-delete-cuda-cute`**, not from this work (confirmed by stashing
+every change on this branch): `test_linr.py::test_unknown_backend_is_rejected[*-simhash]` calls
+`SimHashKNN(k=K, backend=backend)` and dies with `TypeError: missing 1 required positional
+argument: 'k_bits'` before the expected `ValueError` — the lambda in B4's `010681d` omits
+`k_bits`. One-line test fix, left to B4's owner. Harness CPU suite: `103 passed, 1 skipped`.
+`ruff check retrieve` clean and `ruff format --check` clean on all Python; the 11 `E501`s
+`ruff check evaluation` reports are pre-existing in `evaluation/eval_datasets/`.
+`check_doc_links.py` at 0.
+
+**Two notes for the coordinator.**
+
+1. **A1's golden must be re-derived before the 1e-6 gate can be evaluated.** Every SilverTorch
+   cell in A1's golden was produced with the atomic k-means, so its centroids — and everything
+   downstream of them: cluster membership, the int8 scale, every quality column — are one
+   arbitrary draw from a distribution the old code could not reproduce. Comparing a
+   deterministic re-run against them at 1e-6 is not a meaningful test. The LiNR cells are also
+   affected: A1's `graph` numbers for `linr_v2` / `linr_v3` on triton were compiled-eager
+   (finding (ii)), so their latencies are not graph latencies. Both re-derivations want the
+   same GPU lane.
+2. **The sentinel can change SilverTorch quality numbers**, on the triton backend only.
+   `evaluation/retrieval/metrics.py` is unchanged and its `_hits` masks on `ids != -1` only,
+   never on score finiteness — so before this fix a filtered-out item's id sitting in a `-inf`
+   slot could be counted as a hit, and counted into `jaccard_vs_first@k`. Rows with fewer than
+   `k` survivors can therefore move; the movement is **downward only** (spurious hits removed),
+   and rows with ≥ `k` survivors have no `-inf` slot in the top-`k` and are unaffected. `torch`
+   and `official` numbers do not change. The harness was deliberately not touched.
+
+**Operational finding.** Inductor's on-disk FX-graph cache (`/tmp/torchinductor_root`) does not
+invalidate when a `@triton_op` body's *Python* source changes: after editing `_cps_finish` the
+compiled cells silently kept running the pre-edit epilogue, and only a cache clear (or
+`TORCHINDUCTOR_FORCE_DISABLE_CACHES=1`) exposed the change. Anyone editing a kernel host
+wrapper and re-running compiled cells must clear it, or the numbers are from the old code.
+
 ## 10. Validation record — WP-0 / roadmap A1, 2026-09-06, A100-SXM4-80GB
 
 > Model: [cuda-silvertorch-handoff.md §13](archive/cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360).

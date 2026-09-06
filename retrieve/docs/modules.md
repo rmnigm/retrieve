@@ -116,3 +116,8 @@ centroids, assignments = KMeansTorch(n_lists=1024).fit(item_embs)
 Lloyd's k-means with chunked assignment; returns `(centroids [n_lists, D], assignments [N])`.
 `SilverTorch` uses it internally — call it directly only if you want the clustering for your own
 index build.
+
+`fit` is deterministic: same `seed` and same input give bit-identical centroids and assignments
+on repeated calls, on CPU and on CUDA. The centroid update sums each cluster with a float64
+one-hot GEMM rather than `index_add_`, whose float atomics reduce in scheduling order and are
+not reproducible on a GPU.
