@@ -1,0 +1,60 @@
+### parity gate probe — {'torch': '2.10.0+cu128', 'triton': '3.6.0', 'cuda_runtime': '12.8', 'python': '3.11.10', 'gpu': 'NVIDIA A100-SXM4-80GB', 'driver': '570.195.03', 'sm_clock_mhz_unlocked_sample': '210 MHz', 'nvcc': 'Build cuda_12.8.r12.8/compiler.35583870_0', 'silvertorch_sha': '21aa35e28b6dd9a91e9ee35efb0857715e86bda7'}
+
+== T4 FPR table, corpus 't4': N=4096 C=2 A_max=2 vocab=50, 32 AND queries, k=5, max terms/doc=4, exact pass rate 0.0009
+arm              width  bytes/doc   index B       FPR   FN
+official    b_mult=1.5        3.8     15360    0.0010    0   bits/doc per bundle [30, 30]
+official    b_mult=2.0        5.0     20480    0.0002    0   bits/doc per bundle [40, 40]
+official    b_mult=3.0        7.5     30720    0.0000    0   bits/doc per bundle [60, 60]
+official    b_mult=5.0       12.5     51200    0.0000    0   bits/doc per bundle [100, 100]
+official    b_mult=6.4       16.0     65536    0.0000    0   bits/doc per bundle [128, 128]
+official   b_mult=10.0       25.0    102400    0.0000    0   bits/doc per bundle [200, 200]
+official   b_mult=12.8       32.0    131072    0.0000    0   bits/doc per bundle [256, 256]
+official   b_mult=20.0       50.0    204800    0.0000    0   bits/doc per bundle [400, 400]
+official   b_mult=25.6       64.0    262144    0.0000    0   bits/doc per bundle [512, 512]
+official   b_mult=40.0      100.0    409600    0.0000    0   bits/doc per bundle [800, 800]
+official   b_mult=51.2      128.0    524288    0.0000    0   bits/doc per bundle [1024, 1024]
+ours        m_bits=256       32.0    131072    0.0000    0
+ours        m_bits=512       64.0    262144    0.0000    0
+ours       m_bits=1024      128.0    524288    0.0000    0
+
+== T4 FPR table, corpus 'dense': N=4096 C=2 A_max=4 vocab=8, 32 AND queries, k=5, max terms/doc=8, exact pass rate 0.3787
+arm              width  bytes/doc   index B       FPR   FN
+official    b_mult=1.5        7.5     30720    0.0043    0   bits/doc per bundle [60, 60]
+official    b_mult=2.0       10.0     40960    0.0067    0   bits/doc per bundle [80, 80]
+official    b_mult=3.0       15.0     61440    0.0000    0   bits/doc per bundle [120, 120]
+official    b_mult=5.0       25.0    102400    0.0000    0   bits/doc per bundle [200, 200]
+official    b_mult=6.4       32.0    131072    0.0000    0   bits/doc per bundle [256, 256]
+official   b_mult=10.0       50.0    204800    0.0000    0   bits/doc per bundle [400, 400]
+official   b_mult=12.8       64.0    262144    0.0000    0   bits/doc per bundle [512, 512]
+official   b_mult=20.0      100.0    409600    0.0000    0   bits/doc per bundle [800, 800]
+official   b_mult=25.6      128.0    524288    0.0000    0   bits/doc per bundle [1024, 1024]
+official   b_mult=40.0      200.0    819200    0.0000    0   bits/doc per bundle [1600, 1600]
+official   b_mult=51.2      256.0   1048576    0.0000    0   bits/doc per bundle [2048, 2048]
+ours        m_bits=256       32.0    131072    0.0000    0
+ours        m_bits=512       64.0    262144    0.0000    0
+ours       m_bits=1024      128.0    524288    0.0000    0
+
+== T7 launches / memcpys / host syncs per forward (N=4096 D=128 B=16 K=64 n_probe=8)
+row                                            launch  dist  D2H  H2D sync  (cpp+py)
+triton/none                                        17    15    0    0    0  (0+0)
+triton/exact                                       18    15    0    0    0  (0+0)
+triton/bloom                                       39    31    0    0    0  (0+0)
+torch/none                                         32    27    0    0    0  (0+0)
+torch/exact                                        41    34    0    0    0  (0+0)
+torch/bloom                                        59    46    0    0    0  (0+0)
+official/none/fp16/cache_plans=True                55    42    3    0    3  (3+0)
+official/exact/fp16/cache_plans=True               63    48    3    0    3  (3+0)
+official/bloom[partial]/fp16/cache_plans=True      70    44    7    2    7  (6+1)
+official/bloom[full]/fp16/cache_plans=True         56    43    4    2    4  (3+1)
+official/none/int32/cache_plans=True               54    41    3    0    3  (3+0)
+official/exact/int32/cache_plans=True              62    47    3    0    3  (3+0)
+official/bloom[partial]/int32/cache_plans=True     69    43    7    2    7  (6+1)
+official/bloom[full]/int32/cache_plans=True        55    42    4    2    4  (3+1)
+official/none/fp16/cache_plans=False               55    42    3    0    3  (3+0)
+official/exact/fp16/cache_plans=False              63    48    3    0    3  (3+0)
+official/bloom[partial]/fp16/cache_plans=False     70    44    7    2    7  (6+1)
+official/bloom[full]/fp16/cache_plans=False        56    43    4    2    4  (3+1)
+official/none/int32/cache_plans=False              54    41    3    0    3  (3+0)
+official/exact/int32/cache_plans=False             62    47    3    0    3  (3+0)
+official/bloom[partial]/int32/cache_plans=False     69    43    7    2    7  (6+1)
+official/bloom[full]/int32/cache_plans=False       55    42    4    2    4  (3+1)

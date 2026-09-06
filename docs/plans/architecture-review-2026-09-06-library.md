@@ -381,7 +381,9 @@ backend, the salt constants bit-for-bit).
   deleted instead. A stable sort could permute tie order in `padded_cluster_items`
   against the checkpoints and golden outputs that exist today; the change is safe only
   when B2 can re-run the parity gate on it. Reconsider at B2 with F3's provenance
-  argument.
+  argument. **Applied at B2 (`0521a67`)** after measuring it bit-identical — permutation,
+  padded layout, forward ids and scores on all three backends — on nine regimes
+  (O §14.6).
 - The rest of §D's "now" list was outside this pass and is still open: A3(b)
   (`pack_mask` byte packing — on the timed exact arm, so before B3), A7's `modules.md`
   fix landed but the fp32 boundary cast is C1's, A8 (`.long()` in

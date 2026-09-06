@@ -12,8 +12,10 @@ deliberate PR that reruns the parity gate (O D2).
 `pyproject.toml` under `[tool.uv.sources]` and in `uv.lock`.
 
 **Box.** A100-SXM4-80GB (sm_80, driver 570.195.03), Python 3.11.10,
-torch 2.10.0+cu128, triton 3.6.0, nvcc 12.4 (`/usr/local/cuda`, the only
-toolkit installed).
+torch 2.10.0+cu128, triton 3.6.0; nvcc 12.4 (`/usr/local/cuda`) for A2/A3,
+nvcc 12.8 (`/usr/local/cuda-12.8`, installed 2026-09-06 — see the addendum)
+from B2 on. The SM clock cannot be locked on this box (`nvidia-smi -lgc`
+denied): nothing here is a timing.
 
 ## Files
 
@@ -25,6 +27,12 @@ toolkit installed).
 | `official_facts.py` | A3 / O WP-1 | the probe script: bit order, host syncs, kernel launches, graph capture + replay, parse cost, the `per_embedding_scale` overflow |
 | `official_facts.json` | A3 / O WP-1 | its raw output, including the full per-op kernel-name lists |
 | `official_facts.txt` | A3 / O WP-1 | the same, rendered as a report |
+| `wp0_build_cu128.txt` | addendum | the rebuild of `silvertorch._C` with nvcc 12.8 (README's tested row), 169 s, no warnings |
+| `wp0_upstream_pytest_cu128.txt` | B2 / O WP-3 | upstream suite on the 12.8 build: 99 passed, 3 subtests (the same three files excluded) |
+| `wp3/full_suite_run{1,2,3}.txt` | B2 / O WP-3 | the library suite on the A100: run 1 (`-x`, stopped at the ungated cute cell), run 2 (11 test-side failures in `test_official.py`), run 3 (final: 574 passed, 0 failed, 127 cute skips) |
+| `wp3/test_official_run3.txt` | B2 / O WP-3 | `test_official.py` with `-s`: the printed T2 / T4 / T6 / T7 numbers quoted in O §14.3 |
+| `wp3/argsort_stable_probe.{py,txt,json}` | B2 / O WP-3 | `argsort` vs `argsort(stable=True)` in `_build_ivf` on nine regimes — bit-identical everywhere (O §14.6) |
+| `wp3/parity_gate_probe.{py,txt,json}` | B2 / O WP-3 | the T4 FPR-at-matched-memory table on two corpora and the T7 launches / memcpys / host syncs per layer forward with `cache_plans` on and off (O §14.4–14.5) |
 
 ## How to reproduce
 
@@ -43,6 +51,20 @@ git clone https://github.com/meta-recsys/silvertorch && cd silvertorch
 git checkout 21aa35e28b6dd9a91e9ee35efb0857715e86bda7
 cp <venv>/lib/python3.11/site-packages/silvertorch/_C.cpython-311-*.so silvertorch/
 uv run --extra official --with pytest python -m pytest silvertorch/ -q
+```
+
+B2's runs (from the repo root; the venv is the one `uv sync --extra official`
+made — with the 12.8 toolkit on `PATH` / `CUDA_HOME` so the CUDA C++ backend
+JIT-builds against the same nvcc):
+
+```bash
+export CUDA_HOME=/usr/local/cuda-12.8 PATH=/usr/local/cuda-12.8/bin:$PATH
+uv run --directory retrieve pytest tests/ -q --durations=15 -rs          # wp3/full_suite_run3.txt
+uv run --directory retrieve pytest tests/parity/test_official.py -q -s   # wp3/test_official_run3.txt
+uv run --directory retrieve python ../docs/plans/official-silvertorch-artifacts/wp3/argsort_stable_probe.py \
+    --json ../docs/plans/official-silvertorch-artifacts/wp3/argsort_stable_probe.json
+uv run --directory retrieve python ../docs/plans/official-silvertorch-artifacts/wp3/parity_gate_probe.py \
+    --out ../docs/plans/official-silvertorch-artifacts/wp3
 ```
 
 Then A3's probes (each graph probe runs in its own subprocess — a failed capture
@@ -168,3 +190,19 @@ only as a record; the parity gate (B2) and everything after run on the
 12.8 build. The first attempt with a minimal header set failed on
 `cusparse.h` (torch's `CUDAContextLight.h` includes it), hence the full
 dev-header list above.
+
+## B2 findings (the parity gate, O WP-3)
+
+Full record in [`../silvertorch-official-integration.md` §14](../silvertorch-official-integration.md).
+In one paragraph: the upstream suite is 99/99 on the 12.8 build; `test_official.py`
+is 43/43 after eleven **test-side** fixes (none touched the adapter or a kernel —
+T1-exact assumed the CSR doc space is `N` while `make_probe_family` pads ~10 % of
+the ids; T3's negative control assumed a low-first mask scores nothing while it
+scores the mirrored doc `63 − d % 64`; T6's fp16 and bloom cells did not normalise
+the Triton epilogue's real ids at `-inf` slots; T7's sync instrument was the
+`catch_warnings` artefact A3 already documented); the int32 path is `torch.equal`
+vs Triton on every regime; FPR at matched memory is 0.0000 for both blooms on
+synthetic attributes (the official index is byte-exact the size of ours at
+`b_multiplier = m_bits / (max_terms · 5)`); `cache_plans` moves no launch and no
+sync. The library suite ends at 574 passed / 0 failed / 127 cute skips, and the
+three pre-existing red cells of finding 7 are fixed. B4 is unblocked.

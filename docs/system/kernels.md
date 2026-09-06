@@ -866,9 +866,11 @@ Not a kernel of ours: an adapter over the ops of
 are in
 [silvertorch-official-integration.md](../plans/silvertorch-official-integration.md)
 (§1 inventory, §3 host behaviour, §4 numerics, §5 adapter); this section
-is the *what runs*. **Status:** authored 2026-09-06 on the Mac against
-the upstream source; the GPU gate (parity suite on the A100, roadmap B2)
-has not run yet.
+is the *what runs*. **Status:** authored 2026-09-06 against the upstream
+source and **validated on the A100 the same day** (roadmap B2:
+`tests/parity/test_official.py` 43/43, int32-path scores `torch.equal`
+vs Triton on every regime — record in
+[silvertorch-official-integration.md §14](../plans/silvertorch-official-integration.md#14-validation-record--wp-2-gpu-gate--wp-3-parity-gate-2026-09-06-a100-sxm4-80gb-nvcc-128--torch-2100cu128-triton-360)).
 
 **Layout.** Phase 1 is ours and shared (D3): the same `KMeansTorch`,
 the same `quantize_int8_global` codes, the same centroid top-`n_probe`.

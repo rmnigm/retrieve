@@ -1,0 +1,9 @@
+N=   256 n_lists=   8: perm_equal=True  (diff      0) padded_equal=True  unstable_id_ordered=True  | torch:scores==,ids== triton:scores==,ids== official:scores==,ids==
+N=   256 n_lists= 256: perm_equal=True  (diff      0) padded_equal=True  unstable_id_ordered=True  | torch:scores==,ids== triton:scores==,ids== official:scores==,ids==
+N=  1024 n_lists=  16: perm_equal=True  (diff      0) padded_equal=True  unstable_id_ordered=True  | torch:scores==,ids== triton:scores==,ids== official:scores==,ids==
+N=  2880 n_lists=  32: perm_equal=True  (diff      0) padded_equal=True  unstable_id_ordered=True  | torch:scores==,ids== triton:scores==,ids== official:scores==,ids==
+N=  4096 n_lists=  64: perm_equal=True  (diff      0) padded_equal=True  unstable_id_ordered=True  | torch:scores==,ids== triton:scores==,ids== official:scores==,ids==
+N=  4097 n_lists=  64: perm_equal=True  (diff      0) padded_equal=True  unstable_id_ordered=True  | torch:scores==,ids== triton:scores==,ids== official:scores==,ids==
+N=  6144 n_lists=  64: perm_equal=True  (diff      0) padded_equal=True  unstable_id_ordered=True  | torch:scores==,ids== triton:scores==,ids== official:scores==,ids==
+N= 16384 n_lists=  64: perm_equal=True  (diff      0) padded_equal=True  unstable_id_ordered=True  | torch:scores==,ids== triton:scores==,ids== official:scores==,ids==
+N=131072 n_lists=1024: perm_equal=True  (diff      0) padded_equal=True  unstable_id_ordered=True  | torch:scores==,ids== triton:scores==,ids== official:scores==,ids==

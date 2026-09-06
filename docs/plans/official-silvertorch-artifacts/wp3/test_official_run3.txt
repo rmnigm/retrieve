@@ -1,0 +1,31 @@
+.............T2 d=64 b=1: max_rel_err=4.759e-04 jaccard@32=1.0000
+.T2 d=128 b=1: max_rel_err=4.852e-04 jaccard@32=1.0000
+.T2 d=64 b=16: max_rel_err=4.881e-04 jaccard@32=1.0000
+.T2 d=128 b=16: max_rel_err=4.881e-04 jaccard@32=0.9924
+..........T4 AND: exact pass rate 0.0009, official bloom FPR 0.0000 at b_mult=10
+.T4 NOT: false-negative rate 0.0000 at b_mult=10
+.......T6 fp16 none: jaccard@64 vs triton = 1.0000
+.T6 fp16 exact: jaccard@64 vs triton = 1.0000
+.T6 bloom[partial]: 0 bloom false positives among 1024 returned slots
+.T6 bloom[full]: 0 bloom false positives among 1024 returned slots
+...T7 syncs per call — parse_expression_query_batch[cache=False]: 0
+T7 syncs per call — fused_kmean_ann: 3
+T7 syncs per call — bloom_index_search_batch_return_partial_response: 2
+T7 syncs per call — fused_kmean_ann_with_partial_masks: 4
+T7 syncs per call — bloom_index_search_batch: 0
+.T7 forward syncs — none, cache_plans=True: 3
+T7 forward syncs — exact, cache_plans=True: 3
+T7 forward syncs — bloom[partial], cache_plans=True: 7
+T7 forward syncs — bloom[full], cache_plans=True: 4
+.T7 forward syncs — none, cache_plans=False: 3
+T7 forward syncs — exact, cache_plans=False: 3
+T7 forward syncs — bloom[partial], cache_plans=False: 7
+T7 forward syncs — bloom[full], cache_plans=False: 4
+.
+=============================== warnings summary ===============================
+tests/parity/test_official.py: 14 warnings
+  /venvs/integration/lib/python3.11/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+43 passed, 14 warnings in 6.32s
