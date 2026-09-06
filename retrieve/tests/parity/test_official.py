@@ -470,6 +470,9 @@ def test_t4_expression_mapping():
     a, b = of.parse_plans(["0:7", ""], HASH_K)
     a2, b2 = of.parse_plans(["0:7", ""], HASH_K)
     assert a is a2 and b is b2, "plans are LRU-cached on the expression tuple"
+    a3, b3 = of.parse_plans(["0:7", ""], HASH_K, cache=False)
+    assert a3 is not a and b3 is not b, "cache=False parses every call"
+    assert torch.equal(a3, a) and torch.equal(b3, b)
     # EMPTY plan = match all.
     attrs = _readme_corpus()
     index, boff = of.build_bloom_index(attrs, b_multiplier=5.0, build_k=3)
@@ -646,11 +649,14 @@ def test_t6_layer_bloom(data, bloom_path, record_property):
     record_property("bloom_topk_false_positives", fp)
     print(f"T6 bloom[{bloom_path}]: {fp} bloom false positives among {B * K} returned slots")
     if bloom_path == "full":
+        # The partial path, with the plan cache off (a timing run's setting): same result.
         off_p = _layer(
             data,
             "official",
             "bloom",
-            official=OfficialConfig(score_path="int32", b_multiplier=B_MULT, hash_k=HASH_K),
+            official=OfficialConfig(
+                score_path="int32", b_multiplier=B_MULT, hash_k=HASH_K, cache_plans=False
+            ),
         )
         _transplant(off_p, tri)
         _assert_bitexact(off_p(data["query"], data["q_attrs"]), (ids_o, sc_o))
@@ -767,12 +773,18 @@ def test_t7_sync_count_per_op(record_property):
     g = torch.Generator(device="cuda").manual_seed(47)
     probe_ids = torch.randint(0, sizes.numel(), (4, 4), generator=g, device="cuda")
     qa = make_query_attrs(4, c=c, n_vocab=50, seed=48)
-    plans = of.parse_plans(of.queries_to_expressions(qa), HASH_K)
+    expressions = of.queries_to_expressions(qa)
+    plans = of.parse_plans(expressions, HASH_K)
     max_row = 4 * int(sizes[0].item())
     partial = of.bloom_partial_masks(
         index, boff, plans, offsets[probe_ids], sizes[probe_ids], K_SEARCH, HASH_K
     )
     counts = {
+        # The parse a timing run pays per forward (OfficialConfig.cache_plans=False): a CPU
+        # op, so 0 device syncs is the expected record; the plan upload is the search ops'.
+        "parse_expression_query_batch[cache=False]": _count_syncs(
+            lambda: of.parse_plans(expressions, HASH_K, cache=False)
+        ),
         "fused_kmean_ann": _count_syncs(
             lambda: of.fused_scores(q_codes, probe_ids, offsets, sizes, codes, max_row)
         ),

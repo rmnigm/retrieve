@@ -606,9 +606,11 @@ class SilverTorch(RetrievalModule):
         """Algorithm 1 phases 2+3 on Meta's official ops (plan §5.1), eager only.
 
         ``none`` → ``fused_kmean_ann``; ``bloom`` → the official expression parser (plans
-        cached on CPU) + ``bloom_index_search_batch_return_partial_response`` over the
-        probed clusters + ``fused_kmean_ann_with_partial_masks`` (``OfficialConfig.bloom_path
-        ="partial"``, the paper's co-design) or the full-``N`` packed mask into
+        on CPU, memoised per expression tuple unless ``OfficialConfig.cache_plans=False``,
+        the setting a timing run needs) + ``bloom_index_search_batch_return_partial_response``
+        over the probed clusters + ``fused_kmean_ann_with_partial_masks``
+        (``OfficialConfig.bloom_path="partial"``, the paper's co-design) or the full-``N``
+        packed mask into
         ``fused_kmean_ann(filtering_bit_mask=…)`` (``"full"``, the S9 ablation); ``exact`` →
         our Triton ``clause_mask`` over the sorted attrs, packed into the same
         ``filtering_bit_mask`` (phase 2 ours, full ``N`` — labelled so in every table).
@@ -633,7 +635,9 @@ class SilverTorch(RetrievalModule):
                     "forward without query_clause_attrs"
                 )
             expressions = official_mod.queries_to_expressions(query_clause_attrs)
-            plans = official_mod.parse_plans(expressions, cfg.hash_k, cfg.max_sub_queries)
+            plans = official_mod.parse_plans(
+                expressions, cfg.hash_k, cfg.max_sub_queries, cache=cfg.cache_plans
+            )
             if cfg.bloom_path == "partial":
                 partial = official_mod.bloom_partial_masks(
                     self.bloom_index,

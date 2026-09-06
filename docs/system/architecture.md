@@ -286,7 +286,8 @@ The implementation, `backend ∈ {"triton", "torch", "cuda", "cute", "official"}
   raises. Constructor extras via `official=OfficialConfig(...)`
   (`score_path` `"fp16"` (default, the shipped int8 serving path) or
   `"int32"` (bit-identical to Triton), `bloom_path` `"partial"` /
-  `"full"`, `b_multiplier`, `hash_k`, …). Details in
+  `"full"`, `b_multiplier`, `hash_k`, `cache_plans` — `False` for any
+  timing run, so the per-forward expression parse is paid, …). Details in
   [kernels.md](kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend).
 
 Constructed via `build_silvertorch(item_embs, k, *, n_lists, n_probe,

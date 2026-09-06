@@ -491,6 +491,20 @@ autotune), but `reduce-overhead` still compiles + captures a cudagraph
 per batch-size shape, and that cold cost has been observed leaking into
 the first cell's timing window.
 
+**Official backend and the plan cache.** `SilverTorch(backend=
+"official")` in bloom mode parses each query batch into official
+expression plans on the CPU (≈ 59 µs per call at B=16, plan §13.2 —
+10–20 % of an eager bloom forward) and memoises the result per
+expression tuple by default. `do_bench` over a fixed closure replays
+the same batch, so after the first call a cached official cell never
+pays the parse and its latency is not what serving fresh queries costs.
+An official cell that is timed must build the module with
+`OfficialConfig(cache_plans=False)` (every forward parses; results are
+bit-identical) or report both settings as separate, labelled rows.
+The harness does not do this yet — it belongs to roadmap C4, the
+harness-v2 GPU gate whose official cell runs end to end; until then no
+official bloom latency from the current harness is citable.
+
 ### Multi-query pool — why p20/p80 are over queries
 
 The perf pass times against a **fixed-seed pool of `n_pool = 4096`
