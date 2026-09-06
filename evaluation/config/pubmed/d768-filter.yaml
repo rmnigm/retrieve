@@ -1,0 +1,57 @@
+# PubMed + MedCPT filter sweep at the encoder's native 768 dims.
+#
+# There is no PCA and no dim sweep for this dataset (user decision 2026-09-06:
+# every dataset is benchmarked at its encoder's native dim), so `content_d768`
+# is the only content dir `eval_datasets/pubmed.py` produces.
+#
+# NOT YET VALIDATED — roadmap E2 is deferred; the data is not staged, so no
+# number produced from this config is citable.
+_defaults: &defaults
+  data_dir: data/pubmed-medcpt
+  content_subdir: content_d768
+  gt_subdir: gt_d768
+  # No `checkpoint:` — pubmed is a text dataset. Item embeddings are the
+  # precomputed MedCPT article vectors; queries come from
+  # data/pubmed-medcpt/content_d768/query_emb.pt (`pubmed encode_queries`).
+  output: results/pubmed/d768-filter
+  split: test
+  device: cuda
+  ks: [100, 500, 1000]
+  batch_sizes: [1, 8, 16]
+  seed: 0
+
+  algorithms:
+    - linr_v1_filter_mask
+    - linr_v2              # exact filtered top-K — recall=1.0 baseline
+    - linr_v3
+    - linr_v4
+    - silvertorch
+
+  backends: [triton, torch]
+  users_limit: 10000
+
+  # Clause layout (dataset-candidates.md §4.1, docs/system/datasets.md § pubmed):
+  #   C0 mesh (multi-valued OR, K=4)   C1 mesh_cat   C2 year
+  #   C3 journal (REVERSE)             C4 has_abstract
+  filters:
+    clause:
+      attrs_path:    data/pubmed-medcpt/item_attrs_narrow.pt
+      reverse_path:  data/pubmed-medcpt/clause_is_reverse_narrow.pt
+      sweeps:
+        - {name: c0_mesh,            active_clauses: [0]}
+        - {name: c2_year,            active_clauses: [2]}
+        - {name: c3_journal_reverse, active_clauses: [3]}
+        - {name: c0c2,               active_clauses: [0, 2]}
+        - {name: all5,               active_clauses: [0, 1, 2, 3, 4]}
+    bloom:
+      # BloomFilter is forward-only, so the reverse journal clause is excluded.
+      attrs_path:   data/pubmed-medcpt/item_attrs_narrow.pt
+      reverse_path: data/pubmed-medcpt/clause_is_reverse_narrow.pt
+      m_bits: 1024
+      k_hash: 5
+      sweeps:
+        - {name: c0_mesh, active_clauses: [0]}
+        - {name: c2_year, active_clauses: [2]}
+        - {name: c0c2,    active_clauses: [0, 2]}
+
+<<: *defaults
