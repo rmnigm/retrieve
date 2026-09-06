@@ -19,6 +19,7 @@ modules for ``official`` cells are Triton (O §6.2): ``FILTER_BACKEND``.
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any, get_args
 
 from torch import Tensor, nn
@@ -148,7 +149,15 @@ class Silvertorch(nn.Module):
     """SilverTorch Algorithm 1: IVF + INT8 with the predicate fused into the probe
     (``filter_kind`` → ``filter_mode`` none / exact / bloom). No filter submodule — the
     attribute buffers live inside ``SilverTorch`` and count toward ``index_bytes``.
-    ``n_probe`` is a query-time parameter (``set_query_params``, H §8.2 A)."""
+    ``n_probe`` is a query-time parameter (``set_query_params``, H §8.2 A).
+
+    On ``backend="official"`` the module is built with the library's default
+    ``OfficialConfig`` (``score_path="fp16"``, the shipped serving path; ``cache_plans=True``)
+    and ``set_plan_cache`` flips ``cache_plans`` in place: it is read per forward by
+    ``parse_plans`` and nothing at build depends on it, so quality can keep the memoised
+    parse while the timed variants pay it on every call — kernels.md: *a timing run must
+    set* ``cache_plans=False`` *or report both, labelled*; results are identical either way.
+    ``cache_plans`` reads the current setting (``None`` on every other backend)."""
 
     def __init__(
         self,
@@ -196,6 +205,20 @@ class Silvertorch(nn.Module):
     def k(self, k: int) -> None:
         self._check_probe_pool(self.idx.n_probe, int(k))
         self.idx.k = int(k)
+
+    @property
+    def cache_plans(self) -> bool | None:
+        """``OfficialConfig.cache_plans`` on the official backend, ``None`` elsewhere."""
+        return self.idx.official.cache_plans if self.idx.backend == "official" else None
+
+    def set_plan_cache(self, enabled: bool) -> None:
+        """Official backend only (a no-op elsewhere): memoise the CPU expression parse per
+        expression tuple (``True``, the library default) or parse on every forward
+        (``False``, what ``run.perf`` times — the ≈ 59 µs/call at B=16 of plan §13.2 is a
+        serving cost, and a replayed pool would hide it behind the cache)."""
+        if self.idx.backend != "official":
+            return
+        self.idx.official = dataclasses.replace(self.idx.official, cache_plans=bool(enabled))
 
     def set_query_params(self, *, n_probe: int) -> None:
         """The two ``register_index`` validations, re-run on mutation (main.py:168-169, 187-192)."""
