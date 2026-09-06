@@ -11,6 +11,7 @@ refactors are falsifiable without a GPU.
 
 from __future__ import annotations
 
+import polars as pl
 import pytest
 import torch
 
@@ -21,7 +22,7 @@ from retrieval.algos import (
     supports,
 )
 from retrieval.config import FilterSweepCfg
-from retrieval.loaders import build_sweep_qa
+from retrieval.loaders import build_sweep_qa, load_query_attrs
 
 # ----- build_sweep_qa -----------------------------------------------------
 
@@ -112,3 +113,58 @@ def test_supports_table_covers_registry():
     # Every registered algo has an eligibility row (and no stale extras),
     # so run_one_sweep's supports() gate can never KeyError on a valid algo.
     assert set(SUPPORTED_FILTER_KINDS) == set(ALGORITHMS)
+
+
+# ----- load_query_attrs ------------------------------------------------------
+
+
+def _write_eval_split(path, n_rows: int, n_clauses: int = 4):
+    pl.DataFrame(
+        {
+            "query_attrs_narrow": [
+                [u * n_clauses + c for c in range(n_clauses)] for u in range(n_rows)
+            ]
+        }
+    ).write_parquet(path)
+
+
+def test_load_query_attrs_trims_to_already_trimmed_queries(tmp_path):
+    # The checkpoint path (goodreads) hands load_query_attrs the row count of
+    # queries that queries_cache already trimmed to users_limit, while the
+    # parquet always holds the full split. users_limit is a prefix, so the
+    # attrs must be trimmed to the same prefix instead of raising.
+    path = tmp_path / "eval_split.parquet"
+    _write_eval_split(path, n_rows=50)
+
+    qa = load_query_attrs(path, 10)
+
+    assert qa is not None
+    assert qa.shape == (10, 4)
+    # Prefix, not a sample: row i is still user i.
+    assert torch.equal(qa[0], torch.tensor([0, 1, 2, 3]))
+    assert torch.equal(qa[9], torch.tensor([36, 37, 38, 39]))
+
+
+def test_load_query_attrs_untrimmed_is_identity(tmp_path):
+    # The arxiv path passes the untrimmed count; the trim happens later in
+    # apply_users_limit, so here the parquet must come back whole.
+    path = tmp_path / "eval_split.parquet"
+    _write_eval_split(path, n_rows=7)
+
+    qa = load_query_attrs(path, 7)
+
+    assert qa is not None
+    assert qa.shape == (7, 4)
+
+
+def test_load_query_attrs_too_few_rows_raises(tmp_path):
+    # Fewer attrs than queries is a real regen-the-parquet error.
+    path = tmp_path / "eval_split.parquet"
+    _write_eval_split(path, n_rows=3)
+
+    with pytest.raises(RuntimeError, match="regen eval_split.parquet"):
+        load_query_attrs(path, 10)
+
+
+def test_load_query_attrs_missing_parquet_returns_none(tmp_path):
+    assert load_query_attrs(tmp_path / "nope.parquet", 10) is None
