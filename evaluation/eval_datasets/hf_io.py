@@ -33,6 +33,7 @@ EVAL_REPOS: dict[str, str] = {
     "yambda-500m":       "pinkmeme/eval-yambda-500m",
     "yambda-5b":         "pinkmeme/eval-yambda-5b",
     "goodreads-work-id": "pinkmeme/eval-goodreads-work-id",
+    "pubmed":            "pinkmeme/eval-pubmed",
 }
 
 # Upstream raw repos kept here only so their local target dirs are centralized.
