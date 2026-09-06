@@ -281,7 +281,15 @@ bit-exactness stays where it belongs, in B2's library parity suite.
   WP-6's gate). Unblocks: D1.
   **Status 2026-09-06:** partial, on `dev/c4-harness-gate` — see the
   session status block at the top; results JSONL under
-  `evaluation-harness-v2-artifacts/c4/` on that branch.
+  `evaluation-harness-v2-artifacts/c4/` on that branch. The three library
+  prerequisites from the C4 findings are done on `dev/c4-library-fixes`
+  (`dd8b7b5` cudagraph capture verified, `d5d824b` deterministic k-means,
+  `8df7e9a` the O §14.7 `-1` sentinel), with the record in
+  [evaluation-harness-v2.md §9](evaluation-harness-v2.md); the gate itself
+  still needs the cells re-run, and **A1's golden must be re-derived first**
+  — its SilverTorch cells were produced with the non-deterministic k-means
+  and its `linr_v2` / `linr_v3` `graph` cells were compiled-eager, so
+  comparing against them at 1e-6 is not yet meaningful.
 
 ### Phase D — campaign and baselines (A100)
 
