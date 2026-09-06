@@ -899,7 +899,10 @@ Applied so the slot order is a property of the assignment, not of the sort imple
 - No timing was taken and none is citable (rule 2; the clock is unlocked anyway). WP-4
   owns the numbers.
 
-## 15. Validation record — WP-5 (roadmap B4), 2026-09-06, CPU-only; GPU suite pending
+## 15. Validation record — WP-5 (roadmap B4), 2026-09-06
+
+§15.1–15.5 are the authoring record (CPU-only, GPU suite pending); **§15.6 is the
+A100 gate run, 2026-09-06, green**.
 
 Roadmap step **B4** plus the library review's item 5 (`Backend` reshaping, sequenced for B4),
 on `dev/b4-delete-cuda-cute` off `development` at `41d4479`, three commits: `4d92432`
@@ -1041,3 +1044,82 @@ and this step's Done lines), this plan (§7, §14, §15), the library review (it
   (moved), `test_tune_smoke.py` (7 specs), the 18 `test_unknown_backend_is_rejected` cells.
 - No golden re-run is needed: no Triton kernel or epilogue changed (§14.7's sentinel note is
   untouched, as instructed), and the harness's `PATHS` table is unchanged in shape.
+
+### 15.6 A100 gate run — 2026-09-06, green
+
+The GPU half of B4's gate, on `dev/b4-delete-cuda-cute` at `a435179` (the three authored
+commits `4d92432` / `010681d` / `6698b4a`, plus one test fix found by this run). Box: the
+A100-SXM4-80GB VM, `torch 2.10.0+cu128`, `triton 3.6.0`, `nvcc 12.8` (V12.8.93 — the
+`official` extra is built with `CUDA_HOME=/usr/local/cuda-12.8`), Python 3.11. Environment:
+a dedicated `/venvs/b4` built from this worktree with `uv sync --extra official`
+(`silvertorch==1.0.0` from `meta-recsys/silvertorch@21aa35e`); `retrieve.__file__` verified to
+resolve inside `/workspace/wt/b4-delete-cuda-cute/`. **SM clocks cannot be locked in this
+container** (`nvidia-smi -lgc` denied, no sudo; sampled 210 MHz idle against a 1410 MHz max),
+so the wall times below are run metadata only — **nothing here is a citable timing**.
+
+#### 15.6.1 Library suite (`uv run --directory retrieve pytest tests/ -q`)
+
+| run | state | result |
+|---|---|---|
+| 1 | `6698b4a` (as authored) | 501 passed, **3 failed**, 0 skipped, 39.4 s (44.6 s wall) |
+| 2, final | `a435179` | **504 passed, 0 failed, 0 skipped, 37.8 s** (42.2 s wall) |
+
+**The three red cells (run 1), and the fix.** `test_linr.py::test_unknown_backend_is_rejected[
+{official,cuda,foo}-simhash]` — the `simhash` row of §15.3's new rejection cells built
+`SimHashKNN(k=K, backend=backend)`, but `SimHashKNN.__init__` takes `k_bits` as a required
+positional, so the call raised `TypeError: SimHashKNN.__init__() missing 1 required positional
+argument: 'k_bits'` inside the `pytest.raises(ValueError)` block instead of the rejection the
+cell asserts. A test-authoring bug invisible to §15.4's `--collect-only` gate (parametrized
+lambdas are not called at collection). Fixed in `a435179` by passing `k_bits=64`; the
+`ValueError` still comes from `_PackedBitsKNN.__init__`'s `check_backend`, before `k_bits` is
+stored, so the cell tests what it claims. **No tolerance was loosened and no test was skipped
+or deleted**; no library source changed for it.
+
+**Zero skips**, as §15.5 required: the 127 `cute` skips of §14.2 are gone with the backend, and
+with the `official` extra installed no `require_official` cell skipped either — the official
+rows genuinely ran. §15.5's list confirmed green in run 2: `test_official.py` 43/43,
+`test_silvertorch.py` on all three backends × filter modes (incl. `TestStateDict`'s deep copy
+of a module carrying the `_forward_impl` bound method and `TestCrossBackend`'s official rows),
+`test_silvertorch_compile.py` 3 rows compiled == eager with zero graph breaks (dynamo through
+the bound-method attribute — the one thing CPU could not vouch for), `test_export_kernel_ref.py`,
+`test_bloom_hash.py::test_build_transposed_sigs_bits` (moved), `test_tune_smoke.py` 7 specs,
+and the 18 rejection cells.
+
+#### 15.6.2 The other gates
+
+| gate | result |
+|---|---|
+| `pytest retrieval/tests/ --ignore=…test_silvertorch_algo_reverse.py -q` (evaluation, `CUDA_VISIBLE_DEVICES=""`) | **93 passed, 1 skipped, 78.7 s** — the skip is `test_algos.py:315` "official backend integrated in retrieve — its cell is C4's gate", unchanged from §15.4 and not B4's |
+| `uvx ruff@0.15.6 check retrieve evaluation/retrieval` | see below |
+| `uvx ruff@0.15.6 format --check retrieve/tests/correctness/test_linr.py` | clean |
+| `python3 scripts/check_doc_links.py` | **0 broken** |
+
+`ruff` is not in the `b4` venv (it is not a runtime dependency), so the pinned
+`uvx ruff@0.15.6` of `.pre-commit-config.yaml` was used. `check retrieve evaluation/retrieval`
+and `format --check` on the one file this run changed are clean. CLAUDE.md's wider
+`ruff check retrieve evaluation` reports **11 pre-existing `E501`s** in
+`evaluation/eval_datasets/{arxiv,goodreads,hf_io,synth_arxiv,timesplit}.py` and
+`evaluation/training/train_sasrec.py`, and `ruff format --check retrieve` the two
+pre-existing unformatted files of §15.4 (`kernels/filters/{bloom_compact,clause_compact}.py`).
+All eight files are **byte-identical to `41d4479`** (`git diff --stat 41d4479..HEAD` over them is
+empty): red on `development` before B4, untouched by it, not this step's to fix.
+
+#### 15.6.3 The grep gate
+
+`git grep -il "cute\|codesigned_probe_score_cuda"` outside `docs/plans/archive/`, read as
+§15.4 prescribes (**no code, test, harness, pyproject, script or live system / sdist doc
+mentions the backends**):
+
+- `git grep -ilw … -- retrieve evaluation scripts pyproject.toml uv.lock docs/system README.md`
+  hits **exactly one file**, `docs/system/kernels.md:973`, and it is the mandated tag name
+  ("backends is tagged `cuda-cute-backends-final`"). Nothing else in code, tests, the harness,
+  any `pyproject.toml`, `uv.lock` or `scripts/`.
+- The remaining non-archive hits of the broad `-il` form are the substring "exe**cute**"
+  (`docs/system/testing.md:551`, `evaluation/golden/README.md:6`,
+  `evaluation/retrieval/run.py:3`, `CLAUDE.md`, `LICENSE`, both frozen `articles/`, six
+  `docs/presentation/` binaries) and the plan documents §15.4 lists as records
+  (`00-roadmap.md`, this plan, the library review, `evaluation-harness-v2*`,
+  `reproducibility-paper.md`, `refactor-validation-handoff.md`, `kernels-layers-design.md`,
+  `torch-export-refactor.md`, `official-silvertorch-artifacts/wp3/full_suite_run*.txt`).
+
+**Gate status: green.** B4's checkbox is the coordinator's to flip after merge.
