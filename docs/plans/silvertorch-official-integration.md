@@ -1,6 +1,9 @@
 # Official SilverTorch ops as the reference backend — integration, parity, Triton-vs-official
 
-> **Status:** planned 2026-09-05 on `feat/cute-dsl-scorer` (nothing implemented, no code touched).
+> **Status:** planned 2026-09-05 on `feat/cute-dsl-scorer`. **WP-0 and WP-1 executed 2026-09-06**
+> on `dev/a0-a3-deps-official` (roadmap A2/A3): the package is pinned and built, and §3's host-side
+> table and §4's numerics are now measured rather than read — see the §13 validation record, which
+> corrects §3's sync and launch counts and §1.1's op inventory. WP-2 onward: nothing implemented.
 > Target box: A100-SXM4-80GB, torch 2.10.0+cu128, CUDA 12.x toolchain, triton 3.6.0, Python 3.11.
 > Authored on the Mac (no GPU): every "the official op does X" claim cites `silvertorch/ops/csrc/<file>:<line>`
 > in the clone of [meta-recsys/silvertorch](https://github.com/meta-recsys/silvertorch) at `21aa35e`
@@ -504,3 +507,201 @@ row-wise, official vs Triton — after TF-1, Triton vs Triton), **S8** (FPR/byte
 (probed fraction), **S6/S16** (per-row vs global scale, int32 path), **S12** (no top-k cap). **G1**'s
 deviations table gains "official bloom hash ≠ ours", "official is eager-only" and the
 `per_embedding_scale` overflow; **G2** closes. Still elsewhere: **S5/S7** (Faiss, CPU inverted index; G5/G6).
+
+## 13. Validation record — WP-0 and WP-1, 2026-09-06, A100-SXM4-80GB, nvcc 12.4 / torch 2.10.0+cu128, triton 3.6.0
+
+Roadmap steps A2 (WP-0) and A3 (WP-1), on `dev/a0-a3-deps-official`. Script,
+raw JSON and logs: [official-silvertorch-artifacts/](official-silvertorch-artifacts/README.md)
+(`official_facts.py`, `official_facts.json`, `official_facts.txt`,
+`wp0_build.txt`, `wp0_environment.txt`, `wp0_upstream_pytest.txt`).
+Everything below is measured on this box; nothing is read off the source.
+
+### 13.1 WP-0 — the pin and the build
+
+`silvertorch @ 21aa35e28b6dd9a91e9ee35efb0857715e86bda7` (the full sha of
+`21aa35e`, still `main` HEAD on 2026-09-06). `uv sync --extra official` built
+`silvertorch._C` in **2 m 17 s** with `ninja` (10 translation units,
+`CUDA_HOME=/usr/local/cuda`, `TORCH_CUDA_ARCH_LIST="8.0"`, `MAX_JOBS=32`);
+`torch.ops.st.fused_kmean_ann` exists. **Gate passed** (< 5 min).
+
+Four corrections to §1, §6.1 and §11:
+
+- **§11's "prefer `CUDA_HOME=/usr/local/cuda-12.8`" can be relaxed to 12.x.**
+  This box has only 12.4. Torch warns
+  (`cpp_extension.py:525 ... minor version mismatch ... (12.8)`) and builds;
+  it raises only on a *major* mismatch. Every CUDA test upstream ships passes
+  on the resulting extension.
+- **Nine `st::` ops, not eleven.** `is_topk.{cpp,cu}` and
+  `fresh_index_post_processing.{cpp,cu}` carry `TORCH_LIBRARY_FRAGMENT(st, …)`
+  registrations but are **absent from `setup.py`'s `cpu_sources`/`cuda_sources`**,
+  so `torch.ops.st.is_topk` and `torch.ops.st.take_top_k_and_gather_from_main_and_fresh`
+  exist in no OSS build. §1.1's top-k and live-update rows should say "dead
+  source at this sha", alongside the dead `process_cluster_v4_pipelined` and the
+  unreachable v1 template branches §1.1 already lists. Nothing in §5 changes.
+  `faster_repeat_interleave.cu` compiles but registers no op, consistent with
+  §3's note that `fused_kmean_ann_cuda.cu` never calls it.
+- **`pytest silvertorch/` — the README's own verification command — fails at
+  collection**, 3 errors, before a single test runs. Meta's internal
+  `@oss-disable` comment-stripping is line-based and mangled three test files,
+  each of which loads a Buck target that cannot resolve outside Meta:
+  `test_fresh_index_post_processing.py` and `test_bloom_search_integration.py`
+  have the *closing paren* of a multi-line `torch.ops.load_library(...)` left
+  commented (`SyntaxError: '(' was never closed`); `test_is_topk.py:24` has a
+  single-line call that was not commented at all
+  (`OSError: Could not load this library: /silvertorch/oss/ops/csrc:is_topk`).
+  Excluding those three: **99 passed, 3 subtests passed in 11.6 s**, every CUDA
+  test included. With the bogus lines removed in a scratch copy,
+  `test_bloom_search_integration.py` passes in full (9 tests) — the file is
+  sound; the other two fail on the ops that are never compiled. **Gate reading:
+  green for everything the OSS build ships.** Two paper-ready build-friction
+  facts for §9's write-up.
+- **"7 open issues" are 7 pull requests.** The repo has zero issues, open or
+  closed, in its whole history; the 7 open items (`#5`–`#10`, `#16`) are PRs
+  exported from Phabricator. None argues against this pin: `#16` is CCCL-3 /
+  CUDA-13 compatibility (the incompatibility we avoid by staying on 12.x),
+  `#5`/`#6` a MovieLens benchmark, `#7` lazy imports in internal test rules,
+  `#8`/`#9` README wording, `#10` a JAX/TPU bloom path.
+
+§6.1's `pyproject` recipe works as written with two additions: the workspace
+root is virtual, so it must re-export the extra
+(`official = ["retrieve[official]"]`) for `uv sync --extra official` to resolve
+against it; and `no-build-isolation` needs `setuptools`/`wheel`/`ninja` already
+in the shared `.venv`, which a member's dev group does not give — they are now a
+root `[dependency-groups] dev`. `[[tool.uv.dependency-metadata]]` works: `uv lock`
+takes 1 s and never executes upstream's `setup.py`. The `cute` extra **stays**
+until B4 (roadmap rule 5); `official` is added alongside it, not in place of it.
+
+### 13.2 WP-1 — measured op facts
+
+Config for every measurement below: `N = 16 384` (64 clusters × 256),
+`D = 128`, `n_probe = 8` (`P = 2048`), `B = 16`, `k = 5`, `hash_k = 7`,
+`b_multiplier = 8.0`, int8 codes, query plans held on **CPU** as §3 advises.
+
+**Bit order — §4.3 CONFIRMED, three independent ways.** The official bloom is
+**HIGH-bit-first**: document `d` lives at bit `63 - (d % 64)` of word `d // 64`.
+
+| probe | result |
+|---|---|
+| A — packed `bloom_index_search_batch(return_bool_mask=False)` with a predicate matching only doc 0 | word 0 = `0x8000000000000000`, i.e. bit 63 |
+| B — hand-built `filtering_bit_mask` into `fused_kmean_ann` | bit 63 set → doc 0 survives; bit 0 set → doc **63** survives |
+| C — round trip: A's packed word used as B's mask | surviving ids `==` the bool mask's passing docs |
+
+**This is the constant B1 was told to parameterise over (roadmap A3 → B1 note):
+take the HIGH-first branch.** `pack_mask_high_first(bool [B, N]) -> int64
+[B, ceil(N/64)]` sets bit `63 - (i % 64)` for item `i`, and T3 pins it.
+
+**Host syncs per op — §3 measured, and it undercounts.** The instrument matters:
+`warnings.catch_warnings(record=True)` around
+`torch.cuda.set_sync_debug_mode("warn")` reports **zero** syncs for every
+`torch.ops.st.*` call, which is an artefact — a `TORCH_WARN` raised inside a C++
+custom op is handled by c10's own warning handler and printed to fd 2, never
+converted to a Python warning. Capturing fd 2 and counting
+`warn_or_error_on_sync` lines (validated against a `t.item()` control visible to
+both instruments) gives:
+
+| op | §3 predicted | measured | verdict |
+|---|---|---|---|
+| `fused_kmean_ann` | 2, unavoidable | **3** | more than predicted |
+| `fused_kmean_ann_with_partial_masks` | 1–3 | **4** | above the range |
+| `bloom_index_search_batch` | plan `.cpu()` only if plans are on CUDA | **0** | §3's "keep plans on CPU" advice confirmed |
+| `..._return_partial_response` | ≥ 1 | **2** | consistent |
+| `bloom_index_build` (CUDA) | `[-1].item()` ×2 | **2** | exact |
+| `generate_column_info_for_clusters` | none | **0** | exact |
+
+**Kernel launches per op — §3's "≈ 12 launches" for the scorer is low.**
+`torch.profiler`, one profiled call after 3 warm-ups:
+
+| op | launches | distinct | D2H | H2D | aten ops |
+|---|---|---|---|---|---|
+| `fused_kmean_ann` (no filter) | **19** | 16 | 3 | 0 | 58 |
+| `fused_kmean_ann` (full mask) | **19** | 16 | 3 | 0 | 58 |
+| `fused_kmean_ann_with_partial_masks` | **19** | 16 | 4 | 0 | 62 |
+| `bloom_index_search_batch` (packed, full N) | **1** | 1 | 0 | **2** | 4 |
+| `..._return_partial_response` | **13** | 13 | 2 | 2 | 43 |
+| `generate_column_info_for_clusters` | **1** | 1 | 0 | 0 | 3 |
+| `bloom_index_build` (CUDA) | **16** | 10 | 2 | 3 | 47 |
+
+Only 2 of the scorer's 19 launches are the actual `process_cluster` /
+`process_cluster_remaining` work; the rest is the payload prep §3 describes
+(`generate_cluster_warp_size`, two `generate_*payload*` kernels, four cub scans,
+`arange`, a `repeat_interleave` `compute_cuda_kernel`, a scatter-gather, two
+fills, a bool reduce). The two H2D copies on `bloom_index_search_batch` are the
+per-call pageable plan upload §3 predicts, and they are the whole reason that op
+is not free even at 1 launch. **Direction of §3's conclusion holds and gets
+worse: a `backend="official"` bloom forward is ≈ 32 launches + ≥ 5 syncs against
+Triton's 1 launch.** The §9(ii) framing — report host overhead next to the
+kernel-only row, never as "their kernel is slower" — is the right one.
+
+**CUDA-graph capture — §3 corrected, D7 unchanged and stronger.** §3 marks
+`generate_column_info_for_clusters` as the one capturable op. Measured, **two**
+of seven capture; but the second one is a trap:
+
+| op | capture | note |
+|---|---|---|
+| `generate_column_info_for_clusters` | **CAPTURED** | as §3 says |
+| `bloom_index_search_batch` | **CAPTURED** | …and **replaying it raises `AcceleratorError: CUDA error: an illegal memory access was encountered`** |
+| the other five | FAILED | `cudaErrorStreamCaptureInvalidated` — "operation failed due to a previous error during capture" |
+
+The replay probe captures with predicate A (passing docs `[0, 664, 1170, …]`),
+overwrites the host plan buffer in place with predicate B (`[1, 2015, 5911, …]`),
+and replays: the replay does not return A's stale answer, it faults. The host
+plan decode and pageable upload simply are not in the graph. So capture
+"succeeding" for this op means *nothing usable*, and **D7 ("`official` runs
+eager only", `mode: graph` recorded as `null` with reason `not_capturable`)
+stands as written** — with a sharper reason for the harness: `bloom_index_search_batch`
+must be on the not-capturable list explicitly, or it will capture and then crash.
+
+Operational fact for anyone extending this: **a failed capture attempt leaves
+the CUDA context poisoned** — the next unrelated `torch.cuda.synchronize()`
+raises `cudaErrorIllegalAddress`. `official_facts.py` therefore runs each graph
+probe in its own subprocess; a single-process sweep reports the first failure
+and then junk.
+
+**Parse cost (§4.4) — CPU, `torch.utils.benchmark`, plans returned to CPU:**
+
+| batch of expressions | µs / call | µs / query |
+|---|---|---|
+| B=16, `c:v AND c:v` | 58.7 | **3.67** |
+| B=16, `c:v` | 41.7 | 2.61 |
+| B=16, `c:v AND NOT c:v` | 66.8 | 4.18 |
+| B=1, `c:v AND c:v` | 12.6 | 12.62 |
+
+IQR ≤ 0.2 µs. At B=16 the parse is ~59 µs against a bloom forward in the
+hundreds of µs — a real line item, and the reason §4.4's per-pool plan cache is
+worth having. It is reported as its own row and excluded from the kernel
+comparison (§9e).
+
+**Scale conventions (§4.2) — all three CONFIRMED.** With saturated codes
+(`±127`, D=128) the raw dot is `127² · 128 = 2 064 512`:
+
+- (i) `divisor_for_int8 = -1` returns **int32** and the value is exactly
+  2 064 512 — the bit-exact parity path D5 relies on.
+- (ii) `divisor_for_int8 = 64` returns **fp16** `32 256.0` where the exact
+  quotient is `32 258.0`: pure fp16 rounding (the representable spacing at
+  2¹⁵ is 16), relative error 6.2 × 10⁻⁵, inside §4.2's 2⁻¹¹ bound.
+- (iii) `per_embedding_scale = ones(N, fp16)` returns **`inf` in every one of
+  the 256 output slots**. The kernel casts the int32 dot to fp16 *before*
+  dividing (`index_mm_helpers.cuh:50-52`), so the option is unusable for any
+  input whose dot exceeds 65 504 — at full-range int8 codes that is **D ≥ 5**,
+  exactly as §4.2 predicts. The S6/S16 per-row-vs-global-scale ablation must run
+  on path (i) with the per-row scale in the host epilogue.
+
+### 13.3 What this changes, and what it does not
+
+Confirmed as written: §4.3's bit order (the one fact B1 was blocked on), §4.2
+(i)–(iii), §3's sync counts for `bloom_index_build` and
+`generate_column_info_for_clusters`, §3's "keep plans on CPU", D5's int32
+contract, D7's eager-only conclusion.
+
+Corrected: §3's sync counts for both scorer entry points (3 and 4, not 2 and
+1–3) and its launch estimate (19, not ≈ 12); §3's capturable column
+(`bloom_index_search_batch` captures but its replay faults); §1.1's `is_topk`
+and `take_top_k_and_gather_from_main_and_fresh` rows (never compiled);
+§1.1/§11's "7 open issues" (7 PRs, 0 issues); §11's CUDA 12.8 preference
+(12.4 is fine).
+
+Not done in A2/A3, by scope: no adapter, no parity test, no timing — WP-2/WP-3
+own those. The bloom FPR and memory calibration of §4.3 is WP-4's
+`fpr_calibrate.py`, not measured here. Numbers in this section are host-side
+counts and CPU parse times; **no kernel-speed claim is made and none of this is
+citable as a performance result** (roadmap rule 2).
