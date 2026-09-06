@@ -63,8 +63,34 @@ box. Plan section references: **H** =
 **P** = [reproducibility-paper.md](reproducibility-paper.md) (gaps G1–G16
 in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
 
-### Phase A — unblock the tree (A100)
+### Phase A — unblock the tree
 
+- [ ] **A0 — make the Mac able to run this repo's Python.** (Mac, 0.5 d.)
+  Today it cannot: `.venv` has no torch and `import retrieve` is
+  impossible here, so *no* `Mac` step below can run its own tests or meet
+  its own gate. Two causes, both verified 2026-09-06.
+  (a) `evaluation/pyproject.toml:41–48` pins `torch` to the
+  `pytorch-cu128` index unconditionally, and that index has no macOS
+  wheels — while PyPI's `torch` does (`torch-2.8.0-cp311-none-macosx_11_0_arm64.whl`,
+  73.6 MB). (b) `retrieve` requires `triton>=3.0`, which publishes
+  manylinux wheels *only* (triton 3.8.0 ships
+  `manylinux_2_27_{x86_64,aarch64}` and nothing else), and ten
+  module-level `from retrieve.kernels…` imports in `layers/` make
+  `import retrieve` fail without it
+  ([main.py:10–28](../../retrieve/src/retrieve/layers/silvertorch/main.py),
+  `layers/filters/{bloom,exact_attribute}.py`,
+  `layers/linr/{prefilter_knn,_bit_knn}.py`).
+  Three changes: marker the triton requirement `sys_platform == "linux"`;
+  marker the cu128 index source the same way so the Mac resolves CPU
+  torch from PyPI; move those ten imports into the functions that launch
+  the kernels. **This is not a CPU emulator** (rule 1): nothing
+  device-side is simulated or stubbed — the kernels simply are not
+  importable off Linux, and a Triton path now raises at call time instead
+  of at import time. Gate: `uv sync` succeeds on the Mac, `import
+  retrieve` works, `uv run pytest evaluation/retrieval/tests/` collects
+  and the CPU-only tests pass, and the A100's resolution is unchanged
+  (`uv.lock` diff touches markers only; re-`uv sync` on the box before
+  A1). Unblocks: **every `Mac` step in this file.**
 - [ ] **A1 — golden baseline on the old harness.** H §6 WP-0 (A100,
   0.5 d). Commit the 3-line `users_limit` row-count fix; run the golden
   cells on goodreads-d128 `c0_genre` (all five algos, `triton` + `torch`)
@@ -115,7 +141,20 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
 
 Backends everywhere in H are now `triton | torch | official` (H's
 amendment). The official backend is eager-only (O D7), so H's `graph`
-mode applies to `triton` and `torch` only.
+mode applies to `triton` and `torch` only. **H §8** amends H §2/§3 with
+the findings of a survey of ann-benchmarks, big-ann-benchmarks,
+VectorDBBench, MTEB, cuVS bench, MLPerf, asv, Criterion and the
+results-as-data practice of ClickBench and db-benchmark
+([artifacts](evaluation-harness-v2-artifacts/README.md)); §8.4 lists what
+each WP below gains. Three change behaviour rather than schema: build-time
+params (`n_lists`) sweep separately from query-time params (`n_probe`,
+`candidate_pool`), which turns the `deep` sweep's 12 builds into 2; the
+resume key includes the library subtree's tree hash, so a kernel change
+invalidates a cell instead of silently reusing it; and the campaign's
+process boundary moves down to `(dataset, dim, algo, backend)` (H §8.2 K,
+user decision 2026-09-06) so no dynamo cache or CUDA graph pool outlives
+the backend under test — cross-backend parity moves to a spill file, and
+bit-exactness stays where it belongs, in B2's library parity suite.
 
 - [ ] **C1 — `bench.py`, `metrics.py`, `algos.py` + tests.** H §6 WP-1
   (Mac, 2 d). Needs A1 (golden exists). Includes O §6.2 / WP-6: the
@@ -246,18 +285,53 @@ and ingestion plans: [dataset-candidates.md](dataset-candidates.md)
 ## 2. Dependencies at a glance
 
 ```
+A0 ─> every Mac step (B1, B4, B5, C1–C3, D4, E1–E4 loaders, F1, F3, G-a)
 A1 ─┬─> A4 (merge)
     └─> C1 ─> C2 ─> C3 ─> C4 ─┬─> D1 ─> D4 ─┐
 A2 ─> A3 ─> B1 ─> B2 ─┬─> B4   │   D2, D3 ──┼─> F2, F5
                       └─> B3 ──┘            │
 B5 (any time before D1)                     │
-E0 today; E1–E4 ingest (any time) ─> E5 (after D1) ┘
+E0 first; E1–E4 ingest (any time) ─> E5 (after D1) ┘
 F1, F3 (any time); F4 (after D1)
 ```
 
 The A100 critical path is A1 → A2 → A3 → B2 → B3 → C4 → D1 → D2/D3 →
 E5. Mac work (B1, B4, B5, C1–C3, D4, F1, F3) fills the gaps; E1–E4
 ingestion runs on the box whenever it is otherwise idle.
+
+### 2.1 Where each step runs
+
+The A100 is the bottleneck, so this is the partition to schedule
+against. **Mac** means it needs neither a GPU nor a GPU-produced number;
+A0 is what makes that column real, and nothing in it can start before A0
+lands.
+
+| GPU box only | Mac, startable after A0 | Mac, waiting on a GPU number |
+|---|---|---|
+| A1, A2, A3 | **A0**, C1, C2, C3 (the harness rewrite, 5 d) | A4 — needs A1 |
+| B2, B3 | B1 †, B5, D4 | B4 — needs B2 |
+| C4, D1, D2, D3 | E0, E1 download + parse ‡, E1–E4 loader code + fixture tests | F2 — needs B3 + D1 |
+| E1–E4 encode / PCA / gSASRec / oracle builds, E5 | F1, F3, G-e re-scope, G-a kernel authoring | F4 — needs D1; F5 — needs all |
+| G-a validation and retune, G-b | | |
+
+† B1's *shape* — the `backend="official"` branch, `require_official`, the
+T1–T7 skeletons — is Mac work. A3 supplies the constants the tests
+assert, so write them parameterised over the two candidate bit orders and
+let A3 pick one.
+
+‡ YFCC-10M is 2.9 GB in total (**D** §3.4) and ships its own filtered
+ground truth, so the download, the `.spmat` parse and the narrow attrs
+tensor are Mac work on a 588 GB-free disk; only E1's gate ("our exact
+oracle reproduces the shipped GT") needs the box. The other three
+datasets are 146 GB (PubMed) to 840 GB (Semantic Scholar) and belong on
+the box's disk, but their `eval_datasets/<name>.py` modules are ordinary
+Python that can be written and unit-tested here against fixtures —
+`eval_datasets/` is 3,875 lines with **no tests at all** today, and Phase
+E adds four more loaders to it.
+
+Mac-side critical path, all of it startable as soon as A0 lands:
+**A0 → C1 → C2 → C3** (5.5 d), with B1, B5, D4, F1, F3 and the E-phase
+loaders as filler — ≈ 11 focused days that never touch the A100.
 
 ## 3. Superseded and parked
 
