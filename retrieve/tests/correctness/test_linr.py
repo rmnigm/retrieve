@@ -672,7 +672,7 @@ def test_simhash_quality_lift_over_oporp_at_higher_kbits():
         lambda backend: PostfilterKNNInt8(k=K, backend=backend),
         lambda backend: PrefilterKNN(k=K, backend=backend),
         lambda backend: OneBitKNN(k=K, backend=backend),
-        lambda backend: SimHashKNN(k=K, backend=backend),
+        lambda backend: SimHashKNN(k=K, k_bits=64, backend=backend),
         lambda backend: ExactAttributeFilter(backend=backend),
     ],
     ids=["postfilter", "postfilter_int8", "prefilter", "one_bit", "simhash", "exact_filter"],
