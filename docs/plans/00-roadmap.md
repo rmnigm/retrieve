@@ -100,8 +100,8 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
   anyway (rule 2) — this only affects whether a green Mac test means
   anything about the box. Unblocks: **every `Mac` step in this file.**
 - [x] **A1 — golden baseline on the old harness.** H §6 WP-0 (A100,
-  0.5 d). Done 2026-09-06 on `dev/a1-golden`; golden JSONs and the run
-  record are under `evaluation/golden/`, the validation record is in
+  0.5 d). Done 2026-09-06 on `dev/a1-golden`, commit `9856998`; golden
+  JSONs and the run record are under `evaluation/golden/`, the validation record is in
   [evaluation-harness-v2.md](evaluation-harness-v2.md) §6 WP-0. The
   `users_limit` row-count fix landed, plus **two bugs the golden run
   found**, both of which had been hidden by steps 4–7 never having run:
