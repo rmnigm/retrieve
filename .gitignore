@@ -250,6 +250,17 @@ retrieve/bench_results/
 # (evaluation/golden/README.md). Overrides the blanket `*.log` above.
 !evaluation/golden/_logs/*.log
 
+# The `main`-side half of A1's handoff-step-6 diff: the same 11 cells run from
+# a throwaway worktree off `main`. Only the diff report is worth keeping (it
+# lands in docs/plans/evaluation-harness-v2-artifacts/a1/step6/), and the JSONs
+# are reproducible from that worktree.
+evaluation/golden/_main/
+
+# Throwaway config the step-7 orchestrator smoke writes next to the real one
+# (run_evaluation._cfg_name insists the config lives under evaluation/); the
+# runbook deletes it, this is the belt-and-braces.
+evaluation/config/**/_a1_step7*.yaml
+
 # Ad-hoc agent-created scratch (one-off benches, sweep dumps, tune logs)
 _agent_scratch/
 

@@ -39,6 +39,42 @@ under test. Each process writes 9 rows: `ks = [100, 500, 1000]` ×
 versions), kept so a number can be traced back to the run that produced
 it.
 
+`_main/` holds the same 11 cells run from a throwaway worktree off
+`main` — the other half of handoff step 6, below. It is **gitignored**:
+the diff report is the artifact worth keeping, and the JSONs are
+reproducible from that worktree.
+
+## A1 is more than the golden cells
+
+Roadmap A1 also closes steps 4-7 of
+[../../docs/plans/refactor-validation-handoff.md](../../docs/plans/refactor-validation-handoff.md),
+whose status blockquote records steps 1 and 4-7 as never having run (no
+dataset was on the box). The runbook does all of it in five stages:
+
+| stage | what | artifacts |
+|---|---|---|
+| `golden` | the 11 cells above | `evaluation/golden/*.json` |
+| `step4` | `TORCH_LOGS=graph_breaks` compile smoke on `linr_v3 --skip-quality`; break reasons diffed against `main`, since "no *new* breaks" is only decidable against it | `.../a1/step4/` |
+| `step7` | `run-evaluation --resume` orchestrator smoke: killed as soon as the first algo finishes, resumed, must skip what completed | `.../a1/step7/` |
+| `step6` | the same 11 cells from the `main` worktree + the quality diff | `_main/`, `.../a1/step6/report.md` |
+| `step5` | per-kernel `tune-kernels` +-5 % gates on both sides, behind a wall-time estimate | `.../a1/step5/` |
+
+(`.../a1/` is
+[../../docs/plans/evaluation-harness-v2-artifacts/a1/](../../docs/plans/evaluation-harness-v2-artifacts/README.md).)
+
+**Why `main` needed patching.** Step 6 diffs `main` against the refactor
+track, and the `users_limit` bug below made `main` unable to run a
+goodreads filter cell at all. The handoff's caveat offers two ways out:
+either the error fires identically on both sides, or both sides run with
+`users_limit: null`. The second is unaffordable — a 313k-query exact
+filtered oracle — so the same three-line fix is ported onto a throwaway
+branch off `main` (`tmp/main-users-limit-fix`, never merged) and the two
+sides stay comparable at 10k queries. Both `main` and this branch keep
+their own oracle cache file (`gt_topk_v2_*` vs `gt_topk_v3_*`), so
+neither run can read the other's ground truth; they do share the
+`encoded_queries_test.pt` cache, whose blob format is identical, so both
+sides see the same queries.
+
 ## Only `triton` and `torch` are golden — cuda/cute are void
 
 H §6 WP-0's own text asks for arxiv `silvertorch` on `--backend cuda
@@ -63,7 +99,12 @@ skip-if-present resume:
 bash docs/plans/evaluation-harness-v2-artifacts/a1_golden_run.sh
 ```
 
-It runs, from `evaluation/`, one invocation per cell:
+Stages are selectable (`STAGES="golden step4 step7 step6 step5"`), the
+`main` worktree is `MAIN_WORKTREE=/workspace/wt/main-golden`, and step 5
+refuses to run if its estimated wall time exceeds `STEP5_BUDGET_S`
+(default 2 h for both sides).
+
+The golden stage runs, from `evaluation/`, one invocation per cell:
 
 ```bash
 # goodreads: 5 algos x {triton, torch}
