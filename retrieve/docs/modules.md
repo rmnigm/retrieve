@@ -55,7 +55,8 @@ set). Ranking is what the layers promise; cast at the boundary if you need one d
 ### `FullScanKNN(k)`
 - `forward(query, mask=None, candidate_ids=None)`
 - Exhaustive matmul + top-K. Optional `mask: [B, N] bool` (filtered ids become `-1`) or
-  `candidate_ids: [B, P]` to score only a candidate set.
+  `candidate_ids: [B, P]` to score only a candidate set (`-1` entries are padding: never scored,
+  never returned; a row with fewer than `min(k, P)` real candidates ends in `-1` / `-inf`).
 
 ### `PostfilterKNN(k, backend="triton")`
 - `forward(query, mask=None)`
@@ -89,7 +90,10 @@ SilverTorch(k, n_lists, n_probe, filter_mode="none",
 ```
 
 - `register_index(item_embs, item_clause_attrs=None, clause_is_reverse=None)`
-- `forward(query, query_clause_attrs=None, candidate_ids=None)`
+- `forward(query, query_clause_attrs=None, candidate_ids=None)` — `candidate_ids: [B, P]`
+  (original ids, `-1` = padding) switches to a pure re-rank of those ids with no filter; pads are
+  never scored or returned, a row with fewer than `min(k, P)` real candidates ends in
+  `-1` / `-inf`, and passing `query_clause_attrs` alongside raises.
 
 Parameters:
 

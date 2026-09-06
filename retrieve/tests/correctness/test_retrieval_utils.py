@@ -97,6 +97,39 @@ def test_fullscan_candidate_ids_p_less_than_k():
     assert scores.shape == (B, p)
 
 
+def test_fullscan_candidate_ids_pad_tail_never_scored():
+    """``-1``-tailed candidate ids are padding (the tail every compact producer emits): a
+    raw ``-1`` would wrap to item ``N-1``, so that item is excluded from every candidate
+    list and must never be returned. Row ``b`` keeps ``2 + b`` real candidates of ``p = 24``;
+    with ``K = 32 > p`` the output has ``p`` columns, of which exactly ``2 + b`` are finite
+    (real ids) and the rest ``-1`` / ``-inf``. The finite part matches a pad-free re-rank of
+    the same row."""
+    embs = make_index(N, D)
+    query = make_query(B, D)
+    p = 24
+    g = torch.Generator(device="cuda").manual_seed(3)
+    cand = torch.randint(0, N - 1, (B, p), generator=g, dtype=torch.long, device="cuda")
+    n_valid = torch.arange(B, device="cuda") + 2
+    cand[torch.arange(p, device="cuda")[None, :] >= n_valid[:, None]] = -1
+
+    knn = FullScanKNN(k=K)
+    knn.register_index(embs)
+    ids, scores = knn(query, candidate_ids=cand)
+
+    assert ids.shape == scores.shape == (B, p)
+    assert not (ids == N - 1).any(), "a -1 pad wrapped to the last item"
+    finite = torch.isfinite(scores)
+    assert torch.equal(ids >= 0, finite), "-1 ids exactly where scores are -inf"
+    for b in range(B):
+        nv = int(n_valid[b].item())
+        assert int(finite[b].sum().item()) == nv
+        row = cand[b, :nv].unsqueeze(0)
+        ref_ids, ref_scores = knn(query[b : b + 1], candidate_ids=row)
+        assert torch.allclose(scores[b, :nv], ref_scores[0], atol=1e-5)
+        assert set(ids[b, :nv].tolist()) == set(row[0].tolist())
+        assert set(ref_ids[0].tolist()) == set(row[0].tolist())
+
+
 def test_post_filter_topk_drops_failed():
     """Failed positions get id=-1; counts equals the per-row pass count."""
     g = torch.Generator(device="cuda").manual_seed(7)

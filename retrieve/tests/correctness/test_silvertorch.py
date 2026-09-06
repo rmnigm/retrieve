@@ -35,6 +35,7 @@ from tests.conftest import (
     require_cps_cute,
     require_official,
 )
+from tests.parity.conftest import assert_ids_equal_up_to_ties
 
 N, D, B, K = 4096, 128, 16, 64
 N_LISTS, N_PROBE = 64, 8
@@ -546,6 +547,37 @@ class TestCandidates:
         ):
             with pytest.raises(ValueError, match="not both"):
                 m(data["query"], data["q_attrs"], candidate_ids=cand)
+
+    def test_candidate_ids_pad_tail_never_scored(self, data, backend):
+        """``-1``-tailed candidate ids (what every compact producer emits) are padding:
+        never gathered (a raw ``-1`` would wrap to item ``N-1`` — through ``inv_perm`` on
+        official), never scored, never returned. Row ``b`` has ``2 + b`` real candidates
+        out of ``P = 24``; with ``k = 8`` the first six rows end in ``-1`` / ``-inf``. The
+        finite part equals a pad-free re-rank of the same row (the int8 dot is exact in
+        fp32, so bit-equal), and item ``N-1`` — excluded from every candidate list — never
+        appears."""
+        k, p = 8, 24
+        m = _build_no_bloom(data, k=k, backend=backend)
+        g = torch.Generator(device="cuda").manual_seed(13)
+        cand = torch.randint(0, N - 1, (B, p), generator=g, dtype=torch.long, device="cuda")
+        n_valid = torch.arange(B, device="cuda") + 2
+        cand[torch.arange(p, device="cuda")[None, :] >= n_valid[:, None]] = -1
+        ids, scores = m(data["query"], candidate_ids=cand)
+        assert ids.shape == scores.shape == (B, k)
+        assert not (ids == N - 1).any(), "a -1 pad wrapped to the last item"
+        finite = torch.isfinite(scores)
+        assert torch.equal(ids >= 0, finite), "-1 ids exactly where scores are -inf"
+        for b in range(B):
+            nv = int(n_valid[b].item())
+            kk = min(k, nv)
+            assert int(finite[b].sum().item()) == kk
+            row = cand[b, :nv].unsqueeze(0)
+            ref_ids, ref_scores = m(data["query"][b : b + 1], candidate_ids=row)
+            assert torch.equal(scores[b, :kk], ref_scores[0, :kk])
+            assert_ids_equal_up_to_ties(
+                ids[b, :kk][None], ref_ids[0, :kk][None], scores[b, :kk][None]
+            )
+            assert set(ids[b, :kk].tolist()) <= set(row[0].tolist())
 
     def test_candidate_ids_p_less_than_k(self, data, backend):
         """``candidate_ids`` smaller than K — forward returns ``actual_k = p`` columns."""

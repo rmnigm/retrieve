@@ -298,7 +298,12 @@ mask parameter. `query_clause_attrs=None` is a documented fast path
 that skips predicate evaluation entirely; passing `query_clause_attrs`
 together with `candidate_ids` raises `ValueError` (the candidates path
 scores the given candidates *without* the fused filter, so accepting
-both would silently drop the predicate). `register_index` is split into
+both would silently drop the predicate). On that path `-1` candidate
+ids are padding — the tail every compact producer in the library emits
+(`evaluate_indices`, `compact_mask`): they are gathered as `clamp_min(0)`
+but masked to `-inf` and returned as `-1` through `masked_topk`, so a
+pad never scores or surfaces as item `N-1` (or, on `"official"`, as
+`inv_perm[-1]`). `register_index` is split into
 validate → `_build_ivf` (k-means) → `_quantize_items` →
 `_register_filter_buffers` phases with a frozen buffer-registration
 order (state-dict key order): `centroids`, `item_codes`,
@@ -370,7 +375,9 @@ builders with the filters package, not the module classes:
 
 - [`FullScanKNN`](../../retrieve/src/retrieve/layers/utils/retrieval.py) —
   exhaustive `query @ item_embs.T` + top-K with optional post-mask or
-  candidate_ids, used as a baseline / sanity check. The mask implements
+  candidate_ids (`-1` = padding, never scored or returned — the same
+  `masked_topk` epilogue as `SilverTorch`'s candidates path), used as a
+  baseline / sanity check. The mask implements
   **post-filter** semantics (the LiNR baseline): top-K is selected over
   the full corpus first, then masked winners are tombstoned to `-1` —
   not backfilled — so recall vs a pre-filter oracle is < 1 by design
