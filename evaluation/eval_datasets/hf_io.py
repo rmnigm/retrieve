@@ -33,6 +33,7 @@ EVAL_REPOS: dict[str, str] = {
     "yambda-500m":       "pinkmeme/eval-yambda-500m",
     "yambda-5b":         "pinkmeme/eval-yambda-5b",
     "goodreads-work-id": "pinkmeme/eval-goodreads-work-id",
+    "yfcc10m":           "pinkmeme/eval-yfcc10m",
 }
 
 # Upstream raw repos kept here only so their local target dirs are centralized.
@@ -40,6 +41,9 @@ RAW_REPOS: dict[str, tuple[str, str]] = {
     # source -> (repo_id, repo_type)
     "arxiv":  ("open-index/open-arxiv", "dataset"),
     "yambda": ("yandex/yambda",         "dataset"),
+    # yfcc10m is fetched over plain HTTPS from dl.fbaipublicfiles.com by
+    # `yfcc download`, not from the Hub — it is listed here only so that
+    # `raw_dir("yfcc10m")` has a documented home next to the others.
 }
 
 # What we *don't* want in the per-dataset eval repo. Excludes training inputs,
