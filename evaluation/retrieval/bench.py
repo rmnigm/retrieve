@@ -279,7 +279,10 @@ def latency(
     """§2.5 for one ``(k, bs, mode)`` variant. ``fn`` is the zero-arg call that rotates the
     pool (eager forward, or ``graph_callable``'s replay). Returns ``(perf dict, per-call ms
     of the chosen window)``. Eager only: the first call runs under
-    ``set_sync_debug_mode("warn")`` and ``peak_fwd_mib`` is taken over the first window."""
+    ``set_sync_debug_mode("warn")`` and ``peak_fwd_mib`` is taken over the first window.
+    ``sm_mhz`` is the SM clock sampled right after the last window's sync, while the GPU is
+    still at its load clock — the per-variant value H §7's unlocked-clock fallback needs
+    (``env.sm_mhz`` is sampled between cells, i.e. idle); ``None`` without CUDA."""
     if mode not in ("eager", "graph"):
         raise ValueError(f"mode must be 'eager' or 'graph', got {mode!r}")
     cuda = torch.cuda.is_available()
@@ -307,6 +310,7 @@ def latency(
         runs.append(_time_calls(fn, n))
         if measure:
             peak_fwd_mib = (torch.cuda.max_memory_allocated() - before) / MiB
+    sm_mhz = clocks()["sm_mhz"] if cuda else None  # under load: right after the last sync
     medians = [torch.tensor(ms).median().item() for ms, _ in runs]
     pick = sorted(range(windows), key=lambda i: medians[i])[windows // 2]
     out = stats(*runs[pick], bs)
@@ -318,6 +322,7 @@ def latency(
         unstable=spread > 0.05,
         peak_fwd_mib=peak_fwd_mib,
         window_medians_ms=medians,
+        sm_mhz=sm_mhz,
     )
     return out, runs[pick][0]
 

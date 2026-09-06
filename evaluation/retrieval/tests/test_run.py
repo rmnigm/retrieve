@@ -76,8 +76,10 @@ def test_end_to_end_records(tiny_configs, tmp_path):
         ]
         for e in rec["perf"]:
             assert set(run.PERF_STAT_KEYS) <= set(e)
+            assert e["cache_plans"] is None  # no plan cache on this backend (official only)
             if e["mode"] == "eager":
                 assert e["n"] == 4 and e["load"] == "closed_loop" and "reason" not in e
+                assert e["sm_mhz"] is None  # sampled under load on CUDA only
             else:
                 assert e["reason"] == "cuda_unavailable"
                 assert all(e[key] is None for key in run.PERF_STAT_KEYS)
@@ -309,6 +311,43 @@ def test_heldout_recall_counts_only_reachable_targets():
     out, *_ = run.quality(_Fixed(), inputs, assets_none, [4], torch.device("cpu"))
     assert out["heldout"]["n"] == 3
     assert out["heldout"]["recall@4"] == pytest.approx((0.5 + 0.5 + 0.0) / 3)
+
+
+class _Cached(torch.nn.Module):
+    """A module with a plan cache, as ``algos.Silvertorch`` on the official backend."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.cache_plans = True
+        self.flips: list[bool] = []
+        self.k = 4
+
+    def set_plan_cache(self, enabled: bool) -> None:
+        self.flips.append(enabled)
+        self.cache_plans = enabled
+
+    def forward(self, q, qa=None):
+        return torch.zeros(q.shape[0], self.k, dtype=torch.long), torch.zeros(q.shape[0], self.k)
+
+
+def test_perf_times_with_the_plan_cache_off_and_records_it(tiny_configs):
+    """kernels.md: an official timing run must set ``cache_plans=False`` (or label both).
+    ``run.perf`` flips it off before the first variant and every entry carries the value."""
+    job = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=[NONE_SWEEP])[0]
+    inputs = {"queries": torch.zeros(8, 8)}
+    assets = {"qa_s": None, "skip": None}
+    m = _Cached()
+    entries, samples = run.perf(
+        m, inputs, assets, job, torch.device("cpu"), modes=EAGER, profile=False, latency_kw=LAT
+    )
+    assert m.flips == [False] and m.cache_plans is False
+    assert len(entries) == 4 == len(samples) and all(e["cache_plans"] is False for e in entries)
+    # ... and the null (graph) entries carry it too.
+    entries, _ = run.perf(
+        m, inputs, assets, job, torch.device("cpu"), modes=("graph",), profile=False,
+        latency_kw=LAT,
+    )  # fmt: skip
+    assert all(e["reason"] == "cuda_unavailable" and e["cache_plans"] is False for e in entries)
 
 
 def test_append_record_writes_valid_json_for_non_finite_and_tensors(tmp_path):

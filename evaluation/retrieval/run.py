@@ -345,9 +345,16 @@ def perf(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """§2.5 per ``(bs, k, mode)``: the fixed-seed pool rotated round-robin, ``module.k = k``
     before each variant, ``graph`` via ``bench.graph_callable`` (one capture per shape) or a
-    null entry with the ``reason`` (``official`` → ``not_capturable``, O D7)."""
+    null entry with the ``reason`` (``official`` → ``not_capturable``, O D7). Modules with a
+    plan cache (``silvertorch`` on ``official``) are timed with it *off* — every forward pays
+    the expression parse, as serving fresh queries does (kernels.md) — and every entry
+    records ``cache_plans`` (``None`` where there is no such cache)."""
     entries: list[dict[str, Any]] = []
     samples: list[dict[str, Any]] = []
+    set_plan_cache = getattr(module, "set_plan_cache", None)
+    if set_plan_cache is not None:
+        set_plan_cache(False)
+    cache_plans = getattr(module, "cache_plans", None)
     for bs in job.batch_sizes:
         pool, qa_pool = data.query_pool(
             inputs, assets["qa_s"], assets["skip"], bs=bs, seed=job.seed, device=device
@@ -355,7 +362,12 @@ def perf(
         for k in job.ks:
             module.k = int(k)
             for mode in modes:
-                entry: dict[str, Any] = {"k": int(k), "bs": int(bs), "mode": mode}
+                entry: dict[str, Any] = {
+                    "k": int(k),
+                    "bs": int(bs),
+                    "mode": mode,
+                    "cache_plans": cache_plans,
+                }
                 if mode == "graph":
                     example = (pool[0],) if qa_pool is None else (pool[0], qa_pool[0])
                     try:
