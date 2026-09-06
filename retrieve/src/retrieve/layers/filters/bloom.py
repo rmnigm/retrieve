@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from torch import Tensor
 
-from retrieve.interfaces import Backend, FilterModule
+from retrieve.interfaces import FilterModule, LinrBackend, check_backend
 from retrieve.kernels.filters.bloom_compact import bloom_compact
 from retrieve.kernels.silvertorch.bloom_match import bloom_match
 from retrieve.layers.filters.bloom_hash import (
@@ -27,8 +27,9 @@ class BloomFilter(FilterModule):
     hash_seeds: Tensor  # [k_hash, 2] int64
     clause_salt: Tensor  # [C] int64
 
-    def __init__(self, m_bits: int, k_hash: int, backend: Backend = "triton") -> None:
+    def __init__(self, m_bits: int, k_hash: int, backend: LinrBackend = "triton") -> None:
         super().__init__()
+        check_backend(backend, LinrBackend)
         if m_bits <= 0 or (m_bits & (m_bits - 1)) != 0:
             raise ValueError(f"m_bits must be a positive power of 2, got {m_bits}")
         if m_bits % 64 != 0:

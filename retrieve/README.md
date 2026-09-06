@@ -10,7 +10,7 @@ A library for the candidate-generation / ANN stage of a recsys stack: full-scan 
 pip install torchretrieve
 ```
 
-Source-only distribution. Triton kernels JIT-compile on first call against your local toolchain — no prebuilt CUDA wheels to match. You need a CUDA-capable GPU and a working `torch` + `triton` install (declared as dependencies). Modules that ship a pure-PyTorch fallback accept `backend="torch"`; `SilverTorch` additionally offers `backend="cuda"`, a hand-written CUDA C++ path that JIT-compiles on first forward and needs a matching CUDA toolkit plus `ninja`, and `backend="cute"`, the same kernels written in NVIDIA's CuTe DSL (no toolkit needed; `pip install "torchretrieve[cute]"`), and `backend="official"`, Meta's own `meta-recsys/silvertorch` kernels behind the same layer (the `official` extra; eager-only).
+Source-only distribution. Triton kernels JIT-compile on first call against your local toolchain — no prebuilt CUDA wheels to match. You need a CUDA-capable GPU and a working `torch` + `triton` install (declared as dependencies). Modules that ship a pure-PyTorch fallback accept `backend="torch"`; `SilverTorch` additionally offers `backend="official"`, Meta's own `meta-recsys/silvertorch` kernels behind the same layer (the `official` extra, built from source against your CUDA toolkit; eager-only).
 
 > **Note.** Install pulls in `torch>=2.4` and `triton>=3.0`; the import name is `retrieve`, not `torchretrieve`.
 
@@ -49,7 +49,7 @@ For attribute-filtered retrieval, swap to `filter_mode="bloom"` (with `m_bits` /
 
 Triton is the default backend; modules that have a pure-PyTorch path accept
 `backend="torch"` for `torch.compile` / Inductor users, and `SilverTorch` also
-accepts `backend="cuda"`, `backend="cute"` and `backend="official"` (Meta's kernels, eager-only).
+accepts `backend="official"` (Meta's kernels, eager-only).
 
 ## Docs
 
@@ -63,7 +63,7 @@ System / internals documentation lives in the repository (not in the sdist)
 under `docs/system/`:
 
 - `architecture.md` — module map, what each retrieval family does.
-- `kernels.md` — Triton and CUDA C++ kernel internals.
+- `kernels.md` — Triton kernel internals and the official-backend adapter.
 - `filtering.md` — clause / Bloom filter API.
 - `testing.md` — running the correctness suite.
 - `evaluation.md` — running the benchmark harness.

@@ -1,29 +1,5 @@
-from retrieve.kernels.silvertorch.bloom_match import bloom_match
-from retrieve.kernels.silvertorch.codesigned_probe_score import (
-    codesigned_probe_score,
-)
-from retrieve.kernels.silvertorch.codesigned_probe_score_cuda import (
-    codesigned_probe_score_bloom_cuda,
-    codesigned_probe_score_cuda,
-    codesigned_probe_score_exact_cuda,
-)
-from retrieve.kernels.silvertorch.codesigned_probe_score_cute import (
-    codesigned_probe_score_bloom_cute,
-    codesigned_probe_score_cute,
-    codesigned_probe_score_exact_cute,
-)
-from retrieve.kernels.silvertorch.codesigned_probe_score_exact import (
-    codesigned_probe_score_exact,
-)
-
-__all__ = [
-    "bloom_match",
-    "codesigned_probe_score",
-    "codesigned_probe_score_bloom_cuda",
-    "codesigned_probe_score_bloom_cute",
-    "codesigned_probe_score_cuda",
-    "codesigned_probe_score_cute",
-    "codesigned_probe_score_exact",
-    "codesigned_probe_score_exact_cuda",
-    "codesigned_probe_score_exact_cute",
-]
+"""SilverTorch kernels: ``codesigned_probe_score`` (IVF + INT8 + bloom),
+``codesigned_probe_score_exact`` (IVF + INT8 + exact AND-of-OR), ``bloom_match`` (standalone
+subset test) and ``official`` (the adapter over Meta's ``torch.ops.st.*``). Import the
+submodules directly — nothing is re-exported here, so a module name never shadows the op
+registered under the same name."""

@@ -34,7 +34,7 @@ LiNR variants are V1–V4 as in the paper.
   blockquote (date, branch, what ran), numbered sections, decisions
   `D1…`, work packages with gates, and — once executed — a validation
   record appended to the same file. The model record is
-  `docs/plans/cuda-silvertorch-handoff.md` §13. Finished plans move to
+  `docs/plans/archive/cuda-silvertorch-handoff.md` §13. Finished plans move to
   `docs/plans/archive/` (not maintained, links may rot).
 - `docs/plans/*-artifacts/` — raw scripts and outputs behind a plan's
   numbers, kept so they can be re-derived.
@@ -68,9 +68,10 @@ LiNR variants are V1–V4 as in the paper.
    `docs/system` file in the same commit. Relative markdown links are
    checked by `python3 scripts/check_doc_links.py` (also a pre-commit
    hook); keep it at zero broken links.
-5. **Deletion is gated.** The CUDA C++ and CuTe backends are removed only
-   after the official backend's parity gate (roadmap Phase B). Never
-   delete a kernel that still has no validated replacement.
+5. **Deletion is gated.** Never delete a kernel that still has no
+   validated replacement. The model: the two hand-written SilverTorch
+   backends went at roadmap B4 only after the official backend's parity
+   gate (B2) was green; tag `cuda-cute-backends-final` holds them.
 6. **Commits and branches.** Commit only when the user asks. One branch per
    roadmap phase off `main` after Phase A4. Session artifacts (scripts,
    raw JSON) go under `docs/plans/<plan>-artifacts/`, not in the packages.
