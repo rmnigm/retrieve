@@ -919,8 +919,10 @@ clause index is the feature id, the same `(clause, value)` keying as our
 salt — and `bloom_index_build(b_multiplier, k)` builds `bloom_index [W]`
 + `bundle_b_offsets`; per forward, `queries_to_expressions` renders each
 `[C]` query row as `"0:v0 AND 1:v1"` (`NOT c:v` for reverse clauses,
-`""` = match all), `parse_plans` runs the CPU parser once per distinct
-expression tuple (LRU-cached, plans kept on CPU), and then either
+`""` = match all), `parse_plans` runs the CPU parser (plans kept on
+CPU; memoised per distinct expression tuple by default —
+`OfficialConfig.cache_plans=True` — or parsed on every forward with
+`cache_plans=False`), and then either
 (`bloom_path="partial"`, default — the paper's co-design)
 `bloom_index_search_batch_return_partial_response` over the probed
 clusters feeds `fused_kmean_ann_with_partial_masks`, or
@@ -959,8 +961,13 @@ forward raises `RuntimeError` when traced. Measured on the A100 (plan
 the partial-response bloom search 13 / 2 with two H2D plan uploads, so a
 bloom forward is ≈ 32 launches and ≥ 5 syncs against Triton's one launch.
 On top of that the CPU expression parse costs ≈ 59 µs per call at B=16
-(`c:v AND c:v`), which the `parse_plans` LRU cache hides after the first
-call for a repeated batch. The official arm loses at small `P` / `B=1` for host reasons and the
+(`c:v AND c:v`), 10–20 % of an eager bloom forward, which the
+`parse_plans` LRU cache hides after the first call for a repeated
+batch. **A timing run must therefore set `OfficialConfig(cache_plans=
+False)`** — every forward pays the parse, as serving fresh queries does
+— **or report both settings, labelled**; results are identical either
+way (T6 checks the uncached path bit for bit, T7 records its sync
+count). The official arm loses at small `P` / `B=1` for host reasons and the
 kernel-only tier of the head-to-head (plan §9a) is what compares kernels.
 
 ### `codesigned_probe_score_cuda` — the CUDA C++ backend
