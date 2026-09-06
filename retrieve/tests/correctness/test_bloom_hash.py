@@ -13,11 +13,14 @@ from retrieve.layers.filters import BloomFilter, bloom_hash
 from retrieve.layers.filters.bloom_hash import (
     build_query_signatures,
     build_signatures,
+    build_transposed_sigs,
     generate_clause_salt,
     generate_seeds,
+    words_per_cluster,
 )
 from retrieve.layers.silvertorch import build_silvertorch
 from tests.conftest import make_attrs, make_index, make_query_attrs
+from tests.parity.conftest import make_probe_family
 
 M_BITS, K_HASH = 512, 5
 WORD_COUNT = M_BITS // 64
@@ -162,3 +165,32 @@ def test_clause_salt_registered_as_buffer_and_moves_with_module():
     )
     assert st_noattr.clause_salt.numel() == 0
     assert torch.equal(st_noattr._query_bits(q), expected_q)
+
+
+def test_build_transposed_sigs_bits():
+    """Bit-level roundtrip of the transposed (cluster-major) index: for every (cluster,
+    slot), row m of ``sigs_t`` carries exactly bit m of the slot item's row-wise
+    signature (0 for padding slots). No shipped backend reads this layout since roadmap
+    B4; it is kept for the Triton transposed-bloom kernel (O §8 TF-1)."""
+    n_lists, max_size, w = 8, 90, 4  # non-multiple-of-64 max_size exercises the pad tail
+    padded, _, _, n = make_probe_family(1, n_lists, max_size, 1, pad_rate=0.2)
+    g = torch.Generator(device="cuda").manual_seed(3)
+    ii = torch.iinfo(torch.int64)
+    sigs = torch.randint(ii.min, ii.max, (n, w), generator=g, dtype=torch.int64, device="cuda")
+
+    sigs_t = build_transposed_sigs(sigs, padded)
+    wpc = words_per_cluster(max_size)
+    assert sigs_t.shape == (w * 64, n_lists * wpc)
+
+    m_bits = w * 64
+    m = torch.arange(m_bits, device="cuda")
+    for c in range(n_lists):
+        for s in range(max_size):
+            word = sigs_t[:, c * wpc + s // 64]  # [m_bits]
+            actual = (word >> (s % 64)) & 1
+            item = int(padded[c, s].item())
+            if item < 0:
+                expected = torch.zeros(m_bits, dtype=torch.int64, device="cuda")
+            else:
+                expected = (sigs[item][m // 64] >> (m % 64)) & 1
+            assert torch.equal(actual, expected), f"cluster {c} slot {s}"

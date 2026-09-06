@@ -193,3 +193,49 @@ def bloom_subset_match(qb: Tensor, sigs: Tensor) -> Tensor:
     SilverTorch's eager bloom path."""
     match = (qb.unsqueeze(1) & sigs) == qb.unsqueeze(1)  # [B, P, W]
     return match.all(dim=-1)
+
+
+def words_per_cluster(max_size: int) -> int:
+    """Index words per cluster span in the transposed bloom layout: each cluster occupies
+    ``ceil(max_size / 64)`` int64 words, so spans stay word-aligned."""
+    return (max_size + 63) // 64
+
+
+def build_transposed_sigs(bloom_sigs: Tensor, padded_cluster_items: Tensor) -> Tensor:
+    """Rotate a row-wise bloom index into the transposed, cluster-major layout of the paper's
+    "rotate the matrix" phase 2 (SilverTorch §Bloom Index): a kernel walks only the set bits
+    of the query signature and tests 64 items per int64 word.
+
+    Row ``m`` of the result is a bit-vector over padded IVF slots: bit ``s % 64`` of word
+    ``c * wpc + s // 64`` is bit ``m`` of ``bloom_sigs[padded_cluster_items[c, s]]`` (0 for
+    ``-1`` padding). Shape ``[m_bits, n_lists * wpc]`` int64 with
+    ``wpc = words_per_cluster(max_size)``; every cluster is a contiguous, word-aligned span.
+    Kept here (the hash math's home) for the Triton transposed-bloom kernel planned in
+    docs/plans/silvertorch-official-integration.md §8 TF-1; no shipped backend reads it today.
+
+    Host-side, one-time at ``register_index``. Costs ``m_bits`` iterations of a few small
+    GPU ops each (1024 at the default ``m_bits``)."""
+    if bloom_sigs.dim() != 2 or padded_cluster_items.dim() != 2:
+        raise ValueError("bloom_sigs must be [N, W] and padded_cluster_items [n_lists, max_size]")
+    n_lists, max_size = padded_cluster_items.shape
+    w = bloom_sigs.shape[1]
+    wpc = words_per_cluster(max_size)
+    device = bloom_sigs.device
+
+    valid = padded_cluster_items >= 0
+    safe = padded_cluster_items.clamp_min(0)
+    shifts = torch.arange(64, device=device, dtype=torch.int64)
+    pad_tail = wpc * 64 - max_size
+
+    out = torch.empty(w * 64, n_lists * wpc, dtype=torch.int64, device=device)
+    zero = torch.zeros((), dtype=torch.int64, device=device)
+    for word in range(w):
+        # Per-slot signature word, cluster-major; padding slots contribute 0 bits.
+        slot_words = torch.where(valid, bloom_sigs[:, word][safe], zero)
+        for j in range(64):
+            bits = (slot_words >> j) & 1  # [n_lists, max_size]
+            if pad_tail:
+                bits = torch.nn.functional.pad(bits, (0, pad_tail))
+            packed = (bits.view(n_lists, wpc, 64) << shifts).sum(dim=-1)
+            out[word * 64 + j] = packed.reshape(-1)
+    return out

@@ -19,7 +19,7 @@ legacy label, needs no GPU time and runs on the box's CPUs — there is no
 Mac target since 2026-09-06), its gate, and what it unblocks. When you finish a
 step: run its gate, append the validation record to the *plan's own*
 record section (the model is
-[cuda-silvertorch-handoff.md §13](cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360)),
+[cuda-silvertorch-handoff.md §13](archive/cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360)),
 then flip the checkbox here with the date and commit. Do not start a
 step whose dependencies are unchecked. Do not reorder steps without
 rewriting the dependency notes. When a phase is fully checked, move its
@@ -206,20 +206,30 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
   unblocked.**
 - [ ] **B3 — kernel head-to-head, Triton vs official.** O §9a/§9b, WP-4
   (A100, 1 d). Gate: JSON + tables appended to O. This is paper gap G2.
-- [ ] **B4 — delete the CUDA C++ and CuTe backends.** O §7, WP-5 (Mac,
+- [x] **B4 — delete the CUDA C++ and CuTe backends** (merged 2026-09-06, A100 gate 504/0/0). O §7, WP-5 (Mac,
   1 d). Tag the parent commit `cuda-cute-backends-final`; move
-  [cuda-silvertorch-handoff.md](cuda-silvertorch-handoff.md),
-  [cuda-silvertorch-phase2.md](cuda-silvertorch-phase2.md),
-  [cute-dsl-scorer.md](cute-dsl-scorer.md) and
-  [cute-dsl-scorer-artifacts/](cute-dsl-scorer-artifacts/README.md) to
+  [cuda-silvertorch-handoff.md](archive/cuda-silvertorch-handoff.md),
+  [cuda-silvertorch-phase2.md](archive/cuda-silvertorch-phase2.md),
+  [cute-dsl-scorer.md](archive/cute-dsl-scorer.md) and
+  [cute-dsl-scorer-artifacts/](archive/cute-dsl-scorer-artifacts/README.md) to
   `archive/`; rewrite the system docs O §7 lists. Gate: suite green on
   the A100, collect-only on the Mac, `git grep -il "cute\|codesigned_probe_score_cuda"`
   hits only `docs/plans/archive/`. Needs B2.
-  **Status 2026-09-06:** authored on `dev/b4-delete-cuda-cute`
-  (`4d92432`, `010681d`, `6698b4a`; O §15 record): 5,460 lines deleted,
-  `Backend` split into `LinrBackend` / `SilverTorchBackend` with table
-  dispatch, CPU bit-identity verified, collect-only 504, evaluation suite
-  green. **GPU suite not run; not merged.**
+  **Authored 2026-09-06 on `dev/b4-delete-cuda-cute`; A100 gate green
+  2026-09-06** (`4d92432` deletion, `010681d` `Backend` split — review
+  item 5, the docs commit, `a435179` a test fix, plus the record): parent
+  `41d4479` tagged `cuda-cute-backends-final`; 3,677 lines of kernel/host/
+  test code gone, `build_transposed_sigs` moved to `bloom_hash.py` for
+  TF-1. **Library suite on the A100 with the `official` extra: 504 passed,
+  0 failed, 0 skipped** (the 127 `cute` skips of B2's run 3 are gone with
+  the backend, and no official cell skipped); evaluation suite 93 passed /
+  1 skipped (C4's cell), links 0, ruff clean on `retrieve` +
+  `evaluation/retrieval`, the grep hits only the mandated tag name outside
+  `archive/`. The one red cell of the first run — `SimHashKNN` missing
+  `k_bits` in the new backend-rejection parametrize, invisible to a
+  collect-only gate — is fixed in `a435179`; no library source changed.
+  Record and the grep-rule reading: O §15, §15.6. The coordinator flips
+  this box after merge.
 - [x] **B5 — salt as a buffer.** O §8 TF-2 (Mac, 0.5 h; validate with
   `test_bloom_hash.py` on the A100). Do before any campaign timing.
   Authored 2026-09-06 on `dev/b1-official-adapter` (commit `2dbee72`).
@@ -484,77 +494,28 @@ loaders as filler — ≈ 11 focused days that never touch the A100.
 
 ## Done
 
-### CuTe DSL SilverTorch backend — implemented and benchmarked 2026-09-02
+### CuTe DSL SilverTorch backend — implemented 2026-09-02, deleted at B4 (2026-09-06)
 
-`SilverTorch(backend="cute")`: a one-to-one port of the CUDA C++ backend
-into NVIDIA's CuTe DSL (`nvidia-cutlass-dsl`, optional `cute` extra),
-authored and validated on the A100 in one session on
-`feat/cute-dsl-scorer`. Same three kernels plus the generic fallback,
-same op signatures, same transposed-bloom buffers (imported from the
-cuda module, not copied), so a cute checkpoint is byte-identical to a
-cuda one; bit-exact against both cuda and Triton on every regime.
-`Backend` is now four-valued. The question it answers — kernel size and
-speed of the DSL against C++ — is settled in the plan's §5: kernel-only
-the two are equal, the port's real cost was the DSL launch (63–72 µs of
-host time vs 4–11 µs), trimmed to wall-clock parity at B=16 and gone
-under CUDA-graph replay, which is the harness's deployed path.
+`SilverTorch(backend="cute")`, a one-to-one port of the CUDA C++ backend into
+NVIDIA's CuTe DSL, bit-exact against it and against Triton; its finding
+(kernel-for-kernel parity with C++, the cost being DSL launch overhead,
+gone under CUDA-graph replay) is in the archived plan
+[archive/cute-dsl-scorer.md](archive/cute-dsl-scorer.md) §5 / §5.1 with
+raw outputs in [archive/cute-dsl-scorer-artifacts/](archive/cute-dsl-scorer-artifacts/README.md).
+Citable as `retrieve@cuda-cute-backends-final`.
 
-Plan, decisions, spike findings and the validation record:
-[cute-dsl-scorer.md](cute-dsl-scorer.md); raw scripts and outputs:
-[cute-dsl-scorer-artifacts/](cute-dsl-scorer-artifacts/README.md);
-mechanism: [../system/kernels.md](../system/kernels.md#codesigned_probe_score_cute--the-cute-dsl-backend).
+### CUDA SilverTorch backend — implemented 2026-07-06, validated + tuned on A100 2026-09-02, deleted at B4 (2026-09-06)
 
-### CUDA SilverTorch backend — implemented 2026-07-06, **validated + tuned on A100 2026-09-02**
-
-A second implementation of SilverTorch's Algorithm 1 phases 2+3 in CUDA
-C++, selected by `SilverTorch(backend="cuda")`. Where the Triton kernel
-fuses a row-wise bloom read into scoring, this follows the paper: a
-transposed, cluster-major bloom index evaluated into 1-bit-per-item
-masks, then masked `__dp4a` scoring. Scores are bit-identical to the
-Triton backend by construction; ids match up to permutation within tied
-scores.
-
-**Phase 2 (2026-09-01)** closed the three gaps that
-first pass left, per
-[cuda-silvertorch-phase2.md](cuda-silvertorch-phase2.md). `filter_mode=
-"exact"` now runs on cuda too — as a *second phase-2 mask kernel*
-(`cps_clause_mask_kernel`, one warp per output word, two ballots) rather
-than a third scoring kernel, since the scorer is filter-agnostic and any
-filter is a 1-bit-per-item mask. The scorer gained a config-gated
-`UNROLL ∈ {1, 2, 4}` knob (items in flight per segment; `1` is the
-original loop, and the arithmetic — hence bit-exactness — is identical at
-every value). And two static reviews, one reading the kernels and
-launchers like a compiler, one fact-checking the toolchain and API
-assumptions against upstream docs, were triaged and applied: an explicit
-`nvcc`-major check before the JIT build, `ToolchainMissing` split from a
-real build failure so a compile error can no longer masquerade as a test
-skip, `if constexpr` where a dead ternary arm was doing out-of-range
-pointer arithmetic, and the tie-tolerant id gate above.
-
-**A100 validation (2026-09-02, commit `0f7792c`).** The runbook ran
-§4–§6: 47/47 parity tests bit-exact, `IDP.4A` in SASS, no `LDSM` /
-`BAR.SYNC` in the scorer. As shipped the CUDA path was *slower* than
-Triton at every `B=16` large-`P` regime (one 128 B row per warp in
-flight); the fix — `SEG = D/16` lanes per item with one `int4` per lane,
-ids prefetched one iteration ahead, a thread-per-slot clause-mask kernel,
-`DEFAULT_CONFIG = (128, 8, 1)` — took kernel-only bloom scoring from
-147.8 µs to 58.6 µs against Triton's 124.6 µs (B=16, P=58k, D=128) and
-left no-filter and exact within ±3 % of Triton. Gates (1)–(3b) pass; (4)
-end-to-end was not run (no dataset on the box); ncu was blocked in the
-container. Full record:
-[cuda-silvertorch-handoff.md §13](cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360).
-
-Design and constraints:
-[../system/kernels.md](../system/kernels.md#codesigned_probe_score_cuda--the-cuda-c-backend).
-Phase-2 plan: [cuda-silvertorch-phase2.md](cuda-silvertorch-phase2.md).
-Validation runbook:
-[cuda-silvertorch-handoff.md](cuda-silvertorch-handoff.md).
-
-This also made `Backend` three-valued (`"torch" | "triton" | "cuda"`),
-which matters beyond SilverTorch: every other layer dispatches
-`triton`-or-torch, so `"cuda"` silently resolves to the torch path
-there. See
-[../system/architecture.md](../system/architecture.md#backend-dispatch).
+`SilverTorch(backend="cuda")`, the paper's two-kernel design (transposed
+cluster-major bloom index → 1-bit masks → masked `__dp4a` scoring) in
+CUDA C++, bit-identical to Triton on scores; its A100 record (47/47 parity,
+the memory-level-parallelism fix that took bloom scoring from 147.8 to
+58.6 µs kernel-only against Triton's 124.6 µs at B=16, P=58k, D=128) is
+[archive/cuda-silvertorch-handoff.md §13](archive/cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360),
+phase 2 in [archive/cuda-silvertorch-phase2.md](archive/cuda-silvertorch-phase2.md).
+Deleted after Meta's official ops passed the parity gate (B2, O §14);
+the transposed-index idea returns to Triton as O §8 TF-1. Citable as
+`retrieve@cuda-cute-backends-final`.
 
 ### Refactor track — implemented 2026-07-06, library gates passed 2026-09-02, harness gates pending
 
@@ -619,12 +580,11 @@ bit-KNN wrappers to `@torch.library.triton_op` with a textually-inline
 behind because their shape-branching prep didn't trace cleanly; K2 moved
 that branching into the eager `_impl`s and finished the migration.
 
-**All ten Triton kernel ops are `@triton_op`.** The CUDA backend later
-added three ops on `@torch.library.custom_op` — deliberately, since a C++
-extension has no `@triton.jit` body for inductor to see. Current totals:
-13 registered ops across 8 kernel files. (An earlier version of this
-roadmap claimed nothing remains on `@custom_op`; that stopped being true
-when the CUDA backend landed.)
+**All ten Triton kernel ops are `@triton_op`.** The two hand-written
+SilverTorch backends added six `@torch.library.custom_op`s on top while
+they lived (a C++ extension has no `@triton.jit` body for inductor to
+see); B4 removed them, so the totals are back to 10 registered ops across
+7 kernel files, all `@triton_op`.
 
 The host-side `if actual_k < k: pad` tail was eliminated rather than
 moved caller-side: `oporp_1bit_match_topk_indirect` widens its score
@@ -645,5 +605,6 @@ custom_op migration doc, the per-item research doc, the deferred
 mask-compact-kernel doc, the Stage 1 autotune-separation plan, the Stage
 2 `02-triton-op-migration.md` plan, and the `plans-silvertorch-backup/`
 tree (which held the `ShardedSilverTorch` sketches and a shelved
-native-CUDA experiment — that experiment is no longer shelved, it
-shipped as `backend="cuda"`).
+native-CUDA experiment — that experiment later shipped as
+`backend="cuda"` and was deleted again at B4; its plans are in
+`archive/`).

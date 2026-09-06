@@ -52,7 +52,7 @@ The lockfile lives at the root (`uv.lock`); the per-member lockfiles are obsolet
 sync with the code:
 
 - [`architecture.md`](docs/system/architecture.md) — module map, what each retrieval family does.
-- [`kernels.md`](docs/system/kernels.md) — Triton + CUDA C++ kernel internals.
+- [`kernels.md`](docs/system/kernels.md) — Triton kernel internals and the official-backend adapter.
 - [`filtering.md`](docs/system/filtering.md) — clause / Bloom filter semantics, paper vs. implementation.
 - [`testing.md`](docs/system/testing.md) — the correctness / parity / compile suites.
 - [`evaluation.md`](docs/system/evaluation.md) — the benchmark harness.

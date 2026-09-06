@@ -5,8 +5,9 @@
 > table and §4's numerics are now measured rather than read — see the §13 validation record, which
 > corrects §3's sync and launch counts and §1.1's op inventory. **WP-2 (adapter + T1–T7) and
 > WP-3 (the parity gate) executed 2026-09-06 on `dev/integration`** (roadmap B1/B2/B5): int32
-> path `torch.equal` vs Triton on every regime, 43/43 tests, suite green — see §14. WP-4 onward:
-> nothing implemented.
+> path `torch.equal` vs Triton on every regime, 43/43 tests, suite green — see §14. **WP-5 (the
+> deletion, roadmap B4) authored 2026-09-06 on `dev/b4-delete-cuda-cute`, GPU suite pending** —
+> see §15. WP-4 and WP-6 onward: nothing implemented.
 > Target box: A100-SXM4-80GB, torch 2.10.0+cu128, CUDA 12.x toolchain, triton 3.6.0, Python 3.11.
 > Authored on the Mac (no GPU): every "the official op does X" claim cites `silvertorch/ops/csrc/<file>:<line>`
 > in the clone of [meta-recsys/silvertorch](https://github.com/meta-recsys/silvertorch) at `21aa35e`
@@ -123,7 +124,7 @@ is stateless; neither adds anything our adapter needs, so we call `torch.ops.st.
   alongside as deployed-best-case (harness-v2 §2.7).
 - **D8 — The paper question is Triton vs official** (phase 3 kernel, phase 2 kernel, end to end),
   `torch` eager as the floor. CUDA/CuTe numbers appear only as quotes from the archived
-  [cuda-silvertorch-handoff.md §13](cuda-silvertorch-handoff.md) and [cute-dsl-scorer.md §5](cute-dsl-scorer.md).
+  [cuda-silvertorch-handoff.md §13](archive/cuda-silvertorch-handoff.md) and [cute-dsl-scorer.md §5](archive/cute-dsl-scorer.md).
 - **D9 — Deletion happens after the official parity gate (WP-3), never before** (§9).
 - **D10 — Timing protocol is harness-v2 §2 verbatim**, extended with the official sha, `nvcc --version`,
   and the parse-cost row (§8e).
@@ -243,8 +244,8 @@ and parses one large expression per call) and reported as its own row.
 
 - `retrieve/src/retrieve/kernels/silvertorch/official.py` (new, ≈ 250 lines): `is_available()` /
   `ensure_loaded()` (distinguishes "not installed" from "op missing", as
-  [codesigned_probe_score_cuda.py:161-176](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_cuda.py)
-  does today); `attrs_to_features(attrs_sorted)`; `queries_to_expressions(qa, clause_is_reverse)`;
+  `codesigned_probe_score_cuda.py:161-176` did at the time — that wrapper went at B4, tag
+  `cuda-cute-backends-final`); `attrs_to_features(attrs_sorted)`; `queries_to_expressions(qa, clause_is_reverse)`;
   `parse_plans(expressions, hash_k)` with an LRU keyed by the string tuple; `pack_mask_high_first(bool
   [B, N]) -> int64 [B, ceil(N/64)]`; eager `official_scores(...)` / `official_bloom_partial(...)`
   returning `[B, P]` fp32 scores + int64 ids (`-inf`/`-1` pads) so `masked_topk` applies unchanged.
@@ -772,7 +773,7 @@ excluded: **99 passed, 3 subtests passed in 2.58 s** — the same 99 as the 12.4
 
 Every skip is a `cute` cell: `nvidia-cutlass-dsl` (the `cute` extra) is not installed in
 the B2 venv, so those rows skip exactly as `require_cps_cute` promises; the last full cute
-validation stays [cute-dsl-scorer.md §5](cute-dsl-scorer.md) (2026-09-02) and B4 deletes
+validation stays [cute-dsl-scorer.md §5](archive/cute-dsl-scorer.md) (2026-09-02) and B4 deletes
 the backend. The `cuda` rows ran (parity + compile + export).
 
 **The three pre-existing red cells** (A2's finding 7; all red on `development` before B1):
@@ -897,3 +898,228 @@ Applied so the slot order is a property of the assignment, not of the sort imple
   recorded. B3 (the head-to-head) is the other consumer of this gate.
 - No timing was taken and none is citable (rule 2; the clock is unlocked anyway). WP-4
   owns the numbers.
+
+## 15. Validation record — WP-5 (roadmap B4), 2026-09-06
+
+§15.1–15.5 are the authoring record (CPU-only, GPU suite pending); **§15.6 is the
+A100 gate run, 2026-09-06, green**.
+
+Roadmap step **B4** plus the library review's item 5 (`Backend` reshaping, sequenced for B4),
+on `dev/b4-delete-cuda-cute` off `development` at `41d4479`, three commits: `4d92432`
+(deletion), `010681d` (`Backend` split + table dispatch) and the docs commit carrying this
+section. **Nothing here ran on a GPU**: the box is CPU-only (`CUDA_VISIBLE_DEVICES=""`), so
+the A100 suite is the coordinator's and this step's checkbox stays open until it is green.
+
+**Gate check before deleting.** §14.3 T1: official int32 path `torch.equal` vs the
+reference and vs Triton on all 8 regime cells + 4 exact-mask cells; §14.7 "B4 is unblocked";
+roadmap B2 checked (`aadc380`). Rule 5 of CLAUDE.md is satisfied.
+
+### 15.1 Tag
+
+`git tag cuda-cute-backends-final 41d4479` (local, not pushed) — the last commit holding
+both backends; cite `retrieve@cuda-cute-backends-final` for anything quoted from the
+archived plans (§7 "What stays citable").
+
+### 15.2 Deleted (`4d92432`)
+
+| file | lines |
+|---|---|
+| `kernels/silvertorch/cuda/codesigned_probe_score.cu` | 672 |
+| `kernels/silvertorch/codesigned_probe_score_cuda.py` | 611 |
+| `kernels/silvertorch/codesigned_probe_score_cute.py` | 650 |
+| `kernels/silvertorch/cute/codesigned_probe_score.py` | 763 |
+| `kernels/silvertorch/cute/__init__.py` | 0 |
+| `tests/parity/test_codesigned_probe_score_cuda.py` | 454 |
+| `tests/parity/test_codesigned_probe_score_cute.py` | 527 |
+| **deleted outright** | **3,677** |
+
+Trimmed (parent → now): `layers/silvertorch/main.py` 781 → 639 (imports, `_TWO_KERNEL_BACKENDS`,
+the `bloom_sigs_t` branch and its slack warning, `_forward_cuda` / `_forward_cute` /
+`_forward_two_kernel`); `tune.py` 643 → 452 (four specs, `_cps_cuda_probe_family`,
+`_cps_cuda_inputs`, `_cpse_cuda_inputs`, `_CPS_CUDA_GRID`); `tests/conftest.py` 247 → 182
+(`require_cps_cuda`, `require_cps_cute`); `tests/parity/conftest.py` 195 → 193 (`sigs_t`);
+`test_silvertorch.py` 703 → 599 (eight cuda/cute cross-backend tests, the cute-vs-cuda
+bit-exact test, `BACKENDS` → three); `test_silvertorch_compile.py` 119 → 97 (twelve rows);
+`test_export_kernel_ref.py` 169 → 110 (two backends); `test_tune_smoke.py` 50 → 38;
+`kernels/silvertorch/__init__.py` 29 → 5 (re-exports dropped, review A9). `retrieve/pyproject.toml`:
+the `cute` extra and the `*.cu` wheel-artifact rule; `uv.lock` re-resolved — nine transitive
+packages gone (`nvidia-cutlass-dsl*`, `cuda-python`, `cuda-bindings`, `cuda-core`,
+`nvidia-cuda-nvdisasm`, `backports-strenum`), **no torch / triton line changed**. Commit stat:
+169 files, +320 / −5,460 (131 of the files are the artifact renames).
+
+**Moved, not deleted.** `build_transposed_sigs` and `words_per_cluster` (§7: "keep …
+in `bloom_hash.py` for §8 TF-1"; §8: "WP-5 moves `build_transposed_sigs`") now live in
+`layers/filters/bloom_hash.py` with a docstring saying no shipped backend reads the layout;
+their layout test `test_build_transposed_sigs_bits` moved to `test_bloom_hash.py` (it needs only
+`make_probe_family`). `make_probe_family` stays (`test_official.py` builds its CSR view from it);
+`make_bloom` stays minus its `sigs_t` half, with no live caller (kept for TF-1's parity tests,
+documented as such in testing.md). Nothing else in the Triton or official path imported from
+the deleted modules.
+
+**Plans archived** (`git mv`, contents unchanged): `cuda-silvertorch-handoff.md` (822 lines),
+`cuda-silvertorch-phase2.md` (138), `cute-dsl-scorer.md` (350), `cute-dsl-scorer-artifacts/`
+(128 files, 9.6 MB on disk) → `docs/plans/archive/`, three rows added to the archive README;
+every live link re-pointed (roadmap, this plan, harness-v2 plan, refactor handoff, the
+reproducibility paper's path text, CLAUDE.md's model-record pointer). `scripts/check_doc_links.py`
+now skips `docs/plans/archive/`: the archived plans reference the deleted sources, and
+CLAUDE.md / the archive README already declare the archive "not maintained, links may rot".
+
+**Docs (same commit, rule 4).** kernels.md 1,621 → 973: the cuda and cute sections and their
+follow-ups replaced by a 25-line "Historical backends" note (what they were, what they
+established, where the record is, that TF-1 inherits the transposed index); the intro,
+conventions, op count (16 → 10 ops / 7 files) and tuner list (11 → 7) rewritten.
+architecture.md 514 → 486 (backend table, SilverTorch section, state-dict portability, kernels
+table); testing.md 682 → 646 (layout, gates, parity helpers, per-file invariants); filtering.md,
+evaluation.md, `retrieve/docs/modules.md`, both READMEs, `evaluation/golden/README.md`,
+CLAUDE.md rule 5.
+
+### 15.3 `Backend` split and table dispatch (`010681d`, review item 5 / A2 / A9)
+
+`interfaces.py`: `LinrBackend = Literal["torch", "triton"]`, `SilverTorchBackend =
+Literal["torch", "triton", "official"]`, `check_backend(backend, literal)`; the five-valued
+`Backend` alias is gone from `retrieve.__all__`. Every LiNR layer (`_PackedBitsKNN` covers
+`OneBitKNN` / `SimHashKNN`), `PostfilterKNN`, `PostfilterKNNInt8`, `PrefilterKNN`,
+`ExactAttributeFilter`, `BloomFilter` and `SilverTorch` validate in `__init__` — an unknown
+value, or `"official"` on a LiNR module, raises `ValueError("unknown backend …")` instead of
+silently running the torch path (18 new cells in `test_linr.py`). `SilverTorch.forward` calls
+`self._forward_impl`, a `{"triton", "torch", "official"} → bound method` table built once in
+`__init__`; the `is_compiling()` refusal for official stays in `forward`.
+`_register_official_filter_buffers` folded into `_register_filter_buffers(…, perm=sort_perm)`:
+the bloom branch keys on the backend (our sigs vs the official index), the exact branch is one
+body with the `[perm]` permutation when given — buffer registration order per backend unchanged.
+
+Harness: `algos.py` annotations and its `get_args` guard use the new literals, and its
+docstring says the LiNR cells for `official` are `None` because the layers *reject* the value;
+`test_algos.py` reads the architecture.md dispatch table's `official` column as "rejected" for
+the LiNR rows (the table now says `raises ValueError` there).
+
+**Bit-identity evidence (CPU).** `torch`-backend `SilverTorch` on `none` / `bloom` / `exact`
+(same seed, same inputs; forward with attrs and the candidates path) built on the parent tree
+and on `010681d`: every `state_dict` key and buffer, and every output tensor, `torch.equal`
+(`cpu_identity.py` / `cpu_compare.py`, not kept — 40 lines, reproducible from the description).
+`copy.deepcopy` of a module rebinds `_forward_impl` to the copy (`TestStateDict` deep-copies);
+`load_state_dict` round trip forwards identically. The Triton and official paths are untouched
+by this commit (dispatch only) and are the GPU run's to confirm.
+
+### 15.4 Gates run (all CPU, `CUDA_VISIBLE_DEVICES=""`, `/venvs/integration`)
+
+| gate | result |
+|---|---|
+| `uvx ruff@0.15.6 check retrieve evaluation/retrieval` | clean (both commits) |
+| `ruff format --check retrieve/src retrieve/tests` | clean on every touched file; the three pre-existing unformatted files (`bloom_compact.py`, `clause_compact.py`, and `test_linr.py` before `010681d` reformatted it) are untouched by the deletion |
+| `pytest tests/ --collect-only -q` (library) | 486 after `4d92432` (from 701 = 574 + 127 on the parent), 504 after `010681d` (+18 rejection cells); no collection errors |
+| `pytest retrieval/tests/ -q` (evaluation, CPU) | 93 passed, 1 skipped — after each commit |
+| `python3 scripts/check_doc_links.py` | 0 broken (after each commit) |
+| `uv lock` | resolved in 104 ms; diff = the nine `cute` transitive packages only |
+
+**The grep rule.** The roadmap's gate is `git grep -il "cute\|codesigned_probe_score_cuda"`
+hitting only `docs/plans/archive/`. Read literally it is unsatisfiable on any tree: `-i` without
+`-w` matches "exe**cute**" in `LICENSE`, both frozen `articles/`, `CLAUDE.md` and the harness
+docstrings, and the archived plan's own filename (`cute-dsl-scorer.md`) matches wherever the
+archive is linked from — which this record, the roadmap's Done entry and the archive README must
+do. The reading applied: **no code, test, harness, pyproject, script or live system / sdist doc
+mentions the backends.** `git grep -ilw "cute\|codesigned_probe_score_cuda" -- retrieve evaluation
+scripts pyproject.toml docs/system retrieve/docs README.md` hits nothing except the mandated tag
+name `cuda-cute-backends-final` (kernels.md's historical note; also CLAUDE.md rule 5). The plan
+documents that still name them are records, left as written: `00-roadmap.md` (the B2/B4 entries
+and this step's Done lines), this plan (§7, §14, §15), the library review (its own text),
+`evaluation-harness-v2.md` (its amendment "read every cuda / cute as official"),
+`reproducibility-paper.md`, `official-silvertorch-artifacts/` and `evaluation-harness-v2-artifacts/`
+(raw outputs), `refactor-validation-handoff.md` (one link to the archived artifacts).
+
+### 15.5 What the A100 run must confirm (the checkbox waits for it)
+
+- `uv run --directory retrieve pytest tests/` green on the 504 collected: expected 0 skips
+  with the `official` extra installed (the 127 `cute` skips of §14.2 are gone), otherwise the
+  official cells skip via `require_official`.
+- `test_silvertorch.py` on every backend × filter mode, in particular `TestStateDict` (deep copy
+  of a module carrying the `_forward_impl` bound method) and `TestCrossBackend`'s official rows
+  (the merged `_register_filter_buffers`: state-dict key order and the cluster-sorted attrs).
+- `test_official.py` 43/43 as in §14.3 — T6's state-dict key-order assertion is the direct
+  check on the merged registration.
+- `test_silvertorch_compile.py` (3 rows): compiled == eager and **zero graph breaks** with the
+  forward now calling `self._forward_impl` — dynamo through a bound-method attribute is the one
+  thing in this step a CPU cannot vouch for.
+- `test_export_kernel_ref.py` (Triton only now), `test_bloom_hash.py::test_build_transposed_sigs_bits`
+  (moved), `test_tune_smoke.py` (7 specs), the 18 `test_unknown_backend_is_rejected` cells.
+- No golden re-run is needed: no Triton kernel or epilogue changed (§14.7's sentinel note is
+  untouched, as instructed), and the harness's `PATHS` table is unchanged in shape.
+
+### 15.6 A100 gate run — 2026-09-06, green
+
+The GPU half of B4's gate, on `dev/b4-delete-cuda-cute` at `a435179` (the three authored
+commits `4d92432` / `010681d` / `6698b4a`, plus one test fix found by this run). Box: the
+A100-SXM4-80GB VM, `torch 2.10.0+cu128`, `triton 3.6.0`, `nvcc 12.8` (V12.8.93 — the
+`official` extra is built with `CUDA_HOME=/usr/local/cuda-12.8`), Python 3.11. Environment:
+a dedicated `/venvs/b4` built from this worktree with `uv sync --extra official`
+(`silvertorch==1.0.0` from `meta-recsys/silvertorch@21aa35e`); `retrieve.__file__` verified to
+resolve inside `/workspace/wt/b4-delete-cuda-cute/`. **SM clocks cannot be locked in this
+container** (`nvidia-smi -lgc` denied, no sudo; sampled 210 MHz idle against a 1410 MHz max),
+so the wall times below are run metadata only — **nothing here is a citable timing**.
+
+#### 15.6.1 Library suite (`uv run --directory retrieve pytest tests/ -q`)
+
+| run | state | result |
+|---|---|---|
+| 1 | `6698b4a` (as authored) | 501 passed, **3 failed**, 0 skipped, 39.4 s (44.6 s wall) |
+| 2, final | `a435179` | **504 passed, 0 failed, 0 skipped, 37.8 s** (42.2 s wall) |
+
+**The three red cells (run 1), and the fix.** `test_linr.py::test_unknown_backend_is_rejected[
+{official,cuda,foo}-simhash]` — the `simhash` row of §15.3's new rejection cells built
+`SimHashKNN(k=K, backend=backend)`, but `SimHashKNN.__init__` takes `k_bits` as a required
+positional, so the call raised `TypeError: SimHashKNN.__init__() missing 1 required positional
+argument: 'k_bits'` inside the `pytest.raises(ValueError)` block instead of the rejection the
+cell asserts. A test-authoring bug invisible to §15.4's `--collect-only` gate (parametrized
+lambdas are not called at collection). Fixed in `a435179` by passing `k_bits=64`; the
+`ValueError` still comes from `_PackedBitsKNN.__init__`'s `check_backend`, before `k_bits` is
+stored, so the cell tests what it claims. **No tolerance was loosened and no test was skipped
+or deleted**; no library source changed for it.
+
+**Zero skips**, as §15.5 required: the 127 `cute` skips of §14.2 are gone with the backend, and
+with the `official` extra installed no `require_official` cell skipped either — the official
+rows genuinely ran. §15.5's list confirmed green in run 2: `test_official.py` 43/43,
+`test_silvertorch.py` on all three backends × filter modes (incl. `TestStateDict`'s deep copy
+of a module carrying the `_forward_impl` bound method and `TestCrossBackend`'s official rows),
+`test_silvertorch_compile.py` 3 rows compiled == eager with zero graph breaks (dynamo through
+the bound-method attribute — the one thing CPU could not vouch for), `test_export_kernel_ref.py`,
+`test_bloom_hash.py::test_build_transposed_sigs_bits` (moved), `test_tune_smoke.py` 7 specs,
+and the 18 rejection cells.
+
+#### 15.6.2 The other gates
+
+| gate | result |
+|---|---|
+| `pytest retrieval/tests/ --ignore=…test_silvertorch_algo_reverse.py -q` (evaluation, `CUDA_VISIBLE_DEVICES=""`) | **93 passed, 1 skipped, 78.7 s** — the skip is `test_algos.py:315` "official backend integrated in retrieve — its cell is C4's gate", unchanged from §15.4 and not B4's |
+| `uvx ruff@0.15.6 check retrieve evaluation/retrieval` | see below |
+| `uvx ruff@0.15.6 format --check retrieve/tests/correctness/test_linr.py` | clean |
+| `python3 scripts/check_doc_links.py` | **0 broken** |
+
+`ruff` is not in the `b4` venv (it is not a runtime dependency), so the pinned
+`uvx ruff@0.15.6` of `.pre-commit-config.yaml` was used. `check retrieve evaluation/retrieval`
+and `format --check` on the one file this run changed are clean. CLAUDE.md's wider
+`ruff check retrieve evaluation` reports **11 pre-existing `E501`s** in
+`evaluation/eval_datasets/{arxiv,goodreads,hf_io,synth_arxiv,timesplit}.py` and
+`evaluation/training/train_sasrec.py`, and `ruff format --check retrieve` the two
+pre-existing unformatted files of §15.4 (`kernels/filters/{bloom_compact,clause_compact}.py`).
+All eight files are **byte-identical to `41d4479`** (`git diff --stat 41d4479..HEAD` over them is
+empty): red on `development` before B4, untouched by it, not this step's to fix.
+
+#### 15.6.3 The grep gate
+
+`git grep -il "cute\|codesigned_probe_score_cuda"` outside `docs/plans/archive/`, read as
+§15.4 prescribes (**no code, test, harness, pyproject, script or live system / sdist doc
+mentions the backends**):
+
+- `git grep -ilw … -- retrieve evaluation scripts pyproject.toml uv.lock docs/system README.md`
+  hits **exactly one file**, `docs/system/kernels.md:973`, and it is the mandated tag name
+  ("backends is tagged `cuda-cute-backends-final`"). Nothing else in code, tests, the harness,
+  any `pyproject.toml`, `uv.lock` or `scripts/`.
+- The remaining non-archive hits of the broad `-il` form are the substring "exe**cute**"
+  (`docs/system/testing.md:551`, `evaluation/golden/README.md:6`,
+  `evaluation/retrieval/run.py:3`, `CLAUDE.md`, `LICENSE`, both frozen `articles/`, six
+  `docs/presentation/` binaries) and the plan documents §15.4 lists as records
+  (`00-roadmap.md`, this plan, the library review, `evaluation-harness-v2*`,
+  `reproducibility-paper.md`, `refactor-validation-handoff.md`, `kernels-layers-design.md`,
+  `torch-export-refactor.md`, `official-silvertorch-artifacts/wp3/full_suite_run*.txt`).
+
+**Gate status: green.** B4's checkbox is the coordinator's to flip after merge.
