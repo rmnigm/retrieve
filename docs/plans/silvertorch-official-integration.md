@@ -892,6 +892,10 @@ Applied so the slot order is a property of the assignment, not of the sort imple
   Triton backend's outputs, which A1's golden JSONs and C4's gate own. Recommended: apply
   the sentinel in the two `_finish` helpers together with C1's harness rewrite (one
   `torch.where(isfinite)` — capture-safe), and re-run the golden gate.
+  **Landed** on `dev/c4-library-fixes` as `8df7e9a` (2026-09-06): exactly that one op in both
+  helpers, gated by `TestFewSurvivorsSentinel` in `tests/correctness/test_silvertorch.py`; T6's
+  normalisation stays in place and is now a no-op. The golden re-run is still owed — see the
+  C4 record in [evaluation-harness-v2.md §9](evaluation-harness-v2.md).
 - The `cute` extra is not in the B2 venv; its 127 cells skipped. B4 deletes them.
 - **B4 is unblocked** by the roadmap's rule ("never delete before B2 is green"): T1 is
   `torch.equal` on every regime, the bloom ⊇ / ⊆ checks hold, FPR at matched memory is
