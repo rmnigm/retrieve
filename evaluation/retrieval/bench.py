@@ -16,13 +16,14 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import os
 import platform
 import socket
 import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 import torch
 from torch import nn
@@ -109,6 +110,24 @@ def files_hash() -> str:
         h.update(p.relative_to(root).as_posix().encode())
         h.update(p.read_bytes())
     return "files:" + h.hexdigest()[:40]
+
+
+def atomic_write(path: Path, write: Callable[[BinaryIO], None]) -> None:
+    """Write through ``write(fh)`` into ``<path>.tmp``, fsync, then ``os.replace`` — a crash
+    mid-save (a campaign's oracle blob, encode cache or parity file) leaves either the old
+    file or nothing at ``path``, never a torn one. The tmp file is removed on failure."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        with open(tmp, "wb") as fh:
+            write(fh)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def _nvidia_smi(query: str) -> list[str] | None:
@@ -362,6 +381,7 @@ __all__ = [
     "LIB_SUBTREE",
     "RESULTS_DIR",
     "NotCapturable",
+    "atomic_write",
     "clocks",
     "code_version",
     "files_hash",

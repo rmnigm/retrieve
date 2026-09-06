@@ -7,6 +7,7 @@ when the algo group closes, and the ``bench report`` D4 stub."""
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -60,6 +61,31 @@ def test_cli_run_campaign_and_report(tiny_configs, tmp_path):
     assert {r["status"] for r in recs[1:]} == {"partial"}
     r = CliRunner().invoke(cli.main, ["report", str(out)])
     assert r.exit_code == 2
+
+
+def test_campaign_records_a_timed_out_child(tiny_configs, tmp_path, monkeypatch):
+    """``--timeout`` kills a hung child: ``rc=timeout`` in the summary, exit code 124, the
+    loop continues to the next group. The child is faked (no CPU-shaped way to hang one)."""
+    ds, _ = tiny_configs
+    out = tmp_path / "results"
+    seen = []
+
+    def hung(cmd, *, timeout, **kw):
+        seen.append(timeout)
+        raise subprocess.TimeoutExpired(cmd, timeout)
+
+    monkeypatch.setattr(cli.subprocess, "call", hung)
+    r = CliRunner().invoke(
+        cli.main,
+        ["campaign", "--suite", "e2e", "--timeout", "0.5", "--config-dir", str(ds.parent),
+         "--out", str(out)],
+    )  # fmt: skip
+    assert r.exit_code == cli.RC_TIMEOUT == 124, r.output
+    assert seen == [1800.0, 1800.0]  # two groups, both attempted
+    summary = (out / "_logs" / "campaign.log").read_text()
+    assert summary.count(" rc=timeout ") == 2 and "finished children=2 rc=124" in summary
+    child_log = (out / "_logs" / "e2e_tiny-d8_linr_v4_torch.log").read_text()
+    assert "killed after 0.5 h" in child_log
 
 
 def test_zero_cells_is_an_error(tiny_configs, tmp_path):

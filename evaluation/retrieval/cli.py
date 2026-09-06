@@ -7,8 +7,9 @@ cells — a ``--sweep`` typo, say — is an error (exit 1), never an empty succe
 ``bench campaign`` is the loop of H §3.4 / §8.2 K: one child process per ``(dataset, dim,
 algo, backend)`` group, sequential, ``stdout+stderr`` to ``<out>/_logs/<group>.log``, a
 one-line summary per child in ``<out>/_logs/campaign.log``, non-zero rc recorded and the
-loop continues; ``--resume`` fills gaps. The child is ``python -m retrieval.cli run …`` on
-the same interpreter (no second ``uv`` resolution). ``bench report`` lands in roadmap D4.
+loop continues; ``--resume`` fills gaps. A child that outlives ``--timeout`` hours is killed
+and recorded as ``rc=timeout`` (exit code 124). The child is ``python -m retrieval.cli run …``
+on the same interpreter (no second ``uv`` resolution). ``bench report`` lands in roadmap D4.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from retrieval.config import load_matrix
 
 EVAL_DIR = Path(__file__).resolve().parents[1]
 SUITES = ("quality", "filter", "deep")
+RC_TIMEOUT = 124  # the ``timeout(1)`` convention
 
 
 def _paths(config_dir: str, dataset: str) -> tuple[Path, Path]:
@@ -121,9 +123,17 @@ def run(
 @click.option("--out", default="results", show_default=True)
 @click.option("--resume/--force", default=True)
 @click.option("--config-dir", default="config", show_default=True)
+@click.option(
+    "--timeout",
+    "timeout_h",
+    default=6.0,
+    show_default=True,
+    help="hours per child before it is killed and recorded as rc=timeout",
+)
 def campaign(
-    suite, datasets, dims, modes, skip_quality, skip_perf, profile, out, resume, config_dir
-) -> None:
+    suite, datasets, dims, modes, skip_quality, skip_perf, profile, out, resume, config_dir,
+    timeout_h,
+) -> None:  # fmt: skip
     """One child process per (dataset, dim, algo, backend) group, in suite order."""
     out_dir = Path(out) if Path(out).is_absolute() else EVAL_DIR / out
     log_dir = out_dir / "_logs"
@@ -176,12 +186,23 @@ def campaign(
                     with open(log, "a") as lf:
                         lf.write(f"=== {' '.join(cmd)}\n")
                         lf.flush()
-                        rc = subprocess.call(cmd, stdout=lf, stderr=subprocess.STDOUT, cwd=EVAL_DIR)
+                        try:
+                            rc = subprocess.call(
+                                cmd,
+                                stdout=lf,
+                                stderr=subprocess.STDOUT,
+                                cwd=EVAL_DIR,
+                                timeout=timeout_h * 3600,
+                            )
+                        except subprocess.TimeoutExpired:  # the child was killed
+                            lf.write(f"=== killed after {timeout_h} h (--timeout)\n")
+                            rc = RC_TIMEOUT
                     worst = max(worst, rc)
                     n_children += 1
                     say(
                         f"{dt.datetime.now(dt.timezone.utc):%H:%M:%S} {s} {d} d{dim} {algo} "
-                        f"{backend} rc={rc} {time.monotonic() - t0:.0f}s log={log.name}"
+                        f"{backend} rc={'timeout' if rc == RC_TIMEOUT else rc} "
+                        f"{time.monotonic() - t0:.0f}s log={log.name}"
                     )
                 shutil.rmtree(parity, ignore_errors=True)
         if n_children == 0:

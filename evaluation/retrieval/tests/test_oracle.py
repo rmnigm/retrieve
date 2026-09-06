@@ -233,6 +233,22 @@ def test_fingerprint_covers_the_item_side_of_the_predicate(tmp_path):
     assert d != oracle.attrs_digest(ATTRS, None) != oracle.attrs_digest(None, None)
 
 
+def test_corrupt_file_at_the_v4_path_is_rebuilt(tmp_path):
+    """A crash mid-save used to leave an unreadable file that ``torch.load`` raised on at
+    every later run; now the save is atomic and an unreadable file is rebuilt."""
+    item_embs, queries, _, _, targets = _v4_inputs()
+    _, _, qa, _, _ = _v4_inputs()
+    fp = oracle.fingerprint(
+        item_embs, queries, targets, qa, (0,), 2, attrs_digest=oracle.attrs_digest(ATTRS, REVERSE)
+    )
+    path = oracle.blob_path(tmp_path, "s", fp)
+    path.write_bytes(b"PK\x03\x04 not a zip, not a pickle")
+    blob = _build(tmp_path, item_embs, queries, targets)
+    assert blob["topk"].tolist() == [[0, 1], [2, -1], [-1, -1]]
+    stored = torch.load(str(path), map_location="cpu", weights_only=True)
+    assert stored["fingerprint"] == fp and sorted(tmp_path.iterdir()) == [path]  # no .tmp
+
+
 def test_non_v4_file_at_the_v4_path_is_rebuilt(tmp_path):
     item_embs, queries, _, _, targets = _v4_inputs()
     _, _, qa, _, _ = _v4_inputs()
