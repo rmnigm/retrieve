@@ -1,0 +1,415 @@
+{
+  "meta": {
+    "generated": "2026-09-06T13:07:42Z",
+    "python": "3.11.10",
+    "torch": "2.10.0+cu128",
+    "torch_cuda": "12.8",
+    "gpu": "NVIDIA A100-SXM4-80GB",
+    "silvertorch_rev": "21aa35e28b6dd9a91e9ee35efb0857715e86bda7",
+    "config": {
+      "N": 16384,
+      "D": 128,
+      "n_lists": 64,
+      "n_probe": 8,
+      "B": 16,
+      "cluster_size": 256,
+      "P": 2048,
+      "k": 5,
+      "hash_k": 7
+    }
+  },
+  "bit_order": {
+    "A_bool_shape": [
+      1,
+      16384
+    ],
+    "A_bool_dtype": "torch.bool",
+    "A_packed_shape": [
+      1,
+      256
+    ],
+    "A_packed_dtype": "torch.int64",
+    "A_passing_docs_in_first_64": [
+      0
+    ],
+    "A_first_word_hex": "0x8000000000000000",
+    "A_set_bit_indices_lsb0": [
+      63
+    ],
+    "A_doc_to_bit": {
+      "0": 63
+    },
+    "A_verdict": "HIGH-bit-first (doc d -> bit 63-d)",
+    "B_kept_doc_ids": {
+      "bit63_set": [
+        0
+      ],
+      "bit0_set": [
+        63
+      ]
+    },
+    "B_verdict": "HIGH-bit-first: bit 63 selects doc 0",
+    "C_scorer_kept": [
+      0
+    ],
+    "C_bloom_bool_passing": [
+      0
+    ],
+    "C_roundtrip_equal": true
+  },
+  "syncs": {
+    "fused_kmean_ann (no filter)": {
+      "count": 3,
+      "messages": [
+        "[W906 13:07:43.387190781 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)",
+        "[W906 13:07:43.387332210 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)",
+        "[W906 13:07:43.387491720 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)"
+      ]
+    },
+    "fused_kmean_ann (full mask)": {
+      "count": 3,
+      "messages": [
+        "[W906 13:07:43.389091706 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)",
+        "[W906 13:07:43.389228546 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)",
+        "[W906 13:07:43.389385816 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)"
+      ]
+    },
+    "fused_kmean_ann_with_partial_masks": {
+      "count": 4,
+      "messages": [
+        "[W906 13:07:43.391227951 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)",
+        "[W906 13:07:43.391408951 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)",
+        "[W906 13:07:43.391502481 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)",
+        "[W906 13:07:43.391627730 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)"
+      ]
+    },
+    "bloom_index_search_batch (packed, full N)": {
+      "count": 0,
+      "messages": []
+    },
+    "bloom_index_search_batch_return_partial_response": {
+      "count": 2,
+      "messages": [
+        "[W906 13:07:43.395276392 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)",
+        "[W906 13:07:43.395411572 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)"
+      ]
+    },
+    "generate_column_info_for_clusters": {
+      "count": 0,
+      "messages": []
+    },
+    "bloom_index_build (CUDA)": {
+      "count": 2,
+      "messages": [
+        "[W906 13:07:43.400686009 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)",
+        "[W906 13:07:43.400742069 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)"
+      ]
+    }
+  },
+  "launches": {
+    "fused_kmean_ann (no filter)": {
+      "kernel_launches": 19,
+      "distinct_kernels": 16,
+      "kernels": {
+        "void at_cuda_detail::cub::DeviceScanInitKernel<at_cuda_detail::cub::ScanTileState<int, true> >(at_cuda_detail::cub::ScanTileState<int, true>, int)": 2,
+        "void at_cuda_detail::cub::DeviceScanKernel<at_cuda_detail::cub::DeviceScanPolicy<int, std::plus<int> >::Policy900, int const*, int*, at_cuda_detail::cub::ScanTileState<int, true>, std::plus<int>, at_cuda_detail::cub::NullType, unsigned int, int, false>(int const*, int*, at_cuda_detail::cub::ScanTileState<int, true>, int, std::plus<int>, at_cuda_detail::cub::NullType, unsigned int)": 2,
+        "void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<int>, std::array<char*, 1ul> >(int, at::native::FillFunctor<int>, std::array<char*, 1ul>)": 2,
+        "st::ops::fused_kmean_ann::(anonymous namespace)::generate_cluster_warp_size(long const*, long, int*, int*, int*, c10::cuda::DeviceAssertionsData*, unsigned int)": 1,
+        "void at::native::tensor_kernel_scan_innermost_dim<int, std::plus<int> >(int*, int const*, unsigned int, unsigned int, unsigned int, int, std::plus<int>)": 1,
+        "void (anonymous namespace)::elementwise_kernel_with_index<int, at::native::arange_cuda_out(c10::Scalar const&, c10::Scalar const&, c10::Scalar const&, at::Tensor&)::{lambda()#1}::operator()() const::{lambda()#3}::operator()() const::{lambda(long)#1}>(int, at::native::arange_cuda_out(c10::Scalar const&, c10::Scalar const&, c10::Scalar const&, at::Tensor&)::{lambda()#1}::operator()() const::{lambda()#3}::operator()() const::{lambda(long)#1}, function_traits<at::native::arange_cuda_out(c10::Scalar const&, c10::Scalar const&, c10::Scalar const&, at::Tensor&)::{lambda()#1}::operator()() const::{lambda()#3}::operator()() const::{lambda(long)#1}>::result_type*)": 1,
+        "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#4}::operator()() const::{lambda(long)#1}, std::array<char*, 2ul>, 4, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1> >(int, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#4}::operator()() const::{lambda(long)#1}, std::array<char*, 2ul>, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1>)": 1,
+        "void at_cuda_detail::cub::DeviceScanInitKernel<at_cuda_detail::cub::ScanTileState<long, true> >(at_cuda_detail::cub::ScanTileState<long, true>, int)": 1,
+        "void at_cuda_detail::cub::DeviceScanKernel<at_cuda_detail::cub::DeviceScanPolicy<long, std::plus<long> >::Policy900, long const*, long*, at_cuda_detail::cub::ScanTileState<long, true>, std::plus<long>, at_cuda_detail::cub::NullType, unsigned int, long, false>(long const*, long*, at_cuda_detail::cub::ScanTileState<long, true>, int, std::plus<long>, at_cuda_detail::cub::NullType, unsigned int)": 1,
+        "void at::native::vectorized_elementwise_kernel<4, at::native::compare_scalar_kernel<int>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, int)::{lambda(int)#1}, std::array<char*, 2ul> >(int, at::native::compare_scalar_kernel<int>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, int)::{lambda(int)#1}, std::array<char*, 2ul>)": 1,
+        "void at::native::reduce_kernel<512, 1, at::native::ReduceOp<bool, at::native::func_wrapper_t<bool, at::native::and_kernel_cuda(at::TensorIterator&)::{lambda()#1}::operator()() const::{lambda()#12}::operator()() const::{lambda(bool, bool)#1}>, unsigned int, bool, 4, 4> >(at::native::ReduceOp<bool, at::native::func_wrapper_t<bool, at::native::and_kernel_cuda(at::TensorIterator&)::{lambda()#1}::operator()() const::{lambda()#12}::operator()() const::{lambda(bool, bool)#1}>, unsigned int, bool, 4, 4>)": 1,
+        "void compute_cuda_kernel<int>(int const*, long const*, int*, long, long)": 1,
+        "void at::native::_scatter_gather_elementwise_kernel<128, 8, at::native::_cuda_scatter_gather_internal_kernel<false, at::native::OpaqueType<4>, int>::operator()<at::native::TensorAssign>(at::TensorIterator&, long, long, long, at::native::TensorAssign const&)::{lambda(int)#1}>(int, at::native::_cuda_scatter_gather_internal_kernel<false, at::native::OpaqueType<4>, int>::operator()<at::native::TensorAssign>(at::TensorIterator&, long, long, long, at::native::TensorAssign const&)::{lambda(int)#1})": 1,
+        "st::ops::fused_kmean_ann::(anonymous namespace)::generate_warp_payload_kernel(torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, long, 0ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<1ul, long>, long, 1ul, torch::headeronly::DefaultPtrTraits, long>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, long, 1ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<2ul, long>, long, 2ul, torch::headeronly::DefaultPtrTraits, long>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, int, 1ul, torch::headeronly::DefaultPtrTraits, int>, at::detail::IndexBoundsCheck<2ul, int>, int, 2ul, torch::headeronly::DefaultPtrTraits, int>, int const*, int const*, unsigned long const*, st::ops::fused_kmean_ann::WarpPayload*, long, unsigned long const*, long, long, c10::cuda::DeviceAssertionsData*, unsigned int)": 1,
+        "st::ops::fused_kmean_ann::(anonymous namespace)::generate_remaining_payload_kernel(torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, long, 0ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<1ul, long>, long, 1ul, torch::headeronly::DefaultPtrTraits, long>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, long, 1ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<2ul, long>, long, 2ul, torch::headeronly::DefaultPtrTraits, long>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, long, 1ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<2ul, long>, long, 2ul, torch::headeronly::DefaultPtrTraits, long>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, int, 1ul, torch::headeronly::DefaultPtrTraits, int>, at::detail::IndexBoundsCheck<2ul, int>, int, 2ul, torch::headeronly::DefaultPtrTraits, int>, int const*, unsigned long const*, st::ops::fused_kmean_ann::RemainingPayload*, long, unsigned long const*, long, c10::cuda::DeviceAssertionsData*, unsigned int)": 1,
+        "void st::ops::fused_kmean_ann::(anonymous namespace)::process_cluster<signed char, int, 128, false, int, false>(signed char const*, signed char const*, st::ops::fused_kmean_ann::WarpPayload const*, int*, int*, int, int, c10::cuda::DeviceAssertionsData*, unsigned int)": 1
+      },
+      "memcpy_by_kind": {
+        "Memcpy DtoH (Device -> Pinned)": 3
+      },
+      "memcpy_d2h": 3,
+      "memcpy_h2d": 0,
+      "device_memset": 0,
+      "aten_ops_dispatched": 58
+    },
+    "fused_kmean_ann (full mask)": {
+      "kernel_launches": 19,
+      "distinct_kernels": 16,
+      "kernels": {
+        "void at_cuda_detail::cub::DeviceScanInitKernel<at_cuda_detail::cub::ScanTileState<int, true> >(at_cuda_detail::cub::ScanTileState<int, true>, int)": 2,
+        "void at_cuda_detail::cub::DeviceScanKernel<at_cuda_detail::cub::DeviceScanPolicy<int, std::plus<int> >::Policy900, int const*, int*, at_cuda_detail::cub::ScanTileState<int, true>, std::plus<int>, at_cuda_detail::cub::NullType, unsigned int, int, false>(int const*, int*, at_cuda_detail::cub::ScanTileState<int, true>, int, std::plus<int>, at_cuda_detail::cub::NullType, unsigned int)": 2,
+        "void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<int>, std::array<char*, 1ul> >(int, at::native::FillFunctor<int>, std::array<char*, 1ul>)": 2,
+        "st::ops::fused_kmean_ann::(anonymous namespace)::generate_cluster_warp_size(long const*, long, int*, int*, int*, c10::cuda::DeviceAssertionsData*, unsigned int)": 1,
+        "void at::native::tensor_kernel_scan_innermost_dim<int, std::plus<int> >(int*, int const*, unsigned int, unsigned int, unsigned int, int, std::plus<int>)": 1,
+        "void (anonymous namespace)::elementwise_kernel_with_index<int, at::native::arange_cuda_out(c10::Scalar const&, c10::Scalar const&, c10::Scalar const&, at::Tensor&)::{lambda()#1}::operator()() const::{lambda()#3}::operator()() const::{lambda(long)#1}>(int, at::native::arange_cuda_out(c10::Scalar const&, c10::Scalar const&, c10::Scalar const&, at::Tensor&)::{lambda()#1}::operator()() const::{lambda()#3}::operator()() const::{lambda(long)#1}, function_traits<at::native::arange_cuda_out(c10::Scalar const&, c10::Scalar const&, c10::Scalar const&, at::Tensor&)::{lambda()#1}::operator()() const::{lambda()#3}::operator()() const::{lambda(long)#1}>::result_type*)": 1,
+        "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#4}::operator()() const::{lambda(long)#1}, std::array<char*, 2ul>, 4, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1> >(int, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#4}::operator()() const::{lambda(long)#1}, std::array<char*, 2ul>, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1>)": 1,
+        "void at_cuda_detail::cub::DeviceScanInitKernel<at_cuda_detail::cub::ScanTileState<long, true> >(at_cuda_detail::cub::ScanTileState<long, true>, int)": 1,
+        "void at_cuda_detail::cub::DeviceScanKernel<at_cuda_detail::cub::DeviceScanPolicy<long, std::plus<long> >::Policy900, long const*, long*, at_cuda_detail::cub::ScanTileState<long, true>, std::plus<long>, at_cuda_detail::cub::NullType, unsigned int, long, false>(long const*, long*, at_cuda_detail::cub::ScanTileState<long, true>, int, std::plus<long>, at_cuda_detail::cub::NullType, unsigned int)": 1,
+        "void at::native::vectorized_elementwise_kernel<4, at::native::compare_scalar_kernel<int>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, int)::{lambda(int)#1}, std::array<char*, 2ul> >(int, at::native::compare_scalar_kernel<int>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, int)::{lambda(int)#1}, std::array<char*, 2ul>)": 1,
+        "void at::native::reduce_kernel<512, 1, at::native::ReduceOp<bool, at::native::func_wrapper_t<bool, at::native::and_kernel_cuda(at::TensorIterator&)::{lambda()#1}::operator()() const::{lambda()#12}::operator()() const::{lambda(bool, bool)#1}>, unsigned int, bool, 4, 4> >(at::native::ReduceOp<bool, at::native::func_wrapper_t<bool, at::native::and_kernel_cuda(at::TensorIterator&)::{lambda()#1}::operator()() const::{lambda()#12}::operator()() const::{lambda(bool, bool)#1}>, unsigned int, bool, 4, 4>)": 1,
+        "void compute_cuda_kernel<int>(int const*, long const*, int*, long, long)": 1,
+        "void at::native::_scatter_gather_elementwise_kernel<128, 8, at::native::_cuda_scatter_gather_internal_kernel<false, at::native::OpaqueType<4>, int>::operator()<at::native::TensorAssign>(at::TensorIterator&, long, long, long, at::native::TensorAssign const&)::{lambda(int)#1}>(int, at::native::_cuda_scatter_gather_internal_kernel<false, at::native::OpaqueType<4>, int>::operator()<at::native::TensorAssign>(at::TensorIterator&, long, long, long, at::native::TensorAssign const&)::{lambda(int)#1})": 1,
+        "st::ops::fused_kmean_ann::(anonymous namespace)::generate_warp_payload_kernel(torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, long, 0ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<1ul, long>, long, 1ul, torch::headeronly::DefaultPtrTraits, long>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, long, 1ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<2ul, long>, long, 2ul, torch::headeronly::DefaultPtrTraits, long>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, int, 1ul, torch::headeronly::DefaultPtrTraits, int>, at::detail::IndexBoundsCheck<2ul, int>, int, 2ul, torch::headeronly::DefaultPtrTraits, int>, int const*, int const*, unsigned long const*, st::ops::fused_kmean_ann::WarpPayload*, long, unsigned long const*, long, long, c10::cuda::DeviceAssertionsData*, unsigned int)": 1,
+        "st::ops::fused_kmean_ann::(anonymous namespace)::generate_remaining_payload_kernel(torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, long, 0ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<1ul, long>, long, 1ul, torch::headeronly::DefaultPtrTraits, long>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, long, 1ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<2ul, long>, long, 2ul, torch::headeronly::DefaultPtrTraits, long>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, long, 1ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<2ul, long>, long, 2ul, torch::headeronly::DefaultPtrTraits, long>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, int, 1ul, torch::headeronly::DefaultPtrTraits, int>, at::detail::IndexBoundsCheck<2ul, int>, int, 2ul, torch::headeronly::DefaultPtrTraits, int>, int const*, unsigned long const*, st::ops::fused_kmean_ann::RemainingPayload*, long, unsigned long const*, long, c10::cuda::DeviceAssertionsData*, unsigned int)": 1,
+        "void st::ops::fused_kmean_ann::(anonymous namespace)::process_cluster<signed char, int, 128, true, int, false>(signed char const*, signed char const*, st::ops::fused_kmean_ann::WarpPayload const*, int*, int*, int, int, c10::cuda::DeviceAssertionsData*, unsigned int)": 1
+      },
+      "memcpy_by_kind": {
+        "Memcpy DtoH (Device -> Pinned)": 3
+      },
+      "memcpy_d2h": 3,
+      "memcpy_h2d": 0,
+      "device_memset": 0,
+      "aten_ops_dispatched": 58
+    },
+    "fused_kmean_ann_with_partial_masks": {
+      "kernel_launches": 19,
+      "distinct_kernels": 16,
+      "kernels": {
+        "void at_cuda_detail::cub::DeviceScanInitKernel<at_cuda_detail::cub::ScanTileState<int, true> >(at_cuda_detail::cub::ScanTileState<int, true>, int)": 2,
+        "void at_cuda_detail::cub::DeviceScanKernel<at_cuda_detail::cub::DeviceScanPolicy<int, std::plus<int> >::Policy900, int const*, int*, at_cuda_detail::cub::ScanTileState<int, true>, std::plus<int>, at_cuda_detail::cub::NullType, unsigned int, int, false>(int const*, int*, at_cuda_detail::cub::ScanTileState<int, true>, int, std::plus<int>, at_cuda_detail::cub::NullType, unsigned int)": 2,
+        "void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<int>, std::array<char*, 1ul> >(int, at::native::FillFunctor<int>, std::array<char*, 1ul>)": 2,
+        "st::ops::fused_kmean_ann::(anonymous namespace)::generate_cluster_warp_size(long const*, long, int*, int*, int*, c10::cuda::DeviceAssertionsData*, unsigned int)": 1,
+        "void at::native::tensor_kernel_scan_innermost_dim<int, std::plus<int> >(int*, int const*, unsigned int, unsigned int, unsigned int, int, std::plus<int>)": 1,
+        "void (anonymous namespace)::elementwise_kernel_with_index<int, at::native::arange_cuda_out(c10::Scalar const&, c10::Scalar const&, c10::Scalar const&, at::Tensor&)::{lambda()#1}::operator()() const::{lambda()#3}::operator()() const::{lambda(long)#1}>(int, at::native::arange_cuda_out(c10::Scalar const&, c10::Scalar const&, c10::Scalar const&, at::Tensor&)::{lambda()#1}::operator()() const::{lambda()#3}::operator()() const::{lambda(long)#1}, function_traits<at::native::arange_cuda_out(c10::Scalar const&, c10::Scalar const&, c10::Scalar const&, at::Tensor&)::{lambda()#1}::operator()() const::{lambda()#3}::operator()() const::{lambda(long)#1}>::result_type*)": 1,
+        "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#4}::operator()() const::{lambda(long)#1}, std::array<char*, 2ul>, 4, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1> >(int, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#4}::operator()() const::{lambda(long)#1}, std::array<char*, 2ul>, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1>)": 1,
+        "void at_cuda_detail::cub::DeviceScanInitKernel<at_cuda_detail::cub::ScanTileState<long, true> >(at_cuda_detail::cub::ScanTileState<long, true>, int)": 1,
+        "void at_cuda_detail::cub::DeviceScanKernel<at_cuda_detail::cub::DeviceScanPolicy<long, std::plus<long> >::Policy900, long const*, long*, at_cuda_detail::cub::ScanTileState<long, true>, std::plus<long>, at_cuda_detail::cub::NullType, unsigned int, long, false>(long const*, long*, at_cuda_detail::cub::ScanTileState<long, true>, int, std::plus<long>, at_cuda_detail::cub::NullType, unsigned int)": 1,
+        "void at::native::vectorized_elementwise_kernel<4, at::native::compare_scalar_kernel<int>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, int)::{lambda(int)#1}, std::array<char*, 2ul> >(int, at::native::compare_scalar_kernel<int>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, int)::{lambda(int)#1}, std::array<char*, 2ul>)": 1,
+        "void at::native::reduce_kernel<512, 1, at::native::ReduceOp<bool, at::native::func_wrapper_t<bool, at::native::and_kernel_cuda(at::TensorIterator&)::{lambda()#1}::operator()() const::{lambda()#12}::operator()() const::{lambda(bool, bool)#1}>, unsigned int, bool, 4, 4> >(at::native::ReduceOp<bool, at::native::func_wrapper_t<bool, at::native::and_kernel_cuda(at::TensorIterator&)::{lambda()#1}::operator()() const::{lambda()#12}::operator()() const::{lambda(bool, bool)#1}>, unsigned int, bool, 4, 4>)": 1,
+        "void compute_cuda_kernel<int>(int const*, long const*, int*, long, long)": 1,
+        "void at::native::_scatter_gather_elementwise_kernel<128, 8, at::native::_cuda_scatter_gather_internal_kernel<false, at::native::OpaqueType<4>, int>::operator()<at::native::TensorAssign>(at::TensorIterator&, long, long, long, at::native::TensorAssign const&)::{lambda(int)#1}>(int, at::native::_cuda_scatter_gather_internal_kernel<false, at::native::OpaqueType<4>, int>::operator()<at::native::TensorAssign>(at::TensorIterator&, long, long, long, at::native::TensorAssign const&)::{lambda(int)#1})": 1,
+        "st::ops::fused_kmean_ann::(anonymous namespace)::generate_warp_payload_with_partial_masks_kernel(torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, long, 0ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<1ul, long>, long, 1ul, torch::headeronly::DefaultPtrTraits, long>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, long, 1ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<2ul, long>, long, 2ul, torch::headeronly::DefaultPtrTraits, long>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, int, 1ul, torch::headeronly::DefaultPtrTraits, int>, at::detail::IndexBoundsCheck<2ul, int>, int, 2ul, torch::headeronly::DefaultPtrTraits, int>, int const*, int const*, st::ops::fused_kmean_ann::WarpPayload*, int const*, signed char const*, unsigned long const*, unsigned long const*, long, long, c10::cuda::DeviceAssertionsData*, unsigned int)": 1,
+        "st::ops::fused_kmean_ann::(anonymous namespace)::generate_remaining_payload_with_partial_masks_kernel(torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, long, 0ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<1ul, long>, long, 1ul, torch::headeronly::DefaultPtrTraits, long>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, long, 1ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<2ul, long>, long, 2ul, torch::headeronly::DefaultPtrTraits, long>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, long, 1ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<2ul, long>, long, 2ul, torch::headeronly::DefaultPtrTraits, long>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, int, 1ul, torch::headeronly::DefaultPtrTraits, int>, at::detail::IndexBoundsCheck<2ul, int>, int, 2ul, torch::headeronly::DefaultPtrTraits, int>, int const*, st::ops::fused_kmean_ann::RemainingPayload*, int const*, signed char const*, unsigned long const*, unsigned long const*, long, c10::cuda::DeviceAssertionsData*, unsigned int)": 1,
+        "void st::ops::fused_kmean_ann::(anonymous namespace)::process_cluster<signed char, int, 128, true, int, false>(signed char const*, signed char const*, st::ops::fused_kmean_ann::WarpPayload const*, int*, int*, int, int, c10::cuda::DeviceAssertionsData*, unsigned int)": 1
+      },
+      "memcpy_by_kind": {
+        "Memcpy DtoH (Device -> Pinned)": 4
+      },
+      "memcpy_d2h": 4,
+      "memcpy_h2d": 0,
+      "device_memset": 0,
+      "aten_ops_dispatched": 62
+    },
+    "bloom_index_search_batch (packed, full N)": {
+      "kernel_launches": 1,
+      "distinct_kernels": 1,
+      "kernels": {
+        "void st::ops::bloom_search::(anonymous namespace)::process_documents<long, 16, true>(long const*, bool const*, long, long const*, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, long, 1ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<2ul, long>, long, 2ul, torch::headeronly::DefaultPtrTraits, long>, st::ops::bloom_search::(anonymous namespace)::QueryPlanCuda<true> const*, long, long, c10::cuda::DeviceAssertionsData*, unsigned int)": 1
+      },
+      "memcpy_by_kind": {
+        "Memcpy HtoD (Pageable -> Device)": 2
+      },
+      "memcpy_d2h": 0,
+      "memcpy_h2d": 2,
+      "device_memset": 0,
+      "aten_ops_dispatched": 4
+    },
+    "bloom_index_search_batch_return_partial_response": {
+      "kernel_launches": 13,
+      "distinct_kernels": 13,
+      "kernels": {
+        "st::ops::bloom_search::(anonymous namespace)::generate_column_info_for_clusters_kernel(long const*, long const*, long, int*, int*, signed char*, c10::cuda::DeviceAssertionsData*, unsigned int)": 1,
+        "void (anonymous namespace)::elementwise_kernel_with_index<int, at::native::arange_cuda_out(c10::Scalar const&, c10::Scalar const&, c10::Scalar const&, at::Tensor&)::{lambda()#1}::operator()() const::{lambda()#3}::operator()() const::{lambda(long)#1}>(int, at::native::arange_cuda_out(c10::Scalar const&, c10::Scalar const&, c10::Scalar const&, at::Tensor&)::{lambda()#1}::operator()() const::{lambda()#3}::operator()() const::{lambda(long)#1}, function_traits<at::native::arange_cuda_out(c10::Scalar const&, c10::Scalar const&, c10::Scalar const&, at::Tensor&)::{lambda()#1}::operator()() const::{lambda()#3}::operator()() const::{lambda(long)#1}>::result_type*)": 1,
+        "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#4}::operator()() const::{lambda(long)#1}, std::array<char*, 2ul>, 4, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1> >(int, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#4}::operator()() const::{lambda(long)#1}, std::array<char*, 2ul>, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1>)": 1,
+        "void at_cuda_detail::cub::DeviceScanInitKernel<at_cuda_detail::cub::ScanTileState<long, true> >(at_cuda_detail::cub::ScanTileState<long, true>, int)": 1,
+        "void at_cuda_detail::cub::DeviceScanKernel<at_cuda_detail::cub::DeviceScanPolicy<long, std::plus<long> >::Policy900, long const*, long*, at_cuda_detail::cub::ScanTileState<long, true>, std::plus<long>, at_cuda_detail::cub::NullType, unsigned int, long, false>(long const*, long*, at_cuda_detail::cub::ScanTileState<long, true>, int, std::plus<long>, at_cuda_detail::cub::NullType, unsigned int)": 1,
+        "void at::native::vectorized_elementwise_kernel<4, at::native::compare_scalar_kernel<int>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, int)::{lambda(int)#1}, std::array<char*, 2ul> >(int, at::native::compare_scalar_kernel<int>(at::TensorIteratorBase&, at::native::(anonymous namespace)::OpType, int)::{lambda(int)#1}, std::array<char*, 2ul>)": 1,
+        "void at::native::reduce_kernel<512, 1, at::native::ReduceOp<bool, at::native::func_wrapper_t<bool, at::native::and_kernel_cuda(at::TensorIterator&)::{lambda()#1}::operator()() const::{lambda()#12}::operator()() const::{lambda(bool, bool)#1}>, unsigned int, bool, 4, 4> >(at::native::ReduceOp<bool, at::native::func_wrapper_t<bool, at::native::and_kernel_cuda(at::TensorIterator&)::{lambda()#1}::operator()() const::{lambda()#12}::operator()() const::{lambda(bool, bool)#1}>, unsigned int, bool, 4, 4>)": 1,
+        "void compute_cuda_kernel<int>(int const*, long const*, int*, long, long)": 1,
+        "void at::native::_scatter_gather_elementwise_kernel<128, 8, at::native::_cuda_scatter_gather_internal_kernel<false, at::native::OpaqueType<4>, int>::operator()<at::native::TensorAssign>(at::TensorIterator&, long, long, long, at::native::TensorAssign const&)::{lambda(int)#1}>(int, at::native::_cuda_scatter_gather_internal_kernel<false, at::native::OpaqueType<4>, int>::operator()<at::native::TensorAssign>(at::TensorIterator&, long, long, long, at::native::TensorAssign const&)::{lambda(int)#1})": 1,
+        "void at_cuda_detail::cub::DeviceScanInitKernel<at_cuda_detail::cub::ScanTileState<int, true> >(at_cuda_detail::cub::ScanTileState<int, true>, int)": 1,
+        "void at_cuda_detail::cub::DeviceScanKernel<at_cuda_detail::cub::DeviceScanPolicy<int, std::plus<int> >::Policy900, int const*, int*, at_cuda_detail::cub::ScanTileState<int, true>, std::plus<int>, at_cuda_detail::cub::NullType, unsigned int, int, false>(int const*, int*, at_cuda_detail::cub::ScanTileState<int, true>, int, std::plus<int>, at_cuda_detail::cub::NullType, unsigned int)": 1,
+        "void at::native::vectorized_elementwise_kernel<2, at::native::FillFunctor<long>, std::array<char*, 1ul> >(int, at::native::FillFunctor<long>, std::array<char*, 1ul>)": 1,
+        "void st::ops::bloom_search::(anonymous namespace)::process_documents_on_assigned_cluster_columns_kernel<16, true>(long const*, long, long const*, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, int, 0ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<1ul, long>, int, 1ul, torch::headeronly::DefaultPtrTraits, long>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, int, 0ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<1ul, long>, int, 1ul, torch::headeronly::DefaultPtrTraits, long>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, int, 0ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<1ul, long>, int, 1ul, torch::headeronly::DefaultPtrTraits, long>, long, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, long, 0ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<1ul, long>, long, 1ul, torch::headeronly::DefaultPtrTraits, long>, st::ops::bloom_search::(anonymous namespace)::QueryPlanCuda<true> const*, long, long, unsigned long const*, c10::cuda::DeviceAssertionsData*, unsigned int)": 1
+      },
+      "memcpy_by_kind": {
+        "Memcpy DtoH (Device -> Pinned)": 2,
+        "Memcpy HtoD (Pageable -> Device)": 2
+      },
+      "memcpy_d2h": 2,
+      "memcpy_h2d": 2,
+      "device_memset": 0,
+      "aten_ops_dispatched": 43
+    },
+    "generate_column_info_for_clusters": {
+      "kernel_launches": 1,
+      "distinct_kernels": 1,
+      "kernels": {
+        "st::ops::bloom_search::(anonymous namespace)::generate_column_info_for_clusters_kernel(long const*, long const*, long, int*, int*, signed char*, c10::cuda::DeviceAssertionsData*, unsigned int)": 1
+      },
+      "memcpy_by_kind": {},
+      "memcpy_d2h": 0,
+      "memcpy_h2d": 0,
+      "device_memset": 0,
+      "aten_ops_dispatched": 3
+    },
+    "bloom_index_build (CUDA)": {
+      "kernel_launches": 16,
+      "distinct_kernels": 10,
+      "kernels": {
+        "void at::native::vectorized_elementwise_kernel<2, at::native::FillFunctor<long>, std::array<char*, 1ul> >(int, at::native::FillFunctor<long>, std::array<char*, 1ul>)": 3,
+        "void cub::CUB_200302_800_NS::DeviceCompactInitKernel<cub::CUB_200302_800_NS::ReduceByKeyScanTileState<long, unsigned long long, false>, unsigned int*>(cub::CUB_200302_800_NS::ReduceByKeyScanTileState<long, unsigned long long, false>, int, unsigned int*)": 2,
+        "void cub::CUB_200302_800_NS::DeviceReduceByKeyKernel<cub::CUB_200302_800_NS::detail::device_reduce_by_key_policy_hub<cub::CUB_200302_800_NS::Max, long, unsigned int>::Policy900, cub::CUB_200302_800_NS::TransformInputIterator<unsigned int, st::ops::bloom_indexer::(anonymous namespace)::ColumnIdxToBundleKey, cub::CUB_200302_800_NS::CountingInputIterator<unsigned int, unsigned int>, long>, unsigned int*, long*, long*, unsigned int*, cub::CUB_200302_800_NS::ReduceByKeyScanTileState<long, unsigned long long, false>, cuda::std::__4::equal_to<void>, cub::CUB_200302_800_NS::Max, unsigned long long, long>(cub::CUB_200302_800_NS::TransformInputIterator<unsigned int, st::ops::bloom_indexer::(anonymous namespace)::ColumnIdxToBundleKey, cub::CUB_200302_800_NS::CountingInputIterator<unsigned int, unsigned int>, long>, unsigned int*, long*, long*, unsigned int*, cub::CUB_200302_800_NS::ReduceByKeyScanTileState<long, unsigned long long, false>, int, cuda::std::__4::equal_to<void>, cub::CUB_200302_800_NS::Max, unsigned long long)": 2,
+        "void at_cuda_detail::cub::DeviceScanInitKernel<at_cuda_detail::cub::ScanTileState<long, true> >(at_cuda_detail::cub::ScanTileState<long, true>, int)": 2,
+        "void at_cuda_detail::cub::DeviceScanKernel<at_cuda_detail::cub::DeviceScanPolicy<long, std::plus<long> >::Policy900, long const*, long*, at_cuda_detail::cub::ScanTileState<long, true>, std::plus<long>, at_cuda_detail::cub::NullType, unsigned int, long, false>(long const*, long*, at_cuda_detail::cub::ScanTileState<long, true>, int, std::plus<long>, at_cuda_detail::cub::NullType, unsigned int)": 2,
+        "st::ops::bloom_indexer::(anonymous namespace)::generate_column_b_and_signature_sizes_kernel(long const*, long, long, long, long, double, long*, long*)": 1,
+        "void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<signed char>, std::array<char*, 1ul> >(int, at::native::FillFunctor<signed char>, std::array<char*, 1ul>)": 1,
+        "void st::ops::bloom_indexer::(anonymous namespace)::generate_document_signature<true>(torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, int, 0ul, torch::headeronly::DefaultPtrTraits, int>, at::detail::IndexBoundsCheck<1ul, int>, int, 1ul, torch::headeronly::DefaultPtrTraits, int>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, long, 0ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<1ul, long>, long, 1ul, torch::headeronly::DefaultPtrTraits, long>, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, long, 0ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<1ul, long>, long, 1ul, torch::headeronly::DefaultPtrTraits, long>, long const*, long const*, torch::headeronly::detail::GenericPackedTensorAccessor<torch::headeronly::detail::TensorAccessor<c10::ArrayRef<long>, signed char, 0ul, torch::headeronly::DefaultPtrTraits, long>, at::detail::IndexBoundsCheck<1ul, long>, signed char, 1ul, torch::headeronly::DefaultPtrTraits, long>, long, long, long, c10::cuda::DeviceAssertionsData*, unsigned int)": 1,
+        "void st::ops::faster_repeat_interleave::(anonymous namespace)::consecutive_index_repeat_interleave_with_cumsum_compute_kernel<long, long>(long, long const*, long*, long, long)": 1,
+        "void st::ops::bloom_indexer::(anonymous namespace)::generate_bloom_index_kernel<true>(signed char const*, long, long const*, long const*, long const*, long, long, long*, c10::cuda::DeviceAssertionsData*, unsigned int)": 1
+      },
+      "memcpy_by_kind": {
+        "Memcpy DtoH (Device -> Pinned)": 2,
+        "Memcpy HtoD (Pageable -> Device)": 3
+      },
+      "memcpy_d2h": 2,
+      "memcpy_h2d": 3,
+      "device_memset": 0,
+      "aten_ops_dispatched": 47
+    }
+  },
+  "graph_capture": {
+    "fused_kmean_ann (no filter)": {
+      "capturable": false,
+      "error_type": "AcceleratorError",
+      "error": "CUDA error: operation failed due to a previous error during capture / Search for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information. / CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect."
+    },
+    "fused_kmean_ann (full mask)": {
+      "capturable": false,
+      "error_type": "AcceleratorError",
+      "error": "CUDA error: operation failed due to a previous error during capture / Search for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information. / CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect."
+    },
+    "fused_kmean_ann_with_partial_masks": {
+      "capturable": false,
+      "error_type": "AcceleratorError",
+      "error": "CUDA error: operation failed due to a previous error during capture / Search for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information. / CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect."
+    },
+    "bloom_index_search_batch (packed, full N)": {
+      "capturable": true,
+      "error": null
+    },
+    "bloom_index_search_batch_return_partial_response": {
+      "capturable": false,
+      "error_type": "AcceleratorError",
+      "error": "CUDA error: operation failed due to a previous error during capture / Search for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information. / CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect."
+    },
+    "generate_column_info_for_clusters": {
+      "capturable": true,
+      "error": null
+    },
+    "bloom_index_build (CUDA)": {
+      "capturable": false,
+      "error_type": "AcceleratorError",
+      "error": "CUDA error: operation failed due to a previous error during capture / Search for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information. / CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect."
+    }
+  },
+  "graph_replay_semantics": {
+    "plan_shapes_match": true,
+    "eager_a_passing": [
+      0,
+      664,
+      1170,
+      1457,
+      3078,
+      7058,
+      8410,
+      11821
+    ],
+    "eager_b_passing": [
+      1,
+      2015,
+      5911,
+      7420,
+      7554,
+      8665,
+      10715,
+      11515
+    ],
+    "predicates_differ": true,
+    "captured": true,
+    "replay_error_type": "AcceleratorError",
+    "replay_error": "CUDA error: an illegal memory access was encountered",
+    "verdict": "captures, but replaying the captured graph raises AcceleratorError \u2014 the capture is unusable"
+  },
+  "parse_cost": {
+    "B=16, 2 clauses AND": {
+      "n_expressions": 16,
+      "median_us_per_call": 58.70676808990538,
+      "us_per_query": 3.6691730056190863,
+      "iqr_us": 0.20611064974218765
+    },
+    "B=16, 1 clause": {
+      "n_expressions": 16,
+      "median_us_per_call": 41.72997688874602,
+      "us_per_query": 2.6081235555466264,
+      "iqr_us": 0.018490361981094536
+    },
+    "B=16, 2 clauses + NOT": {
+      "n_expressions": 16,
+      "median_us_per_call": 66.80389400571585,
+      "us_per_query": 4.17524337535724,
+      "iqr_us": 0.22124405950307272
+    },
+    "B=1, 2 clauses AND": {
+      "n_expressions": 1,
+      "median_us_per_call": 12.623563595116138,
+      "us_per_query": 12.623563595116138,
+      "iqr_us": 0.22949897684156934
+    }
+  },
+  "per_embedding_scale": {
+    "dim": 128,
+    "raw_dot": 2064512,
+    "fp16_max": 65504.0,
+    "per_embedding_scale": {
+      "dtype": "torch.float16",
+      "first_8": [
+        Infinity,
+        Infinity,
+        Infinity,
+        Infinity,
+        Infinity,
+        Infinity,
+        Infinity,
+        Infinity
+      ],
+      "n_inf": 256,
+      "n_total": 256,
+      "all_inf": true
+    },
+    "divisor_minus_1_int32": {
+      "dtype": "torch.int32",
+      "first_8": [
+        2064512,
+        2064512,
+        2064512,
+        2064512,
+        2064512,
+        2064512,
+        2064512,
+        2064512
+      ],
+      "equals_raw_dot": true
+    },
+    "divisor_for_int8=64": {
+      "dtype": "torch.float16",
+      "first_8": [
+        32256.0,
+        32256.0,
+        32256.0,
+        32256.0,
+        32256.0,
+        32256.0,
+        32256.0,
+        32256.0
+      ],
+      "all_finite": true,
+      "expected": 32258.0
+    },
+    "smallest_saturated_dim_that_overflows_fp16": 5
+  }
+}

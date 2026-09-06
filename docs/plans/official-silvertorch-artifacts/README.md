@@ -22,6 +22,9 @@ toolkit installed).
 | `wp0_environment.txt` | A2 / O WP-0 | the pin, `nvcc --version`, `nvidia-smi`, torch/triton versions, the nine registered `st::` ops, the build flags and the build time |
 | `wp0_build.txt` | A2 / O WP-0 | full `uv sync --extra official -v` log, including the nvcc invocations and torch's CUDA minor-mismatch warning |
 | `wp0_upstream_pytest.txt` | A2 / O WP-0 | upstream `pytest silvertorch/` output: the README's command, the same minus the three unimportable files, and a scratch-patched run that quantifies why those three fail |
+| `official_facts.py` | A3 / O WP-1 | the probe script: bit order, host syncs, kernel launches, graph capture + replay, parse cost, the `per_embedding_scale` overflow |
+| `official_facts.json` | A3 / O WP-1 | its raw output, including the full per-op kernel-name lists |
+| `official_facts.txt` | A3 / O WP-1 | the same, rendered as a report |
 
 ## How to reproduce
 
@@ -40,6 +43,15 @@ git clone https://github.com/meta-recsys/silvertorch && cd silvertorch
 git checkout 21aa35e28b6dd9a91e9ee35efb0857715e86bda7
 cp <venv>/lib/python3.11/site-packages/silvertorch/_C.cpython-311-*.so silvertorch/
 uv run --extra official --with pytest python -m pytest silvertorch/ -q
+```
+
+Then A3's probes (each graph probe runs in its own subprocess — a failed capture
+poisons the CUDA context):
+
+```bash
+uv run --extra official python \
+    docs/plans/official-silvertorch-artifacts/official_facts.py \
+    --out docs/plans/official-silvertorch-artifacts
 ```
 
 ## A2 findings (corrections and additions to O §1.1, §6.1, §11)
@@ -118,3 +130,24 @@ uv run --extra official --with pytest python -m pytest silvertorch/ -q
    `tests/correctness/test_silvertorch.py::TestEdgeCases::test_n_lists_equals_n[cute]`.
    Not caused by, and not fixed by, the official extra — flagged here so the next
    step does not read them as regressions.
+
+## A3 findings
+
+Full record, claim by claim against O §3 and §4, in
+[`../silvertorch-official-integration.md` §13](../silvertorch-official-integration.md).
+The headline for whoever writes the adapter next:
+
+- **The official bloom mask is HIGH-bit-first**: document `d` is bit
+  `63 - (d % 64)` of word `d // 64`. Confirmed three ways (packed search output,
+  a hand-built single-bit `filtering_bit_mask` into the scorer, and a round trip
+  of one through the other). B1 takes the HIGH-first branch.
+- `fused_kmean_ann` costs **3 host syncs and 19 kernel launches** (O §3 read 2
+  and ≈ 12); only 2 of those launches are the scorer itself.
+- `bloom_index_search_batch` **captures into a CUDA graph and then faults on
+  replay** — it must be on the harness's not-capturable list explicitly. O D7
+  is unchanged.
+- `per_embedding_scale` returns `inf` in every slot at D=128 with full-range
+  codes, exactly as O §4.2 (iii) predicted from the source.
+- Instrument note: `warnings.catch_warnings` reads zero syncs for every
+  `torch.ops.st.*` call. That is an artefact of where c10 routes a `TORCH_WARN`
+  raised inside a C++ op; capture fd 2 instead.

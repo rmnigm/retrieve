@@ -1,0 +1,141 @@
+A3 / O WP-1 — measured facts about the official SilverTorch ops
+generated 2026-09-06T13:07:42Z  |  NVIDIA A100-SXM4-80GB  |  torch 2.10.0+cu128 (cuda 12.8)  |  python 3.11.10
+silvertorch @ 21aa35e28b6dd9a91e9ee35efb0857715e86bda7
+config: {'N': 16384, 'D': 128, 'n_lists': 64, 'n_probe': 8, 'B': 16, 'cluster_size': 256, 'P': 2048, 'k': 5, 'hash_k': 7}
+
+== 1. bloom mask bit order ==================================
+A  packed word 0 = 0x8000000000000000, docs passing in [0,64) = [0]
+   set bit indices (LSB=0) = [63]
+   -> HIGH-bit-first (doc d -> bit 63-d)
+B  single-bit filtering_bit_mask into fused_kmean_ann: {'bit63_set': [0], 'bit0_set': [63]}
+   -> HIGH-bit-first: bit 63 selects doc 0
+C  round trip packed bloom -> scorer: kept [0]
+   bool-mask passing        : [0]
+   -> equal: True
+
+== 2. host syncs per op (set_sync_debug_mode('warn'), fd-2 capture) ==
+  fused_kmean_ann (no filter)                          3
+  fused_kmean_ann (full mask)                          3
+  fused_kmean_ann_with_partial_masks                   4
+  bloom_index_search_batch (packed, full N)            0
+  bloom_index_search_batch_return_partial_response     2
+  generate_column_info_for_clusters                    0
+  bloom_index_build (CUDA)                             2
+
+== 3. kernel launches per op (torch.profiler) ===============
+  fused_kmean_ann (no filter)                          19 launches, 16 distinct, 3 D2H, 0 H2D, 0 memset, 58 aten ops
+        2x void at_cuda_detail::cub::DeviceScanInitKernel<at_cuda_detail::cub::ScanTileState<int, true> >(at_cuda_detail:
+        2x void at_cuda_detail::cub::DeviceScanKernel<at_cuda_detail::cub::DeviceScanPolicy<int, std::plus<int> >::Policy
+        2x void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<int>, std::array<char*, 1ul> >(int, 
+        1x st::ops::fused_kmean_ann::(anonymous namespace)::generate_cluster_warp_size(long const*, long, int*, int*, int
+        1x void at::native::tensor_kernel_scan_innermost_dim<int, std::plus<int> >(int*, int const*, unsigned int, unsign
+        1x void (anonymous namespace)::elementwise_kernel_with_index<int, at::native::arange_cuda_out(c10::Scalar const&,
+        1x void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{la
+        1x void at_cuda_detail::cub::DeviceScanInitKernel<at_cuda_detail::cub::ScanTileState<long, true> >(at_cuda_detail
+        1x void at_cuda_detail::cub::DeviceScanKernel<at_cuda_detail::cub::DeviceScanPolicy<long, std::plus<long> >::Poli
+        1x void at::native::vectorized_elementwise_kernel<4, at::native::compare_scalar_kernel<int>(at::TensorIteratorBas
+        1x void at::native::reduce_kernel<512, 1, at::native::ReduceOp<bool, at::native::func_wrapper_t<bool, at::native:
+        1x void compute_cuda_kernel<int>(int const*, long const*, int*, long, long)
+        1x void at::native::_scatter_gather_elementwise_kernel<128, 8, at::native::_cuda_scatter_gather_internal_kernel<f
+        1x st::ops::fused_kmean_ann::(anonymous namespace)::generate_warp_payload_kernel(torch::headeronly::detail::Gener
+        1x st::ops::fused_kmean_ann::(anonymous namespace)::generate_remaining_payload_kernel(torch::headeronly::detail::
+        1x void st::ops::fused_kmean_ann::(anonymous namespace)::process_cluster<signed char, int, 128, false, int, false
+  fused_kmean_ann (full mask)                          19 launches, 16 distinct, 3 D2H, 0 H2D, 0 memset, 58 aten ops
+        2x void at_cuda_detail::cub::DeviceScanInitKernel<at_cuda_detail::cub::ScanTileState<int, true> >(at_cuda_detail:
+        2x void at_cuda_detail::cub::DeviceScanKernel<at_cuda_detail::cub::DeviceScanPolicy<int, std::plus<int> >::Policy
+        2x void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<int>, std::array<char*, 1ul> >(int, 
+        1x st::ops::fused_kmean_ann::(anonymous namespace)::generate_cluster_warp_size(long const*, long, int*, int*, int
+        1x void at::native::tensor_kernel_scan_innermost_dim<int, std::plus<int> >(int*, int const*, unsigned int, unsign
+        1x void (anonymous namespace)::elementwise_kernel_with_index<int, at::native::arange_cuda_out(c10::Scalar const&,
+        1x void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{la
+        1x void at_cuda_detail::cub::DeviceScanInitKernel<at_cuda_detail::cub::ScanTileState<long, true> >(at_cuda_detail
+        1x void at_cuda_detail::cub::DeviceScanKernel<at_cuda_detail::cub::DeviceScanPolicy<long, std::plus<long> >::Poli
+        1x void at::native::vectorized_elementwise_kernel<4, at::native::compare_scalar_kernel<int>(at::TensorIteratorBas
+        1x void at::native::reduce_kernel<512, 1, at::native::ReduceOp<bool, at::native::func_wrapper_t<bool, at::native:
+        1x void compute_cuda_kernel<int>(int const*, long const*, int*, long, long)
+        1x void at::native::_scatter_gather_elementwise_kernel<128, 8, at::native::_cuda_scatter_gather_internal_kernel<f
+        1x st::ops::fused_kmean_ann::(anonymous namespace)::generate_warp_payload_kernel(torch::headeronly::detail::Gener
+        1x st::ops::fused_kmean_ann::(anonymous namespace)::generate_remaining_payload_kernel(torch::headeronly::detail::
+        1x void st::ops::fused_kmean_ann::(anonymous namespace)::process_cluster<signed char, int, 128, true, int, false>
+  fused_kmean_ann_with_partial_masks                   19 launches, 16 distinct, 4 D2H, 0 H2D, 0 memset, 62 aten ops
+        2x void at_cuda_detail::cub::DeviceScanInitKernel<at_cuda_detail::cub::ScanTileState<int, true> >(at_cuda_detail:
+        2x void at_cuda_detail::cub::DeviceScanKernel<at_cuda_detail::cub::DeviceScanPolicy<int, std::plus<int> >::Policy
+        2x void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<int>, std::array<char*, 1ul> >(int, 
+        1x st::ops::fused_kmean_ann::(anonymous namespace)::generate_cluster_warp_size(long const*, long, int*, int*, int
+        1x void at::native::tensor_kernel_scan_innermost_dim<int, std::plus<int> >(int*, int const*, unsigned int, unsign
+        1x void (anonymous namespace)::elementwise_kernel_with_index<int, at::native::arange_cuda_out(c10::Scalar const&,
+        1x void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{la
+        1x void at_cuda_detail::cub::DeviceScanInitKernel<at_cuda_detail::cub::ScanTileState<long, true> >(at_cuda_detail
+        1x void at_cuda_detail::cub::DeviceScanKernel<at_cuda_detail::cub::DeviceScanPolicy<long, std::plus<long> >::Poli
+        1x void at::native::vectorized_elementwise_kernel<4, at::native::compare_scalar_kernel<int>(at::TensorIteratorBas
+        1x void at::native::reduce_kernel<512, 1, at::native::ReduceOp<bool, at::native::func_wrapper_t<bool, at::native:
+        1x void compute_cuda_kernel<int>(int const*, long const*, int*, long, long)
+        1x void at::native::_scatter_gather_elementwise_kernel<128, 8, at::native::_cuda_scatter_gather_internal_kernel<f
+        1x st::ops::fused_kmean_ann::(anonymous namespace)::generate_warp_payload_with_partial_masks_kernel(torch::header
+        1x st::ops::fused_kmean_ann::(anonymous namespace)::generate_remaining_payload_with_partial_masks_kernel(torch::h
+        1x void st::ops::fused_kmean_ann::(anonymous namespace)::process_cluster<signed char, int, 128, true, int, false>
+  bloom_index_search_batch (packed, full N)            1 launches, 1 distinct, 0 D2H, 2 H2D, 0 memset, 4 aten ops
+        1x void st::ops::bloom_search::(anonymous namespace)::process_documents<long, 16, true>(long const*, bool const*,
+  bloom_index_search_batch_return_partial_response     13 launches, 13 distinct, 2 D2H, 2 H2D, 0 memset, 43 aten ops
+        1x st::ops::bloom_search::(anonymous namespace)::generate_column_info_for_clusters_kernel(long const*, long const
+        1x void (anonymous namespace)::elementwise_kernel_with_index<int, at::native::arange_cuda_out(c10::Scalar const&,
+        1x void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{la
+        1x void at_cuda_detail::cub::DeviceScanInitKernel<at_cuda_detail::cub::ScanTileState<long, true> >(at_cuda_detail
+        1x void at_cuda_detail::cub::DeviceScanKernel<at_cuda_detail::cub::DeviceScanPolicy<long, std::plus<long> >::Poli
+        1x void at::native::vectorized_elementwise_kernel<4, at::native::compare_scalar_kernel<int>(at::TensorIteratorBas
+        1x void at::native::reduce_kernel<512, 1, at::native::ReduceOp<bool, at::native::func_wrapper_t<bool, at::native:
+        1x void compute_cuda_kernel<int>(int const*, long const*, int*, long, long)
+        1x void at::native::_scatter_gather_elementwise_kernel<128, 8, at::native::_cuda_scatter_gather_internal_kernel<f
+        1x void at_cuda_detail::cub::DeviceScanInitKernel<at_cuda_detail::cub::ScanTileState<int, true> >(at_cuda_detail:
+        1x void at_cuda_detail::cub::DeviceScanKernel<at_cuda_detail::cub::DeviceScanPolicy<int, std::plus<int> >::Policy
+        1x void at::native::vectorized_elementwise_kernel<2, at::native::FillFunctor<long>, std::array<char*, 1ul> >(int,
+        1x void st::ops::bloom_search::(anonymous namespace)::process_documents_on_assigned_cluster_columns_kernel<16, tr
+  generate_column_info_for_clusters                    1 launches, 1 distinct, 0 D2H, 0 H2D, 0 memset, 3 aten ops
+        1x st::ops::bloom_search::(anonymous namespace)::generate_column_info_for_clusters_kernel(long const*, long const
+  bloom_index_build (CUDA)                             16 launches, 10 distinct, 2 D2H, 3 H2D, 0 memset, 47 aten ops
+        3x void at::native::vectorized_elementwise_kernel<2, at::native::FillFunctor<long>, std::array<char*, 1ul> >(int,
+        2x void cub::CUB_200302_800_NS::DeviceCompactInitKernel<cub::CUB_200302_800_NS::ReduceByKeyScanTileState<long, un
+        2x void cub::CUB_200302_800_NS::DeviceReduceByKeyKernel<cub::CUB_200302_800_NS::detail::device_reduce_by_key_poli
+        2x void at_cuda_detail::cub::DeviceScanInitKernel<at_cuda_detail::cub::ScanTileState<long, true> >(at_cuda_detail
+        2x void at_cuda_detail::cub::DeviceScanKernel<at_cuda_detail::cub::DeviceScanPolicy<long, std::plus<long> >::Poli
+        1x st::ops::bloom_indexer::(anonymous namespace)::generate_column_b_and_signature_sizes_kernel(long const*, long,
+        1x void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<signed char>, std::array<char*, 1ul>
+        1x void st::ops::bloom_indexer::(anonymous namespace)::generate_document_signature<true>(torch::headeronly::detai
+        1x void st::ops::faster_repeat_interleave::(anonymous namespace)::consecutive_index_repeat_interleave_with_cumsum
+        1x void st::ops::bloom_indexer::(anonymous namespace)::generate_bloom_index_kernel<true>(signed char const*, long
+
+== 4. CUDA graph capture ====================================
+  fused_kmean_ann (no filter)                          FAILED  AcceleratorError
+      CUDA error: operation failed due to a previous error during capture / Search for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information. / CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+  fused_kmean_ann (full mask)                          FAILED  AcceleratorError
+      CUDA error: operation failed due to a previous error during capture / Search for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information. / CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+  fused_kmean_ann_with_partial_masks                   FAILED  AcceleratorError
+      CUDA error: operation failed due to a previous error during capture / Search for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information. / CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+  bloom_index_search_batch (packed, full N)            CAPTURED
+  bloom_index_search_batch_return_partial_response     FAILED  AcceleratorError
+      CUDA error: operation failed due to a previous error during capture / Search for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information. / CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+  generate_column_info_for_clusters                    CAPTURED
+  bloom_index_build (CUDA)                             FAILED  AcceleratorError
+      CUDA error: operation failed due to a previous error during capture / Search for `cudaErrorStreamCaptureInvalidated' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information. / CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+  replay semantics for bloom_index_search_batch:
+      plan_shapes_match = True
+      eager_a_passing = [0, 664, 1170, 1457, 3078, 7058, 8410, 11821]
+      eager_b_passing = [1, 2015, 5911, 7420, 7554, 8665, 10715, 11515]
+      predicates_differ = True
+      captured = True
+      replay_error_type = AcceleratorError
+      replay_error = CUDA error: an illegal memory access was encountered
+      verdict = captures, but replaying the captured graph raises AcceleratorError — the capture is unusable
+
+== 5. expression parse cost (CPU) ===========================
+  B=16, 2 clauses AND          58.7 us/call     3.67 us/query  (IQR 0.2 us)
+  B=16, 1 clause               41.7 us/call     2.61 us/query  (IQR 0.0 us)
+  B=16, 2 clauses + NOT        66.8 us/call     4.18 us/query  (IQR 0.2 us)
+  B=1, 2 clauses AND           12.6 us/call    12.62 us/query  (IQR 0.2 us)
+
+== 6. per_embedding_scale overflow (O 4.2 iii) ==============
+  D=128, saturated codes -> raw dot = 2064512 (fp16 max 65504.0)
+  per_embedding_scale: {'dtype': 'torch.float16', 'first_8': [inf, inf, inf, inf, inf, inf, inf, inf], 'n_inf': 256, 'n_total': 256, 'all_inf': True}
+  divisor_minus_1_int32: {'dtype': 'torch.int32', 'first_8': [2064512, 2064512, 2064512, 2064512, 2064512, 2064512, 2064512, 2064512], 'equals_raw_dot': True}
+  divisor_for_int8=64: {'dtype': 'torch.float16', 'first_8': [32256.0, 32256.0, 32256.0, 32256.0, 32256.0, 32256.0, 32256.0, 32256.0], 'all_finite': True, 'expected': 32258.0}
+  smallest saturated D that overflows fp16: 5
