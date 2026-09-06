@@ -495,6 +495,15 @@ live in `test_official.py`.
   (`[-1, ...]`) on `filter_mode="exact"` matches the no-filter result.
 - Recall ≥ 0.90 at `n_probe = n_lists`; recall ≥ 0.85 at full probe and
   monotone in `n_probe`.
+- **State-dict round trip** (`TestStateDict`, every backend × filter
+  mode): a deep copy of a built module with every buffer zeroed and the
+  cached scalars poisoned (`_global_scale_f = nan`, `_max_cluster_size =
+  -1`) is loaded from the source's `state_dict()`; the load hook must
+  restore both scalars, every buffer must be `torch.equal`, and the
+  forwards must agree (`torch.equal` scores, ids up to ties). The copy
+  is deliberate: a second `register_index` cannot promise the same IVF
+  padding width (GPU k-means is not bit-deterministic) and
+  `load_state_dict` checks shapes.
 - Candidate-ids path returns ids ⊆ candidates (with bloom, with exact,
   without filter, and with `p < k` — the short-`P` case returns
   `min(k, P)` columns, no pad). Passing `query_clause_attrs` together

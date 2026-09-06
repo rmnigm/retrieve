@@ -16,6 +16,8 @@ triton-vs-torch; the official parity gates live in ``tests/parity/test_official.
 
 from __future__ import annotations
 
+import copy
+
 import pytest
 import torch
 
@@ -562,6 +564,46 @@ class TestCandidates:
             allowed = set(cand[b].tolist())
             for j in range(p):
                 assert int(ids[b, j].item()) in allowed
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+class TestStateDict:
+    """``load_state_dict`` re-derives the two Python-scalar caches the forwards read
+    (``_global_scale_f``, ``_max_cluster_size``) from the loaded buffers, so a loaded index
+    scores exactly like the one that was saved — nothing is patched by hand."""
+
+    @pytest.mark.parametrize("filter_mode", ["none", "bloom", "exact"])
+    def test_load_state_dict_rederives_cached_scalars(self, data, backend, filter_mode):
+        builders = {
+            "none": lambda: _build_no_bloom(data, backend=backend),
+            "bloom": lambda: _build(with_attrs=True, data=data, backend=backend),
+            "exact": lambda: _build_exact(data, backend=backend),
+        }
+        src = builders[filter_mode]()
+        # The receiving module must have the saved module's buffer *shapes* (the usual
+        # nn.Module rule), and a second register_index cannot promise that: GPU k-means is
+        # not bit-deterministic (float index_add_ atomics), so the IVF may pad to a
+        # different width. A deep copy fixes the shapes; its buffers are then zeroed and
+        # its caches poisoned, so anything the load does not restore shows up.
+        twin = copy.deepcopy(src)
+        with torch.no_grad():
+            for buf in twin.buffers():
+                buf.zero_()
+        twin._global_scale_f = float("nan")
+        twin._max_cluster_size = -1
+
+        twin.load_state_dict(src.state_dict())
+
+        assert twin._global_scale_f == src._global_scale_f
+        assert twin._max_cluster_size == src._max_cluster_size
+        for (name, a), (_, b) in zip(src.named_buffers(), twin.named_buffers()):
+            assert torch.equal(a, b), name
+        qa = data["q_attrs"] if filter_mode != "none" else None
+        ids_s, sc_s = src(data["query"], qa)
+        ids_t, sc_t = twin(data["query"], qa)
+        assert torch.equal(sc_s, sc_t)
+        for b in range(B):
+            assert_topk_id_sets_match(ids_t, sc_t, ids_s, sc_s, b, atol=0, rtol=0)
 
 
 class TestBuilder:

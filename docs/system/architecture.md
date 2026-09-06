@@ -356,6 +356,15 @@ builders with the filters package, not the module classes:
 > them in any mode**: its `item_codes` and `item_clause_attrs` are in
 > cluster-sorted order and it carries `cluster_offsets` / `sort_perm` /
 > `inv_perm` instead of `padded_cluster_items`.
+>
+> Loading is `nn.Module.load_state_dict` into a module whose
+> `register_index` already ran (the buffers must exist and match in
+> shape). A `load_state_dict` post-hook then re-derives the two Python
+> scalars the forwards read instead of the buffers — `_global_scale_f`
+> (from `global_scale`) and `_max_cluster_size` (from
+> `padded_cluster_items.shape[1]`, or `cluster_sizes.max()` on
+> `"official"`) — with two `.item()` syncs at load time, so a loaded
+> index scores exactly like the saved one.
 
 ## Utility modules
 
