@@ -1,0 +1,409 @@
+### run 2 (no -x, after the three fixes + argsort(stable=True)): uv run --directory retrieve pytest tests/ -q --durations=15 -rs  (2026-09-06T15:29:58Z, tip 563a0f3 + working tree, CUDA_HOME=/usr/local/cuda-12.8, SM clock unlocked: 210 MHz)
+..s.........ssssss.........ssssss....................................... [ 10%]
+........................................................................ [ 20%]
+........................................................................ [ 30%]
+......................s....s....s....s....s....s....s.............s....s [ 41%]
+....s.........ssss...sss...s....s....s....s....s....s....s....s....s.... [ 51%]
+s....s....s........s..................s..s.............................. [ 61%]
+........................................................................ [ 72%]
+............................ssssssssssssssssssssssssssssssssssssssssssss [ 82%]
+ssssssssssssssssssssssssssssssssssssss............................FFFF.. [ 92%]
+.....FFF.............FFF..F........................                      [100%]
+=================================== FAILURES ===================================
+________________ test_t1_exact_mask_bitexact_vs_triton[64-none] ________________
+
+d = 64, reverse = 'none'
+
+    @pytest.mark.parametrize("reverse", ["none", "mixed"])
+    @pytest.mark.parametrize("d", [64, 128])
+    def test_t1_exact_mask_bitexact_vs_triton(d, reverse):
+        """Exact mode on the official scorer is our ``clause_mask`` packed into
+        ``filtering_bit_mask`` (phase 2 ours, full ``N``): the same AND-of-OR / reverse /
+        inactive predicate the Triton exact kernel fuses, so scores are bit-identical to
+        ``codesigned_probe_score_exact`` and to the reference, ids up to ties."""
+        b, k = 16, 32
+        f = Family(b, 64, 96, 8, d)
+        attrs, rev, q_attrs = make_exact(f.n, b, reverse=reverse)
+        mask = clause_mask(attrs[f.sort_perm].contiguous(), rev, q_attrs)  # [B, N] sorted ids
+>       assert mask.shape == (b, f.n)
+E       assert torch.Size([16, 5507]) == (16, 6144)
+E         
+E         At index 1 diff: 5507 != 6144
+E         Use -v to get more diff
+
+tests/parity/test_official.py:223: AssertionError
+_______________ test_t1_exact_mask_bitexact_vs_triton[64-mixed] ________________
+
+d = 64, reverse = 'mixed'
+
+    @pytest.mark.parametrize("reverse", ["none", "mixed"])
+    @pytest.mark.parametrize("d", [64, 128])
+    def test_t1_exact_mask_bitexact_vs_triton(d, reverse):
+        """Exact mode on the official scorer is our ``clause_mask`` packed into
+        ``filtering_bit_mask`` (phase 2 ours, full ``N``): the same AND-of-OR / reverse /
+        inactive predicate the Triton exact kernel fuses, so scores are bit-identical to
+        ``codesigned_probe_score_exact`` and to the reference, ids up to ties."""
+        b, k = 16, 32
+        f = Family(b, 64, 96, 8, d)
+        attrs, rev, q_attrs = make_exact(f.n, b, reverse=reverse)
+        mask = clause_mask(attrs[f.sort_perm].contiguous(), rev, q_attrs)  # [B, N] sorted ids
+>       assert mask.shape == (b, f.n)
+E       assert torch.Size([16, 5507]) == (16, 6144)
+E         
+E         At index 1 diff: 5507 != 6144
+E         Use -v to get more diff
+
+tests/parity/test_official.py:223: AssertionError
+_______________ test_t1_exact_mask_bitexact_vs_triton[128-none] ________________
+
+d = 128, reverse = 'none'
+
+    @pytest.mark.parametrize("reverse", ["none", "mixed"])
+    @pytest.mark.parametrize("d", [64, 128])
+    def test_t1_exact_mask_bitexact_vs_triton(d, reverse):
+        """Exact mode on the official scorer is our ``clause_mask`` packed into
+        ``filtering_bit_mask`` (phase 2 ours, full ``N``): the same AND-of-OR / reverse /
+        inactive predicate the Triton exact kernel fuses, so scores are bit-identical to
+        ``codesigned_probe_score_exact`` and to the reference, ids up to ties."""
+        b, k = 16, 32
+        f = Family(b, 64, 96, 8, d)
+        attrs, rev, q_attrs = make_exact(f.n, b, reverse=reverse)
+        mask = clause_mask(attrs[f.sort_perm].contiguous(), rev, q_attrs)  # [B, N] sorted ids
+>       assert mask.shape == (b, f.n)
+E       assert torch.Size([16, 5507]) == (16, 6144)
+E         
+E         At index 1 diff: 5507 != 6144
+E         Use -v to get more diff
+
+tests/parity/test_official.py:223: AssertionError
+_______________ test_t1_exact_mask_bitexact_vs_triton[128-mixed] _______________
+
+d = 128, reverse = 'mixed'
+
+    @pytest.mark.parametrize("reverse", ["none", "mixed"])
+    @pytest.mark.parametrize("d", [64, 128])
+    def test_t1_exact_mask_bitexact_vs_triton(d, reverse):
+        """Exact mode on the official scorer is our ``clause_mask`` packed into
+        ``filtering_bit_mask`` (phase 2 ours, full ``N``): the same AND-of-OR / reverse /
+        inactive predicate the Triton exact kernel fuses, so scores are bit-identical to
+        ``codesigned_probe_score_exact`` and to the reference, ids up to ties."""
+        b, k = 16, 32
+        f = Family(b, 64, 96, 8, d)
+        attrs, rev, q_attrs = make_exact(f.n, b, reverse=reverse)
+        mask = clause_mask(attrs[f.sort_perm].contiguous(), rev, q_attrs)  # [B, N] sorted ids
+>       assert mask.shape == (b, f.n)
+E       assert torch.Size([16, 5507]) == (16, 6144)
+E         
+E         At index 1 diff: 5507 != 6144
+E         Use -v to get more diff
+
+tests/parity/test_official.py:223: AssertionError
+__________________ test_t3_scorer_reads_filtering_bit_mask[0] __________________
+
+doc = 0
+
+    @pytest.mark.parametrize("doc", [0, 5, 40, 69])
+    def test_t3_scorer_reads_filtering_bit_mask(doc):
+        """A3 probe B as a test: under the pinned read order the one set doc — and only it —
+        is scored; under the other order nothing is (the mirrored bit names a doc past the
+        cluster). The adapter's ``MASK_BIT_ORDER`` must equal the pinned measurement."""
+        assert of.MASK_BIT_ORDER == OFFICIAL_BIT_ORDER
+        scored = _scored_docs(doc, OFFICIAL_BIT_ORDER)
+        assert scored == [doc], (
+            f"with the mask packed {OFFICIAL_BIT_ORDER} the scorer scored docs {scored}, expected "
+            f"[{doc}]: A3's measured bit order no longer holds at this upstream sha"
+        )
+>       assert _scored_docs(doc, OTHER_ORDER) == [], (
+            f"a mask packed {OTHER_ORDER} scored docs — the scorer no longer reads {OFFICIAL_BIT_ORDER}"
+        )
+E       AssertionError: a mask packed low_first scored docs — the scorer no longer reads high_first
+E       assert [63] == []
+E         
+E         Left contains one more item: 63
+E         Use -v to get more diff
+
+tests/parity/test_official.py:361: AssertionError
+__________________ test_t3_scorer_reads_filtering_bit_mask[5] __________________
+
+doc = 5
+
+    @pytest.mark.parametrize("doc", [0, 5, 40, 69])
+    def test_t3_scorer_reads_filtering_bit_mask(doc):
+        """A3 probe B as a test: under the pinned read order the one set doc — and only it —
+        is scored; under the other order nothing is (the mirrored bit names a doc past the
+        cluster). The adapter's ``MASK_BIT_ORDER`` must equal the pinned measurement."""
+        assert of.MASK_BIT_ORDER == OFFICIAL_BIT_ORDER
+        scored = _scored_docs(doc, OFFICIAL_BIT_ORDER)
+        assert scored == [doc], (
+            f"with the mask packed {OFFICIAL_BIT_ORDER} the scorer scored docs {scored}, expected "
+            f"[{doc}]: A3's measured bit order no longer holds at this upstream sha"
+        )
+>       assert _scored_docs(doc, OTHER_ORDER) == [], (
+            f"a mask packed {OTHER_ORDER} scored docs — the scorer no longer reads {OFFICIAL_BIT_ORDER}"
+        )
+E       AssertionError: a mask packed low_first scored docs — the scorer no longer reads high_first
+E       assert [58] == []
+E         
+E         Left contains one more item: 58
+E         Use -v to get more diff
+
+tests/parity/test_official.py:361: AssertionError
+_________________ test_t3_scorer_reads_filtering_bit_mask[40] __________________
+
+doc = 40
+
+    @pytest.mark.parametrize("doc", [0, 5, 40, 69])
+    def test_t3_scorer_reads_filtering_bit_mask(doc):
+        """A3 probe B as a test: under the pinned read order the one set doc — and only it —
+        is scored; under the other order nothing is (the mirrored bit names a doc past the
+        cluster). The adapter's ``MASK_BIT_ORDER`` must equal the pinned measurement."""
+        assert of.MASK_BIT_ORDER == OFFICIAL_BIT_ORDER
+        scored = _scored_docs(doc, OFFICIAL_BIT_ORDER)
+        assert scored == [doc], (
+            f"with the mask packed {OFFICIAL_BIT_ORDER} the scorer scored docs {scored}, expected "
+            f"[{doc}]: A3's measured bit order no longer holds at this upstream sha"
+        )
+>       assert _scored_docs(doc, OTHER_ORDER) == [], (
+            f"a mask packed {OTHER_ORDER} scored docs — the scorer no longer reads {OFFICIAL_BIT_ORDER}"
+        )
+E       AssertionError: a mask packed low_first scored docs — the scorer no longer reads high_first
+E       assert [23] == []
+E         
+E         Left contains one more item: 23
+E         Use -v to get more diff
+
+tests/parity/test_official.py:361: AssertionError
+_____________ test_t6_layer_fp16_default_ranks_like_triton[exact] ______________
+
+data = {'attrs': tensor([[[-1, 49],
+         [-1,  9]],
+
+        [[11,  1],
+         [ 7, 26]],
+
+        [[-1, -1],
+         ...366,  0.1761,  0.0646],
+        [ 0.1220,  0.0465,  0.0392,  ...,  0.0499, -0.0685, -0.1175]],
+       device='cuda:0')}
+filter_mode = 'exact'
+
+    @pytest.mark.parametrize("filter_mode", ["none", "exact"])
+    def test_t6_layer_fp16_default_ranks_like_triton(data, filter_mode):
+        """The default (fp16, timed) path against Triton on the same index: shapes and dtypes
+        as every backend, ``jaccard@K ≥ 0.99`` on the id sets."""
+        tri = _layer(data, "triton", filter_mode)
+        off = _layer(data, "official", filter_mode)
+        assert off.official.score_path == "fp16"
+        _transplant(off, tri)
+        qa = data["q_attrs"] if filter_mode != "none" else None
+        ids_o, sc_o = off(data["query"], qa)
+        ids_t, sc_t = tri(data["query"], qa)
+        assert ids_o.shape == ids_t.shape == (B, K) and ids_o.dtype == torch.long
+        assert sc_o.dtype == torch.float32
+        jac = _jaccard(ids_o, ids_t)
+        print(f"T6 fp16 {filter_mode}: jaccard@{K} vs triton = {jac:.4f}")
+>       assert jac >= 0.99, jac
+E       AssertionError: 0.0948093220338983
+E       assert 0.0948093220338983 >= 0.99
+
+tests/parity/test_official.py:613: AssertionError
+----------------------------- Captured stdout call -----------------------------
+T6 fp16 exact: jaccard@64 vs triton = 0.0948
+_________________________ test_t6_layer_bloom[partial] _________________________
+
+data = {'attrs': tensor([[[-1, 49],
+         [-1,  9]],
+
+        [[11,  1],
+         [ 7, 26]],
+
+        [[-1, -1],
+         ...366,  0.1761,  0.0646],
+        [ 0.1220,  0.0465,  0.0392,  ...,  0.0499, -0.0685, -0.1175]],
+       device='cuda:0')}
+bloom_path = 'partial'
+record_property = <function record_property.<locals>.append_property at 0x7c75e416f9c0>
+
+    @pytest.mark.parametrize("bloom_path", ["partial", "full"])
+    def test_t6_layer_bloom(data, bloom_path, record_property):
+        """Official bloom through the layer (their hash, ``m_bits=None``): the result is the
+        exact-mode Triton result on the same index up to bloom false positives — every
+        returned id that passes the exact predicate is in Triton's exact top-K (or tied at its
+        boundary), and the two bloom paths (partial vs full mask) agree bit for bit."""
+        cfg = OfficialConfig(
+            score_path="int32", bloom_path=bloom_path, b_multiplier=B_MULT, n_stored_hashes=HASH_K
+        )
+        tri = _layer(data, "triton", "exact")
+        off = _layer(data, "official", "bloom", official=cfg)
+        assert off.m_bits == 0 and off.k_hash == K_SEARCH
+        assert off.bloom_index.dtype == torch.int64 and off.bundle_b_offsets.numel() == N // 2048 + 1
+        _transplant(off, tri)
+        ids_o, sc_o = off(data["query"], data["q_attrs"])
+        ids_t, sc_t = tri(data["query"], data["q_attrs"])
+        exact = clause_subset_match(
+            data["attrs"][ids_o.clamp_min(0)], data["q_attrs"], tri.clause_is_reverse
+        ) & (ids_o >= 0)
+        fp = 0
+        for b in range(B):
+            t_set = set(ids_t[b][ids_t[b] >= 0].tolist())
+>           kth = float(sc_t[b][torch.isfinite(sc_t[b])].min().item()) if t_set else float("-inf")
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           RuntimeError: min(): Expected reduction dim to be specified for input.numel() == 0. Specify the reduction dim with the 'dim' argument.
+
+tests/parity/test_official.py:638: RuntimeError
+__________________________ test_t6_layer_bloom[full] ___________________________
+
+data = {'attrs': tensor([[[-1, 49],
+         [-1,  9]],
+
+        [[11,  1],
+         [ 7, 26]],
+
+        [[-1, -1],
+         ...366,  0.1761,  0.0646],
+        [ 0.1220,  0.0465,  0.0392,  ...,  0.0499, -0.0685, -0.1175]],
+       device='cuda:0')}
+bloom_path = 'full'
+record_property = <function record_property.<locals>.append_property at 0x7c75e416da80>
+
+    @pytest.mark.parametrize("bloom_path", ["partial", "full"])
+    def test_t6_layer_bloom(data, bloom_path, record_property):
+        """Official bloom through the layer (their hash, ``m_bits=None``): the result is the
+        exact-mode Triton result on the same index up to bloom false positives — every
+        returned id that passes the exact predicate is in Triton's exact top-K (or tied at its
+        boundary), and the two bloom paths (partial vs full mask) agree bit for bit."""
+        cfg = OfficialConfig(
+            score_path="int32", bloom_path=bloom_path, b_multiplier=B_MULT, n_stored_hashes=HASH_K
+        )
+        tri = _layer(data, "triton", "exact")
+        off = _layer(data, "official", "bloom", official=cfg)
+        assert off.m_bits == 0 and off.k_hash == K_SEARCH
+        assert off.bloom_index.dtype == torch.int64 and off.bundle_b_offsets.numel() == N // 2048 + 1
+        _transplant(off, tri)
+        ids_o, sc_o = off(data["query"], data["q_attrs"])
+        ids_t, sc_t = tri(data["query"], data["q_attrs"])
+        exact = clause_subset_match(
+            data["attrs"][ids_o.clamp_min(0)], data["q_attrs"], tri.clause_is_reverse
+        ) & (ids_o >= 0)
+        fp = 0
+        for b in range(B):
+            t_set = set(ids_t[b][ids_t[b] >= 0].tolist())
+>           kth = float(sc_t[b][torch.isfinite(sc_t[b])].min().item()) if t_set else float("-inf")
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           RuntimeError: min(): Expected reduction dim to be specified for input.numel() == 0. Specify the reduction dim with the 'dim' argument.
+
+tests/parity/test_official.py:638: RuntimeError
+__________________________ test_t7_sync_count_per_op ___________________________
+
+record_property = <function record_property.<locals>.append_property at 0x7c75d6eaaf20>
+
+    def test_t7_sync_count_per_op(record_property):
+        """Records the host syncs each official op performs under
+        ``torch.cuda.set_sync_debug_mode("warn")`` — the fact behind D7 (plan §3 expects 2 for
+        ``fused_kmean_ann``, ≥ 1 for the partial-response search and the partial-mask scorer).
+        Asserted only to be > 0 for the scorer, which is what makes the backend uncapturable;
+        the exact numbers are A3's to confirm and are printed here."""
+        attrs, offsets, sizes, index, boff = _bloom_corpus()
+        n, c, _ = attrs.shape
+        codes, _ = quantize_int8_global(make_index(n, 64))
+        q_codes = torch.randint(-128, 128, (4, 64), dtype=torch.int8, device="cuda")
+        g = torch.Generator(device="cuda").manual_seed(47)
+        probe_ids = torch.randint(0, sizes.numel(), (4, 4), generator=g, device="cuda")
+        qa = make_query_attrs(4, c=c, n_vocab=50, seed=48)
+        expressions = of.queries_to_expressions(qa)
+        plans = of.parse_plans(expressions, HASH_K)
+        max_row = 4 * int(sizes[0].item())
+        partial = of.bloom_partial_masks(
+            index, boff, plans, offsets[probe_ids], sizes[probe_ids], K_SEARCH, HASH_K
+        )
+        counts = {
+            # The parse a timing run pays per forward (OfficialConfig.cache_plans=False): a CPU
+            # op, so 0 device syncs is the expected record; the plan upload is the search ops'.
+            "parse_expression_query_batch[cache=False]": _count_syncs(
+                lambda: of.parse_plans(expressions, HASH_K, cache=False)
+            ),
+            "fused_kmean_ann": _count_syncs(
+                lambda: of.fused_scores(q_codes, probe_ids, offsets, sizes, codes, max_row)
+            ),
+            "bloom_index_search_batch_return_partial_response": _count_syncs(
+                lambda: of.bloom_partial_masks(
+                    index, boff, plans, offsets[probe_ids], sizes[probe_ids], K_SEARCH, HASH_K
+                )
+            ),
+            "fused_kmean_ann_with_partial_masks": _count_syncs(
+                lambda: of.fused_scores(
+                    q_codes, probe_ids, offsets, sizes, codes, max_row, partial=partial
+                )
+            ),
+            "bloom_index_search_batch": _count_syncs(
+                lambda: of.bloom_full_mask(index, boff, plans, K_SEARCH, HASH_K)
+            ),
+        }
+        for name, n_sync in counts.items():
+            record_property(f"syncs_{name}", n_sync)
+            print(f"T7 syncs per call — {name}: {n_sync}")
+>       assert counts["fused_kmean_ann"] > 0, (
+            "plan §3: the scorer syncs the host (repeat_interleave + .item())"
+        )
+E       AssertionError: plan §3: the scorer syncs the host (repeat_interleave + .item())
+E       assert 0 > 0
+
+tests/parity/test_official.py:809: AssertionError
+----------------------------- Captured stdout call -----------------------------
+T7 syncs per call — parse_expression_query_batch[cache=False]: 1
+T7 syncs per call — fused_kmean_ann: 0
+T7 syncs per call — bloom_index_search_batch_return_partial_response: 0
+T7 syncs per call — fused_kmean_ann_with_partial_masks: 0
+T7 syncs per call — bloom_index_search_batch: 0
+----------------------------- Captured stderr call -----------------------------
+[W906 15:30:57.782319779 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W906 15:30:57.782460729 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W906 15:30:57.782622209 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W906 15:30:57.783260607 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W906 15:30:57.783374277 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W906 15:30:57.783878696 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W906 15:30:57.784042626 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W906 15:30:57.784155946 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W906 15:30:57.784280476 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+=============================== warnings summary ===============================
+tests/compile/test_silvertorch_compile.py: 14 warnings
+  /venvs/integration/lib/python3.11/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+tests/parity/test_official.py::test_t7_compile_refused
+  /venvs/integration/lib/python3.11/site-packages/torch/_inductor/compile_fx.py:321: UserWarning: TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. Consider setting `torch.set_float32_matmul_precision('high')` for better performance.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============================= slowest 15 durations =============================
+3.48s call     tests/parity/test_official.py::test_t7_compile_refused
+2.13s call     tests/compile/test_silvertorch_compile.py::test_compiled_forward_matches_eager[none-triton-64]
+1.39s call     tests/compile/test_export_kernel_ref.py::test_export_preserves_kernel_reference[triton]
+0.99s call     tests/correctness/test_bloom_hash.py::test_clause_salt_buffer_is_bit_identical_to_inline_salt[cpu]
+0.75s call     tests/compile/test_silvertorch_compile.py::test_compiled_forward_matches_eager[bloom-triton-64]
+0.70s call     tests/correctness/test_linr.py::TestEdgeCases::test_mask_all_true_equals_unmasked[PostfilterKNN-torch]
+0.70s call     tests/parity/test_bloom_match.py::test_bloom_match_matches_pure_torch[3-1024-4096]
+0.70s call     tests/parity/test_bloom_match.py::test_bloom_match_matches_pure_torch[7-1024-512]
+0.70s call     tests/correctness/test_linr.py::TestCrossBackendAgreement::test_one_bit_torch_matches_one_bit_triton[0.8]
+0.69s call     tests/correctness/test_linr.py::TestCrossBackendAgreement::test_prefilter_torch_matches_prefilter_triton[0.1]
+0.69s call     tests/correctness/test_linr.py::TestEdgeCases::test_one_bit_knn_all_candidates_equals_unmasked[triton]
+0.69s call     tests/correctness/test_linr.py::TestCrossBackendAgreement::test_postfilter_knn_matches_prefilter_topk_set[0.8]
+0.69s call     tests/correctness/test_linr.py::TestEdgeCases::test_one_bit_knn_all_candidates_equals_unmasked[torch]
+0.69s call     tests/parity/test_bloom_match.py::test_bloom_match_matches_pure_torch[7-1024-4096]
+0.69s call     tests/correctness/test_linr.py::TestCrossBackendAgreement::test_one_bit_torch_matches_one_bit_triton[None]
+=========================== short test summary info ============================
+SKIPPED [45] tests/conftest.py:76: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [6] tests/parity/test_codesigned_probe_score_cute.py:71: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [4] tests/parity/test_codesigned_probe_score_cute.py:87: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [12] tests/parity/test_codesigned_probe_score_cute.py:116: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [6] tests/parity/test_codesigned_probe_score_cute.py:152: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [6] tests/parity/test_codesigned_probe_score_cute.py:189: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [36] tests/parity/test_codesigned_probe_score_cute.py:253: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [2] tests/parity/test_codesigned_probe_score_cute.py:329: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [2] tests/parity/test_codesigned_probe_score_cute.py:355: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [1] tests/parity/test_codesigned_probe_score_cute.py:382: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [1] tests/parity/test_codesigned_probe_score_cute.py:441: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [2] tests/parity/test_codesigned_probe_score_cute.py:474: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [4] tests/parity/test_codesigned_probe_score_cute.py:505: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+11 failed, 561 passed, 127 skipped, 15 warnings in 57.48s
+### exit 1 at 15:31:01Z
