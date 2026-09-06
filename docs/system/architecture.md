@@ -372,7 +372,14 @@ builders with the filters package, not the module classes:
   mode="reduce-overhead")`).
 - [`KMeansTorch`](../../retrieve/src/retrieve/layers/utils/kmeans.py) —
   pure-torch Lloyd's k-means used by `SilverTorch` for IVF index
-  building (not a `RetrievalModule`).
+  building (not a `RetrievalModule`). `fit` is **bit-for-bit reproducible
+  run to run**: the centroid update reduces with a float64 one-hot GEMM
+  accumulated panel by panel, not `index_add_`'s floating-point atomics,
+  whose scheduling-dependent order made two seed-0 builds differ by 1.8e-2
+  in the centroids and put every SilverTorch quality number out of reach of
+  the golden gate's 1e-6 (roadmap C4). Costs ~1.3x the old `fit` wall time
+  at N=200k, D=128, n_lists=1024, bounded by one extra assignment-sized
+  matmul per Lloyd iteration.
 - Two abstract bases plus the two backend literals and their validator in
   [`interfaces.py`](../../retrieve/src/retrieve/interfaces.py):
   `RetrievalModule` (a minimal lifecycle ABC — `k` attr + abstract
@@ -404,8 +411,13 @@ not a kernel of ours at all:
 [`silvertorch/official.py`](../../retrieve/src/retrieve/kernels/silvertorch/official.py)
 adapts Meta's `torch.ops.st.*` ops (measured on the A100: 19 launches
 and 3 host syncs per unfiltered forward, ≈ 32 launches and ≥ 5 syncs
-with bloom — plan §13.2). Full per-kernel detail in
-[kernels.md](kernels.md).
+with bloom — plan §13.2). Eight of the ten ops are registered with
+`@torch.library.triton_op` so inductor can see the `@triton.jit` body; the
+two stream-compaction kernels (`clause_compact`, `bloom_compact`) are
+opaque `@torch.library.custom_op`s instead, because their data-dependent
+store address makes inductor's mutation analysis flag the index buffers and
+cudagraph trees skip the compiled forward. Full per-kernel detail, and that
+mechanism, in [kernels.md](kernels.md).
 
 | subtree                                                                                              | kernel                                                                                                                                | consumer                          |
 |------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------|
