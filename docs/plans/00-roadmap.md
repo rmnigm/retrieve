@@ -14,8 +14,9 @@ want to know how something *works*, those are the maintained references;
 a plan only tells you why it was built that way.
 
 **How to keep this file true.** Each step below has a checkbox, the plan
-section it executes, where it runs (`Mac` = this CUDA-less dev machine,
-`A100` = the GPU box), its gate, and what it unblocks. When you finish a
+section it executes, where it runs (`A100` = needs GPU time; `Mac` =
+legacy label, needs no GPU time and runs on the box's CPUs — there is no
+Mac target since 2026-09-06), its gate, and what it unblocks. When you finish a
 step: run its gate, append the validation record to the *plan's own*
 record section (the model is
 [cuda-silvertorch-handoff.md §13](cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360)),
@@ -65,40 +66,11 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
 
 ### Phase A — unblock the tree
 
-- [ ] **A0 — make the Mac able to run this repo's Python.** (Mac, 0.5 d.)
-  Today it cannot: `.venv` has no torch and `import retrieve` is
-  impossible here, so *no* `Mac` step below can run its own tests or meet
-  its own gate. Two causes, both verified 2026-09-06.
-  (a) `evaluation/pyproject.toml:41–48` pins `torch` to the
-  `pytorch-cu128` index unconditionally, and that index has no macOS
-  wheels — while PyPI's `torch` does (`torch-2.8.0-cp311-none-macosx_11_0_arm64.whl`,
-  73.6 MB). (b) `retrieve` requires `triton>=3.0`, which publishes
-  manylinux wheels *only* (triton 3.8.0 ships
-  `manylinux_2_27_{x86_64,aarch64}` and nothing else), and ten
-  module-level `from retrieve.kernels…` imports in `layers/` make
-  `import retrieve` fail without it
-  ([main.py:10–28](../../retrieve/src/retrieve/layers/silvertorch/main.py),
-  `layers/filters/{bloom,exact_attribute}.py`,
-  `layers/linr/{prefilter_knn,_bit_knn}.py`).
-  Three changes: marker the triton requirement `sys_platform == "linux"`;
-  marker the cu128 index source the same way so the Mac resolves CPU
-  torch from PyPI; move those ten imports into the functions that launch
-  the kernels. **This is not a CPU emulator** (rule 1): nothing
-  device-side is simulated or stubbed — the kernels simply are not
-  importable off Linux, and a Triton path now raises at call time instead
-  of at import time. Gate: `uv sync` succeeds on the Mac, `import
-  retrieve` works, `uv run pytest evaluation/retrieval/tests/` collects
-  and the CPU-only tests pass, and the A100's resolution is unchanged
-  (`uv.lock` diff touches markers only; re-`uv sync` on the box before
-  A1). **Version skew:** a two-index lock resolves torch per platform, and
-  PyPI is ahead of the pinned cu128 index — a scratch venv on the Mac took
-  `torch 2.14.0` (verified 2026-09-06, imports fine, MPS available) while
-  the box runs 2.10.0+cu128. Either constrain the Mac side to the box's
-  version or accept the skew and say so in `docs/system/testing.md`; what
-  must not happen is the Linux resolution moving off 2.10.0+cu128, so
-  check that in the `uv.lock` diff. Nothing citable comes off the Mac
-  anyway (rule 2) — this only affects whether a green Mac test means
-  anything about the box. Unblocks: **every `Mac` step in this file.**
+- [x] ~~**A0 — make the Mac able to run this repo's Python.**~~ **Dropped
+  2026-09-06 (user decision): GPU environments are the only target; Mac
+  support is not a goal.** Nothing below depends on it any more — every
+  step runs on the GPU box, and the "Mac" label on a step now only means
+  "needs no GPU time", i.e. it can run on the box while the GPU is busy.
 - [ ] **A1 — golden baseline on the old harness.** H §6 WP-0 (A100,
   0.5 d). Commit the 3-line `users_limit` row-count fix; run the golden
   cells on goodreads-d128 `c0_genre` (all five algos, `triton` + `torch`)
@@ -293,7 +265,7 @@ and ingestion plans: [dataset-candidates.md](dataset-candidates.md)
 ## 2. Dependencies at a glance
 
 ```
-A0 ─> every Mac step (B1, B4, B5, C1–C3, D4, E1–E4 loaders, F1, F3, G-a)
+(A0 dropped 2026-09-06 — no Mac target)
 A1 ─┬─> A4 (merge)
     └─> C1 ─> C2 ─> C3 ─> C4 ─┬─> D1 ─> D4 ─┐
 A2 ─> A3 ─> B1 ─> B2 ─┬─> B4   │   D2, D3 ──┼─> F2, F5
@@ -310,13 +282,13 @@ ingestion runs on the box whenever it is otherwise idle.
 ### 2.1 Where each step runs
 
 The A100 is the bottleneck, so this is the partition to schedule
-against. **Mac** means it needs neither a GPU nor a GPU-produced number;
-A0 is what makes that column real, and nothing in it can start before A0
-lands.
+against. **Mac** means it needs neither a GPU nor a GPU-produced number,
+so it can run on the box's CPUs while the GPU is busy. (A0 was dropped
+2026-09-06: there is no Mac target, every step runs on the GPU box.)
 
 | GPU box only | Mac, startable after A0 | Mac, waiting on a GPU number |
 |---|---|---|
-| A1, A2, A3 | **A0**, C1, C2, C3 (the harness rewrite, 5 d) | A4 — needs A1 |
+| A1, A2, A3 | C1, C2, C3 (the harness rewrite, 5 d) | A4 — needs A1 |
 | B2, B3 | B1 †, B5, D4 | B4 — needs B2 |
 | C4, D1, D2, D3 | E0, E1 download + parse ‡, E1–E4 loader code + fixture tests | F2 — needs B3 + D1 |
 | E1–E4 encode / PCA / gSASRec / oracle builds, E5 | F1, F3, G-e re-scope, G-a kernel authoring | F4 — needs D1; F5 — needs all |
@@ -337,8 +309,8 @@ Python that can be written and unit-tested here against fixtures —
 `eval_datasets/` is 3,875 lines with **no tests at all** today, and Phase
 E adds four more loaders to it.
 
-Mac-side critical path, all of it startable as soon as A0 lands:
-**A0 → C1 → C2 → C3** (5.5 d), with B1, B5, D4, F1, F3 and the E-phase
+CPU-side critical path, startable at once:
+**C1 → C2 → C3** (5 d), with B1, B5, D4, F1, F3 and the E-phase
 loaders as filler — ≈ 11 focused days that never touch the A100.
 
 ## 3. Superseded and parked
