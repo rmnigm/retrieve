@@ -1,0 +1,53 @@
+{
+  "prep": {
+    "n_items": 10000000,
+    "base_norm": {
+      "mean": 1819.383,
+      "std": 20.063,
+      "cv": 0.01103,
+      "sample": 4097
+    },
+    "tag_csr": {
+      "nnz": 108210476,
+      "n_tags": 200386
+    },
+    "n_queries": 100000,
+    "query_tag_hist": [
+      0,
+      61626,
+      38374
+    ],
+    "wall_clock_sec": 16.7
+  },
+  "attrs": {
+    "max_tags": 32,
+    "n_clauses": 2,
+    "tag_vocab_size": 7910,
+    "cap": {
+      "n_items": 10000000,
+      "max_tags": 32,
+      "tag_entries_total": 108210476,
+      "tag_entries_in_query_vocab": 77225208,
+      "tag_entries_kept": 72906366,
+      "tags_per_item_mean": 10.821,
+      "tags_per_item_max": 1517,
+      "restricted_tags_per_item_mean": 7.7225,
+      "restricted_tags_per_item_max": 737,
+      "items_uncapped_frac": 0.985123,
+      "items_with_no_tags": 3263
+    },
+    "queries_with_2_tags": 38374,
+    "gt_fidelity": {
+      "queries_fully_preserved": 74214,
+      "queries_fully_preserved_frac": 0.74214,
+      "gt_entries_preserved_frac": 0.848636,
+      "note": "capping is subtractive, so a query whose whole GT row survives has a capped-attrs exact top-k identical to the shipped GT; the rest have a strictly stricter predicate. The harness builds its oracle from these same capped attrs, so its recall stays internally exact \u2014 the shipped GT is checked separately by yfcc_check_gt.py against the uncapped item_tags_csr.pt."
+    },
+    "item_attrs_narrow_shape": [
+      10000000,
+      2,
+      32
+    ],
+    "wall_clock_sec": 20.5
+  }
+}

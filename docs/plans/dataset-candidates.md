@@ -190,6 +190,17 @@ the n-core or indexing all tracks while training only on the core.
 
 ### 3.4 YFCC-10M (NeurIPS'23 Big-ANN filtered track)
 
+> **Downloaded and ingested (2026-09-06, roadmap E1).** All six URLs below served
+> `HTTP/2 200`; every size matches, including the two this note had not probed
+> (`query.metadata.public.100K.spmat` 1,907,024 B, `unfiltered.GT.public.ibin`
+> 80,000,008 B). Loader, gate script, config and the fidelity numbers for gotcha (a)'s
+> cap: [dataset-candidates-artifacts/](dataset-candidates-artifacts/README.md) and
+> [../system/datasets.md](../system/datasets.md#yfcc10m). Two answers to the open
+> questions below: gotcha (b) — the vocabulary file exposes no prefix, so the tag bag
+> stays **one** clause duplicated across two slots (query tag *j* → clause *j*), not
+> separate year/country/camera clauses; §5 q.5 — the tail is long (max 1,517 tags on
+> one item), so K is capped at 32 and the truncation is recorded in `prep_log.json`.
+
 > **Access (2026-09-05).** The user's earlier attempt to download YFCC-10M failed. A `HEAD`
 > request from the dev Mac the same day returned `HTTP/2 200` with full sizes for the four
 > files below (`base.10M.u8bin` 1,920,000,008 B; `query.public.100K.u8bin` 19,200,008 B;

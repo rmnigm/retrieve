@@ -457,6 +457,16 @@ cache instead of silently reusing stale ground truth (the failure mode
 behind the goodreads stale-cache incident). These caches are local
 build artifacts — delete the `gt_subdir` to force a rebuild.
 
+There is **no way to hand the harness a precomputed oracle**. That only
+matters for yfcc10m, the one dataset that ships its own filtered ground
+truth: it is staged as `gt_shipped.pt` and checked out-of-band by
+`eval_datasets/yfcc_check_gt.py` — see
+[datasets.md](datasets.md#yfcc10m). The oracle is also inner-product-only
+(`q @ E_t` on L2-normalised embeddings), so yfcc10m sweeps measure cosine
+while its shipped ground truth is squared L2. Both gaps are logged for
+harness v2 in
+[evaluation-harness-v2.md §7](../plans/evaluation-harness-v2.md#7-risks--open-questions).
+
 ### Perf pass
 
 [`perf_pass_cached`](../../evaluation/retrieval/passes.py) measures the
@@ -678,7 +688,13 @@ Attr/reverse paths in the YAML resolve cwd-relative first, then
 tensor is gone).
 
 The CLIs are console scripts: `uv run yambda prep ...`,
-`uv run arxiv all ...`, `uv run goodreads all ...`.
+`uv run arxiv all ...`, `uv run goodreads all ...`, `uv run yfcc all ...`.
+
+`yfcc10m` uses the pre-encoded layout above with `content_subdir:
+content_d192`, no `papers.parquet`, and `emb_provenance.json` in place of
+the `*.meta.json` sidecars (those are nomic-prefix assertions that do not
+apply); it also carries `item_tags_csr.pt` and `gt_shipped.pt`, neither of
+which the harness reads. See [datasets.md](datasets.md#yfcc10m).
 
 ### HuggingFace I/O
 
