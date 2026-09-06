@@ -99,7 +99,10 @@ def test_gather_ids_mapping():
     ids, out_scores = masked_topk(scores, 2, gather_ids=gather_ids)
 
     assert ids[0].tolist() == [200, 400]
-    assert out_scores[0].tolist() == [0.9, 0.7]
+    # Exact equality against the fp32 inputs the winners were read from — not against the
+    # Python literals: ``torch.tensor([0.9])`` is fp32 and ``.tolist()`` gives back
+    # 0.8999999761581421, so a literal compare can never pass.
+    assert torch.equal(out_scores[0], scores[0, [1, 3]])
 
 
 def test_gather_ids_with_mask_sentinel():
@@ -112,7 +115,7 @@ def test_gather_ids_with_mask_sentinel():
 
     # Only lane 0 valid: its global id wins, the rest are sentinels.
     assert ids[0].tolist() == [100, -1]
-    assert out_scores[0].tolist() == [0.1, NEG_INF]
+    assert torch.equal(out_scores[0], torch.tensor([scores[0, 0], NEG_INF]))
 
 
 def test_pad_to_k_true_p_less_than_k():
