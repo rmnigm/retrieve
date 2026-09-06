@@ -99,6 +99,15 @@ cand_ids, counts = combine_indices([ef, bf], [qa, qa])
 ids, scores = prefilter_knn(query, candidate_ids=cand_ids, counts=counts)
 ```
 
+**When a filter leaves fewer than K survivors** the returned top-K row is
+padded: the dead slots carry score `-inf` and id `-1`, on every backend and
+on both the standalone-filter paths above and SilverTorch's fused
+`filter_mode="bloom" / "exact"` path (the two Triton epilogues apply the
+sentinel themselves — see [kernels.md](kernels.md#score-conventions)).
+Callers must drop those slots rather than treat `-1` as an item: a hit-based
+metric that only compares ids would otherwise score a padded slot against a
+target id of `-1`.
+
 ## Bloom hash keys: `(clause_idx, value)`
 
 The paper says *"for each feature, we apply K hash functions"* — and a
