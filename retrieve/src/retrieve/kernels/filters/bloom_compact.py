@@ -13,7 +13,8 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
-from retrieve.kernels import common
+# By name, not `common.<fn>` — see the note in clause_mask.py.
+from retrieve.kernels.common import bloom_subset_pass, compact_store
 
 
 @dataclass(frozen=True)
@@ -67,9 +68,9 @@ def _bloom_compact_kernel(
 
     # Helper leaves masking to the caller (lanes loaded with other=0 pass iff qb == 0), so AND
     # with n_valid here.
-    pass_mask = common.bloom_subset_pass(qb, sigs) & n_valid
+    pass_mask = bloom_subset_pass(qb, sigs) & n_valid
 
-    common.compact_store(
+    compact_store(
         pass_mask, n_offsets, counts_ptr, out_indices_ptr, bid, stride_ob, stride_on
     )
 
