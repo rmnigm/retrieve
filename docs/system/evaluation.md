@@ -142,9 +142,14 @@ Two things to read the numbers with, stated rather than changed:
   GPU idles waiting for the host (eager, `bs = 1`) the interval includes
   launch latency and `host_gap_ms ≈ 0`. That is the latency the papers
   report; `--profile` (`kernels`) is the kernel-time view.
-- **Clocks are sampled between cells with the GPU idle.** Without
+- **`env.sm_mhz` is sampled between cells with the GPU idle.** Without
   `nvidia-smi -lgc` that reads the idle clock and the 5 % drift warning
-  fires spuriously; with locked clocks (the runbook) it is right.
+  fires spuriously; with locked clocks (the runbook) it is right. The
+  per-variant `perf[].sm_mhz` is the under-load sample (taken right after
+  the last timing window's sync) and is what an unlocked-clock run's
+  latencies are read against (H §7's fallback; C4's gate script
+  `c4_gate.py` under the plan's artifacts reports it next to the
+  golden's recorded 1140 MHz).
 
 ## Architecture
 
@@ -437,6 +442,8 @@ Perf entry:
 | `spread`, `unstable` | `(max − min) / median` of the three window medians; `> 0.05` |
 | `window_medians_ms` | the three medians |
 | `peak_fwd_mib` | eager only, first window: `max_memory_allocated − allocated_before` |
+| `sm_mhz` | the SM clock sampled right after the last window's sync, with the GPU still at its load clock — the per-variant value H §7's unlocked-clock fallback compares (`env.sm_mhz` is the idle sample between cells); `null` without CUDA |
+| `cache_plans` | on every entry: `false` on `silvertorch`/`official` (`run.perf` calls `set_plan_cache(False)` before the first variant, so every timed forward pays the CPU expression parse), `null` on backends without a plan cache |
 | `load` | `"closed_loop"` |
 | `kernels` | `--profile`, eager only: top-8 CUDA kernels `{kernel, us, calls}` |
 | `reason` | present when the variant could not run (`not_capturable`, `cuda_unavailable`, `cudagraph_skips=N`, `cudaGraphLaunch per call = N, expected 1`); every stat key is then `null` |
@@ -645,8 +652,14 @@ expression plans on the CPU (≈ 59 µs per call at B=16, plan §13.2 —
 expression tuple by default. `latency()` replays one fixed batch, so
 after the first call a cached official cell never pays the parse and
 its latency is not what serving fresh queries costs. An official cell
-that is timed must build the module with `OfficialConfig(cache_plans=
-False)` (every forward parses; results are bit-identical) or report
-both settings as separate, labelled rows. The harness does not do this
-yet — it belongs to roadmap C4, the harness-v2 GPU gate whose official
-cell runs end to end; until then no official bloom latency is citable.
+that is timed must run with `OfficialConfig(cache_plans=False)` (every
+forward parses; results are bit-identical) or report both settings as
+separate, labelled rows. The harness does the former (C4): the module
+is built with the library's default config (cache on) and quality runs
+against it; `run.perf` then calls `algos.Silvertorch.set_plan_cache(False)`
+— `cache_plans` is read per forward by `parse_plans`, nothing at build
+depends on it, so this is an in-place `dataclasses.replace` of
+`SilverTorch.official`, no rebuild — before the first timed variant, and
+every perf entry records `cache_plans` (`false` there, `null` on the
+backends that have no such cache). A cell whose perf entries say
+`cache_plans: true` is not a timing number.

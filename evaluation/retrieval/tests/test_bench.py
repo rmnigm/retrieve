@@ -59,6 +59,7 @@ def test_latency_windows_and_keys():
     assert d["median_ms"] == sorted(d["window_medians_ms"])[1]
     assert d["spread"] >= 0.0 and isinstance(d["unstable"], bool)
     assert d["peak_fwd_mib"] is None  # no CUDA allocator to read on this box
+    assert d["sm_mhz"] is None  # the under-load clock sample is a CUDA-only observation
     floats = ("median_ms", "mean_ms", "p95_ms", "p99_ms", "min_ms", "iqr_ms", "qps", "host_gap_ms")
     assert all(isinstance(d[key], float) for key in floats)
 

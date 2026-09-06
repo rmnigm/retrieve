@@ -290,6 +290,29 @@ def test_silvertorch_query_params_revalidate():
         st.set_query_params(n_probe=1)  # ... which a single probed list cannot serve
 
 
+def test_silvertorch_plan_cache_is_official_only():
+    """``set_plan_cache`` / ``cache_plans`` (the official timing rule of kernels.md) are a
+    no-op / ``None`` on every other backend; on ``official`` — simulated here, the ops need
+    CUDA — the flip replaces ``OfficialConfig.cache_plans`` in place and nothing else."""
+    from retrieve.layers.silvertorch import OfficialConfig  # noqa: PLC0415
+
+    x, _, attrs, _ = _data()
+    m = A.build(
+        "silvertorch", x, k=4, backend="torch", params={"n_lists": 8, "n_probe": 2, "n_iter": 2}
+    )
+    assert m.cache_plans is None
+    m.set_plan_cache(False)
+    assert m.cache_plans is None and m.idx.official.cache_plans is True  # untouched
+    m.idx.backend = "official"
+    m.idx.official = OfficialConfig(b_multiplier=4.0)
+    assert m.cache_plans is True
+    m.set_plan_cache(False)
+    assert m.cache_plans is False and m.idx.official.cache_plans is False
+    assert m.idx.official.b_multiplier == 4.0 and m.idx.official.score_path == "fp16"
+    m.set_plan_cache(True)
+    assert m.cache_plans is True
+
+
 def test_linr_v3_query_params():
     x, q, _, _ = _data()
     m = A.build("linr_v3", x, k=4, backend="torch", params={"candidate_pool": 16})
