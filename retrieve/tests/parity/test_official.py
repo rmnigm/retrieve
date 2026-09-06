@@ -679,10 +679,13 @@ def test_t6_layer_contract(data):
     ids_t, sc_t = tri(data["query"], candidate_ids=cand)
     ids_o, sc_o = off(data["query"], candidate_ids=cand)
     assert torch.equal(sc_o, sc_t) and torch.equal(ids_o, ids_t)
-    # State-dict round trip into a freshly registered module of the same shape.
+    # State-dict round trip into a freshly registered module of the same shape (the CSR
+    # layout's buffer shapes do not depend on the k-means outcome); the load hook
+    # re-derives the cached scalars, nothing is patched by hand.
     twin = _layer(data, "official", "none")
     twin.load_state_dict(off.state_dict())
-    twin._max_cluster_size, twin._global_scale_f = off._max_cluster_size, off._global_scale_f
+    assert twin._max_cluster_size == off._max_cluster_size
+    assert twin._global_scale_f == off._global_scale_f
     a, b = off(data["query"]), twin(data["query"])
     assert torch.equal(a[0], b[0]) and torch.equal(a[1], b[1])
     # Bloom configured without attributes: plain queries work, attribute queries raise.

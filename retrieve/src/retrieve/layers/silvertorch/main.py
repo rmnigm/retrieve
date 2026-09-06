@@ -76,7 +76,10 @@ class SilverTorch(RetrievalModule):
     official registers ``bloom_index`` / ``bundle_b_offsets``) — a cuda or cute ``"exact"``
     module's state_dict is identical to a triton one's, and a cute checkpoint is
     byte-identical to a cuda one; an official state_dict is portable to no other backend
-    (cluster-sorted ``item_codes``, no ``padded_cluster_items``)."""
+    (cluster-sorted ``item_codes``, no ``padded_cluster_items``). ``load_state_dict`` into a
+    module of the same shape (one whose ``register_index`` already ran) re-derives the two
+    Python-scalar caches the forwards read (``_global_scale_f``, ``_max_cluster_size``) from
+    the loaded buffers, so a loaded index scores like the one that was saved."""
 
     centroids: Tensor
     item_codes: Tensor
@@ -164,6 +167,10 @@ class SilverTorch(RetrievalModule):
         self.n_iter = n_iter
         self.seed = seed
         self.backend = backend
+        # The two Python-scalar caches below (_global_scale_f, _max_cluster_size) are set by
+        # register_index; a state-dict load replaces the buffers they were derived from, so
+        # they are re-derived after every load_state_dict.
+        self.register_load_state_dict_post_hook(_rederive_cached_scalars)
 
     @property
     def has_bloom(self) -> bool:
@@ -706,6 +713,23 @@ class SilverTorch(RetrievalModule):
         # non-finite → -1 sentinel never fires; pad_to_k=False keeps the current
         # min(k, P)-column, no-pad, no-sentinel semantics when P < k.
         return masked_topk(scores, self.k, gather_ids=candidate_ids, pad_to_k=False)
+
+
+def _rederive_cached_scalars(module: SilverTorch, incompatible_keys) -> None:
+    """``load_state_dict`` post-hook: re-derive ``_global_scale_f`` and ``_max_cluster_size``
+    from the loaded buffers. Both are plain Python scalars cached at ``register_index`` so
+    the forwards issue no per-call ``.item()`` sync (cudagraph capture) and no shape read
+    (SymInt under ``torch.compile(dynamic=True)``); a load replaces the buffers underneath
+    them. The two ``.item()`` syncs here run once, at load time. Buffers absent from the
+    module (a load before ``register_index``, or a ``strict=False`` partial load) leave the
+    corresponding cache untouched."""
+    if hasattr(module, "global_scale"):
+        module._global_scale_f = float(module.global_scale.item())
+    if hasattr(module, "padded_cluster_items"):
+        module._max_cluster_size = int(module.padded_cluster_items.shape[1])
+    elif hasattr(module, "cluster_sizes"):
+        # Official layout: no padded table; the width is the largest cluster.
+        module._max_cluster_size = int(module.cluster_sizes.max().item())
 
 
 def build_silvertorch(
