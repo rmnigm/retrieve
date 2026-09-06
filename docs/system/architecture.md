@@ -27,7 +27,9 @@ pinned by sha in the workspace root's `[tool.uv.sources]`, which builds a
 CUDA extension and registers nine `torch.ops.st.*` ops. The adapter lives
 in `kernels/silvertorch/official.py`; without the package,
 `SilverTorch(backend="official")` raises `OfficialMissing`. Installing it
-needs `nvcc` (12.x), `ninja` and `setuptools`; see
+needs an nvcc that matches the torch wheel (`CUDA_HOME=/usr/local/cuda-12.8`
+for the cu128 wheel — upstream's README insists on the match), `ninja` and
+`setuptools`; see
 [../plans/official-silvertorch-artifacts/README.md](../plans/official-silvertorch-artifacts/README.md)
 for the pin, the build record and the upstream-suite result.
 
