@@ -2,7 +2,10 @@
 
 Plain torch path: scores the model's last-position query against the full item
 catalog, masks history (and padding), takes top-K, and computes
-NDCG/Recall/Coverage at the requested cutoffs. No `retrieve` framework.
+NDCG/Recall/Coverage at the requested cutoffs. No `retrieve` layers; the
+metric sums are `retrieval.metrics` (shared with the harness — the one
+`training → retrieval` import, so the two packages depend on each other
+through that module only; `encode.py` is the import the other way).
 """
 
 from __future__ import annotations
@@ -11,7 +14,7 @@ import polars as pl
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from retrieval.metrics import accumulate_metrics, finalize_metrics
+from retrieval.metrics import accumulate, accumulator, finalize
 
 
 class EvalDataset(Dataset):
@@ -91,7 +94,7 @@ def evaluate(
     n_total = item_embs.shape[0]
     chunk = min(max(score_chunk, 1), n_total)
     coverage_seen = {k: torch.zeros(num_items + 1, dtype=torch.bool, device=dev) for k in ks}
-    accum: dict[str, list[float]] | None = None
+    acc = accumulator(list(ks), dev)
     k_max = min(max(ks), num_items)
     amp_enabled = use_amp and dev.type == "cuda"
 
@@ -131,11 +134,11 @@ def evaluate(
             topk_idx = cat_idx.gather(1, sel.indices)
 
         topk = topk_idx
-        accum = accumulate_metrics(topk, targets, num_targets, list(ks), accum)
+        accumulate(acc, topk, targets, num_targets)
         for k in ks:
             coverage_seen[k].scatter_(0, topk[:, :k].reshape(-1), True)
 
-    out_full = finalize_metrics(accum) if accum is not None else {}
+    out_full = finalize(acc)
     out: dict[str, float] = {
         key: val for key, val in out_full.items() if key.startswith(("ndcg@", "recall@"))
     }

@@ -14,7 +14,7 @@
 > Line references are against commit `2b1ff80` and are **stale**; functions are also named, so
 > drifted references are recoverable by name.
 >
-> Companion plans: [evaluation-refactor.md](evaluation-refactor.md),
+> Companion plans: [evaluation-refactor.md](archive/evaluation-refactor.md),
 > [future-work-and-research.md](future-work-and-research.md).
 >
 > **Relationship to in-flight plans:** this plan is *structure-preserving* — it deduplicates
@@ -668,7 +668,7 @@ gate: `tests/correctness/test_quantize.py` + strict-equality parity.
 4. **`filter` shadows the builtin** ([main.py:53](../../retrieve/src/retrieve/layers/silvertorch/main.py#L53)):
    rename param + attr to `filter_mode` (keep the `FilterMode` type alias). Call sites:
    `build_silvertorch` (main.py:342), `SilvertorchAlgo`
-   ([evaluation/retrieval/algos/silvertorch.py:69, 87](../../evaluation/retrieval/algos/silvertorch.py#L69)),
+   (evaluation/retrieval/algos/silvertorch.py:69, 87),
    `tests/correctness/test_silvertorch.py`, `tests/compile/test_silvertorch_compile.py`,
    `tests/parity/test_codesigned_probe_score*.py` (grep `filter=` under `retrieve/`). No
    deprecation shim (pre-1.0, repo convention). Skip only if it churns in-flight thesis text.
@@ -765,7 +765,7 @@ def register_index(self, item_clause_attrs: Tensor, *,
 — keyword-only after the first arg, `item_embs` dropped (a future embedding-aware filter can
 extend its own signature; the ABC shouldn't carry speculative params). `BloomFilter` keeps its
 "paper-strict: reverse must be all-False" raise. Callers to touch:
-[evaluation/retrieval/algos/filter.py:44-51](../../evaluation/retrieval/algos/filter.py#L44-L51)
+evaluation/retrieval/algos/filter.py:44-51
 (already keyword-style — only the bloom branch's `bf.register_index(item_attrs_narrow)` is
 signature-compatible as-is), library tests. Add the K8 TypeError test locking kw-only.
 

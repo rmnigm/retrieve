@@ -81,8 +81,8 @@ LiNR variants are V1–V4 as in the paper.
 uv sync                                          # whole workspace (Mac: torch wheel will fail; library code still reads fine)
 uv run --directory retrieve pytest tests/ -x -q  # library suite — GPU only, skips itself without CUDA
 cd evaluation && uv run pytest retrieval/tests/ --ignore=retrieval/tests/test_silvertorch_algo_reverse.py  # CPU-only harness tests
-uv run --directory evaluation evaluate --config config/arxiv/d128-filter.yaml --algo silvertorch --output /tmp/st.json
-uv run --directory evaluation run-evaluation --eval-type filter
+uv run --directory evaluation bench run --dataset arxiv --dim 128 --suite filter --algo silvertorch
+uv run --directory evaluation bench campaign --suite filter --resume
 uv run --directory retrieve tune-kernels --help  # kernel autotune sweeps (GPU)
 ruff check retrieve evaluation && ruff format --check retrieve
 python3 scripts/check_doc_links.py
