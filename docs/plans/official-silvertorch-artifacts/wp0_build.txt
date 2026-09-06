@@ -1,0 +1,426 @@
+### date: 2026-09-06T12:30:27Z
+### CUDA_HOME=/usr/local/cuda TORCH_CUDA_ARCH_LIST=8.0 MAX_JOBS=32
+nvcc: NVIDIA (R) Cuda compiler driver
+Copyright (c) 2005-2024 NVIDIA Corporation
+Built on Thu_Mar_28_02:18:24_PDT_2024
+Cuda compilation tools, release 12.4, V12.4.131
+Build cuda_12.4.r12.4/compiler.34097967_0
+### uv sync --extra official
+DEBUG Found workspace root: `/workspace/wt/a0-a3-deps-official`
+DEBUG Adding root workspace member: `/workspace/wt/a0-a3-deps-official`
+DEBUG Adding discovered workspace member: `/workspace/wt/a0-a3-deps-official/retrieve`
+DEBUG Adding discovered workspace member: `/workspace/wt/a0-a3-deps-official/evaluation`
+DEBUG Found workspace configuration at `/workspace/wt/a0-a3-deps-official/pyproject.toml`
+DEBUG Searching for user configuration in: `/root/.config/uv/uv.toml`
+DEBUG uv 0.12.10 (x86_64-unknown-linux-gnu)
+DEBUG Found project root: `/workspace/wt/a0-a3-deps-official`
+DEBUG No Python version file found in workspace: /workspace/wt/a0-a3-deps-official
+DEBUG Using Python request `>=3.10` from `requires-python` metadata
+DEBUG Checking for Python environment at: `.venv`
+DEBUG The project environment's Python version satisfies the request: `Python >=3.10`
+DEBUG Using request connect timeout of 10s and read timeout of 30s
+DEBUG Found static `requires-dist` for: /workspace/wt/a0-a3-deps-official/retrieve
+DEBUG Found static `requires-dist` for: /workspace/wt/a0-a3-deps-official/evaluation
+DEBUG Found static `requires-dist` for: /workspace/wt/a0-a3-deps-official/
+DEBUG Existing `uv.lock` satisfies workspace requirements
+Resolved 102 packages in 17ms
+DEBUG Registry requirement already cached: ninja==1.13.0
+DEBUG Registry requirement already cached: setuptools==82.0.1
+DEBUG Identified uncached distribution: wheel==0.48.0
+DEBUG Computed cache info: Timestamp(SystemTime { tv_sec: 1788697806, tv_nsec: 0 }), None, None, {}, {"src": Some(Inode(505308499))}. Most recently modified: retrieve/pyproject.toml
+DEBUG Requirement installed, but not fresh: retrieve==0.1.0 (from file:///workspace/wt/a0-a3-deps-official/retrieve)
+DEBUG Computed cache info: Timestamp(SystemTime { tv_sec: 1788697806, tv_nsec: 0 }), None, None, {}, {"src": Some(Inode(505308499))}. Most recently modified: retrieve/pyproject.toml
+DEBUG Identified uncached distribution: retrieve @ file:///workspace/wt/a0-a3-deps-official/retrieve
+DEBUG Computed cache info: Timestamp(SystemTime { tv_sec: 1788697661, tv_nsec: 0 }), None, None, {}, {"src": None}. Most recently modified: evaluation/pyproject.toml
+DEBUG Requirement already installed: retrieve-evaluation==0.1.0 (from file:///workspace/wt/a0-a3-deps-official/evaluation)
+DEBUG Requirement already installed: packaging==26.2
+DEBUG Requirement already installed: click==8.3.3
+DEBUG Requirement already installed: torch==2.10.0+cu128
+DEBUG Requirement already installed: triton==3.6.0
+DEBUG Requirement already installed: huggingface-hub==1.13.0
+DEBUG Requirement already installed: loguru==0.7.3
+DEBUG Requirement already installed: numpy==2.4.4
+DEBUG Requirement already installed: polars==1.40.1
+DEBUG Requirement already installed: pyarrow==24.0.0
+DEBUG Requirement already installed: pyyaml==6.0.3
+DEBUG Requirement already installed: sentence-transformers==5.4.1
+DEBUG Requirement already installed: tqdm==4.67.3
+DEBUG Requirement already installed: wandb==0.26.1
+DEBUG Identified uncached distribution: silvertorch @ git+https://github.com/meta-recsys/silvertorch@21aa35e28b6dd9a91e9ee35efb0857715e86bda7
+DEBUG Requirement already installed: cuda-bindings==12.9.4
+DEBUG Requirement already installed: filelock==3.29.0
+DEBUG Requirement already installed: fsspec==2026.2.0
+DEBUG Requirement already installed: jinja2==3.1.6
+DEBUG Requirement already installed: networkx==3.6.1
+DEBUG Requirement already installed: nvidia-cublas-cu12==12.8.4.1
+DEBUG Requirement already installed: nvidia-cuda-cupti-cu12==12.8.90
+DEBUG Requirement already installed: nvidia-cuda-nvrtc-cu12==12.8.93
+DEBUG Requirement already installed: nvidia-cuda-runtime-cu12==12.8.90
+DEBUG Requirement already installed: nvidia-cudnn-cu12==9.10.2.21
+DEBUG Requirement already installed: nvidia-cufft-cu12==11.3.3.83
+DEBUG Requirement already installed: nvidia-cufile-cu12==1.13.1.3
+DEBUG Requirement already installed: nvidia-curand-cu12==10.3.9.90
+DEBUG Requirement already installed: nvidia-cusolver-cu12==11.7.3.90
+DEBUG Requirement already installed: nvidia-cusparse-cu12==12.5.8.93
+DEBUG Requirement already installed: nvidia-cusparselt-cu12==0.7.1
+DEBUG Requirement already installed: nvidia-nccl-cu12==2.27.5
+DEBUG Requirement already installed: nvidia-nvjitlink-cu12==12.8.93
+DEBUG Requirement already installed: nvidia-nvshmem-cu12==3.4.5
+DEBUG Requirement already installed: nvidia-nvtx-cu12==12.8.90
+DEBUG Requirement already installed: sympy==1.14.0
+DEBUG Requirement already installed: typing-extensions==4.15.0
+DEBUG Requirement already installed: hf-xet==1.4.3
+DEBUG Requirement already installed: httpx==0.28.1
+DEBUG Requirement already installed: typer==0.25.1
+DEBUG Requirement already installed: polars-runtime-32==1.40.1
+DEBUG Requirement already installed: scikit-learn==1.8.0
+DEBUG Requirement already installed: scipy==1.17.1
+DEBUG Requirement already installed: transformers==5.7.0
+DEBUG Requirement already installed: gitpython==3.1.49
+DEBUG Requirement already installed: platformdirs==4.9.6
+DEBUG Requirement already installed: protobuf==7.34.1
+DEBUG Requirement already installed: pydantic==2.13.3
+DEBUG Requirement already installed: requests==2.33.1
+DEBUG Requirement already installed: sentry-sdk==2.58.0
+DEBUG Requirement already installed: cuda-pathfinder==1.5.4
+DEBUG Requirement already installed: markupsafe==3.0.3
+DEBUG Requirement already installed: mpmath==1.3.0
+DEBUG Requirement already installed: anyio==4.13.0
+DEBUG Requirement already installed: certifi==2026.4.22
+DEBUG Requirement already installed: httpcore==1.0.9
+DEBUG Requirement already installed: idna==3.13
+DEBUG Requirement already installed: annotated-doc==0.0.4
+DEBUG Requirement already installed: rich==15.0.0
+DEBUG Requirement already installed: shellingham==1.5.4
+DEBUG Requirement already installed: joblib==1.5.3
+DEBUG Requirement already installed: threadpoolctl==3.6.0
+DEBUG Requirement already installed: regex==2026.4.4
+DEBUG Requirement already installed: safetensors==0.7.0
+DEBUG Requirement already installed: tokenizers==0.22.2
+DEBUG Requirement already installed: gitdb==4.0.12
+DEBUG Requirement already installed: annotated-types==0.7.0
+DEBUG Requirement already installed: pydantic-core==2.46.3
+DEBUG Requirement already installed: typing-inspection==0.4.2
+DEBUG Requirement already installed: charset-normalizer==3.4.7
+DEBUG Requirement already installed: urllib3==2.6.3
+DEBUG Requirement already installed: h11==0.16.0
+DEBUG Requirement already installed: markdown-it-py==4.0.0
+DEBUG Requirement already installed: pygments==2.20.0
+DEBUG Requirement already installed: smmap==5.0.3
+DEBUG Requirement already installed: mdurl==0.1.2
+DEBUG Using request connect timeout of 10s and read timeout of 30s
+DEBUG Computed cache info: Timestamp(SystemTime { tv_sec: 1788697806, tv_nsec: 0 }), None, None, {}, {"src": Some(Inode(505308499))}. Most recently modified: retrieve/pyproject.toml
+DEBUG Cached revision does not match expected cache info for: retrieve @ file:///workspace/wt/a0-a3-deps-official/retrieve
+   Building retrieve @ file:///workspace/wt/a0-a3-deps-official/retrieve
+DEBUG Building: retrieve @ file:///workspace/wt/a0-a3-deps-official/retrieve
+DEBUG No cache entry for: https://files.pythonhosted.org/packages/2e/29/69cfbb602cd91690c55d38ba9fe53e6a7e76a6fa647bf38f19c138d25449/wheel-0.48.0-py3-none-any.whl
+DEBUG Sending fresh GET request for: https://files.pythonhosted.org/packages/2e/29/69cfbb602cd91690c55d38ba9fe53e6a7e76a6fa647bf38f19c138d25449/wheel-0.48.0-py3-none-any.whl
+DEBUG Assessing Python executable as base candidate: /usr/bin/python3.11
+DEBUG Creating build environment for: retrieve @ file:///workspace/wt/a0-a3-deps-official/retrieve
+DEBUG Using base executable for virtual environment: /usr/bin/python3.11
+DEBUG Resolving build requirements
+DEBUG Solving with installed Python version: 3.11.10
+DEBUG Solving with target Python version: >=3.11.10
+DEBUG Adding direct dependency: hatchling*
+DEBUG Found fresh response for: https://pypi.org/simple/hatchling/
+DEBUG Searching for a compatible version of hatchling (*)
+DEBUG Found fresh response for: https://files.pythonhosted.org/packages/a9/84/1798b6d85ecde0e31546004efd25c5de1b1f49250644a60cce460e12593a/hatchling-1.32.0-py3-none-any.whl.metadata
+DEBUG Selecting: hatchling==1.32.0 [compatible] (hatchling-1.32.0-py3-none-any.whl)
+DEBUG Adding transitive dependency for hatchling==1.32.0: packaging>=24.2
+DEBUG Adding transitive dependency for hatchling==1.32.0: pathspec>=0.10.1
+DEBUG Adding transitive dependency for hatchling==1.32.0: pluggy>=1.0.0
+DEBUG Adding transitive dependency for hatchling==1.32.0: tomlkit>=0.11.1
+DEBUG Adding transitive dependency for hatchling==1.32.0: trove-classifiers*
+DEBUG Found fresh response for: https://pypi.org/simple/packaging/
+DEBUG Found fresh response for: https://pypi.org/simple/pathspec/
+DEBUG Found fresh response for: https://pypi.org/simple/pluggy/
+DEBUG Found fresh response for: https://pypi.org/simple/tomlkit/
+DEBUG Found fresh response for: https://pypi.org/simple/trove-classifiers/
+DEBUG Searching for a compatible version of packaging (>=24.2)
+DEBUG Selecting: packaging==26.3 [compatible] (packaging-26.3-py3-none-any.whl)
+DEBUG Found fresh response for: https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl.metadata
+DEBUG Found fresh response for: https://files.pythonhosted.org/packages/7c/a4/81502f486f01db95bc8320646a8a12511f5e556cb63d5e224d91816605c4/trove_classifiers-2026.6.1.19-py3-none-any.whl.metadata
+DEBUG Found fresh response for: https://files.pythonhosted.org/packages/f1/d9/7fb5aa316bc299258e68c73ba3bddbc499654a07f151cba08f6153988714/pathspec-1.1.1-py3-none-any.whl.metadata
+DEBUG Found fresh response for: https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl.metadata
+DEBUG Found fresh response for: https://files.pythonhosted.org/packages/13/bc/8c13eb66537dce1d2bd3a57132902f38d0e7f5bb46fa9f4daed9fe9d76ee/tomlkit-0.15.1-py3-none-any.whl.metadata
+DEBUG Searching for a compatible version of pathspec (>=0.10.1)
+DEBUG Selecting: pathspec==1.1.1 [compatible] (pathspec-1.1.1-py3-none-any.whl)
+DEBUG Searching for a compatible version of pluggy (>=1.0.0)
+DEBUG Selecting: pluggy==1.6.0 [compatible] (pluggy-1.6.0-py3-none-any.whl)
+DEBUG Searching for a compatible version of tomlkit (>=0.11.1)
+DEBUG Selecting: tomlkit==0.15.1 [compatible] (tomlkit-0.15.1-py3-none-any.whl)
+DEBUG Searching for a compatible version of trove-classifiers (*)
+DEBUG Selecting: trove-classifiers==2026.6.1.19 [compatible] (trove_classifiers-2026.6.1.19-py3-none-any.whl)
+DEBUG Tried 6 versions: hatchling 1, packaging 1, pathspec 1, pluggy 1, tomlkit 1, trove-classifiers 1
+DEBUG marker environment resolution took 0.025s
+DEBUG Installing in pluggy==1.6.0, hatchling==1.32.0, tomlkit==0.15.1, trove-classifiers==2026.6.1.19, packaging==26.3, pathspec==1.1.1 in /root/.cache/uv/builds-v0/.tmpyqH0eF
+DEBUG Registry requirement already cached: pluggy==1.6.0
+DEBUG Registry requirement already cached: hatchling==1.32.0
+DEBUG Registry requirement already cached: tomlkit==0.15.1
+DEBUG Registry requirement already cached: trove-classifiers==2026.6.1.19
+DEBUG Registry requirement already cached: packaging==26.3
+DEBUG Registry requirement already cached: pathspec==1.1.1
+DEBUG Installing build requirements: pluggy==1.6.0, hatchling==1.32.0, tomlkit==0.15.1, trove-classifiers==2026.6.1.19, packaging==26.3, pathspec==1.1.1
+DEBUG Creating PEP 517 build environment
+DEBUG Calling `hatchling.build.get_requires_for_build_editable()`
+DEBUG Installing extra requirements for build backend
+DEBUG Solving with installed Python version: 3.11.10
+DEBUG Solving with target Python version: >=3.11.10
+DEBUG Adding direct dependency: hatchling*
+DEBUG Adding direct dependency: editables>=0.3, <1.dev0
+DEBUG Searching for a compatible version of hatchling (*)
+DEBUG Found fresh response for: https://pypi.org/simple/editables/
+DEBUG Selecting: hatchling==1.32.0 [compatible] (hatchling-1.32.0-py3-none-any.whl)
+DEBUG Found fresh response for: https://files.pythonhosted.org/packages/cc/0e/d095533037fc9468f947b19f2da53f869804632b508808de41e86e801797/editables-0.6-py3-none-any.whl.metadata
+DEBUG Adding transitive dependency for hatchling==1.32.0: packaging>=24.2
+DEBUG Adding transitive dependency for hatchling==1.32.0: pathspec>=0.10.1
+DEBUG Adding transitive dependency for hatchling==1.32.0: pluggy>=1.0.0
+DEBUG Adding transitive dependency for hatchling==1.32.0: tomlkit>=0.11.1
+DEBUG Adding transitive dependency for hatchling==1.32.0: trove-classifiers*
+DEBUG Searching for a compatible version of editables (>=0.3, <1.dev0)
+DEBUG Selecting: editables==0.6 [compatible] (editables-0.6-py3-none-any.whl)
+DEBUG Searching for a compatible version of packaging (>=24.2)
+DEBUG Selecting: packaging==26.3 [compatible] (packaging-26.3-py3-none-any.whl)
+DEBUG Searching for a compatible version of pathspec (>=0.10.1)
+DEBUG Selecting: pathspec==1.1.1 [compatible] (pathspec-1.1.1-py3-none-any.whl)
+DEBUG Searching for a compatible version of pluggy (>=1.0.0)
+DEBUG Selecting: pluggy==1.6.0 [compatible] (pluggy-1.6.0-py3-none-any.whl)
+DEBUG Searching for a compatible version of tomlkit (>=0.11.1)
+DEBUG Selecting: tomlkit==0.15.1 [compatible] (tomlkit-0.15.1-py3-none-any.whl)
+DEBUG Searching for a compatible version of trove-classifiers (*)
+DEBUG Selecting: trove-classifiers==2026.6.1.19 [compatible] (trove_classifiers-2026.6.1.19-py3-none-any.whl)
+DEBUG Tried 7 versions: editables 1, hatchling 1, packaging 1, pathspec 1, pluggy 1, tomlkit 1, trove-classifiers 1
+DEBUG marker environment resolution took 0.012s
+DEBUG Installing in pluggy==1.6.0, editables==0.6, tomlkit==0.15.1, packaging==26.3, trove-classifiers==2026.6.1.19, hatchling==1.32.0, pathspec==1.1.1 in /root/.cache/uv/builds-v0/.tmpyqH0eF
+DEBUG Requirement already installed: pluggy==1.6.0
+DEBUG Registry requirement already cached: editables==0.6
+DEBUG Requirement already installed: tomlkit==0.15.1
+DEBUG Requirement already installed: packaging==26.3
+DEBUG Requirement already installed: trove-classifiers==2026.6.1.19
+DEBUG Requirement already installed: hatchling==1.32.0
+DEBUG Requirement already installed: pathspec==1.1.1
+DEBUG Installing build requirement: editables==0.6
+DEBUG Calling `hatchling.build.build_editable(__import__("os").fsdecode(b"/root/.cache/uv/builds-v0/.tmpvtbMv3"), {}, None)`
+DEBUG Built `retrieve @ file:///workspace/wt/a0-a3-deps-official/retrieve` into `retrieve-0.1.0-py3-none-any.whl`
+      Built retrieve @ file:///workspace/wt/a0-a3-deps-official/retrieve
+Prepared 2 packages in 701ms
+DEBUG Uninstalled retrieve (11 files, 1 directory)
+Uninstalled 1 package in 15ms
+Installed 4 packages in 5.60s
+DEBUG Fetching source distribution from Git: https://github.com/meta-recsys/silvertorch
+DEBUG Updating Git source `https://github.com/meta-recsys/silvertorch`
+   Updating https://github.com/meta-recsys/silvertorch (21aa35e28b6dd9a91e9ee35efb0857715e86bda7)
+DEBUG Performing a Git fetch for: https://github.com/meta-recsys/silvertorch
+DEBUG Reset /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e to 21aa35e28b6dd9a91e9ee35efb0857715e86bda7
+    Updated https://github.com/meta-recsys/silvertorch (21aa35e28b6dd9a91e9ee35efb0857715e86bda7)
+   Building silvertorch @ git+https://github.com/meta-recsys/silvertorch@21aa35e28b6dd9a91e9ee35efb0857715e86bda7
+DEBUG Building: silvertorch @ git+https://github.com/meta-recsys/silvertorch@21aa35e28b6dd9a91e9ee35efb0857715e86bda7
+DEBUG Assessing Python executable as base candidate: /usr/bin/python3.11
+DEBUG Creating build environment for: silvertorch @ git+https://github.com/meta-recsys/silvertorch@21aa35e28b6dd9a91e9ee35efb0857715e86bda7
+DEBUG Proceeding without build isolation
+DEBUG Locking the source tree for setuptools
+DEBUG Calling `setuptools.build_meta.build_wheel(__import__("os").fsdecode(b"/root/.cache/uv/builds-v0/.tmpmkzHdp"), {}, None)`
+DEBUG running bdist_wheel
+DEBUG running build
+DEBUG running build_py
+DEBUG creating build/lib.linux-x86_64-cpython-311/silvertorch
+DEBUG copying silvertorch/__init__.py -> build/lib.linux-x86_64-cpython-311/silvertorch
+DEBUG creating build/lib.linux-x86_64-cpython-311/silvertorch/ops
+DEBUG copying silvertorch/ops/__init__.py -> build/lib.linux-x86_64-cpython-311/silvertorch/ops
+DEBUG copying silvertorch/ops/_load_ops.py -> build/lib.linux-x86_64-cpython-311/silvertorch/ops
+DEBUG creating build/lib.linux-x86_64-cpython-311/silvertorch/modules
+DEBUG copying silvertorch/modules/__init__.py -> build/lib.linux-x86_64-cpython-311/silvertorch/modules
+DEBUG copying silvertorch/modules/bloom_index_search_module.py -> build/lib.linux-x86_64-cpython-311/silvertorch/modules
+DEBUG copying silvertorch/modules/bloom_index_search_module_builder.py -> build/lib.linux-x86_64-cpython-311/silvertorch/modules
+DEBUG copying silvertorch/modules/filter_query_parser_module.py -> build/lib.linux-x86_64-cpython-311/silvertorch/modules
+DEBUG copying silvertorch/modules/filter_query_parser_module_builder.py -> build/lib.linux-x86_64-cpython-311/silvertorch/modules
+DEBUG creating build/lib.linux-x86_64-cpython-311/silvertorch/modules/tests
+DEBUG copying silvertorch/modules/tests/__init__.py -> build/lib.linux-x86_64-cpython-311/silvertorch/modules/tests
+DEBUG copying silvertorch/modules/tests/test_bloom_index_search_module.py -> build/lib.linux-x86_64-cpython-311/silvertorch/modules/tests
+DEBUG copying silvertorch/modules/tests/test_filter_query_parser_module.py -> build/lib.linux-x86_64-cpython-311/silvertorch/modules/tests
+DEBUG running build_ext
+DEBUG W0906 12:30:53.278000 9770 torch/utils/cpp_extension.py:525] The detected CUDA version (12.4) has a minor version mismatch with the version that was used to compile PyTorch (12.8). Most likely this shouldn't be a problem.
+DEBUG W0906 12:30:53.281000 9770 torch/utils/cpp_extension.py:535] There are no x86_64-linux-gnu-g++ version bounds defined for CUDA version 12.4
+DEBUG building 'silvertorch._C' extension
+DEBUG creating /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc
+DEBUG [1/10] c++ -MMD -MF /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_indexer.o.d -Wsign-compare -DNDEBUG -g -fwrapv -O2 -Wall -g -fstack-protector-strong -Wformat -Werror=format-security -g -fwrapv -O2 -fPIC -I/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc -I/workspace/wt/a0-a3-deps-official/.venv/lib/python3.11/site-packages/torch/include -I/workspace/wt/a0-a3-deps-official/.venv/lib/python3.11/site-packages/torch/include/torch/csrc/api/include -I/usr/local/cuda/include -I/workspace/wt/a0-a3-deps-official/.venv/include -I/usr/include/python3.11 -c -c /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_indexer.cpp -o /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_indexer.o -Wall -Wextra -Wno-sign-conversion -Wno-sign-compare -Wno-unused-parameter -Wno-unknown-pragmas -Wno-unused-function -DTORCH_API_INCLUDE_EXTENSION_H -DTORCH_EXTENSION_NAME=_C -std=c++17
+DEBUG [2/10] c++ -MMD -MF /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_index_util.o.d -Wsign-compare -DNDEBUG -g -fwrapv -O2 -Wall -g -fstack-protector-strong -Wformat -Werror=format-security -g -fwrapv -O2 -fPIC -I/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc -I/workspace/wt/a0-a3-deps-official/.venv/lib/python3.11/site-packages/torch/include -I/workspace/wt/a0-a3-deps-official/.venv/lib/python3.11/site-packages/torch/include/torch/csrc/api/include -I/usr/local/cuda/include -I/workspace/wt/a0-a3-deps-official/.venv/include -I/usr/include/python3.11 -c -c /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_index_util.cpp -o /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_index_util.o -Wall -Wextra -Wno-sign-conversion -Wno-sign-compare -Wno-unused-parameter -Wno-unknown-pragmas -Wno-unused-function -DTORCH_API_INCLUDE_EXTENSION_H -DTORCH_EXTENSION_NAME=_C -std=c++17
+DEBUG [3/10] c++ -MMD -MF /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/expression_query_parser.o.d -Wsign-compare -DNDEBUG -g -fwrapv -O2 -Wall -g -fstack-protector-strong -Wformat -Werror=format-security -g -fwrapv -O2 -fPIC -I/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc -I/workspace/wt/a0-a3-deps-official/.venv/lib/python3.11/site-packages/torch/include -I/workspace/wt/a0-a3-deps-official/.venv/lib/python3.11/site-packages/torch/include/torch/csrc/api/include -I/usr/local/cuda/include -I/workspace/wt/a0-a3-deps-official/.venv/include -I/usr/include/python3.11 -c -c /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/expression_query_parser.cpp -o /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/expression_query_parser.o -Wall -Wextra -Wno-sign-conversion -Wno-sign-compare -Wno-unused-parameter -Wno-unknown-pragmas -Wno-unused-function -DTORCH_API_INCLUDE_EXTENSION_H -DTORCH_EXTENSION_NAME=_C -std=c++17
+DEBUG [4/10] c++ -MMD -MF /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_index_search.o.d -Wsign-compare -DNDEBUG -g -fwrapv -O2 -Wall -g -fstack-protector-strong -Wformat -Werror=format-security -g -fwrapv -O2 -fPIC -I/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc -I/workspace/wt/a0-a3-deps-official/.venv/lib/python3.11/site-packages/torch/include -I/workspace/wt/a0-a3-deps-official/.venv/lib/python3.11/site-packages/torch/include/torch/csrc/api/include -I/usr/local/cuda/include -I/workspace/wt/a0-a3-deps-official/.venv/include -I/usr/include/python3.11 -c -c /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_index_search.cpp -o /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_index_search.o -Wall -Wextra -Wno-sign-conversion -Wno-sign-compare -Wno-unused-parameter -Wno-unknown-pragmas -Wno-unused-function -DTORCH_API_INCLUDE_EXTENSION_H -DTORCH_EXTENSION_NAME=_C -std=c++17
+DEBUG [5/10] c++ -MMD -MF /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann.o.d -Wsign-compare -DNDEBUG -g -fwrapv -O2 -Wall -g -fstack-protector-strong -Wformat -Werror=format-security -g -fwrapv -O2 -fPIC -I/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc -I/workspace/wt/a0-a3-deps-official/.venv/lib/python3.11/site-packages/torch/include -I/workspace/wt/a0-a3-deps-official/.venv/lib/python3.11/site-packages/torch/include/torch/csrc/api/include -I/usr/local/cuda/include -I/workspace/wt/a0-a3-deps-official/.venv/include -I/usr/include/python3.11 -c -c /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann.cpp -o /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann.o -Wall -Wextra -Wno-sign-conversion -Wno-sign-compare -Wno-unused-parameter -Wno-unknown-pragmas -Wno-unused-function -DTORCH_API_INCLUDE_EXTENSION_H -DTORCH_EXTENSION_NAME=_C -std=c++17
+DEBUG [6/10] /usr/local/cuda/bin/nvcc --generate-dependencies-with-compile --dependency-output /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/faster_repeat_interleave.o.d -I/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc -I/workspace/wt/a0-a3-deps-official/.venv/lib/python3.11/site-packages/torch/include -I/workspace/wt/a0-a3-deps-official/.venv/lib/python3.11/site-packages/torch/include/torch/csrc/api/include -I/usr/local/cuda/include -I/workspace/wt/a0-a3-deps-official/.venv/include -I/usr/include/python3.11 -c -c /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/faster_repeat_interleave.cu -o /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/faster_repeat_interleave.o -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_BFLOAT16_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__ --expt-relaxed-constexpr --compiler-options ''"'"'-fPIC'"'"'' --expt-extended-lambda --expt-relaxed-constexpr -DTORCH_API_INCLUDE_EXTENSION_H -DTORCH_EXTENSION_NAME=_C -gencode=arch=compute_80,code=sm_80 -std=c++17
+DEBUG [7/10] /usr/local/cuda/bin/nvcc --generate-dependencies-with-compile --dependency-output /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/expression_query_parser_cuda.o.d -I/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc -I/workspace/wt/a0-a3-deps-official/.venv/lib/python3.11/site-packages/torch/include -I/workspace/wt/a0-a3-deps-official/.venv/lib/python3.11/site-packages/torch/include/torch/csrc/api/include -I/usr/local/cuda/include -I/workspace/wt/a0-a3-deps-official/.venv/include -I/usr/include/python3.11 -c -c /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/expression_query_parser_cuda.cu -o /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/expression_query_parser_cuda.o -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_BFLOAT16_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__ --expt-relaxed-constexpr --compiler-options ''"'"'-fPIC'"'"'' --expt-extended-lambda --expt-relaxed-constexpr -DTORCH_API_INCLUDE_EXTENSION_H -DTORCH_EXTENSION_NAME=_C -gencode=arch=compute_80,code=sm_80 -std=c++17
+DEBUG [8/10] /usr/local/cuda/bin/nvcc --generate-dependencies-with-compile --dependency-output /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_index_search_cuda.o.d -I/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc -I/workspace/wt/a0-a3-deps-official/.venv/lib/python3.11/site-packages/torch/include -I/workspace/wt/a0-a3-deps-official/.venv/lib/python3.11/site-packages/torch/include/torch/csrc/api/include -I/usr/local/cuda/include -I/workspace/wt/a0-a3-deps-official/.venv/include -I/usr/include/python3.11 -c -c /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_index_search_cuda.cu -o /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_index_search_cuda.o -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_BFLOAT16_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__ --expt-relaxed-constexpr --compiler-options ''"'"'-fPIC'"'"'' --expt-extended-lambda --expt-relaxed-constexpr -DTORCH_API_INCLUDE_EXTENSION_H -DTORCH_EXTENSION_NAME=_C -gencode=arch=compute_80,code=sm_80 -std=c++17
+DEBUG /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_index_search_cuda.cu(47): warning #177-D: variable "st::ops::bloom_search::<unnamed>::C_NUM_OFFSETS_PER_PLAN" was declared but never referenced
+DEBUG   static constexpr int32_t C_NUM_OFFSETS_PER_PLAN = 8;
+DEBUG                            ^
+DEBUG 
+DEBUG Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+DEBUG 
+DEBUG /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_index_search_cuda.cu(520): warning #177-D: function "st::ops::bloom_search::<unnamed>::run_query_plan<STACK_SIZE,is_bloom_index_v2>(const int64_t *, int64_t, const int64_t *, int64_t, int64_t, int64_t, const st::ops::bloom_search::<unnamed>::QueryPlanCuda<is_bloom_index_v2> &) [with STACK_SIZE=0, is_bloom_index_v2=false]" was declared but never referenced
+DEBUG   __attribute__((device)) uint64_t run_query_plan<0, false >(
+DEBUG                                    ^
+DEBUG 
+DEBUG ptxas warning : Stack size for entry function '_ZN2st3ops12bloom_search59_GLOBAL__N__0864c837_26_bloom_index_search_cuda_cu_3db1f38870process_documents_on_assigned_cluster_columns_on_multiple_chunk_kernelILi0ELb1EEEvlPKPKlS5_S7_PKiS9_lS9_S9_S9_N5torch10headeronly6detail27GenericPackedTensorAccessorINSC_14TensorAccessorIN3c108ArrayRefIlEElLm0ENSB_16DefaultPtrTraitsElEEN2at6detail16IndexBoundsCheckILm1ElEElLm1ESI_lEEPKNS2_13QueryPlanCudaIXT0_EEEllPKmPNSF_4cuda20DeviceAssertionsDataEj' cannot be statically determined
+DEBUG ptxas warning : Stack size for entry function '_ZN2st3ops12bloom_search59_GLOBAL__N__0864c837_26_bloom_index_search_cuda_cu_3db1f38852process_documents_on_assigned_cluster_columns_kernelILi0ELb1EEEvPKllS5_N5torch10headeronly6detail27GenericPackedTensorAccessorINS8_14TensorAccessorIN3c108ArrayRefIlEEiLm0ENS7_16DefaultPtrTraitsElEEN2at6detail16IndexBoundsCheckILm1ElEEiLm1ESE_lEESK_SK_lNS9_INSA_ISD_lLm0ESE_lEESJ_lLm1ESE_lEEPKNS2_13QueryPlanCudaIXT0_EEEllPKmPNSB_4cuda20DeviceAssertionsDataEj' cannot be statically determined
+DEBUG ptxas warning : Stack size for entry function '_ZN2st3ops12bloom_search59_GLOBAL__N__0864c837_26_bloom_index_search_cuda_cu_3db1f38817process_documentsIlLi0ELb1EEEvPKlPKblS5_N5torch10headeronly6detail27GenericPackedTensorAccessorINSA_14TensorAccessorIN3c108ArrayRefIlEET_Lm1ENS9_16DefaultPtrTraitsElEEN2at6detail16IndexBoundsCheckILm2ElEESG_Lm2ESH_lEEPKNS2_13QueryPlanCudaIXT1_EEEllPNSD_4cuda20DeviceAssertionsDataEj' cannot be statically determined
+DEBUG ptxas warning : Stack size for entry function '_ZN2st3ops12bloom_search59_GLOBAL__N__0864c837_26_bloom_index_search_cuda_cu_3db1f38817process_documentsIbLi0ELb1EEEvPKlPKblS5_N5torch10headeronly6detail27GenericPackedTensorAccessorINSA_14TensorAccessorIN3c108ArrayRefIlEET_Lm1ENS9_16DefaultPtrTraitsElEEN2at6detail16IndexBoundsCheckILm2ElEESG_Lm2ESH_lEEPKNS2_13QueryPlanCudaIXT1_EEEllPNSD_4cuda20DeviceAssertionsDataEj' cannot be statically determined
+DEBUG [9/10] /usr/local/cuda/bin/nvcc --generate-dependencies-with-compile --dependency-output /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_indexer_cuda.o.d -I/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc -I/workspace/wt/a0-a3-deps-official/.venv/lib/python3.11/site-packages/torch/include -I/workspace/wt/a0-a3-deps-official/.venv/lib/python3.11/site-packages/torch/include/torch/csrc/api/include -I/usr/local/cuda/include -I/workspace/wt/a0-a3-deps-official/.venv/include -I/usr/include/python3.11 -c -c /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_indexer_cuda.cu -o /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_indexer_cuda.o -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_BFLOAT16_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__ --expt-relaxed-constexpr --compiler-options ''"'"'-fPIC'"'"'' --expt-extended-lambda --expt-relaxed-constexpr -DTORCH_API_INCLUDE_EXTENSION_H -DTORCH_EXTENSION_NAME=_C -gencode=arch=compute_80,code=sm_80 -std=c++17
+DEBUG /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_indexer_cuda.cu(519): warning #1835-D: attribute "__shared__" does not apply here
+DEBUG       const uint32_t* __attribute__((shared)) b_positions,
+DEBUG                                      ^
+DEBUG 
+DEBUG Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+DEBUG 
+DEBUG /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_indexer_cuda.cu(519): warning #1835-D: attribute "__shared__" does not apply here
+DEBUG       const uint32_t* __attribute__((shared)) b_positions,
+DEBUG                                      ^
+DEBUG 
+DEBUG Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+DEBUG 
+DEBUG /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_indexer_cuda.cu(713): warning #177-D: function "st::ops::bloom_indexer::<unnamed>::generate_bloom_index_transpose_kernel" was declared but never referenced
+DEBUG   __attribute__((global)) void generate_bloom_index_transpose_kernel(
+DEBUG                                ^
+DEBUG 
+DEBUG [10/10] /usr/local/cuda/bin/nvcc --generate-dependencies-with-compile --dependency-output /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann_cuda.o.d -I/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc -I/workspace/wt/a0-a3-deps-official/.venv/lib/python3.11/site-packages/torch/include -I/workspace/wt/a0-a3-deps-official/.venv/lib/python3.11/site-packages/torch/include/torch/csrc/api/include -I/usr/local/cuda/include -I/workspace/wt/a0-a3-deps-official/.venv/include -I/usr/include/python3.11 -c -c /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann_cuda.cu -o /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann_cuda.o -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_BFLOAT16_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__ --expt-relaxed-constexpr --compiler-options ''"'"'-fPIC'"'"'' --expt-extended-lambda --expt-relaxed-constexpr -DTORCH_API_INCLUDE_EXTENSION_H -DTORCH_EXTENSION_NAME=_C -gencode=arch=compute_80,code=sm_80 -std=c++17
+DEBUG /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/simple_index_mm.cuh(178): warning #191-D: type qualifier is meaningless on cast type
+DEBUG         reinterpret_cast<const VECTOR_LOAD_TYPE* __restrict__>(embeddings);
+DEBUG                          ^
+DEBUG 
+DEBUG Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+DEBUG 
+DEBUG /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/simple_index_mm.cuh(180): warning #191-D: type qualifier is meaningless on cast type
+DEBUG         reinterpret_cast<const VECTOR_LOAD_TYPE* __restrict__>(query);
+DEBUG                          ^
+DEBUG 
+DEBUG /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann_cuda.cu(896): warning #191-D: type qualifier is meaningless on cast type
+DEBUG           reinterpret_cast<const int4* __restrict__>(warp_payloads) + warp_index);
+DEBUG                            ^
+DEBUG 
+DEBUG /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann_cuda.cu(909): warning #191-D: type qualifier is meaningless on cast type
+DEBUG           reinterpret_cast<const int4* __restrict__>(warp_payloads) + warp_index);
+DEBUG                            ^
+DEBUG 
+DEBUG /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann_cuda.cu(918): warning #191-D: type qualifier is meaningless on cast type
+DEBUG             reinterpret_cast<const int4* __restrict__>(warp_payloads) +
+DEBUG                              ^
+DEBUG 
+DEBUG /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann_cuda.cu(988): warning #191-D: type qualifier is meaningless on cast type
+DEBUG           reinterpret_cast<const int4* __restrict__>(warp_payloads) + warp_index);
+DEBUG                            ^
+DEBUG 
+DEBUG /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann_cuda.cu(1053): warning #191-D: type qualifier is meaningless on cast type
+DEBUG           reinterpret_cast<const int4* __restrict__>(remaining_payloads) +
+DEBUG                            ^
+DEBUG 
+DEBUG /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann_cuda.cu(1096): warning #191-D: type qualifier is meaningless on cast type
+DEBUG           reinterpret_cast<const int4* __restrict__>(warp_payloads) + warp_index);
+DEBUG                            ^
+DEBUG 
+DEBUG /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann_cuda.cu(1151): warning #191-D: type qualifier is meaningless on cast type
+DEBUG           reinterpret_cast<const int4* __restrict__>(remaining_payloads) +
+DEBUG                            ^
+DEBUG 
+DEBUG /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann_cuda.cu(988): warning #191-D: type qualifier is meaningless on cast type
+DEBUG           reinterpret_cast<const int4* __restrict__>(warp_payloads) + warp_index);
+DEBUG                            ^
+DEBUG 
+DEBUG Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+DEBUG 
+DEBUG /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/simple_index_mm.cuh(178): warning #191-D: type qualifier is meaningless on cast type
+DEBUG         reinterpret_cast<const VECTOR_LOAD_TYPE* __restrict__>(embeddings);
+DEBUG                          ^
+DEBUG           detected during:
+DEBUG             instantiation of "decltype(auto) st::ops::simple_index_mm::dotproduct<T,DIM,THREADS_PER_LINE,EMB_ON_LOCAL_MEM,QUERY_ON_LOCAL_MEM>(const T *, const T *, std::enable_if_t<<expression>, void> *) [with T=float, DIM=16, THREADS_PER_LINE=1, EMB_ON_LOCAL_MEM=false, QUERY_ON_LOCAL_MEM=true]" at line 355
+DEBUG             instantiation of "RETURN_T st::ops::simple_index_mm::get_score<T,RETURN_T,DIM,THREADS_PER_LINE,EMB_ON_LOCAL_MEM,DIVISOR_T,QUERY_ON_LOCAL_MEM>(const T *, const T *, DIVISOR_T) [with T=float, RETURN_T=float, DIM=16, THREADS_PER_LINE=1, EMB_ON_LOCAL_MEM=false, DIVISOR_T=c10::Half, QUERY_ON_LOCAL_MEM=true]" at line 287 of /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann_cuda.cu
+DEBUG             instantiation of "void st::ops::fused_kmean_ann::<unnamed>::store_with_direct_query<EMBEDDING_T,RETURN_T,DIM,FILTER,DIVISOR_T>(const EMBEDDING_T *, const EMBEDDING_T *, int64_t, DIVISOR_T, RETURN_T *, int32_t *, __nv_bool) [with EMBEDDING_T=float, RETURN_T=float, DIM=16, FILTER=true, DIVISOR_T=c10::Half]" at line 1018 of /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann_cuda.cu
+DEBUG             instantiation of "void st::ops::fused_kmean_ann::<unnamed>::process_cluster<EMBEDDING_T,RETURN_T,DIM,FILTER,DIVISOR_INPUT,QUERY_ON_SHARED_MEM>(const EMBEDDING_T *, const EMBEDDING_T *, const st::ops::fused_kmean_ann::WarpPayload *, RETURN_T *, int32_t *, int32_t, DIVISOR_INPUT, c10::cuda::DeviceAssertionsData *, uint32_t) [with EMBEDDING_T=float, RETURN_T=float, DIM=16, FILTER=true, DIVISOR_INPUT=c10::Half *, QUERY_ON_SHARED_MEM=true]" at line 1489 of /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann_cuda.cu
+DEBUG 
+DEBUG /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/simple_index_mm.cuh(180): warning #191-D: type qualifier is meaningless on cast type
+DEBUG         reinterpret_cast<const VECTOR_LOAD_TYPE* __restrict__>(query);
+DEBUG                          ^
+DEBUG           detected during:
+DEBUG             instantiation of "decltype(auto) st::ops::simple_index_mm::dotproduct<T,DIM,THREADS_PER_LINE,EMB_ON_LOCAL_MEM,QUERY_ON_LOCAL_MEM>(const T *, const T *, std::enable_if_t<<expression>, void> *) [with T=float, DIM=16, THREADS_PER_LINE=1, EMB_ON_LOCAL_MEM=false, QUERY_ON_LOCAL_MEM=true]" at line 355
+DEBUG             instantiation of "RETURN_T st::ops::simple_index_mm::get_score<T,RETURN_T,DIM,THREADS_PER_LINE,EMB_ON_LOCAL_MEM,DIVISOR_T,QUERY_ON_LOCAL_MEM>(const T *, const T *, DIVISOR_T) [with T=float, RETURN_T=float, DIM=16, THREADS_PER_LINE=1, EMB_ON_LOCAL_MEM=false, DIVISOR_T=c10::Half, QUERY_ON_LOCAL_MEM=true]" at line 287 of /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann_cuda.cu
+DEBUG             instantiation of "void st::ops::fused_kmean_ann::<unnamed>::store_with_direct_query<EMBEDDING_T,RETURN_T,DIM,FILTER,DIVISOR_T>(const EMBEDDING_T *, const EMBEDDING_T *, int64_t, DIVISOR_T, RETURN_T *, int32_t *, __nv_bool) [with EMBEDDING_T=float, RETURN_T=float, DIM=16, FILTER=true, DIVISOR_T=c10::Half]" at line 1018 of /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann_cuda.cu
+DEBUG             instantiation of "void st::ops::fused_kmean_ann::<unnamed>::process_cluster<EMBEDDING_T,RETURN_T,DIM,FILTER,DIVISOR_INPUT,QUERY_ON_SHARED_MEM>(const EMBEDDING_T *, const EMBEDDING_T *, const st::ops::fused_kmean_ann::WarpPayload *, RETURN_T *, int32_t *, int32_t, DIVISOR_INPUT, c10::cuda::DeviceAssertionsData *, uint32_t) [with EMBEDDING_T=float, RETURN_T=float, DIM=16, FILTER=true, DIVISOR_INPUT=c10::Half *, QUERY_ON_SHARED_MEM=true]" at line 1489 of /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann_cuda.cu
+DEBUG 
+DEBUG /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann_cuda.cu(1053): warning #191-D: type qualifier is meaningless on cast type
+DEBUG           reinterpret_cast<const int4* __restrict__>(remaining_payloads) +
+DEBUG                            ^
+DEBUG 
+DEBUG /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann_cuda.cu(1096): warning #191-D: type qualifier is meaningless on cast type
+DEBUG           reinterpret_cast<const int4* __restrict__>(warp_payloads) + warp_index);
+DEBUG                            ^
+DEBUG 
+DEBUG /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann_cuda.cu(1151): warning #191-D: type qualifier is meaningless on cast type
+DEBUG           reinterpret_cast<const int4* __restrict__>(remaining_payloads) +
+DEBUG                            ^
+DEBUG 
+DEBUG x86_64-linux-gnu-g++ -Wsign-compare -DNDEBUG -g -fwrapv -O2 -Wall -g -fstack-protector-strong -Wformat -Werror=format-security -g -fwrapv -O2 -shared -Wl,-O1 -Wl,-Bsymbolic-functions /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_index_search.o /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_index_search_cuda.o /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_index_util.o /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_indexer.o /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/bloom_indexer_cuda.o /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/expression_query_parser.o /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/expression_query_parser_cuda.o /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/faster_repeat_interleave.o /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann.o /root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/build/temp.linux-x86_64-cpython-311/root/.cache/uv/git-v0/checkouts/c60d3ffa11a7538e/21aa35e/silvertorch/ops/csrc/fused_kmean_ann_cuda.o -L/workspace/wt/a0-a3-deps-official/.venv/lib/python3.11/site-packages/torch/lib -L/usr/local/cuda/lib64 -L/usr/lib/x86_64-linux-gnu -lc10 -ltorch -ltorch_cpu -ltorch_python -lcudart -lc10_cuda -ltorch_cuda -o build/lib.linux-x86_64-cpython-311/silvertorch/_C.cpython-311-x86_64-linux-gnu.so
+DEBUG installing to build/bdist.linux-x86_64/wheel
+DEBUG running install
+DEBUG running install_lib
+DEBUG creating build/bdist.linux-x86_64/wheel
+DEBUG creating build/bdist.linux-x86_64/wheel/silvertorch
+DEBUG copying build/lib.linux-x86_64-cpython-311/silvertorch/__init__.py -> build/bdist.linux-x86_64/wheel/./silvertorch
+DEBUG creating build/bdist.linux-x86_64/wheel/silvertorch/ops
+DEBUG copying build/lib.linux-x86_64-cpython-311/silvertorch/ops/__init__.py -> build/bdist.linux-x86_64/wheel/./silvertorch/ops
+DEBUG copying build/lib.linux-x86_64-cpython-311/silvertorch/ops/_load_ops.py -> build/bdist.linux-x86_64/wheel/./silvertorch/ops
+DEBUG creating build/bdist.linux-x86_64/wheel/silvertorch/modules
+DEBUG copying build/lib.linux-x86_64-cpython-311/silvertorch/modules/__init__.py -> build/bdist.linux-x86_64/wheel/./silvertorch/modules
+DEBUG copying build/lib.linux-x86_64-cpython-311/silvertorch/modules/bloom_index_search_module.py -> build/bdist.linux-x86_64/wheel/./silvertorch/modules
+DEBUG copying build/lib.linux-x86_64-cpython-311/silvertorch/modules/bloom_index_search_module_builder.py -> build/bdist.linux-x86_64/wheel/./silvertorch/modules
+DEBUG copying build/lib.linux-x86_64-cpython-311/silvertorch/modules/filter_query_parser_module.py -> build/bdist.linux-x86_64/wheel/./silvertorch/modules
+DEBUG copying build/lib.linux-x86_64-cpython-311/silvertorch/modules/filter_query_parser_module_builder.py -> build/bdist.linux-x86_64/wheel/./silvertorch/modules
+DEBUG creating build/bdist.linux-x86_64/wheel/silvertorch/modules/tests
+DEBUG copying build/lib.linux-x86_64-cpython-311/silvertorch/modules/tests/__init__.py -> build/bdist.linux-x86_64/wheel/./silvertorch/modules/tests
+DEBUG copying build/lib.linux-x86_64-cpython-311/silvertorch/modules/tests/test_bloom_index_search_module.py -> build/bdist.linux-x86_64/wheel/./silvertorch/modules/tests
+DEBUG copying build/lib.linux-x86_64-cpython-311/silvertorch/modules/tests/test_filter_query_parser_module.py -> build/bdist.linux-x86_64/wheel/./silvertorch/modules/tests
+DEBUG copying build/lib.linux-x86_64-cpython-311/silvertorch/_C.cpython-311-x86_64-linux-gnu.so -> build/bdist.linux-x86_64/wheel/./silvertorch
+DEBUG running install_egg_info
+DEBUG running egg_info
+DEBUG creating silvertorch.egg-info
+DEBUG writing silvertorch.egg-info/PKG-INFO
+DEBUG writing dependency_links to silvertorch.egg-info/dependency_links.txt
+DEBUG writing requirements to silvertorch.egg-info/requires.txt
+DEBUG writing top-level names to silvertorch.egg-info/top_level.txt
+DEBUG writing manifest file 'silvertorch.egg-info/SOURCES.txt'
+DEBUG reading manifest file 'silvertorch.egg-info/SOURCES.txt'
+DEBUG adding license file 'LICENSE'
+DEBUG writing manifest file 'silvertorch.egg-info/SOURCES.txt'
+DEBUG Copying silvertorch.egg-info to build/bdist.linux-x86_64/wheel/./silvertorch-1.0.0-py3.11.egg-info
+DEBUG running install_scripts
+DEBUG creating build/bdist.linux-x86_64/wheel/silvertorch-1.0.0.dist-info/WHEEL
+DEBUG creating '/root/.cache/uv/builds-v0/.tmpmkzHdp/.tmp-8zwm_h_n/silvertorch-1.0.0-cp311-cp311-linux_x86_64.whl' and adding 'build/bdist.linux-x86_64/wheel' to it
+DEBUG adding 'silvertorch/_C.cpython-311-x86_64-linux-gnu.so'
+DEBUG adding 'silvertorch/__init__.py'
+DEBUG adding 'silvertorch/modules/__init__.py'
+DEBUG adding 'silvertorch/modules/bloom_index_search_module.py'
+DEBUG adding 'silvertorch/modules/bloom_index_search_module_builder.py'
+DEBUG adding 'silvertorch/modules/filter_query_parser_module.py'
+DEBUG adding 'silvertorch/modules/filter_query_parser_module_builder.py'
+DEBUG adding 'silvertorch/modules/tests/__init__.py'
+DEBUG adding 'silvertorch/modules/tests/test_bloom_index_search_module.py'
+DEBUG adding 'silvertorch/modules/tests/test_filter_query_parser_module.py'
+DEBUG adding 'silvertorch/ops/__init__.py'
+DEBUG adding 'silvertorch/ops/_load_ops.py'
+DEBUG adding 'silvertorch-1.0.0.dist-info/licenses/LICENSE'
+DEBUG adding 'silvertorch-1.0.0.dist-info/METADATA'
+DEBUG adding 'silvertorch-1.0.0.dist-info/WHEEL'
+DEBUG adding 'silvertorch-1.0.0.dist-info/top_level.txt'
+DEBUG adding 'silvertorch-1.0.0.dist-info/RECORD'
+DEBUG removing build/bdist.linux-x86_64/wheel
+DEBUG Built `silvertorch @ git+https://github.com/meta-recsys/silvertorch@21aa35e28b6dd9a91e9ee35efb0857715e86bda7` into `silvertorch-1.0.0-cp311-cp311-linux_x86_64.whl`
+      Built silvertorch @ git+https://github.com/meta-recsys/silvertorch@21aa35e28b6dd9a91e9ee35efb0857715e86bda7
+Prepared 1 package without build isolation in 2m 17s
+Installed 1 package in 390ms
+ + ninja==1.13.0
+ ~ retrieve==0.1.0 (from file:///workspace/wt/a0-a3-deps-official/retrieve)
+ + setuptools==82.0.1
+ + silvertorch==1.0.0 (from git+https://github.com/meta-recsys/silvertorch@21aa35e28b6dd9a91e9ee35efb0857715e86bda7)
+ + wheel==0.48.0
+
+real	2m25.263s
+user	5m49.537s
+sys	0m52.548s
