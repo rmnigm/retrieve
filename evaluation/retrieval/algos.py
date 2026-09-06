@@ -12,8 +12,8 @@ no such cell. Backends collapse where they run the same code (``linr_v1``/``linr
 ``none`` are cuBLAS whatever the flag says); on filter cells the path names both halves
 (``cublas+triton``: cuBLAS scoring, Triton ``clause_mask``). ``official`` is Meta's
 SilverTorch reference backend and exists for ``silvertorch`` only — the library's other
-layers would silently run their torch path under that label (architecture.md § Backend
-dispatch), so those cells are ``None`` rather than a mislabelled number. Standalone filter
+layers reject it at construction (``LinrBackend``, architecture.md § Backend dispatch), so
+those cells are ``None`` rather than a build error. Standalone filter
 modules for ``official`` cells are Triton (O §6.2): ``FILTER_BACKEND``.
 """
 
@@ -32,7 +32,7 @@ from retrieve import (
     PrefilterKNN,
     SilverTorch,
 )
-from retrieve.interfaces import Backend, FilterModule
+from retrieve.interfaces import FilterModule, LinrBackend, SilverTorchBackend
 
 FILTER_KINDS = ("none", "clause", "bloom")
 BACKENDS = ("triton", "torch", "official")
@@ -62,7 +62,9 @@ class LinrV1(nn.Module):
 
     k = _k_of("idx")
 
-    def __init__(self, item_embs: Tensor, k: int, *, filter_mod=None, backend: Backend = "triton"):
+    def __init__(
+        self, item_embs: Tensor, k: int, *, filter_mod=None, backend: LinrBackend = "triton"
+    ):
         super().__init__()
         self.idx = PostfilterKNN(k=k, backend=backend)
         self.idx.register_index(item_embs)
@@ -79,7 +81,12 @@ class LinrV2(nn.Module):
     k = _k_of("idx")
 
     def __init__(
-        self, item_embs: Tensor, k: int, *, filter_mod: FilterModule, backend: Backend = "triton"
+        self,
+        item_embs: Tensor,
+        k: int,
+        *,
+        filter_mod: FilterModule,
+        backend: LinrBackend = "triton",
     ):
         super().__init__()
         self.idx = PrefilterKNN(k=k, backend=backend)
@@ -105,7 +112,7 @@ class LinrV3(nn.Module):
         candidate_pool: int = 5000,
         seed: int = 0,
         filter_mod=None,
-        backend: Backend = "triton",
+        backend: LinrBackend = "triton",
     ):
         super().__init__()
         self.stage1 = OneBitKNN(k=candidate_pool, seed=seed, backend=backend)
@@ -134,7 +141,9 @@ class LinrV4(nn.Module):
 
     k = _k_of("idx")
 
-    def __init__(self, item_embs: Tensor, k: int, *, filter_mod=None, backend: Backend = "triton"):
+    def __init__(
+        self, item_embs: Tensor, k: int, *, filter_mod=None, backend: LinrBackend = "triton"
+    ):
         super().__init__()
         self.idx = PostfilterKNNInt8(k=k, backend=backend)
         self.idx.register_index(item_embs)
@@ -164,7 +173,7 @@ class Silvertorch(nn.Module):
         m_bits: int = 1024,
         k_hash: int = 5,
         seed: int = 0,
-        backend: Backend = "triton",
+        backend: SilverTorchBackend = "triton",
     ):
         super().__init__()
         self.filter_kind = filter_kind
@@ -292,7 +301,7 @@ def build(
         raise ValueError(f"no code path for ({algo}, {filter_kind}, {backend})")
     if not is_valid_combo(algo, p):
         raise ValueError(f"invalid params for {algo}: {p}")
-    if backend == "official" and "official" not in get_args(Backend):
+    if backend == "official" and "official" not in get_args(SilverTorchBackend):
         raise NotImplementedError("backend='official' is not in retrieve yet (roadmap B1)")
     module: nn.Module
     if algo == "silvertorch":

@@ -5,8 +5,8 @@
 > document only states what the paper *needs* from them (§B.6, §B.7).
 > Sources: local — `articles/silvertorch.md`, `articles/linr.md`, `docs/thesis/main.tex`
 > (ch. 4–6), `docs/system/{filtering,architecture,evaluation}.md`, `docs/plans/00-roadmap.md` §4,
-> `docs/plans/future-work-and-research.md`, `docs/plans/cuda-silvertorch-handoff.md` §13,
-> `docs/plans/cute-dsl-scorer.md` §5, `evaluation/config/**`, `evaluation/results/**`.
+> `docs/plans/future-work-and-research.md`, `docs/plans/archive/cuda-silvertorch-handoff.md` §13,
+> `docs/plans/archive/cute-dsl-scorer.md` §5, `evaluation/config/**`, `evaluation/results/**`.
 > Web sources are cited inline; anything I could not verify is marked **[unverified]**.
 >
 > **Ordering authority:** [00-roadmap.md](00-roadmap.md) — G2 is roadmap Phase B, G3/G4/G7/G8 are

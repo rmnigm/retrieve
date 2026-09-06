@@ -1,28 +1,16 @@
 from __future__ import annotations
 
-import warnings
 from typing import Literal
 
 import torch
 from torch import Tensor
 
-from retrieve.interfaces import Backend, RetrievalModule
+from retrieve.interfaces import RetrievalModule, SilverTorchBackend, check_backend
 from retrieve.kernels.filters.clause_mask import clause_mask
 from retrieve.kernels.silvertorch import official as official_mod
 from retrieve.kernels.silvertorch.codesigned_probe_score import (
     codesigned_probe_score,
     codesigned_probe_score_bloom,
-)
-from retrieve.kernels.silvertorch.codesigned_probe_score_cuda import (
-    build_transposed_sigs,
-    codesigned_probe_score_bloom_cuda,
-    codesigned_probe_score_cuda,
-    codesigned_probe_score_exact_cuda,
-)
-from retrieve.kernels.silvertorch.codesigned_probe_score_cute import (
-    codesigned_probe_score_bloom_cute,
-    codesigned_probe_score_cute,
-    codesigned_probe_score_exact_cute,
 )
 from retrieve.kernels.silvertorch.codesigned_probe_score_exact import (
     codesigned_probe_score_exact,
@@ -43,11 +31,6 @@ from retrieve.layers.utils.topk import masked_topk
 
 FilterMode = Literal["none", "bloom", "exact"]
 
-# Backends that run the paper's two-kernel design (phase-2 partial masks over the probed
-# clusters -> masked dp4a scoring) and therefore read the *transposed* bloom index. The
-# CuTe DSL backend is a port of the CUDA C++ one: same ops, same buffers, same layout.
-_TWO_KERNEL_BACKENDS = ("cuda", "cute")
-
 
 class SilverTorch(RetrievalModule):
     """Co-designed IVF + INT8 ANN + optional attribute filter (paper Algorithm 1, §4.2): an ``[N,
@@ -58,10 +41,7 @@ class SilverTorch(RetrievalModule):
 
     ``backend="triton"`` (default) keeps all probe intermediates off HBM; ``backend="torch"``
     runs the same semantics eager but materializes ``[B, P, D]``, so large ``P·B·D`` needs the
-    Triton backend. ``backend="cuda"`` runs the CUDA C++ implementation of all three filter
-    modes, JIT-compiling on first forward and returning bit-identical results to the Triton
-    backend; ``backend="cute"`` is the CuTe DSL port of that backend (same ops, same buffers,
-    same mask layout, bit-identical to cuda; needs the ``cute`` extra). ``backend="official"``
+    Triton backend. ``backend="official"``
     routes phases 2+3 to Meta's own ``torch.ops.st.*`` kernels (``meta-recsys/silvertorch``,
     the ``official`` extra) — the reference the Triton kernels are checked against: same
     k-means, same int8 codes and probes, the official scorer over a cluster-sorted table
@@ -71,12 +51,11 @@ class SilverTorch(RetrievalModule):
     optional there) and our ``clause_mask`` packed into the scorer's bit mask for
     ``filter_mode="exact"``. It is **eager-only** (every official op syncs the host):
     ``torch.compile`` of an official module raises. See docs/system/kernels.md for every
-    backend's design and constraints. Only the ``"bloom"`` index differs across backends
-    (cuda and cute register the transposed ``bloom_sigs_t`` instead of ``bloom_sigs``;
-    official registers ``bloom_index`` / ``bundle_b_offsets``) — a cuda or cute ``"exact"``
-    module's state_dict is identical to a triton one's, and a cute checkpoint is
-    byte-identical to a cuda one; an official state_dict is portable to no other backend
-    (cluster-sorted ``item_codes``, no ``padded_cluster_items``). ``load_state_dict`` into a
+    backend's design and constraints. ``triton`` and ``torch`` register the same buffers
+    (a checkpoint is portable between them in every ``filter_mode``); an official state_dict
+    is portable to neither (cluster-sorted ``item_codes``, ``bloom_index`` /
+    ``bundle_b_offsets`` instead of ``bloom_sigs``, no ``padded_cluster_items``).
+    ``load_state_dict`` into a
     module of the same shape (one whose ``register_index`` already ran) re-derives the two
     Python-scalar caches the forwards read (``_global_scale_f``, ``_max_cluster_size``) from
     the loaded buffers, so a loaded index scores like the one that was saved."""
@@ -92,7 +71,6 @@ class SilverTorch(RetrievalModule):
     bloom_index: Tensor  # official + bloom: [W] int64
     bundle_b_offsets: Tensor  # official + bloom: [n_bundles + 1] int64
     bloom_sigs: Tensor
-    bloom_sigs_t: Tensor
     hash_seeds: Tensor
     clause_salt: Tensor
     item_clause_attrs: Tensor
@@ -108,7 +86,7 @@ class SilverTorch(RetrievalModule):
         k_hash: int | None = None,
         n_iter: int = 10,
         seed: int = 0,
-        backend: Backend = "triton",
+        backend: SilverTorchBackend = "triton",
         official: OfficialConfig | None = None,
     ) -> None:
         super().__init__()
@@ -116,8 +94,7 @@ class SilverTorch(RetrievalModule):
             raise ValueError(
                 f"filter_mode must be 'none', 'bloom', or 'exact', got {filter_mode!r}"
             )
-        if backend not in ("triton", "torch", "cuda", "cute", "official"):
-            raise ValueError(f"unknown backend {backend!r}")
+        check_backend(backend, SilverTorchBackend)
         if official is not None and backend != "official":
             raise ValueError("official=OfficialConfig(...) only applies to backend='official'")
         if backend == "official":
@@ -167,6 +144,12 @@ class SilverTorch(RetrievalModule):
         self.n_iter = n_iter
         self.seed = seed
         self.backend = backend
+        # Dispatch table built once; forward calls the bound method for this backend.
+        self._forward_impl = {
+            "triton": self._forward_triton,
+            "torch": self._forward_torch_eager,
+            "official": self._forward_official,
+        }[backend]
         # The two Python-scalar caches below (_global_scale_f, _max_cluster_size) are set by
         # register_index; a state-dict load replaces the buffers they were derived from, so
         # they are re-derived after every load_state_dict.
@@ -200,7 +183,9 @@ class SilverTorch(RetrievalModule):
             self.register_buffer("cluster_sizes", cluster_sizes)
             self.register_buffer("sort_perm", sort_perm)
             self.register_buffer("inv_perm", inv_perm)
-            self._register_official_filter_buffers(item_clause_attrs, clause_is_reverse)
+            self._register_filter_buffers(
+                item_embs.shape[0], item_clause_attrs, clause_is_reverse, perm=sort_perm
+            )
             return
         self._quantize_items(item_embs)
         # Buffer registration order is frozen (state-dict key order): centroids, item_codes,
@@ -245,10 +230,9 @@ class SilverTorch(RetrievalModule):
         cluster_sizes = torch.bincount(assignments, minlength=self.n_lists)
         max_size = int(cluster_sizes.max().item())
         # Plain Python int, cached for the same reason as _global_scale_f below: the
-        # cuda exact op takes the padded cluster width as a scalar argument, and
-        # reading it back off padded_cluster_items.shape[1] inside forward would hand
-        # dynamo a SymInt under `torch.compile(dynamic=True)` — which the custom op's
-        # `int` schema slot would then have to specialize or graph-break on.
+        # official forward passes `n_probe * max_cluster_size` as a scalar op argument,
+        # and reading it back off padded_cluster_items.shape[1] inside forward would hand
+        # dynamo a SymInt under `torch.compile(dynamic=True)`.
         self._max_cluster_size = max_size
 
         # P (probe pool width) = n_probe × max_cluster_size; topk runs with no pad tail, so the
@@ -303,9 +287,38 @@ class SilverTorch(RetrievalModule):
         n: int,
         item_clause_attrs: Tensor | None,
         clause_is_reverse: Tensor | None,
+        *,
+        perm: Tensor | None = None,
     ) -> None:
+        """Filter buffers for this backend's index layout. ``perm`` is the official
+        backend's ``sort_perm``: with it the attribute buffers live in the cluster-sorted
+        doc space so the official scorer's ``cluster_offsets`` address the same items;
+        without it they keep original ids. ``bloom`` → our row-wise ``bloom_sigs`` +
+        ``hash_seeds`` + ``clause_salt`` on triton / torch, or the official
+        ``bloom_index`` / ``bundle_b_offsets`` built by ``torch.ops.st.bloom_index_build``
+        (their hash; ``k_hash`` is the search ``k``, ``OfficialConfig.build_k`` the build
+        ``k``); ``exact`` → the narrow attrs (permuted when ``perm`` is given) +
+        ``clause_is_reverse``, read by our kernels or, on official, by ``clause_mask``."""
         device = self.item_codes.device  # same device as item_embs
-        if self.filter_mode == "bloom":
+        if self.filter_mode == "bloom" and self.backend == "official":
+            cfg = self.official
+            if item_clause_attrs is None:
+                # No attributes at build time: an empty index. A later query with
+                # attributes has nothing to search and raises in _forward_official.
+                bloom_index = torch.empty(0, dtype=torch.int64, device=device)
+                bundle_b_offsets = torch.zeros(1, dtype=torch.int64, device=device)
+            else:
+                assert perm is not None  # the official layout always sorts
+                attrs_sorted = item_clause_attrs.long()[perm]
+                bloom_index, bundle_b_offsets = official_mod.build_bloom_index(
+                    attrs_sorted,
+                    b_multiplier=cfg.b_multiplier,
+                    build_k=cfg.build_k if cfg.build_k is not None else self.k_hash,
+                    fast_build=cfg.fast_build,
+                )
+            self.register_buffer("bloom_index", bloom_index)
+            self.register_buffer("bundle_b_offsets", bundle_b_offsets)
+        elif self.filter_mode == "bloom":
             seeds = generate_seeds(self.k_hash, device=device)
             if item_clause_attrs is None:
                 # No attributes at build time: all-zero signatures and an empty salt
@@ -323,34 +336,7 @@ class SilverTorch(RetrievalModule):
                     self.word_count,
                     clause_salt=salt,
                 )
-            if self.backend in _TWO_KERNEL_BACKENDS:
-                # The cuda/cute path reads only the transposed index; row-wise sigs are
-                # a build-time intermediate. Registering both would double the filter
-                # index memory. Note this changes the state-dict key set — see
-                # docs/system/architecture.md on cross-backend checkpoint portability.
-                #
-                # Size: bloom_sigs_t is [m_bits, n_lists * wpc] int64, i.e.
-                #   W * 8 * n_lists * wpc * 64 bytes  =  bloom_sigs * (n_lists * wpc * 64 / N)
-                # The factor is the IVF *padding* slack: n_lists * max_size / N rounded
-                # up to whole 64-slot words. It is ~1.0-1.1x for a balanced index but
-                # grows without bound as clusters get more uneven, because every cluster
-                # is padded out to the largest one.
-                slack = self.padded_cluster_items.numel() / max(n, 1)
-                if slack > 2.0:
-                    warnings.warn(
-                        f"{self.backend}+bloom transposed index is {slack:.1f}x the row-wise "
-                        f"bloom_sigs size: n_lists * max_cluster_size = "
-                        f"{self.padded_cluster_items.numel()} padded slots for N={n} "
-                        f"items. Cluster sizes are very uneven — re-cluster (more "
-                        f"n_iter, a different n_lists/seed) to bring this down.",
-                        RuntimeWarning,
-                        stacklevel=2,
-                    )
-                self.register_buffer(
-                    "bloom_sigs_t", build_transposed_sigs(sigs, self.padded_cluster_items)
-                )
-            else:
-                self.register_buffer("bloom_sigs", sigs)
+            self.register_buffer("bloom_sigs", sigs)
             self.register_buffer("hash_seeds", seeds)
             # Registered (not rebuilt per call) so the bloom forward issues no
             # host→device copy — see bloom_hash.generate_clause_salt.
@@ -359,49 +345,11 @@ class SilverTorch(RetrievalModule):
             assert item_clause_attrs is not None  # narrowed by _validate_register_args
             c = item_clause_attrs.shape[1]
             if clause_is_reverse is None:
-                clause_is_reverse = torch.zeros(
-                    c, dtype=torch.bool, device=item_clause_attrs.device
-                )
-            self.register_buffer("item_clause_attrs", item_clause_attrs.long())
-            self.register_buffer("clause_is_reverse", clause_is_reverse)
-
-    def _register_official_filter_buffers(
-        self,
-        item_clause_attrs: Tensor | None,
-        clause_is_reverse: Tensor | None,
-    ) -> None:
-        """Filter buffers of the official backend, in the cluster-sorted doc space so the
-        scorer's ``cluster_offsets`` address the same items: ``bloom`` → the official
-        ``bloom_index`` / ``bundle_b_offsets`` built by ``torch.ops.st.bloom_index_build``
-        (their hash; ``k_hash`` is the search ``k``, ``OfficialConfig.build_k`` the build
-        ``k``); ``exact`` → the narrow attrs (sorted) + ``clause_is_reverse`` read by our
-        ``clause_mask``."""
-        device = self.item_codes.device
-        cfg = self.official
-        if self.filter_mode == "bloom":
-            if item_clause_attrs is None:
-                # No attributes at build time: an empty index. A later query with
-                # attributes has nothing to search and raises in _forward_official.
-                bloom_index = torch.empty(0, dtype=torch.int64, device=device)
-                bundle_b_offsets = torch.zeros(1, dtype=torch.int64, device=device)
-            else:
-                attrs_sorted = item_clause_attrs.long()[self.sort_perm]
-                bloom_index, bundle_b_offsets = official_mod.build_bloom_index(
-                    attrs_sorted,
-                    b_multiplier=cfg.b_multiplier,
-                    build_k=cfg.build_k if cfg.build_k is not None else self.k_hash,
-                    fast_build=cfg.fast_build,
-                )
-            self.register_buffer("bloom_index", bloom_index)
-            self.register_buffer("bundle_b_offsets", bundle_b_offsets)
-        elif self.filter_mode == "exact":
-            assert item_clause_attrs is not None  # narrowed by _validate_register_args
-            c = item_clause_attrs.shape[1]
-            if clause_is_reverse is None:
                 clause_is_reverse = torch.zeros(c, dtype=torch.bool, device=device)
-            self.register_buffer(
-                "item_clause_attrs", item_clause_attrs.long()[self.sort_perm].contiguous()
-            )
+            attrs = item_clause_attrs.long()
+            if perm is not None:
+                attrs = attrs[perm].contiguous()
+            self.register_buffer("item_clause_attrs", attrs)
             self.register_buffer("clause_is_reverse", clause_is_reverse)
 
     def compile(self, *args, **kwargs):
@@ -435,21 +383,13 @@ class SilverTorch(RetrievalModule):
             raise ValueError(
                 "query_clause_attrs requires filter_mode='bloom' or filter_mode='exact'"
             )
-        if self.backend == "triton":
-            return self._forward_triton(query, query_clause_attrs)
-        if self.backend == "cuda":
-            return self._forward_cuda(query, query_clause_attrs)
-        if self.backend == "cute":
-            return self._forward_cute(query, query_clause_attrs)
-        if self.backend == "official":
-            if torch.compiler.is_compiling():
-                raise RuntimeError(
-                    "SilverTorch(backend='official') is eager-only and cannot be traced by "
-                    "torch.compile / torch.export (plan D7): every official op syncs the host. "
-                    "Call the module eagerly, or use backend='triton' / 'torch'."
-                )
-            return self._forward_official(query, query_clause_attrs)
-        return self._forward_torch_eager(query, query_clause_attrs)
+        if self.backend == "official" and torch.compiler.is_compiling():
+            raise RuntimeError(
+                "SilverTorch(backend='official') is eager-only and cannot be traced by "
+                "torch.compile / torch.export (plan D7): every official op syncs the host. "
+                "Call the module eagerly, or use backend='triton' / 'torch'."
+            )
+        return self._forward_impl(query, query_clause_attrs)
 
     def _phase1_probe_ids(self, query: Tensor) -> Tensor:
         """Phase 1 proper: centroid scores → top-``n_probe`` cluster ids ``[B, n_probe]``."""
@@ -516,88 +456,6 @@ class SilverTorch(RetrievalModule):
                 self.k,
             )
         return codesigned_probe_score(
-            query,
-            flat_items,
-            self.item_codes,
-            self._global_scale_f,
-            self.k,
-        )
-
-    def _forward_cuda(
-        self,
-        query: Tensor,
-        query_clause_attrs: Tensor | None,
-    ) -> tuple[Tensor, Tensor]:
-        """CUDA C++ backend — see ``_forward_two_kernel``."""
-        return self._forward_two_kernel(
-            query,
-            query_clause_attrs,
-            plain=codesigned_probe_score_cuda,
-            bloom=codesigned_probe_score_bloom_cuda,
-            exact=codesigned_probe_score_exact_cuda,
-        )
-
-    def _forward_cute(
-        self,
-        query: Tensor,
-        query_clause_attrs: Tensor | None,
-    ) -> tuple[Tensor, Tensor]:
-        """CuTe DSL backend — the cuda forward with the cute ops; see ``_forward_two_kernel``."""
-        return self._forward_two_kernel(
-            query,
-            query_clause_attrs,
-            plain=codesigned_probe_score_cute,
-            bloom=codesigned_probe_score_bloom_cute,
-            exact=codesigned_probe_score_exact_cute,
-        )
-
-    def _forward_two_kernel(
-        self,
-        query: Tensor,
-        query_clause_attrs: Tensor | None,
-        *,
-        plain,
-        bloom,
-        exact,
-    ) -> tuple[Tensor, Tensor]:
-        """Paper Algorithm 1 as the cuda and cute backends run it: phase 1 host-side,
-        then a two-kernel filtered path (partial 1-bit masks over the probed clusters →
-        masked dp4a scoring) or plain mask-free scoring. Bloom and exact share the
-        scoring kernel and differ only in which phase-2 kernel builds the mask; the
-        exact path reads ids straight from ``flat_items``, so it needs the padded
-        cluster width rather than the probed cluster ids. ``plain`` / ``bloom`` /
-        ``exact`` are the backend's three custom ops (identical signatures)."""
-        probe_ids, flat_items = self._phase1_probe_with_ids(query)
-
-        if self.has_exact and query_clause_attrs is not None:
-            return exact(
-                query,
-                flat_items,
-                self.item_codes,
-                self.item_clause_attrs,
-                self.clause_is_reverse,
-                query_clause_attrs.long(),
-                self._global_scale_f,
-                self.k,
-                # Python int cached at index build (_build_ivf) — no device read and
-                # no tensor-shape read, so cudagraph capture stays clean and dynamic
-                # compilation cannot turn it into a SymInt.
-                self._max_cluster_size,
-            )
-
-        if self.has_bloom and query_clause_attrs is not None:
-            qb = self._query_bits(query_clause_attrs)
-            return bloom(
-                query,
-                flat_items,
-                self.item_codes,
-                qb,
-                self.bloom_sigs_t,
-                probe_ids,
-                self._global_scale_f,
-                self.k,
-            )
-        return plain(
             query,
             flat_items,
             self.item_codes,
@@ -761,7 +619,7 @@ def build_silvertorch(
     seed: int = 0,
     item_clause_attrs: Tensor | None = None,
     clause_is_reverse: Tensor | None = None,
-    backend: Backend = "triton",
+    backend: SilverTorchBackend = "triton",
     official: OfficialConfig | None = None,
 ) -> SilverTorch:
     """Construct a ``SilverTorch`` and run ``register_index(item_embs, ...)`` in one call."""
