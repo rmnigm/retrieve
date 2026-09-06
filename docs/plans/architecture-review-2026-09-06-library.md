@@ -398,3 +398,10 @@ the T1/B.4 test and doc rows, and shrinking "five"/"eleven" to "three"/"seven". 
 (`_host.py`), D3 (dummy pointers), the `bloom_sigs_t`-on-Triton wording. C1/C4: the
 harness's `official` cell passing `cache_plans=False` (or both rows), the LiNR cells'
 `"cuda"` → `"triton"`, A7's score dtype at the layer boundary.
+
+**Applied at B4 (2026-09-06, `dev/b4-delete-cuda-cute`, CPU-only; GPU suite pending).** #5
+(`LinrBackend` / `SilverTorchBackend` + `check_backend` in every constructor, 18 rejection
+cells in `test_linr.py`), A2 (table dispatch in `SilverTorch.__init__`, merged
+`_register_filter_buffers(…, perm=)`), A9 re-exports (the kernel package `__init__` is
+docstring-only), the T1 / B.4 test and doc rows, "five"/"eleven" → "three"/"seven". D7's
+`_forward_two_kernel` went with the backends. Record: O §15.
