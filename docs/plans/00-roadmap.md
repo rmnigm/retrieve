@@ -108,15 +108,38 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
   closes the harness half of
   [refactor-validation-handoff.md](refactor-validation-handoff.md)
   (steps 4–7) — record the result there.
-- [ ] **A2 — pin and build the official package.** O §10 WP-0 (A100,
+- [x] **A2 — pin and build the official package.** O §10 WP-0 (A100,
   0.5 d). `uv sync --extra official`; upstream suite green; sha, `nvcc`
   and build log in `docs/plans/official-silvertorch-artifacts/`. Gate:
   build < 5 min, `torch.ops.st.fused_kmean_ann` exists. Unblocks: A3, B2.
-- [ ] **A3 — official op facts.** O §10 WP-1 (A100, 0.5 d): bit-order
+  **Done 2026-09-06, `d2b9248`** (`dev/a0-a3-deps-official`). Pin
+  `21aa35e28b6dd9a91e9ee35efb0857715e86bda7`; build 2 m 17 s with nvcc 12.4
+  (a *minor* mismatch against the cu128 wheel — warning, not an error, so
+  O §11's 12.8 preference relaxes to 12.x); `torch.ops.st.fused_kmean_ann`
+  present. Upstream `pytest silvertorch/` **fails at collection** on three
+  files whose Buck `load_library` lines survived Meta's `@oss-disable`
+  stripping; excluding them, 99 passed / 3 subtests passed, every CUDA test
+  included — green for everything the OSS build ships. Two ops
+  (`is_topk`, `take_top_k_and_gather_from_main_and_fresh`) are dead source:
+  their `.cpp`/`.cu` are not in `setup.py`. The `cute` extra stays until B4
+  (rule 5); `official` is added alongside. Record: O §13.1.
+- [x] **A3 — official op facts.** O §10 WP-1 (A100, 0.5 d): bit-order
   probe, syncs and launches per op, graph-capture attempt, parse cost,
   the `per_embedding_scale` overflow. Gate: O §3 confirmed or corrected
   in O's record section. Unblocks: B1 (the adapter is written against
   measured facts, not read ones).
+  **Done 2026-09-06, `137a3c5`** (`dev/a0-a3-deps-official`). **The answer
+  B1 needs: the official bloom mask is HIGH-bit-first — document `d` is bit
+  `63 - (d % 64)` of word `d // 64`** (three independent probes agree), so
+  take the HIGH-first branch of the two the B1 note below asks for. O §4.2
+  (i)–(iii) confirmed, including `per_embedding_scale` returning `inf` in
+  every slot at D=128. Corrected: `fused_kmean_ann` costs 3 syncs and 19
+  launches, not 2 and ≈ 12; `_with_partial_masks` 4 syncs;
+  `bloom_index_search_batch` *captures* into a CUDA graph and then faults on
+  replay, so it needs to be on the harness's not-capturable list explicitly
+  (D7 unchanged). Parse cost at B=16: 58.7 µs/call, 3.67 µs/query. Record:
+  O §13.2; script and raw output in
+  [official-silvertorch-artifacts/](official-silvertorch-artifacts/README.md).
 - [ ] **A4 — merge to `main`.** After A1 passes: merge `development`
   into `main` (library gates passed 2026-09-02, harness golden passed in
   A1). Everything below happens on phase branches off `main`, merged
