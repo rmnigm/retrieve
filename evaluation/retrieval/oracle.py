@@ -1,170 +1,314 @@
-"""Filtered-FullScan ground truth for filter-bench cells.
+"""Exact filtered oracle for harness v2 (H §2.2, §8.2 I) and the resume key (§8.2 B).
 
-The oracle is a brute-force ``q @ E_t`` top-K_GT, computed once per (sweep,
-filter_kind) pair and cached on disk. Algos under test are scored against
-this oracle, not against held-out targets, because filter sweeps deliberately
-restrict the candidate set: held-out targets often fall outside the filtered
-catalog and would tank recall regardless of algo quality.
+Brute-force ``q @ E^T`` under the *exact* mask (``ExactAttributeFilter`` even on bloom
+cells — bloom's false positives must never leak into ground truth), top-``k_max`` with
+``-inf`` ties written as ``-1`` so short-filled rows never score against the algos' ``-1``
+sentinel. Skipped rows (no live clause) stay all ``-1``. Indices are 0-indexed positions in
+the pad-row-dropped ``item_embs``.
 
-``filter_mod`` MUST be an *exact* mask source (``ExactAttributeFilter``).
-Bloom's false positives must NOT leak into the ground truth — bloom-suite
-runs build a separate exact filter over the same attrs at the call site.
+**Blob v4** — one dict at ``<gt_dir>/oracle_v4_<sweep>_<fingerprint[:16]>.pt``:
+
+| key | value |
+|---|---|
+| ``version`` | ``4`` |
+| ``topk`` | ``[U, k_gt]`` int64, ``-1`` padded |
+| ``pass_counts`` | ``[U]`` int64: items passing the exact mask; ``-1`` on skipped rows |
+| ``pass_rate`` | mean over kept rows of ``pass_counts / n_items`` (H §2.2, LiNR's axis) |
+| ``targets_in_filter`` | ``[U, T]`` bool: held-out target ``t`` of user ``u`` passes the mask |
+| ``target_in_filter`` | ``[U]`` bool: any held-out target passes (``n_queries_heldout = sum``) |
+| ``n_items``, ``n_queries``, ``n_kept``, ``k_gt``, ``sweep``, ``clauses`` | the build's shape |
+| ``fingerprint`` | the content hash below |
+| ``code_version``, ``harness_commit``, ``torch``, ``created`` | provenance of the build |
+
+The **fingerprint** hashes shapes, dtypes and a fixed 64-row linspace sample of
+``item_embs``, ``queries``, ``targets`` and the sweep's ``qa`` plus ``clauses`` and ``k_gt``
+(the E6 fix, extended to the two inputs the v4 fields depend on). Same-shape content changes
+— another dim off the same ``data_dir``, regenerated attrs, a retrained checkpoint, a changed
+``users_limit`` — change the file name, so a stale blob is never *read*; the hash in the name
+is what makes the blob a portable artifact (§8.2 I). Bloom pass rates are not cached: they
+depend on ``m_bits`` / ``k_hash`` and cost one mask pass (``pass_counts``).
+
+The two old names at the bottom (``compute_filtered_oracle``, ``load_or_build_oracle``) are
+thin wrappers for ``sweep.py``; C3 deletes them.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
+import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import torch
 from loguru import logger
 from tqdm import tqdm
 
+from retrieval.bench import _git, code_version
 from retrieve.interfaces import FilterModule
 
+BLOB_VERSION = 4
 _FP_SAMPLE_ROWS = 64
 
 
-def _oracle_fingerprint(
+def fingerprint(
     item_embs: torch.Tensor,
     queries: torch.Tensor,
-    qa_narrow_sweep: torch.Tensor | None,
+    targets: torch.Tensor | None,
+    qa_sweep: torch.Tensor | None,
+    clauses: tuple[int, ...] | None,
     k_gt: int,
 ) -> str:
-    """Cheap deterministic content hash: shapes + dtypes + a fixed row sample.
-
-    Sampling (vs hashing 3M×256 fp32 fully) keeps this <10 ms; linspace rows
-    catch dim changes, re-encodes, attr regens, and checkpoint swaps — any of
-    which perturb sampled bytes. Not adversarially robust; doesn't need to be."""
+    """Cheap deterministic content hash: shapes + dtypes + a fixed row sample (<10 ms)."""
     h = hashlib.sha256()
-    tensors = [item_embs, queries] + ([qa_narrow_sweep] if qa_narrow_sweep is not None else [])
-    for t in tensors:
+    for t in (item_embs, queries, targets, qa_sweep):
+        if t is None:
+            h.update(b"none")
+            continue
         h.update(repr((tuple(t.shape), str(t.dtype))).encode())
         idx = torch.linspace(0, t.shape[0] - 1, steps=min(_FP_SAMPLE_ROWS, t.shape[0])).long()
         h.update(t[idx].detach().float().cpu().contiguous().numpy().tobytes())
-    h.update(str(k_gt).encode())
+    h.update(repr((None if clauses is None else tuple(clauses), int(k_gt))).encode())
     return h.hexdigest()
 
 
+def _batches(n_rows: int, skip_mask: torch.Tensor | None, batch_size: int, desc: str):
+    keep = ~skip_mask if skip_mask is not None else torch.ones(n_rows, dtype=torch.bool)
+    keep_idx = keep.nonzero(as_tuple=False).reshape(-1)
+    rng = range(0, keep_idx.numel(), batch_size)
+    for s in tqdm(rng, desc=desc, leave=False, disable=not sys.stderr.isatty()):
+        yield keep_idx[s : s + batch_size]
+
+
 @torch.inference_mode()
-def compute_filtered_oracle(
-    item_embs: torch.Tensor,
-    queries: torch.Tensor,
-    qa_narrow_sweep: torch.Tensor | None,
+def pass_counts(
+    filter_mod: FilterModule,
+    qa_sweep: torch.Tensor,
     skip_mask: torch.Tensor | None,
-    filter_mod: FilterModule | None,
-    K_GT: int,
     *,
     batch_size: int = 64,
     device: torch.device,
 ) -> torch.Tensor:
-    """Brute-force filtered FullScan: returns ``[N_users, K_GT]`` int64 ids.
-
-    Skipped rows get all -1. ``filter_mod`` must be an *exact* mask
-    source — i.e. ``ExactAttributeFilter`` even on bloom-suite runs, so
-    bloom's false positives do not leak into the ground truth.
-
-    Indices are 0-indexed positions in the (already pad-row-dropped)
-    ``item_embs`` — the loaders strip the training-side padding row
-    before any retrieval-time tensor leaves the harness.
-    """
-    n_users = queries.shape[0]
-    out = torch.full((n_users, K_GT), -1, dtype=torch.long)
-    keep = ~skip_mask if skip_mask is not None else torch.ones(n_users, dtype=torch.bool)
-    keep_idx = keep.nonzero(as_tuple=False).reshape(-1)
-    if keep_idx.numel() == 0:
-        return out
-
-    item_embs_t = item_embs.t().contiguous()
-    n_total = int(item_embs.shape[0])
-    K_eff = min(K_GT, n_total)
-
-    for s in tqdm(
-        range(0, keep_idx.numel(), batch_size),
-        desc="oracle",
-        leave=False,
-        disable=not sys.stderr.isatty(),
-    ):
-        batch_idx = keep_idx[s : s + batch_size]
-        q = queries[batch_idx].to(device, non_blocking=True)
-        qa_n = (
-            qa_narrow_sweep[batch_idx].to(device, non_blocking=True)
-            if qa_narrow_sweep is not None
-            else None
-        )
-        mask = (
-            filter_mod.evaluate_mask(qa_n)
-            if (filter_mod is not None and qa_n is not None)
-            else None
-        )
-        scores = q @ item_embs_t
-        if mask is not None:
-            scores = scores.masked_fill(~mask, float("-inf"))
-        topk = torch.topk(scores, K_eff, dim=1)
-        # When the filter passes fewer than K_eff items, the bottom slots tie
-        # at -inf and torch.topk picks the lowest-indexed padding items
-        # (0, 1, 2, ...). Force those to -1 so they don't get scored as real
-        # ground-truth candidates against the algos' -1 padding.
-        topk_ids = torch.where(
-            torch.isfinite(topk.values),
-            topk.indices,
-            torch.full_like(topk.indices, -1),
-        )
-        out[batch_idx, :K_eff] = topk_ids.cpu()
-
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    """``[U]`` int64 items passing ``filter_mod`` per query (``-1`` on skipped rows). With a
+    ``BloomFilter`` this is the bloom pass count (H §2.2 ``bloom_fp_rate``)."""
+    out = torch.full((qa_sweep.shape[0],), -1, dtype=torch.long)
+    for idx in _batches(qa_sweep.shape[0], skip_mask, batch_size, "pass_counts"):
+        mask = filter_mod.evaluate_mask(qa_sweep[idx].to(device, non_blocking=True))
+        out[idx] = mask.sum(dim=1).cpu()
     return out
 
 
-def load_or_build_oracle(
+def pass_rate(counts: torch.Tensor, n_items: int) -> float:
+    """Mean of ``counts / n_items`` over kept rows (``counts >= 0``); ``nan`` if none."""
+    kept = counts[counts >= 0]
+    return (kept.double() / n_items).mean().item() if kept.numel() else float("nan")
+
+
+def bloom_fp_rate(bloom_counts: torch.Tensor, exact_counts: torch.Tensor, n_items: int) -> float:
+    """Mean per-query false-positive rate ``(bloom − exact) / (N − exact)`` over kept rows
+    with at least one negative; ``nan`` if none (bloom ⊇ exact, so this is ≥ 0)."""
+    keep = (exact_counts >= 0) & (bloom_counts >= 0) & (exact_counts < n_items)
+    fp = (bloom_counts[keep] - exact_counts[keep]).double()
+    neg = (n_items - exact_counts[keep]).double()
+    return (fp / neg).mean().item() if keep.any() else float("nan")
+
+
+@torch.inference_mode()
+def compute(
+    item_embs: torch.Tensor,
+    queries: torch.Tensor,
+    qa_sweep: torch.Tensor | None,
+    skip_mask: torch.Tensor | None,
+    filter_mod: FilterModule | None,
+    k_gt: int,
+    *,
+    targets: torch.Tensor | None = None,
+    batch_size: int = 64,
+    device: torch.device,
+) -> dict[str, Any]:
+    """The v4 content fields (``topk``, ``pass_counts``, ``targets_in_filter``,
+    ``target_in_filter``, ``pass_rate``) for one sweep. ``filter_mod`` must be exact; with
+    ``None`` (or no ``qa_sweep``) every item passes. ``targets`` is ``[U, T]`` ``-1``-padded."""
+    n_users, n_items = queries.shape[0], int(item_embs.shape[0])
+    k_eff = min(k_gt, n_items)
+    topk = torch.full((n_users, k_gt), -1, dtype=torch.long)
+    counts = torch.full((n_users,), -1, dtype=torch.long)
+    t_shape = targets.shape if targets is not None else (n_users, 0)
+    tif = torch.zeros(t_shape, dtype=torch.bool)
+    item_embs_t = item_embs.t().contiguous()
+    for idx in _batches(n_users, skip_mask, batch_size, "oracle"):
+        q = queries[idx].to(device, non_blocking=True)
+        scores = q @ item_embs_t
+        if filter_mod is not None and qa_sweep is not None:
+            mask = filter_mod.evaluate_mask(qa_sweep[idx].to(device, non_blocking=True))
+            scores = scores.masked_fill(~mask, float("-inf"))
+            counts[idx] = mask.sum(dim=1).cpu()
+        else:
+            mask = None
+            counts[idx] = n_items
+        top = torch.topk(scores, k_eff, dim=1)
+        # Fewer than k_eff survivors: the tail ties at -inf and topk picks the lowest ids.
+        topk[idx, :k_eff] = torch.where(torch.isfinite(top.values), top.indices, -1).cpu()
+        if targets is not None:
+            t = targets[idx].to(device, non_blocking=True)
+            valid = t != -1
+            passes = valid if mask is None else valid & mask.gather(1, t.clamp(min=0))
+            tif[idx] = passes.cpu()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return {
+        "topk": topk,
+        "pass_counts": counts,
+        "pass_rate": pass_rate(counts, n_items),
+        "targets_in_filter": tif,
+        "target_in_filter": tif.any(dim=1),
+    }
+
+
+def blob_path(gt_dir: Path, sweep: str, fp: str) -> Path:
+    return gt_dir / f"oracle_v4_{sweep}_{fp[:16]}.pt"
+
+
+def load_or_build(
     gt_dir: Path,
-    sweep_name: str,
-    K_GT: int,
+    sweep: str,
+    k_gt: int,
     *,
     item_embs: torch.Tensor,
     queries: torch.Tensor,
-    qa_narrow_sweep: torch.Tensor | None,
+    targets: torch.Tensor | None,
+    qa_sweep: torch.Tensor | None,
     skip_mask: torch.Tensor | None,
-    oracle_filter: FilterModule | None,
+    clauses: tuple[int, ...] | None,
+    filter_mod: FilterModule | None,
     device: torch.device,
-) -> torch.Tensor:
-    """Load cached oracle from disk; recompute on content-fingerprint mismatch.
+) -> dict[str, Any]:
+    """The v4 blob for one sweep: read from ``blob_path`` when present, else build and
+    save. The name carries the fingerprint, so a stale blob is simply never found."""
+    fp = fingerprint(item_embs, queries, targets, qa_sweep, clauses, k_gt)
+    path = blob_path(gt_dir, sweep, fp)
+    if path.exists():
+        blob = torch.load(str(path), map_location="cpu", weights_only=True)
+        if (
+            isinstance(blob, dict)
+            and blob.get("version") == BLOB_VERSION
+            and blob.get("fingerprint") == fp
+        ):
+            logger.info("  loaded oracle from cache: {}", path)
+            return blob
+        logger.warning("  {}: not a v4 blob for this fingerprint; rebuilding", path)
+    logger.info("  building exact oracle (k_gt={}) for sweep {}", k_gt, sweep)
+    n_kept = int((~skip_mask).sum()) if skip_mask is not None else int(queries.shape[0])
+    blob = {
+        "version": BLOB_VERSION,
+        **compute(
+            item_embs,
+            queries,
+            qa_sweep,
+            skip_mask,
+            filter_mod,
+            k_gt,
+            targets=targets,
+            device=device,
+        ),
+        "n_items": int(item_embs.shape[0]),
+        "n_queries": int(queries.shape[0]),
+        "n_kept": n_kept,
+        "k_gt": int(k_gt),
+        "sweep": sweep,
+        "clauses": None if clauses is None else [int(c) for c in clauses],
+        "fingerprint": fp,
+        "code_version": code_version(),
+        "harness_commit": _git("rev-parse", "--short", "HEAD") or "unknown",
+        "torch": str(torch.__version__),
+        "created": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+    }
+    gt_dir.mkdir(parents=True, exist_ok=True)
+    torch.save(blob, str(path))
+    logger.info("  saved oracle → {} (pass_rate={:.4f})", path, blob["pass_rate"])
+    return blob
 
-    Disk cache lives at ``<gt_dir>/gt_topk_v3_<sweep_name>.pt`` as a dict
-    blob ``{"topk", "fingerprint", "k_gt"}``. The fingerprint hashes the
-    post-``users_limit`` tensors the oracle is actually built from, so
-    same-shape content changes — a different ``content_subdir`` dim off
-    the same ``data_dir``, regenerated attrs, a retrained checkpoint —
-    invalidate the cache instead of silently reusing stale ground truth
-    (per-dim ``gt_subdir`` remains cheap defense-in-depth, not a
-    correctness requirement). Legacy ``gt_topk_v2_`` bare-tensor caches
-    are ignored by name and can be deleted; a bare tensor or stale dict
-    found at the v3 path is recomputed and overwritten, never migrated
-    in-place.
-    """
-    gt_path = gt_dir / f"gt_topk_v3_{sweep_name}.pt"
-    fp = _oracle_fingerprint(item_embs, queries, qa_narrow_sweep, K_GT)
-    if gt_path.exists():
-        blob = torch.load(str(gt_path), map_location="cpu", weights_only=True)
-        if isinstance(blob, dict) and blob.get("fingerprint") == fp:
-            logger.info("  loaded oracle from cache: {}", gt_path)
-            return blob["topk"]
-        logger.warning("stale/legacy oracle at {} (fingerprint mismatch); recomputing", gt_path)
-    logger.info("  building filtered oracle (K_GT={})", K_GT)
-    oracle_topk = compute_filtered_oracle(
+
+# ----- resume key ---------------------------------------------------------------------
+
+
+def resume_key(key: dict[str, Any], code_version: str) -> str:
+    """The JSONL resume key (H §8.2 B): ``Job.key(params)`` plus the library's
+    ``code_version``, as canonical JSON. A record's key is
+    ``resume_key({k: rec[k] for k in KEY_FIELDS}, rec["env"]["code_version"])``."""
+    return json.dumps({**key, "code_version": code_version}, sort_keys=True, separators=(",", ":"))
+
+
+KEY_FIELDS = (
+    "dataset",
+    "dim",
+    "suite",
+    "filter_kind",
+    "sweep",
+    "algo",
+    "backend",
+    "params",
+    "seed",
+)
+
+
+# ----- old API (sweep.py; C3 deletes) --------------------------------------------------
+
+
+def compute_filtered_oracle(
+    item_embs, queries, qa_narrow_sweep, skip_mask, filter_mod, K_GT, *, batch_size=64, device
+) -> torch.Tensor:
+    return compute(
         item_embs,
         queries,
         qa_narrow_sweep,
         skip_mask,
-        oracle_filter,
-        K_GT=K_GT,
+        filter_mod,
+        K_GT,
+        batch_size=batch_size,
         device=device,
-    )
-    torch.save({"topk": oracle_topk, "fingerprint": fp, "k_gt": K_GT}, str(gt_path))
-    logger.info("  saved oracle → {}", gt_path)
-    return oracle_topk
+    )["topk"]
 
 
-__all__ = ["compute_filtered_oracle", "load_or_build_oracle"]
+def load_or_build_oracle(
+    gt_dir,
+    sweep_name,
+    K_GT,
+    *,
+    item_embs,
+    queries,
+    qa_narrow_sweep,
+    skip_mask,
+    oracle_filter,
+    device,
+) -> torch.Tensor:
+    return load_or_build(
+        gt_dir,
+        sweep_name,
+        K_GT,
+        item_embs=item_embs,
+        queries=queries,
+        targets=None,
+        qa_sweep=qa_narrow_sweep,
+        skip_mask=skip_mask,
+        clauses=None,
+        filter_mod=oracle_filter,
+        device=device,
+    )["topk"]
+
+
+__all__ = [
+    "BLOB_VERSION",
+    "KEY_FIELDS",
+    "blob_path",
+    "bloom_fp_rate",
+    "compute",
+    "compute_filtered_oracle",
+    "fingerprint",
+    "load_or_build",
+    "load_or_build_oracle",
+    "pass_counts",
+    "pass_rate",
+    "resume_key",
+]

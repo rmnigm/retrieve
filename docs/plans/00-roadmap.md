@@ -173,6 +173,11 @@ bit-exactness stays where it belongs, in B2's library parity suite.
   rewritten in place with the old per-row API kept as wrappers.
 - [ ] **C2 — `config.py`, `data.py`, `oracle.py` + tests.** H §6 WP-2
   (Mac, 1.5 d).
+  Status: authored 2026-09-06 on `dev/c1-harness-v2`, CPU tests green,
+  GPU gate C4 pending. `config.py` and `oracle.py` rewritten in place with
+  the old API kept below a divider / as wrappers; `data.py` is new and
+  imports `encode.py` (kept as the one `training.*` boundary). Oracle
+  caches are now blob v4 with the fingerprint in the file name.
 - [ ] **C3 — `run.py`, `cli.py`, deletions, docs.** H §6 WP-3 (Mac,
   1.5 d): delete the old harness files H §5 lists, rewrite
   [../system/evaluation.md](../system/evaluation.md) to H §2, archive
