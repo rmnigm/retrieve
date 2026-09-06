@@ -305,7 +305,7 @@ class SilverTorch(RetrievalModule):
             if item_clause_attrs is None:
                 # No attributes at build time: all-zero signatures and an empty salt
                 # (the clause count is unknown); a later query build derives its salt
-                # on the fly, see _query_salt.
+                # device-side per call, see _query_bits.
                 sigs = torch.zeros(n, self.word_count, dtype=torch.int64, device=device)
                 salt = torch.empty(0, dtype=torch.int64, device=device)
             else:
@@ -467,7 +467,9 @@ class SilverTorch(RetrievalModule):
     def _query_bits(self, query_clause_attrs: Tensor) -> Tensor:
         """``[B, C]`` query attrs → ``[B, W]`` bloom query signature, using the registered
         ``clause_salt`` buffer (no per-call host→device copy). The buffer is empty when the
-        index was registered without attributes; then the salt is derived on the fly."""
+        index was registered without attributes; then ``generate_clause_salt`` derives the
+        ``[C]`` salt per call — a few tiny device-side kernels from ``arange`` and
+        Python-int constants, still no host→device copy."""
         salt = self.clause_salt if self.clause_salt.numel() > 0 else None
         return build_query_signatures(
             query_clause_attrs.long().unsqueeze(-1),
@@ -636,7 +638,7 @@ class SilverTorch(RetrievalModule):
                 )
             expressions = official_mod.queries_to_expressions(query_clause_attrs)
             plans = official_mod.parse_plans(
-                expressions, cfg.hash_k, cfg.max_sub_queries, cache=cfg.cache_plans
+                expressions, cfg.n_stored_hashes, cfg.max_sub_queries, cache=cfg.cache_plans
             )
             if cfg.bloom_path == "partial":
                 partial = official_mod.bloom_partial_masks(
@@ -646,11 +648,11 @@ class SilverTorch(RetrievalModule):
                     self.cluster_offsets[probe_ids],
                     self.cluster_sizes[probe_ids],
                     self.k_hash,
-                    cfg.hash_k,
+                    cfg.n_stored_hashes,
                 )
             else:
                 filtering_bit_mask = official_mod.bloom_filtering_mask(
-                    self.bloom_index, self.bundle_b_offsets, plans, self.k_hash, cfg.hash_k
+                    self.bloom_index, self.bundle_b_offsets, plans, self.k_hash, cfg.n_stored_hashes
                 )
 
         return official_mod.official_probe_score(

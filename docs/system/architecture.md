@@ -286,7 +286,7 @@ The implementation, `backend ∈ {"triton", "torch", "cuda", "cute", "official"}
   raises. Constructor extras via `official=OfficialConfig(...)`
   (`score_path` `"fp16"` (default, the shipped int8 serving path) or
   `"int32"` (bit-identical to Triton), `bloom_path` `"partial"` /
-  `"full"`, `b_multiplier`, `hash_k`, `cache_plans` — `False` for any
+  `"full"`, `b_multiplier`, `n_stored_hashes`, `cache_plans` — `False` for any
   timing run, so the per-forward expression parse is paid, …). Details in
   [kernels.md](kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend).
 
@@ -326,7 +326,8 @@ builders with the filters package, not the module classes:
   alongside `hash_seeds[k_hash, 2]` and the per-clause hash salt
   `clause_salt[C]` (registered so the query-side build makes no
   host→device copy per forward; empty when the index was registered
-  without attributes). **Which signature buffer is
+  without attributes, in which case the salt is derived device-side per
+  query from Python-int constants — still no copy). **Which signature buffer is
   registered depends on the backend**: `"triton"` / `"torch"` store the
   row-wise `bloom_sigs[N, W]`; `"cuda"` stores only the transposed
   `bloom_sigs_t[m_bits, n_lists · wpc]` that its phase-2 kernel reads

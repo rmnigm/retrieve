@@ -39,8 +39,9 @@ are bit-identical to the Triton path in every `filter_mode`. `SilverTorch` also 
 and bloom phases, with our k-means and quantization in front; it is the reference the Triton
 kernels are checked against, eager-only (`torch.compile` raises), and its bloom mode is Meta's
 bloom index rather than ours (`m_bits` is optional; `official=OfficialConfig(...)` carries
-`b_multiplier`, `hash_k`, the `"int32"` bit-exact vs `"fp16"` serving score path, and the
-partial-vs-full bloom path). Any other module given `"cuda"`, `"cute"` or `"official"` runs its
+`b_multiplier`, `n_stored_hashes`, the `"int32"` bit-exact vs `"fp16"` serving score path, the
+partial-vs-full bloom path, and `cache_plans` — set it `False` when timing so every forward pays
+the expression parse). Any other module given `"cuda"`, `"cute"` or `"official"` runs its
 torch path.
 
 ## LiNR modules

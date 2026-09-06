@@ -36,7 +36,10 @@ def generate_seeds(k_hash: int, device: torch.device) -> Tensor:
     return seeds.to(device)
 
 
-def _mix64(x: Tensor, c1: Tensor, c2: Tensor) -> Tensor:
+def _mix64(x: Tensor, c1: Tensor | int, c2: Tensor | int) -> Tensor:
+    """splitmix64-style finalizer; ``c1`` / ``c2`` may be int64 tensors (the per-hash seeds)
+    or Python ints (the salt constants — passed to the multiply kernel by value, so no
+    host→device copy and no capture-breaking upload)."""
     h = x ^ (x >> 33)
     h = h * c1
     h = h ^ (h >> 33)
@@ -52,13 +55,14 @@ def generate_clause_salt(c_dim: int, device: torch.device) -> Tensor:
     the ``clause_salt`` buffer at ``register_index`` so the per-forward query build
     issues no host→device copy (the previous per-call ``torch.tensor(_SALT_C1,
     device=cuda)`` was a pageable H2D copy that broke raw CUDA-graph capture and cost
-    ~0.4 ms of launch overhead per eager bloom forward)."""
+    ~0.4 ms of launch overhead per eager bloom forward). The constants are applied as
+    Python ints, so the one path that still derives the salt per call — a ``SilverTorch``
+    bloom index registered without attributes — copies nothing either."""
     clause_ids = torch.arange(c_dim, dtype=torch.int64, device=device)
-    return _mix64(
-        clause_ids,
-        torch.tensor(_SALT_C1, dtype=torch.int64, device=device),
-        torch.tensor(_SALT_C2, dtype=torch.int64, device=device),
-    )
+    # Python-int constants: a wrapped scalar rides along the multiply kernel's arguments,
+    # so even the per-call fallback (an index registered without attributes) issues no
+    # host→device copy. Same int64 wrap-around arithmetic, bit-identical result.
+    return _mix64(clause_ids, _SALT_C1, _SALT_C2)
 
 
 def _expand_clause_salt(clause_salt: Tensor, c_dim: int, a_max: int) -> Tensor:

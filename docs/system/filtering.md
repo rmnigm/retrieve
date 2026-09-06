@@ -128,7 +128,9 @@ callers — the parity tests, the tuner — and
 pins the buffer path against the old inline computation). A
 `SilverTorch` bloom index registered *without* attributes stores an
 empty `clause_salt` (the clause count is unknown) and derives it at
-query time. No
+query time — device-side, from `arange` and the two constants applied
+as Python ints (a wrapped scalar rides along the kernel arguments), so
+that path copies nothing either. No
 runtime cost worth measuring (one extra elementwise XOR inside an already
 chunked loop) and zero kernel impact —
 [`bloom_match`](../../retrieve/src/retrieve/kernels/silvertorch/bloom_match.py),

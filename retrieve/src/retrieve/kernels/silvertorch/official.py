@@ -130,9 +130,10 @@ class OfficialConfig:
     - ``b_multiplier``: bloom width per bundle = ``max_terms_per_doc · k · b_multiplier``
       bits per doc (``bloom_indexer.cpp:52-66``); must be ``> 1.0``. Matched-memory /
       matched-FPR calibration against our ``m_bits`` is plan §4.3.
-    - ``hash_k``: raw murmur hashes precomputed per query term at parse time; the search
-      ANDs the first ``k`` (our ``k_hash``) *distinct* positions among them, so it must
-      exceed ``k`` by a margin (README uses 7 for k=3).
+    - ``n_stored_hashes``: raw murmur hashes precomputed per query term at parse time (the
+      ops' ``hash_k`` argument — renamed here because the library-wide ``k_hash`` is the
+      *search* ``k``, ``SilverTorch.k_hash``); the search ANDs the first ``k`` *distinct*
+      positions among them, so it must exceed ``k`` by a margin (README uses 7 for k=3).
     - ``build_k``: hash positions set per term at index build; ``None`` → the search
       ``k`` (README's usage; the upstream module builder passes ``hash_k`` instead, which
       sets extra bits per term — plan §1.1).
@@ -151,11 +152,11 @@ class OfficialConfig:
     divisor: int | None = None
     bloom_path: BloomPath = "partial"
     b_multiplier: float = 10.0
-    hash_k: int = 7
     build_k: int | None = None
     max_sub_queries: int = 5
     fast_build: bool = False
     cache_plans: bool = True
+    n_stored_hashes: int = 7
 
     def __post_init__(self) -> None:
         if self.score_path not in ("int32", "fp16"):
@@ -170,8 +171,8 @@ class OfficialConfig:
             raise ValueError(
                 f"b_multiplier must be > 1.0 (upstream TORCH_CHECK), got {self.b_multiplier}"
             )
-        if self.hash_k <= 0:
-            raise ValueError(f"hash_k must be positive, got {self.hash_k}")
+        if self.n_stored_hashes <= 0:
+            raise ValueError(f"n_stored_hashes must be positive, got {self.n_stored_hashes}")
         if self.build_k is not None and not (0 < self.build_k <= MAX_SEARCH_K):
             raise ValueError(f"build_k must be in [1, {MAX_SEARCH_K}], got {self.build_k}")
         if self.max_sub_queries <= 0:
@@ -246,24 +247,11 @@ def is_available() -> bool:
 
 
 # --- layout: padded IVF → official CSR ----------------------------------------------------
-
-
-def csr_from_assignments(
-    assignments: Tensor, n_lists: int
-) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-    """Cluster assignments ``[N]`` → ``(sort_perm, inv_perm, cluster_offsets, cluster_sizes)``.
-
-    ``sort_perm[j]`` is the original id of the item at cluster-sorted position ``j``
-    (``argsort(assignments)``, stable so a cluster's items keep id order); ``inv_perm`` is
-    its inverse; ``cluster_offsets`` is the int64 ``[n_lists+1]`` CSR the official
-    scorer indexes with ``cluster_ids``; ``cluster_sizes`` int64 ``[n_lists]``."""
-    cluster_sizes = torch.bincount(assignments, minlength=n_lists)
-    sort_perm = torch.argsort(assignments, stable=True)
-    inv_perm = torch.empty_like(sort_perm)
-    inv_perm[sort_perm] = torch.arange(sort_perm.numel(), device=sort_perm.device)
-    offsets = torch.zeros(n_lists + 1, dtype=torch.int64, device=assignments.device)
-    offsets[1:] = cluster_sizes.cumsum(0)
-    return sort_perm, inv_perm, offsets, cluster_sizes
+#
+# The cluster-sorted CSR (``sort_perm`` / ``inv_perm`` / ``cluster_offsets`` /
+# ``cluster_sizes``) is derived by ``SilverTorch._build_ivf`` + ``register_index`` from the
+# same assignment as the padded layout, so both arms share one slot order; nothing here
+# re-derives it.
 
 
 def default_divisor(d: int) -> int:
@@ -337,7 +325,9 @@ def queries_to_expressions(
     """``[B, C]`` int64 query attrs (``-1`` inactive) → one expression per row in the
     official DSL: active clauses joined with ``AND`` as ``"{c}:{v}"``, reverse clauses as
     ``"NOT {c}:{v}"``, no active clause → ``""`` (``EMPTY`` = match all,
-    ``expression_query_parser.cpp:400-405``). Host-side by nature (a string parser)."""
+    ``expression_query_parser.cpp:400-405``). Host-side by nature (a string parser).
+    ``clause_is_reverse`` is a test seam: the library never passes it (bloom mode rejects
+    reverse clauses at ``register_index``); ``NOT`` is exercised by T4 only."""
     if query_clause_attrs.dim() != 2:
         raise ValueError(
             f"query_clause_attrs must be [B, C], got {tuple(query_clause_attrs.shape)}"
@@ -419,11 +409,6 @@ def pack_mask(mask: Tensor, bit_order: BitOrder = MASK_BIT_ORDER) -> Tensor:
     # Disjoint bit patterns add without carries, so the sum is the OR (bit 63 included:
     # two's-complement wrap-around is exactly the int64 bit pattern we want).
     return (bits << _shifts(bit_order, mask.device)).sum(dim=-1)
-
-
-def pack_mask_high_first(mask: Tensor) -> Tensor:
-    """``pack_mask(mask, "high_first")`` — the name plan §5.1 uses."""
-    return pack_mask(mask, "high_first")
 
 
 def unpack_mask(words: Tensor, n: int, bit_order: BitOrder = MASK_BIT_ORDER) -> Tensor:
@@ -733,7 +718,6 @@ __all__ = [
     "bloom_index_docs",
     "bloom_partial_masks",
     "build_bloom_index",
-    "csr_from_assignments",
     "default_divisor",
     "dequantize_scores",
     "ensure_loaded",
@@ -742,7 +726,6 @@ __all__ = [
     "official_probe_score",
     "official_scores_full",
     "pack_mask",
-    "pack_mask_high_first",
     "padded_rows",
     "parse_plans",
     "queries_to_expressions",

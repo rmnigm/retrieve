@@ -551,8 +551,9 @@ def _layer(data, backend, filter_mode="none", *, reverse=None, official=None, **
 
 def _transplant(off: SilverTorch, tri: SilverTorch) -> None:
     """Give the official module the Triton module's index (GPU k-means is not
-    bit-deterministic across runs, so bit-exact layer comparisons share one index):
-    centroids and codes verbatim, the CSR rebuilt from the padded layout."""
+    bit-deterministic across runs — the float ``index_add_`` atomics in ``KMeansTorch``'s
+    centroid update and ``torch.cdist`` — so bit-exact layer comparisons share one
+    index): centroids and codes verbatim, the CSR rebuilt from the padded layout."""
     sort_perm, offsets, sizes = csr_from_padded(tri.padded_cluster_items)
     inv = torch.empty_like(sort_perm)
     inv[sort_perm] = torch.arange(sort_perm.numel(), device="cuda")
@@ -619,7 +620,7 @@ def test_t6_layer_bloom(data, bloom_path, record_property):
     returned id that passes the exact predicate is in Triton's exact top-K (or tied at its
     boundary), and the two bloom paths (partial vs full mask) agree bit for bit."""
     cfg = OfficialConfig(
-        score_path="int32", bloom_path=bloom_path, b_multiplier=B_MULT, hash_k=HASH_K
+        score_path="int32", bloom_path=bloom_path, b_multiplier=B_MULT, n_stored_hashes=HASH_K
     )
     tri = _layer(data, "triton", "exact")
     off = _layer(data, "official", "bloom", official=cfg)
@@ -655,7 +656,7 @@ def test_t6_layer_bloom(data, bloom_path, record_property):
             "official",
             "bloom",
             official=OfficialConfig(
-                score_path="int32", b_multiplier=B_MULT, hash_k=HASH_K, cache_plans=False
+                score_path="int32", b_multiplier=B_MULT, n_stored_hashes=HASH_K, cache_plans=False
             ),
         )
         _transplant(off_p, tri)

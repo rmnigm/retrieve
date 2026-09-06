@@ -929,8 +929,10 @@ clusters feeds `fused_kmean_ann_with_partial_masks`, or
 (`"full"`, the S9 ablation) `bloom_index_search_batch(return_bool_mask=
 False)` over all `N` feeds `fused_kmean_ann(filtering_bit_mask=…)`. The
 search `k` is our `k_hash` (must be ≤ 10: `MAX_K_V2`, a fixed array
-size the upstream kernel never checks), `OfficialConfig.hash_k` (default
-7) is the number of raw hashes stored per term, `build_k` defaults to the
+size the upstream kernel never checks), `OfficialConfig.n_stored_hashes`
+(default 7; the ops' `hash_k` argument, renamed because `k_hash` is the
+library-wide name of the search `k`) is the number of raw hashes stored
+per term, `build_k` defaults to the
 search `k`. A bloom index registered without attributes is empty and a
 later query with attributes raises.
 
