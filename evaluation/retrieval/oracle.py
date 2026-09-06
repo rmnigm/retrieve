@@ -44,7 +44,7 @@ import torch
 from loguru import logger
 from tqdm import tqdm
 
-from retrieval.bench import _git, code_version
+from retrieval.bench import _git, atomic_write, code_version
 from retrieve.interfaces import FilterModule
 
 BLOB_VERSION = 4
@@ -203,13 +203,18 @@ def load_or_build(
     device: torch.device,
 ) -> dict[str, Any]:
     """The v4 blob for one sweep: read from ``blob_path`` when present, else build and
-    save. The name carries the fingerprint, so a stale blob is simply never found."""
+    save (atomically). The name carries the fingerprint, so a stale blob is simply never
+    found; an unreadable file at the path (a crash mid-save) is rebuilt, not fatal."""
     fp = fingerprint(
         item_embs, queries, targets, qa_sweep, clauses, k_gt, attrs_digest=attrs_digest
     )
     path = blob_path(gt_dir, sweep, fp)
     if path.exists():
-        blob = torch.load(str(path), map_location="cpu", weights_only=True)
+        try:
+            blob = torch.load(str(path), map_location="cpu", weights_only=True)
+        except Exception as exc:  # noqa: BLE001 — a torn / foreign file at the cache path
+            logger.warning("  {}: unreadable ({}: {}); rebuilding", path, type(exc).__name__, exc)
+            blob = None
         if (
             isinstance(blob, dict)
             and blob.get("version") == BLOB_VERSION
@@ -217,7 +222,8 @@ def load_or_build(
         ):
             logger.info("  loaded oracle from cache: {}", path)
             return blob
-        logger.warning("  {}: not a v4 blob for this fingerprint; rebuilding", path)
+        if blob is not None:
+            logger.warning("  {}: not a v4 blob for this fingerprint; rebuilding", path)
     logger.info("  building exact oracle (k_gt={}) for sweep {}", k_gt, sweep)
     n_kept = int((~skip_mask).sum()) if skip_mask is not None else int(queries.shape[0])
     blob = {
@@ -244,8 +250,7 @@ def load_or_build(
         "torch": str(torch.__version__),
         "created": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
     }
-    gt_dir.mkdir(parents=True, exist_ok=True)
-    torch.save(blob, str(path))
+    atomic_write(path, lambda fh: torch.save(blob, fh))
     logger.info("  saved oracle → {} (pass_rate={:.4f})", path, blob["pass_rate"])
     return blob
 

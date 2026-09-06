@@ -32,6 +32,7 @@ import torch.nn.functional as F
 from loguru import logger
 
 from retrieval.algos import FILTER_BACKEND, build_filter
+from retrieval.bench import atomic_write
 from retrieval.config import Dataset
 from retrieval.encode import encode_queries, load_model_for_eval
 from retrieval.oracle import attrs_digest
@@ -142,7 +143,7 @@ def _sasrec(ds: Dataset, device: torch.device) -> tuple[torch.Tensor, ...]:
             "not caching encoded queries: {:.1f} GB > budget {:.1f} GB", est / 2**30, budget / 2**30
         )
     else:
-        torch.save(blob, str(cache))
+        atomic_write(cache, lambda fh: torch.save(blob, fh))
         logger.info("wrote {} ({:.2f} GB)", cache, est / 2**30)
     return item_embs, queries, targets, n_targets
 

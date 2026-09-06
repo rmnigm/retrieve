@@ -279,7 +279,7 @@ bench run      --dataset D --suite S [--dim N]* [--algo A]* [--backend B]* [--fi
                [--resume|--force] [--expected-sm-mhz 1410] [--config-dir config]
 bench campaign --suite quality|filter|deep|all [--dataset D]* [--dim N]* [--mode M]*
                [--skip-quality] [--skip-perf] [--profile] [--out results] [--resume|--force]
-               [--config-dir config]
+               [--config-dir config] [--timeout 6.0]
 bench report   [results]                        # exits 2: roadmap D4 (H §6 WP-6)
 upload-results --repo-id user/repo [--results results] [--private] [--dry-run]
 ```
@@ -306,7 +306,9 @@ The child's stdout + stderr go to
 `results/_logs/<suite>_<dataset>-d<dim>_<algo>_<backend>.log` (appended, the
 command line first); one summary line per child (`time suite dataset dim
 algo backend rc seconds log`) goes to `results/_logs/campaign.log` and the
-terminal; a non-zero rc is recorded and the loop continues; the exit code
+terminal; a non-zero rc is recorded and the loop continues; a child
+still running after `--timeout` hours (default 6) is killed and recorded
+as `rc=timeout` (exit code 124, noted in its log); the exit code
 is the worst child rc, or 1 when a listed dataset expands to no groups or
 no child was launched at all (`--dataset` / `--dim` selecting nothing).
 `results/_parity/` is deleted when the `(dataset, dim, algo)` group
@@ -354,10 +356,26 @@ order:
 
 Any exception inside a cell (an OOM on the torch path included) becomes a
 `status: failed` record with the traceback and `stage` (`build`,
-`query_params`, `quality`, `perf`) and the loop continues. Two exceptions
-stop the process: `KeyboardInterrupt`, and `QualityGateError` — an exact
+`query_params`, `quality`, `perf`) and the loop continues. Three things
+stop the process: `KeyboardInterrupt`; `QualityGateError` — an exact
 algo (`linr_v1_filter_mask`, `linr_v2`) below `recall_oracle@k_max ≥ 0.99`
-— which is recorded first.
+— which is recorded first; and a sticky CUDA error (`run.STICKY_CUDA`:
+`CUDA error`, `illegal memory access`, `device-side assert` in the
+message), also recorded first and then re-raised, because the context is
+dead and every later cell would fail in seconds with the same traceback.
+In a campaign either of the last two ends the *child*, i.e. the
+`(dataset, dim, algo, backend)` group; the loop continues with the next
+group and `--resume` re-runs the un-run cells later.
+
+Crash safety: the oracle blob, the encode cache and the parity file are
+written through `bench.atomic_write` (`<path>.tmp` + fsync +
+`os.replace`), so a crash mid-save leaves the old file or nothing, never
+a torn one, and an unreadable file at the oracle's fingerprint path is
+rebuilt with a warning. Each JSONL line is one `write` + `fsync`; the
+samples line is appended *before* its record, so a crash between the two
+cannot leave a resumable record without its vector; `read_keys` ignores
+(and logs) one torn trailing line — the cell in flight when the process
+died — and raises on a malformed line anywhere else.
 
 ## Output: one JSONL record per cell
 
@@ -412,7 +430,7 @@ Perf entry:
 
 `results/<suite>/<dataset>-d<dim>.samples.jsonl` holds the per-call vector
 of the chosen window: one line per perf entry, `{key block, k, bs, mode,
-ms: [...]}`.
+ms: [...]}`, written before the cell's record.
 
 ### Resume
 

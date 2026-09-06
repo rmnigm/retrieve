@@ -36,9 +36,7 @@ D128_DROP05_DEFAULTS = {
 }
 
 
-def load_model_for_eval(
-    checkpoint_path: Path, num_items: int, device: torch.device
-) -> GSASRec:
+def load_model_for_eval(checkpoint_path: Path, num_items: int, device: torch.device) -> GSASRec:
     """Load a `GSASRec` from disk for retrieval eval.
 
     Reads the sibling ``config.json`` when present (5B / freshly-trained

@@ -199,6 +199,26 @@ def test_profile_once_is_empty_without_cuda():
     assert bench.profile_once(lambda: torch.ones(2) + 1) == []
 
 
+def test_atomic_write_replaces_or_leaves_nothing(tmp_path):
+    p = tmp_path / "blob.pt"
+    bench.atomic_write(p, lambda fh: torch.save({"v": 1}, fh))
+    assert torch.load(p, weights_only=True) == {"v": 1}
+    assert list(tmp_path.iterdir()) == [p]  # no .tmp left behind
+
+    def torn(fh):
+        fh.write(b"half a file")
+        raise OSError("disk full")
+
+    with pytest.raises(OSError, match="disk full"):
+        bench.atomic_write(p, torn)
+    assert torch.load(p, weights_only=True) == {"v": 1}  # the old file survives a failed save
+    assert list(tmp_path.iterdir()) == [p]
+    q = tmp_path / "new" / "x.npz"
+    with pytest.raises(OSError):
+        bench.atomic_write(q, torn)
+    assert not q.exists() and list(q.parent.iterdir()) == []  # nothing at all, not a torn file
+
+
 def test_setup_seeds_and_pins_precision():
     bench.setup(7)
     a = torch.randn(4)

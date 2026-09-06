@@ -180,6 +180,54 @@ def test_failed_cell_is_recorded_and_the_loop_continues(tiny_configs, tmp_path, 
     assert dict(counts) == {"skipped": 2, "ok": 2}
 
 
+def test_sticky_cuda_error_is_recorded_then_ends_the_process(tiny_configs, tmp_path, monkeypatch):
+    """After an illegal memory access the context is dead: the cell is recorded as failed
+    like any other, but the loop does not continue into cells that can only fail."""
+    jobs = _jobs(tiny_configs, sweeps=[NONE_SWEEP])  # v1 none, v4 none
+    real = run.algos.build
+
+    def dead(algo, *a, **kw):
+        if algo == "linr_v4":
+            raise RuntimeError("CUDA error: an illegal memory access was encountered")
+        return real(algo, *a, **kw)
+
+    monkeypatch.setattr(run.algos, "build", dead)
+    out = tmp_path / "results"
+    with pytest.raises(RuntimeError, match="illegal memory access"):
+        run.run(jobs, out_dir=out, **KW)
+    recs = _records(out / "e2e" / "tiny-d8.jsonl")
+    assert [(r["algo"], r["status"]) for r in recs] == [
+        ("linr_v1_filter_mask", "ok"),
+        ("linr_v4", "failed"),
+    ]
+    assert recs[1]["stage"] == "build" and "illegal memory access" in recs[1]["error"]
+    assert run.is_sticky(RuntimeError("CUDA error: device-side assert triggered"))
+    assert not run.is_sticky(RuntimeError("CUDA out of memory. Tried to allocate 2 GiB"))
+
+
+def test_read_keys_tolerates_one_torn_trailing_line(tmp_path):
+    """The line in flight when the process died must not block ``--resume``; a malformed
+    line anywhere else is corruption and raises."""
+    p = tmp_path / "x.jsonl"
+    key = {
+        "dataset": "tiny", "dim": 8, "suite": "e2e", "filter_kind": "none", "sweep": "full_scan",
+        "algo": "linr_v1_filter_mask", "backend": "torch", "params": {}, "seed": 0,
+    }  # fmt: skip
+    rec = {**key, "status": "ok", "env": {"code_version": "c"}}
+    run.append_record(p, rec)
+    run.append_record(p, {**rec, "seed": 1, "status": "failed"})
+    with open(p, "a") as f:
+        f.write('{"dataset": "tiny", "dim": 8, "sui')  # the crash
+    keys = run.read_keys(p)
+    assert len(keys) == 2 and set(keys.values()) == {"ok", "failed"}
+    assert keys[oracle.resume_key(key, "c")] == "ok"
+    with open(p, "a") as f:
+        f.write("\n")
+        f.write(json.dumps({**rec, "seed": 2}) + "\n")  # a record *after* the torn line
+    with pytest.raises(ValueError, match="malformed record on line 3"):
+        run.read_keys(p)
+
+
 def test_quality_gate_kills_the_run_after_recording(tiny_configs, tmp_path, monkeypatch):
     jobs = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=[NONE_SWEEP, "c0"])
     monkeypatch.setattr(run, "EXACT_MIN_RECALL", 1.5)  # unreachable → the gate must fire

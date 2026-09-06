@@ -16,9 +16,17 @@ it does not carry everything the suite asked for: ``--skip-quality`` / ``--skip-
 ``--mode`` subset, or ``--k`` / ``--bs`` replacing the suite's lists (``Job.narrowed``);
 ``partial_reasons`` names which. Failures (§8.2 D, §7): any
 exception inside a cell is written as ``status: failed`` with the traceback and the loop
-continues — an OOM on the torch path is a finding, not noise. Two things stop the process:
-``KeyboardInterrupt`` and the exact-algo recall gate of §2.4 (``QualityGateError``, recorded
-first).
+continues — an OOM on the torch path is a finding, not noise. Three things stop the
+process: ``KeyboardInterrupt``, the exact-algo recall gate of §2.4 (``QualityGateError``,
+recorded first) and a *sticky* CUDA error (``STICKY_CUDA``: an illegal memory access or a
+device-side assert kills the context, so every later cell would fail in seconds with the
+same traceback and ``--resume`` would re-run them all) — recorded, then re-raised so the
+campaign moves to the next group.
+
+Crash safety: the oracle blob, encode cache and parity file are written through
+``bench.atomic_write`` (tmp + ``os.replace``); the JSONL lines are one ``write`` + ``fsync``
+each, samples *before* the record so a crash between the two cannot leave a resumable
+record without its vector; ``read_keys`` tolerates (and logs) one torn trailing line.
 
 Cross-backend parity (§2.4, amended by §8.2 K): the first backend to run a cell writes its
 top-``k_max`` ids and scores to ``<out_dir>/_parity/<hash>.npz`` (hash over the key minus
@@ -58,6 +66,9 @@ QUALITY_CHUNK = 16  # the OOM bound of the old passes.py (H §2.4): [B, P, D] on
 EXACT_ALGOS = ("linr_v1_filter_mask", "linr_v2")  # §2.4: recall_oracle@k_max >= 0.99 or die
 EXACT_MIN_RECALL = 0.99
 CLOCK_DRIFT = 0.05  # §2.1: warn when clocks.sm drifts > 5 % from the first sample
+# An exception whose message carries one of these has killed the CUDA context: recorded, then
+# re-raised so the child exits and ``bench campaign`` moves on (review §2.9).
+STICKY_CUDA = ("CUDA error", "illegal memory access", "device-side assert")
 MiB = bench.MiB
 # The stat keys of a perf entry; a variant that cannot run records them as null + ``reason``.
 PERF_STAT_KEYS = (
@@ -68,6 +79,12 @@ PERF_STAT_KEYS = (
 
 class QualityGateError(RuntimeError):
     """An exact algo scored below ``EXACT_MIN_RECALL`` against the oracle (H §2.4)."""
+
+
+def is_sticky(exc: BaseException) -> bool:
+    """A CUDA error after which the process cannot measure anything else."""
+    msg = str(exc)
+    return any(s in msg for s in STICKY_CUDA)
 
 
 # ----- JSONL ----------------------------------------------------------------------------
@@ -105,17 +122,24 @@ def append_record(path: Path, rec: dict[str, Any]) -> None:
 
 
 def read_keys(path: Path) -> dict[str, str]:
-    """``{resume_key: status}`` of the records in ``path`` (last record per key wins)."""
+    """``{resume_key: status}`` of the records in ``path`` (last record per key wins). A
+    malformed *last* line — the cell in flight when the process died — is logged and
+    ignored (the cell simply re-runs); a malformed line anywhere else is corruption and
+    raises."""
     out: dict[str, str] = {}
     if not path.exists():
         return out
-    with open(path) as f:
-        for line in f:
-            if not line.strip():
-                continue
+    lines = [ln for ln in path.read_text().splitlines() if ln.strip()]
+    for i, line in enumerate(lines):
+        try:
             rec = json.loads(line)
-            key = {k: rec[k] for k in oracle.KEY_FIELDS}
-            out[oracle.resume_key(key, rec["env"]["code_version"])] = rec.get("status", "ok")
+        except json.JSONDecodeError as exc:
+            if i == len(lines) - 1:
+                logger.warning("{}: torn trailing line ignored ({})", path, exc)
+                break
+            raise ValueError(f"{path}: malformed record on line {i + 1}: {exc}") from exc
+        key = {k: rec[k] for k in oracle.KEY_FIELDS}
+        out[oracle.resume_key(key, rec["env"]["code_version"])] = rec.get("status", "ok")
     return out
 
 
@@ -276,12 +300,14 @@ def parity(
         else:
             out["parity"] = f"shape_mismatch:{tuple(r_ids.shape)}!={tuple(ids.shape)}"
         return out
-    ref.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(
+    bench.atomic_write(
         ref,
-        ids=ids.cpu().numpy().astype(np.int32),
-        scores=scores.cpu().numpy().astype(np.float32),
-        backend=np.array(job.backend),
+        lambda fh: np.savez(
+            fh,
+            ids=ids.cpu().numpy().astype(np.int32),
+            scores=scores.cpu().numpy().astype(np.float32),
+            backend=np.array(job.backend),
+        ),
     )
     out["parity"] = "reference"
     return out
@@ -474,6 +500,9 @@ def run(
             for p in todo:
                 append_record(path, _failed(job, p, env0, "build", exc, t0))
                 counts["failed"] += 1
+            if is_sticky(exc):
+                logger.error("sticky CUDA error: the context is dead, ending this process")
+                raise
             _release()
             continue
         index_mib = bench.index_bytes(module) / MiB
@@ -565,12 +594,15 @@ def run(
                 logger.exception("cell failed at {}: {}", stage, job.key(params))
                 append_record(path, _failed(job, params, env0, stage, exc, t0))
                 counts["failed"] += 1
+                if is_sticky(exc):
+                    logger.error("sticky CUDA error: the context is dead, ending this process")
+                    raise
                 _release()
                 continue
-            append_record(path, rec)
             key = job.key(params)
-            for s in samples:
+            for s in samples:  # samples first: a record without its vector is never resumable
                 append_record(path.with_suffix(".samples.jsonl"), {**key, **s})
+            append_record(path, rec)
             existing[path][oracle.resume_key(key, code_version)] = rec["status"]
             counts[rec["status"]] += 1
             logger.info(
@@ -591,8 +623,10 @@ __all__ = [
     "PERF_STAT_KEYS",
     "QUALITY_CHUNK",
     "SCHEMA_VERSION",
+    "STICKY_CUDA",
     "QualityGateError",
     "append_record",
+    "is_sticky",
     "read_keys",
     "record_path",
     "run",
