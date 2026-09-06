@@ -19,6 +19,8 @@ dependencies = [
 ]
 
 [project.scripts]
+bench                   = "retrieval.cli:main"
+upload-results          = "retrieval.upload:main"
 yambda                  = "eval_datasets.yambda:main"
 arxiv                   = "eval_datasets.arxiv:main"
 goodreads               = "eval_datasets.goodreads:main"
