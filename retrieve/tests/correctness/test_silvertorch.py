@@ -5,11 +5,9 @@ sizes that fit well on a single GPU; larger sweeps live in ``evaluation/``.
 Tests cover three filter modes — ``"none"`` (plain IVF), ``"bloom"`` (paper's
 bloom subset test), ``"exact"`` (clause-attribute predicate fused into the
 codesigned kernel). All forward paths are exercised with ``backend="torch"``,
-``backend="triton"``, ``backend="cuda"``, ``backend="cute"`` and
-``backend="official"`` across all three filter modes; cuda cells skip only when the
-C++ extension can't build here, cute cells only when the CuTe DSL (the ``cute``
-extra) is not installed, official cells only when ``meta-recsys/silvertorch`` (the
-``official`` extra) is not installed. On ``"official"`` the bloom mode is Meta's own
+``backend="triton"`` and ``backend="official"`` across all three filter modes; official
+cells skip only when ``meta-recsys/silvertorch`` (the ``official`` extra) is not
+installed. On ``"official"`` the bloom mode is Meta's own
 bloom index (a different hash), so the bloom cross-backend checks stay
 triton-vs-torch; the official parity gates live in ``tests/parity/test_official.py``.
 """
@@ -31,8 +29,6 @@ from tests.conftest import (
     make_query,
     make_query_attrs,
     recall_at_k,
-    require_cps_cuda,
-    require_cps_cute,
     require_official,
 )
 from tests.parity.conftest import assert_ids_equal_up_to_ties
@@ -42,16 +38,12 @@ N_LISTS, N_PROBE = 64, 8
 M_BITS, K_HASH = 512, 5
 C, A_MAX = 2, 2
 
-BACKENDS = ["torch", "triton", "cuda", "cute", "official"]
+BACKENDS = ["torch", "triton", "official"]
 
 
 def _require_backend(backend: str) -> None:
-    """Skip-or-fail gate for the three optional backends; a no-op for torch / triton."""
-    if backend == "cuda":
-        require_cps_cuda()
-    elif backend == "cute":
-        require_cps_cute()
-    elif backend == "official":
+    """Skip-or-fail gate for the optional official backend; a no-op for torch / triton."""
+    if backend == "official":
         require_official()
 
 
@@ -306,10 +298,9 @@ class TestEquivalence:
 
 class TestCrossBackend:
     """torch and Triton SilverTorch agree on id sets (accumulator order may flip ties);
-    cuda and Triton, and cute and Triton, agree on id sets through the whole layer (the
-    kernel-level parity suites additionally prove the scores bit-identical on a shared
-    probe family). cute and cuda register the same buffers and run the same two-kernel
-    design, so through the whole layer they are compared bit for bit."""
+    official and Triton agree on id sets through the whole layer on ``none`` / ``exact``
+    (``test_official.py`` T1/T6 additionally prove the int32 scores bit-identical on a
+    shared index)."""
 
     def test_with_bloom(self, data):
         tri = _build(with_attrs=True, data=data, backend="triton")
@@ -327,22 +318,6 @@ class TestCrossBackend:
         for b in range(B):
             assert_topk_id_sets_match(ids_trc, sc_trc, ids_tri, sc_tri, b)
 
-    def test_cuda_with_bloom(self, data):
-        tri = _build(with_attrs=True, data=data, backend="triton")
-        cud = _build(with_attrs=True, data=data, backend="cuda")
-        ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
-        ids_cud, sc_cud = cud(data["query"], data["q_attrs"])
-        for b in range(B):
-            assert_topk_id_sets_match(ids_cud, sc_cud, ids_tri, sc_tri, b)
-
-    def test_cuda_no_bloom(self, data):
-        tri = _build_no_bloom(data, backend="triton")
-        cud = _build_no_bloom(data, backend="cuda")
-        ids_tri, sc_tri = tri(data["query"])
-        ids_cud, sc_cud = cud(data["query"])
-        for b in range(B):
-            assert_topk_id_sets_match(ids_cud, sc_cud, ids_tri, sc_tri, b)
-
     def test_with_exact(self, data):
         tri = _build_exact(data, backend="triton")
         trc = _build_exact(data, backend="torch")
@@ -359,56 +334,6 @@ class TestCrossBackend:
         ids_trc, sc_trc = trc(data["query"], data["q_attrs"])
         for b in range(B):
             assert_topk_id_sets_match(ids_trc, sc_trc, ids_tri, sc_tri, b)
-
-    def test_cuda_with_exact(self, data):
-        tri = _build_exact(data, backend="triton")
-        cud = _build_exact(data, backend="cuda")
-        ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
-        ids_cud, sc_cud = cud(data["query"], data["q_attrs"])
-        for b in range(B):
-            assert_topk_id_sets_match(ids_cud, sc_cud, ids_tri, sc_tri, b)
-
-    def test_cuda_with_exact_reverse(self, data):
-        rev = torch.tensor([True, False], dtype=torch.bool, device="cuda")
-        tri = _build_exact(data, backend="triton", clause_is_reverse=rev)
-        cud = _build_exact(data, backend="cuda", clause_is_reverse=rev)
-        ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
-        ids_cud, sc_cud = cud(data["query"], data["q_attrs"])
-        for b in range(B):
-            assert_topk_id_sets_match(ids_cud, sc_cud, ids_tri, sc_tri, b)
-
-    def test_cute_with_bloom(self, data):
-        tri = _build(with_attrs=True, data=data, backend="triton")
-        cut = _build(with_attrs=True, data=data, backend="cute")
-        ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
-        ids_cut, sc_cut = cut(data["query"], data["q_attrs"])
-        for b in range(B):
-            assert_topk_id_sets_match(ids_cut, sc_cut, ids_tri, sc_tri, b)
-
-    def test_cute_no_bloom(self, data):
-        tri = _build_no_bloom(data, backend="triton")
-        cut = _build_no_bloom(data, backend="cute")
-        ids_tri, sc_tri = tri(data["query"])
-        ids_cut, sc_cut = cut(data["query"])
-        for b in range(B):
-            assert_topk_id_sets_match(ids_cut, sc_cut, ids_tri, sc_tri, b)
-
-    def test_cute_with_exact(self, data):
-        tri = _build_exact(data, backend="triton")
-        cut = _build_exact(data, backend="cute")
-        ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
-        ids_cut, sc_cut = cut(data["query"], data["q_attrs"])
-        for b in range(B):
-            assert_topk_id_sets_match(ids_cut, sc_cut, ids_tri, sc_tri, b)
-
-    def test_cute_with_exact_reverse(self, data):
-        rev = torch.tensor([True, False], dtype=torch.bool, device="cuda")
-        tri = _build_exact(data, backend="triton", clause_is_reverse=rev)
-        cut = _build_exact(data, backend="cute", clause_is_reverse=rev)
-        ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
-        ids_cut, sc_cut = cut(data["query"], data["q_attrs"])
-        for b in range(B):
-            assert_topk_id_sets_match(ids_cut, sc_cut, ids_tri, sc_tri, b)
 
     def test_official_no_bloom(self, data):
         tri = _build_no_bloom(data, backend="triton")
@@ -434,35 +359,6 @@ class TestCrossBackend:
         ids_off, sc_off = off(data["query"], data["q_attrs"])
         for b in range(B):
             assert_topk_id_sets_match(ids_off, sc_off, ids_tri, sc_tri, b)
-
-    @pytest.mark.parametrize("filter_mode", ["none", "bloom", "exact"])
-    def test_cute_equals_cuda_bitexact(self, data, filter_mode):
-        """cute is a port of cuda with the same buffers (a cute checkpoint is a cuda
-        checkpoint) and the same kernels, so on the *same index* the whole layer must
-        agree bit for bit, not just on id sets. Two kmeans runs are not bit-deterministic
-        on the GPU (this is why the other cross-backend tests compare id sets), so the
-        cute module is handed the cuda module's index verbatim rather than rebuilding
-        its own."""
-        builders = {
-            "none": lambda backend: _build_no_bloom(data, backend=backend),
-            "bloom": lambda backend: _build(with_attrs=True, data=data, backend=backend),
-            "exact": lambda backend: _build_exact(data, backend=backend),
-        }
-        cud = builders[filter_mode]("cuda")
-        cut = builders[filter_mode]("cute")
-        assert list(cud.state_dict()) == list(cut.state_dict()), "buffer sets must match"
-        for name, buf in cud.named_buffers():
-            setattr(cut, name, buf.clone())
-        cut._max_cluster_size = cud._max_cluster_size
-        cut._global_scale_f = cud._global_scale_f
-        qa = data["q_attrs"] if filter_mode != "none" else None
-        ids_cud, sc_cud = cud(data["query"], qa)
-        ids_cut, sc_cut = cut(data["query"], qa)
-        assert torch.equal(sc_cud, sc_cut)
-        # topk tie order is not promised stable across launches, so ids get the usual
-        # one notch of slack: equal, or permuted within a run of tied scores.
-        for b in range(B):
-            assert_topk_id_sets_match(ids_cut, sc_cut, ids_cud, sc_cud, b, atol=0, rtol=0)
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
@@ -689,7 +585,7 @@ class TestBuilder:
 class TestEdgeCases:
     def test_n_lists_equals_n(self, data, backend):
         """Degenerate clustering (one item per cluster); full probe → recall ≈ 1."""
-        _require_backend(backend)  # the one builder-less test: gate the optional backends
+        _require_backend(backend)  # the one builder-less test: gate the optional backend
         small_n = 256
         embs = data["embs"][:small_n]
         m = SilverTorch(k=K, n_lists=small_n, n_probe=small_n, n_iter=2, backend=backend)

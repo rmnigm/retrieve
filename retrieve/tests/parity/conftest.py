@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import torch
 
-from retrieve.kernels.silvertorch.codesigned_probe_score_cuda import build_transposed_sigs
 from retrieve.layers.filters.bloom_hash import build_signatures, generate_seeds
 from retrieve.layers.filters.exact_attribute import clause_subset_match
 from retrieve.layers.utils.quantize import quantize_int8
@@ -12,8 +11,9 @@ from tests.conftest import make_attrs, make_query_attrs
 
 
 def make_probe_family(b, n_lists, max_size, n_probe, *, pad_rate=0.1, seed=7):
-    """Synthetic padded IVF layout + probed clusters for the two-kernel (cuda / cute)
-    backends: ``padded [n_lists, max_size]`` holds each item id at most once (scattered
+    """Synthetic padded IVF layout + probed clusters, the shape a backend's phase 2 decodes
+    (``test_official.py`` builds the CSR view from it too, so every backend scores the same
+    candidates): ``padded [n_lists, max_size]`` holds each item id at most once (scattered
     via randperm, ``-1`` padding), ``flat = padded[probe_ids].reshape(b, -1)`` mirrors
     the layer's phase 1. Returns ``(padded, probe_ids, flat, n)``."""
     g = torch.Generator(device="cuda").manual_seed(seed)
@@ -26,9 +26,8 @@ def make_probe_family(b, n_lists, max_size, n_probe, *, pad_rate=0.1, seed=7):
     return padded, probe_ids, flat, n
 
 
-def make_bloom(n, b, padded, *, m_bits=512, k_hash=5):
-    """Row-wise item signatures, their transposed (cluster-major) index over ``padded``,
-    and query signatures: ``(sigs, sigs_t, qb)``."""
+def make_bloom(n, b, *, m_bits=512, k_hash=5):
+    """Row-wise item signatures and query signatures: ``(sigs, qb)``."""
     attrs = make_attrs(n, c=2, a_max=2)
     q_attrs = make_query_attrs(b, c=2)
     seeds = generate_seeds(k_hash=k_hash, device=attrs.device)
@@ -37,8 +36,7 @@ def make_bloom(n, b, padded, *, m_bits=512, k_hash=5):
     qb = build_signatures(
         q_attrs.long().unsqueeze(-1), seeds, m_bits=m_bits, k_hash=k_hash, word_count=w
     )
-    sigs_t = build_transposed_sigs(sigs, padded)
-    return sigs, sigs_t, qb
+    return sigs, qb
 
 
 def make_exact(n, b, *, c=2, a_max=2, reverse="none", n_vocab=8):
@@ -74,9 +72,9 @@ def ref_cps_phase23(
     ``query_clause_attrs``: AND over clauses, OR over ``A_max`` within a clause, XOR
     with reverse, OR with the ``-1`` inactive sentinel). Computed in fp32 because the
     integer products fit in fp32 mantissa at this D — bit-identical to an int32
-    accumulator. Shared by the Triton and CUDA parity suites; both CUDA filter kernels
-    read a different layout (transposed index / cluster-major mask) but compute a
-    boolean-identical predicate to these row-wise forms."""
+    accumulator. Shared by the Triton and official parity suites: the official scorer reads
+    a cluster-sorted table and a packed bit mask, but the predicate it is handed is
+    boolean-identical to these row-wise forms."""
     valid = flat_items >= 0
     safe = flat_items.clamp(min=0)
 

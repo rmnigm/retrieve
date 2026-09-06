@@ -2,7 +2,7 @@
 
 > **Status:** **steps 1–4 and 7 executed; 5 and 6 deferred.** Steps 2–3 passed de facto on an
 > A100 on 2026-09-02: the full `retrieve/tests/` suite is green at the branch tip (286 tests,
-> [cute-dsl-scorer-artifacts/wp4/pytest-final.txt](cute-dsl-scorer-artifacts/wp4/pytest-final.txt))
+> [cute-dsl-scorer-artifacts/wp4/pytest-final.txt](archive/cute-dsl-scorer-artifacts/wp4/pytest-final.txt))
 > and the K2 tracing caveat did not bite.
 >
 > **2026-09-06, under roadmap A1** (branch `dev/a1-golden`; record in

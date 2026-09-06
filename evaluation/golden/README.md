@@ -75,15 +75,15 @@ neither run can read the other's ground truth; they do share the
 `encoded_queries_test.pt` cache, whose blob format is identical, so both
 sides see the same queries.
 
-## Only `triton` and `torch` are golden — cuda/cute are void
+## Only `triton` and `torch` are golden — the deleted backends are void
 
-H §6 WP-0's own text asks for arxiv `silvertorch` on `--backend cuda
-cute`. **That is void**, per H's amendment of 2026-09-05 and roadmap
-Phase B: Meta's official kernels become the reference backend
-(`backend="official"`) and the CUDA C++ and CuTe DSL backends are deleted
-once the official parity gate (B2) is green. A golden column for a
-backend that will not exist would be checked against nothing, so it was
-not produced. The backend axis of the v2 harness is
+H §6 WP-0's own text asks for arxiv `silvertorch` on the two hand-written
+SilverTorch backends of the time. **That is void**, per H's amendment of
+2026-09-05 and roadmap Phase B: Meta's official kernels became the
+reference backend (`backend="official"`) and those two backends were
+deleted at B4 once the official parity gate (B2) was green. A golden
+column for a backend that no longer exists would be checked against
+nothing, so it was not produced. The backend axis of the v2 harness is
 `triton | torch | official`; `official` gets its own gate in C4 (jaccard
 ≥ 0.99 vs `triton` on one goodreads cell), not a golden comparison here.
 
