@@ -122,6 +122,10 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
 - [ ] **B1 — adapter + tests.** O §5, §10 WP-2 (Mac, 2 d): `backend=
   "official"` in `SilverTorch`, `require_official`, parity tests T1–T7.
   Gate: `ruff` clean, suite collects and skips on the Mac. Needs A3.
+  *Status: authored 2026-09-06 on `dev/b1-official-adapter` (Mac gate
+  green: ruff clean, 683 tests collect, official surface skips); GPU
+  gate pending — see O §10 WP-2's status note. A3's bit order is not
+  pinned yet (`OFFICIAL_BIT_ORDER = None` in `test_official.py`).*
 - [ ] **B2 — parity gate.** O §10 WP-3 (A100, 0.5 d). Gate: phase-3
   scores `torch.equal` on the int32 path on every regime, bloom ⊇ check
   and FPR at matched memory recorded in O's record section. **Unblocks
@@ -139,6 +143,9 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
   hits only `docs/plans/archive/`. Needs B2.
 - [ ] **B5 — salt as a buffer.** O §8 TF-2 (Mac, 0.5 h; validate with
   `test_bloom_hash.py` on the A100). Do before any campaign timing.
+  *Status: authored 2026-09-06 on `dev/b1-official-adapter` (commit
+  `2dbee72`); GPU gate pending — `test_bloom_hash.py` + the bloom rows
+  of `test_silvertorch.py` on the A100.*
 
 ### Phase C — harness v2 (Mac work in parallel with B; A100 gate at the end)
 

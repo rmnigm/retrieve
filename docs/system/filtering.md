@@ -51,6 +51,7 @@ boolean composition.
 | Bloom Triton kernels | [kernels/silvertorch/bloom_match.py](../../retrieve/src/retrieve/kernels/silvertorch/bloom_match.py), [kernels/filters/bloom_compact.py](../../retrieve/src/retrieve/kernels/filters/bloom_compact.py) | `(qb & sigs) == qb` → `[B, N]` bool (match); fused subset-test + stream compaction (compact). Consumed by `BloomFilter.evaluate_mask` / `evaluate_indices` on CUDA |
 | Filter fused into SilverTorch score kernel | [kernels/silvertorch/codesigned_probe_score.py](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py), [codesigned_probe_score_exact.py](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_exact.py) | Selected by `SilverTorch.filter_mode`. `"bloom"` → conjunctive bloom subset test (single `QB`), part of co-designed Algorithm 1; `"exact"` → exact AND-of-OR over `[N, C, A_max]` narrow attrs (reverse clauses supported), same `common.clause_pass` inner loop as `clause_mask` but fused into the probe-and-score path. Both are **separate paths** from the standalone `BloomFilter` / `ExactAttributeFilter` — SilverTorch shares the predicate math and hash builders, not the module classes. `backend="cuda"` runs both predicates too, as phase-2 mask kernels in [cuda/codesigned_probe_score.cu](../../retrieve/src/retrieve/kernels/silvertorch/cuda/codesigned_probe_score.cu) (`cps_bloom_mask_kernel`, `cps_clause_mask_kernel`) feeding one filter-agnostic scorer. |
 | `combine_masks` / `combine_indices` | [layers/filters/__init__.py](../../retrieve/src/retrieve/layers/filters/__init__.py) | mask-AND composition; sparse cascade via `evaluate_subset` |
+| Official SilverTorch filters (`backend="official"`) | [kernels/silvertorch/official.py](../../retrieve/src/retrieve/kernels/silvertorch/official.py) | `filter_mode="bloom"` is **Meta's bloom index** (`bloom_index_build` over `(clause, value)` features, murmur3, bundles of 2048 docs, width from `OfficialConfig.b_multiplier`) queried through their expression DSL (`"0:v AND 1:w"`, `NOT`, `""` = all) — a different hash from ours, never bit-compared, matched by FPR / memory instead; `filter_mode="exact"` is our `clause_mask` packed into the official scorer's `filtering_bit_mask`. See [kernels.md](kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend) |
 
 ## Key observation: LiNR hosts *both* filter types
 
@@ -112,7 +113,22 @@ version counts, license codes all share small integer ranges) leak
 ~25–30% of non-matching items as false positives via cross-clause value
 collision. The salt lives in the shared core, so item-side
 `build_signatures` and query-side `build_query_signatures` are
-symmetric by construction. No
+symmetric by construction. It is a pure function of the clause index
+(`generate_clause_salt(C, device)` → `[C]` int64, no seed), and since
+B5 (2026-09-06) `BloomFilter` and `SilverTorch(filter_mode="bloom")`
+register it once as the **`clause_salt` buffer** at `register_index`
+and pass it to every builder call; before that the two splitmix64
+constants were materialised per call with `torch.tensor(_SALT,
+device=cuda)` — a pageable host→device copy on every forward that
+inflated the eager bloom path by ~0.4 ms and broke raw CUDA-graph
+capture. The bits are identical either way (`build_signatures(...,
+clause_salt=None)` still derives the salt on the fly for standalone
+callers — the parity tests, the tuner — and
+[`test_bloom_hash.py`](../../retrieve/tests/correctness/test_bloom_hash.py)
+pins the buffer path against the old inline computation). A
+`SilverTorch` bloom index registered *without* attributes stores an
+empty `clause_salt` (the clause count is unknown) and derives it at
+query time. No
 runtime cost worth measuring (one extra elementwise XOR inside an already
 chunked loop) and zero kernel impact —
 [`bloom_match`](../../retrieve/src/retrieve/kernels/silvertorch/bloom_match.py),

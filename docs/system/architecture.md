@@ -19,23 +19,24 @@ and selecting their compute path via a `backend=` flag on `__init__`
 | `"torch"` | pure-torch eager equivalent, same semantics, larger intermediates | every module |
 | `"cuda"` | hand-written CUDA C++, JIT-compiled on first forward | **`SilverTorch` only** |
 | `"cute"` | CuTe DSL port of the `"cuda"` kernels (same ops, same buffers, bit-identical); needs the `cute` extra | **`SilverTorch` only** |
+| `"official"` | Meta's own `meta-recsys/silvertorch` ops (`torch.ops.st.*`) for phases 2+3 — the reference backend; eager-only; needs the `official` extra | **`SilverTorch` only** |
 
-There is also an optional extra with **no backend behind it yet**:
-`torchretrieve[official]` (`uv sync --extra official`) installs Meta's own
-`meta-recsys/silvertorch`, pinned by sha in the workspace root's
-`[tool.uv.sources]`, which builds a CUDA extension and registers nine
-`torch.ops.st.*` ops. Nothing in `retrieve` imports it today — the
-`backend="official"` adapter is Phase B of
-[../plans/00-roadmap.md](../plans/00-roadmap.md). Installing it needs `nvcc`
-(12.x), `ninja` and `setuptools`; see
+The `"official"` backend needs an optional extra: `torchretrieve[official]`
+(`uv sync --extra official`) installs Meta's own `meta-recsys/silvertorch`,
+pinned by sha in the workspace root's `[tool.uv.sources]`, which builds a
+CUDA extension and registers nine `torch.ops.st.*` ops. The adapter lives
+in `kernels/silvertorch/official.py`; without the package,
+`SilverTorch(backend="official")` raises `OfficialMissing`. Installing it
+needs `nvcc` (12.x), `ninja` and `setuptools`; see
 [../plans/official-silvertorch-artifacts/README.md](../plans/official-silvertorch-artifacts/README.md)
 for the pin, the build record and the upstream-suite result.
 
-`"cuda"` is not a universal third path: it exists solely for
-`SilverTorch`'s probe-scoring kernel. Every other class accepts the flag
-for API symmetry, but its dispatch is `if backend == "triton": … else:
-<torch>`, so passing `"cuda"` to a LiNR module or a standalone filter
-silently runs the **torch** path. See
+`"cuda"` is not a universal third path — and neither are `"cute"` or
+`"official"`: they exist solely for `SilverTorch`'s probe-scoring
+kernel. Every other class accepts the flag for API symmetry, but its
+dispatch is `if backend == "triton": … else: <torch>`, so passing
+`"cuda"`, `"cute"` or `"official"` to a LiNR module or a standalone
+filter silently runs the **torch** path. See
 [Backend dispatch](#backend-dispatch) below.
 
 - **LiNR** ([`layers/linr/`](../../retrieve/src/retrieve/layers/linr/)) — five
@@ -259,7 +260,7 @@ The predicate, `filter_mode ∈ {"none", "bloom", "exact"}`:
   no false positives, bandwidth-cheaper per item at small `C × A_max`,
   trades the bloom hash flexibility for exact-value match.
 
-The implementation, `backend ∈ {"triton", "torch", "cuda"}`:
+The implementation, `backend ∈ {"triton", "torch", "cuda", "cute", "official"}`:
 
 - `"triton"` (default) — phases 2+3 fused into one Triton launch, no
   probe intermediate on HBM.
@@ -271,6 +272,20 @@ The implementation, `backend ∈ {"triton", "torch", "cuda"}`:
   `filter_mode="exact"` at construction** — that combination raises
   `ValueError`; use `"triton"` or `"torch"` for exact clauses. Details in
   [kernels.md](kernels.md#codesigned_probe_score_cuda--the-cuda-c-backend).
+- `"cute"` — the CuTe DSL port of the `"cuda"` backend (same ops, same
+  buffers, bit-identical; the `cute` extra).
+- `"official"` — Meta's official `torch.ops.st.*` kernels
+  (`meta-recsys/silvertorch`, pinned; the `official` extra) as the
+  **reference**: our k-means, quantization and probe selection, their
+  `fused_kmean_ann` scorer over a cluster-sorted int8 table, their bloom
+  index and expression parser for `filter_mode="bloom"`, our
+  `clause_mask` packed into their scorer's bit mask for
+  `filter_mode="exact"`. Eager-only: `torch.compile` of an official module
+  raises. Constructor extras via `official=OfficialConfig(...)`
+  (`score_path` `"fp16"` (default, the shipped int8 serving path) or
+  `"int32"` (bit-identical to Triton), `bloom_path` `"partial"` /
+  `"full"`, `b_multiplier`, `hash_k`, …). Details in
+  [kernels.md](kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend).
 
 Constructed via `build_silvertorch(item_embs, k, *, n_lists, n_probe,
 filter_mode="none", m_bits=None, k_hash=None, n_iter=10, seed=0,
@@ -286,7 +301,12 @@ validate → `_build_ivf` (k-means) → `_quantize_items` →
 `_register_filter_buffers` phases with a frozen buffer-registration
 order (state-dict key order): `centroids`, `item_codes`,
 `global_scale`, `padded_cluster_items`, `cluster_sizes`, then the
-filter buffers.
+filter buffers. On `"official"` the IVF is stored as the CSR the official
+scorer indexes instead of the padded layout: `centroids`, `item_codes`
+(**cluster-sorted**), `global_scale`, `cluster_offsets[n_lists+1]`,
+`cluster_sizes`, `sort_perm[N]` (sorted position → original id),
+`inv_perm[N]`, then the filter buffers; `padded_cluster_items` is not
+registered.
 
 The filter is private to SilverTorch — no standalone `FilterModule`
 instance is wired in; the module shares the ten-line predicate *math*
@@ -295,17 +315,28 @@ builders with the filters package, not the module classes:
 
 - For `"bloom"`, signatures are derived from `item_clause_attrs` at
   `register_index` time via `bloom_hash.build_signatures` and stored
-  alongside `hash_seeds[k_hash, 2]`. **Which signature buffer is
+  alongside `hash_seeds[k_hash, 2]` and the per-clause hash salt
+  `clause_salt[C]` (registered so the query-side build makes no
+  host→device copy per forward; empty when the index was registered
+  without attributes). **Which signature buffer is
   registered depends on the backend**: `"triton"` / `"torch"` store the
   row-wise `bloom_sigs[N, W]`; `"cuda"` stores only the transposed
   `bloom_sigs_t[m_bits, n_lists · wpc]` that its phase-2 kernel reads
-  (registering both would double the filter index for nothing).
+  (registering both would double the filter index for nothing);
+  `"official"` stores Meta's own index — `bloom_index[W]` int64 and
+  `bundle_b_offsets[n_bundles+1]` from `torch.ops.st.bloom_index_build`
+  over the cluster-sorted attrs (their murmur3 hash, width set by
+  `OfficialConfig.b_multiplier`; `m_bits` is optional and ignored, `k_hash`
+  is the search `k ≤ 10`) and no `hash_seeds` / `clause_salt`.
 - For `"exact"`, the narrow `[N, C, A_max]` attribute tensor is stored
   as the `item_clause_attrs` buffer (plus `clause_is_reverse[C]` bool)
   and consumed directly by the exact kernel — reverse clauses are
   supported on this mode only. This pair is backend-independent: the
   cuda clause-mask kernel reads the same two buffers in place, so it
-  registers nothing extra.
+  registers nothing extra. (On `"official"` the same two buffers are
+  registered, with `item_clause_attrs` permuted into the cluster-sorted
+  doc space; our Triton `clause_mask` evaluates them and the `[B, N]`
+  mask is packed into the official scorer's `filtering_bit_mask`.)
 - For `"none"`, both attribute buffers are skipped and `forward`
   requires `query_clause_attrs=None`.
 
@@ -319,7 +350,10 @@ builders with the filters package, not the module classes:
 > `item_codes`, `global_scale`, `padded_cluster_items`, `cluster_sizes`,
 > and the `filter_mode="exact"` pair `item_clause_attrs` /
 > `clause_is_reverse` — so an exact-mode checkpoint *is* portable across
-> all three backends.
+> triton / torch / cuda / cute. **`"official"` is portable to none of
+> them in any mode**: its `item_codes` and `item_clause_attrs` are in
+> cluster-sorted order and it carries `cluster_offsets` / `sort_perm` /
+> `inv_perm` instead of `padded_cluster_items`.
 
 ## Utility modules
 
@@ -368,8 +402,12 @@ host-side `torch.topk` over the score buffer (CUB beats anything we can
 write in pure Triton). The CUDA backend is the one exception: both of its
 *filtered* paths launch two kernels (a phase-2 mask — partial bloom or
 exact clause — then the shared masked scorer) before the same host-side
-top-K; the unfiltered path is a single launch. Full per-kernel detail in
-[kernels.md](kernels.md).
+top-K; the unfiltered path is a single launch. The official backend is
+not a kernel of ours at all:
+[`silvertorch/official.py`](../../retrieve/src/retrieve/kernels/silvertorch/official.py)
+adapts Meta's `torch.ops.st.*` ops (≈ 12 launches and 2 host syncs per
+unfiltered forward upstream, more with bloom — plan §3). Full per-kernel
+detail in [kernels.md](kernels.md).
 
 | subtree                                                                                              | kernel                                                                                                                                | consumer                          |
 |------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------|
@@ -382,26 +420,30 @@ top-K; the unfiltered path is a single launch. Full per-kernel detail in
 | [`silvertorch/`](../../retrieve/src/retrieve/kernels/silvertorch/)                               | [`codesigned_probe_score_exact`](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_exact.py) — fused IVF + INT8 + exact AND-of-OR | `SilverTorch(filter_mode="exact")`     |
 | [`silvertorch/`](../../retrieve/src/retrieve/kernels/silvertorch/)                               | [`bloom_match`](../../retrieve/src/retrieve/kernels/silvertorch/bloom_match.py) — bool subset test (standalone)                     | `BloomFilter.evaluate_mask`       |
 | [`silvertorch/cuda/`](../../retrieve/src/retrieve/kernels/silvertorch/cuda/)                     | [`codesigned_probe_score_cuda`](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_cuda.py) — CUDA C++ transposed bloom + dp4a scoring (2 launches) | `SilverTorch(backend="cuda")` |
+| [`silvertorch/`](../../retrieve/src/retrieve/kernels/silvertorch/)                               | [`official`](../../retrieve/src/retrieve/kernels/silvertorch/official.py) — adapter over Meta's `torch.ops.st.fused_kmean_ann*` / bloom ops (no kernel of ours; eager-only) | `SilverTorch(backend="official")` |
 
 ### Backend dispatch
 
-Only `SilverTorch` branches four ways. Everywhere else the dispatch is
-binary, so a `"cuda"` or `"cute"` request lands on the torch path:
+Only `SilverTorch` branches five ways. Everywhere else the dispatch is
+binary, so a `"cuda"`, `"cute"` or `"official"` request lands on the
+torch path:
 
-| module | `"triton"` | `"torch"` | `"cuda"` | `"cute"` |
-|---|---|---|---|---|
-| `SilverTorch` | fused Triton | eager torch | CUDA C++ | CuTe DSL (port of the C++ backend) |
-| `PrefilterKNN` | `fused_masked_knn_topk` | eager | → torch | → torch |
-| `OneBitKNN` / `SimHashKNN` | `oporp_1bit_match_topk` | eager | → torch | → torch |
-| `ExactAttributeFilter` | `clause_mask` / `clause_compact` | eager | → torch | → torch |
-| `BloomFilter` | `bloom_match` / `bloom_compact` | eager | → torch | → torch |
-| `PostfilterKNN` / `PostfilterKNNInt8` | cuBLAS (flag is a no-op) | same | same | same |
+| module | `"triton"` | `"torch"` | `"cuda"` | `"cute"` | `"official"` |
+|---|---|---|---|---|---|
+| `SilverTorch` | fused Triton | eager torch | CUDA C++ | CuTe DSL (port of the C++ backend) | Meta's `torch.ops.st.*` (eager-only) |
+| `PrefilterKNN` | `fused_masked_knn_topk` | eager | → torch | → torch | → torch |
+| `OneBitKNN` / `SimHashKNN` | `oporp_1bit_match_topk` | eager | → torch | → torch | → torch |
+| `ExactAttributeFilter` | `clause_mask` / `clause_compact` | eager | → torch | → torch | → torch |
+| `BloomFilter` | `bloom_match` / `bloom_compact` | eager | → torch | → torch | → torch |
+| `PostfilterKNN` / `PostfilterKNNInt8` | cuBLAS (flag is a no-op) | same | same | same | same |
 
 This matters when benchmarking: a harness cell labelled `backend="cuda"`
-(or `"cute"`) for anything other than `SilverTorch` is measuring the
-**torch** path. The eval harness works around it by building filter
-modules for `"cuda"` / `"cute"` cells with `backend="triton"` — see
-[evaluation.md](evaluation.md#the-cuda-backend-in-sweeps).
+(or `"cute"`, or `"official"`) for anything other than `SilverTorch` is
+measuring the **torch** path. The eval harness works around it by
+building filter modules for `"cuda"` / `"cute"` cells with
+`backend="triton"` — see
+[evaluation.md](evaluation.md#the-cuda-backend-in-sweeps); the harness
+does not accept `"official"` yet (roadmap C1 / plan WP-6).
 
 ## Testing
 

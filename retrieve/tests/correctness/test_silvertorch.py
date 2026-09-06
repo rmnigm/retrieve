@@ -5,9 +5,13 @@ sizes that fit well on a single GPU; larger sweeps live in ``evaluation/``.
 Tests cover three filter modes — ``"none"`` (plain IVF), ``"bloom"`` (paper's
 bloom subset test), ``"exact"`` (clause-attribute predicate fused into the
 codesigned kernel). All forward paths are exercised with ``backend="torch"``,
-``backend="triton"``, ``backend="cuda"`` and ``backend="cute"`` across all three
-filter modes; cuda cells skip only when the C++ extension can't build here, cute
-cells only when the CuTe DSL (the ``cute`` extra) is not installed.
+``backend="triton"``, ``backend="cuda"``, ``backend="cute"`` and
+``backend="official"`` across all three filter modes; cuda cells skip only when the
+C++ extension can't build here, cute cells only when the CuTe DSL (the ``cute``
+extra) is not installed, official cells only when ``meta-recsys/silvertorch`` (the
+``official`` extra) is not installed. On ``"official"`` the bloom mode is Meta's own
+bloom index (a different hash), so the bloom cross-backend checks stay
+triton-vs-torch; the official parity gates live in ``tests/parity/test_official.py``.
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ from tests.conftest import (
     recall_at_k,
     require_cps_cuda,
     require_cps_cute,
+    require_official,
 )
 
 N, D, B, K = 4096, 128, 16, 64
@@ -34,15 +39,17 @@ N_LISTS, N_PROBE = 64, 8
 M_BITS, K_HASH = 512, 5
 C, A_MAX = 2, 2
 
-BACKENDS = ["torch", "triton", "cuda", "cute"]
+BACKENDS = ["torch", "triton", "cuda", "cute", "official"]
 
 
 def _require_backend(backend: str) -> None:
-    """Skip-or-fail gate for the two optional backends; a no-op for torch / triton."""
+    """Skip-or-fail gate for the three optional backends; a no-op for torch / triton."""
     if backend == "cuda":
         require_cps_cuda()
     elif backend == "cute":
         require_cps_cute()
+    elif backend == "official":
+        require_official()
 
 
 @pytest.fixture(scope="module")
@@ -142,10 +149,21 @@ class TestShape:
         assert m.global_scale.dtype == torch.float32
         assert m.global_scale.shape == ()
         assert m.centroids.dtype == torch.float32
-        assert m.padded_cluster_items.shape[0] == N_LISTS
+        if backend == "official":
+            # Cluster-sorted CSR layout instead of the padded one (plan D4).
+            assert not hasattr(m, "padded_cluster_items")
+            assert m.cluster_offsets.shape == (N_LISTS + 1,)
+            assert m.cluster_offsets.dtype == torch.int64
+            assert m.sort_perm.shape == (N,) and m.inv_perm.shape == (N,)
+            assert torch.equal(m.inv_perm[m.sort_perm], torch.arange(N, device="cuda"))
+            assert int(m.cluster_offsets[-1].item()) == N
+        else:
+            assert m.padded_cluster_items.shape[0] == N_LISTS
+        assert m.cluster_sizes.shape == (N_LISTS,)
         # No filter → no filter buffers.
         assert not hasattr(m, "bloom_sigs")
         assert not hasattr(m, "hash_seeds")
+        assert not hasattr(m, "bloom_index")
         assert not hasattr(m, "item_clause_attrs")
         assert not hasattr(m, "clause_is_reverse")
 
@@ -160,6 +178,10 @@ class TestShape:
         # Exact mode must not allocate bloom buffers.
         assert not hasattr(m, "bloom_sigs")
         assert not hasattr(m, "hash_seeds")
+        assert not hasattr(m, "bloom_index")
+        if backend == "official":
+            # Attrs live in the cluster-sorted doc space on this backend.
+            assert torch.equal(m.item_clause_attrs, data["attrs"][m.sort_perm])
 
 
 class TestParamValidation:
@@ -384,6 +406,31 @@ class TestCrossBackend:
         ids_cut, sc_cut = cut(data["query"], data["q_attrs"])
         for b in range(B):
             assert_topk_id_sets_match(ids_cut, sc_cut, ids_tri, sc_tri, b)
+
+    def test_official_no_bloom(self, data):
+        tri = _build_no_bloom(data, backend="triton")
+        off = _build_no_bloom(data, backend="official")
+        ids_tri, sc_tri = tri(data["query"])
+        ids_off, sc_off = off(data["query"])
+        for b in range(B):
+            assert_topk_id_sets_match(ids_off, sc_off, ids_tri, sc_tri, b)
+
+    def test_official_with_exact(self, data):
+        tri = _build_exact(data, backend="triton")
+        off = _build_exact(data, backend="official")
+        ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
+        ids_off, sc_off = off(data["query"], data["q_attrs"])
+        for b in range(B):
+            assert_topk_id_sets_match(ids_off, sc_off, ids_tri, sc_tri, b)
+
+    def test_official_with_exact_reverse(self, data):
+        rev = torch.tensor([True, False], dtype=torch.bool, device="cuda")
+        tri = _build_exact(data, backend="triton", clause_is_reverse=rev)
+        off = _build_exact(data, backend="official", clause_is_reverse=rev)
+        ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
+        ids_off, sc_off = off(data["query"], data["q_attrs"])
+        for b in range(B):
+            assert_topk_id_sets_match(ids_off, sc_off, ids_tri, sc_tri, b)
 
     @pytest.mark.parametrize("filter_mode", ["none", "bloom", "exact"])
     def test_cute_equals_cuda_bitexact(self, data, filter_mode):
