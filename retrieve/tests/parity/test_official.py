@@ -53,20 +53,15 @@ from tests.parity.conftest import (
 
 # --- bit-order pin (roadmap A3, footnote † in 00-roadmap.md §2.1) ---------------------------
 #
-# The order in which the official scorer reads a ``filtering_bit_mask`` word is taken from
-# the upstream source (high-first: doc d at bit 63 - d % 64) but has not been measured on
-# the GPU. Until roadmap A3 pins it, every bit-order-dependent test below runs over BOTH
-# candidate orders and asserts the observed behaviour against the adapter's constant
-# ``official.MASK_BIT_ORDER`` — so a wrong constant fails loudly, with the fix in the
-# message, instead of passing by construction. To pin after A3: set
-# ``OFFICIAL_BIT_ORDER = "high_first"`` or ``"low_first"`` (A3's measured value, recorded
-# in the plan's validation record), make ``official.MASK_BIT_ORDER`` equal to it, and the
-# parametrisation collapses to that one order.
-OFFICIAL_BIT_ORDER: of.BitOrder | None = None
-CANDIDATE_ORDERS: tuple[of.BitOrder, ...] = ("high_first", "low_first")
-ORDERS: tuple[of.BitOrder, ...] = (
-    CANDIDATE_ORDERS if OFFICIAL_BIT_ORDER is None else (OFFICIAL_BIT_ORDER,)
-)
+# The order in which the official scorer reads a ``filtering_bit_mask`` word — and in which
+# ``bloom_index_search_batch`` packs its output — was measured on the A100 on 2026-09-06
+# (plan §13.2, three independent probes): HIGH-first, doc ``d`` at bit ``63 - d % 64``. It is
+# pinned here as a *test-side* constant, independent of the adapter's, so T3 asserts
+# ``official.MASK_BIT_ORDER`` / ``official.BLOOM_OUTPUT_BIT_ORDER`` against the measurement
+# rather than against themselves; the other order is kept as a negative control (a mask
+# packed low-first scores nothing / does not round-trip). A3's probes are the tests below.
+OFFICIAL_BIT_ORDER: of.BitOrder = "high_first"
+OTHER_ORDER: of.BitOrder = "low_first"
 
 K_SEARCH, HASH_K, B_MULT = 5, 7, 10.0
 
@@ -310,12 +305,13 @@ def test_t2_default_divisor_is_the_overflow_bound():
 # --- T3: bit order --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("bit_order", ORDERS)
-def test_t3_bloom_output_word_order(bit_order):
+def test_t3_bloom_output_word_order():
     """``bloom_index_search_batch(return_bool_mask=False)`` packs doc ``d`` at bit
-    ``63 - d % 64`` (``store<bool>`` unpacks from bit 63 down): ``pack_mask(bool_mask,
-    "high_first")`` round-trips the packed output and the other order does not. Also
-    reproduces the README's expected hits on its own corpus."""
+    ``63 - d % 64`` (``store<bool>`` unpacks from bit 63 down — A3 probe A): ``pack_mask(
+    bool_mask, OFFICIAL_BIT_ORDER)`` round-trips the packed output and the other order does
+    not, and the adapter's constant agrees with the measurement. Also reproduces the
+    README's expected hits on its own corpus."""
+    assert of.BLOOM_OUTPUT_BIT_ORDER == OFFICIAL_BIT_ORDER
     attrs = _readme_corpus()
     index, boff = of.build_bloom_index(attrs, b_multiplier=5.0, build_k=3)
     assert of.bloom_index_docs(boff) == of.DOCS_PER_BUNDLE
@@ -326,24 +322,17 @@ def test_t3_bloom_output_word_order(bit_order):
         assert [i for i, h in enumerate(row) if h] == hits
     packed = of.bloom_full_mask(index, boff, plans, 3, 7, return_bool_mask=False)
     assert packed.dtype == torch.int64 and packed.shape == (3, of.WORDS_PER_BUNDLE)
-    matches = torch.equal(of.pack_mask(full, bit_order), packed)
-    assert matches == (bit_order == of.BLOOM_OUTPUT_BIT_ORDER), (
-        f"packed bloom output is {'not ' if not matches else ''}{bit_order}; "
-        f"official.BLOOM_OUTPUT_BIT_ORDER says {of.BLOOM_OUTPUT_BIT_ORDER}"
+    assert torch.equal(of.pack_mask(full, OFFICIAL_BIT_ORDER), packed), (
+        f"packed bloom output is not {OFFICIAL_BIT_ORDER} — A3's measurement no longer holds"
     )
+    assert not torch.equal(of.pack_mask(full, OTHER_ORDER), packed)
     assert torch.equal(of.unpack_mask(packed, of.DOCS_PER_BUNDLE, of.BLOOM_OUTPUT_BIT_ORDER), full)
 
 
-@pytest.mark.parametrize("doc", [0, 5, 40, 69])
-@pytest.mark.parametrize("bit_order", ORDERS)
-def test_t3_scorer_reads_filtering_bit_mask(bit_order, doc):
-    """The A3 probe as a test: one 70-doc cluster (docs 0–63 in the first mask word, 64–69
-    in the second; docs 0–63 on the warp-aligned path, 64–69 on the remainder path) and a
-    ``filtering_bit_mask`` with exactly one doc set under ``bit_order``. Under the scorer's
-    true read order that doc — and only it — is scored; under the other order nothing is
-    (the mirrored bit names a doc past the cluster). The outcome must match
-    ``official.MASK_BIT_ORDER``: if it does not, A3 has found the other order — flip the
-    constant and pin ``OFFICIAL_BIT_ORDER`` here."""
+def _scored_docs(doc: int, bit_order: of.BitOrder) -> list[int]:
+    """One 70-doc cluster (docs 0–63 in the first mask word, 64–69 in the second; docs 0–63
+    on the warp-aligned path, 64–69 on the remainder path) scored under a
+    ``filtering_bit_mask`` with exactly ``doc`` set, packed in ``bit_order``."""
     n, d = 70, 16
     g = torch.Generator(device="cuda").manual_seed(11)
     codes = torch.randint(-128, 128, (n, d), generator=g, dtype=torch.int8, device="cuda")
@@ -355,28 +344,30 @@ def test_t3_scorer_reads_filtering_bit_mask(bit_order, doc):
     mask[0, doc] = True
     packed = of.pack_mask(mask, bit_order)
     _, idx = of.fused_scores(q_codes, probe, offsets, sizes, codes, n, filtering_bit_mask=packed)
-    scored = sorted(idx[idx >= 0].tolist())
-    if bit_order == of.MASK_BIT_ORDER:
-        assert scored == [doc], (
-            f"with the mask packed {bit_order} the scorer scored docs {scored}, expected "
-            f"[{doc}]: official.MASK_BIT_ORDER={of.MASK_BIT_ORDER!r} is wrong — flip it and "
-            "pin OFFICIAL_BIT_ORDER in this file"
-        )
-    else:
-        assert scored == [], (
-            f"with the mask packed {bit_order} the scorer scored docs {scored}: the scorer "
-            f"reads {bit_order}, not official.MASK_BIT_ORDER={of.MASK_BIT_ORDER!r} — flip it "
-            "and pin OFFICIAL_BIT_ORDER in this file"
-        )
-    if OFFICIAL_BIT_ORDER is not None:
-        assert of.MASK_BIT_ORDER == OFFICIAL_BIT_ORDER
+    return sorted(idx[idx >= 0].tolist())
 
 
-@pytest.mark.parametrize("bit_order", ORDERS)
+@pytest.mark.parametrize("doc", [0, 5, 40, 69])
+def test_t3_scorer_reads_filtering_bit_mask(doc):
+    """A3 probe B as a test: under the pinned read order the one set doc — and only it —
+    is scored; under the other order nothing is (the mirrored bit names a doc past the
+    cluster). The adapter's ``MASK_BIT_ORDER`` must equal the pinned measurement."""
+    assert of.MASK_BIT_ORDER == OFFICIAL_BIT_ORDER
+    scored = _scored_docs(doc, OFFICIAL_BIT_ORDER)
+    assert scored == [doc], (
+        f"with the mask packed {OFFICIAL_BIT_ORDER} the scorer scored docs {scored}, expected "
+        f"[{doc}]: A3's measured bit order no longer holds at this upstream sha"
+    )
+    assert _scored_docs(doc, OTHER_ORDER) == [], (
+        f"a mask packed {OTHER_ORDER} scored docs — the scorer no longer reads {OFFICIAL_BIT_ORDER}"
+    )
+
+
+@pytest.mark.parametrize("bit_order", [OFFICIAL_BIT_ORDER, OTHER_ORDER])
 def test_t3_partial_mask_decode_order(bit_order):
     """``unpack_partial_mask`` (the test-side decoder of the ``_return_partial_response``
-    triple) agrees with the bool full mask under the bloom output order and not the other:
-    README corpus as two 2-doc clusters, probed by every query."""
+    triple) agrees with the bool full mask under the pinned bloom output order and not the
+    other: README corpus as two 2-doc clusters, probed by every query."""
     attrs = _readme_corpus()
     index, boff = of.build_bloom_index(attrs, b_multiplier=5.0, build_k=3)
     plans = of.parse_plans(README_QUERIES, hash_k=7)
@@ -389,7 +380,7 @@ def test_t3_partial_mask_decode_order(bit_order):
     assert cumsum.tolist() == [1, 2, 3, 4, 5, 6] and first.tolist() == [0, 2] * 3
     decoded = of.unpack_partial_mask(cumsum, first, words, sel_len, 2, bit_order)
     assert decoded.shape == (3, 4)
-    assert torch.equal(decoded, full) == (bit_order == of.BLOOM_OUTPUT_BIT_ORDER)
+    assert torch.equal(decoded, full) == (bit_order == OFFICIAL_BIT_ORDER)
 
 
 def test_t3_pack_unpack_reverse_roundtrip():
