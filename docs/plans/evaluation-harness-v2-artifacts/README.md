@@ -5,6 +5,7 @@ Raw material behind [../evaluation-harness-v2.md](../evaluation-harness-v2.md).
 | file | what it is |
 |---|---|
 | [survey-ann-ir-benchmarks.md](survey-ann-ir-benchmarks.md) | How ann-benchmarks, big-ann-benchmarks (incl. the NeurIPS'23 filtered track), VectorDBBench, MTEB / BEIR / `ir_measures`, cuVS `raft-ann-bench` and FAISS's `benchs/` store results, declare sweeps, isolate runs, cache ground truth and time queries. §3 lists the ten conventions that recur across ≥3 of them; §4 grades each against our plan; §5 lists what the survey could not verify from primary sources. |
+| [a1_golden_run.sh](a1_golden_run.sh) | The A1 / WP-0 golden runbook: 11 processes, one per `(dataset, algo, backend)` — goodreads d128 clause/`c0_genre` x 5 algos x {triton, torch}, arxiv d128 clause/`c0_maincat` x silvertorch x {triton}. Locks the SM clock, logs per cell, resumes by skipping cells whose JSON exists. Outputs and their README live in [../../../evaluation/golden/](../../../evaluation/golden/README.md), not here — they are a gate input for C4, not raw material. |
 | [survey-bench-infrastructure.md](survey-bench-infrastructure.md) | The same question for general benchmarking infrastructure: Criterion.rs, Google Benchmark, nanobench, pytest-benchmark, airspeed velocity, MLPerf Inference's LoadGen scenarios, `torch.utils.benchmark`, Hydra / submitit / W&B Sweeps / MLflow / Sacred / DVC, and the results-as-data conventions of ClickBench, db-benchmark, Conbench and Codespeed. |
 
 Both were produced by literature/repo search, not by running anything;
