@@ -12,6 +12,20 @@ prefix, applied in exactly one place, to queries / targets / query attrs togethe
 ones (pad row dropped, targets shifted −1, fp16 → fp32 + L2-normalise on the text path);
 ``encode.py`` stays the one file that imports ``training.*``.
 
+**Two on-disk layouts are accepted, not assumed** (roadmap A1, ``df6db40``): the modern
+``[N, …]`` 0-indexed dense one ``docs/system/datasets.md`` documents, and the pre-``3b1b5b3``
+1-indexed ``[N+1, …]`` one with a training-side padding row at index 0 — which is what the
+copies published on the Hub (``eval-fetch``) still are. ``drop_legacy_padding_row`` recognises
+the padding row by its *content* (all-zero for an embedding matrix, all ``-1`` for an
+attribute tensor) and drops it from every per-item tensor — the pre-encoded ``text_emb`` and
+``item_attrs_narrow`` (the SASRec path's ``nn.Embedding`` always carries the pad row and
+loses it by construction) — and ``load_inputs`` then requires ``item_attrs`` and ``item_embs``
+to have the same row count, raising with both counts on anything else. Held-out target ids
+are 1-indexed item ids on disk in both layouts, so the ``-1`` shift below is the same in
+both; what the pad-row drop fixes is the *rows* those ids index. Getting this wrong is not
+always loud: on the arxiv path attrs and embeddings are both 1-indexed and agree with each
+other, so only the targets are off by one — ``cos(query, target)`` 0.99 → 0.62, no error.
+
 Returned dict (``inputs``): ``item_embs [N, D]`` fp32 on device; ``queries [U, D]`` fp32,
 ``targets [U, T]`` int64 ``-1``-padded 0-indexed, ``n_targets [U]`` — all CPU; ``qa
 [U, C]`` int64 CPU or ``None``; ``item_attrs [N, C, A]`` int64 and ``clause_is_reverse
@@ -42,6 +56,48 @@ EXPECTED_DOC_PREFIX = "search_document: "
 EXPECTED_QUERY_PREFIX = "search_query: "
 ENCODE_CACHE = "encoded_queries_v2.pt"
 _CACHE_FREE_FRACTION, _CACHE_RESERVE_BYTES = 0.7, 4 * 2**30
+
+
+# ----- legacy [N+1, …] layout ------------------------------------------------------------
+
+
+def drop_legacy_padding_row(t: torch.Tensor, *, kind: str, what: str) -> torch.Tensor:
+    """Drop row 0 of a pre-``3b1b5b3`` ``[N+1, …]`` retrieval tensor (module docstring).
+
+    A padding row is recognised by its content, never by its position alone: all-zero for
+    an embedding matrix (``kind="emb"``; impossible for an L2-normalised row) and all ``-1``
+    for an attribute tensor (``kind="attrs"``; the ``-1`` fill is "no value"). Anything else
+    is returned untouched, so a modern ``[N, …]`` tensor whose row 0 is a real item is never
+    shortened. Dropping is loud (a warning naming ``what`` and both row counts)."""
+    if kind not in ("emb", "attrs"):
+        raise ValueError(f"kind must be 'emb' or 'attrs', got {kind!r}")
+    if t.ndim == 0 or t.shape[0] == 0:
+        return t
+    is_pad = bool((t[0] == 0).all()) if kind == "emb" else bool((t[0] == -1).all())
+    if not is_pad:
+        return t
+    logger.warning(
+        "{}: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as "
+        "published on the Hub). Dropping it: {} → {} rows.",
+        what,
+        t.shape[0],
+        t.shape[0] - 1,
+    )
+    return t[1:].contiguous()
+
+
+def check_items_aligned(n_items: int, n_attrs: int, *, what: str) -> None:
+    """``item_attrs`` must describe exactly the ``n_items`` rows of ``item_embs`` — row ``i``
+    of both is item id ``i+1``. A mismatch is a misaligned filter mask that would score
+    every query against the wrong items three layers down (in the oracle, or silently in
+    the algos), so it fails here, naming both counts and the two accepted layouts."""
+    if n_attrs != n_items:
+        raise RuntimeError(
+            f"{what} has {n_attrs} rows but there are {n_items} items: the filter mask would "
+            f"be misaligned. Expected {n_items} (0-indexed dense) or {n_items + 1} (legacy "
+            "[N+1] with a padding row at index 0) — see docs/system/datasets.md and "
+            "retrieval.data.drop_legacy_padding_row"
+        )
 
 
 # ----- item embeddings + queries ---------------------------------------------------------
@@ -85,9 +141,14 @@ def _pre_encoded(ds: Dataset, device: torch.device) -> tuple[torch.Tensor, ...]:
         item_embs = _load_sharded(shard_index, device)
     else:
         item_embs = torch.load(str(content / "text_emb.pt"), map_location=device)
+    # A legacy [N+1, D] file loses its all-zero padding row here, *before* normalisation.
+    # This is the path where the old layout is silent: attrs and embeddings agree with each
+    # other and only the target shift below would be wrong (module docstring).
+    item_embs = drop_legacy_padding_row(item_embs, kind="emb", what=f"{content.name}/text_emb")
     item_embs = F.normalize(item_embs.float().contiguous(), dim=-1)  # fp16 on disk → fp32
     heldout = pl.read_parquet(ds.data_dir / "heldout.parquet")
-    # heldout stores 1-indexed item ids (the encoder's pad-aware space) → 0-indexed.
+    # heldout stores 1-indexed item ids (the encoder's pad-aware space) → 0-indexed. The
+    # shift is the same in both layouts; row i of the pad-row-dropped item_embs is id i+1.
     targets = torch.tensor(heldout["item_id"].to_list(), dtype=torch.long).unsqueeze(-1) - 1
     queries = torch.load(str(content / "query_emb.pt"), map_location="cpu")
     if queries.shape[0] != heldout.height:
@@ -167,6 +228,12 @@ def load_inputs(ds: Dataset, device: torch.device, *, with_filters: bool = True)
     if with_filters and ds.attrs is not None:
         qa = load_query_attrs(ds.data_dir / "eval_split.parquet", queries.shape[0])
         item_attrs = torch.load(str(ds.attrs), map_location=device, weights_only=True)
+        # A legacy [N+1, C, A] file loses its all-(-1) padding row; either way the attrs
+        # must then index exactly the items item_embs does (loud on goodreads, where the
+        # SASRec path drops its pad row by construction and a legacy attrs file is one row
+        # too long; checked rather than assumed everywhere else).
+        item_attrs = drop_legacy_padding_row(item_attrs, kind="attrs", what=ds.attrs.name)
+        check_items_aligned(int(item_embs.shape[0]), int(item_attrs.shape[0]), what=ds.attrs.name)
         if ds.reverse is not None:
             reverse = torch.load(str(ds.reverse), map_location=device, weights_only=True)
     n = ds.users_limit
@@ -287,6 +354,8 @@ def query_pool(
 __all__ = [
     "ENCODE_CACHE",
     "build_filters",
+    "check_items_aligned",
+    "drop_legacy_padding_row",
     "exact_filter",
     "load_inputs",
     "load_query_attrs",
