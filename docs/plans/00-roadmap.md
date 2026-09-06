@@ -168,14 +168,21 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
   `archive/`; rewrite the system docs O §7 lists. Gate: suite green on
   the A100, collect-only on the Mac, `git grep -il "cute\|codesigned_probe_score_cuda"`
   hits only `docs/plans/archive/`. Needs B2.
-  **Authored 2026-09-06 on `dev/b4-delete-cuda-cute`, GPU suite pending**
-  (`4d92432` deletion, `010681d` `Backend` split — review item 5, plus the
-  docs commit): parent `41d4479` tagged `cuda-cute-backends-final`; 3,677
-  lines of kernel/host/test code gone, `build_transposed_sigs` moved to
-  `bloom_hash.py` for TF-1; CPU gates green (ruff, collect-only 504,
-  evaluation suite 93/1, links 0, torch-backend outputs `torch.equal` to
-  the parent). Record and the grep-rule reading: O §15. The coordinator
-  flips this box after the A100 run.
+  **Authored 2026-09-06 on `dev/b4-delete-cuda-cute`; A100 gate green
+  2026-09-06** (`4d92432` deletion, `010681d` `Backend` split — review
+  item 5, the docs commit, `a435179` a test fix, plus the record): parent
+  `41d4479` tagged `cuda-cute-backends-final`; 3,677 lines of kernel/host/
+  test code gone, `build_transposed_sigs` moved to `bloom_hash.py` for
+  TF-1. **Library suite on the A100 with the `official` extra: 504 passed,
+  0 failed, 0 skipped** (the 127 `cute` skips of B2's run 3 are gone with
+  the backend, and no official cell skipped); evaluation suite 93 passed /
+  1 skipped (C4's cell), links 0, ruff clean on `retrieve` +
+  `evaluation/retrieval`, the grep hits only the mandated tag name outside
+  `archive/`. The one red cell of the first run — `SimHashKNN` missing
+  `k_bits` in the new backend-rejection parametrize, invisible to a
+  collect-only gate — is fixed in `a435179`; no library source changed.
+  Record and the grep-rule reading: O §15, §15.6. The coordinator flips
+  this box after merge.
 - [x] **B5 — salt as a buffer.** O §8 TF-2 (Mac, 0.5 h; validate with
   `test_bloom_hash.py` on the A100). Do before any campaign timing.
   Authored 2026-09-06 on `dev/b1-official-adapter` (commit `2dbee72`).
