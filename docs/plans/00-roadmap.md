@@ -119,19 +119,37 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
 
 ### Phase B — official backend, parity, deletion
 
-- [ ] **B1 — adapter + tests.** O §5, §10 WP-2 (Mac, 2 d): `backend=
+- [x] **B1 — adapter + tests.** O §5, §10 WP-2 (Mac, 2 d): `backend=
   "official"` in `SilverTorch`, `require_official`, parity tests T1–T7.
   Gate: `ruff` clean, suite collects and skips on the Mac. Needs A3.
-  *Status: authored 2026-09-06 on `dev/b1-official-adapter` (Mac gate
-  green: ruff clean, 683 tests collect, official surface skips); GPU
-  gate pending — see O §10 WP-2's status note. A3's bit order is pinned
-  (`OFFICIAL_BIT_ORDER = "high_first"` in `test_official.py`, 2026-09-06,
-  with the library review's "now" items — see
-  [architecture-review-2026-09-06-library.md](architecture-review-2026-09-06-library.md)).*
-- [ ] **B2 — parity gate.** O §10 WP-3 (A100, 0.5 d). Gate: phase-3
+  Authored 2026-09-06 on `dev/b1-official-adapter` (Mac gate green; A3's
+  bit order pinned as `OFFICIAL_BIT_ORDER = "high_first"`, with the
+  library review's "now" items — see
+  [architecture-review-2026-09-06-library.md](architecture-review-2026-09-06-library.md)).
+  **Done 2026-09-06, `aadc380`** (`dev/integration`): GPU gate — 43/43 in
+  `test_official.py` on the A100 after 11 **test-side** fixes (T1-exact's
+  CSR doc space, T3's mirrored-doc negative control, `-inf`-slot id
+  normalisation in T6, the fd-2 sync instrument in T7); no adapter or
+  kernel change. Record: O §14.3.
+- [x] **B2 — parity gate.** O §10 WP-3 (A100, 0.5 d). Gate: phase-3
   scores `torch.equal` on the int32 path on every regime, bloom ⊇ check
   and FPR at matched memory recorded in O's record section. **Unblocks
   B4 (deletion) — never delete before this is green.**
+  **Done 2026-09-06, `2b09f8e` + `0521a67` + `aadc380`** (`dev/integration`,
+  nvcc 12.8 build, clocks unlocked — counts and bit comparisons only).
+  T1 `torch.equal` vs the reference and vs Triton on all 8 regime cells +
+  4 exact-mask cells; bloom ⊇ exact (AND) and ⊆ exact (NOT) with 0 false
+  negatives / positives; FPR at matched memory (byte-exact at
+  `b_multiplier = m_bits / (max_terms · 5)`) 0.0000 for both blooms on
+  synthetic attrs — the real-attribute calibration stays D3; T7 syncs per
+  forward 3 / 3 / 7 / 4 (none / exact / bloom-partial / bloom-full),
+  identical with `cache_plans` on and off. Full suite **574 passed, 0
+  failed, 127 skipped (all cute — extra not installed)**; upstream suite
+  99/99 on the 12.8 build; the three pre-existing red cells fixed (fp32
+  literal compare → `torch.equal` on the fp32 inputs, ungated cute cell
+  gated); the review's deferred `argsort(stable=True)` applied after
+  measuring it bit-identical on nine regimes. Record: O §14. **B4 is now
+  unblocked.**
 - [ ] **B3 — kernel head-to-head, Triton vs official.** O §9a/§9b, WP-4
   (A100, 1 d). Gate: JSON + tables appended to O. This is paper gap G2.
 - [ ] **B4 — delete the CUDA C++ and CuTe backends.** O §7, WP-5 (Mac,
@@ -143,11 +161,13 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
   `archive/`; rewrite the system docs O §7 lists. Gate: suite green on
   the A100, collect-only on the Mac, `git grep -il "cute\|codesigned_probe_score_cuda"`
   hits only `docs/plans/archive/`. Needs B2.
-- [ ] **B5 — salt as a buffer.** O §8 TF-2 (Mac, 0.5 h; validate with
+- [x] **B5 — salt as a buffer.** O §8 TF-2 (Mac, 0.5 h; validate with
   `test_bloom_hash.py` on the A100). Do before any campaign timing.
-  *Status: authored 2026-09-06 on `dev/b1-official-adapter` (commit
-  `2dbee72`); GPU gate pending — `test_bloom_hash.py` + the bloom rows
-  of `test_silvertorch.py` on the A100.*
+  Authored 2026-09-06 on `dev/b1-official-adapter` (commit `2dbee72`).
+  **Done 2026-09-06** — GPU gate passed in B2's full-suite run 3
+  (`test_bloom_hash.py` incl. the buffer-vs-inline bit-equality on CUDA
+  and CPU, and every bloom row of `test_silvertorch.py`, green; O §14.2).
+  The raw-capture latency claim is unmeasured until WP-7.
 
 ### Phase C — harness v2 (Mac work in parallel with B; A100 gate at the end)
 

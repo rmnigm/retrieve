@@ -1,0 +1,9 @@
+### upstream pytest, silvertorch @ 21aa35e28b6dd9a91e9ee35efb0857715e86bda7 — rebuilt with nvcc 12.8
+### 2026-09-06T15:25:50Z  A100-SXM4-80GB, driver 570.195.03, torch 2.10.0+cu128, nvcc 12.8 (/usr/local/cuda-12.8, V12.8.93), python 3.11.10
+### checkout: fresh clone at the pinned sha with the built _C.so copied in from /venvs/integration (the cu128 build of wp0_build_cu128.txt)
+### command: python -m pytest silvertorch/ -q --ignore=<each of the three uncollectable files of wp0_upstream_pytest.txt (2)>; roadmap step B2 item 1
+
+===== pytest silvertorch/ minus the three files that cannot be imported at this sha =====
+........................................................................ [ 72%]
+...........................                                           [100%]
+99 passed, 3 subtests passed in 2.58s

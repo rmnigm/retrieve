@@ -1,0 +1,49 @@
+### run 3 (final, no -x; all B2 fixes applied): uv run --directory retrieve pytest tests/ -q --durations=15 -rs  (2026-09-06T15:37:21Z, tip 563a0f3 + working tree, CUDA_HOME=/usr/local/cuda-12.8, SM clock unlocked: 285 MHz)
+..s.........ssssss.........ssssss....................................... [ 10%]
+........................................................................ [ 20%]
+........................................................................ [ 30%]
+......................s....s....s....s....s....s....s.............s....s [ 41%]
+....s.........ssss...sss...s....s....s....s....s....s....s....s....s.... [ 51%]
+s....s....s........s..................s..s.............................. [ 61%]
+........................................................................ [ 71%]
+............................ssssssssssssssssssssssssssssssssssssssssssss [ 82%]
+ssssssssssssssssssssssssssssssssssssss.................................. [ 92%]
+.....................................................                    [100%]
+=============================== warnings summary ===============================
+tests/compile/test_silvertorch_compile.py: 14 warnings
+  /venvs/integration/lib/python3.11/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============================= slowest 15 durations =============================
+1.98s call     tests/compile/test_silvertorch_compile.py::test_compiled_forward_matches_eager[none-triton-64]
+1.32s call     tests/compile/test_export_kernel_ref.py::test_export_preserves_kernel_reference[triton]
+0.95s call     tests/parity/test_official.py::test_t7_compile_refused
+0.90s call     tests/correctness/test_bloom_hash.py::test_clause_salt_buffer_is_bit_identical_to_inline_salt[cpu]
+0.82s call     tests/correctness/test_linr.py::TestOneBitKNN::test_torch_compile_fullgraph_no_break[torch]
+0.70s call     tests/correctness/test_linr.py::TestEdgeCases::test_mask_all_true_equals_unmasked[PostfilterKNN-torch]
+0.70s call     tests/parity/test_bloom_match.py::test_bloom_match_matches_pure_torch[3-1024-4096]
+0.70s call     tests/parity/test_bloom_match.py::test_bloom_match_matches_pure_torch[7-1024-4096]
+0.69s call     tests/correctness/test_linr.py::TestEdgeCases::test_one_bit_knn_all_candidates_equals_unmasked[torch]
+0.69s call     tests/correctness/test_linr.py::TestEdgeCases::test_mask_all_true_equals_unmasked[PostfilterKNNInt8-torch]
+0.69s call     tests/correctness/test_linr.py::TestSimHashKNNCrossBackend::test_simhash_torch_matches_simhash_triton[None-128]
+0.69s call     tests/correctness/test_linr.py::TestOneBitKNNKBitsLtD::test_one_bit_knn_kbits_lt_d_cross_backend
+0.69s call     tests/correctness/test_linr.py::TestCrossBackendAgreement::test_postfilter_knn_matches_prefilter_topk_set[0.8]
+0.68s call     tests/correctness/test_linr.py::TestEdgeCases::test_mask_all_true_equals_unmasked[PostfilterKNNInt8-triton]
+0.68s call     tests/correctness/test_linr.py::TestEdgeCases::test_mask_all_true_equals_unmasked[PostfilterKNN-triton]
+=========================== short test summary info ============================
+SKIPPED [45] tests/conftest.py:76: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [6] tests/parity/test_codesigned_probe_score_cute.py:71: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [4] tests/parity/test_codesigned_probe_score_cute.py:87: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [12] tests/parity/test_codesigned_probe_score_cute.py:116: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [6] tests/parity/test_codesigned_probe_score_cute.py:152: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [6] tests/parity/test_codesigned_probe_score_cute.py:189: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [36] tests/parity/test_codesigned_probe_score_cute.py:253: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [2] tests/parity/test_codesigned_probe_score_cute.py:329: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [2] tests/parity/test_codesigned_probe_score_cute.py:355: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [1] tests/parity/test_codesigned_probe_score_cute.py:382: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [1] tests/parity/test_codesigned_probe_score_cute.py:441: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [2] tests/parity/test_codesigned_probe_score_cute.py:474: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+SKIPPED [4] tests/parity/test_codesigned_probe_score_cute.py:505: retrieve CuTe DSL backend unavailable: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+574 passed, 127 skipped, 14 warnings in 52.02s
+### exit 0 at 15:38:19Z

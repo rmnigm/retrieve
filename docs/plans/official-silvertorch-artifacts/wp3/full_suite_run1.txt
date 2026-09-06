@@ -1,0 +1,386 @@
+### run 1: uv run --directory retrieve pytest tests/ -q -x --durations=15  (2026-09-06T15:27:00Z, tip 563a0f3, CUDA_HOME=/usr/local/cuda-12.8, SM clock unlocked: 210 MHz)
+Uninstalled 1 package in 0.94ms
+Installed 1 package in 197ms
+..s.........ssssss.........ssssss....................................... [ 10%]
+........................................................................ [ 20%]
+........................................................................ [ 30%]
+......................s....s....s....s....s....s....s.............s....s [ 41%]
+....s.........ssss...sss...s....s....s....s....s....s....s....s....s.... [ 51%]
+s....s....s........F
+=================================== FAILURES ===================================
+__________________ TestEdgeCases.test_n_lists_equals_n[cute] ___________________
+
+self = <tests.correctness.test_silvertorch.TestEdgeCases object at 0x74e9c8ec9250>
+data = {'attrs': tensor([[[-1, 49],
+         [-1,  9]],
+
+        [[11,  1],
+         [ 7, 26]],
+
+        [[-1, -1],
+         ...366,  0.1761,  0.0646],
+        [ 0.1220,  0.0465,  0.0392,  ...,  0.0499, -0.0685, -0.1175]],
+       device='cuda:0')}
+backend = 'cute'
+
+    def test_n_lists_equals_n(self, data, backend):
+        """Degenerate clustering (one item per cluster); full probe → recall ≈ 1."""
+        small_n = 256
+        embs = data["embs"][:small_n]
+        m = SilverTorch(k=K, n_lists=small_n, n_probe=small_n, n_iter=2, backend=backend)
+        m.register_index(embs)
+>       ids, _ = m(data["query"])
+                 ^^^^^^^^^^^^^^^^
+
+tests/correctness/test_silvertorch.py:696: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/venvs/integration/lib/python3.11/site-packages/torch/nn/modules/module.py:1776: in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/venvs/integration/lib/python3.11/site-packages/torch/nn/modules/module.py:1787: in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/retrieve/layers/silvertorch/main.py:438: in forward
+    return self._forward_cute(query, query_clause_attrs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/retrieve/layers/silvertorch/main.py:541: in _forward_cute
+    return self._forward_two_kernel(
+src/retrieve/layers/silvertorch/main.py:595: in _forward_two_kernel
+    return plain(
+/venvs/integration/lib/python3.11/site-packages/torch/_library/custom_ops.py:698: in __call__
+    return self._opoverload(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/venvs/integration/lib/python3.11/site-packages/torch/_ops.py:819: in __call__
+    return self._op(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+/venvs/integration/lib/python3.11/site-packages/torch/_library/autograd.py:112: in autograd_impl
+    result = forward_no_grad(*args, Metadata(keyset, keyword_only_args))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/venvs/integration/lib/python3.11/site-packages/torch/_library/autograd.py:41: in forward_no_grad
+    result = op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/venvs/integration/lib/python3.11/site-packages/torch/_ops.py:826: in redispatch
+    return self._handle.redispatch_boxed(keyset, *args, **kwargs)  # type: ignore[return-value]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/venvs/integration/lib/python3.11/site-packages/torch/_library/custom_ops.py:347: in backend_impl
+    result = self._backend_fns[device_type](*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/venvs/integration/lib/python3.11/site-packages/torch/_compile.py:54: in inner
+    return disable_fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/venvs/integration/lib/python3.11/site-packages/torch/_dynamo/eval_frame.py:1181: in _fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+/venvs/integration/lib/python3.11/site-packages/torch/_library/custom_ops.py:382: in wrapped_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:548: in codesigned_probe_score_cute
+    return _codesigned_probe_score_cute_impl(query, flat_probed_items, item_codes, global_scale, k)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:472: in _codesigned_probe_score_cute_impl
+    return _cps_cute_score_topk(
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:422: in _cps_cute_score_topk
+    _cps_cute_scores(
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:321: in _cps_cute_scores
+    dev = _load_dev()
+          ^^^^^^^^^^^
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: in _load_dev
+    raise _DEV_MEMO
+tests/conftest.py:74: in require_cps_cute
+    ensure_built()
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:144: in ensure_built
+    _load_dev(verbose=verbose)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+verbose = False
+
+    def _load_dev(verbose: bool = False):
+        """Import the device module and compile its first kernel (memoized).
+    
+        Raises ``CuteMissing`` when the DSL is absent or there is no GPU, and a plain
+        ``ImportError`` carrying the DSL error when it is present and failed."""
+        global _DEV_MEMO
+        if _DEV_MEMO is None:
+            _DEV_MEMO = _import_dev(verbose)
+        if isinstance(_DEV_MEMO, BaseException):
+>           raise _DEV_MEMO
+E           retrieve.kernels.silvertorch.codesigned_probe_score_cute.CuteMissing: nvidia-cutlass-dsl is not installed; sync the `cute` extra (`uv sync --all-packages --extra cute`). Underlying error: No module named 'cutlass'
+
+src/retrieve/kernels/silvertorch/codesigned_probe_score_cute.py:138: CuteMissing
+=============================== warnings summary ===============================
+tests/compile/test_silvertorch_compile.py: 14 warnings
+  /venvs/integration/lib/python3.11/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+tests/compile/test_silvertorch_compile.py::test_compiled_forward_matches_eager[bloom-triton-64]
+  /venvs/integration/lib/python3.11/site-packages/torch/_inductor/compile_fx.py:321: UserWarning: TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. Consider setting `torch.set_float32_matmul_precision('high')` for better performance.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============================= slowest 15 durations =============================
+77.68s call     tests/compile/test_export_kernel_ref.py::test_export_preserves_kernel_reference[cuda]
+3.15s call     tests/compile/test_silvertorch_compile.py::test_compiled_forward_matches_eager[none-triton-64]
+2.55s call     tests/compile/test_silvertorch_compile.py::test_compiled_forward_matches_eager[bloom-triton-64]
+1.98s call     tests/compile/test_export_kernel_ref.py::test_export_preserves_kernel_reference[triton]
+1.26s call     tests/compile/test_silvertorch_compile.py::test_compiled_forward_matches_eager[bloom-cuda-64]
+1.02s call     tests/correctness/test_linr.py::TestOneBitKNN::test_torch_compile_fullgraph_no_break[torch]
+1.01s call     tests/compile/test_silvertorch_compile.py::test_compiled_forward_matches_eager[bloom-cuda-128]
+0.84s call     tests/correctness/test_bloom_hash.py::test_clause_salt_buffer_is_bit_identical_to_inline_salt[cpu]
+0.76s call     tests/correctness/test_linr.py::TestCrossBackendAgreement::test_postfilter_knn_matches_prefilter_topk_set[0.1]
+0.70s call     tests/correctness/test_linr.py::TestCrossBackendAgreement::test_one_bit_torch_matches_one_bit_triton[0.8]
+0.68s call     tests/correctness/test_linr.py::TestCrossBackendAgreement::test_postfilter_knn_matches_prefilter_topk_set[0.8]
+0.65s call     tests/correctness/test_linr.py::TestSimHashKNNCrossBackend::test_simhash_torch_matches_simhash_triton[0.1-512]
+0.65s call     tests/correctness/test_linr.py::TestCrossBackendAgreement::test_prefilter_torch_matches_prefilter_triton[0.1]
+0.65s call     tests/correctness/test_linr.py::TestCrossBackendAgreement::test_one_bit_torch_matches_one_bit_triton[0.1]
+0.65s call     tests/correctness/test_linr.py::TestOneBitKNNKBitsLtD::test_one_bit_knn_kbits_lt_d_cross_backend
+=========================== short test summary info ============================
+FAILED tests/correctness/test_silvertorch.py::TestEdgeCases::test_n_lists_equals_n[cute]
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed, 337 passed, 42 skipped, 15 warnings in 122.82s (0:02:02)
+### exit 1 at 15:29:27Z
