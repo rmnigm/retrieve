@@ -259,7 +259,12 @@ class SilverTorch(RetrievalModule):
                 f"{self.n_probe} * {max_size} = {self.n_probe * max_size}"
             )
 
-        sort_idx = torch.argsort(assignments)
+        # Stable: items inside a cluster keep ascending-id order, so the slot order of
+        # padded_cluster_items / sort_perm is a function of the assignment alone, not of
+        # the sort implementation (torch's CUDA sort is stable for segments > 4096 and was
+        # measured stable below it too — bit-identical buffers and outputs on every regime,
+        # docs/plans/official-silvertorch-artifacts/wp3/argsort_stable_probe.txt).
+        sort_idx = torch.argsort(assignments, stable=True)
         sorted_clusters = assignments[sort_idx]
         offsets = torch.zeros(self.n_lists + 1, dtype=torch.long, device=item_embs.device)
         offsets[1:] = cluster_sizes.cumsum(0)

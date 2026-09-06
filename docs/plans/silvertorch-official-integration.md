@@ -3,7 +3,10 @@
 > **Status:** planned 2026-09-05 on `feat/cute-dsl-scorer`. **WP-0 and WP-1 executed 2026-09-06**
 > on `dev/a0-a3-deps-official` (roadmap A2/A3): the package is pinned and built, and §3's host-side
 > table and §4's numerics are now measured rather than read — see the §13 validation record, which
-> corrects §3's sync and launch counts and §1.1's op inventory. WP-2 onward: nothing implemented.
+> corrects §3's sync and launch counts and §1.1's op inventory. **WP-2 (adapter + T1–T7) and
+> WP-3 (the parity gate) executed 2026-09-06 on `dev/integration`** (roadmap B1/B2/B5): int32
+> path `torch.equal` vs Triton on every regime, 43/43 tests, suite green — see §14. WP-4 onward:
+> nothing implemented.
 > Target box: A100-SXM4-80GB, torch 2.10.0+cu128, CUDA 12.x toolchain, triton 3.6.0, Python 3.11.
 > Authored on the Mac (no GPU): every "the official op does X" claim cites `silvertorch/ops/csrc/<file>:<line>`
 > in the clone of [meta-recsys/silvertorch](https://github.com/meta-recsys/silvertorch) at `21aa35e`
@@ -376,8 +379,9 @@ official T1) plus the §9a/§9b head-to-head; gains are claimed only from the he
   > GPU): `generate_clause_salt` → `[C]` int64 `clause_salt` buffer registered by `BloomFilter`
   > and `SilverTorch`, builders take `clause_salt=`; four tests added to `test_bloom_hash.py`
   > (buffer ≡ on-the-fly ≡ pre-B5 inline bits on CUDA and CPU, device independence, shape
-  > check, buffer moves with `.to()`). **GPU gate pending** — `test_bloom_hash.py` and the
-  > bloom rows of `test_silvertorch.py` on the A100; the raw-capture claim is unmeasured.
+  > check, buffer moves with `.to()`). **GPU gate passed 2026-09-06** (roadmap B5, §14.2:
+  > `test_bloom_hash.py` and the bloom rows of `test_silvertorch.py` green on the A100 in the
+  > full-suite run 3); the raw-capture claim is still unmeasured — WP-7's.
 - **TF-3 — Memory-level parallelism / retune.** The C++ scorer went 188 → 88 µs by keeping
   `SPW·UNROLL` rows in flight per warp (handoff §13 fix 1). Triton's `[BLOCK_P, D]` int8 tile is
   already one coalesced 128 B row per item with `num_stages` pipelining across programs
@@ -482,8 +486,8 @@ benchmark what the pinned sha runs; parse cost excluded and reported; identical 
   > orders, `OFFICIAL_BIT_ORDER = None` until A3 pins it), `"official"` rows in
   > `test_silvertorch.py`. Mac gate green: `ruff check` / `ruff format --check` clean on the
   > library, `pytest --collect-only` collects 683 tests with no errors, the official surface
-  > skips on `OfficialMissing`. **GPU gate pending** (WP-3 / roadmap B2): nothing here has run
-  > against the real ops. Deviations from §5 found while matching the upstream source: (1)
+  > skips on `OfficialMissing`. **GPU gate passed 2026-09-06** (WP-3 / roadmap B2, §14: 43/43
+  > after 11 test-side fixes, no adapter change). Deviations from §5 found while matching the upstream source: (1)
   > T4's "official partial mask ⊇ `clause_subset_match` … AND and NOT expressions" cannot hold
   > for NOT — a bloom NOT is the complement of a bloom term, so it has no false positives and
   > *may* have false negatives; the test asserts ⊆ for NOT and records the false-negative
@@ -733,3 +737,163 @@ own those. The bloom FPR and memory calibration of §4.3 is WP-4's
 `fpr_calibrate.py`, not measured here. Numbers in this section are host-side
 counts and CPU parse times; **no kernel-speed claim is made and none of this is
 citable as a performance result** (roadmap rule 2).
+
+## 14. Validation record — WP-2 GPU gate + WP-3 parity gate, 2026-09-06, A100-SXM4-80GB, nvcc 12.8 / torch 2.10.0+cu128, triton 3.6.0
+
+Roadmap steps **B1** (WP-2's GPU gate), **B2** (WP-3) and **B5** (TF-2's GPU gate), on
+`dev/integration` (worktree; parent `563a0f3` = `development`), commits `2b09f8e`
+(three pre-existing red cells), `0521a67` (stable argsort), `aadc380` (`test_official.py`
+fixes + the per-forward sync test) and the docs commit that carries this section. Raw
+outputs: [official-silvertorch-artifacts/wp3/](official-silvertorch-artifacts/README.md)
+(`full_suite_run{1,2,3}.txt`, `test_official_run3.txt`, `argsort_stable_probe.{py,txt,json}`,
+`parity_gate_probe.{py,txt,json}`) and `wp0_upstream_pytest_cu128.txt`.
+
+**Environment.** A100-SXM4-80GB (sm_80), driver 570.195.03, Python 3.11.10, torch
+2.10.0+cu128, triton 3.6.0; `silvertorch._C` **rebuilt with nvcc 12.8** (V12.8.93,
+`/usr/local/cuda-12.8` — upstream README's tested row; `wp0_build_cu128.txt`, 169 s, no
+warnings) at `21aa35e28b6dd9a91e9ee35efb0857715e86bda7`; our CUDA C++ backend JIT-built
+with the same nvcc. **SM clock unlocked** (`nvidia-smi -lgc` is denied on this box;
+samples during the session 210–1140 MHz). Nothing in this section is a timing: every
+number is a bit comparison or a count, so the clock is irrelevant to it.
+
+### 14.1 Upstream suite on the 12.8 build
+
+Fresh clone at the pin, built `_C.so` copied in, the three uncollectable files of §13.1
+excluded: **99 passed, 3 subtests passed in 2.58 s** — the same 99 as the 12.4 build
+(`wp0_upstream_pytest_cu128.txt`).
+
+### 14.2 Library suite (`uv run --directory retrieve pytest tests/`)
+
+| run | state | result |
+|---|---|---|
+| 1, `-x` | tip `563a0f3` | 337 passed, 42 skipped, **stopped at `test_silvertorch.py::TestEdgeCases::test_n_lists_equals_n[cute]`** (2 m 03 s incl. the 78 s CUDA JIT build) |
+| 2 | + `2b09f8e`, `0521a67` | 561 passed, **11 failed — all in `test_official.py`**, 127 skipped, 57 s |
+| 3, final | + `aadc380` | **574 passed, 0 failed, 127 skipped, 52 s** |
+
+Every skip is a `cute` cell: `nvidia-cutlass-dsl` (the `cute` extra) is not installed in
+the B2 venv, so those rows skip exactly as `require_cps_cute` promises; the last full cute
+validation stays [cute-dsl-scorer.md §5](cute-dsl-scorer.md) (2026-09-02) and B4 deletes
+the backend. The `cuda` rows ran (parity + compile + export).
+
+**The three pre-existing red cells** (A2's finding 7; all red on `development` before B1):
+
+- `test_topk_util.py::test_gather_ids_mapping` and `::test_gather_ids_with_mask_sentinel`
+  compared `out_scores.tolist()` with Python literals (`0.9`, `0.7`, `0.1`) while the
+  score tensor is fp32 (`0.8999999761581421 != 0.9`): a test that could never pass. Fixed
+  as **exact equality** — `torch.equal` against the fp32 input elements the winners were
+  gathered from — no tolerance introduced anywhere.
+- `test_silvertorch.py::TestEdgeCases::test_n_lists_equals_n[cute]` was the one test in
+  the file that builds a module without `_require_backend`, so without the extra it
+  raised `CuteMissing` from inside the forward instead of skipping. Gated.
+
+### 14.3 The parity gate — per test (`test_official.py`, 43 tests, run 3 all green)
+
+First run against the real ops: 32 of 43 green as authored; the 11 red were all
+**test-side**, none a mismatch of the adapter or of the kernels (`aadc380`). No tolerance
+was loosened; T1's `torch.equal` gates are unchanged.
+
+| test | cells | outcome | what B2 changed |
+|---|---|---|---|
+| **T1** int32 path `torch.equal` vs `ref_cps_phase23` and vs `_codesigned_probe_score_impl`, ids up to ties | 4 layouts (`(16,64,4,D64)`, `(64,96,8,D128)`, `(32,64,8,D96)` ref-only, `(32,90,8,D128)` remainder path) × B ∈ {1, 16} = 8; exact mask via `clause_mask` → `pack_mask` 4 (D ∈ {64, 128} × reverse none/mixed); raw op contract 1 | **PASS — bit-exact on every regime** | exact cells asserted `mask.shape == (b, N)`; `make_probe_family` pads ~10 % of slots so the CSR doc space is `sort_perm.numel()` (5507 of 6144). Assertion corrected; the bit-exactness held as authored |
+| **T2** fp16 path | 2 layouts × B ∈ {1, 16} + the divisor bound | **PASS**: `max_rel_err` 4.76e-4 / 4.85e-4 / 4.88e-4 / 4.88e-4 (bound 2⁻¹⁰ = 9.77e-4), `jaccard@32` 1.0 / 1.0 / 1.0 / **0.9924** (D=128, B=16) | — |
+| **T3** bit order | packed-output round trip + README hits 1; one-doc mask over a 70-doc cluster, docs {0, 5, 40, 69} 4; partial decode 2; pack/unpack/reverse 1 | **PASS — HIGH-first confirmed** (adapter constants equal the A3 pin) | the negative control claimed a low-first mask scores *nothing*; it scores the **mirrored doc** `63 − d % 64` of the same word (0 → 63, 5 → 58, 40 → 23; 69 → 122, past the cluster → nothing) — A3's probe B verbatim. The control now asserts exactly that |
+| **T4** bloom ⊇ exact, FPR; NOT ⊆ exact; expressions | 3 | **PASS**: AND — no false negative on the full mask nor on the partial masks (which equal the full mask on the probed docs), FPR 0.0000 at `b_multiplier=10` on a 0.09 % pass-rate predicate; NOT — no false positive, false-negative rate 0.0000; LRU / `cache=False` behave | — (FPR table in §14.4) |
+| **T5** `_with_partial_masks` ≡ full mask ≡ unfiltered ∘ mask | B ∈ {1, 16} | **PASS**, `torch.equal` on scores, ids and valid | — |
+| **T6** the layer | int32 vs Triton 3 (none / exact / exact-reverse, + all-inactive); fp16 2; bloom 2 (partial / full, + `cache_plans=False`); contract 1 | **PASS**: int32 `torch.equal` on every path; fp16 `jaccard@64` **1.0000** on `none` and `exact`; bloom **0 false positives among 1024 returned slots** on both paths, partial ≡ full ≡ uncached bit for bit; state-dict order / round trip, candidates through `inv_perm` bit-equal to Triton, bare bloom index, `k_hash > 10` rejected | fp16-exact read `jaccard = 0.09` and the bloom cells crashed on `.min()` of an empty set because the **Triton epilogue leaves the padded item id at `-inf` slots** while the official epilogue writes `-1` (B1's deviation 4). The int32 cells already normalised through `_sentinel_ids`; the fp16 and bloom cells now do too |
+| **T7** eager-only; syncs | compile refusal 1; per op 1; per forward × `cache_plans` 2 | **PASS**: `module.compile()` and `fullgraph` raise; syncs per op **parse 0, `fused_kmean_ann` 3, `_return_partial_response` 2, `_with_partial_masks` 4, `bloom_index_search_batch` 0** — §13.2's numbers exactly; per forward see §14.5 | `_count_syncs` used `warnings.catch_warnings`, which reads 0 for every C++ op (§13.2's instrument artefact) — it now counts c10's `warn_or_error_on_sync` lines on fd 2 **plus** Python-side warnings (disjoint: an `.item()` control is seen only by the latter, the ops only by the former). New `test_t7_layer_forward_sync_count` |
+
+### 14.4 T4 — FPR at matched memory (`parity_gate_probe.py`, both blooms `k = 5`, official `hash_k = 7`)
+
+Matched memory is **exact**, not "within 2 %": the official width per bundle is
+`int(max_terms · k · b_multiplier)` bits per doc (`bundle_b_offsets` is its running sum,
+`bloom_indexer.cpp:46-66`), so at `b_multiplier = m_bits / (max_terms · 5)` the official
+index has the same byte count as our `[N, m_bits/64]` signatures — 131 072 / 262 144 /
+524 288 B for 256 / 512 / 1024 bits on the T4 corpus (4 terms per doc, `b_multiplier` 12.8 /
+25.6 / 51.2) and at `b_multiplier` 6.4 / 12.8 / 25.6 on the dense corpus (8 terms).
+
+T4's corpus (N = 4096, C = 2, A_max = 2, vocab 50, pad 0.3; 32 two-term AND queries, exact
+pass rate 0.0009) — 4 096 docs, so the "index B" column is the real buffer size:
+
+| arm | width | bytes/doc | index B | FPR | FN |
+|---|---|---|---|---|---|
+| official | `b_mult=1.5` (30 bits) | 3.8 | 15 360 | 0.0010 | 0 |
+| official | `b_mult=2.0` (40) | 5.0 | 20 480 | 0.0002 | 0 |
+| official | `b_mult=3.0` … `10.0` (60 … 200) | 7.5 … 25 | 30 720 … 102 400 | 0.0000 | 0 |
+| official | **`b_mult=12.8` (256) — matched to `m_bits=256`** | 32.0 | **131 072** | 0.0000 | 0 |
+| official | **`b_mult=25.6` (512) — matched to `m_bits=512`** | 64.0 | **262 144** | 0.0000 | 0 |
+| official | **`b_mult=51.2` (1024) — matched to `m_bits=1024`** | 128.0 | **524 288** | 0.0000 | 0 |
+| ours | `m_bits=256` | 32.0 | **131 072** | 0.0000 | 0 |
+| ours | `m_bits=512` | 64.0 | **262 144** | 0.0000 | 0 |
+| ours | `m_bits=1024` | 128.0 | **524 288** | 0.0000 | 0 |
+
+Dense corpus (A_max = 4, vocab 8, pad 0.1, up to 8 terms per doc; 32 one-term queries,
+exact pass rate 0.3787):
+
+| arm | width | bytes/doc | index B | FPR | FN |
+|---|---|---|---|---|---|
+| official | `b_mult=1.5` (60 bits) | 7.5 | 30 720 | 0.0043 | 0 |
+| official | `b_mult=2.0` (80) | 10.0 | 40 960 | 0.0067 | 0 |
+| official | `b_mult=3.0` … `5.0` (120 … 200) | 15 … 25 | 61 440 … 102 400 | 0.0000 | 0 |
+| official | **`b_mult=6.4` (256) — matched to `m_bits=256`** | 32.0 | **131 072** | 0.0000 | 0 |
+| official | **`b_mult=12.8` (512) — matched to `m_bits=512`** | 64.0 | **262 144** | 0.0000 | 0 |
+| official | **`b_mult=25.6` (1024) — matched to `m_bits=1024`** | 128.0 | **524 288** | 0.0000 | 0 |
+| official | `b_mult=40.0`, `51.2` (1600, 2048) | 200, 256 | 819 200, 1 048 576 | 0.0000 | 0 |
+| ours | `m_bits=256` / `512` / `1024` | 32 / 64 / 128 | 131 072 / 262 144 / 524 288 | 0.0000 | 0 |
+
+Reading: at matched memory **both blooms are at FPR 0.0000 on synthetic attributes** —
+with ≤ 8 terms × 5 hashes per doc a 256-bit row is ≤ 16 % full and a term's 5 positions
+collide with probability ≈ 10⁻⁴; the official bloom shows a measurable FPR only below
+~100 bits per doc. The gate's requirement (FPR recorded at matched memory, no false
+negatives on either arm) is met; the *informative* comparison — the paper's S8 point,
+6.98 % → 0.067 % from 512 to 1024 bits — needs real attributes with tens of terms per
+doc and is WP-4's `fpr_calibrate.py` / roadmap D3, unchanged.
+
+### 14.5 T7 — launches, memcpys and host syncs per layer forward (`parity_gate_probe.py`)
+
+N = 4096, D = 128, B = 16, K = 64, `n_lists = 64`, `n_probe = 8`; one profiled forward
+after 3 warm-ups (`torch.profiler`), syncs by the two disjoint instruments (C++ + Python):
+
+| forward | launches | distinct | D2H | H2D | syncs |
+|---|---|---|---|---|---|
+| triton none / exact / bloom | 17 / 18 / 39 | 15 / 15 / 31 | 0 | 0 | 0 |
+| torch none / exact / bloom | 32 / 41 / 59 | 27 / 34 / 46 | 0 | 0 | 0 |
+| official none (fp16 / int32) | 55 / 54 | 42 / 41 | 3 | 0 | **3** (3 + 0) |
+| official exact (fp16 / int32) | 63 / 62 | 48 / 47 | 3 | 0 | **3** (3 + 0) |
+| official bloom[partial] (fp16 / int32) | 70 / 69 | 44 / 43 | 7 | 2 | **7** (6 + 1) |
+| official bloom[full] (fp16 / int32) | 56 / 55 | 43 / 42 | 4 | 2 | **4** (3 + 1) |
+
+`cache_plans=True` and `=False` give **identical rows** in every column — the plan cache
+moves only CPU parse time (§13.2: ≈ 59 µs at B = 16), never a launch or a device sync.
+The `+ 1` Python-side sync on both bloom paths is the `.tolist()` in
+`queries_to_expressions` (the string parser needs host values); the two H2D copies are the
+per-call pageable plan upload of §3. The Triton rows count the whole forward — phase 1
+(`matmul`, `topk`, gather), `quantize_int8`, the fused kernel and the `topk` epilogue —
+the "1 launch" of §3 is the fused kernel alone. `test_t7_layer_forward_sync_count`
+asserts the sync column (3 / 3 / 7 / 4) on both cache settings.
+
+### 14.6 `argsort(stable=True)` in `_build_ivf` — applied (`0521a67`)
+
+The review's deferred A3(a). `argsort_stable_probe.py` builds the IVF both ways from one
+k-means assignment on nine regimes (N = 256 … 131 072 with `n_lists` 8 … 1024 — the
+suite's layer sizes, both sides of torch's 4096-element CUDA small-sort threshold) and
+compares the permutation, the padded layout and the forward's ids and scores on `torch`,
+`triton` and `official`: **bit-identical in every regime** (the unstable sort was already
+id-ordered within clusters on this torch), so no checkpoint or golden output can move.
+Applied so the slot order is a property of the assignment, not of the sort implementation.
+
+### 14.7 Findings to carry, and what is not done here
+
+- **Triton's epilogue leaves the padded item id at `-inf` slots** (`_cps_finish`,
+  `_cpse_finish`); the `torch` and `official` backends return the `-1` sentinel through
+  `masked_topk`, which is what `interfaces.py`'s contract names. Every test normalises
+  through score finiteness, so nothing is red, but the two backends' `ids` tensors are
+  not `torch.equal` on rows with fewer than K survivors. Not changed in B2: it alters the
+  Triton backend's outputs, which A1's golden JSONs and C4's gate own. Recommended: apply
+  the sentinel in the two `_finish` helpers together with C1's harness rewrite (one
+  `torch.where(isfinite)` — capture-safe), and re-run the golden gate.
+- The `cute` extra is not in the B2 venv; its 127 cells skipped. B4 deletes them.
+- **B4 is unblocked** by the roadmap's rule ("never delete before B2 is green"): T1 is
+  `torch.equal` on every regime, the bloom ⊇ / ⊆ checks hold, FPR at matched memory is
+  recorded. B3 (the head-to-head) is the other consumer of this gate.
+- No timing was taken and none is citable (rule 2; the clock is unlocked anyway). WP-4
+  owns the numbers.
