@@ -1,24 +1,16 @@
 # Evaluation harness refactor — readability + leanness
 
-> **Status: IMPLEMENTED (2026-07-06); library test gates passed on A100 2026-09-02, harness gates pending** (see the roadmap, Open work 1). All phases E1-E8 are committed
-> on branch `refactor/kernels-eval`. This document is now a **record of intent**, not a work
-> queue. The as-built harness is documented in
-> [../system/evaluation.md](../system/evaluation.md), which is the maintained reference — this
-> plan's "Ground truth: actual architecture" section has been superseded by it.
+> **Status: ARCHIVED 2026-09-06 with roadmap C3.** Implemented 2026-07-06 (E1–E8 on
+> `refactor/kernels-eval`); the harness it produced was replaced by harness v2
+> ([../evaluation-harness-v2.md](../evaluation-harness-v2.md), roadmap Phase C), which deleted
+> every file this plan touched except `encode.py`, `metrics.py`, `oracle.py`, `config.py`. The
+> live harness is documented in [../../system/evaluation.md](../../system/evaluation.md). Kept
+> for provenance only; line references are against commit `2b1ff80` and links below point at
+> files that no longer exist (see [README.md](README.md)).
 >
-> It stays here (rather than in [archive/](archive/)) only until
-> [refactor-validation-handoff.md](refactor-validation-handoff.md) signs off. Archive it once
-> validation passes.
->
-> Line references are against commit `2b1ff80` and are **stale**; several files named here
-> (`bench_tools.py`, `algos/torch_knn.py`, `datasets/`) no longer exist — that is the point of
-> the plan, not an error in it.
->
-> Companion plans: [kernels-layers-design.md](kernels-layers-design.md) (library side),
-> [future-work-and-research.md](future-work-and-research.md) (post-refactor ideas).
-> Does not conflict with [torch-export-refactor.md](torch-export-refactor.md) or
-> [live-update-api.md](live-update-api.md); where they touch the same files, this plan defers
-> to their decisions (noted inline).
+> Companion plans: [../kernels-layers-design.md](../kernels-layers-design.md) (library side),
+> [../future-work-and-research.md](../future-work-and-research.md) (post-refactor ideas),
+> [../torch-export-refactor.md](../torch-export-refactor.md), [../live-update-api.md](../live-update-api.md).
 
 ## Context
 
@@ -30,10 +22,10 @@ accumulated:
 1. **Dead weight**: a broken-and-unused algo, an unreachable CPU-timing path, identity-function
    indirection, three unused dependencies, and a one-shot campaign upload script.
 2. **Parameter-threading**: the driver threads 15–20 keyword args through five call levels.
-   [silvertorch-reverse-clause-wrapper-fix.md](archive/silvertorch-reverse-clause-wrapper-fix.md)
+   [silvertorch-reverse-clause-wrapper-fix.md](silvertorch-reverse-clause-wrapper-fix.md)
    §Changes documents the cost concretely: adding **one** field (`clause_is_reverse`) required
    touching **five** function signatures in `sweep.py` alone.
-3. **Doc drift**: [docs/system/evaluation.md](../system/evaluation.md) describes a layout
+3. **Doc drift**: [docs/system/evaluation.md](../../system/evaluation.md) describes a layout
    (`evaluate.py`, `run_per_algo.sh`, `conf/`, `algo.modules`, `QUALITY_BATCH_SIZE = 64`) that
    no longer exists.
 
@@ -41,7 +33,7 @@ accumulated:
 
 Since the system doc is stale, this is the as-built map an implementing agent should trust:
 
-- **Entry points** ([evaluation/pyproject.toml:24-35](../../evaluation/pyproject.toml)):
+- **Entry points** ([evaluation/pyproject.toml:24-35](../../../evaluation/pyproject.toml)):
 
   | script | target | role |
   |---|---|---|
@@ -68,13 +60,13 @@ Since the system doc is stale, this is the as-built map an implementing agent sh
 - **Row schema**: one dict per `(filter_kind, sweep, algo, backend, params, k, bs)` cell —
   `suite, cell, filter_kind, sweep, impl, backend, device, seed, batch_size, k, n_users_kept,
   median_ms, p20_ms, p80_ms, peak_mem_mib, index_mem_mib, fwd_scratch_mib, recall@K, ndcg@K,
-  extra.params` ([sweep.py:646-691](../../evaluation/retrieval/sweep.py#L646-L691)).
+  extra.params` (sweep.py:646-691).
 - **Measurement invariants** (must survive this refactor unchanged): TF32 pinned off; one-shot
   GPU warmup outside any measured window; warmup **before** peak-memory reset; memory window
   without do_bench's L2-buster; timing auto-extends `rep_ms` until ≥ `MIN_SAMPLES=30` samples
   (cap `MAX_REP_MS=3000`); perf pool of `n_pool=4096` fixed-seed query batches; quality
   streamed at `QUALITY_BATCH_SIZE=16`; per-sweep `torch._dynamo.reset()` + `empty_cache()`
-  ([sweep.py:191-197](../../evaluation/retrieval/sweep.py#L191-L197)); per-algo process
+  (sweep.py:191-197); per-algo process
   isolation via the orchestrator.
 - **Algos** (`retrieval/algos/`): thin `nn.Module` wrappers over `retrieve` layers; duck-typed
   protocol `(algo_modules: list[nn.Module], is_cpu: bool, __call__(q, qa_narrow=None) → (ids,
@@ -91,11 +83,11 @@ Since the system doc is stale, this is the as-built map an implementing agent sh
   `datasets/common.py`). Only the package-name hazard
   (E1.6) touches this tree.
 - **Stage 4a schema extensions themselves** (`throughput_qps`, `p99_ms`, `build_time_s`, …) —
-  they stay in [00-roadmap.md](00-roadmap.md) Stage 4a; **but** E5 restructures return types so
+  they stay in [00-roadmap.md](../00-roadmap.md) Stage 4a; **but** E5 restructures return types so
   landing them later is a one-field change, not another 5-signature thread.
 - **Training pipeline** (`training/`) — read but healthy; no changes beyond the import-path
   effects of E5.1.
-- **Library (`retrieve/`) changes** — see [kernels-layers-design.md](kernels-layers-design.md).
+- **Library (`retrieve/`) changes** — see [kernels-layers-design.md](../kernels-layers-design.md).
 
 ## Conventions for the implementing agent
 
@@ -124,17 +116,17 @@ small commits.
 invokes algo objects directly:
 `bench_tools.py:378` `topk_ids, _ = forward(q,
 **kw)` where `forward` *is* the algo instance, and
-[sweep.py:642](../../evaluation/retrieval/sweep.py#L642) `algo_obj(q, **kw)`. Enabling
+sweep.py:642 `algo_obj(q, **kw)`. Enabling
 `torch_knn` in any config therefore raises `TypeError: 'TorchKnnAlgo' object is not callable`
 at the first quality batch. No YAML under `evaluation/config/` lists it (verified by grep across
 all 19 configs), and
-[cli/upload_results.py:145](../../evaluation/retrieval/cli/upload_results.py#L145) documents it
+cli/upload_results.py:145 documents it
 was "dropped from quality YAMLs in favor of `linr_v1_filter_mask` (also exact) + `linr_v4`".
 
 **Edits.**
 
 1. Delete `evaluation/retrieval/algos/torch_knn.py`.
-2. [algos/__init__.py](../../evaluation/retrieval/algos/__init__.py): remove the import (line
+2. algos/__init__.py: remove the import (line
    43), the `"torch_knn"` entry in `ALGORITHMS` (line 46), the `build_algorithm` branch (lines
    84-85), and the `torch_knn` mention in the module docstring.
 3. `BACKEND_CAPABLE_ALGOS` (lines 58-60) now equals "every registered algo" — delete the set;
@@ -146,16 +138,16 @@ was "dropped from quality YAMLs in favor of `linr_v1_filter_mask` (also exact) +
    )
    ```
 
-   ([sweep.py:368-370](../../evaluation/retrieval/sweep.py#L368-L370)) with `for backend in
+   (sweep.py:368-370) with `for backend in
    backends:` and drop the exception note from the docstring (lines 333-335).
 4. Remove the stale `FullScanKNN` cross-reference in
-   [docs/system/evaluation.md](../system/evaluation.md) when E8 rewrites it.
+   [docs/system/evaluation.md](../../system/evaluation.md) when E8 rewrites it.
 
 **Note for the future:** if a strict fp32 exact reference is ever wanted again, resurrect it as
 an `nn.Module` wrapper over `FullScanKNN` in one commit — record this in the commit message,
 not in code. The oracle does **not** depend on this class
 (`compute_filtered_oracle` inlines its own matmul,
-[oracle.py:54-84](../../evaluation/retrieval/oracle.py#L54-L84)).
+[oracle.py:54-84](../../../evaluation/retrieval/oracle.py#L54-L84)).
 
 ### E1.2 Remove the unreachable CPU-timing path
 
@@ -170,22 +162,22 @@ not in code. The oracle does **not** depend on this class
 |---|---|
 | `bench_tools.py:170-216` | delete `measure_forward_cpu` |
 | `bench_tools.py:384-395` | drop `is_cpu` param from `perf_pass_cached`; delete the `if is_cpu: return measure_forward_cpu(...)` tail (lines 446-447) |
-| [sweep.py:450-452](../../evaluation/retrieval/sweep.py#L450-L452) | `index_mem = cuda_allocated_mib() - mem_before` unconditionally |
-| [sweep.py:475-484](../../evaluation/retrieval/sweep.py#L475-L484) | drop `is_cpu=algo_obj.is_cpu` kwarg |
-| [sweep.py:494](../../evaluation/retrieval/sweep.py#L494) | `_make_perf_row`: drop `is_cpu` param; hard-code `"device": "cuda"` (line 677) |
-| [sweep.py:632](../../evaluation/retrieval/sweep.py#L632) | `_autotune_prewarm`: drop the `algo_obj.is_cpu or` clause |
+| sweep.py:450-452 | `index_mem = cuda_allocated_mib() - mem_before` unconditionally |
+| sweep.py:475-484 | drop `is_cpu=algo_obj.is_cpu` kwarg |
+| sweep.py:494 | `_make_perf_row`: drop `is_cpu` param; hard-code `"device": "cuda"` (line 677) |
+| sweep.py:632 | `_autotune_prewarm`: drop the `algo_obj.is_cpu or` clause |
 | `algos/*.py` (5 files) | delete the `is_cpu = False` class attr |
-| [algos/__init__.py:6](../../evaluation/retrieval/algos/__init__.py#L6) | drop `is_cpu` from the protocol docstring |
+| algos/__init__.py:6 | drop `is_cpu` from the protocol docstring |
 
 Keep the `device` **column** in the row schema (hard-coded `"cuda"`) — downstream analysis
 filters on it and removing a column violates the additive-schema rule.
 
 ### E1.3 Inline `expand_param_combos`
 
-[sweep.py:742-747](../../evaluation/retrieval/sweep.py#L742-L747) is an identity wrapper
+sweep.py:742-747 is an identity wrapper
 (copies each dict). Its docstring's "used by … external tests" claim is false — the only test
 file is `tests/test_silvertorch_algo_reverse.py`. Replace the call site
-([sweep.py:372](../../evaluation/retrieval/sweep.py#L372)):
+(sweep.py:372):
 
 ```python
 # before
@@ -196,12 +188,12 @@ for params in cfg.algo_params.get(algo, [{}]):
 ```
 
 Delete the function and its `__all__` entry. **Keep `is_valid_combo`**
-([sweep.py:750-757](../../evaluation/retrieval/sweep.py#L750-L757)) — it encodes a real
+(sweep.py:750-757) — it encodes a real
 constraint (`n_probe > n_lists` skip).
 
 ### E1.4 Drop unused dependencies
 
-[evaluation/pyproject.toml:17-21](../../evaluation/pyproject.toml) declares `torchvision`,
+[evaluation/pyproject.toml:17-21](../../../evaluation/pyproject.toml) declares `torchvision`,
 `matplotlib`, `einops` — **zero** imports anywhere under `evaluation/` (verified:
 `grep -rn "import torchvision|import matplotlib|import einops|from torchvision|from matplotlib|from einops"`
 returns nothing). Remove all three plus the `torchvision = { index = "pytorch-cu128" }` source
@@ -210,7 +202,7 @@ pin (line 52). `wandb` (used in `training/train_sasrec.py` only) and `sentence-t
 
 ### E1.5 Quarantine the campaign-bound upload script
 
-[cli/upload_results.py](../../evaluation/retrieval/cli/upload_results.py) hard-codes
+cli/upload_results.py hard-codes
 `REPO_ID = "pinkmeme/retrieval-filter-evals-2026-05-23"` (line 27), a dated commit message
 (line 176), and hand-written campaign README prose (lines 112-127, 142-147).
 
@@ -231,7 +223,7 @@ is acceptable; the current state — a dated one-shot masquerading as reusable i
 ### E1.6 Rename the `datasets` package (name collision with HF `datasets`)
 
 `packages = ["datasets", "retrieval", "training"]`
-([pyproject.toml:42](../../evaluation/pyproject.toml)) installs a top-level `datasets` package
+([pyproject.toml:42](../../../evaluation/pyproject.toml)) installs a top-level `datasets` package
 that shadows HuggingFace `datasets` in this venv. `sentence-transformers` (a declared dep)
 imports HF `datasets` opportunistically; if that path is hit, it imports *our* package and
 fails with a confusing AttributeError far from the cause.
@@ -256,10 +248,10 @@ Take it now; the failure mode is a time bomb and the rename is grep-mechanical.
 ## Phase E2 — Context objects for the driver (the big readability lever)
 
 **Problem, concretely**: `run_filter_kind` takes 15 parameters
-([sweep.py:128-146](../../evaluation/retrieval/sweep.py#L128-L146)), `run_one_sweep` 19
-([sweep.py:307-328](../../evaluation/retrieval/sweep.py#L307-L328)), `evaluate_cell` 20
-([sweep.py:408-431](../../evaluation/retrieval/sweep.py#L408-L431)), `_run_quality` 14
-([sweep.py:561-577](../../evaluation/retrieval/sweep.py#L561-L577)). Nearly all are
+(sweep.py:128-146), `run_one_sweep` 19
+(sweep.py:307-328), `evaluate_cell` 20
+(sweep.py:408-431), `_run_quality` 14
+(sweep.py:561-577). Nearly all are
 pass-through. The reverse-clause fix threaded one tensor through five signatures.
 
 ### E2.1 New module `retrieval/context.py`
@@ -349,17 +341,17 @@ def _autotune_prewarm(algo_obj: RetrievalAlgo, ctx: SweepContext, assets: Filter
    so the context always holds post-limit tensors. One invariant replaces the
    `queries` vs `queries_f` naming split. Note `queries_cache.load_or_cache_queries` *also*
    trims to `users_limit` before caching
-   ([queries_cache.py:75-85](../../evaluation/retrieval/queries_cache.py#L75-L85)) — after this
+   (queries_cache.py:75-85) — after this
    move the second trim in the driver becomes a no-op guard for the cache-miss arxiv path;
    keep it (idempotent) and note it in the docstring.
 2. `cli/evaluate.py` stops mutating cfg
-   ([cli/evaluate.py:54](../../evaluation/retrieval/cli/evaluate.py#L54) `cfg.algorithms =
+   (cli/evaluate.py:54 `cfg.algorithms =
    [algo]`): pass `algorithms=(algo,)` into the context instead.
 3. Rewrite `run_sweep` to consume `ctx` (its body keeps `pin_precision_globals()` /
    `warm_gpu_once`, the gt_dir mkdir, and the filter-kind loop; `K_GT`/`suite`/`gt_dir` move
    into context construction).
 4. `_build_filter_modules(filter_kind, fcfg, ctx) -> FilterAssets` — same body, returns the
-   dataclass instead of the 5-tuple ([sweep.py:242-248](../../evaluation/retrieval/sweep.py#L242-L248)).
+   dataclass instead of the 5-tuple (sweep.py:242-248).
 5. `run_one_sweep` stamps per-sweep fields:
 
    ```python
@@ -388,7 +380,7 @@ threading topology. Do not add `slots=True` (harmless here but blocks
 ### E3.1 `RetrievalAlgo` Protocol
 
 The driver types algo objects as `Any`
-([sweep.py:527-538](../../evaluation/retrieval/sweep.py#L527-L538), `_run_quality`,
+(sweep.py:527-538, `_run_quality`,
 `_autotune_prewarm`, `_release_algo`). Add to `algos/_helpers.py`:
 
 ```python
@@ -409,10 +401,10 @@ Annotate: `build_algorithm` return, `_try_build_algo`/successor, `_run_quality`,
 
 Today `build_algorithm` raises `ValueError` for incompatible cells and `_try_build_algo`
 catches **all** `ValueError`s at debug level
-([sweep.py:544-558](../../evaluation/retrieval/sweep.py#L544-L558)). Failure mode: a genuine
+(sweep.py:544-558). Failure mode: a genuine
 bad argument — a typo'd param key, an int cast failing, a library-level shape ValueError from
 `SilverTorch.register_index` (e.g. `k > n_probe × max_cluster_size`,
-[main.py:130-134](../../retrieve/src/retrieve/layers/silvertorch/main.py#L130-L134)) — is
+[main.py:130-134](../../../retrieve/src/retrieve/layers/silvertorch/main.py#L130-L134)) — is
 silently logged as "combo isn't applicable" and the cell vanishes from the results with no
 error. This has real silent-data-loss potential in a sweep campaign.
 
@@ -443,14 +435,14 @@ error. This has real silent-data-loss potential in a sweep campaign.
 4. `build_algorithm` keeps its defensive raises (now genuinely exceptional) — e.g.
    `linr_v2` without `filter_mod` stays a hard error.
 5. Retire the eligibility prose in the module docstring
-   ([algos/__init__.py:21-25](../../evaluation/retrieval/algos/__init__.py#L21-L25)) in favor
+   (algos/__init__.py:21-25) in favor
    of the table.
 
 ### E3.3 `FilterKind` literal alias
 
 `filter_kind: str` is string-compared in ≥8 places (`sweep.py`, `algos/__init__.py`,
 `algos/filter.py`, `loaders.py:325`, `oracle` call sites). Add next to the `Backend` import in
-[retrieval/config.py](../../evaluation/retrieval/config.py):
+[retrieval/config.py](../../../evaluation/retrieval/config.py):
 
 ```python
 FilterKind = Literal["none", "clause", "bloom"]
@@ -462,11 +454,11 @@ and annotate through. Pure typing; pyright catches typos. The YAML side stays a 
 ## Phase E4 — `AlgoBase` for the wrapper boilerplate
 
 All five algo wrappers repeat the same construction tail
-([linr_v1.py:41-45](../../evaluation/retrieval/algos/linr_v1.py#L41-L45),
-[linr_v2.py:39-43](../../evaluation/retrieval/algos/linr_v2.py#L39-L43),
-[linr_v3.py:59-65](../../evaluation/retrieval/algos/linr_v3.py#L59-L65),
-[linr_v4.py:42-46](../../evaluation/retrieval/algos/linr_v4.py#L42-L46),
-[silvertorch.py:107-108](../../evaluation/retrieval/algos/silvertorch.py#L107-L108)). The
+(linr_v1.py:41-45,
+linr_v2.py:39-43,
+linr_v3.py:59-65,
+linr_v4.py:42-46,
+silvertorch.py:107-108). The
 `torch.compile(dynamic=True, mode="reduce-overhead")` invocation — the single most load-bearing
 line in the harness (it is what makes one cudagraph capture per algo forward) — is duplicated
 five times.
@@ -513,10 +505,10 @@ calls `self._finalize(self.idx, filter_mod=None)`.
 
 **Do not** move `forward` logic into the base — the per-algo forwards are the readable
 specification of each cascade (especially
-[linr_v3.py:67-89](../../evaluation/retrieval/algos/linr_v3.py#L67-L89), whose comments carry
+linr_v3.py:67-89, whose comments carry
 the cudagraph-stitching rationale) and must stay visible in their files. Delete
 `collect_modules` once all five are migrated; `_release_algo`
-([sweep.py:732-736](../../evaluation/retrieval/sweep.py#L732-L736)) is unchanged (it consumes
+(sweep.py:732-736) is unchanged (it consumes
 `algo_modules`).
 
 ## Phase E5 — Measurement module split + structured results
@@ -548,7 +540,7 @@ reference the constant instead of a literal.
 ### E5.2 `PerfStats` / `QualityStats` instead of tuples
 
 `measure_forward_cuda` and `perf_pass_cached` return positional 5-tuples, unpacked at
-[sweep.py:475](../../evaluation/retrieval/sweep.py#L475) `med, p20, p80, peak, scratch = …`.
+sweep.py:475 `med, p20, p80, peak, scratch = …`.
 Roadmap Stage 4a wants `throughput_qps`, `mean_ms`, `p99_ms`, per-query latency vectors —
 every tuple extension breaks all unpack sites.
 
@@ -579,7 +571,7 @@ class QualityStats:
     mrr: float
 ```
 
-**Why QualityStats**: [metrics.py:150-154](../../evaluation/retrieval/metrics.py#L150-L154)
+**Why QualityStats**: [metrics.py:150-154](../../../evaluation/retrieval/metrics.py#L150-L154)
 already computes recall/precision/mrr/ndcg per batch; the harness then discards precision and
 mrr (`bench_tools.py:381`). Emit them —
 `_make_perf_row` adds `precision@{k}` / `mrr@{k}` columns (additive, Stage 4a-friendly, zero
@@ -591,14 +583,14 @@ columns are additive only.
 
 ## Phase E6 — Oracle cache: content fingerprint, not shape check
 
-**Problem.** [oracle.py:114-124](../../evaluation/retrieval/oracle.py#L114-L124) invalidates the
+**Problem.** [oracle.py:114-124](../../../evaluation/retrieval/oracle.py#L114-L124) invalidates the
 cached oracle only on `(n_users, K_GT)` **shape** mismatch. Same-shape content changes — a
 different `content_subdir` dim off the same `data_dir`, regenerated attrs, a retrained
 checkpoint — silently reuse a stale oracle. This burned the thesis once (the goodreads
-stale-cache incident; [00-roadmap.md](00-roadmap.md) Stage 4b item 7 calls the rerun a
+stale-cache incident; [00-roadmap.md](../00-roadmap.md) Stage 4b item 7 calls the rerun a
 **publication blocker**), and the current mitigation is a *convention*: a YAML comment warning
 that `gt_subdir` "MUST vary by dim"
-([config/goodreads/d128-filter.yaml:4-7](../../evaluation/config/goodreads/d128-filter.yaml)).
+(config/goodreads/d128-filter.yaml:4-7).
 
 **Fix.** Store the oracle as a dict with a content fingerprint; validate on load.
 
@@ -653,7 +645,7 @@ Notes:
 
 ### E7.1 `resolve_path` basename fallback
 
-[loaders.py:38-47](../../evaluation/retrieval/loaders.py#L38-L47): a non-existent
+loaders.py:38-47: a non-existent
 `attrs_path: subdir/foo.pt` silently resolves to `data_dir/foo.pt` — **basename only** — which
 is exactly how a wrong attr tensor gets loaded without an error. Replace:
 
@@ -693,20 +685,20 @@ def load_raw_config(path: Path) -> dict:
 ### E7.3 Guard `output: null`
 
 `_load_cfg` does `Path(data["output"])`
-([run_evaluation.py:85](../../evaluation/retrieval/cli/run_evaluation.py#L85)) — a config
+(run_evaluation.py:85) — a config
 using the documented `output: null` default dies with a bare `TypeError`. Raise
 `SystemExit(f"{path}: config must set output: (a directory) to be orchestrated")` instead.
 
 ### E7.4 Docstring sweep (no behavior)
 
-- [config.py:1-13](../../evaluation/retrieval/config.py#L1-L13): references
+- [config.py:1-13](../../../evaluation/retrieval/config.py#L1-L13): references
   `eval_goodreads_retrieval.py`, `eval_arxiv_retrieval.py`,
   `docs/plans/goodreads-filter-eval.md` — none exist; rewrite against the current driver.
   Same for the field comments at lines 98-99.
-- [algos/filter.py](../../evaluation/retrieval/algos/filter.py),
-  [queries_cache.py](../../evaluation/retrieval/queries_cache.py),
-  [results_io.py](../../evaluation/retrieval/results_io.py): current — leave.
-- `_autotune_prewarm`'s docstring ([sweep.py:624-630](../../evaluation/retrieval/sweep.py#L624-L630))
+- algos/filter.py,
+  queries_cache.py,
+  results_io.py: current — leave.
+- `_autotune_prewarm`'s docstring (sweep.py:624-630)
   says it defends against "Triton's autotune cache" — the library moved to offline-tuned
   `DEFAULT_CONFIG`s (no runtime autotune) in roadmap Stage 1. The prewarm is still needed (it
   now covers **JIT compile + cudagraph capture** per batch size), but the rationale text is
@@ -792,15 +784,15 @@ Catalogued during the audit; none blocks the phases above.
   choke point.
 - **tqdm vs orchestrator logs**: the quality/oracle tqdm bars
   (`bench_tools.py:361`,
-  [oracle.py:58](../../evaluation/retrieval/oracle.py#L58)) write control characters into the
+  [oracle.py:58](../../../evaluation/retrieval/oracle.py#L58)) write control characters into the
   orchestrator's tee'd logs. Pass `disable=not sys.stderr.isatty()` (or
   `TQDM_DISABLE`-aware) to both.
 - **`torch.load(..., weights_only=False)`** in
-  [queries_cache.py:54](../../evaluation/retrieval/queries_cache.py#L54): the blob is
+  queries_cache.py:54: the blob is
   dict-of-tensors + scalars, so `weights_only=True` works and removes a pickle-execution
   surface on a shared box. Same in `loaders.load_filter_assets` (already plain tensors;
   add the flag).
-- **`EVAL_TYPES` preset lists** ([run_evaluation.py:35-54](../../evaluation/retrieval/cli/run_evaluation.py#L35-L54))
+- **`EVAL_TYPES` preset lists** (run_evaluation.py:35-54)
   hard-code config paths that must be hand-synced with `evaluation/config/`. Fine at this
   scale; alternative is `sorted(glob("config/*/d*-filter.yaml"))` at call time — take it only
   if a preset drifts again.
@@ -813,7 +805,7 @@ Catalogued during the audit; none blocks the phases above.
   module.
 - **Naming**: `linr_v1_filter_mask` vs alias `triton_knn` (a *pure-torch* full scan, despite
   the name — the Triton kernel was removed;
-  [linr_v1.py:3-7](../../evaluation/retrieval/algos/linr_v1.py#L3-L7)). Renaming breaks YAML
+  linr_v1.py:3-7). Renaming breaks YAML
   lineage + downstream result joins, so **don't rename**; instead make the registry docstring
   the canonical explanation and add `extra.impl_note` only if confusion recurs.
 
@@ -837,23 +829,23 @@ Catalogued during the audit; none blocks the phases above.
 
 | File | Phases |
 |---|---|
-| [evaluation/retrieval/sweep.py](../../evaluation/retrieval/sweep.py) | E1.2-3, E2, E3, E5.2 |
+| evaluation/retrieval/sweep.py | E1.2-3, E2, E3, E5.2 |
 | `evaluation/retrieval/context.py` | E2 — CREATE |
 | `evaluation/retrieval/bench_tools.py` | E1.2, E5.1 — split into `measure.py` / `encode.py` / `passes.py`, then DELETE |
-| [evaluation/retrieval/algos/__init__.py](../../evaluation/retrieval/algos/__init__.py) | E1.1, E3 |
+| evaluation/retrieval/algos/__init__.py | E1.1, E3 |
 | `evaluation/retrieval/algos/torch_knn.py` | E1.1 — DELETE |
-| [evaluation/retrieval/algos/_helpers.py](../../evaluation/retrieval/algos/_helpers.py) | E3.1, E4 |
+| evaluation/retrieval/algos/_helpers.py | E3.1, E4 |
 | algos/{linr_v1,linr_v2,linr_v3,linr_v4,silvertorch}.py | E1.2, E4 |
-| [evaluation/retrieval/oracle.py](../../evaluation/retrieval/oracle.py) | E6 |
-| [evaluation/retrieval/loaders.py](../../evaluation/retrieval/loaders.py) | E2.1, E7.1 |
-| [evaluation/retrieval/config.py](../../evaluation/retrieval/config.py) | E3.3, E7.2, E7.4 |
-| [evaluation/retrieval/cli/evaluate.py](../../evaluation/retrieval/cli/evaluate.py) | E2 |
-| [evaluation/retrieval/cli/run_evaluation.py](../../evaluation/retrieval/cli/run_evaluation.py) | E7.2, E7.3 |
-| [evaluation/retrieval/cli/stage_results.py](../../evaluation/retrieval/cli/stage_results.py) | E7.2 |
-| [evaluation/retrieval/cli/upload_results.py](../../evaluation/retrieval/cli/upload_results.py) | E1.5 |
-| [evaluation/pyproject.toml](../../evaluation/pyproject.toml) | E1.4, E1.6 |
+| [evaluation/retrieval/oracle.py](../../../evaluation/retrieval/oracle.py) | E6 |
+| evaluation/retrieval/loaders.py | E2.1, E7.1 |
+| [evaluation/retrieval/config.py](../../../evaluation/retrieval/config.py) | E3.3, E7.2, E7.4 |
+| evaluation/retrieval/cli/evaluate.py | E2 |
+| evaluation/retrieval/cli/run_evaluation.py | E7.2, E7.3 |
+| evaluation/retrieval/cli/stage_results.py | E7.2 |
+| evaluation/retrieval/cli/upload_results.py | E1.5 |
+| [evaluation/pyproject.toml](../../../evaluation/pyproject.toml) | E1.4, E1.6 |
 | `evaluation/retrieval/tests/…` | E8.1 — CREATE (4 files) |
-| [docs/system/evaluation.md](../system/evaluation.md) | E8.2 rewrite |
+| [docs/system/evaluation.md](../../system/evaluation.md) | E8.2 rewrite |
 
 ## Sequencing + effort
 
@@ -868,5 +860,5 @@ Catalogued during the audit; none blocks the phases above.
 | 7 | E7 hygiene | ±60 | none |
 | 8 | E8.2 doc rewrite | doc only | none |
 
-After landing, trim this plan per repo convention ([00-roadmap.md](00-roadmap.md)
+After landing, trim this plan per repo convention ([00-roadmap.md](../00-roadmap.md)
 "Cleanup status").

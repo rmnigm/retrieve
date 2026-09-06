@@ -200,7 +200,7 @@ Parametrize over `(PostfilterKNN, "torch"|"triton"), (PrefilterKNN, "torch"|"tri
 7. **Filter upsert parity** — `BloomFilter` / `ExactAttributeFilter`: incremental upsert produces the same `evaluate_mask` output as a single-shot `register_index` over the equivalent attrs.
 8. **Filter legacy path** — `capacity=None` produces today's `bloom_sigs` / `item_clause_attrs` shape and dtype; `upsert` raises `NotImplementedError` (interface default).
 9. **Watermark monotonic** — `delete` does not lower `n_active`; `upsert(rows=[r])` raises it to `max(r)+1`.
-10. **V3 cascade** — `OneBitKNN` → `PrefilterKNN` (mirrors [linr_v3.py:50-52](../../evaluation/retrieval/algos/linr_v3.py#L50)). Both stages capacity-aware; delete on both with same rows; deleted absent from final ids.
+10. **V3 cascade** — `OneBitKNN` → `PrefilterKNN` (mirrors linr_v3.py:50-52). Both stages capacity-aware; delete on both with same rows; deleted absent from final ids.
 
 Commands:
 

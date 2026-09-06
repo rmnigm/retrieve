@@ -4,7 +4,7 @@
 > names the repo components it builds on, the external prior art, the expected payoff, and a
 > rough cost. Complements the execution plans:
 > [kernels-layers-design.md](kernels-layers-design.md) /
-> [evaluation-refactor.md](evaluation-refactor.md) (refactor track),
+> [evaluation-refactor.md](archive/evaluation-refactor.md) (refactor track),
 > [torch-export-refactor.md](torch-export-refactor.md) and
 > [live-update-api.md](live-update-api.md) (deferred features),
 > [00-roadmap.md](00-roadmap.md) Stage 3/4 (kernel optimizations, thesis measurements).
@@ -28,7 +28,7 @@ on "run the suite on a dev GPU". Options, cheapest first:
    GitHub runner): `uv sync && pytest retrieve/tests -x -q` + the eval unit tests. ~30 min of
    A10 time per night.
 3. Same runner, plus the golden-cell regression from
-   [evaluation-refactor.md §Conventions](evaluation-refactor.md) (one `linr_v3` filter cell,
+   [evaluation-refactor.md §Conventions](archive/evaluation-refactor.md) (one `linr_v3` filter cell,
    asserting byte-identical quality columns).
 
 Recommendation: (2) now, (3) after the eval refactor lands. Cost: a day of setup.
@@ -138,7 +138,7 @@ Beyond roadmap Stage 4a (throughput, p99, build-time, per-query latency vectors)
   Cheap (a background sampler thread around `measure_forward_cuda`), and gives the thesis a
   cost-efficiency figure mirroring the paper's Table 2 at academic scale.
 - **Provenance columns** (`extra.gpu`, `extra.commit`, `extra.torch`) — 5 lines, see
-  [evaluation-refactor.md §Additional](evaluation-refactor.md).
+  [evaluation-refactor.md §Additional](archive/evaluation-refactor.md).
 - **Selectivity as a first-class column**: per-sweep mean pass-rate (the filter's mean
   `counts/N` over the query pool) is computed implicitly everywhere but never emitted; adding
   it turns every filter plot's x-axis from "sweep name" into a quantitative selectivity axis —
@@ -247,7 +247,7 @@ LiNR reports 1B×64d fp16 → 1-bit on a single V100 ([linr.md §5.3.2](../../ar
 the repo's measured ceiling so far is the 15M synth-arxiv catalog. The synth generator
 (`datasets/synth_arxiv.py` — cluster + slerp
 sampling, sharded emission) scales by construction; the eval harness already warns and guides
-at >100M ([loaders.py:98-104](../../evaluation/retrieval/loaders.py#L98-L104)). Experiment
+at >100M (loaders.py:98-104). Experiment
 ladder: 50M → 100M (d=128, 1-bit codes = 800 MB; int8 = 12.8 GB — both fit an 80 GB card
 alongside scratch) → 250M+ (1-bit only). Measure the full algo matrix where memory permits;
 report the recall/latency/memory scaling curves and the crossover where IVF beats full-scan
@@ -263,7 +263,7 @@ contributions (they generalize beyond this system):
 - **Oracle-relative recall for filtered cells** (recall vs filtered-FullScan top-K rather
   than held-out interactions, with `-1` short-fill semantics and per-row denominator
   `min(pass_count, k)` — [oracle.py](../../evaluation/retrieval/oracle.py),
-  [sweep.py:597-604](../../evaluation/retrieval/sweep.py#L597-L604)) — versus the common but
+  sweep.py:597-604) — versus the common but
   misleading "held-out recall under filters" (targets often fail the filter). Formalize, and
   quantify how much the two disagree on goodreads.
 - **Approximate-filter scoring**: bloom cells are scored against the *exact* oracle, so bloom

@@ -386,11 +386,17 @@ binary, so a `"cuda"` or `"cute"` request lands on the torch path:
 | `BloomFilter` | `bloom_match` / `bloom_compact` | eager | → torch | → torch |
 | `PostfilterKNN` / `PostfilterKNNInt8` | cuBLAS (flag is a no-op) | same | same | same |
 
-This matters when benchmarking: a harness cell labelled `backend="cuda"`
-(or `"cute"`) for anything other than `SilverTorch` is measuring the
-**torch** path. The eval harness works around it by building filter
-modules for `"cuda"` / `"cute"` cells with `backend="triton"` — see
-[evaluation.md](evaluation.md#the-cuda-backend-in-sweeps).
+This matters when benchmarking: a cell labelled `backend="cuda"` (or
+`"cute"`, or the coming `"official"`) for anything other than `SilverTorch`
+would be measuring the **torch** path. The eval harness therefore refuses
+such cells instead of mislabelling them: its `PATHS` table maps every
+`(algo, filter_kind, backend)` to the code path that actually runs
+(`cublas`, `triton`, `torch`, `cublas+triton`, `official`, or `None`),
+collapses backends that run the same code into one job, and builds the
+standalone filter modules for `official` cells with `backend="triton"` —
+see [evaluation.md](evaluation.md#algorithms-and-the-paths-table).
+`evaluation/retrieval/tests/test_algos.py` parses the table above and
+asserts `PATHS` agrees with it, so keep the two in step.
 
 ## Testing
 

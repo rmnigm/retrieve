@@ -25,7 +25,7 @@
 ## 1. Where it starts
 
 `evaluation/retrieval/` is 3,884 lines (3,424 code + 460 tests) across 30 files plus 19 YAMLs
-(668 lines). The previous refactor ([evaluation-refactor.md](evaluation-refactor.md), E1–E8)
+(668 lines). The previous refactor ([evaluation-refactor.md](archive/evaluation-refactor.md), E1–E8)
 deleted dead weight and added `SweepContext`/`FilterAssets`, `AlgoBase`, `PerfStats`, the oracle
 fingerprint and CPU tests, but deliberately left the **measurement methodology untouched** ("Out
 of scope: no behavioral changes to measurement methodology") — which is where the problems are:
@@ -632,3 +632,43 @@ parity suite (**O** §5 T1–T7 / roadmap B2), not the harness. `[medium]`
 One library change follows from A: `SilverTorch.set_query_params(n_probe=…)`
 re-running the two `register_index` validations — 10 lines, alongside the
 `build_timings` nit in §7.
+
+## 9. Validation record — C1–C3 (2026-09-06, Mac / CPU only, `dev/c1-harness-v2`)
+
+Roadmap C1, C2 and C3 (WP-1, WP-2, WP-3 above, with the §8.4 additions) are authored and
+CPU-tested; the GPU gate is C4 (WP-4). Nothing here is citable (CLAUDE.md rule 2).
+
+**What ran.** `cd evaluation && CUDA_VISIBLE_DEVICES="" uv run pytest retrieval/tests/ -q`:
+82 passed (8 files) on torch CPU; `ruff check retrieval training/evaluate.py` clean;
+`python3 scripts/check_doc_links.py` at zero. The end-to-end tests (`test_run.py`,
+`test_cli.py`) drive `run.run` and `bench run` / `bench campaign` on a 24-item, 8-query
+pre-encoded fixture with `backend="torch"`, `mode="eager"`, shrunken latency windows: record
+schema (§3.2 + §8.2 B–F), resume by key with `code_version`, a failed cell recorded and the
+loop continuing, the §2.4 exact-algo gate, the parity spill file across two "backends", one
+real child process per group with per-child logs and `campaign.log`.
+
+**What is in the tree** (`evaluation/retrieval/`, `wc -l` incl. docstrings): `bench.py` 349,
+`metrics.py` 111, `algos.py` 328, `config.py` 365, `data.py` 291, `oracle.py` 264, `run.py`
+582, `cli.py` 190, `upload.py` 60, `encode.py` 117 = 2,657 code; tests 1,699 (8 files +
+`conftest.py`). Budget in §3.1 was 1,450 + 350; the overrun is docstrings (≈ ⅓), the
+record assembly in `run.py`, `data.py`'s two loaders, and tests that lock the old harness's
+numbers (metrics to 1e-9, the d128 cell sets, the dispatch table). Deleted per §5: 30 old
+files / 4,339 lines (commit `f021179`). The as-built reference is
+[../system/evaluation.md](../system/evaluation.md).
+
+**Deviations from this plan** (also listed in the system doc): parity spill is `.npz` with
+ids + scores under a hash of the key block minus `backend`, cleaned by `bench campaign` per
+`(dataset, dim, algo)`; samples are a JSONL sidecar rather than a parquet (append per cell);
+resume re-runs `failed` / `partial` records; the campaign child is `python -m retrieval.cli
+run` on the same interpreter; `EXACT_ALGOS = (linr_v1_filter_mask, linr_v2)`; `--flush-l2`
+not implemented; `training/evaluate.py` moved to the new `metrics` API (5 lines) so the old
+per-row wrappers could go; `bench campaign` forwards `--skip-quality / --skip-perf /
+--profile`. `upload-results` is the 60-line mirror of §3.1. `report.py` is D4.
+
+**Unverified until C4 (A100):** every Triton / `graph` / CUDA-event / `nvidia-smi` /
+SASRec-encode path; the `official` cells (roadmap B1 must land first — until then they are
+`status: failed` with `NotImplementedError`); quality vs A1's golden to 1e-6; graph latency
+within 5 % of the old numbers; `cudagraph_skips == 0`; `jaccard_vs_first@100 == 1.0` torch
+vs triton across the process boundary; reserved memory flat across a group; kill-and-resume
+mid-run; the per-cell wall time (§2.8's 2 min estimate). The C4 command:
+`uv run bench run --dataset goodreads --dim 128 --suite filter --filter-kind clause --sweep c0_genre`.
