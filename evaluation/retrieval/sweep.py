@@ -134,7 +134,13 @@ def _build_filter_modules(
         return EMPTY_ASSETS
 
     item_attrs_narrow, clause_is_reverse = load_filter_assets(
-        filter_kind, fcfg, Path(ctx.cfg.data_dir), ctx.device
+        filter_kind,
+        fcfg,
+        Path(ctx.cfg.data_dir),
+        ctx.device,
+        # The attrs tensor indexes the same items as item_embs; passing the
+        # count turns a silent misalignment into a loud error at load time.
+        n_items=int(ctx.item_embs.shape[0]),
     )
 
     filter_mods: dict[Backend, FilterModule | None] = {}
