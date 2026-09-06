@@ -1,0 +1,125 @@
+2026-09-06 14:41:56.075 | INFO     | retrieval.queries_cache:load_or_cache_queries:62 - loaded encoded_queries from cache: data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/encoded_queries_test.pt
+2026-09-06 14:41:56.743 | INFO     | retrieval.loaders:load_query_attrs:365 -   eval_split rows=313178 > queries=10000 (users_limit prefix): trimming attrs
+2026-09-06 14:41:56.903 | INFO     | retrieval.loaders:load_query_attrs:372 - loaded eval_split.parquet: qa_narrow=(10000, 4)
+2026-09-06 14:41:57.797 | WARNING  | retrieval.loaders:drop_legacy_padding_row:81 - item_attrs_narrow: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 797085 → 797084 rows.
+2026-09-06 14:41:57.818 | INFO     | retrieval.sweep:_build_filter_modules:184 -   filter modules built: ExactAttributeFilter × 1 (oracle: ExactAttributeFilter)
+2026-09-06 14:41:57.818 | INFO     | retrieval.sweep:run_one_sweep:213 - === filter_kind=clause sweep=c0_genre ===
+2026-09-06 14:41:58.338 | INFO     | retrieval.sweep:run_one_sweep:221 -   kept users: 9859 / 10000
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:42:27.798 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[triton] k=100 bs=1 median=0.452ms p20=0.449 p80=0.525 peak=715.5MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:42:29.406 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[triton] k=100 bs=8 median=1.379ms p20=1.372 p80=1.392 peak=802.8MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:42:30.018 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[triton] k=100 bs=16 median=2.472ms p20=2.462 p80=2.481 peak=902.8MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:42:31.824 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[triton] k=500 bs=1 median=0.460ms p20=0.451 p80=0.470 peak=923.1MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:42:37.327 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[triton] k=500 bs=8 median=1.710ms p20=1.706 p80=1.724 peak=1011.0MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:42:39.023 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[triton] k=500 bs=16 median=2.487ms p20=2.481 p80=2.506 peak=1111.4MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:42:49.224 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[triton] k=1000 bs=1 median=0.573ms p20=0.559 p80=0.585 peak=715.6MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:42:54.723 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[triton] k=1000 bs=8 median=1.710ms p20=1.705 p80=1.731 peak=804.1MiB recall=nan ndcg=nan
+skipping cudagraphs due to mutated inputs (1 instances). Found from : 
+   File "/workspace/wt/a1-golden/evaluation/retrieval/algos/linr_v3.py", line 60, in forward
+    pos_idx, pcounts = self.filter_mod.evaluate_indices(qa_narrow)
+  File "/workspace/wt/a1-golden/retrieve/src/retrieve/layers/filters/exact_attribute.py", line 76, in evaluate_indices
+    return clause_compact(
+
+2026-09-06 14:42:56.423 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/linr_v3[triton] k=1000 bs=16 median=2.555ms p20=2.483 p80=3.026 peak=905.9MiB recall=nan ndcg=nan
+2026-09-06 14:43:04.032 | INFO     | retrieval.cli.evaluate:main:110 - wrote 9 rows to /workspace/wt/a1-golden/docs/plans/evaluation-harness-v2-artifacts/a1/step4/branch-linr_v3_graphbreak_smoke.json

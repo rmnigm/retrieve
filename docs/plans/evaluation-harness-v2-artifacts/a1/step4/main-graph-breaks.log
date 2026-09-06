@@ -1,0 +1,4 @@
+Using CPython 3.11.10 interpreter at: /usr/bin/python3
+Creating virtual environment at: /workspace/wt/main-golden/.venv
+error: Failed to install: wandb-0.26.1-py3-none-manylinux_2_28_x86_64.whl (wandb==0.26.1)
+  Caused by: Stale file handle (os error 116) at path "/workspace/wt/main-golden/.venv/lib/python3.11/site-packages/wandb/integration/dspy/.tmpmOwIJU"

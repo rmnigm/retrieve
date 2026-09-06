@@ -1,0 +1,20 @@
+2026-09-06 14:36:22.464 | INFO     | retrieval.queries_cache:load_or_cache_queries:62 - loaded encoded_queries from cache: data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/encoded_queries_test.pt
+2026-09-06 14:36:23.280 | INFO     | retrieval.loaders:load_query_attrs:365 -   eval_split rows=313178 > queries=10000 (users_limit prefix): trimming attrs
+2026-09-06 14:36:23.440 | INFO     | retrieval.loaders:load_query_attrs:372 - loaded eval_split.parquet: qa_narrow=(10000, 4)
+2026-09-06 14:36:24.236 | WARNING  | retrieval.loaders:drop_legacy_padding_row:81 - item_attrs_narrow: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 797085 → 797084 rows.
+2026-09-06 14:36:24.252 | INFO     | retrieval.sweep:_build_filter_modules:184 -   filter modules built: ExactAttributeFilter × 1 (oracle: ExactAttributeFilter)
+2026-09-06 14:36:24.252 | INFO     | retrieval.sweep:run_one_sweep:213 - === filter_kind=clause sweep=c0_genre ===
+2026-09-06 14:36:24.734 | INFO     | retrieval.sweep:run_one_sweep:221 -   kept users: 9859 / 10000
+2026-09-06 14:36:25.143 | INFO     | retrieval.oracle:load_or_build_oracle:152 -   loaded oracle from cache: data/goodreads-work-id/gt_d128/gt_topk_v3_c0_genre.pt
+/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/_inductor/compile_fx.py:321: UserWarning: TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. Consider setting `torch.set_float32_matmul_precision('high')` for better performance.
+  warnings.warn(
+2026-09-06 14:37:01.729 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[torch] k=100 bs=1 median=0.613ms p20=0.609 p80=0.617 peak=787.9MiB recall=0.9126 ndcg=0.9358
+2026-09-06 14:37:04.349 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[torch] k=100 bs=8 median=3.421ms p20=3.411 p80=3.427 peak=802.8MiB recall=0.9126 ndcg=0.9358
+2026-09-06 14:37:05.598 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[torch] k=100 bs=16 median=6.802ms p20=6.793 p80=6.818 peak=819.8MiB recall=0.9126 ndcg=0.9358
+2026-09-06 14:38:13.707 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[torch] k=500 bs=1 median=0.607ms p20=0.598 p80=0.646 peak=1085.7MiB recall=0.8470 ndcg=0.8762
+2026-09-06 14:38:14.811 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[torch] k=500 bs=8 median=3.437ms p20=3.425 p80=3.450 peak=1100.6MiB recall=0.8470 ndcg=0.8762
+2026-09-06 14:38:16.014 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[torch] k=500 bs=16 median=6.818ms p20=6.809 p80=6.833 peak=1117.6MiB recall=0.8470 ndcg=0.8762
+2026-09-06 14:39:25.925 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[torch] k=1000 bs=1 median=0.603ms p20=0.599 p80=0.608 peak=787.9MiB recall=0.7889 ndcg=0.8233
+2026-09-06 14:39:27.018 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[torch] k=1000 bs=8 median=3.463ms p20=3.454 p80=3.472 peak=802.8MiB recall=0.7889 ndcg=0.8233
+2026-09-06 14:39:28.310 | INFO     | retrieval.sweep:_log_perf_line:527 - clause/c0_genre/silvertorch[torch] k=1000 bs=16 median=6.877ms p20=6.864 p80=6.890 peak=819.8MiB recall=0.7889 ndcg=0.8233
+2026-09-06 14:39:28.363 | INFO     | retrieval.cli.evaluate:main:110 - wrote 9 rows to /workspace/wt/a1-golden/evaluation/golden/goodreads-d128-c0_genre-silvertorch-torch.json
