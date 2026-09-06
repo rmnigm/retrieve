@@ -56,6 +56,7 @@ import argparse
 import gzip
 import hashlib
 import json
+import multiprocessing
 import os
 import re
 import sys
@@ -595,11 +596,20 @@ def cmd_convert(args) -> int:
     print(f"STEP parse pubmed_chunk_*.json ({args.workers} workers)", flush=True)
     jobs = [(i, str(ROOT), str(ROOT), str(staging)) for i in sorted(shard_pmids)]
     n_parsed = 0
-    with ProcessPoolExecutor(max_workers=args.workers) as ex:
-        for i, n in ex.map(_convert_shard_attrs, jobs):
-            if n >= 0:
-                n_parsed += n
-                print(f"  shard {i}: {n:,} articles", flush=True)
+    # A pool only pays off across many 1.5 GB shards, and it must be a *spawn*
+    # pool: forking a process that has already initialised polars' rayon thread
+    # pool deadlocks the child inside `write_parquet`. A single worker (the test
+    # path) runs inline and forks nothing at all.
+    if args.workers > 1:
+        ctx = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=args.workers, mp_context=ctx) as ex:
+            results = list(ex.map(_convert_shard_attrs, jobs))
+    else:
+        results = [_convert_shard_attrs(j) for j in jobs]
+    for i, n in results:
+        if n >= 0:
+            n_parsed += n
+            print(f"  shard {i}: {n:,} articles", flush=True)
     log["n_articles_parsed"] = int(n_parsed)
 
     # ---- fp16 [N, 768] item matrix -----------------------------------------
@@ -639,7 +649,7 @@ def cmd_convert(args) -> int:
             rows = _rows_for(np.asarray(shard_pmids[i], dtype=np.int64))
             for s in range(0, arr.shape[0], args.batch_rows):
                 e = min(s + args.batch_rows, arr.shape[0])
-                block = torch.from_numpy(np.asarray(arr[s:e], dtype=np.float32))
+                block = torch.from_numpy(np.array(arr[s:e], dtype=np.float32))
                 mm[rows[s:e]] = F.normalize(block, dim=-1).to(torch.float16).numpy()
             del arr
             print(f"  shard {i}: {len(rows):,} rows folded in", flush=True)
@@ -651,8 +661,10 @@ def cmd_convert(args) -> int:
 
         sub_dir = output / f"content_d{EMB_DIM_NATIVE}"
         sub_dir.mkdir(parents=True, exist_ok=True)
+        # np.array (not ascontiguousarray) forces a writable copy: torch needs
+        # one, and torch.save materialises the whole tensor anyway.
         acc = np.load(acc_path, mmap_mode="r")
-        torch.save(torch.from_numpy(np.ascontiguousarray(acc)), sub_dir / "text_emb.pt")
+        torch.save(torch.from_numpy(np.array(acc)), sub_dir / "text_emb.pt")
         del acc
         with open(sub_dir / "text_emb.meta.json", "w") as f:
             json.dump(
