@@ -428,6 +428,14 @@ run on the A100 box. Effort in focused days.
   (`all4`) few users qualify; report `n_queries_heldout` next to it and do not headline it there.
 - **Schema break.** Downstream thesis scripts that read the old columns are gone with the LaTeX
   move (roadmap §4 note); `report.py` is the only consumer. Old JSONs remain under `results/archive/`.
+- **No precomputed-oracle input** (added 2026-09-06 by roadmap E1). `oracle.py` always *computes*
+  the filtered top-K. YFCC-10M ships its own filtered ground truth, staged by the loader as
+  `gt_shipped.pt` (format in [../system/datasets.md](../system/datasets.md#yfcc10m)); nothing in
+  the harness can read it, so it is validated out-of-band by
+  `evaluation/eval_datasets/yfcc_check_gt.py`. WP-2 should give `oracle.py` a
+  "load this blob instead of computing" path, keyed the same way the content fingerprint is, and
+  with it a per-dataset metric (YFCC's GT is squared L2; every other dataset is inner product on
+  L2-normalised embeddings, which is what the loader hard-codes today).
 
 ## 8. External practice review — what the field does, and what we take from it
 

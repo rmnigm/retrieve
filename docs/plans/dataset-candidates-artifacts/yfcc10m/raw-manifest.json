@@ -1,0 +1,74 @@
+{
+  "base_url": "https://dl.fbaipublicfiles.com/billion-scale-ann-benchmarks/yfcc100M",
+  "files": {
+    "base.10M.u8bin": {
+      "bytes": 1920000008,
+      "sha256": "589030afcbcc44a50ff798cec935f0980815a02eb7075b224d4f7c12febe96bf",
+      "sha256_sec": 5.8
+    },
+    "query.public.100K.u8bin": {
+      "bytes": 19200008,
+      "sha256": "77a937d67baf7523a7d9089a6e49c0ac8c6a3e7eb5499d759afeacf0a843df82",
+      "sha256_sec": 0.1
+    },
+    "base.metadata.10M.spmat": {
+      "bytes": 945683840,
+      "sha256": "2f9c9a533fde31cb062edfdf5c9410f088bb5d7bf4a721ab98c47e3d2954287d",
+      "sha256_sec": 2.5
+    },
+    "query.metadata.public.100K.spmat": {
+      "bytes": 1907024,
+      "sha256": "93eae99029c34d167f7d030c60c6b4075c039247b3204cc6c34f8a44066983bd",
+      "sha256_sec": 0.0
+    },
+    "GT.public.ibin": {
+      "bytes": 8000008,
+      "sha256": "db8a37bbbf1d32681fb01e0c4694044cf731d91c8e34ccf4e407d7ee9a14e251",
+      "sha256_sec": 0.0
+    },
+    "unfiltered.GT.public.ibin": {
+      "bytes": 80000008,
+      "sha256": "52899b776a4485d67e41c9edf35dd2fb776bb4c1af5568db95d5000aaa673e0f",
+      "sha256_sec": 0.2
+    }
+  },
+  "headers": {
+    "base": {
+      "n": 10000000,
+      "d": 192,
+      "dtype": "uint8"
+    },
+    "query": {
+      "n": 100000,
+      "d": 192,
+      "dtype": "uint8"
+    },
+    "base_tags": {
+      "n_rows": 10000000,
+      "n_tags": 200386,
+      "nnz": 108210476,
+      "tags_per_item_mean": 10.821,
+      "tags_per_item_max": 1517
+    },
+    "query_tags": {
+      "n_rows": 100000,
+      "nnz": 138374,
+      "tags_per_query_hist": [
+        0,
+        61626,
+        38374
+      ],
+      "unique_query_tags": 7910
+    },
+    "gt_filtered": {
+      "n": 100000,
+      "k": 10,
+      "metric": "squared_l2",
+      "d_max": 227899.0
+    },
+    "gt_unfiltered": {
+      "n": 100000,
+      "k": 100
+    }
+  }
+}

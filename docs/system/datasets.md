@@ -1,8 +1,8 @@
 # Datasets and training
 
-Everything upstream of the benchmark: how the four datasets are fetched
-and reshaped into the on-disk layout the harness expects, and how the
-SASRec checkpoints that produce query embeddings are trained.
+Everything upstream of the benchmark: how the datasets are fetched and
+reshaped into the on-disk layout the harness expects, and how the SASRec
+checkpoints that produce query embeddings are trained.
 
 For what happens *after* — the sweep driver, measurement methodology,
 output schema — see [evaluation.md](evaluation.md). For the trained
@@ -17,7 +17,7 @@ gets is decided by whether it sets `checkpoint`:
 | shape | datasets | query embeddings come from | filters |
 |---|---|---|---|
 | **sequential** | yambda-500m, yambda-5b, goodreads | a trained SASRec checkpoint, encoded at eval time | goodreads only |
-| **text** | arxiv, arxiv-synth | pre-encoded text embeddings on disk | yes |
+| **text** | arxiv, arxiv-synth, yfcc10m | pre-encoded embeddings on disk | yes |
 
 A third variant, **synthetic**, is a text dataset grown to arbitrary `N`
 by interpolating between real embeddings — used for scale sweeps where a
@@ -38,6 +38,8 @@ because the latter shadows HuggingFace's `datasets` in the shared venv.
 | [`yambda.py`](../../evaluation/eval_datasets/yambda.py) | `yambda` | HF `yandex/yambda`, Listen+ branch |
 | [`goodreads.py`](../../evaluation/eval_datasets/goodreads.py) | `goodreads` | UCSD Book Graph mirror (HTTPS) |
 | [`arxiv.py`](../../evaluation/eval_datasets/arxiv.py) | `arxiv` | HF `open-index/open-arxiv` (~2.99M papers) |
+| [`yfcc.py`](../../evaluation/eval_datasets/yfcc.py) | `yfcc` | `dl.fbaipublicfiles.com` (NeurIPS'23 Big-ANN filtered track) |
+| [`yfcc_check_gt.py`](../../evaluation/eval_datasets/yfcc_check_gt.py) | `yfcc-check-gt` | — (validates the shipped GT) |
 | [`synth_arxiv.py`](../../evaluation/eval_datasets/synth_arxiv.py) | — (run as a module) | an already-encoded arxiv directory |
 | [`hf_io.py`](../../evaluation/eval_datasets/hf_io.py) | `eval-fetch`, `eval-publish`, `eval-publish-checkpoint` | HF Hub push/pull |
 | [`common.py`](../../evaluation/eval_datasets/common.py) | — | shared attribute-synthesis numerics |
@@ -45,6 +47,22 @@ because the latter shadows HuggingFace's `datasets` in the shared venv.
 
 `synth_arxiv` has **no** console script despite its docstring examples —
 invoke it as `uv run python -m eval_datasets.synth_arxiv`.
+
+### Tests
+
+```bash
+cd evaluation && uv run pytest eval_datasets/tests -q     # CPU-only, no GPU
+```
+
+[`eval_datasets/tests/`](../../evaluation/eval_datasets/tests/) is CPU-only
+and needs no network: the fixture writers at the top of
+[`test_yfcc.py`](../../evaluation/eval_datasets/tests/test_yfcc.py)
+(`write_u8bin`, `write_knn_result`, `write_spmat`) emit the upstream
+binary formats into `tmp_path`, so the parsers are tested against bytes
+rather than against a downloaded file. The last class, `TestRealSlice`,
+round-trips a 1,000-item slice of the *real* prepared dataset against the
+uncapped tag CSR and skips itself when `$RETRIEVE_DATA_ROOT/yfcc10m` is
+not on the machine. Reuse those writers when adding the E2–E4 loaders.
 
 ### Shared conventions
 
@@ -142,6 +160,140 @@ Embeddings are written per dimension:
 
 Configs select one via `content_subdir`.
 
+### yfcc10m
+
+`download` → `convert` → `prep` → `attrs`, or
+`uv run yfcc all --output-dir data/yfcc10m`.
+
+The NeurIPS'23 Big-ANN **filtered-search** track set: 10M CLIP image
+descriptors, 192-d uint8, plus a bag of tags per image drawn from a
+200,386-word vocabulary (description words, camera model, year, country),
+plus 100,000 queries that each carry 1–2 tags. Six files, 2.97 GB, no
+registration, from
+`https://dl.fbaipublicfiles.com/billion-scale-ann-benchmarks/yfcc100M/`
+(exact names and sizes in
+[dataset-candidates.md §3.4](../plans/dataset-candidates.md) and in
+`yfcc.py`'s `RAW_FILES`). `download` is size-verified and resumable;
+`convert` re-parses every header and writes
+`data/_raw/yfcc10m/processed/manifest.json` with the sha256 of each file.
+
+**This is the one dataset whose filtered ground truth is not ours.** For
+every dataset above, `retrieval/oracle.py` computes the filtered
+top-K itself. Here the organisers ship `GT.public.ibin`: per query, the
+10 nearest base vectors *by squared L2* among the items whose tag bag
+contains **every** query tag (conjunctive AND). `prep` stores it verbatim
+as `gt_shipped.pt`, together with the shipped 100-deep unfiltered GT:
+
+```python
+{"format": "yfcc-shipped-gt-v1",
+ "ids": int64 [100000, 10],   "dists": float32 [100000, 10],   # filtered
+ "unfiltered_ids": int64 [100000, 100], "unfiltered_dists": float32 [...],
+ "k": 10, "unfiltered_k": 100,
+ "metric": "squared_l2",
+ "id_space": "0-indexed base row == item_id - 1 == item_embs row",
+ "predicate": "item tag bag contains every query tag (conjunctive AND)",
+ "source": ".../GT.public.ibin", "provenance": "shipped by the organisers"}
+```
+
+The current harness has **no precomputed-oracle input** — it always
+builds its own — so nothing reads `gt_shipped.pt` at sweep time. It is
+consumed by
+[`yfcc_check_gt.py`](../../evaluation/eval_datasets/yfcc_check_gt.py),
+and it is the format harness v2 should grow an input for
+([evaluation-harness-v2.md §7](../plans/evaluation-harness-v2.md#7-risks--open-questions)).
+
+**Three things about this dataset differ from the others**, all forced by
+the upstream data:
+
+1. **The metric is Euclidean, not inner product.** The shipped GT ranks
+   by squared L2 over raw uint8 vectors; the harness's text path
+   L2-normalises and scores inner product, i.e. cosine. Base-vector norms
+   have a coefficient of variation of 1.1 % (`prep_log.json` →
+   `prep.base_norm`), so the two orders are close but not equal: on a
+   100-query sample, an exact *cosine* filtered top-10 has mean recall
+   0.951 against the shipped squared-L2 GT and reproduces it exactly on
+   59 % of queries (`yfcc_check_gt --metric ip`). Harness recall on this
+   dataset is therefore measured against the harness's own cosine oracle;
+   agreement with the shipped GT is checked separately.
+2. **fp16 is lossless here.** uint8 values 0..255 are exact in fp16, and
+   a 192-term squared-L2 sum over them stays below 2²⁴, so fp32 arithmetic
+   reproduces the shipped integer distances bit-for-bit. `content_d192/`
+   holds fp16 only; a separate int8 code file would be a redundant copy of
+   the same integers, and SilverTorch quantises internally at build time.
+   The sidecars are named `emb_provenance.json`, **not** `*.meta.json`:
+   `loaders.assert_arxiv_prefixes` treats a `*.meta.json` as a nomic
+   encode and demands the `search_document: ` / `search_query: ` prefixes,
+   which YFCC has no concept of.
+3. **The narrow clause tensor is a capped approximation of the tag
+   predicate** — see below.
+
+**`attrs` and the tag cap.** `ExactAttributeFilter` matches a clause when
+the query's value for it appears anywhere in that clause's `A_max` slots,
+and ANDs the clauses. So the tag predicate maps onto **two clauses that
+both hold the item's tag bag**: the query's first tag goes in clause 0,
+its second in clause 1 (`-1`, "always pass", for the 61,626 single-tag
+queries). What does not fit is the bag itself: items carry 10.8 tags on
+average with a 1,517-tag tail, and `[10M, 2, 1517]` int64 is 243 GB.
+`attrs` therefore
+
+- drops every tag no query ever asks for — 192,476 of 200,386 tags, which
+  removes 29 % of the tag entries and cannot change any answer, then
+- keeps the `--max-tags` (default 32) most query-frequent of what remains
+  and pads with `-1`.
+
+Capping is **subtractive only**: the capped predicate passes a subset of
+what the true predicate passes, never a superset. At K=32 that leaves
+98.51 % of items uncapped, and 74.21 % of the 100k queries keep their
+entire shipped-GT row (84.86 % of individual GT entries survive) — the
+numbers land in `prep_log.json` → `attrs.gt_fidelity`, recomputed on every
+`attrs` run. The harness builds its oracle from these same capped attrs,
+so its recall stays internally exact; what the cap changes is *which*
+filter is being benchmarked, not whether the measurement is right.
+
+The **uncapped** bags are shipped as `item_tags_csr.pt` (CSR: `indptr`
+int64 `[N+1]`, `indices` int32 `[nnz]`, upstream tag ids), 513 MB. That
+is the authoritative attribute source: the gate check reads it, and a
+future sparse-set filter could too.
+
+```
+data/yfcc10m/
+├── item_id_map.json            identity map, 10M entries (row i → i+1)
+├── heldout.parquet             query_row, item_id (unfiltered-GT rank 1), n_query_tags
+├── content_d192/
+│   ├── text_emb.pt             [10M, 192] fp16   (uint8 values, lossless)
+│   ├── query_emb.pt            [100k, 192] fp16
+│   └── emb_provenance.json
+├── item_tags_csr.pt            full uncapped tag bags, CSR
+├── item_attrs_narrow.pt        [10M, 2, 32] int64 — dense tag ids, -1 pad
+├── clause_is_reverse_narrow.pt [2] bool = [F, F]  (no negated predicate here)
+├── tag_vocab.json              7,910 queried tags: upstream id, query freq, doc freq
+├── eval_split.parquet          target_id, query_attrs_narrow [2], n_query_tags
+├── gt_shipped.pt               the organisers' filtered + unfiltered GT
+└── prep_log.json
+```
+
+`eval_split.parquet` has no `query_attrs_wide_*` columns — YFCC has one
+attribute (tags) and no wide-bloom bag, so the dead artifacts below do
+not exist for it.
+
+**Validating the shipped GT (roadmap E1's gate).**
+
+```bash
+export RETRIEVE_DATA_ROOT=/workspace/data
+uv run --directory evaluation python -m eval_datasets.yfcc_check_gt \
+    --data-dir $RETRIEVE_DATA_ROOT/yfcc10m --device cuda \
+    --report $RETRIEVE_DATA_ROOT/yfcc10m/gt_check.json
+```
+
+It rebuilds the exact filtered oracle — conjunctive AND over the uncapped
+CSR, squared L2 in fp32 with TF32 pinned off — and compares to
+`gt_shipped.pt` id-by-id, falling back to an exact distance-vector
+comparison where equal distances make the ordering ambiguous. Exit 0 iff
+every query is reproduced. `--limit N` checks a random subset (`--device
+cpu --limit 200` is a ~2-minute sanity run), `--tags narrow` measures the
+cap instead of the true predicate, and `--metric ip` reports the cosine
+drift; the last two are diagnostics and always exit 0.
+
 ### synth_arxiv
 
 Grows an encoded arxiv directory to arbitrary `N` (15M / 30M / 50M) by
@@ -183,6 +335,10 @@ data/arxiv/papers/
     └── query_emb.pt + query_emb.meta.json
 ```
 
+`yfcc10m` is the same shape with one content dir (`content_d192`) and no
+`papers.parquet` — the full listing is under
+[yfcc10m](#yfcc10m) above.
+
 Filter sweeps additionally need:
 
 ```
@@ -214,8 +370,14 @@ EVAL_REPOS = {
     "yambda-500m":       "pinkmeme/eval-yambda-500m",
     "yambda-5b":         "pinkmeme/eval-yambda-5b",
     "goodreads-work-id": "pinkmeme/eval-goodreads-work-id",
+    "yfcc10m":           "pinkmeme/eval-yfcc10m",
 }
 ```
+
+`yfcc10m`'s repo is registered but **not published** — the upstream files
+are already public and unauthenticated, so `yfcc download` is the fetch
+path; the entry exists so the local directory layout resolves like every
+other dataset's.
 
 `eval-fetch` pulls a prepared dataset (optionally a subset of dims),
 `eval-publish` pushes one, `eval-publish-checkpoint` pushes a trained
