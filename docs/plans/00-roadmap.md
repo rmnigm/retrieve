@@ -181,8 +181,16 @@ bit-exactness stays where it belongs, in B2's library parity suite.
 - [ ] **C3 — `run.py`, `cli.py`, deletions, docs.** H §6 WP-3 (Mac,
   1.5 d): delete the old harness files H §5 lists, rewrite
   [../system/evaluation.md](../system/evaluation.md) to H §2, archive
-  [evaluation-refactor.md](evaluation-refactor.md) and the harness half
+  [evaluation-refactor.md](archive/evaluation-refactor.md) and the harness half
   of the refactor runbook.
+  Status: authored 2026-09-06 on `dev/c1-harness-v2`, CPU e2e green, GPU
+  gate C4 pending. `run.py` (the cell loop, JSONL + samples sidecar,
+  resume by key + `code_version`, parity spill, failures as `status:
+  failed`), `cli.py` (`bench run` / `campaign` / `report` stub),
+  `upload.py`; the old harness, its 19 YAMLs and the `evaluate` /
+  `run-evaluation` / `stage-results` scripts deleted (H §5);
+  `algos_v2.py` → `algos.py`; [../system/evaluation.md](../system/evaluation.md)
+  rewritten; validation record in H §9.
 - [ ] **C4 — GPU gate.** H §6 WP-4 (A100, 1 d). Gate: quality within
   1e-6 of the A1 golden, graph latency within 5 %, `cudagraph_skips ==
   0`, `jaccard_vs_first@100 == 1.0` torch-vs-triton, one `official` cell
@@ -355,7 +363,7 @@ loaders as filler — ≈ 11 focused days that never touch the A100.
 - **Refactor validation runbook** — library steps passed on the A100
   2026-09-02 (see *Done*); harness steps 4–7 are replaced by A1. The two
   implemented plans ([kernels-layers-design.md](kernels-layers-design.md),
-  [evaluation-refactor.md](evaluation-refactor.md)) archive with C3.
+  [evaluation-refactor.md](archive/evaluation-refactor.md)) archive with C3.
 - **Thesis results expansion (old item 4)** — its 4a schema items are H
   §2/§3, its 4b reruns are D1; the section is gone from this file.
 - **Goodreads oracle rerun (old item 2)** — D1.
@@ -455,7 +463,7 @@ sweeps are committed on `refactor/kernels-eval`.
   `FilterModule.register_index` kw-only alignment and the minimal
   `RetrievalModule` ABC (K6); the `KernelTuneSpec` registry (K7); new
   tests (K8); doc sweep (K9).
-- [evaluation-refactor.md](evaluation-refactor.md) — harness leanness:
+- [evaluation-refactor.md](archive/evaluation-refactor.md) — harness leanness:
   delete the dead `torch_knn` algo, the unreachable CPU-timing path and
   three unused dependencies; quarantine the upload script behind
   `--repo-id`; rename `datasets` → `eval_datasets` (E1); replace the

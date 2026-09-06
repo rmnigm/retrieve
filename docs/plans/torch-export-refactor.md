@@ -16,7 +16,7 @@
 > Treat the line references and command examples as archaeology.
 >
 > **Scope:** every layer that backs an algo registered in
-> [evaluation/retrieval/algos/__init__.py](../../evaluation/retrieval/algos/__init__.py). 6 layer
+> evaluation/retrieval/algos/__init__.py. 6 layer
 > classes (5 linr + `SilverTorch`). `ShardedSilverTorch` remains out of scope.
 
 ## Goal
@@ -113,11 +113,11 @@ Sibling-method form rather than a `mode=` flag because each filter mode has a di
 Eval algos thread the chosen `mode=` into the layer constructor so the eager benchmark path exercises the export-clean code paths. Minimal blast radius — mode is fixed per algo cell:
 
 - `torch_knn.py`: pick `mode="full"` / `"masked"` / `"candidates"` from whether `filter_mod` is wired and which cell is being benched.
-- [linr_v1.py](../../evaluation/retrieval/algos/linr_v1.py): `mode="full"` if `filter_mod is None` else `"masked"`.
-- [linr_v4.py](../../evaluation/retrieval/algos/linr_v4.py): same shape as linr_v1.
-- [linr_v2.py](../../evaluation/retrieval/algos/linr_v2.py): always `mode="candidates"` (filter required).
-- [linr_v3.py](../../evaluation/retrieval/algos/linr_v3.py): stage 1 `OneBitKNN(mode="full" or "candidates")` based on whether a filter is wired ([linr_v3.py:65](../../evaluation/retrieval/algos/linr_v3.py#L65)); stage 2 always `PrefilterKNN(mode="candidates")`.
-- [silvertorch.py](../../evaluation/retrieval/algos/silvertorch.py): already maps `filter_kind` → `filter`; route the eager `forward` dispatcher through it.
+- linr_v1.py: `mode="full"` if `filter_mod is None` else `"masked"`.
+- linr_v4.py: same shape as linr_v1.
+- linr_v2.py: always `mode="candidates"` (filter required).
+- linr_v3.py: stage 1 `OneBitKNN(mode="full" or "candidates")` based on whether a filter is wired (linr_v3.py:65); stage 2 always `PrefilterKNN(mode="candidates")`.
+- silvertorch.py: already maps `filter_kind` → `filter`; route the eager `forward` dispatcher through it.
 
 ## Verifying the library promise
 
