@@ -29,6 +29,9 @@ from torch import nn
 
 ROOT = Path(__file__).resolve().parents[2]
 LIB_SUBTREE = "retrieve/src/retrieve"  # code_version = tree hash of this (H §8.2 B)
+# Harness outputs are data (H §3.2, §8.2 G/I: committed and mirrored, not scratch), so a
+# campaign appending to them must not flip ``repo_dirty``.
+RESULTS_DIR = "evaluation/results"
 MiB = 1024 * 1024
 
 
@@ -68,13 +71,36 @@ def _git(*args: str) -> str | None:
         return None
 
 
+def subtree_dirty() -> bool | None:
+    """Uncommitted changes (untracked files included) under ``LIB_SUBTREE`` — the code the
+    harness measures. ``None`` outside a git checkout."""
+    out = _git("status", "--porcelain", "--", LIB_SUBTREE)
+    return None if out is None else bool(out)
+
+
+def repo_dirty() -> bool | None:
+    """Uncommitted changes to *tracked* files anywhere but ``RESULTS_DIR``; informational
+    (docs, plans, harness code). ``None`` outside a git checkout."""
+    out = _git(
+        "status", "--porcelain", "--untracked-files=no", "--", ".", f":(exclude){RESULTS_DIR}"
+    )
+    return None if out is None else bool(out)
+
+
 def code_version() -> str:
-    """The library subtree's tree hash at HEAD (H §8.2 B) — the resume key's code component.
-    Outside a git checkout: ``files:<sha256>`` over the installed ``retrieve`` sources, a
-    disjoint namespace so the two can never be mistaken for each other."""
-    tree = _git("rev-parse", f"HEAD:{LIB_SUBTREE}")
-    if tree:
-        return tree
+    """The resume key's code component (H §8.2 B): the library subtree's tree hash at HEAD
+    when the subtree is clean, else ``files:<sha256>`` over the ``retrieve`` sources actually
+    on disk (also the value outside a git checkout). The two namespaces are disjoint, and a
+    dirty subtree never reuses a cell measured at the committed tree."""
+    if subtree_dirty() is False:
+        tree = _git("rev-parse", f"HEAD:{LIB_SUBTREE}")
+        if tree:
+            return tree
+    return files_hash()
+
+
+def files_hash() -> str:
+    """``files:<sha256>`` over every ``*.py`` under the installed ``retrieve`` package."""
     import retrieve  # noqa: PLC0415
 
     root = Path(retrieve.__file__).resolve().parent
@@ -100,8 +126,9 @@ def _nvidia_smi(query: str) -> list[str] | None:
 
 def provenance() -> dict[str, Any]:
     """The record's ``env`` block minus clocks (§3.2, §8.2 B/F). ``commit`` is the repo HEAD;
-    ``code_version`` is the library subtree's tree hash, so doc churn never invalidates a
-    campaign but a kernel edit does. ``dirty`` covers the whole tree."""
+    ``dirty`` is ``subtree_dirty()`` — the flag ``report.py`` enforces (§8.2 F) — and
+    ``repo_dirty`` the informational whole-tree one; ``code_version`` follows ``dirty`` (a
+    kernel edit, committed or not, invalidates a campaign; doc churn never does)."""
     try:
         import triton  # noqa: PLC0415
 
@@ -116,7 +143,8 @@ def provenance() -> dict[str, Any]:
         "torch": torch.__version__,
         "triton": triton_v,
         "commit": _git("rev-parse", "--short", "HEAD"),
-        "dirty": bool(_git("status", "--porcelain")),
+        "dirty": subtree_dirty(),
+        "repo_dirty": repo_dirty(),
         "git_branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
         "code_version": code_version(),
         "host": socket.gethostname(),
@@ -322,9 +350,7 @@ def profile_once(fn: Callable[[], Any], top: int = 8) -> list[dict[str, Any]]:
     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
         fn()
         torch.cuda.synchronize()
-    kernels = [
-        e for e in prof.key_averages() if e.device_type == torch.autograd.DeviceType.CUDA
-    ]
+    kernels = [e for e in prof.key_averages() if e.device_type == torch.autograd.DeviceType.CUDA]
     kernels.sort(key=lambda e: e.self_device_time_total, reverse=True)
     return [
         {"kernel": e.key, "us": float(e.self_device_time_total), "calls": int(e.count)}
@@ -334,16 +360,20 @@ def profile_once(fn: Callable[[], Any], top: int = 8) -> list[dict[str, Any]]:
 
 __all__ = [
     "LIB_SUBTREE",
+    "RESULTS_DIR",
     "NotCapturable",
     "clocks",
     "code_version",
+    "files_hash",
     "graph_callable",
     "index_bytes",
     "latency",
     "profile_once",
     "provenance",
+    "repo_dirty",
     "setup",
     "stats",
+    "subtree_dirty",
     "timed_build",
     "warm_gpu_once",
 ]

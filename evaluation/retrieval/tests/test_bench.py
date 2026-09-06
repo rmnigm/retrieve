@@ -94,11 +94,12 @@ def test_index_bytes_sums_buffers_once_per_tensor():
 def test_provenance_fields():
     p = bench.provenance()
     expected = {
-        "gpu", "driver", "cuda", "torch", "triton", "commit", "dirty", "git_branch",
-        "code_version", "host", "python", "started",
+        "gpu", "driver", "cuda", "torch", "triton", "commit", "dirty", "repo_dirty",
+        "git_branch", "code_version", "host", "python", "started",
     }  # fmt: skip
     assert expected <= set(p)
-    assert p["torch"] == torch.__version__ and isinstance(p["dirty"], bool)
+    assert p["torch"] == torch.__version__
+    assert isinstance(p["dirty"], bool) and isinstance(p["repo_dirty"], bool)
     assert p["started"].endswith("+00:00")
     try:
         tree = subprocess.check_output(
@@ -106,7 +107,65 @@ def test_provenance_fields():
         ).strip()
     except (OSError, subprocess.SubprocessError):
         pytest.skip("git unavailable")
-    assert p["code_version"] == tree and len(tree) == 40
+    assert len(tree) == 40
+    if p["dirty"]:  # an uncommitted kernel edit on this box: the content hash, not the tree
+        assert p["code_version"].startswith("files:")
+    else:
+        assert p["code_version"] == tree
+
+
+def _fake_git(subtree_status: str, repo_status: str):
+    """A ``bench._git`` stand-in: ``status`` answers depend on the pathspec, the rest is real."""
+    real = bench._git
+
+    def fake(*args):
+        if args[0] == "status":
+            return subtree_status if bench.LIB_SUBTREE in args else repo_status
+        return real(*args)
+
+    return fake
+
+
+def test_dirty_is_scoped_to_the_library_subtree(monkeypatch):
+    tree = bench._git("rev-parse", f"HEAD:{bench.LIB_SUBTREE}")
+    if not tree:
+        pytest.skip("git unavailable")
+    # Docs / harness edits: repo dirty, library clean → the tree hash still names the code.
+    monkeypatch.setattr(bench, "_git", _fake_git("", " M docs/plans/00-roadmap.md"))
+    p = bench.provenance()
+    assert (p["dirty"], p["repo_dirty"]) == (False, True) and p["code_version"] == tree
+    # An uncommitted kernel edit: the tree hash would lie, so code_version is the content
+    # hash of the files on disk — a different resume key from the committed tree's.
+    monkeypatch.setattr(bench, "_git", _fake_git(" M retrieve/src/retrieve/x.py", ""))
+    p = bench.provenance()
+    assert (p["dirty"], p["repo_dirty"]) == (True, False)
+    assert p["code_version"] == bench.files_hash() != tree
+    assert p["code_version"].startswith("files:")
+    # Outside a git checkout: unknown, and the content hash.
+    monkeypatch.setattr(bench, "_git", lambda *a: None)
+    p = bench.provenance()
+    assert p["dirty"] is None and p["repo_dirty"] is None and p["commit"] is None
+    assert p["code_version"] == bench.files_hash()
+
+
+def test_repo_dirty_ignores_the_results_dir():
+    """The harness's own outputs are data, not a dirty tree: the pathspec excludes them."""
+    if bench._git("rev-parse", "HEAD") is None:
+        pytest.skip("git unavailable")
+    calls = []
+    real = bench._git
+
+    def spy(*args):
+        calls.append(args)
+        return real(*args)
+
+    bench_git, bench._git = bench._git, spy
+    try:
+        bench.repo_dirty()
+    finally:
+        bench._git = bench_git
+    (args,) = calls
+    assert "--untracked-files=no" in args and f":(exclude){bench.RESULTS_DIR}" in args
 
 
 def test_clocks_record_shape():
