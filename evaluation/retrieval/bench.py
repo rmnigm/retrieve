@@ -15,6 +15,7 @@ the caller's pool rotation keeps index reads naturally cold. Closed-loop, one cl
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import platform
 import socket
 import subprocess
@@ -67,6 +68,23 @@ def _git(*args: str) -> str | None:
         return None
 
 
+def code_version() -> str:
+    """The library subtree's tree hash at HEAD (H §8.2 B) — the resume key's code component.
+    Outside a git checkout: ``files:<sha256>`` over the installed ``retrieve`` sources, a
+    disjoint namespace so the two can never be mistaken for each other."""
+    tree = _git("rev-parse", f"HEAD:{LIB_SUBTREE}")
+    if tree:
+        return tree
+    import retrieve  # noqa: PLC0415
+
+    root = Path(retrieve.__file__).resolve().parent
+    h = hashlib.sha256()
+    for p in sorted(root.rglob("*.py")):
+        h.update(p.relative_to(root).as_posix().encode())
+        h.update(p.read_bytes())
+    return "files:" + h.hexdigest()[:40]
+
+
 def _nvidia_smi(query: str) -> list[str] | None:
     try:
         out = subprocess.check_output(
@@ -100,7 +118,7 @@ def provenance() -> dict[str, Any]:
         "commit": _git("rev-parse", "--short", "HEAD"),
         "dirty": bool(_git("status", "--porcelain")),
         "git_branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
-        "code_version": _git("rev-parse", f"HEAD:{LIB_SUBTREE}"),
+        "code_version": code_version(),
         "host": socket.gethostname(),
         "python": platform.python_version(),
         "started": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
@@ -318,6 +336,7 @@ __all__ = [
     "LIB_SUBTREE",
     "NotCapturable",
     "clocks",
+    "code_version",
     "graph_callable",
     "index_bytes",
     "latency",

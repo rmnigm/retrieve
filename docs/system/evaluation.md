@@ -17,8 +17,8 @@ suite that gates kernel changes is documented in
 
 The harness is being rewritten to the protocol in
 [evaluation-harness-v2.md](../plans/evaluation-harness-v2.md) (H); the
-ordered steps are [00-roadmap.md](../plans/00-roadmap.md) Phase C. Step C1
-landed the first three modules next to the old ones, which keep running
+ordered steps are [00-roadmap.md](../plans/00-roadmap.md) Phase C. Steps C1
+and C2 landed the first six modules next to the old ones, which keep running
 unchanged until C3 deletes them (H §5):
 
 | module | owns | status |
@@ -26,6 +26,9 @@ unchanged until C3 deletes them (H §5):
 | [`retrieval/bench.py`](../../evaluation/retrieval/bench.py) | `setup`, `warm_gpu_once`, `provenance` (GPU, driver, CUDA, torch, triton, commit, dirty, branch, `code_version` = tree hash of `retrieve/src/retrieve`), `clocks`, `timed_build`, `index_bytes` (Σ buffers incl. the filter submodule), `latency` (H §2.5 event-per-call windows, IQR + outlier counts, `load: closed_loop`), `graph_callable` (`reduce-overhead`, `dynamic=False`, `fullgraph=True`, asserts `cudagraph_skips == 0` and one `cudaGraphLaunch` per call, raises `NotCapturable` with the record's `reason`), `profile_once` | authored C1; CPU tests green; GPU paths validated in C4 |
 | [`retrieval/metrics.py`](../../evaluation/retrieval/metrics.py) | `accumulator` / `accumulate` / `finalize` — recall, ndcg, precision, mrr at every `k` from one top-`k_max` list as float64 running sums on device (one sync per pass); `ranked=True` reproduces the old per-`k` oracle `nt_k`; `jaccard_at_k`. The old per-row API (`*_at_k`, `accumulate_metrics`, `finalize_metrics`) is kept as wrappers for `passes.py` | rewritten in place; equal to the old per-row means to 1e-9 (`tests/test_metrics.py`) |
 | [`retrieval/algos_v2.py`](../../evaluation/retrieval/algos_v2.py) | the five `nn.Module` wrappers (`LinrV1`…`Silvertorch`) with the filter as a submodule, `k` settable, `set_query_params` (`n_probe`, `candidate_pool`; H §8.2 A); `ALGOS`, `FILTER_KINDS`, `BACKENDS = (triton, torch, official)`, `FILTER_BACKEND` (official cells build Triton filters, O §6.2), `CAPTURABLE` (official is eager-only), `PATHS[(algo, filter_kind, backend)]` → the code path that runs (`triton`, `torch`, `cublas`, `cublas+triton`, `cublas+torch`, `official`) or `None`; `build`, `build_filter`, `is_valid_combo` | named `algos_v2.py` because a module cannot coexist with the old `algos/` package; C3 renames it to `algos.py`. `backend="official"` raises `NotImplementedError` until roadmap B1 adds it to `retrieve` |
+| [`retrieval/config.py`](../../evaluation/retrieval/config.py) | the H §3.3 matrix: `load_dataset(yaml, dim) -> Dataset`, `load_matrix(dataset_yaml, suites_yaml, suite, **narrows) -> list[Job]`; `{dim}` templating, the `build:` / `query:` param split (H §8.2 A), `disabled: true` sweeps (§8.2 J), the PATHS collapse, `ConfigError` naming the file and key. Schema below | authored C2 (v2 API on top; the old `EvalConfig` API stays below a divider for `cli/evaluate.py` / `sweep.py` until C3). `tests/test_config_v2.py` checks job counts per suite on a fixture and that the real `config/{goodreads,arxiv}.yaml` × `suites.yaml` reproduce the old `d128-{filter,quality}.yaml` cells |
+| [`retrieval/data.py`](../../evaluation/retrieval/data.py) | `load_inputs(ds, device, with_filters=True) -> dict` (item embs, queries, targets, `n_targets`, `qa`, `item_attrs`, `clause_is_reverse`, `n_items`, `n_queries`; SASRec encode cached as `<ckpt-dir>/encoded_queries_v2.pt` on the *full* split; `users_limit` applied once, as a prefix, after the eval_split row check), `sweep_qa(qa, clauses)`, `build_filters(kind, inputs, backends, bloom=…)` keyed by *filter* backend (`FILTER_BACKEND`, so `[triton, official]` builds one module), `exact_filter(...)` for the oracle, `query_pool(...)` (the fixed-seed perf pool, same draw as the old harness) | authored C2; the pre-encoded path is tested on a tmp fixture (`tests/test_data.py`), the checkpoint path runs in C4. Imports `encode.py` (the one `training.*` boundary); copies the arxiv numerics from `loaders.py` |
+| [`retrieval/oracle.py`](../../evaluation/retrieval/oracle.py) | the exact filtered oracle as **blob v4** (`load_or_build(...) -> dict`, `compute`, `pass_counts`, `pass_rate`, `bloom_fp_rate`), the content fingerprint in the file name, `resume_key(key, code_version)` (+ `KEY_FIELDS`); `bench.code_version()` = `git rev-parse HEAD:retrieve/src/retrieve` or `files:<sha256>` outside git | rewritten in place; the old `compute_filtered_oracle` / `load_or_build_oracle` are wrappers returning `topk` (the old harness now reads/writes v4 blobs under its `gt_subdir`; its `gt_topk_v3_*` files are ignored and can be deleted) |
 
 `tests/test_algos.py` parses the dispatch table in
 [architecture.md](architecture.md#backend-dispatch) and asserts `PATHS`
@@ -34,9 +37,117 @@ layer bakes `k` into a buffer at `register_index` — `module.k = k'` after
 registration returns the top-`k'` prefix of the top-`k` result with every
 buffer untouched (H §7 first risk: nothing found; `SilverTorch` and the
 1-bit KNNs only *validate* `k` at registration, and the wrapper's `k`
-setter / `set_query_params` re-run SilverTorch's two checks). Everything
-below this section describes the **old** harness, which is what
-`uv run evaluate` still runs.
+setter / `set_query_params` re-run SilverTorch's two checks).
+
+### Config schema (C2, H §3.3 + §8.2 A/J)
+
+Five files replace the 19 old YAMLs (which stay until C3):
+[`config/goodreads.yaml`](../../evaluation/config/goodreads.yaml),
+[`arxiv.yaml`](../../evaluation/config/arxiv.yaml),
+[`yambda-500m.yaml`](../../evaluation/config/yambda-500m.yaml),
+[`yambda-5b.yaml`](../../evaluation/config/yambda-5b.yaml) and
+[`suites.yaml`](../../evaluation/config/suites.yaml). Their values are
+the old configs' (`users_limit: 10000`, the same sweeps, ks, batch sizes,
+`n_probe` grid) so C4 can compare against A1's golden cells.
+
+```yaml
+# config/<dataset>.yaml — one per dataset; every string may carry {dim}
+data_dir: data/goodreads-work-id
+checkpoint: data/goodreads-work-id/checkpoints/gsasrec-d{dim}-drop0.5-id/best_model.pt
+#   or, for pre-encoded text datasets, a per-dim mapping instead of `checkpoint`:
+#   content_dir: {64: content_d64, 128: content_d128, 256: content}   # relative to data_dir
+dims: [64, 128, 256]
+encode: {batch_size: 512, num_workers: 8, max_seq_length: 200}       # SASRec datasets only
+users_limit: 10000                                                    # or null
+filters:                                                              # optional
+  attrs: item_attrs_narrow.pt                                         # relative to data_dir
+  reverse: clause_is_reverse_narrow.pt
+  clause: {c0_genre: [0], c1_lang_reverse: [1], all4: [0, 1, 2, 3]}   # name: active clauses
+  bloom: {c0_genre: [0], old_sweep: {clauses: [2], disabled: true}}   # long form: disabled
+```
+
+`gt_dir` is derived (`<data_dir>/gt_d{dim}`); `output`, `split`, `device`,
+`gt_subdir`, `query_emb_path` and `content_subdir` are gone. Unknown keys
+raise `ConfigError` naming the file.
+
+```yaml
+# config/suites.yaml — a suite = cells run on every listed dataset × its dims
+filter:
+  datasets: [goodreads, arxiv]
+  dims: [128]                       # optional; default: the dataset's dims
+  filter_kinds: [clause, bloom]     # none | clause | bloom
+  ks: [100, 500, 1000]
+  batch_sizes: [1, 8, 16]
+  algos: {linr_v2: [triton, torch], silvertorch: [triton, torch, official]}
+  params:                           # per algo; dict-of-lists = grid, list-of-dicts = combos
+    silvertorch: {build: {n_lists: [1664, 8192]}, query: {n_probe: [4, 8, 24, 32]}}
+  seeds: {default: [0], headline: {sweeps: [c0_genre, all4], dims: [128], seeds: [0, 1, 2]}}
+  bloom: {m_bits: 1024, k_hash: 5}  # optional per-suite override of the top-level default
+bloom: {m_bits: 1024, k_hash: 5}
+```
+
+`build:` params rebuild the index; `query:` params (`n_probe`,
+`candidate_pool` — the `QUERY_PARAMS` set) are applied with
+`set_query_params` to the built index, so the `deep` suite above is two
+k-means per `(dataset, sweep, seed)`, not eight. Putting a query param
+under `build:` (or vice versa) is a `ConfigError`. `seeds:` is a list, or
+the `default` / `headline` form (headline seeds apply to the named sweeps
+at the named dims, whatever the filter kind). A backend whose `PATHS`
+entry is `None` is skipped and one that runs the same path as an earlier
+backend of the same algo and filter kind is collapsed into it (logged
+once each); CLI narrows (`dims`, `algos`, `backends`, `filter_kinds`,
+`sweeps`, `seeds`, `ks`, `batch_sizes`) filter the suite's lists *before*
+that collapse.
+
+`load_matrix` returns `Job`s grouped by `Job.group == (dataset, dim, algo,
+backend)` — the campaign's process boundary (H §8.2 K) — in the order
+`dim → algo → backend → filter_kind → sweep → build → seed`. A `Job` is one
+build: `dataset, dim, suite, filter_kind, sweep, clauses, algo, backend,
+path, build, query, ks, batch_sizes, seed, bloom, data: Dataset`;
+`job.cells()` lists the `params = build | query` of each cell and
+`job.key(params)` is the record's key block (`dataset, dim, suite,
+filter_kind, sweep, algo, backend, params, seed`). `none` cells have
+`sweep == "full_scan"` and `clauses is None`.
+
+### Oracle blob v4 and the resume key (C2, H §2.2, §8.2 B/I)
+
+`oracle.load_or_build(gt_dir, sweep, k_gt, item_embs=, queries=, targets=,
+qa_sweep=, skip_mask=, clauses=, filter_mod=, device=)` returns one dict,
+cached at `<gt_dir>/oracle_v4_<sweep>_<fingerprint[:16]>.pt`:
+
+| key | value |
+|---|---|
+| `version` | `4` |
+| `topk` | `[U, k_gt]` int64 exact filtered top-k (0-indexed, `-1` padded; skipped rows all `-1`) |
+| `pass_counts` | `[U]` int64 items passing the exact mask; `-1` on skipped rows |
+| `pass_rate` | mean of `pass_counts / n_items` over kept rows |
+| `targets_in_filter` | `[U, T]` bool, target `t` of user `u` passes the mask |
+| `target_in_filter` | `[U]` bool, any target passes (`n_queries_heldout` = its sum) |
+| `n_items`, `n_queries`, `n_kept`, `k_gt`, `sweep`, `clauses` | shape of the build |
+| `fingerprint` | sha256 over shapes, dtypes and a 64-row linspace sample of `item_embs`, `queries`, `targets`, `qa_sweep`, plus `clauses` and `k_gt` |
+| `code_version`, `harness_commit`, `torch`, `created` | provenance |
+
+The fingerprint is in the file name, so a stale blob is never read (a
+different dim off the same `data_dir`, regenerated attrs, a retrained
+checkpoint, another `users_limit` or clause set each produce a new file),
+and the blob is a portable artifact for roadmap F4. The filter passed in
+must be exact (`data.exact_filter`): bloom cells build a fresh
+`ExactAttributeFilter` for it. Bloom pass rates are not cached —
+`oracle.pass_counts(bloom_mod, qa_sweep, skip_mask, device=)` plus
+`oracle.bloom_fp_rate(bloom_counts, blob["pass_counts"], n_items)` give
+the record's `bloom_fp_rate` (mean per-query `(bloom − exact) / (N −
+exact)`).
+
+The resume key is `oracle.resume_key(job.key(params),
+bench.code_version())`: canonical JSON of the key block plus the library
+subtree's tree hash (`git rev-parse HEAD:retrieve/src/retrieve`;
+`files:<sha256>` over the installed sources outside git). A kernel edit
+therefore invalidates every cell; doc churn invalidates none. `run.py`
+(C3) reconstructs a record's key as `resume_key({k: rec[k] for k in
+oracle.KEY_FIELDS}, rec["env"]["code_version"])`.
+
+Everything below this section describes the **old** harness, which is
+what `uv run evaluate` still runs.
 
 ## Scope
 
@@ -257,7 +368,7 @@ see [filtering.md](filtering.md) for the filter API.
 | `query_emb_path` | path or `null` | Override for the pre-encoded query tensor location on the arxiv path. Defaults to `<data_dir>/<content_subdir>/query_emb.pt`. No shipped config sets it; it does **not** select the pre-encoded path (`checkpoint` does). |
 | `data_dir` | path | Holds `item_id_map.json`, `<split>.parquet`, optional `eval_split.parquet` + filter attrs. |
 | `content_subdir` | str | Subdir under `data_dir` for `{text_emb,query_emb}.pt` + meta sidecars (arxiv only). Default `content`; arxiv ships `content_d64`, `content_d128`, `content` (= d=256). Sharded synth catalogs (`shard_index.json`) are reassembled on load. |
-| `gt_subdir` | str | Subdir under `data_dir` for `gt_topk_v3_<sweep>.pt` oracle caches. Default `gt`. Varying it per dim keeps caches tidy; **correctness no longer depends on it** — the oracle blob carries a content fingerprint and stale caches recompute automatically. |
+| `gt_subdir` | str | Subdir under `data_dir` for the oracle caches (since C2: the v4 blobs `oracle_v4_<sweep>_<hash>.pt` described in the harness-v2 section; older `gt_topk_v3_*` files are ignored). Default `gt`. Varying it per dim keeps caches tidy; **correctness no longer depends on it** — the fingerprint is in the file name. |
 | `output` | dir path | Directory for the per-algo JSONs. The orchestrator requires it to be set (a `output: null` config exits with a clear error rather than a bare TypeError). |
 | `split` | str | `test` (default) or `val`. Inert on the arxiv path (the held-out set is fixed at `heldout.parquet`); it selects the parquet on SASRec paths and is part of the encode-cache filename. |
 | `device` | str | `cuda`. The only supported value — output rows hard-code `"device": "cuda"` regardless of what is set here, so a `cpu` config produces mislabelled rows rather than a CPU run. |
@@ -472,15 +583,16 @@ mapped back to `-1` so short-fill rows don't score against the algos'
 `-1` sentinel. Indices are 0-indexed positions in the (already
 pad-row-dropped) `item_embs`.
 
-Disk cache: `<data_dir>/<gt_subdir>/gt_topk_v3_<sweep>.pt`, a dict blob
-`{"topk", "fingerprint", "k_gt"}`. The **content fingerprint** hashes
-shapes + dtypes + a fixed 64-row linspace sample of `item_embs`,
-`queries`, and the sweep's `qa_narrow`, plus `K_GT` — so same-shape
-content changes (a different dim off the same `data_dir`, regenerated
-attrs, a retrained checkpoint, a changed `users_limit`) invalidate the
-cache instead of silently reusing stale ground truth (the failure mode
-behind the goodreads stale-cache incident). These caches are local
-build artifacts — delete the `gt_subdir` to force a rebuild.
+Disk cache: since C2 `load_or_build_oracle` is a wrapper over the v4
+`oracle.load_or_build` and returns its `topk`; the blob lives at
+`<data_dir>/<gt_subdir>/oracle_v4_<sweep>_<fingerprint[:16]>.pt` with
+the content **fingerprint** (shapes + dtypes + a fixed 64-row linspace
+sample of `item_embs`, `queries` and the sweep's `qa_narrow`, plus
+`K_GT`) in the file name — so same-shape content changes (a different dim
+off the same `data_dir`, regenerated attrs, a retrained checkpoint, a
+changed `users_limit`) produce a new file instead of silently reusing
+stale ground truth (the failure mode behind the goodreads stale-cache
+incident). The old `gt_topk_v3_*` files are ignored and can be deleted.
 
 ### Perf pass
 
