@@ -423,6 +423,10 @@ LiNR V1, V2, V3, V4 plus `SimHashKNN` in both backends.
   matches eager with zero graph breaks
   (`test_reduce_overhead_compile_zero_graph_breaks_and_parity`).
 
+- `backend` validation: every LiNR class and `ExactAttributeFilter`
+  raise `ValueError("unknown backend …")` for `"official"`, `"cuda"` and a
+  typo — `LinrBackend` is `torch | triton`, no silent torch fallback.
+
 ### [`test_silvertorch.py`](../../retrieve/tests/correctness/test_silvertorch.py)
 
 `SilverTorch` — all three filter modes (`"none"`, `"bloom"`, `"exact"`)

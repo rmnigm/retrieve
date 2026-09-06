@@ -1,11 +1,24 @@
 from __future__ import annotations
 
 import abc
-from typing import Literal
+from typing import Literal, get_args
 
 from torch import Tensor, nn
 
-Backend = Literal["torch", "triton", "official"]
+# Two backend vocabularies, one per family. Every LiNR layer and every standalone filter
+# has exactly a Triton path and a torch path; only ``SilverTorch`` also routes to Meta's
+# official ops. Each constructor validates its own literal via ``check_backend`` so a
+# typo — or a SilverTorch-only value handed to a LiNR module — raises instead of
+# silently running the torch path.
+LinrBackend = Literal["torch", "triton"]
+SilverTorchBackend = Literal["torch", "triton", "official"]
+
+
+def check_backend(backend: str, allowed: object) -> None:
+    """Raise ``ValueError`` unless ``backend`` is one of the ``Literal`` values ``allowed``."""
+    if backend not in get_args(allowed):
+        expected = ", ".join(map(repr, get_args(allowed)))
+        raise ValueError(f"unknown backend {backend!r}; expected one of {expected}")
 
 
 class RetrievalModule(nn.Module, abc.ABC):
