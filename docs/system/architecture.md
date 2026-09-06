@@ -404,8 +404,13 @@ not a kernel of ours at all:
 [`silvertorch/official.py`](../../retrieve/src/retrieve/kernels/silvertorch/official.py)
 adapts Meta's `torch.ops.st.*` ops (measured on the A100: 19 launches
 and 3 host syncs per unfiltered forward, ≈ 32 launches and ≥ 5 syncs
-with bloom — plan §13.2). Full per-kernel detail in
-[kernels.md](kernels.md).
+with bloom — plan §13.2). Eight of the ten ops are registered with
+`@torch.library.triton_op` so inductor can see the `@triton.jit` body; the
+two stream-compaction kernels (`clause_compact`, `bloom_compact`) are
+opaque `@torch.library.custom_op`s instead, because their data-dependent
+store address makes inductor's mutation analysis flag the index buffers and
+cudagraph trees skip the compiled forward. Full per-kernel detail, and that
+mechanism, in [kernels.md](kernels.md).
 
 | subtree                                                                                              | kernel                                                                                                                                | consumer                          |
 |------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------|
