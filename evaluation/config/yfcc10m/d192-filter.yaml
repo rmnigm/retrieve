@@ -1,0 +1,60 @@
+_defaults: &defaults
+  data_dir: data/yfcc10m
+  # CLIP descriptors are 192-d uint8; there is no Matryoshka ladder here, so
+  # this is the only content dir the dataset has.
+  content_subdir: content_d192
+  gt_subdir: gt_d192
+  # No `checkpoint:` field — YFCC is the pre-encoded (text-shape) path;
+  # queries are the organisers' shipped 100k query vectors.
+  output: results/yfcc10m/d192-filter
+  split: test
+  device: cuda
+  # 10 is the shipped ground-truth depth (GT.public.ibin); 100 keeps the
+  # cross-dataset column comparable with arxiv/goodreads.
+  ks: [10, 100]
+  batch_sizes: [1, 8, 16]
+  seed: 0
+
+  algorithms:
+    - linr_v1_filter_mask
+    - linr_v2              # exact filtered top-K — recall=1.0 baseline
+    - linr_v3
+    - linr_v4
+    - silvertorch
+
+  backends: [triton, torch]
+  # 100k shipped queries; the same cap the other filter configs use keeps a
+  # cell's bs=1 quality stream from dominating wall clock.
+  users_limit: 10000
+
+  # Two clauses, both holding the item's (capped) tag bag: the query's first
+  # tag goes in clause 0, its second in clause 1, and ExactAttributeFilter
+  # ANDs the clauses — which is the organisers' conjunctive tag predicate.
+  # 61,626 of the 100k queries carry one tag and leave clause 1 at -1
+  # ("always pass"); 38,374 carry two.
+  #
+  # Caveats, both spelled out in docs/system/datasets.md:
+  #  * the clause tensor is capped at 32 tags/item, so this predicate is
+  #    *stricter* than the shipped one on 25.8 % of queries. The harness
+  #    builds its oracle from these same attrs, so recall here stays
+  #    internally exact; agreement with the shipped GT is a separate check
+  #    (`python -m eval_datasets.yfcc_check_gt`).
+  #  * the harness scores cosine, the shipped GT squared L2. Same caveat.
+  #
+  # No bloom block: BloomFilter hashes one query value per clause, which is
+  # the same shape as `clause` here, but its false positives would make the
+  # cross-check against the shipped GT meaningless. Add one only for a
+  # deliberate FPR study (roadmap D3).
+  filters:
+    none:
+      # Targets for the unfiltered cell are the rank-1 neighbours from the
+      # shipped unfiltered GT (see `yfcc prep` -> heldout.parquet).
+      sweeps:
+        - {name: full_scan}
+    clause:
+      attrs_path:   data/yfcc10m/item_attrs_narrow.pt
+      reverse_path: data/yfcc10m/clause_is_reverse_narrow.pt
+      sweeps:
+        - {name: tags_and, active_clauses: [0, 1]}
+
+<<: *defaults

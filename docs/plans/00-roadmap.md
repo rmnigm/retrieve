@@ -225,6 +225,15 @@ and ingestion plans: [dataset-candidates.md](dataset-candidates.md)
   set, so this is the one dataset whose filtered ground truth is *not*
   ours. Gate: our exact filtered oracle reproduces the shipped GT on the
   100k queries; one `none` + one filter cell run.
+  *Status: download + parse + loader done 2026-09-06, GPU gate pending.*
+  (`evaluation/eval_datasets/yfcc.py`, `yfcc_check_gt.py`,
+  `config/yfcc10m/d192-filter.yaml`; 200-query CPU subset of the gate
+  reproduces the shipped GT bit-exactly. Two deviations from D §3.4 to
+  carry into the paper: the tag clause tensor is capped at 32 tags/item,
+  which makes the *harness* predicate stricter than the shipped one on
+  25.8 % of queries — the shipped GT is validated against the uncapped
+  CSR instead — and the harness scores cosine while the shipped GT is
+  squared L2. Both in [../system/datasets.md](../system/datasets.md#yfcc10m).)
 - [ ] **E2 — PubMed + MedCPT, ~36 M articles.** D §3.8 / §4.1
   (download-bound: 102 GB of 768-d fp32 embeddings + 44 GB of per-PMID
   JSON from the NCBI FTP, public domain, no registration; no encoding).
