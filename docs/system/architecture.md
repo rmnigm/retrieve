@@ -372,7 +372,14 @@ builders with the filters package, not the module classes:
   mode="reduce-overhead")`).
 - [`KMeansTorch`](../../retrieve/src/retrieve/layers/utils/kmeans.py) —
   pure-torch Lloyd's k-means used by `SilverTorch` for IVF index
-  building (not a `RetrievalModule`).
+  building (not a `RetrievalModule`). `fit` is **bit-for-bit reproducible
+  run to run**: the centroid update reduces with a float64 one-hot GEMM
+  accumulated panel by panel, not `index_add_`'s floating-point atomics,
+  whose scheduling-dependent order made two seed-0 builds differ by 1.8e-2
+  in the centroids and put every SilverTorch quality number out of reach of
+  the golden gate's 1e-6 (roadmap C4). Costs ~1.3x the old `fit` wall time
+  at N=200k, D=128, n_lists=1024, bounded by one extra assignment-sized
+  matmul per Lloyd iteration.
 - Two abstract bases plus the two backend literals and their validator in
   [`interfaces.py`](../../retrieve/src/retrieve/interfaces.py):
   `RetrievalModule` (a minimal lifecycle ABC — `k` attr + abstract
