@@ -207,6 +207,10 @@ bit-exactness stays where it belongs, in B2's library parity suite.
   0`, `jaccard_vs_first@100 == 1.0` torch-vs-triton, one `official` cell
   runs end to end on goodreads-d128 `c0_genre` with jaccard ≥ 0.99 (O
   WP-6's gate). Unblocks: D1.
+  Status 2026-09-06: 14 goodreads d128 c0_genre cells ran on the A100
+  (JSONL in evaluation-harness-v2-artifacts/c4/); cudagraph-skip failure
+  found on compiled linr_v2/linr_v3 triton, fix drafted, unverified; arxiv
+  cell, resume check and the golden comparison NOT run; gate open.
 
 ### Phase D — campaign and baselines (A100)
 
