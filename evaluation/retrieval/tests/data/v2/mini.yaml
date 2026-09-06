@@ -1,0 +1,15 @@
+# Harness v2 dataset fixture for test_config_v2.py: two dims, a checkpoint template,
+# one disabled sweep (H §8.2 J). No real data behind any path.
+data_dir: data/mini
+checkpoint: data/mini/checkpoints/d{dim}/best_model.pt
+dims: [16, 32]
+encode: {batch_size: 8, num_workers: 0, max_seq_length: 20}
+users_limit: 100
+filters:
+  attrs: item_attrs_narrow.pt
+  reverse: clause_is_reverse_narrow.pt
+  clause:
+    c0: [0]
+    c0c1: [0, 1]
+    c9_off: {clauses: [1], disabled: true}
+  bloom: {c0: [0]}

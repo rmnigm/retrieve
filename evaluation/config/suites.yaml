@@ -1,0 +1,56 @@
+# Harness v2 suites (H §3.3, §8.2 A/J; backends per H's amendment: triton | torch | official).
+# A suite = the cells run on every listed dataset × its dims. `algos` maps each algo to the
+# backends it runs on; algos_v2.PATHS collapses backends that run the same code (linr_v1 /
+# linr_v4 on `none` are one cuBLAS job) and drops (algo, filter_kind, backend) triples with
+# no code path (linr_v2 on `none`, official on anything but silvertorch).
+# `params.<algo>`: `build:` (rebuilds the index) and `query:` (n_probe / candidate_pool,
+# mutated via set_query_params) — dict-of-lists = grid, list-of-dicts = explicit combos.
+# Algo defaults when no params are given: silvertorch n_lists=1024 n_probe=24 n_iter=10,
+# linr_v3 candidate_pool=5000 (the old configs' cells).
+
+quality:                       # unfiltered, vs held-out targets (old d*-quality.yaml)
+  datasets: [goodreads, yambda-500m, yambda-5b, arxiv]
+  filter_kinds: [none]
+  ks: [100, 200, 400]
+  batch_sizes: [1]
+  algos:
+    linr_v1_filter_mask: [triton]        # cuBLAS either way; one job
+    linr_v3: [triton, torch]
+    linr_v4: [triton]                    # cuBLAS int8 either way; one job
+    silvertorch: [triton, torch, official]
+
+filter:                        # vs exact oracle + held-out-in-filter (old d*-filter.yaml)
+  datasets: [goodreads, arxiv]
+  filter_kinds: [clause, bloom]
+  ks: [100, 500, 1000]
+  batch_sizes: [1, 8, 16]
+  algos:
+    linr_v1_filter_mask: [triton, torch]
+    linr_v2: [triton, torch]
+    linr_v3: [triton, torch]
+    linr_v4: [triton, torch]
+    silvertorch: [triton, torch, official]
+  params:
+    silvertorch: {query: {n_probe: [24, 32]}}   # roadmap D1: headline n_probe ∈ {24, 32}
+  seeds:
+    default: [0]
+    headline: {sweeps: [c0_genre, c0_maincat, all4], dims: [128], seeds: [0, 1, 2]}
+
+deep:                          # recall-vs-latency curves (old config/deep_sweeps/*.yaml + H §2.7)
+  datasets: [goodreads, arxiv]
+  dims: [128]
+  filter_kinds: [clause, bloom]
+  ks: [100, 200, 400]
+  batch_sizes: [1, 8, 16]
+  seeds: [0, 1, 2]
+  algos:
+    silvertorch: [triton, torch, official]
+    linr_v3: [triton, torch]
+  params:
+    silvertorch:               # 2 builds (n_lists) × 6 query configs, not 12 builds (§8.2 A)
+      build: {n_lists: [1664, 8192]}
+      query: {n_probe: [4, 8, 24, 32, 128, 256]}
+    linr_v3:
+      query: {candidate_pool: [2000, 4000, 8000, 16000, 32000]}
+
+bloom: {m_bits: 1024, k_hash: 5}   # shared defaults; a suite may override with its own `bloom:`
