@@ -20,7 +20,7 @@ import polars as pl
 import pytest
 import torch
 
-from retrieval import data
+from retrieval import data, oracle
 from retrieval.config import Dataset
 from retrieve import BloomFilter, ExactAttributeFilter
 
@@ -71,9 +71,11 @@ def test_load_inputs_pre_encoded(tmp_path):
         True,
     ]
     assert (inp["n_items"], inp["n_queries"]) == (N, U)
+    assert inp["attrs_digest"] == oracle.attrs_digest(inp["item_attrs"], inp["clause_is_reverse"])
     # Without filters nothing attribute-shaped is loaded.
     lean = data.load_inputs(ds, torch.device("cpu"), with_filters=False)
     assert lean["qa"] is None and lean["item_attrs"] is None and lean["clause_is_reverse"] is None
+    assert lean["attrs_digest"] == oracle.attrs_digest(None, None) != inp["attrs_digest"]
 
 
 def test_users_limit_is_one_prefix_over_every_query_tensor(tmp_path):

@@ -21,12 +21,14 @@ the pad-row-dropped ``item_embs``.
 | ``code_version``, ``harness_commit``, ``torch``, ``created`` | provenance of the build |
 
 The **fingerprint** hashes shapes, dtypes and a fixed 64-row linspace sample of
-``item_embs``, ``queries``, ``targets`` and the sweep's ``qa`` plus ``clauses`` and ``k_gt``
-(the E6 fix, extended to the two inputs the v4 fields depend on). Same-shape content changes
-— another dim off the same ``data_dir``, regenerated attrs, a retrained checkpoint, a changed
-``users_limit`` — change the file name, so a stale blob is never *read*; the hash in the name
-is what makes the blob a portable artifact (§8.2 I). Bloom pass rates are not cached: they
-depend on ``m_bits`` / ``k_hash`` and cost one mask pass (``pass_counts``).
+``item_embs``, ``queries``, ``targets`` and the sweep's ``qa``, the *full bytes* of the item
+side of the predicate — ``item_attrs`` and ``clause_is_reverse``, via ``attrs_digest``
+(``data.load_inputs`` computes it once per ``(dataset, dim)``; the ETL edits that tensor
+piecemeal, so a row sample is not enough) — plus ``clauses`` and ``k_gt``. Same-shape content
+changes — another dim off the same ``data_dir``, regenerated attrs, a retrained checkpoint, a
+changed ``users_limit`` — change the file name, so a stale blob is never *read*; the hash in
+the name is what makes the blob a portable artifact (§8.2 I). Bloom pass rates are not
+cached: they depend on ``m_bits`` / ``k_hash`` and cost one mask pass (``pass_counts``).
 """
 
 from __future__ import annotations
@@ -49,6 +51,20 @@ BLOB_VERSION = 4
 _FP_SAMPLE_ROWS = 64
 
 
+def attrs_digest(item_attrs: torch.Tensor | None, clause_is_reverse: torch.Tensor | None) -> str:
+    """sha256 over the full bytes (shape, dtype, content) of ``item_attrs`` and
+    ``clause_is_reverse`` — the item side of the predicate. ≈ 1 s per GB; computed once per
+    ``(dataset, dim)`` by ``data.load_inputs`` and passed down to ``fingerprint``."""
+    h = hashlib.sha256()
+    for t in (item_attrs, clause_is_reverse):
+        if t is None:
+            h.update(b"none")
+            continue
+        h.update(repr((tuple(t.shape), str(t.dtype))).encode())
+        h.update(t.detach().cpu().contiguous().numpy().tobytes())
+    return h.hexdigest()
+
+
 def fingerprint(
     item_embs: torch.Tensor,
     queries: torch.Tensor,
@@ -56,8 +72,11 @@ def fingerprint(
     qa_sweep: torch.Tensor | None,
     clauses: tuple[int, ...] | None,
     k_gt: int,
+    *,
+    attrs_digest: str,
 ) -> str:
-    """Cheap deterministic content hash: shapes + dtypes + a fixed row sample (<10 ms)."""
+    """Deterministic content hash: shapes + dtypes + a fixed row sample of the four query-side
+    tensors (<10 ms), the precomputed ``attrs_digest``, ``clauses`` and ``k_gt``."""
     h = hashlib.sha256()
     for t in (item_embs, queries, targets, qa_sweep):
         if t is None:
@@ -66,6 +85,7 @@ def fingerprint(
         h.update(repr((tuple(t.shape), str(t.dtype))).encode())
         idx = torch.linspace(0, t.shape[0] - 1, steps=min(_FP_SAMPLE_ROWS, t.shape[0])).long()
         h.update(t[idx].detach().float().cpu().contiguous().numpy().tobytes())
+    h.update(attrs_digest.encode())
     h.update(repr((None if clauses is None else tuple(clauses), int(k_gt))).encode())
     return h.hexdigest()
 
@@ -179,11 +199,14 @@ def load_or_build(
     skip_mask: torch.Tensor | None,
     clauses: tuple[int, ...] | None,
     filter_mod: FilterModule | None,
+    attrs_digest: str,
     device: torch.device,
 ) -> dict[str, Any]:
     """The v4 blob for one sweep: read from ``blob_path`` when present, else build and
     save. The name carries the fingerprint, so a stale blob is simply never found."""
-    fp = fingerprint(item_embs, queries, targets, qa_sweep, clauses, k_gt)
+    fp = fingerprint(
+        item_embs, queries, targets, qa_sweep, clauses, k_gt, attrs_digest=attrs_digest
+    )
     path = blob_path(gt_dir, sweep, fp)
     if path.exists():
         blob = torch.load(str(path), map_location="cpu", weights_only=True)
@@ -253,6 +276,7 @@ KEY_FIELDS = (
 __all__ = [
     "BLOB_VERSION",
     "KEY_FIELDS",
+    "attrs_digest",
     "blob_path",
     "bloom_fp_rate",
     "compute",

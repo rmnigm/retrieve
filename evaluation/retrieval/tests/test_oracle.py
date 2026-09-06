@@ -150,7 +150,11 @@ def test_pass_counts_and_bloom_fp_rate():
 # ----- cache: fingerprint in the file name ----------------------------------------------
 
 
-def _build(gt_dir, item_embs, queries, targets=None, clauses=(0,)):
+ATTRS = torch.tensor([[[0]], [[1]], [[2]], [[0]]])  # [N=4, C=1, A=1]
+REVERSE = torch.tensor([False])
+
+
+def _build(gt_dir, item_embs, queries, targets=None, clauses=(0,), attrs=ATTRS, reverse=REVERSE):
     _, _, qa, filt, _ = _v4_inputs()
     return load_or_build(
         gt_dir,
@@ -163,6 +167,7 @@ def _build(gt_dir, item_embs, queries, targets=None, clauses=(0,)):
         skip_mask=None,
         clauses=clauses,
         filter_mod=filt,
+        attrs_digest=oracle.attrs_digest(attrs, reverse),
         device=CPU,
     )
 
@@ -207,10 +212,33 @@ def test_fingerprint_invalidates_on_content_targets_and_clauses(tmp_path):
     assert len(list(tmp_path.glob("oracle_v4_s_*.pt"))) == 4
 
 
+def test_fingerprint_covers_the_item_side_of_the_predicate(tmp_path):
+    """Regenerated ``item_attrs`` at the same shape (every E-phase re-ETL) or a flipped
+    ``clause_is_reverse`` must produce a new blob, not reuse the stale one."""
+    item_embs, queries, _, _, targets = _v4_inputs()
+    first = _build(tmp_path, item_embs, queries, targets)
+    # One attribute value edited — a row sample would miss it; the full-bytes digest does not.
+    attrs = ATTRS.clone()
+    attrs[3, 0, 0] = 2
+    second = _build(tmp_path, item_embs, queries, targets, attrs=attrs)
+    assert second["fingerprint"] != first["fingerprint"]
+    flipped = _build(tmp_path, item_embs, queries, targets, reverse=torch.tensor([True]))
+    assert flipped["fingerprint"] not in (first["fingerprint"], second["fingerprint"])
+    assert len(list(tmp_path.glob("oracle_v4_s_*.pt"))) == 3
+    # The digest itself: content, shape and dtype sensitive; None is a distinct value.
+    d = oracle.attrs_digest(ATTRS, REVERSE)
+    assert d == oracle.attrs_digest(ATTRS.clone(), REVERSE.clone()) and len(d) == 64
+    assert d != oracle.attrs_digest(ATTRS.reshape(4, 1, 1, 1), REVERSE)
+    assert d != oracle.attrs_digest(ATTRS.to(torch.int32), REVERSE)
+    assert d != oracle.attrs_digest(ATTRS, None) != oracle.attrs_digest(None, None)
+
+
 def test_non_v4_file_at_the_v4_path_is_rebuilt(tmp_path):
     item_embs, queries, _, _, targets = _v4_inputs()
     _, _, qa, _, _ = _v4_inputs()
-    fp = oracle.fingerprint(item_embs, queries, targets, qa, (0,), 2)
+    fp = oracle.fingerprint(
+        item_embs, queries, targets, qa, (0,), 2, attrs_digest=oracle.attrs_digest(ATTRS, REVERSE)
+    )
     path = oracle.blob_path(tmp_path, "s", fp)
     torch.save(torch.zeros(3, 2, dtype=torch.long), str(path))  # a bare tensor
     blob = _build(tmp_path, item_embs, queries, targets)

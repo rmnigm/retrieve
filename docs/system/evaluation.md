@@ -425,7 +425,7 @@ committed JSONL is not a dirty tree.
 ### Oracle blob v4
 
 `oracle.load_or_build(gt_dir, sweep, k_gt, item_embs=, queries=, targets=,
-qa_sweep=, skip_mask=, clauses=, filter_mod=, device=)` returns one dict,
+qa_sweep=, skip_mask=, clauses=, filter_mod=, attrs_digest=, device=)` returns one dict,
 cached at `<gt_dir>/oracle_v4_<sweep>_<fingerprint[:16]>.pt`:
 
 | key | value |
@@ -437,11 +437,12 @@ cached at `<gt_dir>/oracle_v4_<sweep>_<fingerprint[:16]>.pt`:
 | `targets_in_filter` | `[U, T]` bool, target `t` of user `u` passes the mask |
 | `target_in_filter` | `[U]` bool, any target passes |
 | `n_items`, `n_queries`, `n_kept`, `k_gt`, `sweep`, `clauses` | shape of the build |
-| `fingerprint` | sha256 over shapes, dtypes and a 64-row linspace sample of `item_embs`, `queries`, `targets`, `qa_sweep`, plus `clauses` and `k_gt` |
+| `fingerprint` | sha256 over shapes, dtypes and a 64-row linspace sample of `item_embs`, `queries`, `targets`, `qa_sweep`; the full bytes of `item_attrs` and `clause_is_reverse` (`oracle.attrs_digest`, computed once per `(dataset, dim)` in `data.load_inputs` as `inputs["attrs_digest"]`); plus `clauses` and `k_gt` |
 | `code_version`, `harness_commit`, `torch`, `created` | provenance |
 
 The fingerprint is in the file name, so a stale blob is never read (a
-different dim off the same `data_dir`, regenerated attrs, a retrained
+different dim off the same `data_dir`, regenerated attrs — even one
+edited value, since the item side is hashed in full — a retrained
 checkpoint, another `users_limit` or clause set each produce a new file),
 and the blob is a portable artifact for roadmap F4. The filter passed in
 is always exact (`data.exact_filter`: the clause module itself on `clause`
@@ -453,8 +454,9 @@ positives never leak into ground truth. Bloom pass rates are not cached.
 `load_inputs(ds, device, with_filters=True)` returns `item_embs [N, D]`
 fp32 on device; `queries [U, D]`, `targets [U, T]` (`-1`-padded,
 0-indexed), `n_targets [U]` on CPU; `qa [U, C]` int64 CPU, `item_attrs
-[N, C, A]` and `clause_is_reverse [C]` on device (or `None`); `n_items`,
-`n_queries`. Two loaders, keyed on the `Dataset`:
+[N, C, A]` and `clause_is_reverse [C]` on device (or `None`) with their
+full-bytes `attrs_digest` (the oracle fingerprint's item side, hashed
+once here); `n_items`, `n_queries`. Two loaders, keyed on the `Dataset`:
 
 | `Dataset` field set | path |
 |---|---|

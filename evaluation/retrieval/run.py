@@ -147,6 +147,7 @@ def sweep_assets(job: Job, inputs: dict[str, Any], k_max: int, device: torch.dev
             skip_mask=skip,
             clauses=job.clauses,
             filter_mod=exact,
+            attrs_digest=inputs["attrs_digest"],
             device=device,
         )
         heldout &= blob["target_in_filter"]
