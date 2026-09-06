@@ -264,11 +264,21 @@ def load_query_attrs(eval_split_path: Path, n_queries: int) -> torch.Tensor | No
         )
         return None
     eval_split = pl.read_parquet(eval_split_path)
-    if eval_split.height != n_queries:
+    # `queries_cache` already trimmed the queries to `cfg.users_limit` on the
+    # checkpoint path while the parquet holds the full split; `users_limit` is
+    # a prefix, so take the same prefix here. Only *fewer* rows is an error.
+    if eval_split.height < n_queries:
         raise RuntimeError(
-            f"eval_split rows={eval_split.height} ≠ queries={n_queries}; "
+            f"eval_split rows={eval_split.height} < queries={n_queries}; "
             "regen eval_split.parquet via the dataset CLI's `attrs` subcommand"
         )
+    if eval_split.height > n_queries:
+        logger.info(
+            "  eval_split rows={} > queries={} (users_limit prefix): trimming attrs",
+            eval_split.height,
+            n_queries,
+        )
+        eval_split = eval_split.head(n_queries)
     qa_narrow = torch.tensor(eval_split["query_attrs_narrow"].to_list(), dtype=torch.long)
     logger.info("loaded eval_split.parquet: qa_narrow={}", tuple(qa_narrow.shape))
     return qa_narrow
