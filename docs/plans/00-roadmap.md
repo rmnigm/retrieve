@@ -263,7 +263,7 @@ and ingestion plans: [dataset-candidates.md](dataset-candidates.md)
 - [ ] **E0 — request the Semantic Scholar API key** (D §3.7; free
   research partner form). First thing in this phase: it is the long
   pole for E3. If it is refused, E3 runs on OpenAlex.
-- [ ] **E1 — YFCC-10M.** D §3.4 / §4.5 (download-bound, ≈ 3 GB; A100
+- [x] **E1 — YFCC-10M** (GT gate passed 2026-09-06; the two cells run at E5). D §3.4 / §4.5 (download-bound, ≈ 3 GB; A100
   minutes). Retry the download with the exact URLs in D §3.4 (served on
   2026-09-05). Ingest: uint8 CLIP → fp16/int8 codes; tag bags → the
   narrow clause tensor (cap K per D §3.4 gotcha a); the shipped 100k
@@ -280,6 +280,13 @@ and ingestion plans: [dataset-candidates.md](dataset-candidates.md)
   25.8 % of queries — the shipped GT is validated against the uncapped
   CSR instead — and the harness scores cosine while the shipped GT is
   squared L2. Both in [../system/datasets.md](../system/datasets.md#yfcc10m).)
+  **Gate record 2026-09-06 (A100, `development` @ 41d4479):** our exact
+  filtered oracle (conjunctive AND over the uncapped tag CSR, squared L2 in
+  fp32, TF32 off) reproduces the shipped `GT.public.ibin` on **100,000 /
+  100,000** queries, all id-exact, `max_abs_distance_error = 0.0`, 1276 s
+  wall — [gt_check-cuda-100k.json](dataset-candidates-artifacts/yfcc10m/gt_check-cuda-100k.json).
+  The "one `none` + one filter cell" half is a harness-v2 campaign cell and
+  runs with E5 (user 2026-09-06: heavy evals later).
 - [ ] **E2 — PubMed + MedCPT, ~36 M articles.** D §3.8 / §4.1
   (download-bound: 102 GB of 768-d fp32 embeddings + 44 GB of per-PMID
   JSON from the NCBI FTP, public domain, no registration; no encoding).
