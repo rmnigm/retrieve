@@ -21,6 +21,11 @@ members = [
     "retrieve-workspace",
 ]
 
+[[manifest.dependency-metadata]]
+name = "silvertorch"
+version = "1.0.0"
+requires-dist = ["torch>=2.0"]
+
 [[package]]
 name = "annotated-doc"
 version = "0.0.4"
@@ -1592,6 +1597,9 @@ dependencies = [
 cute = [
     { name = "nvidia-cutlass-dsl" },
 ]
+official = [
+    { name = "silvertorch" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -1604,10 +1612,11 @@ dev = [
 requires-dist = [
     { name = "click", specifier = ">=8.1" },
     { name = "nvidia-cutlass-dsl", marker = "extra == 'cute'", specifier = ">=4.7" },
+    { name = "silvertorch", marker = "extra == 'official'", git = "https://github.com/meta-recsys/silvertorch?rev=21aa35e28b6dd9a91e9ee35efb0857715e86bda7" },
     { name = "torch", specifier = ">=2.4,<3" },
     { name = "triton", specifier = ">=3.0" },
 ]
-provides-extras = ["cute"]
+provides-extras = ["cute", "official"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1661,10 +1670,31 @@ dependencies = [
     { name = "retrieve-evaluation" },
 ]
 
+[package.optional-dependencies]
+official = [
+    { name = "retrieve", extra = ["official"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "ninja" },
+    { name = "setuptools" },
+    { name = "wheel" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "retrieve", editable = "retrieve" },
+    { name = "retrieve", extras = ["official"], marker = "extra == 'official'", editable = "retrieve" },
     { name = "retrieve-evaluation", editable = "evaluation" },
+]
+provides-extras = ["official"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "ninja", specifier = ">=1.11" },
+    { name = "setuptools", specifier = ">=61" },
+    { name = "wheel" },
 ]
 
 [[package]]
@@ -2009,6 +2039,14 @@ wheels = [
 ]
 
 [[package]]
+name = "silvertorch"
+version = "1.0.0"
+source = { git = "https://github.com/meta-recsys/silvertorch?rev=21aa35e28b6dd9a91e9ee35efb0857715e86bda7#21aa35e28b6dd9a91e9ee35efb0857715e86bda7" }
+dependencies = [
+    { name = "torch" },
+]
+
+[[package]]
 name = "smmap"
 version = "5.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2303,6 +2341,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/7c/d0/4e846ffc1d0cc435518dfa581ce73ac82cfd0ebbf35f3853c9277f632e5f/wandb-0.26.1-py3-none-win32.whl", hash = "sha256:5c2bd44e575ae9944e2764d1aaa031461178276bf2636d5558399c2816ef5cfe", size = 24968151, upload-time = "2026-04-23T16:27:22.086Z" },
     { url = "https://files.pythonhosted.org/packages/e3/9b/487413eaccefdb58799a226726e24b486e9192d2671c75a4550c160aba23/wandb-0.26.1-py3-none-win_amd64.whl", hash = "sha256:5817785467d3f1676f1812ec19a89f77f6e56dfe67d9f47080075af95f705d3e", size = 24968155, upload-time = "2026-04-23T16:27:25.731Z" },
     { url = "https://files.pythonhosted.org/packages/04/dc/5baf3e99b3eeb709d6f75124b5bec8cb73d4b38d2b10df7fdcfde4966200/wandb-0.26.1-py3-none-win_arm64.whl", hash = "sha256:f848b7744f896bc04cabbb28360a2814d1551a91fa2c456243e06435729c8a2e", size = 22912416, upload-time = "2026-04-23T16:27:29.456Z" },
+]
+
+[[package]]
+name = "wheel"
+version = "0.48.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "packaging" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d0/20/50ed6bdf27dec98b568a8ae25dc599f35baa3d9709f9e83fd1edb56b9a90/wheel-0.48.0.tar.gz", hash = "sha256:94800765601e9171bf5d58d066e640662842bcedcbab982b2c90787a2c987322", size = 66471, upload-time = "2026-08-11T22:02:27.327Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2e/29/69cfbb602cd91690c55d38ba9fe53e6a7e76a6fa647bf38f19c138d25449/wheel-0.48.0-py3-none-any.whl", hash = "sha256:3217dcc807155e45db462d7ef2431f5ddda0d7273b700d05a67b271ceb1287ab", size = 33320, upload-time = "2026-08-11T22:02:26.1Z" },
 ]
 
 [[package]]
