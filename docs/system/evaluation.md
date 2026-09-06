@@ -255,14 +255,17 @@ under `build:` (or vice versa) is a `ConfigError`. `seeds:` is a list, or
 the `default` / `headline` form (headline seeds apply to the named sweeps
 at the named dims, whatever the filter kind). CLI narrows (`dims`,
 `algos`, `backends`, `filter_kinds`, `sweeps`, `seeds`, `ks`,
-`batch_sizes`) filter the suite's lists *before* the `PATHS` collapse.
+`batch_sizes`) filter the suite's lists *before* the `PATHS` collapse;
+`ks` / `batch_sizes` are replacements, not selections, and set
+`Job.narrowed` when they differ from the suite's (`run` then records
+`partial`).
 
 `load_matrix(dataset_yaml, suites_yaml, suite, **narrows)` returns `Job`s
 grouped by `Job.group == (dataset, dim, algo, backend)` — the campaign's
 process boundary — in the order `dim → algo → backend → filter_kind →
 sweep → build → seed`. A `Job` is one build: `dataset, dim, suite,
 filter_kind, sweep, clauses, algo, backend, path, build, query, ks,
-batch_sizes, seed, bloom, data: Dataset`; `job.cells()` lists the
+batch_sizes, seed, bloom, data: Dataset, narrowed`; `job.cells()` lists the
 `params = build | query` of each cell and `job.key(params)` is the
 record's key block. `none` cells have `sweep == "full_scan"` and
 `clauses is None`.
@@ -287,7 +290,12 @@ upload-results --repo-id user/repo [--results results] [--private] [--dry-run]
 current `code_version`, `--force` re-runs them (their old records stay in
 the file). `--mode` defaults to both; `--expected-sm-mhz 0` disables the
 `clocks_locked` expectation; `--output` overrides the per-`(suite,
-dataset, dim)` file. The exit code is 1 when any cell failed.
+dataset, dim)` file. `--k`, `--bs` and `--mode` *replace* the suite's
+lists rather than select cells, so a run with any of them (or a
+`--skip-*` flag) writes `status: partial` records — resume re-runs them,
+and the next full run is never fooled by an iteration-day cell. The exit
+code is 1 when any cell failed, and 1 with a message when the narrows
+select zero cells (a `--sweep` typo is an error, not an empty success).
 
 `bench campaign` is the loop of H §3.4 / §8.2 K: for every suite (in the
 order quality, filter, deep for `all`), every listed dataset and every
@@ -299,8 +307,10 @@ The child's stdout + stderr go to
 command line first); one summary line per child (`time suite dataset dim
 algo backend rc seconds log`) goes to `results/_logs/campaign.log` and the
 terminal; a non-zero rc is recorded and the loop continues; the exit code
-is the worst child rc. `results/_parity/` is deleted when the `(dataset,
-dim, algo)` group closes. A backend is the thing under test, so it gets
+is the worst child rc, or 1 when a listed dataset expands to no groups or
+no child was launched at all (`--dataset` / `--dim` selecting nothing).
+`results/_parity/` is deleted when the `(dataset, dim, algo)` group
+closes. A backend is the thing under test, so it gets
 the process: no dynamo cache, allocator arena or CUDA-graph pool outlives
 it, at the cost of a dataset reload and a CUDA context init per group.
 
@@ -357,7 +367,8 @@ perf entries.
 | field | type | value |
 |---|---|---|
 | `schema_version` | int | `1` |
-| `status` | str | `ok`, `partial` (a `--skip-*` flag dropped a block), `failed` |
+| `status` | str | `ok`, `partial` (the record does not carry everything the suite asked for), `failed` |
+| `partial_reasons` | list / null | why `partial`: any of `skip_quality`, `skip_perf`, `modes` (a `--mode` subset), `ks_bs` (`--k` / `--bs` replaced the suite's lists — `Job.narrowed`) |
 | `dataset`, `dim`, `suite`, `filter_kind`, `sweep`, `algo`, `backend`, `params`, `seed` | | the key block = `Job.key(params)` (`KEY_FIELDS`); `params` is the native dict of build + query params (`{}` when the algo takes none) |
 | `path` | str | `PATHS[(algo, filter_kind, backend)]` |
 | `n_items`, `n_queries` | int | catalogue size, queries after `users_limit` |

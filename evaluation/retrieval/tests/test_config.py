@@ -187,6 +187,19 @@ def test_narrows_apply_before_collapse():
     )
 
 
+def test_ks_and_batch_sizes_narrows_mark_jobs_narrowed():
+    """``--k`` / ``--bs`` replace the suite's lists (ks [10, 50], batch_sizes [1, 2] in the
+    filter suite): a different set is ``narrowed`` (→ ``partial`` records); the same set,
+    in any order, is not. Cell-selecting narrows never are."""
+    assert not any(j.narrowed for j in load_matrix(MINI, SUITES, "filter"))
+    assert not any(j.narrowed for j in load_matrix(MINI, SUITES, "filter", dims=[16], seeds=[0]))
+    assert not any(j.narrowed for j in load_matrix(MINI, SUITES, "filter", ks=[50, 10]))
+    assert not any(j.narrowed for j in load_matrix(MINI, SUITES, "filter", batch_sizes=[2, 1]))
+    assert all(j.narrowed for j in load_matrix(MINI, SUITES, "filter", ks=[10]))
+    assert all(j.narrowed for j in load_matrix(MINI, SUITES, "filter", batch_sizes=[2]))
+    assert all(j.narrowed for j in load_matrix(MINI, SUITES, "filter", ks=[10, 50, 99]))
+
+
 def test_suite_errors_are_named():
     with pytest.raises(ConfigError, match="no suite 'nope'"):
         load_matrix(MINI, SUITES, "nope")
