@@ -1,0 +1,13 @@
+Sun Sep  6 13:32:16 UTC 2026
+No cache entries found
+Resolved 102 packages in 8ms
+   Building silvertorch @ git+https://github.com/meta-recsys/silvertorch@21aa35e28b6dd9a91e9ee35efb0857715e86bda7
+      Built silvertorch @ git+https://github.com/meta-recsys/silvertorch@21aa35e28b6dd9a91e9ee35efb0857715e86bda7
+Prepared 1 package in 2m 47s
+Uninstalled 4 packages in 27ms
+Installed 1 package in 23ms
+ - iniconfig==2.3.0
+ - pluggy==1.6.0
+ - pytest==9.0.3
+ ~ silvertorch==1.0.0 (from git+https://github.com/meta-recsys/silvertorch@21aa35e28b6dd9a91e9ee35efb0857715e86bda7)
+SYNC_RC=0 BUILD_WALL_S=169

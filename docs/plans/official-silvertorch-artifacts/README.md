@@ -151,3 +151,20 @@ The headline for whoever writes the adapter next:
 - Instrument note: `warnings.catch_warnings` reads zero syncs for every
   `torch.ops.st.*` call. That is an artefact of where c10 routes a `TORCH_WARN`
   raised inside a C++ op; capture fd 2 instead.
+
+## Addendum 2026-09-06 — rebuilt with nvcc 12.8 (README's tested matrix)
+
+The first build (`wp0_build.txt`) used the box's only toolkit, nvcc 12.4,
+against the torch 2.10.0+cu128 wheel. Upstream's README says nvcc "MUST
+match the torch wheel" and lists torch 2.7–2.10 + CUDA 12.8 as the
+recommended, tested row, so `cuda-nvcc-12-8` and the 12.8 dev headers
+(cudart, cccl, nvrtc, cublas, curand, cusparse, cufft, cusolver, nvtx)
+were installed from NVIDIA's apt repo into `/usr/local/cuda-12.8` (driver
+570.195.03 supports 12.8) and the extension rebuilt with
+`CUDA_HOME=/usr/local/cuda-12.8 TORCH_CUDA_ARCH_LIST=8.0 uv sync --extra
+official --reinstall-package silvertorch` — `wp0_build_cu128.txt`, 169 s
+wall, no warnings, `torch.ops.st.*` registers. The 12.4 build is kept
+only as a record; the parity gate (B2) and everything after run on the
+12.8 build. The first attempt with a minimal header set failed on
+`cusparse.h` (torch's `CUDAContextLight.h` includes it), hence the full
+dev-header list above.
