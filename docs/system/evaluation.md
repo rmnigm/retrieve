@@ -13,6 +13,31 @@ itself, [checkpoints.md](checkpoints.md). The correctness-only test
 suite that gates kernel changes is documented in
 [testing.md](testing.md).
 
+## Harness v2 in progress (roadmap Phase C)
+
+The harness is being rewritten to the protocol in
+[evaluation-harness-v2.md](../plans/evaluation-harness-v2.md) (H); the
+ordered steps are [00-roadmap.md](../plans/00-roadmap.md) Phase C. Step C1
+landed the first three modules next to the old ones, which keep running
+unchanged until C3 deletes them (H §5):
+
+| module | owns | status |
+|---|---|---|
+| [`retrieval/bench.py`](../../evaluation/retrieval/bench.py) | `setup`, `warm_gpu_once`, `provenance` (GPU, driver, CUDA, torch, triton, commit, dirty, branch, `code_version` = tree hash of `retrieve/src/retrieve`), `clocks`, `timed_build`, `index_bytes` (Σ buffers incl. the filter submodule), `latency` (H §2.5 event-per-call windows, IQR + outlier counts, `load: closed_loop`), `graph_callable` (`reduce-overhead`, `dynamic=False`, `fullgraph=True`, asserts `cudagraph_skips == 0` and one `cudaGraphLaunch` per call, raises `NotCapturable` with the record's `reason`), `profile_once` | authored C1; CPU tests green; GPU paths validated in C4 |
+| [`retrieval/metrics.py`](../../evaluation/retrieval/metrics.py) | `accumulator` / `accumulate` / `finalize` — recall, ndcg, precision, mrr at every `k` from one top-`k_max` list as float64 running sums on device (one sync per pass); `ranked=True` reproduces the old per-`k` oracle `nt_k`; `jaccard_at_k`. The old per-row API (`*_at_k`, `accumulate_metrics`, `finalize_metrics`) is kept as wrappers for `passes.py` | rewritten in place; equal to the old per-row means to 1e-9 (`tests/test_metrics.py`) |
+| [`retrieval/algos_v2.py`](../../evaluation/retrieval/algos_v2.py) | the five `nn.Module` wrappers (`LinrV1`…`Silvertorch`) with the filter as a submodule, `k` settable, `set_query_params` (`n_probe`, `candidate_pool`; H §8.2 A); `ALGOS`, `FILTER_KINDS`, `BACKENDS = (triton, torch, official)`, `FILTER_BACKEND` (official cells build Triton filters, O §6.2), `CAPTURABLE` (official is eager-only), `PATHS[(algo, filter_kind, backend)]` → the code path that runs (`triton`, `torch`, `cublas`, `cublas+triton`, `cublas+torch`, `official`) or `None`; `build`, `build_filter`, `is_valid_combo` | named `algos_v2.py` because a module cannot coexist with the old `algos/` package; C3 renames it to `algos.py`. `backend="official"` raises `NotImplementedError` until roadmap B1 adds it to `retrieve` |
+
+`tests/test_algos.py` parses the dispatch table in
+[architecture.md](architecture.md#backend-dispatch) and asserts `PATHS`
+agrees with it, and checks on CPU (`backend="torch"`) that no `retrieve`
+layer bakes `k` into a buffer at `register_index` — `module.k = k'` after
+registration returns the top-`k'` prefix of the top-`k` result with every
+buffer untouched (H §7 first risk: nothing found; `SilverTorch` and the
+1-bit KNNs only *validate* `k` at registration, and the wrapper's `k`
+setter / `set_query_params` re-run SilverTorch's two checks). Everything
+below this section describes the **old** harness, which is what
+`uv run evaluate` still runs.
+
 ## Scope
 
 [`evaluation/retrieval/cli/evaluate.py`](../../evaluation/retrieval/cli/evaluate.py)

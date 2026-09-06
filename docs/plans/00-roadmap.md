@@ -167,6 +167,10 @@ bit-exactness stays where it belongs, in B2's library parity suite.
 - [ ] **C1 — `bench.py`, `metrics.py`, `algos.py` + tests.** H §6 WP-1
   (Mac, 2 d). Needs A1 (golden exists). Includes O §6.2 / WP-6: the
   `official` path in the `PATHS` table.
+  Status: authored 2026-09-06 on `dev/c1-harness-v2`, CPU tests green,
+  GPU gate C4 pending. `algos.py` landed as `algos_v2.py` (the old
+  `algos/` package shadows the name until C3 deletes it); `metrics.py`
+  rewritten in place with the old per-row API kept as wrappers.
 - [ ] **C2 — `config.py`, `data.py`, `oracle.py` + tests.** H §6 WP-2
   (Mac, 1.5 d).
 - [ ] **C3 — `run.py`, `cli.py`, deletions, docs.** H §6 WP-3 (Mac,
