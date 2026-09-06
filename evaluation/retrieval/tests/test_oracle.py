@@ -224,7 +224,10 @@ def test_non_v4_file_at_the_v4_path_is_rebuilt(tmp_path):
 
 def test_code_version_is_the_library_tree_hash_or_a_files_hash(monkeypatch):
     v = bench.code_version()
-    assert v == bench._git("rev-parse", "HEAD:retrieve/src/retrieve") and len(v) == 40
+    if bench.subtree_dirty():
+        assert v.startswith("files:")
+    else:
+        assert v == bench._git("rev-parse", "HEAD:retrieve/src/retrieve") and len(v) == 40
     monkeypatch.setattr(bench, "_git", lambda *a: None)
     fb = bench.code_version()
     assert fb.startswith("files:") and len(fb) == len("files:") + 40

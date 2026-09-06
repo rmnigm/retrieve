@@ -144,7 +144,7 @@ and `data.py`'s two loaders; docstrings are a third of the count.
 
 | module | lines | owns |
 |---|---:|---|
-| [`bench.py`](../../evaluation/retrieval/bench.py) | 349 | `setup`, `warm_gpu_once`, `provenance` (GPU, driver, CUDA, torch, triton, commit, dirty, branch, `code_version` = tree hash of `retrieve/src/retrieve`, host, python, started), `clocks(expected_sm_mhz)` (`clocks_locked` = within 2 % of the expectation), `timed_build`, `index_bytes` (Σ buffers, submodules included, deduplicated), `stats`, `latency(fn, bs=, mode=)` (§2.5 windows, IQR + outlier counts, `load: closed_loop`, `peak_fwd_mib`), `graph_callable` (raises `NotCapturable` with the record's `reason`), `profile_once` |
+| [`bench.py`](../../evaluation/retrieval/bench.py) | 349 | `setup`, `warm_gpu_once`, `provenance` (GPU, driver, CUDA, torch, triton, commit, `dirty` = `subtree_dirty()` over `retrieve/src/retrieve`, `repo_dirty`, branch, `code_version` = the subtree's tree hash, or `files:<sha256>` of the sources on disk when the subtree is dirty, host, python, started), `clocks(expected_sm_mhz)` (`clocks_locked` = within 2 % of the expectation), `timed_build`, `index_bytes` (Σ buffers, submodules included, deduplicated), `stats`, `latency(fn, bs=, mode=)` (§2.5 windows, IQR + outlier counts, `load: closed_loop`, `peak_fwd_mib`), `graph_callable` (raises `NotCapturable` with the record's `reason`), `profile_once` |
 | [`metrics.py`](../../evaluation/retrieval/metrics.py) | 111 | `accumulator(ks, device)` / `accumulate(acc, ids, targets, num_targets=None, ranked=False)` / `finalize(acc)` — recall, ndcg, precision, mrr at every `k` from one top-`k_max` list as float64 running sums on device; `ranked=True` scores against the oracle's own top-`k` prefix (the old per-`k` `nt_k`); `per_row`, `jaccard_at_k`. `training/evaluate.py` shares it |
 | [`algos.py`](../../evaluation/retrieval/algos.py) | 328 | the five `nn.Module` wrappers (`LinrV1`, `LinrV2`, `LinrV3`, `LinrV4`, `Silvertorch`) with the filter as a submodule, `k` settable, `set_query_params` (`n_probe`, `candidate_pool`); `ALGOS`, `FILTER_KINDS`, `BACKENDS`, `FILTER_BACKEND`, `CAPTURABLE`, `PATHS`; `build`, `build_filter`, `is_valid_combo` |
 | [`config.py`](../../evaluation/retrieval/config.py) | 365 | `Dataset`, `Job`, `load_dataset`, `load_matrix` — the config matrix below |
@@ -376,7 +376,7 @@ perf entries.
 | `unstable` | bool | any perf entry `unstable`, or `clocks_drift` |
 | `memory_reserved_mib` | float / null | `torch.cuda.memory_reserved()` after the cell — the leak detector across a group's cells |
 | `elapsed_s` | float | wall time of the cell |
-| `env` | dict | `gpu, driver, cuda, torch, triton, commit, dirty, git_branch, code_version, host, python, started, config_sha` + the cell's `sm_mhz, mem_mhz, sm_max_mhz, power_limit_w, expected_sm_mhz, clocks_locked, clocks_drift` |
+| `env` | dict | `gpu, driver, cuda, torch, triton, commit, dirty, repo_dirty, git_branch, code_version, host, python, started, config_sha` + the cell's `sm_mhz, mem_mhz, sm_max_mhz, power_limit_w, expected_sm_mhz, clocks_locked, clocks_drift` |
 | `stage`, `error` | str | `failed` records only: where it died and the traceback |
 
 Perf entry:
@@ -402,13 +402,25 @@ ms: [...]}`.
 ### Resume
 
 The resume key is `oracle.resume_key(job.key(params), code_version)` —
-canonical JSON of the key block plus the library subtree's tree hash
-(`git rev-parse HEAD:retrieve/src/retrieve`; `files:<sha256>` over the
-installed sources outside git). A kernel edit therefore invalidates every
-cell; a doc or plan edit invalidates none. `run.read_keys(path)` rebuilds
+canonical JSON of the key block plus `bench.code_version()`: the library
+subtree's tree hash (`git rev-parse HEAD:retrieve/src/retrieve`) when the
+subtree is clean, else `files:<sha256>` over the `retrieve/**/*.py` sources
+actually on disk (also the value outside a git checkout; the two namespaces
+are disjoint). A kernel edit — committed or not — therefore invalidates
+every cell; a doc or plan edit invalidates none. `run.read_keys(path)` rebuilds
 the key from a record as `resume_key({k: rec[k] for k in KEY_FIELDS},
 rec["env"]["code_version"])` and keeps the last status per key; a cell is
 skipped when that status is `ok`. `--force` runs everything and appends.
+
+Two dirty flags, both `null` outside a git checkout: `env.dirty` is
+`git status --porcelain -- retrieve/src/retrieve` (untracked files
+included — a new kernel module is measured code too) and is the flag
+`report.py` refuses to cite (H §8.2 F); `env.repo_dirty` is the tracked
+files anywhere else (`--untracked-files=no`, informational: a docs or
+harness edit). `evaluation/results/` is excluded from `repo_dirty`: the
+harness's outputs are data — committed and mirrored to HF by
+`upload-results` (H §3.2, §8.2 G/I) — so a campaign appending to a
+committed JSONL is not a dirty tree.
 
 ### Oracle blob v4
 
