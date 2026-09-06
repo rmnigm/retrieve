@@ -351,7 +351,8 @@ INT8 + OPORP + popcount.
 
 `BloomFilter` semantics.
 
-- Buffer shape (`bloom_sigs[N, m_bits/64]`, `hash_seeds[k_hash, 2]`).
+- Buffer shape (`bloom_sigs[N, m_bits/64]`, `hash_seeds[k_hash, 2]`; the
+  `clause_salt[C]` buffer is covered in `test_bloom_hash.py`).
 - `evaluate_mask` shape and dtype.
 - `m_bits` non-power-of-2 / non-multiple-of-64 raises `ValueError`;
   `k_hash <= 0` raises `ValueError`.
@@ -521,6 +522,14 @@ epilogue every layer's torch path routes through.
   row-wise — chunked and loop-free paths agree exactly, including
   across the `_BUILD_SIGS_BATCH` chunk boundary (monkeypatched small).
 - `generate_seeds` is deterministic and odd.
+- `clause_salt` as a buffer (B5): `build_signatures(...,
+  clause_salt=buffer)` ≡ the on-the-fly salt ≡ the pre-B5 inline
+  computation (replicated in the test), bit for bit, on CUDA *and* on
+  CPU (the hash core is plain tensor math); the salt is device-
+  independent; a wrong-length salt raises; `BloomFilter` and
+  `SilverTorch(filter_mode="bloom")` expose it in `state_dict`, it
+  follows `.cpu()` / `.cuda()`, and an attribute-less `SilverTorch`
+  bloom index carries an empty salt and derives it at query time.
 
 ### [`test_tune_smoke.py`](../../retrieve/tests/correctness/test_tune_smoke.py)
 

@@ -112,7 +112,22 @@ version counts, license codes all share small integer ranges) leak
 ~25–30% of non-matching items as false positives via cross-clause value
 collision. The salt lives in the shared core, so item-side
 `build_signatures` and query-side `build_query_signatures` are
-symmetric by construction. No
+symmetric by construction. It is a pure function of the clause index
+(`generate_clause_salt(C, device)` → `[C]` int64, no seed), and since
+B5 (2026-09-06) `BloomFilter` and `SilverTorch(filter_mode="bloom")`
+register it once as the **`clause_salt` buffer** at `register_index`
+and pass it to every builder call; before that the two splitmix64
+constants were materialised per call with `torch.tensor(_SALT,
+device=cuda)` — a pageable host→device copy on every forward that
+inflated the eager bloom path by ~0.4 ms and broke raw CUDA-graph
+capture. The bits are identical either way (`build_signatures(...,
+clause_salt=None)` still derives the salt on the fly for standalone
+callers — the parity tests, the tuner — and
+[`test_bloom_hash.py`](../../retrieve/tests/correctness/test_bloom_hash.py)
+pins the buffer path against the old inline computation). A
+`SilverTorch` bloom index registered *without* attributes stores an
+empty `clause_salt` (the clause count is unknown) and derives it at
+query time. No
 runtime cost worth measuring (one extra elementwise XOR inside an already
 chunked loop) and zero kernel impact —
 [`bloom_match`](../../retrieve/src/retrieve/kernels/silvertorch/bloom_match.py),

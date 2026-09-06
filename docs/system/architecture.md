@@ -284,7 +284,10 @@ builders with the filters package, not the module classes:
 
 - For `"bloom"`, signatures are derived from `item_clause_attrs` at
   `register_index` time via `bloom_hash.build_signatures` and stored
-  alongside `hash_seeds[k_hash, 2]`. **Which signature buffer is
+  alongside `hash_seeds[k_hash, 2]` and the per-clause hash salt
+  `clause_salt[C]` (registered so the query-side build makes no
+  host→device copy per forward; empty when the index was registered
+  without attributes). **Which signature buffer is
   registered depends on the backend**: `"triton"` / `"torch"` store the
   row-wise `bloom_sigs[N, W]`; `"cuda"` stores only the transposed
   `bloom_sigs_t[m_bits, n_lists · wpc]` that its phase-2 kernel reads

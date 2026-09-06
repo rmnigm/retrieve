@@ -29,6 +29,7 @@ from retrieve.layers.filters.bloom_hash import (
     bloom_subset_match,
     build_query_signatures,
     build_signatures,
+    generate_clause_salt,
     generate_seeds,
 )
 from retrieve.layers.filters.exact_attribute import clause_subset_match
@@ -70,6 +71,7 @@ class SilverTorch(RetrievalModule):
     bloom_sigs: Tensor
     bloom_sigs_t: Tensor
     hash_seeds: Tensor
+    clause_salt: Tensor
     item_clause_attrs: Tensor
     clause_is_reverse: Tensor
 
@@ -232,14 +234,20 @@ class SilverTorch(RetrievalModule):
         if self.filter_mode == "bloom":
             seeds = generate_seeds(self.k_hash, device=device)
             if item_clause_attrs is None:
+                # No attributes at build time: all-zero signatures and an empty salt
+                # (the clause count is unknown); a later query build derives its salt
+                # on the fly, see _query_salt.
                 sigs = torch.zeros(n, self.word_count, dtype=torch.int64, device=device)
+                salt = torch.empty(0, dtype=torch.int64, device=device)
             else:
+                salt = generate_clause_salt(item_clause_attrs.shape[1], device=device)
                 sigs = build_signatures(
                     item_clause_attrs.long(),
                     seeds,
                     self.m_bits,
                     self.k_hash,
                     self.word_count,
+                    clause_salt=salt,
                 )
             if self.backend in _TWO_KERNEL_BACKENDS:
                 # The cuda/cute path reads only the transposed index; row-wise sigs are
@@ -270,6 +278,9 @@ class SilverTorch(RetrievalModule):
             else:
                 self.register_buffer("bloom_sigs", sigs)
             self.register_buffer("hash_seeds", seeds)
+            # Registered (not rebuilt per call) so the bloom forward issues no
+            # host→device copy — see bloom_hash.generate_clause_salt.
+            self.register_buffer("clause_salt", salt)
         elif self.filter_mode == "exact":
             assert item_clause_attrs is not None  # narrowed by _validate_register_args
             c = item_clause_attrs.shape[1]
@@ -321,6 +332,20 @@ class SilverTorch(RetrievalModule):
     def _phase1_probe(self, query: Tensor) -> Tensor:
         return self._phase1_probe_with_ids(query)[1]
 
+    def _query_bits(self, query_clause_attrs: Tensor) -> Tensor:
+        """``[B, C]`` query attrs → ``[B, W]`` bloom query signature, using the registered
+        ``clause_salt`` buffer (no per-call host→device copy). The buffer is empty when the
+        index was registered without attributes; then the salt is derived on the fly."""
+        salt = self.clause_salt if self.clause_salt.numel() > 0 else None
+        return build_query_signatures(
+            query_clause_attrs.long().unsqueeze(-1),
+            self.hash_seeds,
+            self.m_bits,
+            self.k_hash,
+            self.word_count,
+            clause_salt=salt,
+        )
+
     def _forward_triton(
         self,
         query: Tensor,
@@ -341,13 +366,7 @@ class SilverTorch(RetrievalModule):
             )
 
         if self.has_bloom and query_clause_attrs is not None:
-            qb = build_query_signatures(
-                query_clause_attrs.long().unsqueeze(-1),
-                self.hash_seeds,
-                self.m_bits,
-                self.k_hash,
-                self.word_count,
-            )
+            qb = self._query_bits(query_clause_attrs)
             return codesigned_probe_score_bloom(
                 query,
                 flat_items,
@@ -428,13 +447,7 @@ class SilverTorch(RetrievalModule):
             )
 
         if self.has_bloom and query_clause_attrs is not None:
-            qb = build_query_signatures(
-                query_clause_attrs.long().unsqueeze(-1),
-                self.hash_seeds,
-                self.m_bits,
-                self.k_hash,
-                self.word_count,
-            )
+            qb = self._query_bits(query_clause_attrs)
             return bloom(
                 query,
                 flat_items,
@@ -469,13 +482,7 @@ class SilverTorch(RetrievalModule):
 
         keep = valid
         if self.has_bloom and query_clause_attrs is not None:
-            qb = build_query_signatures(
-                query_clause_attrs.long().unsqueeze(-1),
-                self.hash_seeds,
-                self.m_bits,
-                self.k_hash,
-                self.word_count,
-            )  # [B, W]
+            qb = self._query_bits(query_clause_attrs)  # [B, W]
             keep = keep & bloom_subset_match(qb, self.bloom_sigs[safe])
         elif self.has_exact and query_clause_attrs is not None:
             gathered = self.item_clause_attrs[safe]  # [B, P, C, A_max]

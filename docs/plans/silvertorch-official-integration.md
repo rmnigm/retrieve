@@ -369,6 +369,12 @@ official T1) plus the §9a/§9b head-to-head; gains are claimed only from the he
   capture (cute §5.1) and inflates eager bloom by ≈ 0.4 ms flat (filtering.md). Register seeds and
   salt at `register_index`. Gain: eager bloom at `B=1` toward the `none` row; effort 0.5 h;
   validation `test_bloom_hash.py` bit-equality. Do before WP-7.
+  > **Status (roadmap B5):** authored 2026-09-06 on `dev/b1-official-adapter` (Mac-side, no
+  > GPU): `generate_clause_salt` → `[C]` int64 `clause_salt` buffer registered by `BloomFilter`
+  > and `SilverTorch`, builders take `clause_salt=`; four tests added to `test_bloom_hash.py`
+  > (buffer ≡ on-the-fly ≡ pre-B5 inline bits on CUDA and CPU, device independence, shape
+  > check, buffer moves with `.to()`). **GPU gate pending** — `test_bloom_hash.py` and the
+  > bloom rows of `test_silvertorch.py` on the A100; the raw-capture claim is unmeasured.
 - **TF-3 — Memory-level parallelism / retune.** The C++ scorer went 188 → 88 µs by keeping
   `SPW·UNROLL` rows in flight per warp (handoff §13 fix 1). Triton's `[BLOCK_P, D]` int8 tile is
   already one coalesced 128 B row per item with `num_stages` pipelining across programs
