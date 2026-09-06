@@ -149,11 +149,15 @@ The shipped pattern, applied uniformly to every kernel in this tree:
 5. Tuning is offline: `retrieve/src/retrieve/tune.py` (`uv run
    tune-kernels <kernel-subcommand>`) is a declarative registry — one
    `KernelTuneSpec` per kernel in the `KERNELS` tuple, from which the
-   eight click subcommands are generated
+   eleven click subcommands are generated
    (`fused-masked-knn-topk`, `oporp-1bit-match-topk`,
    `codesigned-probe-score`, `codesigned-probe-score-cuda`,
-   `codesigned-probe-score-exact`,
-   `clause-mask`, `clause-compact`, `bloom-compact`), all driven by one
+   `codesigned-probe-score-cute`, `codesigned-probe-score-exact`,
+   `codesigned-probe-score-exact-cuda`,
+   `codesigned-probe-score-exact-cute`, `clause-mask`, `clause-compact`,
+   `bloom-compact` — the four cuda/cute ones go at roadmap B4;
+   [`test_tune_smoke.py`](../../retrieve/tests/correctness/test_tune_smoke.py)
+   pins the list), all driven by one
    generic `_sweep` + `_print` pair. Each spec sweeps its `(block,
    num_warps)` grid against built-in shape regimes mirroring real-eval
    workloads (goodreads N≈800k, arxiv N≈3M, synth-15M; batch sizes from
@@ -928,24 +932,36 @@ size the upstream kernel never checks), `OfficialConfig.hash_k` (default
 search `k`. A bloom index registered without attributes is empty and a
 later query with attributes raises.
 
-**Bit order — the one unmeasured fact.** The upstream scorer reads mask
+**Bit order — measured, high-first.** The upstream scorer reads mask
 words high-first ("lower doc id put at higher bits",
 `bloom_index_util.cuh`), and the packed bloom output is stored the same
 way; both are constants in the adapter (`MASK_BIT_ORDER`,
 `BLOOM_OUTPUT_BIT_ORDER`) and `bloom_filtering_mask` bit-reverses per
-word if they ever differ. Roadmap A3 measures the scorer's order on the
-A100; `test_official.py` T3 runs over both candidate orders until it is
-pinned and fails with the fix spelled out if the constant is wrong.
+word if they ever differ. Roadmap A3 measured the scorer's order on the
+A100 (2026-09-06, plan §13.2) three independent ways — the packed
+search output for a doc-0 predicate is `0x8000000000000000`, a
+hand-built mask with bit 63 set scores doc 0 (bit 0 scores doc 63), and
+the packed output round-trips as a scorer mask — so both constants are
+`"high_first"`. `test_official.py` pins that value as
+`OFFICIAL_BIT_ORDER` and T3 asserts the adapter constants equal it,
+with the other order kept as a negative control (nothing scored).
 
 **Eager only (D7).** Every op syncs the host (`repeat_interleave`
 without an output size, `.item()` on cumsums, a per-call host decode and
 pageable upload of the plans — plan §3), and the partial-response output
 shape is data-dependent, so there is no `torch.compile` or CUDA-graph
 path: `SilverTorch.compile()` raises on this backend and a compiled
-forward raises `RuntimeError` when traced. Expect ≈ 12 launches + 2
-syncs per unfiltered forward against Triton's one launch; the official
-arm loses at small `P` / `B=1` for host reasons and the kernel-only tier
-of the head-to-head (plan §9a) is what compares kernels.
+forward raises `RuntimeError` when traced. Measured on the A100 (plan
+§13.2, `torch.profiler` + fd-2 sync counting): `fused_kmean_ann` is
+**19 launches and 3 host syncs** per unfiltered forward (only 2 of the
+19 are the scoring kernels; the rest is payload prep — scans, a
+`repeat_interleave`, fills), `fused_kmean_ann_with_partial_masks` 19 / 4,
+the partial-response bloom search 13 / 2 with two H2D plan uploads, so a
+bloom forward is ≈ 32 launches and ≥ 5 syncs against Triton's one launch.
+On top of that the CPU expression parse costs ≈ 59 µs per call at B=16
+(`c:v AND c:v`), which the `parse_plans` LRU cache hides after the first
+call for a repeated batch. The official arm loses at small `P` / `B=1` for host reasons and the
+kernel-only tier of the head-to-head (plan §9a) is what compares kernels.
 
 ### `codesigned_probe_score_cuda` — the CUDA C++ backend
 

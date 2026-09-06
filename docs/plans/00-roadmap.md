@@ -124,8 +124,10 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
   Gate: `ruff` clean, suite collects and skips on the Mac. Needs A3.
   *Status: authored 2026-09-06 on `dev/b1-official-adapter` (Mac gate
   green: ruff clean, 683 tests collect, official surface skips); GPU
-  gate pending — see O §10 WP-2's status note. A3's bit order is not
-  pinned yet (`OFFICIAL_BIT_ORDER = None` in `test_official.py`).*
+  gate pending — see O §10 WP-2's status note. A3's bit order is pinned
+  (`OFFICIAL_BIT_ORDER = "high_first"` in `test_official.py`, 2026-09-06,
+  with the library review's "now" items — see
+  [architecture-review-2026-09-06-library.md](architecture-review-2026-09-06-library.md)).*
 - [ ] **B2 — parity gate.** O §10 WP-3 (A100, 0.5 d). Gate: phase-3
   scores `torch.equal` on the int32 path on every regime, bloom ⊇ check
   and FPR at matched memory recorded in O's record section. **Unblocks

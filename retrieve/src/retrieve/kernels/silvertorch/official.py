@@ -75,10 +75,11 @@ BloomPath = Literal["partial", "full"]
 # Bit order the official *scorer* uses when it reads a ``filtering_bit_mask`` word (and the
 # partial column masks): doc ``d`` is bit ``63 - d % 64`` of word ``d // 64`` — "lower doc id
 # put at higher bits", ``bloom_index_util.cuh`` ``get_bit_64_bit_mask`` /
-# ``get_next_32_bit_mask`` (lines 125-180 at 21aa35e). Read from the source, not yet
-# measured: roadmap A3 (plan §10 WP-1) probes it on the A100 and
-# ``tests/parity/test_official.py`` T3 pins it against the GPU. If A3 finds the other
-# order, flip this constant — nothing else in the adapter hard-codes it.
+# ``get_next_32_bit_mask`` (lines 125-180 at 21aa35e). **Measured 2026-09-06 on the A100**
+# (roadmap A3, plan §13.2: three independent probes — packed search output, a hand-built
+# mask into ``fused_kmean_ann``, and their round trip — all HIGH-first).
+# ``tests/parity/test_official.py`` T3 pins it (``OFFICIAL_BIT_ORDER``); nothing else in
+# the adapter hard-codes it.
 MASK_BIT_ORDER: BitOrder = "high_first"
 
 # Order of the packed output of ``bloom_index_search_batch(return_bool_mask=False)``:

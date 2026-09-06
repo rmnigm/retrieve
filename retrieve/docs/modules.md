@@ -46,7 +46,11 @@ torch path.
 ## LiNR modules
 
 Constructor → `register_index` → `forward`. Unless noted, `item_embs` is `[N, D]`, `query` is
-`[B, D]`, and the return is `([B, k] int64 ids, [B, k] float32 scores)`.
+`[B, D]`, and the return is `([B, k] int64 ids, [B, k] scores)`. The score dtype follows the
+module's arithmetic: `FullScanKNN` returns the input dtype (fp32 for fp32 inputs), `OneBitKNN` /
+`SimHashKNN` return fp32, `PostfilterKNN` and `PostfilterKNNInt8` return fp16, and `PrefilterKNN`
+returns fp16 on the `torch` backend and fp32 on the `triton` backend (and for an empty candidate
+set). Ranking is what the layers promise; cast at the boundary if you need one dtype.
 
 ### `FullScanKNN(k)`
 - `forward(query, mask=None, candidate_ids=None)`

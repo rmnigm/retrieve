@@ -381,7 +381,10 @@ builders with the filters package, not the module classes:
   `RetrievalModule` (a minimal lifecycle ABC — `k` attr + abstract
   `register_index`, called exactly once; forward signatures deliberately
   unconstrained), `FilterModule`, and
-  `Backend = Literal["torch", "triton", "cuda"]`. All retrieval layers
+  `Backend = Literal["torch", "triton", "cuda", "cute", "official"]`
+  (only `SilverTorch` validates it — see [Backend
+  dispatch](#backend-dispatch); it shrinks to three values at roadmap
+  B4). All retrieval layers
   (`PostfilterKNN`, `PostfilterKNNInt8`, `PrefilterKNN`,
   `_PackedBitsKNN` and its two subclasses, `SilverTorch`, `FullScanKNN`)
   subclass `RetrievalModule`.
@@ -407,9 +410,10 @@ exact clause — then the shared masked scorer) before the same host-side
 top-K; the unfiltered path is a single launch. The official backend is
 not a kernel of ours at all:
 [`silvertorch/official.py`](../../retrieve/src/retrieve/kernels/silvertorch/official.py)
-adapts Meta's `torch.ops.st.*` ops (≈ 12 launches and 2 host syncs per
-unfiltered forward upstream, more with bloom — plan §3). Full per-kernel
-detail in [kernels.md](kernels.md).
+adapts Meta's `torch.ops.st.*` ops (measured on the A100: 19 launches
+and 3 host syncs per unfiltered forward, ≈ 32 launches and ≥ 5 syncs
+with bloom — plan §13.2). Full per-kernel detail in
+[kernels.md](kernels.md).
 
 | subtree                                                                                              | kernel                                                                                                                                | consumer                          |
 |------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------|
