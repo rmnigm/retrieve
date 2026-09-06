@@ -767,7 +767,9 @@ under `backend="triton"`; `backend="cuda"` routes the same three
 ([below](#codesigned_probe_score_cuda--the-cuda-c-backend)) and
 `backend="cute"` to its CuTe DSL port
 ([below](#codesigned_probe_score_cute--the-cute-dsl-backend)), while
-`backend="torch"` is the eager reference.
+`backend="torch"` is the eager reference and `backend="official"` runs
+Meta's own kernels through an adapter
+([below](#official--metas-torchopsst-kernels-as-the-reference-backend)).
 (`bloom_match` also lives in this tree but is documented above as a
 standalone filter primitive — it has a non-SilverTorch consumer now.)
 
@@ -849,6 +851,101 @@ predicate body is the shared `common.clause_pass`
 probed items). Score buffer is `torch.empty([B, P])` — same convention
 as `codesigned_probe_score`, no pre-fill kernel.
 
+
+### `official` — Meta's `torch.ops.st.*` kernels as the reference backend
+
+[`silvertorch/official.py`](../../retrieve/src/retrieve/kernels/silvertorch/official.py).
+Not a kernel of ours: an adapter over the ops of
+[meta-recsys/silvertorch](https://github.com/meta-recsys/silvertorch)
+(pinned at `21aa35e`, the `official` extra), selected by
+`SilverTorch(backend="official")`. Design and every upstream claim below
+are in
+[silvertorch-official-integration.md](../plans/silvertorch-official-integration.md)
+(§1 inventory, §3 host behaviour, §4 numerics, §5 adapter); this section
+is the *what runs*. **Status:** authored 2026-09-06 on the Mac against
+the upstream source; the GPU gate (parity suite on the A100, roadmap B2)
+has not run yet.
+
+**Layout.** Phase 1 is ours and shared (D3): the same `KMeansTorch`,
+the same `quantize_int8_global` codes, the same centroid top-`n_probe`.
+The official scorer wants a CSR, so `register_index` permutes the int8
+table into cluster-sorted order (`item_codes[sort_perm]`) and registers
+`cluster_offsets[n_lists+1]`, `cluster_sizes`, `sort_perm`, `inv_perm`
+instead of `padded_cluster_items` (D4). Forward passes
+`cluster_ids = probe_ids [B, n_probe]`, `cluster_length =
+cluster_sizes[probe_ids]` and `max_tensor_size_per_row = n_probe ·
+max_cluster_size` — the static width of our padded layout, so the
+official output is our `[B, P]` (rounded up to 32) and the host
+`masked_topk` costs the same in every arm; returned indices are sorted
+positions and map back through `sort_perm`. Slots the op never writes
+(pads, filtered docs) carry `indices == -1` and become `-inf` / `-1`.
+
+**Ops called** (schemas in the module docstring, matched to the upstream
+`TORCH_LIBRARY_FRAGMENT` registrations): `fused_kmean_ann`,
+`fused_kmean_ann_with_partial_masks`, `bloom_index_build`,
+`parse_expression_query_batch` (CPU),
+`bloom_index_search_batch`, `bloom_index_search_batch_return_partial_response`.
+Nothing else upstream is used — no `BloomIndexSearchModule`, no
+`is_topk`, no `*_multiple` sharded variants.
+
+**Scores** (`OfficialConfig.score_path`). `"int32"`:
+`divisor_for_int8=-1` returns the raw int32 dot; the host epilogue
+`(dot.float() · q_scale[b]) · global_scale` is the same two
+left-associated fp32 multiplies as the Triton kernel and the torch path,
+so scores are **bit-identical** (the parity contract, D5). `"fp16"`
+(default — the instantiation Meta ships for int8 serving, hence the
+timed path): `divisor_for_int8 = default_divisor(D)`, the smallest power
+of two with `127²·D / divisor ≤ 65504` (16 / 32 / 64 at D = 64 / 128 /
+256); the kernel writes `fp16(dot / divisor)` — exact division, one fp16
+rounding (relative ≤ 2⁻¹¹) — and the epilogue multiplies by `divisor ·
+q_scale · global_scale`. `per_embedding_scale` is not used: upstream
+casts the int32 dot to fp16 *before* dividing by it, which overflows for
+any realistic `D` (plan §4.2).
+
+**Filter modes.** `none` → `fused_kmean_ann`. `exact` → our Triton
+`clause_mask` over the cluster-sorted `item_clause_attrs`, packed by
+`pack_mask` into the scorer's `filtering_bit_mask` (int64 `[B,
+ceil(N/64)]`, doc `d` at bit `63 − d % 64` of word `d // 64` —
+`MASK_BIT_ORDER`, see below) and passed to `fused_kmean_ann`: phase 2
+ours and full-`N`, labelled so in every table. `bloom` → **Meta's
+bloom**, not ours: at `register_index`, `attrs_to_features` turns the
+sorted `[N, C, A_max]` attrs into the jagged `(feature_ids int32 [C],
+feature_offsets int64 [N·C+1], feature_values int64)` layout — the
+clause index is the feature id, the same `(clause, value)` keying as our
+salt — and `bloom_index_build(b_multiplier, k)` builds `bloom_index [W]`
++ `bundle_b_offsets`; per forward, `queries_to_expressions` renders each
+`[C]` query row as `"0:v0 AND 1:v1"` (`NOT c:v` for reverse clauses,
+`""` = match all), `parse_plans` runs the CPU parser once per distinct
+expression tuple (LRU-cached, plans kept on CPU), and then either
+(`bloom_path="partial"`, default — the paper's co-design)
+`bloom_index_search_batch_return_partial_response` over the probed
+clusters feeds `fused_kmean_ann_with_partial_masks`, or
+(`"full"`, the S9 ablation) `bloom_index_search_batch(return_bool_mask=
+False)` over all `N` feeds `fused_kmean_ann(filtering_bit_mask=…)`. The
+search `k` is our `k_hash` (must be ≤ 10: `MAX_K_V2`, a fixed array
+size the upstream kernel never checks), `OfficialConfig.hash_k` (default
+7) is the number of raw hashes stored per term, `build_k` defaults to the
+search `k`. A bloom index registered without attributes is empty and a
+later query with attributes raises.
+
+**Bit order — the one unmeasured fact.** The upstream scorer reads mask
+words high-first ("lower doc id put at higher bits",
+`bloom_index_util.cuh`), and the packed bloom output is stored the same
+way; both are constants in the adapter (`MASK_BIT_ORDER`,
+`BLOOM_OUTPUT_BIT_ORDER`) and `bloom_filtering_mask` bit-reverses per
+word if they ever differ. Roadmap A3 measures the scorer's order on the
+A100; `test_official.py` T3 runs over both candidate orders until it is
+pinned and fails with the fix spelled out if the constant is wrong.
+
+**Eager only (D7).** Every op syncs the host (`repeat_interleave`
+without an output size, `.item()` on cumsums, a per-call host decode and
+pageable upload of the plans — plan §3), and the partial-response output
+shape is data-dependent, so there is no `torch.compile` or CUDA-graph
+path: `SilverTorch.compile()` raises on this backend and a compiled
+forward raises `RuntimeError` when traced. Expect ≈ 12 launches + 2
+syncs per unfiltered forward against Triton's one launch; the official
+arm loses at small `P` / `B=1` for host reasons and the kernel-only tier
+of the head-to-head (plan §9a) is what compares kernels.
 
 ### `codesigned_probe_score_cuda` — the CUDA C++ backend
 

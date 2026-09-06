@@ -32,7 +32,7 @@ retrieve/tests/
 │   ├── test_linr.py                (PostfilterKNN, PostfilterKNNInt8, PrefilterKNN, OneBitKNN, SimHashKNN × torch / Triton)
 │   ├── test_quantize.py            (int8, OPORP, popcount)
 │   ├── test_retrieval_utils.py     (FullScanKNN, post_filter_topk)
-│   ├── test_silvertorch.py         (SilverTorch × filter_mode {none,bloom,exact} × backend {triton,torch,cuda,cute})
+│   ├── test_silvertorch.py         (SilverTorch × filter_mode {none,bloom,exact} × backend {triton,torch,cuda,cute,official})
 │   ├── test_topk_util.py           (masked_topk / counts_to_valid)
 │   └── test_tune_smoke.py          (one tiny sweep point per tune-kernels spec, all 11; CUDA-gated)
 ├── parity/                # kernel vs pure-torch reference
@@ -46,6 +46,7 @@ retrieve/tests/
 │   ├── test_codesigned_probe_score_cute.py  (CuTe DSL backend: same gates, plus bit-exact vs the CUDA backend)
 │   ├── test_codesigned_probe_score_exact.py
 │   ├── test_fused_masked_knn_topk.py
+│   ├── test_official.py                     (Meta's official ops: T1–T7 of the integration plan; bit-exact vs Triton on the int32 path)
 │   └── test_oporp_1bit_match_topk.py
 └── compile/               # torch.compile / torch.export gates
     ├── test_silvertorch_compile.py # compiled == eager + zero graph breaks, filter_mode × backend
@@ -155,6 +156,14 @@ module.
   device) and fails on any other `ImportError` (the DSL is present but
   the kernels failed to import or compile), carrying the DSL error text.
   The first call pays the import plus one ~0.1 s kernel compile.
+
+- `require_official()` — the same gate for `SilverTorch(backend=
+  "official")`, Meta's `torch.ops.st.*` ops (the `official` extra). It
+  skips on `OfficialMissing` (`silvertorch` not installed, or no CUDA
+  device — so the Mac collects and skips the whole official surface) and
+  fails on any other `ImportError` (`silvertorch` imports but its
+  `_C` extension did not build / load, or the pinned sha lacks an op the
+  adapter calls). Memoized in the adapter after the first call.
 
 ### [`tests/parity/conftest.py`](../../retrieve/tests/parity/conftest.py)
 
@@ -438,11 +447,17 @@ LiNR V1, V2, V3, V4 plus `SimHashKNN` in both backends.
 ### [`test_silvertorch.py`](../../retrieve/tests/correctness/test_silvertorch.py)
 
 `SilverTorch` — all three filter modes (`"none"`, `"bloom"`, `"exact"`)
-across all four backends (`"torch"`, `"triton"`, `"cuda"`, `"cute"`) in
-one file. Cuda cells call `require_cps_cuda()`, which skips only when
-there is no toolchain at all (a build *failure* fails the test); cute
-cells call `require_cps_cute()` likewise; every mode/backend combination
-is otherwise exercised.
+across all five backends (`"torch"`, `"triton"`, `"cuda"`, `"cute"`,
+`"official"`) in one file. Cuda cells call `require_cps_cuda()`, which
+skips only when there is no toolchain at all (a build *failure* fails
+the test); cute cells call `require_cps_cute()` likewise; official cells
+call `require_official()`; every mode/backend combination is otherwise
+exercised. On `"official"` the buffer checks read the CSR layout
+(`cluster_offsets` / `sort_perm` / `inv_perm`, no
+`padded_cluster_items`; `item_clause_attrs` in cluster-sorted order) and
+the cross-backend rows cover `none` / `exact` / `exact`-reverse against
+Triton — bloom is Meta's own hash there, so its gates are semantic and
+live in `test_official.py`.
 
 - Output shape `(B, K)` with `query_clause_attrs`, without it, on
   `filter_mode="none"`, and on `filter_mode="exact"`; ids long, scores
@@ -556,6 +571,7 @@ exact-by-construction kernels, which use stricter assertions.
 | [`test_codesigned_probe_score.py`](../../retrieve/tests/parity/test_codesigned_probe_score.py) | `codesigned_probe_score`  | `_ref_phase23`: bloom subset + INT8 dequant + dot + topk | the SilverTorch bloom-fused path; cases for `(qb, no qb)` |
 | [`test_codesigned_probe_score_exact.py`](../../retrieve/tests/parity/test_codesigned_probe_score_exact.py) | `codesigned_probe_score_exact` | `_ref_phase23`: exact AND-of-OR predicate over narrow attrs + INT8 dequant + dot + topk | the SilverTorch exact-fused path; cases for active vs all-inactive query clauses |
 | [`test_codesigned_probe_score_cuda.py`](../../retrieve/tests/parity/test_codesigned_probe_score_cuda.py) | `codesigned_probe_score_cuda`, `..._bloom_cuda`, `..._exact_cuda` | shared `ref_cps_phase23` **and** the Triton kernels themselves | two gates per filter mode: tolerance-based vs the reference, and vs Triton at `D ∈ {64, 128, 256}` × `(bloom, no bloom)` / × `(reverse, no reverse)` for exact — `torch.equal` on scores, `assert_ids_equal_up_to_ties` on ids. Also covers `build_transposed_sigs` bit layout, both phase-2 mask kernels alone vs their torch predicates (with a non-multiple-of-64 `max_size` for the pad tail), config plumbing (`block_p`/`num_warps`/`unroll` change nothing observable), the launcher's must-reject configs, the tiny-`max_size` carry-loop stress, and `opcheck` at `d ∈ {64, 128, 256, 96}`. Gated by `require_cps_cuda()` |
+| [`test_official.py`](../../retrieve/tests/parity/test_official.py) | Meta's `torch.ops.st.fused_kmean_ann` / `_with_partial_masks`, `bloom_index_build`, `parse_expression_query_batch`, `bloom_index_search_batch` / `_return_partial_response` through [`official.py`](../../retrieve/src/retrieve/kernels/silvertorch/official.py) | `ref_cps_phase23`, the Triton `_impl`s (plain and exact), `clause_mask`, and the `SilverTorch` layer itself | Plan §5.2 gates. **T1** int32 path: scores `torch.equal` vs the reference and vs Triton (plain at `D ∈ {64, 128}`, `D=96` reference-only, a 90-wide cluster for the remainder path; exact via `clause_mask` → `pack_mask` → `filtering_bit_mask`, with reverse clauses), ids up to ties after normalising `-inf` slots to the `-1` sentinel; the raw op contract (int32/int32, width `round_up(·, 32)`, `INT32_MIN`/`-1` pads, returned positions = the probed set). **T2** fp16 path: `max_rel_err ≤ 2⁻¹⁰`, no overflow, `jaccard@32 ≥ 0.99`, and `default_divisor` is the overflow bound. **T3** bit order, parametrised over *both* candidate orders until roadmap A3 pins `OFFICIAL_BIT_ORDER`: the packed bloom output round-trips `pack_mask` only under `BLOOM_OUTPUT_BIT_ORDER` (README corpus, README hits reproduced); a one-doc `filtering_bit_mask` over a 70-doc cluster (docs 0 / 5 / 40 / 69: both mask words, warp and remainder paths) is honoured only under `MASK_BIT_ORDER` — a wrong constant fails with the fix in the message; `unpack_partial_mask` decodes under the bloom order only; pack / unpack / `reverse_bits64` round trip. **T4** official bloom ⊇ exact on the full mask and on the partial masks (which must equal the full mask on the probed docs), FPR at `b_multiplier=10` recorded and `< 5 %`; `NOT` terms have **no false positives** (⊆ exact — the guarantee flips for a complemented bloom; false-negative rate recorded); expression mapping and the LRU plan cache. **T5** `_with_partial_masks` scores `torch.equal` the full-mask scores and the unfiltered scores masked by the bloom (paper §4.3). **T6** the layer on the Triton module's transplanted index (GPU k-means is not bit-deterministic): int32 path `torch.equal` vs Triton on `none` / `exact` / `exact`-reverse (+ all-inactive queries), fp16 default `jaccard@K ≥ 0.99`, bloom (`m_bits=None`, both `bloom_path`s bit-identical to each other) ⊆ Triton's exact top-K up to bloom false positives, state-dict key order, candidates path through `inv_perm` bit-equal to Triton, state-dict round trip, attribute-less bloom index raises on attribute queries, `k_hash > 10` rejected. **T7** `module.compile()` and a `fullgraph` `torch.compile` raise (`RuntimeError`), default-mode compile raises or matches eager; host syncs per op counted under `set_sync_debug_mode("warn")`, printed and recorded, asserted `> 0` for the scorer. Gated by `require_official()` |
 | [`test_codesigned_probe_score_cute.py`](../../retrieve/tests/parity/test_codesigned_probe_score_cute.py) | `codesigned_probe_score_cute`, `..._bloom_cute`, `..._exact_cute` | the cuda file's gates (`ref_cps_phase23`, the Triton kernels, the row-wise mask predicates) **and** the cuda backend itself | every test of the cuda file with the cute `_impl`s (must-reject configs are `ValueError`s from the host module), plus the gate the port exists for: `torch.equal` against the **cuda** backend on the raw phase-2 mask words and on the full `[B, P]` phase-3 score buffer, at `d ∈ {64, 128, 256, 96}` × `{none, bloom, exact}` × `unroll ∈ {1, 2, 4}`. Gated by `require_cps_cute()`; the cuda-vs-cute tests also by `require_cps_cuda()` |
 
 ## Adding a new test
