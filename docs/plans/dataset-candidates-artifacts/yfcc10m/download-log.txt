@@ -1,0 +1,41 @@
+=== YFCC-10M download 2026-09-06T12:16:48Z ===
+base url: https://dl.fbaipublicfiles.com/billion-scale-ann-benchmarks/yfcc100M
+--- base.10M.u8bin
+HTTP/2 200
+content-length: 1920000008
+last-modified: Wed, 14 Jun 2023 07:22:06 GMT
+curl rc=0 size=1920000008
+--- query.public.100K.u8bin
+HTTP/2 200
+content-length: 19200008
+last-modified: Wed, 14 Jun 2023 07:22:18 GMT
+curl rc=0 size=19200008
+--- GT.public.ibin
+HTTP/2 200
+content-length: 8000008
+last-modified: Wed, 14 Jun 2023 07:22:26 GMT
+curl rc=0 size=8000008
+--- unfiltered.GT.public.ibin
+HTTP/2 200
+content-length: 80000008
+last-modified: Wed, 13 Sep 2023 23:00:48 GMT
+curl rc=0 size=80000008
+--- base.metadata.10M.spmat
+HTTP/2 200
+content-length: 945683840
+last-modified: Wed, 14 Jun 2023 07:21:59 GMT
+curl rc=0 size=945683840
+--- query.metadata.public.100K.spmat
+HTTP/2 200
+content-length: 1907024
+last-modified: Wed, 14 Jun 2023 07:22:25 GMT
+curl rc=0 size=1907024
+=== done 2026-09-06T12:18:54Z ===
+[2026-09-06T12:59:11Z] === yfcc download from https://dl.fbaipublicfiles.com/billion-scale-ann-benchmarks/yfcc100M into /workspace/data/_raw/yfcc10m
+[2026-09-06T12:59:11Z] SKIP base.10M.u8bin (already 1920000008 bytes)
+[2026-09-06T12:59:11Z] SKIP query.public.100K.u8bin (already 19200008 bytes)
+[2026-09-06T12:59:11Z] SKIP base.metadata.10M.spmat (already 945683840 bytes)
+[2026-09-06T12:59:11Z] SKIP query.metadata.public.100K.spmat (already 1907024 bytes)
+[2026-09-06T12:59:11Z] SKIP GT.public.ibin (already 8000008 bytes)
+[2026-09-06T12:59:11Z] SKIP unfiltered.GT.public.ibin (already 80000008 bytes)
+[2026-09-06T12:59:11Z] DONE all 6 files, 2.97 GB
