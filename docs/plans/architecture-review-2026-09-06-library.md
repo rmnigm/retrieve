@@ -356,3 +356,43 @@ gates.
 [live-update-api.md](live-update-api.md) needs #4 first (a mutated index must
 re-derive the caches). Neither is unblocked by this review; both are re-scoped after B4
 as the roadmap says.
+
+## E. Applied 2026-09-06 (`dev/integration`, Mac, CPU-only)
+
+Five commits on top of `12e3927`, one per item, each gated by `ruff check` /
+`ruff format --check` (clean apart from the pre-existing `tests/correctness/test_linr.py`
+formatting), `pytest tests/ --collect-only` (683 → 699 collected) and
+`scripts/check_doc_links.py` (0 broken). **Every GPU claim below is unverified until B2
+runs the suite on the A100**; the only execution here was CPU-side smoke checks of the
+device-agnostic logic (the load hook and the `-1` candidates semantics on the torch
+backend, the salt constants bit-for-bit).
+
+| item | commit | what landed |
+|---|---|---|
+| #2 docs sweep + bit-order pin | `1ee2f0a` | every row of §B.4's table except the two marked "at B2/B4"; `OFFICIAL_BIT_ORDER = "high_first"` pinned as a test-side constant, T3 asserts the adapter constants against it and keeps `"low_first"` as a negative control — the both-orders parametrisation is gone (683 → 678 tests) |
+| #4 load hook | `ee9c339` | `_rederive_cached_scalars` registered as a `load_state_dict` post-hook in `SilverTorch.__init__`; T6's hand patch deleted; new `TestStateDict` (every backend × filter mode) loads a zeroed, cache-poisoned deep copy — a deep copy because GPU k-means is not bit-deterministic and `load_state_dict` checks buffer shapes |
+| #3 `-1` on candidates | `37cef19` | both `_forward_candidates` go through `masked_topk(valid=ids >= 0, gather_ids=ids, pad_to_k=False)` with a `clamp_min(0)` gather; `masked_topk` unchanged; bit-identical for all-valid inputs (checked on CPU); GPU tests in `TestCandidates` and `test_retrieval_utils.py`; done now rather than "before D1" |
+| #1 `cache_plans` | `55ebb41` | `OfficialConfig.cache_plans: bool = True`, `parse_plans(..., cache=)`; the timing rule in `official.py`, kernels.md, architecture.md and one paragraph in evaluation.md — the harness cell itself is roadmap C4's; T4 covers the uncached path, T6 runs the partial-bloom module with the cache off, T7 records its sync count |
+| A3(a), A4, D1, B.4 dead code | `cf1d42b` | `csr_from_assignments` and `pack_mask_high_first` deleted; `OfficialConfig.hash_k` → `n_stored_hashes`; `generate_clause_salt` uses Python-int constants so the attribute-less bloom fallback copies nothing; A3(c)'s docstring note; T2(d)'s `_transplant` wording |
+
+**Deliberately not applied, with the reason.**
+
+- A3(a)'s second half, `argsort(stable=True)` in `_build_ivf`: the dead helper was
+  deleted instead. A stable sort could permute tie order in `padded_cluster_items`
+  against the checkpoints and golden outputs that exist today; the change is safe only
+  when B2 can re-run the parity gate on it. Reconsider at B2 with F3's provenance
+  argument.
+- The rest of §D's "now" list was outside this pass and is still open: A3(b)
+  (`pack_mask` byte packing — on the timed exact arm, so before B3), A7's `modules.md`
+  fix landed but the fp32 boundary cast is C1's, A8 (`.long()` in
+  `ExactAttributeFilter.register_index`), A9 (`__all__` exports), T3 (helper fold),
+  B.4's `# --- test support ---` move in `official.py`, D2's docstring line, D5's
+  numerics sentence in kernels.md.
+
+**Deferred as the review sequences them.** B2: the GPU validation of everything above
+plus kernels.md's "Status: authored … GPU gate has not run yet". B4: #5 (`Backend`
+split + validation, dispatch table, merged filter-buffer registration), A9 re-exports,
+the T1/B.4 test and doc rows, and shrinking "five"/"eleven" to "three"/"seven". G-a: A5
+(`_host.py`), D3 (dummy pointers), the `bloom_sigs_t`-on-Triton wording. C1/C4: the
+harness's `official` cell passing `cache_plans=False` (or both rows), the LiNR cells'
+`"cuda"` → `"triton"`, A7's score dtype at the layer boundary.
