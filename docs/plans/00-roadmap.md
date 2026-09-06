@@ -90,7 +90,15 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
   retrieve` works, `uv run pytest evaluation/retrieval/tests/` collects
   and the CPU-only tests pass, and the A100's resolution is unchanged
   (`uv.lock` diff touches markers only; re-`uv sync` on the box before
-  A1). Unblocks: **every `Mac` step in this file.**
+  A1). **Version skew:** a two-index lock resolves torch per platform, and
+  PyPI is ahead of the pinned cu128 index — a scratch venv on the Mac took
+  `torch 2.14.0` (verified 2026-09-06, imports fine, MPS available) while
+  the box runs 2.10.0+cu128. Either constrain the Mac side to the box's
+  version or accept the skew and say so in `docs/system/testing.md`; what
+  must not happen is the Linux resolution moving off 2.10.0+cu128, so
+  check that in the `uv.lock` diff. Nothing citable comes off the Mac
+  anyway (rule 2) — this only affects whether a green Mac test means
+  anything about the box. Unblocks: **every `Mac` step in this file.**
 - [ ] **A1 — golden baseline on the old harness.** H §6 WP-0 (A100,
   0.5 d). Commit the 3-line `users_limit` row-count fix; run the golden
   cells on goodreads-d128 `c0_genre` (all five algos, `triton` + `torch`)
