@@ -15,7 +15,8 @@ ones (pad row dropped, targets shifted −1, fp16 → fp32 + L2-normalise on the
 Returned dict (``inputs``): ``item_embs [N, D]`` fp32 on device; ``queries [U, D]`` fp32,
 ``targets [U, T]`` int64 ``-1``-padded 0-indexed, ``n_targets [U]`` — all CPU; ``qa
 [U, C]`` int64 CPU or ``None``; ``item_attrs [N, C, A]`` int64 and ``clause_is_reverse
-[C]`` bool on device or ``None``; ``n_items``, ``n_queries``.
+[C]`` bool on device or ``None``; ``attrs_digest`` (``oracle.attrs_digest`` of those two,
+the item side of the oracle fingerprint, hashed once here); ``n_items``, ``n_queries``.
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ from loguru import logger
 from retrieval.algos import FILTER_BACKEND, build_filter
 from retrieval.config import Dataset
 from retrieval.encode import encode_queries, load_model_for_eval
+from retrieval.oracle import attrs_digest
 from retrieve.interfaces import FilterModule
 
 EXPECTED_DOC_PREFIX = "search_document: "
@@ -180,6 +182,7 @@ def load_inputs(ds: Dataset, device: torch.device, *, with_filters: bool = True)
         "qa": qa,
         "item_attrs": item_attrs,
         "clause_is_reverse": reverse,
+        "attrs_digest": attrs_digest(item_attrs, reverse),
         "n_items": int(item_embs.shape[0]),
         "n_queries": int(queries.shape[0]),
     }
