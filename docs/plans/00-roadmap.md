@@ -263,6 +263,15 @@ and ingestion plans: [dataset-candidates.md](dataset-candidates.md)
   attributes: MeSH descriptors (multi-valued, ~30 k), year, journal /
   language via the MEDLINE join. Gate: layout on disk, oracle built,
   one `none` + one filter cell.
+  **Status: deferred 2026-09-06 (user decision): no PCA, native 768-d only,
+  heavy ETL/evals later; loader skeleton on `dev/e2-pubmed`.** What exists:
+  `evaluation/eval_datasets/pubmed.py` (download / verify / medline / convert /
+  attrs / queries / encode_queries) with CPU tests on synthetic fixtures,
+  `config/pubmed/d768-filter.yaml`, the `pubmed` → `pinkmeme/eval-pubmed`
+  registry entry (unpublished) and the docs/system/datasets.md section. What is
+  not done: no data staged (the ~198 GB raw mirror does not fit the 100 GiB
+  `/workspace` quota — see the section for the budget), no PCA anywhere, no
+  oracle, no cells. The `--dims 256,128,64` PCA plan in D §4.1 is superseded.
 - [ ] **E3 — Semantic Scholar SPECTER2, ~50 M slice of 120 M.** D §3.7
   (`embeddings-specter_v2`: 30 files × 28 GB JSONL ≈ 840 GB for 120 M
   papers, 768-d; `papers` for year / venue / fields of study /
