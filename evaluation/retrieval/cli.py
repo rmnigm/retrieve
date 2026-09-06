@@ -1,7 +1,9 @@
 """``bench`` — the harness-v2 console script (H §3.4).
 
 ``bench run`` expands one ``(dataset, suite)`` through ``config.load_matrix`` (every option
-below ``--suite`` is a narrow) and runs the cells in *this* process via ``run.run``.
+below ``--suite`` is a narrow; ``--k`` / ``--bs`` / ``--mode`` replace the suite's lists and
+make the records ``partial``) and runs the cells in *this* process via ``run.run``. Zero
+cells — a ``--sweep`` typo, say — is an error (exit 1), never an empty success.
 ``bench campaign`` is the loop of H §3.4 / §8.2 K: one child process per ``(dataset, dim,
 algo, backend)`` group, sequential, ``stdout+stderr`` to ``<out>/_logs/<group>.log``, a
 one-line summary per child in ``<out>/_logs/campaign.log``, non-zero rc recorded and the
@@ -86,6 +88,11 @@ def run(
         ks=_multi(ks),
         batch_sizes=_multi(batch_sizes),
     )
+    if not jobs:
+        raise click.ClickException(
+            f"{dataset}/{suite}: the narrows select no cells (check --dim/--algo/--backend/"
+            "--filter-kind/--sweep/--seed against the suite; see the log lines above)"
+        )
     sha = hashlib.sha256(ds_yaml.read_bytes() + suites_yaml.read_bytes()).hexdigest()[:16]
     counts = run_mod.run(
         jobs,
@@ -123,6 +130,7 @@ def campaign(
     log_dir.mkdir(parents=True, exist_ok=True)
     parity = out_dir / "_parity"
     worst = 0
+    n_children = 0
     with open(log_dir / "campaign.log", "a") as summary:
 
         def say(line: str) -> None:
@@ -141,6 +149,9 @@ def campaign(
                 ds_yaml, _ = _paths(config_dir, ds)
                 jobs = load_matrix(ds_yaml, suites_yaml, s, dims=_multi(dims))
                 groups = list(dict.fromkeys(j.group for j in jobs))
+                if not groups:
+                    say(f"{s} {ds}: no cells selected (dims {list(dims) or 'all'}) rc=1")
+                    worst = max(worst, 1)
                 last: tuple | None = None
                 for d, dim, algo, backend in groups:
                     if (d, dim, algo) != last:  # the parity group closes: drop the spill file
@@ -167,12 +178,17 @@ def campaign(
                         lf.flush()
                         rc = subprocess.call(cmd, stdout=lf, stderr=subprocess.STDOUT, cwd=EVAL_DIR)
                     worst = max(worst, rc)
+                    n_children += 1
                     say(
                         f"{dt.datetime.now(dt.timezone.utc):%H:%M:%S} {s} {d} d{dim} {algo} "
                         f"{backend} rc={rc} {time.monotonic() - t0:.0f}s log={log.name}"
                     )
                 shutil.rmtree(parity, ignore_errors=True)
-        say(f"=== campaign {suite} finished rc={worst}")
+        if n_children == 0:
+            worst = max(worst, 1)
+            say(f"no child was launched: --dataset {list(datasets)} / --dim {list(dims)} select "
+                f"nothing in suite {suite!r}")  # fmt: skip
+        say(f"=== campaign {suite} finished children={n_children} rc={worst}")
     sys.exit(worst)
 
 

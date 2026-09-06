@@ -84,6 +84,7 @@ class Job:
     seed: int
     bloom: dict[str, int]  # m_bits, k_hash (used on bloom cells)
     data: Dataset = field(compare=False, repr=False)
+    narrowed: bool = False  # --k / --bs replaced the suite's lists: records are ``partial``
 
     def cells(self) -> list[dict[str, Any]]:
         """``params`` of every cell of this job, in query order."""
@@ -278,7 +279,9 @@ def load_matrix(
     """Expand one ``(dataset, suite)`` into jobs, grouped by ``Job.group`` in the order
     ``dim → algo → backend → filter_kind → sweep → build → seed``. Keyword narrows are the
     CLI overrides (H §3.4): they filter the suite's lists *before* the PATHS collapse, so
-    ``backends=["torch"]`` on a ``none`` cell yields the cuBLAS job labelled ``torch``."""
+    ``backends=["torch"]`` on a ``none`` cell yields the cuBLAS job labelled ``torch``.
+    ``ks`` / ``batch_sizes`` *replace* the suite's lists rather than select cells, so when
+    they differ the jobs are ``narrowed`` and ``run`` records them as ``partial``."""
     suites = _read(suites_yaml)
     if suite not in suites:
         raise ConfigError(f"{suites_yaml}: no suite {suite!r}; have {sorted(suites)}")
@@ -295,9 +298,15 @@ def load_matrix(
         raise ConfigError(
             f"{where}: unknown filter_kinds {sorted(unknown_fk)}, backends {sorted(unknown_be)}"
         )
-    ks_ = _ints(f"{where}: ks", s["ks"]) if ks is None else _ints("--k", list(ks))
-    bs_ = _ints(f"{where}: batch_sizes", s["batch_sizes"])
-    bs_ = bs_ if batch_sizes is None else _ints("--bs", list(batch_sizes))
+    suite_ks, suite_bs = (
+        _ints(f"{where}: ks", s["ks"]),
+        _ints(f"{where}: batch_sizes", s["batch_sizes"]),
+    )
+    ks_ = suite_ks if ks is None else _ints("--k", list(ks))
+    bs_ = suite_bs if batch_sizes is None else _ints("--bs", list(batch_sizes))
+    narrowed = set(ks_) != set(suite_ks) or set(bs_) != set(suite_bs)
+    if narrowed:
+        logger.info("--k / --bs replace the suite's lists: every record will be status: partial")
     bloom = {**_BLOOM, **(suites.get("bloom") or {}), **(s.get("bloom") or {})}
     raw_dims = _ints(f"{dataset_yaml}: dims", _read(dataset_yaml).get("dims"))
     dims_ = _narrow([d for d in raw_dims if d in s.get("dims", raw_dims)], dims, "dim")
@@ -348,6 +357,7 @@ def load_matrix(
                                         seed=seed,
                                         bloom=dict(bloom),
                                         data=ds,
+                                        narrowed=narrowed,
                                     )
                                 )
     logger.info("{}/{}: {} jobs, {} cells", name, suite, len(jobs), sum(len(j.query) for j in jobs))

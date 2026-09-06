@@ -53,10 +53,28 @@ def test_cli_run_campaign_and_report(tiny_configs, tmp_path):
         "campaign.log", "e2e_tiny-d8_linr_v1_filter_mask_torch.log", "e2e_tiny-d8_linr_v4_torch.log"
     ]  # fmt: skip
     summary = (out / "_logs" / "campaign.log").read_text()
-    assert summary.count(" rc=0 ") == 2 and "finished rc=0" in summary
+    assert summary.count(" rc=0 ") == 2 and "finished children=2 rc=0" in summary
     assert not (out / "_parity").exists()  # dropped when the last algo group closed
     recs = _records(out / "e2e" / "tiny-d8.jsonl")
     assert len(recs) == 1 + 6  # the partial cell re-ran; 3 + 3 cells (none, c0, c0c1) per algo
     assert {r["status"] for r in recs[1:]} == {"partial"}
     r = CliRunner().invoke(cli.main, ["report", str(out)])
     assert r.exit_code == 2
+
+
+def test_zero_cells_is_an_error(tiny_configs, tmp_path):
+    """A ``--sweep`` typo (or a ``--dataset`` that matches nothing) must not exit 0 with an
+    empty summary; nothing is run or written."""
+    ds, _ = tiny_configs
+    out = tmp_path / "results"
+    common = ["--config-dir", str(ds.parent), "--out", str(out)]
+    r = CliRunner().invoke(
+        cli.main, ["run", "--dataset", "tiny", "--suite", "e2e", "--sweep", "c0_typo", *common]
+    )
+    assert r.exit_code == 1 and "select no cells" in r.output
+    assert not (out / "e2e").exists()
+    r = CliRunner().invoke(cli.main, ["campaign", "--suite", "e2e", "--dataset", "nope", *common])
+    assert r.exit_code == 1 and "no child was launched" in r.output
+    r = CliRunner().invoke(cli.main, ["campaign", "--suite", "e2e", "--dim", "999", *common])
+    assert r.exit_code == 1 and "no cells selected" in r.output
+    assert list((out / "_logs").iterdir()) == [out / "_logs" / "campaign.log"]

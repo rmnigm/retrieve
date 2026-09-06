@@ -11,7 +11,10 @@ perf per ``(bs, k, mode)`` → record.
 
 Resume (§8.2 B): a cell is skipped when its ``oracle.resume_key`` — the key block plus the
 library tree hash — is already in the file with ``status: ok``; failed and partial records
-are re-run, and ``report.py`` reads the last record per key. Failures (§8.2 D, §7): any
+are re-run, and ``report.py`` reads the last record per key. A record is ``partial`` when
+it does not carry everything the suite asked for: ``--skip-quality`` / ``--skip-perf``, a
+``--mode`` subset, or ``--k`` / ``--bs`` replacing the suite's lists (``Job.narrowed``);
+``partial_reasons`` names which. Failures (§8.2 D, §7): any
 exception inside a cell is written as ``status: failed`` with the traceback and the loop
 continues — an OOM on the torch path is a finding, not noise. Two things stop the process:
 ``KeyboardInterrupt`` and the exact-algo recall gate of §2.4 (``QualityGateError``, recorded
@@ -394,6 +397,9 @@ def run(
     code_version = env0["code_version"]
     clk0 = bench.clocks(expected_sm_mhz)
     latency_kw = dict(latency_kw or {})
+    reasons0 = [r for r, on in (("skip_quality", skip_quality), ("skip_perf", skip_perf)) if on]
+    if set(modes) != set(MODES):
+        reasons0.append("modes")
     with_filters = {(j.dataset, j.dim): False for j in jobs}
     for j in jobs:
         with_filters[j.dataset, j.dim] |= j.filter_kind != "none"
@@ -484,9 +490,11 @@ def run(
                         "clocks.sm {} MHz drifted from {} MHz", clk["sm_mhz"], clk0["sm_mhz"]
                     )
                 env = {**env0, **clk, "clocks_drift": bool(drift)}
+                reasons = reasons0 + (["ks_bs"] if job.narrowed else [])
                 rec: dict[str, Any] = {
                     "schema_version": SCHEMA_VERSION,
-                    "status": "partial" if (skip_quality or skip_perf) else "ok",
+                    "status": "partial" if reasons else "ok",
+                    "partial_reasons": reasons or None,
                     **job.key(params),
                     "path": job.path,
                     "n_items": inputs["n_items"],

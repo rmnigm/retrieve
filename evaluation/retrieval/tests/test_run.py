@@ -1,14 +1,18 @@
 """CPU end-to-end tests for ``retrieval.run`` (harness v2 WP-3) on the tiny fixture of
-``conftest.py``: ``backend="torch"``, ``mode="eager"`` only (graph mode needs CUDA and is
-C4's gate), shrunken latency windows.
+``conftest.py``: ``backend="torch"``, both modes — ``graph`` needs CUDA, so on this box every
+graph entry is the null entry with ``reason: cuda_unavailable`` (the exact path the
+``official`` backend takes on the A100; capture itself is C4's gate) — shrunken latency
+windows.
 
 Checked: the JSONL record schema (H §3.2 + §8.2 amendments: key block, ``schema_version``,
 ``status``, quality shapes per filter kind, one perf entry per ``(bs, k, mode)`` with the
 §2.5 stats, ``env`` with ``code_version``), resume by key (a second run skips everything,
 a changed ``code_version`` re-runs everything), a failing cell recorded as ``status: failed``
 with its traceback while the loop continues, the exact-algo quality gate, the parity spill
-file (second backend records ``jaccard_vs_first@k`` against the first), and the samples
-sidecar. ``test_cli.py`` drives the same fixture through ``bench``.
+file (second backend records ``jaccard_vs_first@k`` against the first), the samples
+sidecar, and the ``partial`` rule (a ``--mode`` subset or a ``--k`` / ``--bs`` narrow is
+recorded as partial and re-run by resume). ``test_cli.py`` drives the same fixture through
+``bench``.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ from retrieval.config import NONE_SWEEP, load_matrix
 
 LAT = {"warmup": 2, "n_min": 4, "n_max": 4, "windows": 3}
 EAGER = ("eager",)
+KW = dict(latency_kw=LAT, expected_sm_mhz=None)
 
 
 def _jobs(cfgs, **narrow):
@@ -44,7 +49,7 @@ def test_end_to_end_records(tiny_configs, tmp_path):
         ("clause", "c0c1"),
     ]
     out = tmp_path / "results"
-    counts = run.run(jobs, out_dir=out, modes=EAGER, latency_kw=LAT, expected_sm_mhz=None)
+    counts = run.run(jobs, out_dir=out, **KW)
     assert dict(counts) == {"ok": 3}
     path = out / "e2e" / "tiny-d8.jsonl"
     recs = _records(path)
@@ -52,6 +57,7 @@ def test_end_to_end_records(tiny_configs, tmp_path):
     # Key block + status + provenance on every record.
     for rec, job in zip(recs, jobs):
         assert rec["schema_version"] == run.SCHEMA_VERSION and rec["status"] == "ok"
+        assert rec["partial_reasons"] is None
         assert {k: rec[k] for k in oracle.KEY_FIELDS} == job.key({})
         assert rec["path"] == "cublas" if job.filter_kind == "none" else "cublas+torch"
         assert rec["env"]["code_version"] == bench.code_version()
@@ -62,13 +68,18 @@ def test_end_to_end_records(tiny_configs, tmp_path):
         assert rec["ks"] == [2, 4] and rec["batch_sizes"] == [1, 2]
         assert rec["build_s"] > 0 and rec["index_mib"] > 0 and rec["unstable"] in (True, False)
         assert rec["memory_reserved_mib"] is None  # no CUDA allocator on this box
-        # perf: one entry per (bs, k, mode) with the §2.5 statistics.
+        # perf: one entry per (bs, k, mode) — eager with the §2.5 statistics, graph as the
+        # null entry (every stat key null + the reason) because there is no CUDA here.
         assert [(e["bs"], e["k"], e["mode"]) for e in rec["perf"]] == [
-            (1, 2, "eager"), (1, 4, "eager"), (2, 2, "eager"), (2, 4, "eager")
-        ]  # fmt: skip
+            (bs, k, mode) for bs in (1, 2) for k in (2, 4) for mode in ("eager", "graph")
+        ]
         for e in rec["perf"]:
-            assert set(run.PERF_STAT_KEYS) <= set(e) and e["n"] == 4 and e["load"] == "closed_loop"
-            assert e["reason" if e["median_ms"] is None else "median_ms"] is not None
+            assert set(run.PERF_STAT_KEYS) <= set(e)
+            if e["mode"] == "eager":
+                assert e["n"] == 4 and e["load"] == "closed_loop" and "reason" not in e
+            else:
+                assert e["reason"] == "cuda_unavailable"
+                assert all(e[key] is None for key in run.PERF_STAT_KEYS)
     none, c0, c0c1 = recs
     # Unfiltered: held-out only, everything passes, no filter memory.
     assert "oracle" not in none["quality"] and none["pass_rate"] == 1.0
@@ -87,7 +98,7 @@ def test_end_to_end_records(tiny_configs, tmp_path):
         assert rec["quality"]["parity"] == "reference"
         assert rec["quality"]["jaccard_vs_first@4"] is None
     assert c0["quality"]["heldout"]["recall@4"] >= 0.0
-    # The samples sidecar: one line per perf entry carrying the key block.
+    # The samples sidecar: one line per *measured* perf entry carrying the key block.
     samples = _records(path.with_suffix(".samples.jsonl"))
     assert len(samples) == 3 * 4 and all(len(s["ms"]) == 4 for s in samples)
     assert {k: samples[0][k] for k in oracle.KEY_FIELDS} == jobs[0].key({})
@@ -98,7 +109,7 @@ def test_end_to_end_records(tiny_configs, tmp_path):
 def test_resume_skips_ok_cells_and_code_version_change_reruns(tiny_configs, tmp_path, monkeypatch):
     jobs = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=[NONE_SWEEP, "c0"])
     out = tmp_path / "results"
-    kw = dict(out_dir=out, modes=EAGER, latency_kw=LAT, expected_sm_mhz=None)
+    kw = dict(out_dir=out, **KW)
     assert dict(run.run(jobs, **kw)) == {"ok": 2}
     assert dict(run.run(jobs, **kw)) == {"skipped": 2}
     assert dict(run.run(jobs, resume=False, **kw)) == {"ok": 2}
@@ -109,6 +120,35 @@ def test_resume_skips_ok_cells_and_code_version_change_reruns(tiny_configs, tmp_
     recs = _records(path)
     assert len(recs) == 6 and recs[-1]["env"]["code_version"] == "0" * 40
     assert len(run.read_keys(path)) == 4  # 2 keys × 2 code versions
+
+
+def test_narrowed_runs_are_partial_and_resume_reruns_them(tiny_configs, tmp_path):
+    """An iteration-day ``--mode eager`` / ``--k 2`` run must never make the next full run
+    skip the cell: the record is ``partial`` (with the reasons), and only ``ok`` resumes."""
+    out = tmp_path / "results"
+    path = out / "e2e" / "tiny-d8.jsonl"
+    full = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=[NONE_SWEEP])
+    assert not full[0].narrowed
+    # --mode eager: a subset of MODES.
+    assert dict(run.run(full, out_dir=out, modes=EAGER, **KW)) == {"partial": 1}
+    assert _records(path)[-1]["partial_reasons"] == ["modes"]
+    assert [e["mode"] for e in _records(path)[-1]["perf"]] == ["eager"] * 4
+    # --k 2 (the suite has [2, 4]) and --bs 1 (of [1, 2]): the suite's lists replaced.
+    narrow = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=[NONE_SWEEP], ks=[2])
+    assert narrow[0].narrowed and narrow[0].key({}) == full[0].key({})  # same key block
+    assert dict(run.run(narrow, out_dir=out, skip_perf=True, **KW)) == {"partial": 1}
+    rec = _records(path)[-1]
+    assert rec["status"] == "partial" and rec["partial_reasons"] == ["skip_perf", "ks_bs"]
+    assert rec["ks"] == [2] and rec["k_max"] == 2
+    # The same narrow with the suite's own values is not narrowed at all.
+    same = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=[NONE_SWEEP], ks=[4, 2])
+    assert not same[0].narrowed
+    # A full run afterwards does not resume over any of the partial records ...
+    assert dict(run.run(full, out_dir=out, **KW)) == {"ok": 1}
+    assert [r["status"] for r in _records(path)] == ["partial", "partial", "ok"]
+    # ... and only the ok one is what resume sees.
+    assert dict(run.run(full, out_dir=out, **KW)) == {"skipped": 1}
+    assert dict(run.run(narrow, out_dir=out, **KW)) == {"skipped": 1}  # same key: ok wins
 
 
 def test_failed_cell_is_recorded_and_the_loop_continues(tiny_configs, tmp_path, monkeypatch):
@@ -123,7 +163,7 @@ def test_failed_cell_is_recorded_and_the_loop_continues(tiny_configs, tmp_path, 
 
     monkeypatch.setattr(run.algos, "build", flaky)
     out = tmp_path / "results"
-    counts = run.run(jobs, out_dir=out, modes=EAGER, latency_kw=LAT, expected_sm_mhz=None)
+    counts = run.run(jobs, out_dir=out, **KW)
     assert dict(counts) == {"ok": 2, "failed": 2}
     recs = _records(out / "e2e" / "tiny-d8.jsonl")
     assert [r["status"] for r in recs] == ["ok", "ok", "failed", "failed"]
@@ -133,7 +173,7 @@ def test_failed_cell_is_recorded_and_the_loop_continues(tiny_configs, tmp_path, 
         assert r["env"]["code_version"] == bench.code_version()
     # A failed record does not count as done: resume re-runs it.
     monkeypatch.setattr(run.algos, "build", real)
-    counts = run.run(jobs, out_dir=out, modes=EAGER, latency_kw=LAT, expected_sm_mhz=None)
+    counts = run.run(jobs, out_dir=out, **KW)
     assert dict(counts) == {"skipped": 2, "ok": 2}
 
 
@@ -142,7 +182,7 @@ def test_quality_gate_kills_the_run_after_recording(tiny_configs, tmp_path, monk
     monkeypatch.setattr(run, "EXACT_MIN_RECALL", 1.5)  # unreachable → the gate must fire
     out = tmp_path / "results"
     with pytest.raises(run.QualityGateError, match="recall_oracle@4"):
-        run.run(jobs, out_dir=out, modes=EAGER, latency_kw=LAT, expected_sm_mhz=None)
+        run.run(jobs, out_dir=out, **KW)
     recs = _records(out / "e2e" / "tiny-d8.jsonl")
     assert [r["status"] for r in recs] == ["ok", "failed"]  # none cell has no oracle gate
     assert recs[1]["stage"] == "quality" and "QualityGateError" in recs[1]["error"]
@@ -153,7 +193,7 @@ def test_parity_spill_compares_the_second_backend(tiny_configs, tmp_path, monkey
     jobs = load_matrix(ds, suites, "e2e", algos=["linr_v1_filter_mask"], sweeps=["c0"])
     clause = [j for j in jobs if j.filter_kind == "clause"]
     out = tmp_path / "results"
-    kw = dict(out_dir=out, modes=EAGER, latency_kw=LAT, expected_sm_mhz=None, skip_perf=True)
+    kw = dict(out_dir=out, skip_perf=True, **KW)
     run.run(clause, **kw)
     ref = list((out / "_parity").glob("*.npz"))
     assert len(ref) == 1
