@@ -20,6 +20,9 @@ its extension is broken.
 
 from __future__ import annotations
 
+import os
+import sys
+import tempfile
 import warnings
 
 import pytest
@@ -219,8 +222,10 @@ def test_t1_exact_mask_bitexact_vs_triton(d, reverse):
     b, k = 16, 32
     f = Family(b, 64, 96, 8, d)
     attrs, rev, q_attrs = make_exact(f.n, b, reverse=reverse)
-    mask = clause_mask(attrs[f.sort_perm].contiguous(), rev, q_attrs)  # [B, N] sorted ids
-    assert mask.shape == (b, f.n)
+    mask = clause_mask(attrs[f.sort_perm].contiguous(), rev, q_attrs)  # [B, N_csr] sorted ids
+    # ``make_probe_family`` pads ~10 % of the slots, so those ids sit in no cluster: the
+    # CSR's doc space is the ids the layout holds (``sort_perm.numel()``), not ``f.n``.
+    assert mask.shape == (b, f.sort_perm.numel())
     out = f.official(k, score_path="int32", filtering_bit_mask=of.pack_mask(mask))
     tri = _codesigned_probe_score_exact_impl(
         f.query,
@@ -350,16 +355,20 @@ def _scored_docs(doc: int, bit_order: of.BitOrder) -> list[int]:
 @pytest.mark.parametrize("doc", [0, 5, 40, 69])
 def test_t3_scorer_reads_filtering_bit_mask(doc):
     """A3 probe B as a test: under the pinned read order the one set doc — and only it —
-    is scored; under the other order nothing is (the mirrored bit names a doc past the
-    cluster). The adapter's ``MASK_BIT_ORDER`` must equal the pinned measurement."""
+    is scored; under the other order the *mirrored* doc ``63 - doc % 64`` of the same word
+    is scored instead (A3: "bit 0 set → doc 63 survives"), or nothing when the mirror lies
+    past the cluster (doc 69 → 122 ≥ 70). The adapter's ``MASK_BIT_ORDER`` must equal the
+    pinned measurement."""
     assert of.MASK_BIT_ORDER == OFFICIAL_BIT_ORDER
     scored = _scored_docs(doc, OFFICIAL_BIT_ORDER)
     assert scored == [doc], (
         f"with the mask packed {OFFICIAL_BIT_ORDER} the scorer scored docs {scored}, expected "
         f"[{doc}]: A3's measured bit order no longer holds at this upstream sha"
     )
-    assert _scored_docs(doc, OTHER_ORDER) == [], (
-        f"a mask packed {OTHER_ORDER} scored docs — the scorer no longer reads {OFFICIAL_BIT_ORDER}"
+    mirror = (doc // 64) * 64 + (63 - doc % 64)
+    assert _scored_docs(doc, OTHER_ORDER) == ([mirror] if mirror < 70 else []), (
+        f"a mask packed {OTHER_ORDER} did not score the mirrored doc — the scorer no longer "
+        f"reads {OFFICIAL_BIT_ORDER}"
     )
 
 
@@ -608,7 +617,9 @@ def test_t6_layer_fp16_default_ranks_like_triton(data, filter_mode):
     ids_t, sc_t = tri(data["query"], qa)
     assert ids_o.shape == ids_t.shape == (B, K) and ids_o.dtype == torch.long
     assert sc_o.dtype == torch.float32
-    jac = _jaccard(ids_o, ids_t)
+    # Exact rows with < K survivors: the Triton epilogue leaves the padded item id at an
+    # ``-inf`` slot, the official one writes ``-1`` — normalise both (see ``_sentinel_ids``).
+    jac = _jaccard(_sentinel_ids(ids_o, sc_o), _sentinel_ids(ids_t, sc_t))
     print(f"T6 fp16 {filter_mode}: jaccard@{K} vs triton = {jac:.4f}")
     assert jac >= 0.99, jac
 
@@ -629,13 +640,15 @@ def test_t6_layer_bloom(data, bloom_path, record_property):
     _transplant(off, tri)
     ids_o, sc_o = off(data["query"], data["q_attrs"])
     ids_t, sc_t = tri(data["query"], data["q_attrs"])
+    ids_o, ids_t = _sentinel_ids(ids_o, sc_o), _sentinel_ids(ids_t, sc_t)
     exact = clause_subset_match(
         data["attrs"][ids_o.clamp_min(0)], data["q_attrs"], tri.clause_is_reverse
     ) & (ids_o >= 0)
     fp = 0
     for b in range(B):
         t_set = set(ids_t[b][ids_t[b] >= 0].tolist())
-        kth = float(sc_t[b][torch.isfinite(sc_t[b])].min().item()) if t_set else float("-inf")
+        t_finite = sc_t[b][torch.isfinite(sc_t[b])]
+        kth = float(t_finite.min().item()) if t_finite.numel() else float("-inf")
         for j in range(K):
             i = int(ids_o[b, j].item())
             if i < 0:
@@ -750,15 +763,35 @@ def test_t7_compile_refused(data):
 
 
 def _count_syncs(fn) -> int:
-    with warnings.catch_warnings(record=True) as caught:
+    """Host syncs ``fn`` performs under ``torch.cuda.set_sync_debug_mode("warn")``. Two
+    disjoint instruments (plan §13.2): a sync inside a C++ custom op is reported by c10's
+    own warning handler as a ``warn_or_error_on_sync`` line on **fd 2** and never becomes a
+    Python warning; a sync from Python-dispatched aten (``.item()``, ``nonzero``) surfaces
+    as a Python warning and not on fd 2. Both are counted; the "prototype feature" notice
+    the mode prints once is not a sync."""
+    torch.cuda.synchronize()
+    with tempfile.TemporaryFile(mode="w+") as tf, warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
+        sys.stderr.flush()
+        saved = os.dup(2)
+        os.dup2(tf.fileno(), 2)
         torch.cuda.set_sync_debug_mode("warn")
         try:
             fn()
             torch.cuda.synchronize()
         finally:
             torch.cuda.set_sync_debug_mode("default")
-    return sum(1 for w in caught if "synchroniz" in str(w.message).lower())
+            sys.stderr.flush()
+            os.dup2(saved, 2)
+            os.close(saved)
+        tf.seek(0)
+        from_cpp = sum(1 for line in tf if "warn_or_error_on_sync" in line)
+    from_py = sum(
+        1
+        for w in caught
+        if "called a synchronizing" in str(w.message) and "prototype" not in str(w.message)
+    )
+    return from_cpp + from_py
 
 
 def test_t7_sync_count_per_op(record_property):
@@ -809,3 +842,31 @@ def test_t7_sync_count_per_op(record_property):
     assert counts["fused_kmean_ann"] > 0, (
         "plan §3: the scorer syncs the host (repeat_interleave + .item())"
     )
+
+
+@pytest.mark.parametrize("cache_plans", [True, False])
+def test_t7_layer_forward_sync_count(data, cache_plans, record_property):
+    """Host syncs of one ``SilverTorch(backend="official")`` forward per filter path, with
+    the plan cache on (a replayed batch) and off (the timing setting): the numbers behind
+    plan D7's "eager only". Phase 1 and the ``masked_topk`` epilogue add none of their own,
+    so ``none`` should equal ``fused_kmean_ann``'s count and the bloom paths the sum of the
+    search and scorer ops'; ``cache_plans`` moves no device sync (the parse is CPU work)."""
+    cfg = dict(b_multiplier=B_MULT, n_stored_hashes=HASH_K, cache_plans=cache_plans)
+    modules = {
+        "none": (_layer(data, "official", "none"), None),
+        "exact": (_layer(data, "official", "exact"), data["q_attrs"]),
+        "bloom[partial]": (
+            _layer(data, "official", "bloom", official=OfficialConfig(bloom_path="partial", **cfg)),
+            data["q_attrs"],
+        ),
+        "bloom[full]": (
+            _layer(data, "official", "bloom", official=OfficialConfig(bloom_path="full", **cfg)),
+            data["q_attrs"],
+        ),
+    }
+    for name, (module, qa) in modules.items():
+        module(data["query"], qa)  # warm-up: first-call lazy work is not the steady state
+        n_sync = _count_syncs(lambda: module(data["query"], qa))
+        record_property(f"forward_syncs_{name}_cache_plans={cache_plans}", n_sync)
+        print(f"T7 forward syncs — {name}, cache_plans={cache_plans}: {n_sync}")
+        assert n_sync > 0
