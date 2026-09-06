@@ -1,10 +1,10 @@
 """Bloom signature hashing — the single home of the hash math.
 
-``generate_seeds`` / ``build_signatures`` / ``build_query_signatures`` are the
-public API consumed by :class:`~retrieve.layers.filters.bloom.BloomFilter` and
-``SilverTorch``'s fused bloom mode. The hash is pinned: persisted ``bloom_sigs``
-buffers must stay bit-valid across refactors, so any change here invalidates
-every stored index.
+``generate_seeds`` / ``generate_clause_salt`` / ``build_signatures`` /
+``build_query_signatures`` are the public API consumed by
+:class:`~retrieve.layers.filters.bloom.BloomFilter` and ``SilverTorch``'s fused
+bloom mode. The hash is pinned: persisted ``bloom_sigs`` buffers must stay
+bit-valid across refactors, so any change here invalidates every stored index.
 """
 
 from __future__ import annotations
@@ -45,19 +45,41 @@ def _mix64(x: Tensor, c1: Tensor, c2: Tensor) -> Tensor:
     return h
 
 
-def _clause_salt(c_dim: int, a_max: int, device: torch.device) -> Tensor:
-    """``[1, C*A, 1]`` per-clause hash salt shared by both builders."""
-    clause_ids = (
-        torch.arange(c_dim, dtype=torch.int64, device=device)
-        .view(c_dim, 1)
-        .expand(c_dim, a_max)
-        .reshape(1, c_dim * a_max, 1)
-    )
+def generate_clause_salt(c_dim: int, device: torch.device) -> Tensor:
+    """``[C]`` int64 per-clause hash salt — ``_mix64`` of the clause index under the
+    splitmix64 constants. Pure function of ``c_dim`` (no seed), so it is identical on
+    every device and every call; ``BloomFilter`` / ``SilverTorch`` register it once as
+    the ``clause_salt`` buffer at ``register_index`` so the per-forward query build
+    issues no host→device copy (the previous per-call ``torch.tensor(_SALT_C1,
+    device=cuda)`` was a pageable H2D copy that broke raw CUDA-graph capture and cost
+    ~0.4 ms of launch overhead per eager bloom forward)."""
+    clause_ids = torch.arange(c_dim, dtype=torch.int64, device=device)
     return _mix64(
         clause_ids,
         torch.tensor(_SALT_C1, dtype=torch.int64, device=device),
         torch.tensor(_SALT_C2, dtype=torch.int64, device=device),
     )
+
+
+def _expand_clause_salt(clause_salt: Tensor, c_dim: int, a_max: int) -> Tensor:
+    """``[C]`` salt → the ``[1, C*A, 1]`` broadcast shape ``_signature_batch`` XORs in
+    (clause ``c`` repeated over its ``A`` attribute slots). Views only — no copy, no
+    host round trip."""
+    if clause_salt.dim() != 1 or clause_salt.shape[0] != c_dim:
+        raise ValueError(
+            f"clause_salt must be a [C={c_dim}] int64 tensor, got shape {tuple(clause_salt.shape)}"
+        )
+    return clause_salt.view(c_dim, 1).expand(c_dim, a_max).reshape(1, c_dim * a_max, 1)
+
+
+def _resolve_clause_salt(
+    clause_salt: Tensor | None, c_dim: int, a_max: int, device: torch.device
+) -> Tensor:
+    """The registered ``[C]`` buffer if given, else a fresh one (standalone callers —
+    parity tests, the tuner). Either way the bits XORed into the hash are the same."""
+    if clause_salt is None:
+        clause_salt = generate_clause_salt(c_dim, device)
+    return _expand_clause_salt(clause_salt, c_dim, a_max)
 
 
 def _signature_batch(
@@ -101,12 +123,15 @@ def build_signatures(
     m_bits: int,
     k_hash: int,
     word_count: int,
+    *,
+    clause_salt: Tensor | None = None,
 ) -> Tensor:
     """Index-side signature build: chunked over ``_BUILD_SIGS_BATCH`` rows.
 
     Dense ``[N, word_count, 64]`` int64 would be ~22 GiB at N=2.7M, m_bits=1024;
     chunking bounds the per-batch peak (~1 GiB at 131072 rows) so it fits
-    alongside the index."""
+    alongside the index. ``clause_salt`` is the ``[C]`` buffer from
+    :func:`generate_clause_salt`; ``None`` derives it on the fly (same bits)."""
     leading = attrs.shape[:-2]
     n = 1
     for d in leading:
@@ -115,15 +140,13 @@ def build_signatures(
     a_max = attrs.shape[-1]
 
     flat = attrs.reshape(n, c_dim * a_max)
-    clause_salt = _clause_salt(c_dim, a_max, attrs.device)
+    salt = _resolve_clause_salt(clause_salt, c_dim, a_max, attrs.device)
 
     out = torch.empty(n, word_count, dtype=torch.int64, device=attrs.device)
     for s in range(0, n, _BUILD_SIGS_BATCH):
         e = min(s + _BUILD_SIGS_BATCH, n)
         batch = flat[s:e]
-        out[s:e] = _signature_batch(
-            batch, batch != -1, seeds, m_bits, k_hash, word_count, clause_salt
-        )
+        out[s:e] = _signature_batch(batch, batch != -1, seeds, m_bits, k_hash, word_count, salt)
 
     out_shape = list(leading) + [word_count]
     return out.reshape(out_shape) if leading else out.reshape(word_count)
@@ -135,11 +158,14 @@ def build_query_signatures(
     m_bits: int,
     k_hash: int,
     word_count: int,
+    *,
+    clause_salt: Tensor | None = None,
 ) -> Tensor:
     """Query-side signature build: one loop-free ``_signature_batch`` call — a
     Python ``range()`` loop would make dynamo specialize on the trip count under
     ``torch.compile(dynamic=True)``. Query batches are small, so the unchunked
-    peak alloc is fine."""
+    peak alloc is fine. Pass the module's ``clause_salt`` buffer so the forward
+    is free of host→device copies (see :func:`generate_clause_salt`)."""
     leading = attrs.shape[:-2]
     n = 1
     for d in leading:
@@ -148,8 +174,8 @@ def build_query_signatures(
     a_max = attrs.shape[-1]
 
     flat = attrs.reshape(n, c_dim * a_max)
-    clause_salt = _clause_salt(c_dim, a_max, attrs.device)
-    out = _signature_batch(flat, flat != -1, seeds, m_bits, k_hash, word_count, clause_salt)
+    salt = _resolve_clause_salt(clause_salt, c_dim, a_max, attrs.device)
+    out = _signature_batch(flat, flat != -1, seeds, m_bits, k_hash, word_count, salt)
 
     out_shape = list(leading) + [word_count]
     return out.reshape(out_shape) if leading else out.reshape(word_count)

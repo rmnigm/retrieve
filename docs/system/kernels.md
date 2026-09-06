@@ -550,7 +550,11 @@ post-`_mix64` hash, before the position mask. This is what prevents
 value `V` in clause C0 from colliding with the same `V` in clause C3
 when clauses share a value vocabulary; without it, single-clause
 queries on overlapping vocabularies leak ~25–30% of non-matching items
-as false positives. The kernel itself is untouched: it consumes
+as false positives. The salt is a `[C]` int64 buffer (`clause_salt`,
+built by `generate_clause_salt` and registered at `register_index`
+by `BloomFilter` and `SilverTorch`), so the per-forward query build
+issues no host→device copy — see
+[filtering.md](filtering.md#bloom-hash-keys-clause_idx-value). The kernel itself is untouched: it consumes
 `[N, W]` / `[B, W]` int64 buffers as opaque bits. The salt costs one
 extra elementwise XOR per chunk (well under measurement noise vs the
 existing scatter + word-pack reduction); kernel HBM traffic and launch
@@ -1426,10 +1430,12 @@ the large layout exactly as in §5. So the host gap is a cost of the
 tuner / parity / eager path only; the deployed compiled path never pays
 it. (A manual `torch.cuda.CUDAGraph` of the eager forward — pure replay,
 cuda÷cute 0.97–1.00× — captures for none and exact but not for bloom on
-any backend: `build_query_signatures` builds its salt constants with
-`torch.tensor(_SALT, device=cuda)`, a pageable host→device copy that
-invalidates raw capture; inductor folds them into the graph. Hoisting
-those two constants would make the eager bloom forward raw-capturable.)
+any backend: at the time of that measurement `build_query_signatures`
+built its salt constants with `torch.tensor(_SALT, device=cuda)`, a
+pageable host→device copy that invalidates raw capture; inductor folds
+them into the graph. B5 (2026-09-06) hoisted the salt into the
+`clause_salt` buffer, which should make the eager bloom forward
+raw-capturable — not yet re-measured.)
 
 **Levers for the remaining host gap**, by expected payoff over cost:
 

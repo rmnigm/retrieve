@@ -9,6 +9,7 @@ from retrieve.layers.filters.bloom_hash import (
     bloom_subset_match,
     build_query_signatures,
     build_signatures,
+    generate_clause_salt,
     generate_seeds,
 )
 from retrieve.layers.utils.compact import compact_mask
@@ -24,6 +25,7 @@ class BloomFilter(FilterModule):
 
     bloom_sigs: Tensor  # [N, W] int64
     hash_seeds: Tensor  # [k_hash, 2] int64
+    clause_salt: Tensor  # [C] int64
 
     def __init__(self, m_bits: int, k_hash: int, backend: Backend = "triton") -> None:
         super().__init__()
@@ -49,14 +51,20 @@ class BloomFilter(FilterModule):
                 "BloomFilter is paper-strict: clause_is_reverse must be all-False "
                 "(no NOT). Use ExactAttributeFilter (filter_kind='clause') for reverse clauses."
             )
-        seeds = generate_seeds(self.k_hash, device=item_clause_attrs.device)
+        device = item_clause_attrs.device
+        seeds = generate_seeds(self.k_hash, device=device)
         self.register_buffer("hash_seeds", seeds)
+        # Per-clause salt registered once so the per-forward query build issues no
+        # host→device copy (bloom_hash.generate_clause_salt).
+        salt = generate_clause_salt(item_clause_attrs.shape[1], device=device)
+        self.register_buffer("clause_salt", salt)
         sigs = build_signatures(
             item_clause_attrs.long(),
             seeds,
             self.m_bits,
             self.k_hash,
             self.word_count,
+            clause_salt=salt,
         )
         self.register_buffer("bloom_sigs", sigs)
 
@@ -67,6 +75,7 @@ class BloomFilter(FilterModule):
             self.m_bits,
             self.k_hash,
             self.word_count,
+            clause_salt=self.clause_salt,
         )
 
     def evaluate_mask(self, query_clause_attrs: Tensor) -> Tensor:
