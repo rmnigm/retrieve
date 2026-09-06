@@ -632,3 +632,125 @@ parity suite (**O** §5 T1–T7 / roadmap B2), not the harness. `[medium]`
 One library change follows from A: `SilverTorch.set_query_params(n_probe=…)`
 re-running the two `register_index` validations — 10 lines, alongside the
 `build_timings` nit in §7.
+
+## 9. Validation record — WP-0 / roadmap A1, 2026-09-06, A100-SXM4-80GB
+
+> Model: [cuda-silvertorch-handoff.md §13](cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360).
+
+**Environment.** A100-SXM4-80GB, driver 570.195.03, CUDA 12.8, torch
+2.10.0+cu128, triton 3.6.0, Python 3.11. Branch `dev/a1-golden`; every row
+carries `extra.commit = 70bafc4`, the commit the cells were produced at.
+Runbook: [evaluation-harness-v2-artifacts/a1_golden_run.sh](evaluation-harness-v2-artifacts/a1_golden_run.sh),
+stages `golden step4 step7`.
+
+**Clocks were NOT locked — this container cannot.** `nvidia-smi -lgc 1410`
+returns *"The current user does not have permission to change clocks"* and
+there is no `sudo` binary, so §7's fallback applies: the runbook samples
+`clocks.sm` every 30 s into `evaluation/golden/_logs/clocks.csv` instead.
+Under load the SM clock sat at **1140 MHz** (the application-clock default,
+not the 1410 MHz boost the plan asks for), 210 MHz idle, 28-31 °C, no
+thermal excursion. **The quality columns are unaffected; the latency
+columns are not clock-controlled and must not be quoted as if they were.**
+C4 compares quality within 1e-6 (H WP-4 gate 1) — that gate stands; its
+gate 2, `graph` median within 5 % of golden, has to be read against this,
+and the cleanest fix is for C4 to run on a box where clocks can be pinned.
+
+### 9.1 Golden cells — 11/11 green
+
+99 rows, 9 per cell (`ks = [100, 500, 1000]` × `batch_sizes = [1, 8, 16]`),
+every `(k, bs)` present and every quality column populated. Wall time 35.9
+min total, 2.5-4.6 min per cell (each is a fresh process; the first pays the
+oracle build, 62 s for goodreads `c0_genre`, then it is cached by
+fingerprint). `users_limit: 10000`; goodreads keeps 9,859 of 10,000 users on
+`c0_genre` (the rest have no surviving clause), arxiv keeps 10,000/10,000.
+
+| cell | k | recall@k | ndcg@k | median_ms bs=1 | bs=8 | bs=16 |
+|---|---|---|---|---|---|---|
+| arxiv-d128-c0_maincat-silvertorch-triton | 100 | 0.884007 | 0.913704 | 0.1868 | 0.3097 | 0.4701 |
+| arxiv-d128-c0_maincat-silvertorch-triton | 500 | 0.847281 | 0.875401 | 0.2012 | 0.3197 | 0.4790 |
+| arxiv-d128-c0_maincat-silvertorch-triton | 1000 | 0.819665 | 0.848330 | 0.2020 | 0.3198 | 0.4801 |
+| goodreads-d128-c0_genre-linr_v1_filter_mask-torch | 100 | 0.999695 | 0.999781 | 0.4340 | 0.9449 | 1.6256 |
+| goodreads-d128-c0_genre-linr_v1_filter_mask-torch | 500 | 0.999657 | 0.999729 | 0.4506 | 0.9574 | 1.6389 |
+| goodreads-d128-c0_genre-linr_v1_filter_mask-torch | 1000 | 0.999627 | 0.999696 | 0.4500 | 0.9576 | 1.6382 |
+| goodreads-d128-c0_genre-linr_v1_filter_mask-triton | 100 | 0.999695 | 0.999781 | 0.4600 | 1.0907 | 1.9004 |
+| goodreads-d128-c0_genre-linr_v1_filter_mask-triton | 500 | 0.999657 | 0.999729 | 0.4756 | 1.1021 | 1.9098 |
+| goodreads-d128-c0_genre-linr_v1_filter_mask-triton | 1000 | 0.999627 | 0.999696 | 0.5475 | 1.1028 | 1.9136 |
+| goodreads-d128-c0_genre-linr_v2-torch | 100 | 0.999695 | 0.999781 | 0.9320 | 4.6478 | 9.1234 |
+| goodreads-d128-c0_genre-linr_v2-torch | 500 | 0.999657 | 0.999729 | 0.9088 | 4.6556 | 9.1410 |
+| goodreads-d128-c0_genre-linr_v2-torch | 1000 | 0.999627 | 0.999696 | 0.8409 | 4.6580 | 9.1373 |
+| goodreads-d128-c0_genre-linr_v2-triton | 100 | 0.999279 | 0.999483 | 0.3679 | 1.6625 | 3.2321 |
+| goodreads-d128-c0_genre-linr_v2-triton | 500 | 0.999372 | 0.999503 | 0.4577 | 1.6842 | 3.2532 |
+| goodreads-d128-c0_genre-linr_v2-triton | 1000 | 0.999388 | 0.999501 | 0.4602 | 1.6953 | 3.2561 |
+| goodreads-d128-c0_genre-linr_v3-torch | 100 | 0.876957 | 0.909106 | 0.4742 | 1.8755 | 3.4024 |
+| goodreads-d128-c0_genre-linr_v3-torch | 500 | 0.724322 | 0.774934 | 0.5834 | 1.8952 | 3.4184 |
+| goodreads-d128-c0_genre-linr_v3-torch | 1000 | 0.617541 | 0.676164 | 0.5791 | 1.8919 | 3.4193 |
+| goodreads-d128-c0_genre-linr_v3-triton | 100 | 0.876978 | 0.909125 | 0.4347 | 1.3807 | 2.4714 |
+| goodreads-d128-c0_genre-linr_v3-triton | 500 | 0.724367 | 0.774973 | 0.5496 | 1.4048 | 2.4867 |
+| goodreads-d128-c0_genre-linr_v3-triton | 1000 | 0.617544 | 0.676167 | 0.4720 | 1.4036 | 2.4864 |
+| goodreads-d128-c0_genre-linr_v4-torch | 100 | 0.982054 | 0.987055 | 0.5993 | 1.1424 | 1.8444 |
+| goodreads-d128-c0_genre-linr_v4-torch | 500 | 0.986094 | 0.988973 | 0.6142 | 1.1539 | 1.8551 |
+| goodreads-d128-c0_genre-linr_v4-torch | 1000 | 0.987316 | 0.989631 | 0.7399 | 1.1551 | 1.8556 |
+| goodreads-d128-c0_genre-linr_v4-triton | 100 | 0.982054 | 0.987055 | 0.6273 | 1.3012 | 2.5555 |
+| goodreads-d128-c0_genre-linr_v4-triton | 500 | 0.986094 | 0.988973 | 0.6470 | 1.3123 | 2.1000 |
+| goodreads-d128-c0_genre-linr_v4-triton | 1000 | 0.987316 | 0.989631 | 0.6462 | 1.3135 | 2.1002 |
+| goodreads-d128-c0_genre-silvertorch-torch | 100 | 0.912643 | 0.935841 | 0.6128 | 3.4215 | 6.8018 |
+| goodreads-d128-c0_genre-silvertorch-torch | 500 | 0.847044 | 0.876175 | 0.6074 | 3.4368 | 6.8182 |
+| goodreads-d128-c0_genre-silvertorch-torch | 1000 | 0.788911 | 0.823259 | 0.6025 | 3.4635 | 6.8771 |
+| goodreads-d128-c0_genre-silvertorch-triton | 100 | 0.912759 | 0.935927 | 0.2107 | 0.4509 | 0.8570 |
+| goodreads-d128-c0_genre-silvertorch-triton | 500 | 0.847199 | 0.876303 | 0.2721 | 0.4686 | 0.8727 |
+| goodreads-d128-c0_genre-silvertorch-triton | 1000 | 0.789083 | 0.823403 | 0.2777 | 0.4767 | 0.8859 |
+
+Reading these: `linr_v2` is the exact filtered top-K baseline, so its ~0.9997
+is the tie-order ceiling rather than a recall loss; `torch` and `triton`
+agree to ~1e-4 on every algo (tie order, not arithmetic); `silvertorch`
+triton is 3.2-7.9× faster than its torch fallback at bs=16 while matching it
+to 1.2e-4 on recall.
+
+### 9.2 Handoff steps
+
+| step | result |
+|---|---|
+| 1 — eval CPU tests | **pass**, 33 passed (`retrieval/tests/`, minus the GPU-only reverse-clause suite) |
+| 4 — compile gate, `TORCH_LOGS=graph_breaks` on `linr_v3 --skip-quality` | **pass**: exit 0 and **zero** graph breaks on the branch. The step's criterion is "no *new* breaks vs `main`"; with none at all the comparison is vacuous, and the `main`-side leg did not run (that worktree's `.venv` was removed when step 6 was deferred, and it needs both fixes below first) |
+| 7 — orchestrator smoke | **pass**: killed as soon as the first algo completed (250 s in), resumed, `exit=0`, 1 × `resume: skipping`, 5/5 algo JSONs, and `SUMMARY.txt` / `full.log` / `goodreads__a1_step7-d128-filter.log` in the run-log dir. Output went to a throwaway dir via a copied config, so `evaluation/results/` was untouched |
+| 5 — per-kernel ±5 % gates | **deferred 2026-09-06** (user: heavy evals later). Scripted: stage `step5` + [a1_step5_compare.py](evaluation-harness-v2-artifacts/a1_step5_compare.py). Estimate 332 sweep points per side, ~44 min both sides at 4 s/point |
+| 6 — golden diff vs `main` | **deferred 2026-09-06** (same). Scripted: stage `step6` + [a1_step6_diff.py](evaluation-harness-v2-artifacts/a1_step6_diff.py); the throwaway `tmp/main-users-limit-fix` worktree carries main's `users_limit` port and still needs the two fixes below |
+
+### 9.3 Three bugs, none of them in the plan
+
+WP-0 was budgeted as "commit a 3-line fix, run 11 cells". It took three
+attempts, and each failure was a real defect that only a golden run could
+surface — which is the argument for A1 existing at all.
+
+1. **`users_limit` row count** (`fix(A1): users_limit row-count in
+   load_query_attrs`, `0129e25`) — the known blocker of §1 verdict 7.
+2. **The fetched datasets are the pre-`3b1b5b3` 1-indexed `[N+1, …]`
+   artifacts** (`fix(A1): accept the legacy 1-indexed dataset layout`,
+   `df6db40`). The loaders, the ETL and `docs/system/datasets.md` expect
+   `[N, …]` 0-indexed dense; the copies published on the Hub never moved.
+   goodreads crashed in the oracle (797,085 vs 797,084 rows). **arxiv did
+   not crash** — attrs and embeddings were both 1-indexed, agreeing with
+   each other, so only the held-out target shift was wrong:
+   `cos(query, text_emb[target_id])` 0.9891 versus
+   `cos(query, text_emb[target_id - 1])` 0.6248, with no error anywhere. An
+   arxiv golden cell would have been wrong and plausible. Not a refactor
+   regression: `main` and `development` have byte-identical
+   `load_filter_assets`. Diagnostic:
+   [a1_check_item_alignment.py](evaluation-harness-v2-artifacts/a1_check_item_alignment.py).
+3. **K3's shared `@triton.jit` helpers do not survive inductor**
+   (`fix(A1): import the shared triton helpers by name, not via the
+   module`, `70bafc4`). `common.clause_pass(...)` resolves fine in eager
+   Triton — hence 47/47 parity tests and the full library suite green on
+   2026-09-02 — but `torch.compile` rebuilds the kernel's globals and
+   captures `@triton.jit` callees *by name*, so every compiled filter algo
+   died with `NameError('common is not defined')` and **not one golden cell
+   could be produced**. This is precisely what handoff step 4 exists to
+   catch, and step 4 had never run. Fixed by importing the helpers by name;
+   the compiled mask is `torch.equal` to the eager one and
+   `pytest -k "clause or bloom or compact"` is 165 passed / 33 skipped.
+
+One operational note, not a code defect: killing a cell mid-`torch.save`
+left a truncated 20 MiB `gt_topk_v3_c0_maincat.pt`, and the next run failed
+with `PytorchStreamReader failed reading zip archive`. Deleted and rebuilt.
+`load_or_build_oracle` should treat an unreadable cache the way it treats a
+stale fingerprint — recompute, not raise; folded into WP-2's oracle work.

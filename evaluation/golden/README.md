@@ -51,13 +51,13 @@ Roadmap A1 also closes steps 4-7 of
 whose status blockquote records steps 1 and 4-7 as never having run (no
 dataset was on the box). The runbook does all of it in five stages:
 
-| stage | what | artifacts |
-|---|---|---|
-| `golden` | the 11 cells above | `evaluation/golden/*.json` |
-| `step4` | `TORCH_LOGS=graph_breaks` compile smoke on `linr_v3 --skip-quality`; break reasons diffed against `main`, since "no *new* breaks" is only decidable against it | `.../a1/step4/` |
-| `step7` | `run-evaluation --resume` orchestrator smoke: killed as soon as the first algo finishes, resumed, must skip what completed | `.../a1/step7/` |
-| `step6` | the same 11 cells from the `main` worktree + the quality diff | `_main/`, `.../a1/step6/report.md` |
-| `step5` | per-kernel `tune-kernels` +-5 % gates on both sides, behind a wall-time estimate | `.../a1/step5/` |
+| stage | what | result 2026-09-06 | artifacts |
+|---|---|---|---|
+| `golden` | the 11 cells above | **11/11 green**, 99 rows, 35.9 min | `evaluation/golden/*.json` |
+| `step4` | `TORCH_LOGS=graph_breaks` compile smoke on `linr_v3 --skip-quality`; break reasons diffed against `main`, since "no *new* breaks" is only decidable against it | **pass** — zero breaks on the branch, so the comparison is vacuous; the `main` leg did not run | `.../a1/step4/` |
+| `step7` | `run-evaluation --resume` orchestrator smoke: killed as soon as the first algo finishes, resumed, must skip what completed | **pass** — exit 0, 1 resume skip, 5/5 JSONs | `.../a1/step7/` |
+| `step6` | the same 11 cells from the `main` worktree + the quality diff | **deferred** (user: heavy evals later) | `_main/`, `.../a1/step6/report.md` |
+| `step5` | per-kernel `tune-kernels` +-5 % gates on both sides, behind a wall-time estimate | **deferred** (same); estimate 332 points/side, ~44 min both | `.../a1/step5/` |
 
 (`.../a1/` is
 [../../docs/plans/evaluation-harness-v2-artifacts/a1/](../../docs/plans/evaluation-harness-v2-artifacts/README.md).)
@@ -127,13 +127,25 @@ The working directory matters: both configs' `data_dir` and filter
 
 | what | value |
 |---|---|
-| harness code state | `0129e25` — `fix(A1): users_limit row-count in load_query_attrs`, on `dev/a1-golden` off `development` |
-| box | A100-SXM4-80GB, torch 2.10.0+cu128, triton 3.6.0, Python 3.11 |
-| clocks | SM locked to 1410 MHz for every cell |
+| cells produced at | `70bafc4` — `fix(A1): import the shared triton helpers by name, not via the module`, on `dev/a1-golden` off `development`. Every row carries it in `extra.commit` |
+| box | A100-SXM4-80GB, driver 570.195.03, CUDA 12.8, torch 2.10.0+cu128, triton 3.6.0, Python 3.11 |
+| clocks | **not locked — this container cannot** (`nvidia-smi -lgc` → "The current user does not have permission to change clocks"; no `sudo` binary). H §7's fallback instead: sampled every 30 s into `_logs/clocks.csv`. 1140 MHz under load (the application default, not the 1410 MHz the plan asks for), 210 MHz idle, 28-31 °C. Quality is unaffected; **the latency columns are not clock-controlled** |
 | exact HEAD, host and UTC of the run | `_logs/provenance.txt` |
-| run record | appended to [evaluation-harness-v2.md](../../docs/plans/evaluation-harness-v2.md) and to the harness half of [refactor-validation-handoff.md](../../docs/plans/refactor-validation-handoff.md) |
+| run record | [evaluation-harness-v2.md §9](../../docs/plans/evaluation-harness-v2.md), with the per-cell table; the handoff's status blockquote carries the step-by-step result |
 
-`0129e25` carries the one behavioural change these numbers depend on:
+## Three bugs the run found
+
+WP-0 was budgeted as "commit a 3-line fix, run 11 cells"; it took three
+attempts, and every failure was a real defect that only a golden run could
+surface. Full account in the §9 record — in short: the `users_limit` row
+count (`0129e25`); the fetched datasets being the pre-`3b1b5b3` 1-indexed
+`[N+1, …]` artifacts, which crashed goodreads and *silently* misaligned
+arxiv by one row (`cos(query, target)` 0.99 → 0.62) (`df6db40`); and K3's
+`common.clause_pass` being a `NameError` under inductor, which failed every
+compiled filter algo and blocked all eleven cells (`70bafc4`).
+
+`0129e25` carries the first of the three behavioural changes these numbers
+depend on:
 before it, `load_query_attrs` required `eval_split.height == n_queries`
 while `queries_cache` had already trimmed the queries to
 `users_limit: 10000` against a 313,178-row `eval_split.parquet`, so every

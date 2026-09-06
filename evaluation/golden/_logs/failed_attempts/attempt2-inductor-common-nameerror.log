@@ -1,0 +1,194 @@
+2026-09-06 13:43:35.352 | INFO     | retrieval.queries_cache:load_or_cache_queries:62 - loaded encoded_queries from cache: data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/encoded_queries_test.pt
+2026-09-06 13:43:35.978 | INFO     | retrieval.loaders:load_query_attrs:365 -   eval_split rows=313178 > queries=10000 (users_limit prefix): trimming attrs
+2026-09-06 13:43:36.735 | INFO     | retrieval.loaders:load_query_attrs:372 - loaded eval_split.parquet: qa_narrow=(10000, 4)
+2026-09-06 13:43:37.492 | WARNING  | retrieval.loaders:drop_legacy_padding_row:81 - item_attrs_narrow: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 797085 → 797084 rows.
+2026-09-06 13:43:37.512 | INFO     | retrieval.sweep:_build_filter_modules:184 -   filter modules built: ExactAttributeFilter × 1 (oracle: ExactAttributeFilter)
+2026-09-06 13:43:37.512 | INFO     | retrieval.sweep:run_one_sweep:213 - === filter_kind=clause sweep=c0_genre ===
+2026-09-06 13:43:37.825 | INFO     | retrieval.sweep:run_one_sweep:221 -   kept users: 9859 / 10000
+2026-09-06 13:43:37.929 | INFO     | retrieval.oracle:load_or_build_oracle:155 -   building filtered oracle (K_GT=1000)
+2026-09-06 13:44:40.288 | INFO     | retrieval.oracle:load_or_build_oracle:166 -   saved oracle → data/goodreads-work-id/gt_d128/gt_topk_v3_c0_genre.pt
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0] Triton compilation failed: _clause_mask_kernel_0
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0] def _clause_mask_kernel(
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     item_attrs_ptr,  # [N, C, A_max] int64
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     is_reverse_ptr,  # [C] bool (stored as int8 in torch)
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     query_attrs_ptr,  # [B, C] int64
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     out_ptr,  # [B, N] bool
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     N,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     tiles_y,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     C: tl.constexpr,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     A_MAX: tl.constexpr,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     stride_in,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     stride_ic,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     stride_ia,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     stride_qb,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     stride_qc,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     stride_ob,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     stride_on,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     BLOCK_N: tl.constexpr,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0] ):
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     # 3D grid: batch on grid_x (L2 reuse on item_attrs), tiles split across grid_y × grid_z to dodge
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     # the 65535 single-axis cap; tile_id = tile_x * tiles_y + tile_y keeps tiles contiguous.
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     bid = tl.program_id(0)
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     tile_y = tl.program_id(1)
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     tile_x = tl.program_id(2)
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     tile_id = tile_x * tiles_y + tile_y
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0] 
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     n_offsets = tile_id * BLOCK_N + tl.arange(0, BLOCK_N)
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     n_valid = n_offsets < N
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0] 
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     # Result is already ANDed with n_valid inside the helper (keep seeds from load_mask).
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     pass_mask = common.clause_pass(
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]         item_attrs_ptr,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]         is_reverse_ptr,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]         query_attrs_ptr,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]         n_offsets,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]         n_valid,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]         bid,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]         stride_in,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]         stride_ic,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]         stride_ia,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]         stride_qb,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]         stride_qc,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]         C=C,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]         A_MAX=A_MAX,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     )
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0] 
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     tl.store(
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]         out_ptr + bid * stride_ob + n_offsets * stride_on,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]         pass_mask,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]         mask=n_valid,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     )
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0] 
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0] metadata: {'signature': {'item_attrs_ptr': '*i64', 'is_reverse_ptr': '*i8', 'query_attrs_ptr': '*i64', 'out_ptr': '*i1', 'N': 'i32', 'tiles_y': 'i32', 'C': 'constexpr', 'A_MAX': 'constexpr', 'stride_in': 'i32', 'stride_ic': 'i32', 'stride_ia': 'constexpr', 'stride_qb': 'i32', 'stride_qc': 'constexpr', 'stride_ob': 'i32', 'stride_on': 'constexpr', 'BLOCK_N': 'constexpr'}, 'device': 0, 'constants': {'C': 4, 'A_MAX': 4, 'stride_ia': 1, 'stride_qc': 1, 'stride_on': 1, 'BLOCK_N': 512}, 'configs': [{(0,): [['tt.divisibility', 16]], (1,): [['tt.divisibility', 16]], (2,): [['tt.divisibility', 16]], (3,): [['tt.divisibility', 16]], (8,): [['tt.divisibility', 16]]}], 'device_type': 'cuda', 'num_warps': 2, 'num_stages': 3, 'debug': True, 'cc': 80}
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0] Traceback (most recent call last):
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]   File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 808, in _precompile_config
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     binary = triton.compile(*compile_args, **compile_kwargs)
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]   File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/triton/compiler/compiler.py", line 304, in compile
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     module = src.make_ir(target, options, codegen_fns, module_map, context)
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]   File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/triton/compiler/compiler.py", line 80, in make_ir
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     return ast_to_ttir(self.fn, self, context=context, options=options, codegen_fns=codegen_fns,
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0] triton.compiler.errors.CompilationError: at 30:16:
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     # 3D grid: batch on grid_x (L2 reuse on item_attrs), tiles split across grid_y × grid_z to dodge
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     # the 65535 single-axis cap; tile_id = tile_x * tiles_y + tile_y keeps tiles contiguous.
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     bid = tl.program_id(0)
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     tile_y = tl.program_id(1)
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     tile_x = tl.program_id(2)
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     tile_id = tile_x * tiles_y + tile_y
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0] 
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     n_offsets = tile_id * BLOCK_N + tl.arange(0, BLOCK_N)
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     n_valid = n_offsets < N
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0] 
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     # Result is already ANDed with n_valid inside the helper (keep seeds from load_mask).
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]     pass_mask = common.clause_pass(
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0]                 ^
+E0906 13:45:18.096000 45605 torch/_inductor/runtime/triton_heuristics.py:810] [0/0] NameError('common is not defined')
+Traceback (most recent call last):
+  File "/workspace/wt/a1-golden/.venv/bin/evaluate", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/click/core.py", line 1514, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/click/core.py", line 1435, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/click/core.py", line 1298, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/click/core.py", line 853, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/evaluation/retrieval/cli/evaluate.py", line 104, in main
+    rows = run_sweep(ctx)
+           ^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/evaluation/retrieval/sweep.py", line 63, in run_sweep
+    rows.extend(run_filter_kind(filter_kind, fcfg, ctx))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/evaluation/retrieval/sweep.py", line 100, in run_filter_kind
+    rows.extend(run_one_sweep(sweep, filter_kind, ctx, assets))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/evaluation/retrieval/sweep.py", line 259, in run_one_sweep
+    evaluate_cell(
+  File "/workspace/wt/a1-golden/evaluation/retrieval/sweep.py", line 297, in evaluate_cell
+    quality = _run_quality(algo_obj, k, desc, ctx, assets)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/evaluation/retrieval/sweep.py", line 411, in _run_quality
+    return quality_pass_cached(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/evaluation/retrieval/passes.py", line 102, in quality_pass_cached
+    topk_ids, _ = forward(q, **kw)
+                  ^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1774, in _wrapped_call_impl
+    return self._compiled_call_impl(*args, **kwargs)  # type: ignore[misc]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/_dynamo/eval_frame.py", line 967, in compile_wrapper
+    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/_inductor/compile_fx.py", line 1019, in _compile_fx_inner
+    raise InductorError(e, currentframe()).with_traceback(
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/_inductor/compile_fx.py", line 1003, in _compile_fx_inner
+    mb_compiled_graph = fx_codegen_and_compile(
+                        ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/_inductor/compile_fx.py", line 1766, in fx_codegen_and_compile
+    return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/_inductor/compile_fx.py", line 1537, in codegen_and_compile
+    compiled_module = graph.compile_to_module()
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/_inductor/graph.py", line 2416, in compile_to_module
+    return self._compile_to_module()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/_inductor/graph.py", line 2426, in _compile_to_module
+    mod = self._compile_to_module_lines(wrapper_code)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/_inductor/graph.py", line 2501, in _compile_to_module_lines
+    mod = PyCodeCache.load_by_key_path(
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/_inductor/codecache.py", line 3674, in load_by_key_path
+    mod = _reload_python_module(key, path, set_sys_modules=in_toplevel)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/compile_tasks.py", line 35, in _reload_python_module
+    exec(code, mod.__dict__, mod.__dict__)
+  File "/tmp/torchinductor_root/j4/cj4bytof536woqcbnqspgcsybrht33brkqikaunkc2kwngrmjdea.py", line 78, in <module>
+    _clause_mask_kernel_0 = async_compile.triton('_clause_mask_kernel', '''
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/_inductor/async_compile.py", line 477, in triton
+    kernel.precompile(
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 441, in precompile
+    self._precompile_worker()
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 463, in _precompile_worker
+    compile_results.append(self._precompile_config(c))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 808, in _precompile_config
+    binary = triton.compile(*compile_args, **compile_kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/triton/compiler/compiler.py", line 304, in compile
+    module = src.make_ir(target, options, codegen_fns, module_map, context)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/wt/a1-golden/.venv/lib/python3.11/site-packages/triton/compiler/compiler.py", line 80, in make_ir
+    return ast_to_ttir(self.fn, self, context=context, options=options, codegen_fns=codegen_fns,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch._inductor.exc.InductorError: CompilationError: at 30:16:
+    # 3D grid: batch on grid_x (L2 reuse on item_attrs), tiles split across grid_y × grid_z to dodge
+    # the 65535 single-axis cap; tile_id = tile_x * tiles_y + tile_y keeps tiles contiguous.
+    bid = tl.program_id(0)
+    tile_y = tl.program_id(1)
+    tile_x = tl.program_id(2)
+    tile_id = tile_x * tiles_y + tile_y
+
+    n_offsets = tile_id * BLOCK_N + tl.arange(0, BLOCK_N)
+    n_valid = n_offsets < N
+
+    # Result is already ANDed with n_valid inside the helper (keep seeds from load_mask).
+    pass_mask = common.clause_pass(
+                ^
+NameError('common is not defined')
+
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
+

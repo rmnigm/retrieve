@@ -1,0 +1,21 @@
+branch:   dev/a1-golden @ 70bafc499f1f8e653d59af6431c2bd00759583c4
+dirty:    18 paths
+main wt:  /workspace/wt/main-golden @ cc9b733593603ca6940e28039a111a6d1ab510ea
+stages:   golden
+host:     880fe1ed291b
+utc:      2026-09-06T15:05:48Z
+nvidia-smi:
+Sun Sep  6 15:05:48 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 570.195.03             Driver Version: 570.195.03     CUDA Version: 12.8     |
+|-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA A100-SXM4-80GB          On  |   00000000:4E:00.0 Off |                    0 |
+| N/A   28C    P0             63W /  400W |       0MiB /  81920MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+torch 2.10.0+cu128
+triton 3.6.0

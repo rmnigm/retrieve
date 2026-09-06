@@ -109,17 +109,50 @@ SKIPPED_STAGES=()
 # Locked SM clocks so the latency columns are comparable across processes
 # and against C4's rerun (H §2.1; CLAUDE.md hard rule 1).
 
+CLOCKS_LOCKED=0
+SAMPLER_PID=""
+
+_nvsmi_priv() {
+  # The box may or may not have sudo, and a container may hold neither the
+  # capability nor a sudo binary. Try both, quietly.
+  if command -v sudo >/dev/null 2>&1; then sudo -n nvidia-smi "$@" 2>&1; else nvidia-smi "$@" 2>&1; fi
+}
+
 lock_clocks() {
   [ "${NO_CLOCK_LOCK:-0}" = "1" ] && { echo "[clocks] NO_CLOCK_LOCK=1 — not locking"; return 0; }
   echo "[clocks] locking SM clock to 1410 MHz"
-  sudo nvidia-smi -pm 1 || echo "[clocks] WARNING: persistence mode failed"
-  sudo nvidia-smi -lgc 1410 || echo "[clocks] WARNING: -lgc failed; latencies are NOT clock-controlled"
+  _nvsmi_priv -pm 1 | tail -1
+  if _nvsmi_priv -lgc 1410 | tee /dev/stderr | grep -qi "all done"; then
+    CLOCKS_LOCKED=1
+  else
+    echo "[clocks] WARNING: could not lock clocks (no permission in this container?)."
+    echo "[clocks] Falling back to H §7's alternative: clocks are SAMPLED per cell into"
+    echo "[clocks] $LOG_DIR/clocks.csv and the run record must say the latencies are not"
+    echo "[clocks] clock-controlled. Quality columns are unaffected."
+  fi
 }
 
 unlock_clocks() {
-  [ "${NO_CLOCK_LOCK:-0}" = "1" ] && return 0
+  [ -n "$SAMPLER_PID" ] && kill "$SAMPLER_PID" 2>/dev/null
+  [ "$CLOCKS_LOCKED" = "1" ] || return 0
   echo "[clocks] resetting SM clock"
-  sudo nvidia-smi -rgc || echo "[clocks] WARNING: -rgc failed; clocks left locked"
+  _nvsmi_priv -rgc | tail -1
+}
+
+start_clock_sampler() {
+  # The fallback H §7 prescribes when locking is unavailable — and useful
+  # provenance even when it is not: one sample every 30 s for the whole run.
+  local out="$LOG_DIR/clocks.csv"
+  # Append, never truncate: a second driver invocation (a resumed run, a
+  # single re-run cell) must not erase the trace of the first.
+  [ -s "$out" ] || echo "utc,clocks.sm,clocks.mem,temperature.gpu,power.draw,utilization.gpu" > "$out"
+  ( while true; do
+      echo "$(date -u +%Y-%m-%dT%H:%M:%SZ),$(nvidia-smi --query-gpu=clocks.sm,clocks.mem,temperature.gpu,power.draw,utilization.gpu \
+            --format=csv,noheader,nounits 2>/dev/null | tr -d ' ')" >> "$out"
+      sleep 30
+    done ) &
+  SAMPLER_PID=$!
+  echo "[clocks] sampling every 30s -> $out (pid $SAMPLER_PID)"
 }
 
 trap unlock_clocks EXIT
@@ -497,6 +530,7 @@ stage_step5() {
 } | tee "$LOG_DIR/provenance.txt"
 
 lock_clocks
+start_clock_sampler
 
 for stage in $STAGES; do
   case "$stage" in
