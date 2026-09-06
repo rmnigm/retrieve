@@ -79,13 +79,19 @@ not on the machine. Reuse those writers when adding the E2–E4 loaders.
   (2026-05-25), but the copies *published on the Hub* — what `eval-fetch`
   pulls — are still the older 1-indexed tensors with a padding row at
   index 0, as their own README and `text_emb.meta.json` say.
-  `retrieval.loaders.drop_legacy_padding_row` recognises that row by its
-  content (all-zero for embeddings, all `-1` for attributes) and drops it,
-  and `load_filter_assets` then checks the attrs row count against
-  `item_embs`. Getting this wrong is not always loud: on the arxiv path
+  `retrieval.data.drop_legacy_padding_row` recognises that row by its
+  content (all-zero for embeddings, all `-1` for attributes) and drops it
+  from every per-item tensor the harness loads (the pre-encoded `text_emb`
+  and `item_attrs_narrow`; the SASRec path's `nn.Embedding` pad row is
+  dropped by construction), and `load_inputs` then requires the attrs row
+  count to equal `item_embs`'s, raising with both counts otherwise
+  (`check_items_aligned`). Held-out ids are 1-indexed on disk in both
+  layouts, so the −1 shift is the same; the drop fixes the rows they
+  index. Getting this wrong is not always loud: on the arxiv path
   attrs and embeddings are *both* 1-indexed, so they agree with each other
   and only the held-out target shift is wrong — `cos(query, target)` falls
-  from 0.99 to 0.62 with no error anywhere (found in A1, 2026-09-06).
+  from 0.99 to 0.62 with no error anywhere (found in A1, 2026-09-06, on
+  the old harness's `loaders.py`; ported to v2's `data.py` in C4).
 - Every subcommand writes a `prep_log.json` with row counts and
   filtering statistics next to its outputs.
 - Subcommands are individually re-runnable; `all` chains them.

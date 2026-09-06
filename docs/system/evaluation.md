@@ -509,6 +509,20 @@ once here); `n_items`, `n_queries`. Two loaders, keyed on the `Dataset`:
 | `checkpoint` | SASRec: `encode.load_model_for_eval` + `encode_queries` over `test.parquet`, cached as `<ckpt-dir>/encoded_queries_v2.pt` keyed on ckpt mtime + `max_seq_length`, the *full* split (a free-disk budget of `0.7 × free − 4 GiB` guards the write); the padding row is dropped, target ids shifted −1 |
 | `content_dir` | pre-encoded text: `text_emb.pt` (or `shard_index.json` + shards) / `query_emb.pt` + `.meta.json` sidecars whose nomic prefixes are asserted, `heldout.parquet` (1-indexed → 0-indexed); fp16 → fp32 + L2-normalise |
 
+**Both on-disk layouts load** ([datasets.md](datasets.md#shared-conventions),
+roadmap A1): the modern `[N, …]` 0-indexed one and the legacy 1-indexed
+`[N+1, …]` one with a padding row at index 0, which is what the Hub copies
+`eval-fetch` pulls still are. `drop_legacy_padding_row` recognises the pad
+row by content — all-zero for `text_emb`, all `-1` for `item_attrs_narrow`
+— and drops it with a warning; `load_inputs` then requires the attrs row
+count to equal the item count (`check_items_aligned`) and raises naming
+both counts on anything else, so a misaligned mask fails at load rather
+than three layers down. The held-out `−1` shift is the same in both
+layouts (ids are 1-indexed on disk either way); only the rows they index
+change. A1 found this on the old harness (goodreads crashed on the row
+count; arxiv ran *silently* wrong, `cos(query, target)` 0.99 → 0.62); C4
+ported it to v2, tested on the conftest writer's `legacy=True` layout.
+
 `eval_split.parquet`'s row count is checked against the *full* split
 before `users_limit` trims queries, targets, `n_targets` and `qa` together
 as a prefix — the one `users_limit` site (kept a prefix, not a sample, for
