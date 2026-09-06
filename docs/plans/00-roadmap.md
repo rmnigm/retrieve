@@ -27,38 +27,54 @@ plan to `archive/` and shorten its entry here to one line under *Done*.
 
 ---
 
-> **Session status 2026-09-06 (evening, A100 VM, coordinator record).**
-> Done and merged into `development`: A1, A2, A3, B1, B2, B5, C1, C2,
-> C3, E1's gate; E2 deferred (skeleton merged); two architecture
-> reviews ([library](architecture-review-2026-09-06-library.md),
+> **Session status 2026-09-06 (late evening, A100 VM, coordinator record).**
+> Done and merged into `development`: A1, A2, A3, B1, B2, **B4**
+> (`62421b1`, A100 suite 504/0/0), B5, C1, C2, C3, E1's gate; E2
+> deferred (skeleton merged); two architecture reviews
+> ([library](architecture-review-2026-09-06-library.md),
 > [evaluation](architecture-review-2026-09-06-evaluation.md)) with their
-> "now" findings applied. **Not merged, on branches:**
-> `dev/b4-delete-cuda-cute` (B4 authored, CPU gates green, GPU suite not
-> run — merge after `uv run --directory retrieve pytest tests/ -q` is
-> green with the official extra; tag `cuda-cute-backends-final` marks
-> the parent `41d4479`) and `dev/c4-harness-gate` (C4 partial: the 14
-> goodreads cells ran, a cudagraph-skip failure on compiled
-> `linr_v2`/`linr_v3` triton was found and a fix drafted but not
-> verified; arxiv cell, resume check and golden comparison not run).
-> Runs were stopped on the user's instruction ("code now, heavy evals
-> later"). **Three C4 findings the next session must act on** (details
-> in the C4 agent's commits on that branch): (i) GPU k-means is not
-> deterministic — two seed-0 builds differ by 1.8e-2 in centroids
-> (`index_add_` atomics), so SilverTorch quality reproduces only to
-> ~1e-4 and the 1e-6 golden gate cannot pass on it until the library's
-> k-means reduction is made deterministic (a library change, not a
-> tolerance change); LiNR V2/V3 triton reproduce to 1e-6..5e-6 for the
-> same reason (unordered atomic compaction). (ii) The `graph` numbers in
-> A1's golden for `linr_v2`/`linr_v3` triton were compiled-eager: inductor
-> skipped cudagraphs ("mutated inputs", a false positive from the
-> compaction kernels' data-dependent stores); the WIP fix wraps the two
-> compact kernels as opaque custom ops. (iii) Unlocked clocks differ
-> between runs: golden ran at 1140 MHz, C4 at 1410 MHz under load, so
-> latency comparisons must normalise on `env.sm_mhz`, and 9 cells came
-> out `unstable` from the idle-first-sample drift rule. Next GPU lane,
-> in order: B4's suite → finish C4 (verify the WIP, deterministic k-means
-> decision, rerun) → B3 → the Triton epilogue `-1` sentinel (O §14.7) →
-> D4.
+> "now" findings applied. **C4's code is merged, its gate is not run**
+> (`7a21095` = `dev/c4-harness-gate` + `dev/c4-library-fixes`): the
+> harness pieces (legacy 1-indexed layout in `data.py`, official cells
+> with the plan cache off, `_check_probe_pool` on the official layout,
+> `c4_gate.py` + tests) and the three library fixes the C4 findings
+> demanded — (i) `clause_compact` / `bloom_compact` as opaque custom ops so
+> compiled LiNR V2/V3 capture (`cudagraph_skips == 0` on all six
+> layer × filter cells, regression test in `tests/compile/test_linr_compile.py`);
+> (ii) deterministic k-means (`bincount` + float64 one-hot GEMM in panel
+> order, no atomics; two seed-0 fits `torch.equal`, 1.22× the old wall
+> time); (iii) the O §14.7 `-1` id sentinel at `-inf` slots in both Triton
+> epilogues. Record: [evaluation-harness-v2.md §9](evaluation-harness-v2.md).
+> Merged state verified: library suite **519 passed** on the A100 with
+> the official extra, harness suite 103 passed / 1 skipped, ruff 0.15.6
+> clean, links 0. No branch carries unmerged code any more; the
+> `dev/*` worktrees under `/workspace/wt/` can be pruned.
+> **The eval queue, in order, for the next GPU session** (user
+> 2026-09-06: "code now, heavy evals later" — nothing below has run):
+> 1. **Re-derive A1's golden** on the old harness
+> (`/workspace/wt/main-golden`, `tmp/main-users-limit-fix`) against the
+> *new* library — its SilverTorch cells came from the atomic k-means and
+> its `linr_v2` / `linr_v3` `graph` cells were compiled-eager, so the
+> 1e-6 gate against the existing JSONs is not meaningful. Expect
+> SilverTorch-triton quality on rows with < k survivors to move
+> *down* only: `metrics.py::_hits` masks on `ids != -1`, never on score
+> finiteness, so a bloom-rejected item's id in a `-inf` slot could count
+> as a hit before the sentinel (torch / official unchanged).
+> 2. **C4 gate rerun** — the 14 goodreads-d128 `c0_genre` cells, the
+> arxiv cell, kill-and-resume, `c4_gate.py` against the new golden;
+> latency compared normalised on `env.sm_mhz` (golden 1140 MHz vs 1410
+> under load; 9 cells came out `unstable` from the idle-first-sample
+> rule). Then flip C4.
+> 3. **B3** — the Triton vs official head-to-head (O §9a/§9b, gap G2).
+> 4. **D1** — the campaign (≈ 24 h wall), then D4 `report.py`.
+> Kernel improvement (TF-1 transposed bloom, TF-3/4 retune) stays in
+> Phase G: gains are claimed only from B3, and a kernel change after D1
+> invalidates the campaign through the tree-hash resume key.
+> **Operational finding (C4 agent):** inductor's on-disk FX cache
+> (`/tmp/torchinductor_root`) does *not* invalidate when a `@triton_op`
+> host wrapper's Python source changes — clear it (or set
+> `TORCHINDUCTOR_FORCE_DISABLE_CACHES=1`) after editing any kernel
+> wrapper, or compiled numbers come from the old code.
 > **Environment facts that bind everything below:** the VM *is* the
 > A100 box; SM clocks cannot be locked (`nvidia-smi -lgc` denied, no
 > sudo — timing uses H §7's fallback: sampled `sm_mhz` + `unstable`);
@@ -88,7 +104,7 @@ conditional on a deadline. The A100 is the bottleneck, so GPU steps are
 ordered first and Mac-side steps run in parallel with them.
 
 **Branch.** `development` = `main` + the refactor track + the CUDA/CuTe
-backends (deleted on `dev/b4-delete-cuda-cute`, pending merge) +
+backends (deleted by B4, merged 2026-09-06) +
 everything the 2026-09-06 session merged (status block above); ≈ 146
 commits ahead of `main`, nothing pushed to `main`. Work happens on
 `dev/<step>` branches in git worktrees under `/workspace/wt/`, merged into
@@ -292,8 +308,8 @@ bit-exactness stays where it belongs, in B2's library parity suite.
   **Status 2026-09-06:** partial, on `dev/c4-harness-gate` — see the
   session status block at the top; results JSONL under
   `evaluation-harness-v2-artifacts/c4/` on that branch. The three library
-  prerequisites from the C4 findings are done on `dev/c4-library-fixes`
-  (`dd8b7b5` cudagraph capture verified, `d5d824b` deterministic k-means,
+  prerequisites from the C4 findings are done and merged (`7a21095`, from `dev/c4-library-fixes`:
+  `dd8b7b5` cudagraph capture verified, `d5d824b` deterministic k-means,
   `8df7e9a` the O §14.7 `-1` sentinel), with the record in
   [evaluation-harness-v2.md §9](evaluation-harness-v2.md); the gate itself
   still needs the cells re-run, and **A1's golden must be re-derived first**
