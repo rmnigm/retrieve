@@ -689,6 +689,7 @@ class TestBuilder:
 class TestEdgeCases:
     def test_n_lists_equals_n(self, data, backend):
         """Degenerate clustering (one item per cluster); full probe → recall ≈ 1."""
+        _require_backend(backend)  # the one builder-less test: gate the optional backends
         small_n = 256
         embs = data["embs"][:small_n]
         m = SilverTorch(k=K, n_lists=small_n, n_probe=small_n, n_iter=2, backend=backend)
