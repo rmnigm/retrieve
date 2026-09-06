@@ -82,6 +82,35 @@ def require_cps_cute() -> None:
         )
 
 
+def require_official() -> None:
+    """Gate the calling test on Meta's official SilverTorch ops (``torch.ops.st.*``,
+    the ``official`` extra), with the same split as ``require_cps_cuda``:
+
+    - **Not runnable here** (``silvertorch`` not installed, or no CUDA device) →
+      ``skip``. The suite is expected to run on boxes without the extra — the Mac
+      collects and skips it.
+    - **Installed but broken** (``silvertorch`` imports but ``silvertorch._C`` failed
+      to build / load, or the pinned sha lacks an op the adapter calls) → ``fail``
+      with the loader's message. A build failure that silently skipped would look
+      green on the first GPU run.
+
+    The first call pays the extension load; later calls hit the memo in the adapter."""
+    # Full-module-path import, as for the cuda / cute gates: the package __init__
+    # re-exports ops under module names, so import the module explicitly.
+    from retrieve.kernels.silvertorch.official import OfficialMissing, ensure_loaded
+
+    try:
+        ensure_loaded()
+    except OfficialMissing as e:
+        pytest.skip(f"official SilverTorch backend unavailable: {e}")
+    except ImportError as e:
+        pytest.fail(
+            f"silvertorch is installed but the official ops failed to load — this is a "
+            f"real failure, not a skip:\n{e}",
+            pytrace=False,
+        )
+
+
 def make_index(
     n: int,
     d: int,

@@ -5,7 +5,7 @@ from typing import Literal
 
 from torch import Tensor, nn
 
-Backend = Literal["torch", "triton", "cuda", "cute"]
+Backend = Literal["torch", "triton", "cuda", "cute", "official"]
 
 
 class RetrievalModule(nn.Module, abc.ABC):
