@@ -148,8 +148,8 @@ Two things to read the numbers with, stated rather than changed:
   per-variant `perf[].sm_mhz` is the under-load sample (taken right after
   the last timing window's sync) and is what an unlocked-clock run's
   latencies are read against (H §7's fallback; C4's gate script
-  `c4_gate.py` under the plan's artifacts reports it next to the
-  golden's recorded 1140 MHz).
+  [c4_gate.py](../plans/evaluation-harness-v2-artifacts/c4_gate.py)
+  reports it next to the golden's recorded 1140 MHz).
 
 ## Architecture
 
