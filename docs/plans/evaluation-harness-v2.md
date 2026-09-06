@@ -145,11 +145,15 @@ one process, in this order. Everything below is `eager` unless labelled `graph`.
    in `ks` from the one top-`k_max` list (exact for every algo here: same candidate set, same
    scores, `torch.topk` sorted). Targets: **oracle** on filter cells, **held-out** always (on filter
    cells restricted to users with `target_in_filter`, and `n_queries_heldout` recorded). Metrics
-   accumulate as running sums on device; one `.item()` per metric at the end. Cross-backend
-   **parity** for free: backends are the innermost loop, the first backend's top-`k_max` ids
-   (≤ 10k × 1000 int32 = 40 MB) stay in memory and every other backend records
-   `jaccard@k` vs it plus `score_max_abs_diff`. Exact algos assert `recall_oracle@k ≥ 0.99`
-   (fp16 tolerance per main.tex:706); a failure kills the run.
+   accumulate as running sums on device; one `.item()` per metric at the end. Exact algos assert
+   `recall_oracle@k ≥ 0.99` (fp16 tolerance per main.tex:706); a failure kills the run.
+   **Amended by §8.2 K:** backends are no longer the innermost loop — each runs in its own
+   process — so cross-backend parity is not free any more. Correctness lives where it always
+   belonged, in the library's parity suite (**O** §5 T1–T7, roadmap B2, `torch.equal` on scores);
+   the harness keeps only the *wiring* check that C4 and **O** WP-6 gate on, via a spill file:
+   the first backend of a `(dataset, dim, algo, params, seed)` group writes its top-`k_max` ids to
+   `results/_parity/<key>.npy` (≤ 40 MB, one alive at a time, deleted when the group closes) and
+   later backends record `jaccard@k` and `score_max_abs_diff` against it. ~15 lines in `run.py`.
 5. **Perf, per `(k, bs, mode)`** with `mode ∈ {eager, graph}` and `module.k = k` set before each
    variant (a WP-1 check confirms no layer bakes `k` into buffers at register time). Inputs: the
    fixed-seed pool of 4,096 query batches (and attr batches) rotated round-robin, identical across
@@ -184,6 +188,11 @@ one process, in this order. Everything below is `eager` unless labelled `graph`.
    `graph` is the deployed-best-case number and is reported alongside, never instead.
 8. **Cell cost.** Quality once per cell (not per k), perf 3 k × 3 bs × 2 modes × 3 windows ≈ 2 min
    per cell on A100; the campaign in §6 WP-5 is ~700 cells ≈ 24 h (today: 3 builds per cell).
+   Two amendments pull in opposite directions and roughly cancel: §8.2 A (build params sweep
+   separately from query params) removes ~5 of every 6 k-means builds in the `deep` suite, while
+   §8.2 K (a process per backend, ~200–250 boundaries instead of ~80) adds a dataset reload and a
+   CUDA context init per boundary — *est.* 30–60 s each, 2–4 h over the campaign. WP-5 records
+   both so the next plan does not have to guess.
 
 ## 3. Target architecture
 
@@ -234,6 +243,10 @@ Nested, not wide — `perf` is a list, `polars.read_ndjson(...).explode("perf")`
         "triton":"3.6.0","commit":"f0838d0","dirty":false,"host":"gpu-a100","sm_mhz":1410,
         "mem_mhz":1593,"started":"2026-09-10T08:00:00Z","config_sha":"…"}}
 ```
+
+**Amended by §8.2** (B, C, D, E, F, and the `load` key): the record also carries
+`schema_version`, `status`, `code_version`, `git_branch`/`python`/`clocks_locked` in `env`, and
+each `perf` entry carries `iqr_ms`, the two outlier counts and `load: "closed_loop"`.
 
 `results/<suite>/samples/<dataset>-d<dim>.parquet`: one row per `perf` entry — key columns, `k`,
 `bs`, `mode`, `ms: list[float]` (≈ 35 MB per campaign). JSONL for records (greppable, diffable,
@@ -289,6 +302,11 @@ deep:
 bloom: {m_bits: 1024, k_hash: 5}   # shared defaults, overridable per suite
 ```
 
+**Amended by §8.2 A**: `params:` splits into `build:` (`n_lists`) and `query:` (`n_probe`,
+`candidate_pool`), because the index is built once per build config and re-queried per query
+config — 2 builds in the `deep` sweep above, not 12. Sweep entries also accept `disabled: true`
+(§8.2 J).
+
 `config.load_matrix` expands this to `Job`s; `PATHS` collapses backends that run the same code
 (`linr_v1`/`linr_v4` on `none` → one job with `path: cublas`) and logs each collapse once.
 `is_valid_combo` (`n_probe ≤ n_lists`) stays as 3 lines in `algos.build`.
@@ -303,11 +321,14 @@ bench campaign --suite filter|quality|deep|all [--dataset D] [--dim N] [--resume
 bench report   results [--tables docs/thesis/tables] [--figures docs/thesis/figures]
 ```
 
-`bench campaign` is a loop: per `(dataset, dim, algo)` in the suite, `subprocess.run(["uv", "run",
-"bench", "run", ...], stdout=open(log, "a"), stderr=STDOUT)` with one log per child under
-`results/_logs/`, a one-line summary, non-zero rc recorded, loop continues (`--resume` fills gaps).
-Per-algo process isolation stays — the one thing the old orchestrator got right; all backends of an
-algo run inside that process, so shared inputs and parity hold by construction (wp4 `h2h.py`).
+`bench campaign` is a loop: per `(dataset, dim, algo, backend)` in the suite —
+**amended by §8.2 K**, was `(dataset, dim, algo)` — `subprocess.run(["uv", "run", "bench", "run",
+...], stdout=open(log, "a"), stderr=STDOUT)` with one log per child under `results/_logs/`, a
+one-line summary, non-zero rc recorded, loop continues (`--resume` fills gaps). Process isolation
+is the one thing the old orchestrator got right and the new boundary takes it further: a backend
+is the thing under test, so it gets the process, and no dynamo cache, allocator arena or CUDA
+graph pool outlives it. The cost is a dataset reload per boundary (§2.8) and parity by spill file
+rather than by shared memory (§2.4).
 
 ## 4. What NOT to abstract
 
@@ -407,3 +428,207 @@ run on the A100 box. Effort in focused days.
   (`all4`) few users qualify; report `n_queries_heldout` next to it and do not headline it there.
 - **Schema break.** Downstream thesis scripts that read the old columns are gone with the LaTeX
   move (roadmap §4 note); `report.py` is the only consumer. Old JSONs remain under `results/archive/`.
+
+## 8. External practice review — what the field does, and what we take from it
+
+Two surveys of how benchmark harnesses are actually built were run against
+this plan (raw reports and URLs:
+[evaluation-harness-v2-artifacts/](evaluation-harness-v2-artifacts/README.md)).
+One covers retrieval-specific harnesses — ann-benchmarks,
+big-ann-benchmarks incl. the NeurIPS'23 filtered YFCC track, VectorDBBench,
+MTEB / BEIR / `ir_measures`, cuVS `raft-ann-bench`, FAISS `benchs/`. The
+other covers general benchmarking infrastructure — Criterion.rs, Google
+Benchmark, nanobench, pytest-benchmark, airspeed velocity, MLPerf
+Inference, `torch.utils.benchmark`, Hydra / W&B Sweeps / MLflow / DVC, and
+the results-as-data practice of ClickBench, db-benchmark, Conbench and
+Codespeed. Neither ran anything; both are literature reviews and each ends
+with an explicit unverified list.
+
+### 8.1 Confirmed, no change
+
+Five of the ten conventions the ANN survey found recurring across ≥3
+frameworks are already in this plan, arrived at independently, and should
+stop being treated as debatable:
+
+- **one appended record per finest unit, whose existence *is* the resume
+  mechanism** (§3.2) — ann-benchmarks/big-ann one HDF5 per (dataset, algo,
+  args), MTEB one JSON per (model, revision, task), VectorDBBench one row
+  per (db, case);
+- **provenance inline on the record, not in a side log** (§3.2 `env`) —
+  ann-benchmarks HDF5 `attrs`, MTEB's `mteb_version`/`dataset_revision`,
+  pytest-benchmark's `machine_info` + `commit_info`, Conbench's machine
+  block;
+- **sweeps declared as data and Cartesian-producted** (§3.3) —
+  ann-benchmarks `run_groups.args`, cuVS `groups.build`/`.search`;
+- **closed-loop by default with a separately *named* second mode** (§2.5's
+  `eager`/`graph`) — ann-benchmarks per-query vs `--batch`, VectorDBBench
+  `serial_runner` vs `concurrent_runner`;
+- **cutoff-qualified metric keys** (`recall@100`, not `recall_at_100`) —
+  the `ir_measures` grammar. Keep enforcing it for every key `report.py`
+  emits.
+
+Three things this plan does *not* do are also confirmed as correct rather
+than as shortcuts. **No Docker-per-algorithm**: ann-benchmarks and big-ann
+need containers because they aggregate dozens of third-party libraries
+with conflicting native dependencies; we have five algorithms behind one
+`uv.lock`, and §3.4's subprocess boundary buys the state isolation without
+the dependency problem we don't have. **No separate results repository**:
+MTEB split its results out to keep thousands of external contributions off
+the benchmark's review path; a single-team repo gains only friction.
+**No power/$-per-query axis**: big-ann's T3 track needs IPMI sensor access
+we do not have on a rented A100, and scoring on power invites exactly the
+measurement-integrity disputes a reproducibility paper should not host —
+§2.1's recorded clocks and >5 % drift warning are the right-sized version.
+
+### 8.2 Accepted — deltas to the sections above
+
+**A. Build-time and query-time parameters sweep separately (amends §2.8,
+§3.3, §3.1 `run.py`).** Every ANN harness surveyed builds the index once
+per *build* config and then re-queries it for every *query* config
+(ann-benchmarks `args` vs `query_args` with `set_query_arguments`; cuVS
+`groups.build` vs `groups.search`; big-ann caps a submission at "1 build +
+up to 10 search configs"). We rebuild per param combo. `n_probe` is not a
+build parameter: `SilverTorch.__init__` stores it
+([main.py:118–119](../../retrieve/src/retrieve/layers/silvertorch/main.py))
+and `register_index` reads it only for two validation checks
+(main.py:168–169, 187–192); the k-means at main.py:176 does not depend on
+it. So the `deep` suite's `{n_lists: [1664, 8192], n_probe: [4, 8, 24, 32,
+128, 256]}` is **2 builds, not 12** — one k-means over 3 M × 128 per
+`n_lists`, then six query configs against it, the same mutate-then-measure
+pattern §2.5 already uses for `module.k`. The same holds for `linr_v3`'s
+`candidate_pool`. Config change: `params:` splits into `build:` and
+`query:`; `run.py` grows one loop level (build → for each query config:
+quality + perf); the two `register_index` checks move into a
+`set_query_params()` that re-validates on mutation. This is the largest
+single cost saving in the campaign and it makes the `deep` sweep's build
+column meaningful (one build time per built index, not twelve copies).
+`[medium]`
+
+**B. The resume key must include a code version (amends §3.1 `cli.py`,
+§3.2).** "Skip keys already present in the JSONL" silently treats a cell
+as done when the kernel it measured has since changed. asv versions the
+*benchmark definition* by the hash of its own source, separately from the
+numeric result, precisely so a redefinition is a discontinuity rather than
+a silent comparison across semantics. Record `code_version` =
+`git rev-parse HEAD:retrieve/src/retrieve` (the library subtree's tree
+hash, not the repo commit — docs and plans churn constantly and must not
+invalidate a campaign) and make it part of the resume key. `[cheap]`
+
+**C. `schema_version: 1` on every record (amends §3.2).** asv (`version:
+2`), Google Benchmark (`json_schema_version`), pytest-benchmark. Costs
+nothing on day one, cannot be retrofitted once records exist, and §5 of
+this plan is already an explicit schema break — the next one should be
+readable rather than guessed. `[cheap]`
+
+**D. `status: ok | failed | partial` on every record (amends §3.2, §3.1
+`run.py`).** §3.1 says "no skip that is not logged with the reason and
+counted"; putting the reason on the record instead of only in the log
+makes `report.py` able to state coverage without parsing logs. `[cheap]`
+
+**E. Robust statistics, not just the mean (amends §2.5).** Criterion,
+nanobench, pytest-benchmark and Google Benchmark all warn against the mean
+alone on heavy-tailed runtimes, and all keep raw samples. §2.5 already
+stores `median/mean/p95/p99/min` and the per-call vector; add **IQR** and
+both outlier counts (stddev-based and Tukey-fence) computed at write time
+from the vector we already have, and never drop an outlier silently.
+`[cheap]`
+
+**F. Provenance additions (amends §2.1, §3.2 `env`).** Add `git_branch`,
+`python`, and — the field naive harnesses forget — `clocks_locked` as a
+*recorded value*, not an operational habit. Google Benchmark records
+`cpu_scaling_enabled` for exactly this reason: without it, a future reader
+cannot tell which historical rows were taken at locked clocks.
+`CLAUDE.md`'s rule 1 already mandates `nvidia-smi -lgc 1410`; recording it
+lets `bench report` refuse to cite a run instead of trusting memory. Same
+argument for `dirty` (already planned) — keep it, and have `report.py`
+*enforce* it. `[cheap]`
+
+**G. `report.py` emits one flat table before any plot (amends §3.1,
+§6 WP-6).** Every harness surveyed puts exactly one denormalisation step
+between raw storage and any chart: `data_export.py` → CSV in
+ann-benchmarks, big-ann and cuVS; VectorDBBench's `leaderboard.json` *is*
+that step. Make `bench report` write `results/flat.csv` (or parquet)
+first, unconditionally, and build every table and figure from it. It is
+also the artifact to ship with the paper. `[cheap]`
+
+**H. QPS-vs-recall Pareto and a recall-at-budget table as `report.py`'s
+default view (amends §6 WP-6).** The one figure the whole ANN field
+converges on, plus big-ann's `show_operating_points.py`-style "best recall
+at or above a QPS / under a latency budget" table. Every field it needs
+(`qps`, `recall@k`, `p99_ms`) is already in the §3.2 record. `[cheap]`
+
+**I. The oracle is a shippable artifact, not just a cache (amends §3.1
+`oracle.py`, and F4 in the roadmap).** ann-benchmarks embeds ground truth
+in the dataset HDF5, big-ann ships `yfcc100m_query_gt100.bin`, MTEB pins
+`dataset_revision` — ground truth is versioned and distributed, never
+recomputed per run. E6's content fingerprint already makes our cache
+correct; make the blob *portable* (a stable content hash over item
+embeddings, query attrs, filter definition and `k_max`, with the hash in
+the filename) and publish the oracles alongside the datasets in the
+roadmap's F4. This is what makes an external reader able to check our
+recall numbers without an A100. `[medium]`
+
+**J. `disabled: true` on a sweep entry (amends §3.3).** ann-benchmarks and
+cuVS both retire a config this way rather than by commenting out or
+deleting YAML, so the definition and its git blame survive. `[cheap]`
+
+**K. One process per `(dataset, dim, algo, backend)`, not per `(dataset, dim, algo)`
+(amends §2.4, §2.8, §3.4).** Every isolation-providing harness surveyed puts a hard process or
+container wall around exactly the state that is cheapest to leak — compiled kernels, allocator
+arenas, CUDA graph pools — and §1.10 already documents that leak here (`torch._dynamo.reset()`
+runs between sweeps only, so graph pools accumulate across the cells of a sweep). ann-benchmarks'
+rule is that one process is one thing under test; our thing under test is a *backend*, so the
+backend gets the process. The thesis methodology (main.tex:662–676) asked for this too.
+**Decision (user, 2026-09-06): take it — in-process cross-backend parity is not worth keeping the
+boundary coarse for.** Consequences: parity moves to a spill file (§2.4), the campaign loop keys
+on backend (§3.4), and ~200–250 process boundaries each pay a dataset reload and CUDA context
+init (§2.8). Correctness itself does not depend on this: the bit-exactness gate is the library's
+parity suite (**O** §5 T1–T7 / roadmap B2), not the harness. `[medium]`
+
+### 8.3 Rejected, with the reason
+
+- **Open-loop load generation** (MLPerf's Server scenario). The
+  infrastructure survey recommends it; the ANN survey found that *no*
+  retrieval harness does it for queries — ann-benchmarks, big-ann, cuVS
+  and both of VectorDBBench's query runners are closed-loop, and only
+  VectorDBBench's *insert* path is open-loop. Neither paper we reproduce
+  reports open-loop query latency either. Verdict: stay closed-loop, and
+  make that explicit rather than implicit — record `load: "closed_loop"`
+  in the perf entry and say so in §2.7's comparability paragraph. Building
+  an arrival-process generator is `[expensive]` for a number nobody we are
+  comparing against reports.
+- **Hydra, W&B Sweeps, MLflow, Sacred, DVC pipelines.** Each needs a
+  server, an agent, or a config object model this plan explicitly rejects
+  in §4; W&B's grid resume has a multi-year history of duplicate and
+  missing runs. ClickBench and DuckDB's db-benchmark run at comparable or
+  larger scale on files-in-the-repo plus a flat CLI, which is what §3
+  already specifies.
+
+### 8.4 Effect on the work packages
+
+- **WP-1** additionally: IQR + outlier counts in `bench.latency`;
+  `code_version`, `git_branch`, `python`, `clocks_locked` in
+  `provenance()`; `load: "closed_loop"` in the perf dict.
+- **WP-2** additionally: `build:` / `query:` param split in
+  `config.load_matrix` and its test (job count assertions change);
+  `disabled: true` honoured and logged; the oracle blob's content hash in
+  its filename.
+- **WP-3** additionally: `schema_version`, `status`, resume keyed on
+  `code_version` too; `run.py`'s extra query-config loop and
+  `set_query_params()`; the campaign loop keyed on
+  `(dataset, dim, algo, backend)` and the `results/_parity/` spill file
+  with its group-close cleanup (§8.2 K); `torch.cuda.memory_reserved()`
+  recorded per cell, which is now a leak *detector* rather than a
+  mitigation.
+- **WP-4** additionally, three gates: reserved GPU memory flat across a
+  sweep's cells (±5 %); quality identical for the same `(n_lists,
+  n_probe)` whether reached by rebuild or by `set_query_params`; and
+  `jaccard_vs_first@100 == 1.0` still reproduced across the process
+  boundary via the spill file (this is C4's gate (4) and **O** WP-6's
+  gate — the boundary change must not silently drop them).
+- **WP-6** additionally: `results/flat.csv` written first; the QPS-vs-recall
+  Pareto and the recall-at-budget table as the default view.
+
+One library change follows from A: `SilverTorch.set_query_params(n_probe=…)`
+re-running the two `register_index` validations — 10 lines, alongside the
+`build_timings` nit in §7.
