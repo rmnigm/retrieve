@@ -33,8 +33,15 @@ equivalent. `PostfilterKNN` / `PostfilterKNNInt8` accept the flag for API symmet
 the same code (cuBLAS already covers their case). `SilverTorch` alone also accepts
 `backend="cuda"` (CUDA C++, JIT-built on first forward, needs `nvcc` + `ninja`) and
 `backend="cute"` (the same kernels in the CuTe DSL, `pip install "torchretrieve[cute]"`); both
-are bit-identical to the Triton path in every `filter_mode`. Any other module given `"cuda"` or
-`"cute"` runs its torch path.
+are bit-identical to the Triton path in every `filter_mode`. `SilverTorch` also accepts
+`backend="official"`: Meta's own `meta-recsys/silvertorch` kernels (`torch.ops.st.*`, the
+`official` extra — built from source, needs a CUDA toolkit matching your torch) for the scoring
+and bloom phases, with our k-means and quantization in front; it is the reference the Triton
+kernels are checked against, eager-only (`torch.compile` raises), and its bloom mode is Meta's
+bloom index rather than ours (`m_bits` is optional; `official=OfficialConfig(...)` carries
+`b_multiplier`, `hash_k`, the `"int32"` bit-exact vs `"fp16"` serving score path, and the
+partial-vs-full bloom path). Any other module given `"cuda"`, `"cute"` or `"official"` runs its
+torch path.
 
 ## LiNR modules
 

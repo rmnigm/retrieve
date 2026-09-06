@@ -372,6 +372,12 @@ official T1) plus the §9a/§9b head-to-head; gains are claimed only from the he
   capture (cute §5.1) and inflates eager bloom by ≈ 0.4 ms flat (filtering.md). Register seeds and
   salt at `register_index`. Gain: eager bloom at `B=1` toward the `none` row; effort 0.5 h;
   validation `test_bloom_hash.py` bit-equality. Do before WP-7.
+  > **Status (roadmap B5):** authored 2026-09-06 on `dev/b1-official-adapter` (Mac-side, no
+  > GPU): `generate_clause_salt` → `[C]` int64 `clause_salt` buffer registered by `BloomFilter`
+  > and `SilverTorch`, builders take `clause_salt=`; four tests added to `test_bloom_hash.py`
+  > (buffer ≡ on-the-fly ≡ pre-B5 inline bits on CUDA and CPU, device independence, shape
+  > check, buffer moves with `.to()`). **GPU gate pending** — `test_bloom_hash.py` and the
+  > bloom rows of `test_silvertorch.py` on the A100; the raw-capture claim is unmeasured.
 - **TF-3 — Memory-level parallelism / retune.** The C++ scorer went 188 → 88 µs by keeping
   `SPW·UNROLL` rows in flight per warp (handoff §13 fix 1). Triton's `[BLOCK_P, D]` int8 tile is
   already one coalesced 128 B row per item with `num_stages` pipelining across programs
@@ -465,6 +471,28 @@ benchmark what the pinned sha runs; parse cost excluded and reported; identical 
   `per_embedding_scale` overflow reproduced. Gate: §3 confirmed or corrected here.
 - **WP-2 — Adapter + tests (2 d, Mac-authored).** §5.1, `require_official`, T1–T7. Gate: `ruff`
   clean, suite collects and skips on the Mac.
+  > **Status (roadmap B1):** authored 2026-09-06 on `dev/b1-official-adapter` (Mac-side, no GPU,
+  > official package not installed — A2 runs in parallel). Shipped: `kernels/silvertorch/official.py`
+  > (availability probe splitting "missing" from "broken", `OfficialConfig`, CSR + feature +
+  > expression mapping, `pack_mask` / `unpack_partial_mask` / `reverse_bits64`, the raw and
+  > dequantised scoring wrappers, bloom partial / full search), `Backend` gains `"official"`,
+  > `SilverTorch(backend="official", official=OfficialConfig(...))` with the §5.1 buffers and
+  > filter matrix, `compile()` / traced-forward refusal (D7), `require_official()`,
+  > `tests/parity/test_official.py` T1–T7 (bit-order tests parametrised over both candidate
+  > orders, `OFFICIAL_BIT_ORDER = None` until A3 pins it), `"official"` rows in
+  > `test_silvertorch.py`. Mac gate green: `ruff check` / `ruff format --check` clean on the
+  > library, `pytest --collect-only` collects 683 tests with no errors, the official surface
+  > skips on `OfficialMissing`. **GPU gate pending** (WP-3 / roadmap B2): nothing here has run
+  > against the real ops. Deviations from §5 found while matching the upstream source: (1)
+  > T4's "official partial mask ⊇ `clause_subset_match` … AND and NOT expressions" cannot hold
+  > for NOT — a bloom NOT is the complement of a bloom term, so it has no false positives and
+  > *may* have false negatives; the test asserts ⊆ for NOT and records the false-negative
+  > rate. (2) The `k` passed to `bloom_index_build` is a knob (`OfficialConfig.build_k`,
+  > default = the search `k` as the README does; the upstream module builder passes `hash_k`).
+  > (3) `m_bits` is optional on the official backend (the width is `b_multiplier`); `k_hash`
+  > is validated `≤ 10` (`MAX_K_V2`). (4) The layer applies the `-1` id sentinel to every
+  > non-finite slot (`masked_topk`, the `RetrievalModule` contract); the Triton `_impl`s do
+  > not, so the bit-exact tests normalise both sides before comparing ids.
 - **WP-3 — Parity gate (0.5 d, GPU).** `tests/parity/test_official.py` + `test_silvertorch.py` green,
   T1 `torch.equal` on every regime, T4 FPR at matched memory recorded. **Unblocks deletion.**
 - **WP-4 — Kernel head-to-head (1 d, GPU).** §9a/§9b + `fpr_calibrate.py`; JSON + a §12
