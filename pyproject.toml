@@ -8,8 +8,19 @@ dependencies = [
     "retrieve-evaluation",
 ]
 
+[project.optional-dependencies]
+official = [
+    "retrieve[official]",
+]
+
 [tool.uv]
 package = false
+no-build-isolation-package = ["silvertorch"]
+
+[[tool.uv.dependency-metadata]]
+name = "silvertorch"
+version = "1.0.0"
+requires-dist = ["torch>=2.0"]
 
 [tool.uv.workspace]
 members = ["retrieve", "evaluation"]
@@ -17,3 +28,11 @@ members = ["retrieve", "evaluation"]
 [tool.uv.sources]
 retrieve = { workspace = true }
 retrieve-evaluation = { workspace = true }
+silvertorch = { git = "https://github.com/meta-recsys/silvertorch", rev = "21aa35e28b6dd9a91e9ee35efb0857715e86bda7" }
+
+[dependency-groups]
+dev = [
+    "ninja>=1.11",
+    "setuptools>=61",
+    "wheel",
+]
