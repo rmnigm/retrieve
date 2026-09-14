@@ -89,6 +89,18 @@ plan to `archive/` and shorten its entry here to one line under *Done*.
 > dim**; big datasets (E2, E3) deferred until disk allows; A4's local
 > merge into `main` is on hold until the user says so.
 
+> **Amendment 2026-09-15 (plans only, no code).** Three refactor plans
+> were added and slotted in below: **L** (library API, Phase L), **V**
+> (harness packaging, step C5), **X** (the boundary contract). They change
+> the eval queue above in one place: **L1 and L2 land before queue item 2
+> (the C4 gate rerun)** so the gate validates the final library layout once
+> and `code_version` (the library tree hash) stops changing before any cell
+> that must survive; C5 lands after C4 flips and before D1. Queue item 1
+> (re-derive the golden) is unaffected: the old-harness worktree keeps
+> working through L's compatibility shim. Fallback if the user wants the
+> harness loop closed first: run item 2 now and repeat the 14-cell gate
+> after L2 (L D11).
+
 ## 0. Goal, scheduling rule, branch
 
 **Goal.** A reproducibility paper on SilverTorch (Meta) and LiNR
@@ -118,6 +130,22 @@ after the official parity gate; Triton stays and gets the kernel effort;
 the harness is rewritten rather than patched. Rationale in the four
 plans and in *Done* below.
 
+**Decisions taken 2026-09-15, do not reopen.** The library takes Meta's
+two-level shape — `retrieve.modules` (high-level `nn.Module`s with
+builders) and `retrieve.ops` (registered kernels, one namespace per
+backend: `triton`, `reference`, `official`) plus the two small helper
+namespaces `retrieve.indexing` and `retrieve.functional`; Meta's modules
+and ops stay imported and wired in, never copied; the LiNR paper variants
+V1–V4 become library modules and the harness keeps only a name → class
+table; the harness is split into three packages with one dependency
+direction (`bench` → `training` → `eval_datasets`) and the
+`retrieval` ↔ `training` cycle goes. Op names, module names, buffer
+names and op schemas do not change; k-means++ is opt-in until D1's
+numbers say otherwise. Plans:
+[library-api-refactor.md](library-api-refactor.md) (**L**),
+[evaluation-package-layout.md](evaluation-package-layout.md) (**V**),
+[library-harness-boundary.md](library-harness-boundary.md) (**X**).
+
 ## 1. The queue
 
 Effort is in focused days from the plans; "A100 h" is wall time on the
@@ -125,7 +153,10 @@ box. Plan section references: **H** =
 [evaluation-harness-v2.md](evaluation-harness-v2.md), **O** =
 [silvertorch-official-integration.md](silvertorch-official-integration.md),
 **P** = [reproducibility-paper.md](reproducibility-paper.md) (gaps G1–G16
-in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
+in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md),
+**L** = [library-api-refactor.md](library-api-refactor.md), **V** =
+[evaluation-package-layout.md](evaluation-package-layout.md), **X** =
+[library-harness-boundary.md](library-harness-boundary.md).
 
 ### Phase A — unblock the tree
 
@@ -134,7 +165,7 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
   support is not a goal.** Nothing below depends on it any more — every
   step runs on the GPU box, and the "Mac" label on a step now only means
   "needs no GPU time", i.e. it can run on the box while the GPU is busy.
-- [x] **A1 — golden baseline on the old harness.** H §6 WP-0 (A100,
+- [x] **A1 — run the golden cells on the old harness and commit the baseline.** H §6 WP-0 (A100,
   0.5 d). Done 2026-09-06 on `dev/a1-golden`, commit `9856998`; golden
   JSONs and the run record are under `evaluation/golden/`, the validation record is in
   [evaluation-harness-v2.md](evaluation-harness-v2.md) §6 WP-0. The
@@ -150,7 +181,7 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
   **steps 1, 4 and 7 passed**; **steps 5 and 6 are deferred 2026-09-06
   (user: heavy evals later)** — scripted and ready, see that file's
   status. Unblocks: A4, C4.
-- [x] **A2 — pin and build the official package.** O §10 WP-0 (A100,
+- [x] **A2 — pin and build Meta's official SilverTorch package on the A100.** O §10 WP-0 (A100,
   0.5 d). `uv sync --extra official`; upstream suite green; sha, `nvcc`
   and build log in `docs/plans/official-silvertorch-artifacts/`. Gate:
   build < 5 min, `torch.ops.st.fused_kmean_ann` exists. Unblocks: A3, B2.
@@ -165,7 +196,7 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
   (`is_topk`, `take_top_k_and_gather_from_main_and_fresh`) are dead source:
   their `.cpp`/`.cu` are not in `setup.py`. The `cute` extra stays until B4
   (rule 5); `official` is added alongside. Record: O §13.1.
-- [x] **A3 — official op facts.** O §10 WP-1 (A100, 0.5 d): bit-order
+- [x] **A3 — measure how the official ops actually behave on the A100.** O §10 WP-1 (A100, 0.5 d): bit-order
   probe, syncs and launches per op, graph-capture attempt, parse cost,
   the `per_embedding_scale` overflow. Gate: O §3 confirmed or corrected
   in O's record section. Unblocks: B1 (the adapter is written against
@@ -182,14 +213,14 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
   (D7 unchanged). Parse cost at B=16: 58.7 µs/call, 3.67 µs/query. Record:
   O §13.2; script and raw output in
   [official-silvertorch-artifacts/](official-silvertorch-artifacts/README.md).
-- [ ] **A4 — merge to `main`** (**on hold 2026-09-06 — user decides when**). After A1 passes: merge `development`
+- [ ] **A4 — merge `development` into `main`.** (**On hold 2026-09-06 — user decides when**). After A1 passes: merge `development`
   into `main` (library gates passed 2026-09-02, harness golden passed in
   A1). Everything below happens on phase branches off `main`, merged
   back through `development`.
 
 ### Phase B — official backend, parity, deletion
 
-- [x] **B1 — adapter + tests.** O §5, §10 WP-2 (Mac, 2 d): `backend=
+- [x] **B1 — write the official-backend adapter and its parity tests.** O §5, §10 WP-2 (Mac, 2 d): `backend=
   "official"` in `SilverTorch`, `require_official`, parity tests T1–T7.
   Gate: `ruff` clean, suite collects and skips on the Mac. Needs A3.
   Authored 2026-09-06 on `dev/b1-official-adapter` (Mac gate green; A3's
@@ -201,7 +232,7 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
   CSR doc space, T3's mirrored-doc negative control, `-inf`-slot id
   normalisation in T6, the fd-2 sync instrument in T7); no adapter or
   kernel change. Record: O §14.3.
-- [x] **B2 — parity gate.** O §10 WP-3 (A100, 0.5 d). Gate: phase-3
+- [x] **B2 — prove official and Triton scores agree bit-exactly on the A100.** O §10 WP-3 (A100, 0.5 d). Gate: phase-3
   scores `torch.equal` on the int32 path on every regime, bloom ⊇ check
   and FPR at matched memory recorded in O's record section. **Unblocks
   B4 (deletion) — never delete before this is green.**
@@ -220,9 +251,9 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
   gated); the review's deferred `argsort(stable=True)` applied after
   measuring it bit-identical on nine regimes. Record: O §14. **B4 is now
   unblocked.**
-- [ ] **B3 — kernel head-to-head, Triton vs official.** O §9a/§9b, WP-4
+- [ ] **B3 — benchmark Triton against the official kernels, kernel-only and end to end.** O §9a/§9b, WP-4
   (A100, 1 d). Gate: JSON + tables appended to O. This is paper gap G2.
-- [x] **B4 — delete the CUDA C++ and CuTe backends** (merged 2026-09-06, A100 gate 504/0/0). O §7, WP-5 (Mac,
+- [x] **B4 — delete the CUDA C++ and CuTe backends.** (Merged 2026-09-06, A100 gate 504/0/0). O §7, WP-5 (Mac,
   1 d). Tag the parent commit `cuda-cute-backends-final`; move
   [cuda-silvertorch-handoff.md](archive/cuda-silvertorch-handoff.md),
   [cuda-silvertorch-phase2.md](archive/cuda-silvertorch-phase2.md),
@@ -246,13 +277,50 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md).
   collect-only gate — is fixed in `a435179`; no library source changed.
   Record and the grep-rule reading: O §15, §15.6. The coordinator flips
   this box after merge.
-- [x] **B5 — salt as a buffer.** O §8 TF-2 (Mac, 0.5 h; validate with
+- [x] **B5 — register the bloom salt as a buffer instead of a per-call host tensor.** O §8 TF-2 (Mac, 0.5 h; validate with
   `test_bloom_hash.py` on the A100). Do before any campaign timing.
   Authored 2026-09-06 on `dev/b1-official-adapter` (commit `2dbee72`).
   **Done 2026-09-06** — GPU gate passed in B2's full-suite run 3
   (`test_bloom_hash.py` incl. the buffer-vs-inline bit-equality on CUDA
   and CPU, and every bloom row of `test_silvertorch.py`, green; O §14.2).
   The raw-capture latency claim is unmeasured until WP-7.
+
+### Phase L — library API refactor (CPU work on the box; two library-suite runs)
+
+The `retrieve` package takes Meta's `modules` / `ops` shape (**L** §3);
+structure-preserving first (L1), features second (L2). Both land
+**before the C4 gate rerun** (status-block queue item 2) and before D1,
+because `code_version` is the library tree hash and every recorded cell
+dies with it (**L** D11). One branch, `dev/l-library-layout`, off
+`development`; nothing else edits `retrieve/` while it is open.
+
+- [ ] **L1 — move the library into the `modules` / `ops` / `indexing`
+  layout with no behaviour change.** L §10 WP-1 (CPU 1.5 d + one library
+  suite run). `modules/`, `ops/{triton,reference,official}/`, `indexing/`,
+  `functional.py`, the ops loader and `_host.py` (review A5), the
+  `retrieve.layers` / `retrieve.kernels` deprecation shim, pyproject
+  `name = "torchretrieve"` 0.2.0, the review's A8 / A9 / T3 / B.4
+  leftovers, tests and docs re-pointed. Op schemas, buffer names and
+  registration order unchanged; the pure-torch eager branches are
+  *extracted* into `ops/reference`, not rewritten. Gate: `ruff` clean,
+  `tests/test_public_api.py`, links 0, harness CPU suite green through the
+  shim; on the GPU the full library suite green, every parity file
+  bit-exact, `ops.reference.codesigned_probe_score` `torch.equal` to the
+  pre-move `ref_cps_phase23`, a pre-move state dict (3 backends × 3 filter
+  modes) loads and returns identical ids and scores, the golden worktree
+  runs one cell through the shim. Needs nothing unchecked.
+- [ ] **L2 — ship LiNR V1–V4 as library modules, the builders, k-means++
+  seeding, build timings and the harness contract.** L §10 WP-2 (CPU 2 d +
+  one library suite run). `LiNRV1`–`LiNRV4` moved from
+  `evaluation/retrieval/algos.py`, `SilverTorchBuilder` / `LiNRBuilder`
+  (`build_silvertorch` retired into the shim), `KMeans(init="kmeans++")`
+  opt-in (L D9), `set_query_params` moved into the library,
+  `build_timings`, `capturable` as a class attribute,
+  `retrieve.modules.official`, `interfaces.DISPATCH`, the **X** §4 clauses
+  and `test_boundary.py`; user guide and system docs per L §8. Gate: as
+  L1 plus composites `torch.equal` to the hand-composed primitives on every
+  backend × filter kind, builder round-trip, k-means++ tests. Needs L1.
+  **Unblocks C5** and, with it, the C4 rerun on the final layout.
 
 ### Phase C — harness v2 (Mac work in parallel with B; A100 gate at the end)
 
@@ -273,21 +341,21 @@ user decision 2026-09-06) so no dynamo cache or CUDA graph pool outlives
 the backend under test — cross-backend parity moves to a spill file, and
 bit-exactness stays where it belongs, in B2's library parity suite.
 
-- [ ] **C1 — `bench.py`, `metrics.py`, `algos.py` + tests.** H §6 WP-1
+- [ ] **C1 — write the measurement primitives, device-side metrics and the algorithm table.** H §6 WP-1
   (Mac, 2 d). Needs A1 (golden exists). Includes O §6.2 / WP-6: the
   `official` path in the `PATHS` table.
   Status: authored 2026-09-06 on `dev/c1-harness-v2`, CPU tests green,
   GPU gate C4 pending. `algos.py` landed as `algos_v2.py` (the old
   `algos/` package shadows the name until C3 deletes it); `metrics.py`
   rewritten in place with the old per-row API kept as wrappers.
-- [ ] **C2 — `config.py`, `data.py`, `oracle.py` + tests.** H §6 WP-2
+- [ ] **C2 — write the config matrix, per-dataset inputs and the oracle with pass rates.** H §6 WP-2
   (Mac, 1.5 d).
   Status: authored 2026-09-06 on `dev/c1-harness-v2`, CPU tests green,
   GPU gate C4 pending. `config.py` and `oracle.py` rewritten in place with
   the old API kept below a divider / as wrappers; `data.py` is new and
   imports `encode.py` (kept as the one `training.*` boundary). Oracle
   caches are now blob v4 with the fingerprint in the file name.
-- [ ] **C3 — `run.py`, `cli.py`, deletions, docs.** H §6 WP-3 (Mac,
+- [ ] **C3 — write the cell loop and CLIs, delete the old harness, rewrite the docs.** H §6 WP-3 (Mac,
   1.5 d): delete the old harness files H §5 lists, rewrite
   [../system/evaluation.md](../system/evaluation.md) to H §2, archive
   [evaluation-refactor.md](archive/evaluation-refactor.md) and the harness half
@@ -300,7 +368,7 @@ bit-exactness stays where it belongs, in B2's library parity suite.
   `run-evaluation` / `stage-results` scripts deleted (H §5);
   `algos_v2.py` → `algos.py`; [../system/evaluation.md](../system/evaluation.md)
   rewritten; validation record in H §9.
-- [ ] **C4 — GPU gate.** H §6 WP-4 (A100, 1 d). Gate: quality within
+- [ ] **C4 — validate the new harness against the golden baseline on the A100.** H §6 WP-4 (A100, 1 d). Gate: quality within
   1e-6 of the A1 golden, graph latency within 5 %, `cudagraph_skips ==
   0`, `jaccard_vs_first@100 == 1.0` torch-vs-triton, one `official` cell
   runs end to end on goodreads-d128 `c0_genre` with jaccard ≥ 0.99 (O
@@ -316,24 +384,52 @@ bit-exactness stays where it belongs, in B2's library parity suite.
   — its SilverTorch cells were produced with the non-deterministic k-means
   and its `linr_v2` / `linr_v3` `graph` cells were compiled-eager, so
   comparing against them at 1e-6 is not yet meaningful.
+  **Amended 2026-09-15:** the rerun happens on the L2 library layout
+  (Phase L above), so the gate validates the final code once; the harness
+  side of the gate is unchanged by L (the wrappers are moved, not
+  rewritten, and `algos.py` is re-tabled in C5 *after* this gate flips).
+- [ ] **C5 — split the harness into `bench` / `training` / `eval_datasets`
+  with one dependency direction, one test tree and three CLIs.** V §9
+  WP-V1 + WP-V2 (CPU 2 d). `retrieval/` → `bench/` (`bench.py` →
+  `measure.py`, `records.py` gathering `SCHEMA_VERSION` / `KEY_FIELDS` /
+  `resume_key` / `append_record` / `read_keys` / `flatten`), `algos.py`
+  reduced to the **X** §3 table with `PATHS` derived from
+  `retrieve.interfaces.DISPATCH`; `eval_datasets/layout.py` (review §1.11:
+  the on-disk contract as code, `bench check`, the readers out of
+  `data.py`, `users_limit` once), `hub.py`, `etl/`; `training/encode.py`
+  (the cycle goes; `training/evaluate.py` keeps a frozen local recall /
+  ndcg, V D5); `evaluation/tests/` with conftest, `gpu` marker,
+  dependency-direction test; `bench` / `eval-data` / `train` click groups
+  (12 scripts → 3); pre-v2 `results/**` to `results/archive/`, the two
+  old-schema YAMLs to v2 shape, the `__pycache__`-only dirs deleted;
+  system docs and CLAUDE.md's commands. Gate: `ruff`, `cd evaluation &&
+  uv run pytest tests/` green, links 0, every `--help` renders, and one
+  `bench run` cell on goodreads-d128 `c0_genre` (`silvertorch`, `triton`)
+  reproduces the pre-rename record's key block and `quality` at the same
+  `code_version`. Needs C4 (flipped) and L2. **Unblocks D1** (the campaign
+  runs on the final package).
 
 ### Phase D — campaign and baselines (A100)
 
-- [ ] **D1 — full campaign rerun.** H §6 WP-5 + O WP-7 (A100 ≈ 24 h wall
+- [ ] **D1 — rerun the full campaign on the new harness.** H §6 WP-5 + O WP-7 (A100 ≈ 24 h wall
   + 0.5 d): four datasets × dims × `{triton, torch, official}` × seeds
   {0, 1, 2} on headline sweeps, `n_probe ∈ {24, 32}`, the S9 co-design
   ablation cells. Closes in one pass: the goodreads oracle rerun (old
   open item 2), P gaps G3 (P99/QPS), G4 (seeds), G7, G8 (cross-dataset
-  deep sweeps), old §4b items 1, 3, 4, 5, 7. Gate: H WP-5's.
-- [ ] **D2 — external baselines.** P G5 (A100, 2–3 d): Faiss-GPU
+  deep sweeps), old §4b items 1, 3, 4, 5, 7. Gate: H WP-5's. Needs C4,
+  L2 and C5 (a library change after D1 invalidates the campaign through
+  the tree-hash resume key; a harness rename after it changes the recorded
+  command lines and upload paths).
+- [ ] **D2 — add Faiss, HNSW, cuBLAS and cuVS baselines as harness algorithms.** P G5 (A100, 2–3 d): Faiss-GPU
   IVF-Flat, Faiss-CPU IVF-Flat, HNSW, cuBLAS brute-force floor at
   matched recall, as harness algos. Then P G13 (cuVS IVF-Flat / IVF-PQ /
   CAGRA with bitset prefilter) and G14 (Filtered-DiskANN, ACORN on the
   CPU box, or FANNBench's harness on one of our datasets).
-- [ ] **D3 — bloom FPR and memory vs width.** P G6 (A100, 1–2 d), on
+- [ ] **D3 — measure bloom false-positive rate and memory against filter width.** P G6 (A100, 1–2 d), on
   both blooms (ours and official), real attributes.
-- [ ] **D4 — `report.py`.** H §6 WP-6 (Mac, 1.5 d): thesis/paper tables
-  and figures from the JSONL only, plus the methodology paragraph.
+- [ ] **D4 — generate every thesis and paper table and figure from the records.** H §6 WP-6 (Mac, 1.5 d): thesis/paper tables
+  and figures from the JSONL only, plus the methodology paragraph. Lands
+  as `bench/report.py` reading `records.flatten()` (V §5.3).
 
 ### Phase E — datasets (GPU box in parallel with D)
 
@@ -349,10 +445,10 @@ encoder; the existing Yambda unfiltered runs stay as they are). Survey
 and ingestion plans: [dataset-candidates.md](dataset-candidates.md)
 §3–§4.
 
-- [ ] **E0 — request the Semantic Scholar API key** (D §3.7; free
+- [ ] **E0 — request the Semantic Scholar API key.** D §3.7 (free
   research partner form). First thing in this phase: it is the long
   pole for E3. If it is refused, E3 runs on OpenAlex.
-- [x] **E1 — YFCC-10M** (GT gate passed 2026-09-06; the two cells run at E5). D §3.4 / §4.5 (download-bound, ≈ 3 GB; A100
+- [x] **E1 — ingest YFCC-10M with its shipped filtered ground truth.** (GT gate passed 2026-09-06; the two cells run at E5.) D §3.4 / §4.5 (download-bound, ≈ 3 GB; A100
   minutes). Retry the download with the exact URLs in D §3.4 (served on
   2026-09-05). Ingest: uint8 CLIP → fp16/int8 codes; tag bags → the
   narrow clause tensor (cap K per D §3.4 gotcha a); the shipped 100k
@@ -376,7 +472,7 @@ and ingestion plans: [dataset-candidates.md](dataset-candidates.md)
   wall — [gt_check-cuda-100k.json](dataset-candidates-artifacts/yfcc10m/gt_check-cuda-100k.json).
   The "one `none` + one filter cell" half is a harness-v2 campaign cell and
   runs with E5 (user 2026-09-06: heavy evals later).
-- [ ] **E2 — PubMed + MedCPT, ~36 M articles.** D §3.8 / §4.1
+- [ ] **E2 — ingest PubMed with MedCPT embeddings and MeSH filters, ~36 M articles.** D §3.8 / §4.1
   (download-bound: 102 GB of 768-d fp32 embeddings + 44 GB of per-PMID
   JSON from the NCBI FTP, public domain, no registration; no encoding).
   PCA to 256 / 128 / 64 for the dim sweep (fit on a 1 M sample, apply on
@@ -395,7 +491,7 @@ and ingestion plans: [dataset-candidates.md](dataset-candidates.md)
   not done: no data staged (the ~198 GB raw mirror does not fit the 100 GiB
   `/workspace` quota — see the section for the budget), no PCA anywhere, no
   oracle, no cells. The `--dims 256,128,64` PCA plan in D §4.1 is superseded.
-- [ ] **E3 — Semantic Scholar SPECTER2, ~50 M slice of 120 M.** D §3.7
+- [ ] **E3 — ingest a 50 M-paper Semantic Scholar SPECTER2 slice, with OpenAlex as the fallback.** D §3.7
   (`embeddings-specter_v2`: 30 files × 28 GB JSONL ≈ 840 GB for 120 M
   papers, 768-d; `papers` for year / venue / fields of study /
   publication type / open access / citation bucket; `citations` for
@@ -408,7 +504,7 @@ and ingestion plans: [dataset-candidates.md](dataset-candidates.md)
   citation links, but ~670 GB snapshot pass + ≈ 9–14 A100 h of nomic
   encoding). Gate: layout on disk, oracle built, one `none` + one filter
   cell.
-- [ ] **E4 — KuaiRand-27K, 32 M videos.** D §3.2 / §4.3. ETL to the
+- [ ] **E4 — ingest KuaiRand-27K and train gSASRec over its 32 M videos.** D §3.2 / §4.3. ETL to the
   harness layout; train gSASRec D=128 with a *shared* item table (two
   32 M-row tables are ~100 GB fp32 + Adam) or train on the 5-core
   subset while indexing all 32 M; attributes: video_type, upload_type,
@@ -416,37 +512,40 @@ and ingestion plans: [dataset-candidates.md](dataset-candidates.md)
   protocols: target-derived (optimistic) and business-rule (exclude
   ads, duration bucket; pessimistic, LiNR-style pass-rate tiers). Gate:
   checkpoint on HF, layout on disk, one `none` + one filter cell.
-- [ ] **E5 — campaign cells on E1–E4** on the D1 harness state; extend
-  the report. Needs D1.
+- [ ] **E5 — run the campaign on the four new datasets and extend the
+  report.** The E1–E4 cells on the D1 harness state. Needs D1.
 
 ### Phase F — the paper (F1 and F3 can start any time)
 
-- [ ] **F1 — reframe + deviations table.** P G1 (Mac, 1 d): QuantizedIVF
+- [ ] **F1 — reframe the thesis as SilverTorch Algorithm 1 and write the deviations table.** P G1 (Mac, 1 d): QuantizedIVF
   is SilverTorch Algorithm 1; the deviations table incl. O's findings
   (official bloom hash ≠ ours, official eager-only, the
   `per_embedding_scale` overflow).
-- [ ] **F2 — "official vs reimplementation" section.** O §10 WP-9 (1 d),
+- [ ] **F2 — write the "official vs reimplementation" section of the paper.** O §10 WP-9 (1 d),
   from B3 + D1 numbers.
-- [ ] **F3 — provenance + hardware/software disclosure.** P G9 (hours).
-- [ ] **F4 — artifacts.** P §B.7: tagged `torchretrieve` release, Zenodo
+- [ ] **F3 — write the provenance and hardware/software disclosure.** P G9 (hours).
+- [ ] **F4 — package the artifacts: tagged release, Zenodo DOI, HF data, one-command reproduction.** P §B.7: tagged `torchretrieve` release, Zenodo
   DOI (incl. the pinned official sdist), HF datasets + oracles + results,
   one-command `reproduce-paper`, anonymised mirror for review.
-- [ ] **F5 — write the paper** per P §C.3 research questions and §C.4
-  section plan, with every table produced by D4's `report.py`.
+- [ ] **F5 — write the paper.** Follow the P §C.3 research questions and
+  §C.4 section plan, with every table produced by D4's `report.py`.
 
 ### Phase G — kernel follow-ups and extended experiments (after F)
 
-- [ ] **G-a — Triton transposed bloom (TF-1) + retune (TF-3/4).** O §8,
+- [ ] **G-a — write the transposed bloom index in Triton and retune the scorer.** O §8,
   WP-8 (2 d + A100). Gate: parity bit-exact, bloom kernel-only within
   1.3× of official. Then rerun B3.
-- [ ] **G-b — P gaps G10–G12, G15, G16** (synthetic scale ladder to
+- [ ] **G-b — run the extended experiments: scale ladder, pass-rate
+  sweep, ablation depth, bit width, batch grid.** P gaps G10–G12, G15,
+  G16 (synthetic scale ladder to
   240 M / 1 B, controlled pass-rate sweep, co-design ablation depth, V3
   bit width, extended batch grid). G13/G14 are in D2.
-- [ ] **G-c — resource paper for the library itself** (P §A.1 lists the
-  track), after F5.
-- [ ] **G-d — deferred kernel optimizations** (`oporp_1bit_match_topk`
-  hardware popcount; allocator hygiene in the LiNR kernels). No timeline.
-- [ ] **G-e — parked feature plans**:
+- [ ] **G-c — write a resource paper about the library itself.** P §A.1
+  lists the track; after F5.
+- [ ] **G-d — apply the deferred kernel optimizations.**
+  `oporp_1bit_match_topk` hardware popcount; allocator hygiene in the LiNR
+  kernels. No timeline.
+- [ ] **G-e — re-scope the parked export and live-update plans.**
   [torch-export-refactor.md](torch-export-refactor.md),
   [live-update-api.md](live-update-api.md). Not started; both carry
   stale-anchor banners; re-scope before executing. Research menu:
@@ -457,17 +556,19 @@ and ingestion plans: [dataset-candidates.md](dataset-candidates.md)
 ```
 (A0 dropped 2026-09-06 — no Mac target)
 A1 ─┬─> A4 (merge)
-    └─> C1 ─> C2 ─> C3 ─> C4 ─┬─> D1 ─> D4 ─┐
-A2 ─> A3 ─> B1 ─> B2 ─┬─> B4   │   D2, D3 ──┼─> F2, F5
-                      └─> B3 ──┘            │
-B5 (any time before D1)                     │
+    └─> C1 ─> C2 ─> C3 ─┬─> C4 ─> C5 ─> D1 ─> D4 ─┐
+L1 ─> L2 ───────────────┘    │      │   D2, D3 ───┼─> F2, F5
+A2 ─> A3 ─> B1 ─> B2 ─┬─> B4 │      │             │
+                      └─> B3 ┘      │             │
 E0 first; E1–E4 ingest (any time) ─> E5 (after D1) ┘
 F1, F3 (any time); F4 (after D1)
 ```
 
-The A100 critical path is A1 → A2 → A3 → B2 → B3 → C4 → D1 → D2/D3 →
-E5. Mac work (B1, B4, B5, C1–C3, D4, F1, F3) fills the gaps; E1–E4
-ingestion runs on the box whenever it is otherwise idle.
+The A100 critical path is (golden re-derive) → C4 (on the L2 layout) →
+B3 → D1 → D2/D3 → E5. CPU work on the box (L1, L2, C5, D4, F1, F3, the
+E-phase loaders) fills the gaps: **L1 → L2 before the C4 rerun, C5 after
+C4 and before D1**. E1–E4 ingestion runs whenever the box is otherwise
+idle.
 
 ### 2.1 Where each step runs
 
@@ -478,8 +579,8 @@ so it can run on the box's CPUs while the GPU is busy. (A0 was dropped
 
 | GPU box only | Mac, startable after A0 | Mac, waiting on a GPU number |
 |---|---|---|
-| A1, A2, A3 | C1, C2, C3 (the harness rewrite, 5 d) | A4 — needs A1 |
-| B2, B3 | B1 †, B5, D4 | B4 — needs B2 |
+| A1, A2, A3 | ~~C1, C2, C3~~ (done); **L1, L2** (the library refactor, 3.5 d + two suite runs) | A4 — needs A1 |
+| B2, B3 | B1 †, B5, D4 | B4 — needs B2; **C5 — needs C4 + L2** (2 d) |
 | C4, D1, D2, D3 | E0, E1 download + parse ‡, E1–E4 loader code + fixture tests | F2 — needs B3 + D1 |
 | E1–E4 encode / PCA / gSASRec / oracle builds, E5 | F1, F3, G-e re-scope, G-a kernel authoring | F4 — needs D1; F5 — needs all |
 | G-a validation and retune, G-b | | |
@@ -500,8 +601,9 @@ Python that can be written and unit-tested here against fixtures —
 E adds four more loaders to it.
 
 CPU-side critical path, startable at once:
-**C1 → C2 → C3** (5 d), with B1, B5, D4, F1, F3 and the E-phase
-loaders as filler — ≈ 11 focused days that never touch the A100.
+**L1 → L2** (3.5 d, before the C4 rerun) → **C5** (2 d, after C4), with
+D4, F1, F3 and the E-phase loaders as filler; each of L1 / L2 needs one
+library-suite run on the GPU (minutes) and C5 needs one cell.
 
 ## 3. Superseded and parked
 
@@ -513,6 +615,14 @@ loaders as filler — ≈ 11 focused days that never touch the A100.
   §2/§3, its 4b reruns are D1; the section is gone from this file.
 - **Goodreads oracle rerun (old item 2)** — D1.
 - **Deferred kernel optimizations (old item 3)** — G-d.
+- **Parked feature plans (G-e)** — re-scope against **L**'s layout: the
+  composites' single forward signature is what
+  [torch-export-refactor.md](torch-export-refactor.md) wanted, and
+  [live-update-api.md](live-update-api.md)'s `LiveIndexMixin` lands on
+  `retrieve.modules`.
+- **Review items folded into L / V** — library review A5 (`_host.py`),
+  A8, A9, D3, T3, B.4 → L1; harness review §1.11 (layout contract), §1.12
+  (training / metrics), §1.4 (`resume_key`) → C5.
 
 ---
 
