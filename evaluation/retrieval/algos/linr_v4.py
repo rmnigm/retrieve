@@ -13,7 +13,8 @@ from __future__ import annotations
 
 from torch import Tensor
 
-from retrieve.interfaces import Backend, FilterModule
+from retrieval._compat import Backend
+from retrieve.interfaces import FilterModule
 from retrieve.layers.linr.postfilter_knn_int8 import PostfilterKNNInt8
 
 from ._helpers import AlgoBase

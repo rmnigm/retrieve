@@ -25,7 +25,7 @@ from typing import Any, Literal
 
 import yaml
 
-from retrieve.interfaces import Backend
+from retrieval._compat import Backend
 
 # The three filter kinds a sweep cell can have. YAML config dicts stay keyed
 # by plain str; ``_select_filter_iter`` (sweep.py) narrows to this on load.

@@ -21,7 +21,8 @@ from typing import Any
 from torch import Tensor
 
 from retrieval.config import FilterKind
-from retrieve.interfaces import Backend, FilterModule
+from retrieval._compat import Backend
+from retrieve.interfaces import FilterModule
 
 from ._helpers import RetrievalAlgo
 from .filter import build_filter, make_mask

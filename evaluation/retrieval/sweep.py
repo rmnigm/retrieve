@@ -40,7 +40,8 @@ from retrieval.measure import (
 )
 from retrieval.oracle import load_or_build_oracle
 from retrieval.passes import QualityStats, perf_pass_cached, quality_pass_cached
-from retrieve.interfaces import Backend, FilterModule
+from retrieval._compat import Backend
+from retrieve.interfaces import FilterModule
 
 # Backends whose only non-torch kernels are SilverTorch's fused probe scoring (the CUDA C++
 # backend and its CuTe DSL port). They have no filter kernels of their own, so standalone
