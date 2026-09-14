@@ -207,6 +207,11 @@ def _cps_finish(launch: _CpsLaunch, k: int) -> tuple[Tensor, Tensor]:
     # path.
     topk_scores, topk_local = torch.topk(launch.all_scores, k, dim=1)
     topk_ids = launch.flat_probed_items.gather(1, topk_local)
+    # -1 at every -inf slot — a bloom-rejected item or a -1 padding lane of the probe pool — so
+    # the Triton backend meets interfaces.py's "-1 / -inf are the no-item sentinels" the same
+    # way ``masked_topk`` does for the torch and official backends (O §14.7). One capture-safe
+    # elementwise op: no host sync, no data-dependent branch.
+    topk_ids = torch.where(torch.isfinite(topk_scores), topk_ids, -1)
     return topk_ids, topk_scores
 
 

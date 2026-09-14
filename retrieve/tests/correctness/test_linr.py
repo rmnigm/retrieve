@@ -587,12 +587,8 @@ class TestEdgeCases:
     "make_mod",
     [
         pytest.param(lambda: OneBitKNN(k=K, backend="triton"), id="onebit-default"),
-        pytest.param(
-            lambda: OneBitKNN(k=K, backend="triton", k_bits=64), id="onebit-kbits64"
-        ),
-        pytest.param(
-            lambda: SimHashKNN(k=K, k_bits=D, backend="triton"), id="simhash-kbits-D"
-        ),
+        pytest.param(lambda: OneBitKNN(k=K, backend="triton", k_bits=64), id="onebit-kbits64"),
+        pytest.param(lambda: SimHashKNN(k=K, k_bits=D, backend="triton"), id="simhash-kbits-D"),
         pytest.param(
             lambda: SimHashKNN(k=K, k_bits=4 * D, backend="triton"),
             id="simhash-kbits-4D",
@@ -667,3 +663,23 @@ def test_simhash_quality_lift_over_oporp_at_higher_kbits():
         f"SimHash@{8 * d} recall@{k}={sh_recall:.3f} not >= 1.3 × "
         f"OneBitKNN@{d} recall@{k}={op_recall:.3f}"
     )
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda backend: PostfilterKNN(k=K, backend=backend),
+        lambda backend: PostfilterKNNInt8(k=K, backend=backend),
+        lambda backend: PrefilterKNN(k=K, backend=backend),
+        lambda backend: OneBitKNN(k=K, backend=backend),
+        lambda backend: SimHashKNN(k=K, k_bits=64, backend=backend),
+        lambda backend: ExactAttributeFilter(backend=backend),
+    ],
+    ids=["postfilter", "postfilter_int8", "prefilter", "one_bit", "simhash", "exact_filter"],
+)
+@pytest.mark.parametrize("backend", ["official", "cuda", "foo"])
+def test_unknown_backend_is_rejected(make, backend):
+    """``LinrBackend`` is ``torch | triton``: a typo, or a SilverTorch-only value, raises at
+    construction instead of silently running the torch path (review #5 / roadmap B4)."""
+    with pytest.raises(ValueError, match="unknown backend"):
+        make(backend)

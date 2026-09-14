@@ -1,14 +1,12 @@
 """End-to-end ``torch.compile`` parity + graph-break check for SilverTorch.
 
-After the codesigned kernels were rewrapped as ``@torch.library.custom_op``
+After the codesigned kernels were rewrapped as ``@torch.library.triton_op``
 the layer's docstring promise (`callers wrap with torch.compile`) becomes
 actually true: dynamo treats both kernels as opaque ops, the layer's forward
 captures into a single graph, and cudagraph_trees can fuse it. This test
-asserts that promise for all three filter modes on the Triton, the CUDA C++
-and the CuTe DSL backend (whose custom ops carry the same opacity contract), at
-both cuda/cute scoring-kernel specializations (D=64 and D=128). The cuda and
-cute exact ops additionally take ``max_size`` as a Python int cached at index
-build, so they must not reintroduce a graph break either.
+asserts that promise for all three filter modes on the Triton backend (the
+official backend is eager-only by contract — ``test_official.py`` T7 asserts
+that it *refuses* to compile).
 """
 
 from __future__ import annotations
@@ -22,38 +20,18 @@ from tests.conftest import (
     make_index,
     make_query,
     make_query_attrs,
-    require_cps_cuda,
-    require_cps_cute,
 )
 
-# (filter_mode, backend, D). The Triton rows keep the cheap D=64 build; the cuda and
-# cute rows run at both D=64 and D=128 because D selects a *different kernel
-# instantiation* there (SEG=16/WPL=1 vs SEG=32/WPL=1), and D=128 is the shipped eval
-# width — a graph break or a capture failure could easily be specific to one of them.
+# (filter_mode, backend, D). The Triton kernels are shape-generic in D, so the cheap
+# D=64 build covers them.
 MODES = [
     ("none", "triton", 64),
     ("bloom", "triton", 64),
     ("exact", "triton", 64),
-    ("none", "cuda", 64),
-    ("bloom", "cuda", 64),
-    ("exact", "cuda", 64),
-    ("none", "cuda", 128),
-    ("bloom", "cuda", 128),
-    ("exact", "cuda", 128),
-    ("none", "cute", 64),
-    ("bloom", "cute", 64),
-    ("exact", "cute", 64),
-    ("none", "cute", 128),
-    ("bloom", "cute", 128),
-    ("exact", "cute", 128),
 ]
 
 
 def _build(filter_mode, backend, *, n=512, d=64, n_lists=16, n_probe=4, k=8, c=2, a_max=2):
-    if backend == "cuda":
-        require_cps_cuda()
-    elif backend == "cute":
-        require_cps_cute()
     embs = make_index(n, d)
     kw = dict(k=k, n_lists=n_lists, n_probe=n_probe, n_iter=3, backend=backend)
     if filter_mode == "bloom":
@@ -93,7 +71,7 @@ def test_compiled_forward_matches_eager(filter_mode, backend, d):
     out_ids, out_scores = compiled(query, q_attrs)
 
     # Top-K parity: ids match exactly (same kernel, same dummies); scores
-    # bit-identical because the @custom_op body is byte-for-byte the same
+    # bit-identical because the @triton_op body is byte-for-byte the same
     # eager call.
     torch.testing.assert_close(out_ids, eager_ids)
     torch.testing.assert_close(out_scores, eager_scores)

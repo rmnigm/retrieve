@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
-from retrieve.interfaces import Backend, RetrievalModule
+from retrieve.interfaces import LinrBackend, RetrievalModule, check_backend
 from retrieve.kernels.linr.oporp_1bit_match_topk import (
     oporp_1bit_match_topk_full,
     oporp_1bit_match_topk_indirect,
@@ -34,8 +34,9 @@ class _PackedBitsKNN(RetrievalModule):
 
     item_bits: Tensor
 
-    def __init__(self, k: int, backend: Backend = "triton") -> None:
+    def __init__(self, k: int, backend: LinrBackend = "triton") -> None:
         super().__init__()
+        check_backend(backend, LinrBackend)
         self.k = k
         self.backend = backend
 

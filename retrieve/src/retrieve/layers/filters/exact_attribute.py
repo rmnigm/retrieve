@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
-from retrieve.interfaces import Backend, FilterModule
+from retrieve.interfaces import FilterModule, LinrBackend, check_backend
 from retrieve.kernels.filters.clause_compact import clause_compact
 from retrieve.kernels.filters.clause_mask import clause_mask
 from retrieve.layers.utils.compact import compact_mask
@@ -34,8 +34,9 @@ class ExactAttributeFilter(FilterModule):
     item_clause_attrs: Tensor  # [N, C, A_max] int64
     clause_is_reverse: Tensor  # [C] bool
 
-    def __init__(self, backend: Backend = "triton") -> None:
+    def __init__(self, backend: LinrBackend = "triton") -> None:
         super().__init__()
+        check_backend(backend, LinrBackend)
         self.backend = backend
 
     def register_index(

@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
-from retrieve.interfaces import Backend, RetrievalModule
+from retrieve.interfaces import LinrBackend, RetrievalModule, check_backend
 from retrieve.layers.utils.topk import masked_topk
 
 
@@ -29,8 +29,9 @@ class PostfilterKNNInt8(RetrievalModule):
 
     item_codes_t: Tensor  # [D, N_padded] int8
 
-    def __init__(self, k: int, backend: Backend = "triton") -> None:
+    def __init__(self, k: int, backend: LinrBackend = "triton") -> None:
         super().__init__()
+        check_backend(backend, LinrBackend)
         self.k = k
         self.backend = backend
         self._n_real = 0

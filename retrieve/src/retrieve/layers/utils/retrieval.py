@@ -4,6 +4,7 @@ import torch
 from torch import Tensor
 
 from retrieve.interfaces import RetrievalModule
+from retrieve.layers.utils.topk import masked_topk
 
 
 def post_filter_topk(
@@ -31,7 +32,12 @@ class FullScanKNN(RetrievalModule):
     (mask before top-K) or PrefilterKNN (candidates path).
 
     ``post_filter_topk`` also returns the per-row survivor count; ``forward``
-    discards it — callers needing counts call ``post_filter_topk`` directly."""
+    discards it — callers needing counts call ``post_filter_topk`` directly.
+
+    ``candidate_ids: [B, P]`` re-ranks the given ids only; ``-1`` entries are
+    padding (the tail every compact producer emits) — never gathered, scored
+    or returned. Rows with fewer than ``min(k, P)`` real candidates carry
+    ``-1`` / ``-inf`` in the tail; ``P < k`` returns ``P`` columns."""
 
     item_embs: Tensor
 
@@ -61,9 +67,7 @@ class FullScanKNN(RetrievalModule):
         query: Tensor,
         candidate_ids: Tensor,
     ) -> tuple[Tensor, Tensor]:
-        cand_embs = self.item_embs[candidate_ids]
+        valid = candidate_ids >= 0
+        cand_embs = self.item_embs[candidate_ids.clamp_min(0)]
         scores = torch.bmm(query.unsqueeze(1), cand_embs.transpose(1, 2)).squeeze(1)
-        actual_k = min(self.k, scores.shape[1])
-        topk_scores, topk_local = torch.topk(scores, actual_k, dim=1)
-        topk_ids = candidate_ids.gather(1, topk_local)
-        return topk_ids, topk_scores
+        return masked_topk(scores, self.k, valid=valid, gather_ids=candidate_ids, pad_to_k=False)

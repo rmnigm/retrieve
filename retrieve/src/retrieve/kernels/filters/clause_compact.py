@@ -11,7 +11,6 @@ import torch
 import triton
 import triton.language as tl
 from torch import Tensor
-from torch.library import triton_op, wrap_triton
 
 # By name, not `common.<fn>` — see the note in clause_mask.py: inductor's
 # re-compilation of a @triton_op kernel captures @triton.jit callees from
@@ -79,9 +78,7 @@ def _clause_compact_kernel(
         A_MAX=A_MAX,
     )
 
-    compact_store(
-        pass_mask, n_offsets, counts_ptr, out_indices_ptr, bid, stride_ob, stride_on
-    )
+    compact_store(pass_mask, n_offsets, counts_ptr, out_indices_ptr, bid, stride_ob, stride_on)
 
 
 @dataclass(frozen=True)
@@ -171,7 +168,7 @@ def _clause_compact_impl(
     return launch.out_indices, launch.counts
 
 
-@triton_op("retrieve::clause_compact", mutates_args=())
+@torch.library.custom_op("retrieve::clause_compact", mutates_args=(), device_types="cuda")
 def clause_compact(
     item_clause_attrs: Tensor,  # [N, C, A_max] int64
     clause_is_reverse: Tensor,  # [C] bool
@@ -179,11 +176,26 @@ def clause_compact(
 ) -> tuple[Tensor, Tensor]:
     """Fused clause evaluation + compaction → (positive_indices [B, N] int64, counts [B] int64). The
     full ``[B, N]`` buffer has ``-1`` sentinels in the unused tail; consumers row-bound by
-    ``counts[b]``, and within-row order is unspecified (atomic writes). Registered as a
-    ``triton_op`` for ``torch.compile``; mirrors ``_clause_compact_impl`` with
-    ``DEFAULT_CONFIG``."""
-    launch = _clause_compact_prep(
-        item_clause_attrs, clause_is_reverse, query_clause_attrs, cfg=DEFAULT_CONFIG
+    ``counts[b]``, and within-row order is unspecified (atomic writes). Mirrors
+    ``_clause_compact_impl`` with ``DEFAULT_CONFIG``.
+
+    Registered as an *opaque* ``custom_op``, not a ``triton_op`` (roadmap C4, 2026-09-06): under
+    ``triton_op`` inductor analyses the kernel's TTIR for mutated pointers, and its provenance
+    walk follows a store address back through every argument of the ``tt.call`` that produced
+    it. ``compact_store``'s address is ``base + intra`` — data-dependent on the pass mask, which
+    is the result of the ``clause_pass`` call whose arguments include ``item_attrs_ptr`` — so
+    the index buffer (a graph input) is reported as mutated and cudagraph trees skip the whole
+    forward ("skipping cudagraphs due to mutated inputs"). ``clause_mask`` stores at a
+    data-independent address and is unaffected. As a custom op the kernel launch is opaque to
+    inductor, the op is functional as declared, and the forward captures. The cost is one
+    custom-op dispatch instead of an inlined launch; the eager path is unchanged."""
+    return _clause_compact_impl(item_clause_attrs, clause_is_reverse, query_clause_attrs)
+
+
+@clause_compact.register_fake
+def _(item_clause_attrs, clause_is_reverse, query_clause_attrs):
+    b, n = query_clause_attrs.shape[0], item_clause_attrs.shape[0]
+    return (
+        query_clause_attrs.new_empty((b, n), dtype=torch.int64),
+        query_clause_attrs.new_empty((b,), dtype=torch.int64),
     )
-    wrap_triton(_clause_compact_kernel)[launch.grid](**launch.kwargs)  # keep inline (export)
-    return launch.out_indices, launch.counts
