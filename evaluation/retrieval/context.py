@@ -15,7 +15,8 @@ import torch
 from torch import Tensor
 
 from retrieval.config import EvalConfig
-from retrieve.interfaces import Backend, FilterModule
+from retrieval._compat import Backend
+from retrieve.interfaces import FilterModule
 
 
 @dataclass(frozen=True)

@@ -25,7 +25,7 @@ from torch import Tensor
 
 from retrieval.config import FilterKind
 from retrieve import SilverTorch
-from retrieve.interfaces import Backend
+from retrieval._compat import Backend
 
 from ._helpers import AlgoBase
 

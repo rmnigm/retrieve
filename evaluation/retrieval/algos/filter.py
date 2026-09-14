@@ -13,7 +13,8 @@ import torch
 from torch import Tensor
 
 from retrieval.config import FilterKind
-from retrieve.interfaces import Backend, FilterModule
+from retrieval._compat import Backend
+from retrieve.interfaces import FilterModule
 from retrieve.layers.filters import BloomFilter, ExactAttributeFilter
 
 

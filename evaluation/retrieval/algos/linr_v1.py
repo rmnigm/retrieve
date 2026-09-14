@@ -10,7 +10,8 @@ from __future__ import annotations
 from torch import Tensor
 
 from retrieve import PostfilterKNN
-from retrieve.interfaces import Backend, FilterModule
+from retrieval._compat import Backend
+from retrieve.interfaces import FilterModule
 
 from ._helpers import AlgoBase
 from .filter import make_mask
