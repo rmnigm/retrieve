@@ -5,12 +5,16 @@ sizes that fit well on a single GPU; larger sweeps live in ``evaluation/``.
 Tests cover three filter modes — ``"none"`` (plain IVF), ``"bloom"`` (paper's
 bloom subset test), ``"exact"`` (clause-attribute predicate fused into the
 codesigned kernel). All forward paths are exercised with ``backend="torch"``,
-``backend="triton"``, ``backend="cuda"`` and ``backend="cute"`` across all three
-filter modes; cuda cells skip only when the C++ extension can't build here, cute
-cells only when the CuTe DSL (the ``cute`` extra) is not installed.
+``backend="triton"`` and ``backend="official"`` across all three filter modes; official
+cells skip only when ``meta-recsys/silvertorch`` (the ``official`` extra) is not
+installed. On ``"official"`` the bloom mode is Meta's own
+bloom index (a different hash), so the bloom cross-backend checks stay
+triton-vs-torch; the official parity gates live in ``tests/parity/test_official.py``.
 """
 
 from __future__ import annotations
+
+import copy
 
 import pytest
 import torch
@@ -25,24 +29,22 @@ from tests.conftest import (
     make_query,
     make_query_attrs,
     recall_at_k,
-    require_cps_cuda,
-    require_cps_cute,
+    require_official,
 )
+from tests.parity.conftest import assert_ids_equal_up_to_ties
 
 N, D, B, K = 4096, 128, 16, 64
 N_LISTS, N_PROBE = 64, 8
 M_BITS, K_HASH = 512, 5
 C, A_MAX = 2, 2
 
-BACKENDS = ["torch", "triton", "cuda", "cute"]
+BACKENDS = ["torch", "triton", "official"]
 
 
 def _require_backend(backend: str) -> None:
-    """Skip-or-fail gate for the two optional backends; a no-op for torch / triton."""
-    if backend == "cuda":
-        require_cps_cuda()
-    elif backend == "cute":
-        require_cps_cute()
+    """Skip-or-fail gate for the optional official backend; a no-op for torch / triton."""
+    if backend == "official":
+        require_official()
 
 
 @pytest.fixture(scope="module")
@@ -142,10 +144,21 @@ class TestShape:
         assert m.global_scale.dtype == torch.float32
         assert m.global_scale.shape == ()
         assert m.centroids.dtype == torch.float32
-        assert m.padded_cluster_items.shape[0] == N_LISTS
+        if backend == "official":
+            # Cluster-sorted CSR layout instead of the padded one (plan D4).
+            assert not hasattr(m, "padded_cluster_items")
+            assert m.cluster_offsets.shape == (N_LISTS + 1,)
+            assert m.cluster_offsets.dtype == torch.int64
+            assert m.sort_perm.shape == (N,) and m.inv_perm.shape == (N,)
+            assert torch.equal(m.inv_perm[m.sort_perm], torch.arange(N, device="cuda"))
+            assert int(m.cluster_offsets[-1].item()) == N
+        else:
+            assert m.padded_cluster_items.shape[0] == N_LISTS
+        assert m.cluster_sizes.shape == (N_LISTS,)
         # No filter → no filter buffers.
         assert not hasattr(m, "bloom_sigs")
         assert not hasattr(m, "hash_seeds")
+        assert not hasattr(m, "bloom_index")
         assert not hasattr(m, "item_clause_attrs")
         assert not hasattr(m, "clause_is_reverse")
 
@@ -160,6 +173,10 @@ class TestShape:
         # Exact mode must not allocate bloom buffers.
         assert not hasattr(m, "bloom_sigs")
         assert not hasattr(m, "hash_seeds")
+        assert not hasattr(m, "bloom_index")
+        if backend == "official":
+            # Attrs live in the cluster-sorted doc space on this backend.
+            assert torch.equal(m.item_clause_attrs, data["attrs"][m.sort_perm])
 
 
 class TestParamValidation:
@@ -281,10 +298,9 @@ class TestEquivalence:
 
 class TestCrossBackend:
     """torch and Triton SilverTorch agree on id sets (accumulator order may flip ties);
-    cuda and Triton, and cute and Triton, agree on id sets through the whole layer (the
-    kernel-level parity suites additionally prove the scores bit-identical on a shared
-    probe family). cute and cuda register the same buffers and run the same two-kernel
-    design, so through the whole layer they are compared bit for bit."""
+    official and Triton agree on id sets through the whole layer on ``none`` / ``exact``
+    (``test_official.py`` T1/T6 additionally prove the int32 scores bit-identical on a
+    shared index)."""
 
     def test_with_bloom(self, data):
         tri = _build(with_attrs=True, data=data, backend="triton")
@@ -301,22 +317,6 @@ class TestCrossBackend:
         ids_trc, sc_trc = trc(data["query"])
         for b in range(B):
             assert_topk_id_sets_match(ids_trc, sc_trc, ids_tri, sc_tri, b)
-
-    def test_cuda_with_bloom(self, data):
-        tri = _build(with_attrs=True, data=data, backend="triton")
-        cud = _build(with_attrs=True, data=data, backend="cuda")
-        ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
-        ids_cud, sc_cud = cud(data["query"], data["q_attrs"])
-        for b in range(B):
-            assert_topk_id_sets_match(ids_cud, sc_cud, ids_tri, sc_tri, b)
-
-    def test_cuda_no_bloom(self, data):
-        tri = _build_no_bloom(data, backend="triton")
-        cud = _build_no_bloom(data, backend="cuda")
-        ids_tri, sc_tri = tri(data["query"])
-        ids_cud, sc_cud = cud(data["query"])
-        for b in range(B):
-            assert_topk_id_sets_match(ids_cud, sc_cud, ids_tri, sc_tri, b)
 
     def test_with_exact(self, data):
         tri = _build_exact(data, backend="triton")
@@ -335,84 +335,30 @@ class TestCrossBackend:
         for b in range(B):
             assert_topk_id_sets_match(ids_trc, sc_trc, ids_tri, sc_tri, b)
 
-    def test_cuda_with_exact(self, data):
-        tri = _build_exact(data, backend="triton")
-        cud = _build_exact(data, backend="cuda")
-        ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
-        ids_cud, sc_cud = cud(data["query"], data["q_attrs"])
-        for b in range(B):
-            assert_topk_id_sets_match(ids_cud, sc_cud, ids_tri, sc_tri, b)
-
-    def test_cuda_with_exact_reverse(self, data):
-        rev = torch.tensor([True, False], dtype=torch.bool, device="cuda")
-        tri = _build_exact(data, backend="triton", clause_is_reverse=rev)
-        cud = _build_exact(data, backend="cuda", clause_is_reverse=rev)
-        ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
-        ids_cud, sc_cud = cud(data["query"], data["q_attrs"])
-        for b in range(B):
-            assert_topk_id_sets_match(ids_cud, sc_cud, ids_tri, sc_tri, b)
-
-    def test_cute_with_bloom(self, data):
-        tri = _build(with_attrs=True, data=data, backend="triton")
-        cut = _build(with_attrs=True, data=data, backend="cute")
-        ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
-        ids_cut, sc_cut = cut(data["query"], data["q_attrs"])
-        for b in range(B):
-            assert_topk_id_sets_match(ids_cut, sc_cut, ids_tri, sc_tri, b)
-
-    def test_cute_no_bloom(self, data):
+    def test_official_no_bloom(self, data):
         tri = _build_no_bloom(data, backend="triton")
-        cut = _build_no_bloom(data, backend="cute")
+        off = _build_no_bloom(data, backend="official")
         ids_tri, sc_tri = tri(data["query"])
-        ids_cut, sc_cut = cut(data["query"])
+        ids_off, sc_off = off(data["query"])
         for b in range(B):
-            assert_topk_id_sets_match(ids_cut, sc_cut, ids_tri, sc_tri, b)
+            assert_topk_id_sets_match(ids_off, sc_off, ids_tri, sc_tri, b)
 
-    def test_cute_with_exact(self, data):
+    def test_official_with_exact(self, data):
         tri = _build_exact(data, backend="triton")
-        cut = _build_exact(data, backend="cute")
+        off = _build_exact(data, backend="official")
         ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
-        ids_cut, sc_cut = cut(data["query"], data["q_attrs"])
+        ids_off, sc_off = off(data["query"], data["q_attrs"])
         for b in range(B):
-            assert_topk_id_sets_match(ids_cut, sc_cut, ids_tri, sc_tri, b)
+            assert_topk_id_sets_match(ids_off, sc_off, ids_tri, sc_tri, b)
 
-    def test_cute_with_exact_reverse(self, data):
+    def test_official_with_exact_reverse(self, data):
         rev = torch.tensor([True, False], dtype=torch.bool, device="cuda")
         tri = _build_exact(data, backend="triton", clause_is_reverse=rev)
-        cut = _build_exact(data, backend="cute", clause_is_reverse=rev)
+        off = _build_exact(data, backend="official", clause_is_reverse=rev)
         ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
-        ids_cut, sc_cut = cut(data["query"], data["q_attrs"])
+        ids_off, sc_off = off(data["query"], data["q_attrs"])
         for b in range(B):
-            assert_topk_id_sets_match(ids_cut, sc_cut, ids_tri, sc_tri, b)
-
-    @pytest.mark.parametrize("filter_mode", ["none", "bloom", "exact"])
-    def test_cute_equals_cuda_bitexact(self, data, filter_mode):
-        """cute is a port of cuda with the same buffers (a cute checkpoint is a cuda
-        checkpoint) and the same kernels, so on the *same index* the whole layer must
-        agree bit for bit, not just on id sets. Two kmeans runs are not bit-deterministic
-        on the GPU (this is why the other cross-backend tests compare id sets), so the
-        cute module is handed the cuda module's index verbatim rather than rebuilding
-        its own."""
-        builders = {
-            "none": lambda backend: _build_no_bloom(data, backend=backend),
-            "bloom": lambda backend: _build(with_attrs=True, data=data, backend=backend),
-            "exact": lambda backend: _build_exact(data, backend=backend),
-        }
-        cud = builders[filter_mode]("cuda")
-        cut = builders[filter_mode]("cute")
-        assert list(cud.state_dict()) == list(cut.state_dict()), "buffer sets must match"
-        for name, buf in cud.named_buffers():
-            setattr(cut, name, buf.clone())
-        cut._max_cluster_size = cud._max_cluster_size
-        cut._global_scale_f = cud._global_scale_f
-        qa = data["q_attrs"] if filter_mode != "none" else None
-        ids_cud, sc_cud = cud(data["query"], qa)
-        ids_cut, sc_cut = cut(data["query"], qa)
-        assert torch.equal(sc_cud, sc_cut)
-        # topk tie order is not promised stable across launches, so ids get the usual
-        # one notch of slack: equal, or permuted within a run of tied scores.
-        for b in range(B):
-            assert_topk_id_sets_match(ids_cut, sc_cut, ids_cud, sc_cud, b, atol=0, rtol=0)
+            assert_topk_id_sets_match(ids_off, sc_off, ids_tri, sc_tri, b)
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
@@ -498,6 +444,37 @@ class TestCandidates:
             with pytest.raises(ValueError, match="not both"):
                 m(data["query"], data["q_attrs"], candidate_ids=cand)
 
+    def test_candidate_ids_pad_tail_never_scored(self, data, backend):
+        """``-1``-tailed candidate ids (what every compact producer emits) are padding:
+        never gathered (a raw ``-1`` would wrap to item ``N-1`` — through ``inv_perm`` on
+        official), never scored, never returned. Row ``b`` has ``2 + b`` real candidates
+        out of ``P = 24``; with ``k = 8`` the first six rows end in ``-1`` / ``-inf``. The
+        finite part equals a pad-free re-rank of the same row (the int8 dot is exact in
+        fp32, so bit-equal), and item ``N-1`` — excluded from every candidate list — never
+        appears."""
+        k, p = 8, 24
+        m = _build_no_bloom(data, k=k, backend=backend)
+        g = torch.Generator(device="cuda").manual_seed(13)
+        cand = torch.randint(0, N - 1, (B, p), generator=g, dtype=torch.long, device="cuda")
+        n_valid = torch.arange(B, device="cuda") + 2
+        cand[torch.arange(p, device="cuda")[None, :] >= n_valid[:, None]] = -1
+        ids, scores = m(data["query"], candidate_ids=cand)
+        assert ids.shape == scores.shape == (B, k)
+        assert not (ids == N - 1).any(), "a -1 pad wrapped to the last item"
+        finite = torch.isfinite(scores)
+        assert torch.equal(ids >= 0, finite), "-1 ids exactly where scores are -inf"
+        for b in range(B):
+            nv = int(n_valid[b].item())
+            kk = min(k, nv)
+            assert int(finite[b].sum().item()) == kk
+            row = cand[b, :nv].unsqueeze(0)
+            ref_ids, ref_scores = m(data["query"][b : b + 1], candidate_ids=row)
+            assert torch.equal(scores[b, :kk], ref_scores[0, :kk])
+            assert_ids_equal_up_to_ties(
+                ids[b, :kk][None], ref_ids[0, :kk][None], scores[b, :kk][None]
+            )
+            assert set(ids[b, :kk].tolist()) <= set(row[0].tolist())
+
     def test_candidate_ids_p_less_than_k(self, data, backend):
         """``candidate_ids`` smaller than K — forward returns ``actual_k = p`` columns."""
         m = _build_no_bloom(data, backend=backend)
@@ -515,6 +492,46 @@ class TestCandidates:
             allowed = set(cand[b].tolist())
             for j in range(p):
                 assert int(ids[b, j].item()) in allowed
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+class TestStateDict:
+    """``load_state_dict`` re-derives the two Python-scalar caches the forwards read
+    (``_global_scale_f``, ``_max_cluster_size``) from the loaded buffers, so a loaded index
+    scores exactly like the one that was saved — nothing is patched by hand."""
+
+    @pytest.mark.parametrize("filter_mode", ["none", "bloom", "exact"])
+    def test_load_state_dict_rederives_cached_scalars(self, data, backend, filter_mode):
+        builders = {
+            "none": lambda: _build_no_bloom(data, backend=backend),
+            "bloom": lambda: _build(with_attrs=True, data=data, backend=backend),
+            "exact": lambda: _build_exact(data, backend=backend),
+        }
+        src = builders[filter_mode]()
+        # The receiving module must have the saved module's buffer *shapes* (the usual
+        # nn.Module rule), and a second register_index cannot promise that: GPU k-means is
+        # not bit-deterministic (float index_add_ atomics), so the IVF may pad to a
+        # different width. A deep copy fixes the shapes; its buffers are then zeroed and
+        # its caches poisoned, so anything the load does not restore shows up.
+        twin = copy.deepcopy(src)
+        with torch.no_grad():
+            for buf in twin.buffers():
+                buf.zero_()
+        twin._global_scale_f = float("nan")
+        twin._max_cluster_size = -1
+
+        twin.load_state_dict(src.state_dict())
+
+        assert twin._global_scale_f == src._global_scale_f
+        assert twin._max_cluster_size == src._max_cluster_size
+        for (name, a), (_, b) in zip(src.named_buffers(), twin.named_buffers()):
+            assert torch.equal(a, b), name
+        qa = data["q_attrs"] if filter_mode != "none" else None
+        ids_s, sc_s = src(data["query"], qa)
+        ids_t, sc_t = twin(data["query"], qa)
+        assert torch.equal(sc_s, sc_t)
+        for b in range(B):
+            assert_topk_id_sets_match(ids_t, sc_t, ids_s, sc_s, b, atol=0, rtol=0)
 
 
 class TestBuilder:
@@ -568,6 +585,7 @@ class TestBuilder:
 class TestEdgeCases:
     def test_n_lists_equals_n(self, data, backend):
         """Degenerate clustering (one item per cluster); full probe → recall ≈ 1."""
+        _require_backend(backend)  # the one builder-less test: gate the optional backend
         small_n = 256
         embs = data["embs"][:small_n]
         m = SilverTorch(k=K, n_lists=small_n, n_probe=small_n, n_iter=2, backend=backend)
@@ -579,3 +597,69 @@ class TestEdgeCases:
         ex_ids, _ = exact(data["query"])
         # int8 quant + kmeans degeneracy can shuffle near-ties; allow modest slack.
         assert recall_at_k(ids, ex_ids) >= 0.85
+
+
+class TestFewSurvivorsSentinel:
+    """``-inf`` slots carry the ``-1`` id on every backend (O §14.7).
+
+    ``interfaces.py`` names ``-1 / -inf`` as the "no item" sentinels. The ``torch`` and
+    ``official`` backends get there through ``masked_topk``; the Triton epilogues
+    (``_cps_finish`` / ``_cpse_finish``) used to return whatever item id the probe pool held at
+    that slot, so on a row with fewer than K survivors the two backends' ``ids`` tensors were not
+    comparable without normalising through score finiteness first. The epilogues now apply the
+    sentinel themselves.
+
+    The index here is built so the survivor count is *known*: one clause, one attribute slot, a
+    value carried by exactly five items, and a query row asking for a value no item carries.
+    """
+
+    K_SMALL = 8
+    N_SMALL = 1024
+
+    @pytest.fixture(scope="class")
+    def few(self):
+        embs = make_index(self.N_SMALL, D, seed=11)
+        attrs = torch.full((self.N_SMALL, 1, 1), 7, dtype=torch.long, device="cuda")
+        attrs[:5, 0, 0] = 3  # exactly five items carry value 3 — fewer than K_SMALL
+        # rows: 5 survivors / every item / no item at all.
+        q_attrs = torch.tensor([[3], [7], [99]], dtype=torch.long, device="cuda")
+        return {"embs": embs, "attrs": attrs, "q_attrs": q_attrs, "query": make_query(3, D)}
+
+    def _build_few(self, few, filter_mode, backend):
+        kw = dict(
+            k=self.K_SMALL, n_lists=8, n_probe=8, n_iter=3, filter_mode=filter_mode, backend=backend
+        )
+        if filter_mode == "bloom":
+            kw.update(m_bits=M_BITS, k_hash=K_HASH)
+        m = SilverTorch(**kw)
+        m.register_index(few["embs"], few["attrs"])
+        return m
+
+    @pytest.mark.parametrize("filter_mode", ["exact", "bloom"])
+    def test_triton_writes_minus_one_at_inf_slots(self, few, filter_mode):
+        m = self._build_few(few, filter_mode, "triton")
+        ids, scores = m(few["query"], few["q_attrs"])
+
+        dead = ~torch.isfinite(scores)
+        assert dead.any(), "fixture no longer produces rows with fewer than K survivors"
+        assert torch.equal(ids[dead], torch.full_like(ids[dead], -1)), (
+            f"{filter_mode}: Triton epilogue left probe-pool ids at -inf slots: "
+            f"{sorted(set(ids[dead].tolist()))}"
+        )
+        # The last query row asks for a value no item carries: the exact filter admits nobody.
+        if filter_mode == "exact":
+            assert bool(dead[2].all()), "row 2 should have no survivors at all"
+            assert torch.equal(ids[2], torch.full_like(ids[2], -1))
+
+    @pytest.mark.parametrize("filter_mode", ["exact", "bloom"])
+    def test_triton_ids_match_torch_without_normalisation(self, few, filter_mode):
+        """The two backends' ids now compare directly — no finiteness normalisation first."""
+        tri = self._build_few(few, filter_mode, "triton")
+        trc = self._build_few(few, filter_mode, "torch")
+        ids_tri, sc_tri = tri(few["query"], few["q_attrs"])
+        ids_trc, sc_trc = trc(few["query"], few["q_attrs"])
+
+        assert torch.equal(sc_tri, sc_trc), (
+            f"{filter_mode}: scores differ between triton and torch on the shared int8 index"
+        )
+        assert_ids_equal_up_to_ties(ids_tri, ids_trc, sc_tri)

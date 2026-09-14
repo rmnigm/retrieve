@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from torch import Tensor
 
-from retrieve.interfaces import Backend
+from retrieve.interfaces import LinrBackend
 from retrieve.layers.linr._bit_knn import _PackedBitsKNN
 from retrieve.layers.utils.quantize import (
     project_simhash_1bit_query,
@@ -24,7 +24,7 @@ class SimHashKNN(_PackedBitsKNN):
         k: int,
         k_bits: int,
         seed: int = 0,
-        backend: Backend = "triton",
+        backend: LinrBackend = "triton",
     ) -> None:
         super().__init__(k, backend)
         self.k_bits = k_bits

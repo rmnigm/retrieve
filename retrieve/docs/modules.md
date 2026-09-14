@@ -31,20 +31,30 @@ Most modules accept `backend="triton"` (default) or `backend="torch"`. The Trito
 kernels; the torch path is pure PyTorch (still GPU) and is `torch.compile`-friendly. Results are
 equivalent. `PostfilterKNN` / `PostfilterKNNInt8` accept the flag for API symmetry but always run
 the same code (cuBLAS already covers their case). `SilverTorch` alone also accepts
-`backend="cuda"` (CUDA C++, JIT-built on first forward, needs `nvcc` + `ninja`) and
-`backend="cute"` (the same kernels in the CuTe DSL, `pip install "torchretrieve[cute]"`); both
-are bit-identical to the Triton path in every `filter_mode`. Any other module given `"cuda"` or
-`"cute"` runs its torch path.
+`backend="official"`: Meta's own `meta-recsys/silvertorch` kernels (`torch.ops.st.*`, the
+`official` extra — built from source, needs a CUDA toolkit matching your torch) for the scoring
+and bloom phases, with our k-means and quantization in front; it is the reference the Triton
+kernels are checked against, eager-only (`torch.compile` raises), and its bloom mode is Meta's
+bloom index rather than ours (`m_bits` is optional; `official=OfficialConfig(...)` carries
+`b_multiplier`, `n_stored_hashes`, the `"int32"` bit-exact vs `"fp16"` serving score path, the
+partial-vs-full bloom path, and `cache_plans` — set it `False` when timing so every forward pays
+the expression parse). Any other module given `"official"` — or any string outside its
+backend literal — raises `ValueError` at construction.
 
 ## LiNR modules
 
 Constructor → `register_index` → `forward`. Unless noted, `item_embs` is `[N, D]`, `query` is
-`[B, D]`, and the return is `([B, k] int64 ids, [B, k] float32 scores)`.
+`[B, D]`, and the return is `([B, k] int64 ids, [B, k] scores)`. The score dtype follows the
+module's arithmetic: `FullScanKNN` returns the input dtype (fp32 for fp32 inputs), `OneBitKNN` /
+`SimHashKNN` return fp32, `PostfilterKNN` and `PostfilterKNNInt8` return fp16, and `PrefilterKNN`
+returns fp16 on the `torch` backend and fp32 on the `triton` backend (and for an empty candidate
+set). Ranking is what the layers promise; cast at the boundary if you need one dtype.
 
 ### `FullScanKNN(k)`
 - `forward(query, mask=None, candidate_ids=None)`
 - Exhaustive matmul + top-K. Optional `mask: [B, N] bool` (filtered ids become `-1`) or
-  `candidate_ids: [B, P]` to score only a candidate set.
+  `candidate_ids: [B, P]` to score only a candidate set (`-1` entries are padding: never scored,
+  never returned; a row with fewer than `min(k, P)` real candidates ends in `-1` / `-inf`).
 
 ### `PostfilterKNN(k, backend="triton")`
 - `forward(query, mask=None)`
@@ -78,7 +88,10 @@ SilverTorch(k, n_lists, n_probe, filter_mode="none",
 ```
 
 - `register_index(item_embs, item_clause_attrs=None, clause_is_reverse=None)`
-- `forward(query, query_clause_attrs=None, candidate_ids=None)`
+- `forward(query, query_clause_attrs=None, candidate_ids=None)` — `candidate_ids: [B, P]`
+  (original ids, `-1` = padding) switches to a pure re-rank of those ids with no filter; pads are
+  never scored or returned, a row with fewer than `min(k, P)` real candidates ends in
+  `-1` / `-inf`, and passing `query_clause_attrs` alongside raises.
 
 Parameters:
 
@@ -103,3 +116,8 @@ centroids, assignments = KMeansTorch(n_lists=1024).fit(item_embs)
 Lloyd's k-means with chunked assignment; returns `(centroids [n_lists, D], assignments [N])`.
 `SilverTorch` uses it internally — call it directly only if you want the clustering for your own
 index build.
+
+`fit` is deterministic: same `seed` and same input give bit-identical centroids and assignments
+on repeated calls, on CPU and on CUDA. The centroid update sums each cluster with a float64
+one-hot GEMM rather than `index_add_`, whose float atomics reduce in scheduling order and are
+not reproducible on a GPU.

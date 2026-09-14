@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from torch import Tensor
 
-from retrieve.interfaces import Backend
+from retrieve.interfaces import LinrBackend
 from retrieve.layers.linr._bit_knn import _PackedBitsKNN
 from retrieve.layers.utils.quantize import (
     project_oporp_1bit_query,
@@ -26,7 +26,7 @@ class OneBitKNN(_PackedBitsKNN):
         self,
         k: int,
         seed: int = 0,
-        backend: Backend = "triton",
+        backend: LinrBackend = "triton",
         k_bits: int = 0,
     ) -> None:
         super().__init__(k, backend)
