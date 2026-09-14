@@ -5,6 +5,9 @@ repository. Every other document in [docs/plans/](.) is detail for one
 phase of this queue; none of them fixes an order, this file does. If you
 are an agent starting a session: read [`../../CLAUDE.md`](../../CLAUDE.md),
 then this file top to bottom, then only the plan section your step names.
+If you are a **worker** dispatched onto one step, read your step's section
+and stop there; who dispatches what, on which model, and how many run at
+once is [agent-orchestration.md](agent-orchestration.md).
 
 **Conventions.** A plan lives in this directory while it is either a
 live instruction set or a record of intent whose validation hasn't
@@ -120,8 +123,25 @@ backends (deleted by B4, merged 2026-09-06) +
 everything the 2026-09-06 session merged (status block above); ≈ 146
 commits ahead of `main`, nothing pushed to `main`. Work happens on
 `dev/<step>` branches in git worktrees under `/workspace/wt/`, merged into
-`development` by the coordinator once a step's gates and the review fixes
-are in; A4 (merge into `main`) is on hold.
+`development` by the orchestrator once a step's gates and the review fixes
+are in, and **pushed to `origin/development`** — a step whose code sits only
+in a local branch or worktree is not finished
+([agent-orchestration.md](agent-orchestration.md) §6). A4 (merge into
+`main`) is on hold.
+
+**Who executes a step.** One user-controlled orchestrator session dispatches
+constrained workers, at most three at once, one of which may hold the GPU;
+`fable` takes the core library and harness rewrites (L1, L2, C5) as single
+large chunks, `opus` takes gates, campaigns, reports, loaders, debugging and
+docs; nesting is two levels apart from a `sonnet` subagent for web deep
+research; every worker's result is a validation record in the plan it
+executed. The contract is
+[agent-orchestration.md](agent-orchestration.md); it changes no order here.
+What the code it writes should look like — thin, little defensive
+programming, no compatibility with shapes we invented, no comment slop,
+tests only where a gate names them — is
+[coding-guidelines.md](coding-guidelines.md), which also lists the three
+places it collides with a decision already taken here.
 
 **Decisions already taken (2026-09-05), do not reopen.** Meta's
 `meta-recsys/silvertorch` ops become the reference backend
