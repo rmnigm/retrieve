@@ -68,7 +68,13 @@ written for someone who installed `torchretrieve` and does not have this repo:
 **Plans** ([`docs/plans/`](docs/plans/)) — the master plan
 ([`00-roadmap.md`](docs/plans/00-roadmap.md): the one ordered work queue with
 gates and checkboxes), one detail plan per phase, live GPU-validation runbooks,
-and a research-idea catalog. Completed plans are archived under
+a research-idea catalog, and two contracts that order nothing and apply
+everywhere: [`agent-orchestration.md`](docs/plans/agent-orchestration.md) (one
+orchestrator, constrained workers, which model takes which work, and the rule
+that everything lands on `development` at `origin`) and
+[`coding-guidelines.md`](docs/plans/coding-guidelines.md) (thin code, no
+self-compat, no comment slop, and what is deliberately not the goal).
+Completed plans are archived under
 [`docs/plans/archive/`](docs/plans/archive/). Agents start at
 [`CLAUDE.md`](CLAUDE.md).
 

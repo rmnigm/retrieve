@@ -30,7 +30,11 @@ LiNR variants are V1–V4 as in the paper.
   `datasets.md`, `checkpoints.md`. If code and a system doc disagree, the
   code is right and the doc is a bug — fix the doc.
 - `docs/plans/*.md` — **why and in what order**. `00-roadmap.md` is the
-  master plan; the others are one-phase detail. Plans carry a status
+  master plan; the others are one-phase detail. Two contracts order
+  nothing and apply everywhere: `agent-orchestration.md` (who runs a step,
+  on which model, how many at once, where the output lands) and
+  `coding-guidelines.md` (what the code should look like, and what is
+  deliberately not the goal). Plans carry a status
   blockquote (date, branch, what ran), numbered sections, decisions
   `D1…`, work packages with gates, and — once executed — a validation
   record appended to the same file. The model record is
@@ -75,9 +79,38 @@ LiNR variants are V1–V4 as in the paper.
 6. **Commits and branches.** Commit only when the user asks. One branch per
    roadmap phase off `main` after Phase A4. Session artifacts (scripts,
    raw JSON) go under `docs/plans/<plan>-artifacts/`, not in the packages.
-7. **Subagents.** Respect any cap the user sets on agent count as a total
-   including children; child agents for search only on lightweight models
-   (`sonnet` / `haiku`), never the default model.
+   **All work ends up on `development` at `origin`** — whatever branch or
+   worktree produced it, a step is not finished until it is merged into
+   `development` and pushed (`docs/plans/agent-orchestration.md` §6). The
+   box is rented; the repository is the only durable artifact.
+7. **One orchestrator, constrained workers.** One user-controlled
+   orchestrator session dispatches workers that do code, tests,
+   evaluations or docs; workers do not widen their own scope, start a step
+   the roadmap does not list, or dispatch peers. **At most three workers at
+   once**, lowered by GPU serialization (rule 1), plan-level exclusivity and
+   the requirement that concurrent workers edit disjoint trees.
+   **Model by the shape of the work:** core library rewrites with heavy
+   kernel or coding work, and core harness rewrites carrying architecture
+   design, go to **`fable`** as one big chunk; routine cleanups, monitoring,
+   debugging, docs and one-time experiments go to **`opus`**. **Nesting is
+   two levels**, with exactly one exception: a **`sonnet`** nested subagent
+   for web deep research. Every worker's result is a validation record
+   appended to the plan it executed — a run recorded only in a transcript
+   did not happen. Full contract:
+   [`docs/plans/agent-orchestration.md`](docs/plans/agent-orchestration.md).
+8. **Thin code, documented outside it.** Priorities in order: correct code,
+   clean architecture, evals that run. Little defensive programming —
+   validate at the boundary, then let it fail loudly. No backward
+   compatibility with shapes we invented: redo the part and delete the old
+   one (this does not weaken rule 5 — a *kernel* still goes only after its
+   replacement's parity gate). No abstraction level without a written
+   reason. **No multi-line comment slop — prefer no comment at all**; a
+   short one only where the code is genuinely surprising, and it says why.
+   The documentation is `docs/system` (what the code does today) and
+   `docs/plans` (why, and what was measured), kept current. Tests are the
+   gates a plan names, not a deliverable. Not the goal: coverage, cosmetic
+   polish, unscheduled baselines, paper speculation. Full contract:
+   [`docs/plans/coding-guidelines.md`](docs/plans/coding-guidelines.md).
 
 ## Commands
 
@@ -101,3 +134,7 @@ Append the validation record to the plan you executed, flip the roadmap
 checkbox with date and commit, update the affected `docs/system` file,
 run the link checker, and state plainly in your report what passed, what
 was skipped, and what is still unverified.
+
+If you are a **worker** (rule 7): write the record, leave the checkbox
+alone — the orchestrator flips it after the merge — and hand back the
+branch plus the plain statement above.
