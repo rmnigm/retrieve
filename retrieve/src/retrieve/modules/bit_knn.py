@@ -110,6 +110,9 @@ class OneBitKNN(_PackedBitsKNN):
         # Pristine constructor arg: the sentinel is re-resolved from it on every register_index,
         # so re-registering with a different-dim corpus can't silently keep the first D.
         self._k_bits_arg = k_bits
+        # A state-dict load into a module that never registered (the builders' prebuilt path)
+        # must resolve the sentinel from the loaded projection instead.
+        self.register_load_state_dict_post_hook(_rederive_k_bits)
 
     def _quantize_index(self, item_embs: Tensor) -> None:
         # Resolve the 0 sentinel to a concrete int so _project_query sees a stable Python int under
@@ -123,6 +126,11 @@ class OneBitKNN(_PackedBitsKNN):
     def _project_query(self, query: Tensor) -> Tensor:
         """Pure tensor-flow query projection — shared by both backends."""
         return project_oporp_1bit_query(query, self.oporp_signs, self.oporp_perm, self.k_bits)
+
+
+def _rederive_k_bits(module: OneBitKNN, incompatible_keys) -> None:
+    if module._k_bits_arg == 0 and hasattr(module, "oporp_signs"):
+        module.k_bits = int(module.oporp_signs.shape[0])
 
 
 class SimHashKNN(_PackedBitsKNN):

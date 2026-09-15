@@ -14,7 +14,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.modules.silvertorch import build_silvertorch
+from retrieve.modules.silvertorch import SilverTorchBuilder
 from tests.conftest import (
     make_attrs,
     make_index,
@@ -35,24 +35,13 @@ def _build(filter_mode, backend, *, n=512, d=64, n_lists=16, n_probe=4, k=8, c=2
     embs = make_index(n, d)
     kw = dict(k=k, n_lists=n_lists, n_probe=n_probe, n_iter=3, backend=backend)
     if filter_mode == "bloom":
-        attrs = make_attrs(n, c=c, a_max=a_max)
-        return build_silvertorch(
-            embs,
-            filter_mode="bloom",
-            m_bits=512,
-            k_hash=4,
-            item_clause_attrs=attrs,
-            **kw,
-        )
+        kw.update(filter_mode="bloom", m_bits=512, k_hash=4)
     if filter_mode == "exact":
-        attrs = make_attrs(n, c=c, a_max=a_max)
-        return build_silvertorch(
-            embs,
-            filter_mode="exact",
-            item_clause_attrs=attrs,
-            **kw,
-        )
-    return build_silvertorch(embs, **kw)
+        kw.update(filter_mode="exact")
+    b = SilverTorchBuilder(**kw).set_item_embeddings(embs)
+    if filter_mode != "none":
+        b.set_item_attributes(make_attrs(n, c=c, a_max=a_max))
+    return b.build()
 
 
 @pytest.mark.parametrize("filter_mode,backend,d", MODES)

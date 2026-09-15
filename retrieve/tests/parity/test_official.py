@@ -30,7 +30,7 @@ import torch
 
 from retrieve.functional import clause_subset_match, masked_topk
 from retrieve.indexing.quantize import quantize_int8, quantize_int8_global
-from retrieve.modules.silvertorch import OfficialConfig, SilverTorch, build_silvertorch
+from retrieve.modules.silvertorch import OfficialConfig, SilverTorch, SilverTorchBuilder
 from retrieve.ops import official as of
 from retrieve.ops import reference
 from retrieve.ops.triton.clause_mask import clause_mask
@@ -541,13 +541,12 @@ def _layer(data, backend, filter_mode="none", *, reverse=None, official=None, **
         args.update(
             filter_mode="bloom", m_bits=512 if backend != "official" else None, k_hash=K_SEARCH
         )
-        return build_silvertorch(data["embs"], item_clause_attrs=data["attrs"], **args)
     if filter_mode == "exact":
         args.update(filter_mode="exact")
-        return build_silvertorch(
-            data["embs"], item_clause_attrs=data["attrs"], clause_is_reverse=reverse, **args
-        )
-    return build_silvertorch(data["embs"], **args)
+    b = SilverTorchBuilder(**args).set_item_embeddings(data["embs"])
+    if filter_mode != "none":
+        b.set_item_attributes(data["attrs"], reverse)
+    return b.build()
 
 
 def _transplant(off: SilverTorch, tri: SilverTorch) -> None:

@@ -22,9 +22,9 @@ from retrieve.modules import (
     PostfilterKNNInt8,
     PrefilterKNN,
     SilverTorch,
+    SilverTorchBuilder,
     SimHashKNN,
 )
-from retrieve.modules.silvertorch import build_silvertorch
 
 warnings.warn(
     "retrieve.layers is deprecated (torchretrieve 0.2): import from retrieve, "
@@ -34,6 +34,14 @@ warnings.warn(
 )
 
 KMeansTorch = KMeans
+
+
+def build_silvertorch(item_embs, k, *, item_clause_attrs=None, clause_is_reverse=None, **kwargs):
+    """The 0.1 one-call constructor, over ``SilverTorchBuilder`` (``kwargs`` are the module's)."""
+    b = SilverTorchBuilder(k=k, **kwargs).set_item_embeddings(item_embs)
+    if item_clause_attrs is not None:
+        b.set_item_attributes(item_clause_attrs, clause_is_reverse)
+    return b.build()
 
 
 def _alias(name: str, **attrs: object) -> None:

@@ -6,24 +6,44 @@ which one to reach for and the exact signatures.
 
 ## Choosing a module
 
-Two families:
+Two families, and the paper's variants of the first:
 
-- **LiNR** (`FullScanKNN`, `PostfilterKNN`, `PostfilterKNNInt8`, `PrefilterKNN`, `OneBitKNN`,
-  `SimHashKNN`) — score the corpus directly (full scan or over a candidate set). Simple, exact or
+- **LiNR** — score the corpus directly (full scan or over a candidate set). Simple, exact or
   near-exact, no index-build step. Best at small-to-medium `N` or when you already have a
-  candidate set from an upstream filter.
+  candidate set from an upstream filter. The paper's four variants ship as modules
+  (`LiNRV1`–`LiNRV4`), each composing the primitives (`PostfilterKNN`, `PostfilterKNNInt8`,
+  `PrefilterKNN`, `OneBitKNN`, `SimHashKNN`, `FullScanKNN`) with an optional filter; the
+  primitives are public for your own compositions.
 - **SilverTorch** — IVF (clustered) + INT8 ANN. Adds an index-build (k-means) step and approximate
   recall, but scales to large `N` by only probing a few clusters per query.
 
 | Module | Scoring | Memory vs fp16 | Notes |
 | --- | --- | --- | --- |
+| `LiNRV1` | fp16 dot product | 1× (fp16) | Dense scan, filter as a mask. |
+| `LiNRV2` | fp16 dot product | 1× (fp16) | Filter → candidates → exact rescoring; filter required. |
+| `LiNRV3` | Hamming, then fp16 | ~1/16× + 1× | 1-bit top-`candidate_pool`, then exact rescoring. |
+| `LiNRV4` | INT8 dot product | 0.5× | Dense int8 scan, filter as a mask. |
+| `SilverTorch` | INT8 ANN over IVF | 0.5× + centroids | Scales to large `N`; optional fused filter. |
 | `FullScanKNN` | exact dot product | 1× (fp32) | Reference / small-N. |
 | `PostfilterKNN` | fp16 dot product | 1× (fp16) | Dense scan + optional boolean mask. |
 | `PostfilterKNNInt8` | INT8 dot product | 0.5× | Dense scan, int32 end-to-end. |
 | `PrefilterKNN` | fp16 dot product | 1× (fp16) | Scores only a candidate set. |
 | `OneBitKNN` | Hamming (1-bit) | ~1/16× | Sign-OPORP quantization. |
 | `SimHashKNN` | Hamming (1-bit) | ~1/16× | SimHash; `k_bits` can exceed `D`. |
-| `SilverTorch` | INT8 ANN over IVF | 0.5× + centroids | Scales to large `N`; optional fused filter. |
+
+The public surface, in one import:
+
+```python
+from retrieve import (
+    LinrBackend, SilverTorchBackend, RetrievalModule, FilterModule,   # interfaces
+    SilverTorch, SilverTorchBuilder, OfficialConfig,                  # Algorithm 1
+    LiNRV1, LiNRV2, LiNRV3, LiNRV4, LiNRBuilder,                      # LiNR paper variants
+    PostfilterKNN, PostfilterKNNInt8, PrefilterKNN, FullScanKNN,      # dense / sparse primitives
+    OneBitKNN, SimHashKNN,                                            # 1-bit primitives
+    BloomFilter, ExactAttributeFilter,                                # filters
+)
+import retrieve.modules.official   # Meta's BloomIndexSearchModule(+Builder), FilterQueryParserModule(+Builder)
+```
 
 ### Backend
 
@@ -41,7 +61,56 @@ partial-vs-full bloom path, and `cache_plans` — set it `False` when timing so 
 the expression parse). Any other module given `"official"` — or any string outside its
 backend literal — raises `ValueError` at construction.
 
-## LiNR modules
+## LiNR variants
+
+Each holds its filter (a `BloomFilter` or `ExactAttributeFilter`, see the
+[filtering guide](filtering-and-quantization.md)) as the `filter` submodule, so `buffers()` and
+`state_dict()` cover index and filter (the filter's buffers under `filter.`). All four:
+
+- `register_index(item_embs, item_clause_attrs=None, clause_is_reverse=None)` — registers the
+  index and, when attributes are given, the attached filter.
+- `forward(query, query_clause_attrs=None) -> (ids [B, k] int64, scores [B, k])`; without
+  `query_clause_attrs` the filter is skipped (V2 requires it: the filter is its candidate
+  source).
+- `k` is settable after `register_index`; `capturable` is `True` (a class attribute).
+
+### `LiNRV1(k, *, filter=None, backend="triton")`
+- `PostfilterKNN` + the filter's mask: dense fp16 dot product, masked, top-k.
+
+### `LiNRV2(k, *, filter, backend="triton")`
+- `PrefilterKNN` over `filter.evaluate_indices`: the filter's compact candidate list, rescored
+  exactly. `query_clause_attrs` is required.
+
+### `LiNRV3(k, *, candidate_pool=5000, seed=0, filter=None, backend="triton")`
+- `OneBitKNN(k=candidate_pool)` → `PrefilterKNN(k)`: 1-bit Hamming top-`candidate_pool` (over
+  the filter's candidates when there is one), then exact fp16 rescoring of the survivors.
+  `set_query_params(candidate_pool=...)` changes the pool later (must be `<= N`).
+
+### `LiNRV4(k, *, filter=None, backend="triton")`
+- `PostfilterKNNInt8` + the filter's mask: dense int8 dot product, masked, top-k.
+
+### `LiNRBuilder(variant, **kwargs)`
+
+`variant` is `"v1"` … `"v4"`, `kwargs` the variant's constructor keywords. Then:
+
+```python
+v3 = (LiNRBuilder("v3", k=100, candidate_pool=8000)
+      .set_item_embeddings(item_embs)
+      .set_filter(ExactAttributeFilter(backend="triton"), item_attrs, clause_is_reverse)
+      .set_backend("triton")
+      .set_device("cuda")
+      .build())                                   # == construct + register_index + .to(device)
+
+same = (LiNRBuilder("v3", k=100, candidate_pool=8000)
+        .set_filter(ExactAttributeFilter())        # a home for the saved filter.* buffers
+        .set_state_dict(torch.load("v3.pt"))
+        .build())                                  # prebuilt: no quantization, the buffers are loaded
+```
+
+`set_item_embeddings` and `set_state_dict` are mutually exclusive; `build()` without either
+raises.
+
+## LiNR primitives
 
 Constructor → `register_index` → `forward`. Unless noted, `item_embs` is `[N, D]`, `query` is
 `[B, D]`, and the return is `([B, k] int64 ids, [B, k] scores)`. The score dtype follows the
@@ -83,8 +152,8 @@ set). Ranking is what the layers promise; cast at the boundary if you need one d
 ## SilverTorch
 
 ```python
-SilverTorch(k, n_lists, n_probe, filter_mode="none",
-            m_bits=None, k_hash=None, n_iter=10, seed=0, backend="triton")
+SilverTorch(k, n_lists, n_probe, filter_mode="none", m_bits=None, k_hash=None,
+            n_iter=10, seed=0, kmeans_init="random", backend="triton", official=None)
 ```
 
 - `register_index(item_embs, item_clause_attrs=None, clause_is_reverse=None)`
@@ -95,35 +164,42 @@ SilverTorch(k, n_lists, n_probe, filter_mode="none",
 
 Parameters:
 
-- `n_lists` — number of IVF clusters (k-means runs `n_iter` iterations at register time).
+- `n_lists` — number of IVF clusters (k-means runs `n_iter` iterations at register time;
+  `kmeans_init="kmeans++"` seeds it by D² sampling instead of random rows — opt-in, the
+  default is `"random"`).
 - `n_probe` — clusters scanned per query (≤ `n_lists`). Higher = more recall, more work.
+  `set_query_params(n_probe=...)` changes it after `register_index`, with the same validation.
 - `filter_mode` — `"none"`, `"bloom"`, or `"exact"`. `"bloom"` requires `m_bits` (power of 2,
   multiple of 64) and `k_hash`. The filter is fused into the probe+score kernel — see the
   [filtering guide](filtering-and-quantization.md).
 
-Constraint: `n_probe * max_cluster_size >= k` (raised at `register_index` otherwise).
+Constraint: `n_probe * max_cluster_size >= k` (raised at `register_index` and by
+`set_query_params` otherwise). `k` is a plain attribute, settable at any time.
 
-`retrieve.modules.silvertorch.build_silvertorch(item_embs, k, *, n_lists, n_probe,
-filter_mode="none", ...)` is a convenience that constructs the module and calls `register_index`
-in one step (no longer exported at the top level; a fluent `SilverTorchBuilder` replaces it next).
-`OfficialConfig` is exported at the top level.
+After `register_index`, `build_timings` holds the seconds of the four build phases
+(`kmeans_s`, `assemble_s`, `quantize_s`, `filter_s`; `{}` before it and on a prebuilt module).
+`capturable` is `True` on `triton` / `torch` and `False` on `official` (eager-only).
 
-## KMeans (`retrieve.indexing`)
+### `SilverTorchBuilder(**kwargs)`
+
+`kwargs` are `SilverTorch`'s. Then:
 
 ```python
-from retrieve.indexing import KMeans
+ann = (SilverTorchBuilder(k=100, n_lists=1024, n_probe=24, filter_mode="bloom", m_bits=1024, k_hash=5)
+       .set_item_embeddings(item_embs)
+       .set_item_attributes(item_attrs, clause_is_reverse=None)
+       .set_backend("official", official=OfficialConfig(cache_plans=False))
+       .set_device("cuda")
+       .build())                                   # == construct + register_index + .to(device)
 
-KMeans(n_lists, n_iter=10, seed=0)
-centroids, assignments = KMeans(n_lists=1024).fit(item_embs)
-assignments = KMeans.assign(item_embs, centroids)
+same = SilverTorchBuilder(k=100, n_lists=1024, n_probe=24).set_state_dict(torch.load("st.pt")).build()
 ```
 
-Lloyd's k-means with chunked assignment; returns `(centroids [n_lists, D], assignments [N])`.
-`SilverTorch` uses it internally — call it directly only if you want the clustering for your own
-index build (`retrieve.indexing.padded_layout` / `csr_layout` turn an assignment into the two IVF
-layouts). `KMeansTorch` was its 0.1 name.
+The `set_state_dict` path runs no k-means: the saved buffers are loaded and the load hook
+re-derives the cached scalars, so `same` scores exactly like the module that was saved (the
+state dict must come from the same backend — see the portability note in the system docs).
+`set_item_embeddings` and `set_state_dict` are mutually exclusive; `build()` without either
+raises. `OfficialConfig` is exported at the top level.
 
-`fit` is deterministic: same `seed` and same input give bit-identical centroids and assignments
-on repeated calls, on CPU and on CUDA. The centroid update sums each cluster with a float64
-one-hot GEMM rather than `index_add_`, whose float atomics reduce in scheduling order and are
-not reproducible on a GPU.
+`KMeans`, the IVF layouts and the quantizers are documented in
+[`indexing-and-ops.md`](indexing-and-ops.md).

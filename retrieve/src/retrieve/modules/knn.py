@@ -56,6 +56,7 @@ class PostfilterKNNInt8(RetrievalModule):
     _PAD_M = 17
 
     item_codes_t: Tensor  # [D, N_padded] int8
+    n_items: Tensor  # 0-d int64: N before padding (not recoverable from the padded table)
 
     def __init__(self, k: int, backend: LinrBackend = "triton") -> None:
         super().__init__()
@@ -63,6 +64,7 @@ class PostfilterKNNInt8(RetrievalModule):
         self.k = k
         self.backend = backend
         self._n_real = 0
+        self.register_load_state_dict_post_hook(_rederive_n_real)
 
     def register_index(self, item_embs: Tensor) -> None:
         codes = quantize_int8_global_codes(item_embs)  # [N, D] int8
@@ -75,6 +77,7 @@ class PostfilterKNNInt8(RetrievalModule):
             pad = codes.new_zeros((pad_n, codes.shape[1]))
             codes = torch.cat([codes, pad], dim=0)
         self.register_buffer("item_codes_t", codes.t().contiguous())
+        self.register_buffer("n_items", torch.tensor(n, dtype=torch.int64, device=codes.device))
 
     def forward(
         self,
@@ -99,6 +102,13 @@ class PostfilterKNNInt8(RetrievalModule):
         if mask is not None:
             return masked_topk(scores, self.k, valid=mask)
         return masked_topk(scores, self.k)
+
+
+def _rederive_n_real(module: PostfilterKNNInt8, incompatible_keys) -> None:
+    """``load_state_dict`` post-hook: the forward slices the padded ``_int_mm`` output at the
+    Python int ``_n_real`` (no per-call sync); a load replaces the buffer it came from."""
+    if hasattr(module, "n_items"):
+        module._n_real = int(module.n_items.item())
 
 
 class PrefilterKNN(RetrievalModule):

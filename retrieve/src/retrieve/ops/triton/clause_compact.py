@@ -1,7 +1,11 @@
-"""Fused clause evaluation + stream compaction in one launch (cumsum for intra-tile offsets,
-atomic_add for the per-row base), avoiding the dense ``[B, N]`` bool of the pure-torch path.
-Output ordering within a row is unspecified (atomics across tiles); callers that need order must
-sort."""
+"""Fused clause evaluation + stream compaction without the dense ``[B, N]`` bool of the pure-torch
+path, in two phases (plan L3): the predicate launch writes each tile's survivor count and stashes
+its surviving ids, compacted, in the tile's own slot range of an int32 scratch;
+``_host.compact_finish`` scans the counts and a second, predicate-free launch moves every run to
+``tile_offset``. A row's ids therefore come out in **ascending item order**, ``torch.equal`` to
+``ops.reference.clause_compact`` and to itself launch after launch — the ``atomic_add`` row base
+this replaced ordered them by tile completion, which the downstream tie-breakers turned into
+run-to-run quality noise."""
 
 from __future__ import annotations
 
@@ -15,8 +19,8 @@ from torch import Tensor
 # By name, not `common.<fn>` — see the note in clause_mask.py: inductor's
 # re-compilation of a @triton_op kernel captures @triton.jit callees from
 # the kernel's globals by name, and a module object is not one.
-from retrieve.ops.triton._host import grid_batch_tiles
-from retrieve.ops.triton.common import clause_pass, compact_store
+from retrieve.ops.triton._host import compact_finish, grid_batch_tiles
+from retrieve.ops.triton.common import clause_pass, compact_stash
 
 
 @dataclass(frozen=True)
@@ -26,9 +30,8 @@ class ClauseCompactConfig:
     num_stages: int = 3
 
 
-# Default tile config (tuned on A100/sm_80). In-kernel @triton.autotune is unsafe here: atomic_add
-# into counts accumulates across trials and out_indices is written in-place; the offline tuner
-# allocates fresh buffers per call.
+# Tuned on A100/sm_80 for the one-pass atomic kernel (`tune-kernels clause-compact`); not
+# re-tuned for the two-phase shape (roadmap Phase G).
 DEFAULT_CONFIG = ClauseCompactConfig(block_n=512, num_warps=2)
 
 
@@ -37,8 +40,8 @@ def _clause_compact_kernel(
     item_attrs_ptr,  # [N, C, A_max] int64
     is_reverse_ptr,  # [C] bool (stored as int8 in torch)
     query_attrs_ptr,  # [B, C] int64
-    out_indices_ptr,  # [B, N] int64 (worst-case scratch)
-    counts_ptr,  # [B] int64 (init 0)
+    tile_counts_ptr,  # [B, T] int64
+    scratch_ptr,  # [B, T * BLOCK_N] int32
     N,
     tiles_y,
     C: tl.constexpr,
@@ -48,8 +51,8 @@ def _clause_compact_kernel(
     stride_ia,  # item_attrs.stride(2)
     stride_qb,
     stride_qc,
-    stride_ob,
-    stride_on,
+    stride_tb,
+    stride_sb,
     BLOCK_N: tl.constexpr,
 ):
     # 3D grid: batch on grid_x (L2 reuse on item_attrs), tiles split across grid_y × grid_z to dodge
@@ -79,15 +82,26 @@ def _clause_compact_kernel(
         A_MAX=A_MAX,
     )
 
-    compact_store(pass_mask, n_offsets, counts_ptr, out_indices_ptr, bid, stride_ob, stride_on)
+    compact_stash(
+        pass_mask,
+        n_offsets,
+        tile_counts_ptr,
+        scratch_ptr,
+        bid,
+        tile_id,
+        stride_tb,
+        stride_sb,
+        BLOCK_N,
+    )
 
 
 @dataclass(frozen=True)
 class _ClauseCompactLaunch:
     grid: tuple[int, int, int]
+    tiles_y: int
     kwargs: dict[str, object]  # every kernel arg: tensors, strides, constexprs, cfg
-    out_indices: Tensor
-    counts: Tensor
+    tile_counts: Tensor
+    scratch: Tensor
 
 
 def _clause_compact_prep(
@@ -97,14 +111,10 @@ def _clause_compact_prep(
     *,
     cfg: ClauseCompactConfig,
 ) -> _ClauseCompactLaunch:
-    """Validation + contiguity + buffers + the full launch-arg dict. THE single place input
-    checking happens — shared by ``_clause_compact_impl`` and the public op.
-
-    ``out_indices`` is init'd to the ``-1`` sentinel: the kernel writes only
-    ``[base, base + tile_sum)`` per tile, so positions beyond ``counts[bid]`` stay ``-1``. With
-    ``torch.empty`` they'd hold uninitialised memory that leaks into the gather when
-    ``counts[b] < k``. ``-1`` is the canonical "no item" sentinel. ``counts`` must be
-    zero-initialized — the kernel's atomic_add accumulates into it."""
+    """Validation + contiguity + the phase-1 buffers + the launch-arg dict. THE single place input
+    checking happens — shared by ``_clause_compact_impl`` and the public op. ``tile_counts`` and
+    ``scratch`` cover the grid's ``T = tiles_y * tiles_x`` tiles, every one of which the launch
+    writes (tiles past ``cdiv(N, BLOCK_N)`` write zeros)."""
     if item_clause_attrs.dim() != 3:
         raise ValueError("item_clause_attrs must be [N, C, A_max]")
     if query_clause_attrs.dim() != 2:
@@ -120,17 +130,17 @@ def _clause_compact_prep(
     clause_is_reverse = clause_is_reverse.contiguous().to(torch.int8)
     query_clause_attrs = query_clause_attrs.contiguous()
 
-    out_indices = torch.full((b, n), -1, dtype=torch.int64, device=device)
-    counts = torch.zeros((b,), dtype=torch.int64, device=device)
-
     grid, tiles_y = grid_batch_tiles(b, n, cfg.block_n)
+    tiles = tiles_y * grid[2]
+    tile_counts = torch.empty((b, tiles), dtype=torch.int64, device=device)
+    scratch = torch.empty((b, tiles * cfg.block_n), dtype=torch.int32, device=device)
 
     kwargs = dict(
         item_attrs_ptr=item_clause_attrs,
         is_reverse_ptr=clause_is_reverse,
         query_attrs_ptr=query_clause_attrs,
-        out_indices_ptr=out_indices,
-        counts_ptr=counts,
+        tile_counts_ptr=tile_counts,
+        scratch_ptr=scratch,
         N=n,
         tiles_y=tiles_y,
         C=c,
@@ -140,13 +150,13 @@ def _clause_compact_prep(
         stride_ia=item_clause_attrs.stride(2),
         stride_qb=query_clause_attrs.stride(0),
         stride_qc=query_clause_attrs.stride(1),
-        stride_ob=out_indices.stride(0),
-        stride_on=out_indices.stride(1),
+        stride_tb=tile_counts.stride(0),
+        stride_sb=scratch.stride(0),
         BLOCK_N=cfg.block_n,
         num_warps=cfg.num_warps,
         num_stages=cfg.num_stages,
     )
-    return _ClauseCompactLaunch(grid, kwargs, out_indices, counts)
+    return _ClauseCompactLaunch(grid, tiles_y, kwargs, tile_counts, scratch)
 
 
 def _clause_compact_impl(
@@ -157,12 +167,20 @@ def _clause_compact_impl(
     config: ClauseCompactConfig | None = None,
 ) -> tuple[Tensor, Tensor]:
     """Direct-launch body used by the offline tuner and unit tests. Takes an optional ``config=`` so
-    tile parameters can be swept; the public ``@triton_op``-wrapped ``clause_compact`` always
-    uses ``DEFAULT_CONFIG``."""
+    tile parameters can be swept; the public ``custom_op``-wrapped ``clause_compact`` always uses
+    ``DEFAULT_CONFIG``."""
     cfg = config if config is not None else DEFAULT_CONFIG
     launch = _clause_compact_prep(item_clause_attrs, clause_is_reverse, query_clause_attrs, cfg=cfg)
     _clause_compact_kernel[launch.grid](**launch.kwargs)
-    return launch.out_indices, launch.counts
+    return compact_finish(
+        launch.grid,
+        launch.tiles_y,
+        launch.tile_counts,
+        launch.scratch,
+        item_clause_attrs.shape[0],
+        block_n=cfg.block_n,
+        num_warps=cfg.num_warps,
+    )
 
 
 @torch.library.custom_op("retrieve::clause_compact", mutates_args=(), device_types="cuda")
@@ -173,7 +191,8 @@ def clause_compact(
 ) -> tuple[Tensor, Tensor]:
     """Fused clause evaluation + compaction → (positive_indices [B, N] int64, counts [B] int64). The
     full ``[B, N]`` buffer has ``-1`` sentinels in the unused tail; consumers row-bound by
-    ``counts[b]``, and within-row order is unspecified (atomic writes). Mirrors
+    ``counts[b]``. Within a row the ids are in **ascending item order** — bit-equal to
+    ``ops.reference.clause_compact`` and to itself across launches and processes. Mirrors
     ``_clause_compact_impl`` with ``DEFAULT_CONFIG``.
 
     Registered as an *opaque* ``custom_op``, not a ``triton_op`` (roadmap C4, 2026-09-06): under

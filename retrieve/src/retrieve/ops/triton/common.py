@@ -6,7 +6,9 @@ masking policy** — callers keep their own grids, loads, and epilogue policy. T
 invariant is what lets one helper serve kernels with very different launch shapes.
 
 Helpers: ``or_combine``, ``popcount_int64``, ``bloom_subset_pass``, ``clause_pass``,
-``compact_store``. Per-helper semantics and the call-site map live in
+``compact_store``, ``compact_stash``; plus ``compact_scatter_kernel``, the one launched kernel
+here (the predicate-free second phase both compaction ops share, driven by
+``_host.compact_finish``). Per-helper semantics and the call-site map live in
 docs/system/kernels.md § Shared kernel helpers.
 """
 
@@ -92,19 +94,68 @@ def clause_pass(
 
 
 @triton.jit
-def compact_store(pass_mask, ids, counts_ptr, out_ptr, bid, stride_ob, stride_on):
-    """Stream compaction: cumsum intra-tile offsets + atomic_add row base.
-
-    ``counts_ptr`` must be int64 zero-initialized; ``out_ptr`` rows must be
-    host-prefilled with ``-1`` (only ``[base, base + tile_sum)`` is written,
-    positions past ``counts[bid]`` keep the sentinel). ``ids`` are cast to
-    int64 on store. Within-row order is unspecified (atomics across tiles)."""
+def compact_store(pass_mask, ids, base, out_ptr, bid, stride_ob, stride_on):
+    """Stream-compaction store at a caller-supplied row base: ``tl.cumsum`` intra-tile ranks and
+    a masked store of ``ids`` (cast to the pointee type) at ``base + rank``. Ascending ``ids``
+    in, ascending out."""
     pass_int = tl.where(pass_mask, 1, 0).to(tl.int32)
     intra = tl.cumsum(pass_int, axis=0) - 1
-    tile_sum = tl.sum(pass_int)
-    base = tl.atomic_add(counts_ptr + bid, tile_sum.to(tl.int64))
     tl.store(
-        out_ptr + bid * stride_ob + (base + intra.to(tl.int64)) * stride_on,
-        ids.to(tl.int64),
+        out_ptr + bid * stride_ob + (base + intra) * stride_on,
+        ids.to(out_ptr.dtype.element_ty),
         mask=pass_mask,
+    )
+
+
+@triton.jit
+def compact_stash(
+    pass_mask,
+    ids,
+    tile_counts_ptr,
+    scratch_ptr,
+    bid,
+    tile_id,
+    stride_tb,
+    stride_sb,
+    BLOCK_N: tl.constexpr,
+):
+    """Phase 1 of the two-phase compaction: the tile's survivor count to ``tile_counts[bid,
+    tile_id]`` and its surviving ``ids`` compacted into the tile's own slot range
+    ``scratch[bid, tile_id * BLOCK_N : +count]`` (int32), for ``compact_scatter_kernel`` to move
+    to the row offset once the counts are scanned. Same epilogue as the pre-L3 kernel with the
+    ``atomic_add`` row base replaced by the fixed tile-local base — the shape that keeps the
+    predicate kernel at its one-pass speed (plan §7: a count-only epilogue is 1.8× slower at
+    B=1, a packed bitmask 1.7×)."""
+    # The scan first: Triton lays the tile out for the first reduction it meets, and the layout
+    # it picks for a bare tl.sum makes the predicate's loads 1.8x slower at B=1 (plan §7).
+    compact_store(pass_mask, ids, tile_id * BLOCK_N, scratch_ptr, bid, stride_sb, 1)
+    tile_sum = tl.sum(tl.where(pass_mask, 1, 0).to(tl.int32))
+    tl.store(tile_counts_ptr + bid * stride_tb + tile_id, tile_sum.to(tl.int64))
+
+
+@triton.jit
+def compact_scatter_kernel(
+    scratch_ptr,  # [B, T * BLOCK_N] int32, compact_stash's tile-local id runs
+    tile_counts_ptr,  # [B, T] int64
+    offsets_ptr,  # [B, T] int64 exclusive scan of the tile counts
+    out_ptr,  # [B, N] int64, -1 prefilled
+    tiles_y,
+    stride_sb,
+    stride_tb,
+    stride_ob,
+    stride_on,
+    BLOCK_N: tl.constexpr,
+):
+    """Phase 3 of the two-phase compaction, one program per ``(row, tile)`` on the same 3-D grid
+    as the predicate kernel: move the tile's ``count`` stashed ids to ``out[bid, offset :]``.
+    Traffic is the survivors only. Launched by ``_host.compact_finish``; the only
+    ``@triton.jit`` here that is a kernel rather than a callee."""
+    bid = tl.program_id(0)
+    tile_id = tl.program_id(2) * tiles_y + tl.program_id(1)
+    lane = tl.arange(0, BLOCK_N)
+    count = tl.load(tile_counts_ptr + bid * stride_tb + tile_id)
+    base = tl.load(offsets_ptr + bid * stride_tb + tile_id)
+    ids = tl.load(scratch_ptr + bid * stride_sb + tile_id * BLOCK_N + lane, mask=lane < count)
+    tl.store(
+        out_ptr + bid * stride_ob + (base + lane) * stride_on, ids.to(tl.int64), mask=lane < count
     )
