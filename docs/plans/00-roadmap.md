@@ -625,7 +625,20 @@ bit-exactness stays where it belongs, in B2's library parity suite.
   CPU box, or FANNBench's harness on one of our datasets).
 - [ ] **D3 — measure bloom false-positive rate and memory against filter width.** P G6 (A100, 1–2 d), on
   both blooms (ours and official), real attributes.
-- [ ] **D4 — generate every thesis and paper table and figure from the records.** H §6 WP-6 (Mac, 1.5 d): thesis/paper tables
+- [x] **D4 — generate every thesis and paper table and figure from the records.**
+  **Code done 2026-09-15** (`6be479c`, merged at `fcc8d7e`), **run early and
+  deliberately**: the campaign needed the GPU that B3 was holding, and D4 needs
+  none, so `bench/report.py` was built against the record *schema* and today's
+  C4/C5 records. 18 artifacts emit without a traceback, suite 170 passed / 4
+  skipped, LaTeX validated structurally (no TeX toolchain on the box).
+  **The artifacts are not the paper's**: they are built from pre-campaign
+  probe records and every one of them says so — rule 2 is enforced in the tool
+  (`--gate` is vetoed by a `failed` / `partial` / dirty / branch-provenance
+  record, verified: `--gate D1` over today's records still prints NOT CITABLE).
+  **Re-run it on D1's records**; `tab:recall_nofilter` is empty until D1-c
+  supplies a `filter_kind: none` cell, and the Pareto and deep-sweep figures
+  have never seen a real sweep. Record:
+  [evaluation-harness-v2.md §13](evaluation-harness-v2.md). H §6 WP-6 (Mac, 1.5 d): thesis/paper tables
   and figures from the JSONL only, plus the methodology paragraph. Lands
   as `bench/report.py` reading `records.flatten()` (V §5.3).
 
