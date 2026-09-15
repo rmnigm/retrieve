@@ -56,7 +56,7 @@ def test_paths_cover_the_full_grid():
 def _dispatch_table() -> tuple[list[str], dict[str, list[str]]]:
     """Parse the ``### Backend dispatch`` table: header cells and rows keyed by module cell."""
     text = ARCH_MD.read_text()
-    body = text.split("### Backend dispatch", 1)[1]
+    body = text.split("### Backend dispatch", 1)[1].split("\n#", 1)[0]
     rows = [ln for ln in body.splitlines() if ln.startswith("|")]
     split = lambda ln: [c.strip() for c in ln.strip().strip("|").split("|")]  # noqa: E731
     header = [re.sub(r"[`\"]", "", c) for c in split(rows[0])]

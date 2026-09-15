@@ -615,6 +615,21 @@ also imports `retrieve.interfaces.Backend`, which stopped existing at B4's
 `LinrBackend` / `SilverTorchBackend` split — that is not a `layers` /
 `kernels` path, so the shim does not cover it.
 
+**Orchestrator review (2026-09-15, before the merge).** The record above
+claimed the harness CPU suite at 103 passed / 1 skipped; re-run on the branch it
+is **1 failed / 102 passed / 1 skipped** —
+`test_algos.py::test_paths_agree_with_architecture_dispatch_table`. The cause is
+this step's own docs edit: the test parses `docs/system/architecture.md` from the
+`### Backend dispatch` heading to the end of the file, so the 0.1 → 0.2 move
+table added under `## Module layout` gave `SilverTorch` a second matching row.
+Fixed here by bounding the parser at the next heading (one line in
+`evaluation/retrieval/tests/test_algos.py`); the table itself stays, as §8 asks.
+The suite is 103 passed / 1 skipped with that fix. The three failures this record
+attributes to the GPU being visible were confirmed pre-existing: the same three
+fail on `development` @ `4f52972` with the GPU visible, and the harness suite is
+CPU-only by construction — run it with `CUDA_VISIBLE_DEVICES=""`. L2 retires this
+markdown-parsing test in favour of `interfaces.DISPATCH` (**X** §5).
+
 **Deviations from the plan text, all behaviour-preserving.** (i)
 `indexing.csr_layout(assignments, n_lists)` takes `n_lists` (the plan's
 signature omitted it; trailing empty clusters make it underivable). (ii) The
