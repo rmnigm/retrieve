@@ -79,13 +79,39 @@ atomic k-means was the other, and C4 fix (ii) removed it.
   it is deterministic). Phase 3: each tile re-evaluates its predicate and
   writes at `tile_offset[b, t] + intra-tile cumsum`, the intra-tile cumsum
   being the one already in `compact_store`. `counts[b]` is the scan's total.
-- **D3 — Recompute the predicate rather than stash the mask.** Phase 3 runs
-  the same `clause_pass` / bloom test again instead of reading a `[B, N]`
-  bool that phase 1 wrote. The predicate is a handful of integer ops against
-  values already in L2; a dense `[B, N]` scratch is exactly what these kernels
-  exist to avoid (that is the whole point of the fused path over the torch
-  one). Cost is ≈ 2× the compaction kernel, which is a small share of a V2/V3
-  forward — **measure it, do not assume it** (§5 gate 4).
+- **D3 — ~~Recompute the predicate rather than stash the mask.~~
+  **Superseded by measurement, 2026-09-15 (orchestrator, on WP-1's numbers).**
+  As written, D3 said: phase 3 re-runs the `clause_pass` / bloom test instead
+  of reading a `[B, N]` bool that phase 1 wrote, because "the predicate is a
+  handful of integer ops against values already in L2" and "cost is ≈ 2× the
+  compaction kernel, which is a small share of a V2/V3 forward".
+
+  **Both halves of that premise are false**, and WP-1 measured it rather than
+  assuming it, as the decision's own last clause demanded. `clause_compact` is
+  **34 % of a `linr_v2` graph forward at `B = 1` and 47 % at `B = 16`** — not a
+  small share — and it is *instruction*-bound on the `C · A_max` int64 loads
+  per item, not DRAM-bound, so a second pass costs a second full kernel rather
+  than a cache replay: ×1.9–3.1 on the kernel and **+43–58 % end to end**, past
+  both thresholds in §5 gate 4. The §6 bitmask fallback fared little better
+  (×1.9 at `B = 1`, +28 % end to end) because of the Triton tile-layout defect
+  in §7.1 (ii).
+
+  **What ships instead: the tile stash.** The predicate launch keeps the
+  pre-L3 epilogue (`tl.cumsum` ranks + masked store) and writes each tile's
+  survivors into *its own fixed slot range* of an int32 scratch, so no atomic
+  decides a base; the scan then gives each tile its row offset and a
+  predicate-free scatter moves the runs into place. The invariant of D1 is
+  unchanged and so is D4. Cost: **×1.02–1.05 on the V2/V3 forwards under CUDA
+  graph** (what the harness measures), ×1.13–1.14 eager at `B = 1` from the two
+  extra launches, and a `4 · B · T · BLOCK_N`-byte scratch — 51 MB at goodreads
+  `B = 16`, alongside the `[B, N]` int64 result buffer that already exists, so
+  it is peak memory rather than traffic. At E-phase scale (36 M items, `B = 16`)
+  that scratch is ≈ 2.3 GB next to the 4.6 GB result, which fits this box but
+  belongs in the scale-ladder notes.
+
+  The general lesson, for the next kernel decision in this repository: "it is
+  already in cache" and "it is a small share of the forward" are hypotheses
+  with units, and a profiler settles them in minutes.
 - **D4 — No change to the op schemas, names, or the `@custom_op` opacity.**
   `clause_compact` and `bloom_compact` stay opaque custom ops (C4 fix (i),
   which is what lets compiled V2/V3 capture a CUDA graph); only their bodies
