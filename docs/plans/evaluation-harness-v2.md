@@ -1021,13 +1021,12 @@ its four claims fail.
 3. **Moves are up as well as down.** Every SilverTorch goodreads delta is
    positive; arxiv is mixed; `linr_v3-triton` is positive.
 4. **Two LiNR cells moved.** `linr_v2-triton` and `linr_v3-triton` moved while
-   their `torch` counterparts are bit-identical — exactly the algos C4 fix (i)
-   touched (`clause_compact` / `bloom_compact` as opaque custom ops, which
-   changed what the compiled V2/V3 triton path captures). `linr_v2` is the
-   *exact* filtered top-K baseline, so its ≤ 5.07e-6 mixed movement can only be
-   tie order among equal scores; `linr_v3` is approximate, so its move is a
-   real quality change. Neither is attributed further here — **not verified**
-   beyond the correlation.
+   their `torch` counterparts are bit-identical, which at the time looked like
+   the signature of C4 fix (i) (`clause_compact` / `bloom_compact` as opaque
+   custom ops). It was flagged **not verified**, and §11.8 **withdraws it**:
+   both cells turn out to be non-deterministic run to run, with a spread that
+   covers the whole observed movement. Only the three `silvertorch` moves in
+   the table above are real.
 
 **The result that replaces the prediction.** SilverTorch's two backends now
 agree *exactly* on goodreads:
@@ -1092,3 +1091,105 @@ gate 4 (`jaccard_vs_first@100`) should be *stricter* than it was, not looser.
 untouched. The C4 gate rerun, B3, D1 — not this job. No library code was
 changed. Nothing here is citable: CLAUDE.md rule 2 — these cells are the *input*
 to C4's gate, and that gate has not run.
+
+### 11.7 L1's gate line — one golden cell against `dev/l1-library-layout`
+
+Run 2026-09-15 on the orchestrator's instruction, after L1's own gates.
+Worktree `/workspace/wt/golden` (the frozen A1 harness, untouched), library
+subtree swapped to `dev/l1-library-layout` @ `df04e74` (tree `624459b6`),
+committed as `52ee677` on `tmp/golden-rederive`. Same box, same
+`/workspace/data`, same GPU lock, own `TORCHINDUCTOR_CACHE_DIR`. Both cached
+inputs hit again, `kept users: 9859 / 10000`.
+
+**The `torchretrieve` rename does fight the frozen workspace**, as the
+orchestrator suspected. L1 renames the distribution `retrieve` →
+`torchretrieve` (import name unchanged), so the frozen root `pyproject.toml`
+(`dependencies = ["retrieve"]`, `retrieve[official]`,
+`[tool.uv.sources] retrieve`) and the frozen `evaluation/pyproject.toml`
+(`dependencies = ["retrieve"]`) no longer resolve. Fixed on the throwaway
+branch by taking L1's root `pyproject.toml` wholesale and renaming the one
+dependency line in `evaluation/pyproject.toml`. **Workspace metadata only** —
+no harness code moved, no import changed, `uv sync --extra official` then
+succeeds and the old harness imports cleanly against L1 (the
+`retrieve.kernels` shim emits its deprecation warning as designed). Anyone
+re-pointing a frozen worktree at L1 or later needs the same two-line rename.
+
+**Gate: `goodreads-d128 c0_genre silvertorch triton` — PASS, bit-identical.**
+All 9 rows × `recall@k` / `ndcg@k` / `precision@k` / `mrr@k` equal to §11.2's
+re-derived JSON exactly, no tolerance applied, and equal again on a second
+independent run. This is the most sensitive of the eleven cells — k-means, the
+fused filter path and the `-1` sentinel all bear on it — so L1's "no behaviour
+change" claim is confirmed against real data, not just unit fixtures.
+
+| cell | runs on L1 | vs §11.2 golden | verdict |
+|---|---|---|---|
+| `goodreads-…-silvertorch-triton` | 2 | 0 of 36 quality columns differ, both runs | **PASS** |
+| `goodreads-…-linr_v3-triton` | 3 | 27 of 36 differ | **not evaluable** — see §11.8 |
+| `goodreads-…-linr_v2-triton` | 2 | 24 of 36 differ | **not evaluable** — see §11.8 |
+
+The second cell was added because it was the other one that moved in §11.2. It
+did not reproduce — and the reason is not L1.
+
+### 11.8 `linr_v2-triton` and `linr_v3-triton` are non-deterministic run to run
+
+Before reporting the `linr_v3` mismatch as a defect in L1's move, the cell was
+repeated on the **identical** L1 tree. It does not reproduce itself:
+
+| `recall@k`, bs=1 | §11.2 golden | L1 run 1 | L1 run 2 | L1 run 3 | spread over the three L1 runs |
+|---|---|---|---|---|---|
+| `linr_v3-triton` k=100 | 0.877002740643 | 0.877019983864 | 0.876952025615 | 0.876981440444 | **6.796e-05** |
+| `linr_v3-triton` k=500 | 0.724373871613 | 0.724341413849 | 0.724360888599 | 0.724337356573 | 2.353e-05 |
+| `linr_v3-triton` k=1000 | 0.617545795329 | 0.617553200089 | 0.617552388708 | 0.617545694154 | 7.506e-06 |
+| `linr_v2-triton` k=100 | 0.999273760709 | 0.999275789310 | 0.999273760709 | — | **2.029e-06** |
+| `linr_v2-triton` k=1000 | 0.999391020874 | 0.999389803697 | 0.999389296547 | — | 5.072e-07 |
+
+Same commit, same data, same `seed: 0`, same cached queries and oracle. The
+golden value sits *inside* the run-to-run range in both cells, and the
+`|L1 − golden|` distance (3.246e-05 for `linr_v3`) is **smaller** than the
+cell's own spread (6.796e-05). So:
+
+1. **The `linr_v3` / `linr_v2` mismatches are not attributable to L1.** There
+   is no evidence of a defect in the move; there is also no way to prove its
+   absence on these two cells, because they cannot prove anything about
+   themselves. `silvertorch-triton` — which *is* deterministic, bit-identical
+   across three runs on two different library trees — carries the gate.
+2. **§11.2's `linr_v2-triton` (5.07e-6) and `linr_v3-triton` (2.43e-5) moves
+   are withdrawn.** Both are inside the noise floor measured here. The
+   attribution to C4 fix (i) in §11.3 item 4 does not stand. The three
+   `silvertorch` moves and the exact `torch`/`triton` convergence are
+   unaffected — `silvertorch` is deterministic, so those remain real.
+3. **C4's gate 1 cannot be met on these two cells by any harness.** H WP-4
+   asks for `recall@k` / `ndcg@k` within `1e-6`; `linr_v2-triton`'s own noise
+   is 2.0e-6 and `linr_v3-triton`'s is 6.8e-5, i.e. 2× and 68× the tolerance.
+   No v2 harness can reproduce a single sample of a distribution that wide.
+   C4 needs a decision before it runs: exclude the two cells from gate 1,
+   gate them on a repeat-derived interval instead of a point, or fix the
+   non-determinism first. **This is a blocker for roadmap queue item 2 and it
+   is not L1's to fix.**
+
+**Mechanism — hypothesis, not verified.** The two affected cells are exactly
+the compiled *triton* LiNR paths; their `torch` counterparts were bit-identical
+in §11.2 and `linr_v1` / `linr_v4` triton were too. The leading candidate is
+per-process Triton autotuning: each `evaluate` process is fresh (H §8.2 K), so
+an autotuner that picks a config by measured time can pick differently run to
+run, and a different block/reduction shape resolves score ties in a different
+order. That would explain the magnitudes — `linr_v2` is the *exact* filtered
+top-K so only ties can move it (2e-6), while `linr_v3`'s 1-bit stage has
+massive integer-Hamming ties in the candidate pool, so a reordering there
+propagates into stage 2 (7e-5). **Not tested**; testing it means pinning the
+autotuner and re-running, which is library work and out of this job's scope.
+
+### 11.9 `retrieve.interfaces.Backend` — do not "fix" the L shim
+
+The orchestrator ruled on §11.5 item 1 on 2026-09-15 and the ruling is
+recorded here so the next reader does not undo it. `Backend` was deleted at
+roadmap **B4**, when it split into `LinrBackend` / `SilverTorchBackend`; it is
+not a path plan **L** moved, and L's shim is scoped to `retrieve.layers` /
+`retrieve.kernels`. Re-exporting `Backend` from that shim would resurrect an
+API retired a phase earlier, which coding-guidelines D2 forbids. **The correct
+place for the alias is where it now lives** — declared locally in the frozen
+A1 harness on the throwaway `tmp/golden-rederive` branch
+([copy](evaluation-harness-v2-artifacts/a1-rederive/harness_compat_backend.py)).
+No change to L1 is needed. §11.5 item 1's closing sentence ("this is the
+concrete requirement on Phase L's compatibility shim") is superseded by this
+paragraph.
