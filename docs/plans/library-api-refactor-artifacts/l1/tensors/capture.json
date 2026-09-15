@@ -1,0 +1,131 @@
+{
+  "commit": "4f529723c57573332c0a11456e1397e98b3905fd",
+  "cells": {
+    "plain_b1_l16_m64_p4_d64_k8": "5bdab73bfb754614",
+    "plain_b16_l16_m64_p4_d64_k8": "8a104865c9c02062",
+    "plain_b1_l64_m96_p8_d128_k32": "3008ee2a0591e17c",
+    "plain_b16_l64_m96_p8_d128_k32": "865950a9666e1aa9",
+    "plain_b1_l32_m64_p8_d96_k16": "9e27b4a3b3a401c7",
+    "plain_b16_l32_m64_p8_d96_k16": "67ae2e66b69383e3",
+    "plain_b1_l32_m90_p8_d128_k32": "bd2a7cb77e67f0a1",
+    "plain_b16_l32_m90_p8_d128_k32": "58aa132b351ca712",
+    "exact_d64_none": "f3f61cfd085447c1",
+    "exact_d64_mixed": "29f100ed7658ab96",
+    "bloom_d64": "e7ae2ae26ece5f98",
+    "exact_d128_none": "d50cd2cbd46c99e7",
+    "exact_d128_mixed": "5d0f46139740e988",
+    "bloom_d128": "8184a3d2de8fe1d9"
+  },
+  "modules": {
+    "silvertorch_triton_none": {
+      "keys": [
+        "centroids",
+        "item_codes",
+        "global_scale",
+        "padded_cluster_items",
+        "cluster_sizes"
+      ],
+      "scores_sha": "61c3c3d47ea56a8d"
+    },
+    "silvertorch_triton_bloom": {
+      "keys": [
+        "centroids",
+        "item_codes",
+        "global_scale",
+        "padded_cluster_items",
+        "cluster_sizes",
+        "bloom_sigs",
+        "hash_seeds",
+        "clause_salt"
+      ],
+      "scores_sha": "68270c355c0dae18"
+    },
+    "silvertorch_triton_exact": {
+      "keys": [
+        "centroids",
+        "item_codes",
+        "global_scale",
+        "padded_cluster_items",
+        "cluster_sizes",
+        "item_clause_attrs",
+        "clause_is_reverse"
+      ],
+      "scores_sha": "16de7ed06ee87469"
+    },
+    "silvertorch_torch_none": {
+      "keys": [
+        "centroids",
+        "item_codes",
+        "global_scale",
+        "padded_cluster_items",
+        "cluster_sizes"
+      ],
+      "scores_sha": "61c3c3d47ea56a8d"
+    },
+    "silvertorch_torch_bloom": {
+      "keys": [
+        "centroids",
+        "item_codes",
+        "global_scale",
+        "padded_cluster_items",
+        "cluster_sizes",
+        "bloom_sigs",
+        "hash_seeds",
+        "clause_salt"
+      ],
+      "scores_sha": "68270c355c0dae18"
+    },
+    "silvertorch_torch_exact": {
+      "keys": [
+        "centroids",
+        "item_codes",
+        "global_scale",
+        "padded_cluster_items",
+        "cluster_sizes",
+        "item_clause_attrs",
+        "clause_is_reverse"
+      ],
+      "scores_sha": "16de7ed06ee87469"
+    },
+    "silvertorch_official_none": {
+      "keys": [
+        "centroids",
+        "item_codes",
+        "global_scale",
+        "cluster_offsets",
+        "cluster_sizes",
+        "sort_perm",
+        "inv_perm"
+      ],
+      "scores_sha": "61c3c3d47ea56a8d"
+    },
+    "silvertorch_official_bloom": {
+      "keys": [
+        "centroids",
+        "item_codes",
+        "global_scale",
+        "cluster_offsets",
+        "cluster_sizes",
+        "sort_perm",
+        "inv_perm",
+        "bloom_index",
+        "bundle_b_offsets"
+      ],
+      "scores_sha": "68270c355c0dae18"
+    },
+    "silvertorch_official_exact": {
+      "keys": [
+        "centroids",
+        "item_codes",
+        "global_scale",
+        "cluster_offsets",
+        "cluster_sizes",
+        "sort_perm",
+        "inv_perm",
+        "item_clause_attrs",
+        "clause_is_reverse"
+      ],
+      "scores_sha": "16de7ed06ee87469"
+    }
+  }
+}

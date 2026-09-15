@@ -1,7 +1,8 @@
 # `torchretrieve` 0.2 — the Meta-shaped API: `modules` / `ops` / `indexing`
 
-> **Status:** planned 2026-09-15 on `development` at `76f8985` (nothing
-> implemented, no code touched). Authored from three inventories taken the
+> **Status:** WP-1 (roadmap L1) executed 2026-09-15 on `dev/l1-library-layout`
+> off `development` @ `4f52972`, gates green on the A100 (§12.1); WP-2 not
+> started. Planned 2026-09-15 on `development` at `76f8985`. Authored from three inventories taken the
 > same day against that commit: this package file by file, the harness file
 > by file, and Meta's [meta-recsys/silvertorch](https://github.com/meta-recsys/silvertorch)
 > at `main` (the official-integration plan pins `21aa35e`; `main` has since
@@ -519,5 +520,128 @@ citable (rule 2); the plan's only numbers are line counts.
 
 ## 12. Validation record
 
-*(appended by WP-1 and WP-2 when they run; model:
-[archive/cuda-silvertorch-handoff.md §13](archive/cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360).)*
+*(model: [archive/cuda-silvertorch-handoff.md §13](archive/cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360). WP-2 appends §12.2.)*
+
+### 12.1 WP-1 (roadmap L1) — 2026-09-15, A100-SXM4-80GB, `dev/l1-library-layout`
+
+**Environment.** The A100 box (driver 580.159.04, nvcc 12.4 at
+`/usr/local/cuda`), Python 3.11, torch 2.10.0+cu128, triton 3.6.0, ruff
+0.15.6 (installed as a `uv tool`; it is not in the workspace lock), Meta's
+`silvertorch` built from the pinned sha into `/venvs/l1` with
+`uv sync --extra official --all-packages` (the nvcc 12.4 / cu128 minor-version
+warning as recorded in O §13.1). Branch point `development` @ `4f52972`;
+worktree `/workspace/wt/l1`. The GPU was shared: every CUDA job below ran
+under `flock /workspace/gpu.lock`, one at a time; SM clock sampled 1155 MHz
+at the start of the suite (clocks cannot be locked here — no number below is
+a timing). Two commits: the move (code, tests, pyproject, docs) and this
+record with the step-0 artifacts.
+
+**What was done.** The §3 move table, every row a `git mv` plus import
+rewrites (`git diff --stat -M` on the move commit: 109 files, 2,427 (+) /
+2,070 (−); 14 rename-detected paths — `modules/silvertorch.py`,
+`modules/filters.py`, `ops/official/adapter.py`, the nine Triton files,
+`indexing/{kmeans,quantize,bloom_hash}.py`, `ops/tune.py`; three files fell
+under git's 50 % rename threshold because each absorbed several old files
+and show as new: `functional.py` = `layers/utils/topk.py` + `compact.py` +
+`retrieval.py::post_filter_topk` + `filters/__init__.py::combine_*` +
+`exact_attribute.py::clause_subset_match` + `bloom_hash.py::bloom_subset_match`
++ `quantize.py::popcount_int64`; `modules/knn.py` = `prefilter_knn.py` +
+`postfilter_knn.py` + `postfilter_knn_int8.py` + `retrieval.py::FullScanKNN`;
+`modules/bit_knn.py` = `_bit_knn.py` + `one_bit_knn.py` + `simhash_knn.py`).
+`ops/triton/_load.py` (the one importer of the kernel files),
+`ops/triton/_host.py` (review A5: `ProbeLaunch` + `probe_finish` replace the
+byte-identical `_CpsLaunch`/`_cps_finish` and `_CpseLaunch`/`_cpse_finish`;
+`grid_batch_tiles` replaces the 3-D grid split pasted in the three filter
+kernels), review D3 (the never-dereferenced dummy pointers are
+`flat_probed_items` / `query_bits` instead of a per-call `torch.empty`),
+`interfaces.ops_for`, `ops/reference/` (eight files, the ten op names of
+`ops/triton` with identical signatures: the layers' eager branches and
+`ref_cps_phase23` extracted), `ops/official/__init__.py` + `adapter.py`
+(review B.4: `padded_rows`, `bloom_index_docs`, `unpack_mask`,
+`unpack_partial_mask` below a test-support rule — the review's list also
+named `official_scores_full`, `bloom_full_mask` and `reverse_bits64`, which
+are on the adapter's own path and stay where they are), `indexing/ivf.py`
+extracted from `_build_ivf`, the shim (§7; `KMeansTorch = KMeans`,
+`build_silvertorch` re-exported — it still exists in
+`modules/silvertorch.py` until WP-2 — and the four dotted paths the old
+harness on `main` imports aliased as modules: `retrieve.layers.filters`,
+`retrieve.layers.silvertorch`, `retrieve.layers.linr(.postfilter_knn_int8)`,
+`retrieve.kernels.silvertorch.official`), the pyproject rename, review A8 /
+A9 / T3, D5 in kernels.md, the tests re-pointed, `tests/test_public_api.py`,
+the docs of §8's WP-1 half (system docs re-pointed and rewritten where the
+layout changed; the sdist guide's import homes; link *targets* in the live
+plans mapped to the moved files with their text left as written), and the
+two harness imports the shim does not cover (`test_algos.py` takes
+`OfficialConfig` from `retrieve`, `test_yfcc.py` takes
+`clause_subset_match` from `retrieve.functional`).
+
+**Step 0 (pre-move reference).**
+[library-api-refactor-artifacts/l1/premove_check.py](library-api-refactor-artifacts/l1/premove_check.py)
+`capture` ran on the untouched branch point (`4f52972`) and pinned 14
+reference cells — `ref_cps_phase23` on the parity suite's own inputs
+(`make_probe_family` × the `test_official.py` T1 grid × B ∈ {1, 16}, plus
+`make_exact` at D ∈ {64, 128} × reverse ∈ {none, mixed} and `make_bloom` at
+D ∈ {64, 128}) — and 9 `SilverTorch` modules (3 backends × 3 filter modes,
+N=2048, D=64, 8 queries): state dicts and `(ids, scores)`. Digests in
+[capture.json](library-api-refactor-artifacts/l1/tensors/capture.json); the
+13 MB of tensors are regenerable from the branch point (README there) and
+not committed.
+
+**Gates — CPU.**
+
+| gate | result |
+|---|---|
+| `ruff check retrieve evaluation/retrieval && ruff format --check retrieve` (0.15.6) | clean (72 files formatted) |
+| `uv run --directory retrieve pytest tests/test_public_api.py -q` | 2 passed: `retrieve.modules.__all__` = the 10 §4.1 names that exist at WP-1 (the four `LiNRV*`, two builders are WP-2), `retrieve.__all__` = those + the 4 interface names; `import retrieve` in a fresh interpreter leaves no `retrieve.ops.triton*` / `retrieve.ops.reference*` module in `sys.modules` (`triton` itself is already imported by `torch`, so that is not the check) |
+| `python3 scripts/check_doc_links.py` | 0 broken links |
+| `cd evaluation && uv run pytest retrieval/tests/ --ignore=…reverse.py` | **103 passed, 1 skipped** (4 min 07 s) with `CUDA_VISIBLE_DEVICES=""` — the number the 2026-09-06 status block records. With the GPU visible the same command gives 3 failed / 98 passed / 3 skipped: `test_bench.py::test_latency_windows_and_keys` and two `test_run.py` cells count `bench.latency`'s calls and their own comment says "no CUDA: no first call" — harness-only code this step did not touch, and the suite is documented as CPU-only |
+| `git diff --stat -M` against the move table | reviewed above: moves, import rewrites, the extraction of the eager branches, and the seven review items — nothing else |
+
+**Gates — GPU (under the lock).**
+
+| gate | result |
+|---|---|
+| full library suite with the official extra | **521 passed, 0 failed, 0 skipped**, 88.8 s — 519 on `development` + the 2 tests of `test_public_api.py`; no other count changed (the T3 fold and the `ref_cps_phase23` retirement change no test) |
+| every parity file bit-exact | green in that run, tolerances untouched: `test_oporp_1bit_match_topk.py` strict equality, `test_official.py` T1/T5/T6 `torch.equal` on scores against `retrieve.ops.reference` and the Triton `_impl`s, ids up to ties |
+| `ops.reference.codesigned_probe_score{,_bloom,_exact}` vs the pre-move `ref_cps_phase23` | `premove_check.py compare`: all 14 cells `torch.equal` on scores, ids **equal at every finite slot**, and exactly equal after normalising `-inf` slots to `-1` ([results.json](library-api-refactor-artifacts/l1/tensors/results.json)). The one intended difference: the shipped reference goes through `masked_topk` and writes the `-1` sentinel at `-inf` slots (as the `"torch"` backend always did, and as the Triton epilogue does since O §14.7), where the retired test copy gathered the padded item id — `test_official.py`'s `_sentinel_ids` normalisation is now idempotent |
+| pre-move state dicts (3 × 3) load into the moved modules | all 9: key order equal, buffers loaded, forward `ids` and `scores` `torch.equal` to the pre-move outputs; and a **fresh** post-move build's state dict equals the saved one buffer for buffer (k-means, layout, quantization and hashing unchanged) |
+| the shim imports and warns | `retrieve.layers` and `retrieve.kernels` each raise one `DeprecationWarning`; `KMeansTorch is KMeans`, `build_silvertorch`, `OfficialConfig`, `retrieve.kernels.silvertorch.official.ensure_loaded` reachable |
+
+**Not run here.** "The golden worktree runs one cell through the shim" — the
+worktree (`/workspace/wt/main-golden`, `tmp/main-users-limit-fix`) belongs
+to another worker; the orchestrator coordinates that run against this
+branch. One thing that worker needs to know: the old harness on that branch
+also imports `retrieve.interfaces.Backend`, which stopped existing at B4's
+`LinrBackend` / `SilverTorchBackend` split — that is not a `layers` /
+`kernels` path, so the shim does not cover it.
+
+**Deviations from the plan text, all behaviour-preserving.** (i)
+`indexing.csr_layout(assignments, n_lists)` takes `n_lists` (the plan's
+signature omitted it; trailing empty clusters make it underivable). (ii) The
+`PostfilterKNNInt8` dedup is `quantize_int8_global_codes` (codes only, no
+sync) rather than a call to `quantize_int8_global`, whose `.item()` would
+have put a host sync on that forward. (iii) A module does not store its op
+namespace: `copy.deepcopy` of an `nn.Module` holding a module object raises
+(`TestStateDict` deep-copies), so `ops_for` keeps a module-level cache,
+constructors call it to import at construction, and `forward` calls it again
+(a dict hit; traced `fullgraph` by dynamo — the compile suite is green).
+(iv) `ops.reference.fused_masked_knn_topk` / `oporp_1bit_match_topk_indirect`
+take `counts` as the Triton ops do; the module builds `full(P)` when the
+caller passes none on both backends (the eager branch used to pass
+`valid=None`) — identical outputs since Hamming and fp16 dot scores are
+finite. (v) The reference ops take `global_scale` as a Python float like
+the Triton ops (the eager branch multiplied by the 0-d buffer); the state
+dict gate shows the `"torch"` backend's scores unchanged. (vi) The plan's
+"Backend dispatch" table keeps its per-class rows because
+`evaluation/retrieval/tests/test_algos.py` parses it; WP-2's `DISPATCH`
+replaces that test. (vii) `retrieve.ops.triton.<name>` is both a submodule
+and the op of that name; the package attribute is the op (bound last), a
+kernel file's `_impl` / `Config` is reached with
+`from retrieve.ops.triton.<name> import …` — documented in architecture.md.
+
+**Unverified / for the orchestrator.** No performance number is claimed
+(D3 and A5 change no launch). `available_backends()` has no test. The
+harness CPU suite's dependence on `CUDA_VISIBLE_DEVICES=""` predates this
+step and is worth a line in evaluation.md or a fix in `test_bench.py` (C5).
+The roadmap checkbox and the merge into `development` are the
+orchestrator's.
