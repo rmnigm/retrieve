@@ -372,3 +372,106 @@ ACM badging policy https://www.acm.org/publications/policies/artifact-review-and
 SIGIR badging https://sigir.org/general-information/acm-sigir-artifact-badging/ ·
 KDD 2027 D&B https://kdd2027.kdd.org/datasets-and-benchmarks-track-call-for-papers/ ·
 RecSys 2026 second call (track chairs, contact) https://mailman1.isti.cnr.it/hyperkitty/list/hcitaly@isti.cnr.it/thread/GJSJZJS724LOMJP4ZILMYOCJW6DM55GW/
+
+---
+
+## Part D — validation record
+
+### D.1 G1 and G9 — roadmap F1 and F3, 2026-09-15, `dev/f1-f3-paper`
+
+Worker job under [agent-orchestration.md](agent-orchestration.md): **no roadmap
+checkbox was flipped and nothing was merged.** Branch `dev/f1-f3-paper` off
+`development` @ `81c55d3`, worktree `/workspace/wt/f1f3`. Writing only — no
+venv, no GPU, no measurement; `retrieve/` and `evaluation/` were not touched
+(two other workers own those trees today).
+
+**What was written.**
+
+1. **The thesis is reframed** ([../thesis/main.tex](../thesis/main.tex),
+   [../thesis/references.bib](../thesis/references.bib)). All 33 occurrences of
+   *QuantizedIVF* are gone; the algorithm is **SilverTorch (Алгоритм 1)** in
+   prose, in the section heading, in the algorithm caption, in the `algo:`
+   label and its `\ref`, in every table column and in the figure caption. The
+   language of the thesis (Russian, with an English abstract) is unchanged and
+   nothing was translated. The four places that claimed the algorithm as new
+   work ("новый алгоритм", "предложенная в данной работе реализация",
+   "авторский алгоритм", and the conclusion's "предложены новые подходы") now
+   describe it as an independent reimplementation of Algorithm 1 from the
+   SilverTorch paper, written from the paper's text. **The thesis did not cite
+   the SilverTorch paper at all** — a `@misc{xue2025silvertorch}` entry
+   (arXiv 2511.14881, full 32-author list) was added and is cited at each of
+   those places, plus at the BitFunnel and SONG lineage sentences. Three
+   sentences saying "предложенные методы" / "the proposed methods" about the
+   whole algorithm set now say "реализованные" / "the implemented", because
+   only LiNR V4 is ours. Naming follows
+   [library-harness-boundary.md](library-harness-boundary.md) §6.
+2. **[../paper/reproduction-deviations.md](../paper/reproduction-deviations.md)**
+   — G1's deviations table, as nine sections: the naming map; 12 SilverTorch
+   rows (ST-1…ST-12); 7 LiNR rows (LN-1…LN-7); 8 rows of deviations in **Meta's
+   released code against Meta's own paper** (OF-1…OF-8); 5 harness/protocol
+   rows (HB-1…HB-5); 7 defects in **our** implementation found by reproducing
+   (D-1…D-7); 3 residuals listed as unexplained (R-1…R-3); and a closing
+   section naming what the document deliberately does not contain. Every row
+   carries the plan section that measured it; a row whose gate has not passed
+   says **not yet validated** and names the step.
+3. **[../paper/provenance-and-disclosure.md](../paper/provenance-and-disclosure.md)**
+   — G9. Hardware and software stack with the pin of Meta's package; the
+   per-record provenance fields the harness writes and which of them may be
+   cited; §4 on clock estimators; §5, the disclosure of what was and was not
+   compared; §6, the not-yet-validated list with the roadmap step per line;
+   §7, data provenance including the mirror's 1-indexed layout; §8, the
+   commands to reproduce the environment.
+
+**What was deliberately not claimed.**
+
+- **No equivalence between the v2 harness and the pre-v2 harness.** §5 of the
+  provenance document states exactly what the steer permits: the golden was
+  re-derived **once** (H §11), the v2 harness matched it on **9 of 11 cells at
+  ≤ 7.5e-9**, and **two residuals are recorded and unresolved** (`linr_v4`
+  7.3e-5 with its chunk-shape attribution falsified, arXiv `silvertorch`
+  2.0e-6 unattributed). What C4 closed on — 20/20 `status: ok`,
+  `cudagraph_skips == 0` 20/20, clean kill-and-resume, exact SilverTorch
+  cross-backend parity, the official cell end to end at 0.9998 with the plan
+  cache off — is reported as the result, and the thesis's own tables are
+  declared superseded rather than cited.
+- **No speed claim about any kernel.** O §13.2's launch and sync counts are
+  reported as host-side counts, with the sentence that they are not a
+  kernel-speed claim; the Triton-vs-official comparison is left to **B3** /
+  **F2**.
+- **No post-fix `linr_v2` numbers.** D-1 and LN-4 state the *finding* — the
+  kernel accumulated fp16 where its own docstring promised fp32, 0.0276 max abs
+  error against an fp64 dot under catastrophic cancellation, and a parity suite
+  that compares two implementations at the same precision is structurally blind
+  to the whole class — and mark the fix pending **L5**, with the measured fp32
+  latency and parity explicitly flagged not yet validated.
+- **No number from the deleted CUDA backend presented as current.** ST-9 quotes
+  the transposed-index record and then says the backend no longer exists and the
+  Triton transposed index (G-a) is unwritten.
+- **No venue or reviewer reasoning.** Part A was not extended, per
+  [coding-guidelines.md](coding-guidelines.md) §3.
+
+**Contradictions between the records and the thesis as written, found here.**
+
+1. **The thesis says the SilverTorch step 1 clustering uses k-means++; the code
+   uses random init.** `kmeans_init="kmeans++"` exists but is opt-in, and the
+   default stays random precisely because every recorded number was taken on it
+   (**L** D9). The thesis text is corrected to state random init and to name
+   k-means++ as the paper's choice and an available option. Whether the init
+   changes quality is unmeasured — **D1**.
+2. **The thesis does not cite SilverTorch.** Fixed, above.
+3. **The thesis presents `QuantizedIVF` recall/latency/memory tables as this
+   work's results.** They are pre-v2-harness numbers; HB-5 and §5 of the
+   provenance document say so, and the paper takes its tables from D1/D4
+   instead.
+
+**Gates.** `python3 scripts/check_doc_links.py` → **0 broken links**. No test
+suite was run and none applies: nothing outside `docs/` changed.
+
+**Skipped / out of scope.** F2 (needs B3), F4, F5. `docs/presentation/*`
+(`pre-defense-ru.tex`, `speaker-notes-ru.md`, `schemas-prompt.md`) still spell
+*QuantizedIVF* in 22 places and were **left alone on purpose**: they are the
+source of a talk already delivered, with a committed PDF beside them that would
+silently diverge from a renamed source. Flagged for the orchestrator to decide;
+CLAUDE.md's naming rule and roadmap F1 both speak about the thesis and the
+paper, not about a delivered presentation. The roadmap checkboxes for F1 and F3
+are **not** flipped and the branch is **not** merged.
