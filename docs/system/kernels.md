@@ -238,11 +238,12 @@ to the inlined predicate with a
 
 ## Score conventions
 
-- Real-valued similarity (V1, V2): plain dot product of the fp16 inputs.
-  Higher is better. `-inf` marks masked-out / padded positions. The
-  *width* is the path's, not a convention: cuBLAS (V1, V2 `torch`)
-  accumulates fp32 and returns fp16; `fused_masked_knn_topk` (V2 `triton`)
-  accumulates fp16 and returns fp32 — see that kernel's section.
+- Real-valued similarity (V1, V2): plain dot product of the fp16 inputs,
+  accumulated in fp32 on every path. Higher is better. `-inf` marks
+  masked-out / padded positions. cuBLAS (V1, V2 `torch`) rounds the score
+  to fp16 on output; `fused_masked_knn_topk` (V2 `triton`) writes it as
+  fp32 — that output rounding is the whole difference between the two
+  backends (plan L5).
 - 1-bit Sign-OPORP (V3): `D - 2 * popcount(query_bits ^ item_bits)`, fp32.
   `D = 64 * W`. This is the standard Hamming-to-dot-product relation for
   sign-quantized vectors. Higher is better. Same `-inf` sentinel.
@@ -322,23 +323,24 @@ return:   ids               [B, K]    int64
 ```
 
 (`_fmkt_prep` validates the dtypes: parity tests feed fp32, the
-production `PrefilterKNN` path feeds fp16; the score *buffer* is always
-fp32.)
+production `PrefilterKNN` path feeds fp16; scores are always fp32.)
 
-**Accumulation width is the input's.** `emb_rows * q` is an fp16 product
-and `tl.sum` reduces in the input dtype (Triton's `_pick_sum_dtype`
-promotes only sub-32-bit ints), so on the fp16 production path the dot is
-an fp16 tree reduction stored as fp32 — the compiled PTX carries
-`add.f16` and no `f32` arithmetic, and every score it writes is an fp16
-value. On goodreads d128 (`|score|` up to 31, partial sums of the same
-order) that is up to 0.028 absolute error, mean 0.0034, against a
-rank-100 gap whose median is 0.0068; the `torch` backend's `bmm` accumulates
-fp32 and rounds the *output* to fp16 (≤ 1 ulp). The two backends therefore
-swap one boundary pair on 6.3 % of `c0_genre` rows (`jaccard@100`
-0.998743) with identical candidate sets — precision, not selection.
-Measured in [plan L4](../plans/linr-v2-backend-parity.md) §6, which also
-measures the fp32-accumulating variant (same kernel time; not shipped —
-a decision, not a side effect).
+**Accumulation is fp32 whatever the input dtype.** The kernel widens
+`q` and `emb_rows` to fp32 before the multiply, so an fp16 × fp16 product
+is exact and `tl.sum` reduces in fp32 (the compiled PTX: `add.f32` /
+`fma.rn.f32`, no `f16` arithmetic). This has to be explicit: Triton's
+`tl.sum` reduces in its *operand* dtype (`_pick_sum_dtype` promotes only
+sub-32-bit ints), and until L5 the kernel reduced in fp16 — on goodreads
+d128 (`|score|` up to 31, partial sums of the same order) 0.028 max abs
+error against an fp64 dot, which swapped one boundary pair on 6.3 % of
+`c0_genre` rows against the `torch` backend (plan L4 §6.1). Now the error
+is ~1e-5 and the remaining `torch`-vs-`triton` difference is the `torch`
+side's own fp16 output rounding creating ties (plan L5 §8). The
+accumulation-width parity file
+[`test_accumulation.py`](../../retrieve/tests/parity/test_accumulation.py)
+pins every scoring kernel against an fp64 oracle, because the other
+parity files compare Triton against `ops.reference` at the same input
+dtype and cannot see this class of defect.
 
 **Launch grid** `(B, cdiv(P, BLOCK_N))`. Each program owns one
 `(query, p-tile)` cell and gathers `BLOCK_N` item rows by indirect load:

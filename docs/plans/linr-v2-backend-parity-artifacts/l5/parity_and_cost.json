@@ -1,0 +1,111 @@
+{
+ "n_kept_rows": 9859,
+ "sm_mhz_start": 1155,
+ "parity_triton_vs_torch": {
+  "jaccard@100": 0.9997509437524542,
+  "jaccard@500": 0.9994995592396291,
+  "jaccard@1000": 0.999378520100377,
+  "rows_top100_differ": 124,
+  "rows_top100_differ_where_torch_scores_tie_exactly": 124,
+  "score_max_abs_diff": 0.0039043426513671875
+ },
+ "fp64_error_chunk0": {
+  "P": 442864,
+  "abs_score_max": 31.370335508603603,
+  "shipped_fp32_acc": {
+   "max_abs": 3.2212992664426565e-06,
+   "mean_abs": 4.0057491403159134e-07
+  },
+  "pre_l5_fp16_acc": {
+   "max_abs": 0.027644284127745777,
+   "mean_abs": 0.0033623270641187173
+  }
+ },
+ "timing": {
+  "kernel_B1_P195023_shipped_fp32_acc": {
+   "ms": 0.05302400141954422,
+   "sm_mhz": [
+    1410,
+    1410
+   ]
+  },
+  "kernel_B1_P195023_pre_l5_fp16_acc": {
+   "ms": 0.05315199866890907,
+   "sm_mhz": [
+    1410,
+    1410
+   ]
+  },
+  "forward_B1_linr_v2_triton_eager": {
+   "ms": 0.4970879852771759,
+   "sm_mhz": [
+    1410,
+    1410
+   ]
+  },
+  "forward_B1_linr_v2_torch_eager": {
+   "ms": 1.5175360441207886,
+   "sm_mhz": [
+    1410,
+    1410
+   ]
+  },
+  "kernel_B16_P442864_shipped_fp32_acc": {
+   "ms": 0.9403520226478577,
+   "sm_mhz": [
+    1410,
+    1410
+   ]
+  },
+  "kernel_B16_P442864_pre_l5_fp16_acc": {
+   "ms": 0.9630880057811737,
+   "sm_mhz": [
+    1410,
+    1410
+   ]
+  },
+  "forward_B16_linr_v2_triton_eager": {
+   "ms": 3.2711520195007324,
+   "sm_mhz": [
+    1410,
+    1410
+   ]
+  },
+  "forward_B16_linr_v2_torch_eager": {
+   "ms": 18.280799865722656,
+   "sm_mhz": [
+    1410,
+    1410
+   ]
+  }
+ },
+ "ptx_op_counts": {
+  "shipped_fp32_acc": {
+   "add.f16": 0,
+   "add.rn.f16": 0,
+   "fma.rn.f16": 0,
+   "mul.f16": 0,
+   "mul.rn.f16": 0,
+   "add.f32": 8,
+   "add.rn.f32": 0,
+   "fma.rn.f32": 14,
+   "mul.f32": 2,
+   "mul.rn.f32": 0,
+   "cvt.f32.f16": 24
+  },
+  "pre_l5_fp16_acc": {
+   "add.f16": 8,
+   "add.rn.f16": 0,
+   "fma.rn.f16": 0,
+   "mul.f16": 0,
+   "mul.rn.f16": 0,
+   "add.f32": 0,
+   "add.rn.f32": 0,
+   "fma.rn.f32": 0,
+   "mul.f32": 0,
+   "mul.rn.f32": 0,
+   "cvt.f32.f16": 1
+  }
+ },
+ "elapsed_s": 26.095069885253906
+}

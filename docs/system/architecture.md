@@ -373,8 +373,8 @@ on it — plan L D9) or through `SilverTorchBuilder(**those)` →
 `.set_item_embeddings(x)` [+ `.set_item_attributes(attrs, clause_is_reverse)`]
 or `.set_state_dict(sd)` → [`.set_backend(b, official=None)`,
 `.set_device(d)`] → `.build()`, which is construct → `register_index` (or the
-prebuilt load, no k-means) → `.to(device)`. `build_silvertorch` is retired:
-only the deprecation shim still spells it. After `register_index`,
+prebuilt load, no k-means) → `.to(device)`. There is no one-call
+`build_silvertorch` any more. After `register_index`,
 `build_timings` is `{"kmeans_s", "assemble_s", "quantize_s", "filter_s"}`
 (device-synchronised wall seconds of the four phases; `{}` before
 registration and on a prebuilt module) and `set_query_params(n_probe=…)`
@@ -473,8 +473,8 @@ builders with the filters package, not the module classes:
   the shared torch-side masked top-K epilogue (pure tensor-flow, traces
   cleanly under the eval harness's `torch.compile(dynamic=True,
   mode="reduce-overhead")`).
-- [`KMeans`](../../retrieve/src/retrieve/indexing/kmeans.py) (`KMeansTorch`
-  in 0.1; the shim keeps the alias) — pure-torch Lloyd's k-means used by
+- [`KMeans`](../../retrieve/src/retrieve/indexing/kmeans.py) — pure-torch
+  Lloyd's k-means used by
   `SilverTorch` for IVF index building (not a `RetrievalModule`);
   `KMeans(n_lists, n_iter=10, seed=0, init="random" | "kmeans++")`,
   `fit(embs) -> (centroids, assignments)`, `assign(embs, centroids)`.
@@ -620,11 +620,14 @@ gate. Performance characterization (latency, memory, recall sweeps) lives in
 ## Module layout
 
 The 0.2 layout is by role, not by history (plan L §3). The 0.1 → 0.2 move
-table, every row a `git mv` plus import rewrites and no behaviour change:
+table, every row a `git mv` plus import rewrites and no behaviour change.
+The 0.1 import paths were re-exported by a shim until roadmap L5 (it
+existed so the old-harness golden worktree could run against the new
+library, plan L D10); they are gone:
 
-| 0.1 (`retrieve.layers` / `retrieve.kernels`) | 0.2 |
+| 0.1 (`layers/`, `kernels/`) | 0.2 |
 |---|---|
-| `layers/silvertorch/main.py` | [`modules/silvertorch.py`](../../retrieve/src/retrieve/modules/silvertorch.py) (`build_silvertorch` retired into the shim at L2; `SilverTorchBuilder` is the one-call path) |
+| `layers/silvertorch/main.py` | [`modules/silvertorch.py`](../../retrieve/src/retrieve/modules/silvertorch.py) (`build_silvertorch` retired at L2; `SilverTorchBuilder` is the one-call path) |
 | `layers/linr/{postfilter_knn,postfilter_knn_int8,prefilter_knn}.py`, `layers/utils/retrieval.py::FullScanKNN` | [`modules/knn.py`](../../retrieve/src/retrieve/modules/knn.py) |
 | `layers/linr/{_bit_knn,one_bit_knn,simhash_knn}.py` | [`modules/bit_knn.py`](../../retrieve/src/retrieve/modules/bit_knn.py) |
 | `layers/filters/{bloom,exact_attribute}.py` (the classes) | [`modules/filters.py`](../../retrieve/src/retrieve/modules/filters.py) |
