@@ -31,6 +31,29 @@
 > decision in either. There is no Mac: every step runs on the A100 box, and
 > "CPU" below means "needs no GPU time" (roadmap A0).
 
+> **Steer 2026-09-15 (user), recorded in every plan it touches.**
+> *"We don't care about reproducing old results now, we're improving all code
+> and rewriting, then testing and profiling, then running the full evals step
+> by step."* The A1 golden baseline stops being a gate and becomes
+> information; roadmap **C4 closed** on what the harness proves about itself
+> (graph capture 20/20, kill-and-resume, cross-backend parity, the official
+> cell end to end), not on equality with the pre-v2 harness. Order of work:
+> **code first, then tests and profiling, then the evals one step at a time.**
+> Authority: [00-roadmap.md](00-roadmap.md) §1 status block;
+> [evaluation-harness-v2.md](evaluation-harness-v2.md) WP-4's amendment block.
+>
+> **Phase L status 2026-09-15:** WP-1 (**L1**) and WP-2 (**L2**) are executed,
+> merged and their checkboxes flipped (§12.1, §12.2). Two steps were added to
+> Phase L after them, neither in this plan: **L3**
+> ([deterministic-compaction.md](deterministic-compaction.md), merged) made the
+> Triton stream compaction deterministic, and **L4**
+> ([linr-v2-backend-parity.md](linr-v2-backend-parity.md)) settles the LiNR V2
+> backend divergence. **D10's shim is still alive**: its deletion was scheduled
+> for C5, which could not take it (the library was owned by another worker that
+> day), so it needs rescheduling — it is temporary tooling, and the thing it
+> was built for (the frozen golden worktree) has served its purpose now that
+> the golden is no longer a gate.
+
 ## 1. Where it starts
 
 ### 1.1 Ours today (`development` @ `76f8985`, 36 files, ≈ 6,000 lines)

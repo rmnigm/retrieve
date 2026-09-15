@@ -13,6 +13,31 @@
 > delivered by Phase D1, G5/G6 are D2/D3, G1/G9 are F1/F3, G10–G16 are Phase G. The venue decision
 > (ECIR 2027 Reproducibility, paper 19 Oct 2026) is recorded in roadmap §0.
 
+> **Steer 2026-09-15 (user), recorded in every plan it touches.**
+> *"We don't care about reproducing old results now, we're improving all code
+> and rewriting, then testing and profiling, then running the full evals step
+> by step."* The A1 golden baseline stops being a gate and becomes
+> information; roadmap **C4 closed** on what the harness proves about itself
+> (graph capture 20/20, kill-and-resume, cross-backend parity, the official
+> cell end to end), not on equality with the pre-v2 harness. Order of work:
+> **code first, then tests and profiling, then the evals one step at a time.**
+> Authority: [00-roadmap.md](00-roadmap.md) §1 status block;
+> [evaluation-harness-v2.md](evaluation-harness-v2.md) WP-4's amendment block.
+>
+> **Consequence for this plan, specifically.** No claim of equivalence with the
+> pre-v2 harness may be made from the C4 numbers — **G9**'s provenance section
+> must say what was and was not compared: the golden was re-derived once
+> (H §11), the v2 harness matched it on 9 of 11 cells at ≤7.5e-9, and two
+> residuals are recorded and unresolved (`linr_v4` 7.3e-5, chunk-induced int8
+> boundary ties; arxiv `silvertorch` 2.0e-6, unattributed). **G2** (Triton vs
+> official) is unaffected and is still B3's. Three findings from 2026-09-15 are
+> paper material once their gates are green, and none is citable yet (rule 2):
+> deterministic k-means makes SilverTorch's `torch` and `triton` backends agree
+> exactly where they previously differed by 1.7e-4; our Triton stream
+> compaction was order-nondeterministic, which made LiNR V2/V3 irreproducible
+> at 2.0e-6 / 6.8e-5 until L3 fixed it; and `linr_v2`'s two backends still
+> disagree by 4.2e-4 recall (**L4**).
+
 ## 0. Executive summary
 
 1. **The premise "industry papers with no public code" is half wrong.** Meta released

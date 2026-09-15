@@ -27,6 +27,28 @@
 > are Phase B, WP-6 folds into Phase C1/C4, WP-7 into D1, WP-8 (TF-1) is Phase G-a, WP-9 is F2.
 > Validation records go in a "§13 Validation record" section appended to this file.
 
+> **Steer 2026-09-15 (user), recorded in every plan it touches.**
+> *"We don't care about reproducing old results now, we're improving all code
+> and rewriting, then testing and profiling, then running the full evals step
+> by step."* The A1 golden baseline stops being a gate and becomes
+> information; roadmap **C4 closed** on what the harness proves about itself
+> (graph capture 20/20, kill-and-resume, cross-backend parity, the official
+> cell end to end), not on equality with the pre-v2 harness. Order of work:
+> **code first, then tests and profiling, then the evals one step at a time.**
+> Authority: [00-roadmap.md](00-roadmap.md) §1 status block;
+> [evaluation-harness-v2.md](evaluation-harness-v2.md) WP-4's amendment block.
+>
+> **A finding for B3 and F2, from C4's run (2026-09-15, H §12).** `official` vs
+> `triton` on `silvertorch` clears the O WP-6 / roadmap gate on **goodreads**
+> — `jaccard_vs_first@100` **0.999849** with the plan cache off — but reaches
+> only **0.985 / 0.9849 on arxiv**, where the roadmap's clause names goodreads
+> only and so does not bite. `score_max_abs_diff` is ~10× *smaller* on arxiv
+> while jaccard is lower, which points at more near-ties at the top-100
+> boundary under a looser filter rather than at a numerics problem. B3's
+> head-to-head should measure it on both datasets rather than inheriting the
+> goodreads-only threshold, and §10 WP-9's "official vs reimplementation"
+> section should report the dataset dependence.
+
 ## 1. Where it starts
 
 **Official repo**: 12 commits (2026-04-21 → 2026-07-23), 9,427 lines of `.cpp/.cu/.cuh/.h` under

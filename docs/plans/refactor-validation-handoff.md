@@ -50,6 +50,25 @@
 > Do not rebase/merge the branch mid-validation. Every fallback below is a code change —
 > re-run the affected gates after applying one.
 
+> **Steer 2026-09-15 (user), recorded in every plan it touches.**
+> *"We don't care about reproducing old results now, we're improving all code
+> and rewriting, then testing and profiling, then running the full evals step
+> by step."* The A1 golden baseline stops being a gate and becomes
+> information; roadmap **C4 closed** on what the harness proves about itself
+> (graph capture 20/20, kill-and-resume, cross-backend parity, the official
+> cell end to end), not on equality with the pre-v2 harness. Order of work:
+> **code first, then tests and profiling, then the evals one step at a time.**
+> Authority: [00-roadmap.md](00-roadmap.md) §1 status block;
+> [evaluation-harness-v2.md](evaluation-harness-v2.md) WP-4's amendment block.
+>
+> **Steps 5 and 6 are moot as of 2026-09-15.** Step 6 diffs this track against
+> `main`, and step 5 gates per-kernel tuning on both sides — both exist to show
+> the refactor changed no number. Under the steer above that is no longer a
+> question the project is asking: the library has since been re-laid-out (L1,
+> L2), a kernel was deliberately changed for determinism (L3), and `main` is
+> ~150 commits behind. Neither step should be run as written. What replaced
+> them: the library's own parity suite (bit-exact, 645 tests) and H §11-§12.
+
 ## 1. Context — what landed
 
 Branch `refactor/kernels-eval`, on top of `main` @ `2b1ff80`. All code phases are committed —

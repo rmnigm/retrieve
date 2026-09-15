@@ -30,6 +30,25 @@
 > There is no Mac: every step runs on the A100 box; "CPU" means "needs no
 > GPU time".
 
+> **Steer 2026-09-15 (user), recorded in every plan it touches.**
+> *"We don't care about reproducing old results now, we're improving all code
+> and rewriting, then testing and profiling, then running the full evals step
+> by step."* The A1 golden baseline stops being a gate and becomes
+> information; roadmap **C4 closed** on what the harness proves about itself
+> (graph capture 20/20, kill-and-resume, cross-backend parity, the official
+> cell end to end), not on equality with the pre-v2 harness. Order of work:
+> **code first, then tests and profiling, then the evals one step at a time.**
+> Authority: [00-roadmap.md](00-roadmap.md) §1 status block;
+> [evaluation-harness-v2.md](evaluation-harness-v2.md) WP-4's amendment block.
+>
+> **Dependency satisfied 2026-09-15:** WP-V1's "after C4 flips; needs L WP-2"
+> is met — L1, L2 and L3 are merged (`ea1243f`) and C4 is closed. §9's one-cell
+> gate stands, but read it as written: it compares a `bench run` record against
+> a record produced by **this** harness at the same `code_version`, not against
+> the old harness. The shim deletion that L D10 scheduled for this step is
+> **deferred** — the library was owned by another worker on the day C5 ran, and
+> it needs its own scheduling.
+
 ## 1. Where it starts
 
 Three top-level packages in one distribution (`retrieve-evaluation`,
