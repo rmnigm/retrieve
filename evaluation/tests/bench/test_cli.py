@@ -4,7 +4,7 @@ one ``(dataset, dim, algo, backend)`` group — a second child proves nothing th
 and each costs a cold torch + retrieve import; ``--skip-quality --skip-perf``: full-length
 latency windows are minutes on CPU fp16 matmuls), the per-child log and the ``campaign.log``
 summary, the parity-directory cleanup when the algo group closes, a faked timed-out child,
-the zero-cells error, and the ``bench report`` D4 stub."""
+the zero-cells error, and ``bench report`` over the campaign's own records."""
 
 from __future__ import annotations
 
@@ -54,8 +54,11 @@ def test_cli_run_campaign_and_report(tiny_configs, tmp_path):
     ]  # fmt: skip
     assert all(r["partial_reasons"] == ["skip_quality", "skip_perf"] for r in recs)
     assert all(r["quality"] is None and r["perf"] is None and r["build_s"] > 0 for r in recs)
-    r = CliRunner().invoke(cli.main, ["report", str(out)])
-    assert r.exit_code == 2
+    r = CliRunner().invoke(cli.main, ["report", str(out), "--gate", "D1"])
+    assert r.exit_code == 0, r.output
+    assert (out / "report" / "flat.csv").exists()
+    assert "NOT CITABLE" in r.output  # three partial records veto --gate
+    assert "NOT CITABLE" in (out / "report" / "tables" / "tab-memory.tex").read_text()
 
 
 def test_campaign_records_a_timed_out_child(tiny_configs, tmp_path, monkeypatch):

@@ -127,7 +127,8 @@ boundary at `(dataset, dim, algo, backend)`.
   done, `torch` becomes the reference and `official` records `vs_torch`.
 - **Samples go to a JSONL sidecar** (`<name>.samples.jsonl`, one line per
   perf entry with the key block, `k`, `bs`, `mode`, `ms: [...]`), not a
-  parquet: parquet cannot be appended per cell. `bench report` (D4) converts.
+  parquet: parquet cannot be appended per cell. `bench report` reads the
+  sidecar directly for the latency violins.
 - **Resume re-runs `failed` and `partial` records**; only `status: ok` at the
   same `code_version` counts as done. `report.py` must take the last record
   per key.
@@ -187,6 +188,7 @@ cascade.
 | [`oracle.py`](../../evaluation/bench/oracle.py) | the exact filtered oracle as blob v4, `attrs_digest`, `pass_counts`, `pass_rate`, `bloom_fp_rate` |
 | [`run.py`](../../evaluation/bench/run.py) | `run(jobs, out_dir=...)` — the cell loop; `MODES`, `QUALITY_CHUNK = 16`, `EXACT_ALGOS`, `PERF_STAT_KEYS`, `CLOCK_DRIFT` |
 | [`cli.py`](../../evaluation/bench/cli.py) | `bench run` / `campaign` / `check` / `upload` / `report` |
+| [`report.py`](../../evaluation/bench/report.py) | `bench report`: `flat.csv`, the thesis and paper tables as LaTeX, the figures, the methodology paragraph and `report.md`; the `ARTIFACTS` dispatch table, the citability verdict and the `PAPER_REPORTED` constants. See [Report](#report-reportpy) |
 | [`upload.py`](../../evaluation/bench/upload.py) | `bench upload`: mirror `results/` to a HF dataset repo |
 
 ### Algorithms and the `PATHS` table
@@ -318,7 +320,9 @@ bench campaign --suite quality|filter|deep|all [--dataset D]* [--dim N]* [--mode
                [--config-dir config] [--timeout 6.0]
 bench check    --dataset D [--dim N]* [--config-dir config]   # eval_datasets.layout.validate_layout
 bench upload   --repo-id user/repo [--results results] [--private] [--dry-run]
-bench report   [results]                        # exits 2: roadmap D4 (H §6 WP-6)
+bench report   [results] [--out DIR] [--gate STEP] [--only NAME]* [--dim 128] [--k 100]
+               [--bs 1] [--compare-bs 16] [--mode eager|graph] [--backend triton]
+               [--sweep W] [--batch-dataset D] [--budget-ms MS]*
 ```
 
 `*` = repeatable. `bench run` expands one `(dataset, suite)` through
@@ -529,6 +533,72 @@ is always exact (`inputs.exact_filter`: the clause module itself on `clause`
 cells, a fresh `ExactAttributeFilter` on `bloom` cells) — bloom's false
 positives never leak into ground truth. Bloom pass rates are not cached.
 
+## Report (`report.py`)
+
+`bench report <results>` writes `<results>/report/` (or `--out DIR`):
+`flat.csv` first (H §8.2 G — `records.flatten`, and the artifact to ship
+with the paper), then one file per artifact, then `report.md`. Every table
+and figure is built from `flat.csv`; `records.read_records` is read a
+second time for the provenance block alone, because `schema_version`,
+`partial_reasons`, `stage` and `error` are not columns of `flat.csv`.
+
+| artifact (`--only` name) | file | what it is |
+|---|---|---|
+| `recall_nofilter` | `tables/tab-recall_nofilter.tex` | held-out Recall@k on `filter_kind: none` cells, datasets × algos (`tab:recall_nofilter`) |
+| `pareto` | `tables/tab-pareto_<dataset>.tex` | condition × algo: oracle recall, `median_ms`, speedup vs LiNR V1, `index_mib` (`tab:pareto_<dataset>`) |
+| `batch_scaling` | `tables/tab-batch_scaling.tex` | amortised ms/query per algo × batch size, each cell carrying its window spread (`tab:batch_scaling`) |
+| `memory` | `tables/tab-memory.tex` | `index_mib`, datasets × algos (`tab:memory`) |
+| `parity` | `tables/tab-backend_parity.tex` | per `(dataset, sweep, algo, backend)`: `path`, `jaccard_vs_first@k`, `score_max_abs_diff`, eager vs graph median and their ratio |
+| `recall_at_budget` | `tables/tab-recall_at_budget.tex` | H §8.2 H: best recall reachable under each `--budget-ms` p99 budget, with the algo that reached it |
+| `paper_comparison` | `tables/tab-paper_comparison.tex` | our `--compare-bs` eager mean / p99 / QPS / pass rate beside the numbers SilverTorch and LiNR report, with H §2.7's differences as footnotes. The published rows are the `PAPER_REPORTED` constant, cited per row |
+| `fig_pareto`, `fig_qps_recall`, `fig_batch_scaling` | `figures/*.png` | recall vs latency, QPS vs recall, amortised latency vs batch (error bars = window spread) |
+| `fig_deep_sweep` | `figures/fig-deep-sweep-*.png` | one per swept parameter: recall and latency against its value, whiskers = min–max across seeds |
+| `fig_latency_violin` | `figures/fig-latency-violin.png` | per-call distributions from the samples sidecar (`<name>.samples.jsonl`, one torn trailing line tolerated) |
+| `methodology` | `methodology.tex` | the thesis's §"Методология замеров" itemize, its constants read live out of `measure.latency`, `inputs.query_pool` and `run` so text and code cannot drift |
+| — | `report.md` | provenance, citability verdict, the selection used, a coverage table, the failed cells with their stage and error, the partial records, the unstable variants with their spread, the artifact list |
+
+**Citability (CLAUDE.md rule 2).** Nothing is citable by default. `--gate
+STEP` declares that step's roadmap gate green, and only then can an
+artifact come out unmarked — but the evidence vetoes the flag: a `failed`
+or `partial` record, an `env.dirty` one, or one whose `env.git_branch` is
+not `development` / `main` (rule 2's own wording: "harness numbers from a
+branch are not paper material") keeps the marker on. Otherwise
+every `.tex` carries a `% PROVENANCE: *** NOT CITABLE ***` banner with the
+reasons, its caption starts with `\textbf{[PRE-CAMPAIGN RECORDS — NOT
+CITABLE]}`, and every figure gets a diagonal watermark. Every artifact
+carries the `code_version`, the commit, the branch, the GPU, the schema
+version and the run window regardless.
+
+**Failed, partial, unstable.** A `status: failed` record never reaches a
+number and is listed in `report.md` with its stage and error. A `partial`
+record is used and marked `*`; a perf entry with `unstable: true` (window
+spread > 5 %) is used and marked `†`. Both marks are explained in every
+caption.
+
+**Clocks.** Latency artifacts print which estimator they used: the
+per-variant under-load `perf[].sm_mhz`, with its observed range. No clock
+normalisation is applied, and the idle `env.sm_mhz_idle` (or a schema-1
+`env.sm_mhz`, which is a whole-run median dominated by idle samples) is
+never compared with an under-load one — the artifact that made 92 of 99 of
+C4's latency rows appear to fail (H §12.4).
+
+**Selection.** One set of options narrows every artifact: `--dim`, `--k`,
+`--bs` (`--compare-bs` for the paper table), `--mode`, `--backend`,
+`--sweep`, `--budget-ms`. Where a table's shape allows only one value per
+cell and the records hold several parameter sets, the smallest by
+canonical-JSON order is shown and a caption footnote names all of them;
+several seeds are reduced to their median (min–max whiskers in the
+figures). `tab:batch_scaling` needs one dataset: `--batch-dataset`, else
+the best-covered one, named in the caption. A selection that matches
+nothing emits the table with a `--- no matching cells ---` row rather than
+failing.
+
+**Not compiled.** No TeX toolchain is installed on this box, so the
+fragments are checked structurally (`tests/bench/test_report.py`:
+balanced environments, balanced braces and math, the thesis's labels
+present, no unescaped `_` outside math, `\texttt` and `\label`), never
+compiled.
+
 ## Inputs (`inputs.py`)
 
 `load_inputs(ds, device, with_filters=True)` returns `item_embs [N, D]`
@@ -582,7 +652,8 @@ cd evaluation && CUDA_VISIBLE_DEVICES="" uv run pytest tests/ -q
 | `bench/test_inputs.py` | `load_inputs` on the conftest writer, `users_limit` once, prefix and row-count checks, the legacy layout loading equal to the modern one, misalignment raising, `attrs_digest`, `sweep_qa`, filters by filter backend, `query_pool` |
 | `bench/test_oracle.py` | padding, v4 fields and arithmetic, fingerprint in the file name, an unreadable blob rebuilt, bloom FP rate, `code_version` |
 | `bench/test_run.py` | end to end on the tiny fixture, both modes (`graph` = the CPU null entry): record schema, resume, `code_version` invalidation, `partial`, a failed cell + continue, a sticky CUDA error, the quality gate, the parity spill, reachable-target masking, the plan cache off through `OfficialConfig` |
-| `bench/test_cli.py` | `bench run` via `CliRunner`, a real one-child `bench campaign`, a faked timed-out child, zero cells → exit 1, the `report` stub |
+| `bench/test_cli.py` | `bench run` via `CliRunner`, a real one-child `bench campaign`, a faked timed-out child, zero cells → exit 1, `bench report` over the campaign's own records |
+| `bench/test_report.py` | every column the tables read still comes out of `records.flatten`; every artifact emitted; the LaTeX structurally balanced with the thesis's labels and no unescaped `_`; a `failed` record excluded and a `partial` / `unstable` one marked; citability off by default and evidence beating `--gate`; an empty tree; a schema-1 record |
 | `bench/test_c4_gate.py` | the C4 gate script against synthesised schema-1 records |
 | `eval_datasets/test_layout.py` | the legacy pad-row rule, `apply_users_limit`, `validate_layout` clean on both layouts and flagging a short `eval_split`, a missing or swapped prefix sidecar, misaligned attrs |
 | `eval_datasets/test_yfcc.py`, `test_pubmed.py` | the two ETL loaders on synthetic fixtures (moved from `eval_datasets/tests/`) |

@@ -1644,3 +1644,144 @@ Three decisions this gate needs before it can be green, all the orchestrator's:
 shape-dependent int8 ties; **(b)** what clock gate 2 normalises against, and whether it
 applies at bs=1 at all; **(c)** whether gate 5 means anything on a box that cannot lock
 clocks, and whether `clocks_drift` should be measured against a warm sample.
+
+## 13. Validation record — WP-6 / roadmap D4, `report.py`, 2026-09-15, CPU only (`dev/d4-report`)
+
+> Model: §12 above, and [V §11](evaluation-package-layout.md). Worker job under
+> [agent-orchestration.md](agent-orchestration.md): **no roadmap checkbox was flipped and
+> nothing was merged into `development`.** Branch `dev/d4-report` off `development`
+> @ `e23309c`, worktree `/workspace/wt/d4`.
+>
+> **This step was dispatched out of order.** D4 normally runs on D1's campaign records; the
+> campaign needs the GPU, which another worker held. `report.py` is therefore written
+> against the **record schema** and the records that exist today — C4's gate run (schema 1)
+> and C5's one-cell check (schema 2) — and nothing in it hard-codes a cell of either.
+> **Nothing it emitted today is citable** (CLAUDE.md rule 2), which is also what every
+> artifact says about itself.
+
+**Environment.** The A100 box, CPU only: **`CUDA_VISIBLE_DEVICES=""` throughout, no GPU
+work at all** (the concurrent B3 worker's timings were not perturbed). Python 3.11.15,
+torch 2.10.0+cu128, `/venvs/d4` via `uv sync --all-packages`, ruff 0.15.6 (`uvx`; not in
+the lock), datasets symlinked but never read. `retrieve/` untouched.
+
+**What was built.** [`evaluation/bench/report.py`](../../evaluation/bench/report.py)
+(≈ 700 lines), the `bench report` subcommand wired into `cli.py` in place of its exit-2
+stub, [`evaluation/tests/bench/test_report.py`](../../evaluation/tests/bench/test_report.py),
+the [Report section](../system/evaluation.md#report-reportpy) of the system doc, and the
+sample output in [d4/](evaluation-harness-v2-artifacts/d4/README.md). One dependency added:
+`matplotlib>=3.8` on `retrieve-evaluation` (`uv add --package`; `uv.lock` +761 lines) — the
+figures WP-6 names need a plotting library and none was installed.
+
+Shape: one function per artifact and one `ARTIFACTS` dispatch table, no plotting framework,
+no config object model (coding-guidelines D3/D4). **It is 975 lines against §3.1's 200-line
+budget** — that budget was written before §6 WP-6 enumerated fourteen artifacts; each
+function is 20–45 lines and the only shared machinery is one selector, one seed/parameter
+reducer, one LaTeX table writer and one figure wrapper. V §5.3's three requirements are
+met: `partial` honoured, the subtree `dirty` flag enforced, a torn samples line tolerated. `records.flatten` writes `flat.csv` first
+(§8.2 G) and every table and figure is built from it; `records.read_records` is read a
+second time for the provenance block alone, because `schema_version`, `partial_reasons`,
+`stage` and `error` are **not columns of `flat.csv`** (see "reported, not changed" below).
+
+**What each artifact contains.**
+
+| `--only` name | file | content |
+|---|---|---|
+| `recall_nofilter` | `tables/tab-recall_nofilter.tex` | `tab:recall_nofilter`: held-out Recall@k on `filter_kind: none` cells, datasets × algos |
+| `pareto` | `tables/tab-pareto_<dataset>.tex` | `tab:pareto_<dataset>`: condition × algo — oracle recall, `median_ms`, speedup vs LiNR V1, `index_mib` |
+| `batch_scaling` | `tables/tab-batch_scaling.tex` | `tab:batch_scaling`: amortised ms/query per algo × batch size, **each cell carrying its window spread** |
+| `memory` | `tables/tab-memory.tex` | `tab:memory`: `index_mib`, datasets × algos |
+| `parity` | `tables/tab-backend_parity.tex` | per `(dataset, sweep, algo, backend)`: `path`, `jaccard_vs_first@k`, `score_max_abs_diff`, eager vs graph median and the ratio |
+| `recall_at_budget` | `tables/tab-recall_at_budget.tex` | §8.2 H: best recall under each `--budget-ms` p99 budget, and the algo that reached it |
+| `paper_comparison` | `tables/tab-paper_comparison.tex` | our `--compare-bs` eager mean / p99 / QPS / pass rate beside SilverTorch's and LiNR's **reported** numbers, with §2.7's differences as a footnote. The published rows are the `PAPER_REPORTED` constant, cited per row to `articles/` |
+| `fig_pareto`, `fig_qps_recall`, `fig_batch_scaling` | `figures/*.png` | recall–latency Pareto per dataset, QPS vs recall, amortised latency vs batch with window-spread error bars |
+| `fig_deep_sweep` | `figures/fig-deep-sweep-*.png` | one per swept parameter: recall and latency against its value, **whiskers = seed min–max** |
+| `fig_latency_violin` | `figures/fig-latency-violin.png` | per-call distributions from the samples sidecar (one torn trailing line tolerated) |
+| `methodology` | `methodology.tex` | the thesis's §"Методология замеров" itemize with its constants read **live** out of `measure.latency`'s signature, `inputs.query_pool`'s `n_pool` and `run.{MODES, QUALITY_CHUNK, CLOCK_DRIFT}`, so text and code cannot drift apart again |
+| — | `report.md` | the human-readable view: provenance, citability verdict and reasons, the selection the tables used, a coverage table, the failed cells with stage and error, the partial records, the unstable variants with their spread, the artifact list |
+
+**The three constraints of the day, and how they are met.**
+
+1. **Nothing is citable by default (rule 2).** `--gate STEP` is the only way to an unmarked
+   artifact, and the **evidence vetoes the flag**: a `failed` or `partial` record, or one
+   with `env.dirty`, keeps the marker on even with `--gate`. Otherwise every `.tex` carries
+   a `% PROVENANCE: *** NOT CITABLE ***` banner listing the reasons, its caption opens with
+   `\textbf{[PRE-CAMPAIGN RECORDS — NOT CITABLE]}`, and every figure gets a diagonal
+   watermark. Every artifact carries the `code_version`, the commit, the branch, the GPU,
+   the schema version and the run window whether citable or not.
+2. **Which clock estimator.** Every latency table's last footnote names it: the per-variant
+   **under-load** `perf[].sm_mhz`, with the range observed over exactly the rows behind
+   that table. `env.sm_mhz_idle` and a schema-1 `env.sm_mhz` (a whole-run median dominated
+   by idle) are provenance only and are never compared with an under-load sample — §12.4's
+   artifact. **No clock normalisation is performed anywhere**; the report states the clock,
+   it does not divide by it.
+3. **`bs = 1` is noise-dominated.** `tab:batch_scaling` prints each cell's window spread
+   beside the number and says in the caption that no speedup claim is made from a `B=1`
+   column; `fig_batch_scaling` draws spread error bars; the Pareto and comparison tables
+   mark every `unstable` variant `†`.
+
+**Failed, partial, unstable — decided, not filtered quietly.** A `status: failed` record
+never reaches a number, anywhere, and is listed in `report.md` with its stage and the last
+line of its traceback. A `partial` record is used and marked `*`. A perf entry with
+`unstable: true` is used and marked `†`. Both marks are explained in every caption, and
+both counts are in the banner and in `report.md`. Where a table's shape allows one value
+per cell and the records hold several parameter sets, the smallest by canonical-JSON order
+is shown **and a caption footnote names all of them**; several seeds reduce to their median
+with min–max whiskers in the figures.
+
+**Gates.**
+
+| gate | result |
+|---|---|
+| `ruff check evaluation` (0.15.6) | **clean** |
+| `cd evaluation && CUDA_VISIBLE_DEVICES="" uv run pytest tests/` | **170 passed, 4 skipped** (baseline at `e23309c`: 164 / 4). +6 = `tests/bench/test_report.py`; `test_cli.py`'s report case changed from "exits 2" to a real end-to-end `bench report` over the campaign's own records. The 4 skips are unchanged (`test_yfcc.py::TestRealSlice`, yfcc10m not staged) |
+| `python3 scripts/check_doc_links.py` | **0 broken links** |
+| `bench report --help` | renders, rc 0; all 20 other `--help`s unchanged |
+| `bench report` end to end on today's records | **18 artifacts, no traceback**, over 24 records (C4's 20 schema-1 + C5's 6 schema-2, 4 deduping by resume key). Output committed as [d4/](evaluation-harness-v2-artifacts/d4/README.md) |
+| LaTeX | **not compiled — no TeX toolchain on this box.** Checked structurally by the test: balanced `table` / `tabular` / `itemize` / `minipage`, balanced braces and `$`, the thesis's labels present, no unescaped `_` outside math, `\texttt` and `\label` |
+
+**Labels match `docs/thesis/main.tex` as it now stands** (read, not assumed): the five
+table labels are `tab:recall_nofilter`, `tab:pareto_arxiv`, `tab:pareto_goodreads`,
+`tab:batch_scaling`, `tab:memory`, the algorithm label is `algo:silvertorch`, and the
+captions follow the file's Russian decimal-comma convention (`$0{,}9128$`). `QuantizedIVF`
+appears nowhere; `ALGO_LABEL` maps `silvertorch` → "SilverTorch".
+
+**The test** (`tests/bench/test_report.py`, 6 cases, ≈ 10 s, coding-guidelines D6 — a gate,
+not a deliverable): every column the tables read still comes out of `records.flatten`
+(a `KEY_FIELDS` / `_RECORD_COLUMNS` change breaks it loudly and names the missing column);
+every artifact emitted and the LaTeX structurally sound with the thesis's labels; a
+`failed` record excluded and a `partial` / `unstable` one marked; citability off by default
+and evidence beating `--gate` (a `failed`/`partial` record, a dirty subtree, a `dev/*`
+branch); an empty results tree emitting placeholders instead of failing; a schema-1 record building tables and using the under-load clock rather than the
+1155 MHz whole-run median.
+
+**Reported, not changed — one `records.py` gap.** `records.flatten` does **not** carry
+`schema_version`, `partial_reasons`, `stage` or `error` into `flat.csv` (`_RECORD_COLUMNS`
+omits them). `report.py` works around it by reading the JSONL a second time through
+`records.read_records` for the provenance block only, which is public API and changes no
+behaviour — but if `flat.csv` is meant to be the shippable denormalisation of a record
+(§8.2 G), those four fields belong in it. Not done here: another worker's numbers depend on
+that module today. Second, smaller: `records.flatten` writes to a path it does not create,
+so a caller must `mkdir` first (`report._load` does).
+
+**What is skipped, and what is unverified.**
+
+* **Every number in every artifact.** These are C4's and C5's probe records, not campaign
+  data. The step's own output is the *shape*; the numbers are D1's.
+* **`tab:recall_nofilter` is empty today** — no `filter_kind: none` cell exists in the
+  records that exist; it emits its `--- no matching cells ---` placeholder, which is the
+  behaviour under test. It fills in when D1's `quality` suite runs.
+* **No LaTeX was compiled**, and no fragment was placed in `main.tex`. Pasting them is
+  F5's job, not this one.
+* **The deep-sweep and Pareto figures have never seen a real sweep**: today's only swept
+  parameter is `n_probe ∈ {24, 32}`, two points. The `deep` suite's `n_lists` × `n_probe`
+  grid and `linr_v3`'s `candidate_pool` ladder are D1's.
+* **Seed whiskers are exercised on exactly one cell set** (C5's seeds 0/1/2 on
+  goodreads `silvertorch`); the multi-seed headline block is D1's.
+* **`bench report` has never run on a `deep` or `quality` suite directory**, on more than
+  one dim, or on a tree with a `_parity` or `_logs` directory beside the suites (the glob
+  is `*/*.jsonl`, so `_logs/*.log` is ignored, but this was reasoned, not run).
+* **`--profile` kernel tables are not reported on.** The `kernels` key is in `_PERF_SKIP`,
+  so it never reaches `flat.csv`; a per-kernel view would need its own artifact and WP-6
+  does not name one.
+* The **`matplotlib` addition is unexercised outside this box's Agg backend**, and the
+  `uv.lock` change is the one thing in this branch that can conflict on merge.
