@@ -1,0 +1,416 @@
+{
+ "n_kept_rows": 9859,
+ "parity": {
+  "shipped_triton_vs_torch": {
+   "jaccard@100": 0.9987427464189353,
+   "jaccard@500": 0.9988785679531427,
+   "jaccard@1000": 0.9988775426205143,
+   "rows_top100_differ": 624,
+   "score_max_abs_diff": 0.009765625,
+   "ids_torch_equal": false
+  },
+  "fp32acc_probe_vs_torch": {
+   "jaccard@100": 0.9997509437524542,
+   "jaccard@500": 0.9994995592396291,
+   "jaccard@1000": 0.999378520100377,
+   "rows_top100_differ": 124,
+   "score_max_abs_diff": 0.0039043426513671875,
+   "ids_torch_equal": false
+  },
+  "fp32acc_probe_vs_shipped_triton": {
+   "jaccard@100": 0.9986804823570489,
+   "jaccard@500": 0.9988243550795881,
+   "jaccard@1000": 0.9988352106064537,
+   "rows_top100_differ": 655,
+   "score_max_abs_diff": 0.010572433471679688,
+   "ids_torch_equal": false
+  }
+ },
+ "boundary": {
+  "rows_top100_differ": 624,
+  "swapped_pairs": 626,
+  "rows_with_exactly_one_swap": 622,
+  "torch_only_item_is_in_true_top100": 581,
+  "triton_only_item_is_in_true_top100": 48,
+  "kernel_scores_consistent_with_its_own_choice": 626,
+  "truth_gap_between_swapped_pair": {
+   "max": 0.004895905498415232,
+   "median": 0.0008908719755709171,
+   "min": -0.001592682907357812
+  },
+  "kernel_abs_error_on_swapped_items": {
+   "max": 0.006190211046487093,
+   "median": 0.001006989274173975
+  },
+  "rank100_gap_all_rows": {
+   "median": 0.006795283406972885,
+   "p10": 0.0009798919782042503,
+   "p1": 9.317316289525479e-05,
+   "min": 2.712476998567581e-07,
+   "frac_below_0.03": 0.9460391402244568,
+   "frac_below_0.01": 0.6310985088348389,
+   "frac_below_0.001": 0.10132873803377151
+  },
+  "first_rows": [
+   {
+    "row": 17,
+    "count": 162710,
+    "boundary_score": -0.12287022289820015,
+    "gap": 0.0007138128858059645,
+    "pairs": [
+     {
+      "torch_only": {
+       "id": 722077,
+       "truth_rank": 99,
+       "truth": -0.12287022289820015,
+       "kernel": -0.122802734375,
+       "kernel_err": 6.74885232001543e-05
+      },
+      "triton_only": {
+       "id": 744155,
+       "truth_rank": 100,
+       "truth": -0.12358403578400612,
+       "kernel": -0.122314453125,
+       "kernel_err": 0.0012695826590061188
+      },
+      "truth_gap_between_pair": 0.0007138128858059645
+     }
+    ]
+   },
+   {
+    "row": 41,
+    "count": 162710,
+    "boundary_score": -1.098602682352066,
+    "gap": 0.0006779726063541602,
+    "pairs": [
+     {
+      "torch_only": {
+       "id": 738604,
+       "truth_rank": 99,
+       "truth": -1.098602682352066,
+       "kernel": -1.099609375,
+       "kernel_err": -0.00100669264793396
+      },
+      "triton_only": {
+       "id": 202924,
+       "truth_rank": 100,
+       "truth": -1.0992806549584202,
+       "kernel": -1.0986328125,
+       "kernel_err": 0.0006478424584202003
+      },
+      "truth_gap_between_pair": 0.0006779726063541602
+     }
+    ]
+   },
+   {
+    "row": 69,
+    "count": 255458,
+    "boundary_score": -0.6507592159323394,
+    "gap": 0.0018085879273712635,
+    "pairs": [
+     {
+      "torch_only": {
+       "id": 674345,
+       "truth_rank": 99,
+       "truth": -0.6507592159323394,
+       "kernel": -0.6513671875,
+       "kernel_err": -0.0006079715676605701
+      },
+      "triton_only": {
+       "id": 371046,
+       "truth_rank": 100,
+       "truth": -0.6525678038597107,
+       "kernel": -0.6513671875,
+       "kernel_err": 0.0012006163597106934
+      },
+      "truth_gap_between_pair": 0.0018085879273712635
+     }
+    ]
+   },
+   {
+    "row": 107,
+    "count": 442864,
+    "boundary_score": 0.6692152816103771,
+    "gap": 0.000673057627864182,
+    "pairs": [
+     {
+      "torch_only": {
+       "id": 679430,
+       "truth_rank": 99,
+       "truth": 0.6692152816103771,
+       "kernel": 0.66796875,
+       "kernel_err": -0.001246531610377133
+      },
+      "triton_only": {
+       "id": 487037,
+       "truth_rank": 100,
+       "truth": 0.668542223982513,
+       "kernel": 0.66796875,
+       "kernel_err": -0.0005734739825129509
+      },
+      "truth_gap_between_pair": 0.000673057627864182
+     }
+    ]
+   },
+   {
+    "row": 150,
+    "count": 442864,
+    "boundary_score": 1.6647084112628363,
+    "gap": 0.0013349800719879568,
+    "pairs": [
+     {
+      "torch_only": {
+       "id": 763205,
+       "truth_rank": 98,
+       "truth": 1.6655794270336628,
+       "kernel": 1.6630859375,
+       "kernel_err": -0.002493489533662796
+      },
+      "triton_only": {
+       "id": 749632,
+       "truth_rank": 100,
+       "truth": 1.6633734311908484,
+       "kernel": 1.6669921875,
+       "kernel_err": 0.0036187563091516495
+      },
+      "truth_gap_between_pair": 0.0022059958428144455
+     }
+    ]
+   },
+   {
+    "row": 161,
+    "count": 442864,
+    "boundary_score": 0.7340188219677657,
+    "gap": 0.003052490879781544,
+    "pairs": [
+     {
+      "torch_only": {
+       "id": 722697,
+       "truth_rank": 99,
+       "truth": 0.7340188219677657,
+       "kernel": 0.73388671875,
+       "kernel_err": -0.0001321032177656889
+      },
+      "triton_only": {
+       "id": 734794,
+       "truth_rank": 100,
+       "truth": 0.7309663310879841,
+       "kernel": 0.7353515625,
+       "kernel_err": 0.004385231412015855
+      },
+      "truth_gap_between_pair": 0.003052490879781544
+     }
+    ]
+   },
+   {
+    "row": 162,
+    "count": 117470,
+    "boundary_score": -0.7043826882727444,
+    "gap": 0.00022236551740206778,
+    "pairs": [
+     {
+      "torch_only": {
+       "id": 9126,
+       "truth_rank": 101,
+       "truth": -0.7046569685917348,
+       "kernel": -0.70556640625,
+       "kernel_err": -0.000909437658265233
+      },
+      "triton_only": {
+       "id": 260855,
+       "truth_rank": 99,
+       "truth": -0.7043826882727444,
+       "kernel": -0.70361328125,
+       "kernel_err": 0.0007694070227444172
+      },
+      "truth_gap_between_pair": -0.00027428031899034977
+     }
+    ]
+   },
+   {
+    "row": 174,
+    "count": 195023,
+    "boundary_score": -1.9269329730886966,
+    "gap": 0.0006986211519688368,
+    "pairs": [
+     {
+      "torch_only": {
+       "id": 538145,
+       "truth_rank": 99,
+       "truth": -1.9269329730886966,
+       "kernel": -1.9267578125,
+       "kernel_err": 0.000175160588696599
+      },
+      "triton_only": {
+       "id": 618676,
+       "truth_rank": 100,
+       "truth": -1.9276315942406654,
+       "kernel": -1.923828125,
+       "kernel_err": 0.003803469240665436
+      },
+      "truth_gap_between_pair": 0.0006986211519688368
+     }
+    ]
+   },
+   {
+    "row": 203,
+    "count": 442864,
+    "boundary_score": -1.0640636878088117,
+    "gap": 0.0006019453285261989,
+    "pairs": [
+     {
+      "torch_only": {
+       "id": 77712,
+       "truth_rank": 99,
+       "truth": -1.0640636878088117,
+       "kernel": -1.0654296875,
+       "kernel_err": -0.0013659996911883354
+      },
+      "triton_only": {
+       "id": 80626,
+       "truth_rank": 100,
+       "truth": -1.0646656331373379,
+       "kernel": -1.064453125,
+       "kernel_err": 0.00021250813733786345
+      },
+      "truth_gap_between_pair": 0.0006019453285261989
+     }
+    ]
+   },
+   {
+    "row": 206,
+    "count": 214177,
+    "boundary_score": -0.9970697180833668,
+    "gap": 0.0017571380594745278,
+    "pairs": [
+     {
+      "torch_only": {
+       "id": 665974,
+       "truth_rank": 99,
+       "truth": -0.9970697180833668,
+       "kernel": -0.998046875,
+       "kernel_err": -0.0009771569166332483
+      },
+      "triton_only": {
+       "id": 169547,
+       "truth_rank": 100,
+       "truth": -0.9988268561428413,
+       "kernel": -0.998046875,
+       "kernel_err": 0.0007799811428412795
+      },
+      "truth_gap_between_pair": 0.0017571380594745278
+     }
+    ]
+   },
+   {
+    "row": 222,
+    "count": 162710,
+    "boundary_score": -0.5358705901890062,
+    "gap": 6.489449879154563e-05,
+    "pairs": [
+     {
+      "torch_only": {
+       "id": 259357,
+       "truth_rank": 99,
+       "truth": -0.5358705901890062,
+       "kernel": -0.5361328125,
+       "kernel_err": -0.00026222231099382043
+      },
+      "triton_only": {
+       "id": 736202,
+       "truth_rank": 100,
+       "truth": -0.5359354846877977,
+       "kernel": -0.53515625,
+       "kernel_err": 0.0007792346877977252
+      },
+      "truth_gap_between_pair": 6.489449879154563e-05
+     }
+    ]
+   },
+   {
+    "row": 223,
+    "count": 31497,
+    "boundary_score": -1.9641385823488235,
+    "gap": 0.00035009754355996847,
+    "pairs": [
+     {
+      "torch_only": {
+       "id": 104653,
+       "truth_rank": 99,
+       "truth": -1.9641385823488235,
+       "kernel": -1.9638671875,
+       "kernel_err": 0.00027139484882354736
+      },
+      "triton_only": {
+       "id": 187961,
+       "truth_rank": 100,
+       "truth": -1.9644886798923835,
+       "kernel": -1.962890625,
+       "kernel_err": 0.0015980548923835158
+      },
+      "truth_gap_between_pair": 0.00035009754355996847
+     }
+    ]
+   }
+  ]
+ },
+ "timing": {
+  "kernel_B1_P195023_shipped_fp16_acc": {
+   "ms": 0.052352000027894974,
+   "sm_mhz": [
+    1410,
+    1410
+   ]
+  },
+  "kernel_B1_P195023_probe_fp32_acc": {
+   "ms": 0.05225599929690361,
+   "sm_mhz": [
+    1410,
+    1410
+   ]
+  },
+  "forward_B1_linr_v2_triton_eager_shipped": {
+   "ms": 0.4705919921398163,
+   "sm_mhz": [
+    1410,
+    1410
+   ]
+  },
+  "forward_B1_linr_v2_torch_eager": {
+   "ms": 1.5151679515838623,
+   "sm_mhz": [
+    1410,
+    1410
+   ]
+  },
+  "kernel_B16_P442864_shipped_fp16_acc": {
+   "ms": 0.9635840058326721,
+   "sm_mhz": [
+    1410,
+    1410
+   ]
+  },
+  "kernel_B16_P442864_probe_fp32_acc": {
+   "ms": 0.9407680034637451,
+   "sm_mhz": [
+    1410,
+    1410
+   ]
+  },
+  "forward_B16_linr_v2_triton_eager_shipped": {
+   "ms": 3.3351839780807495,
+   "sm_mhz": [
+    1410,
+    1410
+   ]
+  },
+  "forward_B16_linr_v2_torch_eager": {
+   "ms": 18.300128936767578,
+   "sm_mhz": [
+    1410,
+    1410
+   ]
+  }
+ },
+ "elapsed_s": 41.92364454269409
+}

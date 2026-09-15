@@ -238,8 +238,11 @@ to the inlined predicate with a
 
 ## Score conventions
 
-- Real-valued similarity (V1, V2): plain dot product, fp32. Higher is better.
-  `-inf` marks masked-out / padded positions.
+- Real-valued similarity (V1, V2): plain dot product of the fp16 inputs.
+  Higher is better. `-inf` marks masked-out / padded positions. The
+  *width* is the path's, not a convention: cuBLAS (V1, V2 `torch`)
+  accumulates fp32 and returns fp16; `fused_masked_knn_topk` (V2 `triton`)
+  accumulates fp16 and returns fp32 — see that kernel's section.
 - 1-bit Sign-OPORP (V3): `D - 2 * popcount(query_bits ^ item_bits)`, fp32.
   `D = 64 * W`. This is the standard Hamming-to-dot-product relation for
   sign-quantized vectors. Higher is better. Same `-inf` sentinel.
@@ -319,7 +322,23 @@ return:   ids               [B, K]    int64
 ```
 
 (`_fmkt_prep` validates the dtypes: parity tests feed fp32, the
-production `PrefilterKNN` path feeds fp16; scores are always fp32.)
+production `PrefilterKNN` path feeds fp16; the score *buffer* is always
+fp32.)
+
+**Accumulation width is the input's.** `emb_rows * q` is an fp16 product
+and `tl.sum` reduces in the input dtype (Triton's `_pick_sum_dtype`
+promotes only sub-32-bit ints), so on the fp16 production path the dot is
+an fp16 tree reduction stored as fp32 — the compiled PTX carries
+`add.f16` and no `f32` arithmetic, and every score it writes is an fp16
+value. On goodreads d128 (`|score|` up to 31, partial sums of the same
+order) that is up to 0.028 absolute error, mean 0.0034, against a
+rank-100 gap whose median is 0.0068; the `torch` backend's `bmm` accumulates
+fp32 and rounds the *output* to fp16 (≤ 1 ulp). The two backends therefore
+swap one boundary pair on 6.3 % of `c0_genre` rows (`jaccard@100`
+0.998743) with identical candidate sets — precision, not selection.
+Measured in [plan L4](../plans/linr-v2-backend-parity.md) §6, which also
+measures the fp32-accumulating variant (same kernel time; not shipped —
+a decision, not a side effect).
 
 **Launch grid** `(B, cdiv(P, BLOCK_N))`. Each program owns one
 `(query, p-tile)` cell and gathers `BLOCK_N` item rows by indirect load:
