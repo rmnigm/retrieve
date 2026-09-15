@@ -1,0 +1,16 @@
+2026-09-15 12:01:16.941 | INFO     | retrieval.config:load_matrix:363 - goodreads/filter: 2 jobs, 2 cells
+2026-09-15 12:01:20.115 | INFO     | retrieval.run:run:472 - resume: ('goodreads', 128, 'linr_v1_filter_mask', 'triton') all 1 cells done
+2026-09-15 12:01:31.862 | INFO     | retrieval.data:_sasrec:170 - loaded encoded queries from data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/encoded_queries_v2.pt
+2026-09-15 12:01:32.930 | WARNING  | retrieval.data:drop_legacy_padding_row:79 - item_attrs_narrow.pt: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 797085 → 797084 rows.
+2026-09-15 12:01:32.941 | INFO     | retrieval.data:load_inputs:241 - users_limit=10000: keeping the first 10000 of 313178 queries
+2026-09-15 12:01:32.941 | INFO     | retrieval.data:load_inputs:244 - inputs: items 797084 queries 10000 dim 128
+2026-09-15 12:01:33.696 | INFO     | retrieval.data:build_filters:300 - filter modules (clause): ['torch']
+2026-09-15 12:01:33.914 | INFO     | retrieval.oracle:load_or_build:223 -   loaded oracle from cache: data/goodreads-work-id/gt_d128/oracle_v4_c0_genre_2634b8ef02f0f10c.pt
+2026-09-15 12:01:34.148 | INFO     | retrieval.run:run:500 - build linr_v1_filter_mask clause/c0_genre torch build={}
+/workspace/retrieve/.venv/lib/python3.11/site-packages/torch/cuda/__init__.py:1216: UserWarning: Synchronization debug mode is a prototype feature and does not yet detect all synchronizing operations (Triggered internally at /pytorch/torch/csrc/cuda/Module.cpp:989.)
+  torch._C._cuda_set_sync_debug_mode(debug_mode)
+/workspace/retrieve/.venv/lib/python3.11/site-packages/torch/profiler/profiler.py:217: UserWarning: Warning: Profiler clears events at the end of each cycle.Only events from the current cycle will be reported.To keep events across cycles, set acc_events=True.
+  _warn_once(
+2026-09-15 12:10:51.853 | INFO     | retrieval.run:run:622 -   linr_v1_filter_mask clause/c0_genre torch params={} -> ok (557s)
+2026-09-15 12:10:52.023 | INFO     | retrieval.run:run:630 - done: {'skipped': 1, 'ok': 1}
+goodreads/filter: {'skipped': 1, 'ok': 1}

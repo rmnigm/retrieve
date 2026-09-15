@@ -1,0 +1,12 @@
+[08:50:26] === stage goodreads
+[11:15:28] done
+[11:20:06] === stage arxiv
+[11:51:47] === stage resume
+[11:51:47] resume check: pid 132736, waiting for the first record
+[12:01:03] killing 132736 (SIGTERM) mid-cell
+[12:01:03] records after the kill: 1
+[12:10:53] resume lines: 1; records now: 2
+[12:10:53] done
+[12:18:58] === stage gate
+[12:18:59] gate exit=1
+[12:18:59] done

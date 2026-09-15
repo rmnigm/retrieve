@@ -1,0 +1,106 @@
+2026-09-15 11:20:18.292 | INFO     | retrieval.config:load_matrix:363 - arxiv/filter: 3 jobs, 6 cells
+2026-09-15 11:20:32.061 | WARNING  | retrieval.data:drop_legacy_padding_row:79 - content_d128/text_emb: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 2988997 → 2988996 rows.
+2026-09-15 11:20:33.605 | WARNING  | retrieval.data:drop_legacy_padding_row:79 - item_attrs_narrow.pt: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 2988997 → 2988996 rows.
+2026-09-15 11:20:33.625 | INFO     | retrieval.data:load_inputs:244 - inputs: items 2988996 queries 10000 dim 128
+2026-09-15 11:20:35.448 | INFO     | retrieval.data:build_filters:300 - filter modules (clause): ['triton']
+2026-09-15 11:20:35.466 | INFO     | retrieval.oracle:load_or_build:227 -   building exact oracle (k_gt=1000) for sweep c0_maincat
+2026-09-15 11:21:10.986 | INFO     | retrieval.oracle:load_or_build:254 -   saved oracle → data/arxiv-papers/gt_d128/oracle_v4_c0_maincat_c5222af9615d538d.pt (pass_rate=0.1363)
+2026-09-15 11:21:11.015 | INFO     | retrieval.run:run:500 - build silvertorch clause/c0_maincat triton build={}
+2026-09-15 11:21:13.225 | WARNING  | retrieval.run:run:539 - clocks.sm 1410.0 MHz drifted from 1155.0 MHz
+/workspace/retrieve/.venv/lib/python3.11/site-packages/torch/cuda/__init__.py:1216: UserWarning: Synchronization debug mode is a prototype feature and does not yet detect all synchronizing operations (Triggered internally at /pytorch/torch/csrc/cuda/Module.cpp:989.)
+  torch._C._cuda_set_sync_debug_mode(debug_mode)
+/workspace/retrieve/.venv/lib/python3.11/site-packages/torch/_inductor/compile_fx.py:321: UserWarning: TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. Consider setting `torch.set_float32_matmul_precision('high')` for better performance.
+  warnings.warn(
+/workspace/retrieve/.venv/lib/python3.11/site-packages/torch/profiler/profiler.py:217: UserWarning: Warning: Profiler clears events at the end of each cycle.Only events from the current cycle will be reported.To keep events across cycles, set acc_events=True.
+  _warn_once(
+2026-09-15 11:25:38.824 | INFO     | retrieval.run:run:622 -   silvertorch clause/c0_maincat triton params={'n_probe': 24} -> ok (265s)
+2026-09-15 11:25:38.903 | WARNING  | retrieval.run:run:539 - clocks.sm 1410.0 MHz drifted from 1155.0 MHz
+2026-09-15 11:29:52.967 | INFO     | retrieval.run:run:622 -   silvertorch clause/c0_maincat triton params={'n_probe': 32} -> ok (254s)
+2026-09-15 11:29:53.716 | INFO     | retrieval.data:build_filters:300 - filter modules (clause): ['torch']
+2026-09-15 11:29:53.989 | INFO     | retrieval.oracle:load_or_build:223 -   loaded oracle from cache: data/arxiv-papers/gt_d128/oracle_v4_c0_maincat_c5222af9615d538d.pt
+2026-09-15 11:29:54.040 | INFO     | retrieval.run:run:500 - build silvertorch clause/c0_maincat torch build={}
+2026-09-15 11:29:56.054 | WARNING  | retrieval.run:run:539 - clocks.sm 1410.0 MHz drifted from 1155.0 MHz
+2026-09-15 11:35:48.614 | INFO     | retrieval.run:run:622 -   silvertorch clause/c0_maincat torch params={'n_probe': 24} -> ok (352s)
+2026-09-15 11:35:48.646 | WARNING  | retrieval.run:run:539 - clocks.sm 1410.0 MHz drifted from 1155.0 MHz
+2026-09-15 11:42:26.560 | INFO     | retrieval.run:run:622 -   silvertorch clause/c0_maincat torch params={'n_probe': 32} -> ok (398s)
+2026-09-15 11:42:27.444 | INFO     | retrieval.data:build_filters:300 - filter modules (clause): ['triton']
+2026-09-15 11:42:27.957 | INFO     | retrieval.oracle:load_or_build:223 -   loaded oracle from cache: data/arxiv-papers/gt_d128/oracle_v4_c0_maincat_c5222af9615d538d.pt
+2026-09-15 11:42:27.978 | INFO     | retrieval.run:run:500 - build silvertorch clause/c0_maincat official build={}
+2026-09-15 11:42:30.058 | WARNING  | retrieval.run:run:539 - clocks.sm 1410.0 MHz drifted from 1155.0 MHz
+[W915 11:45:00.913663601 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:45:00.913818860 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:45:00.913990759 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:45:07.096 | INFO     | retrieval.run:perf:376 -   graph bs=1 k=100: not_capturable
+[W915 11:45:07.675546343 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:45:07.675684692 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:45:07.675833291 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:45:13.301 | INFO     | retrieval.run:perf:376 -   graph bs=1 k=500: not_capturable
+[W915 11:45:13.880485410 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:45:13.880628439 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:45:13.880771528 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:45:19.432 | INFO     | retrieval.run:perf:376 -   graph bs=1 k=1000: not_capturable
+[W915 11:45:19.219502801 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:45:19.221538011 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:45:19.221727260 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:45:32.680 | INFO     | retrieval.run:perf:376 -   graph bs=8 k=100: not_capturable
+[W915 11:45:32.258875919 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:45:32.261365107 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:45:32.261501296 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:45:45.742 | INFO     | retrieval.run:perf:376 -   graph bs=8 k=500: not_capturable
+[W915 11:45:45.320948915 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:45:45.323386313 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:45:45.323532313 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:45:58.764 | INFO     | retrieval.run:perf:376 -   graph bs=8 k=1000: not_capturable
+[W915 11:45:58.527628993 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:45:59.614132274 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:45:59.614422833 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:46:21.755 | INFO     | retrieval.run:perf:376 -   graph bs=16 k=100: not_capturable
+[W915 11:46:21.334280637 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:46:21.339916019 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:46:21.340060028 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:46:44.488 | INFO     | retrieval.run:perf:376 -   graph bs=16 k=500: not_capturable
+[W915 11:46:44.067810171 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:46:44.073388184 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:46:44.073542233 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:47:07.257 | INFO     | retrieval.run:perf:376 -   graph bs=16 k=1000: not_capturable
+2026-09-15 11:47:07.374 | INFO     | retrieval.run:run:622 -   silvertorch clause/c0_maincat official params={'n_probe': 24} -> ok (277s)
+2026-09-15 11:47:07.405 | WARNING  | retrieval.run:run:539 - clocks.sm 1410.0 MHz drifted from 1155.0 MHz
+[W915 11:49:38.517302902 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:49:38.517456281 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:49:38.517617850 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:49:44.918 | INFO     | retrieval.run:perf:376 -   graph bs=1 k=100: not_capturable
+[W915 11:49:44.498373512 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:49:44.498508001 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:49:44.498645490 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:49:51.257 | INFO     | retrieval.run:perf:376 -   graph bs=1 k=500: not_capturable
+[W915 11:49:51.835621334 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:49:51.835717383 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:49:51.835825943 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:49:57.489 | INFO     | retrieval.run:perf:376 -   graph bs=1 k=1000: not_capturable
+[W915 11:49:57.221178374 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:49:57.223292093 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:49:57.223512672 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:50:10.689 | INFO     | retrieval.run:perf:376 -   graph bs=8 k=100: not_capturable
+[W915 11:50:10.268723482 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:50:10.271185900 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:50:10.271331599 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:50:23.546 | INFO     | retrieval.run:perf:376 -   graph bs=8 k=500: not_capturable
+[W915 11:50:23.125266988 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:50:23.127776356 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:50:23.127912855 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:50:36.449 | INFO     | retrieval.run:perf:376 -   graph bs=8 k=1000: not_capturable
+[W915 11:50:36.316402463 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:50:36.321555488 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:50:36.321772287 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:50:59.360 | INFO     | retrieval.run:perf:376 -   graph bs=16 k=100: not_capturable
+[W915 11:50:59.939247897 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:50:59.944914438 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:50:59.945055798 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:51:21.966 | INFO     | retrieval.run:perf:376 -   graph bs=16 k=500: not_capturable
+[W915 11:51:21.545625792 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:51:21.551305634 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:51:21.551436763 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:51:44.566 | INFO     | retrieval.run:perf:376 -   graph bs=16 k=1000: not_capturable
+2026-09-15 11:51:44.653 | INFO     | retrieval.run:run:622 -   silvertorch clause/c0_maincat official params={'n_probe': 32} -> ok (277s)
+2026-09-15 11:51:45.156 | INFO     | retrieval.run:run:630 - done: {'ok': 6}
+arxiv/filter: {'ok': 6}

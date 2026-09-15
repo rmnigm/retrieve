@@ -1,0 +1,148 @@
+2026-09-15 08:50:46.474 | INFO     | retrieval.config:load_matrix:363 - goodreads/filter: 11 jobs, 14 cells
+2026-09-15 08:51:00.964 | INFO     | retrieval.encode:load_model_for_eval:53 - model: GSASRec params={'max_seq_length': 200, 'embedding_dim': 128, 'num_heads': 2, 'num_blocks': 2, 'ffn_hidden_dim': 512, 'dropout': 0.5, 'reuse_item_embeddings': False}
+/workspace/retrieve/evaluation/training/model.py:42: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_blocks)
+encode queries:   0%|          | 0/612 [00:00<?, ?it/s]encode queries:   0%|          | 1/612 [00:00<09:37,  1.06it/s]encode queries:   2%|▏         | 12/612 [00:01<00:39, 15.17it/s]encode queries:   4%|▍         | 23/612 [00:01<00:19, 29.77it/s]encode queries:   6%|▌         | 34/612 [00:01<00:13, 43.96it/s]encode queries:   8%|▊         | 46/612 [00:01<00:09, 58.66it/s]encode queries:   9%|▉         | 57/612 [00:01<00:08, 69.23it/s]encode queries:  11%|█▏        | 69/612 [00:01<00:06, 80.38it/s]encode queries:  13%|█▎        | 81/612 [00:01<00:06, 88.42it/s]encode queries:  15%|█▌        | 94/612 [00:01<00:05, 96.99it/s]encode queries:  17%|█▋        | 106/612 [00:01<00:04, 102.33it/s]encode queries:  19%|█▉        | 118/612 [00:02<00:04, 105.22it/s]encode queries:  21%|██        | 130/612 [00:02<00:11, 42.10it/s] encode queries:  23%|██▎       | 143/612 [00:02<00:08, 53.18it/s]encode queries:  25%|██▌       | 155/612 [00:02<00:07, 63.58it/s]encode queries:  27%|██▋       | 167/612 [00:02<00:06, 73.29it/s]encode queries:  29%|██▉       | 179/612 [00:03<00:05, 82.03it/s]encode queries:  31%|███       | 191/612 [00:03<00:04, 89.42it/s]encode queries:  33%|███▎      | 202/612 [00:03<00:04, 92.30it/s]encode queries:  35%|███▌      | 215/612 [00:03<00:03, 99.94it/s]encode queries:  37%|███▋      | 227/612 [00:03<00:03, 102.99it/s]encode queries:  39%|███▉      | 239/612 [00:03<00:03, 107.38it/s]encode queries:  41%|████      | 251/612 [00:03<00:03, 109.59it/s]encode queries:  43%|████▎     | 263/612 [00:03<00:03, 112.14it/s]encode queries:  45%|████▍     | 275/612 [00:03<00:03, 111.89it/s]encode queries:  47%|████▋     | 287/612 [00:04<00:02, 111.81it/s]encode queries:  49%|████▉     | 299/612 [00:04<00:02, 113.27it/s]encode queries:  51%|█████     | 311/612 [00:04<00:02, 113.09it/s]encode queries:  53%|█████▎    | 323/612 [00:04<00:02, 115.05it/s]encode queries:  55%|█████▍    | 336/612 [00:04<00:02, 117.66it/s]encode queries:  57%|█████▋    | 348/612 [00:04<00:02, 117.44it/s]encode queries:  59%|█████▉    | 360/612 [00:04<00:02, 116.76it/s]encode queries:  61%|██████    | 372/612 [00:04<00:02, 115.88it/s]encode queries:  63%|██████▎   | 384/612 [00:04<00:02, 113.78it/s]encode queries:  65%|██████▍   | 396/612 [00:05<00:01, 113.11it/s]encode queries:  67%|██████▋   | 408/612 [00:05<00:01, 113.72it/s]encode queries:  69%|██████▉   | 421/612 [00:05<00:01, 116.04it/s]encode queries:  71%|███████   | 433/612 [00:05<00:01, 113.92it/s]encode queries:  73%|███████▎  | 445/612 [00:05<00:01, 111.71it/s]encode queries:  75%|███████▍  | 457/612 [00:05<00:01, 112.16it/s]encode queries:  77%|███████▋  | 469/612 [00:05<00:01, 114.31it/s]encode queries:  79%|███████▊  | 481/612 [00:05<00:01, 114.89it/s]encode queries:  81%|████████  | 493/612 [00:06<00:02, 43.28it/s] encode queries:  82%|████████▏ | 503/612 [00:06<00:02, 50.82it/s]encode queries:  84%|████████▍ | 514/612 [00:06<00:01, 59.84it/s]encode queries:  86%|████████▌ | 525/612 [00:06<00:01, 68.96it/s]encode queries:  88%|████████▊ | 537/612 [00:06<00:00, 78.43it/s]encode queries:  90%|████████▉ | 548/612 [00:06<00:00, 83.48it/s]encode queries:  91%|█████████▏| 559/612 [00:07<00:00, 88.61it/s]encode queries:  93%|█████████▎| 570/612 [00:07<00:00, 92.99it/s]encode queries:  95%|█████████▍| 581/612 [00:07<00:00, 96.05it/s]encode queries:  97%|█████████▋| 592/612 [00:07<00:00, 99.33it/s]encode queries:  99%|█████████▊| 604/612 [00:07<00:00, 103.75it/s]encode queries: 100%|██████████| 612/612 [00:07<00:00, 79.16it/s] 
+2026-09-15 08:52:29.198 | INFO     | retrieval.data:_sasrec:208 - wrote data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/encoded_queries_v2.pt (1.00 GB)
+2026-09-15 08:52:29.917 | WARNING  | retrieval.data:drop_legacy_padding_row:79 - item_attrs_narrow.pt: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 797085 → 797084 rows.
+2026-09-15 08:52:29.928 | INFO     | retrieval.data:load_inputs:241 - users_limit=10000: keeping the first 10000 of 313178 queries
+2026-09-15 08:52:29.928 | INFO     | retrieval.data:load_inputs:244 - inputs: items 797084 queries 10000 dim 128
+2026-09-15 08:52:31.056 | INFO     | retrieval.data:build_filters:300 - filter modules (clause): ['triton']
+2026-09-15 08:52:31.482 | INFO     | retrieval.oracle:load_or_build:223 -   loaded oracle from cache: data/goodreads-work-id/gt_d128/oracle_v4_c0_genre_2634b8ef02f0f10c.pt
+2026-09-15 08:52:31.745 | INFO     | retrieval.run:run:500 - build linr_v1_filter_mask clause/c0_genre triton build={}
+/workspace/retrieve/.venv/lib/python3.11/site-packages/torch/cuda/__init__.py:1216: UserWarning: Synchronization debug mode is a prototype feature and does not yet detect all synchronizing operations (Triggered internally at /pytorch/torch/csrc/cuda/Module.cpp:989.)
+  torch._C._cuda_set_sync_debug_mode(debug_mode)
+/workspace/retrieve/.venv/lib/python3.11/site-packages/torch/profiler/profiler.py:217: UserWarning: Warning: Profiler clears events at the end of each cycle.Only events from the current cycle will be reported.To keep events across cycles, set acc_events=True.
+  _warn_once(
+2026-09-15 09:00:40.833 | INFO     | retrieval.run:run:622 -   linr_v1_filter_mask clause/c0_genre triton params={} -> ok (489s)
+2026-09-15 09:00:41.488 | INFO     | retrieval.data:build_filters:300 - filter modules (clause): ['torch']
+2026-09-15 09:00:41.874 | INFO     | retrieval.oracle:load_or_build:223 -   loaded oracle from cache: data/goodreads-work-id/gt_d128/oracle_v4_c0_genre_2634b8ef02f0f10c.pt
+2026-09-15 09:00:42.051 | INFO     | retrieval.run:run:500 - build linr_v1_filter_mask clause/c0_genre torch build={}
+2026-09-15 09:00:42.169 | WARNING  | retrieval.run:run:539 - clocks.sm 1410.0 MHz drifted from 1155.0 MHz
+2026-09-15 09:09:29.714 | INFO     | retrieval.run:run:622 -   linr_v1_filter_mask clause/c0_genre torch params={} -> ok (527s)
+2026-09-15 09:09:30.240 | INFO     | retrieval.data:build_filters:300 - filter modules (clause): ['triton']
+2026-09-15 09:09:30.709 | INFO     | retrieval.oracle:load_or_build:223 -   loaded oracle from cache: data/goodreads-work-id/gt_d128/oracle_v4_c0_genre_2634b8ef02f0f10c.pt
+2026-09-15 09:09:30.843 | INFO     | retrieval.run:run:500 - build linr_v2 clause/c0_genre triton build={}
+2026-09-15 09:09:30.879 | WARNING  | retrieval.run:run:539 - clocks.sm 1410.0 MHz drifted from 1155.0 MHz
+2026-09-15 09:17:57.900 | INFO     | retrieval.run:run:622 -   linr_v2 clause/c0_genre triton params={} -> ok (507s)
+2026-09-15 09:17:58.447 | INFO     | retrieval.data:build_filters:300 - filter modules (clause): ['torch']
+2026-09-15 09:17:58.995 | INFO     | retrieval.oracle:load_or_build:223 -   loaded oracle from cache: data/goodreads-work-id/gt_d128/oracle_v4_c0_genre_2634b8ef02f0f10c.pt
+2026-09-15 09:17:59.251 | INFO     | retrieval.run:run:500 - build linr_v2 clause/c0_genre torch build={}
+2026-09-15 09:17:59.342 | WARNING  | retrieval.run:run:539 - clocks.sm 1410.0 MHz drifted from 1155.0 MHz
+2026-09-15 09:31:34.959 | INFO     | retrieval.run:run:622 -   linr_v2 clause/c0_genre torch params={} -> ok (816s)
+2026-09-15 09:31:36.049 | INFO     | retrieval.data:build_filters:300 - filter modules (clause): ['triton']
+2026-09-15 09:31:36.590 | INFO     | retrieval.oracle:load_or_build:223 -   loaded oracle from cache: data/goodreads-work-id/gt_d128/oracle_v4_c0_genre_2634b8ef02f0f10c.pt
+2026-09-15 09:31:36.754 | INFO     | retrieval.run:run:500 - build linr_v3 clause/c0_genre triton build={}
+2026-09-15 09:31:36.868 | WARNING  | retrieval.run:run:539 - clocks.sm 1410.0 MHz drifted from 1155.0 MHz
+2026-09-15 09:39:51.847 | INFO     | retrieval.run:run:622 -   linr_v3 clause/c0_genre triton params={} -> ok (495s)
+2026-09-15 09:39:52.541 | INFO     | retrieval.data:build_filters:300 - filter modules (clause): ['torch']
+2026-09-15 09:39:53.109 | INFO     | retrieval.oracle:load_or_build:223 -   loaded oracle from cache: data/goodreads-work-id/gt_d128/oracle_v4_c0_genre_2634b8ef02f0f10c.pt
+2026-09-15 09:39:53.340 | INFO     | retrieval.run:run:500 - build linr_v3 clause/c0_genre torch build={}
+2026-09-15 09:39:53.416 | WARNING  | retrieval.run:run:539 - clocks.sm 1410.0 MHz drifted from 1155.0 MHz
+2026-09-15 09:53:00.950 | INFO     | retrieval.run:run:622 -   linr_v3 clause/c0_genre torch params={} -> ok (787s)
+2026-09-15 09:53:01.543 | INFO     | retrieval.data:build_filters:300 - filter modules (clause): ['triton']
+2026-09-15 09:53:02.085 | INFO     | retrieval.oracle:load_or_build:223 -   loaded oracle from cache: data/goodreads-work-id/gt_d128/oracle_v4_c0_genre_2634b8ef02f0f10c.pt
+2026-09-15 09:53:02.251 | INFO     | retrieval.run:run:500 - build linr_v4 clause/c0_genre triton build={}
+2026-09-15 09:53:02.296 | WARNING  | retrieval.run:run:539 - clocks.sm 1410.0 MHz drifted from 1155.0 MHz
+2026-09-15 10:01:17.898 | INFO     | retrieval.run:run:622 -   linr_v4 clause/c0_genre triton params={} -> ok (495s)
+2026-09-15 10:01:18.645 | INFO     | retrieval.data:build_filters:300 - filter modules (clause): ['torch']
+2026-09-15 10:01:19.368 | INFO     | retrieval.oracle:load_or_build:223 -   loaded oracle from cache: data/goodreads-work-id/gt_d128/oracle_v4_c0_genre_2634b8ef02f0f10c.pt
+2026-09-15 10:01:19.659 | INFO     | retrieval.run:run:500 - build linr_v4 clause/c0_genre torch build={}
+2026-09-15 10:10:29.344 | INFO     | retrieval.run:run:622 -   linr_v4 clause/c0_genre torch params={} -> ok (549s)
+2026-09-15 10:10:30.138 | INFO     | retrieval.data:build_filters:300 - filter modules (clause): ['triton']
+2026-09-15 10:10:30.817 | INFO     | retrieval.oracle:load_or_build:223 -   loaded oracle from cache: data/goodreads-work-id/gt_d128/oracle_v4_c0_genre_2634b8ef02f0f10c.pt
+2026-09-15 10:10:31.047 | INFO     | retrieval.run:run:500 - build silvertorch clause/c0_genre triton build={}
+2026-09-15 10:10:31.784 | WARNING  | retrieval.run:run:539 - clocks.sm 1410.0 MHz drifted from 1155.0 MHz
+/workspace/retrieve/.venv/lib/python3.11/site-packages/torch/_inductor/compile_fx.py:321: UserWarning: TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. Consider setting `torch.set_float32_matmul_precision('high')` for better performance.
+  warnings.warn(
+2026-09-15 10:18:45.468 | INFO     | retrieval.run:run:622 -   silvertorch clause/c0_genre triton params={'n_probe': 24} -> ok (494s)
+2026-09-15 10:18:45.501 | WARNING  | retrieval.run:run:539 - clocks.sm 1410.0 MHz drifted from 1155.0 MHz
+2026-09-15 10:26:51.379 | INFO     | retrieval.run:run:622 -   silvertorch clause/c0_genre triton params={'n_probe': 32} -> ok (486s)
+2026-09-15 10:26:52.148 | INFO     | retrieval.data:build_filters:300 - filter modules (clause): ['torch']
+2026-09-15 10:26:52.713 | INFO     | retrieval.oracle:load_or_build:223 -   loaded oracle from cache: data/goodreads-work-id/gt_d128/oracle_v4_c0_genre_2634b8ef02f0f10c.pt
+2026-09-15 10:26:52.848 | INFO     | retrieval.run:run:500 - build silvertorch clause/c0_genre torch build={}
+2026-09-15 10:26:53.587 | WARNING  | retrieval.run:run:539 - clocks.sm 1410.0 MHz drifted from 1155.0 MHz
+2026-09-15 10:42:06.540 | INFO     | retrieval.run:run:622 -   silvertorch clause/c0_genre torch params={'n_probe': 24} -> ok (913s)
+2026-09-15 10:42:06.604 | WARNING  | retrieval.run:run:539 - clocks.sm 1410.0 MHz drifted from 1155.0 MHz
+2026-09-15 10:59:52.110 | INFO     | retrieval.run:run:622 -   silvertorch clause/c0_genre torch params={'n_probe': 32} -> ok (1065s)
+2026-09-15 10:59:53.243 | INFO     | retrieval.data:build_filters:300 - filter modules (clause): ['triton']
+2026-09-15 10:59:53.827 | INFO     | retrieval.oracle:load_or_build:223 -   loaded oracle from cache: data/goodreads-work-id/gt_d128/oracle_v4_c0_genre_2634b8ef02f0f10c.pt
+2026-09-15 10:59:54.050 | INFO     | retrieval.run:run:500 - build silvertorch clause/c0_genre official build={}
+2026-09-15 10:59:54.739 | WARNING  | retrieval.run:run:539 - clocks.sm 1410.0 MHz drifted from 1155.0 MHz
+[W915 11:06:29.915372069 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:06:29.915779697 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:06:29.915980386 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:06:35.564 | INFO     | retrieval.run:perf:376 -   graph bs=1 k=100: not_capturable
+[W915 11:06:35.143299743 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:06:35.143431023 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:06:35.143582342 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:06:41.781 | INFO     | retrieval.run:perf:376 -   graph bs=1 k=500: not_capturable
+[W915 11:06:41.360556380 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:06:41.360703100 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:06:41.360856779 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:06:48.083 | INFO     | retrieval.run:perf:376 -   graph bs=1 k=1000: not_capturable
+[W915 11:06:48.917554937 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:06:48.917729266 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:06:48.917925225 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:06:54.432 | INFO     | retrieval.run:perf:376 -   graph bs=8 k=100: not_capturable
+[W915 11:06:54.011205419 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:06:54.011368088 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:06:54.011533107 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:07:00.667 | INFO     | retrieval.run:perf:376 -   graph bs=8 k=500: not_capturable
+[W915 11:07:00.246536706 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:07:00.246681525 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:07:00.246817125 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:07:06.960 | INFO     | retrieval.run:perf:376 -   graph bs=8 k=1000: not_capturable
+[W915 11:07:07.815950000 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:07:07.816803646 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:07:07.816984945 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:07:16.886 | INFO     | retrieval.run:perf:376 -   graph bs=16 k=100: not_capturable
+[W915 11:07:16.464407991 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:07:16.465726484 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:07:16.465831704 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:07:26.564 | INFO     | retrieval.run:perf:376 -   graph bs=16 k=500: not_capturable
+[W915 11:07:26.143087270 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:07:26.143983756 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:07:26.144147915 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:07:36.297 | INFO     | retrieval.run:perf:376 -   graph bs=16 k=1000: not_capturable
+2026-09-15 11:07:36.430 | INFO     | retrieval.run:run:622 -   silvertorch clause/c0_genre official params={'n_probe': 24} -> ok (462s)
+2026-09-15 11:07:36.463 | WARNING  | retrieval.run:run:539 - clocks.sm 1410.0 MHz drifted from 1155.0 MHz
+[W915 11:14:15.920812084 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:14:15.920976003 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:14:15.926206198 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:14:21.681 | INFO     | retrieval.run:perf:376 -   graph bs=1 k=100: not_capturable
+[W915 11:14:21.260233733 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:14:21.260380393 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:14:21.260537732 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:14:27.478 | INFO     | retrieval.run:perf:376 -   graph bs=1 k=500: not_capturable
+[W915 11:14:27.057421551 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:14:27.057555090 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:14:27.057685980 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:14:33.873 | INFO     | retrieval.run:perf:376 -   graph bs=1 k=1000: not_capturable
+[W915 11:14:34.634244798 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:14:34.634415747 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:14:34.634617186 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:14:40.442 | INFO     | retrieval.run:perf:376 -   graph bs=8 k=100: not_capturable
+[W915 11:14:40.021100451 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:14:40.021271931 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:14:40.021430200 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:14:46.752 | INFO     | retrieval.run:perf:376 -   graph bs=8 k=500: not_capturable
+[W915 11:14:46.331384927 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:14:46.331577906 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:14:46.331758675 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:14:53.008 | INFO     | retrieval.run:perf:376 -   graph bs=8 k=1000: not_capturable
+[W915 11:14:53.722172933 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:14:53.813695727 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:14:53.813915846 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:15:03.700 | INFO     | retrieval.run:perf:376 -   graph bs=16 k=100: not_capturable
+[W915 11:15:03.278671354 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:15:03.279677619 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:15:03.279814928 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:15:14.182 | INFO     | retrieval.run:perf:376 -   graph bs=16 k=500: not_capturable
+[W915 11:15:14.761458674 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:15:14.762351340 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+[W915 11:15:14.762496029 CUDAFunctions.cpp:162] Warning: called a synchronizing CUDA operation (function warn_or_error_on_sync)
+2026-09-15 11:15:24.647 | INFO     | retrieval.run:perf:376 -   graph bs=16 k=1000: not_capturable
+2026-09-15 11:15:24.780 | INFO     | retrieval.run:run:622 -   silvertorch clause/c0_genre official params={'n_probe': 32} -> ok (468s)
+2026-09-15 11:15:25.174 | INFO     | retrieval.run:run:630 - done: {'ok': 14}
+goodreads/filter: {'ok': 14}
