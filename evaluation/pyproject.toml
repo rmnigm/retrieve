@@ -16,6 +16,7 @@ dependencies = [
     "pyyaml>=6.0",
     "wandb>=0.16",
     "sentence-transformers>=3.0",
+    "matplotlib>=3.8",
 ]
 
 [project.scripts]
