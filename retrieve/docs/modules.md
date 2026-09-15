@@ -103,19 +103,25 @@ Parameters:
 
 Constraint: `n_probe * max_cluster_size >= k` (raised at `register_index` otherwise).
 
-`build_silvertorch(item_embs, k, *, n_lists, n_probe, filter_mode="none", ...)` is a convenience
-that constructs the module and calls `register_index` in one step.
+`retrieve.modules.silvertorch.build_silvertorch(item_embs, k, *, n_lists, n_probe,
+filter_mode="none", ...)` is a convenience that constructs the module and calls `register_index`
+in one step (no longer exported at the top level; a fluent `SilverTorchBuilder` replaces it next).
+`OfficialConfig` is exported at the top level.
 
-## KMeansTorch
+## KMeans (`retrieve.indexing`)
 
 ```python
-KMeansTorch(n_lists, n_iter=10, seed=0)
-centroids, assignments = KMeansTorch(n_lists=1024).fit(item_embs)
+from retrieve.indexing import KMeans
+
+KMeans(n_lists, n_iter=10, seed=0)
+centroids, assignments = KMeans(n_lists=1024).fit(item_embs)
+assignments = KMeans.assign(item_embs, centroids)
 ```
 
 Lloyd's k-means with chunked assignment; returns `(centroids [n_lists, D], assignments [N])`.
 `SilverTorch` uses it internally — call it directly only if you want the clustering for your own
-index build.
+index build (`retrieve.indexing.padded_layout` / `csr_layout` turn an assignment into the two IVF
+layouts). `KMeansTorch` was its 0.1 name.
 
 `fit` is deterministic: same `seed` and same input give bit-identical centroids and assignments
 on repeated calls, on CPU and on CUDA. The centroid update sums each cluster with a float64

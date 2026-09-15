@@ -19,8 +19,8 @@ import copy
 import pytest
 import torch
 
-from retrieve.layers.silvertorch import SilverTorch, build_silvertorch
-from retrieve.layers.utils.retrieval import FullScanKNN
+from retrieve.modules.knn import FullScanKNN
+from retrieve.modules.silvertorch import SilverTorch, build_silvertorch
 from tests.conftest import (
     assert_recall_monotone,
     assert_topk_id_sets_match,

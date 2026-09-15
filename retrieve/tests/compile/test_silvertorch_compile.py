@@ -14,7 +14,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.layers.silvertorch import build_silvertorch
+from retrieve.modules.silvertorch import build_silvertorch
 from tests.conftest import (
     make_attrs,
     make_index,

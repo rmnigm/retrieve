@@ -4,13 +4,8 @@ from __future__ import annotations
 
 import torch
 
-from retrieve.layers.filters import (
-    BloomFilter,
-    ExactAttributeFilter,
-    combine_indices,
-    combine_masks,
-)
-from retrieve.layers.utils.compact import compact_mask
+from retrieve.functional import combine_indices, combine_masks, compact_mask
+from retrieve.modules import BloomFilter, ExactAttributeFilter
 from tests.conftest import make_attrs, make_query_attrs
 
 

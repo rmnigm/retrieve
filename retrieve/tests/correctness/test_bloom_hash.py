@@ -9,8 +9,8 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.layers.filters import BloomFilter, bloom_hash
-from retrieve.layers.filters.bloom_hash import (
+from retrieve.indexing import bloom_hash
+from retrieve.indexing.bloom_hash import (
     build_query_signatures,
     build_signatures,
     build_transposed_sigs,
@@ -18,7 +18,8 @@ from retrieve.layers.filters.bloom_hash import (
     generate_seeds,
     words_per_cluster,
 )
-from retrieve.layers.silvertorch import build_silvertorch
+from retrieve.modules import BloomFilter
+from retrieve.modules.silvertorch import build_silvertorch
 from tests.conftest import make_attrs, make_index, make_query_attrs
 from tests.parity.conftest import make_probe_family
 

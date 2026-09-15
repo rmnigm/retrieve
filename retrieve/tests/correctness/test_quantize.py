@@ -5,10 +5,10 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.layers.utils.quantize import (
+from retrieve.functional import popcount_int64
+from retrieve.indexing.quantize import (
     _build_oporp,
     _pack_signs_to_int64,
-    popcount_int64,
     project_oporp_1bit_query,
     project_simhash_1bit_query,
     quantize_int8,

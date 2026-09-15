@@ -1,22 +1,15 @@
 from retrieve.interfaces import FilterModule, LinrBackend, RetrievalModule, SilverTorchBackend
-from retrieve.layers import (
+from retrieve.modules import (
     BloomFilter,
     ExactAttributeFilter,
     FullScanKNN,
-    KMeansTorch,
+    OfficialConfig,
     OneBitKNN,
     PostfilterKNN,
     PostfilterKNNInt8,
     PrefilterKNN,
     SilverTorch,
     SimHashKNN,
-    build_silvertorch,
-    combine_indices,
-    combine_masks,
-    post_filter_topk,
-    quantize_int8,
-    quantize_oporp_1bit,
-    quantize_simhash_1bit,
 )
 
 __all__ = [
@@ -24,8 +17,8 @@ __all__ = [
     "ExactAttributeFilter",
     "FilterModule",
     "FullScanKNN",
-    "KMeansTorch",
     "LinrBackend",
+    "OfficialConfig",
     "OneBitKNN",
     "PostfilterKNN",
     "PostfilterKNNInt8",
@@ -34,11 +27,4 @@ __all__ = [
     "SilverTorch",
     "SilverTorchBackend",
     "SimHashKNN",
-    "build_silvertorch",
-    "combine_indices",
-    "combine_masks",
-    "post_filter_topk",
-    "quantize_int8",
-    "quantize_oporp_1bit",
-    "quantize_simhash_1bit",
 ]

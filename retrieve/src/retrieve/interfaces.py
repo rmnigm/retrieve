@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import abc
+import importlib
+from types import ModuleType
 from typing import Literal, get_args
 
 from torch import Tensor, nn
@@ -19,6 +21,25 @@ def check_backend(backend: str, allowed: object) -> None:
     if backend not in get_args(allowed):
         expected = ", ".join(map(repr, get_args(allowed)))
         raise ValueError(f"unknown backend {backend!r}; expected one of {expected}")
+
+
+_OPS_NAMESPACE = {
+    "triton": "retrieve.ops.triton",
+    "torch": "retrieve.ops.reference",
+    "official": "retrieve.ops.official",
+}
+_OPS_LOADED: dict[str, ModuleType] = {}
+
+
+def ops_for(backend: str) -> ModuleType:
+    """The op namespace a backend scores with (``retrieve.ops.triton`` / ``.reference`` /
+    ``.official``), imported on first use so ``import retrieve`` registers no kernels. Modules
+    call it once in ``__init__`` (the import, and its errors, happen at construction) and again
+    in ``forward`` (a dict hit; not stored on the instance, which must stay deep-copyable)."""
+    if backend in _OPS_LOADED:
+        return _OPS_LOADED[backend]
+    _OPS_LOADED[backend] = importlib.import_module(_OPS_NAMESPACE[backend])
+    return _OPS_LOADED[backend]
 
 
 class RetrievalModule(nn.Module, abc.ABC):
@@ -60,7 +81,7 @@ class FilterModule(nn.Module, abc.ABC):
         self,
         query_clause_attrs: Tensor,
     ) -> tuple[Tensor, Tensor]:
-        from retrieve.layers.utils.compact import compact_mask
+        from retrieve.functional import compact_mask
 
         return compact_mask(self.evaluate_mask(query_clause_attrs))
 
