@@ -1,0 +1,936 @@
+{
+ "n_items": 797084,
+ "n_kept_rows": 9859,
+ "candidate_set": {
+  "rows_with_different_counts": 0,
+  "rows_with_different_ids": 0,
+  "first_difference": null
+ },
+ "nondeterministic_repeat_on_chunk0": {
+  "triton": 0,
+  "torch": 0
+ },
+ "k_max": 1000,
+ "harness_metrics": {
+  "jaccard_vs_first@100": 0.9987427464189353,
+  "jaccard_vs_first@500": 0.9988785679531427,
+  "jaccard_vs_first@1000": 0.9988775426205143,
+  "score_max_abs_diff": 0.009765625,
+  "score_mean_abs_diff": 0.0007994358893483877
+ },
+ "rows_top100_differ": 624,
+ "arithmetic_chunk0": {
+  "P": 442864,
+  "score_magnitude": {
+   "max": 31.370335508603603,
+   "median": 12.116901370492997
+  },
+  "triton_vs_fp64": {
+   "max_abs": 0.027644284127745777,
+   "max_in_fp16_ulps": 2888.53125,
+   "mean_abs": 0.0033623270641187173
+  },
+  "torch_bmm_fp16out_vs_fp64": {
+   "max_abs": 0.00782464595977217,
+   "max_in_fp16_ulps": 0.615478515625,
+   "mean_abs": 0.0020287293475029595
+  },
+  "fp16_round_of_fp64_vs_fp64": {
+   "max_abs": 0.007813379168510437,
+   "max_in_fp16_ulps": 0.5000609159469604,
+   "mean_abs": 0.002028726178651757
+  },
+  "fp32_sequential_vs_fp64": {
+   "max_abs": 1.6145873814821243e-05,
+   "max_in_fp16_ulps": 0.56640625,
+   "mean_abs": 1.6375445506640182e-06
+  },
+  "fp16_sequential_vs_fp64": {
+   "max_abs": 0.15522776287980378,
+   "max_in_fp16_ulps": 4791.46875,
+   "mean_abs": 0.013576541303536869
+  },
+  "triton_scores_all_fp16_representable": true,
+  "torch_equals_fp16_round_of_fp64": false,
+  "torch_equals_fp16_round_of_fp32seq": false,
+  "torch_vs_fp16_round_of_fp64_max_ulps": 1.0,
+  "triton_vs_fp16_sequential_max_ulps": 7680.0,
+  "triton_output_dtype": "torch.float32",
+  "torch_output_dtype": "torch.float16"
+ },
+ "ptx_op_counts": {
+  "add.rn.f16": 0,
+  "add.f16": 8,
+  "fma.rn.f16": 0,
+  "mul.rn.f16": 0,
+  "mul.f16": 0,
+  "add.rn.f32": 0,
+  "add.f32": 0,
+  "fma.rn.f32": 0,
+  "mul.rn.f32": 0,
+  "mul.f32": 0,
+  "cvt.f32.f16": 1,
+  "cvt.rn.f16.f32": 0
+ },
+ "boundary": {
+  "rows_examined": 624,
+  "differing_items_total": 1252,
+  "differing_items_beyond_one_fp16_ulp_of_boundary": 483,
+  "max_distance_from_boundary_in_fp16_ulps": 1438.2052612304688,
+  "detail_first_rows": [
+   {
+    "row": 17,
+    "count": 162710,
+    "score_rank100": -0.12287022289820015,
+    "fp16_ulp_at_rank100": 6.103515625e-05,
+    "gap_rank100_to_101": 0.0007138128858059645,
+    "gap_in_ulps": 11.695110321044922,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      11.695110321044922,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 41,
+    "count": 162710,
+    "score_rank100": -1.098602682352066,
+    "fp16_ulp_at_rank100": 0.0009765625,
+    "gap_rank100_to_101": 0.0006779726063541602,
+    "gap_in_ulps": 0.6942439489066601,
+    "candidates_within_one_ulp_of_rank100": 2,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      0.6942439489066601,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 69,
+    "count": 255458,
+    "score_rank100": -0.6507592159323394,
+    "fp16_ulp_at_rank100": 0.00048828125,
+    "gap_rank100_to_101": 0.0018085879273712635,
+    "gap_in_ulps": 3.7039880752563477,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      3.7039880752563477,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 107,
+    "count": 442864,
+    "score_rank100": 0.6692152816103771,
+    "fp16_ulp_at_rank100": 0.00048828125,
+    "gap_rank100_to_101": 0.000673057627864182,
+    "gap_in_ulps": 1.3784220218658447,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      1.3784220218658447,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 150,
+    "count": 442864,
+    "score_rank100": 1.6647084112628363,
+    "fp16_ulp_at_rank100": 0.0009765625,
+    "gap_rank100_to_101": 0.0013349800719879568,
+    "gap_in_ulps": 1.3670195937156677,
+    "candidates_within_one_ulp_of_rank100": 2,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.8919201493263245,
+      98
+     ],
+     [
+      1.3670195937156677,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 161,
+    "count": 442864,
+    "score_rank100": 0.7340188219677657,
+    "fp16_ulp_at_rank100": 0.00048828125,
+    "gap_rank100_to_101": 0.003052490879781544,
+    "gap_in_ulps": 6.2515013217926025,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      6.2515013217926025,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 162,
+    "count": 117470,
+    "score_rank100": -0.7043826882727444,
+    "fp16_ulp_at_rank100": 0.00048828125,
+    "gap_rank100_to_101": 0.00022236551740206778,
+    "gap_in_ulps": 0.4554045796394348,
+    "candidates_within_one_ulp_of_rank100": 3,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      0.5617260932922363,
+      101
+     ]
+    ]
+   },
+   {
+    "row": 174,
+    "count": 195023,
+    "score_rank100": -1.9269329730886966,
+    "fp16_ulp_at_rank100": 0.0009765625,
+    "gap_rank100_to_101": 0.0006986211519688368,
+    "gap_in_ulps": 0.7153880596160889,
+    "candidates_within_one_ulp_of_rank100": 2,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      0.7153880596160889,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 203,
+    "count": 442864,
+    "score_rank100": -1.0640636878088117,
+    "fp16_ulp_at_rank100": 0.0009765625,
+    "gap_rank100_to_101": 0.0006019453285261989,
+    "gap_in_ulps": 0.6163920164108276,
+    "candidates_within_one_ulp_of_rank100": 2,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      0.6163920164108276,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 206,
+    "count": 214177,
+    "score_rank100": -0.9970697180833668,
+    "fp16_ulp_at_rank100": 0.00048828125,
+    "gap_rank100_to_101": 0.0017571380594745278,
+    "gap_in_ulps": 3.598618745803833,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      3.598618745803833,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 222,
+    "count": 162710,
+    "score_rank100": -0.5358705901890062,
+    "fp16_ulp_at_rank100": 0.00048828125,
+    "gap_rank100_to_101": 6.489449879154563e-05,
+    "gap_in_ulps": 0.13290393352508545,
+    "candidates_within_one_ulp_of_rank100": 2,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      0.13290393352508545,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 223,
+    "count": 31497,
+    "score_rank100": -1.9641385823488235,
+    "fp16_ulp_at_rank100": 0.0009765625,
+    "gap_rank100_to_101": 0.00035009754355996847,
+    "gap_in_ulps": 0.3584998846054077,
+    "candidates_within_one_ulp_of_rank100": 2,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      0.3584998846054077,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 226,
+    "count": 195023,
+    "score_rank100": -1.2493262935895473,
+    "fp16_ulp_at_rank100": 0.0009765625,
+    "gap_rank100_to_101": 0.0022813042160123587,
+    "gap_in_ulps": 2.3360555171966553,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      2.3360555171966553,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 232,
+    "count": 255458,
+    "score_rank100": 0.3079263686668128,
+    "fp16_ulp_at_rank100": 0.000244140625,
+    "gap_rank100_to_101": 0.00037948903627693653,
+    "gap_in_ulps": 1.554387092590332,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      1.554387092590332,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 235,
+    "count": 117470,
+    "score_rank100": -0.36559914774261415,
+    "fp16_ulp_at_rank100": 0.000244140625,
+    "gap_rank100_to_101": 0.0026653402019292116,
+    "gap_in_ulps": 10.91723346710205,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      10.91723346710205,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 252,
+    "count": 195023,
+    "score_rank100": -1.2276990402315278,
+    "fp16_ulp_at_rank100": 0.0009765625,
+    "gap_rank100_to_101": 0.0012619888584595174,
+    "gap_in_ulps": 1.2922765910625458,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      1.2922765910625458,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 262,
+    "count": 162710,
+    "score_rank100": -1.4812213787809014,
+    "fp16_ulp_at_rank100": 0.0009765625,
+    "gap_rank100_to_101": 0.0013882541097700596,
+    "gap_in_ulps": 1.421572208404541,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      1.421572208404541,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 291,
+    "count": 442864,
+    "score_rank100": 0.2830757880874444,
+    "fp16_ulp_at_rank100": 0.000244140625,
+    "gap_rank100_to_101": 0.0012159024190623313,
+    "gap_in_ulps": 4.980336308479309,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      4.980336308479309,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 301,
+    "count": 442864,
+    "score_rank100": -1.4196475744247437,
+    "fp16_ulp_at_rank100": 0.0009765625,
+    "gap_rank100_to_101": 0.0004374580457806587,
+    "gap_in_ulps": 0.44795703887939453,
+    "candidates_within_one_ulp_of_rank100": 3,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      0.5854387283325195,
+      98
+     ]
+    ]
+   },
+   {
+    "row": 306,
+    "count": 74598,
+    "score_rank100": 0.5741379505489022,
+    "fp16_ulp_at_rank100": 0.00048828125,
+    "gap_rank100_to_101": 0.00029349245596677065,
+    "gap_in_ulps": 0.6010725498199463,
+    "candidates_within_one_ulp_of_rank100": 2,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      0.6010725498199463,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 367,
+    "count": 195023,
+    "score_rank100": -0.39583869744092226,
+    "fp16_ulp_at_rank100": 0.000244140625,
+    "gap_rank100_to_101": 0.00041518453508615494,
+    "gap_in_ulps": 1.7005958557128906,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      1.7005958557128906,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 375,
+    "count": 255458,
+    "score_rank100": 1.8433088371530175,
+    "fp16_ulp_at_rank100": 0.0009765625,
+    "gap_rank100_to_101": 0.00023494381457567215,
+    "gap_in_ulps": 0.24058246612548828,
+    "candidates_within_one_ulp_of_rank100": 3,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      0.24058246612548828,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 420,
+    "count": 162710,
+    "score_rank100": 1.8139054748753551,
+    "fp16_ulp_at_rank100": 0.0009765625,
+    "gap_rank100_to_101": 0.0008524600707460195,
+    "gap_in_ulps": 0.872919112443924,
+    "candidates_within_one_ulp_of_rank100": 2,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      0.872919112443924,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 445,
+    "count": 442864,
+    "score_rank100": -0.001084324554540217,
+    "fp16_ulp_at_rank100": 9.5367431640625e-07,
+    "gap_rank100_to_101": 0.0013715794193558395,
+    "gap_in_ulps": 1438.2052612304688,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      134.9019775390625,
+      98
+     ],
+     [
+      1438.2052612304688,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 449,
+    "count": 255458,
+    "score_rank100": -0.3258809861727059,
+    "fp16_ulp_at_rank100": 0.000244140625,
+    "gap_rank100_to_101": 0.0007451713463524356,
+    "gap_in_ulps": 3.0522218346595764,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      3.0522218346595764,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 472,
+    "count": 442864,
+    "score_rank100": 0.23921005753800273,
+    "fp16_ulp_at_rank100": 0.0001220703125,
+    "gap_rank100_to_101": 0.0007153653655223025,
+    "gap_in_ulps": 5.860273074358702,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      5.860273074358702,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 476,
+    "count": 162710,
+    "score_rank100": -1.0226319571956992,
+    "fp16_ulp_at_rank100": 0.0009765625,
+    "gap_rank100_to_101": 0.0008177729323506355,
+    "gap_in_ulps": 0.8373994827270508,
+    "candidates_within_one_ulp_of_rank100": 2,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      0.8373994827270508,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 515,
+    "count": 442864,
+    "score_rank100": 0.952002867590636,
+    "fp16_ulp_at_rank100": 0.00048828125,
+    "gap_rank100_to_101": 0.00020269304513931274,
+    "gap_in_ulps": 0.4151153564453125,
+    "candidates_within_one_ulp_of_rank100": 2,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      0.4151153564453125,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 517,
+    "count": 442864,
+    "score_rank100": -0.29561961319996044,
+    "fp16_ulp_at_rank100": 0.000244140625,
+    "gap_rank100_to_101": 0.0011595396208576858,
+    "gap_in_ulps": 4.749474287033081,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      4.749474287033081,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 521,
+    "count": 442864,
+    "score_rank100": -0.015671042259782553,
+    "fp16_ulp_at_rank100": 1.52587890625e-05,
+    "gap_rank100_to_101": 0.000725938007235527,
+    "gap_in_ulps": 47.5750732421875,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      47.5750732421875,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 526,
+    "count": 442864,
+    "score_rank100": 0.6113824499770999,
+    "fp16_ulp_at_rank100": 0.00048828125,
+    "gap_rank100_to_101": 3.9285048842430115e-05,
+    "gap_in_ulps": 0.08045578002929688,
+    "candidates_within_one_ulp_of_rank100": 2,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.08045578002929688,
+      100
+     ],
+     [
+      1.7931938171386719,
+      98
+     ]
+    ]
+   },
+   {
+    "row": 562,
+    "count": 207192,
+    "score_rank100": 0.3547075082315132,
+    "fp16_ulp_at_rank100": 0.000244140625,
+    "gap_rank100_to_101": 0.0011132321087643504,
+    "gap_in_ulps": 4.559798717498779,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      4.559798717498779,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 564,
+    "count": 255458,
+    "score_rank100": 1.1889181004371494,
+    "fp16_ulp_at_rank100": 0.0009765625,
+    "gap_rank100_to_101": 0.0006464231992140412,
+    "gap_in_ulps": 0.6619373559951782,
+    "candidates_within_one_ulp_of_rank100": 3,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      0.6619373559951782,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 574,
+    "count": 162710,
+    "score_rank100": -0.6173760490491986,
+    "fp16_ulp_at_rank100": 0.00048828125,
+    "gap_rank100_to_101": 0.001564954232890159,
+    "gap_in_ulps": 3.2050262689590454,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      3.2050262689590454,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 597,
+    "count": 442864,
+    "score_rank100": 0.2954160065855831,
+    "fp16_ulp_at_rank100": 0.000244140625,
+    "gap_rank100_to_101": 0.0006005649920552969,
+    "gap_in_ulps": 2.459914207458496,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      2.459914207458496,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 599,
+    "count": 442864,
+    "score_rank100": 0.03728670906275511,
+    "fp16_ulp_at_rank100": 3.0517578125e-05,
+    "gap_rank100_to_101": 0.0004918817430734634,
+    "gap_in_ulps": 16.11798095703125,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      16.11798095703125,
+      100
+     ],
+     [
+      44.062469482421875,
+      98
+     ]
+    ]
+   },
+   {
+    "row": 606,
+    "count": 214177,
+    "score_rank100": -0.4355707138311118,
+    "fp16_ulp_at_rank100": 0.000244140625,
+    "gap_rank100_to_101": 4.5748340198770165e-05,
+    "gap_in_ulps": 0.1873852014541626,
+    "candidates_within_one_ulp_of_rank100": 2,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      0.1873852014541626,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 621,
+    "count": 255458,
+    "score_rank100": 1.9507950241677463,
+    "fp16_ulp_at_rank100": 0.0009765625,
+    "gap_rank100_to_101": 0.0025394009426236153,
+    "gap_in_ulps": 2.600346565246582,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      2.600346565246582,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 646,
+    "count": 255458,
+    "score_rank100": -0.06565263215452433,
+    "fp16_ulp_at_rank100": 6.103515625e-05,
+    "gap_rank100_to_101": 0.00032967422157526016,
+    "gap_in_ulps": 5.4013824462890625,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      5.4013824462890625,
+      100
+     ]
+    ]
+   },
+   {
+    "row": 648,
+    "count": 207192,
+    "score_rank100": 0.543346636579372,
+    "fp16_ulp_at_rank100": 0.00048828125,
+    "gap_rank100_to_101": 0.001260186661966145,
+    "gap_in_ulps": 2.580862283706665,
+    "candidates_within_one_ulp_of_rank100": 1,
+    "n_items_only_in_torch": 1,
+    "n_items_only_in_triton": 1,
+    "differing_items_[dist_from_boundary_in_ulps, truth_rank]": [
+     [
+      0.0,
+      99
+     ],
+     [
+      2.580862283706665,
+      100
+     ]
+    ]
+   }
+  ]
+ },
+ "boundary_sample_500_rows": {
+  "gap_rank100_in_fp16_ulps": {
+   "median": 18.040502548217773,
+   "p10": 2.206594705581665,
+   "min": 0.07051658630371094,
+   "frac_below_1ulp": 0.04816955700516701
+  },
+  "candidates_within_one_ulp_of_rank100": {
+   "median": 1.0,
+   "max": 3
+  }
+ },
+ "elapsed_s": 27.712542295455933
+}
