@@ -54,8 +54,7 @@ Triton is the default backend; modules that have a pure-PyTorch path accept
 accepts `backend="official"` (Meta's kernels, eager-only). The package is two
 public layers — `retrieve.modules` (re-exported at the top level) and
 `retrieve.ops` — plus `retrieve.indexing` (index-build math) and
-`retrieve.functional` (query-time glue); the 0.1 paths `retrieve.layers` /
-`retrieve.kernels` still import under a `DeprecationWarning` and go away next.
+`retrieve.functional` (query-time glue).
 
 ## Docs
 

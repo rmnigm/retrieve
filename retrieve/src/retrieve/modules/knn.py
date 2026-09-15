@@ -1,11 +1,10 @@
 """Dense and sparse KNN primitives over fp16 / int8 / fp32 item tables.
 
-Precision contract: ``PostfilterKNN`` and ``PrefilterKNN`` store fp16. The cuBLAS paths
-(``PostfilterKNN``, ``PrefilterKNN(backend="torch")``) accumulate in fp32 and round the score to
-fp16; ``PrefilterKNN(backend="triton")`` multiplies and reduces in fp16 (Triton's ``tl.sum`` keeps
-the input dtype) into an fp32 buffer — measured in plan L4, where the two V2 backends disagree on
-6 % of goodreads rows at the rank-100 boundary. ``PostfilterKNNInt8`` is int32 end to end;
-``FullScanKNN`` keeps the input dtype."""
+Precision contract: ``PostfilterKNN`` and ``PrefilterKNN`` store fp16 and accumulate dots in fp32
+— cuBLAS (``PostfilterKNN``, ``PrefilterKNN(backend="torch")``) rounds the score to fp16 on output,
+the fused Triton kernel (``PrefilterKNN(backend="triton")``) writes it as fp32 (plan L5; the two
+differ only by that output rounding). ``PostfilterKNNInt8`` is int32 end to end; ``FullScanKNN``
+keeps the input dtype."""
 
 from __future__ import annotations
 
@@ -118,9 +117,8 @@ class PrefilterKNN(RetrievalModule):
     """Sparse-rescore KNN with selectable backend. Given ``candidate_ids: [B, P]`` (and optional
     per-row ``counts: [B]``) it scores only the passing rows and top-Ks them back to global ids;
     without ``candidate_ids`` it falls back to a dense full matmul. ``backend="triton"`` fuses
-    the sparse path (no ``[B, P, D]`` intermediate). Inputs are stored fp16; ``"torch"`` scores
-    with an fp32-accumulating ``bmm`` rounded to fp16, ``"triton"`` with an fp16 reduction
-    written as fp32 (module docstring).
+    the sparse path (no ``[B, P, D]`` intermediate); inputs are stored fp16 with fp32-accumulated
+    dots on both backends (module docstring).
 
     Decoupled from filtering — callers compute ``(candidate_ids, counts)`` upstream."""
 
