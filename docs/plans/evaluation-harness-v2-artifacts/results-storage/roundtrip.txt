@@ -1,0 +1,26 @@
+Round trip of pinkmeme/eval-results, 2026-09-15, CPU only (CUDA_VISIBLE_DEVICES="").
+
+Three `bench upload --verify` runs (each checks its own subtree's sha256 against the
+manifest it just wrote), then one independent full-repo download into a temp dir on the
+VM's LOCAL disk (/tmp, 262 GB free — never /workspace, which is a ~26 GB quota) and a
+`diff -r` against the source trees.
+
+  $ T=$(mktemp -d /tmp/results-roundtrip-XXXX)
+  $ snapshot_download('pinkmeme/eval-results', repo_type='dataset', local_dir=$T)
+  $ diff -r $T/c4 docs/plans/evaluation-harness-v2-artifacts/c4/results   --exclude=MANIFEST.json
+  c4 IDENTICAL
+  $ diff -r $T/c5 docs/plans/evaluation-package-layout-artifacts/c5/results --exclude=MANIFEST.json
+  c5 IDENTICAL
+  $ diff -r $T/b3 docs/plans/official-silvertorch-artifacts/b3/e2e        --exclude=MANIFEST.json
+  b3 IDENTICAL
+  $ du -sh $T
+  36M
+
+Per-subtree --verify output:
+  c4: round trip verified: 4 files, sha256 equal
+  c5: round trip verified: 3 files, sha256 equal
+  b3: round trip verified: 8 files, sha256 equal
+
+The repo is PRIVATE (api.repo_info(...).private is True, checked after the last upload).
+All three subtrees report NOT CITABLE; the reasons are in each MANIFEST.json here and in
+hub-README.md.

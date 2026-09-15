@@ -133,7 +133,10 @@ def _samples(results_dir: Path) -> list[dict[str, Any]]:
 MAIN_BRANCHES = ("development", "main")  # rule 2: numbers from a branch are not paper material
 
 
-def _provenance(recs: list[dict[str, Any]], gate: str | None) -> dict[str, Any]:
+def provenance(recs: list[dict[str, Any]], gate: str | None) -> dict[str, Any]:
+    """The rule-2 verdict over a set of records. Shared with ``bench upload``, which puts
+    it in every published ``MANIFEST.json`` so a Hub copy cannot claim more than the
+    tables would."""
     env = [r.get("env") or {} for r in recs]
     status = Counter(r.get("status", "ok") for r in recs)
     dirty = [r for r, e in zip(recs, env, strict=True) if e.get("dirty")]
@@ -928,7 +931,7 @@ class Ctx:
         self.flat, self.rows = _load(self.results_dir, self.out)
         self.recs = _latest(self.results_dir)
         self.samples = _samples(self.results_dir)
-        self.prov = _provenance(self.recs, gate)
+        self.prov = provenance(self.recs, gate)
         self.written: list[Path] = [self.flat]
         for k, v in sel.items():
             setattr(self, k, v)
@@ -981,4 +984,4 @@ def report(results, out, gate, only, dim, k, bs, compare_bs, mode, backend, swee
                    c.prov["blockers"])))
 
 
-__all__ = ["ARTIFACTS", "generate", "report"]
+__all__ = ["ARTIFACTS", "generate", "provenance", "report"]

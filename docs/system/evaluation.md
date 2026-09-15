@@ -189,7 +189,7 @@ cascade.
 | [`run.py`](../../evaluation/bench/run.py) | `run(jobs, out_dir=...)` — the cell loop; `MODES`, `QUALITY_CHUNK = 16`, `EXACT_ALGOS`, `PERF_STAT_KEYS`, `CLOCK_DRIFT` |
 | [`cli.py`](../../evaluation/bench/cli.py) | `bench run` / `campaign` / `check` / `upload` / `report` |
 | [`report.py`](../../evaluation/bench/report.py) | `bench report`: `flat.csv`, the thesis and paper tables as LaTeX, the figures, the methodology paragraph and `report.md`; the `ARTIFACTS` dispatch table, the citability verdict and the `PAPER_REPORTED` constants. See [Report](#report-reportpy) |
-| [`upload.py`](../../evaluation/bench/upload.py) | `bench upload`: mirror `results/` to a HF dataset repo |
+| [`upload.py`](../../evaluation/bench/upload.py) | `bench upload`: publish a results tree to the HF results repo with a `MANIFEST.json` (provenance + a sha256 per file) and a generated README. See [Results storage](#results-storage) |
 
 ### Algorithms and the `PATHS` table
 
@@ -319,7 +319,8 @@ bench campaign --suite quality|filter|deep|all [--dataset D]* [--dim N]* [--mode
                [--skip-quality] [--skip-perf] [--profile] [--out results] [--resume|--force]
                [--config-dir config] [--timeout 6.0]
 bench check    --dataset D [--dim N]* [--config-dir config]   # eval_datasets.layout.validate_layout
-bench upload   --repo-id user/repo [--results results] [--private] [--dry-run]
+bench upload   [--repo-id user/repo] [--results DIR] [--path-in-repo PREFIX] [--gate STEP]
+               [--private|--public] [--verify] [--dry-run]
 bench report   [results] [--out DIR] [--gate STEP] [--only NAME]* [--dim 128] [--k 100]
                [--bs 1] [--compare-bs 16] [--mode eager|graph] [--backend triton]
                [--sweep W] [--batch-dataset D] [--budget-ms MS]*
@@ -599,6 +600,74 @@ balanced environments, balanced braces and math, the thesis's labels
 present, no unescaped `_` outside math, `\texttt` and `\label`), never
 compiled.
 
+## Results storage
+
+Three destinations, decided by size and by how expensive the file is to
+recreate. The records are the product of this project and the only thing the
+paper may cite (CLAUDE.md rule 2), and they currently live on a rented box whose
+`/workspace` volume is a ~26 GB quota — so where each output goes is a rule, not
+a habit.
+
+| what | where | why |
+|---|---|---|
+| `results/<suite>/<dataset>-d<dim>.jsonl` (the records), `flat.csv`, `report/` (`*.tex`, `report.md`), the validation record in the plan | **git**, under `docs/plans/<plan>-artifacts/` while a step is in flight and `evaluation/results/` for the campaign | kilobytes to a few MB, line-diffable, and they are the evidence. 79 records so far are 750 KB in total |
+| `*.samples.jsonl` (the per-call latency vectors), `.perkernel/` profiles, figures | **HF Hub**, `pinkmeme/eval-results`, private | ~60× the records: 45 MB of sidecars behind those same 750 KB of records, and nobody reads a diff of them. Regenerable only by re-running the cell on the GPU |
+| `results/_parity/*.npz` (600–680 MB per run), `results/_logs/` | **nowhere** — deleted | rewritten by every run, and the parity *verdict* (`jaccard_vs_first@k`, `score_max_abs_diff`) is already inside the record. C4, C5 and B3 each deleted theirs; `.gitignore` covers both directories and `bench upload` skips every `_`-prefixed path part |
+
+Both halves stay in step: the Hub copy of a subtree carries the sha256 of every
+file it holds, and that manifest is committed next to the plan
+([results-storage/](../plans/evaluation-harness-v2-artifacts/results-storage/)),
+so git can prove what the Hub has without downloading it.
+
+### `bench upload`
+
+One invocation publishes one `--path-in-repo` subtree of one results tree:
+
+```bash
+uv run bench upload --results results --path-in-repo d1-a --verify
+uv run bench upload --results ../docs/plans/official-silvertorch-artifacts/b3/e2e \
+    --path-in-repo b3 --dry-run
+```
+
+`--repo-id` defaults to `upload.RESULTS_REPO` = `pinkmeme/eval-results` — the
+registry entry for *results*, beside `eval_datasets.hub.EVAL_REPOS` for
+*datasets*. The listing is `upload.files`: the tree minus anything under a
+`_`-prefixed path part and minus the two files a previous upload generated.
+Everything goes up in **one commit** (`create_commit`, so a failure leaves no
+half-published subtree), together with:
+
+- **`<prefix>/MANIFEST.json`** — `report.provenance` over the records being
+  uploaded (`code_version`, `commit`, `git_branch`, `schema_version`, `gpu`,
+  `host`, the run window, the status counts, the `unstable` count, the gate and
+  the citability verdict with its reasons) plus `{path, bytes, sha256}` per
+  file. It is the same function `bench report` calls, so the Hub copy cannot
+  claim more than the tables would.
+- **`README.md` at the repo root** — regenerated from *every* manifest in the
+  repo (the existing ones are fetched first), so a second upload does not drop
+  the first subtree from the front page. Generated from the records, never
+  hand-written.
+
+**Citability survives the trip.** `--gate STEP` is the only route to
+`"citable": true`, and the evidence vetoes it exactly as in
+[Report](#report-reportpy): a `failed` or `partial` record, an `env.dirty` one,
+or one whose `env.git_branch` is not `development` / `main` keeps the verdict at
+`false` and lists why. Read a downloaded file's `MANIFEST.json` before believing
+a number came from a campaign.
+
+**Private by default** (`--private/--public`, default private). Going public is
+roadmap F4's decision — the Zenodo DOI and the anonymised review mirror — not
+this command's.
+
+**`--verify`** downloads the subtree it just wrote into a temp directory (on the
+VM's local disk, never `/workspace`) and checks every sha256 against the
+manifest; a mismatch is a non-zero exit. An upload path that has never been
+downloaded is not a backup.
+
+`tests/bench/test_upload.py` pins all of it with no network: the scratch
+exclusion, the checksums, the four ways evidence beats `--gate`, the generated
+README, the round-trip check catching a changed byte, and the commit's operation
+list with `private=True`.
+
 ## Inputs (`inputs.py`)
 
 `load_inputs(ds, device, with_filters=True)` returns `item_embs [N, D]`
@@ -653,6 +722,7 @@ cd evaluation && CUDA_VISIBLE_DEVICES="" uv run pytest tests/ -q
 | `bench/test_oracle.py` | padding, v4 fields and arithmetic, fingerprint in the file name, an unreadable blob rebuilt, bloom FP rate, `code_version` |
 | `bench/test_run.py` | end to end on the tiny fixture, both modes (`graph` = the CPU null entry): record schema, resume, `code_version` invalidation, `partial`, a failed cell + continue, a sticky CUDA error, the quality gate, the parity spill, reachable-target masking, the plan cache off through `OfficialConfig` |
 | `bench/test_cli.py` | `bench run` via `CliRunner`, a real one-child `bench campaign`, a faked timed-out child, zero cells → exit 1, `bench report` over the campaign's own records |
+| `bench/test_upload.py` | `bench upload` with no network: `_logs/` and `_parity/` never listed, the manifest's sha256 per file, evidence beating `--gate` four ways, the generated README over several subtrees, `verify` catching a changed byte, the commit's operations and `private=True` |
 | `bench/test_report.py` | every column the tables read still comes out of `records.flatten`; every artifact emitted; the LaTeX structurally balanced with the thesis's labels and no unescaped `_`; a `failed` record excluded and a `partial` / `unstable` one marked; citability off by default and evidence beating `--gate`; an empty tree; a schema-1 record |
 | `bench/test_c4_gate.py` | the C4 gate script against synthesised schema-1 records |
 | `eval_datasets/test_layout.py` | the legacy pad-row rule, `apply_users_limit`, `validate_layout` clean on both layouts and flagging a short `eval_split`, a missing or swapped prefix sidecar, misaligned attrs |
@@ -675,7 +745,7 @@ uv run bench run --dataset arxiv --dim 128 --suite filter --algo silvertorch --b
     --filter-kind bloom --sweep c0_maincat --mode eager --skip-perf
 # the campaign (roadmap D1)
 uv run bench campaign --suite all --resume
-uv run bench upload --repo-id <user/repo> --dry-run
+uv run bench upload --results results --path-in-repo d1-a --verify   # publish, then check the round trip
 ```
 
 Sanity checks after a run (H WP-5's gates): `median_ms(bs=16) <
@@ -711,7 +781,8 @@ eval-data arxiv all …`, `uv run eval-data goodreads all …`.
 ### HuggingFace I/O
 
 [`eval_datasets/hub.py`](../../evaluation/eval_datasets/hub.py) is the
-single source of truth for HF reads / writes: `EVAL_REPOS` maps each
+single source of truth for HF reads / writes of **datasets and checkpoints**
+(for *results* see [Results storage](#results-storage)): `EVAL_REPOS` maps each
 dataset to its `pinkmeme/eval-<dataset>` HF dataset repo (eval inputs +
 `checkpoints/<ckpt-id>/`), `RAW_REPOS` maps upstream raw sources into
 `data/_raw/<source>/`.
