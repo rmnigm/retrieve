@@ -394,6 +394,82 @@ run on the A100 box. Effort in focused days.
   in every graph cell; (4) `jaccard_vs_first@100 == 1.0` for `torch` vs `triton` on exact algos and
   `cuda`/`cute` vs `triton` on `silvertorch`; (5) no `unstable` cell at locked clocks; (6) kill the
   child mid-run and confirm `--resume` continues at the next cell.
+
+> **Superseding decision, 2026-09-15 (user).** *"We don't care about
+> reproducing old results now, we're improving all code and rewriting, then
+> testing and profiling, then running the full evals step by step."* The golden
+> baseline was a bridge: it existed to prove the harness rewrite had not
+> changed quality. It is now **informational, not a gate**. WP-4's clauses (1)
+> and (2) — equality with A1's numbers and with A1's latency — no longer block
+> anything; what still blocks is the harness being *correct on its own terms*:
+> clauses (3), (4) and (6), the parity spill, and the official cell running end
+> to end. The amendments below stand as the record of what the golden
+> comparison could and could not support, and the two residuals remain worth
+> knowing — but no step waits on them. **Consequence for the paper: no claim of
+> equivalence with the pre-v2 harness may be made from these numbers** (P G9's
+> provenance section says what was and was not compared).
+>
+> **WP-4's gates, amended 2026-09-15 — after the gate ran, by the orchestrator
+> with the user.** The run is §12; the amendments below are what it showed the
+> clauses could and could not mean. They are recorded here rather than edited
+> into the text above, because a gate rewritten to match its own result is
+> worth nothing to a reader. Each names the evidence.
+>
+> - **(1) quality ≤ 1e-6 — kept, with two recorded residuals.** 9 of 11 golden
+>   cells pass with a worst *passing* delta of **7.5e-9**. Two do not, and
+>   neither is a harness defect. **`linr_v4` (both backends, 7.3e-5)**: the
+>   int8 path (`PostfilterKNNInt8`, int32 `>>5` → fp16) produces boundary ties
+>   whose order depends on the **query-batch chunk shape**, and the two
+>   harnesses chunk differently (v2's `QUALITY_CHUNK = 16` against the golden's
+>   64; below `_PAD_M = 17` the module pads, which 16 always trips). §12 killed
+>   the alternatives by measurement: not the library (§11.2 has it
+>   bit-identical), not the `k_max` slice (rerun at `--k 100` reproduces v2's
+>   *own* number to the last digit), not eager-vs-compiled (bit-identical).
+>   The clause's "tie order under the `k_max` slice" is therefore too narrow —
+>   ties reach the metric by a second route the clause does not name. **The
+>   decisive experiment — v2 at chunk 64 against the golden — was not run**,
+>   so this is attributed but not proven; it is carried as open item L4-b.
+>   **arxiv `silvertorch` `recall@100` (2.0e-6)** is **unattributed**: not the
+>   slice and not the batch shape (both tested), ≈ 2 single-hit changes in
+>   10,000 rows. Accepted as a bounded residual, not explained.
+> - **(2) graph latency within 5 % — the clause was comparing two different
+>   estimators of the same clock, and is re-specified as *matched-estimator,
+>   bs ≥ 8*.** Every v2 perf entry records `sm_mhz` as a single under-load
+>   sample (1410); the golden's 1155 is a whole-run 30 s-cadence median
+>   *dominated by idle and between-cell samples* — filtering that trace to
+>   `utilization > 50 %` gives median 1410, min 1410. The normalisation
+>   therefore injected a flat ×1.221, four times the threshold, and the
+>   orchestrator's instruction to pass `--golden-sm-mhz 1155` was wrong. At the
+>   matched estimator: **66/66 bs=8/16 rows pass**, ratios 0.957–1.030, no
+>   threshold touched (`gate-matched-clock.txt`). **bs=1 is excluded from the
+>   criterion**, because the baseline cannot support it: the *golden harness's
+>   own repeats* spread up to **21.1 %** at bs=1 against ≤ 0.4 % at bs=8 and
+>   ≤ 0.1 % at bs=16, while v2's own windows are ≤ 0.3 %. The noise is in the
+>   baseline, and no harness can hit 5 % against it. `--flush-l2` was not run;
+>   the bs≥8 rows bound any flush effect at ≤ 3 %.
+> - **(3), (6) — unchanged and passed.** 20/20 and one clean kill/resume.
+> - **(4) jaccard — the roadmap's clause passed; this plan's wording conflates
+>   two different properties and is split.** `official` vs `triton` on
+>   goodreads `silvertorch`: **0.999849 ≥ 0.99**, plan cache off. SilverTorch
+>   `torch` vs `triton`: **exactly 1.0**, `score_max_abs_diff 0.0`, both
+>   datasets. Two rows do not meet it: **`linr_v2` torch-vs-triton** (jaccard
+>   0.998743, `score_max_abs_diff` 9.77e-3) and **`official` on arxiv** (0.985,
+>   against a threshold the roadmap states for goodreads only). "Exact algo"
+>   describes exact *filtering*, not bit-identical arithmetic across two
+>   implementations of an fp16 dot product; the clause as written demands the
+>   latter. The `linr_v2` divergence is **reproduced independently by the
+>   golden** (torch 0.99969470 vs triton 0.99927376, 4.2e-4 recall) and so is
+>   not a harness artifact. It is carried as **roadmap L4**, to be settled
+>   before D1.
+> - **(5) no `unstable` cell at locked clocks — not evaluable in this
+>   container** (`nvidia-smi -lgc` denied, no sudo), and 10 of the 18 flags are
+>   an artifact: `clocks_drift` compares a start-of-process idle sample (1155)
+>   against under-load samples (1410), i.e. it fires on the GPU *boosting*.
+>   Eight flags are real bs=1 window spread. Also recorded: `clocks_locked` is
+>   `true` on the arxiv cells because the field means "within 2 % of
+>   `expected_sm_mhz`" and the box happened to be there — the opposite of what
+>   §8.2 F wanted it for. Both are harness defects, carried as open item L4-c.
+
 - **WP-5 — campaign rerun (GPU, ~24 h wall + 0.5 d).** Locked clocks, `bench campaign --suite all`:
   four datasets, all dims, all backends incl. `cuda`/`cute` (clause cells on cuda are legal per
   cuda-silvertorch-handoff §7). Closes roadmap §2 (goodreads oracle rerun) and §4b items 1, 3, 4,
