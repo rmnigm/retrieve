@@ -16,8 +16,7 @@ from torch.library import triton_op, wrap_triton
 
 _P_BUCKETS = (256, 2048, 16384, 131072, 1048576)
 
-# Dtypes the kernel is exercised with today: parity tests feed fp32, PrefilterKNN feeds fp16.
-# Scores are always fp32 (the output buffer's dtype). Documents reality per kernels.md → I/O.
+# Parity tests feed fp32, PrefilterKNN feeds fp16; the dot accumulates in fp32 either way.
 _SUPPORTED_DTYPES = (torch.float16, torch.float32)
 
 
@@ -74,7 +73,9 @@ def _fused_masked_knn_topk_kernel(
     count = tl.load(counts_ptr + bid)
     in_count = n_offsets < count
 
-    q = tl.load(query_ptr + bid * stride_qb + d_offsets * stride_qd)
+    # Widen before the multiply: tl.sum reduces in its operand dtype (fp16 in production, plan
+    # L4 §6.1), and fp16 × fp16 is exact in fp32.
+    q = tl.load(query_ptr + bid * stride_qb + d_offsets * stride_qd).to(tl.float32)
 
     item_ids = tl.load(
         pos_indices_ptr + bid * stride_pb + n_offsets * stride_pp,
@@ -86,7 +87,7 @@ def _fused_masked_knn_topk_kernel(
         item_embs_ptr + item_ids[:, None] * stride_in + d_offsets[None, :] * stride_id,
         mask=in_count[:, None],
         other=0.0,
-    )
+    ).to(tl.float32)
 
     dots = tl.sum(emb_rows * q[None, :], axis=1)
     dots = tl.where(in_count, dots, float("-inf"))
