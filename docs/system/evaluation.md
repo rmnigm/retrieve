@@ -152,7 +152,10 @@ Two things to read the numbers with, stated rather than changed:
   the last timing window's sync) and is what an unlocked-clock run's
   latencies are read against (H §7's fallback; C4's gate script
   [c4_gate.py](../plans/evaluation-harness-v2-artifacts/c4_gate.py)
-  reports it next to the golden's recorded 1140 MHz).
+  reports it next to the golden's recorded SM clock, which its
+  `--golden-sm-mhz` default still calls 1140: that was A1's sample, and the
+  2026-09-15 re-derived golden records **1155 MHz**, so the flag has to be
+  passed).
 
 ## Architecture
 
