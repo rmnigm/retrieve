@@ -11,13 +11,13 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.kernels.filters.clause_compact import (
+from retrieve.functional import compact_mask
+from retrieve.modules import ExactAttributeFilter
+from retrieve.ops.triton.clause_compact import (
     ClauseCompactConfig,
     _clause_compact_impl,
     clause_compact,
 )
-from retrieve.layers.filters import ExactAttributeFilter
-from retrieve.layers.utils.compact import compact_mask
 from tests.conftest import make_attrs, make_query_attrs
 
 

@@ -11,15 +11,15 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.kernels.filters.bloom_compact import (
+from retrieve.functional import compact_mask
+from retrieve.indexing.bloom_hash import build_signatures
+from retrieve.modules import BloomFilter
+from retrieve.ops.triton.bloom_compact import (
     BloomCompactConfig,
     _bloom_compact_impl,
     bloom_compact,
 )
-from retrieve.kernels.silvertorch.bloom_match import bloom_match
-from retrieve.layers.filters import BloomFilter
-from retrieve.layers.filters.bloom_hash import build_signatures
-from retrieve.layers.utils.compact import compact_mask
+from retrieve.ops.triton.bloom_match import bloom_match
 from tests.conftest import make_attrs, make_query_attrs
 
 

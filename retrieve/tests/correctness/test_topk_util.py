@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import torch
 
-from retrieve.layers.utils.topk import counts_to_valid, masked_topk
+from retrieve.functional import counts_to_valid, masked_topk
 
 NEG_INF = float("-inf")
 

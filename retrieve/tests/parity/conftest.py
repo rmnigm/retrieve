@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import torch
 
-from retrieve.layers.filters.bloom_hash import build_signatures, generate_seeds
-from retrieve.layers.filters.exact_attribute import clause_subset_match
-from retrieve.layers.utils.quantize import quantize_int8
-from tests.conftest import make_attrs, make_query_attrs
+from retrieve.indexing.bloom_hash import build_signatures, generate_seeds
+from tests.conftest import assert_topk_id_sets_match, make_attrs, make_query_attrs
 
 
 def make_probe_family(b, n_lists, max_size, n_probe, *, pad_rate=0.1, seed=7):
@@ -50,53 +48,6 @@ def make_exact(n, b, *, c=2, a_max=2, reverse="none", n_vocab=8):
     if reverse == "mixed":
         rev[0] = True
     return attrs, rev, q_attrs
-
-
-def ref_cps_phase23(
-    query,
-    flat_items,
-    item_codes,
-    global_scale,
-    k,
-    *,
-    qb=None,
-    bloom_sigs=None,
-    item_clause_attrs=None,
-    clause_is_reverse=None,
-    query_clause_attrs=None,
-):
-    """Reference for the paper-faithful int8 ANN (SilverTorch phases 2+3): int8 × int8
-    → int32 dot with one global scale + per-row query scale, optionally gated by a
-    filter — the row-wise bloom subset test (``qb`` / ``bloom_sigs``) or the exact
-    AND-of-OR clause predicate (``item_clause_attrs`` / ``clause_is_reverse`` /
-    ``query_clause_attrs``: AND over clauses, OR over ``A_max`` within a clause, XOR
-    with reverse, OR with the ``-1`` inactive sentinel). Computed in fp32 because the
-    integer products fit in fp32 mantissa at this D — bit-identical to an int32
-    accumulator. Shared by the Triton and official parity suites: the official scorer reads
-    a cluster-sorted table and a packed bit mask, but the predicate it is handed is
-    boolean-identical to these row-wise forms."""
-    valid = flat_items >= 0
-    safe = flat_items.clamp(min=0)
-
-    keep = valid
-    if qb is not None:
-        probed_sigs = bloom_sigs[safe]
-        match = (qb.unsqueeze(1) & probed_sigs) == qb.unsqueeze(1)
-        keep = keep & match.all(dim=-1)
-    if query_clause_attrs is not None:
-        gathered = item_clause_attrs[safe]  # [B, P, C, A_max]
-        keep = keep & clause_subset_match(gathered, query_clause_attrs.long(), clause_is_reverse)
-
-    q_codes, q_scales = quantize_int8(query)
-    codes = item_codes[safe].float()  # [B, P, D]
-    scores = torch.einsum("bd,bpd->bp", q_codes.float(), codes)
-    scores = scores * q_scales.unsqueeze(1) * global_scale
-    scores = scores.masked_fill(~keep, float("-inf"))
-
-    actual_k = min(k, scores.shape[1])
-    topk_scores, topk_local = torch.topk(scores, actual_k, dim=1)
-    topk_ids = flat_items.gather(1, topk_local)
-    return topk_ids, topk_scores
 
 
 def assert_ids_equal_up_to_ties(
@@ -150,41 +101,15 @@ def assert_topk_matches(
 ) -> None:
     """Assert two top-K implementations agree on finite-id sets and sorted scores.
 
-    Tie-breaking on the id permutation can differ between backends, so we compare
-    *sets* of finite-score ids per row and the *sorted* descending scores
-    (with -inf replaced by 0 so ``allclose`` still works on padded rows).
+    Tie-breaking on the id permutation can differ between backends, so every row goes through
+    ``assert_topk_id_sets_match`` (sets of finite-score ids, boundary ties within ``atol``) and
+    the *sorted* descending scores are compared with ``allclose`` (with -inf replaced by 0 so it
+    still works on padded rows).
     """
-    b, k = out_ids.shape
-    for bi in range(b):
-        out_pairs = [
-            (out_ids[bi, j].item(), out_scores[bi, j].item())
-            for j in range(k)
-            if torch.isfinite(out_scores[bi, j])
-        ]
-        ref_pairs = [
-            (ref_ids[bi, j].item(), ref_scores[bi, j].item())
-            for j in range(k)
-            if torch.isfinite(ref_scores[bi, j])
-        ]
-        out_set = {p[0] for p in out_pairs}
-        ref_set = {p[0] for p in ref_pairs}
-        if out_set == ref_set:
-            continue
-        # Tensor-core matmul (`tl.dot`) and torch `@` differ in accumulator
-        # order — score-tied items can swap at the K-th boundary. Allow that
-        # provided each side's unique ids lie within `atol` of its own min.
-        out_min = min(s for _, s in out_pairs) if out_pairs else float("-inf")
-        ref_min = min(s for _, s in ref_pairs) if ref_pairs else float("-inf")
-        for i in ref_set - out_set:
-            s = next(sc for idx, sc in ref_pairs if idx == i)
-            assert s <= ref_min + atol + rtol * abs(ref_min), (
-                f"row {bi}: ref-only id {i} score={s:.6f} not at boundary {ref_min:.6f}"
-            )
-        for i in out_set - ref_set:
-            s = next(sc for idx, sc in out_pairs if idx == i)
-            assert s <= out_min + atol + rtol * abs(out_min), (
-                f"row {bi}: out-only id {i} score={s:.6f} not at boundary {out_min:.6f}"
-            )
+    for bi in range(out_ids.shape[0]):
+        assert_topk_id_sets_match(
+            out_ids, out_scores, ref_ids, ref_scores, bi, atol=atol, rtol=rtol
+        )
 
     out_sorted, _ = out_scores.sort(dim=1, descending=True)
     ref_sorted, _ = ref_scores.sort(dim=1, descending=True)

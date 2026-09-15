@@ -28,18 +28,18 @@ import warnings
 import pytest
 import torch
 
-from retrieve.kernels.filters.clause_mask import clause_mask
-from retrieve.kernels.silvertorch import official as of
-from retrieve.kernels.silvertorch.codesigned_probe_score import (
+from retrieve.functional import clause_subset_match, masked_topk
+from retrieve.indexing.quantize import quantize_int8, quantize_int8_global
+from retrieve.modules.silvertorch import OfficialConfig, SilverTorch, build_silvertorch
+from retrieve.ops import official as of
+from retrieve.ops import reference
+from retrieve.ops.triton.clause_mask import clause_mask
+from retrieve.ops.triton.codesigned_probe_score import (
     _codesigned_probe_score_impl,
 )
-from retrieve.kernels.silvertorch.codesigned_probe_score_exact import (
+from retrieve.ops.triton.codesigned_probe_score_exact import (
     _codesigned_probe_score_exact_impl,
 )
-from retrieve.layers.filters.exact_attribute import clause_subset_match
-from retrieve.layers.silvertorch import OfficialConfig, SilverTorch, build_silvertorch
-from retrieve.layers.utils.quantize import quantize_int8, quantize_int8_global
-from retrieve.layers.utils.topk import masked_topk
 from tests.conftest import (
     make_attrs,
     make_index,
@@ -51,7 +51,6 @@ from tests.parity.conftest import (
     assert_ids_equal_up_to_ties,
     make_exact,
     make_probe_family,
-    ref_cps_phase23,
 )
 
 # --- bit-order pin (roadmap A3, footnote † in 00-roadmap.md §2.1) ---------------------------
@@ -205,7 +204,7 @@ def test_t1_int32_path_bitexact(n_lists, max_size, n_probe, d, k, b):
     path) and mask words with a pad tail."""
     f = Family(b, n_lists, max_size, n_probe, d)
     out = f.official(k, score_path="int32")
-    ref = ref_cps_phase23(f.query, f.flat, f.codes, f.global_scale, k)
+    ref = reference.codesigned_probe_score(f.query, f.flat, f.codes, f.global_scale, k)
     _assert_bitexact(out, ref)
     if d & (d - 1) == 0:
         tri = _codesigned_probe_score_impl(f.query, f.flat, f.codes, f.global_scale, k)
@@ -238,15 +237,8 @@ def test_t1_exact_mask_bitexact_vs_triton(d, reverse):
         query_clause_attrs=q_attrs,
     )
     _assert_bitexact(out, tri)
-    ref = ref_cps_phase23(
-        f.query,
-        f.flat,
-        f.codes,
-        f.global_scale,
-        k,
-        item_clause_attrs=attrs,
-        clause_is_reverse=rev,
-        query_clause_attrs=q_attrs,
+    ref = reference.codesigned_probe_score_exact(
+        f.query, f.flat, f.codes, attrs, rev, q_attrs, f.global_scale, k
     )
     _assert_bitexact(out, ref)
 
@@ -561,7 +553,7 @@ def _layer(data, backend, filter_mode="none", *, reverse=None, official=None, **
 def _transplant(off: SilverTorch, tri: SilverTorch) -> None:
     """Give the official module the Triton module's index, so a bit-exact layer comparison is
     of the *kernels* and not of two index builds: centroids and codes verbatim, the CSR
-    rebuilt from the padded layout. (``KMeansTorch.fit`` is reproducible run to run since
+    rebuilt from the padded layout. (``KMeans.fit`` is reproducible run to run since
     roadmap C4, so the two builds would now agree anyway; sharing the index keeps this test
     independent of that and of any future change to the layout path.)"""
     sort_perm, offsets, sizes = csr_from_padded(tri.padded_cluster_items)

@@ -94,7 +94,7 @@ ids, scores = pre(query, candidate_ids=cand_ids, counts=counts)
 its parameter order differs from `ExactAttributeFilter`). Bloom raises if `clause_is_reverse` has
 any `True`.
 
-Composition helpers (exported at top level):
+Composition helpers (in `retrieve.functional`):
 
 - `combine_masks(*masks)` — element-wise AND of `[B, N]` masks; `None` inputs ignored.
 - `combine_indices(filters, query_clause_attrs)` — sparse cascade across multiple filters; order
@@ -107,8 +107,8 @@ For deeper filter internals and kernel behavior, see the repo-level
 
 ## Quantization utilities
 
-The 1-bit and INT8 modules quantize internally, but the building blocks are exported for custom
-index builds:
+The 1-bit and INT8 modules quantize internally, but the building blocks are exported from
+`retrieve.indexing` for custom index builds:
 
 | Function | Returns | Used by |
 | --- | --- | --- |
@@ -122,7 +122,7 @@ use the standalone functions only when assembling your own pipeline.
 
 ```python
 import torch
-from retrieve import quantize_oporp_1bit
+from retrieve.indexing import quantize_oporp_1bit
 
 embs = torch.randn(100_000, 128, device="cuda")
 bits, signs, perm = quantize_oporp_1bit(embs)   # bits: [100000, 2] int64 at k_bits=128

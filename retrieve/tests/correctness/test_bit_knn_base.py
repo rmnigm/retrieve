@@ -16,9 +16,7 @@ import pytest
 import torch
 
 from retrieve.interfaces import RetrievalModule
-from retrieve.layers.linr._bit_knn import _PackedBitsKNN
-from retrieve.layers.linr.one_bit_knn import OneBitKNN
-from retrieve.layers.linr.simhash_knn import SimHashKNN
+from retrieve.modules.bit_knn import OneBitKNN, SimHashKNN, _PackedBitsKNN
 
 N, D, B = 32, 128, 4
 
