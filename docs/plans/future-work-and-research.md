@@ -262,7 +262,7 @@ contributions (they generalize beyond this system):
 
 - **Oracle-relative recall for filtered cells** (recall vs filtered-FullScan top-K rather
   than held-out interactions, with `-1` short-fill semantics and per-row denominator
-  `min(pass_count, k)` — [oracle.py](../../evaluation/retrieval/oracle.py),
+  `min(pass_count, k)` — [oracle.py](../../evaluation/bench/oracle.py),
   sweep.py:597-604) — versus the common but
   misleading "held-out recall under filters" (targets often fail the filter). Formalize, and
   quantify how much the two disagree on goodreads.

@@ -601,7 +601,7 @@ loop-free paths agree exactly — asserted by
 [`test_bloom_hash.py`](../../retrieve/tests/correctness/test_bloom_hash.py));
 keeping it purely tensor-flow lets the outer
 `torch.compile(dynamic=True, mode="reduce-overhead")` wrapped around
-each algo's forward in `evaluation/retrieval/algos/` install a single
+each algo's forward in the harness (`evaluation/bench/measure.py`) install a single
 symbolic-shape graph that's reused for all B. The eager body fires
 ~15 separate CUDA kernels per call (~0.4 ms wall-clock, **flat in
 B**) — pure launch overhead, since the actual work is microseconds;
@@ -785,7 +785,7 @@ The pure-torch hot bodies on V3's reference path —
 ([`_bit_knn.py`](../../retrieve/src/retrieve/modules/bit_knn.py)) —
 are pure tensor-flow free of `.item()` and Python control flow, so the
 outer `torch.compile(dynamic=True, mode="reduce-overhead")` wrapped
-around each algo's forward in `evaluation/retrieval/algos/` traces them
+around each algo's forward in the harness (`evaluation/bench/measure.py`) traces them
 into its cudagraph capture cleanly:
 
 - **`project_oporp_1bit_query`** ([`quantize.py`](../../retrieve/src/retrieve/indexing/quantize.py)).

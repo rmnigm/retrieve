@@ -106,7 +106,7 @@ What is still true and is this plan's business:
   seeded `randperm`); the paper says k-means++ (SilverTorch §4.1). There is
   no k-means++ anywhere.
 - **The LiNR paper variants V1–V4 live in the harness**
-  ([evaluation/retrieval/algos.py](../../evaluation/retrieval/algos.py):
+  ([evaluation/retrieval/algos.py](../../evaluation/bench/algos.py):
   `LinrV1`–`LinrV4`, 362 lines with `Silvertorch`), and so do two things the
   library should own: `set_query_params` (on the harness `Silvertorch` and
   `LinrV3` wrappers, not on the layers) and the `capturable` flag (stamped by

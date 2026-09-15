@@ -1,0 +1,18 @@
+# YFCC-10M (Big-ANN filtered track) at its native 192 dims — harness v2 dataset file (H §3.3),
+# the v2 shape of the old config/yfcc10m/d192-filter.yaml. Roadmap E1's cells run at E5: the
+# dataset is listed in no suite of suites.yaml yet, and a suite that takes it needs
+# ks: [10, 100] (10 = the shipped GT depth). Pre-encoded text shape: the organisers' 100k
+# query vectors are content_d192/query_emb.pt; the sidecars are emb_provenance.json, not
+# *.meta.json (no nomic prefix to assert). One sweep, `tags_and`: clause 0 = the query's
+# first tag, clause 1 = its second (-1, "always pass", on single-tag queries), ANDed — the
+# organisers' conjunctive predicate over the capped 32-tag bags (docs/system/datasets.md
+# § yfcc10m for the cap and the cosine-vs-L2 caveat). No bloom block: a bloom's false
+# positives would make the cross-check against the shipped GT meaningless (roadmap D3).
+data_dir: data/yfcc10m
+content_dir: content_d192                 # relative to data_dir
+dims: [192]
+users_limit: 10000
+filters:
+  attrs: item_attrs_narrow.pt
+  reverse: clause_is_reverse_narrow.pt
+  clause: {tags_and: [0, 1]}

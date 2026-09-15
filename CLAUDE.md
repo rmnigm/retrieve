@@ -117,9 +117,12 @@ LiNR variants are V1–V4 as in the paper.
 ```bash
 uv sync --extra official --all-packages          # whole workspace + Meta's ops; --all-packages keeps pytest (it is in the members' dev groups)
 uv run --directory retrieve pytest tests/ -x -q  # library suite — GPU only, skips itself without CUDA
-cd evaluation && CUDA_VISIBLE_DEVICES="" uv run pytest retrieval/tests/ --ignore=retrieval/tests/test_silvertorch_algo_reverse.py  # CPU-only harness tests: three of them assert CPU-only behaviour and fail with a GPU visible
+cd evaluation && CUDA_VISIBLE_DEVICES="" uv run pytest tests/ -q  # the harness suite (bench / training / eval_datasets): CPU-only by construction, three tests assert it, so hide the GPU
 uv run --directory evaluation bench run --dataset arxiv --dim 128 --suite filter --algo silvertorch
 uv run --directory evaluation bench campaign --suite filter --resume
+uv run --directory evaluation bench check --dataset goodreads     # validate a staged dataset's layout
+uv run --directory evaluation eval-data arxiv --help              # dataset ETL + Hub transfer (eval-data fetch|publish)
+uv run --directory evaluation train sasrec --help                 # gSASRec training; train upload-checkpoint
 uv run --directory retrieve tune-kernels --help  # kernel autotune sweeps (GPU)
 ruff check retrieve evaluation && ruff format --check retrieve
 python3 scripts/check_doc_links.py
