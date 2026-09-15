@@ -206,3 +206,25 @@ synthetic attributes (the official index is byte-exact the size of ours at
 `b_multiplier = m_bits / (max_terms · 5)`); `cache_plans` moves no launch and no
 sync. The library suite ends at 574 passed / 0 failed / 127 cute skips, and the
 three pre-existing red cells of finding 7 are fixed. B4 is unblocked.
+
+## `b3/` — the Triton vs official head-to-head (O WP-4, roadmap B3), 2026-09-15
+
+Record: [`../silvertorch-official-integration.md` §16](../silvertorch-official-integration.md).
+Contents:
+
+| file | what it is |
+|---|---|
+| `b3_e2e_run.sh` | the end-to-end driver: `bench run` per `(suite, dataset, backend)`, `filter` unnarrowed and `quality` at `--k 100 --bs 1 --bs 8 --bs 16` |
+| `b3_kernel_h2h.py` | the kernel-only tiers (§9a phases 2+3, §9b phase 2, parity, bloom FPR/memory, top-k boundary gaps); one process per dataset, `bench.measure.latency` as the estimator |
+| `b3_tables.py` | renders every table in the record from the raw JSON — no measurement |
+| `kernel_goodreads.json`, `kernel_arxiv.json` | raw kernel-only measurements incl. per-kernel profiler lists and the shared-index fairness checks |
+| `kernel_*.log` | their stdout |
+| `e2e/<suite>/<dataset>-d128.jsonl` (+ `.samples.jsonl`) | 30 harness records, schema 2, and the per-call vectors |
+| `e2e/_logs/` | per-child logs and `campaign.log` |
+| `tables.md` | every table the record condenses, one row per `(k, bs)` (468 end-to-end perf entries) |
+
+Reproduce (from `evaluation/`, with `UV_PROJECT_ENVIRONMENT`, `RETRIEVE_DATA_ROOT`
+and a private `TORCHINDUCTOR_CACHE_DIR` set, under `flock /workspace/gpu.lock`):
+`b3_e2e_run.sh`, then `python b3_kernel_h2h.py <dataset> <sweep> <out.json>` per
+dataset, then `python b3_tables.py <this dir>`. Wall time on the A100: ≈ 3 h 25 m
+end to end (the `torch` arm is two thirds of it), ≈ 6 m kernel-only.
