@@ -69,7 +69,7 @@ registered item set:
 
 - `evaluate_mask(query_clause_attrs) -> [B, N]` bool — dense.
 - `evaluate_indices(query_clause_attrs) -> ([B, P] int64, [B] int64)` — a compact candidate set
-  `(ids, counts)`; within-row order is unspecified.
+  `(ids, counts)`; each row's ids are in ascending item order on both backends.
 - `evaluate_subset(query_clause_attrs, candidate_ids) -> [B, P]` bool — re-check an existing
   candidate set.
 

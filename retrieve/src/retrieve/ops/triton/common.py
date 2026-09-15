@@ -92,17 +92,14 @@ def clause_pass(
 
 
 @triton.jit
-def compact_store(pass_mask, ids, counts_ptr, out_ptr, bid, stride_ob, stride_on):
-    """Stream compaction: cumsum intra-tile offsets + atomic_add row base.
-
-    ``counts_ptr`` must be int64 zero-initialized; ``out_ptr`` rows must be
-    host-prefilled with ``-1`` (only ``[base, base + tile_sum)`` is written,
-    positions past ``counts[bid]`` keep the sentinel). ``ids`` are cast to
-    int64 on store. Within-row order is unspecified (atomics across tiles)."""
+def compact_store(pass_mask, ids, base, out_ptr, bid, stride_ob, stride_on):
+    """Stream-compaction store at a caller-supplied row base: ``tl.cumsum`` intra-tile offsets
+    and a masked store of ``ids`` (cast to int64) at ``base + intra``. Ascending ``ids`` in,
+    ascending out; the caller derives ``base`` from a scan over per-tile counts, so the order is
+    the item order and not the tile-completion order. ``out_ptr`` rows are host-prefilled with
+    ``-1`` (only ``[base, base + tile_sum)`` is written)."""
     pass_int = tl.where(pass_mask, 1, 0).to(tl.int32)
     intra = tl.cumsum(pass_int, axis=0) - 1
-    tile_sum = tl.sum(pass_int)
-    base = tl.atomic_add(counts_ptr + bid, tile_sum.to(tl.int64))
     tl.store(
         out_ptr + bid * stride_ob + (base + intra.to(tl.int64)) * stride_on,
         ids.to(tl.int64),

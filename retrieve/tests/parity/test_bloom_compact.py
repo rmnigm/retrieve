@@ -2,8 +2,8 @@
 
 ``BloomFilter.evaluate_indices`` already routes to ``bloom_compact`` on CUDA,
 so we build the query signature by hand and call the kernel directly to keep
-this a true kernel-vs-pure-torch parity check. Output id ordering is
-unspecified per the kernel doc — we compare row *sets*, not positions.
+this a true kernel-vs-pure-torch parity check. Rows are compared in order: the kernel's
+contract is ascending item order (plan L3), the same order ``compact_mask`` emits.
 """
 
 from __future__ import annotations
@@ -33,16 +33,14 @@ def _build_qb(bf: BloomFilter, q: torch.Tensor) -> torch.Tensor:
     )
 
 
-def _set_match(out_ids, out_counts, ref_ids, ref_counts) -> None:
+def _rows_equal(out_ids, out_counts, ref_ids, ref_counts) -> None:
     assert torch.equal(out_counts, ref_counts), (
         f"counts: {out_counts.tolist()} vs {ref_counts.tolist()}"
     )
     b = ref_counts.shape[0]
     for r in range(b):
         c = int(ref_counts[r].item())
-        assert set(out_ids[r, :c].tolist()) == set(ref_ids[r, :c].tolist()), (
-            f"row {r}: id-set mismatch"
-        )
+        assert torch.equal(out_ids[r, :c], ref_ids[r, :c]), f"row {r}: ids differ"
 
 
 @pytest.mark.parametrize("n", [512, 4096])
@@ -59,7 +57,7 @@ def test_bloom_compact_matches_pure_torch(n, m_bits, k_hash):
     out_ids, out_counts = bloom_compact(qb, bf.bloom_sigs)
     ref_mask = bloom_match(qb, bf.bloom_sigs)
     ref_ids, ref_counts = compact_mask(ref_mask)
-    _set_match(out_ids, out_counts, ref_ids, ref_counts)
+    _rows_equal(out_ids, out_counts, ref_ids, ref_counts)
 
 
 def test_bloom_compact_inactive_query_passes_all():
@@ -77,7 +75,7 @@ def test_bloom_compact_inactive_query_passes_all():
     expected = torch.full((4,), n, dtype=torch.int64, device="cuda")
     assert torch.equal(out_counts, expected)
     for r in range(4):
-        assert set(out_ids[r, :n].tolist()) == set(range(n))
+        assert torch.equal(out_ids[r, :n], torch.arange(n, device="cuda"))
 
 
 def test_bloom_compact_b_one():
@@ -92,7 +90,7 @@ def test_bloom_compact_b_one():
 
     out_ids, out_counts = bloom_compact(qb, bf.bloom_sigs)
     ref_ids, ref_counts = compact_mask(bloom_match(qb, bf.bloom_sigs))
-    _set_match(out_ids, out_counts, ref_ids, ref_counts)
+    _rows_equal(out_ids, out_counts, ref_ids, ref_counts)
 
 
 def test_bloom_compact_n_smaller_than_block():
@@ -107,7 +105,7 @@ def test_bloom_compact_n_smaller_than_block():
 
     out_ids, out_counts = bloom_compact(qb, bf.bloom_sigs)
     ref_ids, ref_counts = compact_mask(bloom_match(qb, bf.bloom_sigs))
-    _set_match(out_ids, out_counts, ref_ids, ref_counts)
+    _rows_equal(out_ids, out_counts, ref_ids, ref_counts)
 
 
 def test_bloom_compact_routed_via_layer():
@@ -121,14 +119,14 @@ def test_bloom_compact_routed_via_layer():
 
     got_ids, got_counts = bf.evaluate_indices(q)
     ref_ids, ref_counts = compact_mask(bf.evaluate_mask(q))
-    _set_match(got_ids, got_counts, ref_ids, ref_counts)
+    _rows_equal(got_ids, got_counts, ref_ids, ref_counts)
 
 
 @pytest.mark.parametrize("block_n, num_warps", [(128, 2), (512, 8), (1024, 4)])
 def test_bloom_compact_config_override(block_n, num_warps):
-    """Non-default ``BloomCompactConfig`` produces the same row-id sets —
+    """Non-default ``BloomCompactConfig`` produces the same rows —
     proves the ``config=`` kwarg plumbs through ``_bloom_compact_impl``
-    to the kernel launch and the atomic_add compaction stays correct
+    to the kernel launch and the two-phase compaction stays correct
     under non-default tiles."""
     n = 4096
     attrs = make_attrs(n, c=2, a_max=3, n_vocab=200, pad_rate=0.1, seed=141)
@@ -142,4 +140,4 @@ def test_bloom_compact_config_override(block_n, num_warps):
     out_ids, out_counts = _bloom_compact_impl(qb, bf.bloom_sigs, config=cfg)
     ref_mask = bloom_match(qb, bf.bloom_sigs)
     ref_ids, ref_counts = compact_mask(ref_mask)
-    _set_match(out_ids, out_counts, ref_ids, ref_counts)
+    _rows_equal(out_ids, out_counts, ref_ids, ref_counts)
