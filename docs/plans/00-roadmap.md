@@ -125,11 +125,8 @@ plan to `archive/` and shorten its entry here to one line under *Done*.
 > backends now agree **exactly** on all 9 goodreads rows, where A1 had a
 > 1.7e-4 gap it read as tie order.
 > **The eval queue, in order, from here:**
-> 1. **L3** — deterministic compaction
-> ([deterministic-compaction.md](deterministic-compaction.md)). It is new, it
-> blocks the rest, and it exists because the golden re-derive found that
-> `linr_v2` / `linr_v3` on `triton` cannot reproduce *themselves* across
-> processes (2.0e-6 / 6.8e-5 spread against a 1e-6 gate).
+> 1. ~~**L3** — deterministic compaction.~~ **Done**; the two affected golden
+> cells were re-derived with it and are byte-identical across runs.
 > 2. **C4 gate rerun** — the 14 goodreads-d128 `c0_genre` cells, the arxiv
 > cell, kill-and-resume, `c4_gate.py` against the **re-derived** golden.
 > `--golden-sm-mhz` must be passed **1155** (the re-derive's sampled median);
@@ -395,7 +392,19 @@ dies with it (**L** D11). One branch, `dev/l-library-layout`, off
   backend × filter kind, builder round-trip, k-means++ tests. Needs L1.
   **Unblocks C5** and, with it, the C4 rerun on the final layout.
 
-- [ ] **L3 — make the Triton stream compaction deterministic.**
+- [x] **L3 — make the Triton stream compaction deterministic.** **Done
+  2026-09-15** (`4837a6c`, merged at `HEAD`): ascending-order compaction
+  `torch.equal` to `ops.reference`, launch-to-launch identity in and across
+  processes, library suite 645 (+32), and both affected golden cells
+  re-derived and byte-identical across runs. The shipped kernel is **not**
+  the plan's D3 — measurement falsified its premise (`clause_compact` is
+  34–47 % of a `linr_v2` forward and instruction-bound, so recomputing the
+  predicate cost +43–58 % end to end); the tile-stash shape costs ×1.02–1.05
+  under graph. D3 amended with the numbers. Two defects found and pinned: a
+  `[1]`-view `counts` tripping inductor's `assert_alignment` on the compiled
+  bloom V2 forward at `B = 1`, and a count-before-scan epilogue slowing the
+  predicate launch 1.7–1.8×. Record:
+  [deterministic-compaction.md §7](deterministic-compaction.md).
   [deterministic-compaction.md](deterministic-compaction.md) §5 WP-1 (A100,
   0.5 d). `clause_compact` / `bloom_compact` claim their per-row base with an
   `atomic_add`, so a row's surviving ids land in tile-completion order; the
