@@ -5,19 +5,19 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.kernels.linr.oporp_1bit_match_topk import (
+from retrieve.functional import popcount_int64
+from retrieve.indexing.quantize import (
+    project_oporp_1bit_query,
+    project_simhash_1bit_query,
+    quantize_oporp_1bit,
+    quantize_simhash_1bit,
+)
+from retrieve.ops.triton.oporp_1bit_match_topk import (
     Oporp1BitMatchTopkConfig,
     _bucket_n,
     _oporp_1bit_match_topk_impl,
     oporp_1bit_match_topk_full,
     oporp_1bit_match_topk_indirect,
-)
-from retrieve.layers.utils.quantize import (
-    popcount_int64,
-    project_oporp_1bit_query,
-    project_simhash_1bit_query,
-    quantize_oporp_1bit,
-    quantize_simhash_1bit,
 )
 from tests.conftest import make_index, make_query
 from tests.parity.conftest import assert_topk_matches

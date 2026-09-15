@@ -92,7 +92,7 @@ in K7).
 
 ## Phase K1 — Fix the broken tuner subcommand (do first, tiny)
 
-**Evidence.** [tune.py:38-41](../../retrieve/src/retrieve/tune.py#L38-L41) imports the
+**Evidence.** [tune.py:38-41](../../retrieve/src/retrieve/ops/tune.py#L38-L41) imports the
 **public op**:
 
 ```python
@@ -103,9 +103,9 @@ from retrieve.kernels.silvertorch.codesigned_probe_score import (
 ```
 
 and `_tune_cps` calls it with `query_bits=`, `bloom_sigs=`, `config=` kwargs
-([tune.py:280-303](../../retrieve/src/retrieve/tune.py#L280-L303)). Those kwargs exist only on
+([tune.py:280-303](../../retrieve/src/retrieve/ops/tune.py#L280-L303)). Those kwargs exist only on
 `_codesigned_probe_score_impl`
-([codesigned_probe_score.py:123-133](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py#L123-L133));
+([codesigned_probe_score.py:123-133](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py#L123-L133));
 the `@triton_op` schema is `(query, flat_probed_items, item_codes, global_scale, k)`. The
 subcommand has been broken since Stage 2b moved the kwargs off the public op —
 `uv run tune-kernels codesigned-probe-score` raises TypeError on the first sweep point.
@@ -153,18 +153,18 @@ dev GPU and prints a `DEFAULT_CONFIG = CodesignedProbeScoreConfig(...)` line.
 ## Phase K2 — Host-wrapper dedup: shared prep/epilogue per kernel file
 
 **The pattern**, quantified on the worst case
-([codesigned_probe_score.py](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py)):
+([codesigned_probe_score.py](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py)):
 `_impl` (lines 123-218), `codesigned_probe_score` (221-282), `codesigned_probe_score_bloom`
 (285-348) each repeat: `quantize_int8(query)` + `.contiguous()` chain, dummy
 `query_bits`/`bloom_sigs` allocation, `torch.empty` score buffer, the 25-line stride kwarg
 list, and the `topk → gather` epilogue — three copies ≈ 190 lines of launch plumbing for one
 kernel. Same shape at smaller scale in
-[codesigned_probe_score_exact.py](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_exact.py)
-(2 copies), [clause_compact.py](../../retrieve/src/retrieve/kernels/filters/clause_compact.py) (2),
-[clause_mask.py](../../retrieve/src/retrieve/kernels/filters/clause_mask.py) (2),
-[bloom_compact.py](../../retrieve/src/retrieve/kernels/filters/bloom_compact.py) (2),
-[fused_masked_knn_topk.py](../../retrieve/src/retrieve/kernels/linr/fused_masked_knn_topk.py) (2),
-[oporp_1bit_match_topk.py](../../retrieve/src/retrieve/kernels/linr/oporp_1bit_match_topk.py) (3).
+[codesigned_probe_score_exact.py](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score_exact.py)
+(2 copies), [clause_compact.py](../../retrieve/src/retrieve/ops/triton/clause_compact.py) (2),
+[clause_mask.py](../../retrieve/src/retrieve/ops/triton/clause_mask.py) (2),
+[bloom_compact.py](../../retrieve/src/retrieve/ops/triton/bloom_compact.py) (2),
+[fused_masked_knn_topk.py](../../retrieve/src/retrieve/ops/triton/fused_masked_knn_topk.py) (2),
+[oporp_1bit_match_topk.py](../../retrieve/src/retrieve/ops/triton/oporp_1bit_match_topk.py) (3).
 
 Invariant 2 permits sharing everything **except the launch line itself**. The recipe, worked
 in full for `codesigned_probe_score.py` (the other six files follow mechanically):
@@ -289,8 +289,8 @@ Verification 4) **before** rolling the pattern to the other six files.
 |---|---|
 | `codesigned_probe_score_exact.py` | prep validates `C`/`A_max`/batch agreement (lines 148-166) and does the `clause_is_reverse.to(torch.int8)` cast (Triton can't load torch.bool — keep the comment); finish identical to `_cps_finish` |
 | `fused_masked_knn_topk.py` | `_impl` buckets P via `_bucket_p` + `p == 0` early-return + `actual_k < k` pad tail (lines 110-184); the public op does none of those (documented: "catalog size is fixed per deployment", `p >= k > 0` guaranteed by `PrefilterKNN`). Express as `_fmkt_prep(..., bucket: bool)` and `_fmkt_finish(..., pad_to_k: bool)` flags so the intentional difference is explicit rather than implicit in divergent copies |
-| `oporp_1bit_match_topk.py` | prep handles the `HAS_INDICES` dummy-tensor branch (lines 156-178); finish handles the `clamp_max(n_loop - 1)` + `where(isfinite, …, -1)` tail. The indirect op *keeps* its `max(_bucket_n(P), _bucket_n(k))` widening (guarantees ≥ k lanes, [oporp:293-295](../../retrieve/src/retrieve/kernels/linr/oporp_1bit_match_topk.py#L293-L295)) — that one is not vestigial |
-| `clause_compact.py` / `bloom_compact.py` | prep allocates the `-1`-filled `out_indices` + zeroed `counts` (the atomic_add-safety allocation notes at [clause_compact.py:124-129](../../retrieve/src/retrieve/kernels/filters/clause_compact.py#L124-L129) move onto `_prep`'s docstring); finish is identity (`return out_indices, counts`) — skip a finish helper |
+| `oporp_1bit_match_topk.py` | prep handles the `HAS_INDICES` dummy-tensor branch (lines 156-178); finish handles the `clamp_max(n_loop - 1)` + `where(isfinite, …, -1)` tail. The indirect op *keeps* its `max(_bucket_n(P), _bucket_n(k))` widening (guarantees ≥ k lanes, [oporp:293-295](../../retrieve/src/retrieve/ops/triton/oporp_1bit_match_topk.py#L293-L295)) — that one is not vestigial |
+| `clause_compact.py` / `bloom_compact.py` | prep allocates the `-1`-filled `out_indices` + zeroed `counts` (the atomic_add-safety allocation notes at [clause_compact.py:124-129](../../retrieve/src/retrieve/ops/triton/clause_compact.py#L124-L129) move onto `_prep`'s docstring); finish is identity (`return out_indices, counts`) — skip a finish helper |
 | `clause_mask.py` | prep only; output buffer is the return value |
 | `bloom_match.py` | leave as-is (single 80-line file, one op, no `_impl`, no Config — see K9 for the doc note) |
 
@@ -312,21 +312,21 @@ Triton supports calling `@triton.jit` functions from kernels (already used:
 
 1. **Exact-clause predicate** (inner OR over `A_MAX`, outer AND over `C`, reverse XOR,
    `q_c == -1` inactive override) — three copies:
-   [clause_mask.py:59-79](../../retrieve/src/retrieve/kernels/filters/clause_mask.py#L59-L79),
-   [clause_compact.py:62-83](../../retrieve/src/retrieve/kernels/filters/clause_compact.py#L62-L83),
-   [codesigned_probe_score_exact.py:81-99](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_exact.py#L81-L99)
+   [clause_mask.py:59-79](../../retrieve/src/retrieve/ops/triton/clause_mask.py#L59-L79),
+   [clause_compact.py:62-83](../../retrieve/src/retrieve/ops/triton/clause_compact.py#L62-L83),
+   [codesigned_probe_score_exact.py:81-99](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score_exact.py#L81-L99)
    (same math; the codesigned copy addresses items indirectly via `safe_ids` and gates loads
    with `valid` instead of `n_valid`).
 2. **Bloom subset test** — three copies in **two algebraic forms**:
-   equality + min-reduce ([bloom_match.py:40-43](../../retrieve/src/retrieve/kernels/silvertorch/bloom_match.py#L40-L43),
-   [bloom_compact.py:66-69](../../retrieve/src/retrieve/kernels/filters/bloom_compact.py#L66-L69))
+   equality + min-reduce ([bloom_match.py:40-43](../../retrieve/src/retrieve/ops/triton/bloom_match.py#L40-L43),
+   [bloom_compact.py:66-69](../../retrieve/src/retrieve/ops/triton/bloom_compact.py#L66-L69))
    vs `qb & ~sig` + OR-reduce
-   ([codesigned_probe_score.py:93-97](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py#L93-L97)).
+   ([codesigned_probe_score.py:93-97](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py#L93-L97)).
 3. **Compaction epilogue** (`cumsum → atomic_add → masked store`) — two copies:
-   [clause_compact.py:85-97](../../retrieve/src/retrieve/kernels/filters/clause_compact.py#L85-L97),
-   [bloom_compact.py:71-83](../../retrieve/src/retrieve/kernels/filters/bloom_compact.py#L71-L83).
+   [clause_compact.py:85-97](../../retrieve/src/retrieve/ops/triton/clause_compact.py#L85-L97),
+   [bloom_compact.py:71-83](../../retrieve/src/retrieve/ops/triton/bloom_compact.py#L71-L83).
 
-**New file** `retrieve/src/retrieve/kernels/common.py`:
+**New file** `retrieve/src/retrieve/ops/triton/common.py`:
 
 ```python
 """Shared @triton.jit building blocks. Every helper is a pure function of
@@ -432,16 +432,16 @@ bloom/none pair already shares one kernel via `HAS_QB` — that stays.)
 
 The epilogue "mask invalid scores to `-inf` → `topk` → map local→global ids → replace
 non-finite winners with `-1` → optionally pad to k" appears six times with drift-prone
-variations: [prefilter_knn.py:66-84](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py#L66-L84)
-(cat-style pad), [one_bit_knn.py:104-119](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py#L104-L119),
-[simhash_knn.py:90-105](../../retrieve/src/retrieve/layers/linr/simhash_knn.py#L90-L105),
-[silvertorch/main.py:302-316](../../retrieve/src/retrieve/layers/silvertorch/main.py#L302-L316)
-(full+slice-assign pad), [silvertorch/main.py:330-333](../../retrieve/src/retrieve/layers/silvertorch/main.py#L330-L333)
-(no pad, no sentinel), [postfilter_knn.py:32-41](../../retrieve/src/retrieve/layers/linr/postfilter_knn.py#L32-L41)
-+ [postfilter_knn_int8.py:68-78](../../retrieve/src/retrieve/layers/linr/postfilter_knn_int8.py#L68-L78)
+variations: [prefilter_knn.py:66-84](../../retrieve/src/retrieve/modules/knn.py#L66-L84)
+(cat-style pad), [one_bit_knn.py:104-119](../../retrieve/src/retrieve/modules/bit_knn.py#L104-L119),
+[simhash_knn.py:90-105](../../retrieve/src/retrieve/modules/bit_knn.py#L90-L105),
+[silvertorch/main.py:302-316](../../retrieve/src/retrieve/modules/silvertorch.py#L302-L316)
+(full+slice-assign pad), [silvertorch/main.py:330-333](../../retrieve/src/retrieve/modules/silvertorch.py#L330-L333)
+(no pad, no sentinel), [postfilter_knn.py:32-41](../../retrieve/src/retrieve/modules/knn.py#L32-L41)
++ [postfilter_knn_int8.py:68-78](../../retrieve/src/retrieve/modules/knn.py#L68-L78)
 (mask-optional dense form).
 
-**New file** `retrieve/src/retrieve/layers/utils/topk.py`:
+**New file** `retrieve/src/retrieve/functional.py`:
 
 ```python
 """Shared masked top-K epilogue for the torch-side layer paths.
@@ -508,14 +508,14 @@ but do not force unification — the kernel-side tails' subtleties (uninitialize
 
 ### K4.2 Fold `SimHashKNN` into a shared bit-KNN base (~130 duplicated lines → ~30)
 
-[simhash_knn.py](../../retrieve/src/retrieve/layers/linr/simhash_knn.py) duplicates
-[one_bit_knn.py](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py) almost line-for-line:
+[simhash_knn.py](../../retrieve/src/retrieve/modules/bit_knn.py) duplicates
+[one_bit_knn.py](../../retrieve/src/retrieve/modules/bit_knn.py) almost line-for-line:
 identical module-level `_score_full_*_eager` (18-27 both files), `_forward_torch_eager` (78-109
 vs 90-123), `_forward_triton` (111-134 vs 125-148), `d_total` property, `k > n` guard. Real
 differences: the index-time quantizer, the query projection, and OneBitKNN's `k_bits=0`
 sentinel.
 
-**New file** `retrieve/src/retrieve/layers/linr/_bit_knn.py`:
+**New file** `retrieve/src/retrieve/modules/bit_knn.py`:
 
 ```python
 class _PackedBitsKNN(nn.Module):
@@ -596,7 +596,7 @@ note: the base introduces no Optional attrs and no new branches — the export p
 twice.
 
 **Micro-dedup in `utils/quantize.py`** (same PR):
-`quantize_oporp_1bit` ([quantize.py:68-94](../../retrieve/src/retrieve/layers/utils/quantize.py#L68-L94))
+`quantize_oporp_1bit` ([quantize.py:68-94](../../retrieve/src/retrieve/indexing/quantize.py#L68-L94))
 and `project_oporp_1bit_query` (97-121) repeat validation + the
 sign-flip → permute → bin → normalize → pack chain. Extract:
 
@@ -617,7 +617,7 @@ gate: `tests/correctness/test_quantize.py` + strict-equality parity.
 ### K4.3 SilverTorch structural cleanups (no semantics change)
 
 1. **Split `register_index`**
-   ([main.py:101-188](../../retrieve/src/retrieve/layers/silvertorch/main.py#L101-L188), ~90
+   ([main.py:101-188](../../retrieve/src/retrieve/modules/silvertorch.py#L101-L188), ~90
    lines, four phases in one method):
 
    ```python
@@ -631,7 +631,7 @@ gate: `tests/correctness/test_quantize.py` + strict-equality parity.
    Buffer names and **registration order** stay identical (Invariant 4).
 2. **Guard the silent filter-skip on the candidates path**: `forward` returns
    `_forward_candidates` *before* validating `query_clause_attrs`
-   ([main.py:199-200](../../retrieve/src/retrieve/layers/silvertorch/main.py#L199-L200)), so
+   ([main.py:199-200](../../retrieve/src/retrieve/modules/silvertorch.py#L199-L200)), so
    `forward(q, query_clause_attrs=qa, candidate_ids=ids)` silently ignores the predicate:
 
    ```python
@@ -645,11 +645,11 @@ gate: `tests/correctness/test_quantize.py` + strict-equality parity.
 
    Add a correctness test asserting the raise.
 3. **Share the eager predicate math with the filters**: SilverTorch's torch-eager exact block
-   ([main.py:288-296](../../retrieve/src/retrieve/layers/silvertorch/main.py#L288-L296)) is a
+   ([main.py:288-296](../../retrieve/src/retrieve/modules/silvertorch.py#L288-L296)) is a
    copy of `ExactAttributeFilter.evaluate_subset`
-   ([exact_attribute.py:74-82](../../retrieve/src/retrieve/layers/filters/exact_attribute.py#L74-L82));
+   ([exact_attribute.py:74-82](../../retrieve/src/retrieve/modules/filters.py#L74-L82));
    its bloom block (277-287) copies `BloomFilter.evaluate_subset`
-   ([bloom.py:87-90](../../retrieve/src/retrieve/layers/filters/bloom.py#L87-L90)). Extract two
+   ([bloom.py:87-90](../../retrieve/src/retrieve/modules/filters.py#L87-L90)). Extract two
    free functions into the filters package (natural home: `exact_attribute.py` and the K5
    `bloom_hash.py`):
 
@@ -665,7 +665,7 @@ gate: `tests/correctness/test_quantize.py` + strict-equality parity.
    consumed by the filter classes' `evaluate_subset` **and** SilverTorch's eager path.
    SilverTorch deliberately does not hold `FilterModule` instances (the in-model fused filter
    is the paper's point) — it shares the ten-line predicate math, not the module.
-4. **`filter` shadows the builtin** ([main.py:53](../../retrieve/src/retrieve/layers/silvertorch/main.py#L53)):
+4. **`filter` shadows the builtin** ([main.py:53](../../retrieve/src/retrieve/modules/silvertorch.py#L53)):
    rename param + attr to `filter_mode` (keep the `FilterMode` type alias). Call sites:
    `build_silvertorch` (main.py:342), `SilvertorchAlgo`
    (evaluation/retrieval/algos/silvertorch.py:69, 87),
@@ -675,7 +675,7 @@ gate: `tests/correctness/test_quantize.py` + strict-equality parity.
 
 ### K4.4 `FullScanKNN` mask semantics — document loudly
 
-[retrieval.py:33-45](../../retrieve/src/retrieve/layers/utils/retrieval.py#L33-L45) applies the
+[retrieval.py:33-45](../../retrieve/src/retrieve/modules/knn.py#L33-L45) applies the
 mask **post-topk** (`post_filter_topk`): masked winners become `-1` but their scores remain in
 `topk_scores`, and rows with fewer than k survivors are *not* backfilled from the remaining
 corpus — the opposite of every other layer, and the docstring ("Optional post-filter mask or
@@ -700,7 +700,7 @@ directly") or return it; keep-and-document is the non-breaking choice.
 
 ## Phase K5 — Bloom signature builder: one core, public API
 
-1. **New module** `retrieve/src/retrieve/layers/filters/bloom_hash.py` receives (from
+1. **New module** `retrieve/src/retrieve/indexing/bloom_hash.py` receives (from
    `bloom.py`): `_generate_seeds` → `generate_seeds`, `_mix64` (stays private),
    `_BUILD_SIGS_BATCH`, and the two builders re-cored:
 
@@ -722,13 +722,13 @@ directly") or return it; keep-and-document is the non-breaking choice.
    ```
 
    The bodies are ~85% identical today
-   ([bloom.py:119-173](../../retrieve/src/retrieve/layers/filters/bloom.py#L119-L173) vs
-   [176-224](../../retrieve/src/retrieve/layers/filters/bloom.py#L176-L224)); after extraction
+   ([bloom.py:119-173](../../retrieve/src/retrieve/modules/filters.py#L119-L173) vs
+   [176-224](../../retrieve/src/retrieve/modules/filters.py#L176-L224)); after extraction
    each is ~10 lines around `_signature_batch`. The `(clause_idx, value)` keying invariant
    comment (the false-positive-leak fix documented in
    [kernels.md → bloom_match](../system/kernels.md)) moves onto `_signature_batch`.
 2. **Kill the private cross-module imports**:
-   [silvertorch/main.py:16-20](../../retrieve/src/retrieve/layers/silvertorch/main.py#L16-L20)
+   [silvertorch/main.py:16-20](../../retrieve/src/retrieve/modules/silvertorch.py#L16-L20)
    imports `_build_query_signatures`, `_build_signatures`, `_generate_seeds` from `bloom.py`.
    Both `bloom.py` (the `BloomFilter` class keeps only class logic) and `silvertorch/main.py`
    import the public names from `bloom_hash.py`.
@@ -747,13 +747,13 @@ Three incompatible orderings today:
 | | signature after `item_clause_attrs` |
 |---|---|
 | ABC ([interfaces.py:19-23](../../retrieve/src/retrieve/interfaces.py#L19-L23)) | `item_embs=None` |
-| `ExactAttributeFilter` ([exact_attribute.py:25-30](../../retrieve/src/retrieve/layers/filters/exact_attribute.py#L25-L30)) | `clause_is_reverse=None, item_embs=None` |
-| `BloomFilter` ([bloom.py:36-41](../../retrieve/src/retrieve/layers/filters/bloom.py#L36-L41)) | `item_embs=None, clause_is_reverse=None` |
+| `ExactAttributeFilter` ([exact_attribute.py:25-30](../../retrieve/src/retrieve/modules/filters.py#L25-L30)) | `clause_is_reverse=None, item_embs=None` |
+| `BloomFilter` ([bloom.py:36-41](../../retrieve/src/retrieve/modules/filters.py#L36-L41)) | `item_embs=None, clause_is_reverse=None` |
 
 A positional `clause_is_reverse` passed to `BloomFilter` lands in `item_embs` and is silently
 ignored — the same bug class the silvertorch-reverse plan fixed at the eval layer.
 
-**Fix**: `grep -rn "item_embs" retrieve/src/retrieve/layers/filters/ evaluation/` confirms
+**Fix**: `grep -rn "item_embs" retrieve/src/retrieve/modules/filters.py evaluation/` confirms
 nothing ever passes `item_embs` to a filter (it was speculative). New unified signature on the
 ABC and both classes:
 
@@ -801,12 +801,12 @@ Subclass it in: `PostfilterKNN`, `PostfilterKNNInt8`, `PrefilterKNN`, `_PackedBi
 
 ### K6.3 Docstring corrections (one-liners)
 
-- [postfilter_knn_int8.py:20-24](../../retrieve/src/retrieve/layers/linr/postfilter_knn_int8.py#L20-L24)
+- [postfilter_knn_int8.py:20-24](../../retrieve/src/retrieve/modules/knn.py#L20-L24)
   claims "topk order is exact"; the `>> 5` range shift (line 67) floor-divides int32 dots —
   order-preserving but tie-*introducing* within 32-unit buckets. Qualify: "topk ordering is
   exact up to ties introduced by the >>5 range compression (boundary ties are
   quality-equivalent)."
-- [compact.py:6-14](../../retrieve/src/retrieve/layers/utils/compact.py#L6-L14) says it
+- [compact.py:6-14](../../retrieve/src/retrieve/functional.py#L6-L14) says it
   "matches the triton bloom_compact/clause_compact contract" — align the wording: all three
   return **full-width** `[B, N]` indices; entries past `counts[b]` are arbitrary (argsort
   tail) for `compact_mask` vs `-1` (prefilled) for the kernels; consumers must bound by
@@ -814,7 +814,7 @@ Subclass it in: `PostfilterKNN`, `PostfilterKNNInt8`, `PrefilterKNN`, `_PackedBi
 
 ## Phase K7 — `tune.py`: one sweep engine + registry (~640 → ~300 lines)
 
-Six `_tune_*` functions ([tune.py:100-499](../../retrieve/src/retrieve/tune.py#L100-L499))
+Six `_tune_*` functions ([tune.py:100-499](../../retrieve/src/retrieve/ops/tune.py#L100-L499))
 share one skeleton — iterate regimes → build inputs → for each `(block, warps)`: warm 3×,
 `do_bench`, track best → plurality-vote (ties → lower warps) → print paste line — and six
 `_print_*` functions differ only in path + class name.
@@ -889,7 +889,7 @@ Fix [docs/system/architecture.md](../system/architecture.md) and
   mask param; callers pass precompacted `(candidate_ids, counts)`.
 - Compact-family return shape: docs say `positive_indices [B, P], P = max(counts.max(), 1)`;
   code returns full-width `[B, N]` with `-1` tails (Stage 2 change;
-  [clause_compact.py:169-173](../../retrieve/src/retrieve/kernels/filters/clause_compact.py#L169-L173)).
+  [clause_compact.py:169-173](../../retrieve/src/retrieve/ops/triton/clause_compact.py#L169-L173)).
   Same fix in the `compact_mask` helper section (returns full width, not `[:, :P]`).
 - `fused_masked_knn_topk` I/O table says query/item_embs fp32; the PrefilterKNN path feeds
   fp16 (K2 adds the dtype assert that documents reality).
@@ -906,12 +906,12 @@ Beyond dedup — real design gaps found in the audit that deserve their own deci
 blocks K1–K9.
 
 1. **State-dict round-trip doesn't work on fresh modules.** Every layer registers its buffers
-   inside `register_index` (e.g. [postfilter_knn.py:21-24](../../retrieve/src/retrieve/layers/linr/postfilter_knn.py#L21-L24),
-   [silvertorch/main.py:152-164](../../retrieve/src/retrieve/layers/silvertorch/main.py#L152-L164)),
+   inside `register_index` (e.g. [postfilter_knn.py:21-24](../../retrieve/src/retrieve/modules/knn.py#L21-L24),
+   [silvertorch/main.py:152-164](../../retrieve/src/retrieve/modules/silvertorch.py#L152-L164)),
    so `SilverTorch(...).load_state_dict(saved)` on a fresh module fails (buffers don't exist),
    and even if they did, `SilverTorch._global_scale_f` — a plain Python float cached at
    register time to avoid a per-call `.item()` sync
-   ([main.py:160-162](../../retrieve/src/retrieve/layers/silvertorch/main.py#L160-L162)) —
+   ([main.py:160-162](../../retrieve/src/retrieve/modules/silvertorch.py#L160-L162)) —
    would be stale/absent after a state-dict load. If checkpoint-shipping of built indexes is
    wanted (it is, for the serving story), add a `load_state_dict` post-hook
    (`register_load_state_dict_post_hook`) that re-derives `_global_scale_f` from the
@@ -920,17 +920,17 @@ blocks K1–K9.
    checkpointing story matters (torch-export plan is the natural place).
 2. **`KMeansTorch` is not k-means++** — the SilverTorch paper specifies "KMeans++-based
    training" (§3, citing Arthur & Vassilvitskii), but
-   [kmeans.py:19-21](../../retrieve/src/retrieve/layers/utils/kmeans.py#L19-L21) seeds
+   [kmeans.py:19-21](../../retrieve/src/retrieve/indexing/kmeans.py#L19-L21) seeds
    centroids with a plain `randperm` sample and runs Lloyd's. This is a *fidelity* gap, not a
    bug — but k-means++ init typically tightens cluster balance, which directly shrinks
    `max_cluster_size` and therefore `P = n_probe × max_cluster_size`, the codesigned kernel's
    scratch width. A ~15-line `_kmeanspp_init` (distance-weighted sampling, chunked) is cheap;
    measure `max_cluster_size` and probe-kernel latency before/after on goodreads/arxiv.
    Thesis-relevant: this is a claimable improvement with a one-figure ablation. (Also:
-   `chunk = 1 << 14` at [kmeans.py:23](../../retrieve/src/retrieve/layers/utils/kmeans.py#L23)
+   `chunk = 1 << 14` at [kmeans.py:23](../../retrieve/src/retrieve/indexing/kmeans.py#L23)
    deserves a constructor knob.)
 3. **`OneBitKNN.k_bits` sentinel mutation on re-register**
-   ([one_bit_knn.py:63-67](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py#L63-L67)):
+   ([one_bit_knn.py:63-67](../../retrieve/src/retrieve/modules/bit_knn.py#L63-L67)):
    after the first `register_index`, `k_bits=0` has been resolved to `D₁`; re-registering with
    a different-dim corpus silently keeps `D₁` and `quantize_oporp_1bit` then raises (or worse,
    D₂ % D₁ == 0 and it silently bins). Store the *resolved* value in a separate attr
@@ -942,10 +942,10 @@ blocks K1–K9.
    recommended) or add explicit re-registration support when
    [live-update-api.md](live-update-api.md) lands (it makes mutation first-class anyway).
 5. **`_int_mm` minimum-M padding constant**:
-   [postfilter_knn_int8.py:26](../../retrieve/src/retrieve/layers/linr/postfilter_knn_int8.py#L26)
+   [postfilter_knn_int8.py:26](../../retrieve/src/retrieve/modules/knn.py#L26)
    `_PAD_M = 17` encodes cuBLAS LtGemm's `M >= 17` int8 requirement with no comment linking to
    it (the doc note lives only in kernels.md). One comment line; fold into K6.3's pass.
-6. **`combine_indices` device sync**: [filters/__init__.py:53](../../retrieve/src/retrieve/layers/filters/__init__.py#L53)
+6. **`combine_indices` device sync**: [filters/__init__.py:53](../../retrieve/src/retrieve/functional.py#L53)
    does `int(new_counts.max().item())` per cascade stage — a documented sync point, fine for
    offline composition, but worth a docstring warning ("host sync per stage; don't put this in
    a cudagraph-captured path"). The eval harness never calls it in a hot loop (only linr algos
@@ -975,20 +975,20 @@ blocks K1–K9.
 
 | File | Phases |
 |---|---|
-| [retrieve/src/retrieve/tune.py](../../retrieve/src/retrieve/tune.py) | K1 bugfix, K7 rework |
-| [kernels/silvertorch/codesigned_probe_score.py](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py) | K2 (worked example), K3 |
-| [kernels/silvertorch/codesigned_probe_score_exact.py](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_exact.py) | K2, K3 |
-| [kernels/filters/{clause_mask,clause_compact,bloom_compact}.py](../../retrieve/src/retrieve/kernels/filters/) | K2, K3 |
-| [kernels/linr/{fused_masked_knn_topk,oporp_1bit_match_topk}.py](../../retrieve/src/retrieve/kernels/linr/) | K2, K3 |
+| [retrieve/src/retrieve/ops/tune.py](../../retrieve/src/retrieve/ops/tune.py) | K1 bugfix, K7 rework |
+| [kernels/silvertorch/codesigned_probe_score.py](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py) | K2 (worked example), K3 |
+| [kernels/silvertorch/codesigned_probe_score_exact.py](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score_exact.py) | K2, K3 |
+| [kernels/filters/{clause_mask,clause_compact,bloom_compact}.py](../../retrieve/src/retrieve/ops/triton/) | K2, K3 |
+| [kernels/linr/{fused_masked_knn_topk,oporp_1bit_match_topk}.py](../../retrieve/src/retrieve/ops/triton/) | K2, K3 |
 | `kernels/common.py` | K3 — CREATE |
 | `layers/utils/topk.py` | K4.1 — CREATE |
 | `layers/linr/_bit_knn.py` | K4.2 — CREATE |
-| [layers/linr/{one_bit_knn,simhash_knn}.py](../../retrieve/src/retrieve/layers/linr/) | K4.2 |
-| [layers/silvertorch/main.py](../../retrieve/src/retrieve/layers/silvertorch/main.py) | K4.3, K5 |
-| [layers/filters/bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py) → + `bloom_hash.py` | K5 |
-| [layers/filters/exact_attribute.py](../../retrieve/src/retrieve/layers/filters/exact_attribute.py) | K4.3.3, K6.1 |
+| [layers/linr/{one_bit_knn,simhash_knn}.py](../../retrieve/src/retrieve/modules/) | K4.2 |
+| [layers/silvertorch/main.py](../../retrieve/src/retrieve/modules/silvertorch.py) | K4.3, K5 |
+| [layers/filters/bloom.py](../../retrieve/src/retrieve/modules/filters.py) → + `bloom_hash.py` | K5 |
+| [layers/filters/exact_attribute.py](../../retrieve/src/retrieve/modules/filters.py) | K4.3.3, K6.1 |
 | [src/retrieve/interfaces.py](../../retrieve/src/retrieve/interfaces.py) | K6 |
-| [layers/utils/{quantize,retrieval,compact,kmeans}.py](../../retrieve/src/retrieve/layers/utils/) | K4.2, K4.4, K6.3, Additional-2 |
+| [layers/utils/{quantize,retrieval,compact,kmeans}.py](../../retrieve/src/retrieve/indexing/) | K4.2, K4.4, K6.3, Additional-2 |
 | `retrieve/tests/…` | K1, K4.1, K8 — new files |
 | [docs/system/{architecture,kernels}.md](../system/) | K9 |
 

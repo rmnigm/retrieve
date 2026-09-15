@@ -39,12 +39,12 @@
 `torch.ops.st.*` after `import silvertorch.ops._load_ops` (`_load_ops.py:34`). No fake/meta kernels
 anywhere (repo-wide grep for `register_fake|impl_abstract|custom_op|DispatchKey::Meta` is empty).
 
-**Ours**: `SilverTorch` ([main.py](../../retrieve/src/retrieve/layers/silvertorch/main.py)),
+**Ours**: `SilverTorch` ([main.py](../../retrieve/src/retrieve/modules/silvertorch.py)),
 `backend ∈ {triton, torch, cuda, cute}` ([interfaces.py:8](../../retrieve/src/retrieve/interfaces.py)),
 phase 1 host-side (main.py:311-319), phases 2+3 in one Triton launch
-([codesigned_probe_score.py](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py)
-310 lines, exact variant 294, [common.py](../../retrieve/src/retrieve/kernels/common.py) 110,
-[bloom_hash.py](../../retrieve/src/retrieve/layers/filters/bloom_hash.py) 165), plus the two-kernel
+([codesigned_probe_score.py](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py)
+310 lines, exact variant 294, [common.py](../../retrieve/src/retrieve/ops/triton/common.py) 110,
+[bloom_hash.py](../../retrieve/src/retrieve/indexing/bloom_hash.py) 165), plus the two-kernel
 CUDA/CuTe backends this plan removes (§7).
 
 ### 1.1 Inventory — Algorithm 1 phases vs the official ops
@@ -52,7 +52,7 @@ CUDA/CuTe backends this plan removes (§7).
 | phase (paper Alg. 1) | official op | ours | for `backend="official"` |
 |---|---|---|---|
 | k-means / IVF build | **none** — README "Index build flow" (`fused_kmean_ann.cpp:331-337`): bring your own k-means, sort items by cluster, CSR `cluster_offsets` | `KMeansTorch` + padded layout (main.py:171-210) | ours; needs a **cluster-sorted** table + `cluster_offsets[n_lists+1]` |
-| int8 quantization | **none**; op takes int8 embeddings *and int8 queries* (`fused_kmean_ann_cuda.cu:1296`), scale via `divisor_for_int8` (int) or `per_embedding_scale` (fp16 `[N]`, divides) | `quantize_int8_global` + per-row `quantize_int8` ([quantize.py:24-43](../../retrieve/src/retrieve/layers/utils/quantize.py)) | ours; scale applied host-side (§4.2) |
+| int8 quantization | **none**; op takes int8 embeddings *and int8 queries* (`fused_kmean_ann_cuda.cu:1296`), scale via `divisor_for_int8` (int) or `per_embedding_scale` (fp16 `[N]`, divides) | `quantize_int8_global` + per-row `quantize_int8` ([quantize.py:24-43](../../retrieve/src/retrieve/indexing/quantize.py)) | ours; scale applied host-side (§4.2) |
 | bloom index build | `bloom_index_build(feature_ids int32[F], feature_offsets int64[N·F+1], feature_values int64, b_multiplier>1.0, k, fast_build)` — CPU `bloom_indexer.cpp:27-112`, CUDA `bloom_indexer_cuda.cu:755-878` | `build_signatures` `[N, W]` | **official** (their hash) |
 | query predicate | `parse_expression_query_batch(str[], ks, hash_k, return_plan, max_sub_queries)` — CPU parser, AND/OR/NOT/parens (`EXPRESSION_SYNTAX.md`); `ks` is unused (`expression_query_parser.cpp:395`) | `[B, C]` attrs → `build_query_signatures` | official; plans cached (§4.4) |
 | phase 2 partial mask | `bloom_index_search_batch_return_partial_response(index, b_offsets, plans, selected_cluster_offsets [B,P], selected_cluster_lengths [B,P], k, hash_k, plan_index?) → (column_counts_cumsum int32, first_item_offset_in_column int8, column_mask_response int64)` (`bloom_index_search.cpp:560-571`, cuda `:1213-1262`) | fused row-wise subset test | official |
@@ -242,7 +242,7 @@ and parses one large expression per call) and reported as its own row.
 
 ### 5.1 Files, buffers, filter matrix
 
-- `retrieve/src/retrieve/kernels/silvertorch/official.py` (new, ≈ 250 lines): `is_available()` /
+- `retrieve/src/retrieve/ops/official/adapter.py` (new, ≈ 250 lines): `is_available()` /
   `ensure_loaded()` (distinguishes "not installed" from "op missing", as
   `codesigned_probe_score_cuda.py:161-176` did at the time — that wrapper went at B4, tag
   `cuda-cute-backends-final`); `attrs_to_features(attrs_sorted)`; `queries_to_expressions(qa, clause_is_reverse)`;

@@ -1,18 +1,19 @@
-"""Triton ``codesigned_probe_score`` vs the pure-torch SilverTorch phase 2+3."""
+"""Triton ``codesigned_probe_score`` vs ``retrieve.ops.reference`` (the pure-torch phase 2+3)."""
 
 from __future__ import annotations
 
 import pytest
 import torch
 
-from retrieve.kernels.silvertorch.codesigned_probe_score import (
+from retrieve.indexing.bloom_hash import build_signatures, generate_seeds
+from retrieve.indexing.quantize import quantize_int8_global
+from retrieve.ops import reference
+from retrieve.ops.triton.codesigned_probe_score import (
     CodesignedProbeScoreConfig,
     _codesigned_probe_score_impl,
     codesigned_probe_score,
     codesigned_probe_score_bloom,
 )
-from retrieve.layers.filters.bloom_hash import build_signatures, generate_seeds
-from retrieve.layers.utils.quantize import quantize_int8_global
 from tests.conftest import (
     make_attrs,
     make_index,
@@ -20,7 +21,6 @@ from tests.conftest import (
     make_query_attrs,
 )
 from tests.parity.conftest import assert_topk_matches
-from tests.parity.conftest import ref_cps_phase23 as _ref_phase23
 
 
 def _make_flat_probed(b, n, p, *, pad_rate=0.1, seed=7):
@@ -40,7 +40,7 @@ def test_codesigned_no_filters_matches_ref(n, d, p, k, b):
     flat = _make_flat_probed(b, n, p)
 
     out_ids, out_scores = codesigned_probe_score(query, flat, codes, global_scale, k)
-    ref_ids, ref_scores = _ref_phase23(query, flat, codes, global_scale, k)
+    ref_ids, ref_scores = reference.codesigned_probe_score(query, flat, codes, global_scale, k)
     assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores)
 
 
@@ -61,7 +61,9 @@ def test_codesigned_with_bloom_matches_ref(n, d, p, k, b):
     out_ids, out_scores = codesigned_probe_score_bloom(
         query, flat, codes, qb, sigs, global_scale, k
     )
-    ref_ids, ref_scores = _ref_phase23(query, flat, codes, global_scale, k, qb=qb, bloom_sigs=sigs)
+    ref_ids, ref_scores = reference.codesigned_probe_score_bloom(
+        query, flat, codes, qb, sigs, global_scale, k
+    )
     assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores)
 
 

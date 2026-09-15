@@ -25,6 +25,19 @@ toolchain, so there are no prebuilt CUDA wheels to match. You need:
 Modules that ship a pure-PyTorch path accept `backend="torch"` and run without Triton (still on
 GPU). The default is `backend="triton"`.
 
+The package has two public layers and two helper namespaces:
+
+| namespace | what it holds |
+| --- | --- |
+| `retrieve` / `retrieve.modules` | the `nn.Module`s: `SilverTorch`, the LiNR primitives, the two filters, `OfficialConfig` |
+| `retrieve.ops.triton` / `.reference` / `.official` | the kernels behind them, one namespace per backend with the same op names and signatures (`import retrieve.ops.triton` registers `torch.ops.retrieve.*`) |
+| `retrieve.indexing` | index-build math: `KMeans`, the IVF layouts, the quantizers, the bloom hash builders |
+| `retrieve.functional` | query-time glue: `masked_topk`, `compact_mask`, `combine_masks` / `combine_indices`, `post_filter_topk` |
+
+`import retrieve` imports no kernel; a module resolves its backend's op namespace when it is
+constructed. The 0.1 paths `retrieve.layers` / `retrieve.kernels` still import (with a
+`DeprecationWarning`) and are removed in the next release.
+
 ## The shared lifecycle
 
 Every retrieval module is an `nn.Module` with the same three-step contract:

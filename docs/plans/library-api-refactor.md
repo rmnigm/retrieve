@@ -78,7 +78,7 @@ What is still true and is this plan's business:
   retriever (`FullScanKNN`); `layers/filters/bloom_hash.py` holds build-time
   hashing next to the filter module. Meta's tree answers "where is X" from
   X's role (§1.2); ours does not.
-- **`KMeansTorch` is random-init Lloyd's** ([kmeans.py](../../retrieve/src/retrieve/layers/utils/kmeans.py):
+- **`KMeansTorch` is random-init Lloyd's** ([kmeans.py](../../retrieve/src/retrieve/indexing/kmeans.py):
   seeded `randperm`); the paper says k-means++ (SilverTorch §4.1). There is
   no k-means++ anywhere.
 - **The LiNR paper variants V1–V4 live in the harness**

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import torch
 
-from retrieve.layers.utils.compact import compact_mask
+from retrieve.functional import compact_mask
 from tests.conftest import make_mask
 
 

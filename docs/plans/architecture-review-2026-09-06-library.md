@@ -26,11 +26,11 @@ state dict does not carry, and one fairness hole that would leak into citable nu
 
 | # | change | effort | risk | when |
 |---|---|---|---|---|
-| 1 | **Make the official plan cache opt-in for timing.** `parse_plans` is `lru_cache`d on the whole expression tuple ([official.py:357-379](../../retrieve/src/retrieve/kernels/silvertorch/official.py#L357-L379)); the harness times with `do_bench` over one fixed closure (`evaluation/retrieval/measure.py:146` (deleted by C3; v2 times in [bench.py](../../evaluation/retrieval/bench.py))), so after the first call the official bloom arm never pays the parse A3 measured at 58.7 µs/call (B=16) — 10–20 % of an eager bloom forward, silently excluded from B3/D1. Add `OfficialConfig.cache_plans: bool = True`; the harness's `official` cell passes `False` (or reports both, labelled). | 1 h | low | **before B3** |
+| 1 | **Make the official plan cache opt-in for timing.** `parse_plans` is `lru_cache`d on the whole expression tuple ([official.py:357-379](../../retrieve/src/retrieve/ops/official/adapter.py#L357-L379)); the harness times with `do_bench` over one fixed closure (`evaluation/retrieval/measure.py:146` (deleted by C3; v2 times in [bench.py](../../evaluation/retrieval/bench.py))), so after the first call the official bloom arm never pays the parse A3 measured at 58.7 µs/call (B=16) — 10–20 % of an eager bloom forward, silently excluded from B3/D1. Add `OfficialConfig.cache_plans: bool = True`; the harness's `official` cell passes `False` (or reports both, labelled). | 1 h | low | **before B3** |
 | 2 | **Stale-record sweep + pin the bit order.** A3 is checked and measured HIGH-first with three probes, 19 launches / 3 syncs; yet `official.py:75-82` says "not yet measured", `kernels.md:931-945` says "the one unmeasured fact … ≈ 12 launches + 2 syncs", `architecture.md:410` repeats 12/2, `architecture.md:384` still defines `Backend` as three-valued, `kernels.md:152` counts eight tune subcommands (there are eleven), `modules.md:52` promises float32 scores from modules that return fp16. Rule 4 says docs move with code; these did not. Pin `OFFICIAL_BIT_ORDER = "high_first"` in `test_official.py:65` at the same time (T3 then asserts the constant on the A100 at B2). | 2 h | none | **now** |
-| 3 | **Close the `-1` trap on the candidates paths.** `SilverTorch._forward_candidates` ([main.py:697-698](../../retrieve/src/retrieve/layers/silvertorch/main.py#L697-L698)) and `FullScanKNN._forward_candidates` ([retrieval.py:64](../../retrieve/src/retrieve/layers/utils/retrieval.py#L64)) index buffers with the raw ids; every compact producer in the library returns `-1`-tailed `[B, N]` ids, and these two `forward`s take no `counts`. A `-1` wraps to the last item (on `official`, through `inv_perm`), scores it, and returns it as a real id. Untested (`TestCandidates` never feeds a pad). Fix: `valid = ids >= 0`, gather via `clamp_min(0)`, `masked_topk(..., valid=valid, gather_ids=ids, pad_to_k=False)` — pure tensor flow, no sync. | 2 h + GPU test | low–med | **before D1** |
-| 4 | **Make a loaded state dict usable.** `_global_scale_f` and `_max_cluster_size` are Python caches set only in `register_index` ([main.py:245](../../retrieve/src/retrieve/layers/silvertorch/main.py#L245), [:287](../../retrieve/src/retrieve/layers/silvertorch/main.py#L287)); `load_state_dict` leaves them stale. T6 proves it — the test patches both by hand ([test_official.py:691](../../retrieve/tests/parity/test_official.py#L691)). Register a `load_state_dict` post-hook that re-derives them from `global_scale` / `padded_cluster_items.shape[1]` (or `cluster_sizes.max()` on official — a sync at load time is fine) and delete the patch. | 2 h | low | **now** |
-| 5 | **Give `Backend` its real shape at B4.** Today one five-valued literal is accepted by every constructor and silently means "torch" for four of them on three of its values; nothing validates it (`OneBitKNN(k, backend="foo")` runs). After B4 the honest types are `LinrBackend = Literal["torch","triton"]` and `SilverTorchBackend = Literal["torch","triton","official"]`, both validated in `__init__`, `SilverTorch.forward` dispatching through a table built once at construction instead of an `if` ladder ([main.py:425-439](../../retrieve/src/retrieve/layers/silvertorch/main.py#L425-L439)). The harness's LiNR cells must stop passing `"cuda"` (C1 already plans a `PATHS` table). | 0.5 d | med (harness cells) | **B4 + C1** |
+| 3 | **Close the `-1` trap on the candidates paths.** `SilverTorch._forward_candidates` ([main.py:697-698](../../retrieve/src/retrieve/modules/silvertorch.py#L697-L698)) and `FullScanKNN._forward_candidates` ([retrieval.py:64](../../retrieve/src/retrieve/modules/knn.py#L64)) index buffers with the raw ids; every compact producer in the library returns `-1`-tailed `[B, N]` ids, and these two `forward`s take no `counts`. A `-1` wraps to the last item (on `official`, through `inv_perm`), scores it, and returns it as a real id. Untested (`TestCandidates` never feeds a pad). Fix: `valid = ids >= 0`, gather via `clamp_min(0)`, `masked_topk(..., valid=valid, gather_ids=ids, pad_to_k=False)` — pure tensor flow, no sync. | 2 h + GPU test | low–med | **before D1** |
+| 4 | **Make a loaded state dict usable.** `_global_scale_f` and `_max_cluster_size` are Python caches set only in `register_index` ([main.py:245](../../retrieve/src/retrieve/modules/silvertorch.py#L245), [:287](../../retrieve/src/retrieve/modules/silvertorch.py#L287)); `load_state_dict` leaves them stale. T6 proves it — the test patches both by hand ([test_official.py:691](../../retrieve/tests/parity/test_official.py#L691)). Register a `load_state_dict` post-hook that re-derives them from `global_scale` / `padded_cluster_items.shape[1]` (or `cluster_sizes.max()` on official — a sync at load time is fine) and delete the patch. | 2 h | low | **now** |
+| 5 | **Give `Backend` its real shape at B4.** Today one five-valued literal is accepted by every constructor and silently means "torch" for four of them on three of its values; nothing validates it (`OneBitKNN(k, backend="foo")` runs). After B4 the honest types are `LinrBackend = Literal["torch","triton"]` and `SilverTorchBackend = Literal["torch","triton","official"]`, both validated in `__init__`, `SilverTorch.forward` dispatching through a table built once at construction instead of an `if` ladder ([main.py:425-439](../../retrieve/src/retrieve/modules/silvertorch.py#L425-L439)). The harness's LiNR cells must stop passing `"cuda"` (C1 already plans a `PATHS` table). | 0.5 d | med (harness cells) | **B4 + C1** |
 
 Everything else in §B is smaller, and §D says where each one lands.
 
@@ -41,7 +41,7 @@ Everything else in §B is smaller, and §D says where each one lands.
 **A1. Backend dispatch is coherent for `SilverTorch` and vacuous everywhere else.**
 `Backend` ([interfaces.py:8](../../retrieve/src/retrieve/interfaces.py#L8)) is
 `Literal["torch","triton","cuda","cute","official"]`. Only `SilverTorch.__init__`
-validates it ([main.py:116-117](../../retrieve/src/retrieve/layers/silvertorch/main.py#L116-L117));
+validates it ([main.py:116-117](../../retrieve/src/retrieve/modules/silvertorch.py#L116-L117));
 `_PackedBitsKNN`, `PrefilterKNN`, `PostfilterKNN*`, `BloomFilter`,
 `ExactAttributeFilter` store it unvalidated and branch `== "triton"` else torch. The
 docs describe this honestly (architecture.md "Backend dispatch"), and the harness
@@ -52,7 +52,7 @@ ValueError`) to the four LiNR/filter constructors **only if** the harness's cuda
 LiNR cells are confirmed to pass `"triton"` — otherwise wait for C1. *When:* B4 + C1.
 
 **A2. What `SilverTorch` should look like after B4.** Deleting cuda/cute removes
-[main.py:16-26](../../retrieve/src/retrieve/layers/silvertorch/main.py#L16-L26),
+[main.py:16-26](../../retrieve/src/retrieve/modules/silvertorch.py#L16-L26),
 `:49`, `:314-339` (the `bloom_sigs_t` branch and its slack warning), `:427-430`,
 `:511-591`. What remains is three backends with two index layouts (padded vs CSR) and
 two filter-buffer sets. Sketch:
@@ -69,8 +69,8 @@ return self._forward_impl(query, query_clause_attrs)
 ```
 
 and merge `_register_filter_buffers` / `_register_official_filter_buffers` — their
-`exact` branches are copies ([main.py:346-354](../../retrieve/src/retrieve/layers/silvertorch/main.py#L346-L354)
-vs [:385-393](../../retrieve/src/retrieve/layers/silvertorch/main.py#L385-L393); the
+`exact` branches are copies ([main.py:346-354](../../retrieve/src/retrieve/modules/silvertorch.py#L346-L354)
+vs [:385-393](../../retrieve/src/retrieve/modules/silvertorch.py#L385-L393); the
 only difference is the `[self.sort_perm]` permutation), so one method with
 `perm: Tensor | None` covers both. `_TWO_KERNEL_BACKENDS` and `build_transposed_sigs`
 go; G-a brings `bloom_sigs_t` back for Triton, at which point the "bloom index differs
@@ -79,13 +79,13 @@ write it that way then, not now. *When:* B4.
 
 **A3. The official adapter fits the design (§5.1) — with three seams.**
 Buffers, order, filter matrix, sentinel handling (`indices == -1` → `valid` →
-`masked_topk`, [official.py:545-555](../../retrieve/src/retrieve/kernels/silvertorch/official.py#L545-L555))
+`masked_topk`, [official.py:545-555](../../retrieve/src/retrieve/ops/official/adapter.py#L545-L555))
 and the eager-only guard (both `nn.Module.compile` override and `is_compiling`) are as
 planned; the loader's three-way outcome (`OfficialMissing` / broken `ImportError` /
 missing op) is the right contract and `require_official` uses it correctly.
 Seams:
-(a) `csr_from_assignments` ([official.py:243-258](../../retrieve/src/retrieve/kernels/silvertorch/official.py#L243-L258))
-is dead — `_build_ivf` re-derives `sort_perm`/`offsets` itself ([main.py:255-258](../../retrieve/src/retrieve/layers/silvertorch/main.py#L255-L258))
+(a) `csr_from_assignments` ([official.py:243-258](../../retrieve/src/retrieve/ops/official/adapter.py#L243-L258))
+is dead — `_build_ivf` re-derives `sort_perm`/`offsets` itself ([main.py:255-258](../../retrieve/src/retrieve/modules/silvertorch.py#L255-L258))
 and `register_index` computes `inv_perm` inline (`:190-191`). Worse, the two disagree:
 the adapter's version is `argsort(stable=True)`, the layer's is not. On CUDA int64
 `argsort` is radix-sorted and stable in practice, but the layer's slot order (hence
@@ -93,7 +93,7 @@ the adapter's version is `argsort(stable=True)`, the layer's is not. On CUDA int
 *Fix:* delete `csr_from_assignments`, use `stable=True` in `_build_ivf`. Changes no
 score, may permute ties; F3's provenance story wants this determinism anyway. *When:* now,
 validate at B2.
-(b) `pack_mask` ([official.py:393-406](../../retrieve/src/retrieve/kernels/silvertorch/official.py#L393-L406))
+(b) `pack_mask` ([official.py:393-406](../../retrieve/src/retrieve/ops/official/adapter.py#L393-L406))
 materialises `padded.view(b, w, 64).to(int64) << shifts` — a `[B, N]` int64 tensor,
 8× the mask, 1.3 GB at N = 10 M, B = 16, per forward, on the exact-on-official path.
 Pack bytes instead:
@@ -107,18 +107,18 @@ return packed.flip(-1).contiguous().view(torch.int64).squeeze(-1)  # byte 0 → 
 
 peak `[B, N]` uint8. Bit-identical output; T3's round trips gate it. *When:* now,
 validate at B2 (it is on the timed exact arm, so before B3).
-Same family, torch fallback only: `compact_mask` ([compact.py:15](../../retrieve/src/retrieve/layers/utils/compact.py#L15))
+Same family, torch fallback only: `compact_mask` ([compact.py:15](../../retrieve/src/retrieve/functional.py#L15))
 casts the mask to fp32 before `argsort(stable=True)` — a `[B, N]` fp32 temp per call;
 bool `argsort(stable=True)` works on torch 2.4 (checked on CPU here), so the cast can
 go once B2 confirms it on CUDA.
-(c) `queries_to_expressions(…, clause_is_reverse=None)` ([official.py:326-354](../../retrieve/src/retrieve/kernels/silvertorch/official.py#L326-L354))
+(c) `queries_to_expressions(…, clause_is_reverse=None)` ([official.py:326-354](../../retrieve/src/retrieve/ops/official/adapter.py#L326-L354))
 is never called with the second argument from the library (bloom mode rejects reverse
 at `register_index`); only T4 uses it. Fine as a test seam — say so in the docstring
 ("library callers never pass it; NOT is exercised by T4 only").
 
 **A4. Two knobs named `k_hash` and `hash_k` with different meanings.**
 `SilverTorch.k_hash` is the official *search* `k` (≤ 10); `OfficialConfig.hash_k`
-([official.py:147](../../retrieve/src/retrieve/kernels/silvertorch/official.py#L147))
+([official.py:147](../../retrieve/src/retrieve/ops/official/adapter.py#L147))
 is the number of raw murmur hashes stored per term. The docstring explains it, the
 names do not. Rename `OfficialConfig.hash_k` → `n_stored_hashes` (and `build_k` →
 `n_build_bits`?) while B1 is still Mac-side and unpublished. *When:* now.
@@ -127,15 +127,15 @@ names do not. Rename `OfficialConfig.hash_k` → `n_stored_hashes` (and `build_k
 `_<name>_prep` + `_impl` + `@triton_op` with the launch inline; grep confirms one
 `wrap_triton(` per op and `.stride(` only inside a `_prep` (the exception is
 `bloom_match`, which K2.2 left without a prep on purpose). But `_CpsLaunch`/`_cps_finish`
-([codesigned_probe_score.py:227-233](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py#L227-L233),
-[:315-320](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py#L315-L320))
-and `_CpseLaunch`/`_cpse_finish` ([codesigned_probe_score_exact.py:539-545](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_exact.py#L539-L545),
-[:633-638](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_exact.py#L633-L638))
+([codesigned_probe_score.py:227-233](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py#L227-L233),
+[:315-320](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py#L315-L320))
+and `_CpseLaunch`/`_cpse_finish` ([codesigned_probe_score_exact.py:539-545](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score_exact.py#L539-L545),
+[:633-638](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score_exact.py#L633-L638))
 are byte-for-byte the same; K2.2 said "finish identical to `_cps_finish`" and meant
 share it. Likewise the 3-D grid split (`tiles`, `tiles_x = cdiv(tiles, 65535)`,
-`tiles_y`) is pasted in [clause_mask.py:115-119](../../retrieve/src/retrieve/kernels/filters/clause_mask.py#L115-L119),
-[clause_compact.py:298-302](../../retrieve/src/retrieve/kernels/filters/clause_compact.py#L298-L302),
-[bloom_compact.py:475-479](../../retrieve/src/retrieve/kernels/filters/bloom_compact.py#L475-L479).
+`tiles_y`) is pasted in [clause_mask.py:115-119](../../retrieve/src/retrieve/ops/triton/clause_mask.py#L115-L119),
+[clause_compact.py:298-302](../../retrieve/src/retrieve/ops/triton/clause_compact.py#L298-L302),
+[bloom_compact.py:475-479](../../retrieve/src/retrieve/ops/triton/bloom_compact.py#L475-L479).
 *Fix:* a host-side `kernels/_host.py` (not `common.py`, which is `@triton.jit`-only by
 its own docstring) with `ProbeLaunch`, `probe_finish(launch, k)` and
 `grid_batch_tiles(b, n, block) -> (b, tiles_y, tiles_x)`. *When:* G-a (it rewrites
@@ -153,9 +153,9 @@ that, keep it (§C).
 **A7. `masked_topk` / `_PackedBitsKNN` sharing (K4): done, with one dtype seam.**
 All torch-side epilogues route through `masked_topk`; the two bit-KNNs are 52 and 40
 lines of subclass. But scores dtype differs by path: `PostfilterKNN` returns fp16
-([postfilter_knn.py:32](../../retrieve/src/retrieve/layers/linr/postfilter_knn.py#L32)),
-`PostfilterKNNInt8` fp16 of `dots >> 5` ([postfilter_knn_int8.py:69](../../retrieve/src/retrieve/layers/linr/postfilter_knn_int8.py#L69)),
-`PrefilterKNN` fp16 on the torch path ([prefilter_knn.py:65](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py#L65))
+([postfilter_knn.py:32](../../retrieve/src/retrieve/modules/knn.py#L32)),
+`PostfilterKNNInt8` fp16 of `dots >> 5` ([postfilter_knn_int8.py:69](../../retrieve/src/retrieve/modules/knn.py#L69)),
+`PrefilterKNN` fp16 on the torch path ([prefilter_knn.py:65](../../retrieve/src/retrieve/modules/knn.py#L65))
 but fp32 on Triton and fp32 in both `p == 0` early returns (`:57-61`, `:77-82`).
 `modules.md:52-53` promises `float32 scores` for all. Either cast to fp32 at the layer
 boundary (cheap, `[B, k]`) or document per class. The `p == 0` block is also
@@ -168,7 +168,7 @@ and both subclasses (K6.1). `_PackedBitsKNN` uses `raise NotImplementedError` ho
 rather than `abc.abstractmethod` — acceptable (the base is private and never
 instantiated), but `@abc.abstractmethod` costs nothing and documents intent.
 `ExactAttributeFilter.register_index` does not `.long()` its attrs
-([exact_attribute.py:47-48](../../retrieve/src/retrieve/layers/filters/exact_attribute.py#L47-L48))
+([exact_attribute.py:47-48](../../retrieve/src/retrieve/modules/filters.py#L47-L48))
 while `BloomFilter` and `SilverTorch` do; an int32 attrs tensor compiles a second
 `clause_mask` variant with a mixed-width compare. One `.long()`. *When:* now.
 
@@ -187,9 +187,9 @@ already imports the submodule — verified by grep) and the footgun disappears. 
 ### B.2 Code design and readability
 
 **D1. The B5 salt buffer has one hole.** `SilverTorch._query_bits`
-([main.py:463](../../retrieve/src/retrieve/layers/silvertorch/main.py#L463)) falls back
+([main.py:463](../../retrieve/src/retrieve/modules/silvertorch.py#L463)) falls back
 to on-the-fly salt when the index was registered without attributes, and
-`generate_clause_salt` ([bloom_hash.py:56-61](../../retrieve/src/retrieve/layers/filters/bloom_hash.py#L56-L61))
+`generate_clause_salt` ([bloom_hash.py:56-61](../../retrieve/src/retrieve/indexing/bloom_hash.py#L56-L61))
 still builds two `torch.tensor(_SALT, device=…)` scalars — i.e. exactly the per-call
 H2D copy B5 removed, on that path. Register the salt lazily on first query instead
 (or register a `[0]` buffer and derive the `[C]` one with `torch.arange` +
@@ -205,7 +205,7 @@ scalar multiply, no upload). *When:* now, `test_bloom_hash.py` gates it.
 sync so a profiler reader does not go looking.
 
 **D3. Allocations in forward that could be buffers.** `_cps_prep` allocates two 1×1
-int64 dummies per call on the no-bloom path ([codesigned_probe_score.py:272-273](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py#L272-L273)),
+int64 dummies per call on the no-bloom path ([codesigned_probe_score.py:272-273](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py#L272-L273)),
 as does `_oporp_prep` (`:434-435`). Under `reduce-overhead` these are captured; eager,
 they are two tiny `cudaMalloc`-pool hits per forward — measurable only at B=1. Reuse an
 existing int64 tensor (`flat_probed_items`) as the dummy pointer instead — the kernel
@@ -215,15 +215,15 @@ for B3; otherwise leave.
 **D4. `torch.compile` friendliness.** `P`, `D`, `W`, `N` are `tl.constexpr`; the
 bucketing policy for the two LiNR indirect kernels is documented and correct; the
 official backend is excluded by design. `_max_cluster_size` as a Python int is the
-right call (the comment at [main.py:240-244](../../retrieve/src/retrieve/layers/silvertorch/main.py#L240-L244)
+right call (the comment at [main.py:240-244](../../retrieve/src/retrieve/modules/silvertorch.py#L240-L244)
 explains the SymInt hazard). No graph-break sources found beyond the documented ones.
 Keep.
 
 **D5. Duplicated numerics that must stay in lock-step.** The dequant expression
 `dot.float() * q_scale * global_scale` (left-associated) appears in the Triton kernel
-([codesigned_probe_score.py:217](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py#L217)),
-the exact kernel, the eager path ([main.py:687](../../retrieve/src/retrieve/layers/silvertorch/main.py#L687)),
-the candidates path (`:703`), the official epilogue ([official.py:552](../../retrieve/src/retrieve/kernels/silvertorch/official.py#L552)),
+([codesigned_probe_score.py:217](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py#L217)),
+the exact kernel, the eager path ([main.py:687](../../retrieve/src/retrieve/modules/silvertorch.py#L687)),
+the candidates path (`:703`), the official epilogue ([official.py:552](../../retrieve/src/retrieve/ops/official/adapter.py#L552)),
 and `ref_cps_phase23`. That is the bit-exact contract and it is correct in all six;
 but it is enforced only by tests. Put one sentence in `kernels.md § Numerics` listing
 the six sites, so a future "simplify" pass does not reassociate one of them.
@@ -235,7 +235,7 @@ build/import memoisers and re-raise typed errors — right. Library-code `assert
 the cute twin (deleted at B4). No silent fallbacks other than A1.
 
 **D7. `_forward_two_kernel(plain=, bloom=, exact=)`** passes three untyped callables
-([main.py:539-554](../../retrieve/src/retrieve/layers/silvertorch/main.py#L539-L554)).
+([main.py:539-554](../../retrieve/src/retrieve/modules/silvertorch.py#L539-L554)).
 Deleted at B4; do not touch.
 
 **D8. Naming (QuantizedIVF → SilverTorch).** Clean in the library: zero hits for
@@ -281,7 +281,7 @@ No mutable defaults, no TODO/FIXME anywhere in `src/`. Stale text is the real li
 
 | where | says | truth | fix |
 |---|---|---|---|
-| [official.py:75-82](../../retrieve/src/retrieve/kernels/silvertorch/official.py#L75-L82) | "Read from the source, not yet measured: roadmap A3 … probes it" | A3 done, HIGH-first measured (roadmap A3 record, O §13.2) | "Measured 2026-09-06 (O §13.2): high-first" |
+| [official.py:75-82](../../retrieve/src/retrieve/ops/official/adapter.py#L75-L82) | "Read from the source, not yet measured: roadmap A3 … probes it" | A3 done, HIGH-first measured (roadmap A3 record, O §13.2) | "Measured 2026-09-06 (O §13.2): high-first" |
 | [kernels.md:931-937](../system/kernels.md) | "Bit order — the one unmeasured fact … Roadmap A3 measures" | same | rewrite paragraph |
 | [kernels.md:945](../system/kernels.md), [architecture.md:410](../system/architecture.md) | "≈ 12 launches + 2 syncs" | 19 launches / 3 syncs, bloom ≈ 32 / ≥ 5 (O §13.2) | update both |
 | [architecture.md:384](../system/architecture.md) | `Backend = Literal["torch","triton","cuda"]` | five-valued (`interfaces.py:8`) | fix; re-fix at B4 |
@@ -289,7 +289,7 @@ No mutable defaults, no TODO/FIXME anywhere in `src/`. Stale text is the real li
 | [modules.md:52-53](../../retrieve/docs/modules.md) | "`[B, k] float32 scores`" | fp16 from `PostfilterKNN`, `PostfilterKNNInt8`, `PrefilterKNN` (torch path) | per A7 |
 | [testing.md:168-170](../system/testing.md) | parity conftest "Three helpers" | six (`make_probe_family`, `make_bloom`, `make_exact` omitted) | list them; three go at B4 |
 | [kernels.md:855-866](../system/kernels.md) | "Status: authored … GPU gate has not run yet" | still true — keep, but it will rot at B2 | update at B2 |
-| [main.py:46-48](../../retrieve/src/retrieve/layers/silvertorch/main.py#L46-L48) comment | "CuTe DSL backend is a port…" | true | deleted at B4 |
+| [main.py:46-48](../../retrieve/src/retrieve/modules/silvertorch.py#L46-L48) comment | "CuTe DSL backend is a port…" | true | deleted at B4 |
 
 Dead code: `csr_from_assignments` (A3a); `pack_mask_high_first` (a plan-name alias,
 unused anywhere — delete, the plan can cite `pack_mask`); `bloom_index_docs`,

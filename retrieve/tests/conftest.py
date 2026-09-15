@@ -16,7 +16,8 @@ def pytest_collection_modifyitems(config, items):
     if not torch.cuda.is_available():
         skip = pytest.mark.skip(reason="retrieve is GPU-only; CUDA required")
         for it in items:
-            it.add_marker(skip)
+            if "cpu" not in it.keywords:
+                it.add_marker(skip)
 
 
 def require_official() -> None:
@@ -32,7 +33,7 @@ def require_official() -> None:
       green on the first GPU run.
 
     The first call pays the extension load; later calls hit the memo in the adapter."""
-    from retrieve.kernels.silvertorch.official import OfficialMissing, ensure_loaded
+    from retrieve.ops.official import OfficialMissing, ensure_loaded
 
     try:
         ensure_loaded()

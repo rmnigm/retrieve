@@ -712,7 +712,7 @@ Every kernel exposes a `<Name>Config` dataclass + a single curated
 `DEFAULT_CONFIG` next to its `@triton.jit` body. Overrides go through a
 private `_<name>_impl(..., *, config=None)` so the public op keeps a
 fixed schema. Offline tuning via
-[tune.py](../../retrieve/src/retrieve/tune.py). `bloom_match` keeps a
+[tune.py](../../retrieve/src/retrieve/ops/tune.py). `bloom_match` keeps a
 hard-coded tile — its per-call width is dictated by `N`. Convention:
 [../system/kernels.md → Autotune separation](../system/kernels.md#autotune-separation).
 

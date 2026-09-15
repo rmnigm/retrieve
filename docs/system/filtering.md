@@ -2,11 +2,14 @@
 
 This repo reproduces two retrieval papers — SilverTorch (IVF + INT8 ANN
 with bloom or exact attribute filter fused inline) at
-[retrieve/src/retrieve/layers/silvertorch/](../../retrieve/src/retrieve/layers/silvertorch/)
+[retrieve/src/retrieve/modules/silvertorch.py](../../retrieve/src/retrieve/modules/silvertorch.py)
 and LiNR (V1 fp16 dense / V2 sparse pre-filter / V3 1-bit OPORP, plus a
 V4 int8 dense variant added beyond the paper) at
-[retrieve/src/retrieve/layers/linr/](../../retrieve/src/retrieve/layers/linr/).
-Filtering is its own subpackage: [retrieve/src/retrieve/layers/filters/](../../retrieve/src/retrieve/layers/filters/).
+[retrieve/src/retrieve/modules/knn.py](../../retrieve/src/retrieve/modules/knn.py) and
+[bit_knn.py](../../retrieve/src/retrieve/modules/bit_knn.py).
+The standalone filters are [retrieve/src/retrieve/modules/filters.py](../../retrieve/src/retrieve/modules/filters.py);
+their kernels are `retrieve.ops.triton` (with pure-torch twins in `retrieve.ops.reference`),
+the hash math `retrieve.indexing.bloom_hash`, the composition helpers `retrieve.functional`.
 This brief covers **filtering only**; KNN scoring, quantization, and training
 are out of scope here.
 
@@ -44,22 +47,21 @@ boolean composition.
 | component | path | notes |
 |---|---|---|
 | `FilterModule` ABC | [interfaces.py](../../retrieve/src/retrieve/interfaces.py) | three native paths: `evaluate_mask`, `evaluate_indices`, `evaluate_subset`; `forward` aliases `evaluate_mask`. Unified signature `register_index(item_clause_attrs, *, clause_is_reverse=None)` — keyword-only after the first arg on the ABC and both subclasses |
-| `ExactAttributeFilter` (exact, supports reverse) | [layers/filters/exact_attribute.py](../../retrieve/src/retrieve/layers/filters/exact_attribute.py) | `FilterModule` subclass; native `evaluate_mask` via `clause_mask` kernel; native `evaluate_indices` via `clause_compact` kernel; `evaluate_subset` via gather + `clause_subset_match` (the module-level torch predicate SilverTorch's eager exact path also uses) |
-| `BloomFilter` (approximate, conjunctive) | [layers/filters/bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py) | `FilterModule` subclass; paper-strict (no reverse, no DSL) — `register_index` accepts an optional keyword-only `clause_is_reverse` and raises `ValueError` if any entry is `True`; native `evaluate_mask` via `bloom_match` kernel; native `evaluate_indices` via `bloom_compact` kernel; `evaluate_subset` via gather + `bloom_subset_match`. Hashes `(clause_idx, value)` pairs, **not** raw values — see ["Bloom hash keys"](#bloom-hash-keys-clause_idx-value) |
-| Bloom hash math | [layers/filters/bloom_hash.py](../../retrieve/src/retrieve/layers/filters/bloom_hash.py) | the single home of the signature builders: public `generate_seeds` / `build_signatures` (index-side, chunked) / `build_query_signatures` (query-side, loop-free) plus `bloom_subset_match`; consumed by `BloomFilter` **and** `SilverTorch`'s fused bloom mode (no private cross-module imports). Hash math is pinned — changing it invalidates every persisted `bloom_sigs` buffer |
-| LiNR clause Triton kernels | [kernels/filters/clause_compact.py](../../retrieve/src/retrieve/kernels/filters/clause_compact.py), [clause_mask.py](../../retrieve/src/retrieve/kernels/filters/clause_mask.py) | fused eval + stream compaction (compact); fused eval emitting `[B, N]` bool (mask). No `[B, N, C, A_max]` intermediate either way |
-| Bloom Triton kernels | [kernels/silvertorch/bloom_match.py](../../retrieve/src/retrieve/kernels/silvertorch/bloom_match.py), [kernels/filters/bloom_compact.py](../../retrieve/src/retrieve/kernels/filters/bloom_compact.py) | `(qb & sigs) == qb` → `[B, N]` bool (match); fused subset-test + stream compaction (compact). Consumed by `BloomFilter.evaluate_mask` / `evaluate_indices` on CUDA |
-| Filter fused into SilverTorch score kernel | [kernels/silvertorch/codesigned_probe_score.py](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py), [codesigned_probe_score_exact.py](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score_exact.py) | Selected by `SilverTorch.filter_mode`. `"bloom"` → conjunctive bloom subset test (single `QB`), part of co-designed Algorithm 1; `"exact"` → exact AND-of-OR over `[N, C, A_max]` narrow attrs (reverse clauses supported), same `common.clause_pass` inner loop as `clause_mask` but fused into the probe-and-score path. Both are **separate paths** from the standalone `BloomFilter` / `ExactAttributeFilter` — SilverTorch shares the predicate math and hash builders, not the module classes. On `backend="official"` the `"exact"` predicate is our `clause_mask` packed into the official scorer's bit mask and `"bloom"` is Meta's own bloom index (see [kernels.md](kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend)). |
-| `combine_masks` / `combine_indices` | [layers/filters/__init__.py](../../retrieve/src/retrieve/layers/filters/__init__.py) | mask-AND composition; sparse cascade via `evaluate_subset` |
-| Official SilverTorch filters (`backend="official"`) | [kernels/silvertorch/official.py](../../retrieve/src/retrieve/kernels/silvertorch/official.py) | `filter_mode="bloom"` is **Meta's bloom index** (`bloom_index_build` over `(clause, value)` features, murmur3, bundles of 2048 docs, width from `OfficialConfig.b_multiplier`) queried through their expression DSL (`"0:v AND 1:w"`, `NOT`, `""` = all) — a different hash from ours, never bit-compared, matched by FPR / memory instead; `filter_mode="exact"` is our `clause_mask` packed into the official scorer's `filtering_bit_mask`. See [kernels.md](kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend) |
+| `ExactAttributeFilter` (exact, supports reverse) | [modules/filters.py](../../retrieve/src/retrieve/modules/filters.py) | `FilterModule` subclass; native `evaluate_mask` via `clause_mask` kernel; native `evaluate_indices` via `clause_compact` kernel; `evaluate_subset` via gather + `clause_subset_match` (the module-level torch predicate SilverTorch's eager exact path also uses) |
+| `BloomFilter` (approximate, conjunctive) | [modules/filters.py](../../retrieve/src/retrieve/modules/filters.py) | `FilterModule` subclass; paper-strict (no reverse, no DSL) — `register_index` accepts an optional keyword-only `clause_is_reverse` and raises `ValueError` if any entry is `True`; native `evaluate_mask` via `bloom_match` kernel; native `evaluate_indices` via `bloom_compact` kernel; `evaluate_subset` via gather + `bloom_subset_match`. Hashes `(clause_idx, value)` pairs, **not** raw values — see ["Bloom hash keys"](#bloom-hash-keys-clause_idx-value) |
+| Bloom hash math | [indexing/bloom_hash.py](../../retrieve/src/retrieve/indexing/bloom_hash.py) | the single home of the signature builders: public `generate_seeds` / `build_signatures` (index-side, chunked) / `build_query_signatures` (query-side, loop-free); `bloom_subset_match` is in `functional.py`; consumed by `BloomFilter` **and** `SilverTorch`'s fused bloom mode (no private cross-module imports). Hash math is pinned — changing it invalidates every persisted `bloom_sigs` buffer |
+| LiNR clause Triton kernels | [ops/triton/clause_compact.py](../../retrieve/src/retrieve/ops/triton/clause_compact.py), [clause_mask.py](../../retrieve/src/retrieve/ops/triton/clause_mask.py) | fused eval + stream compaction (compact); fused eval emitting `[B, N]` bool (mask). No `[B, N, C, A_max]` intermediate either way |
+| Bloom Triton kernels | [ops/triton/bloom_match.py](../../retrieve/src/retrieve/ops/triton/bloom_match.py), [bloom_compact.py](../../retrieve/src/retrieve/ops/triton/bloom_compact.py) | `(qb & sigs) == qb` → `[B, N]` bool (match); fused subset-test + stream compaction (compact). Consumed by `BloomFilter.evaluate_mask` / `evaluate_indices` on CUDA |
+| Filter fused into SilverTorch score kernel | [ops/triton/codesigned_probe_score.py](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py), [codesigned_probe_score_exact.py](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score_exact.py) | Selected by `SilverTorch.filter_mode`. `"bloom"` → conjunctive bloom subset test (single `QB`), part of co-designed Algorithm 1; `"exact"` → exact AND-of-OR over `[N, C, A_max]` narrow attrs (reverse clauses supported), same `common.clause_pass` inner loop as `clause_mask` but fused into the probe-and-score path. Both are **separate paths** from the standalone `BloomFilter` / `ExactAttributeFilter` — SilverTorch shares the predicate math and hash builders, not the module classes. On `backend="official"` the `"exact"` predicate is our `clause_mask` packed into the official scorer's bit mask and `"bloom"` is Meta's own bloom index (see [kernels.md](kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend)). |
+| `combine_masks` / `combine_indices` | [functional.py](../../retrieve/src/retrieve/functional.py) | mask-AND composition; sparse cascade via `evaluate_subset` |
+| Official SilverTorch filters (`backend="official"`) | [ops/official/adapter.py](../../retrieve/src/retrieve/ops/official/adapter.py) | `filter_mode="bloom"` is **Meta's bloom index** (`bloom_index_build` over `(clause, value)` features, murmur3, bundles of 2048 docs, width from `OfficialConfig.b_multiplier`) queried through their expression DSL (`"0:v AND 1:w"`, `NOT`, `""` = all) — a different hash from ours, never bit-compared, matched by FPR / memory instead; `filter_mode="exact"` is our `clause_mask` packed into the official scorer's `filtering_bit_mask`. See [kernels.md](kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend) |
 
 ## Key observation: LiNR hosts *both* filter types
 
 LiNR's `forward` is decoupled from the filter — it accepts `mask: [B, N]`
 or `candidate_ids: [B, P]` as input
-([postfilter_knn.py](../../retrieve/src/retrieve/layers/linr/postfilter_knn.py),
-[prefilter_knn.py](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py),
-[one_bit_knn.py](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py)). Any
+([modules/knn.py](../../retrieve/src/retrieve/modules/knn.py),
+[modules/bit_knn.py](../../retrieve/src/retrieve/modules/bit_knn.py)). Any
 `FilterModule` that produces those shapes plugs in. Both
 `ExactAttributeFilter` and `BloomFilter` do, and they compose via
 `combine_masks` / `combine_indices`.
@@ -112,7 +114,7 @@ target id of `-1`.
 
 The paper says *"for each feature, we apply K hash functions"* — and a
 feature is a `(key, value)` pair. The implementation reflects this:
-[`bloom_hash._signature_batch`](../../retrieve/src/retrieve/layers/filters/bloom_hash.py)
+[`bloom_hash._signature_batch`](../../retrieve/src/retrieve/indexing/bloom_hash.py)
 (the shared core both builders wrap)
 mixes a per-clause salt (`_mix64(clause_id, …)`) into the post-hash bits
 before the position mask, so value `V` in clause C0 lands on different
@@ -142,10 +144,10 @@ as Python ints (a wrapped scalar rides along the kernel arguments), so
 that path copies nothing either. No
 runtime cost worth measuring (one extra elementwise XOR inside an already
 chunked loop) and zero kernel impact —
-[`bloom_match`](../../retrieve/src/retrieve/kernels/silvertorch/bloom_match.py),
-[`bloom_compact`](../../retrieve/src/retrieve/kernels/filters/bloom_compact.py),
+[`bloom_match`](../../retrieve/src/retrieve/ops/triton/bloom_match.py),
+[`bloom_compact`](../../retrieve/src/retrieve/ops/triton/bloom_compact.py),
 and the bloom branch of
-[`codesigned_probe_score`](../../retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py)
+[`codesigned_probe_score`](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py)
 all consume opaque `[N, W]` / `[B, W]` int64 buffers and are unchanged.
 
 **Index vs query build paths.** The item index goes through

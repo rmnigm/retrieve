@@ -295,7 +295,7 @@ def test_silvertorch_plan_cache_is_official_only():
     """``set_plan_cache`` / ``cache_plans`` (the official timing rule of kernels.md) are a
     no-op / ``None`` on every other backend; on ``official`` — simulated here, the ops need
     CUDA — the flip replaces ``OfficialConfig.cache_plans`` in place and nothing else."""
-    from retrieve.layers.silvertorch import OfficialConfig  # noqa: PLC0415
+    from retrieve import OfficialConfig  # noqa: PLC0415
 
     x, _, attrs, _ = _data()
     m = A.build(
