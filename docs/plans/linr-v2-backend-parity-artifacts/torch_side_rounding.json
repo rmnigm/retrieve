@@ -1,0 +1,104 @@
+{
+ "rows_top100_differ_fp32probe_vs_torch": 124,
+ "swapped_pairs": 124,
+ "pair_gap_in_fp16_ulps_at_boundary": {
+  "max": 0.978107213973999,
+  "median": 0.29188060760498047
+ },
+ "pairs_within_one_ulp": 124,
+ "torch_fp16_scores_tie": 124,
+ "torch_orders_pair_as_returned": 124,
+ "max_dist_from_boundary_ulps": 0.978107213973999,
+ "first_pairs": [
+  {
+   "row": 77,
+   "truth_gap_pair": -8.54849349707365e-06,
+   "gap_in_fp16_ulps_at_boundary": 0.1400585174560547,
+   "torch_fp16_scores_tie": true,
+   "torch_orders_pair_as_returned": true,
+   "dist_torch_item_from_boundary_ulps": 0.1400585174560547,
+   "dist_fp32_item_from_boundary_ulps": 0.0
+  },
+  {
+   "row": 162,
+   "truth_gap_pair": -0.00027428031899034977,
+   "gap_in_fp16_ulps_at_boundary": 0.5617260932922363,
+   "torch_fp16_scores_tie": true,
+   "torch_orders_pair_as_returned": true,
+   "dist_torch_item_from_boundary_ulps": 0.5617260932922363,
+   "dist_fp32_item_from_boundary_ulps": 0.0
+  },
+  {
+   "row": 240,
+   "truth_gap_pair": -3.037857823073864e-07,
+   "gap_in_fp16_ulps_at_boundary": 0.0012443065643310547,
+   "torch_fp16_scores_tie": true,
+   "torch_orders_pair_as_returned": true,
+   "dist_torch_item_from_boundary_ulps": 0.0012443065643310547,
+   "dist_fp32_item_from_boundary_ulps": 0.0
+  },
+  {
+   "row": 301,
+   "truth_gap_pair": -0.0004374580457806587,
+   "gap_in_fp16_ulps_at_boundary": 0.44795703887939453,
+   "torch_fp16_scores_tie": true,
+   "torch_orders_pair_as_returned": true,
+   "dist_torch_item_from_boundary_ulps": 0.44795703887939453,
+   "dist_fp32_item_from_boundary_ulps": 0.0
+  },
+  {
+   "row": 411,
+   "truth_gap_pair": -0.0003706631250679493,
+   "gap_in_fp16_ulps_at_boundary": 0.7591180801391602,
+   "torch_fp16_scores_tie": true,
+   "torch_orders_pair_as_returned": true,
+   "dist_torch_item_from_boundary_ulps": 0.7591180801391602,
+   "dist_fp32_item_from_boundary_ulps": 0.0
+  },
+  {
+   "row": 569,
+   "truth_gap_pair": -0.00016220129327848554,
+   "gap_in_fp16_ulps_at_boundary": 0.1660941243171692,
+   "torch_fp16_scores_tie": true,
+   "torch_orders_pair_as_returned": true,
+   "dist_torch_item_from_boundary_ulps": 0.1660941243171692,
+   "dist_fp32_item_from_boundary_ulps": 0.0
+  },
+  {
+   "row": 613,
+   "truth_gap_pair": -8.730217814445496e-06,
+   "gap_in_fp16_ulps_at_boundary": 0.017879486083984375,
+   "torch_fp16_scores_tie": true,
+   "torch_orders_pair_as_returned": true,
+   "dist_torch_item_from_boundary_ulps": 0.017879486083984375,
+   "dist_fp32_item_from_boundary_ulps": 0.0
+  },
+  {
+   "row": 684,
+   "truth_gap_pair": -0.00048415351193398237,
+   "gap_in_fp16_ulps_at_boundary": 0.49577319622039795,
+   "torch_fp16_scores_tie": true,
+   "torch_orders_pair_as_returned": true,
+   "dist_torch_item_from_boundary_ulps": 0.49577319622039795,
+   "dist_fp32_item_from_boundary_ulps": 0.0
+  },
+  {
+   "row": 755,
+   "truth_gap_pair": -0.00026114110369235277,
+   "gap_in_fp16_ulps_at_boundary": 0.26740849018096924,
+   "torch_fp16_scores_tie": true,
+   "torch_orders_pair_as_returned": true,
+   "dist_torch_item_from_boundary_ulps": 0.26740849018096924,
+   "dist_fp32_item_from_boundary_ulps": 0.0
+  },
+  {
+   "row": 934,
+   "truth_gap_pair": -0.00029750075191259384,
+   "gap_in_fp16_ulps_at_boundary": 0.6092815399169922,
+   "torch_fp16_scores_tie": true,
+   "torch_orders_pair_as_returned": true,
+   "dist_torch_item_from_boundary_ulps": 0.6092815399169922,
+   "dist_fp32_item_from_boundary_ulps": 0.0
+  }
+ ]
+}
