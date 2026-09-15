@@ -81,11 +81,19 @@ plan to `archive/` and shorten its entry here to one line under *Done*.
 > **Environment facts that bind everything below:** the VM *is* the
 > A100 box; SM clocks cannot be locked (`nvidia-smi -lgc` denied, no
 > sudo — timing uses H §7's fallback: sampled `sm_mhz` + `unstable`);
-> `/workspace` reported a 100 GB quota in the 2026-09-06 block; on
-> 2026-09-15 `df` reports it as a **2.1 PB network volume with ~619 TB free**,
-> plus a 300 GB local disk with ~222 GB free. If that is real rather than an
-> unenforced quota, **E2 and E3's deferral no longer has a reason** — confirm
-> with a sized write before committing to a ~200 GB ETL. Superseded text:
+> **`/workspace`'s free space is an illusion and the quota is real — measured
+> 2026-09-15.** `df` reports a 2.1 PB network volume with ~620 TB free; a
+> `dd` probe died at **18 GB** with `Disk quota exceeded`. With 8.2 GB already
+> resident the enforced quota is **≈ 26 GB, not the 100 GB** this block
+> recorded, and **E2 / E3 stay deferred** — 198 GB and 670 GB do not fit by two
+> orders of magnitude. Headroom today ≈ 18 GB, which shapes D1: goodreads-d128
+> and arxiv-d128 (4.9 GB) are staged and D1-a/b/d/e fit, but **D1-c's `quality`
+> suite needs yambda-500m (9.2 GB) and yambda-5b (8.8 GB), which do not fit
+> together** — stage one, run it, prune it, stage the next. Parity spill
+> `.npz` files (~600–680 MB per run) must be pruned between stages.
+> The local disk (300 GB, ~215 GB free) is the place for anything large, and
+> `/venvs` already holds 76 GB of per-worktree environments that can be pruned.
+> Superseded text:
 > per-worktree venvs go under `/venvs/`, and PubMed / Semantic Scholar
 > cannot be staged at native dims until disk grows; the fetched HF
 > datasets are the pre-`3b1b5b3` 1-indexed layout (handled in
@@ -329,7 +337,23 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md),
   gated); the review's deferred `argsort(stable=True)` applied after
   measuring it bit-identical on nine regimes. Record: O §14. **B4 is now
   unblocked.**
-- [ ] **B3 — benchmark Triton against the official kernels, kernel-only and end to end.** O §9a/§9b, WP-4
+- [x] **B3 — benchmark Triton against the official kernels, kernel-only and end
+  to end.** **Done 2026-09-15** (`399c231`, merged at `HEAD`); closes paper gap
+  **G2**. Triton is the fastest arm end to end in every cell (1.3–1.6×
+  unfiltered, 1.2–1.9× bloom, 2.9–10.1× exact vs `official`; 7.3–32.7× vs
+  `torch`), **but Meta's scorer kernel is faster than ours in every cell**
+  (1.15–3.2× arxiv, **10.9–17.8× goodreads**) and we win only on payload prep
+  (their 268–896 µs over 73–95 launches against our 34–58). The 10× is **our
+  padded probe layout, not our scorer**: on goodreads `n_probe ·
+  max_cluster_size` is 611,520 slots for ≈18.7 k real items, so **97 % of what
+  our kernel walks is `-1` pad** (59 % on the less skewed arxiv IVF). O §9's
+  "parity within ±20 %" is falsified in both directions, and so is its
+  expectation (iii): their bloom *forward* is 1.8–2.1× slower than our fused
+  one, while their **transposed bloom search beats ours 2.0× at 0.8 M items and
+  6.1× at 3.0 M** (ours grows 3.3× with N, theirs 1.07×) — the strongest
+  evidence yet for TF-1. Parity: the official int32 path is **bit-exact**
+  against Triton on both datasets in all three filter modes. Record:
+  [silvertorch-official-integration.md §16](silvertorch-official-integration.md). O §9a/§9b, WP-4
   (A100, 1 d). Gate: JSON + tables appended to O. This is paper gap G2.
 - [x] **B4 — delete the CUDA C++ and CuTe backends.** (Merged 2026-09-06, A100 gate 504/0/0). O §7, WP-5 (Mac,
   1 d). Tag the parent commit `cuda-cute-backends-final`; move
