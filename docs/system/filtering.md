@@ -172,7 +172,7 @@ bandwidth-bound, ~128 ms for N=3M, paid once at `register_index`). The
 per-forward query build is the separate loop-free
 `build_query_signatures`, written as pure tensor flow so the
 outer `torch.compile(dynamic=True, mode="reduce-overhead")` wrapped
-around each algo in `evaluation/retrieval/algos/` captures it into one
+around each algo (`evaluation/bench/measure.py::graph_callable`) captures it into one
 cudagraph. Eager standalone (no algo wrapper) is launch-overhead-bound
 (~0.4 ms flat in B from ~15 small CUDA kernels); under the algo-level
 cudagraph_trees capture it collapses to ~0.09 ms — ~4× at all batch

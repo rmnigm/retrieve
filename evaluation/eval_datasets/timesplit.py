@@ -12,15 +12,18 @@ def sequential_split_train_val_test(
     engine: str = "streaming",
 ) -> tuple[pl.LazyFrame, pl.LazyFrame | None, pl.LazyFrame]:
     """
-    Splits the dataset into training, validation, and test segments based on the provided timestamps.
+    Splits the dataset into training, validation, and test segments based on the provided
+    timestamps.
 
     The segments are defined as follows:
     - Training set: [0, test_timestamp - gap_size - val_size - gap_size) if val_size != 0,
                     otherwise [0, test_timestamp - gap_size)
-    - Validation set: [test_timestamp - val_size - gap_size, test_timestamp - gap_size), if val_size != 0
+    - Validation set: [test_timestamp - val_size - gap_size, test_timestamp - gap_size),
+                      if val_size != 0
     - Test set: [test_timestamp, +inf)
 
-    It retains only those users and items in the validation and test sets that exist in the training set.
+    It retains only those users and items in the validation and test sets that exist in the
+    training set.
 
     Parameters:
     ----------
