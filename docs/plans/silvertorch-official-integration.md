@@ -7,7 +7,10 @@
 > WP-3 (the parity gate) executed 2026-09-06 on `dev/integration`** (roadmap B1/B2/B5): int32
 > path `torch.equal` vs Triton on every regime, 43/43 tests, suite green — see §14. **WP-5 (the
 > deletion, roadmap B4) authored 2026-09-06 on `dev/b4-delete-cuda-cute`, GPU suite pending** —
-> see §15. WP-4 and WP-6 onward: nothing implemented.
+> see §15. **WP-4 (the head-to-head, roadmap B3) executed 2026-09-15** on
+> `dev/b3-head-to-head`: kernel-only, phase-2-only and end to end on both datasets, each
+> speed statement beside its parity statement — see §16, which corrects §9's expected
+> outcomes (i) and (iii). WP-6 onward: nothing implemented.
 > Target box: A100-SXM4-80GB, torch 2.10.0+cu128, CUDA 12.x toolchain, triton 3.6.0, Python 3.11.
 > Authored on the Mac (no GPU): every "the official op does X" claim cites `silvertorch/ops/csrc/<file>:<line>`
 > in the clone of [meta-recsys/silvertorch](https://github.com/meta-recsys/silvertorch) at `21aa35e`
@@ -48,6 +51,15 @@
 > head-to-head should measure it on both datasets rather than inheriting the
 > goodreads-only threshold, and §10 WP-9's "official vs reimplementation"
 > section should report the dataset dependence.
+>
+> **Answered by B3 (§16.4) — and this reading of it is wrong.** It is not the
+> filter: the *unfiltered* cells split the same way (arxiv 0.9838, goodreads
+> 0.9999), and on the **int32** score path both datasets are bit-exact (jaccard
+> 1.0, `score_max_abs_diff` 0.0) in all three filter modes. The whole deficit is
+> the shipped fp16 score path meeting arxiv's score distribution: **95 % of arxiv
+> queries have their rank-100/101 score gap inside one fp16 ulp**, against 3 % of
+> goodreads ones. Cost in the metric that matters: 3.1e-4 recall@100 on arxiv,
+> 4e-6 on goodreads.
 
 ## 1. Where it starts
 
@@ -1149,3 +1161,390 @@ mentions the backends**):
   `torch-export-refactor.md`, `official-silvertorch-artifacts/wp3/full_suite_run*.txt`).
 
 **Gate status: green.** B4's checkbox is the coordinator's to flip after merge.
+
+## 16. Validation record — WP-4, the Triton vs official head-to-head (roadmap B3), 2026-09-15, A100-SXM4-80GB
+
+Roadmap step **B3** (§9a kernel-only, §9b phase 2, §9c end to end), executed on
+`dev/b3-head-to-head` off `development` @ `e23309c`. Scripts, raw JSON, harness
+records and the full table dump:
+[official-silvertorch-artifacts/b3/](official-silvertorch-artifacts/b3/)
+(`b3_e2e_run.sh`, `b3_kernel_h2h.py`, `b3_tables.py`, `kernel_{goodreads,arxiv}.json`,
+`e2e/**/*.jsonl`, `tables.md`). Everything below was measured on this box in this
+session. **Nothing here is citable until the orchestrator re-runs the gate**
+(CLAUDE.md rule 2); what follows is what the box did, with its estimator and its
+spread.
+
+### 16.1 Environment, protocol, and what makes the arms comparable
+
+A100-SXM4-80GB, torch 2.10.0+cu128, triton 3.6.0, CUDA runtime 12.8 / **nvcc 12.4**
+build of `silvertorch @ 21aa35e28b6dd9a91e9ee35efb0857715e86bda7`, Python 3.11,
+`/venvs/b3`, `code_version 0e67780…` (the library subtree tree hash; `dirty: false`
+on all 30 records). Datasets at d128: goodreads-work-id (797,084 items, sweep
+`c0_genre`) and arxiv-papers (2,988,996 items, sweep `c0_maincat`), `users_limit
+10000`, seed 0, `n_lists 1024`, `n_probe ∈ {24, 32}` end to end and 24 kernel-only,
+bloom `m_bits 1024, k_hash 5`, official `b_multiplier 10.0, hash_k 7,
+bloom_path="partial"`.
+
+- **Estimator.** Both tiers use the harness's `bench.measure.latency` (H §2.5): 50
+  warm-ups, 20 calls to size the window, then **3 windows** of `clamp(2 s / median,
+  1000, 5000)` calls, per-call CUDA events, and the **median of the three window
+  medians**; `spread = (max − min) / median` of those three, `unstable` above 5 %.
+  Every arm rotates the *same* fixed-seed pool of query batches. Host-side rows
+  (§16.3's two parser rows) are `perf_counter` walls, because CUDA events would time
+  an empty GPU timeline; they say so in the table.
+- **Clocks.** `nvidia-smi -lgc` is denied on this box, so every table reports the SM
+  clock **sampled under load right after the last window's sync** (`sm_mhz`).
+  Under load the box runs at **1410 MHz**; the rows that read 1155–1395 MHz are not
+  noise and not idle-sample contamination — they are arms whose GPU is *idle inside
+  the measured call* (official at `bs = 1`, where the host does a `.tolist()`
+  sync and a CPU expression parse per forward), so the card drops its clock. Read
+  those rows as host-bound by construction.
+- **`bs = 1` is noise-dominated here** (this session's C4 finding): **31 of the 468**
+  end-to-end perf entries are `unstable`, **26 of them at `bs ∈ {1, 8}`**, spreads to
+  22.5 %. No claim below rests on a `bs = 1` difference smaller than that; the
+  headline comparisons are at `bs = 16`, where 5 of 156 entries exceed the 5 %
+  threshold (worst 19.1 %, an arxiv `clause` `triton` `k = 500` cell; the worst
+  `k = 100` one is 8.1 %, arxiv bloom official `n_probe = 24`).
+- **Plan cache.** Every timed official forward runs with
+  `OfficialConfig(cache_plans=False)` — the harness sets it in `run.perf` and
+  `b3_kernel_h2h.py` sets it on both official arms — so the CPU expression parse is
+  inside every timed call, in both tiers. `cache_plans: false` is recorded on **all
+  156 official perf entries**.
+- **Fairness (D3), checked rather than assumed.** For every mode and dataset the
+  script asserts the two arms share an index: `centroids_equal` **True**,
+  `item_codes` of the official arm `torch.equal` to `item_codes[sort_perm]` of the
+  Triton arm **True**, `global_scale` equal **True** (6/6 checks, both datasets ×
+  3 filter modes). Both arms therefore probe the same clusters and score the same
+  int8 codes; only phases 2+3 differ.
+- **What is inside a timed call.** *Kernel-only (§16.2)*: phase 1 (centroid matmul +
+  probe top-k, identical code in both arms) is precomputed per pool batch and
+  excluded; the call covers query quantization, the mask op(s) the filter mode
+  needs, the scorer, the host epilogue and the shared `masked_topk`. *End to end
+  (§16.5)*: the whole `module.forward`, phase 1 included, through the harness.
+
+### 16.2 Kernel-only — Algorithm 1 phases 2+3 (§9a), `bs = 16`, n_probe 24
+
+`device µs` columns are one `torch.profiler` call classified by kernel name
+(`scorer` = `process_cluster*` / `_codesigned_probe_score*`, `mask` =
+`process_documents*`, `topk` = the shared epilogue, `prep` = the official op's
+payload build — scans, `repeat_interleave`, fills, gathers). **The classifier is a
+name heuristic**; the raw per-kernel lists are in the JSON, and one row is
+mislabelled on purpose below.
+
+| dataset | mode | arm | wall median ms | spread | sm_mhz | device µs | scorer | mask | prep | topk | launches | peak MiB |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| goodreads | none | `triton` | **0.7517** | 0.000 | 1410 | 721 | 337.0 | — | 41 | 335 | 38 | 37.7 |
+| goodreads | none | `official-fp16` | 1.3074 | 0.006 | 1410 | 1146 | **30.9** | — | 710 | 338 | 75 | 214.6 |
+| goodreads | none | `official-int32` | 1.3750 | 0.003 | 1410 | 1203 | 33.1 | — | 771 | 335 | 73 | 233.3 |
+| goodreads | bloom | `triton` | **1.0069** | 0.000 | 1410 | 960 | 520.8 | — | 88 | 339 | 58 | 37.7 |
+| goodreads | bloom | `official-fp16` | 2.1563 | 0.070 | 1410 | 1181 | **29.2** | 9.1 | 730 | 331 | 93 | 214.7 |
+| goodreads | exact | `triton` | **0.8177** | 0.000 | 1410 | 778 | 397.6 | — | 37 | 339 | 35 | 37.7 |
+| goodreads | exact | `official-fp16` | 3.0496 | 0.001 | 1410 | 1343 | 26.8 | — | 834 | 324 | 79 | 228.3 |
+| arxiv | none | `triton` | **0.4977** | 0.005 | 1410 | 302 | 129.8 | — | 40 | 124 | 38 | 10.8 |
+| arxiv | none | `official-fp16` | 0.9362 | 0.006 | 1410 | 529 | **113.3** | — | 268 | 120 | 75 | 60.9 |
+| arxiv | bloom | `triton` | **0.8953** | 0.009 | 1410 | 452 | 228.6 | — | 86 | 124 | 58 | 10.8 |
+| arxiv | bloom | `official-fp16` | 1.6064 | 0.001 | 1395 | 543 | **76.8** | 10.4 | 294 | 120 | 93 | 61.0 |
+| arxiv | exact | `triton` | **0.4770** | 0.003 | 1410 | 423 | 260.8 | — | 33 | 125 | 34 | 10.8 |
+| arxiv | exact | `official-fp16` | 7.2117 | 0.001 | 1410 | 815 | 81.7 | — | 271 | 119 | 77 | **826.7** |
+
+`bs = 1` rows are in the JSON: Triton 0.380–0.869 ms against official 0.833–1.467 ms,
+i.e. **1.4–2.5× for host reasons**, exactly the §9(ii) framing, and the arms where
+the card drops below 1410 MHz.
+
+Four things this says, and one it does not.
+
+1. **Wall, phases 2+3, `bs = 16`: Triton is 1.7–2.1× faster unfiltered and bloom, and
+   3.7× (goodreads) / 15.1× (arxiv) faster in exact mode.** The exact-mode gap is *not*
+   a statement about Meta's kernel — see point 4.
+2. **Meta's scoring kernel is faster than ours in every cell**, by **1.15–3.2× on
+   arxiv** (113 vs 130 µs unfiltered, 77 vs 229 µs bloom) and by **10.9–17.8× on
+   goodreads** (31 vs 337 µs unfiltered, 29 vs 521 µs bloom). This
+   was not the expected outcome (§9 expected "parity within ±20 %") and the cause is
+   **our padded IVF layout, not bandwidth**: `max_tensor_size_per_row = n_probe ×
+   max_cluster_size` is 611,520 slots on goodreads where the 24 probed clusters hold
+   ≈ 18.7 k items — **97 % of the slots our kernel walks are `-1` pads** — against
+   171,648 slots and ≈ 59 % pads on the less skewed arxiv IVF. The official op reads a
+   CSR and visits only real items. The comparison "at equal `n_probe`" is therefore
+   equal *recall* but not equal *work*, and that is the finding: on a skewed IVF the
+   padded layout, not the kernel, is what costs us.
+3. **The official arm gives all of that back in payload prep**: 268–896 µs of scans,
+   `repeat_interleave`, fills and gathers across 73–95 launches per forward against
+   Triton's 34–58, so its *total device time* is 1.2–2.4× ours even where its scorer
+   is 10× faster. §3/§13.2's launch-count conclusion is confirmed at the timing level.
+4. **The arxiv exact cell's 7.21 ms is ours, not Meta's.** Its device time is 0.50–0.82 ms;
+   the rest is the `filtering_bit_mask` our adapter builds — `clause_mask` over all
+   2.99 M items plus `pack_mask`, whose `[B, N/64, 64]` intermediate is the 826 MiB
+   peak and the 316 µs `reduce_kernel<long>` the classifier files under "quantize" in
+   the raw JSON. Plan §5.1 already labels this path "phase 2 ours, full-N"; the
+   measurement says it is also the dominant cost of that path, and that the official
+   backend's exact mode is an adapter artefact, not a vendor result. **Reported, not
+   fixed** (B3 measures; a transposed or chunked packer is Phase G work).
+5. The `topk` epilogue is identical in both arms by construction (324–339 µs on
+   goodreads, 119–125 µs on arxiv) and dominates the unfiltered Triton cell — which
+   is why the wall ratios are smaller than the scorer ratios.
+
+### 16.3 Phase 2 alone (§9b), `bs = 16`, full `N`
+
+| dataset | op | arm | median ms | p99 ms | spread | timer |
+|---|---|---|---|---|---|---|
+| goodreads | `bloom_match` (row-wise, full N) | ours | 0.4517 | 0.5610 | 0.060 | CUDA events |
+| goodreads | `bloom_index_search_batch` (transposed, full N, packed) | official | **0.2279** | 0.2588 | 0.003 | CUDA events |
+| goodreads | `…_return_partial_response` (probed clusters only) | official | 0.4488 | 0.4971 | 0.029 | CUDA events |
+| goodreads | `build_query_signatures` (our query bloom bits) | ours | 0.3687 | 0.4191 | 0.004 | CUDA events |
+| goodreads | `queries_to_expressions` (host, incl. its D2H) | official | 0.0272 | 0.0376 | — | `perf_counter` |
+| goodreads | `parse_expression_query_batch` (host) | official | 0.0468 | 0.0594 | — | `perf_counter` |
+| arxiv | `bloom_match` (row-wise, full N) | ours | 1.4809 | 1.4898 | 0.000 | CUDA events |
+| arxiv | `bloom_index_search_batch` (transposed, full N, packed) | official | **0.2443** | 0.2814 | 0.003 | CUDA events |
+| arxiv | `…_return_partial_response` (probed clusters only) | official | 0.4513 | 0.5039 | 0.016 | CUDA events |
+| arxiv | `build_query_signatures` (our query bloom bits) | ours | 0.3780 | 0.4580 | 0.015 | CUDA events |
+| arxiv | `queries_to_expressions` (host, incl. its D2H) | official | 0.0273 | 0.0363 | — | `perf_counter` |
+| arxiv | `parse_expression_query_batch` (host) | official | 0.0468 | 0.0559 | — | `perf_counter` |
+
+- **S13 replicated with Meta's code, and it scales the way the transposed-index
+  argument predicts.** Full-`N` mask, same batch: official is **2.0× faster on
+  goodreads (0.8 M items) and 6.1× on arxiv (3.0 M)**. Our row-wise `bloom_match`
+  grows 3.3× from 0.8 M to 3.0 M items, the official transposed search grows 1.07×.
+  This is the strongest argument in the run for TF-1 (§8), and it is now measured
+  against the vendor rather than inferred from the deleted CUDA backend.
+- **The official partial-response path is *slower* than the official full-`N` search**
+  at these sizes (0.449 vs 0.228 ms, 0.451 vs 0.244 ms) — 13 launches, 2 syncs and a
+  `repeat_interleave` against one launch. The co-design still wins end to end (§16.5)
+  because it shrinks what the *scorer* then reads, not because phase 2 is cheaper.
+- **Our query-side bloom hashing costs 0.37 ms at `bs = 16`** — more than the whole
+  official mask search — and it is inside our fused bloom forward: it is most of the
+  gap between the Triton `none` (0.75 ms) and `bloom` (1.01 ms) kernel-only cells.
+  Under CUDA graph it largely disappears (§16.5's graph column). A Triton-side
+  opportunity, recorded here, not acted on.
+- **Parse cost**: 46.8 µs/call at `bs = 16` (2.9 µs/query), plus 27.2 µs for
+  `queries_to_expressions` including its `.tolist()` sync — ≈ 74 µs of host work per
+  official bloom forward. A3 measured 58.7 µs for the parser alone on a different
+  expression shape (§13.2); same order, and still a real line item at `bs = 1`.
+
+**Bloom selectivity and memory, real attributes, shipped settings**
+
+| dataset | exact pass rate | our bloom FP rate | official bloom FP rate | our bloom MiB | official index MiB |
+|---|---|---|---|---|---|
+| goodreads `c0_genre` | 0.3323 | **0.000000** | **0.000000** | 97.3 (`m_bits = 1024`) | **33.3** (`b_multiplier = 10`) |
+| arxiv `c0_maincat` | 0.1357 | **0.000000** | **0.000000** | 364.9 | **71.3** |
+
+Both blooms have **zero false positives** on these sweeps (8 batches × 16 queries,
+counts against the exact mask), so §4.3's matched-FPR bisection is **undefined here**
+— there is no FPR to match. What is comparable is memory at equal (zero) FPR, and
+the official index is **2.9× / 5.1× smaller**. Our `m_bits = 1024` is simply
+over-provisioned for single-clause sweeps at these vocabularies; the FPR-vs-width
+curve (S8) needs a wider sweep and stays D3's job.
+
+### 16.4 Parity alongside speed — and where the goodreads/arxiv jaccard split comes from
+
+Kernel-only, 512 queries per cell (32 pool batches at `bs = 16`), against the Triton
+arm on the same batches:
+
+| dataset | mode | score path | jaccard@100 | `score_max_abs_diff` |
+|---|---|---|---|---|
+| goodreads | none | int32 | **1.000000** | **0.0** |
+| goodreads | none | fp16 | 1.000000 | 2.885e-03 |
+| goodreads | bloom / exact | int32 | 0.999961 | **0.0** |
+| goodreads | bloom / exact | fp16 | 0.999961 | 2.916e-03 |
+| arxiv | none | int32 | **1.000000** | **0.0** |
+| arxiv | none | fp16 | 0.982928 | 4.814e-04 |
+| arxiv | bloom / exact | int32 | **1.000000** | **0.0** |
+| arxiv | bloom / exact | fp16 | 0.985788 | 4.814e-04 |
+
+**The int32 path is bit-exact against Triton on both datasets, in all three filter
+modes** — D5's contract, now confirmed on real data at scale as well as in B2's unit
+regimes. The goodreads 0.999961 comes with `score_max_abs_diff = 0.0`: identical
+scores, ids differing only where scores tie.
+
+**So the whole of the arxiv deficit is the fp16 score path**, and the steer's
+hypothesis for it is falsified. O's steer (from C4) read the 0.985-vs-0.9998 split as
+"more near-ties at the top-100 boundary *under a looser filter*". It is not the
+filter: the unfiltered (`none`) cells show the same split, 0.9838 end to end and
+0.9829 kernel-only on arxiv against 0.9999 / 1.0000 on goodreads. It is the score
+distribution of the dataset:
+
+| dataset | mode | rank-100/101 gap p10 | gap median | score@100 median | one fp16 ulp there | **rows with gap < 1 ulp** |
+|---|---|---|---|---|---|---|
+| goodreads | none | 9.46e-04 | 6.97e-03 | 0.5623 | 2.75e-04 | **3.3 %** |
+| goodreads | bloom / exact | 1.10e-03 | 6.85e-03 | 0.6320 | 3.09e-04 | **3.1 %** |
+| arxiv | none | 1.38e-05 | 7.92e-05 | 0.8363 | 4.08e-04 | **95.3 %** |
+| arxiv | bloom / exact | 1.41e-05 | 8.57e-05 | 0.8303 | 4.05e-04 | **94.5 %** |
+
+arxiv's nomic text embeddings put the 100th and 101st candidate **8.6e-5 apart on a
+score of 0.83**, a fifth of an fp16 ulp; goodreads' gSASRec scores are 22× further
+apart than their ulp. Under a score path that rounds to fp16, 95 % of arxiv queries
+*can* swap their boundary ranks and ~3 % of goodreads ones can. That is the
+mechanism, it is a property of the embedding, and it is the number F2 should quote
+rather than the jaccard alone.
+
+What it costs in the metric anyone cares about: **recall@100 against the exact oracle,
+end to end, 10,000 queries** — arxiv `c0_maincat` n_probe 24, official 0.883735 vs
+Triton 0.884044 (**Δ 3.1e-4**); goodreads `c0_genre`, 0.912796 vs 0.912800 (**Δ 4e-6**).
+`torch` matches `triton` at **jaccard 1.0, `score_max_abs_diff` 0.0** on all six
+filter cells (the post-L5 state).
+
+### 16.5 End to end (§9c) — `k = 100`, seed 0, harness `filter` + `quality` suites
+
+30 records (24 `ok`, 6 `partial` — the `quality` suite was narrowed to `--k 100 --bs
+1 --bs 8 --bs 16` so the unfiltered arm is timed at the same batch sizes; the
+`filter` suite ran unnarrowed at `ks {100,500,1000} × bs {1,8,16}`). All at one
+`code_version`, `dirty: false`, `env.sm_mhz_load` **1410 MHz on all 30**.
+
+| dataset | filter | n_probe | backend | eager bs=1 | eager bs=8 | eager bs=16 | graph bs=16 | qps bs=16 | peak MiB bs=16 | index MiB |
+|---|---|---|---|---|---|---|---|---|---|---|
+| arxiv | bloom | 24 | `triton` | 1.083 | 1.075 | 1.094 | 0.428 | 14518 | 32 | 786 |
+| arxiv | bloom | 24 | `official` | 1.176 | 1.370 | 1.292 | n/a (not_capturable) | 12355 | 61 | 482 |
+| arxiv | bloom | 24 | `torch` | 1.162 | 4.253 | 8.170 | 2.319 | 1957 | 1725 | 786 |
+| arxiv | bloom | 32 | `triton` | 1.069 | 1.087 | 1.084 | 0.526 | 14751 | 42 | 786 |
+| arxiv | bloom | 32 | `official` | 1.300 | 1.372 | 1.451 | n/a (not_capturable) | 11102 | 81 | 482 |
+| arxiv | bloom | 32 | `torch` | 1.240 | 5.565 | 10.806 | 3.017 | 1480 | 2299 | 786 |
+| arxiv | clause | 24 | `triton` | 0.560 | 0.689 | 0.701 | 0.452 | 22750 | 32 | 786 |
+| arxiv | clause | 24 | `official` | 1.167 | 3.956 | 7.110 | n/a (not_capturable) | 2255 | 827 | 776 |
+| arxiv | clause | 24 | `torch` | 0.735 | 4.076 | 7.863 | 2.276 | 2033 | 2060 | 786 |
+| arxiv | clause | 32 | `triton` | 0.695 | 0.704 | 0.709 | 0.560 | 19981 | 42 | 786 |
+| arxiv | clause | 32 | `official` | 1.150 | 3.924 | 7.131 | n/a (not_capturable) | 2240 | 827 | 776 |
+| arxiv | clause | 32 | `torch` | 0.902 | 5.334 | 10.410 | 2.990 | 1536 | 2745 | 786 |
+| arxiv | none | — | `triton` | 0.541 | 0.659 | 0.668 | 0.348 | 23821 | 32 | 421 |
+| arxiv | none | — | `official` | 0.834 | 0.834 | 0.846 | n/a (not_capturable) | 18851 | 61 | 411 |
+| arxiv | none | — | `torch` | 0.589 | 2.549 | 4.852 | 2.128 | 3294 | 1722 | 421 |
+| goodreads | bloom | 24 | `triton` | 0.999 | 1.020 | 1.112 | 0.970 | 14305 | 112 | 394 |
+| goodreads | bloom | 24 | `official` | 1.330 | 1.411 | 2.063 | n/a (not_capturable) | 7501 | 215 | 143 |
+| goodreads | bloom | 24 | `torch` | 2.088 | 14.325 | 28.516 | 7.192 | 561 | 6140 | 394 |
+| goodreads | bloom | 32 | `triton` | 1.055 | 1.096 | 1.350 | 1.206 | 11797 | 150 | 394 |
+| goodreads | bloom | 32 | `official` | 1.344 | 1.637 | 2.260 | n/a (not_capturable) | 7088 | 287 | 143 |
+| goodreads | bloom | 32 | `torch` | 2.668 | 19.065 | 37.870 | 9.346 | 422 | 8186 | 394 |
+| goodreads | clause | 24 | `triton` | 0.519 | 0.649 | 0.921 | 0.842 | 17253 | 112 | 394 |
+| goodreads | clause | 24 | `official` | 1.053 | 1.677 | 3.044 | n/a (not_capturable) | 5240 | 228 | 207 |
+| goodreads | clause | 24 | `torch` | 1.980 | 13.843 | 27.575 | 6.811 | 580 | 7335 | 394 |
+| goodreads | clause | 32 | `triton` | 0.648 | 0.655 | 1.119 | 1.037 | 14224 | 150 | 394 |
+| goodreads | clause | 32 | `official` | 1.051 | 1.837 | 3.291 | n/a (not_capturable) | 4849 | 300 | 207 |
+| goodreads | clause | 32 | `torch` | 2.544 | 18.407 | 36.638 | 9.022 | 437 | 9779 | 394 |
+| goodreads | none | — | `triton` | 0.534 | 0.667 | 0.857 | 0.894 | 18539 | 112 | 297 |
+| goodreads | none | — | `official` | 0.897 | 0.904 | 1.325 | n/a (not_capturable) | 11995 | 215 | 110 |
+| goodreads | none | — | `torch` | 1.274 | 8.490 | 16.918 | 6.639 | 945 | 6131 | 297 |
+
+| dataset | filter | n_probe | backend | recall@100 vs oracle | jaccard_vs_first@100 | score_max_abs_diff | parity | unstable |
+|---|---|---|---|---|---|---|---|---|
+| arxiv | bloom | 24 | `triton` | 0.884044 | reference | — | reference | True |
+| arxiv | bloom | 24 | `official` | 0.883735 | 0.984950 | 9.510e-02 | vs_triton | True |
+| arxiv | bloom | 24 | `torch` | 0.884044 | 1.000000 | 0.000e+00 | vs_triton | False |
+| arxiv | bloom | 32 | `triton` | 0.903351 | reference | — | reference | True |
+| arxiv | bloom | 32 | `official` | 0.903010 | 0.984797 | 9.795e-02 | vs_triton | True |
+| arxiv | bloom | 32 | `torch` | 0.903351 | 1.000000 | 0.000e+00 | vs_triton | True |
+| arxiv | clause | 24 | `triton` | 0.884044 | reference | — | reference | True |
+| arxiv | clause | 24 | `official` | 0.883757 | 0.985033 | 4.827e-04 | vs_triton | False |
+| arxiv | clause | 24 | `torch` | 0.884044 | 1.000000 | 0.000e+00 | vs_triton | False |
+| arxiv | clause | 32 | `triton` | 0.903351 | reference | — | reference | True |
+| arxiv | clause | 32 | `official` | 0.903036 | 0.984882 | 4.827e-04 | vs_triton | False |
+| arxiv | clause | 32 | `torch` | 0.903351 | 1.000000 | 0.000e+00 | vs_triton | False |
+| arxiv | none | — | `triton` | — (`none` cell) | reference | — | reference | False |
+| arxiv | none | — | `official` | — (`none` cell) | 0.983778 | 4.827e-04 | vs_triton | False |
+| arxiv | none | — | `torch` | — (`none` cell) | 1.000000 | 0.000e+00 | vs_triton | True |
+| goodreads | bloom | 24 | `triton` | 0.912800 | reference | — | reference | True |
+| goodreads | bloom | 24 | `official` | 0.912796 | 0.999849 | 5.517e-03 | vs_triton | True |
+| goodreads | bloom | 24 | `torch` | 0.912800 | 1.000000 | 0.000e+00 | vs_triton | False |
+| goodreads | bloom | 32 | `triton` | 0.936908 | reference | — | reference | True |
+| goodreads | bloom | 32 | `official` | 0.936910 | 0.999805 | 5.622e-03 | vs_triton | True |
+| goodreads | bloom | 32 | `torch` | 0.936908 | 1.000000 | 0.000e+00 | vs_triton | False |
+| goodreads | clause | 24 | `triton` | 0.912800 | reference | — | reference | False |
+| goodreads | clause | 24 | `official` | 0.912796 | 0.999849 | 5.517e-03 | vs_triton | True |
+| goodreads | clause | 24 | `torch` | 0.912800 | 1.000000 | 0.000e+00 | vs_triton | False |
+| goodreads | clause | 32 | `triton` | 0.936908 | reference | — | reference | False |
+| goodreads | clause | 32 | `official` | 0.936910 | 0.999805 | 5.622e-03 | vs_triton | True |
+| goodreads | clause | 32 | `torch` | 0.936908 | 1.000000 | 0.000e+00 | vs_triton | False |
+| goodreads | none | — | `triton` | — (`none` cell) | reference | — | reference | False |
+| goodreads | none | — | `official` | — (`none` cell) | 0.999885 | 3.794e-03 | vs_triton | False |
+| goodreads | none | — | `torch` | — (`none` cell) | 1.000000 | 0.000e+00 | vs_triton | False |
+
+Reading the end-to-end tables:
+
+- **Triton is the fastest arm in every cell of the matrix**, eager and under graph.
+  Against official at `bs = 16`: **1.5× (goodreads none), 1.9× (goodreads bloom),
+  3.3× (goodreads clause), 1.2× (arxiv none), 1.2× (arxiv bloom), 10.1× (arxiv
+  clause)**. At `bs = 1` the margin is 1.1–2.0× and sits inside this box's `bs = 1`
+  noise for the bloom cells — stated as such, not as a result.
+- **The co-design is visible in Meta's own numbers, and it inverts the two arms'
+  filter ordering.** For official, bloom (partial masks over probed clusters) is
+  *cheaper* than exact (full-`N` `filtering_bit_mask`): 1.29 vs 7.11 ms on arxiv,
+  2.06 vs 3.04 ms on goodreads. For Triton the order is the other way (1.09 vs 0.70,
+  1.11 vs 0.92) because our exact predicate is fused into the scorer and our bloom
+  pays the query-hash of §16.3. This is the paper's §4.3 claim (S9) reproduced from
+  the vendor side, though not as the controlled full-vs-partial ablation §9(d) wants
+  (that needs `bloom_path="full"` cells, **not run** — see §16.6).
+- **Graph mode is Triton-only** (D7): **all 78 official `graph` entries** are `null`
+  with `reason: not_capturable`, and `torch.compile(mode="reduce-overhead")` gives
+  Triton 0.35–1.21 ms at `bs = 16`: **1.6–2.6× over its own eager cell on arxiv**,
+  1.09–1.15× on the goodreads filter cells, and **0.96× — i.e. slightly slower —
+  on goodreads `none`** (0.894 vs 0.857 ms), the one cell where capture does not
+  pay. Triton is still the fastest arm in every graph cell (`torch` never wins one).
+  The eager column is the comparable number; the graph column is the
+  deployed-best-case one (H §2.7).
+- **`torch` is the floor and stays bit-exact**: 1.0 jaccard and `score_max_abs_diff`
+  0.0 against Triton on all six filter cells, at 4.9–37.9 ms per `bs = 16` forward
+  (**7.3–32.7× Triton**) and 1.7–9.6 GiB of peak forward memory against Triton's
+  32–150 MiB.
+- **Memory.** The official arm's *index* is smaller wherever the padded layout bites:
+  **2.70×** on goodreads `none` (110 vs 297 MiB), 2.75× goodreads bloom, 1.90×
+  goodreads clause, 1.63× arxiv bloom — but only **1.01–1.02×** on the arxiv `none`
+  and `clause` cells, where the CSR's two permutation vectors nearly cancel the
+  padded table they replace. The skew that costs us kernel time in §16.2 is the same
+  thing that costs us ~200 MiB on goodreads. The official *forward* peak is ~1.9×
+  ours on the bloom and `none` cells and **26× ours on arxiv clause** (827 vs 32 MiB,
+  the adapter's packer again).
+- **`bloom_fp_rate` is 0.000000 on all four of our bloom cells** at
+  `m_bits = 1024, k_hash = 5`, consistent with §16.3.
+- **Stability.** 14 of 30 cells carry `unstable: true`; every one of them is either a
+  `bs ∈ {1, 8}` eager entry with spread 5–22 % or a `clocks_drift` flag raised by the
+  same host-bound arms dropping the card to 1155–1395 MHz (10 cells, all bloom or
+  arxiv-clause). Of the 156 `bs = 16` entries, **5 exceed the 5 % threshold**; the
+  only one inside a headline ratio above is arxiv bloom official `n_probe = 24` at
+  **8.1 %**, so read that cell's 1.2× as 1.1–1.3×. The six `torch` cells and the
+  goodreads `triton` `none` / `clause` cells are stable throughout. Per-entry
+  `spread` and `sm_mhz` are in the JSONL.
+
+### 16.6 What this settles, what it corrects, and what is still open
+
+**§9's expected outcomes, checked one by one.**
+
+| §9 expectation | verdict |
+|---|---|
+| (i) kernel-only, no filter, large P: "parity within ±20 %, a 310-line Triton kernel within X % of the vendor's" | **Wrong in both directions.** Meta's scorer kernel is 1.15× (arxiv) to 10.9× (goodreads) faster than ours; our *forward* is still 1.7× faster because their op spends 268–896 µs in prep. The goodreads factor is our padded layout's pad tax (97 % pads), not bandwidth. |
+| (ii) eager wall at `bs = 1` / small P: official 2–3× slower from launches + syncs | **Confirmed, milder**: 1.4–2.5× kernel-only, 1.1–2.0× end to end, and the card visibly drops clock in those cells. |
+| (iii) bloom kernel-only at `bs = 16`: official partial mask + masked scorer beats row-wise fused Triton by ~2× until TF-1 | **Wrong as stated.** Their *phase 2* beats ours by 2.0–6.1× (full-`N` search), but their bloom *forward* is **1.8× (arxiv) / 2.1× (goodreads) slower** than our fused one. The partial-response op is also slower than their own full-`N` search. |
+| (iv) quality: identical candidate sets up to fp16 ties | **Confirmed and quantified** (§16.4): int32 bit-exact; fp16 costs 3.1e-4 recall@100 on arxiv, 4e-6 on goodreads. |
+| **S13** (transposed vs row-wise phase 2) | **Replicated against Meta's code**, and the advantage grows with `N` (2.0× at 0.8 M, 6.1× at 3.0 M). |
+| **S9** (co-design) | **Directionally reproduced from the official side** (their partial-mask path beats their own full-mask path by 1.5–5.5× end to end); the controlled ablation is not run. |
+| **S8** (FPR vs bits) | **Not measurable at these settings** — both blooms are at FPR 0.0. Needs D3's wider sweep. |
+
+**Corrections to this plan's text.** §9's "expected outcomes" (i) and (iii) are wrong
+as written and should be read against the table above. §8's TF-1 case is
+*strengthened* — the transposed index is worth 2–6× on phase 2 — while TF-3/TF-4
+(scorer retunes) are now clearly second-order next to **the padded layout itself**,
+which is what costs the Triton scorer 10× on a skewed IVF. A "TF-9: CSR or
+capped-pad probe layout" belongs in §8 for Phase G; the orchestrator owns that edit.
+
+**What was skipped, and why.**
+- `fpr_calibrate.py` and the §4.3 matched-FPR bisection: undefined at FPR 0.0 for both
+  blooms on these sweeps (§16.3). Matched *memory* is reported instead.
+- §9(d)'s S9 ablation with `OfficialConfig(bloom_path="full")`, S10 (probed fraction),
+  S6/S16 (per-row vs global scale), S12: not run — WP-7 / D1 / D3 scope.
+- P ∈ {1024, 46 720, 58 368} synthetic layouts of §9a: replaced by the two real
+  datasets' own `P` (611,520 goodreads, 171,648 arxiv at `n_probe = 24`), which is
+  where the pad-tax finding came from; the synthetic ladder was not run.
+- `ncu` is blocked on this box, so every kernel number is `torch.profiler` device
+  time, not an occupancy or sector analysis.
+- Seeds 1 and 2, `k ∈ {500, 1000}` ratios, and the third dataset dimension: out of
+  scope here (D1's).
+
+**Unverified / carried forward.**
+- The 826 MiB peak and 7.2 ms wall of the official **exact** path are the adapter's
+  full-`N` `pack_mask`, diagnosed from the kernel list but **not fixed and not
+  re-measured after a fix**; every official-exact number is an upper bound on what
+  that path could cost with a better packer.
+- Our 0.37 ms query-bloom-hash at `bs = 16` is measured but not attributed to a
+  specific kernel inside `build_query_signatures`.
+- The kernel-class split is a name heuristic (§16.2); the `quantize` column of the
+  arxiv official-exact row is really the packer's reduction.
+- Parity is measured on 512 queries kernel-only and 10,000 end to end, at `k = 100`;
+  the `k = 500 / 1000` jaccards are in the JSONL but not analysed here.
+- **Nothing in this section is citable until the orchestrator re-runs the gate**
+  (rule 2), and B3's checkbox is the orchestrator's to flip.
