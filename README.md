@@ -11,6 +11,10 @@ This repo is a [uv workspace](https://docs.astral.sh/uv/concepts/projects/worksp
 - [`retrieve/`](retrieve/) — the library: kernels, modules, correctness tests. Published to PyPI as `torchretrieve`; imports as `retrieve`.
 - [`evaluation/`](evaluation/) — training and benchmark harness; depends on `retrieve` editable. Not published.
 
+Datasets, virtual environments and campaign scratch live *outside* the repo, on
+the GPU box's local disk — see [`docs/system/storage.md`](docs/system/storage.md)
+for the paths, the environment variables and the space budget.
+
 ## Install (library only)
 
 If you just want the modules:
@@ -58,6 +62,7 @@ sync with the code:
 - [`evaluation.md`](docs/system/evaluation.md) — the benchmark harness.
 - [`datasets.md`](docs/system/datasets.md) — dataset ETL and the SASRec training pipeline.
 - [`checkpoints.md`](docs/system/checkpoints.md) — trained models + HF Hub workflow.
+- [`storage.md`](docs/system/storage.md) — the box's disks, what may live on each, and the space budget.
 
 **Library user guide** ([`retrieve/docs/`](retrieve/docs/)) — ships in the sdist,
 written for someone who installed `torchretrieve` and does not have this repo:
