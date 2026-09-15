@@ -435,7 +435,32 @@ dies with it (**L** D11). One branch, `dev/l-library-layout`, off
   until this lands) **and D1** (whose WP-5 gate asks for a byte-identical
   rerun). User decision 2026-09-15: fix the kernel rather than widen the gate.
 
-- [ ] **L4 — settle the LiNR V2 backend divergence.**
+- [x] **L4 — settle the LiNR V2 backend divergence.** **Done 2026-09-15**
+  (`91fd352`, merged at `d9a3200`): the candidate sets are **identical**
+  (0/9859 rows differ on counts or ids, `torch.equal`), so it is arithmetic —
+  `fused_masked_knn_topk` **accumulates in fp16** (`tl.sum` keeps the operand
+  dtype; the PTX has 8 `add.f16` and no f32 adds), and on goodreads the partial
+  sums reach |s|=31 against a top-100 near 0…-1, i.e. catastrophic
+  cancellation: **0.0276** max abs score error against an fp64 dot. All 626
+  swapped pairs lie inside that error and the top-k epilogue ranks correctly in
+  626/626. `knn.py` and `kernels.md` both claimed fp32 — the code contradicted
+  its own contract, and the parity suite could not see it because it compares
+  Triton against a reference *at the same precision*. Record:
+  [linr-v2-backend-parity.md §6.1](linr-v2-backend-parity.md). **L4-b is
+  falsified** (below); **L4-c** is fixed in C5.
+- [ ] **L5 — fp32 accumulation, and the precision audit it implies.**
+  [linr-v2-backend-parity.md §7](linr-v2-backend-parity.md) (A100, 0.5 d).
+  User decision 2026-09-15 on L4's numbers: ship fp32 accumulation — it is not
+  a trade-off (B=1 0.05235 → 0.05226 ms, B=16 0.9636 → **0.9408** ms, i.e.
+  faster; parity 0.998743 → 0.999751, the residual 124 rows being `torch`'s own
+  fp16 ties) — **and sweep every Triton kernel for reduction width**, because
+  `tl.sum` inherits the operand dtype and the parity suite is structurally
+  blind to the whole class. Adds a parity file against an **fp64 oracle**, the
+  test that would have caught it. Also deletes the `retrieve.layers` /
+  `retrieve.kernels` shim, whose reason to exist ended when the golden stopped
+  being a gate. Gate: suite green (645), existing parity bit-exact, the fp64
+  file green, the audit table complete, no cost regression. **Before B3 and
+  D1.**
   [linr-v2-backend-parity.md](linr-v2-backend-parity.md) (A100, 0.5 d).
   `linr_v2` is our **exact** filtered top-K, yet `torch` and `triton` return
   different results: jaccard@100 **0.998743**, `score_max_abs_diff` **9.77e-3**,
@@ -532,7 +557,7 @@ bit-exactness stays where it belongs, in B2's library parity suite.
   (Phase L above), so the gate validates the final code once; the harness
   side of the gate is unchanged by L (the wrappers are moved, not
   rewritten, and `algos.py` is re-tabled in C5 *after* this gate flips).
-- [ ] **C5 — split the harness into `bench` / `training` / `eval_datasets`
+- [x] **C5 — split the harness into `bench` / `training` / `eval_datasets`
   with one dependency direction, one test tree and three CLIs.** V §9
   WP-V1 + WP-V2 (CPU 2 d). `retrieval/` → `bench/` (`bench.py` →
   `measure.py`, `records.py` gathering `SCHEMA_VERSION` / `KEY_FIELDS` /
@@ -552,6 +577,20 @@ bit-exactness stays where it belongs, in B2's library parity suite.
   reproduces the pre-rename record's key block and `quality` at the same
   `code_version`. Needs C4 (flipped) and L2. **Unblocks D1** (the campaign
   runs on the final package).
+  **Done 2026-09-15** (`6900306`, merged at `d9a3200`): 164 passed / 4 skipped,
+  ruff clean (the 11 pre-existing E501s cleared), dependency-direction test
+  green against **X** §2, `PATHS == derive(DISPATCH)` replacing the
+  markdown-parsing test, all 20 `--help`s, links 0, and the one-cell gate
+  reproducing C4's pre-rename records with **all 31 `quality` fields equal to
+  the digit** at the same `code_version`. **L4-c fixed here**: `clocks_locked`
+  and `--expected-sm-mhz` removed (they recorded a coincidence on a box that
+  cannot lock clocks), `env.sm_mhz` split into `sm_mhz_idle` / `sm_mhz_load`,
+  `clocks_drift` now compares under-load samples with under-load samples;
+  `SCHEMA_VERSION` 2. **L4-b falsified**: `linr_v4` at quality chunk 64 lands
+  **2.9e-4** from the golden — four times *further* than chunk 16's 7.3e-5 —
+  so batch shape moves the cell but the chunk difference is not what separates
+  the two harnesses, and that residual is unexplained again. Record:
+  [evaluation-package-layout.md §11](evaluation-package-layout.md).
 
 ### Phase D — campaign and baselines (A100)
 
