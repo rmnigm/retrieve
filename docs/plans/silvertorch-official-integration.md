@@ -46,11 +46,22 @@
 > — `jaccard_vs_first@100` **0.999849** with the plan cache off — but reaches
 > only **0.985 / 0.9849 on arxiv**, where the roadmap's clause names goodreads
 > only and so does not bite. `score_max_abs_diff` is ~10× *smaller* on arxiv
-> while jaccard is lower, which points at more near-ties at the top-100
-> boundary under a looser filter rather than at a numerics problem. B3's
-> head-to-head should measure it on both datasets rather than inheriting the
-> goodreads-only threshold, and §10 WP-9's "official vs reimplementation"
-> section should report the dataset dependence.
+> while jaccard is lower.
+>
+> **Answered by B3, 2026-09-15 (§16), and the guess in the original note was
+> wrong.** The note above supposed "more near-ties at the top-100 boundary
+> *under a looser filter* rather than a numerics problem". It is near-ties, but
+> it has nothing to do with filtering and it *is* numerics: the split appears
+> identically on the **unfiltered** cells (arxiv 0.9838 vs goodreads 0.9999),
+> and the official int32 path is **bit-exact** against Triton in all three
+> filter modes on both datasets. The cause is the shipped **fp16 score path
+> meeting arxiv's score distribution**: the rank-100/101 gap there is 8.6e-5 on
+> a score of ≈0.83, so **95.3 % of arxiv queries have that gap inside one fp16
+> ulp**, against 3.1 % of goodreads queries (22× their ulp). Cost in the metric
+> that matters — recall@100 against the exact oracle over 10 k queries — is
+> **3.1e-4 on arxiv and 4e-6 on goodreads**. §10 WP-9 should report the
+> dataset dependence as a property of fp16 resolution against a corpus's score
+> distribution, not as a filter effect.
 >
 > **Answered by B3 (§16.4) — and this reading of it is wrong.** It is not the
 > filter: the *unfiltered* cells split the same way (arxiv 0.9838, goodreads
