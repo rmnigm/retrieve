@@ -479,6 +479,34 @@ run on the A100 box. Effort in focused days.
   cuda-silvertorch-handoff §7). Closes roadmap §2 (goodreads oracle rerun) and §4b items 1, 3, 4,
   5, 7 in one pass. Gate: `bench report` runs with no missing cells; `median_ms(bs=16) <
   16·median_ms(bs=1)`; ids identical across `mode`; a rerun is byte-identical in quality.
+
+> **WP-5 staged, 2026-09-15 (orchestrator, on the user's steer "running the
+> full evals step by step").** WP-5 is written as one ~24 h campaign. It runs
+> as five stages instead, each resumable and each leaving the paper strictly
+> better off than the stage before, so that losing the box costs one stage
+> rather than the run. `bench campaign --resume` already keys on
+> `(cell, code_version)`, so a stage boundary costs nothing but a process
+> restart. **No kernel or library change may land between stages** — the tree
+> hash is in the resume key, and a change silently invalidates every cell
+> recorded before it (§8.2 B).
+>
+> | stage | what | why this order | rough wall |
+> |---|---|---|---|
+> | **D1-a** | goodreads + arxiv, `filter` suite, d128, seed 0, `{triton, torch, official}` | the headline filtered cells: every table in the thesis and §C.4's core claims rest on these, and they are the cells C4 already exercised, so a failure here is a harness problem and not a surprise | ~4–6 h |
+> | **D1-b** | the same cells at seeds 1, 2 (headline sweeps only, per `suites.yaml`) | closes P gap **G4** (seed variance). Cheap insurance: without it every headline number is a single sample, which a reviewer will ask about | ~8–12 h |
+> | **D1-c** | `quality` suite, all four datasets, all dims | the unfiltered recall tables, incl. the two yambda datasets that no longer appear anywhere else | ~3–4 h |
+> | **D1-d** | `deep` suite (2 builds × 6 query configs per §8.2 A, seeds 0–2) | the recall-vs-latency Pareto curves — the most cuttable stage if time runs short, and the one whose absence is easiest to explain | ~6–8 h |
+> | **D1-e** | the S9 co-design ablation cells (`OfficialConfig(bloom_path="full")`) | O §9's fairness ablation; needs the official arm of D1-a to have landed | ~1 h |
+>
+> **Gate, unchanged from WP-5** but evaluated per stage: `bench report` runs
+> with no missing cells for that stage, `median_ms(bs=16) < 16·median_ms(bs=1)`,
+> ids identical across `mode`, and a rerun byte-identical in quality — the last
+> of which is only meetable because L3 and L5 landed first (before them,
+> `linr_v2`/`linr_v3` on `triton` could not reproduce themselves at all).
+> **Latency caveat carried from C4:** report `sm_mhz_load`, never
+> `sm_mhz_idle`, and treat any bs=1 comparison narrower than the baseline's own
+> ~21 % spread as noise.
+
 - **WP-6 — `report.py` (1.5 d).** From the JSONL/parquet only: the thesis tables
   (`tab:recall_nofilter`, `tab:pareto_arxiv`/`goodreads`, `tab:batch_scaling`, the memory table at
   main.tex:820–823) as LaTeX, the Pareto figures, deep-sweep curves with seed whiskers, latency
