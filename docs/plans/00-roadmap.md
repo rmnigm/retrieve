@@ -92,17 +92,60 @@ plan to `archive/` and shorten its entry here to one line under *Done*.
 > dim**; big datasets (E2, E3) deferred until disk allows; A4's local
 > merge into `main` is on hold until the user says so.
 
-> **Amendment 2026-09-15 (plans only, no code).** Three refactor plans
-> were added and slotted in below: **L** (library API, Phase L), **V**
-> (harness packaging, step C5), **X** (the boundary contract). They change
-> the eval queue above in one place: **L1 and L2 land before queue item 2
-> (the C4 gate rerun)** so the gate validates the final library layout once
-> and `code_version` (the library tree hash) stops changing before any cell
-> that must survive; C5 lands after C4 flips and before D1. Queue item 1
-> (re-derive the golden) is unaffected: the old-harness worktree keeps
-> working through L's compatibility shim. Fallback if the user wants the
-> harness loop closed first: run item 2 now and repeat the 14-cell gate
-> after L2 (L D11).
+> **Session status 2026-09-15 (A100 box, orchestrator record).** Supersedes
+> the eval queue of the 2026-09-06 block above. Merged into `development` and
+> pushed: the three refactor plans (**L**, **V**, **X**) and the two contracts
+> ([agent-orchestration.md](agent-orchestration.md),
+> [coding-guidelines.md](coding-guidelines.md)); **L1** and **L2**
+> (`dc58734`); **eval-queue item 1**, the golden re-derive. Merged state
+> verified on the box: library suite **613 passed**, harness CPU suite 103
+> passed / 1 skipped, ruff clean, links 0.
+> **The box is a fresh rental**: the 2026-09-06 worktrees and
+> `evaluation/data` are gone. Datasets restaged to `/workspace/data`
+> (`RETRIEVE_DATA_ROOT`, 2.6 GB goodreads d128 + 1.3 GB arxiv `content_d128`;
+> the Hub's `gt_d128/` oracle blobs hit, so no oracle rebuild). Only CUDA
+> **12.4** is installed — correct, and what O §13.1 recorded; the 12.8 line in
+> the block above is stale. `uv sync --extra official` at the workspace root
+> **uninstalls pytest** (it lives in the members' `dev` groups): use
+> `uv sync --extra official --all-packages`. The harness CPU suite must run
+> with `CUDA_VISIBLE_DEVICES=""` — three of its tests assert CPU-only
+> behaviour in their own text and fail on a box with a GPU. Concurrent GPU
+> workers each need their own `TORCHINDUCTOR_CACHE_DIR`; `/tmp/torchinductor_root`
+> is shared and does not invalidate on a kernel-wrapper source change.
+> GPU work is serialized with `flock /workspace/gpu.lock`.
+> **The golden is re-derived** (H §11): 11/11 cells, 6 bit-identical, 5 moved
+> by 5×–160× the C4 tolerance, so the C4 gate against A1's cells would have
+> failed unattributably. The 2026-09-06 prediction in the block above is
+> **wrong in three of its four claims** and is superseded by H §11.3: the `-1`
+> sentinel cannot move a goodreads number (only 141 of 10,000 `c0_genre`
+> queries have `< k` survivors and they are exactly the dropped users), the
+> `torch` backend moved by the run's largest delta, and moves go up as well as
+> down. The cause is the deterministic k-means, which changes the centroids on
+> every backend. The finding worth keeping: SilverTorch's `triton` and `torch`
+> backends now agree **exactly** on all 9 goodreads rows, where A1 had a
+> 1.7e-4 gap it read as tie order.
+> **The eval queue, in order, from here:**
+> 1. **L3** — deterministic compaction
+> ([deterministic-compaction.md](deterministic-compaction.md)). It is new, it
+> blocks the rest, and it exists because the golden re-derive found that
+> `linr_v2` / `linr_v3` on `triton` cannot reproduce *themselves* across
+> processes (2.0e-6 / 6.8e-5 spread against a 1e-6 gate).
+> 2. **C4 gate rerun** — the 14 goodreads-d128 `c0_genre` cells, the arxiv
+> cell, kill-and-resume, `c4_gate.py` against the **re-derived** golden.
+> `--golden-sm-mhz` must be passed **1155** (the re-derive's sampled median);
+> the script's 1140 default is A1's. Then flip C4.
+> 3. **B3** — the Triton vs official head-to-head (O §9a/§9b, gap G2).
+> 4. **C5** — the harness package split (**V**), after C4 flips.
+> 5. **D1** — the campaign (≈ 24 h wall), then **D4** `report.py`.
+> Kernel *improvement* (TF-1 transposed bloom, TF-3/4 retune) stays in Phase G;
+> L3 is a correctness fix, not that work.
+> **Decisions taken 2026-09-15, do not reopen:** the `retrieve.layers` /
+> `retrieve.kernels` shim stays as **temporary tooling** and is deleted at C5
+> (the coding-guidelines D2 collision, resolved by the user); `interfaces.Backend`
+> is **not** revived in that shim — it was deleted at B4, not moved by L, and
+> the frozen golden worktree declares the literal locally instead; the golden
+> was re-derived *before* L landed and L1/L2's gate cells confirm the library
+> reproduces it bit-exactly; L3 fixes the kernel rather than widening C4's gate.
 
 ## 0. Goal, scheduling rule, branch
 
@@ -314,8 +357,13 @@ because `code_version` is the library tree hash and every recorded cell
 dies with it (**L** D11). One branch, `dev/l-library-layout`, off
 `development`; nothing else edits `retrieve/` while it is open.
 
-- [ ] **L1 — move the library into the `modules` / `ops` / `indexing`
-  layout with no behaviour change.** L §10 WP-1 (CPU 1.5 d + one library
+- [x] **L1 — move the library into the `modules` / `ops` / `indexing`
+  layout with no behaviour change.** **Done 2026-09-15** (`df04e74`, merged at
+  `dc58734`): library suite 521, 14 reference cells `torch.equal` to the
+  pre-move `ref_cps_phase23`, 9 pre-move state dicts returning identical ids
+  and scores, and the `goodreads-d128 c0_genre silvertorch triton` golden cell
+  bit-identical through the shim. Record:
+  [library-api-refactor.md §12.1](library-api-refactor.md). L §10 WP-1 (CPU 1.5 d + one library
   suite run). `modules/`, `ops/{triton,reference,official}/`, `indexing/`,
   `functional.py`, the ops loader and `_host.py` (review A5), the
   `retrieve.layers` / `retrieve.kernels` deprecation shim, pyproject
@@ -329,8 +377,13 @@ dies with it (**L** D11). One branch, `dev/l-library-layout`, off
   pre-move `ref_cps_phase23`, a pre-move state dict (3 backends × 3 filter
   modes) loads and returns identical ids and scores, the golden worktree
   runs one cell through the shim. Needs nothing unchecked.
-- [ ] **L2 — ship LiNR V1–V4 as library modules, the builders, k-means++
-  seeding, build timings and the harness contract.** L §10 WP-2 (CPU 2 d +
+- [x] **L2 — ship LiNR V1–V4 as library modules, the builders, k-means++
+  seeding, build timings and the harness contract.** **Done 2026-09-15**
+  (`b81d2ca`, merged at `dc58734`): library suite 613 (+92), composites
+  `torch.equal` to the hand-composed primitives on every backend × filter
+  kind, builder round-trip against a fresh build, `test_boundary.py` green,
+  k-means++ greedy at `n_lists=8192` in 9.5 s so k-means‖ was not needed.
+  Record: [library-api-refactor.md §12.2](library-api-refactor.md). L §10 WP-2 (CPU 2 d +
   one library suite run). `LiNRV1`–`LiNRV4` moved from
   `evaluation/retrieval/algos.py`, `SilverTorchBuilder` / `LiNRBuilder`
   (`build_silvertorch` retired into the shim), `KMeans(init="kmeans++")`
@@ -341,6 +394,23 @@ dies with it (**L** D11). One branch, `dev/l-library-layout`, off
   L1 plus composites `torch.equal` to the hand-composed primitives on every
   backend × filter kind, builder round-trip, k-means++ tests. Needs L1.
   **Unblocks C5** and, with it, the C4 rerun on the final layout.
+
+- [ ] **L3 — make the Triton stream compaction deterministic.**
+  [deterministic-compaction.md](deterministic-compaction.md) §5 WP-1 (A100,
+  0.5 d). `clause_compact` / `bloom_compact` claim their per-row base with an
+  `atomic_add`, so a row's surviving ids land in tile-completion order; the
+  tie-breakers downstream (`PrefilterKNN`'s top-k, and `OneBitKNN`'s
+  massively-tied integer Hamming ranking, which decides *pool membership*)
+  turn that into quality noise of **2.0e-6 on `linr_v2` and 6.8e-5 on
+  `linr_v3`** — 2× and 68× C4's `1e-6` gate, measured across three identical
+  runs (H §11.8). The invariant becomes ascending item order, matching
+  `ops.reference`, via a two-phase kernel (per-tile counts → exclusive scan →
+  write at fixed offsets). Gate: order parity `torch.equal` to `ops.reference`,
+  launch-to-launch identity in and across processes, full suite green, the cost
+  measured, and the two affected golden cells re-derived and bit-identical to
+  each other. Needs L2. **Blocks C4** (its gate is unmeetable on two cells
+  until this lands) **and D1** (whose WP-5 gate asks for a byte-identical
+  rerun). User decision 2026-09-15: fix the kernel rather than widen the gate.
 
 ### Phase C — harness v2 (Mac work in parallel with B; A100 gate at the end)
 

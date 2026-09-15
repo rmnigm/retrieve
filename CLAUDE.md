@@ -115,9 +115,9 @@ LiNR variants are V1–V4 as in the paper.
 ## Commands
 
 ```bash
-uv sync                                          # whole workspace (Mac: torch wheel will fail; library code still reads fine)
+uv sync --extra official --all-packages          # whole workspace + Meta's ops; --all-packages keeps pytest (it is in the members' dev groups)
 uv run --directory retrieve pytest tests/ -x -q  # library suite — GPU only, skips itself without CUDA
-cd evaluation && uv run pytest retrieval/tests/ --ignore=retrieval/tests/test_silvertorch_algo_reverse.py  # CPU-only harness tests
+cd evaluation && CUDA_VISIBLE_DEVICES="" uv run pytest retrieval/tests/ --ignore=retrieval/tests/test_silvertorch_algo_reverse.py  # CPU-only harness tests: three of them assert CPU-only behaviour and fail with a GPU visible
 uv run --directory evaluation bench run --dataset arxiv --dim 128 --suite filter --algo silvertorch
 uv run --directory evaluation bench campaign --suite filter --resume
 uv run --directory retrieve tune-kernels --help  # kernel autotune sweeps (GPU)
