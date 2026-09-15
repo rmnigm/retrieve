@@ -448,7 +448,18 @@ dies with it (**L** D11). One branch, `dev/l-library-layout`, off
   Triton against a reference *at the same precision*. Record:
   [linr-v2-backend-parity.md §6.1](linr-v2-backend-parity.md). **L4-b is
   falsified** (below); **L4-c** is fixed in C5.
-- [ ] **L5 — fp32 accumulation, and the precision audit it implies.**
+- [x] **L5 — fp32 accumulation, and the precision audit it implies.** **Done
+  2026-09-15** (`0469741`, merged at `HEAD`): two casts; max abs error vs an
+  fp64 dot **0.027644 → 3.2e-6**; `linr_v2` torch-vs-triton **0.998743 →
+  0.999751** with all 124 residual rows being `torch`'s own fp16 ties; cost
+  B=16 **0.9631 → 0.9404 ms** (faster). The audit found the fixed reduction was
+  the **only floating-point reduction in `ops/triton/`** — the int8 scorers use
+  `tl.dot(out_dtype=int32)` (exact below 2²⁴), oporp sums int32 popcounts, the
+  compaction reductions are integer — so **no SilverTorch number moves** and B3
+  is unaffected. `tests/parity/test_accumulation.py` bounds each scoring kernel
+  against fp64 *and* asserts an fp16 model of the same computation misses the
+  bound, so its discriminating power is checked every run. The shim is deleted.
+  Suite 653. Record: [linr-v2-backend-parity.md §8.1](linr-v2-backend-parity.md).
   [linr-v2-backend-parity.md §7](linr-v2-backend-parity.md) (A100, 0.5 d).
   User decision 2026-09-15 on L4's numbers: ship fp32 accumulation — it is not
   a trade-off (B=1 0.05235 → 0.05226 ms, B=16 0.9636 → **0.9408** ms, i.e.
@@ -700,13 +711,27 @@ and ingestion plans: [dataset-candidates.md](dataset-candidates.md)
 
 ### Phase F — the paper (F1 and F3 can start any time)
 
-- [ ] **F1 — reframe the thesis as SilverTorch Algorithm 1 and write the deviations table.** P G1 (Mac, 1 d): QuantizedIVF
+- [x] **F1 — reframe the thesis as SilverTorch Algorithm 1 and write the deviations table.** **Done 2026-09-15**
+  (`5dad4df`, merged at `HEAD`): all 33 `QuantizedIVF` occurrences retired from
+  `docs/thesis/`, the novelty claims rewritten as an independent
+  reimplementation, the SilverTorch paper cited for the first time
+  (arXiv 2511.14881, verified against the arXiv record), and
+  [`docs/paper/reproduction-deviations.md`](../paper/reproduction-deviations.md)
+  written — 42 rows across paper-vs-us, Meta's code vs Meta's paper, defects in
+  our own code found by reproducing, and 3 unexplained residuals, each citing
+  the plan section that measured it. P G1 (Mac, 1 d): QuantizedIVF
   is SilverTorch Algorithm 1; the deviations table incl. O's findings
   (official bloom hash ≠ ours, official eager-only, the
   `per_embedding_scale` overflow).
 - [ ] **F2 — write the "official vs reimplementation" section of the paper.** O §10 WP-9 (1 d),
   from B3 + D1 numbers.
-- [ ] **F3 — write the provenance and hardware/software disclosure.** P G9 (hours).
+- [x] **F3 — write the provenance and hardware/software disclosure.** P G9.
+  **Done 2026-09-15** (`5dad4df`, merged at `HEAD`):
+  [`docs/paper/provenance-and-disclosure.md`](../paper/provenance-and-disclosure.md)
+  — hardware/software with Meta's pin, which recorded fields may be cited, the
+  clock-estimator section, the "what was and was not compared" disclosure (no
+  equivalence claim with the pre-v2 harness), and the not-yet-validated list
+  with its roadmap step per line.
 - [ ] **F4 — package the artifacts: tagged release, Zenodo DOI, HF data, one-command reproduction.** P §B.7: tagged `torchretrieve` release, Zenodo
   DOI (incl. the pinned official sdist), HF datasets + oracles + results,
   one-command `reproduce-paper`, anonymised mirror for review.
