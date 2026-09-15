@@ -1,9 +1,9 @@
 """Fused bloom subset-test + stream compaction without the dense ``[B, N]`` bool of
-``compact_mask(bloom_match(.))``. Same two-phase shape as ``clause_compact``: a count launch into
-``[B, T]``, ``torch.cumsum`` for the per-tile row offsets, a write launch that re-runs the subset
-test and stores each survivor at ``tile_offset + intra-tile rank`` — so a row's ids are in
-**ascending item order**, ``torch.equal`` to ``ops.reference.bloom_compact`` and reproducible
-across launches and processes (plan L3)."""
+``compact_mask(bloom_match(.))``. Same two-phase shape as ``clause_compact`` (plan L3): the
+subset-test launch writes per-tile survivor counts and stashes the survivors' ids tile-locally,
+``_host.compact_finish`` scans and scatters — so a row's ids are in **ascending item order**,
+``torch.equal`` to ``ops.reference.bloom_compact`` and reproducible across launches and
+processes."""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ import triton.language as tl
 from torch import Tensor
 
 # By name, not `common.<fn>` — see the note in clause_mask.py.
-from retrieve.ops.triton._host import grid_batch_tiles
-from retrieve.ops.triton.common import bloom_subset_pass, compact_store
+from retrieve.ops.triton._host import compact_finish, grid_batch_tiles
+from retrieve.ops.triton.common import bloom_subset_pass, compact_stash
 
 
 @dataclass(frozen=True)
@@ -36,8 +36,8 @@ DEFAULT_CONFIG = BloomCompactConfig(block_n=256, num_warps=8)
 def _bloom_compact_kernel(
     qb_ptr,  # [B, W] int64
     sigs_ptr,  # [N, W] int64
-    tile_ptr,  # [B, T] int64: per-tile survivor counts (COUNT) / exclusive row offsets (write)
-    out_indices_ptr,  # [B, N] int64 (worst-case scratch; untouched under COUNT)
+    tile_counts_ptr,  # [B, T] int64
+    scratch_ptr,  # [B, T * BLOCK_N] int32
     N,
     tiles_y,
     W: tl.constexpr,
@@ -46,9 +46,7 @@ def _bloom_compact_kernel(
     stride_s_n,
     stride_s_w,
     stride_tb,
-    stride_ob,
-    stride_on,
-    COUNT: tl.constexpr,
+    stride_sb,
     BLOCK_N: tl.constexpr,
 ):
     # 3D grid: batch on grid_x (L2 reuse on sigs), tiles split across grid_y × grid_z to dodge the
@@ -74,20 +72,26 @@ def _bloom_compact_kernel(
     # with n_valid here.
     pass_mask = bloom_subset_pass(qb, sigs) & n_valid
 
-    if COUNT:
-        tile_sum = tl.sum(tl.where(pass_mask, 1, 0).to(tl.int32))
-        tl.store(tile_ptr + bid * stride_tb + tile_id, tile_sum.to(tl.int64))
-    else:
-        base = tl.load(tile_ptr + bid * stride_tb + tile_id)
-        compact_store(pass_mask, n_offsets, base, out_indices_ptr, bid, stride_ob, stride_on)
+    compact_stash(
+        pass_mask,
+        n_offsets,
+        tile_counts_ptr,
+        scratch_ptr,
+        bid,
+        tile_id,
+        stride_tb,
+        stride_sb,
+        BLOCK_N,
+    )
 
 
 @dataclass(frozen=True)
 class _BloomCompactLaunch:
     grid: tuple[int, int, int]
-    kwargs: dict[str, object]  # every kernel arg but tile_ptr / COUNT: tensors, strides, cfg
-    out_indices: Tensor
+    tiles_y: int
+    kwargs: dict[str, object]  # every kernel arg: tensors, strides, constexprs, cfg
     tile_counts: Tensor
+    scratch: Tensor
 
 
 def _bloom_compact_prep(
@@ -96,13 +100,9 @@ def _bloom_compact_prep(
     *,
     cfg: BloomCompactConfig,
 ) -> _BloomCompactLaunch:
-    """Validation + contiguity + buffers + the launch-arg dict. THE single place input checking
-    happens — shared by ``_bloom_compact_impl`` and the public op.
-
-    ``out_indices`` is init'd to the ``-1`` sentinel (see ``clause_compact._clause_compact_prep``):
-    positions past ``counts[bid]`` aren't written and ``-1`` propagates as "no item" through the
-    gather when ``counts[b] < k``. ``tile_counts`` is ``[B, T]`` for the grid's
-    ``T = tiles_y * tiles_x`` tiles, every one of which the count launch writes."""
+    """Validation + contiguity + the phase-1 buffers + the launch-arg dict. THE single place input
+    checking happens — shared by ``_bloom_compact_impl`` and the public op (see
+    ``clause_compact._clause_compact_prep`` for the buffer contract)."""
     if qb.dim() != 2:
         raise ValueError("qb must be [B, W]")
     if sigs.dim() != 2:
@@ -119,13 +119,15 @@ def _bloom_compact_prep(
     sigs = sigs.contiguous()
 
     grid, tiles_y = grid_batch_tiles(b, n, cfg.block_n)
-    out_indices = torch.full((b, n), -1, dtype=torch.int64, device=qb.device)
-    tile_counts = torch.empty((b, tiles_y * grid[2]), dtype=torch.int64, device=qb.device)
+    tiles = tiles_y * grid[2]
+    tile_counts = torch.empty((b, tiles), dtype=torch.int64, device=qb.device)
+    scratch = torch.empty((b, tiles * cfg.block_n), dtype=torch.int32, device=qb.device)
 
     kwargs = dict(
         qb_ptr=qb,
         sigs_ptr=sigs,
-        out_indices_ptr=out_indices,
+        tile_counts_ptr=tile_counts,
+        scratch_ptr=scratch,
         N=n,
         tiles_y=tiles_y,
         W=w,
@@ -134,13 +136,12 @@ def _bloom_compact_prep(
         stride_s_n=sigs.stride(0),
         stride_s_w=sigs.stride(1),
         stride_tb=tile_counts.stride(0),
-        stride_ob=out_indices.stride(0),
-        stride_on=out_indices.stride(1),
+        stride_sb=scratch.stride(0),
         BLOCK_N=cfg.block_n,
         num_warps=cfg.num_warps,
         num_stages=cfg.num_stages,
     )
-    return _BloomCompactLaunch(grid, kwargs, out_indices, tile_counts)
+    return _BloomCompactLaunch(grid, tiles_y, kwargs, tile_counts, scratch)
 
 
 def _bloom_compact_impl(
@@ -154,12 +155,16 @@ def _bloom_compact_impl(
     ``DEFAULT_CONFIG``."""
     cfg = config if config is not None else DEFAULT_CONFIG
     launch = _bloom_compact_prep(qb, sigs, cfg=cfg)
-    _bloom_compact_kernel[launch.grid](**launch.kwargs, tile_ptr=launch.tile_counts, COUNT=True)
-    tile_ends = launch.tile_counts.cumsum(1)
-    tile_offsets = tile_ends - launch.tile_counts
-    _bloom_compact_kernel[launch.grid](**launch.kwargs, tile_ptr=tile_offsets, COUNT=False)
-    # clone, not contiguous(): see _clause_compact_impl.
-    return launch.out_indices, tile_ends[:, -1].clone()
+    _bloom_compact_kernel[launch.grid](**launch.kwargs)
+    return compact_finish(
+        launch.grid,
+        launch.tiles_y,
+        launch.tile_counts,
+        launch.scratch,
+        sigs.shape[0],
+        block_n=cfg.block_n,
+        num_warps=cfg.num_warps,
+    )
 
 
 @torch.library.custom_op("retrieve::bloom_compact", mutates_args=(), device_types="cuda")

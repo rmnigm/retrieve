@@ -217,9 +217,17 @@ its own tile shape, launch grid, or masking policy:
   `.to(torch.int8)`; Triton can't load native torch.bool).
 - `compact_store(pass_mask, ids, base, out_ptr, bid, ...)` — the
   stream-compaction store (`cumsum` intra-tile rank + masked store at
-  the caller-supplied row `base`, which the two compaction ops derive
-  from a scan over per-tile counts), shared by `clause_compact` and
-  `bloom_compact`.
+  the caller-supplied `base`, cast to the pointee type).
+- `compact_stash(pass_mask, ids, tile_counts_ptr, scratch_ptr, bid,
+  tile_id, ..., BLOCK_N)` — phase 1 of the two compaction ops: the
+  tile's survivor count, and `compact_store` of its ids into the tile's
+  own slot range `scratch[bid, tile_id * BLOCK_N :]` (int32).
+- `compact_scatter_kernel` — the one *launched* kernel in this file:
+  phase 3 of both compaction ops, one program per `(row, tile)` on the
+  predicate launch's grid, moving the tile's stashed run to the scanned
+  row offset. Launched by
+  [`_host.compact_finish`](../../retrieve/src/retrieve/ops/triton/_host.py),
+  which also does the `cumsum`.
 - `or_combine(a, b)` — combine_fn for `tl.reduce` OR-reductions.
 
 Perf caveat: helpers with many pointer params (`clause_pass`) can
@@ -458,30 +466,52 @@ dispatched programs share the same item tile (good L2 reuse on the
 split across `grid_y × grid_z` to dodge the 65,535 cap on a single
 axis (which would otherwise overflow at N>~16M with `block_n=256`). The
 kernel reconstructs `tile_id = tile_x * tiles_y + tile_y`. Each program
-owns one `(query, n-tile)` cell. The op is **two launches of the same
-kernel around a scan** (plan L3, decision D2):
+owns one `(query, n-tile)` cell. The op is **two launches around a
+scan** (plan L3, decision D2). The predicate launch keeps the pre-L3
+epilogue — `cumsum` intra-tile ranks and a masked store — with the
+`atomic_add` row base replaced by the tile's own fixed slot range in an
+int32 scratch, plus a store of the tile's count; the scan and a
+predicate-free second launch then move each tile's run to its row offset:
 
 ```
-count launch (b, tile):
+predicate launch (b, tile):                     _clause_compact_kernel
     pass_mask = AND over clauses of (any item attr == query attr) ^ reverse
-    tile_counts[b, tile] = sum(pass_mask)
-host, inside the op:
+    tile_counts[b, tile] = sum(pass_mask)                     # common.compact_stash
+    intra = tl.cumsum(pass_mask) - 1
+    tl.store(scratch[b, tile * BLOCK_N + intra], item_id, mask=pass_mask)
+host, inside the op:                            _host.compact_finish
     tile_ends    = tile_counts.cumsum(1)          # [B, T] int64, T = grid tiles
     tile_offsets = tile_ends - tile_counts        # exclusive scan
-    counts       = tile_ends[:, -1]
-write launch (b, tile):
-    pass_mask = the same predicate, re-evaluated (D3)
-    intra     = tl.cumsum(pass_mask) - 1          # intra-tile rank
-    tl.store(positive_indices[b, tile_offsets[b, tile] + intra], item_id, mask=pass_mask)
+    counts       = tile_ends[:, -1].clone()
+scatter launch (b, tile), same grid:            common.compact_scatter_kernel
+    ids = scratch[b, tile * BLOCK_N : +tile_counts[b, tile]]
+    positive_indices[b, tile_offsets[b, tile] : +count] = ids
 ```
+
+Why this shape and not plan D3's (re-evaluate the predicate in the second
+launch) or §6's (a packed bitmask): both were built and measured
+([deterministic-compaction.md](../plans/deterministic-compaction.md) §7).
+Re-evaluation costs a full second pass of the predicate (1.9–3.1× on the
+kernel, +43–58% on a V2/V3 forward). The bitmask — and even a bare
+count-only epilogue — makes the *predicate* launch 1.7–1.8× slower at
+`B = 1`, where the grid is under one wave and per-program latency is the
+kernel time; the `cumsum` + masked-store epilogue keeps it at the one-pass
+speed (1.10× at B=1, 1.03× at B=16, full pipeline). The scratch traffic is
+the survivors only (4 B in, 8 B out per id); its allocation is
+`4 · B · T · BLOCK_N` bytes, half the `[B, N]` int64 result. `counts` is a
+fresh tensor, not a view into the scan: inductor asserts custom-op outputs
+are 16-byte aligned, and at `B = 1` the scan's last column is a contiguous
+view at element offset `T - 1` (the first defect L3 hit;
+`test_compiled_batch_of_one_bloom_v2`).
 
 **Clause loop** is the shared
 [`common.clause_pass`](../../retrieve/src/retrieve/ops/triton/common.py)
 helper, fully unrolled (`C` and `A_MAX` are `tl.constexpr`): inner OR
 over the `A_MAX` attribute slots per clause, outer AND over the `C`
 clauses, with the reverse flag XORed in per-clause and `q_c == -1`
-overriding to "always passes." The compaction epilogue is
-`common.compact_store` at the scanned base.
+overriding to "always passes." The tile's count and id run go out
+through `common.compact_stash`; `common.compact_scatter_kernel` moves the
+run to the scanned base.
 
 **Output ordering** within a row is **ascending item order** — the order
 `ops.reference.clause_compact` (`compact_mask`'s stable argsort) emits, so
@@ -494,8 +524,8 @@ completion; `PrefilterKNN`'s top-k and `OneBitKNN`'s heavily tied Hamming
 ranking turned that into 2e-6 / 7e-5 run-to-run quality noise on
 `linr_v2` / `linr_v3`
 ([deterministic-compaction.md](../plans/deterministic-compaction.md) §1-2).
-The price is the predicate evaluated twice and one small scan — measured
-in that plan's §7.
+The price is the scan, the stash round trip and two extra launches —
+measured in that plan's §7.
 
 **Op registration** is `@torch.library.custom_op`, not `@triton_op` — this
 kernel and `bloom_compact` are the two exceptions in the tree. The
@@ -662,10 +692,9 @@ capture under cudagraph trees.
 compact/mask kernels (`tile_id = tile_x * tiles_y + tile_y`). Each
 program loads `qb[b, :]` once, the `[BLOCK_N, W]` `sigs` tile, computes
 the subset test via the shared `common.bloom_subset_pass` (same helper
-as `bloom_match`); the count launch stores the tile's survivor count,
-the write launch (after the op's `cumsum`) re-runs the test and stores
-through the shared `common.compact_store` at the scanned base (same
-shape as `clause_compact`). Wide `W` (=16 at the default `m_bits=1024`) makes
+as `bloom_match`), then hands the tile's count and surviving ids to
+`common.compact_stash`; `_host.compact_finish` scans and scatters, exactly
+as for `clause_compact`. Wide `W` (=16 at the default `m_bits=1024`) makes
 this kernel register-pressure-bound; at large `block_n` with few warps
 it spills catastrophically (5–15× slowdown observed at `block_n≥512,
 num_warps≤4`). The shipped default keeps `block_n` moderate and warps

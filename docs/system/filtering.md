@@ -114,7 +114,8 @@ target id of `-1`.
 row's survivors in **ascending item order** on every backend: the
 `compact_mask` (stable argsort) order on `torch`, and since roadmap L3 the
 same order from the fused `clause_compact` / `bloom_compact` kernels, which
-count per tile, scan, and write at fixed offsets
+count per tile (stashing each tile's survivors in its own slot range), scan,
+and move every run to its fixed row offset
 ([kernels.md](kernels.md#clause_compact--fused-clause-eval--stream-compaction)).
 Before L3 the kernels claimed their row base with an atomic, so a row came
 out in tile-completion order and the downstream tie-breakers —
