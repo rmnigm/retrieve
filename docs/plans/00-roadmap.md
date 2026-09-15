@@ -81,8 +81,29 @@ plan to `archive/` and shorten its entry here to one line under *Done*.
 > **Environment facts that bind everything below:** the VM *is* the
 > A100 box; SM clocks cannot be locked (`nvidia-smi -lgc` denied, no
 > sudo — timing uses H §7's fallback: sampled `sm_mhz` + `unstable`);
-> **`/workspace`'s free space is an illusion and the quota is real — measured
-> 2026-09-15.** `df` reports a 2.1 PB network volume with ~620 TB free; a
+> **Storage, settled 2026-09-15 — see [../system/storage.md](../system/storage.md).**
+> Two writable filesystems and no others: the **300 GB container overlay**
+> (a real XFS project quota that reports honestly — an 80 GiB probe succeeded
+> at 470 MB/s; **262 GB free**) and `/workspace`. The host's 21 TB is **not
+> reachable**: no block device nodes exist in `/dev`, `mknod` returns EPERM,
+> `CAP_SYS_ADMIN` is not in the bounding set. **User decision: the overlay is
+> the disk for everything**, with datasets staged one or two at a time and
+> pulled from / pushed to the Hub. The overlay is **ephemeral** (host up 38
+> days, `/.dockerenv` stamped 2026-09-14), so only regenerable things live
+> there; the repo stays on `/workspace` and is pushed to `origin`.
+> `RETRIEVE_DATA_ROOT=/data` after the D1-a cutover. MooseFS reads at ~52 MB/s,
+> so this is a speed win too. **Venvs are ~7.6 GB each and reached 91 GB in
+> twelve environments on 2026-09-15** — use one shared venv via
+> `UV_PROJECT_ENVIRONMENT`.
+> **What it changes: D1-c is unblocked outright** (both yambda datasets fit
+> simultaneously, so the stage-run-prune dance is unnecessary); **E2 becomes
+> network-bound rather than disk-blocked** (raw 198 GB + a 111 GB processed
+> tensor is 309 GB and will not fit, but a shard-by-shard streaming ETL peaks
+> at ~111 GB with ~150 GB spare); **E3 stays deferred** — 670–840 GB of source
+> is more than twice the disk, and the disk was never its only problem.
+>
+> *Superseded, kept because the reasoning is instructive —* **`/workspace`'s
+> free space is an illusion and the quota is real:** `df` reports a 2.1 PB network volume with ~620 TB free; a
 > `dd` probe died at **18 GB** with `Disk quota exceeded`. With 8.2 GB already
 > resident the enforced quota is **≈ 26 GB, not the 100 GB** this block
 > recorded, and **E2 / E3 stay deferred** — 198 GB and 670 GB do not fit by two
