@@ -494,7 +494,7 @@ run on the A100 box. Effort in focused days.
 > |---|---|---|---|
 > | **D1-a** | goodreads + arxiv, `filter` suite, d128, seed 0, `{triton, torch, official}` | the headline filtered cells: every table in the thesis and §C.4's core claims rest on these, and they are the cells C4 already exercised, so a failure here is a harness problem and not a surprise | ~4–6 h |
 > | **D1-b** | the same cells at seeds 1, 2 (headline sweeps only, per `suites.yaml`) | closes P gap **G4** (seed variance). Cheap insurance: without it every headline number is a single sample, which a reviewer will ask about | ~8–12 h |
-> | **D1-c** | `quality` suite, all four datasets, all dims | the unfiltered recall tables, incl. the two yambda datasets that no longer appear anywhere else | ~3–4 h |
+> | **D1-c** | `quality` suite, all four datasets, all dims | the unfiltered recall tables, incl. the two yambda datasets that no longer appear anywhere else. **Both yambda sets (18 GB) fit on `/data` simultaneously** — the stage-run-prune dance in earlier notes was forced by the 26 GB network quota and is unnecessary ([storage.md](../system/storage.md)) | ~3–4 h |
 > | **D1-d** | `deep` suite (2 builds × 6 query configs per §8.2 A, seeds 0–2) | the recall-vs-latency Pareto curves — the most cuttable stage if time runs short, and the one whose absence is easiest to explain | ~6–8 h |
 > | **D1-e** | the S9 co-design ablation cells (`OfficialConfig(bloom_path="full")`) | O §9's fairness ablation; needs the official arm of D1-a to have landed | ~1 h |
 >
