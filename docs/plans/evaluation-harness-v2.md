@@ -912,3 +912,183 @@ left a truncated 20 MiB `gt_topk_v3_c0_maincat.pt`, and the next run failed
 with `PytorchStreamReader failed reading zip archive`. Deleted and rebuilt.
 `load_or_build_oracle` should treat an unreadable cache the way it treats a
 stale fingerprint — recompute, not raise; folded into WP-2's oracle work.
+
+## 11. Validation record — A1 golden re-derive, 2026-09-15, A100-SXM4-80GB
+
+> Model: [cuda-silvertorch-handoff.md §13](archive/cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360).
+> Roadmap eval-queue item 1. Extends §10 (A1's own record); it does not
+> replace it. Worker job, run under
+> [agent-orchestration.md](agent-orchestration.md): no roadmap checkbox was
+> flipped and nothing was merged into `development`.
+
+**Why.** §10's cells were produced against the library *before* the three C4
+library fixes (`7a21095`): the non-deterministic atomic k-means, the
+compiled-eager LiNR V2/V3 `graph` cells, and no O §14.7 `-1` id sentinel. C4's
+gate compares the v2 harness against those cells at `1e-6`, so the comparison
+measured the *library* change and not the harness rewrite. The fix is to run
+the **old harness unchanged against the current library** and keep everything
+else — data, queries, oracle, box — fixed, so every delta is a library delta.
+
+**Environment.** A100-SXM4-80GB, driver 580.159.04, nvcc **12.4** (the only
+toolkit installed; correct per
+[silvertorch-official-integration.md](silvertorch-official-integration.md)
+§13.1), torch 2.10.0+cu128, triton 3.6.0, Python 3.11, `silvertorch` 1.0.0 at
+`21aa35e`. Fresh rental: no worktree and no dataset survived the 2026-09-06
+session.
+
+- **Worktree** `/workspace/wt/golden`, branch `tmp/golden-rederive` off
+  `origin/dev/a1-golden` (`1ccdb27`) with `git checkout 4f52972 -- retrieve/`.
+  Library tree `28fda5ae` (= `4f52972:retrieve`); A1's was `6dc72aac`
+  (= `70bafc4:retrieve`). Rows carry `extra.commit = 87a9b38`. **Throwaway,
+  never merged** — kept alive for the L1 follow-up cell.
+- **Venv** `/venvs/golden`, `uv sync --extra official --all-packages`.
+- **Datasets** staged to `/workspace/data` (`RETRIEVE_DATA_ROOT`), symlinked as
+  `evaluation/data`: goodreads-work-id 2.6 GB (d128 only) + arxiv-papers 1.3 GB
+  (`content_d128` only). Confirmed the **pre-`3b1b5b3` 1-indexed `[N+1, …]`
+  layout** the Hub still publishes — goodreads `item_attrs_narrow` `[797085,
+  4, 4]` against 797,084 ids, arxiv `[2988997, …]` against 2,988,996 — which
+  the old harness detects and drops (`df6db40`).
+- **GPU shared** with the L1 worker; every cell took `flock /workspace/gpu.lock`
+  for its own duration (CLAUDE.md rule 1).
+- **Clocks still cannot be locked.** Sampled every 30 s into
+  `evaluation/golden/_logs/clocks.csv`: **1155 MHz** median under load (A1:
+  1140), 1410 MHz peak, 210 MHz idle, 26-39 °C. Quality unaffected; **latency
+  is not clock-controlled** and the interleaved second worker makes it worse
+  than A1's. `c4_gate.py --golden-sm-mhz` must be passed **1155**.
+
+**Runbook.** [a1-rederive/a1_golden_rerun.sh](evaluation-harness-v2-artifacts/a1-rederive/a1_golden_rerun.sh),
+`STAGES=golden`; a copy of [a1_golden_run.sh](evaluation-harness-v2-artifacts/a1_golden_run.sh)
+differing only in: `STAGES` defaults to `golden`; every GPU `uv run` is wrapped
+in `flock`; `uv run --no-sync` against `/venvs/golden`; `NO_CLOCK_LOCK=1`;
+a private `TORCHINDUCTOR_CACHE_DIR` (the default `/tmp/torchinductor_root` is
+shared with the other worker, and §10's C4 note is that it does not invalidate
+on a `@triton_op` wrapper source change); `REPO_ROOT` one directory deeper.
+Stages `step4` / `step5` / `step6` / `step7` are **out of scope and still
+deferred**.
+
+### 11.1 Inputs are provably A1's
+
+Each cell's log (`evaluation/golden/_logs/branch-*.log`) shows
+`loaded encoded_queries from cache` and `loaded oracle from cache`, so the
+queries, the item embeddings and the ground truth are byte-identical to A1's.
+The `encoded_queries_test.pt` cache is keyed on the checkpoint's mtime, which a
+fresh `snapshot_download` changes; the checkpoint's mtime was set back to the
+blob's recorded `ckpt_mtime` so no re-encode could perturb the queries. `kept
+users: 9859 / 10000` (goodreads) and `10000 / 10000` (arxiv) match §10.
+
+### 11.2 Cells — 11/11 green
+
+99 rows, 9 per cell, every `(k, bs)` present and every quality column
+populated. 29.4 min of cell time (2.4-3.1 min each), 33 min end to end.
+
+| cell | quality vs A1 | max abs delta | direction |
+|---|---|---|---|
+| goodreads-d128-c0_genre-linr_v1_filter_mask-triton | **identical** | 0 | — |
+| goodreads-d128-c0_genre-linr_v1_filter_mask-torch | **identical** | 0 | — |
+| goodreads-d128-c0_genre-linr_v2-torch | **identical** | 0 | — |
+| goodreads-d128-c0_genre-linr_v3-torch | **identical** | 0 | — |
+| goodreads-d128-c0_genre-linr_v4-triton | **identical** | 0 | — |
+| goodreads-d128-c0_genre-linr_v4-torch | **identical** | 0 | — |
+| goodreads-d128-c0_genre-linr_v2-triton | moved | 5.07e-6 | mixed |
+| goodreads-d128-c0_genre-linr_v3-triton | moved | 2.43e-5 | up |
+| arxiv-d128-c0_maincat-silvertorch-triton | moved | 3.50e-5 | mixed |
+| goodreads-d128-c0_genre-silvertorch-triton | moved | 7.79e-5 | mixed |
+| goodreads-d128-c0_genre-silvertorch-torch | moved | 1.57e-4 | up |
+
+Row-level table: [a1-rederive/quality-diff.md](evaluation-harness-v2-artifacts/a1-rederive/quality-diff.md).
+Every moved cell moves identically at all three batch sizes, as it must —
+quality does not depend on `bs`.
+
+### 11.3 The roadmap's prediction is wrong, and here is why
+
+The roadmap's status blockquote predicted: *SilverTorch-**triton** quality on
+rows with `< k` survivors moves **down** only (`metrics.py::_hits` masks on
+`ids != -1`, never on score finiteness); torch / official unchanged.* Three of
+its four claims fail.
+
+1. **The `-1` sentinel cannot move a goodreads number at all.** The cached
+   oracle says so directly: of 10,000 goodreads `c0_genre` queries, exactly 141
+   have **zero** survivors and the other 9,859 have the full 1,000 — and the
+   141 zero-survivor rows are precisely the users the harness drops
+   (`kept users: 9859 / 10000`). No kept row has `< k` survivors at any of
+   `k ∈ {100, 500, 1000}`, so no algo output has a `-inf` slot inside the
+   reported slice. On arxiv the sentinel *can* act, but only on 4 / 6 / 11 of
+   10,000 rows at `k = 100 / 500 / 1000`.
+2. **`torch` moved** — `silvertorch-torch` by up to 1.57e-4, the largest delta
+   in the run. Deterministic k-means (C4 fix ii) is backend-independent: it
+   changes the centroids, hence the IVF lists and the probed cells, on *every*
+   backend. Nothing about the sentinel argument covers this.
+3. **Moves are up as well as down.** Every SilverTorch goodreads delta is
+   positive; arxiv is mixed; `linr_v3-triton` is positive.
+4. **Two LiNR cells moved.** `linr_v2-triton` and `linr_v3-triton` moved while
+   their `torch` counterparts are bit-identical — exactly the algos C4 fix (i)
+   touched (`clause_compact` / `bloom_compact` as opaque custom ops, which
+   changed what the compiled V2/V3 triton path captures). `linr_v2` is the
+   *exact* filtered top-K baseline, so its ≤ 5.07e-6 mixed movement can only be
+   tie order among equal scores; `linr_v3` is approximate, so its move is a
+   real quality change. Neither is attributed further here — **not verified**
+   beyond the correlation.
+
+**The result that replaces the prediction.** SilverTorch's two backends now
+agree *exactly* on goodreads:
+
+| k | A1: torch vs triton | re-derived |
+|---|---|---|
+| 100 | recall 1.156e-4, ndcg 8.523e-5 | **0.0 / 0.0** |
+| 500 | recall 1.550e-4, ndcg 1.279e-4 | **0.0 / 0.0** |
+| 1000 | recall 1.717e-4, ndcg 1.444e-4 | **0.0 / 0.0** |
+
+§10 read A1's gap as "tie order, not arithmetic". It was the non-deterministic
+k-means: with a deterministic fit both backends build the same index and score
+the same items. That is the cleanest available evidence that C4 fix (ii) does
+what it claims, and it is *not* something the golden cells were designed to
+show.
+
+### 11.4 Consequences for C4
+
+The `1e-6` gate now has a meaningful baseline. Five cells moved by 5e-6 to
+1.6e-4, i.e. between 5× and 160× the tolerance — a C4 gate run against the old
+cells would have failed on all five and the failures would have been
+unattributable. Two things C4 must carry over: `--golden-sm-mhz 1155`, and the
+fact that SilverTorch `torch` / `triton` parity is now exact on goodreads, so
+gate 4 (`jaccard_vs_first@100`) should be *stricter* than it was, not looser.
+
+### 11.5 Findings outside the cells
+
+1. **The old harness does not import against the current library.**
+   `from retrieve.interfaces import Backend` fails: B4 split `Backend` into
+   `LinrBackend` / `SilverTorchBackend` and dropped `"cuda"` / `"cute"`. That
+   is the only break — every other symbol the harness imports
+   (`FilterModule`, `PostfilterKNN`, `PrefilterKNN`, `OneBitKNN`,
+   `SilverTorch`, `BloomFilter`, `ExactAttributeFilter`, `PostfilterKNNInt8`)
+   still resolves with a compatible signature. `Backend` is used only in type
+   annotations (no `get_args`), so the throwaway worktree declares the old
+   literal locally
+   ([copy](evaluation-harness-v2-artifacts/a1-rederive/harness_compat_backend.py));
+   no behaviour and no number changes. **This is the concrete requirement on
+   Phase L's compatibility shim**: re-export `Backend` or the frozen harness
+   will not import.
+2. **The harness CPU suite is only green with CUDA hidden.** `cd evaluation &&
+   pytest retrieval/tests/ --ignore=…` gives **3 failed, 98 passed, 3 skipped**
+   on this box and **103 passed, 1 skipped** under `CUDA_VISIBLE_DEVICES=""`.
+   The three — `test_bench.py::test_latency_windows_and_keys`,
+   `test_run.py::test_end_to_end_records`,
+   `test_run.py::test_perf_times_with_the_plan_cache_off_and_records_it` —
+   assert CPU-only behaviour in their own text ("no CUDA: no first call", "no
+   CUDA allocator on this box", `reason == "cuda_unavailable"`). They were
+   written when the box had no GPU. Not fixed here (harness v2 code is out of
+   this job's scope); the roadmap's "103 passed / 1 skipped" should say under
+   which condition.
+3. **The Hub still publishes the pre-`3b1b5b3` 1-indexed artifacts** — §10's
+   bug 2 — and the `gt_d128/gt_topk_v3_*` oracle blobs are published with them,
+   which is what kept this run to 33 minutes instead of hours.
+4. **`/tmp/torchinductor_root` is shared between workers on this box.** Any
+   concurrent GPU job must set its own `TORCHINDUCTOR_CACHE_DIR`, or §10's
+   stale-FX-cache finding applies across workers as well as across edits.
+
+### 11.6 What was not done
+
+`step4`, `step5`, `step6`, `step7` (A1's other halves) — **still deferred**,
+untouched. The C4 gate rerun, B3, D1 — not this job. No library code was
+changed. Nothing here is citable: CLAUDE.md rule 2 — these cells are the *input*
+to C4's gate, and that gate has not run.
