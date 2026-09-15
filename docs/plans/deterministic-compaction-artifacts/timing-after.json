@@ -1,0 +1,589 @@
+{
+  "utc": "2026-09-15T08:18:16Z",
+  "kernels": {
+    "clause_compact synth N,B,C,A=(797085, 1, 4, 4)": {
+      "ms": 0.13631999492645264,
+      "sm_mhz": [
+        1155,
+        1410
+      ]
+    },
+    "clause_compact synth N,B,C,A=(797085, 16, 4, 4)": {
+      "ms": 1.51665598154068,
+      "sm_mhz": [
+        1410,
+        1410
+      ]
+    },
+    "clause_compact synth N,B,C,A=(2988997, 1, 5, 4)": {
+      "ms": 0.3554239869117737,
+      "sm_mhz": [
+        1410,
+        1410
+      ]
+    },
+    "clause_compact synth N,B,C,A=(2988997, 16, 5, 4)": {
+      "ms": 3.1111040115356445,
+      "sm_mhz": [
+        1410,
+        1410
+      ]
+    },
+    "bloom_compact synth N,B,W=(797085, 1, 16)": {
+      "ms": 0.10547199845314026,
+      "sm_mhz": [
+        1410,
+        1410
+      ]
+    },
+    "bloom_compact synth N,B,W=(797085, 16, 16)": {
+      "ms": 0.5439040064811707,
+      "sm_mhz": [
+        1410,
+        1410
+      ]
+    },
+    "bloom_compact synth N,B,W=(2988997, 1, 16)": {
+      "ms": 0.271232008934021,
+      "sm_mhz": [
+        1410,
+        1410
+      ]
+    },
+    "bloom_compact synth N,B,W=(2988997, 16, 16)": {
+      "ms": 1.9343039989471436,
+      "sm_mhz": [
+        1410,
+        1410
+      ]
+    },
+    "clause_compact goodreads c0_genre B=1": {
+      "ms": 0.1361279934644699,
+      "sm_mhz": [
+        1410,
+        1410
+      ],
+      "pass_rate": [
+        0.5556044578552246
+      ]
+    },
+    "bloom_compact goodreads c0_genre B=1": {
+      "ms": 0.10867200046777725,
+      "sm_mhz": [
+        1410,
+        1410
+      ],
+      "pass_rate": [
+        0.5556044578552246
+      ]
+    },
+    "clause_compact goodreads c0_genre B=16": {
+      "ms": 1.5363519787788391,
+      "sm_mhz": [
+        1410,
+        1410
+      ],
+      "pass_rate": [
+        0.5556044578552246,
+        0.3204902708530426,
+        0.3204902708530426,
+        0.5556044578552246,
+        0.039515234529972076,
+        0.5556044578552246,
+        0.20413130521774292,
+        0.20413130521774292,
+        0.3204902708530426,
+        0.3204902708530426,
+        0.2599371373653412,
+        0.5556044578552246,
+        0.5556044578552246,
+        0.24467025697231293,
+        0.1473744958639145,
+        0.24467025697231293
+      ]
+    },
+    "bloom_compact goodreads c0_genre B=16": {
+      "ms": 0.5884159803390503,
+      "sm_mhz": [
+        1410,
+        1410
+      ],
+      "pass_rate": [
+        0.5556044578552246,
+        0.3204902708530426,
+        0.3204902708530426,
+        0.5556044578552246,
+        0.039515234529972076,
+        0.5556044578552246,
+        0.20413130521774292,
+        0.20413130521774292,
+        0.3204902708530426,
+        0.3204902708530426,
+        0.2599371373653412,
+        0.5556044578552246,
+        0.5556044578552246,
+        0.24467025697231293,
+        0.1473744958639145,
+        0.24467025697231293
+      ]
+    }
+  },
+  "e2e": {
+    "linr_v2 clause eager B=1": {
+      "ms": 0.4596000015735626,
+      "sm_mhz": [
+        1410,
+        1410
+      ],
+      "profile_top_us": [
+        {
+          "kernel": "_clause_compact_kernel",
+          "us": 99.8,
+          "n": 1
+        },
+        {
+          "kernel": "_fused_masked_knn_topk_kernel",
+          "us": 99.1,
+          "n": 1
+        },
+        {
+          "kernel": "at::native::mbtopk::computeDigitCumSum(short*, unsigned int*, unsigned int)",
+          "us": 74.2,
+          "n": 4
+        },
+        {
+          "kernel": "void at::native::mbtopk::computeBlockDigitCounts<float, unsigned int, unsigned i",
+          "us": 20.1,
+          "n": 4
+        },
+        {
+          "kernel": "void at::native::mbtopk::computeBlockwiseWithinKCounts<unsigned int, float>(unsi",
+          "us": 15.6,
+          "n": 4
+        },
+        {
+          "kernel": "void at_cuda_detail::cub::DeviceScanByKeyKernel<at_cuda_detail::cub::DeviceScanB",
+          "us": 9.2,
+          "n": 2
+        },
+        {
+          "kernel": "void at::native::mbtopk::gatherTopK<float, unsigned int, 1>(at::cuda::detail::Te",
+          "us": 8.8,
+          "n": 1
+        },
+        {
+          "kernel": "void at::native::radixSortKVInPlace<-2, -1, 32, 4, float, long, unsigned int>(at",
+          "us": 7.9,
+          "n": 1
+        },
+        {
+          "kernel": "void at::native::vectorized_elementwise_kernel<2, at::native::FillFunctor<long>,",
+          "us": 5.8,
+          "n": 2
+        },
+        {
+          "kernel": "Memset (Device)",
+          "us": 4.9,
+          "n": 2
+        },
+        {
+          "kernel": "compact_scatter_kernel",
+          "us": 4.7,
+          "n": 1
+        },
+        {
+          "kernel": "void at_cuda_detail::cub::DeviceScanKernel<at_cuda_detail::cub::DeviceScanPolicy",
+          "us": 4.1,
+          "n": 1
+        }
+      ]
+    },
+    "linr_v2 clause graph B=1": {
+      "ms": 0.37254399061203003,
+      "sm_mhz": [
+        1410,
+        1410
+      ]
+    },
+    "linr_v2 clause eager B=16": {
+      "ms": 3.2862401008605957,
+      "sm_mhz": [
+        1410,
+        1410
+      ],
+      "profile_top_us": [
+        {
+          "kernel": "_clause_compact_kernel",
+          "us": 1422.3,
+          "n": 1
+        },
+        {
+          "kernel": "_fused_masked_knn_topk_kernel",
+          "us": 1361.1,
+          "n": 1
+        },
+        {
+          "kernel": "void at::native::mbtopk::computeBlockDigitCounts<float, unsigned int, unsigned i",
+          "us": 216.5,
+          "n": 4
+        },
+        {
+          "kernel": "void at::native::mbtopk::gatherTopK<float, unsigned int, 2>(at::cuda::detail::Te",
+          "us": 99.4,
+          "n": 1
+        },
+        {
+          "kernel": "void at::native::vectorized_elementwise_kernel<2, at::native::FillFunctor<long>,",
+          "us": 52.4,
+          "n": 2
+        },
+        {
+          "kernel": "compact_scatter_kernel",
+          "us": 35.2,
+          "n": 1
+        },
+        {
+          "kernel": "void at::native::mbtopk::computeBlockwiseWithinKCounts<unsigned int, float>(unsi",
+          "us": 18.0,
+          "n": 4
+        },
+        {
+          "kernel": "at::native::mbtopk::computeDigitCumSum(short*, unsigned int*, unsigned int)",
+          "us": 16.7,
+          "n": 4
+        },
+        {
+          "kernel": "void at::native::tensor_kernel_scan_innermost_dim<long, std::plus<long> >(long*,",
+          "us": 11.5,
+          "n": 1
+        },
+        {
+          "kernel": "void at::native::_scatter_gather_elementwise_kernel<128, 8, at::native::_cuda_sc",
+          "us": 10.0,
+          "n": 1
+        },
+        {
+          "kernel": "void at::native::radixSortKVInPlace<2, -1, 32, 4, float, long, unsigned int>(at:",
+          "us": 9.5,
+          "n": 1
+        },
+        {
+          "kernel": "void at_cuda_detail::cub::DeviceScanByKeyKernel<at_cuda_detail::cub::DeviceScanB",
+          "us": 9.2,
+          "n": 2
+        }
+      ]
+    },
+    "linr_v2 clause graph B=16": {
+      "ms": 3.2268800735473633,
+      "sm_mhz": [
+        1410,
+        1410
+      ]
+    },
+    "linr_v2 bloom eager B=1": {
+      "ms": 0.9729599952697754,
+      "sm_mhz": [
+        1410,
+        1410
+      ],
+      "profile_top_us": [
+        {
+          "kernel": "_fused_masked_knn_topk_kernel",
+          "us": 98.9,
+          "n": 1
+        },
+        {
+          "kernel": "at::native::mbtopk::computeDigitCumSum(short*, unsigned int*, unsigned int)",
+          "us": 74.1,
+          "n": 4
+        },
+        {
+          "kernel": "_bloom_compact_kernel",
+          "us": 64.1,
+          "n": 1
+        },
+        {
+          "kernel": "void at::native::mbtopk::computeBlockDigitCounts<float, unsigned int, unsigned i",
+          "us": 20.6,
+          "n": 4
+        },
+        {
+          "kernel": "void at::native::mbtopk::computeBlockwiseWithinKCounts<unsigned int, float>(unsi",
+          "us": 15.6,
+          "n": 4
+        },
+        {
+          "kernel": "void at_cuda_detail::cub::DeviceScanByKeyKernel<at_cuda_detail::cub::DeviceScanB",
+          "us": 9.3,
+          "n": 2
+        },
+        {
+          "kernel": "void at::native::mbtopk::gatherTopK<float, unsigned int, 1>(at::cuda::detail::Te",
+          "us": 9.1,
+          "n": 1
+        },
+        {
+          "kernel": "void at::native::radixSortKVInPlace<-2, -1, 32, 4, float, long, unsigned int>(at",
+          "us": 7.9,
+          "n": 1
+        },
+        {
+          "kernel": "void at::native::vectorized_elementwise_kernel<2, at::native::FillFunctor<long>,",
+          "us": 7.3,
+          "n": 3
+        },
+        {
+          "kernel": "compact_scatter_kernel",
+          "us": 7.0,
+          "n": 1
+        },
+        {
+          "kernel": "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda",
+          "us": 5.2,
+          "n": 1
+        },
+        {
+          "kernel": "void at::native::vectorized_elementwise_kernel<2, at::native::BinaryFunctor<long",
+          "us": 4.9,
+          "n": 3
+        }
+      ]
+    },
+    "linr_v2 bloom graph B=1": {
+      "ms": 0.358815997838974,
+      "sm_mhz": [
+        1410,
+        1410
+      ]
+    },
+    "linr_v2 bloom eager B=16": {
+      "ms": 2.407871961593628,
+      "sm_mhz": [
+        1410,
+        1410
+      ],
+      "profile_top_us": [
+        {
+          "kernel": "_fused_masked_knn_topk_kernel",
+          "us": 1348.8,
+          "n": 1
+        },
+        {
+          "kernel": "_bloom_compact_kernel",
+          "us": 427.8,
+          "n": 1
+        },
+        {
+          "kernel": "void at::native::mbtopk::computeBlockDigitCounts<float, unsigned int, unsigned i",
+          "us": 217.7,
+          "n": 4
+        },
+        {
+          "kernel": "void at::native::mbtopk::gatherTopK<float, unsigned int, 2>(at::cuda::detail::Te",
+          "us": 100.5,
+          "n": 1
+        },
+        {
+          "kernel": "compact_scatter_kernel",
+          "us": 82.0,
+          "n": 1
+        },
+        {
+          "kernel": "void at::native::vectorized_elementwise_kernel<2, at::native::FillFunctor<long>,",
+          "us": 55.1,
+          "n": 3
+        },
+        {
+          "kernel": "void at::native::tensor_kernel_scan_innermost_dim<long, std::plus<long> >(long*,",
+          "us": 18.6,
+          "n": 1
+        },
+        {
+          "kernel": "void at::native::mbtopk::computeBlockwiseWithinKCounts<unsigned int, float>(unsi",
+          "us": 17.7,
+          "n": 4
+        },
+        {
+          "kernel": "at::native::mbtopk::computeDigitCumSum(short*, unsigned int*, unsigned int)",
+          "us": 17.2,
+          "n": 4
+        },
+        {
+          "kernel": "void at::native::_scatter_gather_elementwise_kernel<128, 8, at::native::_cuda_sc",
+          "us": 9.9,
+          "n": 1
+        },
+        {
+          "kernel": "void at::native::radixSortKVInPlace<2, -1, 32, 4, float, long, unsigned int>(at:",
+          "us": 9.4,
+          "n": 1
+        },
+        {
+          "kernel": "void at_cuda_detail::cub::DeviceScanByKeyKernel<at_cuda_detail::cub::DeviceScanB",
+          "us": 9.2,
+          "n": 2
+        }
+      ]
+    },
+    "linr_v2 bloom graph B=16": {
+      "ms": 2.2847360372543335,
+      "sm_mhz": [
+        1410,
+        1410
+      ]
+    },
+    "linr_v3 clause eager B=1": {
+      "ms": 1.2733440399169922,
+      "sm_mhz": [
+        1410,
+        1410
+      ],
+      "profile_top_us": [
+        {
+          "kernel": "_clause_compact_kernel",
+          "us": 100.7,
+          "n": 1
+        },
+        {
+          "kernel": "at::native::mbtopk::computeDigitCumSum(short*, unsigned int*, unsigned int)",
+          "us": 69.1,
+          "n": 4
+        },
+        {
+          "kernel": "void at::native::sbtopk::gatherTopK<float, unsigned int, 1, false>(at::cuda::det",
+          "us": 49.8,
+          "n": 1
+        },
+        {
+          "kernel": "void at_cuda_detail::cub::DeviceRadixSortOnesweepKernel<at_cuda_detail::cub::Dev",
+          "us": 23.8,
+          "n": 4
+        },
+        {
+          "kernel": "void at::native::mbtopk::computeBlockDigitCounts<float, unsigned int, unsigned i",
+          "us": 22.1,
+          "n": 4
+        },
+        {
+          "kernel": "void at::native::_scatter_gather_elementwise_kernel<128, 8, at::native::_cuda_sc",
+          "us": 18.3,
+          "n": 3
+        },
+        {
+          "kernel": "void at::native::mbtopk::computeBlockwiseWithinKCounts<unsigned int, float>(unsi",
+          "us": 15.6,
+          "n": 4
+        },
+        {
+          "kernel": "_oporp_1bit_match_topk_kernel",
+          "us": 13.0,
+          "n": 1
+        },
+        {
+          "kernel": "Memset (Device)",
+          "us": 12.1,
+          "n": 8
+        },
+        {
+          "kernel": "void at::native::mbtopk::gatherTopK<float, unsigned int, 1>(at::cuda::detail::Te",
+          "us": 11.4,
+          "n": 1
+        },
+        {
+          "kernel": "void at_cuda_detail::cub::DeviceScanByKeyKernel<at_cuda_detail::cub::DeviceScanB",
+          "us": 9.2,
+          "n": 2
+        },
+        {
+          "kernel": "void at::native::reduce_kernel<512, 1, at::native::ReduceOp<long, at::native::fu",
+          "us": 8.4,
+          "n": 2
+        }
+      ]
+    },
+    "linr_v3 clause graph B=1": {
+      "ms": 0.4174079895019531,
+      "sm_mhz": [
+        1410,
+        1410
+      ]
+    },
+    "linr_v3 clause eager B=16": {
+      "ms": 2.6030399799346924,
+      "sm_mhz": [
+        1410,
+        1410
+      ],
+      "profile_top_us": [
+        {
+          "kernel": "_clause_compact_kernel",
+          "us": 1421.3,
+          "n": 1
+        },
+        {
+          "kernel": "void at::native::mbtopk::computeBlockDigitCounts<float, unsigned int, unsigned i",
+          "us": 341.9,
+          "n": 4
+        },
+        {
+          "kernel": "_oporp_1bit_match_topk_kernel",
+          "us": 156.9,
+          "n": 1
+        },
+        {
+          "kernel": "void at::native::mbtopk::gatherTopK<float, unsigned int, 2>(at::cuda::detail::Te",
+          "us": 156.2,
+          "n": 1
+        },
+        {
+          "kernel": "void at::native::vectorized_elementwise_kernel<2, at::native::FillFunctor<long>,",
+          "us": 54.2,
+          "n": 3
+        },
+        {
+          "kernel": "void at::native::sbtopk::gatherTopK<float, unsigned int, 2, false>(at::cuda::det",
+          "us": 51.6,
+          "n": 1
+        },
+        {
+          "kernel": "compact_scatter_kernel",
+          "us": 35.9,
+          "n": 1
+        },
+        {
+          "kernel": "void at_cuda_detail::cub::DeviceRadixSortOnesweepKernel<at_cuda_detail::cub::Dev",
+          "us": 33.4,
+          "n": 4
+        },
+        {
+          "kernel": "void at::native::_scatter_gather_elementwise_kernel<128, 8, at::native::_cuda_sc",
+          "us": 32.5,
+          "n": 3
+        },
+        {
+          "kernel": "void at::native::mbtopk::computeBlockwiseWithinKCounts<unsigned int, float>(unsi",
+          "us": 22.8,
+          "n": 4
+        },
+        {
+          "kernel": "void at::native::reduce_kernel<512, 1, at::native::ReduceOp<long, at::native::fu",
+          "us": 21.1,
+          "n": 2
+        },
+        {
+          "kernel": "Memset (Device)",
+          "us": 20.5,
+          "n": 11
+        }
+      ]
+    },
+    "linr_v3 clause graph B=16": {
+      "ms": 2.419167995452881,
+      "sm_mhz": [
+        1410,
+        1410
+      ]
+    }
+  }
+}
