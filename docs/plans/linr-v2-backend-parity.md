@@ -336,3 +336,174 @@ reason to exist is gone: delete both modules and the `KMeansTorch` /
 `retrieve/docs/` and `docs/system/architecture.md`. Gate: suite green, `git
 grep -l "retrieve.layers\|retrieve.kernels"` clean outside `docs/plans/`
 history, links 0.
+
+
+## 8. Validation record — L5
+
+### 8.1 L5 — 2026-09-15, A100-SXM4-80GB, `dev/l5-fp32-accumulation`
+
+**Verdict.** `fused_masked_knn_topk` now widens both operands to fp32 before
+the multiply and reduces in fp32; the two backends of `linr_v2` agree on
+every row except the 124 where the `torch` side's fp16 output rounding
+creates an exact tie. The audit found **no other floating-point reduction
+in `ops/triton/`**: every remaining `tl.sum` / `tl.dot` / `tl.reduce` is an
+integer or boolean path, so no SilverTorch number moves and no second fix
+was needed. The compatibility shim (`retrieve.layers`, `retrieve.kernels`)
+is deleted.
+
+**Environment.** The A100 box (driver 580.159.04, nvcc 12.4), Python 3.11,
+torch 2.10.0+cu128, triton 3.6.0, ruff 0.15.6 via `uvx`, `/venvs/l5` from
+`uv sync --extra official --all-packages`. Branch point `development` @
+`81c55d3`; worktree `/workspace/wt/l5`; private inductor cache
+`/tmp/inductor-l5`. Every CUDA job ran under `flock /workspace/gpu.lock`. SM
+clock sampled at 1410 MHz before and after every timing (idle sample at
+process start 1155 MHz; clocks cannot be locked, H §7). Artifacts under
+[linr-v2-backend-parity-artifacts/l5/](linr-v2-backend-parity-artifacts/l5/):
+`parity_and_cost.py` (+ `.json`, the shipped kernel's
+`fused_masked_knn_topk_fp32.ptx`); `parity_and_cost.log` and
+`library-suite.log` sit beside them in the worktree but are gitignored
+(`*.log`, as L4's were). Inputs are the L4
+cell's, via `../probe_v2_parity.py::load / build` (goodreads d128, SASRec
+cache, first 10 000 users, `c0_genre`, 9 859 kept rows, chunks of 16,
+`k_max = 1000`).
+
+**WP-1 item 1 — the fix.** Two `.to(tl.float32)` on the loads in
+`_fused_masked_knn_topk_kernel`; nothing else in the file changes — op
+schema, buffer dtypes, `FusedMaskedKnnTopkConfig` and the `KernelTuneSpec`
+entry are untouched. An fp16 × fp16 product is exact in fp32, so the only
+error left is the fp32 tree reduction. The compiled PTX (D = 128,
+`fused_masked_knn_topk_fp32.ptx`):
+
+| body | `add.f16` | `add.f32` | `fma.rn.f32` | `mul.f32` | `cvt.f32.f16` |
+|---|---|---|---|---|---|
+| pre-L5 (fp16 acc; the L4 PTX) | 8 | 0 | 0 | 0 | 1 |
+| shipped (fp32 acc) | **0** | 8 | 14 | 2 | 24 |
+
+**WP-1 item 2 — the audit.** Every reduction and accumulator in
+`retrieve/src/retrieve/ops/triton/`, read from the source:
+
+| file | reduction | operand dtype | accumulates in | verdict |
+|---|---|---|---|---|
+| `fused_masked_knn_topk.py` | `tl.sum(emb_rows * q, axis=1)` | fp16 or fp32 inputs, **cast to fp32 before the multiply** | fp32 | **fixed here** (was: operand dtype, fp16 in production) |
+| `codesigned_probe_score.py` | `tl.dot(q_codes[None, :], codes.T, out_dtype=tl.int32)` | int8 × int8 | int32, exact (`|dot| ≤ 127² · D`, < 2²⁴ for `D ≤ 1024`, so the `.to(tl.float32)` is exact too) | correct |
+| `codesigned_probe_score.py` | `tl.sum(dots_2d, axis=0)` (squeeze of the length-1 M axis) | int32 | int32 | correct |
+| `codesigned_probe_score.py` | `dots_i32.to(tl.float32) * q_scale * global_scale` | fp32 scalars | two fp32 multiplies, no reduction (≤ 2⁻²³ rel. each) | correct; measured 1.1e-7 rel vs fp64 |
+| `codesigned_probe_score_exact.py` | same three lines as above | int8 / int32 / fp32 | int32, then fp32 dequant | correct |
+| `oporp_1bit_match_topk.py` | `tl.sum(pop_words, axis=1)` | int32 (from `popcount_int64`) | int32; `(D_TOTAL - 2 * hamming).to(tl.float32)` exact for `D_TOTAL < 2²⁴` | correct; `torch.equal` to the int64 truth |
+| `common.py::popcount_int64` | SWAR on int64 lanes | int64 | int64 → int32 | correct, bit-exact twin of `functional.popcount_int64` |
+| `common.py::bloom_subset_pass` | `tl.reduce(diff, axis=1, combine_fn=or_combine)` | int64 | int64 OR | boolean; no arithmetic |
+| `common.py::clause_pass` | `\|`, `&`, `^` over `int1` | int1 | int1 | boolean; no arithmetic |
+| `common.py::compact_store` | `tl.cumsum(pass_int, axis=0)` | int32 | int32 | integer rank; exact |
+| `common.py::compact_stash` | `tl.sum(tl.where(pass_mask, 1, 0).to(tl.int32))` | int32 | int32 → stored int64 | integer count; exact |
+| `bloom_match.py`, `bloom_compact.py`, `clause_mask.py`, `clause_compact.py` | none of their own — they call the `common.py` helpers above | — | — | no reduction |
+| `compact_scatter_kernel`, `_host.py` | no reductions (`torch.cumsum` on the host over int64 tile counts) | int64 | int64 | exact |
+
+The rule that makes the integer rows safe: Triton's `_pick_sum_dtype`
+promotes sub-32-bit ints to int32 and leaves int32 / int64 alone, and every
+integer path here is either already int32 or bounded well inside it. The
+only floating-point reduction in the tree was the one fixed. **No
+SilverTorch number moves** (the int8 kernels are untouched), so the
+"stop and ask" clause of §7.3 item 2 was not triggered.
+
+**WP-1 item 3 — the fp64 parity file.**
+[`tests/parity/test_accumulation.py`](../../retrieve/tests/parity/test_accumulation.py),
+8 tests, one per scoring kernel × dimension: asks for every candidate
+(`k = P`), maps the returned ids back to an fp64 computation of the same
+operation on the same inputs, and asserts a bound *and* that an fp16 model
+of the same computation on the same inputs misses it — so the bound's
+discriminating power is checked on every run. Goodreads-like inputs
+(unnormalised fp16, `|score|` up to ~140):
+
+| kernel | measured error vs fp64 | bound | the fp16 model on the same inputs |
+|---|---|---|---|
+| `fused_masked_knn_topk`, D ∈ {64, 128, 256} | 7.5e-6 / 9.7e-6 / 1.4e-5 max abs | `1e-4` abs | fp16 tree reduction of the fp16 products: 6.5e-2 / 9.0e-2 / 1.4e-1 |
+| `codesigned_probe_score`, D ∈ {64, 128} | 1.1e-7 max rel | `1e-6` rel | fp16 cannot hold the int32 dot (`|dot|` ~1e5 > 65 504 → overflow) |
+| `codesigned_probe_score_exact`, D ∈ {64, 128} | 1.0e-7 max rel | `1e-6` rel | same |
+| `oporp_1bit_match_topk_indirect`, W = 4 | 0 | `torch.equal` | — (integer) |
+
+Run against the pre-L5 kernel body (the fix stashed, same inputs), this
+file fails at every D: 7.2e-2 / 8.9e-2 / 1.4e-1 max abs against the 1e-4
+bound — the test that would have caught it.
+
+**WP-1 item 4 — docs.** `modules/knn.py` (module and `PrefilterKNN`
+docstrings) and `docs/system/kernels.md` (score conventions; the
+accumulation paragraph under `fused_masked_knn_topk`) state fp32 again,
+now with the reason it must be explicit; `docs/system/testing.md` lists the
+new file.
+
+**WP-1 item 5 — parity and cost, re-measured (`parity_and_cost.json`).**
+`linr_v2` `torch` vs `triton`, all 9 859 kept rows:
+
+| | L4 (fp16 acc) | **L5 (fp32 acc)** |
+|---|---|---|
+| `jaccard@100` | 0.998743 | **0.999751** (predicted 0.999751) |
+| `jaccard@500` / `@1000` | — | 0.999500 / 0.999379 |
+| rows whose top-100 differ | 624 | **124** |
+| … of which the `torch` scores of the swapped pair are exactly equal | — | **124 / 124** |
+| `score_max_abs_diff` (`torch` fp16 out vs kernel fp32) | 0.009766 | **0.003904** (= 1 fp16 ulp at `|s|` ∈ [2, 4)) |
+
+Against an fp64 dot of the same fp16 inputs over all `P = 442 864`
+candidates of chunk 0 (`|s|` max 31.4), both bodies in the same process:
+
+| body | max abs | mean abs |
+|---|---|---|
+| pre-L5 fp16 acc | 0.027644 (L4: 0.0276) | 0.003362 |
+| **shipped fp32 acc** | **3.2e-6** | 4.0e-7 |
+
+`do_bench` medians (500 reps, warm-up 100), both bodies in the same
+session, SM 1410 MHz sampled before and after each:
+
+| launch | pre-L5 fp16 acc | **shipped fp32 acc** | L4's numbers (fp16 / fp32 probe) |
+|---|---|---|---|
+| kernel `B = 1, P = 195 023` | 0.05315 ms | **0.05302 ms** | 0.05235 / 0.05226 |
+| kernel `B = 16, P = 442 864` | 0.9631 ms | **0.9404 ms** (−2.4 %) | 0.9636 / 0.9408 |
+| `LiNRV2` eager forward `triton` | — | 0.497 ms (B=1), 3.271 ms (B=16) | 0.471 / 3.335 |
+| `LiNRV2` eager forward `torch` | — | 1.518 ms (B=1), 18.28 ms (B=16) | 1.515 / 18.30 |
+
+No regression: the kernel is gather-bound and the cast is free (the
+B = 16 launch is 2.4 % faster, as L4's probe measured; B = 1 is inside
+noise).
+
+**WP-2 — the shim.** `retrieve/src/retrieve/layers/__init__.py` and
+`retrieve/src/retrieve/kernels/__init__.py` deleted (with them the
+`KMeansTorch` alias, `build_silvertorch`, and the `retrieve.layers.{filters,
+silvertorch,linr,linr.postfilter_knn_int8}` / `retrieve.kernels.silvertorch
+.official` module aliases). The paragraphs promising them in
+`retrieve/README.md`, `retrieve/docs/getting-started.md` and
+`docs/system/architecture.md` (three sites, including the move table's
+header) are gone; the move table keeps the 0.1 *file* names as history.
+`git grep -l "retrieve\.layers\|retrieve\.kernels" -- ':!docs/plans'` is
+empty. Nothing in `evaluation/` or `tests/` imported the shim.
+
+**Gates — CPU.**
+
+| gate | result |
+|---|---|
+| `uvx ruff@0.15.6 check retrieve` (+ the L5 artifact script) / `format --check retrieve` | clean (75 files) |
+| `python3 scripts/check_doc_links.py` | 0 broken links |
+| shim grep (above) | clean |
+
+**Gates — GPU (under the lock).**
+
+| gate | result |
+|---|---|
+| full library suite | **653 passed, 0 failed, 0 skipped** in 123 s (`library-suite.log`) = 645 at `d9a3200` + the 8 new tests; 16 warnings, all pre-existing |
+| every existing parity file, tolerances untouched | in the suite; `test_fused_masked_knn_topk.py` 11 passed on its own first — its inputs are fp32, where the cast is a no-op, so it is bit-for-bit the same arithmetic as before |
+| `tests/parity/test_accumulation.py` | 8 passed |
+| audit table | complete (above) |
+| cost table | no regression (above) |
+
+**Changed in this commit.** `ops/triton/fused_masked_knn_topk.py` (the two
+casts, the dtype comment); `modules/knn.py` (docstrings);
+`tests/parity/test_accumulation.py` (new); `docs/system/{kernels,testing,
+architecture}.md`; `retrieve/README.md`, `retrieve/docs/getting-started.md`;
+`layers/` and `kernels/` deleted; this record; the `l5/` artifacts.
+
+**Skipped / unverified.** Only the `c0_genre` sweep on goodreads d128 was
+re-measured; arxiv (unit-norm inputs) and the `bloom` cells were not, but
+the fp64 file bounds the kernel on unnormalised inputs harder than either.
+V3's stage 2 goes through the same kernel and inherits the fix unmeasured.
+The `torch` backend's fp16 output rounding is left as is — it is cuBLAS's
+`bmm` output dtype, and the 124 residual rows are exact ties it creates,
+not an error of ours. The roadmap checkbox and the merge are the
+orchestrator's; B3 and D1 were not touched.

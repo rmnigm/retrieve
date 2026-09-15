@@ -35,8 +35,7 @@ The package has two public layers and two helper namespaces:
 | `retrieve.functional` | query-time glue: `masked_topk`, `compact_mask`, `combine_masks` / `combine_indices`, `post_filter_topk` |
 
 `import retrieve` imports no kernel; a module resolves its backend's op namespace when it is
-constructed. The 0.1 paths `retrieve.layers` / `retrieve.kernels` still import (with a
-`DeprecationWarning`) and are removed in the next release. [`indexing-and-ops.md`](indexing-and-ops.md)
+constructed. [`indexing-and-ops.md`](indexing-and-ops.md)
 lists the two helper namespaces and the ops.
 
 ## The shared lifecycle
