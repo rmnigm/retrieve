@@ -1,7 +1,8 @@
-# Filtering & quantization
+# Filtering
 
-Two topics that cut across the modules: attribute-filtered retrieval (only return items matching a
-structured predicate) and the standalone quantization utilities.
+Attribute-filtered retrieval: only return items matching a structured predicate. (The
+quantization utilities this page used to describe are in
+[`indexing-and-ops.md`](indexing-and-ops.md).)
 
 ## Attribute filtering
 
@@ -23,8 +24,9 @@ that item's values (OR over the `A_max` slot, AND across clauses).
 
 1. **SilverTorch inline** — the predicate is fused into the probe+score kernel; nothing
    intermediate touches HBM.
-2. **LiNR decoupled** — a standalone `FilterModule` computes a mask or candidate set, which you
-   pass into a LiNR module.
+2. **LiNR decoupled** — a standalone `FilterModule` computes a mask or candidate set. The
+   `LiNRV1`–`LiNRV4` modules hold one as `filter=` and call it for you; the primitives take the
+   mask or candidate set explicitly.
 
 ### SilverTorch inline filtering
 
@@ -71,7 +73,18 @@ registered item set:
 - `evaluate_subset(query_clause_attrs, candidate_ids) -> [B, P]` bool — re-check an existing
   candidate set.
 
-Build a filter, then feed its output to a LiNR module:
+Build a filter, then hand it to a LiNR variant — it registers with the index and is evaluated on
+every forward that carries `query_clause_attrs`:
+
+```python
+from retrieve import ExactAttributeFilter, LiNRV2
+
+v2 = LiNRV2(k=10, filter=ExactAttributeFilter()).cuda()
+v2.register_index(item_embs, item_attrs, clause_is_reverse)   # registers the filter too
+ids, scores = v2(query, query_attrs)                           # filter → candidates → rescoring
+```
+
+Or feed a filter's output to a primitive yourself:
 
 ```python
 from retrieve import ExactAttributeFilter, PostfilterKNN, PrefilterKNN
@@ -104,26 +117,3 @@ Composition helpers (in `retrieve.functional`):
 
 For deeper filter internals and kernel behavior, see the repo-level
 `docs/system/filtering.md`.
-
-## Quantization utilities
-
-The 1-bit and INT8 modules quantize internally, but the building blocks are exported from
-`retrieve.indexing` for custom index builds:
-
-| Function | Returns | Used by |
-| --- | --- | --- |
-| `quantize_int8(embs)` | `(codes [N, D] int8, scales [N] fp32)` — per-row symmetric; `embs ≈ codes.float() * scales[:, None]` | INT8 ANN |
-| `quantize_oporp_1bit(embs, seed=0, k_bits=0)` | `(bits [N, k_bits//64] int64, signs [D] int8, perm [D] int64)` — Sign-OPORP; `k_bits=0` → `D` | `OneBitKNN` |
-| `quantize_simhash_1bit(embs, k_bits, seed=0)` | `(bits [N, k_bits//64] int64, r [k_bits, D] fp32)` — SimHash; `k_bits` may exceed `D` | `SimHashKNN` |
-
-For the 1-bit schemes, the query is projected with the **same** `(signs, perm, k_bits)` or `r`,
-and similarity is `k_bits - 2 * popcount(query_bits ^ item_bits)`. The modules handle this for you;
-use the standalone functions only when assembling your own pipeline.
-
-```python
-import torch
-from retrieve.indexing import quantize_oporp_1bit
-
-embs = torch.randn(100_000, 128, device="cuda")
-bits, signs, perm = quantize_oporp_1bit(embs)   # bits: [100000, 2] int64 at k_bits=128
-```

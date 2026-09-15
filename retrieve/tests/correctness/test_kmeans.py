@@ -138,3 +138,58 @@ def test_fit_quality_matches_atomic_reference():
         f"k-means objective moved: {new_i:.9f} vs atomic {old_i:.9f} (rel {rel:.3e}) — the "
         f"order-fixed reduction is not computing the same sums"
     )
+
+
+# ---------------------------------------------------------------------------
+# init="kmeans++" (plan L D9: opt-in; the default stays "random").
+# ---------------------------------------------------------------------------
+
+
+def _blobs(n_blobs: int, per_blob: int, d: int, *, spread: float = 20.0, seed: int = 5):
+    """``n_blobs`` unit-radius Gaussian clusters with centres ``spread`` apart: a separable
+    index on which one seed per blob is the only good initialisation."""
+    g = torch.Generator(device="cuda").manual_seed(seed)
+    centres = torch.randn(n_blobs, d, generator=g, device="cuda") * spread
+    embs = centres.repeat_interleave(per_blob, dim=0)
+    embs = embs + torch.randn(embs.shape[0], d, generator=g, device="cuda")
+    return embs, torch.arange(n_blobs, device="cuda").repeat_interleave(per_blob)
+
+
+def test_kmeanspp_seeds_are_a_valid_d2_sample():
+    """``n_iter=0`` returns the seeds: each is a row of the index, all distinct (a point at zero
+    D² mass — one already chosen — is never drawn again), and on separable blobs one lands in
+    every blob."""
+    embs, blob = _blobs(16, 128, 32)
+    km = KMeans(n_lists=16, n_iter=0, seed=0, init="kmeans++")
+    centroids, assignments = km.fit(embs)
+    hit = (centroids[:, None, :] == embs[None, :, :]).all(dim=-1)  # [16, N]
+    assert hit.any(dim=1).all()
+    rows = hit.float().argmax(dim=1)
+    assert rows.unique().numel() == 16
+    assert blob[rows].unique().numel() == 16
+    assert torch.equal(assignments, KMeans.assign(embs, centroids))
+
+
+def test_kmeanspp_is_deterministic_per_seed():
+    embs = make_index(20_001, 16)
+    c1, a1 = KMeans(n_lists=32, n_iter=3, seed=0, init="kmeans++").fit(embs)
+    c2, a2 = KMeans(n_lists=32, n_iter=3, seed=0, init="kmeans++").fit(embs)
+    c3, _ = KMeans(n_lists=32, n_iter=3, seed=1, init="kmeans++").fit(embs)
+    assert torch.equal(c1, c2) and torch.equal(a1, a2)
+    assert not torch.equal(c1, c3)
+
+
+def test_kmeanspp_inertia_at_most_random_on_separable_blobs():
+    """Sixteen blobs, sixteen lists: random init lands two seeds in one blob almost surely
+    (16!/16¹⁶ ≈ 1e-6 against) and Lloyd's cannot recover, so D² seeding wins the objective
+    both before and after the iterations."""
+    embs, _ = _blobs(16, 256, 32)
+    for n_iter in (0, 5):
+        pp = KMeans(n_lists=16, n_iter=n_iter, seed=0, init="kmeans++").fit(embs)
+        rnd = KMeans(n_lists=16, n_iter=n_iter, seed=0, init="random").fit(embs)
+        assert _inertia(embs, *pp) <= _inertia(embs, *rnd)
+
+
+def test_init_is_validated():
+    with pytest.raises(ValueError, match="init must be"):
+        KMeans(n_lists=4, init="k-means++")
