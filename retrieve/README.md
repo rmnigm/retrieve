@@ -42,14 +42,20 @@ For attribute-filtered retrieval, swap to `filter_mode="bloom"` (with `m_bits` /
 | `SimHashKNN` | SimHash 1-bit quantization + Hamming top-K; `k_bits` may exceed `D`. |
 | `PostfilterKNN`, `PostfilterKNNInt8` | KNN then attribute filter. |
 | `PrefilterKNN` | Attribute filter then KNN over the candidate set. |
-| `SilverTorch` | IVF + INT8 ANN with optional fused bloom / exact filter (paper Algorithm 1). |
-| `BloomFilter`, `ExactAttributeFilter` | Standalone `FilterModule`s; compose via `combine_masks` / `combine_indices`. |
-| `KMeansTorch` | Index-build helper (clusters for IVF). |
-| `quantize_int8`, `quantize_oporp_1bit`, `quantize_simhash_1bit` | Quantization utilities used by the modules above. |
+| `LiNRV1`–`LiNRV4` | The LiNR paper's variants, composed from the above with an optional filter submodule; `LiNRBuilder` builds one. |
+| `SilverTorch` | IVF + INT8 ANN with optional fused bloom / exact filter (paper Algorithm 1); `SilverTorchBuilder` builds or loads one. |
+| `BloomFilter`, `ExactAttributeFilter` | Standalone `FilterModule`s; compose via `retrieve.functional.combine_masks` / `combine_indices`. |
+| `retrieve.indexing.KMeans` | Index-build helper (clusters for IVF); `init="random"` or `"kmeans++"`. |
+| `retrieve.indexing.quantize_int8`, `quantize_oporp_1bit`, `quantize_simhash_1bit` | Quantization utilities used by the modules above. |
+| `retrieve.ops.triton` / `retrieve.ops.reference` / `retrieve.ops.official` | The kernels behind the modules, one namespace per backend, same op names and signatures. |
 
 Triton is the default backend; modules that have a pure-PyTorch path accept
 `backend="torch"` for `torch.compile` / Inductor users, and `SilverTorch` also
-accepts `backend="official"` (Meta's kernels, eager-only).
+accepts `backend="official"` (Meta's kernels, eager-only). The package is two
+public layers — `retrieve.modules` (re-exported at the top level) and
+`retrieve.ops` — plus `retrieve.indexing` (index-build math) and
+`retrieve.functional` (query-time glue); the 0.1 paths `retrieve.layers` /
+`retrieve.kernels` still import under a `DeprecationWarning` and go away next.
 
 ## Docs
 
@@ -57,7 +63,8 @@ User guide (in this package, under [`docs/`](docs/)):
 
 - [`getting-started.md`](docs/getting-started.md) — install, the shared lifecycle, first examples.
 - [`modules.md`](docs/modules.md) — which module to pick + per-module API reference.
-- [`filtering-and-quantization.md`](docs/filtering-and-quantization.md) — attribute-filtered retrieval and the quantization utilities.
+- [`filtering-and-quantization.md`](docs/filtering-and-quantization.md) — attribute-filtered retrieval.
+- [`indexing-and-ops.md`](docs/indexing-and-ops.md) — `retrieve.indexing`, `retrieve.functional` and the op namespaces.
 
 System / internals documentation lives in the repository (not in the sdist)
 under `docs/system/`:

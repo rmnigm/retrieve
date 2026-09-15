@@ -497,7 +497,7 @@ per *build* config and then re-queries it for every *query* config
 `groups.build` vs `groups.search`; big-ann caps a submission at "1 build +
 up to 10 search configs"). We rebuild per param combo. `n_probe` is not a
 build parameter: `SilverTorch.__init__` stores it
-([main.py:118–119](../../retrieve/src/retrieve/layers/silvertorch/main.py))
+([main.py:118–119](../../retrieve/src/retrieve/modules/silvertorch.py))
 and `register_index` reads it only for two validation checks
 (main.py:168–169, 187–192); the k-means at main.py:176 does not depend on
 it. So the `deep` suite's `{n_lists: [1664, 8192], n_probe: [4, 8, 24, 32,

@@ -69,7 +69,7 @@ afterwards. By phase:
   shape-branching (P-bucketing, `p == 0` early-return, pad tails) now lives only in the eager
   `_impl`s behind explicit `bucket=` / `pad_to_k=` flags. All ten registered ops are
   `@triton_op` + inline `wrap_triton(...)[grid](**launch.kwargs)`.
-- **K3** — shared `@triton.jit` helpers in `retrieve/src/retrieve/kernels/common.py`
+- **K3** — shared `@triton.jit` helpers in `retrieve/src/retrieve/ops/triton/common.py`
   (`popcount_int64`, `bloom_subset_pass`, `clause_pass`, `compact_store`, `or_combine`);
   bloom kernels standardized on the `qb & ~sig` OR-reduce subset form (boolean-identical).
 - **K4** — `layers/utils/topk.py` (`masked_topk` / `counts_to_valid`, replacing six inlined
@@ -197,7 +197,7 @@ Baseline notes:
 - On `main`, `tune-kernels codesigned-probe-score` is **broken** (the K1 bug — TypeError on
   the first sweep point). For that kernel, take the baseline from the branch commit that
   landed K2 for `codesigned_probe_score.py` *before* K3 (find it via
-  `git log --oneline -- retrieve/src/retrieve/kernels/silvertorch/codesigned_probe_score.py`),
+  `git log --oneline -- retrieve/src/retrieve/ops/triton/codesigned_probe_score.py`),
   or accept the parity-suite wall-clock comparison as the gate.
 - JSON diagnostics changed shape (benign): the fmkt progress key is now `P=…,D=…,B=…` and the
   `--json-out` per-shape key is `per_regime` (was `per_bucket`). Compare medians, not keys.

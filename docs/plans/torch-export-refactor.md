@@ -47,7 +47,7 @@ Filter modules (`BloomFilter`, `ExactAttributeFilter`) are already one-signature
 
 ## Layer-side mode flags
 
-### [PostfilterKNN](../../retrieve/src/retrieve/layers/linr/postfilter_knn.py) (linr_v1)
+### [PostfilterKNN](../../retrieve/src/retrieve/modules/knn.py) (linr_v1)
 
 Add `mode: Literal["full", "masked"]`:
 
@@ -56,13 +56,13 @@ def forward(self, query):                # mode="full"   — no mask path; skip 
 def forward(self, query, mask):          # mode="masked" — apply mask + isfinite → -1 sentinel
 ```
 
-Drop the `mask is not None` branches at [postfilter_knn.py:50-58](../../retrieve/src/retrieve/layers/linr/postfilter_knn.py#L50-L58).
+Drop the `mask is not None` branches at [postfilter_knn.py:50-58](../../retrieve/src/retrieve/modules/knn.py#L50-L58).
 
-### [PostfilterKNNInt8](../../retrieve/src/retrieve/layers/linr/postfilter_knn_int8.py) (linr_v4)
+### [PostfilterKNNInt8](../../retrieve/src/retrieve/modules/knn.py) (linr_v4)
 
 Same shape as `PostfilterKNN`. Add `mode: Literal["full", "masked"]`. The int8 quantize + `torch._int_mm` body is common to both modes; the `mask is not None` branch is the only Optional.
 
-### [PrefilterKNN](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py) (linr_v2, linr_v3 stage 2)
+### [PrefilterKNN](../../retrieve/src/retrieve/modules/knn.py) (linr_v2, linr_v3 stage 2)
 
 Add `mode: Literal["full", "candidates"]`:
 
@@ -72,11 +72,11 @@ def forward(self, query, candidate_ids, counts):           # mode="candidates"
 ```
 
 Drop:
-- the `candidate_ids is None` branch at [prefilter_knn.py:54](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py#L54);
-- the `counts is None → torch.full(p, ...)` fallback at [prefilter_knn.py:117-118](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py#L117-L118);
-- the two layer-side `if p == 0` early returns at [prefilter_knn.py:74-78](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py#L74-L78) and [prefilter_knn.py:111-116](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py#L111-L116). `fused_masked_knn_topk` handles per-row empty already.
+- the `candidate_ids is None` branch at [prefilter_knn.py:54](../../retrieve/src/retrieve/modules/knn.py#L54);
+- the `counts is None → torch.full(p, ...)` fallback at [prefilter_knn.py:117-118](../../retrieve/src/retrieve/modules/knn.py#L117-L118);
+- the two layer-side `if p == 0` early returns at [prefilter_knn.py:74-78](../../retrieve/src/retrieve/modules/knn.py#L74-L78) and [prefilter_knn.py:111-116](../../retrieve/src/retrieve/modules/knn.py#L111-L116). `fused_masked_knn_topk` handles per-row empty already.
 
-### [OneBitKNN](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py) (linr_v3 stage 1)
+### [OneBitKNN](../../retrieve/src/retrieve/modules/bit_knn.py) (linr_v3 stage 1)
 
 Add `mode: Literal["full", "candidates"]`. `forward` dispatches to the existing custom_ops 1:1:
 
@@ -85,9 +85,9 @@ def forward(self, query):                                  # mode="full"        
 def forward(self, query, candidate_ids, counts):           # mode="candidates"  → oporp_1bit_match_topk_indirect
 ```
 
-Same dispatch in `_forward_torch_eager`. Drop the `counts is None` fallback at [one_bit_knn.py:149-155](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py#L149-L155).
+Same dispatch in `_forward_torch_eager`. Drop the `counts is None` fallback at [one_bit_knn.py:149-155](../../retrieve/src/retrieve/modules/bit_knn.py#L149-L155).
 
-### [FullScanKNN](../../retrieve/src/retrieve/layers/utils/retrieval.py) (torch_knn)
+### [FullScanKNN](../../retrieve/src/retrieve/modules/knn.py) (torch_knn)
 
 Add `mode: Literal["full", "masked", "candidates"]`. The current `forward` matrixes `mask` × `candidate_ids` — three modes cover the practical combinations:
 
@@ -97,14 +97,14 @@ def forward(self, query, mask):                            # mode="masked"   —
 def forward(self, query, candidate_ids):                   # mode="candidates"
 ```
 
-`mode="masked"` keeps `post_filter_topk` ([retrieval.py:9](../../retrieve/src/retrieve/layers/utils/retrieval.py#L9)) post-topk so the K slot count stays static. `mode="candidates"` needs a pad-to-K wrap on top of `_forward_candidates`'s `min(self.k, scores.shape[1])` at [retrieval.py:57](../../retrieve/src/retrieve/layers/utils/retrieval.py#L57) so the output shape is statically `[B, k]`.
+`mode="masked"` keeps `post_filter_topk` ([retrieval.py:9](../../retrieve/src/retrieve/modules/knn.py#L9)) post-topk so the K slot count stays static. `mode="candidates"` needs a pad-to-K wrap on top of `_forward_candidates`'s `min(self.k, scores.shape[1])` at [retrieval.py:57](../../retrieve/src/retrieve/modules/knn.py#L57) so the output shape is statically `[B, k]`.
 
-### [SilverTorch](../../retrieve/src/retrieve/layers/silvertorch/main.py)
+### [SilverTorch](../../retrieve/src/retrieve/modules/silvertorch.py)
 
-`filter: FilterMode = "none"` ([Literal["none", "bloom", "exact"]](../../retrieve/src/retrieve/layers/silvertorch/main.py#L24)) already exists and `has_bloom` / `has_exact` are derived `@property`s. What remains is collapsing the two Optional arguments in `forward`:
+`filter: FilterMode = "none"` ([Literal["none", "bloom", "exact"]](../../retrieve/src/retrieve/modules/silvertorch.py#L24)) already exists and `has_bloom` / `has_exact` are derived `@property`s. What remains is collapsing the two Optional arguments in `forward`:
 
-- Collapse `query_clause_attrs: Tensor | None = None` ([main.py:224-244](../../retrieve/src/retrieve/layers/silvertorch/main.py#L224-L244)) into sibling `forward_ivf_only(query)` / `forward_bloom(query, qa)` / `forward_exact(query, qa)` methods (one export entry per filter mode). `forward` becomes a Python dispatcher for eager runtime.
-- Extract `_forward_candidates` ([main.py:369-385](../../retrieve/src/retrieve/layers/silvertorch/main.py#L369-L385)) to a public `forward_candidates(query, candidate_ids)`. Drop the `candidate_ids is not None` branch in `forward` at [main.py:236](../../retrieve/src/retrieve/layers/silvertorch/main.py#L236).
+- Collapse `query_clause_attrs: Tensor | None = None` ([main.py:224-244](../../retrieve/src/retrieve/modules/silvertorch.py#L224-L244)) into sibling `forward_ivf_only(query)` / `forward_bloom(query, qa)` / `forward_exact(query, qa)` methods (one export entry per filter mode). `forward` becomes a Python dispatcher for eager runtime.
+- Extract `_forward_candidates` ([main.py:369-385](../../retrieve/src/retrieve/modules/silvertorch.py#L369-L385)) to a public `forward_candidates(query, candidate_ids)`. Drop the `candidate_ids is not None` branch in `forward` at [main.py:236](../../retrieve/src/retrieve/modules/silvertorch.py#L236).
 
 Sibling-method form rather than a `mode=` flag because each filter mode has a distinct prep block (`evaluate_bloom_sigs` vs `evaluate_clause_mask` upstream of the probe kernel); inlining all three into one `forward` body via a single dispatch would still need a `mode` check anyway.
 
@@ -192,8 +192,8 @@ cd evaluation && uv run evaluate --config conf/500m/d128-quality.yaml   --algori
 
 ```bash
 grep -rn "Tensor | None\|Optional\[Tensor\]" \
-    retrieve/src/retrieve/layers/linr/ \
-    retrieve/src/retrieve/layers/silvertorch/ \
-    retrieve/src/retrieve/layers/utils/retrieval.py
+    retrieve/src/retrieve/modules/ \
+    retrieve/src/retrieve/modules/silvertorch.py \
+    retrieve/src/retrieve/modules/knn.py
 # Zero hits in forward signatures of the in-scope layers.
 ```

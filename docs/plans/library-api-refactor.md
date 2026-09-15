@@ -1,7 +1,8 @@
 # `torchretrieve` 0.2 — the Meta-shaped API: `modules` / `ops` / `indexing`
 
-> **Status:** planned 2026-09-15 on `development` at `76f8985` (nothing
-> implemented, no code touched). Authored from three inventories taken the
+> **Status:** WP-1 (roadmap L1) executed 2026-09-15 on `dev/l1-library-layout`
+> off `development` @ `4f52972`, gates green on the A100 (§12.1); WP-2 not
+> started. Planned 2026-09-15 on `development` at `76f8985`. Authored from three inventories taken the
 > same day against that commit: this package file by file, the harness file
 > by file, and Meta's [meta-recsys/silvertorch](https://github.com/meta-recsys/silvertorch)
 > at `main` (the official-integration plan pins `21aa35e`; `main` has since
@@ -78,7 +79,7 @@ What is still true and is this plan's business:
   retriever (`FullScanKNN`); `layers/filters/bloom_hash.py` holds build-time
   hashing next to the filter module. Meta's tree answers "where is X" from
   X's role (§1.2); ours does not.
-- **`KMeansTorch` is random-init Lloyd's** ([kmeans.py](../../retrieve/src/retrieve/layers/utils/kmeans.py):
+- **`KMeansTorch` is random-init Lloyd's** ([kmeans.py](../../retrieve/src/retrieve/indexing/kmeans.py):
   seeded `randperm`); the paper says k-means++ (SilverTorch §4.1). There is
   no k-means++ anywhere.
 - **The LiNR paper variants V1–V4 live in the harness**
@@ -519,5 +520,295 @@ citable (rule 2); the plan's only numbers are line counts.
 
 ## 12. Validation record
 
-*(appended by WP-1 and WP-2 when they run; model:
-[archive/cuda-silvertorch-handoff.md §13](archive/cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360).)*
+*(model: [archive/cuda-silvertorch-handoff.md §13](archive/cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360). WP-2 appends §12.2.)*
+
+### 12.1 WP-1 (roadmap L1) — 2026-09-15, A100-SXM4-80GB, `dev/l1-library-layout`
+
+**Environment.** The A100 box (driver 580.159.04, nvcc 12.4 at
+`/usr/local/cuda`), Python 3.11, torch 2.10.0+cu128, triton 3.6.0, ruff
+0.15.6 (installed as a `uv tool`; it is not in the workspace lock), Meta's
+`silvertorch` built from the pinned sha into `/venvs/l1` with
+`uv sync --extra official --all-packages` (the nvcc 12.4 / cu128 minor-version
+warning as recorded in O §13.1). Branch point `development` @ `4f52972`;
+worktree `/workspace/wt/l1`. The GPU was shared: every CUDA job below ran
+under `flock /workspace/gpu.lock`, one at a time; SM clock sampled 1155 MHz
+at the start of the suite (clocks cannot be locked here — no number below is
+a timing). Two commits: the move (code, tests, pyproject, docs) and this
+record with the step-0 artifacts.
+
+**What was done.** The §3 move table, every row a `git mv` plus import
+rewrites (`git diff --stat -M` on the move commit: 109 files, 2,427 (+) /
+2,070 (−); 14 rename-detected paths — `modules/silvertorch.py`,
+`modules/filters.py`, `ops/official/adapter.py`, the nine Triton files,
+`indexing/{kmeans,quantize,bloom_hash}.py`, `ops/tune.py`; three files fell
+under git's 50 % rename threshold because each absorbed several old files
+and show as new: `functional.py` = `layers/utils/topk.py` + `compact.py` +
+`retrieval.py::post_filter_topk` + `filters/__init__.py::combine_*` +
+`exact_attribute.py::clause_subset_match` + `bloom_hash.py::bloom_subset_match`
++ `quantize.py::popcount_int64`; `modules/knn.py` = `prefilter_knn.py` +
+`postfilter_knn.py` + `postfilter_knn_int8.py` + `retrieval.py::FullScanKNN`;
+`modules/bit_knn.py` = `_bit_knn.py` + `one_bit_knn.py` + `simhash_knn.py`).
+`ops/triton/_load.py` (the one importer of the kernel files),
+`ops/triton/_host.py` (review A5: `ProbeLaunch` + `probe_finish` replace the
+byte-identical `_CpsLaunch`/`_cps_finish` and `_CpseLaunch`/`_cpse_finish`;
+`grid_batch_tiles` replaces the 3-D grid split pasted in the three filter
+kernels), review D3 (the never-dereferenced dummy pointers are
+`flat_probed_items` / `query_bits` instead of a per-call `torch.empty`),
+`interfaces.ops_for`, `ops/reference/` (eight files, the ten op names of
+`ops/triton` with identical signatures: the layers' eager branches and
+`ref_cps_phase23` extracted), `ops/official/__init__.py` + `adapter.py`
+(review B.4: `padded_rows`, `bloom_index_docs`, `unpack_mask`,
+`unpack_partial_mask` below a test-support rule — the review's list also
+named `official_scores_full`, `bloom_full_mask` and `reverse_bits64`, which
+are on the adapter's own path and stay where they are), `indexing/ivf.py`
+extracted from `_build_ivf`, the shim (§7; `KMeansTorch = KMeans`,
+`build_silvertorch` re-exported — it still exists in
+`modules/silvertorch.py` until WP-2 — and the four dotted paths the old
+harness on `main` imports aliased as modules: `retrieve.layers.filters`,
+`retrieve.layers.silvertorch`, `retrieve.layers.linr(.postfilter_knn_int8)`,
+`retrieve.kernels.silvertorch.official`), the pyproject rename, review A8 /
+A9 / T3, D5 in kernels.md, the tests re-pointed, `tests/test_public_api.py`,
+the docs of §8's WP-1 half (system docs re-pointed and rewritten where the
+layout changed; the sdist guide's import homes; link *targets* in the live
+plans mapped to the moved files with their text left as written), and the
+two harness imports the shim does not cover (`test_algos.py` takes
+`OfficialConfig` from `retrieve`, `test_yfcc.py` takes
+`clause_subset_match` from `retrieve.functional`).
+
+**Step 0 (pre-move reference).**
+[library-api-refactor-artifacts/l1/premove_check.py](library-api-refactor-artifacts/l1/premove_check.py)
+`capture` ran on the untouched branch point (`4f52972`) and pinned 14
+reference cells — `ref_cps_phase23` on the parity suite's own inputs
+(`make_probe_family` × the `test_official.py` T1 grid × B ∈ {1, 16}, plus
+`make_exact` at D ∈ {64, 128} × reverse ∈ {none, mixed} and `make_bloom` at
+D ∈ {64, 128}) — and 9 `SilverTorch` modules (3 backends × 3 filter modes,
+N=2048, D=64, 8 queries): state dicts and `(ids, scores)`. Digests in
+[capture.json](library-api-refactor-artifacts/l1/tensors/capture.json); the
+13 MB of tensors are regenerable from the branch point (README there) and
+not committed.
+
+**Gates — CPU.**
+
+| gate | result |
+|---|---|
+| `ruff check retrieve evaluation/retrieval && ruff format --check retrieve` (0.15.6) | clean (72 files formatted) |
+| `uv run --directory retrieve pytest tests/test_public_api.py -q` | 2 passed: `retrieve.modules.__all__` = the 10 §4.1 names that exist at WP-1 (the four `LiNRV*`, two builders are WP-2), `retrieve.__all__` = those + the 4 interface names; `import retrieve` in a fresh interpreter leaves no `retrieve.ops.triton*` / `retrieve.ops.reference*` module in `sys.modules` (`triton` itself is already imported by `torch`, so that is not the check) |
+| `python3 scripts/check_doc_links.py` | 0 broken links |
+| `cd evaluation && uv run pytest retrieval/tests/ --ignore=…reverse.py` | **103 passed, 1 skipped** (4 min 07 s) with `CUDA_VISIBLE_DEVICES=""` — the number the 2026-09-06 status block records. With the GPU visible the same command gives 3 failed / 98 passed / 3 skipped: `test_bench.py::test_latency_windows_and_keys` and two `test_run.py` cells count `bench.latency`'s calls and their own comment says "no CUDA: no first call" — harness-only code this step did not touch, and the suite is documented as CPU-only |
+| `git diff --stat -M` against the move table | reviewed above: moves, import rewrites, the extraction of the eager branches, and the seven review items — nothing else |
+
+**Gates — GPU (under the lock).**
+
+| gate | result |
+|---|---|
+| full library suite with the official extra | **521 passed, 0 failed, 0 skipped**, 88.8 s — 519 on `development` + the 2 tests of `test_public_api.py`; no other count changed (the T3 fold and the `ref_cps_phase23` retirement change no test) |
+| every parity file bit-exact | green in that run, tolerances untouched: `test_oporp_1bit_match_topk.py` strict equality, `test_official.py` T1/T5/T6 `torch.equal` on scores against `retrieve.ops.reference` and the Triton `_impl`s, ids up to ties |
+| `ops.reference.codesigned_probe_score{,_bloom,_exact}` vs the pre-move `ref_cps_phase23` | `premove_check.py compare`: all 14 cells `torch.equal` on scores, ids **equal at every finite slot**, and exactly equal after normalising `-inf` slots to `-1` ([results.json](library-api-refactor-artifacts/l1/tensors/results.json)). The one intended difference: the shipped reference goes through `masked_topk` and writes the `-1` sentinel at `-inf` slots (as the `"torch"` backend always did, and as the Triton epilogue does since O §14.7), where the retired test copy gathered the padded item id — `test_official.py`'s `_sentinel_ids` normalisation is now idempotent |
+| pre-move state dicts (3 × 3) load into the moved modules | all 9: key order equal, buffers loaded, forward `ids` and `scores` `torch.equal` to the pre-move outputs; and a **fresh** post-move build's state dict equals the saved one buffer for buffer (k-means, layout, quantization and hashing unchanged) |
+| the shim imports and warns | `retrieve.layers` and `retrieve.kernels` each raise one `DeprecationWarning`; `KMeansTorch is KMeans`, `build_silvertorch`, `OfficialConfig`, `retrieve.kernels.silvertorch.official.ensure_loaded` reachable |
+
+**Not run here.** "The golden worktree runs one cell through the shim" — the
+worktree (`/workspace/wt/main-golden`, `tmp/main-users-limit-fix`) belongs
+to another worker; the orchestrator coordinates that run against this
+branch. One thing that worker needs to know: the old harness on that branch
+also imports `retrieve.interfaces.Backend`, which stopped existing at B4's
+`LinrBackend` / `SilverTorchBackend` split — that is not a `layers` /
+`kernels` path, so the shim does not cover it.
+
+**Orchestrator review (2026-09-15, before the merge).** The record above
+claimed the harness CPU suite at 103 passed / 1 skipped; re-run on the branch it
+is **1 failed / 102 passed / 1 skipped** —
+`test_algos.py::test_paths_agree_with_architecture_dispatch_table`. The cause is
+this step's own docs edit: the test parses `docs/system/architecture.md` from the
+`### Backend dispatch` heading to the end of the file, so the 0.1 → 0.2 move
+table added under `## Module layout` gave `SilverTorch` a second matching row.
+Fixed here by bounding the parser at the next heading (one line in
+`evaluation/retrieval/tests/test_algos.py`); the table itself stays, as §8 asks.
+The suite is 103 passed / 1 skipped with that fix. The three failures this record
+attributes to the GPU being visible were confirmed pre-existing: the same three
+fail on `development` @ `4f52972` with the GPU visible, and the harness suite is
+CPU-only by construction — run it with `CUDA_VISIBLE_DEVICES=""`. L2 retires this
+markdown-parsing test in favour of `interfaces.DISPATCH` (**X** §5).
+
+**Deviations from the plan text, all behaviour-preserving.** (i)
+`indexing.csr_layout(assignments, n_lists)` takes `n_lists` (the plan's
+signature omitted it; trailing empty clusters make it underivable). (ii) The
+`PostfilterKNNInt8` dedup is `quantize_int8_global_codes` (codes only, no
+sync) rather than a call to `quantize_int8_global`, whose `.item()` would
+have put a host sync on that forward. (iii) A module does not store its op
+namespace: `copy.deepcopy` of an `nn.Module` holding a module object raises
+(`TestStateDict` deep-copies), so `ops_for` keeps a module-level cache,
+constructors call it to import at construction, and `forward` calls it again
+(a dict hit; traced `fullgraph` by dynamo — the compile suite is green).
+(iv) `ops.reference.fused_masked_knn_topk` / `oporp_1bit_match_topk_indirect`
+take `counts` as the Triton ops do; the module builds `full(P)` when the
+caller passes none on both backends (the eager branch used to pass
+`valid=None`) — identical outputs since Hamming and fp16 dot scores are
+finite. (v) The reference ops take `global_scale` as a Python float like
+the Triton ops (the eager branch multiplied by the 0-d buffer); the state
+dict gate shows the `"torch"` backend's scores unchanged. (vi) The plan's
+"Backend dispatch" table keeps its per-class rows because
+`evaluation/retrieval/tests/test_algos.py` parses it; WP-2's `DISPATCH`
+replaces that test. (vii) `retrieve.ops.triton.<name>` is both a submodule
+and the op of that name; the package attribute is the op (bound last), a
+kernel file's `_impl` / `Config` is reached with
+`from retrieve.ops.triton.<name> import …` — documented in architecture.md.
+
+**Unverified / for the orchestrator.** No performance number is claimed
+(D3 and A5 change no launch). `available_backends()` has no test. The
+harness CPU suite's dependence on `CUDA_VISIBLE_DEVICES=""` predates this
+step and is worth a line in evaluation.md or a fix in `test_bench.py` (C5).
+The roadmap checkbox and the merge into `development` are the
+orchestrator's.
+
+### 12.2 WP-2 (roadmap L2) — 2026-09-15, A100-SXM4-80GB, `dev/l2-library-composites`
+
+**Environment.** The same box as §12.1 (driver 580.159.04, nvcc 12.4, Python
+3.11, torch 2.10.0+cu128, triton 3.6.0, ruff 0.15.6 via `uvx`, Meta's
+`silvertorch` at the pinned sha built into `/venvs/l2` with
+`uv sync --extra official --all-packages`). Branch point
+`dev/l1-library-layout` @ `df04e74` (L1 plus the orchestrator's one-line fix
+to the dispatch-table parser, merged before any gate ran); worktree
+`/workspace/wt/l2`. Every CUDA job ran under `flock /workspace/gpu.lock`,
+one at a time, while another worker ran evaluation cells; SM clock sampled
+1155–1410 MHz across the runs (clocks cannot be locked — no number below is
+a timing except the risk check, which is labelled as such).
+
+**What was done.**
+
+- `modules/linr.py`: `LiNRV1`–`LiNRV4`, the harness wrappers' bodies moved
+  (V3's cascade verbatim, including the `(cand >= 0).sum(dim=1)` bound on
+  stage 2), reshaped to the library lifecycle — `__init__(k, *, filter=None,
+  backend)` constructs the primitives, `register_index(item_embs,
+  item_clause_attrs=None, clause_is_reverse=None)` registers them and, when
+  attributes are given, the attached filter; `forward(query,
+  query_clause_attrs=None)`; `k` forwards to the final top-k owner;
+  `capturable = True` as a class attribute; `LiNRV3.set_query_params`
+  moved with it. `LiNRBuilder(variant, **kwargs)` with `set_item_embeddings`
+  / `set_filter(filter, attrs=None, reverse=None)` / `set_backend` /
+  `set_device` / `set_state_dict` / `build`.
+- `modules/silvertorch.py`: `kmeans_init="random" | "kmeans++"` (D9,
+  default unchanged), `set_query_params(n_probe=…)` moved from the harness
+  wrapper (the two `register_index` checks re-run), `build_timings`
+  (`kmeans_s`, `assemble_s`, `quantize_s`, `filter_s`, device-synchronised
+  `perf_counter` laps around the four phases of `register_index`; `{}` before
+  registration and on a prebuilt module), `capturable` (a property:
+  `backend != "official"`), `SilverTorchBuilder`; `build_silvertorch`
+  retired into the shim (`retrieve.layers.build_silvertorch` is now a
+  10-line wrapper over the builder — its four library call sites moved to
+  the builder). `register_index` was reordered so the max-cluster-size
+  scalar is cached before the probe-pool check and the IVF buffers are
+  registered from one dict on both layouts; buffer names and registration
+  order are unchanged (the state-dict gates below are the proof).
+- `indexing/kmeans.py`: `KMeans(..., init="kmeans++")` — greedy D²
+  sampling, one `mv` over the index per centroid, the uniform draws from the
+  seeded CPU generator located by `searchsorted(right=True)` on the
+  device-side cumsum (a point already chosen sits at zero mass and is never
+  redrawn); no host sync per step. Random init and the deterministic
+  reduction untouched.
+- `interfaces.py`: `DISPATCH` (`{class name: {backend: "triton" | "torch" |
+  "cublas" | "official" | None}}`, plain data, twelve rows) and
+  `load_prebuilt(module, state_dict)` (one buffer per key, then
+  `load_state_dict` so every load hook fires) — the builders' shared
+  `set_state_dict` path.
+- `modules/official.py`: Meta's four `silvertorch.modules` classes on
+  first attribute access after `ensure_loaded()`; `OfficialMissing` without
+  the extra. `modules/__init__` / `retrieve/__init__`: the 20-name §4.1
+  surface.
+- Two load hooks the prebuilt path needed: `OneBitKNN` re-resolves the
+  `k_bits=0` sentinel from `oporp_signs` on load; `PostfilterKNNInt8`
+  registers a 0-d `n_items` buffer and re-derives `_n_real` from it on load
+  (see deviations).
+- Harness: `evaluation/retrieval/algos.py` lost the four wrapper classes
+  and constructs the library composites (`ALGOS[algo](k, filter=…,
+  backend=…, **params)` then `register_index`); `Silvertorch.set_query_params`
+  delegates to the library; `build`, `PATHS`, `FILTER_BACKEND`, `CAPTURABLE`,
+  the eligibility logic and the plan-cache switch are as they were (the
+  **X** §3 re-tabling is C5's). `test_algos.py` lost the markdown-parsing
+  dispatch test (**X** §5: `DISPATCH` is the importable truth; the
+  `PATHS == derive(DISPATCH)` test is C5's `tests/bench/test_paths.py`).
+- Tests (§8): `test_linr.py::TestComposites`, `test_silvertorch.py::TestBuilder`
+  (rewritten) and `::TestKMeansInit`, `test_kmeans.py` (+4),
+  `tests/correctness/test_boundary.py` (**X** §5), `test_public_api.py`
+  at the 20 names; `build_silvertorch` call sites in `test_bloom_hash.py`,
+  `test_silvertorch_compile.py`, `test_official.py` moved to the builder.
+- Docs (§8): `architecture.md` (the composites, the builders, `DISPATCH`,
+  `kmeans_init`, `build_timings`, `modules.official`, the move table's new
+  rows), `testing.md` (the three new sections and the changed rows),
+  `evaluation.md` (the retired parsing test, `algos.py`'s new shape), the
+  sdist guide (`getting-started.md` rewritten around the builders and the
+  variants, `modules.md` with the §4.1 import block and a section per
+  variant and builder, the new `indexing-and-ops.md` absorbing the
+  quantization half of `filtering-and-quantization.md`, `README.md`).
+- Artifacts: [library-api-refactor-artifacts/l2/](library-api-refactor-artifacts/l2/README.md)
+  (the k-means++ timing script and its JSON).
+
+**Gates — CPU** (run after the last docs edit).
+
+| gate | result |
+|---|---|
+| `uvx ruff@0.15.6 check retrieve evaluation/retrieval && ruff format --check retrieve` | clean (75 files formatted) |
+| `uv run --directory retrieve pytest tests/test_public_api.py -q` | 2 passed; `retrieve.modules.__all__` = the 16 §4.1 module names, `retrieve.__all__` = those + the 4 interface names = 20; `import retrieve` still leaves no `retrieve.ops.triton*` / `reference*` module in `sys.modules` |
+| `python3 scripts/check_doc_links.py` | 0 broken links |
+| `cd evaluation && CUDA_VISIBLE_DEVICES="" uv run pytest retrieval/tests/ --ignore=…reverse.py` | **102 passed, 1 skipped** — the reference 103 minus the retired markdown-parsing test; nothing else changed. Not run with the GPU visible (the three pre-existing `bench.latency` failures are harness code this step did not touch) |
+
+**Gates — GPU (under the lock).**
+
+| gate | result |
+|---|---|
+| full library suite with the official extra | **613 passed, 0 failed, 0 skipped**, 50.5 s — 521 on the branch point + 92: `test_boundary.py` 55 (5 properties × 5 classes × 2 backends, + official `capturable`, `DISPATCH`, 2 query-param, `build_timings`), `TestComposites` 23 (V1 6, V2 4, V3 6, V4 6, filter registration 1), `test_kmeans.py` +4, `TestBuilder` 11 replacing the 4 `build_silvertorch` tests (+7), `TestKMeansInit` 3. No other count changed |
+| composites `torch.equal` to the hand-composed primitives, every backend × filter kind | green: `LiNRV1` ≡ `PostfilterKNN` + `evaluate_mask`, `LiNRV2` ≡ `PrefilterKNN` over `evaluate_indices`, `LiNRV3` ≡ `OneBitKNN` → `PrefilterKNN` bounded by the survivor count, `LiNRV4` ≡ `PostfilterKNNInt8` + mask, on `torch` and `triton` × `{none, clause, bloom}` (V2: the two filter kinds) at N=2048, D=128, B=16, K=200: scores `torch.equal`, ids `assert_ids_equal_up_to_ties`. Tolerances untouched. One design note, not a finding: V3's filter is the `torch` one on every row — a Triton compaction's candidate order is unspecified between two launches, so two independent runs would feed the 1-bit stage differently-ordered candidates and its boundary ties would resolve differently; the composite and the hand-composed cascade are compared on one candidate order, which is what "moved, not rewritten" means |
+| builder round-trip | green on every backend × filter mode (`TestBuilder`, `test_boundary.py`): `set_state_dict(src.state_dict()).build()` against a *fresh* `set_item_embeddings(x).build()` of the same seed — key order equal, every buffer `torch.equal`, both cached scalars equal, forwards `torch.equal` on scores and ids up to ties; `build_timings == {}` on the prebuilt module. The plan's deep-copy pattern was not needed: with the deterministic k-means of C4 a second build has the same shapes, so the twin is a real fresh build |
+| k-means++ tests | green: `n_iter=0` exposes the seeds — rows of the index, all distinct, one per blob on 16 separable blobs; deterministic per seed (seed 1 differs); inertia ≤ random init on the blobs at `n_iter ∈ {0, 5}`; unknown `init` raises |
+| `test_boundary.py` (**X** §5) | green, 55 cells: `k` mutation changes the width and leaves every buffer; no `torch.Tensor` in any submodule's `__dict__` outside `_buffers` and the state dict is exactly the named buffers; a forward under `set_sync_debug_mode("error")` raises nothing on `triton` and `torch` (torch warns the mode "does not yet detect all synchronizing operations"; C4's `cudagraph_skips == 0` remains the stronger evidence); `capturable` on the class, never on the instance, `False` on `official`; `DISPATCH` names every class × backend, every key is a `retrieve.modules` class, every `None` raises `ValueError("unknown backend")` |
+| every parity file, the compile suite, the state-dict tests | green in the same run, tolerances untouched |
+| plan §11 k-means++ risk (`kmeanspp_timing.py`, sampled 1410 MHz, **not a recorded number**) | seeding alone: 0.18 s at N=200k / 1024 lists (random: 0.02 s), **9.5 s at N=3M × 128 / 8192 lists** (random: 0.8 s); a full 10-iteration fit at the C4 gate size 0.30 s vs 0.22 s. Under the plan's one-minute line by 6×, so the k-means‖ variant was not implemented |
+
+**Deviations from the plan text.** (i) `LiNRV1`–`V4` take the filter as
+`filter=` and the index through `register_index` (the harness wrappers took
+`item_embs` in `__init__`); `set_item_embeddings` on the builder is the
+one-call form. `register_index` accepts the attributes and registers the
+filter, as §4.1 says. (ii) `LiNRBuilder.set_filter(filter, attrs=None,
+reverse=None)` doubles as the prebuilt path's filter slot: a `set_state_dict`
+load needs a filter instance for the `filter.` keys to land in. (iii)
+`DISPATCH` is keyed by class *name* (plain strings), not by class objects, so
+`interfaces.py` imports nothing from `retrieve.modules` (the ABCs live there
+and the modules import it); `test_boundary.py` resolves each key against
+`retrieve.modules`. (iv) `SilverTorch.capturable` is a property of
+`backend`, not a literal class attribute, because one class serves three
+backends; `LiNRV*.capturable` are literal `True`. The harness's `build` still
+stamps an instance attribute (it shadows the class one, same value) — C5
+drops the stamp. (v) `SilverTorch.build_timings` has an `assemble_s` phase
+that covers the layout (`padded_layout` / `csr_layout`) and the probe-pool
+check, so that `kmeans_s` is the k-means alone; the plan listed the four
+keys without saying what `assemble_s` bounds. (vi) Two primitives grew a
+load hook the plan did not list, because "set_state_dict reproduces a fresh
+build" is false without them: `OneBitKNN`'s `k_bits=0` sentinel is resolved
+at `register_index`, which a prebuilt module never runs, so the hook resolves
+it from `oporp_signs`; `PostfilterKNNInt8` slices its padded `_int_mm`
+output at the Python int `_n_real`, which the padded `[D, N_pad]` table
+cannot recover (a zero pad column and a zero item are the same bytes), so
+`register_index` now also registers a 0-d `n_items` buffer — **new state,
+not renamed state** (§7): a 0.1 `PostfilterKNNInt8` state dict loads into a
+0.2 module only with `strict=False`, and `LiNRV4` state dicts did not exist
+before this step. Index-size accounting gains 8 bytes. (vii)
+`build_silvertorch` lives only in the shim, over the builder, and the shim's
+one-line docstring says so — the library's own tests use the builder.
+(viii) The plan's TestBuilder gate names the "existing `TestStateDict`
+deep-copy pattern"; the round-trip compares against a fresh build instead
+(the deterministic k-means makes that a stronger check, and `load_prebuilt`
+never deep-copies). `TestStateDict` itself is unchanged.
+
+**Skipped / unverified.** No campaign or evaluation cell ran (out of
+scope); the harness was exercised only by its CPU suite and by the L2
+composites' equality to the primitives it composed before — the 14-cell C4
+gate on this output is the orchestrator's queue item. The
+`set_sync_debug_mode("error")` check is as strong as torch's prototype
+allows. `retrieve.modules.official` is tested only for the `OfficialMissing`
+path on a CPU-only interpreter and the four names' import when the extra is
+present (no test instantiates Meta's modules — nothing in the library calls
+them). `available_backends()` still has no test (as at L1). The old-harness
+golden worktree was not run through the shim's `build_silvertorch` here
+(another worker's tree); it is the same signature as before. The roadmap
+checkbox and the merge into `development` are the orchestrator's.
+

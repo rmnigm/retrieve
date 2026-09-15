@@ -7,7 +7,7 @@ import math
 import pytest
 import torch
 
-from retrieve.layers.filters import BloomFilter, ExactAttributeFilter
+from retrieve.modules import BloomFilter, ExactAttributeFilter
 from tests.conftest import make_attrs, make_query_attrs
 
 

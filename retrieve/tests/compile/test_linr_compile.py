@@ -27,8 +27,13 @@ import pytest
 import torch
 from torch import Tensor, nn
 
-from retrieve.layers.filters import BloomFilter, ExactAttributeFilter
-from retrieve.layers.linr import OneBitKNN, PostfilterKNN, PrefilterKNN
+from retrieve.modules import (
+    BloomFilter,
+    ExactAttributeFilter,
+    OneBitKNN,
+    PostfilterKNN,
+    PrefilterKNN,
+)
 from tests.conftest import make_attrs, make_index, make_query, make_query_attrs
 
 N, D, B, C, A_MAX, K = 512, 64, 4, 2, 2, 8

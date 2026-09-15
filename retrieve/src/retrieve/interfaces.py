@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import abc
+import importlib
+from types import ModuleType
 from typing import Literal, get_args
 
+import torch
 from torch import Tensor, nn
 
 # Two backend vocabularies, one per family. Every LiNR layer and every standalone filter
@@ -19,6 +22,56 @@ def check_backend(backend: str, allowed: object) -> None:
     if backend not in get_args(allowed):
         expected = ", ".join(map(repr, get_args(allowed)))
         raise ValueError(f"unknown backend {backend!r}; expected one of {expected}")
+
+
+_OPS_NAMESPACE = {
+    "triton": "retrieve.ops.triton",
+    "torch": "retrieve.ops.reference",
+    "official": "retrieve.ops.official",
+}
+_OPS_LOADED: dict[str, ModuleType] = {}
+
+
+def ops_for(backend: str) -> ModuleType:
+    """The op namespace a backend scores with (``retrieve.ops.triton`` / ``.reference`` /
+    ``.official``), imported on first use so ``import retrieve`` registers no kernels. Modules
+    call it once in ``__init__`` (the import, and its errors, happen at construction) and again
+    in ``forward`` (a dict hit; not stored on the instance, which must stay deep-copyable)."""
+    if backend in _OPS_LOADED:
+        return _OPS_LOADED[backend]
+    _OPS_LOADED[backend] = importlib.import_module(_OPS_NAMESPACE[backend])
+    return _OPS_LOADED[backend]
+
+
+# The code path each backend runs per module (plan L §5): ``"cublas"`` where the flag is a
+# no-op, ``None`` where the constructor raises. Keyed by class name so the table is plain data
+# with no import of ``retrieve.modules``; the harness derives its ``PATHS`` from it
+# (library-harness-boundary.md §4).
+DISPATCH: dict[str, dict[str, str | None]] = {
+    "SilverTorch": {"triton": "triton", "torch": "torch", "official": "official"},
+    "LiNRV1": {"triton": "cublas", "torch": "cublas", "official": None},
+    "LiNRV2": {"triton": "triton", "torch": "torch", "official": None},
+    "LiNRV3": {"triton": "triton", "torch": "torch", "official": None},
+    "LiNRV4": {"triton": "cublas", "torch": "cublas", "official": None},
+    "PostfilterKNN": {"triton": "cublas", "torch": "cublas", "official": None},
+    "PostfilterKNNInt8": {"triton": "cublas", "torch": "cublas", "official": None},
+    "PrefilterKNN": {"triton": "triton", "torch": "torch", "official": None},
+    "OneBitKNN": {"triton": "triton", "torch": "torch", "official": None},
+    "SimHashKNN": {"triton": "triton", "torch": "torch", "official": None},
+    "ExactAttributeFilter": {"triton": "triton", "torch": "torch", "official": None},
+    "BloomFilter": {"triton": "triton", "torch": "torch", "official": None},
+}
+
+
+def load_prebuilt(module: nn.Module, state_dict: dict[str, Tensor]) -> None:
+    """Give a freshly constructed module (no ``register_index``) the buffers of a saved one:
+    one buffer per state-dict key, shaped and placed like the saved tensor, then
+    ``load_state_dict`` so every load hook re-derives its cached scalars. The builders'
+    ``set_state_dict`` path."""
+    for name, t in state_dict.items():
+        owner, _, leaf = name.rpartition(".")
+        module.get_submodule(owner).register_buffer(leaf, torch.empty_like(t))
+    module.load_state_dict(state_dict)
 
 
 class RetrievalModule(nn.Module, abc.ABC):
@@ -60,7 +113,7 @@ class FilterModule(nn.Module, abc.ABC):
         self,
         query_clause_attrs: Tensor,
     ) -> tuple[Tensor, Tensor]:
-        from retrieve.layers.utils.compact import compact_mask
+        from retrieve.functional import compact_mask
 
         return compact_mask(self.evaluate_mask(query_clause_attrs))
 
