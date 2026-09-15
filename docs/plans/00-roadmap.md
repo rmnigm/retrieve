@@ -81,7 +81,11 @@ plan to `archive/` and shorten its entry here to one line under *Done*.
 > **Environment facts that bind everything below:** the VM *is* the
 > A100 box; SM clocks cannot be locked (`nvidia-smi -lgc` denied, no
 > sudo — timing uses H §7's fallback: sampled `sm_mhz` + `unstable`);
-> `/workspace` is a 100 GB quota volume plus 100 GB local disk —
+> `/workspace` reported a 100 GB quota in the 2026-09-06 block; on
+> 2026-09-15 `df` reports it as a **2.1 PB network volume with ~619 TB free**,
+> plus a 300 GB local disk with ~222 GB free. If that is real rather than an
+> unenforced quota, **E2 and E3's deferral no longer has a reason** — confirm
+> with a sized write before committing to a ~200 GB ETL. Superseded text:
 > per-worktree venvs go under `/venvs/`, and PubMed / Semantic Scholar
 > cannot be staged at native dims until disk grows; the fetched HF
 > datasets are the pre-`3b1b5b3` 1-indexed layout (handled in
@@ -506,21 +510,21 @@ user decision 2026-09-06) so no dynamo cache or CUDA graph pool outlives
 the backend under test — cross-backend parity moves to a spill file, and
 bit-exactness stays where it belongs, in B2's library parity suite.
 
-- [ ] **C1 — write the measurement primitives, device-side metrics and the algorithm table.** H §6 WP-1
+- [x] **C1 — write the measurement primitives, device-side metrics and the algorithm table.** H §6 WP-1
   (Mac, 2 d). Needs A1 (golden exists). Includes O §6.2 / WP-6: the
   `official` path in the `PATHS` table.
   Status: authored 2026-09-06 on `dev/c1-harness-v2`, CPU tests green,
-  GPU gate C4 pending. `algos.py` landed as `algos_v2.py` (the old
+  **gate closed 2026-09-15 with C4** (`c1ae1b5`); the code has since been re-split by C5. `algos.py` landed as `algos_v2.py` (the old
   `algos/` package shadows the name until C3 deletes it); `metrics.py`
   rewritten in place with the old per-row API kept as wrappers.
-- [ ] **C2 — write the config matrix, per-dataset inputs and the oracle with pass rates.** H §6 WP-2
+- [x] **C2 — write the config matrix, per-dataset inputs and the oracle with pass rates.** H §6 WP-2
   (Mac, 1.5 d).
   Status: authored 2026-09-06 on `dev/c1-harness-v2`, CPU tests green,
-  GPU gate C4 pending. `config.py` and `oracle.py` rewritten in place with
+  **gate closed 2026-09-15 with C4** (`c1ae1b5`); the code has since been re-split by C5. `config.py` and `oracle.py` rewritten in place with
   the old API kept below a divider / as wrappers; `data.py` is new and
   imports `encode.py` (kept as the one `training.*` boundary). Oracle
   caches are now blob v4 with the fingerprint in the file name.
-- [ ] **C3 — write the cell loop and CLIs, delete the old harness, rewrite the docs.** H §6 WP-3 (Mac,
+- [x] **C3 — write the cell loop and CLIs, delete the old harness, rewrite the docs.** H §6 WP-3 (Mac,
   1.5 d): delete the old harness files H §5 lists, rewrite
   [../system/evaluation.md](../system/evaluation.md) to H §2, archive
   [evaluation-refactor.md](archive/evaluation-refactor.md) and the harness half
