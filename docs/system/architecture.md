@@ -183,7 +183,7 @@ overridden only when a fused kernel beats the default:
   buffer is **full-width** `[B, N]`: only the first `counts[b]` entries
   of each row are meaningful (`-1`-filled tails on the kernel path,
   arbitrary argsort tails on the `compact_mask` fallback), and within-row
-  order is unspecified. `ExactAttributeFilter` routes to the fused
+  order is ascending item order on both backends (plan L3). `ExactAttributeFilter` routes to the fused
   `clause_compact` Triton kernel on the `"triton"` backend; `BloomFilter`
   routes to the fused `bloom_compact` kernel. The `"torch"` backend falls
   back to `compact_mask(evaluate_mask)`.

@@ -17,8 +17,7 @@ This test is the gate on that: it builds the three filtered LiNR variants the wa
 is the exact failure the harness turns into ``NotCapturable``.
 
 Correctness alongside capture: scores must be ``torch.equal`` to eager, and ids equal up
-to ties among equal scores — the compaction kernels write their row in atomic order, so
-two runs may order equal-scoring candidates differently even eager-vs-eager.
+to ties among equal scores (``torch.topk``'s tie order is not guaranteed stable).
 """
 
 from __future__ import annotations
@@ -153,4 +152,26 @@ def test_compiled_captures_without_cudagraph_skips(algo, filter_kind):
     assert torch.equal(out_scores, eager_scores), (
         f"{algo} / {filter_kind}: compiled scores differ from eager"
     )
+    _assert_ids_equal_up_to_ties(out_ids, eager_ids, eager_scores)
+
+
+def test_compiled_batch_of_one_bloom_v2():
+    """Pins L3's first defect: the two-phase ``bloom_compact`` returned ``counts`` as a view at
+    element offset ``T - 1`` of its scan buffer when ``B == 1`` (``contiguous()`` is a no-op on a
+    ``[1]`` view), and inductor's ``assert_alignment`` on custom-op outputs rejected the compiled
+    forward. ``N = 512`` at ``block_n = 256`` is the smallest odd-offset shape."""
+    torch.manual_seed(0)
+    module = _build("linr_v2", "bloom")
+    query = make_query(1, D)
+    q_attrs = make_query_attrs(1, c=C)
+    with torch.inference_mode():
+        eager_ids, eager_scores = (t.clone() for t in module(query, q_attrs))
+    torch._dynamo.reset()
+    compiled = torch.compile(module, mode="reduce-overhead", dynamic=False, fullgraph=True)
+    with torch.inference_mode():
+        for _ in range(5):
+            compiled(query, q_attrs)
+        out_ids, out_scores = (t.clone() for t in compiled(query, q_attrs))
+        torch.cuda.synchronize()
+    assert torch.equal(out_scores, eager_scores)
     _assert_ids_equal_up_to_ties(out_ids, eager_ids, eager_scores)
