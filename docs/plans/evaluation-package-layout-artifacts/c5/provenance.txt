@@ -1,0 +1,4 @@
+name, driver_version, clocks.current.sm [MHz], clocks.max.sm [MHz], utilization.gpu [%]
+NVIDIA A100-SXM4-80GB, 580.159.04, 210 MHz, 1410 MHz, 0 %
+71430d79101957362618e08a6fb50f7fd3a45663
+0fe440d4bc9013097737e225af59b71ccec94a6d

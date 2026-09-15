@@ -23,47 +23,79 @@ A third variant, **synthetic**, is a text dataset grown to arbitrary `N`
 by interpolating between real embeddings — used for scale sweeps where a
 real catalog that size doesn't exist.
 
-Data lives under `$RETRIEVE_DATA_ROOT` (default `<repo>/data`). Raw
-downloads go to `data/_raw/<dataset>/`; bench-side outputs to
-`data/<dataset>/<variant>/`.
+Data lives under `$RETRIEVE_DATA_ROOT` (default `<repo>/evaluation/data`;
+on the A100 box `/workspace/data`, with `evaluation/data` a symlink to
+it). Raw downloads go to `data/_raw/<dataset>/`; bench-side outputs to
+`data/<dataset>/`.
 
-## `eval_datasets/` — the ETL package
+## `eval_datasets/` — what is on disk
 
-One module per dataset, each an `argparse` CLI exposed as a console
-script. The package is named `eval_datasets` rather than `datasets`
-because the latter shadows HuggingFace's `datasets` in the shared venv.
+The package that owns the on-disk layout: the contract as code
+(`layout.py`), the Hub registry (`hub.py`), the shared numerics, and one
+level down the per-dataset ETL scripts (`etl/`) behind one console script,
+`eval-data`. It imports neither `bench` nor `training`
+(`tests/test_dependency_direction.py`). The package is named
+`eval_datasets` rather than `datasets` because the latter shadows
+HuggingFace's `datasets` in the shared venv.
 
-| module | console script | source |
+| module | `eval-data` subcommand | source |
 |---|---|---|
-| [`yambda.py`](../../evaluation/eval_datasets/yambda.py) | `yambda` | HF `yandex/yambda`, Listen+ branch |
-| [`goodreads.py`](../../evaluation/eval_datasets/goodreads.py) | `goodreads` | UCSD Book Graph mirror (HTTPS) |
-| [`arxiv.py`](../../evaluation/eval_datasets/arxiv.py) | `arxiv` | HF `open-index/open-arxiv` (~2.99M papers) |
-| [`yfcc.py`](../../evaluation/eval_datasets/yfcc.py) | `yfcc` | `dl.fbaipublicfiles.com` (NeurIPS'23 Big-ANN filtered track) |
-| [`yfcc_check_gt.py`](../../evaluation/eval_datasets/yfcc_check_gt.py) | `yfcc-check-gt` | — (validates the shipped GT) |
-| [`pubmed.py`](../../evaluation/eval_datasets/pubmed.py) | `pubmed` | NCBI FTP MedCPT embeddings + MEDLINE baseline (~36M articles) |
-| [`synth_arxiv.py`](../../evaluation/eval_datasets/synth_arxiv.py) | — (run as a module) | an already-encoded arxiv directory |
-| [`hf_io.py`](../../evaluation/eval_datasets/hf_io.py) | `eval-fetch`, `eval-publish`, `eval-publish-checkpoint` | HF Hub push/pull |
+| [`layout.py`](../../evaluation/eval_datasets/layout.py) | (`bench check`) | the layout contract — readers, checks, `validate_layout` |
+| [`hub.py`](../../evaluation/eval_datasets/hub.py) | `fetch`, `publish`, `publish-checkpoint` | HF Hub push/pull, `data_root()` |
+| [`etl/yambda.py`](../../evaluation/eval_datasets/etl/yambda.py) | `yambda` | HF `yandex/yambda`, Listen+ branch |
+| [`etl/goodreads.py`](../../evaluation/eval_datasets/etl/goodreads.py) | `goodreads` | UCSD Book Graph mirror (HTTPS) |
+| [`etl/arxiv.py`](../../evaluation/eval_datasets/etl/arxiv.py) | `arxiv` | HF `open-index/open-arxiv` (~2.99M papers) |
+| [`etl/yfcc.py`](../../evaluation/eval_datasets/etl/yfcc.py) | `yfcc` | `dl.fbaipublicfiles.com` (NeurIPS'23 Big-ANN filtered track) |
+| [`etl/yfcc_check_gt.py`](../../evaluation/eval_datasets/etl/yfcc_check_gt.py) | `yfcc-check-gt` | — (validates the shipped GT) |
+| [`etl/pubmed.py`](../../evaluation/eval_datasets/etl/pubmed.py) | `pubmed` | NCBI FTP MedCPT embeddings + MEDLINE baseline (~36M articles) |
+| [`etl/synth_arxiv.py`](../../evaluation/eval_datasets/etl/synth_arxiv.py) | `synth-arxiv` | an already-encoded arxiv directory |
 | [`common.py`](../../evaluation/eval_datasets/common.py) | — | shared attribute-synthesis numerics |
 | [`timesplit.py`](../../evaluation/eval_datasets/timesplit.py) | — | vendored sequential time-split |
 
-`synth_arxiv` has **no** console script despite its docstring examples —
-invoke it as `uv run python -m eval_datasets.synth_arxiv`.
+The ETL modules are `argparse` programs; `eval-data <name> …` forwards
+its arguments to that module's `main(argv)`, so `uv run eval-data arxiv
+--help` is arxiv's own subcommand list (`download`, `convert`, `prep`,
+`encode_text`, `encode_queries`, `attrs`, `all`), and `uv run eval-data
+goodreads prep --processed-dir … --output-dir …` is what `uv run goodreads
+prep …` used to be.
+
+### The layout contract (`layout.py`)
+
+[`layout.py`](../../evaluation/eval_datasets/layout.py) is the one place
+that says what a dataset directory must contain, shared by the writers
+here and the readers in `bench/inputs.py`: `load_text_items` /
+`load_text_queries` (the pre-encoded shape, prefix sidecars asserted, fp16
+→ fp32 + L2-normalise), `load_query_attrs` (row count checked against the
+full test split), `load_item_attrs` (the legacy pad row dropped, rows
+checked against the items), `apply_users_limit` (one prefix over every
+query-side tensor), `atomic_write`, and `validate_layout(data_dir,
+content_dir) -> list[str]` — every way the directory can be wrong for the
+harness (missing files, a missing or swapped prefix sidecar, `query_emb`
+vs `heldout` rows, attrs vs items, `eval_split` vs queries) — which
+`bench check --dataset <name>` runs at every dim. Run it on a freshly
+staged dataset before a campaign; the two breakages the 2026-09-06 review
+found (PubMed's `queries` dropping rows, YFCC without sidecars) are what it
+reports.
 
 ### Tests
 
 ```bash
-cd evaluation && uv run pytest eval_datasets/tests -q     # CPU-only, no GPU
+cd evaluation && CUDA_VISIBLE_DEVICES="" uv run pytest tests/eval_datasets -q     # CPU-only, no GPU
 ```
 
-[`eval_datasets/tests/`](../../evaluation/eval_datasets/tests/) is CPU-only
-and needs no network: the fixture writers at the top of
-[`test_yfcc.py`](../../evaluation/eval_datasets/tests/test_yfcc.py)
+[`tests/eval_datasets/`](../../evaluation/tests/eval_datasets/) is CPU-only
+and needs no network: `test_layout.py` runs the contract on the shared
+tiny-dataset writer of `tests/conftest.py` (both item layouts clean, each
+breakage flagged); the fixture writers at the top of
+[`test_yfcc.py`](../../evaluation/tests/eval_datasets/test_yfcc.py)
 (`write_u8bin`, `write_knn_result`, `write_spmat`) emit the upstream
 binary formats into `tmp_path`, so the parsers are tested against bytes
 rather than against a downloaded file. The last class, `TestRealSlice`,
 round-trips a 1,000-item slice of the *real* prepared dataset against the
 uncapped tag CSR and skips itself when `$RETRIEVE_DATA_ROOT/yfcc10m` is
-not on the machine. Reuse those writers when adding the E2–E4 loaders.
+not on the machine. Reuse those writers when adding the E2–E4 loaders,
+and give each new loader a fixture test that runs `validate_layout` on
+what it wrote.
 
 ### Shared conventions
 
@@ -76,10 +108,10 @@ not on the machine. Reuse those writers when adding the E2–E4 loaders.
   `item_attrs_narrow.pt` describes `item_id i+1`.
 - **Legacy `[N+1, …]` artifacts are accepted, not assumed.** Both layouts
   exist in the wild: everything switched to `[N, …]` in `3b1b5b3`
-  (2026-05-25), but the copies *published on the Hub* — what `eval-fetch`
-  pulls — are still the older 1-indexed tensors with a padding row at
-  index 0, as their own README and `text_emb.meta.json` say.
-  `retrieval.data.drop_legacy_padding_row` recognises that row by its
+  (2026-05-25), but the copies *published on the Hub* — what `eval-data
+  fetch` pulls — are still the older 1-indexed tensors with a padding row
+  at index 0, as their own README and `text_emb.meta.json` say.
+  `eval_datasets.layout.drop_legacy_padding_row` recognises that row by its
   content (all-zero for embeddings, all `-1` for attributes) and drops it
   from every per-item tensor the harness loads (the pre-encoded `text_emb`
   and `item_attrs_narrow`; the SASRec path's `nn.Embedding` pad row is
@@ -91,14 +123,14 @@ not on the machine. Reuse those writers when adding the E2–E4 loaders.
   attrs and embeddings are *both* 1-indexed, so they agree with each other
   and only the held-out target shift is wrong — `cos(query, target)` falls
   from 0.99 to 0.62 with no error anywhere (found in A1, 2026-09-06, on
-  the old harness's `loaders.py`; ported to v2's `data.py` in C4).
+  the old harness's `loaders.py`; now `layout.py`).
 - Every subcommand writes a `prep_log.json` with row counts and
   filtering statistics next to its outputs.
 - Subcommands are individually re-runnable; `all` chains them.
 
 ### yambda
 
-`uv run yambda prep --variant {500m,5b} --output-dir data/yambda/<v>`
+`uv run eval-data yambda prep --variant {500m,5b} --output-dir data/yambda/<v>`
 
 Downloads `<variant>/sequential/listens.parquet`, runs `preprocess()`
 (Listen+ branch: `played_ratio ≥ 50%`), and writes the four artifacts the
@@ -154,7 +186,7 @@ goodreads bloom sweeps exclude it.
 ### arxiv
 
 `download` → `convert` → `prep` → `encode_text` → `encode_queries` →
-`attrs`, or `uv run arxiv all --output-dir data/arxiv-papers` (the
+`attrs`, or `uv run eval-data arxiv all --output-dir data/arxiv-papers` (the
 `data_dir` of [`config/arxiv.yaml`](../../evaluation/config/arxiv.yaml)).
 
 Arxiv has **no user sequences**, so `prep` does no interactions and no
@@ -183,7 +215,7 @@ Configs select one via `content_subdir`.
 ### yfcc10m
 
 `download` → `convert` → `prep` → `attrs`, or
-`uv run yfcc all --output-dir data/yfcc10m`.
+`uv run eval-data yfcc all --output-dir data/yfcc10m`.
 
 The NeurIPS'23 Big-ANN **filtered-search** track set: 10M CLIP image
 descriptors, 192-d uint8, plus a bag of tags per image drawn from a
@@ -193,12 +225,12 @@ registration, from
 `https://dl.fbaipublicfiles.com/billion-scale-ann-benchmarks/yfcc100M/`
 (exact names and sizes in
 [dataset-candidates.md §3.4](../plans/dataset-candidates.md) and in
-`yfcc.py`'s `RAW_FILES`). `download` is size-verified and resumable;
+`etl/yfcc.py`'s `RAW_FILES`). `download` is size-verified and resumable;
 `convert` re-parses every header and writes
 `data/_raw/yfcc10m/processed/manifest.json` with the sha256 of each file.
 
 **This is the one dataset whose filtered ground truth is not ours.** For
-every dataset above, `retrieval/oracle.py` computes the filtered
+every dataset above, `bench/oracle.py` computes the filtered
 top-K itself. Here the organisers ship `GT.public.ibin`: per query, the
 10 nearest base vectors *by squared L2* among the items whose tag bag
 contains **every** query tag (conjunctive AND). `prep` stores it verbatim
@@ -218,7 +250,7 @@ as `gt_shipped.pt`, together with the shipped 100-deep unfiltered GT:
 The current harness has **no precomputed-oracle input** — it always
 builds its own — so nothing reads `gt_shipped.pt` at sweep time. It is
 consumed by
-[`yfcc_check_gt.py`](../../evaluation/eval_datasets/yfcc_check_gt.py),
+[`etl/yfcc_check_gt.py`](../../evaluation/eval_datasets/etl/yfcc_check_gt.py),
 and it is the format harness v2 should grow an input for
 ([evaluation-harness-v2.md §7](../plans/evaluation-harness-v2.md#7-risks--open-questions)).
 
@@ -241,9 +273,10 @@ the upstream data:
    holds fp16 only; a separate int8 code file would be a redundant copy of
    the same integers, and SilverTorch quantises internally at build time.
    The sidecars are named `emb_provenance.json`, **not** `*.meta.json`:
-   `loaders.assert_arxiv_prefixes` treats a `*.meta.json` as a nomic
-   encode and demands the `search_document: ` / `search_query: ` prefixes,
-   which YFCC has no concept of.
+   `layout.assert_prefixes` treats a `*.meta.json` as a nomic encode and
+   demands the `search_document: ` / `search_query: ` prefixes, which YFCC
+   has no concept of (`validate_layout` therefore reports the missing
+   sidecars on this dataset — a known, accepted finding).
 3. **The narrow clause tensor is a capped approximation of the tag
    predicate** — see below.
 
@@ -300,7 +333,7 @@ not exist for it.
 
 ```bash
 export RETRIEVE_DATA_ROOT=/workspace/data
-uv run --directory evaluation python -m eval_datasets.yfcc_check_gt \
+uv run --directory evaluation eval-data yfcc-check-gt \
     --data-dir $RETRIEVE_DATA_ROOT/yfcc10m --device cuda \
     --report $RETRIEVE_DATA_ROOT/yfcc10m/gt_check.json
 ```
@@ -337,7 +370,8 @@ baseline *does* publish `.md5` and `verify --medline` checks those.
 **No dimensionality reduction.** Every dataset is benchmarked at its encoder's
 native dim (user decision 2026-09-06), so pubmed has exactly one content dir,
 `content_d768`, and `dataset-candidates.md` §4.1's PCA-to-256/128/64 plan is
-**not** implemented.
+**not** implemented. [`config/pubmed.yaml`](../../evaluation/config/pubmed.yaml)
+is the harness-v2 dataset file (in no suite yet).
 
 #### Attribute semantics
 
@@ -471,14 +505,14 @@ Filter sweeps additionally need:
 `item_attrs_wide.pt`, `wide_shelf_vocab.json`,
 `wide_shelf_global_freq.pt`, and the `query_attrs_wide_1shelf` /
 `_2shelf` columns of `eval_split.parquet` are **built but never read**:
-`retrieval.data.load_inputs` does not load them and `load_query_attrs`
+`bench.inputs.load_inputs` does not load them and `layout.load_query_attrs`
 reads only the `query_attrs_narrow` column. They exist for a wide-bloom sweep that was
 never run. Keep or drop them as a unit — they are only meaningful
 together.
 
 ## HuggingFace I/O
 
-[`hf_io.py`](../../evaluation/eval_datasets/hf_io.py) holds the repo
+[`hub.py`](../../evaluation/eval_datasets/hub.py) holds the repo
 registry and the fetch/publish helpers, so no path or repo id is
 hard-coded in the ETL modules:
 
@@ -501,16 +535,20 @@ other dataset's.
 `pinkmeme/eval-pubmed` is **registered but not published** — E2 is deferred and
 nothing has been pushed to it.
 
-`eval-fetch` pulls a prepared dataset (optionally a subset of dims),
-`eval-publish` pushes one, `eval-publish-checkpoint` pushes a trained
-checkpoint under `<repo>/checkpoints/<ckpt-id>/`. Downloading a prepared
-dataset is the fast path — the full arxiv encode is hours of GPU time.
+`eval-data fetch` pulls a prepared dataset (optionally a subset of dims),
+`eval-data publish` pushes one, `eval-data publish-checkpoint` pushes a
+trained checkpoint under `<repo>/checkpoints/<ckpt-id>/` (`train
+upload-checkpoint` is the same upload with an `all` selector). Downloading
+a prepared dataset is the fast path — the full arxiv encode is hours of GPU
+time.
 
 ## Training — `evaluation/training/`
 
-A compact gSASRec trainer. It exists to produce the item embeddings and
-query encoder the sequential benchmarks need; it is not a research
-surface of its own.
+A compact gSASRec trainer plus the history → query-vector encoder the
+harness uses at eval time. It exists to produce the embeddings the
+sequential benchmarks need; it is not a research surface of its own. It
+imports `eval_datasets.{hub,layout}` and nothing from `bench`; the
+console script is `train`.
 
 | file | role |
 |---|---|
@@ -518,14 +556,16 @@ surface of its own.
 | [`model.py`](../../evaluation/training/model.py) | `GSASRec` — `nn.TransformerEncoder`, `norm_first`, separate output embedding, `predict_last` |
 | [`dataset.py`](../../evaluation/training/dataset.py) | `SequenceDataset`, negative-sampling collate, train dataloader |
 | [`losses.py`](../../evaluation/training/losses.py) | `gbce_loss` |
-| [`evaluate.py`](../../evaluation/training/evaluate.py) | chunked full-catalog scoring + metrics (shares `retrieval.metrics`) |
-| [`train_sasrec.py`](../../evaluation/training/train_sasrec.py) | `train()` + the click CLI |
-| [`upload_checkpoints.py`](../../evaluation/training/upload_checkpoints.py) | push a checkpoint dir to HF |
+| [`evaluate.py`](../../evaluation/training/evaluate.py) | chunked full-catalog scoring with its **own** recall / ndcg (`hits_at`, `recall_at_k`, `ndcg_at_k`): a checkpoint's reported quality must not move with the harness's metric code; `tests/training/test_encode.py` pins them to `bench.metrics` at 1e-9 |
+| [`encode.py`](../../evaluation/training/encode.py) | `load_model_for_eval`, `encode_queries`, `encode_split` — the eval-time encode of the test split with its cache (`<ckpt-dir>/encoded_queries_v2.pt`, keyed on ckpt mtime + `max_seq_length`, the full split); what `bench.inputs.load_inputs` calls on a `checkpoint` dataset |
+| [`train.py`](../../evaluation/training/train.py) | `train()` + the `train sasrec` command |
+| [`checkpoints.py`](../../evaluation/training/checkpoints.py) | `train upload-checkpoint`: push a checkpoint dir (or all) to HF through `hub.upload_checkpoint` |
+| [`cli.py`](../../evaluation/training/cli.py) | the `train` group |
 
 ### Running a training job
 
 ```bash
-uv run --directory evaluation python -m training.train_sasrec \
+uv run --directory evaluation train sasrec \
     --data-dir data/yambda/500m-listens \
     --checkpoint-dir checkpoints/yambda-500m-d128 \
     --embedding-dim 128 --dropout 0.5
@@ -577,18 +617,21 @@ Training throughput matters more than bit-reproducibility of a matmul.
 `config.json` is what makes a checkpoint self-describing at eval time.
 Checkpoints trained before it was written fall back to
 `D128_DROP05_DEFAULTS` in
-[`encode.py`](../../evaluation/retrieval/encode.py) — see
+[`encode.py`](../../evaluation/training/encode.py) — see
 [checkpoints.md](checkpoints.md) for which runs those are.
 
 ## Adding a dataset
 
-1. Write `eval_datasets/<name>.py` with `download` / `convert` / `prep`
-   subcommands emitting the layout above; register a console script in
-   [`evaluation/pyproject.toml`](../../evaluation/pyproject.toml).
+1. Write `eval_datasets/etl/<name>.py` with `download` / `convert` / `prep`
+   subcommands emitting the layout above (`main(argv)` over an `argparse`
+   parser) and add it to `ETL` in
+   [`eval_datasets/cli.py`](../../evaluation/eval_datasets/cli.py); give it
+   a fixture test under `tests/eval_datasets/` that runs
+   `layout.validate_layout` on what it wrote.
 2. If it has attributes, add an `attrs` subcommand producing
    `item_attrs_narrow.pt`, `clause_is_reverse_narrow.pt`, the vocab
    JSONs, and `eval_split.parquet` aligned 1:1 with `test.parquet`.
-3. Add an entry to `EVAL_REPOS` in `hf_io.py`.
+3. Add an entry to `EVAL_REPOS` in `hub.py`.
 4. Add one `evaluation/config/<name>.yaml` (harness v2: one YAML per
    dataset, see [evaluation.md](evaluation.md#config-one-yaml-per-dataset--suitesyaml))
    and list the dataset in the suites it belongs to in

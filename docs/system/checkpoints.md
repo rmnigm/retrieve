@@ -8,9 +8,11 @@ against all 1,866,170 items, no history masking — matches the
 
 Checkpoints now live under each dataset's data dir:
 `data/<dataset>/checkpoints/<ckpt-id>/` (e.g.
-`data/yambda-500m/checkpoints/gsasrec-d128-drop0.5/`). The eval CLI
-configs in [`evaluation/config/`](../../evaluation/config/) point at these
-paths verbatim.
+`data/yambda-500m/checkpoints/gsasrec-d128-drop0.5/`), under the data
+root of [datasets.md](datasets.md) (`RETRIEVE_DATA_ROOT`, default
+`evaluation/data/`). The harness configs in
+[`evaluation/config/`](../../evaluation/config/) point at these paths
+verbatim.
 
 This document is the **inventory** — which checkpoints exist, how they
 scored, and how to move them around. For how the trainer itself works
@@ -104,7 +106,7 @@ torch.save(item_embs, CKPT_DIR / "item_embs.pt")
 Use this tensor as the index for ANN search, dot-product retrieval, or
 clustering. The id mapping (dense_id → raw_yandex_id) is the
 `item_id_map.json` written by
-the [`eval_datasets/yambda.py`](../../evaluation/eval_datasets/yambda.py) `prep` subcommand
+the [`eval_datasets/etl/yambda.py`](../../evaluation/eval_datasets/etl/yambda.py) `prep` subcommand (`eval-data yambda prep`)
 (the library function `preprocess()` returns `Data.item_id_to_idx` in
 memory; the CLI persists it to disk alongside the parquets).
 
@@ -186,7 +188,7 @@ The `.pt` files are **not** stored in git (see `.gitignore`). HF storage is
 **one repo per dataset**, with all checkpoints living under that repo's
 `checkpoints/<ckpt-id>/` subtree (alongside the dataset's eval inputs).
 The registry lives in
-[`evaluation/eval_datasets/hf_io.py`](../../evaluation/eval_datasets/hf_io.py) as
+[`evaluation/eval_datasets/hub.py`](../../evaluation/eval_datasets/hub.py) as
 `EVAL_REPOS`:
 
 | Dataset key | HF repo (dataset type) |
@@ -201,7 +203,7 @@ A given checkpoint then lands at
 own model repo. Local layout mirrors that:
 `data/<dataset>/checkpoints/<ckpt-id>/`. Override the local root with
 `RETRIEVE_DATA_ROOT=/some/path`; otherwise it resolves to
-`evaluation/eval_datasets/`.
+`evaluation/data/` (`hub.data_root()`).
 
 ### Auth (one-time setup)
 
@@ -215,49 +217,49 @@ For private repos you need a token with **read** access to download and
 
 ### Downloading a checkpoint
 
-`hf_io.download_checkpoint` pulls a single `checkpoints/<ckpt-id>/` subtree:
+`hub.download_checkpoint` pulls a single `checkpoints/<ckpt-id>/` subtree:
 
 ```python
-from eval_datasets.hf_io import download_checkpoint
+from eval_datasets.hub import download_checkpoint
 
 local = download_checkpoint("yambda-500m", "gsasrec-d128-drop0.5")
 # → data/yambda-500m/checkpoints/gsasrec-d128-drop0.5/
 ```
 
-The matching CLI is `eval-fetch` (whole dataset, optionally including
+The matching CLI is `eval-data fetch` (whole dataset, optionally including
 checkpoints) — for a single ckpt it's currently easier to call the function
 above. To grab the dataset's eval inputs (item embeddings, attrs, etc.)
 without checkpoints:
 
 ```bash
-uv run eval-fetch yambda-500m
-uv run eval-fetch goodreads-work-id --dims d64,d128 --include-checkpoints
+uv run eval-data fetch yambda-500m
+uv run eval-data fetch goodreads-work-id --dims d64,d128 --include-checkpoints
 ```
 
 ### Uploading a new checkpoint
 
-Push the resulting dir with the
-[`upload-checkpoints`](../../evaluation/training/upload_checkpoints.py)
-console script — a thin wrapper over `hf_io.upload_checkpoint`. It reuses
-the per-dataset eval repo (creating it if absent), uploads the checkpoint
-subtree at `checkpoints/<ckpt-id>/`, generates a minimal model card from
+Push the resulting dir with `train upload-checkpoint`
+([`training/checkpoints.py`](../../evaluation/training/checkpoints.py)) — a
+thin wrapper over `hub.upload_checkpoint`. It reuses the per-dataset eval
+repo (creating it if absent), uploads the checkpoint subtree at
+`checkpoints/<ckpt-id>/`, generates a minimal model card from
 `eval_quality.json` / `config.json` when `README.md` is absent, and uses
 LFS automatically for `.pt` files.
 
 ```bash
 # Dry-run first to confirm the file list:
-uv run upload-checkpoints \
+uv run train upload-checkpoint \
     --dataset yambda-500m \
     --ckpt-id gsasrec-d128-drop0.5 \
     --dry-run
 
 # Real upload:
-uv run upload-checkpoints \
+uv run train upload-checkpoint \
     --dataset yambda-500m \
     --ckpt-id gsasrec-d128-drop0.5
 
 # Upload every checkpoint dir under data/<dataset>/checkpoints/ in one go:
-uv run upload-checkpoints --dataset yambda-500m --ckpt-id all
+uv run train upload-checkpoint --dataset yambda-500m --ckpt-id all
 ```
 
 By default the script skips the epoch-tagged `gsasrec-ep*.pt` snapshot
@@ -267,11 +269,11 @@ moment in the training loop). That halves what gets pushed. Pass
 `--public` (instead of the default `--private`), `--no-write-card` to skip
 the auto-generated README.
 
-The lower-level `eval-publish-checkpoint` console script exposes the same
+The lower-level `eval-data publish-checkpoint` command exposes the same
 upload helper without the `all` selector:
 
 ```bash
-uv run eval-publish-checkpoint yambda-500m gsasrec-d128-drop0.5 --dry-run
+uv run eval-data publish-checkpoint yambda-500m gsasrec-d128-drop0.5 --dry-run
 ```
 
 ## Hyperparameter notes

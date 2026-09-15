@@ -74,6 +74,13 @@ defective path, and pin it with a parity test in the shape of L3's
   makes boundary ties). Three alternatives were killed by measurement; the
   confirmation was not run. Run one `linr_v4` cell at chunk 64: if it
   reproduces the golden exactly, the attribution is proven.
+  **Run at C5 (2026-09-15,
+  [evaluation-package-layout.md §11.2](evaluation-package-layout.md)): it does not.**
+  v2 at chunk 64 lands 2.9e-4 from the golden at `recall@100` — four times further than
+  chunk 16's 7.3e-5 — and moves `k = 500 / 1000` by 2.3–2.6e-4 where chunk 16 was within
+  1e-5, all downward. Batch shape moves `linr_v4` (the probe was right), but the golden is
+  not "v2 at 64"; what the old harness's quality pass did to the batch is the open
+  question, and it needs the golden worktree. `QUALITY_CHUNK` stays 16.
 - **L4-c — the `unstable` artifacts.** `clocks_drift` compares a
   start-of-process *idle* sample against under-load samples, so it fires on the
   GPU boosting (10 of C4's 18 flags). `clocks_locked` means "within 2 % of

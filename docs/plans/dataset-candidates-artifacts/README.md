@@ -7,9 +7,9 @@ subdirectory per dataset, added as each step runs.
 ## `yfcc10m/` — roadmap E1, 2026-09-06
 
 Produced on the CPU box (128 cores, no GPU used) by
-[`evaluation/eval_datasets/yfcc.py`](../../../evaluation/eval_datasets/yfcc.py)
+[`evaluation/eval_datasets/yfcc.py`](../../../evaluation/eval_datasets/etl/yfcc.py)
 and
-[`yfcc_check_gt.py`](../../../evaluation/eval_datasets/yfcc_check_gt.py),
+[`yfcc_check_gt.py`](../../../evaluation/eval_datasets/etl/yfcc_check_gt.py),
 with `RETRIEVE_DATA_ROOT=/workspace/data`.
 
 | file | what it is |
