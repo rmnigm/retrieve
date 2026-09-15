@@ -90,13 +90,17 @@ nothing, so it was not produced. The backend axis of the v2 harness is
 ## Exact commands
 
 Run from the repository root on the A100 box, with `evaluation/data`
-pointing at the dataset root and clocks locked
-(`sudo nvidia-smi -pm 1 && sudo nvidia-smi -lgc 1410`). The script that
-does all of it, including the clock lock/unlock, the per-cell logs and a
-skip-if-present resume:
+pointing at the dataset root. The plan asks for locked clocks
+(`sudo nvidia-smi -pm 1 && sudo nvidia-smi -lgc 1410`); **this container
+cannot lock them** and neither the A1 run nor the re-derive did — H §7's
+sampled-`sm_mhz` fallback is used instead. The script that does all of it,
+including the per-cell logs, the clock sampler and a skip-if-present resume:
 
 ```bash
 bash docs/plans/evaluation-harness-v2-artifacts/a1_golden_run.sh
+# the 2026-09-15 re-derive ran this copy instead (GPU lock, /venvs/golden,
+# private inductor cache, golden stage only):
+STAGES=golden bash docs/plans/evaluation-harness-v2-artifacts/a1-rederive/a1_golden_rerun.sh
 ```
 
 Stages are selectable (`STAGES="golden step4 step7 step6 step5"`), the
@@ -125,13 +129,60 @@ The working directory matters: both configs' `data_dir` and filter
 
 ## Provenance
 
+**These cells were re-derived on 2026-09-15** (roadmap eval-queue item 1).
+The originals are A1's, produced 2026-09-06; they are still in git history at
+`development`'s parent of the re-derive commit. Why they had to be redone, and
+what moved, is below the table.
+
 | what | value |
 |---|---|
-| cells produced at | `70bafc4` — `fix(A1): import the shared triton helpers by name, not via the module`, on `dev/a1-golden` off `development`. Every row carries it in `extra.commit` |
-| box | A100-SXM4-80GB, driver 570.195.03, CUDA 12.8, torch 2.10.0+cu128, triton 3.6.0, Python 3.11 |
-| clocks | **not locked — this container cannot** (`nvidia-smi -lgc` → "The current user does not have permission to change clocks"; no `sudo` binary). H §7's fallback instead: sampled every 30 s into `_logs/clocks.csv`. 1140 MHz under load (the application default, not the 1410 MHz the plan asks for), 210 MHz idle, 28-31 °C. Quality is unaffected; **the latency columns are not clock-controlled** |
+| cells produced at | `87a9b38` on the throwaway branch `tmp/golden-rederive` = `origin/dev/a1-golden` (`1ccdb27`, the old harness) with the **current library** swapped in (`git checkout 4f52972 -- retrieve/`; library tree `28fda5ae`). Every row carries `87a9b38` in `extra.commit`. The branch is never merged; it exists so the run can be repeated |
+| library under test | `4f52972:retrieve` — deterministic k-means, `clause_compact` / `bloom_compact` as opaque custom ops, the O §14.7 `-1` id sentinel (the three C4 library fixes merged at `7a21095`) |
+| harness | unchanged from A1: `origin/dev/a1-golden`. One porting change, typing only: `retrieve.interfaces.Backend` is gone from the current library (split into `LinrBackend` / `SilverTorchBackend` at B4), so the harness declares the old literal locally — copy at [`../../docs/plans/evaluation-harness-v2-artifacts/a1-rederive/harness_compat_backend.py`](../../docs/plans/evaluation-harness-v2-artifacts/a1-rederive/harness_compat_backend.py) |
+| box | A100-SXM4-80GB, driver 580.159.04, nvcc 12.4, torch 2.10.0+cu128, triton 3.6.0, Python 3.11 |
+| inputs | identical to A1: the same `encoded_queries_test.pt` blob (cache hit — the checkpoint's mtime was set to the blob's recorded `ckpt_mtime` so no re-encode could perturb the queries) and the same cached oracles `gt_d128/gt_topk_v3_{c0_genre,c0_maincat}.pt` (fingerprint hit). goodreads keeps 9,859 / 10,000 users, arxiv 10,000 / 10,000 — both as in A1 |
+| clocks | **still not locked — this container cannot** (`nvidia-smi -lgc` denied, no `sudo`). H §7's fallback: sampled every 30 s into `_logs/clocks.csv`. **1155 MHz** median under load (A1: 1140), 1410 MHz peak, 210 MHz idle, 26-39 °C. `c4_gate.py --golden-sm-mhz` must be given **1155**, not its 1140 default. Quality is unaffected; **the latency columns are not clock-controlled**, and this run also shared the GPU with a second worker through `flock /workspace/gpu.lock` (serialised, but the thermal state between cells was not controlled) |
+| wall time | 29.4 min of cell time for the 11 cells, 2.4-3.1 min each, 33 min end to end including lock waits |
+| runbook | [`a1-rederive/a1_golden_rerun.sh`](../../docs/plans/evaluation-harness-v2-artifacts/a1-rederive/a1_golden_rerun.sh), `STAGES=golden` — a copy of [`a1_golden_run.sh`](../../docs/plans/evaluation-harness-v2-artifacts/a1_golden_run.sh) with the GPU lock, `uv run --no-sync` against `/venvs/golden`, a private inductor cache, and stages 4-7 dropped |
 | exact HEAD, host and UTC of the run | `_logs/provenance.txt` |
-| run record | [evaluation-harness-v2.md §9](../../docs/plans/evaluation-harness-v2.md), with the per-cell table; the handoff's status blockquote carries the step-by-step result |
+| run record | [evaluation-harness-v2.md §11](../../docs/plans/evaluation-harness-v2.md) (A1's own record is §10) |
+| quality diff vs A1 | [`a1-rederive/quality-diff.md`](../../docs/plans/evaluation-harness-v2-artifacts/a1-rederive/quality-diff.md) |
+
+### Why they were re-derived
+
+A1's cells came from the library *before* the three C4 fixes, so comparing
+C4's harness output against them at `1e-6` would have measured the library
+change, not the harness rewrite. The old harness was therefore run unchanged
+against the new library; the harness, the data, the queries and the oracle are
+all held fixed, so every delta is a library delta.
+
+### What moved
+
+**6 of 11 cells are bit-identical**: both `linr_v1_filter_mask` cells, both
+`linr_v4` cells, `linr_v2-torch`, `linr_v3-torch`. **5 moved**, all by
+≤ 1.6e-4 — above the `1e-6` gate tolerance, which is the whole reason this
+re-derive had to happen:
+
+| cell | max abs delta | direction |
+|---|---|---|
+| `goodreads-…-silvertorch-torch` | 1.57e-4 | up |
+| `goodreads-…-silvertorch-triton` | 7.79e-5 | mixed |
+| `arxiv-…-silvertorch-triton` | 3.50e-5 | mixed |
+| `goodreads-…-linr_v3-triton` | 2.43e-5 | up |
+| `goodreads-…-linr_v2-triton` | 5.07e-6 | mixed |
+
+The headline: SilverTorch's `torch` and `triton` backends **now agree exactly**
+on goodreads — all 9 rows, `recall` and `ndcg` delta `0.0`, where A1 had a
+1.2-1.7e-4 gap it attributed to tie order. Deterministic k-means gives both
+backends the same index.
+
+**The roadmap's prediction for this run does not hold** and should not be
+repeated: it expected SilverTorch-*triton* to move *down* on rows with fewer
+than `k` survivors, with `torch` unchanged. Among the 9,859 **kept** goodreads
+users every query has ≥ 1000 survivors — the 141 dropped users are exactly the
+zero-survivor ones — so the `-1` sentinel cannot move a goodreads number at
+all; and `torch` moved because deterministic k-means is backend-independent.
+The analysis is in §11 of the run record.
 
 ## Three bugs the run found
 
