@@ -1813,3 +1813,158 @@ so a caller must `mkdir` first (`report._load` does).
   does not name one.
 * The **`matplotlib` addition is unexercised outside this box's Agg backend**, and the
   `uv.lock` change is the one thing in this branch that can conflict on merge.
+
+---
+
+## 14. Validation record — results storage and `bench upload`, 2026-09-15, CPU only (`dev/results-storage`)
+
+> Model: §13 above. Worker job under [agent-orchestration.md](agent-orchestration.md):
+> **no roadmap checkbox was flipped, nothing was merged, nothing was made public.**
+> Branch `dev/results-storage` off `development` @ `5fd05a6`, worktree
+> `/workspace/wt/results`, `/venvs/results`. `CUDA_VISIBLE_DEVICES=""` throughout —
+> no GPU work at any point, so the concurrent D1-a campaign in `/workspace/wt/d1a`
+> was not perturbed and its worktree was not touched. `retrieve/` untouched.
+>
+> **Why now, before the volume arrives.** D1 runs as five stages and E5 adds four
+> datasets; the records are the only thing the paper may cite (CLAUDE.md rule 2) and
+> they live on a rented box whose `/workspace` is a ~26 GB quota. `bench upload`
+> was the machinery meant to make them durable and **V §11 listed it "exercised by
+> no test"** — it had never been run. It has now.
+
+### 14.1 The policy
+
+Three destinations, by size and by the cost of recreating the file. Written up as
+[Results storage](../system/evaluation.md#results-storage); the short version:
+
+| what | where | why |
+|---|---|---|
+| the JSONL records, `flat.csv`, `report/` (`*.tex`, `report.md`), the validation record | **git** | 79 records exist today and they are **750 KB in total** — kilobytes, line-diffable, and they are the evidence |
+| `*.samples.jsonl`, `.perkernel/`, figures | **HF Hub**, `pinkmeme/eval-results`, private | the sidecars behind those same 750 KB are **45 MB — 60×**. Nobody diffs a latency vector, and it is regenerable only by re-running the cell on the GPU |
+| `results/_parity/*.npz` (600–680 MB/run), `results/_logs/` | **deleted** | rewritten by every run, and the parity *verdict* (`jaccard_vs_first@k`, `score_max_abs_diff`) is already inside the record. C4, C5 and B3 each deleted theirs by hand; this makes it the written rule. `.gitignore` already covers both, and `upload.files` skips every `_`-prefixed path part |
+
+The 60× ratio is the whole argument and it was measured, not guessed: `750 KB`
+of records against `45 MB` of sidecars across C4 + C5 + B3. At D1's ~700 cells the
+sidecars extrapolate to ~450 MB — 1.7 % of the quota for data no reader opens.
+
+The two halves stay in step: the Hub copy carries a sha256 per file, and that
+manifest is committed beside this plan in
+[results-storage/](evaluation-harness-v2-artifacts/results-storage/), so git can
+prove what the Hub holds without downloading it.
+
+### 14.2 What was built
+
+[`evaluation/bench/upload.py`](../../evaluation/bench/upload.py) rewritten (54 → 264
+lines) and [`evaluation/tests/bench/test_upload.py`](../../evaluation/tests/bench/test_upload.py)
+added (15 tests, no network). The command was a bare `upload_folder` mirror with a
+required `--repo-id`, `--private` defaulting to *false*, and no provenance of any kind.
+It is now:
+
+- **One `--path-in-repo` subtree per invocation**, in **one** `create_commit` — so a
+  failure leaves no half-published subtree, and C4's, C5's and B3's runs (different
+  commits, different branches, different schema versions) do not blur into one tree.
+- **`<prefix>/MANIFEST.json`**: `report.provenance` over the records actually being
+  uploaded, plus `{path, bytes, sha256}` per file.
+- **A root `README.md` generated from every manifest in the repo** — the existing ones
+  are fetched first, so a second upload does not drop the first subtree from the front
+  page. Generated from the records; no hand-written prose anywhere in it.
+- **`--verify`**: downloads the subtree back and checks every sha256.
+- **`--private/--public`, default private**, and `--repo-id` defaulting to
+  `upload.RESULTS_REPO = pinkmeme/eval-results` — the registry entry for *results*,
+  beside `eval_datasets.hub.EVAL_REPOS` for *datasets*.
+
+**Provenance survives the trip, and this is the point of the step.** Rule 2 is enforced
+inside `report.py`; the same verdict now travels with the payload. The one change outside
+`upload.py` is that `report._provenance` is renamed **`report.provenance`** and exported
+(3 lines: the `def`, its one call site, `__all__`) — deliberately *not* a copy, so the
+Hub manifest and the LaTeX banner cannot drift. `--gate STEP` is the only route to
+`"citable": true` and the evidence vetoes it exactly as in the tables: `failed`,
+`partial`, `env.dirty`, or an `env.git_branch` outside `development` / `main`.
+
+`eval_datasets/hub.py` was **not touched** (the storage worker was live in that area),
+and no second HF abstraction was built: one `HfApi`, `create_commit`, `snapshot_download`,
+`hf_hub_download`, the same four calls `hub.py` uses.
+
+### 14.3 What was published
+
+`pinkmeme/eval-results`, created **private**, 20 files / 37 MB, three subtrees —
+every record that exists on `development` today:
+
+| subtree | source | records | status | schema | branch | commit | files | bytes |
+|---|---|---|---|---|---|---|---|---|
+| `c4` | `…/evaluation-harness-v2-artifacts/c4/results` | 20 | ok=20 | 1 | `dev/c4-gate-rerun` | `afc2ab9` | 4 | 12,983,727 |
+| `c5` | `…/evaluation-package-layout-artifacts/c5/results` | 6 | ok=6 | 2 | `dev/c5-harness-split` | `71430d7` | 3 | 7,563,738 |
+| `b3` | `…/official-silvertorch-artifacts/b3/e2e` | 30 | ok=24, partial=6 | 2 | `dev/b3-head-to-head` | `e23309c` | 8 | 16,918,821 |
+
+**All three are `"citable": false`**, and the reasons are the right ones — the machinery
+found them, they were not asserted:
+
+- all three: `no --gate given` (correct: no roadmap gate is green for these), and
+  `record(s) produced on dev/…` (rule 2, verbatim).
+- `b3` additionally: `6 record(s) with status=partial` — B3's `--skip-quality` /
+  narrowed cells, caught without anyone remembering they existed.
+
+`c4` carries `schema_version: 1` and 18 `unstable` cells, `c5` 5 and `b3` 14; all of it
+is in the manifests. The three manifests and the generated README are committed at
+[results-storage/](evaluation-harness-v2-artifacts/results-storage/).
+
+### 14.4 The round trip
+
+Two independent checks, both on the VM's **local disk** (`/tmp`, 262 GB free) — never
+`/workspace`. Transcript:
+[roundtrip.txt](evaluation-harness-v2-artifacts/results-storage/roundtrip.txt).
+
+1. `--verify` on each upload, against the manifest it had just written: `c4` 4 files,
+   `c5` 3, `b3` 8, **every sha256 equal**.
+2. A separate full-repo `snapshot_download` into a fresh temp dir afterwards, then
+   `diff -r` against the three source trees: **`c4` / `c5` / `b3` IDENTICAL**, byte for
+   byte. 36 MB down.
+
+`api.repo_info(...).private` re-read after the last upload: `True`.
+
+### 14.5 Gate
+
+| gate | result |
+|---|---|
+| `ruff check evaluation` | clean |
+| `cd evaluation && CUDA_VISIBLE_DEVICES="" uv run pytest tests/` | **185 passed, 4 skipped** (baseline at `5fd05a6`: 170/4; the +15 are `test_upload.py` and nothing else changed) |
+| a no-network test for the upload path | `tests/bench/test_upload.py`, 15 tests, `HfApi` replaced by a recorder; the real upload is a validation-record item, not a CI dependency (coding-guidelines D6) |
+| `bench upload --help` | renders, rc 0 |
+| the real upload ran | three subtrees, §14.3 |
+| the round trip verified | §14.4 |
+| `python3 scripts/check_doc_links.py` | 0 broken links |
+
+### 14.6 Surprises
+
+- **The sidecar ratio is 60:1, not the 5–10× a reader would guess.** C4's
+  `goodreads-d128` is a 156 KB record file beside an 8.4 MB samples file. That single
+  number is what makes the split obviously right rather than a matter of taste.
+- **B3's 6 `partial` records were news.** Nobody had to remember them; `report.provenance`
+  reported them from the files, which is the argument for reusing it rather than writing
+  a second verdict for the Hub.
+- **The Hub's dataset viewer would have tried to parse the records.** The generated README
+  carries `viewer: false` front matter — the JSONL is ragged (perf entries differ per
+  cell) and the viewer would only fail on it; without front matter the Hub also warns
+  about a bare card on every push.
+- **The existing sidecars are already committed to git** (45 MB across the three artifact
+  dirs), predating this policy. They are left alone: rewriting history would not reclaim
+  the quota, and rule 5's instinct — do not delete what has no validated replacement —
+  applies until the Hub copy has been round-tripped from a *different* machine. The
+  policy binds D1 onward.
+
+### 14.7 Unverified
+
+- **Every number in every record published.** These are C4/C5/B3 probe runs; the
+  manifests say so. Nothing here makes them citable.
+- **`bench upload` has never run against a live `results/` tree** — the three payloads
+  are the static artifact dirs. Specifically untested against a campaign *in flight*
+  (D1-a is appending to `/workspace/wt/d1a` right now): a JSONL that grows between
+  `sha256()` and `create_commit` would upload a manifest describing a file that no longer
+  matches. **Run `bench upload` on a stage that has finished, not one that is running.**
+- **No upload larger than 37 MB, and no LFS path exercised.** `create_commit`
+  pre-uploads LFS itself, but the ~450 MB D1 sidecar set has not gone through it.
+- **The round trip was verified on this box only.** A download onto a *different*
+  machine — the real test of "the box is rented" — has not been done.
+- **`--path-in-repo ""` (the whole repo root) is untested against a real repo**; only the
+  prefixed form ran.
+- **Nothing was deleted.** The `.npz` rule is documented and already the practice; no
+  parity spill existed to delete at the time of writing.

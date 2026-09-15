@@ -1,53 +1,264 @@
-"""``bench upload`` — mirror ``results/`` to a HuggingFace dataset repo (H §3.1: a mirror, no
-staging layout). ``_logs/`` and ``_parity/`` (campaign scratch) are skipped; everything else
-under ``--results`` goes up as-is, so the JSONL + samples sidecars keep their names."""
+"""``bench upload`` — publish a results tree to a HuggingFace dataset repo (H §3.1, §8.2 G/I).
+
+The storage policy this implements is the "Results storage" section of
+``docs/system/evaluation.md``: the JSONL records, ``flat.csv`` and the report go in **git**,
+because they are the evidence and they are kilobytes; the verbose sidecars
+(``*.samples.jsonl``, ``.perkernel/``, figures) go **here**, because they are ~60x larger and
+nobody diffs them; ``results/_parity/*.npz`` and ``results/_logs/`` go **nowhere** — scratch,
+rewritten by every run, skipped by the ``_``-prefix rule in :func:`files`.
+
+One invocation publishes one ``--path-in-repo`` subtree and writes two generated files:
+``<prefix>/MANIFEST.json`` — that subtree's provenance *plus a sha256 per file*, so the round
+trip is checkable — and a root ``README.md`` rebuilt from every manifest in the repo.
+**The citability verdict is ``report.provenance``, the same function ``bench report`` uses**
+(CLAUDE.md rule 2), so a file fetched from the Hub in six months carries the same NOT CITABLE
+reasons the tables would have carried. ``--gate`` cannot override the evidence, only the
+default. **Private by default** — going public is roadmap F4's decision, not this command's.
+"""
 
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import json
+import tempfile
 from pathlib import Path
 
 import click
 
+from bench import records
+from bench.report import provenance
+
 EVAL_DIR = Path(__file__).resolve().parents[1]
-IGNORE = ["_*", "_*/**", "**/_*", "**/_*/**"]
+RESULTS_REPO = "pinkmeme/eval-results"  # the registry entry, beside eval_datasets.hub.EVAL_REPOS
+MANIFEST_VERSION = 1
+GENERATED = ("MANIFEST.json", "README.md")
 
 
 def files(results: Path) -> list[Path]:
+    """Every file to publish: the tree minus anything under a ``_``-prefixed path part
+    (``_logs/``, ``_parity/``) and minus what a previous upload generated."""
     return sorted(
         p
         for p in results.rglob("*")
-        if p.is_file() and not any(part.startswith("_") for part in p.relative_to(results).parts)
+        if p.is_file()
+        and not any(part.startswith("_") for part in p.relative_to(results).parts)
+        and p.relative_to(results).as_posix() not in GENERATED
     )
+
+
+def _source(results: Path) -> str:
+    """The tree's path relative to the repository root — an absolute worktree path on a
+    rented box is not provenance anyone can use in six months."""
+    for d in (results, *results.parents):
+        if (d / ".git").exists():
+            return results.relative_to(d).as_posix()
+    return str(results)
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def manifest(results: Path, listing: list[Path], prefix: str, gate: str | None) -> dict:
+    """The subtree's provenance and per-file checksums. The records are read out of the
+    ``.jsonl`` files being uploaded, so the verdict describes what actually goes up."""
+    recs = [
+        r
+        for p in listing
+        if p.suffix == ".jsonl" and not p.name.endswith(".samples.jsonl")
+        for r in records.read_records(p)
+    ]
+    return {
+        "manifest_version": MANIFEST_VERSION,
+        "path_in_repo": prefix,
+        "source": _source(results),
+        "uploaded": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        **provenance(recs, gate),
+        "n_files": len(listing),
+        "bytes": sum(p.stat().st_size for p in listing),
+        "files": [
+            {
+                "path": p.relative_to(results).as_posix(),
+                "bytes": p.stat().st_size,
+                "sha256": sha256(p),
+            }
+            for p in listing
+        ],
+    }
+
+
+def _row(m: dict) -> str:
+    return (
+        f"| `{m['path_in_repo'] or '(root)'}` | {m['n_records']} | "
+        f"{'; '.join(f'{k}={v}' for k, v in m['status'].items()) or '—'} | "
+        f"{'**yes**' if m['citable'] else 'NO'} | "
+        f"{','.join(map(str, m['schema_versions'])) or '?'} | "
+        f"{','.join(m['branches']) or '?'} | {','.join(m['commits']) or '?'} | "
+        f"{m['n_files']} | {m['bytes']:,} |"
+    )
+
+
+def readme(manifests: list[dict]) -> str:
+    """The repo's front page, generated from the manifests — never hand-written prose."""
+    ms = sorted(manifests, key=lambda m: m["path_in_repo"])
+    out = [
+        # front matter: the records are ragged JSONL, not a browsable dataset — the viewer
+        # would only fail at parsing them, and without it the Hub warns about a bare card.
+        "---",
+        "viewer: false",
+        "tags: [benchmark-results, torchretrieve]",
+        "---",
+        "",
+        "# `torchretrieve` — benchmark results",
+        "",
+        "GENERATED by `bench upload` out of the records themselves. Do not edit: the next",
+        "upload overwrites it. Each subtree's `MANIFEST.json` is the authority.",
+        "",
+        '**Nothing here is citable unless its `MANIFEST.json` says `"citable": true`.**',
+        "A subtree is citable only when the uploader named a green roadmap gate *and* the",
+        "records back it: no `failed` or `partial` cell, no dirty library subtree, and every",
+        "record taken on `development` or `main` (CLAUDE.md rule 2 — harness numbers from a",
+        "branch are not paper material). The verdict is computed by the same function",
+        "`bench report` uses, so it cannot drift from the tables.",
+        "",
+        "| subtree | records | status | citable | schema | branch | commit | files | bytes |",
+        "|---|---|---|---|---|---|---|---|---|",
+        *(_row(m) for m in ms),
+        "",
+    ]
+    for m in ms:
+        out += [
+            f"## `{m['path_in_repo'] or '(root)'}`",
+            "",
+            f"- uploaded {m['uploaded']}, from `{m['source']}`",
+            f"- code_version `{','.join(m['code_versions']) or '?'}`"
+            f"  ·  GPU {','.join(m['gpus']) or '?'}"
+            f"  ·  host {','.join(m['hosts']) or '?'}",
+            f"- run window {m['started'][0]} .. {m['started'][1]}"
+            f"  ·  {m['unstable']} cell(s) flagged `unstable`",
+            "",
+        ]
+        if m["citable"]:
+            out += [f"**CITABLE** — the uploader declared gate `{m['gate']}` green.", ""]
+        else:
+            out += ["**NOT CITABLE.** Reasons:", ""]
+            out += [f"- {b}" for b in m["blockers"]]
+            out += [""]
+    out += [
+        "## Fetching",
+        "",
+        "```python",
+        "from huggingface_hub import snapshot_download",
+        'snapshot_download(repo_id="<this repo>", repo_type="dataset",',
+        '                  local_dir="results", allow_patterns=["<subtree>/*"])',
+        "```",
+        "",
+        "`MANIFEST.json` carries a sha256 per file; `bench upload --verify` checks a fresh",
+        "download against it. Records are `<suite>/<dataset>-d<dim>.jsonl`, one JSON object",
+        "per cell; `*.samples.jsonl` are the per-call latency vectors behind them.",
+        "",
+    ]
+    return "\n".join(out)
+
+
+def verify(local: Path, man: dict) -> list[str]:
+    """Mismatches between a downloaded subtree and the manifest that described it."""
+    bad = []
+    for f in man["files"]:
+        p = local / f["path"]
+        if not p.is_file():
+            bad.append(f"missing: {f['path']}")
+        elif p.stat().st_size != f["bytes"]:
+            bad.append(f"size {p.stat().st_size} != {f['bytes']}: {f['path']}")
+        elif sha256(p) != f["sha256"]:
+            bad.append(f"sha256 differs: {f['path']}")
+    return bad
+
+
+def _other_manifests(api, repo_id: str, prefix: str) -> list[dict]:
+    """The manifests already in the repo, minus the one this upload replaces: the root README
+    is rebuilt from all of them, so it describes the repo and not just today's subtree."""
+    from huggingface_hub import hf_hub_download  # noqa: PLC0415
+
+    out = []
+    for f in api.list_repo_files(repo_id=repo_id, repo_type="dataset"):
+        if not f.endswith("MANIFEST.json") or f.rpartition("/")[0] == prefix:
+            continue
+        out.append(json.loads(Path(hf_hub_download(repo_id=repo_id, repo_type="dataset",
+                                                   filename=f)).read_text()))
+    return out
 
 
 @click.command()
-@click.option("--repo-id", required=True, help="target HF dataset repo, e.g. user/retrieval-evals")
-@click.option("--results", type=click.Path(path_type=Path), default=EVAL_DIR / "results")
-@click.option("--private", is_flag=True, help="create the repo as private")
-@click.option("--dry-run", is_flag=True, help="list what would be uploaded")
-def upload(repo_id: str, results: Path, private: bool, dry_run: bool) -> None:
-    """Mirror the results directory to a HuggingFace dataset repo."""
-    results = results if results.is_absolute() else EVAL_DIR / results
+@click.option("--repo-id", default=RESULTS_REPO, show_default=True, help="target HF dataset repo")
+@click.option("--results", type=click.Path(path_type=Path), default=EVAL_DIR / "results",
+              help="the results tree to publish")
+@click.option("--path-in-repo", "prefix", default="", help="subtree in the repo, e.g. d1-a")
+@click.option("--gate", default=None,
+              help="the roadmap step whose gate is green for these records (e.g. D1). Without "
+                   "it the manifest says NOT CITABLE; it cannot override the evidence.")
+@click.option("--private/--public", default=True, show_default=True,
+              help="public is roadmap F4's decision, never a default")
+@click.option("--verify", "do_verify", is_flag=True,
+              help="download the subtree back to a temp dir and check every sha256")
+@click.option("--dry-run", is_flag=True, help="print the listing and the manifest, upload nothing")
+def upload(repo_id, results, prefix, gate, private, do_verify, dry_run) -> None:  # fmt: skip
+    """Publish a results tree to a HuggingFace dataset repo, with its provenance."""
+    results = (results if results.is_absolute() else EVAL_DIR / results).resolve()
+    if not results.is_dir():
+        raise click.ClickException(f"{results} is not a directory")
+    prefix = prefix.strip("/")
     listing = files(results)
-    total = sum(p.stat().st_size for p in listing)
-    for p in listing:
-        click.echo(f"  {p.relative_to(results)} ({p.stat().st_size:,} bytes)")
-    click.echo(f"{len(listing)} files, {total:,} bytes -> {repo_id} (private={private})")
+    if not listing:
+        raise click.ClickException(f"{results} has no files to upload (scratch dirs are skipped)")
+
+    man = manifest(results, listing, prefix, gate)
+    for f in man["files"]:
+        click.echo(f"  {f['path']} ({f['bytes']:,} bytes)")
+    click.echo(
+        f"{man['n_files']} files, {man['bytes']:,} bytes, {man['n_records']} record(s) "
+        f"-> {repo_id}/{prefix or '.'} (private={private})"
+    )
+    click.echo("  CITABLE" if man["citable"] else "  NOT CITABLE: " + "; ".join(man["blockers"]))
     if dry_run:
+        click.echo(json.dumps(man, indent=2))
         return
-    from huggingface_hub import HfApi  # noqa: PLC0415
+
+    from huggingface_hub import CommitOperationAdd, HfApi, snapshot_download  # noqa: PLC0415
+
+    def at(rel: str) -> str:
+        return f"{prefix}/{rel}" if prefix else rel
 
     api = HfApi()
     api.create_repo(repo_id=repo_id, repo_type="dataset", private=private, exist_ok=True)
-    api.upload_folder(
-        folder_path=str(results),
+    body = readme([*_other_manifests(api, repo_id, prefix), man]).encode()
+    ops = [CommitOperationAdd(at(f["path"]), str(results / f["path"])) for f in man["files"]]
+    ops.append(CommitOperationAdd(at("MANIFEST.json"), json.dumps(man, indent=2).encode()))
+    ops.append(CommitOperationAdd("README.md", body))
+    api.create_commit(
         repo_id=repo_id,
         repo_type="dataset",
-        ignore_patterns=IGNORE,
-        commit_message=f"results mirror {dt.date.today().isoformat()}",
+        operations=ops,
+        commit_message=f"results {prefix or 'root'}: {man['n_records']} records, "
+                       f"{'citable' if man['citable'] else 'NOT CITABLE'}",
     )
-    click.echo(f"done: https://huggingface.co/datasets/{repo_id}")
+    click.echo(f"done: https://huggingface.co/datasets/{repo_id}/tree/main/{prefix}")
+
+    if do_verify:
+        with tempfile.TemporaryDirectory(prefix="bench-upload-verify-") as tmp:
+            local = snapshot_download(
+                repo_id=repo_id, repo_type="dataset", local_dir=tmp,
+                allow_patterns=[f"{prefix}/*"] if prefix else None,
+            )
+            bad = verify(Path(local) / prefix, man)
+        if bad:
+            raise click.ClickException(f"round trip failed ({len(bad)}):\n" + "\n".join(bad))
+        click.echo(f"round trip verified: {man['n_files']} files, sha256 equal")
 
 
-__all__ = ["upload"]
+__all__ = ["RESULTS_REPO", "files", "manifest", "readme", "upload", "verify"]
