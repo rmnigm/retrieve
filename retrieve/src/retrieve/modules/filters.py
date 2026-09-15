@@ -88,8 +88,8 @@ class BloomFilter(FilterModule):
         return ops_for(self.backend).bloom_match(qb, self.bloom_sigs)
 
     def evaluate_indices(self, query_clause_attrs: Tensor) -> tuple[Tensor, Tensor]:
-        """Returns (positive_indices [B, P] int64, counts [B] int64); within-row id order is
-        unspecified (triton atomics), so callers that care must sort."""
+        """Returns (positive_indices [B, N] int64, counts [B] int64); each row's ids are in
+        ascending item order on both backends (plan L3)."""
         qb = self._build_query_sigs(query_clause_attrs)  # [B, W]
         return ops_for(self.backend).bloom_compact(qb, self.bloom_sigs)
 
@@ -138,8 +138,8 @@ class ExactAttributeFilter(FilterModule):
         )
 
     def evaluate_indices(self, query_clause_attrs: Tensor) -> tuple[Tensor, Tensor]:
-        """Returns (positive_indices [B, P] int64, counts [B] int64); within-row id order is
-        unspecified (triton atomics), so callers that care must sort."""
+        """Returns (positive_indices [B, N] int64, counts [B] int64); each row's ids are in
+        ascending item order on both backends (plan L3)."""
         return ops_for(self.backend).clause_compact(
             self.item_clause_attrs, self.clause_is_reverse, query_clause_attrs
         )
