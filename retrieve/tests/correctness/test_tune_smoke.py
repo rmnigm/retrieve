@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve import tune
+from retrieve.ops import tune
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
 

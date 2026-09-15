@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Training and evaluation for retrieve framework"
 requires-python = ">=3.10"
 dependencies = [
-    "retrieve",
+    "torchretrieve",
     "torch>=2.4,<3",
     "polars>=1.0",
     "pyarrow>=15",

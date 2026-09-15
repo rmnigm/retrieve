@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import torch
 
-from retrieve.layers.utils.retrieval import FullScanKNN, post_filter_topk
+from retrieve.functional import post_filter_topk
+from retrieve.modules.knn import FullScanKNN
 from tests.conftest import make_index, make_mask, make_query
 
 N, D, B, K = 1024, 128, 8, 32

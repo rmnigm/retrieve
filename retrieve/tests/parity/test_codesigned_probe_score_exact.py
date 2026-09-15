@@ -1,24 +1,25 @@
-"""Triton ``codesigned_probe_score_exact`` vs the shared pure-torch phase-2+3
-reference (``tests/parity/conftest.py::ref_cps_phase23``, exact-predicate form)."""
+"""Triton ``codesigned_probe_score_exact`` vs the same op in ``retrieve.ops.reference`` (the
+pure-torch phase 2+3 with the exact predicate)."""
 
 from __future__ import annotations
 
 import pytest
 import torch
 
-from retrieve.kernels.silvertorch.codesigned_probe_score_exact import (
+from retrieve.indexing.quantize import quantize_int8_global
+from retrieve.ops import reference
+from retrieve.ops.triton.codesigned_probe_score_exact import (
     CodesignedProbeScoreExactConfig,
     _codesigned_probe_score_exact_impl,
     codesigned_probe_score_exact,
 )
-from retrieve.layers.utils.quantize import quantize_int8_global
 from tests.conftest import (
     make_attrs,
     make_index,
     make_query,
     make_query_attrs,
 )
-from tests.parity.conftest import assert_topk_matches, ref_cps_phase23
+from tests.parity.conftest import assert_topk_matches
 
 
 def _make_flat_probed(b, n, p, *, pad_rate=0.1, seed=7):
@@ -58,15 +59,8 @@ def test_codesigned_exact_matches_ref(n, d, p, k, c, a_max, b):
         global_scale,
         k,
     )
-    ref_ids, ref_scores = ref_cps_phase23(
-        query,
-        flat,
-        codes,
-        global_scale,
-        k,
-        item_clause_attrs=attrs,
-        clause_is_reverse=rev,
-        query_clause_attrs=q_attrs,
+    ref_ids, ref_scores = reference.codesigned_probe_score_exact(
+        query, flat, codes, attrs, rev, q_attrs, global_scale, k
     )
     assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores)
 
@@ -108,25 +102,11 @@ def test_codesigned_exact_reverse_clause():
         k,
     )
     # Parity against the reference for both reverse configs.
-    ref_off_ids, ref_off_scores = ref_cps_phase23(
-        query,
-        flat,
-        codes,
-        global_scale,
-        k,
-        item_clause_attrs=attrs,
-        clause_is_reverse=rev_off,
-        query_clause_attrs=q_attrs,
+    ref_off_ids, ref_off_scores = reference.codesigned_probe_score_exact(
+        query, flat, codes, attrs, rev_off, q_attrs, global_scale, k
     )
-    ref_on_ids, ref_on_scores = ref_cps_phase23(
-        query,
-        flat,
-        codes,
-        global_scale,
-        k,
-        item_clause_attrs=attrs,
-        clause_is_reverse=rev_on,
-        query_clause_attrs=q_attrs,
+    ref_on_ids, ref_on_scores = reference.codesigned_probe_score_exact(
+        query, flat, codes, attrs, rev_on, q_attrs, global_scale, k
     )
     assert_topk_matches(ids_off, scores_off, ref_off_ids, ref_off_scores)
     assert_topk_matches(ids_on, scores_on, ref_on_ids, ref_on_scores)
@@ -158,7 +138,7 @@ def test_codesigned_exact_inactive_query():
         k,
     )
 
-    from retrieve.kernels.silvertorch.codesigned_probe_score import (
+    from retrieve.ops.triton.codesigned_probe_score import (
         _codesigned_probe_score_impl,
     )
 

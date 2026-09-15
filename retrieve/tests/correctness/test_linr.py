@@ -11,14 +11,10 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.layers.filters import ExactAttributeFilter
-from retrieve.layers.linr.one_bit_knn import OneBitKNN
-from retrieve.layers.linr.postfilter_knn import PostfilterKNN
-from retrieve.layers.linr.postfilter_knn_int8 import PostfilterKNNInt8
-from retrieve.layers.linr.prefilter_knn import PrefilterKNN
-from retrieve.layers.linr.simhash_knn import SimHashKNN
-from retrieve.layers.utils.compact import compact_mask
-from retrieve.layers.utils.retrieval import FullScanKNN
+from retrieve.functional import compact_mask
+from retrieve.modules import ExactAttributeFilter
+from retrieve.modules.bit_knn import OneBitKNN, SimHashKNN
+from retrieve.modules.knn import FullScanKNN, PostfilterKNN, PostfilterKNNInt8, PrefilterKNN
 from tests.conftest import (
     assert_topk_id_sets_match,
     make_attrs,
