@@ -2,8 +2,8 @@
 
 ``ExactAttributeFilter.evaluate_indices`` already routes to ``clause_compact`` on CUDA,
 so we call the kernel directly to keep this a true kernel-vs-pure-torch parity
-check. Output id ordering is unspecified per the kernel doc — we compare row
-*sets* of returned ids, not positions.
+check. Rows are compared in order: the kernel's contract is ascending item order (plan L3),
+the same order ``compact_mask`` emits.
 """
 
 from __future__ import annotations
@@ -29,16 +29,14 @@ def _ref(attrs: torch.Tensor, is_reverse: torch.Tensor, q: torch.Tensor):
     return ref_ids, ref_counts
 
 
-def _set_match(out_ids, out_counts, ref_ids, ref_counts) -> None:
+def _rows_equal(out_ids, out_counts, ref_ids, ref_counts) -> None:
     assert torch.equal(out_counts, ref_counts), (
         f"counts: {out_counts.tolist()} vs {ref_counts.tolist()}"
     )
     b = ref_counts.shape[0]
     for r in range(b):
         c = int(ref_counts[r].item())
-        assert set(out_ids[r, :c].tolist()) == set(ref_ids[r, :c].tolist()), (
-            f"row {r}: id-set mismatch"
-        )
+        assert torch.equal(out_ids[r, :c], ref_ids[r, :c]), f"row {r}: ids differ"
 
 
 @pytest.mark.parametrize("n", [256, 4096])
@@ -52,7 +50,7 @@ def test_clause_compact_matches_pure_torch(n, c, a_max, pad_rate):
 
     out_ids, out_counts = clause_compact(attrs, is_reverse, q)
     ref_ids, ref_counts = _ref(attrs, is_reverse, q)
-    _set_match(out_ids, out_counts, ref_ids, ref_counts)
+    _rows_equal(out_ids, out_counts, ref_ids, ref_counts)
 
 
 def test_clause_compact_with_reverse_clauses():
@@ -63,7 +61,7 @@ def test_clause_compact_with_reverse_clauses():
 
     out_ids, out_counts = clause_compact(attrs, is_reverse, q)
     ref_ids, ref_counts = _ref(attrs, is_reverse, q)
-    _set_match(out_ids, out_counts, ref_ids, ref_counts)
+    _rows_equal(out_ids, out_counts, ref_ids, ref_counts)
 
 
 def test_clause_compact_inactive_query_passes_all():
@@ -77,7 +75,7 @@ def test_clause_compact_inactive_query_passes_all():
     expected = torch.full((4,), n, dtype=torch.int64, device="cuda")
     assert torch.equal(out_counts, expected)
     for r in range(4):
-        assert set(out_ids[r, :n].tolist()) == set(range(n))
+        assert torch.equal(out_ids[r, :n], torch.arange(n, device="cuda"))
 
 
 def test_clause_compact_no_passing_items():
@@ -100,14 +98,14 @@ def test_clause_compact_b_one():
 
     out_ids, out_counts = clause_compact(attrs, is_reverse, q)
     ref_ids, ref_counts = _ref(attrs, is_reverse, q)
-    _set_match(out_ids, out_counts, ref_ids, ref_counts)
+    _rows_equal(out_ids, out_counts, ref_ids, ref_counts)
 
 
 @pytest.mark.parametrize("block_n, num_warps", [(128, 2), (512, 8), (1024, 4)])
 def test_clause_compact_config_override(block_n, num_warps):
-    """Non-default ``ClauseCompactConfig`` produces the same row-id sets —
+    """Non-default ``ClauseCompactConfig`` produces the same rows —
     proves the ``config=`` kwarg plumbs through ``_clause_compact_impl``
-    to the kernel launch and the atomic_add compaction stays correct
+    to the kernel launch and the two-phase compaction stays correct
     under non-default tiles."""
     n, c = 4096, 3
     attrs = make_attrs(n, c=c, a_max=2, n_vocab=30, pad_rate=0.2, seed=121)
@@ -117,4 +115,4 @@ def test_clause_compact_config_override(block_n, num_warps):
     cfg = ClauseCompactConfig(block_n=block_n, num_warps=num_warps)
     out_ids, out_counts = _clause_compact_impl(attrs, is_reverse, q, config=cfg)
     ref_ids, ref_counts = _ref(attrs, is_reverse, q)
-    _set_match(out_ids, out_counts, ref_ids, ref_counts)
+    _rows_equal(out_ids, out_counts, ref_ids, ref_counts)

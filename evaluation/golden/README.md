@@ -148,6 +148,26 @@ what moved, is below the table.
 | run record | [evaluation-harness-v2.md §11](../../docs/plans/evaluation-harness-v2.md) (A1's own record is §10) |
 | quality diff vs A1 | [`a1-rederive/quality-diff.md`](../../docs/plans/evaluation-harness-v2-artifacts/a1-rederive/quality-diff.md) |
 
+**Two cells were re-derived again at roadmap L3 (2026-09-15):**
+`goodreads-d128-c0_genre-linr_v2-triton.json` and
+`goodreads-d128-c0_genre-linr_v3-triton.json`. The re-derive above found
+these two could not reproduce *themselves* across processes (2.0e-6 and
+6.8e-5 spread; H §11.8): the Triton compaction kernels claimed their row base
+with an atomic, so a row's candidate order was the tile-completion order and
+the downstream tie-breakers turned it into quality noise. L3 made the
+compaction deterministic (ascending item order,
+[deterministic-compaction.md](../../docs/plans/deterministic-compaction.md)),
+and the cells were produced by the same old harness in the same worktree
+(`tmp/golden-rederive` @ `6c70e74`, L3's library `2b74979` swapped in), **twice
+each**, byte-identical to each other on every quality column; the committed
+files are run 1. Against the 2026-09-15 originals they moved by ≤ 6.1e-7
+(`linr_v2`) and ≤ 5.9e-5 (`linr_v3`) — inside the old noise band, which is why
+the originals could not be kept: they were one arbitrary sample of it. The two
+runs, logs, clock trace and provenance are in
+[`deterministic-compaction-artifacts/golden-rederive/`](../../docs/plans/deterministic-compaction-artifacts/golden-rederive/);
+`_logs/` holds run 1's two logs. Sampled SM clock median during those cells:
+1155 MHz (same as the re-derive).
+
 ### Why they were re-derived
 
 A1's cells came from the library *before* the three C4 fixes, so comparing

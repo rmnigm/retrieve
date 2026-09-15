@@ -110,6 +110,22 @@ Callers must drop those slots rather than treat `-1` as an item: a hit-based
 metric that only compares ids would otherwise score a padded slot against a
 target id of `-1`.
 
+**Candidate order is part of the contract.** `evaluate_indices` returns each
+row's survivors in **ascending item order** on every backend: the
+`compact_mask` (stable argsort) order on `torch`, and since roadmap L3 the
+same order from the fused `clause_compact` / `bloom_compact` kernels, which
+count per tile (stashing each tile's survivors in its own slot range), scan,
+and move every run to its fixed row offset
+([kernels.md](kernels.md#clause_compact--fused-clause-eval--stream-compaction)).
+Before L3 the kernels claimed their row base with an atomic, so a row came
+out in tile-completion order and the downstream tie-breakers —
+`PrefilterKNN`'s top-k, and `OneBitKNN`'s heavily tied Hamming ranking,
+which decides pool membership — made `linr_v2` / `linr_v3` on `triton`
+irreproducible run to run (2e-6 / 7e-5,
+[deterministic-compaction.md](../plans/deterministic-compaction.md) §1).
+The same candidate order every call is what makes a quality number
+repeatable.
+
 ## Bloom hash keys: `(clause_idx, value)`
 
 The paper says *"for each feature, we apply K hash functions"* — and a

@@ -129,10 +129,9 @@ patterns had drawbacks:
 
 - `@triton.autotune` re-tunes at every cache-key shape change, leaking
   compile pressure into the cudagraph-trees capture for
-  `torch.compile(dynamic=True, mode="reduce-overhead")` and re-running
-  the autotune sweep across `tl.atomic_add` kernels corrupts output
-  buffers across trials (the compact kernels can't safely autotune
-  in-kernel).
+  `torch.compile(dynamic=True, mode="reduce-overhead")`, and — while the
+  compact kernels claimed their row base with `tl.atomic_add`, before
+  L3 — re-running the sweep corrupted output buffers across trials.
 - Hard-coded `_BLOCK_N = 256` etc. were guesses, not measurements;
   picked once and never re-checked against real-eval shapes.
 
@@ -184,13 +183,10 @@ The shipped pattern, applied uniformly to every kernel in this tree:
    runs one tiny regime per spec so schema drift between tune.py and
    the kernel `_impl`s breaks CI instead of a tuning session.
 
-For the compact kernels, the offline tuner avoids the `atomic_add`
-hazard naturally: it calls the host wrapper, which allocates fresh
-`out_indices` (`-1`-filled) and `counts` (zeros) on every call — `do_bench`
-reps each pay one allocation, so no cross-rep accumulation. The
-warning that lived on the kernel files about
-`@triton.autotune`-time corruption still applies to in-kernel
-autotune; the offline path is unaffected.
+The compact kernels have had no accumulating state since L3 (per-tile
+counts and offsets are plain stores, so a repeated launch rewrites the
+same values); the tuner calls their host wrappers, which allocate fresh
+buffers per call either way.
 
 ## Shared kernel helpers (`ops/triton/common.py`)
 
@@ -219,10 +215,19 @@ its own tile shape, launch grid, or masking policy:
   `codesigned_probe_score_exact` (`ids=safe_ids`, `load_mask=valid`).
   `is_reverse_ptr` must point at int8 storage (host preps do
   `.to(torch.int8)`; Triton can't load native torch.bool).
-- `compact_store(pass_mask, ids, counts_ptr, out_ptr, bid, ...)` — the
-  stream-compaction epilogue (`cumsum` intra-tile offsets +
-  `atomic_add` row base + masked store), shared by `clause_compact` and
-  `bloom_compact`.
+- `compact_store(pass_mask, ids, base, out_ptr, bid, ...)` — the
+  stream-compaction store (`cumsum` intra-tile rank + masked store at
+  the caller-supplied `base`, cast to the pointee type).
+- `compact_stash(pass_mask, ids, tile_counts_ptr, scratch_ptr, bid,
+  tile_id, ..., BLOCK_N)` — phase 1 of the two compaction ops: the
+  tile's survivor count, and `compact_store` of its ids into the tile's
+  own slot range `scratch[bid, tile_id * BLOCK_N :]` (int32).
+- `compact_scatter_kernel` — the one *launched* kernel in this file:
+  phase 3 of both compaction ops, one program per `(row, tile)` on the
+  predicate launch's grid, moving the tile's stashed run to the scanned
+  row offset. Launched by
+  [`_host.compact_finish`](../../retrieve/src/retrieve/ops/triton/_host.py),
+  which also does the `cumsum`.
 - `or_combine(a, b)` — combine_fn for `tl.reduce` OR-reductions.
 
 Perf caveat: helpers with many pointer params (`clause_pass`) can
@@ -438,7 +443,7 @@ bucketing needed.
 
 Powers `ExactAttributeFilter.evaluate_indices`. Avoids materializing the
 dense `[B, N]` bool that `evaluate_mask` would otherwise produce, then doing
-a host-side argsort to compact it. One launch produces the
+a host-side argsort to compact it. One op call produces the
 `(positive_indices, counts)` pair that `PrefilterKNN` and `OneBitKNN`'s
 sparse paths consume.
 
@@ -461,29 +466,66 @@ dispatched programs share the same item tile (good L2 reuse on the
 split across `grid_y × grid_z` to dodge the 65,535 cap on a single
 axis (which would otherwise overflow at N>~16M with `block_n=256`). The
 kernel reconstructs `tile_id = tile_x * tiles_y + tile_y`. Each program
-owns one `(query, n-tile)` cell and produces:
+owns one `(query, n-tile)` cell. The op is **two launches around a
+scan** (plan L3, decision D2). The predicate launch keeps the pre-L3
+epilogue — `cumsum` intra-tile ranks and a masked store — with the
+`atomic_add` row base replaced by the tile's own fixed slot range in an
+int32 scratch, plus a store of the tile's count; the scan and a
+predicate-free second launch then move each tile's run to its row offset:
 
 ```
-per program (b, tile):
+predicate launch (b, tile):                     _clause_compact_kernel
     pass_mask = AND over clauses of (any item attr == query attr) ^ reverse
-    intra     = tl.cumsum(pass_mask) - 1               # intra-tile offset
-    base      = tl.atomic_add(counts[b], tile_sum)     # row base offset
-    tl.store(positive_indices[b, base + intra], item_id, mask=pass_mask)
+    tile_counts[b, tile] = sum(pass_mask)                     # common.compact_stash
+    intra = tl.cumsum(pass_mask) - 1
+    tl.store(scratch[b, tile * BLOCK_N + intra], item_id, mask=pass_mask)
+host, inside the op:                            _host.compact_finish
+    tile_ends    = tile_counts.cumsum(1)          # [B, T] int64, T = grid tiles
+    tile_offsets = tile_ends - tile_counts        # exclusive scan
+    counts       = tile_ends[:, -1].clone()
+scatter launch (b, tile), same grid:            common.compact_scatter_kernel
+    ids = scratch[b, tile * BLOCK_N : +tile_counts[b, tile]]
+    positive_indices[b, tile_offsets[b, tile] : +count] = ids
 ```
+
+Why this shape and not plan D3's (re-evaluate the predicate in the second
+launch) or §6's (a packed bitmask): both were built and measured
+([deterministic-compaction.md](../plans/deterministic-compaction.md) §7).
+Re-evaluation costs a full second pass of the predicate (1.9–3.1× on the
+kernel, +43–58% on a V2/V3 forward). The bitmask — and even a bare
+count-only epilogue — makes the *predicate* launch 1.7–1.8× slower at
+`B = 1`, where the grid is under one wave and per-program latency is the
+kernel time; the `cumsum` + masked-store epilogue keeps it at the one-pass
+speed (1.10× at B=1, 1.03× at B=16, full pipeline). The scratch traffic is
+the survivors only (4 B in, 8 B out per id); its allocation is
+`4 · B · T · BLOCK_N` bytes, half the `[B, N]` int64 result. `counts` is a
+fresh tensor, not a view into the scan: inductor asserts custom-op outputs
+are 16-byte aligned, and at `B = 1` the scan's last column is a contiguous
+view at element offset `T - 1` (the first defect L3 hit;
+`test_compiled_batch_of_one_bloom_v2`).
 
 **Clause loop** is the shared
 [`common.clause_pass`](../../retrieve/src/retrieve/ops/triton/common.py)
 helper, fully unrolled (`C` and `A_MAX` are `tl.constexpr`): inner OR
 over the `A_MAX` attribute slots per clause, outer AND over the `C`
 clauses, with the reverse flag XORed in per-clause and `q_c == -1`
-overriding to "always passes." The compaction epilogue is
-`common.compact_store`.
+overriding to "always passes." The tile's count and id run go out
+through `common.compact_stash`; `common.compact_scatter_kernel` moves the
+run to the scanned base.
 
-**Output ordering** within a row is **unspecified** — atomics across tiles
-race with each other. Downstream consumers (`fused_masked_knn_topk`,
-`oporp_1bit_match_topk` HAS_INDICES path) only care about the *set* of
-passing ids, so this is fine. Callers that need a deterministic order must
-sort.
+**Output ordering** within a row is **ascending item order** — the order
+`ops.reference.clause_compact` (`compact_mask`'s stable argsort) emits, so
+the two backends agree `torch.equal` on ids and counts, and a call
+reproduces itself launch after launch and process after process
+([`test_compact_order.py`](../../retrieve/tests/parity/test_compact_order.py)).
+This is the L3 contract: the one-pass kernel it replaced claimed each
+tile's row base with a `tl.atomic_add`, which ordered a row by tile
+completion; `PrefilterKNN`'s top-k and `OneBitKNN`'s heavily tied Hamming
+ranking turned that into 2e-6 / 7e-5 run-to-run quality noise on
+`linr_v2` / `linr_v3`
+([deterministic-compaction.md](../plans/deterministic-compaction.md) §1-2).
+The price is the scan, the stash round trip and two extra launches —
+measured in that plan's §7.
 
 **Op registration** is `@torch.library.custom_op`, not `@triton_op` — this
 kernel and `bloom_compact` are the two exceptions in the tree. The
@@ -494,18 +536,17 @@ bullet in the conventions list at the top of this file has the full mechanism
 and names the regression test.
 
 **Tile config.** `ClauseCompactConfig(block_n, num_warps, num_stages)`
-— shipped as `DEFAULT_CONFIG` on the kernel module; tests/tuner override
-via `_clause_compact_impl(..., config=)`. Re-tune on a new arch via
-`uv run tune-kernels clause-compact`. The `@triton.autotune`
-hazard around `tl.atomic_add` accumulating across trials does **not**
-apply to the offline tuner — see [Autotune separation](#autotune-separation).
+— shipped as `DEFAULT_CONFIG` on the kernel module (tuned for the one-pass
+kernel; not re-tuned for the two-phase shape — roadmap Phase G); tests/tuner
+override via `_clause_compact_impl(..., config=)`. Re-tune on a new arch via
+`uv run tune-kernels clause-compact`.
 
 ## `clause_mask` — fused clause eval emitting `[B, N]` bool
 
 [`ops/triton/clause_mask.py`](../../retrieve/src/retrieve/ops/triton/clause_mask.py).
 
 Powers `ExactAttributeFilter.evaluate_mask` on CUDA. Same inner loop as
-`clause_compact` minus the cumsum + `atomic_add` epilogue — emits the
+`clause_compact` minus the count → scan → write compaction — emits the
 `[B, N]` bool directly without the host-side argsort the dense path used
 to need. Replaces the pure-torch broadcast that materialized
 `[B, N, C, A_max]` bool — `C·A_max`× the output mask — before reducing.
@@ -621,16 +662,16 @@ mask for `N < 128`, ~80-line file, single op). Rationale: the per-call
 width is dictated by `N`, so a Config would be tuned against exactly
 one regime; there is correspondingly no `tune-kernels` subcommand. The
 fused `bloom_compact` (next section) shares this kernel's inner
-subset-test helper and adds `clause_compact`'s cumsum + `atomic_add`
-tail, but uses the 3D launch grid the compact kernels need at large N.
+subset-test helper and adds `clause_compact`'s two-phase compaction,
+but uses the 3D launch grid the compact kernels need at large N.
 
 ## `bloom_compact` — fused subset test + stream compaction
 
 [`ops/triton/bloom_compact.py`](../../retrieve/src/retrieve/ops/triton/bloom_compact.py).
 
 Powers `BloomFilter.evaluate_indices` on CUDA. Combines `bloom_match`'s
-subset-test inner loop with `clause_compact`'s cumsum + `atomic_add`
-epilogue, so the dense `[B, N]` bool plus host-side argsort that the
+subset-test inner loop with `clause_compact`'s count → scan → write
+compaction, so the dense `[B, N]` bool plus host-side argsort that the
 ABC fallback (`compact_mask(bloom_match(.))`) would otherwise produce
 never materializes.
 
@@ -651,23 +692,25 @@ capture under cudagraph trees.
 compact/mask kernels (`tile_id = tile_x * tiles_y + tile_y`). Each
 program loads `qb[b, :]` once, the `[BLOCK_N, W]` `sigs` tile, computes
 the subset test via the shared `common.bloom_subset_pass` (same helper
-as `bloom_match`), then runs the shared `common.compact_store`
-epilogue (same as `clause_compact`). Wide `W` (=16 at the default `m_bits=1024`) makes
+as `bloom_match`), then hands the tile's count and surviving ids to
+`common.compact_stash`; `_host.compact_finish` scans and scatters, exactly
+as for `clause_compact`. Wide `W` (=16 at the default `m_bits=1024`) makes
 this kernel register-pressure-bound; at large `block_n` with few warps
 it spills catastrophically (5–15× slowdown observed at `block_n≥512,
 num_warps≤4`). The shipped default keeps `block_n` moderate and warps
 high to stay off that cliff.
 
-**Output ordering** within a row is **unspecified** — same convention as
-`clause_compact`. V2's `fused_masked_knn_topk` and V3's HAS_INDICES path
-consume the *set*, not the order.
+**Output ordering** within a row is **ascending item order** — the same
+L3 contract as `clause_compact`, `torch.equal` to
+`ops.reference.bloom_compact` and reproducible across launches and
+processes. V2's `fused_masked_knn_topk` and V3's HAS_INDICES path consume
+the list in that order, which is what keeps their tie-breaks repeatable.
 
 **Tile config.** `BloomCompactConfig(block_n, num_warps, num_stages)` —
 shipped as `DEFAULT_CONFIG`; tests/tuner override via
-`_bloom_compact_impl(..., config=)`. Re-tune via `uv run tune-kernels
-bloom-compact`. The atomic-add hazard around in-kernel autotune
-is real but does not affect the offline tuner — see
-[Autotune separation](#autotune-separation). `qb` is built host-side via
+`_bloom_compact_impl(..., config=)` (tuned for the one-pass kernel; not
+re-tuned for the two-phase shape). Re-tune via `uv run tune-kernels
+bloom-compact`. `qb` is built host-side via
 `bloom_hash.build_query_signatures`; folding it into the kernel adds
 register pressure with no obvious win and is explicitly out of scope.
 The same `(clause_idx, value)` keying invariant documented under
