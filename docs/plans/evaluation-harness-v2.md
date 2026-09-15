@@ -426,9 +426,13 @@ run on the A100 box. Effort in focused days.
 >   bit-identical), not the `k_max` slice (rerun at `--k 100` reproduces v2's
 >   *own* number to the last digit), not eager-vs-compiled (bit-identical).
 >   The clause's "tie order under the `k_max` slice" is therefore too narrow —
->   ties reach the metric by a second route the clause does not name. **The
->   decisive experiment — v2 at chunk 64 against the golden — was not run**,
->   so this is attributed but not proven; it is carried as open item L4-b.
+>   ties reach the metric by a second route the clause does not name.
+>   **Correction, 2026-09-15 (C5 ran L4-b): the attribution is falsified.** v2
+>   at quality chunk 64 lands **2.9e-4** from the golden at `recall@100`, four
+>   times *further* than chunk 16's 7.3e-5, and moves k=500/1000 by 2.3–2.6e-4
+>   where chunk 16 was within 1e-5. Batch shape does move `linr_v4`, but "the
+>   golden batched at 64" is not what separates the two harnesses. **The 7.3e-5
+>   residual is unexplained**, alongside arxiv's 2.0e-6.
 >   **arxiv `silvertorch` `recall@100` (2.0e-6)** is **unattributed**: not the
 >   slice and not the batch shape (both tested), ≈ 2 single-hit changes in
 >   10,000 rows. Accepted as a bounded residual, not explained.

@@ -260,3 +260,79 @@ sweeps, `bloom` cells, arxiv (unit-norm inputs, so a different error
 regime) and V3's stage 2 (the same kernel, the same width) were not
 measured. The fp32-accumulating kernel exists only in the artifacts. The
 roadmap checkbox and the merge are the orchestrator's.
+
+
+## 7. L5 — the fix, and the audit the fix implies
+
+> **Decided 2026-09-15 by the user, on §6.1's numbers.** Ship fp32
+> accumulation, and sweep the other kernels for the same defect. The plan's §3
+> default ("change nothing in the kernels") is **overridden**: it assumed a
+> real trade-off, and there is none.
+
+### 7.1 Why this is not the trade-off §3 imagined
+
+| | shipped (fp16 acc) | fp32 acc |
+|---|---|---|
+| kernel, B=1, P=195 023 | 0.05235 ms | **0.05226 ms** |
+| kernel, B=16, P=442 864 | 0.9636 ms | **0.9408 ms** (2.4 % *faster*) |
+| max abs score error vs fp64 | **0.0276** | ~1e-5 |
+| `linr_v2` torch-vs-triton jaccard@100 | 0.998743 (624 rows) | **0.999751** (124 rows) |
+| the residual 124 rows | — | `torch`'s *own* fp16 ties, broken by `torch.topk` |
+
+Latency is unchanged or better (the kernel is gather-bound), accuracy improves
+by ~3 orders, and **no campaign has run**, so nothing is invalidated. The
+documented contract already *said* fp32 (`knn.py`, `kernels.md`): the code
+contradicted its own specification, and L4 corrected the docs to match the
+code. This step corrects the code instead, and restores the docs.
+
+### 7.2 The audit is the point
+
+`tl.sum` inherits its operand dtype (Triton 3.6.0 promotes only sub-32-bit
+ints), so **every fp16 × fp16 reduction in this library has this defect by
+default**, and our parity suite is structurally blind to it: it compares
+`ops.triton` against `ops.reference` at the *same* input dtype, so both sides
+carry the same error and agree. The bug was found only because a *third*
+implementation — cuBLAS, in the `torch` backend — accumulates differently.
+
+Hence: sweep every Triton kernel for accumulation width, and add a parity test
+against an **fp64 oracle**, not only against `ops.reference`. The instance
+matters less than the detection gap.
+
+### 7.3 Work package and gate
+
+**WP-1 — fp32 accumulation and the precision audit (GPU).** `fable`, branch
+`dev/l5-fp32-accumulation` off `development`.
+
+1. `fused_masked_knn_topk` accumulates in fp32; scores keep their current
+   output dtype and the op schema is unchanged (op names, buffer names and
+   `KernelTuneSpec` keys stay valid).
+2. **Audit every kernel in `ops/triton/` for reduction width** — read each
+   `tl.sum` / `tl.dot` / accumulator and record its dtype in a table in the
+   record, including the ones that are correct and why (integer paths:
+   `codesigned_probe_score`'s int8 → int32, `oporp_1bit_match_topk`'s
+   popcount). Fix what is wrong by the same rule; **if a fix would change
+   SilverTorch's numbers, stop and tell the orchestrator before shipping it** —
+   B3's head-to-head and the `official` parity gate both rest on that kernel.
+3. **A parity file against an fp64 oracle** (`tests/parity/test_accumulation.py`
+   or similar): for each scoring kernel, the max abs error against an fp64
+   computation of the same operation on the same inputs, asserted under a bound
+   that fp32 accumulation meets and fp16 does not. This is the test that would
+   have caught the defect; it is the deliverable that outlasts the fix.
+4. Restore the precision statements in `modules/knn.py` and
+   `docs/system/kernels.md` (L4 corrected them *downward* to match the code;
+   they go back to fp32, now truthfully).
+5. Re-measure `linr_v2` torch-vs-triton parity and report the new jaccard, and
+   re-measure the two kernels' `do_bench` cost.
+
+Gate: full library suite green (**645** at `d9a3200`), every existing parity
+file bit-exact with tolerances untouched, the new fp64 parity file green, the
+audit table complete, and the cost table showing no regression.
+
+**WP-2 — delete the compatibility shim (CPU; same branch).** `retrieve.layers`
+and `retrieve.kernels` were temporary tooling for the old-harness golden
+worktree (L D10). The golden stopped being a gate on 2026-09-15, so the shim's
+reason to exist is gone: delete both modules and the `KMeansTorch` /
+`build_silvertorch` aliases, and drop the paragraph that promised them in
+`retrieve/docs/` and `docs/system/architecture.md`. Gate: suite green, `git
+grep -l "retrieve.layers\|retrieve.kernels"` clean outside `docs/plans/`
+history, links 0.
