@@ -1,0 +1,26 @@
+2026-09-15 13:54:26.137 | INFO     | bench.config:load_matrix:363 - goodreads/filter: 3 jobs, 6 cells
+2026-09-15 13:54:41.484 | INFO     | training.encode:encode_split:118 - loaded encoded queries from data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/encoded_queries_v2.pt
+2026-09-15 13:54:43.248 | WARNING  | eval_datasets.layout:drop_legacy_padding_row:65 - item_attrs_narrow.pt: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 797085 → 797084 rows.
+2026-09-15 13:54:43.280 | INFO     | eval_datasets.layout:apply_users_limit:172 - users_limit=10000: keeping the first 10000 of 313178 queries
+2026-09-15 13:54:43.280 | INFO     | bench.inputs:load_inputs:57 - inputs: items 797084 queries 10000 dim 128
+2026-09-15 13:54:44.277 | INFO     | bench.inputs:build_filters:109 - filter modules (clause): ['triton']
+2026-09-15 13:54:45.369 | INFO     | bench.oracle:load_or_build:223 -   loaded oracle from cache: data/goodreads-work-id/gt_d128/oracle_v4_c0_genre_2634b8ef02f0f10c.pt
+2026-09-15 13:54:45.586 | INFO     | bench.run:run:455 - build silvertorch clause/c0_genre triton build={}
+/venvs/c5/lib/python3.11/site-packages/torch/cuda/__init__.py:1216: UserWarning: Synchronization debug mode is a prototype feature and does not yet detect all synchronizing operations (Triggered internally at /pytorch/torch/csrc/cuda/Module.cpp:989.)
+  torch._C._cuda_set_sync_debug_mode(debug_mode)
+/venvs/c5/lib/python3.11/site-packages/torch/_inductor/compile_fx.py:321: UserWarning: TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. Consider setting `torch.set_float32_matmul_precision('high')` for better performance.
+  warnings.warn(
+/venvs/c5/lib/python3.11/site-packages/torch/profiler/profiler.py:217: UserWarning: Warning: Profiler clears events at the end of each cycle.Only events from the current cycle will be reported.To keep events across cycles, set acc_events=True.
+  _warn_once(
+2026-09-15 14:03:15.557 | INFO     | bench.run:run:577 -   silvertorch clause/c0_genre triton params={'n_probe': 24} -> ok (509s)
+2026-09-15 14:11:21.674 | INFO     | bench.run:run:577 -   silvertorch clause/c0_genre triton params={'n_probe': 32} -> ok (486s)
+2026-09-15 14:11:22.127 | INFO     | bench.run:run:455 - build silvertorch clause/c0_genre triton build={}
+2026-09-15 14:19:21.206 | WARNING  | bench.run:run:546 - under-load clocks.sm [1185.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0] MHz vs first 1410.0 MHz
+2026-09-15 14:19:21.454 | INFO     | bench.run:run:577 -   silvertorch clause/c0_genre triton params={'n_probe': 24} -> ok (478s)
+2026-09-15 14:27:26.752 | INFO     | bench.run:run:577 -   silvertorch clause/c0_genre triton params={'n_probe': 32} -> ok (485s)
+2026-09-15 14:27:27.215 | INFO     | bench.run:run:455 - build silvertorch clause/c0_genre triton build={}
+2026-09-15 14:35:31.272 | WARNING  | bench.run:run:546 - under-load clocks.sm [1290.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0, 1410.0] MHz vs first 1410.0 MHz
+2026-09-15 14:35:32.222 | INFO     | bench.run:run:577 -   silvertorch clause/c0_genre triton params={'n_probe': 24} -> ok (483s)
+2026-09-15 14:43:41.934 | INFO     | bench.run:run:577 -   silvertorch clause/c0_genre triton params={'n_probe': 32} -> ok (488s)
+2026-09-15 14:43:42.317 | INFO     | bench.run:run:585 - done: {'ok': 6}
+goodreads/filter: {'ok': 6}
