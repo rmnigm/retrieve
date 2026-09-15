@@ -214,7 +214,7 @@ This is the one direction that upgrades the thesis from "systems reproduction + 
 ### R5. NOT-predicates for approximate filters on GPU **[thesis — small but novel]**
 
 `BloomFilter` is conjunctive-only; reverse clauses are exact-filter-only (bloom mode raises,
-[bloom.py:42-46](../../retrieve/src/retrieve/layers/filters/bloom.py#L42-L46)), which cost
+[bloom.py:42-46](../../retrieve/src/retrieve/modules/filters.py#L42-L46)), which cost
 three goodreads sweeps until the exact-kernel path landed. Bloom filters fundamentally cannot
 answer NOT (false positives become false *negatives* under complement — retrieval-fatal). The
 question "what is the right GPU-resident approximate structure for negated set-membership at

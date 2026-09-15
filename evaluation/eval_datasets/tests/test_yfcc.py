@@ -209,9 +209,7 @@ class TestNarrowTensor:
     def test_clause_semantics_are_conjunctive_and(self):
         """The narrow tensor + query attrs must reproduce "bag contains all
         query tags" under the library's own clause-match definition."""
-        clause_subset_match = pytest.importorskip(
-            "retrieve.layers.filters.exact_attribute"
-        ).clause_subset_match
+        clause_subset_match = pytest.importorskip("retrieve.functional").clause_subset_match
         bags = np.array(
             [
                 [0, 1, -1],  # item 0: tags {0, 1}

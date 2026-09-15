@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.layers.filters import BloomFilter, ExactAttributeFilter, combine_masks
-from retrieve.layers.linr.one_bit_knn import OneBitKNN
-from retrieve.layers.utils.compact import compact_mask
+from retrieve.functional import combine_masks, compact_mask
+from retrieve.modules import BloomFilter, ExactAttributeFilter
+from retrieve.modules.bit_knn import OneBitKNN
 from tests.conftest import make_attrs, make_index, make_query, make_query_attrs
 
 

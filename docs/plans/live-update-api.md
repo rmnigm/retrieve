@@ -5,7 +5,7 @@
 >
 > - its central reuse target, `_build_signatures` in `layers/filters/bloom.py`, **moved**: it is
 >   now public as `build_signatures` in
->   [`layers/filters/bloom_hash.py`](../../retrieve/src/retrieve/layers/filters/bloom_hash.py) (K5),
+>   [`layers/filters/bloom_hash.py`](../../retrieve/src/retrieve/indexing/bloom_hash.py) (K5),
 > - `one_bit_knn.py` is now a thin subclass of `_bit_knn.py`; the `.item()` short-circuit this
 >   plan targets is already gone (K4.2),
 > - all `bloom.py` / `one_bit_knn.py` / `prefilter_knn.py` / `quantize.py` line numbers predate K2/K4,
@@ -42,7 +42,7 @@ Scope:
 
 ### Phase A — Shared scaffolding
 
-**New:** `retrieve/src/retrieve/layers/utils/live_update.py`
+**New:** `retrieve/src/retrieve/indexing/live_update.py`
 
 `LiveIndexMixin` (pure mixin, no `nn.Module` base — concrete classes already subclass `RetrievalModule(nn.Module)`):
 
@@ -78,13 +78,13 @@ def delete(self, rows):
     self.valid_mask.index_fill_(0, rows, False)
 ```
 
-#### B1 — `PostfilterKNN` (V1) — [postfilter_knn.py](../../retrieve/src/retrieve/layers/linr/postfilter_knn.py)
+#### B1 — `PostfilterKNN` (V1) — [postfilter_knn.py](../../retrieve/src/retrieve/modules/knn.py)
 
 **Per-module quirk:** buffer is **pre-transposed** `item_embs_t: [D, N]` (line 35). Upsert is a **column-slice**: `self.item_embs_t.index_copy_(1, rows, embs.t().contiguous())`. The pre-transpose is deliberate (lines 31-34 comment about cuBLAS operand alignment) — preserve it through overcommit by allocating `[D, capacity]` and indexing along dim 1.
 
-Forward ([line 37](../../retrieve/src/retrieve/layers/linr/postfilter_knn.py#L37)): swap `if mask is not None: scores = scores.masked_fill(~mask, -inf)` for `effective = self._effective_mask(query.shape[0], mask); if effective is not None: scores = scores.masked_fill(~effective, -inf)`. The existing isfinite → `-1` wrap (lines 46-51) already handles tombstoned scores (`-inf`) correctly.
+Forward ([line 37](../../retrieve/src/retrieve/modules/knn.py#L37)): swap `if mask is not None: scores = scores.masked_fill(~mask, -inf)` for `effective = self._effective_mask(query.shape[0], mask); if effective is not None: scores = scores.masked_fill(~effective, -inf)`. The existing isfinite → `-1` wrap (lines 46-51) already handles tombstoned scores (`-inf`) correctly.
 
-#### B2 — `PrefilterKNN` (V2) — [prefilter_knn.py](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py)
+#### B2 — `PrefilterKNN` (V2) — [prefilter_knn.py](../../retrieve/src/retrieve/modules/knn.py)
 
 **Per-module quirk:** forward has **no `mask=` parameter** (line 40 signature is `(query, candidate_ids, counts)`). Fold `valid_mask` inside each sub-path; do not widen the public signature.
 
@@ -92,17 +92,17 @@ Buffer is `item_embs: [N, D]`. `upsert` is the straight row-slice `index_copy_(0
 
 Forward sub-paths:
 
-- **`_forward_full`** ([line 52](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py#L52)) — full matmul + topk. When `_live_enabled`, apply `masked_fill(~valid_mask, -inf)` after the matmul and before topk; wrap top-K ids with the same isfinite → `-1` pattern V1 uses.
+- **`_forward_full`** ([line 52](../../retrieve/src/retrieve/modules/knn.py#L52)) — full matmul + topk. When `_live_enabled`, apply `masked_fill(~valid_mask, -inf)` after the matmul and before topk; wrap top-K ids with the same isfinite → `-1` pattern V1 uses.
 
-- **`_forward_prefilter`** ([line 57](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py#L57), torch backend) — gather `valid_in_cand = self.valid_mask[safe_ids]` (`[B, P]`) and AND it into the existing `counts`-derived validity mask (lines 76-78) before topk.
+- **`_forward_prefilter`** ([line 57](../../retrieve/src/retrieve/modules/knn.py#L57), torch backend) — gather `valid_in_cand = self.valid_mask[safe_ids]` (`[B, P]`) and AND it into the existing `counts`-derived validity mask (lines 76-78) before topk.
 
-- **`_forward_prefilter_triton`** ([line 96](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py#L96)) — the `fused_masked_knn_topk` kernel (line 111) requires the first `counts[i]` entries to be valid. Strategy: gather `valid_in_cand`, AND with the arange-from-counts mask, **stable-sort per row** so live entries pack contiguously at the front, gather `candidate_ids` along that permutation, set `counts = valid_in_cand.sum(dim=1).long()`. Pass to the kernel unchanged. Cost: one per-row stable sort over P — small vs the kernel cost.
+- **`_forward_prefilter_triton`** ([line 96](../../retrieve/src/retrieve/modules/knn.py#L96)) — the `fused_masked_knn_topk` kernel (line 111) requires the first `counts[i]` entries to be valid. Strategy: gather `valid_in_cand`, AND with the arange-from-counts mask, **stable-sort per row** so live entries pack contiguously at the front, gather `candidate_ids` along that permutation, set `counts = valid_in_cand.sum(dim=1).long()`. Pass to the kernel unchanged. Cost: one per-row stable sort over P — small vs the kernel cost.
 
-#### B3 — `OneBitKNN` (V3 stage 1) — [one_bit_knn.py](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py)
+#### B3 — `OneBitKNN` (V3 stage 1) — [one_bit_knn.py](../../retrieve/src/retrieve/modules/bit_knn.py)
 
 **Per-module quirk:** `oporp_signs` and `oporp_perm` are **frozen at register_index time** — exactly what upsert needs. Forward signature is `(query, candidate_ids=None, counts=None)` — there is no `mask` parameter; the masked path was retired with Stage 2b, so `valid_mask` folds into the existing sub-paths.
 
-`upsert` reuses the same op chain `quantize_oporp_1bit` runs initially ([quantize.py:81](../../retrieve/src/retrieve/layers/utils/quantize.py#L81)) but over `[K, D]`:
+`upsert` reuses the same op chain `quantize_oporp_1bit` runs initially ([quantize.py:81](../../retrieve/src/retrieve/indexing/quantize.py#L81)) but over `[K, D]`:
 
 ```python
 proj = (embs * self.oporp_signs.to(embs.dtype)).index_select(1, self.oporp_perm)
@@ -110,7 +110,7 @@ bits = _pack_signs_to_int64(proj)       # quantize.py:66
 self.item_bits.index_copy_(0, rows, bits)
 ```
 
-Forward ([line 93](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py#L93)) has four sub-paths — torch full / torch candidates / triton full / triton candidates. Fold `valid_mask` into each:
+Forward ([line 93](../../retrieve/src/retrieve/modules/bit_knn.py#L93)) has four sub-paths — torch full / torch candidates / triton full / triton candidates. Fold `valid_mask` into each:
 
 - `_forward_torch_eager` full-scan sub-path (`candidate_ids is None`): apply `effective = self._effective_mask(B, None); if effective is not None: scores = scores.masked_fill(~effective, -inf)` before topk.
 - `_forward_torch_eager` candidate sub-path (`candidate_ids is not None`): gather `valid_in_cand = self.valid_mask[candidate_ids.clamp_min(0)]`, AND with the existing counts-derived validity mask, then `masked_fill(~valid, -inf)` before topk. The existing isfinite → `-1` wrap handles tombstones automatically.
@@ -119,9 +119,9 @@ Forward ([line 93](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py#L93)) 
 
 Docstring note: the synthetic-candidates full-scan route is slower than the contiguous-load full path; live-update is opt-in via `capacity=`, so the cost is paid only when freshness is enabled.
 
-#### B4 — `FullScanKNN` — [utils/retrieval.py](../../retrieve/src/retrieve/layers/utils/retrieval.py)
+#### B4 — `FullScanKNN` — [utils/retrieval.py](../../retrieve/src/retrieve/modules/knn.py)
 
-**Per-module quirk:** mask is **post-topk** via `post_filter_topk` ([line 9](../../retrieve/src/retrieve/layers/utils/retrieval.py#L9)), distinct from V1/V3. For tombstones to never appear in the K slots (not just blank to `-1` after the fact), apply `valid_mask` **pre-topk** in `forward` ([line 36](../../retrieve/src/retrieve/layers/utils/retrieval.py#L36)):
+**Per-module quirk:** mask is **post-topk** via `post_filter_topk` ([line 9](../../retrieve/src/retrieve/modules/knn.py#L9)), distinct from V1/V3. For tombstones to never appear in the K slots (not just blank to `-1` after the fact), apply `valid_mask` **pre-topk** in `forward` ([line 36](../../retrieve/src/retrieve/modules/knn.py#L36)):
 
 ```python
 if getattr(self, "_live_enabled", False):
@@ -132,25 +132,25 @@ if mask is not None:
     topk_ids, _ = post_filter_topk(topk_ids, mask)
 ```
 
-Caller's `mask` keeps its post-topk → `-1` semantics. Live-mask is separate (pre-topk, never appears). `_forward_candidates` ([line 50](../../retrieve/src/retrieve/layers/utils/retrieval.py#L50)): gather `valid_mask[candidate_ids]`, `masked_fill` before the local topk.
+Caller's `mask` keeps its post-topk → `-1` semantics. Live-mask is separate (pre-topk, never appears). `_forward_candidates` ([line 50](../../retrieve/src/retrieve/modules/knn.py#L50)): gather `valid_mask[candidate_ids]`, `masked_fill` before the local topk.
 
 ### Phase C — Filters
 
-#### C1 — `ExactAttributeFilter` — [exact_attribute.py](../../retrieve/src/retrieve/layers/filters/exact_attribute.py)
+#### C1 — `ExactAttributeFilter` — [exact_attribute.py](../../retrieve/src/retrieve/modules/filters.py)
 
-Buffer `item_clause_attrs: [N, C, A_max]` int64 ([line 28](../../retrieve/src/retrieve/layers/filters/exact_attribute.py#L28)). `clause_is_reverse: [C]` ([line 29](../../retrieve/src/retrieve/layers/filters/exact_attribute.py#L29)) is per-clause, not per-row — untouched.
+Buffer `item_clause_attrs: [N, C, A_max]` int64 ([line 28](../../retrieve/src/retrieve/modules/filters.py#L28)). `clause_is_reverse: [C]` ([line 29](../../retrieve/src/retrieve/modules/filters.py#L29)) is per-clause, not per-row — untouched.
 
 Capacity-aware register_index over-allocates as `[capacity, C, A_max]` filled with `-1` (padding sentinel — treated as "no match" by the `clause_pass.any(dim=-1)` semantics at line 64). No `valid_mask` allocated; the filter does not call `_alloc_live_buffers`.
 
 `upsert(rows, item_clause_attrs)` → `self.item_clause_attrs.index_copy_(0, rows, item_clause_attrs)`. Caller pads/truncates to `A_max`. No delete.
 
-#### C2 — `BloomFilter` — [bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py)
+#### C2 — `BloomFilter` — [bloom.py](../../retrieve/src/retrieve/modules/filters.py)
 
-Buffer `bloom_sigs: [N, W]` int64 ([line 29](../../retrieve/src/retrieve/layers/filters/bloom.py#L29)). `hash_seeds` ([line 30](../../retrieve/src/retrieve/layers/filters/bloom.py#L30)) frozen at register_index.
+Buffer `bloom_sigs: [N, W]` int64 ([line 29](../../retrieve/src/retrieve/modules/filters.py#L29)). `hash_seeds` ([line 30](../../retrieve/src/retrieve/modules/filters.py#L30)) frozen at register_index.
 
 Capacity-aware register_index over-allocates as `[capacity, W]` filled with zero (all-zero sig fails the `(qb & sigs) == qb` test at line 80 for any non-zero query).
 
-`upsert(rows, item_clause_attrs)` reuses [`_build_signatures`](../../retrieve/src/retrieve/layers/filters/bloom.py#L134) on the `[K, C, A_max]` slice — the function is **shape-generic in leading dims** (line 141) and chunked by 131k rows (line 131), so it works on any K without rewriting. Then `self.bloom_sigs.index_copy_(0, rows, new_sigs)`. No delete.
+`upsert(rows, item_clause_attrs)` reuses [`_build_signatures`](../../retrieve/src/retrieve/modules/filters.py#L134) on the `[K, C, A_max]` slice — the function is **shape-generic in leading dims** (line 141) and chunked by 131k rows (line 131), so it works on any K without rewriting. Then `self.bloom_sigs.index_copy_(0, rows, new_sigs)`. No delete.
 
 ### Phase D — Docs
 
@@ -168,22 +168,22 @@ Capacity-aware register_index over-allocates as `[capacity, W]` filled with zero
 
 | File | Touch |
 |---|---|
-| `retrieve/src/retrieve/layers/utils/live_update.py` (new) | `LiveIndexMixin`: `_alloc_live_buffers`, `_bump_watermark`, `_effective_mask`, `next_free_rows`. All on-device — no `.cpu()`, no `.item()`, no Python loops. |
+| `retrieve/src/retrieve/indexing/live_update.py` (new) | `LiveIndexMixin`: `_alloc_live_buffers`, `_bump_watermark`, `_effective_mask`, `next_free_rows`. All on-device — no `.cpu()`, no `.item()`, no Python loops. |
 | [retrieve/src/retrieve/interfaces.py](../../retrieve/src/retrieve/interfaces.py) | `capacity=None` on abstract `register_index` for both `RetrievalModule` and `FilterModule`; non-abstract `upsert` / `delete` defaults; `FilterModule.upsert` default (no `delete`). |
-| [retrieve/src/retrieve/layers/linr/postfilter_knn.py](../../retrieve/src/retrieve/layers/linr/postfilter_knn.py) | Mix in `LiveIndexMixin`. Capacity-aware register_index allocating `[D, capacity]`. `upsert` does **column-slice** `index_copy_(1, rows, embs.t().contiguous())`. Forward folds `_effective_mask`. |
-| [retrieve/src/retrieve/layers/linr/prefilter_knn.py](../../retrieve/src/retrieve/layers/linr/prefilter_knn.py) | Mix in `LiveIndexMixin`. Capacity-aware register_index. `upsert` row-slice. Forward has **no `mask=` arg**: fold `valid_mask` inside `_forward_full` (masked_fill pre-topk), `_forward_prefilter` (`valid_mask[safe_ids]` gather), `_forward_prefilter_triton` (per-row stable-sort permutation of `candidate_ids` + recompute `counts`). |
-| [retrieve/src/retrieve/layers/linr/one_bit_knn.py](../../retrieve/src/retrieve/layers/linr/one_bit_knn.py) | Mix in `LiveIndexMixin`. Capacity-aware register_index (signs/perm frozen, item_bits over-allocated). `upsert` reuses `_pack_signs_to_int64` over `[K, D]`. Forward folds `valid_mask` across all four sub-paths (torch full/cand, triton full/cand); triton full-scan synthesizes `(candidate_ids, counts)` and routes through `_indirect` when live. |
-| [retrieve/src/retrieve/layers/utils/retrieval.py](../../retrieve/src/retrieve/layers/utils/retrieval.py) | `FullScanKNN` mix in `LiveIndexMixin`. Capacity-aware register_index. `upsert`/`delete`. Forward applies `valid_mask` **pre-topk** (so tombstones never appear); caller's mask stays post-topk via existing `post_filter_topk`. |
-| [retrieve/src/retrieve/layers/filters/exact_attribute.py](../../retrieve/src/retrieve/layers/filters/exact_attribute.py) | Capacity-aware register_index (`-1`-padded over-alloc). `upsert(rows, item_clause_attrs)` = `index_copy_(0, ...)`. No `valid_mask`, no `delete`. |
-| [retrieve/src/retrieve/layers/filters/bloom.py](../../retrieve/src/retrieve/layers/filters/bloom.py) | Capacity-aware register_index (zero-padded over-alloc). `upsert` reuses [`_build_signatures`](../../retrieve/src/retrieve/layers/filters/bloom.py#L134) on the `[K, C, A_max]` slice + `index_copy_`. No delete. |
+| [retrieve/src/retrieve/modules/knn.py](../../retrieve/src/retrieve/modules/knn.py) | Mix in `LiveIndexMixin`. Capacity-aware register_index allocating `[D, capacity]`. `upsert` does **column-slice** `index_copy_(1, rows, embs.t().contiguous())`. Forward folds `_effective_mask`. |
+| [retrieve/src/retrieve/modules/knn.py](../../retrieve/src/retrieve/modules/knn.py) | Mix in `LiveIndexMixin`. Capacity-aware register_index. `upsert` row-slice. Forward has **no `mask=` arg**: fold `valid_mask` inside `_forward_full` (masked_fill pre-topk), `_forward_prefilter` (`valid_mask[safe_ids]` gather), `_forward_prefilter_triton` (per-row stable-sort permutation of `candidate_ids` + recompute `counts`). |
+| [retrieve/src/retrieve/modules/bit_knn.py](../../retrieve/src/retrieve/modules/bit_knn.py) | Mix in `LiveIndexMixin`. Capacity-aware register_index (signs/perm frozen, item_bits over-allocated). `upsert` reuses `_pack_signs_to_int64` over `[K, D]`. Forward folds `valid_mask` across all four sub-paths (torch full/cand, triton full/cand); triton full-scan synthesizes `(candidate_ids, counts)` and routes through `_indirect` when live. |
+| [retrieve/src/retrieve/modules/knn.py](../../retrieve/src/retrieve/modules/knn.py) | `FullScanKNN` mix in `LiveIndexMixin`. Capacity-aware register_index. `upsert`/`delete`. Forward applies `valid_mask` **pre-topk** (so tombstones never appear); caller's mask stays post-topk via existing `post_filter_topk`. |
+| [retrieve/src/retrieve/modules/filters.py](../../retrieve/src/retrieve/modules/filters.py) | Capacity-aware register_index (`-1`-padded over-alloc). `upsert(rows, item_clause_attrs)` = `index_copy_(0, ...)`. No `valid_mask`, no `delete`. |
+| [retrieve/src/retrieve/modules/filters.py](../../retrieve/src/retrieve/modules/filters.py) | Capacity-aware register_index (zero-padded over-alloc). `upsert` reuses [`_build_signatures`](../../retrieve/src/retrieve/modules/filters.py#L134) on the `[K, C, A_max]` slice + `index_copy_`. No delete. |
 | `retrieve/tests/correctness/test_live_update.py` (new) | Test plan below. |
 | `docs/system/live-updates.md` (new), `architecture.md`, `checkpoints.md` (edits) | Concurrency contract; capacity sizing; what supports live updates. |
 
 ## Reused existing utilities (no new factories)
 
-- [`_pack_signs_to_int64`](../../retrieve/src/retrieve/layers/utils/quantize.py#L44) — `OneBitKNN.upsert` reuses it over `[K, D]` with the stored `oporp_signs` / `oporp_perm`.
-- [`_build_signatures`](../../retrieve/src/retrieve/layers/filters/bloom.py#L134) — `BloomFilter.upsert` re-calls it on a K-row slice. Already chunked & shape-generic.
-- [`post_filter_topk`](../../retrieve/src/retrieve/layers/utils/retrieval.py#L9) — `FullScanKNN` keeps using it for caller-mask post-filtering; live-mask is pre-topk and separate.
+- [`_pack_signs_to_int64`](../../retrieve/src/retrieve/indexing/quantize.py#L44) — `OneBitKNN.upsert` reuses it over `[K, D]` with the stored `oporp_signs` / `oporp_perm`.
+- [`_build_signatures`](../../retrieve/src/retrieve/modules/filters.py#L134) — `BloomFilter.upsert` re-calls it on a K-row slice. Already chunked & shape-generic.
+- [`post_filter_topk`](../../retrieve/src/retrieve/modules/knn.py#L9) — `FullScanKNN` keeps using it for caller-mask post-filtering; live-mask is pre-topk and separate.
 
 ## Verification
 
@@ -214,10 +214,10 @@ cd /workspace/retrieve/retrieve && uv run pytest tests/ -v
 
 # 3. Export-cleanliness check on the new code paths.
 grep -nE "\.item\(\)|\.cpu\(\)|Optional\[Tensor\]" \
-    /workspace/retrieve/retrieve/src/retrieve/layers/utils/live_update.py \
-    /workspace/retrieve/retrieve/src/retrieve/layers/linr/{one_bit_knn,prefilter_knn,postfilter_knn}.py \
-    /workspace/retrieve/retrieve/src/retrieve/layers/utils/retrieval.py \
-    /workspace/retrieve/retrieve/src/retrieve/layers/filters/{bloom,exact_attribute}.py
+    /workspace/retrieve/retrieve/src/retrieve/indexing/live_update.py \
+    /workspace/retrieve/retrieve/src/retrieve/modules/{one_bit_knn,prefilter_knn,postfilter_knn}.py \
+    /workspace/retrieve/retrieve/src/retrieve/modules/knn.py \
+    /workspace/retrieve/retrieve/src/retrieve/modules/filters.py{bloom,exact_attribute}.py
 # Expected: zero hits in the new code. The pre-existing one_bit_knn.py:156
 # .item() in the masked-kernel short-circuit is orthogonal to this plan.
 

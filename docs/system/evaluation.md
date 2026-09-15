@@ -170,7 +170,7 @@ and `data.py`'s two loaders; docstrings are a third of the count.
 |---|---:|---|
 | [`bench.py`](../../evaluation/retrieval/bench.py) | 399 | `setup`, `warm_gpu_once`, `provenance` (GPU, driver, CUDA, torch, triton, commit, `dirty` = `subtree_dirty()` over `retrieve/src/retrieve`, `repo_dirty`, branch, `code_version` = the subtree's tree hash, or `files:<sha256>` of the sources on disk when the subtree is dirty, host, python, started), `clocks(expected_sm_mhz)` (`clocks_locked` = within 2 % of the expectation), `timed_build`, `index_bytes` (Σ buffers, submodules included, deduplicated), `stats`, `latency(fn, bs=, mode=)` (§2.5 windows, IQR + outlier counts, `load: closed_loop`, `peak_fwd_mib`), `graph_callable` (raises `NotCapturable` with the record's `reason`), `profile_once` |
 | [`metrics.py`](../../evaluation/retrieval/metrics.py) | 111 | `accumulator(ks, device)` / `accumulate(acc, ids, targets, num_targets=None, ranked=False)` / `finalize(acc)` — recall, ndcg, precision, mrr at every `k` from one top-`k_max` list as float64 running sums on device; `ranked=True` scores against the oracle's own top-`k` prefix (the old per-`k` `nt_k`); `per_row`, `jaccard_at_k`. `training/evaluate.py` shares it |
-| [`algos.py`](../../evaluation/retrieval/algos.py) | 328 | the five `nn.Module` wrappers (`LinrV1`, `LinrV2`, `LinrV3`, `LinrV4`, `Silvertorch`) with the filter as a submodule, `k` settable, `set_query_params` (`n_probe`, `candidate_pool`); `ALGOS`, `FILTER_KINDS`, `BACKENDS`, `FILTER_BACKEND`, `CAPTURABLE`, `PATHS`; `build`, `build_filter`, `is_valid_combo` |
+| [`algos.py`](../../evaluation/retrieval/algos.py) | 250 | the library's `LiNRV1`–`LiNRV4` (roadmap L2) and the one remaining wrapper, `Silvertorch` (the `filter_kind` → `filter_mode` map and the plan-cache switch, until C5), with the filter as a submodule, `k` settable, `set_query_params` (`n_probe`, `candidate_pool`); `ALGOS`, `FILTER_KINDS`, `BACKENDS`, `FILTER_BACKEND`, `CAPTURABLE`, `PATHS`; `build`, `build_filter`, `is_valid_combo` |
 | [`config.py`](../../evaluation/retrieval/config.py) | 375 | `Dataset`, `Job`, `load_dataset`, `load_matrix` — the config matrix below |
 | [`data.py`](../../evaluation/retrieval/data.py) | 295 | `load_inputs` (SASRec encode cached on the full split, or pre-encoded text; `users_limit` once, as a prefix), `sweep_qa`, `build_filters` (keyed by filter backend), `exact_filter`, `query_pool` |
 | [`oracle.py`](../../evaluation/retrieval/oracle.py) | 293 | the exact filtered oracle as blob v4, `pass_counts`, `pass_rate`, `bloom_fp_rate`, `resume_key`, `KEY_FIELDS` |
@@ -192,9 +192,9 @@ stats dataclasses, no results-IO layer.
 runs, or `None` when there is no such cell. It is what a record's `path`
 column carries and what `load_matrix` collapses on: backends that run the
 same code become one job (logged once), `None` triples are skipped. The
-table agrees with the dispatch table in
-[architecture.md](architecture.md#backend-dispatch) — `tests/test_algos.py`
-parses that markdown and asserts it.
+table mirrors `retrieve.interfaces.DISPATCH` (the library's dispatch table
+as data — [architecture.md](architecture.md#backend-dispatch)); deriving it
+from there by a test is roadmap C5's `tests/bench/test_paths.py`.
 
 | algo | `none` | `clause` / `bloom` | `official` |
 |---|---|---|---|
@@ -211,11 +211,12 @@ perf entries are `null` with `reason: not_capturable`. Until B1 lands in
 `retrieve`, `algos.build(backend="official")` raises `NotImplementedError`,
 which a campaign records as `status: failed` on those cells.
 
-Every wrapper is `forward(q, qa=None) -> (ids [B, k], scores [B, k])`,
+Every algo module is `forward(q, qa=None) -> (ids [B, k], scores [B, k])`,
 `torch.topk`-sorted rows, `-1` ids where a row has fewer than `k`
 survivors. `k` is a property that forwards to the layer owning the final
-top-k; `Silvertorch.k` and `set_query_params(n_probe=)` re-run the two
-`register_index` validations. `build(algo, item_embs, k=, backend=,
+top-k; `Silvertorch.k` and `set_query_params(n_probe=)` (the library's
+`SilverTorch.set_query_params`) re-run the two `register_index`
+validations. `build(algo, item_embs, k=, backend=,
 filter_kind=, filter_mod=, item_attrs=, clause_is_reverse=, params=,
 seed=)` is the one factory; it refuses `None`-path cells and
 `n_probe > n_lists`. `params` are the merged build + query params; on
@@ -559,7 +560,7 @@ cd evaluation && CUDA_VISIBLE_DEVICES="" uv run pytest retrieval/tests/ -q
 |---|---|
 | `test_bench.py` | `stats` vs numpy, `latency` control flow, `index_bytes` dedup, `provenance` git fields, `dirty` scoped to the library subtree with the `files:` fallback, `repo_dirty` excluding `results/`, `atomic_write`, `clocks` shape, `graph_callable` refusals |
 | `test_metrics.py` | padding / IDCG / denominator contracts; running sums equal the pre-v2 per-row means to 1e-9 (fixed and ranked targets); `jaccard_at_k` |
-| `test_algos.py` | `PATHS` covers the grid and agrees with architecture.md's dispatch table (parsed from the markdown); `k`-slice invariance of every layer and wrapper (no buffer changes with `k`) — the three SilverTorch wrappers are built once per session with `n_iter=2` (`silvertorch_modules`) and shared by the read-only tests; `set_query_params`; build refusals |
+| `test_algos.py` | `PATHS` covers the grid; `k`-slice invariance of every layer and algo module (no buffer changes with `k`) — the three SilverTorch wrappers are built once per session with `n_iter=2` (`silvertorch_modules`) and shared by the read-only tests; `set_query_params`; build refusals |
 | `test_config.py` | job counts and keys per suite on `tests/data/{mini,text,suites}.yaml`; `disabled`; build/query split; seeds; narrows and `Job.narrowed`; the real `goodreads` / `arxiv` d128 cell sets equal the deleted YAMLs' (kept until C4 agrees with A1's golden) |
 | `test_data.py` | the pre-encoded loader on the conftest writer at a smaller shape, `users_limit` once, prefix and row-count checks, `attrs_digest`, `sweep_qa`, filters by filter backend, `query_pool` |
 | `test_oracle.py` | padding, v4 fields and arithmetic, fingerprint in the file name (item side included: one edited attr value or a flipped reverse flag names a new blob), an unreadable blob rebuilt, bloom FP rate, `code_version`, `resume_key` |
@@ -592,12 +593,14 @@ no `unstable` cell at locked clocks.
 ## Extending
 
 **A new algorithm.** One `nn.Module` in [`algos.py`](../../evaluation/retrieval/algos.py):
-build the `retrieve` layers in `__init__`, register the filter as
-`self.filter`, `forward(q, qa=None) -> (ids, scores)`, a `k` property
-forwarding to the final top-k layer, `set_query_params` for any
-query-time knob; add it to `ALGOS`, teach `_path` its code path, add it
-to a suite's `algos:` in `suites.yaml`. `tests/test_algos.py` will demand
-the `k`-slice invariance and the dispatch-table agreement.
+compose the `retrieve` primitives as a library module (the LiNR variants
+are `retrieve.modules.linr`; a new composition is added there first —
+[library-harness-boundary.md](../plans/library-harness-boundary.md) §2):
+the filter as `self.filter`, `forward(q, qa=None) -> (ids, scores)`, a `k`
+property forwarding to the final top-k layer, `set_query_params` for any
+query-time knob, `capturable` as a class attribute, a `DISPATCH` row; then
+add it to `ALGOS`, teach `_path` its code path, add it to a suite's `algos:`
+in `suites.yaml`. `tests/test_algos.py` will demand the `k`-slice invariance.
 
 **A new dataset.** One `config/<dataset>.yaml` (above) and the on-disk
 artifacts under `data/<dataset>/` — `item_id_map.json`, `train/val/test.parquet`

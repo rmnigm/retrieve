@@ -11,22 +11,21 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.layers.filters import ExactAttributeFilter
-from retrieve.layers.linr.one_bit_knn import OneBitKNN
-from retrieve.layers.linr.postfilter_knn import PostfilterKNN
-from retrieve.layers.linr.postfilter_knn_int8 import PostfilterKNNInt8
-from retrieve.layers.linr.prefilter_knn import PrefilterKNN
-from retrieve.layers.linr.simhash_knn import SimHashKNN
-from retrieve.layers.utils.compact import compact_mask
-from retrieve.layers.utils.retrieval import FullScanKNN
+from retrieve.functional import compact_mask
+from retrieve.modules import BloomFilter, ExactAttributeFilter
+from retrieve.modules.bit_knn import OneBitKNN, SimHashKNN
+from retrieve.modules.knn import FullScanKNN, PostfilterKNN, PostfilterKNNInt8, PrefilterKNN
+from retrieve.modules.linr import LiNRV1, LiNRV2, LiNRV3, LiNRV4
 from tests.conftest import (
     assert_topk_id_sets_match,
     make_attrs,
     make_index,
     make_mask,
     make_query,
+    make_query_attrs,
     recall_at_k,
 )
+from tests.parity.conftest import assert_ids_equal_up_to_ties
 
 N, D, B, K = 2048, 128, 16, 200
 
@@ -683,3 +682,116 @@ def test_unknown_backend_is_rejected(make, backend):
     construction instead of silently running the torch path (review #5 / roadmap B4)."""
     with pytest.raises(ValueError, match="unknown backend"):
         make(backend)
+
+
+# ---------------------------------------------------------------------------
+# The paper variants as modules: LiNRV1–V4 equal the primitives composed by hand.
+# ---------------------------------------------------------------------------
+
+
+class TestComposites:
+    """``LiNRV1``–``LiNRV4`` (plan L D5) are the harness wrappers moved, not rewritten: on the
+    same inputs each equals the primitives composed by hand — scores ``torch.equal``, ids
+    equal up to ties. A Triton filter's compaction order is unspecified between two launches,
+    so V3's filter is the ``torch`` one on every row: fed a Triton candidate list, the 1-bit
+    stage's boundary ties would resolve differently in two independent runs and the rescored
+    set would legitimately differ (V1 / V2 are order-free: a mask, or per-candidate scores)."""
+
+    POOL = 256
+
+    @pytest.fixture(scope="class")
+    def attrs(self):
+        return make_attrs(N, c=2, a_max=2, n_vocab=20), make_query_attrs(B, c=2, n_vocab=20)
+
+    @staticmethod
+    def _filter(kind, backend, attrs):
+        if kind == "none":
+            return None
+        if kind == "clause":
+            f = ExactAttributeFilter(backend=backend)
+        else:
+            f = BloomFilter(m_bits=512, k_hash=4, backend=backend)
+        f.register_index(attrs)
+        return f
+
+    @staticmethod
+    def _equal(out, ref):
+        assert torch.equal(out[1], ref[1])
+        assert_ids_equal_up_to_ties(out[0], ref[0], ref[1])
+
+    @pytest.mark.parametrize("backend", BACKENDS)
+    @pytest.mark.parametrize("kind", ["none", "clause", "bloom"])
+    def test_v1_equals_postfilter_knn(self, data, attrs, backend, kind):
+        item_attrs, qa = attrs
+        f = self._filter(kind, backend, item_attrs)
+        v1 = LiNRV1(k=K, filter=f, backend=backend)
+        v1.register_index(data["embs"])
+        ref = PostfilterKNN(k=K, backend=backend)
+        ref.register_index(data["embs"])
+        if kind == "none":
+            self._equal(v1(data["query"]), ref(data["query"]))
+        else:
+            self._equal(v1(data["query"], qa), ref(data["query"], mask=f.evaluate_mask(qa)))
+
+    @pytest.mark.parametrize("backend", BACKENDS)
+    @pytest.mark.parametrize("kind", ["clause", "bloom"])
+    def test_v2_equals_prefilter_knn(self, data, attrs, backend, kind):
+        item_attrs, qa = attrs
+        f = self._filter(kind, backend, item_attrs)
+        v2 = LiNRV2(k=K, filter=f, backend=backend)
+        v2.register_index(data["embs"])
+        ref = PrefilterKNN(k=K, backend=backend)
+        ref.register_index(data["embs"])
+        cand, counts = f.evaluate_indices(qa)
+        self._equal(v2(data["query"], qa), ref(data["query"], candidate_ids=cand, counts=counts))
+
+    @pytest.mark.parametrize("backend", BACKENDS)
+    @pytest.mark.parametrize("kind", ["none", "clause", "bloom"])
+    def test_v3_equals_one_bit_then_prefilter_cascade(self, data, attrs, backend, kind):
+        item_attrs, qa = attrs
+        f = self._filter(kind, "torch", item_attrs)
+        v3 = LiNRV3(k=K, candidate_pool=self.POOL, seed=3, filter=f, backend=backend)
+        v3.register_index(data["embs"])
+        stage1 = OneBitKNN(k=self.POOL, seed=3, backend=backend)
+        stage1.register_index(data["embs"])
+        stage2 = PrefilterKNN(k=K, backend=backend)
+        stage2.register_index(data["embs"])
+        if kind == "none":
+            cand, _ = stage1(data["query"])
+            self._equal(v3(data["query"]), stage2(data["query"], candidate_ids=cand))
+            return
+        pos, pcounts = f.evaluate_indices(qa)
+        cand, _ = stage1(data["query"], candidate_ids=pos, counts=pcounts)
+        ref = stage2(data["query"], candidate_ids=cand, counts=(cand >= 0).sum(dim=1))
+        self._equal(v3(data["query"], qa), ref)
+
+    @pytest.mark.parametrize("backend", BACKENDS)
+    @pytest.mark.parametrize("kind", ["none", "clause", "bloom"])
+    def test_v4_equals_postfilter_knn_int8(self, data, attrs, backend, kind):
+        item_attrs, qa = attrs
+        f = self._filter(kind, backend, item_attrs)
+        v4 = LiNRV4(k=K, filter=f, backend=backend)
+        v4.register_index(data["embs"])
+        ref = PostfilterKNNInt8(k=K, backend=backend)
+        ref.register_index(data["embs"])
+        if kind == "none":
+            self._equal(v4(data["query"]), ref(data["query"]))
+        else:
+            self._equal(v4(data["query"], qa), ref(data["query"], mask=f.evaluate_mask(qa)))
+
+    def test_register_index_registers_the_filter(self, data, attrs):
+        """``register_index(embs, item_clause_attrs, clause_is_reverse)`` registers the attached
+        filter too; the filter's buffers live under ``filter.`` in the state dict."""
+        item_attrs, qa = attrs
+        rev = torch.tensor([True, False], device="cuda")
+        v2 = LiNRV2(k=K, filter=ExactAttributeFilter())
+        v2.register_index(data["embs"], item_attrs, rev)
+        assert torch.equal(v2.filter.clause_is_reverse, rev)
+        assert list(v2.state_dict()) == [
+            "idx.item_embs",
+            "filter.item_clause_attrs",
+            "filter.clause_is_reverse",
+        ]
+        ref = ExactAttributeFilter()
+        ref.register_index(item_attrs, clause_is_reverse=rev)
+        assert torch.equal(v2.filter.evaluate_mask(qa), ref.evaluate_mask(qa))

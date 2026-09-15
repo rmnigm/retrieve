@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import torch
 
-from retrieve.kernels.silvertorch.codesigned_probe_score_exact import (
+from retrieve.ops.triton.codesigned_probe_score_exact import (
     codesigned_probe_score_exact,
 )
 from tests.conftest import make_attrs, make_query, make_query_attrs

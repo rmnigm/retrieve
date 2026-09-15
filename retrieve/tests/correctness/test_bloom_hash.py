@@ -9,8 +9,8 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.layers.filters import BloomFilter, bloom_hash
-from retrieve.layers.filters.bloom_hash import (
+from retrieve.indexing import bloom_hash
+from retrieve.indexing.bloom_hash import (
     build_query_signatures,
     build_signatures,
     build_transposed_sigs,
@@ -18,7 +18,8 @@ from retrieve.layers.filters.bloom_hash import (
     generate_seeds,
     words_per_cluster,
 )
-from retrieve.layers.silvertorch import build_silvertorch
+from retrieve.modules import BloomFilter
+from retrieve.modules.silvertorch import SilverTorchBuilder
 from tests.conftest import make_attrs, make_index, make_query_attrs
 from tests.parity.conftest import make_probe_family
 
@@ -145,24 +146,14 @@ def test_clause_salt_registered_as_buffer_and_moves_with_module():
     assert torch.equal(bf_back.evaluate_mask(q), mask_before)
 
     embs = make_index(256, 64)
-    st = build_silvertorch(
-        embs,
-        k=8,
-        n_lists=8,
-        n_probe=4,
-        filter_mode="bloom",
-        m_bits=M_BITS,
-        k_hash=K_HASH,
-        n_iter=2,
-        item_clause_attrs=attrs,
-    )
+    kw = dict(k=8, n_lists=8, n_probe=4, n_iter=2)
+    kw.update(filter_mode="bloom", m_bits=M_BITS, k_hash=K_HASH)
+    st = SilverTorchBuilder(**kw).set_item_embeddings(embs).set_item_attributes(attrs).build()
     assert "clause_salt" in st.state_dict()
     assert torch.equal(st.clause_salt, bf.clause_salt.cuda())
     assert torch.equal(st._query_bits(q), expected_q)
     # Registered without attributes → empty salt, derived on the fly at query time.
-    st_noattr = build_silvertorch(
-        embs, k=8, n_lists=8, n_probe=4, filter_mode="bloom", m_bits=M_BITS, k_hash=K_HASH, n_iter=2
-    )
+    st_noattr = SilverTorchBuilder(**kw).set_item_embeddings(embs).build()
     assert st_noattr.clause_salt.numel() == 0
     assert torch.equal(st_noattr._query_bits(q), expected_q)
 
