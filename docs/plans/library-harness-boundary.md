@@ -9,6 +9,29 @@
 >
 > **Ordering authority:** [00-roadmap.md](00-roadmap.md) §1 (Phase L, C5).
 
+> **Steer 2026-09-15 (user), recorded in every plan it touches.**
+> *"We don't care about reproducing old results now, we're improving all code
+> and rewriting, then testing and profiling, then running the full evals step
+> by step."* The A1 golden baseline stops being a gate and becomes
+> information; roadmap **C4 closed** on what the harness proves about itself
+> (graph capture 20/20, kill-and-resume, cross-backend parity, the official
+> cell end to end), not on equality with the pre-v2 harness. Order of work:
+> **code first, then tests and profiling, then the evals one step at a time.**
+> Authority: [00-roadmap.md](00-roadmap.md) §1 status block;
+> [evaluation-harness-v2.md](evaluation-harness-v2.md) WP-4's amendment block.
+>
+> **§4's last clause is wrong as worded, and C4 proved it (2026-09-15).** "Bit-
+> exactness between backends is the library's parity suite" is right; H WP-4's
+> reading of it — `jaccard_vs_first@100 == 1.0` for "the exact algos" — is not.
+> *Exact* describes exact **filtering** (no approximation in candidate
+> selection), not bit-identical arithmetic between two implementations of an
+> fp16 dot product. `linr_v2` scores 0.998743 torch-vs-triton with
+> `score_max_abs_diff` 9.77e-3, reproduced independently by the golden at
+> 4.2e-4 recall; `linr_v1` and `linr_v4` agree at exactly 0.0 and SilverTorch
+> at exactly 1.0 with `score_max_abs_diff` 0.0. Roadmap **L4**
+> ([linr-v2-backend-parity.md](linr-v2-backend-parity.md)) settles whether that
+> is precision or a defect, and the clause is reworded from its answer.
+
 ## 1. The rule
 
 **The library retrieves; the harness measures.** Anything that decides *which
