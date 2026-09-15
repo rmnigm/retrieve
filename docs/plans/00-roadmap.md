@@ -146,6 +146,28 @@ plan to `archive/` and shorten its entry here to one line under *Done*.
 > first, then tests and profiling, then the evals one step at a time**, and no
 > code step waits on a golden comparison. **The paper may not claim
 > equivalence with the pre-v2 harness from these numbers** (P G9).
+> **Overnight plan, set 2026-09-15 ~22:40 UTC.** Enough work is queued to run
+> unattended; each item is dispatched by the orchestrator when the previous one
+> hands back, and every stage is resumable, so an interruption costs one stage.
+> In order: **D1-a** (running), then **D1-b** (seeds 1–2, ~8–12 h — the longest
+> single block and the one that closes P gap G4), **D1-c** (the `quality` suite;
+> stage yambda-500m, run, prune, then yambda-5b — they do not fit together in
+> the `/workspace` quota), **D1-d** (the deep Pareto sweeps, the most cuttable),
+> **D1-e** (the S9 ablation). `bench report` is re-run on the accumulated
+> records after each stage, and results are published per the storage policy.
+> **Nothing in `retrieve/src/retrieve` may change until D1-e is done** — the
+> resume key is the library tree hash, so a kernel edit silently invalidates
+> every cell recorded before it. Kernel work that B3 justified (TF-1's
+> transposed bloom, and the new TF-9: our padded probe layout is 97 % `-1` on
+> goodreads and costs 10.9–17.8× against Meta's scorer) stays in Phase G,
+> after the campaign, exactly as O §8 requires.
+> **Housekeeping done the same evening, so the box can run unattended:** eleven
+> merged worktrees pruned (every branch reachable from `origin/development`;
+> `tmp/golden-rederive` pushed), nine stale venvs deleted (`/venvs` 91 GB →
+> 23 GB, local disk 59 GB → 187 GB free), 1.2 GB of stray inductor caches
+> removed, `/workspace` down to 6.7 GB of its ~26 GB quota. A venv is ~7.6 GB
+> and is regenerable with one `uv sync` — **do not keep one per worktree.**
+
 > **The queue, in order, from here:**
 > 1. ~~**L3** — deterministic compaction.~~ **Done**; the two affected golden
 > cells were re-derived with it and are byte-identical across runs.
