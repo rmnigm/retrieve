@@ -124,16 +124,30 @@ plan to `archive/` and shorten its entry here to one line under *Done*.
 > every backend. The finding worth keeping: SilverTorch's `triton` and `torch`
 > backends now agree **exactly** on all 9 goodreads rows, where A1 had a
 > 1.7e-4 gap it read as tie order.
-> **The eval queue, in order, from here:**
+> **Steer 2026-09-15 (user), which re-points everything below.**
+> *"We don't care about reproducing old results now, we're improving all code
+> and rewriting, then testing and profiling, then running the full evals step
+> by step."* The golden baseline stops being a gate and becomes information
+> (H WP-4's amendment block): C4 is closed on what the harness proves about
+> *itself* — graph capture, resume, cross-backend parity, the official cell —
+> not on equality with A1's numbers. The order of work is therefore **code
+> first, then tests and profiling, then the evals one step at a time**, and no
+> code step waits on a golden comparison. **The paper may not claim
+> equivalence with the pre-v2 harness from these numbers** (P G9).
+> **The queue, in order, from here:**
 > 1. ~~**L3** — deterministic compaction.~~ **Done**; the two affected golden
 > cells were re-derived with it and are byte-identical across runs.
-> 2. **C4 gate rerun** — the 14 goodreads-d128 `c0_genre` cells, the arxiv
-> cell, kill-and-resume, `c4_gate.py` against the **re-derived** golden.
-> `--golden-sm-mhz` must be passed **1155** (the re-derive's sampled median);
-> the script's 1140 default is A1's. Then flip C4.
-> 3. **B3** — the Triton vs official head-to-head (O §9a/§9b, gap G2).
-> 4. **C5** — the harness package split (**V**), after C4 flips.
-> 5. **D1** — the campaign (≈ 24 h wall), then **D4** `report.py`.
+> 2. ~~**C4 gate rerun.**~~ **Done and closed** — see the C4 entry. One
+> correction it produced, which any later timing comparison needs: the golden's
+> `sm_mhz` of 1155 is a whole-run median **dominated by idle samples**;
+> filtered to `utilization > 50 %` the golden trace is median 1410, min 1410,
+> which is the estimator v2 records. Compare like with like.
+> 3. **Code, in parallel on disjoint trees:** **L4** (the LiNR V2 backend
+> divergence — a correctness question about our own code, which the steer does
+> *not* demote) and **C5** (the harness package split, **V**).
+> 4. **Tests and profiling:** **B3**, the Triton vs official head-to-head
+> (O §9a/§9b, gap G2).
+> 5. **The evals, step by step:** **D1**, then **D4** `report.py`.
 > Kernel *improvement* (TF-1 transposed bloom, TF-3/4 retune) stays in Phase G;
 > L3 is a correctness fix, not that work.
 > **Decisions taken 2026-09-15, do not reopen:** the `retrieve.layers` /
@@ -421,6 +435,22 @@ dies with it (**L** D11). One branch, `dev/l-library-layout`, off
   until this lands) **and D1** (whose WP-5 gate asks for a byte-identical
   rerun). User decision 2026-09-15: fix the kernel rather than widen the gate.
 
+- [ ] **L4 — settle the LiNR V2 backend divergence.**
+  [linr-v2-backend-parity.md](linr-v2-backend-parity.md) (A100, 0.5 d).
+  `linr_v2` is our **exact** filtered top-K, yet `torch` and `triton` return
+  different results: jaccard@100 **0.998743**, `score_max_abs_diff` **9.77e-3**,
+  and the *golden* reproduces it independently (torch 0.99969470 vs triton
+  0.99927376, **4.2e-4** recall) — so it is in the library, not the harness,
+  and it predates the v2 rewrite. `linr_v1` and `linr_v4` agree at exactly 0.0
+  on the same cells, which is the control. The question to settle first is
+  single and decidable: **do the two backends select the same candidate set**
+  (post-L3 the compaction is deterministic and ascending, so they should) **and
+  differ only in fp16 dot-product rounding near the top-k boundary, or do they
+  genuinely disagree?** The first is precision and is documented; the second is
+  a bug and is fixed. Carries two smaller open items from C4: **L4-b**, the
+  decisive `linr_v4` chunk-64 experiment; **L4-c**, the `clocks_drift` /
+  `clocks_locked` harness artifacts (H §8.2 F). Needs L3. **Before D1.**
+
 ### Phase C — harness v2 (Mac work in parallel with B; A100 gate at the end)
 
 Backends everywhere in H are now `triton | torch | official` (H's
@@ -467,7 +497,22 @@ bit-exactness stays where it belongs, in B2's library parity suite.
   `run-evaluation` / `stage-results` scripts deleted (H §5);
   `algos_v2.py` → `algos.py`; [../system/evaluation.md](../system/evaluation.md)
   rewritten; validation record in H §9.
-- [ ] **C4 — validate the new harness against the golden baseline on the A100.** H §6 WP-4 (A100, 1 d). Gate: quality within
+- [x] **C4 — validate the new harness against the golden baseline on the A100.**
+  **Closed 2026-09-15** (`32d4877`, merged at `c1ae1b5`) under the user's
+  superseding decision the same day — *"we don't care about reproducing old
+  results now"* — which demotes the golden comparison from a gate to
+  information. What the run actually established, and what closes this step:
+  20 cells all `status: ok`, `cudagraph_skips == 0` 20/20, kill-and-resume
+  clean, `official` end to end on goodreads at jaccard 0.9998 with the plan
+  cache off, SilverTorch `torch` vs `triton` **exactly 1.0** with
+  `score_max_abs_diff 0.0` on both datasets, and quality matching the
+  re-derived golden on 9/11 cells at a worst passing delta of 7.5e-9. What it
+  did **not** establish, carried forward rather than buried: `linr_v4`'s 7.3e-5
+  (chunk-induced int8 boundary ties, attributed but the decisive chunk-64
+  experiment unrun), arxiv `silvertorch`'s unattributed 2.0e-6, and the
+  `linr_v2` backend divergence, which becomes **L4**. Gate amendments and the
+  evidence behind each: [evaluation-harness-v2.md](evaluation-harness-v2.md)
+  WP-4's amendment block; run record §12. H §6 WP-4 (A100, 1 d). Gate: quality within
   1e-6 of the A1 golden, graph latency within 5 %, `cudagraph_skips ==
   0`, `jaccard_vs_first@100 == 1.0` torch-vs-triton, one `official` cell
   runs end to end on goodreads-d128 `c0_genre` with jaccard ≥ 0.99 (O
