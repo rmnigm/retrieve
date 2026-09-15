@@ -168,6 +168,22 @@ plan to `archive/` and shorten its entry here to one line under *Done*.
 > removed, `/workspace` down to 6.7 GB of its ~26 GB quota. A venv is ~7.6 GB
 > and is regenerable with one `uv sync` — **do not keep one per worktree.**
 
+> **Autonomy rules, set 2026-09-15 (user: "finish most of the evals you can
+> autonomously").** The orchestrator runs the campaign chain unattended and
+> **does these without asking**: verify a worker's gates independently and merge
+> its branch; dispatch the next D1 stage; re-run `bench report` on the
+> accumulated records; publish results per the storage policy (private); stage
+> and prune datasets one or two at a time; prune merged worktrees, stale venvs
+> and caches; cut `RETRIEVE_DATA_ROOT` over to the overlay once D1-a is done;
+> fix a harness bug that blocks a stage, and record it.
+> **It stops and asks** for: anything that would change a written gate or what
+> the paper may claim; any change under `retrieve/src/retrieve` (it invalidates
+> every recorded cell through the resume key — the whole reason the kernel work
+> is parked); publishing anything publicly or minting a DOI; deleting data that
+> is not regenerable; and a gate failure whose fix is a plan amendment rather
+> than a bug fix. A falsified expectation is **reported, never smoothed** —
+> six were falsified on 2026-09-15 and each was worth more than a green tick.
+
 > **The queue, in order, from here:**
 > 1. ~~**L3** — deterministic compaction.~~ **Done**; the two affected golden
 > cells were re-derived with it and are byte-identical across runs.
