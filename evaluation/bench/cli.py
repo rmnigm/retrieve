@@ -1,6 +1,6 @@
 """``bench`` — the harness console script (H §3.4): ``run`` (one process), ``campaign`` (one
 child per group), ``check`` (the on-disk layout), ``upload`` (results → HF mirror),
-``report`` (roadmap D4).
+``report`` (tables and figures from the records; roadmap D4).
 
 ``bench run`` expands one ``(dataset, suite)`` through ``config.load_matrix`` (every option
 below ``--suite`` is a narrow; ``--k`` / ``--bs`` / ``--mode`` replace the suite's lists and
@@ -26,10 +26,10 @@ from pathlib import Path
 
 import click
 import yaml
-from loguru import logger
 
 from bench.algos import BACKENDS, FILTER_KINDS
 from bench.config import load_dataset, load_matrix
+from bench.report import report
 from bench.upload import upload
 
 EVAL_DIR = Path(__file__).resolve().parents[1]
@@ -53,6 +53,7 @@ def main() -> None:
 
 
 main.add_command(upload)
+main.add_command(report)
 
 
 @main.command()
@@ -237,14 +238,6 @@ def check(dataset, dims, config_dir) -> None:
         for p in problems:
             click.echo(f"  {p}")
     sys.exit(1 if bad else 0)
-
-
-@main.command()
-@click.argument("results", required=False)
-def report(results) -> None:
-    """Tables and figures from the JSONL (roadmap D4, H §6 WP-6)."""
-    logger.error("bench report is roadmap D4 (H §6 WP-6): flat.csv, tables, figures — not yet")
-    sys.exit(2)
 
 
 if __name__ == "__main__":
