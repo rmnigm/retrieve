@@ -1,10 +1,9 @@
 """CPU-only tests for ``retrieval.algos`` (harness v2 WP-1).
 
-- ``PATHS`` covers ``ALGOS × FILTER_KINDS × BACKENDS`` and agrees with the dispatch table
-  in ``docs/system/architecture.md`` (parsed from the markdown, not mirrored in a fixture,
-  so the doc and the table cannot drift apart silently).
+- ``PATHS`` covers ``ALGOS × FILTER_KINDS × BACKENDS`` (its derivation from
+  ``retrieve.interfaces.DISPATCH`` is roadmap C5's ``tests/bench/test_paths.py``).
 - ``k``-slice invariance: for every ``retrieve`` layer the harness uses, and for every
-  wrapper, ``module.k = k'`` after ``register_index`` returns the top-``k'`` prefix of the
+  algo module, ``module.k = k'`` after ``register_index`` returns the top-``k'`` prefix of the
   top-``k`` result (scores ``torch.equal``, ids equal up to ties) and leaves every buffer
   untouched — the H §7 "no layer bakes ``k`` into a buffer" check, on ``backend="torch"``
   (the Triton kernels need CUDA; C4 covers them).
@@ -20,8 +19,6 @@ assertions, and every test that shares them is read-only on the module beyond ``
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
 from typing import get_args
 
 import pytest
@@ -32,7 +29,6 @@ from retrieval.bench import index_bytes
 from retrieve import OneBitKNN, PostfilterKNN, PostfilterKNNInt8, PrefilterKNN, SilverTorch
 from retrieve.interfaces import SilverTorchBackend
 
-ARCH_MD = Path(__file__).resolve().parents[3] / "docs" / "system" / "architecture.md"
 N, D = 256, 64
 
 # ----- PATHS ----------------------------------------------------------------------
@@ -51,71 +47,6 @@ def test_paths_cover_the_full_grid():
     for b in ("triton", "torch"):
         assert A.PATHS["linr_v1_filter_mask", "none", b] == "cublas"
         assert A.PATHS["linr_v4", "none", b] == "cublas"
-
-
-def _dispatch_table() -> tuple[list[str], dict[str, list[str]]]:
-    """Parse the ``### Backend dispatch`` table: header cells and rows keyed by module cell."""
-    text = ARCH_MD.read_text()
-    body = text.split("### Backend dispatch", 1)[1].split("\n#", 1)[0]
-    rows = [ln for ln in body.splitlines() if ln.startswith("|")]
-    split = lambda ln: [c.strip() for c in ln.strip().strip("|").split("|")]  # noqa: E731
-    header = [re.sub(r"[`\"]", "", c) for c in split(rows[0])]
-    table = {split(ln)[0]: split(ln)[1:] for ln in rows[2:]}
-    return header, table
-
-
-def _classify(cell: str) -> str:
-    c = cell.lower()
-    if "valueerror" in c or "raises" in c:
-        return "rejected"
-    if "cublas" in c:
-        return "cublas"
-    if "eager" in c or "torch" in c:
-        return "torch"
-    return "triton"  # a fused Triton kernel name, or "fused Triton"
-
-
-_MODULES = {  # library modules on each algo's path; the first is the final top-k owner
-    "linr_v1_filter_mask": ["PostfilterKNN"],
-    "linr_v2": ["PrefilterKNN"],
-    "linr_v3": ["OneBitKNN", "PrefilterKNN"],
-    "linr_v4": ["PostfilterKNNInt8"],
-    "silvertorch": ["SilverTorch"],
-}
-_FILTER = {"clause": "ExactAttributeFilter", "bloom": "BloomFilter"}
-
-
-def test_paths_agree_with_architecture_dispatch_table():
-    header, table = _dispatch_table()
-    cols = {name: i for i, name in enumerate(header[1:])}
-
-    def row(module: str) -> list[str]:
-        matches = [cells for key, cells in table.items() if module in key]
-        assert len(matches) == 1, module
-        cells = list(matches[0])
-        for i, c in enumerate(cells):  # "same" = the flag is a no-op: inherit the triton cell
-            cells[i] = cells[0] if c.lower() == "same" else c
-        return cells
-
-    for (algo, fk, backend), path in A.PATHS.items():
-        if backend == "official":
-            if algo != "silvertorch":
-                # The table says these modules reject "official" at construction — no
-                # official code — so PATHS refuses the cell rather than mislabelling a
-                # torch/cuBLAS number.
-                for m in _MODULES[algo]:
-                    assert _classify(row(m)[cols["official"]]) == "rejected", (algo, m)
-                assert path is None
-            continue
-        if algo == "linr_v2" and fk == "none":
-            assert path is None
-            continue
-        parts = [_classify(row(m)[cols[backend]]) for m in _MODULES[algo]]
-        assert len(set(parts)) == 1, (algo, backend, parts)
-        if fk != "none" and algo != "silvertorch":  # SilverTorch fuses its predicate
-            parts.append(_classify(row(_FILTER[fk])[cols[backend]]))
-        expected = parts[0] if len(set(parts)) == 1 else "+".join(parts)
-        assert path == expected, (algo, fk, backend, path, expected)
 
 
 # ----- k-slice invariance ---------------------------------------------------------

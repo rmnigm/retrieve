@@ -27,13 +27,15 @@ retrieve/tests/
 │   ├── test_bit_knn_base.py        (_PackedBitsKNN base: ctor/buffers/k_bits sentinel/candidates semantics)
 │   ├── test_bloom_filter.py
 │   ├── test_bloom_hash.py          (bloom_hash builders: chunked vs loop-free equality, seed determinism)
+│   ├── test_boundary.py            (the library side of the library / harness contract: SilverTorch + LiNRV1–V4)
 │   ├── test_combine_filters.py
 │   ├── test_compact.py
 │   ├── test_filters.py             (ExactAttributeFilter)
-│   ├── test_linr.py                (PostfilterKNN, PostfilterKNNInt8, PrefilterKNN, OneBitKNN, SimHashKNN × torch / Triton)
+│   ├── test_linr.py                (PostfilterKNN, PostfilterKNNInt8, PrefilterKNN, OneBitKNN, SimHashKNN × torch / Triton;
+│   │                                LiNRV1–V4 torch.equal to the hand-composed primitives)
 │   ├── test_quantize.py            (int8, OPORP, popcount)
 │   ├── test_retrieval_utils.py     (FullScanKNN, post_filter_topk)
-│   ├── test_silvertorch.py         (SilverTorch × filter_mode {none,bloom,exact} × backend {triton,torch,official})
+│   ├── test_silvertorch.py         (SilverTorch × filter_mode {none,bloom,exact} × backend {triton,torch,official}; SilverTorchBuilder)
 │   ├── test_topk_util.py           (masked_topk / counts_to_valid)
 │   └── test_tune_smoke.py          (one tiny sweep point per tune-kernels spec, all 7; CUDA-gated)
 ├── parity/                # kernel vs pure-torch reference
@@ -238,6 +240,9 @@ module under test.
 | `combine_indices`          | `compact_mask(combine_masks(*[f.evaluate_mask(q)]))` |
 | `SilverTorch` (no bloom)   | `FullScanKNN` for recall (asserts ≥ 0.85 at full probe) + recall monotone in `n_probe` |
 | `SilverTorch` (qa=None)    | `SilverTorch (no bloom)` directly — `query_clause_attrs=None` is a documented fast path |
+| `LiNRV1`–`LiNRV4`          | the primitives composed by hand on the same inputs (`torch.equal` scores, ids up to ties) |
+| `SilverTorchBuilder` / `LiNRBuilder` `set_state_dict` | a fresh `set_item_embeddings` build of the same seed (buffers `torch.equal`, forwards equal) |
+| `KMeans(init="kmeans++")`  | the seeds are distinct rows of the index, one per blob on separable blobs; inertia ≤ `init="random"` there |
 | `PostfilterKNN` semantics | `(q @ x.T).masked_fill(~mask, -inf).topk(k)` |
 | `PrefilterKNN` semantics      | gather + bmm + local topk + scatter |
 | `OneBitKNN` semantics         | `FullScanKNN` recall (asserts ≥ 0.4 at K=200, N=2048) |
@@ -420,6 +425,17 @@ LiNR V1, V2, V3, V4 plus `SimHashKNN` in both backends.
 - `backend` validation: every LiNR class and `ExactAttributeFilter`
   raise `ValueError("unknown backend …")` for `"official"`, `"cuda"` and a
   typo — `LinrBackend` is `torch | triton`, no silent torch fallback.
+- The composites (`TestComposites`, roadmap L2's bit-exactness gate):
+  `LiNRV1` ≡ `PostfilterKNN` + `filter.evaluate_mask`, `LiNRV2` ≡
+  `PrefilterKNN` over `filter.evaluate_indices`, `LiNRV3` ≡ `OneBitKNN` →
+  `PrefilterKNN` bounded by the survivors' count, `LiNRV4` ≡
+  `PostfilterKNNInt8` + mask — on `torch` and `triton` × filter kind
+  `{none, clause, bloom}` (V2: the two filter kinds), scores `torch.equal`,
+  ids `assert_ids_equal_up_to_ties`. V3's filter is the `torch` one on
+  every row: a Triton compaction's candidate order is unspecified between
+  launches, and the 1-bit stage's boundary ties would then resolve
+  differently in two independent runs. `register_index(embs, attrs,
+  reverse)` registers the attached filter, under the `filter.` prefix.
 
 ### [`test_silvertorch.py`](../../retrieve/tests/correctness/test_silvertorch.py)
 
@@ -482,8 +498,17 @@ live in `test_official.py`.
   kernel-level parity suite (`test_official.py` T1/T6) separately proves
   official↔triton int32 scores bit-identical on a shared index (and ids
   equal up to tie permutation).
-- `build_silvertorch` builder round-trips (bloom / no-filter / exact /
-  torch backend).
+- `SilverTorchBuilder` (`TestBuilder`, every backend × filter mode):
+  `set_state_dict(src.state_dict()).build()` equals a *fresh*
+  `set_item_embeddings(x).build()` of the same seed — key order, every
+  buffer `torch.equal`, the two cached scalars, forwards (`torch.equal`
+  scores, ids up to ties); `build_timings` is `{}` on the prebuilt module;
+  the full chain (`set_item_attributes` with reverse flags, `set_backend`,
+  `set_device`); `build()` with neither or both sources raises.
+- `kmeans_init` (`TestKMeansInit`): the default is `"random"` (plan L D9 —
+  the recorded numbers depend on it); a `"kmeans++"` module builds on
+  `torch` / `triton`, its centroids differ from random init's, are
+  reproducible, and `build_timings["kmeans_s"] > 0`.
 - Edge case: `n_lists = N` (one item per cluster) → recall ≥ 0.85 at
   full probe.
 
@@ -537,6 +562,52 @@ epilogue every layer's torch path routes through.
   cluster-major layout round-trips bit by bit against the row-wise index
   over a `make_probe_family` layout with a non-multiple-of-64 `max_size`
   (pad tail) and `-1` padding slots (all-zero columns).
+
+### [`test_kmeans.py`](../../retrieve/tests/correctness/test_kmeans.py)
+
+`KMeans.fit` is bit-reproducible (the C4 fix: the one-hot GEMM reduction
+against the pre-C4 atomic one, at the 200k/128/1024 gate size and a
+chunk-tail size, on CUDA and CPU), and `init="kmeans++"` (roadmap L2):
+
+- `n_iter=0` exposes the seeds: each is a row of the index, all distinct
+  (a point at zero D² mass is never redrawn — `searchsorted(right=True)`),
+  one per blob on 16 separable blobs, and the returned assignments are
+  `KMeans.assign` of the returned centroids.
+- Deterministic per seed (two seed-0 fits `torch.equal`; seed 1 differs).
+- Inertia ≤ random init on the separable blobs at `n_iter ∈ {0, 5}`
+  (random init lands two seeds in one blob almost surely and Lloyd's cannot
+  recover).
+- An unknown `init` raises.
+
+### [`test_boundary.py`](../../retrieve/tests/correctness/test_boundary.py)
+
+The library side of
+[library-harness-boundary.md](../plans/library-harness-boundary.md) §5, for
+each of `SilverTorch` (`filter_mode="exact"`), `LiNRV1`–`LiNRV4` (with an
+`ExactAttributeFilter`) on a tiny index, on `triton` and `torch`:
+
+- `module.k = k'` changes the output width without re-registration and
+  leaves every buffer untouched.
+- `buffers()` covers every tensor attribute: no `torch.Tensor` in any
+  submodule's `__dict__` outside `_buffers`, and the state dict is exactly
+  the named buffers.
+- A forward under `torch.cuda.set_sync_debug_mode("error")` raises nothing
+  (after one warm-up call for the Triton JIT). torch itself warns that the
+  mode "does not yet detect all synchronizing operations"; the harness's
+  `cudagraph_skips == 0` (roadmap C4) is the stronger evidence.
+- `set_state_dict(...).build()` through the class's builder equals a fresh
+  build: key order, buffers, forward.
+- `capturable` is defined on the class (a `bool` or a property), never
+  stamped on the instance; `True` on both backends, `False` on
+  `SilverTorch(backend="official")` (gated by `require_official`).
+- `DISPATCH` names every algo-level class × the three backends, every key
+  is a `retrieve.modules` class, `None` cells raise `ValueError("unknown
+  backend")` at construction.
+- `set_query_params`: `SilverTorch(n_probe=…)` re-runs the two
+  `register_index` validations (`<= n_lists`, probe pool `>= k`);
+  `LiNRV3(candidate_pool=…)` re-validates against `N`.
+- `build_timings`: the four keys in phase order, non-negative floats,
+  `kmeans_s > 0`; `{}` before registration.
 
 ### [`test_tune_smoke.py`](../../retrieve/tests/correctness/test_tune_smoke.py)
 

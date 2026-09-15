@@ -1,10 +1,12 @@
 """Benchmark algorithms for harness v2 (H §3.1 ``algos.py``).
 
-Five ``nn.Module`` wrappers, one per paper variant, with the filter module registered as a
-submodule (so ``module.buffers()`` — and ``bench.index_bytes`` — covers index *and* filter,
-the thesis's memory definition) and ``k`` settable after ``register_index`` (perf sets
-``module.k = k`` per variant instead of rebuilding; ``tests/test_algos.py`` checks that no
-layer bakes ``k`` into a buffer). ``forward(q, qa=None) -> (ids [B, k], scores [B, k])``.
+The LiNR variants are the library's ``LiNRV1``–``LiNRV4`` (roadmap L2; the filter module is a
+submodule, so ``module.buffers()`` — and ``bench.index_bytes`` — covers index *and* filter, the
+thesis's memory definition); ``Silvertorch`` is the one remaining wrapper, kept for the harness's
+``filter_kind`` → ``filter_mode`` mapping and the plan-cache switch until roadmap C5 re-tables
+this file. ``k`` is settable after ``register_index`` on every module (perf sets ``module.k = k``
+per variant instead of rebuilding; ``tests/test_algos.py`` checks that no layer bakes ``k`` into
+a buffer). ``forward(q, qa=None) -> (ids [B, k], scores [B, k])``.
 
 Tables: ``ALGOS`` (name → class), ``FILTER_KINDS``, ``BACKENDS`` and ``PATHS`` — for every
 ``(algo, filter_kind, backend)`` the code path that actually runs, or ``None`` when there is
@@ -27,13 +29,13 @@ from torch import Tensor, nn
 from retrieve import (
     BloomFilter,
     ExactAttributeFilter,
-    OneBitKNN,
-    PostfilterKNN,
-    PostfilterKNNInt8,
-    PrefilterKNN,
+    LiNRV1,
+    LiNRV2,
+    LiNRV3,
+    LiNRV4,
     SilverTorch,
 )
-from retrieve.interfaces import FilterModule, LinrBackend, SilverTorchBackend
+from retrieve.interfaces import FilterModule, SilverTorchBackend
 
 FILTER_KINDS = ("none", "clause", "bloom")
 BACKENDS = ("triton", "torch", "official")
@@ -41,117 +43,6 @@ BACKENDS = ("triton", "torch", "official")
 FILTER_BACKEND = {"triton": "triton", "torch": "torch", "official": "triton"}
 # H amendment / O D7: the official ops cannot be CUDA-graph captured → no ``graph`` variant.
 CAPTURABLE = {"triton": True, "torch": True, "official": False}
-
-
-def _k_of(attr: str) -> property:
-    """``module.k`` forwards to the inner layer that owns the final top-k."""
-    return property(
-        lambda self: getattr(self, attr).k,
-        lambda self, k: setattr(getattr(self, attr), "k", int(k)),
-    )
-
-
-def _mask(filter_mod: FilterModule | None, qa: Tensor | None) -> Tensor | None:
-    if qa is None:
-        return None
-    assert filter_mod is not None, "query attrs given but the algo has no filter"
-    return filter_mod.evaluate_mask(qa)
-
-
-class LinrV1(nn.Module):
-    """LiNR V1 — dense fp16 matmul (cuBLAS), optional ``[B, N]`` bool mask, top-k."""
-
-    k = _k_of("idx")
-
-    def __init__(
-        self, item_embs: Tensor, k: int, *, filter_mod=None, backend: LinrBackend = "triton"
-    ):
-        super().__init__()
-        self.idx = PostfilterKNN(k=k, backend=backend)
-        self.idx.register_index(item_embs)
-        self.filter = filter_mod
-
-    def forward(self, q: Tensor, qa: Tensor | None = None) -> tuple[Tensor, Tensor]:
-        return self.idx(q, mask=_mask(self.filter, qa))
-
-
-class LinrV2(nn.Module):
-    """LiNR V2 — the filter's compact candidate list rescored exactly (``PrefilterKNN``).
-    The candidate source *is* the filter, so ``qa`` is required."""
-
-    k = _k_of("idx")
-
-    def __init__(
-        self,
-        item_embs: Tensor,
-        k: int,
-        *,
-        filter_mod: FilterModule,
-        backend: LinrBackend = "triton",
-    ):
-        super().__init__()
-        self.idx = PrefilterKNN(k=k, backend=backend)
-        self.idx.register_index(item_embs)
-        self.filter = filter_mod
-
-    def forward(self, q: Tensor, qa: Tensor) -> tuple[Tensor, Tensor]:
-        cand, counts = self.filter.evaluate_indices(qa)
-        return self.idx(q, candidate_ids=cand, counts=counts)
-
-
-class LinrV3(nn.Module):
-    """LiNR V3 → V2 cascade: 1-bit OPORP top-``candidate_pool``, then exact rescoring.
-    ``candidate_pool`` is a query-time parameter (``set_query_params``)."""
-
-    k = _k_of("stage2")
-
-    def __init__(
-        self,
-        item_embs: Tensor,
-        k: int,
-        *,
-        candidate_pool: int = 5000,
-        seed: int = 0,
-        filter_mod=None,
-        backend: LinrBackend = "triton",
-    ):
-        super().__init__()
-        self.stage1 = OneBitKNN(k=candidate_pool, seed=seed, backend=backend)
-        self.stage1.register_index(item_embs)
-        self.stage2 = PrefilterKNN(k=k, backend=backend)
-        self.stage2.register_index(item_embs)
-        self.filter = filter_mod
-
-    def set_query_params(self, *, candidate_pool: int) -> None:
-        if candidate_pool > self.stage1.item_bits.shape[0]:
-            raise ValueError(f"candidate_pool={candidate_pool} exceeds N")
-        self.stage1.k = int(candidate_pool)
-
-    def forward(self, q: Tensor, qa: Tensor | None = None) -> tuple[Tensor, Tensor]:
-        if qa is None:
-            cand, _ = self.stage1(q)
-            return self.stage2(q, candidate_ids=cand)
-        pos, pcounts = self.filter.evaluate_indices(qa)
-        cand, _ = self.stage1(q, candidate_ids=pos, counts=pcounts)
-        # Rows with fewer survivors than candidate_pool carry -1 tails; bound stage 2 by counts.
-        return self.stage2(q, candidate_ids=cand, counts=(cand >= 0).sum(dim=1))
-
-
-class LinrV4(nn.Module):
-    """LiNR V4 — int8 dense matmul (cuBLAS ``_int_mm``), optional mask, top-k."""
-
-    k = _k_of("idx")
-
-    def __init__(
-        self, item_embs: Tensor, k: int, *, filter_mod=None, backend: LinrBackend = "triton"
-    ):
-        super().__init__()
-        self.idx = PostfilterKNNInt8(k=k, backend=backend)
-        self.idx.register_index(item_embs)
-        self.filter = filter_mod
-
-    def forward(self, q: Tensor, qa: Tensor | None = None) -> tuple[Tensor, Tensor]:
-        return self.idx(q, mask=_mask(self.filter, qa))
 
 
 class Silvertorch(nn.Module):
@@ -230,11 +121,7 @@ class Silvertorch(nn.Module):
         self.idx.official = dataclasses.replace(self.idx.official, cache_plans=bool(enabled))
 
     def set_query_params(self, *, n_probe: int) -> None:
-        """The two ``register_index`` validations, re-run on mutation (main.py:168-169, 187-192)."""
-        if n_probe > self.idx.n_lists:
-            raise ValueError(f"n_probe ({n_probe}) cannot exceed n_lists ({self.idx.n_lists}).")
-        self._check_probe_pool(int(n_probe), self.idx.k)
-        self.idx.n_probe = int(n_probe)
+        self.idx.set_query_params(n_probe=int(n_probe))
 
     def _check_probe_pool(self, n_probe: int, k: int) -> None:
         # The layer's own cached scalar (set by register_index on every layout, re-derived
@@ -251,10 +138,10 @@ class Silvertorch(nn.Module):
 
 
 ALGOS: dict[str, type[nn.Module]] = {
-    "linr_v1_filter_mask": LinrV1,
-    "linr_v2": LinrV2,
-    "linr_v3": LinrV3,
-    "linr_v4": LinrV4,
+    "linr_v1_filter_mask": LiNRV1,
+    "linr_v2": LiNRV2,
+    "linr_v3": LiNRV3,
+    "linr_v4": LiNRV4,
     "silvertorch": Silvertorch,
 }
 
@@ -340,10 +227,11 @@ def build(
             backend=backend,
             **p,
         )
-    elif algo == "linr_v3":
-        module = LinrV3(item_embs, k, seed=seed, filter_mod=filter_mod, backend=backend, **p)
     else:
-        module = ALGOS[algo](item_embs, k, filter_mod=filter_mod, backend=backend, **p)
+        if algo == "linr_v3":
+            p["seed"] = seed
+        module = ALGOS[algo](k, filter=filter_mod, backend=backend, **p)
+        module.register_index(item_embs)
     module.backend = backend
     module.capturable = CAPTURABLE[backend]
     return module
