@@ -1,0 +1,131 @@
+{
+  "captured_at": "4f529723c57573332c0a11456e1397e98b3905fd",
+  "cells": {
+    "plain_b1_l16_m64_p4_d64_k8": {
+      "scores_equal": true,
+      "ids_equal_at_finite_slots": true,
+      "ids_exactly_equal_after_sentinel": true
+    },
+    "plain_b16_l16_m64_p4_d64_k8": {
+      "scores_equal": true,
+      "ids_equal_at_finite_slots": true,
+      "ids_exactly_equal_after_sentinel": true
+    },
+    "plain_b1_l64_m96_p8_d128_k32": {
+      "scores_equal": true,
+      "ids_equal_at_finite_slots": true,
+      "ids_exactly_equal_after_sentinel": true
+    },
+    "plain_b16_l64_m96_p8_d128_k32": {
+      "scores_equal": true,
+      "ids_equal_at_finite_slots": true,
+      "ids_exactly_equal_after_sentinel": true
+    },
+    "plain_b1_l32_m64_p8_d96_k16": {
+      "scores_equal": true,
+      "ids_equal_at_finite_slots": true,
+      "ids_exactly_equal_after_sentinel": true
+    },
+    "plain_b16_l32_m64_p8_d96_k16": {
+      "scores_equal": true,
+      "ids_equal_at_finite_slots": true,
+      "ids_exactly_equal_after_sentinel": true
+    },
+    "plain_b1_l32_m90_p8_d128_k32": {
+      "scores_equal": true,
+      "ids_equal_at_finite_slots": true,
+      "ids_exactly_equal_after_sentinel": true
+    },
+    "plain_b16_l32_m90_p8_d128_k32": {
+      "scores_equal": true,
+      "ids_equal_at_finite_slots": true,
+      "ids_exactly_equal_after_sentinel": true
+    },
+    "exact_d64_none": {
+      "scores_equal": true,
+      "ids_equal_at_finite_slots": true,
+      "ids_exactly_equal_after_sentinel": true
+    },
+    "exact_d64_mixed": {
+      "scores_equal": true,
+      "ids_equal_at_finite_slots": true,
+      "ids_exactly_equal_after_sentinel": true
+    },
+    "bloom_d64": {
+      "scores_equal": true,
+      "ids_equal_at_finite_slots": true,
+      "ids_exactly_equal_after_sentinel": true
+    },
+    "exact_d128_none": {
+      "scores_equal": true,
+      "ids_equal_at_finite_slots": true,
+      "ids_exactly_equal_after_sentinel": true
+    },
+    "exact_d128_mixed": {
+      "scores_equal": true,
+      "ids_equal_at_finite_slots": true,
+      "ids_exactly_equal_after_sentinel": true
+    },
+    "bloom_d128": {
+      "scores_equal": true,
+      "ids_equal_at_finite_slots": true,
+      "ids_exactly_equal_after_sentinel": true
+    }
+  },
+  "modules": {
+    "silvertorch_triton_none": {
+      "state_dict_keys_equal": true,
+      "fresh_build_state_dict_equal": true,
+      "ids_equal": true,
+      "scores_equal": true
+    },
+    "silvertorch_triton_bloom": {
+      "state_dict_keys_equal": true,
+      "fresh_build_state_dict_equal": true,
+      "ids_equal": true,
+      "scores_equal": true
+    },
+    "silvertorch_triton_exact": {
+      "state_dict_keys_equal": true,
+      "fresh_build_state_dict_equal": true,
+      "ids_equal": true,
+      "scores_equal": true
+    },
+    "silvertorch_torch_none": {
+      "state_dict_keys_equal": true,
+      "fresh_build_state_dict_equal": true,
+      "ids_equal": true,
+      "scores_equal": true
+    },
+    "silvertorch_torch_bloom": {
+      "state_dict_keys_equal": true,
+      "fresh_build_state_dict_equal": true,
+      "ids_equal": true,
+      "scores_equal": true
+    },
+    "silvertorch_torch_exact": {
+      "state_dict_keys_equal": true,
+      "fresh_build_state_dict_equal": true,
+      "ids_equal": true,
+      "scores_equal": true
+    },
+    "silvertorch_official_none": {
+      "state_dict_keys_equal": true,
+      "fresh_build_state_dict_equal": true,
+      "ids_equal": true,
+      "scores_equal": true
+    },
+    "silvertorch_official_bloom": {
+      "state_dict_keys_equal": true,
+      "fresh_build_state_dict_equal": true,
+      "ids_equal": true,
+      "scores_equal": true
+    },
+    "silvertorch_official_exact": {
+      "state_dict_keys_equal": true,
+      "fresh_build_state_dict_equal": true,
+      "ids_equal": true,
+      "scores_equal": true
+    }
+  }
+}
