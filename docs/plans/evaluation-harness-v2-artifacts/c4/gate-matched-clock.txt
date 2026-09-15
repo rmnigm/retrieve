@@ -1,0 +1,242 @@
+cell                                                                   check                 verdict  detail
+-------------------------------------------------------------------------------------------------------------
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-triton-s0-{}        quality recall@100    PASS     v2 0.999695 golden 0.999695 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-triton-s0-{}        quality ndcg@100      PASS     v2 0.999781 golden 0.999781 |diff| 6.0e-12 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-triton-s0-{}        quality recall@500    PASS     v2 0.999657 golden 0.999657 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-triton-s0-{}        quality ndcg@500      PASS     v2 0.999729 golden 0.999729 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-triton-s0-{}        quality recall@1000   PASS     v2 0.999627 golden 0.999627 |diff| 1.1e-16 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-triton-s0-{}        quality ndcg@1000     PASS     v2 0.999696 golden 0.999696 |diff| 1.0e-09 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-triton-s0-{}        latency k=100 bs=1    FAIL     v2 graph 0.4519 ms golden 0.5242 ms ratio 0.862 [sm 1410/1410 MHz]; v2 eager 0.4888 ms
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-triton-s0-{}        latency k=100 bs=8    PASS     v2 graph 1.1043 ms golden 1.0887 ms ratio 1.014 [sm 1410/1410 MHz]; v2 eager 1.1350 ms
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-triton-s0-{}        latency k=100 bs=16   PASS     v2 graph 1.9439 ms golden 1.8948 ms ratio 1.026 [sm 1410/1410 MHz]; v2 eager 1.9711 ms
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-triton-s0-{}        latency k=500 bs=1    PASS     v2 graph 0.4653 ms golden 0.4741 ms ratio 0.982 [sm 1410/1410 MHz]; v2 eager 0.5071 ms
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-triton-s0-{}        latency k=500 bs=8    PASS     v2 graph 1.1158 ms golden 1.1009 ms ratio 1.014 [sm 1410/1410 MHz]; v2 eager 1.1477 ms
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-triton-s0-{}        latency k=500 bs=16   PASS     v2 graph 1.9531 ms golden 1.9046 ms ratio 1.025 [sm 1410/1410 MHz]; v2 eager 1.9821 ms
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-triton-s0-{}        latency k=1000 bs=1   PASS     v2 graph 0.4664 ms golden 0.4781 ms ratio 0.975 [sm 1410/1410 MHz]; v2 eager 0.5078 ms
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-triton-s0-{}        latency k=1000 bs=8   PASS     v2 graph 1.1164 ms golden 1.1010 ms ratio 1.014 [sm 1410/1410 MHz]; v2 eager 1.1484 ms
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-triton-s0-{}        latency k=1000 bs=16  PASS     v2 graph 1.9541 ms golden 1.9060 ms ratio 1.025 [sm 1410/1410 MHz]; v2 eager 1.9830 ms
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-triton-s0-{}        graph                 PASS     9/9 graph entries measured (cudagraph_skips == 0)
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-triton-s0-{}        parity                INFO     parity=reference (wrote the reference or no quality)
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-triton-s0-{}        stable                PASS     stable
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-torch-s0-{}         quality recall@100    PASS     v2 0.999695 golden 0.999695 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-torch-s0-{}         quality ndcg@100      PASS     v2 0.999781 golden 0.999781 |diff| 6.0e-12 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-torch-s0-{}         quality recall@500    PASS     v2 0.999657 golden 0.999657 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-torch-s0-{}         quality ndcg@500      PASS     v2 0.999729 golden 0.999729 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-torch-s0-{}         quality recall@1000   PASS     v2 0.999627 golden 0.999627 |diff| 1.1e-16 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-torch-s0-{}         quality ndcg@1000     PASS     v2 0.999696 golden 0.999696 |diff| 1.0e-09 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-torch-s0-{}         latency k=100 bs=1    FAIL     v2 graph 0.4190 ms golden 0.4812 ms ratio 0.871 [sm 1410/1410 MHz]; v2 eager 0.6842 ms
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-torch-s0-{}         latency k=100 bs=8    PASS     v2 graph 0.9552 ms golden 0.9435 ms ratio 1.012 [sm 1410/1410 MHz]; v2 eager 2.6049 ms
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-torch-s0-{}         latency k=100 bs=16   PASS     v2 graph 1.6518 ms golden 1.6229 ms ratio 1.018 [sm 1410/1410 MHz]; v2 eager 4.9004 ms
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-torch-s0-{}         latency k=500 bs=1    PASS     v2 graph 0.4339 ms golden 0.4477 ms ratio 0.969 [sm 1410/1410 MHz]; v2 eager 0.7005 ms
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-torch-s0-{}         latency k=500 bs=8    PASS     v2 graph 0.9665 ms golden 0.9560 ms ratio 1.011 [sm 1410/1410 MHz]; v2 eager 2.6178 ms
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-torch-s0-{}         latency k=500 bs=16   PASS     v2 graph 1.6624 ms golden 1.6335 ms ratio 1.018 [sm 1410/1410 MHz]; v2 eager 4.9152 ms
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-torch-s0-{}         latency k=1000 bs=1   PASS     v2 graph 0.4349 ms golden 0.4509 ms ratio 0.964 [sm 1410/1410 MHz]; v2 eager 0.7013 ms
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-torch-s0-{}         latency k=1000 bs=8   PASS     v2 graph 0.9677 ms golden 0.9551 ms ratio 1.013 [sm 1410/1410 MHz]; v2 eager 2.6192 ms
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-torch-s0-{}         latency k=1000 bs=16  PASS     v2 graph 1.6624 ms golden 1.6344 ms ratio 1.017 [sm 1410/1410 MHz]; v2 eager 4.9170 ms
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-torch-s0-{}         graph                 PASS     9/9 graph entries measured (cudagraph_skips == 0)
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-torch-s0-{}         parity                PASS     vs_triton: jaccard@100 1.000000, score_max_abs_diff 0.000e+00 (exact algo: must be 1.0)
+goodreads-d128-clause/c0_genre-linr_v1_filter_mask-torch-s0-{}         stable                FAIL     unstable: clocks_drift
+goodreads-d128-clause/c0_genre-linr_v2-triton-s0-{}                    quality recall@100    PASS     v2 0.999274 golden 0.999274 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v2-triton-s0-{}                    quality ndcg@100      PASS     v2 0.999479 golden 0.999479 |diff| 3.6e-11 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v2-triton-s0-{}                    quality recall@500    PASS     v2 0.999373 golden 0.999373 |diff| 1.1e-16 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v2-triton-s0-{}                    quality ndcg@500      PASS     v2 0.999504 golden 0.999504 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v2-triton-s0-{}                    quality recall@1000   PASS     v2 0.999390 golden 0.999390 |diff| 1.1e-16 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v2-triton-s0-{}                    quality ndcg@1000     PASS     v2 0.999503 golden 0.999503 |diff| 1.6e-09 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v2-triton-s0-{}                    latency k=100 bs=1    PASS     v2 graph 0.3466 ms golden 0.3575 ms ratio 0.969 [sm 1410/1410 MHz]; v2 eager 0.6622 ms
+goodreads-d128-clause/c0_genre-linr_v2-triton-s0-{}                    latency k=100 bs=8    PASS     v2 graph 1.6495 ms golden 1.6765 ms ratio 0.984 [sm 1410/1410 MHz]; v2 eager 1.7032 ms
+goodreads-d128-clause/c0_genre-linr_v2-triton-s0-{}                    latency k=100 bs=16   PASS     v2 graph 3.2124 ms golden 3.2284 ms ratio 0.995 [sm 1410/1410 MHz]; v2 eager 3.2714 ms
+goodreads-d128-clause/c0_genre-linr_v2-triton-s0-{}                    latency k=500 bs=1    FAIL     v2 graph 0.3582 ms golden 0.4367 ms ratio 0.820 [sm 1410/1410 MHz]; v2 eager 0.6634 ms
+goodreads-d128-clause/c0_genre-linr_v2-triton-s0-{}                    latency k=500 bs=8    PASS     v2 graph 1.6673 ms golden 1.6926 ms ratio 0.985 [sm 1410/1410 MHz]; v2 eager 1.7227 ms
+goodreads-d128-clause/c0_genre-linr_v2-triton-s0-{}                    latency k=500 bs=16   PASS     v2 graph 3.2285 ms golden 3.2410 ms ratio 0.996 [sm 1410/1410 MHz]; v2 eager 3.2887 ms
+goodreads-d128-clause/c0_genre-linr_v2-triton-s0-{}                    latency k=1000 bs=1   FAIL     v2 graph 0.3621 ms golden 0.3914 ms ratio 0.925 [sm 1410/1410 MHz]; v2 eager 0.6702 ms
+goodreads-d128-clause/c0_genre-linr_v2-triton-s0-{}                    latency k=1000 bs=8   PASS     v2 graph 1.6757 ms golden 1.6917 ms ratio 0.991 [sm 1410/1410 MHz]; v2 eager 1.7238 ms
+goodreads-d128-clause/c0_genre-linr_v2-triton-s0-{}                    latency k=1000 bs=16  PASS     v2 graph 3.2319 ms golden 3.2412 ms ratio 0.997 [sm 1410/1410 MHz]; v2 eager 3.2919 ms
+goodreads-d128-clause/c0_genre-linr_v2-triton-s0-{}                    graph                 PASS     9/9 graph entries measured (cudagraph_skips == 0)
+goodreads-d128-clause/c0_genre-linr_v2-triton-s0-{}                    parity                INFO     parity=reference (wrote the reference or no quality)
+goodreads-d128-clause/c0_genre-linr_v2-triton-s0-{}                    stable                FAIL     unstable: clocks_drift
+goodreads-d128-clause/c0_genre-linr_v2-torch-s0-{}                     quality recall@100    PASS     v2 0.999695 golden 0.999695 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v2-torch-s0-{}                     quality ndcg@100      PASS     v2 0.999781 golden 0.999781 |diff| 6.0e-12 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v2-torch-s0-{}                     quality recall@500    PASS     v2 0.999657 golden 0.999657 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v2-torch-s0-{}                     quality ndcg@500      PASS     v2 0.999729 golden 0.999729 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v2-torch-s0-{}                     quality recall@1000   PASS     v2 0.999627 golden 0.999627 |diff| 1.1e-16 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v2-torch-s0-{}                     quality ndcg@1000     PASS     v2 0.999696 golden 0.999696 |diff| 1.0e-09 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v2-torch-s0-{}                     latency k=100 bs=1    PASS     v2 graph 0.8017 ms golden 0.8218 ms ratio 0.976 [sm 1410/1410 MHz]; v2 eager 1.4825 ms
+goodreads-d128-clause/c0_genre-linr_v2-torch-s0-{}                     latency k=100 bs=8    PASS     v2 graph 4.6869 ms golden 4.6465 ms ratio 1.009 [sm 1410/1410 MHz]; v2 eager 9.2444 ms
+goodreads-d128-clause/c0_genre-linr_v2-torch-s0-{}                     latency k=100 bs=16   PASS     v2 graph 9.2215 ms golden 9.1240 ms ratio 1.011 [sm 1410/1410 MHz]; v2 eager 18.2631 ms
+goodreads-d128-clause/c0_genre-linr_v2-torch-s0-{}                     latency k=500 bs=1    PASS     v2 graph 0.8150 ms golden 0.8390 ms ratio 0.971 [sm 1410/1410 MHz]; v2 eager 1.5008 ms
+goodreads-d128-clause/c0_genre-linr_v2-torch-s0-{}                     latency k=500 bs=8    PASS     v2 graph 4.6981 ms golden 4.6600 ms ratio 1.008 [sm 1410/1410 MHz]; v2 eager 9.2586 ms
+goodreads-d128-clause/c0_genre-linr_v2-torch-s0-{}                     latency k=500 bs=16   PASS     v2 graph 9.2332 ms golden 9.1331 ms ratio 1.011 [sm 1410/1410 MHz]; v2 eager 18.2739 ms
+goodreads-d128-clause/c0_genre-linr_v2-torch-s0-{}                     latency k=1000 bs=1   PASS     v2 graph 0.8165 ms golden 0.8399 ms ratio 0.972 [sm 1410/1410 MHz]; v2 eager 1.5070 ms
+goodreads-d128-clause/c0_genre-linr_v2-torch-s0-{}                     latency k=1000 bs=8   PASS     v2 graph 4.6996 ms golden 4.6598 ms ratio 1.009 [sm 1410/1410 MHz]; v2 eager 9.2642 ms
+goodreads-d128-clause/c0_genre-linr_v2-torch-s0-{}                     latency k=1000 bs=16  PASS     v2 graph 9.2246 ms golden 9.1424 ms ratio 1.009 [sm 1410/1410 MHz]; v2 eager 18.2824 ms
+goodreads-d128-clause/c0_genre-linr_v2-torch-s0-{}                     graph                 PASS     9/9 graph entries measured (cudagraph_skips == 0)
+goodreads-d128-clause/c0_genre-linr_v2-torch-s0-{}                     parity                FAIL     vs_triton: jaccard@100 0.998743, score_max_abs_diff 9.766e-03 (exact algo: must be 1.0)
+goodreads-d128-clause/c0_genre-linr_v2-torch-s0-{}                     stable                FAIL     unstable: clocks_drift
+goodreads-d128-clause/c0_genre-linr_v3-triton-s0-{}                    quality recall@100    PASS     v2 0.876944 golden 0.876944 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v3-triton-s0-{}                    quality ndcg@100      PASS     v2 0.909096 golden 0.909096 |diff| 1.6e-09 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v3-triton-s0-{}                    quality recall@500    PASS     v2 0.724322 golden 0.724322 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v3-triton-s0-{}                    quality ndcg@500      PASS     v2 0.774934 golden 0.774934 |diff| 1.3e-09 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v3-triton-s0-{}                    quality recall@1000   PASS     v2 0.617541 golden 0.617541 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v3-triton-s0-{}                    quality ndcg@1000     PASS     v2 0.676164 golden 0.676164 |diff| 1.2e-09 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v3-triton-s0-{}                    latency k=100 bs=1    PASS     v2 graph 0.3938 ms golden 0.4031 ms ratio 0.977 [sm 1410/1410 MHz]; v2 eager 1.1548 ms
+goodreads-d128-clause/c0_genre-linr_v3-triton-s0-{}                    latency k=100 bs=8    PASS     v2 graph 1.3259 ms golden 1.3280 ms ratio 0.998 [sm 1410/1410 MHz]; v2 eager 1.4851 ms
+goodreads-d128-clause/c0_genre-linr_v3-triton-s0-{}                    latency k=100 bs=16   PASS     v2 graph 2.4059 ms golden 2.4110 ms ratio 0.998 [sm 1410/1410 MHz]; v2 eager 2.5827 ms
+goodreads-d128-clause/c0_genre-linr_v3-triton-s0-{}                    latency k=500 bs=1    PASS     v2 graph 0.4156 ms golden 0.4286 ms ratio 0.970 [sm 1410/1410 MHz]; v2 eager 1.4264 ms
+goodreads-d128-clause/c0_genre-linr_v3-triton-s0-{}                    latency k=500 bs=8    PASS     v2 graph 1.3509 ms golden 1.3538 ms ratio 0.998 [sm 1410/1410 MHz]; v2 eager 1.5108 ms
+goodreads-d128-clause/c0_genre-linr_v3-triton-s0-{}                    latency k=500 bs=16   PASS     v2 graph 2.4266 ms golden 2.4327 ms ratio 0.998 [sm 1410/1410 MHz]; v2 eager 2.6018 ms
+goodreads-d128-clause/c0_genre-linr_v3-triton-s0-{}                    latency k=1000 bs=1   PASS     v2 graph 0.4283 ms golden 0.4406 ms ratio 0.972 [sm 1410/1410 MHz]; v2 eager 1.4266 ms
+goodreads-d128-clause/c0_genre-linr_v3-triton-s0-{}                    latency k=1000 bs=8   PASS     v2 graph 1.3515 ms golden 1.3554 ms ratio 0.997 [sm 1410/1410 MHz]; v2 eager 1.5124 ms
+goodreads-d128-clause/c0_genre-linr_v3-triton-s0-{}                    latency k=1000 bs=16  PASS     v2 graph 2.4283 ms golden 2.4337 ms ratio 0.998 [sm 1410/1410 MHz]; v2 eager 2.6063 ms
+goodreads-d128-clause/c0_genre-linr_v3-triton-s0-{}                    graph                 PASS     9/9 graph entries measured (cudagraph_skips == 0)
+goodreads-d128-clause/c0_genre-linr_v3-triton-s0-{}                    parity                INFO     parity=reference (wrote the reference or no quality)
+goodreads-d128-clause/c0_genre-linr_v3-triton-s0-{}                    stable                FAIL     unstable: k=100 bs=1 eager spread 0.228, k=500 bs=1 eager spread 0.051 clocks_drift
+goodreads-d128-clause/c0_genre-linr_v3-torch-s0-{}                     quality recall@100    PASS     v2 0.876957 golden 0.876957 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v3-torch-s0-{}                     quality ndcg@100      PASS     v2 0.909106 golden 0.909106 |diff| 1.6e-09 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v3-torch-s0-{}                     quality recall@500    PASS     v2 0.724322 golden 0.724322 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v3-torch-s0-{}                     quality ndcg@500      PASS     v2 0.774934 golden 0.774934 |diff| 1.3e-09 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v3-torch-s0-{}                     quality recall@1000   PASS     v2 0.617541 golden 0.617541 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v3-torch-s0-{}                     quality ndcg@1000     PASS     v2 0.676164 golden 0.676164 |diff| 1.2e-09 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v3-torch-s0-{}                     latency k=100 bs=1    FAIL     v2 graph 0.4623 ms golden 0.5488 ms ratio 0.842 [sm 1410/1410 MHz]; v2 eager 1.6883 ms
+goodreads-d128-clause/c0_genre-linr_v3-torch-s0-{}                     latency k=100 bs=8    PASS     v2 graph 1.9223 ms golden 1.8741 ms ratio 1.026 [sm 1410/1410 MHz]; v2 eager 10.7331 ms
+goodreads-d128-clause/c0_genre-linr_v3-torch-s0-{}                     latency k=100 bs=16   PASS     v2 graph 3.4971 ms golden 3.3966 ms ratio 1.030 [sm 1410/1410 MHz]; v2 eager 20.9077 ms
+goodreads-d128-clause/c0_genre-linr_v3-torch-s0-{}                     latency k=500 bs=1    PASS     v2 graph 0.4818 ms golden 0.4893 ms ratio 0.985 [sm 1410/1410 MHz]; v2 eager 1.7071 ms
+goodreads-d128-clause/c0_genre-linr_v3-torch-s0-{}                     latency k=500 bs=8    PASS     v2 graph 1.9373 ms golden 1.8888 ms ratio 1.026 [sm 1410/1410 MHz]; v2 eager 10.7528 ms
+goodreads-d128-clause/c0_genre-linr_v3-torch-s0-{}                     latency k=500 bs=16   PASS     v2 graph 3.5141 ms golden 3.4133 ms ratio 1.030 [sm 1410/1410 MHz]; v2 eager 20.9350 ms
+goodreads-d128-clause/c0_genre-linr_v3-torch-s0-{}                     latency k=1000 bs=1   FAIL     v2 graph 0.4838 ms golden 0.5760 ms ratio 0.840 [sm 1410/1410 MHz]; v2 eager 1.7104 ms
+goodreads-d128-clause/c0_genre-linr_v3-torch-s0-{}                     latency k=1000 bs=8   PASS     v2 graph 1.9340 ms golden 1.8912 ms ratio 1.023 [sm 1410/1410 MHz]; v2 eager 10.7510 ms
+goodreads-d128-clause/c0_genre-linr_v3-torch-s0-{}                     latency k=1000 bs=16  PASS     v2 graph 3.5120 ms golden 3.4142 ms ratio 1.029 [sm 1410/1410 MHz]; v2 eager 20.9203 ms
+goodreads-d128-clause/c0_genre-linr_v3-torch-s0-{}                     graph                 PASS     9/9 graph entries measured (cudagraph_skips == 0)
+goodreads-d128-clause/c0_genre-linr_v3-torch-s0-{}                     parity                INFO     vs_triton: jaccard@100 0.998972, score_max_abs_diff 1.172e-02 (inexact algo: reported)
+goodreads-d128-clause/c0_genre-linr_v3-torch-s0-{}                     stable                FAIL     unstable: clocks_drift
+goodreads-d128-clause/c0_genre-linr_v4-triton-s0-{}                    quality recall@100    FAIL     v2 0.982127 golden 0.982054 |diff| 7.3e-05 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v4-triton-s0-{}                    quality ndcg@100      FAIL     v2 0.987107 golden 0.987055 |diff| 5.2e-05 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v4-triton-s0-{}                    quality recall@500    FAIL     v2 0.986103 golden 0.986094 |diff| 9.3e-06 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v4-triton-s0-{}                    quality ndcg@500      FAIL     v2 0.988981 golden 0.988973 |diff| 7.3e-06 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v4-triton-s0-{}                    quality recall@1000   FAIL     v2 0.987318 golden 0.987316 |diff| 2.1e-06 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v4-triton-s0-{}                    quality ndcg@1000     FAIL     v2 0.989633 golden 0.989631 |diff| 1.6e-06 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v4-triton-s0-{}                    latency k=100 bs=1    PASS     v2 graph 0.6195 ms golden 0.6260 ms ratio 0.990 [sm 1410/1410 MHz]; v2 eager 0.6931 ms
+goodreads-d128-clause/c0_genre-linr_v4-triton-s0-{}                    latency k=100 bs=8    PASS     v2 graph 1.3137 ms golden 1.3024 ms ratio 1.009 [sm 1410/1410 MHz]; v2 eager 1.4288 ms
+goodreads-d128-clause/c0_genre-linr_v4-triton-s0-{}                    latency k=100 bs=16   PASS     v2 graph 2.1292 ms golden 2.0788 ms ratio 1.024 [sm 1410/1410 MHz]; v2 eager 2.3028 ms
+goodreads-d128-clause/c0_genre-linr_v4-triton-s0-{}                    latency k=500 bs=1    PASS     v2 graph 0.6336 ms golden 0.6381 ms ratio 0.993 [sm 1410/1410 MHz]; v2 eager 0.7093 ms
+goodreads-d128-clause/c0_genre-linr_v4-triton-s0-{}                    latency k=500 bs=8    PASS     v2 graph 1.3228 ms golden 1.3082 ms ratio 1.011 [sm 1410/1410 MHz]; v2 eager 1.4398 ms
+goodreads-d128-clause/c0_genre-linr_v4-triton-s0-{}                    latency k=500 bs=16   PASS     v2 graph 2.1436 ms golden 2.0923 ms ratio 1.025 [sm 1410/1410 MHz]; v2 eager 2.3206 ms
+goodreads-d128-clause/c0_genre-linr_v4-triton-s0-{}                    latency k=1000 bs=1   FAIL     v2 graph 0.6346 ms golden 0.7704 ms ratio 0.824 [sm 1410/1410 MHz]; v2 eager 0.7098 ms
+goodreads-d128-clause/c0_genre-linr_v4-triton-s0-{}                    latency k=1000 bs=8   PASS     v2 graph 1.3241 ms golden 1.3082 ms ratio 1.012 [sm 1410/1410 MHz]; v2 eager 1.4406 ms
+goodreads-d128-clause/c0_genre-linr_v4-triton-s0-{}                    latency k=1000 bs=16  PASS     v2 graph 2.1446 ms golden 2.0908 ms ratio 1.026 [sm 1410/1410 MHz]; v2 eager 2.3222 ms
+goodreads-d128-clause/c0_genre-linr_v4-triton-s0-{}                    graph                 PASS     9/9 graph entries measured (cudagraph_skips == 0)
+goodreads-d128-clause/c0_genre-linr_v4-triton-s0-{}                    parity                INFO     parity=reference (wrote the reference or no quality)
+goodreads-d128-clause/c0_genre-linr_v4-triton-s0-{}                    stable                FAIL     unstable: clocks_drift
+goodreads-d128-clause/c0_genre-linr_v4-torch-s0-{}                     quality recall@100    FAIL     v2 0.982127 golden 0.982054 |diff| 7.3e-05 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v4-torch-s0-{}                     quality ndcg@100      FAIL     v2 0.987107 golden 0.987055 |diff| 5.2e-05 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v4-torch-s0-{}                     quality recall@500    FAIL     v2 0.986103 golden 0.986094 |diff| 9.3e-06 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v4-torch-s0-{}                     quality ndcg@500      FAIL     v2 0.988981 golden 0.988973 |diff| 7.3e-06 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v4-torch-s0-{}                     quality recall@1000   FAIL     v2 0.987318 golden 0.987316 |diff| 2.1e-06 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v4-torch-s0-{}                     quality ndcg@1000     FAIL     v2 0.989633 golden 0.989631 |diff| 1.6e-06 (tol 1e-06)
+goodreads-d128-clause/c0_genre-linr_v4-torch-s0-{}                     latency k=100 bs=1    PASS     v2 graph 0.5886 ms golden 0.5969 ms ratio 0.986 [sm 1410/1410 MHz]; v2 eager 0.8811 ms
+goodreads-d128-clause/c0_genre-linr_v4-torch-s0-{}                     latency k=100 bs=8    PASS     v2 graph 1.1472 ms golden 1.1389 ms ratio 1.007 [sm 1410/1410 MHz]; v2 eager 2.8977 ms
+goodreads-d128-clause/c0_genre-linr_v4-torch-s0-{}                     latency k=100 bs=16   PASS     v2 graph 1.8209 ms golden 1.8392 ms ratio 0.990 [sm 1410/1410 MHz]; v2 eager 5.2374 ms
+goodreads-d128-clause/c0_genre-linr_v4-torch-s0-{}                     latency k=500 bs=1    FAIL     v2 graph 0.6022 ms golden 0.7265 ms ratio 0.829 [sm 1410/1410 MHz]; v2 eager 0.8956 ms
+goodreads-d128-clause/c0_genre-linr_v4-torch-s0-{}                     latency k=500 bs=8    PASS     v2 graph 1.1591 ms golden 1.1506 ms ratio 1.007 [sm 1410/1410 MHz]; v2 eager 2.9095 ms
+goodreads-d128-clause/c0_genre-linr_v4-torch-s0-{}                     latency k=500 bs=16   PASS     v2 graph 1.8316 ms golden 1.8523 ms ratio 0.989 [sm 1410/1410 MHz]; v2 eager 5.2478 ms
+goodreads-d128-clause/c0_genre-linr_v4-torch-s0-{}                     latency k=1000 bs=1   PASS     v2 graph 0.6036 ms golden 0.6123 ms ratio 0.986 [sm 1410/1410 MHz]; v2 eager 0.8973 ms
+goodreads-d128-clause/c0_genre-linr_v4-torch-s0-{}                     latency k=1000 bs=8   PASS     v2 graph 1.1596 ms golden 1.1513 ms ratio 1.007 [sm 1410/1410 MHz]; v2 eager 2.9102 ms
+goodreads-d128-clause/c0_genre-linr_v4-torch-s0-{}                     latency k=1000 bs=16  PASS     v2 graph 1.8335 ms golden 1.8509 ms ratio 0.991 [sm 1410/1410 MHz]; v2 eager 5.2494 ms
+goodreads-d128-clause/c0_genre-linr_v4-torch-s0-{}                     graph                 PASS     9/9 graph entries measured (cudagraph_skips == 0)
+goodreads-d128-clause/c0_genre-linr_v4-torch-s0-{}                     parity                INFO     vs_triton: jaccard@100 1.000000, score_max_abs_diff 0.000e+00 (inexact algo: reported)
+goodreads-d128-clause/c0_genre-linr_v4-torch-s0-{}                     stable                PASS     stable
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":24}    quality recall@100    PASS     v2 0.912800 golden 0.912800 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":24}    quality ndcg@100      PASS     v2 0.935957 golden 0.935957 |diff| 5.5e-09 (tol 1e-06)
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":24}    quality recall@500    PASS     v2 0.847150 golden 0.847150 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":24}    quality ndcg@500      PASS     v2 0.876262 golden 0.876262 |diff| 4.1e-10 (tol 1e-06)
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":24}    quality recall@1000   PASS     v2 0.789005 golden 0.789005 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":24}    quality ndcg@1000     PASS     v2 0.823339 golden 0.823339 |diff| 1.7e-10 (tol 1e-06)
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":24}    latency k=100 bs=1    PASS     v2 graph 0.2016 ms golden 0.2099 ms ratio 0.961 [sm 1410/1410 MHz]; v2 eager 0.6468 ms
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":24}    latency k=100 bs=8    PASS     v2 graph 0.4382 ms golden 0.4478 ms ratio 0.979 [sm 1410/1410 MHz]; v2 eager 0.6640 ms
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":24}    latency k=100 bs=16   PASS     v2 graph 0.8407 ms golden 0.8518 ms ratio 0.987 [sm 1410/1410 MHz]; v2 eager 0.9193 ms
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":24}    latency k=500 bs=1    FAIL     v2 graph 0.2167 ms golden 0.2711 ms ratio 0.799 [sm 1410/1410 MHz]; v2 eager 0.6452 ms
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":24}    latency k=500 bs=8    PASS     v2 graph 0.4549 ms golden 0.4632 ms ratio 0.982 [sm 1410/1410 MHz]; v2 eager 0.6651 ms
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":24}    latency k=500 bs=16   PASS     v2 graph 0.8555 ms golden 0.8663 ms ratio 0.988 [sm 1410/1410 MHz]; v2 eager 0.9335 ms
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":24}    latency k=1000 bs=1   FAIL     v2 graph 0.2196 ms golden 0.2580 ms ratio 0.851 [sm 1410/1410 MHz]; v2 eager 0.6480 ms
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":24}    latency k=1000 bs=8   PASS     v2 graph 0.4565 ms golden 0.4638 ms ratio 0.984 [sm 1410/1410 MHz]; v2 eager 0.6632 ms
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":24}    latency k=1000 bs=16  PASS     v2 graph 0.8576 ms golden 0.8687 ms ratio 0.987 [sm 1410/1410 MHz]; v2 eager 0.9362 ms
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":24}    graph                 PASS     9/9 graph entries measured (cudagraph_skips == 0)
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":24}    parity                INFO     parity=reference (wrote the reference or no quality)
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":24}    stable                FAIL     unstable: k=100 bs=8 eager spread 0.086 clocks_drift
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":32}    quality               INFO     no golden cell for these params / backend
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":32}    graph                 PASS     9/9 graph entries measured (cudagraph_skips == 0)
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":32}    parity                INFO     parity=reference (wrote the reference or no quality)
+goodreads-d128-clause/c0_genre-silvertorch-triton-s0-{"n_probe":32}    stable                FAIL     unstable: k=100 bs=1 eager spread 0.131, k=1000 bs=1 eager spread 0.074 clocks_drift
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":24}     quality recall@100    PASS     v2 0.912800 golden 0.912800 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":24}     quality ndcg@100      PASS     v2 0.935957 golden 0.935957 |diff| 5.5e-09 (tol 1e-06)
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":24}     quality recall@500    PASS     v2 0.847150 golden 0.847150 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":24}     quality ndcg@500      PASS     v2 0.876262 golden 0.876262 |diff| 4.1e-10 (tol 1e-06)
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":24}     quality recall@1000   PASS     v2 0.789005 golden 0.789005 |diff| 0.0e+00 (tol 1e-06)
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":24}     quality ndcg@1000     PASS     v2 0.823339 golden 0.823339 |diff| 1.7e-10 (tol 1e-06)
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":24}     latency k=100 bs=1    FAIL     v2 graph 0.5757 ms golden 0.6266 ms ratio 0.919 [sm 1410/1410 MHz]; v2 eager 1.9739 ms
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":24}     latency k=100 bs=8    PASS     v2 graph 3.4439 ms golden 3.4513 ms ratio 0.998 [sm 1410/1410 MHz]; v2 eager 13.8360 ms
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":24}     latency k=100 bs=16   PASS     v2 graph 6.8065 ms golden 6.8599 ms ratio 0.992 [sm 1410/1410 MHz]; v2 eager 27.5719 ms
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":24}     latency k=500 bs=1    FAIL     v2 graph 0.5895 ms golden 0.6434 ms ratio 0.916 [sm 1410/1410 MHz]; v2 eager 1.9954 ms
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":24}     latency k=500 bs=8    PASS     v2 graph 3.4728 ms golden 3.4701 ms ratio 1.001 [sm 1410/1410 MHz]; v2 eager 13.8556 ms
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":24}     latency k=500 bs=16   PASS     v2 graph 6.8224 ms golden 6.8714 ms ratio 0.993 [sm 1410/1410 MHz]; v2 eager 27.5771 ms
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":24}     latency k=1000 bs=1   FAIL     v2 graph 0.5922 ms golden 0.6495 ms ratio 0.912 [sm 1410/1410 MHz]; v2 eager 2.0013 ms
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":24}     latency k=1000 bs=8   PASS     v2 graph 3.4586 ms golden 3.4660 ms ratio 0.998 [sm 1410/1410 MHz]; v2 eager 13.8560 ms
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":24}     latency k=1000 bs=16  PASS     v2 graph 6.8240 ms golden 6.8680 ms ratio 0.994 [sm 1410/1410 MHz]; v2 eager 27.5802 ms
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":24}     graph                 PASS     9/9 graph entries measured (cudagraph_skips == 0)
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":24}     parity                INFO     vs_triton: jaccard@100 1.000000, score_max_abs_diff 0.000e+00 (inexact algo: reported)
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":24}     stable                FAIL     unstable: clocks_drift
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":32}     quality               INFO     no golden cell for these params / backend
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":32}     graph                 PASS     9/9 graph entries measured (cudagraph_skips == 0)
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":32}     parity                INFO     vs_triton: jaccard@100 1.000000, score_max_abs_diff 0.000e+00 (inexact algo: reported)
+goodreads-d128-clause/c0_genre-silvertorch-torch-s0-{"n_probe":32}     stable                FAIL     unstable: clocks_drift
+goodreads-d128-clause/c0_genre-silvertorch-official-s0-{"n_probe":24}  quality               INFO     no golden cell for these params / backend
+goodreads-d128-clause/c0_genre-silvertorch-official-s0-{"n_probe":24}  graph                 PASS     9 entries null with reason not_capturable
+goodreads-d128-clause/c0_genre-silvertorch-official-s0-{"n_probe":24}  parity                PASS     vs_triton: jaccard@100 0.999849, score_max_abs_diff 5.517e-03 (≥ 0.99)
+goodreads-d128-clause/c0_genre-silvertorch-official-s0-{"n_probe":24}  stable                FAIL     unstable: clocks_drift
+goodreads-d128-clause/c0_genre-silvertorch-official-s0-{"n_probe":24}  official              PASS     status ok, quality present, 9 timed entries, 0 with the plan cache on
+goodreads-d128-clause/c0_genre-silvertorch-official-s0-{"n_probe":32}  quality               INFO     no golden cell for these params / backend
+goodreads-d128-clause/c0_genre-silvertorch-official-s0-{"n_probe":32}  graph                 PASS     9 entries null with reason not_capturable
+goodreads-d128-clause/c0_genre-silvertorch-official-s0-{"n_probe":32}  parity                PASS     vs_triton: jaccard@100 0.999805, score_max_abs_diff 5.622e-03 (≥ 0.99)
+goodreads-d128-clause/c0_genre-silvertorch-official-s0-{"n_probe":32}  stable                FAIL     unstable: k=500 bs=1 eager spread 0.070 clocks_drift
+goodreads-d128-clause/c0_genre-silvertorch-official-s0-{"n_probe":32}  official              PASS     status ok, quality present, 9 timed entries, 0 with the plan cache on
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":24}      quality recall@100    FAIL     v2 0.884044 golden 0.884042 |diff| 2.0e-06 (tol 1e-06)
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":24}      quality ndcg@100      FAIL     v2 0.913734 golden 0.913733 |diff| 1.4e-06 (tol 1e-06)
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":24}      quality recall@500    PASS     v2 0.847300 golden 0.847300 |diff| 6.0e-12 (tol 1e-06)
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":24}      quality ndcg@500      PASS     v2 0.875418 golden 0.875418 |diff| 7.5e-09 (tol 1e-06)
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":24}      quality recall@1000   PASS     v2 0.819666 golden 0.819666 |diff| 6.0e-12 (tol 1e-06)
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":24}      quality ndcg@1000     PASS     v2 0.848330 golden 0.848330 |diff| 6.5e-09 (tol 1e-06)
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":24}      latency k=100 bs=1    FAIL     v2 graph 0.1901 ms golden 0.1571 ms ratio 1.210 [sm 1410/1410 MHz]; v2 eager 0.5216 ms
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":24}      latency k=100 bs=8    PASS     v2 graph 0.2936 ms golden 0.3069 ms ratio 0.957 [sm 1410/1410 MHz]; v2 eager 0.6548 ms
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":24}      latency k=100 bs=16   PASS     v2 graph 0.4516 ms golden 0.4626 ms ratio 0.976 [sm 1410/1410 MHz]; v2 eager 0.6658 ms
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":24}      latency k=500 bs=1    FAIL     v2 graph 0.1889 ms golden 0.2014 ms ratio 0.938 [sm 1410/1410 MHz]; v2 eager 0.6381 ms
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":24}      latency k=500 bs=8    PASS     v2 graph 0.3105 ms golden 0.3177 ms ratio 0.977 [sm 1410/1410 MHz]; v2 eager 0.6622 ms
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":24}      latency k=500 bs=16   PASS     v2 graph 0.4668 ms golden 0.4786 ms ratio 0.975 [sm 1410/1410 MHz]; v2 eager 0.6576 ms
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":24}      latency k=1000 bs=1   FAIL     v2 graph 0.1857 ms golden 0.1717 ms ratio 1.082 [sm 1410/1410 MHz]; v2 eager 0.6504 ms
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":24}      latency k=1000 bs=8   PASS     v2 graph 0.3091 ms golden 0.3200 ms ratio 0.966 [sm 1410/1410 MHz]; v2 eager 0.6579 ms
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":24}      latency k=1000 bs=16  PASS     v2 graph 0.4671 ms golden 0.4776 ms ratio 0.978 [sm 1410/1410 MHz]; v2 eager 0.6532 ms
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":24}      graph                 PASS     9/9 graph entries measured (cudagraph_skips == 0)
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":24}      parity                INFO     parity=reference (wrote the reference or no quality)
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":24}      stable                FAIL     unstable: k=500 bs=1 graph spread 0.149, k=1000 bs=1 eager spread 0.069, k=1000 bs=1 graph spread 0.143, k=1000 bs=8 eager spread 0.054, k=100 bs=16 eager spread 0.068 clocks_drift
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":32}      quality               INFO     no golden cell for these params / backend
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":32}      graph                 PASS     9/9 graph entries measured (cudagraph_skips == 0)
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":32}      parity                INFO     parity=reference (wrote the reference or no quality)
+arxiv-d128-clause/c0_maincat-silvertorch-triton-s0-{"n_probe":32}      stable                FAIL     unstable: k=1000 bs=1 eager spread 0.053 clocks_drift
+arxiv-d128-clause/c0_maincat-silvertorch-torch-s0-{"n_probe":24}       quality               INFO     no golden cell for these params / backend
+arxiv-d128-clause/c0_maincat-silvertorch-torch-s0-{"n_probe":24}       graph                 PASS     9/9 graph entries measured (cudagraph_skips == 0)
+arxiv-d128-clause/c0_maincat-silvertorch-torch-s0-{"n_probe":24}       parity                INFO     vs_triton: jaccard@100 1.000000, score_max_abs_diff 0.000e+00 (inexact algo: reported)
+arxiv-d128-clause/c0_maincat-silvertorch-torch-s0-{"n_probe":24}       stable                FAIL     unstable: clocks_drift
+arxiv-d128-clause/c0_maincat-silvertorch-torch-s0-{"n_probe":32}       quality               INFO     no golden cell for these params / backend
+arxiv-d128-clause/c0_maincat-silvertorch-torch-s0-{"n_probe":32}       graph                 PASS     9/9 graph entries measured (cudagraph_skips == 0)
+arxiv-d128-clause/c0_maincat-silvertorch-torch-s0-{"n_probe":32}       parity                INFO     vs_triton: jaccard@100 1.000000, score_max_abs_diff 0.000e+00 (inexact algo: reported)
+arxiv-d128-clause/c0_maincat-silvertorch-torch-s0-{"n_probe":32}       stable                FAIL     unstable: k=500 bs=1 eager spread 0.052 clocks_drift
+arxiv-d128-clause/c0_maincat-silvertorch-official-s0-{"n_probe":24}    quality               INFO     no golden cell for these params / backend
+arxiv-d128-clause/c0_maincat-silvertorch-official-s0-{"n_probe":24}    graph                 PASS     9 entries null with reason not_capturable
+arxiv-d128-clause/c0_maincat-silvertorch-official-s0-{"n_probe":24}    parity                FAIL     vs_triton: jaccard@100 0.985033, score_max_abs_diff 4.827e-04 (≥ 0.99)
+arxiv-d128-clause/c0_maincat-silvertorch-official-s0-{"n_probe":24}    stable                FAIL     unstable: clocks_drift
+arxiv-d128-clause/c0_maincat-silvertorch-official-s0-{"n_probe":24}    official              PASS     status ok, quality present, 9 timed entries, 0 with the plan cache on
+arxiv-d128-clause/c0_maincat-silvertorch-official-s0-{"n_probe":32}    quality               INFO     no golden cell for these params / backend
+arxiv-d128-clause/c0_maincat-silvertorch-official-s0-{"n_probe":32}    graph                 PASS     9 entries null with reason not_capturable
+arxiv-d128-clause/c0_maincat-silvertorch-official-s0-{"n_probe":32}    parity                FAIL     vs_triton: jaccard@100 0.984882, score_max_abs_diff 4.827e-04 (≥ 0.99)
+arxiv-d128-clause/c0_maincat-silvertorch-official-s0-{"n_probe":32}    stable                FAIL     unstable: k=500 bs=1 eager spread 0.060 clocks_drift
+arxiv-d128-clause/c0_maincat-silvertorch-official-s0-{"n_probe":32}    official              PASS     status ok, quality present, 9 timed entries, 0 with the plan cache on
+-------------------------------------------------------------------------------------------------------------
+PASS 164  FAIL 51  INFO 23

@@ -1193,3 +1193,374 @@ A1 harness on the throwaway `tmp/golden-rederive` branch
 No change to L1 is needed. §11.5 item 1's closing sentence ("this is the
 concrete requirement on Phase L's compatibility shim") is superseded by this
 paragraph.
+
+---
+
+## 12. Validation record — C4 / WP-4 GPU gate, 2026-09-15, A100-SXM4-80GB
+
+> Model: [§11](#11-validation-record--a1-golden-re-derive-2026-09-15-a100-sxm4-80gb) above and
+> [cuda-silvertorch-handoff.md §13](archive/cuda-silvertorch-handoff.md#13-validation-record--2026-09-02-a100-sxm4-80gb-cuda-124-nvcc--torch-2100cu128-triton-360).
+> Roadmap eval-queue item 2. Worker job under
+> [agent-orchestration.md](agent-orchestration.md): **no roadmap checkbox was
+> flipped and nothing was merged into `development`.** Branch
+> `dev/c4-gate-rerun` off `development` @ `afc2ab9`.
+> **Verdict: the gate is not green.** Gates 3 and 6 pass outright, gate 1
+> passes on 9 of 11 golden cells, gate 4 passes on the cell the roadmap names
+> and on the SilverTorch backend pair, gates 2 and 5 fail as written and the
+> failures are measurement artifacts explained below, and three substantive
+> findings fall out. Nothing here is citable (CLAUDE.md rule 2).
+
+**Environment.** A100-SXM4-80GB, driver 580.159.04, nvcc 12.4, torch 2.10.0+cu128,
+triton 3.6.0, Python 3.11, `silvertorch` 1.0.0. Venv `/venvs/retrieve` (the repo's
+`.venv`), used directly with `PYTHONPATH` — never `uv run` (the shared venv's editable
+`retrieve` pointer may belong to another worktree). Datasets at `/workspace/data`
+(`RETRIEVE_DATA_ROOT`, `evaluation/data` symlinked there). Private
+`TORCHINDUCTOR_CACHE_DIR=/tmp/inductor-c4`, created empty and confirmed to be the one in
+use — §10's stale-FX-cache trap does not apply to these numbers. Sole GPU worker; every
+stage still took `flock /workspace/gpu.lock`.
+
+Every record carries `code_version = 0fe440d4bc9013097737e225af59b71ccec94a6d`
+(= `afc2ab9:retrieve/src/retrieve`) and `dirty: false` — the **library subtree was clean
+for every cell**. `repo_dirty: true` is the artifact scripts in this directory, not
+measured code. `provenance.txt` is rewritten by each invocation of the runbook and shows
+only the last stage (`gate`); the per-record `env` block is the authority.
+
+**Runbook.** [c4_gate_run.sh](evaluation-harness-v2-artifacts/c4_gate_run.sh),
+`PY=/workspace/retrieve/.venv/bin/python`, stages `goodreads` → `arxiv` → `resume` →
+`gate`. One change to the script: `GOLDEN_SM_MHZ` is now an environment variable
+defaulting to **1155**, §11's sampled median; the hard-coded `1140` was A1's and is
+stale. No threshold in `c4_gate.py` was touched.
+
+| stage | window (UTC) | result |
+|---|---|---|
+| `goodreads` | 08:50:26 – 11:15:28 | 14/14 cells, all `status: ok` |
+| `arxiv` | 11:20:06 – 11:51:47 | 6/6 cells, all `status: ok` |
+| `resume` | 11:51:47 – 12:10:53 | gate 6, pass |
+| `gate` | 12:18:58 | `gate.txt`, exit 1 |
+
+20 records, 360 perf entries, 0 failed cells. All 11 golden cells matched **exactly one**
+v2 record at the algo defaults (`coverage`: 0 failures).
+
+### 12.1 The inputs are the golden's inputs, and that was checked, not assumed
+
+The v2 harness keys its own query cache (`encoded_queries_v2.pt`) differently from the old
+one (`encoded_queries_test.pt`), so it re-encoded all 313,178 queries from the checkpoint
+rather than reading A1's blob. That could have moved every quality column on its own, so
+the two caches were compared directly:
+
+| tensor | result |
+|---|---|
+| `item_embs` `[797084, 128]` | **bit-identical** (`torch.equal`) |
+| `queries[:10000]` | **bit-identical** |
+| `targets[:10000]`, `n_targets[:10000]` | **bit-identical** |
+
+The old blob stores only the first 10,000 rows (`users_limit` applied before caching); v2
+stores all 313,178 and slices at load (`users_limit=10000: keeping the first 10000 of
+313178`). Independently, the goodreads oracle **cache hit** —
+`oracle_v4_c0_genre_2634b8ef02f0f10c.pt`, whose fingerprint samples the query tensor — so
+the queries reaching the oracle are provably the ones it was built from. The legacy
+1-indexed `[N+1, …]` attrs layout was detected and dropped on both datasets, as designed.
+
+**An oracle *was* built, once, and it was not a fingerprint mismatch.** arxiv's
+`gt_d128/` as published carries only the old-harness `gt_topk_v3_c0_maincat.pt`; there is
+no `oracle_v4_*` blob for arxiv at all (goodreads ships both). The build took **~40 s**
+(11:20:35 → 11:21:15) for 10,000 queries × 2,988,996 items, not hours. The result was then
+cross-checked against the blob the golden actually used:
+
+> `gt_topk_v3_c0_maincat.pt["topk"]` vs the new `oracle_v4_c0_maincat_c5222af9615d538d.pt["topk"]`,
+> both `[10000, 1000]` int64 — **exact equal: True**.
+
+So the rebuild changed no ground truth. Nothing else was rebuilt.
+
+### 12.2 Per-cell gate table
+
+`gr/` = goodreads-d128 clause/`c0_genre`, `ax/` = arxiv-d128 clause/`c0_maincat`, seed 0.
+`np24`/`np32` = `n_probe`. INFO = no golden cell for those params/backend (checked on
+gates 3–5 only), or an inexact algo's parity, which is reported not gated.
+
+| cell | 1 quality | 2 latency | 3 graph | 4 parity | 5 stable |
+|---|---|---|---|---|---|
+| gr/linr_v1_filter_mask-triton | PASS | FAIL | PASS | INFO (ref) | PASS |
+| gr/linr_v1_filter_mask-torch | PASS | FAIL | PASS | **PASS** | FAIL |
+| gr/linr_v2-triton | PASS | FAIL | PASS | INFO (ref) | FAIL |
+| gr/linr_v2-torch | PASS | FAIL | PASS | **FAIL** | FAIL |
+| gr/linr_v3-triton | PASS | FAIL | PASS | INFO | FAIL |
+| gr/linr_v3-torch | PASS | FAIL | PASS | INFO | FAIL |
+| gr/linr_v4-triton | **FAIL** | FAIL | PASS | INFO (ref) | FAIL |
+| gr/linr_v4-torch | **FAIL** | FAIL | PASS | INFO | PASS |
+| gr/silvertorch-triton np24 | PASS | FAIL | PASS | INFO (ref) | FAIL |
+| gr/silvertorch-triton np32 | INFO | INFO | PASS | INFO | FAIL |
+| gr/silvertorch-torch np24 | PASS | FAIL | PASS | INFO | FAIL |
+| gr/silvertorch-torch np32 | INFO | INFO | PASS | INFO | FAIL |
+| gr/silvertorch-official np24 | INFO | INFO | PASS | **PASS** | FAIL |
+| gr/silvertorch-official np32 | INFO | INFO | PASS | **PASS** | FAIL |
+| ax/silvertorch-triton np24 | **FAIL** | FAIL | PASS | INFO (ref) | FAIL |
+| ax/silvertorch-triton np32 | INFO | INFO | PASS | INFO | FAIL |
+| ax/silvertorch-torch np24 | INFO | INFO | PASS | INFO | FAIL |
+| ax/silvertorch-torch np32 | INFO | INFO | PASS | INFO | FAIL |
+| ax/silvertorch-official np24 | INFO | INFO | PASS | **FAIL** | FAIL |
+| ax/silvertorch-official np32 | INFO | INFO | PASS | **FAIL** | FAIL |
+
+Full table: [c4/gate.txt](evaluation-harness-v2-artifacts/c4/gate.txt) (PASS 88, FAIL 127,
+INFO 23).
+
+### 12.3 Gate 1 — quality within 1e-6: **9 of 11 golden cells pass**
+
+52 of 66 compared rows pass, and they do not merely pass — the **worst passing delta in
+the whole run is 7.5e-9**, three orders of magnitude inside the tolerance. Six of the nine
+passing cells are exact to 0.0 on `recall@k`.
+
+**The two cells §11.8 declared unmeetable now pass.** L3's deterministic stream compaction
+is confirmed against real data, not just unit fixtures:
+
+| cell | §11.8's measured own-noise | C4 max \|diff\| vs the re-derived golden |
+|---|---|---|
+| `linr_v2-triton` | 2.0e-6 (2× the tolerance) | **3.6e-11** |
+| `linr_v3-triton` | 6.8e-5 (68× the tolerance) | **1.6e-9** |
+
+§11.8 item 3 ("C4's gate 1 cannot be met on these two cells by any harness") is therefore
+**withdrawn**: it was true of the pre-L3 library and is false of this one. No decision to
+exclude the two cells is needed.
+
+**Two cells fail, and neither failure is the permitted `k_max`-slice difference.**
+
+| cell | k=100 | k=500 | k=1000 |
+|---|---|---|---|
+| `linr_v4` (**both** backends, identical) `recall@k` | **7.3e-5** | 9.3e-6 | 2.1e-6 |
+| `linr_v4` (both backends) `ndcg@k` | 5.2e-5 | 7.3e-6 | 1.6e-6 |
+| `ax/silvertorch-triton np24` `recall@k` | **2.0e-6** | 6.0e-12 | 6.0e-12 |
+| `ax/silvertorch-triton np24` `ndcg@k` | 1.4e-6 | 7.5e-9 | 6.5e-9 |
+
+Both misses concentrate at the shallowest `k`, which looks exactly like the `k_max` slice
+WP-4 gate 1 permits. **It is not.** Both cells were rerun with `--k 100`, i.e. `k_max =
+100`, precisely the way the golden ran them
+([c4/kmax-diag/](evaluation-harness-v2-artifacts/c4/kmax-diag)):
+
+| cell | v2 at `k_max=1000` | v2 at `k_max=100` | golden |
+|---|---|---|---|
+| `gr/linr_v4-triton` `recall@100` | 0.982127004293 | **0.982127004293** | 0.982053974462 |
+| `ax/silvertorch-triton np24` `recall@100` | 0.884044068151 | **0.884044068151** | 0.884042068159 |
+
+The v2 number is identical to the last digit at both `k_max`. The slice is exonerated and
+the misses are real differences between the two harnesses.
+
+**`linr_v4` is attributed, and it is not a defect in either harness.** Three hypotheses
+were tested ([c4_linr_v4_probe.py](evaluation-harness-v2-artifacts/c4_linr_v4_probe.py)):
+
+1. *the library changed* — no: §11.2 found `linr_v4` bit-identical between A1 and the
+   re-derive on both backends;
+2. *eager vs compiled* (the old harness compiled at build time in `AlgoBase._finalize` and
+   ran quality through the compiled forward; v2 runs quality eager) — no: eager vs
+   `torch.compile(dynamic=True, mode="reduce-overhead")` is **bit-identical**, 0/2048 rows
+   differ, `max |Δscore| = 0`;
+3. *the query-batch shape* — **yes.** `LiNRV4`'s output depends on how many queries are in
+   the call:
+
+   | algo | scoring | chunk 16 vs chunk 64, 2048 rows | max \|Δscore\| | mean set overlap@100 |
+   |---|---|---|---|---|
+   | `linr_v1_filter_mask` | fp32 cuBLAS | **0 / 2048 rows differ** | 0.0 | 1.000000000 |
+   | `linr_v4` | int8 `_int_mm` → `>>5` → fp16 | **1536 / 2048 rows differ** | 1.96e+2 | 0.992065430 |
+
+   The library documents the mechanism itself
+   ([knn.py:46–56](../../retrieve/src/retrieve/modules/knn.py)): `PostfilterKNNInt8`
+   compresses int32 dots with `>>5` into fp16 before `topk`, and says "topk ordering is
+   exact up to ties introduced by the `>>5` range compression (**boundary ties are
+   quality-equivalent**)". It also zero-pads batches below `_PAD_M = 17`, and v2's quality
+   pass uses `QUALITY_CHUNK = 16`, so v2 takes the padded path where the old harness's
+   batching did not. ~0.8 of 100 ids per row change, which moves `recall@100` by 7.3e-5.
+
+   So this is the library's documented, quality-equivalent tie order — *tie order*, which
+   WP-4 gate 1 allows, but reached by a route the clause does not name ("under the `k_max`
+   slice"), and `c4_gate.py` compares floats and cannot express "ties only". **This is a
+   gate-wording question for the orchestrator, not a bug to fix**, and it is the one row
+   in this run whose resolution changes whether C4 can ever go green as written.
+
+**The arxiv 2.0e-6 is not attributed.** It is 2× the tolerance on `recall@100` only, with
+k=500 and k=1000 bit-exact at 6e-12 — arithmetically about **two single-hit changes across
+10,000 queries**. It is not the `k_max` slice (above) and not the batch shape: the same
+chunk-16-vs-64 probe on `ax/silvertorch-triton` gives **0 / 4096 rows differ**, ids and
+scores identical. The remaining candidate is top-k boundary ties on the handful of arxiv
+rows that have fewer than `k` survivors (§11.3 counts 4 such rows at k=100); **not tested,
+and it is recorded here as unexplained.**
+
+### 12.4 Gate 2 — graph latency within 5 %: fails as specified, and the failure is the clock normalisation
+
+**As the gate is specified (`--golden-sm-mhz 1155`), 92 of 99 latency rows FAIL**,
+including every bs=8 and bs=16 row. That result is an artifact of `c4_gate.py`'s
+clock normalisation, and the evidence is decisive.
+
+The script compares two numbers that are not estimates of the same thing:
+
+* the **golden's** clock is `--golden-sm-mhz`, the **median of a 30 s-cadence trace over
+  the whole run** — which mostly samples the build, quality and oracle phases, not the
+  timing windows;
+* the **run's** clock is `perf[].sm_mhz`, a **single sample taken immediately after the
+  last timing window's sync, under load**. All 360 perf entries recorded **1410 MHz**, the
+  boost clock, without exception.
+
+The two runs' GPUs were at the same clocks throughout:
+
+| trace | n | median | max | min | histogram |
+|---|---|---|---|---|---|
+| golden (`evaluation/golden/_logs/clocks.csv`) | 65 | 1155 | 1410 | 210 | 1155×55, 1410×9, 210×1 |
+| C4 (`c4/clocks.csv`) | 41 | 1155 | 1410 | 210 | 1155×31, 1410×9, 210×1 |
+
+So dividing a 1410 MHz under-load sample by a 1155 MHz whole-run median injects a flat
+**1410/1155 = 1.221** bias into every ratio, which is more than four times the 5 % gate.
+That, not the harness, is what fails 92 rows.
+
+**At a matched under-load clock** the picture inverts
+([c4/gate-matched-clock.txt](evaluation-harness-v2-artifacts/c4/gate-matched-clock.txt),
+the same script at `--golden-sm-mhz 1410`, no threshold changed):
+
+| bs | PASS | FAIL | ratio range (v2 / golden) |
+|---|---|---|---|
+| 1 | 17 | **16** | 0.799 – 1.210 |
+| 8 | **33** | 0 | 0.957 – 1.026 |
+| 16 | **33** | 0 | 0.975 – 1.030 |
+
+Every bs=8 and bs=16 row is inside 5 %, most inside 3 %. All 16 failures are at bs=1, and
+**14 of the 16 have v2 faster than golden**, which is the direction WP-4 (2) itself
+predicts ("the golden number is a cold-L2 `do_bench` median and v2 does not flush, so v2 is
+expected at or below golden"). The two exceptions are arxiv rows at 1.210 and 1.082.
+
+**bs=1 cannot be a 5 % target, and that is measurable on the golden harness alone.** The
+§11.7 repeat runs are the same code, same box, same data, run 2–3 times
+(`c4_latency_evidence.py --golden-noise`):
+
+| bs | cells × (k) | max run-to-run spread | median spread |
+|---|---|---|---|
+| 1 | 9 | **21.1 %** | 14.1 % |
+| 8 | 9 | 0.4 % | 0.1 % |
+| 16 | 9 | 0.1 % | 0.0 % |
+
+The golden's own bs=1 column carries up to 21 % of noise — wider than the entire
+0.799–1.210 range C4 measured — while its bs=8/16 columns are stable to 0.4 %. bs=1 at
+these shapes is 0.2–0.9 ms of launch latency for a handful of kernels; there is nothing
+there for a 5 % gate to hold on to. v2's *own* windows are tight (window spread ≤ 0.3 % at
+bs=1, ≤ 0.1 % at bs=8/16), so the noise is in the baseline, not in the new measurement.
+
+**The `--flush-l2` experiment WP-4 (2) names was not run.** `bench.py` has no flush and
+adding one is harness code, i.e. C5's tree, not this job's. It is also not needed to reach
+a verdict: the direction is already the one the flush predicts, and the golden's own bs=1
+noise covers the whole observed range without invoking it, while at bs=8/16 — where the
+golden is stable to 0.4 % — v2 lands within 3 %, bounding any flush effect there at ≤ 3 %.
+
+**Verdict on gate 2: explained, not met.** The bs=8/16 half of the gate is met once the
+clocks are compared like for like; the bs=1 half cannot be met by any harness against this
+baseline. Two things are the orchestrator's to decide and were deliberately not done here:
+whether `c4_gate.py` should compare under-load samples against an under-load golden clock
+(the golden run recorded no per-variant clock, only the trace), and whether gate 2 should
+apply at bs=1 at all.
+
+### 12.5 Gate 3 — `cudagraph_skips == 0`: **PASS, 20/20 cells**
+
+Every capturable cell measured all 9 graph variants (`9/9 graph entries measured`); no
+record carries a `reason` or a null `median_ms` on `triton` or `torch`. On `official` all
+four cells are null with `reason: not_capturable` and nothing else, which is the only
+accepted reason there (O D7). The three library fixes behind this (H §9, `dd8b7b5`) hold on
+real data at every batch size.
+
+### 12.6 Gate 4 — parity: the roadmap's cell passes, two rows fail
+
+**The result §11.4 asked for holds.** SilverTorch `torch` vs `triton` is now
+`jaccard@100 = 1.000000` with `score_max_abs_diff = 0.0` on **both** datasets and **both**
+`n_probe` values — exact, not merely within tolerance.
+
+**The roadmap's own clause passes**: `gr/silvertorch-official` runs end to end with
+`status: ok`, quality present, 9 timed entries, `cache_plans: false` on every one, and
+`jaccard@100 = 0.999849` (np24) / `0.999805` (np32), against O WP-6's ≥ 0.99.
+
+Two rows fail:
+
+| row | jaccard@100 | `score_max_abs_diff` | required |
+|---|---|---|---|
+| `gr/linr_v2-torch` vs `triton` | 0.998743 | 9.766e-03 | 1.0 (exact algo) |
+| `ax/silvertorch-official` np24 / np32 vs `triton` | 0.985033 / 0.984882 | 4.827e-04 | ≥ 0.99 |
+
+1. **`linr_v2` torch ≠ triton is pre-existing and is in the golden.** The two golden cells
+   disagree by exactly the same amount — `recall@100` 0.9996946954935145 (torch) vs
+   0.9992737607088252 (triton) — and the v2 harness reproduces **each** of them to 1e-11.
+   The harness is right; LiNR V2, which is the *exact* filtered top-K and is gated at
+   `jaccard == 1.0` for that reason, does not agree between its two backends in this
+   library. Reported, **not fixed** (out of scope). This is the one row in this run that
+   looks like a genuine library bug rather than a measurement or wording issue.
+2. **`official` clears 0.99 on goodreads and misses it on arxiv.** The roadmap's gate names
+   goodreads only, and the arxiv `official` cells are extra (`BACKENDS_ARXIV` defaults to
+   all three). `score_max_abs_diff` is an order of magnitude *smaller* on arxiv
+   (4.8e-4 vs 5.5e-3) while jaccard is lower, which is what a looser filter with more
+   near-ties at the top-100 boundary looks like. Whether O WP-6's bar should hold on arxiv
+   is not settled anywhere and is not settled here.
+
+### 12.7 Gate 5 — no `unstable` cell: fails, and clause 5's precondition does not exist on this box
+
+18 of 20 cells are flagged. Split by cause:
+
+| cause | cells |
+|---|---|
+| a real window spread > 5 % in at least one perf entry | **8** |
+| `clocks_drift` **only**, every window tight | **10** |
+| clean | 2 |
+
+The 10 are a pure artifact. `run.py` sets `clocks_drift` when a cell's clock differs by
+more than 5 % from `clk0`, sampled once at process start; `clk0` reads 1155 MHz and every
+under-load sample reads 1410 MHz, so the flag fires on a 22 % "drift" that is just the GPU
+boosting. The log says so literally: `clocks.sm 1410.0 MHz drifted from 1155.0 MHz`.
+Related, `clocks_locked` is recorded **`true`** on the arxiv cells — the field is defined
+as "`sm_mhz` within 2 % of `expected_sm_mhz`", the default expectation is 1410, and the
+box happened to be at 1410. On a container where `nvidia-smi -lgc` is denied that field
+records a coincidence, which is the opposite of what §8.2 F wanted it for.
+
+The other 8 are real, and they are the same bs=1 story as gate 2: **11 of the 14
+window-spread outliers are at bs=1**, 2 at bs=8, 1 at bs=16, out of 360 perf entries
+(3.9 %). The worst are `linr_v3-triton` k=100 bs=1 eager at 22.8 % and
+`silvertorch-triton` k=500/1000 bs=1 **graph** at 14.9 % / 14.3 %.
+
+WP-4 clause 5 reads "no `unstable` cell **at locked clocks**". Clocks cannot be locked in
+this container (`provenance.txt`: *"The current user does not have permission to change
+clocks"*), so the clause's stated precondition is unavailable and H §7's fallback applies
+instead. **Gate 5 as written cannot be evaluated here**; what can be said is that 10 of
+the 18 flags are a first-sample artifact and the remaining 8 are bs=1 launch-latency noise.
+
+### 12.8 Gate 6 — kill mid-run, `--resume` continues: **PASS**
+
+`docs/plans/evaluation-harness-v2-artifacts/c4/resume/`. Child started 11:51:47 on
+`linr_v1_filter_mask` × {triton, torch}, SIGTERM at 12:01:03 once the first record had
+landed and the second cell was well under way, 1 record on disk after the kill. The rerun
+with `--resume` logged
+`resume: ('goodreads', 128, 'linr_v1_filter_mask', 'triton') all 1 cells done` and finished
+with `{'skipped': 1, 'ok': 1}` — 2 records, no duplicate, no recomputation of the completed
+cell.
+
+### 12.9 What was not done, and what is still unverified
+
+* **No roadmap checkbox flipped, nothing merged** — the orchestrator's call after review.
+* **`--flush-l2`** (WP-4 (2)'s named experiment): not run, see §12.4.
+* **The arxiv 2.0e-6 gate-1 miss**: not attributed, see §12.3.
+* **`linr_v2` torch/triton disagreement**: reported, not investigated in the library and
+  not fixed — the library was closed for the day.
+* **`--seed 0` only.** The `filter` suite's `headline` block adds seeds 1 and 2 on
+  `c0_genre`/`c0_maincat` at d128; WP-4 does not ask for them and they did not run.
+* **`bloom` filter cells, other sweeps, other dims**: out of WP-4's scope, not run.
+* The 2026-09-06 partial run's outputs were moved to
+  [c4/2026-09-06-partial/](evaluation-harness-v2-artifacts/c4/2026-09-06-partial) rather
+  than deleted; they carry no `code_version` and are not comparable to these.
+* Parity spill files (`_parity/*.npz`, ~600 MB) are regenerated by every run and are now
+  gitignored.
+
+### 12.10 Summary for the roadmap
+
+| WP-4 clause | verdict |
+|---|---|
+| 1 quality within 1e-6 | **9 / 11 golden cells pass** (worst passing delta 7.5e-9). `linr_v4` (both backends) misses by 7.3e-5 — attributed to the int8 path's documented boundary ties moving with the query-batch shape, i.e. tie order, reached by a route the clause does not name. arxiv `silvertorch` misses `recall@100` by 2.0e-6, unattributed. |
+| 2 graph latency within 5 % | **Fails as specified** (92/99 rows) because the gate normalises an under-load clock sample against a whole-run median. At matched clocks: **66/66 pass at bs=8 and bs=16**, 16/33 fail at bs=1, 14 of them with v2 *faster*. The golden's own bs=1 noise is up to 21 %. |
+| 3 `cudagraph_skips == 0` | **PASS**, 20/20 cells; `official` null with `not_capturable` only. |
+| 4 `jaccard_vs_first@100` | Roadmap's clause **PASS** (`gr/silvertorch-official` 0.999849 ≥ 0.99). SilverTorch torch-vs-triton **exactly 1.0** on both datasets. **FAIL** on `linr_v2` torch-vs-triton (0.998743, also present in the golden — a library property) and on `official` **on arxiv** (0.985, a dataset the roadmap's clause does not name). |
+| 5 no `unstable` cell | **Not evaluable** — the clause says "at locked clocks" and clocks cannot be locked here. 18/20 flagged: 10 by a first-sample `clocks_drift` artifact, 8 by real bs=1 window spread. |
+| 6 kill + `--resume` | **PASS**. |
+
+Three decisions this gate needs before it can be green, all the orchestrator's:
+**(a)** whether gate 1's "tie order under the `k_max` slice" covers `linr_v4`'s
+shape-dependent int8 ties; **(b)** what clock gate 2 normalises against, and whether it
+applies at bs=1 at all; **(c)** whether gate 5 means anything on a box that cannot lock
+clocks, and whether `clocks_drift` should be measured against a warm sample.

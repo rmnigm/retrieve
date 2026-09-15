@@ -18,7 +18,8 @@
 # Clocks: this container cannot lock them (nvidia-smi -lgc is denied; A1 measured 1140 MHz
 # under load), so H §7's fallback applies — the SM clock is sampled every 30 s into
 # c4/clocks.csv for the whole run, every perf entry carries its own under-load sm_mhz, and
-# c4_gate.py reads the 5 % latency criterion against the golden's 1140 MHz.
+# c4_gate.py reads the 5 % latency criterion against the golden's sampled clock
+# (GOLDEN_SM_MHZ, 1155 MHz from the 2026-09-15 re-derive; A1's 1140 is stale).
 #
 # The shared venv's editable `retrieve` pointer may belong to another worktree, so the
 # interpreter is used directly with PYTHONPATH on this checkout — never `uv run` here.
@@ -31,6 +32,9 @@ OUT=${OUT:-$C4/results}
 PY=${PY:-/venvs/integration/bin/python}
 STAGES=${STAGES:-"goodreads arxiv gate resume"}
 BACKENDS_ARXIV=${BACKENDS_ARXIV:-"triton torch official"}
+# The golden's SM clock under load. 1140 was A1's; the 2026-09-15 re-derive (H §11) sampled
+# 1155 MHz and that is the baseline C4 compares against (roadmap eval-queue item 2).
+GOLDEN_SM_MHZ=${GOLDEN_SM_MHZ:-1155}
 export PYTHONPATH=$ROOT/retrieve/src:$EVAL
 unset CUDA_VISIBLE_DEVICES
 
@@ -79,7 +83,7 @@ for stage in $STAGES; do
       set +e
       python3 "$ROOT/docs/plans/evaluation-harness-v2-artifacts/c4_gate.py" \
         "$OUT/filter/goodreads-d128.jsonl" "$OUT/filter/arxiv-d128.jsonl" \
-        --golden "$EVAL/golden" --golden-sm-mhz 1140 | tee "$C4/gate.txt"
+        --golden "$EVAL/golden" --golden-sm-mhz "$GOLDEN_SM_MHZ" | tee "$C4/gate.txt"
       say "gate exit=${PIPESTATUS[0]}"
       set -e
       ;;
