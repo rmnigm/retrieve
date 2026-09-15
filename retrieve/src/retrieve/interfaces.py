@@ -5,6 +5,7 @@ import importlib
 from types import ModuleType
 from typing import Literal, get_args
 
+import torch
 from torch import Tensor, nn
 
 # Two backend vocabularies, one per family. Every LiNR layer and every standalone filter
@@ -40,6 +41,37 @@ def ops_for(backend: str) -> ModuleType:
         return _OPS_LOADED[backend]
     _OPS_LOADED[backend] = importlib.import_module(_OPS_NAMESPACE[backend])
     return _OPS_LOADED[backend]
+
+
+# The code path each backend runs per module (plan L §5): ``"cublas"`` where the flag is a
+# no-op, ``None`` where the constructor raises. Keyed by class name so the table is plain data
+# with no import of ``retrieve.modules``; the harness derives its ``PATHS`` from it
+# (library-harness-boundary.md §4).
+DISPATCH: dict[str, dict[str, str | None]] = {
+    "SilverTorch": {"triton": "triton", "torch": "torch", "official": "official"},
+    "LiNRV1": {"triton": "cublas", "torch": "cublas", "official": None},
+    "LiNRV2": {"triton": "triton", "torch": "torch", "official": None},
+    "LiNRV3": {"triton": "triton", "torch": "torch", "official": None},
+    "LiNRV4": {"triton": "cublas", "torch": "cublas", "official": None},
+    "PostfilterKNN": {"triton": "cublas", "torch": "cublas", "official": None},
+    "PostfilterKNNInt8": {"triton": "cublas", "torch": "cublas", "official": None},
+    "PrefilterKNN": {"triton": "triton", "torch": "torch", "official": None},
+    "OneBitKNN": {"triton": "triton", "torch": "torch", "official": None},
+    "SimHashKNN": {"triton": "triton", "torch": "torch", "official": None},
+    "ExactAttributeFilter": {"triton": "triton", "torch": "torch", "official": None},
+    "BloomFilter": {"triton": "triton", "torch": "torch", "official": None},
+}
+
+
+def load_prebuilt(module: nn.Module, state_dict: dict[str, Tensor]) -> None:
+    """Give a freshly constructed module (no ``register_index``) the buffers of a saved one:
+    one buffer per state-dict key, shaped and placed like the saved tensor, then
+    ``load_state_dict`` so every load hook re-derives its cached scalars. The builders'
+    ``set_state_dict`` path."""
+    for name, t in state_dict.items():
+        owner, _, leaf = name.rpartition(".")
+        module.get_submodule(owner).register_buffer(leaf, torch.empty_like(t))
+    module.load_state_dict(state_dict)
 
 
 class RetrievalModule(nn.Module, abc.ABC):

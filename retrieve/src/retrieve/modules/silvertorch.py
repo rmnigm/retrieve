@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Literal
 
 import torch
@@ -13,16 +14,22 @@ from retrieve.indexing.bloom_hash import (
     generate_seeds,
 )
 from retrieve.indexing.ivf import csr_layout, padded_layout
-from retrieve.indexing.kmeans import KMeans
+from retrieve.indexing.kmeans import KMeans, KMeansInit
 from retrieve.indexing.quantize import quantize_int8, quantize_int8_global
-from retrieve.interfaces import RetrievalModule, SilverTorchBackend, check_backend, ops_for
+from retrieve.interfaces import (
+    RetrievalModule,
+    SilverTorchBackend,
+    check_backend,
+    load_prebuilt,
+    ops_for,
+)
 from retrieve.ops import official as official_mod
 from retrieve.ops.official import DEFAULT_CONFIG as OFFICIAL_DEFAULT
 from retrieve.ops.official import OfficialConfig
 
 FilterMode = Literal["none", "bloom", "exact"]
 
-__all__ = ["FilterMode", "OfficialConfig", "SilverTorch", "build_silvertorch"]
+__all__ = ["FilterMode", "OfficialConfig", "SilverTorch", "SilverTorchBuilder"]
 
 
 class SilverTorch(RetrievalModule):
@@ -53,7 +60,13 @@ class SilverTorch(RetrievalModule):
     ``load_state_dict`` into a
     module of the same shape (one whose ``register_index`` already ran) re-derives the two
     Python-scalar caches the forwards read (``_global_scale_f``, ``_max_cluster_size``) from
-    the loaded buffers, so a loaded index scores like the one that was saved."""
+    the loaded buffers, so a loaded index scores like the one that was saved.
+
+    After ``register_index``, ``build_timings`` holds the wall seconds of the four build
+    phases (``kmeans_s``, ``assemble_s``, ``quantize_s``, ``filter_s``; device-synchronised)
+    and ``set_query_params(n_probe=...)`` changes the probe width without a rebuild. ``k`` is a
+    plain attribute, settable at any time. ``capturable`` says whether a forward can be
+    CUDA-graph captured / compiled: every backend but ``official``."""
 
     centroids: Tensor
     item_codes: Tensor
@@ -81,6 +94,7 @@ class SilverTorch(RetrievalModule):
         k_hash: int | None = None,
         n_iter: int = 10,
         seed: int = 0,
+        kmeans_init: KMeansInit = "random",
         backend: SilverTorchBackend = "triton",
         official: OfficialConfig | None = None,
     ) -> None:
@@ -141,7 +155,9 @@ class SilverTorch(RetrievalModule):
         self.n_probe = n_probe
         self.n_iter = n_iter
         self.seed = seed
+        self.kmeans_init: KMeansInit = kmeans_init
         self.backend = backend
+        self.build_timings: dict[str, float] = {}
         # Dispatch table built once; forward calls the bound method for this backend.
         self._forward_impl = {
             "triton": self._forward_ops,
@@ -152,6 +168,10 @@ class SilverTorch(RetrievalModule):
         # register_index; a state-dict load replaces the buffers they were derived from, so
         # they are re-derived after every load_state_dict.
         self.register_load_state_dict_post_hook(_rederive_cached_scalars)
+
+    @property
+    def capturable(self) -> bool:
+        return self.backend != "official"
 
     @property
     def has_bloom(self) -> bool:
@@ -168,34 +188,57 @@ class SilverTorch(RetrievalModule):
         clause_is_reverse: Tensor | None = None,
     ) -> None:
         self._validate_register_args(item_embs, item_clause_attrs, clause_is_reverse)
+        lap = _lap(item_embs)
+        t0 = lap()
         assignments = self._build_ivf(item_embs)
+        t1 = lap()
+        perm = None
         if self.backend == "official":
             # Official layout (plan §4.1 / D4): the int8 table in cluster-sorted (CSR) order
             # plus the permutation both ways; no padded_cluster_items. Frozen order:
             # centroids, item_codes, global_scale, cluster_offsets, cluster_sizes,
             # sort_perm, inv_perm, then the filter buffers.
-            sort_perm, inv_perm, cluster_offsets, cluster_sizes = csr_layout(
-                assignments, self.n_lists
-            )
-            self._check_probe_pool(cluster_sizes)
-            self._quantize_items(item_embs, perm=sort_perm)
-            self.register_buffer("cluster_offsets", cluster_offsets)
-            self.register_buffer("cluster_sizes", cluster_sizes)
-            self.register_buffer("sort_perm", sort_perm)
-            self.register_buffer("inv_perm", inv_perm)
-            self._register_filter_buffers(
-                item_embs.shape[0], item_clause_attrs, clause_is_reverse, perm=sort_perm
-            )
-            return
-        padded, cluster_sizes = padded_layout(assignments, self.n_lists)
-        self._check_probe_pool(cluster_sizes)
-        self._quantize_items(item_embs)
+            perm, inv_perm, cluster_offsets, cluster_sizes = csr_layout(assignments, self.n_lists)
+            ivf = {
+                "cluster_offsets": cluster_offsets,
+                "cluster_sizes": cluster_sizes,
+                "sort_perm": perm,
+                "inv_perm": inv_perm,
+            }
+        else:
+            padded, cluster_sizes = padded_layout(assignments, self.n_lists)
+            ivf = {"padded_cluster_items": padded, "cluster_sizes": cluster_sizes}
+        # Plain Python int, cached for the same reason as _global_scale_f below: the
+        # official forward passes `n_probe * max_cluster_size` as a scalar op argument,
+        # and reading it back off padded_cluster_items.shape[1] inside forward would hand
+        # dynamo a SymInt under `torch.compile(dynamic=True)`.
+        self._max_cluster_size = int(cluster_sizes.max().item())
+        self._check_probe_pool(self.n_probe, self.k)
+        t2 = lap()
+        self._quantize_items(item_embs, perm=perm)
+        t3 = lap()
         # Buffer registration order is frozen (state-dict key order): centroids, item_codes,
-        # global_scale, padded_cluster_items, cluster_sizes, then the filter buffers — hence the
-        # two IVF buffers are registered here, after the quant buffers.
-        self.register_buffer("padded_cluster_items", padded)
-        self.register_buffer("cluster_sizes", cluster_sizes)
-        self._register_filter_buffers(item_embs.shape[0], item_clause_attrs, clause_is_reverse)
+        # global_scale, the IVF buffers, then the filter buffers — hence the IVF buffers are
+        # registered here, after the quant buffers.
+        for name, buf in ivf.items():
+            self.register_buffer(name, buf)
+        self._register_filter_buffers(
+            item_embs.shape[0], item_clause_attrs, clause_is_reverse, perm=perm
+        )
+        t4 = lap()
+        self.build_timings = {
+            "kmeans_s": t1 - t0,
+            "assemble_s": t2 - t1,
+            "quantize_s": t3 - t2,
+            "filter_s": t4 - t3,
+        }
+
+    def set_query_params(self, *, n_probe: int) -> None:
+        """Change ``n_probe`` after ``register_index`` with the same two validations."""
+        if n_probe > self.n_lists:
+            raise ValueError(f"n_probe ({n_probe}) cannot exceed n_lists ({self.n_lists}).")
+        self._check_probe_pool(n_probe, self.k)
+        self.n_probe = n_probe
 
     def _validate_register_args(
         self,
@@ -224,24 +267,19 @@ class SilverTorch(RetrievalModule):
         """K-means clustering; registers ``centroids`` and returns the ``[N]`` assignment the
         layout (``indexing.padded_layout`` / ``csr_layout``) is derived from."""
         centroids, assignments = KMeans(
-            n_lists=self.n_lists, n_iter=self.n_iter, seed=self.seed
+            n_lists=self.n_lists, n_iter=self.n_iter, seed=self.seed, init=self.kmeans_init
         ).fit(item_embs)
         self.register_buffer("centroids", centroids)
         return assignments
 
-    def _check_probe_pool(self, cluster_sizes: Tensor) -> None:
-        max_size = int(cluster_sizes.max().item())
-        # Plain Python int, cached for the same reason as _global_scale_f below: the
-        # official forward passes `n_probe * max_cluster_size` as a scalar op argument,
-        # and reading it back off padded_cluster_items.shape[1] inside forward would hand
-        # dynamo a SymInt under `torch.compile(dynamic=True)`.
-        self._max_cluster_size = max_size
+    def _check_probe_pool(self, n_probe: int, k: int) -> None:
         # P (probe pool width) = n_probe × max_cluster_size; topk runs with no pad tail, so the
         # index must supply >= k candidate slots per query.
-        if self.n_probe * max_size < self.k:
+        max_size = self._max_cluster_size
+        if n_probe * max_size < k:
             raise ValueError(
-                f"k={self.k} exceeds probe pool n_probe * max_cluster_size = "
-                f"{self.n_probe} * {max_size} = {self.n_probe * max_size}"
+                f"k={k} exceeds probe pool n_probe * max_cluster_size = "
+                f"{n_probe} * {max_size} = {n_probe * max_size}"
             )
 
     def _quantize_items(self, item_embs: Tensor, perm: Tensor | None = None) -> None:
@@ -558,34 +596,64 @@ def _rederive_cached_scalars(module: SilverTorch, incompatible_keys) -> None:
         module._max_cluster_size = int(module.cluster_sizes.max().item())
 
 
-def build_silvertorch(
-    item_embs: Tensor,
-    k: int,
-    *,
-    n_lists: int,
-    n_probe: int,
-    filter_mode: FilterMode = "none",
-    m_bits: int | None = None,
-    k_hash: int | None = None,
-    n_iter: int = 10,
-    seed: int = 0,
-    item_clause_attrs: Tensor | None = None,
-    clause_is_reverse: Tensor | None = None,
-    backend: SilverTorchBackend = "triton",
-    official: OfficialConfig | None = None,
-) -> SilverTorch:
-    """Construct a ``SilverTorch`` and run ``register_index(item_embs, ...)`` in one call."""
-    module = SilverTorch(
-        k=k,
-        n_lists=n_lists,
-        n_probe=n_probe,
-        filter_mode=filter_mode,
-        m_bits=m_bits,
-        k_hash=k_hash,
-        n_iter=n_iter,
-        seed=seed,
-        backend=backend,
-        official=official,
-    )
-    module.register_index(item_embs, item_clause_attrs, clause_is_reverse)
-    return module
+def _lap(item_embs: Tensor):
+    """Phase clock for ``build_timings``: device-synchronised wall seconds."""
+    if not item_embs.is_cuda:
+        return time.perf_counter
+
+    def lap() -> float:
+        torch.cuda.synchronize(item_embs.device)
+        return time.perf_counter()
+
+    return lap
+
+
+class SilverTorchBuilder:
+    """Fluent construction of a registered ``SilverTorch`` (Meta's ``*ModuleBuilder`` shape):
+    the constructor keywords are ``SilverTorch``'s, then ``set_item_embeddings`` (+
+    ``set_item_attributes`` for a filter mode) to build the index, or ``set_state_dict`` to
+    load a prebuilt one without k-means — the load hook re-derives the cached scalars.
+    ``build()`` is construct → register (or load) → ``.to(device)``."""
+
+    def __init__(self, **kwargs) -> None:
+        self._kwargs = kwargs
+        self._embs: Tensor | None = None
+        self._attrs: Tensor | None = None
+        self._reverse: Tensor | None = None
+        self._state_dict: dict[str, Tensor] | None = None
+        self._device: torch.device | str | None = None
+
+    def set_item_embeddings(self, item_embs: Tensor) -> SilverTorchBuilder:
+        self._embs = item_embs
+        return self
+
+    def set_item_attributes(
+        self, item_clause_attrs: Tensor, clause_is_reverse: Tensor | None = None
+    ) -> SilverTorchBuilder:
+        self._attrs = item_clause_attrs
+        self._reverse = clause_is_reverse
+        return self
+
+    def set_backend(
+        self, backend: SilverTorchBackend, official: OfficialConfig | None = None
+    ) -> SilverTorchBuilder:
+        self._kwargs.update(backend=backend, official=official)
+        return self
+
+    def set_device(self, device: torch.device | str) -> SilverTorchBuilder:
+        self._device = device
+        return self
+
+    def set_state_dict(self, state_dict: dict[str, Tensor]) -> SilverTorchBuilder:
+        self._state_dict = state_dict
+        return self
+
+    def build(self) -> SilverTorch:
+        if (self._embs is None) == (self._state_dict is None):
+            raise ValueError("set exactly one of set_item_embeddings / set_state_dict")
+        module = SilverTorch(**self._kwargs)
+        if self._state_dict is not None:
+            load_prebuilt(module, self._state_dict)
+        else:
+            module.register_index(self._embs, self._attrs, self._reverse)
+        return module if self._device is None else module.to(self._device)

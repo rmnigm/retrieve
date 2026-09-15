@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 import torch
 from torch import Tensor
 
@@ -8,27 +10,40 @@ def _chunk(n: int) -> int:
     return max(1, min(n, 1 << 14))
 
 
+KMeansInit = Literal["random", "kmeans++"]
+
+
 class KMeans:
     """Lloyd's k-means with chunked centroid assignment; ``fit`` returns (centroids [n_lists, D],
-    assignments [N]).
+    assignments [N]). ``init="random"`` seeds from ``n_lists`` distinct rows; ``init="kmeans++"``
+    seeds by D² sampling (Arthur & Vassilvitskii 2007, the paper's choice — SilverTorch §4.1),
+    one pass over the index per centroid, no host sync per step.
 
-    ``fit`` is **bit-for-bit reproducible run to run** on a given device: the initialisation
-    draws from a CPU generator seeded with ``seed``, the assignment step is a deterministic
+    ``fit`` is **bit-for-bit reproducible run to run** on a given device: both initialisations
+    draw from a CPU generator seeded with ``seed``, the assignment step is a deterministic
     ``cdist`` + ``argmin``, and the centroid-update reduction is order-fixed (see
     ``_cluster_sums``). Reproducibility is a gate requirement — SilverTorch's IVF layout, and
     therefore every quality number it produces, is a pure function of these centroids."""
 
-    def __init__(self, n_lists: int, n_iter: int = 10, seed: int = 0) -> None:
+    def __init__(
+        self, n_lists: int, n_iter: int = 10, seed: int = 0, init: KMeansInit = "random"
+    ) -> None:
+        if init not in ("random", "kmeans++"):
+            raise ValueError(f"init must be 'random' or 'kmeans++', got {init!r}")
         self.n_lists = n_lists
         self.n_iter = n_iter
         self.seed = seed
+        self.init = init
 
     def fit(self, embs: Tensor) -> tuple[Tensor, Tensor]:
         n, _ = embs.shape
         g = torch.Generator(device="cpu")
         g.manual_seed(self.seed)
-        perm = torch.randperm(n, generator=g)[: self.n_lists]
-        centroids = embs[perm].clone().float()
+        if self.init == "kmeans++":
+            centroids = self._seed_kmeanspp(embs, g)
+        else:
+            perm = torch.randperm(n, generator=g)[: self.n_lists]
+            centroids = embs[perm].clone().float()
 
         chunk = _chunk(n)
 
@@ -44,6 +59,27 @@ class KMeans:
             )
 
         return centroids, self.assign(embs, centroids)
+
+    def _seed_kmeanspp(self, embs: Tensor, g: torch.Generator) -> Tensor:
+        """D² sampling: the first centroid uniform, each next one drawn with probability
+        proportional to its squared distance to the nearest centroid so far. One ``mv`` over
+        the index per centroid (``‖x‖² − 2x·c + ‖c‖²``, clamped at 0); the draw is a CPU
+        uniform from ``g`` located by ``searchsorted`` on the device-side cumsum
+        (``right=True`` so a point already chosen, at zero mass, is never drawn again)."""
+        x = embs.float()
+        n = x.shape[0]
+        x_norm = (x * x).sum(dim=1)
+        centroids = torch.empty(self.n_lists, x.shape[1], dtype=torch.float32, device=x.device)
+        centroids[0] = x[torch.randint(n, (1,), generator=g)[0]]
+        d2 = (x_norm - 2 * torch.mv(x, centroids[0]) + centroids[0].dot(centroids[0])).clamp_min(0)
+        for j in range(1, self.n_lists):
+            cum = torch.cumsum(d2, dim=0)
+            target = torch.rand((), generator=g) * cum[-1:]
+            idx = torch.searchsorted(cum, target, right=True).clamp_max(n - 1)[0]
+            c = x[idx]
+            centroids[j] = c
+            d2 = torch.minimum(d2, (x_norm - 2 * torch.mv(x, c) + c.dot(c)).clamp_min(0))
+        return centroids
 
     @staticmethod
     def _cluster_sums(

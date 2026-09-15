@@ -20,7 +20,7 @@ import pytest
 import torch
 
 from retrieve.modules.knn import FullScanKNN
-from retrieve.modules.silvertorch import SilverTorch, build_silvertorch
+from retrieve.modules.silvertorch import SilverTorch, SilverTorchBuilder
 from tests.conftest import (
     assert_recall_monotone,
     assert_topk_id_sets_match,
@@ -535,50 +535,86 @@ class TestStateDict:
 
 
 class TestBuilder:
-    def test_build_helper_with_bloom(self, data):
-        m = build_silvertorch(
-            data["embs"],
-            k=K,
-            n_lists=N_LISTS,
-            n_probe=N_PROBE,
-            filter_mode="bloom",
-            m_bits=M_BITS,
-            k_hash=K_HASH,
-            n_iter=3,
-            item_clause_attrs=data["attrs"],
-        )
-        assert isinstance(m, SilverTorch)
+    """``SilverTorchBuilder`` (plan L D6): construct → register → ``.to(device)`` in one chain,
+    and the prebuilt path — ``set_state_dict(sd).build()`` — reproduces
+    ``set_item_embeddings(x).build()`` for the same seed with no k-means: the buffers come from
+    the state dict and the load hook re-derives the two cached scalars."""
 
-    def test_build_helper_no_bloom(self, data):
-        m = build_silvertorch(data["embs"], k=K, n_lists=N_LISTS, n_probe=N_PROBE, n_iter=3)
-        assert isinstance(m, SilverTorch)
-        ids, _ = m(data["query"])
-        assert ids.shape == (B, K)
+    @staticmethod
+    def _builder(backend, filter_mode, **overrides):
+        kw = {"k": K, "n_lists": N_LISTS, "n_probe": N_PROBE, "n_iter": 3, "backend": backend}
+        if filter_mode == "bloom":
+            kw.update(m_bits=M_BITS if backend != "official" else None, k_hash=K_HASH)
+        kw.update(filter_mode=filter_mode, **overrides)
+        return SilverTorchBuilder(**kw)
 
-    def test_build_helper_torch_backend(self, data):
-        m = build_silvertorch(
-            data["embs"], k=K, n_lists=N_LISTS, n_probe=N_PROBE, n_iter=3, backend="torch"
-        )
-        assert m.backend == "torch"
-        ids, _ = m(data["query"])
-        assert ids.shape == (B, K)
+    @pytest.mark.parametrize("backend", BACKENDS)
+    @pytest.mark.parametrize("filter_mode", ["none", "bloom", "exact"])
+    def test_state_dict_reproduces_a_fresh_build(self, data, backend, filter_mode):
+        _require_backend(backend)
 
-    def test_build_helper_with_exact(self, data):
+        def fresh():
+            b = self._builder(backend, filter_mode).set_item_embeddings(data["embs"])
+            if filter_mode != "none":
+                b.set_item_attributes(data["attrs"])
+            return b.build()
+
+        src = fresh()
+        twin = self._builder(backend, filter_mode).set_state_dict(src.state_dict()).build()
+        again = fresh()
+        assert twin.build_timings == {} and set(src.build_timings) == set(again.build_timings)
+        assert list(twin.state_dict()) == list(again.state_dict())
+        for (name, a), (_, b) in zip(again.named_buffers(), twin.named_buffers()):
+            assert torch.equal(a, b), name
+        assert twin._global_scale_f == again._global_scale_f
+        assert twin._max_cluster_size == again._max_cluster_size
+        qa = data["q_attrs"] if filter_mode != "none" else None
+        ids_a, sc_a = again(data["query"], qa)
+        ids_t, sc_t = twin(data["query"], qa)
+        assert torch.equal(sc_a, sc_t)
+        assert_ids_equal_up_to_ties(ids_t, ids_a, sc_a)
+
+    def test_chain(self, data):
         rev = torch.tensor([True, False], dtype=torch.bool, device="cuda")
-        m = build_silvertorch(
-            data["embs"],
-            k=K,
-            n_lists=N_LISTS,
-            n_probe=N_PROBE,
-            filter_mode="exact",
-            n_iter=3,
-            item_clause_attrs=data["attrs"],
-            clause_is_reverse=rev,
+        m = (
+            SilverTorchBuilder(k=K, n_lists=N_LISTS, n_probe=N_PROBE, n_iter=3, filter_mode="exact")
+            .set_item_embeddings(data["embs"])
+            .set_item_attributes(data["attrs"], rev)
+            .set_backend("torch")
+            .set_device(torch.device("cuda"))
+            .build()
         )
-        assert isinstance(m, SilverTorch)
-        assert m.filter_mode == "exact"
+        assert isinstance(m, SilverTorch) and m.backend == "torch" and m.filter_mode == "exact"
+        assert torch.equal(m.clause_is_reverse, rev)
         ids, _ = m(data["query"], data["q_attrs"])
         assert ids.shape == (B, K)
+
+    def test_build_needs_exactly_one_source(self, data):
+        b = self._builder("torch", "none")
+        with pytest.raises(ValueError, match="exactly one"):
+            b.build()
+        b.set_item_embeddings(data["embs"]).set_state_dict({})
+        with pytest.raises(ValueError, match="exactly one"):
+            b.build()
+
+
+class TestKMeansInit:
+    """``kmeans_init`` reaches ``indexing.KMeans``; the default stays ``"random"`` (plan L D9:
+    the A1 golden and the C4 gate are taken on it)."""
+
+    def test_default_is_random(self):
+        assert SilverTorch(k=1, n_lists=1, n_probe=1).kmeans_init == "random"
+
+    @pytest.mark.parametrize("backend", ["torch", "triton"])
+    def test_kmeanspp_module(self, data, backend):
+        pp = _build_no_bloom(data, backend=backend, kmeans_init="kmeans++")
+        rnd = _build_no_bloom(data, backend=backend)
+        assert pp.kmeans_init == "kmeans++" and not torch.equal(pp.centroids, rnd.centroids)
+        assert pp.build_timings["kmeans_s"] > 0
+        ids, _ = pp(data["query"])
+        assert ids.shape == (B, K)
+        again = _build_no_bloom(data, backend=backend, kmeans_init="kmeans++")
+        assert torch.equal(again.centroids, pp.centroids)
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
