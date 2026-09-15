@@ -1082,6 +1082,27 @@ way (T6 checks the uncached path bit for bit, T7 records its sync
 count). The official arm loses at small `P` / `B=1` for host reasons and the
 kernel-only tier of the head-to-head (plan §9a) is what compares kernels.
 
+**Measured, 2026-09-15** (roadmap B3, plan
+[§16](../plans/silvertorch-official-integration.md); A100, `n_probe = 24`,
+`bs = 16`, `cache_plans=False`, both arms on the same centroids and int8 codes —
+not citable until that gate is re-run). Per SilverTorch forward, `triton` against
+`official`: **1.3–1.6× faster unfiltered, 1.2–1.9× on bloom, 2.9–10.1× in exact
+mode** end to end (eager, `k = 100`, both `n_probe` values). The split behind those numbers is not the one this section
+predicted: Meta's `process_cluster` scorer is **faster than the Triton kernel in
+every cell** (1.15× on arxiv, up to 10.9× on goodreads) and their op gives it back
+in payload prep (268–896 µs over 73–95 launches against our 34–58). The goodreads
+factor is our **padded probe layout**, not bandwidth — `n_probe ·
+max_cluster_size` is 611,520 slots there for ≈ 18.7 k real items, so 97 % of what
+the Triton kernel walks is `-1` pad, against 59 % on the less skewed arxiv IVF.
+Phase 2 alone, full `N`: the official transposed `bloom_index_search_batch` beats
+our row-wise `bloom_match` by **2.0× at 0.8 M items and 6.1× at 3.0 M** (the case
+for the transposed bloom, plan §8 TF-1), while our *fused* bloom forward still
+beats their partial-mask pipeline by 1.8–2.1×. Scores: the official **int32** path is
+`torch.equal` to Triton's on both datasets in all three filter modes; the shipped
+**fp16** path costs 3.1e-4 recall@100 on arxiv and 4e-6 on goodreads, because 95 %
+of arxiv queries have their rank-100/101 score gap inside one fp16 ulp against
+3 % of goodreads ones.
+
 ### Historical backends
 
 Two further SilverTorch backends lived in this tree until roadmap B4
