@@ -1,0 +1,65 @@
+{
+  "manifest_version": 1,
+  "path_in_repo": "c5",
+  "source": "docs/plans/evaluation-package-layout-artifacts/c5/results",
+  "uploaded": "2026-09-15T23:37:54Z",
+  "n_records": 6,
+  "status": {
+    "ok": 6
+  },
+  "unstable": 5,
+  "schema_versions": [
+    2
+  ],
+  "code_versions": [
+    "0fe440d4bc9013097737e225af59b71ccec94a6d"
+  ],
+  "commits": [
+    "71430d7"
+  ],
+  "branches": [
+    "dev/c5-harness-split"
+  ],
+  "gpus": [
+    "NVIDIA A100-SXM4-80GB"
+  ],
+  "hosts": [
+    "96ef99fba44c"
+  ],
+  "runs": [
+    [
+      "71430d7",
+      "dev/c5-harness-split"
+    ]
+  ],
+  "started": [
+    "2026-09-15T13:54:29+00:00",
+    "2026-09-15T13:54:29+00:00"
+  ],
+  "gate": null,
+  "citable": false,
+  "blockers": [
+    "no --gate given: these records come from no green roadmap gate",
+    "record(s) produced on dev/c5-harness-split \u2014 CLAUDE.md rule 2: harness numbers from a branch are not paper material"
+  ],
+  "generated": "2026-09-15T23:37:54Z",
+  "n_files": 3,
+  "bytes": 7563738,
+  "files": [
+    {
+      "path": "filter/goodreads-d128.jsonl",
+      "bytes": 68597,
+      "sha256": "495ebdc86366754f232547c9e95755dee3fb9e569f264b88b0da92882fb89b8f"
+    },
+    {
+      "path": "filter/goodreads-d128.samples.jsonl",
+      "bytes": 7386603,
+      "sha256": "6c798bc23c44ada49a1dad8911e5df9fa30e77546e1ca6abb13392ad688ed3df"
+    },
+    {
+      "path": "flat.csv",
+      "bytes": 108538,
+      "sha256": "490dab99c08834007f783172d1ea7ab79839a06fe7f0bea6217106b75d7f3999"
+    }
+  ]
+}
