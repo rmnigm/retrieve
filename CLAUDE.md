@@ -18,7 +18,9 @@ install commands.
 
 Naming that must stay straight in code, docs and prose: our `SilverTorch`
 layer is *SilverTorch Algorithm 1 reimplemented* (in the thesis it was
-called QuantizedIVF — that name is being retired); `meta-recsys/silvertorch`
+called QuantizedIVF — retired 2026-09-15 in `docs/thesis/` and `docs/paper/`;
+`docs/presentation/` still says it and stays that way, being the source of a
+talk already delivered with its PDF beside it); `meta-recsys/silvertorch`
 is Meta's *official* code and, once integrated, `backend="official"`; the
 LiNR variants are V1–V4 as in the paper.
 
@@ -43,6 +45,13 @@ LiNR variants are V1–V4 as in the paper.
 - `docs/plans/*-artifacts/` — raw scripts and outputs behind a plan's
   numbers, kept so they can be re-derived.
 - `retrieve/docs/` — the library user guide that ships in the sdist.
+- `docs/paper/` — the reproducibility paper's own sections, each row or claim
+  citing the plan section that measured it:
+  [`reproduction-deviations.md`](docs/paper/reproduction-deviations.md) (paper
+  vs us, Meta's code vs Meta's paper, defects reproducing found in our own
+  code, and the unexplained residuals) and
+  [`provenance-and-disclosure.md`](docs/paper/provenance-and-disclosure.md)
+  (hardware, software, what may be cited, what was and was not compared).
 - `articles/` — pandoc renderings of the papers. Frozen; cite, never edit.
 - `evaluation/results/` — staged campaign outputs (`<name>.json` +
   `.yaml` + `.perkernel/`).
