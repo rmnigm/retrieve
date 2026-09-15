@@ -2,10 +2,10 @@
 
 Plain torch path: scores the model's last-position query against the full item
 catalog, masks history (and padding), takes top-K, and computes
-NDCG/Recall/Coverage at the requested cutoffs. No `retrieve` layers; the
-metric sums are `retrieval.metrics` (shared with the harness — the one
-`training → retrieval` import, so the two packages depend on each other
-through that module only; `encode.py` is the import the other way).
+NDCG/Recall/Coverage at the requested cutoffs. No ``retrieve`` layers, and its
+own recall / ndcg (plan V D5): a checkpoint's reported quality must not move
+when the harness's metric code does. ``tests/training/test_encode.py`` pins the
+two to agree to 1e-9.
 """
 
 from __future__ import annotations
@@ -14,7 +14,26 @@ import polars as pl
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from retrieval.metrics import accumulate, accumulator, finalize
+
+def hits_at(ids: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    """``[B, K]`` bool: candidate at rank r is one of the row's non-``-1`` targets."""
+    eq = ids.unsqueeze(2) == targets.unsqueeze(1)
+    valid = (ids.unsqueeze(2) != -1) & (targets.unsqueeze(1) != -1)
+    return (eq & valid).any(dim=2)
+
+
+def recall_at_k(hits: torch.Tensor, num_targets: torch.Tensor, k: int) -> torch.Tensor:
+    return hits[:, :k].sum(dim=1).float() / num_targets.float().clamp(min=1)
+
+
+def ndcg_at_k(hits: torch.Tensor, num_targets: torch.Tensor, k: int) -> torch.Tensor:
+    h = hits[:, :k].float()
+    positions = torch.arange(1, k + 1, device=h.device, dtype=torch.float32)
+    discounts = 1.0 / torch.log2(positions + 1)
+    dcg = (h * discounts.unsqueeze(0)).sum(dim=1)
+    ideal = positions.unsqueeze(0) <= num_targets.unsqueeze(1).float().clamp(max=k)
+    idcg = (ideal.float() * discounts.unsqueeze(0)).sum(dim=1)
+    return dcg / idcg.clamp(min=1e-8)
 
 
 class EvalDataset(Dataset):
@@ -94,7 +113,12 @@ def evaluate(
     n_total = item_embs.shape[0]
     chunk = min(max(score_chunk, 1), n_total)
     coverage_seen = {k: torch.zeros(num_items + 1, dtype=torch.bool, device=dev) for k in ks}
-    acc = accumulator(list(ks), dev)
+    sums = {
+        f"{m}@{k}": torch.zeros((), dtype=torch.float64, device=dev)
+        for k in ks
+        for m in ("ndcg", "recall")
+    }
+    n_rows = 0
     k_max = min(max(ks), num_items)
     amp_enabled = use_amp and dev.type == "cuda"
 
@@ -134,14 +158,14 @@ def evaluate(
             topk_idx = cat_idx.gather(1, sel.indices)
 
         topk = topk_idx
-        accumulate(acc, topk, targets, num_targets)
+        hits = hits_at(topk, targets)
         for k in ks:
+            sums[f"ndcg@{k}"] += ndcg_at_k(hits, num_targets, k).double().sum()
+            sums[f"recall@{k}"] += recall_at_k(hits, num_targets, k).double().sum()
             coverage_seen[k].scatter_(0, topk[:, :k].reshape(-1), True)
+        n_rows += b
 
-    out_full = finalize(acc)
-    out: dict[str, float] = {
-        key: val for key, val in out_full.items() if key.startswith(("ndcg@", "recall@"))
-    }
+    out: dict[str, float] = {key: (v / max(n_rows, 1)).item() for key, v in sums.items()}
     for k in ks:
         out[f"coverage@{k}"] = float(coverage_seen[k][1:].sum().item()) / max(num_items, 1)
 

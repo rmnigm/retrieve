@@ -1,0 +1,15 @@
+2026-09-15 14:43:51.600 | INFO     | bench.config:load_matrix:363 - goodreads/filter: 3 jobs, 3 cells
+2026-09-15 14:44:18.023 | INFO     | training.encode:encode_split:118 - loaded encoded queries from data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/encoded_queries_v2.pt
+2026-09-15 14:44:20.266 | WARNING  | eval_datasets.layout:drop_legacy_padding_row:65 - item_attrs_narrow.pt: row 0 is a padding row — legacy 1-indexed [N+1, …] layout (pre-3b1b5b3, as published on the Hub). Dropping it: 797085 → 797084 rows.
+2026-09-15 14:44:20.421 | INFO     | eval_datasets.layout:apply_users_limit:172 - users_limit=10000: keeping the first 10000 of 313178 queries
+2026-09-15 14:44:20.421 | INFO     | bench.inputs:load_inputs:57 - inputs: items 797084 queries 10000 dim 128
+2026-09-15 14:44:22.677 | INFO     | bench.inputs:build_filters:109 - filter modules (clause): ['triton']
+2026-09-15 14:44:24.117 | INFO     | bench.oracle:load_or_build:223 -   loaded oracle from cache: data/goodreads-work-id/gt_d128/oracle_v4_c0_genre_2634b8ef02f0f10c.pt
+2026-09-15 14:44:24.445 | INFO     | bench.run:run:455 - build linr_v4 clause/c0_genre triton build={}
+2026-09-15 14:46:14.328 | INFO     | bench.run:run:577 -   linr_v4 clause/c0_genre triton params={} -> partial (110s)
+2026-09-15 14:46:14.541 | INFO     | bench.run:run:455 - build linr_v4 clause/c0_genre triton build={}
+2026-09-15 14:47:56.999 | INFO     | bench.run:run:577 -   linr_v4 clause/c0_genre triton params={} -> partial (102s)
+2026-09-15 14:47:57.253 | INFO     | bench.run:run:455 - build linr_v4 clause/c0_genre triton build={}
+2026-09-15 14:49:38.827 | INFO     | bench.run:run:577 -   linr_v4 clause/c0_genre triton params={} -> partial (102s)
+2026-09-15 14:49:39.322 | INFO     | bench.run:run:585 - done: {'partial': 3}
+goodreads/filter: {'partial': 3}

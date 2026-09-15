@@ -44,7 +44,7 @@ repository would want it: the LiNR V3 cascade, yes; the oracle blob keyed by
 content fingerprint, no.
 
 Today the rule is broken in one direction, in one file:
-[evaluation/retrieval/algos.py](../../evaluation/retrieval/algos.py) owns the
+[evaluation/retrieval/algos.py](../../evaluation/bench/algos.py) owns the
 paper's V1–V4 as wrappers whose only content is the composition of library
 primitives, plus `set_query_params` (on `Silvertorch` and `LinrV3`) and the
 `capturable` flag — three things that describe the retriever, not the
