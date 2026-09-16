@@ -56,14 +56,28 @@ def test_validate_layout_text_shape(tmp_path):
     # PubMed's cmd_queries breakage: eval_split shorter than the query set.
     short = write_tiny_dataset(tmp_path / "short", n_split=5)
     assert layout.validate_layout(short, short / "content") == ["eval_split rows 5 != queries 8"]
-    # YFCC's breakage: no prefix sidecars.
+    # The prefix policy (YFCC, PubMed): ``prefix: null`` declares a prefix-free encoder and
+    # is clean; a sidecar without the key at all is a problem, not a pass.
+    declared = write_tiny_dataset(tmp_path / "declared")
+    (declared / "content" / "text_emb.meta.json").write_text(json.dumps({"prefix": None}))
+    (declared / "content" / "query_emb.meta.json").write_text(json.dumps({"prefix": None}))
+    assert layout.validate_layout(declared, declared / "content") == []
+    layout.assert_prefixes(declared / "content")  # the loader agrees with the check
+    keyless = write_tiny_dataset(tmp_path / "keyless")
+    (keyless / "content" / "query_emb.meta.json").write_text(json.dumps({"encoder": "x"}))
+    (problem,) = layout.validate_layout(keyless, keyless / "content")
+    assert problem.startswith(f"{keyless / 'content' / 'query_emb.meta.json'}: no 'prefix' key")
+    with pytest.raises(RuntimeError, match="no 'prefix' key"):
+        layout.assert_prefixes(keyless / "content")
+    # YFCC's 2026-09-06 breakage: no prefix sidecars at all.
     bare = write_tiny_dataset(tmp_path / "bare")
     (bare / "content" / "text_emb.meta.json").unlink()
     (problem,) = layout.validate_layout(bare, bare / "content")
     assert problem.startswith("missing") and "text_emb.meta.json" in problem
     swapped = write_tiny_dataset(tmp_path / "swapped", doc_prefix="search_query: ")
     assert layout.validate_layout(swapped, swapped / "content") == [
-        f"{swapped / 'content' / 'text_emb.meta.json'}: prefix != 'search_document: '"
+        f"{swapped / 'content' / 'text_emb.meta.json'}: prefix='search_query: ' != "
+        "'search_document: '"
     ]
     wrong = write_tiny_dataset(tmp_path / "wrong")
     torch.save(torch.full((5, 2, 1), 7, dtype=torch.long), wrong / "item_attrs_narrow.pt")

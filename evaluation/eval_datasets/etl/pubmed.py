@@ -10,8 +10,10 @@ Source: the NCBI FTP MedCPT article-embedding release
 * ``pubmed_chunk_{i}.json`` — ``{pmid: {"d": date, "t": title, "a": abstract,
   "m": mesh}}``.
 
-``m`` is a ``|``-separated list of ``descriptor!qualifier`` entries where a
-trailing ``*`` marks a major topic, e.g.::
+Sizes as served on 2026-09-16 (``plan`` re-measures them): 110.35 GB of ``.npy``,
+52.89 GB of chunk JSON, 0.42 GB of PMID lists — **163.7 GB raw** for
+**35,920,666 articles**. ``m`` is a ``|``-separated list of ``descriptor!qualifier``
+entries where a trailing ``*`` marks a major topic, e.g.::
 
     "humans!|rectal neoplasms!|rectal neoplasms*|rectal neoplasms!therapy|"
 
@@ -23,11 +25,16 @@ MeSH tree-top category letters come from the MeSH descriptor file
 
 Subcommands::
 
-    download        Resumable parallel mirror of any of the four raw sources.
+    plan            Dry run: HEAD every remote file, compute rows, peak disk and
+                    wall time for a given --keep-items / --prefetch. No download.
+    download        Resumable parallel mirror of any raw source (``--what pmids``
+                    is the 0.42 GB the streaming convert needs up front).
+    verify          Structural check of staged shards (+ MEDLINE md5).
     medline         Stream the MEDLINE baseline → pmid/journal/language parquet.
-    convert         Chunk JSON + npy → item_id_map.json, per-shard article
-                    parquet, and the fp16 ``content_d768/text_emb.pt`` item
-                    matrix at the encoder's **native** 768 dims.
+    convert         **Streaming**: PMID lists → item_id_map.json; then shard by
+                    shard (fetch → parse → fold → delete) → per-shard article
+                    parquet and ``content_d768/text_emb_shard_NN.pt`` +
+                    ``shard_index.json`` at the encoder's **native** 768 dims.
     attrs           Article parquet + MEDLINE join → item_attrs_narrow.pt,
                     clause_is_reverse_narrow.pt, vocab JSONs, heldout.parquet,
                     eval_split.parquet.
@@ -37,16 +44,31 @@ Subcommands::
 
 **No dimensionality reduction.** Per the user decision of 2026-09-06 every
 dataset is benchmarked at its encoder's native dim; there is no PCA step here
-and none is planned. MedCPT is 768-d, so the item matrix is 36M × 768 fp16
-≈ 55 GB and the raw mirror is ~198 GB (102 GB embeddings + 44 GB chunk JSON
-+ 52 GB MEDLINE baseline). ``convert --delete-raw`` folds each shard in and
-drops it so the raw mirror need not be held whole; the 55 GB output still
-needs a volume that can hold it. See docs/system/datasets.md § pubmed.
+and none is planned.
+
+**Why streaming, and what it costs (docs/system/datasets.md § pubmed).** Raw
+(163.7 GB) plus the fp16 item matrix (35.9 M × 768 × 2 B = 55.2 GB) would be
+219 GB before the MEDLINE join — more than the overlay can spare next to anything
+else. ``convert`` therefore never holds the raw mirror whole: it fetches the
+0.42 GB of PMID lists first (they fix the id map), then walks the shards one at a
+time — download the next shard while parsing this one (``--prefetch``), gather the
+kept rows, L2-normalise, cast to fp16, ``torch.save`` them as *their own* output
+shard, and ``--delete-raw`` the input. The peak is the processed output plus
+``1 + prefetch`` raw shards, never the mirror. There is no accumulator and no
+second copy: the sharded layout (``shard_index.json`` +
+``text_emb_shard_*.pt``) is what ``eval_datasets.layout.load_sharded`` already
+reads for the synthetic arXiv catalogs.
+
+**Slice, not the whole.** ``--keep-items N`` keeps exactly ``N`` articles chosen
+by a seeded hash of the PMID (``select_pmids``): the same set whatever the shard
+order, spread uniformly over 1781–2024 rather than "the oldest ``N``". The full
+36 M does **not** fit the harness on one 80 GB A100 at 768-d — items are held
+fp32 on the device (110 GB) — so the slice is the target, not a stopgap.
 
 Layout (under ``$RETRIEVE_DATA_ROOT``, default ``<repo>/data``)::
 
-    data/_raw/pubmed/                       chunk npy/json, mesh_desc*.xml.gz
-    data/_raw/pubmed/medline_baseline/      pubmed26n*.xml.gz (+ .md5)
+    data/_raw/pubmed/                       pmids_chunk_*.json (kept), the shard in flight
+    data/_raw/pubmed/medline_baseline/      pubmed26n*.xml.gz (+ .md5), streamed
     data/pubmed-medcpt/                     the bench-side output dir
 """
 
@@ -56,7 +78,6 @@ import argparse
 import gzip
 import hashlib
 import json
-import multiprocessing
 import os
 import re
 import sys
@@ -64,7 +85,7 @@ import time
 import urllib.error
 import urllib.request
 from collections import Counter
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -120,6 +141,14 @@ _QUERY_SCHEMA = {"query_id": pl.Utf8, "text": pl.Utf8, "target_id": pl.Int64}
 
 # MeSH tree-top category letters (the first character of a tree number).
 MESH_CATEGORIES = list("ABCDEFGHIJKLMNVZ")
+
+# `plan`'s per-row allowance for the zstd article parquet (pmid, year, has_abstract,
+# mesh list, title). Measured 55.0 B/row on the real chunk 37 (20,947,498 B for 380,761
+# rows, 2026-09-16, the E2 record in docs/plans/dataset-candidates.md); 60 keeps a margin.
+ARTICLE_PARQUET_BYTES_PER_ROW = 60
+# `plan`'s allowance for the MEDLINE join output (`medline/*.parquet`, pmid + journal +
+# language for every citation), an upper bound at ~30 B/row zstd over 40 M citations.
+MEDLINE_PARQUET_BYTES = 1_200_000_000
 
 
 # ---------------------------------------------------------------------------
@@ -205,9 +234,64 @@ def mesh_category_of(tree_numbers: list[str]) -> int:
     return -1
 
 
+def pmid_hash(pmids: np.ndarray, seed: int) -> np.ndarray:
+    """splitmix64's finaliser over the PMIDs, keyed by ``seed`` — a fixed, order-free
+    pseudo-random rank per article (uint64). Used by ``select_pmids``."""
+    with np.errstate(over="ignore"):
+        z = np.asarray(pmids, dtype=np.uint64) + np.uint64(seed + 1) * np.uint64(
+            0x9E3779B97F4A7C15
+        )
+        z = (z ^ (z >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
+        z = (z ^ (z >> np.uint64(27))) * np.uint64(0x94D049BB133111EB)
+        return z ^ (z >> np.uint64(31))
+
+
+def select_pmids(pmids: np.ndarray, keep_items: int | None, seed: int = 0) -> np.ndarray:
+    """``[len(pmids)]`` bool: the ``keep_items`` articles with the smallest
+    ``pmid_hash`` (ties on the PMID itself), or everything when ``keep_items`` is
+    ``None`` / not smaller than the catalog. The choice depends only on the PMID set
+    and the seed — not on shard order, chunking or which shards have been fetched —
+    so a resumed or re-sharded run keeps the same articles, and the slice is spread
+    uniformly over the whole 1781–2024 catalog instead of being its oldest prefix."""
+    n = int(pmids.shape[0])
+    if keep_items is None or keep_items >= n:
+        return np.ones(n, dtype=bool)
+    if keep_items <= 0:
+        raise ValueError("keep_items must be positive")
+    order = np.lexsort((pmids, pmid_hash(pmids, seed)))
+    keep = np.zeros(n, dtype=bool)
+    keep[order[:keep_items]] = True
+    return keep
+
+
 # ---------------------------------------------------------------------------
 # download — resumable, parallel, checksum-verified where NCBI publishes one
 # ---------------------------------------------------------------------------
+
+
+def _remote_size(url: str) -> int:
+    """``Content-Length`` of a HEAD, or 0 when the server does not say."""
+    try:
+        head = urllib.request.Request(url, method="HEAD")
+        with urllib.request.urlopen(head, timeout=60) as r:
+            return int(r.headers.get("Content-Length", "0"))
+    except (urllib.error.URLError, ValueError, TimeoutError, OSError):
+        return 0
+
+
+_RE_NPY_SHAPE = re.compile(rb"'shape':\s*\((\d+),\s*(\d+)\)")
+
+
+def _remote_npy_shape(url: str) -> tuple[int, int] | None:
+    """``(rows, cols)`` from the first 256 bytes of a remote ``.npy`` (a Range GET)."""
+    try:
+        req = urllib.request.Request(url, headers={"Range": "bytes=0-255"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            head = r.read(256)
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return None
+    m = _RE_NPY_SHAPE.search(head)
+    return (int(m.group(1)), int(m.group(2))) if m else None
 
 
 def _fetch_one(url: str, dest: Path, *, attempts: int = 8, log: Path | None = None) -> bool:
@@ -226,13 +310,9 @@ def _fetch_one(url: str, dest: Path, *, attempts: int = 8, log: Path | None = No
                 f.write(line)
         print(line.rstrip(), flush=True)
 
-    try:
-        head = urllib.request.Request(url, method="HEAD")
-        with urllib.request.urlopen(head, timeout=60) as r:
-            total = int(r.headers.get("Content-Length", "0"))
-    except (urllib.error.URLError, ValueError, TimeoutError) as e:
-        _log(f"HEADFAIL {dest.name} {e}")
-        total = 0
+    total = _remote_size(url)
+    if total == 0:
+        _log(f"HEADFAIL {dest.name}")
 
     for attempt in range(1, attempts + 1):
         have = dest.stat().st_size if dest.exists() else 0
@@ -294,15 +374,24 @@ def _parse_shards(spec: str | None) -> list[int]:
     return sorted(set(out))
 
 
+def _shard_paths(i: int) -> dict[str, tuple[str, Path]]:
+    """``{"pmids" | "content" | "embeds": (url, local path)}`` of chunk ``i``."""
+    names = {
+        "pmids": f"pmids_chunk_{i}.json",
+        "content": f"pubmed_chunk_{i}.json",
+        "embeds": f"embeds_chunk_{i}.npy",
+    }
+    return {k: (f"{MEDCPT_BASE}/{n}", ROOT / n) for k, n in names.items()}
+
+
 def _medcpt_urls(shards: list[int], what: str) -> list[tuple[str, Path]]:
-    jobs: list[tuple[str, Path]] = []
-    for i in shards:
-        if what in ("all", "meta"):
-            jobs.append((f"{MEDCPT_BASE}/pmids_chunk_{i}.json", ROOT / f"pmids_chunk_{i}.json"))
-            jobs.append((f"{MEDCPT_BASE}/pubmed_chunk_{i}.json", ROOT / f"pubmed_chunk_{i}.json"))
-        if what in ("all", "embeds"):
-            jobs.append((f"{MEDCPT_BASE}/embeds_chunk_{i}.npy", ROOT / f"embeds_chunk_{i}.npy"))
-    return jobs
+    parts = {
+        "all": ("pmids", "content", "embeds"),
+        "meta": ("pmids", "content"),
+        "pmids": ("pmids",),
+        "embeds": ("embeds",),
+    }[what]
+    return [_shard_paths(i)[p] for i in shards for p in parts]
 
 
 def cmd_download(args) -> int:
@@ -311,7 +400,7 @@ def cmd_download(args) -> int:
     shards = _parse_shards(args.shards)
     jobs: list[tuple[str, Path]] = []
 
-    if args.what in ("all", "embeds", "meta"):
+    if args.what in ("all", "embeds", "meta", "pmids"):
         jobs += _medcpt_urls(shards, args.what)
     if args.what in ("all", "mesh"):
         jobs.append((MESH_DESC_URL, MESH_DESC_PATH))
@@ -382,6 +471,145 @@ def cmd_verify(args) -> int:
         print(f"BAD {b}", flush=True)
     print(f"DONE verify — {len(bad)} problem(s)", flush=True)
     return 1 if bad else 0
+
+
+# ---------------------------------------------------------------------------
+# plan — the disk and wall-time arithmetic, from the server's own numbers
+# ---------------------------------------------------------------------------
+
+
+def plan_budget(
+    sizes: dict[int, dict[str, int]],
+    rows: dict[int, int],
+    *,
+    keep_items: int | None,
+    prefetch: int,
+    mbps: float,
+    medline_bytes: int = 0,
+    parse_s_per_shard: float = 30.0,
+) -> dict:
+    """Peak disk and wall time of a streaming ``convert`` — pure arithmetic over the
+    remote sizes ``{shard: {"pmids", "content", "embeds"}}`` and the per-shard row
+    counts, so it is testable without a network and re-derivable by anyone.
+
+    Peak disk = the finished fp16 shards + the article parquets + the PMID lists that
+    stay behind + ``1 + prefetch`` raw shards in flight (the largest ones, an upper
+    bound) + the MEDLINE parquet when the baseline is included. Wall time = every raw
+    byte over ``mbps`` (each shard must be scanned even for a slice: the slice is a
+    hash of the PMID, not a prefix) + the JSON parses, which overlap the next shard's
+    download only when ``prefetch > 0``."""
+    n_rows = int(sum(rows.values()))
+    kept = n_rows if keep_items is None else min(int(keep_items), n_rows)
+    raw = {k: int(sum(s[k] for s in sizes.values())) for k in ("pmids", "content", "embeds")}
+    shard_bytes = [s["content"] + s["embeds"] for s in sizes.values()]
+    in_flight = int(sum(sorted(shard_bytes, reverse=True)[: 1 + prefetch]))
+    fp16 = kept * EMB_DIM_NATIVE * 2
+    parquet = kept * ARTICLE_PARQUET_BYTES_PER_ROW
+    medline_parquet = MEDLINE_PARQUET_BYTES if medline_bytes else 0
+    peak = fp16 + parquet + raw["pmids"] + in_flight + medline_parquet
+    raw_total = sum(raw.values())
+    download_s = (raw_total + medline_bytes) / (mbps * 1e6)
+    parse_s = parse_s_per_shard * len(sizes)
+    wall_s = download_s + (parse_s_per_shard if prefetch else parse_s)
+    return {
+        "n_shards": len(sizes),
+        "n_rows": n_rows,
+        "keep_items": kept,
+        "raw_bytes": {**raw, "medline": int(medline_bytes), "total": int(raw_total + medline_bytes)},  # noqa: E501
+        "processed_bytes": {
+            "text_emb_fp16": int(fp16),
+            "article_parquet_est": int(parquet),
+            "medline_parquet_est": int(medline_parquet),
+        },
+        "in_flight_raw_bytes": in_flight,
+        "prefetch": int(prefetch),
+        "peak_disk_bytes": int(peak),
+        "mbps": float(mbps),
+        "download_s": round(download_s),
+        "parse_s_serial": round(parse_s),
+        "wall_s_est": round(wall_s),
+        "fp32_on_device_bytes": int(kept * EMB_DIM_NATIVE * 4),
+    }  # fmt: skip
+
+
+def _probe_mbps(url: str, n_bytes: int = 64 << 20) -> float:
+    """Download the first ``n_bytes`` of ``url`` and report MB/s (0.0 on failure)."""
+    req = urllib.request.Request(url, headers={"Range": f"bytes=0-{n_bytes - 1}"})
+    t0 = time.monotonic()
+    got = 0
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            while True:
+                buf = r.read(4 << 20)
+                if not buf:
+                    break
+                got += len(buf)
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return 0.0
+    return got / 1e6 / max(time.monotonic() - t0, 1e-6)
+
+
+def cmd_plan(args) -> int:
+    shards = _parse_shards(args.shards)
+    print(f"STEP HEAD {3 * len(shards)} MedCPT files + npy headers", flush=True)
+    sizes: dict[int, dict[str, int]] = {}
+    rows: dict[int, int] = {}
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        size_f = {
+            (i, k): ex.submit(_remote_size, url)
+            for i in shards
+            for k, (url, _) in _shard_paths(i).items()
+        }
+        shape_f = {i: ex.submit(_remote_npy_shape, _shard_paths(i)["embeds"][0]) for i in shards}
+        for i in shards:
+            sizes[i] = {k: size_f[i, k].result() for k in ("pmids", "content", "embeds")}
+            shape = shape_f[i].result()
+            if shape is None or shape[1] != EMB_DIM_NATIVE:
+                print(f"ERROR chunk {i}: npy header {shape} unreadable or not {EMB_DIM_NATIVE}-d")
+                return 1
+            rows[i] = shape[0]
+            if any(v == 0 for v in sizes[i].values()):
+                print(f"ERROR chunk {i}: a HEAD returned no Content-Length: {sizes[i]}")
+                return 1
+    medline_bytes = 0
+    if args.medline:
+        print(f"STEP HEAD {N_MEDLINE_FILES} MEDLINE baseline files", flush=True)
+        urls = [f"{MEDLINE_BASE}/pubmed26n{i:04d}.xml.gz" for i in range(1, N_MEDLINE_FILES + 1)]
+        with ThreadPoolExecutor(max_workers=16) as ex:
+            medline_bytes = sum(ex.map(_remote_size, urls))
+    mbps = args.mbps or _probe_mbps(_shard_paths(shards[0])["embeds"][0])
+    if mbps <= 0:
+        print("ERROR could not measure the download rate; pass --mbps", flush=True)
+        return 1
+    budget = plan_budget(
+        sizes, rows, keep_items=args.keep_items, prefetch=args.prefetch, mbps=mbps,
+        medline_bytes=medline_bytes,
+    )  # fmt: skip
+    budget["per_shard"] = {str(i): {**sizes[i], "rows": rows[i]} for i in shards}
+    gb = 1e9
+    rb, pb = budget["raw_bytes"], budget["processed_bytes"]
+    lines = [
+        f"rows {budget['n_rows']:,} over {budget['n_shards']} shards; "
+        f"keep {budget['keep_items']:,}",
+        f"raw: npy {rb['embeds'] / gb:.2f} GB + json {rb['content'] / gb:.2f} GB + pmids "
+        f"{rb['pmids'] / gb:.2f} GB + medline {medline_bytes / gb:.2f} GB = "
+        f"{rb['total'] / gb:.2f} GB",
+        f"processed: fp16 shards {pb['text_emb_fp16'] / gb:.2f} GB, article parquet "
+        f"~{pb['article_parquet_est'] / gb:.2f} GB, medline parquet "
+        f"~{pb['medline_parquet_est'] / gb:.2f} GB",
+        f"in flight: {1 + args.prefetch} raw shard(s) = "
+        f"{budget['in_flight_raw_bytes'] / gb:.2f} GB",
+        f"PEAK DISK ~{budget['peak_disk_bytes'] / gb:.1f} GB; "
+        f"WALL ~{budget['wall_s_est'] / 3600:.2f} h at {mbps:.1f} MB/s "
+        f"(download {budget['download_s'] / 3600:.2f} h)",
+        f"harness: items fp32 on device = {budget['fp32_on_device_bytes'] / gb:.1f} GB",
+    ]
+    print("\n".join(lines), flush=True)
+    if args.report:
+        Path(args.report).expanduser().parent.mkdir(parents=True, exist_ok=True)
+        Path(args.report).expanduser().write_text(json.dumps(budget, indent=2))
+        print(f"wrote {args.report}", flush=True)
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -488,200 +716,269 @@ def cmd_medline(args) -> int:
 
 
 # ---------------------------------------------------------------------------
-# convert — chunk JSON + npy → item_id_map.json, article parquet, fp16 matrix
+# convert — streaming: pmids → id map; per shard: fetch → parse → fold → delete
 # ---------------------------------------------------------------------------
 
 
-def _convert_shard_attrs(args_tuple) -> tuple[int, int]:
-    """Parse one ``pubmed_chunk_{i}.json`` into a compact article parquet.
+def _shard_name(i: int) -> str:
+    return f"text_emb_shard_{i:02d}.pt"
 
-    ``args_tuple`` is ``(shard, content_root, pmids_root, staging)`` — the two
-    roots differ under `stream`, where the 10 MB pmids lists stay in the raw
-    mirror but the 1.5 GB content JSON is staged on local scratch and deleted.
-    """
-    i, content_root, pmids_root, staging = args_tuple
-    content_root, pmids_root, staging = Path(content_root), Path(pmids_root), Path(staging)
-    out = staging / f"articles_chunk_{i}.parquet"
-    if out.exists():
-        return i, -1
-    src = content_root / f"pubmed_chunk_{i}.json"
-    pmid_src = pmids_root / f"pmids_chunk_{i}.json"
-    if not src.exists() or not pmid_src.exists():
-        return i, 0
-    order = json.loads(pmid_src.read_text())  # row order inside the shard
-    content = json.loads(src.read_text())
 
-    pmids: list[int] = []
+def _parse_shard_content(content_path: Path, pmids: np.ndarray) -> pl.DataFrame:
+    """One ``pubmed_chunk_{i}.json`` → the article rows of ``pmids``, **in the order of
+    ``pmids``** (which ``cmd_convert`` passes in item-id order). A PMID present in the
+    embedding matrix but absent from the content dump keeps its row (the vector is real)
+    with empty attributes. The title is kept so ``queries`` can build item-as-query
+    text after ``--delete-raw`` has removed the JSON."""
+    content = json.loads(content_path.read_text())
     years: list[int] = []
     has_abs: list[bool] = []
     mesh: list[list[str]] = []
-    for p in order:
-        rec = content.get(p)
+    titles: list[str] = []
+    for p in pmids.tolist():
+        rec = content.get(str(p))
         if rec is None:
-            # Row present in the embedding matrix but absent from the content
-            # dump — keep the row (the vector is real) with empty attributes.
-            pmids.append(int(p))
             years.append(-1)
             has_abs.append(False)
             mesh.append([])
+            titles.append("")
             continue
-        pmids.append(int(p))
         y = parse_year(rec.get("d"))
         years.append(y if y is not None else -1)
         has_abs.append(bool((rec.get("a") or "").strip()))
         mesh.append(parse_mesh_field(rec.get("m")))
-
-    pl.DataFrame(
-        {"pmid": pmids, "year": years, "has_abstract": has_abs, "mesh": mesh},
+        titles.append((rec.get("t") or "").strip())
+    del content
+    return pl.DataFrame(
+        {"pmid": pmids.tolist(), "year": years, "has_abstract": has_abs, "mesh": mesh,
+         "title": titles},
         schema={
             "pmid": pl.Int64,
             "year": pl.Int32,
             "has_abstract": pl.Boolean,
             "mesh": pl.List(pl.Utf8),
+            "title": pl.Utf8,
         },
-    ).write_parquet(out, compression="zstd")
-    return i, len(pmids)
+    )  # fmt: skip
+
+
+def _fold_shard_embeddings(npy: Path, positions: np.ndarray, out: Path, batch_rows: int) -> None:
+    """Rows ``positions`` of the shard's ``(N_i, 768)`` fp32 matrix, in that order →
+    L2-normalised fp16 ``[len(positions), 768]`` saved at ``out``. The source is mmapped
+    and gathered in ascending-position batches, so a 3 GB shard costs one pass and
+    ``batch_rows × 768 × 4`` bytes of RAM, not the shard."""
+    import torch
+    import torch.nn.functional as F
+
+    from eval_datasets.layout import atomic_write
+
+    arr = np.load(npy, mmap_mode="r")
+    if arr.ndim != 2 or arr.shape[1] != EMB_DIM_NATIVE or arr.dtype != np.float32:
+        raise ValueError(
+            f"{npy}: expected (N, {EMB_DIM_NATIVE}) float32, got {arr.shape} {arr.dtype}"
+        )
+    dest = torch.empty((positions.shape[0], EMB_DIM_NATIVE), dtype=torch.float16)
+    # Gather in source order (sequential reads) and scatter to the item order.
+    order = np.argsort(positions, kind="stable")
+    src_sorted = positions[order]
+    for s in range(0, src_sorted.shape[0], batch_rows):
+        e = min(s + batch_rows, src_sorted.shape[0])
+        block = torch.from_numpy(np.array(arr[src_sorted[s:e]], dtype=np.float32))
+        dest[torch.from_numpy(order[s:e])] = F.normalize(block, dim=-1).to(torch.float16)
+    del arr
+    atomic_write(out, lambda fh: torch.save(dest, fh))
+
+
+def _write_shard_index(content_dir: Path, n_items: int, entries: list[dict]) -> None:
+    payload = {
+        "n_items": int(n_items),
+        "dim": EMB_DIM_NATIVE,
+        "dtype": "float16",
+        "n_shards": len(entries),
+        "shards": entries,
+        "source": f"{MEDCPT_BASE} (embeds_chunk_*.npy, fp32 → L2-normalised fp16)",
+        "order": "shard order, ascending PMID within a shard (= item_id order)",
+    }
+    (content_dir / "shard_index.json").write_text(json.dumps(payload, indent=2))
 
 
 def cmd_convert(args) -> int:
-    """Build ``item_id_map.json``, the per-shard article parquets, and (unless
-    ``--skip-embeds``) the single memory-mapped fp16 ``item_emb_768.f16``.
+    """Streaming build of ``item_id_map.json``, ``staging/articles_chunk_*.parquet`` and
+    ``content_d768/{text_emb_shard_NN.pt, shard_index.json, text_emb.meta.json}``.
 
-    Item ids are **1-indexed dense** over the PMIDs present in the chunks,
-    assigned in ascending numeric PMID order (chunk *i* already holds PMIDs
-    ``i,000,000..i,999,999``, so this is chunk order), matching the
-    ``item_id_map.json`` convention in docs/system/datasets.md.
+    Item ids are **1-indexed dense** in *(shard order, ascending PMID within the shard)*
+    — the chunks partition the PMID space by million (chunk *i* holds PMIDs
+    ``i,000,000..i,999,999``), so this is ascending PMID order too; ``prep_log.json`` records
+    ``pmid_ranges_disjoint`` so the claim is checked, not assumed. With ``--keep-items``
+    the map covers the selected articles only (``select_pmids``). Every output shard is
+    a contiguous ``[start_id, start_id + n_rows)`` block, which is what
+    ``eval_datasets.layout.load_sharded`` reassembles.
+
+    Resumable: a shard whose parquet and ``.pt`` exist with the index's row count is
+    skipped; ``--fetch`` pulls missing raw files (``--prefetch`` shards ahead) and
+    ``--delete-raw`` removes a shard's JSON + npy once folded (the PMID list stays).
     """
     output = Path(args.output_dir).expanduser()
     staging = output / "staging"
+    content_dir = output / f"content_d{EMB_DIM_NATIVE}"
     staging.mkdir(parents=True, exist_ok=True)
+    content_dir.mkdir(parents=True, exist_ok=True)
     shards = _parse_shards(args.shards)
+    log_path = ROOT / "download.log"
     t0 = time.monotonic()
-    log: dict = {"shards": shards, "raw_root": str(ROOT)}
+    log: dict = {"shards": shards, "raw_root": str(ROOT), "keep_items": args.keep_items,
+                 "seed": args.seed}  # fmt: skip
 
-    # ---- item_id_map.json ---------------------------------------------------
-    print("STEP scan pmids → item_id_map.json", flush=True)
-    shard_pmids: dict[int, list[int]] = {}
+    # ---- phase 1: pmid lists → the id map ----------------------------------
+    print("STEP pmid lists → item_id_map.json", flush=True)
+    shard_pmids: dict[int, np.ndarray] = {}
     for i in shards:
-        p = ROOT / f"pmids_chunk_{i}.json"
+        url, p = _shard_paths(i)["pmids"]
+        if not p.exists() and args.fetch:
+            _fetch_one(url, p, log=log_path)
         if not p.exists():
             print(f"  WARN missing {p.name}, skipping shard {i}", flush=True)
             continue
-        shard_pmids[i] = [int(x) for x in json.loads(p.read_text())]
+        shard_pmids[i] = np.asarray(json.loads(p.read_text()), dtype=np.int64)
     if not shard_pmids:
-        print("ERROR no pmids_chunk_*.json found (run `download --what meta`)", flush=True)
+        print("ERROR no pmids_chunk_*.json found (run `download --what pmids`)", flush=True)
         return 1
-
-    all_pmids = np.concatenate(
-        [np.asarray(shard_pmids[i], dtype=np.int64) for i in sorted(shard_pmids)]
-    )
-    order = np.argsort(all_pmids, kind="stable")
-    sorted_pmids = all_pmids[order]
-    uniq, first_idx = np.unique(sorted_pmids, return_index=True)
-    if len(uniq) != len(all_pmids):
-        print(f"  WARN {len(all_pmids) - len(uniq):,} duplicate PMIDs dropped", flush=True)
-    n_items = len(uniq)
-    # item_id = rank in ascending PMID order, 1-indexed.
+    order = sorted(shard_pmids)
+    all_pmids = np.concatenate([shard_pmids[i] for i in order])
+    _, first_idx = np.unique(all_pmids, return_index=True)
+    first = np.zeros(all_pmids.shape[0], dtype=bool)
+    first[first_idx] = True
+    n_dup = int((~first).sum())
+    if n_dup:
+        print(f"  WARN {n_dup:,} duplicate PMIDs — the first occurrence (shard order) wins")
+    # Select over the de-duplicated set so `--keep-items` is exact.
+    keep = np.zeros_like(first)
+    keep[first] = select_pmids(all_pmids[first], args.keep_items, args.seed)
+    lo: list[int] = []
+    hi: list[int] = []
+    kept_per_shard: dict[int, np.ndarray] = {}  # shard → kept row positions, PMID-ascending
+    starts: dict[int, int] = {}
+    offset = 0
     with open(output / "item_id_map.json", "w") as f:
-        json.dump({str(int(p)): i + 1 for i, p in enumerate(uniq)}, f)
-    log["n_items"] = int(n_items)
-    print(f"  n_items = {n_items:,} → item_id_map.json", flush=True)
+        f.write("{")
+        first_entry = True
+        for i in order:
+            pm = shard_pmids[i]
+            k = keep[offset : offset + pm.shape[0]]
+            offset += pm.shape[0]
+            pos = np.nonzero(k)[0]
+            pos = pos[np.argsort(pm[pos], kind="stable")]
+            kept_per_shard[i] = pos
+            starts[i] = sum(len(v) for j, v in kept_per_shard.items() if j < i)
+            if pos.size:
+                lo.append(int(pm[pos[0]]))
+                hi.append(int(pm[pos[-1]]))
+            base = starts[i] + 1
+            chunk = ",".join(f'"{int(p)}":{base + j}' for j, p in enumerate(pm[pos]))
+            if chunk:
+                f.write(("" if first_entry else ",") + chunk)
+                first_entry = False
+        f.write("}")
+    n_items = int(keep.sum())
+    disjoint = all(hi[j] < lo[j + 1] for j in range(len(lo) - 1))
+    log.update(
+        n_pmids_listed=int(all_pmids.shape[0]), n_duplicates=n_dup, n_items=n_items,
+        pmid_ranges_disjoint=disjoint,
+    )  # fmt: skip
+    print(
+        f"  {all_pmids.shape[0]:,} PMIDs listed, {n_items:,} kept → item_id_map.json "
+        f"(shard PMID ranges disjoint: {disjoint})",
+        flush=True,
+    )
+    del all_pmids, keep, first
 
-    # pmid → row index (0-indexed = item_id - 1), as a sorted-array lookup.
-    def _rows_for(pmids: np.ndarray) -> np.ndarray:
-        return np.searchsorted(uniq, pmids)
+    # ---- phase 2: shard by shard ------------------------------------------
+    index_path = content_dir / "shard_index.json"
+    done: dict[str, dict] = {}
+    if index_path.exists():
+        done = {e["filename"]: e for e in json.loads(index_path.read_text())["shards"]}
+    entries: list[dict] = []
+    fetcher = ThreadPoolExecutor(max_workers=max(1, args.prefetch)) if args.fetch else None
+    pending: dict[int, list] = {}
 
-    # ---- per-shard article parquet -----------------------------------------
-    print(f"STEP parse pubmed_chunk_*.json ({args.workers} workers)", flush=True)
-    jobs = [(i, str(ROOT), str(ROOT), str(staging)) for i in sorted(shard_pmids)]
-    n_parsed = 0
-    # A pool only pays off across many 1.5 GB shards, and it must be a *spawn*
-    # pool: forking a process that has already initialised polars' rayon thread
-    # pool deadlocks the child inside `write_parquet`. A single worker (the test
-    # path) runs inline and forks nothing at all.
-    if args.workers > 1:
-        ctx = multiprocessing.get_context("spawn")
-        with ProcessPoolExecutor(max_workers=args.workers, mp_context=ctx) as ex:
-            results = list(ex.map(_convert_shard_attrs, jobs))
-    else:
-        results = [_convert_shard_attrs(j) for j in jobs]
-    for i, n in results:
-        if n >= 0:
-            n_parsed += n
-            print(f"  shard {i}: {n:,} articles", flush=True)
-    log["n_articles_parsed"] = int(n_parsed)
+    def _submit(i: int) -> None:
+        if fetcher is None or i in pending:
+            return
+        paths = _shard_paths(i)
+        need = ["content"] + ([] if args.skip_embeds else ["embeds"])
+        pending[i] = [
+            fetcher.submit(_fetch_one, *paths[k], log=log_path)
+            for k in need
+            if not paths[k][1].exists()
+        ]
 
-    # ---- fp16 [N, 768] item matrix -----------------------------------------
-    #
-    # Written through a `.npy` memmap accumulator on `--emb-scratch` (crash-safe
-    # and resumable across reruns) and finalized once into the harness's
-    # `content_d768/text_emb.pt`. No dimensionality reduction: MedCPT's native
-    # 768 dims are the benchmark dims (user decision 2026-09-06).
-    if args.skip_embeds:
-        print("SKIP embeds (--skip-embeds): id map + article parquets only", flush=True)
-    else:
-        import torch
-        import torch.nn.functional as F
+    for j, i in enumerate(order):
+        for ahead in order[j : j + 1 + args.prefetch]:
+            _submit(ahead)
+        if i in pending and not all(fut.result() for fut in pending.pop(i)):
+            print(f"ERROR shard {i}: download failed", flush=True)
+            return 1
+        pos = kept_per_shard[i]
+        pm = shard_pmids[i][pos]
+        n_rows = int(pos.shape[0])
+        paths = _shard_paths(i)
+        parquet = staging / f"articles_chunk_{i}.parquet"
+        shard_pt = content_dir / _shard_name(i)
+        entry = {"filename": _shard_name(i), "start_id": starts[i], "n_rows": n_rows,
+                 "source_shard": i}  # fmt: skip
+        if n_rows == 0:
+            print(f"  shard {i}: no kept rows", flush=True)
+            continue
+        if not parquet.exists():
+            src = paths["content"][1]
+            if not src.exists():
+                print(f"  WARN shard {i}: missing {src.name}, no article parquet", flush=True)
+            else:
+                _parse_shard_content(src, pm).write_parquet(parquet, compression="zstd")
+        if not args.skip_embeds:
+            prev = done.get(entry["filename"])
+            if shard_pt.exists() and prev == entry:
+                print(f"  shard {i}: {n_rows:,} rows already folded", flush=True)
+            else:
+                npy = paths["embeds"][1]
+                if not npy.exists():
+                    print(f"ERROR shard {i}: missing {npy.name} (pass --fetch)", flush=True)
+                    return 1
+                if np.load(npy, mmap_mode="r").shape[0] != shard_pmids[i].shape[0]:
+                    print(f"ERROR shard {i}: npy rows != pmid list length", flush=True)
+                    return 1
+                _fold_shard_embeddings(npy, pos, shard_pt, args.batch_rows)
+                print(f"  shard {i}: {n_rows:,} rows folded → {shard_pt.name}", flush=True)
+            entries.append(entry)
+            _write_shard_index(content_dir, n_items, entries)
+        if args.delete_raw:
+            for k in ("content", "embeds"):
+                paths[k][1].unlink(missing_ok=True)
+    if fetcher is not None:
+        fetcher.shutdown(wait=True)
 
-        scratch = (
-            Path(args.emb_scratch).expanduser() if args.emb_scratch else output / "_staging_emb"
-        )
-        scratch.mkdir(parents=True, exist_ok=True)
-        acc_path = scratch / f"text_emb_d{EMB_DIM_NATIVE}.npy"
-        print(
-            f"STEP accumulate [{n_items:,}, {EMB_DIM_NATIVE}] fp16 "
-            f"({n_items * EMB_DIM_NATIVE * 2 / 1e9:.1f} GB) → {acc_path}",
-            flush=True,
-        )
-        mm = np.lib.format.open_memmap(
-            acc_path,
-            mode="r+" if acc_path.exists() else "w+",
-            dtype=np.float16,
-            shape=(n_items, EMB_DIM_NATIVE),
-        )
-        for i in sorted(shard_pmids):
-            npy = ROOT / f"embeds_chunk_{i}.npy"
-            if not npy.exists():
-                print(f"  WARN missing {npy.name}", flush=True)
-                continue
-            arr = np.load(npy, mmap_mode="r")
-            rows = _rows_for(np.asarray(shard_pmids[i], dtype=np.int64))
-            for s in range(0, arr.shape[0], args.batch_rows):
-                e = min(s + args.batch_rows, arr.shape[0])
-                block = torch.from_numpy(np.array(arr[s:e], dtype=np.float32))
-                mm[rows[s:e]] = F.normalize(block, dim=-1).to(torch.float16).numpy()
-            del arr
-            print(f"  shard {i}: {len(rows):,} rows folded in", flush=True)
-            if args.delete_raw:
-                npy.unlink()
-                (ROOT / f"pubmed_chunk_{i}.json").unlink(missing_ok=True)
-        mm.flush()
-        del mm
-
-        sub_dir = output / f"content_d{EMB_DIM_NATIVE}"
-        sub_dir.mkdir(parents=True, exist_ok=True)
-        # np.array (not ascontiguousarray) forces a writable copy: torch needs
-        # one, and torch.save materialises the whole tensor anyway.
-        acc = np.load(acc_path, mmap_mode="r")
-        torch.save(torch.from_numpy(np.array(acc)), sub_dir / "text_emb.pt")
-        del acc
-        with open(sub_dir / "text_emb.meta.json", "w") as f:
-            json.dump(
+    if not args.skip_embeds:
+        (content_dir / "text_emb.meta.json").write_text(
+            json.dumps(
                 {
+                    "prefix": None,
                     "encoder": "ncbi/MedCPT-Article-Encoder (precomputed, NCBI FTP)",
                     "dim": EMB_DIM_NATIVE,
                     "reduction": "none",
                     "normalization": "l2",
-                    "n_rows": int(n_items),
-                    "shape": [int(n_items), EMB_DIM_NATIVE],
+                    "n_rows": n_items,
+                    "shape": [n_items, EMB_DIM_NATIVE],
                     "dtype": "float16",
+                    "layout": "sharded (shard_index.json)",
+                    "keep_items": args.keep_items,
+                    "seed": args.seed,
                 },
-                f,
                 indent=2,
             )
-        acc_path.unlink()
-        log["text_emb"] = str(sub_dir / "text_emb.pt")
-        print(f"  wrote {sub_dir}/text_emb.pt (accumulator deleted)", flush=True)
+        )
+        log["text_emb"] = str(index_path)
+    else:
+        print("SKIP embeds (--skip-embeds): id map + article parquets only", flush=True)
 
     log["wall_clock_sec"] = round(time.monotonic() - t0, 1)
     _merge_log(output, "convert", log)
@@ -753,7 +1050,10 @@ def cmd_attrs(args) -> int:
     if not parts:
         print(f"ERROR no article parquets in {staging} (run `convert` first)", flush=True)
         return 1
-    arts = pl.concat([pl.read_parquet(p) for p in parts], how="vertical")
+    arts = pl.concat(
+        [pl.read_parquet(p).select("pmid", "year", "has_abstract", "mesh") for p in parts],
+        how="vertical",
+    )
     # 1-indexed item_id per the shared convention; rows land at item_id - 1.
     arts = arts.with_columns(
         pl.col("pmid")
@@ -960,18 +1260,25 @@ def cmd_queries(args) -> int:
     Two sources, per dataset-candidates.md §3.8/§4.1:
 
     * ``heldout`` — item-as-query: the held-out article's title is the query and
-      the article itself is the single relevant item. Always available.
+      the article itself is the single relevant item. Always available; the
+      titles come from the article parquets, so ``--delete-raw`` costs nothing.
+      **Every held-out row is kept** — a title-less article gets an empty query
+      string rather than being dropped — so ``query_emb.pt`` stays row-aligned
+      with ``heldout.parquet`` / ``eval_split.parquet`` (the layout contract;
+      the 2026-09-06 review's finding on this loader).
     * ``nfcorpus`` — the NFCorpus (BEIR) biomedical query set. NFCorpus document
       ids *are* PMIDs, so its qrels map straight onto our item ids. Needs
       ``queries.jsonl`` + ``qrels/test.tsv`` staged under
       ``--nfcorpus-dir``; if they are absent the set is skipped with a warning
       rather than failing (BEIR asks that its corpus not be redistributed, so
-      the harness never downloads it automatically).
+      the harness never downloads it automatically). NFCorpus rows are written
+      to ``queries_nfcorpus.parquet``, *not* appended to the held-out set: the
+      harness's text path reads one query set aligned with ``heldout.parquet``.
     """
     output = Path(args.output_dir).expanduser()
     sources = [s.strip() for s in args.sources.split(",") if s.strip()]
-    frames: list[pl.DataFrame] = []
     log: dict = {"sources": sources}
+    wrote = False
 
     if "heldout" in sources:
         heldout = output / "heldout.parquet"
@@ -979,15 +1286,19 @@ def cmd_queries(args) -> int:
             print(f"ERROR missing {heldout} (run `attrs` first)", flush=True)
             return 1
         ho = pl.read_parquet(heldout)
-        titles = _titles_for_pmids(set(ho["pmid"].to_list()), args.shards)
+        titles = _titles_for_pmids(output, {int(p) for p in ho["pmid"].to_list()})
         rows = [
-            {"query_id": f"heldout:{p}", "text": titles.get(p, ""), "target_id": int(t)}
+            {"query_id": f"heldout:{p}", "text": titles.get(int(p), ""), "target_id": int(t)}
             for p, t in zip(ho["pmid"].to_list(), ho["item_id"].to_list(), strict=True)
         ]
-        rows = [r for r in rows if r["text"]]
-        frames.append(pl.DataFrame(rows, schema=_QUERY_SCHEMA))
+        n_empty = sum(1 for r in rows if not r["text"])
+        pl.DataFrame(rows, schema=_QUERY_SCHEMA).write_parquet(
+            output / "queries.parquet", compression="zstd"
+        )
         log["n_heldout"] = len(rows)
-        print(f"  heldout queries: {len(rows):,}", flush=True)
+        log["n_heldout_empty_title"] = n_empty
+        print(f"  heldout queries: {len(rows):,} ({n_empty:,} with no title)", flush=True)
+        wrote = True
 
     if "nfcorpus" in sources:
         nf = Path(args.nfcorpus_dir).expanduser() if args.nfcorpus_dir else ROOT / "nfcorpus"
@@ -1013,34 +1324,28 @@ def cmd_queries(args) -> int:
                 rows.append(
                     {"query_id": f"nfcorpus:{qid}", "text": qtext[qid], "target_id": int(tgt)}
                 )
-            frames.append(pl.DataFrame(rows, schema=_QUERY_SCHEMA))
+            pl.DataFrame(rows, schema=_QUERY_SCHEMA).write_parquet(
+                output / "queries_nfcorpus.parquet", compression="zstd"
+            )
             log["n_nfcorpus"] = len(rows)
             print(f"  nfcorpus (query, relevant-PMID) pairs in-catalog: {len(rows):,}", flush=True)
+            wrote = True
 
-    if not frames:
+    if not wrote:
         print("ERROR no query sets built", flush=True)
         return 1
-    out = pl.concat(frames, how="vertical")
-    out.write_parquet(output / "queries.parquet", compression="zstd")
-    log["n_queries"] = out.height
     _merge_log(output, "queries", log)
-    print(f"ALL DONE queries — {out.height:,} rows → queries.parquet", flush=True)
+    print("ALL DONE queries", flush=True)
     return 0
 
 
-def _titles_for_pmids(want: set[str], shards_spec: str | None) -> dict[str, str]:
-    """Pull titles for a PMID set out of the raw ``pubmed_chunk_*.json``."""
-    out: dict[str, str] = {}
-    for i in _parse_shards(shards_spec):
-        src = ROOT / f"pubmed_chunk_{i}.json"
-        if not src.exists():
-            continue
-        content = json.loads(src.read_text())
-        for p in want:
-            rec = content.get(p)
-            if rec is not None:
-                out[p] = (rec.get("t") or "").strip()
-        del content
+def _titles_for_pmids(output: Path, want: set[int]) -> dict[int, str]:
+    """Titles for a PMID set, out of ``staging/articles_chunk_*.parquet``."""
+    out: dict[int, str] = {}
+    wanted = list(want)
+    for p in sorted((output / "staging").glob("articles_chunk_*.parquet")):
+        df = pl.read_parquet(p, columns=["pmid", "title"]).filter(pl.col("pmid").is_in(wanted))
+        out.update(zip(df["pmid"].to_list(), df["title"].to_list(), strict=True))
     return out
 
 
@@ -1095,6 +1400,7 @@ def cmd_encode_queries(args) -> int:
     with open(sub / "query_emb.meta.json", "w") as f:
         json.dump(
             {
+                "prefix": None,
                 "encoder": args.encoder,
                 "pooling": "cls",
                 "dim": EMB_DIM_NATIVE,
@@ -1124,8 +1430,19 @@ def main(argv: list[str] | None = None) -> int:
 
     default_out = str(Path(os.environ.get("RETRIEVE_DATA_ROOT", "data")) / "pubmed-medcpt")
 
+    sp = sub.add_parser("plan", help="dry run: remote sizes → rows, peak disk, wall time")
+    sp.add_argument("--shards", type=str, default=None, help='e.g. "0-9,37" (default: all 38)')
+    sp.add_argument("--keep-items", type=int, default=None, help="slice size (default: all)")
+    sp.add_argument("--prefetch", type=int, default=1)
+    sp.add_argument("--medline", action="store_true", help="also HEAD the 1334 MEDLINE files")
+    sp.add_argument("--mbps", type=float, default=0.0, help="0 = measure with a 64 MB probe")
+    sp.add_argument("--report", type=str, default="", help="write the JSON budget here")
+    sp.set_defaults(func=cmd_plan)
+
     sp = sub.add_parser("download", help="resumable mirror of the NCBI raw files")
-    sp.add_argument("--what", choices=["all", "embeds", "meta", "medline", "mesh"], default="all")
+    sp.add_argument(
+        "--what", choices=["all", "embeds", "meta", "pmids", "medline", "mesh"], default="all"
+    )
     sp.add_argument("--shards", type=str, default=None, help='e.g. "0-9,37" (default: all 38)')
     sp.add_argument("--parallel", type=int, default=12)
     sp.add_argument("--medline-files", type=int, default=0, help="0 = all 1334")
@@ -1146,14 +1463,16 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--delete-raw", action="store_true")
     sp.set_defaults(func=cmd_medline)
 
-    sp = sub.add_parser("convert", help="chunk json/npy → id map, article parquet, fp16 matrix")
+    sp = sub.add_parser("convert", help="streaming: pmids → id map; shards → parquet + fp16")
     sp.add_argument("--output-dir", type=str, default=default_out)
     sp.add_argument("--shards", type=str, default=None)
-    sp.add_argument("--workers", type=int, default=8)
+    sp.add_argument("--keep-items", type=int, default=None,
+                    help="keep exactly N articles, chosen by a seeded PMID hash (default: all)")
+    sp.add_argument("--seed", type=int, default=0)
     sp.add_argument("--batch-rows", type=int, default=100_000)
+    sp.add_argument("--fetch", action="store_true", help="download missing raw files as needed")
+    sp.add_argument("--prefetch", type=int, default=1, help="shards downloaded ahead (--fetch)")
     sp.add_argument("--skip-embeds", action="store_true", help="id map + attrs only")
-    sp.add_argument("--emb-scratch", type=str, default=None,
-                    help="dir for the fp16 accumulator (put it on a disk that can hold 55 GB)")
     sp.add_argument("--delete-raw", action="store_true", help="drop each shard once folded in")
     sp.set_defaults(func=cmd_convert)
 
@@ -1170,7 +1489,6 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("queries", help="build queries.parquet (heldout / nfcorpus)")
     sp.add_argument("--output-dir", type=str, default=default_out)
     sp.add_argument("--sources", type=str, default="heldout")
-    sp.add_argument("--shards", type=str, default=None)
     sp.add_argument("--nfcorpus-dir", type=str, default=None)
     sp.set_defaults(func=cmd_queries)
 
@@ -1198,5 +1516,8 @@ __all__ = [
     "parse_medline_gz",
     "parse_mesh_field",
     "parse_year",
+    "plan_budget",
+    "pmid_hash",
+    "select_pmids",
     "year_to_bucket",
 ]

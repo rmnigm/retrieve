@@ -1,0 +1,16 @@
+{
+  "prefix": null,
+  "encoder": "ncbi/MedCPT-Article-Encoder (precomputed, NCBI FTP)",
+  "dim": 768,
+  "reduction": "none",
+  "normalization": "l2",
+  "n_rows": 380761,
+  "shape": [
+    380761,
+    768
+  ],
+  "dtype": "float16",
+  "layout": "sharded (shard_index.json)",
+  "keep_items": null,
+  "seed": 0
+}

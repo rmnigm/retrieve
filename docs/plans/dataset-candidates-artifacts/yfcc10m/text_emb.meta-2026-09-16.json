@@ -1,0 +1,18 @@
+{
+  "prefix": null,
+  "encoder": "CLIP (Zilliz descriptors, per big-ann-benchmarks)",
+  "raw_dtype": "uint8",
+  "stored_dtype": "float16",
+  "lossless": true,
+  "dim": 192,
+  "metric_upstream": "squared_l2",
+  "metric_harness": "cosine (layout.load_text_items L2-normalises, the harness scores IP)",
+  "source": "https://dl.fbaipublicfiles.com/billion-scale-ann-benchmarks/yfcc100M/base.10M.u8bin",
+  "n_rows": 10000000,
+  "base_norm": {
+    "mean": 1819.383,
+    "std": 20.063,
+    "cv": 0.01103,
+    "sample": 4097
+  }
+}

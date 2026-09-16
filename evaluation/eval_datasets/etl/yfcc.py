@@ -510,26 +510,31 @@ def cmd_prep(args) -> int:
         "cv": round(float(norms.std() / norms.mean()), 5),
         "sample": int(norms.numel()),
     }
-    # NB: deliberately *not* named text_emb.meta.json / query_emb.meta.json —
-    # loaders.assert_arxiv_prefixes() reads those and demands the nomic
-    # "search_document: " / "search_query: " prefixes, which YFCC has no
-    # concept of. With them absent the loader logs a warning and skips.
-    with open(content / "emb_provenance.json", "w") as f:
-        json.dump(
-            {
-                "source": f"{BASE_URL}/base.10M.u8bin",
-                "encoder": "CLIP (Zilliz descriptors, per big-ann-benchmarks)",
-                "raw_dtype": "uint8",
-                "stored_dtype": "float16",
-                "lossless": True,
-                "dim": DIM,
-                "metric_upstream": "squared_l2",
-                "metric_harness": "cosine (loaders.py L2-normalises then scores IP)",
-                "base_norm": log["base_norm"],
-            },
-            f,
-            indent=2,
-        )
+    # The sidecars the layout contract asks for. ``"prefix": null`` is the declared
+    # "this encoder has no prefix concept" of ``layout.prefix_problem`` — CLIP descriptors
+    # are not nomic text embeddings — and is what lets ``bench check`` pass rather than
+    # report a missing assertion (the pre-2026-09-16 ``emb_provenance.json`` did neither).
+    provenance = {
+        "prefix": None,
+        "encoder": "CLIP (Zilliz descriptors, per big-ann-benchmarks)",
+        "raw_dtype": "uint8",
+        "stored_dtype": "float16",
+        "lossless": True,
+        "dim": DIM,
+        "metric_upstream": "squared_l2",
+        "metric_harness": "cosine (layout.load_text_items L2-normalises, the harness scores IP)",
+    }
+    for name, src, n_rows in (
+        ("text_emb", "base.10M.u8bin", N_BASE),
+        ("query_emb", "query.public.100K.u8bin", N_QUERY),
+    ):
+        with open(content / f"{name}.meta.json", "w") as f:
+            json.dump(
+                {**provenance, "source": f"{BASE_URL}/{src}", "n_rows": n_rows,
+                 "base_norm": log["base_norm"]},
+                f,
+                indent=2,
+            )  # fmt: skip
     del item_emb, query_emb
 
     print("STEP item_tags_csr.pt (full, uncapped tag bags)", flush=True)
