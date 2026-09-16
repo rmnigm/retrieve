@@ -1,0 +1,14 @@
+IDENTICAL  goodreads linr_v1_filter_mask triton clause/c0_genre {}
+IDENTICAL  goodreads linr_v2 torch bloom/c2_format {}
+IDENTICAL  goodreads linr_v2 triton clause/c0_genre {}
+IDENTICAL  goodreads linr_v3 triton bloom/c3_year {}
+IDENTICAL  goodreads linr_v3 triton clause/c0_genre {}
+IDENTICAL  goodreads linr_v4 triton clause/c0_genre {}
+IDENTICAL  goodreads silvertorch official clause/c0_genre {"n_probe": 24}
+IDENTICAL  goodreads silvertorch official clause/c0_genre {"n_probe": 32}
+IDENTICAL  goodreads silvertorch torch clause/c0_genre {"n_probe": 24}
+IDENTICAL  goodreads silvertorch torch clause/c0_genre {"n_probe": 32}
+IDENTICAL  goodreads silvertorch triton clause/c0_genre {"n_probe": 24}
+IDENTICAL  goodreads silvertorch triton clause/c0_genre {"n_probe": 32}
+
+12 cells rerun: PASS

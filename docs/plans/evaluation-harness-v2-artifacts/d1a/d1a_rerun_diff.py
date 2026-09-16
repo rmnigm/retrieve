@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Compare the `quality` block of every rerun record in <dir> against the stage-a campaign
 record with the same key. Byte-identical = `json.dumps(..., sort_keys=True)` equal, with the
-parity fields (`jaccard_vs_first@100`, `score_max_abs_diff`, `parity`) dropped: the rerun
+parity-derived fields (`jaccard_vs_first@*` at every k, `score_max_abs_diff`,
+`parity`) dropped: the rerun
 writes its own spill file, so it is always its group's reference."""
 
 from __future__ import annotations
@@ -11,7 +12,15 @@ import sys
 from pathlib import Path
 
 KEY = ("dataset", "dim", "suite", "filter_kind", "sweep", "algo", "backend", "params", "seed")
-DROP = ("jaccard_vs_first@100", "score_max_abs_diff", "parity")
+# every parity-derived field, at every k. A rerun is its own group's reference unless the
+# rerun set happens to contain that group's first backend, so these are None or not,
+# depending on what else was rerun -- they say nothing about the cell reproducing itself.
+DROP_EXACT = ("score_max_abs_diff", "parity")
+DROP_PREFIX = ("jaccard_vs_first@",)
+
+
+def _drop(k):
+    return k in DROP_EXACT or k.startswith(DROP_PREFIX)
 RESULTS = Path(__file__).resolve().parents[4] / "evaluation" / "results" / "filter"
 
 
@@ -21,7 +30,7 @@ def key_of(r):
 
 def qual(r):
     return json.dumps(
-        {k: v for k, v in (r.get("quality") or {}).items() if k not in DROP}, sort_keys=True
+        {k: v for k, v in (r.get("quality") or {}).items() if not _drop(k)}, sort_keys=True
     )
 
 
