@@ -1,10 +1,12 @@
 # Dataset candidates for the filtered-retrieval benchmark (scale-up)
 
-> **Status:** survey, 2026-09-05, nothing ingested. **Ordering authority:**
-> [00-roadmap.md](00-roadmap.md) §1 Phase E — E1 = §4.3's Yambda-full fallback, E2 = §4.1
-> PubMed + MedCPT, E4 (SIGIR) = §4.2 Amazon, §4.3 KuaiRand, §4.4 Cohere Wikipedia, §4.5 YFCC-10M.
-> Ingestion follows `docs/system/datasets.md` § "Adding a dataset"; record what was actually
-> downloaded, encoded and built in a "Ingestion record" section appended here.
+> **Status:** survey, 2026-09-05; ingestion records in §7 — **E1 (YFCC-10M) staged, checked
+> and its filter cell run on 2026-09-16 (§7.1)**, **E2 (PubMed) streaming ETL written and
+> dry-run on one shard the same day, no bulk download started (§7.2)**. **Ordering
+> authority:** [00-roadmap.md](00-roadmap.md) §1 Phase E — E1 = §4.5 YFCC-10M, E2 = §4.1
+> PubMed + MedCPT (its PCA plan superseded: native 768-d only), E3 = §3.7 Semantic Scholar,
+> E4 = §4.3 KuaiRand. Ingestion follows `docs/system/datasets.md` § "Adding a dataset"; what
+> was actually downloaded, encoded and built goes in §7.
 
 Survey date: 2026-09-05. Every dataset fact below carries the URL it was
 taken from; items marked **UNVERIFIED** could not be confirmed from a
@@ -646,3 +648,244 @@ contract, not a base class:
 Gate: `bench check` green on arXiv, Goodreads and every E-phase dataset
 before its first campaign cell; E2 additionally needs the fp16-items +
 chunked-oracle change of review §2.8 (36 M × 768 fp32 does not fit).
+
+## 7. Ingestion records
+
+### 7.1 E1 — YFCC-10M staged, checked and run (2026-09-16)
+
+> **Status:** staged, checked and configured on branch `dev/e1-e2-datasets` (worktree
+> `/scratch/wt/datasets`, off `development` @ `d808a66`), A100 box, **GPU not used** — the
+> D1-a campaign held `/workspace/gpu.lock` for its whole stage (pid 233174, `flock …
+> stage_a.py`, 11 h in when this started), so the cells below are CPU rehearsals. **The
+> "one filter cell with `status: ok`" gate is not met: the exact-algo cell fails the
+> harness's quality gate because the library scores in fp16 and YFCC's cosines are denser
+> than fp16 resolves** (item 4). That is a decision for the orchestrator, not a fix here.
+> Artifacts: [dataset-candidates-artifacts/README.md](dataset-candidates-artifacts/README.md)
+> § `yfcc10m/` 2026-09-16.
+
+**What was done.**
+
+1. **Staged to `/data`** ([../system/storage.md](../system/storage.md)): `eval-data yfcc
+   download` fetched the six files (2.97 GB, every size verified) in 2 min at ~19 MB/s;
+   `convert --sha256`, `prep` (35.7 s) and `attrs --max-tags 32` (796 s, see surprise 1)
+   wrote `/data/yfcc10m` (9.5 GB: `text_emb.pt` 3.84 GB, `item_attrs_narrow.pt` 5.12 GB,
+   `item_tags_csr.pt` 0.51 GB, `item_id_map.json` 0.18 GB, `gt_shipped.pt` 0.13 GB); with the
+   raw mirror the dataset costs 12.5 GB of the overlay. Every number in `prep_log.json` equals
+   the 2026-09-06 record's — 7,910 queried tags, 98.51 % of items uncapped at K = 32,
+   **74,214 / 100,000 queries keep their whole shipped-GT row and 84.86 % of GT entries
+   survive the cap** — so the two recorded deviations stand unchanged: (i) the harness
+   predicate is the *capped* conjunctive tag match, stricter than the shipped one on 25.8 %
+   of queries (the shipped GT was validated against the uncapped CSR on 2026-09-06,
+   100,000/100,000 id-exact); (ii) the harness scores **cosine** while the shipped GT is
+   **squared L2**. Both are in `config/yfcc10m.yaml`'s header, in
+   [../system/datasets.md § yfcc10m](../system/datasets.md#yfcc10m), and in the sidecars.
+2. **The layout contract now accepts it.** `bench check --dataset yfcc10m` used to report
+   the two `*.meta.json` sidecars missing (the loader wrote `emb_provenance.json` to dodge the
+   nomic prefix assertion). The fix is a *policy*, not a rename: `layout.prefix_problem`
+   accepts `"prefix": null` as the declaration of a prefix-free encoder and rejects a sidecar
+   without the key; `assert_prefixes` (the loader) and `validate_layout` (`bench check`)
+   share it. `yfcc prep` writes `text_emb.meta.json` / `query_emb.meta.json` with
+   `prefix: null` plus the provenance. **`bench check --dataset yfcc10m` → `yfcc10m d192:
+   ok`.** Covered by `tests/eval_datasets/test_layout.py` (declared-null passes, keyless
+   fails, both in the loader and the check) and by a new end-to-end fixture test,
+   `test_yfcc.py::TestPrepAttrsLayout`, that runs `prep` + `attrs` on fixture-sized upstream
+   binaries and asserts `validate_layout == []` and that every reader loads the result.
+3. **Config.** `yfcc10m` joined `config/suites.yaml`'s `filter` suite (`datasets` and
+   `dims: [128, 192]` — 192 is YFCC's only dim, not an ablation), so
+   `bench run --dataset yfcc10m --suite filter` expands to its cells: one clause sweep
+   (`tags_and = [0, 1]`), no bloom (a bloom's false positives would defeat the shipped-GT
+   cross-check), the suite's ks 100/500/1000 and batch sizes 1/8/16, every listed algo ×
+   backend. No `none` cell is in any committed suite: the unfiltered `quality` suite was
+   retired in flight on 2026-09-16 (uncommitted on `development`), and the roadmap says the
+   unfiltered cells come back with E5.
+4. **Cells — the gate is not met, and the reason is a finding.** The GPU was not
+   available (the campaign's lock wraps its entire stage driver, not a cell), so the cells
+   were run **on the CPU** through the real harness (`CUDA_VISIBLE_DEVICES=""`, 16 threads,
+   backend `torch` — the only backend that runs without CUDA; the committed suite still
+   lists it for `linr_v1_filter_mask`), on a scratch copy of the config with
+   `users_limit: 1000` and `--skip-perf --mode eager`, after a first attempt at the full
+   10k queries / all ks / all batch sizes was stopped at 1 h 45 with the oracle still
+   building — a CPU rehearsal has to be bounded. Records, log and the scratch configs are
+   in the artifacts.
+   - **`filter`: `linr_v1_filter_mask / torch / clause / tags_and` → `status: failed`,
+     `QualityGateError: recall_oracle@1000 = 0.9641 < 0.99`** (oracle built in 15 min:
+     pass rate 0.0182, median pass set 15,060 items; the quality pass took 1 h 20 on the
+     CPU). `linr_v1_filter_mask` is an *exact* algorithm — a brute-force masked scan — and
+     the harness kills the run when an exact algo misses the exact oracle by more than the
+     "fp16 tolerance" of 1 % (H §2.4). Diagnosis
+     ([fp16-gate-diagnostic.py](dataset-candidates-artifacts/yfcc10m/fp16-gate-diagnostic.py),
+     [.log](dataset-candidates-artifacts/yfcc10m/fp16-gate-diagnostic.log)): of the 35,273
+     oracle top-1000 entries the module missed over 1,000 queries, 7,212 are exact ties at
+     the module's 1000th score and **28,061 score strictly higher than the module's 1000th
+     item — but never by more than 4.6 × 10⁻⁴ cosine**. Against an fp64-exact top-1000 over
+     the true capped pass set (49 rows with ≥ 1,000 survivors), **the oracle blob scores
+     0.9998, a plain fp32 top-k 0.9999, and the module 0.9211**. The cause is in the frozen
+     library: `retrieve/modules/knn.py` `PostfilterKNN` casts the items to **fp16** at
+     `register_index` and scores `query.half() @ items_t` (lines 35 and 42: "storage fp16,
+     fp32 accumulate"; the backend flag "has no effect"). fp16 spacing in [0.5, 1) is 2⁻¹¹ =
+     4.88 × 10⁻⁴; on YFCC the fp64 score span from rank 1 to rank 1000 is a **median
+     0.0072** (min 0.00004) — about fifteen fp16 quanta hold a thousand items, with 4.96 %
+     of the catalog being exact duplicate vectors on top — so fp16 scoring ties and reorders
+     the whole tail of a 1000-deep list. On goodreads the same algo sits at 0.9996 on the
+     same gate (`evaluation/results/filter/goodreads-d128.jsonl`): the gate is fine, YFCC
+     is the first dataset whose score density is below fp16's resolution. **The cast is
+     backend-independent, so the GPU cell will fail the same gate at k = 1000.** This is
+     not the cosine-vs-L2 deviation (oracle and module score the same cosine) and not the
+     tag cap (both use the same capped attrs). The choices are the orchestrator's:
+     (a) score exact algos in fp32 on this dataset — a library change, frozen during the
+     campaign, and it doubles linr_v1's item bytes; (b) evaluate YFCC at the shipped depth
+     (k ≤ 100, fewer items per fp16 quantum at the boundary — *not measured here*); or
+     (c) exempt YFCC from the exact-algo gate and report the fp16 recall as what it is.
+     Not a quiet normalisation in any case.
+   - **`none_e1`** (scratch suite, not committed): `linr_v1_filter_mask / torch / none /
+     full_scan` → `status: partial` (`skip_perf`, `modes`), **held-out recall@100/500/1000
+     = 0.998**, mrr@100 0.812, build 4.7 s, index 3,662 MiB, 1,952 s on the CPU. The 0.2 %
+     of misses are deviation (ii): the held-out target is the shipped *unfiltered
+     squared-L2* rank-1 neighbour, the harness ranks by cosine.
+   Both records carry `env.gpu = "cpu"`; nothing in them is paper material. **The GPU
+   cell — E1's actual gate — has not run and, for `linr_v1` at k = 1000, will not pass as
+   the suite stands.** Once the lock is free, the command is
+   ```bash
+   cd evaluation && export RETRIEVE_DATA_ROOT=/data
+   flock /workspace/gpu.lock -c '/venvs/retrieve/bin/python -m bench.cli run --dataset yfcc10m \
+       --dim 192 --suite filter --algo silvertorch --backend triton --filter-kind clause'
+   ```
+   (SilverTorch is not an exact algo and is not gated, so its record will be `ok` or a real
+   result), and `--algo linr_v1_filter_mask` reproduces the finding on the GPU.
+
+**Gates.** `ruff check evaluation`: clean except one pre-existing `E501` in
+`bench/records.py:46` on `development` @ `d808a66` (not touched here);
+`CUDA_VISIBLE_DEVICES="" pytest tests/` in `evaluation/`: **197 passed** (baseline
+185 passed / 4 skipped at `2e18d8c`; +8 new tests here, and the 4 `TestRealSlice` tests
+that skip without the dataset now run against `/data/yfcc10m` and pass);
+`scripts/check_doc_links.py`: 0 broken.
+
+**Surprises.**
+
+1. **`/venvs/retrieve`'s console scripts run the wrong interpreter.** `/venvs/retrieve/bin/bench`
+   and `eval-data` carry the shebang `#!/workspace/retrieve/.venv/bin/python3`, so
+   `uv run --no-sync bench …` — the recipe in storage.md — executes with
+   `sys.prefix = /workspace/retrieve/.venv` and imports torch and numpy **from the MooseFS
+   network volume** (52 MB/s, FUSE page faults on every `.so` page). That is why `yfcc attrs`
+   took 796 s here against 20.5 s on 2026-09-06 (9 s user, 240 s system time), why a
+   `bench run` sat 2 min in `request_wait_answer` before printing a line, and why the first
+   dry-run attempts stalled. `/venvs/retrieve/bin/pytest` has the right shebang, which is why
+   the test suite was unaffected. Workaround used for everything after the YFCC ETL:
+   `/venvs/retrieve/bin/python -m bench.cli …` / `-m eval_datasets.cli …` with
+   `PYTHONPATH=<worktree>/evaluation` (the venv's editable `.pth` points at
+   `/workspace/retrieve/evaluation`, so a worktree's code is otherwise not what runs). The
+   fix is a venv re-provision (`uv sync` from the overlay), which is outside this step.
+2. **`evaluation/data` is per worktree.** The harness resolves `data_dir: data/<name>`
+   against `evaluation/`, not `$RETRIEVE_DATA_ROOT`; a fresh worktree needs
+   `ln -s /data evaluation/data` (gitignored) or `bench check` reports every file missing.
+   Documented in datasets.md.
+3. The container's CPU quota is 27.2 cores (`cpu.max`), not the 255 `nproc` reports; CPU
+   rehearsals were pinned to 16 threads to stay out of the campaign's way.
+
+### 7.2 E2 — PubMed streaming ETL written, dry-run on one shard (2026-09-16)
+
+> **Status:** code + tests + dry run on branch `dev/e1-e2-datasets`; **no bulk download
+> started, nothing staged, no oracle, no cell.** §4.1's PCA plan is superseded (roadmap
+> decision 2026-09-06: native 768-d only). Artifacts:
+> [dataset-candidates-artifacts/README.md](dataset-candidates-artifacts/README.md) § `pubmed/`.
+
+**The arithmetic, computed from the server (not guessed).** `eval-data pubmed plan`
+`HEAD`s all 114 MedCPT files and reads each npy header over a `Range` request, so the
+numbers below are re-derivable by anyone with the command in the artifacts README:
+
+| | full catalog | `--keep-items 10000000` |
+|---|---|---|
+| articles (npy headers = PMID lists; 38 disjoint ranges, 0 duplicates) | **35,920,666** | 10,000,000 |
+| MedCPT raw: npy 110.35 GB + chunk JSON 52.89 GB + PMID lists 0.42 GB | 163.66 GB | 163.66 GB |
+| MEDLINE baseline (1334 files, `HEAD`ed) | 54.27 GB | 54.27 GB |
+| **raw to download** | **217.9 GB** | **217.9 GB** |
+| fp16 item shards (N × 768 × 2 B) | 55.17 GB | 15.36 GB |
+| article parquet (60 B/row; **55.0 measured** on chunk 37) | 2.16 GB | 0.60 GB |
+| MEDLINE parquet (bound) | 1.20 GB | 1.20 GB |
+| raw in flight, `1 + prefetch` largest shards (31 + 34) | 9.61 GB | 9.61 GB |
+| **peak disk** | **68.6 GB** | **27.2 GB** |
+| wall, download-bound | **2.54 h at 23.9 MB/s** (64 MB probe, 10:00 UTC); 1.5 h at the 41 MB/s a `curl` probe saw at 09:24 | same |
+| items fp32 on the device (what `bench.inputs` holds) | **110.3 GB** | 30.7 GB |
+
+Two corrections to the numbers this step was handed: the raw is 163.7 GB of MedCPT files,
+not 146 (102 + 44) — the server's sizes are 8 % larger than the 2026-09-05 survey's — and
+the *processed* tensor is **55 GB, not 111**: every text dataset here stores fp16 on disk
+(arxiv's `text_emb.pt` is fp16) and the harness makes the fp32 copy on the device. So raw
++ processed never had to coexist at 309 GB; what does not fit is the mirror (218 GB) next
+to the campaign's datasets and a second copy of anything.
+
+**The streaming path (`etl/pubmed.py`, rewritten).**
+
+- `download --what pmids` (new) fetches the 0.42 GB of PMID lists; `convert` needs nothing
+  else up front. The lists fix `item_id_map.json`: 1-indexed dense in (shard order,
+  ascending PMID within the shard) — the same as ascending PMID, because the 38 ranges are
+  disjoint, which `convert` checks and logs (`pmid_ranges_disjoint`).
+- `convert --fetch --prefetch 1 --delete-raw` then walks the shards: download the next
+  shard while parsing this one; parse `pubmed_chunk_i.json` into
+  `staging/articles_chunk_i.parquet` (`pmid, year, has_abstract, mesh, title` — the title
+  stays so `queries` no longer needs the JSON); gather the kept npy rows in PMID order,
+  L2-normalise, cast to fp16, `torch.save` as `content_d768/text_emb_shard_NN.pt`; append
+  to `shard_index.json`; delete the shard's JSON and npy. This is the **sharded layout
+  `layout.load_sharded` already reads** (synth-arxiv), so there is no accumulator, no
+  monolithic `text_emb.pt`, no second on-disk copy and no 55 GB RAM materialisation — the
+  old path's `torch.save(np.array(memmap))` did all three. A killed run resumes at the first
+  shard whose outputs are missing.
+- `--keep-items N` keeps exactly `N` articles: the `N` smallest values of a seeded
+  splitmix64 hash of the PMID (`select_pmids`). Order-free (the same set whatever the shard
+  order or fetch history), uniform over 1781–2024 rather than "the oldest N", and exact.
+  Every shard is still scanned — the slice saves disk, not download.
+- `queries` keeps **every** held-out row (an untitled article gets an empty query string)
+  so `query_emb.pt` aligns with `heldout.parquet` / `eval_split.parquet` — the 2026-09-06
+  review's breakage on this loader; NFCorpus rows go to a separate parquet. `encode_queries`
+  and `convert` write `prefix: null` sidecars.
+- `plan` is the dry run: no download, prints and writes the budget above.
+
+**Tests** (`tests/eval_datasets/test_pubmed.py`, CPU, synthetic fixtures like the existing
+ones): `select_pmids` exact / seeded / order-free / spread; `pmid_hash` stability; the
+streaming convert over two fixture shards with `--delete-raw` (raw gone, PMID lists kept,
+two contiguous output shards, `load_sharded` reassembles them, a rerun is a pure resume,
+`attrs` + `queries` on top keep every held-out row, `validate_layout == []`);
+`--keep-items` slicing with dense ids; `plan_budget`'s arithmetic; `cmd_plan` with the
+network monkeypatched. 33 pubmed tests pass.
+
+**Dry run on one real shard** (chunk 37, the smallest: 1.17 GB npy + 0.62 GB JSON, 380,761
+articles, PMIDs 37,000,000–37,384,379): `convert --shards 37 --fetch --prefetch 1
+--delete-raw` in **222 s** (60 s + 60 s of download at ~10–20 MB/s, ~100 s of parse + fold;
+raw deleted, 558 MB of output: `text_emb_shard_37.pt` 584.9 MB = 380,761 × 768 × 2 B,
+`articles_chunk_37.parquet` 20.9 MB = **55.0 B/row**, `item_id_map.json` 6.7 MB); `attrs`
+30 s (C0 MeSH coverage 37 % on this newest chunk, whose 2023–24 articles are largely not
+yet MeSH-indexed; C1 = 0 because the 17 MB MeSH descriptor file was not fetched; C3 = 0
+without the MEDLINE join — all three expected for a dry run); `queries` 2,000 held-out
+titles (3 empty, kept); `encode_queries --device cpu` with `ncbi/MedCPT-Query-Encoder`
+→ `query_emb.pt [2000, 768]`. **`bench check --dataset pubmed` on that directory: `pubmed
+d768: ok`.** The dry-run directory (647 MB) was deleted afterwards; the 0.40 GB of PMID
+lists stay in `/data/_raw/pubmed` for the real run.
+
+**Is the full 36 M the right target? No — and not because of disk.** The 10 M slice is.
+`bench.inputs.load_inputs` holds items fp32 on the device: 110.3 GB for the full catalog
+on an 80 GB A100, before any index. An fp16-items harness (review §2.8) would still put
+55 GB of items next to SilverTorch's 27.6 GB of int8 codes. At 10 M: 30.7 GB of items +
+7.7 GB of codes + 1.6 GB of attrs, comfortably inside 80 GB with the oracle's `[64, N]`
+score buffers and the perf pools; it matches the papers' 10 M pool and YFCC's size, so the
+cross-dataset comparison is like for like; and the largest catalog the harness as written
+takes at 768-d is ~15 M. The full 36 M is an ETL option (`plan` says 68.6 GB peak, 2.5 h)
+that the harness cannot consume — going above ~15 M is a harness decision, not this step's.
+
+**What the real run is** (one command per line, ~2.5–3 h wall, network-bound, no GPU until
+`encode_queries`; peak 27.2 GB):
+```bash
+export RETRIEVE_DATA_ROOT=/data; cd evaluation; PY=/venvs/retrieve/bin/python
+$PY -m eval_datasets.cli pubmed plan --medline --keep-items 10000000      # re-derive the budget
+$PY -m eval_datasets.cli pubmed download --what mesh                       # 17 MB descriptor file
+$PY -m eval_datasets.cli pubmed convert --fetch --prefetch 1 --delete-raw --keep-items 10000000
+$PY -m eval_datasets.cli pubmed medline --stream                           # 54 GB, streamed, deleted
+$PY -m eval_datasets.cli pubmed attrs && $PY -m eval_datasets.cli pubmed queries
+flock /workspace/gpu.lock -c "$PY -m eval_datasets.cli pubmed encode_queries --device cuda"
+$PY -m bench.cli check --dataset pubmed
+```
+Then `pubmed` goes into a suite (it is in none) and E2's oracle + cells run under the lock.
+
+**Not done / unverified.** No bulk download; no MEDLINE join run; no oracle; no cell; the
+MeSH pass-rate numbers §4.1 predicts (0.01–5 %) are unmeasured; `encode_queries` on the
+GPU is untested (CPU path only). The tiered MeSH-cap selectivity story stands or falls
+with the real `attrs` run.

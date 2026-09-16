@@ -380,3 +380,73 @@ class TestRealSlice:
             want = q_indices[q_indptr[r] : q_indptr[r + 1]].tolist()
             got = [t for t in tags[r].tolist() if t >= 0]
             assert got == want, f"query {r}"
+
+
+# ----- the whole layout on a synthetic mini-dataset ---------------------------
+
+
+class TestPrepAttrsLayout:
+    """``prep`` + ``attrs`` on fixture-sized upstream files write a directory that the
+    layout contract accepts — the test ``docs/system/datasets.md`` asks of every loader."""
+
+    N_BASE, N_QUERY, DIM, N_TAGS = 30, 5, 4, 6
+
+    @pytest.fixture
+    def raw_root(self, tmp_path, monkeypatch):
+        root = tmp_path / "_raw" / "yfcc10m"
+        root.mkdir(parents=True)
+        rng = np.random.default_rng(0)
+        base = rng.integers(0, 256, (self.N_BASE, self.DIM), dtype=np.uint8)
+        query = rng.integers(0, 256, (self.N_QUERY, self.DIM), dtype=np.uint8)
+        write_u8bin(root / "base.10M.u8bin", base)
+        write_u8bin(root / "query.public.100K.u8bin", query)
+        bags = [sorted(rng.choice(self.N_TAGS, rng.integers(0, 4), replace=False).tolist())
+                for _ in range(self.N_BASE)]  # fmt: skip
+        write_spmat(root / "base.metadata.10M.spmat", bags, self.N_TAGS)
+        q_tags = [[0], [1, 2], [0, 3], [2], [1]]
+        write_spmat(root / "query.metadata.public.100K.spmat", q_tags, self.N_TAGS)
+        ids = rng.integers(0, self.N_BASE, (self.N_QUERY, 2)).astype(np.int32)
+        write_knn_result(root / "GT.public.ibin", ids, np.ones((self.N_QUERY, 2)))
+        uids = rng.integers(0, self.N_BASE, (self.N_QUERY, 3)).astype(np.int32)
+        write_knn_result(root / "unfiltered.GT.public.ibin", uids, np.ones((self.N_QUERY, 3)))
+        for name, value in (("ROOT", root), ("N_BASE", self.N_BASE), ("N_QUERY", self.N_QUERY),
+                            ("DIM", self.DIM), ("N_TAGS", self.N_TAGS)):  # fmt: skip
+            monkeypatch.setattr(yfcc, name, value)
+        return root
+
+    def test_validate_layout_is_clean_and_sidecars_declare_no_prefix(self, raw_root, tmp_path):
+        from eval_datasets import layout
+
+        out = tmp_path / "yfcc10m"
+        assert yfcc.cmd_prep(_ns(output_dir=str(out))) == 0
+        assert yfcc.cmd_attrs(_ns(output_dir=str(out), max_tags=2)) == 0
+        content = out / yfcc.CONTENT_SUBDIR
+        assert layout.validate_layout(out, content) == []
+        for name in ("text_emb", "query_emb"):
+            meta = json.loads((content / f"{name}.meta.json").read_text())
+            assert "prefix" in meta and meta["prefix"] is None
+            assert meta["metric_upstream"] == "squared_l2"
+        assert not (content / "emb_provenance.json").exists()
+        # ... and the loaders take it: items L2-normalised, queries aligned with heldout.
+        items = layout.load_text_items(content, torch.device("cpu"))
+        assert items.shape == (self.N_BASE, self.DIM)
+        assert torch.allclose(items.norm(dim=-1), torch.ones(self.N_BASE), atol=1e-5)
+        queries, targets, n_targets = layout.load_text_queries(out, content, self.DIM)
+        assert queries.shape == (self.N_QUERY, self.DIM) and targets.shape == (self.N_QUERY, 1)
+        assert (targets >= 0).all() and (targets < self.N_BASE).all()
+        qa = layout.load_query_attrs(out / "eval_split.parquet", self.N_QUERY)
+        assert qa.shape == (self.N_QUERY, yfcc.C_NARROW)
+        assert (qa[:, 0] >= 0).all() and qa[3, 1] == -1 and qa[1, 1] >= 0
+        narrow, rev = layout.load_item_attrs(
+            out / "item_attrs_narrow.pt", out / "clause_is_reverse_narrow.pt", self.N_BASE,
+            torch.device("cpu"),
+        )  # fmt: skip
+        assert narrow.shape == (self.N_BASE, yfcc.C_NARROW, 2) and not rev.any()
+        log = json.loads((out / "prep_log.json").read_text())
+        assert log["attrs"]["cap"]["max_tags"] == 2 and "gt_fidelity" in log["attrs"]
+
+
+def _ns(**kw):
+    import argparse
+
+    return argparse.Namespace(**kw)

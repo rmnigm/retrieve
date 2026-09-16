@@ -24,9 +24,12 @@ by interpolating between real embeddings — used for scale sweeps where a
 real catalog that size doesn't exist.
 
 Data lives under `$RETRIEVE_DATA_ROOT` (default `<repo>/evaluation/data`;
-on the A100 box `/workspace/data`, with `evaluation/data` a symlink to
-it). Raw downloads go to `data/_raw/<dataset>/`; bench-side outputs to
-`data/<dataset>/`.
+on the A100 box `/data` on the overlay disk — [storage.md](storage.md) —
+with `evaluation/data` a gitignored symlink to it that every worktree
+needs its own copy of, `ln -s /data evaluation/data`, because the harness
+resolves `config/*.yaml`'s `data_dir: data/<dataset>` against
+`evaluation/`, not against `$RETRIEVE_DATA_ROOT`). Raw downloads go to
+`data/_raw/<dataset>/`; bench-side outputs to `data/<dataset>/`.
 
 ## `eval_datasets/` — what is on disk
 
@@ -70,12 +73,22 @@ full test split), `load_item_attrs` (the legacy pad row dropped, rows
 checked against the items), `apply_users_limit` (one prefix over every
 query-side tensor), `atomic_write`, and `validate_layout(data_dir,
 content_dir) -> list[str]` — every way the directory can be wrong for the
-harness (missing files, a missing or swapped prefix sidecar, `query_emb`
+harness (missing files, a missing, keyless or swapped prefix sidecar, `query_emb`
 vs `heldout` rows, attrs vs items, `eval_split` vs queries) — which
 `bench check --dataset <name>` runs at every dim. Run it on a freshly
 staged dataset before a campaign; the two breakages the 2026-09-06 review
 found (PubMed's `queries` dropping rows, YFCC without sidecars) are what it
-reports.
+reports, and both loaders were fixed on 2026-09-16.
+
+**The prefix policy** (`layout.prefix_problem`, shared by the loader's
+`assert_prefixes` and by `validate_layout`): every `text_emb.meta.json` /
+`query_emb.meta.json` must carry a `prefix` key. It is either the nomic
+prefix the harness expects (`search_document: ` / `search_query: `) or
+**explicitly `null`**, which declares that the encoder has no prefix
+concept — YFCC's CLIP descriptors, MedCPT's precomputed vectors. A sidecar
+*without* the key is a problem, not a pass, because it cannot be told apart
+from a forgotten prefix; a missing sidecar is a problem in `validate_layout`
+and a logged warning in the loader.
 
 ### Tests
 
@@ -272,11 +285,12 @@ the upstream data:
    reproduces the shipped integer distances bit-for-bit. `content_d192/`
    holds fp16 only; a separate int8 code file would be a redundant copy of
    the same integers, and SilverTorch quantises internally at build time.
-   The sidecars are named `emb_provenance.json`, **not** `*.meta.json`:
-   `layout.assert_prefixes` treats a `*.meta.json` as a nomic encode and
-   demands the `search_document: ` / `search_query: ` prefixes, which YFCC
-   has no concept of (`validate_layout` therefore reports the missing
-   sidecars on this dataset — a known, accepted finding).
+   The sidecars `text_emb.meta.json` / `query_emb.meta.json` carry
+   `"prefix": null` — the declared "no prefix concept" of the prefix policy
+   above — plus the provenance (source URL, raw dtype, both metrics, the
+   base-norm statistics). Until 2026-09-16 they were named
+   `emb_provenance.json` and `bench check` reported them missing; now
+   `bench check --dataset yfcc10m` is clean.
 3. **The narrow clause tensor is a capped approximation of the tag
    predicate** — see below.
 
@@ -315,7 +329,8 @@ data/yfcc10m/
 ├── content_d192/
 │   ├── text_emb.pt             [10M, 192] fp16   (uint8 values, lossless)
 │   ├── query_emb.pt            [100k, 192] fp16
-│   └── emb_provenance.json
+│   ├── text_emb.meta.json      prefix: null + provenance
+│   └── query_emb.meta.json     prefix: null + provenance
 ├── item_tags_csr.pt            full uncapped tag bags, CSR
 ├── item_attrs_narrow.pt        [10M, 2, 32] int64 — dense tag ids, -1 pad
 ├── clause_is_reverse_narrow.pt [2] bool = [F, F]  (no negated predicate here)
@@ -346,21 +361,66 @@ every query is reproduced. `--limit N` checks a random subset (`--device
 cpu --limit 200` is a ~2-minute sanity run), `--tags narrow` measures the
 cap instead of the true predicate, and `--metric ip` reports the cosine
 drift; the last two are diagnostics and always exit 0.
+
+**Running it (roadmap E1).** [`config/yfcc10m.yaml`](../../evaluation/config/yfcc10m.yaml)
+is the harness-v2 dataset file (one dim, 192; one clause sweep `tags_and`
+= clauses `[0, 1]`; no bloom block, because a bloom's false positives would
+make the cross-check against the shipped GT meaningless), and since
+2026-09-16 the dataset is listed in the `filter` suite of
+[`config/suites.yaml`](../../evaluation/config/suites.yaml) with 192 added
+to the suite's dims. So
+
+```bash
+export RETRIEVE_DATA_ROOT=/data
+uv run eval-data yfcc all --output-dir /data/yfcc10m      # 12.5 GB with the raw
+uv run bench check --dataset yfcc10m                       # yfcc10m d192: ok
+uv run bench run --dataset yfcc10m --suite filter          # every filter cell
+```
+
+is the whole path. Three things to keep in mind when reading its records:
+the suite's `ks` (100 / 500 / 1000) are deeper than the shipped GT's
+k = 10, which is fine because recall is measured against the harness's own
+cosine oracle over the capped attrs (deviations 1 and 3 above); the
+`none` cells are in no suite of `suites.yaml` (the unfiltered `quality`
+suite was retired on 2026-09-16; they come back with E5); and **the
+exact-algo cell fails the harness's quality gate on this dataset** — the
+library's `PostfilterKNN` scores in fp16, whose 4.9 × 10⁻⁴ spacing is
+coarser than YFCC's score density (a median 0.0072 cosine between rank 1
+and rank 1000, plus 5 % exact-duplicate vectors), so `linr_v1_filter_mask`
+reaches only `recall_oracle@1000 ≈ 0.96` against the fp32 oracle and
+`QualityGateError` ends the run before the other algos. The oracle is right
+(0.9998 against fp64); the module's fp16 is the cause; it is
+backend-independent. What to do about it is an open decision recorded in
+[dataset-candidates.md §7.1](../plans/dataset-candidates.md#71-e1--yfcc-10m-staged-checked-and-run-2026-09-16),
+which also says what ran and on which device.
+
 ### pubmed
 
-**Status: skeleton only.** Roadmap E2 is deferred (2026-09-06) — no PubMed data
-is staged and none of the numbers below have been produced, let alone gated.
+**Status: ETL written and rehearsed, nothing staged.** Roadmap E2's ingest
+path was restructured to stream on 2026-09-16 and dry-run on one real shard
+([dataset-candidates.md §7.2](../plans/dataset-candidates.md#72-e2--pubmed-streaming-etl-written-dry-run-on-one-shard-2026-09-16));
+the full download has not been started, no oracle has been built and no
+cell has run. Nothing below is citable.
 
-`download` → `convert` → `medline` → `attrs` → `queries` → `encode_queries`.
-Source is the NCBI FTP MedCPT article-embedding release, public domain, no
-registration:
-`https://ftp.ncbi.nlm.nih.gov/pub/lu/MedCPT/pubmed_embeddings/` — 38 chunks of
+`plan` → `download --what pmids` → `convert --fetch --delete-raw` →
+`medline --stream` → `attrs` → `queries` → `encode_queries`. Source is the
+NCBI FTP MedCPT article-embedding release, public domain, no registration:
+`https://ftp.ncbi.nlm.nih.gov/pub/lu/MedCPT/pubmed_embeddings/` — 38 chunks
+of
 
 - `embeds_chunk_{i}.npy` — `(N_i, 768)` **float32** (verified from the npy
-  header, `descr='<f4'`; ~102 GB total),
-- `pmids_chunk_{i}.json` — the row-aligned PMID list (~400 MB total),
+  header, `descr='<f4'`; **110.35 GB** as served on 2026-09-16),
+- `pmids_chunk_{i}.json` — the row-aligned PMID list (0.42 GB),
 - `pubmed_chunk_{i}.json` — `{pmid: {"d": date, "t": title, "a": abstract,
-  "m": mesh}}` (~44 GB total).
+  "m": mesh}}` (**52.89 GB**).
+
+That is **35,920,666 articles** (the PMID lists and the npy headers agree),
+and chunk *i* holds exactly PMIDs `i,000,000 … i,999,999` — the 38 ranges
+are disjoint with no duplicate PMID anywhere, which `convert` re-checks and
+records as `pmid_ranges_disjoint`. `plan` re-derives every size above from
+the server (`HEAD` per file, a `Range` read of each npy header) and prints
+the disk and wall-time budget for a given `--keep-items` — run it before
+any download.
 
 NCBI publishes **no** checksums for that directory, so `verify` checks the
 shards structurally instead: the npy header must parse, dtype must be float32,
@@ -372,6 +432,40 @@ native dim (user decision 2026-09-06), so pubmed has exactly one content dir,
 `content_d768`, and `dataset-candidates.md` §4.1's PCA-to-256/128/64 plan is
 **not** implemented. [`config/pubmed.yaml`](../../evaluation/config/pubmed.yaml)
 is the harness-v2 dataset file (in no suite yet).
+
+#### The streaming `convert`
+
+The raw mirror (163.7 GB) plus the fp16 item matrix (55.2 GB) plus the
+MEDLINE baseline (53.9 GB) is 273 GB — more than the 300 GB overlay can
+give one dataset next to the campaign's. So `convert` never holds the
+mirror:
+
+1. **PMID lists first** (0.42 GB, `download --what pmids` or `--fetch`).
+   They fix the id map: item ids are 1-indexed dense in *(shard order,
+   ascending PMID within the shard)* — equal to ascending PMID order given
+   the disjoint ranges — and with `--keep-items N` the map covers only the
+   `N` articles `select_pmids` picks: the `N` smallest values of a seeded
+   splitmix64 hash of the PMID, so the slice is the same set whatever the
+   shard order or the fetch history, and is spread uniformly over
+   1781–2024 rather than being the oldest `N`.
+2. **Shard by shard**, `--prefetch` shards downloading ahead: parse the
+   chunk JSON into `staging/articles_chunk_{i}.parquet` (`pmid, year,
+   has_abstract, mesh, title` — the title stays so `queries` works after
+   the JSON is gone), gather the kept rows of the npy in PMID order,
+   L2-normalise, cast to fp16 and `torch.save` them as
+   `content_d768/text_emb_shard_{i:02d}.pt`; append the `{filename,
+   start_id, n_rows}` entry to `shard_index.json`; `--delete-raw` the
+   JSON and npy. A killed run resumes at the first shard whose `.pt` or
+   parquet is missing.
+
+The output is the **sharded layout** `layout.load_sharded` already reads
+for the synthetic arXiv catalogs (`shard_index.json` + contiguous
+`text_emb_shard_*.pt` blocks); there is no monolithic `text_emb.pt`, no
+accumulator and no second on-disk copy. `text_emb.meta.json` carries
+`prefix: null` (MedCPT has no prefix concept) and the `keep_items` / `seed`
+of the slice. Peak disk = the finished shards + the parquets + the PMID
+lists + `1 + prefetch` raw shards in flight — the numbers are under
+*Disk budget and the slice* below.
 
 #### Attribute semantics
 
@@ -422,29 +516,56 @@ Language is parsed and stored in `articles.parquet` + `lang_vocab.json` but is
 `queries` builds `queries.parquet` (`query_id`, `text`, `target_id`) from two
 sources:
 
-- `heldout` — item-as-query: a held-out article's title is the query and the
-  article itself is the single relevant item. Always available.
+- `heldout` — item-as-query: a held-out article's title (from the article
+  parquets) is the query and the article itself is the single relevant item.
+  Always available. **Every held-out row keeps its query row** — an article
+  without a title gets an empty string, it is not dropped — so
+  `query_emb.pt` stays aligned 1:1 with `heldout.parquet` and
+  `eval_split.parquet`, which is what the 2026-09-06 review found broken
+  here and what `bench check` verifies.
 - `nfcorpus` — the NFCorpus (BEIR) biomedical query set. NFCorpus document ids
   *are* PMIDs, so its qrels map straight onto our item ids. BEIR asks that its
   corpus not be redistributed, so nothing is downloaded automatically: stage
   `queries.jsonl` + `qrels/test.tsv` under `--nfcorpus-dir` yourself, or the set
-  is skipped with a warning.
+  is skipped with a warning. Its rows go to a separate
+  `queries_nfcorpus.parquet`, never appended to the held-out set, for the
+  same alignment reason.
 
 `encode_queries` runs `ncbi/MedCPT-Query-Encoder` ([CLS] pooling) and writes
 `content_d768/query_emb.pt`. MedCPT's query and article encoders are
 *asymmetric* — the same load-bearing property as nomic's prefixes on arxiv — so
 the unfiltered cross-check sweep is meaningful rather than an identity lookup.
 
-#### Disk budget
+#### Disk budget and the slice
 
-This is the binding constraint and the reason E2 is deferred. Raw is ~198 GB
-(102 GB embeddings + 44 GB chunk JSON + 52 GB MEDLINE baseline) and the fp16
-item matrix at native 768-d is another 55 GB. `convert --delete-raw` folds each
-shard into the matrix and drops it, so the raw mirror never has to be held
-whole, and `--emb-scratch` puts the fp16 accumulator on a disk that can take
-55 GB while only the finished `content_d768/text_emb.pt` lands next to the rest
-of the dataset. The accumulator is a `.npy` memmap, so a killed run resumes
-rather than restarting.
+Computed by `eval-data pubmed plan --medline --keep-items N` on 2026-09-16
+from the server's own sizes (the JSON reports are in
+[dataset-candidates-artifacts/pubmed/](../plans/dataset-candidates-artifacts/pubmed/)),
+at the 23.9 MB/s a single-stream 64 MB probe measured that day (an earlier
+`curl` probe saw 41 MB/s; the range is the honest number):
+
+| | full catalog | `--keep-items 10000000` |
+|---|---|---|
+| articles | 35,920,666 | 10,000,000 |
+| raw to download (MedCPT 163.66 GB + MEDLINE 53.93 GB) | 217.6 GB | 217.6 GB — every shard is scanned; the slice is a hash, not a prefix |
+| fp16 item shards on disk | 55.17 GB | 15.36 GB |
+| article parquet (60 B/row; 55 measured) + MEDLINE parquet (bound) | ~2.2 + 1.2 GB | ~0.6 + 1.2 GB |
+| raw in flight (`1 + prefetch` largest shards, chunks 31 + 34) | 9.6 GB | 9.6 GB |
+| **peak disk** | **~68.6 GB** | **~27.2 GB** |
+| wall time (download-bound) | ~2.5 h at 23.9 MB/s, ~1.5 h at 41 MB/s | same |
+| items as the harness holds them: fp32 on the device | **110.3 GB** | 30.7 GB |
+
+The disk is no longer the obstacle: both fit beside goodreads + arxiv on the
+overlay. **The GPU is.** `bench.inputs.load_inputs` holds the item matrix
+fp32 on the device, so the full catalog at 768-d needs 110 GB on an 80 GB
+A100 before any index exists — and even an fp16-items harness change would
+put 55 GB of items next to SilverTorch's 27.6 GB of int8 codes. **The 10 M
+slice is therefore the E2 target**, not a stopgap: 30.7 GB of items + 7.7 GB
+of int8 codes + 1.6 GB of attrs leaves the working set the oracle and the
+perf pools need, it is the papers' 10 M pool size and YFCC's, and the
+largest catalog the harness as written can take at 768-d is ~15 M. Going
+above that is a harness decision (fp16 items + a chunked oracle, review
+§2.8), not an ETL one.
 
 ### synth_arxiv
 
@@ -489,7 +610,10 @@ data/arxiv-papers/                       # config/arxiv.yaml: data_dir
 
 `yfcc10m` is the same shape with one content dir (`content_d192`) and no
 `papers.parquet` — the full listing is under
-[yfcc10m](#yfcc10m) above.
+[yfcc10m](#yfcc10m) above. `pubmed` is the same shape with one content dir
+(`content_d768`) whose item matrix is **sharded** — `shard_index.json` +
+`text_emb_shard_*.pt`, the synth-arxiv layout — instead of one
+`text_emb.pt`; `load_text_items` and `validate_layout` take either.
 
 Filter sweeps additionally need:
 

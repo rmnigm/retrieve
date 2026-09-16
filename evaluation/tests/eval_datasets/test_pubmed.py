@@ -19,6 +19,7 @@ import gzip
 import json
 
 import numpy as np
+import polars as pl
 import pytest
 import torch
 
@@ -231,11 +232,13 @@ def _convert_args(out, **kw):
     base = dict(
         output_dir=str(out),
         shards="0",
-        workers=1,
+        keep_items=None,
+        seed=0,
         batch_rows=2,
+        fetch=False,
+        prefetch=1,
         skip_embeds=False,
         delete_raw=False,
-        emb_scratch=None,
     )
     base.update(kw)
     return argparse.Namespace(**base)
@@ -251,15 +254,17 @@ def test_convert_builds_a_sorted_one_indexed_id_map(raw_root, tmp_path):
     # the order the PMIDs appear in inside the shard.
     assert id_map == {"1000000": 1, "1000001": 2, "1000002": 3}
 
-    import polars as pl
-
     arts = pl.read_parquet(out / "staging" / "articles_chunk_0.parquet")
     assert arts.height == 3
-    # article parquet keeps the *shard* row order, not the id order
-    assert arts["pmid"].to_list() == [1000002, 1000000, 1000001]
-    assert arts["year"].to_list() == [2022, 2007, 1985]
-    assert arts["has_abstract"].to_list() == [True, True, False]
-    assert arts["mesh"].to_list()[1] == ["humans", "rare gene", "animals"]
+    # the article parquet is in item-id order (ascending PMID), whatever the shard's row
+    # order was, and carries the title so `queries` works after --delete-raw
+    assert arts["pmid"].to_list() == [1000000, 1000001, 1000002]
+    assert arts["year"].to_list() == [2007, 1985, 2022]
+    assert arts["has_abstract"].to_list() == [True, False, True]
+    assert arts["mesh"].to_list()[0] == ["humans", "rare gene", "animals"]
+    assert arts["title"].to_list() == ["Alpha study.", "Beta study.", "Gamma study."]
+    log = json.loads((out / "prep_log.json").read_text())["convert"]
+    assert log["n_items"] == 3 and log["pmid_ranges_disjoint"] is True
 
 
 def test_convert_writes_a_normalised_native_768_style_matrix(raw_root, tmp_path):
@@ -271,7 +276,8 @@ def test_convert_writes_a_normalised_native_768_style_matrix(raw_root, tmp_path)
     pubmed.EMB_DIM_NATIVE = 8
     try:
         assert pubmed.cmd_convert(_convert_args(out)) == 0
-        emb = torch.load(out / f"content_d{8}" / "text_emb.pt")
+        content = out / "content_d8"
+        emb = torch.load(content / "text_emb_shard_00.pt")
     finally:
         pubmed.EMB_DIM_NATIVE = orig
 
@@ -284,10 +290,21 @@ def test_convert_writes_a_normalised_native_768_style_matrix(raw_root, tmp_path)
     want = torch.nn.functional.normalize(torch.from_numpy(src[1]), dim=-1).half()
     assert torch.allclose(emb[0].float(), want.float(), atol=2e-3)
 
-    meta = json.loads((out / "content_d8" / "text_emb.meta.json").read_text())
+    # the sharded layout the harness reads (layout.load_sharded): one output shard per
+    # input shard, contiguous [start_id, start_id + n_rows)
+    index = json.loads((content / "shard_index.json").read_text())
+    assert index["n_items"] == 3 and index["dim"] == 8 and index["dtype"] == "float16"
+    assert index["shards"] == [
+        {"filename": "text_emb_shard_00.pt", "start_id": 0, "n_rows": 3, "source_shard": 0}
+    ]
+    from eval_datasets import layout
+
+    whole = layout.load_sharded(content / "shard_index.json", torch.device("cpu"))
+    assert torch.equal(whole, emb)
+    meta = json.loads((content / "text_emb.meta.json").read_text())
     assert meta["reduction"] == "none" and meta["normalization"] == "l2"
-    # the accumulator is cleaned up
-    assert not list((out / "_staging_emb").glob("*.npy"))
+    assert "prefix" in meta and meta["prefix"] is None  # the declared no-prefix encoder
+    assert not (content / "text_emb.pt").exists()  # no monolithic copy, ever
 
 
 def test_convert_is_rerunnable(raw_root, tmp_path):
@@ -463,3 +480,175 @@ def test_clause_layout_is_the_documented_one():
     assert pubmed.A_MAX_NARROW == 4
     assert pubmed.CLAUSE_NAMES == ["mesh", "mesh_cat", "year", "journal", "has_abstract"]
     assert len(pubmed.CLAUSE_IS_REVERSE) == pubmed.C_NARROW
+
+
+# ---------------------------------------------------------------------------
+# the streaming convert: slice selection, two shards, delete-raw, resume, layout
+# ---------------------------------------------------------------------------
+
+
+def test_select_pmids_is_exact_seeded_and_order_free():
+    pmids = np.arange(1_000_000, 1_001_000, dtype=np.int64)
+    keep = pubmed.select_pmids(pmids, 100, seed=0)
+    assert keep.sum() == 100
+    # the same articles whatever the order they are listed in
+    perm = np.random.default_rng(1).permutation(pmids.size)
+    keep_perm = pubmed.select_pmids(pmids[perm], 100, seed=0)
+    assert set(pmids[keep].tolist()) == set(pmids[perm][keep_perm].tolist())
+    # a different seed is a different slice; None / oversize keep everything
+    assert set(pmids[pubmed.select_pmids(pmids, 100, seed=1)].tolist()) != set(
+        pmids[keep].tolist()
+    )
+    assert pubmed.select_pmids(pmids, None).all() and pubmed.select_pmids(pmids, 5000).all()
+    # spread over the range, not a prefix: both halves are represented
+    assert 20 <= (pmids[keep] < 1_000_500).sum() <= 80
+    with pytest.raises(ValueError):
+        pubmed.select_pmids(pmids, 0)
+
+
+def test_pmid_hash_is_a_stable_function_of_pmid_and_seed():
+    a = pubmed.pmid_hash(np.array([1, 2, 3], dtype=np.int64), seed=0)
+    b = pubmed.pmid_hash(np.array([1, 2, 3], dtype=np.int64), seed=0)
+    assert a.dtype == np.uint64 and np.array_equal(a, b) and len(set(a.tolist())) == 3
+    assert not np.array_equal(a, pubmed.pmid_hash(np.array([1, 2, 3], dtype=np.int64), seed=7))
+
+
+def _write_two_shards(root, dim=8):
+    """Shard 0 = the three-article fixture; shard 1 = two more PMIDs one million up, so the
+    shard PMID ranges are disjoint the way NCBI's are."""
+    src0 = _write_shard(root, 0, dim=dim)
+    (root / "pmids_chunk_1.json").write_text(json.dumps(["2000001", "2000000"]))
+    (root / "pubmed_chunk_1.json").write_text(
+        json.dumps(
+            {
+                "2000000": {"d": "2019", "t": "Delta.", "a": "x", "m": "humans!|"},
+                "2000001": {"d": "2021", "t": "", "a": "", "m": ""},
+            }
+        )
+    )
+    rng = np.random.default_rng(1)
+    src1 = rng.standard_normal((2, dim)).astype(np.float32)
+    np.save(root / "embeds_chunk_1.npy", src1)
+    return src0, src1
+
+
+def test_streaming_convert_two_shards_delete_raw_resume_and_layout(raw_root, tmp_path):
+    from eval_datasets import layout
+
+    src0, src1 = _write_two_shards(raw_root)
+    out = tmp_path / "out"
+    orig = pubmed.EMB_DIM_NATIVE
+    pubmed.EMB_DIM_NATIVE = 8
+    try:
+        args = _convert_args(out, shards="0-1", delete_raw=True)
+        assert pubmed.cmd_convert(args) == 0
+        # the raw shard is gone once folded, the PMID lists stay (they fix the id map)
+        for i in (0, 1):
+            assert not (raw_root / f"embeds_chunk_{i}.npy").exists()
+            assert not (raw_root / f"pubmed_chunk_{i}.json").exists()
+            assert (raw_root / f"pmids_chunk_{i}.json").exists()
+        content = out / "content_d8"
+        index = json.loads((content / "shard_index.json").read_text())
+        assert [(s["start_id"], s["n_rows"]) for s in index["shards"]] == [(0, 3), (3, 2)]
+        id_map = json.loads((out / "item_id_map.json").read_text())
+        assert id_map == {"1000000": 1, "1000001": 2, "1000002": 3, "2000000": 4, "2000001": 5}
+        whole = layout.load_sharded(content / "shard_index.json", torch.device("cpu"))
+        assert whole.shape == (5, 8)
+        want = torch.nn.functional.normalize(torch.from_numpy(src1[1]), dim=-1).half()
+        assert torch.allclose(whole[3].float(), want.float(), atol=2e-3)  # 2000000 = row 3
+        # a rerun with the raw gone is a pure resume: nothing re-fetched, nothing rewritten
+        mtime = (content / "text_emb_shard_01.pt").stat().st_mtime_ns
+        assert pubmed.cmd_convert(args) == 0
+        assert (content / "text_emb_shard_01.pt").stat().st_mtime_ns == mtime
+        # attrs + queries on top, then the layout contract (query_emb is the encode step,
+        # so it is the one thing validate_layout may still miss)
+        assert pubmed.cmd_attrs(_attrs_args(out, n_heldout=5, mesh_desc=str(tmp_path / "no"))) == 0
+        q_args = _ns(output_dir=str(out), sources="heldout", nfcorpus_dir=None)
+        assert pubmed.cmd_queries(q_args) == 0
+        q = pl.read_parquet(out / "queries.parquet")
+        ho = pl.read_parquet(out / "heldout.parquet")
+        # every held-out row keeps its query row (2000001 has no title → empty text)
+        assert q.height == ho.height == 5
+        assert q["target_id"].to_list() == ho["item_id"].to_list()
+        assert q.filter(pl.col("query_id") == "heldout:2000001")["text"].to_list() == [""]
+        torch.save(torch.ones(5, 8, dtype=torch.float16), content / "query_emb.pt")
+        (content / "query_emb.meta.json").write_text(json.dumps({"prefix": None}))
+        assert layout.validate_layout(out, content) == []
+    finally:
+        pubmed.EMB_DIM_NATIVE = orig
+
+
+def test_streaming_convert_keep_items_slices_and_keeps_ids_dense(raw_root, tmp_path):
+    _write_two_shards(raw_root)
+    out = tmp_path / "out"
+    orig = pubmed.EMB_DIM_NATIVE
+    pubmed.EMB_DIM_NATIVE = 8
+    try:
+        assert pubmed.cmd_convert(_convert_args(out, shards="0-1", keep_items=3)) == 0
+    finally:
+        pubmed.EMB_DIM_NATIVE = orig
+    id_map = json.loads((out / "item_id_map.json").read_text())
+    assert len(id_map) == 3 and sorted(id_map.values()) == [1, 2, 3]
+    all_pmids = np.array([1000000, 1000001, 1000002, 2000000, 2000001], dtype=np.int64)
+    want = set(all_pmids[pubmed.select_pmids(all_pmids, 3, seed=0)].tolist())
+    assert {int(k) for k in id_map} == want
+    index = json.loads((out / "content_d8" / "shard_index.json").read_text())
+    assert index["n_items"] == 3 and sum(s["n_rows"] for s in index["shards"]) == 3
+    assert json.loads((out / "prep_log.json").read_text())["convert"]["keep_items"] == 3
+
+
+def test_convert_without_embeds_present_fails_cleanly(raw_root, tmp_path):
+    _write_shard(raw_root, 0, with_embeds=False)
+    assert pubmed.cmd_convert(_convert_args(tmp_path / "out")) == 1
+
+
+# ---------------------------------------------------------------------------
+# plan: the peak-disk / wall-time arithmetic, no network
+# ---------------------------------------------------------------------------
+
+
+def test_plan_budget_arithmetic():
+    sizes = {
+        0: {"pmids": 10, "content": 1_000, "embeds": 3_000},
+        1: {"pmids": 10, "content": 2_000, "embeds": 2_000},
+        2: {"pmids": 10, "content": 500, "embeds": 1_000},
+    }
+    rows = {0: 100, 1: 80, 2: 20}
+    b = pubmed.plan_budget(sizes, rows, keep_items=None, prefetch=1, mbps=1.0)
+    assert b["n_rows"] == 200 and b["keep_items"] == 200
+    assert b["raw_bytes"] == {"pmids": 30, "content": 3_500, "embeds": 6_000, "medline": 0,
+                              "total": 9_530}  # fmt: skip
+    fp16 = 200 * pubmed.EMB_DIM_NATIVE * 2
+    assert b["processed_bytes"]["text_emb_fp16"] == fp16
+    # two largest shards in flight with prefetch 1: (1000+3000) + (2000+2000)
+    assert b["in_flight_raw_bytes"] == 8_000
+    assert b["peak_disk_bytes"] == fp16 + 200 * pubmed.ARTICLE_PARQUET_BYTES_PER_ROW + 30 + 8_000
+    assert b["fp32_on_device_bytes"] == 2 * fp16
+    assert b["download_s"] == round(9_530 / 1e6)
+    # a slice shrinks the processed side only: every raw byte is still downloaded
+    s = pubmed.plan_budget(sizes, rows, keep_items=50, prefetch=0, mbps=1.0, medline_bytes=100)
+    assert s["keep_items"] == 50 and s["raw_bytes"]["total"] == 9_630
+    assert s["in_flight_raw_bytes"] == 4_000
+    assert s["processed_bytes"]["medline_parquet_est"] == pubmed.MEDLINE_PARQUET_BYTES
+    assert s["wall_s_est"] > b["wall_s_est"]  # no prefetch: the parses do not overlap
+
+
+def test_plan_command_uses_remote_sizes_only(monkeypatch, tmp_path):
+    sizes = {"pmids_chunk": 10, "pubmed_chunk": 1_000, "embeds_chunk": 128 + 4 * 768 * 4}
+    monkeypatch.setattr(
+        pubmed, "_remote_size", lambda url: next(v for k, v in sizes.items() if k in url)
+    )
+    monkeypatch.setattr(pubmed, "_remote_npy_shape", lambda url: (4, 768))
+    report = tmp_path / "plan.json"
+    rc = pubmed.cmd_plan(
+        _ns(shards="0-1", keep_items=5, prefetch=1, medline=False, mbps=10.0, report=str(report))
+    )
+    assert rc == 0
+    got = json.loads(report.read_text())
+    assert got["n_rows"] == 8 and got["keep_items"] == 5 and got["n_shards"] == 2
+    assert got["per_shard"]["1"]["rows"] == 4
+    assert got["mbps"] == 10.0
+
+
+def _ns(**kw):
+    return argparse.Namespace(**kw)
