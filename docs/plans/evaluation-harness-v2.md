@@ -2017,7 +2017,10 @@ Two independent checks, both on the VM's **local disk** (`/tmp`, 262 GB free) �
 
 > Branch `dev/d1a-campaign` off `development` `5fd05a6`. Ran the `filter` suite on
 > **goodreads** d128, seed 0, backends `{triton, torch}` — **8 of the 11 goodreads jobs,
-> 72 of 126 cells, every one `status: ok`**. The stage as dispatched (goodreads + arxiv,
+> 72 of 126 cells, every one `status: ok`**. **§14.11 supersedes the counts below**: a
+> ninth job (`silvertorch triton`, 18 cells) completed after §14.1–§14.10 were written and
+> the gate was re-run at **90 cells**, still all `ok`. Sections 14.1–14.10 are left at the
+> 72-cell cut they were computed on; §14.11 carries the deltas and corrects two claims. The stage as dispatched (goodreads + arxiv,
 > 266 cells) was **not** completed: the orchestrator cut it twice while it ran, first to the
 > goodreads leg and then to "stop after the job in flight", after the user changed the
 > campaign grid. Four of the six gate clauses pass on the records; **two GPU clauses were
@@ -2290,3 +2293,70 @@ not be comparable to this one on that column, and `report.py`'s citability check
 * **`bench upload` was not run**, by instruction — the JSONL was still growing and a manifest
   written against it would not match.
 * **The roadmap checkbox was not flipped and nothing was merged.**
+
+### 14.11 Addendum — `silvertorch triton` completed, gate re-run at 90 cells
+
+The driver could not be stopped (§14.1), so it ran one more job to completion after
+§14.1–§14.10 were written: **`silvertorch triton`, 18 cells (9 sweeps × `n_probe ∈ {24, 32}`),
+`rc=0` in 8105 s, finishing 2026-09-16T11:39:56Z**. That is the newly-prioritised arm, so the
+cells are kept and the gate was re-run over **90 cells**. It still passes on all four
+record-decidable clauses, with every cell `status: ok`:
+
+| clause | 72-cell cut | 90-cell cut |
+|---|---|---|
+| 1 status | 72 `ok` | **90 `ok`**, zero `failed`, zero `partial` |
+| 2 completeness | 72/72 | **90/90** |
+| 3 batch scaling | 432 comparisons, worst 12.406 | **540** comparisons, worst **12.406** (unchanged — the worst cell is still `linr_v3 torch all4 k=100 eager`) |
+| 4 graph capture | 648/648 measured | **810/810** measured |
+
+`bench report` now emits **20 artifacts** rather than 15: the `silvertorch` cells populate the
+Pareto and paper-comparison tables that the LiNR-only cut left structurally incomplete.
+Still `NOT CITABLE`.
+
+**The fixed per-cell cost holds on a fifth algorithm, and this is now the run's firmest
+result.** `silvertorch triton` cost **447 s/cell, of which 100 s is timed windows and 347 s is
+not**. Across all five algorithms and both backends the non-timed remainder is now
+**315–349 s/cell** — a 10 % band across nine jobs whose timed cost spans 100–420 s, a 4.2×
+range. The campaign's wall time is a compile-and-capture constant, not algorithm work.
+
+**Correction 1 — "`graph` has zero unstable entries" is withdrawn.** §14.8 said 0 of 648.
+At 90 cells it is **1 of 810**. The claim was true of the sample it was made on and is false
+as a general statement; `graph` remains overwhelmingly more stable than `eager` (1 vs 71),
+but not perfectly so.
+
+**Correction 2 — instability is bs ∈ {1, 8}, not bs=1 alone.** §14.8 reported bs=1: 31,
+bs=8: 5, bs=16: 1 and called it "a bs=1 phenomenon". `silvertorch` changes the shape:
+
+| | bs=1 | bs=8 | bs=16 | total |
+|---|---|---|---|---|
+| 72-cell cut | 31 | 5 | 1 | 37 |
+| **90-cell cut** | **50** | **21** | **1** | **72** |
+
+**71 of 72 unstable entries (98.6 %) are at bs ∈ {1, 8}**, which reproduces B3's finding
+(26 of 31, 84 %) more closely than the LiNR-only cut did. `silvertorch` alone contributes 35
+of the 72. Its bs=1 `eager` instability rate is **33 % (18/54)** against **14 % (31/216)** for
+the four LiNR algorithms — an IVF probe-list property at small batch, not a harness fault.
+`clocks_drift` rises from 6 to **11 of 90 cells**.
+
+**A second worker appeared on the box, and it did not contend for the GPU.** The dispatch
+stated "the GPU is yours alone for this stage". From **2026-09-16T10:17:28Z** a second
+process was running — E1's `yfcc10m d192` rehearsal
+(`bench.cli run … --skip-perf --mode eager --out /scratch/campaigns/e1-yfcc-cpu`) — which
+overlapped roughly 60 % of the `silvertorch triton` job. It was checked rather than assumed:
+it holds **zero `nvidia*` file descriptors** (`/proc/<pid>/fd`), never appears in
+`nvidia-smi --query-compute-apps`, and the only compute process on the device throughout was
+this campaign's own child. **The GPU premise held; the latency numbers are not contaminated.**
+
+It does consume CPU (118 threads, runnable), and bs=1 `eager` latency is host-bound, so the
+obvious worry is host-side contention. Within the `silvertorch triton` job — same algorithm,
+same backend, same process, so only wall-clock position differs — the bs=1 `eager` unstable
+rate is **5/18 (28 %) before** the E1 process started and **13/36 (36 %) after**. At that
+sample size the difference is meaningless, and cells 3–6 were already unstable *before* E1
+existed. **No contention effect is detectable, and the sample is far too small to exclude
+one.** Recorded so the next reader does not rediscover the overlap and assume the worst.
+
+**Unchanged by any of this:** gate clauses 5 and 6 (ids across `mode`, byte-identical rerun)
+are still **NOT RUN** — the driver went straight on to `silvertorch torch` and still holds the
+GPU lock. `linr_v2`'s parity status (§14.6) is unaffected: `silvertorch triton` is its group's
+parity *reference*, so it records `parity: reference` and no cross-backend comparison, and no
+`official` arm has run on goodreads.

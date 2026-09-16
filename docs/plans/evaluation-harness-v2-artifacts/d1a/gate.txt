@@ -1,23 +1,23 @@
 ==============================================================================
 1. status
-   72 cells: {'ok': 72}
+   90 cells: {'ok': 90}
    -> PASS
 2. completeness
-   expected 72 cells for the slice, 72 recorded ok
+   expected 90 cells for the slice, 90 recorded ok
    -> PASS
 3. batch scaling: median_ms(bs=16) < 16 x median_ms(bs=1)
-   432 comparisons, worst ratio 12.406 (goodreads linr_v3 torch all4 k=100 eager: 1.6847 -> 20.9008 ms)
+   540 comparisons, worst ratio 12.406 (goodreads linr_v3 torch all4 k=100 eager: 1.6847 -> 20.9008 ms)
    -> PASS
 4. graph capture (cudagraph_skips == 0 on every capturable arm)
-   {'measured': 648}
+   {'measured': 810}
    -> PASS
 ------------------------------------------------------------------------------
 informational
    env.sm_mhz_load over cells: [1410.0]
-   perf[].sm_mhz under load: min 1155.0 median 1410.0 max 1410.0 over 1296 entries
+   perf[].sm_mhz under load: min 1155.0 median 1410.0 max 1410.0 over 1620 entries
    env.sm_mhz_idle: [1155.0]
-   clocks_drift cells: 6
-   unstable perf entries: 37 by bs {1: 31, 8: 5, 16: 1} by mode {'eager': 37} by algo {'linr_v1_filter_mask': 4, 'linr_v2': 9, 'linr_v3': 16, 'linr_v4': 8}
+   clocks_drift cells: 11
+   unstable perf entries: 72 by bs {1: 50, 8: 21, 16: 1} by mode {'eager': 71, 'graph': 1} by algo {'linr_v1_filter_mask': 4, 'linr_v2': 9, 'linr_v3': 16, 'linr_v4': 8, 'silvertorch': 35}
    parity vs the group's reference backend (min jaccard@100, max |dscore|):
      goodreads  linr_v1_filter_mask  torch     vs_triton    n=  9 jaccard_min=1.000000 dscore_max=0.000e+00
      goodreads  linr_v2              torch     vs_triton    n=  9 jaccard_min=0.999005 dscore_max=7.818e-03
