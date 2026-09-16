@@ -175,9 +175,13 @@ reports:
   plan cache **off** so the per-forward parse is paid.
 
 Two things that arm did **not** establish, stated rather than buried: the
-official arm reaches only **0.985** on arXiv, and the LiNR V2 backend
-divergence, which turned out to be a real precision defect in our own kernel
-(see [reproduction-deviations.md](reproduction-deviations.md) §7 D-1).
+official arm reaches only **0.985** on arXiv — since explained by roadmap B3 as
+fp16 resolution against arXiv's score distribution rather than a filter effect,
+costing 3.1e-4 recall@100
+([official-vs-reimplementation.md](official-vs-reimplementation.md) §6.1) — and
+the LiNR V2 backend divergence, which turned out to be a real precision defect
+in our own kernel (see
+[reproduction-deviations.md](reproduction-deviations.md) §7 D-1).
 
 **Superseded, and superseded openly.** The thesis's tables and figures were
 produced by the pre-v2 harness. They are **not** cited as results in this paper;
@@ -191,7 +195,8 @@ the item is not paper material (CLAUDE.md rule 2).
 
 | item | waits on |
 |---|---|
-| any Triton-vs-official **kernel or end-to-end speed** comparison | **B3** |
+| ~~any Triton-vs-official **kernel or end-to-end speed** comparison~~ — **B3's gate passed 2026-09-15**; the comparison, with its own limits, is [official-vs-reimplementation.md](official-vs-reimplementation.md) | done |
+| confidence intervals, paired tests and a second seed behind **any** of B3's ratios | **D1-b** |
 | every quality, latency, memory, QPS and pass-rate table in the paper | **D1**, then **D4** |
 | fp32 accumulation in `fused_masked_knn_topk`, the reduction-width audit across every Triton kernel, and the fp64-oracle parity file that would have caught the class | **L5** |
 | multi-seed cells, bootstrap CIs, paired tests for every "A is faster than B" sentence | **D1** (gap G4) |
