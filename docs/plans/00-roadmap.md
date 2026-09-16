@@ -398,9 +398,11 @@ in its §B.3), **D** = [dataset-candidates.md](dataset-candidates.md),
   unblocked.**
 - [x] **B3 — benchmark Triton against the official kernels, kernel-only and end
   to end.** **Done 2026-09-15** (`399c231`, merged at `HEAD`); closes paper gap
-  **G2**. Triton is the fastest arm end to end in every cell (1.3–1.6×
-  unfiltered, 1.2–1.9× bloom, 2.9–10.1× exact vs `official`; 7.3–32.7× vs
-  `torch`), **but Meta's scorer kernel is faster than ours in every cell**
+  **G2**. Triton is the fastest arm end to end in every cell (bs=16: **1.27×**
+  arxiv / **1.55×** goodreads unfiltered — this line previously rounded them to
+  "1.3–1.6×", corrected at F2 — 1.18–1.86× bloom, 2.94–10.14× exact vs
+  `official`; 7.3–32.7× vs `torch`), **but Meta's scorer kernel is faster than
+  ours in every cell**
   (1.15–3.2× arxiv, **10.9–17.8× goodreads**) and we win only on payload prep
   (their 268–896 µs over 73–95 launches against our 34–58). The 10× is **our
   padded probe layout, not our scorer**: on goodreads `n_probe ·
