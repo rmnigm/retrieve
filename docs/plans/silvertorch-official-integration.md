@@ -461,6 +461,27 @@ official T1) plus the §9a/§9b head-to-head; gains are claimed only from the he
 Order: TF-2 (before WP-7), TF-1 (after WP-5, which moves `build_transposed_sigs`), TF-3/TF-4
 retune, each followed by the parity suite and a §9a/§9b rerun.
 
+### TF-9 — the probe layout, not the scorer (added 2026-09-16 by the orchestrator, from §16)
+
+B3 measured Meta's scorer at **10.9–17.8× ours on goodreads** and 1.15–3.2× on
+arxiv, and located the cause: our **padded probe layout**. `n_probe ·
+max_cluster_size` allocates 611,520 slots for ≈18.7 k real items on goodreads,
+so **97 % of what the kernel walks is `-1` pad** (59 % on the less skewed arxiv
+IVF). The arithmetic is not the problem — the scorer is fed mostly padding.
+
+A CSR or capped-pad probe layout (the official backend already uses CSR, via
+`indexing.csr_layout`) removes that tax without touching the scorer's inner
+loop. This is the largest single kernel-side win the project has measured, and
+it is **larger on the more skewed corpus**, which is the direction that matters
+for the recsys datasets in Phase E.
+
+**Not scheduled before D1.** A layout change alters `code_version`, and the
+resume key is the library subtree's tree hash — it would invalidate every
+campaign cell recorded before it (H §8.2 B). Phase G, after the paper's numbers
+are in, alongside TF-1 (whose case §16.3 also strengthened: the official
+transposed bloom search beats ours 2.0× at 0.8 M items and 6.1× at 3.0 M, and
+ours grows 3.3× with N against their 1.07×).
+
 ## 9. Perf-comparison plan (Triton vs official; torch eager as floor)
 
 Scripts live in `docs/plans/official-silvertorch-artifacts/` (raw JSON kept, as the cute artifacts

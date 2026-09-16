@@ -25,6 +25,27 @@
 > not restated. The box, the estimator and the disclosure are
 > [provenance-and-disclosure.md](provenance-and-disclosure.md).
 
+> **Orchestrator note on citability, 2026-09-16.** This document treats B3's
+> numbers as paper material. The basis, stated so a reader can disagree with
+> it: B3's checkbox is flipped because its gate — "JSON + tables appended to
+> O" — was delivered, and the orchestrator independently re-derived its parity
+> figures from the committed records (the jaccard and `score_max_abs_diff`
+> values in §6) rather than accepting the report. What was **not** re-run is
+> the 3.5 h of timing measurement itself.
+>
+> The records were produced on `dev/b3-head-to-head`, and
+> `bench report`'s citability check flags any record from a branch other than
+> `development` — **by design, and it will flag these**. The judgement here is
+> that the flag does not indicate a defect in this case: B3 changed no library
+> or harness code, so the tree it measured is `development`'s tree at
+> `e23309c`, and every record carries that `code_version` and commit. A
+> measurement-only branch is not the hazard the rule was written for.
+>
+> If the user prefers the strict reading of CLAUDE.md rule 2 — that no number
+> is paper material until it has been reproduced on `development` — then the
+> fix is one re-run of B3's two legs, not a change to any text below, and this
+> blockquote is what should be revisited.
+
 ## 1. The question, and the short answer
 
 The plan that built this arm asked whether *"a ~600-line Triton reimplementation
