@@ -84,17 +84,33 @@ def check_items_aligned(n_items: int, n_attrs: int, *, what: str) -> None:
         )
 
 
+def prefix_problem(meta: Path, expected: str) -> str | None:
+    """The prefix policy, in one place: a ``*.meta.json`` sidecar must carry a ``prefix`` key
+    equal to the nomic prefix the harness expects **or explicitly ``null``** — the encoder has
+    no prefix concept (YFCC's CLIP descriptors, MedCPT's precomputed vectors), a declared fact
+    rather than an omission. A sidecar *without* the key is a problem: it cannot be told apart
+    from a forgotten prefix. Returns the message, or ``None`` when the sidecar is fine."""
+    with open(meta) as f:
+        payload = json.load(f)
+    if "prefix" not in payload:
+        return f"{meta}: no 'prefix' key (write null to declare a prefix-free encoder)"
+    prefix = payload["prefix"]
+    if prefix is None or prefix == expected:
+        return None
+    return f"{meta}: prefix={prefix!r} != {expected!r}"
+
+
 def assert_prefixes(content_dir: Path) -> None:
-    """Catch silent nomic prefix swaps (they cost 5–15 % arxiv recall with no error)."""
+    """Catch silent nomic prefix swaps (they cost 5–15 % arxiv recall with no error); a
+    ``prefix: null`` sidecar passes (``prefix_problem``)."""
     for name, expected in (("text_emb", EXPECTED_DOC_PREFIX), ("query_emb", EXPECTED_QUERY_PREFIX)):
         meta = content_dir / f"{name}.meta.json"
         if not meta.exists():
             logger.warning("missing {} — skipping the prefix assertion", meta)
             continue
-        with open(meta) as f:
-            prefix = json.load(f).get("prefix")
-        if prefix != expected:
-            raise RuntimeError(f"{meta}: prefix={prefix!r} != {expected!r} — re-encode")
+        problem = prefix_problem(meta, expected)
+        if problem is not None:
+            raise RuntimeError(f"{problem} — re-encode")
 
 
 def load_sharded(shard_index: Path, device: torch.device) -> torch.Tensor:
@@ -207,8 +223,8 @@ def validate_layout(data_dir: Path, content_dir: Path | None = None) -> list[str
             meta = content_dir / f"{name}.meta.json"
             if not meta.exists():
                 problems.append(f"missing {meta} (no prefix assertion possible)")
-            elif json.loads(meta.read_text()).get("prefix") != expected:
-                problems.append(f"{meta}: prefix != {expected!r}")
+            elif (problem := prefix_problem(meta, expected)) is not None:
+                problems.append(problem)
         if heldout.exists():
             n_queries = pl.read_parquet(heldout).height
             if query_emb.exists() and (q := _rows(query_emb, "emb")) != n_queries:
@@ -253,5 +269,6 @@ __all__ = [
     "load_sharded",
     "load_text_items",
     "load_text_queries",
+    "prefix_problem",
     "validate_layout",
 ]
