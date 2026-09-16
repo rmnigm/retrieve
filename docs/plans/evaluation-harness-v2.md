@@ -498,6 +498,28 @@ run on the A100 box. Effort in focused days.
 > | **D1-d** | `deep` suite (2 builds × 6 query configs per §8.2 A, seeds 0–2) | the recall-vs-latency Pareto curves — the most cuttable stage if time runs short, and the one whose absence is easiest to explain | ~6–8 h |
 > | **D1-e** | the S9 co-design ablation cells (`OfficialConfig(bloom_path="full")`) | O §9's fairness ablation; needs the official arm of D1-a to have landed | ~1 h |
 >
+> **Wall-time corrected 2026-09-16, from measurement — the stage estimates
+> above are wrong, and so is WP-5's "≈ 24 h".** D1-a's first job took **4,390 s**
+> and covered **nine sweeps** (six `clause`, three `bloom`) at **365–535 s
+> each**, plus ~65 s per new oracle. The "9–13 min per cell" figure that fed the
+> estimates came from C4, which only ever ran **one** sweep (`c0_genre`); the
+> `filter` suite runs all nine. The unit is therefore ≈ **490 s per (algo,
+> backend, sweep, params)**, not per cell.
+>
+> The matrix at d128 alone is **833 jobs**: goodreads `filter` 165 / `quality` 7
+> / `deep` 216, arxiv 198 / 7 / 240. At the measured rate **D1-a is ~25–30 h,
+> not 4–6**, and the full five-stage campaign is **days, not one night**.
+>
+> This does not invalidate anything already recorded — the cells are correct and
+> the staging still works — but the ordering now has to be read as *value per
+> GPU hour*, because the tail will not all fit. In that light: **D1-a's
+> goodreads leg alone (~13 h) gives a complete filtered picture of the primary
+> dataset**, which is what the thesis's core tables need; the three headline
+> sweeps (`c0_genre`, `c0_maincat`, `all4`) carry those tables, and the other
+> six feed the pass-rate analysis. If the rental horizon is short, the trim that
+> costs least is **the six non-headline sweeps at seed 0**, then **D1-d** (the
+> deep Pareto sweeps, 456 of the 833 jobs).
+
 > **Gate, unchanged from WP-5** but evaluated per stage: `bench report` runs
 > with no missing cells for that stage, `median_ms(bs=16) < 16·median_ms(bs=1)`,
 > ids identical across `mode`, and a rerun byte-identical in quality — the last
