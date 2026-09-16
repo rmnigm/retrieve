@@ -2028,7 +2028,7 @@ Two independent checks, both on the VM's **local disk** (`/tmp`, 262 GB free) �
 > from a branch, and `bench report` marks every artifact `NOT CITABLE` (CLAUDE.md rule 2).
 > Artifacts: [evaluation-harness-v2-artifacts/d1a/](evaluation-harness-v2-artifacts/d1a/README.md).
 
-### 14.1 What ran, and why it stops where it does
+### 15.1 What ran, and why it stops where it does
 
 The stage was dispatched as "goodreads + arxiv, `filter` suite, d128, seed 0,
 `{triton, torch, official}`", estimated at 4–6 h. It was stopped twice, both times by the
@@ -2059,7 +2059,7 @@ written. Its cells are valid records at the same `code_version` and `--resume` w
 them; they are simply **not covered by the gate below**, which is cut at 72 cells. The
 committed JSONL may therefore contain `silvertorch triton` lines beyond the 72 gated ones.
 
-### 14.2 Environment and exact command lines
+### 15.2 Environment and exact command lines
 
 A100-SXM4-80GB, host `96ef99fba44c`, torch 2.10.0+cu128, triton 3.6.0, CUDA 12.4,
 Python 3.11. `code_version` (library subtree tree hash) `0e6778056238de3c921cd2a14beec28b98a1d41c`,
@@ -2094,7 +2094,7 @@ python docs/plans/evaluation-harness-v2-artifacts/d1a/d1a_gate.py \
 python -m bench.cli report <snapshot> --out docs/plans/evaluation-harness-v2-artifacts/d1a/report
 ```
 
-### 14.3 Per-job results — 8/8 `rc=0`, 72/72 cells `ok`
+### 15.3 Per-job results — 8/8 `rc=0`, 72/72 cells `ok`
 
 `s/cell` is `elapsed_s`; `timed` is the reconstructed cost of the measurement windows
 themselves (`3 × n × median_ms + 50 warm-ups`, summed over the cell's 18 perf entries);
@@ -2121,7 +2121,7 @@ inside cells**; the per-group process boundary costs ~1.6 %.
 and are listed only to show the cells produced sane output: `linr_v3`'s wide range is the
 1-bit stage's expected recall spread across the nine sweeps, not an error.
 
-### 14.4 Gate verdicts
+### 15.4 Gate verdicts
 
 WP-5's stage gate, evaluated over the 72 cells. Full output:
 [d1a_gate.py](evaluation-harness-v2-artifacts/d1a/d1a_gate.py).
@@ -2141,7 +2141,7 @@ Clause 4 is expressed as "every `graph` entry on a capturable backend was measur
 (`bench/measure.py:308-322`), so a skip shows up as a null entry with a `reason`, never as a
 number. There were none.
 
-### 14.5 The wall-time estimate was wrong by 7×, and the cost is not where it was assumed
+### 15.5 The wall-time estimate was wrong by 7×, and the cost is not where it was assumed
 
 WP-5's stage table says **~4–6 h** for stage a and H §2.8 says **≈2 min per cell**. Measured:
 **530 s per cell** (8.8 min), so the 266-cell stage is **~39 h** and the goodreads leg alone
@@ -2171,7 +2171,7 @@ the slow arm and it is slow in execution, not compilation.** Its `other` column 
 `triton`'s to within 11 %, while its timed cost is 1.35× (`v1`, `v4`) to 3.4× (`v2`, `v3`)
 `triton`'s. The `torch` arms cost 40 % of this run's wall time.
 
-### 14.6 `linr_v2` is not an exact algo, and C4's gate says it is
+### 15.6 `linr_v2` is not an exact algo, and C4's gate says it is
 
 `c4_gate.py:67` declares `EXACT_ALGOS = ("linr_v1_filter_mask", "linr_v2")` and requires
 `quality.jaccard_vs_first@100 == 1.0` for them. Over all nine goodreads sweeps and both
@@ -2208,7 +2208,7 @@ cell. The justification given for dropping `torch` — that B3 measured `torch` 
 exactly 1.0 with `score_max_abs_diff` 0.0 — is correct **for SilverTorch**, and this run
 confirms it for `linr_v1` and `linr_v4`; it does not hold for `linr_v2` or `linr_v3`.
 
-### 14.7 Clocks — `sm_mhz_load`, never `sm_mhz_idle`
+### 15.7 Clocks — `sm_mhz_load`, never `sm_mhz_idle`
 
 `env.sm_mhz_load` is **1410.0 MHz on all 72 cells**, with no spread at all.
 `env.sm_mhz_idle` is 1155.0 MHz on all 72 — reported here only to say it exists and was not
@@ -2220,7 +2220,7 @@ applied anywhere in this record**, as C4 and B3 require.
 `clocks_drift` is flagged on **6 of 72 cells**. Under C4's clause 5 ("no `unstable` record")
 those 6 would fail; that clause is not part of WP-5's stage gate and is not evaluated here.
 
-### 14.8 Instability is a bs=1 phenomenon, as B3 found
+### 15.8 Instability is a bs=1 phenomenon, as B3 found
 
 **37 of 1296 perf entries (2.9 %) carry `unstable: true`** (window spread > 5 %). They are
 not spread evenly:
@@ -2239,7 +2239,7 @@ and it is the measurement behind the dispatch's rule that a bs=1 comparison narr
 entries in 648 measurements.** Whatever is jittering at bs=1 is host-side — launch overhead
 and dispatch — and capture removes it.
 
-### 14.9 A harness bug, recorded and not fixed
+### 15.9 A harness bug, recorded and not fixed
 
 **`bench/report.py:848-849` prints a false provenance sentence.** Every non-citable report
 unconditionally appends:
@@ -2264,7 +2264,7 @@ including `official`, whose `graph` entry would have been `not_capturable` regar
 not be comparable to this one on that column, and `report.py`'s citability check treats
 `partial` as a blocker.
 
-### 14.10 What was not done, and what is unverified
+### 15.10 What was not done, and what is unverified
 
 * **Gate clauses 5 and 6 were not run.** Both need the GPU. The driver could not be stopped
   (`kill -TERM` refused by the sandbox as `Interfere With Workloads`), it held
@@ -2294,7 +2294,7 @@ not be comparable to this one on that column, and `report.py`'s citability check
   written against it would not match.
 * **The roadmap checkbox was not flipped and nothing was merged.**
 
-### 14.11 Addendum — `silvertorch triton` completed, gate re-run at 90 cells
+### 15.11 Addendum — `silvertorch triton` completed, gate re-run at 90 cells
 
 The driver could not be stopped (§14.1), so it ran one more job to completion after
 §14.1–§14.10 were written: **`silvertorch triton`, 18 cells (9 sweeps × `n_probe ∈ {24, 32}`),
@@ -2360,3 +2360,65 @@ are still **NOT RUN** — the driver went straight on to `silvertorch torch` and
 GPU lock. `linr_v2`'s parity status (§14.6) is unaffected: `silvertorch triton` is its group's
 parity *reference*, so it records `parity: reference` and no cross-backend comparison, and no
 `official` arm has run on goodreads.
+
+### 15.12 Final state — the goodreads leg complete at 126 cells, and clause 6 **PASSES**
+
+*(Written by the orchestrator on 2026-09-16 as the session closed. §15.1–§15.11
+above stop at earlier cuts — §15.1's blockquote still says "8 of the 11 jobs,
+72 of 126 cells" and §15.4 still lists clauses 5 and 6 as NOT RUN. Both are
+**superseded by this subsection**; the committed `d1a/gate.txt` is the 126-cell
+run, not the 72-cell one.)*
+
+**The leg finished at 11/11 jobs, 126/126 cells, every one `status: ok`**, after
+the user authorised stopping the driver at the goodreads/arxiv boundary rather
+than immediately. A watcher fired 26 s after `silvertorch official rc=0` and
+killed the driver; the first arxiv job had already been launched ~74 s earlier
+and survived as an orphan, so it was stopped too — it died mid-cell and wrote
+no record, so nothing is partial.
+
+**Clause 6 — the byte-identical rerun — PASSES on all 12 rerun records**, five
+algos × three backends × both filter kinds. Verified independently by the
+orchestrator from the raw JSONL in `d1a/rerun-records/`, not taken from the
+worker's report:
+
+| path | §11.8 spread, before | after L3 + L5 |
+|---|---|---|
+| `linr_v2` triton | 2.029e-06 | **identical** |
+| `linr_v3` triton | 6.796e-05 | **identical** |
+| the other 10 cells | — | **identical** |
+
+`linr_v3`'s oracle block matches to 16 significant digits across two processes;
+the old spread would have moved the fifth. **This validates L3 (deterministic
+compaction) and L5 (fp32 accumulation) at campaign scale**, and it **retires
+§11.8's conclusion** that "C4's gate 1 cannot be met on these two cells by any
+harness" — their noise is not small, it is gone, so gate 1 needs no exclusion
+and no interval treatment for those paths.
+
+One cell, `linr_v2 torch bloom/c2_format`, differs on `parity`,
+`score_max_abs_diff` and `jaccard_vs_first@k` only: it had no `triton` twin in
+the rerun set, so it became its own parity group's **reference**. Those fields
+record which *other* backend ran first in a run set, not whether a cell
+reproduces itself; its oracle and heldout blocks were identical before anything
+was touched. The worker's first diff run reported it as a failure, located the
+bug in its own field filter, and **committed both the raw and the corrected
+output** rather than only the clean one.
+
+**Clause 5 (ids identical across `mode`) is NOT RUN** — it was executing when
+the session was stopped and was neither finished nor killed; it wrote only to
+uncommitted scratch. Honestly unrun, not silently passed.
+
+**Full-leg numbers**, from the committed `gate.txt` (they supersede §15.3–§15.4's
+72-cell tables): worst batch-scaling ratio **14.429** against the limit of 16
+(from `silvertorch torch c3_year k=100 eager` — the arm the new grid drops);
+graph capture **972 measured + 162 `official:not_capturable`**, the first time
+that exemption has ever fired; `silvertorch` `torch` vs `triton` exactly
+**1.000000 / 0.000e+00** on all 18 cells, independently reproducing B3;
+`official` vs `triton` **0.999321 / 7.792e-03**, far past the ≥0.99 threshold
+and much better than C4's arxiv official cells (0.9850, which *failed* it) —
+evidence that C4's official parity failure is **dataset-specific**, not a
+property of Meta's backend.
+
+**Still open from this stage:** the samples sidecar is 73 MB in git and belongs
+on the Hub per [../system/evaluation.md](../system/evaluation.md); the file has
+stopped changing, so that move is unblocked. `bench report` should be re-run
+over all 126 cells — it was last run at 90.

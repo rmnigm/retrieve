@@ -157,9 +157,30 @@ plan to `archive/` and shorten its entry here to one line under *Done*.
 > every backend. The finding worth keeping: SilverTorch's `triton` and `torch`
 > backends now agree **exactly** on all 9 goodreads rows, where A1 had a
 > 1.7e-4 gap it read as tie order.
-> ## Handoff, 2026-09-16 morning — read this before dispatching anything
+> ## Handoff, 2026-09-16 — read this before dispatching anything
 >
-> **State.** `development` @ `b874c8e`, pushed, clean. 25 of 41 steps checked.
+> **Session closed with the VM shut down. Nothing is in flight; every branch is
+> merged and pushed; the overlay disk (`/data`, `/venvs`, `/scratch`) is gone
+> with the box and everything on it was regenerable by design** — datasets
+> re-pull from the Hub, venvs from one `uv sync`. `/workspace` and `origin`
+> carry the repository.
+>
+> **First thing on a new box:** `uv sync --extra official --all-packages`
+> (builds Meta's extension, ~2 min), re-stage datasets to `/data`
+> (`eval-fetch`, ~10 GB for goodreads + arxiv + yfcc), and read
+> [../system/storage.md](../system/storage.md) before writing anything
+> anywhere.
+>
+> **D1-a's result, which is the session's headline:** the goodreads `filter`
+> leg completed at **126/126 cells**, and the **byte-identical rerun passes on
+> all 12 rerun records** — `linr_v2-triton` and `linr_v3-triton`, which §11.8
+> had measured as unable to reproduce themselves, are now identical to 16
+> significant digits. **L3 and L5 are validated at campaign scale** and
+> §11.8's objection to C4's gate 1 is retired. Full account:
+> [evaluation-harness-v2.md §15.12](evaluation-harness-v2.md). Clause 5 (ids
+> across `mode`) is honestly **unrun**. The arxiv leg was never started.
+>
+> **State.** `development` @ `cccdf29`+, pushed, clean. 25 of 41 steps checked.
 > Library suite 653, harness suite 183 passed / 4 skipped, links 0. Every
 > branch this session produced is merged; nothing is half-built.
 >
