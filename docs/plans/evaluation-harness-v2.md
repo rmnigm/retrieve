@@ -520,6 +520,29 @@ run on the A100 box. Effort in focused days.
 > costs least is **the six non-headline sweeps at seed 0**, then **D1-d** (the
 > deep Pareto sweeps, 456 of the 833 jobs).
 
+> **Grid narrowed 2026-09-16 (user), mid-D1-a.** Two changes, made because the
+> measured campaign is days rather than one night:
+>
+> - **`torch` leaves the perf grid** — *"torch backends are less interesting
+>   now, priority for triton (fastest?) or official meta version"*. That is 5 of
+>   11 jobs per dataset, ≈45 % of the wall time. Cross-backend parity does not
+>   depend on the campaign: the library's parity suite is bit-exact, and B3
+>   measured `torch` vs `triton` at jaccard **1.0** with `score_max_abs_diff`
+>   **0.0** on SilverTorch across both datasets.
+> - **Modes narrow to `eager`, plus `graph` on `triton` for the headline
+>   sweeps.** The user first asked for graph-only; that was put back because
+>   Meta's `official` backend **cannot be captured** (O D7, and O §3 names the
+>   two sync sites), so a graph-only campaign would leave the prioritised arm
+>   with no latency at all — and `eager` is the mode both papers' published
+>   figures are comparable to, and the one B3's head-to-head used.
+>
+> **Consequence to be honest about:** `bench/run.py` stamps a narrowed mode set
+> as `status: partial`, `partial_reasons: ["modes"]`. That is the harness
+> describing itself correctly, but it means `report.py`'s citability check will
+> mark these records NOT CITABLE. Whether a *deliberate, plan-recorded*
+> narrowing should be distinguished from an accidental one is a change to what
+> the paper may claim, so it goes to the user rather than being made quietly.
+
 > **Gate, unchanged from WP-5** but evaluated per stage: `bench report` runs
 > with no missing cells for that stage, `median_ms(bs=16) < 16·median_ms(bs=1)`,
 > ids identical across `mode`, and a rerun byte-identical in quality — the last
