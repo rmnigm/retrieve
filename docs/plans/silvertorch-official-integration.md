@@ -1559,3 +1559,51 @@ capped-pad probe layout" belongs in §8 for Phase G; the orchestrator owns that 
   the `k = 500 / 1000` jaccards are in the JSONL but not analysed here.
 - **Nothing in this section is citable until the orchestrator re-runs the gate**
   (rule 2), and B3's checkbox is the orchestrator's to flip.
+
+## 17. Record — WP-9, the paper section (roadmap F2), 2026-09-16
+
+Written on `dev/f2-official-section` off `development` @ `2e18d8c`, worktree on
+the local disk (`/scratch/wt/f2`). **No measurement was taken**: the D1-a
+campaign held the GPU throughout and this step is writing. Every number in the
+section comes from §16 (B3), which the orchestrator gated and merged
+(`399c231`, roadmap B3 checked 2026-09-15).
+
+**Delivered.** [`../paper/official-vs-reimplementation.md`](../paper/official-vs-reimplementation.md)
+— §1 the question and the two-sided answer, §2 the fairness controls, §3 end to
+end with the per-cell ratios, §4 kernel-only and the padded-layout pad tax, §5
+phase 2 and S13, §6 parity plus the fp16/arXiv mechanism, §7 memory, §8 the two
+caveats (the adapter's `pack_mask` making every official-*exact* number an upper
+bound; no claim resting on a `bs = 1` margin), §9 what the comparison cannot
+say, §10 the D1 gap table, §11 the expectations B3 falsified.
+
+**Three companion rows updated by what §16 measured**, so the `docs/paper/` set
+does not contradict itself: [OF-7](../paper/reproduction-deviations.md) and
+[R-3](../paper/reproduction-deviations.md) said the goodreads/arXiv jaccard
+split was "the shape of a looser filter" and "unresolved" — §16.4 falsifies both
+and they now carry the fp16 explanation; [OF-4](../paper/reproduction-deviations.md)
+said the kernel-only comparison was "not yet validated" and now cites §16.2.
+[provenance-and-disclosure.md](../paper/provenance-and-disclosure.md) §5/§6: the
+"waits on B3" row is closed and a `D1-b` row for CIs and seeds replaces it.
+`CLAUDE.md` lists the new section.
+
+**What the section waits on**, each hole marked in the text rather than filled:
+CIs, paired tests and a second seed behind every ratio (**D1-b**); the paper's
+own latency/QPS/recall tables from `report.py` over the campaign records
+(**D1** → **D4**); p95/p99 and open-loop QPS (**D1**); the `k ∈ {500, 1000}`
+ratios (**D1**); the full unfiltered sweep (**D1-c**); the controlled S9
+ablation (**D1-e** / **G-b**); FPR vs bloom width (**D3**); external baselines
+(**D2**); a Triton transposed bloom index (**G-a**); any post-fix number for the
+padded layout or `pack_mask` (**Phase G**, after D1 — the resume key is the
+library tree hash).
+
+**Gates.** `python3 scripts/check_doc_links.py` → **0 broken links**. No code,
+no tests, no GPU. The roadmap checkbox is left unflipped for the orchestrator,
+and the branch is unmerged.
+
+**One discrepancy found in §16 while writing, not corrected here.** §16.2's
+prose quotes the official payload prep as "268–896 µs across 73–95 launches" and
+its total device time as "1.2–2.4× ours", while the twelve rows tabulated
+immediately above span 268–834 µs, 73–93 launches and 1.20–1.93×. The wider
+ranges presumably come from rows kept only in the JSON. The paper section quotes
+the tabulated ranges and attributes the wider ones to §16.2's prose; whoever
+re-derives the tables should reconcile the two.

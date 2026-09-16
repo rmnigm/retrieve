@@ -51,7 +51,10 @@ LiNR variants are V1–V4 as in the paper.
   vs us, Meta's code vs Meta's paper, defects reproducing found in our own
   code, and the unexplained residuals) and
   [`provenance-and-disclosure.md`](docs/paper/provenance-and-disclosure.md)
-  (hardware, software, what may be cited, what was and was not compared).
+  (hardware, software, what may be cited, what was and was not compared) and
+  [`official-vs-reimplementation.md`](docs/paper/official-vs-reimplementation.md)
+  (Meta's kernels against ours, from B3: end to end, kernel-only, phase 2,
+  parity, memory, and what the comparison cannot say).
 - `articles/` — pandoc renderings of the papers. Frozen; cite, never edit.
 - `evaluation/results/` — staged campaign outputs (`<name>.json` +
   `.yaml` + `.perkernel/`).
