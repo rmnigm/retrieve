@@ -8,3 +8,4 @@
 07:04:29 filter goodreads d128 linr_v3 torch rc=0 6592s filter_goodreads-d128_linr_v3_torch.log
 08:08:55 filter goodreads d128 linr_v4 triton rc=0 3866s filter_goodreads-d128_linr_v4_triton.log
 09:24:51 filter goodreads d128 linr_v4 torch rc=0 4556s filter_goodreads-d128_linr_v4_torch.log
+11:39:56 filter goodreads d128 silvertorch triton rc=0 8105s filter_goodreads-d128_silvertorch_triton.log
