@@ -1,10 +1,10 @@
 # `bench report`
 
-- generated: `2026-09-16T09:33:34Z`  from `/tmp/claude-0/-workspace-retrieve/7c1995ca-a1a3-4b78-9907-2c0de7f4d6fc/scratchpad/snap`
-- records: **72** {'ok': 72}, cells flagged unstable (window spread or clock drift): 23
+- generated: `2026-09-16T11:45:30Z`  from `/tmp/claude-0/-workspace-retrieve/7c1995ca-a1a3-4b78-9907-2c0de7f4d6fc/scratchpad/snap90`
+- records: **90** {'ok': 90}, cells flagged unstable (window spread or clock drift): 40
 - schema_version: [2]  |  code_version: ['0e6778056238de3c921cd2a14beec28b98a1d41c']
 - runs (commit, branch): [('5fd05a6', 'dev/d1a-campaign')]
-- gpu: ['NVIDIA A100-SXM4-80GB']  host: ['96ef99fba44c']  window: 2026-09-15T22:39:06+00:00 .. 2026-09-16T08:09:01+00:00
+- gpu: ['NVIDIA A100-SXM4-80GB']  host: ['96ef99fba44c']  window: 2026-09-15T22:39:06+00:00 .. 2026-09-16T09:25:08+00:00
 
 ## Citability (CLAUDE.md rule 2)
 
@@ -31,6 +31,8 @@ These records predate the D1 campaign; they come from C4's gate run and C5's one
 | goodreads | 128 | filter | bloom | c0_genre | linr_v3 | triton | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | bloom | c0_genre | linr_v4 | torch | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | bloom | c0_genre | linr_v4 | triton | {} | [0] | {'ok': 1} |
+| goodreads | 128 | filter | bloom | c0_genre | silvertorch | triton | {"n_probe": 24} | [0] | {'ok': 1} |
+| goodreads | 128 | filter | bloom | c0_genre | silvertorch | triton | {"n_probe": 32} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | bloom | c2_format | linr_v1_filter_mask | torch | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | bloom | c2_format | linr_v1_filter_mask | triton | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | bloom | c2_format | linr_v2 | torch | {} | [0] | {'ok': 1} |
@@ -39,6 +41,8 @@ These records predate the D1 campaign; they come from C4's gate run and C5's one
 | goodreads | 128 | filter | bloom | c2_format | linr_v3 | triton | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | bloom | c2_format | linr_v4 | torch | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | bloom | c2_format | linr_v4 | triton | {} | [0] | {'ok': 1} |
+| goodreads | 128 | filter | bloom | c2_format | silvertorch | triton | {"n_probe": 24} | [0] | {'ok': 1} |
+| goodreads | 128 | filter | bloom | c2_format | silvertorch | triton | {"n_probe": 32} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | bloom | c3_year | linr_v1_filter_mask | torch | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | bloom | c3_year | linr_v1_filter_mask | triton | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | bloom | c3_year | linr_v2 | torch | {} | [0] | {'ok': 1} |
@@ -47,6 +51,8 @@ These records predate the D1 campaign; they come from C4's gate run and C5's one
 | goodreads | 128 | filter | bloom | c3_year | linr_v3 | triton | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | bloom | c3_year | linr_v4 | torch | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | bloom | c3_year | linr_v4 | triton | {} | [0] | {'ok': 1} |
+| goodreads | 128 | filter | bloom | c3_year | silvertorch | triton | {"n_probe": 24} | [0] | {'ok': 1} |
+| goodreads | 128 | filter | bloom | c3_year | silvertorch | triton | {"n_probe": 32} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | all4 | linr_v1_filter_mask | torch | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | all4 | linr_v1_filter_mask | triton | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | all4 | linr_v2 | torch | {} | [0] | {'ok': 1} |
@@ -55,6 +61,8 @@ These records predate the D1 campaign; they come from C4's gate run and C5's one
 | goodreads | 128 | filter | clause | all4 | linr_v3 | triton | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | all4 | linr_v4 | torch | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | all4 | linr_v4 | triton | {} | [0] | {'ok': 1} |
+| goodreads | 128 | filter | clause | all4 | silvertorch | triton | {"n_probe": 24} | [0] | {'ok': 1} |
+| goodreads | 128 | filter | clause | all4 | silvertorch | triton | {"n_probe": 32} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c0_genre | linr_v1_filter_mask | torch | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c0_genre | linr_v1_filter_mask | triton | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c0_genre | linr_v2 | torch | {} | [0] | {'ok': 1} |
@@ -63,6 +71,8 @@ These records predate the D1 campaign; they come from C4's gate run and C5's one
 | goodreads | 128 | filter | clause | c0_genre | linr_v3 | triton | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c0_genre | linr_v4 | torch | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c0_genre | linr_v4 | triton | {} | [0] | {'ok': 1} |
+| goodreads | 128 | filter | clause | c0_genre | silvertorch | triton | {"n_probe": 24} | [0] | {'ok': 1} |
+| goodreads | 128 | filter | clause | c0_genre | silvertorch | triton | {"n_probe": 32} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c0c1 | linr_v1_filter_mask | torch | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c0c1 | linr_v1_filter_mask | triton | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c0c1 | linr_v2 | torch | {} | [0] | {'ok': 1} |
@@ -71,6 +81,8 @@ These records predate the D1 campaign; they come from C4's gate run and C5's one
 | goodreads | 128 | filter | clause | c0c1 | linr_v3 | triton | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c0c1 | linr_v4 | torch | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c0c1 | linr_v4 | triton | {} | [0] | {'ok': 1} |
+| goodreads | 128 | filter | clause | c0c1 | silvertorch | triton | {"n_probe": 24} | [0] | {'ok': 1} |
+| goodreads | 128 | filter | clause | c0c1 | silvertorch | triton | {"n_probe": 32} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c1_lang_reverse | linr_v1_filter_mask | torch | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c1_lang_reverse | linr_v1_filter_mask | triton | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c1_lang_reverse | linr_v2 | torch | {} | [0] | {'ok': 1} |
@@ -79,6 +91,8 @@ These records predate the D1 campaign; they come from C4's gate run and C5's one
 | goodreads | 128 | filter | clause | c1_lang_reverse | linr_v3 | triton | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c1_lang_reverse | linr_v4 | torch | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c1_lang_reverse | linr_v4 | triton | {} | [0] | {'ok': 1} |
+| goodreads | 128 | filter | clause | c1_lang_reverse | silvertorch | triton | {"n_probe": 24} | [0] | {'ok': 1} |
+| goodreads | 128 | filter | clause | c1_lang_reverse | silvertorch | triton | {"n_probe": 32} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c2_format | linr_v1_filter_mask | torch | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c2_format | linr_v1_filter_mask | triton | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c2_format | linr_v2 | torch | {} | [0] | {'ok': 1} |
@@ -87,6 +101,8 @@ These records predate the D1 campaign; they come from C4's gate run and C5's one
 | goodreads | 128 | filter | clause | c2_format | linr_v3 | triton | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c2_format | linr_v4 | torch | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c2_format | linr_v4 | triton | {} | [0] | {'ok': 1} |
+| goodreads | 128 | filter | clause | c2_format | silvertorch | triton | {"n_probe": 24} | [0] | {'ok': 1} |
+| goodreads | 128 | filter | clause | c2_format | silvertorch | triton | {"n_probe": 32} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c3_year | linr_v1_filter_mask | torch | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c3_year | linr_v1_filter_mask | triton | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c3_year | linr_v2 | torch | {} | [0] | {'ok': 1} |
@@ -95,6 +111,8 @@ These records predate the D1 campaign; they come from C4's gate run and C5's one
 | goodreads | 128 | filter | clause | c3_year | linr_v3 | triton | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c3_year | linr_v4 | torch | {} | [0] | {'ok': 1} |
 | goodreads | 128 | filter | clause | c3_year | linr_v4 | triton | {} | [0] | {'ok': 1} |
+| goodreads | 128 | filter | clause | c3_year | silvertorch | triton | {"n_probe": 24} | [0] | {'ok': 1} |
+| goodreads | 128 | filter | clause | c3_year | silvertorch | triton | {"n_probe": 32} | [0] | {'ok': 1} |
 
 ## Failed cells (excluded from every number)
 
@@ -104,7 +122,7 @@ none
 
 none
 
-## Unstable perf variants (marked `†`): 37
+## Unstable perf variants (marked `†`): 72
 
 - goodreads linr_v1_filter_mask/triton k=100 bs=1 eager: spread 8.4%
 - goodreads linr_v1_filter_mask/triton k=500 bs=1 eager: spread 21.9%
@@ -143,11 +161,20 @@ none
 - goodreads linr_v4/triton k=100 bs=1 eager: spread 11.9%
 - goodreads linr_v4/triton k=500 bs=1 eager: spread 18.6%
 - goodreads linr_v4/triton k=1000 bs=1 eager: spread 11.1%
+- goodreads silvertorch/triton k=500 bs=8 eager: spread 16.3%
+- goodreads silvertorch/triton k=100 bs=1 eager: spread 11.7%
+- goodreads silvertorch/triton k=500 bs=1 eager: spread 11.1%
+- ... 32 more
 
 ## Artifacts
 
 - `figures/fig-batch-scaling.png`
-- `figures/fig-deep-sweep.png`
+- `figures/fig-deep-sweep-goodreads-all4-silvertorch-n_probe.png`
+- `figures/fig-deep-sweep-goodreads-c0_genre-silvertorch-n_probe.png`
+- `figures/fig-deep-sweep-goodreads-c0c1-silvertorch-n_probe.png`
+- `figures/fig-deep-sweep-goodreads-c1_lang_reverse-silvertorch-n_probe.png`
+- `figures/fig-deep-sweep-goodreads-c2_format-silvertorch-n_probe.png`
+- `figures/fig-deep-sweep-goodreads-c3_year-silvertorch-n_probe.png`
 - `figures/fig-latency-violin.png`
 - `figures/fig-pareto-goodreads.png`
 - `figures/fig-qps-recall.png`
