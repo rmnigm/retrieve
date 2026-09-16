@@ -252,10 +252,14 @@ def test_filter_suite_matches_old_d128_filter_config(dataset):
         )
         if j.backend != "official"
     ]
+    # The grid narrowed on 2026-09-16 (user): one backend per algo, `linr_v4` dropped as ours
+    # rather than LiNR's, no dim ablation. This once asserted equality with the pre-v2
+    # `d128-filter.yaml`; that migration check was closed by C4 and the matrix has deliberately
+    # diverged since, so it now pins the CURRENT grid -- still catching accidental drift, no
+    # longer demanding a superseded shape.
     assert _new_cells(jobs) == {
-        (a, b, fk, sw, k, bs)
-        for a in _OLD_ALGOS
-        for b in _OLD_BACKENDS
+        (a, "triton", fk, sw, k, bs)
+        for a in ("linr_v1_filter_mask", "linr_v2", "linr_v3", "silvertorch")
         for fk in ("clause", "bloom")
         for sw in old[fk]
         for k in (100, 500, 1000)
@@ -280,23 +284,8 @@ def test_filter_suite_matches_old_d128_filter_config(dataset):
     assert st.bloom == {"m_bits": 1024, "k_hash": 5}
 
 
-@pytest.mark.parametrize("dataset", ["goodreads", "arxiv"])
-def test_quality_suite_matches_old_d128_quality_config_modulo_collapse(dataset):
-    # Old: [linr_v1_filter_mask, linr_v4, silvertorch, linr_v3] × [triton, torch] × none;
-    # linr_v1 / linr_v4 collapse to their first (cuBLAS) backend.
-    jobs = [
-        j
-        for j in load_matrix(CFG / f"{dataset}.yaml", CFG / "suites.yaml", "quality", dims=[128])
-        if j.backend != "official"
-    ]
-    kept = {("linr_v1_filter_mask", "triton"), ("linr_v4", "triton")} | {
-        (a, b) for a in ("linr_v3", "silvertorch") for b in _OLD_BACKENDS
-    }
-    assert _new_cells(jobs) == {
-        (a, b, "none", NONE_SWEEP, k, 1) for a, b in kept for k in (100, 200, 400)
-    }
-    assert len(jobs) == 6 and {j.path for j in jobs} == {"cublas", "triton", "torch"}
-
+# `test_quality_suite_matches_old_d128_quality_config_modulo_collapse` removed 2026-09-16:
+# the `quality` suite is retired from the campaign and yambda left the study at Phase E.
 
 def test_deep_suite_builds_once_per_n_lists():
     jobs = load_matrix(
@@ -321,6 +310,4 @@ def test_deep_suite_builds_once_per_n_lists():
     assert [j.query for j in jobs if j.algo == "linr_v3"] == [
         tuple({"candidate_pool": c} for c in (2000, 4000, 8000, 16000, 32000))
     ]
-    for name in ("yambda-500m", "yambda-5b"):
-        q = load_matrix(CFG / f"{name}.yaml", CFG / "suites.yaml", "quality")
-        assert q and all(j.filter_kind == "none" and j.data.attrs is None for j in q)
+
