@@ -1,0 +1,29 @@
+Wed Sep 16 09:59:54 UTC 2026
+STEP pmid lists → item_id_map.json
+  380,761 PMIDs listed, 380,761 kept → item_id_map.json (shard PMID ranges disjoint: True)
+2026-09-16T10:00:16 OK pubmed_chunk_37.json 622101277
+2026-09-16T10:01:16 OK embeds_chunk_37.npy 1169697920
+  shard 37: 380,761 rows folded → text_emb_shard_37.pt
+ALL DONE convert in 222s — n_items=380,761
+Wed Sep 16 10:03:47 UTC 2026
+558M	/scratch/tmp/pubmed/dryrun/content_d768
+6.5M	/scratch/tmp/pubmed/dryrun/item_id_map.json
+4.0K	/scratch/tmp/pubmed/dryrun/prep_log.json
+20M	/scratch/tmp/pubmed/dryrun/staging
+401M	/data/_raw/pubmed
+--- attrs
+STEP C3 journal + language (MEDLINE join)
+  WARN no medline/*.parquet — C3 journal all -1 (run `medline` first)
+STEP assemble item_attrs_narrow
+  per-clause coverage = {'c0_mesh': 0.3743, 'c1_mesh_cat': 0.0, 'c2_year': 0.998, 'c3_journal': 0.0, 'c4_has_abstract': 1.0}
+  wrote item_attrs_narrow.pt (380761, 5, 4) + clause_is_reverse_narrow.pt [False, False, False, True, False]
+STEP heldout + eval_split
+  wrote heldout.parquet + eval_split.parquet (2,000 rows)
+ALL DONE attrs in 30s
+--- queries
+  heldout queries: 2,000 (3 with no title)
+ALL DONE queries
+--- encode (cpu)
+  wrote /scratch/tmp/pubmed/dryrun/content_d768/query_emb.pt (2000, 768)
+ALL DONE encode_queries
+Wed Sep 16 10:09:04 UTC 2026

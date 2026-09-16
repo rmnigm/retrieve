@@ -1,0 +1,8 @@
+# pass 1 (ties vs real misses), 2026-09-16 12:31 UTC
+_parity/6850e459f63f9d3f7276.npz [torch] (the filter cell): rows 1000 recall 0.9558 misses 35273: at-boundary ties 7212, strictly-better-than-module-min 28061; worst rows (row, real misses, max score gap): [(422, 183, 0.000386), (963, 159, 0.000417), (221, 147, 0.000415), (268, 132, 0.000258), (91, 128, 0.000463)]
+_parity/70a869bde7e3e5c3bd15.npz [torch] (the none cell, compared to the *filtered* oracle — not meaningful, listed for completeness): recall 0.0524
+distinct vectors in first 2M rows: 1900754 (4.96% exact duplicates)
+# pass 2 (fp64 reference over the true capped pass set), 2026-09-16 12:34 UTC
+rows 49: recall vs fp64-exact — oracle blob 0.9998, module (torch linr_v1) 0.9211, my fp32 topk 0.9999
+score span rank1→rank1000 (fp64): median 0.00721 min 0.00004; module min score dtype torch.float32
+28s
