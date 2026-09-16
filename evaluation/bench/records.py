@@ -38,8 +38,12 @@ _RECORD_COLUMNS = (
     "status", "path", "n_items", "n_queries", "n_kept", "n_queries_heldout", "n_queries_oracle",
     "n_targets_in_filter", "pass_rate", "bloom_fp_rate", "k_max", "build_s", "index_mib",
     "filter_mib", "unstable", "memory_reserved_mib", "elapsed_s",
+    "schema_version", "stage", "error", "partial_reasons",
 )  # fmt: skip
-_ENV_COLUMNS = ("code_version", "commit", "dirty", "gpu", "sm_mhz_load", "clocks_drift")
+# flat.csv is shipped as a paper artifact (P §B.7), so it has to carry why a row is
+# incomplete, not only that it is: `stage`/`error` on a failure, `partial_reasons` on a
+# narrowed cell, `schema_version` because v1 and v2 records coexist in one file.
+_ENV_COLUMNS = ("code_version", "commit", "dirty", "gpu", "sm_mhz_load", "clocks_drift", "git_branch")
 _PERF_SKIP = ("window_medians_ms", "kernels")
 
 
