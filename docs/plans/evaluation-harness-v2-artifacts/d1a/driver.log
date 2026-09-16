@@ -9,3 +9,6 @@
 08:08:55 filter goodreads d128 linr_v4 triton rc=0 3866s filter_goodreads-d128_linr_v4_triton.log
 09:24:51 filter goodreads d128 linr_v4 torch rc=0 4556s filter_goodreads-d128_linr_v4_torch.log
 11:39:56 filter goodreads d128 silvertorch triton rc=0 8105s filter_goodreads-d128_silvertorch_triton.log
+16:23:21 filter goodreads d128 silvertorch torch rc=0 17005s filter_goodreads-d128_silvertorch_torch.log
+18:22:08 filter goodreads d128 silvertorch official rc=0 7127s filter_goodreads-d128_silvertorch_official.log
+2026-09-16 18:22:08.340 | INFO     | bench.config:load_matrix:363 - arxiv/filter: 110 jobs, 140 cells
