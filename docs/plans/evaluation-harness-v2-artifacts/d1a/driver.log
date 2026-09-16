@@ -1,0 +1,10 @@
+=== d1a filter started 2026-09-15T22:39:01Z
+2026-09-15 22:39:01.862 | INFO     | bench.config:load_matrix:363 - goodreads/filter: 99 jobs, 126 cells
+23:52:11 filter goodreads d128 linr_v1_filter_mask triton rc=0 4390s filter_goodreads-d128_linr_v1_filter_mask_triton.log
+01:06:50 filter goodreads d128 linr_v1_filter_mask torch rc=0 4479s filter_goodreads-d128_linr_v1_filter_mask_torch.log
+02:15:34 filter goodreads d128 linr_v2 triton rc=0 4123s filter_goodreads-d128_linr_v2_triton.log
+04:09:43 filter goodreads d128 linr_v2 torch rc=0 6849s filter_goodreads-d128_linr_v2_torch.log
+05:14:38 filter goodreads d128 linr_v3 triton rc=0 3895s filter_goodreads-d128_linr_v3_triton.log
+07:04:29 filter goodreads d128 linr_v3 torch rc=0 6592s filter_goodreads-d128_linr_v3_torch.log
+08:08:55 filter goodreads d128 linr_v4 triton rc=0 3866s filter_goodreads-d128_linr_v4_triton.log
+09:24:51 filter goodreads d128 linr_v4 torch rc=0 4556s filter_goodreads-d128_linr_v4_torch.log
