@@ -1,0 +1,15 @@
+# PubMed + MedCPT at the encoder's native 768 dims — harness v2 dataset file (H §3.3), the
+# v2 shape of the old config/pubmed/d768-filter.yaml. Roadmap E2 is deferred: no data is
+# staged and the dataset is listed in no suite of suites.yaml yet; nothing produced from
+# this file is citable. Clause layout (docs/system/datasets.md § pubmed): C0 mesh (multi-
+# valued OR, K=4), C1 mesh_cat, C2 year, C3 journal (REVERSE — bloom-incompatible), C4
+# has_abstract. Pre-encoded text shape: queries from content_d768/query_emb.pt.
+data_dir: /scratch/tmp/pubmed/dryrun
+content_dir: content_d768                 # relative to data_dir
+dims: [768]
+users_limit: 10000
+filters:
+  attrs: item_attrs_narrow.pt
+  reverse: clause_is_reverse_narrow.pt
+  clause: {c0_mesh: [0], c2_year: [2], c3_journal_reverse: [3], c0c2: [0, 2], all5: [0, 1, 2, 3, 4]}
+  bloom: {c0_mesh: [0], c2_year: [2], c0c2: [0, 2]}
