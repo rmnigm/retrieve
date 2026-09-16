@@ -482,6 +482,32 @@ are in, alongside TF-1 (whose case §16.3 also strengthened: the official
 transposed bloom search beats ours 2.0× at 0.8 M items and 6.1× at 3.0 M, and
 ours grows 3.3× with N against their 1.07×).
 
+### TF-10 — the upstream issue, and a clearly-labelled patched-official ablation (added 2026-09-16)
+
+§3 established that `official`'s non-capturability is **not intrinsic**: Meta's
+own repo ships `faster_repeat_interleave._with_cumsum_raw`, which takes an
+explicit host output size, and `fused_kmean_ann_cuda.cu` never calls it. With
+it plus the precomputed `total_cluster_*` ints, the scorer's shapes would be
+static and CUDA-graph capture would be possible.
+
+Two pieces of work follow, neither before D1:
+
+1. **File the upstream issue** citing `faster_repeat_interleave.cuh:24-73` and
+   the two sync sites, so the finding reaches the people who can fix it. A
+   reproduction paper that finds a fixable limitation in the code it reproduces
+   should say so upstream, not only in its own PDF.
+2. **Optionally measure a patched build as an ablation**, labelled in every
+   table as **not the official release**. What it would quantify is what Meta's
+   payload prep costs them — but note that **B3 already measured that directly**
+   (268–834 µs over 73–93 launches against our 34–58, §16.2), so the ablation is
+   a confirmation, not a new fact, and it is worth running only if a reviewer
+   asks.
+
+**Why the main comparison stays unpatched:** the value of the `official` arm is
+that it is Meta's released code. A fork that we modified to be faster is not the
+reference, and "our Triton against our modified Meta" is a much weaker claim.
+D7 stands: the paper's headline is eager vs eager.
+
 ## 9. Perf-comparison plan (Triton vs official; torch eager as floor)
 
 Scripts live in `docs/plans/official-silvertorch-artifacts/` (raw JSON kept, as the cute artifacts
