@@ -157,6 +157,84 @@ plan to `archive/` and shorten its entry here to one line under *Done*.
 > every backend. The finding worth keeping: SilverTorch's `triton` and `torch`
 > backends now agree **exactly** on all 9 goodreads rows, where A1 had a
 > 1.7e-4 gap it read as tie order.
+> ## Handoff, 2026-09-16 morning — read this before dispatching anything
+>
+> **State.** `development` @ `b874c8e`, pushed, clean. 25 of 41 steps checked.
+> Library suite 653, harness suite 183 passed / 4 skipped, links 0. Every
+> branch this session produced is merged; nothing is half-built.
+>
+> **Landed 2026-09-15/16:** Phase L complete (**L1** layout move, **L2**
+> composites/builders, **L3** deterministic compaction, **L4** the V2
+> divergence diagnosed, **L5** fp32 accumulation + the kernel-wide reduction
+> audit + the shim deleted); **C1–C5** (harness v2 authored, gated and split
+> into `bench`/`training`/`eval_datasets`); **C4** closed; **B3** (gap G2,
+> the Triton-vs-official head-to-head); **D4** (`bench/report.py`); **F1**,
+> **F2**, **F3** (`docs/paper/`); the golden re-derive; results publishing to
+> a private Hub repo; `docs/system/storage.md`.
+>
+> **What is running as this was written:** a partial **D1-a** campaign leg
+> (goodreads `filter`, the *old* grid, ~90 records banked) and a dataset worker
+> preparing **YFCC** and **PubMed** for filter evals. Both were told to finish
+> and stop.
+>
+> **The user's instruction for the next session: running more evals is out of
+> the current session's scope.** Do not start a campaign stage without asking.
+>
+> ### What a following agent should do, in order
+> 1. **Merge and publish what the in-flight workers hand back**, then re-run
+>    `bench report` over the accumulated records. `bench upload` must never run
+>    against a campaign in flight (a growing JSONL publishes a manifest that no
+>    longer matches).
+> 2. **Ask before running D1.** The grid is now 450 jobs / ≈44 GPU h
+>    (`config/suites.yaml`), down from 1,314 / 196 h. Stages are in H's
+>    "WP-5 staged" block, corrected with the measured ~537 s/record rate.
+> 3. **Then the coding queue**, which is genuinely independent of the campaign
+>    only where marked:
+>    - **D2 baselines** (Faiss-GPU/CPU IVF-Flat, HNSW, cuBLAS floor; then cuVS,
+>      Filtered-DiskANN). **P0 for any submission** — an absent baseline
+>      invalidates a speedup claim. Needs D1's records to compare against.
+>    - **G-a / TF-1** (transposed bloom in Triton) and **TF-9** (CSR or
+>      capped-pad probe layout). **Both frozen until the campaign ends.**
+>    - **D3** (bloom FPR vs filter width), **E2/E3/E4** datasets, **F4**
+>      packaging (needs the user's accounts), **F5** (the paper).
+>
+> ### Constraints that are easy to violate and expensive to discover
+> - **Nothing under `retrieve/src/retrieve` may change while campaign records
+>   are being accumulated.** The resume key is that subtree's tree hash
+>   (H §8.2 B): a kernel edit silently invalidates every cell recorded before
+>   it. This is why TF-1 and TF-9 are parked despite B3 justifying both.
+> - **Storage**: `/workspace` is a ~26 GB network quota that `df` misreports as
+>   petabytes; the **300 GB overlay** (`/data`, `/scratch`, `/venvs`) is the
+>   disk and is **ephemeral**. Only regenerable things live there. One or two
+>   datasets resident. **One shared venv** — twelve reached 91 GB on 2026-09-15.
+>   Full contract: [../system/storage.md](../system/storage.md).
+> - **The harness CPU suite needs `CUDA_VISIBLE_DEVICES=""`**; three of its
+>   tests assert CPU-only behaviour. `uv sync --extra official --all-packages`
+>   or `pytest` is uninstalled. Each concurrent GPU job needs its own
+>   `TORCHINDUCTOR_CACHE_DIR`.
+> - **Verify a worker's gates yourself before merging.** On 2026-09-15 a worker
+>   reported a suite green that was not; the failure was its own docs edit.
+>
+> ### Open, and needing the user
+> - **E0** — the Semantic Scholar API key. Identity-bound form, long pole for E3.
+> - **The rental horizon.** It decides whether the full 450-job grid runs or
+>   only its headline subset.
+> - **Citability of a narrowed campaign.** `run.py` stamps a narrowed mode set
+>   as `status: partial, partial_reasons: ["modes"]`, so `report.py` will mark
+>   the campaign NOT CITABLE. Whether a *deliberate, plan-recorded* narrowing
+>   should read differently from an accidental one changes what the paper may
+>   claim, so it is the user's call and was deliberately not made here.
+>
+> ### Smaller cleanups, unblocked, none urgent
+> `architecture.md` calls the backend flag "a no-op, cuBLAS either way" for
+> `linr_v1`; our own records show **4.16×**, because the flag also selects the
+> *filter* implementation. The quality subset is a 10k **prefix**, not a seeded
+> sample — safe here (the file is shuffled; means match to 0.998) but safe by
+> accident; the perf pool already uses a seeded draw and quality should too.
+> `bench upload`'s LFS path is unexercised above 37 MB and D1's ~450 MB
+> sidecars will hit it. `records.flatten`'s four provenance columns landed on
+> 2026-09-16; `flat.csv` regenerates from the JSONL at any time.
+
 > **Steer 2026-09-15 (user), which re-points everything below.**
 > *"We don't care about reproducing old results now, we're improving all code
 > and rewriting, then testing and profiling, then running the full evals step
