@@ -238,11 +238,14 @@ at forward.
 
 ## Config: one YAML per dataset + `suites.yaml`
 
-Five files under [`evaluation/config/`](../../evaluation/config/):
+Seven files under [`evaluation/config/`](../../evaluation/config/):
 [`goodreads.yaml`](../../evaluation/config/goodreads.yaml),
 [`arxiv.yaml`](../../evaluation/config/arxiv.yaml),
 [`yambda-500m.yaml`](../../evaluation/config/yambda-500m.yaml),
-[`yambda-5b.yaml`](../../evaluation/config/yambda-5b.yaml) and
+[`yambda-5b.yaml`](../../evaluation/config/yambda-5b.yaml),
+[`yfcc10m.yaml`](../../evaluation/config/yfcc10m.yaml) (in the `filter`
+suite since 2026-09-16), [`pubmed.yaml`](../../evaluation/config/pubmed.yaml)
+(in no suite yet) and
 [`suites.yaml`](../../evaluation/config/suites.yaml). Their values are
 the old configs' (`users_limit: 10000`, the same sweeps, ks, batch sizes,
 `n_probe` grid) so C4 can compare against A1's golden cells;

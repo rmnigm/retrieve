@@ -4,6 +4,34 @@ Raw material behind [../dataset-candidates.md](../dataset-candidates.md)
 and the Phase E steps of [../00-roadmap.md](../00-roadmap.md). One
 subdirectory per dataset, added as each step runs.
 
+## `yfcc10m/` — roadmap E1, 2026-09-16 (staged on `/data`, checked, cell run)
+
+Produced on the A100 box (branch `dev/e1-e2-datasets`, `RETRIEVE_DATA_ROOT=/data`) by the
+same two scripts, now at `evaluation/eval_datasets/etl/`. The record is
+[../dataset-candidates.md §7.1](../dataset-candidates.md#71-e1--yfcc-10m-staged-checked-and-run-2026-09-16).
+
+| file | what it is |
+|---|---|
+| [prep_log-2026-09-16.json](yfcc10m/prep_log-2026-09-16.json) | `yfcc prep` + `yfcc attrs` re-run from a fresh download. Every number equals the 2026-09-06 `prep_log.json` below except the wall clocks (prep 35.7 s, attrs 796 s — the 40× slower attrs was the `/venvs/retrieve` console-script shebang importing numpy over the network volume, see §7.1). |
+| [text_emb.meta-2026-09-16.json](yfcc10m/text_emb.meta-2026-09-16.json) | The new `*.meta.json` sidecar: `prefix: null` (the declared prefix-free encoder of `layout.prefix_problem`) plus the provenance the old `emb_provenance.json` carried. `bench check --dataset yfcc10m` → `yfcc10m d192: ok`. |
+| [filter-yfcc10m-d192-cpu-rehearsal.jsonl](yfcc10m/filter-yfcc10m-d192-cpu-rehearsal.jsonl) | The `filter` suite's `linr_v1_filter_mask / torch / clause / tags_and` cell run **on the CPU** (`CUDA_VISIBLE_DEVICES=""`, 16 threads, `users_limit` 1000, `--skip-perf --mode eager`) because the D1-a campaign holds the GPU lock for its whole stage. **`status: failed` at the exact-algo quality gate: `recall_oracle@1000 = 0.9641 < 0.99`** — see the diagnostic below and §7.1 item 4. `env.gpu = "cpu"`. |
+| [none_e1-yfcc10m-d192-cpu-rehearsal.jsonl](yfcc10m/none_e1-yfcc10m-d192-cpu-rehearsal.jsonl) | The matching `none` cell from a scratch suite (`none_e1`, not in `config/suites.yaml`, whose unfiltered suite was retired on 2026-09-16): `status: partial` (`skip_perf`, `modes`), held-out recall@100/500/1000 = 0.998, 1,952 s on the CPU. Same caveats. |
+| [cpu-rehearsal-run.log](yfcc10m/cpu-rehearsal-run.log), [cpu-rehearsal-yfcc10m.yaml](yfcc10m/cpu-rehearsal-yfcc10m.yaml), [cpu-rehearsal-suites.yaml](yfcc10m/cpu-rehearsal-suites.yaml) | The two commands' log (oracle 15 min, quality pass 1 h 20, the `QualityGateError`) and the scratch config dir they ran from (`users_limit: 1000`; the `none_e1` suite appended to a copy of the committed `suites.yaml`). |
+| [fp16-gate-diagnostic.py](yfcc10m/fp16-gate-diagnostic.py), [fp16-gate-diagnostic.log](yfcc10m/fp16-gate-diagnostic.log) | Why the exact algo misses: of 35,273 missed oracle entries, 7,212 tie at the module's 1000th score and 28,061 beat it by ≤ 4.6 × 10⁻⁴; against an fp64 top-1000 over the true pass set the oracle scores 0.9998, a plain fp32 top-k 0.9999, the module 0.9211. `retrieve/modules/knn.py` scores in fp16 (2⁻¹¹ = 4.88 × 10⁻⁴ spacing); YFCC's rank-1→1000 score span is a median 0.0072, and 4.96 % of its vectors are exact duplicates. Backend-independent, so the GPU cell fails the same gate. |
+
+## `pubmed/` — roadmap E2, 2026-09-16 (streaming ETL dry run, nothing staged)
+
+Produced on the A100 box, no GPU. The record is
+[../dataset-candidates.md §7.2](../dataset-candidates.md#72-e2--pubmed-streaming-etl-written-dry-run-on-one-shard-2026-09-16).
+
+| file | what it is |
+|---|---|
+| [plan-full-2026-09-16.json](pubmed/plan-full-2026-09-16.json) | `eval-data pubmed plan --medline --prefetch 1 --mbps 23.9`: per-shard sizes from `HEAD` (114 MedCPT files + 1334 MEDLINE files) and rows from each npy header — 35,920,666 articles, 217.9 GB to download, peak disk 68.6 GB, 2.54 h at the measured single-stream rate; 110.3 GB of fp32 items on the device. |
+| [plan-10m-2026-09-16.json](pubmed/plan-10m-2026-09-16.json) | The same with `--keep-items 10000000`: peak disk 27.2 GB, the same download, 30.7 GB of items on the device. |
+| [dryrun-chunk37.log](pubmed/dryrun-chunk37.log) | The one-shard dry run: `convert --shards 37 --fetch --prefetch 1 --delete-raw` (1.79 GB fetched, 380,761 rows folded in 222 s, raw deleted), `attrs`, `queries`, `encode_queries --device cpu` (2,000 held-out titles). |
+| [dryrun-chunk37-prep_log.json](pubmed/dryrun-chunk37-prep_log.json), [dryrun-chunk37-shard_index.json](pubmed/dryrun-chunk37-shard_index.json), [dryrun-chunk37-text_emb.meta.json](pubmed/dryrun-chunk37-text_emb.meta.json) | What the dry run wrote: `pmid_ranges_disjoint: true`, one output shard `[0, 380761)`, `prefix: null`. |
+| [dryrun-chunk37-config.yaml](pubmed/dryrun-chunk37-config.yaml) | `config/pubmed.yaml` with `data_dir` pointed at the dry-run directory; `bench check --dataset pubmed --config-dir …` → `pubmed d768: ok`. |
+
 ## `yfcc10m/` — roadmap E1, 2026-09-06
 
 Produced on the CPU box (128 cores, no GPU used) by
