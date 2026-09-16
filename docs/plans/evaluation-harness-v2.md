@@ -1813,3 +1813,283 @@ so a caller must `mkdir` first (`report._load` does).
   does not name one.
 * The **`matplotlib` addition is unexercised outside this box's Agg backend**, and the
   `uv.lock` change is the one thing in this branch that can conflict on merge.
+
+---
+
+## 14. Validation record — D1-a (goodreads leg), WP-5 stage a, 2026-09-16, A100-SXM4-80GB
+
+> Branch `dev/d1a-campaign` off `development` `5fd05a6`. Ran the `filter` suite on
+> **goodreads** d128, seed 0, backends `{triton, torch}` — **8 of the 11 goodreads jobs,
+> 72 of 126 cells, every one `status: ok`**. The stage as dispatched (goodreads + arxiv,
+> 266 cells) was **not** completed: the orchestrator cut it twice while it ran, first to the
+> goodreads leg and then to "stop after the job in flight", after the user changed the
+> campaign grid. Four of the six gate clauses pass on the records; **two GPU clauses were
+> not run** — see §14.10. Nothing here is citable: D1's gate is not green, these records are
+> from a branch, and `bench report` marks every artifact `NOT CITABLE` (CLAUDE.md rule 2).
+> Artifacts: [evaluation-harness-v2-artifacts/d1a/](evaluation-harness-v2-artifacts/d1a/README.md).
+
+### 14.1 What ran, and why it stops where it does
+
+The stage was dispatched as "goodreads + arxiv, `filter` suite, d128, seed 0,
+`{triton, torch, official}`", estimated at 4–6 h. It was stopped twice, both times by the
+orchestrator and both times for reasons that only became visible once it was running:
+
+1. **After ~8 h** — measurement showed the stage was 25–30 h, not 4–6 h (§14.5). The stage
+   was cut at the goodreads/arxiv dataset boundary, arxiv to be resumed by a separate worker
+   into the same results tree (`--resume` keys on `(cell, code_version)`, so nothing here is
+   re-run).
+2. **After ~10.75 h** — the user changed the grid: `torch` leaves the perf grid
+   ("priority for triton or official"), and modes narrow to `eager` everywhere plus `graph`
+   on `triton` for the headline sweeps. The remaining jobs under the old grid would have been
+   wasted, so the instruction was to stop after the job in flight.
+
+The run therefore covers the four LiNR algorithms on both backends and stops before
+`silvertorch`. **This is a clean algorithmic boundary, not a truncation mid-job**: every one
+of the 8 jobs ran all 9 goodreads sweeps to completion with `rc=0`.
+
+| | ran | did not run |
+|---|---|---|
+| goodreads d128 | `linr_v1_filter_mask`, `linr_v2`, `linr_v3`, `linr_v4` × `{triton, torch}` — 8 jobs, 72 cells | `silvertorch` × `{triton, torch, official}` — 3 jobs, 54 cells |
+| arxiv d128 | — | all 11 jobs, 140 cells |
+
+**One job could not be stopped as instructed.** `kill -TERM` on the driver was refused by
+the sandbox (`Interfere With Workloads`), and the driver launched job 9
+(`silvertorch triton`) ~5 min after job 8 finished. It was still running when this record was
+written. Its cells are valid records at the same `code_version` and `--resume` will keep
+them; they are simply **not covered by the gate below**, which is cut at 72 cells. The
+committed JSONL may therefore contain `silvertorch triton` lines beyond the 72 gated ones.
+
+### 14.2 Environment and exact command lines
+
+A100-SXM4-80GB, host `96ef99fba44c`, torch 2.10.0+cu128, triton 3.6.0, CUDA 12.4,
+Python 3.11. `code_version` (library subtree tree hash) `0e6778056238de3c921cd2a14beec28b98a1d41c`,
+constant over all 72 cells; `dirty: false`; `git_branch: dev/d1a-campaign`. SM clocks are not
+lockable in this container, so they are sampled, not pinned (§7).
+
+```bash
+cd /workspace/wt/d1a/evaluation
+export UV_PROJECT_ENVIRONMENT=/venvs/d1a RETRIEVE_DATA_ROOT=/workspace/data \
+       TORCHINDUCTOR_CACHE_DIR=/tmp/inductor-d1a
+flock /workspace/gpu.lock -c 'uv run --no-sync python \
+  ../docs/plans/evaluation-harness-v2-artifacts/d1a/stage_a.py'
+```
+
+`stage_a.py` is `bench campaign`'s loop with the one narrow the CLI has no flag for,
+`--seed 0`. **`bench campaign` has no `--seed` option** (`bench/cli.py:138-141` — `run` has
+`--seed`, `campaign` does not), so running `bench campaign --suite filter` would have swept
+seeds 0/1/2 on the headline sweeps, which is stage b and out of scope. Each child is
+verbatim what `campaign` would have issued, plus the seed:
+
+```bash
+python -m bench.cli run --dataset goodreads --dim 128 --suite filter \
+  --algo <algo> --backend <backend> --seed 0 \
+  --out /workspace/wt/d1a/evaluation/results --config-dir config --resume
+```
+
+Gate and report:
+
+```bash
+python docs/plans/evaluation-harness-v2-artifacts/d1a/d1a_gate.py \
+  results/filter/goodreads-d128.jsonl --expected-cells 72
+python -m bench.cli report <snapshot> --out docs/plans/evaluation-harness-v2-artifacts/d1a/report
+```
+
+### 14.3 Per-job results — 8/8 `rc=0`, 72/72 cells `ok`
+
+`s/cell` is `elapsed_s`; `timed` is the reconstructed cost of the measurement windows
+themselves (`3 × n × median_ms + 50 warm-ups`, summed over the cell's 18 perf entries);
+`other` is everything else in the cell — compile, capture, quality, setup.
+
+| algo | backend | cells | job wall | s/cell | timed s | other s | other % | `recall@100` min..max |
+|---|---|---|---|---|---|---|---|---|
+| `linr_v1_filter_mask` | triton | 9 | 4390 s | 450 | 108 | 342 | 76 % | 0.999423 .. 0.999695 |
+| `linr_v1_filter_mask` | torch  | 9 | 4479 s | 493 | 146 | 347 | 70 % | 0.999423 .. 0.999695 |
+| `linr_v2` | triton | 9 | 4123 s | 455 | 123 | 332 | 73 % | 0.999677 .. 0.999729 |
+| `linr_v2` | torch  | 9 | 6849 s | 756 | 420 | 337 | 45 % | 0.999423 .. 0.999695 |
+| `linr_v3` | triton | 9 | 3895 s | 429 | 113 | 316 | 74 % | 0.694572 .. 0.952268 |
+| `linr_v3` | torch  | 9 | 6592 s | 727 | 381 | 346 | 48 % | 0.694571 .. 0.952175 |
+| `linr_v4` | triton | 9 | 3866 s | 425 | 110 | 315 | 74 % | 0.980697 .. 0.984766 |
+| `linr_v4` | torch  | 9 | 4556 s | 501 | 152 | 349 | 70 % | 0.980697 .. 0.984766 |
+| **total** | | **72** | **38 750 s** (10 h 45 m) | **530** | **170** | **330** | **62 %** | |
+
+Driver started 2026-09-15T22:39:01Z; job 8 finished 2026-09-16T09:24:51Z. Cell `elapsed_s`
+sums to 38 130 s against 38 750 s of driver wall — **98.4 % of the campaign's wall time is
+inside cells**; the per-group process boundary costs ~1.6 %.
+
+`build_s` is 0.0 for every cell (the index build is amortised into the cached assets);
+`index_mib` is 292 (v1/v2), 304 (v3), 195 (v4). Quality numbers are **not yet validated**
+and are listed only to show the cells produced sane output: `linr_v3`'s wide range is the
+1-bit stage's expected recall spread across the nine sweeps, not an error.
+
+### 14.4 Gate verdicts
+
+WP-5's stage gate, evaluated over the 72 cells. Full output:
+[d1a_gate.py](evaluation-harness-v2-artifacts/d1a/d1a_gate.py).
+
+| # | clause | verdict | numbers |
+|---|---|---|---|
+| 1 | every cell `status: ok` | **PASS** | 72 cells, `{'ok': 72}`. Zero `failed`, zero `partial`. |
+| 2 | `bench report` runs, no missing cells for the slice | **PASS** | 72 expected, 72 recorded; `bench report` emitted 15 artifacts from 72 records. |
+| 3 | `median_ms(bs=16) < 16 × median_ms(bs=1)` | **PASS** | 432 comparisons, worst ratio **12.406** (`linr_v3 torch all4 k=100 eager`, 1.6847 → 20.9008 ms) against the limit of 16. |
+| 4 | `cudagraph_skips == 0` on every capturable arm | **PASS** | 648/648 `graph` entries measured, zero null/`reason` entries. No `official` arm ran, so the `not_capturable` exemption was never exercised. |
+| 5 | ids identical across `mode` | **NOT RUN** | needs the GPU; see §14.10. |
+| 6 | a rerun is byte-identical in quality | **NOT RUN** | needs the GPU; see §14.10. This is the clause §11.8 predicts will fail on 2 of its 9 cells. |
+
+Clause 4 is expressed as "every `graph` entry on a capturable backend was measured", because
+`cudagraph_skips` is **not a record field**: `measure.graph_callable` raises
+`NotCapturable(f"cudagraph_skips={skips}")` rather than recording a count
+(`bench/measure.py:308-322`), so a skip shows up as a null entry with a `reason`, never as a
+number. There were none.
+
+### 14.5 The wall-time estimate was wrong by 7×, and the cost is not where it was assumed
+
+WP-5's stage table says **~4–6 h** for stage a and H §2.8 says **≈2 min per cell**. Measured:
+**530 s per cell** (8.8 min), so the 266-cell stage is **~39 h** and the goodreads leg alone
+is **~18.5 h**. H §2.8 is out by 4.4×; the stage table by 7–10×.
+
+The decomposition in §14.3 says where it goes, and it is **not** the timing windows:
+
+* **`other` is 315–349 s per cell and is almost independent of algorithm and backend.** It
+  varies by 11 % across eight jobs whose timed cost varies by 3.9×. That is a fixed cost:
+  the **9 `torch.compile` + cudagraph captures per cell** (3 batch sizes × 3 `k`, with a
+  `torch._dynamo.reset()` per batch size), plus quality and setup.
+* **It is 62 % of the campaign's wall time overall and 73–76 % on every `triton` job.**
+  At 266 cells the fixed cost alone is ~24 h.
+* The timed windows are cheap: **125.7 s/cell for all nine `eager` entries and 68.4 s/cell
+  for all nine `graph` entries.**
+
+**This supports the user's mode change, with numbers.** `graph` costs ~330 s/cell of compile
+and capture to measure 68 s/cell of windows. An `eager`-only cell pays neither, so the new
+grid should cost roughly 150–200 s/cell against the 430–530 s measured here — a ~3× speedup,
+larger than the ~45 % saved by dropping `torch`. The graph arm is worth keeping where it is
+kept: **`graph` is 1.84× faster than `eager` at the median over 648 paired
+`(cell, k, bs)` comparisons (min 1.01×, max 6.50×)** — that is the number the headline
+`triton` graph cells exist to produce.
+
+A secondary finding, incidental support for dropping `torch` from the perf grid: **`torch` is
+the slow arm and it is slow in execution, not compilation.** Its `other` column matches
+`triton`'s to within 11 %, while its timed cost is 1.35× (`v1`, `v4`) to 3.4× (`v2`, `v3`)
+`triton`'s. The `torch` arms cost 40 % of this run's wall time.
+
+### 14.6 `linr_v2` is not an exact algo, and C4's gate says it is
+
+`c4_gate.py:67` declares `EXACT_ALGOS = ("linr_v1_filter_mask", "linr_v2")` and requires
+`quality.jaccard_vs_first@100 == 1.0` for them. Over all nine goodreads sweeps and both
+filter kinds, **`linr_v2` `torch` vs `triton` is never 1.0**:
+
+| algo | jaccard@100 range | `score_max_abs_diff` range | verdict |
+|---|---|---|---|
+| `linr_v1_filter_mask` | 1.000000 (9/9) | 0.000e+00 | bit-exact |
+| `linr_v4` | 1.000000 (9/9) | 0.000e+00 | bit-exact |
+| `linr_v2` | 0.999005 .. 0.999751 | 3.903e-03 .. 7.818e-03 | **never exact** |
+| `linr_v3` | 0.999017 .. 0.999797 | 3.906e-03 .. 7.818e-03 | never exact (already labelled inexact) |
+
+**This is pre-existing and it is not a regression.** C4 measured the same cell
+(`goodreads c0_genre clause`) at `code_version 0fe440d4` and recorded
+`jaccard 0.998743, score_max_abs_diff 9.766e-03`, and its own gate output logs it as
+`parity FAIL … (exact algo: must be 1.0)` (`c4/gate.txt:73`). This run, at `0e677805`,
+measures **0.999751 / 3.904e-03** on that cell — *better* agreement on both axes. The L1/L2
+rewrite moved `linr_v2` toward parity, not away from it.
+
+**The magnitudes say reduction order, not logic.** Scores are `float16`
+(`retrieve/modules/knn.py:35,42`), whose ULP is `2^-8 = 3.90625e-03` for values in [4, 8) and
+`2^-7 = 7.8125e-03` in [8, 16). The observed maxima are 3.903e-03–3.912e-03 and 7.818e-03 —
+**one ULP**, against C4's 2.5–3 ULP. A jaccard of 0.999 at k=100 is ~1 id in 1000 moving,
+which is what one-ULP score differences do to ties at the top-k boundary. The worst cell is
+`all4`, the most selective filter, where the candidate list is shortest and near-ties densest.
+
+**Recommendation (not acted on — no code or config was changed):** either `linr_v2` should
+be moved out of `EXACT_ALGOS` alongside `linr_v3`, or the one-ULP disagreement is a real
+defect in one of the two backends and should be chased. It cannot be both. This is worth
+settling *before* `torch` leaves the grid, because **`torch` is the only arm that produces
+this comparison at all**: with `triton` alone there is no second backend to be the parity
+reference, and the only cross-backend evidence for `linr_v2`/`linr_v3` will be C4's single
+cell. The justification given for dropping `torch` — that B3 measured `torch` vs `triton` at
+exactly 1.0 with `score_max_abs_diff` 0.0 — is correct **for SilverTorch**, and this run
+confirms it for `linr_v1` and `linr_v4`; it does not hold for `linr_v2` or `linr_v3`.
+
+### 14.7 Clocks — `sm_mhz_load`, never `sm_mhz_idle`
+
+`env.sm_mhz_load` is **1410.0 MHz on all 72 cells**, with no spread at all.
+`env.sm_mhz_idle` is 1155.0 MHz on all 72 — reported here only to say it exists and was not
+used for anything. Per-entry `perf[].sm_mhz` over all 1296 entries: **min 1155.0, median
+1410.0, max 1410.0**, i.e. the GPU is at its boost clock for essentially every measurement
+and the 1155 samples are the tail of a cell starting cold. **No clock normalisation was
+applied anywhere in this record**, as C4 and B3 require.
+
+`clocks_drift` is flagged on **6 of 72 cells**. Under C4's clause 5 ("no `unstable` record")
+those 6 would fail; that clause is not part of WP-5's stage gate and is not evaluated here.
+
+### 14.8 Instability is a bs=1 phenomenon, as B3 found
+
+**37 of 1296 perf entries (2.9 %) carry `unstable: true`** (window spread > 5 %). They are
+not spread evenly:
+
+| by batch size | | by mode | | by algo | |
+|---|---|---|---|---|---|
+| bs=1 | **31** | `eager` | **37** | `linr_v3` | 16 |
+| bs=8 | 5 | `graph` | **0** | `linr_v2` | 9 |
+| bs=16 | 1 | | | `linr_v4` | 8 |
+| | | | | `linr_v1_filter_mask` | 4 |
+
+**84 % of instability is at bs=1 and 100 % of it is in `eager`.** This independently
+reproduces B3's result (26 of its 31 unstable entries at bs ∈ {1, 8}) on a 4× larger sample,
+and it is the measurement behind the dispatch's rule that a bs=1 comparison narrower than
+~21 % is noise. It also says something the dispatch did not: **`graph` mode has zero unstable
+entries in 648 measurements.** Whatever is jittering at bs=1 is host-side — launch overhead
+and dispatch — and capture removes it.
+
+### 14.9 A harness bug, recorded and not fixed
+
+**`bench/report.py:848-849` prints a false provenance sentence.** Every non-citable report
+unconditionally appends:
+
+> These records predate the D1 campaign; they come from C4's gate run and C5's one-cell check
+> and are evidence about the harness, not results.
+
+It sits in the `else` branch of the citability block with no condition on the records. For
+this report the sentence is simply false — these *are* D1's campaign records. It is prose in
+`report.md` only: no table, figure or `flat.csv` column depends on it, so **it invalidates
+nothing measured here**. It appears verbatim in the committed artifact. Not fixed, because no
+harness change may land while a campaign is running — the resume key includes the library
+subtree hash and a mid-run change would silently invalidate every cell recorded before it.
+
+A second, smaller observation for whoever runs the narrowed grid: **`partial` is stamped per
+process, not per cell.** `bench/run.py:402-404` computes `reasons0` once from the `--mode`
+list and appends `"modes"` if it differs from the full set, then line 490 writes
+`"status": "partial"`. So an `eager`-only pass marks *every* record it writes `partial`,
+including `official`, whose `graph` entry would have been `not_capturable` regardless
+(`bench/measure.py:314-315` raises before compiling on `capturable = False`). Every record in
+*this* run is `ok`, because it ran the full mode set. The next worker's coverage table will
+not be comparable to this one on that column, and `report.py`'s citability check treats
+`partial` as a blocker.
+
+### 14.10 What was not done, and what is unverified
+
+* **Gate clauses 5 and 6 were not run.** Both need the GPU. The driver could not be stopped
+  (`kill -TERM` refused by the sandbox as `Interfere With Workloads`), it held
+  `flock /workspace/gpu.lock` continuously, and running them concurrently would have
+  corrupted the latency measurements of the `silvertorch triton` job in flight — the arm the
+  user had just prioritised. The scripts are written, narrowed to goodreads and ready:
+  [d1a_mode_ids.py](evaluation-harness-v2-artifacts/d1a/d1a_mode_ids.py) and
+  [d1a_rerun.sh](evaluation-harness-v2-artifacts/d1a/d1a_rerun.sh) (9 cells: all 4 LiNR algos
+  + `silvertorch`, both filter kinds, 4 sweeps).
+* **Clause 6 has a predicted failure and it should not be run casually.** §11.8 of this plan
+  records that **`linr_v2-triton` and `linr_v3-triton` are non-deterministic run to run**
+  (`recall@100` spread 2.029e-06 and 6.796e-05 over three repeats on an identical tree),
+  hypothesised to be per-process Triton autotuning. Two of the nine rerun cells are exactly
+  those two paths. If L3/L5's determinism work fixed it, they will now be byte-identical and
+  that is the strongest single line this stage can produce; if it did not, clause 6 fails on
+  those two cells and passes on the other seven, and **that** is the deliverable. Either way
+  the result is informative and neither outcome should be retried into existence.
+* **`silvertorch` was not run on goodreads at all**, so this stage produced no `official`
+  arm, no `n_probe` sweep, and no parity row against Meta's code. `tab-paper_comparison`,
+  `tab-pareto_goodreads` and the Pareto/QPS figures in `report/` are therefore built from
+  LiNR cells only and are structurally incomplete.
+* **arxiv was not touched.** 140 cells, 11 jobs, zero records.
+* **Every number in this record is unvalidated** in the sense of rule 2: D1's gate is not
+  green, the records are on a branch, and `bench report` marks all 15 artifacts
+  `NOT CITABLE`. That banner is correct and was left in place.
+* **`bench upload` was not run**, by instruction — the JSONL was still growing and a manifest
+  written against it would not match.
+* **The roadmap checkbox was not flipped and nothing was merged.**
