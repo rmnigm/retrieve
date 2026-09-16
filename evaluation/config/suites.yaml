@@ -20,7 +20,12 @@ quality:                       # unfiltered, vs held-out targets (old d*-quality
     silvertorch: [triton, torch, official]
 
 filter:                        # vs exact oracle + held-out-in-filter (old d*-filter.yaml)
-  datasets: [goodreads, arxiv]
+  # yfcc10m joined 2026-09-16 (roadmap E1): one dim (192, its native CLIP width — the
+  # d128 of the others is their chosen dim, not an ablation), one clause sweep, no bloom
+  # (config/yfcc10m.yaml). ks are the suite's: recall is against the harness's own cosine
+  # oracle, not the shipped k=10 squared-L2 GT (docs/system/datasets.md § yfcc10m).
+  datasets: [goodreads, arxiv, yfcc10m]
+  dims: [128, 192]
   filter_kinds: [clause, bloom]
   ks: [100, 500, 1000]
   batch_sizes: [1, 8, 16]
