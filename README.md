@@ -76,7 +76,7 @@ gates and checkboxes), one detail plan per phase, live GPU-validation runbooks,
 a research-idea catalog, and two contracts that order nothing and apply
 everywhere: [`agent-orchestration.md`](docs/plans/agent-orchestration.md) (one
 orchestrator, constrained workers, which model takes which work, and the rule
-that everything lands on `development` at `origin`) and
+that everything lands on `main` at `origin`) and
 [`coding-guidelines.md`](docs/plans/coding-guidelines.md) (thin code, no
 self-compat, no comment slop, and what is deliberately not the goal).
 Completed plans are archived under
