@@ -565,7 +565,7 @@ second time for the provenance block alone, because `schema_version`,
 STEP` declares that step's roadmap gate green, and only then can an
 artifact come out unmarked — but the evidence vetoes the flag: a `failed`
 or `partial` record, an `env.dirty` one, or one whose `env.git_branch` is
-not `development` / `main` (rule 2's own wording: "harness numbers from a
+not `staging` / `development` / `main` (rule 2's own wording: "harness numbers from a
 branch are not paper material") keeps the marker on. Otherwise
 every `.tex` carries a `% PROVENANCE: *** NOT CITABLE ***` banner with the
 reasons, its caption starts with `\textbf{[PRE-CAMPAIGN RECORDS — NOT
@@ -653,7 +653,7 @@ half-published subtree), together with:
 **Citability survives the trip.** `--gate STEP` is the only route to
 `"citable": true`, and the evidence vetoes it exactly as in
 [Report](#report-reportpy): a `failed` or `partial` record, an `env.dirty` one,
-or one whose `env.git_branch` is not `development` / `main` keeps the verdict at
+or one whose `env.git_branch` is not `staging` / `development` / `main` keeps the verdict at
 `false` and lists why. Read a downloaded file's `MANIFEST.json` before believing
 a number came from a campaign.
 

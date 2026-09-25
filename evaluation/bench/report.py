@@ -130,7 +130,8 @@ def _samples(results_dir: Path) -> list[dict[str, Any]]:
 # ----- provenance and citability ----------------------------------------------
 
 
-MAIN_BRANCHES = ("development", "main")  # rule 2: numbers from a branch are not paper material
+# rule 2: numbers from a branch are not paper material
+MAIN_BRANCHES = ("staging", "development", "main")
 
 
 def provenance(recs: list[dict[str, Any]], gate: str | None) -> dict[str, Any]:

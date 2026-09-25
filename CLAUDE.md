@@ -90,9 +90,9 @@ LiNR variants are V1–V4 as in the paper.
 6. **Commits and branches.** Commit only when the user asks. One branch per
    roadmap phase off `main` after Phase A4. Session artifacts (scripts,
    raw JSON) go under `docs/plans/<plan>-artifacts/`, not in the packages.
-   **All work ends up on `development` at `origin`** — whatever branch or
+   **All work ends up on `staging` at `origin`** — whatever branch or
    worktree produced it, a step is not finished until it is merged into
-   `development` and pushed (`docs/plans/agent-orchestration.md` §6). The
+   `staging` and pushed (`docs/plans/agent-orchestration.md` §6). The
    box is rented; the repository is the only durable artifact.
 7. **One orchestrator, constrained workers.** One user-controlled
    orchestrator session dispatches workers that do code, tests,

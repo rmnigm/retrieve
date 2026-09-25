@@ -100,7 +100,7 @@ pod_id() {
 }
 
 cmd_up() {
-    local gpu=$GPU gpus=1 npods=1 name="" nv="" cloud=SECURE branch=development disk=60 volume=100
+    local gpu=$GPU gpus=1 npods=1 name="" nv="" cloud=SECURE branch=staging disk=60 volume=100
     while [ $# -gt 0 ]; do
         case $1 in
             -g | --gpu) gpu=$2; shift ;;
@@ -150,7 +150,7 @@ machine_id() {
 }
 
 cmd_image() {
-    local branch=${1:-development} key body id build
+    local branch=${1:-staging} key body id build
     git -C "$REPO_ROOT" fetch -q origin "$branch"
     git -C "$REPO_ROOT" diff --quiet "origin/$branch" -- infra/runpod pyproject.toml uv.lock \
         retrieve/pyproject.toml retrieve/README.md evaluation/pyproject.toml \

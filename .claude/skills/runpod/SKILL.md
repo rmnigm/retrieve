@@ -18,7 +18,7 @@ and `herdr` for remote attach. Every `runpodctl` command prints JSON.
   for sm_80 + sm_90), gh, Claude Code, herdr, runpodctl, sshd.
 - `/workspace` is the pod volume (or a network volume). Boot
   (`rootfs/opt/retrieve-pod/bootstrap.sh`, log `/workspace/.pod-home/bootstrap.log`)
-  clones `rmnigm/retrieve` at `development` into `$REPO_DIR` (default
+  clones `rmnigm/retrieve` at `staging` into `$REPO_DIR` (default
   `/workspace/retrieve`; `/workspace/<pod>/retrieve` when a network volume is shared),
   runs `rp-sync`, installs herdr's Claude integration and pre-trusts the checkout.
   It never touches an existing checkout. A headless `herdr server` starts at boot
@@ -54,7 +54,7 @@ runs `claude setup-token` (laptop or pod) for a subscription token, or uses an A
 ## Image (built on a RunPod CPU pod, no local Docker)
 
 ```bash
-infra/runpod/pod.sh image [BRANCH]    # default development; streams the build log, deletes the pod
+infra/runpod/pod.sh image [BRANCH]    # default staging; streams the build log, deletes the pod
 ```
 
 kaniko on a 16-vCPU CPU pod builds `origin/BRANCH` (so push `infra/runpod/` and the
