@@ -150,7 +150,7 @@ machine_id() {
 }
 
 cmd_image() {
-    local branch=${1:-staging} key body id build
+    local branch=${1:-staging} key body id build log
     git -C "$REPO_ROOT" fetch -q origin "$branch"
     git -C "$REPO_ROOT" diff --quiet "origin/$branch" -- infra/runpod pyproject.toml uv.lock \
         retrieve/pyproject.toml retrieve/README.md evaluation/pyproject.toml \
@@ -176,10 +176,14 @@ EOS
     id=$(curl -fsS -X POST https://rest.runpod.io/v1/pods -H "Authorization: Bearer $key" \
         -H "Content-Type: application/json" -d "$body" | jq -r .id)
     echo "build pod $id — building $IMAGE from origin/$branch"
-    runpodctl pod logs "$id" --follow | jq -r --unbuffered 'select(.source == "container") | .line' \
-        | tee "${TMPDIR:-/tmp}/retrieve-image-build.log" | sed -u '/^BUILD_EXIT=/q' || true
+    log=${TMPDIR:-/tmp}/retrieve-image-build.log
+    until runpodctl pod logs "$id" | jq -r 'select(.source == "container") | .line' > "$log" \
+        && grep -q '^BUILD_EXIT=' "$log"; do
+        tail -1 "$log"
+        sleep 30
+    done
     runpodctl pod delete "$id" >/dev/null && echo "build pod $id deleted"
-    grep -q '^BUILD_EXIT=0$' "${TMPDIR:-/tmp}/retrieve-image-build.log"
+    grep -q '^BUILD_EXIT=0$' "$log"
 }
 
 cmd=${1:-help}
