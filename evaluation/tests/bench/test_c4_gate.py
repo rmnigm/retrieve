@@ -1,5 +1,5 @@
 """CPU tests for the C4 golden-comparison script
-(``docs/plans/evaluation-harness-v2-artifacts/c4_gate.py``, H §6 WP-4). Real golden files are
+(``docs/artifacts/evaluation-harness-v2/c4_gate.py``). Real golden files are
 copied into ``tmp_path``; v2 records are synthesised to reproduce them exactly (quality to the
 digit, graph medians equal, both clocks 1140 MHz, parity 1.0, an official cell at
 ``cache_plans: false``) so the gate passes, then each gate is broken one way at a time and
@@ -16,7 +16,7 @@ import pytest
 
 from bench import measure as bench
 
-SCRIPT = bench.ROOT / "docs" / "plans" / "evaluation-harness-v2-artifacts" / "c4_gate.py"
+SCRIPT = bench.ROOT / "docs" / "artifacts" / "evaluation-harness-v2" / "c4_gate.py"
 GOLDEN = bench.ROOT / "evaluation" / "golden"
 FILES = [
     "goodreads-d128-c0_genre-silvertorch-triton.json",

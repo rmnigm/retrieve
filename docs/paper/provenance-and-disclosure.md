@@ -2,13 +2,19 @@
 
 > **Status:** written 2026-09-15 on `dev/f1-f3-paper` (roadmap **F3**, paper gap
 > **G9**). Paper material for §4 "Experimental setup" of
-> [reproducibility-paper.md](../plans/reproducibility-paper.md) §C.4, and for the
+> reproducibility-paper.md §C.4, and for the
 > reproducibility-checklist appendix (§B.7).
+>
+> **References.** Labels such as O §13, H §12 and V §11 name sections of
+> the design plans this section was written from (O: official integration,
+> H: harness v2, V: harness package layout). Those plans are retired; each
+> link now points to the artifacts or wiki page that carries the fact, and
+> a label with no link has no public source beyond this text.
 >
 > Every fact in §1–§4 was verified on the box in the sessions named per line.
 > §5 is the disclosure the user's steer of 2026-09-15 requires and its wording
 > is deliberate: **no claim of equivalence with the pre-v2 harness may be made
-> from the C4 numbers** ([H WP-4's amendment block](../plans/evaluation-harness-v2.md)).
+> from the C4 numbers** ([H WP-4's amendment block](../validation.md#harness-gates)).
 > §6 lists what is not yet validated and the roadmap step each item waits on
 > (CLAUDE.md rule 2).
 
@@ -28,7 +34,7 @@
 The box is a rental and has been re-provisioned during this project: the working
 tree, the virtual environments and the staged datasets of the 2026-09-06 session
 did not survive into 2026-09-15, and the datasets were restaged
-([H §11](../plans/evaluation-harness-v2.md)). Nothing in the results depends on
+([H §11](../../evaluation/golden/README.md)). Nothing in the results depends on
 machine state that is not re-derivable from the repository and the public
 datasets.
 
@@ -54,7 +60,7 @@ comment-stripping; excluding them, 99 tests and 3 subtests pass in 11.6 s, every
 CUDA test included. Two ops registered in the source tree
 (`is_topk`, `take_top_k_and_gather_from_main_and_fresh`) are absent from
 `setup.py` and therefore exist in no OSS build. Both from
-[O §13.1](../plans/silvertorch-official-integration.md).
+[O §13.1](../artifacts/official-silvertorch/README.md).
 
 ## 3. What every record carries
 
@@ -101,7 +107,7 @@ baseline's own trace to `utilization > 50 %` gives median 1410 and min 1410: the
 two runs' GPUs were at the same clock throughout. At the **matched estimator**,
 with no threshold changed, **66 of 66 rows pass at batch 8 and 16** (ratios
 0.957–1.030), and all 16 remaining failures are at batch 1, 14 of them with the
-new harness *faster*. [H §12.4](../plans/evaluation-harness-v2.md)
+new harness *faster*. [H §12.4](../validation.md#harness-gates)
 
 Two consequences the paper must carry:
 
@@ -123,7 +129,7 @@ against under-load samples, so it fired on the GPU boosting (10 of C4's 18
 cannot lock clocks at all, because it meant "within 2 % of an expected value"
 and the box happened to be there. `clocks_locked` and `--expected-sm-mhz` are
 removed; `env.sm_mhz` is split into `sm_mhz_idle` / `sm_mhz_load`
-([V §11](../plans/evaluation-package-layout.md), L4-c).
+([V §11](../artifacts/evaluation-package-layout/README.md), L4-c).
 
 **The baseline's latency columns are not clock-controlled**, for a second reason
 as well: the GPU was shared while they were produced. Cells of the 2026-09-15
@@ -145,7 +151,7 @@ produced 11 of 11 cells, 99 rows. Six cells came out **bit-identical** to the
 original baseline; five moved, by 5e-6 to 1.6e-4 — between 5× and 160× the 1e-6
 comparison tolerance — and the cause is the deterministic k-means fix, which
 changes the centroids on every backend.
-[H §11](../plans/evaluation-harness-v2.md)
+[H §11](../../evaluation/golden/README.md)
 
 The v2 harness was then run against that re-derived baseline. It **matched 9 of
 the 11 cells, with a worst passing delta of 7.5e-9**, three orders of magnitude
@@ -154,8 +160,8 @@ residuals did not match and are unresolved**: `linr_v4` at **7.3e-5** (the
 chunk-shape attribution was tested and *falsified* — see
 [reproduction-deviations.md](reproduction-deviations.md) §8 R-1) and arXiv
 `silvertorch` `recall@100` at **2.0e-6**, unattributed.
-[H §12.3](../plans/evaluation-harness-v2.md), correction in
-[V §11.2](../plans/evaluation-package-layout.md)
+[H §12.3](../validation.md#harness-gates), correction in
+[V §11.2](../artifacts/evaluation-package-layout/README.md)
 
 **What is not claimed.** *No claim of equivalence between the v2 harness and the
 pre-v2 harness is made from these numbers.* The baseline comparison is
@@ -228,17 +234,17 @@ leading pad row. Anyone re-deriving from the mirror gets the 1-indexed files and
 must keep that handling; a loader that reads attribute row `i` for item `i`
 produces wrong filtered results that are **loud on goodreads and silent on
 arXiv** — it showed up only as `cos(query, target)` falling from 0.99 to 0.62
-([H §10](../plans/evaluation-harness-v2.md)). Oracle blobs published alongside
+([H §10](../../evaluation/golden/README.md)). Oracle blobs published alongside
 the embeddings were re-used where the fingerprint matched, and the one oracle
 that was rebuilt (arXiv `c0_maincat`) was cross-checked against the blob the
 baseline had used: `torch.equal` on both `[10000, 1000]` int64 top-K tensors,
-**exactly equal** ([H §12.1](../plans/evaluation-harness-v2.md)).
+**exactly equal** ([H §12.1](../validation.md#harness-gates)).
 
 Ground truth is our own exact filtered fp32 full-scan oracle, keyed by a content
 fingerprint of the inputs. Where a dataset ships its own filtered ground truth
 we checked ours against it: on YFCC-10M our oracle reproduced the shipped
 `GT.public.ibin` on **100,000 / 100,000** queries, id-exact, with
-`max_abs_distance_error = 0.0` ([roadmap E1](../plans/00-roadmap.md)).
+`max_abs_distance_error = 0.0` ([roadmap E1](../validation.md#datasets)).
 
 ## 8. Reproducing the environment
 

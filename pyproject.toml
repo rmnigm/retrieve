@@ -38,7 +38,7 @@ torchretrieve = { workspace = true }
 retrieve-evaluation = { workspace = true }
 # Meta's official SilverTorch, pinned to the full sha of `main` @ 21aa35e
 # (2026-07-23). Not on PyPI; no tags upstream. Bumping this is a deliberate PR
-# that reruns the parity gate (docs/plans/silvertorch-official-integration.md D2).
+# that reruns the official parity gate (docs/decisions.md, Library).
 silvertorch = { git = "https://github.com/meta-recsys/silvertorch", rev = "21aa35e28b6dd9a91e9ee35efb0857715e86bda7" }
 
 [dependency-groups]

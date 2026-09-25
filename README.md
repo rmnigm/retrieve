@@ -52,6 +52,22 @@ The lockfile lives at the root (`uv.lock`); the per-member lockfiles are obsolet
 
 ## Docs
 
+**Documentation** ([`docs/`](docs/index.md)) is a wiki of what is true now:
+[`index.md`](docs/index.md) lists every page and
+[`SCHEMA.md`](docs/SCHEMA.md) its conventions. Start with
+[`roadmap.md`](docs/roadmap.md) (the open work queue, gates and
+dependencies), [`decisions.md`](docs/decisions.md) (standing decisions and
+constraints) and [`validation.md`](docs/validation.md) (which gates pass and
+the measured results that stand). Two contracts apply everywhere:
+[`agent-orchestration.md`](docs/contracts/agent-orchestration.md) (one
+orchestrator, constrained workers, which model takes which work, and the
+rule that everything lands on `staging` at `origin`) and
+[`coding-guidelines.md`](docs/contracts/coding-guidelines.md) (thin code, no
+self-compat, no comment slop, and what is deliberately not the goal). Raw
+scripts and outputs behind the numbers are in
+[`docs/artifacts/`](docs/artifacts/). Agents start at
+[`AGENTS.md`](AGENTS.md).
+
 **System design** ([`docs/system/`](docs/system/)) — how the thing works, kept in
 sync with the code:
 
@@ -69,19 +85,6 @@ written for someone who installed `torchretrieve` and does not have this repo:
 [getting-started](retrieve/docs/getting-started.md),
 [modules](retrieve/docs/modules.md),
 [filtering-and-quantization](retrieve/docs/filtering-and-quantization.md).
-
-**Plans** ([`docs/plans/`](docs/plans/)) — the master plan
-([`00-roadmap.md`](docs/plans/00-roadmap.md): the one ordered work queue with
-gates and checkboxes), one detail plan per phase, live GPU-validation runbooks,
-a research-idea catalog, and two contracts that order nothing and apply
-everywhere: [`agent-orchestration.md`](docs/plans/agent-orchestration.md) (one
-orchestrator, constrained workers, which model takes which work, and the rule
-that everything lands on `staging` at `origin`) and
-[`coding-guidelines.md`](docs/plans/coding-guidelines.md) (thin code, no
-self-compat, no comment slop, and what is deliberately not the goal).
-Completed plans are archived under
-[`docs/plans/archive/`](docs/plans/archive/). Agents start at
-[`CLAUDE.md`](CLAUDE.md).
 
 **Papers** ([`articles/`](articles/)) — pandoc renderings of the three papers
 this repo reproduces or benchmarks against (SilverTorch, LiNR, Yambda). Frozen

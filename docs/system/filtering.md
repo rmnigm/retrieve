@@ -1,3 +1,12 @@
+---
+title: filtering
+created: 2026-09-26
+updated: 2026-09-26
+type: concept
+tags: [filtering, library]
+sources: [retrieve/src/retrieve/modules/filters.py, retrieve/src/retrieve/indexing/bloom_hash.py, retrieve/src/retrieve/functional.py]
+---
+
 # Filtering in `retrieve`
 
 This repo reproduces two retrieval papers — SilverTorch (IVF + INT8 ANN
@@ -112,19 +121,17 @@ target id of `-1`.
 
 **Candidate order is part of the contract.** `evaluate_indices` returns each
 row's survivors in **ascending item order** on every backend: the
-`compact_mask` (stable argsort) order on `torch`, and since roadmap L3 the
-same order from the fused `clause_compact` / `bloom_compact` kernels, which
+`compact_mask` (stable argsort) order on `torch`, and the same order from
+the fused `clause_compact` / `bloom_compact` kernels, which
 count per tile (stashing each tile's survivors in its own slot range), scan,
 and move every run to its fixed row offset
 ([kernels.md](kernels.md#clause_compact--fused-clause-eval--stream-compaction)).
-Before L3 the kernels claimed their row base with an atomic, so a row came
-out in tile-completion order and the downstream tie-breakers —
-`PrefilterKNN`'s top-k, and `OneBitKNN`'s heavily tied Hamming ranking,
-which decides pool membership — made `linr_v2` / `linr_v3` on `triton`
-irreproducible run to run (2e-6 / 7e-5,
-[deterministic-compaction.md](../plans/deterministic-compaction.md) §1).
-The same candidate order every call is what makes a quality number
-repeatable.
+A row base claimed with an atomic would order a row by tile completion,
+and the downstream tie-breakers — `PrefilterKNN`'s top-k, and
+`OneBitKNN`'s heavily tied Hamming ranking, which decides pool membership
+— would make `linr_v2` / `linr_v3` on `triton` irreproducible run to run
+(2e-6 / 7e-5 in quality). The same candidate order every call is what
+makes a quality number repeatable.
 
 ## Bloom hash keys: `(clause_idx, value)`
 
@@ -141,18 +148,16 @@ version counts, license codes all share small integer ranges) leak
 collision. The salt lives in the shared core, so item-side
 `build_signatures` and query-side `build_query_signatures` are
 symmetric by construction. It is a pure function of the clause index
-(`generate_clause_salt(C, device)` → `[C]` int64, no seed), and since
-B5 (2026-09-06) `BloomFilter` and `SilverTorch(filter_mode="bloom")`
-register it once as the **`clause_salt` buffer** at `register_index`
-and pass it to every builder call; before that the two splitmix64
-constants were materialised per call with `torch.tensor(_SALT,
-device=cuda)` — a pageable host→device copy on every forward that
-inflated the eager bloom path by ~0.4 ms and broke raw CUDA-graph
-capture. The bits are identical either way (`build_signatures(...,
-clause_salt=None)` still derives the salt on the fly for standalone
-callers — the parity tests, the tuner — and
-[`test_bloom_hash.py`](../../retrieve/tests/correctness/test_bloom_hash.py)
-pins the buffer path against the old inline computation). A
+(`generate_clause_salt(C, device)` → `[C]` int64, no seed).
+`BloomFilter` and `SilverTorch(filter_mode="bloom")` register it once as
+the **`clause_salt` buffer** at `register_index` and pass it to every
+builder call, because materialising the two splitmix64 constants per call
+is a pageable host→device copy on every forward, which costs ~0.4 ms on
+the eager bloom path and breaks raw CUDA-graph capture. The bits are
+identical either way (`build_signatures(..., clause_salt=None)` derives
+the salt on the fly for standalone callers — the parity tests, the tuner
+— and [`test_bloom_hash.py`](../../retrieve/tests/correctness/test_bloom_hash.py)
+pins the buffer path against an inline computation). A
 `SilverTorch` bloom index registered *without* attributes stores an
 empty `clause_salt` (the clause count is unknown) and derives it at
 query time — device-side, from `arange` and the two constants applied
@@ -171,17 +176,17 @@ all consume opaque `[N, W]` / `[B, W]` int64 buffers and are unchanged.
 bandwidth-bound, ~128 ms for N=3M, paid once at `register_index`). The
 per-forward query build is the separate loop-free
 `build_query_signatures`, written as pure tensor flow so the
-outer `torch.compile(dynamic=True, mode="reduce-overhead")` wrapped
-around each algo (`evaluation/bench/measure.py::graph_callable`) captures it into one
-cudagraph. Eager standalone (no algo wrapper) is launch-overhead-bound
+harness's `torch.compile(mode="reduce-overhead", dynamic=False,
+fullgraph=True)` of each algo (`evaluation/bench/measure.py::graph_callable`,
+one capture per batch size) captures it into the algo's cudagraph. Eager standalone (no algo wrapper) is launch-overhead-bound
 (~0.4 ms flat in B from ~15 small CUDA kernels); under the algo-level
 cudagraph_trees capture it collapses to ~0.09 ms — ~4× at all batch
 sizes, ~80% of `SilverTorch.forward` at bs=1. Both builders wrap the
 same `_signature_batch` core, so outputs are bit-equal (asserted by
 [`test_bloom_hash.py`](../../retrieve/tests/correctness/test_bloom_hash.py)).
 
-`bloom_sigs` snapshots persisted before this keying was added are stale
-and must be rebuilt; the bench harness rebuilds on every run.
+A `bloom_sigs` buffer persisted without this keying is stale and must be
+rebuilt; the bench harness rebuilds on every run.
 
 ## Out of scope
 

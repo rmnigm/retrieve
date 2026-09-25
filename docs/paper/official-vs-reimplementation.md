@@ -1,18 +1,25 @@
 # The official kernels against our reimplementation
 
 > **Status:** written 2026-09-16 on `dev/f2-official-section` (roadmap **F2**,
-> [O §10 WP-9](../plans/silvertorch-official-integration.md), paper gap **G2**).
+> O §10 WP-9, paper gap **G2**).
 > Paper material for §3 "Reproduction methodology" (the official-kernel check)
-> and §5.1 "RQ1" of [reproducibility-paper.md](../plans/reproducibility-paper.md)
+> and §5.1 "RQ1" of reproducibility-paper.md
 > §C.4.
 >
+> **References.** Labels such as O §16, H §12, V §11 and L §12 name
+> sections of the design plans this section was written from (O: official
+> integration, H: harness v2, V: harness package layout, L: library
+> refactor). Those plans are retired; each link now points to the artifacts
+> or wiki page that carries the fact, and a label with no link has no
+> public source beyond this text.
+>
 > **Source.** Every measurement below is
-> [O §16](../plans/silvertorch-official-integration.md), the validation record of
+> [O §16](../artifacts/official-silvertorch/b3/tables.md), the validation record of
 > roadmap **B3**, executed 2026-09-15 on the A100 box; raw scripts, JSON, harness
 > JSONL and the full table dump are in
-> [official-silvertorch-artifacts/b3/](../plans/official-silvertorch-artifacts/b3/).
-> B3's checkbox is flipped in [00-roadmap.md](../plans/00-roadmap.md) (`399c231`,
-> merged), so under CLAUDE.md rule 2 these are paper material — with the limits
+> [artifacts/official-silvertorch/b3/](../artifacts/official-silvertorch/b3/).
+> B3 is closed ([validation](../validation.md#official-against-our-triton-reimplementation-citable-contested)),
+> so under CLAUDE.md rule 2 these are paper material — with the limits
 > §8 and §9 state, which are not decoration.
 >
 > **What is not here.** The campaign has not run. Roadmap **D1** is in progress
@@ -50,10 +57,10 @@
 
 The plan that built this arm asked whether *"a ~600-line Triton reimplementation
 is competitive with the vendor's ~9.4k-line CUDA C++"*
-([O](../plans/silvertorch-official-integration.md), header). Meta's ops tree is
+([O](../system/kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend), header). Meta's ops tree is
 **9,427 lines** of `.cpp/.cu/.cuh/.h`, ≈ 3.5k of it the `fused_kmean_ann` scorer
 family; our phases 2+3 are **310 lines** of Triton (294 more for the exact
-variant, 110 shared, 165 for the bloom hash) ([O §1](../plans/silvertorch-official-integration.md)).
+variant, 110 shared, 165 for the bloom hash) ([O §1](../system/kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend)).
 
 The answer is two-sided, and the two sides do not cancel:
 
@@ -82,7 +89,7 @@ code in both arms**; only Algorithm 1's phases 2+3 differ.
 
 | control | how it was enforced | where |
 |---|---|---|
-| same index in both arms | asserted per mode and dataset, not assumed: `centroids_equal` **True**, the official arm's `item_codes` `torch.equal` to the Triton arm's under the cluster sort permutation **True**, `global_scale` equal **True** — 6/6 checks | [O §16.1](../plans/silvertorch-official-integration.md) |
+| same index in both arms | asserted per mode and dataset, not assumed: `centroids_equal` **True**, the official arm's `item_codes` `torch.equal` to the Triton arm's under the cluster sort permutation **True**, `global_scale` equal **True** — 6/6 checks | [O §16.1](../artifacts/official-silvertorch/b3/tables.md) |
 | the official expression parse is paid every forward | `OfficialConfig(cache_plans=False)` on **all 156** official perf entries, in both tiers, so the CPU parse is inside the timed call | O §16.1; the parse cost itself is [OF-5](reproduction-deviations.md) |
 | identical top-k | the same host `masked_topk` in both arms (324–339 µs Goodreads, 119–125 µs arXiv) | O §16.2 |
 | one estimator, stated | 50 warm-ups, 3 windows, per-call CUDA events, median of window medians, `spread` recorded, `unstable` above 5 %; SM clock sampled **under load** after the last window | O §16.1, [provenance §4](provenance-and-disclosure.md) |
@@ -98,7 +105,7 @@ official bloom at `b_multiplier 10.0, hash_k 7, bloom_path="partial"`
 
 `k = 100`, seed 0, eager, `bs = 16`, ms per forward; 30 harness records, all at
 one `code_version`, `dirty: false`, `sm_mhz_load` **1410 MHz on all 30**
-([O §16.5](../plans/silvertorch-official-integration.md)).
+([O §16.5](../artifacts/official-silvertorch/b3/tables.md)).
 
 | dataset | filter | n_probe | `triton` | `official` | `torch` | official / triton | torch / triton |
 |---|---|---|---|---|---|---|---|
@@ -150,7 +157,7 @@ Four things the table says:
 
 Algorithm 1 phases 2+3 only, `bs = 16`, `n_probe 24`, phase 1 precomputed and
 excluded. `device µs` is one `torch.profiler` call classified by kernel name
-([O §16.2](../plans/silvertorch-official-integration.md)); the classifier is a
+([O §16.2](../artifacts/official-silvertorch/b3/tables.md)); the classifier is a
 name heuristic and the raw per-kernel lists are in the artifacts.
 
 | dataset | mode | arm | wall ms | device µs | scorer µs | prep µs | topk µs | launches | peak MiB |
@@ -182,7 +189,7 @@ CSR and visits only real items. "At equal `n_probe`" is therefore equal *recall*
 but **not equal work**, and that — not bandwidth, not instruction mix, and not
 the 310-vs-3,500 line difference — is what the Goodreads factor measures. Both
 arms' scorers lower to the same `dp4a` instruction path
-([O §8 TF-3](../plans/silvertorch-official-integration.md)), so the comparison is
+([O §8 TF-3](../roadmap.md#phase-g-after-the-paper)), so the comparison is
 purely about what each design *reads*.
 
 **The official arm gives all of it back in payload prep.** Its scans,
@@ -201,7 +208,7 @@ comparison must read §3 — neither substitutes for the other.**
 
 ## 5. Phase 2 alone — the transposed index, replicated against Meta's code
 
-Full-`N` mask, `bs = 16` ([O §16.3](../plans/silvertorch-official-integration.md)):
+Full-`N` mask, `bs = 16` ([O §16.3](../artifacts/official-silvertorch/b3/tables.md)):
 
 | dataset | op | arm | median ms | p99 ms | timer |
 |---|---|---|---|---|---|
@@ -245,7 +252,7 @@ Full-`N` mask, `bs = 16` ([O §16.3](../plans/silvertorch-official-integration.m
 | arXiv `c0_maincat` | 0.1357 | **0.000000** | **0.000000** | 364.9 | **71.3** |
 
 Both blooms have **zero false positives** on these single-clause sweeps, so the
-matched-FPR protocol of [O §4.3](../plans/silvertorch-official-integration.md) is
+matched-FPR protocol of [O §4.3](../system/kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend) is
 **undefined here** — there is no FPR to match. What is comparable is memory at
 equal (zero) FPR, where the official index is **2.9× / 5.1× smaller**: our fixed
 `m_bits = 1024` ([ST-2](reproduction-deviations.md)) is simply over-provisioned
@@ -255,7 +262,7 @@ D3**.
 ## 6. Parity — bit-exact where it can be, and where fp16 costs something
 
 Kernel-only, 512 queries per cell, against the Triton arm on the same batches
-([O §16.4](../plans/silvertorch-official-integration.md)):
+([O §16.4](../artifacts/official-silvertorch/b3/tables.md)):
 
 | dataset | mode | score path | `jaccard@100` | `score_max_abs_diff` |
 |---|---|---|---|---|
@@ -342,7 +349,7 @@ rest is `ops/official/adapter.pack_mask` — **our** adapter building a full-`N`
 **826 MiB** peak and whose reduction the kernel-name classifier files under
 "quantize". `filter_mode="exact"` is not in the SilverTorch paper at all
 ([ST-3](reproduction-deviations.md)) and Meta's ops provide no exact predicate
-([O §1.1](../plans/silvertorch-official-integration.md)), so this path is a
+([O §1.1](../system/kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend)), so this path is a
 bridge we built. **The 10.1× and 3.3× exact ratios of §3 therefore bound what
 that path costs today, not what Meta's kernels cost**; a transposed or chunked
 packer is Phase G work and B3 deliberately measured rather than fixed it.
@@ -385,7 +392,7 @@ Stated here rather than left for a reviewer to find:
    items here, no OverArch, no Value Model, single-embedding queries
    ([ST-12](reproduction-deviations.md)). No number here is compared against a
    latency printed in either paper.
-6. **The synthetic layout ladder of [O §9a](../plans/silvertorch-official-integration.md)
+6. **The synthetic layout ladder of O §9a
    was not run**; the two real datasets' own `P` (611,520 and 171,648 at
    `n_probe 24`) replaced it, which is where the pad-tax finding came from.
 7. **`build_s` is not compared.** Index-build time for the two bloom indexes is a
@@ -413,7 +420,7 @@ gate is green the item is not paper material (CLAUDE.md rule 2).
 ## 11. What the reproduction got wrong before it measured
 
 A reproduction paper's value is that it *checked*. Ours wrote its expectations
-down before the run ([O §9](../plans/silvertorch-official-integration.md)), and
+down before the run (O §9), and
 two of the four were wrong — one of them in both directions.
 
 | expectation, as written | verdict |

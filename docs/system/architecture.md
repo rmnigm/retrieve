@@ -1,3 +1,12 @@
+---
+title: architecture
+created: 2026-09-26
+updated: 2026-09-26
+type: entity
+tags: [library]
+sources: [retrieve/src/retrieve/]
+---
+
 # `retrieve` architecture
 
 This is the high-level map of the `retrieve` package (on PyPI as
@@ -31,11 +40,9 @@ retrieve/src/retrieve/
 │   ├── triton/            _load.py (imports every kernel file → registers retrieve::*), _host.py (shared
 │   │                      launch scaffold), common.py (@triton.jit helpers), one file per kernel
 │   ├── reference/         the same op names and signatures in pure torch: the "torch" backend + parity oracle
-│   ├── official/          __init__.py (loader, OfficialConfig, constants, `st`), adapter.py (B1's adapter)
+│   ├── official/          __init__.py (loader, OfficialConfig, constants, `st`), adapter.py (the adapter)
 │   └── tune.py            the autotune CLI (`tune-kernels`)
-├── indexing/              kmeans.py (KMeans, init random | kmeans++), ivf.py (padded_layout, csr_layout), quantize.py, bloom_hash.py
-└── layers/, kernels/      the 0.1 import paths under a DeprecationWarning — temporary tooling for the
-                           old-harness golden worktree, deleted at roadmap C5 (plan L D10)
+└── indexing/              kmeans.py (KMeans, init random | kmeans++), ivf.py (padded_layout, csr_layout), quantize.py, bloom_hash.py
 ```
 
 `import retrieve` imports no kernel: a module resolves its backend's op
@@ -73,7 +80,7 @@ CUDA extension and registers nine `torch.ops.st.*` ops. The adapter is the
 needs an nvcc that matches the torch wheel (`CUDA_HOME=/usr/local/cuda-12.8`
 for the cu128 wheel — upstream's README insists on the match), `ninja` and
 `setuptools`; see
-[../plans/official-silvertorch-artifacts/README.md](../plans/official-silvertorch-artifacts/README.md)
+[../artifacts/official-silvertorch/README.md](../artifacts/official-silvertorch/README.md)
 for the pin, the build record and the upstream-suite result.
 
 `"official"` is not a universal third path: it exists solely for
@@ -183,18 +190,16 @@ overridden only when a fused kernel beats the default:
   buffer is **full-width** `[B, N]`: only the first `counts[b]` entries
   of each row are meaningful (`-1`-filled tails on the kernel path,
   arbitrary argsort tails on the `compact_mask` fallback), and within-row
-  order is ascending item order on both backends (plan L3). `ExactAttributeFilter` routes to the fused
+  order is ascending item order on both backends. `ExactAttributeFilter` routes to the fused
   `clause_compact` Triton kernel on the `"triton"` backend; `BloomFilter`
   routes to the fused `bloom_compact` kernel. The `"torch"` backend falls
   back to `compact_mask(evaluate_mask)`.
 - `evaluate_subset(query_clause_attrs, candidate_ids) → [B, P] bool` —
   apply a filter only to the given candidate ids. Both filters override
   this with gather + the shared torch-side predicate helpers
-  (`clause_subset_match` in
-  [`exact_attribute.py`](../../retrieve/src/retrieve/modules/filters.py),
-  `bloom_subset_match` in
-  [`bloom_hash.py`](../../retrieve/src/retrieve/indexing/bloom_hash.py) —
-  the same functions SilverTorch's eager backend uses); default is
+  (`clause_subset_match` and `bloom_subset_match` in
+  [`functional.py`](../../retrieve/src/retrieve/functional.py) — the same
+  functions SilverTorch's eager backend uses); default is
   `evaluate_mask(...).gather(1, candidate_ids)`.
 
 Callers that already have a bool mask from some other source (a hand-rolled
@@ -225,8 +230,7 @@ clause_is_reverse=None)` — which registers the filter too when attributes
 are given — and `forward(query, query_clause_attrs=None) -> (ids [B, k],
 scores [B, k])`; `k` forwards to the primitive that owns the final top-k and
 is settable after registration; `capturable = True` is a class attribute
-(every LiNR backend captures). The bodies are the harness wrappers' bodies,
-moved verbatim (plan L D5):
+(every LiNR backend captures):
 
 | class | composition | `forward` |
 |---|---|---|
@@ -263,8 +267,8 @@ utility, not per-class copies.
 
 - **`PostfilterKNN` — dense similarity, optional mask.** Full
   `query @ item_embs.T`, masked scores set to `-inf`, then top-K. Forward
-  takes `(query, mask=None)`. The original Triton kernel was removed
-  because cuBLAS + CUB already deliver the same memory traffic; the
+  takes `(query, mask=None)`. There is no Triton kernel because cuBLAS +
+  CUB already deliver the same memory traffic; the
   `backend=` flag is accepted for API symmetry but is a no-op on this
   class.
 - **`PostfilterKNNInt8` — dense int8 similarity, optional mask.**
@@ -369,12 +373,11 @@ Constructed directly (`SilverTorch(k, n_lists, n_probe, filter_mode="none",
 m_bits=None, k_hash=None, n_iter=10, seed=0, kmeans_init="random",
 backend="triton", official=None)`; `kmeans_init="kmeans++"` opts into D²
 seeding, the default stays random because every recorded number was taken
-on it — plan L D9) or through `SilverTorchBuilder(**those)` →
+on it, [decisions](../decisions.md#library)) or through `SilverTorchBuilder(**those)` →
 `.set_item_embeddings(x)` [+ `.set_item_attributes(attrs, clause_is_reverse)`]
 or `.set_state_dict(sd)` → [`.set_backend(b, official=None)`,
 `.set_device(d)`] → `.build()`, which is construct → `register_index` (or the
-prebuilt load, no k-means) → `.to(device)`. There is no one-call
-`build_silvertorch` any more. After `register_index`,
+prebuilt load, no k-means) → `.to(device)`. After `register_index`,
 `build_timings` is `{"kmeans_s", "assemble_s", "quantize_s", "filter_s"}`
 (device-synchronised wall seconds of the four phases; `{}` before
 registration and on a prebuilt module) and `set_query_params(n_probe=…)`
@@ -471,8 +474,8 @@ builders with the filters package, not the module classes:
   `(ids, counts)`; `FullScanKNN.forward` discards the counts.
 - [`masked_topk` / `counts_to_valid`](../../retrieve/src/retrieve/functional.py) —
   the shared torch-side masked top-K epilogue (pure tensor-flow, traces
-  cleanly under the eval harness's `torch.compile(dynamic=True,
-  mode="reduce-overhead")`).
+  cleanly under the eval harness's `torch.compile(mode="reduce-overhead",
+  dynamic=False, fullgraph=True)`).
 - [`KMeans`](../../retrieve/src/retrieve/indexing/kmeans.py) — pure-torch
   Lloyd's k-means used by
   `SilverTorch` for IVF index building (not a `RetrievalModule`);
@@ -480,17 +483,16 @@ builders with the filters package, not the module classes:
   `fit(embs) -> (centroids, assignments)`, `assign(embs, centroids)`.
   `init="kmeans++"` is greedy D² sampling — one `mv` over the index per
   centroid, the uniform draws from the CPU generator located by
-  `searchsorted` on the device-side cumsum, no host sync per step; timed
-  on the A100 at N = 3 M × 128, `n_lists = 8192` in plan L §12.2, so the
-  k-means‖ variant the plan held in reserve was not needed.
+  `searchsorted` on the device-side cumsum, no host sync per step (9.5 s
+  against 0.8 s random at N = 3 M × 128, `n_lists = 8192`).
   `fit` is **bit-for-bit reproducible
   run to run**: the centroid update reduces with a float64 one-hot GEMM
   accumulated panel by panel, not `index_add_`'s floating-point atomics,
-  whose scheduling-dependent order made two seed-0 builds differ by 1.8e-2
-  in the centroids and put every SilverTorch quality number out of reach of
-  the golden gate's 1e-6 (roadmap C4). Costs ~1.3x the old `fit` wall time
-  at N=200k, D=128, n_lists=1024, bounded by one extra assignment-sized
-  matmul per Lloyd iteration.
+  whose scheduling-dependent order makes two seed-0 builds differ by 1.8e-2
+  in the centroids and puts every SilverTorch quality number out of reach of
+  the golden gate's 1e-6. It costs ~1.3× the wall time of the atomic
+  reduction at N=200k, D=128, n_lists=1024, bounded by one extra
+  assignment-sized matmul per Lloyd iteration.
 - Two abstract bases plus the two backend literals and their validator in
   [`interfaces.py`](../../retrieve/src/retrieve/interfaces.py):
   `RetrievalModule` (a minimal lifecycle ABC — `k` attr + abstract
@@ -527,14 +529,12 @@ two probe scorers, `grid_batch_tiles` for the three 3-D-grid filter
 kernels); each kernel keeps its own loads and masking policy.
 [`_load.py`](../../retrieve/src/retrieve/ops/triton/_load.py) is the one
 place the kernel files are imported, so `import retrieve.ops.triton` is
-the registration. Every kernel of ours is Triton (the two hand-written
-SilverTorch backends were deleted at roadmap B4 — see
-[kernels.md](kernels.md#historical-backends)). Each op has a pure-torch
+the registration. Every kernel of ours is Triton (see
+[kernels.md](kernels.md#deleted-backends)). Each op has a pure-torch
 twin of the same name and signature in
 [`ops/reference/`](../../retrieve/src/retrieve/ops/reference/) — the
 `"torch"` backend and the oracle the parity suite scores the kernel
-against (`ref_cps_phase23`, the test tree's former private copy of the
-SilverTorch reference, is gone).
+against.
 
 Each Triton path is **one launch per `forward()`** followed by a
 host-side `torch.topk` over the score buffer (CUB beats anything we can
@@ -543,7 +543,7 @@ not a kernel of ours at all:
 [`ops/official/`](../../retrieve/src/retrieve/ops/official/adapter.py)
 adapts Meta's `torch.ops.st.*` ops (measured on the A100: 19 launches
 and 3 host syncs per unfiltered forward, ≈ 32 launches and ≥ 5 syncs
-with bloom — plan §13.2). Eight of the ten ops are registered with
+with bloom). Eight of the ten ops are registered with
 `@torch.library.triton_op` so inductor can see the `@triton.jit` body; the
 two stream-compaction kernels (`clause_compact`, `bloom_compact`) are
 opaque `@torch.library.custom_op`s instead, because their data-dependent
@@ -597,9 +597,11 @@ rather than catching the error: its `PATHS` table maps every
 (`cublas`, `triton`, `torch`, `cublas+triton`, `official`, or `None`),
 collapses backends that run the same code into one job, and builds the
 standalone filter modules for `official` cells with `backend="triton"` —
-see [evaluation.md](evaluation.md#algorithms-and-the-paths-table). Its
-derivation from `DISPATCH` is roadmap C5's test; until then `PATHS` is
-maintained by hand.
+see [evaluation.md](evaluation.md#algorithms-and-the-paths-table).
+`PATHS` is derived from `DISPATCH`
+([`bench/algos.py`](../../evaluation/bench/algos.py)), and
+[`tests/bench/test_paths.py`](../../evaluation/tests/bench/test_paths.py)
+pins the derivation.
 
 ## Testing
 
@@ -619,38 +621,15 @@ gate. Performance characterization (latency, memory, recall sweeps) lives in
 
 ## Module layout
 
-The 0.2 layout is by role, not by history (plan L §3). The 0.1 → 0.2 move
-table, every row a `git mv` plus import rewrites and no behaviour change.
-The 0.1 import paths were re-exported by a shim until roadmap L5 (it
-existed so the old-harness golden worktree could run against the new
-library, plan L D10); they are gone:
-
-| 0.1 (`layers/`, `kernels/`) | 0.2 |
-|---|---|
-| `layers/silvertorch/main.py` | [`modules/silvertorch.py`](../../retrieve/src/retrieve/modules/silvertorch.py) (`build_silvertorch` retired at L2; `SilverTorchBuilder` is the one-call path) |
-| `layers/linr/{postfilter_knn,postfilter_knn_int8,prefilter_knn}.py`, `layers/utils/retrieval.py::FullScanKNN` | [`modules/knn.py`](../../retrieve/src/retrieve/modules/knn.py) |
-| `layers/linr/{_bit_knn,one_bit_knn,simhash_knn}.py` | [`modules/bit_knn.py`](../../retrieve/src/retrieve/modules/bit_knn.py) |
-| `layers/filters/{bloom,exact_attribute}.py` (the classes) | [`modules/filters.py`](../../retrieve/src/retrieve/modules/filters.py) |
-| `layers/filters/__init__.py::{combine_masks,combine_indices}`, `layers/utils/{topk,compact}.py`, `retrieval.py::post_filter_topk`, `exact_attribute.py::clause_subset_match`, `bloom_hash.py::bloom_subset_match`, `quantize.py::popcount_int64` | [`functional.py`](../../retrieve/src/retrieve/functional.py) |
-| `layers/utils/kmeans.py` (`KMeansTorch`) | [`indexing/kmeans.py`](../../retrieve/src/retrieve/indexing/kmeans.py) (`KMeans`; `_assign_chunked` → public `assign`; `init="kmeans++"` added at L2) |
-| `layers/utils/quantize.py` (+ `postfilter_knn_int8._quantize_int8_global`, deduplicated as `quantize_int8_global_codes`) | [`indexing/quantize.py`](../../retrieve/src/retrieve/indexing/quantize.py) |
-| `layers/filters/bloom_hash.py` (builders, salt, `build_transposed_sigs`) | [`indexing/bloom_hash.py`](../../retrieve/src/retrieve/indexing/bloom_hash.py) |
-| `SilverTorch._build_ivf`'s padded table and CSR view | [`indexing/ivf.py`](../../retrieve/src/retrieve/indexing/ivf.py) (`padded_layout`, `csr_layout`) |
-| `kernels/common.py`, `kernels/{filters,linr,silvertorch}/*.py` (Triton) | [`ops/triton/*.py`](../../retrieve/src/retrieve/ops/triton/) (flat; `_load.py`, `_host.py` new) |
-| `kernels/silvertorch/official.py` | [`ops/official/__init__.py`](../../retrieve/src/retrieve/ops/official/__init__.py) + [`adapter.py`](../../retrieve/src/retrieve/ops/official/adapter.py) |
-| eager branches in the layers + `tests/parity/conftest.py::ref_cps_phase23` | [`ops/reference/*.py`](../../retrieve/src/retrieve/ops/reference/) |
-| `tune.py` | [`ops/tune.py`](../../retrieve/src/retrieve/ops/tune.py) |
-| `interfaces.py` | unchanged path (+ `ops_for`; L2: `DISPATCH`, `load_prebuilt`) |
-| `evaluation/retrieval/algos.py::LinrV1`–`LinrV4` (the harness wrappers) | [`modules/linr.py`](../../retrieve/src/retrieve/modules/linr.py) (`LiNRV1`–`LiNRV4`, L2; `set_query_params` and `capturable` with them) |
-
-Conventions that survive the move: the version-numbered classes are
-compositions only — `LiNRV1`–`LiNRV4` own no kernel and no quantizer, the
+The layout is by role ([Package layout](#package-layout)), with these
+conventions: the version-numbered classes are compositions only — `LiNRV1`–`LiNRV4` own no kernel and no quantizer, the
 primitives keep `register_index` as their only build path and the builders
 call it; no caller crosses quantizer families (the bit-KNNs never see INT8,
 `SilverTorch` never sees OPORP/SimHash); a kernel file is reached with
 `from retrieve.ops.triton.<kernel> import ...` (its `_impl` and `Config`),
 while the package attribute `retrieve.ops.triton.<kernel>` is the op of
-the same name. Op schemas, buffer names and registration order did not
-change at L1, so a 0.1 state dict loads into a 0.2 module; L2 added state,
-never renamed it — the composites' `filter.` prefix and
-`PostfilterKNNInt8.n_items`.
+the same name. Op schemas, buffer names and registration order are
+stable, so a state dict written by an earlier release loads into the
+current modules ([decisions](../decisions.md#library)); state is added,
+never renamed (the composites' `filter.` prefix,
+`PostfilterKNNInt8.n_items`).

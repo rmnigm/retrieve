@@ -1,3 +1,12 @@
+---
+title: checkpoints
+created: 2026-09-26
+updated: 2026-09-26
+type: entity
+tags: [training]
+sources: [evaluation/training/, evaluation/eval_datasets/hub.py]
+---
+
 # GSASRec checkpoints
 
 Trained on Yambda **500M** Listen+ (50% played-ratio threshold). All runs share
@@ -6,7 +15,7 @@ the same architecture and gBCE loss; they differ in `embedding_dim` (and
 against all 1,866,170 items, no history masking — matches the
 [Yambda paper](https://arxiv.org/abs/2505.22238) Table 2 (Listen+) protocol.
 
-Checkpoints now live under each dataset's data dir:
+Checkpoints live under each dataset's data dir:
 `data/<dataset>/checkpoints/<ckpt-id>/` (e.g.
 `data/yambda-500m/checkpoints/gsasrec-d128-drop0.5/`), under the data
 root of [datasets.md](datasets.md) (`RETRIEVE_DATA_ROOT`, default
@@ -23,12 +32,9 @@ scored, and how to move them around. For how the trainer itself works
 
 | Path | Dim | Dropout | Best epoch | Test NDCG@10 | NDCG@100 | Recall@10 | Recall@100 | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `data/yambda-500m/checkpoints/gsasrec-d128-drop0.5/` | 128 | 0.5 | 54 | 0.0751 | 0.0946 | 0.0353 | 0.1362 | beats paper on every metric except NDCG@10 (tie); was still climbing when stopped |
-| `data/yambda-500m/checkpoints/gsasrec-d64-drop0.5/` | 64 | 0.5 | 99 | **0.0813** | **0.1029** | **0.0384** | **0.1489** | bf16 + fused AdamW recipe; was still climbing at the 100-epoch budget cap; **best on every quality metric** |
+| `data/yambda-500m/checkpoints/gsasrec-d128-drop0.5/` | 128 | 0.5 | 54 | 0.0751 | 0.0946 | 0.0353 | 0.1362 | beats paper on every metric except NDCG@10 (tie); stopped before convergence |
+| `data/yambda-500m/checkpoints/gsasrec-d64-drop0.5/` | 64 | 0.5 | 99 | **0.0813** | **0.1029** | **0.0384** | **0.1489** | bf16 + fused AdamW recipe; still climbing at the 100-epoch budget cap; **best on every quality metric** |
 | `data/yambda-500m/checkpoints/gsasrec-d256-drop0.5/` | 256 | 0.5 | 95 | 0.0753 | 0.0910 | 0.0364 | 0.1284 | same recipe as d64; higher coverage (0.126 vs 0.124) but worse R@100 — extra capacity hurts here |
-
-The original `gsasrec-500m-listens-v1/` (dim 128, dropout 0.2, ep 37 — paper
-parity) was retired when the dropout=0.5 variants subsumed it.
 
 Other datasets follow the same `data/<dataset>/checkpoints/<ckpt-id>/`
 layout: 5B runs at `data/yambda-5b/checkpoints/gsasrec-d{64,128}/`,
@@ -47,8 +53,8 @@ lr=1e-3  weight_decay=0  optimizer=AdamW (fused on cuda)
 autocast=bfloat16   tf32=on
 ```
 
-The `-d64-drop0.5` run was the first to use the bf16/fused-AdamW/TF32 stack.
-The two earlier `d128` runs predated it and used fp16+GradScaler.
+`gsasrec-d128-drop0.5` was trained with fp16 + GradScaler; the d64 and d256
+runs with the bf16 / fused-AdamW / TF32 stack above.
 
 ## What's in each checkpoint dir
 
@@ -71,7 +77,7 @@ from training.model import GSASRec
 DATA_DIR = Path("data/yambda-500m")
 CKPT_DIR = DATA_DIR / "checkpoints/gsasrec-d128-drop0.5"
 
-# num_items comes from the data dir's id map (written by `eval_datasets/yambda.py` prep).
+# num_items comes from the data dir's id map (written by `eval_datasets/etl/yambda.py` prep).
 with open(DATA_DIR / "item_id_map.json") as f:
     num_items = len(json.load(f))
 
@@ -227,8 +233,7 @@ local = download_checkpoint("yambda-500m", "gsasrec-d128-drop0.5")
 ```
 
 The matching CLI is `eval-data fetch` (whole dataset, optionally including
-checkpoints) — for a single ckpt it's currently easier to call the function
-above. To grab the dataset's eval inputs (item embeddings, attrs, etc.)
+checkpoints) — for a single ckpt, call the function above. To grab the dataset's eval inputs (item embeddings, attrs, etc.)
 without checkpoints:
 
 ```bash
@@ -281,8 +286,8 @@ uv run eval-data publish-checkpoint yambda-500m gsasrec-d128-drop0.5 --dry-run
 - `mask_history=False` is the correct default for re-consumption tasks (music
   re-listens). Setting it to `True` halves NDCG@10 because the items the model
   most wants to recommend (already-heard tracks) get masked out.
-- `dropout=0.5` is the SASRec/gSASRec paper default and clearly outperforms
-  0.2 on this dataset (see table above).
+- `dropout=0.5` is the SASRec/gSASRec paper default and outperforms 0.2 on
+  this dataset.
 - The d128-drop0.5 run was stopped manually before convergence; val NDCG@10
   was still rising at epoch 54. Resume / extend training would likely push the
   numbers further past the paper.

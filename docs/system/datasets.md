@@ -1,3 +1,12 @@
+---
+title: datasets
+created: 2026-09-26
+updated: 2026-09-26
+type: entity
+tags: [datasets, training]
+sources: [evaluation/eval_datasets/, evaluation/training/]
+---
+
 # Datasets and training
 
 Everything upstream of the benchmark: how the datasets are fetched and
@@ -24,11 +33,11 @@ by interpolating between real embeddings — used for scale sweeps where a
 real catalog that size doesn't exist.
 
 Data lives under `$RETRIEVE_DATA_ROOT` (default `<repo>/evaluation/data`;
-on the A100 box `/data` on the overlay disk — [storage.md](storage.md) —
-with `evaluation/data` a gitignored symlink to it that every worktree
-needs its own copy of, `ln -s /data evaluation/data`, because the harness
-resolves `config/*.yaml`'s `data_dir: data/<dataset>` against
-`evaluation/`, not against `$RETRIEVE_DATA_ROOT`). Raw downloads go to
+the pod image sets it, see [storage.md](storage.md)). Where it points
+elsewhere, `evaluation/data` must be a gitignored symlink to it in every
+worktree (`ln -s "$RETRIEVE_DATA_ROOT" evaluation/data`), because the
+harness resolves `config/*.yaml`'s `data_dir: data/<dataset>` against
+`evaluation/`, not against `$RETRIEVE_DATA_ROOT`. Raw downloads go to
 `data/_raw/<dataset>/`; bench-side outputs to `data/<dataset>/`.
 
 ## `eval_datasets/` — what is on disk
@@ -58,9 +67,7 @@ HuggingFace's `datasets` in the shared venv.
 The ETL modules are `argparse` programs; `eval-data <name> …` forwards
 its arguments to that module's `main(argv)`, so `uv run eval-data arxiv
 --help` is arxiv's own subcommand list (`download`, `convert`, `prep`,
-`encode_text`, `encode_queries`, `attrs`, `all`), and `uv run eval-data
-goodreads prep --processed-dir … --output-dir …` is what `uv run goodreads
-prep …` used to be.
+`encode_text`, `encode_queries`, `attrs`, `all`).
 
 ### The layout contract (`layout.py`)
 
@@ -76,9 +83,8 @@ content_dir) -> list[str]` — every way the directory can be wrong for the
 harness (missing files, a missing, keyless or swapped prefix sidecar, `query_emb`
 vs `heldout` rows, attrs vs items, `eval_split` vs queries) — which
 `bench check --dataset <name>` runs at every dim. Run it on a freshly
-staged dataset before a campaign; the two breakages the 2026-09-06 review
-found (PubMed's `queries` dropping rows, YFCC without sidecars) are what it
-reports, and both loaders were fixed on 2026-09-16.
+staged dataset before a campaign: a loader that drops query rows or
+writes no prefix sidecars is exactly what it reports.
 
 **The prefix policy** (`layout.prefix_problem`, shared by the loader's
 `assert_prefixes` and by `validate_layout`): every `text_emb.meta.json` /
@@ -120,9 +126,8 @@ what it wrote.
 - **Attribute tensors are 0-indexed dense**: row `i` of
   `item_attrs_narrow.pt` describes `item_id i+1`.
 - **Legacy `[N+1, …]` artifacts are accepted, not assumed.** Both layouts
-  exist in the wild: everything switched to `[N, …]` in `3b1b5b3`
-  (2026-05-25), but the copies *published on the Hub* — what `eval-data
-  fetch` pulls — are still the older 1-indexed tensors with a padding row
+  exist: the ETL writes `[N, …]`, but the copies *published on the Hub* —
+  what `eval-data fetch` pulls — are 1-indexed tensors with a padding row
   at index 0, as their own README and `text_emb.meta.json` say.
   `eval_datasets.layout.drop_legacy_padding_row` recognises that row by its
   content (all-zero for embeddings, all `-1` for attributes) and drops it
@@ -135,15 +140,17 @@ what it wrote.
   index. Getting this wrong is not always loud: on the arxiv path
   attrs and embeddings are *both* 1-indexed, so they agree with each other
   and only the held-out target shift is wrong — `cos(query, target)` falls
-  from 0.99 to 0.62 with no error anywhere (found in A1, 2026-09-06, on
-  the old harness's `loaders.py`; now `layout.py`).
+  from 0.99 to 0.62 with no error anywhere.
 - Every subcommand writes a `prep_log.json` with row counts and
   filtering statistics next to its outputs.
 - Subcommands are individually re-runnable; `all` chains them.
 
 ### yambda
 
-`uv run eval-data yambda prep --variant {500m,5b} --output-dir data/yambda/<v>`
+Yambda is out of the study ([decisions](../decisions.md#datasets)); its
+ETL, configs and checkpoints stay.
+
+`uv run eval-data yambda prep --variant {50m,500m,5b} --output-dir data/yambda/<v>`
 
 Downloads `<variant>/sequential/listens.parquet`, runs `preprocess()`
 (Listen+ branch: `played_ratio ≥ 50%`), and writes the four artifacts the
@@ -159,8 +166,8 @@ trainer consumes:
 Validation history is the train portion (already sliced to the last 200
 items in `preprocess`); test history is train ++ val, last 200. Adapted
 from the Yambda paper's reference `sasrec/data.py`; only the
-listens-Listen+ branch is kept, the rest is replaced by
-`evaluation.training`.
+listens-Listen+ branch is kept, the rest is replaced by the `training`
+package ([`evaluation/training/`](../../evaluation/training/)).
 
 ### goodreads
 
@@ -223,7 +230,8 @@ Embeddings are written per dimension:
 <output>/content_d64/   same, truncated to 64
 ```
 
-Configs select one via `content_subdir`.
+A dataset config selects one per dim through its `content_dir` mapping
+([evaluation](evaluation.md#config-one-yaml-per-dataset--suitesyaml)).
 
 ### yfcc10m
 
@@ -236,9 +244,7 @@ descriptors, 192-d uint8, plus a bag of tags per image drawn from a
 plus 100,000 queries that each carry 1–2 tags. Six files, 2.97 GB, no
 registration, from
 `https://dl.fbaipublicfiles.com/billion-scale-ann-benchmarks/yfcc100M/`
-(exact names and sizes in
-[dataset-candidates.md §3.4](../plans/dataset-candidates.md) and in
-`etl/yfcc.py`'s `RAW_FILES`). `download` is size-verified and resumable;
+(exact names and sizes in `etl/yfcc.py`'s `RAW_FILES`). `download` is size-verified and resumable;
 `convert` re-parses every header and writes
 `data/_raw/yfcc10m/processed/manifest.json` with the sha256 of each file.
 
@@ -264,8 +270,8 @@ The current harness has **no precomputed-oracle input** — it always
 builds its own — so nothing reads `gt_shipped.pt` at sweep time. It is
 consumed by
 [`etl/yfcc_check_gt.py`](../../evaluation/eval_datasets/etl/yfcc_check_gt.py),
-and it is the format harness v2 should grow an input for
-([evaluation-harness-v2.md §7](../plans/evaluation-harness-v2.md#7-risks--open-questions)).
+and it is the format a harness input for shipped ground truth would read
+(not built).
 
 **Three things about this dataset differ from the others**, all forced by
 the upstream data:
@@ -288,9 +294,7 @@ the upstream data:
    The sidecars `text_emb.meta.json` / `query_emb.meta.json` carry
    `"prefix": null` — the declared "no prefix concept" of the prefix policy
    above — plus the provenance (source URL, raw dtype, both metrics, the
-   base-norm statistics). Until 2026-09-16 they were named
-   `emb_provenance.json` and `bench check` reported them missing; now
-   `bench check --dataset yfcc10m` is clean.
+   base-norm statistics); `bench check --dataset yfcc10m` is clean.
 3. **The narrow clause tensor is a capped approximation of the tag
    predicate** — see below.
 
@@ -344,10 +348,10 @@ data/yfcc10m/
 attribute (tags) and no wide-bloom bag, so the dead artifacts below do
 not exist for it.
 
-**Validating the shipped GT (roadmap E1's gate).**
+**Validating the shipped GT** (the dataset's staging gate; its state is
+in [validation](../validation.md#datasets)).
 
 ```bash
-export RETRIEVE_DATA_ROOT=/workspace/data
 uv run --directory evaluation eval-data yfcc-check-gt \
     --data-dir $RETRIEVE_DATA_ROOT/yfcc10m --device cuda \
     --report $RETRIEVE_DATA_ROOT/yfcc10m/gt_check.json
@@ -362,17 +366,16 @@ cpu --limit 200` is a ~2-minute sanity run), `--tags narrow` measures the
 cap instead of the true predicate, and `--metric ip` reports the cosine
 drift; the last two are diagnostics and always exit 0.
 
-**Running it (roadmap E1).** [`config/yfcc10m.yaml`](../../evaluation/config/yfcc10m.yaml)
-is the harness-v2 dataset file (one dim, 192; one clause sweep `tags_and`
+**Running it.** [`config/yfcc10m.yaml`](../../evaluation/config/yfcc10m.yaml)
+is the dataset file (one dim, 192; one clause sweep `tags_and`
 = clauses `[0, 1]`; no bloom block, because a bloom's false positives would
-make the cross-check against the shipped GT meaningless), and since
-2026-09-16 the dataset is listed in the `filter` suite of
+make the cross-check against the shipped GT meaningless), and the
+dataset is listed in the `filter` suite of
 [`config/suites.yaml`](../../evaluation/config/suites.yaml) with 192 added
 to the suite's dims. So
 
 ```bash
-export RETRIEVE_DATA_ROOT=/data
-uv run eval-data yfcc all --output-dir /data/yfcc10m      # 12.5 GB with the raw
+uv run eval-data yfcc all --output-dir $RETRIEVE_DATA_ROOT/yfcc10m   # 12.5 GB with the raw
 uv run bench check --dataset yfcc10m                       # yfcc10m d192: ok
 uv run bench run --dataset yfcc10m --suite filter          # every filter cell
 ```
@@ -381,8 +384,8 @@ is the whole path. Three things to keep in mind when reading its records:
 the suite's `ks` (100 / 500 / 1000) are deeper than the shipped GT's
 k = 10, which is fine because recall is measured against the harness's own
 cosine oracle over the capped attrs (deviations 1 and 3 above); the
-`none` cells are in no suite of `suites.yaml` (the unfiltered `quality`
-suite was retired on 2026-09-16; they come back with E5); and **the
+`none` cells are in no suite of `suites.yaml` (unfiltered cells come back
+with roadmap E5); and **the
 exact-algo cell fails the harness's quality gate on this dataset** — the
 library's `PostfilterKNN` scores in fp16, whose 4.9 × 10⁻⁴ spacing is
 coarser than YFCC's score density (a median 0.0072 cosine between rank 1
@@ -390,15 +393,14 @@ and rank 1000, plus 5 % exact-duplicate vectors), so `linr_v1_filter_mask`
 reaches only `recall_oracle@1000 ≈ 0.96` against the fp32 oracle and
 `QualityGateError` ends the run before the other algos. The oracle is right
 (0.9998 against fp64); the module's fp16 is the cause; it is
-backend-independent. What to do about it is an open decision recorded in
-[dataset-candidates.md §7.1](../plans/dataset-candidates.md#71-e1--yfcc-10m-staged-checked-and-run-2026-09-16),
-which also says what ran and on which device.
+backend-independent. What to do about it is an open decision on the
+[roadmap](../roadmap.md#needs-the-user).
 
 ### pubmed
 
 **Status: ETL written and rehearsed, nothing staged.** Roadmap E2's ingest
-path was restructured to stream on 2026-09-16 and dry-run on one real shard
-([dataset-candidates.md §7.2](../plans/dataset-candidates.md#72-e2--pubmed-streaming-etl-written-dry-run-on-one-shard-2026-09-16));
+path streams shard by shard and has been dry-run on one real shard
+([validation](../validation.md#datasets));
 the full download has not been started, no oracle has been built and no
 cell has run. Nothing below is citable.
 
@@ -428,10 +430,10 @@ width 768, and the row count must equal `len(pmids_chunk_i.json)`. The MEDLINE
 baseline *does* publish `.md5` and `verify --medline` checks those.
 
 **No dimensionality reduction.** Every dataset is benchmarked at its encoder's
-native dim (user decision 2026-09-06), so pubmed has exactly one content dir,
-`content_d768`, and `dataset-candidates.md` §4.1's PCA-to-256/128/64 plan is
-**not** implemented. [`config/pubmed.yaml`](../../evaluation/config/pubmed.yaml)
-is the harness-v2 dataset file (in no suite yet).
+native dim ([decisions](../decisions.md#datasets): no PCA), so pubmed has
+exactly one content dir, `content_d768`.
+[`config/pubmed.yaml`](../../evaluation/config/pubmed.yaml) is the dataset
+file (in no suite yet).
 
 #### The streaming `convert`
 
@@ -505,11 +507,10 @@ four, so `cap_mesh_by_rarity` keeps the **four globally rarest** in-vocab
 descriptors, *rarest first*, ties broken on vocab id. The order is load-bearing:
 `common.synthesize_qa_narrow` takes the first non-pad entry as the query-side
 clause value, so a frequency-descending order would hand every query "humans"
-(a ~40 % pass rate) instead of the selective heading
-`dataset-candidates.md` §4.1 asks for.
+(a ~40 % pass rate) instead of a selective heading.
 
 Language is parsed and stored in `articles.parquet` + `lang_vocab.json` but is
-*not* one of the five clauses — §4.1 fixes the layout above.
+*not* one of the five clauses.
 
 #### Query sets
 
@@ -521,8 +522,7 @@ sources:
   Always available. **Every held-out row keeps its query row** — an article
   without a title gets an empty string, it is not dropped — so
   `query_emb.pt` stays aligned 1:1 with `heldout.parquet` and
-  `eval_split.parquet`, which is what the 2026-09-06 review found broken
-  here and what `bench check` verifies.
+  `eval_split.parquet`, which `bench check` verifies.
 - `nfcorpus` — the NFCorpus (BEIR) biomedical query set. NFCorpus document ids
   *are* PMIDs, so its qrels map straight onto our item ids. BEIR asks that its
   corpus not be redistributed, so nothing is downloaded automatically: stage
@@ -540,7 +540,7 @@ the unfiltered cross-check sweep is meaningful rather than an identity lookup.
 
 Computed by `eval-data pubmed plan --medline --keep-items N` on 2026-09-16
 from the server's own sizes (the JSON reports are in
-[dataset-candidates-artifacts/pubmed/](../plans/dataset-candidates-artifacts/pubmed/)),
+[dataset-candidates-artifacts/pubmed/](../artifacts/dataset-candidates/pubmed/)),
 at the 23.9 MB/s a single-stream 64 MB probe measured that day (an earlier
 `curl` probe saw 41 MB/s; the range is the honest number):
 
@@ -555,7 +555,7 @@ at the 23.9 MB/s a single-stream 64 MB probe measured that day (an earlier
 | wall time (download-bound) | ~2.5 h at 23.9 MB/s, ~1.5 h at 41 MB/s | same |
 | items as the harness holds them: fp32 on the device | **110.3 GB** | 30.7 GB |
 
-The disk is no longer the obstacle: both fit beside goodreads + arxiv on the
+The disk is not the obstacle: both fit beside goodreads + arxiv on the
 overlay. **The GPU is.** `bench.inputs.load_inputs` holds the item matrix
 fp32 on the device, so the full catalog at 768-d needs 110 GB on an 80 GB
 A100 before any index exists — and even an fp16-items harness change would
@@ -564,8 +564,8 @@ slice is therefore the E2 target**, not a stopgap: 30.7 GB of items + 7.7 GB
 of int8 codes + 1.6 GB of attrs leaves the working set the oracle and the
 perf pools need, it is the papers' 10 M pool size and YFCC's, and the
 largest catalog the harness as written can take at 768-d is ~15 M. Going
-above that is a harness decision (fp16 items + a chunked oracle, review
-§2.8), not an ETL one.
+above that is a harness decision (fp16 items + a chunked oracle), not an
+ETL one.
 
 ### synth_arxiv
 
@@ -630,8 +630,8 @@ Filter sweeps additionally need:
 `wide_shelf_global_freq.pt`, and the `query_attrs_wide_1shelf` /
 `_2shelf` columns of `eval_split.parquet` are **built but never read**:
 `bench.inputs.load_inputs` does not load them and `layout.load_query_attrs`
-reads only the `query_attrs_narrow` column. They exist for a wide-bloom sweep that was
-never run. Keep or drop them as a unit — they are only meaningful
+reads only the `query_attrs_narrow` column. They exist for a wide-bloom
+sweep that no suite runs. Keep or drop them as a unit — they are only meaningful
 together.
 
 ## HuggingFace I/O
@@ -656,8 +656,8 @@ are already public and unauthenticated, so `yfcc download` is the fetch
 path; the entry exists so the local directory layout resolves like every
 other dataset's.
 
-`pinkmeme/eval-pubmed` is **registered but not published** — E2 is deferred and
-nothing has been pushed to it.
+`pinkmeme/eval-pubmed` is **registered but not published**; nothing is
+pushed to it before roadmap E2.
 
 `eval-data fetch` pulls a prepared dataset (optionally a subset of dims),
 `eval-data publish` pushes one, `eval-data publish-checkpoint` pushes a
@@ -739,7 +739,7 @@ Training throughput matters more than bit-reproducibility of a matmul.
 ```
 
 `config.json` is what makes a checkpoint self-describing at eval time.
-Checkpoints trained before it was written fall back to
+A checkpoint without it falls back to
 `D128_DROP05_DEFAULTS` in
 [`encode.py`](../../evaluation/training/encode.py) — see
 [checkpoints.md](checkpoints.md) for which runs those are.
@@ -756,7 +756,7 @@ Checkpoints trained before it was written fall back to
    `item_attrs_narrow.pt`, `clause_is_reverse_narrow.pt`, the vocab
    JSONs, and `eval_split.parquet` aligned 1:1 with `test.parquet`.
 3. Add an entry to `EVAL_REPOS` in `hub.py`.
-4. Add one `evaluation/config/<name>.yaml` (harness v2: one YAML per
+4. Add one `evaluation/config/<name>.yaml` (one YAML per
    dataset, see [evaluation.md](evaluation.md#config-one-yaml-per-dataset--suitesyaml))
    and list the dataset in the suites it belongs to in
    `evaluation/config/suites.yaml`. Set `checkpoint` for the sequential
