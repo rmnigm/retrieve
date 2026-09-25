@@ -24,7 +24,7 @@ per query, [`articles/silvertorch.md`](../../articles/silvertorch.md)
 [`articles/linr.md`](../../articles/linr.md) § Benchmark). Our current
 pools top out at 5.37M (Yambda-5B) and only Goodreads (797k) and arXiv
 (2.99M) carry attributes ([`docs/system/datasets.md`](../system/datasets.md),
-[`docs/thesis/main.tex`](../thesis/main.tex) § 5.1). A replacement set
+thesis § 5.1). A replacement set
 must (1) hold ≥ 10M items (5M floor, 50–100M stretch) whose fp16
 embeddings at D=64–256 plus IVF/Bloom indexes fit one A100-80GB; (2) ship
 dense vectors or encodable content with a named encoder; (3) carry

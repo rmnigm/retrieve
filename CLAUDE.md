@@ -12,15 +12,14 @@ or that sits behind an unchecked dependency.
 papers — SilverTorch (Meta, `articles/silvertorch.md`) and LiNR (LinkedIn,
 `articles/linr.md`) — from their text. `evaluation/` is the benchmark and
 training harness that produces the numbers for a master's thesis
-(`docs/thesis/`) and, now, a reproducibility paper (roadmap §0). It is a uv
+(its sources are kept out of this repository) and, now, a reproducibility paper (roadmap §0). It is a uv
 workspace with one `.venv` at the root; `README.md` has the layout and the
 install commands.
 
 Naming that must stay straight in code, docs and prose: our `SilverTorch`
 layer is *SilverTorch Algorithm 1 reimplemented* (in the thesis it was
-called QuantizedIVF — retired 2026-09-15 in `docs/thesis/` and `docs/paper/`;
-`docs/presentation/` still says it and stays that way, being the source of a
-talk already delivered with its PDF beside it); `meta-recsys/silvertorch`
+called QuantizedIVF — retired 2026-09-15 in the thesis and `docs/paper/`;
+the already-delivered defense talk still says it and stays that way); `meta-recsys/silvertorch`
 is Meta's *official* code and, once integrated, `backend="official"`; the
 LiNR variants are V1–V4 as in the paper.
 

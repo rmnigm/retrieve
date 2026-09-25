@@ -387,8 +387,8 @@ venv, no GPU, no measurement; `retrieve/` and `evaluation/` were not touched
 
 **What was written.**
 
-1. **The thesis is reframed** ([../thesis/main.tex](../thesis/main.tex),
-   [../thesis/references.bib](../thesis/references.bib)). All 33 occurrences of
+1. **The thesis is reframed** (`main.tex`,
+   `references.bib`; thesis sources, not in this repository). All 33 occurrences of
    *QuantizedIVF* are gone; the algorithm is **SilverTorch (Алгоритм 1)** in
    prose, in the section heading, in the algorithm caption, in the `algo:`
    label and its `\ref`, in every table column and in the figure caption. The

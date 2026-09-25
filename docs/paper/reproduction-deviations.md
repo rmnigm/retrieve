@@ -29,7 +29,7 @@ The thesis called our SilverTorch layer *QuantizedIVF* and described it as a new
 algorithm proposed in that work. It is not: it is **SilverTorch's Algorithm 1**
 (`articles/silvertorch.md` §4.4, `alg:partial_bloom`), reimplemented from the
 paper's text. The name is retired; roadmap **F1** rewrote
-[../thesis/main.tex](../thesis/main.tex) accordingly and added the missing
+the thesis source (`main.tex`, not in this repository) accordingly and added the missing
 citation of the SilverTorch paper, which the thesis did not carry at all.
 
 The three vocabularies, from
