@@ -8,7 +8,7 @@ CONF=$CONF_DIR/config.env
 SSH_CONF=$HOME/.ssh/retrieve-pods.conf
 KNOWN_HOSTS=$HOME/.ssh/retrieve-pods.known_hosts
 
-IMAGE=ghcr.io/rmnigm/retrieve-pod:v4
+IMAGE=ghcr.io/rmnigm/retrieve-pod:v5
 GPU=a100
 SSH_KEY=$HOME/.ssh/runpod_ed25519
 SECRETS=
