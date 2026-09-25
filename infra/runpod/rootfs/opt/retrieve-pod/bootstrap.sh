@@ -25,4 +25,5 @@ if [ ! -d "$REPO_DIR/.git" ]; then
     git clone --branch "$REPO_BRANCH" "https://github.com/$REPO_SLUG.git" "$REPO_DIR"
 fi
 rp-sync
+(cd "$REPO_DIR" && pre-commit install)
 echo "== bootstrap done $(date -Is)"

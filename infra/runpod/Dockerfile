@@ -14,7 +14,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility \
     CUDA_HOME=/usr/local/cuda-12.8 \
-    PATH=/root/.local/bin:/usr/local/cuda-12.8/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    PATH=/venvs/retrieve/bin:/root/.local/bin:/usr/local/cuda-12.8/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     UV_PROJECT_ENVIRONMENT=/venvs/retrieve \
     UV_PYTHON_INSTALL_DIR=/opt/uv-python \
     UV_PYTHON_PREFERENCE=only-managed \
@@ -59,6 +59,12 @@ RUN uv python install ${PYTHON_VERSION} \
         --all-packages --all-groups --extra official \
     && uv cache clean \
     && /venvs/retrieve/bin/python -c "import torch, triton, silvertorch; print(torch.__version__, triton.__version__)"
+
+ENV UV_TOOL_DIR=/opt/uv-tools UV_TOOL_BIN_DIR=/usr/local/bin
+RUN for tool in ruff==0.15.6 pre-commit==4.6.2 pyrefly==1.3.1; do uv tool install --python ${PYTHON_VERSION} "$tool"; done \
+    && uv cache clean \
+    && ruff --version && pre-commit --version && pyrefly --version \
+    && mkdir -p /data /scratch/campaigns /scratch/inductor /scratch/parity /scratch/hf /scratch/wt /scratch/tmp
 
 COPY infra/runpod/rootfs/ /
 RUN chmod +x /opt/retrieve-pod/*.sh /usr/local/bin/rp-* \

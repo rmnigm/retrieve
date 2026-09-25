@@ -15,17 +15,22 @@ and `herdr` for remote attach. Every `runpodctl` command prints JSON.
   (`infra/runpod/Dockerfile`): Ubuntu 22.04 with only nvcc + the CUDA 12.8 headers
   (`CUDA_HOME=/usr/local/cuda-12.8`, matching the torch 2.10.0+cu128 wheel), uv, Python 3.11, the workspace venv at `/venvs/retrieve` built from `uv.lock`
   with `--all-packages --all-groups --extra official` (Meta's silvertorch compiled
-  for sm_80 + sm_90), gh, Claude Code, herdr, runpodctl, sshd.
+  for sm_80 + sm_90, on `PATH`), gh, Claude Code, herdr, runpodctl, sshd, and pinned
+  `ruff` 0.15.6 (the pre-commit version), `pre-commit` 4.6.2 and `pyrefly` 1.3.1.
 - `/workspace` is the pod volume (or a network volume). Boot
   (`rootfs/opt/retrieve-pod/bootstrap.sh`, log `/workspace/.pod-home/bootstrap.log`)
   clones `rmnigm/retrieve` at `staging` into `$REPO_DIR` (default
   `/workspace/retrieve`; `/workspace/<pod>/retrieve` when a network volume is shared),
-  runs `rp-sync`, installs herdr's Claude integration and pre-trusts the checkout.
+  runs `rp-sync` and `pre-commit install`, installs herdr's Claude integration and
+  pre-trusts the checkout.
   It never touches an existing checkout. A headless `herdr server` starts at boot
   (log `/workspace/.pod-home/herdr.log`), so herdr sessions outlive SSH disconnects.
-- State that survives restarts lives in `/workspace/.pod-home`: `secrets.env`
-  (tokens), `gitconfig`, `claude/` (Claude config, `~/.claude` points here).
-  `HF_HOME` and `RETRIEVE_DATA_ROOT` are on `/workspace` too.
+- Disks follow `docs/system/storage.md`: `/workspace` (slow network volume, survives
+  restarts) holds only the checkout and `/workspace/.pod-home` (`secrets.env`,
+  `gitconfig`, `claude/` which `~/.claude` points at). Everything large and
+  regenerable is on the container disk, which a restart wipes: `RETRIEVE_DATA_ROOT=/data`,
+  `HF_HOME=/scratch/hf`, and `/scratch/{inductor,parity,campaigns,wt,tmp}`. Give each
+  job its own `TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/<job>`.
 - In the pod use `rp-sync` rather than bare `uv sync`: a bare sync is exact and
   uninstalls pytest and silvertorch.
 
@@ -73,7 +78,7 @@ retrieve-pod → settings).
 ## Commands
 
 ```bash
-pod.sh up                          # 1× default GPU (config), secure cloud, 100 GB pod volume
+pod.sh up                          # 1× default GPU (config), secure cloud, 200 GB disk, 30 GB volume
 pod.sh up -g h100 -n 4             # one pod, 4× H100 SXM
 pod.sh up -g a100 -p 3             # three pods, 1× A100 SXM each (names …-1..3)
 pod.sh up --nv VOLUME_ID -g h100   # attach a network volume (shared state, per-pod checkout)

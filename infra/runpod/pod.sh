@@ -94,7 +94,7 @@ pod_id() {
 }
 
 cmd_up() {
-    local gpu=$GPU gpus=1 npods=1 name="" nv="" cloud=SECURE branch=staging disk=60 volume=100
+    local gpu=$GPU gpus=1 npods=1 name="" nv="" cloud=SECURE branch=staging disk=200 volume=30
     while [ $# -gt 0 ]; do
         case $1 in
             -g | --gpu) gpu=$2; shift ;;
