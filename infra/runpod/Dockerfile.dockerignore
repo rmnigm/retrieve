@@ -1,0 +1,7 @@
+*
+!pyproject.toml
+!uv.lock
+!retrieve/pyproject.toml
+!retrieve/README.md
+!evaluation/pyproject.toml
+!infra/runpod/rootfs

@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. /opt/retrieve-pod/bashrc.sh
+SECRETS=$POD_STATE/secrets.env
+PY=/venvs/retrieve/bin/python
+touch "$SECRETS"
+chmod 600 "$SECRETS"
+
+save() {
+    local tmp
+    tmp=$(mktemp)
+    grep -v "^$1=" "$SECRETS" > "$tmp" || true
+    printf '%s=%q\n' "$1" "$2" >> "$tmp"
+    mv "$tmp" "$SECRETS"
+    chmod 600 "$SECRETS"
+    export "$1=$2"
+    echo "  saved $1"
+}
+ask() { read -rp "  $1 " REPLY; }
+secret() { read -rsp "  $1 " REPLY; echo; }
+
+login_gh() {
+    echo "== GitHub"
+    ask "[b]rowser device login, [p]aste token, Enter to skip:"
+    case $REPLY in
+        b) (unset GH_TOKEN; gh auth login -h github.com -p https -s repo,workflow -w)
+           save GH_TOKEN "$(unset GH_TOKEN; gh auth token)" ;;
+        p) secret "token:"; [ -z "$REPLY" ] || save GH_TOKEN "$REPLY" ;;
+    esac
+    [ -n "${GH_TOKEN:-}" ] || return 0
+    gh auth setup-git
+    echo "  user $(gh api user -q .login), push to $REPO_SLUG: $(gh api "repos/$REPO_SLUG" -q .permissions.push)"
+    ask "git user.name [${GIT_USER_NAME:-}]:"
+    save GIT_USER_NAME "${REPLY:-${GIT_USER_NAME:-}}"
+    ask "git user.email [${GIT_USER_EMAIL:-}]:"
+    save GIT_USER_EMAIL "${REPLY:-${GIT_USER_EMAIL:-}}"
+    git config --global user.name "$GIT_USER_NAME"
+    git config --global user.email "$GIT_USER_EMAIL"
+}
+
+login_hf() {
+    echo "== Hugging Face (huggingface.co/settings/tokens)"
+    secret "token, Enter to skip:"
+    [ -n "$REPLY" ] || return 0
+    HF_TOKEN=$REPLY /venvs/retrieve/bin/hf auth whoami && save HF_TOKEN "$REPLY"
+}
+
+login_wandb() {
+    echo "== W&B (wandb.ai/authorize)"
+    secret "key, Enter to skip:"
+    [ -n "$REPLY" ] || return 0
+    "$PY" -c 'import sys, wandb; print(" ", wandb.Api(api_key=sys.argv[1]).viewer)' "$REPLY" \
+        && save WANDB_API_KEY "$REPLY"
+}
+
+login_claude() {
+    echo "== Claude Code"
+    ask "[s]ubscription token, [k] API key, Enter to skip:"
+    case $REPLY in
+        s) ask "generate one here with 'claude setup-token'? [y/N]"
+           if [ "$REPLY" = y ]; then claude setup-token || true; fi
+           secret "token:"; [ -z "$REPLY" ] || save CLAUDE_CODE_OAUTH_TOKEN "$REPLY" ;;
+        k) secret "key:"; [ -z "$REPLY" ] || save ANTHROPIC_API_KEY "$REPLY" ;;
+    esac
+}
+
+for t in "${@:-gh hf wandb claude}"; do
+    for u in $t; do "login_$u"; done
+done
+echo "done — 'exec bash' to load the new env; restart herdr panes opened before this"

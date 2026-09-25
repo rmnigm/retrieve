@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. /opt/retrieve-pod/bashrc.sh
+cd "${1:-$REPO_DIR}"
+exec uv sync --all-packages --all-groups --extra official
