@@ -2,7 +2,6 @@
 set -euo pipefail
 . /opt/retrieve-pod/bashrc.sh
 SECRETS=$POD_STATE/secrets.env
-PY=/venvs/retrieve/bin/python
 touch "$SECRETS"
 chmod 600 "$SECRETS"
 
@@ -49,7 +48,7 @@ login_wandb() {
     echo "== W&B (wandb.ai/authorize)"
     secret "key, Enter to skip:"
     [ -n "$REPLY" ] || return 0
-    "$PY" -c 'import sys, wandb; print(" ", wandb.Api(api_key=sys.argv[1]).viewer)' "$REPLY" \
+    /venvs/retrieve/bin/python -c 'import sys, wandb; print(" ", wandb.Api(api_key=sys.argv[1]).viewer)' "$REPLY" \
         && save WANDB_API_KEY "$REPLY"
 }
 
@@ -64,7 +63,6 @@ login_claude() {
     esac
 }
 
-for t in "${@:-gh hf wandb claude}"; do
-    for u in $t; do "login_$u"; done
-done
+[ $# -gt 0 ] || set -- gh hf wandb claude
+for t; do "login_$t"; done
 echo "done — 'exec bash' to load the new env; restart herdr panes opened before this"

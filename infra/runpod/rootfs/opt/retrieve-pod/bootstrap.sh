@@ -17,10 +17,8 @@ jq --arg repo "$REPO_DIR" \
     "$cfg" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
 herdr integration install claude || true
 
-touch "$GIT_CONFIG_GLOBAL"
 if [ -n "${GIT_USER_NAME:-}" ]; then git config --global user.name "$GIT_USER_NAME"; fi
 if [ -n "${GIT_USER_EMAIL:-}" ]; then git config --global user.email "$GIT_USER_EMAIL"; fi
-git config --global --replace-all safe.directory '*'
 if [ -n "${GH_TOKEN:-}" ]; then gh auth setup-git; fi
 
 if [ ! -d "$REPO_DIR/.git" ]; then

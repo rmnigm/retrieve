@@ -8,7 +8,7 @@ CONF=$CONF_DIR/config.env
 SSH_CONF=$HOME/.ssh/retrieve-pods.conf
 KNOWN_HOSTS=$HOME/.ssh/retrieve-pods.known_hosts
 
-IMAGE=ghcr.io/rmnigm/retrieve-pod:v3
+IMAGE=ghcr.io/rmnigm/retrieve-pod:v4
 GPU=a100
 SSH_KEY=$HOME/.ssh/runpod_ed25519
 SECRETS=
@@ -55,8 +55,7 @@ cmd_init() {
 }
 
 pods() {
-    runpodctl pod list | jq '[(if type == "array" then .[] else (.pods // [])[] end)
-        | select(.name | startswith("retrieve-"))]'
+    runpodctl pod list | jq '[.[] | select(.name | startswith("retrieve-"))]'
 }
 
 endpoint() {
@@ -113,10 +112,11 @@ cmd_up() {
     done
     [ -f "$CONF" ] || die "run 'pod.sh init' first"
     name=${name:-$gpu-x$gpus-$(date +%m%d%H%M)}
-    local i pname env pair args
+    local i pname env pair args names=()
     for ((i = 1; i <= npods; i++)); do
         pname=$name
         [ "$npods" -eq 1 ] || pname=$name-$i
+        names+=("$pname")
         env=$(jq -n --arg b "$branch" --arg k "$(cat "$SSH_KEY.pub")" \
             --arg n "$(git -C "$REPO_ROOT" config user.name || true)" \
             --arg e "$(git -C "$REPO_ROOT" config user.email || true)" \
@@ -133,15 +133,13 @@ cmd_up() {
         runpodctl pod create "${args[@]}" | jq -r --arg n "rp-$pname" '"\($n)  \(.id)"'
     done
     refresh >/dev/null
-    for ((i = 1; i <= npods; i++)); do
-        pname=$name
-        [ "$npods" -eq 1 ] || pname=$name-$i
-        herdr machine add "rp-$pname" --label "$pname" || echo "herdr machine add rp-$pname failed"
+    for pname in "${names[@]}"; do
+        herdr machine add "rp-$pname" --label "$pname" || true
     done
 }
 
 machine_id() {
-    herdr machine list 2>/dev/null | awk -v l="${1#rp-}" '$0 ~ ("(^|[^-[:alnum:]])" l "([^-[:alnum:]]|$)") {print $1; exit}'
+    herdr machine list | awk -F'\t' -v l="${1#rp-}" '$2 == l {print $1}'
 }
 
 cmd_image() {
@@ -186,7 +184,7 @@ shift || true
 case $cmd in
     init) cmd_init ;;
     up) cmd_up "$@" ;;
-    ls) refresh | jq -r '.[] | "rp-\(.name | ltrimstr("retrieve-"))\t\(.id)\t\(.desiredStatus // "?")\t\(.costPerHr // "?")/hr"' ;;
+    ls) refresh | jq -r '.[] | "rp-\(.name | ltrimstr("retrieve-"))\t\(.id)\t\(.desiredStatus)\t\(.costPerHr)/hr"' ;;
     ssh) h=$(host "${1:?pod}"); shift; exec ssh "$h" "$@" ;;
     herdr) exec herdr --remote "$(host "${1:?pod}")" ;;
     login) exec ssh -t "$(host "${1:?pod}")" rp-login "${@:2}" ;;

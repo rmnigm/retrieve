@@ -12,8 +12,8 @@ and `herdr` for remote attach. Every `runpodctl` command prints JSON.
 ## What a pod is
 
 - Image `ghcr.io/rmnigm/retrieve-pod:<tag>`, the tag pinned as `IMAGE` in `pod.sh`
-  (`infra/runpod/Dockerfile`): Ubuntu 22.04 with only nvcc + CUDA 12.8 headers (`CUDA_HOME=/usr/local/cuda-12.8`, matching the torch 2.10.0+cu128 wheel),
-  uv, Python 3.11, the workspace venv at `/venvs/retrieve` built from `uv.lock`
+  (`infra/runpod/Dockerfile`): Ubuntu 22.04 with only nvcc + the CUDA 12.8 headers
+  (`CUDA_HOME=/usr/local/cuda-12.8`, matching the torch 2.10.0+cu128 wheel), uv, Python 3.11, the workspace venv at `/venvs/retrieve` built from `uv.lock`
   with `--all-packages --all-groups --extra official` (Meta's silvertorch compiled
   for sm_80 + sm_90), gh, Claude Code, herdr, runpodctl, sshd.
 - `/workspace` is the pod volume (or a network volume). Boot
@@ -54,7 +54,7 @@ runs `claude setup-token` (laptop or pod) for a subscription token, or uses an A
 ## Image (built on a RunPod CPU pod, no local Docker)
 
 ```bash
-infra/runpod/pod.sh image [BRANCH]    # default staging; streams the build log, deletes the pod
+infra/runpod/pod.sh image [BRANCH]    # default staging; polls the build log, deletes the pod
 ```
 
 kaniko on a 16-vCPU CPU pod builds `origin/BRANCH` (so push `infra/runpod/` and the
@@ -64,9 +64,9 @@ It authenticates with the RunPod secret `ghcr_token`: a classic GitHub token wit
 cannot size CPU pods or override the entrypoint. The log also lands in
 `$TMPDIR/retrieve-image-build.log`; it takes several minutes, so run it in the background.
 
-Bump the tag in `pod.sh` for every rebuild (pods cache by tag), then delete the
-now-untagged version on GHCR (`gh api user/packages/container/retrieve-pod/versions`,
-needs `delete:packages`). Rebuild after `uv.lock` or `infra/runpod/` changes. Pods
+Bump the tag in `pod.sh` for every rebuild (pods cache by tag), then have the user
+delete the previous tag at github.com/users/rmnigm/packages/container/retrieve-pod/versions
+(⋯ → Delete version). Rebuild after `uv.lock` or `infra/runpod/` changes. Pods
 pull anonymously, so the GHCR package must be public (GitHub → Packages →
 retrieve-pod → settings).
 
