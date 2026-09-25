@@ -6,8 +6,9 @@ REPO_ROOT=$(cd "$HERE/../.." && pwd)
 CONF_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/retrieve-pod
 CONF=$CONF_DIR/config.env
 SSH_CONF=$HOME/.ssh/retrieve-pods.conf
+KNOWN_HOSTS=$HOME/.ssh/retrieve-pods.known_hosts
 
-IMAGE=ghcr.io/rmnigm/retrieve-pod:v2
+IMAGE=ghcr.io/rmnigm/retrieve-pod:v3
 GPU=a100
 SSH_KEY=$HOME/.ssh/runpod_ed25519
 SECRETS=
@@ -59,15 +60,7 @@ pods() {
 }
 
 endpoint() {
-    local ip port cmd
-    ip=$(jq -r '.publicIp // empty' <<<"$1")
-    port=$(jq -r '(.portMappings // {})["22"] // empty' <<<"$1")
-    if [ -z "$ip" ] || [ -z "$port" ]; then
-        cmd=$(runpodctl ssh info "$(jq -r .id <<<"$1")" 2>/dev/null | jq -r '.command // empty' || true)
-        ip=$(sed -nE 's/.*@([0-9.]+).*/\1/p' <<<"$cmd")
-        port=$(sed -nE 's/.*-p ?([0-9]+).*/\1/p' <<<"$cmd")
-    fi
-    [ -z "$ip" ] || [ -z "$port" ] || echo "$ip $port"
+    runpodctl ssh info "$(jq -r .id <<<"$1")" 2>/dev/null | jq -r 'select(.ip and .port) | "\(.ip) \(.port)"' || true
 }
 
 refresh() {
@@ -79,9 +72,11 @@ refresh() {
         pod=$(jq ".[$i]" <<<"$all")
         ep=$(endpoint "$pod")
         [ -n "$ep" ] || continue
-        printf 'Host rp-%s %s\n  HostName %s\n  Port %s\n  User root\n  IdentityFile %s\n  IdentitiesOnly yes\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null\n  LogLevel ERROR\n  ServerAliveInterval 30\n\n' \
+        ssh-keygen -R "[${ep% *}]:${ep#* }" -f "$KNOWN_HOSTS" >/dev/null 2>&1 || true
+        ssh-keyscan -T 5 -p "${ep#* }" "${ep% *}" >> "$KNOWN_HOSTS" 2>/dev/null || true
+        printf 'Host rp-%s %s\n  HostName %s\n  Port %s\n  User root\n  IdentityFile %s\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  UserKnownHostsFile %s\n  LogLevel ERROR\n  ServerAliveInterval 30\n\n' \
             "$(jq -r '.name | ltrimstr("retrieve-")' <<<"$pod")" "$(jq -r .id <<<"$pod")" \
-            "${ep% *}" "${ep#* }" "$SSH_KEY" >> "$SSH_CONF.tmp"
+            "${ep% *}" "${ep#* }" "$SSH_KEY" "$KNOWN_HOSTS" >> "$SSH_CONF.tmp"
     done
     mv "$SSH_CONF.tmp" "$SSH_CONF"
     echo "$all"

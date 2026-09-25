@@ -10,7 +10,7 @@ chmod 600 /root/.ssh/authorized_keys
 ssh-keygen -A >/dev/null
 /usr/sbin/sshd
 
-nohup herdr server >> /workspace/.pod-home/herdr.log 2>&1 &
+(cd /root && SHELL=/bin/bash setsid /root/.local/bin/herdr server >> /workspace/.pod-home/herdr.log 2>&1 < /dev/null &)
 /opt/retrieve-pod/bootstrap.sh >> /workspace/.pod-home/bootstrap.log 2>&1 &
 
 exec sleep infinity
