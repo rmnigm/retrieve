@@ -155,7 +155,7 @@ cmd_image() {
     git -C "$REPO_ROOT" diff --quiet "origin/$branch" -- infra/runpod pyproject.toml uv.lock \
         retrieve/pyproject.toml retrieve/README.md evaluation/pyproject.toml \
         || die "kaniko builds origin/$branch: push infra/runpod and the lockfiles first"
-    key=${RUNPOD_API_KEY:-$(sed -nE 's/^apikey *= *"?([^"]*)"?/\1/p' "$HOME/.runpod/config.toml")}
+    key=${RUNPOD_API_KEY:-$(sed -nE "s/^apikey *= *[\"']?([^\"']*)[\"']?/\\1/p" "$HOME/.runpod/config.toml")}
     build=$(cat <<'EOS'
 mkdir -p /kaniko/.docker
 printf '{"auths":{"ghcr.io":{"auth":"%s"}}}' "$(printf '%s:%s' "$GHCR_USER" "$GHCR_TOKEN" | base64 | tr -d '\n')" > /kaniko/.docker/config.json
