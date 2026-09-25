@@ -7,7 +7,7 @@ CONF_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/retrieve-pod
 CONF=$CONF_DIR/config.env
 SSH_CONF=$HOME/.ssh/retrieve-pods.conf
 
-IMAGE=ghcr.io/rmnigm/retrieve-pod:latest
+IMAGE=ghcr.io/rmnigm/retrieve-pod:v2
 GPU=a100
 SSH_KEY=$HOME/.ssh/runpod_ed25519
 SECRETS=
@@ -42,8 +42,8 @@ cmd_init() {
     done
     read -rp "default gpu [$GPU]: " g
     mkdir -p "$CONF_DIR"
-    printf 'IMAGE=%s\nGPU=%s\nSSH_KEY=%s\nSECRETS="%s"\n' \
-        "$IMAGE" "${g:-$GPU}" "$SSH_KEY" "${s# }" > "$CONF"
+    printf 'GPU=%s\nSSH_KEY=%s\nSECRETS="%s"\n' \
+        "${g:-$GPU}" "$SSH_KEY" "${s# }" > "$CONF"
     touch "$SSH_CONF"
     grep -qF "$SSH_CONF" "$HOME/.ssh/config" 2>/dev/null || {
         { echo "Include $SSH_CONF"; cat "$HOME/.ssh/config" 2>/dev/null || true; } > "$HOME/.ssh/config.new"
@@ -149,6 +149,39 @@ machine_id() {
     herdr machine list 2>/dev/null | awk -v l="${1#rp-}" '$0 ~ ("(^|[^-[:alnum:]])" l "([^-[:alnum:]]|$)") {print $1; exit}'
 }
 
+cmd_image() {
+    local branch=${1:-development} key body id build
+    git -C "$REPO_ROOT" fetch -q origin "$branch"
+    git -C "$REPO_ROOT" diff --quiet "origin/$branch" -- infra/runpod pyproject.toml uv.lock \
+        retrieve/pyproject.toml retrieve/README.md evaluation/pyproject.toml \
+        || die "kaniko builds origin/$branch: push infra/runpod and the lockfiles first"
+    key=${RUNPOD_API_KEY:-$(sed -nE 's/^apikey *= *"?([^"]*)"?/\1/p' "$HOME/.runpod/config.toml")}
+    build=$(cat <<'EOS'
+mkdir -p /kaniko/.docker
+printf '{"auths":{"ghcr.io":{"auth":"%s"}}}' "$(printf '%s:%s' "$GHCR_USER" "$GHCR_TOKEN" | base64 | tr -d '\n')" > /kaniko/.docker/config.json
+/kaniko/executor --context "git://github.com/$REPO#refs/heads/$BRANCH" --dockerfile infra/runpod/Dockerfile \
+    --destination "$IMAGE" --destination "${IMAGE%:*}:latest" --build-arg MAX_JOBS=16 \
+    --snapshot-mode=redo --use-new-run
+echo "BUILD_EXIT=$?"
+sleep infinity
+EOS
+)
+    body=$(jq -n --arg img "$IMAGE" --arg b "$branch" --arg sh "$(printf '%s' "$build" | base64)" \
+        --arg user "$(cut -d/ -f2 <<<"$IMAGE")" '{
+        name: "retrieve-image-build", computeType: "CPU", cpuFlavorIds: ["cpu5c", "cpu3c"], vcpuCount: 16,
+        containerDiskInGb: 80, volumeInGb: 0, imageName: "gcr.io/kaniko-project/executor:v1.23.2-debug",
+        dockerEntrypoint: ["/busybox/sh", "-c"], dockerStartCmd: ["echo \"$BUILD_SH\" | base64 -d | sh"],
+        env: {BUILD_SH: $sh, IMAGE: $img, REPO: "rmnigm/retrieve", BRANCH: $b, GHCR_USER: $user,
+              GHCR_TOKEN: "{{ RUNPOD_SECRET_ghcr_token }}"}}')
+    id=$(curl -fsS -X POST https://rest.runpod.io/v1/pods -H "Authorization: Bearer $key" \
+        -H "Content-Type: application/json" -d "$body" | jq -r .id)
+    echo "build pod $id — building $IMAGE from origin/$branch"
+    runpodctl pod logs "$id" --follow | jq -r --unbuffered 'select(.source == "container") | .line' \
+        | tee "${TMPDIR:-/tmp}/retrieve-image-build.log" | sed -u '/^BUILD_EXIT=/q' || true
+    runpodctl pod delete "$id" >/dev/null && echo "build pod $id deleted"
+    grep -q '^BUILD_EXIT=0$' "${TMPDIR:-/tmp}/retrieve-image-build.log"
+}
+
 cmd=${1:-help}
 shift || true
 case $cmd in
@@ -161,6 +194,6 @@ case $cmd in
     log) exec ssh "$(host "${1:?pod}")" tail -n +1 -f /workspace/.pod-home/bootstrap.log ;;
     stop | start) runpodctl pod "$cmd" "$(pod_id "${1:?pod}")" >/dev/null && refresh >/dev/null ;;
     rm) id=$(pod_id "${1:?pod}"); [ -n "$id" ] || die "no pod $1"; m=$(machine_id "$1"); [ -z "$m" ] || herdr machine remove "$m"; runpodctl pod delete "$id" >/dev/null && refresh >/dev/null ;;
-    image) docker buildx build --platform linux/amd64 -f "$HERE/Dockerfile" -t "$IMAGE" --push "$REPO_ROOT" ;;
+    image) cmd_image "$@" ;;
     *) die "usage: pod.sh init|up|ls|ssh|herdr|login|log|stop|start|rm|image (see .claude/skills/runpod/SKILL.md)" ;;
 esac

@@ -1,10 +1,8 @@
-# syntax=docker/dockerfile:1.7
-ARG CUDA_IMAGE=nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:latest
 
 FROM ${UV_IMAGE} AS uv
 
-FROM ${CUDA_IMAGE}
+FROM ubuntu:22.04
 
 ARG PYTHON_VERSION=3.11
 ARG TORCH_CUDA_ARCH_LIST="8.0;9.0"
@@ -13,6 +11,8 @@ ARG MAX_JOBS=4
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
     CUDA_HOME=/usr/local/cuda-12.8 \
     PATH=/root/.local/bin:/usr/local/cuda-12.8/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     UV_PROJECT_ENVIRONMENT=/venvs/retrieve \
@@ -28,7 +28,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
         > /etc/apt/sources.list.d/github-cli.list \
+    && curl -fsSL -o /tmp/cuda-keyring.deb \
+        https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb \
+    && dpkg -i /tmp/cuda-keyring.deb && rm /tmp/cuda-keyring.deb \
     && apt-get update && apt-get install -y --no-install-recommends gh \
+        cuda-nvcc-12-8 cuda-cudart-dev-12-8 cuda-cccl-12-8 cuda-nvrtc-dev-12-8 cuda-nvtx-12-8 \
+        libcublas-dev-12-8 libcurand-dev-12-8 libcusparse-dev-12-8 libcufft-dev-12-8 libcusolver-dev-12-8 \
+    && rm -f /usr/local/cuda-12.8/targets/x86_64-linux/lib/*_static*.a \
     && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_* \
     && mkdir -p /run/sshd /root/.ssh && chmod 700 /root/.ssh \
     && sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/; s/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
@@ -46,12 +52,12 @@ WORKDIR /opt/retrieve-lock
 COPY pyproject.toml uv.lock ./
 COPY retrieve/pyproject.toml retrieve/README.md retrieve/
 COPY evaluation/pyproject.toml evaluation/
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv python install ${PYTHON_VERSION} \
+RUN uv python install ${PYTHON_VERSION} \
     && uv sync --frozen --python ${PYTHON_VERSION} --no-install-workspace \
         --all-packages --all-groups --no-install-package silvertorch \
     && MAX_JOBS=${MAX_JOBS} uv sync --frozen --python ${PYTHON_VERSION} --no-install-workspace \
         --all-packages --all-groups --extra official \
+    && uv cache clean \
     && /venvs/retrieve/bin/python -c "import torch, triton, silvertorch; print(torch.__version__, triton.__version__)"
 
 COPY infra/runpod/rootfs/ /

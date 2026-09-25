@@ -11,8 +11,8 @@ and `herdr` for remote attach. Every `runpodctl` command prints JSON.
 
 ## What a pod is
 
-- Image `ghcr.io/rmnigm/retrieve-pod:latest` (`infra/runpod/Dockerfile`): CUDA 12.8
-  devel (`CUDA_HOME=/usr/local/cuda-12.8`, matching the torch 2.10.0+cu128 wheel),
+- Image `ghcr.io/rmnigm/retrieve-pod:<tag>`, the tag pinned as `IMAGE` in `pod.sh`
+  (`infra/runpod/Dockerfile`): Ubuntu 22.04 with only nvcc + CUDA 12.8 headers (`CUDA_HOME=/usr/local/cuda-12.8`, matching the torch 2.10.0+cu128 wheel),
   uv, Python 3.11, the workspace venv at `/venvs/retrieve` built from `uv.lock`
   with `--all-packages --all-groups --extra official` (Meta's silvertorch compiled
   for sm_80 + sm_90), gh, Claude Code, herdr, runpodctl, sshd.
@@ -51,18 +51,24 @@ GitHub: prefer a fine-grained PAT limited to `rmnigm/retrieve`, Contents read/wr
 A token cannot be limited to one branch; protect `main` on GitHub. Claude: the user
 runs `claude setup-token` (laptop or pod) for a subscription token, or uses an API key.
 
-## Image (no CI, built from the laptop)
+## Image (built on a RunPod CPU pod, no local Docker)
 
 ```bash
-gh auth token | docker login ghcr.io -u rmnigm --password-stdin   # token needs write:packages
-infra/runpod/pod.sh image                                         # buildx linux/amd64 --push
+infra/runpod/pod.sh image [BRANCH]    # default development; streams the build log, deletes the pod
 ```
 
-On Apple silicon this is an emulated amd64 build and the silvertorch compile is
-slow (expect tens of minutes); run it in the background. Rebuild after `uv.lock`
-or `infra/runpod/` changes. Pods pull the image anonymously, so the GHCR package
-must be public (GitHub → Packages → retrieve-pod → settings). Otherwise register
-credentials with `runpodctl registry create` and pass `--registry-auth-id`.
+kaniko on a 16-vCPU CPU pod builds `origin/BRANCH` (so push `infra/runpod/` and the
+lockfiles first; the command refuses otherwise) and pushes `IMAGE` plus `latest`.
+It authenticates with the RunPod secret `ghcr_token`: a classic GitHub token with only
+`write:packages`. The pod is created through RunPod's REST API, since `runpodctl`
+cannot size CPU pods or override the entrypoint. The log also lands in
+`$TMPDIR/retrieve-image-build.log`; it takes several minutes, so run it in the background.
+
+Bump the tag in `pod.sh` for every rebuild (pods cache by tag), then delete the
+now-untagged version on GHCR (`gh api user/packages/container/retrieve-pod/versions`,
+needs `delete:packages`). Rebuild after `uv.lock` or `infra/runpod/` changes. Pods
+pull anonymously, so the GHCR package must be public (GitHub → Packages →
+retrieve-pod → settings).
 
 ## Commands
 
