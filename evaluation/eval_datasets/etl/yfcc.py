@@ -87,7 +87,6 @@ and all recorded in ``docs/system/datasets.md``:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 import time
@@ -97,6 +96,7 @@ from pathlib import Path
 
 import numpy as np
 
+from eval_datasets.common import file_hexdigest, merge_prep_log
 from eval_datasets.hub import raw_dir
 
 # ----- upstream facts ---------------------------------------------------------
@@ -380,14 +380,6 @@ def cmd_download(args) -> int:
 # ----- convert ----------------------------------------------------------------
 
 
-def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        while chunk := f.read(1 << 24):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def cmd_convert(args) -> int:
     """Validate every raw header against the documented format and record a
     manifest. There is no reshaping to do at this stage - the upstream files
@@ -409,7 +401,7 @@ def cmd_convert(args) -> int:
         entry: dict = {"bytes": got}
         if args.sha256:
             t0 = time.monotonic()
-            entry["sha256"] = _sha256(p)
+            entry["sha256"] = file_hexdigest(p, "sha256")
             entry["sha256_sec"] = round(time.monotonic() - t0, 1)
         manifest["files"][name] = entry
         print(f"  {name}: {got:,} bytes OK", flush=True)
@@ -588,7 +580,7 @@ def cmd_prep(args) -> int:
     log["query_tag_hist"] = np.bincount(np.diff(q_indptr)).tolist()
 
     log["wall_clock_sec"] = round(time.monotonic() - t0, 1)
-    _merge_prep_log(output, "prep", log)
+    merge_prep_log(output, "prep", log)
     print(f"ALL DONE prep in {log['wall_clock_sec']:.0f}s", flush=True)
     return 0
 
@@ -709,20 +701,9 @@ def cmd_attrs(args) -> int:
     print(f"  eval_split.parquet ({eval_split.height} rows)", flush=True)
 
     log["wall_clock_sec"] = round(time.monotonic() - t0, 1)
-    _merge_prep_log(output, "attrs", log)
+    merge_prep_log(output, "attrs", log)
     print(f"ALL DONE attrs in {log['wall_clock_sec']:.0f}s", flush=True)
     return 0
-
-
-def _merge_prep_log(output: Path, key: str, payload: dict) -> None:
-    path = output / "prep_log.json"
-    existing: dict = {}
-    if path.exists():
-        with open(path) as f:
-            existing = json.load(f)
-    existing[key] = payload
-    with open(path, "w") as f:
-        json.dump(existing, f, indent=2)
 
 
 # ----- all --------------------------------------------------------------------

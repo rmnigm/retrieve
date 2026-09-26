@@ -77,7 +77,8 @@ def build_filter(
     Bloom is paper-strict forward-only, so it never sees ``clause_is_reverse``."""
     if filter_kind == "none":
         return None
-    assert item_attrs is not None, f"filter_kind={filter_kind} needs item_attrs"
+    if item_attrs is None:
+        raise ValueError(f"filter_kind={filter_kind} needs item_attrs")
     if filter_kind == "clause":
         f: FilterModule = ExactAttributeFilter(backend=backend)
         f.register_index(item_attrs, clause_is_reverse=clause_is_reverse)
@@ -122,7 +123,8 @@ def build(
         if mode == "none":
             module.register_index(item_embs)
         else:
-            assert item_attrs is not None, f"silvertorch/{filter_kind} needs item_attrs"
+            if item_attrs is None:
+                raise ValueError(f"silvertorch/{filter_kind} needs item_attrs")
             rev = clause_is_reverse if mode == "exact" else None
             module.register_index(item_embs, item_clause_attrs=item_attrs, clause_is_reverse=rev)
         return module

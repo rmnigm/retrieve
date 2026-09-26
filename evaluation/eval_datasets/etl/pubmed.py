@@ -74,7 +74,6 @@ from __future__ import annotations
 
 import argparse
 import gzip
-import hashlib
 import json
 import re
 import sys
@@ -82,18 +81,21 @@ import time
 import urllib.error
 import urllib.request
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from functools import partial
 from pathlib import Path
 
 import numpy as np
 import polars as pl
 
-from eval_datasets.common import synthesize_qa_narrow
+from eval_datasets.common import (
+    file_hexdigest,
+    merge_prep_log,
+    parse_ranges,
+    select_pmids,
+    synthesize_qa_narrow,
+)
 from eval_datasets.hub import data_root, raw_dir
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 
 MEDCPT_BASE = "https://ftp.ncbi.nlm.nih.gov/pub/lu/MedCPT/pubmed_embeddings"
 MEDLINE_BASE = "https://ftp.ncbi.nlm.nih.gov/pubmed/baseline"
@@ -148,9 +150,6 @@ ARTICLE_PARQUET_BYTES_PER_ROW = 60
 MEDLINE_PARQUET_BYTES = 1_200_000_000
 
 
-# ---------------------------------------------------------------------------
-# Small parsing helpers (pure functions — these are what tests pin down)
-# ---------------------------------------------------------------------------
 
 
 def parse_mesh_field(m: str | None) -> list[str]:
@@ -231,39 +230,6 @@ def mesh_category_of(tree_numbers: list[str]) -> int:
     return -1
 
 
-def pmid_hash(pmids: np.ndarray, seed: int) -> np.ndarray:
-    """splitmix64's finaliser over the PMIDs, keyed by ``seed`` — a fixed, order-free
-    pseudo-random rank per article (uint64). Used by ``select_pmids``."""
-    with np.errstate(over="ignore"):
-        z = np.asarray(pmids, dtype=np.uint64) + np.uint64(seed + 1) * np.uint64(
-            0x9E3779B97F4A7C15
-        )
-        z = (z ^ (z >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
-        z = (z ^ (z >> np.uint64(27))) * np.uint64(0x94D049BB133111EB)
-        return z ^ (z >> np.uint64(31))
-
-
-def select_pmids(pmids: np.ndarray, keep_items: int | None, seed: int = 0) -> np.ndarray:
-    """``[len(pmids)]`` bool: the ``keep_items`` articles with the smallest
-    ``pmid_hash`` (ties on the PMID itself), or everything when ``keep_items`` is
-    ``None`` / not smaller than the catalog. The choice depends only on the PMID set
-    and the seed — not on shard order, chunking or which shards have been fetched —
-    so a resumed or re-sharded run keeps the same articles, and the slice is spread
-    uniformly over the whole 1781–2024 catalog instead of being its oldest prefix."""
-    n = int(pmids.shape[0])
-    if keep_items is None or keep_items >= n:
-        return np.ones(n, dtype=bool)
-    if keep_items <= 0:
-        raise ValueError("keep_items must be positive")
-    order = np.lexsort((pmids, pmid_hash(pmids, seed)))
-    keep = np.zeros(n, dtype=bool)
-    keep[order[:keep_items]] = True
-    return keep
-
-
-# ---------------------------------------------------------------------------
-# download — resumable, parallel, checksum-verified where NCBI publishes one
-# ---------------------------------------------------------------------------
 
 
 def _remote_size(url: str) -> int:
@@ -291,6 +257,14 @@ def _remote_npy_shape(url: str) -> tuple[int, int] | None:
     return (int(m.group(1)), int(m.group(2))) if m else None
 
 
+def _log_line(log: Path | None, msg: str) -> None:
+    line = f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {msg}\n"
+    if log is not None:
+        with open(log, "a") as f:
+            f.write(line)
+    print(line.rstrip(), flush=True)
+
+
 def _fetch_one(url: str, dest: Path, *, attempts: int = 8, log: Path | None = None) -> bool:
     """Resumable single-file GET. Returns True when ``dest`` holds the full file.
 
@@ -299,14 +273,7 @@ def _fetch_one(url: str, dest: Path, *, attempts: int = 8, log: Path | None = No
     already at that length is a no-op.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
-
-    def _log(msg: str) -> None:
-        line = f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {msg}\n"
-        if log is not None:
-            with open(log, "a") as f:
-                f.write(line)
-        print(line.rstrip(), flush=True)
-
+    _log = partial(_log_line, log)
     total = _remote_size(url)
     if total == 0:
         _log(f"HEADFAIL {dest.name}")
@@ -324,10 +291,7 @@ def _fetch_one(url: str, dest: Path, *, attempts: int = 8, log: Path | None = No
             req.add_header("Range", f"bytes={have}-")
         try:
             with urllib.request.urlopen(req, timeout=120) as r, open(dest, "ab") as f:
-                while True:
-                    buf = r.read(8 << 20)
-                    if not buf:
-                        break
+                while buf := r.read(8 << 20):
                     f.write(buf)
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             _log(f"RETRY {dest.name} attempt={attempt} {type(e).__name__}: {e}")
@@ -343,32 +307,9 @@ def _fetch_one(url: str, dest: Path, *, attempts: int = 8, log: Path | None = No
     return False
 
 
-def _md5(path: Path, chunk: int = 8 << 20) -> str:
-    h = hashlib.md5()  # NCBI publishes md5, not our choice
-    with open(path, "rb") as f:
-        while True:
-            b = f.read(chunk)
-            if not b:
-                break
-            h.update(b)
-    return h.hexdigest()
-
-
-def _parse_shards(spec: str | None) -> list[int]:
-    """``"0-3,7"`` → ``[0, 1, 2, 3, 7]``; ``None`` → every chunk."""
-    if not spec:
-        return list(range(N_CHUNKS))
-    out: list[int] = []
-    for part in spec.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        if "-" in part:
-            a, b = part.split("-", 1)
-            out.extend(range(int(a), int(b) + 1))
-        else:
-            out.append(int(part))
-    return sorted(set(out))
+def _md5_matches(gz: Path, md5f: Path) -> bool:
+    """``gz`` against NCBI's published ``MD5(name)= <hex>`` sidecar."""
+    return file_hexdigest(gz, "md5") == md5f.read_text().strip().rsplit("=", 1)[-1].strip()
 
 
 def _shard_paths(i: int) -> dict[str, tuple[str, Path]]:
@@ -391,10 +332,10 @@ def _medcpt_urls(shards: list[int], what: str) -> list[tuple[str, Path]]:
     return [_shard_paths(i)[p] for i in shards for p in parts]
 
 
-def cmd_download(args) -> int:
+def cmd_download(args: argparse.Namespace) -> int:
     ROOT.mkdir(parents=True, exist_ok=True)
     log = ROOT / "download.log"
-    shards = _parse_shards(args.shards)
+    shards = parse_ranges(args.shards, N_CHUNKS)
     jobs: list[tuple[str, Path]] = []
 
     if args.what in ("all", "embeds", "meta", "pmids"):
@@ -424,7 +365,7 @@ def cmd_download(args) -> int:
     return 0 if n_ok == len(jobs) else 1
 
 
-def cmd_verify(args) -> int:
+def cmd_verify(args: argparse.Namespace) -> int:
     """Structural + checksum verification of the raw mirror.
 
     NCBI publishes **no** checksums for the MedCPT embedding directory, so the
@@ -433,7 +374,7 @@ def cmd_verify(args) -> int:
     ``len(pmids_chunk_i.json)``. That catches every truncation we can produce.
     The MEDLINE baseline *does* publish ``.md5`` and those are checked.
     """
-    shards = _parse_shards(args.shards)
+    shards = parse_ranges(args.shards, N_CHUNKS)
     bad: list[str] = []
     for i in shards:
         npy = ROOT / f"embeds_chunk_{i}.npy"
@@ -459,10 +400,8 @@ def cmd_verify(args) -> int:
             gz = md5f.with_suffix("")
             if not gz.exists():
                 continue
-            want = md5f.read_text().strip().rsplit("=", 1)[-1].strip()
-            got = _md5(gz)
-            if want != got:
-                bad.append(f"{gz.name}: md5 {got} != {want}")
+            if not _md5_matches(gz, md5f):
+                bad.append(f"{gz.name}: md5 mismatch against {md5f.name}")
 
     for b in bad:
         print(f"BAD {b}", flush=True)
@@ -470,9 +409,6 @@ def cmd_verify(args) -> int:
     return 1 if bad else 0
 
 
-# ---------------------------------------------------------------------------
-# plan — the disk and wall-time arithmetic, from the server's own numbers
-# ---------------------------------------------------------------------------
 
 
 def plan_budget(
@@ -536,18 +472,15 @@ def _probe_mbps(url: str, n_bytes: int = 64 << 20) -> float:
     got = 0
     try:
         with urllib.request.urlopen(req, timeout=120) as r:
-            while True:
-                buf = r.read(4 << 20)
-                if not buf:
-                    break
+            while buf := r.read(4 << 20):
                 got += len(buf)
     except (urllib.error.URLError, TimeoutError, OSError):
         return 0.0
     return got / 1e6 / max(time.monotonic() - t0, 1e-6)
 
 
-def cmd_plan(args) -> int:
-    shards = _parse_shards(args.shards)
+def cmd_plan(args: argparse.Namespace) -> int:
+    shards = parse_ranges(args.shards, N_CHUNKS)
     print(f"STEP HEAD {3 * len(shards)} MedCPT files + npy headers", flush=True)
     sizes: dict[int, dict[str, int]] = {}
     rows: dict[int, int] = {}
@@ -609,9 +542,6 @@ def cmd_plan(args) -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------
-# medline — stream the baseline into a pmid → (journal, language) parquet
-# ---------------------------------------------------------------------------
 
 _RE_PMID = re.compile(rb"<PMID[^>]*>(\d+)</PMID>")
 _RE_TA = re.compile(rb"<MedlineTA>(.*?)</MedlineTA>", re.S)
@@ -645,12 +575,11 @@ def parse_medline_gz(path: Path) -> tuple[list[int], list[str], list[str]]:
     return pmids, journals, langs
 
 
-def _medline_worker(args_tuple) -> tuple[str, int]:
-    path, out_dir, delete_raw = args_tuple
-    path = Path(path)
-    out = Path(out_dir) / f"{path.name.split('.')[0]}.parquet"
+def _medline_worker(path: Path, out_dir: Path, *, delete_raw: bool) -> int:
+    """One baseline file → ``out_dir/<name>.parquet``; its row count, 0 if already there."""
+    out = out_dir / f"{path.name.split('.')[0]}.parquet"
     if out.exists():
-        return path.name, -1
+        return 0
     pmids, journals, langs = parse_medline_gz(path)
     pl.DataFrame(
         {"pmid": pmids, "journal": journals, "language": langs},
@@ -661,10 +590,28 @@ def _medline_worker(args_tuple) -> tuple[str, int]:
         md5 = path.with_suffix(path.suffix + ".md5")
         if md5.exists():
             md5.unlink()
-    return path.name, len(pmids)
+    return len(pmids)
 
 
-def cmd_medline(args) -> int:
+def _medline_one(i: int, out_dir: Path, *, stream: bool, delete_raw: bool) -> int:
+    name = f"pubmed26n{i:04d}.xml.gz"
+    gz = MEDLINE_DIR / name
+    if stream and not gz.exists():
+        if not _fetch_one(f"{MEDLINE_BASE}/{name}", gz, log=ROOT / "download.log"):
+            return 0
+        _fetch_one(f"{MEDLINE_BASE}/{name}.md5", MEDLINE_DIR / f"{name}.md5", attempts=2)
+    if not gz.exists():
+        return 0
+    md5f = MEDLINE_DIR / f"{name}.md5"
+    if md5f.exists() and not _md5_matches(gz, md5f):
+        print(f"BAD md5 {name} — redownloading", flush=True)
+        gz.unlink()
+        if not _fetch_one(f"{MEDLINE_BASE}/{name}", gz, log=ROOT / "download.log"):
+            return 0
+    return _medline_worker(gz, out_dir, delete_raw=stream or delete_raw)
+
+
+def cmd_medline(args: argparse.Namespace) -> int:
     """MEDLINE baseline ``.xml.gz`` → ``medline/<file>.parquet`` shards.
 
     With ``--stream`` each file is downloaded, md5-checked, parsed and deleted
@@ -676,29 +623,9 @@ def cmd_medline(args) -> int:
     t0 = time.monotonic()
     n_rows = 0
     n_done = 0
-
-    def _one(i: int) -> int:
-        name = f"pubmed26n{i:04d}.xml.gz"
-        gz = MEDLINE_DIR / name
-        if args.stream and not gz.exists():
-            if not _fetch_one(f"{MEDLINE_BASE}/{name}", gz, log=ROOT / "download.log"):
-                return 0
-            _fetch_one(f"{MEDLINE_BASE}/{name}.md5", MEDLINE_DIR / f"{name}.md5", attempts=2)
-        if not gz.exists():
-            return 0
-        md5f = MEDLINE_DIR / f"{name}.md5"
-        if md5f.exists():
-            want = md5f.read_text().strip().rsplit("=", 1)[-1].strip()
-            if _md5(gz) != want:
-                print(f"BAD md5 {name} — redownloading", flush=True)
-                gz.unlink()
-                if not _fetch_one(f"{MEDLINE_BASE}/{name}", gz, log=ROOT / "download.log"):
-                    return 0
-        _, n = _medline_worker((str(gz), str(out_dir), args.stream or args.delete_raw))
-        return max(n, 0)
-
+    one = partial(_medline_one, out_dir=out_dir, stream=args.stream, delete_raw=args.delete_raw)
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
-        for n in ex.map(_one, range(1, n_files + 1)):
+        for n in ex.map(one, range(1, n_files + 1)):
             n_rows += n
             n_done += 1
             if n_done % 50 == 0:
@@ -712,9 +639,6 @@ def cmd_medline(args) -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------
-# convert — streaming: pmids → id map; per shard: fetch → parse → fold → delete
-# ---------------------------------------------------------------------------
 
 
 def _shard_name(i: int) -> str:
@@ -799,7 +723,20 @@ def _write_shard_index(content_dir: Path, n_items: int, entries: list[dict]) -> 
     (content_dir / "shard_index.json").write_text(json.dumps(payload, indent=2))
 
 
-def cmd_convert(args) -> int:
+def _submit_fetches(
+    fetcher: ThreadPoolExecutor, i: int, *, skip_embeds: bool, log_path: Path
+) -> list[Future]:
+    """Queue the missing raw files of shard ``i``; the futures resolve to ``_fetch_one``'s bool."""
+    paths = _shard_paths(i)
+    need = ["content"] + ([] if skip_embeds else ["embeds"])
+    return [
+        fetcher.submit(_fetch_one, *paths[k], log=log_path)
+        for k in need
+        if not paths[k][1].exists()
+    ]
+
+
+def cmd_convert(args: argparse.Namespace) -> int:
     """Streaming build of ``item_id_map.json``, ``staging/articles_chunk_*.parquet`` and
     ``content_d768/{text_emb_shard_NN.pt, shard_index.json, text_emb.meta.json}``.
 
@@ -820,13 +757,12 @@ def cmd_convert(args) -> int:
     content_dir = output / f"content_d{EMB_DIM_NATIVE}"
     staging.mkdir(parents=True, exist_ok=True)
     content_dir.mkdir(parents=True, exist_ok=True)
-    shards = _parse_shards(args.shards)
+    shards = parse_ranges(args.shards, N_CHUNKS)
     log_path = ROOT / "download.log"
     t0 = time.monotonic()
     log: dict = {"shards": shards, "raw_root": str(ROOT), "keep_items": args.keep_items,
                  "seed": args.seed}  # fmt: skip
 
-    # ---- phase 1: pmid lists → the id map ----------------------------------
     print("STEP pmid lists → item_id_map.json", flush=True)
     shard_pmids: dict[int, np.ndarray] = {}
     for i in shards:
@@ -889,29 +825,19 @@ def cmd_convert(args) -> int:
     )
     del all_pmids, keep, first
 
-    # ---- phase 2: shard by shard ------------------------------------------
     index_path = content_dir / "shard_index.json"
     done: dict[str, dict] = {}
     if index_path.exists():
         done = {e["filename"]: e for e in json.loads(index_path.read_text())["shards"]}
     entries: list[dict] = []
     fetcher = ThreadPoolExecutor(max_workers=max(1, args.prefetch)) if args.fetch else None
-    pending: dict[int, list] = {}
-
-    def _submit(i: int) -> None:
-        if fetcher is None or i in pending:
-            return
-        paths = _shard_paths(i)
-        need = ["content"] + ([] if args.skip_embeds else ["embeds"])
-        pending[i] = [
-            fetcher.submit(_fetch_one, *paths[k], log=log_path)
-            for k in need
-            if not paths[k][1].exists()
-        ]
-
+    pending: dict[int, list[Future]] = {}
     for j, i in enumerate(order):
         for ahead in order[j : j + 1 + args.prefetch]:
-            _submit(ahead)
+            if fetcher is not None and ahead not in pending:
+                pending[ahead] = _submit_fetches(
+                    fetcher, ahead, skip_embeds=args.skip_embeds, log_path=log_path
+                )
         if i in pending and not all(fut.result() for fut in pending.pop(i)):
             print(f"ERROR shard {i}: download failed", flush=True)
             return 1
@@ -978,22 +904,11 @@ def cmd_convert(args) -> int:
         print("SKIP embeds (--skip-embeds): id map + article parquets only", flush=True)
 
     log["wall_clock_sec"] = round(time.monotonic() - t0, 1)
-    _merge_log(output, "convert", log)
+    merge_prep_log(output, "convert", log)
     print(f"ALL DONE convert in {log['wall_clock_sec']:.0f}s — n_items={n_items:,}", flush=True)
     return 0
 
 
-def _merge_log(output: Path, key: str, payload: dict) -> None:
-    path = output / "prep_log.json"
-    existing = json.loads(path.read_text()) if path.exists() else {}
-    existing[key] = payload
-    with open(path, "w") as f:
-        json.dump(existing, f, indent=2)
-
-
-# ---------------------------------------------------------------------------
-# attrs — narrow clause tensor, vocabs, heldout, eval_split
-# ---------------------------------------------------------------------------
 
 
 def load_mesh_tree_tops(path: Path) -> dict[str, int]:
@@ -1026,7 +941,7 @@ def load_mesh_tree_tops(path: Path) -> dict[str, int]:
     return out
 
 
-def cmd_attrs(args) -> int:
+def cmd_attrs(args: argparse.Namespace) -> int:
     import torch
 
     output = Path(args.output_dir).expanduser()
@@ -1060,7 +975,6 @@ def cmd_attrs(args) -> int:
     ).filter(pl.col("item_id") > 0)
     print(f"  {arts.height:,} articles mapped onto {n_items:,} item ids", flush=True)
 
-    # ---- C0 MeSH vocab ------------------------------------------------------
     print("STEP C0 MeSH vocab", flush=True)
     counts = Counter()
     for bag in arts["mesh"].to_list():
@@ -1085,7 +999,6 @@ def cmd_attrs(args) -> int:
         flush=True,
     )
 
-    # ---- C1 MeSH tree-top category -----------------------------------------
     print("STEP C1 MeSH tree-top category", flush=True)
     tree_tops = load_mesh_tree_tops(Path(args.mesh_desc or MESH_DESC_PATH))
     if not tree_tops:
@@ -1098,12 +1011,10 @@ def cmd_attrs(args) -> int:
     log["mesh_cat_vocab_size"] = len(MESH_CATEGORIES)
     log["mesh_tree_tops_known"] = len(tree_tops)
 
-    # ---- C2 year vocab ------------------------------------------------------
     with open(output / "year_vocab.json", "w") as f:
         json.dump({"size": len(YEAR_BUCKET_NAMES), "names": YEAR_BUCKET_NAMES}, f, indent=2)
     log["year_vocab_size"] = len(YEAR_BUCKET_NAMES)
 
-    # ---- C3 journal + language, from the MEDLINE join ----------------------
     print("STEP C3 journal + language (MEDLINE join)", flush=True)
     med_parts = sorted((output / "medline").glob("*.parquet"))
     journal_names: list[str] = []
@@ -1162,7 +1073,6 @@ def cmd_attrs(args) -> int:
     log["journal_vocab_size"] = len(journal_names)
     log["lang_vocab_size"] = len(lang_names)
 
-    # ---- assemble item_attrs_narrow [N, 5, 4] ------------------------------
     print("STEP assemble item_attrs_narrow", flush=True)
     narrow = torch.full((n_items, C_NARROW, A_MAX_NARROW), -1, dtype=torch.long)
     narrow_np = narrow.numpy()
@@ -1213,12 +1123,10 @@ def cmd_attrs(args) -> int:
         flush=True,
     )
 
-    # ---- articles.parquet (compact, for query building) --------------------
     arts.select(
         "item_id", "pmid", "year", "has_abstract", "journal_id", "lang_id"
     ).sort("item_id").write_parquet(output / "articles.parquet", compression="zstd")
 
-    # ---- heldout + eval_split ----------------------------------------------
     print("STEP heldout + eval_split", flush=True)
     rng = np.random.default_rng(args.seed)
     n_heldout = min(args.n_heldout, n_items)
@@ -1243,17 +1151,14 @@ def cmd_attrs(args) -> int:
     print(f"  wrote heldout.parquet + eval_split.parquet ({n_heldout:,} rows)", flush=True)
 
     log["wall_clock_sec"] = round(time.monotonic() - t0, 1)
-    _merge_log(output, "attrs", log)
+    merge_prep_log(output, "attrs", log)
     print(f"ALL DONE attrs in {log['wall_clock_sec']:.0f}s", flush=True)
     return 0
 
 
-# ---------------------------------------------------------------------------
-# queries — build the query sets
-# ---------------------------------------------------------------------------
 
 
-def cmd_queries(args) -> int:
+def cmd_queries(args: argparse.Namespace) -> int:
     """Write ``queries.parquet`` (``query_id, text, target_id``).
 
     Two sources:
@@ -1332,7 +1237,7 @@ def cmd_queries(args) -> int:
     if not wrote:
         print("ERROR no query sets built", flush=True)
         return 1
-    _merge_log(output, "queries", log)
+    merge_prep_log(output, "queries", log)
     print("ALL DONE queries", flush=True)
     return 0
 
@@ -1347,12 +1252,9 @@ def _titles_for_pmids(output: Path, want: set[int]) -> dict[int, str]:
     return out
 
 
-# ---------------------------------------------------------------------------
-# encode_queries — MedCPT-Query-Encoder, native 768-d
-# ---------------------------------------------------------------------------
 
 
-def cmd_encode_queries(args) -> int:
+def cmd_encode_queries(args: argparse.Namespace) -> int:
     import torch
     import torch.nn.functional as F
     from transformers import AutoModel, AutoTokenizer
@@ -1417,9 +1319,6 @@ def cmd_encode_queries(args) -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1515,7 +1414,5 @@ __all__ = [
     "parse_mesh_field",
     "parse_year",
     "plan_budget",
-    "pmid_hash",
-    "select_pmids",
     "year_to_bucket",
 ]

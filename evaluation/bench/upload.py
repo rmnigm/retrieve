@@ -181,6 +181,10 @@ def verify(local: Path, man: dict) -> list[str]:
     return bad
 
 
+def _at(prefix: str, rel: str) -> str:
+    return f"{prefix}/{rel}" if prefix else rel
+
+
 def _other_manifests(api, repo_id: str, prefix: str) -> list[dict]:
     """The manifests already in the repo, minus the one this upload replaces: the root README
     is rebuilt from all of them, so it describes the repo and not just today's subtree."""
@@ -228,14 +232,13 @@ def upload(repo_id, results, prefix, gate, private, do_verify, dry_run) -> None:
         click.echo(json.dumps(man, indent=2))
         return
 
-    def at(rel: str) -> str:
-        return f"{prefix}/{rel}" if prefix else rel
-
     api = HfApi()
     api.create_repo(repo_id=repo_id, repo_type="dataset", private=private, exist_ok=True)
     body = readme([*_other_manifests(api, repo_id, prefix), man]).encode()
-    ops = [CommitOperationAdd(at(f["path"]), str(results / f["path"])) for f in man["files"]]
-    ops.append(CommitOperationAdd(at("MANIFEST.json"), json.dumps(man, indent=2).encode()))
+    ops = [
+        CommitOperationAdd(_at(prefix, f["path"]), str(results / f["path"])) for f in man["files"]
+    ]
+    ops.append(CommitOperationAdd(_at(prefix, "MANIFEST.json"), json.dumps(man, indent=2).encode()))
     ops.append(CommitOperationAdd("README.md", body))
     api.create_commit(
         repo_id=repo_id,

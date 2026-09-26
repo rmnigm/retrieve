@@ -24,7 +24,9 @@ import shutil
 import subprocess
 import sys
 import time
+from functools import partial
 from pathlib import Path
+from typing import TextIO
 
 import click
 import yaml
@@ -40,6 +42,12 @@ from eval_datasets.layout import validate_layout
 EVAL_DIR = Path(__file__).resolve().parents[1]
 SUITES = ("quality", "filter", "deep")
 RC_TIMEOUT = 124  # the ``timeout(1)`` convention
+
+
+def _say(summary: TextIO, line: str) -> None:
+    click.echo(line)
+    summary.write(line + "\n")
+    summary.flush()
 
 
 def _paths(config_dir: str, dataset: str) -> tuple[Path, Path]:
@@ -150,12 +158,7 @@ def campaign(
     worst = 0
     n_children = 0
     with open(log_dir / "campaign.log", "a") as summary:
-
-        def say(line: str) -> None:
-            click.echo(line)
-            summary.write(line + "\n")
-            summary.flush()
-
+        say = partial(_say, summary)
         say(f"=== campaign {suite} started {dt.datetime.now(dt.timezone.utc):%Y-%m-%dT%H:%M:%SZ}")
         for s in SUITES if suite == "all" else (suite,):
             _, suites_yaml = _paths(config_dir, "_")

@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import hashlib
 import json
 import sys
 import tarfile
@@ -27,6 +26,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import IO
 
 import numpy as np
 import polars as pl
@@ -34,7 +34,7 @@ import pyarrow as pa
 import pyarrow.csv as pacsv
 import pyarrow.parquet as pq
 
-from eval_datasets.common import synthesize_qa_narrow
+from eval_datasets.common import file_hexdigest, merge_prep_log, synthesize_qa_narrow
 from eval_datasets.hub import raw_dir
 from eval_datasets.timesplit import sequential_split_train_val_test
 
@@ -113,24 +113,6 @@ def _log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
-def _merge_prep_log(output: Path, key: str, payload: dict) -> None:
-    path = output / "prep_log.json"
-    existing = json.loads(path.read_text()) if path.exists() else {}
-    existing[key] = payload
-    path.write_text(json.dumps(existing, indent=2))
-
-
-# ----- download ---------------------------------------------------------------
-
-
-def _md5(path: Path) -> str:
-    h = hashlib.md5()
-    with open(path, "rb") as f:
-        while chunk := f.read(1 << 24):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def _fetch(url: str, dest: Path, expected: int) -> None:
     have = dest.stat().st_size if dest.exists() else 0
     if have > expected:
@@ -147,7 +129,7 @@ def _fetch(url: str, dest: Path, expected: int) -> None:
                 out.write(chunk)
 
 
-def cmd_download(args) -> int:
+def cmd_download(args: argparse.Namespace) -> int:
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     for name, (url, size, md5) in RAW_FILES.items():
         dest = RAW_DIR / name
@@ -159,7 +141,7 @@ def cmd_download(args) -> int:
                 continue
             if dest.stat().st_size == size:
                 break
-        got = _md5(dest)
+        got = file_hexdigest(dest, "md5")
         if got != md5:
             _log(f"ERROR {name}: md5 {got} != {md5}; delete it and re-run")
             return 1
@@ -167,10 +149,7 @@ def cmd_download(args) -> int:
     return 0
 
 
-# ----- convert ----------------------------------------------------------------
-
-
-def csv_to_parquet(src, dst: Path, column_types: dict | None) -> int:
+def csv_to_parquet(src: Path | IO[bytes], dst: Path, column_types: dict | None) -> int:
     """Stream one CSV (a path or a binary file object) into ZSTD parquet; returns the rows."""
     reader = pacsv.open_csv(
         src,
@@ -187,7 +166,7 @@ def csv_to_parquet(src, dst: Path, column_types: dict | None) -> int:
     return rows
 
 
-def cmd_convert(args) -> int:
+def cmd_convert(args: argparse.Namespace) -> int:
     tarball = RAW_DIR / "KuaiRand-27K.tar.gz"
     categories = RAW_DIR / "kuairand_video_categories.csv"
     for p in (tarball, categories):
@@ -217,9 +196,6 @@ def cmd_convert(args) -> int:
     (PROCESSED_DIR / "convert_log.json").write_text(json.dumps(rows, indent=2))
     _log(f"ALL DONE convert {rows}")
     return 0
-
-
-# ----- prep -------------------------------------------------------------------
 
 
 def shanghai_midnight(day: str) -> int:
@@ -269,7 +245,7 @@ def write_item_id_map(path: Path, n: int) -> None:
         f.write("}")
 
 
-def cmd_prep(args) -> int:
+def cmd_prep(args: argparse.Namespace) -> int:
     processed = Path(args.processed_dir).expanduser()
     output = Path(args.output_dir).expanduser()
     output.mkdir(parents=True, exist_ok=True)
@@ -360,13 +336,11 @@ def cmd_prep(args) -> int:
         "items_clicked_in_train": int(train["history"].explode().n_unique()),
         "wall_clock_sec": round(time.monotonic() - t0, 1),
     }
-    _merge_prep_log(output, "prep", log)
+    merge_prep_log(output, "prep", log)
     _log(f"ALL DONE prep {log}")
     return 0
 
 
-# ----- attrs ------------------------------------------------------------------
-#
 # Clause layout (docs/system/datasets.md § kuairand): C0-C3 carry target-derived query
 # values, C4-C6 business-rule ones; the config's sweeps pick one protocol or the other.
 
@@ -460,7 +434,7 @@ def pass_rates(attrs: np.ndarray, qa: np.ndarray) -> dict:
     return out
 
 
-def cmd_attrs(args) -> int:
+def cmd_attrs(args: argparse.Namespace) -> int:
     import torch
 
     processed = Path(args.processed_dir).expanduser()
@@ -487,7 +461,9 @@ def cmd_attrs(args) -> int:
         how="left",
         maintain_order="left",
     )
-    assert basic.height == cats.height == N_VIDEOS
+    if not basic.height == cats.height == N_VIDEOS:
+        _log(f"ERROR {basic.height:,} videos, {cats.height:,} category rows, want {N_VIDEOS:,}")
+        return 1
     attrs = np.full((N_VIDEOS, C_NARROW, A_MAX), -1, dtype=np.int64)
 
     cat1_vocab = dense_vocab(cats["first_level_category_id"])
@@ -558,15 +534,12 @@ def cmd_attrs(args) -> int:
         "mean_pass_rate": pass_rates(attrs, qa),
         "wall_clock_sec": round(time.monotonic() - t0, 1),
     }
-    _merge_prep_log(output, "attrs", log)
+    merge_prep_log(output, "attrs", log)
     _log(f"ALL DONE attrs {log}")
     return 0
 
 
-# ----- all / main ---------------------------------------------------------------
-
-
-def cmd_all(args) -> int:
+def cmd_all(args: argparse.Namespace) -> int:
     for fn in (cmd_download, cmd_convert, cmd_prep, cmd_attrs):
         rc = fn(args)
         if rc:
@@ -574,22 +547,24 @@ def cmd_all(args) -> int:
     return 0
 
 
+def _add_prep_args(sp: argparse.ArgumentParser) -> None:
+    sp.add_argument("--processed-dir", default=str(PROCESSED_DIR))
+    sp.add_argument("--output-dir", required=True)
+    sp.add_argument("--max-seq-len", type=int, default=200)
+    sp.add_argument("--test-start", default="2022-05-07", help="local date (Asia/Shanghai)")
+    sp.add_argument("--val-days", type=int, default=1)
+    sp.add_argument("--gap-minutes", type=int, default=30)
+
+
+def _add_attrs_args(sp: argparse.ArgumentParser) -> None:
+    sp.add_argument(
+        "--reference-date", default="2022-05-07", help="upload ages are counted to this day"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="kuairand", description="KuaiRand-27K ETL")
     sub = parser.add_subparsers(dest="cmd", required=True)
-
-    def add_prep_args(sp: argparse.ArgumentParser) -> None:
-        sp.add_argument("--processed-dir", default=str(PROCESSED_DIR))
-        sp.add_argument("--output-dir", required=True)
-        sp.add_argument("--max-seq-len", type=int, default=200)
-        sp.add_argument("--test-start", default="2022-05-07", help="local date (Asia/Shanghai)")
-        sp.add_argument("--val-days", type=int, default=1)
-        sp.add_argument("--gap-minutes", type=int, default=30)
-
-    def add_attrs_args(sp: argparse.ArgumentParser) -> None:
-        sp.add_argument(
-            "--reference-date", default="2022-05-07", help="upload ages are counted to this day"
-        )
 
     sp = sub.add_parser("download", help="tarball + category supplement (md5-verified)")
     sp.add_argument("--retries", type=int, default=3)
@@ -599,19 +574,19 @@ def main(argv: list[str] | None = None) -> int:
     sp.set_defaults(func=cmd_convert)
 
     sp = sub.add_parser("prep", help="clicks -> train/val/test.parquet + item_id_map.json")
-    add_prep_args(sp)
+    _add_prep_args(sp)
     sp.set_defaults(func=cmd_prep)
 
     sp = sub.add_parser("attrs", help="narrow clause tensor + vocabs + eval_split")
     sp.add_argument("--processed-dir", default=str(PROCESSED_DIR))
     sp.add_argument("--output-dir", required=True)
-    add_attrs_args(sp)
+    _add_attrs_args(sp)
     sp.set_defaults(func=cmd_attrs)
 
     sp = sub.add_parser("all", help="download -> convert -> prep -> attrs")
     sp.add_argument("--retries", type=int, default=3)
-    add_prep_args(sp)
-    add_attrs_args(sp)
+    _add_prep_args(sp)
+    _add_attrs_args(sp)
     sp.set_defaults(func=cmd_all)
 
     args = parser.parse_args(argv)
