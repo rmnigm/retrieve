@@ -181,6 +181,18 @@ citable.** Artifacts: [gate A](artifacts/seqrec-encoder/gate-a/),
 | `torch.compile` of the body | 3.93-4.03 s/epoch compiled against 4.8-5.9 eager (shared-negative gBCE, 3 epochs each, interleaved); kept |
 | unit gates | `tests/training/test_encoder.py`: a left-padded row stays finite and padding content does not move the last position (`sasrec`, `hstu`); `sampled_softmax_loss` equals a direct `F.cross_entropy` over explicit candidate lists; `TrainConfig` rejects an unknown `loss` and `normalize` with `gbce` (CPU) |
 
+### Encoder experiments E0-E4 (H100, not yet validated, not citable)
+
+Bars are the published checkpoints re-scored on the trainer's `test.parquet`: yambda-500m d64
+0.0846 / 0.1563, d128 0.0811 / 0.1486; goodreads-work-id d64 0.0350 / 0.1486, d128 0.0361 / 0.1480
+(ndcg@10 / recall@100; [E0](artifacts/seqrec-encoder/e0-goodreads-bars/), which matches the
+stored goodreads numbers to 4 decimals). Selection is on val ndcg@10; test is recorded only for
+the selected checkpoint. sm_mhz 1980 throughout.
+
+| run | test ndcg@10 / ndcg@100 / R@10 / R@100 / cov@10 | Δ vs bar (ndcg@10 / R@100) | best val ndcg@10 (epoch) | s/epoch (median) | seq/s | peak GB | wall |
+|---|---|---|---|---|---|---|---|
+| [E1](artifacts/seqrec-encoder/e1-yambda-d64-sasrec-ssm/) yambda d64, gSASRec body, sampled softmax (in-batch 4096 + uniform 8192, no logQ) | 0.0661 / 0.0790 / 0.0326 / 0.1093 / 0.0674 | −0.0185 / −0.0470 | 0.0740 (95 of 100) | 10.9 | 8,337 | 10.7 | 26 min |
+
 Unverified: the `hstu` block and `sampled_softmax` beyond a 50-step smoke run and the unit gates;
 `use_time` on real timestamps (the yambda and goodreads trainer parquets now carry the column; no run has used it yet); resume (`--resume` has never run on the GPU).
 
