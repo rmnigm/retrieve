@@ -1,0 +1,30 @@
+{
+  "run": "e3-goodreads-d64-sasrec-ssm-logq",
+  "test": {
+    "ndcg@10": 0.0381,
+    "ndcg@100": 0.0695,
+    "recall@10": 0.0346,
+    "recall@100": 0.1447,
+    "coverage@10": 0.1232
+  },
+  "delta_vs_bar": {
+    "ndcg@10": 0.0031,
+    "recall@100": -0.0039
+  },
+  "bar": {
+    "ndcg@10": 0.035,
+    "recall@100": 0.1486
+  },
+  "best_epoch": 16,
+  "best_val_ndcg@10": 0.0402,
+  "epochs_run": 27,
+  "epoch_time_median_s": 49.37,
+  "first_epoch_s": 58.0,
+  "samples_per_s": 14966,
+  "peak_gpu_mem_gb": 6.7,
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "sm_mhz": [
+    1980.0
+  ],
+  "total_wall_s": 1540
+}

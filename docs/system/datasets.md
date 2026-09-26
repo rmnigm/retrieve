@@ -1130,7 +1130,7 @@ Negatives are uniform over `1..N`, drawn on the GPU inside the step.
   the positive class in fp32, hence float64. One `[K]` vector shared by the
   batch does not train: only K table rows get a negative gradient per step,
   and on yambda-500m d64 the user queries collapse onto a few popular items
-  ([validation](../validation.md#seqrec-encoder-rewrite)).
+  ([validation](../validation.md#seqrec-encoder)).
 - `sampled_softmax` — cross-entropy of the positive against one candidate
   vector shared by the batch: `inbatch_negatives` positives of the batch (a
   random subset) plus `num_negatives` uniform ids, at `temperature` (default 0.05), in fp32 outside
