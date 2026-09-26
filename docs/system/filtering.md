@@ -185,7 +185,7 @@ sizes, ~80% of `SilverTorch.forward` at bs=1. Both builders wrap the
 same `_signature_batch` core, so outputs are bit-equal (asserted by
 [`test_bloom_hash.py`](../../retrieve/tests/correctness/test_bloom_hash.py)).
 
-A `bloom_sigs` buffer persisted without this keying is stale and must be
+A persisted bloom buffer (`bloom_sigs`, `bloom_transposed`) built without this keying is stale and must be
 rebuilt; the bench harness rebuilds on every run.
 
 ## Out of scope

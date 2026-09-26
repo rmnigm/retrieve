@@ -1,5 +1,5 @@
 """Fused clause evaluation + stream compaction without the dense ``[B, N]`` bool of the pure-torch
-path, in two phases (plan L3): the predicate launch writes each tile's survivor count and stashes
+path, in two phases: the predicate launch writes each tile's survivor count and stashes
 its surviving ids, compacted, in the tile's own slot range of an int32 scratch;
 ``_host.compact_finish`` scans the counts and a second, predicate-free launch moves every run to
 ``tile_offset``. A row's ids therefore come out in **ascending item order**, ``torch.equal`` to
@@ -19,8 +19,13 @@ from torch import Tensor
 # By name, not `common.<fn>` — see the note in clause_mask.py: inductor's
 # re-compilation of a @triton_op kernel captures @triton.jit callees from
 # the kernel's globals by name, and a module object is not one.
-from retrieve.ops.triton._host import compact_finish, grid_batch_tiles
-from retrieve.ops.triton.common import clause_pass, compact_stash
+from retrieve.ops.triton._host import (
+    check_contiguous,
+    compact_finish,
+    grid_batch_tiles,
+    wide,
+)
+from retrieve.ops.triton.common import clause_pass, compact_stash, tile_rows
 
 
 @dataclass(frozen=True)
@@ -54,23 +59,22 @@ def _clause_compact_kernel(
     stride_tb,
     stride_sb,
     BLOCK_N: tl.constexpr,
+    WIDE: tl.constexpr,
 ):
-    # 3D grid: batch on grid_x (L2 reuse on item_attrs), tiles split across grid_y × grid_z to dodge
-    # the 65535 single-axis cap; tile_id = tile_x * tiles_y + tile_y keeps tiles contiguous.
     bid = tl.program_id(0)
-    tile_y = tl.program_id(1)
-    tile_x = tl.program_id(2)
-    tile_id = tile_x * tiles_y + tile_y
-
-    n_offsets = tile_id * BLOCK_N + tl.arange(0, BLOCK_N)
+    tile_id = tl.program_id(2) * tiles_y + tl.program_id(1)
+    row0 = tile_id * BLOCK_N
+    lane = tl.arange(0, BLOCK_N)
+    n_offsets = row0 + lane
     n_valid = n_offsets < N
 
     # Result is already ANDed with n_valid inside the helper (keep seeds from load_mask).
+    attrs_base, ids = tile_rows(item_attrs_ptr, row0, lane, stride_in, WIDE)
     pass_mask = clause_pass(
-        item_attrs_ptr,
+        attrs_base,
         is_reverse_ptr,
         query_attrs_ptr,
-        n_offsets,
+        ids,
         n_valid,
         bid,
         stride_in,
@@ -92,6 +96,7 @@ def _clause_compact_kernel(
         stride_tb,
         stride_sb,
         BLOCK_N,
+        WIDE,
     )
 
 
@@ -126,7 +131,7 @@ def _clause_compact_prep(
         raise ValueError(f"clause-count mismatch: items C={c}, query C={c_q}")
 
     device = query_clause_attrs.device
-    item_clause_attrs = item_clause_attrs.contiguous()
+    check_contiguous(item_clause_attrs=item_clause_attrs)
     clause_is_reverse = clause_is_reverse.contiguous().to(torch.int8)
     query_clause_attrs = query_clause_attrs.contiguous()
 
@@ -135,27 +140,28 @@ def _clause_compact_prep(
     tile_counts = torch.empty((b, tiles), dtype=torch.int64, device=device)
     scratch = torch.empty((b, tiles * cfg.block_n), dtype=torch.int32, device=device)
 
-    kwargs = dict(
-        item_attrs_ptr=item_clause_attrs,
-        is_reverse_ptr=clause_is_reverse,
-        query_attrs_ptr=query_clause_attrs,
-        tile_counts_ptr=tile_counts,
-        scratch_ptr=scratch,
-        N=n,
-        tiles_y=tiles_y,
-        C=c,
-        A_MAX=a_max,
-        stride_in=item_clause_attrs.stride(0),
-        stride_ic=item_clause_attrs.stride(1),
-        stride_ia=item_clause_attrs.stride(2),
-        stride_qb=query_clause_attrs.stride(0),
-        stride_qc=query_clause_attrs.stride(1),
-        stride_tb=tile_counts.stride(0),
-        stride_sb=scratch.stride(0),
-        BLOCK_N=cfg.block_n,
-        num_warps=cfg.num_warps,
-        num_stages=cfg.num_stages,
-    )
+    kwargs = {
+        "item_attrs_ptr": item_clause_attrs,
+        "is_reverse_ptr": clause_is_reverse,
+        "query_attrs_ptr": query_clause_attrs,
+        "tile_counts_ptr": tile_counts,
+        "scratch_ptr": scratch,
+        "N": n,
+        "tiles_y": tiles_y,
+        "C": c,
+        "A_MAX": a_max,
+        "stride_in": item_clause_attrs.stride(0),
+        "stride_ic": item_clause_attrs.stride(1),
+        "stride_ia": item_clause_attrs.stride(2),
+        "stride_qb": query_clause_attrs.stride(0),
+        "stride_qc": query_clause_attrs.stride(1),
+        "stride_tb": tile_counts.stride(0),
+        "stride_sb": scratch.stride(0),
+        "BLOCK_N": cfg.block_n,
+        "WIDE": wide(item_clause_attrs, scratch),
+        "num_warps": cfg.num_warps,
+        "num_stages": cfg.num_stages,
+    }
     return _ClauseCompactLaunch(grid, tiles_y, kwargs, tile_counts, scratch)
 
 
@@ -195,7 +201,8 @@ def clause_compact(
     ``ops.reference.clause_compact`` and to itself across launches and processes. Mirrors
     ``_clause_compact_impl`` with ``DEFAULT_CONFIG``.
 
-    Registered as an *opaque* ``custom_op``, not a ``triton_op`` (roadmap C4, 2026-09-06): under
+    Registered as an *opaque* ``custom_op``, not a ``triton_op`` (kernels.md, graph-break
+    behavior): under
     ``triton_op`` inductor analyses the kernel's TTIR for mutated pointers, and its provenance
     walk follows a store address back through every argument of the ``tt.call`` that produced
     it. ``compact_store``'s address is ``base + intra`` — data-dependent on the pass mask, which

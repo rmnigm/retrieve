@@ -26,11 +26,17 @@ rerun the library suite before trusting any row on it.
 
 | gate | state | notes |
 |---|---|---|
-| Library suite (`retrieve/tests`, GPU, `official` extra installed) | **green**, 708 passed at the last full run (roadmap Q3's hardened gates included; none turned red) | no tolerance loosened; every tolerance stated at its call site; see [testing](system/testing.md) |
-| Triton vs reference ops, every parity file | **bit-exact** (`torch.equal` scores, ids up to ties) for `codesigned_probe_score` (+ bloom), `codesigned_probe_score_exact`, `oporp_1bit_match_topk_*`, `clause_mask`, the compaction ops; **not bit-exact** for `fused_masked_knn_topk` | the fused kernel's fp32 `tl.sum` and the reference's `bmm` reduce in different orders: measured drift ≤ 6e-8 at D ≤ 128 on unit-norm data, gated at `atol=1e-6` |
+| Library suite (`retrieve/tests`, GPU, `official` extra installed) | **green**, 755 passed at the last full run (branch `dev/kernel-opt`, on a cold inductor cache; Q3's hardened gates included, none turned red) | no tolerance loosened; every tolerance stated at its call site; see [testing](system/testing.md) |
+| Triton vs reference ops, every parity file | **bit-exact** (`torch.equal` scores, ids up to ties) for `codesigned_probe_score` (+ bloom) and `codesigned_probe_score_exact` on the compact CSR layout (also against a loop-built oracle and, for bloom, the row-wise subset test), and for `oporp_1bit_match_topk_*`, `clause_mask`, the compaction ops; **not bit-exact** for `fused_masked_knn_topk` | the fused kernel's fp32 `tl.sum` and the reference's `bmm` reduce in different orders: measured drift ≤ 6e-8 at D ≤ 128 on unit-norm data, gated at `atol=1e-6` |
 | Kernel identities (Q3) | **bit-exact**: indirect OPORP over `arange(N)` ≡ full scan; bloom op with an all-pass query signature ≡ no-bloom op; `clause_compact` ≡ `compact_mask(clause_mask)` incl. the `-1` tail; row alone ≡ row in batch (fused, both probe scorers, OPORP); item-table permutation permutes ids only (fused, `codesigned_probe_score`, OPORP) | Triton only, on this box |
 | Kernel cutoffs and degenerate rows (Q3) | **green**: both sides of `_P_BUCKETS[0]` / `_N_BUCKETS[0]` and `P % block` ∈ {0, 1} (read from the kernels' constants, regime asserted); `count = 0` / `1` rows give exact `(-1, -inf)` tails | |
-| Unwritten-slot (poisoned `torch.empty`) | **green** for every kernel scoring into `torch.empty`: `fused_masked_knn_topk`, `codesigned_probe_score` (+ bloom), `codesigned_probe_score_exact`, OPORP full and indirect | allocation hit counted, so a moved allocation fails the test |
+| Addressing past 2³¹ elements (kernel-opt) | **green**: [`test_large_offsets.py`](../retrieve/tests/correctness/test_large_offsets.py), output axis (`B = 144, N = 16M`: `clause_mask`, `clause_compact`, `fused_masked_knn_topk`, `oporp_1bit_match_topk_indirect`) and item axis (a `[140M, 16]` table: `bloom_match`, `bloom_compact`, `clause_mask`, `clause_compact`, `oporp_1bit_match_topk_full`), planted answers. All five cases fail on the pre-change code (illegal address; `bloom_match` also overflowed `grid_y`), and each kernel's widening was mutation-checked | skipped below 48 / 24 GiB free. The probe scorers' `B·P ≥ 2³¹` output axis has the same `row_base` but no large case. Timing of the narrow path: all 13 cases within noise of the pre-change kernels, interleaved ([artifact](artifacts/kernel-opt/phase1.md); [kernels](system/kernels.md#addressing)) |
+| Unwritten-slot (poisoned `torch.empty`) | **green** for every kernel writing into `torch.empty`: `fused_masked_knn_topk`, `codesigned_probe_score` (+ bloom), `codesigned_probe_score_exact`, OPORP full and indirect, and the two compaction ops, whose scatter launch now writes the `-1` tail itself. The compaction case goes red with the tail store removed | allocation hit counted, so a moved allocation fails the test |
+| Op boundary (kernel-opt) | **green**: [`test_op_boundary.py`](../retrieve/tests/correctness/test_op_boundary.py). Every Triton op raises `ValueError` on a non-contiguous item-side table (11 cases) and on a non-power-of-two `tl.arange` extent (7 cases). Before, these were a silent per-call copy and a Triton `CompilationError`. All 18 go red with the checks disabled | [kernels](system/kernels.md) conventions |
+| Tuner rule (kernel-opt) | **green**: `tune._choose` keeps the shipped default inside a 3 % noise band and rejects a candidate more than 5 % slower in any regime (`test_tune_smoke.py`, 4 synthetic cases). `--json-out` records SM clocks, commit and versions. No sweep has been run under the rule yet | |
+| Build-time int8 quantization (kernel-opt) | **green**: `quantize_int8_global` quantizes chunk by chunk (optionally in `sort_perm` order, so SilverTorch writes its cluster-sorted table directly). The codes are `torch.equal` to the one-shot formula, and the transient stays under half the fp32 table. The one-shot form measured 672 MiB of transient on a 384 MiB table (`test_quantize.py`). This is the SilverTorch OOM on pubmed 10M × 768 that the E2 worker reported: two fp32 table copies on top of a 28.6 GiB table. **Re-run on pubmed 10M × 768**: the build completes on triton and official, peak allocated ≈ 38 GiB (quantize +0.5 GiB beyond its int8 output), official cells run end to end; Triton stops at the first forward on `D=768 must be a power of two`, a separate blocker ([pubmed](artifacts/kernel-opt/pubmed/README.md)) | [artifact](artifacts/kernel-opt/phase4.md) |
+| Short candidate lists and missing filters (kernel-opt) | **green** (`test_linr.py`): `fused_masked_knn_topk` rejects `P < k` with `ValueError` on both backends, where before Triton raised a torch `RuntimeError` and the twin padded; `PrefilterKNN` returns `[B, k]` with exact `(-1, -inf)` tails for `P` in {0, 3} and the backends agree; OPORP indirect returns `min(k, P)` columns on both backends (Triton returned `k`; at `P = 0` it crashed), compiled `dynamic=True` included; `LiNRV3` rejects `k > candidate_pool`; clause attrs to a filterless variant raise `ValueError` (an `assert` / `AttributeError` before) | |
+| Non-power-of-two widths (kernel-opt finding, unscheduled) | **not supported, by design today**: every Triton kernel with a `tl.arange` over the embedding or word width needs a power of two. Those are `codesigned_probe_score*` (`D`), `fused_masked_knn_topk` (`D`), OPORP and the bloom kernels (`W`); since Phase 2 each raises `ValueError` at the op boundary. Measured on pubmed 10M × 768: SilverTorch triton stops at its first forward (`D=768 must be a power of two`), and LiNR V2 / V3 would stop likewise (OPORP's default `k_bits = D` gives `W = 12`). Official and the cuBLAS paths (V1, V4) run. A limitation for a roadmap decision (masked padding to the next power of two), not fixed here | [pubmed](artifacts/kernel-opt/pubmed/README.md) |
 | Op registry | **green**: all 10 `retrieve::` ops have a same-name, same-signature reference twin; none declares a mutable argument; every input `torch.equal` after the op and after its twin; `torch.library.opcheck` passes on `clause_compact` / `bloom_compact`; the six official schemas equal the strings pinned for 21aa35e | |
 | CUDA-graph replay | **bit-exact**: `reduce-overhead` SilverTorch (3 filter modes), LiNR V1-V3 × clause/bloom (and B=1), OneBit/SimHash replay on two queries they were not captured on, each `torch.equal` to eager, zero `cudagraph_skips` | |
 | No wide intermediate in a forward | **green** on Triton for SilverTorch and LiNR V1-V4: no ≥ 3-d module-level tensor above B·N elements; the torch backend (which materializes `[B, ·, C, A_max]`) is the control | custom ops are opaque to the recorder: it checks module-level ops only, not a kernel's own buffers |
@@ -50,7 +56,7 @@ rerun the library suite before trusting any row on it.
 | `ruff check evaluation` (B, C4, SIM, RUF100, BLE001, PLC0415 on top of E, W, F, I, UP) | **clean**, ruff 0.15.6 | per-file ignores with reasons: ETL inline imports, goodreads' broad `except` (its own cleanup) ([evaluation](system/evaluation.md#lint)) |
 | `ruff format --check evaluation` | **not clean**: 15 files | waits on the `evaluation/` formatting-only commit; the pre-commit format hook covers `retrieve/` only until then |
 | `scripts/check_doc_links.py` | **0 problems**: links, 116 backticked repo paths, 88 `bench` / `eval-data` / `train` subcommands | subcommands read from the click sources with `ast`; floors of 60 paths / 50 calls catch a broken pattern; `docs/log.md` (history) is exempt from the path check and `evaluation/data` (gitignored) is allowed |
-| Golden baseline (`evaluation/golden/`) against the v2 harness | 9 of 11 cells match within 7.5e-9 in quality | two residuals unexplained: `linr_v4` recall@100 7.3e-5; arXiv `silvertorch` triton recall@100 2.0e-6. No equivalence with the pre-v2 harness is claimed |
+| Golden baseline (`evaluation/golden/`) against the v2 harness | Rerun on `dev/kernel-opt` (quality only, eager) ([artifact](artifacts/kernel-opt/golden_compare.md)). All 7 comparable goodreads cells (LiNR V1-V3 and SilverTorch triton / official at `n_probe` 24 and 32) are **identical** to the committed D1 records of the pre-change code: max \|diff\| 0 over 24 oracle and held-out metrics each. Against the golden JSONs: `linr_v1` and goodreads `silvertorch` within 1e-6; arXiv `silvertorch` recall@100 2.0e-6 (the known residual); `linr_v2` 4.5e-4 and `linr_v3` 1.7e-5 **also differ on the pre-change code** (the D1 records carry the same values), so the former "9 of 11 within 7.5e-9" no longer describes this harness and library. The cause is unidentified and predates `dev/kernel-opt`. The golden `torch` and `linr_v4` cells have no counterpart in today's suites | the two old residuals: `linr_v4` recall@100 7.3e-5 (not rerunnable: no suite runs `linr_v4`); arXiv `silvertorch` triton recall@100 2.0e-6 |
 | Graph latency against the golden | passes at batch 8 and 16 (ratio 0.96-1.03 at matched clock) | batch 1 is inside the golden's own repeat noise (up to 21 %) |
 | CUDA-graph capture | every capturable arm captured, `cudagraph_skips == 0` | `official` is not capturable and records a null entry with a reason |
 | Resume after SIGTERM | passes, no duplicate records | |
@@ -76,12 +82,30 @@ explains the mechanism behind the kernel-only split.
   1.3× (arXiv none), 1.2× (arXiv bloom), 10.1× (arXiv clause) against
   official at `n_probe` 24, k = 100; across `n_probe` 24 and 32, 1.3-1.6×
   unfiltered, 1.2-1.9× bloom, 2.9-10.1× clause. At batch 1, 1.1-2.0×, inside batch-1 noise for bloom.
-- **Meta's scorer kernel is faster than ours in every cell**: 1.15-3.2× on
-  arXiv, 10.9-17.8× on goodreads. The cause is our padded IVF layout: on
+- **Meta's scorer kernel is faster than ours in every cell** (b3, padded layout): 1.15-3.2× on
+  arXiv, 10.9-17.8× on goodreads. The cause was our padded IVF layout: on
   goodreads `n_probe × max_cluster_size` is 611,520 slots for about 18.7k
   real items (97 % padding); Meta reads a CSR. Official gives the time back
   in payload preparation (268-834 µs over 73-93 launches, against our
   34-58 launches).
+- **After G-a TF-9 / TF-1** (compact CSR probe layout + transposed bloom,
+  branch `dev/kernel-opt`; b3 methodology re-run by
+  [h2h.py](artifacts/kernel-opt/h2h.py), one run per tree, padded tree and
+  compact tree in alternating processes with official as the control arm;
+  [table](artifacts/kernel-opt/h2h.md)). Bloom kernel-only at batch 16,
+  ours (scorer + mask) against official fp16 (scorer + mask): **0.90×
+  goodreads (34.3 vs 38.1 µs), 1.24× arXiv (105.0 vs 84.5 µs)**, the
+  1.3× gate green. Unfiltered 0.82× / 0.88×; exact 2.15× / 2.47×, where ours
+  fuses a `C·A_max` attrs read that official receives as a precomputed mask
+  outside the scorer class. Our scorer went 338 → 26 µs (none), 525 → 34
+  (bloom), 400 → 53 (exact) on goodreads and 131 → 99, 238 → 105,
+  268 → 197 on arXiv; eager phases-2+3 wall at batch 16 from 0.76 / 1.02 / 0.82
+  to 0.42 / 0.62 / 0.44 ms on goodreads, and 0.45 / 0.78 / 0.48 to
+  0.46 / 0.62 / 0.45 ms on arXiv, with 28-44 launches. Int32 parity against
+  official: jaccard 1.000000, `score_max_abs_diff` 0 in all six cells.
+  SM clock 1275-1410 MHz, sampled per row in the artifact. **Not yet
+  validated** as paper material: one run per tree, not re-run after the
+  merge to `staging`, and no end-to-end (`bench run`) rerun.
 - **Phase 2 alone**: Meta's transposed bloom search beats our row-wise
   `bloom_match` 2.0× at 0.8M items and 6.1× at 3.0M; ours grows 3.3× with
   N, theirs 1.07×. This reproduces the paper's transposed-index claim
@@ -122,6 +146,11 @@ explains the mechanism behind the kernel-only split.
 | Semantic Scholar, KuaiRand | not started |
 
 ## Still unverified
+
+- Any compiled (`graph`-mode) measurement taken on a warm inductor cache after a library
+  change: the FX-graph / AOT-autograd caches replay a stale `triton_op` body
+  ([testing](system/testing.md#running)). This is measured in the library suite; whether any
+  recorded harness cell was affected has not been checked.
 
 - Clause 5 of the campaign gate (ids identical across modes).
 - The official exact path without our adapter's mask packing.

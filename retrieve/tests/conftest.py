@@ -8,6 +8,8 @@ library code that intentionally creates CPU-side generators.
 
 from __future__ import annotations
 
+import itertools
+
 import pytest
 import torch
 
@@ -180,5 +182,5 @@ def recall_at_k(approx_ids: torch.Tensor, exact_ids: torch.Tensor) -> float:
 
 def assert_recall_monotone(recalls: list[float], *, slack: float = 0.02) -> None:
     """Assert ``recalls`` is non-decreasing within ``slack`` between adjacent entries."""
-    for prev, nxt in zip(recalls, recalls[1:]):
+    for prev, nxt in itertools.pairwise(recalls):
         assert nxt >= prev - slack, f"recall regressed: {recalls}"

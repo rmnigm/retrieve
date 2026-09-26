@@ -3,7 +3,7 @@
 ``SilverTorch(backend="official")`` keeps our phase 1 (k-means, int8 quantization, probe
 selection) and routes Algorithm 1 phases 2+3 to the ops of
 `meta-recsys/silvertorch <https://github.com/meta-recsys/silvertorch>`_ (pinned at
-``21aa35e``; see ``docs/plans/silvertorch-official-integration.md``). This package is the
+``21aa35e``; docs/system/kernels.md § official). This package is the
 whole adapter: the availability probe, ``OfficialConfig`` and the upstream constants here;
 attribute → feature / expression mapping, mask packing and the eager scoring wrappers whose
 outputs go through the same ``masked_topk`` epilogue as every other backend in ``adapter``
@@ -51,7 +51,7 @@ Op schemas matched against the upstream registrations (``TORCH_LIBRARY_FRAGMENT(
   ``[B·P]``, ``first_item_offset_in_column`` int8 ``[B·P]``, ``column_mask_response``
   int64 ``[Σ columns]``.
 
-Everything here is **eager only** (plan D7): each op syncs the host, so there is no
+Everything here is **eager only**: each op syncs the host, so there is no
 ``torch.compile`` / CUDA-graph path; the layer refuses to compile this backend.
 """
 
@@ -69,9 +69,8 @@ BloomPath = Literal["partial", "full"]
 # Bit order the official *scorer* uses when it reads a ``filtering_bit_mask`` word (and the
 # partial column masks): doc ``d`` is bit ``63 - d % 64`` of word ``d // 64`` — "lower doc id
 # put at higher bits", ``bloom_index_util.cuh`` ``get_bit_64_bit_mask`` /
-# ``get_next_32_bit_mask`` (lines 125-180 at 21aa35e). **Measured 2026-09-06 on the A100**
-# (roadmap A3, plan §13.2: three independent probes — packed search output, a hand-built
-# mask into ``fused_kmean_ann``, and their round trip — all HIGH-first).
+# ``get_next_32_bit_mask`` (lines 125-180 at 21aa35e). Measured three independent ways, all
+# HIGH-first (kernels.md, "Bit order — measured, high-first").
 # ``tests/parity/test_official.py`` T3 pins it (``OFFICIAL_BIT_ORDER``); nothing else in
 # the adapter hard-codes it.
 MASK_BIT_ORDER: BitOrder = "high_first"
@@ -113,9 +112,9 @@ class OfficialConfig:
 
     - ``score_path``: ``"int32"`` → ``divisor_for_int8=-1``, the raw int32 dot, host
       epilogue ``(dot·q_scale)·global_scale`` **bit-identical** to Triton / torch (the
-      parity path, plan D5); ``"fp16"`` → ``divisor_for_int8 = divisor`` (a power of two
+      parity path); ``"fp16"`` → ``divisor_for_int8 = divisor`` (a power of two
       chosen so ``127²·D / divisor ≤ 65504``), the kernel writes ``fp16(dot / divisor)``
-      — the instantiation Meta ships for int8 serving, hence the timed path (plan §4.2).
+      — the instantiation Meta ships for int8 serving, hence the timed path.
     - ``divisor``: ``None`` → :func:`default_divisor` of the index width.
     - ``bloom_path``: ``"partial"`` → ``bloom_index_search_batch_return_partial_response``
       over the probed clusters + ``fused_kmean_ann_with_partial_masks`` (the paper's
@@ -123,19 +122,19 @@ class OfficialConfig:
       over all ``N`` + ``fused_kmean_ann(filtering_bit_mask=…)`` (the S9 ablation).
     - ``b_multiplier``: bloom width per bundle = ``max_terms_per_doc · k · b_multiplier``
       bits per doc (``bloom_indexer.cpp:52-66``); must be ``> 1.0``. Matched-memory /
-      matched-FPR calibration against our ``m_bits`` is plan §4.3.
+      matched-FPR calibration against our ``m_bits`` is roadmap D3.
     - ``n_stored_hashes``: raw murmur hashes precomputed per query term at parse time (the
       ops' ``hash_k`` argument — renamed here because the library-wide ``k_hash`` is the
       *search* ``k``, ``SilverTorch.k_hash``); the search ANDs the first ``k`` *distinct*
       positions among them, so it must exceed ``k`` by a margin (README uses 7 for k=3).
     - ``build_k``: hash positions set per term at index build; ``None`` → the search
       ``k`` (README's usage; the upstream module builder passes ``hash_k`` instead, which
-      sets extra bits per term — plan §1.1).
+      sets extra bits per term).
     - ``max_sub_queries``: parser fan-out bound per AND/OR node (semantics unchanged).
     - ``fast_build``: the CUDA builder's single-pass signature-free build (ignored by the
       CPU builder).
     - ``cache_plans``: memoise :func:`parse_plans` on the expression tuple (default). The
-      CPU expression parse costs ≈ 59 µs per call at B=16 (plan §13.2, ``c:v AND c:v``) —
+      CPU expression parse costs ≈ 59 µs per call at B=16 —
       10–20 % of an eager bloom forward — and a benchmark that replays one fixed batch
       would hide it behind the cache after the first call. **Timing must use
       ``cache_plans=False``** (every forward pays the parse, as a serving path with fresh
@@ -186,7 +185,7 @@ def _try_load():
     if not torch.cuda.is_available():
         return OfficialMissing(
             "torch reports no CUDA device; the official SilverTorch backend runs its "
-            "scorer on CUDA only (the CPU reference ops are not oracles, plan §1.1)."
+            "scorer on CUDA only (the CPU reference ops are not oracles)."
         )
     try:
         import silvertorch.ops._load_ops  # noqa: F401  (registers torch.ops.st.*)
@@ -194,7 +193,7 @@ def _try_load():
         if (e.name or "").split(".")[0] == "silvertorch":
             return OfficialMissing(
                 "meta-recsys/silvertorch is not installed; sync the `official` extra "
-                f"(`uv sync --extra official`, roadmap A2). Underlying error: {e}"
+                f"(`uv sync --extra official`). Underlying error: {e}"
             )
         failure = ImportError(f"silvertorch import failed on a dependency:\n{e}")
         failure.__cause__ = e

@@ -26,6 +26,7 @@ from __future__ import annotations
 import pytest
 import torch
 from torch import Tensor, nn
+from torch._dynamo.utils import counters
 
 from retrieve.modules import (
     BloomFilter,
@@ -104,7 +105,6 @@ def _assert_replays_match_eager(module: nn.Module, b: int, label: str) -> None:
     """Compile as the harness does, warm up five times on one query, then replay the captured
     graph on two different queries: zero ``cudagraph_skips``, and each replay equals eager on
     the same inputs (scores ``torch.equal``, ids up to ties)."""
-    from torch._dynamo.utils import counters
 
     torch._dynamo.reset()
     skips_before = int(counters["inductor"]["cudagraph_skips"])

@@ -2797,8 +2797,8 @@ dev = [
 requires-dist = [
     { name = "click", specifier = ">=8.1" },
     { name = "silvertorch", marker = "extra == 'official'", git = "https://github.com/meta-recsys/silvertorch?rev=21aa35e28b6dd9a91e9ee35efb0857715e86bda7" },
-    { name = "torch", specifier = ">=2.4,<3" },
-    { name = "triton", specifier = ">=3.0" },
+    { name = "torch", specifier = ">=2.10,<3" },
+    { name = "triton", specifier = ">=3.6" },
 ]
 provides-extras = ["official"]
 

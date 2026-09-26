@@ -2,9 +2,8 @@
 
 Precision contract: ``PostfilterKNN`` and ``PrefilterKNN`` store fp16 and accumulate dots in fp32
 — cuBLAS (``PostfilterKNN``, ``PrefilterKNN(backend="torch")``) rounds the score to fp16 on output,
-the fused Triton kernel (``PrefilterKNN(backend="triton")``) writes it as fp32 (plan L5; the two
-differ only by that output rounding). ``PostfilterKNNInt8`` is int32 end to end; ``FullScanKNN``
-keeps the input dtype."""
+the fused Triton kernel (``PrefilterKNN(backend="triton")``) writes it as fp32.
+``PostfilterKNNInt8`` is int32 end to end; ``FullScanKNN`` keeps the input dtype."""
 
 from __future__ import annotations
 
@@ -12,7 +11,7 @@ import torch
 from torch import Tensor
 
 from retrieve.functional import masked_topk, post_filter_topk
-from retrieve.indexing.quantize import quantize_int8_global_codes
+from retrieve.indexing.quantize import quantize_int8_global, quantize_int8_global_codes
 from retrieve.interfaces import LinrBackend, RetrievalModule, check_backend, ops_for
 
 
@@ -40,9 +39,7 @@ class PostfilterKNN(RetrievalModule):
         mask: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
         scores = query.to(torch.float16) @ self.item_embs_t
-        if mask is not None:
-            return masked_topk(scores, self.k, valid=mask)
-        return masked_topk(scores, self.k)
+        return masked_topk(scores, self.k, valid=mask)
 
 
 class PostfilterKNNInt8(RetrievalModule):
@@ -69,7 +66,7 @@ class PostfilterKNNInt8(RetrievalModule):
         self.register_load_state_dict_post_hook(_rederive_n_real)
 
     def register_index(self, item_embs: Tensor) -> None:
-        codes = quantize_int8_global_codes(item_embs)  # [N, D] int8
+        codes, _ = quantize_int8_global(item_embs)  # [N, D] int8, chunked at build
         # _int_mm needs N (after transpose) a multiple of 8; pad with zero items (sliced off in
         # forward), quantize before padding so the global scale is unaffected.
         n = codes.shape[0]
@@ -101,9 +98,7 @@ class PostfilterKNNInt8(RetrievalModule):
         # int32 → fp16 for topk: >>5 brings worst-case |dot| ≈ D·127² (~2²¹) under fp16's ~2¹⁶ range
         # while preserving order; fp16 also halves CUB radix-select passes (2 vs 4).
         scores = (dots >> 5).to(torch.float16)
-        if mask is not None:
-            return masked_topk(scores, self.k, valid=mask)
-        return masked_topk(scores, self.k)
+        return masked_topk(scores, self.k, valid=mask)
 
 
 def _rederive_n_real(module: PostfilterKNNInt8, incompatible_keys) -> None:
@@ -146,14 +141,11 @@ class PrefilterKNN(RetrievalModule):
             topk_scores, topk_ids = torch.topk(scores, self.k, dim=1)
             return topk_ids, topk_scores
         b, p = candidate_ids.shape
-        if p == 0:
-            device = query.device
-            return (
-                torch.full((b, self.k), -1, dtype=torch.long, device=device),
-                torch.full((b, self.k), float("-inf"), device=device),
-            )
         if counts is None:
             counts = torch.full((b,), p, dtype=torch.long, device=query.device)
+        if p < self.k:
+            # The op needs >= k columns; lanes past counts are never read, so -1 pads them.
+            candidate_ids = torch.nn.functional.pad(candidate_ids, (0, self.k - p), value=-1)
         return ops_for(self.backend).fused_masked_knn_topk(
             query, self.item_embs, candidate_ids, counts, self.k
         )

@@ -42,7 +42,8 @@ def masked_topk(
     P < k returns min(k, P) columns."""
     b, p = scores.shape
     if valid is not None:
-        scores = scores.masked_fill(~valid, float("-inf"))
+        # One pass; masked_fill(~valid) clones the scores and inverts the mask first.
+        scores = torch.where(valid, scores, float("-inf"))
     actual_k = min(k, p)
     topk_scores, topk_local = torch.topk(scores, actual_k, dim=1)
     topk_ids = gather_ids.gather(1, topk_local) if gather_ids is not None else topk_local
@@ -61,7 +62,7 @@ def compact_mask(mask: Tensor) -> tuple[Tensor, Tensor]:
     Same contract as the triton ``bloom_compact``/``clause_compact`` kernels, so torch and
     triton paths stay interchangeable: all three return full-width ``[B, N]`` indices with
     only the first ``counts[b]`` entries of each row meaningful. The tails differ — arbitrary
-    ids (argsort tail) here vs ``-1`` (prefilled) for the kernels — so consumers must bound
+    ids (argsort tail) here vs ``-1`` (written by the kernels) — so consumers must bound
     reads by ``counts`` either way."""
     counts = mask.sum(dim=1)
     sorted_idx = mask.float().argsort(dim=1, descending=True, stable=True)
@@ -100,12 +101,12 @@ def combine_indices(
     f0, q0 = filters[0], query_clause_attrs[0]
     ids, counts = f0.evaluate_indices(q0)
 
-    for f, q in zip(filters[1:], query_clause_attrs[1:]):
+    for f, q in zip(filters[1:], query_clause_attrs[1:], strict=True):
         b, p = ids.shape
         if p == 0:
             return ids, counts
-        valid = torch.arange(p, device=ids.device).unsqueeze(0) < counts.unsqueeze(1)
-        # ids past counts[b] are scratch from clause_compact's torch.empty(); gather as 0, then
+        valid = counts_to_valid(counts, p)
+        # ids past counts[b] are -1 (Triton) or argsort leftovers (torch); gather as 0, then
         # sub_mask & valid zeroes them out.
         safe_ids = torch.where(valid, ids, ids.new_zeros(()))
         sub_mask = f.evaluate_subset(q, safe_ids)  # [B, P] bool

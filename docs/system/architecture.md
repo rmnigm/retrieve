@@ -42,7 +42,7 @@ retrieve/src/retrieve/
 │   ├── reference/         the same op names and signatures in pure torch: the "torch" backend + parity oracle
 │   ├── official/          __init__.py (loader, OfficialConfig, constants, `st`), adapter.py (the adapter)
 │   └── tune.py            the autotune CLI (`tune-kernels`)
-└── indexing/              kmeans.py (KMeans, init random | kmeans++), ivf.py (padded_layout, csr_layout), quantize.py, bloom_hash.py
+└── indexing/              kmeans.py (KMeans, init random | kmeans++), ivf.py (csr_layout, probe_width), quantize.py, bloom_hash.py
 ```
 
 `import retrieve` imports no kernel: a module resolves its backend's op
@@ -382,7 +382,8 @@ prebuilt load, no k-means) → `.to(device)`. After `register_index`,
 (device-synchronised wall seconds of the four phases; `{}` before
 registration and on a prebuilt module) and `set_query_params(n_probe=…)`
 changes the probe width with the two `register_index` validations re-run
-(`n_probe <= n_lists`, `n_probe · max_cluster_size >= k`); `k` is a plain
+(`n_probe <= n_lists`, a probe width of at least `k` — the sum of the
+`n_probe` largest clusters, [kernels](kernels.md#silvertorch-kernels)); `k` is a plain
 attribute. `capturable` is a property: `True` on `triton` / `torch`, `False`
 on `official`. Forward takes
 `(query, query_clause_attrs=None, candidate_ids=None)` — there is no
@@ -397,18 +398,13 @@ but masked to `-inf` and returned as `-1` through `masked_topk`, so a
 pad never scores or surfaces as item `N-1` (or, on `"official"`, as
 `inv_perm[-1]`). `register_index` is split into
 validate → `_build_ivf` (k-means, registers `centroids`) → the layout
-([`indexing.padded_layout`](../../retrieve/src/retrieve/indexing/ivf.py) on
-`triton` / `torch`, `indexing.csr_layout` on `official`; both derive from
-one stable `argsort` of the same assignment, so they share a slot order) →
-`_quantize_items` → `_register_filter_buffers`, with a frozen
-buffer-registration order (state-dict key order): `centroids`,
-`item_codes`, `global_scale`, `padded_cluster_items`, `cluster_sizes`,
-then the filter buffers. On `"official"` the IVF is stored as the CSR the
-official scorer indexes instead of the padded layout: `centroids`,
-`item_codes` (**cluster-sorted**), `global_scale`,
-`cluster_offsets[n_lists+1]`, `cluster_sizes`, `sort_perm[N]` (sorted
-position → original id), `inv_perm[N]`, then the filter buffers;
-`padded_cluster_items` is not registered.
+([`indexing.csr_layout`](../../retrieve/src/retrieve/indexing/ivf.py), one
+stable `argsort` of the assignment, on every backend) → `_quantize_items` →
+`_register_filter_buffers`, with a frozen buffer-registration order
+(state-dict key order): `centroids`, `item_codes` (**cluster-sorted**),
+`global_scale`, `cluster_offsets[n_lists+1]`, `cluster_sizes`,
+`sort_perm[N]` (sorted position → original id), `inv_perm[N]`, then the
+filter buffers, also in cluster-sorted order.
 
 The filter is private to SilverTorch — no standalone `FilterModule`
 instance is wired in; the module shares the ten-line predicate *math*
@@ -423,7 +419,8 @@ builders with the filters package, not the module classes:
   without attributes, in which case the salt is derived device-side per
   query from Python-int constants — still no copy). **Which signature buffer is
   registered depends on the backend**: `"triton"` / `"torch"` store the
-  row-wise `bloom_sigs[N, W]`; `"official"` stores Meta's own index — `bloom_index[W]` int64 and
+  transposed index `bloom_transposed[m_bits, ceil(N/64)]`
+  ([kernels](kernels.md#codesigned_probe_score--ivf--int8--bloom)); `"official"` stores Meta's own index — `bloom_index[W]` int64 and
   `bundle_b_offsets[n_bundles+1]` from `torch.ops.st.bloom_index_build`
   over the cluster-sorted attrs (their murmur3 hash, width set by
   `OfficialConfig.b_multiplier`; `m_bits` is optional and ignored, `k_hash`
@@ -431,30 +428,26 @@ builders with the filters package, not the module classes:
 - For `"exact"`, the narrow `[N, C, A_max]` attribute tensor is stored
   as the `item_clause_attrs` buffer (plus `clause_is_reverse[C]` bool)
   and consumed directly by the exact kernel — reverse clauses are
-  supported on this mode only. (On `"official"` the same two buffers are
-  registered, with `item_clause_attrs` permuted into the cluster-sorted
-  doc space; our Triton `clause_mask` evaluates them and the `[B, N]`
-  mask is packed into the official scorer's `filtering_bit_mask`.)
+  supported on this mode only. `item_clause_attrs` is in the cluster-sorted
+  doc space on every backend. (On `"official"` our Triton `clause_mask`
+  evaluates it and the `[B, N]` mask is packed into the official
+  scorer's `filtering_bit_mask`.)
 - For `"none"`, both attribute buffers are skipped and `forward`
   requires `query_clause_attrs=None`.
 
 > **State dicts are portable between `"triton"` and `"torch"` in every
-> `filter_mode`** — the two register the same buffers (`centroids`,
-> `item_codes`, `global_scale`, `padded_cluster_items`, `cluster_sizes`,
-> then the filter buffers). **`"official"` is portable to neither in any
-> mode**: its `item_codes` and `item_clause_attrs` are in cluster-sorted
-> order, it carries `cluster_offsets` / `sort_perm` / `inv_perm` instead
-> of `padded_cluster_items`, and its bloom index is Meta's. Rebuild the
-> index with `register_index` rather than trying to load across that
-> boundary.
+> `filter_mode`, and to `"official"` in `"none"` and `"exact"`**: every
+> backend registers the same CSR and attribute buffers. Only the bloom
+> index differs (`bloom_transposed` against Meta's `bloom_index` /
+> `bundle_b_offsets`), so a bloom index is rebuilt with `register_index`
+> across that boundary.
 >
 > Loading is `nn.Module.load_state_dict` into a module whose
 > `register_index` already ran (the buffers must exist and match in
 > shape). A `load_state_dict` post-hook then re-derives the two Python
 > scalars the forwards read instead of the buffers — `_global_scale_f`
-> (from `global_scale`) and `_max_cluster_size` (from
-> `padded_cluster_items.shape[1]`, or `cluster_sizes.max()` on
-> `"official"`) — with two `.item()` syncs at load time, so a loaded
+> (from `global_scale`) and `_probe_width` (from `cluster_sizes` and
+> `n_probe`) — with two `.item()` syncs at load time, so a loaded
 > index scores exactly like the saved one.
 
 ## Utility modules
