@@ -83,7 +83,7 @@ def step_loss(
     batch: dict[str, torch.Tensor],
     config: TrainConfig,
     num_items: int,
-    p_train: torch.Tensor | None = None,
+    p_train: torch.Tensor | None,
 ) -> torch.Tensor:
     items = batch["items"]
     inputs, targets = items[:, :-1], items[:, 1:]

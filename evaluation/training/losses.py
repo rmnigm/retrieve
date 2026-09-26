@@ -41,7 +41,7 @@ def sampled_softmax_loss(
     table: torch.Tensor,
     temperature: float,
     normalize: bool,
-    log_q: torch.Tensor | None = None,
+    log_q: torch.Tensor | None,
 ) -> torch.Tensor:
     """Cross-entropy of the positive against the shared candidates; a candidate equal to the
     row's own positive (an accidental hit) is masked out. ``log_q [C]``, when given, is

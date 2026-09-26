@@ -1143,8 +1143,8 @@ Negatives are uniform over `1..N`, drawn on the GPU inside the step.
   = `num_negatives`, N the item count). `p_train` is each item's share of
   the train target positions (`target_frequencies`, one GPU bincount at
   startup). The positive column is not corrected (arXiv 2507.09331);
-  accidental hits stay `−inf`. With M = 0, q is uniform and the correction
-  is a constant that changes nothing.
+  accidental hits stay `−inf`. With M = 0, q is uniform and every
+  candidate moves by `+log N` against the uncorrected positive.
 
 ### Loop shape
 
