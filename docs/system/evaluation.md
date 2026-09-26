@@ -279,10 +279,9 @@ Nine files under [`evaluation/config/`](../../evaluation/config/):
 [`yambda-5b.yaml`](../../evaluation/config/yambda-5b.yaml),
 [`yfcc10m.yaml`](../../evaluation/config/yfcc10m.yaml),
 [`pubmed.yaml`](../../evaluation/config/pubmed.yaml) and
-[`openalex.yaml`](../../evaluation/config/openalex.yaml) (all three in
-the `filter` suite; pubmed and openalex at 768), and
-[`kuairand.yaml`](../../evaluation/config/kuairand.yaml)
-(in no suite yet) and
+[`openalex.yaml`](../../evaluation/config/openalex.yaml) and
+[`kuairand.yaml`](../../evaluation/config/kuairand.yaml) (all four in
+the `filter` suite; pubmed and openalex at 768, kuairand at 128), and
 [`suites.yaml`](../../evaluation/config/suites.yaml). `users_limit:
 10000` and the goodreads/arXiv sweeps, ks and batch sizes match the
 [golden cells](../../evaluation/golden/README.md), so the two stay
@@ -322,7 +321,7 @@ raise `ConfigError` naming the file.
 ```yaml
 # config/suites.yaml — a suite = cells run on every listed dataset × its dims
 filter:
-  datasets: [goodreads, arxiv, yfcc10m, pubmed]
+  datasets: [goodreads, arxiv, yfcc10m, pubmed, openalex, kuairand]
   dims: [128, 192, 768]             # optional; default: the dataset's dims (yfcc10m 192, pubmed 768 only)
   filter_kinds: [clause, bloom]     # none | clause | bloom
   ks: [100, 500, 1000]

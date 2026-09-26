@@ -597,10 +597,15 @@ it, and `bench/` and the slice stay as they are. The exact
 
 ### kuairand
 
-**Status: staged and layout-clean, no checkpoint.** `download` → `convert` →
-`prep` → `attrs` have run on the real data, and `bench check --dataset
-kuairand` is clean. The gSASRec checkpoint, the Hub publish and the filter
-cell need the GPU and have not run (roadmap E4). Nothing below is citable.
+**Status: staged, trained, on the Hub, one filter cell run.** `download` →
+`convert` → `prep` → `attrs` have run on the real data and `bench check
+--dataset kuairand` is clean. The gSASRec checkpoint `gsasrec-d128-shared` is
+trained and published (private) to
+`pinkmeme/eval-kuairand/checkpoints/gsasrec-d128-shared`; the dataset files
+themselves are not published. The dataset is in the `filter` suite. One cell,
+`linr_v1_filter_mask`/triton clause `t_cat1`, eager, `--skip-perf` (so
+`partial`): pass rate 0.0362, `recall_oracle@1000` **0.9996**, held-out
+`recall@100` 0.020, `recall@1000` 0.064, n = 9,910. Nothing below is citable.
 The run records are in
 [artifacts/e4-kuairand/](../artifacts/e4-kuairand/).
 
@@ -694,22 +699,36 @@ What the data ruled out:
 
 The sweeps of [`config/kuairand.yaml`](../../evaluation/config/kuairand.yaml)
 are `t_*` over C0–C3 and `b_*` over C4–C6. Bloom runs `t_cat1`, `t_tag`,
-`b_short` and `b_fresh`. The dataset is in no suite yet (roadmap E5).
+`b_short` and `b_fresh`. The dataset is in the `filter` suite.
 
 **Training** runs over the full 32 M table with `reuse_item_embeddings`,
 the one item table the trainer already supports. The table is 32,038,726
-× 128 fp32 = 16.4 GB. With its dense gradient and AdamW's two moments that
-is 65.6 GB before activations on the 80 GB A100; two separate tables would
-need 131 GB. That estimate is arithmetic, not a measurement. If it does not
-fit, lower `--negs-per-pos` or `--batch-size`. Every epoch also scores
-the full catalog for the val users, so `--eval-max-users` bounds that
-cost. The command, not yet run:
+× 128 fp32 = 16.4 GB; with its dense gradient and AdamW's two moments that
+is 65.6 GB before activations, where two separate tables would need 131 GB.
+At the default `--negs-per-pos 256` the first backward OOMs (the gathered
+negatives alone are 6.7 GB fp32, with 74.8 GiB already allocated before
+AdamW's moments exist). At 128 the measured peak `max_memory_allocated` is
+82.9 GB (77.2 GiB) of the 80 GB card, the full-catalog val eval included.
+Every epoch scores the full catalog for the val users, so `--eval-max-users`
+bounds that cost. The command that produced `gsasrec-d128-shared`:
 
 ```bash
-uv run --directory evaluation train sasrec --data-dir data/kuairand \
-    --checkpoint-dir data/kuairand/checkpoints/gsasrec-d128-shared \
-    --embedding-dim 128 --dropout 0.5 --reuse-item-embeddings --eval-max-users 4096
+PYTORCH_ALLOC_CONF=expandable_segments:True uv run --directory evaluation train sasrec \
+    --data-dir data/kuairand --checkpoint-dir data/kuairand/checkpoints/gsasrec-d128-shared \
+    --embedding-dim 128 --dropout 0.5 --reuse-item-embeddings --eval-max-users 4096 \
+    --negs-per-pos 128 --patience 5 --num-epochs 100 --no-wandb
 ```
+
+An epoch is 2,193 batches and takes ~11 min (4 it/s plus eval and a 49 GB
+`_resume.pt`). The goal was usable embeddings, not convergence, hence
+patience 5. Val NDCG@10 (4,096 users) peaked at 0.0361 at epoch 13 and
+early stopping ended the run after epoch 18 (3.2 h); `best_model.pt` is
+epoch 13. Test (all 26,221 users): NDCG@10 0.0088, NDCG@100 0.0059,
+Recall@100 0.0024, 4× below val (val over all users: 0.0355). Item
+cold start is part of that: only 44.7 % of test targets were clicked in
+train, against 65.9 % of val targets, and an item never clicked in train
+keeps its random init. The rest of the gap is unexplained. The finished
+checkpoint directory holds ~82 GB, 49 GB of it `_resume.pt`.
 
 ```
 data/kuairand/
@@ -721,7 +740,12 @@ data/kuairand/
 ├── clause_is_reverse_narrow.pt [7] bool = [F, F, F, F, T, F, F]
 ├── attr_vocab.json
 ├── eval_split.parquet          target_id, query_attrs_narrow [7]
-└── prep_log.json
+├── prep_log.json
+├── gt_d128/                    exact oracles, built by the harness per sweep
+└── checkpoints/gsasrec-d128-shared/
+    ├── best_model.pt / item_embs.pt   16.4 GB each (epoch 13)
+    ├── config.json, eval_quality.json, train_metrics.json, item_id_map.json
+    └── _resume.pt              49 GB, model + AdamW state after epoch 18; not on the Hub
 ```
 
 ### openalex
@@ -1022,9 +1046,9 @@ path; the entry exists so the local directory layout resolves like every
 other dataset's.
 
 `pinkmeme/eval-pubmed` is **registered but not published**; nothing is
-pushed to it before roadmap E2. `pinkmeme/eval-kuairand` is likewise
-registered and not yet published (roadmap E4 publishes it with its
-checkpoint).
+pushed to it before roadmap E2. `pinkmeme/eval-kuairand` holds only the
+`gsasrec-d128-shared` checkpoint (private); the dataset files are not
+published.
 
 `eval-data fetch` pulls a prepared dataset (optionally a subset of dims),
 `eval-data publish` pushes one, `eval-data publish-checkpoint` pushes a

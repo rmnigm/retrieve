@@ -1,0 +1,3 @@
+2026-09-26 08:02:58.180 | INFO     | training.train:train:215 - Epoch 0 — loss: 0.5429 | ndcg@10: 0.0000 | val: {"ndcg@10": 0.0, "recall@10": 0.0, "ndcg@100": 0.0006, "recall@100": 0.0004, "coverage@10": 0.0, "coverage@100": 0.0}
+2026-09-26 08:05:13.063 | INFO     | training.train:train:305 - Test metrics: {
+EXIT 0

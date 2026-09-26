@@ -38,7 +38,10 @@ scored, and how to move them around. For how the trainer itself works
 
 Other datasets follow the same `data/<dataset>/checkpoints/<ckpt-id>/`
 layout: 5B runs at `data/yambda-5b/checkpoints/gsasrec-d{64,128}/`,
-goodreads at `data/goodreads-work-id/checkpoints/gsasrec-d{64,128,256}-drop0.5-id/`.
+goodreads at `data/goodreads-work-id/checkpoints/gsasrec-d{64,128,256}-drop0.5-id/`,
+kuairand at `data/kuairand/checkpoints/gsasrec-d128-shared/` (one shared item
+table, `negs_per_pos=128`, epoch 13 of 18, test NDCG@10 0.0088; on the Hub —
+[datasets](datasets.md#kuairand)).
 Arxiv has no SASRec checkpoint — its queries come from a pre-encoded text
 embedding tensor (see [evaluation.md](evaluation.md)).
 
@@ -203,6 +206,7 @@ The registry lives in
 | `yambda-5b` | `pinkmeme/eval-yambda-5b` |
 | `goodreads-work-id` | `pinkmeme/eval-goodreads-work-id` |
 | `arxiv-papers` | `pinkmeme/eval-arxiv-papers` |
+| `kuairand` | `pinkmeme/eval-kuairand` |
 
 A given checkpoint then lands at
 `pinkmeme/eval-<dataset>/tree/main/checkpoints/<ckpt-id>/` rather than its
