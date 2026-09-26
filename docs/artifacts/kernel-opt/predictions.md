@@ -150,3 +150,12 @@ bucketed width is 16.7M lanes for P = 3M, and every tail lane ran the SWAR); mas
 `quantize_int8_global` at 3M × 128 **−13.4 %** with the transient bounded to one chunk
 (`test_quantize.py`: 672 MiB on a 384 MiB table before, under half the table after); the controls
 (`fmkt`, both compactions) within 0.5 %.
+
+## Final: pre-change baseline (`ded8125`) against the branch head, interleaved
+
+`final.md`, 13 cases whose API exists in both trees. The probe scorers' API changed, and their
+before/after is `h2h.md`. **No case slower beyond its noise band.**
+Faster: `oporp_indirect` −12.3 %, `quantize_int8_global` −13.7 %, masked `PostfilterKNN` −9.4 %,
+`bloom_compact` −5.1 % / −3.3 % (B=16 / B=1), `bloom_match` −3.6 %, `PostfilterKNNInt8` −3.3 %,
+`oporp_full` −2.4 %. `clause_compact_b1` +1.5 % sits inside an 8 % band and is `unstable` 3/3 on
+both sides. The rest are within ±1 %.

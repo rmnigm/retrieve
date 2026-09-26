@@ -26,7 +26,7 @@ rerun the library suite before trusting any row on it.
 
 | gate | state | notes |
 |---|---|---|
-| Library suite (`retrieve/tests`, GPU, `official` extra installed) | **green**, 708 passed at the last full run (roadmap Q3's hardened gates included; none turned red) | no tolerance loosened; every tolerance stated at its call site; see [testing](system/testing.md) |
+| Library suite (`retrieve/tests`, GPU, `official` extra installed) | **green**, 755 passed at the last full run (branch `dev/kernel-opt`, on a cold inductor cache; Q3's hardened gates included, none turned red) | no tolerance loosened; every tolerance stated at its call site; see [testing](system/testing.md) |
 | Triton vs reference ops, every parity file | **bit-exact** (`torch.equal` scores, ids up to ties) for `codesigned_probe_score` (+ bloom) and `codesigned_probe_score_exact` on the compact CSR layout (also against a loop-built oracle and, for bloom, the row-wise subset test), and for `oporp_1bit_match_topk_*`, `clause_mask`, the compaction ops; **not bit-exact** for `fused_masked_knn_topk` | the fused kernel's fp32 `tl.sum` and the reference's `bmm` reduce in different orders: measured drift ≤ 6e-8 at D ≤ 128 on unit-norm data, gated at `atol=1e-6` |
 | Kernel identities (Q3) | **bit-exact**: indirect OPORP over `arange(N)` ≡ full scan; bloom op with an all-pass query signature ≡ no-bloom op; `clause_compact` ≡ `compact_mask(clause_mask)` incl. the `-1` tail; row alone ≡ row in batch (fused, both probe scorers, OPORP); item-table permutation permutes ids only (fused, `codesigned_probe_score`, OPORP) | Triton only, on this box |
 | Kernel cutoffs and degenerate rows (Q3) | **green**: both sides of `_P_BUCKETS[0]` / `_N_BUCKETS[0]` and `P % block` ∈ {0, 1} (read from the kernels' constants, regime asserted); `count = 0` / `1` rows give exact `(-1, -inf)` tails | |
@@ -55,7 +55,7 @@ rerun the library suite before trusting any row on it.
 | `ruff check evaluation` (B, C4, SIM, RUF100, BLE001, PLC0415 on top of E, W, F, I, UP) | **clean**, ruff 0.15.6 | per-file ignores with reasons: ETL inline imports, goodreads' broad `except` (its own cleanup) ([evaluation](system/evaluation.md#lint)) |
 | `ruff format --check evaluation` | **not clean**: 15 files | waits on the `evaluation/` formatting-only commit; the pre-commit format hook covers `retrieve/` only until then |
 | `scripts/check_doc_links.py` | **0 problems**: links, 116 backticked repo paths, 88 `bench` / `eval-data` / `train` subcommands | subcommands read from the click sources with `ast`; floors of 60 paths / 50 calls catch a broken pattern; `docs/log.md` (history) is exempt from the path check and `evaluation/data` (gitignored) is allowed |
-| Golden baseline (`evaluation/golden/`) against the v2 harness | 9 of 11 cells match within 7.5e-9 in quality | two residuals unexplained: `linr_v4` recall@100 7.3e-5; arXiv `silvertorch` triton recall@100 2.0e-6. No equivalence with the pre-v2 harness is claimed |
+| Golden baseline (`evaluation/golden/`) against the v2 harness | Rerun on `dev/kernel-opt` (quality only, eager) ([artifact](artifacts/kernel-opt/golden_compare.md)). All 7 comparable goodreads cells (LiNR V1-V3 and SilverTorch triton / official at `n_probe` 24 and 32) are **identical** to the committed D1 records of the pre-change code: max \|diff\| 0 over 24 oracle and held-out metrics each. Against the golden JSONs: `linr_v1` and goodreads `silvertorch` within 1e-6; arXiv `silvertorch` recall@100 2.0e-6 (the known residual); `linr_v2` 4.5e-4 and `linr_v3` 1.7e-5 **also differ on the pre-change code** (the D1 records carry the same values), so the former "9 of 11 within 7.5e-9" no longer describes this harness and library. The cause is unidentified and predates `dev/kernel-opt`. The golden `torch` and `linr_v4` cells have no counterpart in today's suites | the two old residuals: `linr_v4` recall@100 7.3e-5 (not rerunnable: no suite runs `linr_v4`); arXiv `silvertorch` triton recall@100 2.0e-6 |
 | Graph latency against the golden | passes at batch 8 and 16 (ratio 0.96-1.03 at matched clock) | batch 1 is inside the golden's own repeat noise (up to 21 %) |
 | CUDA-graph capture | every capturable arm captured, `cudagraph_skips == 0` | `official` is not capturable and records a null entry with a reason |
 | Resume after SIGTERM | passes, no duplicate records | |
@@ -145,6 +145,11 @@ explains the mechanism behind the kernel-only split.
 | Semantic Scholar, KuaiRand | not started |
 
 ## Still unverified
+
+- Any compiled (`graph`-mode) measurement taken on a warm inductor cache after a library
+  change: the FX-graph / AOT-autograd caches replay a stale `triton_op` body
+  ([testing](system/testing.md#running)). This is measured in the library suite; whether any
+  recorded harness cell was affected has not been checked.
 
 - Clause 5 of the campaign gate (ids identical across modes).
 - The official exact path without our adapter's mask packing.

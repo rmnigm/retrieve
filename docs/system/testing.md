@@ -42,8 +42,13 @@ retrieve/tests/
 │   ├── test_compact.py
 │   ├── test_filters.py             (ExactAttributeFilter)
 │   ├── test_kmeans.py              (KMeans.fit bit-reproducible; kmeans++ init)
+│   ├── test_large_offsets.py       (addressing past 2³¹ elements, one planted case per overflow class; skipped
+│   │                                below 48 / 24 GiB free — kernels.md § Addressing)
 │   ├── test_linr.py                (PostfilterKNN, PostfilterKNNInt8, PrefilterKNN, OneBitKNN, SimHashKNN × torch / Triton;
-│   │                                LiNRV1–V4 torch.equal to the hand-composed primitives)
+│   │                                LiNRV1–V4 torch.equal to the hand-composed primitives; short candidate lists,
+│   │                                missing filters)
+│   ├── test_op_boundary.py         (every Triton op rejects a non-contiguous item table and a non-power-of-two
+│   │                                `tl.arange` extent with `ValueError`)
 │   ├── test_quantize.py            (int8, OPORP, popcount)
 │   ├── test_retrieval_utils.py     (FullScanKNN, post_filter_topk)
 │   ├── test_silvertorch.py         (SilverTorch × filter_mode {none,bloom,exact} × backend {triton,torch,official}; SilverTorchBuilder)
@@ -813,5 +818,14 @@ uv run pytest --collect-only tests/
 ```
 
 There is no marker to select and no `--bench` flag.
+
+**After editing a `triton_op` body, run the compile gates on a fresh inductor cache**
+(`TORCHINDUCTOR_CACHE_DIR=$(mktemp -d)`). The on-disk FX-graph / AOT-autograd caches key a graph
+on the custom op, not on the Python source of its `@triton_op` body. With a warm default
+cache (`/tmp/torchinductor_<user>`), a compiled call can replay the *old* body. Measured:
+after the OPORP candidate path changed its output width, four `test_linr.py` compile gates
+failed with the pre-change width on the warm cache and passed on a cold one. The same
+hazard applies to any compiled (`graph`-mode) harness run on a box whose cache predates a
+library change.
 The pytest config in [pyproject.toml](../../retrieve/pyproject.toml)
 collects `test_*.py` only.
