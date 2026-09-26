@@ -1,0 +1,3 @@
+train distinct items (inputs) 12058978
+val targets 3871194 seen-in-train frac 0.6595 per-user median 118
+test targets 8380134 seen-in-train frac 0.4472 per-user median 246
