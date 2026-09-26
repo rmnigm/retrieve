@@ -13,12 +13,12 @@ repos:
     hooks:
       - id: check-merge-conflict
       - id: check-added-large-files
-        args: [--maxkb=10240]  # docs/artifacts/ holds 7-8 MB raw outputs
-      # Frozen or recorded bytes are never rewritten: the papers, raw artifacts, results.
+        args: [--maxkb=1024]  # raw outputs live on the Hub (docs/system/evaluation.md)
+      # Frozen or recorded bytes are never rewritten: the papers, raw artifacts, the golden cells.
       - id: end-of-file-fixer
-        exclude: ^(articles|docs/artifacts|evaluation/results|evaluation/golden)/
+        exclude: ^(articles|docs/artifacts|evaluation/golden)/
       - id: trailing-whitespace
-        exclude: ^(articles|docs/artifacts|evaluation/results|evaluation/golden)/
+        exclude: ^(articles|docs/artifacts|evaluation/golden)/
 
   - repo: local
     hooks:

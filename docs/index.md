@@ -58,8 +58,9 @@ How the code works today. Code comments cite these pages by section.
   ([deviations](paper/reproduction-deviations.md),
   [provenance](paper/provenance-and-disclosure.md),
   [official vs reimplementation](paper/official-vs-reimplementation.md)).
-- [artifacts/](artifacts/): raw scripts and outputs behind measured
-  numbers, one directory per plan.
+- [artifacts/](artifacts/): raw scripts behind measured numbers, one
+  directory per plan; the raw outputs are on the Hub
+  ([hub-index.md](artifacts/hub-index.md)).
 - [`retrieve/docs/`](../retrieve/docs/): the library user guide shipped in
   the sdist.
 - [`articles/`](../articles/): the SilverTorch and LiNR papers, frozen.

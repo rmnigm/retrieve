@@ -32,10 +32,11 @@ under test. Each process writes 9 rows: `ks = [100, 500, 1000]` ×
 | `goodreads-d128-c0_genre-silvertorch-{triton,torch}.json` | " | " | silvertorch | triton, torch |
 | `arxiv-d128-c0_maincat-silvertorch-triton.json` | arxiv-papers, d128 | clause / `c0_maincat` | silvertorch | triton |
 
-11 files. `_logs/` holds one stdout/stderr log per cell plus
-`provenance.txt` (commit, host, UTC, `nvidia-smi`, torch/triton
-versions), kept so a number can be traced back to the run that produced
-it.
+11 files. `_logs/provenance.txt` (commit, host, UTC, `nvidia-smi`,
+torch/triton versions) ties them to the run that produced them; the
+stdout/stderr log per cell, the driver log and the clock trace are on the
+Hub under `artifacts/golden-logs/`
+([hub index](../../docs/artifacts/hub-index.md)).
 
 `_main/` holds the same 11 cells run from a throwaway worktree off
 `main` — the other half of handoff step 6, below. It is **gitignored**:
@@ -138,7 +139,7 @@ what moved, is below the table.
 | harness | unchanged from A1: `origin/dev/a1-golden`. One porting change, typing only: `retrieve.interfaces.Backend` is gone from the current library (split into `LinrBackend` / `SilverTorchBackend` at B4), so the harness declares the old literal locally — copy at [`../../docs/artifacts/evaluation-harness-v2/a1-rederive/harness_compat_backend.py`](../../docs/artifacts/evaluation-harness-v2/a1-rederive/harness_compat_backend.py) |
 | box | A100-SXM4-80GB, driver 580.159.04, nvcc 12.4, torch 2.10.0+cu128, triton 3.6.0, Python 3.11 |
 | inputs | identical to A1: the same `encoded_queries_test.pt` blob (cache hit — the checkpoint's mtime was set to the blob's recorded `ckpt_mtime` so no re-encode could perturb the queries) and the same cached oracles `gt_d128/gt_topk_v3_{c0_genre,c0_maincat}.pt` (fingerprint hit). goodreads keeps 9,859 / 10,000 users, arxiv 10,000 / 10,000 — both as in A1 |
-| clocks | **still not locked — this container cannot** (`nvidia-smi -lgc` denied, no `sudo`). H §7's fallback: sampled every 30 s into `_logs/clocks.csv`. **1155 MHz** median under load (A1: 1140), 1410 MHz peak, 210 MHz idle, 26-39 °C. `c4_gate.py --golden-sm-mhz` must be given **1155**, not its 1140 default. Quality is unaffected; **the latency columns are not clock-controlled**, and this run also shared the GPU with a second worker through `flock /workspace/gpu.lock` (serialised, but the thermal state between cells was not controlled) |
+| clocks | **still not locked — this container cannot** (`nvidia-smi -lgc` denied, no `sudo`). H §7's fallback: sampled every 30 s into `_logs/clocks.csv` (on the Hub, `artifacts/golden-logs/clocks.csv`). **1155 MHz** median under load (A1: 1140), 1410 MHz peak, 210 MHz idle, 26-39 °C. `c4_gate.py --golden-sm-mhz` must be given **1155**, not its 1140 default. Quality is unaffected; **the latency columns are not clock-controlled**, and this run also shared the GPU with a second worker through `flock /workspace/gpu.lock` (serialised, but the thermal state between cells was not controlled) |
 | wall time | 29.4 min of cell time for the 11 cells, 2.4-3.1 min each, 33 min end to end including lock waits |
 | runbook | [`a1-rederive/a1_golden_rerun.sh`](../../docs/artifacts/evaluation-harness-v2/a1-rederive/a1_golden_rerun.sh), `STAGES=golden` — a copy of [`a1_golden_run.sh`](../../docs/artifacts/evaluation-harness-v2/a1_golden_run.sh) with the GPU lock, `uv run --no-sync` against `/venvs/golden`, a private inductor cache, and stages 4-7 dropped |
 | exact HEAD, host and UTC of the run | `_logs/provenance.txt` |
@@ -162,7 +163,7 @@ files are run 1. Against the 2026-09-15 originals they moved by ≤ 6.1e-7
 the originals could not be kept: they were one arbitrary sample of it. The two
 runs, logs, clock trace and provenance are in
 [`deterministic-compaction/golden-rederive/`](../../docs/artifacts/deterministic-compaction/golden-rederive/);
-`_logs/` holds run 1's two logs. Sampled SM clock median during those cells:
+Run 1's two cell logs are on the Hub under `artifacts/golden-logs/`. Sampled SM clock median during those cells:
 1155 MHz (same as the re-derive).
 
 ### Why they were re-derived
@@ -228,5 +229,5 @@ where the count matched and the trim is an identity.
 - **Not citable on their own** (CLAUDE.md rule 2): they are the input to
   C4's gate, and the paper's numbers come from the D1 campaign on the v2
   harness.
-- **Not the old campaign outputs.** Those live in `../results/` and are
-  pre-oracle-fix; v2 moves them to `results/archive/`.
+- **Not the old campaign outputs.** Those were pre-oracle-fix, never
+  citable, and are no longer kept (git history has them).

@@ -1,5 +1,5 @@
 """``bench`` — the harness console script (H §3.4): ``run`` (one process), ``campaign`` (one
-child per group), ``check`` (the on-disk layout), ``upload`` (results → HF mirror),
+child per group), ``check`` (the on-disk layout), ``upload`` / ``fetch`` (results ↔ the HF Hub),
 ``report`` (tables and figures from the records; roadmap D4), ``env`` (the provenance and
 clock block as JSON, for a validation record).
 
@@ -10,7 +10,8 @@ cells — a ``--sweep`` typo, say — is an error (exit 1), never an empty succe
 ``bench campaign`` is the loop of H §3.4 / §8.2 K: one child process per ``(dataset, dim,
 algo, backend)`` group, sequential, ``stdout+stderr`` to ``<out>/_logs/<group>.log``, a
 one-line summary per child in ``<out>/_logs/campaign.log``, non-zero rc recorded and the
-loop continues; ``--resume`` fills gaps. A child that outlives ``--timeout`` hours is killed
+loop continues; ``--resume`` fills gaps; the records are aggregated into
+``<out>/results.parquet`` at the end. A child that outlives ``--timeout`` hours is killed
 and recorded as ``rc=timeout`` (exit code 124). The child is ``python -m bench.cli run …``
 on the same interpreter (no second ``uv`` resolution).
 """
@@ -31,12 +32,12 @@ from typing import TextIO
 import click
 import yaml
 
-from bench import measure
+from bench import measure, records
 from bench import run as run_mod
 from bench.algos import BACKENDS, FILTER_KINDS
 from bench.config import load_dataset, load_matrix
 from bench.report import report
-from bench.upload import upload
+from bench.upload import fetch, upload
 from eval_datasets.layout import validate_layout
 
 EVAL_DIR = Path(__file__).resolve().parents[1]
@@ -62,10 +63,11 @@ def _multi(v) -> list | None:
 
 @click.group()
 def main() -> None:
-    """The retrieval benchmark: run, campaign, check, upload, report, env."""
+    """The retrieval benchmark: run, campaign, check, upload, fetch, report, env."""
 
 
 main.add_command(upload)
+main.add_command(fetch)
 main.add_command(report)
 
 
@@ -216,6 +218,8 @@ def campaign(
                         f"{time.monotonic() - t0:.0f}s log={log.name}"
                     )
                 shutil.rmtree(parity, ignore_errors=True)
+        if records.record_files(out_dir):
+            say(f"=== aggregated {records.aggregate(out_dir)}")
         if n_children == 0:
             worst = max(worst, 1)
             say(f"no child was launched: --dataset {list(datasets)} / --dim {list(dims)} select "

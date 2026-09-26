@@ -739,7 +739,7 @@ cut to 10 M: `prep --keep-items 10000000` (374 s), `reshard --from-dir` the 15 M
 suite. One cell, `linr_v1_filter_mask`/triton clause `field_era`, eager, `--skip-perf` (so
 `partial`): pass rate 0.0526, `recall_oracle@1000` **0.9959**, held-out (a cited paper)
 `recall@100` 0.505 / `@1000` 0.741, n = 10,000, 64 GB reserved
-([record](../artifacts/e3-openalex/filter-openalex-d768-cell.jsonl)). SilverTorch-triton
+([record](https://huggingface.co/datasets/pinkmeme/eval-results/blob/main/artifacts/e3-openalex/filter-openalex-d768-cell.jsonl)). SilverTorch-triton
 and LiNR V2 / V3 cannot run at D = 768 (the power-of-two limit on the
 [roadmap](../roadmap.md)); official and V1 can. Nothing here is citable yet.
 
@@ -887,7 +887,7 @@ the main thread costs ~6 %. `flash_attn` is not installed.
 #### Budget
 
 As measured on 2026-09-26; `plan` from its
-[report](../artifacts/e3-openalex/plan-2026-09-23.json):
+[report](https://huggingface.co/datasets/pinkmeme/eval-results/blob/main/artifacts/e3-openalex/plan-2026-09-23.json):
 
 | | 10 M catalog |
 |---|---|

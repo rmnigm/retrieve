@@ -1,0 +1,235 @@
+path	action	hub_path	why
+docs/artifacts/cute-dsl-scorer/wp4/cps-cuda.json	hub	artifacts/cute-dsl-scorer/wp4/cps-cuda.json	raw data behind a documented finding
+docs/artifacts/cute-dsl-scorer/wp4/cps-cute-posttrim.json	hub	artifacts/cute-dsl-scorer/wp4/cps-cute-posttrim.json	raw data behind a documented finding
+docs/artifacts/cute-dsl-scorer/wp4/cps-cute.json	hub	artifacts/cute-dsl-scorer/wp4/cps-cute.json	raw data behind a documented finding
+docs/artifacts/cute-dsl-scorer/wp4/cps-triton.json	hub	artifacts/cute-dsl-scorer/wp4/cps-triton.json	raw data behind a documented finding
+docs/artifacts/cute-dsl-scorer/wp4/cpse-cuda.json	hub	artifacts/cute-dsl-scorer/wp4/cpse-cuda.json	raw data behind a documented finding
+docs/artifacts/cute-dsl-scorer/wp4/cpse-cute-posttrim.json	hub	artifacts/cute-dsl-scorer/wp4/cpse-cute-posttrim.json	raw data behind a documented finding
+docs/artifacts/cute-dsl-scorer/wp4/cpse-cute.json	hub	artifacts/cute-dsl-scorer/wp4/cpse-cute.json	raw data behind a documented finding
+docs/artifacts/cute-dsl-scorer/wp4/cpse-triton.json	hub	artifacts/cute-dsl-scorer/wp4/cpse-triton.json	raw data behind a documented finding
+docs/artifacts/cute-dsl-scorer/wp4/h2h-base.json	hub	artifacts/cute-dsl-scorer/wp4/h2h-base.json	raw data behind a documented finding
+docs/artifacts/cute-dsl-scorer/wp4/h2h-final.json	hub	artifacts/cute-dsl-scorer/wp4/h2h-final.json	raw data behind a documented finding
+docs/artifacts/cute-dsl-scorer/wp4/host_overhead-after.json	hub	artifacts/cute-dsl-scorer/wp4/host_overhead-after.json	raw data behind a documented finding
+docs/artifacts/cute-dsl-scorer/wp4/host_overhead-base.json	hub	artifacts/cute-dsl-scorer/wp4/host_overhead-base.json	raw data behind a documented finding
+docs/artifacts/cute-dsl-scorer/wp4/host_overhead-base2.json	hub	artifacts/cute-dsl-scorer/wp4/host_overhead-base2.json	raw data behind a documented finding
+docs/artifacts/cute-dsl-scorer/wp4/host_overhead-before.json	hub	artifacts/cute-dsl-scorer/wp4/host_overhead-before.json	raw data behind a documented finding
+docs/artifacts/cute-dsl-scorer/wp4/host_trim.json	hub	artifacts/cute-dsl-scorer/wp4/host_trim.json	raw data behind a documented finding
+docs/artifacts/cute-dsl-scorer/wp4/kernel_only-base.json	hub	artifacts/cute-dsl-scorer/wp4/kernel_only-base.json	raw data behind a documented finding
+docs/artifacts/cute-dsl-scorer/wp4/kernel_only-final.json	hub	artifacts/cute-dsl-scorer/wp4/kernel_only-final.json	raw data behind a documented finding
+docs/artifacts/cute-dsl-scorer/wp6/graphs.json	hub	artifacts/cute-dsl-scorer/wp6/graphs.json	raw data behind a documented finding
+docs/artifacts/cute-dsl-scorer/wp6/smoke.json	hub	artifacts/cute-dsl-scorer/wp6/smoke.json	raw data behind a documented finding
+docs/artifacts/dataset-candidates/pubmed/dryrun-chunk37-prep_log.json	hub	artifacts/dataset-candidates/pubmed/dryrun-chunk37-prep_log.json	raw data behind a documented finding
+docs/artifacts/dataset-candidates/pubmed/dryrun-chunk37-shard_index.json	hub	artifacts/dataset-candidates/pubmed/dryrun-chunk37-shard_index.json	raw data behind a documented finding
+docs/artifacts/dataset-candidates/pubmed/dryrun-chunk37-text_emb.meta.json	hub	artifacts/dataset-candidates/pubmed/dryrun-chunk37-text_emb.meta.json	raw data behind a documented finding
+docs/artifacts/dataset-candidates/pubmed/plan-10m-2026-09-16.json	hub	artifacts/dataset-candidates/pubmed/plan-10m-2026-09-16.json	raw data behind a documented finding
+docs/artifacts/dataset-candidates/pubmed/plan-full-2026-09-16.json	hub	artifacts/dataset-candidates/pubmed/plan-full-2026-09-16.json	raw data behind a documented finding
+docs/artifacts/dataset-candidates/yfcc10m/filter-yfcc10m-d192-cpu-rehearsal.jsonl	hub	artifacts/dataset-candidates/yfcc10m/filter-yfcc10m-d192-cpu-rehearsal.jsonl	raw data behind a documented finding
+docs/artifacts/dataset-candidates/yfcc10m/gt_check-cpu-100-cosine.json	hub	artifacts/dataset-candidates/yfcc10m/gt_check-cpu-100-cosine.json	raw data behind a documented finding
+docs/artifacts/dataset-candidates/yfcc10m/gt_check-cpu-200.json	hub	artifacts/dataset-candidates/yfcc10m/gt_check-cpu-200.json	raw data behind a documented finding
+docs/artifacts/dataset-candidates/yfcc10m/gt_check-cuda-100k.json	hub	artifacts/dataset-candidates/yfcc10m/gt_check-cuda-100k.json	raw data behind a documented finding
+docs/artifacts/dataset-candidates/yfcc10m/none_e1-yfcc10m-d192-cpu-rehearsal.jsonl	hub	artifacts/dataset-candidates/yfcc10m/none_e1-yfcc10m-d192-cpu-rehearsal.jsonl	raw data behind a documented finding
+docs/artifacts/dataset-candidates/yfcc10m/prep_log-2026-09-16.json	hub	artifacts/dataset-candidates/yfcc10m/prep_log-2026-09-16.json	raw data behind a documented finding
+docs/artifacts/dataset-candidates/yfcc10m/prep_log.json	hub	artifacts/dataset-candidates/yfcc10m/prep_log.json	raw data behind a documented finding
+docs/artifacts/dataset-candidates/yfcc10m/raw-manifest.json	hub	artifacts/dataset-candidates/yfcc10m/raw-manifest.json	raw data behind a documented finding
+docs/artifacts/dataset-candidates/yfcc10m/text_emb.meta-2026-09-16.json	hub	artifacts/dataset-candidates/yfcc10m/text_emb.meta-2026-09-16.json	raw data behind a documented finding
+docs/artifacts/deterministic-compaction/epilogue_variants.json	hub	artifacts/deterministic-compaction/epilogue_variants.json	raw data behind a documented finding
+docs/artifacts/deterministic-compaction/golden-rederive/run1/goodreads-d128-c0_genre-linr_v2-triton.json	hub	artifacts/deterministic-compaction/golden-rederive/run1/goodreads-d128-c0_genre-linr_v2-triton.json	raw data behind a documented finding
+docs/artifacts/deterministic-compaction/golden-rederive/run1/goodreads-d128-c0_genre-linr_v3-triton.json	hub	artifacts/deterministic-compaction/golden-rederive/run1/goodreads-d128-c0_genre-linr_v3-triton.json	raw data behind a documented finding
+docs/artifacts/deterministic-compaction/golden-rederive/run2/goodreads-d128-c0_genre-linr_v2-triton.json	hub	artifacts/deterministic-compaction/golden-rederive/run2/goodreads-d128-c0_genre-linr_v2-triton.json	raw data behind a documented finding
+docs/artifacts/deterministic-compaction/golden-rederive/run2/goodreads-d128-c0_genre-linr_v3-triton.json	hub	artifacts/deterministic-compaction/golden-rederive/run2/goodreads-d128-c0_genre-linr_v3-triton.json	raw data behind a documented finding
+docs/artifacts/deterministic-compaction/timing-after-bitmask.json	hub	artifacts/deterministic-compaction/timing-after-bitmask.json	raw data behind a documented finding
+docs/artifacts/deterministic-compaction/timing-after-d3-recompute.json	hub	artifacts/deterministic-compaction/timing-after-d3-recompute.json	raw data behind a documented finding
+docs/artifacts/deterministic-compaction/timing-after-stash.json	hub	artifacts/deterministic-compaction/timing-after-stash.json	raw data behind a documented finding
+docs/artifacts/deterministic-compaction/timing-after.json	hub	artifacts/deterministic-compaction/timing-after.json	raw data behind a documented finding
+docs/artifacts/deterministic-compaction/timing-before.json	hub	artifacts/deterministic-compaction/timing-before.json	raw data behind a documented finding
+docs/artifacts/e2-pubmed/filter-pubmed-d768-cell.jsonl	hub	artifacts/e2-pubmed/filter-pubmed-d768-cell.jsonl	raw data behind a documented finding
+docs/artifacts/e2-pubmed/plan-10m.json	hub	artifacts/e2-pubmed/plan-10m.json	raw data behind a documented finding
+docs/artifacts/e3-openalex/dryrun-convert_log.jsonl	hub	artifacts/e3-openalex/dryrun-convert_log.jsonl	raw data behind a documented finding
+docs/artifacts/e3-openalex/dryrun-prep_log.json	hub	artifacts/e3-openalex/dryrun-prep_log.json	raw data behind a documented finding
+docs/artifacts/e3-openalex/dryrun-staging-params.json	hub	artifacts/e3-openalex/dryrun-staging-params.json	raw data behind a documented finding
+docs/artifacts/e3-openalex/filter-openalex-d768-cell.jsonl	hub	artifacts/e3-openalex/filter-openalex-d768-cell.jsonl	raw data behind a documented finding
+docs/artifacts/e3-openalex/plan-2026-09-23.json	hub	artifacts/e3-openalex/plan-2026-09-23.json	raw data behind a documented finding
+docs/artifacts/e3-openalex/run10m-prep_log.json	hub	artifacts/e3-openalex/run10m-prep_log.json	raw data behind a documented finding
+docs/artifacts/e3-openalex/run15m-convert_log.jsonl	drop		per-shard log of the superseded 15M convert; totals are in datasets.md
+docs/artifacts/e3-openalex/run15m-prep_log.json	hub	artifacts/e3-openalex/run15m-prep_log.json	raw data behind a documented finding
+docs/artifacts/e3-openalex/run15m-staging-params.json	hub	artifacts/e3-openalex/run15m-staging-params.json	raw data behind a documented finding
+docs/artifacts/e3-openalex/stream_probe-32w.json	hub	artifacts/e3-openalex/stream_probe-32w.json	raw data behind a documented finding
+docs/artifacts/e3-openalex/stream_probe-64w.json	hub	artifacts/e3-openalex/stream_probe-64w.json	raw data behind a documented finding
+docs/artifacts/e4-kuairand/attr_vocab.json	hub	artifacts/e4-kuairand/attr_vocab.json	raw data behind a documented finding
+docs/artifacts/e4-kuairand/convert_log.json	hub	artifacts/e4-kuairand/convert_log.json	raw data behind a documented finding
+docs/artifacts/e4-kuairand/prep_log.json	hub	artifacts/e4-kuairand/prep_log.json	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/a1-rederive/l1-gate/goodreads-d128-c0_genre-linr_v3-triton.json	hub	artifacts/evaluation-harness-v2/a1-rederive/l1-gate/goodreads-d128-c0_genre-linr_v3-triton.json	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/a1-rederive/l1-gate/goodreads-d128-c0_genre-silvertorch-triton.json	hub	artifacts/evaluation-harness-v2/a1-rederive/l1-gate/goodreads-d128-c0_genre-silvertorch-triton.json	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/a1-rederive/l1-gate/repeat2-linr_v2-triton.json	hub	artifacts/evaluation-harness-v2/a1-rederive/l1-gate/repeat2-linr_v2-triton.json	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/a1-rederive/l1-gate/repeat2-linr_v3-triton.json	hub	artifacts/evaluation-harness-v2/a1-rederive/l1-gate/repeat2-linr_v3-triton.json	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/a1-rederive/l1-gate/repeat2-silvertorch-triton.json	hub	artifacts/evaluation-harness-v2/a1-rederive/l1-gate/repeat2-silvertorch-triton.json	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/a1-rederive/l1-gate/repeat3-linr_v3-triton.json	hub	artifacts/evaluation-harness-v2/a1-rederive/l1-gate/repeat3-linr_v3-triton.json	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/a1-rederive/l1-gate/run1-linr_v2-triton.json	hub	artifacts/evaluation-harness-v2/a1-rederive/l1-gate/run1-linr_v2-triton.json	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/a1/step4/branch-linr_v3_graphbreak_smoke.json	hub	artifacts/evaluation-harness-v2/a1/step4/branch-linr_v3_graphbreak_smoke.json	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/c4/2026-09-06-partial/results/filter/goodreads-d128.jsonl	drop		aborted partial C4 run, superseded by c4/results (on the Hub as c4); cited nowhere
+docs/artifacts/evaluation-harness-v2/c4/2026-09-06-partial/results/filter/goodreads-d128.samples.jsonl	drop		aborted partial C4 run, superseded by c4/results (on the Hub as c4); cited nowhere
+docs/artifacts/evaluation-harness-v2/c4/kmax-diag/filter/arxiv-d128.jsonl	hub	artifacts/evaluation-harness-v2/c4/kmax-diag/filter/arxiv-d128.jsonl	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/c4/kmax-diag/filter/goodreads-d128.jsonl	hub	artifacts/evaluation-harness-v2/c4/kmax-diag/filter/goodreads-d128.jsonl	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/c4/results/filter/arxiv-d128.jsonl	rm-on-hub	c4/filter/arxiv-d128.jsonl	already on the Hub, byte-identical
+docs/artifacts/evaluation-harness-v2/c4/results/filter/arxiv-d128.samples.jsonl	rm-on-hub	c4/filter/arxiv-d128.samples.jsonl	already on the Hub, byte-identical
+docs/artifacts/evaluation-harness-v2/c4/results/filter/goodreads-d128.jsonl	rm-on-hub	c4/filter/goodreads-d128.jsonl	already on the Hub, byte-identical
+docs/artifacts/evaluation-harness-v2/c4/results/filter/goodreads-d128.samples.jsonl	rm-on-hub	c4/filter/goodreads-d128.samples.jsonl	already on the Hub, byte-identical
+docs/artifacts/evaluation-harness-v2/c4/resume/filter/goodreads-d128.jsonl	hub	artifacts/evaluation-harness-v2/c4/resume/filter/goodreads-d128.jsonl	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/c4/resume/filter/goodreads-d128.samples.jsonl	hub	artifacts/evaluation-harness-v2/c4/resume/filter/goodreads-d128.samples.jsonl	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/d1a/report/flat.csv	drop		derived: bench report regenerates it (now results.parquet) from the d1-a records
+docs/artifacts/evaluation-harness-v2/d1a/rerun-records/goodreads_linr_v1_filter_mask_triton_clause_c0_genre.jsonl	hub	artifacts/evaluation-harness-v2/d1a/rerun-records/goodreads_linr_v1_filter_mask_triton_clause_c0_genre.jsonl	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/d1a/rerun-records/goodreads_linr_v2_torch_bloom_c2_format.jsonl	hub	artifacts/evaluation-harness-v2/d1a/rerun-records/goodreads_linr_v2_torch_bloom_c2_format.jsonl	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/d1a/rerun-records/goodreads_linr_v2_triton_clause_c0_genre.jsonl	hub	artifacts/evaluation-harness-v2/d1a/rerun-records/goodreads_linr_v2_triton_clause_c0_genre.jsonl	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/d1a/rerun-records/goodreads_linr_v3_triton_bloom_c3_year.jsonl	hub	artifacts/evaluation-harness-v2/d1a/rerun-records/goodreads_linr_v3_triton_bloom_c3_year.jsonl	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/d1a/rerun-records/goodreads_linr_v3_triton_clause_c0_genre.jsonl	hub	artifacts/evaluation-harness-v2/d1a/rerun-records/goodreads_linr_v3_triton_clause_c0_genre.jsonl	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/d1a/rerun-records/goodreads_linr_v4_triton_clause_c0_genre.jsonl	hub	artifacts/evaluation-harness-v2/d1a/rerun-records/goodreads_linr_v4_triton_clause_c0_genre.jsonl	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/d1a/rerun-records/goodreads_silvertorch_official_clause_c0_genre.jsonl	hub	artifacts/evaluation-harness-v2/d1a/rerun-records/goodreads_silvertorch_official_clause_c0_genre.jsonl	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/d1a/rerun-records/goodreads_silvertorch_torch_clause_c0_genre.jsonl	hub	artifacts/evaluation-harness-v2/d1a/rerun-records/goodreads_silvertorch_torch_clause_c0_genre.jsonl	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/d1a/rerun-records/goodreads_silvertorch_triton_clause_c0_genre.jsonl	hub	artifacts/evaluation-harness-v2/d1a/rerun-records/goodreads_silvertorch_triton_clause_c0_genre.jsonl	raw data behind a documented finding
+docs/artifacts/evaluation-harness-v2/d4/flat.csv	drop		derived: bench report regenerates it from its records
+docs/artifacts/evaluation-harness-v2/results-storage/b3-MANIFEST.json	drop		the Hub copies of these manifests are authoritative; sha256 recorded in docs/artifacts/hub-index.md
+docs/artifacts/evaluation-harness-v2/results-storage/c4-MANIFEST.json	drop		the Hub copies of these manifests are authoritative; sha256 recorded in docs/artifacts/hub-index.md
+docs/artifacts/evaluation-harness-v2/results-storage/c5-MANIFEST.json	drop		the Hub copies of these manifests are authoritative; sha256 recorded in docs/artifacts/hub-index.md
+docs/artifacts/evaluation-package-layout/c5/results-l4b-chunk64/filter/goodreads-d128.jsonl	hub	artifacts/evaluation-package-layout/c5/results-l4b-chunk64/filter/goodreads-d128.jsonl	raw data behind a documented finding
+docs/artifacts/evaluation-package-layout/c5/results/filter/goodreads-d128.jsonl	rm-on-hub	c5/filter/goodreads-d128.jsonl	already on the Hub, byte-identical
+docs/artifacts/evaluation-package-layout/c5/results/filter/goodreads-d128.samples.jsonl	rm-on-hub	c5/filter/goodreads-d128.samples.jsonl	already on the Hub, byte-identical
+docs/artifacts/evaluation-package-layout/c5/results/flat.csv	rm-on-hub	c5/flat.csv	already on the Hub, byte-identical
+docs/artifacts/kernel-opt/final/base-1.json	hub	artifacts/kernel-opt/final/base-1.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/final/base-2.json	hub	artifacts/kernel-opt/final/base-2.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/final/base-3.json	hub	artifacts/kernel-opt/final/base-3.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/final/new-1.json	hub	artifacts/kernel-opt/final/new-1.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/final/new-2.json	hub	artifacts/kernel-opt/final/new-2.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/final/new-3.json	hub	artifacts/kernel-opt/final/new-3.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/h2h/compact-arxiv-r1.json	hub	artifacts/kernel-opt/h2h/compact-arxiv-r1.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/h2h/compact-goodreads-r1.json	hub	artifacts/kernel-opt/h2h/compact-goodreads-r1.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/h2h/padded-arxiv-r1.json	hub	artifacts/kernel-opt/h2h/padded-arxiv-r1.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/h2h/padded-goodreads-r1.json	hub	artifacts/kernel-opt/h2h/padded-goodreads-r1.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/h2h/superseded/compact-arxiv-r1.json	drop		superseded by the h2h/*.json runs h2h.md tabulates
+docs/artifacts/kernel-opt/h2h/superseded/compact-arxiv-r2.json	drop		superseded by the h2h/*.json runs h2h.md tabulates
+docs/artifacts/kernel-opt/h2h/superseded/compact-goodreads-r1.json	drop		superseded by the h2h/*.json runs h2h.md tabulates
+docs/artifacts/kernel-opt/h2h/superseded/compact-goodreads-r2.json	drop		superseded by the h2h/*.json runs h2h.md tabulates
+docs/artifacts/kernel-opt/phase0_aa/base-1.json	hub	artifacts/kernel-opt/phase0_aa/base-1.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase0_aa/base-2.json	hub	artifacts/kernel-opt/phase0_aa/base-2.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase0_aa/base-3.json	hub	artifacts/kernel-opt/phase0_aa/base-3.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase0_aa/new-1.json	hub	artifacts/kernel-opt/phase0_aa/new-1.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase0_aa/new-2.json	hub	artifacts/kernel-opt/phase0_aa/new-2.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase0_aa/new-3.json	hub	artifacts/kernel-opt/phase0_aa/new-3.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase1/base-1.json	hub	artifacts/kernel-opt/phase1/base-1.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase1/base-2.json	hub	artifacts/kernel-opt/phase1/base-2.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase1/base-3.json	hub	artifacts/kernel-opt/phase1/base-3.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase1/new-1.json	hub	artifacts/kernel-opt/phase1/new-1.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase1/new-2.json	hub	artifacts/kernel-opt/phase1/new-2.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase1/new-3.json	hub	artifacts/kernel-opt/phase1/new-3.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase1_first_attempt/base-1.json	hub	artifacts/kernel-opt/phase1_first_attempt/base-1.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase1_first_attempt/base-2.json	hub	artifacts/kernel-opt/phase1_first_attempt/base-2.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase1_first_attempt/base-3.json	hub	artifacts/kernel-opt/phase1_first_attempt/base-3.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase1_first_attempt/new-1.json	hub	artifacts/kernel-opt/phase1_first_attempt/new-1.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase1_first_attempt/new-2.json	hub	artifacts/kernel-opt/phase1_first_attempt/new-2.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase1_first_attempt/new-3.json	hub	artifacts/kernel-opt/phase1_first_attempt/new-3.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase1_second_attempt/base-1.json	hub	artifacts/kernel-opt/phase1_second_attempt/base-1.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase1_second_attempt/base-2.json	hub	artifacts/kernel-opt/phase1_second_attempt/base-2.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase1_second_attempt/base-3.json	hub	artifacts/kernel-opt/phase1_second_attempt/base-3.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase1_second_attempt/new-1.json	hub	artifacts/kernel-opt/phase1_second_attempt/new-1.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase1_second_attempt/new-2.json	hub	artifacts/kernel-opt/phase1_second_attempt/new-2.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase1_second_attempt/new-3.json	hub	artifacts/kernel-opt/phase1_second_attempt/new-3.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase2/base-1.json	hub	artifacts/kernel-opt/phase2/base-1.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase2/base-2.json	hub	artifacts/kernel-opt/phase2/base-2.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase2/base-3.json	hub	artifacts/kernel-opt/phase2/base-3.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase2/new-1.json	hub	artifacts/kernel-opt/phase2/new-1.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase2/new-2.json	hub	artifacts/kernel-opt/phase2/new-2.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase2/new-3.json	hub	artifacts/kernel-opt/phase2/new-3.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase4/base-1.json	hub	artifacts/kernel-opt/phase4/base-1.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase4/base-2.json	hub	artifacts/kernel-opt/phase4/base-2.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase4/base-3.json	hub	artifacts/kernel-opt/phase4/base-3.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase4/new-1.json	hub	artifacts/kernel-opt/phase4/new-1.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase4/new-2.json	hub	artifacts/kernel-opt/phase4/new-2.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/phase4/new-3.json	hub	artifacts/kernel-opt/phase4/new-3.json	raw data behind a documented finding
+docs/artifacts/kernel-opt/pubmed/pubmed-d768.jsonl	hub	artifacts/kernel-opt/pubmed/pubmed-d768.jsonl	raw data behind a documented finding
+docs/artifacts/library-api-refactor/l1/tensors/capture.json	hub	artifacts/library-api-refactor/l1/tensors/capture.json	raw data behind a documented finding
+docs/artifacts/library-api-refactor/l1/tensors/results.json	hub	artifacts/library-api-refactor/l1/tensors/results.json	raw data behind a documented finding
+docs/artifacts/library-api-refactor/l2/kmeanspp_timing.json	hub	artifacts/library-api-refactor/l2/kmeanspp_timing.json	raw data behind a documented finding
+docs/artifacts/linr-v2-backend-parity/boundary_and_fp32_variant.json	hub	artifacts/linr-v2-backend-parity/boundary_and_fp32_variant.json	raw data behind a documented finding
+docs/artifacts/linr-v2-backend-parity/l5/parity_and_cost.json	hub	artifacts/linr-v2-backend-parity/l5/parity_and_cost.json	raw data behind a documented finding
+docs/artifacts/linr-v2-backend-parity/probe_v2_parity.json	hub	artifacts/linr-v2-backend-parity/probe_v2_parity.json	raw data behind a documented finding
+docs/artifacts/linr-v2-backend-parity/torch_side_rounding.json	hub	artifacts/linr-v2-backend-parity/torch_side_rounding.json	raw data behind a documented finding
+docs/artifacts/official-silvertorch/b3/e2e/filter/arxiv-d128.jsonl	rm-on-hub	b3/filter/arxiv-d128.jsonl	already on the Hub, byte-identical
+docs/artifacts/official-silvertorch/b3/e2e/filter/arxiv-d128.samples.jsonl	rm-on-hub	b3/filter/arxiv-d128.samples.jsonl	already on the Hub, byte-identical
+docs/artifacts/official-silvertorch/b3/e2e/filter/goodreads-d128.jsonl	rm-on-hub	b3/filter/goodreads-d128.jsonl	already on the Hub, byte-identical
+docs/artifacts/official-silvertorch/b3/e2e/filter/goodreads-d128.samples.jsonl	rm-on-hub	b3/filter/goodreads-d128.samples.jsonl	already on the Hub, byte-identical
+docs/artifacts/official-silvertorch/b3/e2e/quality/arxiv-d128.jsonl	rm-on-hub	b3/quality/arxiv-d128.jsonl	already on the Hub, byte-identical
+docs/artifacts/official-silvertorch/b3/e2e/quality/arxiv-d128.samples.jsonl	rm-on-hub	b3/quality/arxiv-d128.samples.jsonl	already on the Hub, byte-identical
+docs/artifacts/official-silvertorch/b3/e2e/quality/goodreads-d128.jsonl	rm-on-hub	b3/quality/goodreads-d128.jsonl	already on the Hub, byte-identical
+docs/artifacts/official-silvertorch/b3/e2e/quality/goodreads-d128.samples.jsonl	rm-on-hub	b3/quality/goodreads-d128.samples.jsonl	already on the Hub, byte-identical
+docs/artifacts/official-silvertorch/b3/kernel_arxiv.json	hub	artifacts/official-silvertorch/b3/kernel_arxiv.json	raw data behind a documented finding
+docs/artifacts/official-silvertorch/b3/kernel_goodreads.json	hub	artifacts/official-silvertorch/b3/kernel_goodreads.json	raw data behind a documented finding
+docs/artifacts/official-silvertorch/official_facts.json	hub	artifacts/official-silvertorch/official_facts.json	raw data behind a documented finding
+docs/artifacts/official-silvertorch/wp3/argsort_stable_probe.json	hub	artifacts/official-silvertorch/wp3/argsort_stable_probe.json	raw data behind a documented finding
+docs/artifacts/official-silvertorch/wp3/parity_gate_probe.json	hub	artifacts/official-silvertorch/wp3/parity_gate_probe.json	raw data behind a documented finding
+docs/artifacts/q3/roofline.json	keep		linked from docs/validation.md (worker may not edit it); 506 B
+evaluation/golden/_logs/branch-arxiv-d128-c0_maincat-silvertorch-triton.log	hub	artifacts/golden-logs/branch-arxiv-d128-c0_maincat-silvertorch-triton.log	run logs behind the golden cells
+evaluation/golden/_logs/branch-goodreads-d128-c0_genre-linr_v1_filter_mask-torch.log	hub	artifacts/golden-logs/branch-goodreads-d128-c0_genre-linr_v1_filter_mask-torch.log	run logs behind the golden cells
+evaluation/golden/_logs/branch-goodreads-d128-c0_genre-linr_v1_filter_mask-triton.log	hub	artifacts/golden-logs/branch-goodreads-d128-c0_genre-linr_v1_filter_mask-triton.log	run logs behind the golden cells
+evaluation/golden/_logs/branch-goodreads-d128-c0_genre-linr_v2-torch.log	hub	artifacts/golden-logs/branch-goodreads-d128-c0_genre-linr_v2-torch.log	run logs behind the golden cells
+evaluation/golden/_logs/branch-goodreads-d128-c0_genre-linr_v2-triton.log	hub	artifacts/golden-logs/branch-goodreads-d128-c0_genre-linr_v2-triton.log	run logs behind the golden cells
+evaluation/golden/_logs/branch-goodreads-d128-c0_genre-linr_v3-torch.log	hub	artifacts/golden-logs/branch-goodreads-d128-c0_genre-linr_v3-torch.log	run logs behind the golden cells
+evaluation/golden/_logs/branch-goodreads-d128-c0_genre-linr_v3-triton.log	hub	artifacts/golden-logs/branch-goodreads-d128-c0_genre-linr_v3-triton.log	run logs behind the golden cells
+evaluation/golden/_logs/branch-goodreads-d128-c0_genre-linr_v4-torch.log	hub	artifacts/golden-logs/branch-goodreads-d128-c0_genre-linr_v4-torch.log	run logs behind the golden cells
+evaluation/golden/_logs/branch-goodreads-d128-c0_genre-linr_v4-triton.log	hub	artifacts/golden-logs/branch-goodreads-d128-c0_genre-linr_v4-triton.log	run logs behind the golden cells
+evaluation/golden/_logs/branch-goodreads-d128-c0_genre-silvertorch-torch.log	hub	artifacts/golden-logs/branch-goodreads-d128-c0_genre-silvertorch-torch.log	run logs behind the golden cells
+evaluation/golden/_logs/branch-goodreads-d128-c0_genre-silvertorch-triton.log	hub	artifacts/golden-logs/branch-goodreads-d128-c0_genre-silvertorch-triton.log	run logs behind the golden cells
+evaluation/golden/_logs/clocks.csv	hub	artifacts/golden-logs/clocks.csv	run logs behind the golden cells
+evaluation/golden/_logs/driver.log	hub	artifacts/golden-logs/driver.log	run logs behind the golden cells
+evaluation/golden/_logs/failed_attempts/attempt1-legacy-1indexed-attrs-crash.log	drop		crash logs of two golden attempts that produced no cell; causes in golden/README.md
+evaluation/golden/_logs/failed_attempts/attempt2-inductor-common-nameerror.log	drop		crash logs of two golden attempts that produced no cell; causes in golden/README.md
+evaluation/golden/_logs/provenance.txt	keep		exact HEAD/host/UTC of an active gate fixture, cited by golden/README.md
+evaluation/golden/arxiv-d128-c0_maincat-silvertorch-triton.json	keep		gate fixture read by C4 gate and test_c4_gate
+evaluation/golden/goodreads-d128-c0_genre-linr_v1_filter_mask-torch.json	keep		gate fixture read by C4 gate and test_c4_gate
+evaluation/golden/goodreads-d128-c0_genre-linr_v1_filter_mask-triton.json	keep		gate fixture read by C4 gate and test_c4_gate
+evaluation/golden/goodreads-d128-c0_genre-linr_v2-torch.json	keep		gate fixture read by C4 gate and test_c4_gate
+evaluation/golden/goodreads-d128-c0_genre-linr_v2-triton.json	keep		gate fixture read by C4 gate and test_c4_gate
+evaluation/golden/goodreads-d128-c0_genre-linr_v3-torch.json	keep		gate fixture read by C4 gate and test_c4_gate
+evaluation/golden/goodreads-d128-c0_genre-linr_v3-triton.json	keep		gate fixture read by C4 gate and test_c4_gate
+evaluation/golden/goodreads-d128-c0_genre-linr_v4-torch.json	keep		gate fixture read by C4 gate and test_c4_gate
+evaluation/golden/goodreads-d128-c0_genre-linr_v4-triton.json	keep		gate fixture read by C4 gate and test_c4_gate
+evaluation/golden/goodreads-d128-c0_genre-silvertorch-torch.json	keep		gate fixture read by C4 gate and test_c4_gate
+evaluation/golden/goodreads-d128-c0_genre-silvertorch-triton.json	keep		gate fixture read by C4 gate and test_c4_gate
+evaluation/results/archive/arxiv/d128-filter.json	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/arxiv/d128-filter.yaml	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/arxiv/d128-quality.json	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/arxiv/d128-quality.yaml	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/arxiv/d256-filter.json	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/arxiv/d256-filter.yaml	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/arxiv/d256-quality.json	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/arxiv/d256-quality.yaml	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/arxiv/d64-filter.json	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/arxiv/d64-filter.yaml	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/arxiv/d64-quality.json	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/arxiv/d64-quality.yaml	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/deep_sweeps/arxiv-d128-silvertorch.json	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/deep_sweeps/arxiv-d128-silvertorch.yaml	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/deep_sweeps/goodreads-d128-linr_v3.json	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/deep_sweeps/goodreads-d128-linr_v3.yaml	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/goodreads/d128-filter.json	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/goodreads/d128-filter.yaml	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/goodreads/d128-quality.json	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/goodreads/d128-quality.yaml	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/goodreads/d256-filter.json	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/goodreads/d256-filter.yaml	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/goodreads/d256-quality.json	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/goodreads/d256-quality.yaml	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/goodreads/d64-filter.json	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/goodreads/d64-filter.yaml	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/goodreads/d64-quality.json	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/goodreads/d64-quality.yaml	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/yambda/500m-d128.json	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/yambda/500m-d128.yaml	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/yambda/500m-d256.json	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/yambda/500m-d256.yaml	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/yambda/500m-d64.json	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/yambda/500m-d64.yaml	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/yambda/5b-d128.json	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/yambda/5b-d128.yaml	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/yambda/5b-d64.json	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/archive/yambda/5b-d64.yaml	drop		pre-v2 harness output, pre-fix oracle, never citable
+evaluation/results/filter/goodreads-d128.jsonl	hub	d1-a/filter/goodreads-d128.jsonl	live D1-a campaign records
+evaluation/results/filter/goodreads-d128.samples.jsonl	hub	d1-a/filter/goodreads-d128.samples.jsonl	live D1-a campaign records
