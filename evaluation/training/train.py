@@ -1,9 +1,10 @@
 """Encoder trainer — produces the checkpoints the sequential benchmarks encode with.
 
-bf16 autocast, one shared uniform negative vector per step (plus in-batch positives for
-sampled softmax), fused AdamW with linear warmup, optional ``torch.compile`` of the dense
-body, chunked full-catalog eval every ``eval_every`` epochs, best-metric checkpointing with
-resumable RNG state. TF32 is *enabled* here, unlike the benchmark harness.
+bf16 autocast, uniform negatives drawn on the GPU (per position for gBCE, one shared vector
+plus in-batch positives for sampled softmax), fused AdamW with linear warmup, optional
+``torch.compile`` of the dense body, chunked full-catalog eval every ``eval_every`` epochs,
+best-metric checkpointing with resumable RNG state. TF32 is *enabled* here, unlike the
+benchmark harness.
 
 Usage (``train run …``), the config surface, and what a finished run writes out:
 docs/system/datasets.md § Training.
@@ -76,10 +77,12 @@ def step_loss(
     timestamps = batch["timestamps"][:, :-1] if "timestamps" in batch else None
     mask = targets != 0
     queries, pos_ids = model(inputs, timestamps)[mask], targets[mask]
-    neg_ids = torch.randint(1, num_items + 1, (config.num_negatives,), device=items.device)
     table = model.get_output_embeddings().weight
     if config.loss == "gbce":
+        shape = (pos_ids.shape[0], config.num_negatives)
+        neg_ids = torch.randint(1, num_items + 1, shape, device=items.device)
         return gbce_loss(queries, pos_ids, neg_ids, table, num_items, config.gbce_t)
+    neg_ids = torch.randint(1, num_items + 1, (config.num_negatives,), device=items.device)
     perm = torch.randperm(pos_ids.shape[0], device=items.device)[: config.inbatch_negatives]
     candidates = torch.cat([pos_ids[perm], neg_ids])
     return sampled_softmax_loss(

@@ -14,3 +14,12 @@ Prediction for Gate B (H100, compile=true): training part 4.0 s/epoch (~23k seq/
 i.e. ~6.5 s/epoch amortized vs 28.1 s on the A100 (~4x; most of it the removed per-position
 gather and the host data path, the rest H100 vs A100). Peak memory well under the A100 run's
 14.8 GB: ~4.5 GB (A/B peak) plus the eval scoring buffers.
+
+## Revision before the per-position run (written after the shared-K=256 stall, before launch)
+
+The shared-negative recipe stalls (loss ~ln 2; see `README.md`), so gBCE moved back to
+per-position negatives. A 2-epoch eager diagnostic of that recipe on this box: 11.2-11.6 s
+per epoch, peak 10.4 GB. The `[P, 256, 64]` gather and its einsum sit outside the compiled
+body, so compile should buy only the ~1 s the body saves: predict ~10 s/epoch training,
+~9-10k seq/s, peak ~11 GB; total ~100 x 10 s + 50 evals (~10 s each incl. host-side
+DataLoader) ~= 25 min, vs 2809 s on the A100 (~1.9x).

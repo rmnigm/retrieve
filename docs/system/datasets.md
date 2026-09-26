@@ -1101,17 +1101,19 @@ fails at load without one; `use_time=False` ignores it.
 
 ### The losses
 
-Every step draws **one** uniform negative id vector `[num_negatives]` on
-the GPU, shared by all positions of the batch, so the negative gather is
-`[K, D]` rather than `[P, K, D]`.
+Negatives are uniform over `1..N`, drawn on the GPU inside the step.
 
-- `gbce` — gBCE: the positive logit through the float64 calibration
-  transform (`gbce_t`, `alpha = K / (N − 1)`), BCE against the K shared
-  negatives. The `pow(−beta)` and `1/(x−1)` steps lose the positive class
-  in fp32, hence float64.
-- `sampled_softmax` — cross-entropy of the positive against the candidates
-  `inbatch_negatives` positives of the batch (a random subset) plus the K
-  uniform negatives, at `temperature` (default 0.05), in fp32 outside
+- `gbce` — gBCE as gSASRec publishes it: `num_negatives` negatives **per
+  position** (`[P, K]`, a `[P, K, D]` gather), the positive logit through
+  the float64 calibration transform (`gbce_t`, `alpha = K / (N − 1)`), BCE
+  over positive + K negatives. The `pow(−beta)` and `1/(x−1)` steps lose
+  the positive class in fp32, hence float64. One `[K]` vector shared by the
+  batch does not train: only K table rows get a negative gradient per step,
+  and on yambda-500m d64 it stalls at loss ≈ ln 2
+  ([validation](../validation.md#seqrec-encoder-rewrite)).
+- `sampled_softmax` — cross-entropy of the positive against one candidate
+  vector shared by the batch: `inbatch_negatives` positives of the batch (a
+  random subset) plus `num_negatives` uniform ids, at `temperature` (default 0.05), in fp32 outside
   autocast. A candidate equal to the row's own positive is masked to
   `−inf`. `normalize` (default: on for this loss, off for gbce; recorded in
   `config.json`) L2-normalizes queries and items first. No logQ

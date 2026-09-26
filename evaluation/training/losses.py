@@ -1,5 +1,6 @@
-"""The two losses over one shared candidate id vector: ``queries [P, D]`` against their
-positives ``pos_ids [P]`` and ``neg_ids [K]`` shared by every row."""
+"""The two losses: ``queries [P, D]`` against their positives ``pos_ids [P]`` and uniform
+negatives, drawn per position for gBCE (``[P, K]``) and shared by every row for sampled
+softmax (``[C]``); docs/system/datasets.md § The losses."""
 
 from __future__ import annotations
 
@@ -16,9 +17,9 @@ def gbce_loss(
     t: float,
 ) -> torch.Tensor:
     pos_scores = (queries * table[pos_ids]).sum(-1, keepdim=True)
-    neg_scores = queries @ table[neg_ids].T
+    neg_scores = torch.einsum("pd,pkd->pk", queries, table[neg_ids])
 
-    alpha = neg_ids.shape[0] / (num_items - 1)
+    alpha = neg_ids.shape[1] / (num_items - 1)
     beta = alpha * ((1 - 1 / alpha) * t + 1 / alpha)
     eps = 1e-10
     pos_probs = torch.clamp(torch.sigmoid(pos_scores.double()), eps, 1 - eps)
