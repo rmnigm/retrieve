@@ -19,7 +19,7 @@ Hub holds is in [hub-index.md](../hub-index.md).
   `bench upload` on each — `--dry-run` by default, `PUBLISH=1` for the real
   upload with `--verify`.
 
-Dry run, 2026-09-26, all 14 subtrees: listing, manifest and citability verdict
-computed without error; `d1-a` is 3 files / 78,261,847 bytes / 126 records,
-NOT CITABLE (no gate; produced on `dev/d1a-campaign`). No real upload has been
-made from this list yet.
+Published 2026-09-26 with `PUBLISH=1`, all 14 subtrees, private, each
+`--verify` round trip sha256-equal; the manifest sha256s are in
+[hub-index.md](../hub-index.md). `d1-a` is 3 files / 78,261,847 bytes / 126
+records, NOT CITABLE (no gate; produced on `dev/d1a-campaign`).
