@@ -132,18 +132,20 @@ The goal is to replace the published gSASRec checkpoints as the history encoder 
   [evidence](artifacts/seqrec-encoder/gate-b-yambda-d64/README.md)); and sampled softmax on
   L2-normalized embeddings with logQ (temperature 0.05, in-batch positives plus shared uniform
   negatives, expected-count correction, positive uncorrected), the default since E1c
-  ([results](validation.md#encoder-experiments-e0-e4-h100-not-yet-validated-not-citable)).
+  ([recipe search](validation.md#recipe-search-yambda-500m-d64)).
 - **HSTU was tried and dropped.** The softmax-attention HSTU body with time-bucket bias (E2a,
   E2c) did not beat the gSASRec body with logQ (E1c); the user dropped it and its code
   (`HSTUBlock`, `use_time`, `hidden_dim`), 2026-09-26. Pointwise (softmax-free) attention was
-  never pursued.
+  never pursued ([recipe search](validation.md#recipe-search-yambda-500m-d64)).
 - **Success is measured on the same test file with the same eval code.** A new encoder must
   beat the published gSASRec checkpoint of the same D, re-scored on today's
   `trainer/test.parquet`, on test NDCG@10 **and** R@100, on both yambda-500m and
   goodreads-work-id, with one shared recipe. The stored `eval_quality.json` numbers are not the
-  bar: yambda's were scored on a test split that is no longer on disk.
-- **Runs** (user, 2026-09-26): yambda-500m, goodreads-work-id and KuaiRand at d64 and d128 on
-  the E1c recipe (ffn 4×D); only D, epochs, patience and eval cadence vary.
+  bar: yambda's were scored on a test split that is no longer on disk
+  ([bars](validation.md#bars)).
+- **Runs** (user, 2026-09-26): the E1c recipe (ffn 4×D) at d64, d128 and d256 on yambda-500m and
+  goodreads-work-id, and at d64 and d128 on KuaiRand; only D, epochs, patience and eval cadence
+  vary ([final models](validation.md#final-models-the-e1c-recipe)).
 - **Out of scope for this line:** a LLaMA block, row-wise Adagrad, a bf16 table,
   FuXi-style channels and multi-GPU.
 

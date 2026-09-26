@@ -165,39 +165,72 @@ These are data-integrity gates, not results; nothing here is citable.
 | KuaiRand `timestamps` | **passes**: `List(Int64)` unix seconds, lengths equal to `item_ids` on every row, 0 rows with a decrease in train (561,486) / val (24,503) / test (26,221); `tests/eval_datasets/test_kuairand.py` pins the column | `/data/kuairand` re-staged by `eval-data kuairand all` (pod, 2026-09-26); the check script is not committed. The test histories end at 1651850999, 30 min before `test_timestamp_unix` 1651852800 |
 | Harness suite on `dev/hstu-etl` | **green**, 235 passed / 4 skipped, CPU (`CUDA_VISIBLE_DEVICES=""`) | |
 
-## Seqrec encoder rewrite
+## Seqrec encoder
 
 Trainer rewrite (`evaluation/training/`, [datasets](system/datasets.md#training--evaluationtraining)).
-H100 80GB HBM3 (the pod, not the A100 above), torch 2.10.0+cu128. **Not yet validated, not
-citable.** Artifacts: [gate A](artifacts/seqrec-encoder/gate-a/),
+H100 80GB HBM3 (the pod, not the A100 above), torch 2.10.0+cu128, sm_mhz 1980 in every sample.
+**Not yet validated, not citable.** Test is full-catalog on the trainer's `test.parquet`,
+recorded only for the checkpoint selected on val ndcg@10.
+
+### Bars
+
+The published gSASRec checkpoint of the same D, re-scored on the same `trainer/test.parquet`
+with the same eval code (ndcg@10 / recall@100):
+
+| dataset | d64 | d128 | d256 |
+|---|---|---|---|
+| yambda-500m | 0.0846 / 0.1563 ([gate A](artifacts/seqrec-encoder/gate-a/)) | 0.0811 / 0.1486 ([gate A](artifacts/seqrec-encoder/gate-a/)) | 0.0814 / 0.1398 ([E0b](artifacts/seqrec-encoder/e0b-yambda-d256-bar/)) |
+| goodreads-work-id | 0.0350 / 0.1486 ([E0](artifacts/seqrec-encoder/e0-goodreads-bars/)) | 0.0361 / 0.1480 ([E0](artifacts/seqrec-encoder/e0-goodreads-bars/)) | 0.0354 / 0.1472: the checkpoint's stored `eval_quality.json`, **not re-scored** (E0 found the stored goodreads d64/d128 numbers equal to the re-score to 4 decimals) |
+| KuaiRand | pending | pending | not run |
+
+### Final models (the E1c recipe)
+
+gSASRec body, ffn 4×D, sampled softmax (in-batch 4096 + uniform 8192) with logQ: the trainer's
+defaults. Only D, epochs, patience and eval cadence vary (yambda: 100 epochs, eval every 2;
+goodreads: 75-epoch cap, eval every epoch; patience 10 on both).
+
+| model | test ndcg@10 | R@100 | ndcg@100 | cov@10 | Δ vs bar (ndcg@10 / R@100) | best epoch (val ndcg@10) | s/epoch (median) | peak GB | W&B |
+|---|---|---|---|---|---|---|---|---|---|
+| [yambda d64](artifacts/seqrec-encoder/e1c-yambda-d64-sasrec-ssm-logq/) | 0.0945 | 0.1619 | 0.1157 | 0.0382 | **+0.0099 / +0.0056** | 77 (0.1010); early stop at 97 | 11.6 | 10.7 | [zxkmti7a](https://wandb.ai/pinkmeme/seqrec-encoder/runs/zxkmti7a) |
+| [yambda d128](artifacts/seqrec-encoder/y128-sasrec-ssm-logq/) | 0.1006 | 0.1662 | 0.1207 | 0.0389 | **+0.0195 / +0.0176** | 99 of 100 (0.1078), still rising | 13.8 | 13.6 | [03idzv11](https://wandb.ai/pinkmeme/seqrec-encoder/runs/03idzv11) |
+| [yambda d256](artifacts/seqrec-encoder/y256-sasrec-ssm-logq/) | 0.0966 | 0.1481 | 0.1108 | 0.0401 | **+0.0152 / +0.0083** | 97 of 100 (0.1040), still rising | 18.7 | 19.7 | [rqmh9ai9](https://wandb.ai/pinkmeme/seqrec-encoder/runs/rqmh9ai9) |
+| [goodreads d64](artifacts/seqrec-encoder/e3-goodreads-d64-sasrec-ssm-logq/) | 0.0381 | 0.1447 | 0.0695 | 0.1232 | +0.0031 / **−0.0039** | 16 (0.0402); early stop at 26 | 49.4 | 6.7 | [338ohzq4](https://wandb.ai/pinkmeme/seqrec-encoder/runs/338ohzq4) |
+| [goodreads d128](artifacts/seqrec-encoder/g128-sasrec-ssm-logq/) | 0.0410 | 0.1518 | 0.0736 | 0.1577 | **+0.0049 / +0.0038** | 34 (0.0440); early stop at 44 | 59.0 | 8.1 | [fcian7qz](https://wandb.ai/pinkmeme/seqrec-encoder/runs/fcian7qz) |
+| [goodreads d256](artifacts/seqrec-encoder/g256-sasrec-ssm-logq/) | 0.0418 | 0.1530 | 0.0743 | 0.1616 | **+0.0064 / +0.0058** (bar not re-scored) | 13 (0.0463); early stop at 23 | 80.3 | 11.0 | [b42n4obv](https://wandb.ai/pinkmeme/seqrec-encoder/runs/b42n4obv) |
+| KuaiRand d64 | pending | | | | | | | | |
+| KuaiRand d128 | pending | | | | | | | | |
+
+Against the success rule ([decisions](decisions.md#sequential-encoder-devhstu)): five of six
+beat the bar on both metrics; goodreads d64 misses on R@100. yambda d128 and d256 were still
+improving at the 100-epoch cap. yambda d128's s/epoch includes 14 epochs slowed by a shared GPU.
+
+### Recipe search (yambda-500m d64)
+
+| run | recipe | test ndcg@10 / R@100 | Δ vs bar | verdict |
+|---|---|---|---|---|
+| [E1](artifacts/seqrec-encoder/e1-yambda-d64-sasrec-ssm/) | gSASRec body, sampled softmax, no logQ | 0.0661 / 0.1093 | −0.0185 / −0.0470 | loss: without logQ the in-batch negatives push popular items down (cov@10 0.0674 against E1c's 0.0382) |
+| [E1c](artifacts/seqrec-encoder/e1c-yambda-d64-sasrec-ssm-logq/) | E1 + logQ | 0.0945 / 0.1619 | +0.0099 / +0.0056 | loss: logQ alone takes the same body from −0.0185 to +0.0099; selected |
+| [E2a](artifacts/seqrec-encoder/e2a-yambda-d64-hstu-ssm-uniform/) (partial: stopped after epoch 58 of 100) | HSTU body (hidden 256, 4 blocks, 4 heads, time bias), uniform 8192 only | 0.0743 / 0.1379 | −0.0103 / −0.0184 | loss: the same body gains +0.0140 / +0.0121 with E1c's loss (E2c) |
+| [E2b](artifacts/seqrec-encoder/e2b-yambda-d64-hstu-gbce/) (partial: stopped in epoch 15 of 100) | HSTU body, per-position gBCE | 0.0290 / 0.0658 | −0.0556 / −0.0905 | loss: gBCE on the HSTU body learns slowly (val 0.0301 and rising at the stop); inconclusive |
+| [E2c](artifacts/seqrec-encoder/e2c-yambda-d64-hstu-ssm-logq/) | HSTU body, E1c's loss | 0.0883 / 0.1500 | +0.0037 / −0.0063 | body: with the same loss, HSTU is below gSASRec (−0.0062 / −0.0119 against E1c) at 3.6× the s/epoch |
+
+The loss carries the gain; the HSTU body adds cost, not quality.
+
+### Gates
+
+Artifacts: [gate A](artifacts/seqrec-encoder/gate-a/),
 [gate B](artifacts/seqrec-encoder/gate-b-yambda-d64/),
-[compile A/B](artifacts/seqrec-encoder/compile/).
+[compile A/B](artifacts/seqrec-encoder/compile/),
+[W6 equivalence](artifacts/seqrec-encoder/w6-cleanup-equivalence/).
 
 | gate | state |
 |---|---|
 | A: published checkpoints through `load_model_for_eval` + `evaluate` reproduce `eval_quality.json` test ndcg@10 / recall@100 to 4 decimals | old and new code give **identical** numbers on all four. goodreads d64 and d128 match to 4 decimals. yambda-500m d64 and d128 **do not** (0.0846/0.1563 vs 0.0813/0.1489; 0.0811/0.1486 vs 0.0751/0.1362), before and after the change alike. Mechanism: the test split on disk is not the one those files were scored on. The d64 checkpoint re-scored on `trainer/val.parquet` gives 0.09198, which matches its own training-time best val (0.09200). `test.parquet` at the data root and under `trainer/` hold the same rows. After the W6 cleanup (`loss` missing from the published `config.json` read as `gbce`): all four numbers `==` the pre-cleanup loader's ([artifact](artifacts/seqrec-encoder/w6-cleanup-equivalence/)). |
 | B: retrain yambda-500m d64 on the published recipe, test within ±0.002 | per-position gBCE negatives, `compile=true`, 100 epochs: test ndcg@10 **0.0837**, recall@100 **0.1558**. Against the brief's 0.0813 / 0.1489 (the stale split): +0.0024 / +0.0069, **outside**. Against the published checkpoint re-scored on the same file (0.0846 / 0.1563): −0.0009 / −0.0006, **inside**. Best val 0.0913 (published 0.0920). 10.37 s/epoch median, 8,772 seq/s, 1478 s total (A100 published run: 2809 s), peak 11.2 GB, sm_mhz 1980 |
 | B, shared negatives (plan §3) | one `[256]` negative vector per step collapses gBCE (test 0.0160 / 0.0377, 21 distinct items across 2048 users' top-10s); gBCE therefore samples per position ([mechanism](artifacts/seqrec-encoder/gate-b-yambda-d64/README.md)) |
-| HSTU body, `use_time`, `hidden_dim` | removed with the code (W6 cleanup) |
 | W6 cleanup equivalence (per-step training losses bit-identical before/after, both losses) | **passes** ([artifact](artifacts/seqrec-encoder/w6-cleanup-equivalence/)). H100, yambda-500m d64, 50 steps, seed 42, `compile=false`: the E1c `config.json` on the pre-cleanup trainer against the bare new `TrainConfig` defaults, and the Gate B gBCE `config.json` on both, give `==` per-step losses (50/50 each); the pre-cleanup trainer run twice is also identical to itself. CPU proxy (synthetic split, 18 steps per loss) bit-identical single-threaded; on 64 threads gBCE differs run to run in the last bit for the same code |
 | `torch.compile` of the body | 3.93-4.03 s/epoch compiled against 4.8-5.9 eager (shared-negative gBCE, 3 epochs each, interleaved); kept |
 | unit gates | `tests/training/test_encoder.py`: a left-padded row stays finite and padding content does not move the last position; `sampled_softmax_loss` equals a direct `F.cross_entropy` over explicit candidate lists, without and with a hand-built logQ (uneven explicit q; fails on a flipped sign or a corrected positive); `logq_correction` equals a hand-written `log(M·p + K/N)` vector for M = 2, K = 3, N = 4 (fails with the per-slot `/(M+K)`); `TrainConfig` rejects an unknown `loss`, and `normalize` or `logq` with `gbce`; defaults to `sampled_softmax` with `normalize` and `logq` on, `gbce` resolves both off; `TrainConfig.load` reads a `config.json` without `loss` as gbce, re-resolves `normalize`/`logq` when an override changes `loss` (both directions), keeps an explicit override and keeps the saved values when `loss` is unchanged (each case fails on its mutation, hand-checked) (CPU) |
-
-### Encoder experiments E0-E4 (H100, not yet validated, not citable)
-
-Bars are the published checkpoints re-scored on the trainer's `test.parquet`: yambda-500m d64
-0.0846 / 0.1563, d128 0.0811 / 0.1486; goodreads-work-id d64 0.0350 / 0.1486, d128 0.0361 / 0.1480
-(ndcg@10 / recall@100; [E0](artifacts/seqrec-encoder/e0-goodreads-bars/), which matches the
-stored goodreads numbers to 4 decimals). Selection is on val ndcg@10; test is recorded only for
-the selected checkpoint. sm_mhz 1980 throughout.
-
-| run | test ndcg@10 / ndcg@100 / R@10 / R@100 / cov@10 | Δ vs bar (ndcg@10 / R@100) | best val ndcg@10 (epoch) | s/epoch (median) | seq/s | peak GB | wall |
-|---|---|---|---|---|---|---|---|
-| [E1](artifacts/seqrec-encoder/e1-yambda-d64-sasrec-ssm/) yambda d64, gSASRec body, sampled softmax (in-batch 4096 + uniform 8192, no logQ) | 0.0661 / 0.0790 / 0.0326 / 0.1093 / 0.0674 | −0.0185 / −0.0470 | 0.0740 (95 of 100) | 10.9 | 8,337 | 10.7 | 26 min |
-| [E2a](artifacts/seqrec-encoder/e2a-yambda-d64-hstu-ssm-uniform/) yambda d64, HSTU body (hidden 256, 4 blocks, 4 heads, `use_time`), sampled softmax (uniform 8192 only). **Stopped after epoch 58 of 100 by user decision** | 0.0743 / 0.0950 / 0.0364 / 0.1379 / 0.0450 | −0.0103 / −0.0184 | 0.0781 (55) | 39.2 | 2,249 | 9.4 | 47 min (to the stop) |
-| [E2c](artifacts/seqrec-encoder/e2c-yambda-d64-hstu-ssm-logq/) yambda d64, HSTU body as E2a, sampled softmax (in-batch 4096 + uniform 8192) **with logQ** | 0.0883 / 0.1075 / 0.0425 / 0.1500 / 0.0423 | **+0.0037** / −0.0063 | 0.0921 (21; early stop at 41) | 42.3 | 2,155 | 11.9 | 34 min |
-| [E2b](artifacts/seqrec-encoder/e2b-yambda-d64-hstu-gbce/) yambda d64, HSTU body as E2a, per-position gBCE (K=256, t=0.75). **Stopped during epoch 15 of 100 by user decision** | 0.0290 / 0.0422 / 0.0123 / 0.0658 / 0.0003 | −0.0556 / −0.0905 | 0.0301 (13, still rising) | 41.1 | 2,193 | 11.6 | 12 min (to the stop) |
-| [E1c](artifacts/seqrec-encoder/e1c-yambda-d64-sasrec-ssm-logq/) yambda d64, gSASRec body as E1, sampled softmax (in-batch 4096 + uniform 8192) **with logQ**: the selected config | **0.0945** / 0.1157 / 0.0460 / **0.1619** / 0.0382 | **+0.0099 / +0.0056** | 0.1010 (77; early stop at 97) | 11.6 | 7,809 | 10.7 | 26 min |
 
 Unverified: `target_frequencies` (logQ) is checked only by hand on CPU; E2c ran `logq=true` on the GPU;
 resume (`--resume` has never run on the GPU).
