@@ -108,13 +108,15 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    **3 windows** of `N = clamp(2 s / median_est, 1000, 5000)` calls, each
    call bracketed by CUDA events on the current stream, wall clock around
    the window with one sync at the end. From the window with the median
-   median: `median_ms, mean_ms, p95_ms, p99_ms, min_ms, iqr_ms, n`, two
+   median: `median_ms, mean_ms, trimmed_mean_ms, p95_ms, p99_ms, min_ms,
+   iqr_ms, n`, two
    outlier counts (`outliers_std` beyond 3σ, `outliers_tukey`), `qps =
    N·bs / wall_s` (closed-loop single client, `load: "closed_loop"`, the
    in-process analogue of the papers' client-side QPS), `host_gap_ms =
    wall/N − mean_gpu_ms` (diagnostic), `window_medians_ms` and `spread =
    (max − min) / median` of the three window medians; `spread > 0.05` sets
-   `unstable: true`. The per-call vector of the chosen window goes to the
+   `unstable: true`. After each window's sync one `nvidia-smi` SM clock
+   sample goes to `window_sm_mhz` (outside the timed calls). The per-call vector of the chosen window goes to the
    samples sidecar. `peak_fwd_mib` = `max_memory_allocated −
    allocated_before` over the first eager window only (graph mode
    allocates nothing). The first eager call runs under
@@ -157,8 +159,12 @@ the oracle fingerprint in the blob's file name; see
   report; `--profile` (`kernels`) is the kernel-time view.
 - **Clocks are compared load against load, never against idle.**
   `env.sm_mhz_idle` is the process-start sample, provenance only. Every
-  perf entry's `sm_mhz` is sampled right after its last timing window's
-  sync, under load; `env.sm_mhz_load` is the median of a cell's under-load
+  perf entry samples the SM clock right after each timing window's sync,
+  under load, into `window_sm_mhz`; its `sm_mhz` is the last of these (the
+  same sample as before `window_sm_mhz` existed). A throttle inside one
+  window shows up as that window's clock sample, next to its entry in
+  `window_medians_ms`; neither `unstable` nor `clocks_drift` reads
+  `window_sm_mhz`. `env.sm_mhz_load` is the median of a cell's under-load
   samples, and `env.clocks_drift` fires (and sets the record's `unstable`)
   when any of them is more than 5 % (`run.CLOCK_DRIFT`) from the process's
   *first* under-load sample. An idle sample reads low and would flag the GPU
@@ -166,6 +172,29 @@ the oracle fingerprint in the blob's file name; see
   lock clocks. Compare latencies across runs against `perf[].sm_mhz`.
   [c4_gate.py](../artifacts/evaluation-harness-v2/c4_gate.py) reads the
   schema-1 `env.sm_mhz` field.
+- **No L2 flush between calls.** `measure.latency` does not flush L2
+  (`triton.testing.do_bench` does by default). Consecutive calls take
+  consecutive batches of the query pool, so what depends on the query
+  (which index rows a batch reads) varies call to call, while what every
+  call reads stays in L2 as it would in serving. Cache state is therefore
+  the serving steady state, not a cold-cache worst case; a flushed number
+  could be higher on bandwidth-bound variants, and it is not measured. The
+  kernel microbenchmarks under `docs/artifacts/` (`q3/roofline.py`,
+  `kernel-opt/bench_kernels.py`) do not flush either.
+- **One sync per window, not per call.** `_time_calls` records a CUDA
+  event pair around each call and calls `torch.cuda.synchronize()` once
+  before the window and once after it, never inside the loop, so a sync
+  does not inflate the per-call numbers. The host is free to run ahead
+  unless the module itself syncs (the first eager call runs under
+  `set_sync_debug_mode("warn")` to catch that).
+- **No sub-launch-floor flag.** Per-call numbers under about 10 µs
+  would be mostly timer and launch overhead. The smallest `min_ms` in
+  `evaluation/results/` (2106 perf entries) is 0.196 ms (`silvertorch`
+  triton graph, bs = 1), 20× above that, so no entry carries a flag for it.
+- **`trimmed_mean_ms`** is the mean after dropping `n // 10` calls from
+  each end of the chosen window: a central value that one-sided
+  interference on the shared GPU moves less than `mean_ms`. `mean_ms`
+  stays the papers' comparable number.
 - **Samples go to a JSONL sidecar** (`<name>.samples.jsonl`, one line per
   perf entry with the key block, `k`, `bs`, `mode`, `ms: [...]`), because
   parquet cannot be appended per cell. `bench report` reads it for the
@@ -507,13 +536,15 @@ Perf entry:
 |---|---|
 | `k`, `bs`, `mode` | the variant; `mode ∈ {eager, graph}` |
 | `n`, `median_ms`, `mean_ms`, `p95_ms`, `p99_ms`, `min_ms`, `iqr_ms` | of the chosen window (median of the three window medians); quantiles linear-interpolated |
+| `trimmed_mean_ms` | mean of that window after dropping `n // 10` calls from each end |
 | `qps` | `n · bs / wall_s` of that window (closed-loop, one client) |
 | `host_gap_ms` | `wall / n − mean_ms` |
 | `outliers_std`, `outliers_tukey` | counts beyond 3 σ / the 1.5 IQR fences, never dropped |
 | `spread`, `unstable` | `(max − min) / median` of the three window medians; `> 0.05` |
 | `window_medians_ms` | the three medians |
+| `window_sm_mhz` | the SM clock sampled right after each window's sync, same order as `window_medians_ms`; `null` elements without CUDA; not in `flat.csv` |
 | `peak_fwd_mib` | eager only, first window: `max_memory_allocated − allocated_before` |
-| `sm_mhz` | the SM clock sampled right after the last window's sync, with the GPU still at its load clock — the per-variant value cross-run latency comparisons read, and the only clock `clocks_drift` looks at; `null` without CUDA |
+| `sm_mhz` | `window_sm_mhz[-1]`: the SM clock sampled right after the last window's sync, with the GPU still at its load clock — the per-variant value cross-run latency comparisons read, and the only clock `clocks_drift` looks at; `null` without CUDA |
 | `cache_plans` | on every entry: `false` on `silvertorch`/`official` (`run.perf` replaces `module.official` with `cache_plans=False` before the first variant, so every timed forward pays the CPU expression parse), `null` on backends without a plan cache |
 | `load` | `"closed_loop"` |
 | `kernels` | `--profile`, eager only: top-8 CUDA kernels `{kernel, us, calls}` |

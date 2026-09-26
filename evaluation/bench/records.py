@@ -46,7 +46,7 @@ _RECORD_COLUMNS = (
 _ENV_COLUMNS = (
     "code_version", "commit", "dirty", "gpu", "sm_mhz_load", "clocks_drift", "git_branch",
 )  # fmt: skip
-_PERF_SKIP = ("window_medians_ms", "kernels")
+_PERF_SKIP = ("window_medians_ms", "window_sm_mhz", "kernels")
 
 
 def resume_key(key: dict[str, Any], code_version: str) -> str:
