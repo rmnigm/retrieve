@@ -83,10 +83,16 @@ EVAL_IGNORE_PATTERNS: list[str] = [
 # epoch-tagged copy by default; pass `include_epoch_snapshots=True` to keep it.
 EPOCH_SNAPSHOT_PATTERN = "gsasrec-ep*.pt"
 
-# Always-skip files in checkpoint dirs (run output, not training meta).
+# Always-skip files in checkpoint dirs (run output or resume-only state, not
+# the trained checkpoint itself). _resume.pt carries optimizer state and can
+# be tens of GB, larger than the checkpoint it resumes (found staging E4's
+# kuairand checkpoint, 2026-09-26); encoded_queries_v2.pt is training.encode's
+# cache, keyed on checkpoint mtime, not portable to a fresh copy.
 CKPT_ALWAYS_IGNORE: list[str] = [
     "evaluate.json",
     "benchmark.json",
+    "_resume.pt",
+    "encoded_queries_v2.pt",
 ]
 
 
