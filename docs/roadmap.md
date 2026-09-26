@@ -187,6 +187,26 @@ in records, commits and code comments; they are not renumbered.
   frozen golden worktree (`tmp/golden-rederive`).
 - `bloom_compact`'s `block_n` has not been retuned for the two-phase
   compaction shape the kernel-opt pass introduced.
+- A GPU-kernel-technique survey (2026-09-26, web research) found
+  background reading, not scheduled work: a warp-ballot (`__ballot_sync`)
+  candidate-selection pattern used across recent GPU-IVF kNN kernels,
+  worth a one-time check against whether the probe kernel already does
+  something equivalent; a tunable-vectorization GPU bloom filter design
+  (arXiv 2512.15595) and a cuckoo-filter alternative (arXiv 2603.15486)
+  as citable comparisons for the transposed bloom-index kernel; a
+  bucket-based coalesced-access layout for filtered graph search
+  (GRAB-ANNS, arXiv 2604.16402) as a citable alternative mechanism to
+  the compact CSR-like probe layout; recall-bucketed / Pareto-frontier
+  reporting (NVIDIA cuVS Bench methodology) as a possible improvement to
+  `bench report`'s recall/latency tables, instead of point comparisons.
+  Two citations for the paper: Meta's own public SilverTorch numbers
+  (`github.com/meta-recsys/silvertorch`, an Engineering-at-Meta blog
+  post) as target figures for
+  [official-vs-reimplementation](paper/official-vs-reimplementation.md);
+  two ANN-benchmark trustworthiness critiques (arXiv 2507.00379, a
+  YDB.tech write-up) for
+  [provenance-and-disclosure](paper/provenance-and-disclosure.md). No
+  public LiNR reproduction exists anywhere to compare against.
 
 ## Dependencies
 
