@@ -47,8 +47,7 @@ retrieve/tests/
 │   ├── test_linr.py                (PostfilterKNN, PostfilterKNNInt8, PrefilterKNN, OneBitKNN, SimHashKNN × torch / Triton;
 │   │                                LiNRV1–V4 torch.equal to the hand-composed primitives; short candidate lists,
 │   │                                missing filters)
-│   ├── test_op_boundary.py         (every Triton op rejects a non-contiguous item table and a non-power-of-two
-│   │                                `tl.arange` extent with `ValueError`)
+│   ├── test_op_boundary.py         (every Triton op rejects a non-contiguous item table with `ValueError`)
 │   ├── test_quantize.py            (int8, OPORP, popcount)
 │   ├── test_retrieval_utils.py     (FullScanKNN, post_filter_topk)
 │   ├── test_silvertorch.py         (SilverTorch × filter_mode {none,bloom,exact} × backend {triton,torch,official}; SilverTorchBuilder)
@@ -107,7 +106,10 @@ The split is **by purpose**, not by module:
   test file (`_ref`), or — where two backends share one — in
   `parity/conftest.py`. One file per kernel, plus `test_accumulation.py`,
   whose oracle is fp64 rather than the torch path (a same-dtype reference
-  shares the kernel's accumulation error and cannot see it).
+  shares the kernel's accumulation error and cannot see it). Every file
+  whose kernel pads its width (kernels.md § Padding) also runs a
+  non-power-of-two case against the oracle at the true width: D = 192 and
+  768 (yfcc10m's and pubmed's), OPORP `W = 3` / `12`, bloom `W = 3` / `12`.
 - `compile/` answers *"does the compile/export machinery still see the
   kernels?"* — `test_silvertorch_compile.py` warms the
   `reduce-overhead` module up on one query, then replays the captured
@@ -214,6 +216,9 @@ The probe-layout builders, four assertions and the poisoned allocator:
   item and query signatures (`sigs, qb`) they are checked against. No live caller; kept for
   the parity tests of the Triton transposed-bloom kernel (roadmap G-a,
   TF-1).
+- `make_words(n, w, seed)` — raw `[N, W]` int64 signatures and `[8, W]`
+  query words, half subsets of an item's signature and half random sparse
+  words, for the bloom ops at a `W` no `BloomFilter` produces.
 - `make_exact(n, b, *, c=2, a_max=2, reverse="none", n_vocab=8)` — item
   and query clause attrs plus the reverse flags; `reverse="mixed"` flips
   clause 0 only so one call covers both branches of the XOR.

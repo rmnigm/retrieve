@@ -14,7 +14,7 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
-from retrieve.ops.triton._host import check_contiguous, check_pow2, wide
+from retrieve.ops.triton._host import check_contiguous, wide
 from retrieve.ops.triton.common import row_base
 
 _P_BUCKETS = (256, 2048, 16384, 131072, 1048576)
@@ -53,6 +53,7 @@ def _fused_masked_knn_topk_kernel(
     out_scores_ptr,
     P: tl.constexpr,  # bucketed width (constexpr); see _bucket_p
     D: tl.constexpr,
+    D_PAD: tl.constexpr,
     stride_qb,
     stride_qd,
     stride_in,
@@ -70,7 +71,8 @@ def _fused_masked_knn_topk_kernel(
     bid = tl.program_id(1)
 
     n_offsets = tile_id * BLOCK_N + tl.arange(0, BLOCK_N)
-    d_offsets = tl.arange(0, D)
+    d_offsets = tl.arange(0, D_PAD)
+    d_in = d_offsets < D
 
     p_valid = n_offsets < P
 
@@ -79,7 +81,9 @@ def _fused_masked_knn_topk_kernel(
 
     # Widen before the multiply: tl.sum reduces in its operand dtype (fp16 in production, plan
     # L4 §6.1), and fp16 × fp16 is exact in fp32.
-    q = tl.load(query_ptr + bid * stride_qb + d_offsets * stride_qd).to(tl.float32)
+    q = tl.load(query_ptr + bid * stride_qb + d_offsets * stride_qd, mask=d_in, other=0.0).to(
+        tl.float32
+    )
 
     item_ids = tl.load(
         row_base(pos_indices_ptr, bid, stride_pb, WIDE) + n_offsets * stride_pp,
@@ -89,7 +93,7 @@ def _fused_masked_knn_topk_kernel(
 
     emb_rows = tl.load(
         item_embs_ptr + item_ids[:, None] * stride_in + d_offsets[None, :] * stride_id,
-        mask=in_count[:, None],
+        mask=in_count[:, None] & d_in[None, :],
         other=0.0,
     ).to(tl.float32)
 
@@ -141,7 +145,6 @@ def _fmkt_prep(
     p = positive_indices.shape[1]
 
     check_contiguous(item_embs=item_embs, positive_indices=positive_indices)
-    check_pow2(D=d)
     query = query.contiguous()
     counts = counts.contiguous()
 
@@ -160,6 +163,7 @@ def _fmkt_prep(
         "out_scores_ptr": all_scores,
         "P": p_kernel,
         "D": d,
+        "D_PAD": triton.next_power_of_2(d),
         "stride_qb": query.stride(0),
         "stride_qd": query.stride(1),
         "stride_in": item_embs.stride(0),

@@ -764,8 +764,8 @@ suite. One cell, `linr_v1_filter_mask`/triton clause `field_era`, eager, `--skip
 `partial`): pass rate 0.0526, `recall_oracle@1000` **0.9959**, held-out (a cited paper)
 `recall@100` 0.505 / `@1000` 0.741, n = 10,000, 64 GB reserved
 ([record](https://huggingface.co/datasets/pinkmeme/eval-results/blob/main/artifacts/e3-openalex/filter-openalex-d768-cell.jsonl)). SilverTorch-triton
-and LiNR V2 / V3 cannot run at D = 768 (the power-of-two limit on the
-[roadmap](../roadmap.md)); official and V1 can. Nothing here is citable yet.
+and LiNR V2 / V3 run at D = 768 since the Triton kernels pad to the next power of two
+([kernels](kernels.md#padding)); not yet run on this dataset. Nothing here is citable yet.
 
 The full-scan filter counts (`convert_log.jsonl`, summed): 476,196,327 rows → year
 373,119,082 → English 261,736,236 → type 154,189,252 → flags 130,910,232 → hash sample

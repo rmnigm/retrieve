@@ -87,7 +87,9 @@ def _ref_indices(
 
 
 @pytest.mark.parametrize("quant", ["oporp", "simhash"])
-@pytest.mark.parametrize("n,d,k", [(1024, 128, 8), (8192, 128, 32), (4096, 256, 16)])
+@pytest.mark.parametrize(
+    "n,d,k", [(1024, 128, 8), (8192, 128, 32), (4096, 256, 16), (4096, 192, 16), (4096, 768, 16)]
+)
 @pytest.mark.parametrize("b", [1, 16])
 def test_oporp_1bit_full_matches_torch(n, d, k, b, quant):
     embs = make_index(n, d)
@@ -100,7 +102,10 @@ def test_oporp_1bit_full_matches_torch(n, d, k, b, quant):
 
 
 @pytest.mark.parametrize("quant", ["oporp", "simhash"])
-@pytest.mark.parametrize("n,d,p,k", [(1024, 128, 128, 8), (8192, 128, 512, 32)])
+@pytest.mark.parametrize(
+    "n,d,p,k",
+    [(1024, 128, 128, 8), (8192, 128, 512, 32), (8192, 192, 512, 32), (8192, 768, 512, 32)],
+)
 @pytest.mark.parametrize("b", [1, 16])
 def test_oporp_1bit_indices_matches_torch(n, d, p, k, b, quant):
     embs = make_index(n, d)

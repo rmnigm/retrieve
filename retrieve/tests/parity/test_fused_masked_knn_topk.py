@@ -46,6 +46,8 @@ def _ref(query, item_embs, mask, k):
     [
         (1, 1024, 64, 16),
         (16, 16_384, 128, 200),
+        (16, 16_384, 192, 200),
+        (16, 16_384, 768, 200),
         # P_real << P_bucket case: pass_rate keeps P_real around ~400-800
         # while bucket=2048; exercises Phase 2's smaller score buffer + grid.
         (8, 8_192, 64, 16),

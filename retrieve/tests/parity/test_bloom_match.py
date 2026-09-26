@@ -14,6 +14,7 @@ from retrieve.indexing.bloom_hash import build_signatures
 from retrieve.modules import BloomFilter
 from retrieve.ops.triton.bloom_match import bloom_match
 from tests.conftest import make_attrs, make_query_attrs
+from tests.parity.conftest import make_words
 
 
 @pytest.mark.parametrize("n", [512, 4096])
@@ -50,3 +51,14 @@ def test_bloom_match_matches_pure_torch(n, m_bits, k_hash):
     )
     out = bloom_match(qb_sigs, bf.bloom_sigs)
     assert torch.equal(out, ref)
+
+
+@pytest.mark.parametrize("w", [3, 12])
+def test_bloom_match_non_power_of_two_words(w):
+    """``W`` pads to ``next_power_of_2`` in-kernel; the answer is the subset test at the true
+    ``W``. ``BloomFilter`` keeps ``m_bits`` a power of two, so this is the op on its own."""
+    sigs, qb = make_words(4096, w, seed=w)
+    ref = ((qb.unsqueeze(1) & sigs.unsqueeze(0)) == qb.unsqueeze(1)).all(dim=-1)
+    out = bloom_match(qb, sigs)
+    assert torch.equal(out, ref)
+    assert out.any() and not out.all()
