@@ -2,7 +2,7 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.6  # = the ruff pin in pyproject.toml's dev group; bump both together
     hooks:
-      - id: ruff
+      - id: ruff-check
         files: ^(retrieve|evaluation)/
       # evaluation/ joins once its formatting-only commit lands; it does not pass today.
       - id: ruff-format
