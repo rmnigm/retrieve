@@ -1,0 +1,44 @@
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: Currently logged in as: pinkmeme to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /scratch/wt/runs/evaluation/wandb/run-20260926_223708-ieshvbzg
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run k128-probe
+wandb: ⭐️ View project at https://wandb.ai/pinkmeme/seqrec-encoder
+wandb: 🚀 View run at https://wandb.ai/pinkmeme/seqrec-encoder/runs/ieshvbzg
+
+Epoch 0:   0%|          | 1/200 [00:09<32:56,  9.93s/it]
+Traceback (most recent call last):
+  File "/venvs/wt-runs/bin/train", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/venvs/wt-runs/lib/python3.11/site-packages/click/core.py", line 1514, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venvs/wt-runs/lib/python3.11/site-packages/click/core.py", line 1435, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/venvs/wt-runs/lib/python3.11/site-packages/click/core.py", line 1902, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venvs/wt-runs/lib/python3.11/site-packages/click/core.py", line 1298, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venvs/wt-runs/lib/python3.11/site-packages/click/core.py", line 853, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/wt/runs/evaluation/training/train.py", line 407, in run
+    train(config, resume=resume)
+  File "/scratch/wt/runs/evaluation/training/train.py", line 217, in train
+    loss.backward()
+  File "/venvs/wt-runs/lib/python3.11/site-packages/torch/_tensor.py", line 630, in backward
+    torch.autograd.backward(
+  File "/venvs/wt-runs/lib/python3.11/site-packages/torch/autograd/__init__.py", line 364, in backward
+    _engine_run_backward(
+  File "/venvs/wt-runs/lib/python3.11/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 15.28 GiB. GPU 0 has a total capacity of 79.18 GiB of which 14.71 GiB is free. Including non-PyTorch memory, this process has 64.46 GiB memory in use. Of the allocated memory 62.98 GiB is allocated by PyTorch, and 772.04 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[1;34mwandb[0m: 
+[1;34mwandb[0m: 🚀 View run [33mk128-probe[0m at: [34mhttps://wandb.ai/pinkmeme/seqrec-encoder/runs/ieshvbzg[0m
+[1;34mwandb[0m: Find logs at: [1;35mwandb/run-20260926_223708-ieshvbzg/logs[0m

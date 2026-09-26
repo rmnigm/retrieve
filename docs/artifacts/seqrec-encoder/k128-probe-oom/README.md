@@ -1,7 +1,7 @@
-# k128 memory probe: OOM with one table (KuaiRand-27K d128, `reuse_item_embeddings=true`, `train_on_val=true`)
+# k128-probe-oom: KuaiRand d128 memory probe, OOM with one table (KuaiRand-27K d128, `reuse_item_embeddings=true`, `train_on_val=true`)
 
-H100 80GB HBM3 (79.18 GiB usable), 2026-09-26 22:35:50-22:37:22 UTC. `probe.sh`, `probe_oom.txt`.
-Not yet validated. Per instruction 011218745: "on OOM, stop and note it". k128-refit was not launched.
+H100 80GB HBM3 (79.18 GiB usable), 2026-09-26 22:35:50-22:37:22 UTC. `probe.sh` (the command), `log_tail.txt` (the log tail with the traceback), `probe_oom.txt` (the excerpt), `prediction.md`.
+Not yet validated. Per instruction 011218745: "on OOM, stop and note it". k128-refit was not launched, and the user then decided not to run KuaiRand d128 at all (2026-09-26); its staged command is in `../k128-refit-sasrec-ssm-logq/`.
 
 **Result:** `torch.OutOfMemoryError` inside `loss.backward()` (`train.py` line 217) on the probe's
 **second** step, the first after AdamW has allocated its state. "Tried to allocate 15.28 GiB ... 14.71 GiB
