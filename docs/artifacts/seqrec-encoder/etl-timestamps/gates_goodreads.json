@@ -1,0 +1,71 @@
+{
+  "item_id_map_sha256": {
+    "trainer": "dd6b80050487971084c398d6d8e8dc07e3f3b9f2b93cacbf68eb7a1148107265",
+    "hub": "dd6b80050487971084c398d6d8e8dc07e3f3b9f2b93cacbf68eb7a1148107265"
+  },
+  "maps_identical": true,
+  "test_vs_hub": {
+    "rows_new": 313178,
+    "rows_ref": 313178,
+    "rows_multiset_equal": false,
+    "rows_in_same_position": 274254,
+    "item_ids": {
+      "equal": false,
+      "sha256_new": "0f6e94f6b7d1c0872cc43221bfd4d41ac52d7e616533b146e36634382dd1202c",
+      "sha256_ref": "36fb2900e61bcb0abf5cbfceb1973244f3f87b21d48b5c0510bc462e6073e243"
+    },
+    "targets": {
+      "equal": false,
+      "sha256_new": "caf0b3b19b944b4e3ce321e4a978e7ed8efcd9b2ab95db2a6a245ca10b90e5ad",
+      "sha256_ref": "30adf993ee13d0e66f359e49390cd4ba7dd5eeea67706f3ba889953382436c60"
+    },
+    "pairing": {
+      "paired": 312396,
+      "pairs_identical": 274254,
+      "pairs_item_ids_tie_order_only": 35768,
+      "pairs_targets_order_differs": 2374,
+      "unpaired_new": 782,
+      "unpaired_ref": 782,
+      "duplicate_keys": 0
+    },
+    "positional": {
+      "rows_differing": 38924,
+      "item_ids_tie_order_only": 36576,
+      "targets_order_only": 2398,
+      "item_ids_membership_in_leading_tie_run": 782
+    }
+  },
+  "train": {
+    "rows": 744332,
+    "timestamps": {
+      "dtype": "List(Int64)",
+      "lengths_equal_item_ids": true,
+      "rows_with_decrease": 0,
+      "decreasing_steps": 0,
+      "min": 1167638400,
+      "max": 1493214211
+    }
+  },
+  "val": {
+    "rows": 190278,
+    "timestamps": {
+      "dtype": "List(Int64)",
+      "lengths_equal_item_ids": true,
+      "rows_with_decrease": 0,
+      "decreasing_steps": 0,
+      "min": 1168329600,
+      "max": 1493214209
+    }
+  },
+  "test": {
+    "rows": 313178,
+    "timestamps": {
+      "dtype": "List(Int64)",
+      "lengths_equal_item_ids": true,
+      "rows_with_decrease": 0,
+      "decreasing_steps": 0,
+      "min": 1167638400,
+      "max": 1496411011
+    }
+  }
+}
