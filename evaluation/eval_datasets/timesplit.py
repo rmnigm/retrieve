@@ -3,6 +3,21 @@ import polars as pl
 from .constants import Constants
 
 
+def _drop_non_train(df: pl.LazyFrame, unique_train_item_ids: pl.DataFrame) -> pl.LazyFrame:
+    return df.select(
+        "uid",
+        pl.all()
+        .exclude("uid")
+        .list.gather(
+            pl.col("item_id").list.eval(
+                pl.arg_where(
+                    pl.element().is_in(unique_train_item_ids.get_column("item_id").implode())
+                )
+            )
+        ),
+    ).filter(pl.col("item_id").list.len() > 0)
+
+
 def sequential_split_train_val_test(
     df: pl.LazyFrame,
     test_timestamp: int,
@@ -43,29 +58,12 @@ def sequential_split_train_val_test(
     tuple[LazyFrame, LazyFrame | None, LazyFrame]
         A tuple containing LazyFrames for the training, validation (if applicable), and test sets.
     """
-
-    def drop(df: pl.LazyFrame, unique_train_item_ids) -> pl.LazyFrame:
-        if not drop_non_train_items:
-            return df
-
-        return df.select(
-            "uid",
-            pl.all()
-            .exclude("uid")
-            .list.gather(
-                pl.col("item_id").list.eval(
-                    pl.arg_where(
-                        pl.element().is_in(unique_train_item_ids.get_column("item_id").implode())
-                    )
-                )
-            ),
-        ).filter(pl.col("item_id").list.len() > 0)
-
     train_timestamp = test_timestamp - gap_size - val_size - (gap_size if val_size != 0 else 0)
-
-    assert gap_size >= 0
-    assert val_size >= 0
-    assert train_timestamp > 0
+    if gap_size < 0 or val_size < 0 or train_timestamp <= 0:
+        raise ValueError(
+            f"need gap_size, val_size >= 0 and a positive train cutoff: gap_size={gap_size}, "
+            f"val_size={val_size}, train_timestamp={train_timestamp}"
+        )
 
     df_lazy = df.lazy()
 
@@ -106,9 +104,9 @@ def sequential_split_train_val_test(
             .drop("uid_in_train")
         )
 
-        validation = drop(validation, unique_train_item_ids).filter(
-            pl.col("item_id").list.len() > 0
-        )
+        if drop_non_train_items:
+            validation = _drop_non_train(validation, unique_train_item_ids)
+        validation = validation.filter(pl.col("item_id").list.len() > 0)
 
     test = (
         df_lazy.select(
@@ -119,7 +117,6 @@ def sequential_split_train_val_test(
                 pl.col("timestamp").list.eval(pl.arg_where(pl.element() >= test_timestamp))
             ),
         )
-        #
         .with_columns(
             pl.col("uid").is_in(unique_train_uids.get_column("uid").implode()).alias("uid_in_train")
         )  # to prevent filter reordering
@@ -127,6 +124,8 @@ def sequential_split_train_val_test(
         .drop("uid_in_train")
     )
 
-    test = drop(test, unique_train_item_ids).filter(pl.col("item_id").list.len() > 0)
+    if drop_non_train_items:
+        test = _drop_non_train(test, unique_train_item_ids)
+    test = test.filter(pl.col("item_id").list.len() > 0)
 
     return train, validation, test

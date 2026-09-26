@@ -64,7 +64,7 @@ HuggingFace's `datasets` in the shared venv.
 | [`etl/kuairand.py`](../../evaluation/eval_datasets/etl/kuairand.py) | `kuairand` | Zenodo KuaiRand-27K + category supplement (32M videos) |
 | [`etl/openalex.py`](../../evaluation/eval_datasets/etl/openalex.py) | `openalex` | OpenAlex snapshot on public S3, parquet copy (476M works, streamed) |
 | [`etl/synth_arxiv.py`](../../evaluation/eval_datasets/etl/synth_arxiv.py) | `synth-arxiv` | an already-encoded arxiv directory |
-| [`common.py`](../../evaluation/eval_datasets/common.py) | — | shared attribute-synthesis numerics |
+| [`common.py`](../../evaluation/eval_datasets/common.py) | — | shared attribute synthesis, id-hash sampling, `prep_log.json` merge, range specs |
 | [`timesplit.py`](../../evaluation/eval_datasets/timesplit.py) | — | vendored sequential time-split |
 
 The ETL modules are `argparse` programs; `eval-data <name> …` forwards
@@ -776,7 +776,7 @@ The filters, in order, each counted into `convert_log.jsonl`:
    `dataset` is 29 % of English works and mostly boilerplate (every CCDC crystal-structure
    entry shares one abstract, i.e. exact-duplicate vectors);
 4. not `is_paratext` / `is_retracted` / `is_xpac`;
-5. the **hash sample**: `pubmed.pmid_hash(work_id, seed) < sample_rate · 2⁶⁴`;
+5. the **hash sample**: `common.pmid_hash(work_id, seed) < sample_rate · 2⁶⁴`;
 6. abstract present. The text is the inverted index's words in position order
    (`abstract_text`). The parquet copy caps strings just under 32,767 chars, which cuts
    about one index in 7 M mid-JSON (1 in 7,108,348 sampled, W4214716959); such a row is
@@ -789,7 +789,7 @@ parquet string equals the one rebuilt from the API object.
 
 #### The slice, the queries, the relevance
 
-`prep` keeps the **N smallest work-id hashes** of the staged rows (`pubmed.select_pmids`,
+`prep` keeps the **N smallest work-id hashes** of the staged rows (`common.select_pmids`,
 so the catalog is the same set whatever the file order, and a smaller N is a subset of a
 larger one); a work id staged twice keeps its newest copy. Item ids are 1-indexed dense in
 (file, row) order; `papers.parquet` is written in item-id order, which `encode_text` and
@@ -1099,7 +1099,7 @@ A checkpoint without it falls back to
 5. Train a checkpoint if sequential; otherwise encode embeddings into
    `content*/` with meta sidecars.
 
-Reuse `common.py` for attribute synthesis (`dense_remap_ids`,
-`synthesize_qa_narrow`, `sample_rare_biased_wide`) rather than
+Reuse `common.py` for attribute synthesis (`synthesize_qa_narrow`,
+`sample_rare_biased_wide`) and id-hash slicing (`select_pmids`) rather than
 re-deriving the sampling — the rare-biased draw in particular is what
 keeps filter selectivity in an interesting range.

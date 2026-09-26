@@ -46,6 +46,8 @@ import time
 import urllib.request
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from functools import partial
+from itertools import repeat
 from pathlib import Path
 
 import numpy as np
@@ -55,7 +57,7 @@ import pyarrow.compute as pc
 import pyarrow.fs as pafs
 import pyarrow.parquet as pq
 
-from eval_datasets.etl.pubmed import pmid_hash, select_pmids
+from eval_datasets.common import merge_prep_log, parse_ranges, pmid_hash, select_pmids
 from eval_datasets.hub import data_root, raw_dir
 from eval_datasets.layout import atomic_write
 
@@ -125,9 +127,6 @@ _STAGED_SCHEMA = {
     "abstract": pl.Utf8,
     "refs": pl.List(pl.Int64),
 }
-
-
-# ----- record parsing ------------------------------------------------------------------------
 
 
 def abstract_text(inverted: str | None) -> str | None:
@@ -206,9 +205,6 @@ def stage_table(
     return df.select(list(_STAGED_SCHEMA)).cast(_STAGED_SCHEMA), stats
 
 
-# ----- manifest ------------------------------------------------------------------------------
-
-
 def _fetch_json(url: str) -> dict:
     with urllib.request.urlopen(url, timeout=120) as r:
         return json.loads(r.read())
@@ -237,17 +233,6 @@ def works_files(manifest: dict) -> list[dict]:
             }
         )
     return sorted(out, key=lambda f: f["name"])
-
-
-def _parse_files(spec: str | None, n: int) -> list[int]:
-    """``"0-3,7"`` → ``[0, 1, 2, 3, 7]`` (indices into ``works_files``); ``None`` → all."""
-    if not spec:
-        return list(range(n))
-    out: list[int] = []
-    for part in spec.split(","):
-        lo, _, hi = part.partition("-")
-        out.extend(range(int(lo), int(hi or lo) + 1))
-    return sorted(set(out))
 
 
 def _s3() -> pafs.S3FileSystem:
@@ -286,16 +271,6 @@ def _check_params(path: Path, params: dict) -> None:
     path.write_text(json.dumps(params, indent=2))
 
 
-def _merge_log(output: Path, key: str, payload: dict) -> None:
-    path = output / "prep_log.json"
-    existing = json.loads(path.read_text()) if path.exists() else {}
-    existing[key] = payload
-    path.write_text(json.dumps(existing, indent=2))
-
-
-# ----- plan ----------------------------------------------------------------------------------
-
-
 def _footer(key: str) -> tuple[int, int]:
     md = pq.ParquetFile(key, filesystem=_s3()).metadata
     return md.num_row_groups, _projected_bytes(md)
@@ -327,7 +302,7 @@ def _sample_row_group(key: str, rg: int, max_year: int) -> dict:
     }
 
 
-def cmd_plan(args) -> int:
+def cmd_plan(args: argparse.Namespace) -> int:
     manifest = _load_manifest() if MANIFEST_PATH.exists() else _fetch_json(MANIFEST_URL)
     files = works_files(manifest)
     max_year = int(manifest["date"][:4])
@@ -354,11 +329,12 @@ def cmd_plan(args) -> int:
     picks = rng.choice(
         len(files), size=args.sample_row_groups, replace=True, p=weights / weights.sum()
     )
-    jobs = [(files[i]["key"], int(rng.integers(footers[i][0]))) for i in picks]
-    print(f"STEP filter rates on {len(jobs)} sampled row groups", flush=True)
+    keys = [files[i]["key"] for i in picks]
+    row_groups = [int(rng.integers(footers[i][0])) for i in picks]
+    print(f"STEP filter rates on {len(keys)} sampled row groups", flush=True)
     t0 = time.monotonic()
     with ThreadPoolExecutor(args.threads) as ex:
-        samples = list(ex.map(lambda j: _sample_row_group(*j, max_year), jobs))
+        samples = list(ex.map(_sample_row_group, keys, row_groups, repeat(max_year)))
     t_wall = time.monotonic() - t0
 
     stats: Counter = Counter()
@@ -389,7 +365,7 @@ def cmd_plan(args) -> int:
         "bytes": n_bytes,
         "projected_bytes": projected,
         "sample": {
-            "row_groups": len(jobs),
+            "row_groups": len(keys),
             "rows": rows,
             "filter_steps": {k: stats[k] for k in stats if k.startswith("after_")},
             "eligible_fraction": round(frac, 4),
@@ -433,10 +409,7 @@ def cmd_plan(args) -> int:
     return 0
 
 
-# ----- download ------------------------------------------------------------------------------
-
-
-def cmd_download(args) -> int:
+def cmd_download(args: argparse.Namespace) -> int:
     if MANIFEST_PATH.exists() and not args.force:
         m = _load_manifest()
         print(f"SKIP download: {MANIFEST_PATH} pins release {m['date']} (--force to re-pin)")
@@ -450,9 +423,6 @@ def cmd_download(args) -> int:
         flush=True,
     )
     return 0
-
-
-# ----- convert -------------------------------------------------------------------------------
 
 
 def stage_file(key: str, out: Path, max_year: int, sample_rate: float, seed: int) -> dict:
@@ -472,7 +442,7 @@ def stage_file(key: str, out: Path, max_year: int, sample_rate: float, seed: int
     return dict(stats) | {"bytes_read": _projected_bytes(pf.metadata)}
 
 
-def cmd_convert(args) -> int:
+def cmd_convert(args: argparse.Namespace) -> int:
     manifest = _load_manifest()
     files = works_files(manifest)
     params = {
@@ -484,7 +454,7 @@ def cmd_convert(args) -> int:
         "seed": args.seed,
     }
     _check_params(STAGING / "params.json", params)
-    selected = [files[i] for i in _parse_files(args.files, len(files))]
+    selected = [files[i] for i in parse_ranges(args.files, len(files))]
     todo = [f for f in selected if not (STAGING / f"{f['name']}.parquet").exists()]
     print(
         f"START convert release {params['release']}: {len(selected):,} files selected, "
@@ -533,15 +503,12 @@ def cmd_convert(args) -> int:
     return 0
 
 
-# ----- prep ----------------------------------------------------------------------------------
-
-
 def _staged_paths() -> list[Path]:
     """The staged files in manifest order (their names sort as (date, part))."""
     return sorted(STAGING.glob("*.parquet"))
 
 
-def cmd_prep(args) -> int:
+def cmd_prep(args: argparse.Namespace) -> int:
     output = Path(args.output_dir).expanduser()
     output.mkdir(parents=True, exist_ok=True)
     params = json.loads((STAGING / "params.json").read_text())
@@ -696,12 +663,9 @@ def cmd_prep(args) -> int:
     )
     log["seed"] = args.seed
     log["wall_clock_sec"] = round(time.monotonic() - t0, 1)
-    _merge_log(output, "prep", log)
+    merge_prep_log(output, "prep", log)
     print(f"ALL DONE prep in {log['wall_clock_sec']:.0f}s — n_items={n_items:,} n_heldout={n_q:,}")
     return 0
-
-
-# ----- encode --------------------------------------------------------------------------------
 
 
 def _texts(df: pl.DataFrame, prefix: str, description_chars: int) -> list[str]:
@@ -711,7 +675,7 @@ def _texts(df: pl.DataFrame, prefix: str, description_chars: int) -> list[str]:
     ]
 
 
-def _load_encoder(args):
+def _load_encoder(args: argparse.Namespace):
     import torch
     from sentence_transformers import SentenceTransformer
 
@@ -721,12 +685,11 @@ def _load_encoder(args):
     model.max_seq_length = args.max_seq_length
     if model.get_embedding_dimension() != EMB_DIM_NATIVE:
         raise SystemExit(f"ERROR {args.encoder} is not {EMB_DIM_NATIVE}-d")
-    # bf16 weights, not autocast: 898 vs 755 docs/s on the A100, min cosine 0.99989 between
-    # the two (docs/system/datasets.md § openalex).
+    # bf16 weights, not autocast: faster at equal vectors (docs/system/datasets.md § openalex).
     return (model.to(torch.bfloat16) if args.device == "cuda" else model).eval()
 
 
-def _encode(model, texts: list[str], args):
+def _encode(model, texts: list[str], args: argparse.Namespace):
     """``[len(texts), 768]`` fp16, L2-normalised."""
     import torch
     import torch.nn.functional as F
@@ -738,7 +701,7 @@ def _encode(model, texts: list[str], args):
     return F.normalize(emb.float(), dim=-1).half().cpu()
 
 
-def _encode_meta(args, prefix: str, n_rows: int) -> dict:
+def _encode_meta(args: argparse.Namespace, prefix: str, n_rows: int) -> dict:
     return {
         "prefix": prefix,
         "encoder": args.encoder,
@@ -755,7 +718,7 @@ def _encode_meta(args, prefix: str, n_rows: int) -> dict:
     }
 
 
-def cmd_encode_text(args) -> int:
+def cmd_encode_text(args: argparse.Namespace) -> int:
     import torch
 
     output = Path(args.output_dir).expanduser()
@@ -777,7 +740,7 @@ def cmd_encode_text(args) -> int:
             continue
         rows = pl.scan_parquet(papers).slice(start, n).select("title", "abstract").collect()
         emb = _encode(model, _texts(rows, DOC_PREFIX, args.description_chars), args)
-        atomic_write(content / name, lambda fh, emb=emb: torch.save(emb, fh))
+        atomic_write(content / name, partial(torch.save, emb))
         n_done += n
         rate = n_done / (time.monotonic() - t0)
         print(
@@ -806,7 +769,7 @@ def cmd_encode_text(args) -> int:
     return 0
 
 
-def cmd_encode_queries(args) -> int:
+def cmd_encode_queries(args: argparse.Namespace) -> int:
     import torch
 
     output = Path(args.output_dir).expanduser()
@@ -821,9 +784,6 @@ def cmd_encode_queries(args) -> int:
     )
     print(f"ALL DONE encode_queries — {tuple(emb.shape)} → {content / 'query_emb.pt'}", flush=True)
     return 0
-
-
-# ----- attrs ---------------------------------------------------------------------------------
 
 
 def _lookup(values: np.ndarray, vocab: np.ndarray) -> np.ndarray:
@@ -842,7 +802,7 @@ def earlier_era_slots(era: np.ndarray) -> np.ndarray:
     return np.where(slots < len(ERA_NAMES), slots, -1)
 
 
-def cmd_attrs(args) -> int:
+def cmd_attrs(args: argparse.Namespace) -> int:
     import torch
 
     output = Path(args.output_dir).expanduser()
@@ -941,15 +901,12 @@ def cmd_attrs(args) -> int:
         "target_passes_clause": dict(zip(CLAUSE_NAMES, target_passes, strict=True)),
         "wall_clock_sec": round(time.monotonic() - t0, 1),
     }
-    _merge_log(output, "attrs", log)
+    merge_prep_log(output, "attrs", log)
     print(json.dumps(log, indent=2), flush=True)
     return 0
 
 
-# ----- all -----------------------------------------------------------------------------------
-
-
-def cmd_all(args) -> int:
+def cmd_all(args: argparse.Namespace) -> int:
     for step in (
         cmd_download,
         cmd_convert,
@@ -964,10 +921,7 @@ def cmd_all(args) -> int:
     return 0
 
 
-# ----- main ----------------------------------------------------------------------------------
-
-
-def _add_convert_args(p) -> None:
+def _add_convert_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--files",
         type=str,
@@ -983,7 +937,7 @@ def _add_convert_args(p) -> None:
     p.add_argument("--workers", type=int, default=32)  # fmt: skip
 
 
-def _add_prep_args(p) -> None:
+def _add_prep_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--keep-items",
         type=int,
@@ -994,7 +948,7 @@ def _add_prep_args(p) -> None:
     p.add_argument("--row-group-rows", type=int, default=100_000)  # fmt: skip
 
 
-def _add_encode_args(p) -> None:
+def _add_encode_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--encoder", type=str, default=ENCODER)
     p.add_argument("--description-chars", type=int, default=1500)
     p.add_argument("--max-seq-length", type=int, default=512)

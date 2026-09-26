@@ -23,7 +23,7 @@ import polars as pl
 import pytest
 import torch
 
-from eval_datasets import layout
+from eval_datasets import common, layout
 from eval_datasets.etl import pubmed
 
 # ---------------------------------------------------------------------------
@@ -469,7 +469,7 @@ def test_attrs_without_convert_fails_cleanly(tmp_path):
     ],
 )
 def test_parse_shards(spec, expected):
-    assert pubmed._parse_shards(spec) == expected
+    assert common.parse_ranges(spec, pubmed.N_CHUNKS) == expected
 
 
 def test_clause_layout_is_the_documented_one():
@@ -486,28 +486,28 @@ def test_clause_layout_is_the_documented_one():
 
 def test_select_pmids_is_exact_seeded_and_order_free():
     pmids = np.arange(1_000_000, 1_001_000, dtype=np.int64)
-    keep = pubmed.select_pmids(pmids, 100, seed=0)
+    keep = common.select_pmids(pmids, 100, seed=0)
     assert keep.sum() == 100
     # the same articles whatever the order they are listed in
     perm = np.random.default_rng(1).permutation(pmids.size)
-    keep_perm = pubmed.select_pmids(pmids[perm], 100, seed=0)
+    keep_perm = common.select_pmids(pmids[perm], 100, seed=0)
     assert set(pmids[keep].tolist()) == set(pmids[perm][keep_perm].tolist())
     # a different seed is a different slice; None / oversize keep everything
-    assert set(pmids[pubmed.select_pmids(pmids, 100, seed=1)].tolist()) != set(
+    assert set(pmids[common.select_pmids(pmids, 100, seed=1)].tolist()) != set(
         pmids[keep].tolist()
     )
-    assert pubmed.select_pmids(pmids, None).all() and pubmed.select_pmids(pmids, 5000).all()
+    assert common.select_pmids(pmids, None).all() and common.select_pmids(pmids, 5000).all()
     # spread over the range, not a prefix: both halves are represented
     assert 20 <= (pmids[keep] < 1_000_500).sum() <= 80
     with pytest.raises(ValueError):
-        pubmed.select_pmids(pmids, 0)
+        common.select_pmids(pmids, 0)
 
 
 def test_pmid_hash_is_a_stable_function_of_pmid_and_seed():
-    a = pubmed.pmid_hash(np.array([1, 2, 3], dtype=np.int64), seed=0)
-    b = pubmed.pmid_hash(np.array([1, 2, 3], dtype=np.int64), seed=0)
+    a = common.pmid_hash(np.array([1, 2, 3], dtype=np.int64), seed=0)
+    b = common.pmid_hash(np.array([1, 2, 3], dtype=np.int64), seed=0)
     assert a.dtype == np.uint64 and np.array_equal(a, b) and len(set(a.tolist())) == 3
-    assert not np.array_equal(a, pubmed.pmid_hash(np.array([1, 2, 3], dtype=np.int64), seed=7))
+    assert not np.array_equal(a, common.pmid_hash(np.array([1, 2, 3], dtype=np.int64), seed=7))
 
 
 def _write_two_shards(root, dim=8):
@@ -585,7 +585,7 @@ def test_streaming_convert_keep_items_slices_and_keeps_ids_dense(raw_root, tmp_p
     id_map = json.loads((out / "item_id_map.json").read_text())
     assert len(id_map) == 3 and sorted(id_map.values()) == [1, 2, 3]
     all_pmids = np.array([1000000, 1000001, 1000002, 2000000, 2000001], dtype=np.int64)
-    want = set(all_pmids[pubmed.select_pmids(all_pmids, 3, seed=0)].tolist())
+    want = set(all_pmids[common.select_pmids(all_pmids, 3, seed=0)].tolist())
     assert {int(k) for k in id_map} == want
     index = json.loads((out / "content_d8" / "shard_index.json").read_text())
     assert index["n_items"] == 3 and sum(s["n_rows"] for s in index["shards"]) == 3

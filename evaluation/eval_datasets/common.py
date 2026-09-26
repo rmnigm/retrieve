@@ -1,20 +1,16 @@
-"""Shared numeric helpers across the dataset CLIs.
-
-The arxiv and goodreads CLIs both build a per-target narrow query-attribute
-tensor and a rare-biased wide-shelf sample. The numeric ops are identical;
-only the input vocab and per-clause semantics differ. Keep the math here, the
-domain plumbing in the dataset modules.
-"""
+"""Helpers shared by the dataset ETL modules: attribute synthesis, hash sampling, plumbing."""
 
 from __future__ import annotations
 
+import hashlib
+import json
+from pathlib import Path
+from typing import TYPE_CHECKING
+
 import numpy as np
-import torch
 
-
-def dense_remap_ids(values: list[int], *, start: int = 1) -> dict[int, int]:
-    """Build a 1-indexed (or `start`-indexed) dense int map from sorted unique values."""
-    return {int(v): i + start for i, v in enumerate(values)}
+if TYPE_CHECKING:
+    import torch
 
 
 def synthesize_qa_narrow(
@@ -34,7 +30,7 @@ def synthesize_qa_narrow(
     1-indexed item_id (matching ``item_id_map.json``).
     """
     n_users = len(target_first)
-    qa = torch.full((n_users, n_clauses), -1, dtype=torch.long)
+    qa = narrow_t.new_full((n_users, n_clauses), -1).long()
     for u, tgt in enumerate(target_first):
         if tgt <= 0:
             continue
@@ -107,4 +103,68 @@ def sample_rare_biased_wide(
     return qa_wide_1, qa_wide_2, n_drop_1, n_drop_2
 
 
-__all__ = ["dense_remap_ids", "synthesize_qa_narrow", "sample_rare_biased_wide"]
+def pmid_hash(pmids: np.ndarray, seed: int) -> np.ndarray:
+    """splitmix64's finaliser over the ids, keyed by ``seed`` — a fixed, order-free
+    pseudo-random rank per id (uint64). Used by ``select_pmids``."""
+    with np.errstate(over="ignore"):
+        z = np.asarray(pmids, dtype=np.uint64) + np.uint64(seed + 1) * np.uint64(0x9E3779B97F4A7C15)
+        z = (z ^ (z >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
+        z = (z ^ (z >> np.uint64(27))) * np.uint64(0x94D049BB133111EB)
+        return z ^ (z >> np.uint64(31))
+
+
+def select_pmids(pmids: np.ndarray, keep_items: int | None, seed: int = 0) -> np.ndarray:
+    """``[len(pmids)]`` bool: the ``keep_items`` ids with the smallest ``pmid_hash`` (ties on
+    the id itself), or everything when ``keep_items`` is ``None`` / not smaller than the
+    catalog. The choice depends only on the id set and the seed — not on shard order, chunking
+    or which shards have been fetched — so a resumed or re-sharded run keeps the same items,
+    spread uniformly over the catalog instead of being its oldest prefix."""
+    n = int(pmids.shape[0])
+    if keep_items is None or keep_items >= n:
+        return np.ones(n, dtype=bool)
+    if keep_items <= 0:
+        raise ValueError("keep_items must be positive")
+    order = np.lexsort((pmids, pmid_hash(pmids, seed)))
+    keep = np.zeros(n, dtype=bool)
+    keep[order[:keep_items]] = True
+    return keep
+
+
+def parse_ranges(spec: str | None, n: int) -> list[int]:
+    """``"0-3,7"`` → ``[0, 1, 2, 3, 7]``, sorted and de-duplicated; ``None`` → ``range(n)``."""
+    if not spec:
+        return list(range(n))
+    out: list[int] = []
+    for part in spec.split(","):
+        lo, _, hi = part.strip().partition("-")
+        if lo:
+            out.extend(range(int(lo), int(hi or lo) + 1))
+    return sorted(set(out))
+
+
+def merge_prep_log(output: Path, key: str, payload: dict) -> None:
+    """Set ``key`` in ``output/prep_log.json``, keeping the other steps' entries."""
+    path = output / "prep_log.json"
+    existing = json.loads(path.read_text()) if path.exists() else {}
+    existing[key] = payload
+    path.write_text(json.dumps(existing, indent=2))
+
+
+def file_hexdigest(path: Path, algorithm: str) -> str:
+    """Hex digest of a file, streamed (``hashlib.file_digest`` needs 3.11)."""
+    h = hashlib.new(algorithm)
+    with open(path, "rb") as f:
+        while chunk := f.read(1 << 24):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+__all__ = [
+    "file_hexdigest",
+    "merge_prep_log",
+    "parse_ranges",
+    "pmid_hash",
+    "sample_rare_biased_wide",
+    "select_pmids",
+    "synthesize_qa_narrow",
+]

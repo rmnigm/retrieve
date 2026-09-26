@@ -54,7 +54,8 @@ import statistics
 import time
 import traceback
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -267,18 +268,22 @@ def parity(
 # ----- perf -----------------------------------------------------------------------------------
 
 
+def _call_next(callee: Any, pool: torch.Tensor, counter: Iterator[int]) -> Any:
+    return callee(pool[next(counter) % pool.shape[0]])
+
+
+def _call_next_filtered(
+    callee: Any, pool: torch.Tensor, qa_pool: torch.Tensor, counter: Iterator[int]
+) -> Any:
+    i = next(counter) % pool.shape[0]
+    return callee(pool[i], qa_pool[i])
+
+
 def _rotate(callee: Any, pool: torch.Tensor, qa_pool: torch.Tensor | None) -> Any:
     """The zero-arg call ``measure.latency`` times: the pool rotated round-robin (§2.5)."""
-    counter = itertools.count()
-    n_pool = pool.shape[0]
     if qa_pool is None:
-        return lambda: callee(pool[next(counter) % n_pool])
-
-    def fn():
-        i = next(counter) % n_pool
-        return callee(pool[i], qa_pool[i])
-
-    return fn
+        return partial(_call_next, callee, pool, itertools.count())
+    return partial(_call_next_filtered, callee, pool, qa_pool, itertools.count())
 
 
 def perf(
