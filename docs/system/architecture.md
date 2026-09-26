@@ -633,3 +633,23 @@ stable, so a state dict written by an earlier release loads into the
 current modules ([decisions](../decisions.md#library)); state is added,
 never renamed (the composites' `filter.` prefix,
 `PostfilterKNNInt8.n_items`).
+
+## Which page owns what
+
+One home per fact (AGENTS.md rule 4, [coding guidelines](../contracts/coding-guidelines.md)):
+when a code area's behaviour changes, this is the `docs/system` page to
+update in the same commit.
+
+| code area | page |
+|---|---|
+| `retrieve/src/retrieve/ops/`, kernel internals, the tuner | [kernels.md](kernels.md) |
+| `retrieve/src/retrieve/modules/`, `interfaces.py`, package layout | this page |
+| filter semantics (`modules/filters.py`, clause/bloom predicates) | [filtering.md](filtering.md) |
+| `retrieve/tests/` | [testing.md](testing.md) |
+| `evaluation/bench/` (the harness CLI, `PATHS`, the cell loop) | [evaluation.md](evaluation.md) |
+| `evaluation/eval_datasets/` (ETL, Hub transfer) | [datasets.md](datasets.md) |
+| training (`evaluation/train/`) and checkpoints | [checkpoints.md](checkpoints.md) |
+| disks, venvs, the space budget | [storage.md](storage.md) |
+| standing decisions and constraints (why, not what) | [decisions.md](../decisions.md) |
+| what gates pass and the measured results that stand | [validation.md](../validation.md) |
+| the open work queue | [roadmap.md](../roadmap.md) |

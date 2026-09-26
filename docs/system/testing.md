@@ -67,8 +67,26 @@ retrieve/tests/
     └── test_export_kernel_ref.py   # torch.export preserves the kernel reference (triton_op)
 ```
 
-The parity oracle is the library's own `retrieve.ops.reference` (the
-`"torch"` backend); there is no test-only copy of a reference.
+### Oracle policy
+
+The shared `retrieve.ops.reference` twin (the
+`"torch"` backend) is the default parity oracle — a new parity test
+reaches for it first. A private, test-local oracle (an inlined `_ref`)
+is written only where independence from the shared twin is the point
+(e.g. the test would otherwise route through the very kernel it is
+checking, or it exists to catch a defect the shared twin could share),
+and the test's docstring says why, the way
+[`test_clause_mask.py`](../../retrieve/tests/parity/test_clause_mask.py)
+does ("intentionally materializing the `[B, N, C, A_max]` intermediate
+this kernel exists to avoid"). At the time of writing,
+`test_codesigned_probe_score.py`, `test_codesigned_probe_score_exact.py`,
+`test_compact_order.py` and `test_official.py` import `ops.reference`
+directly; `test_bloom_match.py`, `test_bloom_compact.py`,
+`test_clause_mask.py`, `test_clause_compact.py`,
+`test_fused_masked_knn_topk.py` and `test_oporp_1bit_match_topk.py` carry
+a private `_ref` — bringing the latter group's docstrings up to the
+"say why" half of the policy is unscheduled work, not a claim this page
+makes about them today.
 
 The split is **by purpose**, not by module:
 
@@ -227,10 +245,16 @@ regression rather than accumulator-order noise.
   outputs, compare per-row `set(ids)` (or `valid_id_set`), not
   position-by-position. Tie-breaking on equal scores is implementation-
   specific and is not asserted.
-- **Score tolerance**: `atol=1e-3, rtol=1e-3` for fp32 tile-blocked
-  reductions (`PostfilterKNN` / `PrefilterKNN` paths); strict
-  `torch.equal` only for `OneBitKNN` (popcount is exact by construction)
-  and for path-isolated comparisons on identical reductions.
+- **Score tolerance**: `atol=1e-3, rtol=1e-3` (`assert_topk_id_sets_match`
+  / `assert_topk_matches`) for every cross-backend and kernel-parity
+  comparison, `PostfilterKNN` / `PrefilterKNN` and the bit-KNNs alike —
+  `OneBitKNN`'s popcount is bit-exact, so torch and Triton scores agree
+  exactly in practice, but the test itself does not require exact
+  equality. Strict `torch.equal` is used only for path-isolated
+  comparisons on identical reductions (state-dict round trips, a
+  composite class vs. its hand-composed primitives) and for
+  `clause_mask`'s parity test, which has no compaction-order ambiguity
+  to tolerate.
 - **Module-scope fixtures**: heavy index builds (IVF, LiNR with N>1k)
   use `@pytest.fixture(scope="module")` to amortize across the file.
   Per-test mutation of these fixtures is forbidden.
@@ -417,9 +441,11 @@ LiNR V1, V2, V3, V4 plus `SimHashKNN` in both backends.
   returns ids satisfying the mask; small-batch `_int_mm` padding corner.
 - Cross-backend: torch ↔ Triton return identical valid-id sets per
   row for `PostfilterKNN`, `PrefilterKNN`, `OneBitKNN`, `SimHashKNN`
-  across `pass_rate ∈ {None, 0.01, 0.1, 0.8}`. Sorted scores `allclose`
-  (atol=1e-3) for fp32 paths; **strict equality** for the bit-KNNs
-  (popcount is exact by construction). (For `PostfilterKNNInt8` the
+  across `pass_rate ∈ {None, 0.01, 0.1, 0.8}`, via
+  `assert_topk_id_sets_match` (set + boundary-tie tolerance,
+  `atol=1e-3`) for every one of them — including the bit-KNNs, whose
+  popcount is bit-exact so scores agree exactly in practice, though the
+  assertion itself does not require it. (For `PostfilterKNNInt8` the
   `backend=` flag is a no-op — cuBLAS LtGemm runs the same code on
   both paths.)
 - `PostfilterKNN` (mask path) ≡ `PrefilterKNN` (compact_mask of same
@@ -631,22 +657,24 @@ each of `SilverTorch` (`filter_mode="exact"`), `LiNRV1`–`LiNRV4` (with an
 
 ### [`test_tune_smoke.py`](../../retrieve/tests/correctness/test_tune_smoke.py)
 
-CUDA-gated tuner smoke: `KERNELS` registry covers all eleven kernel
+CUDA-gated tuner smoke: `KERNELS` registry covers all seven kernel
 specs, and each spec's `run(make_inputs(dev, smoke_regime), config)`
 executes one tiny sweep point — schema drift between `ops/tune.py` and the
 kernel `_impl`s breaks CI instead of a tuning session.
 
 ## What each parity file asserts
 
-Each parity file calls one Triton kernel directly and a hand-rolled
-torch reference (`_ref(...)`) on the same inputs, then
-`assert_topk_matches` (set + sorted-score tolerance) — except for
-exact-by-construction kernels, which use stricter assertions.
+Each parity file calls one Triton kernel directly and a reference (the
+shared `ops.reference` twin or a private `_ref(...)`, per the oracle
+policy above) on the same inputs, then `assert_topk_matches` (set +
+sorted-score tolerance, `atol=1e-3, rtol=1e-3`) — except `clause_mask`,
+whose kernel has no compaction-order ambiguity to tolerate and is
+checked with plain `torch.equal` instead.
 
 | File | Kernel | Reference | Notes |
 |------|--------|-----------|-------|
 | [`test_fused_masked_knn_topk.py`](../../retrieve/tests/parity/test_fused_masked_knn_topk.py) | `fused_masked_knn_topk`     | `compact_mask` → gather + bmm + topk         | mirrors `PrefilterKNN._forward_prefilter` |
-| [`test_oporp_1bit_match_topk.py`](../../retrieve/tests/parity/test_oporp_1bit_match_topk.py) | `oporp_1bit_match_topk`     | `popcount_int64(xor).sum(W)` → topk          | popcount is bit-exact by construction (SWAR matches between torch and Triton) |
+| [`test_oporp_1bit_match_topk.py`](../../retrieve/tests/parity/test_oporp_1bit_match_topk.py) | `oporp_1bit_match_topk`     | `popcount_int64(xor).sum(W)` → topk          | popcount is bit-exact by construction (SWAR matches between torch and Triton), but the test still asserts through `assert_topk_matches`'s `1e-3` tolerance rather than `torch.equal` — roadmap Q3 tightens integer-exact paths to `torch.equal`; until then, treat the tolerance as what the test actually checks |
 | [`test_bloom_match.py`](../../retrieve/tests/parity/test_bloom_match.py)                     | `bloom_match`               | `(qb & sigs) == qb` per word, AND-reduced — computed on CPU to keep the test from tautologically routing through the kernel via `BloomFilter.evaluate_mask` | parametrize on `(n, m_bits, k_hash)` |
 | [`test_bloom_compact.py`](../../retrieve/tests/parity/test_bloom_compact.py)                 | `bloom_compact`             | `compact_mask(bloom_match(qb, sigs))` with hand-built `qb` | rows equal in order (the kernel's contract is ascending item order); covers `B=1`, all-inactive query, `N < BLOCK_N`, and a routed-via-`BloomFilter.evaluate_indices` smoke check |
 | [`test_compact_order.py`](../../retrieve/tests/parity/test_compact_order.py)                 | `clause_compact`, `bloom_compact` | `ops.reference.clause_compact` / `bloom_compact` | the determinism gate: ids **and** counts `torch.equal` in order (ascending item order) over `make_exact` × reverse ∈ {none, mixed} × `(C, A_max)` and `make_bloom` × `m_bits` ∈ {256, 512, 1024}, at one tile / many tiles / a ragged last tile; the order holds under three non-default tile configs; and the same call is `torch.equal` ten launches running and in a fresh interpreter |
@@ -681,9 +709,11 @@ exact-by-construction kernels, which use stricter assertions.
 1. One file per kernel, named `test_<kernel_name>.py`.
 2. Import the kernel directly from
    `retrieve.ops.triton.<kernel>` (the file; the package attribute of the
-   same name is the op), and the torch twin from `retrieve.ops.reference`.
-3. Write `_ref(...)` as a pure-torch implementation that does the
-   same computation step by step.
+   same name is the op). Score it against the same-named op in
+   `retrieve.ops.reference` — the default oracle (see the oracle policy
+   above). Write a private `_ref(...)` pure-torch implementation instead
+   only where independence from the shared twin is the point, and say why
+   in the docstring.
 4. Use `from tests.parity.conftest import assert_topk_matches` for the
    assertion; do not write a position-equality assertion for fp32 score
    paths.

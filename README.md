@@ -30,7 +30,7 @@ Source-only distribution — Triton kernels JIT-compile on first call. Requires 
 For working on the library or running the evaluation harness:
 
 ```bash
-uv sync   # from this directory — populates ./.venv with both packages installed editable
+uv sync --extra official --all-packages   # from this directory — populates ./.venv with both packages installed editable, Meta's official extension, and pytest (in the members' dev groups)
 ```
 
 After `uv sync`, run from anywhere in the workspace:
@@ -84,7 +84,8 @@ sync with the code:
 written for someone who installed `torchretrieve` and does not have this repo:
 [getting-started](retrieve/docs/getting-started.md),
 [modules](retrieve/docs/modules.md),
-[filtering-and-quantization](retrieve/docs/filtering-and-quantization.md).
+[filtering-and-quantization](retrieve/docs/filtering-and-quantization.md),
+[indexing-and-ops](retrieve/docs/indexing-and-ops.md).
 
 **Papers** ([`articles/`](articles/)) — pandoc renderings of the three papers
 this repo reproduces or benchmarks against (SilverTorch, LiNR, Yambda). Frozen
