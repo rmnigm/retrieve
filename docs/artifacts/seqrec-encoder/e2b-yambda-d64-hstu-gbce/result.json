@@ -1,0 +1,30 @@
+{
+  "run": "e2b-yambda-d64-hstu-gbce",
+  "status": "stopped during epoch 15 (epochs 0-14 complete) of 100 by user decision (not run to completion)",
+  "wandb": "https://wandb.ai/pinkmeme/seqrec-encoder/runs/0kbrrcwb",
+  "test": {
+    "ndcg@10": 0.029,
+    "ndcg@100": 0.0422,
+    "recall@10": 0.0123,
+    "recall@100": 0.0658,
+    "coverage@10": 0.0003
+  },
+  "delta_vs_bar": {
+    "ndcg@10": -0.0556,
+    "recall@100": -0.0905
+  },
+  "bar": {
+    "ndcg@10": 0.0846,
+    "recall@100": 0.1563
+  },
+  "best_epoch": 13,
+  "best_val_ndcg@10": 0.0301,
+  "epochs_run": 15,
+  "epoch_time_median_s": 41.1,
+  "first_epoch_s": 51.9,
+  "samples_per_s": 2193,
+  "peak_gpu_mem_gb": 11.6,
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "sm_mhz": "1980 (nvidia-smi spot checks; train_metrics.json not written)",
+  "wall": "14:31:33 -> 14:43:49 UTC, ~12 min to the stop"
+}
