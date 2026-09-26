@@ -248,8 +248,9 @@ Nine files under [`evaluation/config/`](../../evaluation/config/):
 [`arxiv.yaml`](../../evaluation/config/arxiv.yaml),
 [`yambda-500m.yaml`](../../evaluation/config/yambda-500m.yaml),
 [`yambda-5b.yaml`](../../evaluation/config/yambda-5b.yaml),
-[`yfcc10m.yaml`](../../evaluation/config/yfcc10m.yaml) (in the `filter`
-suite), [`pubmed.yaml`](../../evaluation/config/pubmed.yaml),
+[`yfcc10m.yaml`](../../evaluation/config/yfcc10m.yaml) and
+[`pubmed.yaml`](../../evaluation/config/pubmed.yaml) (both in the `filter`
+suite; pubmed at 768), and
 [`kuairand.yaml`](../../evaluation/config/kuairand.yaml) and
 [`openalex.yaml`](../../evaluation/config/openalex.yaml)
 (in no suite yet) and
@@ -292,8 +293,8 @@ raise `ConfigError` naming the file.
 ```yaml
 # config/suites.yaml — a suite = cells run on every listed dataset × its dims
 filter:
-  datasets: [goodreads, arxiv, yfcc10m]
-  dims: [128, 192]                  # optional; default: the dataset's dims (yfcc10m is 192 only)
+  datasets: [goodreads, arxiv, yfcc10m, pubmed]
+  dims: [128, 192, 768]             # optional; default: the dataset's dims (yfcc10m 192, pubmed 768 only)
   filter_kinds: [clause, bloom]     # none | clause | bloom
   ks: [100, 500, 1000]
   batch_sizes: [1, 8, 16]

@@ -48,7 +48,7 @@ def test_clause_compact_order_matches_reference(n, reverse, c, a_max):
 @pytest.mark.parametrize("n", _NS)
 @pytest.mark.parametrize("m_bits", [256, 512, 1024])
 def test_bloom_compact_order_matches_reference(n, m_bits):
-    sigs, qb = make_bloom(n, 8, m_bits=m_bits)
+    *_, sigs, qb = make_bloom(n, 8, m_bits=m_bits)
     assert_compact_equal(bloom_compact(qb, sigs), reference.bloom_compact(qb, sigs))
 
 
@@ -59,7 +59,7 @@ def test_order_holds_under_every_tile_config(block_n, num_warps):
     assert_compact_equal(
         _clause_compact_impl(attrs, rev, q, config=cfg), reference.clause_compact(attrs, rev, q)
     )
-    sigs, qb = make_bloom(20_011, 4, m_bits=1024)
+    *_, sigs, qb = make_bloom(20_011, 4, m_bits=1024)
     cfg = BloomCompactConfig(block_n, num_warps)
     assert_compact_equal(
         _bloom_compact_impl(qb, sigs, config=cfg), reference.bloom_compact(qb, sigs)
@@ -69,7 +69,7 @@ def test_order_holds_under_every_tile_config(block_n, num_warps):
 _INPUTS = """
 from tests.parity.conftest import make_bloom, make_exact
 attrs, rev, q = make_exact(200_003, 8, c=4, a_max=4, reverse="mixed")
-sigs, qb = make_bloom(200_003, 8, m_bits=1024)
+*_, sigs, qb = make_bloom(200_003, 8, m_bits=1024)
 """
 
 _FRESH_PROCESS = f"""
@@ -90,7 +90,7 @@ def test_launch_to_launch_identity(tmp_path):
     first = (clause_compact(attrs, rev, q), bloom_compact(qb, sigs))
     for _ in range(9):
         again = (clause_compact(attrs, rev, q), bloom_compact(qb, sigs))
-        for a, b in zip(first, again):
+        for a, b in zip(first, again, strict=True):
             assert torch.equal(a[0], b[0]) and torch.equal(a[1], b[1])
 
     out = tmp_path / "fresh.pt"
@@ -100,5 +100,5 @@ def test_launch_to_launch_identity(tmp_path):
         cwd=Path(__file__).resolve().parents[2],
     )
     fresh = torch.load(out)
-    for a, b in zip(first, fresh):
+    for a, b in zip(first, fresh, strict=True):
         assert torch.equal(a[0], b[0]) and torch.equal(a[1], b[1])

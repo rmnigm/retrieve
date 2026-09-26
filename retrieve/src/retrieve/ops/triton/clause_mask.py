@@ -17,10 +17,9 @@ from torch.library import triton_op, wrap_triton
 # namespace from the JITFunction's globals and captures @triton.jit callees
 # by name. A module object is not captured, so `clause_pass(...)`
 # raises NameError('common is not defined') at ast_to_ttir time — eager
-# Triton resolves the attribute and never sees it. Found by A1's golden run,
-# 2026-09-06; this is what handoff step 4's compile gate exists to catch.
-from retrieve.ops.triton._host import grid_batch_tiles
-from retrieve.ops.triton.common import clause_pass
+# Triton resolves the attribute and never sees it (tests/compile catches it).
+from retrieve.ops.triton._host import check_contiguous, grid_batch_tiles, wide
+from retrieve.ops.triton.common import clause_pass, row_base, tile_rows
 
 
 @dataclass(frozen=True)
@@ -53,23 +52,22 @@ def _clause_mask_kernel(
     stride_ob,
     stride_on,
     BLOCK_N: tl.constexpr,
+    WIDE: tl.constexpr,
 ):
-    # 3D grid: batch on grid_x (L2 reuse on item_attrs), tiles split across grid_y × grid_z to dodge
-    # the 65535 single-axis cap; tile_id = tile_x * tiles_y + tile_y keeps tiles contiguous.
     bid = tl.program_id(0)
-    tile_y = tl.program_id(1)
-    tile_x = tl.program_id(2)
-    tile_id = tile_x * tiles_y + tile_y
-
-    n_offsets = tile_id * BLOCK_N + tl.arange(0, BLOCK_N)
+    tile_id = tl.program_id(2) * tiles_y + tl.program_id(1)
+    row0 = tile_id * BLOCK_N
+    lane = tl.arange(0, BLOCK_N)
+    n_offsets = row0 + lane
     n_valid = n_offsets < N
 
     # Result is already ANDed with n_valid inside the helper (keep seeds from load_mask).
+    attrs_base, ids = tile_rows(item_attrs_ptr, row0, lane, stride_in, WIDE)
     pass_mask = clause_pass(
-        item_attrs_ptr,
+        attrs_base,
         is_reverse_ptr,
         query_attrs_ptr,
-        n_offsets,
+        ids,
         n_valid,
         bid,
         stride_in,
@@ -82,9 +80,7 @@ def _clause_mask_kernel(
     )
 
     tl.store(
-        out_ptr + bid * stride_ob + n_offsets * stride_on,
-        pass_mask,
-        mask=n_valid,
+        row_base(out_ptr, bid, stride_ob, WIDE) + n_offsets * stride_on, pass_mask, mask=n_valid
     )
 
 
@@ -114,7 +110,7 @@ def _clause_mask_prep(
     if c != c_q:
         raise ValueError(f"clause-count mismatch: items C={c}, query C={c_q}")
 
-    item_clause_attrs = item_clause_attrs.contiguous()
+    check_contiguous(item_clause_attrs=item_clause_attrs)
     clause_is_reverse = clause_is_reverse.contiguous().to(torch.int8)
     query_clause_attrs = query_clause_attrs.contiguous()
 
@@ -122,26 +118,27 @@ def _clause_mask_prep(
 
     grid, tiles_y = grid_batch_tiles(b, n, cfg.block_n)
 
-    kwargs = dict(
-        item_attrs_ptr=item_clause_attrs,
-        is_reverse_ptr=clause_is_reverse,
-        query_attrs_ptr=query_clause_attrs,
-        out_ptr=out,
-        N=n,
-        tiles_y=tiles_y,
-        C=c,
-        A_MAX=a_max,
-        stride_in=item_clause_attrs.stride(0),
-        stride_ic=item_clause_attrs.stride(1),
-        stride_ia=item_clause_attrs.stride(2),
-        stride_qb=query_clause_attrs.stride(0),
-        stride_qc=query_clause_attrs.stride(1),
-        stride_ob=out.stride(0),
-        stride_on=out.stride(1),
-        BLOCK_N=cfg.block_n,
-        num_warps=cfg.num_warps,
-        num_stages=cfg.num_stages,
-    )
+    kwargs = {
+        "item_attrs_ptr": item_clause_attrs,
+        "is_reverse_ptr": clause_is_reverse,
+        "query_attrs_ptr": query_clause_attrs,
+        "out_ptr": out,
+        "N": n,
+        "tiles_y": tiles_y,
+        "C": c,
+        "A_MAX": a_max,
+        "stride_in": item_clause_attrs.stride(0),
+        "stride_ic": item_clause_attrs.stride(1),
+        "stride_ia": item_clause_attrs.stride(2),
+        "stride_qb": query_clause_attrs.stride(0),
+        "stride_qc": query_clause_attrs.stride(1),
+        "stride_ob": out.stride(0),
+        "stride_on": out.stride(1),
+        "BLOCK_N": cfg.block_n,
+        "WIDE": wide(item_clause_attrs, out),
+        "num_warps": cfg.num_warps,
+        "num_stages": cfg.num_stages,
+    }
     return _ClauseMaskLaunch(grid, kwargs, out)
 
 

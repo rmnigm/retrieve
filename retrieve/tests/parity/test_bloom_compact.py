@@ -21,6 +21,7 @@ from retrieve.ops.triton.bloom_compact import (
 )
 from retrieve.ops.triton.bloom_match import bloom_match
 from tests.conftest import make_attrs, make_query_attrs
+from tests.parity.conftest import poison_empty
 
 
 def _build_qb(bf: BloomFilter, q: torch.Tensor) -> torch.Tensor:
@@ -141,3 +142,19 @@ def test_bloom_compact_config_override(block_n, num_warps):
     ref_mask = bloom_match(qb, bf.bloom_sigs)
     ref_ids, ref_counts = compact_mask(ref_mask)
     _rows_equal(out_ids, out_counts, ref_ids, ref_counts)
+
+
+def test_bloom_compact_writes_every_slot(monkeypatch):
+    """The output is ``torch.empty``: every slot must come back as a real id or ``-1`` — a
+    poisoned allocation proves the scatter kernel wrote the tail itself."""
+    n, b = 1000, 4
+    bf = BloomFilter(m_bits=256, k_hash=3).to("cuda")
+    bf.register_index(make_attrs(n, c=2, a_max=2, n_vocab=10, seed=11))
+    qb = _build_qb(bf, make_query_attrs(b=b, c=2, n_vocab=10, seed=12))
+    ref_ids, ref_counts = compact_mask(bloom_match(qb, bf.bloom_sigs))
+    hits = poison_empty(monkeypatch, (b, n), torch.int64, 123_456_789)
+    ids, counts = bloom_compact(qb, bf.bloom_sigs)
+    assert hits
+    width = torch.arange(n, device="cuda")[None, :] < ref_counts[:, None]
+    assert torch.equal(counts, ref_counts)
+    assert torch.equal(ids, torch.where(width, ref_ids, -1))

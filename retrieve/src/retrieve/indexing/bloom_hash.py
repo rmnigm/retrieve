@@ -9,6 +9,8 @@ bit-valid across refactors, so any change here invalidates every stored index.
 
 from __future__ import annotations
 
+import math
+
 import torch
 from torch import Tensor
 
@@ -18,6 +20,18 @@ _SALT_C1 = 0x9E3779B97F4A7C15 - (1 << 64)
 _SALT_C2 = 0xBF58476D1CE4E5B9 - (1 << 64)
 
 _BUILD_SIGS_BATCH = 131072  # rows per chunk; bounds peak alloc to ~B*word_count*64*8 bytes
+
+
+def check_bloom_params(m_bits: int | None, k_hash: int) -> None:
+    """The bloom boundary check shared by ``BloomFilter`` and ``SilverTorch`` (``m_bits=None``:
+    the official backend sizes its own index)."""
+    if m_bits is not None:
+        if m_bits <= 0 or (m_bits & (m_bits - 1)) != 0:
+            raise ValueError(f"m_bits must be a positive power of 2, got {m_bits}")
+        if m_bits % 64 != 0:
+            raise ValueError(f"m_bits must be a multiple of 64, got {m_bits}")
+    if k_hash <= 0:
+        raise ValueError(f"k_hash must be positive, got {k_hash}")
 
 
 def generate_seeds(k_hash: int, device: torch.device) -> Tensor:
@@ -86,6 +100,24 @@ def _resolve_clause_salt(
     return _expand_clause_salt(clause_salt, c_dim, a_max)
 
 
+def _bit_positions(
+    flat: Tensor,
+    seeds: Tensor,
+    m_bits: int,
+    k_hash: int,
+    clause_salt: Tensor,
+) -> Tensor:
+    """Hash + salt of one ``[b, C*A]`` slab → ``[b, C*A, k_hash]`` bit positions in
+    ``[0, m_bits)``. Keying is by ``(clause_idx, value)``: the per-clause salt namespaces the
+    hash by feature key (paper eq. 3) — without it, value V in any clause collides with V in
+    another clause, a documented false-positive leak (see kernels.md → bloom_match)."""
+    seed_c1 = seeds[:, 0].view(1, 1, k_hash)
+    seed_c2 = seeds[:, 1].view(1, 1, k_hash)
+    h = _mix64(flat.unsqueeze(-1) + seed_c1, seed_c1, seed_c2)
+    h = h ^ clause_salt
+    return h & (m_bits - 1)
+
+
 def _signature_batch(
     flat: Tensor,
     valid: Tensor,
@@ -95,24 +127,12 @@ def _signature_batch(
     word_count: int,
     clause_salt: Tensor,
 ) -> Tensor:
-    """Hash + salt + scatter + word-pack for one ``[b, C*A]`` slab → ``[b, W]``.
-
-    The shared core of the two builders below. Keying is by ``(clause_idx, value)``:
-    the per-clause salt namespaces the hash by feature key (paper eq. 3) — without
-    it, value V in any clause collides with V in another clause, a documented
-    false-positive leak (see kernels.md → bloom_match). Padding (``-1``, via
-    ``valid``) is detected before keying, so the ``m_bits`` sentinel sink is
-    unaffected.
-    """
+    """``_bit_positions`` scattered and word-packed for one ``[b, C*A]`` slab → ``[b, W]``; the
+    shared core of the two builders below. Padding (``-1``, via ``valid``) goes to the
+    ``m_bits`` sentinel column, which the pack drops."""
     b = flat.shape[0]
-    seed_c1 = seeds[:, 0].view(1, 1, k_hash)
-    seed_c2 = seeds[:, 1].view(1, 1, k_hash)
     shifts = torch.arange(64, dtype=torch.int64, device=flat.device)
-
-    h = _mix64(flat.unsqueeze(-1) + seed_c1, seed_c1, seed_c2)
-    h = h ^ clause_salt
-    positions = h & (m_bits - 1)
-    flat_pos = positions.reshape(b, -1)
+    flat_pos = _bit_positions(flat, seeds, m_bits, k_hash, clause_salt).reshape(b, -1)
     valid_expanded = valid.unsqueeze(-1).expand(-1, -1, k_hash).reshape(b, -1)
     safe_pos = torch.where(valid_expanded, flat_pos, torch.full_like(flat_pos, m_bits))
     bit_grid = torch.zeros(b, m_bits + 1, dtype=torch.bool, device=flat.device)
@@ -137,9 +157,7 @@ def build_signatures(
     alongside the index. ``clause_salt`` is the ``[C]`` buffer from
     :func:`generate_clause_salt`; ``None`` derives it on the fly (same bits)."""
     leading = attrs.shape[:-2]
-    n = 1
-    for d in leading:
-        n *= d
+    n = math.prod(leading)
     c_dim = attrs.shape[-2]
     a_max = attrs.shape[-1]
 
@@ -171,9 +189,7 @@ def build_query_signatures(
     peak alloc is fine. Pass the module's ``clause_salt`` buffer so the forward
     is free of host→device copies (see :func:`generate_clause_salt`)."""
     leading = attrs.shape[:-2]
-    n = 1
-    for d in leading:
-        n *= d
+    n = math.prod(leading)
     c_dim = attrs.shape[-2]
     a_max = attrs.shape[-1]
 
@@ -185,47 +201,39 @@ def build_query_signatures(
     return out.reshape(out_shape) if leading else out.reshape(word_count)
 
 
-def words_per_cluster(max_size: int) -> int:
-    """Index words per cluster span in the transposed bloom layout: each cluster occupies
-    ``ceil(max_size / 64)`` int64 words, so spans stay word-aligned."""
-    return (max_size + 63) // 64
+def build_query_bit_positions(
+    query_attrs: Tensor,
+    seeds: Tensor,
+    m_bits: int,
+    k_hash: int,
+    *,
+    clause_salt: Tensor | None = None,
+) -> Tensor:
+    """``[B, C]`` query attrs (``-1`` inactive) → ``[B, C * k_hash]`` int64 set-bit positions of
+    the query signature, ``-1`` for an inactive clause's slots: the input of the transposed
+    bloom scorer. Scattering the non-negative positions reproduces
+    ``build_query_signatures`` bit for bit (same ``_bit_positions``; duplicates are harmless,
+    the subset test is an AND). Loop-free, like the signature builder."""
+    b, c_dim = query_attrs.shape
+    salt = _resolve_clause_salt(clause_salt, c_dim, 1, query_attrs.device)
+    pos = _bit_positions(query_attrs, seeds, m_bits, k_hash, salt)  # [B, C, k_hash]
+    pos = torch.where((query_attrs != -1).unsqueeze(-1), pos, -1)
+    return pos.reshape(b, c_dim * k_hash)
 
 
-def build_transposed_sigs(bloom_sigs: Tensor, padded_cluster_items: Tensor) -> Tensor:
-    """Rotate a row-wise bloom index into the transposed, cluster-major layout of the paper's
-    "rotate the matrix" phase 2 (SilverTorch §Bloom Index): a kernel walks only the set bits
-    of the query signature and tests 64 items per int64 word.
-
-    Row ``m`` of the result is a bit-vector over padded IVF slots: bit ``s % 64`` of word
-    ``c * wpc + s // 64`` is bit ``m`` of ``bloom_sigs[padded_cluster_items[c, s]]`` (0 for
-    ``-1`` padding). Shape ``[m_bits, n_lists * wpc]`` int64 with
-    ``wpc = words_per_cluster(max_size)``; every cluster is a contiguous, word-aligned span.
-    Kept here (the hash math's home) for the Triton transposed-bloom kernel planned in
-    docs/plans/silvertorch-official-integration.md §8 TF-1; no shipped backend reads it today.
-
-    Host-side, one-time at ``register_index``. Costs ``m_bits`` iterations of a few small
-    GPU ops each (1024 at the default ``m_bits``)."""
-    if bloom_sigs.dim() != 2 or padded_cluster_items.dim() != 2:
-        raise ValueError("bloom_sigs must be [N, W] and padded_cluster_items [n_lists, max_size]")
-    n_lists, max_size = padded_cluster_items.shape
-    w = bloom_sigs.shape[1]
-    wpc = words_per_cluster(max_size)
-    device = bloom_sigs.device
-
-    valid = padded_cluster_items >= 0
-    safe = padded_cluster_items.clamp_min(0)
-    shifts = torch.arange(64, device=device, dtype=torch.int64)
-    pad_tail = wpc * 64 - max_size
-
-    out = torch.empty(w * 64, n_lists * wpc, dtype=torch.int64, device=device)
-    zero = torch.zeros((), dtype=torch.int64, device=device)
+def build_transposed_sigs(sorted_sigs: Tensor) -> Tensor:
+    """Rotate a row-wise ``[N, W]`` bloom index, rows in cluster-sorted order, into the
+    transposed index of the paper's "rotate the matrix" phase 2 (SilverTorch §Bloom Index):
+    ``[W * 64, ceil(N / 64)]`` int64, bit ``s % 64`` of word ``s // 64`` of row ``m`` is bit
+    ``m`` of ``sorted_sigs[s]``. A query reads one word per set bit per 64 items instead of a
+    ``W``-word row per item. Chunked over words; build-time only."""
+    n, w = sorted_sigs.shape
+    n_words = (n + 63) // 64
+    shifts = torch.arange(64, device=sorted_sigs.device, dtype=torch.int64)
+    padded = torch.zeros(n_words * 64, w, dtype=torch.int64, device=sorted_sigs.device)
+    padded[:n] = sorted_sigs
+    out = torch.empty(w * 64, n_words, dtype=torch.int64, device=sorted_sigs.device)
     for word in range(w):
-        # Per-slot signature word, cluster-major; padding slots contribute 0 bits.
-        slot_words = torch.where(valid, bloom_sigs[:, word][safe], zero)
-        for j in range(64):
-            bits = (slot_words >> j) & 1  # [n_lists, max_size]
-            if pad_tail:
-                bits = torch.nn.functional.pad(bits, (0, pad_tail))
-            packed = (bits.view(n_lists, wpc, 64) << shifts).sum(dim=-1)
-            out[word * 64 + j] = packed.reshape(-1)
+        bits = (padded[:, word].unsqueeze(0) >> shifts.unsqueeze(1)) & 1  # [64 (m), N_pad]
+        out[word * 64 : (word + 1) * 64] = (bits.view(64, n_words, 64) << shifts).sum(-1)
     return out

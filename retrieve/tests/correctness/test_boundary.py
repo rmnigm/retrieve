@@ -20,8 +20,8 @@ from retrieve import (
     LiNRV4,
     SilverTorch,
     SilverTorchBuilder,
+    modules as modules_pkg,
 )
-from retrieve import modules as modules_pkg
 from retrieve.interfaces import DISPATCH
 from tests.conftest import make_attrs, make_index, make_query, make_query_attrs, require_official
 from tests.parity.conftest import assert_ids_equal_up_to_ties
@@ -130,7 +130,7 @@ class TestPerClass:
         twin = _builder(cls, backend).set_state_dict(src.state_dict()).build()
         fresh = _build(cls, backend, data)
         assert list(twin.state_dict()) == list(fresh.state_dict())
-        for (name, a), (_, b) in zip(fresh.named_buffers(), twin.named_buffers()):
+        for (name, a), (_, b) in zip(fresh.named_buffers(), twin.named_buffers(), strict=True):
             assert torch.equal(a, b), name
         ids_f, sc_f = fresh(data["query"], data["q_attrs"])
         ids_t, sc_t = twin(data["query"], data["q_attrs"])
@@ -166,10 +166,9 @@ def test_dispatch_names_every_class_and_backend():
 class TestQueryParams:
     def test_silvertorch_n_probe_revalidates(self, data):
         m = _build(SilverTorch, "torch", data)
-        max_size = m._max_cluster_size
         with pytest.raises(ValueError, match="cannot exceed n_lists"):
             m.set_query_params(n_probe=9)
-        m.k = 8 * max_size + 1
+        m.k = int(m.cluster_sizes.topk(8).values.sum()) + 1  # one past the 8-probe width
         with pytest.raises(ValueError, match="probe pool"):
             m.set_query_params(n_probe=8)
         m.k = K

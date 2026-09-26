@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import argparse
 import gzip
-import hashlib
 import json
 import re
 import sys
@@ -48,7 +47,7 @@ import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from eval_datasets.common import sample_rare_biased_wide, synthesize_qa_narrow
+from eval_datasets.common import file_hexdigest, sample_rare_biased_wide, synthesize_qa_narrow
 from eval_datasets.timesplit import sequential_split_train_val_test
 
 ROOT = Path.home() / "datasets" / "goodreads-ucsd"
@@ -166,17 +165,6 @@ def download_one(url: str, dest: Path, *, retries: int = 5) -> int:
     return dest.stat().st_size
 
 
-def sha256_of(path: Path, chunk: int = 1 << 20) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        while True:
-            b = f.read(chunk)
-            if not b:
-                break
-            h.update(b)
-    return h.hexdigest()
-
-
 def cmd_download(args) -> int:
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     files = args.files or DOWNLOAD_FILES
@@ -190,7 +178,7 @@ def cmd_download(args) -> int:
         if dest.exists() and not args.force:
             expected = http_size(url)
             if expected is None or size == expected:
-                sha = sha256_of(dest)
+                sha = file_hexdigest(dest, "sha256")
                 manifest_lines.append(f"{name}  {size}  {sha}")
                 print(f"SKIP [{i}/{len(files)}] {name} ({fmt(size)})", flush=True)
                 continue
@@ -201,7 +189,7 @@ def cmd_download(args) -> int:
         except Exception as e:
             print(f"ERROR [{i}/{len(files)}] {name}: {e}", flush=True)
             continue
-        sha = sha256_of(dest)
+        sha = file_hexdigest(dest, "sha256")
         manifest_lines.append(f"{name}  {size}  {sha}")
         print(
             f"DONE [{i}/{len(files)}] {name} {fmt(size)} in " f"{time.monotonic() - t0:.0f}s",

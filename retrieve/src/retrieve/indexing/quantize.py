@@ -14,23 +14,46 @@ def quantize_int8(embs: Tensor) -> tuple[Tensor, Tensor]:
     return codes, scales
 
 
-def quantize_int8_global_codes(embs: Tensor) -> Tensor:
-    """The codes of :func:`quantize_int8_global` without its scale — no host sync, so
-    ``PostfilterKNNInt8`` can quantize the query batch on the forward path (its int32 dot is
-    rank-preserving, so the scale is never needed)."""
-    abs_max = embs.abs().amax().clamp(min=1e-8)
+_CODE_CHUNK_ROWS = 1 << 16  # build-time quantization chunk: 256 MiB of fp32 at D = 1024
+
+
+def _abs_max(embs: Tensor) -> Tensor:
+    """``embs.abs().amax()`` without the ``[N, D]`` ``abs`` temporary: ``max(amax, -amin)`` is
+    the same value bit for bit (negation is exact)."""
+    return torch.maximum(embs.amax(), -embs.amin()).clamp(min=1e-8)
+
+
+def _codes(embs: Tensor, abs_max: Tensor) -> Tensor:
     return (embs / abs_max * 127.0).round().clamp(-128, 127).to(torch.int8)
 
 
-def quantize_int8_global(embs: Tensor) -> tuple[Tensor, float]:
+def quantize_int8_global_codes(embs: Tensor) -> Tensor:
+    """The codes of :func:`quantize_int8_global` without its scale — no host sync and no Python
+    loop, so ``PostfilterKNNInt8`` can quantize the query batch on the forward path (its int32
+    dot is rank-preserving, so the scale is never needed)."""
+    return _codes(embs, _abs_max(embs))
+
+
+def quantize_int8_global(embs: Tensor, rows: Tensor | None = None) -> tuple[Tensor, float]:
     """Symmetric per-tensor INT8 quantization (SilverTorch paper §4.2): one global scalar scale, so
     the kernel does one scalar multiply per item at the cost of coarser reconstruction than the
     per-row ``quantize_int8``.
 
+    Build-time: the codes are written chunk by chunk into the ``[N, D]`` int8 output, so the
+    transient is one chunk rather than two fp32 copies of the table (a 10M × 768 fp32 index is
+    28.6 GiB; two more copies do not fit on an 80 GB card). Bit-identical to
+    ``quantize_int8_global_codes``: the same elementwise formula against the same ``abs_max``.
+    ``rows`` (a permutation, e.g. SilverTorch's ``sort_perm``) writes the codes of
+    ``embs[rows]`` — the same codes, reordered, without a second int8 table.
+
     Returns (codes [N, D] int8, scale float); embs ≈ codes.float() * scale."""
-    abs_max = embs.abs().amax().clamp(min=1e-8)
-    scale = float((abs_max / 127.0).item())
-    return quantize_int8_global_codes(embs), scale
+    abs_max = _abs_max(embs)
+    codes = torch.empty(embs.shape, dtype=torch.int8, device=embs.device)
+    for start in range(0, embs.shape[0], _CODE_CHUNK_ROWS):
+        stop = start + _CODE_CHUNK_ROWS
+        chunk = embs[start:stop] if rows is None else embs[rows[start:stop]]
+        codes[start:stop] = _codes(chunk, abs_max)
+    return codes, float((abs_max / 127.0).item())
 
 
 def _build_oporp(d: int, seed: int, device: torch.device) -> tuple[Tensor, Tensor]:
@@ -46,8 +69,6 @@ def _pack_signs_to_int64(values: Tensor) -> Tensor:
 
     Bit ``b`` of word ``w`` is set iff ``values[..., 64*w + b] > 0``."""
     *prefix, d = values.shape
-    if d % 64 != 0:
-        raise ValueError(f"projected dim must be a multiple of 64, got {d}")
     w = d // 64
     bits = (values > 0).to(torch.int64)
     bits = bits.reshape(*prefix, w, 64)
@@ -65,7 +86,7 @@ def _oporp_project(x: Tensor, signs: Tensor, perm: Tensor, k_bits: int) -> Tenso
     if d % k_bits != 0:
         raise ValueError(f"k_bits must divide D; got k_bits={k_bits}, D={d}")
     if k_bits % 64 != 0:
-        raise ValueError(f"k_bits must be a multiple of 64, got {k_bits}")
+        raise ValueError(f"k_bits (D when 0) must be a multiple of 64, got {k_bits}")
     bin_w = d // k_bits
     proj = (x * signs.to(x.dtype)).index_select(1, perm)
     binned = proj.view(b_or_n, k_bits, bin_w).sum(dim=-1)
@@ -85,10 +106,7 @@ def quantize_oporp_1bit(
     2*popcount(q ^ item)."""
     if embs.dim() != 2:
         raise ValueError(f"expected 2-D [N, D] embeddings, got shape {tuple(embs.shape)}")
-    d = embs.shape[1]
-    if d % 64 != 0:
-        raise ValueError(f"D must be a multiple of 64 for 1-bit packing, got {d}")
-    signs, perm = _build_oporp(d, seed, embs.device)
+    signs, perm = _build_oporp(embs.shape[1], seed, embs.device)
     return _oporp_project(embs, signs, perm, k_bits), signs, perm
 
 

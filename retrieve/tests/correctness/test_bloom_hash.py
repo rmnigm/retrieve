@@ -11,17 +11,16 @@ import torch
 
 from retrieve.indexing import bloom_hash
 from retrieve.indexing.bloom_hash import (
+    build_query_bit_positions,
     build_query_signatures,
     build_signatures,
     build_transposed_sigs,
     generate_clause_salt,
     generate_seeds,
-    words_per_cluster,
 )
 from retrieve.modules import BloomFilter
 from retrieve.modules.silvertorch import SilverTorchBuilder
 from tests.conftest import make_attrs, make_index, make_query_attrs
-from tests.parity.conftest import make_probe_family
 
 M_BITS, K_HASH = 512, 5
 WORD_COUNT = M_BITS // 64
@@ -146,42 +145,61 @@ def test_clause_salt_registered_as_buffer_and_moves_with_module():
     assert torch.equal(bf_back.evaluate_mask(q), mask_before)
 
     embs = make_index(256, 64)
-    kw = dict(k=8, n_lists=8, n_probe=4, n_iter=2)
+    kw = {"k": 8, "n_lists": 8, "n_probe": 4, "n_iter": 2}
     kw.update(filter_mode="bloom", m_bits=M_BITS, k_hash=K_HASH)
     st = SilverTorchBuilder(**kw).set_item_embeddings(embs).set_item_attributes(attrs).build()
     assert "clause_salt" in st.state_dict()
     assert torch.equal(st.clause_salt, bf.clause_salt.cuda())
-    assert torch.equal(st._query_bits(q), expected_q)
+    assert torch.equal(_pack_positions(st._query_bit_positions(q)), expected_q)
     # Registered without attributes → empty salt, derived on the fly at query time.
     st_noattr = SilverTorchBuilder(**kw).set_item_embeddings(embs).build()
     assert st_noattr.clause_salt.numel() == 0
-    assert torch.equal(st_noattr._query_bits(q), expected_q)
+    assert torch.equal(_pack_positions(st_noattr._query_bit_positions(q)), expected_q)
+
+
+def _pack_positions(pos: torch.Tensor, m_bits: int = M_BITS) -> torch.Tensor:
+    """``[B, n]`` set-bit positions (``-1`` = none) → ``[B, m_bits // 64]`` packed signature, by a
+    scatter independent of ``bloom_hash``'s own pack."""
+    b = pos.shape[0]
+    grid = torch.zeros(b, m_bits + 1, dtype=torch.bool, device=pos.device)
+    grid.scatter_(1, torch.where(pos >= 0, pos, m_bits), True)
+    shifts = torch.arange(64, device=pos.device)
+    return (grid[:, :m_bits].view(b, m_bits // 64, 64).long() << shifts).sum(-1)
+
+
+def test_query_bit_positions_are_the_query_signature():
+    """``build_query_bit_positions`` scattered is ``build_query_signatures`` bit for bit, with
+    ``-1`` exactly at the slots of inactive (``-1``) clauses; the transposed scorer reads these
+    positions instead of the packed signature."""
+    q = make_query_attrs(b=32, c=3, inactive_rate=0.3, seed=96)
+    seeds = generate_seeds(K_HASH, torch.device("cuda"))
+    salt = generate_clause_salt(3, torch.device("cuda"))
+    pos = build_query_bit_positions(q, seeds, M_BITS, K_HASH, clause_salt=salt)
+    assert pos.shape == (32, 3 * K_HASH)
+    inactive = (q == -1).repeat_interleave(K_HASH, dim=1)
+    assert torch.equal(pos < 0, inactive)
+    expected = build_query_signatures(
+        q.unsqueeze(-1), seeds, M_BITS, K_HASH, WORD_COUNT, clause_salt=salt
+    )
+    assert torch.equal(_pack_positions(pos), expected)
 
 
 def test_build_transposed_sigs_bits():
-    """Bit-level roundtrip of the transposed (cluster-major) index: for every (cluster,
-    slot), row m of ``sigs_t`` carries exactly bit m of the slot item's row-wise
-    signature (0 for padding slots). No shipped backend reads this layout since roadmap
-    B4; it is kept for the Triton transposed-bloom kernel (O §8 TF-1)."""
-    n_lists, max_size, w = 8, 90, 4  # non-multiple-of-64 max_size exercises the pad tail
-    padded, _, _, n = make_probe_family(1, n_lists, max_size, 1, pad_rate=0.2)
+    """Bit-level roundtrip of the transposed index: bit ``s % 64`` of word ``s // 64`` of row
+    ``m`` is bit ``m`` of ``sigs[s]``, and the pad past ``N`` (a non-multiple of 64) is 0."""
+    n, w = 200, 4
     g = torch.Generator(device="cuda").manual_seed(3)
     ii = torch.iinfo(torch.int64)
     sigs = torch.randint(ii.min, ii.max, (n, w), generator=g, dtype=torch.int64, device="cuda")
 
-    sigs_t = build_transposed_sigs(sigs, padded)
-    wpc = words_per_cluster(max_size)
-    assert sigs_t.shape == (w * 64, n_lists * wpc)
+    sigs_t = build_transposed_sigs(sigs)
+    assert sigs_t.shape == (w * 64, 4)
 
-    m_bits = w * 64
-    m = torch.arange(m_bits, device="cuda")
-    for c in range(n_lists):
-        for s in range(max_size):
-            word = sigs_t[:, c * wpc + s // 64]  # [m_bits]
-            actual = (word >> (s % 64)) & 1
-            item = int(padded[c, s].item())
-            if item < 0:
-                expected = torch.zeros(m_bits, dtype=torch.int64, device="cuda")
-            else:
-                expected = (sigs[item][m // 64] >> (m % 64)) & 1
-            assert torch.equal(actual, expected), f"cluster {c} slot {s}"
+    m = torch.arange(w * 64, device="cuda")
+    for s in range(4 * 64):
+        actual = (sigs_t[:, s // 64] >> (s % 64)) & 1
+        if s >= n:
+            expected = torch.zeros(w * 64, dtype=torch.int64, device="cuda")
+        else:
+            expected = (sigs[s][m // 64] >> (m % 64)) & 1
+        assert torch.equal(actual, expected), f"slot {s}"

@@ -208,7 +208,7 @@ def test_config_override_matches_default_full_and_indexed():
 @pytest.mark.parametrize("path", ["full", "indirect"])
 def test_empty_score_buffer_does_not_leak(monkeypatch, path):
     """The score buffer is ``torch.empty`` — ``[B, N]`` on the full scan, ``[B,
-    max(_bucket_n(P), _bucket_n(k))]`` on the indirect path, whose lanes past ``counts[b]`` and
+    _bucket_n(P)]`` on the indirect path, whose lanes past ``counts[b]`` and
     past ``P`` must be written ``-inf``. Poisoned allocator, hit count, exact parity."""
     n, d, p, k, b = 1024, 128, 100, 8, 4
     embs = make_index(n, d)
@@ -223,7 +223,7 @@ def test_empty_score_buffer_does_not_leak(monkeypatch, path):
         pos = torch.randint(0, n, (b, p), generator=g, device="cuda", dtype=torch.long)
         counts = torch.tensor([p, 50, 3, 0], dtype=torch.long, device="cuda")
         ref = _ref_indices(query_bits, item_bits, pos, counts, k)
-        hits = poison_empty(monkeypatch, (b, max(_bucket_n(p), _bucket_n(k))))
+        hits = poison_empty(monkeypatch, (b, _bucket_n(p)))
         out = oporp_1bit_match_topk_indirect(query_bits, item_bits, k, pos, counts)
     assert hits, "the score buffer no longer comes from torch.empty — the poison never ran"
     assert not (out[1] == POISON).any(), "poison leaked into top-K: a slot went unwritten"
@@ -280,7 +280,7 @@ def test_indirect_across_bucket_and_tile_cutoffs(p, regime):
     ``DEFAULT_CONFIG.block_n``; both sides of each cutoff are exact against the oracle."""
     item_bits, query_bits = _oporp_data(n=8192)
     b, k = query_bits.shape[0], 32
-    width = max(_bucket_n(p), _bucket_n(k))
+    width = _bucket_n(p)
     if "bucket" in regime:
         assert width == (_N_BUCKETS[0] if p <= _N_BUCKETS[0] else _N_BUCKETS[1]), regime
     else:

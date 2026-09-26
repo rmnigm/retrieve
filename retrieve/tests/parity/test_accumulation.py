@@ -13,6 +13,8 @@ above the top scores.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 import torch
 
@@ -60,10 +62,13 @@ def test_fused_masked_knn_topk_accumulates_fp32(d):
 
 
 def _int8_family(d, b=8):
-    padded, probe_ids, flat, n = make_probe_family(b, 64, 128, 8)
+    """A probe with an identity ``sort_perm``, so a returned id is also its row of the
+    cluster-sorted ``codes`` the oracle reads."""
+    lay = make_probe_family(b, 64, 128, 8)
+    lay = replace(lay, sort_perm=torch.arange(lay.n, device="cuda"))
     query = make_query(b, d)
-    codes, global_scale = quantize_int8_global(make_index(n, d))
-    return query, flat, codes, global_scale, n
+    codes, global_scale = quantize_int8_global(make_index(lay.n, d))
+    return query, lay, codes, global_scale
 
 
 def _assert_int8_dequant(query, codes, global_scale, ids, scores):
@@ -82,18 +87,22 @@ def _assert_int8_dequant(query, codes, global_scale, ids, scores):
 
 @pytest.mark.parametrize("d", [64, 128])
 def test_codesigned_probe_score_int32_dot_fp32_dequant(d):
-    query, flat, codes, global_scale, _ = _int8_family(d)
-    ids, scores = codesigned_probe_score(query, flat, codes, global_scale, flat.shape[1])
+    query, lay, codes, global_scale = _int8_family(d)
+    ids, scores = codesigned_probe_score(
+        query, lay.probe_ids, lay.cluster_offsets, codes, lay.sort_perm, global_scale,
+        lay.width, lay.width,
+    )  # fmt: skip
     _assert_int8_dequant(query, codes, global_scale, ids, scores)
 
 
 @pytest.mark.parametrize("d", [64, 128])
 def test_codesigned_probe_score_exact_int32_dot_fp32_dequant(d):
-    query, flat, codes, global_scale, n = _int8_family(d)
-    attrs, rev, q_attrs = make_exact(n, query.shape[0])
+    query, lay, codes, global_scale = _int8_family(d)
+    attrs, rev, q_attrs = make_exact(lay.n, query.shape[0])
     ids, scores = codesigned_probe_score_exact(
-        query, flat, codes, attrs, rev, q_attrs, global_scale, flat.shape[1]
-    )
+        query, lay.probe_ids, lay.cluster_offsets, codes, lay.sort_perm, attrs, rev, q_attrs,
+        global_scale, lay.width, lay.width,
+    )  # fmt: skip
     _assert_int8_dequant(query, codes, global_scale, ids, scores)
 
 

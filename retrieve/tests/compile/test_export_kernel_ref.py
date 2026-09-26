@@ -42,37 +42,36 @@ from retrieve.ops.triton.codesigned_probe_score_exact import (
     codesigned_probe_score_exact,
 )
 from tests.conftest import make_attrs, make_index, make_query, make_query_attrs
-from tests.parity.conftest import make_bloom, make_exact
+from tests.parity.conftest import make_bloom, make_exact, make_probe_family
 
 
 class _ExactScorer(torch.nn.Module):
     """Minimal wrapper: index-side state as buffers, forward = one op call."""
 
-    def __init__(
-        self,
-        item_codes: torch.Tensor,
-        item_clause_attrs: torch.Tensor,
-        clause_is_reverse: torch.Tensor,
-        global_scale: float,
-        k: int,
-    ):
+    def __init__(self, lay, item_codes, item_clause_attrs, clause_is_reverse, global_scale, k):
         super().__init__()
+        self.register_buffer("cluster_offsets", lay.cluster_offsets)
         self.register_buffer("item_codes", item_codes)
+        self.register_buffer("sort_perm", lay.sort_perm)
         self.register_buffer("item_clause_attrs", item_clause_attrs)
         self.register_buffer("clause_is_reverse", clause_is_reverse)
         self.global_scale = global_scale
         self.k = k
+        self.width = lay.width
 
-    def forward(self, query, flat_probed_items, query_clause_attrs):
+    def forward(self, query, probe_ids, query_clause_attrs):
         return codesigned_probe_score_exact(
             query,
-            flat_probed_items,
+            probe_ids,
+            self.cluster_offsets,
             self.item_codes,
+            self.sort_perm,
             self.item_clause_attrs,
             self.clause_is_reverse,
             query_clause_attrs,
             self.global_scale,
             self.k,
+            self.width,
         )
 
 
@@ -89,13 +88,14 @@ def _references_kernel(node) -> bool:
 
 def test_export_preserves_kernel_reference():
     torch.manual_seed(0)
-    n, d, b, p, c, a_max, k = 64, 32, 2, 16, 2, 2, 4
+    d, b, c, a_max, k = 32, 2, 2, 2, 4
+    lay = make_probe_family(b, 8, 12, 3)  # includes empty clusters and a tail past the items
+    n = lay.n
 
     g = torch.Generator(device="cuda").manual_seed(0)
     item_codes = torch.randint(-127, 128, (n, d), generator=g, dtype=torch.int8, device="cuda")
-    flat_probed_items = torch.randint(0, n, (b, p), generator=g, device="cuda")
-    flat_probed_items[:, -2:] = -1  # exercise the -1-pad lanes
     mod = _ExactScorer(
+        lay,
         item_codes,
         make_attrs(n, c=c, a_max=a_max),
         torch.zeros(c, dtype=torch.bool, device="cuda"),
@@ -104,7 +104,7 @@ def test_export_preserves_kernel_reference():
     )
     query = make_query(b, d)
     q_attrs = make_query_attrs(b, c=c)
-    args = (query, flat_probed_items, q_attrs)
+    args = (query, lay.probe_ids, q_attrs)
 
     eager_ids, eager_scores = mod(*args)
 
@@ -136,15 +136,16 @@ def _retrieve_schemas() -> dict[str, torch.FunctionSchema]:
 
 def _op_args() -> dict[str, tuple]:
     """One small valid call per registered op, keyed by op name."""
-    n, b, d, k = 512, 3, 64, 8
+    b, d, k = 3, 64, 8
+    lay = make_probe_family(b, 16, 64, 4)
+    n = lay.n
     embs = make_index(n, d)
     query = make_query(b, d)
     codes, gs = quantize_int8_global(embs)
-    sigs, qb = make_bloom(n, b)
+    qpos, bt, sigs, qb = make_bloom(n, b)
     attrs, rev, q_attrs = make_exact(n, b, reverse="mixed")
+    probe = (lay.probe_ids, lay.cluster_offsets, codes, lay.sort_perm)
     g = torch.Generator(device="cuda").manual_seed(0)
-    flat = torch.randint(0, n, (b, 64), generator=g, device="cuda")
-    flat[:, -5:] = -1
     pos = torch.randint(0, n, (b, 64), generator=g, device="cuda")
     counts = torch.tensor([64, 10, 0], device="cuda")
     item_bits = quantize_oporp_1bit(embs, seed=0)[0]
@@ -154,9 +155,9 @@ def _op_args() -> dict[str, tuple]:
         "bloom_compact": (qb, sigs),
         "clause_mask": (attrs, rev, q_attrs),
         "clause_compact": (attrs, rev, q_attrs),
-        "codesigned_probe_score": (query, flat, codes, gs, k),
-        "codesigned_probe_score_bloom": (query, flat, codes, qb, sigs, gs, k),
-        "codesigned_probe_score_exact": (query, flat, codes, attrs, rev, q_attrs, gs, k),
+        "codesigned_probe_score": (query, *probe, gs, k, lay.width),
+        "codesigned_probe_score_bloom": (query, *probe, qpos, bt, gs, k, lay.width),
+        "codesigned_probe_score_exact": (query, *probe, attrs, rev, q_attrs, gs, k, lay.width),
         "fused_masked_knn_topk": (query, embs, pos, counts, k),
         "oporp_1bit_match_topk_full": (q_bits, item_bits, k),
         "oporp_1bit_match_topk_indirect": (q_bits, item_bits, k, pos, counts),
@@ -189,7 +190,7 @@ def test_inputs_unchanged_after_the_op_and_its_twin(name):
     for fn in (getattr(torch.ops.retrieve, name), getattr(reference, name)):
         fn(*args)
         torch.cuda.synchronize()
-        for i, (a, b) in enumerate(zip(args, before)):
+        for i, (a, b) in enumerate(zip(args, before, strict=True)):
             if isinstance(a, torch.Tensor):
                 assert torch.equal(a, b), f"{name} ({fn}): input {i} was written"
 

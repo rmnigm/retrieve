@@ -5,6 +5,8 @@ sign-stable."""
 
 from __future__ import annotations
 
+import abc
+
 import torch
 from torch import Tensor
 
@@ -34,17 +36,13 @@ class _PackedBitsKNN(RetrievalModule):
         self.backend = backend
         ops_for(backend)
 
-    # -- subclass hooks -----------------------------------------------------
-
+    @abc.abstractmethod
     def _quantize_index(self, item_embs: Tensor) -> None:
         """Build + register ``item_bits`` and the projection buffers."""
-        raise NotImplementedError
 
+    @abc.abstractmethod
     def _project_query(self, query: Tensor) -> Tensor:
         """[B, D] → [B, W] int64, same bit space as ``item_bits``."""
-        raise NotImplementedError
-
-    # -- common ---------------------------------------------------------------
 
     def register_index(self, item_embs: Tensor) -> None:
         n = item_embs.shape[0]

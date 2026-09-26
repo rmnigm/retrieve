@@ -64,7 +64,7 @@ HuggingFace's `datasets` in the shared venv.
 | [`etl/kuairand.py`](../../evaluation/eval_datasets/etl/kuairand.py) | `kuairand` | Zenodo KuaiRand-27K + category supplement (32M videos) |
 | [`etl/openalex.py`](../../evaluation/eval_datasets/etl/openalex.py) | `openalex` | OpenAlex snapshot on public S3, parquet copy (476M works, streamed) |
 | [`etl/synth_arxiv.py`](../../evaluation/eval_datasets/etl/synth_arxiv.py) | `synth-arxiv` | an already-encoded arxiv directory |
-| [`common.py`](../../evaluation/eval_datasets/common.py) | — | shared attribute-synthesis numerics |
+| [`common.py`](../../evaluation/eval_datasets/common.py) | — | shared attribute synthesis, id-hash sampling, `prep_log.json` merge, range specs |
 | [`timesplit.py`](../../evaluation/eval_datasets/timesplit.py) | — | vendored sequential time-split |
 
 The ETL modules are `argparse` programs; `eval-data <name> …` forwards
@@ -404,11 +404,12 @@ backend-independent. What to do about it is an open decision on the
 
 ### pubmed
 
-**Status: ETL written and rehearsed, nothing staged.** Roadmap E2's ingest
-path streams shard by shard and has been dry-run on one real shard
-([validation](../validation.md#datasets));
-the full download has not been started, no oracle has been built and no
-cell has run. Nothing below is citable.
+**Status: staged as the 10 M slice** (`--keep-items 10000000 --seed 0`,
+roadmap E2) under `$RETRIEVE_DATA_ROOT/pubmed-medcpt`: `bench check`
+passes, the `c0_mesh` oracle is built, and one exact filter cell runs.
+SilverTorch cannot build at this size yet (see *Disk budget and the
+slice*); state in [validation](../validation.md#datasets). Not on the Hub.
+Nothing below is citable.
 
 `plan` → `download --what pmids` → `convert --fetch --delete-raw` →
 `medline --stream` → `attrs` → `queries` → `encode_queries`. Source is the
@@ -439,7 +440,7 @@ baseline *does* publish `.md5` and `verify --medline` checks those.
 native dim ([decisions](../decisions.md#datasets): no PCA), so pubmed has
 exactly one content dir, `content_d768`.
 [`config/pubmed.yaml`](../../evaluation/config/pubmed.yaml) is the dataset
-file (in no suite yet).
+file, listed in the `filter` suite at 768.
 
 #### The streaming `convert`
 
@@ -490,7 +491,9 @@ first-seen order — so the three `rectal neoplasms` forms above collapse to one
 Journal and language are **not** in the chunk JSON. They come from a join
 against the MEDLINE baseline (`https://ftp.ncbi.nlm.nih.gov/pubmed/baseline/`,
 1334 × `pubmed26n*.xml.gz`, **51.8 GB**), which `medline` streams into
-`medline/*.parquet` (`pmid`, `journal` = `MedlineTA`, `language`). MeSH tree-top
+`medline/*.parquet` (`pmid`, `journal` = `MedlineTA`, `language`). An
+article with no baseline row (0.27 % of the 10 M slice) gets journal and
+language `-1`, the pad, like an out-of-vocab journal. MeSH tree-top
 category letters come from the MeSH descriptor file
 (`xmlmesh/desc2026.gz`, 17 MB).
 
@@ -575,6 +578,22 @@ perf pools need, it is the papers' 10 M pool size and YFCC's, and the
 largest catalog the harness as written can take at 768-d is ~15 M. Going
 above that is a harness decision (fp16 items + a chunked oracle), not an
 ETL one.
+
+**Measured on the staged slice (2026-09-26).** `convert` took 57 min for
+all 38 shards, with `medline --stream` (21 min, 39,994,988 rows) running
+beside it. On disk: 17 GB under `pubmed-medcpt/` (15 GB of fp16 shards,
+1.5 GB of attrs, 0.7 GB of `staging/` article parquets, 0.1 GB of MEDLINE
+parquet), plus 0.4 GB of PMID lists kept in `_raw/pubmed/`. The exact
+`c0_mesh` oracle (k_gt 1000, 10,000 queries) builds in 23 s. The item
+budget above does **not** cover SilverTorch's build.
+`retrieve.indexing.quantize.quantize_int8_global_codes` computes
+`(embs / abs_max * 127.0).round()` over the whole fp32 matrix. That makes
+two more 28.6 GiB fp32 temporaries next to the 28.6 GiB of items, so
+`register_index` OOMs on the 80 GB A100 on both the `triton` and
+`official` backends. A chunked or in-place quantize in the library fixes
+it, and `bench/` and the slice stay as they are. The exact
+`linr_v1_filter_mask` cell does run
+([artifacts/e2-pubmed/](../artifacts/e2-pubmed/)).
 
 ### kuairand
 
@@ -776,7 +795,7 @@ The filters, in order, each counted into `convert_log.jsonl`:
    `dataset` is 29 % of English works and mostly boilerplate (every CCDC crystal-structure
    entry shares one abstract, i.e. exact-duplicate vectors);
 4. not `is_paratext` / `is_retracted` / `is_xpac`;
-5. the **hash sample**: `pubmed.pmid_hash(work_id, seed) < sample_rate · 2⁶⁴`;
+5. the **hash sample**: `common.pmid_hash(work_id, seed) < sample_rate · 2⁶⁴`;
 6. abstract present. The text is the inverted index's words in position order
    (`abstract_text`). The parquet copy caps strings just under 32,767 chars, which cuts
    about one index in 7 M mid-JSON (1 in 7,108,348 sampled, W4214716959); such a row is
@@ -789,7 +808,7 @@ parquet string equals the one rebuilt from the API object.
 
 #### The slice, the queries, the relevance
 
-`prep` keeps the **N smallest work-id hashes** of the staged rows (`pubmed.select_pmids`,
+`prep` keeps the **N smallest work-id hashes** of the staged rows (`common.select_pmids`,
 so the catalog is the same set whatever the file order, and a smaller N is a subset of a
 larger one); a work id staged twice keeps its newest copy. Item ids are 1-indexed dense in
 (file, row) order; `papers.parquet` is written in item-id order, which `encode_text` and
@@ -1098,7 +1117,7 @@ A checkpoint without it falls back to
 5. Train a checkpoint if sequential; otherwise encode embeddings into
    `content*/` with meta sidecars.
 
-Reuse `common.py` for attribute synthesis (`dense_remap_ids`,
-`synthesize_qa_narrow`, `sample_rare_biased_wide`) rather than
+Reuse `common.py` for attribute synthesis (`synthesize_qa_narrow`,
+`sample_rare_biased_wide`) and id-hash slicing (`select_pmids`) rather than
 re-deriving the sampling — the rare-biased draw in particular is what
 keeps filter selectivity in an interesting range.

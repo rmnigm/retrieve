@@ -173,8 +173,9 @@ Parameters:
   multiple of 64) and `k_hash`. The filter is fused into the probe+score kernel — see the
   [filtering guide](filtering-and-quantization.md).
 
-Constraint: `n_probe * max_cluster_size >= k` (raised at `register_index` and by
-`set_query_params` otherwise). `k` is a plain attribute, settable at any time.
+Constraint: the `n_probe` largest clusters must hold at least `k` items together (the
+scorer's static probe width; raised at `register_index` and by `set_query_params`
+otherwise). `k` is a plain attribute, settable at any time.
 
 After `register_index`, `build_timings` holds the seconds of the four build phases
 (`kmeans_s`, `assemble_s`, `quantize_s`, `filter_s`; `{}` before it and on a prebuilt module).

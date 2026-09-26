@@ -6,8 +6,8 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.1",
-    "torch>=2.4,<3",
-    "triton>=3.0",
+    "torch>=2.10,<3",
+    "triton>=3.6",
 ]
 
 [project.optional-dependencies]
@@ -40,15 +40,22 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I", "UP"]
+select = ["E", "W", "F", "I", "UP", "B", "C4", "SIM", "RUF100", "BLE001", "PLC0415"]
+# PLC0415 (no inline imports) is a preview rule; explicit-preview-rules keeps it the only one.
+preview = true
+explicit-preview-rules = true
 
 [tool.ruff.lint.isort]
 known-first-party = ["retrieve"]
+combine-as-imports = true
 
 [tool.ruff.lint.per-file-ignores]
-# Triton kernel launches use `grid = lambda meta: (...)` — the canonical form
-# from Triton's own tutorials; `meta` is the autotuned config.
-"src/retrieve/ops/triton/*.py" = ["E731"]
+# Deliberately lazy: `import retrieve` registers no kernel and never loads Meta's optional
+# extension; these four load it (or report it) only when asked.
+"src/retrieve/modules/official.py" = ["PLC0415"]
+"src/retrieve/ops/__init__.py" = ["PLC0415"]
+"src/retrieve/ops/official/__init__.py" = ["PLC0415"]
+"tests/conftest.py" = ["PLC0415"]
 
 [dependency-groups]
 dev = [
