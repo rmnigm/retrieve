@@ -611,10 +611,13 @@ it, and `bench/` and the slice stay as they are. The exact
 
 ### kuairand
 
-**Status: staged and layout-clean, no checkpoint.** `download` → `convert` →
-`prep` → `attrs` have run on the real data, and `bench check --dataset
-kuairand` is clean. The gSASRec checkpoint, the Hub publish and the filter
-cell need the GPU and have not run (roadmap E4). Nothing below is citable.
+**Status: staged and layout-clean; one d64 checkpoint, not on the Hub.** `download` →
+`convert` → `prep` → `attrs` have run on the real data, and `bench check --dataset
+kuairand` is clean. The d64 `train_on_val` model is trained
+([validation](../validation.md#final-models-the-e1c-recipe)); d128 does not fit.
+Only the trainer inputs are on the Hub ([HuggingFace I/O](#huggingface-io)): the eval
+inputs and the checkpoint were refused by the private storage limit. The filter cell
+has not run (roadmap E4). Nothing below is citable.
 The run records are in
 [artifacts/e4-kuairand/](../artifacts/e4-kuairand/).
 
@@ -1038,9 +1041,28 @@ path; the entry exists so the local directory layout resolves like every
 other dataset's.
 
 `pinkmeme/eval-pubmed` is **registered but not published**; nothing is
-pushed to it before roadmap E2. `pinkmeme/eval-kuairand` is likewise
-registered and not yet published (roadmap E4 publishes it with its
-checkpoint).
+pushed to it before roadmap E2. `pinkmeme/eval-kuairand` (private) holds only
+the KuaiRand trainer inputs: `eval-data publish kuairand` and the d64 checkpoint
+upload hit the private storage limit (403). The old A100
+`checkpoints/gsasrec-d128-shared` was deleted from it to free space (user decision).
+
+**Trainer inputs** sit under `trainer/` in the private eval repos, uploaded with
+`upload_folder` ([script](../artifacts/seqrec-encoder/hub-upload/trainer_upload.py);
+`hub.py` has no helper for them). The trainer's `data_dir` needs
+`train/val/test.parquet` and `item_id_map.json` in one directory:
+
+- `pinkmeme/eval-goodreads-work-id` `trainer/`: all of `data/goodreads-work-id/trainer/`
+  (`train/val/test.parquet`, `item_id_map.json`, `prep_log.json`, `book_to_work.parquet`);
+- `pinkmeme/eval-yambda-500m` `trainer/`: all of `data/yambda-500m/trainer/`
+  (`train/val/test.parquet`, `item_id_map.json`, the re-prep with `timestamps`);
+- `pinkmeme/eval-kuairand` `trainer/`: `train.parquet`, `val.parquet`, `prep_log.json`.
+  The trainer also needs `test.parquet` and `item_id_map.json` from `data/kuairand/`,
+  which are not on the Hub; rebuild them with `eval-data kuairand all`.
+
+```bash
+hf download pinkmeme/eval-goodreads-work-id --repo-type dataset \
+    --include 'trainer/*' --local-dir data/goodreads-work-id
+```
 
 `eval-data fetch` pulls a prepared dataset (optionally a subset of dims),
 `eval-data publish` pushes one, `eval-data publish-checkpoint` pushes a
