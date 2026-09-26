@@ -1077,7 +1077,7 @@ uv run --directory evaluation train run \
     data_dir=/data/yambda-500m/trainer checkpoint_dir=/scratch/ckpt/yambda-d64
 uv run --directory evaluation train run data_dir=/data/yambda-500m/trainer \
     checkpoint_dir=/scratch/ckpt/yambda-d128 embedding_dim=128 ffn_hidden_dim=512
-uv run --directory evaluation train run --config base.json loss=gbce num_negatives=256 warmup_steps=0
+uv run --directory evaluation train run data_dir=/data/yambda-500m/trainer loss=gbce num_negatives=256 warmup_steps=0
 ```
 
 The defaults are the E1c recipe
