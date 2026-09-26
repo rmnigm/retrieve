@@ -91,7 +91,7 @@ included — so there is no silent torch fallback. See
 
 - **LiNR** ([`modules/knn.py`](../../retrieve/src/retrieve/modules/knn.py),
   [`modules/bit_knn.py`](../../retrieve/src/retrieve/modules/bit_knn.py)) — five
-  primitives (`PostfilterKNN` dense fp16, `PostfilterKNNInt8` dense
+  primitives (`PostfilterKNN` dense fp16-input, `PostfilterKNNInt8` dense
   int8, `PrefilterKNN` sparse pre-filter, `OneBitKNN` 1-bit Sign-OPORP,
   `SimHashKNN` 1-bit SimHash; the two bit-KNNs share the
   [`_PackedBitsKNN`](../../retrieve/src/retrieve/modules/bit_knn.py)
@@ -234,7 +234,7 @@ is settable after registration; `capturable = True` is a class attribute
 
 | class | composition | `forward` |
 |---|---|---|
-| `LiNRV1(k, *, filter=None, backend)` | `PostfilterKNN` (`idx`) + `filter.evaluate_mask` | dense fp16 dot, mask, top-k |
+| `LiNRV1(k, *, filter=None, backend)` | `PostfilterKNN` (`idx`) + `filter.evaluate_mask` | dense dot (fp16 inputs, fp32 scores), mask, top-k |
 | `LiNRV2(k, *, filter, backend)` | `PrefilterKNN` (`idx`) over `filter.evaluate_indices` | `query_clause_attrs` required — the filter is the candidate source |
 | `LiNRV3(k, *, candidate_pool=5000, seed=0, filter=None, backend)` | `OneBitKNN(k=candidate_pool)` (`stage1`) → `PrefilterKNN(k)` (`stage2`); the filter's candidates feed stage 1, stage 2 is bounded by the survivors' count | `set_query_params(candidate_pool=…)` re-validates against `N` |
 | `LiNRV4(k, *, filter=None, backend)` | `PostfilterKNNInt8` (`idx`) + `filter.evaluate_mask` | int8 dot, mask, top-k |
@@ -392,8 +392,9 @@ that skips predicate evaluation entirely; passing `query_clause_attrs`
 together with `candidate_ids` raises `ValueError` (the candidates path
 scores the given candidates *without* the fused filter, so accepting
 both would silently drop the predicate). On that path `-1` candidate
-ids are padding — the tail every compact producer in the library emits
-(`evaluate_indices`, `compact_mask`): they are gathered as `clamp_min(0)`
+ids are padding — a compaction's output (`evaluate_indices`,
+`compact_mask`) must be masked to `-1` past its `counts` first, since its
+tail is unwritten or argsort leftovers: pads are gathered as `clamp_min(0)`
 but masked to `-inf` and returned as `-1` through `masked_topk`, so a
 pad never scores or surfaces as item `N-1` (or, on `"official"`, as
 `inv_perm[-1]`). `register_index` is split into

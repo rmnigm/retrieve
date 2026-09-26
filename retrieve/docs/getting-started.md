@@ -99,7 +99,7 @@ same = SilverTorchBuilder(k=k, n_lists=1024, n_probe=16).set_state_dict(torch.lo
 ## Example: the LiNR variants
 
 The LiNR family scores the full corpus directly. The paper's four variants ship as modules:
-`LiNRV1` (dense fp16 + mask), `LiNRV2` (filter → candidates → exact rescoring), `LiNRV3`
+`LiNRV1` (dense fp16-input scan + mask), `LiNRV2` (filter → candidates → exact rescoring), `LiNRV3`
 (1-bit Hamming top-`candidate_pool` → exact rescoring) and `LiNRV4` (int8 dense + mask), each
 optionally holding a filter. V3 alone, no filter:
 

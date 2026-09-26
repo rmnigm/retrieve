@@ -23,7 +23,7 @@ signature in [`ops/reference/`](../../retrieve/src/retrieve/ops/reference/)
 
 - LiNR — kernels used by `PrefilterKNN` / `OneBitKNN` / `SimHashKNN`
   (`fused_masked_knn_topk`,
-  `oporp_1bit_match_topk`). `PostfilterKNN`'s dense fp16 matmul +
+  `oporp_1bit_match_topk`). `PostfilterKNN`'s dense fp16-input matmul +
   top-K and `PostfilterKNNInt8`'s int8 `_int_mm` + int32 top-K are
   both pure torch — there's no real fusion to win over cuBLAS LtGemm +
   CUB.
@@ -313,12 +313,22 @@ to the inlined predicate with a
 
 ## Score conventions
 
-- Real-valued similarity (V1, V2): plain dot product of the fp16 inputs,
-  accumulated in fp32 on every path. Higher is better. `-inf` marks
-  masked-out / padded positions. cuBLAS (V1, V2 `torch`) rounds the score
-  to fp16 on output; `fused_masked_knn_topk` (V2 `triton`) writes it as
-  fp32 — that output rounding is the whole difference between the two
-  backends.
+- Real-valued similarity (V1, V2): plain dot product of the fp16 inputs
+  (items stored fp16, as the LiNR paper does; the query cast to fp16),
+  accumulated in fp32 and **returned as fp32 on every path**: cuBLAS
+  (V1, V2 dense, V2 `torch`) through `out_dtype=torch.float32`,
+  `fused_masked_knn_topk` (V2 `triton`) by its fp32 `tl.sum`. Higher is
+  better. `-inf` marks masked-out / padded positions. An fp16 *score*
+  would round runs of near-tied items to one value: on YFCC-10M the
+  top-1000 spans about fifteen fp16 quanta (2⁻¹¹ near 0.8), and fp16
+  scores cost the exact algorithms `recall_oracle@1000` 0.956; fp32
+  scores over the same fp16 table give 0.993, and the remaining 0.007 is
+  the fp16 *storage* rounding (an fp32 table gives 1.0 at twice the
+  memory; [decisions](../decisions.md#library),
+  [artifact](../artifacts/l1-l2/README.md)). The cuBLAS path's
+  tensor-core accumulator truncates: measured ≤ 1.1e-6 from an fp64 dot
+  of the same fp16 inputs at D=128, against a plain fp32 sum's ~1e-7;
+  gated in [`test_accumulation.py`](../../retrieve/tests/parity/test_accumulation.py).
 - 1-bit Sign-OPORP (V3): `D - 2 * popcount(query_bits ^ item_bits)`, fp32.
   `D = 64 * W`. This is the standard Hamming-to-dot-product relation for
   sign-quantized vectors. Higher is better. Same `-inf` sentinel.
@@ -350,8 +360,9 @@ byte identical bits.
 
 ## PostfilterKNN dense path — pure torch, no kernel
 
-`PostfilterKNN`'s forward is `query @ item_embs.T` + optional
-`masked_fill(-inf)` + `torch.topk` — implemented directly in
+`PostfilterKNN`'s forward is `torch.mm(query_fp16, item_embs_t,
+out_dtype=torch.float32)` + optional `masked_fill(-inf)` + `torch.topk`
+over the fp32 scores (§ Score conventions) — implemented directly in
 [`PostfilterKNN`](../../retrieve/src/retrieve/modules/knn.py).
 There is no Triton kernel here because one that only fuses the matmul
 still materializes the full `[B, N]` score buffer and calls the same
@@ -407,9 +418,9 @@ is exact and `tl.sum` reduces in fp32 (the compiled PTX: `add.f32` /
 sub-32-bit ints). Reduced in fp16, on goodreads d128 (`|score|` up to 31,
 partial sums of the same order) the error against an fp64 dot is 0.028,
 enough to swap one boundary pair on 6.3 % of `c0_genre` rows against the
-`torch` backend. In fp32 it is ~1e-5, and the remaining
-`torch`-vs-`triton` difference is the `torch` side's own fp16 output
-rounding creating ties ([validation](../validation.md#library-gates)). The
+`torch` backend. In fp32 it is ~1e-5; the `torch` side returns fp32 too
+(§ Score conventions), so the two backends differ only in reduction order
+([validation](../validation.md#library-gates)). The
 accumulation-width parity file
 [`test_accumulation.py`](../../retrieve/tests/parity/test_accumulation.py)
 pins every scoring kernel against an fp64 oracle, because the other
@@ -552,15 +563,26 @@ sparse paths consume.
 inputs:   item_clause_attrs   [N, C, A_max]  int64
           clause_is_reverse   [C]            bool
           query_clause_attrs  [B, C]         int64
-return:   positive_indices    [B, N]         int64  (full width, -1 tails)
+return:   positive_indices    [B, N]         int64  (full width, written on [:counts] only)
           counts              [B]            int64
 ```
 
 The returned index buffer is **full-width** `[B, N]` — only the first
-`counts[b]` entries per row are meaningful; the tail is `-1`, written by
-the scatter launch itself into a `torch.empty` buffer (no host-side
-`counts.max().item()` sync, no narrow slice, no `[B, N]` prefill launch).
-Downstream kernels bound reads by `counts`.
+`counts[b]` entries per row are written; the tail is whatever the
+`torch.empty` allocation held (no host-side `counts.max().item()` sync,
+no narrow slice, no prefill and no tail store). **Every reader bounds
+its reads by `counts`**, and none gathers through a tail id: the Triton
+consumers load ids under `n < counts[b]`, the reference ops index through
+`where(n < counts[b], id, 0)` and mask the rest to `-inf`, and the top-k
+epilogues turn any `-inf` slot's id into `-1`. A path that takes padded
+ids without `counts` (`FullScanKNN` / `SilverTorch` candidates) needs the
+caller to mask the tail to `-1` first. So the op's full output is a
+function of its inputs only under `torch.use_deterministic_algorithms(True)`,
+which fills `torch.empty` (the tail then reads `2⁶³ − 1`); `opcheck` runs
+in that mode. Pinned by
+[`test_compact_order.py`](../../retrieve/tests/parity/test_compact_order.py)
+(`test_consumers_ignore_the_tail_past_counts`: every consumer returns the
+same tensors with the tail poisoned to `-1` and to an out-of-range id).
 
 **Launch grid** `(B, tiles_y, tiles_x)` — batch on `grid_x` so adjacent
 dispatched programs share the same item tile (good L2 reuse on the
@@ -586,9 +608,7 @@ host, inside the op:                            _host.compact_finish
     counts       = tile_ends[:, -1].clone()
 scatter launch (b, tile), same grid:            common.compact_scatter_kernel
     ids = scratch[b, tile * BLOCK_N : +tile_counts[b, tile]]
-    positive_indices[b, tile_offsets[b, tile] : +count] = ids
-    slots = tile * BLOCK_N + lane                  # the tile's own slice of the row
-    positive_indices[b, slots ∩ [counts[b], N)] = -1   # disjoint from every run
+    positive_indices[b, tile_offsets[b, tile] : +count] = ids   # nothing past counts[b]
 ```
 
 Why this shape and not the two alternatives (re-evaluate the predicate in
@@ -600,7 +620,10 @@ count-only epilogue — makes the *predicate* launch 1.7–1.8× slower at
 `B = 1`, where the grid is under one wave and per-program latency is the
 kernel time; the `cumsum` + masked-store epilogue keeps it at the one-pass
 speed (1.10× at B=1, 1.03× at B=16, full pipeline). The scratch traffic is
-the survivors only (4 B in, 8 B out per id); its allocation is
+the survivors only (4 B in, 8 B out per id), and so is the output's: with
+no tail store the scatter writes nothing for a rejected item (−11.7 % on
+`clause_compact`, −5.3 % on `bloom_compact` at B=16, 3M items, 1.8 %
+pass rate, against a `-1` tail store; [artifact](../artifacts/l1-l2/README.md#timing)). Its allocation is
 `4 · B · T · BLOCK_N` bytes, half the `[B, N]` int64 result. `counts` is a
 fresh tensor, not a view into the scan: inductor asserts custom-op outputs
 are 16-byte aligned, and at `B = 1` the scan's last column is a contiguous
@@ -786,12 +809,12 @@ never materializes.
 ```
 inputs:    qb     [B, W]   int64    packed query bloom signature
            sigs   [N, W]   int64    packed item bloom signatures
-return:    positive_indices [B, N] int64  (full width, -1 tails)
+return:    positive_indices [B, N] int64  (full width, written on [:counts] only)
            counts           [B]    int64
 ```
 
 Same full-width `[B, N]` return contract as `clause_compact` — bound
-reads by `counts[b]`, `-1` tails written by the scatter launch. Registered as a
+reads by `counts[b]`; nothing past it is written. Registered as a
 `@torch.library.custom_op` for the same reason `clause_compact` is (the
 compaction store address is data-dependent), so both compaction kernels
 capture under cudagraph trees.
@@ -866,8 +889,8 @@ torch and triton paths stay interchangeable. Implementation:
 `mask.sum(1)` for counts, then
 `mask.float().argsort(descending=True, stable=True)` for the indices —
 no `.item()` sync, no narrow slice. The tails differ across
-implementations (arbitrary argsort-tail ids here vs `-1` for the
-kernels), so consumers must bound reads by `counts` either way.
+implementations (arbitrary argsort-tail ids here, unwritten memory in
+the kernels), so consumers must bound reads by `counts` either way.
 
 ### [`popcount_int64`](../../retrieve/src/retrieve/functional.py) (`retrieve.functional`)
 
@@ -918,7 +941,11 @@ the cudagraph capture + mandatory output clone (to escape the
 
 V1's pure-torch dense path uses cuBLAS for the matmul, so the torch and
 Triton-backend classes go through identical kernels and produce
-bit-identical scores. V2's sparse path scores per-cell with
+bit-identical fp32 scores. Against V2's kernel the two differ only in
+reduction order (cuBLAS's truncating tensor-core accumulator vs an fp32
+`tl.sum`), so the cross-module and cross-backend tests in
+[`test_linr.py`](../../retrieve/tests/correctness/test_linr.py) compare
+at `atol=2e-6`. V2's sparse path scores per-cell with
 `tl.sum(emb_rows * q[None, :], axis=1)` — elementwise multiply +
 reduction, not `tl.dot` — so it doesn't share the tensor-core
 tile-reduction order quirks. Its parity test uses

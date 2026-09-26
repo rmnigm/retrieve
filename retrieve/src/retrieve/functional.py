@@ -62,8 +62,8 @@ def compact_mask(mask: Tensor) -> tuple[Tensor, Tensor]:
     Same contract as the triton ``bloom_compact``/``clause_compact`` kernels, so torch and
     triton paths stay interchangeable: all three return full-width ``[B, N]`` indices with
     only the first ``counts[b]`` entries of each row meaningful. The tails differ — arbitrary
-    ids (argsort tail) here vs ``-1`` (written by the kernels) — so consumers must bound
-    reads by ``counts`` either way."""
+    ids (argsort tail) here, unwritten memory in the kernels — so consumers must bound reads
+    by ``counts`` either way."""
     counts = mask.sum(dim=1)
     sorted_idx = mask.float().argsort(dim=1, descending=True, stable=True)
     return sorted_idx, counts
@@ -106,7 +106,7 @@ def combine_indices(
         if p == 0:
             return ids, counts
         valid = counts_to_valid(counts, p)
-        # ids past counts[b] are -1 (Triton) or argsort leftovers (torch); gather as 0, then
+        # ids past counts[b] are unwritten (Triton) or argsort leftovers (torch); gather as 0, then
         # sub_mask & valid zeroes them out.
         safe_ids = torch.where(valid, ids, ids.new_zeros(()))
         sub_mask = f.evaluate_subset(q, safe_ids)  # [B, P] bool

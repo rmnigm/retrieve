@@ -508,9 +508,9 @@ class SilverTorch(RetrievalModule):
         query: Tensor,
         candidate_ids: Tensor,
     ) -> tuple[Tensor, Tensor]:
-        """Re-rank ``candidate_ids [B, P]`` (original item ids; ``-1`` = padding, as every
-        compact producer in the library emits) with the int8 dot: pads are never gathered
-        (``clamp_min(0)``), never scored (``-inf``) and never returned (``-1`` sentinel).
+        """Re-rank ``candidate_ids [B, P]`` (original item ids; ``-1`` = padding — a compaction's
+        output must be masked to ``-1`` past its counts first) with the int8 dot: pads are never
+        gathered (``clamp_min(0)``), never scored (``-inf``) and never returned (``-1``).
         Rows with fewer than ``min(k, P)`` real candidates carry ``-1`` / ``-inf`` in the
         tail; ``pad_to_k=False`` keeps ``min(k, P)`` columns when ``P < k``. Pure tensor
         flow, no host sync."""

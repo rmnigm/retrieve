@@ -122,8 +122,8 @@ class TestCrossBackendAgreement:
         ids_ref, sc_ref = ref(data["query"], candidate_ids=cand, counts=counts)
         ids_tri, sc_tri = tri(data["query"], candidate_ids=cand, counts=counts)
         for b in range(B):
-            # torch backend scores in fp16 (half-ulp 2^-11 near 1), Triton in fp32.
-            assert_topk_id_sets_match(ids_tri, sc_tri, ids_ref, sc_ref, b, atol=1e-3, rtol=1e-3)
+            # Both return fp32 sums of the same fp16 products, in a different order.
+            assert_topk_id_sets_match(ids_tri, sc_tri, ids_ref, sc_ref, b, atol=2e-6, rtol=0.0)
 
     @pytest.mark.parametrize("mask_pass_rate", [None, 0.01, 0.1, 0.8])
     def test_one_bit_torch_matches_one_bit_triton(self, data, mask_pass_rate):
@@ -156,8 +156,8 @@ class TestCrossBackendAgreement:
         ids1, sc1 = sm(data["query"], mask=mask)
         ids2, sc2 = pf(data["query"], candidate_ids=cand, counts=counts)
         for b in range(B):
-            # Dense fp16 scores vs gathered fp16 inputs accumulated in fp32.
-            assert_topk_id_sets_match(ids2, sc2, ids1, sc1, b, atol=1e-3, rtol=1e-3)
+            # cuBLAS's tensor-core accumulator vs the kernel's fp32 sum (test_accumulation.py).
+            assert_topk_id_sets_match(ids2, sc2, ids1, sc1, b, atol=2e-6, rtol=0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -546,9 +546,8 @@ class TestEdgeCases:
         ids, scores = m(q)
         assert ids.shape == (1, K)
         assert torch.isfinite(scores).all()
-        # Returned ids must match a torch reference top-K. Tensor-core matmul
-        # in the Triton path differs from torch ``@`` in fp accumulator order,
-        # so allow boundary-tied ids to swap (scores within atol of the K-th).
+        # The reference scores the fp32 table, the module its fp16 copy: boundary ids within
+        # the storage rounding may swap.
         ref_full = q @ data["embs"].t()
         ref_scores, ref_ids = torch.topk(ref_full, K, dim=1)
         assert_topk_id_sets_match(ids, scores, ref_ids, ref_scores, 0, atol=1e-3, rtol=1e-3)

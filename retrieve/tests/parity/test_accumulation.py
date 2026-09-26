@@ -17,18 +17,27 @@ from dataclasses import replace
 
 import pytest
 import torch
+import torch.nn.functional as F
 
 from retrieve.functional import compact_mask, popcount_int64
 from retrieve.indexing.quantize import quantize_int8, quantize_int8_global
+from retrieve.modules.knn import PostfilterKNN, PrefilterKNN
 from retrieve.ops.triton.codesigned_probe_score import codesigned_probe_score
 from retrieve.ops.triton.codesigned_probe_score_exact import codesigned_probe_score_exact
 from retrieve.ops.triton.fused_masked_knn_topk import fused_masked_knn_topk
 from retrieve.ops.triton.oporp_1bit_match_topk import oporp_1bit_match_topk_indirect
-from tests.conftest import make_index, make_mask, make_query
+from tests.conftest import (
+    assert_topk_id_sets_match,
+    make_index,
+    make_mask,
+    make_query,
+    recall_at_k,
+)
 from tests.parity.conftest import make_exact, make_probe_family
 
 FP32_DOT_ABS = 1e-4  # measured: fp32 ≤ 1.4e-5 at D=256, |s| ≤ 140; the fp16 tree ≥ 6e-2
 INT8_DEQUANT_REL = 1e-6  # measured: 1.1e-7 (int32 dot exact; two fp32 multiplies)
+NEAR_TIE_DOT_ABS = 2e-6  # cuBLAS's tensor-core accumulator: 1.1e-6 at D=128; fp16 quantum 4.9e-4
 
 
 def _rows(ids):
@@ -119,3 +128,70 @@ def test_oporp_1bit_match_topk_is_exact():
     hamming = popcount_int64(query_bits[_rows(ids)] ^ item_bits[ids.clamp_min(0)]).sum(-1)
     truth = (64 * w - 2 * hamming).double()
     assert torch.equal(scores.double()[finite], truth[finite])
+
+
+def _near_tied(b, n, d, *, seed=11):
+    """YFCC-shaped scores: unit-norm queries near one direction ``u`` and items at cosine
+    ``c ∈ [0.80, 0.81]`` to it, so every row's top-k spans a few fp16 quanta (2⁻¹¹ near 0.8)
+    and the fp16 score of a whole run of items is the same number. Returned fp16, the precision
+    the modules store, so the fp64 truth is of the exact same inputs."""
+    g = torch.Generator(device="cuda").manual_seed(seed)
+    u = F.normalize(torch.randn(d, generator=g, device="cuda"), dim=0)
+    query = F.normalize(u + 0.002 * torch.randn(b, d, generator=g, device="cuda"), dim=1)
+    v = torch.randn(n, d, generator=g, device="cuda")
+    v = F.normalize(v - (v @ u)[:, None] * u, dim=1)
+    c = 0.80 + 0.01 * torch.rand(n, 1, generator=g, device="cuda")
+    items = c * u + (1 - c**2).sqrt() * v
+    return query.half(), items.half()
+
+
+def _linr_scores(path, query, items, mask, k):
+    """``(ids, scores)`` of one exact LiNR scoring path; ``mask`` is ``None`` on the unmasked
+    paths."""
+    if path.startswith("postfilter"):
+        m = PostfilterKNN(k=k)
+        m.register_index(items)
+        return m(query, mask=mask)
+    m = PrefilterKNN(k=k, backend=path.removeprefix("prefilter-"))
+    m.register_index(items)
+    if mask is None:
+        return m(query)
+    pos, counts = compact_mask(mask)
+    return m(query, candidate_ids=pos, counts=counts)
+
+
+@pytest.mark.parametrize(
+    "path,masked",
+    [
+        ("postfilter", False),
+        ("postfilter", True),
+        ("prefilter-triton", False),
+        ("prefilter-torch", True),
+        ("prefilter-triton", True),
+    ],
+)
+def test_exact_linr_selects_the_fp64_topk_near_ties(path, masked):
+    """The exact LiNR scorers return fp32 scores within ``NEAR_TIE_DOT_ABS`` of the fp64 dot of
+    their own fp16 inputs and select the fp64 top-k (up to ties inside that bound). An fp16
+    score rounds the boundary runs together and misses; asserted on the same inputs, so the
+    gate's discriminating power is checked, not claimed."""
+    b, n, d, k = 8, 8192, 128, 100
+    query, items = _near_tied(b, n, d)
+    mask = make_mask(b, n, pass_rate=0.5) if masked else None
+
+    ids, scores = _linr_scores(path, query, items, mask, k)
+    truth = query.double() @ items.double().t()
+    if mask is not None:
+        truth = truth.masked_fill(~mask, float("-inf"))
+    ref_scores, ref_ids = torch.topk(truth, k, dim=1)
+
+    assert scores.dtype == torch.float32
+    err = (scores.double() - truth.gather(1, ids)).abs().max().item()
+    assert err <= NEAR_TIE_DOT_ABS, f"module vs fp64: {err:.3e}"
+    for row in range(b):
+        assert_topk_id_sets_match(
+            ids, scores, ref_ids, ref_scores, row, atol=NEAR_TIE_DOT_ABS, rtol=0.0
+        )
+
+    fp16_ids = torch.topk(truth.half(), k, dim=1).indices
+    assert recall_at_k(fp16_ids, ref_ids) < 0.95, "the case does not discriminate fp16 scores"

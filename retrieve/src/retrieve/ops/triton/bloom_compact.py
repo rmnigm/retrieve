@@ -2,8 +2,8 @@
 ``compact_mask(bloom_match(.))``. Same two-phase shape as ``clause_compact``: the
 subset-test launch writes per-tile survivor counts and stashes the survivors' ids tile-locally,
 ``_host.compact_finish`` scans and scatters — so a row's ids are in **ascending item order**,
-``torch.equal`` to ``ops.reference.bloom_compact`` and reproducible across launches and
-processes."""
+``torch.equal`` to ``ops.reference.bloom_compact`` on ``[:counts]`` and reproducible across
+launches and processes."""
 
 from __future__ import annotations
 
@@ -162,9 +162,9 @@ def _bloom_compact_impl(
 @torch.library.custom_op("retrieve::bloom_compact", mutates_args=(), device_types="cuda")
 def bloom_compact(qb: Tensor, sigs: Tensor) -> tuple[Tensor, Tensor]:
     """Fused bloom subset-test + compaction; qb [B, W] int64, sigs [N, W] int64 → (positive_indices
-    [B, N] int64, counts [B] int64). The ``[B, N]`` buffer has ``-1`` sentinels in the unused
-    tail (consumers row-bound by ``counts[b]``); within a row the ids are in **ascending item
-    order**, bit-equal to ``ops.reference.bloom_compact``. Mirrors ``_bloom_compact_impl`` with
+    [B, N] int64, counts [B] int64). Nothing is written past ``counts[b]`` (consumers row-bound
+    by it); within a row the ids are in **ascending item order**, bit-equal to
+    ``ops.reference.bloom_compact``. Mirrors ``_bloom_compact_impl`` with
     ``DEFAULT_CONFIG``. An opaque ``custom_op`` rather than a ``triton_op`` for the reason given
     on ``clause_compact``: the compaction address depends on the pass mask, so inductor's TTIR
     mutation analysis flags ``sigs`` (an index buffer) as mutated and cudagraph trees skip the

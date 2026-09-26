@@ -193,9 +193,9 @@ def _fmkt_finish(launch: _FmktLaunch, k: int, *, pad_to_k: bool) -> tuple[Tensor
     # op p_kernel == p and the clamp is an identity.
     safe_local = topk_local.clamp_max(p - 1)
     topk_ids = launch.positive_indices.gather(1, safe_local)
-    # When counts[b] < actual_k, ties at -inf can pick positions past counts[b], whose ids are -1
-    # (Triton compaction) or arbitrary (torch compaction); force those to -1, the oracle's
-    # sentinel.
+    # When counts[b] < actual_k, ties at -inf can pick positions past counts[b], whose ids are
+    # unwritten (Triton compaction) or arbitrary (torch compaction); force those to -1, the
+    # oracle's sentinel.
     topk_ids = torch.where(
         torch.isfinite(topk_scores),
         topk_ids,
