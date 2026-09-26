@@ -1,18 +1,30 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.6
+    rev: v0.15.6  # = the ruff pin in pyproject.toml's dev group; bump both together
     hooks:
-      - id: ruff
-        args: [--select, I, --fix]
-        files: ^retrieve/
+      - id: ruff-check
+        files: ^(retrieve|evaluation)/
+      # evaluation/ joins once its formatting-only commit lands; it does not pass today.
       - id: ruff-format
         files: ^retrieve/
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=10240]  # docs/artifacts/ holds 7-8 MB raw outputs
+      # Frozen or recorded bytes are never rewritten: the papers, raw artifacts, results.
+      - id: end-of-file-fixer
+        exclude: ^(articles|docs/artifacts|evaluation/results|evaluation/golden)/
+      - id: trailing-whitespace
+        exclude: ^(articles|docs/artifacts|evaluation/results|evaluation/golden)/
 
   - repo: local
     hooks:
       - id: check-doc-links
-        name: check relative markdown links resolve
+        name: check doc links, repo paths and CLI subcommands
         entry: python3 scripts/check_doc_links.py
         language: system
-        files: \.md$
+        files: \.(md|py)$
         pass_filenames: false

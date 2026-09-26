@@ -48,7 +48,7 @@ def _wandb_init(config: GSASRecConfig):
     if not config.wandb_enabled:
         return None
     try:
-        import wandb
+        import wandb  # noqa: PLC0415 — slow; only when wandb_enabled
     except ImportError:
         logger.warning("wandb not installed; continuing without it.")
         return None

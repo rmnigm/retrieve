@@ -462,9 +462,9 @@ def run(
         )
         try:
             module, build_s = measure.timed_build(
-                lambda: build_module(job, inp, assets, k_max, todo[0])
+                lambda: build_module(job, inp, assets, k_max, todo[0])  # noqa: B023 — called at once
             )
-        except Exception as exc:  # noqa: BLE001 — recorded, the loop continues (H §7)
+        except Exception as exc:  # recorded, the loop continues (H §7)
             logger.exception("build failed: {}", job.key(todo[0]))
             for p in todo:
                 records.append_record(path, _failed(job, p, env0, "build", exc, t0))
@@ -559,7 +559,7 @@ def run(
                 records.append_record(path, _failed(job, params, env0, stage, exc, t0))
                 counts["failed"] += 1
                 raise
-            except Exception as exc:  # noqa: BLE001 — recorded, the loop continues (H §7)
+            except Exception as exc:  # recorded, the loop continues (H §7)
                 logger.exception("cell failed at {}: {}", stage, job.key(params))
                 records.append_record(path, _failed(job, params, env0, stage, exc, t0))
                 counts["failed"] += 1

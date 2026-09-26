@@ -12,8 +12,7 @@
 
 Source: the NeurIPS'23 Big-ANN "filtered search" track set, served without
 registration from
-``https://dl.fbaipublicfiles.com/billion-scale-ann-benchmarks/yfcc100M/``
-(URLs fixed in ``docs/plans/dataset-candidates.md`` §3.4). Six files,
+``https://dl.fbaipublicfiles.com/billion-scale-ann-benchmarks/yfcc100M/``. Six files,
 2.97 GB total:
 
 ===============================  =============  ==================================
@@ -50,7 +49,7 @@ Examples::
     uv run eval-data yfcc all --output-dir data/yfcc10m
     uv run eval-data yfcc attrs --output-dir data/yfcc10m --max-tags 32
 
-Layout produced (under ``$RETRIEVE_DATA_ROOT``, default ``<repo>/data``)::
+Layout produced (under ``hub.data_root()``: ``$RETRIEVE_DATA_ROOT``, default ``evaluation/data``)::
 
     data/_raw/yfcc10m/                 <- the six upstream files + download.log
     data/_raw/yfcc10m/processed/       <- manifest.json (header facts, sha256)
@@ -74,7 +73,7 @@ and all recorded in ``docs/system/datasets.md``:
    file would be a bit-for-bit redundant 1.9 GB, and SilverTorch quantises
    internally at build time anyway.
 3. **The narrow clause tensor is a capped approximation of the true tag
-   predicate** (§3.4 gotcha (a)). Items carry 10.8 tags on average with a
+   predicate** (docs/system/datasets.md § yfcc10m). Items carry 10.8 tags on average with a
    1,517-tag tail; ``ExactAttributeFilter`` needs the whole bag inside one
    clause's ``A_max`` slots, which is not affordable. ``attrs`` caps at
    ``--max-tags`` (default 32) after restricting to the 7,910 tags that the
@@ -104,7 +103,7 @@ from eval_datasets.hub import raw_dir
 
 BASE_URL = "https://dl.fbaipublicfiles.com/billion-scale-ann-benchmarks/yfcc100M"
 
-#: filename -> expected size in bytes (probed 2026-09-05, re-verified 2026-09-06).
+#: filename -> expected size in bytes; ``download`` refuses a file of any other size.
 RAW_FILES: dict[str, int] = {
     "base.10M.u8bin": 1_920_000_008,
     "query.public.100K.u8bin": 19_200_008,
@@ -194,7 +193,7 @@ def read_spmat(path: Path) -> tuple[np.ndarray, np.ndarray, int]:
     return indptr, indices, int(ncol)
 
 
-# ----- tag-bag capping (the §3.4 gotcha (a) decision) -------------------------
+# ----- tag-bag capping (docs/system/datasets.md § yfcc10m) --------------------
 
 
 def build_tag_rank(
@@ -513,7 +512,7 @@ def cmd_prep(args) -> int:
     # The sidecars the layout contract asks for. ``"prefix": null`` is the declared
     # "this encoder has no prefix concept" of ``layout.prefix_problem`` — CLIP descriptors
     # are not nomic text embeddings — and is what lets ``bench check`` pass rather than
-    # report a missing assertion (the pre-2026-09-16 ``emb_provenance.json`` did neither).
+    # report a missing assertion.
     provenance = {
         "prefix": None,
         "encoder": "CLIP (Zilliz descriptors, per big-ann-benchmarks)",
@@ -772,7 +771,7 @@ def main(argv: list[str] | None = None) -> int:
         "--max-tags",
         type=int,
         default=DEFAULT_MAX_TAGS,
-        help=f"A_max per clause (default {DEFAULT_MAX_TAGS}); see §3.4 gotcha (a)",
+        help=f"A_max per clause (default {DEFAULT_MAX_TAGS}); docs/system/datasets.md § yfcc10m",
     )
     sp.set_defaults(func=cmd_attrs)
 

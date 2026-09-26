@@ -79,9 +79,7 @@ class FakeApi:
 @pytest.fixture
 def fake_hub(monkeypatch):
     api = FakeApi()
-    import huggingface_hub
-
-    monkeypatch.setattr(huggingface_hub, "HfApi", lambda *a, **k: api)
+    monkeypatch.setattr(upload, "HfApi", lambda *a, **k: api)
     return api
 
 
@@ -185,12 +183,10 @@ def test_verify_accepts_a_faithful_copy_and_catches_a_changed_byte(tree, tmp_pat
 
 
 def test_dry_run_touches_no_hub(tree, monkeypatch):
-    import huggingface_hub
-
     def boom(*a, **k):
         raise AssertionError("--dry-run must not reach the Hub")
 
-    monkeypatch.setattr(huggingface_hub, "HfApi", boom)
+    monkeypatch.setattr(upload, "HfApi", boom)
     r = _run("--results", str(tree), "--path-in-repo", "c4", "--dry-run")
     assert r.exit_code == 0, r.output
     man = json.loads(r.output[r.output.index("{") :])
@@ -240,9 +236,7 @@ def test_readme_is_rebuilt_from_the_manifests_already_in_the_repo(tree, fake_hub
     fetched.write_text(json.dumps(old))
     fake_hub.repo_files = ["c4/MANIFEST.json", "c4/flat.csv", "README.md"]
 
-    import huggingface_hub
-
-    monkeypatch.setattr(huggingface_hub, "hf_hub_download", lambda **kw: str(fetched))
+    monkeypatch.setattr(upload, "hf_hub_download", lambda **kw: str(fetched))
     assert _run("--results", str(tree), "--repo-id", "u/r", "--path-in-repo", "b3").exit_code == 0
     (readme_op,) = [o for o in fake_hub.commits[0]["operations"] if o.path_in_repo == "README.md"]
     body = readme_op.path_or_fileobj.decode()

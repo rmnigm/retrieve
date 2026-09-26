@@ -745,10 +745,7 @@ def _shelf_keep(name: str | None) -> bool:
     n = name.lower().strip()
     if not n or n in SHELF_BLOCKLIST:
         return False
-    for r in SHELF_RE_DROPS:
-        if r.match(n):
-            return False
-    return True
+    return not any(r.match(n) for r in SHELF_RE_DROPS)
 
 
 def cmd_attrs(args) -> int:
@@ -887,8 +884,8 @@ def cmd_attrs(args) -> int:
     )
     fmt_remap = pl.DataFrame(
         {
-            "format": list(fmt_lookup.keys()),
-            "format_id": [fmt_lookup[k] for k in fmt_lookup.keys()],
+            "format": list(fmt_lookup),
+            "format_id": [fmt_lookup[k] for k in fmt_lookup],
         },
         schema={"format": pl.Utf8, "format_id": pl.Int64},
     )

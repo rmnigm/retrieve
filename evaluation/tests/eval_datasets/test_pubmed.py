@@ -23,6 +23,7 @@ import polars as pl
 import pytest
 import torch
 
+from eval_datasets import layout
 from eval_datasets.etl import pubmed
 
 # ---------------------------------------------------------------------------
@@ -229,17 +230,17 @@ def test_parse_medline_gz(tmp_path):
 
 
 def _convert_args(out, **kw):
-    base = dict(
-        output_dir=str(out),
-        shards="0",
-        keep_items=None,
-        seed=0,
-        batch_rows=2,
-        fetch=False,
-        prefetch=1,
-        skip_embeds=False,
-        delete_raw=False,
-    )
+    base = {
+        "output_dir": str(out),
+        "shards": "0",
+        "keep_items": None,
+        "seed": 0,
+        "batch_rows": 2,
+        "fetch": False,
+        "prefetch": 1,
+        "skip_embeds": False,
+        "delete_raw": False,
+    }
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -297,8 +298,6 @@ def test_convert_writes_a_normalised_native_768_style_matrix(raw_root, tmp_path)
     assert index["shards"] == [
         {"filename": "text_emb_shard_00.pt", "start_id": 0, "n_rows": 3, "source_shard": 0}
     ]
-    from eval_datasets import layout
-
     whole = layout.load_sharded(content / "shard_index.json", torch.device("cpu"))
     assert torch.equal(whole, emb)
     meta = json.loads((content / "text_emb.meta.json").read_text())
@@ -326,15 +325,15 @@ def test_convert_without_pmids_fails_cleanly(raw_root, tmp_path):
 
 
 def _attrs_args(out, **kw):
-    base = dict(
-        output_dir=str(out),
-        mesh_vocab=100,
-        mesh_min_count=1,
-        journal_vocab=10,
-        mesh_desc=None,
-        n_heldout=2,
-        seed=0,
-    )
+    base = {
+        "output_dir": str(out),
+        "mesh_vocab": 100,
+        "mesh_min_count": 1,
+        "journal_vocab": 10,
+        "mesh_desc": None,
+        "n_heldout": 2,
+        "seed": 0,
+    }
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -417,8 +416,6 @@ def test_attrs_mesh_category_clause_uses_the_descriptor_file(converted, tmp_path
 
 
 def test_attrs_eval_split_matches_heldout_and_the_narrow_tensor(converted, tmp_path):
-    import polars as pl
-
     assert pubmed.cmd_attrs(_attrs_args(converted, mesh_desc=str(tmp_path / "nope.gz"))) == 0
     heldout = pl.read_parquet(converted / "heldout.parquet")
     split = pl.read_parquet(converted / "eval_split.parquet")
@@ -533,8 +530,6 @@ def _write_two_shards(root, dim=8):
 
 
 def test_streaming_convert_two_shards_delete_raw_resume_and_layout(raw_root, tmp_path):
-    from eval_datasets import layout
-
     src0, src1 = _write_two_shards(raw_root)
     out = tmp_path / "out"
     orig = pubmed.EMB_DIM_NATIVE

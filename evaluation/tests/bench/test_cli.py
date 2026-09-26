@@ -14,7 +14,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from bench import cli
+from bench import cli, measure
 
 
 def _records(path: Path) -> list[dict]:
@@ -102,3 +102,12 @@ def test_zero_cells_is_an_error(tiny_configs, tmp_path):
     r = CliRunner().invoke(cli.main, ["campaign", "--suite", "e2e", "--dim", "999", *common])
     assert r.exit_code == 1 and "no cells selected" in r.output
     assert list((out / "_logs").iterdir()) == [out / "_logs" / "campaign.log"]
+
+
+def test_env_prints_provenance_and_clocks_as_json(monkeypatch):
+    monkeypatch.setattr(measure, "official_commit", lambda: "abc123")
+    r = CliRunner().invoke(cli.main, ["env"])
+    assert r.exit_code == 0, r.output
+    env = json.loads(r.output)
+    assert set(env) == set(measure.provenance()) | set(measure.clocks())
+    assert env["official_commit"] == "abc123" and "sm_mhz" in env and "code_version" in env

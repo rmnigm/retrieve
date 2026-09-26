@@ -1,6 +1,7 @@
 """``bench`` — the harness console script (H §3.4): ``run`` (one process), ``campaign`` (one
 child per group), ``check`` (the on-disk layout), ``upload`` (results → HF mirror),
-``report`` (tables and figures from the records; roadmap D4).
+``report`` (tables and figures from the records; roadmap D4), ``env`` (the provenance and
+clock block as JSON, for a validation record).
 
 ``bench run`` expands one ``(dataset, suite)`` through ``config.load_matrix`` (every option
 below ``--suite`` is a narrow; ``--k`` / ``--bs`` / ``--mode`` replace the suite's lists and
@@ -18,6 +19,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import json
 import shutil
 import subprocess
 import sys
@@ -27,10 +29,13 @@ from pathlib import Path
 import click
 import yaml
 
+from bench import measure
+from bench import run as run_mod
 from bench.algos import BACKENDS, FILTER_KINDS
 from bench.config import load_dataset, load_matrix
 from bench.report import report
 from bench.upload import upload
+from eval_datasets.layout import validate_layout
 
 EVAL_DIR = Path(__file__).resolve().parents[1]
 SUITES = ("quality", "filter", "deep")
@@ -49,7 +54,7 @@ def _multi(v) -> list | None:
 
 @click.group()
 def main() -> None:
-    """The retrieval benchmark: run, campaign, check, upload, report."""
+    """The retrieval benchmark: run, campaign, check, upload, report, env."""
 
 
 main.add_command(upload)
@@ -80,8 +85,6 @@ def run(
     skip_quality, skip_perf, profile, out, output, resume, config_dir,
 ) -> None:  # fmt: skip
     """Run the cells of one (dataset, suite) in this process."""
-    from bench import run as run_mod  # noqa: PLC0415 — torch import only when running
-
     ds_yaml, suites_yaml = _paths(config_dir, dataset)
     jobs = load_matrix(
         ds_yaml,
@@ -224,8 +227,6 @@ def campaign(
 @click.option("--config-dir", default="config", show_default=True)
 def check(dataset, dims, config_dir) -> None:
     """Validate a dataset's on-disk layout (eval_datasets.layout.validate_layout) per dim."""
-    from eval_datasets.layout import validate_layout  # noqa: PLC0415 — torch import only here
-
     ds_yaml, _ = _paths(config_dir, dataset)
     with open(ds_yaml) as f:
         all_dims = yaml.safe_load(f)["dims"]
@@ -238,6 +239,12 @@ def check(dataset, dims, config_dir) -> None:
         for p in problems:
             click.echo(f"  {p}")
     sys.exit(1 if bad else 0)
+
+
+@main.command()
+def env() -> None:
+    """Print this box's provenance and one nvidia-smi clock sample as JSON."""
+    click.echo(json.dumps(measure.provenance() | measure.clocks(), indent=2))
 
 
 if __name__ == "__main__":

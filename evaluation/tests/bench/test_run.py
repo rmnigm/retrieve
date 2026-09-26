@@ -32,7 +32,7 @@ from retrieve import OfficialConfig
 
 LAT = {"warmup": 2, "n_min": 4, "n_max": 4, "windows": 3}
 EAGER = ("eager",)
-KW = dict(latency_kw=LAT)
+KW = {"latency_kw": LAT}
 
 
 def _jobs(cfgs, **narrow):
@@ -58,7 +58,7 @@ def test_end_to_end_records(tiny_configs, tmp_path):
     recs = _records(path)
     assert len(recs) == 3
     # Key block + status + provenance on every record.
-    for rec, job in zip(recs, jobs):
+    for rec, job in zip(recs, jobs, strict=True):
         assert rec["schema_version"] == records.SCHEMA_VERSION and rec["status"] == "ok"
         assert rec["partial_reasons"] is None
         assert {k: rec[k] for k in records.KEY_FIELDS} == job.key({})

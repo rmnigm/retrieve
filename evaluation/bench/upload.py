@@ -25,6 +25,7 @@ import tempfile
 from pathlib import Path
 
 import click
+from huggingface_hub import CommitOperationAdd, HfApi, hf_hub_download, snapshot_download
 
 from bench import records
 from bench.report import provenance
@@ -183,8 +184,6 @@ def verify(local: Path, man: dict) -> list[str]:
 def _other_manifests(api, repo_id: str, prefix: str) -> list[dict]:
     """The manifests already in the repo, minus the one this upload replaces: the root README
     is rebuilt from all of them, so it describes the repo and not just today's subtree."""
-    from huggingface_hub import hf_hub_download  # noqa: PLC0415
-
     out = []
     for f in api.list_repo_files(repo_id=repo_id, repo_type="dataset"):
         if not f.endswith("MANIFEST.json") or f.rpartition("/")[0] == prefix:
@@ -228,8 +227,6 @@ def upload(repo_id, results, prefix, gate, private, do_verify, dry_run) -> None:
     if dry_run:
         click.echo(json.dumps(man, indent=2))
         return
-
-    from huggingface_hub import CommitOperationAdd, HfApi, snapshot_download  # noqa: PLC0415
 
     def at(rel: str) -> str:
         return f"{prefix}/{rel}" if prefix else rel

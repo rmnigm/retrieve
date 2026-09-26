@@ -36,7 +36,8 @@ docstrings cite these steps as `§2.1`-`§2.8`.
 1. **Environment, once per process.** Seed torch/CUDA; TF32 off and
    `float32_matmul_precision("highest")` (`measure.setup`); one 3-matmul GPU
    warm-up (`warm_gpu_once`); record provenance: GPU name, driver, CUDA
-   runtime, torch/triton versions, git commit + dirty flags, branch,
+   runtime, torch/triton versions, the installed official (`silvertorch`)
+   commit, git commit + dirty flags, branch,
    `code_version`, hostname, python, UTC start, and one `nvidia-smi` clock
    sample (`env.sm_mhz_idle`, `mem_mhz`, `sm_max_mhz`, `power_limit_w`).
    Clocks cannot be locked on this box
@@ -184,7 +185,7 @@ cascade.
 
 | module | owns |
 |---|---|
-| [`measure.py`](../../evaluation/bench/measure.py) | `setup`, `warm_gpu_once`, `provenance` (GPU, driver, CUDA, torch, triton, commit, `dirty` = `subtree_dirty()` over `retrieve/src/retrieve`, `repo_dirty`, branch, `code_version` = the subtree's tree hash, or `files:<sha256>` of the sources on disk when the subtree is dirty, host, python, started), `clocks()` (one `nvidia-smi` sample), `timed_build`, `index_bytes` (Σ buffers, submodules included, deduplicated), `stats`, `latency(fn, bs=, mode=)` (§2.5 windows, IQR + outlier counts, `load: closed_loop`, `peak_fwd_mib`, the under-load `sm_mhz`), `graph_callable` (raises `NotCapturable` with the record's `reason`), `profile_once` |
+| [`measure.py`](../../evaluation/bench/measure.py) | `setup`, `warm_gpu_once`, `provenance` (GPU, driver, CUDA, torch, triton, `official_commit` — the installed `silvertorch`'s PEP 610 `direct_url.json` `vcs_info.commit_id`, `None` when it is not installed from git — commit, `dirty` = `subtree_dirty()` over `retrieve/src/retrieve`, `repo_dirty`, branch, `code_version` = the subtree's tree hash, or `files:<sha256>` of the sources on disk when the subtree is dirty, host, python, started), `clocks()` (one `nvidia-smi` sample), `timed_build`, `index_bytes` (Σ buffers, submodules included, deduplicated), `stats`, `latency(fn, bs=, mode=)` (§2.5 windows, IQR + outlier counts, `load: closed_loop`, `peak_fwd_mib`, the under-load `sm_mhz`), `graph_callable` (raises `NotCapturable` with the record's `reason`), `profile_once` |
 | [`records.py`](../../evaluation/bench/records.py) | what a record *is*: `SCHEMA_VERSION`, `KEY_FIELDS`, `resume_key`, `record_path`, `samples_path`, `append_record` (one `write` + `fsync`), `read_records` / `read_keys` (one torn trailing line tolerated), `flatten(results_dir) → flat.csv` (one row per perf entry, last record per key — what `report.py` reads) |
 | [`metrics.py`](../../evaluation/bench/metrics.py) | `accumulator(ks, device)` / `accumulate(acc, ids, targets, num_targets=None, ranked=False)` / `finalize(acc)` — recall, ndcg, precision, mrr at every `k` from one top-`k_max` list as float64 running sums on device; `ranked=True` scores against the oracle's own top-`k` prefix; `per_row`, `jaccard_at_k`. `training/evaluate.py` keeps its own frozen copy, pinned to agree (`training/test_encode.py`) |
 | [`algos.py`](../../evaluation/bench/algos.py) | the algorithm table: `ALGOS` name → library class (`LiNRV1`–`LiNRV4`, `SilverTorch`), `FILTER_KINDS`, `BACKENDS`, `FILTER_MODE` (`clause` → `exact`), `PATHS` **derived from `retrieve.interfaces.DISPATCH`**, `filter_backend` (`official` → `triton`), `build(algo, item_embs, k=, backend=, …)` (construct + `register_index`, ≈ 25 lines), `build_filter`, `is_valid_combo` |
@@ -192,7 +193,7 @@ cascade.
 | [`inputs.py`](../../evaluation/bench/inputs.py) | `load_inputs` (dispatch to `training.encode.encode_split` or the `eval_datasets.layout` text readers; `users_limit` once, as a prefix), `sweep_qa`, `build_filters` (keyed by filter backend), `exact_filter`, `query_pool` |
 | [`oracle.py`](../../evaluation/bench/oracle.py) | the exact filtered oracle as blob v4, `attrs_digest`, `pass_counts`, `pass_rate`, `bloom_fp_rate` |
 | [`run.py`](../../evaluation/bench/run.py) | `run(jobs, out_dir=...)` — the cell loop; `MODES`, `QUALITY_CHUNK = 16`, `EXACT_ALGOS`, `PERF_STAT_KEYS`, `CLOCK_DRIFT` |
-| [`cli.py`](../../evaluation/bench/cli.py) | `bench run` / `campaign` / `check` / `upload` / `report` |
+| [`cli.py`](../../evaluation/bench/cli.py) | `bench run` / `campaign` / `check` / `upload` / `report` / `env` |
 | [`report.py`](../../evaluation/bench/report.py) | `bench report`: `flat.csv`, the thesis and paper tables as LaTeX, the figures, the methodology paragraph and `report.md`; the `ARTIFACTS` dispatch table, the citability verdict and the `PAPER_REPORTED` constants. See [Report](#report-reportpy) |
 | [`upload.py`](../../evaluation/bench/upload.py) | `bench upload`: publish a results tree to the HF results repo with a `MANIFEST.json` (provenance + a sha256 per file) and a generated README. See [Results storage](#results-storage) |
 
@@ -257,7 +258,10 @@ comparable. The grid is one backend per algo (`triton`; `silvertorch` also
 runs `official`), without `linr_v4` and without a dim ablation
 ([decisions](../decisions.md#harness)).
 [`tests/bench/test_config.py`](../../evaluation/tests/bench/test_config.py)
-pins the current d128 `filter` cell set for goodreads and arxiv.
+pins the current d128 `filter` cell set for goodreads and arxiv, and runs
+every `config/*.yaml` against every suite through `load_matrix`: a listed
+dataset expands to jobs, an unlisted one is refused by name and still
+resolves at each of its dims.
 
 `suites.yaml` holds two suites, `filter` and `deep`. There is no unfiltered
 `quality` suite ([decisions](../decisions.md#harness)); unfiltered cells
@@ -346,6 +350,7 @@ bench upload   [--repo-id user/repo] [--results DIR] [--path-in-repo PREFIX] [--
 bench report   [results] [--out DIR] [--gate STEP] [--only NAME]* [--dim 128] [--k 100]
                [--bs 1] [--compare-bs 16] [--mode eager|graph] [--backend triton]
                [--sweep W] [--batch-dataset D] [--budget-ms MS]*
+bench env                                                     # provenance | clocks, as JSON
 ```
 
 `*` = repeatable. `bench run` expands one `(dataset, suite)` through
@@ -390,6 +395,12 @@ it, at the cost of a dataset reload and a CUDA context init per group.
 the dataset's directory at every dim (files, prefix sidecars, the row
 alignments the readers enforce) and exits 1 on any problem — run it before
 a campaign on a freshly staged dataset.
+`bench env` prints `measure.provenance() | measure.clocks()` as one JSON
+object — the provenance fields of the record's `env` block plus one
+`nvidia-smi` sample under `clocks()`'s names (`sm_mhz`, `mem_mhz`,
+`sm_max_mhz`, `power_limit_w`) — to paste into a
+[validation](../validation.md) record next to a number measured outside the
+harness.
 
 ## The cell loop (`run.py`)
 
@@ -484,7 +495,7 @@ perf entries.
 | `unstable` | bool | any perf entry `unstable` (window spread > 5 %), or `clocks_drift` |
 | `memory_reserved_mib` | float / null | `torch.cuda.memory_reserved()` after the cell — the leak detector across a group's cells |
 | `elapsed_s` | float | wall time of the cell |
-| `env` | dict | `gpu, driver, cuda, torch, triton, commit, dirty, repo_dirty, git_branch, code_version, host, python, started, config_sha`; the process-start sample `sm_mhz_idle, mem_mhz, sm_max_mhz, power_limit_w`; the cell's `sm_mhz_load` (median of its perf entries' under-load samples; `null` without perf or CUDA) and `clocks_drift` (any under-load sample > 5 % from the process's first) |
+| `env` | dict | `gpu, driver, cuda, torch, triton, official_commit, commit, dirty, repo_dirty, git_branch, code_version, host, python, started, config_sha`; the process-start sample `sm_mhz_idle, mem_mhz, sm_max_mhz, power_limit_w`; the cell's `sm_mhz_load` (median of its perf entries' under-load samples; `null` without perf or CUDA) and `clocks_drift` (any under-load sample > 5 % from the process's first) |
 | `stage`, `error` | str | `failed` records only: where it died and the traceback |
 
 Perf entry:
@@ -738,19 +749,45 @@ marker and `testpaths`):
 cd evaluation && CUDA_VISIBLE_DEVICES="" uv run pytest tests/ -q
 ```
 
+`[tool.pytest.ini_options] pythonpath = [".", "../retrieve/src"]` makes the
+suite import `bench`, `training`, `eval_datasets` and `retrieve` from the
+checkout it sits in. Without it a worktree on the shared venv tests the
+checkout the venv's `.pth` names. Console scripts (`uv run --no-sync bench
+…`) still resolve through that `.pth`; in a worktree run `python -m
+bench.cli …` from `evaluation/`.
+
+### Lint
+
+`ruff check evaluation` selects `E, W, F, I, UP` plus bugbear (`B`, so
+`zip()` needs `strict=`), comprehensions (`C4`), simplify (`SIM`), unused
+`noqa` (`RUF100`), blind `except` (`BLE001`) and no inline imports
+(`PLC0415`, a preview rule enabled alone through `explicit-preview-rules`).
+Each per-file ignore in `evaluation/pyproject.toml` carries its reason: the
+ETL CLIs defer torch, sentence-transformers and transformers to the
+subcommand that needs them, and goodreads' broad `except`s wait on their own
+cleanup. An inline `noqa` says why too. `retrieve/` keeps its narrower set
+until roadmap Q4. One ruff version everywhere: `ruff==0.15.6` in the
+workspace `dev` group and the same `rev` in `.pre-commit-config.yaml`, whose
+hooks run `ruff check` on `retrieve/` and `evaluation/`, `ruff format` on
+`retrieve/` (`evaluation/` is not format-clean yet), the merge-conflict,
+large-file (10 MB), end-of-file and trailing-whitespace hooks (the last two
+never on `articles/`, `docs/artifacts/`, `evaluation/results/`,
+`evaluation/golden/`), and `scripts/check_doc_links.py`.
+
 | file | checks |
 |---|---|
-| `test_dependency_direction.py` | every `import` / `from` in `bench/`, `training/`, `eval_datasets/` resolved with `ast`: `bench` → `training.encode`, `eval_datasets.{layout,hub}`; `training` → `eval_datasets.{hub,layout,timesplit}`; `eval_datasets` → nothing; the library only through `retrieve` (its top-level names), `retrieve.functional`, `retrieve.interfaces` |
+| `test_dependency_direction.py` | every `import` / `from` in `bench/`, `training/`, `eval_datasets/` resolved with `ast`: `bench` → `training.encode`, `eval_datasets.layout`; `training` → `eval_datasets.{hub,layout}`; `eval_datasets` → nothing; the library only from `bench`, through `retrieve` (the algo and filter classes) and `retrieve.interfaces` (`DISPATCH`, `FilterModule`). The walk must see more than 25 files, and an allow-list entry no import uses fails as stale |
+| `test_env_readers.py` | every `os.environ.get` / `os.getenv` / `os.environ[...]` of a `RETRIEVE_*` name under `evaluation/` sits in its owner (`RETRIEVE_DATA_ROOT`: `eval_datasets/hub.py`, read through `data_root()`); same file-count and stale-owner guards |
 | `bench/test_paths.py` | `PATHS == derive(DISPATCH)`: the derived table equals the harness's expected paths, the grid is complete, `DISPATCH` names every algo × backend |
 | `bench/test_records.py` | `resume_key` canonical and `code_version`-sensitive; append / read round trip; one torn trailing line; `flatten` one row per perf entry, last record per key |
-| `bench/test_measure.py` | `stats` vs numpy, `latency` control flow, `index_bytes` dedup, `provenance` git fields, `dirty` scoped to the library subtree with the `files:` fallback, `repo_dirty` excluding `results/`, `atomic_write`, `clocks` shape, `graph_callable` refusals |
+| `bench/test_measure.py` | `stats` vs numpy, `latency` control flow, `index_bytes` dedup, `provenance` git fields, `official_commit` from PEP 610 (git, local dir, no `direct_url.json`, not installed), `dirty` scoped to the library subtree with the `files:` fallback, `repo_dirty` excluding `results/`, `atomic_write`, `clocks` shape, `graph_callable` refusals |
 | `bench/test_metrics.py` | padding / IDCG / denominator contracts; running sums equal per-row means to 1e-9; `jaccard_at_k` |
 | `bench/test_algos.py` | `build` on every `(algo, filter_kind)` torch cell: the `k` setter slices the top-k and changes no buffer; the filter submodule in `index_bytes`; `set_query_params`; build refusals |
-| `bench/test_config.py` | job counts and keys per suite on `tests/bench/data/{mini,text,suites}.yaml`; `disabled`; build/query split; seeds; narrows and `Job.narrowed`; the real `goodreads` / `arxiv` d128 cell sets |
+| `bench/test_config.py` | job counts and keys per suite on `tests/bench/data/{mini,text,suites}.yaml`; `disabled`; build/query split; seeds; narrows and `Job.narrowed`; the real `goodreads` / `arxiv` d128 cell sets; every `config/*.yaml` × every suite through `load_matrix` |
 | `bench/test_inputs.py` | `load_inputs` on the conftest writer, `users_limit` once, prefix and row-count checks, the legacy layout loading equal to the modern one, misalignment raising, `attrs_digest`, `sweep_qa`, filters by filter backend, `query_pool` |
 | `bench/test_oracle.py` | padding, v4 fields and arithmetic, fingerprint in the file name, an unreadable blob rebuilt, bloom FP rate, `code_version` |
 | `bench/test_run.py` | end to end on the tiny fixture, both modes (`graph` = the CPU null entry): record schema, resume, `code_version` invalidation, `partial`, a failed cell + continue, a sticky CUDA error, the quality gate, the parity spill, reachable-target masking, the plan cache off through `OfficialConfig` |
-| `bench/test_cli.py` | `bench run` via `CliRunner`, a real one-child `bench campaign`, a faked timed-out child, zero cells → exit 1, `bench report` over the campaign's own records |
+| `bench/test_cli.py` | `bench run` via `CliRunner`, a real one-child `bench campaign`, a faked timed-out child, zero cells → exit 1, `bench report` over the campaign's own records, `bench env`'s JSON keys |
 | `bench/test_upload.py` | `bench upload` with no network: `_logs/` and `_parity/` never listed, the manifest's sha256 per file, evidence beating `--gate` four ways, the generated README over several subtrees, `verify` catching a changed byte, the commit's operations and `private=True` |
 | `bench/test_report.py` | every column the tables read still comes out of `records.flatten`; every artifact emitted; the LaTeX structurally balanced with the thesis's labels and no unescaped `_`; a `failed` record excluded and a `partial` / `unstable` one marked; citability off by default and evidence beating `--gate`; an empty tree; a schema-1 record |
 | `bench/test_c4_gate.py` | the golden-comparison gate script, [`c4_gate.py`](../artifacts/evaluation-harness-v2/c4_gate.py), against synthesised schema-1 records |
@@ -827,7 +864,8 @@ uv run eval-data publish-checkpoint yambda-500m gsasrec-d128-drop0.5 --dry-run
 ```
 
 The local data root resolves to `evaluation/data/` by default; override
-with `RETRIEVE_DATA_ROOT=/some/path`. The pod image sets it to
+with `RETRIEVE_DATA_ROOT=/some/path`. `hub.data_root()` is its only reader
+(`tests/test_env_readers.py`); every ETL default goes through it. The pod image sets it to
 `/workspace/data` ([storage](storage.md)).
 
 ## Archived results

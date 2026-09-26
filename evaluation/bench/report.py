@@ -32,10 +32,10 @@ from typing import Any
 import click
 import matplotlib
 
-from bench import records
+from bench import inputs, measure, records, run
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402 — after use("Agg")
+import matplotlib.pyplot as plt
 
 ALGO_LABEL = {
     "linr_v1_filter_mask": "LiNR V1",
@@ -535,9 +535,10 @@ def tab_recall_at_budget(c) -> list[Path]:
             best = None
             for r in sub:
                 p99, rec = r.get("perf_p99_ms"), r.get(f"oracle_recall@{c.k}")
-                if p99 is not None and rec is not None and p99 <= budget:
-                    if best is None or rec > best[0]:
-                        best = (rec, r["algo"], r["backend"])
+                if p99 is not None and rec is not None and p99 <= budget and (
+                    best is None or rec > best[0]
+                ):
+                    best = (rec, r["algo"], r["backend"])
             cells.append("---" if best is None
                          else _f(best[0]) + f" ({ALGO_LABEL.get(best[1], best[1])})")
         body.append([DATASET_LABEL.get(ds, ds), _esc(sw)] + cells)
@@ -770,8 +771,6 @@ def fig_latency_violin(c) -> list[Path]:
 def methodology(c) -> list[Path]:
     """The §"Методология замеров" paragraph, with the constants read out of the code that
     produced the records — so text and code cannot drift apart again (H WP-6)."""
-    from bench import inputs, measure, run  # noqa: PLC0415 — torch only when reporting
-
     lat = inspect.signature(measure.latency).parameters
     pool = inspect.signature(inputs.query_pool).parameters["n_pool"].default
     recs = c.recs
