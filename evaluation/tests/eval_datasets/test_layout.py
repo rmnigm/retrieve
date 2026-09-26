@@ -10,6 +10,7 @@ import json
 import polars as pl
 import pytest
 import torch
+import torch.nn.functional as F
 from conftest import write_tiny_dataset
 
 from eval_datasets import layout
@@ -113,3 +114,17 @@ def test_validate_layout_sequential_shape(tmp_path):
     torch.save(torch.tensor([False, True]), root / "clause_is_reverse_narrow.pt")
     pl.DataFrame({"query_attrs_narrow": [[0, 1]] * 7}).write_parquet(root / "eval_split.parquet")
     assert layout.validate_layout(root) == ["eval_split rows 7 != queries 8"]
+
+
+def test_load_sharded_normalize_equals_whole_matrix_normalize(tmp_path):
+    shards = [torch.randn(5, 16).half(), torch.randn(3, 16).half()]
+    entries = []
+    for i, (start, s) in enumerate(zip((0, 5), shards, strict=True)):
+        torch.save(s, tmp_path / f"text_emb_shard_{i:03d}.pt")
+        entries.append(
+            {"filename": f"text_emb_shard_{i:03d}.pt", "start_id": start, "n_rows": len(s)}
+        )
+    index = tmp_path / "shard_index.json"
+    index.write_text(json.dumps({"n_items": 8, "dim": 16, "dtype": "float16", "shards": entries}))
+    whole = F.normalize(layout.load_sharded(index, torch.device("cpu")).float(), dim=-1)
+    assert torch.equal(layout.load_sharded(index, torch.device("cpu"), normalize=True), whole)

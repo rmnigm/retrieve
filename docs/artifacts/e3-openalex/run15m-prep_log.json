@@ -29,5 +29,50 @@
     "mean_relevant_field_era_per_query": 2.85,
     "seed": 0,
     "wall_clock_sec": 410.1
+  },
+  "attrs": {
+    "n_items": 15000000,
+    "clauses": [
+      "field",
+      "earlier_era",
+      "subfield",
+      "source",
+      "is_oa"
+    ],
+    "clause_is_reverse": [
+      false,
+      false,
+      false,
+      true,
+      false
+    ],
+    "vocab_sizes": {
+      "field": 26,
+      "subfield": 252,
+      "source": 5000,
+      "era": 5
+    },
+    "coverage": {
+      "field": 0.9985,
+      "earlier_era": 0.7375,
+      "subfield": 0.9985,
+      "source": 0.5159,
+      "is_oa": 1.0
+    },
+    "query_clause_active": {
+      "field": 1.0,
+      "earlier_era": 1.0,
+      "subfield": 1.0,
+      "source": 0.5721,
+      "is_oa": 1.0
+    },
+    "target_passes_clause": {
+      "field": 1.0,
+      "earlier_era": 1.0,
+      "subfield": 0.7505,
+      "source": 0.9229155742003147,
+      "is_oa": 0.5082
+    },
+    "wall_clock_sec": 5.4
   }
 }

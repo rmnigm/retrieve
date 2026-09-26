@@ -1,7 +1,8 @@
 # OpenAlex works + nomic-embed-text-v1.5 at its native 768 dims — roadmap E3's OpenAlex
 # fallback of the Semantic Scholar SPECTER2 slice (named for the data it holds, not the S2
-# plan). Nothing is staged and the dataset is in no suite of suites.yaml; nothing produced
-# from this file is citable. Clause layout (docs/system/datasets.md § openalex): C0 field,
+# plan), staged as a 15 M catalog. In no suite: at 15 M x 768 the harness oracle's
+# transposed item copy does not fit the A100 (roadmap E3); nothing produced from this file
+# is citable. Clause layout (docs/system/datasets.md § openalex): C0 field,
 # C1 earlier_era (item era strictly before the query's), C2 subfield, C3 source (REVERSE —
 # bloom-incompatible), C4 is_oa. The query side is the held-out paper's own field / era /
 # subfield / venue; field_era is the roadmap's "year < query year, same field".

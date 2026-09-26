@@ -726,14 +726,19 @@ data/kuairand/
 
 ### openalex
 
-**Status: streamed and prepped at 15 M, not encoded.** Roadmap E3's OpenAlex fallback (no
-Semantic Scholar key), run at a 15 M catalog (50 M does not fit the harness, below). On
-2026-09-26 `convert --sample-rate 0.35 --workers 64` streamed all 2,040 files of release
-2026-09-23 (297.1 GB read in 572 s, 0 failures) and `prep --keep-items 15000000` built the
-catalog and 10,000 held-out queries (410 s, 64 GB peak RSS); `verify_prep.py` re-derived
-every query with no mismatch ([run logs](../artifacts/e3-openalex/)). `encode_text`,
-`encode_queries`, `attrs`, the oracle and every cell are still to run; nothing below is
-citable.
+**Status: staged at 15 M, `bench check` clean, no cell runs.** Roadmap E3's OpenAlex
+fallback (no Semantic Scholar key), at a 15 M catalog. On 2026-09-26
+`convert --sample-rate 0.35 --workers 64` streamed all 2,040 files of release 2026-09-23
+(297.1 GB read in 572 s, 0 failures), `prep --keep-items 15000000` built the catalog and
+10,000 held-out queries (410 s, 64 GB peak RSS; `verify_prep.py` re-derived every query
+with no mismatch), `encode_text` ran 15,663 s on the A100 (958 docs/s), then
+`encode_queries` and `attrs`; `bench check --dataset openalex` reports `openalex d768: ok`
+([run logs](../artifacts/e3-openalex/)). **The filter cell does not fit**: the harness
+holds the items fp32 on the device (43 GB) and `bench/oracle.py` then makes a transposed
+contiguous copy of them (`item_embs.t().contiguous()`, another 43 GB) — 88 GB on a 79 GB
+A100. Its ceiling at 768-d is therefore ~11–12 M items, not the ~15 M quoted when the
+slice was chosen (pubmed's 10 M needs 57 GB). Nothing below is citable. What to do — a
+smaller catalog, or an oracle without the copy — is open on the roadmap.
 
 The full-scan filter counts (`convert_log.jsonl`, summed): 476,196,327 rows → year
 373,119,082 → English 261,736,236 → type 154,189,252 → flags 130,910,232 → hash sample
@@ -886,16 +891,20 @@ The 15 M run as measured; the encode rate from the dry run, `plan` from its
 | sample rate | 0.35 → 29.9 M staged; any rate with 15 M × (1 + margin) below it gives the same catalog |
 | staging parquet | 16 GB (`_raw/openalex/staging`, deletable after `prep`) |
 | `prep` | 410 s, 64 GB peak RSS; `papers.parquet` 9.3 GB, `item_id_map.json` 318 MB |
-| fp16 item shards | 23.0 GB (not yet written) |
+| fp16 item shards | 23.0 GB (15 × 1 M) |
 | **peak disk** | **~49 GB** with staging kept, ~33 GB without |
-| encode | 15 M ÷ 898 docs/s ≈ **4.6 A100-hours** (queries: seconds) |
-| items fp32 on the device | 46.1 GB |
+| encode | **15,663 s = 4.35 A100-hours**, 958 docs/s (shards of 1.00–1.02 k docs/s early); queries: seconds |
+| items fp32 on the device | 46.1 GB resident, **92 GB** with the oracle's transposed copy — does not fit |
 
-**50 M does not fit the harness as written**: `load_inputs` holds items fp32 on the device,
-153.6 GB at 768-d on an 80 GB A100 — the ceiling that made pubmed a 10 M slice (~15 M
-items at 768-d). E3 therefore runs at 15 M (orchestrator decision, the pubmed precedent);
-a larger N is only `prep --keep-items` plus a higher `--sample-rate`, and the 15 M catalog
-is a subset of any larger one.
+**What fits the harness.** `load_inputs` holds items fp32 on the device and the oracle
+adds a transposed fp32 copy, so a run needs ~2 × N × D × 4 B plus attrs and workspace: at
+768-d that is ~11–12 M items on the 80 GB A100. 50 M (307 GB) and 15 M (92 GB) do not
+fit; pubmed's 10 M (57 GB) does. Before that, the loader itself peaked at three copies
+(fp16 + `.float()` + `F.normalize`, 107 GB at 15 M); `layout.load_text_items` now
+normalises a sharded matrix shard by shard into one fp32 buffer (`load_sharded(...,
+normalize=True)`, `torch.equal` to the old path on 3 M real rows), which is what got the
+15 M run as far as the oracle. A smaller catalog is `prep --keep-items N`: the N smallest
+hashes are a subset of the 15 M, so their vectors are already encoded.
 
 ```
 data/openalex/
