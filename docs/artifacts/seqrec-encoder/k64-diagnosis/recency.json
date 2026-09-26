@@ -1,0 +1,14 @@
+{
+  "frac_test_targets_in_val_day_targets": 0.475741438024738,
+  "frac_test_targets_in_train": 0.44716719326922455,
+  "frac_test_targets_in_val_day_but_not_train": 0.12979362859830165,
+  "frac_test_targets_in_neither": 0.42303917813247377,
+  "val_day_popularity_on_test": {
+    "ndcg@10": 0.031448687411721694,
+    "recall@10": 0.0017169424282561035,
+    "ndcg@100": 0.019870242595381785,
+    "recall@100": 0.007323559622837242,
+    "coverage@10": 3.121222832681388e-07,
+    "coverage@100": 3.1212228326813877e-06
+  }
+}

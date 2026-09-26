@@ -14,10 +14,11 @@ Train loss kept falling (16.5 -> 11.3) while val stalled from epoch 3.
 249 s/epoch median train (2,193 batches), 2,241 seq/s, peak 62.6 GB, 4407 s training loop
 (~78 min wall).
 
-What bounds these numbers (measured, `cold_targets.txt`): **55.3 % of test targets and 34.1 % of
-val targets never occur in the train split.** Those items get no positive update, so the model cannot
-rank them, and the test day is further from train than the val day (median 246 targets per test user
-against 118 per val user). This bounds the metrics; it is not shown to be the whole gap.
+Cold targets (`cold_targets.txt`): 55.3 % of test targets and 34.1 % of val targets never occur in
+the train split. **They do not explain the val/test gap:** restricted to train-seen targets, ndcg@10
+is unchanged (val 0.0233, test 0.0046). The measured mechanism is temporal drift: a global list of
+the val day's most-clicked items scores 0.0314 on test, ~7x this model. See
+[the diagnosis](../k64-diagnosis/README.md).
 
 Context, not a bar: the earlier A100 gSASRec d128 KuaiRand run (`.chains/e4-kuairand/`) logged val
 ndcg@10 0.0133 at epoch 2 and has no final test number; R-k64 had val 0.0218 at epoch 2.
