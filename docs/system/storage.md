@@ -167,9 +167,9 @@ Size the pod's disks for these at `pod.sh up` (`--disk`, `--volume`):
 - **E3 (OpenAlex) only fits as a stream.** The works snapshot is 707 GB of
   parquet and is never landed: `openalex convert` reads 297 GB of projected
   columns over S3 (572 s at 64 workers) and stages the filtered, hash-sampled
-  rows (16 GB). At the 15 M catalog peak disk is ~49 GB with staging kept,
-  ~33 GB without; encoding adds ~4.6 A100-hours
-  ([datasets](datasets.md#budget)).
+  rows (16 GB). The 10 M catalog is ~23 GB (papers 6.3, fp16 items 15, attrs
+  1.5); the superseded 15 M catalog it was resharded from is 34 GB more while
+  it is kept ([datasets](datasets.md#budget)).
 
 ## Persistence
 

@@ -1,0 +1,13 @@
+STEP load /data/openalex-15m/content_d768 (15,000,000 rows, fp16) for 10,000,000 items
+  shard 0: 1,000,000 rows → text_emb_shard_000.pt
+  shard 1: 1,000,000 rows → text_emb_shard_001.pt
+  shard 2: 1,000,000 rows → text_emb_shard_002.pt
+  shard 3: 1,000,000 rows → text_emb_shard_003.pt
+  shard 4: 1,000,000 rows → text_emb_shard_004.pt
+  shard 5: 1,000,000 rows → text_emb_shard_005.pt
+  shard 6: 1,000,000 rows → text_emb_shard_006.pt
+  shard 7: 1,000,000 rows → text_emb_shard_007.pt
+  shard 8: 1,000,000 rows → text_emb_shard_008.pt
+  shard 9: 1,000,000 rows → text_emb_shard_009.pt
+ALL DONE reshard in 34s — 10,000,000 items
+EXIT 0

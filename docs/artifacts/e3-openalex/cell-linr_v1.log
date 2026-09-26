@@ -1,44 +1,10 @@
-2026-09-26 07:32:00.844 | INFO     | bench.config:load_matrix:363 - openalex/filter: 1 jobs, 1 cells
-2026-09-26 07:32:19.428 | INFO     | bench.inputs:load_inputs:57 - inputs: items 15000000 queries 10000 dim 768
-2026-09-26 07:32:24.051 | INFO     | bench.inputs:build_filters:109 - filter modules (clause): ['triton']
-2026-09-26 07:32:24.057 | INFO     | bench.oracle:load_or_build:227 -   building exact oracle (k_gt=1000) for sweep field_era
-Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "/scratch/wt/e3/evaluation/bench/cli.py", line 254, in <module>
-    main()
-  File "/venvs/retrieve/lib/python3.11/site-packages/click/core.py", line 1514, in __call__
-    return self.main(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venvs/retrieve/lib/python3.11/site-packages/click/core.py", line 1435, in main
-    rv = self.invoke(ctx)
-         ^^^^^^^^^^^^^^^^
-  File "/venvs/retrieve/lib/python3.11/site-packages/click/core.py", line 1902, in invoke
-    return _process_result(sub_ctx.command.invoke(sub_ctx))
-                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venvs/retrieve/lib/python3.11/site-packages/click/core.py", line 1298, in invoke
-    return ctx.invoke(self.callback, **ctx.params)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/venvs/retrieve/lib/python3.11/site-packages/click/core.py", line 853, in invoke
-    return callback(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch/wt/e3/evaluation/bench/cli.py", line 116, in run
-    counts = run_mod.run(
-             ^^^^^^^^^^^^
-  File "/scratch/wt/e3/evaluation/bench/run.py", line 454, in run
-    assets = sweep_assets(job, inp, k_max, device)
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch/wt/e3/evaluation/bench/run.py", line 119, in sweep_assets
-    blob = oracle.load_or_build(
-           ^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch/wt/e3/evaluation/bench/oracle.py", line 231, in load_or_build
-    **compute(
-      ^^^^^^^^
-  File "/venvs/retrieve/lib/python3.11/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
-    return func(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^
-  File "/scratch/wt/e3/evaluation/bench/oracle.py", line 156, in compute
-    item_embs_t = item_embs.t().contiguous()
-                  ^^^^^^^^^^^^^^^^^^^^^^^^^^
-torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 42.92 GiB. GPU 0 has a total capacity of 79.25 GiB of which 32.95 GiB is free. Including non-PyTorch memory, this process has 46.29 GiB memory in use. Of the allocated memory 45.16 GiB is allocated by PyTorch, and 655.06 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
-EXIT 1
+2026-09-26 07:47:36.103 | INFO     | bench.config:load_matrix:363 - openalex/filter: 1 jobs, 1 cells
+2026-09-26 07:47:49.044 | INFO     | bench.inputs:load_inputs:57 - inputs: items 10000000 queries 10000 dim 768
+2026-09-26 07:47:52.235 | INFO     | bench.inputs:build_filters:109 - filter modules (clause): ['triton']
+2026-09-26 07:47:52.238 | INFO     | bench.oracle:load_or_build:227 -   building exact oracle (k_gt=1000) for sweep field_era
+2026-09-26 07:48:19.012 | INFO     | bench.oracle:load_or_build:254 -   saved oracle → data/openalex/gt_d768/oracle_v4_field_era_e2c8e7da5aeb3ff9.pt (pass_rate=0.0526)
+2026-09-26 07:48:19.014 | INFO     | bench.run:run:460 - build linr_v1_filter_mask clause/field_era triton build={}
+2026-09-26 07:48:43.615 | INFO     | bench.run:run:582 -   linr_v1_filter_mask clause/field_era triton params={} -> partial (24s)
+2026-09-26 07:48:43.802 | INFO     | bench.run:run:590 - done: {'partial': 1}
+openalex/filter: {'partial': 1}
+EXIT 0

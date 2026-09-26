@@ -1,0 +1,2 @@
+{"n_items": 10000000, "n_queries": 10000, "n_qrels": 35673, "queries_mismatched": 0}
+EXIT 0

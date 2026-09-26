@@ -140,3 +140,29 @@ def test_prep_attrs_hold_out_citing_papers_and_pass_validate_layout(staged):
     for name, prefix in (("text_emb", openalex.DOC_PREFIX), ("query_emb", openalex.QUERY_PREFIX)):
         (content / f"{name}.meta.json").write_text(json.dumps({"prefix": prefix}))
     assert layout.validate_layout(out, content) == []
+
+
+def test_reshard_gathers_a_smaller_catalogs_vectors_by_work_id(staged):
+    big, small = staged / "big", staged / "small"
+    prep = {"n_heldout": 100, "seed": 0, "row_group_rows": 10}
+    assert openalex.cmd_prep(argparse.Namespace(output_dir=str(big), keep_items=45, **prep)) == 0
+    big_ids = pl.read_parquet(big / "papers.parquet")["work_id"].to_list()
+    content = big / "content_d768"
+    content.mkdir()
+    emb = torch.tensor(big_ids, dtype=torch.float16)[:, None].expand(45, 768).contiguous()
+    torch.save(emb[:20], content / "text_emb_shard_000.pt")
+    torch.save(emb[20:], content / "text_emb_shard_001.pt")
+    shards = [{"filename": f"text_emb_shard_00{i}.pt", "start_id": s, "n_rows": n}
+              for i, (s, n) in enumerate(((0, 20), (20, 25)))]  # fmt: skip
+    (content / "shard_index.json").write_text(
+        json.dumps({"n_items": 45, "dim": 768, "dtype": "float16", "shards": shards})
+    )
+    (content / "encode_params.json").write_text(json.dumps({"prefix": openalex.DOC_PREFIX}))
+
+    assert openalex.cmd_prep(argparse.Namespace(output_dir=str(small), keep_items=30, **prep)) == 0
+    args = argparse.Namespace(output_dir=str(small), from_dir=str(big), shard_rows=7)
+    assert openalex.cmd_reshard(args) == 0
+    got = layout.load_sharded(small / "content_d768" / "shard_index.json", torch.device("cpu"))
+    small_ids = pl.read_parquet(small / "papers.parquet")["work_id"].to_list()
+    assert set(small_ids) < set(big_ids)
+    assert torch.equal(got, torch.tensor(small_ids, dtype=torch.float16)[:, None].expand(30, 768))

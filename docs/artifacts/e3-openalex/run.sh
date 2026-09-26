@@ -20,3 +20,16 @@ TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/e3 python -m bench.cli run \
   --dataset openalex --dim 768 --suite filter --algo linr_v1_filter_mask --backend triton \
   --filter-kind clause --sweep field_era --mode eager --skip-perf \
   --output $A/filter-openalex-d768-cell.jsonl > $A/cell-linr_v1.log 2>&1
+# The 15 M catalog did not fit the harness; E3 runs at 10 M, resharded from its vectors.
+mv /data/openalex /data/openalex-15m
+$O prep --keep-items 10000000 > $A/run10m-prep.log 2>&1
+python $A/verify_prep.py /data/openalex > $A/run10m-verify.log 2>&1
+$O reshard --from-dir /data/openalex-15m > $A/run10m-reshard.log 2>&1
+python $A/check_reshard.py /data/openalex /data/openalex-15m > $A/run10m-check-reshard.log 2>&1
+$O encode_queries > $A/run10m-encode-queries-attrs.log 2>&1
+$O attrs >> $A/run10m-encode-queries-attrs.log 2>&1
+python -m bench.cli check --dataset openalex > $A/run10m-bench-check.log 2>&1   # after openalex joined suites.yaml's filter suite
+TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/e3 python -m bench.cli run \
+  --dataset openalex --dim 768 --suite filter --algo linr_v1_filter_mask --backend triton \
+  --filter-kind clause --sweep field_era --mode eager --skip-perf \
+  --output $A/filter-openalex-d768-cell.jsonl > $A/cell-linr_v1.log 2>&1
