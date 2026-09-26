@@ -146,7 +146,8 @@ def train(config: TrainConfig, resume: bool = False) -> None:
     resume_path = ckpt_dir / "_resume.pt"
     if resume and resume_path.exists():
         logger.info("Resuming from {}", resume_path)
-        state = torch.load(resume_path, weights_only=False, map_location=device)
+        # set_rng_state takes CPU ByteTensors only; load_state_dict moves the rest to the device.
+        state = torch.load(resume_path, weights_only=False, map_location="cpu")
         model.load_state_dict(state["model"])
         optimizer.load_state_dict(state["optimizer"])
         scheduler.load_state_dict(state["scheduler"])

@@ -1109,14 +1109,15 @@ Negatives are uniform over `1..N`, drawn on the GPU inside the step.
   over positive + K negatives. The `pow(−beta)` and `1/(x−1)` steps lose
   the positive class in fp32, hence float64. One `[K]` vector shared by the
   batch does not train: only K table rows get a negative gradient per step,
-  and on yambda-500m d64 it stalls at loss ≈ ln 2
+  and on yambda-500m d64 the user queries collapse onto a few popular items
   ([validation](../validation.md#seqrec-encoder-rewrite)).
 - `sampled_softmax` — cross-entropy of the positive against one candidate
   vector shared by the batch: `inbatch_negatives` positives of the batch (a
   random subset) plus `num_negatives` uniform ids, at `temperature` (default 0.05), in fp32 outside
   autocast. A candidate equal to the row's own positive is masked to
   `−inf`. `normalize` (default: on for this loss, off for gbce; recorded in
-  `config.json`) L2-normalizes queries and items first. No logQ
+  `config.json`) L2-normalizes queries and items first. `TrainConfig` rejects
+  `normalize=true` with `gbce` and any other `loss` value. No logQ
   correction.
 
 ### Loop shape

@@ -104,8 +104,6 @@ class Encoder(nn.Module):
     ):
         super().__init__()
         hidden = hidden_dim or embedding_dim
-        self.num_items = num_items
-        self.max_seq_length = max_seq_length
         self.use_time = use_time
         self.time_buckets = time_buckets
         self.normalize = normalize

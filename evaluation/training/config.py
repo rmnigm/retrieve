@@ -55,8 +55,12 @@ class TrainConfig:
     seed: int = 42
 
     def __post_init__(self) -> None:
+        if self.loss not in ("gbce", "sampled_softmax"):
+            raise ValueError(f"loss={self.loss!r}: expected 'gbce' or 'sampled_softmax'")
         if self.normalize is None:
             self.normalize = self.loss == "sampled_softmax"
+        if self.normalize and self.loss == "gbce":
+            raise ValueError("normalize=True is only implemented for loss='sampled_softmax'")
         self.eval_ks = tuple(self.eval_ks)
 
     @property

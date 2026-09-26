@@ -1,6 +1,7 @@
 """``training``: the encoder's attention mask (a left-padded row stays finite, and the last
 position never sees the padding) and ``sampled_softmax_loss`` against a direct
-``F.cross_entropy`` over explicitly built candidate lists."""
+``F.cross_entropy`` over explicitly built candidate lists, and the ``TrainConfig`` loss /
+``normalize`` boundary."""
 
 from __future__ import annotations
 
@@ -8,6 +9,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
+from training.config import TrainConfig
 from training.losses import sampled_softmax_loss
 from training.model import Encoder
 
@@ -47,3 +49,16 @@ def test_sampled_softmax_matches_cross_entropy_over_explicit_candidates():
     got = sampled_softmax_loss(q, pos_ids, cand_ids, table, temperature=0.05, normalize=True)
     want = _oracle(q, table, pos_ids, cand_ids, 0.05)
     assert torch.allclose(got, want, rtol=1e-6, atol=0)  # fp32, same values summed in another order
+
+
+@pytest.mark.parametrize(
+    ("overrides", "match"),
+    [
+        ({"loss": "gbc"}, "expected 'gbce' or 'sampled_softmax'"),
+        ({"loss": "gbce", "normalize": True}, "only implemented for loss='sampled_softmax'"),
+    ],
+    ids=["unknown-loss", "gbce-normalize"],
+)
+def test_train_config_rejects_what_the_loss_would_silently_ignore(overrides, match):
+    with pytest.raises(ValueError, match=match):
+        TrainConfig(**overrides)
