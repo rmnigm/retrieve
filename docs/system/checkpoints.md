@@ -48,7 +48,7 @@ Recall@10 0.0336 · Recall@100 0.1240.
 Common hyperparameters:
 ```
 num_blocks=2  num_heads=2  ffn_hidden_dim=4×embedding_dim
-max_seq_length=200  batch_size=256  negs_per_pos=256 (per-position negatives)  gbce_t=0.75
+max_seq_length=200  batch_size=256  negs_per_pos=256 (per-position negatives; `num_negatives` in `train run`)  gbce_t=0.75
 lr=1e-3  weight_decay=0  optimizer=AdamW (fused on cuda)
 autocast=bfloat16   tf32=on
 ```

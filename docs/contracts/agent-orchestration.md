@@ -83,6 +83,13 @@ the roadmap does not list, or dispatch peers.
 When a step does not fall clearly on one side, the orchestrator decides
 and says so in the dispatch.
 
+**In force on the pods (user decision).** The following override this table and §4 for
+every pod orchestrator:
+- Every worker runs on **opus**, core rewrites included. No `fable`.
+- At most **two** herdr agents are alive at once, and a review agent counts as one of them.
+- Workers get **no subagents**, not even the `sonnet` research child. Start each one with
+  `--disallowedTools Agent Workflow` and say so in the brief.
+
 ## 4. Concurrency and nesting
 
 At most three workers at once. Three constraints bind below that ceiling,
@@ -149,6 +156,33 @@ Returned before the step is called done:
 The orchestrator updates the roadmap after the merge (the finished step
 leaves it). A worker does not edit the roadmap.
 
+### Where briefs, instructions and reports live
+
+In the line of work's chain, `.chains/<chain>/`. The directory is local and git-excluded, and
+the user's laptop session syncs it back. Scratch files are not used for this: they are invisible
+to the laptop and die with the pod.
+
+Each dispatched agent gets a **chain branch** named after it (`branch: w1-encoder`):
+- **The first note** is the brief exactly as sent. Its `parent` is the `main` note that
+  decided the dispatch.
+- **Every later instruction** from the orchestrator is a new note on that branch.
+- **The worker writes its report** as the branch's last note, by absolute path, with `parent`
+  set to the previous note on the branch.
+- **The outcome** (merged, rejected) goes on `main`.
+- Notes are never edited; a correction is a new note.
+- Filenames use the laptop's timestamp frame so the chain sorts.
+
+Every brief also carries two lines:
+- **Never print env or secrets files** (AGENTS.md rule 9).
+- **Set up a worktree's venv with `uv sync`, not `rp-sync`** ([storage](../system/storage.md#environment)).
+
+### The review gate
+
+Before any code merges, a separate review agent (opus) runs the `deslop` skill and then the
+`python-review` skill on the diff. It applies behaviour-preserving fixes, reports the rest as
+findings, and runs `ruff check`, the harness suite and the link checker. There is no merge
+without a CLEAN or CLEAN-AFTER-FIXES verdict.
+
 ## 6. Where the work lands
 
 ```
@@ -164,3 +198,6 @@ box is rented, and the repository is the only durable artifact. The
 orchestrator owns the merge and the push; it commits when the user asks
 (CLAUDE.md rule 6), and pushing is the same outward-facing action under
 the same permission. Merging `staging` into `main` is the user's call.
+
+**Exception, the sequential-encoder line:** its work merges into `dev/hstu` and is
+pushed there, not to `staging`. Merging `dev/hstu` into `staging` is the user's call.

@@ -113,6 +113,17 @@ source changes, so a shared `/tmp/torchinductor_root` silently serves stale
 kernels ([reproduction-deviations.md](../paper/reproduction-deviations.md) D-7).
 `/tmp/inductor-<job>` is on the same disk and works as well.
 
+`rp-sync`, the pod's `uv sync` wrapper, sources `/opt/retrieve-pod/bashrc.sh`. That file
+reloads the pod env file, which sets `UV_PROJECT_ENVIRONMENT=/venvs/retrieve`, so an exported
+override does not survive.
+- A git worktree with its own venv must sync directly:
+  `UV_PROJECT_ENVIRONMENT=/venvs/<name> uv sync --all-packages --all-groups --extra official`.
+- Otherwise it re-points the shared venv's editable installs at the worktree.
+- Never print the pod env file to check this. It holds live tokens (AGENTS.md rule 9).
+
+Memory is capped by the container's cgroup (`RUNPOD_MEM_GB`, 251 GB on the H100 pod), not by
+what `free` reports (the host's ~2 TB). Size CPU-heavy ETL against the cgroup.
+
 ## The budget
 
 The container disk is one pool: the data root, `/venvs`, `/scratch`, `/tmp`

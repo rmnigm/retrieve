@@ -120,7 +120,11 @@ lists every page; [`docs/SCHEMA.md`](docs/SCHEMA.md) holds the conventions
    design, go to **`fable`** as one big chunk; routine cleanups, monitoring,
    debugging, docs and one-time experiments go to **`opus`**. **Nesting is
    two levels**, with exactly one exception: a **`sonnet`** nested subagent
-   for web deep research. Every worker's result lands in the repository
+   for web deep research. **On the pods the user's override is in force:**
+   opus for every worker, at most two agents, no subagents
+   ([contract §3](docs/contracts/agent-orchestration.md#3-model-routing)).
+   Briefs and reports live in `.chains/` as a branch per agent (§5).
+   Every worker's result lands in the repository
    as current state in [`docs/validation.md`](docs/validation.md) and the
    affected `docs/system` page; a run recorded only in a transcript did
    not happen. Full contract:
@@ -139,6 +143,13 @@ lists every page; [`docs/SCHEMA.md`](docs/SCHEMA.md) holds the conventions
    deliverable. Not the goal: coverage, cosmetic polish, unscheduled
    baselines, paper speculation. Full contract:
    [`docs/contracts/coding-guidelines.md`](docs/contracts/coding-guidelines.md).
+
+9. **Never print secrets.** Do not `cat`, `grep`, `head` or otherwise dump an env or
+   secrets file (`/etc/retrieve-pod.env`, `/workspace/.pod-home/secrets.env`, any `.env`),
+   and do not run `env`, `printenv`, `set` or `declare -x`. They hold live tokens, and a
+   transcript is not private. Read one non-secret variable by name
+   (`echo "$UV_PROJECT_ENVIRONMENT"`) or test that it is set. Every dispatch brief repeats
+   this rule.
 
 ## Commands
 

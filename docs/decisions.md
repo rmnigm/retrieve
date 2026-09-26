@@ -4,7 +4,7 @@ created: 2026-09-26
 updated: 2026-09-26
 type: summary
 tags: [decisions]
-sources: [pyproject.toml, evaluation/config/suites.yaml, retrieve/src/retrieve/, evaluation/bench/]
+sources: [pyproject.toml, evaluation/config/suites.yaml, retrieve/src/retrieve/, evaluation/bench/, evaluation/training/]
 ---
 
 # Standing decisions and constraints
@@ -117,6 +117,32 @@ decisions.
 - **YFCC runs clause filters only**, no bloom, so bloom false positives
   cannot spoil the cross-check against the shipped ground truth.
 
+## Sequential encoder (dev/hstu)
+
+The goal is to replace gSASRec as the history encoder behind the sequential benchmarks
+(roadmap: not a numbered step; the user scheduled it directly).
+- **Output contract unchanged.** Item embeddings are `[N, D]` from an embedding table, query
+  embeddings are `[B, D]` from `encode.py`, and scoring is the dot product. D stays 64, 128 or
+  256; only the body may grow.
+- **Inputs are generic.** Item id, position, and the timestamp where the dataset has one. There
+  is no per-dataset feature code and no generative retrieval.
+- **The bet is HSTU with softmax attention.** It keeps HSTU's SiLU U/V/Q/K projections,
+  U-gating and the relative position and time-bucket bias, and applies softmax. Pointwise
+  (softmax-free) attention is not pursued: the user does not believe in it.
+- **The loss is sampled softmax on L2-normalized embeddings.** Temperature 0.05, shared uniform
+  negatives plus in-batch positives, no logQ (HSTU's own recipe).
+  - gBCE stays only for the gSASRec baseline, and it must sample negatives **per position**: one
+    shared vector per step collapses it
+    ([evidence](artifacts/seqrec-encoder/gate-b-yambda-d64/README.md)).
+- **Success is measured on the same test file with the same eval code.** A new encoder must
+  beat the published gSASRec checkpoint of the same D, re-scored on today's
+  `trainer/test.parquet`, on test NDCG@10 **and** R@100, on both yambda-500m and
+  goodreads-work-id, with one shared recipe. The stored `eval_quality.json` numbers are not the
+  bar: yambda's were scored on a test split that is no longer on disk.
+- **Order:** goodreads and yambda-500m first. KuaiRand only if the winner clears both bars.
+- **Out of scope for this line:** logQ, a LLaMA block, row-wise Adagrad, a bf16 table,
+  FuXi-style channels and multi-GPU.
+
 ## Environment
 
 - **One GPU box, serialized** (CLAUDE.md rule 1). One GPU job at a time;
@@ -126,3 +152,6 @@ decisions.
   pod image's defaults put data and the Hub cache on `/workspace`
   instead; storage.md marks this contested.
 - **`ncu` is blocked**; kernel attribution uses `torch.profiler`.
+- **The sequential-encoder line runs on an H100 pod** (`rp-h100-hstu`, one H100 80GB HBM3).
+  Rule 1's "the A100 is the machine" does not apply to that line. Every number from it records
+  the GPU name.
