@@ -42,8 +42,14 @@ takes `[P, K]`), and only `sampled_softmax` keeps one shared candidate vector.
 
 ## Run 2: per-position negatives (Gate B proper)
 
-`/scratch/ckpt/gate-b-yambda-d64/`: see `config.json`, `train_metrics.json`,
-`eval_quality.json`, `log_tail.txt` here.
+`/scratch/ckpt/gate-b-yambda-d64/`: `config.json`, `train_metrics.json`, `eval_quality.json`,
+`log_tail.txt` and the summary `result.json` are copied here. The run went all 100 epochs,
+with the best val at epoch 99 (0.0913; published 0.0920) and a final loss of 0.0018
+(published 0.00184). Test ndcg@10 0.0837, recall@100 0.1558. That is +0.0024 / +0.0069
+against the brief's targets (outside ±0.002, but see below) and −0.0009 / −0.0006 against the
+published checkpoint re-scored on the same test file (inside ±0.002). Epoch time 10.37 s
+median (predicted 10 s), 8,772 seq/s, 1478 s total (A100 published run: 2809 s), peak
+11.2 GB (A100: 14.8 GB), sm_mhz 1980 in every epoch.
 
 ## Reference numbers on today's data
 

@@ -146,6 +146,25 @@ explains the mechanism behind the kernel-only split.
 | openalex | 10 M slice staged locally (A100 box, 2026-09-26; OpenAlex fallback for Semantic Scholar SPECTER2, no API key), not on the Hub: `bench check` passes. One filter cell, `linr_v1_filter_mask`/triton clause `field_era`, eager, `--skip-perf` (`partial`): `recall_oracle@1000` 0.9959, held-out `recall@100` 0.505, `recall@1000` 0.741, n = 10,000. Scoped down from an initial 15 M encode after `bench/oracle.py`'s `item_embs.t().contiguous()` OOMed at that size (a second full fp32 copy on top of the item table; the real 768-d limit is ~11-12 M, not 15 M) — 10 M items resharded from the already-encoded 15 M vectors (`torch.equal`-verified), matching the pubmed precedent. Same power-of-two `D` limitation as pubmed for SilverTorch-`triton` and LiNR V2/V3; not yet validated ([artifacts](artifacts/e3-openalex/)) |
 | kuairand | staged locally (A100 box, 2026-09-26), not on the Hub: `bench check` passes, ETL and two filter protocols (target-derived, business-rule) built. No gSASRec checkpoint yet — GPU queued behind the other GPU work; not yet validated ([artifacts](artifacts/e4-kuairand/)) |
 
+## Seqrec encoder rewrite
+
+Trainer rewrite (`evaluation/training/`, [datasets](system/datasets.md#training--evaluationtraining)).
+H100 80GB HBM3 (the pod, not the A100 above), torch 2.10.0+cu128. **Not yet validated, not
+citable.** Artifacts: [gate A](artifacts/seqrec-encoder/gate-a/),
+[gate B](artifacts/seqrec-encoder/gate-b-yambda-d64/),
+[compile A/B](artifacts/seqrec-encoder/compile/).
+
+| gate | state |
+|---|---|
+| A: published checkpoints through `load_model_for_eval` + `evaluate` reproduce `eval_quality.json` test ndcg@10 / recall@100 to 4 decimals | old and new code give **identical** numbers on all four. goodreads d64 and d128 match to 4 decimals. yambda-500m d64 and d128 **do not** (0.0846/0.1563 vs 0.0813/0.1489; 0.0811/0.1486 vs 0.0751/0.1362), before and after the change alike. Mechanism: the test split on disk is not the one those files were scored on. The d64 checkpoint re-scored on `trainer/val.parquet` gives 0.09198, which matches its own training-time best val (0.09200). `test.parquet` at the data root and under `trainer/` hold the same rows |
+| B: retrain yambda-500m d64 on the published recipe, test within ±0.002 | per-position gBCE negatives, `compile=true`, 100 epochs: test ndcg@10 **0.0837**, recall@100 **0.1558**. Against the brief's 0.0813 / 0.1489 (the stale split): +0.0024 / +0.0069, **outside**. Against the published checkpoint re-scored on the same file (0.0846 / 0.1563): −0.0009 / −0.0006, **inside**. Best val 0.0913 (published 0.0920). 10.37 s/epoch median, 8,772 seq/s, 1478 s total (A100 published run: 2809 s), peak 11.2 GB, sm_mhz 1980 |
+| B, shared negatives (plan §3) | one `[256]` negative vector per step collapses gBCE (test 0.0160 / 0.0377, 21 distinct items across 2048 users' top-10s); gBCE therefore samples per position ([mechanism](artifacts/seqrec-encoder/gate-b-yambda-d64/README.md)) |
+| `torch.compile` of the body | 3.93-4.03 s/epoch compiled against 4.8-5.9 eager (shared-negative gBCE, 3 epochs each, interleaved); kept |
+| unit gates | `tests/training/test_encoder.py`: a left-padded row stays finite and padding content does not move the last position (`sasrec`, `hstu`); `sampled_softmax_loss` equals a direct `F.cross_entropy` over explicit candidate lists |
+
+Unverified: the `hstu` block and `sampled_softmax` beyond a 50-step smoke run and the unit gates;
+`use_time` on real timestamps (no trainer parquet has the column yet); resume.
+
 ## Still unverified
 
 - Any compiled (`graph`-mode) measurement taken on a warm inductor cache after a library
