@@ -61,13 +61,40 @@ conflicts with one of them, the priority wins.
   wiki: `docs/system/` for what the code does, [decisions](../decisions.md)
   and the [roadmap](../roadmap.md) for why and what next, kept current as
   the code changes (CLAUDE.md rule 4).
+
+  No dated or history comments, either: no "measured 2026-…", no
+  "previously did X", no "was broken, now fixed", no run log pasted into
+  a docstring. A comment with a date or a before/after in it is a
+  measurement, and a measurement lives in
+  [validation.md](../validation.md) plus its
+  `docs/artifacts/<plan>/` record, not in the source. A comment at that
+  call site either cites the page section it came from or says nothing.
 - **D6: tests are gates, not a deliverable.** Write the test a gate names
   and the test that pins a bug you just fixed. No scaffolding, fixtures,
   helpers or matrices beyond that (CLAUDE.md rule 1). Coverage is not a
   target; the parity and correctness suites are.
+
+  What a gate test has to assert, so it is worth the name "gate":
+
+  | failure mode | what a real gate does about it |
+  |---|---|
+  | The function under test silently regresses | fails when a sign is flipped or a clause is dropped in the function under test — the mutation check. If nothing in the repo would go red for that mutation, it isn't a gate. |
+  | The kernel raised, so the test called it a pass | no smoke-only "did not raise"; the test checks the returned values, not just that a call completed |
+  | The value merely exists | no `is not None` / `isinstance`-only assertion in place of a value check |
+  | The test re-derives the implementation | the oracle is structurally simpler than (or independent of) the code under test, never a copy of its logic under another name |
+  | A caller passes a bad argument | checked with `pytest.raises(Err, match=...)`, so the reason is pinned, not just that *some* exception fired |
+  | Empty / one-survivor / all-masked input | asserts the exact sentinel values (`-1`, `-inf`, `[]`), not just "did not crash" |
+  | A non-zero tolerance hides a real defect | every `atol`/`rtol` is stated at its call site with a one-line reason for that number; a shared assertion helper takes no default tolerance, so a caller that skips the argument gets a `TypeError`, not a silent `1e-3` |
+  | A tree-scanning test's allow-list rots | asserts it found a non-trivial number of files (a found-at-least-N guard), and each allow-list entry is re-justified, not carried forward untouched |
 - **D7: the work is two packages, their evals and their profiles.**
   `retrieve/` and `evaluation/`, run on the A100, profiled with
   `torch.profiler`.
+- **D8: one home per fact.** Every fact — a branch name, a file path, a
+  flag, a count, a claim about what a page or a test asserts — lives on
+  one page; every other place links to it instead of restating it. When a
+  fact is renamed (a branch, a path, a flag, a count), grep `AGENTS.md`,
+  `docs/`, `retrieve/docs/` and `README.md` for the old wording and fix
+  every copy in the same change, not just the page you were editing.
 
 ## 3. What is explicitly not the goal
 

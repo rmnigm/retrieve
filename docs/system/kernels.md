@@ -57,8 +57,12 @@ covered next, and the SilverTorch-only kernels at the end for context.
 All kernels follow the same conventions.
 
 - One launch per `forward()` call. No persistent threads, no streams.
-- Inputs are CUDA tensors with explicit strides; the host wrapper passes
-  `.stride(i)` for every axis instead of assuming contiguity.
+- Inputs are CUDA tensors. Every `_<name>_prep` calls `.contiguous()` on
+  each tensor argument first, then passes `.stride(i)` for every axis to
+  the launch — the strides are always the contiguous ones; nothing in
+  this tree calls a kernel with a genuinely strided (view) tensor. The
+  stride kwargs exist so a kernel body never hard-codes a layout, not to
+  support non-contiguous inputs.
 - Top-K selection is **not** in-kernel. Each kernel writes a `[B, ·]` score
   buffer and the host calls `torch.topk` on it. CUB's top-K (under torch)
   is faster than anything we can implement in pure Triton without a
@@ -843,12 +847,15 @@ tile-reduction order quirks. Parity tests still use
 duplicate scores can vary.
 
 **OPORP popcount is bit-exact.** V3's torch reference and the Triton
-kernel both use the same SWAR popcount on the same packed bits, so the
-parity test in
+kernel both use the same SWAR popcount on the same packed bits, so torch
+and Triton scores agree exactly. The parity test in
 [`test_oporp_1bit_match_topk.py`](../../retrieve/tests/parity/test_oporp_1bit_match_topk.py)
-asserts strict equality on returned ids and scores. If they ever
-diverge, a popcount or packing bug has been introduced — the kernel's
-correctness depends on bit identity here.
+does not yet lean on that: it goes through `assert_topk_matches`'s
+`1e-3` tolerance like a tile-blocked fp32 kernel, not `torch.equal`
+(roadmap Q3 tightens integer-exact paths to `torch.equal`). If the two
+sides ever diverge, a popcount or packing bug has been introduced — the
+kernel's correctness depends on bit identity here even though the test
+does not currently pin it that tightly.
 
 **The SilverTorch dequant is one expression in five places.** The
 bit-exact contract across `triton` / `torch` / `official` rests on the
@@ -1111,3 +1118,36 @@ collapses to one latency under CUDA-graph replay. The transposed index in
 Triton is roadmap G-a, TF-1: `build_transposed_sigs` / `words_per_cluster`
 in [`indexing/bloom_hash.py`](../../retrieve/src/retrieve/indexing/bloom_hash.py)
 are kept for it and have no consumer today.
+
+## Adding an op
+
+A new Triton kernel touches every one of these; missing one is the usual
+way a kernel ships half-integrated.
+
+1. `ops/triton/<k>.py` — the `@triton.jit` body, the `<Name>Config`
+   dataclass, `DEFAULT_CONFIG`, the shared `_<k>_prep` / `_<k>_finish`
+   pair, the `_<k>_impl`, and the public op (`@torch.library.triton_op`
+   unless the launch's store address is data-dependent, in which case
+   `@torch.library.custom_op` — see "Graph-break behavior" above).
+2. `ops/triton/_load.py` — import the new module so `import
+   retrieve.ops.triton` registers the op.
+3. `ops/reference/<k>.py` — the pure-torch twin, same op name and
+   signature. This is the parity oracle by default
+   ([testing.md](testing.md#oracle-policy)) and the `"torch"` backend.
+4. `ops/tune.py` — a `KernelTuneSpec` in `KERNELS` plus a curated entry
+   in `DEFAULT_CONFIG`, so `tune-kernels` covers it and
+   `test_tune_smoke.py` catches schema drift between `tune.py` and the
+   kernel's `_impl`.
+5. `retrieve/tests/parity/test_<k>.py` — kernel vs. reference, following
+   [testing.md](testing.md#new-parity-test-for-a-triton-kernel).
+6. A compile/graph-break gate: a row in `test_silvertorch_compile.py` or
+   `test_linr_compile.py` if a module's forward calls the op under
+   `torch.compile`, or a dedicated case in `tests/compile/` if it
+   doesn't already fall under one of those.
+7. This file — a kernel section with its inputs/outputs, launch grid,
+   tile config and any numerics caveat.
+8. [architecture.md](architecture.md)'s op table (`## Kernels`) — one row
+   naming the op and its consumer module.
+9. A `DISPATCH` row in `interfaces.py` if a new module uses the op —
+   [architecture.md](architecture.md#backend-dispatch) is derived from
+   it, not maintained separately.

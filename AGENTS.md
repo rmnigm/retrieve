@@ -94,7 +94,10 @@ lists every page; [`docs/SCHEMA.md`](docs/SCHEMA.md) holds the conventions
 4. **Docs move with code.** A change to behaviour updates the matching
    `docs/system` file in the same commit. Relative markdown links are
    checked by `python3 scripts/check_doc_links.py` (also a pre-commit
-   hook); keep it at zero broken links.
+   hook); keep it at zero broken links. One home per fact: when you rename
+   a branch, path, flag or count, grep `AGENTS.md`, `docs/`,
+   `retrieve/docs/` and `README.md` for the old wording and fix every
+   copy, not just the page you were already editing.
 5. **Deletion is gated.** Never delete a kernel that still has no
    validated replacement. The model: the two hand-written SilverTorch
    backends went at roadmap B4 only after the official backend's parity

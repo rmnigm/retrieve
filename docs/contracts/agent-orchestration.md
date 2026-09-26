@@ -103,15 +103,35 @@ more hands asks the orchestrator.
 
 ## 5. What a worker is handed, and what it returns
 
-Handed at dispatch:
+A dispatch brief has these headings, in this order, every time:
 
-- the roadmap step and the page or record it builds on, and nothing else
-  to read;
-- the gates the step must pass, quoted, including which are bit-exact
-  (CLAUDE.md rule 3);
-- the branch, and the worktree if any;
-- the model (§3) and the concurrency constraint it runs under;
-- explicitly, what is out of scope.
+- **Step** — the roadmap step id and its one-line description.
+- **Read only** — the page or record it builds on, and nothing else;
+  a worker does not go read the rest of the wiki on its own initiative.
+- **Gates** — quoted verbatim from the roadmap, with which ones are
+  bit-exact marked explicitly (CLAUDE.md rule 3).
+- **Branch/worktree** — the branch name and worktree path, if any.
+- **Model + concurrency** — which model (§3) and which constraint from
+  §4 it runs under.
+- **Out of scope** — named explicitly, not left implicit.
+- **Verify commands** — the exact commands the worker runs to check its
+  own gates before handing back.
+- **Return** — what comes back and how (§ below).
+
+Two lines stand outside the headings and apply to every dispatch: **the
+code wins over any doc, note or memory** — a worker that finds the wiki
+and the code disagreeing trusts the code and files the doc as a bug
+(AGENTS.md rule 4); and **state the mechanism of a bug before fixing
+it** — a worker reports what is actually happening and why before it
+changes anything, so the fix is traceable to a cause instead of a guess.
+
+What counts as proof, by the kind of change:
+
+| kind of change | proof |
+|---|---|
+| Refactor | the named gate is bit-exact before and after — run it, save the result, make the change, run it again. |
+| Behaviour change | a test that pins the new behaviour, not just a passing run of the old suite. |
+| Performance claim | a before/after pair, each with `sm_mhz`, the `unstable` flag and the shape measured, and the prediction written down *before* the measurement is taken — not fitted to it afterward. A slower result is still a result and is kept, not re-run until it looks better. A ratio between two backends is sampled interleaved (A, B, A, B, ...) in one process, so clock drift over the run hits both arms equally rather than favoring whichever ran first. |
 
 Returned before the step is called done:
 
