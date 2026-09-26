@@ -166,6 +166,44 @@ runs, logs, clock trace and provenance are in
 Run 1's two cell logs are on the Hub under `artifacts/golden-logs/`. Sampled SM clock median during those cells:
 1155 MHz (same as the re-derive).
 
+**One cell was re-derived again at roadmap L1 (2026-09-26):**
+`goodreads-d128-c0_genre-linr_v1_filter_mask-triton.json`. L1 made the exact
+LiNR scorers return fp32 scores over the fp16 item table (they had rounded the
+score to fp16; [kernels](../../docs/system/kernels.md#score-conventions)), so V1
+is expected to move, and to move onto `linr_v2`-triton's already-fp32 scoring.
+Same method as L3: the old harness on a throwaway branch
+(`tmp/golden-rederive-l1l2` @ `c72bfe5`, off `origin/tmp/golden-rederive`) with
+the library swapped in as a clean replace — `retrieve/` tree `928df69`, equal to
+`dev/l1-l2:retrieve` (L1 + L2's library). One harness port, imports only: the
+library has dropped the `retrieve.layers` re-export shims, so the old harness's
+two `retrieve.layers` imports now name the same classes in `retrieve.modules`
+([diff](../../docs/artifacts/l1-l2/golden-rederive/harness_port.diff)). Run
+**twice**, one process and a fresh inductor cache each; the two are identical on
+every quality column; the committed file is run 1 (`extra.commit` `c72bfe5`).
+Every quality column moved **up**, by at most 1.5e-4:
+
+| k | recall (old → new) | ndcg (old → new) |
+|---|---|---|
+| 100 | 0.999694695 → 0.999724110 (+2.9e-5) | 0.999780996 → 0.999802098 (+2.1e-5) |
+| 500 | 0.999656967 → 0.999765294 (+1.1e-4) | 0.999728945 → 0.999814545 (+8.6e-5) |
+| 1000 | 0.999627452 → 0.999781421 (+1.5e-4) | 0.999696314 → 0.999821829 (+1.3e-4) |
+
+These equal, to the last printed digit, what the v2 harness measures for the same
+cell on the same library ([artifact](../../docs/artifacts/l1-l2/README.md#golden-cells)).
+Inputs: the cached oracle `gt_d128/gt_topk_v3_c0_genre.pt` hit its fingerprint
+(which samples the query rows). The query cache did **not** hit: the checkpoint
+was restaged on 2026-09-26 with a new mtime and the mtime was not reset first, so
+run 1 re-encoded the queries and rewrote `encoded_queries_test.pt`. The re-encoded
+queries, targets and item embeddings are `torch.equal` to the v2 harness's
+independent encode of the same checkpoint (`encoded_queries_v2.pt`, first 10,000
+users), and the A1-era oracle fingerprint still matching says the sampled query
+rows equal A1's; the old blob itself is gone, so equality with it on every row is
+inferred, not compared. 9,859 / 10,000 users kept, as before. Sampled SM clock
+1095-1410 MHz (three 30 s samples, the cells run ~40 s): the latency columns are
+not clock-controlled. Provenance and clock trace:
+[`l1-l2/golden-rederive/`](../../docs/artifacts/l1-l2/golden-rederive/); both
+runs' JSONs and logs are on the Hub under `artifacts/l1-l2/golden-rederive/`.
+
 ### Why they were re-derived
 
 A1's cells came from the library *before* the three C4 fixes, so comparing

@@ -1,0 +1,26 @@
+diff --git a/evaluation/retrieval/algos/filter.py b/evaluation/retrieval/algos/filter.py
+index cba288b..0331cdc 100644
+--- a/evaluation/retrieval/algos/filter.py
++++ b/evaluation/retrieval/algos/filter.py
+@@ -15,7 +15,7 @@ from torch import Tensor
+ from retrieval.config import FilterKind
+ from retrieval._compat import Backend
+ from retrieve.interfaces import FilterModule
+-from retrieve.layers.filters import BloomFilter, ExactAttributeFilter
++from retrieve.modules import BloomFilter, ExactAttributeFilter
+ 
+ 
+ def build_filter(
+diff --git a/evaluation/retrieval/algos/linr_v4.py b/evaluation/retrieval/algos/linr_v4.py
+index 2c35330..4e00366 100644
+--- a/evaluation/retrieval/algos/linr_v4.py
++++ b/evaluation/retrieval/algos/linr_v4.py
+@@ -15,7 +15,7 @@ from torch import Tensor
+ 
+ from retrieval._compat import Backend
+ from retrieve.interfaces import FilterModule
+-from retrieve.layers.linr.postfilter_knn_int8 import PostfilterKNNInt8
++from retrieve.modules import PostfilterKNNInt8
+ 
+ from ._helpers import AlgoBase
+ from .filter import make_mask

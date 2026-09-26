@@ -92,8 +92,10 @@ tree and on this branch (after L1, and again after L2), same box, same command.
 | L2 alone (final vs L1-only) | 0 on every metric of every cell |
 
 V1's new oracle numbers equal `linr_v2`/triton's to the ninth digit at @100 and @500: the two
-exact algorithms now score alike. Against the golden JSONs V1 is off by the same deltas, so its
-golden cell needs re-baselining.
+exact algorithms now score alike. V1's golden cell was re-derived with the old harness on this
+library (the golden README's method; [`golden-rederive/`](golden-rederive/) holds the
+provenance, clock trace and the two-import harness port); its quality columns equal the v2
+harness's new numbers above, so V1 meets the golden at 0.
 
 ## Timing
 
