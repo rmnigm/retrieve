@@ -34,3 +34,13 @@ Two tables fit: **peak 62.6 GB** (predicted ~62 GB), so no `reuse_item_embedding
 - `num_epochs=80`: 80 x 210 s = ~4.7 h, under the ~5 h cap. `patience=10` (epochs), as in E3.
 - Disk: ~90 GB of checkpoints (`_resume` 49 + best 16 + best_model 16 + item_embs 8); the probe dir
   is deleted before launch.
+
+## Correction and restart (2026-09-26 19:13 UTC)
+
+The first launch (19:00:17, `num_epochs=80`) ran at 8.5-8.7 it/s (~115 ms/step), dropping to 5.5 it/s
+under host CPU load (load average 22), not the 62 ms/step I read off the probe. That reading came
+from one coarse 6 s tqdm window and was wrong. Measured on the real run: epoch 0 train 296.6 s;
+best checkpoint save ~50 s and `_resume.pt` ~53 s (slower than in the probe). **Epoch wall ~370 s**
+(~260 s train + ~12 s val + ~100 s saves), so 80 epochs would be ~8 h.
+Killed after 12 min (epoch 1 at 78 %) and relaunched with **`num_epochs=48`** (48 x 370 s = ~4.9 h),
+patience 10, the rest unchanged. Val is still ~3 % of the wall.

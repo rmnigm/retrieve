@@ -1,0 +1,22 @@
+[
+  {
+    "ckpt": "/data/goodreads-work-id/checkpoints/gsasrec-d256-drop0.5-id",
+    "test": "/data/goodreads-work-id/trainer/test.parquet",
+    "metrics": {
+      "ndcg@10": 0.03544514680399269,
+      "recall@10": 0.034289425948551076,
+      "ndcg@100": 0.06814105802274208,
+      "recall@100": 0.14724320010602077,
+      "coverage@10": 0.11633278299401317,
+      "coverage@100": 0.3246884895443893
+    },
+    "stored": {
+      "ndcg@10": 0.03544412549149481,
+      "ndcg@100": 0.0681372275604291,
+      "recall@10": 0.034292820656394794,
+      "recall@100": 0.14723947522978256,
+      "coverage@10": 0.11633529213984975,
+      "coverage@100": 0.3247160901485916
+    }
+  }
+]
