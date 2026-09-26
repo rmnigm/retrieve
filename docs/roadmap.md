@@ -45,17 +45,24 @@ in records, commits and code comments; they are not renumbered.
 
 - [ ] **D1: run the full campaign on the harness.** Re-sequenced live by
   the user, 2026-09-26, directly in the `d1` campaign session (not
-  through the orchestrator — reconciled here after the fact, twice, as
-  the live sequencing kept changing — see the `d1` chain notes if the
-  order below and reality disagree): `filter` runs first, in scale
-  order, on **all six datasets** — goodreads, arxiv, yfcc10m, pubmed,
-  openalex, kuairand — then `deep` and `codesign` (S9) run on **both**
-  arxiv and goodreads. This absorbs pubmed's, openalex's and kuairand's
-  `filter` legs from E5 (E5 narrows to nothing extra — everything it
-  covered is now in D1) and reverses the earlier "KuaiRand excluded for
-  now" decision (E4's gSASRec checkpoint is still weak — val NDCG@10
-  0.0361, test 0.0088 — that caveat was not restated when the user added
-  it back, flagged here so it isn't lost). Deliverable after the `filter`
+  through the orchestrator — reconciled here after the fact, three
+  times, as the live sequencing kept changing — see the `d1` chain notes
+  if the order below and reality disagree): `filter` runs first, in
+  scale order, on **goodreads, arxiv, yfcc10m, pubmed** — then `deep`
+  and `codesign` (S9) run on **both** arxiv and goodreads. **openalex and
+  kuairand are dropped from D1's `filter` queue** (user, 2026-09-26,
+  16:26Z): other sessions are working them directly — `dev/hstu` is
+  retraining kuairand's gSASRec/HSTU encoder, not something this
+  orchestrator tracks or touches. This absorbs pubmed's `filter` leg
+  from E5 (E5 still narrows to nothing extra for pubmed) and leaves the
+  earlier "KuaiRand excluded for now" decision's status genuinely
+  unclear — not reversed, not reaffirmed, just superseded by kuairand
+  being out of D1's scope entirely for a different reason (another
+  session owns it now). For the record, the caveat behind the original
+  exclusion still stands as of this writing: E4's gSASRec checkpoint is
+  weak (val NDCG@10 0.0361, test 0.0088, a 4× drop only partly explained
+  by item cold start) — whether `dev/hstu`'s retraining addresses that is
+  for whoever reviews its output, not this chain. Deliverable after the `filter`
   legs, before `deep`/`codesign`: a cross-scale filter comparison across
   algorithms (`recall_oracle`, latency, QPS, memory per algo per dataset
   at the headline operating point). Seeds {0, 1, 2} on the headline
@@ -108,12 +115,15 @@ in records, commits and code comments; they are not renumbered.
 - [ ] **E0: request the Semantic Scholar API key** (needs the user). Not
   blocking E3 any more: it is running the OpenAlex fallback instead.
   Still open if the user wants the proper Semantic Scholar source later.
-- [ ] **E5: extend the report with the unfiltered cells retired from the
-  `quality` suite.** Needs D1, E2, E3. Every dataset's `filter` leg
-  (pubmed, openalex and kuairand included) and the `deep`/`codesign`
-  legs are now inside D1 itself (live re-sequencing by the user,
-  2026-09-26, in the `d1` campaign session — see D1 above); E5 no longer
-  has a dataset-campaign scope of its own, only this report extension.
+- [ ] **E5: run openalex's `filter` leg, extend the report with the
+  unfiltered cells retired from the `quality` suite.** Needs D1, E2, E3.
+  Pubmed's `filter` leg and `deep`/`codesign` on arxiv/goodreads moved
+  into D1 itself (live re-sequencing by the user, 2026-09-26 — see D1
+  above); openalex was in that same D1 scope briefly but was dropped
+  again 16:26Z the same day (other sessions working it directly), so
+  it's back to being E5's job. **KuaiRand is out of both D1 and E5** —
+  `dev/hstu` (a separate session, not tracked by this orchestrator) owns
+  it now.
 
 ## Phase F: the paper
 
@@ -230,9 +240,9 @@ in records, commits and code comments; they are not renumbered.
 D1 ─┬─> D2, D3 ─┐
     ├─> F2      ├─> F5 ─> G-c
     ├─> F4      │
-    └─> E5 (E2, E3 done; report-only now, no GPU campaign of its own)
+    └─> E5 (E2, E3 done; openalex's `filter` leg + report extension)
 TF-3/TF-4 retune ─> rerun the head-to-head
 ```
 
-GPU steps still open: D1, D2, D3, G-b. Everything else runs
+GPU steps still open: D1, D2, D3, E5, G-b. Everything else runs
 on CPUs beside them.
