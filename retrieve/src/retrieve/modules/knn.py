@@ -1,8 +1,8 @@
 """Dense and sparse KNN primitives over fp16 / int8 / fp32 item tables.
 
-Precision contract: ``PostfilterKNN`` and ``PrefilterKNN`` store fp16 and accumulate dots in fp32
-— cuBLAS (``PostfilterKNN``, ``PrefilterKNN(backend="torch")``) rounds the score to fp16 on output,
-the fused Triton kernel (``PrefilterKNN(backend="triton")``) writes it as fp32.
+Precision contract: ``PostfilterKNN`` and ``PrefilterKNN`` store items fp16 (as the LiNR paper
+does), cast the query to fp16, accumulate in fp32 and return fp32 scores on every backend — an
+fp16 score would round near-tied items together (docs/system/kernels.md § Score conventions).
 ``PostfilterKNNInt8`` is int32 end to end; ``FullScanKNN`` keeps the input dtype."""
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ from retrieve.interfaces import LinrBackend, RetrievalModule, check_backend, ops
 
 
 class PostfilterKNN(RetrievalModule):
-    """Pure-torch dense scoring (``query @ item_embs.T``) + optional boolean mask + top-K; inputs
-    are cast to fp16 (storage fp16, fp32 accumulate). The ``backend=`` flag is accepted for API
+    """Pure-torch dense scoring (``query @ item_embs.T``) + optional boolean mask + top-K; fp16
+    inputs, fp32 scores (module docstring). The ``backend=`` flag is accepted for API
     symmetry but has no effect — cuBLAS + CUB already match a fused kernel here."""
 
     item_embs_t: Tensor
@@ -38,7 +38,7 @@ class PostfilterKNN(RetrievalModule):
         query: Tensor,
         mask: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
-        scores = query.to(torch.float16) @ self.item_embs_t
+        scores = torch.mm(query.to(torch.float16), self.item_embs_t, out_dtype=torch.float32)
         return masked_topk(scores, self.k, valid=mask)
 
 
@@ -112,8 +112,8 @@ class PrefilterKNN(RetrievalModule):
     """Sparse-rescore KNN with selectable backend. Given ``candidate_ids: [B, P]`` (and optional
     per-row ``counts: [B]``) it scores only the passing rows and top-Ks them back to global ids;
     without ``candidate_ids`` it falls back to a dense full matmul. ``backend="triton"`` fuses
-    the sparse path (no ``[B, P, D]`` intermediate); inputs are stored fp16 with fp32-accumulated
-    dots on both backends (module docstring).
+    the sparse path (no ``[B, P, D]`` intermediate); fp16 inputs, fp32 scores on both backends
+    (module docstring).
 
     Decoupled from filtering — callers compute ``(candidate_ids, counts)`` upstream."""
 
@@ -137,7 +137,7 @@ class PrefilterKNN(RetrievalModule):
     ) -> tuple[Tensor, Tensor]:
         query = query.to(torch.float16)
         if candidate_ids is None:
-            scores = query @ self.item_embs.t()
+            scores = torch.mm(query, self.item_embs.t(), out_dtype=torch.float32)
             topk_scores, topk_ids = torch.topk(scores, self.k, dim=1)
             return topk_ids, topk_scores
         b, p = candidate_ids.shape

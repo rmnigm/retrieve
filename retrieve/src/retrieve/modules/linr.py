@@ -37,8 +37,8 @@ def _filter(filter_mod: FilterModule | None) -> FilterModule:
 
 
 class LiNRV1(RetrievalModule):
-    """LiNR V1 — dense fp16 matmul (cuBLAS), optional ``[B, N]`` bool mask from the filter,
-    top-k."""
+    """LiNR V1 — dense fp16-input, fp32-score matmul (cuBLAS), optional ``[B, N]`` bool mask from
+    the filter, top-k."""
 
     capturable = True
     k = _k_of("idx")

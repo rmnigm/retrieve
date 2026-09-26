@@ -23,7 +23,7 @@ signature in [`ops/reference/`](../../retrieve/src/retrieve/ops/reference/)
 
 - LiNR — kernels used by `PrefilterKNN` / `OneBitKNN` / `SimHashKNN`
   (`fused_masked_knn_topk`,
-  `oporp_1bit_match_topk`). `PostfilterKNN`'s dense fp16 matmul +
+  `oporp_1bit_match_topk`). `PostfilterKNN`'s dense fp16-input matmul +
   top-K and `PostfilterKNNInt8`'s int8 `_int_mm` + int32 top-K are
   both pure torch — there's no real fusion to win over cuBLAS LtGemm +
   CUB.
@@ -313,12 +313,22 @@ to the inlined predicate with a
 
 ## Score conventions
 
-- Real-valued similarity (V1, V2): plain dot product of the fp16 inputs,
-  accumulated in fp32 on every path. Higher is better. `-inf` marks
-  masked-out / padded positions. cuBLAS (V1, V2 `torch`) rounds the score
-  to fp16 on output; `fused_masked_knn_topk` (V2 `triton`) writes it as
-  fp32 — that output rounding is the whole difference between the two
-  backends.
+- Real-valued similarity (V1, V2): plain dot product of the fp16 inputs
+  (items stored fp16, as the LiNR paper does; the query cast to fp16),
+  accumulated in fp32 and **returned as fp32 on every path**: cuBLAS
+  (V1, V2 dense, V2 `torch`) through `out_dtype=torch.float32`,
+  `fused_masked_knn_topk` (V2 `triton`) by its fp32 `tl.sum`. Higher is
+  better. `-inf` marks masked-out / padded positions. An fp16 *score*
+  would round runs of near-tied items to one value: on YFCC-10M the
+  top-1000 spans about fifteen fp16 quanta (2⁻¹¹ near 0.8), and fp16
+  scores cost the exact algorithms `recall_oracle@1000` 0.956; fp32
+  scores over the same fp16 table give 0.993, and the remaining 0.007 is
+  the fp16 *storage* rounding (an fp32 table gives 1.0 at twice the
+  memory; [decisions](../decisions.md#library),
+  [artifact](../artifacts/l1-l2/README.md)). The cuBLAS path's
+  tensor-core accumulator truncates: measured ≤ 1.1e-6 from an fp64 dot
+  of the same fp16 inputs at D=128, against a plain fp32 sum's ~1e-7;
+  gated in [`test_accumulation.py`](../../retrieve/tests/parity/test_accumulation.py).
 - 1-bit Sign-OPORP (V3): `D - 2 * popcount(query_bits ^ item_bits)`, fp32.
   `D = 64 * W`. This is the standard Hamming-to-dot-product relation for
   sign-quantized vectors. Higher is better. Same `-inf` sentinel.
@@ -350,8 +360,9 @@ byte identical bits.
 
 ## PostfilterKNN dense path — pure torch, no kernel
 
-`PostfilterKNN`'s forward is `query @ item_embs.T` + optional
-`masked_fill(-inf)` + `torch.topk` — implemented directly in
+`PostfilterKNN`'s forward is `torch.mm(query_fp16, item_embs_t,
+out_dtype=torch.float32)` + optional `masked_fill(-inf)` + `torch.topk`
+over the fp32 scores (§ Score conventions) — implemented directly in
 [`PostfilterKNN`](../../retrieve/src/retrieve/modules/knn.py).
 There is no Triton kernel here because one that only fuses the matmul
 still materializes the full `[B, N]` score buffer and calls the same
@@ -918,7 +929,11 @@ the cudagraph capture + mandatory output clone (to escape the
 
 V1's pure-torch dense path uses cuBLAS for the matmul, so the torch and
 Triton-backend classes go through identical kernels and produce
-bit-identical scores. V2's sparse path scores per-cell with
+bit-identical fp32 scores. Against V2's kernel the two differ only in
+reduction order (cuBLAS's truncating tensor-core accumulator vs an fp32
+`tl.sum`), so the cross-module and cross-backend tests in
+[`test_linr.py`](../../retrieve/tests/correctness/test_linr.py) compare
+at `atol=2e-6`. V2's sparse path scores per-cell with
 `tl.sum(emb_rows * q[None, :], axis=1)` — elementwise multiply +
 reduction, not `tl.dot` — so it doesn't share the tensor-core
 tile-reduction order quirks. Its parity test uses

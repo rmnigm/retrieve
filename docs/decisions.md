@@ -55,8 +55,17 @@ decisions.
   item order on both backends, and a rerun is byte-identical
   ([kernels](system/kernels.md)). Chosen over a wider quality tolerance
   because two golden cells could not reproduce themselves.
-- **LiNR kernels accumulate in fp32**, as their docstrings promised; stored
-  scores stay fp16.
+- **LiNR's exact scorers store items fp16 and return fp32 scores**
+  (`PostfilterKNN`, `PrefilterKNN`, every backend): fp16 storage is the
+  LiNR paper's, and keeps the item table at `N × D × 2` bytes (PubMed 10M
+  × 768: 14.3 GiB, where an fp32 table is 28.6 GiB on top of the
+  harness's own fp32 copy). fp32 scores are what the exact-algorithm gate
+  needs: fp16 scores gave `recall_oracle@1000` 0.956 on YFCC-10M, fp32
+  scores 0.993 (gate 0.99), an fp32 table 1.0. Cost: the `[B, N]` score
+  buffer doubles (+610 MiB at B=16 over 10M items). An fp32 table is the
+  next step if a dataset's storage rounding alone breaks the gate
+  ([kernels](system/kernels.md#score-conventions),
+  [artifact](artifacts/l1-l2/README.md)).
 - **Int8 quantization uses one global scale**, as the SilverTorch paper
   does.
 - **Bloom hashes are keyed on `(clause_idx, value)`**, a deviation from

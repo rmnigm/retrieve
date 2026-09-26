@@ -71,7 +71,7 @@ retrieve.ops.available_backends()       # ("triton", "torch") or ("triton", "tor
 | `codesigned_probe_score`, `codesigned_probe_score_bloom`, `codesigned_probe_score_exact` | fused IVF probe + INT8 dot (+ bloom / exact predicate) + top-k | `SilverTorch` |
 | `bloom_match`, `bloom_compact` | bloom subset test → `[B, N]` bool / compact candidates | `BloomFilter` |
 | `clause_mask`, `clause_compact` | exact clause predicate → `[B, N]` bool / compact candidates | `ExactAttributeFilter` |
-| `fused_masked_knn_topk` | gather + fp16 dot over candidate ids + top-k | `PrefilterKNN` |
+| `fused_masked_knn_topk` | gather + fp32-accumulated dot over candidate ids + top-k | `PrefilterKNN` |
 | `oporp_1bit_match_topk_full`, `oporp_1bit_match_topk_indirect` | XOR + popcount + top-k, full scan / through candidate ids | `OneBitKNN`, `SimHashKNN` |
 
 `retrieve.ops.official` is the adapter over Meta's `torch.ops.st.*` (`official_probe_score`,
