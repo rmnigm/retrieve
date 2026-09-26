@@ -14,7 +14,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from bench import cli, measure
+from bench import cli, measure, records
 
 
 def _records(path: Path) -> list[dict]:
@@ -48,6 +48,7 @@ def test_cli_run_campaign_and_report(tiny_configs, tmp_path):
     summary = (out / "_logs" / "campaign.log").read_text()
     assert summary.count(" rc=0 ") == 1 and "finished children=1 rc=0" in summary
     assert not (out / "_parity").exists()  # dropped when the algo group closed
+    assert len(records.read_table(out / "results.parquet")) == 4  # bench run's 1 + these 3
     recs = _records(out / "e2e1" / "tiny-d8.jsonl")
     assert [(r["filter_kind"], r["sweep"]) for r in recs] == [
         ("none", "full_scan"), ("clause", "c0"), ("clause", "c0c1")
@@ -56,7 +57,7 @@ def test_cli_run_campaign_and_report(tiny_configs, tmp_path):
     assert all(r["quality"] is None and r["perf"] is None and r["build_s"] > 0 for r in recs)
     r = CliRunner().invoke(cli.main, ["report", str(out), "--gate", "D1"])
     assert r.exit_code == 0, r.output
-    assert (out / "report" / "flat.csv").exists()
+    assert (out / "report" / "results.parquet").exists()
     assert "NOT CITABLE" in r.output  # three partial records veto --gate
     assert "NOT CITABLE" in (out / "report" / "tables" / "tab-memory.tex").read_text()
 

@@ -31,6 +31,7 @@ def test_stats_matches_numpy_reference():
     assert d["n"] == 500
     assert d["median_ms"] == pytest.approx(med, abs=1e-9)
     assert d["mean_ms"] == pytest.approx(x.mean(), abs=1e-9)
+    assert d["trimmed_mean_ms"] == pytest.approx(np.sort(x)[50:450].mean(), abs=1e-9)
     assert d["p95_ms"] == pytest.approx(p95, abs=1e-9)
     assert d["p99_ms"] == pytest.approx(p99, abs=1e-9)
     assert d["min_ms"] == pytest.approx(x.min(), abs=1e-9)
@@ -61,8 +62,12 @@ def test_latency_windows_and_keys():
     assert d["median_ms"] == sorted(d["window_medians_ms"])[1]
     assert d["spread"] >= 0.0 and isinstance(d["unstable"], bool)
     assert d["peak_fwd_mib"] is None  # no CUDA allocator to read on this box
-    assert d["sm_mhz"] is None  # the under-load clock sample is a CUDA-only observation
-    floats = ("median_ms", "mean_ms", "p95_ms", "p99_ms", "min_ms", "iqr_ms", "qps", "host_gap_ms")
+    # The under-load clock samples, one per window, are a CUDA-only observation.
+    assert d["window_sm_mhz"] == [None] * 3 and d["sm_mhz"] is None
+    floats = (
+        "median_ms", "mean_ms", "trimmed_mean_ms", "p95_ms", "p99_ms", "min_ms", "iqr_ms", "qps",
+        "host_gap_ms",
+    )  # fmt: skip
     assert all(isinstance(d[key], float) for key in floats)
 
 
@@ -178,26 +183,6 @@ def test_dirty_is_scoped_to_the_library_subtree(monkeypatch):
     p = bench.provenance()
     assert p["dirty"] is None and p["repo_dirty"] is None and p["commit"] is None
     assert p["code_version"] == bench.files_hash()
-
-
-def test_repo_dirty_ignores_the_results_dir():
-    """The harness's own outputs are data, not a dirty tree: the pathspec excludes them."""
-    if bench._git("rev-parse", "HEAD") is None:
-        pytest.skip("git unavailable")
-    calls = []
-    real = bench._git
-
-    def spy(*args):
-        calls.append(args)
-        return real(*args)
-
-    bench_git, bench._git = bench._git, spy
-    try:
-        bench.repo_dirty()
-    finally:
-        bench._git = bench_git
-    (args,) = calls
-    assert "--untracked-files=no" in args and f":(exclude){bench.RESULTS_DIR}" in args
 
 
 def test_clocks_record_shape():

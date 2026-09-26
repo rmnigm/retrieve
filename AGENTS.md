@@ -51,8 +51,10 @@ lists every page; [`docs/SCHEMA.md`](docs/SCHEMA.md) holds the conventions
   (who runs a step, on which model, how many at once, where the output
   lands) and [`coding-guidelines.md`](docs/contracts/coding-guidelines.md)
   (what the code should look like, and what is deliberately not the goal).
-- `docs/artifacts/<plan>/`: raw scripts and outputs behind measured
-  numbers, kept so they can be re-derived.
+- `docs/artifacts/<plan>/`: raw scripts behind measured numbers, kept so
+  they can be re-derived; the raw outputs (records, JSON dumps, logs) are
+  on the Hub under `artifacts/<plan>/`, listed in
+  [`docs/artifacts/hub-index.md`](docs/artifacts/hub-index.md).
 - `retrieve/docs/`: the library user guide that ships in the sdist.
 - `docs/paper/`: the reproducibility paper's own sections, each number
   traced to [`validation.md`](docs/validation.md) or an artifact:
@@ -65,8 +67,14 @@ lists every page; [`docs/SCHEMA.md`](docs/SCHEMA.md) holds the conventions
   (Meta's kernels against ours: end to end, kernel-only, phase 2, parity,
   memory, and what the comparison cannot say).
 - `articles/`: pandoc renderings of the papers. Frozen; cite, never edit.
-- `evaluation/results/`: campaign records (`<suite>/<dataset>-d<dim>.jsonl`
-  plus sidecars); `evaluation/golden/`: the golden baseline cells.
+  Gitignored, not shipped in git (likely copyrighted third-party text) —
+  present on a working box, but a fresh clone won't have it; citations to
+  it are for the box you're working on, not the shipped repo.
+- Campaign records: written as JSONL to a gitignored local results tree
+  during a run, aggregated into `results.parquet`, and kept on the
+  private Hub repo `pinkmeme/eval-results` (`bench upload` / `bench
+  fetch`; [`docs/artifacts/hub-index.md`](docs/artifacts/hub-index.md));
+  `evaluation/golden/`: the golden baseline cells.
 
 ## Hard rules
 
@@ -103,8 +111,13 @@ lists every page; [`docs/SCHEMA.md`](docs/SCHEMA.md) holds the conventions
    backends went at roadmap B4 only after the official backend's parity
    gate (B2) was green; tag `cuda-cute-backends-final` holds them.
 6. **Commits and branches.** Commit only when the user asks. One branch per
-   roadmap step (`dev/<step>`) off `staging`. Session artifacts (scripts, raw JSON) go
-   under `docs/artifacts/<plan>/`, not in the packages. **All work ends up
+   roadmap step (`dev/<step>`) off `staging`. Session scripts go under
+   `docs/artifacts/<plan>/`, not in the packages; raw outputs (records,
+   JSON dumps, logs) never go in git — publish them with `bench upload`
+   to `pinkmeme/eval-results` (campaign legs as `<leg>/`, plan outputs as
+   `artifacts/<plan>/`) and add the manifest's sha256 to
+   [`docs/artifacts/hub-index.md`](docs/artifacts/hub-index.md).
+   **All work ends up
    on `staging` at `origin`**: whatever branch or worktree produced it, a
    step is not finished until it is merged into `staging` and pushed
    ([`docs/contracts/agent-orchestration.md`](docs/contracts/agent-orchestration.md)
@@ -163,8 +176,9 @@ python3 scripts/check_doc_links.py
 
 Update [`docs/validation.md`](docs/validation.md) to the new state of every
 gate the step touched (what passes now, on which environment, what was
-skipped, what is still unverified), put the raw scripts and outputs under
-`docs/artifacts/<plan>/`, update the affected `docs/system` page, remove
+skipped, what is still unverified), put the raw scripts under
+`docs/artifacts/<plan>/` and the raw outputs on the Hub (`bench upload`, a
+row in `docs/artifacts/hub-index.md`), update the affected `docs/system` page, remove
 the step from [`docs/roadmap.md`](docs/roadmap.md) and add any new open
 work there, run the link checker, and state plainly in your report what
 passed, what was skipped, and what is still unverified. Write current

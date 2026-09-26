@@ -1,9 +1,8 @@
 """``bench.records``: the resume key, the JSONL append / read round trip, one torn trailing
-line, and ``flatten`` → ``flat.csv`` (one row per perf entry, last record per key)."""
+line, and ``aggregate`` → ``results.parquet`` (one row per perf entry, last record per key)."""
 
 from __future__ import annotations
 
-import csv
 import json
 
 import torch
@@ -48,11 +47,11 @@ def test_append_read_and_a_torn_trailing_line(tmp_path):
         raise AssertionError("a torn line before the last one must raise")
 
 
-def test_flatten_one_row_per_perf_entry_last_record_per_key(tmp_path):
+def test_aggregate_one_row_per_perf_entry_last_record_per_key(tmp_path):
     p = tmp_path / "filter" / "goodreads-d128.jsonl"
     perf = [
         {"k": 100, "bs": 1, "mode": "eager", "median_ms": 1.5, "sm_mhz": 1410.0,
-         "window_medians_ms": [1, 2, 3]},
+         "window_medians_ms": [1, 2, 3], "window_sm_mhz": [1410.0, 1410.0, 1395.0]},
         {"k": 100, "bs": 1, "mode": "graph", "median_ms": None, "reason": "cuda_unavailable"},
     ]  # fmt: skip
     base = {
@@ -66,15 +65,16 @@ def test_flatten_one_row_per_perf_entry_last_record_per_key(tmp_path):
     records.append_record(p, base)  # the same key again: this one wins
     records.append_record(p, {**base, "seed": 1, "quality": None, "perf": None})
     records.append_record(records.samples_path(p), {**KEY, "ms": [1.0]})  # not a record
-    out = records.flatten(tmp_path)
-    rows = list(csv.DictReader(out.read_text().splitlines()))
-    assert out == tmp_path / "flat.csv" and len(rows) == 3
-    seed0 = [r for r in rows if r["seed"] == "0"]
+    out = records.aggregate(tmp_path)
+    rows = records.read_table(out)
+    assert out == tmp_path / "results.parquet" and len(rows) == 3
+    seed0 = [r for r in rows if r["seed"] == 0]
     assert [r["perf_mode"] for r in seed0] == ["eager", "graph"]
-    assert seed0[0]["perf_median_ms"] == "1.5" and seed0[1]["perf_median_ms"] == ""
-    assert seed0[0]["heldout_recall@100"] == "0.5" and seed0[0]["oracle_recall@100"] == "0.9"
+    assert seed0[0]["perf_median_ms"] == 1.5 and seed0[1]["perf_median_ms"] is None
+    assert seed0[0]["heldout_recall@100"] == 0.5 and seed0[0]["oracle_recall@100"] == 0.9
     assert seed0[0]["quality_parity"] == "reference" and seed0[0]["env_code_version"] == "c"
     assert json.loads(seed0[0]["params"]) == KEY["params"] and seed0[0]["status"] == "ok"
-    assert "perf_window_medians_ms" not in rows[0]
-    (r1,) = [r for r in rows if r["seed"] == "1"]
-    assert r1["perf_mode"] == "" and r1["heldout_recall@100"] == ""
+    assert seed0[0]["env_dirty"] is False and seed0[0]["perf_bs"] == 1  # typed, not strings
+    assert "perf_window_medians_ms" not in rows[0] and "perf_window_sm_mhz" not in rows[0]
+    (r1,) = [r for r in rows if r["seed"] == 1]
+    assert r1["perf_mode"] is None and r1["heldout_recall@100"] is None

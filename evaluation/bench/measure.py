@@ -8,9 +8,10 @@ these: ``setup`` → ``warm_gpu_once`` → ``provenance`` / ``clocks`` → ``tim
 
 Timing protocol (§2.5): 50 warm-up calls → sync → ``N = clamp(2 s / median_est, 1000,
 5000)`` → 3 windows of N calls, each call bracketed by CUDA events on the current stream,
-wall clock around the window with one sync at the end. The reported dict comes from the
-window with the median median; ``spread`` is over the three window medians. No L2 flush:
-the caller's pool rotation keeps index reads naturally cold. Closed-loop, one client.
+wall clock around the window with one sync at the end, one ``nvidia-smi`` SM clock sample
+after each window. The reported dict comes from the window with the median median;
+``spread`` is over the three window medians. No L2 flush: the caller's pool rotation keeps
+index reads naturally cold. Closed-loop, one client.
 """
 
 from __future__ import annotations
@@ -37,9 +38,6 @@ import retrieve
 
 ROOT = Path(__file__).resolve().parents[2]
 LIB_SUBTREE = "retrieve/src/retrieve"  # code_version = tree hash of this (H §8.2 B)
-# Harness outputs are data (H §3.2, §8.2 G/I: committed and mirrored, not scratch), so a
-# campaign appending to them must not flip ``repo_dirty``.
-RESULTS_DIR = "evaluation/results"
 MiB = 1024 * 1024
 
 
@@ -87,11 +85,10 @@ def subtree_dirty() -> bool | None:
 
 
 def repo_dirty() -> bool | None:
-    """Uncommitted changes to *tracked* files anywhere but ``RESULTS_DIR``; informational
-    (docs, plans, harness code). ``None`` outside a git checkout."""
-    out = _git(
-        "status", "--porcelain", "--untracked-files=no", "--", ".", f":(exclude){RESULTS_DIR}"
-    )
+    """Uncommitted changes to *tracked* files anywhere; informational (docs, plans, harness
+    code). ``None`` outside a git checkout. ``evaluation/results/`` is gitignored, so a
+    campaign appending to its records never flips it."""
+    out = _git("status", "--porcelain", "--untracked-files=no")
     return None if out is None else bool(out)
 
 
@@ -170,7 +167,7 @@ def clocks() -> dict[str, Any]:
     """One ``nvidia-smi`` sample of the SM / memory clocks and the power limit; every value
     ``None`` without the tool. Whether the GPU is loaded when this runs is the caller's
     business: ``run.py`` records the process-start sample as ``env.sm_mhz_idle`` and
-    ``latency`` samples again right after its last window, under load."""
+    ``latency`` samples again right after each window, under load."""
     vals = _nvidia_smi("clocks.sm,clocks.mem,clocks.max.sm,power.limit")
     out: dict[str, Any] = dict.fromkeys(("sm_mhz", "mem_mhz", "sm_max_mhz", "power_limit_w"))
     if vals and len(vals) == 4:
@@ -228,7 +225,8 @@ def _time_calls(fn: Callable[[], Any], n: int) -> tuple[list[float], float]:
 
 
 def stats(ms: list[float], wall_s: float, bs: int) -> dict[str, Any]:
-    """Robust summary of one window (§2.5 + §8.2 E). Quantiles are linear-interpolated."""
+    """Robust summary of one window (§2.5 + §8.2 E). Quantiles are linear-interpolated;
+    ``trimmed_mean_ms`` drops ``n // 10`` calls from each end."""
     t = torch.tensor(ms, dtype=torch.float64)
     n = t.numel()
     q1, med, q3, p95, p99 = torch.quantile(
@@ -236,10 +234,12 @@ def stats(ms: list[float], wall_s: float, bs: int) -> dict[str, Any]:
     ).tolist()
     mean, std = t.mean().item(), t.std(correction=0).item()
     iqr = q3 - q1
+    cut = n // 10
     return {
         "n": n,
         "median_ms": med,
         "mean_ms": mean,
+        "trimmed_mean_ms": t.sort().values[cut : n - cut].mean().item(),
         "p95_ms": p95,
         "p99_ms": p99,
         "min_ms": t.min().item(),
@@ -267,9 +267,10 @@ def latency(
     pool (eager forward, or ``graph_callable``'s replay). Returns ``(perf dict, per-call ms
     of the chosen window)``. Eager only: the first call runs under
     ``set_sync_debug_mode("warn")`` and ``peak_fwd_mib`` is taken over the first window.
-    ``sm_mhz`` is the SM clock sampled right after the last window's sync, while the GPU is
-    still at its load clock — the per-variant value H §7's unlocked-clock fallback needs and
-    the only clock sample ``clocks_drift`` compares; ``None`` without CUDA."""
+    ``window_sm_mhz`` is the SM clock sampled right after each window's sync, while the GPU
+    is still at its load clock; ``sm_mhz`` is its last element — the per-variant value H §7's
+    unlocked-clock fallback needs and the only clock sample ``clocks_drift`` compares.
+    Samples are ``None`` without CUDA."""
     if mode not in ("eager", "graph"):
         raise ValueError(f"mode must be 'eager' or 'graph', got {mode!r}")
     cuda = torch.cuda.is_available()
@@ -288,6 +289,7 @@ def latency(
 
     peak_fwd_mib = None
     runs: list[tuple[list[float], float]] = []
+    window_sm_mhz: list[float | None] = []
     for w in range(windows):
         measure = w == 0 and mode == "eager" and cuda
         if measure:
@@ -297,7 +299,7 @@ def latency(
         runs.append(_time_calls(fn, n))
         if measure:
             peak_fwd_mib = (torch.cuda.max_memory_allocated() - before) / MiB
-    sm_mhz = clocks()["sm_mhz"] if cuda else None  # under load: right after the last sync
+        window_sm_mhz.append(clocks()["sm_mhz"] if cuda else None)  # under load, after sync
     medians = [torch.tensor(ms).median().item() for ms, _ in runs]
     pick = sorted(range(windows), key=lambda i: medians[i])[windows // 2]
     out = stats(*runs[pick], bs)
@@ -309,7 +311,8 @@ def latency(
         unstable=spread > 0.05,
         peak_fwd_mib=peak_fwd_mib,
         window_medians_ms=medians,
-        sm_mhz=sm_mhz,
+        window_sm_mhz=window_sm_mhz,
+        sm_mhz=window_sm_mhz[-1],
     )
     return out, runs[pick][0]
 
@@ -367,7 +370,6 @@ def profile_once(fn: Callable[[], Any], top: int = 8) -> list[dict[str, Any]]:
 
 __all__ = [
     "LIB_SUBTREE",
-    "RESULTS_DIR",
     "NotCapturable",
     "clocks",
     "code_version",

@@ -43,7 +43,7 @@ docs/
 ├── validation.md    what is validated now: every gate's state, and the measured results that stand
 ├── contracts/       process contracts: agent orchestration, coding guidelines
 ├── system/          how the code works today (one page per subsystem)
-├── artifacts/       raw scripts and outputs behind measured numbers, per plan
+├── artifacts/       raw scripts behind measured numbers, per plan (outputs on the Hub)
 └── paper/           reproducibility-paper sections (not wiki pages)
 ```
 
@@ -128,8 +128,10 @@ current state, not as a record of the run:
   stands (a speedup, a parity figure, a recall) goes in the same page with
   a link to its artifacts.
 - The `system/` page for the behaviour that changed.
-- The raw scripts and outputs under `artifacts/<plan>/`, so the numbers
-  can be re-derived.
+- The raw scripts under `artifacts/<plan>/`; raw outputs (records, dumps,
+  logs) on the Hub under `artifacts/<plan>/`, listed in
+  [artifacts/hub-index.md](artifacts/hub-index.md), so the numbers can be
+  re-derived.
 
 A superseded result is replaced, not appended to.
 
