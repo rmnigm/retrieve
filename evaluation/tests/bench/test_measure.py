@@ -185,26 +185,6 @@ def test_dirty_is_scoped_to_the_library_subtree(monkeypatch):
     assert p["code_version"] == bench.files_hash()
 
 
-def test_repo_dirty_ignores_the_results_dir():
-    """The harness's own outputs are data, not a dirty tree: the pathspec excludes them."""
-    if bench._git("rev-parse", "HEAD") is None:
-        pytest.skip("git unavailable")
-    calls = []
-    real = bench._git
-
-    def spy(*args):
-        calls.append(args)
-        return real(*args)
-
-    bench_git, bench._git = bench._git, spy
-    try:
-        bench.repo_dirty()
-    finally:
-        bench._git = bench_git
-    (args,) = calls
-    assert "--untracked-files=no" in args and f":(exclude){bench.RESULTS_DIR}" in args
-
-
 def test_clocks_record_shape():
     c = bench.clocks()
     assert set(c) == {"sm_mhz", "mem_mhz", "sm_max_mhz", "power_limit_w"}

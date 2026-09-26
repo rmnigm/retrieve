@@ -1,10 +1,9 @@
 """``bench report`` — every thesis and paper table and figure, from the records only
 (roadmap D4, H §6 WP-6, V §5.3).
 
-``records.flatten`` writes ``flat.csv`` first and every table and figure is built from it
-(H §8.2 G); ``records.read_records`` is read a second time for the provenance block alone,
-because ``schema_version``, ``partial_reasons``, ``stage`` and ``error`` are not columns of
-``flat.csv``.
+``records.aggregate`` writes ``results.parquet`` first and every table and figure is built
+from it (H §8.2 G); ``records.latest`` is read a second time for the provenance block alone,
+which needs the nested ``env`` the table flattens to a few columns.
 
 **Nothing emitted here is citable unless ``--gate`` names a green roadmap gate** (CLAUDE.md
 rule 2). Without it — or with a `failed` cell, a `partial` record, a `dirty` library subtree
@@ -20,7 +19,6 @@ artifacts state which clock estimator they used: the per-variant under-load
 
 from __future__ import annotations
 
-import csv
 import datetime as dt
 import inspect
 import json
@@ -81,37 +79,10 @@ PAPER_REPORTED = (
 # ----- loading ----------------------------------------------------------------
 
 
-def _cast(v: str) -> Any:
-    if v == "":
-        return None
-    if v in ("True", "False"):
-        return v == "True"
-    try:
-        return int(v)
-    except ValueError:
-        pass
-    try:
-        return float(v)
-    except ValueError:
-        return v
-
-
 def _load(results_dir: Path, out: Path) -> tuple[Path, list[dict[str, Any]]]:
-    out.mkdir(parents=True, exist_ok=True)  # records.flatten writes, it does not create
-    flat = records.flatten(results_dir, out / "flat.csv")
-    with open(flat, newline="") as f:
-        return flat, [{k: _cast(v) for k, v in row.items()} for row in csv.DictReader(f)]
-
-
-def _latest(results_dir: Path) -> list[dict[str, Any]]:
-    """The same selection ``flatten`` makes — last record per resume key — but nested, so the
-    provenance block can see the fields ``flat.csv`` does not carry."""
-    latest: dict[str, dict[str, Any]] = {}
-    for path in sorted(Path(results_dir).glob("*/*.jsonl")):
-        if not path.name.endswith(".samples.jsonl"):
-            for rec in records.read_records(path):
-                latest[records.record_key(rec)] = rec
-    return list(latest.values())
+    out.mkdir(parents=True, exist_ok=True)  # records.aggregate writes, it does not create
+    table = records.aggregate(results_dir, out / "results.parquet")
+    return table, records.read_table(table)
 
 
 def _samples(results_dir: Path) -> list[dict[str, Any]]:
@@ -929,7 +900,7 @@ class Ctx:
     def __init__(self, results_dir: Path, out: Path, gate: str | None, **sel: Any) -> None:
         self.results_dir, self.out = Path(results_dir), Path(out)
         self.flat, self.rows = _load(self.results_dir, self.out)
-        self.recs = _latest(self.results_dir)
+        self.recs = records.latest(self.results_dir)
         self.samples = _samples(self.results_dir)
         self.prov = provenance(self.recs, gate)
         self.written: list[Path] = [self.flat]

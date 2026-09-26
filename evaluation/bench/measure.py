@@ -38,9 +38,6 @@ import retrieve
 
 ROOT = Path(__file__).resolve().parents[2]
 LIB_SUBTREE = "retrieve/src/retrieve"  # code_version = tree hash of this (H §8.2 B)
-# Harness outputs are data (H §3.2, §8.2 G/I: committed and mirrored, not scratch), so a
-# campaign appending to them must not flip ``repo_dirty``.
-RESULTS_DIR = "evaluation/results"
 MiB = 1024 * 1024
 
 
@@ -88,11 +85,10 @@ def subtree_dirty() -> bool | None:
 
 
 def repo_dirty() -> bool | None:
-    """Uncommitted changes to *tracked* files anywhere but ``RESULTS_DIR``; informational
-    (docs, plans, harness code). ``None`` outside a git checkout."""
-    out = _git(
-        "status", "--porcelain", "--untracked-files=no", "--", ".", f":(exclude){RESULTS_DIR}"
-    )
+    """Uncommitted changes to *tracked* files anywhere; informational (docs, plans, harness
+    code). ``None`` outside a git checkout. ``evaluation/results/`` is gitignored, so a
+    campaign appending to its records never flips it."""
+    out = _git("status", "--porcelain", "--untracked-files=no")
     return None if out is None else bool(out)
 
 
@@ -374,7 +370,6 @@ def profile_once(fn: Callable[[], Any], top: int = 8) -> list[dict[str, Any]]:
 
 __all__ = [
     "LIB_SUBTREE",
-    "RESULTS_DIR",
     "NotCapturable",
     "clocks",
     "code_version",

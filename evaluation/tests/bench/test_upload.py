@@ -42,7 +42,8 @@ def _rec(**over):
 
 @pytest.fixture
 def tree(tmp_path):
-    """A results tree with one record file, its samples sidecar, and both scratch dirs."""
+    """A results tree with one record file, its samples sidecar, its aggregate and both scratch
+    dirs."""
     root = tmp_path / "results"
     records.append_record(root / "filter" / "goodreads-d128.jsonl", _rec())
     records.append_record(root / "filter" / "goodreads-d128.jsonl", _rec(backend="torch"))
@@ -50,7 +51,7 @@ def tree(tmp_path):
         root / "filter" / "goodreads-d128.samples.jsonl",
         {"dataset": "goodreads", "k": 100, "bs": 1, "mode": "eager", "ms": [0.5, 0.51]},
     )
-    (root / "flat.csv").write_text("dataset,dim\ngoodreads,128\n")
+    records.aggregate(root)
     (root / "_logs").mkdir()
     (root / "_logs" / "campaign.log").write_text("noise")
     (root / "_parity").mkdir()
@@ -97,7 +98,7 @@ def test_files_skips_campaign_scratch_and_generated_files(tree):
     assert rel == [
         "filter/goodreads-d128.jsonl",
         "filter/goodreads-d128.samples.jsonl",
-        "flat.csv",
+        "results.parquet",
     ]
 
 
@@ -173,10 +174,11 @@ def test_verify_accepts_a_faithful_copy_and_catches_a_changed_byte(tree, tmp_pat
         dst.write_bytes((tree / f["path"]).read_bytes())
     assert upload.verify(copy, man) == []
 
-    (copy / "flat.csv").write_bytes(b"dataset,dim\ngoodreads,256\n")
-    assert upload.verify(copy, man) == ["sha256 differs: flat.csv"]
-    (copy / "flat.csv").unlink()
-    assert upload.verify(copy, man) == ["missing: flat.csv"]
+    size = (copy / "results.parquet").stat().st_size
+    (copy / "results.parquet").write_bytes(b"\x00" * size)
+    assert upload.verify(copy, man) == ["sha256 differs: results.parquet"]
+    (copy / "results.parquet").unlink()
+    assert upload.verify(copy, man) == ["missing: results.parquet"]
 
 
 # ----- the CLI ---------------------------------------------------------------
@@ -195,6 +197,7 @@ def test_dry_run_touches_no_hub(tree, monkeypatch):
 
 
 def test_upload_commits_every_file_plus_the_two_generated_ones(tree, fake_hub):
+    (tree / "results.parquet").unlink()  # the upload regenerates it from the records
     r = _run("--results", str(tree), "--repo-id", "u/r", "--path-in-repo", "c4")
     assert r.exit_code == 0, r.output
     assert fake_hub.created == {
@@ -205,7 +208,7 @@ def test_upload_commits_every_file_plus_the_two_generated_ones(tree, fake_hub):
     assert paths == [
         "c4/filter/goodreads-d128.jsonl",
         "c4/filter/goodreads-d128.samples.jsonl",
-        "c4/flat.csv",
+        "c4/results.parquet",
         "c4/MANIFEST.json",
         "README.md",
     ]
@@ -234,10 +237,53 @@ def test_readme_is_rebuilt_from_the_manifests_already_in_the_repo(tree, fake_hub
     old["source"] = "/elsewhere/c4"
     fetched = Path(tree.parent / "old.json")
     fetched.write_text(json.dumps(old))
-    fake_hub.repo_files = ["c4/MANIFEST.json", "c4/flat.csv", "README.md"]
+    fake_hub.repo_files = ["c4/MANIFEST.json", "c4/results.parquet", "README.md"]
 
     monkeypatch.setattr(upload, "hf_hub_download", lambda **kw: str(fetched))
     assert _run("--results", str(tree), "--repo-id", "u/r", "--path-in-repo", "b3").exit_code == 0
     (readme_op,) = [o for o in fake_hub.commits[0]["operations"] if o.path_in_repo == "README.md"]
     body = readme_op.path_or_fileobj.decode()
     assert "## `c4`" in body and "## `b3`" in body and "/elsewhere/c4" in body
+
+
+# ----- fetch: the way back ---------------------------------------------------
+
+
+def _published(tree, tmp_path, monkeypatch):
+    """``snapshot_download`` faked by a copy of ``tree`` under ``c4/`` with its manifest."""
+    man = upload.manifest(tree, upload.files(tree), "c4", None)
+
+    def download(local_dir, **kw):
+        for f in man["files"]:
+            dst = Path(local_dir) / "c4" / f["path"]
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_bytes((tree / f["path"]).read_bytes())
+        (Path(local_dir) / "c4" / "MANIFEST.json").write_text(json.dumps(man))
+        return local_dir
+
+    monkeypatch.setattr(upload, "snapshot_download", download)
+    return man
+
+
+def _fetch(*args):
+    return CliRunner().invoke(upload.fetch, list(args))
+
+
+def test_fetch_restores_a_subtree_resume_can_read(tree, tmp_path, monkeypatch):
+    _published(tree, tmp_path, monkeypatch)
+    dest = tmp_path / "restored"
+    r = _fetch("--path-in-repo", "c4", "--results", str(dest))
+    assert r.exit_code == 0, r.output
+    rel = sorted(p.relative_to(dest).as_posix() for p in dest.rglob("*") if p.is_file())
+    assert rel == [p.relative_to(tree).as_posix() for p in upload.files(tree)]
+    assert len(records.read_keys(dest / "filter" / "goodreads-d128.jsonl")) == 2
+    assert _fetch("--path-in-repo", "c4", "--results", str(dest)).exit_code == 0  # idempotent
+
+
+def test_fetch_never_overwrites_a_different_local_copy(tree, tmp_path, monkeypatch):
+    _published(tree, tmp_path, monkeypatch)
+    dest = tmp_path / "live"
+    records.append_record(dest / "filter" / "goodreads-d128.jsonl", _rec(seed=7))
+    r = _fetch("--path-in-repo", "c4", "--results", str(dest))
+    assert r.exit_code != 0 and "filter/goodreads-d128.jsonl" in r.output
+    assert len(records.read_records(dest / "filter" / "goodreads-d128.jsonl")) == 1

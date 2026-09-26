@@ -1,11 +1,13 @@
-"""``bench upload`` — publish a results tree to a HuggingFace dataset repo (H §3.1, §8.2 G/I).
+"""``bench upload`` / ``bench fetch`` — a results tree to and from a HuggingFace dataset repo
+(H §3.1, §8.2 G/I).
 
 The storage policy this implements is the "Results storage" section of
-``docs/system/evaluation.md``: the JSONL records, ``flat.csv`` and the report go in **git**,
-because they are the evidence and they are kilobytes; the verbose sidecars
-(``*.samples.jsonl``, ``.perkernel/``, figures) go **here**, because they are ~60x larger and
-nobody diffs them; ``results/_parity/*.npz`` and ``results/_logs/`` go **nowhere** — scratch,
-rewritten by every run, skipped by the ``_``-prefix rule in :func:`files`.
+``docs/system/evaluation.md``: a results tree is local, gitignored working state while a
+campaign runs (resume reads its JSONL, never the network) and **the Hub is where it is kept**
+— the per-cell JSONL records, their ``*.samples.jsonl`` sidecars and the ``results.parquet``
+aggregate, which :func:`upload` regenerates from the records before listing the tree.
+``results/_parity/*.npz`` and ``results/_logs/`` go **nowhere** — scratch, rewritten by every
+run, skipped by the ``_``-prefix rule in :func:`files`.
 
 One invocation publishes one ``--path-in-repo`` subtree and writes two generated files:
 ``<prefix>/MANIFEST.json`` — that subtree's provenance *plus a sha256 per file*, so the round
@@ -14,6 +16,7 @@ trip is checkable — and a root ``README.md`` rebuilt from every manifest in th
 (CLAUDE.md rule 2), so a file fetched from the Hub in six months carries the same NOT CITABLE
 reasons the tables would have carried. ``--gate`` cannot override the evidence, only the
 default. **Private by default** — going public is roadmap F4's decision, not this command's.
+:func:`fetch` is the way back: one subtree, checked against its manifest, into a results tree.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -67,13 +71,9 @@ def sha256(path: Path) -> str:
 
 def manifest(results: Path, listing: list[Path], prefix: str, gate: str | None) -> dict:
     """The subtree's provenance and per-file checksums. The records are read out of the
-    ``.jsonl`` files being uploaded, so the verdict describes what actually goes up."""
-    recs = [
-        r
-        for p in listing
-        if p.suffix == ".jsonl" and not p.name.endswith(".samples.jsonl")
-        for r in records.read_records(p)
-    ]
+    ``<suite>/*.jsonl`` record files being uploaded, so the verdict describes what goes up."""
+    rec_files = set(records.record_files(results))
+    recs = [r for p in listing if p in rec_files for r in records.read_records(p)]
     return {
         "manifest_version": MANIFEST_VERSION,
         "path_in_repo": prefix,
@@ -159,9 +159,11 @@ def readme(manifests: list[dict]) -> str:
         '                  local_dir="results", allow_patterns=["<subtree>/*"])',
         "```",
         "",
-        "`MANIFEST.json` carries a sha256 per file; `bench upload --verify` checks a fresh",
-        "download against it. Records are `<suite>/<dataset>-d<dim>.jsonl`, one JSON object",
-        "per cell; `*.samples.jsonl` are the per-call latency vectors behind them.",
+        "`MANIFEST.json` carries a sha256 per file; `bench fetch --path-in-repo <subtree>`",
+        "downloads a subtree and checks it. `results.parquet` is the flat table (one row per",
+        "perf entry, last record per cell) every report is built from; the records it is",
+        "aggregated from are `<suite>/<dataset>-d<dim>.jsonl`, one JSON object per cell, and",
+        "`*.samples.jsonl` are the per-call latency vectors behind them.",
         "",
     ]
     return "\n".join(out)
@@ -179,6 +181,14 @@ def verify(local: Path, man: dict) -> list[str]:
         elif sha256(p) != f["sha256"]:
             bad.append(f"sha256 differs: {f['path']}")
     return bad
+
+
+def _download(repo_id: str, prefix: str, tmp: str) -> Path:
+    local = snapshot_download(
+        repo_id=repo_id, repo_type="dataset", local_dir=tmp,
+        allow_patterns=[f"{prefix}/*"] if prefix else None,
+    )  # fmt: skip
+    return Path(local) / prefix
 
 
 def _at(prefix: str, rel: str) -> str:
@@ -216,6 +226,8 @@ def upload(repo_id, results, prefix, gate, private, do_verify, dry_run) -> None:
     if not results.is_dir():
         raise click.ClickException(f"{results} is not a directory")
     prefix = prefix.strip("/")
+    if records.record_files(results):
+        records.aggregate(results)
     listing = files(results)
     if not listing:
         raise click.ClickException(f"{results} has no files to upload (scratch dirs are skipped)")
@@ -238,7 +250,8 @@ def upload(repo_id, results, prefix, gate, private, do_verify, dry_run) -> None:
     ops = [
         CommitOperationAdd(_at(prefix, f["path"]), str(results / f["path"])) for f in man["files"]
     ]
-    ops.append(CommitOperationAdd(_at(prefix, "MANIFEST.json"), json.dumps(man, indent=2).encode()))
+    man_bytes = json.dumps(man, indent=2).encode()
+    ops.append(CommitOperationAdd(_at(prefix, "MANIFEST.json"), man_bytes))
     ops.append(CommitOperationAdd("README.md", body))
     api.create_commit(
         repo_id=repo_id,
@@ -248,17 +261,43 @@ def upload(repo_id, results, prefix, gate, private, do_verify, dry_run) -> None:
                        f"{'citable' if man['citable'] else 'NOT CITABLE'}",
     )
     click.echo(f"done: https://huggingface.co/datasets/{repo_id}/tree/main/{prefix}")
+    click.echo(f"MANIFEST.json sha256 {hashlib.sha256(man_bytes).hexdigest()}")
 
     if do_verify:
         with tempfile.TemporaryDirectory(prefix="bench-upload-verify-") as tmp:
-            local = snapshot_download(
-                repo_id=repo_id, repo_type="dataset", local_dir=tmp,
-                allow_patterns=[f"{prefix}/*"] if prefix else None,
-            )
-            bad = verify(Path(local) / prefix, man)
+            bad = verify(_download(repo_id, prefix, tmp), man)
         if bad:
             raise click.ClickException(f"round trip failed ({len(bad)}):\n" + "\n".join(bad))
         click.echo(f"round trip verified: {man['n_files']} files, sha256 equal")
 
 
-__all__ = ["RESULTS_REPO", "files", "manifest", "readme", "upload", "verify"]
+@click.command()
+@click.option("--repo-id", default=RESULTS_REPO, show_default=True, help="source HF dataset repo")
+@click.option("--path-in-repo", "prefix", required=True, help="the subtree to fetch, e.g. d1-a")
+@click.option("--results", type=click.Path(path_type=Path), default=EVAL_DIR / "results",
+              help="the results tree to fetch into")
+def fetch(repo_id, prefix, results) -> None:
+    """Download one published subtree into a results tree, checked against its manifest."""
+    results = (results if results.is_absolute() else EVAL_DIR / results).resolve()
+    prefix = prefix.strip("/")
+    with tempfile.TemporaryDirectory(prefix="bench-fetch-") as tmp:
+        local = _download(repo_id, prefix, tmp)
+        man = json.loads((local / "MANIFEST.json").read_text())
+        bad = verify(local, man)
+        if bad:
+            raise click.ClickException("download does not match its manifest:\n" + "\n".join(bad))
+        clash = [f["path"] for f in man["files"] if (results / f["path"]).is_file()
+                 and sha256(results / f["path"]) != f["sha256"]]  # fmt: skip
+        if clash:
+            raise click.ClickException(
+                f"{results} already holds different copies of: {', '.join(clash)}"
+            )
+        for f in man["files"]:
+            dst = results / f["path"]
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(local / f["path"], dst)
+    click.echo(f"{man['n_files']} files, {man['n_records']} record(s) from {repo_id}/{prefix} "
+               f"-> {results}; " + ("CITABLE" if man["citable"] else "NOT CITABLE"))  # fmt: skip
+
+
+__all__ = ["RESULTS_REPO", "fetch", "files", "manifest", "readme", "upload", "verify"]
