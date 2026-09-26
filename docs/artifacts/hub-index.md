@@ -24,7 +24,7 @@ re-upload of a subtree replaces its row.
 | `artifacts/deterministic-compaction` | golden re-derive cells (run1/run2), epilogue and timing dumps | 10 | 106,051 | `9758c1961f40443d170d7f4755a45264bacfd59db5c4d451bc5136573ad02911` |
 | `artifacts/e2-pubmed` | PubMed d768 cell record, 10M-slice plan | 2 | 19,364 | `570d51246688e0ab3c6ccde80e9617aa70e930825cd1c8462268c368fa3a71c0` |
 | `artifacts/e3-openalex` | OpenAlex prep/convert logs, staging params, stream probes, plan, cell record | 10 | 11,923 | `f1bbd3638f1bf7ca1f227437ab5df868a2bf91181863a561201ac3a2a0c0b3ef` |
-| `artifacts/e4-kuairand` | KuaiRand attribute vocabulary, convert and prep logs | 3 | 17,756 | `83aad38532a8f8fcdf68482102f8cad4f8a7e2e709b97495fbc92f4df028233a` |
+| `artifacts/e4-kuairand` | KuaiRand attribute vocabulary, convert/prep logs, gSASRec training/probe logs, publish log, the filter-cell record, and the val/test cold-start check | 13 | 37,702 | `bfd1c9fecaabf9dc5a7346b0b203f37d53f56757b6830c1ac550ba2c5be81f14` |
 | `artifacts/evaluation-harness-v2` | C4 resume and kmax-diag records, D1-a rerun records, A1 re-derive and step-4 cells | 21 | 1,597,720 | `01977159cb57cc935f7e5a127a9a65b98d750751f2e81ce0c35795c3af78041f` |
 | `artifacts/evaluation-package-layout` | C5 L4-b chunk-64 record | 1 | 6,224 | `d69e60f9f723eb660dfa873871b7b7cdd6b5c2e665d4144c6a7fdc0393ba7b41` |
 | `artifacts/golden-logs` | run logs behind `evaluation/golden/*.json`: driver, per-cell, clocks | 13 | 43,586 | `3000d733b07ec6ad3e1f6338bab5e020cc578f81b4b9f2e3b7843ea345363c53` |

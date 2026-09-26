@@ -1,15 +1,0 @@
-2026-09-26 11:23:09.288 | INFO     | bench.config:load_matrix:363 - kuairand/filter: 1 jobs, 1 cells
-2026-09-26 11:23:34.083 | INFO     | training.encode:load_model_for_eval:48 - model: GSASRec params={'max_seq_length': 200, 'embedding_dim': 128, 'num_heads': 2, 'num_blocks': 2, 'ffn_hidden_dim': 512, 'dropout': 0.5, 'reuse_item_embeddings': True}
-/scratch/wt/e4b/evaluation/training/model.py:42: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
-  self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_blocks)
-encode queries:   0%|          | 0/52 [00:00<?, ?it/s]encode queries:   2%|▏         | 1/52 [00:00<00:43,  1.16it/s]encode queries:  13%|█▎        | 7/52 [00:00<00:04,  9.38it/s]encode queries:  21%|██        | 11/52 [00:01<00:02, 14.23it/s]encode queries:  31%|███       | 16/52 [00:01<00:01, 20.75it/s]encode queries:  42%|████▏     | 22/52 [00:01<00:01, 26.99it/s]encode queries:  54%|█████▍    | 28/52 [00:01<00:00, 33.21it/s]encode queries:  65%|██████▌   | 34/52 [00:01<00:00, 38.54it/s]encode queries:  77%|███████▋  | 40/52 [00:01<00:00, 42.88it/s]encode queries:  88%|████████▊ | 46/52 [00:02<00:00, 25.35it/s]encode queries: 100%|██████████| 52/52 [00:02<00:00, 22.94it/s]
-2026-09-26 11:24:37.254 | WARNING  | training.encode:encode_split:149 - not caching encoded queries: 17.2 GB > budget 9.9 GB
-2026-09-26 11:24:44.425 | INFO     | eval_datasets.layout:apply_users_limit:196 - users_limit=10000: keeping the first 10000 of 26221 queries
-2026-09-26 11:24:44.426 | INFO     | bench.inputs:load_inputs:57 - inputs: items 32038725 queries 10000 dim 128
-2026-09-26 11:24:57.570 | INFO     | bench.inputs:build_filters:109 - filter modules (clause): ['triton']
-2026-09-26 11:24:57.576 | INFO     | bench.oracle:load_or_build:227 -   building exact oracle (k_gt=1000) for sweep t_cat1
-2026-09-26 11:25:38.970 | INFO     | bench.oracle:load_or_build:254 -   saved oracle → data/kuairand/gt_d128/oracle_v4_t_cat1_8a2656b6b306afbb.pt (pass_rate=0.0362)
-2026-09-26 11:25:39.156 | INFO     | bench.run:run:460 - build linr_v1_filter_mask clause/t_cat1 triton build={}
-2026-09-26 11:26:20.552 | INFO     | bench.run:run:582 -   linr_v1_filter_mask clause/t_cat1 triton params={} -> partial (41s)
-2026-09-26 11:26:20.743 | INFO     | bench.run:run:590 - done: {'partial': 1}
-kuairand/filter: {'partial': 1}
