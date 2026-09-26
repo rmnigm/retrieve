@@ -118,7 +118,7 @@ explains the mechanism behind the kernel-only split.
 |---|---|
 | goodreads, arxiv | staged, layout checked, oracles built |
 | yfcc10m | our exact oracle reproduces the shipped filtered ground truth. The first filter cell fails the exact-algorithm gate (`recall_oracle@1000` 0.964 < 0.99) because `PostfilterKNN` scores in fp16 and YFCC's top-1000 spans only about fifteen fp16 quanta; decision open (roadmap) |
-| pubmed | ETL written and dry-run on one shard; nothing staged |
+| pubmed | 10 M slice staged locally (A100 box, 2026-09-26), not on the Hub: `bench check` passes, the exact `c0_mesh` oracle is built (pass rate 0.0002). One filter cell, `linr_v1_filter_mask`/triton clause `c0_mesh`, eager, `--skip-perf` (so `partial`): `recall_oracle@1000` 0.9991, held-out `recall@100` 0.9989, n = 8,428. SilverTorch (`triton` and `official`) OOMs in the library's global int8 quantize, which holds two extra fp32 copies of the 28.6 GiB item matrix ([datasets](system/datasets.md#disk-budget-and-the-slice)); not yet validated ([artifacts](artifacts/e2-pubmed/)) |
 | Semantic Scholar, KuaiRand | not started |
 
 ## Still unverified

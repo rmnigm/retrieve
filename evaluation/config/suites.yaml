@@ -30,9 +30,10 @@ filter:                        # vs exact oracle + held-out-in-filter (old d*-fi
   # (config/yfcc10m.yaml). ks are the suite's: recall is against the harness's own cosine
   # oracle, not the shipped k=10 squared-L2 GT (docs/system/datasets.md § yfcc10m).
   # `dims` is [128, 192] for that reason and is NOT the dim ablation, which stays dropped:
-  # each dataset contributes exactly one width.
-  datasets: [goodreads, arxiv, yfcc10m]
-  dims: [128, 192]
+  # each dataset contributes exactly one width. pubmed joined at E2 at its native 768
+  # (MedCPT, config/pubmed.yaml), same rule.
+  datasets: [goodreads, arxiv, yfcc10m, pubmed]
+  dims: [128, 192, 768]
   filter_kinds: [clause, bloom]
   ks: [100, 500, 1000]
   batch_sizes: [1, 8, 16]
