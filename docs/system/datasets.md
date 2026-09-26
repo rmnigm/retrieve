@@ -713,7 +713,7 @@ The sweeps of [`config/kuairand.yaml`](../../evaluation/config/kuairand.yaml)
 are `t_*` over C0–C3 and `b_*` over C4–C6. Bloom runs `t_cat1`, `t_tag`,
 `b_short` and `b_fresh`. The dataset is in no suite yet (roadmap E5).
 
-**Training** runs over the full 32 M catalog (32,038,726 items). At d64
+**Training** runs over the full 32 M catalog (32,038,725 items; 32,038,726 table rows with padding). At d64
 two separate tables fit (62.6 GB peak on the 80 GB H100). At d128 even one
 shared table (`reuse_item_embeddings`) does not: weight, two AdamW moments
 and the two dense gradients it receives in backward exceed 80 GB

@@ -149,8 +149,8 @@ The goal is to replace the published gSASRec checkpoints as the history encoder 
 - **KuaiRand is final at d64, refit on train + val** (`train_on_val=true`, 4 epochs, the
   train-only run's best epoch + 1). The refit, because next-day clicks drift and the val day is
   otherwise never trained on ([temporal drift](validation.md#kuairand-temporal-drift)). d128 was
-  not run: it runs out of memory in backward even with one table, and the user stopped KuaiRand at
-  d64 (2026-09-26).
+  not run ([OOM](validation.md#final-models-the-e1c-recipe)); the user stopped KuaiRand at d64
+  (2026-09-26).
 - **Out of scope for this line:** a LLaMA block, row-wise Adagrad, a bf16 table,
   FuXi-style channels and multi-GPU.
 
