@@ -25,10 +25,6 @@ in records, commits and code comments; they are not renumbered.
 
 ## Needs the user
 
-- **Run the campaign?** Running more of D1 needs the user's go-ahead. The
-  grid is 450 jobs, about 44 GPU hours at the measured ~537 s per record.
-  The choice is the full grid or its headline subset, set against the
-  rental horizon.
 - **Citability of a narrowed campaign.** A run with a narrowed mode set is
   recorded `status: partial` and reported NOT CITABLE. Whether a
   deliberate, recorded narrowing (eager everywhere, graph on triton) should
