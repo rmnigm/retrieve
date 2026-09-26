@@ -248,11 +248,11 @@ Nine files under [`evaluation/config/`](../../evaluation/config/):
 [`arxiv.yaml`](../../evaluation/config/arxiv.yaml),
 [`yambda-500m.yaml`](../../evaluation/config/yambda-500m.yaml),
 [`yambda-5b.yaml`](../../evaluation/config/yambda-5b.yaml),
-[`yfcc10m.yaml`](../../evaluation/config/yfcc10m.yaml) and
-[`pubmed.yaml`](../../evaluation/config/pubmed.yaml) (both in the `filter`
-suite; pubmed at 768), and
-[`kuairand.yaml`](../../evaluation/config/kuairand.yaml) and
-[`openalex.yaml`](../../evaluation/config/openalex.yaml)
+[`yfcc10m.yaml`](../../evaluation/config/yfcc10m.yaml),
+[`pubmed.yaml`](../../evaluation/config/pubmed.yaml) and
+[`openalex.yaml`](../../evaluation/config/openalex.yaml) (all three in
+the `filter` suite; pubmed and openalex at 768), and
+[`kuairand.yaml`](../../evaluation/config/kuairand.yaml)
 (in no suite yet) and
 [`suites.yaml`](../../evaluation/config/suites.yaml). `users_limit:
 10000` and the goodreads/arXiv sweeps, ks and batch sizes match the

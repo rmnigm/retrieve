@@ -157,12 +157,22 @@ in records, commits and code comments; they are not renumbered.
 - `bench report` has not been rerun over all 126 goodreads cells.
 - The Triton kernels need a power-of-two `D`/`W` (`tl.arange`;
   `ValueError` at the op boundary since the kernel-opt pass, was a
-  compiler error before). Found staging PubMed (D = 768):
-  `codesigned_probe_score*`, `fused_masked_knn_topk` and OPORP all need
-  it, so PubMed runs SilverTorch on `official` only and LiNR V2/V3 not
-  at all ([validation](validation.md#library-gates)). Fix is masked
-  padding to the next power of two inside the kernel, with its own
-  parity and timing gates — worth doing before E5.
+  compiler error before). Found staging PubMed and OpenAlex (both
+  D = 768): `codesigned_probe_score*`, `fused_masked_knn_topk` and
+  OPORP all need it, so both datasets run SilverTorch on `official`
+  only and LiNR V2/V3 not at all
+  ([validation](validation.md#library-gates)). Fix is masked padding to
+  the next power of two inside the kernel, with its own parity and
+  timing gates — worth doing before E5.
+- `bench/oracle.py`'s `item_embs.t().contiguous()` holds a second full
+  fp32 copy of the item table on top of the item table itself, so the
+  harness's real per-dataset limit at native width is about half the
+  device memory divided by `4·D` bytes, not the full device memory —
+  found staging OpenAlex at 768-d (15 M items fit the item table alone
+  but not both copies; scoped to 10 M instead, see
+  [validation](validation.md#datasets)). A view instead of a contiguous
+  copy would remove the second copy; `bench/` is gated, so this needs
+  its own check against the existing oracle results and golden cells.
 - The shared Inductor cache (`/tmp/torchinductor_root`) does not
   invalidate on a `code_version` change, so a graph-mode harness run
   after a library edit can silently replay stale kernel code (found
