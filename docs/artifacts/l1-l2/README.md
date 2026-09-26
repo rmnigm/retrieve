@@ -20,6 +20,21 @@ The fp16 **score** costs 0.037 of the 0.044; the remaining 0.007 is the fp16 **s
 rounding (the upcast row shows the tensor-core accumulator contributes nothing measurable).
 The gate is `recall_oracle@1000 ≥ 0.99`.
 
+## L1: the harness gate on YFCC-10M, before and after
+
+`bench run --dataset yfcc10m --suite filter --algo linr_v1_filter_mask --filter-kind clause
+--mode eager --skip-perf` (10,000 queries, `users_limit` of the committed config; a scratch
+config dir pointing `data_dir` at `/data/yfcc10m`); "before" is the same command with the pre-L1
+tree first on `PYTHONPATH`. V2 cannot run in the harness at d192 (the Triton kernel's
+power-of-two `D`; the suite folds V2's torch backend into Triton), so
+[`yfcc_v2_torch.py`](yfcc_v2_torch.py) scores `LiNRV2(backend="torch")` against the same oracle
+blob.
+
+| cell | before | after |
+|---|---|---|
+| `linr_v1_filter_mask` / triton, `recall_oracle@1000` | 0.9652, `QualityGateError` | **0.9944**, gate passes (`recall_oracle@100` 0.9886, n = 9,817) |
+| `linr_v2` / torch (script), `recall_oracle@1000` | 0.9652 | **0.9944** (n = 9,817) |
+
 ## L1: memory, at real catalog shapes
 
 [`index_mem.py`](index_mem.py), one process per side, random tensors of the real `N × D`
