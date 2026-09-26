@@ -198,6 +198,7 @@ the selected checkpoint. sm_mhz 1980 throughout.
 | [E1c](artifacts/seqrec-encoder/e1c-yambda-d64-sasrec-ssm-logq/) yambda d64, gSASRec body as E1, sampled softmax (in-batch 4096 + uniform 8192) **with logQ**: the selected config | **0.0945** / 0.1157 / 0.0460 / **0.1619** / 0.0382 | **+0.0099 / +0.0056** | 0.1010 (77; early stop at 97) | 11.6 | 7,809 | 10.7 | 26 min |
 | [E3](artifacts/seqrec-encoder/e3-goodreads-d64-sasrec-ssm-logq/) goodreads-work-id d64, the E1c recipe (bar 0.0350 / 0.1486) | 0.0381 / 0.0695 / 0.0346 / 0.1447 / 0.1232 | **+0.0031** / −0.0039 | 0.0402 (16; early stop at 26) | 49.4 | 14,966 | 6.7 | 26 min |
 | [R-y128](artifacts/seqrec-encoder/y128-sasrec-ssm-logq/) yambda d128, the E1c recipe with ffn 512 (bar 0.0811 / 0.1486) | **0.1006** / 0.1207 / 0.0500 / **0.1662** / 0.0389 | **+0.0195 / +0.0176** | 0.1078 (99 of 100, still rising) | 13.8 | 5,182 (slowed by GPU sharing in 14 epochs) | 13.6 | 48 min |
+| [R-g128](artifacts/seqrec-encoder/g128-sasrec-ssm-logq/) goodreads d128, the E1c recipe with ffn 512 (bar 0.0361 / 0.1480) | **0.0410** / 0.0736 / 0.0372 / **0.1518** / 0.1577 | **+0.0049 / +0.0038** | 0.0440 (34; early stop at 44) | 59.0 | 12,330 | 8.1 | 52 min |
 
 Unverified: `target_frequencies` (logQ) is checked only by hand on CPU; E2c ran `logq=true` on the GPU;
 `use_time` on goodreads timestamps (E2a used it on yambda); resume (`--resume` has never run on the GPU).
