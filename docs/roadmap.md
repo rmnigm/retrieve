@@ -92,6 +92,33 @@ in records, commits and code comments; they are not renumbered.
   including the unfiltered cells retired from the `quality` suite. Needs
   D1 and E1-E4.
 
+## Phase H: harness infrastructure
+
+- [ ] **H1: move results and artifacts off git, onto Parquet + the Hub.**
+  User decision, 2026-09-26, revising the standing "JSONL records +
+  flat.csv + reports in git" choice in
+  [decisions](decisions.md#harness): 196 tracked JSON/JSONL files, 126 MB,
+  should not live next to the code (`docs/artifacts/kernel-opt/` alone is
+  51 files from this session). Per-job JSONL writing during a run stays
+  (crash safety, `records.append_record`'s one-write-one-fsync contract is
+  the point); the canonical, queried, stored form becomes Parquet,
+  aggregated at the end of a run/campaign the way `records.flatten`
+  already aggregates into `flat.csv` today. Raw per-cell JSONL and
+  `docs/artifacts/<plan>/` dumps move to the Hub if worth keeping for
+  re-derivation, or are dropped if not (transient debug output, superseded
+  results). Needs a real design pass, not a mechanical move: `bench
+  campaign --resume`'s skip-detection currently reads local JSONL directly
+  ([evaluation](system/evaluation.md#resume)) and must keep working once
+  the canonical copy is remote/Parquet; `report.py` reads `flat.csv`
+  today and would read Parquet instead; `bench upload`'s existing
+  HF-publish path is the model to extend, not replace. Removing already-
+  committed files from `HEAD` (`git rm`) is in scope; rewriting git
+  history to shrink the `.git` size is a separate, more disruptive
+  question for the user, not assumed. `docs/decisions.md`'s Results
+  storage bullet, `docs/system/storage.md` and CLAUDE.md rule 6 (session
+  artifacts under `docs/artifacts/<plan>/`) all need updating to match
+  whatever this step lands on.
+
 ## Phase F: the paper
 
 - [ ] **F2: finish the official-vs-reimplementation section** with D1's
