@@ -9,16 +9,18 @@ builders at the top are meant to be reused by the E2-E4 loaders.
 
 from __future__ import annotations
 
+import argparse
 import json
-import os
 from pathlib import Path
 
 import numpy as np
 import pytest
 import torch
 
+from eval_datasets import layout
 from eval_datasets.etl import yfcc
 from eval_datasets.etl import yfcc_check_gt as chk
+from eval_datasets.hub import data_root
 
 # ----- fixture writers (the upstream binary formats) --------------------------
 
@@ -307,10 +309,7 @@ class TestCheckGtHelpers:
 
 
 def _real_dir() -> Path | None:
-    root = os.environ.get("RETRIEVE_DATA_ROOT")
-    if not root:
-        return None
-    d = Path(root) / "yfcc10m"
+    d = data_root() / "yfcc10m"
     needed = [
         "item_attrs_narrow.pt",
         "clause_is_reverse_narrow.pt",
@@ -369,6 +368,10 @@ class TestRealSlice:
         assert torch.equal(head, head.round())
         assert head.min() >= 0 and head.max() <= 255
 
+    @pytest.mark.skipif(
+        not (yfcc.ROOT / "query.metadata.public.100K.spmat").exists(),
+        reason="raw yfcc10m query metadata not on this machine",
+    )
     def test_query_predicates_round_trip_to_upstream_tag_ids(self):
         tags, dense = chk.load_query_predicates(REAL)
         assert tags.shape == (yfcc.N_QUERY, yfcc.C_NARROW)
@@ -415,8 +418,6 @@ class TestPrepAttrsLayout:
         return root
 
     def test_validate_layout_is_clean_and_sidecars_declare_no_prefix(self, raw_root, tmp_path):
-        from eval_datasets import layout
-
         out = tmp_path / "yfcc10m"
         assert yfcc.cmd_prep(_ns(output_dir=str(out))) == 0
         assert yfcc.cmd_attrs(_ns(output_dir=str(out), max_tags=2)) == 0
@@ -447,6 +448,4 @@ class TestPrepAttrsLayout:
 
 
 def _ns(**kw):
-    import argparse
-
     return argparse.Namespace(**kw)

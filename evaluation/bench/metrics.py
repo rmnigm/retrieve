@@ -97,7 +97,7 @@ def finalize(acc: dict) -> dict[str, float]:
     keys = [key for key in acc if key != "n"]
     n = max(acc["n"], 1)
     values = torch.stack([acc[key] for key in keys]).div(n).tolist() if keys else []
-    out = dict(zip(keys, values))
+    out = dict(zip(keys, values, strict=True))
     out["n"] = acc["n"]
     return out
 

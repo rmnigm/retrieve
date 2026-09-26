@@ -212,7 +212,7 @@ def _combos(where: str, spec: Any) -> list[dict[str, Any]]:
     if isinstance(spec, dict):
         if not all(isinstance(v, list) and v for v in spec.values()):
             raise ConfigError(f"{where}: a grid maps every key to a non-empty list, got {spec!r}")
-        return [dict(zip(spec, vals)) for vals in itertools.product(*spec.values())]
+        return [dict(zip(spec, vals, strict=True)) for vals in itertools.product(*spec.values())]
     if isinstance(spec, list) and all(isinstance(c, dict) for c in spec):
         return [dict(c) for c in spec] or [{}]
     raise ConfigError(f"{where}: expected a grid or a list of combos, got {spec!r}")

@@ -4,7 +4,7 @@ helpers every ETL module and the trainer share, ``data_root()``, and the ``eval-
 
 Layout:
 
-    $RETRIEVE_DATA_ROOT/                    (default <repo_root>/data)
+    $RETRIEVE_DATA_ROOT/                    (default evaluation/data)
     ├── <dataset>/                          eval inputs from pinkmeme/eval-<dataset>
     │   ├── content/, content_d64/, ...
     │   ├── item_id_map.json, eval_split.parquet, item_attrs_narrow.pt, ...
@@ -21,7 +21,7 @@ import os
 from pathlib import Path
 
 import click
-from huggingface_hub import HfApi, snapshot_download
+from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from huggingface_hub.utils import HfHubHTTPError
 from loguru import logger
 
@@ -195,8 +195,8 @@ def download_raw(
     local.mkdir(parents=True, exist_ok=True)
 
     logger.info("snapshot_download {} -> {} (allow={})", repo_id, local, allow_patterns)
-    kwargs: dict = dict(repo_id=repo_id, repo_type=repo_type, local_dir=str(local),
-                        allow_patterns=allow_patterns)
+    kwargs: dict = {"repo_id": repo_id, "repo_type": repo_type, "local_dir": str(local),
+                    "allow_patterns": allow_patterns}
     if max_workers is not None:
         kwargs["max_workers"] = max_workers
     snapshot_download(**kwargs)
@@ -205,8 +205,6 @@ def download_raw(
 
 def download_raw_file(source: str, filename: str) -> Path:
     """Pull a single file from an upstream raw HF dataset. Returns the local path."""
-    from huggingface_hub import hf_hub_download
-
     try:
         repo_id, repo_type = RAW_REPOS[source]
     except KeyError as e:

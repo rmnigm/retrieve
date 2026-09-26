@@ -53,7 +53,7 @@ def _checkpoint(root: Path, num_items: int = 12) -> tuple[Path, Path]:
 
 def test_encode_split_caches_on_ckpt_mtime_and_max_seq_length(tmp_path):
     ckpt, data_dir = _checkpoint(tmp_path)
-    kw = dict(max_seq_length=6, batch_size=2, num_workers=0, device=torch.device("cpu"))
+    kw = {"max_seq_length": 6, "batch_size": 2, "num_workers": 0, "device": torch.device("cpu")}
     items, queries, targets, n_targets = encode.encode_split(ckpt, data_dir, **kw)
     assert items.shape == (12, 8) and queries.shape == (3, 8)  # the pad row is gone
     assert targets.tolist() == [[1, -1], [0, 2], [3, -1]] and n_targets.tolist() == [1, 2, 1]

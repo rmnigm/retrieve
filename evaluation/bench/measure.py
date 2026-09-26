@@ -1,7 +1,7 @@
 """Measurement primitives (H §2.1, §2.3, §2.5, §8.2 E/F): environment, provenance, clocks,
 build timing, index size, the latency windows, graph capture and the profiler split.
 
-Imports torch and the stdlib only (``triton`` for its version string). ``run.py`` composes
+Imports torch, the stdlib, ``triton`` (version) and ``retrieve`` (files). ``run.py`` composes
 these: ``setup`` → ``warm_gpu_once`` → ``provenance`` / ``clocks`` → ``timed_build`` →
 ``index_bytes`` → per ``(k, bs, mode)`` ``latency`` (with ``graph_callable`` for
 ``mode="graph"``) → optional ``profile_once``.
@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import importlib.metadata
+import json
 import platform
 import socket
 import subprocess
@@ -26,7 +28,12 @@ from pathlib import Path
 from typing import Any
 
 import torch
+import triton
 from torch import nn
+from torch._dynamo.utils import counters
+from torch.profiler import ProfilerActivity, profile
+
+import retrieve
 
 ROOT = Path(__file__).resolve().parents[2]
 LIB_SUBTREE = "retrieve/src/retrieve"  # code_version = tree hash of this (H §8.2 B)
@@ -102,8 +109,6 @@ def code_version() -> str:
 
 def files_hash() -> str:
     """``files:<sha256>`` over every ``*.py`` under the installed ``retrieve`` package."""
-    import retrieve  # noqa: PLC0415
-
     root = Path(retrieve.__file__).resolve().parent
     h = hashlib.sha256()
     for p in sorted(root.rglob("*.py")):
@@ -125,24 +130,31 @@ def _nvidia_smi(query: str) -> list[str] | None:
     return [v.strip() for v in out.strip().split(",")]
 
 
+def official_commit() -> str | None:
+    """``vcs_info.commit_id`` of the installed ``silvertorch`` (its PEP 610
+    ``direct_url.json``); ``None`` when it is not installed or not installed from git."""
+    try:
+        dist = importlib.metadata.distribution("silvertorch")
+    except importlib.metadata.PackageNotFoundError:
+        return None
+    direct = json.loads(dist.read_text("direct_url.json") or "{}")
+    return direct.get("vcs_info", {}).get("commit_id")
+
+
 def provenance() -> dict[str, Any]:
     """The record's ``env`` block minus clocks (§3.2, §8.2 B/F). ``commit`` is the repo HEAD;
     ``dirty`` is ``subtree_dirty()`` — the flag ``report.py`` enforces (§8.2 F) — and
     ``repo_dirty`` the informational whole-tree one; ``code_version`` follows ``dirty`` (a
-    kernel edit, committed or not, invalidates a campaign; doc churn never does)."""
-    try:
-        import triton  # noqa: PLC0415
-
-        triton_v: str | None = triton.__version__
-    except ImportError:
-        triton_v = None
+    kernel edit, committed or not, invalidates a campaign; doc churn never does).
+    ``official_commit`` is the installed ``silvertorch`` build's git commit."""
     driver = _nvidia_smi("driver_version")
     return {
         "gpu": torch.cuda.get_device_name() if torch.cuda.is_available() else "cpu",
         "driver": driver[0] if driver else None,
         "cuda": torch.version.cuda,
         "torch": torch.__version__,
-        "triton": triton_v,
+        "triton": triton.__version__,
+        "official_commit": official_commit(),
         "commit": _git("rev-parse", "--short", "HEAD"),
         "dirty": subtree_dirty(),
         "repo_dirty": repo_dirty(),
@@ -162,7 +174,7 @@ def clocks() -> dict[str, Any]:
     vals = _nvidia_smi("clocks.sm,clocks.mem,clocks.max.sm,power.limit")
     out: dict[str, Any] = dict.fromkeys(("sm_mhz", "mem_mhz", "sm_max_mhz", "power_limit_w"))
     if vals and len(vals) == 4:
-        for key, v in zip(out, vals):
+        for key, v in zip(out, vals, strict=True):
             out[key] = float(v) if v.replace(".", "", 1).isdigit() else None
     return out
 
@@ -315,8 +327,6 @@ def graph_callable(module: nn.Module, *example_args: Any, warmup: int = 5) -> Ca
         raise NotCapturable("not_capturable")
     if not torch.cuda.is_available():
         raise NotCapturable("cuda_unavailable")
-    from torch._dynamo.utils import counters  # noqa: PLC0415
-    from torch.profiler import ProfilerActivity, profile  # noqa: PLC0415
 
     torch._dynamo.reset()
     skips_before = int(counters["inductor"]["cudagraph_skips"])
@@ -340,8 +350,6 @@ def graph_callable(module: nn.Module, *example_args: Any, warmup: int = 5) -> Ca
 def profile_once(fn: Callable[[], Any], top: int = 8) -> list[dict[str, Any]]:
     """One eager call under ``torch.profiler``; the ``top`` device kernels by self time
     (``{"kernel", "us", "calls"}``) — the wp4 ``kernel_only.py`` split. Empty without CUDA."""
-    from torch.profiler import ProfilerActivity, profile  # noqa: PLC0415
-
     if not torch.cuda.is_available():
         return []
     fn()

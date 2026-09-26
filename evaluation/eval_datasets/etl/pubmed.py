@@ -5,14 +5,13 @@ Source: the NCBI FTP MedCPT article-embedding release
 ``https://ftp.ncbi.nlm.nih.gov/pub/lu/MedCPT/pubmed_embeddings/`` — 38 chunks of
 
 * ``embeds_chunk_{i}.npy``  — ``(N_i, 768)`` **float32** (verified from the npy
-  header: ``descr='<f4'``; §3.8 inferred this from the file sizes and was right),
+  header: ``descr='<f4'``),
 * ``pmids_chunk_{i}.json``  — the row-aligned PMID list,
 * ``pubmed_chunk_{i}.json`` — ``{pmid: {"d": date, "t": title, "a": abstract,
   "m": mesh}}``.
 
-Sizes as served on 2026-09-16 (``plan`` re-measures them): 110.35 GB of ``.npy``,
-52.89 GB of chunk JSON, 0.42 GB of PMID lists — **163.7 GB raw** for
-**35,920,666 articles**. ``m`` is a ``|``-separated list of ``descriptor!qualifier``
+``plan`` measures the sizes and row counts from the server; the last measurement is in
+docs/system/datasets.md § pubmed. ``m`` is a ``|``-separated list of ``descriptor!qualifier``
 entries where a trailing ``*`` marks a major topic, e.g.::
 
     "humans!|rectal neoplasms!|rectal neoplasms*|rectal neoplasms!therapy|"
@@ -42,9 +41,8 @@ Subcommands::
     encode_queries  Encode query text with ``ncbi/MedCPT-Query-Encoder``
                     (``--device cuda``) → content_d768/query_emb.pt.
 
-**No dimensionality reduction.** Per the user decision of 2026-09-06 every
-dataset is benchmarked at its encoder's native dim; there is no PCA step here
-and none is planned.
+**No dimensionality reduction.** Every dataset is benchmarked at its encoder's
+native dim (docs/decisions.md § datasets); there is no PCA step here.
 
 **Why streaming, and what it costs (docs/system/datasets.md § pubmed).** Raw
 (163.7 GB) plus the fp16 item matrix (35.9 M × 768 × 2 B = 55.2 GB) would be
@@ -65,7 +63,7 @@ order, spread uniformly over 1781–2024 rather than "the oldest ``N``". The ful
 36 M does **not** fit the harness on one 80 GB A100 at 768-d — items are held
 fp32 on the device (110 GB) — so the slice is the target, not a stopgap.
 
-Layout (under ``$RETRIEVE_DATA_ROOT``, default ``<repo>/data``)::
+Layout (under ``hub.data_root()``: ``$RETRIEVE_DATA_ROOT``, default ``evaluation/data``)::
 
     data/_raw/pubmed/                       pmids_chunk_*.json (kept), the shard in flight
     data/_raw/pubmed/medline_baseline/      pubmed26n*.xml.gz (+ .md5), streamed
@@ -78,7 +76,6 @@ import argparse
 import gzip
 import hashlib
 import json
-import os
 import re
 import sys
 import time
@@ -92,7 +89,7 @@ import numpy as np
 import polars as pl
 
 from eval_datasets.common import synthesize_qa_narrow
-from eval_datasets.hub import raw_dir
+from eval_datasets.hub import data_root, raw_dir
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -118,7 +115,7 @@ MESH_DESC_PATH = ROOT / "mesh_desc2026.xml.gz"
 #   C3 journal     top-`--journal-vocab` MEDLINE journal abbreviation, REVERSE
 #   C4 has_abstract 0/1
 #
-# dataset-candidates.md §4.1 fixes this layout. `language` is parsed and stored
+# docs/system/datasets.md § pubmed documents this layout. `language` is parsed and stored
 # in articles.parquet + lang_vocab.json but is not one of the five clauses.
 C_NARROW = 5
 A_MAX_NARROW = 4
@@ -143,8 +140,8 @@ _QUERY_SCHEMA = {"query_id": pl.Utf8, "text": pl.Utf8, "target_id": pl.Int64}
 MESH_CATEGORIES = list("ABCDEFGHIJKLMNVZ")
 
 # `plan`'s per-row allowance for the zstd article parquet (pmid, year, has_abstract,
-# mesh list, title). Measured 55.0 B/row on the real chunk 37 (20,947,498 B for 380,761
-# rows, 2026-09-16, the E2 record in docs/plans/dataset-candidates.md); 60 keeps a margin.
+# mesh list, title): the measured size is in docs/system/datasets.md § pubmed; 60 keeps a
+# margin over it.
 ARTICLE_PARQUET_BYTES_PER_ROW = 60
 # `plan`'s allowance for the MEDLINE join output (`medline/*.parquet`, pmid + journal +
 # language for every citation), an upper bound at ~30 B/row zstd over 40 M citations.
@@ -208,7 +205,7 @@ def cap_mesh_by_rarity(
 ) -> list[int]:
     """Cap an article's MeSH bag to the ``k`` **globally rarest** descriptors.
 
-    dataset-candidates.md §4.1 asks for a K=4 multi-valued OR clause over a
+    C0 is a K=4 multi-valued OR clause over a
     top-V vocabulary with a MeSH-heading pass rate in the 0.01–5 % range. The
     query-side clause value is
     :func:`eval_datasets.common.synthesize_qa_narrow`'s *first non-pad* entry,
@@ -347,7 +344,7 @@ def _fetch_one(url: str, dest: Path, *, attempts: int = 8, log: Path | None = No
 
 
 def _md5(path: Path, chunk: int = 8 << 20) -> str:
-    h = hashlib.md5()  # noqa: S324 — NCBI publishes md5, not our choice
+    h = hashlib.md5()  # NCBI publishes md5, not our choice
     with open(path, "rb") as f:
         while True:
             b = f.read(chunk)
@@ -1257,15 +1254,14 @@ def cmd_attrs(args) -> int:
 def cmd_queries(args) -> int:
     """Write ``queries.parquet`` (``query_id, text, target_id``).
 
-    Two sources, per dataset-candidates.md §3.8/§4.1:
+    Two sources:
 
     * ``heldout`` — item-as-query: the held-out article's title is the query and
       the article itself is the single relevant item. Always available; the
       titles come from the article parquets, so ``--delete-raw`` costs nothing.
       **Every held-out row is kept** — a title-less article gets an empty query
       string rather than being dropped — so ``query_emb.pt`` stays row-aligned
-      with ``heldout.parquet`` / ``eval_split.parquet`` (the layout contract;
-      the 2026-09-06 review's finding on this loader).
+      with ``heldout.parquet`` / ``eval_split.parquet`` (the layout contract).
     * ``nfcorpus`` — the NFCorpus (BEIR) biomedical query set. NFCorpus document
       ids *are* PMIDs, so its qrels map straight onto our item ids. Needs
       ``queries.jsonl`` + ``qrels/test.tsv`` staged under
@@ -1428,7 +1424,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="ETL for the PubMed + MedCPT filter-bench dataset.")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    default_out = str(Path(os.environ.get("RETRIEVE_DATA_ROOT", "data")) / "pubmed-medcpt")
+    default_out = str(data_root() / "pubmed-medcpt")
 
     sp = sub.add_parser("plan", help="dry run: remote sizes → rows, peak disk, wall time")
     sp.add_argument("--shards", type=str, default=None, help='e.g. "0-9,37" (default: all 38)')

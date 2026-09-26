@@ -42,6 +42,8 @@ torch = { index = "pytorch-cu128" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The suite tests the checkout it sits in, not whichever one the shared venv's .pth names.
+pythonpath = [".", "../retrieve/src"]
 markers = ["gpu: needs CUDA; skipped without it (tests/conftest.py)"]
 
 [tool.ruff]
@@ -49,7 +51,17 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I", "UP"]
+select = ["E", "W", "F", "I", "UP", "B", "C4", "SIM", "RUF100", "BLE001", "PLC0415"]
+# PLC0415 (no inline imports) is a preview rule; explicit-preview-rules keeps it the only one.
+preview = true
+explicit-preview-rules = true
+
+[tool.ruff.lint.per-file-ignores]
+# The ETL CLIs import torch / sentence-transformers / transformers (1.5-8 s) inside the
+# subcommand that needs them, so download, plan and --help run without paying for them.
+"eval_datasets/etl/*.py" = ["PLC0415"]
+# Its three broad excepts are claimed by the evaluation-cleanup backlog, not fixed here.
+"eval_datasets/etl/goodreads.py" = ["BLE001"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["bench", "eval_datasets", "training", "retrieve"]

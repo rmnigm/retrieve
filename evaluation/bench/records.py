@@ -43,7 +43,9 @@ _RECORD_COLUMNS = (
 # flat.csv is shipped as a paper artifact (P §B.7), so it has to carry why a row is
 # incomplete, not only that it is: `stage`/`error` on a failure, `partial_reasons` on a
 # narrowed cell, `schema_version` because v1 and v2 records coexist in one file.
-_ENV_COLUMNS = ("code_version", "commit", "dirty", "gpu", "sm_mhz_load", "clocks_drift", "git_branch")
+_ENV_COLUMNS = (
+    "code_version", "commit", "dirty", "gpu", "sm_mhz_load", "clocks_drift", "git_branch",
+)  # fmt: skip
 _PERF_SKIP = ("window_medians_ms", "kernels")
 
 

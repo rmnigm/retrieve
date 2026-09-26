@@ -10,6 +10,7 @@ table are exercised on the A100 in roadmap C4.
 
 from __future__ import annotations
 
+import importlib.metadata
 import subprocess
 
 import numpy as np
@@ -18,6 +19,7 @@ import torch
 from torch import nn
 
 from bench import measure as bench
+from eval_datasets.layout import atomic_write
 
 
 def test_stats_matches_numpy_reference():
@@ -96,7 +98,7 @@ def test_provenance_fields():
     p = bench.provenance()
     expected = {
         "gpu", "driver", "cuda", "torch", "triton", "commit", "dirty", "repo_dirty",
-        "git_branch", "code_version", "host", "python", "started",
+        "git_branch", "code_version", "host", "python", "started", "official_commit",
     }  # fmt: skip
     assert expected <= set(p)
     assert p["torch"] == torch.__version__
@@ -113,6 +115,35 @@ def test_provenance_fields():
         assert p["code_version"].startswith("files:")
     else:
         assert p["code_version"] == tree
+
+
+class _Dist:
+    def __init__(self, direct_url: str | None):
+        self.direct_url = direct_url
+
+    def read_text(self, name: str) -> str | None:
+        return self.direct_url if name == "direct_url.json" else None
+
+
+@pytest.mark.parametrize(
+    ("dist", "want"),
+    [
+        (_Dist('{"url": "u", "vcs_info": {"vcs": "git", "commit_id": "abc123"}}'), "abc123"),
+        (_Dist('{"url": "file:///x", "dir_info": {}}'), None),
+        (_Dist(None), None),
+        (None, None),
+    ],
+    ids=["git", "local_dir", "no_direct_url", "not_installed"],
+)
+def test_official_commit_reads_pep610(monkeypatch, dist, want):
+    def fake(name):
+        assert name == "silvertorch"
+        if dist is None:
+            raise importlib.metadata.PackageNotFoundError(name)
+        return dist
+
+    monkeypatch.setattr(importlib.metadata, "distribution", fake)
+    assert bench.official_commit() == want
 
 
 def _fake_git(subtree_status: str, repo_status: str):
@@ -194,8 +225,6 @@ def test_profile_once_is_empty_without_cuda():
 
 
 def test_atomic_write_replaces_or_leaves_nothing(tmp_path):
-    from eval_datasets.layout import atomic_write  # noqa: PLC0415
-
     bench.atomic_write = atomic_write
     p = tmp_path / "blob.pt"
     bench.atomic_write(p, lambda fh: torch.save({"v": 1}, fh))

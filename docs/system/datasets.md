@@ -33,7 +33,8 @@ by interpolating between real embeddings — used for scale sweeps where a
 real catalog that size doesn't exist.
 
 Data lives under `$RETRIEVE_DATA_ROOT` (default `<repo>/evaluation/data`;
-the pod image sets it, see [storage.md](storage.md)). Where it points
+the pod image sets it, see [storage.md](storage.md)), read only by
+`eval_datasets.hub.data_root()`; every ETL default path goes through it. Where it points
 elsewhere, `evaluation/data` must be a gitignored symlink to it in every
 worktree (`ln -s "$RETRIEVE_DATA_ROOT" evaluation/data`), because the
 harness resolves `config/*.yaml`'s `data_dir: data/<dataset>` against
@@ -111,8 +112,9 @@ breakage flagged); the fixture writers at the top of
 binary formats into `tmp_path`, so the parsers are tested against bytes
 rather than against a downloaded file. The last class, `TestRealSlice`,
 round-trips a 1,000-item slice of the *real* prepared dataset against the
-uncapped tag CSR and skips itself when `$RETRIEVE_DATA_ROOT/yfcc10m` is
-not on the machine. Reuse those writers when adding the E2–E4 loaders,
+uncapped tag CSR and skips itself when `data_root()/yfcc10m` is not on the
+machine; its query-predicate test also reads the raw
+`_raw/yfcc10m/query.metadata.public.100K.spmat` and skips without it. Reuse those writers when adding the E2–E4 loaders,
 and give each new loader a fixture test that runs `validate_layout` on
 what it wrote.
 
@@ -554,6 +556,9 @@ at the 23.9 MB/s a single-stream 64 MB probe measured that day (an earlier
 | **peak disk** | **~68.6 GB** | **~27.2 GB** |
 | wall time (download-bound) | ~2.5 h at 23.9 MB/s, ~1.5 h at 41 MB/s | same |
 | items as the harness holds them: fp32 on the device | **110.3 GB** | 30.7 GB |
+
+The 55 B/row is chunk 37's article parquet, 20,947,498 B for 380,761 rows;
+`etl/pubmed.py`'s `ARTICLE_PARQUET_BYTES_PER_ROW = 60` keeps a margin over it.
 
 The disk is not the obstacle: both fit beside goodreads + arxiv on the
 overlay. **The GPU is.** `bench.inputs.load_inputs` holds the item matrix

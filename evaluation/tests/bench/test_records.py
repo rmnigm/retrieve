@@ -67,7 +67,7 @@ def test_flatten_one_row_per_perf_entry_last_record_per_key(tmp_path):
     records.append_record(p, {**base, "seed": 1, "quality": None, "perf": None})
     records.append_record(records.samples_path(p), {**KEY, "ms": [1.0]})  # not a record
     out = records.flatten(tmp_path)
-    rows = list(csv.DictReader(open(out)))
+    rows = list(csv.DictReader(out.read_text().splitlines()))
     assert out == tmp_path / "flat.csv" and len(rows) == 3
     seed0 = [r for r in rows if r["seed"] == "0"]
     assert [r["perf_mode"] for r in seed0] == ["eager", "graph"]

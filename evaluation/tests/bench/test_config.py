@@ -16,6 +16,7 @@ from collections import Counter
 from pathlib import Path
 
 import pytest
+import yaml
 
 from bench.config import NONE_SWEEP, ConfigError, load_dataset, load_matrix
 
@@ -311,3 +312,29 @@ def test_deep_suite_builds_once_per_n_lists():
         tuple({"candidate_pool": c} for c in (2000, 4000, 8000, 16000, 32000))
     ]
 
+
+
+DATASET_YAMLS = sorted(p for p in CFG.glob("*.yaml") if p.name != "suites.yaml")
+SUITE_NAMES = sorted(k for k, v in yaml.safe_load((CFG / "suites.yaml").read_text()).items()
+                     if isinstance(v, dict) and "datasets" in v)  # fmt: skip
+
+
+def test_the_config_globs_found_the_shipped_files():
+    assert len(DATASET_YAMLS) >= 5 and len(SUITE_NAMES) >= 2, (DATASET_YAMLS, SUITE_NAMES)
+
+
+@pytest.mark.parametrize("suite", SUITE_NAMES)
+@pytest.mark.parametrize("dataset_yaml", DATASET_YAMLS, ids=lambda p: p.stem)
+def test_every_shipped_config_parses(dataset_yaml, suite):
+    """Every ``config/*.yaml`` against every suite through the real loader: a listed dataset
+    expands to jobs at each of its dims the suite runs; an unlisted one is refused by name
+    and still resolves at every dim it declares."""
+    listed = yaml.safe_load((CFG / "suites.yaml").read_text())[suite]["datasets"]
+    if dataset_yaml.stem in listed:
+        jobs = load_matrix(dataset_yaml, CFG / "suites.yaml", suite)
+        assert jobs and all(j.dataset == dataset_yaml.stem for j in jobs)
+        return
+    with pytest.raises(ConfigError, match=f"dataset {dataset_yaml.stem!r} not in"):
+        load_matrix(dataset_yaml, CFG / "suites.yaml", suite)
+    for dim in yaml.safe_load(dataset_yaml.read_text())["dims"]:
+        assert load_dataset(dataset_yaml, dim).dim == dim

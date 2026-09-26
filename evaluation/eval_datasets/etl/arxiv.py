@@ -38,7 +38,7 @@ Examples::
     uv run eval-data arxiv all --output-dir data/arxiv-papers
     uv run eval-data arxiv encode_text --output-dir data/arxiv-papers --batch-size 256
 
-Layout (under $RETRIEVE_DATA_ROOT, default <repo>/data)::
+Layout (under hub.data_root(): $RETRIEVE_DATA_ROOT, default evaluation/data)::
 
     data/_raw/arxiv/      <- snapshot_download destination (data/YYYY/YYYY-MM.parquet)
     data/_raw/arxiv/processed/   <- arxiv_papers.parquet (merged)
@@ -391,8 +391,8 @@ def _encode_with_prefix(
     p_titles = papers["title"].to_list()
     p_abstracts = papers["abstract"].to_list()
     # Build per-item_id arrays (indexed by 0..N-1; item_id-1).
-    by_iid_title = {int(i): t for i, t in zip(p_item_ids.tolist(), p_titles)}
-    by_iid_abstract = {int(i): a for i, a in zip(p_item_ids.tolist(), p_abstracts)}
+    by_iid_title = {int(i): t for i, t in zip(p_item_ids.tolist(), p_titles, strict=True)}
+    by_iid_abstract = {int(i): a for i, a in zip(p_item_ids.tolist(), p_abstracts, strict=True)}
 
     texts: list[str] = []
     valid_local_idx: list[int] = []  # positions in `item_ids` we actually encode
@@ -416,7 +416,7 @@ def _encode_with_prefix(
 
     if not truncate_dims:
         raise ValueError("truncate_dims must contain at least one dim")
-    dims_sorted = sorted(set(int(d) for d in truncate_dims))
+    dims_sorted = sorted({int(d) for d in truncate_dims})
     d_max = dims_sorted[-1]
 
     print(f"STEP load encoder {encoder} (truncate_dims={dims_sorted})", flush=True)

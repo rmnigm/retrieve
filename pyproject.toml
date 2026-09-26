@@ -42,10 +42,11 @@ retrieve-evaluation = { workspace = true }
 silvertorch = { git = "https://github.com/meta-recsys/silvertorch", rev = "21aa35e28b6dd9a91e9ee35efb0857715e86bda7" }
 
 [dependency-groups]
-# Build tools for the no-build-isolation silvertorch extension; installed into
-# the shared .venv by a plain `uv sync` at the workspace root.
+# Build tools for the no-build-isolation silvertorch extension, and the one pinned ruff;
+# installed into the shared .venv by a plain `uv sync` at the workspace root.
 dev = [
     "ninja>=1.11",
     "setuptools>=61",
     "wheel",
+    "ruff==0.15.6",  # the rev of .pre-commit-config.yaml's ruff-pre-commit; bump both together
 ]

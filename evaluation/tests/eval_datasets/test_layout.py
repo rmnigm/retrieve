@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 
+import polars as pl
 import pytest
 import torch
 from conftest import write_tiny_dataset
@@ -96,8 +97,6 @@ def test_validate_layout_text_shape(tmp_path):
 
 
 def test_validate_layout_sequential_shape(tmp_path):
-    import polars as pl
-
     root = tmp_path / "seq"
     root.mkdir()
     (root / "item_id_map.json").write_text(json.dumps({str(i): i for i in range(1, 25)}))
