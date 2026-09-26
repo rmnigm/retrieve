@@ -184,7 +184,7 @@ citable.** Artifacts: [gate A](artifacts/seqrec-encoder/gate-a/),
 ### Encoder experiments E0-E4 (H100, not yet validated, not citable)
 
 Bars are the published checkpoints re-scored on the trainer's `test.parquet`: yambda-500m d64
-0.0846 / 0.1563, d128 0.0811 / 0.1486; goodreads-work-id d64 0.0350 / 0.1486, d128 0.0361 / 0.1480
+0.0846 / 0.1563, d128 0.0811 / 0.1486, d256 0.0814 / 0.1398 ([E0b](artifacts/seqrec-encoder/e0b-yambda-d256-bar/)); goodreads-work-id d64 0.0350 / 0.1486, d128 0.0361 / 0.1480, d256 0.0354 / 0.1472
 (ndcg@10 / recall@100; [E0](artifacts/seqrec-encoder/e0-goodreads-bars/), which matches the
 stored goodreads numbers to 4 decimals). Selection is on val ndcg@10; test is recorded only for
 the selected checkpoint. sm_mhz 1980 throughout.
