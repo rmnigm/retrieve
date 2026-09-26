@@ -36,6 +36,21 @@ scored, and how to move them around. For how the trainer itself works
 | `data/yambda-500m/checkpoints/gsasrec-d64-drop0.5/` | 64 | 0.5 | 99 | **0.0813** | **0.1029** | **0.0384** | **0.1489** | bf16 + fused AdamW recipe; still climbing at the 100-epoch budget cap; **best on every quality metric** |
 | `data/yambda-500m/checkpoints/gsasrec-d256-drop0.5/` | 256 | 0.5 | 95 | 0.0753 | 0.0910 | 0.0364 | 0.1284 | same recipe as d64; higher coverage (0.126 vs 0.124) but worse R@100 — extra capacity hurts here |
 
+The current trainer's yambda and goodreads final models (the E1c recipe: gSASRec body, sampled softmax with logQ)
+are on the Hub (private) under `checkpoints/<ckpt-id>/`, each with `best_model.pt`,
+`item_embs.pt`, `config.json`, `item_id_map.json`, `eval_quality.json`, `train_metrics.json`
+and a short `README.md`. Metrics and state: [validation](../validation.md#final-models-the-e1c-recipe)
+(not yet validated, not citable).
+
+| HF repo | ckpt-id | D | Recipe |
+|---|---|---|---|
+| `pinkmeme/eval-yambda-500m` | `sasrec-ssm-logq-d64` | 64 | E1c, best val epoch |
+| `pinkmeme/eval-yambda-500m` | `sasrec-ssm-logq-d128` | 128 | E1c, best val epoch |
+| `pinkmeme/eval-yambda-500m` | `sasrec-ssm-logq-d256` | 256 | E1c, best val epoch |
+| `pinkmeme/eval-goodreads-work-id` | `sasrec-ssm-logq-d64` | 64 | E1c, best val epoch |
+| `pinkmeme/eval-goodreads-work-id` | `sasrec-ssm-logq-d128` | 128 | E1c, best val epoch |
+| `pinkmeme/eval-goodreads-work-id` | `sasrec-ssm-logq-d256` | 256 | E1c, best val epoch |
+
 Other datasets follow the same `data/<dataset>/checkpoints/<ckpt-id>/`
 layout: 5B runs at `data/yambda-5b/checkpoints/gsasrec-d{64,128}/`,
 goodreads at `data/goodreads-work-id/checkpoints/gsasrec-d{64,128,256}-drop0.5-id/`.
