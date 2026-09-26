@@ -1,6 +1,6 @@
 """The official-backend adapter proper: attributes → features / expressions, mask packing, the
 bloom searches and the scoring wrappers over ``torch.ops.st.*`` (loader, ``OfficialConfig`` and
-the upstream constants live in the package ``__init__``). Everything is eager only (plan D7).
+the upstream constants live in the package ``__init__``). Everything is eager only.
 """
 
 from __future__ import annotations
@@ -35,8 +35,7 @@ from retrieve.ops.official import (
 def default_divisor(d: int) -> int:
     """Smallest power of two ``v`` with ``127² · d / v ≤ 65504`` — the fp16 score path
     divides the int32 dot by ``v`` before the cast, so this is the smallest divisor at
-    which a full-range int8 dot cannot overflow fp16 (plan §4.2: 16 at D=64, 32 at
-    D=128, 64 at D=256). A power of two keeps the division exact."""
+    which a full-range int8 dot cannot overflow fp16. A power of two keeps the division exact."""
     need = (127 * 127 * d) / FP16_MAX
     return 1 << max(0, math.ceil(math.log2(need)))
 
@@ -143,7 +142,7 @@ def parse_plans(
     """``(plans_data int8, plans_offsets int64)`` on **CPU** for a batch of expressions.
     Plans depend only on ``(strings, hash_k, max_sub_queries)``; the search ops decode them
     host-side per call and would copy CUDA-resident plans back to the CPU first, so keeping
-    them on CPU is the cheaper choice (plan §3/§4.4). ``cache=True`` memoises on the string
+    them on CPU is the cheaper choice. ``cache=True`` memoises on the string
     tuple (LRU, 4096 batches); ``cache=False`` parses every call — ≈ 59 µs at B=16 (plan
     §13.2) — which is what a timing run must use so the parse is not hidden behind a
     replayed batch (``OfficialConfig.cache_plans``)."""
@@ -262,7 +261,7 @@ def dequantize_scores(
 
     int32 path (``divisor == -1``): ``(dot.float() · q_scale[b]) · global_scale`` — the
     same two left-associated fp32 multiplies as the Triton kernel and the torch path, so
-    scores are bit-identical (plan D5). fp16 path: the kernel wrote ``fp16(dot /
+    scores are bit-identical. fp16 path: the kernel wrote ``fp16(dot /
     divisor)``; ``score = raw.float() · (divisor · q_scale[b] · global_scale)``. Slots the
     op did not write (pads, filtered docs) carry ``indices == -1``; the caller masks them
     to ``-inf`` / ``-1`` through ``masked_topk``."""

@@ -89,7 +89,7 @@ class BloomFilter(FilterModule):
 
     def evaluate_indices(self, query_clause_attrs: Tensor) -> tuple[Tensor, Tensor]:
         """Returns (positive_indices [B, N] int64, counts [B] int64); each row's ids are in
-        ascending item order on both backends (plan L3)."""
+        ascending item order on both backends."""
         qb = self._build_query_sigs(query_clause_attrs)  # [B, W]
         return ops_for(self.backend).bloom_compact(qb, self.bloom_sigs)
 
@@ -139,7 +139,7 @@ class ExactAttributeFilter(FilterModule):
 
     def evaluate_indices(self, query_clause_attrs: Tensor) -> tuple[Tensor, Tensor]:
         """Returns (positive_indices [B, N] int64, counts [B] int64); each row's ids are in
-        ascending item order on both backends (plan L3)."""
+        ascending item order on both backends."""
         return ops_for(self.backend).clause_compact(
             self.item_clause_attrs, self.clause_is_reverse, query_clause_attrs
         )

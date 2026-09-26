@@ -529,7 +529,7 @@ class TestStateDict:
 
         assert twin._global_scale_f == src._global_scale_f
         assert twin._probe_width == src._probe_width
-        for (name, a), (_, b) in zip(src.named_buffers(), twin.named_buffers()):
+        for (name, a), (_, b) in zip(src.named_buffers(), twin.named_buffers(), strict=True):
             assert torch.equal(a, b), name
         qa = data["q_attrs"] if filter_mode != "none" else None
         ids_s, sc_s = src(data["query"], qa)
@@ -569,7 +569,7 @@ class TestBuilder:
         again = fresh()
         assert twin.build_timings == {} and set(src.build_timings) == set(again.build_timings)
         assert list(twin.state_dict()) == list(again.state_dict())
-        for (name, a), (_, b) in zip(again.named_buffers(), twin.named_buffers()):
+        for (name, a), (_, b) in zip(again.named_buffers(), twin.named_buffers(), strict=True):
             assert torch.equal(a, b), name
         assert twin._global_scale_f == again._global_scale_f
         assert twin._probe_width == again._probe_width
@@ -665,9 +665,14 @@ class TestFewSurvivorsSentinel:
         return {"embs": embs, "attrs": attrs, "q_attrs": q_attrs, "query": make_query(3, D)}
 
     def _build_few(self, few, filter_mode, backend):
-        kw = dict(
-            k=self.K_SMALL, n_lists=8, n_probe=8, n_iter=3, filter_mode=filter_mode, backend=backend
-        )
+        kw = {
+            "k": self.K_SMALL,
+            "n_lists": 8,
+            "n_probe": 8,
+            "n_iter": 3,
+            "filter_mode": filter_mode,
+            "backend": backend,
+        }
         if filter_mode == "bloom":
             kw.update(m_bits=M_BITS, k_hash=K_HASH)
         m = SilverTorch(**kw)

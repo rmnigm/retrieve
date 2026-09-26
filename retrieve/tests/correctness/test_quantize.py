@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from retrieve.functional import popcount_int64
+from retrieve.indexing import quantize
 from retrieve.indexing.quantize import (
     _build_oporp,
     _pack_signs_to_int64,
@@ -366,7 +367,6 @@ def test_global_quantization_chunked_is_bit_exact_and_bounded():
     and scale equal the one-shot formula bit for bit, ``quantize_int8_global_codes`` (the
     loop-free query path) equals them too, and the build's transient stays under half the
     fp32 table, where the one-shot formula held two fp32 copies of it."""
-    from retrieve.indexing import quantize
 
     n = 12 * quantize._CODE_CHUNK_ROWS + 123  # the chunk temporaries are fixed; the table grows
     embs = torch.randn(n, 128, device="cuda") * 3
@@ -390,7 +390,6 @@ def test_global_quantization_chunked_is_bit_exact_and_bounded():
 def test_global_quantization_in_row_order_equals_permuted_codes():
     """``rows=perm`` writes the codes of ``embs[perm]`` directly (SilverTorch's cluster-sorted
     table without a second int8 copy): equal to quantize-then-permute, same scale."""
-    from retrieve.indexing import quantize
 
     embs = torch.randn(2 * quantize._CODE_CHUNK_ROWS + 5, 64, device="cuda")
     perm = torch.randperm(embs.shape[0], device="cuda")

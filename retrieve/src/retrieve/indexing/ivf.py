@@ -3,9 +3,7 @@ k-means assignment, and the probe width its scorers write.
 
 The sort is a stable ``argsort`` so that items inside a cluster keep ascending-id order and the
 slot order is a function of the assignment alone, not of the sort implementation
-(torch's CUDA sort is stable for segments > 4096 and was measured stable below it too — bit-
-identical buffers and outputs on every regime, roadmap B2,
-docs/plans/official-silvertorch-artifacts/wp3/argsort_stable_probe.txt).
+(torch's CUDA sort is stable for segments > 4096 and measured stable below it too).
 """
 
 from __future__ import annotations

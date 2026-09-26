@@ -12,6 +12,7 @@ import pytest
 import torch
 
 from retrieve.functional import compact_mask
+from retrieve.interfaces import ops_for
 from retrieve.modules import BloomFilter, ExactAttributeFilter
 from retrieve.modules.bit_knn import OneBitKNN, SimHashKNN
 from retrieve.modules.knn import FullScanKNN, PostfilterKNN, PostfilterKNNInt8, PrefilterKNN
@@ -797,3 +798,79 @@ class TestComposites:
         ref = ExactAttributeFilter()
         ref.register_index(item_attrs, clause_is_reverse=rev)
         assert torch.equal(v2.filter.evaluate_mask(qa), ref.evaluate_mask(qa))
+
+
+# --- short candidate lists and missing filters (kernel-opt Phase 5, batch 1) -------------
+
+
+@pytest.mark.parametrize("backend", ["torch", "triton"])
+def test_fused_masked_knn_topk_rejects_fewer_columns_than_k(backend):
+    """One contract on both backends: the op needs ``P >= k`` columns."""
+
+    q, embs = make_query(2, 64).half(), make_index(100, 64).half()
+    pos, counts = torch.arange(5, device="cuda").repeat(2, 1), torch.tensor([5, 3], device="cuda")
+    with pytest.raises(ValueError, match="fewer than k=10"):
+        ops_for(backend).fused_masked_knn_topk(q, embs, pos, counts, 10)
+
+
+@pytest.mark.parametrize("p", [0, 3])
+def test_prefilter_knn_short_candidate_list_pads_to_k(p):
+    """``PrefilterKNN`` returns ``[B, k]`` for any candidate width: short lists end in exact
+    ``(-1, -inf)`` sentinels, and both backends agree (``P = 0``: every slot a sentinel)."""
+    k, embs, q = 6, make_index(50, 64), make_query(2, 64)
+    cand = torch.arange(p, device="cuda").repeat(2, 1)
+    out = {}
+    for backend in ("torch", "triton"):
+        m = PrefilterKNN(k=k, backend=backend).cuda()
+        m.register_index(embs)
+        out[backend] = m(q, candidate_ids=cand)
+    ids, scores = out["triton"]
+    assert ids.shape == (2, k)
+    assert torch.equal(ids[:, p:], torch.full((2, k - p), -1, device="cuda"))
+    assert torch.isinf(scores[:, p:]).all() and torch.isfinite(scores[:, :p]).all()
+    assert torch.equal(ids, out["torch"][0])
+
+
+@pytest.mark.parametrize("p", [0, 3, 40])
+def test_bit_knn_indirect_width_is_min_k_p_on_both_backends(p):
+    """The candidate path returns ``min(k, P)`` columns, no pad, on both backends; ``P = 0`` is
+    an empty ``[B, 0]`` (it used to crash the Triton epilogue's gather)."""
+
+    g = torch.Generator(device="cuda").manual_seed(0)
+    qb = torch.randint(-(2**62), 2**62, (2, 2), generator=g, device="cuda")
+    ib = torch.randint(-(2**62), 2**62, (100, 2), generator=g, device="cuda")
+    pos = torch.arange(p, device="cuda").repeat(2, 1)
+    counts = torch.tensor([p, max(p - 1, 0)], device="cuda")
+    res = [
+        ops_for(bk).oporp_1bit_match_topk_indirect(qb, ib, 10, pos, counts)
+        for bk in ("triton", "torch")
+    ]
+    for ids, scores in res:
+        assert ids.shape == scores.shape == (2, min(10, p))
+    assert_topk_equal(*res[0], *res[1])
+
+
+def test_linr_v3_rejects_k_above_candidate_pool():
+    with pytest.raises(ValueError, match="exceeds candidate_pool=10"):
+        LiNRV3(k=11, candidate_pool=10)
+    m = LiNRV3(k=5, candidate_pool=10).cuda()
+    m.register_index(make_index(100, 64))
+    with pytest.raises(ValueError, match="candidate_pool=4 is below k=5"):
+        m.set_query_params(candidate_pool=4)
+
+
+def test_linr_without_filter_rejects_clause_attrs():
+    """Clause attrs to a variant built without a filter raise ``ValueError`` (not an assert or
+    an ``AttributeError`` on ``None``), at register time and at query time; V2, whose
+    candidates are the filter's, refuses ``filter=None`` at construction."""
+    attrs = torch.zeros(50, 1, 1, dtype=torch.long, device="cuda")
+    qa = torch.zeros(2, 1, dtype=torch.long, device="cuda")
+    for cls in (LiNRV1, LiNRV3, LiNRV4):
+        m = cls(k=5).cuda() if cls is not LiNRV3 else cls(k=5, candidate_pool=10).cuda()
+        with pytest.raises(ValueError, match="has no filter"):
+            m.register_index(make_index(50, 64), attrs)
+        m.register_index(make_index(50, 64))
+        with pytest.raises(ValueError, match="has no filter"):
+            m(make_query(2, 64), qa)
+    with pytest.raises(ValueError, match="has no filter"):
+        LiNRV2(k=5, filter=None)

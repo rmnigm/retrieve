@@ -91,8 +91,8 @@ class KMeans:
         The obvious form — ``torch.zeros(n_lists, D).index_add_(0, assignments, embs)`` — is
         **not reproducible on CUDA**: ``index_add_`` reduces with floating-point atomics, so the
         summation order of a cluster's members depends on block scheduling, and two identical
-        builds drift apart (roadmap C4 measured 1.8e-2 in the centroids after 10 Lloyd
-        iterations — one assignment flipped early cascades through the rest). Here instead:
+        builds drift apart (one assignment flipped early cascades through the rest). Here
+        instead:
 
         1. ``bincount`` gives the counts. Integer atomics are exact whatever the order.
         2. The sums are a **one-hot GEMM** in float64, ``onehot[n_lists, W] @ embs[W, D]``, over

@@ -464,8 +464,10 @@ pads short rows back out to `k` columns. The **public op skips all
 three** (`bucket=False`, `pad_to_k=False` in the shared prep/finish):
 candidate widths are static per deployment (the compact family returns
 full-width `[B, N]`; linr_v3's stage-2 width is the fixed
-`candidate_pool`), and `p >= k > 0` is guaranteed by `PrefilterKNN` —
-the policy rationale is written down once in the module docstring.
+`candidate_pool`, with `LiNRV3` rejecting `k > candidate_pool`), and `P < k`
+raises `ValueError` on the op and its torch twin alike. `PrefilterKNN` pads a
+short candidate list to `k` columns of `-1` (its lanes past `counts` are never
+read), so the layer always returns `[B, k]`.
 When bucketed, the score buffer is allocated at `[B, P_BUCKET]`; lanes
 in `[P_real, P_BUCKET)` get `-inf` automatically because
 `count[bid] <= P_real`, the caller-supplied `positive_indices` stays at
@@ -520,22 +522,21 @@ num_stages)` — shipped as `DEFAULT_CONFIG` on the kernel module; pass
 oporp-1bit-match-topk`.
 
 **Bucketing.** For the `HAS_INDICES=True` path, the score-buffer
-width is `n_kernel = max(_bucket_n(positive_indices.shape[1]),
-_bucket_n(k))` (buckets `{4096, 65536, 1048576, 16777216}`), passed
-as `tl.constexpr N`. Bucketing `n_loop` gives the same JIT-cache
-invariant as `fused_masked_knn_topk`; taking the max with
-`_bucket_n(k)` guarantees the buffer always has at least K lanes so
-`torch.topk(all_scores, k)` works directly without a host-side pad
-tail. `positive_indices` stays at its caller width; the kernel's
-indirect `pos_indices` load is gated by `in_count = (n_off <
-count[bid])` (not `n_valid = (n_off < N)`) so it never reads OOB
-when `N > n_loop`. The post-topk
-`safe_local.clamp_max(n_loop - 1)` + `where(isfinite(scores), ids,
--1)` tail handles the per-row "ran short" case (rows where
-`counts[b] < k` get `-1` sentinels in the bottom slots). For
-`HAS_INDICES=False`, `N = item_bits.shape[0]` is fixed per
-registered index — `OneBitKNN.register_index` asserts `k <= N`, no
-bucketing needed.
+width is `n_kernel = _bucket_n(positive_indices.shape[1])` (buckets
+`{4096, 65536, 1048576, 16777216}`), passed as `tl.constexpr N`: the
+same JIT-cache invariant as `fused_masked_knn_topk`. The candidate path
+returns **`min(k, P)` columns** (`torch.sym_min`, symbolic under
+`dynamic=True`), with no pad. That is the convention of the torch twin and of
+the other candidate-path layers, and `P = 0` gives an empty `[B, 0]`.
+`positive_indices` stays at its caller width; the kernel's indirect
+`pos_indices` load is gated by `in_count = (n_off < count[bid])` (not
+`n_valid = (n_off < N)`) so it never reads OOB when `N > n_loop`. The
+post-topk `safe_local.clamp_max(n_loop - 1)` + `where(isfinite(scores),
+ids, -1)` tail handles the per-row "ran short" case (rows where
+`counts[b] < min(k, P)` get `-1` sentinels in the bottom slots). For
+`HAS_INDICES=False`, `N = item_bits.shape[0]` is fixed per registered
+index — `OneBitKNN.register_index` asserts `k <= N`, no bucketing
+needed.
 
 ## `clause_compact` — fused clause eval + stream compaction
 

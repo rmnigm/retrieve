@@ -1,4 +1,4 @@
-"""The LiNR paper's four variants as modules (plan L D5): each composes the primitives of
+"""The LiNR paper's four variants as modules: each composes the primitives of
 ``modules.knn`` / ``modules.bit_knn`` with an optional ``FilterModule`` held as ``self.filter``
 (so ``buffers()`` covers index and filter) and exposes ``forward(query, query_clause_attrs=None)
 -> (ids [B, k], scores [B, k])``. ``k`` forwards to the primitive that owns the final top-k, so
@@ -27,8 +27,13 @@ def _k_of(attr: str) -> property:
 def _mask(filter_mod: FilterModule | None, qa: Tensor | None) -> Tensor | None:
     if qa is None:
         return None
-    assert filter_mod is not None, "query attrs given but the module has no filter"
-    return filter_mod.evaluate_mask(qa)
+    return _filter(filter_mod).evaluate_mask(qa)
+
+
+def _filter(filter_mod: FilterModule | None) -> FilterModule:
+    if filter_mod is None:
+        raise ValueError("query or item clause attrs given, but the module has no filter")
+    return filter_mod
 
 
 class LiNRV1(RetrievalModule):
@@ -54,7 +59,9 @@ class LiNRV1(RetrievalModule):
     ) -> None:
         self.idx.register_index(item_embs)
         if item_clause_attrs is not None:
-            self.filter.register_index(item_clause_attrs, clause_is_reverse=clause_is_reverse)
+            _filter(self.filter).register_index(
+                item_clause_attrs, clause_is_reverse=clause_is_reverse
+            )
 
     def forward(self, query: Tensor, query_clause_attrs: Tensor | None = None):
         return self.idx(query, mask=_mask(self.filter, query_clause_attrs))
@@ -69,6 +76,7 @@ class LiNRV2(RetrievalModule):
 
     def __init__(self, k: int, *, filter: FilterModule, backend: LinrBackend = "triton") -> None:
         super().__init__()
+        _filter(filter)  # V2's candidates are the filter's
         self.idx = PrefilterKNN(k=k, backend=backend)
         self.filter = filter
         self.backend = backend
@@ -81,7 +89,9 @@ class LiNRV2(RetrievalModule):
     ) -> None:
         self.idx.register_index(item_embs)
         if item_clause_attrs is not None:
-            self.filter.register_index(item_clause_attrs, clause_is_reverse=clause_is_reverse)
+            _filter(self.filter).register_index(
+                item_clause_attrs, clause_is_reverse=clause_is_reverse
+            )
 
     def forward(self, query: Tensor, query_clause_attrs: Tensor):
         cand, counts = self.filter.evaluate_indices(query_clause_attrs)
@@ -105,6 +115,8 @@ class LiNRV3(RetrievalModule):
         backend: LinrBackend = "triton",
     ) -> None:
         super().__init__()
+        if k > candidate_pool:
+            raise ValueError(f"k={k} exceeds candidate_pool={candidate_pool}")
         self.stage1 = OneBitKNN(k=candidate_pool, seed=seed, backend=backend)
         self.stage2 = PrefilterKNN(k=k, backend=backend)
         self.filter = filter
@@ -119,18 +131,22 @@ class LiNRV3(RetrievalModule):
         self.stage1.register_index(item_embs)
         self.stage2.register_index(item_embs)
         if item_clause_attrs is not None:
-            self.filter.register_index(item_clause_attrs, clause_is_reverse=clause_is_reverse)
+            _filter(self.filter).register_index(
+                item_clause_attrs, clause_is_reverse=clause_is_reverse
+            )
 
     def set_query_params(self, *, candidate_pool: int) -> None:
         if candidate_pool > self.stage1.item_bits.shape[0]:
             raise ValueError(f"candidate_pool={candidate_pool} exceeds N")
+        if candidate_pool < self.k:
+            raise ValueError(f"candidate_pool={candidate_pool} is below k={self.k}")
         self.stage1.k = int(candidate_pool)
 
     def forward(self, query: Tensor, query_clause_attrs: Tensor | None = None):
         if query_clause_attrs is None:
             cand, _ = self.stage1(query)
             return self.stage2(query, candidate_ids=cand)
-        pos, pcounts = self.filter.evaluate_indices(query_clause_attrs)
+        pos, pcounts = _filter(self.filter).evaluate_indices(query_clause_attrs)
         cand, _ = self.stage1(query, candidate_ids=pos, counts=pcounts)
         # Rows with fewer survivors than candidate_pool carry -1 tails; bound stage 2 by counts.
         return self.stage2(query, candidate_ids=cand, counts=(cand >= 0).sum(dim=1))
@@ -158,7 +174,9 @@ class LiNRV4(RetrievalModule):
     ) -> None:
         self.idx.register_index(item_embs)
         if item_clause_attrs is not None:
-            self.filter.register_index(item_clause_attrs, clause_is_reverse=clause_is_reverse)
+            _filter(self.filter).register_index(
+                item_clause_attrs, clause_is_reverse=clause_is_reverse
+            )
 
     def forward(self, query: Tensor, query_clause_attrs: Tensor | None = None):
         return self.idx(query, mask=_mask(self.filter, query_clause_attrs))

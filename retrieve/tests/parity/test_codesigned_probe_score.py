@@ -102,7 +102,7 @@ def test_config_override_matches_default():
     qpos, bt, _, _ = make_bloom(lay.n, query.shape[0])
     cfg_a = CodesignedProbeScoreConfig(block_p=32, num_warps=4)
     cfg_b = CodesignedProbeScoreConfig(block_p=128, num_warps=8)
-    for bloom in ({}, dict(query_bit_positions=qpos, bloom_transposed=bt)):
+    for bloom in ({}, {"query_bit_positions": qpos, "bloom_transposed": bt}):
         a = _codesigned_probe_score_impl(
             query, *_args(lay, codes), gs, 8, lay.width, **bloom, config=cfg_a
         )

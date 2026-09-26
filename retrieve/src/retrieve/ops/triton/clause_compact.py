@@ -1,5 +1,5 @@
 """Fused clause evaluation + stream compaction without the dense ``[B, N]`` bool of the pure-torch
-path, in two phases (plan L3): the predicate launch writes each tile's survivor count and stashes
+path, in two phases: the predicate launch writes each tile's survivor count and stashes
 its surviving ids, compacted, in the tile's own slot range of an int32 scratch;
 ``_host.compact_finish`` scans the counts and a second, predicate-free launch moves every run to
 ``tile_offset``. A row's ids therefore come out in **ascending item order**, ``torch.equal`` to
@@ -140,28 +140,28 @@ def _clause_compact_prep(
     tile_counts = torch.empty((b, tiles), dtype=torch.int64, device=device)
     scratch = torch.empty((b, tiles * cfg.block_n), dtype=torch.int32, device=device)
 
-    kwargs = dict(
-        item_attrs_ptr=item_clause_attrs,
-        is_reverse_ptr=clause_is_reverse,
-        query_attrs_ptr=query_clause_attrs,
-        tile_counts_ptr=tile_counts,
-        scratch_ptr=scratch,
-        N=n,
-        tiles_y=tiles_y,
-        C=c,
-        A_MAX=a_max,
-        stride_in=item_clause_attrs.stride(0),
-        stride_ic=item_clause_attrs.stride(1),
-        stride_ia=item_clause_attrs.stride(2),
-        stride_qb=query_clause_attrs.stride(0),
-        stride_qc=query_clause_attrs.stride(1),
-        stride_tb=tile_counts.stride(0),
-        stride_sb=scratch.stride(0),
-        BLOCK_N=cfg.block_n,
-        WIDE=wide(item_clause_attrs, scratch),
-        num_warps=cfg.num_warps,
-        num_stages=cfg.num_stages,
-    )
+    kwargs = {
+        "item_attrs_ptr": item_clause_attrs,
+        "is_reverse_ptr": clause_is_reverse,
+        "query_attrs_ptr": query_clause_attrs,
+        "tile_counts_ptr": tile_counts,
+        "scratch_ptr": scratch,
+        "N": n,
+        "tiles_y": tiles_y,
+        "C": c,
+        "A_MAX": a_max,
+        "stride_in": item_clause_attrs.stride(0),
+        "stride_ic": item_clause_attrs.stride(1),
+        "stride_ia": item_clause_attrs.stride(2),
+        "stride_qb": query_clause_attrs.stride(0),
+        "stride_qc": query_clause_attrs.stride(1),
+        "stride_tb": tile_counts.stride(0),
+        "stride_sb": scratch.stride(0),
+        "BLOCK_N": cfg.block_n,
+        "WIDE": wide(item_clause_attrs, scratch),
+        "num_warps": cfg.num_warps,
+        "num_stages": cfg.num_stages,
+    }
     return _ClauseCompactLaunch(grid, tiles_y, kwargs, tile_counts, scratch)
 
 
@@ -201,7 +201,8 @@ def clause_compact(
     ``ops.reference.clause_compact`` and to itself across launches and processes. Mirrors
     ``_clause_compact_impl`` with ``DEFAULT_CONFIG``.
 
-    Registered as an *opaque* ``custom_op``, not a ``triton_op`` (roadmap C4, 2026-09-06): under
+    Registered as an *opaque* ``custom_op``, not a ``triton_op`` (kernels.md, graph-break
+    behavior): under
     ``triton_op`` inductor analyses the kernel's TTIR for mutated pointers, and its provenance
     walk follows a store address back through every argument of the ``tt.call`` that produced
     it. ``compact_store``'s address is ``base + intra`` — data-dependent on the pass mask, which

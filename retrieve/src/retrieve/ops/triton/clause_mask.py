@@ -17,8 +17,7 @@ from torch.library import triton_op, wrap_triton
 # namespace from the JITFunction's globals and captures @triton.jit callees
 # by name. A module object is not captured, so `clause_pass(...)`
 # raises NameError('common is not defined') at ast_to_ttir time — eager
-# Triton resolves the attribute and never sees it. Found by A1's golden run,
-# 2026-09-06; this is what handoff step 4's compile gate exists to catch.
+# Triton resolves the attribute and never sees it (tests/compile catches it).
 from retrieve.ops.triton._host import check_contiguous, grid_batch_tiles, wide
 from retrieve.ops.triton.common import clause_pass, row_base, tile_rows
 
@@ -119,27 +118,27 @@ def _clause_mask_prep(
 
     grid, tiles_y = grid_batch_tiles(b, n, cfg.block_n)
 
-    kwargs = dict(
-        item_attrs_ptr=item_clause_attrs,
-        is_reverse_ptr=clause_is_reverse,
-        query_attrs_ptr=query_clause_attrs,
-        out_ptr=out,
-        N=n,
-        tiles_y=tiles_y,
-        C=c,
-        A_MAX=a_max,
-        stride_in=item_clause_attrs.stride(0),
-        stride_ic=item_clause_attrs.stride(1),
-        stride_ia=item_clause_attrs.stride(2),
-        stride_qb=query_clause_attrs.stride(0),
-        stride_qc=query_clause_attrs.stride(1),
-        stride_ob=out.stride(0),
-        stride_on=out.stride(1),
-        BLOCK_N=cfg.block_n,
-        WIDE=wide(item_clause_attrs, out),
-        num_warps=cfg.num_warps,
-        num_stages=cfg.num_stages,
-    )
+    kwargs = {
+        "item_attrs_ptr": item_clause_attrs,
+        "is_reverse_ptr": clause_is_reverse,
+        "query_attrs_ptr": query_clause_attrs,
+        "out_ptr": out,
+        "N": n,
+        "tiles_y": tiles_y,
+        "C": c,
+        "A_MAX": a_max,
+        "stride_in": item_clause_attrs.stride(0),
+        "stride_ic": item_clause_attrs.stride(1),
+        "stride_ia": item_clause_attrs.stride(2),
+        "stride_qb": query_clause_attrs.stride(0),
+        "stride_qc": query_clause_attrs.stride(1),
+        "stride_ob": out.stride(0),
+        "stride_on": out.stride(1),
+        "BLOCK_N": cfg.block_n,
+        "WIDE": wide(item_clause_attrs, out),
+        "num_warps": cfg.num_warps,
+        "num_stages": cfg.num_stages,
+    }
     return _ClauseMaskLaunch(grid, kwargs, out)
 
 

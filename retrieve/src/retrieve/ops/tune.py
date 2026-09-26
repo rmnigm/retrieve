@@ -130,13 +130,13 @@ def _fmkt_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
     p, d, b = regime
     n = max(p * 2, 1 << 16)  # need N >= P; generous N keeps the gather realistic
     torch.manual_seed(0)
-    return dict(
-        query=torch.randn(b, d, device=dev),
-        item_embs=torch.randn(n, d, device=dev),
-        positive_indices=torch.randint(0, n, (b, p), dtype=torch.long, device=dev),
-        counts=torch.full((b,), p, dtype=torch.long, device=dev),
-        k=min(64, p),
-    )
+    return {
+        "query": torch.randn(b, d, device=dev),
+        "item_embs": torch.randn(n, d, device=dev),
+        "positive_indices": torch.randint(0, n, (b, p), dtype=torch.long, device=dev),
+        "counts": torch.full((b,), p, dtype=torch.long, device=dev),
+        "k": min(64, p),
+    }
 
 
 def _oporp_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
@@ -151,25 +151,25 @@ def _oporp_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
     else:
         pos = counts = None
         k = 64
-    return dict(
-        query_bits=_rand_bits((b, w), dev),
-        item_bits=_rand_bits((corpus_n, w), dev),
-        k=k,
-        positive_indices=pos,
-        counts=counts,
-    )
+    return {
+        "query_bits": _rand_bits((b, w), dev),
+        "item_bits": _rand_bits((corpus_n, w), dev),
+        "k": k,
+        "positive_indices": pos,
+        "counts": counts,
+    }
 
 
 def _probe_layout(dev: torch.device, n: int, p: int, b: int) -> dict[str, Any]:
     """A synthetic CSR probe: equal 256-item clusters, ``p // 256`` distinct probes per row, so
     every row fills the compact width ``p`` exactly."""
     n_lists, n_probe = n // 256, max(p // 256, 1)
-    return dict(
-        probe_ids=torch.stack([torch.randperm(n_lists, device=dev)[:n_probe] for _ in range(b)]),
-        cluster_offsets=torch.arange(0, n_lists * 256 + 1, 256, device=dev),
-        sort_perm=torch.randperm(n, device=dev),
-        width=n_probe * 256,
-    )
+    return {
+        "probe_ids": torch.stack([torch.randperm(n_lists, device=dev)[:n_probe] for _ in range(b)]),
+        "cluster_offsets": torch.arange(0, n_lists * 256 + 1, 256, device=dev),
+        "sort_perm": torch.randperm(n, device=dev),
+        "width": n_probe * 256,
+    }
 
 
 def _cps_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
@@ -194,11 +194,13 @@ def _clause_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]
     n, b, c, a_max = regime
     torch.manual_seed(0)
     n_vocab = 40
-    return dict(
-        item_clause_attrs=torch.randint(0, n_vocab, (n, c, a_max), dtype=torch.int64, device=dev),
-        clause_is_reverse=torch.zeros(c, dtype=torch.bool, device=dev),
-        query_clause_attrs=torch.randint(0, n_vocab, (b, c), dtype=torch.int64, device=dev),
-    )
+    return {
+        "item_clause_attrs": torch.randint(
+            0, n_vocab, (n, c, a_max), dtype=torch.int64, device=dev
+        ),
+        "clause_is_reverse": torch.zeros(c, dtype=torch.bool, device=dev),
+        "query_clause_attrs": torch.randint(0, n_vocab, (b, c), dtype=torch.int64, device=dev),
+    }
 
 
 def _cpse_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
@@ -220,7 +222,7 @@ def _cpse_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
 def _bloom_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
     n, b, w = regime
     torch.manual_seed(0)
-    return dict(qb=_rand_bits((b, w), dev), sigs=_rand_bits((n, w), dev))
+    return {"qb": _rand_bits((b, w), dev), "sigs": _rand_bits((n, w), dev)}
 
 
 @dataclass(frozen=True)
@@ -263,7 +265,7 @@ def _fmt_entry(spec: KernelTuneSpec, entry: tuple[int, ...]) -> str:
     """One grid entry as ``block_p=256  num_warps=4  unroll=1``, padded so the sweep log
     stays column-aligned across block sizes."""
     return " ".join(
-        f"{name}={v:<4}" for name, v in zip(_config_fields(spec, entry), entry)
+        f"{name}={v:<4}" for name, v in zip(_config_fields(spec, entry), entry, strict=True)
     ).rstrip()
 
 
@@ -335,7 +337,7 @@ def _sweep(spec: KernelTuneSpec, dev: torch.device, regimes: tuple[tuple[int, ..
             for _ in range(3):
                 spec.run(inputs, cfg)
             torch.cuda.synchronize()
-            ms = _bench(lambda c=cfg: spec.run(inputs, c))
+            ms = _bench(lambda c=cfg, i=inputs: spec.run(i, c))
             timings[key][entry] = ms
             results.append({**dict(zip(_config_fields(spec, entry), entry, strict=True)), "ms": ms})
             click.echo(f"  [{key}] {_fmt_entry(spec, entry)}  -> {ms:.3f} ms", err=True)

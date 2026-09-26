@@ -145,7 +145,7 @@ def test_clause_salt_registered_as_buffer_and_moves_with_module():
     assert torch.equal(bf_back.evaluate_mask(q), mask_before)
 
     embs = make_index(256, 64)
-    kw = dict(k=8, n_lists=8, n_probe=4, n_iter=2)
+    kw = {"k": 8, "n_lists": 8, "n_probe": 4, "n_iter": 2}
     kw.update(filter_mode="bloom", m_bits=M_BITS, k_hash=K_HASH)
     st = SilverTorchBuilder(**kw).set_item_embeddings(embs).set_item_attributes(attrs).build()
     assert "clause_salt" in st.state_dict()

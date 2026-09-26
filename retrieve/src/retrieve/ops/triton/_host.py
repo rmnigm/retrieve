@@ -61,27 +61,27 @@ def probe_prep(
     # Cluster-aligned tiles: at most one partial tile per probe, so n_probe extra tiles cover
     # the rounding and the -inf tail past the row's items.
     grid, tiles_y = grid_batch_tiles(b, triton.cdiv(width, block_p) + n_probe, 1)
-    kwargs: dict[str, object] = dict(
-        q_codes_ptr=q_codes.contiguous(),
-        q_scales_ptr=q_scales.contiguous(),
-        probe_ids_ptr=probe_ids.contiguous(),
-        offsets_ptr=cluster_offsets,
-        item_codes_ptr=item_codes,
-        out_scores_ptr=all_scores,
-        global_scale=float(global_scale),
-        n_probe=n_probe,
-        width=width,
-        tiles_y=tiles_y,
-        D=d,
-        NPP=triton.next_power_of_2(n_probe),
-        stride_qcb=q_codes.stride(0),
-        stride_cn=item_codes.stride(0),
-        stride_ob=all_scores.stride(0),
-        BLOCK_P=block_p,
-        WIDE=wide(all_scores),
-        num_warps=num_warps,
-        num_stages=num_stages,
-    )
+    kwargs: dict[str, object] = {
+        "q_codes_ptr": q_codes.contiguous(),
+        "q_scales_ptr": q_scales.contiguous(),
+        "probe_ids_ptr": probe_ids.contiguous(),
+        "offsets_ptr": cluster_offsets,
+        "item_codes_ptr": item_codes,
+        "out_scores_ptr": all_scores,
+        "global_scale": float(global_scale),
+        "n_probe": n_probe,
+        "width": width,
+        "tiles_y": tiles_y,
+        "D": d,
+        "NPP": triton.next_power_of_2(n_probe),
+        "stride_qcb": q_codes.stride(0),
+        "stride_cn": item_codes.stride(0),
+        "stride_ob": all_scores.stride(0),
+        "BLOCK_P": block_p,
+        "WIDE": wide(all_scores),
+        "num_warps": num_warps,
+        "num_stages": num_stages,
+    }
     return ProbeLaunch(grid, kwargs, all_scores)
 
 
@@ -97,19 +97,19 @@ def probe_topk(
     scores, slots = torch.topk(launch.all_scores, k, dim=1)
     ids = torch.empty_like(slots)
     n_probe = probe_ids.shape[1]
-    kwargs: dict[str, object] = dict(
-        slots_ptr=slots,
-        scores_ptr=scores,
-        probe_ids_ptr=probe_ids.contiguous(),
-        offsets_ptr=cluster_offsets,
-        sort_perm_ptr=sort_perm,
-        ids_ptr=ids,
-        n_probe=n_probe,
-        k=k,
-        NPP=triton.next_power_of_2(n_probe),
-        KP=triton.next_power_of_2(k),
-        num_warps=4,
-    )
+    kwargs: dict[str, object] = {
+        "slots_ptr": slots,
+        "scores_ptr": scores,
+        "probe_ids_ptr": probe_ids.contiguous(),
+        "offsets_ptr": cluster_offsets,
+        "sort_perm_ptr": sort_perm,
+        "ids_ptr": ids,
+        "n_probe": n_probe,
+        "k": k,
+        "NPP": triton.next_power_of_2(n_probe),
+        "KP": triton.next_power_of_2(k),
+        "num_warps": 4,
+    }
     return ProbeIds((scores.shape[0],), kwargs, ids, scores)
 
 

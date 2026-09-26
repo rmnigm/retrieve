@@ -130,7 +130,7 @@ class TestPerClass:
         twin = _builder(cls, backend).set_state_dict(src.state_dict()).build()
         fresh = _build(cls, backend, data)
         assert list(twin.state_dict()) == list(fresh.state_dict())
-        for (name, a), (_, b) in zip(fresh.named_buffers(), twin.named_buffers()):
+        for (name, a), (_, b) in zip(fresh.named_buffers(), twin.named_buffers(), strict=True):
             assert torch.equal(a, b), name
         ids_f, sc_f = fresh(data["query"], data["q_attrs"])
         ids_t, sc_t = twin(data["query"], data["q_attrs"])

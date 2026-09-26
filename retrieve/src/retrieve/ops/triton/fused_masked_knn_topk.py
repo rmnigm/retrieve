@@ -152,27 +152,27 @@ def _fmkt_prep(
     # so the tail is correct without a pre-fill.
     all_scores = torch.empty((b, p_kernel), dtype=torch.float32, device=query.device)
 
-    kwargs = dict(
-        query_ptr=query,
-        item_embs_ptr=item_embs,
-        pos_indices_ptr=positive_indices,
-        counts_ptr=counts,
-        out_scores_ptr=all_scores,
-        P=p_kernel,
-        D=d,
-        stride_qb=query.stride(0),
-        stride_qd=query.stride(1),
-        stride_in=item_embs.stride(0),
-        stride_id=item_embs.stride(1),
-        stride_pb=positive_indices.stride(0),
-        stride_pp=positive_indices.stride(1),
-        stride_sb=all_scores.stride(0),
-        stride_sp=all_scores.stride(1),
-        BLOCK_N=cfg.block_n,
-        WIDE=wide(positive_indices, all_scores),
-        num_warps=cfg.num_warps,
-        num_stages=cfg.num_stages,
-    )
+    kwargs = {
+        "query_ptr": query,
+        "item_embs_ptr": item_embs,
+        "pos_indices_ptr": positive_indices,
+        "counts_ptr": counts,
+        "out_scores_ptr": all_scores,
+        "P": p_kernel,
+        "D": d,
+        "stride_qb": query.stride(0),
+        "stride_qd": query.stride(1),
+        "stride_in": item_embs.stride(0),
+        "stride_id": item_embs.stride(1),
+        "stride_pb": positive_indices.stride(0),
+        "stride_pp": positive_indices.stride(1),
+        "stride_sb": all_scores.stride(0),
+        "stride_sp": all_scores.stride(1),
+        "BLOCK_N": cfg.block_n,
+        "WIDE": wide(positive_indices, all_scores),
+        "num_warps": cfg.num_warps,
+        "num_stages": cfg.num_stages,
+    }
     # Tile axis on grid_x, batch on grid_y — see kernel comment.
     grid = (triton.cdiv(p_kernel, cfg.block_n), b)
     return _FmktLaunch(grid, kwargs, all_scores, positive_indices, p, b)
@@ -231,8 +231,8 @@ def _fused_masked_knn_topk_impl(
     k: int,
     config: FusedMaskedKnnTopkConfig | None = None,
 ) -> tuple[Tensor, Tensor]:
-    """Fused masked gather + dot + topk → (ids [B, K], scores [B, K]). 2-D launch over ``(B,
-    cdiv(P_BUCKET, BLOCK_N))``; each program holds one query and gathers a ``BLOCK_N`` slab of
+    """Fused masked gather + dot + topk → (ids [B, K], scores [B, K]). 2-D launch over
+    ``(cdiv(P_BUCKET, BLOCK_N), B)``; each program holds one query and gathers a ``BLOCK_N`` slab of
     candidate ids by indirect load, items past ``counts[b]`` scoring ``-inf``. Scoring is
     elementwise (``tl.sum``, not ``tl.dot``) since rows differ per cell — the dense no-filter
     path should use ``query @ item_embs.T`` instead. Runs over a bucketed width ``P_BUCKET =
@@ -262,8 +262,13 @@ def fused_masked_knn_topk(
 ) -> tuple[Tensor, Tensor]:
     """Production wrapper for ``_fused_masked_knn_topk_impl``, registered as a ``triton_op`` for
     ``torch.compile`` capture. Differs from ``_impl``: hard-codes ``DEFAULT_CONFIG``, skips
-    bucketing (catalog size is fixed per deployment; see the module docstring), and assumes
-    ``p >= k > 0`` (guaranteed by ``PrefilterKNN``) — no ``p == 0`` early-return, no pad tail."""
+    bucketing (catalog size is fixed per deployment; see the module docstring), and requires
+    ``P >= k`` (``ValueError`` otherwise, as the torch twin; ``PrefilterKNN`` pads a short
+    candidate list) — no pad tail."""
+    if positive_indices.shape[1] < k:
+        raise ValueError(
+            f"positive_indices has {positive_indices.shape[1]} columns, fewer than k={k}"
+        )
     launch = _fmkt_prep(query, item_embs, positive_indices, counts, DEFAULT_CONFIG, bucket=False)
     wrap_triton(_fused_masked_knn_topk_kernel)[launch.grid](**launch.kwargs)
     return _fmkt_finish(launch, k, pad_to_k=False)

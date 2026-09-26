@@ -175,7 +175,7 @@ def _assert_bitexact(out, ref):
 
 def _jaccard(ids_a: torch.Tensor, ids_b: torch.Tensor) -> float:
     total = 0.0
-    for a, b in zip(ids_a.tolist(), ids_b.tolist()):
+    for a, b in zip(ids_a.tolist(), ids_b.tolist(), strict=True):
         sa = {i for i in a if i >= 0}
         sb = {i for i in b if i >= 0}
         total += 1.0 if not (sa | sb) else len(sa & sb) / len(sa | sb)
@@ -319,7 +319,7 @@ def test_t3_bloom_output_word_order():
     plans = of.parse_plans(README_QUERIES, hash_k=7)
     full = of.bloom_full_mask(index, boff, plans, 3, 7, return_bool_mask=True)
     assert full.dtype == torch.bool and full.shape == (3, of.DOCS_PER_BUNDLE)
-    for row, hits in zip(full[:, :4].tolist(), README_HITS):
+    for row, hits in zip(full[:, :4].tolist(), README_HITS, strict=True):
         assert [i for i, h in enumerate(row) if h] == hits
     packed = of.bloom_full_mask(index, boff, plans, 3, 7, return_bool_mask=False)
     assert packed.dtype == torch.int64 and packed.shape == (3, of.WORDS_PER_BUNDLE)
@@ -539,7 +539,14 @@ def data():
 
 
 def _layer(data, backend, filter_mode="none", *, reverse=None, official=None, **kw):
-    args = dict(k=K, n_lists=N_LISTS, n_probe=N_PROBE, n_iter=3, backend=backend, official=official)
+    args = {
+        "k": K,
+        "n_lists": N_LISTS,
+        "n_probe": N_PROBE,
+        "n_iter": 3,
+        "backend": backend,
+        "official": official,
+    }
     args.update(kw)
     if filter_mode == "bloom":
         args.update(
@@ -835,7 +842,7 @@ def test_t7_layer_forward_sync_count(data, cache_plans, record_property):
     plan D7's "eager only". Phase 1 and the ``masked_topk`` epilogue add none of their own,
     so ``none`` should equal ``fused_kmean_ann``'s count and the bloom paths the sum of the
     search and scorer ops'; ``cache_plans`` moves no device sync (the parse is CPU work)."""
-    cfg = dict(b_multiplier=B_MULT, n_stored_hashes=HASH_K, cache_plans=cache_plans)
+    cfg = {"b_multiplier": B_MULT, "n_stored_hashes": HASH_K, "cache_plans": cache_plans}
     modules = {
         "none": (_layer(data, "official", "none"), None),
         "exact": (_layer(data, "official", "exact"), data["q_attrs"]),
@@ -850,7 +857,7 @@ def test_t7_layer_forward_sync_count(data, cache_plans, record_property):
     }
     for name, (module, qa) in modules.items():
         module(data["query"], qa)  # warm-up: first-call lazy work is not the steady state
-        n_sync = _count_syncs(lambda: module(data["query"], qa))
+        n_sync = _count_syncs(lambda m=module, a=qa: m(data["query"], a))
         record_property(f"forward_syncs_{name}_cache_plans={cache_plans}", n_sync)
         print(f"T7 forward syncs — {name}, cache_plans={cache_plans}: {n_sync}")
         assert n_sync > 0

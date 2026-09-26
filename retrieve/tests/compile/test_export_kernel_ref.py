@@ -190,7 +190,7 @@ def test_inputs_unchanged_after_the_op_and_its_twin(name):
     for fn in (getattr(torch.ops.retrieve, name), getattr(reference, name)):
         fn(*args)
         torch.cuda.synchronize()
-        for i, (a, b) in enumerate(zip(args, before)):
+        for i, (a, b) in enumerate(zip(args, before, strict=True)):
             if isinstance(a, torch.Tensor):
                 assert torch.equal(a, b), f"{name} ({fn}): input {i} was written"
 

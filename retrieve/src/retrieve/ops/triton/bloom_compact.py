@@ -1,5 +1,5 @@
 """Fused bloom subset-test + stream compaction without the dense ``[B, N]`` bool of
-``compact_mask(bloom_match(.))``. Same two-phase shape as ``clause_compact`` (plan L3): the
+``compact_mask(bloom_match(.))``. Same two-phase shape as ``clause_compact``: the
 subset-test launch writes per-tile survivor counts and stashes the survivors' ids tile-locally,
 ``_host.compact_finish`` scans and scatters — so a row's ids are in **ascending item order**,
 ``torch.equal`` to ``ops.reference.bloom_compact`` and reproducible across launches and
@@ -130,25 +130,25 @@ def _bloom_compact_prep(
     tile_counts = torch.empty((b, tiles), dtype=torch.int64, device=qb.device)
     scratch = torch.empty((b, tiles * cfg.block_n), dtype=torch.int32, device=qb.device)
 
-    kwargs = dict(
-        qb_ptr=qb,
-        sigs_ptr=sigs,
-        tile_counts_ptr=tile_counts,
-        scratch_ptr=scratch,
-        N=n,
-        tiles_y=tiles_y,
-        W=w,
-        stride_qb_b=qb.stride(0),
-        stride_qb_w=qb.stride(1),
-        stride_s_n=sigs.stride(0),
-        stride_s_w=sigs.stride(1),
-        stride_tb=tile_counts.stride(0),
-        stride_sb=scratch.stride(0),
-        BLOCK_N=cfg.block_n,
-        WIDE=wide(sigs, scratch),
-        num_warps=cfg.num_warps,
-        num_stages=cfg.num_stages,
-    )
+    kwargs = {
+        "qb_ptr": qb,
+        "sigs_ptr": sigs,
+        "tile_counts_ptr": tile_counts,
+        "scratch_ptr": scratch,
+        "N": n,
+        "tiles_y": tiles_y,
+        "W": w,
+        "stride_qb_b": qb.stride(0),
+        "stride_qb_w": qb.stride(1),
+        "stride_s_n": sigs.stride(0),
+        "stride_s_w": sigs.stride(1),
+        "stride_tb": tile_counts.stride(0),
+        "stride_sb": scratch.stride(0),
+        "BLOCK_N": cfg.block_n,
+        "WIDE": wide(sigs, scratch),
+        "num_warps": cfg.num_warps,
+        "num_stages": cfg.num_stages,
+    }
     return _BloomCompactLaunch(grid, tiles_y, kwargs, tile_counts, scratch)
 
 

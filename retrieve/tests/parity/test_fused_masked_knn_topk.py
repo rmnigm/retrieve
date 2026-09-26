@@ -15,6 +15,7 @@ import torch
 
 from retrieve.functional import compact_mask
 from retrieve.ops import reference
+from retrieve.ops.triton.clause_compact import clause_compact
 from retrieve.ops.triton.fused_masked_knn_topk import (
     _P_BUCKETS,
     DEFAULT_CONFIG,
@@ -200,7 +201,6 @@ def test_compact_kernel_initialises_buffer_to_minus_one():
     far fewer than ``n`` items per row and assert the compact buffer's
     suffix is filled with -1.
     """
-    from retrieve.ops.triton.clause_compact import clause_compact
 
     b, n, c, a_max = 4, 1024, 2, 1
     # Items: each item has a fixed value per clause; we build sparse matches.

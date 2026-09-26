@@ -90,7 +90,7 @@ def test_launch_to_launch_identity(tmp_path):
     first = (clause_compact(attrs, rev, q), bloom_compact(qb, sigs))
     for _ in range(9):
         again = (clause_compact(attrs, rev, q), bloom_compact(qb, sigs))
-        for a, b in zip(first, again):
+        for a, b in zip(first, again, strict=True):
             assert torch.equal(a[0], b[0]) and torch.equal(a[1], b[1])
 
     out = tmp_path / "fresh.pt"
@@ -100,5 +100,5 @@ def test_launch_to_launch_identity(tmp_path):
         cwd=Path(__file__).resolve().parents[2],
     )
     fresh = torch.load(out)
-    for a, b in zip(first, fresh):
+    for a, b in zip(first, fresh, strict=True):
         assert torch.equal(a[0], b[0]) and torch.equal(a[1], b[1])

@@ -208,12 +208,10 @@ def compact_stash(
     """Phase 1 of the two-phase compaction: the tile's survivor count to ``tile_counts[bid,
     tile_id]`` and its surviving ``ids`` compacted into the tile's own slot range
     ``scratch[bid, tile_id * BLOCK_N : +count]`` (int32), for ``compact_scatter_kernel`` to move
-    to the row offset once the counts are scanned. Same epilogue as the pre-L3 kernel with the
-    ``atomic_add`` row base replaced by the fixed tile-local base — the shape that keeps the
-    predicate kernel at its one-pass speed (plan §7: a count-only epilogue is 1.8× slower at
-    B=1, a packed bitmask 1.7×)."""
+    to the row offset once the counts are scanned — the shape that keeps the predicate kernel
+    at its one-pass speed (kernels.md § ``clause_compact``, "Why this shape")."""
     # The scan first: Triton lays the tile out for the first reduction it meets, and the layout
-    # it picks for a bare tl.sum makes the predicate's loads 1.8x slower at B=1 (plan §7).
+    # it picks for a bare tl.sum makes the predicate's loads 1.8x slower at B=1.
     compact_store(pass_mask, ids, tile_id * BLOCK_N, scratch_ptr, bid, stride_sb, 1, WIDE)
     tile_sum = tl.sum(tl.where(pass_mask, 1, 0).to(tl.int32))
     tl.store(tile_counts_ptr + bid * stride_tb + tile_id, tile_sum.to(tl.int64))

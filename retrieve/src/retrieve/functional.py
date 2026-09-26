@@ -101,7 +101,7 @@ def combine_indices(
     f0, q0 = filters[0], query_clause_attrs[0]
     ids, counts = f0.evaluate_indices(q0)
 
-    for f, q in zip(filters[1:], query_clause_attrs[1:]):
+    for f, q in zip(filters[1:], query_clause_attrs[1:], strict=True):
         b, p = ids.shape
         if p == 0:
             return ids, counts

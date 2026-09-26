@@ -346,12 +346,12 @@ class SilverTorch(RetrievalModule):
             self.register_buffer("clause_is_reverse", clause_is_reverse)
 
     def compile(self, *args, **kwargs):
-        """``nn.Module.compile`` — refused on the official backend (eager-only, plan D7)."""
+        """``nn.Module.compile`` — refused on the official backend (eager-only)."""
         if self.backend == "official":
             raise RuntimeError(
                 "SilverTorch(backend='official') is eager-only: every official op syncs the "
                 "host and re-uploads its plans per call, so there is no torch.compile / "
-                "CUDA-graph path (plan D7). Use backend='triton' or 'torch' for compiled runs."
+                "CUDA-graph path. Use backend='triton' or 'torch' for compiled runs."
             )
         return super().compile(*args, **kwargs)
 
@@ -379,7 +379,7 @@ class SilverTorch(RetrievalModule):
         if self.backend == "official" and torch.compiler.is_compiling():
             raise RuntimeError(
                 "SilverTorch(backend='official') is eager-only and cannot be traced by "
-                "torch.compile / torch.export (plan D7): every official op syncs the host. "
+                "torch.compile / torch.export: every official op syncs the host. "
                 "Call the module eagerly, or use backend='triton' / 'torch'."
             )
         return self._forward_impl(query, query_clause_attrs)
@@ -440,7 +440,7 @@ class SilverTorch(RetrievalModule):
         query: Tensor,
         query_clause_attrs: Tensor | None,
     ) -> tuple[Tensor, Tensor]:
-        """Algorithm 1 phases 2+3 on Meta's official ops (plan §5.1), eager only.
+        """Algorithm 1 phases 2+3 on Meta's official ops, eager only.
 
         ``none`` → ``fused_kmean_ann``; ``bloom`` → the official expression parser (plans
         on CPU, memoised per expression tuple unless ``OfficialConfig.cache_plans=False``,

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import pytest
 import torch
+from torch._dynamo.utils import counters
 
 from retrieve.modules.silvertorch import SilverTorchBuilder
 from tests.conftest import (
@@ -34,7 +35,7 @@ MODES = [
 
 def _build(filter_mode, backend, *, n=512, d=64, n_lists=16, n_probe=4, k=8, c=2, a_max=2):
     embs = make_index(n, d)
-    kw = dict(k=k, n_lists=n_lists, n_probe=n_probe, n_iter=3, backend=backend)
+    kw = {"k": k, "n_lists": n_lists, "n_probe": n_probe, "n_iter": 3, "backend": backend}
     if filter_mode == "bloom":
         kw.update(filter_mode="bloom", m_bits=512, k_hash=4)
     if filter_mode == "exact":
@@ -50,7 +51,6 @@ def test_compiled_forward_matches_eager(filter_mode, backend, d):
     """Warm up the ``reduce-overhead`` module on one query, then replay the captured graph on
     two different queries: each equals eager bit for bit (scores ``torch.equal``, ids up to
     ties), and inductor skipped no cudagraph."""
-    from torch._dynamo.utils import counters
 
     b, c = 4, 2
     eager = _build(filter_mode, backend, d=d)
