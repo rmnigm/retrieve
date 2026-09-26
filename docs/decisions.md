@@ -130,7 +130,8 @@ The goal is to replace gSASRec as the history encoder behind the sequential benc
   U-gating and the relative position and time-bucket bias, and applies softmax. Pointwise
   (softmax-free) attention is not pursued: the user does not believe in it.
 - **The loss is sampled softmax on L2-normalized embeddings.** Temperature 0.05, shared uniform
-  negatives plus in-batch positives, no logQ (HSTU's own recipe).
+  negatives plus in-batch positives. **logQ is available as an opt-in** (`logq`, the
+  expected-count correction, positive uncorrected), user decision 2026-09-26; default off.
   - gBCE stays only for the gSASRec baseline, and it must sample negatives **per position**: one
     shared vector per step collapses it
     ([evidence](artifacts/seqrec-encoder/gate-b-yambda-d64/README.md)).
@@ -140,7 +141,7 @@ The goal is to replace gSASRec as the history encoder behind the sequential benc
   goodreads-work-id, with one shared recipe. The stored `eval_quality.json` numbers are not the
   bar: yambda's were scored on a test split that is no longer on disk.
 - **Order:** goodreads and yambda-500m first. KuaiRand only if the winner clears both bars.
-- **Out of scope for this line:** logQ, a LLaMA block, row-wise Adagrad, a bf16 table,
+- **Out of scope for this line:** a LLaMA block, row-wise Adagrad, a bf16 table,
   FuXi-style channels and multi-GPU.
 
 ## Environment
