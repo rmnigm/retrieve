@@ -82,7 +82,8 @@ pod.sh up                          # 1× default GPU (config), secure cloud, 200
 pod.sh up -g h100 -n 4             # one pod, 4× H100 SXM
 pod.sh up -g a100 -p 3             # three pods, 1× A100 SXM each (names …-1..3)
 pod.sh up --nv VOLUME_ID -g h100   # attach a network volume (shared state, per-pod checkout)
-pod.sh up --community --branch X --name foo --disk 80 --volume 200
+pod.sh up -g h100 --disk 600       # big dataset: see Sizing
+pod.sh up --community --branch X --name foo
 pod.sh ls                          # retrieve-* pods, refreshes ssh aliases rp-NAME
 pod.sh log NAME                    # follow bootstrap until "bootstrap done"
 pod.sh login NAME                  # rp-login on the pod
@@ -94,14 +95,36 @@ pod.sh stop|start|rm NAME
 `up` also saves each pod as a herdr machine (`herdr machine add rp-NAME --label NAME`),
 so plain `herdr` on the laptop lists it in the sidebar; `rm` removes it. SSH goes
 through the alias `rp-NAME` in `~/.ssh/retrieve-pods.conf` with the key from
-`SSH_KEY` in the local config (it must be a key registered in the RunPod account).
+`SSH_KEY` in the local config (it must be a key registered in the RunPod account). The
+alias forwards the laptop's SSH agent, and the pod points `/root/.ssh/agent.sock` at the
+latest forwarded agent, so herdr panes can use `git@github.com:` URLs while the laptop
+is connected (anyone with root on the pod can use the key during that time).
 After `stop`/`start` the pod gets a new port: run `pod.sh ls` once it is up to
 refresh the alias; the herdr machine keeps working through it.
 
+## Sizing
+
+| flag | default | meaning |
+|---|---|---|
+| `--disk GB` | 200 | container disk: `/`, `/data`, `/scratch`, venv. Fast, wiped on restart. |
+| `--volume GB` | 30 | pod volume at `/workspace`: checkout and pod state only. Slow network FS. |
+| `--nv ID` | – | attach a network volume instead of `--volume` (pins the pod to its datacenter) |
+
+Datasets go on the container disk, never on `/workspace` (`docs/system/storage.md`:
+the volume reads at ~52 MB/s). Size `--disk` as base image (~15 GB) + venv (~8 GB) +
+the datasets resident at once + scratch; sizes per dataset are in
+`docs/system/datasets.md` and `storage.md` (e.g. PubMed needs ~111 GB processed plus
+one raw shard, streamed). CPU and RAM come with the machine (an A100 SXM pod had
+32 vCPU / 251 GB); `runpodctl` cannot request more.
+
+A network volume survives across pods but is slow and datacenter-bound: create one
+with `runpodctl network-volume create --name NAME --size GB --data-center-id DC`, list
+with `runpodctl network-volume list`, then `pod.sh up --nv ID`.
+
 GPU keys: `a100` (A100-SXM4-80GB), `a100-pcie`, `h100` (H100 80GB HBM3), `h100-pcie`,
 `h100-nvl`; any other string is passed to `--gpu-id` verbatim (`runpodctl gpu list`
-shows valid ids and availability). `up` blocks until sshd answers (`--wait`), then
-bootstrap takes about a minute more.
+shows valid ids and availability). `up` blocks until sshd answers (`--wait`, 2–4 min
+with the image pull), then bootstrap takes about a minute more.
 
 ## Rules for agents
 

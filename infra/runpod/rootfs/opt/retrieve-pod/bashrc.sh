@@ -9,6 +9,11 @@ export HF_HOME=${HF_HOME:-/scratch/hf}
 export GIT_CONFIG_GLOBAL=$POD_STATE/gitconfig
 export CLAUDE_CONFIG_DIR=$POD_STATE/claude
 
+if [ -S "${SSH_AUTH_SOCK:-}" ] && [ "$SSH_AUTH_SOCK" != /root/.ssh/agent.sock ]; then
+    ln -sf "$SSH_AUTH_SOCK" /root/.ssh/agent.sock
+fi
+export SSH_AUTH_SOCK=/root/.ssh/agent.sock
+
 if [ -f "$POD_STATE/secrets.env" ]; then
     set -a
     . "$POD_STATE/secrets.env"

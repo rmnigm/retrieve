@@ -8,7 +8,7 @@ CONF=$CONF_DIR/config.env
 SSH_CONF=$HOME/.ssh/retrieve-pods.conf
 KNOWN_HOSTS=$HOME/.ssh/retrieve-pods.known_hosts
 
-IMAGE=ghcr.io/rmnigm/retrieve-pod:v4
+IMAGE=ghcr.io/rmnigm/retrieve-pod:v5
 GPU=a100
 SSH_KEY=$HOME/.ssh/runpod_ed25519
 SECRETS=
@@ -73,7 +73,7 @@ refresh() {
         [ -n "$ep" ] || continue
         ssh-keygen -R "[${ep% *}]:${ep#* }" -f "$KNOWN_HOSTS" >/dev/null 2>&1 || true
         ssh-keyscan -T 5 -p "${ep#* }" "${ep% *}" >> "$KNOWN_HOSTS" 2>/dev/null || true
-        printf 'Host rp-%s %s\n  HostName %s\n  Port %s\n  User root\n  IdentityFile %s\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  UserKnownHostsFile %s\n  LogLevel ERROR\n  ServerAliveInterval 30\n\n' \
+        printf 'Host rp-%s %s\n  HostName %s\n  Port %s\n  User root\n  IdentityFile %s\n  IdentitiesOnly yes\n  ForwardAgent yes\n  StrictHostKeyChecking yes\n  UserKnownHostsFile %s\n  LogLevel ERROR\n  ServerAliveInterval 30\n\n' \
             "$(jq -r '.name | ltrimstr("retrieve-")' <<<"$pod")" "$(jq -r .id <<<"$pod")" \
             "${ep% *}" "${ep#* }" "$SSH_KEY" "$KNOWN_HOSTS" >> "$SSH_CONF.tmp"
     done
