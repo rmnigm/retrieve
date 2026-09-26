@@ -144,8 +144,13 @@ The goal is to replace the published gSASRec checkpoints as the history encoder 
   bar: yambda's were scored on a test split that is no longer on disk
   ([bars](validation.md#bars)).
 - **Runs** (user, 2026-09-26): the E1c recipe (ffn 4×D) at d64, d128 and d256 on yambda-500m and
-  goodreads-work-id, and at d64 and d128 on KuaiRand; only D, epochs, patience and eval cadence
+  goodreads-work-id, and at d64 on KuaiRand; only D, epochs, patience and eval cadence
   vary ([final models](validation.md#final-models-the-e1c-recipe)).
+- **KuaiRand is final at d64, refit on train + val** (`train_on_val=true`, 4 epochs, the
+  train-only run's best epoch + 1). The refit, because next-day clicks drift and the val day is
+  otherwise never trained on ([temporal drift](validation.md#kuairand-temporal-drift)). d128 was
+  not run: it runs out of memory in backward even with one table, and the user stopped KuaiRand at
+  d64 (2026-09-26).
 - **Out of scope for this line:** a LLaMA block, row-wise Adagrad, a bf16 table,
   FuXi-style channels and multi-GPU.
 

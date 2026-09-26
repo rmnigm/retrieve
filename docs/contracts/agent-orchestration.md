@@ -158,8 +158,9 @@ leaves it). A worker does not edit the roadmap.
 
 ### Where briefs, instructions and reports live
 
-In the line of work's chain, `.chains/<chain>/`. The directory is local and git-excluded, and
-the user's laptop session syncs it back. Scratch files are not used for this: they are invisible
+In the line of work's chain, `.chains/<chain>/`. The directory is git-excluded while the line
+runs, and the user's laptop session syncs it back; a snapshot is committed at the end of a line
+of work. Notes stay append-only. Scratch files are not used for this: they are invisible
 to the laptop and die with the pod.
 
 Each dispatched agent gets a **chain branch** named after it (`branch: w1-encoder`):
