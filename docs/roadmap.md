@@ -43,11 +43,41 @@ in records, commits and code comments; they are not renumbered.
 
 ## Phase D: campaign and baselines (GPU)
 
-- [ ] **D1: run the full campaign on the harness.** The `filter`, `deep`
-  and `codesign` (S9) suites of `evaluation/config/suites.yaml` over
-  goodreads, arxiv and yfcc10m (`codesign` is goodreads + arxiv only, by
-  its own design); seeds {0, 1, 2} on the headline sweeps; `n_probe` in
-  {24, 32}. Q1-Q4, G-a, G-d, L1/L2, the S9 `codesign` suite and L3 (a CPU
+- [ ] **L4: pad non-power-of-two `D`/`W` to the next power of two in the
+  Triton kernels.** Every kernel with a `tl.arange` over the embedding or
+  word width needs a power of two (`check_pow2`, `retrieve/src/retrieve/ops/triton/_host.py`),
+  raising `ValueError` otherwise: `codesigned_probe_score(_exact)` and
+  `fused_masked_knn_topk` on `D`; `oporp_1bit_match_topk` on `W` (from
+  `k_bits`, default `= D`); `bloom_match`/`bloom_compact` on `W` (from
+  `m_bits`, currently always chosen a power of two by convention, so
+  lower real-world severity). Raised in priority 2026-09-26 (user, live
+  in the `d1` session): D=192 (yfcc10m) and D=768 (pubmed, now pulled
+  into D1 — see D1 below) both fail this way, so `silvertorch`/triton,
+  `linr_v2` and `linr_v3` cannot run on either dataset today — only
+  `linr_v1_filter_mask` and `silvertorch`/`official` survive. Fix: masked
+  padding to the next power of two inside each kernel (pad with values
+  that are provably inert to that kernel's reduction — zero for the fp32
+  dot products, whatever OPORP's popcount/hamming path needs to exclude
+  padding bits from the count), each with its own bit-exact parity gate
+  against the unpadded reference and a timing gate (padding must not
+  regress the already-power-of-two cases). **Blocks D1's yfcc10m and
+  pubmed `filter` legs** — land before those run, same `code_version`
+  economics as L1/L2/L3 (fix now, while the campaign is early, rather
+  than after — a later fix invalidates every record collected up to
+  that point regardless of dataset).
+- [ ] **D1: run the full campaign on the harness.** Re-sequenced live by
+  the user, 2026-09-26, directly in the `d1` campaign session (not
+  through the orchestrator — reconciled here after the fact): `filter`
+  runs first on every dataset, in order — goodreads, arxiv, yfcc10m,
+  pubmed, kuairand (openalex's `filter` leg stays with E5, not pulled
+  in) — then `deep` and `codesign` (S9) run on arxiv only, not on
+  goodreads too. This absorbs pubmed's and kuairand's `filter` legs from
+  E5 (E5 narrows to openalex's `filter` leg only). Seeds {0, 1, 2} on the
+  headline sweeps; `n_probe` in {24, 32}. **Blocked on L4** (below): D=192
+  (yfcc10m) and D=768 (pubmed) are not powers of two, so `silvertorch`
+  triton, `linr_v2` and `linr_v3` currently fail at the op boundary on
+  both — confirm L4 lands before those two legs run, or they will record
+  `status: failed` for most of their algo matrix. Q1-Q4, G-a, G-d, L1/L2, the S9
   path for L1's fp32-output `mm`/`bmm`, which had no CPU kernel and broke
   the harness's CPU-only test suite — found by the S9 worker, fixed
   2026-09-26, harness suite back to 255 passed / 1 skipped) landed first
@@ -86,14 +116,19 @@ in records, commits and code comments; they are not renumbered.
 - [ ] **E0: request the Semantic Scholar API key** (needs the user). Not
   blocking E3 any more: it is running the OpenAlex fallback instead.
   Still open if the user wants the proper Semantic Scholar source later.
-- [ ] **E5: run the campaign on pubmed and openalex, extend the report**,
-  including the unfiltered cells retired from the `quality` suite. Needs
-  D1, E2, E3. **KuaiRand excluded for now** (user decision, 2026-09-26):
-  E4's gSASRec checkpoint is real but weak (val NDCG@10 0.0361, test
-  0.0088 — a 4× drop only partly explained by item cold start), and the
-  user chose not to run evals on kuairand until that's revisited, rather
-  than accept it or invest more GPU time now
-  ([validation](validation.md#datasets)).
+- [ ] **E5: run the campaign on openalex, extend the report**, including
+  the unfiltered cells retired from the `quality` suite. Needs D1, E2,
+  E3. Pubmed's `filter` leg and KuaiRand's `filter` leg were pulled
+  forward into D1 directly by the user, 2026-09-26 (live re-sequencing in
+  the `d1` campaign session, not through the orchestrator) — **the
+  earlier "KuaiRand excluded for now" decision is reversed**: E4's
+  gSASRec checkpoint is still weak (val NDCG@10 0.0361, test 0.0088 — a
+  4× drop only partly explained by item cold start,
+  [validation](validation.md#datasets)), and that caveat was not
+  restated to the user at the point they added it — flagged here so it
+  isn't lost, not to relitigate the choice. `deep` and `codesign` still
+  run on one dataset only (arxiv, user's choice) — E5's scope narrows to
+  openalex's `filter` leg only.
 
 ## Phase F: the paper
 
@@ -152,15 +187,6 @@ in records, commits and code comments; they are not renumbered.
   (~450 MB) will hit it. The 73 MB samples sidecar in git belongs on the
   Hub.
 - `bench report` has not been rerun over all 126 goodreads cells.
-- The Triton kernels need a power-of-two `D`/`W` (`tl.arange`;
-  `ValueError` at the op boundary since the kernel-opt pass, was a
-  compiler error before). Found staging PubMed and OpenAlex (both
-  D = 768): `codesigned_probe_score*`, `fused_masked_knn_topk` and
-  OPORP all need it, so both datasets run SilverTorch on `official`
-  only and LiNR V2/V3 not at all
-  ([validation](validation.md#library-gates)). Fix is masked padding to
-  the next power of two inside the kernel, with its own parity and
-  timing gates — worth doing before E5.
 - `bench/oracle.py`'s `item_embs.t().contiguous()` holds a second full
   fp32 copy of the item table on top of the item table itself, so the
   harness's real per-dataset limit at native width is about half the
@@ -216,12 +242,12 @@ in records, commits and code comments; they are not renumbered.
 ## Dependencies
 
 ```
-D1 ─┬─> D2, D3 ─┐
-    ├─> F2      ├─> F5 ─> G-c
-    ├─> F4      │
-    └─> E5 (E2, E3 done; E4 done but excluded from E5's scope)
+L4 ─> D1 ─┬─> D2, D3 ─┐
+          ├─> F2      ├─> F5 ─> G-c
+          ├─> F4      │
+          └─> E5 (E2, E3 done; E4 done but excluded from E5's scope)
 TF-3/TF-4 retune ─> rerun the head-to-head
 ```
 
-GPU steps still open: D1, D2, D3, E5, G-b. Everything else runs
+GPU steps still open: L4, D1, D2, D3, E5, G-b. Everything else runs
 on CPUs beside them.
