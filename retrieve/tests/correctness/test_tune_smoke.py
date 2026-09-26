@@ -36,3 +36,26 @@ def test_tune_bodies_run_one_point(spec):
     tensors = out if isinstance(out, tuple) else (out,)
     assert all(isinstance(t, torch.Tensor) for t in tensors)
     assert all(t.device.type == "cuda" for t in tensors)
+
+
+_CUR, _CAND = (256, 4), (128, 8)
+
+
+@pytest.mark.parametrize(
+    ("cand_ms", "expect"),
+    [
+        # 2 % faster everywhere: inside the noise band, the shipped default stays.
+        ((0.98, 0.98), _CUR),
+        # 10 % faster everywhere: taken.
+        ((0.90, 0.90), _CAND),
+        # 20 % faster on the geomean but 8 % slower in one regime: over the worst-regime cap.
+        ((0.60, 1.08), _CUR),
+        # 20 % faster, 4 % slower in one regime: inside the cap, taken.
+        ((0.62, 1.04), _CAND),
+    ],
+)
+def test_choose_keeps_current_inside_noise_and_caps_worst_regime(cand_ms, expect):
+    timings = {f"B={i}": {_CUR: 1.0, _CAND: ms} for i, ms in enumerate(cand_ms)}
+    pick, rule = tune._choose(_CUR, timings)
+    assert pick == expect
+    assert rule["worst_vs_current"]["128,8"] == pytest.approx(max(cand_ms))  # exact ratios, 1e-6

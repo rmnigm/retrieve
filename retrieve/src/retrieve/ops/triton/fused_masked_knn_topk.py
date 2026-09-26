@@ -14,10 +14,12 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
+from retrieve.ops.triton._host import check_contiguous, check_pow2, wide
+from retrieve.ops.triton.common import row_base
+
 _P_BUCKETS = (256, 2048, 16384, 131072, 1048576)
 
-# Dtypes the kernel is exercised with today: parity tests feed fp32, PrefilterKNN feeds fp16.
-# Scores are always fp32 (the output buffer's dtype). Documents reality per kernels.md → I/O.
+# Parity tests feed fp32, PrefilterKNN feeds fp16; the dot accumulates in fp32 either way.
 _SUPPORTED_DTYPES = (torch.float16, torch.float32)
 
 
@@ -60,6 +62,7 @@ def _fused_masked_knn_topk_kernel(
     stride_sb,
     stride_sp,
     BLOCK_N: tl.constexpr,
+    WIDE: tl.constexpr,
 ):
     # Tile on grid_x (≤ 2³¹), batch on grid_y (≤ 65535): cdiv(P, BLOCK_N) can overflow grid_y at
     # large P.
@@ -74,10 +77,12 @@ def _fused_masked_knn_topk_kernel(
     count = tl.load(counts_ptr + bid)
     in_count = n_offsets < count
 
-    q = tl.load(query_ptr + bid * stride_qb + d_offsets * stride_qd)
+    # Widen before the multiply: tl.sum reduces in its operand dtype (fp16 in production, plan
+    # L4 §6.1), and fp16 × fp16 is exact in fp32.
+    q = tl.load(query_ptr + bid * stride_qb + d_offsets * stride_qd).to(tl.float32)
 
     item_ids = tl.load(
-        pos_indices_ptr + bid * stride_pb + n_offsets * stride_pp,
+        row_base(pos_indices_ptr, bid, stride_pb, WIDE) + n_offsets * stride_pp,
         mask=in_count,
         other=0,
     )
@@ -86,13 +91,13 @@ def _fused_masked_knn_topk_kernel(
         item_embs_ptr + item_ids[:, None] * stride_in + d_offsets[None, :] * stride_id,
         mask=in_count[:, None],
         other=0.0,
-    )
+    ).to(tl.float32)
 
     dots = tl.sum(emb_rows * q[None, :], axis=1)
     dots = tl.where(in_count, dots, float("-inf"))
 
     tl.store(
-        out_scores_ptr + bid * stride_sb + n_offsets * stride_sp,
+        row_base(out_scores_ptr, bid, stride_sb, WIDE) + n_offsets * stride_sp,
         dots,
         mask=p_valid,
     )
@@ -118,7 +123,7 @@ def _fmkt_prep(
     bucket: bool,
 ) -> _FmktLaunch:
     """Validation + contiguity + score buffer + launch-arg dict + grid dims.
-    THE single place input checking happens — shared by ``_impl`` and the public op.
+    The one place inputs are checked — shared by ``_impl`` and the public op.
 
     ``bucket=True`` (``_impl``: tune sweeps / parity tests see many widths per process) runs the
     kernel at ``P = _bucket_p(p)`` so the JIT cache compiles once per bucket × D; ``bucket=False``
@@ -135,9 +140,9 @@ def _fmkt_prep(
     b, d = query.shape
     p = positive_indices.shape[1]
 
+    check_contiguous(item_embs=item_embs, positive_indices=positive_indices)
+    check_pow2(D=d)
     query = query.contiguous()
-    item_embs = item_embs.contiguous()
-    positive_indices = positive_indices.contiguous()
     counts = counts.contiguous()
 
     p_kernel = _bucket_p(p) if bucket else p
@@ -147,26 +152,27 @@ def _fmkt_prep(
     # so the tail is correct without a pre-fill.
     all_scores = torch.empty((b, p_kernel), dtype=torch.float32, device=query.device)
 
-    kwargs = dict(
-        query_ptr=query,
-        item_embs_ptr=item_embs,
-        pos_indices_ptr=positive_indices,
-        counts_ptr=counts,
-        out_scores_ptr=all_scores,
-        P=p_kernel,
-        D=d,
-        stride_qb=query.stride(0),
-        stride_qd=query.stride(1),
-        stride_in=item_embs.stride(0),
-        stride_id=item_embs.stride(1),
-        stride_pb=positive_indices.stride(0),
-        stride_pp=positive_indices.stride(1),
-        stride_sb=all_scores.stride(0),
-        stride_sp=all_scores.stride(1),
-        BLOCK_N=cfg.block_n,
-        num_warps=cfg.num_warps,
-        num_stages=cfg.num_stages,
-    )
+    kwargs = {
+        "query_ptr": query,
+        "item_embs_ptr": item_embs,
+        "pos_indices_ptr": positive_indices,
+        "counts_ptr": counts,
+        "out_scores_ptr": all_scores,
+        "P": p_kernel,
+        "D": d,
+        "stride_qb": query.stride(0),
+        "stride_qd": query.stride(1),
+        "stride_in": item_embs.stride(0),
+        "stride_id": item_embs.stride(1),
+        "stride_pb": positive_indices.stride(0),
+        "stride_pp": positive_indices.stride(1),
+        "stride_sb": all_scores.stride(0),
+        "stride_sp": all_scores.stride(1),
+        "BLOCK_N": cfg.block_n,
+        "WIDE": wide(positive_indices, all_scores),
+        "num_warps": cfg.num_warps,
+        "num_stages": cfg.num_stages,
+    }
     # Tile axis on grid_x, batch on grid_y — see kernel comment.
     grid = (triton.cdiv(p_kernel, cfg.block_n), b)
     return _FmktLaunch(grid, kwargs, all_scores, positive_indices, p, b)
@@ -187,9 +193,9 @@ def _fmkt_finish(launch: _FmktLaunch, k: int, *, pad_to_k: bool) -> tuple[Tensor
     # op p_kernel == p and the clamp is an identity.
     safe_local = topk_local.clamp_max(p - 1)
     topk_ids = launch.positive_indices.gather(1, safe_local)
-    # When counts[b] < actual_k, ties at -inf can pick padding positions whose ids are
-    # uninitialised (compact kernels use torch.empty); force those to -1 to match the oracle's
-    # sentinel.
+    # When counts[b] < actual_k, ties at -inf can pick positions past counts[b], whose ids are
+    # unwritten (Triton compaction) or arbitrary (torch compaction); force those to -1, the
+    # oracle's sentinel.
     topk_ids = torch.where(
         torch.isfinite(topk_scores),
         topk_ids,
@@ -225,8 +231,8 @@ def _fused_masked_knn_topk_impl(
     k: int,
     config: FusedMaskedKnnTopkConfig | None = None,
 ) -> tuple[Tensor, Tensor]:
-    """Fused masked gather + dot + topk → (ids [B, K], scores [B, K]). 2-D launch over ``(B,
-    cdiv(P_BUCKET, BLOCK_N))``; each program holds one query and gathers a ``BLOCK_N`` slab of
+    """Fused masked gather + dot + topk → (ids [B, K], scores [B, K]). 2-D launch over
+    ``(cdiv(P_BUCKET, BLOCK_N), B)``; each program holds one query and gathers a ``BLOCK_N`` slab of
     candidate ids by indirect load, items past ``counts[b]`` scoring ``-inf``. Scoring is
     elementwise (``tl.sum``, not ``tl.dot``) since rows differ per cell — the dense no-filter
     path should use ``query @ item_embs.T`` instead. Runs over a bucketed width ``P_BUCKET =
@@ -256,8 +262,13 @@ def fused_masked_knn_topk(
 ) -> tuple[Tensor, Tensor]:
     """Production wrapper for ``_fused_masked_knn_topk_impl``, registered as a ``triton_op`` for
     ``torch.compile`` capture. Differs from ``_impl``: hard-codes ``DEFAULT_CONFIG``, skips
-    bucketing (catalog size is fixed per deployment; see the module docstring), and assumes
-    ``p >= k > 0`` (guaranteed by ``PrefilterKNN``) — no ``p == 0`` early-return, no pad tail."""
+    bucketing (catalog size is fixed per deployment; see the module docstring), and requires
+    ``P >= k`` (``ValueError`` otherwise, as the torch twin; ``PrefilterKNN`` pads a short
+    candidate list) — no pad tail."""
+    if positive_indices.shape[1] < k:
+        raise ValueError(
+            f"positive_indices has {positive_indices.shape[1]} columns, fewer than k={k}"
+        )
     launch = _fmkt_prep(query, item_embs, positive_indices, counts, DEFAULT_CONFIG, bucket=False)
     wrap_triton(_fused_masked_knn_topk_kernel)[launch.grid](**launch.kwargs)
     return _fmkt_finish(launch, k, pad_to_k=False)

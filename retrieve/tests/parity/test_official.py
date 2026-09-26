@@ -2,10 +2,9 @@
 vs the pure-torch reference, the Triton kernels and the ``SilverTorch`` layer — the
 T1–T7 gates of docs/plans/silvertorch-official-integration.md §5.2.
 
-The official scorer reads a **cluster-sorted** int8 table through a CSR
-(``cluster_offsets``) and returns sorted-table positions; the Triton kernels read the
-original table through the padded ``flat_items``. Both are built here from one
-``make_probe_family`` layout, so both arms score the very same candidate set and the
+The official scorer and the Triton kernels read the same **cluster-sorted** int8 table
+through the same CSR (``cluster_offsets``), built here by ``make_probe_family``, so both arms
+score the very same candidate set and the
 int32 path must agree with Triton **bit for bit** on the ``[B, k]`` scores
 (``torch.equal``), ids up to permutation within tied scores. The fp16 path (the
 instantiation Meta ships for int8 serving) is gated by rank agreement and a relative
@@ -31,8 +30,7 @@ import torch
 from retrieve.functional import clause_subset_match, masked_topk
 from retrieve.indexing.quantize import quantize_int8, quantize_int8_global
 from retrieve.modules.silvertorch import OfficialConfig, SilverTorch, SilverTorchBuilder
-from retrieve.ops import official as of
-from retrieve.ops import reference
+from retrieve.ops import official as of, reference
 from retrieve.ops.triton.clause_mask import clause_mask
 from retrieve.ops.triton.codesigned_probe_score import (
     _codesigned_probe_score_impl,
@@ -53,7 +51,7 @@ from tests.parity.conftest import (
     make_probe_family,
 )
 
-# --- bit-order pin (roadmap A3, footnote † in 00-roadmap.md §2.1) ---------------------------
+# --- bit-order pin ----------------------------------------------------------------------
 #
 # The order in which the official scorer reads a ``filtering_bit_mask`` word — and in which
 # ``bloom_index_search_batch`` packs its output — was measured on the A100 on 2026-09-06
@@ -73,94 +71,111 @@ def _needs_official():
     require_official()
 
 
+# The schemas of every op the adapter calls, at the pinned sha (pyproject: 21aa35e28b6d…). A
+# different installed build fails here, before any gate reads a renamed or re-ordered argument.
+PINNED_SCHEMAS = {
+    "fused_kmean_ann": (
+        "st::fused_kmean_ann(Tensor cluster_offsets, Tensor cluster_ids, Tensor cluster_length, "
+        "Tensor embeddings, Tensor queries, int max_tensor_size_per_row, "
+        "Tensor? filtering_bit_mask=None, int invalid_index_value=-1, int divisor_for_int8=-1, "
+        "Tensor? filtering_bit_index=None, Tensor? per_embedding_scale=None) -> (Tensor, Tensor)"
+    ),
+    "fused_kmean_ann_with_partial_masks": (
+        "st::fused_kmean_ann_with_partial_masks(Tensor cluster_offsets, Tensor cluster_ids, "
+        "Tensor cluster_length, Tensor embeddings, Tensor queries, int max_tensor_size_per_row, "
+        "Tensor partial_mask_column_counts_cumsum, "
+        "Tensor partial_mask_first_item_offset_in_column, "
+        "Tensor partial_mask_column_results, int invalid_index_value=-1, int divisor_for_int8=-1, "
+        "Tensor? filtering_bit_index=None, Tensor? per_embedding_scale=None, "
+        "Tensor? cluster_warp_size=None, Tensor? cluster_warp_rounded_length_cumsum=None, "
+        "Tensor? cluster_remaining_length_cumsum=None, Tensor? cluster_warp_size_cumsum=None, "
+        "int total_cluster_rounded_warps=0, int total_cluster_remaining_warps=0) "
+        "-> (Tensor, Tensor)"
+    ),
+    "bloom_index_build": (
+        "st::bloom_index_build(Tensor feature_ids, Tensor feature_offsets, Tensor feature_values, "
+        "float b_multiplier, int k, bool fast_build=False) -> (Tensor, Tensor)"
+    ),
+    "parse_expression_query_batch": (
+        "st::parse_expression_query_batch(str[] expressions, Tensor silvertorch_ks, "
+        "int bloom_hash_k, bool return_query_plan=True, int max_sub_queries=5) -> (int, Tensor[])"
+    ),
+    "bloom_index_search_batch": (
+        "st::bloom_index_search_batch(Tensor bloom_index, Tensor bloom_bundle_b_offsets, "
+        "Tensor bloom_query_plans_data, Tensor bloom_query_plans_offsets, int k, int hash_k, "
+        "bool return_bool_mask=True) -> Tensor"
+    ),
+    "bloom_index_search_batch_return_partial_response": (
+        "st::bloom_index_search_batch_return_partial_response(Tensor bloom_index, "
+        "Tensor bloom_bundle_b_offsets, Tensor bloom_query_plans_data, "
+        "Tensor bloom_query_plans_offsets, Tensor selected_cluster_offsets, "
+        "Tensor selected_cluster_lengths, int k, int hash_k, Tensor? query_plan_index=None) "
+        "-> (Tensor, Tensor, Tensor)"
+    ),
+}
+
+
+def test_official_op_schemas_are_pinned():
+    assert sorted(PINNED_SCHEMAS) == sorted(of.REQUIRED_OPS)
+    st = torch.ops.st
+    for name, schema in PINNED_SCHEMAS.items():
+        assert str(getattr(st, name).default._schema) == schema, name
+
+
 # --- helpers ----------------------------------------------------------------------------
 
 
-def csr_from_padded(padded: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """``padded [n_lists, max_size]`` (``-1`` pads) → ``(sort_perm, cluster_offsets,
-    cluster_sizes)``: the cluster-sorted CSR the official scorer indexes, listing each
-    cluster's real items in slot order. ``sort_perm[j]`` is the original id at sorted
-    position ``j``."""
-    valid = padded >= 0
-    sort_perm = padded[valid]  # row-major → cluster-major
-    sizes = valid.sum(dim=1)
-    offsets = torch.zeros(padded.shape[0] + 1, dtype=torch.int64, device=padded.device)
-    offsets[1:] = sizes.cumsum(0)
-    return sort_perm, offsets, sizes
-
-
 class Family:
-    """One probe family in both layouts: padded (``flat`` for the Triton kernels and the
-    reference) and CSR (for the official scorer), over the same int8 codes."""
+    """One CSR probe family (``make_probe_family``) over one cluster-sorted int8 table, scored
+    by the official op, the Triton kernels and the reference."""
 
     def __init__(self, b, n_lists, max_size, n_probe, d, *, seed=7):
-        self.padded, self.probe_ids, self.flat, self.n = make_probe_family(
-            b, n_lists, max_size, n_probe, seed=seed
-        )
-        self.b, self.d, self.max_size, self.n_probe = b, d, max_size, n_probe
-        self.max_row = n_probe * max_size
+        lay = make_probe_family(b, n_lists, max_size, n_probe, seed=seed)
+        self.probe_ids, self.offsets, self.sort_perm, self.width, self.n = (
+            lay.probe_ids, lay.cluster_offsets, lay.sort_perm, lay.width, lay.n,
+        )  # fmt: skip
+        self.sizes = self.offsets.diff()
+        self.b, self.d = b, d
         embs = make_index(self.n, d)
         self.codes, self.global_scale = quantize_int8_global(embs)
         self.query = make_query(b, d)
-        self.sort_perm, self.offsets, self.sizes = csr_from_padded(self.padded)
-        self.codes_sorted = self.codes[self.sort_perm].contiguous()
+
+    def ours(self):
+        """The leading arguments of the Triton / reference probe ops."""
+        return self.query, self.probe_ids, self.offsets, self.codes, self.sort_perm
 
     def official(self, k, **kw):
         return of.official_probe_score(
-            self.query,
-            self.probe_ids,
-            self.offsets,
-            self.sizes,
-            self.codes_sorted,
-            self.sort_perm,
-            self.global_scale,
-            k,
-            self.max_row,
-            **kw,
-        )
+            self.query, self.probe_ids, self.offsets, self.sizes, self.codes, self.sort_perm,
+            self.global_scale, k, self.width, **kw,
+        )  # fmt: skip
 
     def official_full(self, **kw):
         return of.official_scores_full(
-            self.query,
-            self.probe_ids,
-            self.offsets,
-            self.sizes,
-            self.codes_sorted,
-            self.sort_perm,
-            self.global_scale,
-            self.max_row,
-            **kw,
-        )
+            self.query, self.probe_ids, self.offsets, self.sizes, self.codes, self.sort_perm,
+            self.global_scale, self.width, **kw,
+        )  # fmt: skip
 
-    def flat_sorted(self) -> torch.Tensor:
-        """``[B, P]`` sorted-table positions in the padded slot order (``-1`` pads) — the
-        official doc space in Triton's slot layout, for mask gathers."""
-        slot = torch.arange(self.max_size, device=self.padded.device)
-        pos = self.offsets[self.probe_ids][:, :, None] + slot[None, None, :]
-        valid = slot[None, None, :] < self.sizes[self.probe_ids][:, :, None]
-        return torch.where(valid, pos, torch.full_like(pos, -1)).reshape(self.b, -1)
-
-
-def _sentinel_ids(ids: torch.Tensor, scores: torch.Tensor) -> torch.Tensor:
-    """Ids of non-finite slots → ``-1``. The Triton ``_impl`` gathers the padded item id at
-    a ``-inf`` slot (a ``-1`` pad or a filtered item's real id) while the official
-    epilogue goes through ``masked_topk`` and writes the ``-1`` sentinel; the layer
-    contract is the sentinel, so both sides are normalised to it before comparing."""
-    return ids.masked_fill(~torch.isfinite(scores), -1)
+    def probed_positions(self, row: int) -> list[int]:
+        """The sorted-table positions row ``row`` probes, the official doc space."""
+        return [
+            j for c in self.probe_ids[row].tolist()
+            for j in range(int(self.offsets[c]), int(self.offsets[c + 1]))
+        ]  # fmt: skip
 
 
 def _assert_bitexact(out, ref):
+    """Scores ``torch.equal``; ids equal up to ties, the ``-1`` at every ``-inf`` slot included
+    (every backend writes that sentinel itself)."""
     out_ids, out_scores = out
     ref_ids, ref_scores = ref
     assert torch.equal(out_scores, ref_scores), "scores must be bit-identical"
-    assert_ids_equal_up_to_ties(
-        _sentinel_ids(out_ids, out_scores), _sentinel_ids(ref_ids, ref_scores), out_scores
-    )
+    assert_ids_equal_up_to_ties(out_ids, ref_ids, out_scores)
 
 
 def _jaccard(ids_a: torch.Tensor, ids_b: torch.Tensor) -> float:
     total = 0.0
-    for a, b in zip(ids_a.tolist(), ids_b.tolist()):
+    for a, b in zip(ids_a.tolist(), ids_b.tolist(), strict=True):
         sa = {i for i in a if i >= 0}
         sb = {i for i in b if i >= 0}
         total += 1.0 if not (sa | sb) else len(sa & sb) / len(sa | sb)
@@ -204,10 +219,10 @@ def test_t1_int32_path_bitexact(n_lists, max_size, n_probe, d, k, b):
     path) and mask words with a pad tail."""
     f = Family(b, n_lists, max_size, n_probe, d)
     out = f.official(k, score_path="int32")
-    ref = reference.codesigned_probe_score(f.query, f.flat, f.codes, f.global_scale, k)
+    ref = reference.codesigned_probe_score(*f.ours(), f.global_scale, k, f.width)
     _assert_bitexact(out, ref)
     if d & (d - 1) == 0:
-        tri = _codesigned_probe_score_impl(f.query, f.flat, f.codes, f.global_scale, k)
+        tri = _codesigned_probe_score_impl(*f.ours(), f.global_scale, k, f.width)
         _assert_bitexact(out, tri)
 
 
@@ -221,24 +236,15 @@ def test_t1_exact_mask_bitexact_vs_triton(d, reverse):
     b, k = 16, 32
     f = Family(b, 64, 96, 8, d)
     attrs, rev, q_attrs = make_exact(f.n, b, reverse=reverse)
-    mask = clause_mask(attrs[f.sort_perm].contiguous(), rev, q_attrs)  # [B, N_csr] sorted ids
-    # ``make_probe_family`` pads ~10 % of the slots, so those ids sit in no cluster: the
-    # CSR's doc space is the ids the layout holds (``sort_perm.numel()``), not ``f.n``.
-    assert mask.shape == (b, f.sort_perm.numel())
+    mask = clause_mask(attrs, rev, q_attrs)  # [B, N] over sorted positions, like the attrs
     out = f.official(k, score_path="int32", filtering_bit_mask=of.pack_mask(mask))
     tri = _codesigned_probe_score_exact_impl(
-        f.query,
-        f.flat,
-        f.codes,
-        f.global_scale,
-        k,
-        item_clause_attrs=attrs,
-        clause_is_reverse=rev,
+        *f.ours(), f.global_scale, k, f.width, item_clause_attrs=attrs, clause_is_reverse=rev,
         query_clause_attrs=q_attrs,
-    )
+    )  # fmt: skip
     _assert_bitexact(out, tri)
     ref = reference.codesigned_probe_score_exact(
-        f.query, f.flat, f.codes, attrs, rev, q_attrs, f.global_scale, k
+        *f.ours(), attrs, rev, q_attrs, f.global_scale, k, f.width
     )
     _assert_bitexact(out, ref)
 
@@ -249,17 +255,15 @@ def test_t1_raw_output_contract():
     cluster, and the multiset of returned positions equal to the probed candidate set."""
     f = Family(4, 16, 90, 4, 64)
     q_codes, _ = quantize_int8(f.query)
-    raw, idx = of.fused_scores(q_codes, f.probe_ids, f.offsets, f.sizes, f.codes_sorted, f.max_row)
+    raw, idx = of.fused_scores(q_codes, f.probe_ids, f.offsets, f.sizes, f.codes, f.width)
     assert raw.dtype == torch.int32 and idx.dtype == torch.int32
-    assert raw.shape == idx.shape == (4, of.padded_rows(f.max_row))
+    assert raw.shape == idx.shape == (4, of.padded_rows(f.width))
     pad = idx < 0
     assert (raw[pad] == torch.iinfo(torch.int32).min).all()
     assert (idx[pad] == -1).all()
-    expected = f.flat_sorted()
     for row in range(4):
         got = sorted(idx[row][~pad[row]].tolist())
-        want = sorted(expected[row][expected[row] >= 0].tolist())
-        assert got == want, f"row {row}: returned positions != probed candidate set"
+        assert got == sorted(f.probed_positions(row)), f"row {row}: != probed candidate set"
 
 
 # --- T2: fp16 path ------------------------------------------------------------------------
@@ -315,7 +319,7 @@ def test_t3_bloom_output_word_order():
     plans = of.parse_plans(README_QUERIES, hash_k=7)
     full = of.bloom_full_mask(index, boff, plans, 3, 7, return_bool_mask=True)
     assert full.dtype == torch.bool and full.shape == (3, of.DOCS_PER_BUNDLE)
-    for row, hits in zip(full[:, :4].tolist(), README_HITS):
+    for row, hits in zip(full[:, :4].tolist(), README_HITS, strict=True):
         assert [i for i, h in enumerate(row) if h] == hits
     packed = of.bloom_full_mask(index, boff, plans, 3, 7, return_bool_mask=False)
     assert packed.dtype == torch.int64 and packed.shape == (3, of.WORDS_PER_BUNDLE)
@@ -535,7 +539,14 @@ def data():
 
 
 def _layer(data, backend, filter_mode="none", *, reverse=None, official=None, **kw):
-    args = dict(k=K, n_lists=N_LISTS, n_probe=N_PROBE, n_iter=3, backend=backend, official=official)
+    args = {
+        "k": K,
+        "n_lists": N_LISTS,
+        "n_probe": N_PROBE,
+        "n_iter": 3,
+        "backend": backend,
+        "official": official,
+    }
     args.update(kw)
     if filter_mode == "bloom":
         args.update(
@@ -551,26 +562,17 @@ def _layer(data, backend, filter_mode="none", *, reverse=None, official=None, **
 
 def _transplant(off: SilverTorch, tri: SilverTorch) -> None:
     """Give the official module the Triton module's index, so a bit-exact layer comparison is
-    of the *kernels* and not of two index builds: centroids and codes verbatim, the CSR
-    rebuilt from the padded layout. (``KMeans.fit`` is reproducible run to run since
-    roadmap C4, so the two builds would now agree anyway; sharing the index keeps this test
-    independent of that and of any future change to the layout path.)"""
-    sort_perm, offsets, sizes = csr_from_padded(tri.padded_cluster_items)
-    inv = torch.empty_like(sort_perm)
-    inv[sort_perm] = torch.arange(sort_perm.numel(), device="cuda")
-    off.centroids = tri.centroids.clone()
-    off.item_codes = tri.item_codes[sort_perm].contiguous()
-    off.global_scale = tri.global_scale.clone()
+    of the *kernels* and not of two index builds: both backends register the same CSR, so
+    every buffer is copied verbatim. (``KMeans.fit`` is reproducible run to run since
+    roadmap C4, so the two builds would agree anyway; sharing the index keeps this test
+    independent of that.)"""
+    for name in ("centroids", "item_codes", "global_scale", "cluster_offsets",
+                 "cluster_sizes", "sort_perm", "inv_perm"):  # fmt: skip
+        setattr(off, name, getattr(tri, name).clone())
     off._global_scale_f = tri._global_scale_f
-    off._max_cluster_size = tri._max_cluster_size
-    off.cluster_offsets, off.cluster_sizes, off.sort_perm, off.inv_perm = (
-        offsets,
-        sizes,
-        sort_perm,
-        inv,
-    )
+    off._probe_width = tri._probe_width
     if off.filter_mode == "exact":
-        off.item_clause_attrs = tri.item_clause_attrs[sort_perm].contiguous()
+        off.item_clause_attrs = tri.item_clause_attrs.clone()
         off.clause_is_reverse = tri.clause_is_reverse.clone()
 
 
@@ -609,9 +611,7 @@ def test_t6_layer_fp16_default_ranks_like_triton(data, filter_mode):
     ids_t, sc_t = tri(data["query"], qa)
     assert ids_o.shape == ids_t.shape == (B, K) and ids_o.dtype == torch.long
     assert sc_o.dtype == torch.float32
-    # Exact rows with < K survivors: the Triton epilogue leaves the padded item id at an
-    # ``-inf`` slot, the official one writes ``-1`` — normalise both (see ``_sentinel_ids``).
-    jac = _jaccard(_sentinel_ids(ids_o, sc_o), _sentinel_ids(ids_t, sc_t))
+    jac = _jaccard(ids_o, ids_t)
     print(f"T6 fp16 {filter_mode}: jaccard@{K} vs triton = {jac:.4f}")
     assert jac >= 0.99, jac
 
@@ -632,7 +632,6 @@ def test_t6_layer_bloom(data, bloom_path, record_property):
     _transplant(off, tri)
     ids_o, sc_o = off(data["query"], data["q_attrs"])
     ids_t, sc_t = tri(data["query"], data["q_attrs"])
-    ids_o, ids_t = _sentinel_ids(ids_o, sc_o), _sentinel_ids(ids_t, sc_t)
     exact = clause_subset_match(
         data["attrs"][ids_o.clamp_min(0)], data["q_attrs"], tri.clause_is_reverse
     ) & (ids_o >= 0)
@@ -696,7 +695,7 @@ def test_t6_layer_contract(data):
     # re-derives the cached scalars, nothing is patched by hand.
     twin = _layer(data, "official", "none")
     twin.load_state_dict(off.state_dict())
-    assert twin._max_cluster_size == off._max_cluster_size
+    assert twin._probe_width == off._probe_width
     assert twin._global_scale_f == off._global_scale_f
     a, b = off(data["query"]), twin(data["query"])
     assert torch.equal(a[0], b[0]) and torch.equal(a[1], b[1])
@@ -843,7 +842,7 @@ def test_t7_layer_forward_sync_count(data, cache_plans, record_property):
     plan D7's "eager only". Phase 1 and the ``masked_topk`` epilogue add none of their own,
     so ``none`` should equal ``fused_kmean_ann``'s count and the bloom paths the sum of the
     search and scorer ops'; ``cache_plans`` moves no device sync (the parse is CPU work)."""
-    cfg = dict(b_multiplier=B_MULT, n_stored_hashes=HASH_K, cache_plans=cache_plans)
+    cfg = {"b_multiplier": B_MULT, "n_stored_hashes": HASH_K, "cache_plans": cache_plans}
     modules = {
         "none": (_layer(data, "official", "none"), None),
         "exact": (_layer(data, "official", "exact"), data["q_attrs"]),
@@ -858,7 +857,7 @@ def test_t7_layer_forward_sync_count(data, cache_plans, record_property):
     }
     for name, (module, qa) in modules.items():
         module(data["query"], qa)  # warm-up: first-call lazy work is not the steady state
-        n_sync = _count_syncs(lambda: module(data["query"], qa))
+        n_sync = _count_syncs(lambda m=module, a=qa: m(data["query"], a))
         record_property(f"forward_syncs_{name}_cache_plans={cache_plans}", n_sync)
         print(f"T7 forward syncs — {name}, cache_plans={cache_plans}: {n_sync}")
         assert n_sync > 0

@@ -11,8 +11,8 @@ modules use them for you.
 | name | signature | used by |
 | --- | --- | --- |
 | `KMeans` | `KMeans(n_lists, n_iter=10, seed=0, init="random")`; `.fit(embs) -> (centroids [n_lists, D], assignments [N])`; `KMeans.assign(embs, centroids) -> [N]` | `SilverTorch` (`kmeans_init`) |
-| `padded_layout` | `(assignments, n_lists) -> (padded_cluster_items [n_lists, max_size] int64 with -1 pads, cluster_sizes [n_lists])` | `SilverTorch` on `triton` / `torch` |
-| `csr_layout` | `(assignments, n_lists) -> (sort_perm, inv_perm, cluster_offsets [n_lists + 1], cluster_sizes)` — one stable argsort | `SilverTorch` on `official` |
+| `csr_layout` | `(assignments, n_lists) -> (sort_perm, inv_perm, cluster_offsets [n_lists + 1], cluster_sizes)` — one stable argsort; `item_codes[sort_perm]` is the cluster-sorted table | `SilverTorch` (every backend) |
+| `probe_width` | `(cluster_sizes, n_probe) -> int` — the sum of the `n_probe` largest clusters, the scorer's output width | `SilverTorch` |
 | `quantize_int8` | `(embs) -> (codes [N, D] int8, scales [N] fp32)` — per-row symmetric; `embs ≈ codes.float() * scales[:, None]` | `SilverTorch` (queries) |
 | `quantize_int8_global` | `(embs) -> (codes [N, D] int8, scale: float)` — one global scale | `SilverTorch` (items) |
 | `quantize_oporp_1bit` | `(embs, seed=0, k_bits=0) -> (bits [N, k_bits // 64] int64, signs [D] int8, perm [D] int64)` — Sign-OPORP; `k_bits=0` → `D` | `OneBitKNN` |
@@ -20,6 +20,7 @@ modules use them for you.
 | `quantize_simhash_1bit` | `(embs, k_bits, seed=0) -> (bits [N, k_bits // 64] int64, r [k_bits, D] fp32)` — SimHash; `k_bits` may exceed `D` | `SimHashKNN` |
 | `project_simhash_1bit_query` | `(query, r) -> [B, k_bits // 64] int64` | `SimHashKNN` |
 | `generate_seeds`, `generate_clause_salt`, `build_signatures`, `build_query_signatures` | the bloom hash: `k_hash` seed pairs, the per-clause salt, item signatures `[N, m_bits // 64]` and query signatures `[B, m_bits // 64]` | `BloomFilter`, `SilverTorch(filter_mode="bloom")` |
+| `build_transposed_sigs`, `build_query_bit_positions` | the transposed bloom index `[m_bits, ceil(N / 64)]` of row-wise signatures, and a query's set-bit positions `[B, C * k_hash]` (`-1` = inactive clause) | `SilverTorch(filter_mode="bloom")` on `triton` / `torch` |
 
 `KMeans.fit` is deterministic: same `seed` and same input give bit-identical centroids and
 assignments on repeated calls, on CPU and on CUDA, with either `init`. The centroid update sums
@@ -33,11 +34,12 @@ and similarity is `k_bits - 2 * popcount(query_bits ^ item_bits)`.
 
 ```python
 import torch
-from retrieve.indexing import KMeans, padded_layout, quantize_oporp_1bit
+from retrieve.indexing import KMeans, csr_layout, probe_width, quantize_oporp_1bit
 
 embs = torch.randn(100_000, 128, device="cuda")
 centroids, assignments = KMeans(n_lists=1024).fit(embs)
-padded, sizes = padded_layout(assignments, 1024)
+sort_perm, inv_perm, offsets, sizes = csr_layout(assignments, 1024)
+width = probe_width(sizes, n_probe=16)          # the scorer's [B, width] output
 bits, signs, perm = quantize_oporp_1bit(embs)   # bits: [100000, 2] int64 at k_bits=128
 ```
 
@@ -58,7 +60,7 @@ bits, signs, perm = quantize_oporp_1bit(embs)   # bits: [100000, 2] int64 at k_b
 
 ```python
 import retrieve.ops.triton              # registers torch.ops.retrieve.* (Triton)
-retrieve.ops.triton.codesigned_probe_score(query, flat_probed_items, item_codes, global_scale, k)
+retrieve.ops.triton.codesigned_probe_score(query, probe_ids, cluster_offsets, item_codes, sort_perm, global_scale, k, width)
 retrieve.ops.reference.codesigned_probe_score(...)   # same signature, pure torch, torch.equal to the above
 retrieve.ops.official.ensure_loaded(); retrieve.ops.official.st.fused_kmean_ann(...)   # Meta's op
 retrieve.ops.available_backends()       # ("triton", "torch") or ("triton", "torch", "official")
@@ -69,7 +71,7 @@ retrieve.ops.available_backends()       # ("triton", "torch") or ("triton", "tor
 | `codesigned_probe_score`, `codesigned_probe_score_bloom`, `codesigned_probe_score_exact` | fused IVF probe + INT8 dot (+ bloom / exact predicate) + top-k | `SilverTorch` |
 | `bloom_match`, `bloom_compact` | bloom subset test → `[B, N]` bool / compact candidates | `BloomFilter` |
 | `clause_mask`, `clause_compact` | exact clause predicate → `[B, N]` bool / compact candidates | `ExactAttributeFilter` |
-| `fused_masked_knn_topk` | gather + fp16 dot over candidate ids + top-k | `PrefilterKNN` |
+| `fused_masked_knn_topk` | gather + fp32-accumulated dot over candidate ids + top-k | `PrefilterKNN` |
 | `oporp_1bit_match_topk_full`, `oporp_1bit_match_topk_indirect` | XOR + popcount + top-k, full scan / through candidate ids | `OneBitKNN`, `SimHashKNN` |
 
 `retrieve.ops.official` is the adapter over Meta's `torch.ops.st.*` (`official_probe_score`,

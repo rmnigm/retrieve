@@ -9,6 +9,7 @@ import inspect
 
 import pytest
 import torch
+from torch.utils._python_dispatch import TorchDispatchMode
 
 from retrieve import (
     ExactAttributeFilter,
@@ -19,8 +20,8 @@ from retrieve import (
     LiNRV4,
     SilverTorch,
     SilverTorchBuilder,
+    modules as modules_pkg,
 )
-from retrieve import modules as modules_pkg
 from retrieve.interfaces import DISPATCH
 from tests.conftest import make_attrs, make_index, make_query, make_query_attrs, require_official
 from tests.parity.conftest import assert_ids_equal_up_to_ties
@@ -59,9 +60,39 @@ def _build(cls, backend, data):
     return b.build()
 
 
+class _Shapes(TorchDispatchMode):
+    """Records the output shape of every op a forward dispatches. Custom ops are opaque here:
+    it sees a ``retrieve::`` call and its outputs, not the kernel's own buffers."""
+
+    def __init__(self):
+        super().__init__()
+        self.seen: list[tuple[str, tuple[int, ...]]] = []
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        out = func(*args, **(kwargs or {}))
+        outs = out if isinstance(out, (tuple, list)) else (out,)
+        self.seen += [(str(func), tuple(t.shape)) for t in outs if isinstance(t, torch.Tensor)]
+        return out
+
+
 @pytest.mark.parametrize("backend", BACKENDS)
 @pytest.mark.parametrize("cls", CLASSES)
 class TestPerClass:
+    def test_forward_materializes_no_wide_intermediate(self, data, cls, backend):
+        """No >= 3-d intermediate above ``B·N`` elements (a ``[B, P, D]`` gather or a ``[B, N,
+        C, A_max]`` broadcast) on Triton; the torch backend, which materializes them by design,
+        is the control that proves the recorder sees them."""
+        m = _build(cls, backend, data)
+        m(data["query"], data["q_attrs"])
+        with _Shapes() as rec:
+            m(data["query"], data["q_attrs"])
+        assert len(rec.seen) >= 3, rec.seen
+        wide = [(op, s) for op, s in rec.seen if len(s) >= 3 and torch.Size(s).numel() > B * N]
+        if backend == "triton":
+            assert wide == [], wide
+        else:
+            assert wide, "the torch control materialized nothing wide: the recorder is blind"
+
     def test_k_mutation_changes_width_without_reregistration(self, data, cls, backend):
         m = _build(cls, backend, data)
         assert m(data["query"], data["q_attrs"])[0].shape == (B, K)
@@ -99,7 +130,7 @@ class TestPerClass:
         twin = _builder(cls, backend).set_state_dict(src.state_dict()).build()
         fresh = _build(cls, backend, data)
         assert list(twin.state_dict()) == list(fresh.state_dict())
-        for (name, a), (_, b) in zip(fresh.named_buffers(), twin.named_buffers()):
+        for (name, a), (_, b) in zip(fresh.named_buffers(), twin.named_buffers(), strict=True):
             assert torch.equal(a, b), name
         ids_f, sc_f = fresh(data["query"], data["q_attrs"])
         ids_t, sc_t = twin(data["query"], data["q_attrs"])
@@ -135,10 +166,9 @@ def test_dispatch_names_every_class_and_backend():
 class TestQueryParams:
     def test_silvertorch_n_probe_revalidates(self, data):
         m = _build(SilverTorch, "torch", data)
-        max_size = m._max_cluster_size
         with pytest.raises(ValueError, match="cannot exceed n_lists"):
             m.set_query_params(n_probe=9)
-        m.k = 8 * max_size + 1
+        m.k = int(m.cluster_sizes.topk(8).values.sum()) + 1  # one past the 8-probe width
         with pytest.raises(ValueError, match="probe pool"):
             m.set_query_params(n_probe=8)
         m.k = K

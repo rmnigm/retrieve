@@ -8,6 +8,8 @@ from typing import Literal, get_args
 import torch
 from torch import Tensor, nn
 
+from retrieve.functional import compact_mask
+
 # Two backend vocabularies, one per family. Every LiNR layer and every standalone filter
 # has exactly a Triton path and a torch path; only ``SilverTorch`` also routes to Meta's
 # official ops. Each constructor validates its own literal via ``check_backend`` so a
@@ -43,10 +45,10 @@ def ops_for(backend: str) -> ModuleType:
     return _OPS_LOADED[backend]
 
 
-# The code path each backend runs per module (plan L §5): ``"cublas"`` where the flag is a
+# The code path each backend runs per module: ``"cublas"`` where the flag is a
 # no-op, ``None`` where the constructor raises. Keyed by class name so the table is plain data
 # with no import of ``retrieve.modules``; the harness derives its ``PATHS`` from it
-# (library-harness-boundary.md §4).
+# (docs/system/architecture.md § Backend dispatch).
 DISPATCH: dict[str, dict[str, str | None]] = {
     "SilverTorch": {"triton": "triton", "torch": "torch", "official": "official"},
     "LiNRV1": {"triton": "cublas", "torch": "cublas", "official": None},
@@ -113,7 +115,6 @@ class FilterModule(nn.Module, abc.ABC):
         self,
         query_clause_attrs: Tensor,
     ) -> tuple[Tensor, Tensor]:
-        from retrieve.functional import compact_mask
 
         return compact_mask(self.evaluate_mask(query_clause_attrs))
 

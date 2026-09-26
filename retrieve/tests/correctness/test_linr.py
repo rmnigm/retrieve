@@ -12,6 +12,7 @@ import pytest
 import torch
 
 from retrieve.functional import compact_mask
+from retrieve.interfaces import ops_for
 from retrieve.modules import BloomFilter, ExactAttributeFilter
 from retrieve.modules.bit_knn import OneBitKNN, SimHashKNN
 from retrieve.modules.knn import FullScanKNN, PostfilterKNN, PostfilterKNNInt8, PrefilterKNN
@@ -25,7 +26,7 @@ from tests.conftest import (
     make_query_attrs,
     recall_at_k,
 )
-from tests.parity.conftest import assert_ids_equal_up_to_ties
+from tests.parity.conftest import assert_ids_equal_up_to_ties, assert_topk_equal
 
 N, D, B, K = 2048, 128, 16, 200
 
@@ -121,7 +122,8 @@ class TestCrossBackendAgreement:
         ids_ref, sc_ref = ref(data["query"], candidate_ids=cand, counts=counts)
         ids_tri, sc_tri = tri(data["query"], candidate_ids=cand, counts=counts)
         for b in range(B):
-            assert_topk_id_sets_match(ids_tri, sc_tri, ids_ref, sc_ref, b)
+            # Both return fp32 sums of the same fp16 products, in a different order.
+            assert_topk_id_sets_match(ids_tri, sc_tri, ids_ref, sc_ref, b, atol=2e-6, rtol=0.0)
 
     @pytest.mark.parametrize("mask_pass_rate", [None, 0.01, 0.1, 0.8])
     def test_one_bit_torch_matches_one_bit_triton(self, data, mask_pass_rate):
@@ -138,8 +140,9 @@ class TestCrossBackendAgreement:
             cand, counts = compact_mask(mask)
             ids_ref, sc_ref = ref(data["query"], candidate_ids=cand, counts=counts)
             ids_tri, sc_tri = tri(data["query"], candidate_ids=cand, counts=counts)
-        for b in range(B):
-            assert_topk_id_sets_match(ids_tri, sc_tri, ids_ref, sc_ref, b)
+        # Popcount scores are integers on both sides: exact.
+        assert torch.equal(sc_tri, sc_ref)
+        assert_ids_equal_up_to_ties(ids_tri, ids_ref, sc_ref)
 
     @pytest.mark.parametrize("pass_rate", [0.01, 0.1, 0.8])
     def test_postfilter_knn_matches_prefilter_topk_set(self, data, pass_rate):
@@ -153,7 +156,8 @@ class TestCrossBackendAgreement:
         ids1, sc1 = sm(data["query"], mask=mask)
         ids2, sc2 = pf(data["query"], candidate_ids=cand, counts=counts)
         for b in range(B):
-            assert_topk_id_sets_match(ids2, sc2, ids1, sc1, b)
+            # cuBLAS's tensor-core accumulator vs the kernel's fp32 sum (test_accumulation.py).
+            assert_topk_id_sets_match(ids2, sc2, ids1, sc1, b, atol=2e-6, rtol=0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -201,8 +205,7 @@ class TestOneBitKNN:
         # Full-scan path.
         ids_eager, sc_eager = m(data["query"])
         ids_comp, sc_comp = compiled(data["query"])
-        torch.testing.assert_close(ids_eager, ids_comp)
-        torch.testing.assert_close(sc_eager, sc_comp)
+        assert_topk_equal(ids_comp, sc_comp, ids_eager, sc_eager)
 
         # Candidates path (mirrors the LinrV3 cascade call shape).
         g = torch.Generator(device="cuda").manual_seed(11)
@@ -210,8 +213,7 @@ class TestOneBitKNN:
         counts = torch.full((B,), 64, dtype=torch.long, device="cuda")
         ids_eager, sc_eager = m(data["query"], candidate_ids=cand, counts=counts)
         ids_comp, sc_comp = compiled(data["query"], candidate_ids=cand, counts=counts)
-        torch.testing.assert_close(ids_eager, ids_comp)
-        torch.testing.assert_close(sc_eager, sc_comp)
+        assert_topk_equal(ids_comp, sc_comp, ids_eager, sc_eager)
 
 
 # ---------------------------------------------------------------------------
@@ -234,8 +236,9 @@ class TestOneBitKNNKBitsLtD:
         assert torch.equal(ref.item_bits, tri.item_bits)
         ids_ref, sc_ref = ref(data["query"])
         ids_tri, sc_tri = tri(data["query"])
-        for b in range(B):
-            assert_topk_id_sets_match(ids_tri, sc_tri, ids_ref, sc_ref, b)
+        # Popcount scores are integers on both sides: exact.
+        assert torch.equal(sc_tri, sc_ref)
+        assert_ids_equal_up_to_ties(ids_tri, ids_ref, sc_ref)
 
     @pytest.mark.parametrize("backend", BACKENDS)
     def test_one_bit_knn_kbits_lt_d_compile_fullgraph_no_break(self, data, backend):
@@ -253,8 +256,7 @@ class TestOneBitKNNKBitsLtD:
         # Full-scan path.
         ids_eager, sc_eager = m(data["query"])
         ids_comp, sc_comp = compiled(data["query"])
-        torch.testing.assert_close(ids_eager, ids_comp)
-        torch.testing.assert_close(sc_eager, sc_comp)
+        assert_topk_equal(ids_comp, sc_comp, ids_eager, sc_eager)
 
         # Candidates path (mirrors the LinrV3 cascade call shape).
         g = torch.Generator(device="cuda").manual_seed(11)
@@ -262,8 +264,7 @@ class TestOneBitKNNKBitsLtD:
         counts = torch.full((B,), 64, dtype=torch.long, device="cuda")
         ids_eager, sc_eager = m(data["query"], candidate_ids=cand, counts=counts)
         ids_comp, sc_comp = compiled(data["query"], candidate_ids=cand, counts=counts)
-        torch.testing.assert_close(ids_eager, ids_comp)
-        torch.testing.assert_close(sc_eager, sc_comp)
+        assert_topk_equal(ids_comp, sc_comp, ids_eager, sc_eager)
 
 
 # ---------------------------------------------------------------------------
@@ -316,8 +317,7 @@ class TestSimHashKNN:
         # Full-scan path.
         ids_eager, sc_eager = m(data["query"])
         ids_comp, sc_comp = compiled(data["query"])
-        torch.testing.assert_close(ids_eager, ids_comp)
-        torch.testing.assert_close(sc_eager, sc_comp)
+        assert_topk_equal(ids_comp, sc_comp, ids_eager, sc_eager)
 
         # Candidates path.
         g = torch.Generator(device="cuda").manual_seed(11)
@@ -325,8 +325,7 @@ class TestSimHashKNN:
         counts = torch.full((B,), 64, dtype=torch.long, device="cuda")
         ids_eager, sc_eager = m(data["query"], candidate_ids=cand, counts=counts)
         ids_comp, sc_comp = compiled(data["query"], candidate_ids=cand, counts=counts)
-        torch.testing.assert_close(ids_eager, ids_comp)
-        torch.testing.assert_close(sc_eager, sc_comp)
+        assert_topk_equal(ids_comp, sc_comp, ids_eager, sc_eager)
 
 
 class TestSimHashKNNCrossBackend:
@@ -350,8 +349,9 @@ class TestSimHashKNNCrossBackend:
             cand, counts = compact_mask(mask)
             ids_ref, sc_ref = ref(data["query"], candidate_ids=cand, counts=counts)
             ids_tri, sc_tri = tri(data["query"], candidate_ids=cand, counts=counts)
-        for b in range(B):
-            assert_topk_id_sets_match(ids_tri, sc_tri, ids_ref, sc_ref, b)
+        # Popcount scores are integers on both sides: exact.
+        assert torch.equal(sc_tri, sc_ref)
+        assert_ids_equal_up_to_ties(ids_tri, ids_ref, sc_ref)
 
 
 # ---------------------------------------------------------------------------
@@ -466,8 +466,9 @@ class TestEdgeCases:
         ids_no_mask, sc_no_mask = m(data["query"])
         all_true = torch.ones(B, N, dtype=torch.bool, device="cuda")
         ids_masked, sc_masked = m(data["query"], mask=all_true)
-        for b in range(B):
-            assert_topk_id_sets_match(ids_masked, sc_masked, ids_no_mask, sc_no_mask, b)
+        # Same scorer on both paths: an all-True mask must not move a single score.
+        assert torch.equal(sc_masked, sc_no_mask)
+        assert_ids_equal_up_to_ties(ids_masked, ids_no_mask, sc_no_mask)
 
     @pytest.mark.parametrize("backend", BACKENDS)
     @pytest.mark.parametrize("cls", [PostfilterKNN, PostfilterKNNInt8])
@@ -490,8 +491,9 @@ class TestEdgeCases:
         ids_full, sc_full = m(data["query"])
         all_cand = torch.arange(N, device="cuda").unsqueeze(0).expand(B, N).contiguous()
         ids_cand, sc_cand = m(data["query"], candidate_ids=all_cand)
-        for b in range(B):
-            assert_topk_id_sets_match(ids_cand, sc_cand, ids_full, sc_full, b)
+        # Popcount scores are integers on both sides: exact.
+        assert torch.equal(sc_cand, sc_full)
+        assert_ids_equal_up_to_ties(ids_cand, ids_full, sc_full)
 
     @pytest.mark.parametrize("backend", BACKENDS)
     def test_one_bit_knn_zero_counts_returns_sentinels(self, data, backend):
@@ -544,12 +546,11 @@ class TestEdgeCases:
         ids, scores = m(q)
         assert ids.shape == (1, K)
         assert torch.isfinite(scores).all()
-        # Returned ids must match a torch reference top-K. Tensor-core matmul
-        # in the Triton path differs from torch ``@`` in fp accumulator order,
-        # so allow boundary-tied ids to swap (scores within atol of the K-th).
+        # The reference scores the fp32 table, the module its fp16 copy: boundary ids within
+        # the storage rounding may swap.
         ref_full = q @ data["embs"].t()
         ref_scores, ref_ids = torch.topk(ref_full, K, dim=1)
-        assert_topk_id_sets_match(ids, scores, ref_ids, ref_scores, 0)
+        assert_topk_id_sets_match(ids, scores, ref_ids, ref_scores, 0, atol=1e-3, rtol=1e-3)
 
     @pytest.mark.parametrize("backend", BACKENDS)
     def test_k_equals_n(self, data, backend):
@@ -599,7 +600,7 @@ def test_reduce_overhead_compile_zero_graph_breaks_and_parity(data, make_mod):
     config from ``linr_v3.py:65``. Asserts zero graph breaks via
     ``torch._dynamo.explain`` (same pattern as
     ``tests/compile/test_silvertorch_compile.py:78``), then runs the
-    cudagraph-captured forward and checks parity vs eager.
+    cudagraph-captured forward on two new queries, each bit-exact to eager.
 
     Outputs of a cudagraph-captured callable alias the graph's owned
     buffers, so we ``.clone()`` before comparison.
@@ -616,13 +617,14 @@ def test_reduce_overhead_compile_zero_graph_breaks_and_parity(data, make_mod):
 
     torch._dynamo.reset()
     compiled = torch.compile(m, dynamic=True, mode="reduce-overhead")
-    # Warm + record cudagraph (first call records, subsequent replay).
+    # Warm up and record on one query, then replay on two it was not captured on.
     for _ in range(3):
         compiled(data["query"])
-    ids_eager, sc_eager = m(data["query"])
-    ids_comp, sc_comp = compiled(data["query"])
-    torch.testing.assert_close(ids_comp.clone(), ids_eager)
-    torch.testing.assert_close(sc_comp.clone(), sc_eager)
+    for seed in (21, 22):
+        q = make_query(B, D, seed=seed)
+        ids_comp, sc_comp = (t.clone() for t in compiled(q))
+        ids_eager, sc_eager = m(q)
+        assert_topk_equal(ids_comp, sc_comp, ids_eager, sc_eager)
 
 
 def test_simhash_quality_lift_over_oporp_at_higher_kbits():
@@ -795,3 +797,79 @@ class TestComposites:
         ref = ExactAttributeFilter()
         ref.register_index(item_attrs, clause_is_reverse=rev)
         assert torch.equal(v2.filter.evaluate_mask(qa), ref.evaluate_mask(qa))
+
+
+# --- short candidate lists and missing filters ---------------------------------------
+
+
+@pytest.mark.parametrize("backend", ["torch", "triton"])
+def test_fused_masked_knn_topk_rejects_fewer_columns_than_k(backend):
+    """One contract on both backends: the op needs ``P >= k`` columns."""
+
+    q, embs = make_query(2, 64).half(), make_index(100, 64).half()
+    pos, counts = torch.arange(5, device="cuda").repeat(2, 1), torch.tensor([5, 3], device="cuda")
+    with pytest.raises(ValueError, match="fewer than k=10"):
+        ops_for(backend).fused_masked_knn_topk(q, embs, pos, counts, 10)
+
+
+@pytest.mark.parametrize("p", [0, 3])
+def test_prefilter_knn_short_candidate_list_pads_to_k(p):
+    """``PrefilterKNN`` returns ``[B, k]`` for any candidate width: short lists end in exact
+    ``(-1, -inf)`` sentinels, and both backends agree (``P = 0``: every slot a sentinel)."""
+    k, embs, q = 6, make_index(50, 64), make_query(2, 64)
+    cand = torch.arange(p, device="cuda").repeat(2, 1)
+    out = {}
+    for backend in ("torch", "triton"):
+        m = PrefilterKNN(k=k, backend=backend).cuda()
+        m.register_index(embs)
+        out[backend] = m(q, candidate_ids=cand)
+    ids, scores = out["triton"]
+    assert ids.shape == (2, k)
+    assert torch.equal(ids[:, p:], torch.full((2, k - p), -1, device="cuda"))
+    assert torch.isinf(scores[:, p:]).all() and torch.isfinite(scores[:, :p]).all()
+    assert torch.equal(ids, out["torch"][0])
+
+
+@pytest.mark.parametrize("p", [0, 3, 40])
+def test_bit_knn_indirect_width_is_min_k_p_on_both_backends(p):
+    """The candidate path returns ``min(k, P)`` columns, no pad, on both backends; ``P = 0`` is
+    an empty ``[B, 0]`` (it used to crash the Triton epilogue's gather)."""
+
+    g = torch.Generator(device="cuda").manual_seed(0)
+    qb = torch.randint(-(2**62), 2**62, (2, 2), generator=g, device="cuda")
+    ib = torch.randint(-(2**62), 2**62, (100, 2), generator=g, device="cuda")
+    pos = torch.arange(p, device="cuda").repeat(2, 1)
+    counts = torch.tensor([p, max(p - 1, 0)], device="cuda")
+    res = [
+        ops_for(bk).oporp_1bit_match_topk_indirect(qb, ib, 10, pos, counts)
+        for bk in ("triton", "torch")
+    ]
+    for ids, scores in res:
+        assert ids.shape == scores.shape == (2, min(10, p))
+    assert_topk_equal(*res[0], *res[1])
+
+
+def test_linr_v3_rejects_k_above_candidate_pool():
+    with pytest.raises(ValueError, match="exceeds candidate_pool=10"):
+        LiNRV3(k=11, candidate_pool=10)
+    m = LiNRV3(k=5, candidate_pool=10).cuda()
+    m.register_index(make_index(100, 64))
+    with pytest.raises(ValueError, match="candidate_pool=4 is below k=5"):
+        m.set_query_params(candidate_pool=4)
+
+
+def test_linr_without_filter_rejects_clause_attrs():
+    """Clause attrs to a variant built without a filter raise ``ValueError`` (not an assert or
+    an ``AttributeError`` on ``None``), at register time and at query time; V2, whose
+    candidates are the filter's, refuses ``filter=None`` at construction."""
+    attrs = torch.zeros(50, 1, 1, dtype=torch.long, device="cuda")
+    qa = torch.zeros(2, 1, dtype=torch.long, device="cuda")
+    for cls in (LiNRV1, LiNRV3, LiNRV4):
+        m = cls(k=5).cuda() if cls is not LiNRV3 else cls(k=5, candidate_pool=10).cuda()
+        with pytest.raises(ValueError, match="has no filter"):
+            m.register_index(make_index(50, 64), attrs)
+        m.register_index(make_index(50, 64))
+        with pytest.raises(ValueError, match="has no filter"):
+            m(make_query(2, 64), qa)
+    with pytest.raises(ValueError, match="has no filter"):
+        LiNRV2(k=5, filter=None)

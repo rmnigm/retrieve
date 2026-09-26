@@ -14,7 +14,9 @@ Source-only distribution: the Triton kernels JIT-compile on first call against y
 toolchain, so there are no prebuilt CUDA wheels to match. You need:
 
 - a CUDA-capable GPU,
-- `torch >= 2.4` and `triton >= 3.0` (pulled in as dependencies).
+- `torch >= 2.10` and `triton >= 3.6` (pulled in as dependencies). The floors are the
+  validated versions: validated on an A100-SXM4-80GB (sm_80) with torch 2.10.0+cu128,
+  triton 3.6.0 and Python 3.11. Older releases may work but are untested.
 
 > The import name is **`retrieve`**, not `torchretrieve`:
 >
@@ -35,8 +37,7 @@ The package has two public layers and two helper namespaces:
 | `retrieve.functional` | query-time glue: `masked_topk`, `compact_mask`, `combine_masks` / `combine_indices`, `post_filter_topk` |
 
 `import retrieve` imports no kernel; a module resolves its backend's op namespace when it is
-constructed. The 0.1 paths `retrieve.layers` / `retrieve.kernels` still import (with a
-`DeprecationWarning`) and are removed in the next release. [`indexing-and-ops.md`](indexing-and-ops.md)
+constructed. [`indexing-and-ops.md`](indexing-and-ops.md)
 lists the two helper namespaces and the ops.
 
 ## The shared lifecycle
@@ -98,7 +99,7 @@ same = SilverTorchBuilder(k=k, n_lists=1024, n_probe=16).set_state_dict(torch.lo
 ## Example: the LiNR variants
 
 The LiNR family scores the full corpus directly. The paper's four variants ship as modules:
-`LiNRV1` (dense fp16 + mask), `LiNRV2` (filter → candidates → exact rescoring), `LiNRV3`
+`LiNRV1` (dense fp16-input scan + mask), `LiNRV2` (filter → candidates → exact rescoring), `LiNRV3`
 (1-bit Hamming top-`candidate_pool` → exact rescoring) and `LiNRV4` (int8 dense + mask), each
 optionally holding a filter. V3 alone, no filter:
 

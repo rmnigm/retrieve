@@ -1,8 +1,9 @@
 """Dense and sparse KNN primitives over fp16 / int8 / fp32 item tables.
 
-Precision contract: ``PostfilterKNN`` and ``PrefilterKNN`` store fp16 and accumulate dots in fp32
-(matmul/bmm and the fused Triton kernel); ``PostfilterKNNInt8`` is int32 end to end;
-``FullScanKNN`` keeps the input dtype."""
+Precision contract: ``PostfilterKNN`` and ``PrefilterKNN`` store items fp16 (as the LiNR paper
+does), cast the query to fp16, accumulate in fp32 and return fp32 scores on every backend — an
+fp16 score would round near-tied items together (docs/system/kernels.md § Score conventions).
+``PostfilterKNNInt8`` is int32 end to end; ``FullScanKNN`` keeps the input dtype."""
 
 from __future__ import annotations
 
@@ -10,13 +11,13 @@ import torch
 from torch import Tensor
 
 from retrieve.functional import masked_topk, post_filter_topk
-from retrieve.indexing.quantize import quantize_int8_global_codes
+from retrieve.indexing.quantize import quantize_int8_global, quantize_int8_global_codes
 from retrieve.interfaces import LinrBackend, RetrievalModule, check_backend, ops_for
 
 
 class PostfilterKNN(RetrievalModule):
-    """Pure-torch dense scoring (``query @ item_embs.T``) + optional boolean mask + top-K; inputs
-    are cast to fp16 (storage fp16, fp32 accumulate). The ``backend=`` flag is accepted for API
+    """Pure-torch dense scoring (``query @ item_embs.T``) + optional boolean mask + top-K; fp16
+    inputs, fp32 scores (module docstring). The ``backend=`` flag is accepted for API
     symmetry but has no effect — cuBLAS + CUB already match a fused kernel here."""
 
     item_embs_t: Tensor
@@ -37,10 +38,8 @@ class PostfilterKNN(RetrievalModule):
         query: Tensor,
         mask: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
-        scores = query.to(torch.float16) @ self.item_embs_t
-        if mask is not None:
-            return masked_topk(scores, self.k, valid=mask)
-        return masked_topk(scores, self.k)
+        scores = torch.mm(query.to(torch.float16), self.item_embs_t, out_dtype=torch.float32)
+        return masked_topk(scores, self.k, valid=mask)
 
 
 class PostfilterKNNInt8(RetrievalModule):
@@ -67,7 +66,7 @@ class PostfilterKNNInt8(RetrievalModule):
         self.register_load_state_dict_post_hook(_rederive_n_real)
 
     def register_index(self, item_embs: Tensor) -> None:
-        codes = quantize_int8_global_codes(item_embs)  # [N, D] int8
+        codes, _ = quantize_int8_global(item_embs)  # [N, D] int8, chunked at build
         # _int_mm needs N (after transpose) a multiple of 8; pad with zero items (sliced off in
         # forward), quantize before padding so the global scale is unaffected.
         n = codes.shape[0]
@@ -99,9 +98,7 @@ class PostfilterKNNInt8(RetrievalModule):
         # int32 → fp16 for topk: >>5 brings worst-case |dot| ≈ D·127² (~2²¹) under fp16's ~2¹⁶ range
         # while preserving order; fp16 also halves CUB radix-select passes (2 vs 4).
         scores = (dots >> 5).to(torch.float16)
-        if mask is not None:
-            return masked_topk(scores, self.k, valid=mask)
-        return masked_topk(scores, self.k)
+        return masked_topk(scores, self.k, valid=mask)
 
 
 def _rederive_n_real(module: PostfilterKNNInt8, incompatible_keys) -> None:
@@ -115,8 +112,8 @@ class PrefilterKNN(RetrievalModule):
     """Sparse-rescore KNN with selectable backend. Given ``candidate_ids: [B, P]`` (and optional
     per-row ``counts: [B]``) it scores only the passing rows and top-Ks them back to global ids;
     without ``candidate_ids`` it falls back to a dense full matmul. ``backend="triton"`` fuses
-    the sparse path (no ``[B, P, D]`` intermediate); inputs are stored fp16 with fp32-accumulated
-    dots.
+    the sparse path (no ``[B, P, D]`` intermediate); fp16 inputs, fp32 scores on both backends
+    (module docstring).
 
     Decoupled from filtering — callers compute ``(candidate_ids, counts)`` upstream."""
 
@@ -140,18 +137,15 @@ class PrefilterKNN(RetrievalModule):
     ) -> tuple[Tensor, Tensor]:
         query = query.to(torch.float16)
         if candidate_ids is None:
-            scores = query @ self.item_embs.t()
+            scores = torch.mm(query, self.item_embs.t(), out_dtype=torch.float32)
             topk_scores, topk_ids = torch.topk(scores, self.k, dim=1)
             return topk_ids, topk_scores
         b, p = candidate_ids.shape
-        if p == 0:
-            device = query.device
-            return (
-                torch.full((b, self.k), -1, dtype=torch.long, device=device),
-                torch.full((b, self.k), float("-inf"), device=device),
-            )
         if counts is None:
             counts = torch.full((b,), p, dtype=torch.long, device=query.device)
+        if p < self.k:
+            # The op needs >= k columns; lanes past counts are never read, so -1 pads them.
+            candidate_ids = torch.nn.functional.pad(candidate_ids, (0, self.k - p), value=-1)
         return ops_for(self.backend).fused_masked_knn_topk(
             query, self.item_embs, candidate_ids, counts, self.k
         )
@@ -171,9 +165,10 @@ class FullScanKNN(RetrievalModule):
     discards it — callers needing counts call ``post_filter_topk`` directly.
 
     ``candidate_ids: [B, P]`` re-ranks the given ids only; ``-1`` entries are
-    padding (the tail every compact producer emits) — never gathered, scored
-    or returned. Rows with fewer than ``min(k, P)`` real candidates carry
-    ``-1`` / ``-inf`` in the tail; ``P < k`` returns ``P`` columns."""
+    padding — never gathered, scored or returned. There is no ``counts``: mask a
+    compaction's output to ``-1`` past its counts first (its tail is unwritten).
+    Rows with fewer than ``min(k, P)`` real candidates carry ``-1`` / ``-inf`` in
+    the tail; ``P < k`` returns ``P`` columns."""
 
     item_embs: Tensor
 

@@ -16,8 +16,9 @@ This test is the gate on that: it builds the three filtered LiNR variants the wa
 (``torch._dynamo.utils.counters["inductor"]["cudagraph_skips"]``). A non-zero skip count
 is the exact failure the harness turns into ``NotCapturable``.
 
-Correctness alongside capture: scores must be ``torch.equal`` to eager, and ids equal up
-to ties among equal scores (``torch.topk``'s tie order is not guaranteed stable).
+Correctness alongside capture: after the warm-up the graph replays on two queries it was not
+captured on, each ``torch.equal`` to eager on its scores and equal up to ties on its ids
+(``torch.topk``'s tie order is not guaranteed stable).
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from __future__ import annotations
 import pytest
 import torch
 from torch import Tensor, nn
+from torch._dynamo.utils import counters
 
 from retrieve.modules import (
     BloomFilter,
@@ -34,6 +36,7 @@ from retrieve.modules import (
     PrefilterKNN,
 )
 from tests.conftest import make_attrs, make_index, make_query, make_query_attrs
+from tests.parity.conftest import assert_topk_equal
 
 N, D, B, C, A_MAX, K = 512, 64, 4, 2, 2, 8
 CANDIDATE_POOL = 64
@@ -98,61 +101,37 @@ def _build(algo: str, filter_kind: str) -> nn.Module:
     return VARIANTS[algo](embs, f)
 
 
-def _assert_ids_equal_up_to_ties(out_ids: Tensor, ref_ids: Tensor, scores: Tensor) -> None:
-    """Ids must agree once slots holding an equal score are treated as interchangeable.
-
-    Called only after the scores tensors compared ``torch.equal``, so grouping by the one
-    scores tensor is well defined: for every row and every distinct score value, the two
-    id multisets at that value must match.
-    """
-    assert out_ids.shape == ref_ids.shape
-    for b in range(out_ids.shape[0]):
-        row = scores[b]
-        for value in torch.unique(row):
-            slots = row == value
-            got = sorted(out_ids[b][slots].tolist())
-            want = sorted(ref_ids[b][slots].tolist())
-            assert got == want, (
-                f"row {b}, score {value.item()}: ids {got} != {want} — a difference that "
-                f"ties among equal scores do not explain"
-            )
-
-
-@pytest.mark.parametrize("algo", ["linr_v1", "linr_v2", "linr_v3"])
-@pytest.mark.parametrize("filter_kind", ["clause", "bloom"])
-def test_compiled_captures_without_cudagraph_skips(algo, filter_kind):
-    """Zero ``cudagraph_skips`` on the warm-up, and the captured forward matches eager."""
-    from torch._dynamo.utils import counters
-
-    torch.manual_seed(0)
-    module = _build(algo, filter_kind)
-    query = make_query(B, D)
-    q_attrs = make_query_attrs(B, c=C)
-
-    with torch.inference_mode():
-        eager_ids, eager_scores = (t.clone() for t in module(query, q_attrs))
+def _assert_replays_match_eager(module: nn.Module, b: int, label: str) -> None:
+    """Compile as the harness does, warm up five times on one query, then replay the captured
+    graph on two different queries: zero ``cudagraph_skips``, and each replay equals eager on
+    the same inputs (scores ``torch.equal``, ids up to ties)."""
 
     torch._dynamo.reset()
     skips_before = int(counters["inductor"]["cudagraph_skips"])
     compiled = torch.compile(module, mode="reduce-overhead", dynamic=False, fullgraph=True)
     with torch.inference_mode():
         for _ in range(5):
-            compiled(query, q_attrs)
-        torch.cuda.synchronize()
-        skips = int(counters["inductor"]["cudagraph_skips"]) - skips_before
-        # cudagraph-tree outputs are reclaimed on the next call — clone before comparing.
-        out_ids, out_scores = (t.clone() for t in compiled(query, q_attrs))
-        torch.cuda.synchronize()
-
+            compiled(make_query(b, D), make_query_attrs(b, c=C))
+        for seed in (21, 22):
+            query, q_attrs = make_query(b, D, seed=seed), make_query_attrs(b, c=C, seed=seed)
+            # cudagraph-tree outputs are reclaimed on the next call — clone before comparing.
+            out_ids, out_scores = (t.clone() for t in compiled(query, q_attrs))
+            eager_ids, eager_scores = module(query, q_attrs)
+            assert_topk_equal(out_ids, out_scores, eager_ids, eager_scores)
+    skips = int(counters["inductor"]["cudagraph_skips"]) - skips_before
     assert skips == 0, (
-        f"{algo} / {filter_kind}: inductor skipped cudagraphs {skips}x — the compiled "
-        f"forward fell back to compiled-eager, which is what the harness reports as "
-        f"NotCapturable and what made A1's golden `graph` cells not graph numbers"
+        f"{label}: inductor skipped cudagraphs {skips}x — the compiled forward fell back to "
+        f"compiled-eager, which is what the harness reports as NotCapturable"
     )
-    assert torch.equal(out_scores, eager_scores), (
-        f"{algo} / {filter_kind}: compiled scores differ from eager"
-    )
-    _assert_ids_equal_up_to_ties(out_ids, eager_ids, eager_scores)
+
+
+@pytest.mark.parametrize("algo", ["linr_v1", "linr_v2", "linr_v3"])
+@pytest.mark.parametrize("filter_kind", ["clause", "bloom"])
+def test_compiled_captures_without_cudagraph_skips(algo, filter_kind):
+    """Zero ``cudagraph_skips``, and the captured forward replays to eager on new inputs."""
+    torch.manual_seed(0)
+    module = _build(algo, filter_kind)
+    _assert_replays_match_eager(module, B, f"{algo} / {filter_kind}")
 
 
 def test_compiled_batch_of_one_bloom_v2():
@@ -161,17 +140,4 @@ def test_compiled_batch_of_one_bloom_v2():
     ``[1]`` view), and inductor's ``assert_alignment`` on custom-op outputs rejected the compiled
     forward. ``N = 512`` at ``block_n = 256`` is the smallest odd-offset shape."""
     torch.manual_seed(0)
-    module = _build("linr_v2", "bloom")
-    query = make_query(1, D)
-    q_attrs = make_query_attrs(1, c=C)
-    with torch.inference_mode():
-        eager_ids, eager_scores = (t.clone() for t in module(query, q_attrs))
-    torch._dynamo.reset()
-    compiled = torch.compile(module, mode="reduce-overhead", dynamic=False, fullgraph=True)
-    with torch.inference_mode():
-        for _ in range(5):
-            compiled(query, q_attrs)
-        out_ids, out_scores = (t.clone() for t in compiled(query, q_attrs))
-        torch.cuda.synchronize()
-    assert torch.equal(out_scores, eager_scores)
-    _assert_ids_equal_up_to_ties(out_ids, eager_ids, eager_scores)
+    _assert_replays_match_eager(_build("linr_v2", "bloom"), 1, "linr_v2 / bloom, B=1")

@@ -14,11 +14,14 @@ import torch
 from retrieve.functional import compact_mask
 from retrieve.modules import ExactAttributeFilter
 from retrieve.ops.triton.clause_compact import (
+    DEFAULT_CONFIG,
     ClauseCompactConfig,
     _clause_compact_impl,
     clause_compact,
 )
+from retrieve.ops.triton.clause_mask import clause_mask
 from tests.conftest import make_attrs, make_query_attrs
+from tests.parity.conftest import poison_empty
 
 
 def _ref(attrs: torch.Tensor, is_reverse: torch.Tensor, q: torch.Tensor):
@@ -116,3 +119,45 @@ def test_clause_compact_config_override(block_n, num_warps):
     out_ids, out_counts = _clause_compact_impl(attrs, is_reverse, q, config=cfg)
     ref_ids, ref_counts = _ref(attrs, is_reverse, q)
     _rows_equal(out_ids, out_counts, ref_ids, ref_counts)
+
+
+@pytest.mark.parametrize("r", [0, 1])
+def test_clause_compact_equals_compacted_clause_mask(r):
+    """``clause_compact`` is ``compact_mask(clause_mask(...))`` — the two Triton kernels agree
+    bit for bit on counts and the ascending prefix ``[:counts]`` (the only defined part of a
+    row); ``N % DEFAULT_CONFIG.block_n`` in {0, 1} (a full and a one-lane last tile), and one
+    row passes nothing."""
+    n, c = 4 * DEFAULT_CONFIG.block_n + r, 2
+    assert n % DEFAULT_CONFIG.block_n == r
+    attrs = make_attrs(n, c=c, a_max=2, n_vocab=10, pad_rate=0.2, seed=5)
+    is_reverse = torch.tensor([True, False], device="cuda")
+    q = make_query_attrs(b=4, c=c, n_vocab=10, inactive_rate=0.2, seed=6)
+    q[3] = torch.tensor([9999, 9999])
+    is_reverse_none = torch.zeros(c, dtype=torch.bool, device="cuda")
+    for rev in (is_reverse, is_reverse_none):
+        ids, counts = clause_compact(attrs, rev, q)
+        m_ids, m_counts = compact_mask(clause_mask(attrs, rev, q))
+        assert torch.equal(counts, m_counts)
+        width = torch.arange(n, device="cuda")[None, :] < counts[:, None]
+        assert torch.equal(torch.where(width, ids, -1), torch.where(width, m_ids, -1))
+    assert counts[3].item() == 0
+
+
+@pytest.mark.parametrize("r", [0, 1])
+def test_clause_compact_writes_nothing_past_counts(monkeypatch, r):
+    """The output is ``torch.empty`` and the scatter kernel writes the runs only. Poisoned with
+    an id no row can hold, every slot in ``[:counts]`` comes back as the reference's id and every
+    slot past it still holds the poison (a full and a one-lane last tile; one row passes
+    nothing)."""
+    n, c, b = 4 * DEFAULT_CONFIG.block_n + r, 2, 4
+    attrs = make_attrs(n, c=c, a_max=2, n_vocab=10, pad_rate=0.2, seed=5)
+    rev = torch.zeros(c, dtype=torch.bool, device="cuda")
+    q = make_query_attrs(b=b, c=c, n_vocab=10, inactive_rate=0.2, seed=6)
+    q[3] = torch.tensor([9999, 9999])
+    ref_ids, ref_counts = _ref(attrs, rev, q)
+    hits = poison_empty(monkeypatch, (b, n), torch.int64, 123_456_789)
+    ids, counts = clause_compact(attrs, rev, q)
+    assert hits
+    width = torch.arange(n, device="cuda")[None, :] < ref_counts[:, None]
+    assert torch.equal(counts, ref_counts)
+    assert torch.equal(ids, torch.where(width, ref_ids, 123_456_789))

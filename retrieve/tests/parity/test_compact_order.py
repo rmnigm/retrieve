@@ -2,8 +2,9 @@
 
 ``clause_compact`` / ``bloom_compact`` return each row's surviving ids in ascending item order —
 ``torch.equal`` to ``ops.reference`` on ids *and* counts — and the same call returns the same
-tensors ten launches running and in a fresh process. The reference's tail past ``counts[b]`` is
-the argsort's and the kernels' is ``-1``, so rows are compared with both tails set to ``-1``.
+tensors ten launches running and in a fresh process. A row is defined on ``[:counts[b]]`` only
+(the reference's tail is the argsort's, the kernels' is unwritten memory), so rows are compared
+with both tails set to ``-1``; every consumer must give the same answer whatever the tail holds.
 """
 
 from __future__ import annotations
@@ -48,7 +49,7 @@ def test_clause_compact_order_matches_reference(n, reverse, c, a_max):
 @pytest.mark.parametrize("n", _NS)
 @pytest.mark.parametrize("m_bits", [256, 512, 1024])
 def test_bloom_compact_order_matches_reference(n, m_bits):
-    sigs, qb = make_bloom(n, 8, m_bits=m_bits)
+    *_, sigs, qb = make_bloom(n, 8, m_bits=m_bits)
     assert_compact_equal(bloom_compact(qb, sigs), reference.bloom_compact(qb, sigs))
 
 
@@ -59,7 +60,7 @@ def test_order_holds_under_every_tile_config(block_n, num_warps):
     assert_compact_equal(
         _clause_compact_impl(attrs, rev, q, config=cfg), reference.clause_compact(attrs, rev, q)
     )
-    sigs, qb = make_bloom(20_011, 4, m_bits=1024)
+    *_, sigs, qb = make_bloom(20_011, 4, m_bits=1024)
     cfg = BloomCompactConfig(block_n, num_warps)
     assert_compact_equal(
         _bloom_compact_impl(qb, sigs, config=cfg), reference.bloom_compact(qb, sigs)
@@ -69,7 +70,7 @@ def test_order_holds_under_every_tile_config(block_n, num_warps):
 _INPUTS = """
 from tests.parity.conftest import make_bloom, make_exact
 attrs, rev, q = make_exact(200_003, 8, c=4, a_max=4, reverse="mixed")
-sigs, qb = make_bloom(200_003, 8, m_bits=1024)
+*_, sigs, qb = make_bloom(200_003, 8, m_bits=1024)
 """
 
 _FRESH_PROCESS = f"""
@@ -90,8 +91,8 @@ def test_launch_to_launch_identity(tmp_path):
     first = (clause_compact(attrs, rev, q), bloom_compact(qb, sigs))
     for _ in range(9):
         again = (clause_compact(attrs, rev, q), bloom_compact(qb, sigs))
-        for a, b in zip(first, again):
-            assert torch.equal(a[0], b[0]) and torch.equal(a[1], b[1])
+        for a, b in zip(first, again, strict=True):
+            assert_compact_equal(a, b)
 
     out = tmp_path / "fresh.pt"
     subprocess.run(
@@ -100,5 +101,71 @@ def test_launch_to_launch_identity(tmp_path):
         cwd=Path(__file__).resolve().parents[2],
     )
     fresh = torch.load(out)
-    for a, b in zip(first, fresh):
-        assert torch.equal(a[0], b[0]) and torch.equal(a[1], b[1])
+    for a, b in zip(first, fresh, strict=True):
+        assert_compact_equal(a, b)
+
+
+_TAIL_CONSUMERS = """
+import sys
+from functools import partial
+
+import torch
+
+from retrieve.functional import combine_indices, counts_to_valid
+from retrieve.modules import BloomFilter, ExactAttributeFilter
+from retrieve.modules.linr import LiNRV2, LiNRV3
+from tests.conftest import make_attrs, make_index, make_query, make_query_attrs
+from tests.parity.conftest import _poisoned_empty
+
+b, n, d, k = 8, 4096, 64, 100
+attrs = make_attrs(n, c=2, a_max=2, n_vocab=6, pad_rate=0.2, seed=5)
+qa = make_query_attrs(b=b, c=2, n_vocab=6, inactive_rate=0.2, seed=6)
+embs, query = make_index(n, d), make_query(b, d)
+exact = ExactAttributeFilter(backend="triton")
+exact.register_index(attrs)
+bloom = BloomFilter(m_bits=256, k_hash=3, backend="triton")
+bloom.register_index(attrs)
+mods = [
+    LiNRV2(k=k, filter=exact, backend="triton"),
+    LiNRV2(k=k, filter=exact, backend="torch"),
+    LiNRV2(k=k, filter=bloom, backend="torch"),
+    LiNRV3(k=k, candidate_pool=200, filter=exact, backend="triton"),
+    LiNRV3(k=k, candidate_pool=200, filter=bloom, backend="torch"),
+]
+for m in mods:
+    m.register_index(embs)
+
+real_empty = torch.empty
+out = {}
+for tail in (-1, 2**40):
+    hits = []
+    torch.empty = partial(_poisoned_empty, real_empty, (b, n), torch.int64, tail, hits)
+    ids, counts = exact.evaluate_indices(qa)
+    assert hits and (counts < n).all() and (ids[~counts_to_valid(counts, n)] == tail).all()
+    res = [m(query, qa) for m in mods]
+    c_ids, c_counts = combine_indices([exact, bloom], [qa, qa])
+    res.append((torch.where(counts_to_valid(c_counts, c_ids.shape[1]), c_ids, -1), c_counts))
+    torch.empty = real_empty
+    torch.cuda.synchronize()
+    out[tail] = res
+torch.save(out, sys.argv[1])
+"""
+
+
+def test_consumers_ignore_the_tail_past_counts(tmp_path):
+    """The compaction ops write nothing past ``counts[b]``. Every consumer of their output —
+    ``LiNRV2`` (Triton and torch rescoring, clause and bloom), ``LiNRV3`` (Triton and torch),
+    ``combine_indices`` — returns the same tensors when the op's ``torch.empty`` holds ``-1``
+    (the old tail) and when it holds ``2**40``, an id past every table: a consumer that used a
+    tail id would change a result, one that gathered through it would fault. A fault poisons the
+    CUDA context, hence the subprocess."""
+    out = tmp_path / "tails.pt"
+    subprocess.run(
+        [sys.executable, "-c", _TAIL_CONSUMERS, str(out)],
+        check=True,
+        cwd=Path(__file__).resolve().parents[2],
+    )
+    res = torch.load(out)
+    assert len(res[-1]) == 6
+    for clean, poisoned in zip(res[-1], res[2**40], strict=True):
+        assert torch.equal(clean[0], poisoned[0]) and torch.equal(clean[1], poisoned[1])

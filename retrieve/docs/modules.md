@@ -19,15 +19,15 @@ Two families, and the paper's variants of the first:
 
 | Module | Scoring | Memory vs fp16 | Notes |
 | --- | --- | --- | --- |
-| `LiNRV1` | fp16 dot product | 1× (fp16) | Dense scan, filter as a mask. |
-| `LiNRV2` | fp16 dot product | 1× (fp16) | Filter → candidates → exact rescoring; filter required. |
-| `LiNRV3` | Hamming, then fp16 | ~1/16× + 1× | 1-bit top-`candidate_pool`, then exact rescoring. |
+| `LiNRV1` | fp16 inputs, fp32 dot | 1× (fp16) | Dense scan, filter as a mask. |
+| `LiNRV2` | fp16 inputs, fp32 dot | 1× (fp16) | Filter → candidates → exact rescoring; filter required. |
+| `LiNRV3` | Hamming, then fp16-input fp32 dot | ~1/16× + 1× | 1-bit top-`candidate_pool`, then exact rescoring. |
 | `LiNRV4` | INT8 dot product | 0.5× | Dense int8 scan, filter as a mask. |
 | `SilverTorch` | INT8 ANN over IVF | 0.5× + centroids | Scales to large `N`; optional fused filter. |
 | `FullScanKNN` | exact dot product | 1× (fp32) | Reference / small-N. |
-| `PostfilterKNN` | fp16 dot product | 1× (fp16) | Dense scan + optional boolean mask. |
+| `PostfilterKNN` | fp16 inputs, fp32 dot | 1× (fp16) | Dense scan + optional boolean mask. |
 | `PostfilterKNNInt8` | INT8 dot product | 0.5× | Dense scan, int32 end-to-end. |
-| `PrefilterKNN` | fp16 dot product | 1× (fp16) | Scores only a candidate set. |
+| `PrefilterKNN` | fp16 inputs, fp32 dot | 1× (fp16) | Scores only a candidate set. |
 | `OneBitKNN` | Hamming (1-bit) | ~1/16× | Sign-OPORP quantization. |
 | `SimHashKNN` | Hamming (1-bit) | ~1/16× | SimHash; `k_bits` can exceed `D`. |
 
@@ -75,7 +75,7 @@ Each holds its filter (a `BloomFilter` or `ExactAttributeFilter`, see the
 - `k` is settable after `register_index`; `capturable` is `True` (a class attribute).
 
 ### `LiNRV1(k, *, filter=None, backend="triton")`
-- `PostfilterKNN` + the filter's mask: dense fp16 dot product, masked, top-k.
+- `PostfilterKNN` + the filter's mask: dense dot product (fp16 inputs, fp32 scores), masked, top-k.
 
 ### `LiNRV2(k, *, filter, backend="triton")`
 - `PrefilterKNN` over `filter.evaluate_indices`: the filter's compact candidate list, rescored
@@ -83,7 +83,7 @@ Each holds its filter (a `BloomFilter` or `ExactAttributeFilter`, see the
 
 ### `LiNRV3(k, *, candidate_pool=5000, seed=0, filter=None, backend="triton")`
 - `OneBitKNN(k=candidate_pool)` → `PrefilterKNN(k)`: 1-bit Hamming top-`candidate_pool` (over
-  the filter's candidates when there is one), then exact fp16 rescoring of the survivors.
+  the filter's candidates when there is one), then exact rescoring of the survivors (fp16 inputs, fp32 scores).
   `set_query_params(candidate_pool=...)` changes the pool later (must be `<= N`).
 
 ### `LiNRV4(k, *, filter=None, backend="triton")`
@@ -115,9 +115,8 @@ raises.
 Constructor → `register_index` → `forward`. Unless noted, `item_embs` is `[N, D]`, `query` is
 `[B, D]`, and the return is `([B, k] int64 ids, [B, k] scores)`. The score dtype follows the
 module's arithmetic: `FullScanKNN` returns the input dtype (fp32 for fp32 inputs), `OneBitKNN` /
-`SimHashKNN` return fp32, `PostfilterKNN` and `PostfilterKNNInt8` return fp16, and `PrefilterKNN`
-returns fp16 on the `torch` backend and fp32 on the `triton` backend (and for an empty candidate
-set). Ranking is what the layers promise; cast at the boundary if you need one dtype.
+`SimHashKNN` return fp32, `PostfilterKNN` and `PrefilterKNN` return fp32 on every backend (fp16
+inputs, fp32 accumulation), and `PostfilterKNNInt8` returns fp16. Ranking is what the layers promise; cast at the boundary if you need one dtype.
 
 ### `FullScanKNN(k)`
 - `forward(query, mask=None, candidate_ids=None)`
@@ -127,7 +126,7 @@ set). Ranking is what the layers promise; cast at the boundary if you need one d
 
 ### `PostfilterKNN(k, backend="triton")`
 - `forward(query, mask=None)`
-- Dense fp16 dot product + top-K, with an optional `mask: [B, N] bool` applied before selection.
+- Dense dot product (fp16 inputs, fp32 scores) + top-K, with an optional `mask: [B, N] bool` applied before selection.
 
 ### `PostfilterKNNInt8(k, backend="triton")`
 - `forward(query, mask=None)`
@@ -173,8 +172,9 @@ Parameters:
   multiple of 64) and `k_hash`. The filter is fused into the probe+score kernel — see the
   [filtering guide](filtering-and-quantization.md).
 
-Constraint: `n_probe * max_cluster_size >= k` (raised at `register_index` and by
-`set_query_params` otherwise). `k` is a plain attribute, settable at any time.
+Constraint: the `n_probe` largest clusters must hold at least `k` items together (the
+scorer's static probe width; raised at `register_index` and by `set_query_params`
+otherwise). `k` is a plain attribute, settable at any time.
 
 After `register_index`, `build_timings` holds the seconds of the four build phases
 (`kmeans_s`, `assemble_s`, `quantize_s`, `filter_s`; `{}` before it and on a prebuilt module).

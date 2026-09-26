@@ -8,6 +8,8 @@ library code that intentionally creates CPU-side generators.
 
 from __future__ import annotations
 
+import itertools
+
 import pytest
 import torch
 
@@ -25,8 +27,7 @@ def require_official() -> None:
     the ``official`` extra). Two ways it can be absent, and the split is the point:
 
     - **Not runnable here** (``silvertorch`` not installed, or no CUDA device) →
-      ``skip``. The suite is expected to run on boxes without the extra — the Mac
-      collects and skips it.
+      ``skip``. The suite is expected to run on boxes without the extra.
     - **Installed but broken** (``silvertorch`` imports but ``silvertorch._C`` failed
       to build / load, or the pinned sha lacks an op the adapter calls) → ``fail``
       with the loader's message. A build failure that silently skipped would look
@@ -131,10 +132,11 @@ def assert_topk_id_sets_match(
     ref_scores: torch.Tensor,
     b: int,
     *,
-    atol: float = 1e-3,
-    rtol: float = 1e-3,
+    atol: float,
+    rtol: float,
 ) -> None:
-    """Per-row id-set comparison with tie tolerance at the K-th boundary.
+    """Per-row id-set comparison with tie tolerance at the K-th boundary; no default tolerance,
+    each caller states its own.
 
     Tensor-core matmul (`tl.dot`) and torch `@` differ in accumulator order
     enough to flip the K-th-place tiebreak when two items have ~atol score
@@ -179,5 +181,5 @@ def recall_at_k(approx_ids: torch.Tensor, exact_ids: torch.Tensor) -> float:
 
 def assert_recall_monotone(recalls: list[float], *, slack: float = 0.02) -> None:
     """Assert ``recalls`` is non-decreasing within ``slack`` between adjacent entries."""
-    for prev, nxt in zip(recalls, recalls[1:]):
+    for prev, nxt in itertools.pairwise(recalls):
         assert nxt >= prev - slack, f"recall regressed: {recalls}"
