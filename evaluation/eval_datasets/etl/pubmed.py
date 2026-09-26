@@ -1141,7 +1141,9 @@ def cmd_attrs(args) -> int:
             )
             .alias("lang_id"),
         )
-        arts = arts.join(jl, on="pmid", how="left")
+        arts = arts.join(jl, on="pmid", how="left").with_columns(
+            pl.col("journal_id", "lang_id").fill_null(-1)
+        )
         print(
             f"  MEDLINE rows {med.height:,}; journal vocab {len(journal_names):,}; "
             f"languages {len(lang_names)}",

@@ -152,8 +152,10 @@ df -h /                                 # confirm
 Size the pod's disks for these at `pod.sh up` (`--disk`, `--volume`):
 
 - **E2 (PubMed), as the 10 M slice, streams.** The ETL consumes the
-  download shard by shard; peak disk is about 27 GB for the slice (69 GB
-  for the full catalog), download-bound at 1.5-2.5 h
+  download shard by shard. Planned peak is about 27 GB for the slice
+  (69 GB for the full catalog). Measured on the staged copy: 17 GB of
+  layout plus 0.4 GB of PMID lists kept in `_raw/`, and 57 min of
+  download-bound `convert` with MEDLINE streaming beside it
   ([datasets](datasets.md#disk-budget-and-the-slice)).
 - **E4 (KuaiRand-27K) is small on disk.** Measured on the staged copy:
   13.6 GB raw (the tarball and the category supplement), 4.5 GB of
