@@ -713,23 +713,19 @@ The sweeps of [`config/kuairand.yaml`](../../evaluation/config/kuairand.yaml)
 are `t_*` over C0–C3 and `b_*` over C4–C6. Bloom runs `t_cat1`, `t_tag`,
 `b_short` and `b_fresh`. The dataset is in no suite yet (roadmap E5).
 
-**Training** runs over the full 32 M table with `reuse_item_embeddings`,
-the one item table the trainer already supports. The table is 32,038,726
-× 128 fp32 = 16.4 GB. With its dense gradient and AdamW's two moments that
-is 65.6 GB before activations on the 80 GB A100; two separate tables would
-need 131 GB. That estimate is arithmetic, not a measurement. If it does not
-fit, lower `batch_size`. Every epoch also scores
-the full catalog for the val users, so `eval_max_users` bounds that
-cost. The final KuaiRand models are refit with `train_on_val=true` at the
-epoch count chosen on val, because next-day clicks drift and the val day
-is otherwise never trained on ([validation](../validation.md#seqrec-encoder)).
-The command for the run that picks the epoch count, not yet run:
-
-```bash
-uv run --directory evaluation train run data_dir=data/kuairand \
-    checkpoint_dir=data/kuairand/checkpoints/gsasrec-d128-shared \
-    embedding_dim=128 dropout=0.5 reuse_item_embeddings=true eval_max_users=4096
-```
+**Training** runs over the full 32 M catalog (32,038,725 items; 32,038,726 table rows with padding). At d64
+two separate tables fit (62.6 GB peak on the 80 GB H100). At d128 even one
+shared table (`reuse_item_embeddings`) does not: weight, two AdamW moments
+and the two dense gradients it receives in backward exceed 80 GB
+([probe](../artifacts/seqrec-encoder/k128-probe-oom/README.md)). Every epoch
+also scores the full catalog for the val users, so `eval_max_users` bounds
+that cost. The final
+KuaiRand model is refit with `train_on_val=true` at the epoch count chosen
+on val, because next-day clicks drift and the val day is otherwise never
+trained on ([validation](../validation.md#kuairand-temporal-drift)). The
+commands are the [train-only run](../artifacts/seqrec-encoder/k64-sasrec-ssm-logq/command.sh)
+that picks the epoch count and the
+[refit](../artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh).
 
 ```
 data/kuairand/

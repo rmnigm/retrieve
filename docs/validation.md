@@ -181,13 +181,14 @@ with the same eval code (ndcg@10 / recall@100):
 |---|---|---|---|
 | yambda-500m | 0.0846 / 0.1563 ([gate A](artifacts/seqrec-encoder/gate-a/)) | 0.0811 / 0.1486 ([gate A](artifacts/seqrec-encoder/gate-a/)) | 0.0814 / 0.1398 ([E0b](artifacts/seqrec-encoder/e0b-yambda-d256-bar/)) |
 | goodreads-work-id | 0.0350 / 0.1486 ([E0](artifacts/seqrec-encoder/e0-goodreads-bars/)) | 0.0361 / 0.1480 ([E0](artifacts/seqrec-encoder/e0-goodreads-bars/)) | 0.0354 / 0.1472: the checkpoint's stored `eval_quality.json`, **not re-scored** (E0 found the stored goodreads d64/d128 numbers equal to the re-score to 4 decimals) |
-| KuaiRand | pending | pending | not run |
+| KuaiRand | none: no published KuaiRand-27K checkpoint; calibrated against most-popular lists instead ([temporal drift](#kuairand-temporal-drift)) | not run | not run |
 
 ### Final models (the E1c recipe)
 
 gSASRec body, ffn 4×D, sampled softmax (in-batch 4096 + uniform 8192) with logQ: the trainer's
 defaults. Only D, epochs, patience and eval cadence vary (yambda: 100 epochs, eval every 2;
-goodreads: 75-epoch cap, eval every epoch; patience 10 on both).
+goodreads: 75-epoch cap, eval every epoch; patience 10 on both; KuaiRand: 48-epoch cap, eval
+every epoch, patience 10, then the train + val refit).
 
 | model | test ndcg@10 | R@100 | ndcg@100 | cov@10 | Δ vs bar (ndcg@10 / R@100) | best epoch (val ndcg@10) | s/epoch (median) | peak GB | W&B |
 |---|---|---|---|---|---|---|---|---|---|
@@ -197,12 +198,36 @@ goodreads: 75-epoch cap, eval every epoch; patience 10 on both).
 | [goodreads d64](artifacts/seqrec-encoder/e3-goodreads-d64-sasrec-ssm-logq/) | 0.0381 | 0.1447 | 0.0695 | 0.1232 | +0.0031 / **−0.0039** | 16 (0.0402); early stop at 26 | 49.4 | 6.7 | [338ohzq4](https://wandb.ai/pinkmeme/seqrec-encoder/runs/338ohzq4) |
 | [goodreads d128](artifacts/seqrec-encoder/g128-sasrec-ssm-logq/) | 0.0410 | 0.1518 | 0.0736 | 0.1577 | **+0.0049 / +0.0038** | 34 (0.0440); early stop at 44 | 59.0 | 8.1 | [fcian7qz](https://wandb.ai/pinkmeme/seqrec-encoder/runs/fcian7qz) |
 | [goodreads d256](artifacts/seqrec-encoder/g256-sasrec-ssm-logq/) | 0.0418 | 0.1530 | 0.0743 | 0.1616 | **+0.0064 / +0.0058** (bar not re-scored) | 13 (0.0463); early stop at 23 | 80.3 | 11.0 | [b42n4obv](https://wandb.ai/pinkmeme/seqrec-encoder/runs/b42n4obv) |
-| KuaiRand d64 | pending | | | | | | | | |
-| KuaiRand d128 | pending | | | | | | | | |
+| [KuaiRand d64](artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/): train + val day (`train_on_val=true`), 4 epochs | 0.0276 | 0.0063 | 0.0197 | 0.0009 | no bar; val-day most-popular 0.0314 / 0.0073, all-time most-popular 0.0027 / 0.0007 | none: 4 epochs fixed, the first k64's best epoch + 1 | 260.8 | 62.7 | [f11y636d](https://wandb.ai/pinkmeme/seqrec-encoder/runs/f11y636d) |
+| [KuaiRand d64, train only](artifacts/seqrec-encoder/k64-sasrec-ssm-logq/) (the first k64; drift evidence, not the model) | 0.0046 | 0.0016 | 0.0040 | 0.0006 | as above | 3 (0.0232); early stop at 13 | 249.4 | 62.6 | [xkk96p6k](https://wandb.ai/pinkmeme/seqrec-encoder/runs/xkk96p6k) |
+| KuaiRand d128 | not run: OOM in backward even with one table ([probe](artifacts/seqrec-encoder/k128-probe-oom/README.md)). The shared 32 M × 128 fp32 table (15.28 GiB) needs weight + two AdamW moments (45.8 GiB) plus two dense gradients held at once, input lookup and output scoring (30.6 GiB): ~78 of 79.18 GiB | | | | | | | | |
 
 Against the success rule ([decisions](decisions.md#sequential-encoder-devhstu)): five of six
-beat the bar on both metrics; goodreads d64 misses on R@100. yambda d128 and d256 were still
-improving at the 100-epoch cap. yambda d128's s/epoch includes 14 epochs slowed by a shared GPU.
+beat the bar on both metrics; goodreads d64 misses on R@100. KuaiRand is outside the rule (no
+bar). yambda d128 and d256 were still improving at the 100-epoch cap. yambda d128's s/epoch includes 14 epochs slowed by a shared GPU.
+
+### KuaiRand: temporal drift
+
+From the [diagnosis](artifacts/seqrec-encoder/k64-diagnosis/README.md) of the train-only k64
+(`diag.json`, `recency.json`; evals only, H100).
+
+- **Protocol.** Val targets are the clicks of 2022-05-06, the day after train ends; test targets are
+  2022-05-07's. The val day is never trained on without `train_on_val`. Every history is capped at
+  200. Targets per row, median (mean): val 118 (158), test 246 (320). recall@10 / recall@100
+  ceilings: val 0.183 / 0.732, test 0.096 / 0.505. Targets seen in train: val 65.9 %, test 44.7 %.
+  The 1.45× recall ceiling gap does not explain a 5× ndcg@10 gap (val 0.0232, test 0.0046).
+- **Calibration** (the same `evaluate`, full catalog, on test, ndcg@10 / R@100): most-popular over
+  train 0.0027 / 0.0007; most-popular over the val day's targets **0.0314 / 0.0073**; train-only
+  k64 0.0046 / 0.0016, and 0.0046 / 0.0032 on train-seen targets only, so cold items are not the
+  cause. The refit reaches 0.0276 / 0.0063: 6.0× / 3.9× the train-only model, still 12 % / 14 %
+  below yesterday's most-popular list.
+- **Curve.** Val ndcg@10 peaks at epoch 3 (0.0232) and drifts to ~0.020 while train loss keeps
+  falling (12.7 → 11.3) and coverage@10 rises (0.0007 → 0.0018): overfitting to the train
+  distribution, not a popularity collapse.
+- **Mechanism.** Next-day clicks follow trending items: 47.6 % of test targets were clicked on the
+  val day, 13.0 % only on the val day, 42.3 % in neither train nor the val day. logQ subtracts
+  all-time train popularity, the wrong prior for a later day. The train-only model is one day
+  stale on val and two on test; more capacity does not address that, training on the val day does.
 
 ### Recipe search (yambda-500m d64)
 
@@ -231,6 +256,8 @@ Artifacts: [gate A](artifacts/seqrec-encoder/gate-a/),
 | W6 cleanup equivalence (per-step training losses bit-identical before/after, both losses) | **passes** ([artifact](artifacts/seqrec-encoder/w6-cleanup-equivalence/)). H100, yambda-500m d64, 50 steps, seed 42, `compile=false`: the E1c `config.json` on the pre-cleanup trainer against the bare new `TrainConfig` defaults, and the Gate B gBCE `config.json` on both, give `==` per-step losses (50/50 each); the pre-cleanup trainer run twice is also identical to itself. CPU proxy (synthetic split, 18 steps per loss) bit-identical single-threaded; on 64 threads gBCE differs run to run in the last bit for the same code |
 | `torch.compile` of the body | 3.93-4.03 s/epoch compiled against 4.8-5.9 eager (shared-negative gBCE, 3 epochs each, interleaved); kept |
 | unit gates | `tests/training/test_encoder.py`: a left-padded row stays finite and padding content does not move the last position; `sampled_softmax_loss` equals a direct `F.cross_entropy` over explicit candidate lists, without and with a hand-built logQ (uneven explicit q; fails on a flipped sign or a corrected positive); `logq_correction` equals a hand-written `log(M·p + K/N)` vector for M = 2, K = 3, N = 4 (fails with the per-slot `/(M+K)`); `TrainConfig` rejects an unknown `loss`, and `normalize` or `logq` with `gbce`; defaults to `sampled_softmax` with `normalize` and `logq` on, `gbce` resolves both off; `TrainConfig.load` reads a `config.json` without `loss` as gbce, re-resolves `normalize`/`logq` when an override changes `loss` (both directions), keeps an explicit override and keeps the saved values when `loss` is unchanged (each case fails on its mutation, hand-checked) (CPU) |
+| `resume_every` (`_resume.pt` cadence) | `test_resume_is_written_every_n_epochs_and_on_the_last` pins the write epochs at `num_epochs` 8: N = 1 every epoch; N = 3 → 2, 5, 7; N = 3 with an early stop at 3 → 2, 3; N = 4 with a stop at 5 → 3, 5. Each of three mutations (`epoch %` for `(epoch + 1) %`, the last-epoch off-by-one, dropping `stopping`) fails it (CPU). Snapshot retention across a crash (N = 3, crash in epoch 4, `--resume` retrains from epoch 3 and loads the right best; a changed `checkpoint_dir` spelling; a crash before the first `_resume.pt`) is checked only by uncommitted CPU smoke runs. On the GPU only the default N = 1 has run (k64-refit). `_resume.pt` is still written in place, not atomically ([roadmap](roadmap.md#sequential-encoder-follow-ups-devhstu-not-scheduled)) |
+| `train_on_val` (final fit on train + val) | `test_train_on_val_rows_are_the_tail_of_history_then_targets` pins, on a hand-built 4-row `val.parquet` at L = 4, the rows (tail of `item_ids ++ targets`, left padding, more targets than L), `first`, the positions `target_mask` trains and the `target_frequencies` counts. `test_train_on_val_runs_no_val_eval`: a CPU `train()` never calls `evaluate`, writes `best_model.pt`, feeds the val rows after the train rows with `first` aligned, and stores `best_val_metric` `{}`. Each of six mutations (no `do_eval` guard, no `first` in the mask, val rows before train rows, no concat, an off-by-one in `first`, `if True` for the `{}` guard) fails a test (CPU). `train_on_val=false` unchanged: the new mask and `target_frequencies` `torch.equal` the old ones on 50 random left-padded tensors (uncommitted CPU check). GPU: k64-refit ran it (H100, 4 epochs). Rows with more than 200 val-day clicks keep their last 200, so 979,261 of 3,871,194 KuaiRand val-day transitions (25 %) are not trained |
 
 Unverified: `target_frequencies` (logQ) is checked only by hand on CPU; E2c ran `logq=true` on the GPU;
 resume (`--resume` has never run on the GPU).

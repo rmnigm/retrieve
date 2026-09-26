@@ -1,0 +1,28 @@
+{
+  "run": "k64-sasrec-ssm-logq",
+  "test": {
+    "ndcg@10": 0.0046,
+    "ndcg@100": 0.004,
+    "recall@10": 0.0002,
+    "recall@100": 0.0016,
+    "coverage@10": 0.0006
+  },
+  "bar": "none (no published KuaiRand-27K baseline)",
+  "best_epoch": 3,
+  "best_val_ndcg@10": 0.0232,
+  "epochs_run": 14,
+  "epoch_time_median_s": 249.44,
+  "first_epoch_s": 261.8,
+  "samples_per_s": 2241,
+  "peak_gpu_mem_gb": 62.6,
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "sm_mhz": [
+    1980.0
+  ],
+  "total_wall_s": 4407,
+  "wandb": "https://wandb.ai/pinkmeme/seqrec-encoder/runs/xkk96p6k",
+  "cold_targets": {
+    "test_targets_never_clicked_in_train": 0.5528,
+    "val_targets_never_clicked_in_train": 0.3405
+  }
+}

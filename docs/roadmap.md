@@ -160,6 +160,25 @@ in records, commits and code comments; they are not renumbered.
   output size `faster_repeat_interleave` accepts. A patched build may be
   measured only if a reviewer asks, labelled "not the official release".
 
+## Sequential encoder follow-ups (dev/hstu, not scheduled)
+
+- [ ] **KuaiRand d128 memory fix**: a single gather for the shared table's two
+  lookups (one dense gradient instead of two) or a sparse / row-wise
+  optimizer; d128 runs out of memory without it
+  ([probe](artifacts/seqrec-encoder/k128-probe-oom/README.md)).
+- [ ] **Atomic `_resume.pt` write** (R10 F1): it is written in place, so a
+  crash during the ~45 s write destroys the only resume state. Writing to a
+  temporary file and `os.replace` doubles its peak on disk (~98 GB at
+  KuaiRand d64).
+- [ ] **Window val-day clicks** for `train_on_val` users with more than 200
+  of them, as `train.parquet` is windowed: 25 % of KuaiRand's val-day
+  transitions are not trained
+  ([validation](validation.md#gates)).
+- [ ] **Launch overhead / CUDA graphs** in the training step.
+- [ ] **goodreads d64 R@100**: −0.0039 against the bar, the one miss of the
+  success rule ([final models](validation.md#final-models-the-e1c-recipe)).
+- [ ] **Merge dev/hstu into staging**: the user's call.
+
 ## Known defects, unscheduled
 
 - `bench campaign --suite all` raises `KeyError: 'quality'`: `SUITES` in
