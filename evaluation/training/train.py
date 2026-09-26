@@ -87,16 +87,14 @@ def logq_correction(
 
 def step_loss(
     model: Encoder,
-    batch: dict[str, torch.Tensor],
+    items: torch.Tensor,
     config: TrainConfig,
     num_items: int,
     p_train: torch.Tensor | None,
 ) -> torch.Tensor:
-    items = batch["items"]
     inputs, targets = items[:, :-1], items[:, 1:]
-    timestamps = batch["timestamps"][:, :-1] if "timestamps" in batch else None
     mask = targets != 0
-    queries, pos_ids = model(inputs, timestamps)[mask], targets[mask]
+    queries, pos_ids = model(inputs)[mask], targets[mask]
     table = model.get_output_embeddings().weight
     if config.loss == "gbce":
         shape = (pos_ids.shape[0], config.num_negatives)
@@ -126,11 +124,9 @@ def train(config: TrainConfig, resume: bool = False) -> None:
     model = build_encoder(config, num_items).to(device)
     if config.compile:
         model.body = torch.compile(model.body)
-    tensors = load_sequences(
-        str(data_dir / "train.parquet"), config.max_seq_length, config.use_time, device
-    )
-    p_train = target_frequencies(tensors["items"], num_items) if config.logq else None
-    n_batches = tensors["items"].shape[0] // config.batch_size
+    items = load_sequences(str(data_dir / "train.parquet"), config.max_seq_length, device)
+    p_train = target_frequencies(items, num_items) if config.logq else None
+    n_batches = items.shape[0] // config.batch_size
     batches_per_epoch = min(config.max_batches_per_epoch or n_batches, n_batches)
 
     optimizer = torch.optim.AdamW(
@@ -198,7 +194,7 @@ def train(config: TrainConfig, resume: bool = False) -> None:
         model.train()
         epoch_loss = torch.zeros((), device=device)
         ep_t0 = time.perf_counter()
-        batches = train_batches(tensors, config.batch_size)
+        batches = train_batches(items, config.batch_size)
         pbar = tqdm(range(batches_per_epoch), desc=f"Epoch {epoch}", mininterval=10)
         for batch_idx in pbar:
             with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=use_cuda):
@@ -271,9 +267,7 @@ def train(config: TrainConfig, resume: bool = False) -> None:
                 steps_not_improved = 0
                 if best_path is not None and best_path.exists():
                     best_path.unlink()
-                best_path = (
-                    ckpt_dir / f"{config.encoder}-ep{epoch}-{metric.replace('@', '')}{cur:.4f}.pt"
-                )
+                best_path = ckpt_dir / f"sasrec-ep{epoch}-{metric.replace('@', '')}{cur:.4f}.pt"
                 torch.save(model.state_dict(), best_path)
             else:
                 steps_not_improved += 1
@@ -384,7 +378,7 @@ def _parse_override(text: str) -> tuple[str, object]:
 @click.argument("overrides", nargs=-1)
 def run(config_path: str | None, resume: bool, overrides: tuple[str, ...]) -> None:
     """Train an Encoder. OVERRIDES are TrainConfig FIELD=VALUE pairs, VALUE parsed as JSON
-    when it parses (``encoder=hstu hidden_dim=256 compile=true``), else taken as a string."""
+    when it parses (``loss=gbce num_negatives=256 warmup_steps=0``), else taken as a string."""
     base = dataclasses.asdict(TrainConfig.load(config_path)) if config_path else {}
     config = TrainConfig(**{**base, **dict(_parse_override(o) for o in overrides)})
     train(config, resume=resume)

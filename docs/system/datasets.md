@@ -665,8 +665,7 @@ user.
   27k × 200 that one row per user would train.
 - **`timestamps`.** Every train/val/test row carries `timestamps`, the unix
   seconds (`time_ms // 1000`) of each `item_ids` entry, cut into the same
-  windows and tails; it covers the history, not `targets`. The staged copy
-  under `data/kuairand` predates the column: re-run `prep` to get it.
+  windows and tails; it covers the history, not `targets`.
 
 **`attrs`.** It writes `item_attrs_narrow.pt` `[32,038,725, 7, 4]` int64
 (7.2 GB), `clause_is_reverse_narrow.pt`, `attr_vocab.json` (every
@@ -1053,15 +1052,16 @@ time.
 
 ## Training — `evaluation/training/`
 
-One sequence `Encoder` with two block types plus the history → query-vector
-encoder the harness uses at eval time. It exists to produce the embeddings
+One sequence `Encoder` (the gSASRec body), two losses (gBCE and sampled
+softmax with logQ, the default), plus the history → query-vector encoder the
+harness uses at eval time. It exists to produce the embeddings
 the sequential benchmarks need. It imports `eval_datasets.{hub,layout}` and
 nothing from `bench`; the console script is `train`.
 
 | file | role |
 |---|---|
-| [`config.py`](../../evaluation/training/config.py) | `TrainConfig` dataclass + `save` / `load` (unknown keys dropped) / `num_items` |
-| [`model.py`](../../evaluation/training/model.py) | `Encoder`, `SASRecBlock`, `HSTUBlock`, `RelativeBias`, `BLOCKS`, `time_bucket`, `build_encoder(cfg, num_items)` |
+| [`config.py`](../../evaluation/training/config.py) | `TrainConfig` dataclass (defaults = the E1c recipe) + `save` / `load` (unknown keys dropped; no `loss` key means `gbce`) / `num_items` |
+| [`model.py`](../../evaluation/training/model.py) | `Encoder`, `SASRecBlock`, `build_encoder(cfg, num_items)` |
 | [`dataset.py`](../../evaluation/training/dataset.py) | `load_sequences` (the train split as left-padded `[U, L+1]` tensors on the device), `train_batches` (`randperm` slices) |
 | [`losses.py`](../../evaluation/training/losses.py) | `gbce_loss`, `sampled_softmax_loss` |
 | [`evaluate.py`](../../evaluation/training/evaluate.py) | chunked full-catalog scoring with its **own** recall / ndcg (`hits_at`, `recall_at_k`, `ndcg_at_k`): a checkpoint's reported quality must not move with the harness's metric code; `tests/training/test_encode.py` pins them to `bench.metrics` at 1e-9 |
@@ -1074,10 +1074,20 @@ nothing from `bench`; the console script is `train`.
 
 ```bash
 uv run --directory evaluation train run \
-    data_dir=data/yambda-500m/trainer checkpoint_dir=/scratch/ckpt/yambda-d64 \
-    embedding_dim=64 dropout=0.5 eval_every=2 wandb_enabled=false
-uv run --directory evaluation train run --config base.json encoder=hstu loss=sampled_softmax
+    data_dir=/data/yambda-500m/trainer checkpoint_dir=/scratch/ckpt/yambda-d64
+uv run --directory evaluation train run data_dir=/data/yambda-500m/trainer \
+    checkpoint_dir=/scratch/ckpt/yambda-d128 embedding_dim=128 ffn_hidden_dim=512
+uv run --directory evaluation train run data_dir=/data/yambda-500m/trainer loss=gbce num_negatives=256 warmup_steps=0
 ```
+
+The defaults are the E1c recipe
+([artifact](../artifacts/seqrec-encoder/e1c-yambda-d64-sasrec-ssm-logq/config.json)):
+d64, 2 blocks, 2 heads, ffn 256, dropout 0.5; `loss=sampled_softmax` with
+`normalize`, `temperature=0.05`, `num_negatives=8192`,
+`inbatch_negatives=4096`, `logq`; lr 1e-3, batch 256, L 200, warmup 1000,
+`compile`; 100 epochs, eval every 2, early stop on `ndcg@10` with patience
+10. The published gSASRec recipe (Gate B) is `loss=gbce num_negatives=256
+warmup_steps=0`.
 
 Arguments are `TrainConfig` `FIELD=VALUE` pairs, the value parsed as JSON
 when it parses and taken as a string otherwise; an unknown field is a usage
@@ -1089,39 +1099,29 @@ states, so a resumed run is reproducible, not merely restarted.
 
 ### The encoder
 
-`Encoder(items [B, L], timestamps [B, L] | None) -> [B, L, D]`:
-`item_embedding [N+1, D]` (row 0 is padding) → `in_proj` D→H (identity
-when `hidden_dim` is unset or equal to D) → `+ position_embedding` (sasrec
-only) → `+ time_gap_embedding(time_bucket(t_i − t_{i−1}))` (`use_time`) →
-dropout → `blocks` → `final_norm` (LayerNorm) → `out_proj` H→D. The item
-table stays `[N, D]` while the body can be wider (`hidden_dim`).
-`predict_last` takes position −1 (sequences are left-padded).
-`scoring_table()` is the `[N+1, D]` output table queries are scored
-against; with `normalize` both it and `predict_last` return unit vectors, so
-a dot product of the stored vectors is the cosine the loss trained on.
+`Encoder(items [B, L]) -> [B, L, D]`: `item_embedding [N+1, D]` (row 0 is
+padding) `+ position_embedding` → dropout → `blocks` (`num_blocks` ×
+`SASRecBlock`) → `final_norm` (LayerNorm). `SASRecBlock` is
+`nn.TransformerEncoderLayer` (gelu, `norm_first`, `batch_first`), the
+retired `GSASRec` body, so its state dicts load with `encoder.layers.N.`
+renamed to `blocks.N.`. `predict_last` takes position −1 (sequences are
+left-padded). `scoring_table()` is the `[N+1, D]` output table queries are
+scored against; with `normalize` both it and `predict_last` return unit
+vectors, so a dot product of the stored vectors is the cosine the loss
+trained on. The trainer reads only `item_ids` (and `targets` at eval); a
+`timestamps` column in the parquet is ignored.
 
 The attention mask is built once per forward: `causal & (key_valid | eye)`,
 `True` = attend. Real positions see exactly their real causal prefix; a
 left-padding row sees only itself, so no row is empty and nothing
 softmaxes to NaN (`tests/training/test_encoder.py`).
 
-| block | math |
-|---|---|
-| `sasrec` | `nn.TransformerEncoderLayer` (gelu, `norm_first`, `batch_first`); the retired `GSASRec` body, so its state dicts load with `encoder.layers.N.` renamed to `blocks.N.` |
-| `hstu` | HSTU (Zhai et al. 2024, eq. 1–3) with **softmax** attention: `U,V,Q,K = SiLU(f1(RMSNorm(x)))`, `A = softmax(QKᵀ/√d + rab)` through SDPA with the bias as an additive float mask, `x + dropout(f2(RMSNorm(AV) ⊙ U))`. No FFN (`ffn_hidden_dim` unused), no absolute positions |
-
-`RelativeBias` (one per HSTU block): a per-head bias for the relative
-position `i − j`, plus, under `use_time`, one for `time_bucket(t_i − t_j)`.
-`time_bucket` is `floor(log_{1.5}(1 + Δt))` clamped to `time_buckets − 1`
-(Δt in seconds). `use_time=True` needs a `timestamps` column (list[int64],
-unix seconds, aligned with `item_ids`) in the train/val/test parquet and
-fails at load without one; `use_time=False` ignores it.
-
 ### The losses
 
+`loss` picks one of two; `sampled_softmax` with logQ is the default.
 Negatives are uniform over `1..N`, drawn on the GPU inside the step.
 
-- `gbce` — gBCE as gSASRec publishes it: `num_negatives` negatives **per
+- `gbce` — gBCE as gSASRec publishes it (the published checkpoints' loss): `num_negatives` negatives **per
   position** (`[P, K]`, a `[P, K, D]` gather), the positive logit through
   the float64 calibration transform (`gbce_t`, `alpha = K / (N − 1)`), BCE
   over positive + K negatives. The `pow(−beta)` and `1/(x−1)` steps lose
@@ -1136,7 +1136,8 @@ Negatives are uniform over `1..N`, drawn on the GPU inside the step.
   `−inf`. `normalize` (default: on for this loss, off for gbce; recorded in
   `config.json`) L2-normalizes queries and items first. `TrainConfig` rejects
   `normalize=true` with `gbce` and any other `loss` value.
-  `logq` (default off; `TrainConfig` rejects it with `gbce`) subtracts
+  `logq` (default: on for this loss, off for gbce; `TrainConfig` rejects
+  it with `gbce`) subtracts
   `log q_j` from every candidate column after the temperature scaling,
   where `q_j = M·p_train(j) + K/N` is the expected number of times item j
   is drawn among the M + K candidates (M the in-batch candidates actually
@@ -1152,8 +1153,8 @@ Negatives are uniform over `1..N`, drawn on the GPU inside the step.
 
 Per epoch: `randperm` over the device-resident train tensors → bf16
 autocast forward → loss → grad-clip at 1.0 over all parameters → fused
-AdamW → linear warmup over `warmup_steps` (0 = none). `compile=true` wraps
-`Encoder.body` (blocks + final norm + out_proj) in `torch.compile`; the
+AdamW → linear warmup over `warmup_steps` (0 = none, default 1000). `compile=true` wraps
+`Encoder.body` (blocks + final norm) in `torch.compile`; the
 embedding lookup and the loss stay eager. Every `eval_every` epochs it
 evaluates on `val.parquet` by scoring the full catalog in
 `[B, eval_score_chunk]` chunks and merging top-k across chunks, optionally
@@ -1174,7 +1175,7 @@ benchmark harness, which pins it off for measurement determinism.
 ├── item_attrs.parquet     # copied from data_dir when present
 ├── eval_quality.json      # test-split metrics
 ├── train_metrics.json     # losses, val curve, test metrics, epoch_time_sec, samples_per_sec, gpu_name, sm_mhz, peak_gpu_mem_bytes
-├── {encoder}-ep{N}-{metric}{v}.pt   # the current best-epoch snapshot
+├── sasrec-ep{N}-{metric}{v}.pt   # the current best-epoch snapshot
 └── _resume.pt
 ```
 
