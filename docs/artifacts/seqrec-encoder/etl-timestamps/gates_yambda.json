@@ -1,0 +1,91 @@
+{
+  "item_id_map_sha256": {
+    "trainer.new": "9cd9535f624a48d70de244953b78f5a58cd7718f212935a7031259161e6c3b02",
+    "trainer": "9cd9535f624a48d70de244953b78f5a58cd7718f212935a7031259161e6c3b02",
+    "hub": "9cd9535f624a48d70de244953b78f5a58cd7718f212935a7031259161e6c3b02"
+  },
+  "maps_identical": true,
+  "train": {
+    "rows_new": 91806,
+    "rows_ref": 91806,
+    "rows_multiset_equal": true,
+    "rows_in_same_position": 91806,
+    "item_ids": {
+      "equal": true,
+      "sha256_new": "dfdb39692d5f5d1de77fafb5222215736b8e93718063f5801b8a75c0186b16b4",
+      "sha256_ref": "dfdb39692d5f5d1de77fafb5222215736b8e93718063f5801b8a75c0186b16b4"
+    },
+    "timestamps": {
+      "dtype": "List(Int64)",
+      "lengths_equal_item_ids": true,
+      "rows_with_decrease": 0,
+      "decreasing_steps": 0,
+      "min": 765,
+      "max": 25823595
+    }
+  },
+  "val": {
+    "rows_new": 45796,
+    "rows_ref": 45796,
+    "rows_multiset_equal": true,
+    "rows_in_same_position": 11,
+    "item_ids": {
+      "equal": false,
+      "sha256_new": "95965ec1043add119aa41829b6f327a02ceebddf6ea7086c6b7c223f85ab032a",
+      "sha256_ref": "04bbe46e751bc4cbf3b6426014185f3b5533118947ce605072a81c479a34aa52"
+    },
+    "targets": {
+      "equal": false,
+      "sha256_new": "aed0c94696f9011c23a102084ab4d8653f99b868f09e3ce193b689a2e3c214db",
+      "sha256_ref": "d5185c5387dafe36cc62985295f0e97e37ed25ef9feee955c2ece73cbf15fb02"
+    },
+    "timestamps": {
+      "dtype": "List(Int64)",
+      "lengths_equal_item_ids": true,
+      "rows_with_decrease": 0,
+      "decreasing_steps": 0,
+      "min": 5885,
+      "max": 25823595
+    }
+  },
+  "test": {
+    "rows_new": 45932,
+    "rows_ref": 45932,
+    "rows_multiset_equal": true,
+    "rows_in_same_position": 0,
+    "item_ids": {
+      "equal": false,
+      "sha256_new": "c20473bca157cb9bd54a964923aeddc1d45bf4c4217e47a65cd85db6712399da",
+      "sha256_ref": "05766f93bc48b03c771387ba887970a674334b82676bfc6aa0c182c124cc0da3"
+    },
+    "targets": {
+      "equal": false,
+      "sha256_new": "7c2948d02f90acc91c0c979839d2d31599f2649ec1a64376d0869a995e22eb45",
+      "sha256_ref": "592b42ad8b18db81bc3c615ee50ec9a2d241e8a95c7b1a789dcd6f6bbf02e1bc"
+    },
+    "timestamps": {
+      "dtype": "List(Int64)",
+      "lengths_equal_item_ids": true,
+      "rows_with_decrease": 0,
+      "decreasing_steps": 0,
+      "min": 3105,
+      "max": 25911795
+    }
+  },
+  "trainer_test_vs_hub_test": {
+    "rows_new": 45932,
+    "rows_ref": 45932,
+    "rows_multiset_equal": true,
+    "rows_in_same_position": 1,
+    "item_ids": {
+      "equal": false,
+      "sha256_new": "05766f93bc48b03c771387ba887970a674334b82676bfc6aa0c182c124cc0da3",
+      "sha256_ref": "9173d93cf179243e5f584bc2fdd76b6b9f38210ce2c7ba39e20565d85a84a7ec"
+    },
+    "targets": {
+      "equal": false,
+      "sha256_new": "592b42ad8b18db81bc3c615ee50ec9a2d241e8a95c7b1a789dcd6f6bbf02e1bc",
+      "sha256_ref": "0f239ef8b338e6f01ad89bf6c2adb17ee173d2acd8bfe886a13aab9f3ba440a1"
+    }
+  }
+}

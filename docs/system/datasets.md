@@ -163,14 +163,21 @@ Downloads `<variant>/sequential/listens.parquet`, runs `preprocess()`
 trainer consumes:
 
 ```
-<output>/train.parquet      item_ids: list[int64]
-<output>/val.parquet        item_ids, targets
-<output>/test.parquet       item_ids, targets
+<output>/train.parquet      item_ids, timestamps: list[int64]
+<output>/val.parquet        item_ids, timestamps, targets
+<output>/test.parquet       item_ids, timestamps, targets
 <output>/item_id_map.json   {raw_yandex_id: dense_int}
 ```
 
 Validation history is the train portion (already sliced to the last 200
-items in `preprocess`); test history is train ++ val, last 200. Adapted
+items in `preprocess`); test history is train ++ val, last 200.
+`timestamps` is the event time of each `item_ids` entry, same length and
+order; it covers the input history only, never `targets`. Yambda ships
+its time as **seconds since an anonymized dataset epoch** (UInt32,
+0..26,000,000, about 301 days), not unix time, so no conversion to unix
+is possible: the ETL only widens it to int64. The val/test row order is
+not reproducible run to run (it comes out of a `uid` join that is then
+dropped); the row contents are. Adapted
 from the Yambda paper's reference `sasrec/data.py`; only the
 listens-Listen+ branch is kept, the rest is replaced by the `training`
 package ([`evaluation/training/`](../../evaluation/training/)).
@@ -187,7 +194,14 @@ filters `is_read=true`, parses `date_added`, collapses editions to a
 `work_id` catalog, runs an iterative n-core, then time-splits via
 `timesplit.sequential_split_train_val_test`. Outputs `train/val/test.parquet`,
 `item_id_map.json`, `book_to_work.parquet` (reused by the filter eval),
-and `prep_log.json`.
+and `prep_log.json`. The parquets have the yambda columns: `item_ids`,
+`timestamps` (unix seconds of `date_added`, int64, same length and order
+as `item_ids`, the input history only) and, for val/test, `targets`.
+Nothing breaks ties between one user's events at the same second, and
+goodreads has many (bulk shelving), so the order inside a tie, and which
+tied items survive the 200-item cut, change from run to run; a re-run
+differs from the Hub copy only there
+([validation](../validation.md#trainer-inputs-with-timestamps-data-gates-not-citable)).
 
 > `prep` deliberately passes `drop_non_train_items=False`, mirroring
 > `yambda.preprocess`. Setting it `True` makes polars re-evaluate an
@@ -649,6 +663,10 @@ user.
   trainer reads only the last `max_seq_length + 1` items of a row. That
   gives 561,486 rows covering all 109.6 M train transitions, instead of the
   27k × 200 that one row per user would train.
+- **`timestamps`.** Every train/val/test row carries `timestamps`, the unix
+  seconds (`time_ms // 1000`) of each `item_ids` entry, cut into the same
+  windows and tails; it covers the history, not `targets`. The staged copy
+  under `data/kuairand` predates the column: re-run `prep` to get it.
 
 **`attrs`.** It writes `item_attrs_narrow.pt` `[32,038,725, 7, 4]` int64
 (7.2 GB), `clause_is_reverse_narrow.pt`, `attr_vocab.json` (every
@@ -714,8 +732,8 @@ uv run --directory evaluation train sasrec --data-dir data/kuairand \
 ```
 data/kuairand/
 ├── item_id_map.json            identity over 32,038,725 videos (video_id v → v+1), 619 MB
-├── train.parquet               item_ids: 200-transition windows, 561,486 rows
-├── val.parquet / test.parquet  item_ids (last 200), targets
+├── train.parquet               item_ids, timestamps: 200-transition windows, 561,486 rows
+├── val.parquet / test.parquet  item_ids (last 200), timestamps, targets
 ├── test_users.parquet          user_id of each test row
 ├── item_attrs_narrow.pt        [32,038,725, 7, 4] int64, -1 pad
 ├── clause_is_reverse_narrow.pt [7] bool = [F, F, F, F, T, F, F]

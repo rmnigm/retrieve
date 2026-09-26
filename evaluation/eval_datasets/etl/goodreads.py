@@ -566,17 +566,20 @@ def cmd_prep(args) -> int:
     # joins lazily through the streaming engine triggered list-op explosions
     # past the 129 GB cgroup limit.
     print("STEP compose train/val/test parquets", flush=True)
-    train_df = (
-        train_lf.select("uid", pl.col("item_id").list.tail(max_seq).alias("item_ids"))
-        .collect(engine="streaming")
-    )
+    train_df = train_lf.select(
+        "uid",
+        pl.col("item_id").list.tail(max_seq).alias("item_ids"),
+        pl.col("timestamp").list.tail(max_seq).alias("timestamps"),
+    ).collect(engine="streaming")
     print(f"  collected train_df (n_users={train_df.height})", flush=True)
     val_df = val_lf.collect(engine="streaming")
     print(f"  collected val_df (n_users={val_df.height})", flush=True)
     test_df = test_lf.collect(engine="streaming")
     print(f"  collected test_df (n_users={test_df.height})", flush=True)
 
-    train_df.select("item_ids").write_parquet(output / "train.parquet", compression="zstd")
+    train_df.select("item_ids", "timestamps").write_parquet(
+        output / "train.parquet", compression="zstd"
+    )
     print(f"  wrote train.parquet (n_users={train_df.height})", flush=True)
 
     val_join = (
@@ -585,14 +588,16 @@ def cmd_prep(args) -> int:
             on="uid",
             how="inner",
         )
-        .select("item_ids", "targets")
+        .select("item_ids", "timestamps", "targets")
     )
     val_join.write_parquet(output / "val.parquet", compression="zstd")
     print(f"  wrote val.parquet (n_users={val_join.height})", flush=True)
 
     test_join = (
         train_df.join(
-            val_df.select("uid", pl.col("item_id").alias("val_items")),
+            val_df.select(
+                "uid", pl.col("item_id").alias("val_items"), pl.col("timestamp").alias("val_ts")
+            ),
             on="uid",
             how="left",
         )
@@ -600,14 +605,18 @@ def cmd_prep(args) -> int:
             pl.when(pl.col("val_items").is_null())
             .then(pl.col("item_ids"))
             .otherwise(pl.col("item_ids").list.concat(pl.col("val_items")).list.tail(max_seq))
-            .alias("item_ids")
+            .alias("item_ids"),
+            pl.when(pl.col("val_items").is_null())
+            .then(pl.col("timestamps"))
+            .otherwise(pl.col("timestamps").list.concat(pl.col("val_ts")).list.tail(max_seq))
+            .alias("timestamps"),
         )
         .join(
             test_df.select("uid", pl.col("item_id").alias("targets")),
             on="uid",
             how="inner",
         )
-        .select("item_ids", "targets")
+        .select("item_ids", "timestamps", "targets")
     )
     test_join.write_parquet(output / "test.parquet", compression="zstd")
     print(f"  wrote test.parquet (n_users={test_join.height})", flush=True)

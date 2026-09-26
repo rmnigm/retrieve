@@ -146,6 +146,25 @@ explains the mechanism behind the kernel-only split.
 | openalex | 10 M slice staged locally (A100 box, 2026-09-26; OpenAlex fallback for Semantic Scholar SPECTER2, no API key), not on the Hub: `bench check` passes. One filter cell, `linr_v1_filter_mask`/triton clause `field_era`, eager, `--skip-perf` (`partial`): `recall_oracle@1000` 0.9959, held-out `recall@100` 0.505, `recall@1000` 0.741, n = 10,000. Scoped down from an initial 15 M encode after `bench/oracle.py`'s `item_embs.t().contiguous()` OOMed at that size (a second full fp32 copy on top of the item table; the real 768-d limit is ~11-12 M, not 15 M) — 10 M items resharded from the already-encoded 15 M vectors (`torch.equal`-verified), matching the pubmed precedent. Same power-of-two `D` limitation as pubmed for SilverTorch-`triton` and LiNR V2/V3; not yet validated ([artifacts](artifacts/e3-openalex/)) |
 | kuairand | staged locally (A100 box, 2026-09-26), not on the Hub: `bench check` passes, ETL and two filter protocols (target-derived, business-rule) built. No gSASRec checkpoint yet — GPU queued behind the other GPU work; not yet validated ([artifacts](artifacts/e4-kuairand/)) |
 
+### Trainer inputs with `timestamps` (data gates, not citable)
+
+The three trainer-input ETLs (yambda, goodreads, kuairand) write a
+`timestamps` column next to `item_ids` ([datasets](system/datasets.md#yambda)).
+Environment: the pod, CPU only, branch `dev/hstu-etl`
+([artifacts](artifacts/seqrec-encoder/etl-timestamps/): `gates.py` and its JSON).
+These are data-integrity gates, not results; nothing here is citable.
+
+| gate | state | notes |
+|---|---|---|
+| G-yambda: `item_id_map.json` | **passes**: `trainer.new`, `trainer` and the Hub copy are byte-identical, sha256 `9cd9535f…6c3b02` | `/data/yambda-500m/trainer.new/` (prep 97 s, peak RSS 15.7 GB) |
+| G-yambda: `item_ids` / `targets` row for row | **train passes** (91,806 rows, `equals`); **val/test fail row for row, pass as row multisets** (45,796 / 45,932 rows; 11 and 0 rows in the same position) | Mechanism: `cmd_prep` builds val/test with `uid` joins (no `maintain_order`, no sort) and then drops `uid`, so their row order is a fresh draw each run. The old `trainer/test` and the Hub `test.parquet` differ from each other the same way (same rows, 1 in the same position). Contents are unchanged; the order is not reproducible and nothing on disk may be aligned to it by position. Not fixed (out of this step) |
+| G-yambda: `timestamps` | **passes**: `List(Int64)`, lengths equal to `item_ids` on every row, 0 rows with a decrease in train/val/test | seconds since the anonymized Yambda epoch, not unix (the raw data has no unix anchor) |
+| G-goodreads: `item_id_map.json` | **passes**: `/data/goodreads-work-id/trainer/item_id_map.json` sha256-equal to the Hub copy, `dd6b8005…107265` (797,084 items) | raw fetched fresh (books + interactions_dedup only, via parallel ranged `curl`; `eval-data goodreads download` then verified sizes, gzip and wrote the sha256 manifest), `convert` 19.5 min, `prep` 58 s at peak RSS 24.2 GB |
+| G-goodreads: `test.parquet` vs the Hub `test.parquet` (`item_ids`, `targets`, both `list[int64]`) | **fails bit-exact; every difference is a timestamp tie**. Same 313,178 rows in the same user order; 274,254 rows identical; of the 38,924 that differ, 36,576 differ only in `item_ids` order inside runs of equal timestamps, 782 differ in which items fill the oldest end of the 200-item window, always inside the window's leading run of equal timestamps (equal length), and 2,398 differ only in `targets` order (same multiset). Nothing else differs | Mechanism: `cmd_prep` orders each user's events with `sort(["user_id", "ts"])` and nothing breaks ties, and goodreads timestamps tie often (bulk shelving, e.g. many rows at `2007-01-01 00:00`). The order inside a tie comes from the multithreaded scan/join and changes run to run; `list.tail(max_seq + 1)` on the full sequence then keeps a different subset when the cut lands in a tie. Not fixed (out of this step): a tiebreak would also move the output off the Hub copy |
+| G-goodreads: `timestamps` | **passes**: `List(Int64)` unix seconds, lengths equal to `item_ids` on every row, 0 rows with a decrease in train (744,332) / val (190,278) / test (313,178) | |
+| KuaiRand `timestamps` | **code only**: `tests/eval_datasets/test_kuairand.py` pins the column (unix seconds, same windows as `item_ids`); no data run, raw not fetched | the staged `data/kuairand` predates the column |
+| Harness suite on `dev/hstu-etl` | **green**, 235 passed / 4 skipped, CPU (`CUDA_VISIBLE_DEVICES=""`) | |
+
 ## Still unverified
 
 - Any compiled (`graph`-mode) measurement taken on a warm inductor cache after a library

@@ -1,0 +1,3 @@
+{"cmd": "uv run eval-data yambda prep --variant 500m --output-dir /data/yambda-500m/trainer.new", "rc": 0, "wall_s": 96.7, "peak_rss_gb": 15.71}
+{"cmd": "uv run eval-data goodreads convert", "rc": 0, "wall_s": 1167.6, "peak_rss_gb": 0.44}
+{"cmd": "uv run eval-data goodreads prep --processed-dir /data/_raw/goodreads-ucsd/processed --output-dir /data/goodreads-work-id/trainer", "rc": 0, "wall_s": 58.1, "peak_rss_gb": 24.15}

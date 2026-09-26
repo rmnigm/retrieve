@@ -34,6 +34,10 @@ CATEGORY_HEADER = ",".join(
 )
 
 
+def _unix(when: str) -> int:
+    return int(dt.datetime.fromisoformat(when).replace(tzinfo=SHANGHAI).timestamp())
+
+
 def _row(user: int, video: int, when: str, click: int, rand: int = 0) -> str:
     t = dt.datetime.fromisoformat(when).replace(tzinfo=SHANGHAI)
     return f"{user},{video},{t:%Y%m%d},{t:%H%M},{int(t.timestamp() * 1000)},{click},{rand},1"
@@ -164,12 +168,14 @@ def test_convert_keeps_the_needed_members_and_skips_statistics(staged):
 
 
 def test_prep_split_drops_non_clicks_and_random_exposures(staged):
-    train = pl.read_parquet(staged / "train.parquet")["item_ids"].to_list()
+    train = pl.read_parquet(staged / "train.parquet").rows()
     val = pl.read_parquet(staged / "val.parquet").rows()
     test = pl.read_parquet(staged / "test.parquet").rows()
-    assert train == [[1, 2], [2, 1]]
-    assert val == [([1, 2], [5])]
-    assert test == [([1, 2, 5], [3, 4]), ([2, 1], [6])]
+    u1 = [_unix(f"2022-05-0{d}T{h}:00") for d, h in ((1, 10), (2, 10), (6, 12))]
+    u2 = [_unix("2022-05-01T08:00"), _unix("2022-05-02T08:00")]
+    assert train == [([1, 2], u1[:2]), ([2, 1], u2)]
+    assert val == [([1, 2], u1[:2], [5])]
+    assert test == [([1, 2, 5], u1, [3, 4]), ([2, 1], u2, [6])]
     assert json.loads((staged / "item_id_map.json").read_text()) == {
         str(v): v + 1 for v in range(6)
     }
