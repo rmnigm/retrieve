@@ -164,8 +164,11 @@ def test_train_on_val_runs_no_val_eval(tmp_path, monkeypatch):
         tmp_path / "train.parquet"
     )
     pl.DataFrame(_VAL).write_parquet(tmp_path / "val.parquet")
-    calls = []
+    calls, seen = [], []
     monkeypatch.setattr(train_module, "evaluate", lambda *a, **k: calls.append(a) or {})
+    real_batches = train_module.train_batches
+    monkeypatch.setattr(train_module, "train_batches",
+                        lambda i, f, b: seen.append((i, f)) or real_batches(i, f, b))  # fmt: skip
     config = TrainConfig(data_dir=str(tmp_path), checkpoint_dir=str(tmp_path / "ckpt"),
                          max_seq_length=4, embedding_dim=8, num_blocks=1, num_heads=1,
                          ffn_hidden_dim=8, num_negatives=4, inbatch_negatives=4, batch_size=2,
@@ -174,3 +177,11 @@ def test_train_on_val_runs_no_val_eval(tmp_path, monkeypatch):
     train_module.train(config)
     assert calls == []
     assert (tmp_path / "ckpt" / "best_model.pt").exists()
+    val_items, val_first = load_val_transitions(
+        str(tmp_path / "val.parquet"), 4, torch.device("cpu")
+    )
+    items, first = seen[0]
+    assert torch.equal(items[4:], val_items)
+    assert first.tolist() == [0, 0, 0, 0, *val_first.tolist()]
+    metrics = json.loads((tmp_path / "ckpt" / "train_metrics.json").read_text())
+    assert metrics["best_val_metric"] == {}

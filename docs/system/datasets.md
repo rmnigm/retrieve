@@ -723,7 +723,7 @@ the full catalog for the val users, so `eval_max_users` bounds that
 cost. The final KuaiRand models are refit with `train_on_val=true` at the
 epoch count chosen on val, because next-day clicks drift and the val day
 is otherwise never trained on ([validation](../validation.md#seqrec-encoder)).
-The command, not yet run:
+The command for the run that picks the epoch count, not yet run:
 
 ```bash
 uv run --directory evaluation train run data_dir=data/kuairand \
