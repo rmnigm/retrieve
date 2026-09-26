@@ -1,0 +1,9 @@
+{
+  "video_features_basic.parquet": 32038725,
+  "log_standard_4.parquet": 92919789,
+  "log_standard_2.parquet": 68148288,
+  "log_standard_3.parquet": 93062020,
+  "log_standard_1.parquet": 68148288,
+  "log_random.parquet": 1186059,
+  "video_categories.parquet": 32038725
+}

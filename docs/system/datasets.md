@@ -25,7 +25,7 @@ gets is decided by whether it sets `checkpoint`:
 
 | shape | datasets | query embeddings come from | filters |
 |---|---|---|---|
-| **sequential** | yambda-500m, yambda-5b, goodreads | a trained SASRec checkpoint, encoded at eval time | goodreads only |
+| **sequential** | yambda-500m, yambda-5b, goodreads, kuairand | a trained SASRec checkpoint, encoded at eval time | goodreads, kuairand |
 | **text** | arxiv, arxiv-synth, yfcc10m, pubmed | pre-encoded embeddings on disk | yes |
 
 A third variant, **synthetic**, is a text dataset grown to arbitrary `N`
@@ -60,6 +60,7 @@ HuggingFace's `datasets` in the shared venv.
 | [`etl/yfcc.py`](../../evaluation/eval_datasets/etl/yfcc.py) | `yfcc` | `dl.fbaipublicfiles.com` (NeurIPS'23 Big-ANN filtered track) |
 | [`etl/yfcc_check_gt.py`](../../evaluation/eval_datasets/etl/yfcc_check_gt.py) | `yfcc-check-gt` | — (validates the shipped GT) |
 | [`etl/pubmed.py`](../../evaluation/eval_datasets/etl/pubmed.py) | `pubmed` | NCBI FTP MedCPT embeddings + MEDLINE baseline (~36M articles) |
+| [`etl/kuairand.py`](../../evaluation/eval_datasets/etl/kuairand.py) | `kuairand` | Zenodo KuaiRand-27K + category supplement (32M videos) |
 | [`etl/synth_arxiv.py`](../../evaluation/eval_datasets/etl/synth_arxiv.py) | `synth-arxiv` | an already-encoded arxiv directory |
 | [`common.py`](../../evaluation/eval_datasets/common.py) | — | shared attribute-synthesis numerics |
 | [`timesplit.py`](../../evaluation/eval_datasets/timesplit.py) | — | vendored sequential time-split |
@@ -567,6 +568,135 @@ largest catalog the harness as written can take at 768-d is ~15 M. Going
 above that is a harness decision (fp16 items + a chunked oracle), not an
 ETL one.
 
+### kuairand
+
+**Status: staged and layout-clean, no checkpoint.** `download` → `convert` →
+`prep` → `attrs` have run on the real data, and `bench check --dataset
+kuairand` is clean. The gSASRec checkpoint, the Hub publish and the filter
+cell need the GPU and have not run (roadmap E4). Nothing below is citable.
+The run records are in
+[artifacts/e4-kuairand/](../artifacts/e4-kuairand/).
+
+`uv run eval-data kuairand all --output-dir data/kuairand`, or the four
+subcommands in turn. Sources, both CC BY 4.0 on Zenodo and md5-checked by
+`download`:
+
+- `KuaiRand-27K.tar.gz` (9.89 GB): four standard logs, one random-exposure
+  log, `video_features_basic_27k.csv`, `user_features_27k.csv` and three
+  video statistics CSVs;
+- `kuairand_video_categories.csv` (3.69 GB, the 2026 supplement): a
+  four-level category path per video, keyed on `final_video_id`, `-124`
+  for an unknown level.
+
+`convert` streams the tarball once, straight into ZSTD parquet under
+`data/_raw/kuairand/processed/`. It unpacks nothing to disk and never
+writes the 21.7 GB of statistics CSVs, which nothing reads.
+`final_video_id` is the 27K `video_id`: the supplement has exactly one row
+for each of the 32,038,725 ids `0..N-1`, and its level-1 category equals
+the basic features' first `tag` on 64 % of videos, far above chance.
+
+**`prep`.** The positives are `is_click == 1` and `is_rand == 0`.
+`is_rand` is 0 on every standard-log row and 1 on every row of the random
+log, so the filter drops exactly the 1,186,059 random exposures. Those
+exposures come from a uniform intervention, not from the user's choice,
+and KuaiRand ships them for unbiased evaluation. They are therefore not
+training signal. The harness measures recall against its own oracle and
+does not use them.
+
+That leaves 122,052,542 clicks from 27,285 users, a median of 3,806 per
+user.
+
+- **Catalog.** The full catalog is the item space, whether or not a video
+  was ever clicked. `item_id = video_id + 1`, and `item_id_map.json` is
+  the identity map over all 32,038,725 videos, 12.06 M of them clicked in
+  train.
+- **Split.** `timesplit.sequential_split_train_val_test` runs on the local
+  dates of the logs (Asia/Shanghai, a fixed UTC+8). Test is 2022-05-07 and
+  05-08, val is 05-06, with 30-minute gaps.
+- **`test.parquet`.** One row per user: the last 200 items of
+  train ++ val as the history, and every test click as the targets. That
+  is 26,221 rows with a median of 246 targets; `test_users.parquet` holds
+  their `user_id`s.
+- **`train.parquet`.** Each user's train history is cut from the end into
+  non-overlapping 200-transition windows (`train_windows`), because the
+  trainer reads only the last `max_seq_length + 1` items of a row. That
+  gives 561,486 rows covering all 109.6 M train transitions, instead of the
+  27k × 200 that one row per user would train.
+
+**`attrs`.** It writes `item_attrs_narrow.pt` `[32,038,725, 7, 4]` int64
+(7.2 GB), `clause_is_reverse_narrow.pt`, `attr_vocab.json` (every
+vocabulary, the thresholds and the reference date) and
+`eval_split.parquet`. It takes 4 min and peaks at 37 GB RSS. The
+**two filter protocols** occupy disjoint clause slots, because the harness
+reads one `query_attrs_narrow` per query and a sweep only chooses which
+clauses are live:
+
+| clause | attribute | item slots | query value | mean pass rate |
+|---|---|---|---|---|
+| C0 | level-1 category (38) | 1 | **target-derived** | 3.6 % |
+| C1 | finer category, levels 4 → 3 → 2 in one space (801) | up to 3, deepest first | **target-derived** | 1.0 % |
+| C2 | `tag` (58) | up to 4, upstream order | **target-derived** | 4.5 % |
+| C3 | `upload_type` (38) | 1 | **target-derived** | 14.2 % |
+| C4 | `video_type` — **reverse** | 1 | **business**: "no ads" | 99.9 % |
+| C5 | duration ≤ {15, 30, 60, 180} s | every cap it fits under | **business**: the tightest cap at or above the user's median history duration | 52.9 % |
+| C6 | uploaded ≤ {3, 7, 14, 30} days before 2022-05-07 | every window it fits | **business**: "within 7 days" | 25.8 % |
+
+The pass rates are exact means over all 26,221 queries (`prep_log.json` →
+`attrs.mean_pass_rate`).
+
+- **Target-derived** values come from the held-out target's own
+  attributes, through `common.synthesize_qa_narrow`.
+- **Business-rule** values never look at the target. They are the rules a
+  feed would apply: hide ads, cap the length at what this user watches, and
+  keep it fresh.
+- **Ranges as equality.** C5 and C6 encode range predicates as equality
+  clauses: an item carries every threshold id it satisfies, so the query
+  value `j` means "≤ threshold `j`". The clause kernels support equality
+  only ([filtering](filtering.md#linr-paper-31--fixed-clause-schema-no-dsl)).
+- **Reverse and bloom.** C4 is the reverse clause, so it is excluded from
+  bloom sweeps.
+
+What the data ruled out:
+
+- **Upload month.** 90 % of videos were uploaded within 42 days of the
+  test start, so a month bucket is near-constant. Recency relative to the
+  test start replaces it.
+- **Author.** There are 8.8 M authors and the median author has one video,
+  so "not the target's author" would pass about 100 %.
+- **`music_type`.** Six values, one of them 65 %.
+
+The sweeps of [`config/kuairand.yaml`](../../evaluation/config/kuairand.yaml)
+are `t_*` over C0–C3 and `b_*` over C4–C6. Bloom runs `t_cat1`, `t_tag`,
+`b_short` and `b_fresh`. The dataset is in no suite yet (roadmap E5).
+
+**Training** runs over the full 32 M table with `reuse_item_embeddings`,
+the one item table the trainer already supports. The table is 32,038,726
+× 128 fp32 = 16.4 GB. With its dense gradient and AdamW's two moments that
+is 65.6 GB before activations on the 80 GB A100; two separate tables would
+need 131 GB. That estimate is arithmetic, not a measurement. If it does not
+fit, lower `--negs-per-pos` or `--batch-size`. Every epoch also scores
+the full catalog for the val users, so `--eval-max-users` bounds that
+cost. The command, not yet run:
+
+```bash
+uv run --directory evaluation train sasrec --data-dir data/kuairand \
+    --checkpoint-dir data/kuairand/checkpoints/gsasrec-d128-shared \
+    --embedding-dim 128 --dropout 0.5 --reuse-item-embeddings --eval-max-users 4096
+```
+
+```
+data/kuairand/
+├── item_id_map.json            identity over 32,038,725 videos (video_id v → v+1), 619 MB
+├── train.parquet               item_ids: 200-transition windows, 561,486 rows
+├── val.parquet / test.parquet  item_ids (last 200), targets
+├── test_users.parquet          user_id of each test row
+├── item_attrs_narrow.pt        [32,038,725, 7, 4] int64, -1 pad
+├── clause_is_reverse_narrow.pt [7] bool = [F, F, F, F, T, F, F]
+├── attr_vocab.json
+├── eval_split.parquet          target_id, query_attrs_narrow [7]
+└── prep_log.json
+```
+
 ### synth_arxiv
 
 Grows an encoded arxiv directory to arbitrary `N` (15M / 30M / 50M) by
@@ -648,6 +778,7 @@ EVAL_REPOS = {
     "goodreads-work-id": "pinkmeme/eval-goodreads-work-id",
     "yfcc10m":           "pinkmeme/eval-yfcc10m",
     "pubmed":            "pinkmeme/eval-pubmed",
+    "kuairand":          "pinkmeme/eval-kuairand",
 }
 ```
 
@@ -657,7 +788,9 @@ path; the entry exists so the local directory layout resolves like every
 other dataset's.
 
 `pinkmeme/eval-pubmed` is **registered but not published**; nothing is
-pushed to it before roadmap E2.
+pushed to it before roadmap E2. `pinkmeme/eval-kuairand` is likewise
+registered and not yet published (roadmap E4 publishes it with its
+checkpoint).
 
 `eval-data fetch` pulls a prepared dataset (optionally a subset of dims),
 `eval-data publish` pushes one, `eval-data publish-checkpoint` pushes a

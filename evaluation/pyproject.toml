@@ -42,6 +42,8 @@ torch = { index = "pytorch-cu128" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The suite tests the checkout it sits in, not whichever one the shared venv's .pth names.
+pythonpath = [".", "../retrieve/src"]
 markers = ["gpu: needs CUDA; skipped without it (tests/conftest.py)"]
 
 [tool.ruff]

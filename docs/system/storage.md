@@ -155,6 +155,13 @@ Size the pod's disks for these at `pod.sh up` (`--disk`, `--volume`):
   download shard by shard; peak disk is about 27 GB for the slice (69 GB
   for the full catalog), download-bound at 1.5-2.5 h
   ([datasets](datasets.md#disk-budget-and-the-slice)).
+- **E4 (KuaiRand-27K) is small on disk.** Measured on the staged copy:
+  13.6 GB raw (the tarball and the category supplement), 4.5 GB of
+  processed parquet and 8.3 GB of bench layout. Most of the layout is the
+  7.2 GB attribute tensor. `convert` streams the tarball, so the 46 GB
+  unpacked form never lands on disk. Its checkpoint adds one
+  32 M × 128 fp32 table, 16.4 GB
+  ([datasets](datasets.md#kuairand)).
 - **E3 (Semantic Scholar / OpenAlex) only fits as a stream.** The source is
   670–840 GB, so it can never be landed. The 50 M-paper slice is
   50 M × 768 × 4 B ≈ **154 GB** processed, which fits alone only via a pure
