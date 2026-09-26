@@ -34,6 +34,7 @@ EVAL_REPOS: dict[str, str] = {
     "goodreads-work-id": "pinkmeme/eval-goodreads-work-id",
     "yfcc10m":           "pinkmeme/eval-yfcc10m",
     "pubmed":            "pinkmeme/eval-pubmed",
+    "kuairand":          "pinkmeme/eval-kuairand",
 }
 
 # Upstream raw repos kept here only so their local target dirs are centralized.

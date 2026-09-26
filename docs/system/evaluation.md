@@ -243,13 +243,14 @@ in `set_query_params` and at forward.
 
 ## Config: one YAML per dataset + `suites.yaml`
 
-Seven files under [`evaluation/config/`](../../evaluation/config/):
+Eight files under [`evaluation/config/`](../../evaluation/config/):
 [`goodreads.yaml`](../../evaluation/config/goodreads.yaml),
 [`arxiv.yaml`](../../evaluation/config/arxiv.yaml),
 [`yambda-500m.yaml`](../../evaluation/config/yambda-500m.yaml),
 [`yambda-5b.yaml`](../../evaluation/config/yambda-5b.yaml),
 [`yfcc10m.yaml`](../../evaluation/config/yfcc10m.yaml) (in the `filter`
-suite), [`pubmed.yaml`](../../evaluation/config/pubmed.yaml)
+suite), [`pubmed.yaml`](../../evaluation/config/pubmed.yaml) and
+[`kuairand.yaml`](../../evaluation/config/kuairand.yaml)
 (in no suite yet) and
 [`suites.yaml`](../../evaluation/config/suites.yaml). `users_limit:
 10000` and the goodreads/arXiv sweeps, ks and batch sizes match the
@@ -792,7 +793,7 @@ never on `articles/`, `docs/artifacts/`, `evaluation/results/`,
 | `bench/test_report.py` | every column the tables read still comes out of `records.flatten`; every artifact emitted; the LaTeX structurally balanced with the thesis's labels and no unescaped `_`; a `failed` record excluded and a `partial` / `unstable` one marked; citability off by default and evidence beating `--gate`; an empty tree; a schema-1 record |
 | `bench/test_c4_gate.py` | the golden-comparison gate script, [`c4_gate.py`](../artifacts/evaluation-harness-v2/c4_gate.py), against synthesised schema-1 records |
 | `eval_datasets/test_layout.py` | the legacy pad-row rule, `apply_users_limit`, `validate_layout` clean on both layouts and flagging a short `eval_split`, a missing or swapped prefix sidecar, misaligned attrs |
-| `eval_datasets/test_yfcc.py`, `test_pubmed.py` | the two ETL loaders on synthetic fixtures |
+| `eval_datasets/test_yfcc.py`, `test_pubmed.py`, `test_kuairand.py` | the three ETL loaders on synthetic fixtures |
 | `training/test_encode.py` | `training.evaluate`'s recall / ndcg equal `bench.metrics` to 1e-9; `encode_split`'s cache hit / stale key |
 
 ## How to run
