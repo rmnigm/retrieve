@@ -26,33 +26,13 @@ in records, commits and code comments; they are not renumbered.
 ## Needs the user
 
 - **Citability of a narrowed campaign.** A run with a narrowed mode set is
-  recorded `status: partial` and reported NOT CITABLE. Whether a
-  deliberate, recorded narrowing (eager everywhere, graph on triton) should
-  read differently changes what the paper may claim.
-- **YFCC and fp16 scoring.** `PostfilterKNN` scores in fp16, so the exact
-  algorithms fail the `recall_oracle@1000 ≥ 0.99` gate on YFCC (0.964),
-  where the top-1000 spans about fifteen fp16 quanta. Options: fp32
-  scoring for exact algorithms (a library change, so after D1), or a
-  per-dataset gate.
-- **The compaction −1 tail contract.** Done at the kernel-opt pass: the
-  −1 fill now happens inside the scatter kernel (saves the launch and
-  most of the write traffic; `bloom_compact` −4.9 %). Still open: whether
-  to drop the −1-tail contract entirely (readers bound by `counts`,
-  parity compares `[:counts]`) for the remaining traffic — a further
-  contract change, not done here.
+  recorded `status: partial` and reported NOT CITABLE. User's call,
+  2026-09-26: decide after D1's actual report is in front of us, not in
+  the abstract — revisit this the moment `bench report` runs on real D1
+  output.
 - **E0**: the Semantic Scholar API key is an identity-bound form; E3
   is running the OpenAlex fallback instead, not waiting on this.
 - **A4**: merging `staging` into `main` is on hold until the user decides.
-- **KuaiRand checkpoint quality.** E4's gSASRec checkpoint (patience
-  shortened to 5 per the user's "usable embeddings, not best model" call)
-  stopped after epoch 18: val NDCG@10 0.0361, but test NDCG@10 0.0088 —
-  a 4× drop only partly explained (item cold start: 44.7% of test targets
-  were never clicked in train, against 65.9% for val; the rest
-  unexplained). Usable for the retrieval benchmark's plumbing, but a weak
-  model in absolute terms. Whether this is good enough for citable E5
-  numbers, or whether the val/test gap needs investigating first (or a
-  longer training budget), is the user's call, not assumed
-  ([validation](validation.md#datasets)).
 - **`.git` history size.** H1 (2026-09-26) removed 221 tracked
   JSON/JSONL files from `HEAD` going forward, but a plain `git rm` keeps
   their bytes in history — the `.git` directory itself doesn't shrink.
@@ -90,14 +70,41 @@ in records, commits and code comments; they are not renumbered.
   head-to-head saw zero false positives at `m_bits 1024`, so the sweep
   must go below it.
 
+## Phase L: library fixes after D1 (GPU, risky — changes `code_version`)
+
+Both decided by the user, 2026-09-26. Neither runs until D1 ends, for the
+same reason Q4/G-a waited: a `retrieve/src/retrieve/` change bumps
+`code_version` and invalidates any campaign in flight. Bundle these two
+together in one pass when they come up, the way G-a/G-d/Q4 were bundled,
+rather than two separate `code_version` bumps.
+
+- [ ] **L1: fp32 scoring for the exact algorithms.** `PostfilterKNN`
+  scores in fp16, so the exact algorithms fail the
+  `recall_oracle@1000 ≥ 0.99` gate on YFCC (0.964) — the top-1000 spans
+  about fifteen fp16 quanta there. Fixes the actual precision problem at
+  its source, for every dataset, not just YFCC. Needs its own parity gate
+  (bit-exact fp32 path) and a rerun of the affected quality numbers.
+- [ ] **L2: drop the compaction kernel's −1-tail contract.** The kernel-opt
+  pass already moved the −1 fill inside the scatter kernel (saves the
+  launch and most of the write traffic). Dropping the contract entirely
+  (no `-1` fallback; every reader bound strictly by `counts`) saves the
+  rest, but every caller needs auditing — parity already compares
+  `[:counts]`, which suggests this is safer than it looks, but confirm
+  rather than assume. Needs its own parity gate.
+
 ## Phase E: datasets
 
 - [ ] **E0: request the Semantic Scholar API key** (needs the user). Not
   blocking E3 any more: it is running the OpenAlex fallback instead.
   Still open if the user wants the proper Semantic Scholar source later.
-- [ ] **E5: run the campaign on the new datasets and extend the report**,
+- [ ] **E5: run the campaign on pubmed and openalex, extend the report**,
   including the unfiltered cells retired from the `quality` suite. Needs
-  D1 and E1-E4.
+  D1, E2, E3. **KuaiRand excluded for now** (user decision, 2026-09-26):
+  E4's gSASRec checkpoint is real but weak (val NDCG@10 0.0361, test
+  0.0088 — a 4× drop only partly explained by item cold start), and the
+  user chose not to run evals on kuairand until that's revisited, rather
+  than accept it or invest more GPU time now
+  ([validation](validation.md#datasets)).
 
 ## Phase F: the paper
 
@@ -226,9 +233,10 @@ in records, commits and code comments; they are not renumbered.
 D1 ─┬─> D2, D3 ─┐
     ├─> F2      ├─> F5 ─> G-c
     ├─> F4      │
-    └─> E5 <── E4 (E2, E3 done)
+    ├─> L1, L2  │
+    └─> E5 (E2, E3 done; E4 done but excluded from E5's scope)
 TF-3/TF-4 retune ─> rerun the head-to-head
 ```
 
-GPU steps still open: D1, D2, D3, E5, the encode/training of E3-E4, G-b.
-Everything else runs on CPUs beside them.
+GPU steps still open: D1, D2, D3, E5, L1, L2, G-b. Everything else runs
+on CPUs beside them.
