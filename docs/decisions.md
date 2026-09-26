@@ -89,13 +89,23 @@ decisions.
   `status: partial`, which the report treats as not citable; whether a
   deliberate, recorded narrowing should read differently is open (see the
   roadmap).
-- **Clocks cannot be locked** in the container. Records carry the sampled
-  `sm_mhz` under load and an `unstable` flag (window spread over 5 %). A
-  batch-size-1 comparison narrower than about 21 % is noise.
+- **Clocks cannot be locked** in the container. Records carry the SM clock
+  sampled under load after every timing window and an `unstable` flag
+  (window spread over 5 %). A batch-size-1 comparison narrower than about
+  21 % is noise.
 - **Timed official forwards run with `OfficialConfig(cache_plans=False)`**,
   so Meta's plan cache does not flatter repeated identical queries.
-- **Results storage**: JSONL records, `flat.csv` and reports in git; large
-  sidecars on a private Hugging Face repository (`bench upload`).
+- **Results storage** (user, 2026-09-26): no results in git. A run appends
+  JSONL to a local, gitignored results tree (one `write` + `fsync` per cell,
+  and resume reads it back without the network); a finished leg is
+  aggregated into Parquet (`results.parquet`, one row per perf entry — the
+  table every report reads) and published with its JSONL and samples to the
+  private Hub repo `pinkmeme/eval-results` (`bench upload`, `bench fetch`
+  back). Raw outputs behind a documented finding go to the same repo under
+  `artifacts/<plan>/`; what is neither cited nor needed for re-derivation is
+  dropped. Git keeps code, prose, gate reports, the golden cells (a test
+  fixture) and the sha256 of each Hub manifest. The `.git` history still
+  holds the removed files; rewriting it is a separate decision.
 
 ## Datasets
 

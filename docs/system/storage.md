@@ -63,7 +63,10 @@ not exposed to the container at any writable path (no block devices,
 ## What lives where, and why
 
 **`/workspace` — the git repository.** It is the only disk that survives a
-pod restart, and its contents are pushed to `origin` anyway.
+pod restart, and its contents are pushed to `origin` anyway. The harness's
+in-flight results tree (`results/` under `evaluation/`) lives inside the checkout for
+that reason: it is gitignored, so it is not pushed, but a restart mid-campaign
+does not lose the cells already written, and resume reads them locally.
 
 **The container disk — everything large, on one condition.** Datasets,
 worktrees that build things, inductor caches, campaign scratch, parity
@@ -73,12 +76,16 @@ spills.
 > **regenerable without human input** — a dataset re-fetchable from the
 > Hub, a venv from one `uv sync`, a cache by re-running the job. If losing
 > it would cost a decision, a measurement or an afternoon of someone's
-> judgement, it does not belong there. Records, decisions and code belong
-> in git and get pushed.
+> judgement, it does not belong there. Decisions and code belong in git
+> and get pushed; records belong on the Hub (`bench upload`).
 
 **The HF Hub — the archive.** Datasets live at `pinkmeme/eval-*` and
-checkpoints alongside them ([checkpoints.md](checkpoints.md)); verbose
-results go there too ([evaluation](evaluation.md#results-storage)).
+checkpoints alongside them ([checkpoints.md](checkpoints.md)); every
+finished results tree (records, samples, `results.parquet`) and the raw
+outputs behind documented findings live at `pinkmeme/eval-results`
+([evaluation](evaluation.md#results-storage),
+[hub-index.md](../artifacts/hub-index.md)). A results tree is finished —
+and may be deleted locally — once `bench upload --verify` has passed.
 Staging is **pull → use → prune → re-pull**, never hoard.
 
 A layout that follows the rule on a network-volume pod:
@@ -87,7 +94,7 @@ A layout that follows the rule on a network-volume pod:
 /data/          RETRIEVE_DATA_ROOT — staged datasets, checkpoints, _raw/ ETL input
 /venvs/         uv project environments (UV_PROJECT_ENVIRONMENT)
 /scratch/
-  ├── campaigns/  campaign records and eval outputs before they are promoted
+  ├── campaigns/  a results tree kept outside the checkout (`bench campaign --out`)
   ├── inductor/   TORCHINDUCTOR_CACHE_DIR, one subdir per concurrent job
   ├── parity/     parity spill .npz files (~600–680 MB per run)
   ├── hf/         HF_HOME for Hub download caches
@@ -177,7 +184,8 @@ Size the pod's disks for these at `pod.sh up` (`--disk`, `--volume`):
 A network volume is served from outside the pod and outlives it; the
 container disk is RunPod's *container disk*, recreated with the container.
 That asymmetry is the whole design: regenerable things on the big
-ephemeral disk, irreplaceable things in git and pushed to `origin`.
+ephemeral disk, irreplaceable things pushed off the box — code and prose to
+`origin`, records and raw outputs to the Hub.
 
 ## See also
 

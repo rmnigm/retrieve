@@ -108,13 +108,15 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    **3 windows** of `N = clamp(2 s / median_est, 1000, 5000)` calls, each
    call bracketed by CUDA events on the current stream, wall clock around
    the window with one sync at the end. From the window with the median
-   median: `median_ms, mean_ms, p95_ms, p99_ms, min_ms, iqr_ms, n`, two
+   median: `median_ms, mean_ms, trimmed_mean_ms, p95_ms, p99_ms, min_ms,
+   iqr_ms, n`, two
    outlier counts (`outliers_std` beyond 3σ, `outliers_tukey`), `qps =
    N·bs / wall_s` (closed-loop single client, `load: "closed_loop"`, the
    in-process analogue of the papers' client-side QPS), `host_gap_ms =
    wall/N − mean_gpu_ms` (diagnostic), `window_medians_ms` and `spread =
    (max − min) / median` of the three window medians; `spread > 0.05` sets
-   `unstable: true`. The per-call vector of the chosen window goes to the
+   `unstable: true`. After each window's sync one `nvidia-smi` SM clock
+   sample goes to `window_sm_mhz` (outside the timed calls). The per-call vector of the chosen window goes to the
    samples sidecar. `peak_fwd_mib` = `max_memory_allocated −
    allocated_before` over the first eager window only (graph mode
    allocates nothing). The first eager call runs under
@@ -157,8 +159,12 @@ the oracle fingerprint in the blob's file name; see
   report; `--profile` (`kernels`) is the kernel-time view.
 - **Clocks are compared load against load, never against idle.**
   `env.sm_mhz_idle` is the process-start sample, provenance only. Every
-  perf entry's `sm_mhz` is sampled right after its last timing window's
-  sync, under load; `env.sm_mhz_load` is the median of a cell's under-load
+  perf entry samples the SM clock right after each timing window's sync,
+  under load, into `window_sm_mhz`; its `sm_mhz` is the last of these (the
+  same sample as before `window_sm_mhz` existed). A throttle inside one
+  window shows up as that window's clock sample, next to its entry in
+  `window_medians_ms`; neither `unstable` nor `clocks_drift` reads
+  `window_sm_mhz`. `env.sm_mhz_load` is the median of a cell's under-load
   samples, and `env.clocks_drift` fires (and sets the record's `unstable`)
   when any of them is more than 5 % (`run.CLOCK_DRIFT`) from the process's
   *first* under-load sample. An idle sample reads low and would flag the GPU
@@ -166,6 +172,29 @@ the oracle fingerprint in the blob's file name; see
   lock clocks. Compare latencies across runs against `perf[].sm_mhz`.
   [c4_gate.py](../artifacts/evaluation-harness-v2/c4_gate.py) reads the
   schema-1 `env.sm_mhz` field.
+- **No L2 flush between calls.** `measure.latency` does not flush L2
+  (`triton.testing.do_bench` does by default). Consecutive calls take
+  consecutive batches of the query pool, so what depends on the query
+  (which index rows a batch reads) varies call to call, while what every
+  call reads stays in L2 as it would in serving. Cache state is therefore
+  the serving steady state, not a cold-cache worst case; a flushed number
+  could be higher on bandwidth-bound variants, and it is not measured. The
+  kernel microbenchmarks under `docs/artifacts/` (`q3/roofline.py`,
+  `kernel-opt/bench_kernels.py`) do not flush either.
+- **One sync per window, not per call.** `_time_calls` records a CUDA
+  event pair around each call and calls `torch.cuda.synchronize()` once
+  before the window and once after it, never inside the loop, so a sync
+  does not inflate the per-call numbers. The host is free to run ahead
+  unless the module itself syncs (the first eager call runs under
+  `set_sync_debug_mode("warn")` to catch that).
+- **No sub-launch-floor flag.** Per-call numbers under about 10 µs
+  would be mostly timer and launch overhead. The smallest `min_ms` in
+  the D1-a records (Hub subtree `d1-a`, 2106 perf entries) is 0.196 ms (`silvertorch`
+  triton graph, bs = 1), 20× above that, so no entry carries a flag for it.
+- **`trimmed_mean_ms`** is the mean after dropping `n // 10` calls from
+  each end of the chosen window: a central value that one-sided
+  interference on the shared GPU moves less than `mean_ms`. `mean_ms`
+  stays the papers' comparable number.
 - **Samples go to a JSONL sidecar** (`<name>.samples.jsonl`, one line per
   perf entry with the key block, `k`, `bs`, `mode`, `ms: [...]`), because
   parquet cannot be appended per cell. `bench report` reads it for the
@@ -186,16 +215,16 @@ cascade.
 | module | owns |
 |---|---|
 | [`measure.py`](../../evaluation/bench/measure.py) | `setup`, `warm_gpu_once`, `provenance` (GPU, driver, CUDA, torch, triton, `official_commit` — the installed `silvertorch`'s PEP 610 `direct_url.json` `vcs_info.commit_id`, `None` when it is not installed from git — commit, `dirty` = `subtree_dirty()` over `retrieve/src/retrieve`, `repo_dirty`, branch, `code_version` = the subtree's tree hash, or `files:<sha256>` of the sources on disk when the subtree is dirty, host, python, started), `clocks()` (one `nvidia-smi` sample), `timed_build`, `index_bytes` (Σ buffers, submodules included, deduplicated), `stats`, `latency(fn, bs=, mode=)` (§2.5 windows, IQR + outlier counts, `load: closed_loop`, `peak_fwd_mib`, the under-load `sm_mhz`), `graph_callable` (raises `NotCapturable` with the record's `reason`), `profile_once` |
-| [`records.py`](../../evaluation/bench/records.py) | what a record *is*: `SCHEMA_VERSION`, `KEY_FIELDS`, `resume_key`, `record_path`, `samples_path`, `append_record` (one `write` + `fsync`), `read_records` / `read_keys` (one torn trailing line tolerated), `flatten(results_dir) → flat.csv` (one row per perf entry, last record per key — what `report.py` reads) |
+| [`records.py`](../../evaluation/bench/records.py) | what a record *is*: `SCHEMA_VERSION`, `KEY_FIELDS`, `resume_key`, `record_path`, `samples_path`, `append_record` (one `write` + `fsync`), `read_records` / `read_keys` (one torn trailing line tolerated), `record_files`, `latest` (last record per key), `aggregate(results_dir) → results.parquet` (one row per perf entry — what `report.py` reads), `read_table` |
 | [`metrics.py`](../../evaluation/bench/metrics.py) | `accumulator(ks, device)` / `accumulate(acc, ids, targets, num_targets=None, ranked=False)` / `finalize(acc)` — recall, ndcg, precision, mrr at every `k` from one top-`k_max` list as float64 running sums on device; `ranked=True` scores against the oracle's own top-`k` prefix; `per_row`, `jaccard_at_k`. `training/evaluate.py` keeps its own frozen copy, pinned to agree (`training/test_encode.py`) |
 | [`algos.py`](../../evaluation/bench/algos.py) | the algorithm table: `ALGOS` name → library class (`LiNRV1`–`LiNRV4`, `SilverTorch`), `FILTER_KINDS`, `BACKENDS`, `FILTER_MODE` (`clause` → `exact`), `PATHS` **derived from `retrieve.interfaces.DISPATCH`**, `filter_backend` (`official` → `triton`), `build(algo, item_embs, k=, backend=, …)` (construct + `register_index`, ≈ 25 lines), `build_filter`, `is_valid_combo` |
 | [`config.py`](../../evaluation/bench/config.py) | `Dataset`, `Job`, `load_dataset`, `load_matrix` — the config matrix below |
 | [`inputs.py`](../../evaluation/bench/inputs.py) | `load_inputs` (dispatch to `training.encode.encode_split` or the `eval_datasets.layout` text readers; `users_limit` once, as a prefix), `sweep_qa`, `build_filters` (keyed by filter backend), `exact_filter`, `query_pool` |
 | [`oracle.py`](../../evaluation/bench/oracle.py) | the exact filtered oracle as blob v4, `attrs_digest`, `pass_counts`, `pass_rate`, `bloom_fp_rate` |
 | [`run.py`](../../evaluation/bench/run.py) | `run(jobs, out_dir=...)` — the cell loop; `MODES`, `QUALITY_CHUNK = 16`, `EXACT_ALGOS`, `PERF_STAT_KEYS`, `CLOCK_DRIFT` |
-| [`cli.py`](../../evaluation/bench/cli.py) | `bench run` / `campaign` / `check` / `upload` / `report` / `env` |
-| [`report.py`](../../evaluation/bench/report.py) | `bench report`: `flat.csv`, the thesis and paper tables as LaTeX, the figures, the methodology paragraph and `report.md`; the `ARTIFACTS` dispatch table, the citability verdict and the `PAPER_REPORTED` constants. See [Report](#report-reportpy) |
-| [`upload.py`](../../evaluation/bench/upload.py) | `bench upload`: publish a results tree to the HF results repo with a `MANIFEST.json` (provenance + a sha256 per file) and a generated README. See [Results storage](#results-storage) |
+| [`cli.py`](../../evaluation/bench/cli.py) | `bench run` / `campaign` / `check` / `upload` / `fetch` / `report` / `env` |
+| [`report.py`](../../evaluation/bench/report.py) | `bench report`: `results.parquet`, the thesis and paper tables as LaTeX, the figures, the methodology paragraph and `report.md`; the `ARTIFACTS` dispatch table, the citability verdict and the `PAPER_REPORTED` constants. See [Report](#report-reportpy) |
+| [`upload.py`](../../evaluation/bench/upload.py) | `bench upload`: publish a results tree (records, samples, a freshly aggregated `results.parquet`) to the HF results repo with a `MANIFEST.json` (provenance + a sha256 per file) and a generated README; `bench fetch`: one subtree back, checked against its manifest. See [Results storage](#results-storage) |
 
 ### Algorithms and the `PATHS` table
 
@@ -250,10 +279,9 @@ Nine files under [`evaluation/config/`](../../evaluation/config/):
 [`yambda-5b.yaml`](../../evaluation/config/yambda-5b.yaml),
 [`yfcc10m.yaml`](../../evaluation/config/yfcc10m.yaml),
 [`pubmed.yaml`](../../evaluation/config/pubmed.yaml) and
-[`openalex.yaml`](../../evaluation/config/openalex.yaml) (all three in
-the `filter` suite; pubmed and openalex at 768), and
-[`kuairand.yaml`](../../evaluation/config/kuairand.yaml)
-(in no suite yet) and
+[`openalex.yaml`](../../evaluation/config/openalex.yaml) and
+[`kuairand.yaml`](../../evaluation/config/kuairand.yaml) (all four in
+the `filter` suite; pubmed and openalex at 768, kuairand at 128), and
 [`suites.yaml`](../../evaluation/config/suites.yaml). `users_limit:
 10000` and the goodreads/arXiv sweeps, ks and batch sizes match the
 [golden cells](../../evaluation/golden/README.md), so the two stay
@@ -293,7 +321,7 @@ raise `ConfigError` naming the file.
 ```yaml
 # config/suites.yaml — a suite = cells run on every listed dataset × its dims
 filter:
-  datasets: [goodreads, arxiv, yfcc10m, pubmed]
+  datasets: [goodreads, arxiv, yfcc10m, pubmed, openalex, kuairand]
   dims: [128, 192, 768]             # optional; default: the dataset's dims (yfcc10m 192, pubmed 768 only)
   filter_kinds: [clause, bloom]     # none | clause | bloom
   ks: [100, 500, 1000]
@@ -350,6 +378,7 @@ bench campaign --suite filter|deep|all [--dataset D]* [--dim N]* [--mode M]*
 bench check    --dataset D [--dim N]* [--config-dir config]   # eval_datasets.layout.validate_layout
 bench upload   [--repo-id user/repo] [--results DIR] [--path-in-repo PREFIX] [--gate STEP]
                [--private|--public] [--verify] [--dry-run]
+bench fetch    --path-in-repo PREFIX [--repo-id user/repo] [--results DIR]
 bench report   [results] [--out DIR] [--gate STEP] [--only NAME]* [--dim 128] [--k 100]
                [--bs 1] [--compare-bs 16] [--mode eager|graph] [--backend triton]
                [--sweep W] [--batch-dataset D] [--budget-ms MS]*
@@ -390,6 +419,8 @@ still running after `--timeout` hours (default 6) is killed and recorded
 as `rc=timeout` (exit code 124, noted in its log); the exit code
 is the worst child rc, or 1 when a listed dataset expands to no groups or
 no child was launched at all (`--dataset` / `--dim` selecting nothing).
+After the last child the campaign aggregates the tree into
+`results/results.parquet` (`records.aggregate`, logged as `=== aggregated`).
 `results/_parity/` is deleted when the `(dataset, dim, algo)` group
 closes. A backend is the thing under test, so it gets
 the process: no dynamo cache, allocator arena or CUDA-graph pool outlives
@@ -470,9 +501,10 @@ died — and raises on a malformed line anywhere else.
 
 `results/<suite>/<dataset>-d<dim>.jsonl`, appended by the process the
 moment a cell finishes (`json.dumps` of one line, `allow_nan=False` — NaN
-and ±inf become `null` — then `write` + `fsync`). Nested, not wide:
-`polars.read_ndjson(path).explode("perf").unnest("perf")` flattens the
-perf entries.
+and ±inf become `null` — then `write` + `fsync`). Nested, not wide; the flat
+form is `results.parquet` (below). The tree is local working state —
+gitignored, read by resume, kept on the Hub once a leg finishes
+([Results storage](#results-storage)).
 
 | field | type | value |
 |---|---|---|
@@ -507,13 +539,15 @@ Perf entry:
 |---|---|
 | `k`, `bs`, `mode` | the variant; `mode ∈ {eager, graph}` |
 | `n`, `median_ms`, `mean_ms`, `p95_ms`, `p99_ms`, `min_ms`, `iqr_ms` | of the chosen window (median of the three window medians); quantiles linear-interpolated |
+| `trimmed_mean_ms` | mean of that window after dropping `n // 10` calls from each end |
 | `qps` | `n · bs / wall_s` of that window (closed-loop, one client) |
 | `host_gap_ms` | `wall / n − mean_ms` |
 | `outliers_std`, `outliers_tukey` | counts beyond 3 σ / the 1.5 IQR fences, never dropped |
 | `spread`, `unstable` | `(max − min) / median` of the three window medians; `> 0.05` |
 | `window_medians_ms` | the three medians |
+| `window_sm_mhz` | the SM clock sampled right after each window's sync, same order as `window_medians_ms`; `null` elements without CUDA; not in `results.parquet` |
 | `peak_fwd_mib` | eager only, first window: `max_memory_allocated − allocated_before` |
-| `sm_mhz` | the SM clock sampled right after the last window's sync, with the GPU still at its load clock — the per-variant value cross-run latency comparisons read, and the only clock `clocks_drift` looks at; `null` without CUDA |
+| `sm_mhz` | `window_sm_mhz[-1]`: the SM clock sampled right after the last window's sync, with the GPU still at its load clock — the per-variant value cross-run latency comparisons read, and the only clock `clocks_drift` looks at; `null` without CUDA |
 | `cache_plans` | on every entry: `false` on `silvertorch`/`official` (`run.perf` replaces `module.official` with `cache_plans=False` before the first variant, so every timed forward pays the CPU expression parse), `null` on backends without a plan cache |
 | `load` | `"closed_loop"` |
 | `kernels` | `--profile`, eager only: top-8 CUDA kernels `{kernel, us, calls}` |
@@ -535,20 +569,37 @@ every cell; a doc or plan edit invalidates none. `records.read_keys(path)`
 rebuilds the key from a record as `resume_key({k: rec[k] for k in
 KEY_FIELDS}, rec["env"]["code_version"])` and keeps the last status per
 key; a cell is skipped when that status is `ok`. `--force` runs everything
-and appends. `records.flatten(results_dir)` writes `flat.csv` — the last
-record per key of every `<suite>/*.jsonl`, one row per perf entry, the key
-block + record scalars + `env_*` + `heldout_*` / `oracle_*` / `quality_*` +
-`perf_*` columns — the one table `report.py` reads.
+and appends. Resume reads the local JSONL only, never the network: a
+campaign resumed on a box that lost its tree first restores it with
+`bench fetch --path-in-repo <leg>` and then appends to the fetched files.
+
+`records.aggregate(results_dir)` writes `results.parquet` — `records.latest`
+(the last record per key of every `<suite>/*.jsonl`), one row per perf entry
+(one row with null perf columns when the record has none) — the one table
+`report.py` reads. Columns, in order: the key block (`params` as canonical
+JSON); the record scalars `status, path, n_items, n_queries, n_kept,
+n_queries_heldout, n_queries_oracle, n_targets_in_filter, pass_rate,
+bloom_fp_rate, k_max, build_s, index_mib, filter_mib, unstable,
+memory_reserved_mib, elapsed_s, schema_version, stage, error,
+partial_reasons` (a list); `env_code_version, env_commit, env_dirty, env_gpu,
+env_sm_mhz_load, env_clocks_drift, env_git_branch`; `heldout_<metric>@k`,
+`oracle_<metric>@k` and the non-dict `quality_*` entries (`quality_parity`,
+`quality_jaccard_vs_first@k`, `quality_score_max_abs_diff`); `perf_<key>` for
+every perf-entry key except `window_medians_ms`, `window_sm_mhz` and
+`kernels`. Types are inferred per column (int, double, bool, string,
+list<string>), so a column that mixes types across records fails the
+aggregation instead of reaching a table; the column set is the union over
+the records, so it varies with `ks` and schema version. Parquet over CSV
+because the table is typed (no string round trip to re-guess `True`, `""` or
+`1e-05`), smaller than the JSONL it comes from (D1-a: 1.4 MB → 0.2 MB), and read in one call by polars, pyarrow or DuckDB.
 
 Two dirty flags, both `null` outside a git checkout: `env.dirty` is
 `git status --porcelain -- retrieve/src/retrieve` (untracked files
 included — a new kernel module is measured code too) and is the flag
 `report.py` refuses to cite; `env.repo_dirty` is the tracked
 files anywhere else (`--untracked-files=no`, informational: a docs or
-harness edit). `evaluation/results/` is excluded from `repo_dirty`: the
-harness's outputs are data — committed and mirrored to HF by
-`bench upload` — so a campaign appending to a
-committed JSONL is not a dirty tree.
+harness edit). The results tree is gitignored, so a campaign appending to
+its JSONL never flips it.
 
 ### Oracle blob v4
 
@@ -580,11 +631,12 @@ positives never leak into ground truth. Bloom pass rates are not cached.
 ## Report (`report.py`)
 
 `bench report <results>` writes `<results>/report/` (or `--out DIR`):
-`flat.csv` first (`records.flatten`, the artifact that ships
+`results.parquet` first (`records.aggregate`, the artifact that ships
 with the paper), then one file per artifact, then `report.md`. Every table
-and figure is built from `flat.csv`; `records.read_records` is read a
-second time for the provenance block alone, because `schema_version`,
-`partial_reasons`, `stage` and `error` are not columns of `flat.csv`.
+and figure is built from `results.parquet`; `records.latest` is read a
+second time for the provenance block alone, which needs the nested `env`
+the table flattens to seven columns. To report on a leg that is no longer
+on disk, `bench fetch` it first.
 
 | artifact (`--only` name) | file | what it is |
 |---|---|---|
@@ -645,22 +697,29 @@ compiled.
 
 ## Results storage
 
-Three destinations, decided by size and by how expensive the file is to
-recreate. The records are the product of this project and the only thing the
-paper may cite (CLAUDE.md rule 2), and the box they are produced on is rented
-and its disks are small ([storage](storage.md)), so where each output goes is a
-rule, not a habit.
+Nothing the harness writes is committed. The records are the product of this
+project and the only thing the paper may cite (CLAUDE.md rule 2); the box they
+are produced on is rented and its disks are small ([storage](storage.md)); and
+126 cells with their latency vectors are 78 MB, which is not a thing to keep
+next to the code. So a results tree has two homes, one for each phase of its
+life, and git holds only the pointer.
 
 | what | where | why |
 |---|---|---|
-| `results/<suite>/<dataset>-d<dim>.jsonl` (the records), `flat.csv`, `report/` (`*.tex`, `report.md`), the numbers behind [validation](../validation.md) | **git**, under `docs/artifacts/<plan>/` while a step is in flight and `evaluation/results/` for the campaign | kilobytes to a few MB (about 10 KB per record), line-diffable, and they are the evidence |
-| `*.samples.jsonl` (the per-call latency vectors), `.perkernel/` profiles, figures | **HF Hub**, `pinkmeme/eval-results`, private | about 60× the size of the records they belong to, and nobody reads a diff of them. Regenerable only by re-running the cell on the GPU |
-| `results/_parity/*.npz` (600–680 MB per run), `results/_logs/` | **nowhere** — deleted | rewritten by every run, and the parity *verdict* (`jaccard_vs_first@k`, `score_max_abs_diff`) is already inside the record. `.gitignore` covers both directories and `bench upload` skips every `_`-prefixed path part |
+| `results/<suite>/<dataset>-d<dim>.jsonl` (the records) and `*.samples.jsonl` while a leg runs | **local disk**, `results/` under `evaluation/` (gitignored; `--out` elsewhere) | the working state: `append_record` writes a cell and `fsync`s it, resume reads it back, and neither may depend on the network. Inside the repo checkout, which on a pod is `/workspace` and survives a restart |
+| the same records and samples, plus `results.parquet`, once a leg finishes | **HF Hub**, `pinkmeme/eval-results/<leg>/`, private (`bench upload`) | the archive. The JSONL goes up next to the Parquet because it is the lossless form: failed records with their tracebacks, superseded records, the nested `quality` and `env`, `window_medians_ms`, `kernels` — everything the flat table drops — and it is what resume and the manifest's provenance read |
+| `report/` (`*.tex`, figures, `report.md`) behind a gate | **git**, under `docs/artifacts/<plan>/` — without its `results.parquet` (gitignored), which `bench report` regenerates from the Hub copy | small, reviewed, and what a gate's text points at |
+| raw dumps behind a documented finding (kernel timings, probe outputs, ETL logs) | **HF Hub**, `pinkmeme/eval-results/artifacts/<plan>/<same path>` | the finding lives in prose in [validation](../validation.md) and the system pages; the dump is only for re-derivation |
+| `results/_parity/*.npz` (600–680 MB per run), `results/_logs/` | **nowhere** — deleted | rewritten by every run, and the parity *verdict* (`jaccard_vs_first@k`, `score_max_abs_diff`) is already inside the record. `bench upload` skips every `_`-prefixed path part |
 
-Both halves stay in step: the Hub copy of a subtree carries the sha256 of every
-file it holds, and that manifest is committed with the artifacts
-([results-storage/](../artifacts/evaluation-harness-v2/results-storage/)),
-so git can prove what the Hub has without downloading it.
+A leg is finished when its records are on the Hub and verified: `bench upload
+--results results --path-in-repo <leg> --verify`, after which the local tree
+may be deleted. The Hub subtree's `MANIFEST.json` carries the sha256 of every
+file it holds, and git records the sha256 of each manifest in
+[hub-index.md](../artifacts/hub-index.md), so git can prove
+what the Hub has without downloading it. The golden cells are the one
+exception: they are a gate fixture the tests read, and stay in
+[`evaluation/golden/`](../../evaluation/golden/README.md).
 
 ### `bench upload`
 
@@ -668,23 +727,28 @@ One invocation publishes one `--path-in-repo` subtree of one results tree:
 
 ```bash
 uv run bench upload --results results --path-in-repo d1-a --verify
-uv run bench upload --results ../docs/artifacts/official-silvertorch/b3/e2e \
-    --path-in-repo b3 --dry-run
+uv run bench upload --results /scratch/tmp/h1-hub/artifacts/kernel-opt \
+    --path-in-repo artifacts/kernel-opt --dry-run
 ```
 
 `--repo-id` defaults to `upload.RESULTS_REPO` = `pinkmeme/eval-results` — the
 registry entry for *results*, beside `eval_datasets.hub.EVAL_REPOS` for
-*datasets*. The listing is `upload.files`: the tree minus anything under a
-`_`-prefixed path part and minus the two files a previous upload generated.
-Everything goes up in **one commit** (`create_commit`, so a failure leaves no
-half-published subtree), together with:
+*datasets*. When the tree holds records (`records.record_files`: any
+`<suite>/*.jsonl`), the upload first regenerates `results.parquet` from them,
+so the Hub copy never carries a table older than its records. The listing is
+`upload.files`: the tree minus anything under a `_`-prefixed path part and
+minus the two files a previous upload generated. Everything goes up in **one
+commit** (`create_commit`, so a failure leaves no half-published subtree),
+together with:
 
 - **`<prefix>/MANIFEST.json`** — `report.provenance` over the records being
   uploaded (`code_version`, `commit`, `git_branch`, `schema_version`, `gpu`,
   `host`, the run window, the status counts, the `unstable` count, the gate and
   the citability verdict with its reasons) plus `{path, bytes, sha256}` per
   file. It is the same function `bench report` calls, so the Hub copy cannot
-  claim more than the tables would.
+  claim more than the tables would. A real upload prints the manifest's own
+  sha256, the value [hub-index.md](../artifacts/hub-index.md)
+  records.
 - **`README.md` at the repo root** — regenerated from *every* manifest in the
   repo (the existing ones are fetched first), so a second upload does not drop
   the first subtree from the front page. Generated from the records, never
@@ -706,10 +770,21 @@ VM's local disk, never `/workspace`) and checks every sha256 against the
 manifest; a mismatch is a non-zero exit. An upload path that has never been
 downloaded is not a backup.
 
-`tests/bench/test_upload.py` pins all of it with no network: the scratch
+### `bench fetch`
+
+`bench fetch --path-in-repo d1-a [--results results]` is the way back: it
+downloads the subtree into a temp directory, checks every file against the
+subtree's `MANIFEST.json`, and copies the files into the results tree. It
+refuses — before copying anything — when the tree already holds a *different*
+copy of one of them (a live campaign's JSONL is never overwritten); identical
+files are fine, so fetching twice is a no-op. A fetched tree is an ordinary
+results tree: `bench report` reads it and `bench run --resume` appends to it.
+
+`tests/bench/test_upload.py` pins both with no network: the scratch
 exclusion, the checksums, the four ways evidence beats `--gate`, the generated
-README, the round-trip check catching a changed byte, and the commit's operation
-list with `private=True`.
+README, the round-trip check catching a changed byte, the commit's operation
+list with the regenerated `results.parquet` and `private=True`, a fetched tree
+that resume can read, and a fetch refusing to overwrite a different local copy.
 
 ## Inputs (`inputs.py`)
 
@@ -773,8 +848,8 @@ until roadmap Q4. One ruff version everywhere: `ruff==0.15.6` in the
 workspace `dev` group and the same `rev` in `.pre-commit-config.yaml`, whose
 hooks run `ruff check` on `retrieve/` and `evaluation/`, `ruff format` on
 `retrieve/` (`evaluation/` is not format-clean yet), the merge-conflict,
-large-file (10 MB), end-of-file and trailing-whitespace hooks (the last two
-never on `articles/`, `docs/artifacts/`, `evaluation/results/`,
+large-file (1 MB — records and dumps belong on the Hub), end-of-file and
+trailing-whitespace hooks (the last two never on `articles/`, `docs/artifacts/`,
 `evaluation/golden/`), and `scripts/check_doc_links.py`.
 
 | file | checks |
@@ -782,17 +857,17 @@ never on `articles/`, `docs/artifacts/`, `evaluation/results/`,
 | `test_dependency_direction.py` | every `import` / `from` in `bench/`, `training/`, `eval_datasets/` resolved with `ast`: `bench` → `training.encode`, `eval_datasets.layout`; `training` → `eval_datasets.{hub,layout}`; `eval_datasets` → nothing; the library only from `bench`, through `retrieve` (the algo and filter classes) and `retrieve.interfaces` (`DISPATCH`, `FilterModule`). The walk must see more than 25 files, and an allow-list entry no import uses fails as stale |
 | `test_env_readers.py` | every `os.environ.get` / `os.getenv` / `os.environ[...]` of a `RETRIEVE_*` name under `evaluation/` sits in its owner (`RETRIEVE_DATA_ROOT`: `eval_datasets/hub.py`, read through `data_root()`); same file-count and stale-owner guards |
 | `bench/test_paths.py` | `PATHS == derive(DISPATCH)`: the derived table equals the harness's expected paths, the grid is complete, `DISPATCH` names every algo × backend |
-| `bench/test_records.py` | `resume_key` canonical and `code_version`-sensitive; append / read round trip; one torn trailing line; `flatten` one row per perf entry, last record per key |
-| `bench/test_measure.py` | `stats` vs numpy, `latency` control flow, `index_bytes` dedup, `provenance` git fields, `official_commit` from PEP 610 (git, local dir, no `direct_url.json`, not installed), `dirty` scoped to the library subtree with the `files:` fallback, `repo_dirty` excluding `results/`, `atomic_write`, `clocks` shape, `graph_callable` refusals |
+| `bench/test_records.py` | `resume_key` canonical and `code_version`-sensitive; append / read round trip; one torn trailing line; `aggregate` one row per perf entry, last record per key, typed columns |
+| `bench/test_measure.py` | `stats` vs numpy, `latency` control flow, `index_bytes` dedup, `provenance` git fields, `official_commit` from PEP 610 (git, local dir, no `direct_url.json`, not installed), `dirty` scoped to the library subtree with the `files:` fallback, `atomic_write`, `clocks` shape, `graph_callable` refusals |
 | `bench/test_metrics.py` | padding / IDCG / denominator contracts; running sums equal per-row means to 1e-9; `jaccard_at_k` |
 | `bench/test_algos.py` | `build` on every `(algo, filter_kind)` torch cell: the `k` setter slices the top-k and changes no buffer; the filter submodule in `index_bytes`; `set_query_params`; build refusals |
 | `bench/test_config.py` | job counts and keys per suite on `tests/bench/data/{mini,text,suites}.yaml`; `disabled`; build/query split; seeds; narrows and `Job.narrowed`; the real `goodreads` / `arxiv` d128 cell sets; every `config/*.yaml` × every suite through `load_matrix` |
 | `bench/test_inputs.py` | `load_inputs` on the conftest writer, `users_limit` once, prefix and row-count checks, the legacy layout loading equal to the modern one, misalignment raising, `attrs_digest`, `sweep_qa`, filters by filter backend, `query_pool` |
 | `bench/test_oracle.py` | padding, v4 fields and arithmetic, fingerprint in the file name, an unreadable blob rebuilt, bloom FP rate, `code_version` |
 | `bench/test_run.py` | end to end on the tiny fixture, both modes (`graph` = the CPU null entry): record schema, resume, `code_version` invalidation, `partial`, a failed cell + continue, a sticky CUDA error, the quality gate, the parity spill, reachable-target masking, the plan cache off through `OfficialConfig` |
-| `bench/test_cli.py` | `bench run` via `CliRunner`, a real one-child `bench campaign`, a faked timed-out child, zero cells → exit 1, `bench report` over the campaign's own records, `bench env`'s JSON keys |
-| `bench/test_upload.py` | `bench upload` with no network: `_logs/` and `_parity/` never listed, the manifest's sha256 per file, evidence beating `--gate` four ways, the generated README over several subtrees, `verify` catching a changed byte, the commit's operations and `private=True` |
-| `bench/test_report.py` | every column the tables read still comes out of `records.flatten`; every artifact emitted; the LaTeX structurally balanced with the thesis's labels and no unescaped `_`; a `failed` record excluded and a `partial` / `unstable` one marked; citability off by default and evidence beating `--gate`; an empty tree; a schema-1 record |
+| `bench/test_cli.py` | `bench run` via `CliRunner`, a real one-child `bench campaign` ending in `results.parquet`, a faked timed-out child, zero cells → exit 1, `bench report` over the campaign's own records, `bench env`'s JSON keys |
+| `bench/test_upload.py` | `bench upload` with no network: `_logs/` and `_parity/` never listed, the manifest's sha256 per file, evidence beating `--gate` four ways, the generated README over several subtrees, `verify` catching a changed byte, the commit's operations (with the regenerated `results.parquet`) and `private=True`; `bench fetch` restoring a tree resume reads and refusing to overwrite a different local copy |
+| `bench/test_report.py` | every column the tables read still comes out of `records.aggregate`; every artifact emitted; the LaTeX structurally balanced with the thesis's labels and no unescaped `_`; a `failed` record excluded and a `partial` / `unstable` one marked; citability off by default and evidence beating `--gate`; an empty tree; a schema-1 record |
 | `bench/test_c4_gate.py` | the golden-comparison gate script, [`c4_gate.py`](../artifacts/evaluation-harness-v2/c4_gate.py), against synthesised schema-1 records |
 | `eval_datasets/test_layout.py` | the legacy pad-row rule, `apply_users_limit`, `validate_layout` clean on both layouts and flagging a short `eval_split`, a missing or swapped prefix sidecar, misaligned attrs |
 | `eval_datasets/test_yfcc.py`, `test_pubmed.py`, `test_kuairand.py` | the three ETL loaders on synthetic fixtures |
@@ -816,6 +891,7 @@ uv run bench run --dataset arxiv --dim 128 --suite filter --algo silvertorch --b
 uv run bench campaign --suite filter --resume
 uv run bench campaign --suite deep --resume
 uv run bench upload --results results --path-in-repo d1-a --verify   # publish, then check the round trip
+uv run bench fetch --path-in-repo d1-a                               # a published leg back into results/
 ```
 
 Sanity checks after a run (the campaign gate's clauses, state in
@@ -870,15 +946,6 @@ The local data root resolves to `evaluation/data/` by default; override
 with `RETRIEVE_DATA_ROOT=/some/path`. `hub.data_root()` is its only reader
 (`tests/test_env_readers.py`); every ETL default goes through it. The pod image sets it to
 `/workspace/data` ([storage](storage.md)).
-
-## Archived results
-
-[`evaluation/results/archive/`](../../evaluation/results/archive/) holds
-`<name>.json` + `.yaml` + `.perkernel/` outputs of the pre-v2 harness
-(no record schema, the pre-fix oracle; not citable). The harness writes
-`results/<suite>/*.jsonl`. The golden cells live under
-[`evaluation/golden/`](../../evaluation/golden/README.md); they are
-information, not a gate ([validation](../validation.md#harness-gates)).
 
 ## See also
 

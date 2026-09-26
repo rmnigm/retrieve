@@ -1,6 +1,6 @@
 """What a record *is*: the schema version, the key block, the resume key, the JSONL append
-with its ``fsync``, the samples sidecar, the tolerant ``read_keys`` and ``flatten`` — one row
-per ``(record, perf entry)`` as ``flat.csv`` for ``report.py`` (H §3.2, §8.2 B/C/G).
+with its ``fsync``, the samples sidecar, the tolerant ``read_keys`` and ``aggregate`` — one row
+per ``(record, perf entry)`` as ``results.parquet`` for ``report.py`` (H §3.2, §8.2 B/C/G).
 
 Schema 2 (C5): ``env.expected_sm_mhz`` and ``env.clocks_locked`` are gone (a box that cannot
 lock clocks cannot record whether they are locked), ``env.sm_mhz`` is ``env.sm_mhz_idle`` (the
@@ -10,7 +10,6 @@ process-start sample) and ``env.sm_mhz_load`` is the median of the cell's under-
 
 from __future__ import annotations
 
-import csv
 import json
 import math
 import os
@@ -18,6 +17,8 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
 import torch
 from loguru import logger
 
@@ -33,20 +34,20 @@ KEY_FIELDS = (
     "params",
     "seed",
 )
-# Record scalars and env fields that go into flat.csv next to the key block.
+# Record scalars and env fields that go into results.parquet next to the key block.
 _RECORD_COLUMNS = (
     "status", "path", "n_items", "n_queries", "n_kept", "n_queries_heldout", "n_queries_oracle",
     "n_targets_in_filter", "pass_rate", "bloom_fp_rate", "k_max", "build_s", "index_mib",
     "filter_mib", "unstable", "memory_reserved_mib", "elapsed_s",
     "schema_version", "stage", "error", "partial_reasons",
 )  # fmt: skip
-# flat.csv is shipped as a paper artifact (P §B.7), so it has to carry why a row is
+# results.parquet is shipped as a paper artifact (P §B.7), so it has to carry why a row is
 # incomplete, not only that it is: `stage`/`error` on a failure, `partial_reasons` on a
 # narrowed cell, `schema_version` because v1 and v2 records coexist in one file.
 _ENV_COLUMNS = (
     "code_version", "commit", "dirty", "gpu", "sm_mhz_load", "clocks_drift", "git_branch",
 )  # fmt: skip
-_PERF_SKIP = ("window_medians_ms", "kernels")
+_PERF_SKIP = ("window_medians_ms", "window_sm_mhz", "kernels")
 
 
 def resume_key(key: dict[str, Any], code_version: str) -> str:
@@ -135,37 +136,47 @@ def _row(rec: dict[str, Any], entry: dict[str, Any] | None) -> dict[str, Any]:
     return row
 
 
-def flatten(results_dir: Path, out: Path | None = None) -> Path:
-    """``<results_dir>/flat.csv``: the last record per resume key of every
-    ``<suite>/<dataset>-d<dim>.jsonl``, one row per perf entry (one row with empty perf
-    columns when the record has none). Dicts are JSON strings; nulls are empty cells."""
-    results_dir = Path(results_dir)
-    out = out or results_dir / "flat.csv"
-    latest: dict[str, dict[str, Any]] = {}
-    for path in sorted(results_dir.glob("*/*.jsonl")):
-        if path.name.endswith(".samples.jsonl"):
-            continue
+def record_files(results_dir: Path) -> list[Path]:
+    """The ``<suite>/<dataset>-d<dim>.jsonl`` record files of a results tree."""
+    return sorted(
+        p for p in Path(results_dir).glob("*/*.jsonl") if not p.name.endswith(".samples.jsonl")
+    )
+
+
+def latest(results_dir: Path) -> list[dict[str, Any]]:
+    """The last record per resume key across every record file of ``results_dir``."""
+    out: dict[str, dict[str, Any]] = {}
+    for path in record_files(results_dir):
         for rec in read_records(path):
-            latest[record_key(rec)] = rec
-    rows: list[dict[str, Any]] = []
-    for rec in latest.values():
-        rows.extend(_row(rec, e) for e in (rec.get("perf") or [None]))
+            out[record_key(rec)] = rec
+    return list(out.values())
+
+
+def aggregate(results_dir: Path, out: Path | None = None) -> Path:
+    """``<results_dir>/results.parquet``: :func:`latest`, one row per perf entry (one row with
+    null perf columns when the record has none). ``params`` is a JSON string; column types
+    are inferred, so a column mixing types across records fails here rather than in a table."""
+    out = out or Path(results_dir) / "results.parquet"
+    rows = [_row(rec, e) for rec in latest(results_dir) for e in (rec.get("perf") or [None])]
     cols = list(dict.fromkeys(c for r in rows for c in r))
-    with open(out, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=cols)
-        w.writeheader()
-        for r in rows:
-            w.writerow({c: ("" if v is None else v) for c, v in r.items()})
+    pq.write_table(pa.table({c: [r.get(c) for r in rows] for c in cols}), out)
     return out
+
+
+def read_table(path: Path) -> list[dict[str, Any]]:
+    return pq.read_table(path).to_pylist()
 
 
 __all__ = [
     "KEY_FIELDS",
     "SCHEMA_VERSION",
+    "aggregate",
     "append_record",
-    "flatten",
+    "latest",
     "read_keys",
     "read_records",
+    "read_table",
+    "record_files",
     "record_key",
     "record_path",
     "resume_key",

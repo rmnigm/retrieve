@@ -4,7 +4,7 @@ created: 2026-09-26
 updated: 2026-09-26
 type: summary
 tags: [validation, testing, harness]
-sources: [retrieve/tests/, evaluation/tests/, evaluation/golden/, evaluation/results/, docs/artifacts/]
+sources: [retrieve/tests/, evaluation/tests/, evaluation/golden/, evaluation/results/, docs/artifacts/, docs/artifacts/hub-index.md]
 contested: true
 ---
 
@@ -144,7 +144,7 @@ explains the mechanism behind the kernel-only split.
 | yfcc10m | our exact oracle reproduces the shipped filtered ground truth. The first filter cell fails the exact-algorithm gate (`recall_oracle@1000` 0.964 < 0.99) because `PostfilterKNN` scores in fp16 and YFCC's top-1000 spans only about fifteen fp16 quanta; decision open (roadmap) |
 | pubmed | 10 M slice staged locally (A100 box, 2026-09-26), not on the Hub: `bench check` passes, the exact `c0_mesh` oracle is built (pass rate 0.0002). One filter cell, `linr_v1_filter_mask`/triton clause `c0_mesh`, eager, `--skip-perf` (so `partial`): `recall_oracle@1000` 0.9991, held-out `recall@100` 0.9989, n = 8,428. SilverTorch's global int8 quantize OOM is fixed (chunked build, kernel-opt pass); `official` builds and queries (recall@100 0.664/0.709 at n_probe 24/32, held-out recall@100 0.842/0.880, quality-only); SilverTorch-`triton` and LiNR V2/V3 hit the Triton power-of-two `D` limitation (roadmap, Known defects) at native 768; not yet validated ([artifacts](artifacts/e2-pubmed/), [artifacts](artifacts/kernel-opt/pubmed/)) |
 | openalex | 10 M slice staged locally (A100 box, 2026-09-26; OpenAlex fallback for Semantic Scholar SPECTER2, no API key), not on the Hub: `bench check` passes. One filter cell, `linr_v1_filter_mask`/triton clause `field_era`, eager, `--skip-perf` (`partial`): `recall_oracle@1000` 0.9959, held-out `recall@100` 0.505, `recall@1000` 0.741, n = 10,000. Scoped down from an initial 15 M encode after `bench/oracle.py`'s `item_embs.t().contiguous()` OOMed at that size (a second full fp32 copy on top of the item table; the real 768-d limit is ~11-12 M, not 15 M) — 10 M items resharded from the already-encoded 15 M vectors (`torch.equal`-verified), matching the pubmed precedent. Same power-of-two `D` limitation as pubmed for SilverTorch-`triton` and LiNR V2/V3; not yet validated ([artifacts](artifacts/e3-openalex/)) |
-| kuairand | staged locally (A100 box, 2026-09-26), not on the Hub: `bench check` passes, ETL and two filter protocols (target-derived, business-rule) built. No gSASRec checkpoint yet — GPU queued behind the other GPU work; not yet validated ([artifacts](artifacts/e4-kuairand/)) |
+| kuairand | staged locally (A100 box, 2026-09-26); the dataset files are not on the Hub, the gSASRec checkpoint `gsasrec-d128-shared` is (private, `pinkmeme/eval-kuairand`). `bench check` passes. Trained with one shared item table, `--negs-per-pos 128` (256 OOMs), measured peak 82.9 GB allocated; stopped by patience 5 after epoch 18, best val NDCG@10 0.0361 at epoch 13, test NDCG@10 0.0088 / Recall@100 0.0024 (the 4× val→test drop is partly item cold start, 55 % of test targets never clicked in train; the rest is unexplained). One filter cell, `linr_v1_filter_mask`/triton clause `t_cat1`, eager, `--skip-perf` (`partial`): pass rate 0.0362, `recall_oracle@1000` 0.9996, held-out `recall@100` 0.020, `recall@1000` 0.064, n = 9,910; not yet validated ([artifacts](artifacts/e4-kuairand/)) |
 
 ## Still unverified
 

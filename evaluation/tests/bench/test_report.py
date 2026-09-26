@@ -1,6 +1,6 @@
 """``bench.report``: the table-generating path over a synthetic results tree.
 
-The gate this pins: the columns ``report.py`` reads out of ``records.flatten`` still exist,
+The gate this pins: the columns ``report.py`` reads out of ``records.aggregate`` still exist,
 every emitted fragment is structurally balanced LaTeX with the thesis's labels, a
 ``failed`` record never reaches a number, and the citability marker is on unless a gate is
 declared *and* the evidence allows it.
@@ -14,7 +14,7 @@ import pytest
 
 from bench import records, report
 
-# Everything a table reads out of flat.csv. A schema change that drops one breaks here.
+# Everything a table reads out of results.parquet. A schema change that drops one breaks here.
 REQUIRED_COLUMNS = (
     *records.KEY_FIELDS, "status", "path", "n_items", "pass_rate", "index_mib",
     "env_code_version", "env_commit", "env_dirty",
@@ -102,16 +102,16 @@ def _generate(results, out, **kw):
                            budgets=(1.0, 5.0), **kw)
 
 
-def test_flat_csv_still_carries_every_column_the_tables_read(results, tmp_path):
+def test_results_parquet_still_carries_every_column_the_tables_read(results, tmp_path):
     c = _generate(results, tmp_path / "out")
     missing = [col for col in REQUIRED_COLUMNS if col not in c.rows[0]]
-    assert not missing, f"records.flatten no longer emits: {missing}"
+    assert not missing, f"records.aggregate no longer emits: {missing}"
 
 
 def test_every_artifact_is_emitted_and_the_latex_is_structurally_sound(results, tmp_path):
     c = _generate(results, tmp_path / "out")
     names = {p.name for p in c.written}
-    assert {"flat.csv", "report.md", "methodology.tex"} <= names
+    assert {"results.parquet", "report.md", "methodology.tex"} <= names
     assert {f"tab-{n}.tex" for n in ("recall_nofilter", "pareto_goodreads", "batch_scaling",
                                      "memory", "backend_parity", "recall_at_budget",
                                      "paper_comparison")} <= names

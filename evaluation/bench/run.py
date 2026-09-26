@@ -80,8 +80,9 @@ STICKY_CUDA = ("CUDA error", "illegal memory access", "device-side assert")
 MiB = measure.MiB
 # The stat keys of a perf entry; a variant that cannot run records them as null + ``reason``.
 PERF_STAT_KEYS = (
-    "n", "median_ms", "mean_ms", "p95_ms", "p99_ms", "min_ms", "iqr_ms", "qps", "host_gap_ms",
-    "outliers_std", "outliers_tukey", "spread", "unstable", "peak_fwd_mib", "window_medians_ms",
+    "n", "median_ms", "mean_ms", "trimmed_mean_ms", "p95_ms", "p99_ms", "min_ms", "iqr_ms", "qps",
+    "host_gap_ms", "outliers_std", "outliers_tukey", "spread", "unstable", "peak_fwd_mib",
+    "window_medians_ms", "window_sm_mhz",
 )  # fmt: skip
 
 

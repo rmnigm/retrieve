@@ -138,8 +138,9 @@ Returned before the step is called done:
 - [validation.md](../validation.md) updated to the new state of every gate
   the step touched: what passes now, on which environment, what was
   skipped and why, what is still unverified;
-- raw scripts and outputs under `docs/artifacts/<plan>/`, not in the
-  packages (CLAUDE.md rule 6);
+- raw scripts under `docs/artifacts/<plan>/`, not in the packages; raw
+  outputs (records, JSON dumps, logs) on the Hub via `bench upload`, a row
+  added to [hub-index.md](../artifacts/hub-index.md) (CLAUDE.md rule 6);
 - the matching `docs/system` page updated in the same commit if behaviour
   changed (rule 4), and `python3 scripts/check_doc_links.py` at zero;
 - a plain statement of what passed, what was skipped and what is

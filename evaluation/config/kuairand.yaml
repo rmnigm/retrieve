@@ -1,6 +1,6 @@
 # KuaiRand-27K — harness v2 dataset file (H §3.3), roadmap E4. Sequential shape: queries are a
 # gSASRec encode of each test user's history over the full 32,038,725-video catalog, trained
-# with one shared item table (reuse_item_embeddings). In no suite of suites.yaml yet (E5).
+# with one shared item table (reuse_item_embeddings). In the filter suite since E4.
 # Clause layout (docs/system/datasets.md § kuairand): C0-C3 take their query value from the
 # held-out target (the target-derived protocol, t_*), C4-C6 from a business rule that never
 # looks at the target (b_*): C4 no ads (REVERSE — bloom-incompatible), C5 duration cap from
