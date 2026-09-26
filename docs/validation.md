@@ -193,8 +193,9 @@ the selected checkpoint. sm_mhz 1980 throughout.
 |---|---|---|---|---|---|---|---|
 | [E1](artifacts/seqrec-encoder/e1-yambda-d64-sasrec-ssm/) yambda d64, gSASRec body, sampled softmax (in-batch 4096 + uniform 8192, no logQ) | 0.0661 / 0.0790 / 0.0326 / 0.1093 / 0.0674 | −0.0185 / −0.0470 | 0.0740 (95 of 100) | 10.9 | 8,337 | 10.7 | 26 min |
 | [E2a](artifacts/seqrec-encoder/e2a-yambda-d64-hstu-ssm-uniform/) yambda d64, HSTU body (hidden 256, 4 blocks, 4 heads, `use_time`), sampled softmax (uniform 8192 only). **Stopped after epoch 58 of 100 by user decision** | 0.0743 / 0.0950 / 0.0364 / 0.1379 / 0.0450 | −0.0103 / −0.0184 | 0.0781 (55) | 39.2 | 2,249 | 9.4 | 47 min (to the stop) |
+| [E2c](artifacts/seqrec-encoder/e2c-yambda-d64-hstu-ssm-logq/) yambda d64, HSTU body as E2a, sampled softmax (in-batch 4096 + uniform 8192) **with logQ** | 0.0883 / 0.1075 / 0.0425 / 0.1500 / 0.0423 | **+0.0037** / −0.0063 | 0.0921 (21; early stop at 41) | 42.3 | 2,155 | 11.9 | 34 min |
 
-Unverified: `logq=true` has never run on the GPU (`target_frequencies` is checked only by hand on CPU);
+Unverified: `target_frequencies` (logQ) is checked only by hand on CPU; E2c ran `logq=true` on the GPU;
 `use_time` on goodreads timestamps (E2a used it on yambda); resume (`--resume` has never run on the GPU).
 
 ## Still unverified
