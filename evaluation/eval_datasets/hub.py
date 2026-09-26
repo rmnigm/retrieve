@@ -35,6 +35,7 @@ EVAL_REPOS: dict[str, str] = {
     "yfcc10m":           "pinkmeme/eval-yfcc10m",
     "pubmed":            "pinkmeme/eval-pubmed",
     "kuairand":          "pinkmeme/eval-kuairand",
+    "openalex":          "pinkmeme/eval-openalex",
 }
 
 # Upstream raw repos kept here only so their local target dirs are centralized.
@@ -45,6 +46,10 @@ RAW_REPOS: dict[str, tuple[str, str]] = {
     # yfcc10m is fetched over plain HTTPS from dl.fbaipublicfiles.com by
     # `yfcc download`, not from the Hub — it is listed here only so that
     # `raw_dir("yfcc10m")` has a documented home next to the others.
+    # openalex is streamed from the public snapshot bucket (s3://openalex,
+    # anonymous, CC0) by `openalex convert`, not from the Hub — listed here
+    # only so that `raw_dir("openalex")` has a documented home next to the
+    # others.
 }
 
 # What we *don't* want in the per-dataset eval repo. Excludes training inputs,

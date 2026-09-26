@@ -243,14 +243,15 @@ in `set_query_params` and at forward.
 
 ## Config: one YAML per dataset + `suites.yaml`
 
-Eight files under [`evaluation/config/`](../../evaluation/config/):
+Nine files under [`evaluation/config/`](../../evaluation/config/):
 [`goodreads.yaml`](../../evaluation/config/goodreads.yaml),
 [`arxiv.yaml`](../../evaluation/config/arxiv.yaml),
 [`yambda-500m.yaml`](../../evaluation/config/yambda-500m.yaml),
 [`yambda-5b.yaml`](../../evaluation/config/yambda-5b.yaml),
 [`yfcc10m.yaml`](../../evaluation/config/yfcc10m.yaml) (in the `filter`
-suite), [`pubmed.yaml`](../../evaluation/config/pubmed.yaml) and
-[`kuairand.yaml`](../../evaluation/config/kuairand.yaml)
+suite), [`pubmed.yaml`](../../evaluation/config/pubmed.yaml),
+[`kuairand.yaml`](../../evaluation/config/kuairand.yaml) and
+[`openalex.yaml`](../../evaluation/config/openalex.yaml)
 (in no suite yet) and
 [`suites.yaml`](../../evaluation/config/suites.yaml). `users_limit:
 10000` and the goodreads/arXiv sweeps, ks and batch sizes match the
