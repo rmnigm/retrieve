@@ -195,6 +195,7 @@ the selected checkpoint. sm_mhz 1980 throughout.
 | [E2a](artifacts/seqrec-encoder/e2a-yambda-d64-hstu-ssm-uniform/) yambda d64, HSTU body (hidden 256, 4 blocks, 4 heads, `use_time`), sampled softmax (uniform 8192 only). **Stopped after epoch 58 of 100 by user decision** | 0.0743 / 0.0950 / 0.0364 / 0.1379 / 0.0450 | −0.0103 / −0.0184 | 0.0781 (55) | 39.2 | 2,249 | 9.4 | 47 min (to the stop) |
 | [E2c](artifacts/seqrec-encoder/e2c-yambda-d64-hstu-ssm-logq/) yambda d64, HSTU body as E2a, sampled softmax (in-batch 4096 + uniform 8192) **with logQ** | 0.0883 / 0.1075 / 0.0425 / 0.1500 / 0.0423 | **+0.0037** / −0.0063 | 0.0921 (21; early stop at 41) | 42.3 | 2,155 | 11.9 | 34 min |
 | [E2b](artifacts/seqrec-encoder/e2b-yambda-d64-hstu-gbce/) yambda d64, HSTU body as E2a, per-position gBCE (K=256, t=0.75). **Stopped during epoch 15 of 100 by user decision** | 0.0290 / 0.0422 / 0.0123 / 0.0658 / 0.0003 | −0.0556 / −0.0905 | 0.0301 (13, still rising) | 41.1 | 2,193 | 11.6 | 12 min (to the stop) |
+| [E1c](artifacts/seqrec-encoder/e1c-yambda-d64-sasrec-ssm-logq/) yambda d64, gSASRec body as E1, sampled softmax (in-batch 4096 + uniform 8192) **with logQ**: the selected config | **0.0945** / 0.1157 / 0.0460 / **0.1619** / 0.0382 | **+0.0099 / +0.0056** | 0.1010 (77; early stop at 97) | 11.6 | 7,809 | 10.7 | 26 min |
 
 Unverified: `target_frequencies` (logQ) is checked only by hand on CPU; E2c ran `logq=true` on the GPU;
 `use_time` on goodreads timestamps (E2a used it on yambda); resume (`--resume` has never run on the GPU).
