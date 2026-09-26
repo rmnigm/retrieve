@@ -1,0 +1,8 @@
+{"name": "2026-01-26_part_0000.parquet", "rows": 5741, "after_year": 5314, "after_language": 1950, "after_type": 1454, "after_flags": 1443, "after_sample": 1443, "after_abstract": 319, "bytes_read": 1039852}
+{"name": "2025-11-20_part_0000.parquet", "rows": 5801, "after_year": 5237, "after_language": 3146, "after_type": 2370, "after_flags": 2354, "after_sample": 2354, "after_abstract": 191, "bytes_read": 1023201}
+{"name": "2026-02-22_part_0000.parquet", "rows": 3830, "after_year": 3597, "after_language": 1816, "after_type": 1627, "after_flags": 1553, "after_sample": 1553, "after_abstract": 497, "bytes_read": 2251236}
+{"name": "2026-03-31_part_0000.parquet", "rows": 6621, "after_year": 5689, "after_language": 1664, "after_type": 1488, "after_flags": 1460, "after_sample": 1460, "after_abstract": 439, "bytes_read": 2740563}
+{"name": "2026-03-01_part_0000.parquet", "rows": 6685, "after_year": 4904, "after_language": 1568, "after_type": 1421, "after_flags": 1395, "after_sample": 1395, "after_abstract": 258, "bytes_read": 2482707}
+{"name": "2026-08-26_part_0077.parquet", "rows": 3151, "after_year": 1921, "after_language": 1182, "after_type": 1072, "after_flags": 331, "after_sample": 331, "after_abstract": 306, "bytes_read": 1475348}
+{"name": "2026-05-23_part_0000.parquet", "rows": 11399, "after_year": 11122, "after_language": 3038, "after_type": 2653, "after_flags": 2565, "after_sample": 2565, "after_abstract": 1609, "bytes_read": 6827234}
+{"name": "2026-06-28_part_0000.parquet", "rows": 7076, "after_year": 6412, "after_language": 2047, "after_type": 1819, "after_flags": 1658, "after_sample": 1658, "after_abstract": 962, "bytes_read": 5671885}

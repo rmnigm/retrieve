@@ -20,6 +20,7 @@ ETL = {
     "yfcc": "yfcc",
     "yfcc-check-gt": "yfcc_check_gt",
     "pubmed": "pubmed",
+    "openalex": "openalex",
 }
 
 

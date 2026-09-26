@@ -155,11 +155,12 @@ Size the pod's disks for these at `pod.sh up` (`--disk`, `--volume`):
   download shard by shard; peak disk is about 27 GB for the slice (69 GB
   for the full catalog), download-bound at 1.5-2.5 h
   ([datasets](datasets.md#disk-budget-and-the-slice)).
-- **E3 (Semantic Scholar / OpenAlex) only fits as a stream.** The source is
-  670–840 GB, so it can never be landed. The 50 M-paper slice is
-  50 M × 768 × 4 B ≈ **154 GB** processed, which fits alone only via a pure
-  streaming pass over the remote JSONL with nothing else on the disk; the
-  OpenAlex fallback adds 9–14 A100-hours of encoding.
+- **E3 (OpenAlex) only fits as a stream.** The works snapshot is 707 GB of
+  parquet and is never landed: `openalex convert` reads 297 GB of projected
+  columns over S3 and stages the filtered, hash-sampled rows; peak disk for the
+  50 M slice is ~131 GB (staging + papers parquet + fp16 item shards), and
+  encoding adds ~15.5 A100-hours
+  ([datasets](datasets.md#budget)).
 
 ## Persistence
 
