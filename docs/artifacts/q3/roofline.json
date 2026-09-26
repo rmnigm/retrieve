@@ -1,0 +1,23 @@
+{
+ "device": "NVIDIA A100-SXM4-80GB",
+ "torch": "2.10.0+cu128",
+ "triton": "3.6.0",
+ "copy_buffer_gib": 4.0,
+ "copy_s_median": 0.004897438430786133,
+ "copy_gbps_rw_median": 1753.9647947388592,
+ "copy_gbps_rw_best": 1766.2528443828583,
+ "copy_gbps_rw_worst": 1751.987276955964,
+ "launch_us_median": 11.71401596069336,
+ "launch_us_min": 10.27785587310791,
+ "launch_us_max": 14.103584289550783,
+ "sm_mhz_copy": [
+  1275,
+  1410
+ ],
+ "sm_mhz_launch": [
+  1410,
+  1410
+ ],
+ "mem_mhz": 1593,
+ "unstable": true
+}

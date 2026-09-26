@@ -20,16 +20,29 @@ This test exports a tiny module whose forward calls the public
    with the same config (the kernel is deterministic: no atomics, fixed reduction order).
 
 Lives under tests/compile/ until the export plan creates tests/export/.
+
+The op-registry gates live here too, over every ``retrieve::`` op the Triton package registers:
+each has a same-named twin in ``retrieve.ops.reference`` with the schema's argument names and
+kinds, declares no mutable argument, and leaves every input bit-identical after a call (the op
+and its twin); ``torch.library.opcheck`` runs on the two opaque ``custom_op``s with a
+``register_fake``.
 """
 
 from __future__ import annotations
 
+import inspect
+
+import pytest
 import torch
 
+import retrieve.ops.triton  # noqa: F401  (registers torch.ops.retrieve.*)
+from retrieve.indexing.quantize import quantize_int8_global, quantize_oporp_1bit
+from retrieve.ops import reference
 from retrieve.ops.triton.codesigned_probe_score_exact import (
     codesigned_probe_score_exact,
 )
-from tests.conftest import make_attrs, make_query, make_query_attrs
+from tests.conftest import make_attrs, make_index, make_query, make_query_attrs
+from tests.parity.conftest import make_bloom, make_exact
 
 
 class _ExactScorer(torch.nn.Module):
@@ -108,3 +121,79 @@ def test_export_preserves_kernel_reference():
     out_ids, out_scores = ep.module()(*args)
     torch.testing.assert_close(out_ids, eager_ids, rtol=0, atol=0)
     torch.testing.assert_close(out_scores, eager_scores, rtol=0, atol=0)
+
+
+_SCHEMA_KIND = {"Tensor": "Tensor", "float": "float", "SymInt": "int", "int": "int"}
+
+
+def _retrieve_schemas() -> dict[str, torch.FunctionSchema]:
+    return {
+        s.name.removeprefix("retrieve::"): s
+        for s in torch._C._jit_get_all_schemas()
+        if s.name.startswith("retrieve::")
+    }
+
+
+def _op_args() -> dict[str, tuple]:
+    """One small valid call per registered op, keyed by op name."""
+    n, b, d, k = 512, 3, 64, 8
+    embs = make_index(n, d)
+    query = make_query(b, d)
+    codes, gs = quantize_int8_global(embs)
+    sigs, qb = make_bloom(n, b)
+    attrs, rev, q_attrs = make_exact(n, b, reverse="mixed")
+    g = torch.Generator(device="cuda").manual_seed(0)
+    flat = torch.randint(0, n, (b, 64), generator=g, device="cuda")
+    flat[:, -5:] = -1
+    pos = torch.randint(0, n, (b, 64), generator=g, device="cuda")
+    counts = torch.tensor([64, 10, 0], device="cuda")
+    item_bits = quantize_oporp_1bit(embs, seed=0)[0]
+    q_bits = quantize_oporp_1bit(query, seed=0)[0]
+    return {
+        "bloom_match": (qb, sigs),
+        "bloom_compact": (qb, sigs),
+        "clause_mask": (attrs, rev, q_attrs),
+        "clause_compact": (attrs, rev, q_attrs),
+        "codesigned_probe_score": (query, flat, codes, gs, k),
+        "codesigned_probe_score_bloom": (query, flat, codes, qb, sigs, gs, k),
+        "codesigned_probe_score_exact": (query, flat, codes, attrs, rev, q_attrs, gs, k),
+        "fused_masked_knn_topk": (query, embs, pos, counts, k),
+        "oporp_1bit_match_topk_full": (q_bits, item_bits, k),
+        "oporp_1bit_match_topk_indirect": (q_bits, item_bits, k, pos, counts),
+    }
+
+
+def test_every_op_has_a_same_signature_reference_twin():
+    schemas = _retrieve_schemas()
+    assert len(schemas) >= 10, sorted(schemas)
+    assert sorted(schemas) == sorted(_op_args()), "an op has no input builder here"
+    for name, schema in schemas.items():
+        twin = inspect.signature(getattr(reference, name))
+        got = [(p.name, p.annotation) for p in twin.parameters.values()]
+        want = [(a.name, _SCHEMA_KIND[str(a.type)]) for a in schema.arguments]
+        assert got == want, f"{name}: reference twin {got} vs op schema {want}"
+
+
+def test_no_op_declares_a_mutable_argument():
+    schemas = _retrieve_schemas()
+    assert len(schemas) >= 10
+    for name, schema in schemas.items():
+        assert schema.is_mutable is False, name
+        assert all(a.alias_info is None for a in schema.arguments), name
+
+
+@pytest.mark.parametrize("name", sorted(_retrieve_schemas()))
+def test_inputs_unchanged_after_the_op_and_its_twin(name):
+    args = _op_args()[name]
+    before = [a.clone() if isinstance(a, torch.Tensor) else a for a in args]
+    for fn in (getattr(torch.ops.retrieve, name), getattr(reference, name)):
+        fn(*args)
+        torch.cuda.synchronize()
+        for i, (a, b) in enumerate(zip(args, before)):
+            if isinstance(a, torch.Tensor):
+                assert torch.equal(a, b), f"{name} ({fn}): input {i} was written"
+
+
+@pytest.mark.parametrize("name", ["clause_compact", "bloom_compact"])
+def test_opcheck_on_the_fake_impls(name):
+    torch.library.opcheck(getattr(torch.ops.retrieve, name).default, _op_args()[name])

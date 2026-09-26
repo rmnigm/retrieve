@@ -13,6 +13,8 @@ from retrieve.indexing.quantize import (
     quantize_simhash_1bit,
 )
 from retrieve.ops.triton.oporp_1bit_match_topk import (
+    _N_BUCKETS,
+    DEFAULT_CONFIG,
     Oporp1BitMatchTopkConfig,
     _bucket_n,
     _oporp_1bit_match_topk_impl,
@@ -20,7 +22,7 @@ from retrieve.ops.triton.oporp_1bit_match_topk import (
     oporp_1bit_match_topk_indirect,
 )
 from tests.conftest import make_index, make_query
-from tests.parity.conftest import assert_topk_matches
+from tests.parity.conftest import POISON, assert_topk_equal, poison_empty
 
 
 def _make_bits(quant: str, embs: torch.Tensor, query: torch.Tensor, k_bits: int):
@@ -66,7 +68,7 @@ def _ref_indices(
     scores = scores.masked_fill(~valid, float("-inf"))
     actual_k = min(k, p)
     topk_scores, topk_local = torch.topk(scores, actual_k, dim=1)
-    topk_ids = pos.gather(1, topk_local)
+    topk_ids = torch.where(torch.isfinite(topk_scores), pos.gather(1, topk_local), -1)
     if actual_k < k:
         b = pos.shape[0]
         pad = k - actual_k
@@ -94,7 +96,7 @@ def test_oporp_1bit_full_matches_torch(n, d, k, b, quant):
 
     out_ids, out_scores = oporp_1bit_match_topk_full(query_bits, item_bits, k)
     ref_ids, ref_scores = _ref_full(query_bits, item_bits, k)
-    assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores)
+    assert_topk_equal(out_ids, out_scores, ref_ids, ref_scores)
 
 
 @pytest.mark.parametrize("quant", ["oporp", "simhash"])
@@ -111,7 +113,7 @@ def test_oporp_1bit_indices_matches_torch(n, d, p, k, b, quant):
 
     out_ids, out_scores = oporp_1bit_match_topk_indirect(query_bits, item_bits, k, pos, counts)
     ref_ids, ref_scores = _ref_indices(query_bits, item_bits, pos, counts, k)
-    assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores)
+    assert_topk_equal(out_ids, out_scores, ref_ids, ref_scores)
 
 
 def test_partial_counts_handled():
@@ -148,7 +150,7 @@ def test_score_relation_holds():
             xor = query_bits[bi] ^ item_bits[iid]
             hamming = int(popcount_int64(xor).sum().item())
             expected = d - 2 * hamming
-            assert abs(out_scores[bi, j].item() - expected) < 1e-3
+            assert out_scores[bi, j].item() == expected
 
 
 def test_bucket_n_ladder():
@@ -188,8 +190,7 @@ def test_config_override_matches_default_full_and_indexed():
     ids_b, scores_b = _oporp_1bit_match_topk_impl(
         query_bits, item_bits, k, None, None, config=cfg_b
     )
-    torch.testing.assert_close(ids_a, ids_b)
-    torch.testing.assert_close(scores_a, scores_b)
+    assert_topk_equal(ids_a, scores_a, ids_b, scores_b)
 
     # Has-indices path.
     g = torch.Generator(device="cuda").manual_seed(42)
@@ -201,5 +202,106 @@ def test_config_override_matches_default_full_and_indexed():
     ids_b, scores_b = _oporp_1bit_match_topk_impl(
         query_bits, item_bits, k, pos, counts, config=cfg_b
     )
-    torch.testing.assert_close(ids_a, ids_b)
-    torch.testing.assert_close(scores_a, scores_b)
+    assert_topk_equal(ids_a, scores_a, ids_b, scores_b)
+
+
+@pytest.mark.parametrize("path", ["full", "indirect"])
+def test_empty_score_buffer_does_not_leak(monkeypatch, path):
+    """The score buffer is ``torch.empty`` — ``[B, N]`` on the full scan, ``[B,
+    max(_bucket_n(P), _bucket_n(k))]`` on the indirect path, whose lanes past ``counts[b]`` and
+    past ``P`` must be written ``-inf``. Poisoned allocator, hit count, exact parity."""
+    n, d, p, k, b = 1024, 128, 100, 8, 4
+    embs = make_index(n, d)
+    query = make_query(b, d)
+    item_bits, query_bits = _make_bits("oporp", embs, query, k_bits=d)
+    if path == "full":
+        ref = _ref_full(query_bits, item_bits, k)
+        hits = poison_empty(monkeypatch, (b, n))
+        out = oporp_1bit_match_topk_full(query_bits, item_bits, k)
+    else:
+        g = torch.Generator(device="cuda").manual_seed(5)
+        pos = torch.randint(0, n, (b, p), generator=g, device="cuda", dtype=torch.long)
+        counts = torch.tensor([p, 50, 3, 0], dtype=torch.long, device="cuda")
+        ref = _ref_indices(query_bits, item_bits, pos, counts, k)
+        hits = poison_empty(monkeypatch, (b, max(_bucket_n(p), _bucket_n(k))))
+        out = oporp_1bit_match_topk_indirect(query_bits, item_bits, k, pos, counts)
+    assert hits, "the score buffer no longer comes from torch.empty — the poison never ran"
+    assert not (out[1] == POISON).any(), "poison leaked into top-K: a slot went unwritten"
+    assert_topk_equal(*out, *ref)
+
+
+def _oporp_data(n=1024, d=128, b=4):
+    embs = make_index(n, d)
+    item_bits, query_bits = _make_bits("oporp", embs, make_query(b, d), k_bits=d)
+    return item_bits, query_bits
+
+
+def test_indirect_over_every_item_equals_full_scan():
+    """``positive_indices = arange(N)`` with ``counts = N`` is the full scan: a constexpr keyed
+    to the wrong ``HAS_INDICES`` variant, or a reused compilation, breaks this."""
+    item_bits, query_bits = _oporp_data()
+    n, b, k = item_bits.shape[0], query_bits.shape[0], 16
+    pos = torch.arange(n, device="cuda").expand(b, n).contiguous()
+    counts = torch.full((b,), n, dtype=torch.long, device="cuda")
+    out = oporp_1bit_match_topk_indirect(query_bits, item_bits, k, pos, counts)
+    assert_topk_equal(*out, *oporp_1bit_match_topk_full(query_bits, item_bits, k))
+
+
+def test_row_alone_equals_row_in_batch_and_item_permutation():
+    """Row-local reduction: each row run alone equals its row in the batch; permuting the item
+    table permutes the returned ids and leaves every score unchanged."""
+    item_bits, query_bits = _oporp_data()
+    k = 16
+    ids, scores = oporp_1bit_match_topk_full(query_bits, item_bits, k)
+    for bi in range(query_bits.shape[0]):
+        one = oporp_1bit_match_topk_full(query_bits[bi : bi + 1], item_bits, k)
+        assert_topk_equal(*one, ids[bi : bi + 1], scores[bi : bi + 1])
+    # k = N: a tie run cut by the K boundary would resolve by item order, which the
+    # permutation changes.
+    n = item_bits.shape[0]
+    g = torch.Generator(device="cuda").manual_seed(9)
+    perm = torch.randperm(n, generator=g, device="cuda")
+    p_ids, p_scores = oporp_1bit_match_topk_full(query_bits, item_bits[perm], n)
+    assert_topk_equal(perm[p_ids], p_scores, *oporp_1bit_match_topk_full(query_bits, item_bits, n))
+
+
+@pytest.mark.parametrize(
+    "p,regime",
+    [
+        (_N_BUCKETS[0] - 1, "below the first bucket edge"),
+        (_N_BUCKETS[0], "on the first bucket edge"),
+        (_N_BUCKETS[0] + 1, "one past the first bucket edge"),
+        (8 * DEFAULT_CONFIG.block_n, "p % block_n == 0"),
+        (8 * DEFAULT_CONFIG.block_n + 1, "p % block_n == 1"),
+    ],
+)
+def test_indirect_across_bucket_and_tile_cutoffs(p, regime):
+    """The indirect launch width comes from ``_N_BUCKETS`` and its tiles from
+    ``DEFAULT_CONFIG.block_n``; both sides of each cutoff are exact against the oracle."""
+    item_bits, query_bits = _oporp_data(n=8192)
+    b, k = query_bits.shape[0], 32
+    width = max(_bucket_n(p), _bucket_n(k))
+    if "bucket" in regime:
+        assert width == (_N_BUCKETS[0] if p <= _N_BUCKETS[0] else _N_BUCKETS[1]), regime
+    else:
+        assert p % DEFAULT_CONFIG.block_n == int(regime[-1]), regime
+    g = torch.Generator(device="cuda").manual_seed(p)
+    pos = torch.randint(0, item_bits.shape[0], (b, p), generator=g, device="cuda")
+    counts = torch.tensor([p, p - 1, p // 2, 1], dtype=torch.long, device="cuda")
+    out = oporp_1bit_match_topk_indirect(query_bits, item_bits, k, pos, counts)
+    assert_topk_equal(*out, *_ref_indices(query_bits, item_bits, pos, counts, k))
+
+
+def test_degenerate_rows_give_exact_sentinels():
+    """A ``counts = 0`` row is ``(-1, -inf)`` in every slot; a ``counts = 1`` row has its one
+    candidate in slot 0 and ``(-1, -inf)`` after it."""
+    item_bits, query_bits = _oporp_data(b=2)
+    k, p = 8, 64
+    pos = torch.arange(p, device="cuda").expand(2, p).contiguous()
+    counts = torch.tensor([0, 1], dtype=torch.long, device="cuda")
+    ids, scores = oporp_1bit_match_topk_indirect(query_bits, item_bits, k, pos, counts)
+    assert torch.equal(ids[0], torch.full((k,), -1, device="cuda"))
+    assert torch.equal(ids[1, 1:], torch.full((k - 1,), -1, device="cuda"))
+    assert ids[1, 0].item() == 0 and torch.isfinite(scores[1, 0])
+    tail = torch.cat([scores[0], scores[1, 1:]])
+    assert torch.equal(tail, torch.full_like(tail, float("-inf")))

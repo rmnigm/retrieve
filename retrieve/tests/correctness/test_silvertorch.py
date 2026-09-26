@@ -307,24 +307,27 @@ class TestCrossBackend:
         trc = _build(with_attrs=True, data=data, backend="torch")
         ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
         ids_trc, sc_trc = trc(data["query"], data["q_attrs"])
-        for b in range(B):
-            assert_topk_id_sets_match(ids_trc, sc_trc, ids_tri, sc_tri, b)
+        # Same int32 dot and fp32 dequant on both backends (kernels.md → Numerics).
+        assert torch.equal(sc_trc, sc_tri)
+        assert_ids_equal_up_to_ties(ids_trc, ids_tri, sc_tri)
 
     def test_no_bloom(self, data):
         tri = _build_no_bloom(data, backend="triton")
         trc = _build_no_bloom(data, backend="torch")
         ids_tri, sc_tri = tri(data["query"])
         ids_trc, sc_trc = trc(data["query"])
-        for b in range(B):
-            assert_topk_id_sets_match(ids_trc, sc_trc, ids_tri, sc_tri, b)
+        # Same int32 dot and fp32 dequant on both backends (kernels.md → Numerics).
+        assert torch.equal(sc_trc, sc_tri)
+        assert_ids_equal_up_to_ties(ids_trc, ids_tri, sc_tri)
 
     def test_with_exact(self, data):
         tri = _build_exact(data, backend="triton")
         trc = _build_exact(data, backend="torch")
         ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
         ids_trc, sc_trc = trc(data["query"], data["q_attrs"])
-        for b in range(B):
-            assert_topk_id_sets_match(ids_trc, sc_trc, ids_tri, sc_tri, b)
+        # Same int32 dot and fp32 dequant on both backends (kernels.md → Numerics).
+        assert torch.equal(sc_trc, sc_tri)
+        assert_ids_equal_up_to_ties(ids_trc, ids_tri, sc_tri)
 
     def test_with_exact_reverse(self, data):
         rev = torch.tensor([True, False], dtype=torch.bool, device="cuda")
@@ -332,8 +335,9 @@ class TestCrossBackend:
         trc = _build_exact(data, backend="torch", clause_is_reverse=rev)
         ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
         ids_trc, sc_trc = trc(data["query"], data["q_attrs"])
-        for b in range(B):
-            assert_topk_id_sets_match(ids_trc, sc_trc, ids_tri, sc_tri, b)
+        # Same int32 dot and fp32 dequant on both backends (kernels.md → Numerics).
+        assert torch.equal(sc_trc, sc_tri)
+        assert_ids_equal_up_to_ties(ids_trc, ids_tri, sc_tri)
 
     def test_official_no_bloom(self, data):
         tri = _build_no_bloom(data, backend="triton")
@@ -341,7 +345,8 @@ class TestCrossBackend:
         ids_tri, sc_tri = tri(data["query"])
         ids_off, sc_off = off(data["query"])
         for b in range(B):
-            assert_topk_id_sets_match(ids_off, sc_off, ids_tri, sc_tri, b)
+            # official's default fp16 path: T2 bounds it at 2^-10 relative.
+            assert_topk_id_sets_match(ids_off, sc_off, ids_tri, sc_tri, b, atol=1e-3, rtol=1e-3)
 
     def test_official_with_exact(self, data):
         tri = _build_exact(data, backend="triton")
@@ -349,7 +354,8 @@ class TestCrossBackend:
         ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
         ids_off, sc_off = off(data["query"], data["q_attrs"])
         for b in range(B):
-            assert_topk_id_sets_match(ids_off, sc_off, ids_tri, sc_tri, b)
+            # official's default fp16 path: T2 bounds it at 2^-10 relative.
+            assert_topk_id_sets_match(ids_off, sc_off, ids_tri, sc_tri, b, atol=1e-3, rtol=1e-3)
 
     def test_official_with_exact_reverse(self, data):
         rev = torch.tensor([True, False], dtype=torch.bool, device="cuda")
@@ -358,7 +364,8 @@ class TestCrossBackend:
         ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
         ids_off, sc_off = off(data["query"], data["q_attrs"])
         for b in range(B):
-            assert_topk_id_sets_match(ids_off, sc_off, ids_tri, sc_tri, b)
+            # official's default fp16 path: T2 bounds it at 2^-10 relative.
+            assert_topk_id_sets_match(ids_off, sc_off, ids_tri, sc_tri, b, atol=1e-3, rtol=1e-3)
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
