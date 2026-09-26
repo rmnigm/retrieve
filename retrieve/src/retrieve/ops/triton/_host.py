@@ -36,6 +36,23 @@ def probe_finish(launch: ProbeLaunch, k: int) -> tuple[Tensor, Tensor]:
     return topk_ids, topk_scores
 
 
+def check_contiguous(**tables: Tensor) -> None:
+    """Item-side tables must arrive contiguous: a per-call ``.contiguous()`` would copy the
+    whole index on every forward (kernels.md, conventions). Query-side tensors are small and
+    are still copied."""
+    for name, t in tables.items():
+        if not t.is_contiguous():
+            raise ValueError(f"{name} must be contiguous (copy it once at index build)")
+
+
+def check_pow2(**extents: int) -> None:
+    """A ``tl.arange`` extent must be a power of two; Triton otherwise fails inside the
+    compiler."""
+    for name, v in extents.items():
+        if v <= 0 or v & (v - 1):
+            raise ValueError(f"{name}={v} must be a power of two")
+
+
 def wide(*tensors: Tensor) -> bool:
     """A kernel's ``WIDE`` constexpr: some tensor it addresses has ``>= 2**31`` elements, so its
     row bases need int64 (kernels.md § Addressing)."""
@@ -65,18 +82,21 @@ def compact_finish(
     """Phases 2-3 of the two-phase compaction shared by ``clause_compact`` and ``bloom_compact``:
     exclusive-scan the ``[B, T]`` tile counts the predicate launch wrote (``torch.cumsum`` over
     int64 — exact, hence deterministic), then one program per ``(row, tile)`` on the same grid
-    moves the tile's stashed ids to the scanned offset. Returns ``(positive_indices [B, N] int64
-    with -1 tails, counts [B] int64)``; ``counts`` is a fresh tensor, not a view into the scan
-    (inductor asserts custom-op outputs are aligned, and at ``B == 1`` the last column *is*
-    contiguous)."""
+    moves the tile's stashed ids to the scanned offset and writes ``-1`` over its slice of the
+    row's tail. Returns ``(positive_indices [B, N] int64 with -1 tails, counts [B] int64)``;
+    ``counts`` is a fresh tensor, not a view into the scan (inductor asserts custom-op outputs
+    are aligned, and at ``B == 1`` the last column *is* contiguous)."""
     b = tile_counts.shape[0]
     tile_ends = tile_counts.cumsum(1)
-    out_indices = torch.full((b, n), -1, dtype=torch.int64, device=tile_counts.device)
+    counts = tile_ends[:, -1].clone()
+    out_indices = torch.empty((b, n), dtype=torch.int64, device=tile_counts.device)
     compact_scatter_kernel[grid](
         scratch,
         tile_counts,
         tile_ends - tile_counts,
+        counts,
         out_indices,
+        n,
         tiles_y,
         scratch.stride(0),
         tile_counts.stride(0),
@@ -86,4 +106,4 @@ def compact_finish(
         WIDE=wide(scratch, out_indices),
         num_warps=num_warps,
     )
-    return out_indices, tile_ends[:, -1].clone()
+    return out_indices, counts

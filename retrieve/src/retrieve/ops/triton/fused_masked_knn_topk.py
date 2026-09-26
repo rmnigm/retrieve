@@ -14,7 +14,7 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
-from retrieve.ops.triton._host import wide
+from retrieve.ops.triton._host import check_contiguous, check_pow2, wide
 from retrieve.ops.triton.common import row_base
 
 _P_BUCKETS = (256, 2048, 16384, 131072, 1048576)
@@ -140,9 +140,9 @@ def _fmkt_prep(
     b, d = query.shape
     p = positive_indices.shape[1]
 
+    check_contiguous(item_embs=item_embs, positive_indices=positive_indices)
+    check_pow2(D=d)
     query = query.contiguous()
-    item_embs = item_embs.contiguous()
-    positive_indices = positive_indices.contiguous()
     counts = counts.contiguous()
 
     p_kernel = _bucket_p(p) if bucket else p
@@ -193,8 +193,8 @@ def _fmkt_finish(launch: _FmktLaunch, k: int, *, pad_to_k: bool) -> tuple[Tensor
     # op p_kernel == p and the clamp is an identity.
     safe_local = topk_local.clamp_max(p - 1)
     topk_ids = launch.positive_indices.gather(1, safe_local)
-    # When counts[b] < actual_k, ties at -inf can pick padding positions whose ids are
-    # uninitialised (compact kernels use torch.empty); force those to -1 to match the oracle's
+    # When counts[b] < actual_k, ties at -inf can pick positions past counts[b], whose ids are -1
+    # (Triton compaction) or arbitrary (torch compaction); force those to -1, the oracle's
     # sentinel.
     topk_ids = torch.where(
         torch.isfinite(topk_scores),

@@ -9,7 +9,13 @@ from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
 from retrieve.indexing.quantize import quantize_int8
-from retrieve.ops.triton._host import ProbeLaunch, probe_finish, wide
+from retrieve.ops.triton._host import (
+    ProbeLaunch,
+    check_contiguous,
+    check_pow2,
+    probe_finish,
+    wide,
+)
 from retrieve.ops.triton.common import bloom_subset_pass, row_base
 
 
@@ -106,7 +112,10 @@ def _codesigned_probe_score_kernel(
     # Squeeze the length-1 M axis: tl.sum over length-1 (Triton has no reshape to drop a dim).
     dots_i32 = tl.sum(dots_2d, axis=0)
 
-    dots = dots_i32.to(tl.float32) * q_scale * global_scale
+    # fp32 pinned: Inductor passes global_scale as a Python float (kernels.md § Numerics).
+    dots = (
+        dots_i32.to(tl.float32) * tl.cast(q_scale, tl.float32) * tl.cast(global_scale, tl.float32)
+    )
     dots = tl.where(keep, dots, float("-inf"))
 
     tl.store(
@@ -141,13 +150,16 @@ def _cps_prep(
 
     b, d = query.shape
     p = flat_probed_items.shape[1]
+    check_contiguous(item_codes=item_codes, flat_probed_items=flat_probed_items)
+    check_pow2(D=d)
+    if has_qb:
+        check_contiguous(bloom_sigs=bloom_sigs)
+        check_pow2(W=query_bits.shape[1])
 
     q_codes, q_scales = quantize_int8(query)
     q_codes, q_scales = q_codes.contiguous(), q_scales.contiguous()
-    flat_probed_items = flat_probed_items.contiguous()
-    item_codes = item_codes.contiguous()
     if has_qb:
-        query_bits, bloom_sigs = query_bits.contiguous(), bloom_sigs.contiguous()
+        query_bits = query_bits.contiguous()
         w = query_bits.shape[1]
     else:
         # HAS_QB=False gates every load through these pointers, so any int64 tensor stands in

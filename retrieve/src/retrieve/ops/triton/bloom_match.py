@@ -6,7 +6,7 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
-from retrieve.ops.triton._host import grid_batch_tiles, wide
+from retrieve.ops.triton._host import check_contiguous, check_pow2, grid_batch_tiles, wide
 from retrieve.ops.triton.common import bloom_subset_pass, row_base, tile_rows
 
 
@@ -59,6 +59,9 @@ def bloom_match(qb: Tensor, sigs: Tensor) -> Tensor:
     ``torch.compile``; ``BLOCK_N`` is constexpr 128 with a tile-tail mask for ``N < 128``."""
     b, w = qb.shape
     n = sigs.shape[0]
+    check_contiguous(sigs=sigs)
+    check_pow2(W=w)
+    qb = qb.contiguous()
 
     out = torch.empty(b, n, dtype=torch.bool, device=qb.device)
     grid, tiles_y = grid_batch_tiles(b, n, 128)

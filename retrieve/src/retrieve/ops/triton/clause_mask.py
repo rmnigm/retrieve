@@ -19,7 +19,7 @@ from torch.library import triton_op, wrap_triton
 # raises NameError('common is not defined') at ast_to_ttir time — eager
 # Triton resolves the attribute and never sees it. Found by A1's golden run,
 # 2026-09-06; this is what handoff step 4's compile gate exists to catch.
-from retrieve.ops.triton._host import grid_batch_tiles, wide
+from retrieve.ops.triton._host import check_contiguous, grid_batch_tiles, wide
 from retrieve.ops.triton.common import clause_pass, row_base, tile_rows
 
 
@@ -111,7 +111,7 @@ def _clause_mask_prep(
     if c != c_q:
         raise ValueError(f"clause-count mismatch: items C={c}, query C={c_q}")
 
-    item_clause_attrs = item_clause_attrs.contiguous()
+    check_contiguous(item_clause_attrs=item_clause_attrs)
     clause_is_reverse = clause_is_reverse.contiguous().to(torch.int8)
     query_clause_attrs = query_clause_attrs.contiguous()
 

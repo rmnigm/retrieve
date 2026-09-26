@@ -12,7 +12,7 @@ pip install torchretrieve
 
 Source-only distribution. Triton kernels JIT-compile on first call against your local toolchain — no prebuilt CUDA wheels to match. You need a CUDA-capable GPU and a working `torch` + `triton` install (declared as dependencies). Modules that ship a pure-PyTorch fallback accept `backend="torch"`; `SilverTorch` additionally offers `backend="official"`, Meta's own `meta-recsys/silvertorch` kernels behind the same layer (the `official` extra, built from source against your CUDA toolkit; eager-only).
 
-> **Note.** Install pulls in `torch>=2.4` and `triton>=3.0`; the import name is `retrieve`, not `torchretrieve`.
+> **Note.** Install pulls in `torch>=2.10` and `triton>=3.6`, the validated versions: validated on an A100-SXM4-80GB (sm_80) with torch 2.10.0+cu128, triton 3.6.0, Python 3.11. The import name is `retrieve`, not `torchretrieve`.
 
 ## Quick example
 

@@ -151,18 +151,21 @@ def assert_topk_equal(
 POISON = 1e30
 
 
-def poison_empty(monkeypatch, shape: tuple[int, ...]) -> list[tuple[int, ...]]:
-    """Patch ``torch.empty`` so every fp32 allocation of ``shape`` comes back filled with
-    ``POISON`` (it outranks every real score, so an unwritten slot reaches top-K). Returns the
-    list the patched allocator appends to: a test asserts it is non-empty, which fails if the
-    kernel's score buffer moved to another allocator and the poison was never used."""
+def poison_empty(
+    monkeypatch, shape: tuple[int, ...], dtype: torch.dtype = torch.float32, value=POISON
+) -> list[tuple[int, ...]]:
+    """Patch ``torch.empty`` so every ``dtype`` allocation of ``shape`` comes back filled with
+    ``value`` (the fp32 default outranks every real score, so an unwritten slot reaches top-K).
+    Returns the list the patched allocator appends to: a test asserts it is non-empty, which
+    fails if the kernel's output buffer moved to another allocator and the poison was never
+    used."""
     real_empty = torch.empty
     hits: list[tuple[int, ...]] = []
 
     def poisoned(*args, **kwargs):
         t = real_empty(*args, **kwargs)
-        if t.dtype == torch.float32 and tuple(t.shape) == shape:
-            t.fill_(POISON)
+        if t.dtype == dtype and tuple(t.shape) == shape:
+            t.fill_(value)
             hits.append(shape)
         return t
 

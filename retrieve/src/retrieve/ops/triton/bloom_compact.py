@@ -15,7 +15,13 @@ import triton.language as tl
 from torch import Tensor
 
 # By name, not `common.<fn>` — see the note in clause_mask.py.
-from retrieve.ops.triton._host import compact_finish, grid_batch_tiles, wide
+from retrieve.ops.triton._host import (
+    check_contiguous,
+    check_pow2,
+    compact_finish,
+    grid_batch_tiles,
+    wide,
+)
 from retrieve.ops.triton.common import bloom_subset_pass, compact_stash, tile_rows
 
 
@@ -115,8 +121,9 @@ def _bloom_compact_prep(
     b, w = qb.shape
     n = sigs.shape[0]
 
+    check_contiguous(sigs=sigs)
+    check_pow2(W=w)
     qb = qb.contiguous()
-    sigs = sigs.contiguous()
 
     grid, tiles_y = grid_batch_tiles(b, n, cfg.block_n)
     tiles = tiles_y * grid[2]

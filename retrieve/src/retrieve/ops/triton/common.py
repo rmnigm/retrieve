@@ -162,7 +162,9 @@ def compact_scatter_kernel(
     scratch_ptr,  # [B, T * BLOCK_N] int32, compact_stash's tile-local id runs
     tile_counts_ptr,  # [B, T] int64
     offsets_ptr,  # [B, T] int64 exclusive scan of the tile counts
-    out_ptr,  # [B, N] int64, -1 prefilled
+    counts_ptr,  # [B] int64 row totals
+    out_ptr,  # [B, N] int64, uninitialised
+    N,
     tiles_y,
     stride_sb,
     stride_tb,
@@ -172,9 +174,11 @@ def compact_scatter_kernel(
     WIDE: tl.constexpr,
 ):
     """Phase 3 of the two-phase compaction, one program per ``(row, tile)`` on the same 3-D grid
-    as the predicate kernel: move the tile's ``count`` stashed ids to ``out[bid, offset :]``.
-    Traffic is the survivors only. Launched by ``_host.compact_finish``; the only
-    ``@triton.jit`` here that is a kernel rather than a callee."""
+    as the predicate kernel: move the tile's ``count`` stashed ids to ``out[bid, offset :]``, and
+    write ``-1`` over the tile's own slice of the row's tail ``[counts[bid], N)``. The runs cover
+    ``[0, counts[bid])``, so the two writes never overlap. Launched by
+    ``_host.compact_finish``; the only ``@triton.jit`` here that is a kernel rather than a
+    callee."""
     bid = tl.program_id(0)
     tile_id = tl.program_id(2) * tiles_y + tl.program_id(1)
     lane = tl.arange(0, BLOCK_N)
@@ -182,8 +186,8 @@ def compact_scatter_kernel(
     base = tl.load(offsets_ptr + bid * stride_tb + tile_id)
     run = row_base(scratch_ptr, bid, stride_sb, WIDE) + tile_id * BLOCK_N + lane
     ids = tl.load(run, mask=lane < count)
-    tl.store(
-        row_base(out_ptr, bid, stride_ob, WIDE) + (base + lane) * stride_on,
-        ids.to(tl.int64),
-        mask=lane < count,
-    )
+    out_row = row_base(out_ptr, bid, stride_ob, WIDE)
+    tl.store(out_row + (base + lane) * stride_on, ids.to(tl.int64), mask=lane < count)
+    slot = tile_id * BLOCK_N + lane
+    tail = (slot >= tl.load(counts_ptr + bid)) & (slot < N)
+    tl.store(out_row + slot * stride_on, tl.full([BLOCK_N], -1, tl.int64), mask=tail)

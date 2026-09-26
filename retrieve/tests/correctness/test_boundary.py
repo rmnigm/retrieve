@@ -20,8 +20,8 @@ from retrieve import (
     LiNRV4,
     SilverTorch,
     SilverTorchBuilder,
+    modules as modules_pkg,
 )
-from retrieve import modules as modules_pkg
 from retrieve.interfaces import DISPATCH
 from tests.conftest import make_attrs, make_index, make_query, make_query_attrs, require_official
 from tests.parity.conftest import assert_ids_equal_up_to_ties

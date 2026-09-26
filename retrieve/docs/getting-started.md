@@ -14,7 +14,9 @@ Source-only distribution: the Triton kernels JIT-compile on first call against y
 toolchain, so there are no prebuilt CUDA wheels to match. You need:
 
 - a CUDA-capable GPU,
-- `torch >= 2.4` and `triton >= 3.0` (pulled in as dependencies).
+- `torch >= 2.10` and `triton >= 3.6` (pulled in as dependencies). The floors are the
+  validated versions: validated on an A100-SXM4-80GB (sm_80) with torch 2.10.0+cu128,
+  triton 3.6.0 and Python 3.11. Older releases may work but are untested.
 
 > The import name is **`retrieve`**, not `torchretrieve`:
 >

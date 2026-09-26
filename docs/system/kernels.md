@@ -57,12 +57,17 @@ covered next, and the SilverTorch-only kernels at the end for context.
 All kernels follow the same conventions.
 
 - One launch per `forward()` call. No persistent threads, no streams.
-- Inputs are CUDA tensors. Every `_<name>_prep` calls `.contiguous()` on
-  each tensor argument first, then passes `.stride(i)` for every axis to
-  the launch — the strides are always the contiguous ones; nothing in
-  this tree calls a kernel with a genuinely strided (view) tensor. The
-  stride kwargs exist so a kernel body never hard-codes a layout, not to
-  support non-contiguous inputs.
+- Inputs are CUDA tensors. Every `_<name>_prep` checks its boundary
+  (`_host.check_contiguous`, `_host.check_pow2`). An item-side table (the
+  index, and the `[B, N]` candidate lists) must arrive contiguous, and a
+  view raises `ValueError`, because a per-call `.contiguous()` would copy
+  the whole index on every forward. Query-side tensors are small and are
+  still `.contiguous()`-copied. Every `tl.arange` extent (`D`, `W`) must be
+  a power of two: `ValueError` at the boundary instead of a Triton
+  `CompilationError` from inside the compiler. Both are gated by
+  [`test_op_boundary.py`](../../retrieve/tests/correctness/test_op_boundary.py).
+  The prep then passes `.stride(i)` for every axis, so a kernel body
+  never hard-codes a layout. The strides are always the contiguous ones.
 - Top-K selection is **not** in-kernel. Each kernel writes a `[B, ·]` score
   buffer and the host calls `torch.topk` on it. CUB's top-K (under torch)
   is faster than anything we can implement in pure Triton without a
@@ -180,11 +185,18 @@ The pattern, applied uniformly to every kernel in this tree:
    (`codesigned-probe-score-exact` and the three filter kernels) accept
    repeatable `--regime N,B,C,A_MAX` (or `N,B,W`) flags; the
    dimension-swept kernels expose `--d`/`--b`/`--w` flags and derive
-   regimes by crossing them with the module's bucket/P axes. Picks one
-   default per arch via plurality vote across regime winners (ties →
-   lower `num_warps`); emits a pasteable `DEFAULT_CONFIG = ...` line
-   (optional `--json-out` dumps the full per-regime sweep, keyed
-   `per_regime`). Re-run once per new arch; commit the line.
+   regimes by crossing them with the module's bucket/P axes. The shipped
+   `DEFAULT_CONFIG` is always swept too, and it stays unless a
+   candidate's geometric-mean time over the regimes is more than
+   `NOISE_BAND` (3 %) below it, **and** the candidate is at most
+   `WORST_CAP` (5 %) slower in every single regime (`tune._choose`, pinned by
+   `test_tune_smoke.py`). A B = 1 regime whose own winner beats the pick
+   by ≥ `B1_GAP` (10 %) is flagged, which is the evidence a separate batch-1
+   config would need. The CLI emits a pasteable `DEFAULT_CONFIG = ...` line.
+   `--json-out` dumps the per-regime sweep (`per_regime`), the rule's
+   ratios (`rule`), and `env`: the SM clock sampled after each regime, the
+   commit, and the torch / triton versions and device. Re-run once per new
+   arch; commit the line.
    (`bloom_match` has no subcommand — see its section.) A CUDA-gated
    smoke test
    ([`test_tune_smoke.py`](../../retrieve/tests/correctness/test_tune_smoke.py))
@@ -536,8 +548,9 @@ return:   positive_indices    [B, N]         int64  (full width, -1 tails)
 ```
 
 The returned index buffer is **full-width** `[B, N]` — only the first
-`counts[b]` entries per row are meaningful; the tail keeps the `-1`
-prefill (no host-side `counts.max().item()` sync, no narrow slice).
+`counts[b]` entries per row are meaningful; the tail is `-1`, written by
+the scatter launch itself into a `torch.empty` buffer (no host-side
+`counts.max().item()` sync, no narrow slice, no `[B, N]` prefill launch).
 Downstream kernels bound reads by `counts`.
 
 **Launch grid** `(B, tiles_y, tiles_x)` — batch on `grid_x` so adjacent
@@ -565,6 +578,8 @@ host, inside the op:                            _host.compact_finish
 scatter launch (b, tile), same grid:            common.compact_scatter_kernel
     ids = scratch[b, tile * BLOCK_N : +tile_counts[b, tile]]
     positive_indices[b, tile_offsets[b, tile] : +count] = ids
+    slots = tile * BLOCK_N + lane                  # the tile's own slice of the row
+    positive_indices[b, slots ∩ [counts[b], N)] = -1   # disjoint from every run
 ```
 
 Why this shape and not the two alternatives (re-evaluate the predicate in
@@ -767,7 +782,7 @@ return:    positive_indices [B, N] int64  (full width, -1 tails)
 ```
 
 Same full-width `[B, N]` return contract as `clause_compact` — bound
-reads by `counts[b]`, tails keep the `-1` prefill. Registered as a
+reads by `counts[b]`, `-1` tails written by the scatter launch. Registered as a
 `@torch.library.custom_op` for the same reason `clause_compact` is (the
 compaction store address is data-dependent), so both compaction kernels
 capture under cudagraph trees.
@@ -842,8 +857,8 @@ torch and triton paths stay interchangeable. Implementation:
 `mask.sum(1)` for counts, then
 `mask.float().argsort(descending=True, stable=True)` for the indices —
 no `.item()` sync, no narrow slice. The tails differ across
-implementations (arbitrary argsort-tail ids here vs `-1`-prefilled for
-the kernels), so consumers must bound reads by `counts` either way.
+implementations (arbitrary argsort-tail ids here vs `-1` for the
+kernels), so consumers must bound reads by `counts` either way.
 
 ### [`popcount_int64`](../../retrieve/src/retrieve/functional.py) (`retrieve.functional`)
 
@@ -923,7 +938,12 @@ and the official epilogue `dequantize_scores`
 ([`ops/official/adapter.py`](../../retrieve/src/retrieve/ops/official/adapter.py)).
 Reassociating any one of them (`dot * (q_scale * global_scale)`) changes
 the last bit and breaks `torch.equal` in `test_official.py` T1 — it is
-enforced by those tests, not by the code.
+enforced by those tests, not by the code. In the Triton kernels both
+scalars go through `tl.cast(·, tl.float32)`. Under `torch.compile`,
+Inductor passes `global_scale` into the kernel source as a Python float
+rather than a typed argument; `.to()` on it raises inside Inductor's TTIR
+analysis, which then produced NaN scores instead of an error. The cast keeps the
+product in fp32 on both paths. Eager, it is a no-op.
 
 ## SilverTorch kernels
 

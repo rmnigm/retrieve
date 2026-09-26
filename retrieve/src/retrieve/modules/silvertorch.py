@@ -24,8 +24,7 @@ from retrieve.interfaces import (
     ops_for,
 )
 from retrieve.ops import official as official_mod
-from retrieve.ops.official import DEFAULT_CONFIG as OFFICIAL_DEFAULT
-from retrieve.ops.official import OfficialConfig
+from retrieve.ops.official import DEFAULT_CONFIG as OFFICIAL_DEFAULT, OfficialConfig
 
 FilterMode = Literal["none", "bloom", "exact"]
 

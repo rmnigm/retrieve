@@ -45,3 +45,31 @@ on bloom_compact_b16.
    addressing, wide ones use int64 row bases. **All 13 cases within noise; `bloom_match_b16` is 3.5 % faster**
    (0.965, band 0.7 %; not investigated further). The large-size tests pin the wide path, and
    a mutation of `row_base`'s int64 cast turns all five red.
+
+## Phase 2: fp32 scalar pin, in-kernel −1 tail, boundary checks
+
+Measured before the change, with `torch.profiler` (`prof_probe`): the `torch.full((B, N), -1)` prefill is
+**190 µs of the 2055 µs `bloom_compact` op** at B=16, N=3M (384 MB written, 2.0 TB/s). It is 190 µs of
+`clause_compact_b16` too, and about 12 µs at B=1.
+
+- **−1 tail in the scatter kernel** (`torch.empty` output; each `(row, tile)` program writes −1
+  over its own `BLOCK_N` slice of `[count_b, N)`). The runs cover `[0, count_b)`, so the writes are
+  disjoint. Prediction: the op loses one launch and the survivors' second write. The tail itself
+  is still written once. Saving ≈ pass_rate × 190 µs + one launch, so **−2 to −5 %** on
+  `clause_compact_b16` / `bloom_compact_b16`. At B=1 it is **−1 to −3 %** (≈ 5 µs of 210–285 µs).
+  The scatter kernel itself gets slower by the tail bytes it now writes.
+- **fp32 pin of `global_scale` / `q_scale`** in the probe kernels: a no-op in eager, where both
+  are fp32 already. **Same** timing, same bits.
+- **Boundary checks** (non-contiguous item tables rejected, non-power-of-two `tl.arange`
+  extents rejected): host-side only, **same** kernel time.
+
+**Outcome** (`phase2.md`, against the Phase 1 commit, interleaved):
+- `bloom_compact`: **−4.9 %** at B=16, **−3.0 %** at B=1. Inside the prediction.
+- `clause_compact`: +0.7 % at B=16 and +1.5 % at B=1, both inside their noise bands (0.8 % and
+  2.8 %). **The predicted saving did not happen.** Kernel split at B=16: fill 191 µs + scatter 80 µs
+  before, scatter 274 µs after. With the benchmark's 1.8 % pass rate the tail is 98 % of the
+  row, so the tail write costs what the fill did. What is saved is the fill launch plus the survivors'
+  second write, and on `clause_compact` that is inside noise. The `bloom_compact` scatter (256
+  lanes, 8 warps) went 248 + 190 → 333 µs; the `clause_compact` one (512 lanes, 2 warps) did not
+  gain. The retune of `block_n` for the two-phase shape is TF-3, not done here.
+- fp32 pin, boundary checks: same within noise, as predicted.

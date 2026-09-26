@@ -31,8 +31,7 @@ import torch
 from retrieve.functional import clause_subset_match, masked_topk
 from retrieve.indexing.quantize import quantize_int8, quantize_int8_global
 from retrieve.modules.silvertorch import OfficialConfig, SilverTorch, SilverTorchBuilder
-from retrieve.ops import official as of
-from retrieve.ops import reference
+from retrieve.ops import official as of, reference
 from retrieve.ops.triton.clause_mask import clause_mask
 from retrieve.ops.triton.codesigned_probe_score import (
     _codesigned_probe_score_impl,

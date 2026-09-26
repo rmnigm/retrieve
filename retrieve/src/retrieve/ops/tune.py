@@ -7,7 +7,8 @@ regime-swept kernels."""
 from __future__ import annotations
 
 import json
-from collections import Counter
+import math
+import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, fields
 from pathlib import Path
@@ -15,29 +16,55 @@ from typing import Any
 
 import click
 import torch
+import triton
 import triton.testing as ttesting
 
-from retrieve.ops.triton.bloom_compact import BloomCompactConfig, _bloom_compact_impl
-from retrieve.ops.triton.clause_compact import ClauseCompactConfig, _clause_compact_impl
-from retrieve.ops.triton.clause_mask import ClauseMaskConfig, _clause_mask_impl
+from retrieve.ops.triton.bloom_compact import (
+    DEFAULT_CONFIG as BLOOM_COMPACT_DEFAULT,
+    BloomCompactConfig,
+    _bloom_compact_impl,
+)
+from retrieve.ops.triton.clause_compact import (
+    DEFAULT_CONFIG as CLAUSE_COMPACT_DEFAULT,
+    ClauseCompactConfig,
+    _clause_compact_impl,
+)
+from retrieve.ops.triton.clause_mask import (
+    DEFAULT_CONFIG as CLAUSE_MASK_DEFAULT,
+    ClauseMaskConfig,
+    _clause_mask_impl,
+)
 from retrieve.ops.triton.codesigned_probe_score import (
+    DEFAULT_CONFIG as CODESIGNED_PROBE_SCORE_DEFAULT,
     CodesignedProbeScoreConfig,
     _codesigned_probe_score_impl,
 )
 from retrieve.ops.triton.codesigned_probe_score_exact import (
+    DEFAULT_CONFIG as CODESIGNED_PROBE_SCORE_EXACT_DEFAULT,
     CodesignedProbeScoreExactConfig,
     _codesigned_probe_score_exact_impl,
 )
 from retrieve.ops.triton.fused_masked_knn_topk import (
     _P_BUCKETS,
+    DEFAULT_CONFIG as FUSED_MASKED_KNN_TOPK_DEFAULT,
     FusedMaskedKnnTopkConfig,
     _fused_masked_knn_topk_impl,
 )
 from retrieve.ops.triton.oporp_1bit_match_topk import (
     _N_BUCKETS,
+    DEFAULT_CONFIG as OPORP_1BIT_MATCH_TOPK_DEFAULT,
     Oporp1BitMatchTopkConfig,
     _oporp_1bit_match_topk_impl,
 )
+
+# The selection rule (kernels.md § Autotune separation): the shipped default stays unless a
+# candidate is faster by more than NOISE_BAND (geometric mean over regimes, the A/A spread of an
+# interleaved rerun) and slower by at most WORST_CAP in every single regime.
+NOISE_BAND = 0.03
+WORST_CAP = 0.05
+# A B = 1 regime whose own winner beats the chosen config by this much is flagged: the case for
+# a separate batch-1 default.
+B1_GAP = 0.10
 
 _FMKT_GRID = tuple((bn, nw) for bn in (32, 64, 128, 256) for nw in (4, 8))
 _OPORP_GRID = tuple((bn, nw) for bn in (64, 128, 256, 512) for nw in (4, 8))
@@ -203,6 +230,7 @@ class KernelTuneSpec:
     make_inputs: Callable[[torch.device, tuple[int, ...]], dict[str, Any]]  # regime → kwargs
     run: Callable[[dict[str, Any], Any], Any]  # (inputs, config) → one _impl call
     paste_path: str  # file the DEFAULT_CONFIG line goes into
+    current: Any  # the kernel module's shipped DEFAULT_CONFIG, the incumbent of the rule
     smoke_regime: tuple[int, ...]  # one tiny regime for the CI smoke test
     # Regime-swept kernels (--regime):
     default_regimes: tuple[tuple[int, ...], ...] = ()
@@ -227,21 +255,68 @@ def _fmt_entry(spec: KernelTuneSpec, entry: tuple[int, ...]) -> str:
     ).rstrip()
 
 
+def _entry(spec: KernelTuneSpec, config: Any) -> tuple[int, ...]:
+    """A config as a grid entry: its first ``len(grid entry)`` fields."""
+    names = [f.name for f in fields(spec.config_cls)][: len(spec.grid[0])]
+    return tuple(getattr(config, n) for n in names)
+
+
+def _sm_mhz() -> int | None:
+    q = ["nvidia-smi", "--query-gpu=clocks.sm", "--format=csv,noheader,nounits", "-i", "0"]
+    out = subprocess.run(q, capture_output=True, text=True, check=False)
+    return int(out.stdout.split()[0]) if out.returncode == 0 and out.stdout.strip() else None
+
+
+def _commit() -> str | None:
+    out = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=Path(__file__).parent,
+    )
+    return out.stdout.strip() if out.returncode == 0 else None
+
+
+def _choose(
+    current: tuple[int, ...], per_regime: dict[str, dict[tuple[int, ...], float]]
+) -> tuple[tuple[int, ...], dict[str, Any]]:
+    """The selection rule over ``{regime: {entry: ms}}``: the candidate with the lowest geometric
+    mean of ``ms / current_ms`` wins if that mean is below ``1 - NOISE_BAND`` and its worst
+    regime is at most ``1 + WORST_CAP``; otherwise ``current`` stays. Returns the pick and the
+    per-candidate ``(geomean, worst)`` ratios behind it."""
+    ratios: dict[tuple[int, ...], list[float]] = {}
+    for timings in per_regime.values():
+        for entry, ms in timings.items():
+            ratios.setdefault(entry, []).append(ms / timings[current])
+    stats = {
+        e: (math.exp(sum(map(math.log, r)) / len(r)), max(r))
+        for e, r in ratios.items()
+        if len(r) == len(per_regime)
+    }
+    eligible = [e for e, (g, w) in stats.items() if g < 1 - NOISE_BAND and w <= 1 + WORST_CAP]
+    pick = min(eligible, key=lambda e: stats[e][0]) if eligible else current
+    return pick, {
+        "geomean_vs_current": {",".join(map(str, e)): g for e, (g, _) in stats.items()},
+        "worst_vs_current": {",".join(map(str, e)): w for e, (_, w) in stats.items()},
+    }
+
+
 def _sweep(spec: KernelTuneSpec, dev: torch.device, regimes: tuple[tuple[int, ...], ...]) -> dict:
-    """Per regime pick the lowest-latency grid entry from ``spec.grid``, then aggregate to one
-    default by plurality vote (ties → lower ``num_warps``, then lower remaining fields).
-
-    Tuning is offline and out-of-kernel on purpose; see
+    """Time every grid entry (plus the shipped default, if the grid lacks it) on every regime,
+    then pick with ``_choose``. Tuning is offline and out-of-kernel on purpose; see
     docs/system/kernels.md § Autotune separation."""
+    current = _entry(spec, spec.current)
+    grid = spec.grid if current in spec.grid else (*spec.grid, current)
     per_regime: dict[str, dict] = {}
+    timings: dict[str, dict[tuple[int, ...], float]] = {}
+    sm_mhz: list[int | None] = []
     for regime in regimes:
-        key = ",".join(f"{label}={v}" for label, v in zip(spec.regime_labels, regime))
+        key = ",".join(f"{label}={v}" for label, v in zip(spec.regime_labels, regime, strict=True))
         inputs = spec.make_inputs(dev, regime)
-
+        timings[key] = {}
         results: list[dict] = []
-        best: tuple[int, ...] | None = None
-        best_ms = float("inf")
-        for entry in spec.grid:
+        for entry in grid:
             cfg = spec.config_cls(*entry)
             # Warm the JIT cache before measuring; do_bench's warmup wouldn't cover a cold compile
             # of this config.
@@ -249,32 +324,53 @@ def _sweep(spec: KernelTuneSpec, dev: torch.device, regimes: tuple[tuple[int, ..
                 spec.run(inputs, cfg)
             torch.cuda.synchronize()
             ms = _bench(lambda c=cfg: spec.run(inputs, c))
-            results.append({**dict(zip(_config_fields(spec, entry), entry)), "ms": ms})
-            if ms < best_ms:
-                best_ms = ms
-                best = entry
+            timings[key][entry] = ms
+            results.append({**dict(zip(_config_fields(spec, entry), entry, strict=True)), "ms": ms})
             click.echo(f"  [{key}] {_fmt_entry(spec, entry)}  -> {ms:.3f} ms", err=True)
-        assert best is not None
-        per_regime[key] = {"winner": best, "winner_ms": best_ms, "all": results}
+        sm_mhz.append(_sm_mhz())
+        best = min(timings[key], key=timings[key].get)
+        per_regime[key] = {"winner": best, "winner_ms": timings[key][best], "all": results}
         click.echo(
-            f"  [{key}] winner: {_fmt_entry(spec, best)} ({best_ms:.3f} ms)",
-            err=True,
+            f"  [{key}] winner: {_fmt_entry(spec, best)} ({timings[key][best]:.3f} ms)", err=True
         )
 
-    votes = Counter(per_regime[k]["winner"] for k in per_regime)
-    # Ties → lower num_warps (cheaper register pressure), then lower everything after it.
-    top = sorted(votes.items(), key=lambda kv: (-kv[1], kv[0][1:]))
-    return {"per_regime": per_regime, "default": top[0][0]}
+    pick, rule = _choose(current, timings)
+    b1_gaps = {
+        k: timings[k][pick] / per_regime[k]["winner_ms"] - 1
+        for k in timings
+        if "B=1," in k + "," and timings[k][pick] / per_regime[k]["winner_ms"] - 1 >= B1_GAP
+    }
+    return {
+        "per_regime": per_regime,
+        "current": current,
+        "default": pick,
+        "rule": {"noise_band": NOISE_BAND, "worst_cap": WORST_CAP, **rule},
+        "b1_gaps_over_threshold": b1_gaps,
+        "env": {
+            "sm_mhz_per_regime": sm_mhz,
+            "commit": _commit(),
+            "torch": torch.__version__,
+            "triton": triton.__version__,
+            "device": torch.cuda.get_device_name(dev),
+        },
+    }
 
 
 def _print(spec: KernelTuneSpec, arch: str, result: dict) -> None:
     entry = result["default"]
-    args = ", ".join(f"{name}={v}" for name, v in zip(_config_fields(spec, entry), entry))
+    args = ", ".join(
+        f"{name}={v}" for name, v in zip(_config_fields(spec, entry), entry, strict=True)
+    )
     cls_name = spec.config_cls.__name__
     click.echo("")
+    if entry == result["current"]:
+        click.echo(f"# Keep the shipped default: no candidate beats it by > {NOISE_BAND:.0%}")
+        click.echo(f"# within a {WORST_CAP:.0%} worst-regime cap.")
     click.echo(f"# Paste into {spec.paste_path}")
     click.echo(f"# Tuned on {arch}; per-regime details in JSON output if --json-out was used.")
     click.echo(f"DEFAULT_CONFIG = {cls_name}({args})")
+    for key, gap in result["b1_gaps_over_threshold"].items():
+        click.echo(f"# [{key}] its own winner is {gap:.0%} faster: a batch-1 config may pay.")
 
 
 KERNELS: tuple[KernelTuneSpec, ...] = (
@@ -286,6 +382,7 @@ KERNELS: tuple[KernelTuneSpec, ...] = (
         make_inputs=_fmkt_inputs,
         run=lambda inputs, config: _fused_masked_knn_topk_impl(**inputs, config=config),
         paste_path="retrieve/src/retrieve/ops/triton/fused_masked_knn_topk.py",
+        current=FUSED_MASKED_KNN_TOPK_DEFAULT,
         smoke_regime=(256, 64, 2),
         dims=(("d", 128, "Embedding dimension."), ("b", 16, "Batch size.")),
         expand_regimes=lambda d, b: tuple((p, d, b) for p in _P_BUCKETS),
@@ -298,6 +395,7 @@ KERNELS: tuple[KernelTuneSpec, ...] = (
         make_inputs=_oporp_inputs,
         run=lambda inputs, config: _oporp_1bit_match_topk_impl(**inputs, config=config),
         paste_path="retrieve/src/retrieve/ops/triton/oporp_1bit_match_topk.py",
+        current=OPORP_1BIT_MATCH_TOPK_DEFAULT,
         smoke_regime=(4096, 1, 2, 2),
         dims=(("w", 2, "int64 words per bit-vector (D=64*W)."), ("b", 16, "Batch size.")),
         expand_regimes=lambda w, b: tuple((n, hi, w, b) for n in _N_BUCKETS for hi in (0, 1)),
@@ -310,6 +408,7 @@ KERNELS: tuple[KernelTuneSpec, ...] = (
         make_inputs=_cps_inputs,
         run=lambda inputs, config: _codesigned_probe_score_impl(**inputs, config=config),
         paste_path="retrieve/src/retrieve/ops/triton/codesigned_probe_score.py",
+        current=CODESIGNED_PROBE_SCORE_DEFAULT,
         smoke_regime=(1024, 1, 64, 2, 4),
         dims=(
             ("d", 128, "Embedding dimension."),
@@ -331,6 +430,7 @@ KERNELS: tuple[KernelTuneSpec, ...] = (
         make_inputs=_cpse_inputs,
         run=lambda inputs, config: _codesigned_probe_score_exact_impl(**inputs, config=config),
         paste_path="retrieve/src/retrieve/ops/triton/codesigned_probe_score_exact.py",
+        current=CODESIGNED_PROBE_SCORE_EXACT_DEFAULT,
         smoke_regime=(4096, 2, 2, 2),
         default_regimes=_DEFAULT_CLAUSE_REGIMES,
         regime_arity=4,
@@ -344,6 +444,7 @@ KERNELS: tuple[KernelTuneSpec, ...] = (
         make_inputs=_clause_inputs,
         run=lambda inputs, config: _clause_mask_impl(**inputs, config=config),
         paste_path="retrieve/src/retrieve/ops/triton/clause_mask.py",
+        current=CLAUSE_MASK_DEFAULT,
         smoke_regime=(4096, 2, 2, 2),
         default_regimes=_DEFAULT_CLAUSE_REGIMES,
         regime_arity=4,
@@ -357,6 +458,7 @@ KERNELS: tuple[KernelTuneSpec, ...] = (
         make_inputs=_clause_inputs,
         run=lambda inputs, config: _clause_compact_impl(**inputs, config=config),
         paste_path="retrieve/src/retrieve/ops/triton/clause_compact.py",
+        current=CLAUSE_COMPACT_DEFAULT,
         smoke_regime=(4096, 2, 2, 2),
         default_regimes=_DEFAULT_CLAUSE_REGIMES,
         regime_arity=4,
@@ -370,6 +472,7 @@ KERNELS: tuple[KernelTuneSpec, ...] = (
         make_inputs=_bloom_inputs,
         run=lambda inputs, config: _bloom_compact_impl(**inputs, config=config),
         paste_path="retrieve/src/retrieve/ops/triton/bloom_compact.py",
+        current=BLOOM_COMPACT_DEFAULT,
         smoke_regime=(4096, 2, 4),
         default_regimes=_DEFAULT_BLOOM_REGIMES,
         regime_arity=3,

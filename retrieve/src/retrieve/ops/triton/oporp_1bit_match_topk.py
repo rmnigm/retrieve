@@ -15,7 +15,7 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
-from retrieve.ops.triton._host import wide
+from retrieve.ops.triton._host import check_contiguous, check_pow2, wide
 from retrieve.ops.triton.common import popcount_int64, row_base, tile_rows
 
 # N-bucket ladder for the HAS_INDICES path: clamps candidate width to constexpr values so the JIT
@@ -154,11 +154,12 @@ def _oporp_prep(
     d_total = 64 * w
     n_items_total = item_bits.shape[0]
 
+    check_contiguous(item_bits=item_bits)
+    check_pow2(W=w)
     query_bits = query_bits.contiguous()
-    item_bits = item_bits.contiguous()
 
     if has_indices:
-        positive_indices = positive_indices.contiguous()
+        check_contiguous(positive_indices=positive_indices)
         counts = counts.contiguous()
         n_loop = positive_indices.shape[1]
         # Widen to max(bucket(n_loop), bucket(k)) so topk(k) has >= k lanes; lanes in [n_loop,

@@ -9,7 +9,13 @@ from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
 from retrieve.indexing.quantize import quantize_int8
-from retrieve.ops.triton._host import ProbeLaunch, probe_finish, wide
+from retrieve.ops.triton._host import (
+    ProbeLaunch,
+    check_contiguous,
+    check_pow2,
+    probe_finish,
+    wide,
+)
 from retrieve.ops.triton.common import clause_pass, row_base
 
 
@@ -108,7 +114,10 @@ def _codesigned_probe_score_exact_kernel(
     dots_2d = tl.dot(q_codes_2d, codes_T, out_dtype=tl.int32)
     dots_i32 = tl.sum(dots_2d, axis=0)
 
-    dots = dots_i32.to(tl.float32) * q_scale * global_scale
+    # fp32 pinned: Inductor passes global_scale as a Python float (kernels.md § Numerics).
+    dots = (
+        dots_i32.to(tl.float32) * tl.cast(q_scale, tl.float32) * tl.cast(global_scale, tl.float32)
+    )
     dots = tl.where(keep, dots, float("-inf"))
 
     tl.store(
@@ -154,11 +163,15 @@ def _cpse_prep(
     if clause_is_reverse.shape != (c,):
         raise ValueError(f"clause_is_reverse must be [{c}], got {tuple(clause_is_reverse.shape)}")
 
+    check_contiguous(
+        item_codes=item_codes,
+        item_clause_attrs=item_clause_attrs,
+        flat_probed_items=flat_probed_items,
+    )
+    check_pow2(D=d)
+
     q_codes, q_scales = quantize_int8(query)
     q_codes, q_scales = q_codes.contiguous(), q_scales.contiguous()
-    flat_probed_items = flat_probed_items.contiguous()
-    item_codes = item_codes.contiguous()
-    item_clause_attrs = item_clause_attrs.contiguous()
     # Triton can't load native torch.bool; mirror clause_mask.py.
     clause_is_reverse = clause_is_reverse.contiguous().to(torch.int8)
     query_clause_attrs = query_clause_attrs.contiguous()

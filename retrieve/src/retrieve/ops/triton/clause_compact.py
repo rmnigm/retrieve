@@ -19,7 +19,12 @@ from torch import Tensor
 # By name, not `common.<fn>` — see the note in clause_mask.py: inductor's
 # re-compilation of a @triton_op kernel captures @triton.jit callees from
 # the kernel's globals by name, and a module object is not one.
-from retrieve.ops.triton._host import compact_finish, grid_batch_tiles, wide
+from retrieve.ops.triton._host import (
+    check_contiguous,
+    compact_finish,
+    grid_batch_tiles,
+    wide,
+)
 from retrieve.ops.triton.common import clause_pass, compact_stash, tile_rows
 
 
@@ -126,7 +131,7 @@ def _clause_compact_prep(
         raise ValueError(f"clause-count mismatch: items C={c}, query C={c_q}")
 
     device = query_clause_attrs.device
-    item_clause_attrs = item_clause_attrs.contiguous()
+    check_contiguous(item_clause_attrs=item_clause_attrs)
     clause_is_reverse = clause_is_reverse.contiguous().to(torch.int8)
     query_clause_attrs = query_clause_attrs.contiguous()
 
