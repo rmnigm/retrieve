@@ -260,12 +260,14 @@ uv run train upload-checkpoint \
 uv run train upload-checkpoint --dataset yambda-500m --ckpt-id all
 ```
 
-By default the script skips the epoch-tagged `gsasrec-ep*.pt` snapshot (`hub.EPOCH_SNAPSHOT_PATTERN`; it does not yet match the `{encoder}-ep*.pt` name the current trainer writes)
+By default the script skips the epoch-tagged snapshot (`hub.EPOCH_SNAPSHOT_PATTERN`, `*-ep*.pt`: the published `gsasrec-ep*.pt` and the current trainer's `{encoder}-ep*.pt`)
 because it has the same bytes as `best_model.pt` (just saved at a different
 moment in the training loop). That halves what gets pushed. Pass
 `--include-epoch-snapshots` if you want both copies. Other flags:
 `--public` (instead of the default `--private`), `--no-write-card` to skip
-the auto-generated README.
+the auto-generated README. Run output is never pushed
+(`hub.CKPT_ALWAYS_IGNORE`: `evaluate.json`, `benchmark.json`, the trainer's
+`_resume.pt` and the encode cache `encoded_queries_v2.pt`).
 
 The lower-level `eval-data publish-checkpoint` command exposes the same
 upload helper without the `all` selector:
