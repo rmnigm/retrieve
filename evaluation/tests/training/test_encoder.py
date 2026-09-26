@@ -1,9 +1,11 @@
 """``training``: the encoder's attention mask (a left-padded row stays finite, and the last
 position never sees the padding) and ``sampled_softmax_loss`` against a direct
-``F.cross_entropy`` over explicitly built candidate lists, and the ``TrainConfig`` loss /
-``normalize`` boundary."""
+``F.cross_entropy`` over explicitly built candidate lists (with and without logQ), the logQ
+expected-count formula, and the ``TrainConfig`` loss / ``normalize`` / ``logq`` boundary."""
 
 from __future__ import annotations
+
+import math
 
 import pytest
 import torch
@@ -12,6 +14,7 @@ import torch.nn.functional as F
 from training.config import TrainConfig
 from training.losses import sampled_softmax_loss
 from training.model import Encoder
+from training.train import logq_correction
 
 
 @pytest.mark.parametrize("encoder", ["sasrec", "hstu"])
@@ -30,34 +33,49 @@ def test_left_padding_is_finite_and_invisible_to_the_last_position(encoder):
     assert torch.equal(moved[:, -1], out[:, -1])
 
 
-def _oracle(q, table, pos_ids, cand_ids, temperature):
+def _oracle(q, table, pos_ids, cand_ids, temperature, q_of):
     q, table = F.normalize(q, dim=-1), F.normalize(table, dim=-1)
     losses = []
     for row, pos in enumerate(pos_ids.tolist()):
-        ids = [pos] + [c for c in cand_ids.tolist() if c != pos]
-        logits = table[ids] @ q[row] / temperature
-        losses.append(F.cross_entropy(logits[None], torch.tensor([0])))
+        cands = [c for c in cand_ids.tolist() if c != pos]
+        logits = [table[pos] @ q[row] / temperature]
+        logits += [table[c] @ q[row] / temperature - math.log(q_of[c]) for c in cands]
+        losses.append(F.cross_entropy(torch.stack(logits)[None], torch.tensor([0])))
     return torch.stack(losses).mean()
 
 
-def test_sampled_softmax_matches_cross_entropy_over_explicit_candidates():
+@pytest.mark.parametrize("logq", [False, True], ids=["plain", "logq"])
+def test_sampled_softmax_matches_cross_entropy_over_explicit_candidates(logq):
     g = torch.Generator().manual_seed(0)
     table = torch.randn(10, 4, generator=g)
     q = torch.randn(3, 4, generator=g)
     pos_ids = torch.tensor([2, 5, 7])
     cand_ids = torch.tensor([5, 1, 3, 2, 9, 5])  # rows 0 and 1 each hit their own positive
-    got = sampled_softmax_loss(q, pos_ids, cand_ids, table, temperature=0.05, normalize=True)
-    want = _oracle(q, table, pos_ids, cand_ids, 0.05)
+    # Uneven, so a flipped sign or a corrected positive (2 and 5 are candidates) moves the loss.
+    q_of = {5: 0.4, 1: 0.05, 3: 0.1, 2: 0.3, 9: 0.15} if logq else dict.fromkeys(range(10), 1.0)
+    log_q = torch.tensor([math.log(q_of[c]) for c in cand_ids.tolist()]) if logq else None
+    got = sampled_softmax_loss(q, pos_ids, cand_ids, table, 0.05, normalize=True, log_q=log_q)
+    want = _oracle(q, table, pos_ids, cand_ids, 0.05, q_of)
     assert torch.allclose(got, want, rtol=1e-6, atol=0)  # fp32, same values summed in another order
+
+
+def test_logq_is_the_log_expected_draw_count():
+    p_train = torch.tensor([0.0, 0.5, 0.375, 0.125], dtype=torch.float64)
+    candidates = torch.tensor([1, 2, 1, 3, 2])
+    # M = 2 in-batch, K = 3 uniform over N = 4: q_j = 2·p_j + 3/4.
+    want = torch.tensor([math.log(q) for q in [1.75, 1.5, 1.75, 1.0, 1.5]])
+    got = logq_correction(p_train, candidates, m=2, k=3, n=4)
+    assert torch.allclose(got, want, rtol=0, atol=1e-7)  # float64 log rounded to fp32 on both sides
 
 
 @pytest.mark.parametrize(
     ("overrides", "match"),
     [
         ({"loss": "gbc"}, "expected 'gbce' or 'sampled_softmax'"),
-        ({"loss": "gbce", "normalize": True}, "only implemented for loss='sampled_softmax'"),
+        ({"loss": "gbce", "normalize": True}, "normalize=True is only implemented for"),
+        ({"loss": "gbce", "logq": True}, "logq=True is only implemented for"),
     ],
-    ids=["unknown-loss", "gbce-normalize"],
+    ids=["unknown-loss", "gbce-normalize", "gbce-logq"],
 )
 def test_train_config_rejects_what_the_loss_would_silently_ignore(overrides, match):
     with pytest.raises(ValueError, match=match):

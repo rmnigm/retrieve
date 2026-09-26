@@ -27,6 +27,7 @@ class TrainConfig:
     gbce_t: float = 0.75
     temperature: float = 0.05
     normalize: bool | None = None
+    logq: bool = False
 
     batch_size: int = 256
     learning_rate: float = 1e-3
@@ -61,6 +62,8 @@ class TrainConfig:
             self.normalize = self.loss == "sampled_softmax"
         if self.normalize and self.loss == "gbce":
             raise ValueError("normalize=True is only implemented for loss='sampled_softmax'")
+        if self.logq and self.loss == "gbce":
+            raise ValueError("logq=True is only implemented for loss='sampled_softmax'")
         self.eval_ks = tuple(self.eval_ks)
 
     @property

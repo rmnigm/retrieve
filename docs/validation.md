@@ -179,7 +179,7 @@ citable.** Artifacts: [gate A](artifacts/seqrec-encoder/gate-a/),
 | B: retrain yambda-500m d64 on the published recipe, test within ±0.002 | per-position gBCE negatives, `compile=true`, 100 epochs: test ndcg@10 **0.0837**, recall@100 **0.1558**. Against the brief's 0.0813 / 0.1489 (the stale split): +0.0024 / +0.0069, **outside**. Against the published checkpoint re-scored on the same file (0.0846 / 0.1563): −0.0009 / −0.0006, **inside**. Best val 0.0913 (published 0.0920). 10.37 s/epoch median, 8,772 seq/s, 1478 s total (A100 published run: 2809 s), peak 11.2 GB, sm_mhz 1980 |
 | B, shared negatives (plan §3) | one `[256]` negative vector per step collapses gBCE (test 0.0160 / 0.0377, 21 distinct items across 2048 users' top-10s); gBCE therefore samples per position ([mechanism](artifacts/seqrec-encoder/gate-b-yambda-d64/README.md)) |
 | `torch.compile` of the body | 3.93-4.03 s/epoch compiled against 4.8-5.9 eager (shared-negative gBCE, 3 epochs each, interleaved); kept |
-| unit gates | `tests/training/test_encoder.py`: a left-padded row stays finite and padding content does not move the last position (`sasrec`, `hstu`); `sampled_softmax_loss` equals a direct `F.cross_entropy` over explicit candidate lists; `TrainConfig` rejects an unknown `loss` and `normalize` with `gbce` (CPU) |
+| unit gates | `tests/training/test_encoder.py`: a left-padded row stays finite and padding content does not move the last position (`sasrec`, `hstu`); `sampled_softmax_loss` equals a direct `F.cross_entropy` over explicit candidate lists, without and with a hand-built logQ (uneven explicit q; fails on a flipped sign or a corrected positive); `logq_correction` equals a hand-written `log(M·p + K/N)` vector for M = 2, K = 3, N = 4 (fails with the per-slot `/(M+K)`); `TrainConfig` rejects an unknown `loss`, and `normalize` or `logq` with `gbce` (CPU) |
 
 ### Encoder experiments E0-E4 (H100, not yet validated, not citable)
 
@@ -193,7 +193,7 @@ the selected checkpoint. sm_mhz 1980 throughout.
 |---|---|---|---|---|---|---|---|
 | [E1](artifacts/seqrec-encoder/e1-yambda-d64-sasrec-ssm/) yambda d64, gSASRec body, sampled softmax (in-batch 4096 + uniform 8192, no logQ) | 0.0661 / 0.0790 / 0.0326 / 0.1093 / 0.0674 | −0.0185 / −0.0470 | 0.0740 (95 of 100) | 10.9 | 8,337 | 10.7 | 26 min |
 
-Unverified: the `hstu` block and `sampled_softmax` beyond a 50-step smoke run and the unit gates;
+Unverified: the `hstu` block and `sampled_softmax` beyond a 50-step smoke run and the unit gates; `logq=true` has never run on the GPU (`target_frequencies` is checked only by hand on CPU);
 `use_time` on real timestamps (the yambda and goodreads trainer parquets now carry the column; no run has used it yet); resume (`--resume` has never run on the GPU).
 
 ## Still unverified
