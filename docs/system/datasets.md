@@ -720,7 +720,10 @@ is 65.6 GB before activations on the 80 GB A100; two separate tables would
 need 131 GB. That estimate is arithmetic, not a measurement. If it does not
 fit, lower `batch_size`. Every epoch also scores
 the full catalog for the val users, so `eval_max_users` bounds that
-cost. The command, not yet run:
+cost. The final KuaiRand models are refit with `train_on_val=true` at the
+epoch count chosen on val, because next-day clicks drift and the val day
+is otherwise never trained on ([validation](../validation.md#seqrec-encoder)).
+The command for the run that picks the epoch count, not yet run:
 
 ```bash
 uv run --directory evaluation train run data_dir=data/kuairand \
@@ -1062,7 +1065,7 @@ nothing from `bench`; the console script is `train`.
 |---|---|
 | [`config.py`](../../evaluation/training/config.py) | `TrainConfig` dataclass (defaults = the E1c recipe) + `save` / `load` (unknown keys dropped; no `loss` key means `gbce`) / `num_items` |
 | [`model.py`](../../evaluation/training/model.py) | `Encoder`, `SASRecBlock`, `build_encoder(cfg, num_items)` |
-| [`dataset.py`](../../evaluation/training/dataset.py) | `load_sequences` (the train split as left-padded `[U, L+1]` tensors on the device), `train_batches` (`randperm` slices) |
+| [`dataset.py`](../../evaluation/training/dataset.py) | `load_sequences` (the train split as left-padded `[U, L+1]` tensors on the device), `load_val_transitions` (val rows for `train_on_val`), `target_mask` (the trained target positions), `train_batches` (`randperm` slices) |
 | [`losses.py`](../../evaluation/training/losses.py) | `gbce_loss`, `sampled_softmax_loss` |
 | [`evaluate.py`](../../evaluation/training/evaluate.py) | chunked full-catalog scoring with its **own** recall / ndcg (`hits_at`, `recall_at_k`, `ndcg_at_k`): a checkpoint's reported quality must not move with the harness's metric code; `tests/training/test_encode.py` pins them to `bench.metrics` at 1e-9 |
 | [`encode.py`](../../evaluation/training/encode.py) | `load_model_for_eval`, `encode_queries`, `encode_split` — the eval-time encode of the test split with its cache (`<ckpt-dir>/encoded_queries_v2.pt`, keyed on ckpt mtime + `max_seq_length`, the full split); what `bench.inputs.load_inputs` calls on a `checkpoint` dataset |
@@ -1112,6 +1115,19 @@ write, so resuming always finds its best, looked up by file name in
 be retrained, or all of them when no `_resume.pt` was written yet) is
 deleted. Disk peak: one extra best snapshot.
 
+`train_on_val=true` is the final fit, run after `num_epochs` has been chosen
+on val by an ordinary run. It adds one training row per `val.parquet` row:
+the last `max_seq_length + 1` items of `item_ids ++ targets`, with the val
+day's clicks in time order (`load_val_transitions`). Only the target
+positions whose target is a val-day item are trained (`target_mask`, from
+the per-row `first`), because the history transitions are already train
+rows. A row with more than `max_seq_length` targets keeps only its last
+`max_seq_length`. The logQ frequencies count these positions too. The
+run evaluates nothing on val and never stops early: it trains exactly
+`num_epochs`, and the last epoch is the model saved as `best_model.pt` and
+scored on test (`eval_quality.json`; `best_val_metric` is `{}`). `patience`,
+`eval_every` and `early_stop_metric` then have nothing to act on.
+
 ### The encoder
 
 `Encoder(items [B, L]) -> [B, L, D]`: `item_embedding [N+1, D]` (row 0 is
@@ -1158,8 +1174,8 @@ Negatives are uniform over `1..N`, drawn on the GPU inside the step.
   is drawn among the M + K candidates (M the in-batch candidates actually
   used, K = `num_negatives`, N the item count; `logq_correction`, float64
   until the log). `p_train` is each item's share of
-  the train target positions (`target_frequencies`, one GPU bincount at
-  startup). The positive column is not corrected (arXiv 2507.09331);
+  the trained target positions (`target_frequencies` over `target_mask`,
+  one GPU bincount at startup). The positive column is not corrected (arXiv 2507.09331);
   accidental hits stay `−inf`. With M = 0, `q_j = K/N` for every
   candidate, so each moves by `+log(N/K)` against the uncorrected positive:
   the plain uniform sampled-softmax correction.
@@ -1174,7 +1190,8 @@ embedding lookup and the loss stay eager. Every `eval_every` epochs it
 evaluates on `val.parquet` by scoring the full catalog in
 `[B, eval_score_chunk]` chunks and merging top-k across chunks, optionally
 masking history. Checkpoints on improvement in `early_stop_metric`, stops
-after `patience` evaluations without one.
+after `patience` evaluations without one. With `train_on_val` there is no
+val eval, no snapshot and no early stop.
 
 TF32 is **enabled** here (`_enable_tf32`) — the opposite of the
 benchmark harness, which pins it off for measurement determinism.
@@ -1183,7 +1200,7 @@ benchmark harness, which pins it off for measurement determinism.
 
 ```
 <checkpoint_dir>/
-├── best_model.pt          # reloaded, then re-saved from the best epoch
+├── best_model.pt          # reloaded, then re-saved from the best epoch (train_on_val: the last epoch)
 ├── config.json            # the TrainConfig — the eval loader reads this
 ├── item_embs.pt           # scoring_table(), row 0 zeroed
 ├── item_id_map.json       # copied from data_dir

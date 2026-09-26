@@ -27,8 +27,28 @@ def load_sequences(parquet_path: str, max_length: int, device: torch.device) -> 
     return _left_pad(df["item_ids"], max_length + 1).to(device)
 
 
-def train_batches(items: torch.Tensor, batch_size: int) -> Iterator[torch.Tensor]:
+def load_val_transitions(
+    parquet_path: str, max_length: int, device: torch.device
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Val rows as train rows: ``items [U, L+1]``, the last ``L+1`` of ``item_ids ++ targets``,
+    and ``first [U]``, the first target position whose target is a val-day item."""
+    df = pl.read_parquet(parquet_path, columns=["item_ids", "targets"])
+    items = _left_pad(df["item_ids"].list.concat(df["targets"]), max_length + 1)
+    n_targets = torch.from_numpy(df["targets"].list.len().to_numpy().astype("int64"))
+    return items.to(device), (max_length - n_targets).clamp(min=0).to(device)
+
+
+def target_mask(items: torch.Tensor, first: torch.Tensor) -> torch.Tensor:
+    """``[U, L]`` bool: target position ``j`` is trained, a real item at ``j >= first``."""
+    positions = torch.arange(items.shape[1] - 1, device=items.device)
+    return (items[:, 1:] != 0) & (positions >= first.unsqueeze(1))
+
+
+def train_batches(
+    items: torch.Tensor, first: torch.Tensor, batch_size: int
+) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
     """Shuffled full batches (the last partial one is dropped), drawn with the device RNG."""
     perm = torch.randperm(items.shape[0], device=items.device)
     for start in range(0, items.shape[0] - batch_size + 1, batch_size):
-        yield items[perm[start : start + batch_size]]
+        idx = perm[start : start + batch_size]
+        yield items[idx], first[idx]
