@@ -1138,13 +1138,15 @@ Negatives are uniform over `1..N`, drawn on the GPU inside the step.
   `normalize=true` with `gbce` and any other `loss` value.
   `logq` (default off; `TrainConfig` rejects it with `gbce`) subtracts
   `log q_j` from every candidate column after the temperature scaling,
-  where `q_j = (M·p_train(j) + K/N) / (M + K)` is the probability that the
-  mixed proposal draws item j (M the in-batch candidates actually used, K
-  = `num_negatives`, N the item count). `p_train` is each item's share of
+  where `q_j = M·p_train(j) + K/N` is the expected number of times item j
+  is drawn among the M + K candidates (M the in-batch candidates actually
+  used, K = `num_negatives`, N the item count; `logq_correction`, float64
+  until the log). `p_train` is each item's share of
   the train target positions (`target_frequencies`, one GPU bincount at
   startup). The positive column is not corrected (arXiv 2507.09331);
-  accidental hits stay `−inf`. With M = 0, q is uniform and every
-  candidate moves by `+log N` against the uncorrected positive.
+  accidental hits stay `−inf`. With M = 0, `q_j = K/N` for every
+  candidate, so each moves by `+log(N/K)` against the uncorrected positive:
+  the plain uniform sampled-softmax correction.
 
 ### Loop shape
 

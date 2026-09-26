@@ -78,6 +78,13 @@ def target_frequencies(items: torch.Tensor, num_items: int) -> torch.Tensor:
     return counts.double() / counts.sum()
 
 
+def logq_correction(
+    p_train: torch.Tensor, candidates: torch.Tensor, m: int, k: int, n: int
+) -> torch.Tensor:
+    """``log q_j``, q_j the expected count of item j among M in-batch and K uniform draws."""
+    return (m * p_train[candidates] + k / n).log().float()
+
+
 def step_loss(
     model: Encoder,
     batch: dict[str, torch.Tensor],
@@ -100,8 +107,7 @@ def step_loss(
     candidates = torch.cat([pos_ids[perm], neg_ids])
     log_q = None
     if p_train is not None:
-        m, k = perm.shape[0], config.num_negatives
-        log_q = ((m * p_train[candidates] + k / num_items) / (m + k)).log().float()
+        log_q = logq_correction(p_train, candidates, perm.shape[0], config.num_negatives, num_items)
     return sampled_softmax_loss(
         queries, pos_ids, candidates, table, config.temperature, config.normalize, log_q
     )

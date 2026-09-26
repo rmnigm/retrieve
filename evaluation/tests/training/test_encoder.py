@@ -1,7 +1,7 @@
 """``training``: the encoder's attention mask (a left-padded row stays finite, and the last
 position never sees the padding) and ``sampled_softmax_loss`` against a direct
-``F.cross_entropy`` over explicitly built candidate lists (with and without logQ), and the
-``TrainConfig`` loss / ``normalize`` / ``logq`` boundary."""
+``F.cross_entropy`` over explicitly built candidate lists (with and without logQ), the logQ
+expected-count formula, and the ``TrainConfig`` loss / ``normalize`` / ``logq`` boundary."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import torch.nn.functional as F
 from training.config import TrainConfig
 from training.losses import sampled_softmax_loss
 from training.model import Encoder
+from training.train import logq_correction
 
 
 @pytest.mark.parametrize("encoder", ["sasrec", "hstu"])
@@ -56,6 +57,15 @@ def test_sampled_softmax_matches_cross_entropy_over_explicit_candidates(logq):
     got = sampled_softmax_loss(q, pos_ids, cand_ids, table, 0.05, normalize=True, log_q=log_q)
     want = _oracle(q, table, pos_ids, cand_ids, 0.05, q_of)
     assert torch.allclose(got, want, rtol=1e-6, atol=0)  # fp32, same values summed in another order
+
+
+def test_logq_is_the_log_expected_draw_count():
+    p_train = torch.tensor([0.0, 0.5, 0.375, 0.125], dtype=torch.float64)
+    candidates = torch.tensor([1, 2, 1, 3, 2])
+    # M = 2 in-batch, K = 3 uniform over N = 4: q_j = 2·p_j + 3/4.
+    want = torch.tensor([math.log(q) for q in [1.75, 1.5, 1.75, 1.0, 1.5]])
+    got = logq_correction(p_train, candidates, m=2, k=3, n=4)
+    assert torch.allclose(got, want, rtol=0, atol=1e-7)  # float64 log rounded to fp32 on both sides
 
 
 @pytest.mark.parametrize(
