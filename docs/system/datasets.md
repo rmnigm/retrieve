@@ -26,7 +26,7 @@ gets is decided by whether it sets `checkpoint`:
 | shape | datasets | query embeddings come from | filters |
 |---|---|---|---|
 | **sequential** | yambda-500m, yambda-5b, goodreads, kuairand | a trained SASRec checkpoint, encoded at eval time | goodreads, kuairand |
-| **text** | arxiv, arxiv-synth, yfcc10m, pubmed | pre-encoded embeddings on disk | yes |
+| **text** | arxiv, arxiv-synth, yfcc10m, pubmed, openalex | pre-encoded embeddings on disk | yes |
 
 A third variant, **synthetic**, is a text dataset grown to arbitrary `N`
 by interpolating between real embeddings — used for scale sweeps where a
@@ -62,6 +62,7 @@ HuggingFace's `datasets` in the shared venv.
 | [`etl/yfcc_check_gt.py`](../../evaluation/eval_datasets/etl/yfcc_check_gt.py) | `yfcc-check-gt` | — (validates the shipped GT) |
 | [`etl/pubmed.py`](../../evaluation/eval_datasets/etl/pubmed.py) | `pubmed` | NCBI FTP MedCPT embeddings + MEDLINE baseline (~36M articles) |
 | [`etl/kuairand.py`](../../evaluation/eval_datasets/etl/kuairand.py) | `kuairand` | Zenodo KuaiRand-27K + category supplement (32M videos) |
+| [`etl/openalex.py`](../../evaluation/eval_datasets/etl/openalex.py) | `openalex` | OpenAlex snapshot on public S3, parquet copy (476M works, streamed) |
 | [`etl/synth_arxiv.py`](../../evaluation/eval_datasets/etl/synth_arxiv.py) | `synth-arxiv` | an already-encoded arxiv directory |
 | [`common.py`](../../evaluation/eval_datasets/common.py) | — | shared attribute-synthesis numerics |
 | [`timesplit.py`](../../evaluation/eval_datasets/timesplit.py) | — | vendored sequential time-split |
@@ -117,7 +118,9 @@ uncapped tag CSR and skips itself when `data_root()/yfcc10m` is not on the
 machine; its query-predicate test also reads the raw
 `_raw/yfcc10m/query.metadata.public.100K.spmat` and skips without it. Reuse those writers when adding the E2–E4 loaders,
 and give each new loader a fixture test that runs `validate_layout` on
-what it wrote.
+what it wrote. `test_openalex.py` builds its rows in the snapshot's projected
+parquet schema (nested `primary_topic.field.id` etc.) and runs `prep` →
+`attrs` → `validate_layout` on a 60-paper citation-connected staging dir.
 
 ### Shared conventions
 
@@ -702,6 +705,179 @@ data/kuairand/
 └── prep_log.json
 ```
 
+### openalex
+
+**Status: ETL written and dry-run on real snapshot rows, nothing staged.** Roadmap E3's
+OpenAlex fallback (no Semantic Scholar key). The full stream, the encode and every cell
+are still to run; nothing below is citable.
+
+The dry run (2026-09-26, artifacts in [e3-openalex/](../artifacts/e3-openalex/)):
+`convert` on 8 real snapshot files (50,304 records) staged 4,581 works; a few thousand
+rows barely cite each other, so [`api_citation_topup.py`](../artifacts/e3-openalex/api_citation_topup.py)
+added the 1,060 eligible works that 60 pool papers really cite (OpenAlex API, same
+`stage_table`). `prep --keep-items 5073` held out 75 papers with 994 in-catalog
+references (405 same field, earlier era), `verify_prep.py` re-derived all of it with no
+mismatch, `encode_text` / `encode_queries` ran on the A100 (a deleted shard re-encoded
+bit-identically), `attrs` built the clauses, and `bench check` against that directory
+reports `openalex d768: ok` (and flags a removed `eval_split.parquet`). Every harness
+reader (`layout.load_text_items` / `load_text_queries` / `load_item_attrs` /
+`load_query_attrs`) loads it.
+
+`download` → `convert` → `prep` → `encode_text` → `encode_queries` → `attrs`, with
+`plan` first. Source: the OpenAlex quarterly snapshot on public S3, anonymous, CC0.
+Verified 2026-09-26 against release **2026-09-23**: the 2026 layout is
+`s3://openalex/data/{jsonl,parquet}/<entity>/updated_date=*/part_*` with a
+`manifest.json` per format, written last (the old `data/works/` path is an S3 delete
+marker; `legacy-data/` is frozen). `works` is **476,196,327 records in 2,040 files**:
+659.0 GB of gzipped JSONL, **707.1 GB of parquet**. `download` pins that manifest in
+`_raw/openalex/manifest.json`; every later step walks its files in (date, part) order.
+
+**Why the parquet copy.** Column projection. `convert` reads 14 leaves (`id`,
+`publication_year`, `language`, `type`, the three flags, `primary_topic.{field,subfield}.id`,
+`primary_location.source.id`, `open_access.is_oa`, `title`, `abstract_inverted_index`,
+`referenced_works`), which the footers of all 2,040 files put at **297.1 GB (42.0 %)**. The
+abstract is a JSON *string* in the parquet copy (an object in JSONL and the API); only rows
+that survive the cheap filters are JSON-parsed.
+
+#### The streaming `convert`
+
+The snapshot is never landed. `convert --workers W` runs one spawned process per file
+(`stage_file`): row group by row group, read the projected columns over S3, filter
+(`stage_table`), and write the survivors to `_raw/openalex/staging/<date>_<part>.parquet`
+atomically. A killed run resumes at the first file without a staging parquet; the
+parameters (release, year range, types, sample rate, seed) are pinned in
+`staging/params.json` and a resume under different ones is refused. A file that fails with
+an S3 / Arrow error is reported and skipped; rerunning picks it up.
+
+The filters, in order, each counted into `convert_log.jsonl`:
+
+1. `publication_year` in [2000, release year];
+2. `language == "en"`;
+3. `type` in `article, preprint, review, conference-paper, book-chapter, dissertation` —
+   `dataset` is 29 % of English works and mostly boilerplate (every CCDC crystal-structure
+   entry shares one abstract, i.e. exact-duplicate vectors);
+4. not `is_paratext` / `is_retracted` / `is_xpac`;
+5. the **hash sample**: `pubmed.pmid_hash(work_id, seed) < sample_rate · 2⁶⁴`;
+6. abstract present. The text is the inverted index's words in position order
+   (`abstract_text`). The parquet copy caps strings just under 32,767 chars, which cuts
+   about one index in 7 M mid-JSON (1 in 7,108,348 sampled, W4214716959); such a row is
+   counted as `abstract_truncated` and dropped.
+
+`plan` measures these rates on a seeded sample of row groups (weighted by records) and
+turns `--keep-items` into the `--sample-rate` that stages `keep_items × (1 + margin)`
+works. The parser was checked row-for-row against the API: the abstract rebuilt from the
+parquet string equals the one rebuilt from the API object.
+
+#### The slice, the queries, the relevance
+
+`prep` keeps the **N smallest work-id hashes** of the staged rows (`pubmed.select_pmids`,
+so the catalog is the same set whatever the file order, and a smaller N is a subset of a
+larger one); a work id staged twice keeps its newest copy. Item ids are 1-indexed dense in
+(file, row) order; `papers.parquet` is written in item-id order, which `encode_text` and
+`attrs` rely on (`attrs` checks it).
+
+The staged works above rank N — the `margin` — are the **held-out pool**: never in the
+catalog. A pool paper is a query candidate when at least one work it references is in the
+catalog *with the same field and a strictly earlier era* (below). `--n-heldout` (10,000)
+of them are drawn with the seed. Per query:
+
+- `qrels.parquet` — every in-catalog reference (`query_row, item_id, passes_field_era`):
+  the relevance signal, "the papers this paper cites";
+- `heldout.parquet` — `item_id` = **the target**, one reference drawn with the seed among
+  those passing field + era (the harness text path takes one target per query), plus the
+  query's `work_id / year / era / field / subfield / source / is_oa` and its
+  `n_relevant` / `n_relevant_field_era`;
+- `queries.parquet` — its title and abstract, the query text.
+
+Recall is measured against the harness's exact filtered oracle, as everywhere; the qrels
+carry the citation relevance for the multi-target metrics the harness does not yet read.
+[`verify_prep.py`](../artifacts/e3-openalex/verify_prep.py) re-derives every query's qrels,
+flags and target from `item_id_map.json`, `papers.parquet` and the staged `refs`.
+
+#### Attribute semantics
+
+`item_attrs_narrow.pt` is `[N, 5, 4]`, the shape of the other text datasets:
+
+| clause | attribute | cardinality | query value |
+|---|---|---|---|
+| C0 | `primary_topic.field` | 26 | the query's field |
+| C1 | earlier era (below) | 5 eras | the query's era |
+| C2 | `primary_topic.subfield` | ~250 | the query's subfield |
+| C3 | `primary_location.source` | top `--source-vocab` (5,000) | the query's own venue — **reverse** |
+| C4 | `open_access.is_oa` (null → 0) | 2 | `1` for every query |
+
+`clause_is_reverse_narrow.pt` is `[F, F, F, T, F]`; C3 is bloom-incompatible and
+excluded from the bloom sweeps of [`config/openalex.yaml`](../../evaluation/config/openalex.yaml).
+The roadmap's predicate "year < query year, same field" is the `field_era` sweep, C0 ∧ C1.
+
+**Why eras.** Clauses are equality-only
+([filtering](filtering.md#linr-paper-31--fixed-clause-schema-no-dsl)), so an order
+predicate is encoded as a set: an item of era *b* lists the eras *b+1 … 4* in its C1
+slots, and a query sends its own era, which matches exactly the items of strictly earlier
+eras (`earlier_era_slots`). Four slots allow five eras: 2000–09, 2010–14, 2015–18,
+2019–21, ≥2022 (the sampled eligible works split 25 / 21 / 16 / 15 / 23 %). This is
+**subtractive** against the exact year predicate — a reference from earlier in the
+query's own era is excluded — so it benchmarks "published in an earlier era", and the
+harness oracle is built from the same attrs, so recall stays exact for that filter.
+
+#### Encoding
+
+`nomic-embed-text-v1.5` at its native 768 dims (no truncation, [decisions](../decisions.md#datasets)),
+`"search_document: "` / `"search_query: "` prefixes as on arxiv, text
+`"{prefix}{title}. {abstract[:1500]}"`, 512 tokens, bf16 weights, fp16 L2-normalised
+output. `encode_text` writes `content_d768/text_emb_shard_NNN.pt` of `--shard-rows`
+(1 M) items each, atomically; a killed run skips every finished shard, and
+`encode_params.json` refuses a resume under different settings. `shard_index.json` and
+`text_emb.meta.json` are written only once every shard exists, so a partial encode is
+never loadable. The encoder's remote code needs `einops` (now a dependency).
+
+Measured on the A100 on 20,292 real texts (mean 228 tokens, 1.7 % at 512): **898 docs/s**
+with bf16 weights at batch 256 (755 under bf16 autocast, 813 at batch 512; min cosine
+between the two dtypes 0.99989); the forward alone runs 954 docs/s, so tokenization in
+the main thread costs ~6 %. `flash_attn` is not installed.
+
+#### Budget
+
+`plan` on release 2026-09-23 ([report](../artifacts/e3-openalex/plan-2026-09-23.json)),
+the stream rate from [`stream_probe.py`](../artifacts/e3-openalex/stream_probe.py):
+
+| | 50 M slice |
+|---|---|
+| eligible works | 11.5 % of a 5.5 M-row sample (64 row groups) → **~54.6 M**; row groups cluster by type, and a 32-group sample said 13.1 %, so treat it as ±10 % |
+| sample rate | `plan` says 0.962; run `convert --sample-rate 1.0` and let `prep` cut exactly 50 M (the rest is the held-out pool) |
+| read over S3 | **297.1 GB** of projected columns (all files; the slice is a hash, not a prefix) |
+| stream wall time | 176 MB/s with 32 workers, 229.5 MB/s with 64 (96 / 128 random row groups, read + `stage_table`) → **~25–30 min** plus the tail of the largest files; `plan`'s own threaded rate (20 MB/s) is GIL-bound, a lower bound |
+| staging parquet | 525 B/row → ~28–29 GB |
+| `papers.parquet` | ~26.3 GB |
+| fp16 item shards | 76.8 GB |
+| **peak disk** | **~131 GB** (staging + papers + shards; `_raw/openalex/staging` can go once `prep` is done) |
+| encode | 50 M ÷ 898 docs/s ≈ **15.5 A100-hours** (queries: seconds) |
+| items fp32 on the device | **153.6 GB** |
+
+**The 50 M slice does not fit the harness as written**: `load_inputs` holds items fp32 on
+the device, 153.6 GB at 768-d on an 80 GB A100 — the same ceiling that made pubmed a
+10 M slice (~15 M items at 768-d). The ETL takes any `--keep-items`; **E3 runs at ~15 M**
+instead of 50 M (orchestrator decision, matching the pubmed precedent), scaling the table
+above to roughly a third: ~40 GB peak disk, ~4.6 A100-hours to encode.
+
+```
+data/openalex/
+├── item_id_map.json            {"W<id>": item_id}
+├── papers.parquet              item-id order: work_id, year, field, subfield, source, is_oa, type, title, abstract, refs
+├── heldout.parquet             target item_id + the query's own attributes and relevance counts
+├── queries.parquet             query_work_id, title, abstract (heldout row order)
+├── qrels.parquet               query_row, item_id, passes_field_era
+├── content_d768/
+│   ├── text_emb_shard_NNN.pt + shard_index.json + text_emb.meta.json
+│   ├── query_emb.pt + query_emb.meta.json
+│   └── encode_params.json
+├── item_attrs_narrow.pt        [N, 5, 4] int64
+├── clause_is_reverse_narrow.pt [5] bool = [F, F, F, T, F]
+├── {field,subfield,source,era}_vocab.json
+├── eval_split.parquet          target_id, query_attrs_narrow [5]
+└── prep_log.json
+```
+
 ### synth_arxiv
 
 Grows an encoded arxiv directory to arbitrary `N` (15M / 30M / 50M) by
@@ -749,6 +925,8 @@ data/arxiv-papers/                       # config/arxiv.yaml: data_dir
 (`content_d768`) whose item matrix is **sharded** — `shard_index.json` +
 `text_emb_shard_*.pt`, the synth-arxiv layout — instead of one
 `text_emb.pt`; `load_text_items` and `validate_layout` take either.
+`openalex` is the pubmed shape plus `queries.parquet` and `qrels.parquet`
+(listing under [openalex](#openalex)).
 
 Filter sweeps additionally need:
 

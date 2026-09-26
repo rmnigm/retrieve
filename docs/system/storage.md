@@ -162,11 +162,16 @@ Size the pod's disks for these at `pod.sh up` (`--disk`, `--volume`):
   unpacked form never lands on disk. Its checkpoint adds one
   32 M × 128 fp32 table, 16.4 GB
   ([datasets](datasets.md#kuairand)).
-- **E3 (Semantic Scholar / OpenAlex) only fits as a stream.** The source is
-  670–840 GB, so it can never be landed. The 50 M-paper slice is
-  50 M × 768 × 4 B ≈ **154 GB** processed, which fits alone only via a pure
-  streaming pass over the remote JSONL with nothing else on the disk; the
-  OpenAlex fallback adds 9–14 A100-hours of encoding.
+- **E3 (OpenAlex) only fits as a stream.** The works snapshot is 707 GB of
+  parquet and is never landed: `openalex convert` reads 297 GB of projected
+  columns over S3 and stages the filtered, hash-sampled rows. A 50 M-paper
+  catalog does not fit the harness's fp32-on-device item table
+  (50 M × 768 × 4 B ≈ 154 GB against 80 GB, the same ceiling that scoped
+  PubMed to 10 M) — scoped to ~15 M instead (peak disk ~40 GB at that size,
+  scaled down from the measured 50 M figures of ~131 GB staging + papers
+  parquet + fp16 item shards); encoding at 15 M is ~4.6 A100-hours (~15.5 h
+  at the original 50 M)
+  ([datasets](datasets.md#budget)).
 
 ## Persistence
 
