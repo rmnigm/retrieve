@@ -611,13 +611,14 @@ it, and `bench/` and the slice stay as they are. The exact
 
 ### kuairand
 
-**Status: staged and layout-clean; one d64 checkpoint, not on the Hub.** `download` →
-`convert` → `prep` → `attrs` have run on the real data, and `bench check --dataset
-kuairand` is clean. The d64 `train_on_val` model is trained
-([validation](../validation.md#final-models-the-e1c-recipe)); d128 does not fit.
-Only the trainer inputs are on the Hub ([HuggingFace I/O](#huggingface-io)): the eval
-inputs and the checkpoint were refused by the private storage limit. The filter cell
-has not run (roadmap E4). Nothing below is citable.
+**Status: staged and layout-clean; the eval inputs and the d64 checkpoint are not on the Hub.**
+`download` → `convert` → `prep` → `attrs` have run on the real data, and `bench check --dataset
+kuairand` is clean. Only the trainer inputs are on the Hub ([HuggingFace I/O](#huggingface-io)).
+The user chose to keep Hub space for evals, so the eval inputs are rebuilt with
+`eval-data kuairand all` (~20 min) and the d64 `train_on_val` checkpoint was not kept
+([validation](../validation.md#final-models-the-e1c-recipe)): retrain it with `train run` and the
+flags in [its command.sh](../artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh)
+(~20 min on the H100). d128 does not fit. The filter cell has not run (roadmap E4). Nothing below is citable.
 The run records are in
 [artifacts/e4-kuairand/](../artifacts/e4-kuairand/).
 
@@ -1041,9 +1042,9 @@ path; the entry exists so the local directory layout resolves like every
 other dataset's.
 
 `pinkmeme/eval-pubmed` is **registered but not published**; nothing is
-pushed to it before roadmap E2. `pinkmeme/eval-kuairand` (private) holds only
-the KuaiRand trainer inputs: `eval-data publish kuairand` and the d64 checkpoint
-upload hit the private storage limit (403). The old A100
+pushed to it before roadmap E2. `pinkmeme/eval-kuairand` (private) holds only the
+KuaiRand trainer inputs: the eval inputs and the checkpoint are not published
+(user choice, see [kuairand](#kuairand)). The old A100
 `checkpoints/gsasrec-d128-shared` was deleted from it to free space (user decision).
 
 **Trainer inputs** sit under `trainer/` in the private eval repos, uploaded with
