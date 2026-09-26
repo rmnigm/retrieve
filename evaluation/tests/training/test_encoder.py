@@ -1,10 +1,13 @@
 """``training``: the encoder's attention mask (a left-padded row stays finite, and the last
 position never sees the padding) and ``sampled_softmax_loss`` against a direct
 ``F.cross_entropy`` over explicitly built candidate lists (with and without logQ), the logQ
-expected-count formula, and the ``TrainConfig`` loss / ``normalize`` / ``logq`` boundary."""
+expected-count formula, the ``TrainConfig`` loss / ``normalize`` / ``logq`` boundary, and how
+``TrainConfig.load`` resolves them for a legacy or loss-overridden ``config.json``."""
 
 from __future__ import annotations
 
+import dataclasses
+import json
 import math
 
 import pytest
@@ -77,3 +80,39 @@ def test_logq_is_the_log_expected_draw_count():
 def test_train_config_rejects_what_the_loss_would_silently_ignore(overrides, match):
     with pytest.raises(ValueError, match=match):
         TrainConfig(**overrides)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "want"),
+    [({}, ("sampled_softmax", True, True)), ({"loss": "gbce"}, ("gbce", False, False))],
+    ids=["default", "gbce"],
+)
+def test_train_config_resolves_normalize_and_logq_per_loss(kwargs, want):
+    cfg = TrainConfig(**kwargs)
+    assert (cfg.loss, cfg.normalize, cfg.logq) == want
+
+
+_SSM = dataclasses.asdict(TrainConfig())
+_GBCE = dataclasses.asdict(TrainConfig(loss="gbce"))
+
+
+@pytest.mark.parametrize(
+    ("saved", "overrides", "want"),
+    [
+        ({"embedding_dim": 128}, {}, ("gbce", False, False)),
+        (_SSM, {"loss": "gbce"}, ("gbce", False, False)),
+        (_GBCE, {"loss": "sampled_softmax"}, ("sampled_softmax", True, True)),
+        (_GBCE, {"loss": "sampled_softmax", "logq": False}, ("sampled_softmax", True, False)),
+        (
+            _SSM | {"normalize": False},
+            {"loss": "sampled_softmax"},
+            ("sampled_softmax", False, True),
+        ),
+    ],
+    ids=["no-loss-key-is-gbce", "ssm-to-gbce", "gbce-to-ssm", "explicit-wins", "same-loss-keeps"],
+)
+def test_load_resolves_normalize_and_logq_for_the_resulting_loss(tmp_path, saved, overrides, want):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(saved))
+    cfg = TrainConfig.load(path, **overrides)
+    assert (cfg.loss, cfg.normalize, cfg.logq) == want

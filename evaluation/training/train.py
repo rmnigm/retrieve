@@ -379,8 +379,8 @@ def _parse_override(text: str) -> tuple[str, object]:
 def run(config_path: str | None, resume: bool, overrides: tuple[str, ...]) -> None:
     """Train an Encoder. OVERRIDES are TrainConfig FIELD=VALUE pairs, VALUE parsed as JSON
     when it parses (``loss=gbce num_negatives=256 warmup_steps=0``), else taken as a string."""
-    base = dataclasses.asdict(TrainConfig.load(config_path)) if config_path else {}
-    config = TrainConfig(**{**base, **dict(_parse_override(o) for o in overrides)})
+    fields = dict(_parse_override(o) for o in overrides)
+    config = TrainConfig.load(config_path, **fields) if config_path else TrainConfig(**fields)
     train(config, resume=resume)
 
 
