@@ -166,10 +166,9 @@ def test_dispatch_names_every_class_and_backend():
 class TestQueryParams:
     def test_silvertorch_n_probe_revalidates(self, data):
         m = _build(SilverTorch, "torch", data)
-        max_size = m._max_cluster_size
         with pytest.raises(ValueError, match="cannot exceed n_lists"):
             m.set_query_params(n_probe=9)
-        m.k = 8 * max_size + 1
+        m.k = int(m.cluster_sizes.topk(8).values.sum()) + 1  # one past the 8-probe width
         with pytest.raises(ValueError, match="probe pool"):
             m.set_query_params(n_probe=8)
         m.k = K

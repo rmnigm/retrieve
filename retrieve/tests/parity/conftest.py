@@ -2,39 +2,64 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import torch
 
-from retrieve.indexing.bloom_hash import build_signatures, generate_seeds
+from retrieve.indexing.bloom_hash import (
+    build_query_bit_positions,
+    build_signatures,
+    build_transposed_sigs,
+    generate_seeds,
+)
+from retrieve.indexing.ivf import probe_width
 from tests.conftest import assert_topk_id_sets_match, make_attrs, make_query_attrs
 
 
-def make_probe_family(b, n_lists, max_size, n_probe, *, pad_rate=0.1, seed=7):
-    """Synthetic padded IVF layout + probed clusters, the shape a backend's phase 2 decodes
-    (``test_official.py`` builds the CSR view from it too, so every backend scores the same
-    candidates): ``padded [n_lists, max_size]`` holds each item id at most once (scattered
-    via randperm, ``-1`` padding), ``flat = padded[probe_ids].reshape(b, -1)`` mirrors
-    the layer's phase 1. Returns ``(padded, probe_ids, flat, n)``."""
+@dataclass(frozen=True)
+class ProbeLayout:
+    """A synthetic CSR probe, the layout every SilverTorch backend scores: ``probe_ids [B,
+    n_probe]`` (distinct per row), ``cluster_offsets [n_lists + 1]``, ``sort_perm [N]`` (sorted
+    position → original id, a random permutation), the compact ``width`` and ``n``."""
+
+    probe_ids: torch.Tensor
+    cluster_offsets: torch.Tensor
+    sort_perm: torch.Tensor
+    width: int
+    n: int
+
+
+def make_probe_family(b, n_lists, max_size, n_probe, *, empty_rate=0.1, seed=7):
+    """Cluster sizes uniform in ``[0, max_size]`` with one cluster at ``max_size`` and about
+    ``empty_rate`` of them empty, ``n_probe`` distinct clusters per row."""
     g = torch.Generator(device="cuda").manual_seed(seed)
-    n = n_lists * max_size
-    padded = torch.randperm(n, generator=g, device="cuda").reshape(n_lists, max_size)
-    pad = torch.rand(n_lists, max_size, generator=g, device="cuda") < pad_rate
-    padded[pad] = -1
-    probe_ids = torch.randint(0, n_lists, (b, n_probe), generator=g, device="cuda")
-    flat = padded[probe_ids].reshape(b, -1)
-    return padded, probe_ids, flat, n
+    sizes = torch.randint(0, max_size + 1, (n_lists,), generator=g, device="cuda")
+    sizes[torch.rand(n_lists, generator=g, device="cuda") < empty_rate] = 0
+    sizes[0] = max_size
+    offsets = torch.zeros(n_lists + 1, dtype=torch.long, device="cuda")
+    offsets[1:] = sizes.cumsum(0)
+    n = int(offsets[-1])
+    probe_ids = torch.stack(
+        [torch.randperm(n_lists, generator=g, device="cuda")[:n_probe] for _ in range(b)]
+    )
+    sort_perm = torch.randperm(n, generator=g, device="cuda")
+    return ProbeLayout(probe_ids, offsets, sort_perm, probe_width(sizes, n_probe), n)
 
 
-def make_bloom(n, b, *, m_bits=512, k_hash=5):
-    """Row-wise item signatures and query signatures: ``(sigs, qb)``."""
-    attrs = make_attrs(n, c=2, a_max=2)
-    q_attrs = make_query_attrs(b, c=2)
+def make_bloom(n, b, *, m_bits=512, k_hash=5, seed=3):
+    """Bloom inputs over ``n`` cluster-sorted items: ``(query_bit_positions [B, C·k_hash],
+    bloom_transposed [m_bits, ceil(N/64)], sigs [N, W], qb [B, W])`` — the last two the
+    row-wise form, the independent oracle of the transposed subset test."""
+    attrs = make_attrs(n, c=2, a_max=2, seed=seed)
+    q_attrs = make_query_attrs(b, c=2, seed=seed + 1)
     seeds = generate_seeds(k_hash=k_hash, device=attrs.device)
     w = m_bits // 64
     sigs = build_signatures(attrs.long(), seeds, m_bits=m_bits, k_hash=k_hash, word_count=w)
     qb = build_signatures(
         q_attrs.long().unsqueeze(-1), seeds, m_bits=m_bits, k_hash=k_hash, word_count=w
     )
-    return sigs, qb
+    qpos = build_query_bit_positions(q_attrs.long(), seeds, m_bits, k_hash)
+    return qpos, build_transposed_sigs(sigs), sigs, qb
 
 
 def make_exact(n, b, *, c=2, a_max=2, reverse="none", n_vocab=8):

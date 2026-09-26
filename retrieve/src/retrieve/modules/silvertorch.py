@@ -8,12 +8,13 @@ from torch import Tensor
 
 from retrieve.functional import masked_topk
 from retrieve.indexing.bloom_hash import (
-    build_query_signatures,
+    build_query_bit_positions,
     build_signatures,
+    build_transposed_sigs,
     generate_clause_salt,
     generate_seeds,
 )
-from retrieve.indexing.ivf import csr_layout, padded_layout
+from retrieve.indexing.ivf import csr_layout, probe_width
 from retrieve.indexing.kmeans import KMeans, KMeansInit
 from retrieve.indexing.quantize import quantize_int8, quantize_int8_global
 from retrieve.interfaces import (
@@ -43,9 +44,9 @@ class SilverTorch(RetrievalModule):
     Triton backend. ``backend="official"``
     routes phases 2+3 to Meta's own ``torch.ops.st.*`` kernels (``meta-recsys/silvertorch``,
     the ``official`` extra) — the reference the Triton kernels are checked against: same
-    k-means, same int8 codes and probes, the official scorer over a cluster-sorted table
-    (buffers ``cluster_offsets`` / ``cluster_sizes`` / ``sort_perm`` / ``inv_perm`` instead of
-    ``padded_cluster_items``), the official bloom index + expression parser for
+    k-means, same int8 codes and probes, the official scorer over the same cluster-sorted table
+    (the CSR every backend registers: ``cluster_offsets`` / ``cluster_sizes`` / ``sort_perm`` /
+    ``inv_perm``), the official bloom index + expression parser for
     ``filter_mode="bloom"`` (their hash, sized by ``OfficialConfig.b_multiplier``; ``m_bits`` is
     optional there) and our ``clause_mask`` packed into the scorer's bit mask for
     ``filter_mode="exact"``. It is **eager-only** (every official op syncs the host):
@@ -54,11 +55,11 @@ class SilverTorch(RetrievalModule):
     ``interfaces.ops_for``). See docs/system/kernels.md for every backend's design and
     constraints. ``triton`` and ``torch`` register the same buffers
     (a checkpoint is portable between them in every ``filter_mode``); an official state_dict
-    is portable to neither (cluster-sorted ``item_codes``, ``bloom_index`` /
-    ``bundle_b_offsets`` instead of ``bloom_sigs``, no ``padded_cluster_items``).
+    is portable to them only without bloom (``bloom_index`` / ``bundle_b_offsets`` instead of
+    ``bloom_transposed``).
     ``load_state_dict`` into a
     module of the same shape (one whose ``register_index`` already ran) re-derives the two
-    Python-scalar caches the forwards read (``_global_scale_f``, ``_max_cluster_size``) from
+    Python-scalar caches the forwards read (``_global_scale_f``, ``_probe_width``) from
     the loaded buffers, so a loaded index scores like the one that was saved.
 
     After ``register_index``, ``build_timings`` holds the wall seconds of the four build
@@ -70,14 +71,13 @@ class SilverTorch(RetrievalModule):
     centroids: Tensor
     item_codes: Tensor
     global_scale: Tensor
-    padded_cluster_items: Tensor
+    cluster_offsets: Tensor  # [n_lists + 1] int64 CSR
     cluster_sizes: Tensor
-    cluster_offsets: Tensor  # official only: [n_lists + 1] int64 CSR
-    sort_perm: Tensor  # official only: [N] sorted position -> original id
-    inv_perm: Tensor  # official only: [N] original id -> sorted position
+    sort_perm: Tensor  # [N] sorted position -> original id
+    inv_perm: Tensor  # [N] original id -> sorted position
     bloom_index: Tensor  # official + bloom: [W] int64
     bundle_b_offsets: Tensor  # official + bloom: [n_bundles + 1] int64
-    bloom_sigs: Tensor
+    bloom_transposed: Tensor  # triton / torch + bloom: [m_bits, ceil(N / 64)] int64
     hash_seeds: Tensor
     clause_salt: Tensor
     item_clause_attrs: Tensor
@@ -163,7 +163,7 @@ class SilverTorch(RetrievalModule):
             "torch": self._forward_ops,
             "official": self._forward_official,
         }[backend]
-        # The two Python-scalar caches below (_global_scale_f, _max_cluster_size) are set by
+        # The two Python-scalar caches below (_global_scale_f, _probe_width) are set by
         # register_index; a state-dict load replaces the buffers they were derived from, so
         # they are re-derived after every load_state_dict.
         self.register_load_state_dict_post_hook(_rederive_cached_scalars)
@@ -191,30 +191,23 @@ class SilverTorch(RetrievalModule):
         t0 = lap()
         assignments = self._build_ivf(item_embs)
         t1 = lap()
-        perm = None
-        if self.backend == "official":
-            # Official layout (plan §4.1 / D4): the int8 table in cluster-sorted (CSR) order
-            # plus the permutation both ways; no padded_cluster_items. Frozen order:
-            # centroids, item_codes, global_scale, cluster_offsets, cluster_sizes,
-            # sort_perm, inv_perm, then the filter buffers.
-            perm, inv_perm, cluster_offsets, cluster_sizes = csr_layout(assignments, self.n_lists)
-            ivf = {
-                "cluster_offsets": cluster_offsets,
-                "cluster_sizes": cluster_sizes,
-                "sort_perm": perm,
-                "inv_perm": inv_perm,
-            }
-        else:
-            padded, cluster_sizes = padded_layout(assignments, self.n_lists)
-            ivf = {"padded_cluster_items": padded, "cluster_sizes": cluster_sizes}
-        # Plain Python int, cached for the same reason as _global_scale_f below: the
-        # official forward passes `n_probe * max_cluster_size` as a scalar op argument,
-        # and reading it back off padded_cluster_items.shape[1] inside forward would hand
-        # dynamo a SymInt under `torch.compile(dynamic=True)`.
-        self._max_cluster_size = int(cluster_sizes.max().item())
-        self._check_probe_pool(self.n_probe, self.k)
+        # One layout on every backend (kernels.md § SilverTorch kernels): the int8 table in
+        # cluster-sorted (CSR) order plus the permutation both ways. Frozen order: centroids,
+        # item_codes, global_scale, cluster_offsets, cluster_sizes, sort_perm, inv_perm, then
+        # the filter buffers.
+        perm, inv_perm, cluster_offsets, cluster_sizes = csr_layout(assignments, self.n_lists)
+        ivf = {
+            "cluster_offsets": cluster_offsets,
+            "cluster_sizes": cluster_sizes,
+            "sort_perm": perm,
+            "inv_perm": inv_perm,
+        }
+        # Plain Python int, cached: the scorers take the width as a scalar op argument, and
+        # deriving it inside forward would sync (and hand dynamo a data-dependent value).
+        self._probe_width = probe_width(cluster_sizes, self.n_probe)
+        self._check_probe_pool(self.n_probe, self._probe_width, self.k)
         t2 = lap()
-        self._quantize_items(item_embs, perm=perm)
+        self._quantize_items(item_embs, perm)
         t3 = lap()
         # Buffer registration order is frozen (state-dict key order): centroids, item_codes,
         # global_scale, the IVF buffers, then the filter buffers — hence the IVF buffers are
@@ -222,7 +215,7 @@ class SilverTorch(RetrievalModule):
         for name, buf in ivf.items():
             self.register_buffer(name, buf)
         self._register_filter_buffers(
-            item_embs.shape[0], item_clause_attrs, clause_is_reverse, perm=perm
+            item_embs.shape[0], item_clause_attrs, clause_is_reverse, perm
         )
         t4 = lap()
         self.build_timings = {
@@ -236,8 +229,10 @@ class SilverTorch(RetrievalModule):
         """Change ``n_probe`` after ``register_index`` with the same two validations."""
         if n_probe > self.n_lists:
             raise ValueError(f"n_probe ({n_probe}) cannot exceed n_lists ({self.n_lists}).")
-        self._check_probe_pool(n_probe, self.k)
+        width = probe_width(self.cluster_sizes, n_probe)
+        self._check_probe_pool(n_probe, width, self.k)
         self.n_probe = n_probe
+        self._probe_width = width
 
     def _validate_register_args(
         self,
@@ -264,29 +259,25 @@ class SilverTorch(RetrievalModule):
 
     def _build_ivf(self, item_embs: Tensor) -> Tensor:
         """K-means clustering; registers ``centroids`` and returns the ``[N]`` assignment the
-        layout (``indexing.padded_layout`` / ``csr_layout``) is derived from."""
+        layout (``indexing.csr_layout``) is derived from."""
         centroids, assignments = KMeans(
             n_lists=self.n_lists, n_iter=self.n_iter, seed=self.seed, init=self.kmeans_init
         ).fit(item_embs)
         self.register_buffer("centroids", centroids)
         return assignments
 
-    def _check_probe_pool(self, n_probe: int, k: int) -> None:
-        # P (probe pool width) = n_probe × max_cluster_size; topk runs with no pad tail, so the
-        # index must supply >= k candidate slots per query.
-        max_size = self._max_cluster_size
-        if n_probe * max_size < k:
+    def _check_probe_pool(self, n_probe: int, width: int, k: int) -> None:
+        # The scorers' top-k runs over the compact probe width (the n_probe largest clusters)
+        # with no pad tail, so it must hold >= k slots.
+        if width < k:
             raise ValueError(
-                f"k={k} exceeds probe pool n_probe * max_cluster_size = "
-                f"{n_probe} * {max_size} = {n_probe * max_size}"
+                f"k={k} exceeds the probe pool: the {n_probe} largest clusters hold {width}"
             )
 
-    def _quantize_items(self, item_embs: Tensor, perm: Tensor | None = None) -> None:
+    def _quantize_items(self, item_embs: Tensor, perm: Tensor) -> None:
         codes, global_scale = quantize_int8_global(item_embs)
-        if perm is not None:
-            # Same codes, same global scale — permuted into cluster-sorted order for the
-            # official CSR scorer (plan D3: both arms score identical int8 codes).
-            codes = codes[perm].contiguous()
+        # Cluster-sorted, so a probed cluster is one contiguous run of code rows.
+        codes = codes[perm].contiguous()
         self.register_buffer("item_codes", codes)
         # 0-d fp32 buffer: moves with .to(device) and parameterizes the kernel epilogue without a
         # per-index recompile.
@@ -303,31 +294,27 @@ class SilverTorch(RetrievalModule):
         n: int,
         item_clause_attrs: Tensor | None,
         clause_is_reverse: Tensor | None,
-        *,
-        perm: Tensor | None = None,
+        perm: Tensor,
     ) -> None:
-        """Filter buffers for this backend's index layout. ``perm`` is the official
-        backend's ``sort_perm``: with it the attribute buffers live in the cluster-sorted
-        doc space so the official scorer's ``cluster_offsets`` address the same items;
-        without it they keep original ids. ``bloom`` → our row-wise ``bloom_sigs`` +
-        ``hash_seeds`` + ``clause_salt`` on triton / torch, or the official
-        ``bloom_index`` / ``bundle_b_offsets`` built by ``torch.ops.st.bloom_index_build``
-        (their hash; ``k_hash`` is the search ``k``, ``OfficialConfig.build_k`` the build
-        ``k``); ``exact`` → the narrow attrs (permuted when ``perm`` is given) +
+        """Filter buffers, in the cluster-sorted doc space (``perm`` is ``sort_perm``) so the
+        scorers' positions address the same items. ``bloom`` → the transposed index
+        ``bloom_transposed`` + ``hash_seeds`` + ``clause_salt`` on triton / torch, or the
+        official ``bloom_index`` / ``bundle_b_offsets`` built by
+        ``torch.ops.st.bloom_index_build`` (their hash; ``k_hash`` is the search ``k``,
+        ``OfficialConfig.build_k`` the build ``k``); ``exact`` → the sorted narrow attrs +
         ``clause_is_reverse``, read by our kernels or, on official, by ``clause_mask``."""
         device = self.item_codes.device  # same device as item_embs
+        attrs = None if item_clause_attrs is None else item_clause_attrs.long()[perm].contiguous()
         if self.filter_mode == "bloom" and self.backend == "official":
             cfg = self.official
-            if item_clause_attrs is None:
+            if attrs is None:
                 # No attributes at build time: an empty index. A later query with
                 # attributes has nothing to search and raises in _forward_official.
                 bloom_index = torch.empty(0, dtype=torch.int64, device=device)
                 bundle_b_offsets = torch.zeros(1, dtype=torch.int64, device=device)
             else:
-                assert perm is not None  # the official layout always sorts
-                attrs_sorted = item_clause_attrs.long()[perm]
                 bloom_index, bundle_b_offsets = official_mod.build_bloom_index(
-                    attrs_sorted,
+                    attrs,
                     b_multiplier=cfg.b_multiplier,
                     build_k=cfg.build_k if cfg.build_k is not None else self.k_hash,
                     fast_build=cfg.fast_build,
@@ -336,35 +323,26 @@ class SilverTorch(RetrievalModule):
             self.register_buffer("bundle_b_offsets", bundle_b_offsets)
         elif self.filter_mode == "bloom":
             seeds = generate_seeds(self.k_hash, device=device)
-            if item_clause_attrs is None:
+            if attrs is None:
                 # No attributes at build time: all-zero signatures and an empty salt
                 # (the clause count is unknown); a later query build derives its salt
-                # device-side per call, see _query_bits.
+                # device-side per call, see _query_bit_positions.
                 sigs = torch.zeros(n, self.word_count, dtype=torch.int64, device=device)
                 salt = torch.empty(0, dtype=torch.int64, device=device)
             else:
-                salt = generate_clause_salt(item_clause_attrs.shape[1], device=device)
+                salt = generate_clause_salt(attrs.shape[1], device=device)
                 sigs = build_signatures(
-                    item_clause_attrs.long(),
-                    seeds,
-                    self.m_bits,
-                    self.k_hash,
-                    self.word_count,
-                    clause_salt=salt,
+                    attrs, seeds, self.m_bits, self.k_hash, self.word_count, clause_salt=salt
                 )
-            self.register_buffer("bloom_sigs", sigs)
+            self.register_buffer("bloom_transposed", build_transposed_sigs(sigs))
             self.register_buffer("hash_seeds", seeds)
             # Registered (not rebuilt per call) so the bloom forward issues no
             # host→device copy — see bloom_hash.generate_clause_salt.
             self.register_buffer("clause_salt", salt)
         elif self.filter_mode == "exact":
-            assert item_clause_attrs is not None  # narrowed by _validate_register_args
-            c = item_clause_attrs.shape[1]
+            assert attrs is not None  # narrowed by _validate_register_args
             if clause_is_reverse is None:
-                clause_is_reverse = torch.zeros(c, dtype=torch.bool, device=device)
-            attrs = item_clause_attrs.long()
-            if perm is not None:
-                attrs = attrs[perm].contiguous()
+                clause_is_reverse = torch.zeros(attrs.shape[1], dtype=torch.bool, device=device)
             self.register_buffer("item_clause_attrs", attrs)
             self.register_buffer("clause_is_reverse", clause_is_reverse)
 
@@ -413,32 +391,16 @@ class SilverTorch(RetrievalModule):
         _, probe_ids = torch.topk(cent_scores, self.n_probe, dim=1)
         return probe_ids
 
-    def _phase1_probe_with_ids(self, query: Tensor) -> tuple[Tensor, Tensor]:
-        """Phase 1: centroid top-``n_probe`` then gather padded probed items; returns
-        ``(probe_ids [B, n_probe], flat_items [B, P])`` (P = n_probe × max_cluster_size)
-        with ``-1`` marking empty-cluster padding in ``flat_items``."""
-        b = query.shape[0]
-        probe_ids = self._phase1_probe_ids(query)
-        probed = self.padded_cluster_items[probe_ids]
-        return probe_ids, probed.reshape(b, -1)
-
-    def _phase1_probe(self, query: Tensor) -> Tensor:
-        return self._phase1_probe_with_ids(query)[1]
-
-    def _query_bits(self, query_clause_attrs: Tensor) -> Tensor:
-        """``[B, C]`` query attrs → ``[B, W]`` bloom query signature, using the registered
-        ``clause_salt`` buffer (no per-call host→device copy). The buffer is empty when the
-        index was registered without attributes; then ``generate_clause_salt`` derives the
-        ``[C]`` salt per call — a few tiny device-side kernels from ``arange`` and
-        Python-int constants, still no host→device copy."""
+    def _query_bit_positions(self, query_clause_attrs: Tensor) -> Tensor:
+        """``[B, C]`` query attrs → ``[B, C·k_hash]`` set-bit positions of the query signature
+        (``-1`` = an inactive clause's slot), using the registered ``clause_salt`` buffer (no
+        per-call host→device copy). The buffer is empty when the index was registered without
+        attributes; then ``generate_clause_salt`` derives the ``[C]`` salt per call — a few tiny
+        device-side kernels from ``arange`` and Python-int constants, still no host→device
+        copy."""
         salt = self.clause_salt if self.clause_salt.numel() > 0 else None
-        return build_query_signatures(
-            query_clause_attrs.long().unsqueeze(-1),
-            self.hash_seeds,
-            self.m_bits,
-            self.k_hash,
-            self.word_count,
-            clause_salt=salt,
+        return build_query_bit_positions(
+            query_clause_attrs.long(), self.hash_seeds, self.m_bits, self.k_hash, clause_salt=salt
         )
 
     def _forward_ops(
@@ -447,40 +409,32 @@ class SilverTorch(RetrievalModule):
         query_clause_attrs: Tensor | None,
     ) -> tuple[Tensor, Tensor]:
         """Phases 2+3 on the backend's op namespace: ``retrieve.ops.triton`` (one fused launch)
-        or ``retrieve.ops.reference`` (the same semantics eager, materializing ``[B, P, D]``)."""
+        or ``retrieve.ops.reference`` (the same semantics eager, materializing ``[B, width,
+        D]``)."""
         ops = ops_for(self.backend)
-        flat_items = self._phase1_probe(query)
+        layout = (self._phase1_probe_ids(query), self.cluster_offsets, self.item_codes)
+        tail = (self._global_scale_f, self.k, self._probe_width)
 
         if self.has_exact and query_clause_attrs is not None:
             return ops.codesigned_probe_score_exact(
                 query,
-                flat_items,
-                self.item_codes,
+                *layout,
+                self.sort_perm,
                 self.item_clause_attrs,
                 self.clause_is_reverse,
                 query_clause_attrs.long(),
-                self._global_scale_f,
-                self.k,
+                *tail,
             )
-
         if self.has_bloom and query_clause_attrs is not None:
-            qb = self._query_bits(query_clause_attrs)
             return ops.codesigned_probe_score_bloom(
                 query,
-                flat_items,
-                self.item_codes,
-                qb,
-                self.bloom_sigs,
-                self._global_scale_f,
-                self.k,
+                *layout,
+                self.sort_perm,
+                self._query_bit_positions(query_clause_attrs),
+                self.bloom_transposed,
+                *tail,
             )
-        return ops.codesigned_probe_score(
-            query,
-            flat_items,
-            self.item_codes,
-            self._global_scale_f,
-            self.k,
-        )
+        return ops.codesigned_probe_score(query, *layout, self.sort_perm, *tail)
 
     def _forward_official(
         self,
@@ -498,9 +452,9 @@ class SilverTorch(RetrievalModule):
         ``fused_kmean_ann(filtering_bit_mask=…)`` (``"full"``, the S9 ablation); ``exact`` →
         our Triton ``clause_mask`` over the sorted attrs, packed into the same
         ``filtering_bit_mask`` (phase 2 ours, full ``N`` — labelled so in every table).
-        ``max_tensor_size_per_row`` is the static ``n_probe · max_cluster_size`` of the
-        padded layout, so the official output has our ``[B, P]`` width (rounded to 32) and
-        the ``masked_topk`` epilogue costs the same in every arm."""
+        ``max_tensor_size_per_row`` is the compact probe width the Triton scorer writes, so the
+        official output has the same ``[B, width]`` (rounded to 32) and the ``masked_topk``
+        epilogue costs the same in every arm."""
         probe_ids = self._phase1_probe_ids(query)
         cfg = self.official
         filtering_bit_mask: Tensor | None = None
@@ -546,7 +500,7 @@ class SilverTorch(RetrievalModule):
             self.sort_perm,
             self.global_scale,
             self.k,
-            self.n_probe * self._max_cluster_size,
+            self._probe_width,
             score_path=cfg.score_path,
             divisor=cfg.divisor,
             filtering_bit_mask=filtering_bit_mask,
@@ -565,10 +519,8 @@ class SilverTorch(RetrievalModule):
         tail; ``pad_to_k=False`` keeps ``min(k, P)`` columns when ``P < k``. Pure tensor
         flow, no host sync."""
         valid = candidate_ids >= 0
-        safe = candidate_ids.clamp_min(0)
-        if self.backend == "official":
-            # item_codes is cluster-sorted on this backend; candidate ids are original ids.
-            safe = self.inv_perm[safe]
+        # item_codes is cluster-sorted; candidate ids are original ids.
+        safe = self.inv_perm[candidate_ids.clamp_min(0)]
         cand_codes = self.item_codes[safe].to(torch.float32)
         q_codes, q_scales = quantize_int8(query)
         scores = torch.bmm(
@@ -579,20 +531,17 @@ class SilverTorch(RetrievalModule):
 
 
 def _rederive_cached_scalars(module: SilverTorch, incompatible_keys) -> None:
-    """``load_state_dict`` post-hook: re-derive ``_global_scale_f`` and ``_max_cluster_size``
-    from the loaded buffers. Both are plain Python scalars cached at ``register_index`` so
-    the forwards issue no per-call ``.item()`` sync (cudagraph capture) and no shape read
-    (SymInt under ``torch.compile(dynamic=True)``); a load replaces the buffers underneath
-    them. The two ``.item()`` syncs here run once, at load time. Buffers absent from the
-    module (a load before ``register_index``, or a ``strict=False`` partial load) leave the
-    corresponding cache untouched."""
+    """``load_state_dict`` post-hook: re-derive ``_global_scale_f`` and ``_probe_width`` from
+    the loaded buffers. Both are plain Python scalars cached at ``register_index`` so the
+    forwards issue no per-call ``.item()`` sync (cudagraph capture) and no shape read (SymInt
+    under ``torch.compile(dynamic=True)``); a load replaces the buffers underneath them. The
+    ``.item()`` syncs here run once, at load time. Buffers absent from the module (a load
+    before ``register_index``, or a ``strict=False`` partial load) leave the corresponding
+    cache untouched."""
     if hasattr(module, "global_scale"):
         module._global_scale_f = float(module.global_scale.item())
-    if hasattr(module, "padded_cluster_items"):
-        module._max_cluster_size = int(module.padded_cluster_items.shape[1])
-    elif hasattr(module, "cluster_sizes"):
-        # Official layout: no padded table; the width is the largest cluster.
-        module._max_cluster_size = int(module.cluster_sizes.max().item())
+    if hasattr(module, "cluster_sizes"):
+        module._probe_width = probe_width(module.cluster_sizes, module.n_probe)
 
 
 def _lap(item_embs: Tensor):

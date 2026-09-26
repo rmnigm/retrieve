@@ -160,18 +160,31 @@ def _oporp_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
     )
 
 
+def _probe_layout(dev: torch.device, n: int, p: int, b: int) -> dict[str, Any]:
+    """A synthetic CSR probe: equal 256-item clusters, ``p // 256`` distinct probes per row, so
+    every row fills the compact width ``p`` exactly."""
+    n_lists, n_probe = n // 256, max(p // 256, 1)
+    return dict(
+        probe_ids=torch.stack([torch.randperm(n_lists, device=dev)[:n_probe] for _ in range(b)]),
+        cluster_offsets=torch.arange(0, n_lists * 256 + 1, 256, device=dev),
+        sort_perm=torch.randperm(n, device=dev),
+        width=n_probe * 256,
+    )
+
+
 def _cps_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
     p, has_qb, d, b, w = regime
     n = max(p * 4, 1 << 16)
     torch.manual_seed(0)
     return dict(
         query=torch.randn(b, d, device=dev),
-        flat_probed_items=torch.randint(0, n, (b, p), dtype=torch.long, device=dev),
         item_codes=torch.randint(-128, 128, (n, d), dtype=torch.int8, device=dev),
         global_scale=0.01,
         k=min(64, p),
-        query_bits=_rand_bits((b, w), dev) if has_qb else None,
-        bloom_sigs=_rand_bits((n, w), dev) if has_qb else None,
+        # ~C·k_hash = 10 set query bits over a 64·W-bit signature, the shipped bloom shape.
+        query_bit_positions=torch.randint(0, 64 * w, (b, 10), device=dev) if has_qb else None,
+        bloom_transposed=_rand_bits((64 * w, n // 64), dev) if has_qb else None,
+        **_probe_layout(dev, n, p, b),
     )
 
 
@@ -191,16 +204,15 @@ def _clause_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]
 def _cpse_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
     n, b, c, a_max = regime
     inputs = _clause_inputs(dev, regime)
-    # D mirrors the codesigned-probe-score default (--d 128). P = n_probe × max_cluster_size is
-    # deployment-specific; the middle of the CPS P-grid (capped by N) stands in for it here.
+    # D mirrors the codesigned-probe-score default (--d 128). The width is deployment-specific;
+    # the middle of the CPS P-grid (capped by N) stands in for it here.
     d = 128
-    p = min(n, 8192)
     inputs.update(
         query=torch.randn(b, d, device=dev),
-        flat_probed_items=torch.randint(0, n, (b, p), dtype=torch.long, device=dev),
         item_codes=torch.randint(-128, 128, (n, d), dtype=torch.int8, device=dev),
         global_scale=0.01,
-        k=min(64, p),
+        k=64,
+        **_probe_layout(dev, n, min(n, 8192), b),
     )
     return inputs
 

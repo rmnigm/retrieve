@@ -23,16 +23,24 @@ def _strided(t):
     return wide[..., ::2]
 
 
+def _layout():
+    """Two clusters of ``N / 2`` items, both probed by every row: ``(probe_ids,
+    cluster_offsets, sort_perm)``; the width is ``N``."""
+    probe = torch.tensor([[0, 1]] * B, device="cuda")
+    return probe, torch.tensor([0, N // 2, N], device="cuda"), torch.arange(N, device="cuda")
+
+
 def _cases():
     attrs, rev, qa = _i64(N, 2, 2), torch.zeros(2, dtype=torch.bool, device="cuda"), _i64(B, 2)
     sigs, qb = _i64(N, 4), _i64(B, 4)
+    qpos, bt = _i64(B, 10), _i64(256, N // 64)
     embs, q = torch.randn(N, 64, device="cuda").half(), torch.randn(B, 64, device="cuda").half()
     pos, counts = torch.arange(N, device="cuda").repeat(B, 1), torch.full((B,), N, device="cuda")
     codes, qf = (
         torch.zeros(N, 64, dtype=torch.int8, device="cuda"),
         torch.randn(B, 64, device="cuda"),
     )
-    flat = torch.arange(256, device="cuda").repeat(B, 1)
+    lay = _layout()
     return {
         "clause_mask": lambda a=attrs: T.clause_mask(a, rev, qa),
         "clause_compact": lambda a=attrs: T.clause_compact(a, rev, qa),
@@ -42,12 +50,12 @@ def _cases():
         "fmkt_candidates": lambda p=pos: T.fused_masked_knn_topk(q, embs, p, counts, 4),
         "oporp_full": lambda s=sigs: T.oporp_1bit_match_topk_full(qb, s, 4),
         "oporp_candidates": lambda p=pos: T.oporp_1bit_match_topk_indirect(qb, sigs, 4, p, counts),
-        "cps_codes": lambda c=codes: T.codesigned_probe_score(qf, flat, c, 0.1, 4),
-        "cps_bloom_sigs": lambda s=sigs: T.codesigned_probe_score_bloom(
-            qf, flat, codes, qb, s, 0.1, 4
+        "cps_codes": lambda c=codes: T.codesigned_probe_score(qf, *lay[:2], c, lay[2], 0.1, 4, N),
+        "cps_bloom_transposed": lambda t=bt: T.codesigned_probe_score_bloom(
+            qf, *lay[:2], codes, lay[2], qpos, t, 0.1, 4, N
         ),
         "cpse_attrs": lambda a=attrs: T.codesigned_probe_score_exact(
-            qf, flat, codes, a, rev, qa, 0.1, 4
+            qf, *lay[:2], codes, lay[2], a, rev, qa, 0.1, 4, N
         ),
     }, {
         "attrs": attrs,
@@ -55,6 +63,7 @@ def _cases():
         "embs": embs,
         "pos": pos,
         "codes": codes,
+        "bt": bt,
     }
 
 
@@ -68,7 +77,7 @@ _TABLE = {
     "oporp_full": "sigs",
     "oporp_candidates": "pos",
     "cps_codes": "codes",
-    "cps_bloom_sigs": "sigs",
+    "cps_bloom_transposed": "bt",
     "cpse_attrs": "attrs",
 }
 
@@ -87,19 +96,19 @@ def _odd_dim_calls():
     pos, counts = torch.arange(N, device="cuda").repeat(B, 1), torch.full((B,), N, device="cuda")
     qb, sigs = _i64(B, w), _i64(N, w)
     qf, codes = torch.randn(B, d, device="cuda"), torch.zeros(N, d, dtype=torch.int8, device="cuda")
-    flat = torch.arange(256, device="cuda").repeat(B, 1)
+    lay = _layout()
     rev, qa, attrs = torch.zeros(2, dtype=torch.bool, device="cuda"), _i64(B, 2), _i64(N, 2, 2)
     return {
         "fmkt D=96": lambda: T.fused_masked_knn_topk(q, embs, pos, counts, 4),
         "oporp W=3": lambda: T.oporp_1bit_match_topk_full(qb, sigs, 4),
         "bloom_match W=3": lambda: T.bloom_match(qb, sigs),
         "bloom_compact W=3": lambda: T.bloom_compact(qb, sigs),
-        "cps D=96": lambda: T.codesigned_probe_score(qf, flat, codes, 0.1, 4),
-        "cps_bloom W=3": lambda: T.codesigned_probe_score_bloom(
-            qf, flat, torch.zeros(N, 64, dtype=torch.int8, device="cuda"), qb, sigs, 0.1, 4
+        "cps D=96": lambda: T.codesigned_probe_score(qf, *lay[:2], codes, lay[2], 0.1, 4, N),
+        "cps_bloom D=96": lambda: T.codesigned_probe_score_bloom(
+            qf, *lay[:2], codes, lay[2], _i64(B, 10), _i64(512, N // 64), 0.1, 4, N
         ),
         "cpse D=96": lambda: T.codesigned_probe_score_exact(
-            qf, flat, codes, attrs, rev, qa, 0.1, 4
+            qf, *lay[:2], codes, lay[2], attrs, rev, qa, 0.1, 4, N
         ),
     }
 

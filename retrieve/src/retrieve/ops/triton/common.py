@@ -5,10 +5,11 @@ addressing from the caller. **No helper decides its own tile shape, launch grid,
 masking policy** — callers keep their own grids, loads, and epilogue policy. That
 invariant is what lets one helper serve kernels with very different launch shapes.
 
-Helpers: ``row_base``, ``tile_rows``, ``or_combine``, ``popcount_int64``, ``bloom_subset_pass``,
-``clause_pass``, ``compact_store``, ``compact_stash``; plus ``compact_scatter_kernel``, the one
-launched kernel here (the predicate-free second phase both compaction ops share, driven by
-``_host.compact_finish``). Per-helper semantics and the call-site map live in
+Helpers: ``row_base``, ``tile_rows``, ``probe_tile``, ``or_combine``, ``popcount_int64``,
+``bloom_subset_pass``, ``clause_pass``, ``compact_store``, ``compact_stash``; plus two
+launched kernels: ``compact_scatter_kernel`` (the predicate-free second phase both compaction
+ops share, driven by ``_host.compact_finish``) and ``probe_ids_kernel`` (the probe scorers' id
+epilogue). Per-helper semantics and the call-site map live in
 docs/system/kernels.md § Shared kernel helpers.
 """
 
@@ -36,6 +37,75 @@ def tile_rows(ptr, row0, lane, stride, WIDE: tl.constexpr):
     if WIDE:
         return row_base(ptr, row0, stride, WIDE), lane
     return ptr, row0 + lane
+
+
+@triton.jit
+def probe_tile(
+    probe_ids_ptr, offsets_ptr, bid, t, n_probe, NPP: tl.constexpr, BLOCK_P: tl.constexpr
+):
+    """Tile ``t`` of row ``bid`` in the compact probe layout (kernels.md § SilverTorch kernels)
+    → ``(pos, slot, valid, total, tail)``. The row's ``n_probe`` clusters (``NPP`` is its next
+    power of two) are laid out back to back in cluster-aligned tiles of ``BLOCK_P``; the
+    row's table is built here, one vector over its probes, rather than on the host.
+    ``tail``: ``t`` lies past the row's cluster tiles, whose ``-inf`` slots start at
+    ``total + (t - n_tiles) * BLOCK_P``. Otherwise ``pos`` are the lanes' cluster-sorted
+    positions (int64), ``slot`` their output slots, ``valid`` the lanes inside the cluster."""
+    i = tl.arange(0, NPP)
+    live = i < n_probe
+    c = tl.load(probe_ids_ptr + bid * n_probe + i, mask=live, other=0)
+    lo = tl.load(offsets_ptr + c, mask=live, other=0)
+    size = tl.load(offsets_ptr + c + 1, mask=live, other=0) - lo
+    tiles = (size + BLOCK_P - 1) // BLOCK_P
+    tile_end = tl.cumsum(tiles, 0)
+    slot_end = tl.cumsum(size, 0)
+    n_tiles = tl.sum(tiles)
+    total = tl.sum(size)
+    hit = (t >= tile_end - tiles) & (t < tile_end)
+    off = (t - tl.sum(tl.where(hit, tile_end - tiles, 0))) * BLOCK_P
+    lane = tl.arange(0, BLOCK_P)
+    tail = t >= n_tiles
+    slot = tl.where(
+        tail,
+        total + (t - n_tiles) * BLOCK_P + lane,
+        tl.sum(tl.where(hit, slot_end - size, 0)) + off + lane,
+    )
+    pos = tl.sum(tl.where(hit, lo, 0)) + off + lane
+    valid = (off + lane < tl.sum(tl.where(hit, size, 0))) & ~tail
+    return pos, slot, valid, total, tail
+
+
+@triton.jit
+def probe_ids_kernel(
+    slots_ptr,  # [B, k] int64 top-k compact slots
+    scores_ptr,  # [B, k] fp32 their scores
+    probe_ids_ptr,  # [B, n_probe]
+    offsets_ptr,  # [n_lists + 1] CSR
+    sort_perm_ptr,  # [N] sorted position -> original id
+    ids_ptr,  # [B, k] int64 out
+    n_probe,
+    k,
+    NPP: tl.constexpr,
+    KP: tl.constexpr,
+):
+    """The probe scorers' id epilogue, one program per row: each top-k slot's original id, the
+    same slot → position map as ``probe_tile`` (without the tiles), and ``-1`` at every
+    ``-inf`` score. Launched by both ``codesigned_probe_score*`` files after ``torch.topk``."""
+    bid = tl.program_id(0)
+    i = tl.arange(0, NPP)
+    live = i < n_probe
+    c = tl.load(probe_ids_ptr + bid * n_probe + i, mask=live, other=0)
+    lo = tl.load(offsets_ptr + c, mask=live, other=0)
+    size = tl.load(offsets_ptr + c + 1, mask=live, other=0) - lo
+    end = tl.cumsum(size, 0)
+    r = tl.arange(0, KP)
+    in_k = r < k
+    slot = tl.load(slots_ptr + bid * k + r, mask=in_k, other=0)
+    score = tl.load(scores_ptr + bid * k + r, mask=in_k, other=float("-inf"))
+    hit = (slot[:, None] >= (end - size)[None, :]) & (slot[:, None] < end[None, :])
+    pos = tl.sum(tl.where(hit, (lo - (end - size))[None, :], 0), axis=1) + slot
+    # A -inf slot (reject, or past the row's items) is the -1 sentinel via the masked load.
+    ids = tl.load(sort_perm_ptr + pos, mask=in_k & (score > float("-inf")), other=-1)
+    tl.store(ids_ptr + bid * k + r, ids, mask=in_k)
 
 
 @triton.jit

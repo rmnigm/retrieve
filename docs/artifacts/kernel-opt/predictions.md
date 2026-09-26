@@ -73,3 +73,49 @@ Measured before the change, with `torch.profiler` (`prof_probe`): the `torch.ful
   lanes, 8 warps) went 248 + 190 → 333 µs; the `clause_compact` one (512 lanes, 2 warps) did not
   gain. The retune of `block_n` for the two-phase shape is TF-3, not done here.
 - fp32 pin, boundary checks: same within noise, as predicted.
+
+## Phase 3: TF-9 compact CSR probe layout + TF-1 transposed bloom
+
+Measured first (k-means 1024, seed 0, d128): the padded probe width `n_probe · max_cluster` is
+611,520 (goodreads, n_probe 24), against a compact width, the sum of the 24 largest clusters, of
+**64,757**; each row holds about 18.7k real items. On arXiv it is 171,648 against **128,027**
+(about 70k real items per row). A single 25,480-item cluster drives the goodreads padding.
+
+Design: triton and torch register the official backend's CSR (`cluster_offsets`, `sort_perm`,
+`inv_perm`, cluster-sorted `item_codes` and attrs). The scorer writes `[B, width]`, with the
+compact width above; lane `p` finds its probe by counting row ends and reads the contiguous
+sorted row `base[b, j] + p`. Ids are resolved after the top-k (`searchsorted` + `sort_perm`).
+Bloom mode reads a transposed index `T [m_bits, ceil(N/64)]` over sorted positions, one bit per item
+per set query bit (C·k_hash = 10 bits at the shipped settings, so 10/64 of a word per item),
+instead of the 128 B row-wise signature.
+
+Predictions, kernel-only at B=16 (b3's tier A, `torch.profiler` device µs):
+- goodreads scorer: none 337 → **~40 µs**, bloom 521 → **~45 µs**, exact 398 → **~60 µs**. The
+  time follows the real items (~300k × 128 B, with L2 reuse across the batch), not the padding.
+  top-k 335 → **~60 µs** (width 64.8k instead of 611k).
+- arXiv scorer: none 130 → **~100 µs**, bloom 229 → **~110 µs**, exact 261 → **~130 µs**.
+  Only 1.34× less padding here, but contiguous code rows replace gathered ones.
+- The gate, ours (scorer + our mask class) against official (scorer + mask), bloom: goodreads
+  about 45 vs 38 µs (**~1.2×**), arXiv about 110 vs 87 µs (**~1.26×**). Both inside the 1.3×
+  gate, with little room. If the lane-to-probe search (a loop over n_probe per tile) costs more
+  than expected, arXiv misses.
+- End to end, the SilverTorch forward gets faster on goodreads by roughly the saved scorer and
+  top-k time (~0.5 ms of ~0.75–1.0 ms at B=16), and by less on arXiv.
+
+**Outcome** (`h2h.md`, B=16, scorer µs, padded → compact; official fp16 scorer+mask for the gate):
+
+| | predicted | measured |
+|---|---|---|
+| goodreads none / bloom / exact | ~40 / ~45 / ~60 | **26 / 34 / 53** |
+| arXiv none / bloom / exact | ~100 / ~110 / ~130 | **99 / 105 / 197** (exact missed: the `C·A_max = 20` attrs read per item was not in the estimate) |
+| top-k goodreads | ~60 | 92–99 |
+| gate bloom goodreads / arXiv | ~1.2× / ~1.26× | **0.90× / 1.24×** |
+
+The first compact kernel did not pass. It used a per-lane probe search, a tile-first grid, and a
+host-built layout plus a torch epilogue: arXiv bloom came in at 1.49–1.78× and eager wall *regressed* on arXiv (57
+launches against 38, about 230 µs of host overhead). What moved it, each measured on its own:
+early-exit tail tiles (goodreads bloom 73 → 29 µs), a batch-first grid for L2 reuse across
+the batch (arXiv bloom 126 → 107), cluster-aligned tiles (arXiv bloom 115 → 107 against the
+per-lane search), and the probe table built in-kernel plus a one-launch id epilogue (launches
+57 → 32–44). Writing ids from the scorer instead of the epilogue cost 13–20 µs on arXiv and was
+dropped. The tile config (256×4) was re-swept and stays.

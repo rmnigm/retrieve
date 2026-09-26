@@ -19,6 +19,7 @@ import copy
 import pytest
 import torch
 
+from retrieve.indexing.quantize import quantize_int8_global
 from retrieve.modules.knn import FullScanKNN
 from retrieve.modules.silvertorch import SilverTorch, SilverTorchBuilder
 from tests.conftest import (
@@ -144,19 +145,17 @@ class TestShape:
         assert m.global_scale.dtype == torch.float32
         assert m.global_scale.shape == ()
         assert m.centroids.dtype == torch.float32
-        if backend == "official":
-            # Cluster-sorted CSR layout instead of the padded one (plan D4).
-            assert not hasattr(m, "padded_cluster_items")
-            assert m.cluster_offsets.shape == (N_LISTS + 1,)
-            assert m.cluster_offsets.dtype == torch.int64
-            assert m.sort_perm.shape == (N,) and m.inv_perm.shape == (N,)
-            assert torch.equal(m.inv_perm[m.sort_perm], torch.arange(N, device="cuda"))
-            assert int(m.cluster_offsets[-1].item()) == N
-        else:
-            assert m.padded_cluster_items.shape[0] == N_LISTS
-        assert m.cluster_sizes.shape == (N_LISTS,)
+        # The cluster-sorted CSR on every backend (kernels.md § SilverTorch kernels).
+        assert m.cluster_offsets.shape == (N_LISTS + 1,)
+        assert m.cluster_offsets.dtype == torch.int64
+        assert m.sort_perm.shape == (N,) and m.inv_perm.shape == (N,)
+        assert torch.equal(m.inv_perm[m.sort_perm], torch.arange(N, device="cuda"))
+        assert int(m.cluster_offsets[-1].item()) == N
+        assert torch.equal(m.cluster_offsets.diff(), m.cluster_sizes)
+        assert m._probe_width == int(m.cluster_sizes.topk(N_PROBE).values.sum())
+        assert torch.equal(m.item_codes, quantize_int8_global(data["embs"])[0][m.sort_perm])
         # No filter → no filter buffers.
-        assert not hasattr(m, "bloom_sigs")
+        assert not hasattr(m, "bloom_transposed")
         assert not hasattr(m, "hash_seeds")
         assert not hasattr(m, "bloom_index")
         assert not hasattr(m, "item_clause_attrs")
@@ -171,12 +170,11 @@ class TestShape:
         assert m.clause_is_reverse.dtype == torch.bool
         assert m.clause_is_reverse.shape == (C,)
         # Exact mode must not allocate bloom buffers.
-        assert not hasattr(m, "bloom_sigs")
+        assert not hasattr(m, "bloom_transposed")
         assert not hasattr(m, "hash_seeds")
         assert not hasattr(m, "bloom_index")
-        if backend == "official":
-            # Attrs live in the cluster-sorted doc space on this backend.
-            assert torch.equal(m.item_clause_attrs, data["attrs"][m.sort_perm])
+        # Attrs live in the cluster-sorted doc space, like the codes.
+        assert torch.equal(m.item_clause_attrs, data["attrs"][m.sort_perm])
 
 
 class TestParamValidation:
@@ -504,7 +502,7 @@ class TestCandidates:
 @pytest.mark.parametrize("backend", BACKENDS)
 class TestStateDict:
     """``load_state_dict`` re-derives the two Python-scalar caches the forwards read
-    (``_global_scale_f``, ``_max_cluster_size``) from the loaded buffers, so a loaded index
+    (``_global_scale_f``, ``_probe_width``) from the loaded buffers, so a loaded index
     scores exactly like the one that was saved — nothing is patched by hand."""
 
     @pytest.mark.parametrize("filter_mode", ["none", "bloom", "exact"])
@@ -525,12 +523,12 @@ class TestStateDict:
             for buf in twin.buffers():
                 buf.zero_()
         twin._global_scale_f = float("nan")
-        twin._max_cluster_size = -1
+        twin._probe_width = -1
 
         twin.load_state_dict(src.state_dict())
 
         assert twin._global_scale_f == src._global_scale_f
-        assert twin._max_cluster_size == src._max_cluster_size
+        assert twin._probe_width == src._probe_width
         for (name, a), (_, b) in zip(src.named_buffers(), twin.named_buffers()):
             assert torch.equal(a, b), name
         qa = data["q_attrs"] if filter_mode != "none" else None
@@ -574,7 +572,7 @@ class TestBuilder:
         for (name, a), (_, b) in zip(again.named_buffers(), twin.named_buffers()):
             assert torch.equal(a, b), name
         assert twin._global_scale_f == again._global_scale_f
-        assert twin._max_cluster_size == again._max_cluster_size
+        assert twin._probe_width == again._probe_width
         qa = data["q_attrs"] if filter_mode != "none" else None
         ids_a, sc_a = again(data["query"], qa)
         ids_t, sc_t = twin(data["query"], qa)
@@ -646,11 +644,9 @@ class TestFewSurvivorsSentinel:
     """``-inf`` slots carry the ``-1`` id on every backend (O §14.7).
 
     ``interfaces.py`` names ``-1 / -inf`` as the "no item" sentinels. The ``torch`` and
-    ``official`` backends get there through ``masked_topk``; the Triton epilogues
-    (``_cps_finish`` / ``_cpse_finish``) used to return whatever item id the probe pool held at
-    that slot, so on a row with fewer than K survivors the two backends' ``ids`` tensors were not
-    comparable without normalising through score finiteness first. The epilogues now apply the
-    sentinel themselves.
+    ``official`` backends get there through ``masked_topk``; the Triton epilogue
+    (``common.probe_ids_kernel``) writes it itself, so on a row with fewer than K survivors the
+    backends' ``ids`` tensors compare directly.
 
     The index here is built so the survivor count is *known*: one clause, one attribute slot, a
     value carried by exactly five items, and a query row asking for a value no item carries.

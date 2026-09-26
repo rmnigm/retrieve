@@ -105,7 +105,7 @@ def test_index_bytes_includes_filter_submodule(silvertorch_modules):
     m = A.build("linr_v1_filter_mask", x, k=4, backend="torch", filter_kind="clause", filter_mod=f)
     assert m.filter is f and index_bytes(m) == index_bytes(m.idx) + index_bytes(f) > 0
     st = silvertorch_modules["bloom"]
-    assert getattr(st, "filter", None) is None and "bloom_sigs" in st.state_dict()
+    assert getattr(st, "filter", None) is None and "bloom_transposed" in st.state_dict()
     assert A.build_filter("none", None) is None
 
 
@@ -114,14 +114,13 @@ def test_silvertorch_query_params_revalidate():
     st = A.build(
         "silvertorch", x, k=4, backend="torch", params={"n_lists": 8, "n_probe": 2, "n_iter": 2}
     )
-    max_size = st.padded_cluster_items.shape[1]
     with pytest.raises(ValueError, match="cannot exceed n_lists"):
         st.set_query_params(n_probe=9)
     st.set_query_params(n_probe=8)
     assert st.n_probe == 8
     ids, _ = st(q)  # probing every list: every row is full
     assert ids.shape == (6, 4) and bool((ids >= 0).all())
-    st.k = 8 * max_size  # the largest k the full probe pool admits ...
+    st.k = x.shape[0]  # the largest k the full probe pool admits ...
     with pytest.raises(ValueError, match="probe pool"):
         st.set_query_params(n_probe=1)  # ... which a single probed list cannot serve
 

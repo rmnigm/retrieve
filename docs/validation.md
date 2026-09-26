@@ -27,7 +27,7 @@ rerun the library suite before trusting any row on it.
 | gate | state | notes |
 |---|---|---|
 | Library suite (`retrieve/tests`, GPU, `official` extra installed) | **green**, 708 passed at the last full run (roadmap Q3's hardened gates included; none turned red) | no tolerance loosened; every tolerance stated at its call site; see [testing](system/testing.md) |
-| Triton vs reference ops, every parity file | **bit-exact** (`torch.equal` scores, ids up to ties) for `codesigned_probe_score` (+ bloom), `codesigned_probe_score_exact`, `oporp_1bit_match_topk_*`, `clause_mask`, the compaction ops; **not bit-exact** for `fused_masked_knn_topk` | the fused kernel's fp32 `tl.sum` and the reference's `bmm` reduce in different orders: measured drift ≤ 6e-8 at D ≤ 128 on unit-norm data, gated at `atol=1e-6` |
+| Triton vs reference ops, every parity file | **bit-exact** (`torch.equal` scores, ids up to ties) for `codesigned_probe_score` (+ bloom) and `codesigned_probe_score_exact` on the compact CSR layout (also against a loop-built oracle and, for bloom, the row-wise subset test), and for `oporp_1bit_match_topk_*`, `clause_mask`, the compaction ops; **not bit-exact** for `fused_masked_knn_topk` | the fused kernel's fp32 `tl.sum` and the reference's `bmm` reduce in different orders: measured drift ≤ 6e-8 at D ≤ 128 on unit-norm data, gated at `atol=1e-6` |
 | Kernel identities (Q3) | **bit-exact**: indirect OPORP over `arange(N)` ≡ full scan; bloom op with an all-pass query signature ≡ no-bloom op; `clause_compact` ≡ `compact_mask(clause_mask)` incl. the `-1` tail; row alone ≡ row in batch (fused, both probe scorers, OPORP); item-table permutation permutes ids only (fused, `codesigned_probe_score`, OPORP) | Triton only, on this box |
 | Kernel cutoffs and degenerate rows (Q3) | **green**: both sides of `_P_BUCKETS[0]` / `_N_BUCKETS[0]` and `P % block` ∈ {0, 1} (read from the kernels' constants, regime asserted); `count = 0` / `1` rows give exact `(-1, -inf)` tails | |
 | Addressing past 2³¹ elements (kernel-opt) | **green**: [`test_large_offsets.py`](../retrieve/tests/correctness/test_large_offsets.py), output axis (`B = 144, N = 16M`: `clause_mask`, `clause_compact`, `fused_masked_knn_topk`, `oporp_1bit_match_topk_indirect`) and item axis (a `[140M, 16]` table: `bloom_match`, `bloom_compact`, `clause_mask`, `clause_compact`, `oporp_1bit_match_topk_full`), planted answers. All five cases fail on the pre-change code (illegal address; `bloom_match` also overflowed `grid_y`), and each kernel's widening was mutation-checked | skipped below 48 / 24 GiB free. The probe scorers' `B·P ≥ 2³¹` output axis has the same `row_base` but no large case. Timing of the narrow path: all 13 cases within noise of the pre-change kernels, interleaved ([artifact](artifacts/kernel-opt/phase1.md); [kernels](system/kernels.md#addressing)) |
@@ -79,12 +79,30 @@ explains the mechanism behind the kernel-only split.
   1.3× (arXiv none), 1.2× (arXiv bloom), 10.1× (arXiv clause) against
   official at `n_probe` 24, k = 100; across `n_probe` 24 and 32, 1.3-1.6×
   unfiltered, 1.2-1.9× bloom, 2.9-10.1× clause. At batch 1, 1.1-2.0×, inside batch-1 noise for bloom.
-- **Meta's scorer kernel is faster than ours in every cell**: 1.15-3.2× on
-  arXiv, 10.9-17.8× on goodreads. The cause is our padded IVF layout: on
+- **Meta's scorer kernel is faster than ours in every cell** (b3, padded layout): 1.15-3.2× on
+  arXiv, 10.9-17.8× on goodreads. The cause was our padded IVF layout: on
   goodreads `n_probe × max_cluster_size` is 611,520 slots for about 18.7k
   real items (97 % padding); Meta reads a CSR. Official gives the time back
   in payload preparation (268-834 µs over 73-93 launches, against our
   34-58 launches).
+- **After G-a TF-9 / TF-1** (compact CSR probe layout + transposed bloom,
+  branch `dev/kernel-opt`; b3 methodology re-run by
+  [h2h.py](artifacts/kernel-opt/h2h.py), one run per tree, padded tree and
+  compact tree in alternating processes with official as the control arm;
+  [table](artifacts/kernel-opt/h2h.md)). Bloom kernel-only at batch 16,
+  ours (scorer + mask) against official fp16 (scorer + mask): **0.90×
+  goodreads (34.3 vs 38.1 µs), 1.24× arXiv (105.0 vs 84.5 µs)**, the
+  1.3× gate green. Unfiltered 0.82× / 0.88×; exact 2.15× / 2.47×, where ours
+  fuses a `C·A_max` attrs read that official receives as a precomputed mask
+  outside the scorer class. Our scorer went 338 → 26 µs (none), 525 → 34
+  (bloom), 400 → 53 (exact) on goodreads and 131 → 99, 238 → 105,
+  268 → 197 on arXiv; eager phases-2+3 wall at batch 16 from 0.76 / 1.02 / 0.82
+  to 0.42 / 0.62 / 0.44 ms on goodreads, and 0.45 / 0.78 / 0.48 to
+  0.46 / 0.62 / 0.45 ms on arXiv, with 28-44 launches. Int32 parity against
+  official: jaccard 1.000000, `score_max_abs_diff` 0 in all six cells.
+  SM clock 1275-1410 MHz, sampled per row in the artifact. **Not yet
+  validated** as paper material: one run per tree, not re-run after the
+  merge to `staging`, and no end-to-end (`bench run`) rerun.
 - **Phase 2 alone**: Meta's transposed bloom search beats our row-wise
   `bloom_match` 2.0× at 0.8M items and 6.1× at 3.0M; ours grows 3.3× with
   N, theirs 1.07×. This reproduces the paper's transposed-index claim
