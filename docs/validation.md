@@ -4,7 +4,7 @@ created: 2026-09-26
 updated: 2026-09-26
 type: summary
 tags: [validation, testing, harness]
-sources: [retrieve/tests/, evaluation/tests/, evaluation/golden/, evaluation/results/, docs/artifacts/]
+sources: [retrieve/tests/, evaluation/tests/, evaluation/golden/, evaluation/results/, docs/artifacts/, docs/artifacts/hub-index.md]
 contested: true
 ---
 
