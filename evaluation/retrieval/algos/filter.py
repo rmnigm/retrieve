@@ -15,7 +15,7 @@ from torch import Tensor
 from retrieval.config import FilterKind
 from retrieval._compat import Backend
 from retrieve.interfaces import FilterModule
-from retrieve.layers.filters import BloomFilter, ExactAttributeFilter
+from retrieve.modules import BloomFilter, ExactAttributeFilter
 
 
 def build_filter(

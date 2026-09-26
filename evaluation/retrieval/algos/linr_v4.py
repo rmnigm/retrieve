@@ -15,7 +15,7 @@ from torch import Tensor
 
 from retrieval._compat import Backend
 from retrieve.interfaces import FilterModule
-from retrieve.layers.linr.postfilter_knn_int8 import PostfilterKNNInt8
+from retrieve.modules import PostfilterKNNInt8
 
 from ._helpers import AlgoBase
 from .filter import make_mask
