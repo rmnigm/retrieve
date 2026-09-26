@@ -1,0 +1,78 @@
+{
+  "prep": {
+    "staging": {
+      "release": "2026-09-23",
+      "min_year": 2000,
+      "max_year": 2026,
+      "work_types": [
+        "article",
+        "preprint",
+        "review",
+        "conference-paper",
+        "book-chapter",
+        "dissertation"
+      ],
+      "sample_rate": 0.35,
+      "seed": 0
+    },
+    "n_files_staged": 2040,
+    "n_files_manifest": 2040,
+    "n_staged": 29944334,
+    "n_duplicates": 0,
+    "n_items": 15000000,
+    "n_pool": 14944334,
+    "n_pool_with_catalog_refs": 6481495,
+    "n_pool_eligible": 4336859,
+    "n_heldout": 10000,
+    "n_citation_edges_in_catalog": 26083076,
+    "mean_relevant_per_query": 4.77,
+    "mean_relevant_field_era_per_query": 2.85,
+    "seed": 0,
+    "wall_clock_sec": 410.1
+  },
+  "attrs": {
+    "n_items": 15000000,
+    "clauses": [
+      "field",
+      "earlier_era",
+      "subfield",
+      "source",
+      "is_oa"
+    ],
+    "clause_is_reverse": [
+      false,
+      false,
+      false,
+      true,
+      false
+    ],
+    "vocab_sizes": {
+      "field": 26,
+      "subfield": 252,
+      "source": 5000,
+      "era": 5
+    },
+    "coverage": {
+      "field": 0.9985,
+      "earlier_era": 0.7375,
+      "subfield": 0.9985,
+      "source": 0.5159,
+      "is_oa": 1.0
+    },
+    "query_clause_active": {
+      "field": 1.0,
+      "earlier_era": 1.0,
+      "subfield": 1.0,
+      "source": 0.5721,
+      "is_oa": 1.0
+    },
+    "target_passes_clause": {
+      "field": 1.0,
+      "earlier_era": 1.0,
+      "subfield": 0.7505,
+      "source": 0.9229155742003147,
+      "is_oa": 0.5082
+    },
+    "wall_clock_sec": 5.4
+  }
+}

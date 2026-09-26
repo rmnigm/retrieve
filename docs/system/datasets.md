@@ -726,9 +726,36 @@ data/kuairand/
 
 ### openalex
 
-**Status: ETL written and dry-run on real snapshot rows, nothing staged.** Roadmap E3's
-OpenAlex fallback (no Semantic Scholar key). The full stream, the encode and every cell
-are still to run; nothing below is citable.
+**Status: staged at 10 M, `bench check` clean, one filter cell run.** Roadmap E3's
+OpenAlex fallback (no Semantic Scholar key), a 10 M catalog like pubmed's. On 2026-09-26
+`convert --sample-rate 0.35 --workers 64` streamed all 2,040 files of release 2026-09-23
+(297.1 GB read in 572 s, 0 failures); a 15 M catalog was prepped and encoded
+(`encode_text` 15,663 s on the A100, 958 docs/s), did not fit the harness (below), and was
+cut to 10 M: `prep --keep-items 10000000` (374 s), `reshard --from-dir` the 15 M vectors
+(34 s, no encode; all 10 M rows `torch.equal` to their source rows,
+[`check_reshard.py`](../artifacts/e3-openalex/check_reshard.py)), `encode_queries`,
+`attrs`. `verify_prep.py` re-derives every query with no mismatch, and
+`bench check --dataset openalex` reports `openalex d768: ok`. The dataset is in the `filter`
+suite. One cell, `linr_v1_filter_mask`/triton clause `field_era`, eager, `--skip-perf` (so
+`partial`): pass rate 0.0526, `recall_oracle@1000` **0.9959**, held-out (a cited paper)
+`recall@100` 0.505 / `@1000` 0.741, n = 10,000, 64 GB reserved
+([record](../artifacts/e3-openalex/filter-openalex-d768-cell.jsonl)). SilverTorch-triton
+and LiNR V2 / V3 cannot run at D = 768 (the power-of-two limit on the
+[roadmap](../roadmap.md)); official and V1 can. Nothing here is citable yet.
+
+The full-scan filter counts (`convert_log.jsonl`, summed): 476,196,327 rows → year
+373,119,082 → English 261,736,236 → type 154,189,252 → flags 130,910,232 → hash sample
+(0.35) 45,821,266 → abstract 29,944,334 staged, 11 of them dropped as `abstract_truncated`.
+So **~85.6 M works are eligible**, not the 54.6 M `plan`'s row-group sample estimated: the
+sample under-counts badly because row groups cluster by type. Use `plan` for the projected
+bytes (exact, from every footer), not for the eligible count.
+
+The 10 M prep: 29,944,334 staged → 10,000,000 items, 19,944,334 in the held-out pool;
+7,658,677 pool papers cite the catalog, 4,890,174 have a same-field earlier-era reference,
+10,000 drawn; 35,673 qrels. The attrs: field 99.85 % covered, source 51.6 %; the target
+passes the query's field and era clauses for every query (subfield 75 %). The superseded
+15 M run (`run15m-*` logs) held 4.77 in-catalog references per query, 2.85 same field +
+earlier era.
 
 The dry run (2026-09-26, artifacts in [e3-openalex/](../artifacts/e3-openalex/)):
 `convert` on 8 real snapshot files (50,304 records) staged 4,581 works; a few thousand
@@ -743,7 +770,9 @@ reader (`layout.load_text_items` / `load_text_queries` / `load_item_attrs` /
 `load_query_attrs`) loads it.
 
 `download` → `convert` → `prep` → `encode_text` → `encode_queries` → `attrs`, with
-`plan` first. Source: the OpenAlex quarterly snapshot on public S3, anonymous, CC0.
+`plan` first; for a smaller catalog of the same staging, `reshard --from-dir <larger>`
+replaces `encode_text` (the N smallest hashes are a subset of any larger N, so the rows are
+copied, not encoded). Source: the OpenAlex quarterly snapshot on public S3, anonymous, CC0.
 Verified 2026-09-26 against release **2026-09-23**: the 2026 layout is
 `s3://openalex/data/{jsonl,parquet}/<entity>/updated_date=*/part_*` with a
 `manifest.json` per format, written last (the old `data/works/` path is an S3 delete
@@ -857,27 +886,30 @@ the main thread costs ~6 %. `flash_attn` is not installed.
 
 #### Budget
 
-`plan` on release 2026-09-23 ([report](../artifacts/e3-openalex/plan-2026-09-23.json)),
-the stream rate from [`stream_probe.py`](../artifacts/e3-openalex/stream_probe.py):
+As measured on 2026-09-26; `plan` from its
+[report](../artifacts/e3-openalex/plan-2026-09-23.json):
 
-| | 50 M slice |
+| | 10 M catalog |
 |---|---|
-| eligible works | 11.5 % of a 5.5 M-row sample (64 row groups) → **~54.6 M**; row groups cluster by type, and a 32-group sample said 13.1 %, so treat it as ±10 % |
-| sample rate | `plan` says 0.962; run `convert --sample-rate 1.0` and let `prep` cut exactly 50 M (the rest is the held-out pool) |
 | read over S3 | **297.1 GB** of projected columns (all files; the slice is a hash, not a prefix) |
-| stream wall time | 176 MB/s with 32 workers, 229.5 MB/s with 64 (96 / 128 random row groups, read + `stage_table`) → **~25–30 min** plus the tail of the largest files; `plan`'s own threaded rate (20 MB/s) is GIL-bound, a lower bound |
-| staging parquet | 525 B/row → ~28–29 GB |
-| `papers.parquet` | ~26.3 GB |
-| fp16 item shards | 76.8 GB |
-| **peak disk** | **~131 GB** (staging + papers + shards; `_raw/openalex/staging` can go once `prep` is done) |
-| encode | 50 M ÷ 898 docs/s ≈ **15.5 A100-hours** (queries: seconds) |
-| items fp32 on the device | **153.6 GB** |
+| `convert` wall time | **572 s** at `--workers 64`, 526 MB/s average (the 20 s probes of [`stream_probe.py`](../artifacts/e3-openalex/stream_probe.py) saw 176–230 MB/s; `plan`'s threaded rate, 20 MB/s, is GIL-bound) |
+| sample rate | 0.35 → 29.9 M staged; any rate that stages N × (1 + margin) gives the same catalog |
+| staging parquet | 16 GB (`_raw/openalex/staging`, deletable once no smaller catalog is wanted) |
+| `prep` | 374 s; `papers.parquet` 6.3 GB, `item_id_map.json` 209 MB |
+| fp16 item shards | 15 GB (10 × 1 M) |
+| attrs | 1.5 GB (`[10 M, 5, 4]` int64) |
+| encode | a fresh encode is ~2.9 A100-hours at 958 docs/s (the 15 M one took 15,663 s); this catalog was `reshard`ed from it in 34 s |
+| on the device | items fp32 30.7 GB, plus the oracle's transposed copy; the cell reserved 64 GB |
 
-**The 50 M slice does not fit the harness as written**: `load_inputs` holds items fp32 on
-the device, 153.6 GB at 768-d on an 80 GB A100 — the same ceiling that made pubmed a
-10 M slice (~15 M items at 768-d). The ETL takes any `--keep-items`; **E3 runs at ~15 M**
-instead of 50 M (orchestrator decision, matching the pubmed precedent), scaling the table
-above to roughly a third: ~40 GB peak disk, ~4.6 A100-hours to encode.
+**What fits the harness.** `load_inputs` holds items fp32 on the device and the oracle
+adds a transposed fp32 copy, so a run needs ~2 × N × D × 4 B plus attrs and workspace: at
+768-d that is ~11–12 M items on the 80 GB A100. 50 M (307 GB) and 15 M (92 GB) do not
+fit; pubmed's 10 M (57 GB) does. Before that, the loader itself peaked at three copies
+(fp16 + `.float()` + `F.normalize`, 107 GB at 15 M); `layout.load_text_items` now
+normalises a sharded matrix shard by shard into one fp32 buffer (`load_sharded(...,
+normalize=True)`, `torch.equal` to the old path on 3 M real rows), which is what got the
+15 M run as far as the oracle. So E3 runs at 10 M: `prep --keep-items 10000000`, then
+`reshard --from-dir` the 15 M catalog's vectors.
 
 ```
 data/openalex/

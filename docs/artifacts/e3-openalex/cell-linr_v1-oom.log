@@ -1,0 +1,38 @@
+2026-09-26 07:29:29.762 | INFO     | bench.config:load_matrix:363 - openalex/filter: 1 jobs, 1 cells
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/scratch/wt/e3/evaluation/bench/cli.py", line 254, in <module>
+    main()
+  File "/venvs/retrieve/lib/python3.11/site-packages/click/core.py", line 1514, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venvs/retrieve/lib/python3.11/site-packages/click/core.py", line 1435, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/venvs/retrieve/lib/python3.11/site-packages/click/core.py", line 1902, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venvs/retrieve/lib/python3.11/site-packages/click/core.py", line 1298, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venvs/retrieve/lib/python3.11/site-packages/click/core.py", line 853, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/wt/e3/evaluation/bench/cli.py", line 116, in run
+    counts = run_mod.run(
+             ^^^^^^^^^^^^
+  File "/scratch/wt/e3/evaluation/bench/run.py", line 438, in run
+    inp = inputs.load_inputs(
+          ^^^^^^^^^^^^^^^^^^^
+  File "/scratch/wt/e3/evaluation/bench/inputs.py", line 44, in load_inputs
+    item_embs = layout.load_text_items(ds.content_dir, device)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/wt/e3/evaluation/eval_datasets/layout.py", line 142, in load_text_items
+    return F.normalize(item_embs.float().contiguous(), dim=-1)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venvs/retrieve/lib/python3.11/site-packages/torch/nn/functional.py", line 5696, in normalize
+    return input / denom
+           ~~~~~~^~~~~~~
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 42.92 GiB. GPU 0 has a total capacity of 79.25 GiB of which 12.93 GiB is free. Including non-PyTorch memory, this process has 66.31 GiB memory in use. Of the allocated memory 64.44 GiB is allocated by PyTorch, and 1.39 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+EXIT 1

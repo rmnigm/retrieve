@@ -23,6 +23,8 @@ Subcommands::
                     in-catalog references as relevance).
     encode_text     nomic-embed-text-v1.5 at its native 768 dims, "search_document: " prefix →
                     content_d768/text_emb_shard_NNN.pt + shard_index.json. Resumable per shard.
+    reshard         Instead of encode_text for a smaller catalog of the same staging: gather
+                    its items' vectors from a larger encoded catalog (--from-dir), bit for bit.
     encode_queries  Same encoder, "search_query: " prefix → content_d768/query_emb.pt.
     attrs           item_attrs_narrow.pt [N, 5, 4], clause_is_reverse_narrow.pt, vocabs,
                     eval_split.parquet.
@@ -59,7 +61,7 @@ import pyarrow.parquet as pq
 
 from eval_datasets.common import merge_prep_log, parse_ranges, pmid_hash, select_pmids
 from eval_datasets.hub import data_root, raw_dir
-from eval_datasets.layout import atomic_write
+from eval_datasets.layout import atomic_write, load_sharded
 
 MANIFEST_URL = "https://openalex.s3.amazonaws.com/data/parquet/manifest.json"
 S3_REGION = "us-east-1"
@@ -748,7 +750,14 @@ def cmd_encode_text(args: argparse.Namespace) -> int:
             f"{(n_items - start - n) / rate / 3600:.2f} h left)",
             flush=True,
         )
-    # Written last: the index is what the loader reads, so it only exists once every shard does.
+    _write_index(content, n_items, entries, meta)
+    print(f"ALL DONE encode_text in {time.monotonic() - t0:.0f}s — {n_items:,} items", flush=True)
+    return 0
+
+
+def _write_index(content: Path, n_items: int, entries: list[dict], meta: dict) -> None:
+    """Written last: the index is what the loader reads, so it only exists once every shard
+    does."""
     (content / "shard_index.json").write_text(
         json.dumps(
             {
@@ -765,7 +774,44 @@ def cmd_encode_text(args: argparse.Namespace) -> int:
     (content / "text_emb.meta.json").write_text(
         json.dumps(meta | {"layout": "sharded (shard_index.json)"}, indent=2)
     )
-    print(f"ALL DONE encode_text in {time.monotonic() - t0:.0f}s — {n_items:,} items", flush=True)
+
+
+def cmd_reshard(args: argparse.Namespace) -> int:
+    """This catalog's item vectors gathered from a larger catalog's (``--from-dir``) instead of
+    encoded: the N smallest work-id hashes are a subset of any larger N from the same staging,
+    so a smaller catalog is a gather. The fp16 rows are copied as encoded, bit for bit."""
+    import torch
+
+    output = Path(args.output_dir).expanduser()
+    src = Path(args.from_dir).expanduser()
+    content = output / f"content_d{EMB_DIM_NATIVE}"
+    src_content = src / f"content_d{EMB_DIM_NATIVE}"
+    t0 = time.monotonic()
+    src_ids = pl.read_parquet(src / "papers.parquet", columns=["work_id"])["work_id"].to_numpy()
+    ids = pl.read_parquet(output / "papers.parquet", columns=["work_id"])["work_id"].to_numpy()
+    order = np.argsort(src_ids, kind="stable")
+    pos = np.clip(np.searchsorted(src_ids[order], ids), 0, src_ids.size - 1)
+    if not (src_ids[order][pos] == ids).all():
+        raise SystemExit(f"ERROR {output} has works that {src} never encoded: not a subset")
+    rows = torch.from_numpy(order[pos])  # the source row (source item_id - 1) of each new item
+    n_items = int(ids.size)
+    meta = json.loads((src_content / "encode_params.json").read_text()) | {
+        "n_rows": n_items,
+        "shape": [n_items, EMB_DIM_NATIVE],
+        "shard_rows": args.shard_rows,
+    }
+    _check_params(content / "encode_params.json", meta)
+    print(f"STEP load {src_content} ({src_ids.size:,} rows, fp16) for {n_items:,} items")
+    src_emb = load_sharded(src_content / "shard_index.json", torch.device("cpu"))
+    entries = []
+    for i, start in enumerate(range(0, n_items, args.shard_rows)):
+        n = min(args.shard_rows, n_items - start)
+        name = f"text_emb_shard_{i:03d}.pt"
+        entries.append({"filename": name, "start_id": start, "n_rows": n})
+        atomic_write(content / name, partial(torch.save, src_emb[rows[start : start + n]]))
+        print(f"  shard {i}: {n:,} rows → {name}", flush=True)
+    _write_index(content, n_items, entries, meta | {"resharded_from": str(src_content)})
+    print(f"ALL DONE reshard in {time.monotonic() - t0:.0f}s — {n_items:,} items", flush=True)
     return 0
 
 
@@ -990,6 +1036,12 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--output-dir", type=str, default=default_out)
     _add_encode_args(sp)
     sp.set_defaults(func=cmd_encode_text)
+
+    sp = sub.add_parser("reshard", help="items' vectors gathered from a larger encoded catalog")
+    sp.add_argument("--output-dir", type=str, default=default_out)
+    sp.add_argument("--from-dir", type=str, required=True, help="the larger catalog's output dir")
+    sp.add_argument("--shard-rows", type=int, default=1_000_000)
+    sp.set_defaults(func=cmd_reshard)
 
     sp = sub.add_parser("encode_queries", help="held-out papers → content_d768/query_emb.pt")
     sp.add_argument("--output-dir", type=str, default=default_out)

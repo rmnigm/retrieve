@@ -1,0 +1,65 @@
+<All keys matched successfully>
+  shard 0: 1,000,000 rows → text_emb_shard_000.pt  (1,019 docs/s, 3.82 h left)
+  shard 1: 1,000,000 rows → text_emb_shard_001.pt  (985 docs/s, 3.67 h left)
+  shard 2: 1,000,000 rows → text_emb_shard_002.pt  (975 docs/s, 3.42 h left)
+  shard 3: 1,000,000 rows → text_emb_shard_003.pt  (963 docs/s, 3.17 h left)
+  shard 4: 1,000,000 rows → text_emb_shard_004.pt  (955 docs/s, 2.91 h left)
+  shard 5: 1,000,000 rows → text_emb_shard_005.pt  (955 docs/s, 2.62 h left)
+  shard 6: 1,000,000 rows → text_emb_shard_006.pt  (956 docs/s, 2.33 h left)
+  shard 7: 1,000,000 rows → text_emb_shard_007.pt  (954 docs/s, 2.04 h left)
+  shard 8: 1,000,000 rows → text_emb_shard_008.pt  (957 docs/s, 1.74 h left)
+  shard 9: 1,000,000 rows → text_emb_shard_009.pt  (955 docs/s, 1.45 h left)
+  shard 10: 1,000,000 rows → text_emb_shard_010.pt  (954 docs/s, 1.16 h left)
+  shard 11: 1,000,000 rows → text_emb_shard_011.pt  (957 docs/s, 0.87 h left)
+  shard 12: 1,000,000 rows → text_emb_shard_012.pt  (959 docs/s, 0.58 h left)
+  shard 13: 1,000,000 rows → text_emb_shard_013.pt  (960 docs/s, 0.29 h left)
+  shard 14: 1,000,000 rows → text_emb_shard_014.pt  (958 docs/s, 0.00 h left)
+ALL DONE encode_text in 15663s — 15,000,000 items
+<All keys matched successfully>
+ALL DONE encode_queries — (10000, 768) → /data/openalex/content_d768/query_emb.pt
+{
+  "n_items": 15000000,
+  "clauses": [
+    "field",
+    "earlier_era",
+    "subfield",
+    "source",
+    "is_oa"
+  ],
+  "clause_is_reverse": [
+    false,
+    false,
+    false,
+    true,
+    false
+  ],
+  "vocab_sizes": {
+    "field": 26,
+    "subfield": 252,
+    "source": 5000,
+    "era": 5
+  },
+  "coverage": {
+    "field": 0.9985,
+    "earlier_era": 0.7375,
+    "subfield": 0.9985,
+    "source": 0.5159,
+    "is_oa": 1.0
+  },
+  "query_clause_active": {
+    "field": 1.0,
+    "earlier_era": 1.0,
+    "subfield": 1.0,
+    "source": 0.5721,
+    "is_oa": 1.0
+  },
+  "target_passes_clause": {
+    "field": 1.0,
+    "earlier_era": 1.0,
+    "subfield": 0.7505,
+    "source": 0.9229155742003147,
+    "is_oa": 0.5082
+  },
+  "wall_clock_sec": 5.4
+}
+EXIT 0

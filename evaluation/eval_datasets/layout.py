@@ -113,18 +113,23 @@ def assert_prefixes(content_dir: Path) -> None:
             raise RuntimeError(f"{problem} — re-encode")
 
 
-def load_sharded(shard_index: Path, device: torch.device) -> torch.Tensor:
-    """``content/text_emb_shard_*.pt`` (synth catalogs) → one ``[N, D]`` tensor on device."""
+def load_sharded(
+    shard_index: Path, device: torch.device, *, normalize: bool = False
+) -> torch.Tensor:
+    """``content/text_emb_shard_*.pt`` → one ``[N, D]`` tensor on device, in the shards' dtype,
+    or with ``normalize`` fp32 L2-normalised shard by shard — the peak is then the fp32 matrix
+    plus one shard, not the three whole-matrix copies of ``.float()`` + ``F.normalize``."""
     with open(shard_index) as f:
         idx = json.load(f)
-    n, d, dtype = int(idx["n_items"]), int(idx["dim"]), getattr(torch, idx["dtype"])
+    n, d = int(idx["n_items"]), int(idx["dim"])
+    dtype = torch.float32 if normalize else getattr(torch, idx["dtype"])
     out = torch.empty((n, d), dtype=dtype, device=device)
     for s in idx["shards"]:
         shard = torch.load(str(shard_index.parent / s["filename"]), map_location=device)
         start, rows = int(s["start_id"]), int(s["n_rows"])
         if shard.shape != (rows, d):
             raise RuntimeError(f"{s['filename']}: shape {tuple(shard.shape)} != ({rows}, {d})")
-        out[start : start + rows].copy_(shard)
+        out[start : start + rows] = F.normalize(shard.float(), dim=-1) if normalize else shard
         del shard
     return out
 
@@ -134,11 +139,14 @@ def load_text_items(content_dir: Path, device: torch.device) -> torch.Tensor:
     of a legacy file dropped *before* normalisation); the prefix sidecars asserted first."""
     assert_prefixes(content_dir)
     shard_index = content_dir / "shard_index.json"
+    what = f"{content_dir.name}/text_emb"
     if shard_index.exists():
-        item_embs = load_sharded(shard_index, device)
-    else:
-        item_embs = torch.load(str(content_dir / "text_emb.pt"), map_location=device)
-    item_embs = drop_legacy_padding_row(item_embs, kind="emb", what=f"{content_dir.name}/text_emb")
+        # Row-wise, so normalising before the pad-row drop is the same; an all-zero row stays zero.
+        return drop_legacy_padding_row(
+            load_sharded(shard_index, device, normalize=True), kind="emb", what=what
+        )
+    item_embs = torch.load(str(content_dir / "text_emb.pt"), map_location=device)
+    item_embs = drop_legacy_padding_row(item_embs, kind="emb", what=what)
     return F.normalize(item_embs.float().contiguous(), dim=-1)
 
 

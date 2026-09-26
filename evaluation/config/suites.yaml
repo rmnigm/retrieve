@@ -31,8 +31,9 @@ filter:                        # vs exact oracle + held-out-in-filter (old d*-fi
   # oracle, not the shipped k=10 squared-L2 GT (docs/system/datasets.md § yfcc10m).
   # `dims` is [128, 192] for that reason and is NOT the dim ablation, which stays dropped:
   # each dataset contributes exactly one width. pubmed joined at E2 at its native 768
-  # (MedCPT, config/pubmed.yaml), same rule.
-  datasets: [goodreads, arxiv, yfcc10m, pubmed]
+  # (MedCPT, config/pubmed.yaml), same rule; openalex at E3 at its native 768
+  # (nomic-embed-text-v1.5, config/openalex.yaml), a 10 M catalog like pubmed's.
+  datasets: [goodreads, arxiv, yfcc10m, pubmed, openalex]
   dims: [128, 192, 768]
   filter_kinds: [clause, bloom]
   ks: [100, 500, 1000]

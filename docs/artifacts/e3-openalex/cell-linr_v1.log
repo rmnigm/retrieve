@@ -1,0 +1,10 @@
+2026-09-26 07:47:36.103 | INFO     | bench.config:load_matrix:363 - openalex/filter: 1 jobs, 1 cells
+2026-09-26 07:47:49.044 | INFO     | bench.inputs:load_inputs:57 - inputs: items 10000000 queries 10000 dim 768
+2026-09-26 07:47:52.235 | INFO     | bench.inputs:build_filters:109 - filter modules (clause): ['triton']
+2026-09-26 07:47:52.238 | INFO     | bench.oracle:load_or_build:227 -   building exact oracle (k_gt=1000) for sweep field_era
+2026-09-26 07:48:19.012 | INFO     | bench.oracle:load_or_build:254 -   saved oracle → data/openalex/gt_d768/oracle_v4_field_era_e2c8e7da5aeb3ff9.pt (pass_rate=0.0526)
+2026-09-26 07:48:19.014 | INFO     | bench.run:run:460 - build linr_v1_filter_mask clause/field_era triton build={}
+2026-09-26 07:48:43.615 | INFO     | bench.run:run:582 -   linr_v1_filter_mask clause/field_era triton params={} -> partial (24s)
+2026-09-26 07:48:43.802 | INFO     | bench.run:run:590 - done: {'partial': 1}
+openalex/filter: {'partial': 1}
+EXIT 0

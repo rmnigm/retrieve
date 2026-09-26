@@ -1,0 +1,7 @@
+STEP staged ids → the catalog (N smallest work-id hashes) and the held-out pool
+  29,944,334 staged → 15,000,000 items, 14,944,334 in the pool
+STEP write item_id_map.json + papers.parquet (item-id order)
+STEP held-out queries: pool papers whose references reach the catalog
+  6,481,495 pool papers cite the catalog, 4,336,859 with a same-field earlier-era reference; 10,000 held out
+ALL DONE prep in 410s — n_items=15,000,000 n_heldout=10,000
+EXIT 0 peak_rss_kb=67147012
