@@ -38,7 +38,13 @@ def _exact_args(b=4, n_lists=32, max_size=100, n_probe=6, d=64, c=2, a_max=2, re
 
 @pytest.mark.parametrize(
     "n_lists,max_size,n_probe,d,k,c,a_max",
-    [(32, 40, 4, 64, 8, 1, 1), (64, 120, 8, 64, 16, 2, 2), (128, 700, 16, 128, 32, 3, 4)],
+    [
+        (32, 40, 4, 64, 8, 1, 1),
+        (64, 120, 8, 64, 16, 2, 2),
+        (128, 700, 16, 128, 32, 3, 4),
+        (128, 700, 16, 192, 32, 3, 4),
+        (64, 300, 8, 768, 32, 2, 2),
+    ],
 )
 @pytest.mark.parametrize("b", [1, 16])
 @pytest.mark.parametrize("reverse", ["none", "mixed"])

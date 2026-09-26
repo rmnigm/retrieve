@@ -58,14 +58,15 @@ All kernels follow the same conventions.
 
 - One launch per `forward()` call. No persistent threads, no streams.
 - Inputs are CUDA tensors. Every `_<name>_prep` checks its boundary
-  (`_host.check_contiguous`, `_host.check_pow2`). An item-side table (the
+  (`_host.check_contiguous`). An item-side table (the
   index, and the `[B, N]` candidate lists) must arrive contiguous, and a
   view raises `ValueError`, because a per-call `.contiguous()` would copy
   the whole index on every forward. Query-side tensors are small and are
-  still `.contiguous()`-copied. Every `tl.arange` extent (`D`, `W`) must be
-  a power of two: `ValueError` at the boundary instead of a Triton
-  `CompilationError` from inside the compiler. Both are gated by
+  still `.contiguous()`-copied. Gated by
   [`test_op_boundary.py`](../../retrieve/tests/correctness/test_op_boundary.py).
+  A `tl.arange` over the embedding or word width (`D`, `W`) runs at the
+  next power of two, masked back to the true width (§ Padding), so any
+  width is accepted.
   The prep then passes `.stride(i)` for every axis, so a kernel body
   never hard-codes a layout. The strides are always the contiguous ones.
 - Top-K selection is **not** in-kernel. Each kernel writes a `[B, ·]` score
@@ -253,6 +254,43 @@ runs one case per class with a planted answer: `B = 144, N = 16M` through
 signatures, clause attrs and OPORP bits. It is skipped below 48 / 24 GiB of free
 device memory. Every widening is mutation-checked: without its int64 cast the case
 raises an illegal address or returns wrong ids.
+
+## Padding
+
+`tl.arange` needs a power-of-two extent, and D1's datasets do not all have one (yfcc10m
+D = 192, pubmed and openalex D = 768; OPORP's default `k_bits = D` gives `W = 3` and `12`).
+Every kernel with a lane axis over the embedding or word width takes the true width and
+its `triton.next_power_of_2` as two constexprs (`D` / `D_PAD`, `W` / `W_PAD`), aranges over
+the padded one and masks lanes `≥ D` (`≥ W`) out of both the query and the item load with
+`other = 0`. The tables are not padded: no extra index memory or bandwidth, nothing at
+`register_index`, the same stored layout on every backend.
+
+Why a zero lane changes nothing, per kernel:
+
+- **`codesigned_probe_score*`** (int8 dot, int32 accumulator): a masked lane contributes
+  `0 · 0 = 0` to an integer sum, so the dot is exact at any width. Quantization is not in
+  the way either: the query is quantized at its true width by `quantize_int8` and the
+  items by `quantize_int8_global` at build, before any padding exists (both are symmetric,
+  `0.0 → 0`, but nothing zero-valued is ever quantized).
+- **`fused_masked_knn_topk`** (fp32 `tl.sum` of products): each masked lane adds an exact
+  `+0.0`. The reduction tree over `D_PAD` lanes differs from any tree over `D`, as the tree
+  already differs from cuBLAS's `bmm`; the parity gate is the file's existing tolerance
+  (`atol = 1e-6` on unit-norm data), which holds at D = 192 and 768.
+- **`oporp_1bit_match_topk`**: masked words load `0` on both sides, `0 ^ 0` has no set bits,
+  so the Hamming distance and `D_TOTAL - 2·hamming` (`D_TOTAL = 64·W`, the true width) are
+  unchanged.
+- **`bloom_match`, `bloom_compact`**: a masked query word is `0`, and `0 & ~sig = 0` for any
+  signature, so the subset test is unchanged. `BloomFilter` and SilverTorch keep `m_bits`
+  a power of two (the hash), so only a direct caller of the op reaches `W_PAD > W`.
+
+**At a power-of-two width the code is the same.** With `D == D_PAD` the new mask is an
+all-true constant; Triton folds it for `fused_masked_knn_topk`, OPORP and both bloom
+kernels, but in the probe scorers it still perturbed register allocation (three of six
+variants' SASS differed). There the masks are constexpr conditional expressions
+(`mask=None if D == D_PAD else …`) so the power-of-two build is the pre-padding kernel.
+Gate: every kernel of this section, compiled at the power-of-two widths D1 runs, is
+SASS-identical to the tree before padding (30 of 30,
+[script](../artifacts/l4-pow2-pad/ptx_identity.py)).
 
 ## Shared kernel helpers (`ops/triton/common.py`)
 

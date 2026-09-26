@@ -202,3 +202,14 @@ def _poisoned_empty(real_empty, target_shape, target_dtype, value, hits, *args, 
         t.fill_(value)
         hits.append(target_shape)
     return t
+
+
+def make_words(n, w, seed):
+    """``[N, W]`` dense signatures and ``[8, W]`` queries: half are subsets of an item's
+    signature (sparse bits of it), half random sparse words, so both outcomes occur."""
+    g = torch.Generator(device="cuda").manual_seed(seed)
+    sigs = torch.randint(-(2**63), 2**63 - 1, (n, w), generator=g, device="cuda")
+    sparse = torch.randint(-(2**63), 2**63 - 1, (8, 4, w), generator=g, device="cuda")
+    sparse = sparse[:, 0] & sparse[:, 1] & sparse[:, 2] & sparse[:, 3]
+    rows = torch.randint(0, n, (4,), generator=g, device="cuda")
+    return sigs, torch.cat([sigs[rows] & sparse[:4], sparse[4:]])

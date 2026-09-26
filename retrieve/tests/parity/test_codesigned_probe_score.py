@@ -65,7 +65,8 @@ def _oracle(query, lay: ProbeLayout, codes, global_scale, k, keep=None):
 
 
 @pytest.mark.parametrize(
-    "n_lists,max_size,n_probe,d,k", [(64, 40, 4, 64, 8), (128, 700, 16, 128, 32)]
+    "n_lists,max_size,n_probe,d,k",
+    [(64, 40, 4, 64, 8), (128, 700, 16, 128, 32), (128, 700, 16, 192, 32), (64, 300, 8, 768, 32)],
 )
 @pytest.mark.parametrize("b", [1, 16])
 def test_codesigned_no_filters_matches_ref(n_lists, max_size, n_probe, d, k, b):
@@ -81,7 +82,8 @@ def _bloom_rowwise(qb, sigs, r, pos):
 
 
 @pytest.mark.parametrize(
-    "n_lists,max_size,n_probe,d,k", [(64, 80, 4, 64, 16), (128, 700, 16, 128, 32)]
+    "n_lists,max_size,n_probe,d,k",
+    [(64, 80, 4, 64, 16), (128, 700, 16, 128, 32), (128, 700, 16, 192, 32), (64, 300, 8, 768, 32)],
 )
 @pytest.mark.parametrize("b", [1, 16])
 def test_codesigned_with_bloom_matches_ref(n_lists, max_size, n_probe, d, k, b):

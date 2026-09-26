@@ -42,6 +42,7 @@ def _codesigned_probe_score_exact_kernel(
     width,
     tiles_y,
     D: tl.constexpr,
+    D_PAD: tl.constexpr,
     NPP: tl.constexpr,
     C: tl.constexpr,
     A_MAX: tl.constexpr,
@@ -82,12 +83,20 @@ def _codesigned_probe_score_exact_kernel(
             A_MAX=A_MAX,
         )
 
-        d_off = tl.arange(0, D)
-        q_codes = tl.load(q_codes_ptr + bid * stride_qcb + d_off)
+        # Lanes [D, D_PAD) load 0 on both sides: exact zeros in the int32 dot (kernels.md §
+        # Padding). At D == D_PAD the loads stay unmasked: even an all-true mask perturbs this
+        # kernel's register allocation.
+        d_off = tl.arange(0, D_PAD)
+        d_in = d_off < D
+        q_codes = tl.load(
+            q_codes_ptr + bid * stride_qcb + d_off,
+            mask=None if D == D_PAD else d_in,
+            other=None if D == D_PAD else 0,
+        )
         q_scale = tl.load(q_scales_ptr + bid)
         codes = tl.load(
             item_codes_ptr + pos[:, None] * stride_cn + d_off[None, :],
-            mask=keep[:, None],
+            mask=keep[:, None] if D == D_PAD else keep[:, None] & d_in[None, :],
             other=0,
         )
         # int8 × int8 → int32 (paper §4.2): q[1,D] @ codes^T[D,BLOCK_P]. M=1 can't use IMMA

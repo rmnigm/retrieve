@@ -1,7 +1,5 @@
-"""The Triton ops reject two input shapes at the boundary rather than deep in a call
-(kernels.md, conventions): a non-contiguous item-side table, which a per-call
-``.contiguous()`` would copy on every forward, and a non-power-of-two ``tl.arange`` extent
-(``D`` or ``W``), which otherwise fails inside the Triton compiler."""
+"""The Triton ops reject a non-contiguous item-side table at the boundary rather than copying
+it on every forward with a per-call ``.contiguous()`` (kernels.md, conventions)."""
 
 from __future__ import annotations
 
@@ -88,43 +86,3 @@ def test_non_contiguous_item_table_rejected(case):
     calls[case]()  # the contiguous table is accepted
     with pytest.raises(ValueError, match="must be contiguous"):
         calls[case](_strided(tables[_TABLE[case]]))
-
-
-def _odd_dim_calls():
-    d, w = 96, 3
-    q, embs = torch.randn(B, d, device="cuda").half(), torch.randn(N, d, device="cuda").half()
-    pos, counts = torch.arange(N, device="cuda").repeat(B, 1), torch.full((B,), N, device="cuda")
-    qb, sigs = _i64(B, w), _i64(N, w)
-    qf, codes = torch.randn(B, d, device="cuda"), torch.zeros(N, d, dtype=torch.int8, device="cuda")
-    lay = _layout()
-    rev, qa, attrs = torch.zeros(2, dtype=torch.bool, device="cuda"), _i64(B, 2), _i64(N, 2, 2)
-    return {
-        "fmkt D=96": lambda: T.fused_masked_knn_topk(q, embs, pos, counts, 4),
-        "oporp W=3": lambda: T.oporp_1bit_match_topk_full(qb, sigs, 4),
-        "bloom_match W=3": lambda: T.bloom_match(qb, sigs),
-        "bloom_compact W=3": lambda: T.bloom_compact(qb, sigs),
-        "cps D=96": lambda: T.codesigned_probe_score(qf, *lay[:2], codes, lay[2], 0.1, 4, N),
-        "cps_bloom D=96": lambda: T.codesigned_probe_score_bloom(
-            qf, *lay[:2], codes, lay[2], _i64(B, 10), _i64(512, N // 64), 0.1, 4, N
-        ),
-        "cpse D=96": lambda: T.codesigned_probe_score_exact(
-            qf, *lay[:2], codes, lay[2], attrs, rev, qa, 0.1, 4, N
-        ),
-    }
-
-
-_ODD_DIM_CASES = (
-    "fmkt D=96",
-    "oporp W=3",
-    "bloom_match W=3",
-    "bloom_compact W=3",
-    "cps D=96",
-    "cps_bloom D=96",
-    "cpse D=96",
-)
-
-
-@pytest.mark.parametrize("case", _ODD_DIM_CASES)
-def test_non_power_of_two_extent_rejected(case):
-    with pytest.raises(ValueError, match="must be a power of two"):
-        _odd_dim_calls()[case]()

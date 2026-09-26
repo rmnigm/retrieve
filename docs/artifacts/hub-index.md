@@ -30,6 +30,7 @@ re-upload of a subtree replaces its row.
 | `artifacts/golden-logs` | run logs behind `evaluation/golden/*.json`: driver, per-cell, clocks | 13 | 43,586 | `3000d733b07ec6ad3e1f6338bab5e020cc578f81b4b9f2e3b7843ea345363c53` |
 | `artifacts/kernel-opt` | head-to-head, phase A/B timing dumps, PubMed d768 record | 48 | 685,562 | `0887e6bfcec8bf17847a0c74e7a8b0adbed302cb88cd9a4e13449af7fd249089` |
 | `artifacts/l1-l2` | L1 + L2: YFCC precision and harness-gate records (before / after), index memory dumps, golden-cell records (base, after L1, final), timing JSONs and profile, the tail-poison audit, the V1 golden re-derive (two runs, logs, provenance, clocks) | 28 | 136,389 | `c0912982f48a03a378483e1c8eb78b086df16b71e062fdcf3ca864a7259d7a13` |
+| `artifacts/l4-pow2-pad` | L4: interleaved D = 128 timing JSONs (staging vs L4, 5 rounds), log and table; per-kernel SASS hashes before / after and the hashing script | 15 | 31,240 | `5c611d21c15e60a63a8db6bd1de04dd152070880e213dfa489d1fbe3ebe1caac` |
 | `artifacts/library-api-refactor` | L1 tensor capture, L2 k-means++ timing | 3 | 8,137 | `2fe46baa992f152c6563f7e8da8d7aeb4fa5cb7328d86565d7c90fccb817d21c` |
 | `artifacts/linr-v2-backend-parity` | V2 parity probes | 4 | 37,287 | `7066509248e9b21d3a6cc085c9c7d6673621ae616155c4e67883cfbfda4694ac` |
 | `artifacts/official-silvertorch` | B3 kernel-only dumps, official facts, WP3 parity probes | 5 | 775,632 | `1d8d880391ce9d181d7e67c606838eb4fd2846f9e2c48da0f819937ceccb8b95` |

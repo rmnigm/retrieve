@@ -14,7 +14,7 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
-from retrieve.ops.triton._host import check_contiguous, check_pow2, wide
+from retrieve.ops.triton._host import check_contiguous, wide
 from retrieve.ops.triton.common import popcount_int64, row_base, tile_rows
 
 # N-bucket ladder for the HAS_INDICES path: clamps candidate width to constexpr values so the JIT
@@ -50,6 +50,7 @@ def _oporp_1bit_match_topk_kernel(
     out_scores_ptr,
     N: tl.constexpr,
     W: tl.constexpr,
+    W_PAD: tl.constexpr,
     D_TOTAL: tl.constexpr,
     stride_qb_b,
     stride_qb_w,
@@ -70,10 +71,12 @@ def _oporp_1bit_match_topk_kernel(
 
     row0 = tile_id * BLOCK_N
     n_off = row0 + tl.arange(0, BLOCK_N)
-    w_off = tl.arange(0, W)
+    # Words [W, W_PAD) load 0 on both sides: 0 ^ 0 has no set bits (kernels.md § Padding).
+    w_off = tl.arange(0, W_PAD)
+    w_in = w_off < W
     n_valid = n_off < N
 
-    qb = tl.load(qb_ptr + bid * stride_qb_b + w_off * stride_qb_w)
+    qb = tl.load(qb_ptr + bid * stride_qb_b + w_off * stride_qb_w, mask=w_in, other=0)
 
     if HAS_INDICES:
         count = tl.load(counts_ptr + bid)
@@ -87,7 +90,7 @@ def _oporp_1bit_match_topk_kernel(
         ).to(tl.int64)
         item_rows = tl.load(
             item_bits_ptr + item_ids[:, None] * stride_ib_n + w_off[None, :] * stride_ib_w,
-            mask=in_count[:, None],
+            mask=in_count[:, None] & w_in[None, :],
             other=0,
         )
         valid_score = in_count
@@ -95,7 +98,7 @@ def _oporp_1bit_match_topk_kernel(
         bits_base, ids = tile_rows(item_bits_ptr, row0, tl.arange(0, BLOCK_N), stride_ib_n, WIDE)
         item_rows = tl.load(
             bits_base + ids[:, None] * stride_ib_n + w_off[None, :] * stride_ib_w,
-            mask=n_valid[:, None],
+            mask=n_valid[:, None] & w_in[None, :],
             other=0,
         )
         valid_score = n_valid
@@ -152,7 +155,6 @@ def _oporp_prep(
     n_items_total = item_bits.shape[0]
 
     check_contiguous(item_bits=item_bits)
-    check_pow2(W=w)
     query_bits = query_bits.contiguous()
 
     if has_indices:
@@ -183,6 +185,7 @@ def _oporp_prep(
         "out_scores_ptr": all_scores,
         "N": n_kernel,
         "W": w,
+        "W_PAD": triton.next_power_of_2(w),
         "D_TOTAL": d_total,
         "stride_qb_b": query_bits.stride(0),
         "stride_qb_w": query_bits.stride(1),
