@@ -317,7 +317,12 @@ to the inlined predicate with a
   (items stored fp16, as the LiNR paper does; the query cast to fp16),
   accumulated in fp32 and **returned as fp32 on every path**: cuBLAS
   (V1, V2 dense, V2 `torch`) through `out_dtype=torch.float32`,
-  `fused_masked_knn_topk` (V2 `triton`) by its fp32 `tl.sum`. Higher is
+  `fused_masked_knn_topk` (V2 `triton`) by its fp32 `tl.sum`. On CPU
+  (the harness suite's plumbing tests) `aten::mm.dtype` / `bmm.dtype`
+  have no kernel, so those three call sites branch on `is_cuda` and
+  multiply fp32 casts of the fp16 operands there; a cast-then-`mm` on
+  CUDA is not bit-identical to `out_dtype=` (different reduction order,
+  |Δ| ≈ 3e-5), so the CUDA path keeps `out_dtype=`. Higher is
   better. `-inf` marks masked-out / padded positions. An fp16 *score*
   would round runs of near-tied items to one value: on YFCC-10M the
   top-1000 spans about fifteen fp16 quanta (2⁻¹¹ near 0.8), and fp16
@@ -361,7 +366,7 @@ byte identical bits.
 ## PostfilterKNN dense path — pure torch, no kernel
 
 `PostfilterKNN`'s forward is `torch.mm(query_fp16, item_embs_t,
-out_dtype=torch.float32)` + optional `masked_fill(-inf)` + `torch.topk`
+out_dtype=torch.float32)` (fp32 operands on CPU, § Score conventions) + optional `masked_fill(-inf)` + `torch.topk`
 over the fp32 scores (§ Score conventions) — implemented directly in
 [`PostfilterKNN`](../../retrieve/src/retrieve/modules/knn.py).
 There is no Triton kernel here because one that only fuses the matmul

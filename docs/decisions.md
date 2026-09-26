@@ -64,8 +64,9 @@ decisions.
   needs: fp16 scores gave `recall_oracle@1000` 0.956 on YFCC-10M, fp32
   scores 0.993 (gate 0.99), an fp32 table 1.0. Cost: the `[B, N]` score
   buffer doubles (+610 MiB at B=16 over 10M items). An fp32 table is the
-  next step if a dataset's storage rounding alone breaks the gate
-  ([kernels](system/kernels.md#score-conventions),
+  next step if a dataset's storage rounding alone breaks the gate. On
+  CPU, which has no `out_dtype=` matmul, the operands are cast to fp32
+  instead ([kernels](system/kernels.md#score-conventions),
   [artifact](artifacts/l1-l2/README.md)).
 - **Int8 quantization uses one global scale**, as the SilverTorch paper
   does.
