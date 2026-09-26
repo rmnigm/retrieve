@@ -1,0 +1,64 @@
+{
+  "prep": {
+    "n_standard": 322278385,
+    "n_standard_click": 122052542,
+    "n_standard_is_rand": 0,
+    "n_random": 1186059,
+    "n_random_is_rand": 1186059,
+    "n_clicks": 122052542,
+    "n_users": 27285,
+    "n_items": 32038725,
+    "test_start": "2022-05-07",
+    "test_timestamp_unix": 1651852800,
+    "val_days": 1,
+    "gap_minutes": 30,
+    "max_seq_len": 200,
+    "train_users": 27266,
+    "train_rows": 561486,
+    "train_positions": 109575361,
+    "median_train_history": 3402,
+    "val_rows": 24503,
+    "test_rows": 26221,
+    "median_test_targets": 246,
+    "items_clicked_in_train": 12058978,
+    "wall_clock_sec": 42.2
+  },
+  "attrs": {
+    "vocab_sizes": {
+      "cat1": 38,
+      "cat_fine": 801,
+      "tag": 58,
+      "upload_type": 38,
+      "video_type": 3
+    },
+    "item_coverage": {
+      "c0_cat1": 0.9748,
+      "c1_cat_fine": 0.6243,
+      "c2_tag": 0.969,
+      "c3_upload_type": 1.0,
+      "c4_no_ads": 1.0,
+      "c5_duration_max": 0.7178,
+      "c6_uploaded_within": 0.8664
+    },
+    "eval_rows": 26221,
+    "query_live": {
+      "c0_cat1": 0.9905,
+      "c1_cat_fine": 0.7967,
+      "c2_tag": 0.9681,
+      "c3_upload_type": 1.0,
+      "c4_no_ads": 1.0,
+      "c5_duration_max": 0.9986,
+      "c6_uploaded_within": 1.0
+    },
+    "mean_pass_rate": {
+      "c0_cat1": 0.035717,
+      "c1_cat_fine": 0.009822,
+      "c2_tag": 0.045065,
+      "c3_upload_type": 0.142292,
+      "c4_no_ads": 0.999254,
+      "c5_duration_max": 0.528562,
+      "c6_uploaded_within": 0.257761
+    },
+    "wall_clock_sec": 241.6
+  }
+}
