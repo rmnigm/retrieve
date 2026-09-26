@@ -43,23 +43,44 @@ in records, commits and code comments; they are not renumbered.
 
 ## Phase D: campaign and baselines (GPU)
 
-- [ ] **D1: run the full campaign on the harness.** The `filter` and
-  `deep` suites of `evaluation/config/suites.yaml` over goodreads, arxiv
-  and yfcc10m; seeds {0, 1, 2} on the headline sweeps; `n_probe` in
-  {24, 32}; the S9 co-design ablation (`OfficialConfig(bloom_path="full")`,
-  not yet encoded in `suites.yaml` — needs a config addition first). Q1-Q4,
-  G-a and G-d landed first (orchestrator re-sequencing, 2026-09-26: the
-  only reason to run D1 before a library change was to avoid invalidating
-  a campaign in flight, not a data dependency, so doing the code changes
-  once and D1 once afterward avoids ever rerunning it). Consequence: the
-  126 previously-committed goodreads `filter`-leg records (seed 0) carry
-  the pre-kernel-opt `code_version` and will be re-run by `--resume`
-  (~19 GPU hours; quality is expected identical, `official`/`silvertorch`
-  timings faster per the kernel-opt artifacts). Gate per stage:
-  `bench report` with no missing cells; `median_ms(bs=16) < 16 ×
-  median_ms(bs=1)`; ids identical across modes; a rerun byte-identical in
-  quality. Closes paper gaps G3 (P99 / QPS), G4 (seeds), G7, G8
-  (cross-dataset deep sweeps).
+- [ ] **L3: fix the CPU-mm regression L1 introduced.** L1's fp32-output
+  scoring (`torch.mm`/`torch.bmm` with `out_dtype=`) has no CPU kernel
+  (`NotImplementedError: aten::{mm,bmm}.dtype`), so the evaluation
+  harness's CPU-only test suite is now red: 17 failures in
+  `tests/bench/{test_algos,test_cli,test_run}.py`, everywhere a LiNR
+  module runs on CPU (`retrieve/src/retrieve/modules/knn.py:41`,
+  `ops/reference/fused_masked_knn_topk.py:24`). Found by the S9 worker,
+  2026-09-26 ([validation](validation.md#library-gates)). Needs a
+  CPU-compatible fp32-accumulate path (e.g. cast both operands to fp32 and
+  plain-matmul on CPU, keep `out_dtype=` on CUDA) — small, contained, but
+  it is a `retrieve/src/retrieve` change, so it must land **before** D1
+  launches (same reason L1/L2 landed before D1: avoid a second
+  `code_version` bump mid-campaign). Blocks D1.
+- [ ] **D1: run the full campaign on the harness.** The `filter`, `deep`
+  and `codesign` (S9) suites of `evaluation/config/suites.yaml` over
+  goodreads, arxiv and yfcc10m (`codesign` is goodreads + arxiv only, by
+  its own design); seeds {0, 1, 2} on the headline sweeps; `n_probe` in
+  {24, 32}. Needs **L3** first. Q1-Q4, G-a, G-d, L1/L2 and the S9
+  `codesign` suite landed first (orchestrator re-sequencing, 2026-09-26:
+  the only reason to run D1 before a library change was to avoid
+  invalidating a campaign in flight, not a data dependency, so doing the
+  code changes once and D1 once afterward avoids ever rerunning it).
+  Consequence: the 126 previously-committed goodreads `filter`-leg records
+  (seed 0) carry a pre-L1/L2 `code_version` and will be re-run by
+  `--resume` (~19 GPU hours; quality is expected identical except
+  `linr_v1_filter_mask`, which moves by design per L1 — see
+  [validation](validation.md#datasets); `official`/`silvertorch` timings
+  faster per the kernel-opt artifacts). YFCC's exact-algorithm gate is
+  expected to pass now (L1 fixed it in the library suite,
+  `recall_oracle@1000` 0.994 on one manual cell) — confirm on the actual
+  D1 YFCC cell rather than assuming. `codesign`'s one smoke cell (S9
+  worker, 2026-09-26) found `full` *faster* than `partial` on goodreads —
+  the opposite order to the paper's §4.4 — on one seed, one sweep,
+  unlocked clocks: not a finding, confirm or overturn on D1's real sweep.
+  Gate per stage: `bench report` with no missing cells; `median_ms(bs=16)
+  < 16 × median_ms(bs=1)`; ids identical across modes; a rerun
+  byte-identical in quality. Closes paper gaps G3 (P99 / QPS), G4 (seeds),
+  G7, G8 (cross-dataset deep sweeps).
 - [ ] **D2: add Faiss, HNSW, cuBLAS and cuVS baselines as harness
   algorithms.** Faiss-GPU and Faiss-CPU IVF-Flat, HNSW, a cuBLAS
   brute-force floor at matched recall; then cuVS IVF-Flat / IVF-PQ / CAGRA
@@ -69,28 +90,6 @@ in records, commits and code comments; they are not renumbered.
   width**, for both blooms on real attributes (G6; paper claim S8). The
   head-to-head saw zero false positives at `m_bits 1024`, so the sweep
   must go below it.
-
-## Phase L: library fixes after D1 (GPU, risky — changes `code_version`)
-
-Both decided by the user, 2026-09-26. Neither runs until D1 ends, for the
-same reason Q4/G-a waited: a `retrieve/src/retrieve/` change bumps
-`code_version` and invalidates any campaign in flight. Bundle these two
-together in one pass when they come up, the way G-a/G-d/Q4 were bundled,
-rather than two separate `code_version` bumps.
-
-- [ ] **L1: fp32 scoring for the exact algorithms.** `PostfilterKNN`
-  scores in fp16, so the exact algorithms fail the
-  `recall_oracle@1000 ≥ 0.99` gate on YFCC (0.964) — the top-1000 spans
-  about fifteen fp16 quanta there. Fixes the actual precision problem at
-  its source, for every dataset, not just YFCC. Needs its own parity gate
-  (bit-exact fp32 path) and a rerun of the affected quality numbers.
-- [ ] **L2: drop the compaction kernel's −1-tail contract.** The kernel-opt
-  pass already moved the −1 fill inside the scatter kernel (saves the
-  launch and most of the write traffic). Dropping the contract entirely
-  (no `-1` fallback; every reader bound strictly by `counts`) saves the
-  rest, but every caller needs auditing — parity already compares
-  `[:counts]`, which suggests this is safer than it looks, but confirm
-  rather than assume. Needs its own parity gate.
 
 ## Phase E: datasets
 
@@ -154,9 +153,6 @@ rather than two separate `code_version` bumps.
   `e3-openalex` convert log at 176 KB, a `cute-dsl-scorer` diagnostic at
   135 KB) weren't touched by H1's cleanup — candidates for the same
   Hub-or-drop treatment if the user wants them gone too.
-- `bench campaign --suite all` raises `KeyError: 'quality'`: `SUITES` in
-  `evaluation/bench/cli.py` still lists the retired suite
-  ([evaluation](system/evaluation.md#cli)).
 - `bench/report.py` appends a false provenance sentence ("These records
   predate the D1 campaign...") to every non-citable report.
 - `partial` is stamped per process (`bench/run.py`, the `reasons0` list):
@@ -233,10 +229,9 @@ rather than two separate `code_version` bumps.
 D1 ─┬─> D2, D3 ─┐
     ├─> F2      ├─> F5 ─> G-c
     ├─> F4      │
-    ├─> L1, L2  │
     └─> E5 (E2, E3 done; E4 done but excluded from E5's scope)
 TF-3/TF-4 retune ─> rerun the head-to-head
 ```
 
-GPU steps still open: D1, D2, D3, E5, L1, L2, G-b. Everything else runs
+GPU steps still open: D1, D2, D3, E5, G-b. Everything else runs
 on CPUs beside them.
