@@ -264,7 +264,12 @@ variants; `SilverTorch` fuses the predicate and carries the attribute
 buffers inside `index_mib`). `build(algo, item_embs, k=, backend=,
 filter_kind=, filter_mod=, item_attrs=, clause_is_reverse=, params=,
 seed=)` is the one factory; it refuses `None`-path cells and `n_probe >
-n_lists`. `params` are the merged build + query params over
+n_lists`. The build param `bloom_path` (`partial` | `full`, the S9
+co-design ablation) becomes `SilverTorch(official=OfficialConfig(bloom_path=…))`
+through `algos.official_config`; it exists on `silvertorch / bloom /
+official` only (anywhere else `load_matrix` raises `ConfigError`), and
+without the key the library default `OfficialConfig()` runs, which is
+`bloom_path="partial"`. `params` are the merged build + query params over
 `algos.SILVERTORCH_DEFAULTS` (`n_lists 1024, n_probe 24, n_iter 10`); on
 `silvertorch` bloom cells `run.py` merges the suite's `bloom` defaults
 (`m_bits`, `k_hash`) in as well. The probe-pool check is the library's,
@@ -294,10 +299,19 @@ every `config/*.yaml` against every suite through `load_matrix`: a listed
 dataset expands to jobs, an unlisted one is refused by name and still
 resolves at each of its dims.
 
-`suites.yaml` holds two suites, `filter` and `deep`. There is no unfiltered
-`quality` suite ([decisions](../decisions.md#harness)); unfiltered cells
-return with the new datasets (roadmap E5). The CLI still lists `quality` as a suite name (see
-[CLI](#cli)), which is a bug.
+`suites.yaml` holds three suites, `filter`, `deep` and `codesign`. There
+is no unfiltered `quality` suite ([decisions](../decisions.md#harness));
+unfiltered cells return with the new datasets (roadmap E5).
+
+`codesign` is the S9 ablation of the official backend's bloom path:
+`silvertorch / official / bloom` only, `build: {n_lists: [1664],
+bloom_path: [partial, full]}` × `query: {n_probe: [4, 8, 24, 32, 128,
+256]}` on goodreads and arxiv at d128, `ks [100]`, `batch_sizes [1, 8,
+16]`, seed 0. It is its own suite because `params.<algo>` crosses every
+backend and filter kind of the algo, and `bloom_path` has a meaning on
+one of them. Both arms carry `bloom_path` in `params`, so their keys
+never collide with the `filter` / `deep` official cells (which omit it
+and run `partial`); latency and `peak_fwd_mib` are the compared fields.
 
 ```yaml
 # config/<dataset>.yaml — one per dataset; every string may carry {dim}
@@ -339,6 +353,12 @@ filter:
   # bloom: {...}                    # optional per-suite override of the top-level default
 deep:                               # 2 builds (n_lists) × 6 query configs, seeds 0-2
   ...
+codesign:                           # S9: silvertorch/official/bloom only
+  ...
+  params:
+    silvertorch:
+      build: {n_lists: [1664], bloom_path: [partial, full]}
+      query: {n_probe: [4, 8, 24, 32, 128, 256]}
 bloom: {m_bits: 1024, k_hash: 5}
 ```
 
@@ -372,7 +392,7 @@ bench run      --dataset D --suite S [--dim N]* [--algo A]* [--backend B]* [--fi
                [--sweep W]* [--k N]* [--bs N]* [--seed N]* [--mode eager|graph]*
                [--skip-quality] [--skip-perf] [--profile] [--out results] [--output FILE]
                [--resume|--force] [--config-dir config]
-bench campaign --suite filter|deep|all [--dataset D]* [--dim N]* [--mode M]*
+bench campaign --suite filter|deep|codesign|all [--dataset D]* [--dim N]* [--mode M]*
                [--skip-quality] [--skip-perf] [--profile] [--out results] [--resume|--force]
                [--config-dir config] [--timeout 6.0]
 bench check    --dataset D [--dim N]* [--config-dir config]   # eval_datasets.layout.validate_layout
@@ -397,16 +417,8 @@ and a later full run never counts a narrowed cell as done. The exit
 code is 1 when any cell failed, and 1 with a message when the narrows
 select zero cells (a `--sweep` typo is an error, not an empty success).
 
-**Known bug.** [`bench/cli.py`](../../evaluation/bench/cli.py) still has
-`SUITES = ("quality", "filter", "deep")`, but `suites.yaml` has no
-`quality` suite. `bench campaign --suite all` (and `--suite quality`)
-therefore dies on its first suite with `KeyError: 'quality'` when it
-reads the suite's dataset list; `bench run --suite quality` raises
-`ConfigError: no suite 'quality'`. Run the campaign one suite at a time
-(`--suite filter`, then `--suite deep`) until `SUITES` is fixed.
-
 `bench campaign` is the process loop: for every suite (in the
-order of `SUITES` for `all`), every listed dataset and every
+order of `SUITES = ("filter", "deep", "codesign")` for `all`), every listed dataset and every
 `(dataset, dim, algo, backend)` group of `load_matrix`, one child process
 `python -m bench.cli run --dataset … --dim … --suite … --algo …
 --backend … --resume` (same interpreter, `cwd = evaluation/`), sequential.

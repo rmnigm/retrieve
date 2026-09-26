@@ -41,7 +41,7 @@ from bench.upload import fetch, upload
 from eval_datasets.layout import validate_layout
 
 EVAL_DIR = Path(__file__).resolve().parents[1]
-SUITES = ("quality", "filter", "deep")
+SUITES = ("filter", "deep", "codesign")
 RC_TIMEOUT = 124  # the ``timeout(1)`` convention
 
 
@@ -73,7 +73,7 @@ main.add_command(report)
 
 @main.command()
 @click.option("--dataset", required=True, help="config/<dataset>.yaml")
-@click.option("--suite", required=True, help="a suite of suites.yaml (quality | filter | deep)")
+@click.option("--suite", required=True, help="a suite of suites.yaml (filter | deep | codesign)")
 @click.option("--dim", "dims", multiple=True, type=int)
 @click.option("--algo", "algos", multiple=True)
 @click.option("--backend", "backends", multiple=True, type=click.Choice(BACKENDS))
@@ -131,7 +131,7 @@ def run(
 
 
 @main.command()
-@click.option("--suite", required=True, help="quality | filter | deep | all")
+@click.option("--suite", required=True, help="filter | deep | codesign | all")
 @click.option("--dataset", "datasets", multiple=True)
 @click.option("--dim", "dims", multiple=True, type=int)
 @click.option("--mode", "modes", multiple=True, type=click.Choice(("eager", "graph")))

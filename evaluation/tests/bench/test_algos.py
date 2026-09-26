@@ -12,7 +12,7 @@ import torch
 
 from bench import algos as A
 from bench.measure import index_bytes
-from retrieve import SilverTorch
+from retrieve import OfficialConfig, SilverTorch
 
 N, D = 256, 64
 
@@ -41,6 +41,27 @@ def _data(seed: int = 0):
     attrs[:, 1] = torch.where(torch.rand(N, 1, generator=g) < 0.4, torch.tensor(-1), attrs[:, 1])
     qa = torch.tensor([[0, -1], [1, -1], [2, 0], [0, 1], [1, 2], [2, -1]])
     return x, q, attrs, qa
+
+
+@pytest.mark.parametrize(
+    ("params", "bloom_path"), [({}, "partial"), ({"bloom_path": "partial"}, "partial"),
+                               ({"bloom_path": "full"}, "full")],
+)  # fmt: skip
+def test_official_config_from_bloom_path(params, bloom_path):
+    cfg = A.official_config("silvertorch", "bloom", "official", params)
+    assert (cfg or OfficialConfig()).bloom_path == bloom_path
+    assert (cfg is None) == (params == {})
+
+
+@pytest.mark.parametrize(
+    ("algo", "filter_kind", "backend"),
+    [("silvertorch", "bloom", "triton"), ("silvertorch", "clause", "official"),
+     ("linr_v3", "bloom", "triton")],
+)  # fmt: skip
+def test_official_config_rejects_bloom_path_elsewhere(algo, filter_kind, backend):
+    with pytest.raises(ValueError, match="bloom_path applies to"):
+        A.official_config(algo, filter_kind, backend, {"bloom_path": "full"})
+    assert A.official_config(algo, filter_kind, backend, {"n_probe": 4}) is None
 
 
 ST_PARAMS = {"n_lists": 8, "n_probe": 4, "n_iter": 2}

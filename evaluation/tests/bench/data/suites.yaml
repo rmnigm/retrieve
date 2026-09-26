@@ -34,6 +34,23 @@ deep:
     silvertorch: {build: {n_lists: [8, 64]}, query: {n_probe: [4, 16, 64]}}
     linr_v3: {query: [{candidate_pool: 20}, {candidate_pool: 40}]}
   bloom: {m_bits: 128}
+codesign:
+  datasets: [mini]
+  dims: [32]
+  filter_kinds: [bloom]
+  ks: [10]
+  batch_sizes: [1]
+  algos: {silvertorch: [official]}
+  params:
+    silvertorch: {build: {n_lists: [8], bloom_path: [partial, full]}, query: {n_probe: [4, 8]}}
+bad_bloom_path:
+  datasets: [mini]
+  filter_kinds: [clause, bloom]
+  ks: [10]
+  batch_sizes: [1]
+  algos: {silvertorch: [official]}
+  params:
+    silvertorch: {build: {bloom_path: [full]}}   # bloom only: the clause job → ConfigError
 bad_params:
   datasets: [mini]
   filter_kinds: [none]

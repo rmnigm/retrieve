@@ -67,4 +67,25 @@ deep:                          # recall-vs-latency curves (old config/deep_sweep
     linr_v3:
       query: {candidate_pool: [2000, 4000, 8000, 16000, 32000]}
 
+codesign:                      # S9: the paper's §4.4 co-design ablation, latency + scratch vs probe count
+  # Its own suite, not an arm of `deep`: `params.<algo>` crosses every backend and filter kind
+  # of the algo, and `bloom_path` exists only on silvertorch / bloom / official (anything else
+  # is a ConfigError). `partial` (fused partial masks over the probed clusters, the library
+  # default and what every `filter` / `deep` official cell runs, with the key absent) vs
+  # `full` (full-N bool mask, then IVF). One build per arm at deep's smaller n_lists, deep's
+  # probe sweep; one seed, since both arms are bit-exact to each other by construction
+  # (validation.md, library gates) and only latency / peak_fwd_mib differ.
+  datasets: [goodreads, arxiv]
+  dims: [128]
+  filter_kinds: [bloom]
+  ks: [100]
+  batch_sizes: [1, 8, 16]
+  seeds: [0]
+  algos:
+    silvertorch: [official]
+  params:
+    silvertorch:
+      build: {n_lists: [1664], bloom_path: [partial, full]}
+      query: {n_probe: [4, 8, 24, 32, 128, 256]}
+
 bloom: {m_bits: 1024, k_hash: 5}   # shared defaults; a suite may override with its own `bloom:`

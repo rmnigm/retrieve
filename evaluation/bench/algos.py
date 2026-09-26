@@ -24,6 +24,7 @@ from retrieve import (
     LiNRV2,
     LiNRV3,
     LiNRV4,
+    OfficialConfig,
     SilverTorch,
 )
 from retrieve.interfaces import DISPATCH, FilterModule
@@ -62,6 +63,22 @@ def is_valid_combo(algo: str, params: dict[str, Any]) -> bool:
     """``n_probe <= n_lists`` — the one combo the library would reject at build."""
     p = {**SILVERTORCH_DEFAULTS, **params}
     return not (algo == "silvertorch" and p["n_probe"] > p["n_lists"])
+
+
+def official_config(
+    algo: str, filter_kind: str, backend: str, params: dict[str, Any]
+) -> OfficialConfig | None:
+    """The ``bloom_path`` build param (the S9 co-design ablation) as ``OfficialConfig``;
+    ``None`` (the library default, ``bloom_path="partial"``) when the key is absent. It has a
+    meaning on ``silvertorch / bloom / official`` only and raises anywhere else."""
+    if "bloom_path" not in params:
+        return None
+    if (algo, filter_kind, backend) != ("silvertorch", "bloom", "official"):
+        raise ValueError(
+            f"bloom_path applies to silvertorch/bloom/official only, got {algo}/{filter_kind}/"
+            f"{backend}"
+        )
+    return OfficialConfig(bloom_path=params["bloom_path"])
 
 
 def build_filter(
@@ -116,8 +133,10 @@ def build(
     if algo == "silvertorch":
         mode = FILTER_MODE[filter_kind]
         bloom = BLOOM_DEFAULTS if mode == "bloom" else {}
+        official = official_config(algo, filter_kind, backend, p)
+        p.pop("bloom_path", None)
         module = SilverTorch(
-            k=k, filter_mode=mode, seed=seed, backend=backend,
+            k=k, filter_mode=mode, seed=seed, backend=backend, official=official,
             **{**SILVERTORCH_DEFAULTS, **bloom, **p},
         )  # fmt: skip
         if mode == "none":
@@ -147,4 +166,5 @@ __all__ = [
     "build_filter",
     "filter_backend",
     "is_valid_combo",
+    "official_config",
 ]
