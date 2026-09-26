@@ -45,11 +45,11 @@ def probe_tile(
     probe_ids_ptr, offsets_ptr, bid, t, n_probe, NPP: tl.constexpr, BLOCK_P: tl.constexpr
 ):
     """Tile ``t`` of row ``bid`` in the compact probe layout (kernels.md § SilverTorch kernels)
-    → ``(pos, slot, valid, total, tail)``. The row's ``n_probe`` clusters (``NPP`` is its next
+    → ``(pos, slot, valid, tail)``. The row's ``n_probe`` clusters (``NPP`` is its next
     power of two) are laid out back to back in cluster-aligned tiles of ``BLOCK_P``; the
     row's table is built here, one vector over its probes, rather than on the host.
-    ``tail``: ``t`` lies past the row's cluster tiles, whose ``-inf`` slots start at
-    ``total + (t - n_tiles) * BLOCK_P``. Otherwise ``pos`` are the lanes' cluster-sorted
+    ``tail``: ``t`` lies past the row's cluster tiles, whose ``-inf`` slots start at the
+    row's item total ``+ (t - n_tiles) * BLOCK_P``. Otherwise ``pos`` are the lanes' cluster-sorted
     positions (int64), ``slot`` their output slots, ``valid`` the lanes inside the cluster."""
     i = tl.arange(0, NPP)
     live = i < n_probe
@@ -72,7 +72,7 @@ def probe_tile(
     )
     pos = tl.sum(tl.where(hit, lo, 0)) + off + lane
     valid = (off + lane < tl.sum(tl.where(hit, size, 0))) & ~tail
-    return pos, slot, valid, total, tail
+    return pos, slot, valid, tail
 
 
 @triton.jit

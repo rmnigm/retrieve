@@ -63,9 +63,7 @@ def _codesigned_probe_score_kernel(
     # split across grid_y × grid_z (kernels.md § SilverTorch kernels).
     bid = tl.program_id(0)
     t = tl.program_id(2) * tiles_y + tl.program_id(1)
-    pos, slot, valid, total, tail = probe_tile(
-        probe_ids_ptr, offsets_ptr, bid, t, n_probe, NPP, BLOCK_P
-    )
+    pos, slot, valid, tail = probe_tile(probe_ids_ptr, offsets_ptr, bid, t, n_probe, NPP, BLOCK_P)
     out_row = row_base(out_scores_ptr, bid, stride_ob, WIDE)
     if tail:
         # Past the row's clusters (most of the width on a skewed IVF): the -inf tail.
@@ -118,7 +116,7 @@ def _cps_prep(
     bloom_transposed: Tensor | None,
     cfg: CodesignedProbeScoreConfig,
 ) -> ProbeLaunch:
-    """``_host.probe_prep`` plus the bloom arguments. THE single place input checking happens —
+    """``_host.probe_prep`` plus the bloom arguments. The one place inputs are checked —
     shared by ``_codesigned_probe_score_impl`` and both ``@triton_op`` wrappers (which keep only
     their textually-inline ``wrap_triton`` launch)."""
     launch = probe_prep(

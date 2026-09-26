@@ -800,7 +800,7 @@ class TestComposites:
         assert torch.equal(v2.filter.evaluate_mask(qa), ref.evaluate_mask(qa))
 
 
-# --- short candidate lists and missing filters (kernel-opt Phase 5, batch 1) -------------
+# --- short candidate lists and missing filters ---------------------------------------
 
 
 @pytest.mark.parametrize("backend", ["torch", "triton"])

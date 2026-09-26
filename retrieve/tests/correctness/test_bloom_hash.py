@@ -58,7 +58,7 @@ def test_generate_seeds_deterministic_and_odd():
     assert bool((a & 1).eq(1).all())
 
 
-# --- clause_salt as a registered buffer (roadmap B5 / official-integration plan §8 TF-2) ---
+# --- clause_salt as a registered buffer ---------------------------------------------
 
 
 def _inline_salt_reference(attrs, seeds, m_bits, k_hash, word_count):

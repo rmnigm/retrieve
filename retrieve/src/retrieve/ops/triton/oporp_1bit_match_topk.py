@@ -116,25 +116,23 @@ def _oporp_1bit_match_topk_kernel(
 
 @dataclass(frozen=True)
 class _OporpLaunch:
+    grid: tuple[int, int]  # tile axis on grid_x, batch on grid_y — see kernel comment
     kwargs: dict[str, object]  # every kernel arg: tensors, strides, constexprs, cfg
     all_scores: Tensor
     positive_indices: Tensor | None  # post-contiguous, for the epilogue gather (indirect only)
     has_indices: bool
     n_loop: int  # true candidate width (indirect) / corpus size (full-scan)
-    n_kernel: int  # score-buffer + topk lane width; >= k on the indirect path by construction
-    b: int
 
 
 def _oporp_prep(
     query_bits: Tensor,
     item_bits: Tensor,
-    k: int,
     positive_indices: Tensor | None,
     counts: Tensor | None,
     cfg: Oporp1BitMatchTopkConfig,
 ) -> _OporpLaunch:
     """Validation + contiguity + buffers (incl. the HAS_INDICES dummy-tensor branch) + launch-arg
-    dict + grid dims. THE single place input checking happens — shared by ``_impl`` and both
+    dict + grid dims. The one place inputs are checked — shared by ``_impl`` and both
     ops."""
     if query_bits.dim() != 2 or item_bits.dim() != 2:
         raise ValueError("query_bits must be [B, W] and item_bits [N, W]")
@@ -200,7 +198,8 @@ def _oporp_prep(
         "num_warps": cfg.num_warps,
         "num_stages": cfg.num_stages,
     }
-    return _OporpLaunch(kwargs, all_scores, positive_indices, has_indices, n_loop, n_kernel, b)
+    grid = (triton.cdiv(n_kernel, cfg.block_n), b)
+    return _OporpLaunch(grid, kwargs, all_scores, positive_indices, has_indices, n_loop)
 
 
 def _oporp_finish(launch: _OporpLaunch, k: int) -> tuple[Tensor, Tensor]:
@@ -242,12 +241,8 @@ def _oporp_1bit_match_topk_impl(
     point for tune scripts / parity tests; the compiled path goes through the ``@triton_op``
     wrappers."""
     cfg = config if config is not None else DEFAULT_CONFIG
-    launch = _oporp_prep(query_bits, item_bits, k, positive_indices, counts, cfg)
-
-    # Tile axis on grid_x, batch on grid_y — see kernel comment.
-    grid = (triton.cdiv(launch.n_kernel, cfg.block_n), launch.b)
-
-    _oporp_1bit_match_topk_kernel[grid](**launch.kwargs)
+    launch = _oporp_prep(query_bits, item_bits, positive_indices, counts, cfg)
+    _oporp_1bit_match_topk_kernel[launch.grid](**launch.kwargs)
     return _oporp_finish(launch, k)
 
 
@@ -261,13 +256,8 @@ def oporp_1bit_match_topk_full(
     ``_oporp_1bit_match_topk_impl`` — only the launch line lives here (``wrap_triton`` must
     appear textually in the decorated source for torch.export). Layer asserts ``k <=
     n_items_total`` so topk(k) needs no pad tail."""
-    launch = _oporp_prep(query_bits, item_bits, k, None, None, DEFAULT_CONFIG)
-    n_kernel, b = launch.n_kernel, launch.b
-
-    def grid(meta):
-        return (triton.cdiv(n_kernel, meta["BLOCK_N"]), b)
-
-    wrap_triton(_oporp_1bit_match_topk_kernel)[grid](**launch.kwargs)
+    launch = _oporp_prep(query_bits, item_bits, None, None, DEFAULT_CONFIG)
+    wrap_triton(_oporp_1bit_match_topk_kernel)[launch.grid](**launch.kwargs)
     return _oporp_finish(launch, k)
 
 
@@ -283,11 +273,6 @@ def oporp_1bit_match_topk_indirect(
     :counts[b]]`` per row; shares ``_oporp_prep``/``_oporp_finish`` with
     ``_oporp_1bit_match_topk_impl`` (see the full wrapper). Buffer width is ``_bucket_n(P)``;
     lanes in ``[P, n_kernel)`` carry -inf. Returns ``min(k, P)`` columns."""
-    launch = _oporp_prep(query_bits, item_bits, k, positive_indices, counts, DEFAULT_CONFIG)
-    n_kernel, b = launch.n_kernel, launch.b
-
-    def grid(meta):
-        return (triton.cdiv(n_kernel, meta["BLOCK_N"]), b)
-
-    wrap_triton(_oporp_1bit_match_topk_kernel)[grid](**launch.kwargs)
+    launch = _oporp_prep(query_bits, item_bits, positive_indices, counts, DEFAULT_CONFIG)
+    wrap_triton(_oporp_1bit_match_topk_kernel)[launch.grid](**launch.kwargs)
     return _oporp_finish(launch, k)

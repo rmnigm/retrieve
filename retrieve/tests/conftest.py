@@ -27,8 +27,7 @@ def require_official() -> None:
     the ``official`` extra). Two ways it can be absent, and the split is the point:
 
     - **Not runnable here** (``silvertorch`` not installed, or no CUDA device) →
-      ``skip``. The suite is expected to run on boxes without the extra — the Mac
-      collects and skips it.
+      ``skip``. The suite is expected to run on boxes without the extra.
     - **Installed but broken** (``silvertorch`` imports but ``silvertorch._C`` failed
       to build / load, or the pinned sha lacks an op the adapter calls) → ``fail``
       with the loader's message. A build failure that silently skipped would look

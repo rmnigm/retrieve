@@ -123,7 +123,7 @@ def _fmkt_prep(
     bucket: bool,
 ) -> _FmktLaunch:
     """Validation + contiguity + score buffer + launch-arg dict + grid dims.
-    THE single place input checking happens — shared by ``_impl`` and the public op.
+    The one place inputs are checked — shared by ``_impl`` and the public op.
 
     ``bucket=True`` (``_impl``: tune sweeps / parity tests see many widths per process) runs the
     kernel at ``P = _bucket_p(p)`` so the JIT cache compiles once per bucket × D; ``bucket=False``

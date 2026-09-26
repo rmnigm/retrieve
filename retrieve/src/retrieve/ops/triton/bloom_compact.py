@@ -16,6 +16,7 @@ from torch import Tensor
 
 # By name, not `common.<fn>` — see the note in clause_mask.py.
 from retrieve.ops.triton._host import (
+    CompactLaunch,
     check_contiguous,
     check_pow2,
     compact_finish,
@@ -91,23 +92,14 @@ def _bloom_compact_kernel(
     )
 
 
-@dataclass(frozen=True)
-class _BloomCompactLaunch:
-    grid: tuple[int, int, int]
-    tiles_y: int
-    kwargs: dict[str, object]  # every kernel arg: tensors, strides, constexprs, cfg
-    tile_counts: Tensor
-    scratch: Tensor
-
-
 def _bloom_compact_prep(
     qb: Tensor,  # [B, W] int64
     sigs: Tensor,  # [N, W] int64
     *,
     cfg: BloomCompactConfig,
-) -> _BloomCompactLaunch:
-    """Validation + contiguity + the phase-1 buffers + the launch-arg dict. THE single place input
-    checking happens — shared by ``_bloom_compact_impl`` and the public op (see
+) -> CompactLaunch:
+    """Validation + contiguity + the phase-1 buffers + the launch-arg dict. The one place inputs
+    are checked — shared by ``_bloom_compact_impl`` and the public op (see
     ``clause_compact._clause_compact_prep`` for the buffer contract)."""
     if qb.dim() != 2:
         raise ValueError("qb must be [B, W]")
@@ -149,7 +141,7 @@ def _bloom_compact_prep(
         "num_warps": cfg.num_warps,
         "num_stages": cfg.num_stages,
     }
-    return _BloomCompactLaunch(grid, tiles_y, kwargs, tile_counts, scratch)
+    return CompactLaunch(grid, tiles_y, kwargs, tile_counts, scratch)
 
 
 def _bloom_compact_impl(
@@ -164,15 +156,7 @@ def _bloom_compact_impl(
     cfg = config if config is not None else DEFAULT_CONFIG
     launch = _bloom_compact_prep(qb, sigs, cfg=cfg)
     _bloom_compact_kernel[launch.grid](**launch.kwargs)
-    return compact_finish(
-        launch.grid,
-        launch.tiles_y,
-        launch.tile_counts,
-        launch.scratch,
-        sigs.shape[0],
-        block_n=cfg.block_n,
-        num_warps=cfg.num_warps,
-    )
+    return compact_finish(launch, sigs.shape[0], block_n=cfg.block_n, num_warps=cfg.num_warps)
 
 
 @torch.library.custom_op("retrieve::bloom_compact", mutates_args=(), device_types="cuda")

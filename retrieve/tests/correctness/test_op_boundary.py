@@ -113,7 +113,18 @@ def _odd_dim_calls():
     }
 
 
-@pytest.mark.parametrize("case", list(_odd_dim_calls()))
+_ODD_DIM_CASES = (
+    "fmkt D=96",
+    "oporp W=3",
+    "bloom_match W=3",
+    "bloom_compact W=3",
+    "cps D=96",
+    "cps_bloom D=96",
+    "cpse D=96",
+)
+
+
+@pytest.mark.parametrize("case", _ODD_DIM_CASES)
 def test_non_power_of_two_extent_rejected(case):
     with pytest.raises(ValueError, match="must be a power of two"):
         _odd_dim_calls()[case]()
