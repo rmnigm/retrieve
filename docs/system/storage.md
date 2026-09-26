@@ -164,13 +164,9 @@ Size the pod's disks for these at `pod.sh up` (`--disk`, `--volume`):
   ([datasets](datasets.md#kuairand)).
 - **E3 (OpenAlex) only fits as a stream.** The works snapshot is 707 GB of
   parquet and is never landed: `openalex convert` reads 297 GB of projected
-  columns over S3 and stages the filtered, hash-sampled rows. A 50 M-paper
-  catalog does not fit the harness's fp32-on-device item table
-  (50 M × 768 × 4 B ≈ 154 GB against 80 GB, the same ceiling that scoped
-  PubMed to 10 M) — scoped to ~15 M instead (peak disk ~40 GB at that size,
-  scaled down from the measured 50 M figures of ~131 GB staging + papers
-  parquet + fp16 item shards); encoding at 15 M is ~4.6 A100-hours (~15.5 h
-  at the original 50 M)
+  columns over S3 (572 s at 64 workers) and stages the filtered, hash-sampled
+  rows (16 GB). At the 15 M catalog peak disk is ~49 GB with staging kept,
+  ~33 GB without; encoding adds ~4.6 A100-hours
   ([datasets](datasets.md#budget)).
 
 ## Persistence
