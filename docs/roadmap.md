@@ -47,6 +47,16 @@ in records, commits and code comments; they are not renumbered.
 - **E0**: the Semantic Scholar API key is an identity-bound form; E3
   is running the OpenAlex fallback instead, not waiting on this.
 - **A4**: merging `staging` into `main` is on hold until the user decides.
+- **KuaiRand checkpoint quality.** E4's gSASRec checkpoint (patience
+  shortened to 5 per the user's "usable embeddings, not best model" call)
+  stopped after epoch 18: val NDCG@10 0.0361, but test NDCG@10 0.0088 —
+  a 4× drop only partly explained (item cold start: 44.7% of test targets
+  were never clicked in train, against 65.9% for val; the rest
+  unexplained). Usable for the retrieval benchmark's plumbing, but a weak
+  model in absolute terms. Whether this is good enough for citable E5
+  numbers, or whether the val/test gap needs investigating first (or a
+  longer training budget), is the user's call, not assumed
+  ([validation](validation.md#datasets)).
 - **`.git` history size.** H1 (2026-09-26) removed 221 tracked
   JSON/JSONL files from `HEAD` going forward, but a plain `git rm` keeps
   their bytes in history — the `.git` directory itself doesn't shrink.
@@ -89,12 +99,6 @@ in records, commits and code comments; they are not renumbered.
 - [ ] **E0: request the Semantic Scholar API key** (needs the user). Not
   blocking E3 any more: it is running the OpenAlex fallback instead.
   Still open if the user wants the proper Semantic Scholar source later.
-- [ ] **E4: stage KuaiRand-27K and train gSASRec over its 32M videos.**
-  ETL, config and layout done (staged, `bench check` ok, two filter
-  protocols across 7 clause slots). Remaining: the gSASRec checkpoint
-  (`reuse_item_embeddings`, ~65.6 GB estimated peak), the Hub publish and
-  one filter cell — GPU work, queued behind D1.
-  See [datasets](system/datasets.md#kuairand).
 - [ ] **E5: run the campaign on the new datasets and extend the report**,
   including the unfiltered cells retired from the `quality` suite. Needs
   D1 and E1-E4.
