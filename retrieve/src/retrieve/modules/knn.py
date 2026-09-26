@@ -38,7 +38,11 @@ class PostfilterKNN(RetrievalModule):
         query: Tensor,
         mask: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
-        scores = torch.mm(query.to(torch.float16), self.item_embs_t, out_dtype=torch.float32)
+        query = query.to(torch.float16)
+        if query.is_cuda:
+            scores = torch.mm(query, self.item_embs_t, out_dtype=torch.float32)
+        else:  # aten::mm.dtype has no CPU kernel
+            scores = torch.mm(query.float(), self.item_embs_t.float())
         return masked_topk(scores, self.k, valid=mask)
 
 
@@ -137,7 +141,10 @@ class PrefilterKNN(RetrievalModule):
     ) -> tuple[Tensor, Tensor]:
         query = query.to(torch.float16)
         if candidate_ids is None:
-            scores = torch.mm(query, self.item_embs.t(), out_dtype=torch.float32)
+            if query.is_cuda:
+                scores = torch.mm(query, self.item_embs.t(), out_dtype=torch.float32)
+            else:  # aten::mm.dtype has no CPU kernel
+                scores = torch.mm(query.float(), self.item_embs.t().float())
             topk_scores, topk_ids = torch.topk(scores, self.k, dim=1)
             return topk_ids, topk_scores
         b, p = candidate_ids.shape
