@@ -192,9 +192,13 @@ def poison_empty(
     return hits
 
 
-def _poisoned_empty(real_empty, shape, dtype, value, hits, *args, **kwargs):
+def _poisoned_empty(real_empty, target_shape, target_dtype, value, hits, *args, **kwargs):
+    """``target_shape``/``target_dtype`` (not ``shape``/``dtype``) so a caller that explicitly
+    passes ``torch.empty(..., dtype=...)`` doesn't collide with this function's own bound
+    parameter of the same name (a real call would otherwise raise "multiple values for
+    argument 'dtype'" through the ``partial``)."""
     t = real_empty(*args, **kwargs)
-    if t.dtype == dtype and tuple(t.shape) == shape:
+    if t.dtype == target_dtype and tuple(t.shape) == target_shape:
         t.fill_(value)
-        hits.append(shape)
+        hits.append(target_shape)
     return t
