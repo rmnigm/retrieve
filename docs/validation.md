@@ -192,9 +192,10 @@ the selected checkpoint. sm_mhz 1980 throughout.
 | run | test ndcg@10 / ndcg@100 / R@10 / R@100 / cov@10 | Δ vs bar (ndcg@10 / R@100) | best val ndcg@10 (epoch) | s/epoch (median) | seq/s | peak GB | wall |
 |---|---|---|---|---|---|---|---|
 | [E1](artifacts/seqrec-encoder/e1-yambda-d64-sasrec-ssm/) yambda d64, gSASRec body, sampled softmax (in-batch 4096 + uniform 8192, no logQ) | 0.0661 / 0.0790 / 0.0326 / 0.1093 / 0.0674 | −0.0185 / −0.0470 | 0.0740 (95 of 100) | 10.9 | 8,337 | 10.7 | 26 min |
+| [E2a](artifacts/seqrec-encoder/e2a-yambda-d64-hstu-ssm-uniform/) yambda d64, HSTU body (hidden 256, 4 blocks, 4 heads, `use_time`), sampled softmax (uniform 8192 only). **Stopped after epoch 58 of 100 by user decision** | 0.0743 / 0.0950 / 0.0364 / 0.1379 / 0.0450 | −0.0103 / −0.0184 | 0.0781 (55) | 39.2 | 2,249 | 9.4 | 47 min (to the stop) |
 
-Unverified: the `hstu` block and `sampled_softmax` beyond a 50-step smoke run and the unit gates; `logq=true` has never run on the GPU (`target_frequencies` is checked only by hand on CPU);
-`use_time` on real timestamps (the yambda and goodreads trainer parquets now carry the column; no run has used it yet); resume (`--resume` has never run on the GPU).
+Unverified: `logq=true` has never run on the GPU (`target_frequencies` is checked only by hand on CPU);
+`use_time` on goodreads timestamps (E2a used it on yambda); resume (`--resume` has never run on the GPU).
 
 ## Still unverified
 
