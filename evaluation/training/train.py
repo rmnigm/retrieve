@@ -27,7 +27,7 @@ from loguru import logger
 from tqdm import tqdm
 
 from training.config import TrainConfig
-from training.dataset import load_sequences, train_batches
+from training.dataset import load_sequences, load_val_transitions, target_mask, train_batches
 from training.evaluate import evaluate
 from training.losses import gbce_loss, sampled_softmax_loss
 from training.model import Encoder, build_encoder
@@ -69,12 +69,9 @@ def _wandb_init(config: TrainConfig):
     )
 
 
-def target_frequencies(items: torch.Tensor, num_items: int) -> torch.Tensor:
-    """``p_train [N+1]``: each item's share of the non-padding target positions ``items[:, 1:]``."""
-    # Whole-tensor bincount minus column 0: a flat view instead of copying the [:, 1:] slice.
-    counts = torch.bincount(items.flatten(), minlength=num_items + 1)
-    counts -= torch.bincount(items[:, 0], minlength=num_items + 1)
-    counts[0] = 0
+def target_frequencies(items: torch.Tensor, first: torch.Tensor, num_items: int) -> torch.Tensor:
+    """``p_train [N+1]``: each item's share of the trained target positions (``target_mask``)."""
+    counts = torch.bincount(items[:, 1:][target_mask(items, first)], minlength=num_items + 1)
     return counts.double() / counts.sum()
 
 
@@ -88,12 +85,13 @@ def logq_correction(
 def step_loss(
     model: Encoder,
     items: torch.Tensor,
+    first: torch.Tensor,
     config: TrainConfig,
     num_items: int,
     p_train: torch.Tensor | None,
 ) -> torch.Tensor:
     inputs, targets = items[:, :-1], items[:, 1:]
-    mask = targets != 0
+    mask = target_mask(items, first)
     queries, pos_ids = model(inputs)[mask], targets[mask]
     table = model.get_output_embeddings().weight
     if config.loss == "gbce":
@@ -130,7 +128,13 @@ def train(config: TrainConfig, resume: bool = False) -> None:
     if config.compile:
         model.body = torch.compile(model.body)
     items = load_sequences(str(data_dir / "train.parquet"), config.max_seq_length, device)
-    p_train = target_frequencies(items, num_items) if config.logq else None
+    first = torch.zeros(items.shape[0], dtype=torch.long, device=device)
+    if config.train_on_val:
+        val_items, val_first = load_val_transitions(
+            str(data_dir / "val.parquet"), config.max_seq_length, device
+        )
+        items, first = torch.cat([items, val_items]), torch.cat([first, val_first])
+    p_train = target_frequencies(items, first, num_items) if config.logq else None
     n_batches = items.shape[0] // config.batch_size
     batches_per_epoch = min(config.max_batches_per_epoch or n_batches, n_batches)
 
@@ -205,11 +209,11 @@ def train(config: TrainConfig, resume: bool = False) -> None:
         model.train()
         epoch_loss = torch.zeros((), device=device)
         ep_t0 = time.perf_counter()
-        batches = train_batches(items, config.batch_size)
+        batches = train_batches(items, first, config.batch_size)
         pbar = tqdm(range(batches_per_epoch), desc=f"Epoch {epoch}", mininterval=10)
         for batch_idx in pbar:
             with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=use_cuda):
-                loss = step_loss(model, next(batches), config, num_items, p_train)
+                loss = step_loss(model, *next(batches), config, num_items, p_train)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
@@ -239,7 +243,9 @@ def train(config: TrainConfig, resume: bool = False) -> None:
         peak_mem_gb = torch.cuda.max_memory_allocated(device) / (1024**3) if use_cuda else 0.0
         samples_per_sec = batches_per_epoch * config.batch_size / epoch_time
 
-        do_eval = ((epoch + 1) % config.eval_every == 0) or (epoch + 1 == config.num_epochs)
+        do_eval = not config.train_on_val and (
+            (epoch + 1) % config.eval_every == 0 or epoch + 1 == config.num_epochs
+        )
         val_metrics: dict[str, float] = {}
         if do_eval:
             val_metrics = evaluate(
@@ -353,7 +359,7 @@ def train(config: TrainConfig, resume: bool = False) -> None:
             {
                 "epoch_losses": epoch_losses,
                 "val_metrics_per_epoch": val_metrics_per_epoch,
-                "best_val_metric": {metric: best_metric},
+                "best_val_metric": {metric: best_metric} if val_metrics_per_epoch else {},
                 "test_metrics": test_metrics,
                 "total_time_sec": total_time,
                 "epoch_time_sec": epoch_times,

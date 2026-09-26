@@ -3,7 +3,9 @@ position never sees the padding) and ``sampled_softmax_loss`` against a direct
 ``F.cross_entropy`` over explicitly built candidate lists (with and without logQ), the logQ
 expected-count formula, the epochs that write ``_resume.pt``, the ``TrainConfig`` loss /
 ``normalize`` / ``logq`` boundary, and how ``TrainConfig.load`` resolves them for a legacy or
-loss-overridden ``config.json``."""
+loss-overridden ``config.json``, and ``train_on_val``: the val rows it trains on (tail of
+history ++ targets, only the target positions trained or counted for logQ) and that it runs
+no val eval."""
 
 from __future__ import annotations
 
@@ -11,14 +13,17 @@ import dataclasses
 import json
 import math
 
+import polars as pl
 import pytest
 import torch
 import torch.nn.functional as F
 
+from training import train as train_module
 from training.config import TrainConfig
+from training.dataset import load_val_transitions, target_mask
 from training.losses import sampled_softmax_loss
 from training.model import Encoder
-from training.train import logq_correction, resume_due
+from training.train import logq_correction, resume_due, target_frequencies
 
 
 def test_left_padding_is_finite_and_invisible_to_the_last_position():
@@ -128,3 +133,44 @@ def test_resume_is_written_every_n_epochs_and_on_the_last(resume_every, stop_epo
     last = config.num_epochs - 1 if stop_epoch is None else stop_epoch
     got = [e for e in range(last + 1) if resume_due(e, config, stopping=e == stop_epoch)]
     assert got == want
+
+
+_VAL = {
+    "item_ids": [[1, 2, 3], [7, 8, 9, 10, 11, 12], [1], [1]],
+    "targets": [[4, 5], [13], [2], [2, 3, 4, 5, 6, 7]],
+}
+
+
+def test_train_on_val_rows_are_the_tail_of_history_then_targets(tmp_path):
+    pl.DataFrame(_VAL).write_parquet(tmp_path / "val.parquet")
+    items, first = load_val_transitions(str(tmp_path / "val.parquet"), 4, torch.device("cpu"))
+    assert items.tolist() == [
+        [1, 2, 3, 4, 5],
+        [9, 10, 11, 12, 13],
+        [0, 0, 0, 1, 2],
+        [3, 4, 5, 6, 7],
+    ]
+    assert first.tolist() == [2, 3, 3, 0]
+    trained = [row[1:][m].tolist() for row, m in zip(items, target_mask(items, first), strict=True)]
+    assert trained == [[4, 5], [13], [2], [4, 5, 6, 7]]
+    p_train = target_frequencies(items, first, num_items=13)
+    assert torch.equal(p_train * 8, torch.bincount(torch.tensor([4, 5, 13, 2, 4, 5, 6, 7]),
+                                                   minlength=14).double())  # fmt: skip
+
+
+def test_train_on_val_runs_no_val_eval(tmp_path, monkeypatch):
+    (tmp_path / "item_id_map.json").write_text(json.dumps({str(i): i for i in range(1, 14)}))
+    pl.DataFrame({"item_ids": [[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]] * 2}).write_parquet(
+        tmp_path / "train.parquet"
+    )
+    pl.DataFrame(_VAL).write_parquet(tmp_path / "val.parquet")
+    calls = []
+    monkeypatch.setattr(train_module, "evaluate", lambda *a, **k: calls.append(a) or {})
+    config = TrainConfig(data_dir=str(tmp_path), checkpoint_dir=str(tmp_path / "ckpt"),
+                         max_seq_length=4, embedding_dim=8, num_blocks=1, num_heads=1,
+                         ffn_hidden_dim=8, num_negatives=4, inbatch_negatives=4, batch_size=2,
+                         num_epochs=2, eval_every=1, compile=False, wandb_enabled=False,
+                         device="cpu", train_on_val=True)  # fmt: skip
+    train_module.train(config)
+    assert calls == []
+    assert (tmp_path / "ckpt" / "best_model.pt").exists()

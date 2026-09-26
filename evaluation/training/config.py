@@ -34,6 +34,7 @@ class TrainConfig:
     max_batches_per_epoch: int | None = None
     patience: int = 10
     resume_every: int = 1
+    train_on_val: bool = False
 
     eval_batch_size: int = 1024
     eval_ks: tuple[int, ...] = (10, 100)
