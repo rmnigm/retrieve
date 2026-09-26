@@ -41,7 +41,11 @@ for gf in sorted(Path("evaluation/golden").glob("*.json")):
             continue
         seen.add(row["k"])
         for m in (f"recall@{row['k']}", f"ndcg@{row['k']}"):
-            g, b, n = row[m], base[key]["quality"]["oracle"][m], new[key]["quality"]["oracle"][m]
+            g, b, n = (
+                row[m],
+                base[key]["quality"]["oracle"][m],
+                new[key]["quality"]["oracle"][m],
+            )
             verdict = "PASS" if abs(g - n) <= TOL else f"{abs(g - n):.1e}"
             print(f"| {gf.stem} | {m} | {g:.9f} | {b:.9f} | {n:.9f} | {verdict} |")
 

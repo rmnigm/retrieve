@@ -21,16 +21,24 @@ torch.backends.cuda.matmul.allow_tf32 = False
 
 blob = torch.load(sys.argv[1], weights_only=True)
 oracle = blob["topk"]
-emb = F.normalize(torch.load(f"{DATA}/content_d192/text_emb.pt", map_location=dev).float(), dim=-1)
+emb = F.normalize(
+    torch.load(f"{DATA}/content_d192/text_emb.pt", map_location=dev).float(), dim=-1
+)
 queries = F.normalize(torch.load(f"{DATA}/content_d192/query_emb.pt").float(), dim=-1)
-qa = torch.tensor(pl.read_parquet(f"{DATA}/eval_split.parquet")["query_attrs_narrow"].to_list())
+qa = torch.tensor(
+    pl.read_parquet(f"{DATA}/eval_split.parquet")["query_attrs_narrow"].to_list()
+)
 attrs = torch.load(f"{DATA}/item_attrs_narrow.pt", map_location=dev, weights_only=True)
-rev = torch.load(f"{DATA}/clause_is_reverse_narrow.pt", map_location=dev, weights_only=True)
+rev = torch.load(
+    f"{DATA}/clause_is_reverse_narrow.pt", map_location=dev, weights_only=True
+)
 
 m = LiNRV2(k=1000, filter=ExactAttributeFilter(backend="torch"), backend="torch")
 m.register_index(emb, item_clause_attrs=attrs, clause_is_reverse=rev)
 del emb
-keep = ((qa[: oracle.shape[0]] != -1).any(1) & (oracle >= 0).any(1)).nonzero().reshape(-1)
+keep = (
+    ((qa[: oracle.shape[0]] != -1).any(1) & (oracle >= 0).any(1)).nonzero().reshape(-1)
+)
 recalls = []
 for s in range(0, keep.numel(), 16):
     rows = keep[s : s + 16]
@@ -38,4 +46,6 @@ for s in range(0, keep.numel(), 16):
     for got, ref in zip(ids.cpu().tolist(), oracle[rows].tolist(), strict=True):
         ref = {v for v in ref if v >= 0}
         recalls.append(len(ref & set(got)) / len(ref))
-print(f"linr_v2/torch recall_oracle@1000 = {sum(recalls) / len(recalls):.4f} over {len(recalls)} rows")
+print(
+    f"linr_v2/torch recall_oracle@1000 = {sum(recalls) / len(recalls):.4f} over {len(recalls)} rows"
+)
