@@ -1,8 +1,9 @@
 """``training``: the encoder's attention mask (a left-padded row stays finite, and the last
 position never sees the padding) and ``sampled_softmax_loss`` against a direct
 ``F.cross_entropy`` over explicitly built candidate lists (with and without logQ), the logQ
-expected-count formula, the ``TrainConfig`` loss / ``normalize`` / ``logq`` boundary, and how
-``TrainConfig.load`` resolves them for a legacy or loss-overridden ``config.json``."""
+expected-count formula, the epochs that write ``_resume.pt``, the ``TrainConfig`` loss /
+``normalize`` / ``logq`` boundary, and how ``TrainConfig.load`` resolves them for a legacy or
+loss-overridden ``config.json``."""
 
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ import torch.nn.functional as F
 from training.config import TrainConfig
 from training.losses import sampled_softmax_loss
 from training.model import Encoder
-from training.train import logq_correction
+from training.train import logq_correction, resume_due
 
 
 def test_left_padding_is_finite_and_invisible_to_the_last_position():
@@ -116,3 +117,14 @@ def test_load_resolves_normalize_and_logq_for_the_resulting_loss(tmp_path, saved
     path.write_text(json.dumps(saved))
     cfg = TrainConfig.load(path, **overrides)
     assert (cfg.loss, cfg.normalize, cfg.logq) == want
+
+
+@pytest.mark.parametrize(
+    ("resume_every", "stop_epoch", "want"),
+    [(1, None, [0, 1, 2, 3, 4, 5, 6, 7]), (3, None, [2, 5, 7]), (3, 3, [2, 3]), (4, 5, [3, 5])],
+)
+def test_resume_is_written_every_n_epochs_and_on_the_last(resume_every, stop_epoch, want):
+    config = TrainConfig(num_epochs=8, resume_every=resume_every)
+    last = config.num_epochs - 1 if stop_epoch is None else stop_epoch
+    got = [e for e in range(last + 1) if resume_due(e, config, stopping=e == stop_epoch)]
+    assert got == want

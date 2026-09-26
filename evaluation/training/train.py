@@ -111,6 +111,11 @@ def step_loss(
     )
 
 
+def resume_due(epoch: int, config: TrainConfig, stopping: bool) -> bool:
+    """Whether ``epoch`` writes ``_resume.pt``: every ``resume_every`` epochs and the last one."""
+    return stopping or (epoch + 1) % config.resume_every == 0 or epoch + 1 == config.num_epochs
+
+
 def train(config: TrainConfig, resume: bool = False) -> None:
     set_seed(config.seed)
     _enable_tf32()
@@ -180,7 +185,7 @@ def train(config: TrainConfig, resume: bool = False) -> None:
         best_metric = state["best_metric"]
         steps_not_improved = state["steps_not_improved"]
         global_step = state["global_step"]
-        best_path = Path(state["best_path"]) if state["best_path"] else None
+        best_path = ckpt_dir / Path(state["best_path"]).name if state["best_path"] else None
         logger.info(
             "Resumed: start_epoch={} best_metric={:.4f} steps_not_improved={} global_step={}",
             start_epoch,
@@ -188,6 +193,12 @@ def train(config: TrainConfig, resume: bool = False) -> None:
             steps_not_improved,
             global_step,
         )
+    if resume:
+        # Bests saved after _resume.pt, or before the first one, belong to epochs being retrained.
+        for snapshot in ckpt_dir.glob("sasrec-ep*.pt"):
+            if snapshot != best_path:
+                snapshot.unlink()
+    resumable_best = best_path
     t0 = time.perf_counter()
 
     for epoch in range(start_epoch, config.num_epochs):
@@ -265,32 +276,38 @@ def train(config: TrainConfig, resume: bool = False) -> None:
             if cur > best_metric:
                 best_metric = cur
                 steps_not_improved = 0
-                if best_path is not None and best_path.exists():
+                if best_path is not None and best_path != resumable_best:
                     best_path.unlink()
                 best_path = ckpt_dir / f"sasrec-ep{epoch}-{metric.replace('@', '')}{cur:.4f}.pt"
                 torch.save(model.state_dict(), best_path)
             else:
                 steps_not_improved += 1
 
-        torch.save(
-            {
-                "model": model.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "scheduler": scheduler.state_dict(),
-                "next_epoch": epoch + 1,
-                "best_metric": best_metric,
-                "steps_not_improved": steps_not_improved,
-                "best_path": str(best_path) if best_path else None,
-                "global_step": global_step,
-                "py_rng": random.getstate(),
-                "np_rng": np.random.get_state(),
-                "torch_rng": torch.get_rng_state(),
-                "cuda_rng": torch.cuda.get_rng_state_all() if use_cuda else None,
-            },
-            resume_path,
-        )
+        stopping = bool(val_metrics) and steps_not_improved >= config.patience
+        if resume_due(epoch, config, stopping):
+            torch.save(
+                {
+                    "model": model.state_dict(),
+                    "optimizer": optimizer.state_dict(),
+                    "scheduler": scheduler.state_dict(),
+                    "next_epoch": epoch + 1,
+                    "best_metric": best_metric,
+                    "steps_not_improved": steps_not_improved,
+                    "best_path": str(best_path) if best_path else None,
+                    "global_step": global_step,
+                    "py_rng": random.getstate(),
+                    "np_rng": np.random.get_state(),
+                    "torch_rng": torch.get_rng_state(),
+                    "cuda_rng": torch.cuda.get_rng_state_all() if use_cuda else None,
+                },
+                resume_path,
+            )
+            # _resume.pt names the best it was written with; that file lives until the next one.
+            if resumable_best is not None and resumable_best != best_path:
+                resumable_best.unlink()
+            resumable_best = best_path
 
-        if val_metrics and steps_not_improved >= config.patience:
+        if stopping:
             logger.info("Early stopping at epoch {}.", epoch)
             break
 
