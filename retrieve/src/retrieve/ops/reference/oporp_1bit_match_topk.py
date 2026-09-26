@@ -35,7 +35,7 @@ def oporp_1bit_match_topk_indirect(
 ) -> tuple[Tensor, Tensor]:
     """Hamming top-K over ``positive_indices[b, :counts[b]]`` only. ``pad_to_k=False``: returns
     ``min(k, P)`` columns (no ``-1``/``-inf`` tail) — frozen behaviour; callers bound short rows
-    by ``counts``."""
-    scores = _hamming_scores(query_bits, item_bits[positive_indices])  # [B, P]
+    by ``counts``. Ids past ``counts[b]`` are never gathered."""
     valid = counts_to_valid(counts, positive_indices.shape[1])
+    scores = _hamming_scores(query_bits, item_bits[torch.where(valid, positive_indices, 0)])
     return masked_topk(scores, k, valid=valid, gather_ids=positive_indices, pad_to_k=False)

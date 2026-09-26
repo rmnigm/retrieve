@@ -563,15 +563,26 @@ sparse paths consume.
 inputs:   item_clause_attrs   [N, C, A_max]  int64
           clause_is_reverse   [C]            bool
           query_clause_attrs  [B, C]         int64
-return:   positive_indices    [B, N]         int64  (full width, -1 tails)
+return:   positive_indices    [B, N]         int64  (full width, written on [:counts] only)
           counts              [B]            int64
 ```
 
 The returned index buffer is **full-width** `[B, N]` — only the first
-`counts[b]` entries per row are meaningful; the tail is `-1`, written by
-the scatter launch itself into a `torch.empty` buffer (no host-side
-`counts.max().item()` sync, no narrow slice, no `[B, N]` prefill launch).
-Downstream kernels bound reads by `counts`.
+`counts[b]` entries per row are written; the tail is whatever the
+`torch.empty` allocation held (no host-side `counts.max().item()` sync,
+no narrow slice, no prefill and no tail store). **Every reader bounds
+its reads by `counts`**, and none gathers through a tail id: the Triton
+consumers load ids under `n < counts[b]`, the reference ops index through
+`where(n < counts[b], id, 0)` and mask the rest to `-inf`, and the top-k
+epilogues turn any `-inf` slot's id into `-1`. A path that takes padded
+ids without `counts` (`FullScanKNN` / `SilverTorch` candidates) needs the
+caller to mask the tail to `-1` first. So the op's full output is a
+function of its inputs only under `torch.use_deterministic_algorithms(True)`,
+which fills `torch.empty` (the tail then reads `2⁶³ − 1`); `opcheck` runs
+in that mode. Pinned by
+[`test_compact_order.py`](../../retrieve/tests/parity/test_compact_order.py)
+(`test_consumers_ignore_the_tail_past_counts`: every consumer returns the
+same tensors with the tail poisoned to `-1` and to an out-of-range id).
 
 **Launch grid** `(B, tiles_y, tiles_x)` — batch on `grid_x` so adjacent
 dispatched programs share the same item tile (good L2 reuse on the
@@ -597,9 +608,7 @@ host, inside the op:                            _host.compact_finish
     counts       = tile_ends[:, -1].clone()
 scatter launch (b, tile), same grid:            common.compact_scatter_kernel
     ids = scratch[b, tile * BLOCK_N : +tile_counts[b, tile]]
-    positive_indices[b, tile_offsets[b, tile] : +count] = ids
-    slots = tile * BLOCK_N + lane                  # the tile's own slice of the row
-    positive_indices[b, slots ∩ [counts[b], N)] = -1   # disjoint from every run
+    positive_indices[b, tile_offsets[b, tile] : +count] = ids   # nothing past counts[b]
 ```
 
 Why this shape and not the two alternatives (re-evaluate the predicate in
@@ -797,12 +806,12 @@ never materializes.
 ```
 inputs:    qb     [B, W]   int64    packed query bloom signature
            sigs   [N, W]   int64    packed item bloom signatures
-return:    positive_indices [B, N] int64  (full width, -1 tails)
+return:    positive_indices [B, N] int64  (full width, written on [:counts] only)
            counts           [B]    int64
 ```
 
 Same full-width `[B, N]` return contract as `clause_compact` — bound
-reads by `counts[b]`, `-1` tails written by the scatter launch. Registered as a
+reads by `counts[b]`; nothing past it is written. Registered as a
 `@torch.library.custom_op` for the same reason `clause_compact` is (the
 compaction store address is data-dependent), so both compaction kernels
 capture under cudagraph trees.
@@ -877,8 +886,8 @@ torch and triton paths stay interchangeable. Implementation:
 `mask.sum(1)` for counts, then
 `mask.float().argsort(descending=True, stable=True)` for the indices —
 no `.item()` sync, no narrow slice. The tails differ across
-implementations (arbitrary argsort-tail ids here vs `-1` for the
-kernels), so consumers must bound reads by `counts` either way.
+implementations (arbitrary argsort-tail ids here, unwritten memory in
+the kernels), so consumers must bound reads by `counts` either way.
 
 ### [`popcount_int64`](../../retrieve/src/retrieve/functional.py) (`retrieve.functional`)
 

@@ -144,9 +144,10 @@ def test_bloom_compact_config_override(block_n, num_warps):
     _rows_equal(out_ids, out_counts, ref_ids, ref_counts)
 
 
-def test_bloom_compact_writes_every_slot(monkeypatch):
-    """The output is ``torch.empty``: every slot must come back as a real id or ``-1`` — a
-    poisoned allocation proves the scatter kernel wrote the tail itself."""
+def test_bloom_compact_writes_nothing_past_counts(monkeypatch):
+    """The output is ``torch.empty`` and the scatter kernel writes the runs only: on a poisoned
+    allocation every slot in ``[:counts]`` is the reference's id and every slot past it is still
+    the poison."""
     n, b = 1000, 4
     bf = BloomFilter(m_bits=256, k_hash=3).to("cuda")
     bf.register_index(make_attrs(n, c=2, a_max=2, n_vocab=10, seed=11))
@@ -157,4 +158,4 @@ def test_bloom_compact_writes_every_slot(monkeypatch):
     assert hits
     width = torch.arange(n, device="cuda")[None, :] < ref_counts[:, None]
     assert torch.equal(counts, ref_counts)
-    assert torch.equal(ids, torch.where(width, ref_ids, -1))
+    assert torch.equal(ids, torch.where(width, ref_ids, 123_456_789))

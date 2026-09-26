@@ -14,12 +14,14 @@ def fused_masked_knn_topk(
     k: int,
 ) -> tuple[Tensor, Tensor]:
     """Gather + ``bmm`` + ``masked_topk`` over the caller's candidates — the ``[B, P, D]``
-    intermediate the Triton kernel avoids. Scores are fp32, as the kernel writes them."""
+    intermediate the Triton kernel avoids. Scores are fp32, as the kernel writes them; ids past
+    ``counts[b]`` are never gathered (a compaction's tail is unwritten memory)."""
     p = positive_indices.shape[1]
     if p < k:
         raise ValueError(f"positive_indices has {p} columns, fewer than k={k}")
-    reduced_embs = item_embs[positive_indices.clamp_min(0)]
+    valid = counts_to_valid(counts, p)
+    reduced_embs = item_embs[torch.where(valid, positive_indices, 0)]
     scores = torch.bmm(
         query.unsqueeze(1), reduced_embs.transpose(1, 2), out_dtype=torch.float32
     ).squeeze(1)
-    return masked_topk(scores, k, valid=counts_to_valid(counts, p), gather_ids=positive_indices)
+    return masked_topk(scores, k, valid=valid, gather_ids=positive_indices)

@@ -124,9 +124,9 @@ def test_clause_compact_config_override(block_n, num_warps):
 @pytest.mark.parametrize("r", [0, 1])
 def test_clause_compact_equals_compacted_clause_mask(r):
     """``clause_compact`` is ``compact_mask(clause_mask(...))`` — the two Triton kernels agree
-    bit for bit on counts, the ascending prefix, and the exact ``-1`` tail over the full ``[B,
-    N]`` width; ``N % DEFAULT_CONFIG.block_n`` in {0, 1} (a full and a one-lane last tile), and
-    one row passes nothing (an all-``-1`` row)."""
+    bit for bit on counts and the ascending prefix ``[:counts]`` (the only defined part of a
+    row); ``N % DEFAULT_CONFIG.block_n`` in {0, 1} (a full and a one-lane last tile), and one
+    row passes nothing."""
     n, c = 4 * DEFAULT_CONFIG.block_n + r, 2
     assert n % DEFAULT_CONFIG.block_n == r
     attrs = make_attrs(n, c=c, a_max=2, n_vocab=10, pad_rate=0.2, seed=5)
@@ -139,17 +139,16 @@ def test_clause_compact_equals_compacted_clause_mask(r):
         m_ids, m_counts = compact_mask(clause_mask(attrs, rev, q))
         assert torch.equal(counts, m_counts)
         width = torch.arange(n, device="cuda")[None, :] < counts[:, None]
-        expected = torch.full_like(ids, -1)
-        expected[:, : m_ids.shape[1]] = m_ids
-        assert torch.equal(ids, torch.where(width, expected, -1))
-    assert counts[3].item() == 0 and torch.equal(ids[3], torch.full((n,), -1, device="cuda"))
+        assert torch.equal(torch.where(width, ids, -1), torch.where(width, m_ids, -1))
+    assert counts[3].item() == 0
 
 
 @pytest.mark.parametrize("r", [0, 1])
-def test_clause_compact_writes_every_slot(monkeypatch, r):
-    """The output is ``torch.empty``: the scatter kernel writes the runs and the ``-1`` tail
-    itself. Poisoned with an id no row can hold, every slot must come back as a real id or
-    ``-1`` (a full and a one-lane last tile; one row passes nothing)."""
+def test_clause_compact_writes_nothing_past_counts(monkeypatch, r):
+    """The output is ``torch.empty`` and the scatter kernel writes the runs only. Poisoned with
+    an id no row can hold, every slot in ``[:counts]`` comes back as the reference's id and every
+    slot past it still holds the poison (a full and a one-lane last tile; one row passes
+    nothing)."""
     n, c, b = 4 * DEFAULT_CONFIG.block_n + r, 2, 4
     attrs = make_attrs(n, c=c, a_max=2, n_vocab=10, pad_rate=0.2, seed=5)
     rev = torch.zeros(c, dtype=torch.bool, device="cuda")
@@ -161,4 +160,4 @@ def test_clause_compact_writes_every_slot(monkeypatch, r):
     assert hits
     width = torch.arange(n, device="cuda")[None, :] < ref_counts[:, None]
     assert torch.equal(counts, ref_counts)
-    assert torch.equal(ids, torch.where(width, ref_ids, -1))
+    assert torch.equal(ids, torch.where(width, ref_ids, 123_456_789))

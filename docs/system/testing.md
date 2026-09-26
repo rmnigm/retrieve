@@ -133,7 +133,10 @@ The split is **by purpose**, not by module:
   every tensor input is `torch.equal` to its pre-call clone after the op
   and after its twin; `torch.library.opcheck` passes on the two
   `custom_op`s with a `register_fake` (`clause_compact`,
-  `bloom_compact`).
+  `bloom_compact`), every utility included, run under
+  `torch.use_deterministic_algorithms(True)`: their tail past `counts` is
+  unwritten, and deterministic mode's filled `torch.empty` is what makes
+  the eager-vs-AOT comparison of the whole output bitwise.
 
 A module that has both a torch and a Triton backend (like LiNR V1/V2/V3)
 appears in both trees: `test_linr.py` covers semantics, the parity
@@ -728,8 +731,12 @@ older test covers its own); **row alone ≡ row in batch**, and — on
 equal (at `k = P`). Variant identities: OPORP indirect over `arange(N)`
 ≡ full scan; `codesigned_probe_score_bloom` with an all-zero query
 signature ≡ `codesigned_probe_score`; `clause_compact` ≡
-`compact_mask(clause_mask(...))` over the full `[B, N]` width including
-the `-1` tail (`N % block_n` ∈ {0, 1}, one row passing nothing).
+`compact_mask(clause_mask(...))` on counts and the `[:counts]` prefix
+(`N % block_n` ∈ {0, 1}, one row passing nothing). The two compaction
+files' poisoned-output tests assert the opposite of the scorers': the
+`[:counts]` prefix equals the reference and every slot past it **still
+holds the poison** — the scatter writes nothing there
+([kernels](kernels.md#clause_compact--fused-clause-eval--stream-compaction)).
 
 | File | Kernel | Reference | Notes |
 |------|--------|-----------|-------|
@@ -737,7 +744,7 @@ the `-1` tail (`N % block_n` ∈ {0, 1}, one row passing nothing).
 | [`test_oporp_1bit_match_topk.py`](../../retrieve/tests/parity/test_oporp_1bit_match_topk.py) | `oporp_1bit_match_topk`     | `popcount_int64(xor).sum(W)` → topk          | popcount is bit-exact by construction (SWAR matches between torch and Triton): `assert_topk_equal`; the private oracle writes `-1` at every `-inf` slot, the op's sentinel contract |
 | [`test_bloom_match.py`](../../retrieve/tests/parity/test_bloom_match.py)                     | `bloom_match`               | `(qb & sigs) == qb` per word, AND-reduced — computed on CPU to keep the test from tautologically routing through the kernel via `BloomFilter.evaluate_mask` | parametrize on `(n, m_bits, k_hash)` |
 | [`test_bloom_compact.py`](../../retrieve/tests/parity/test_bloom_compact.py)                 | `bloom_compact`             | `compact_mask(bloom_match(qb, sigs))` with hand-built `qb` | rows equal in order (the kernel's contract is ascending item order); covers `B=1`, all-inactive query, `N < BLOCK_N`, and a routed-via-`BloomFilter.evaluate_indices` smoke check |
-| [`test_compact_order.py`](../../retrieve/tests/parity/test_compact_order.py)                 | `clause_compact`, `bloom_compact` | `ops.reference.clause_compact` / `bloom_compact` | the determinism gate: ids **and** counts `torch.equal` in order (ascending item order) over `make_exact` × reverse ∈ {none, mixed} × `(C, A_max)` and `make_bloom` × `m_bits` ∈ {256, 512, 1024}, at one tile / many tiles / a ragged last tile; the order holds under three non-default tile configs; and the same call is `torch.equal` ten launches running and in a fresh interpreter |
+| [`test_compact_order.py`](../../retrieve/tests/parity/test_compact_order.py)                 | `clause_compact`, `bloom_compact` | `ops.reference.clause_compact` / `bloom_compact` | the determinism gate: ids **and** counts `torch.equal` in order (ascending item order) over `make_exact` × reverse ∈ {none, mixed} × `(C, A_max)` and `make_bloom` × `m_bits` ∈ {256, 512, 1024}, at one tile / many tiles / a ragged last tile; the order holds under three non-default tile configs; the same call is `torch.equal` on counts and the `[:counts]` prefix ten launches running and in a fresh interpreter; and **every consumer ignores the tail** — `LiNRV2` (Triton / torch rescoring, clause / bloom), `LiNRV3` (Triton / torch) and `combine_indices`, run in a subprocess with the compaction's `torch.empty` poisoned to `-1` and then to `2**40` (past every table), return `torch.equal` results; a consumer that used a tail id would differ, one that gathered through it would fault (hence the subprocess). Goes red with the reference op's `counts` bound removed, or with `LiNRV2` dropping `counts` |
 | [`test_clause_mask.py`](../../retrieve/tests/parity/test_clause_mask.py)                     | `clause_mask`               | Pure-torch `[B, N, C, A_max]` broadcast inlined as `_ref_mask` | bit-exact via `torch.equal`; covers reverse clauses, all-reverse, all-inactive query, `A_max=1`, `B=1`, `N < BLOCK_N` |
 | [`test_clause_compact.py`](../../retrieve/tests/parity/test_clause_compact.py)               | `clause_compact`            | `ExactAttributeFilter.evaluate_mask(...)` + `compact_mask` (transitively goes through `clause_mask` on CUDA) | rows equal in order (ascending item order); cases for reverse clauses, all-inactive query, no-passing-items, `B=1` grid corner |
 | [`test_codesigned_probe_score.py`](../../retrieve/tests/parity/test_codesigned_probe_score.py) | `codesigned_probe_score` (+ bloom) | the shared `ops.reference` twin, plus two private oracles: a per-row loop concatenating the probed clusters (no shared slot arithmetic) and the row-wise bloom subset test (the transposed index must answer as the row-wise signatures do) | the compact CSR probe layout; cluster-size cutoffs at `block_p`; bit-exact |

@@ -392,8 +392,9 @@ that skips predicate evaluation entirely; passing `query_clause_attrs`
 together with `candidate_ids` raises `ValueError` (the candidates path
 scores the given candidates *without* the fused filter, so accepting
 both would silently drop the predicate). On that path `-1` candidate
-ids are padding — the tail every compact producer in the library emits
-(`evaluate_indices`, `compact_mask`): they are gathered as `clamp_min(0)`
+ids are padding — a compaction's output (`evaluate_indices`,
+`compact_mask`) must be masked to `-1` past its `counts` first, since its
+tail is unwritten or argsort leftovers: pads are gathered as `clamp_min(0)`
 but masked to `-inf` and returned as `-1` through `masked_topk`, so a
 pad never scores or surfaces as item `N-1` (or, on `"official"`, as
 `inv_perm[-1]`). `register_index` is split into

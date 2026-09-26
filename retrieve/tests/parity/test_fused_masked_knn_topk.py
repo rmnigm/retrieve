@@ -15,7 +15,6 @@ import torch
 
 from retrieve.functional import compact_mask
 from retrieve.ops import reference
-from retrieve.ops.triton.clause_compact import clause_compact
 from retrieve.ops.triton.fused_masked_knn_topk import (
     _P_BUCKETS,
     DEFAULT_CONFIG,
@@ -66,30 +65,10 @@ def test_matches_pure_torch(b, n, d, k, pass_rate):
 
 
 def test_padding_uses_minus_one_when_counts_below_k():
-    """Regression: when counts[b] < k, the padding slots must be -1.
-
-    The original bug had two compounding faults:
-
-    1. ``clause_compact`` / ``bloom_compact`` allocated their candidate
-       buffer via ``torch.empty`` — uninitialised memory past
-       ``counts[bid]``.
-    2. After ``torch.topk`` over the ``[B, P]`` score matrix, the bottom
-       slots tied at -inf and the gather pulled from those uninitialised
-       positions, leaking random int64 values into top-K (e.g.
-       ``-4785944168570074265``).
-
-    On goodreads ``c0c4_author`` ~23% of users had counts[b] < 10, so
-    ``linr_v2_filter_compact`` reported recall@10 = 0.77 against the
-    oracle (which has the same flaw on the symmetric side: torch.topk
-    with -inf scores tie-breaks to the lowest item ids 0, 1, 2, …, so
-    its padding slots and v2's padding slots disagreed).
-
-    Fix surface: both ``*_compact`` allocate with ``torch.full(..., -1)``
-    AND the wrapper post-masks topk_ids to -1 on -inf scores. This test
-    exercises the *wrapper* explicitly with a hand-built positive_indices
-    buffer that contains plausible-looking-but-stale ids past
-    ``counts[b]`` — the wrapper must not return them.
-    """
+    """When counts[b] < k the bottom slots tie at -inf and ``torch.topk`` may pick positions
+    past ``counts[b]``, whose ids are whatever the compaction's ``torch.empty`` held (it writes
+    nothing there, kernels.md § ``clause_compact``). The wrapper's ``-inf → -1`` mask is the
+    guard: fed plausible-looking stale ids past ``counts[b]``, it must not return them."""
     b, n, d, k = 4, 64, 32, 10
     p = 32  # padded width of the candidate buffer
     embs = make_index(n, d)
@@ -193,41 +172,6 @@ def test_config_override_matches_default():
     ids_b, scores_b = _fused_masked_knn_topk_impl(query, embs, pos, counts, k, config=cfg_b)
     # Same inputs → identical output regardless of tile config: the D reduction is per lane.
     assert_topk_equal(ids_a, scores_a, ids_b, scores_b)
-
-
-def test_compact_kernel_initialises_buffer_to_minus_one():
-    """Regression: clause_compact / bloom_compact must not return
-    uninitialised memory past `counts[bid]`. We feed a mask that passes
-    far fewer than ``n`` items per row and assert the compact buffer's
-    suffix is filled with -1.
-    """
-
-    b, n, c, a_max = 4, 1024, 2, 1
-    # Items: each item has a fixed value per clause; we build sparse matches.
-    item_attrs = torch.full((n, c, a_max), -1, dtype=torch.int64, device="cuda")
-    # Make item i have clause-0 value (i % 8). Only items where i % 8 == q_c match.
-    item_attrs[:, 0, 0] = torch.arange(n, device="cuda", dtype=torch.int64) % 8
-    item_attrs[:, 1, 0] = 0  # clause 1 always matches when query asks for 0
-    is_reverse = torch.zeros(c, dtype=torch.bool, device="cuda")
-    # Each query: clause 0 = bid (only items i where i%8 == bid match), clause 1 inactive (-1).
-    query_attrs = torch.full((b, c), -1, dtype=torch.int64, device="cuda")
-    query_attrs[:, 0] = torch.arange(b, device="cuda", dtype=torch.int64)
-
-    indices, counts = clause_compact(item_attrs, is_reverse, query_attrs)
-
-    # Each row should have exactly n/8 = 128 passing items, leaving most slots empty.
-    assert (counts == n // 8).all(), f"counts={counts.tolist()} expected {n // 8}"
-    p = indices.shape[1]
-    assert p >= n // 8
-
-    # Slots beyond counts[b] must be -1, not random uninitialised memory.
-    for bi in range(b):
-        cnt = int(counts[bi].item())
-        suffix = indices[bi, cnt:]
-        assert (suffix == -1).all(), (
-            f"row={bi}: clause_compact left non-(-1) values past counts={cnt}; "
-            f"sample suffix={suffix[:5].tolist()}"
-        )
 
 
 def test_row_alone_equals_row_in_batch_and_item_permutation():

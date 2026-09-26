@@ -197,4 +197,13 @@ def test_inputs_unchanged_after_the_op_and_its_twin(name):
 
 @pytest.mark.parametrize("name", ["clause_compact", "bloom_compact"])
 def test_opcheck_on_the_fake_impls(name):
-    torch.library.opcheck(getattr(torch.ops.retrieve, name).default, _op_args()[name])
+    """Every opcheck utility, ``test_aot_dispatch_dynamic``'s bitwise eager-vs-AOT comparison of
+    the whole output included. The ops write nothing past ``counts[b]``, so the tail is whatever
+    ``torch.empty`` held; PyTorch's deterministic mode fills uninitialised memory, which makes
+    the full ``[B, N]`` buffer a function of the inputs and comparable bit for bit."""
+    prev = torch.are_deterministic_algorithms_enabled()
+    torch.use_deterministic_algorithms(True)
+    try:
+        torch.library.opcheck(getattr(torch.ops.retrieve, name).default, _op_args()[name])
+    finally:
+        torch.use_deterministic_algorithms(prev)

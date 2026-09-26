@@ -54,7 +54,6 @@ def test_output_axis_compact_and_scorers(output_axis):
     expect = torch.arange(last % 7, n, 7, device="cuda")
     assert counts[last] == expect.numel()
     assert torch.equal(pos[last, : expect.numel()], expect)
-    assert (pos[last, expect.numel() :] == -1).all()
 
     # Planted winners among row `last`'s candidates: the four largest ids of its class.
     winners = expect[-4:].flip(0)
@@ -99,7 +98,6 @@ def test_item_axis_bloom(item_axis):
     pos, counts = T.bloom_compact(qb[:1], table)
     assert counts.tolist() == [marked.numel()]
     assert torch.equal(pos[0, : marked.numel()], marked)
-    assert (pos[0, marked.numel() :] == -1).all()
 
 
 def test_item_axis_clause(item_axis):

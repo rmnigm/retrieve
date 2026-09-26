@@ -180,8 +180,8 @@ def clause_compact(
     query_clause_attrs: Tensor,  # [B, C] int64
 ) -> tuple[Tensor, Tensor]:
     """Fused clause evaluation + compaction → (positive_indices [B, N] int64, counts [B] int64). The
-    full ``[B, N]`` buffer has ``-1`` sentinels in the unused tail; consumers row-bound by
-    ``counts[b]``. Within a row the ids are in **ascending item order** — bit-equal to
+    ``[B, N]`` buffer is written on ``[:counts[b]]`` only; consumers row-bound by it. Within
+    that prefix the ids are in **ascending item order** — bit-equal to
     ``ops.reference.clause_compact`` and to itself across launches and processes. Mirrors
     ``_clause_compact_impl`` with ``DEFAULT_CONFIG``.
 

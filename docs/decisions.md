@@ -52,7 +52,8 @@ decisions.
   campaign numbers say otherwise. Seeding cost at 3M × 128 with 8,192
   lists is 9.5 s for k-means++ against 0.8 s random.
 - **Stream compaction is deterministic**: survivors come out in ascending
-  item order on both backends, and a rerun is byte-identical
+  item order on both backends, and a rerun is byte-identical on the
+  `[:counts]` prefix, the only part a kernel writes
   ([kernels](system/kernels.md)). Chosen over a wider quality tolerance
   because two golden cells could not reproduce themselves.
 - **LiNR's exact scorers store items fp16 and return fp32 scores**

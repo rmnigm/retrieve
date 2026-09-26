@@ -161,10 +161,11 @@ def compact_finish(
     """Phases 2-3 of the two-phase compaction shared by ``clause_compact`` and ``bloom_compact``:
     exclusive-scan the ``[B, T]`` tile counts the predicate launch wrote (``torch.cumsum`` over
     int64 — exact, hence deterministic), then one program per ``(row, tile)`` on the same grid
-    moves the tile's stashed ids to the scanned offset and writes ``-1`` over its slice of the
-    row's tail. Returns ``(positive_indices [B, N] int64 with -1 tails, counts [B] int64)``;
-    ``counts`` is a fresh tensor, not a view into the scan (inductor asserts custom-op outputs
-    are aligned, and at ``B == 1`` the last column *is* contiguous)."""
+    moves the tile's stashed ids to the scanned offset. Returns ``(positive_indices [B, N]
+    int64, counts [B] int64)``; each row is defined on ``[0, counts[b])`` only, the rest is
+    whatever ``torch.empty`` held (kernels.md § ``clause_compact``). ``counts`` is a fresh
+    tensor, not a view into the scan (inductor asserts custom-op outputs are aligned, and at
+    ``B == 1`` the last column *is* contiguous)."""
     tile_counts, scratch = launch.tile_counts, launch.scratch
     b = tile_counts.shape[0]
     tile_ends = tile_counts.cumsum(1)
@@ -174,9 +175,7 @@ def compact_finish(
         scratch,
         tile_counts,
         tile_ends - tile_counts,
-        counts,
         out_indices,
-        n,
         launch.tiles_y,
         scratch.stride(0),
         tile_counts.stride(0),

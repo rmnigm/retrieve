@@ -165,9 +165,10 @@ class FullScanKNN(RetrievalModule):
     discards it — callers needing counts call ``post_filter_topk`` directly.
 
     ``candidate_ids: [B, P]`` re-ranks the given ids only; ``-1`` entries are
-    padding (the tail every compact producer emits) — never gathered, scored
-    or returned. Rows with fewer than ``min(k, P)`` real candidates carry
-    ``-1`` / ``-inf`` in the tail; ``P < k`` returns ``P`` columns."""
+    padding — never gathered, scored or returned. There is no ``counts``: mask a
+    compaction's output to ``-1`` past its counts first (its tail is unwritten).
+    Rows with fewer than ``min(k, P)`` real candidates carry ``-1`` / ``-inf`` in
+    the tail; ``P < k`` returns ``P`` columns."""
 
     item_embs: Tensor
 
