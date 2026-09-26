@@ -37,43 +37,36 @@ def ndcg_at_k(hits: torch.Tensor, num_targets: torch.Tensor, k: int) -> torch.Te
 
 
 class EvalDataset(Dataset):
-    """History (and, under ``use_time``, its timestamps) left-padded to ``max_length``, plus
-    the row's target ids."""
+    """History left-padded to ``max_length``, plus the row's target ids."""
 
-    def __init__(self, parquet_path: str, max_length: int, use_time: bool = False) -> None:
-        df = pl.read_parquet(parquet_path)
-        if use_time and "timestamps" not in df.columns:
-            raise ValueError(f"use_time=True but {parquet_path} has no 'timestamps' column")
+    def __init__(self, parquet_path: str, max_length: int) -> None:
+        df = pl.read_parquet(parquet_path, columns=["item_ids", "targets"])
         self.sequences = df["item_ids"].to_list()
-        self.timestamps = df["timestamps"].to_list() if use_time else None
         self.targets = df["targets"].to_list()
         self.max_length = max_length
 
     def __len__(self) -> int:
         return len(self.sequences)
 
-    def _pad(self, seq: list[int]) -> torch.Tensor:
-        seq = seq[-self.max_length :]
-        return torch.tensor([0] * (self.max_length - len(seq)) + seq, dtype=torch.long)
-
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor | None, list[int]]:
-        ts = None if self.timestamps is None else self._pad(self.timestamps[idx])
-        return self._pad(self.sequences[idx]), ts, self.targets[idx]
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, list[int]]:
+        seq = self.sequences[idx][-self.max_length :]
+        return torch.tensor(
+            [0] * (self.max_length - len(seq)) + seq, dtype=torch.long
+        ), self.targets[idx]
 
 
 def collate_eval(
-    batch: list[tuple[torch.Tensor, torch.Tensor | None, list[int]]],
-) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor, torch.Tensor]:
-    seqs, times, tlists = zip(*batch, strict=True)
+    batch: list[tuple[torch.Tensor, list[int]]],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    seqs, tlists = zip(*batch, strict=True)
     item_seqs = torch.stack(seqs, dim=0)
-    timestamps = None if times[0] is None else torch.stack(times, dim=0)
     num_targets = torch.tensor([len(t) for t in tlists], dtype=torch.long)
     max_t = int(num_targets.max().item()) if len(tlists) > 0 else 0
     targets = torch.full((len(tlists), max(max_t, 1)), -1, dtype=torch.long)
     for i, t in enumerate(tlists):
         if t:
             targets[i, : len(t)] = torch.tensor(t, dtype=torch.long)
-    return item_seqs, timestamps, targets, num_targets
+    return item_seqs, targets, num_targets
 
 
 @torch.inference_mode()
@@ -95,7 +88,7 @@ def evaluate(
     was_training = model.training
     model.eval()
 
-    dataset = EvalDataset(parquet_path, max_length=max_length, use_time=model.use_time)
+    dataset = EvalDataset(parquet_path, max_length=max_length)
     if max_users is not None and max_users < len(dataset):
         # Deterministic prefix; the parquet rows are already in user-id order so
         # this is reproducible across calls without needing a generator.
@@ -123,15 +116,13 @@ def evaluate(
     k_max = min(max(ks), num_items)
     amp_enabled = use_amp and dev.type == "cuda"
 
-    for item_seqs, timestamps, targets, num_targets in loader:
+    for item_seqs, targets, num_targets in loader:
         item_seqs = item_seqs.to(dev, non_blocking=True)
-        if timestamps is not None:
-            timestamps = timestamps.to(dev, non_blocking=True)
         targets = targets.to(dev, non_blocking=True)
         num_targets = num_targets.to(dev, non_blocking=True)
 
         with torch.autocast(device_type=dev.type, dtype=torch.float16, enabled=amp_enabled):
-            query = model.predict_last(item_seqs, timestamps)  # [B, D]
+            query = model.predict_last(item_seqs)  # [B, D]
         query = query.float()
 
         # Chunked scoring: keeps the [B, N+1] score matrix from materializing

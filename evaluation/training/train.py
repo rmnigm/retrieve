@@ -27,7 +27,7 @@ from loguru import logger
 from tqdm import tqdm
 
 from training.config import TrainConfig
-from training.dataset import load_sequences, train_batches
+from training.dataset import load_sequences, load_val_transitions, target_mask, train_batches
 from training.evaluate import evaluate
 from training.losses import gbce_loss, sampled_softmax_loss
 from training.model import Encoder, build_encoder
@@ -69,12 +69,9 @@ def _wandb_init(config: TrainConfig):
     )
 
 
-def target_frequencies(items: torch.Tensor, num_items: int) -> torch.Tensor:
-    """``p_train [N+1]``: each item's share of the non-padding target positions ``items[:, 1:]``."""
-    # Whole-tensor bincount minus column 0: a flat view instead of copying the [:, 1:] slice.
-    counts = torch.bincount(items.flatten(), minlength=num_items + 1)
-    counts -= torch.bincount(items[:, 0], minlength=num_items + 1)
-    counts[0] = 0
+def target_frequencies(items: torch.Tensor, first: torch.Tensor, num_items: int) -> torch.Tensor:
+    """``p_train [N+1]``: each item's share of the trained target positions (``target_mask``)."""
+    counts = torch.bincount(items[:, 1:][target_mask(items, first)], minlength=num_items + 1)
     return counts.double() / counts.sum()
 
 
@@ -87,16 +84,15 @@ def logq_correction(
 
 def step_loss(
     model: Encoder,
-    batch: dict[str, torch.Tensor],
+    items: torch.Tensor,
+    first: torch.Tensor,
     config: TrainConfig,
     num_items: int,
     p_train: torch.Tensor | None,
 ) -> torch.Tensor:
-    items = batch["items"]
     inputs, targets = items[:, :-1], items[:, 1:]
-    timestamps = batch["timestamps"][:, :-1] if "timestamps" in batch else None
-    mask = targets != 0
-    queries, pos_ids = model(inputs, timestamps)[mask], targets[mask]
+    mask = target_mask(items, first)
+    queries, pos_ids = model(inputs)[mask], targets[mask]
     table = model.get_output_embeddings().weight
     if config.loss == "gbce":
         shape = (pos_ids.shape[0], config.num_negatives)
@@ -113,6 +109,11 @@ def step_loss(
     )
 
 
+def resume_due(epoch: int, config: TrainConfig, stopping: bool) -> bool:
+    """Whether ``epoch`` writes ``_resume.pt``: every ``resume_every`` epochs and the last one."""
+    return stopping or (epoch + 1) % config.resume_every == 0 or epoch + 1 == config.num_epochs
+
+
 def train(config: TrainConfig, resume: bool = False) -> None:
     set_seed(config.seed)
     _enable_tf32()
@@ -126,11 +127,15 @@ def train(config: TrainConfig, resume: bool = False) -> None:
     model = build_encoder(config, num_items).to(device)
     if config.compile:
         model.body = torch.compile(model.body)
-    tensors = load_sequences(
-        str(data_dir / "train.parquet"), config.max_seq_length, config.use_time, device
-    )
-    p_train = target_frequencies(tensors["items"], num_items) if config.logq else None
-    n_batches = tensors["items"].shape[0] // config.batch_size
+    items = load_sequences(str(data_dir / "train.parquet"), config.max_seq_length, device)
+    first = torch.zeros(items.shape[0], dtype=torch.long, device=device)
+    if config.train_on_val:
+        val_items, val_first = load_val_transitions(
+            str(data_dir / "val.parquet"), config.max_seq_length, device
+        )
+        items, first = torch.cat([items, val_items]), torch.cat([first, val_first])
+    p_train = target_frequencies(items, first, num_items) if config.logq else None
+    n_batches = items.shape[0] // config.batch_size
     batches_per_epoch = min(config.max_batches_per_epoch or n_batches, n_batches)
 
     optimizer = torch.optim.AdamW(
@@ -184,7 +189,7 @@ def train(config: TrainConfig, resume: bool = False) -> None:
         best_metric = state["best_metric"]
         steps_not_improved = state["steps_not_improved"]
         global_step = state["global_step"]
-        best_path = Path(state["best_path"]) if state["best_path"] else None
+        best_path = ckpt_dir / Path(state["best_path"]).name if state["best_path"] else None
         logger.info(
             "Resumed: start_epoch={} best_metric={:.4f} steps_not_improved={} global_step={}",
             start_epoch,
@@ -192,17 +197,23 @@ def train(config: TrainConfig, resume: bool = False) -> None:
             steps_not_improved,
             global_step,
         )
+    if resume:
+        # Bests saved after _resume.pt, or before the first one, belong to epochs being retrained.
+        for snapshot in ckpt_dir.glob("sasrec-ep*.pt"):
+            if snapshot != best_path:
+                snapshot.unlink()
+    resumable_best = best_path
     t0 = time.perf_counter()
 
     for epoch in range(start_epoch, config.num_epochs):
         model.train()
         epoch_loss = torch.zeros((), device=device)
         ep_t0 = time.perf_counter()
-        batches = train_batches(tensors, config.batch_size)
+        batches = train_batches(items, first, config.batch_size)
         pbar = tqdm(range(batches_per_epoch), desc=f"Epoch {epoch}", mininterval=10)
         for batch_idx in pbar:
             with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=use_cuda):
-                loss = step_loss(model, next(batches), config, num_items, p_train)
+                loss = step_loss(model, *next(batches), config, num_items, p_train)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
@@ -232,7 +243,9 @@ def train(config: TrainConfig, resume: bool = False) -> None:
         peak_mem_gb = torch.cuda.max_memory_allocated(device) / (1024**3) if use_cuda else 0.0
         samples_per_sec = batches_per_epoch * config.batch_size / epoch_time
 
-        do_eval = ((epoch + 1) % config.eval_every == 0) or (epoch + 1 == config.num_epochs)
+        do_eval = not config.train_on_val and (
+            (epoch + 1) % config.eval_every == 0 or epoch + 1 == config.num_epochs
+        )
         val_metrics: dict[str, float] = {}
         if do_eval:
             val_metrics = evaluate(
@@ -269,34 +282,38 @@ def train(config: TrainConfig, resume: bool = False) -> None:
             if cur > best_metric:
                 best_metric = cur
                 steps_not_improved = 0
-                if best_path is not None and best_path.exists():
+                if best_path is not None and best_path != resumable_best:
                     best_path.unlink()
-                best_path = (
-                    ckpt_dir / f"{config.encoder}-ep{epoch}-{metric.replace('@', '')}{cur:.4f}.pt"
-                )
+                best_path = ckpt_dir / f"sasrec-ep{epoch}-{metric.replace('@', '')}{cur:.4f}.pt"
                 torch.save(model.state_dict(), best_path)
             else:
                 steps_not_improved += 1
 
-        torch.save(
-            {
-                "model": model.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "scheduler": scheduler.state_dict(),
-                "next_epoch": epoch + 1,
-                "best_metric": best_metric,
-                "steps_not_improved": steps_not_improved,
-                "best_path": str(best_path) if best_path else None,
-                "global_step": global_step,
-                "py_rng": random.getstate(),
-                "np_rng": np.random.get_state(),
-                "torch_rng": torch.get_rng_state(),
-                "cuda_rng": torch.cuda.get_rng_state_all() if use_cuda else None,
-            },
-            resume_path,
-        )
+        stopping = bool(val_metrics) and steps_not_improved >= config.patience
+        if resume_due(epoch, config, stopping):
+            torch.save(
+                {
+                    "model": model.state_dict(),
+                    "optimizer": optimizer.state_dict(),
+                    "scheduler": scheduler.state_dict(),
+                    "next_epoch": epoch + 1,
+                    "best_metric": best_metric,
+                    "steps_not_improved": steps_not_improved,
+                    "best_path": str(best_path) if best_path else None,
+                    "global_step": global_step,
+                    "py_rng": random.getstate(),
+                    "np_rng": np.random.get_state(),
+                    "torch_rng": torch.get_rng_state(),
+                    "cuda_rng": torch.cuda.get_rng_state_all() if use_cuda else None,
+                },
+                resume_path,
+            )
+            # _resume.pt names the best it was written with; that file lives until the next one.
+            if resumable_best is not None and resumable_best != best_path:
+                resumable_best.unlink()
+            resumable_best = best_path
 
-        if val_metrics and steps_not_improved >= config.patience:
+        if stopping:
             logger.info("Early stopping at epoch {}.", epoch)
             break
 
@@ -342,7 +359,7 @@ def train(config: TrainConfig, resume: bool = False) -> None:
             {
                 "epoch_losses": epoch_losses,
                 "val_metrics_per_epoch": val_metrics_per_epoch,
-                "best_val_metric": {metric: best_metric},
+                "best_val_metric": {metric: best_metric} if val_metrics_per_epoch else {},
                 "test_metrics": test_metrics,
                 "total_time_sec": total_time,
                 "epoch_time_sec": epoch_times,
@@ -384,9 +401,9 @@ def _parse_override(text: str) -> tuple[str, object]:
 @click.argument("overrides", nargs=-1)
 def run(config_path: str | None, resume: bool, overrides: tuple[str, ...]) -> None:
     """Train an Encoder. OVERRIDES are TrainConfig FIELD=VALUE pairs, VALUE parsed as JSON
-    when it parses (``encoder=hstu hidden_dim=256 compile=true``), else taken as a string."""
-    base = dataclasses.asdict(TrainConfig.load(config_path)) if config_path else {}
-    config = TrainConfig(**{**base, **dict(_parse_override(o) for o in overrides)})
+    when it parses (``loss=gbce num_negatives=256 warmup_steps=0``), else taken as a string."""
+    fields = dict(_parse_override(o) for o in overrides)
+    config = TrainConfig.load(config_path, **fields) if config_path else TrainConfig(**fields)
     train(config, resume=resume)
 
 

@@ -38,7 +38,7 @@ def _checkpoint(root: Path, num_items: int = 12) -> tuple[Path, Path]:
         "ffn_hidden_dim": 16, "dropout": 0.0, "reuse_item_embeddings": False,
     }  # fmt: skip
     torch.manual_seed(0)
-    model = Encoder(num_items=num_items, encoder="sasrec", **params)
+    model = Encoder(num_items=num_items, **params)
     ckpt_dir = root / "checkpoints" / "tiny"
     ckpt_dir.mkdir(parents=True)
     torch.save(model.state_dict(), ckpt_dir / "best_model.pt")

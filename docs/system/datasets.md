@@ -665,8 +665,7 @@ user.
   27k × 200 that one row per user would train.
 - **`timestamps`.** Every train/val/test row carries `timestamps`, the unix
   seconds (`time_ms // 1000`) of each `item_ids` entry, cut into the same
-  windows and tails; it covers the history, not `targets`. The staged copy
-  under `data/kuairand` predates the column: re-run `prep` to get it.
+  windows and tails; it covers the history, not `targets`.
 
 **`attrs`.** It writes `item_attrs_narrow.pt` `[32,038,725, 7, 4]` int64
 (7.2 GB), `clause_is_reverse_narrow.pt`, `attr_vocab.json` (every
@@ -721,7 +720,10 @@ is 65.6 GB before activations on the 80 GB A100; two separate tables would
 need 131 GB. That estimate is arithmetic, not a measurement. If it does not
 fit, lower `batch_size`. Every epoch also scores
 the full catalog for the val users, so `eval_max_users` bounds that
-cost. The command, not yet run:
+cost. The final KuaiRand models are refit with `train_on_val=true` at the
+epoch count chosen on val, because next-day clicks drift and the val day
+is otherwise never trained on ([validation](../validation.md#seqrec-encoder)).
+The command for the run that picks the epoch count, not yet run:
 
 ```bash
 uv run --directory evaluation train run data_dir=data/kuairand \
@@ -1053,16 +1055,17 @@ time.
 
 ## Training — `evaluation/training/`
 
-One sequence `Encoder` with two block types plus the history → query-vector
-encoder the harness uses at eval time. It exists to produce the embeddings
+One sequence `Encoder` (the gSASRec body), two losses (gBCE and sampled
+softmax with logQ, the default), plus the history → query-vector encoder the
+harness uses at eval time. It exists to produce the embeddings
 the sequential benchmarks need. It imports `eval_datasets.{hub,layout}` and
 nothing from `bench`; the console script is `train`.
 
 | file | role |
 |---|---|
-| [`config.py`](../../evaluation/training/config.py) | `TrainConfig` dataclass + `save` / `load` (unknown keys dropped) / `num_items` |
-| [`model.py`](../../evaluation/training/model.py) | `Encoder`, `SASRecBlock`, `HSTUBlock`, `RelativeBias`, `BLOCKS`, `time_bucket`, `build_encoder(cfg, num_items)` |
-| [`dataset.py`](../../evaluation/training/dataset.py) | `load_sequences` (the train split as left-padded `[U, L+1]` tensors on the device), `train_batches` (`randperm` slices) |
+| [`config.py`](../../evaluation/training/config.py) | `TrainConfig` dataclass (defaults = the E1c recipe) + `save` / `load` (unknown keys dropped; no `loss` key means `gbce`) / `num_items` |
+| [`model.py`](../../evaluation/training/model.py) | `Encoder`, `SASRecBlock`, `build_encoder(cfg, num_items)` |
+| [`dataset.py`](../../evaluation/training/dataset.py) | `load_sequences` (the train split as left-padded `[U, L+1]` tensors on the device), `load_val_transitions` (val rows for `train_on_val`), `target_mask` (the trained target positions), `train_batches` (`randperm` slices) |
 | [`losses.py`](../../evaluation/training/losses.py) | `gbce_loss`, `sampled_softmax_loss` |
 | [`evaluate.py`](../../evaluation/training/evaluate.py) | chunked full-catalog scoring with its **own** recall / ndcg (`hits_at`, `recall_at_k`, `ndcg_at_k`): a checkpoint's reported quality must not move with the harness's metric code; `tests/training/test_encode.py` pins them to `bench.metrics` at 1e-9 |
 | [`encode.py`](../../evaluation/training/encode.py) | `load_model_for_eval`, `encode_queries`, `encode_split` — the eval-time encode of the test split with its cache (`<ckpt-dir>/encoded_queries_v2.pt`, keyed on ckpt mtime + `max_seq_length`, the full split); what `bench.inputs.load_inputs` calls on a `checkpoint` dataset |
@@ -1074,61 +1077,89 @@ nothing from `bench`; the console script is `train`.
 
 ```bash
 uv run --directory evaluation train run \
-    data_dir=data/yambda-500m/trainer checkpoint_dir=/scratch/ckpt/yambda-d64 \
-    embedding_dim=64 dropout=0.5 eval_every=2 wandb_enabled=false
-uv run --directory evaluation train run --config base.json encoder=hstu loss=sampled_softmax
+    data_dir=/data/yambda-500m/trainer checkpoint_dir=/scratch/ckpt/yambda-d64
+uv run --directory evaluation train run data_dir=/data/yambda-500m/trainer \
+    checkpoint_dir=/scratch/ckpt/yambda-d128 embedding_dim=128 ffn_hidden_dim=512
+uv run --directory evaluation train run data_dir=/data/yambda-500m/trainer loss=gbce num_negatives=256 warmup_steps=0
 ```
+
+The defaults are the E1c recipe
+([artifact](../artifacts/seqrec-encoder/e1c-yambda-d64-sasrec-ssm-logq/config.json)):
+d64, 2 blocks, 2 heads, ffn 256, dropout 0.5; `loss=sampled_softmax` with
+`normalize`, `temperature=0.05`, `num_negatives=8192`,
+`inbatch_negatives=4096`, `logq`; lr 1e-3, batch 256, L 200, warmup 1000,
+`compile`; 100 epochs, eval every 2, early stop on `ndcg@10` with patience
+10. The published gSASRec recipe (Gate B) is `loss=gbce num_negatives=256
+warmup_steps=0`.
 
 Arguments are `TrainConfig` `FIELD=VALUE` pairs, the value parsed as JSON
 when it parses and taken as a string otherwise; an unknown field is a usage
 error. `--config <json>` starts from a saved config instead of the defaults
-and the pairs override it. `--resume` picks up from
-`<ckpt_dir>/_resume.pt`, written every epoch with model, optimizer,
-scheduler, epoch, best metric and the Python / numpy / torch / CUDA RNG
-states, so a resumed run is reproducible, not merely restarted.
+and the pairs override it (`TrainConfig.load(path, **overrides)`); a pair
+that changes `loss` drops the saved `normalize` and `logq`, so they resolve
+for the new loss unless given as pairs too. `--resume` picks up from
+`<ckpt_dir>/_resume.pt`, holding model, optimizer, scheduler, epoch, best
+metric and the Python / numpy / torch / CUDA RNG states, so a resumed run is
+reproducible, not merely restarted.
+
+`resume_every` (default 1) is the number of epochs between `_resume.pt`
+writes (`resume_due`); the last epoch, including an early stop, always
+writes it, so a finished run stays resumable. The file is model + both AdamW
+moments, three times `best_model.pt`: 49.2 GB and ~45 s per write at
+KuaiRand d64 (two 32 M × 64 tables), about a fifth of a ~210 s epoch. The
+trade-off: a crash loses up to `resume_every − 1` finished epochs, which
+`--resume` retrains. A superseded best snapshot is deleted at once unless
+the current `_resume.pt` names it; that one goes at the next `_resume.pt`
+write, so resuming always finds its best, looked up by file name in
+`checkpoint_dir`. On `--resume`, every other snapshot (from epochs about to
+be retrained, or all of them when no `_resume.pt` was written yet) is
+deleted. Disk peak: one extra best snapshot.
+
+`train_on_val=true` is the final fit, run after `num_epochs` has been chosen
+on val by an ordinary run. It adds one training row per `val.parquet` row:
+the last `max_seq_length + 1` items of `item_ids ++ targets`, with the val
+day's clicks in time order (`load_val_transitions`). Only the target
+positions whose target is a val-day item are trained (`target_mask`, from
+the per-row `first`), because the history transitions are already train
+rows. A row with more than `max_seq_length` targets keeps only its last
+`max_seq_length`. The logQ frequencies count these positions too. The
+run evaluates nothing on val and never stops early: it trains exactly
+`num_epochs`, and the last epoch is the model saved as `best_model.pt` and
+scored on test (`eval_quality.json`; `best_val_metric` is `{}`). `patience`,
+`eval_every` and `early_stop_metric` then have nothing to act on.
 
 ### The encoder
 
-`Encoder(items [B, L], timestamps [B, L] | None) -> [B, L, D]`:
-`item_embedding [N+1, D]` (row 0 is padding) → `in_proj` D→H (identity
-when `hidden_dim` is unset or equal to D) → `+ position_embedding` (sasrec
-only) → `+ time_gap_embedding(time_bucket(t_i − t_{i−1}))` (`use_time`) →
-dropout → `blocks` → `final_norm` (LayerNorm) → `out_proj` H→D. The item
-table stays `[N, D]` while the body can be wider (`hidden_dim`).
-`predict_last` takes position −1 (sequences are left-padded).
-`scoring_table()` is the `[N+1, D]` output table queries are scored
-against; with `normalize` both it and `predict_last` return unit vectors, so
-a dot product of the stored vectors is the cosine the loss trained on.
+`Encoder(items [B, L]) -> [B, L, D]`: `item_embedding [N+1, D]` (row 0 is
+padding) `+ position_embedding` → dropout → `blocks` (`num_blocks` ×
+`SASRecBlock`) → `final_norm` (LayerNorm). `SASRecBlock` is
+`nn.TransformerEncoderLayer` (gelu, `norm_first`, `batch_first`), the
+retired `GSASRec` body, so its state dicts load with `encoder.layers.N.`
+renamed to `blocks.N.`. `predict_last` takes position −1 (sequences are
+left-padded). `scoring_table()` is the `[N+1, D]` output table queries are
+scored against; with `normalize` both it and `predict_last` return unit
+vectors, so a dot product of the stored vectors is the cosine the loss
+trained on. The trainer reads only `item_ids` (and `targets` at eval); a
+`timestamps` column in the parquet is ignored.
 
 The attention mask is built once per forward: `causal & (key_valid | eye)`,
 `True` = attend. Real positions see exactly their real causal prefix; a
 left-padding row sees only itself, so no row is empty and nothing
 softmaxes to NaN (`tests/training/test_encoder.py`).
 
-| block | math |
-|---|---|
-| `sasrec` | `nn.TransformerEncoderLayer` (gelu, `norm_first`, `batch_first`); the retired `GSASRec` body, so its state dicts load with `encoder.layers.N.` renamed to `blocks.N.` |
-| `hstu` | HSTU (Zhai et al. 2024, eq. 1–3) with **softmax** attention: `U,V,Q,K = SiLU(f1(RMSNorm(x)))`, `A = softmax(QKᵀ/√d + rab)` through SDPA with the bias as an additive float mask, `x + dropout(f2(RMSNorm(AV) ⊙ U))`. No FFN (`ffn_hidden_dim` unused), no absolute positions |
-
-`RelativeBias` (one per HSTU block): a per-head bias for the relative
-position `i − j`, plus, under `use_time`, one for `time_bucket(t_i − t_j)`.
-`time_bucket` is `floor(log_{1.5}(1 + Δt))` clamped to `time_buckets − 1`
-(Δt in seconds). `use_time=True` needs a `timestamps` column (list[int64],
-unix seconds, aligned with `item_ids`) in the train/val/test parquet and
-fails at load without one; `use_time=False` ignores it.
-
 ### The losses
 
+`loss` picks one of two; `sampled_softmax` with logQ is the default.
 Negatives are uniform over `1..N`, drawn on the GPU inside the step.
 
-- `gbce` — gBCE as gSASRec publishes it: `num_negatives` negatives **per
+- `gbce` — gBCE as gSASRec publishes it (the published checkpoints' loss): `num_negatives` negatives **per
   position** (`[P, K]`, a `[P, K, D]` gather), the positive logit through
   the float64 calibration transform (`gbce_t`, `alpha = K / (N − 1)`), BCE
   over positive + K negatives. The `pow(−beta)` and `1/(x−1)` steps lose
   the positive class in fp32, hence float64. One `[K]` vector shared by the
   batch does not train: only K table rows get a negative gradient per step,
   and on yambda-500m d64 the user queries collapse onto a few popular items
-  ([validation](../validation.md#seqrec-encoder-rewrite)).
+  ([validation](../validation.md#seqrec-encoder)).
 - `sampled_softmax` — cross-entropy of the positive against one candidate
   vector shared by the batch: `inbatch_negatives` positives of the batch (a
   random subset) plus `num_negatives` uniform ids, at `temperature` (default 0.05), in fp32 outside
@@ -1136,14 +1167,15 @@ Negatives are uniform over `1..N`, drawn on the GPU inside the step.
   `−inf`. `normalize` (default: on for this loss, off for gbce; recorded in
   `config.json`) L2-normalizes queries and items first. `TrainConfig` rejects
   `normalize=true` with `gbce` and any other `loss` value.
-  `logq` (default off; `TrainConfig` rejects it with `gbce`) subtracts
+  `logq` (default: on for this loss, off for gbce; `TrainConfig` rejects
+  it with `gbce`) subtracts
   `log q_j` from every candidate column after the temperature scaling,
   where `q_j = M·p_train(j) + K/N` is the expected number of times item j
   is drawn among the M + K candidates (M the in-batch candidates actually
   used, K = `num_negatives`, N the item count; `logq_correction`, float64
   until the log). `p_train` is each item's share of
-  the train target positions (`target_frequencies`, one GPU bincount at
-  startup). The positive column is not corrected (arXiv 2507.09331);
+  the trained target positions (`target_frequencies` over `target_mask`,
+  one GPU bincount at startup). The positive column is not corrected (arXiv 2507.09331);
   accidental hits stay `−inf`. With M = 0, `q_j = K/N` for every
   candidate, so each moves by `+log(N/K)` against the uncorrected positive:
   the plain uniform sampled-softmax correction.
@@ -1152,13 +1184,14 @@ Negatives are uniform over `1..N`, drawn on the GPU inside the step.
 
 Per epoch: `randperm` over the device-resident train tensors → bf16
 autocast forward → loss → grad-clip at 1.0 over all parameters → fused
-AdamW → linear warmup over `warmup_steps` (0 = none). `compile=true` wraps
-`Encoder.body` (blocks + final norm + out_proj) in `torch.compile`; the
+AdamW → linear warmup over `warmup_steps` (0 = none, default 1000). `compile=true` wraps
+`Encoder.body` (blocks + final norm) in `torch.compile`; the
 embedding lookup and the loss stay eager. Every `eval_every` epochs it
 evaluates on `val.parquet` by scoring the full catalog in
 `[B, eval_score_chunk]` chunks and merging top-k across chunks, optionally
 masking history. Checkpoints on improvement in `early_stop_metric`, stops
-after `patience` evaluations without one.
+after `patience` evaluations without one. With `train_on_val` there is no
+val eval, no snapshot and no early stop.
 
 TF32 is **enabled** here (`_enable_tf32`) — the opposite of the
 benchmark harness, which pins it off for measurement determinism.
@@ -1167,14 +1200,14 @@ benchmark harness, which pins it off for measurement determinism.
 
 ```
 <checkpoint_dir>/
-├── best_model.pt          # reloaded, then re-saved from the best epoch
+├── best_model.pt          # reloaded, then re-saved from the best epoch (train_on_val: the last epoch)
 ├── config.json            # the TrainConfig — the eval loader reads this
 ├── item_embs.pt           # scoring_table(), row 0 zeroed
 ├── item_id_map.json       # copied from data_dir
 ├── item_attrs.parquet     # copied from data_dir when present
 ├── eval_quality.json      # test-split metrics
 ├── train_metrics.json     # losses, val curve, test metrics, epoch_time_sec, samples_per_sec, gpu_name, sm_mhz, peak_gpu_mem_bytes
-├── {encoder}-ep{N}-{metric}{v}.pt   # the current best-epoch snapshot
+├── sasrec-ep{N}-{metric}{v}.pt   # the current best-epoch snapshot (plus the one _resume.pt names, until its next write)
 └── _resume.pt
 ```
 

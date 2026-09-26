@@ -25,7 +25,6 @@ ENCODE_CACHE = "encoded_queries_v2.pt"
 _CACHE_FREE_FRACTION, _CACHE_RESERVE_BYTES = 0.7, 4 * 2**30
 # The legacy 500M checkpoints ship no config.json; they all share these.
 D128_DROP05_DEFAULTS = {
-    "encoder": "sasrec",
     "max_seq_length": 200,
     "embedding_dim": 128,
     "num_heads": 2,
@@ -33,6 +32,7 @@ D128_DROP05_DEFAULTS = {
     "ffn_hidden_dim": 512,
     "dropout": 0.5,
     "reuse_item_embeddings": False,
+    "loss": "gbce",
 }
 
 
@@ -43,7 +43,6 @@ def load_model_for_eval(checkpoint_path: Path, num_items: int, device: torch.dev
     cfg_path = checkpoint_path.parent / "config.json"
     cfg = TrainConfig.load(cfg_path) if cfg_path.exists() else TrainConfig(**D128_DROP05_DEFAULTS)
     model = build_encoder(cfg, num_items).to(device).eval()
-    logger.info("model: {}", cfg.encoder)
     state = torch.load(str(checkpoint_path), map_location=str(device), weights_only=True)
     model.load_state_dict({k.replace("encoder.layers.", "blocks."): v for k, v in state.items()})
     return model
@@ -61,7 +60,7 @@ def encode_queries(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """``model.predict_last`` over the whole eval split: ``(queries [N, D], targets [N, T_max]
     -1-padded, num_targets [N])`` on CPU, target ids as stored (1-indexed)."""
-    dataset = EvalDataset(str(data_path), max_length=max_length, use_time=model.use_time)
+    dataset = EvalDataset(str(data_path), max_length=max_length)
     loader = DataLoader(
         dataset,
         batch_size=encode_batch_size,
@@ -74,12 +73,10 @@ def encode_queries(
     q_chunks: list[torch.Tensor] = []
     t_lists: list[list[int]] = []
     amp_enabled = device.type == "cuda"
-    for item_seqs, timestamps, targets, num_targets in tqdm(loader, desc="encode queries"):
+    for item_seqs, targets, num_targets in tqdm(loader, desc="encode queries"):
         item_seqs = item_seqs.to(device, non_blocking=True)
-        if timestamps is not None:
-            timestamps = timestamps.to(device, non_blocking=True)
         with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
-            q = model.predict_last(item_seqs, timestamps)
+            q = model.predict_last(item_seqs)
         q_chunks.append(q.float().detach().cpu())
         for row, n in zip(targets, num_targets, strict=True):
             t_lists.append(row[:n].tolist())

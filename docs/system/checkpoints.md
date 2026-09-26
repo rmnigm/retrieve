@@ -58,7 +58,7 @@ runs with the bf16 / fused-AdamW / TF32 stack above.
 
 ## What's in each checkpoint dir
 
-- `gsasrec-ep{N}-ndcg10{X}.pt` — model `state_dict` saved at the best val epoch (runs of the current trainer name it `{encoder}-ep{N}-…`).
+- `gsasrec-ep{N}-ndcg10{X}.pt` — model `state_dict` saved at the best val epoch (runs of the current trainer name it `sasrec-ep{N}-…`).
 - `best_model.pt` — same `state_dict`, copied at the end of training (or on
   manual stop). Use this one going forward.
 - `eval_quality.json` — final test metrics, `best_epoch`, `paper_target`.
@@ -73,8 +73,14 @@ runs with the bf16 / fused-AdamW / TF32 stack above.
 sibling `config.json` (or `D128_DROP05_DEFAULTS` when there is none, as for
 `gsasrec-d128-drop0.5`) and renames the retired `GSASRec` keys
 (`encoder.layers.N.` → `blocks.N.`) on load. These published checkpoints
-were trained with the old trainer (per-position negatives); they load as
-`encoder=sasrec`.
+were trained with gBCE (per-position negatives) by the old trainer, and
+their `config.json` has no `loss` key: `TrainConfig.load` reads that as
+`loss=gbce`, so `normalize` is off and scores are raw dot products, and it
+drops the keys the trainer no longer has (`negs_per_pos`, …).
+`D128_DROP05_DEFAULTS` sets `loss=gbce` for the same reason. Checkpoints
+from the current trainer carry `loss` and `normalize` in `config.json`; its
+default is sampled softmax with logQ and `normalize` on
+([datasets.md § The losses](datasets.md#the-losses)).
 
 ```python
 import json, torch
@@ -260,7 +266,7 @@ uv run train upload-checkpoint \
 uv run train upload-checkpoint --dataset yambda-500m --ckpt-id all
 ```
 
-By default the script skips the epoch-tagged snapshot (`hub.EPOCH_SNAPSHOT_PATTERN`, `*-ep*.pt`: the published `gsasrec-ep*.pt` and the current trainer's `{encoder}-ep*.pt`)
+By default the script skips the epoch-tagged snapshot (`hub.EPOCH_SNAPSHOT_PATTERN`, `*-ep*.pt`: the published `gsasrec-ep*.pt` and the current trainer's `sasrec-ep*.pt`)
 because it has the same bytes as `best_model.pt` (just saved at a different
 moment in the training loop). That halves what gets pushed. Pass
 `--include-epoch-snapshots` if you want both copies. Other flags:
