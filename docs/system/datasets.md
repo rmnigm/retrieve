@@ -1066,7 +1066,7 @@ nothing from `bench`; the console script is `train`.
 | [`losses.py`](../../evaluation/training/losses.py) | `gbce_loss`, `sampled_softmax_loss` |
 | [`evaluate.py`](../../evaluation/training/evaluate.py) | chunked full-catalog scoring with its **own** recall / ndcg (`hits_at`, `recall_at_k`, `ndcg_at_k`): a checkpoint's reported quality must not move with the harness's metric code; `tests/training/test_encode.py` pins them to `bench.metrics` at 1e-9 |
 | [`encode.py`](../../evaluation/training/encode.py) | `load_model_for_eval`, `encode_queries`, `encode_split` — the eval-time encode of the test split with its cache (`<ckpt-dir>/encoded_queries_v2.pt`, keyed on ckpt mtime + `max_seq_length`, the full split); what `bench.inputs.load_inputs` calls on a `checkpoint` dataset |
-| [`train.py`](../../evaluation/training/train.py) | `train()`, `step_loss()` + the `train run` command |
+| [`train.py`](../../evaluation/training/train.py) | `train()`, `step_loss()`, `target_frequencies()` + the `train run` command |
 | [`checkpoints.py`](../../evaluation/training/checkpoints.py) | `train upload-checkpoint`: push a checkpoint dir (or all) to HF through `hub.upload_checkpoint` |
 | [`cli.py`](../../evaluation/training/cli.py) | the `train` group |
 
@@ -1135,8 +1135,16 @@ Negatives are uniform over `1..N`, drawn on the GPU inside the step.
   autocast. A candidate equal to the row's own positive is masked to
   `−inf`. `normalize` (default: on for this loss, off for gbce; recorded in
   `config.json`) L2-normalizes queries and items first. `TrainConfig` rejects
-  `normalize=true` with `gbce` and any other `loss` value. No logQ
-  correction.
+  `normalize=true` with `gbce` and any other `loss` value.
+  `logq` (default off; `TrainConfig` rejects it with `gbce`) subtracts
+  `log q_j` from every candidate column after the temperature scaling,
+  where `q_j = (M·p_train(j) + K/N) / (M + K)` is the probability that the
+  mixed proposal draws item j (M the in-batch candidates actually used, K
+  = `num_negatives`, N the item count). `p_train` is each item's share of
+  the train target positions (`target_frequencies`, one GPU bincount at
+  startup). The positive column is not corrected (arXiv 2507.09331);
+  accidental hits stay `−inf`. With M = 0, q is uniform and the correction
+  is a constant that changes nothing.
 
 ### Loop shape
 

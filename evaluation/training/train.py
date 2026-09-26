@@ -69,8 +69,21 @@ def _wandb_init(config: TrainConfig):
     )
 
 
+def target_frequencies(items: torch.Tensor, num_items: int) -> torch.Tensor:
+    """``p_train [N+1]``: each item's share of the non-padding target positions ``items[:, 1:]``."""
+    # Whole-tensor bincount minus column 0: a flat view instead of copying the [:, 1:] slice.
+    counts = torch.bincount(items.flatten(), minlength=num_items + 1)
+    counts -= torch.bincount(items[:, 0], minlength=num_items + 1)
+    counts[0] = 0
+    return counts.double() / counts.sum()
+
+
 def step_loss(
-    model: Encoder, batch: dict[str, torch.Tensor], config: TrainConfig, num_items: int
+    model: Encoder,
+    batch: dict[str, torch.Tensor],
+    config: TrainConfig,
+    num_items: int,
+    p_train: torch.Tensor | None = None,
 ) -> torch.Tensor:
     items = batch["items"]
     inputs, targets = items[:, :-1], items[:, 1:]
@@ -85,8 +98,12 @@ def step_loss(
     neg_ids = torch.randint(1, num_items + 1, (config.num_negatives,), device=items.device)
     perm = torch.randperm(pos_ids.shape[0], device=items.device)[: config.inbatch_negatives]
     candidates = torch.cat([pos_ids[perm], neg_ids])
+    log_q = None
+    if p_train is not None:
+        m, k = perm.shape[0], config.num_negatives
+        log_q = ((m * p_train[candidates] + k / num_items) / (m + k)).log().float()
     return sampled_softmax_loss(
-        queries, pos_ids, candidates, table, config.temperature, config.normalize
+        queries, pos_ids, candidates, table, config.temperature, config.normalize, log_q
     )
 
 
@@ -106,6 +123,7 @@ def train(config: TrainConfig, resume: bool = False) -> None:
     tensors = load_sequences(
         str(data_dir / "train.parquet"), config.max_seq_length, config.use_time, device
     )
+    p_train = target_frequencies(tensors["items"], num_items) if config.logq else None
     n_batches = tensors["items"].shape[0] // config.batch_size
     batches_per_epoch = min(config.max_batches_per_epoch or n_batches, n_batches)
 
@@ -178,7 +196,7 @@ def train(config: TrainConfig, resume: bool = False) -> None:
         pbar = tqdm(range(batches_per_epoch), desc=f"Epoch {epoch}", mininterval=10)
         for batch_idx in pbar:
             with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=use_cuda):
-                loss = step_loss(model, next(batches), config, num_items)
+                loss = step_loss(model, next(batches), config, num_items, p_train)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()

@@ -41,13 +41,18 @@ def sampled_softmax_loss(
     table: torch.Tensor,
     temperature: float,
     normalize: bool,
+    log_q: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Cross-entropy of the positive against the shared candidates; a candidate equal to the
-    row's own positive (an accidental hit) is masked out."""
+    row's own positive (an accidental hit) is masked out. ``log_q [C]``, when given, is
+    subtracted from the candidate logits only, never from the positive (arXiv 2507.09331)."""
     with torch.autocast(queries.device.type, enabled=False):
         q, pos, neg = queries.float(), table[pos_ids].float(), table[neg_ids].float()
         if normalize:
             q, pos, neg = F.normalize(q, dim=-1), F.normalize(pos, dim=-1), F.normalize(neg, dim=-1)
-        neg_logits = (q @ neg.T).masked_fill(neg_ids[None, :] == pos_ids[:, None], float("-inf"))
-        logits = torch.cat([(q * pos).sum(-1, keepdim=True), neg_logits], dim=1) / temperature
+        neg_logits = q @ neg.T / temperature
+        if log_q is not None:
+            neg_logits = neg_logits - log_q
+        neg_logits = neg_logits.masked_fill(neg_ids[None, :] == pos_ids[:, None], float("-inf"))
+        logits = torch.cat([(q * pos).sum(-1, keepdim=True) / temperature, neg_logits], dim=1)
         return F.cross_entropy(logits, torch.zeros_like(pos_ids))
