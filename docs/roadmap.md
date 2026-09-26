@@ -43,25 +43,15 @@ in records, commits and code comments; they are not renumbered.
 
 ## Phase D: campaign and baselines (GPU)
 
-- [ ] **L3: fix the CPU-mm regression L1 introduced.** L1's fp32-output
-  scoring (`torch.mm`/`torch.bmm` with `out_dtype=`) has no CPU kernel
-  (`NotImplementedError: aten::{mm,bmm}.dtype`), so the evaluation
-  harness's CPU-only test suite is now red: 17 failures in
-  `tests/bench/{test_algos,test_cli,test_run}.py`, everywhere a LiNR
-  module runs on CPU (`retrieve/src/retrieve/modules/knn.py:41`,
-  `ops/reference/fused_masked_knn_topk.py:24`). Found by the S9 worker,
-  2026-09-26 ([validation](validation.md#library-gates)). Needs a
-  CPU-compatible fp32-accumulate path (e.g. cast both operands to fp32 and
-  plain-matmul on CPU, keep `out_dtype=` on CUDA) — small, contained, but
-  it is a `retrieve/src/retrieve` change, so it must land **before** D1
-  launches (same reason L1/L2 landed before D1: avoid a second
-  `code_version` bump mid-campaign). Blocks D1.
 - [ ] **D1: run the full campaign on the harness.** The `filter`, `deep`
   and `codesign` (S9) suites of `evaluation/config/suites.yaml` over
   goodreads, arxiv and yfcc10m (`codesign` is goodreads + arxiv only, by
   its own design); seeds {0, 1, 2} on the headline sweeps; `n_probe` in
-  {24, 32}. Needs **L3** first. Q1-Q4, G-a, G-d, L1/L2 and the S9
-  `codesign` suite landed first (orchestrator re-sequencing, 2026-09-26:
+  {24, 32}. Q1-Q4, G-a, G-d, L1/L2, the S9 `codesign` suite and L3 (a CPU
+  path for L1's fp32-output `mm`/`bmm`, which had no CPU kernel and broke
+  the harness's CPU-only test suite — found by the S9 worker, fixed
+  2026-09-26, harness suite back to 255 passed / 1 skipped) landed first
+  (orchestrator re-sequencing, 2026-09-26:
   the only reason to run D1 before a library change was to avoid
   invalidating a campaign in flight, not a data dependency, so doing the
   code changes once and D1 once afterward avoids ever rerunning it).
