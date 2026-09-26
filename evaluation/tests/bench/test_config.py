@@ -164,6 +164,25 @@ def test_deep_suite_build_query_split():
     assert jobs[0].bloom == {"m_bits": 128, "k_hash": 3}  # suite override on top of the default
 
 
+def test_codesign_suite_carries_bloom_path_in_the_key():
+    jobs = load_matrix(MINI, SUITES, "codesign")
+    assert [(j.backend, j.filter_kind, j.build) for j in jobs] == [
+        ("official", "bloom", {"n_lists": 8, "bloom_path": "partial"}),
+        ("official", "bloom", {"n_lists": 8, "bloom_path": "full"}),
+    ]
+    assert jobs[1].key({"n_lists": 8, "bloom_path": "full", "n_probe": 4})["params"] == {
+        "n_lists": 8,
+        "bloom_path": "full",
+        "n_probe": 4,
+    }
+    assert all("bloom_path" not in j.build for j in load_matrix(MINI, SUITES, "filter"))
+
+
+def test_bloom_path_off_the_official_bloom_path_is_a_config_error():
+    with pytest.raises(ConfigError, match="bloom_path applies to silvertorch/bloom/official"):
+        load_matrix(MINI, SUITES, "bad_bloom_path")
+
+
 def test_narrows_apply_before_collapse():
     jobs = load_matrix(
         MINI,

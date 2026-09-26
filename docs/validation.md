@@ -54,7 +54,7 @@ rerun the library suite before trusting any row on it.
 
 | gate | state | notes |
 |---|---|---|
-| Harness suite (`evaluation/tests`, CPU with `CUDA_VISIBLE_DEVICES=""`) | **green**, 214 passed / 1 skipped on the A100 box, `yfcc10m` staged under `/data` | the skip reads the raw `_raw/yfcc10m/query.metadata.public.100K.spmat`, which is not on the box. pytest's `pythonpath` makes the suite import the checkout it sits in; before that, a worktree on the shared venv tested the main checkout |
+| Harness suite (`evaluation/tests`, CPU with `CUDA_VISIBLE_DEVICES=""`) | **red since L1**: 17 failed / 222 passed / 1 skipped at `5f73104` on the A100 box (238 passed on `dev/s9-ablation`, the same 17 failing). Every failure is `NotImplementedError: aten::mm.dtype` / `aten::bmm.dtype` on CPU: L1's fp32-output `mm` / `bmm` (`retrieve/src/retrieve/modules/knn.py:41`, `retrieve/src/retrieve/ops/reference/fused_masked_knn_topk.py:24`) have no CPU kernel, so every harness test that runs a LiNR module on the torch backend on CPU fails (`test_run.py`, `test_cli.py` e2e, parts of `test_algos.py`) | the skip reads the raw `_raw/yfcc10m/query.metadata.public.100K.spmat`, which is not on the box. pytest's `pythonpath` makes the suite import the checkout it sits in; before that, a worktree on the shared venv tested the main checkout |
 | Convention gates in the harness suite | **green** | one reader per `RETRIEVE_*` variable (`test_env_readers.py`); the dependency direction with a file-count floor and stale-entry failures (`test_dependency_direction.py`, which dropped four stale edges and nine unused library names); every `config/*.yaml` × every suite through `load_matrix` (`test_config.py`). Each was checked to go red on a planted violation |
 | `ruff check evaluation` (B, C4, SIM, RUF100, BLE001, PLC0415 on top of E, W, F, I, UP) | **clean**, ruff 0.15.6 | per-file ignores with reasons: ETL inline imports, goodreads' broad `except` (its own cleanup) ([evaluation](system/evaluation.md#lint)) |
 | `ruff format --check evaluation` | **not clean**: 15 files | waits on the `evaluation/` formatting-only commit; the pre-commit format hook covers `retrieve/` only until then |
@@ -122,7 +122,8 @@ explains the mechanism behind the kernel-only split.
   bites and equal on arXiv none/clause. The official exact path's 826 MiB
   peak and 7.2 ms at arXiv clause are our adapter's full-N mask packing,
   not Meta's code; every official exact number is an upper bound.
-- **Not measured**: the controlled `bloom_path="full"` ablation (S9), bloom
+- **Not measured**: the controlled `bloom_path="full"` ablation (S9; encoded
+  as the `codesign` suite, see [Campaign](#campaign-roadmap-d1-not-yet-validated)), bloom
   FPR against width (both blooms showed zero false positives, so S8 needs
   roadmap D3), seeds 1-2, k in {500, 1000}.
 
@@ -131,7 +132,17 @@ explains the mechanism behind the kernel-only split.
 - Goodreads `filter` leg: 126 of 126 cells `ok` on the grid of
   [decisions](decisions.md#harness). Quality numbers are not yet
   validated, and the report marks the leg not citable (narrowed mode set).
-- arXiv leg, seeds 1-2, the `deep` suite and the S9 ablation cells: not run.
+- arXiv leg, seeds 1-2, the `deep` suite and the `codesign` suite (S9) cells:
+  not run.
+- `codesign` (S9) wiring: `bloom_path` reaches `OfficialConfig` (unit tests
+  in `test_algos.py` / `test_config.py`), and one end-to-end job ran on
+  goodreads d128 `c0_genre`, `n_lists 1664`, `n_probe 32`, narrowed to
+  `k 1000` (the cached oracle), bs {1, 16}: both arms `ok` apart from the
+  narrowing, quality identical (`recall_oracle@1000` 0.78101 both). Eager
+  median, partial vs full: bs 1 1.09 vs 0.88 ms, bs 16 1.24 vs 1.05 ms;
+  `peak_fwd_mib` bs 16 19.8 vs 21.3. One seed, one sweep, unlocked clocks
+  (1305-1410 MHz): a smoke run, not a result, and the opposite latency
+  order to the paper's §4.4 is not yet a finding.
 - Measured cost: about 530 s per cell, of which about 330 s is the fixed
   cost of nine `torch.compile` + CUDA-graph captures per cell; the timing
   windows themselves take about 125 s (eager) and 68 s (graph). Graph is

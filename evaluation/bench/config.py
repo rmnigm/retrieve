@@ -27,7 +27,7 @@ from typing import Any
 import yaml
 from loguru import logger
 
-from bench.algos import ALGOS, BACKENDS, FILTER_KINDS, PATHS, is_valid_combo
+from bench.algos import ALGOS, BACKENDS, FILTER_KINDS, PATHS, is_valid_combo, official_config
 
 QUERY_PARAMS = frozenset({"n_probe", "candidate_pool"})  # set_query_params, never a rebuild
 NONE_SWEEP = "full_scan"  # the one sweep of filter_kind ``none`` (the old harness's name)
@@ -332,6 +332,10 @@ def load_matrix(
                     sweep_defs = ds.clauses.get(fk, {}) if fk != "none" else {NONE_SWEEP: None}
                     for sweep in _narrow(list(sweep_defs), sweeps, "sweep"):
                         for build in builds:
+                            try:
+                                official_config(algo, fk, backend, build)
+                            except ValueError as e:
+                                raise ConfigError(f"{where}: {e}") from e
                             qs = tuple(q for q in queries if is_valid_combo(algo, {**build, **q}))
                             if len(qs) < len(queries):
                                 logger.info("{} build={}: invalid combos dropped", algo, build)

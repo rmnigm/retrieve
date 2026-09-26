@@ -26,7 +26,7 @@ LIBRARY = {
 LIBRARY_NAMES = {
     "retrieve": {
         "SilverTorch", "LiNRV1", "LiNRV2", "LiNRV3", "LiNRV4", "BloomFilter",
-        "ExactAttributeFilter",
+        "ExactAttributeFilter", "OfficialConfig",
     },
     "retrieve.interfaces": {"DISPATCH", "FilterModule"},
 }  # fmt: skip
