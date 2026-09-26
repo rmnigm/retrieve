@@ -1092,7 +1092,9 @@ warmup_steps=0`.
 Arguments are `TrainConfig` `FIELD=VALUE` pairs, the value parsed as JSON
 when it parses and taken as a string otherwise; an unknown field is a usage
 error. `--config <json>` starts from a saved config instead of the defaults
-and the pairs override it. `--resume` picks up from
+and the pairs override it (`TrainConfig.load(path, **overrides)`); a pair
+that changes `loss` drops the saved `normalize` and `logq`, so they resolve
+for the new loss unless given as pairs too. `--resume` picks up from
 `<ckpt_dir>/_resume.pt`, written every epoch with model, optimizer,
 scheduler, epoch, best metric and the Python / numpy / torch / CUDA RNG
 states, so a resumed run is reproducible, not merely restarted.

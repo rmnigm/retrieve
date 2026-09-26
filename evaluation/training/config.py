@@ -74,9 +74,13 @@ class TrainConfig:
             json.dump(dataclasses.asdict(self), f, indent=2)
 
     @classmethod
-    def load(cls, path: str | Path) -> TrainConfig:
+    def load(cls, path: str | Path, **overrides) -> TrainConfig:
         with open(path) as f:
             data = json.load(f)
         valid = {f.name for f in dataclasses.fields(cls)}
         # A config.json without "loss" predates it: a published gBCE checkpoint.
-        return cls(**{"loss": "gbce", **{k: v for k, v in data.items() if k in valid}})
+        data = {"loss": "gbce", **{k: v for k, v in data.items() if k in valid}}
+        # Saved normalize/logq are resolved for the saved loss; a new loss re-resolves them.
+        if overrides.get("loss", data["loss"]) != data["loss"]:
+            data = {k: v for k, v in data.items() if k not in ("normalize", "logq")}
+        return cls(**{**data, **overrides})
