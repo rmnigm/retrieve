@@ -12,7 +12,7 @@ import torch
 from torch import Tensor
 
 from retrieve.functional import masked_topk, post_filter_topk
-from retrieve.indexing.quantize import quantize_int8_global_codes
+from retrieve.indexing.quantize import quantize_int8_global, quantize_int8_global_codes
 from retrieve.interfaces import LinrBackend, RetrievalModule, check_backend, ops_for
 
 
@@ -69,7 +69,7 @@ class PostfilterKNNInt8(RetrievalModule):
         self.register_load_state_dict_post_hook(_rederive_n_real)
 
     def register_index(self, item_embs: Tensor) -> None:
-        codes = quantize_int8_global_codes(item_embs)  # [N, D] int8
+        codes, _ = quantize_int8_global(item_embs)  # [N, D] int8, chunked at build
         # _int_mm needs N (after transpose) a multiple of 8; pad with zero items (sliced off in
         # forward), quantize before padding so the global scale is unaffected.
         n = codes.shape[0]

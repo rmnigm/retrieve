@@ -15,6 +15,7 @@ docs/system/kernels.md § Shared kernel helpers.
 
 import triton
 import triton.language as tl
+from triton.language.extra.cuda import libdevice
 
 
 @triton.jit
@@ -115,19 +116,10 @@ def or_combine(a, b):
 
 @triton.jit
 def popcount_int64(x):
-    """SWAR popcount over int64 lanes → int32 (no libdevice dependency).
-
-    torch twin: ``retrieve.functional.popcount_int64`` — the
-    bit-exact pairing is load-bearing (torch reference and Triton kernel must
-    agree bit-for-bit; see kernels.md → Numerics)."""
-    M1 = 0x5555555555555555
-    M2 = 0x3333333333333333
-    M4 = 0x0F0F0F0F0F0F0F0F
-    H01 = 0x0101010101010101
-    x = x - ((x >> 1) & M1)
-    x = (x & M2) + ((x >> 2) & M2)
-    x = (x + (x >> 4)) & M4
-    return ((x * H01) >> 56).to(tl.int32)
+    """Popcount over int64 lanes → int32: the hardware ``POPC`` (``__nv_popcll``). Exact integer
+    math, so it equals the torch twin ``retrieve.functional.popcount_int64`` (SWAR, because this
+    torch has no ``bitwise_count``) bit for bit; kernels.md → Numerics."""
+    return libdevice.popc(x)
 
 
 @triton.jit

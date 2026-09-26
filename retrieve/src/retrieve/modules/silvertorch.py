@@ -275,9 +275,8 @@ class SilverTorch(RetrievalModule):
             )
 
     def _quantize_items(self, item_embs: Tensor, perm: Tensor) -> None:
-        codes, global_scale = quantize_int8_global(item_embs)
         # Cluster-sorted, so a probed cluster is one contiguous run of code rows.
-        codes = codes[perm].contiguous()
+        codes, global_scale = quantize_int8_global(item_embs, rows=perm)
         self.register_buffer("item_codes", codes)
         # 0-d fp32 buffer: moves with .to(device) and parameterizes the kernel epilogue without a
         # per-index recompile.

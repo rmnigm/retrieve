@@ -270,10 +270,11 @@ its own tile shape, launch grid, or masking policy:
   table built in-kernel ([SilverTorch kernels](#silvertorch-kernels)).
 - `probe_ids_kernel` — a *launched* kernel: the probe scorers' id
   epilogue after `torch.topk` (slot → `sort_perm[pos]`, `-1` at `-inf`).
-- `popcount_int64(x) → int32` — SWAR popcount over int64 lanes; used by
-  `oporp_1bit_match_topk`. Its torch twin is
-  [`functional.py::popcount_int64`](../../retrieve/src/retrieve/functional.py) —
-  the bit-exact pairing is load-bearing (see [Numerics](#numerics)).
+- `popcount_int64(x) → int32` — the hardware `POPC` (`libdevice.popc` on
+  int64, `__nv_popcll`); used by `oporp_1bit_match_topk`. Its torch twin
+  [`functional.py::popcount_int64`](../../retrieve/src/retrieve/functional.py)
+  is SWAR; popcount is exact integer math, so the two agree bit for bit
+  (see [Numerics](#numerics)).
 - `bloom_subset_pass(qb, sigs) → [BLOCK] int1` — the bloom subset test
   in the `qb & ~sig == 0` OR-reduce form (boolean-identical to, and
   cheaper than, the equality + min-reduce form; all three bloom
@@ -495,12 +496,14 @@ return:   ids               [B, K]     int64
 **Inner op**: per (b, n) cell, `tl.sum(_popcount_int64(qb ^ item_row),
 axis=W) → hamming`, then `score = D_TOTAL - 2 * hamming`.
 
-**Popcount** is the SWAR bit-twiddle
-[`common.popcount_int64`](../../retrieve/src/retrieve/ops/triton/common.py):
-five mask-shift-add steps, no libdevice dependency.
-The matching torch reference [`popcount_int64`](../../retrieve/src/retrieve/functional.py)
-uses the exact same algorithm so torch and Triton produce **bit-exact**
-identical scores.
+**Popcount** is the hardware `POPC`
+([`common.popcount_int64`](../../retrieve/src/retrieve/ops/triton/common.py),
+`libdevice.popc`). It replaced a five-step SWAR bit-twiddle: −12.5 % on the
+indirect op at B=16, P=3M and −2.1 % on the full scan, where top-k(5000)
+dominates ([artifacts](../artifacts/kernel-opt/predictions.md)). The torch
+reference [`popcount_int64`](../../retrieve/src/retrieve/functional.py) is
+still SWAR, because this torch has no `bitwise_count`. Popcount is exact, so torch and Triton
+produce **bit-exact** identical scores.
 
 **Launch grid** `(cdiv(n, BLOCK_N), B)`: tile axis on `grid_x` (up to
 2³¹), batch on `grid_y` (up to 65535), because `cdiv(N, BLOCK_N)` can
@@ -869,9 +872,8 @@ kernels), so consumers must bound reads by `counts` either way.
 
 Torch-side SWAR popcount. Required because this PyTorch (2.10.0+cu128)
 lacks `Tensor.bitwise_count`. Returns int32 to keep the downstream sum
-narrow. Matches the kernel-side `common.popcount_int64`
-step-for-step — the bit-exact pairing the OPORP/SimHash parity tests
-depend on (the SWAR constants exist in exactly these two places).
+narrow. The kernel side uses the hardware `POPC`; both are exact, so the
+OPORP/SimHash parity tests stay bit-exact.
 
 ### [`quantize_oporp_1bit`](../../retrieve/src/retrieve/indexing/quantize.py) (`retrieve.indexing`)
 
@@ -923,8 +925,8 @@ tile-reduction order quirks. Its parity test uses
 `atol=1e-6`: the kernel's `tl.sum` and the reference's `bmm` reduce in
 different orders (measured drift ≤ 6e-8 at D ≤ 128).
 
-**OPORP popcount is bit-exact.** V3's torch reference and the Triton
-kernel both use the same SWAR popcount on the same packed bits, so torch
+**OPORP popcount is bit-exact.** V3's torch reference (SWAR) and the
+Triton kernel (hardware `POPC`) count the same packed bits exactly, so torch
 and Triton scores agree exactly, and
 [`test_oporp_1bit_match_topk.py`](../../retrieve/tests/parity/test_oporp_1bit_match_topk.py)
 pins it with `assert_topk_equal` (`torch.equal` scores, ids up to ties).

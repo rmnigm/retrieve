@@ -14,23 +14,46 @@ def quantize_int8(embs: Tensor) -> tuple[Tensor, Tensor]:
     return codes, scales
 
 
-def quantize_int8_global_codes(embs: Tensor) -> Tensor:
-    """The codes of :func:`quantize_int8_global` without its scale — no host sync, so
-    ``PostfilterKNNInt8`` can quantize the query batch on the forward path (its int32 dot is
-    rank-preserving, so the scale is never needed)."""
-    abs_max = embs.abs().amax().clamp(min=1e-8)
+_CODE_CHUNK_ROWS = 1 << 16  # build-time quantization chunk: 256 MiB of fp32 at D = 1024
+
+
+def _abs_max(embs: Tensor) -> Tensor:
+    """``embs.abs().amax()`` without the ``[N, D]`` ``abs`` temporary: ``max(amax, -amin)`` is
+    the same value bit for bit (negation is exact)."""
+    return torch.maximum(embs.amax(), -embs.amin()).clamp(min=1e-8)
+
+
+def _codes(embs: Tensor, abs_max: Tensor) -> Tensor:
     return (embs / abs_max * 127.0).round().clamp(-128, 127).to(torch.int8)
 
 
-def quantize_int8_global(embs: Tensor) -> tuple[Tensor, float]:
+def quantize_int8_global_codes(embs: Tensor) -> Tensor:
+    """The codes of :func:`quantize_int8_global` without its scale — no host sync and no Python
+    loop, so ``PostfilterKNNInt8`` can quantize the query batch on the forward path (its int32
+    dot is rank-preserving, so the scale is never needed)."""
+    return _codes(embs, _abs_max(embs))
+
+
+def quantize_int8_global(embs: Tensor, rows: Tensor | None = None) -> tuple[Tensor, float]:
     """Symmetric per-tensor INT8 quantization (SilverTorch paper §4.2): one global scalar scale, so
     the kernel does one scalar multiply per item at the cost of coarser reconstruction than the
     per-row ``quantize_int8``.
 
+    Build-time: the codes are written chunk by chunk into the ``[N, D]`` int8 output, so the
+    transient is one chunk rather than two fp32 copies of the table (a 10M × 768 fp32 index is
+    28.6 GiB; two more copies do not fit on an 80 GB card). Bit-identical to
+    ``quantize_int8_global_codes``: the same elementwise formula against the same ``abs_max``.
+    ``rows`` (a permutation, e.g. SilverTorch's ``sort_perm``) writes the codes of
+    ``embs[rows]`` — the same codes, reordered, without a second int8 table.
+
     Returns (codes [N, D] int8, scale float); embs ≈ codes.float() * scale."""
-    abs_max = embs.abs().amax().clamp(min=1e-8)
-    scale = float((abs_max / 127.0).item())
-    return quantize_int8_global_codes(embs), scale
+    abs_max = _abs_max(embs)
+    codes = torch.empty(embs.shape, dtype=torch.int8, device=embs.device)
+    for start in range(0, embs.shape[0], _CODE_CHUNK_ROWS):
+        stop = start + _CODE_CHUNK_ROWS
+        chunk = embs[start:stop] if rows is None else embs[rows[start:stop]]
+        codes[start:stop] = _codes(chunk, abs_max)
+    return codes, float((abs_max / 127.0).item())
 
 
 def _build_oporp(d: int, seed: int, device: torch.device) -> tuple[Tensor, Tensor]:

@@ -1,0 +1,96 @@
+{
+ "retrieve": "/tmp/claude-0/-scratch-wt-kernel-opt/c3c084c3-2334-44c2-82cb-148f4b88e823/scratchpad/p3/retrieve/src/retrieve/__init__.py",
+ "torch": "2.10.0+cu128",
+ "triton": "3.6.0",
+ "device": "NVIDIA A100-SXM4-80GB",
+ "cases": {
+  "postfilter_masked_b16": {
+   "us_median": 1730.926513671875,
+   "us_min": 1713.6377854780717,
+   "spread": 0.03302825412039258,
+   "iters": 11,
+   "sm_mhz": [
+    1380,
+    1410
+   ],
+   "unstable": false
+  },
+  "postfilter_int8_masked_b16": {
+   "us_median": 3183.231989542643,
+   "us_min": 3154.149373372396,
+   "spread": 0.024206822293960345,
+   "iters": 6,
+   "sm_mhz": [
+    1410,
+    1410
+   ],
+   "unstable": false
+  },
+  "quantize_int8_global_3m": {
+   "us_median": 14230.144500732422,
+   "us_min": 14217.578887939453,
+   "spread": 0.0081216751864281,
+   "iters": 3,
+   "sm_mhz": [
+    1410,
+    1410
+   ],
+   "unstable": false
+  },
+  "clause_compact_b16": {
+   "us_median": 1755.6320190429688,
+   "us_min": 1746.5408325195312,
+   "spread": 0.013943728809434619,
+   "iters": 10,
+   "sm_mhz": [
+    1410,
+    1410
+   ],
+   "unstable": false
+  },
+  "bloom_compact_b16": {
+   "us_median": 1949.144787258572,
+   "us_min": 1931.3636355929905,
+   "spread": 0.019580484057191663,
+   "iters": 9,
+   "sm_mhz": [
+    1410,
+    1410
+   ],
+   "unstable": false
+  },
+  "fmkt_b16_k100": {
+   "us_median": 4559.576034545898,
+   "us_min": 4522.272109985352,
+   "spread": 0.017355976559182876,
+   "iters": 4,
+   "sm_mhz": [
+    1410,
+    1410
+   ],
+   "unstable": false
+  },
+  "oporp_full_b16_k5000": {
+   "us_median": 1928.9671579996746,
+   "us_min": 1910.5813768174912,
+   "spread": 0.019766954745924773,
+   "iters": 9,
+   "sm_mhz": [
+    1410,
+    1410
+   ],
+   "unstable": false
+  },
+  "oporp_indirect_b16_k5000": {
+   "us_median": 7855.103810628255,
+   "us_min": 7819.616317749023,
+   "spread": 0.024589296164066236,
+   "iters": 3,
+   "sm_mhz": [
+    1410,
+    1410
+   ],
+   "unstable": false
+  }
+ }
+}

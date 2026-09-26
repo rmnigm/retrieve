@@ -359,3 +359,41 @@ def test_simhash_seed_determinism():
 
     _, c_r = quantize_simhash_1bit(embs, k_bits=128, seed=43)
     assert not torch.equal(a_r, c_r)
+
+
+def test_global_quantization_chunked_is_bit_exact_and_bounded():
+    """``quantize_int8_global`` quantizes chunk by chunk (build-time, large tables): its codes
+    and scale equal the one-shot formula bit for bit, ``quantize_int8_global_codes`` (the
+    loop-free query path) equals them too, and the build's transient stays under half the
+    fp32 table, where the one-shot formula held two fp32 copies of it."""
+    from retrieve.indexing import quantize
+
+    n = 12 * quantize._CODE_CHUNK_ROWS + 123  # the chunk temporaries are fixed; the table grows
+    embs = torch.randn(n, 128, device="cuda") * 3
+    abs_max = embs.abs().amax().clamp(min=1e-8)
+    expected = (embs / abs_max * 127.0).round().clamp(-128, 127).to(torch.int8)
+
+    torch.cuda.synchronize()
+    base = torch.cuda.memory_allocated()
+    torch.cuda.reset_peak_memory_stats()
+    codes, scale = quantize.quantize_int8_global(embs)
+    transient = torch.cuda.max_memory_allocated() - base - codes.numel()
+    assert torch.equal(codes, expected)
+    assert scale == float((abs_max / 127.0).item())
+    assert torch.equal(quantize.quantize_int8_global_codes(embs), expected)
+    table = embs.numel() * embs.element_size()
+    assert transient < table // 2, (
+        f"transient {transient / 2**20:.0f} MiB vs table {table / 2**20:.0f} MiB"
+    )
+
+
+def test_global_quantization_in_row_order_equals_permuted_codes():
+    """``rows=perm`` writes the codes of ``embs[perm]`` directly (SilverTorch's cluster-sorted
+    table without a second int8 copy): equal to quantize-then-permute, same scale."""
+    from retrieve.indexing import quantize
+
+    embs = torch.randn(2 * quantize._CODE_CHUNK_ROWS + 5, 64, device="cuda")
+    perm = torch.randperm(embs.shape[0], device="cuda")
+    codes, scale = quantize.quantize_int8_global(embs)
+    sorted_codes, sorted_scale = quantize.quantize_int8_global(embs, rows=perm)
+    assert torch.equal(sorted_codes, codes[perm]) and sorted_scale == scale

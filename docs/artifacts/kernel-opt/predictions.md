@@ -119,3 +119,34 @@ the batch (arXiv bloom 126 → 107), cluster-aligned tiles (arXiv bloom 115 → 
 per-lane search), and the probe table built in-kernel plus a one-launch id epilogue (launches
 57 → 32–44). Writing ids from the scorer instead of the epilogue cost 13–20 µs on arXiv and was
 dropped. The tile config (256×4) was re-swept and stays.
+
+## Phase 4: hardware popcount, LiNR allocator hygiene, quantize OOM
+
+- **Hardware popcount** (`libdevice.popc` on int64, i.e. `__nv_popcll`, two `POPC` in SASS) replaces
+  the five-step SWAR in `common.popcount_int64`. The two are bit-identical (checked on random
+  words plus 0, −1 and the sign bit). The torch twin stays SWAR, since this torch has no
+  `bitwise_count`, and popcount is exact integer math either way. Prediction: the OPORP kernel is
+  ALU-bound on SWAR at W=2 (12 int64 ops per word, while the 48 MB table read is ~30 µs). The
+  full-scan kernel goes 585 → **~400 µs**, and the op (topk k=5000 dominates) **−8 to −12 %**.
+  The indirect op is gather- and top-k-bound: **−2 to −5 %**.
+- **quantize_int8_global_codes OOM** (sibling E2 finding, pubmed 10M × 768 fp32 = 28.6 GiB).
+  `embs.abs()` and `embs / abs_max * 127` each materialize an N×D fp32 temporary. Fix: `abs_max` as
+  `max(amax, -amin)` (two reductions, no temporary, the same value bit for bit), then the codes
+  per row chunk into a preallocated int8 output. Prediction: peak transient drops from items +
+  2 × items to items + one chunk. Build time changes by under ±10 % (the same bytes are read
+  about 3× instead of 2×, but the writes of two temporaries go away).
+- **`masked_topk` masking** (audit finding: no prefill analogue exists in the LiNR kernels, whose
+  score buffers are `torch.empty` and poison-tested. The masked dense paths spend ~310 µs of a
+  1782 µs `PostfilterKNN` forward at B=16, N=3M on `~valid` + a DtoD clone + the fill of
+  out-of-place `masked_fill`). `torch.where(valid, scores, -inf)`: the same values, one pass.
+  Prediction: **−150 to −180 µs** (~−9 %) on masked `PostfilterKNN` / `PostfilterKNNInt8`
+  eager forwards. Inductor fuses the graph mode anyway.
+
+**Outcome** (`phase4.md`, against the Phase 3 commit, interleaved, 3 rounds): `oporp_full_b16` **−2.1 %**
+(predicted −8 to −12 %, a miss: the op is top-k(5000)-bound and the kernel's share was smaller than
+assumed); `oporp_indirect_b16` **−12.5 %** (predicted −2 to −5 %, a miss the other way: the
+bucketed width is 16.7M lanes for P = 3M, and every tail lane ran the SWAR); masked
+`PostfilterKNN` **−5.7 %**, `PostfilterKNNInt8` **−2.2 %** (predicted ~−9 %);
+`quantize_int8_global` at 3M × 128 **−13.4 %** with the transient bounded to one chunk
+(`test_quantize.py`: 672 MiB on a 384 MiB table before, under half the table after); the controls
+(`fmkt`, both compactions) within 0.5 %.

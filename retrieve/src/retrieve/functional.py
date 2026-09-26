@@ -42,7 +42,8 @@ def masked_topk(
     P < k returns min(k, P) columns."""
     b, p = scores.shape
     if valid is not None:
-        scores = scores.masked_fill(~valid, float("-inf"))
+        # One pass; masked_fill(~valid) clones the scores and inverts the mask first.
+        scores = torch.where(valid, scores, float("-inf"))
     actual_k = min(k, p)
     topk_scores, topk_local = torch.topk(scores, actual_k, dim=1)
     topk_ids = gather_ids.gather(1, topk_local) if gather_ids is not None else topk_local

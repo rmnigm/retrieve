@@ -89,7 +89,20 @@ def build_cases(torch, names):
     flat = padded[probe].reshape(b, -1)
     codes = torch.randint(-127, 128, (n, 128), dtype=torch.int8, device=dev, generator=g)
 
+    from retrieve.indexing.quantize import quantize_int8_global
+    from retrieve.modules.knn import PostfilterKNN, PostfilterKNNInt8
+
+    dense = PostfilterKNN(k=100).cuda()
+    dense.register_index(embs)
+    dense_i8 = PostfilterKNNInt8(k=100).cuda()
+    dense_i8.register_index(embs)
+    mask = torch.rand(b, n, device=dev, generator=g) < 0.3
+    embs_f32 = embs.float()
+
     cases = {
+        "postfilter_masked_b16": lambda: dense(q, mask),
+        "postfilter_int8_masked_b16": lambda: dense_i8(q, mask),
+        "quantize_int8_global_3m": lambda: quantize_int8_global(embs_f32),
         "clause_mask_b16": lambda: T.clause_mask(attrs, rev, qa),
         "clause_mask_b1": lambda: T.clause_mask(attrs, rev, qa[:1]),
         "clause_compact_b16": lambda: T.clause_compact(attrs, rev, qa),
