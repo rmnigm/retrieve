@@ -82,14 +82,6 @@ in records, commits and code comments; they are not renumbered.
 - [ ] **E0: request the Semantic Scholar API key** (needs the user). Not
   blocking E3 any more: it is running the OpenAlex fallback instead.
   Still open if the user wants the proper Semantic Scholar source later.
-- [ ] **E3: stage a 50M-paper Semantic Scholar SPECTER2 slice** (OpenAlex
-  fallback: no API key, not waiting on one). ETL written, verified
-  against the live snapshot, dry-run clean. **Scoped to ~15M** (matching
-  E2's precedent: 50M items at 768-d fp32 is 153.6 GB against an 80 GB
-  A100). Convert + prep at 15M done (29.9M staged, 15M-paper catalog,
-  14.9M held-out pool); remaining: `encode_text` / `encode_queries`
-  (~4.6 A100-hours) / `attrs` / `bench check` / one filter cell — GPU
-  work, queued behind D1. See [datasets](system/datasets.md#openalex).
 - [ ] **E4: stage KuaiRand-27K and train gSASRec over its 32M videos.**
   ETL, config and layout done (staged, `bench check` ok, two filter
   protocols across 7 clause slots). Remaining: the gSASRec checkpoint
@@ -202,7 +194,7 @@ in records, commits and code comments; they are not renumbered.
 D1 ─┬─> D2, D3 ─┐
     ├─> F2      ├─> F5 ─> G-c
     ├─> F4      │
-    └─> E5 <── E3, E4 (E2 done)
+    └─> E5 <── E4 (E2, E3 done)
 TF-3/TF-4 retune ─> rerun the head-to-head
 ```
 
