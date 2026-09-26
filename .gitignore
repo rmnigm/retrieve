@@ -183,9 +183,9 @@ cython_debug/
 .abstra/
 
 # Visual Studio Code
-#  Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
+#  Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore
 #  that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#  and can be added to the global gitignore or merged into this file. However, if you prefer, 
+#  and can be added to the global gitignore or merged into this file. However, if you prefer,
 #  you could uncomment the following to ignore the entire vscode folder
 # .vscode/
 
@@ -238,8 +238,11 @@ evaluation/wandb/
 evaluation/results/_logs/
 evaluation/results/_parity/
 
-# Packed article sources (unpacked versions are tracked separately)
-articles/*.tar.gz
+# articles/: pandoc renderings of the papers this project reproduces. Kept
+# locally for citation while working, not shipped in git -- likely
+# copyrighted third-party text (2026-09-26, user decision), unlike
+# everything else in this repo which is our own code/docs.
+articles/
 
 # Local Claude Code settings
 .claude/settings.local.json

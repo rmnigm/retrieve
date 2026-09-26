@@ -65,6 +65,9 @@ lists every page; [`docs/SCHEMA.md`](docs/SCHEMA.md) holds the conventions
   (Meta's kernels against ours: end to end, kernel-only, phase 2, parity,
   memory, and what the comparison cannot say).
 - `articles/`: pandoc renderings of the papers. Frozen; cite, never edit.
+  Gitignored, not shipped in git (likely copyrighted third-party text) —
+  present on a working box, but a fresh clone won't have it; citations to
+  it are for the box you're working on, not the shipped repo.
 - `evaluation/results/`: campaign records (`<suite>/<dataset>-d<dim>.jsonl`
   plus sidecars); `evaluation/golden/`: the golden baseline cells.
 

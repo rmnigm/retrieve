@@ -63,3 +63,4 @@ How the code works today. Code comments cite these pages by section.
 - [`retrieve/docs/`](../retrieve/docs/): the library user guide shipped in
   the sdist.
 - [`articles/`](../articles/): the SilverTorch and LiNR papers, frozen.
+  Gitignored (not shipped in git); present locally, not after a fresh clone.
