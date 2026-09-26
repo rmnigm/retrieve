@@ -1095,9 +1095,21 @@ error. `--config <json>` starts from a saved config instead of the defaults
 and the pairs override it (`TrainConfig.load(path, **overrides)`); a pair
 that changes `loss` drops the saved `normalize` and `logq`, so they resolve
 for the new loss unless given as pairs too. `--resume` picks up from
-`<ckpt_dir>/_resume.pt`, written every epoch with model, optimizer,
-scheduler, epoch, best metric and the Python / numpy / torch / CUDA RNG
-states, so a resumed run is reproducible, not merely restarted.
+`<ckpt_dir>/_resume.pt`, holding model, optimizer, scheduler, epoch, best
+metric and the Python / numpy / torch / CUDA RNG states, so a resumed run is
+reproducible, not merely restarted.
+
+`resume_every` (default 1) is the number of epochs between `_resume.pt`
+writes (`resume_due`); the last epoch, including an early stop, always
+writes it, so a finished run stays resumable. The file is model + both AdamW
+moments, three times `best_model.pt`: 49.2 GB and ~45 s per write at
+KuaiRand d64 (two 32 M × 64 tables), about a fifth of a ~210 s epoch. The
+trade-off: a crash loses up to `resume_every − 1` finished epochs, which
+`--resume` retrains. A superseded best snapshot is deleted at once unless
+the current `_resume.pt` names it; that one goes at the next `_resume.pt`
+write, so resuming always finds its best. On `--resume`, snapshots newer
+than `_resume.pt` (from epochs about to be retrained) are deleted. Disk peak:
+one extra best snapshot.
 
 ### The encoder
 
@@ -1177,7 +1189,7 @@ benchmark harness, which pins it off for measurement determinism.
 ├── item_attrs.parquet     # copied from data_dir when present
 ├── eval_quality.json      # test-split metrics
 ├── train_metrics.json     # losses, val curve, test metrics, epoch_time_sec, samples_per_sec, gpu_name, sm_mhz, peak_gpu_mem_bytes
-├── sasrec-ep{N}-{metric}{v}.pt   # the current best-epoch snapshot
+├── sasrec-ep{N}-{metric}{v}.pt   # the current best-epoch snapshot (plus the one _resume.pt names, until its next write)
 └── _resume.pt
 ```
 
