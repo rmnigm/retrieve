@@ -89,9 +89,10 @@ decisions.
   `status: partial`, which the report treats as not citable; whether a
   deliberate, recorded narrowing should read differently is open (see the
   roadmap).
-- **Clocks cannot be locked** in the container. Records carry the sampled
-  `sm_mhz` under load and an `unstable` flag (window spread over 5 %). A
-  batch-size-1 comparison narrower than about 21 % is noise.
+- **Clocks cannot be locked** in the container. Records carry the SM clock
+  sampled under load after every timing window and an `unstable` flag
+  (window spread over 5 %). A batch-size-1 comparison narrower than about
+  21 % is noise.
 - **Timed official forwards run with `OfficialConfig(cache_plans=False)`**,
   so Meta's plan cache does not flatter repeated identical queries.
 - **Results storage**: JSONL records, `flat.csv` and reports in git; large

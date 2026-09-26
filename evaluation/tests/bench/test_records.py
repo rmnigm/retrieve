@@ -52,7 +52,7 @@ def test_flatten_one_row_per_perf_entry_last_record_per_key(tmp_path):
     p = tmp_path / "filter" / "goodreads-d128.jsonl"
     perf = [
         {"k": 100, "bs": 1, "mode": "eager", "median_ms": 1.5, "sm_mhz": 1410.0,
-         "window_medians_ms": [1, 2, 3]},
+         "window_medians_ms": [1, 2, 3], "window_sm_mhz": [1410.0, 1410.0, 1395.0]},
         {"k": 100, "bs": 1, "mode": "graph", "median_ms": None, "reason": "cuda_unavailable"},
     ]  # fmt: skip
     base = {
@@ -75,6 +75,6 @@ def test_flatten_one_row_per_perf_entry_last_record_per_key(tmp_path):
     assert seed0[0]["heldout_recall@100"] == "0.5" and seed0[0]["oracle_recall@100"] == "0.9"
     assert seed0[0]["quality_parity"] == "reference" and seed0[0]["env_code_version"] == "c"
     assert json.loads(seed0[0]["params"]) == KEY["params"] and seed0[0]["status"] == "ok"
-    assert "perf_window_medians_ms" not in rows[0]
+    assert "perf_window_medians_ms" not in rows[0] and "perf_window_sm_mhz" not in rows[0]
     (r1,) = [r for r in rows if r["seed"] == "1"]
     assert r1["perf_mode"] == "" and r1["heldout_recall@100"] == ""
