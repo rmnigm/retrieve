@@ -119,28 +119,31 @@ decisions.
 
 ## Sequential encoder (dev/hstu)
 
-The goal is to replace gSASRec as the history encoder behind the sequential benchmarks
+The goal is to replace the published gSASRec checkpoints as the history encoder behind the sequential benchmarks
 (roadmap: not a numbered step; the user scheduled it directly).
 - **Output contract unchanged.** Item embeddings are `[N, D]` from an embedding table, query
   embeddings are `[B, D]` from `encode.py`, and scoring is the dot product. D stays 64, 128 or
-  256; only the body may grow.
-- **Inputs are generic.** Item id, position, and the timestamp where the dataset has one. There
-  is no per-dataset feature code and no generative retrieval.
-- **The bet is HSTU with softmax attention.** It keeps HSTU's SiLU U/V/Q/K projections,
-  U-gating and the relative position and time-bucket bias, and applies softmax. Pointwise
-  (softmax-free) attention is not pursued: the user does not believe in it.
-- **The loss is sampled softmax on L2-normalized embeddings.** Temperature 0.05, shared uniform
-  negatives plus in-batch positives. **logQ is available as an opt-in** (`logq`, the
-  expected-count correction, positive uncorrected), user decision 2026-09-26; default off.
-  - gBCE stays only for the gSASRec baseline, and it must sample negatives **per position**: one
-    shared vector per step collapses it
-    ([evidence](artifacts/seqrec-encoder/gate-b-yambda-d64/README.md)).
+  256.
+- **The encoder is the gSASRec body** (`SASRecBlock`, the published architecture), with the
+  E1c recipe as the trainer's defaults (user, 2026-09-26). The trainer reads item ids and
+  positions only; a `timestamps` column in the data is ignored.
+- **Two losses** (user, 2026-09-26): gBCE with per-position negatives, the published gSASRec
+  baseline (one shared vector per step collapses it,
+  [evidence](artifacts/seqrec-encoder/gate-b-yambda-d64/README.md)); and sampled softmax on
+  L2-normalized embeddings with logQ (temperature 0.05, in-batch positives plus shared uniform
+  negatives, expected-count correction, positive uncorrected), the default since E1c
+  ([results](validation.md#encoder-experiments-e0-e4-h100-not-yet-validated-not-citable)).
+- **HSTU was tried and dropped.** The softmax-attention HSTU body with time-bucket bias (E2a,
+  E2c) did not beat the gSASRec body with logQ (E1c); the user dropped it and its code
+  (`HSTUBlock`, `use_time`, `hidden_dim`), 2026-09-26. Pointwise (softmax-free) attention was
+  never pursued.
 - **Success is measured on the same test file with the same eval code.** A new encoder must
   beat the published gSASRec checkpoint of the same D, re-scored on today's
   `trainer/test.parquet`, on test NDCG@10 **and** R@100, on both yambda-500m and
   goodreads-work-id, with one shared recipe. The stored `eval_quality.json` numbers are not the
   bar: yambda's were scored on a test split that is no longer on disk.
-- **Order:** goodreads and yambda-500m first. KuaiRand only if the winner clears both bars.
+- **Runs** (user, 2026-09-26): yambda-500m, goodreads-work-id and KuaiRand at d64 and d128 on
+  the E1c recipe (ffn 4×D); only D, epochs, patience and eval cadence vary.
 - **Out of scope for this line:** a LLaMA block, row-wise Adagrad, a bf16 table,
   FuXi-style channels and multi-GPU.
 
