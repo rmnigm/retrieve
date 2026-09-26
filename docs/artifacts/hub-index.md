@@ -19,6 +19,7 @@ re-upload of a subtree replaces its row.
 | `c4` | harness v2 gate run (C4): filter records and samples, arXiv and Goodreads d128 | 4 | 12,983,727 | `20cc70458b4fd790889fb808bd1009ae0f5354f883f644ce21b469d4c88a8964` |
 | `c5` | package-split gate run (C5): Goodreads d128 records, samples, `flat.csv` | 3 | 7,563,738 | `a4e60720e2960bfe503119997dd4786dcfff443aa479e8e71b92e394e3f140f4` |
 | `d1-a` | D1 campaign stage a, Goodreads d128 filter suite: 126 records, samples, `results.parquet` | 3 | 78,261,847 | `72fa58381475321c33d40d66fb0d0f7203d87d9eae79526760670a7d4a171966` |
+| `d1/goodreads` | D1 filter leg, Goodreads d128 (staging `ee6ee99`, code_version `72e5a90`): 105 records (all ok), samples, `results.parquet`; not citable until D1's gate is green | 3 | 85,281,519 | `12868d2e2de3946ae0e5fbbd81346e887533b1e782c4cc0f3efb5f4f6f82a00c` |
 | `artifacts/cute-dsl-scorer` | timing and graph dumps of the deleted CuTe backend (tag `cuda-cute-backends-final`) | 19 | 540,746 | `785ae6b63e77f8d91f1df8d96ac5edeccf5da2f8c99873584fccbb875355b70e` |
 | `artifacts/dataset-candidates` | YFCC and PubMed ETL dry-run logs, plans, GT checks, rehearsal records | 15 | 40,346 | `e06a33b267d6ffaa0e06c95412f3fc6766f40ace1f51bbb55c881bdfa6b41656` |
 | `artifacts/deterministic-compaction` | golden re-derive cells (run1/run2), epilogue and timing dumps | 10 | 106,051 | `9758c1961f40443d170d7f4755a45264bacfd59db5c4d451bc5136573ad02911` |
