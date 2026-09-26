@@ -418,9 +418,9 @@ is exact and `tl.sum` reduces in fp32 (the compiled PTX: `add.f32` /
 sub-32-bit ints). Reduced in fp16, on goodreads d128 (`|score|` up to 31,
 partial sums of the same order) the error against an fp64 dot is 0.028,
 enough to swap one boundary pair on 6.3 % of `c0_genre` rows against the
-`torch` backend. In fp32 it is ~1e-5, and the remaining
-`torch`-vs-`triton` difference is the `torch` side's own fp16 output
-rounding creating ties ([validation](../validation.md#library-gates)). The
+`torch` backend. In fp32 it is ~1e-5; the `torch` side returns fp32 too
+(§ Score conventions), so the two backends differ only in reduction order
+([validation](../validation.md#library-gates)). The
 accumulation-width parity file
 [`test_accumulation.py`](../../retrieve/tests/parity/test_accumulation.py)
 pins every scoring kernel against an fp64 oracle, because the other
@@ -620,7 +620,10 @@ count-only epilogue — makes the *predicate* launch 1.7–1.8× slower at
 `B = 1`, where the grid is under one wave and per-program latency is the
 kernel time; the `cumsum` + masked-store epilogue keeps it at the one-pass
 speed (1.10× at B=1, 1.03× at B=16, full pipeline). The scratch traffic is
-the survivors only (4 B in, 8 B out per id); its allocation is
+the survivors only (4 B in, 8 B out per id), and so is the output's: with
+no tail store the scatter writes nothing for a rejected item (−11.7 % on
+`clause_compact`, −5.3 % on `bloom_compact` at B=16, 3M items, 1.8 %
+pass rate, against a `-1` tail store; [artifact](../artifacts/l1-l2/README.md#timing)). Its allocation is
 `4 · B · T · BLOCK_N` bytes, half the `[B, N]` int64 result. `counts` is a
 fresh tensor, not a view into the scan: inductor asserts custom-op outputs
 are 16-byte aligned, and at `B = 1` the scan's last column is a contiguous
