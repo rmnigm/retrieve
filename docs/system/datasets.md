@@ -1107,9 +1107,10 @@ KuaiRand d64 (two 32 M × 64 tables), about a fifth of a ~210 s epoch. The
 trade-off: a crash loses up to `resume_every − 1` finished epochs, which
 `--resume` retrains. A superseded best snapshot is deleted at once unless
 the current `_resume.pt` names it; that one goes at the next `_resume.pt`
-write, so resuming always finds its best. On `--resume`, snapshots newer
-than `_resume.pt` (from epochs about to be retrained) are deleted. Disk peak:
-one extra best snapshot.
+write, so resuming always finds its best, looked up by file name in
+`checkpoint_dir`. On `--resume`, every other snapshot (from epochs about to
+be retrained, or all of them when no `_resume.pt` was written yet) is
+deleted. Disk peak: one extra best snapshot.
 
 ### The encoder
 

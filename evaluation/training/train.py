@@ -185,11 +185,7 @@ def train(config: TrainConfig, resume: bool = False) -> None:
         best_metric = state["best_metric"]
         steps_not_improved = state["steps_not_improved"]
         global_step = state["global_step"]
-        best_path = Path(state["best_path"]) if state["best_path"] else None
-        # Bests saved after this _resume.pt came from epochs about to be retrained.
-        for snapshot in ckpt_dir.glob("sasrec-ep*.pt"):
-            if snapshot != best_path:
-                snapshot.unlink()
+        best_path = ckpt_dir / Path(state["best_path"]).name if state["best_path"] else None
         logger.info(
             "Resumed: start_epoch={} best_metric={:.4f} steps_not_improved={} global_step={}",
             start_epoch,
@@ -197,6 +193,11 @@ def train(config: TrainConfig, resume: bool = False) -> None:
             steps_not_improved,
             global_step,
         )
+    if resume:
+        # Bests saved after _resume.pt, or before the first one, belong to epochs being retrained.
+        for snapshot in ckpt_dir.glob("sasrec-ep*.pt"):
+            if snapshot != best_path:
+                snapshot.unlink()
     resumable_best = best_path
     t0 = time.perf_counter()
 
