@@ -648,7 +648,7 @@ update in the same commit.
 | `retrieve/tests/` | [testing.md](testing.md) |
 | `evaluation/bench/` (the harness CLI, `PATHS`, the cell loop) | [evaluation.md](evaluation.md) |
 | `evaluation/eval_datasets/` (ETL, Hub transfer) | [datasets.md](datasets.md) |
-| training (`evaluation/train/`) and checkpoints | [checkpoints.md](checkpoints.md) |
+| training (`evaluation/training/`) and checkpoints | [checkpoints.md](checkpoints.md) |
 | disks, venvs, the space budget | [storage.md](storage.md) |
 | standing decisions and constraints (why, not what) | [decisions.md](../decisions.md) |
 | what gates pass and the measured results that stand | [validation.md](../validation.md) |
