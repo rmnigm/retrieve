@@ -180,7 +180,7 @@ with the same eval code (ndcg@10 / recall@100):
 | dataset | d64 | d128 | d256 |
 |---|---|---|---|
 | yambda-500m | 0.0846 / 0.1563 ([gate A](artifacts/seqrec-encoder/gate-a/)) | 0.0811 / 0.1486 ([gate A](artifacts/seqrec-encoder/gate-a/)) | 0.0814 / 0.1398 ([E0b](artifacts/seqrec-encoder/e0b-yambda-d256-bar/)) |
-| goodreads-work-id | 0.0350 / 0.1486 ([E0](artifacts/seqrec-encoder/e0-goodreads-bars/)) | 0.0361 / 0.1480 ([E0](artifacts/seqrec-encoder/e0-goodreads-bars/)) | 0.0354 / 0.1472: the checkpoint's stored `eval_quality.json`, **not re-scored** (E0 found the stored goodreads d64/d128 numbers equal to the re-score to 4 decimals) |
+| goodreads-work-id | 0.0350 / 0.1486 ([E0](artifacts/seqrec-encoder/e0-goodreads-bars/)) | 0.0361 / 0.1480 ([E0](artifacts/seqrec-encoder/e0-goodreads-bars/)) | 0.0354 / 0.1472 ([E0c](artifacts/seqrec-encoder/e0c-goodreads-d256-bar/)) |
 | KuaiRand | none: no published KuaiRand-27K checkpoint; calibrated against most-popular lists instead ([temporal drift](#kuairand-temporal-drift)) | not run | not run |
 
 ### Final models (the E1c recipe)
@@ -197,7 +197,7 @@ every epoch, patience 10, then the train + val refit).
 | [yambda d256](artifacts/seqrec-encoder/y256-sasrec-ssm-logq/) | 0.0966 | 0.1481 | 0.1108 | 0.0401 | **+0.0152 / +0.0083** | 97 of 100 (0.1040), still rising | 18.7 | 19.7 | [rqmh9ai9](https://wandb.ai/pinkmeme/seqrec-encoder/runs/rqmh9ai9) |
 | [goodreads d64](artifacts/seqrec-encoder/e3-goodreads-d64-sasrec-ssm-logq/) | 0.0381 | 0.1447 | 0.0695 | 0.1232 | +0.0031 / **−0.0039** | 16 (0.0402); early stop at 26 | 49.4 | 6.7 | [338ohzq4](https://wandb.ai/pinkmeme/seqrec-encoder/runs/338ohzq4) |
 | [goodreads d128](artifacts/seqrec-encoder/g128-sasrec-ssm-logq/) | 0.0410 | 0.1518 | 0.0736 | 0.1577 | **+0.0049 / +0.0038** | 34 (0.0440); early stop at 44 | 59.0 | 8.1 | [fcian7qz](https://wandb.ai/pinkmeme/seqrec-encoder/runs/fcian7qz) |
-| [goodreads d256](artifacts/seqrec-encoder/g256-sasrec-ssm-logq/) | 0.0418 | 0.1530 | 0.0743 | 0.1616 | **+0.0064 / +0.0058** (bar not re-scored) | 13 (0.0463); early stop at 23 | 80.3 | 11.0 | [b42n4obv](https://wandb.ai/pinkmeme/seqrec-encoder/runs/b42n4obv) |
+| [goodreads d256](artifacts/seqrec-encoder/g256-sasrec-ssm-logq/) | 0.0418 | 0.1530 | 0.0743 | 0.1616 | **+0.0064 / +0.0058** | 13 (0.0463); early stop at 23 | 80.3 | 11.0 | [b42n4obv](https://wandb.ai/pinkmeme/seqrec-encoder/runs/b42n4obv) |
 | [KuaiRand d64](artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/): train + val day (`train_on_val=true`), 4 epochs | 0.0276 | 0.0063 | 0.0197 | 0.0009 | no bar; val-day most-popular 0.0314 / 0.0073, all-time most-popular 0.0027 / 0.0007 | none: 4 epochs fixed, the first k64's best epoch + 1 | 260.8 | 62.7 | [f11y636d](https://wandb.ai/pinkmeme/seqrec-encoder/runs/f11y636d) |
 | [KuaiRand d64, train only](artifacts/seqrec-encoder/k64-sasrec-ssm-logq/) (the first k64; drift evidence, not the model) | 0.0046 | 0.0016 | 0.0040 | 0.0006 | as above | 3 (0.0232); early stop at 13 | 249.4 | 62.6 | [xkk96p6k](https://wandb.ai/pinkmeme/seqrec-encoder/runs/xkk96p6k) |
 | KuaiRand d128 | not run: OOM in backward even with one table ([probe](artifacts/seqrec-encoder/k128-probe-oom/README.md)). The shared 32 M × 128 fp32 table (15.28 GiB) needs weight + two AdamW moments (45.8 GiB) plus two dense gradients held at once, input lookup and output scoring (30.6 GiB): ~78 of 79.18 GiB | | | | | | | | |
