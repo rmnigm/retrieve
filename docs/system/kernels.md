@@ -841,21 +841,17 @@ Triton-backend classes go through identical kernels and produce
 bit-identical scores. V2's sparse path scores per-cell with
 `tl.sum(emb_rows * q[None, :], axis=1)` — elementwise multiply +
 reduction, not `tl.dot` — so it doesn't share the tensor-core
-tile-reduction order quirks. Parity tests still use
-[`assert_topk_matches`](../../retrieve/tests/parity/conftest.py)
-(set + sorted-score tolerance) for V2 because gather order across
-duplicate scores can vary.
+tile-reduction order quirks. Its parity test uses
+[`assert_topk_matches`](../../retrieve/tests/parity/conftest.py) at
+`atol=1e-6`: the kernel's `tl.sum` and the reference's `bmm` reduce in
+different orders (measured drift ≤ 6e-8 at D ≤ 128).
 
 **OPORP popcount is bit-exact.** V3's torch reference and the Triton
 kernel both use the same SWAR popcount on the same packed bits, so torch
-and Triton scores agree exactly. The parity test in
+and Triton scores agree exactly, and
 [`test_oporp_1bit_match_topk.py`](../../retrieve/tests/parity/test_oporp_1bit_match_topk.py)
-does not yet lean on that: it goes through `assert_topk_matches`'s
-`1e-3` tolerance like a tile-blocked fp32 kernel, not `torch.equal`
-(roadmap Q3 tightens integer-exact paths to `torch.equal`). If the two
-sides ever diverge, a popcount or packing bug has been introduced — the
-kernel's correctness depends on bit identity here even though the test
-does not currently pin it that tightly.
+pins it with `assert_topk_equal` (`torch.equal` scores, ids up to ties).
+A divergence means a popcount or packing bug.
 
 **The SilverTorch dequant is one expression in five places.** The
 bit-exact contract across `triton` / `torch` / `official` rests on the

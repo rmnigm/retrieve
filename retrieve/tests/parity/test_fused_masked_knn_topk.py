@@ -14,14 +14,17 @@ import pytest
 import torch
 
 from retrieve.functional import compact_mask
+from retrieve.ops import reference
 from retrieve.ops.triton.fused_masked_knn_topk import (
+    _P_BUCKETS,
+    DEFAULT_CONFIG,
     FusedMaskedKnnTopkConfig,
     _bucket_p,
     _fused_masked_knn_topk_impl,
     fused_masked_knn_topk,
 )
 from tests.conftest import make_index, make_mask, make_query
-from tests.parity.conftest import assert_topk_matches
+from tests.parity.conftest import POISON, assert_topk_equal, assert_topk_matches, poison_empty
 
 
 def _ref(query, item_embs, mask, k):
@@ -57,7 +60,8 @@ def test_matches_pure_torch(b, n, d, k, pass_rate):
     pos, counts = compact_mask(mask)
     out_ids, out_scores = fused_masked_knn_topk(query, embs, pos, counts, k)
     ref_ids, ref_scores = _ref(query, embs, mask, k)
-    assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores)
+    # fp32 tl.sum vs bmm accumulate in different orders; measured drift <= 6e-8 at D <= 128.
+    assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores, atol=1e-6, rtol=0.0)
 
 
 def test_padding_uses_minus_one_when_counts_below_k():
@@ -128,42 +132,26 @@ def test_padding_uses_minus_one_when_counts_below_k():
 
 
 def test_empty_score_buffer_does_not_leak(monkeypatch):
-    """Phase 1 regression: ``all_scores`` is allocated via ``torch.empty``,
-    relying on the kernel to write every slot in ``[0, P)`` (real dot or
-    ``-inf`` past ``counts[bid]``). Poison every fresh ``torch.empty``
-    float32 2-D buffer with ``+1e30`` before the kernel runs — if the
-    kernel skipped any slot, top-K would surface that poison value
-    (``+1e30`` beats every cosine in ``[-1, 1]``).
-    """
-    real_empty = torch.empty
-    poison = 1e30
-
-    def poisoned_empty(*args, **kwargs):
-        t = real_empty(*args, **kwargs)
-        if t.dtype == torch.float32 and t.dim() == 2:
-            t.fill_(poison)
-        return t
-
-    monkeypatch.setattr(torch, "empty", poisoned_empty)
-
-    b, n, d, k = 8, 1024, 64, 10
+    """``all_scores`` is allocated via ``torch.empty``, relying on the kernel to write every slot
+    in ``[0, P)`` (real dot or ``-inf`` past ``counts[bid]``). The poisoned allocator proves it:
+    an unwritten slot would surface ``POISON`` in top-K, and the hit count proves the poisoned
+    buffer is the one the kernel wrote."""
+    b, n, d, k = 8, 1024, 64, 48
     embs = make_index(n, d)
     query = make_query(b, d)
-    # Mix of pass rates per row so some rows have counts < k (stresses
-    # the padding-region writes) and some have counts > k.
+    # counts land in [35, 61]: rows on both sides of k, so the -inf tail reaches top-K.
     mask = make_mask(b, n, pass_rate=0.05)
     pos, counts = compact_mask(mask)
+    ref_ids, ref_scores = reference.fused_masked_knn_topk(query, embs, pos, counts, k)
+    assert bool((counts < k).any()) and bool((counts >= k).any())
 
+    hits = poison_empty(monkeypatch, (b, pos.shape[1]))
     out_ids, out_scores = fused_masked_knn_topk(query, embs, pos, counts, k)
 
-    finite = torch.isfinite(out_scores)
-    assert finite.any(), "test setup degenerate — no finite scores"
-    assert (out_scores[finite] != poison).all(), (
-        "torch.empty's +1e30 poison leaked into top-K — kernel left a slot unwritten"
-    )
-    assert (out_scores[finite].abs() <= 1.5).all(), (
-        f"finite scores out of cosine range: max={out_scores[finite].abs().max().item()}"
-    )
+    assert hits, "the score buffer no longer comes from torch.empty — the poison never ran"
+    assert not (out_scores == POISON).any(), "poison leaked into top-K: a slot went unwritten"
+    # fp32 tl.sum vs bmm accumulate in different orders; measured drift <= 6e-8 at D <= 128.
+    assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores, atol=1e-6, rtol=0.0)
 
 
 def test_bucket_p_ladder():
@@ -202,9 +190,8 @@ def test_config_override_matches_default():
 
     ids_a, scores_a = _fused_masked_knn_topk_impl(query, embs, pos, counts, k, config=cfg_a)
     ids_b, scores_b = _fused_masked_knn_topk_impl(query, embs, pos, counts, k, config=cfg_b)
-    # Same inputs → identical output regardless of tile config.
-    torch.testing.assert_close(ids_a, ids_b)
-    torch.testing.assert_close(scores_a, scores_b)
+    # Same inputs → identical output regardless of tile config: the D reduction is per lane.
+    assert_topk_equal(ids_a, scores_a, ids_b, scores_b)
 
 
 def test_compact_kernel_initialises_buffer_to_minus_one():
@@ -241,3 +228,56 @@ def test_compact_kernel_initialises_buffer_to_minus_one():
             f"row={bi}: clause_compact left non-(-1) values past counts={cnt}; "
             f"sample suffix={suffix[:5].tolist()}"
         )
+
+
+def test_row_alone_equals_row_in_batch_and_item_permutation():
+    """Row-local reduction: each row run alone equals its row in the batch; permuting the item
+    table (and remapping the candidates) permutes the ids and leaves every score unchanged. At
+    ``k = P`` so no tie run is cut by the K boundary."""
+    b, n, d = 4, 1024, 64
+    embs = make_index(n, d)
+    query = make_query(b, d)
+    pos, counts = compact_mask(make_mask(b, n, pass_rate=0.2))
+    k = pos.shape[1]
+    ids, scores = fused_masked_knn_topk(query, embs, pos, counts, k)
+    for bi in range(b):
+        one = fused_masked_knn_topk(
+            query[bi : bi + 1], embs, pos[bi : bi + 1], counts[bi : bi + 1], k
+        )
+        assert_topk_equal(*one, ids[bi : bi + 1], scores[bi : bi + 1])
+    g = torch.Generator(device="cuda").manual_seed(9)
+    perm = torch.randperm(n, generator=g, device="cuda")
+    inv = torch.argsort(perm)
+    p_ids, p_scores = fused_masked_knn_topk(query, embs[perm], inv[pos], counts, k)
+    assert_topk_equal(torch.where(p_ids >= 0, perm[p_ids.clamp_min(0)], -1), p_scores, ids, scores)
+
+
+@pytest.mark.parametrize(
+    "p,regime",
+    [
+        (_P_BUCKETS[0] - 1, "below the first bucket edge"),
+        (_P_BUCKETS[0], "on the first bucket edge"),
+        (_P_BUCKETS[0] + 1, "one past the first bucket edge"),
+        (8 * DEFAULT_CONFIG.block_n, "p % block_n == 0"),
+        (8 * DEFAULT_CONFIG.block_n + 1, "p % block_n == 1"),
+    ],
+)
+def test_across_bucket_and_tile_cutoffs(p, regime):
+    """``_impl`` launches at ``_bucket_p(p)`` and the public op at ``p``, tiled by
+    ``DEFAULT_CONFIG.block_n``: both sides of each cutoff, both entry points, against the
+    shared oracle; the two entry points agree bit for bit."""
+    if "bucket" in regime:
+        assert _bucket_p(p) == (_P_BUCKETS[0] if p <= _P_BUCKETS[0] else _P_BUCKETS[1]), regime
+    else:
+        assert p % DEFAULT_CONFIG.block_n == int(regime[-1]), regime
+    b, n, d, k = 4, 4096, 64, 16
+    embs = make_index(n, d)
+    query = make_query(b, d)
+    g = torch.Generator(device="cuda").manual_seed(p)
+    pos = torch.randint(0, n, (b, p), generator=g, device="cuda")
+    counts = torch.tensor([p, p - 1, p // 2, 1], dtype=torch.long, device="cuda")
+    ref = reference.fused_masked_knn_topk(query, embs, pos, counts, k)
+    out = fused_masked_knn_topk(query, embs, pos, counts, k)
+    # fp32 tl.sum vs bmm accumulate in different orders; measured drift <= 6e-8 at D <= 128.
+    assert_topk_matches(*out, *ref, atol=1e-6, rtol=0.0)
+    assert_topk_equal(*_fused_masked_knn_topk_impl(query, embs, pos, counts, k), *out)

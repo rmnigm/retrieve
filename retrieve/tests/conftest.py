@@ -131,10 +131,11 @@ def assert_topk_id_sets_match(
     ref_scores: torch.Tensor,
     b: int,
     *,
-    atol: float = 1e-3,
-    rtol: float = 1e-3,
+    atol: float,
+    rtol: float,
 ) -> None:
-    """Per-row id-set comparison with tie tolerance at the K-th boundary.
+    """Per-row id-set comparison with tie tolerance at the K-th boundary; no default tolerance,
+    each caller states its own.
 
     Tensor-core matmul (`tl.dot`) and torch `@` differ in accumulator order
     enough to flip the K-th-place tiebreak when two items have ~atol score

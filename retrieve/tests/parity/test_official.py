@@ -73,6 +73,57 @@ def _needs_official():
     require_official()
 
 
+# The schemas of every op the adapter calls, at the pinned sha (pyproject: 21aa35e28b6d…). A
+# different installed build fails here, before any gate reads a renamed or re-ordered argument.
+PINNED_SCHEMAS = {
+    "fused_kmean_ann": (
+        "st::fused_kmean_ann(Tensor cluster_offsets, Tensor cluster_ids, Tensor cluster_length, "
+        "Tensor embeddings, Tensor queries, int max_tensor_size_per_row, "
+        "Tensor? filtering_bit_mask=None, int invalid_index_value=-1, int divisor_for_int8=-1, "
+        "Tensor? filtering_bit_index=None, Tensor? per_embedding_scale=None) -> (Tensor, Tensor)"
+    ),
+    "fused_kmean_ann_with_partial_masks": (
+        "st::fused_kmean_ann_with_partial_masks(Tensor cluster_offsets, Tensor cluster_ids, "
+        "Tensor cluster_length, Tensor embeddings, Tensor queries, int max_tensor_size_per_row, "
+        "Tensor partial_mask_column_counts_cumsum, "
+        "Tensor partial_mask_first_item_offset_in_column, "
+        "Tensor partial_mask_column_results, int invalid_index_value=-1, int divisor_for_int8=-1, "
+        "Tensor? filtering_bit_index=None, Tensor? per_embedding_scale=None, "
+        "Tensor? cluster_warp_size=None, Tensor? cluster_warp_rounded_length_cumsum=None, "
+        "Tensor? cluster_remaining_length_cumsum=None, Tensor? cluster_warp_size_cumsum=None, "
+        "int total_cluster_rounded_warps=0, int total_cluster_remaining_warps=0) "
+        "-> (Tensor, Tensor)"
+    ),
+    "bloom_index_build": (
+        "st::bloom_index_build(Tensor feature_ids, Tensor feature_offsets, Tensor feature_values, "
+        "float b_multiplier, int k, bool fast_build=False) -> (Tensor, Tensor)"
+    ),
+    "parse_expression_query_batch": (
+        "st::parse_expression_query_batch(str[] expressions, Tensor silvertorch_ks, "
+        "int bloom_hash_k, bool return_query_plan=True, int max_sub_queries=5) -> (int, Tensor[])"
+    ),
+    "bloom_index_search_batch": (
+        "st::bloom_index_search_batch(Tensor bloom_index, Tensor bloom_bundle_b_offsets, "
+        "Tensor bloom_query_plans_data, Tensor bloom_query_plans_offsets, int k, int hash_k, "
+        "bool return_bool_mask=True) -> Tensor"
+    ),
+    "bloom_index_search_batch_return_partial_response": (
+        "st::bloom_index_search_batch_return_partial_response(Tensor bloom_index, "
+        "Tensor bloom_bundle_b_offsets, Tensor bloom_query_plans_data, "
+        "Tensor bloom_query_plans_offsets, Tensor selected_cluster_offsets, "
+        "Tensor selected_cluster_lengths, int k, int hash_k, Tensor? query_plan_index=None) "
+        "-> (Tensor, Tensor, Tensor)"
+    ),
+}
+
+
+def test_official_op_schemas_are_pinned():
+    assert sorted(PINNED_SCHEMAS) == sorted(of.REQUIRED_OPS)
+    st = torch.ops.st
+    for name, schema in PINNED_SCHEMAS.items():
+        assert str(getattr(st, name).default._schema) == schema, name
+
+
 # --- helpers ----------------------------------------------------------------------------
 
 

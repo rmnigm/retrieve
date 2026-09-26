@@ -36,7 +36,8 @@ retrieve/tests/
 │   ├── test_bit_knn_base.py        (_PackedBitsKNN base: ctor/buffers/k_bits sentinel/candidates semantics)
 │   ├── test_bloom_filter.py
 │   ├── test_bloom_hash.py          (bloom_hash builders: chunked vs loop-free equality, seed determinism)
-│   ├── test_boundary.py            (the library side of the library / harness contract: SilverTorch + LiNRV1–V4)
+│   ├── test_boundary.py            (the library side of the library / harness contract: SilverTorch + LiNRV1–V4;
+│   │                                no wide intermediate in a forward)
 │   ├── test_combine_filters.py
 │   ├── test_compact.py
 │   ├── test_filters.py             (ExactAttributeFilter)
@@ -49,7 +50,8 @@ retrieve/tests/
 │   ├── test_topk_util.py           (masked_topk / counts_to_valid)
 │   └── test_tune_smoke.py          (one tiny sweep point per tune-kernels spec, all 7; CUDA-gated)
 ├── parity/                # kernel vs pure-torch reference
-│   ├── conftest.py        # assert_topk_matches + assert_ids_equal_up_to_ties + the probe-family builders
+│   ├── conftest.py        # assert_scores_match / assert_topk_matches / assert_topk_equal /
+│   │                      # assert_ids_equal_up_to_ties, poison_empty, the probe-family builders
 │   ├── test_accumulation.py                 (every scoring kernel against an fp64 oracle)
 │   ├── test_bloom_compact.py
 │   ├── test_bloom_match.py
@@ -59,12 +61,13 @@ retrieve/tests/
 │   ├── test_codesigned_probe_score_exact.py
 │   ├── test_compact_order.py                (ascending item order, run to run and process to process)
 │   ├── test_fused_masked_knn_topk.py
-│   ├── test_official.py                     (Meta's official ops: gates T1–T7; bit-exact vs Triton on the int32 path)
+│   ├── test_official.py                     (Meta's official ops: gates T1–T7; bit-exact vs Triton on the int32 path;
+│   │                                         op schemas pinned)
 │   └── test_oporp_1bit_match_topk.py
 └── compile/               # torch.compile / torch.export gates
-    ├── test_linr_compile.py        # compiled LiNR V1–V3 × clause/bloom capture with cudagraph_skips == 0
-    ├── test_silvertorch_compile.py # compiled == eager + zero graph breaks, filter_mode × backend
-    └── test_export_kernel_ref.py   # torch.export preserves the kernel reference (triton_op)
+    ├── test_linr_compile.py        # compiled LiNR V1–V3 × clause/bloom: cudagraph_skips == 0, replays == eager
+    ├── test_silvertorch_compile.py # compiled replays == eager + zero graph breaks, filter_mode × backend
+    └── test_export_kernel_ref.py   # torch.export preserves the kernel reference (triton_op); the op-registry gates
 ```
 
 ### Oracle policy
@@ -101,20 +104,31 @@ The split is **by purpose**, not by module:
   whose oracle is fp64 rather than the torch path (a same-dtype reference
   shares the kernel's accumulation error and cannot see it).
 - `compile/` answers *"does the compile/export machinery still see the
-  kernels?"* — `test_silvertorch_compile.py` asserts the compiled
-  forward matches eager and captures with **zero graph breaks** across
+  kernels?"* — `test_silvertorch_compile.py` warms the
+  `reduce-overhead` module up on one query, then replays the captured
+  graph on two queries it was not captured on, each **bit-exact** to eager
+  (`assert_topk_equal`) with zero `cudagraph_skips`, and captures with
+  **zero graph breaks** across
   three `(filter_mode, backend, D)` rows: all three modes on `"triton"`
   at `D=64` (the official backend is eager-only by contract;
   `test_official.py` T7 asserts that it refuses to compile);
   `test_linr_compile.py` compiles the filtered LiNR variants with the
-  harness's `graph` settings and asserts `cudagraph_skips == 0`, scores
-  `torch.equal` to eager (the gate on the compaction kernels being
-  `custom_op`s, [kernels](kernels.md));
+  harness's `graph` settings, warms up five times, then replays on two new
+  queries: `cudagraph_skips == 0`, each replay's scores `torch.equal` to
+  eager on the same inputs, ids up to ties (the gate on the compaction
+  kernels being `custom_op`s, [kernels](kernels.md));
   `test_export_kernel_ref.py` exports a module
   calling `codesigned_probe_score_exact` and asserts the exported graph
   keeps a live reference to the kernel *and* replays bit-identically —
   the regression gate for the "`wrap_triton` stays textually inline"
-  invariant.
+  invariant. The same file holds the **op-registry gates**, over every
+  `retrieve::` schema registered (at least 10, asserted): each op has a
+  same-named callable in `retrieve.ops.reference` whose parameter names
+  and kinds equal the schema's; no schema declares a mutable argument;
+  every tensor input is `torch.equal` to its pre-call clone after the op
+  and after its twin; `torch.library.opcheck` passes on the two
+  `custom_op`s with a `register_fake` (`clause_compact`,
+  `bloom_compact`).
 
 A module that has both a torch and a Triton backend (like LiNR V1/V2/V3)
 appears in both trees: `test_linr.py` covers semantics, the parity
@@ -149,8 +163,9 @@ Four evaluation helpers:
   check with absolute slack; used to verify ANN recall grows with
   `n_probe`.
 - `assert_topk_id_sets_match(out_ids, out_scores, ref_ids, ref_scores,
-  b, *, atol=1e-3, rtol=1e-3)` — per-row id-set comparison with tie
-  tolerance at the K-th boundary. Used from the **correctness** tree
+  b, *, atol, rtol)` — per-row id-set comparison with tie
+  tolerance at the K-th boundary. The tolerances have no default: a
+  caller that omits them gets a `TypeError`. Used from the **correctness** tree
   (e.g. `test_linr.py`) when comparing two retrieval calls (typically
   torch backend vs Triton backend) on a specific row; symmetric-
   difference ids must lie within `atol` of their side's finite-score
@@ -178,8 +193,7 @@ A second, narrower gate covers the optional official backend:
 
 ### [`tests/parity/conftest.py`](../../retrieve/tests/parity/conftest.py)
 
-Five helpers — three fixtures that build synthetic probe layouts and
-two assertions:
+The probe-layout builders, four assertions and the poisoned allocator:
 
 - `make_probe_family(b, n_lists, max_size, n_probe, *, pad_rate=0.1,
   seed=7)` — a synthetic padded IVF layout (`padded [n_lists, max_size]`
@@ -196,13 +210,19 @@ two assertions:
 - `make_exact(n, b, *, c=2, a_max=2, reverse="none", n_vocab=8)` — item
   and query clause attrs plus the reverse flags; `reverse="mixed"` flips
   clause 0 only so one call covers both branches of the XOR.
+- `assert_scores_match(out, ref, *, atol, rtol)` — slot-wise: the
+  non-finite pattern must be identical (`isfinite`, `isnan`, the sign of
+  each infinity), finite slots within `atol + rtol·|ref|`; a failure
+  prints the mismatch count, the first slots and both values.
 - `assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores, *,
-  atol=1e-3, rtol=1e-3)` — the standard kernel-vs-torch assertion:
+  atol, rtol)` — the tolerance-based kernel-vs-torch assertion, for
+  paths that reduce in a different order:
   `assert_topk_id_sets_match` over every row (**sets** of finite-score
-  ids per row — tie-breaking on the id permutation differs between
-  backends, so position-equality is not asserted) and **sorted descending
-  scores** with `allclose` (with `-inf` replaced by 0 so padded rows still
-  compare cleanly).
+  ids per row) and the **sorted descending scores** through
+  `assert_scores_match`. No default tolerance.
+- `assert_topk_equal(out_ids, out_scores, ref_ids, ref_scores)` — the
+  bit-exact top-K gate: `assert_scores_match` at zero tolerance slot by
+  slot, then `assert_ids_equal_up_to_ties`.
 - `assert_ids_equal_up_to_ties(ids_a, ids_b, scores)` — the id half of a
   bit-exact backend comparison. The caller asserts
   `torch.equal(scores_a, scores_b)` first and passes that tensor in; ids
@@ -210,20 +230,28 @@ two assertions:
   scores whose id multisets match. `torch.topk` documents its tie order
   as "not guaranteed stable across invocations", and ties do occur in
   this data (int32 dots of ~±1e5 over P≈768 → about one tied pair per
-  row), so a tie permutation is a top-K property, not a kernel bug.
+  row), so a tie permutation is a top-K property, not a kernel bug. A tie
+  run cut by the K boundary is not covered (which tied items made it in
+  is arbitrary); a test whose inputs reorder items — the permutation
+  identities — therefore runs at `k = P`.
+- `poison_empty(monkeypatch, shape)` — patches `torch.empty` so every fp32
+  allocation of `shape` is filled with `POISON = 1e30` (outranks every
+  real score) and returns the list of hits; the poisoned-output tests
+  assert it is non-empty, so a score buffer that moved to another
+  allocator fails instead of passing vacuously.
 
-Use `assert_topk_matches` for any new parity test; do not write a
-position-equality assertion for fp32 score paths.
-
-**The one exception** is
-[`test_official.py`](../../retrieve/tests/parity/test_official.py)'s T1,
-which asserts `torch.equal` on the **scores** between the official int32
-path and the Triton kernels (and `assert_ids_equal_up_to_ties` on the
-ids). That is deliberate and stronger than the tolerance-based
-comparison: the two are provably bit-identical on scores (exact int32
-dot, boolean-identical predicate, same fp32 dequant — see
-[kernels.md](kernels.md#numerics)), so any score drift is a real
-regression rather than accumulator-order noise.
+A path that is bit-exact by construction — an integer score (popcount),
+the int8 probe scorers (exact int32 dot, the same two fp32 multiplies on
+every backend, [kernels.md](kernels.md#numerics)), a kernel against
+itself (config override, row alone vs batch, permutation, compiled vs
+eager) — uses `assert_topk_equal`: any score drift there is a real
+regression, not accumulator-order noise.
+[`test_official.py`](../../retrieve/tests/parity/test_official.py)'s T1
+does the same between the official int32 path and the Triton kernels.
+Only a path that reduces floats in a different order
+(`fused_masked_knn_topk`'s `tl.sum` vs `bmm`, an fp16 backend vs an fp32
+one) uses `assert_topk_matches`, with its tolerance and reason at the
+call site.
 
 ## Conventions
 
@@ -245,16 +273,15 @@ regression rather than accumulator-order noise.
   outputs, compare per-row `set(ids)` (or `valid_id_set`), not
   position-by-position. Tie-breaking on equal scores is implementation-
   specific and is not asserted.
-- **Score tolerance**: `atol=1e-3, rtol=1e-3` (`assert_topk_id_sets_match`
-  / `assert_topk_matches`) for every cross-backend and kernel-parity
-  comparison, `PostfilterKNN` / `PrefilterKNN` and the bit-KNNs alike —
-  `OneBitKNN`'s popcount is bit-exact, so torch and Triton scores agree
-  exactly in practice, but the test itself does not require exact
-  equality. Strict `torch.equal` is used only for path-isolated
-  comparisons on identical reductions (state-dict round trips, a
-  composite class vs. its hand-composed primitives) and for
-  `clause_mask`'s parity test, which has no compaction-order ambiguity
-  to tolerate.
+- **Score tolerance**: none by default. Exact paths (above) compare
+  with `torch.equal` / `assert_topk_equal`: the bit-KNNs torch vs Triton,
+  `SilverTorch` torch vs Triton, every probe-scorer and OPORP parity test,
+  mask-all-True ≡ unmasked. A stated tolerance remains only where the two
+  sides round differently: `fused_masked_knn_topk` vs `bmm` at
+  `atol=1e-6` (measured ≤ 6e-8), and `atol=rtol=1e-3` where one side's
+  scores are fp16 (`PrefilterKNN` torch vs Triton, `PostfilterKNN` vs
+  `PrefilterKNN`, the `B = 1` edge case) or come from the official fp16
+  path (T2 bounds it at 2⁻¹⁰ relative).
 - **Module-scope fixtures**: heavy index builds (IVF, LiNR with N>1k)
   use `@pytest.fixture(scope="module")` to amortize across the file.
   Per-test mutation of these fixtures is forbidden.
@@ -439,13 +466,11 @@ LiNR V1, V2, V3, V4 plus `SimHashKNN` in both backends.
   0.95 at K=10 on unit-norm random embeddings (the int8 quantization
   preserves topk ordering modulo per-element rounding); mask path
   returns ids satisfying the mask; small-batch `_int_mm` padding corner.
-- Cross-backend: torch ↔ Triton return identical valid-id sets per
-  row for `PostfilterKNN`, `PrefilterKNN`, `OneBitKNN`, `SimHashKNN`
-  across `pass_rate ∈ {None, 0.01, 0.1, 0.8}`, via
-  `assert_topk_id_sets_match` (set + boundary-tie tolerance,
-  `atol=1e-3`) for every one of them — including the bit-KNNs, whose
-  popcount is bit-exact so scores agree exactly in practice, though the
-  assertion itself does not require it. (For `PostfilterKNNInt8` the
+- Cross-backend: torch ↔ Triton across
+  `pass_rate ∈ {None, 0.01, 0.1, 0.8}`. The bit-KNNs (`OneBitKNN` incl.
+  `k_bits < D`, `SimHashKNN`) are `torch.equal` on scores, ids up to
+  ties; `PrefilterKNN` goes through `assert_topk_id_sets_match` at
+  `atol=rtol=1e-3` (the torch backend's scores are fp16). (For `PostfilterKNNInt8` the
   `backend=` flag is a no-op — cuBLAS LtGemm runs the same code on
   both paths.)
 - `PostfilterKNN` (mask path) ≡ `PrefilterKNN` (compact_mask of same
@@ -456,16 +481,18 @@ LiNR V1, V2, V3, V4 plus `SimHashKNN` in both backends.
 - Edge cases (`TestEdgeCases`):
   - mask-all-True ≡ unmasked path (`PostfilterKNN`,
     `PostfilterKNNInt8` × torch / Triton); all-candidates ≡ unmasked
-    for `OneBitKNN`.
+    for `OneBitKNN` — both `torch.equal` on scores, ids up to ties.
   - mask-all-False produces no finite scores.
   - `OneBitKNN` zero `counts` returns full `(-1, -inf)` sentinels.
   - `PrefilterKNN` `candidate_ids` shape `[B, 0]` returns full padding
     (`(-1, -inf)` × K).
   - `B = 1` single-query.
   - `K = N` returns every item (a permutation of `[0, N)`).
-- `reduce-overhead` compile parity: one compiled forward per family
-  matches eager with zero graph breaks
-  (`test_reduce_overhead_compile_zero_graph_breaks_and_parity`).
+- `reduce-overhead` compile parity: zero graph breaks, then after the
+  warm-up two replays on queries the graph was not captured on, each
+  `assert_topk_equal` to eager
+  (`test_reduce_overhead_compile_zero_graph_breaks_and_parity`); the
+  `fullgraph` compile tests likewise `assert_topk_equal`.
 
 - `backend` validation: every LiNR class and `ExactAttributeFilter`
   raise `ValueError("unknown backend …")` for `"official"`, `"cuda"` and a
@@ -537,8 +564,10 @@ live in `test_official.py`.
   silently skip the fused filter otherwise).
 - Cross-backend agreement: `torch` vs `triton` on all three modes plus
   reverse clauses on `filter_mode="exact"`, and `official` vs `triton` on
-  `none` / `exact` / `exact`-reverse. Layer-level cross-backend checks
-  compare **id sets** (accumulator order may flip ties); the
+  `none` / `exact` / `exact`-reverse. torch vs Triton is `torch.equal`
+  on scores, ids up to ties (the same int32 dot and fp32 dequant);
+  official vs Triton compares **id sets** at `atol=rtol=1e-3` (the
+  official default is the fp16 path); the
   kernel-level parity suite (`test_official.py` T1/T6) separately proves
   official↔triton int32 scores bit-identical on a shared index (and ids
   equal up to tie permutation).
@@ -654,6 +683,14 @@ each of `SilverTorch` (`filter_mode="exact"`), `LiNRV1`–`LiNRV4` (with an
   `LiNRV3(candidate_pool=…)` re-validates against `N`.
 - `build_timings`: the four keys in phase order, non-negative floats,
   `kmeans_s > 0`; `{}` before registration.
+- No wide intermediate: a `TorchDispatchMode` records the output shape of
+  every op a second forward dispatches; on Triton no ≥ 3-d tensor exceeds
+  `B·N` elements (a `[B, P, D]` gather or a `[B, N, C, A_max]` broadcast
+  would); the torch backend, which materializes `[B, ·, C, A_max]`, must
+  trip the same check — the control that the recorder sees anything.
+  Custom ops are opaque to the recorder (it sees the `retrieve::` call and
+  its outputs, not the kernel's own buffers), so this gates module-level
+  code only.
 
 ### [`test_tune_smoke.py`](../../retrieve/tests/correctness/test_tune_smoke.py)
 
@@ -666,24 +703,41 @@ kernel `_impl`s breaks CI instead of a tuning session.
 
 Each parity file calls one Triton kernel directly and a reference (the
 shared `ops.reference` twin or a private `_ref(...)`, per the oracle
-policy above) on the same inputs, then `assert_topk_matches` (set +
-sorted-score tolerance, `atol=1e-3, rtol=1e-3`) — except `clause_mask`,
-whose kernel has no compaction-order ambiguity to tolerate and is
-checked with plain `torch.equal` instead.
+policy above) on the same inputs, then `assert_topk_equal` (bit-exact) —
+except `fused_masked_knn_topk`, which goes through `assert_topk_matches`
+at `atol=1e-6`, and the mask / compaction kernels, which compare with
+plain `torch.equal`.
+
+The top-K kernel files (`fused_masked_knn_topk`, both probe scorers,
+OPORP) also carry, bit-exact: a **poisoned-output** test
+(`poison_empty` on the score buffer's shape, hit asserted, no `POISON` in
+the output, parity with the reference); **cutoff** runs on both sides of
+the code's own constants (`_P_BUCKETS[0]` / `_N_BUCKETS[0]` ± 1 and
+`P % DEFAULT_CONFIG.block_*` ∈ {0, 1}, the regime asserted inside the
+test); **degenerate rows** (`count = 0` → `(-1, -inf)` in every slot,
+`count = 1` → the one candidate then `(-1, -inf)`; the fused file's
+older test covers its own); **row alone ≡ row in batch**, and — on
+`fused_masked_knn_topk`, `codesigned_probe_score` and OPORP full —
+**item-table permutation** permutes the ids and leaves the scores
+equal (at `k = P`). Variant identities: OPORP indirect over `arange(N)`
+≡ full scan; `codesigned_probe_score_bloom` with an all-zero query
+signature ≡ `codesigned_probe_score`; `clause_compact` ≡
+`compact_mask(clause_mask(...))` over the full `[B, N]` width including
+the `-1` tail (`N % block_n` ∈ {0, 1}, one row passing nothing).
 
 | File | Kernel | Reference | Notes |
 |------|--------|-----------|-------|
 | [`test_fused_masked_knn_topk.py`](../../retrieve/tests/parity/test_fused_masked_knn_topk.py) | `fused_masked_knn_topk`     | `compact_mask` → gather + bmm + topk         | mirrors `PrefilterKNN._forward_prefilter` |
-| [`test_oporp_1bit_match_topk.py`](../../retrieve/tests/parity/test_oporp_1bit_match_topk.py) | `oporp_1bit_match_topk`     | `popcount_int64(xor).sum(W)` → topk          | popcount is bit-exact by construction (SWAR matches between torch and Triton), but the test still asserts through `assert_topk_matches`'s `1e-3` tolerance rather than `torch.equal` — roadmap Q3 tightens integer-exact paths to `torch.equal`; until then, treat the tolerance as what the test actually checks |
+| [`test_oporp_1bit_match_topk.py`](../../retrieve/tests/parity/test_oporp_1bit_match_topk.py) | `oporp_1bit_match_topk`     | `popcount_int64(xor).sum(W)` → topk          | popcount is bit-exact by construction (SWAR matches between torch and Triton): `assert_topk_equal`; the private oracle writes `-1` at every `-inf` slot, the op's sentinel contract |
 | [`test_bloom_match.py`](../../retrieve/tests/parity/test_bloom_match.py)                     | `bloom_match`               | `(qb & sigs) == qb` per word, AND-reduced — computed on CPU to keep the test from tautologically routing through the kernel via `BloomFilter.evaluate_mask` | parametrize on `(n, m_bits, k_hash)` |
 | [`test_bloom_compact.py`](../../retrieve/tests/parity/test_bloom_compact.py)                 | `bloom_compact`             | `compact_mask(bloom_match(qb, sigs))` with hand-built `qb` | rows equal in order (the kernel's contract is ascending item order); covers `B=1`, all-inactive query, `N < BLOCK_N`, and a routed-via-`BloomFilter.evaluate_indices` smoke check |
 | [`test_compact_order.py`](../../retrieve/tests/parity/test_compact_order.py)                 | `clause_compact`, `bloom_compact` | `ops.reference.clause_compact` / `bloom_compact` | the determinism gate: ids **and** counts `torch.equal` in order (ascending item order) over `make_exact` × reverse ∈ {none, mixed} × `(C, A_max)` and `make_bloom` × `m_bits` ∈ {256, 512, 1024}, at one tile / many tiles / a ragged last tile; the order holds under three non-default tile configs; and the same call is `torch.equal` ten launches running and in a fresh interpreter |
 | [`test_clause_mask.py`](../../retrieve/tests/parity/test_clause_mask.py)                     | `clause_mask`               | Pure-torch `[B, N, C, A_max]` broadcast inlined as `_ref_mask` | bit-exact via `torch.equal`; covers reverse clauses, all-reverse, all-inactive query, `A_max=1`, `B=1`, `N < BLOCK_N` |
 | [`test_clause_compact.py`](../../retrieve/tests/parity/test_clause_compact.py)               | `clause_compact`            | `ExactAttributeFilter.evaluate_mask(...)` + `compact_mask` (transitively goes through `clause_mask` on CUDA) | rows equal in order (ascending item order); cases for reverse clauses, all-inactive query, no-passing-items, `B=1` grid corner |
-| [`test_codesigned_probe_score.py`](../../retrieve/tests/parity/test_codesigned_probe_score.py) | `codesigned_probe_score`  | `_ref_phase23`: bloom subset + INT8 dequant + dot + topk | the SilverTorch bloom-fused path; cases for `(qb, no qb)` |
-| [`test_codesigned_probe_score_exact.py`](../../retrieve/tests/parity/test_codesigned_probe_score_exact.py) | `codesigned_probe_score_exact` | `_ref_phase23`: exact AND-of-OR predicate over narrow attrs + INT8 dequant + dot + topk | the SilverTorch exact-fused path; cases for active vs all-inactive query clauses |
+| [`test_codesigned_probe_score.py`](../../retrieve/tests/parity/test_codesigned_probe_score.py) | `codesigned_probe_score`  | `_ref_phase23`: bloom subset + INT8 dequant + dot + topk | the SilverTorch bloom-fused path; cases for `(qb, no qb)`; bit-exact |
+| [`test_codesigned_probe_score_exact.py`](../../retrieve/tests/parity/test_codesigned_probe_score_exact.py) | `codesigned_probe_score_exact` | `_ref_phase23`: exact AND-of-OR predicate over narrow attrs + INT8 dequant + dot + topk | the SilverTorch exact-fused path; cases for active vs all-inactive query clauses; bit-exact |
 | [`test_accumulation.py`](../../retrieve/tests/parity/test_accumulation.py) | `fused_masked_knn_topk`, `codesigned_probe_score`, `codesigned_probe_score_exact`, `oporp_1bit_match_topk_indirect` | **fp64** computation of the same operation on the same inputs, every candidate returned (`k = P`) and mapped back by id | the accumulation-width gate the other parity files cannot be (they compare both sides at the same input dtype, so a width defect cancels). Goodreads-like unnormalised fp16 inputs; the fp32 dot within `1e-4` abs of fp64 where an fp16 tree reduction of the same products is asserted to miss it; the int8 kernels' fp32 dequant within `1e-6` rel of fp64 where fp16 cannot hold the int32 dot; the popcount path `torch.equal` to the int64 truth |
-| [`test_official.py`](../../retrieve/tests/parity/test_official.py) | Meta's `torch.ops.st.fused_kmean_ann` / `_with_partial_masks`, `bloom_index_build`, `parse_expression_query_batch`, `bloom_index_search_batch` / `_return_partial_response` through [`ops/official/`](../../retrieve/src/retrieve/ops/official/adapter.py) | `retrieve.ops.reference`, the Triton `_impl`s (plain and exact), `clause_mask`, and the `SilverTorch` layer itself | The official parity gates T1-T7. **T1** int32 path: scores `torch.equal` vs the reference and vs Triton (plain at `D ∈ {64, 128}`, `D=96` reference-only, a 90-wide cluster for the remainder path; exact via `clause_mask` → `pack_mask` → `filtering_bit_mask`, with reverse clauses), ids up to ties after normalising `-inf` slots to the `-1` sentinel; the raw op contract (int32/int32, width `round_up(·, 32)`, `INT32_MIN`/`-1` pads, returned positions = the probed set). **T2** fp16 path: `max_rel_err ≤ 2⁻¹⁰`, no overflow, `jaccard@32 ≥ 0.99`, and `default_divisor` is the overflow bound. **T3** bit order, pinned to the measured order ([kernels](kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend); `OFFICIAL_BIT_ORDER = "high_first"`, a test-side constant the adapter's `MASK_BIT_ORDER` / `BLOOM_OUTPUT_BIT_ORDER` must equal): the packed bloom output round-trips `pack_mask` under the pinned order and not the other (README corpus, README hits reproduced); a one-doc `filtering_bit_mask` over a 70-doc cluster (docs 0 / 5 / 40 / 69: both mask words, warp and remainder paths) is honoured under the pinned order and, under the other, scores exactly the mirrored doc `63 − d % 64` of the same word (nothing when that lies past the cluster); `unpack_partial_mask` decodes under the pinned order only; pack / unpack / `reverse_bits64` round trip. **T4** official bloom ⊇ exact on the full mask and on the partial masks (which must equal the full mask on the probed docs), FPR at `b_multiplier=10` recorded and `< 5 %`; `NOT` terms have **no false positives** (⊆ exact — the guarantee flips for a complemented bloom; false-negative rate recorded); expression mapping and the LRU plan cache. **T5** `_with_partial_masks` scores `torch.equal` the full-mask scores and the unfiltered scores masked by the bloom (paper §4.3). **T6** the layer on the Triton module's transplanted index (GPU k-means is not bit-deterministic): int32 path `torch.equal` vs Triton on `none` / `exact` / `exact`-reverse (+ all-inactive queries), fp16 default `jaccard@K ≥ 0.99`, bloom (`m_bits=None`, both `bloom_path`s bit-identical to each other and to the `cache_plans=False` run) ⊆ Triton's exact top-K up to bloom false positives — both after normalising `-inf` slots to the `-1` sentinel, since the Triton epilogue leaves the padded item id there while the official one goes through `masked_topk`, state-dict key order, candidates path through `inv_perm` bit-equal to Triton, state-dict round trip, attribute-less bloom index raises on attribute queries, `k_hash > 10` rejected. **T7** `module.compile()` and a `fullgraph` `torch.compile` raise (`RuntimeError`), default-mode compile raises or matches eager; host syncs per op counted under `set_sync_debug_mode("warn")` — c10's `warn_or_error_on_sync` lines captured on fd 2 (a sync inside a C++ op never becomes a Python warning) plus Python-side warnings (aten syncs never reach fd 2), the two being disjoint — printed and recorded, asserted `> 0` for the scorer; and per `SilverTorch(backend="official")` forward on every filter path with `cache_plans` on and off (3 / 3 / 7 / 4 for none / exact / bloom-partial / bloom-full on the A100). Gated by `require_official()` |
+| [`test_official.py`](../../retrieve/tests/parity/test_official.py) | Meta's `torch.ops.st.fused_kmean_ann` / `_with_partial_masks`, `bloom_index_build`, `parse_expression_query_batch`, `bloom_index_search_batch` / `_return_partial_response` through [`ops/official/`](../../retrieve/src/retrieve/ops/official/adapter.py) | `retrieve.ops.reference`, the Triton `_impl`s (plain and exact), `clause_mask`, and the `SilverTorch` layer itself | The official parity gates T1-T7. **T1** int32 path: scores `torch.equal` vs the reference and vs Triton (plain at `D ∈ {64, 128}`, `D=96` reference-only, a 90-wide cluster for the remainder path; exact via `clause_mask` → `pack_mask` → `filtering_bit_mask`, with reverse clauses), ids up to ties after normalising `-inf` slots to the `-1` sentinel; the raw op contract (int32/int32, width `round_up(·, 32)`, `INT32_MIN`/`-1` pads, returned positions = the probed set). **T2** fp16 path: `max_rel_err ≤ 2⁻¹⁰`, no overflow, `jaccard@32 ≥ 0.99`, and `default_divisor` is the overflow bound. **T3** bit order, pinned to the measured order ([kernels](kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend); `OFFICIAL_BIT_ORDER = "high_first"`, a test-side constant the adapter's `MASK_BIT_ORDER` / `BLOOM_OUTPUT_BIT_ORDER` must equal): the packed bloom output round-trips `pack_mask` under the pinned order and not the other (README corpus, README hits reproduced); a one-doc `filtering_bit_mask` over a 70-doc cluster (docs 0 / 5 / 40 / 69: both mask words, warp and remainder paths) is honoured under the pinned order and, under the other, scores exactly the mirrored doc `63 − d % 64` of the same word (nothing when that lies past the cluster); `unpack_partial_mask` decodes under the pinned order only; pack / unpack / `reverse_bits64` round trip. **T4** official bloom ⊇ exact on the full mask and on the partial masks (which must equal the full mask on the probed docs), FPR at `b_multiplier=10` recorded and `< 5 %`; `NOT` terms have **no false positives** (⊆ exact — the guarantee flips for a complemented bloom; false-negative rate recorded); expression mapping and the LRU plan cache. **T5** `_with_partial_masks` scores `torch.equal` the full-mask scores and the unfiltered scores masked by the bloom (paper §4.3). **T6** the layer on the Triton module's transplanted index (GPU k-means is not bit-deterministic): int32 path `torch.equal` vs Triton on `none` / `exact` / `exact`-reverse (+ all-inactive queries), fp16 default `jaccard@K ≥ 0.99`, bloom (`m_bits=None`, both `bloom_path`s bit-identical to each other and to the `cache_plans=False` run) ⊆ Triton's exact top-K up to bloom false positives — both after normalising `-inf` slots to the `-1` sentinel, since the Triton epilogue leaves the padded item id there while the official one goes through `masked_topk`, state-dict key order, candidates path through `inv_perm` bit-equal to Triton, state-dict round trip, attribute-less bloom index raises on attribute queries, `k_hash > 10` rejected. **Schemas**: `str(torch.ops.st.<op>.default._schema)` equals the string pinned for 21aa35e, for exactly the adapter's `REQUIRED_OPS`. **T7** `module.compile()` and a `fullgraph` `torch.compile` raise (`RuntimeError`), default-mode compile raises or matches eager; host syncs per op counted under `set_sync_debug_mode("warn")` — c10's `warn_or_error_on_sync` lines captured on fd 2 (a sync inside a C++ op never becomes a Python warning) plus Python-side warnings (aten syncs never reach fd 2), the two being disjoint — printed and recorded, asserted `> 0` for the scorer; and per `SilverTorch(backend="official")` forward on every filter path with `cache_plans` on and off (3 / 3 / 7 / 4 for none / exact / bloom-partial / bloom-full on the A100). Gated by `require_official()` |
 
 ## Adding a new test
 
@@ -714,9 +768,9 @@ checked with plain `torch.equal` instead.
    above). Write a private `_ref(...)` pure-torch implementation instead
    only where independence from the shared twin is the point, and say why
    in the docstring.
-4. Use `from tests.parity.conftest import assert_topk_matches` for the
-   assertion; do not write a position-equality assertion for fp32 score
-   paths.
+4. Use `assert_topk_equal` from `tests.parity.conftest` when the path is
+   exact by construction, else `assert_topk_matches` with the tolerance
+   and a one-line reason at the call site.
 5. Parametrize over shape (`(b, n, d, k)` or similar) and any kernel-
    internal flag (`HAS_MASK`, `HAS_INDICES`, etc.).
 6. Cover degenerate cases: `B = 1`, `p = 0`, all-pass / all-fail

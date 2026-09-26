@@ -90,29 +90,81 @@ def assert_ids_equal_up_to_ties(
             start = end
 
 
+def assert_scores_match(out: torch.Tensor, ref: torch.Tensor, *, atol: float, rtol: float) -> None:
+    """Slot-wise score comparison: the non-finite pattern must be identical (``isfinite``,
+    ``isnan`` and the sign of every infinity), finite slots within ``atol + rtol·|ref|``. A
+    failure prints the mismatch count, the first slots and both values."""
+    assert out.shape == ref.shape, f"shape {tuple(out.shape)} vs {tuple(ref.shape)}"
+    fin_o, fin_r = torch.isfinite(out), torch.isfinite(ref)
+    bad = (fin_o != fin_r) | (out.isnan() != ref.isnan())
+    bad |= out.isinf() & ref.isinf() & (out != ref)
+    both = fin_o & fin_r
+    bad |= both & ~torch.isclose(out, ref, atol=atol, rtol=rtol)
+    if bad.any():
+        idx = bad.nonzero()[:5]
+        detail = ", ".join(
+            f"{tuple(i.tolist())}: {out[tuple(i)].item()!r} vs {ref[tuple(i)].item()!r}"
+            for i in idx
+        )
+        raise AssertionError(
+            f"{int(bad.sum())} score slots differ (atol={atol}, rtol={rtol}); first: {detail}"
+        )
+
+
 def assert_topk_matches(
     out_ids: torch.Tensor,
     out_scores: torch.Tensor,
     ref_ids: torch.Tensor,
     ref_scores: torch.Tensor,
     *,
-    atol: float = 1e-3,
-    rtol: float = 1e-3,
+    atol: float,
+    rtol: float,
 ) -> None:
     """Assert two top-K implementations agree on finite-id sets and sorted scores.
 
     Tie-breaking on the id permutation can differ between backends, so every row goes through
     ``assert_topk_id_sets_match`` (sets of finite-score ids, boundary ties within ``atol``) and
-    the *sorted* descending scores are compared with ``allclose`` (with -inf replaced by 0 so it
-    still works on padded rows).
+    the *sorted* descending scores through ``assert_scores_match`` (exact non-finite pattern,
+    finite values within tolerance). No default tolerance: each caller states its own.
     """
     for bi in range(out_ids.shape[0]):
         assert_topk_id_sets_match(
             out_ids, out_scores, ref_ids, ref_scores, bi, atol=atol, rtol=rtol
         )
-
     out_sorted, _ = out_scores.sort(dim=1, descending=True)
     ref_sorted, _ = ref_scores.sort(dim=1, descending=True)
-    out_finite = torch.where(torch.isfinite(out_sorted), out_sorted, torch.zeros_like(out_sorted))
-    ref_finite = torch.where(torch.isfinite(ref_sorted), ref_sorted, torch.zeros_like(ref_sorted))
-    assert torch.allclose(out_finite, ref_finite, atol=atol, rtol=rtol)
+    assert_scores_match(out_sorted, ref_sorted, atol=atol, rtol=rtol)
+
+
+def assert_topk_equal(
+    out_ids: torch.Tensor,
+    out_scores: torch.Tensor,
+    ref_ids: torch.Tensor,
+    ref_scores: torch.Tensor,
+) -> None:
+    """The bit-exact top-K gate: scores equal slot by slot (non-finite pattern included), ids
+    equal up to permutation within tied scores."""
+    assert_scores_match(out_scores, ref_scores, atol=0.0, rtol=0.0)
+    assert_ids_equal_up_to_ties(out_ids, ref_ids, ref_scores)
+
+
+POISON = 1e30
+
+
+def poison_empty(monkeypatch, shape: tuple[int, ...]) -> list[tuple[int, ...]]:
+    """Patch ``torch.empty`` so every fp32 allocation of ``shape`` comes back filled with
+    ``POISON`` (it outranks every real score, so an unwritten slot reaches top-K). Returns the
+    list the patched allocator appends to: a test asserts it is non-empty, which fails if the
+    kernel's score buffer moved to another allocator and the poison was never used."""
+    real_empty = torch.empty
+    hits: list[tuple[int, ...]] = []
+
+    def poisoned(*args, **kwargs):
+        t = real_empty(*args, **kwargs)
+        if t.dtype == torch.float32 and tuple(t.shape) == shape:
+            t.fill_(POISON)
+            hits.append(shape)
+        return t
+
+    monkeypatch.setattr(torch, "empty", poisoned)
+    return hits

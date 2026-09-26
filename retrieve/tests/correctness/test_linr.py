@@ -25,7 +25,7 @@ from tests.conftest import (
     make_query_attrs,
     recall_at_k,
 )
-from tests.parity.conftest import assert_ids_equal_up_to_ties
+from tests.parity.conftest import assert_ids_equal_up_to_ties, assert_topk_equal
 
 N, D, B, K = 2048, 128, 16, 200
 
@@ -121,7 +121,8 @@ class TestCrossBackendAgreement:
         ids_ref, sc_ref = ref(data["query"], candidate_ids=cand, counts=counts)
         ids_tri, sc_tri = tri(data["query"], candidate_ids=cand, counts=counts)
         for b in range(B):
-            assert_topk_id_sets_match(ids_tri, sc_tri, ids_ref, sc_ref, b)
+            # torch backend scores in fp16 (half-ulp 2^-11 near 1), Triton in fp32.
+            assert_topk_id_sets_match(ids_tri, sc_tri, ids_ref, sc_ref, b, atol=1e-3, rtol=1e-3)
 
     @pytest.mark.parametrize("mask_pass_rate", [None, 0.01, 0.1, 0.8])
     def test_one_bit_torch_matches_one_bit_triton(self, data, mask_pass_rate):
@@ -138,8 +139,9 @@ class TestCrossBackendAgreement:
             cand, counts = compact_mask(mask)
             ids_ref, sc_ref = ref(data["query"], candidate_ids=cand, counts=counts)
             ids_tri, sc_tri = tri(data["query"], candidate_ids=cand, counts=counts)
-        for b in range(B):
-            assert_topk_id_sets_match(ids_tri, sc_tri, ids_ref, sc_ref, b)
+        # Popcount scores are integers on both sides: exact.
+        assert torch.equal(sc_tri, sc_ref)
+        assert_ids_equal_up_to_ties(ids_tri, ids_ref, sc_ref)
 
     @pytest.mark.parametrize("pass_rate", [0.01, 0.1, 0.8])
     def test_postfilter_knn_matches_prefilter_topk_set(self, data, pass_rate):
@@ -153,7 +155,8 @@ class TestCrossBackendAgreement:
         ids1, sc1 = sm(data["query"], mask=mask)
         ids2, sc2 = pf(data["query"], candidate_ids=cand, counts=counts)
         for b in range(B):
-            assert_topk_id_sets_match(ids2, sc2, ids1, sc1, b)
+            # Dense fp16 scores vs gathered fp16 inputs accumulated in fp32.
+            assert_topk_id_sets_match(ids2, sc2, ids1, sc1, b, atol=1e-3, rtol=1e-3)
 
 
 # ---------------------------------------------------------------------------
@@ -201,8 +204,7 @@ class TestOneBitKNN:
         # Full-scan path.
         ids_eager, sc_eager = m(data["query"])
         ids_comp, sc_comp = compiled(data["query"])
-        torch.testing.assert_close(ids_eager, ids_comp)
-        torch.testing.assert_close(sc_eager, sc_comp)
+        assert_topk_equal(ids_comp, sc_comp, ids_eager, sc_eager)
 
         # Candidates path (mirrors the LinrV3 cascade call shape).
         g = torch.Generator(device="cuda").manual_seed(11)
@@ -210,8 +212,7 @@ class TestOneBitKNN:
         counts = torch.full((B,), 64, dtype=torch.long, device="cuda")
         ids_eager, sc_eager = m(data["query"], candidate_ids=cand, counts=counts)
         ids_comp, sc_comp = compiled(data["query"], candidate_ids=cand, counts=counts)
-        torch.testing.assert_close(ids_eager, ids_comp)
-        torch.testing.assert_close(sc_eager, sc_comp)
+        assert_topk_equal(ids_comp, sc_comp, ids_eager, sc_eager)
 
 
 # ---------------------------------------------------------------------------
@@ -234,8 +235,9 @@ class TestOneBitKNNKBitsLtD:
         assert torch.equal(ref.item_bits, tri.item_bits)
         ids_ref, sc_ref = ref(data["query"])
         ids_tri, sc_tri = tri(data["query"])
-        for b in range(B):
-            assert_topk_id_sets_match(ids_tri, sc_tri, ids_ref, sc_ref, b)
+        # Popcount scores are integers on both sides: exact.
+        assert torch.equal(sc_tri, sc_ref)
+        assert_ids_equal_up_to_ties(ids_tri, ids_ref, sc_ref)
 
     @pytest.mark.parametrize("backend", BACKENDS)
     def test_one_bit_knn_kbits_lt_d_compile_fullgraph_no_break(self, data, backend):
@@ -253,8 +255,7 @@ class TestOneBitKNNKBitsLtD:
         # Full-scan path.
         ids_eager, sc_eager = m(data["query"])
         ids_comp, sc_comp = compiled(data["query"])
-        torch.testing.assert_close(ids_eager, ids_comp)
-        torch.testing.assert_close(sc_eager, sc_comp)
+        assert_topk_equal(ids_comp, sc_comp, ids_eager, sc_eager)
 
         # Candidates path (mirrors the LinrV3 cascade call shape).
         g = torch.Generator(device="cuda").manual_seed(11)
@@ -262,8 +263,7 @@ class TestOneBitKNNKBitsLtD:
         counts = torch.full((B,), 64, dtype=torch.long, device="cuda")
         ids_eager, sc_eager = m(data["query"], candidate_ids=cand, counts=counts)
         ids_comp, sc_comp = compiled(data["query"], candidate_ids=cand, counts=counts)
-        torch.testing.assert_close(ids_eager, ids_comp)
-        torch.testing.assert_close(sc_eager, sc_comp)
+        assert_topk_equal(ids_comp, sc_comp, ids_eager, sc_eager)
 
 
 # ---------------------------------------------------------------------------
@@ -316,8 +316,7 @@ class TestSimHashKNN:
         # Full-scan path.
         ids_eager, sc_eager = m(data["query"])
         ids_comp, sc_comp = compiled(data["query"])
-        torch.testing.assert_close(ids_eager, ids_comp)
-        torch.testing.assert_close(sc_eager, sc_comp)
+        assert_topk_equal(ids_comp, sc_comp, ids_eager, sc_eager)
 
         # Candidates path.
         g = torch.Generator(device="cuda").manual_seed(11)
@@ -325,8 +324,7 @@ class TestSimHashKNN:
         counts = torch.full((B,), 64, dtype=torch.long, device="cuda")
         ids_eager, sc_eager = m(data["query"], candidate_ids=cand, counts=counts)
         ids_comp, sc_comp = compiled(data["query"], candidate_ids=cand, counts=counts)
-        torch.testing.assert_close(ids_eager, ids_comp)
-        torch.testing.assert_close(sc_eager, sc_comp)
+        assert_topk_equal(ids_comp, sc_comp, ids_eager, sc_eager)
 
 
 class TestSimHashKNNCrossBackend:
@@ -350,8 +348,9 @@ class TestSimHashKNNCrossBackend:
             cand, counts = compact_mask(mask)
             ids_ref, sc_ref = ref(data["query"], candidate_ids=cand, counts=counts)
             ids_tri, sc_tri = tri(data["query"], candidate_ids=cand, counts=counts)
-        for b in range(B):
-            assert_topk_id_sets_match(ids_tri, sc_tri, ids_ref, sc_ref, b)
+        # Popcount scores are integers on both sides: exact.
+        assert torch.equal(sc_tri, sc_ref)
+        assert_ids_equal_up_to_ties(ids_tri, ids_ref, sc_ref)
 
 
 # ---------------------------------------------------------------------------
@@ -466,8 +465,9 @@ class TestEdgeCases:
         ids_no_mask, sc_no_mask = m(data["query"])
         all_true = torch.ones(B, N, dtype=torch.bool, device="cuda")
         ids_masked, sc_masked = m(data["query"], mask=all_true)
-        for b in range(B):
-            assert_topk_id_sets_match(ids_masked, sc_masked, ids_no_mask, sc_no_mask, b)
+        # Same scorer on both paths: an all-True mask must not move a single score.
+        assert torch.equal(sc_masked, sc_no_mask)
+        assert_ids_equal_up_to_ties(ids_masked, ids_no_mask, sc_no_mask)
 
     @pytest.mark.parametrize("backend", BACKENDS)
     @pytest.mark.parametrize("cls", [PostfilterKNN, PostfilterKNNInt8])
@@ -490,8 +490,9 @@ class TestEdgeCases:
         ids_full, sc_full = m(data["query"])
         all_cand = torch.arange(N, device="cuda").unsqueeze(0).expand(B, N).contiguous()
         ids_cand, sc_cand = m(data["query"], candidate_ids=all_cand)
-        for b in range(B):
-            assert_topk_id_sets_match(ids_cand, sc_cand, ids_full, sc_full, b)
+        # Popcount scores are integers on both sides: exact.
+        assert torch.equal(sc_cand, sc_full)
+        assert_ids_equal_up_to_ties(ids_cand, ids_full, sc_full)
 
     @pytest.mark.parametrize("backend", BACKENDS)
     def test_one_bit_knn_zero_counts_returns_sentinels(self, data, backend):
@@ -549,7 +550,7 @@ class TestEdgeCases:
         # so allow boundary-tied ids to swap (scores within atol of the K-th).
         ref_full = q @ data["embs"].t()
         ref_scores, ref_ids = torch.topk(ref_full, K, dim=1)
-        assert_topk_id_sets_match(ids, scores, ref_ids, ref_scores, 0)
+        assert_topk_id_sets_match(ids, scores, ref_ids, ref_scores, 0, atol=1e-3, rtol=1e-3)
 
     @pytest.mark.parametrize("backend", BACKENDS)
     def test_k_equals_n(self, data, backend):
@@ -599,7 +600,7 @@ def test_reduce_overhead_compile_zero_graph_breaks_and_parity(data, make_mod):
     config from ``linr_v3.py:65``. Asserts zero graph breaks via
     ``torch._dynamo.explain`` (same pattern as
     ``tests/compile/test_silvertorch_compile.py:78``), then runs the
-    cudagraph-captured forward and checks parity vs eager.
+    cudagraph-captured forward on two new queries, each bit-exact to eager.
 
     Outputs of a cudagraph-captured callable alias the graph's owned
     buffers, so we ``.clone()`` before comparison.
@@ -616,13 +617,14 @@ def test_reduce_overhead_compile_zero_graph_breaks_and_parity(data, make_mod):
 
     torch._dynamo.reset()
     compiled = torch.compile(m, dynamic=True, mode="reduce-overhead")
-    # Warm + record cudagraph (first call records, subsequent replay).
+    # Warm up and record on one query, then replay on two it was not captured on.
     for _ in range(3):
         compiled(data["query"])
-    ids_eager, sc_eager = m(data["query"])
-    ids_comp, sc_comp = compiled(data["query"])
-    torch.testing.assert_close(ids_comp.clone(), ids_eager)
-    torch.testing.assert_close(sc_comp.clone(), sc_eager)
+    for seed in (21, 22):
+        q = make_query(B, D, seed=seed)
+        ids_comp, sc_comp = (t.clone() for t in compiled(q))
+        ids_eager, sc_eager = m(q)
+        assert_topk_equal(ids_comp, sc_comp, ids_eager, sc_eager)
 
 
 def test_simhash_quality_lift_over_oporp_at_higher_kbits():

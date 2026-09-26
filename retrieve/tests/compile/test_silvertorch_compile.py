@@ -21,6 +21,7 @@ from tests.conftest import (
     make_query,
     make_query_attrs,
 )
+from tests.parity.conftest import assert_topk_equal
 
 # (filter_mode, backend, D). The Triton kernels are shape-generic in D, so the cheap
 # D=64 build covers them.
@@ -46,24 +47,31 @@ def _build(filter_mode, backend, *, n=512, d=64, n_lists=16, n_probe=4, k=8, c=2
 
 @pytest.mark.parametrize("filter_mode,backend,d", MODES)
 def test_compiled_forward_matches_eager(filter_mode, backend, d):
-    """Compiled SilverTorch returns the same top-K as the eager module."""
-    torch.manual_seed(0)
+    """Warm up the ``reduce-overhead`` module on one query, then replay the captured graph on
+    two different queries: each equals eager bit for bit (scores ``torch.equal``, ids up to
+    ties), and inductor skipped no cudagraph."""
+    from torch._dynamo.utils import counters
+
     b, c = 4, 2
-
     eager = _build(filter_mode, backend, d=d)
-    query = make_query(b, eager.item_codes.shape[1])
-    q_attrs = make_query_attrs(b, c=c) if filter_mode != "none" else None
+    dim = eager.item_codes.shape[1]
 
-    eager_ids, eager_scores = eager(query, q_attrs)
+    def inputs(seed):
+        qa = make_query_attrs(b, c=c, seed=seed) if filter_mode != "none" else None
+        return make_query(b, dim, seed=seed), qa
 
+    torch._dynamo.reset()
+    skips_before = int(counters["inductor"]["cudagraph_skips"])
     compiled = torch.compile(eager, dynamic=True, mode="reduce-overhead")
-    out_ids, out_scores = compiled(query, q_attrs)
-
-    # Top-K parity: ids match exactly (same kernel, same dummies); scores
-    # bit-identical because the @triton_op body is byte-for-byte the same
-    # eager call.
-    torch.testing.assert_close(out_ids, eager_ids)
-    torch.testing.assert_close(out_scores, eager_scores)
+    for _ in range(3):
+        compiled(*inputs(1))
+    for seed in (21, 22):
+        query, q_attrs = inputs(seed)
+        # cudagraph-tree outputs are reclaimed on the next call — clone before comparing.
+        out_ids, out_scores = (t.clone() for t in compiled(query, q_attrs))
+        eager_ids, eager_scores = eager(query, q_attrs)
+        assert_topk_equal(out_ids, out_scores, eager_ids, eager_scores)
+    assert int(counters["inductor"]["cudagraph_skips"]) == skips_before
 
 
 @pytest.mark.parametrize("filter_mode,backend,d", MODES)
