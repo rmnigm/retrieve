@@ -14,6 +14,9 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
+from retrieve.ops.triton._host import wide
+from retrieve.ops.triton.common import row_base
+
 _P_BUCKETS = (256, 2048, 16384, 131072, 1048576)
 
 # Parity tests feed fp32, PrefilterKNN feeds fp16; the dot accumulates in fp32 either way.
@@ -59,6 +62,7 @@ def _fused_masked_knn_topk_kernel(
     stride_sb,
     stride_sp,
     BLOCK_N: tl.constexpr,
+    WIDE: tl.constexpr,
 ):
     # Tile on grid_x (≤ 2³¹), batch on grid_y (≤ 65535): cdiv(P, BLOCK_N) can overflow grid_y at
     # large P.
@@ -78,7 +82,7 @@ def _fused_masked_knn_topk_kernel(
     q = tl.load(query_ptr + bid * stride_qb + d_offsets * stride_qd).to(tl.float32)
 
     item_ids = tl.load(
-        pos_indices_ptr + bid * stride_pb + n_offsets * stride_pp,
+        row_base(pos_indices_ptr, bid, stride_pb, WIDE) + n_offsets * stride_pp,
         mask=in_count,
         other=0,
     )
@@ -93,7 +97,7 @@ def _fused_masked_knn_topk_kernel(
     dots = tl.where(in_count, dots, float("-inf"))
 
     tl.store(
-        out_scores_ptr + bid * stride_sb + n_offsets * stride_sp,
+        row_base(out_scores_ptr, bid, stride_sb, WIDE) + n_offsets * stride_sp,
         dots,
         mask=p_valid,
     )
@@ -165,6 +169,7 @@ def _fmkt_prep(
         stride_sb=all_scores.stride(0),
         stride_sp=all_scores.stride(1),
         BLOCK_N=cfg.block_n,
+        WIDE=wide(positive_indices, all_scores),
         num_warps=cfg.num_warps,
         num_stages=cfg.num_stages,
     )

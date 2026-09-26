@@ -9,8 +9,8 @@ from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
 from retrieve.indexing.quantize import quantize_int8
-from retrieve.ops.triton._host import ProbeLaunch, probe_finish
-from retrieve.ops.triton.common import bloom_subset_pass
+from retrieve.ops.triton._host import ProbeLaunch, probe_finish, wide
+from retrieve.ops.triton.common import bloom_subset_pass, row_base
 
 
 @dataclass(frozen=True)
@@ -53,6 +53,7 @@ def _codesigned_probe_score_kernel(
     stride_op,
     HAS_QB: tl.constexpr,
     BLOCK_P: tl.constexpr,
+    WIDE: tl.constexpr,
 ):
     # Tile on grid_x (≤ 2³¹), batch on grid_y (≤ 65535): P = n_probe × max_cluster_size can overflow
     # grid_y.
@@ -69,7 +70,7 @@ def _codesigned_probe_score_kernel(
     q_scale = tl.load(q_scales_ptr + bid * stride_qs)
 
     item_ids = tl.load(
-        flat_items_ptr + bid * stride_fb + p_off * stride_fp,
+        row_base(flat_items_ptr, bid, stride_fb, WIDE) + p_off * stride_fp,
         mask=p_valid,
         other=-1,
     ).to(tl.int64)
@@ -109,7 +110,7 @@ def _codesigned_probe_score_kernel(
     dots = tl.where(keep, dots, float("-inf"))
 
     tl.store(
-        out_scores_ptr + bid * stride_ob + p_off * stride_op,
+        row_base(out_scores_ptr, bid, stride_ob, WIDE) + p_off * stride_op,
         dots,
         mask=p_valid,
     )
@@ -185,6 +186,7 @@ def _cps_prep(
         stride_op=all_scores.stride(1),
         HAS_QB=has_qb,
         BLOCK_P=cfg.block_p,
+        WIDE=wide(flat_probed_items, all_scores),
         num_warps=cfg.num_warps,
         num_stages=cfg.num_stages,
     )

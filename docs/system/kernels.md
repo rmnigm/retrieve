@@ -196,6 +196,52 @@ counts and offsets are plain stores, so a repeated launch rewrites the
 same values); the tuner calls their host wrappers, which allocate fresh
 buffers per call either way.
 
+## Addressing
+
+Triton's `program_id` is int32, and so is every integer argument below 2³¹, so a row base
+`row * stride` is an int32 product and wraps once an address passes 2³¹ elements. Two
+classes of product reach that inside the paper's scale ladder:
+
+- **output / candidate axis**, `B·N ≥ 2³¹`: every `[B, N]`-shaped buffer a kernel indexes
+  by batch row: the `clause_mask` / `bloom_match` masks, the compaction scratch and
+  `[B, N]` result, the `[B, P]` candidate lists and score buffers of
+  `fused_masked_knn_topk`, `oporp_1bit_match_topk` and the probe scorers (B = 144 at
+  N = 15M).
+- **item axis**, `N·row_stride ≥ 2³¹`: item tables read by contiguous tile with a row
+  stride above 1: bloom signatures and OPORP bits at `N ≥ 2³¹/W` (134M at `W = 16`,
+  1.07B at `W = 2`), clause attrs at `N ≥ 2³¹/(C·A_max)` (268M at `C·A_max = 8`).
+
+**Rule.** Every kernel takes `WIDE: tl.constexpr`, set by
+[`_host.wide`](../../retrieve/src/retrieve/ops/triton/_host.py) when any tensor the kernel
+addresses holds ≥ 2³¹ elements. Batch-row bases go through `common.row_base(ptr, row,
+stride, WIDE)`, item tiles through `common.tile_rows(ptr, row0, lane, stride, WIDE)`.
+Under `WIDE` the scalar row product is int64, via `tl.assume(row, stride ≥ 0)`, so it
+lowers to one `mul.wide.u32`. The lane offsets (`tl.arange`) stay int32, relative to that
+base. Narrow, both helpers reproduce the int32 addressing the kernels always had.
+Not widened: query rows (`B·D`, `B·W`, `B·C`) and tile-count rows (`B·N/BLOCK`), which
+stay far below 2³¹ at any launchable `B`, and gathered item ids, which are loaded as
+int64 already.
+
+**Why a constexpr, not int64 everywhere.** Always-int64 was built first and measured
+([artifacts](../artifacts/kernel-opt/predictions.md)): `fused_masked_knn_topk` +7 %, since
+its 1.5M 32-lane programs pay for a full 64-bit multiply per row base. `bloom_compact` was
++13 %: 40 → 46 registers, one block per SM fewer. `clause_compact` at B = 1 was +3 %, from the
+shifted-pointer formulation itself. With the constexpr, launches below 2³¹ time within noise
+of the int32 kernels, and only launches past 2³¹ pay.
+
+**Bounds that remain.** `N`, `P` and every per-row count stay below 2³¹: the compaction
+scratch holds ids as int32, and `tile_id · BLOCK` is int32. The batch-first grids cap `B`
+at 65,535.
+
+**Gate.**
+[`tests/correctness/test_large_offsets.py`](../../retrieve/tests/correctness/test_large_offsets.py)
+runs one case per class with a planted answer: `B = 144, N = 16M` through
+`clause_mask`, `clause_compact`, `fused_masked_knn_topk` and
+`oporp_1bit_match_topk_indirect`, and one `[140M, 16]` int64 table read as bloom
+signatures, clause attrs and OPORP bits. It is skipped below 48 / 24 GiB of free
+device memory. Every widening is mutation-checked: without its int64 cast the case
+raises an illegal address or returns wrong ids.
+
 ## Shared kernel helpers (`ops/triton/common.py`)
 
 [`ops/triton/common.py`](../../retrieve/src/retrieve/ops/triton/common.py)
@@ -204,6 +250,9 @@ inlines them). Every helper is a pure function of already-loaded tiles
 or takes fully-resolved addressing from the caller — no helper decides
 its own tile shape, launch grid, or masking policy:
 
+- `row_base(ptr, row, stride, WIDE)` / `tile_rows(ptr, row0, lane, stride, WIDE)` — the
+  row-base arithmetic of [Addressing](#addressing); every kernel's `[B, ·]` row and item
+  tile goes through one of the two.
 - `popcount_int64(x) → int32` — SWAR popcount over int64 lanes; used by
   `oporp_1bit_match_topk`. Its torch twin is
   [`functional.py::popcount_int64`](../../retrieve/src/retrieve/functional.py) —
@@ -663,12 +712,20 @@ inputs:    qb     [B, W]     int64    packed query bloom signature
 output:    mask   [B, N]     bool     (qb & sigs[n]) == qb, AND over W
 ```
 
-**Launch grid** `(B, cdiv(N, BLOCK_N))`, batch on `grid_x`. It is the
-structural ancestor of `oporp_1bit_match_topk` (the popcount step is the
-only material difference in the body), but that kernel launches
-`(cdiv(N, BLOCK_N), B)`, tile axis first. Each
-program loads `qb[b, :]` once, then a `[BLOCK_N, W]` tile of `sigs`,
-and emits `[BLOCK_N]` bool to the output buffer.
+**Launch grid** `(B, tiles_y, tiles_x)` from `_host.grid_batch_tiles`, the
+same 3-D split as the clause and compaction kernels: batch on `grid_x`,
+the `cdiv(N, 128)` tiles across `grid_y × grid_z`. A 2-D grid with tiles
+on `grid_y` capped `N` at 65,535 · 128 = 8,388,480, below the tuner's own
+15M regime. It is the structural ancestor of `oporp_1bit_match_topk` (the
+popcount step is the only material difference in the body), which launches
+`(cdiv(N, BLOCK_N), B)`, tile axis first. Each program loads `qb[b, :]`
+once, then a `[BLOCK_N, W]` tile of `sigs`, and emits `[BLOCK_N]` bool to
+the output buffer.
+
+`N` stays a `tl.constexpr` (one compile per registered index). Measured
+against a runtime `N`: 1269 µs vs 1418 µs at `B = 16, N = 3M`
+([artifacts](../artifacts/kernel-opt/predictions.md)). The exact `N` is the
+only difference, and the 1-byte mask store is where the time goes.
 
 **Inner op**: the shared
 [`common.bloom_subset_pass`](../../retrieve/src/retrieve/ops/triton/common.py)
@@ -689,8 +746,8 @@ mask for `N < 128`, ~80-line file, single op). Rationale: the per-call
 width is dictated by `N`, so a Config would be tuned against exactly
 one regime; there is correspondingly no `tune-kernels` subcommand. The
 fused `bloom_compact` (next section) shares this kernel's inner
-subset-test helper and adds `clause_compact`'s two-phase compaction,
-but uses the 3D launch grid the compact kernels need at large N.
+subset-test helper and its 3-D grid, and adds `clause_compact`'s
+two-phase compaction.
 
 ## `bloom_compact` — fused subset test + stream compaction
 

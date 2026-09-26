@@ -36,6 +36,12 @@ def probe_finish(launch: ProbeLaunch, k: int) -> tuple[Tensor, Tensor]:
     return topk_ids, topk_scores
 
 
+def wide(*tensors: Tensor) -> bool:
+    """A kernel's ``WIDE`` constexpr: some tensor it addresses has ``>= 2**31`` elements, so its
+    row bases need int64 (kernels.md § Addressing)."""
+    return any(t.numel() >= 2**31 for t in tensors)
+
+
 def grid_batch_tiles(b: int, n: int, block: int) -> tuple[tuple[int, int, int], int]:
     """``((b, tiles_y, tiles_x), tiles_y)``: batch on grid_x (L2 reuse on the index), the
     ``cdiv(n, block)`` tiles split across grid_y × grid_z to dodge the 65535 single-axis cap;
@@ -77,6 +83,7 @@ def compact_finish(
         out_indices.stride(0),
         out_indices.stride(1),
         BLOCK_N=block_n,
+        WIDE=wide(scratch, out_indices),
         num_warps=num_warps,
     )
     return out_indices, tile_ends[:, -1].clone()

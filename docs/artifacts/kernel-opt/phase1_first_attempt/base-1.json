@@ -1,0 +1,151 @@
+{
+ "retrieve": "/tmp/claude-0/-scratch-wt-kernel-opt/c3c084c3-2334-44c2-82cb-148f4b88e823/scratchpad/base/retrieve/src/retrieve/__init__.py",
+ "torch": "2.10.0+cu128",
+ "triton": "3.6.0",
+ "device": "NVIDIA A100-SXM4-80GB",
+ "cases": {
+  "clause_mask_b16": {
+   "us_median": 2629.3942587716238,
+   "us_min": 2584.8914555140905,
+   "spread": 0.03711533744480126,
+   "iters": 7,
+   "sm_mhz": [
+    1410,
+    1410
+   ],
+   "unstable": false
+  },
+  "clause_mask_b1": {
+   "us_median": 218.28336100424488,
+   "us_min": 212.15586508474044,
+   "spread": 0.058237436116968556,
+   "iters": 62,
+   "sm_mhz": [
+    1410,
+    1410
+   ],
+   "unstable": true
+  },
+  "clause_compact_b16": {
+   "us_median": 1751.1423110961914,
+   "us_min": 1727.337646484375,
+   "spread": 0.018630046806300253,
+   "iters": 10,
+   "sm_mhz": [
+    1410,
+    1410
+   ],
+   "unstable": false
+  },
+  "clause_compact_b1": {
+   "us_median": 210.46686884182603,
+   "us_min": 202.51415024942426,
+   "spread": 0.30687028176962067,
+   "iters": 67,
+   "sm_mhz": [
+    1410,
+    1410
+   ],
+   "unstable": true
+  },
+  "bloom_match_b16": {
+   "us_median": 1287.2731345040459,
+   "us_min": 1274.1576603480748,
+   "spread": 0.024304803682567076,
+   "iters": 14,
+   "sm_mhz": [
+    1410,
+    1410
+   ],
+   "unstable": false
+  },
+  "bloom_compact_b16": {
+   "us_median": 2052.2098541259766,
+   "us_min": 2032.8356424967446,
+   "spread": 0.03154280030414491,
+   "iters": 9,
+   "sm_mhz": [
+    1410,
+    1410
+   ],
+   "unstable": false
+  },
+  "bloom_compact_b1": {
+   "us_median": 313.39402632279825,
+   "us_min": 280.45439286665487,
+   "spread": 1.1370159057561267,
+   "iters": 55,
+   "sm_mhz": [
+    1410,
+    1410
+   ],
+   "unstable": true
+  },
+  "fmkt_b16_k100": {
+   "us_median": 4571.000099182129,
+   "us_min": 4531.000137329102,
+   "spread": 0.09805643223164584,
+   "iters": 4,
+   "sm_mhz": [
+    1410,
+    1410
+   ],
+   "unstable": true
+  },
+  "oporp_full_b16_k5000": {
+   "us_median": 1938.464058770074,
+   "us_min": 1910.6951819525823,
+   "spread": 0.05098919067072592,
+   "iters": 9,
+   "sm_mhz": [
+    1410,
+    1410
+   ],
+   "unstable": true
+  },
+  "oporp_indirect_b16_k5000": {
+   "us_median": 7884.81076558431,
+   "us_min": 7839.5201365153,
+   "spread": 0.015108208649838108,
+   "iters": 3,
+   "sm_mhz": [
+    1410,
+    1410
+   ],
+   "unstable": false
+  },
+  "cps_none_b16": {
+   "us_median": 778.0160449800038,
+   "us_min": 765.929176693871,
+   "spread": 0.03281802438806283,
+   "iters": 21,
+   "sm_mhz": [
+    1410,
+    1410
+   ],
+   "unstable": false
+  },
+  "cps_bloom_b16": {
+   "us_median": 996.965632719152,
+   "us_min": 979.8380907844095,
+   "spread": 0.03807693826961538,
+   "iters": 17,
+   "sm_mhz": [
+    1410,
+    1410
+   ],
+   "unstable": false
+  },
+  "cps_exact_b16": {
+   "us_median": 844.0496444702148,
+   "us_min": 827.8271675109863,
+   "spread": 0.04830426567894115,
+   "iters": 20,
+   "sm_mhz": [
+    1395,
+    1410
+   ],
+   "unstable": false
+  }
+ }
+}

@@ -15,8 +15,8 @@ import triton.language as tl
 from torch import Tensor
 
 # By name, not `common.<fn>` — see the note in clause_mask.py.
-from retrieve.ops.triton._host import compact_finish, grid_batch_tiles
-from retrieve.ops.triton.common import bloom_subset_pass, compact_stash
+from retrieve.ops.triton._host import compact_finish, grid_batch_tiles, wide
+from retrieve.ops.triton.common import bloom_subset_pass, compact_stash, tile_rows
 
 
 @dataclass(frozen=True)
@@ -48,22 +48,21 @@ def _bloom_compact_kernel(
     stride_tb,
     stride_sb,
     BLOCK_N: tl.constexpr,
+    WIDE: tl.constexpr,
 ):
-    # 3D grid: batch on grid_x (L2 reuse on sigs), tiles split across grid_y × grid_z to dodge the
-    # 65535 single-axis cap; tile_id = tile_x * tiles_y + tile_y keeps tiles contiguous.
     bid = tl.program_id(0)
-    tile_y = tl.program_id(1)
-    tile_x = tl.program_id(2)
-    tile_id = tile_x * tiles_y + tile_y
-
-    n_offsets = tile_id * BLOCK_N + tl.arange(0, BLOCK_N)
+    tile_id = tl.program_id(2) * tiles_y + tl.program_id(1)
+    row0 = tile_id * BLOCK_N
+    lane = tl.arange(0, BLOCK_N)
+    n_offsets = row0 + lane
     n_valid = n_offsets < N
 
     w_off = tl.arange(0, W)
     qb = tl.load(qb_ptr + bid * stride_qb_b + w_off * stride_qb_w)  # [W]
 
+    sig_base, ids = tile_rows(sigs_ptr, row0, lane, stride_s_n, WIDE)
     sigs = tl.load(
-        sigs_ptr + n_offsets[:, None] * stride_s_n + w_off[None, :] * stride_s_w,
+        sig_base + ids[:, None] * stride_s_n + w_off[None, :] * stride_s_w,
         mask=n_valid[:, None],
         other=0,
     )  # [BLOCK_N, W]
@@ -82,6 +81,7 @@ def _bloom_compact_kernel(
         stride_tb,
         stride_sb,
         BLOCK_N,
+        WIDE,
     )
 
 
@@ -138,6 +138,7 @@ def _bloom_compact_prep(
         stride_tb=tile_counts.stride(0),
         stride_sb=scratch.stride(0),
         BLOCK_N=cfg.block_n,
+        WIDE=wide(sigs, scratch),
         num_warps=cfg.num_warps,
         num_stages=cfg.num_stages,
     )

@@ -15,7 +15,8 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
-from retrieve.ops.triton.common import popcount_int64
+from retrieve.ops.triton._host import wide
+from retrieve.ops.triton.common import popcount_int64, row_base, tile_rows
 
 # N-bucket ladder for the HAS_INDICES path: clamps candidate width to constexpr values so the JIT
 # cache compiles once per bucket × W. Full-scan uses item_bits.shape[0] directly (fixed per
@@ -61,13 +62,15 @@ def _oporp_1bit_match_topk_kernel(
     stride_sn,
     HAS_INDICES: tl.constexpr,
     BLOCK_N: tl.constexpr,
+    WIDE: tl.constexpr,
 ):
     # Tile on grid_x (≤ 2³¹), batch on grid_y (≤ 65535): cdiv(N, BLOCK_N) can overflow grid_y at
     # large N.
     tile_id = tl.program_id(0)
     bid = tl.program_id(1)
 
-    n_off = tile_id * BLOCK_N + tl.arange(0, BLOCK_N)
+    row0 = tile_id * BLOCK_N
+    n_off = row0 + tl.arange(0, BLOCK_N)
     w_off = tl.arange(0, W)
     n_valid = n_off < N
 
@@ -79,7 +82,7 @@ def _oporp_1bit_match_topk_kernel(
         # Gate pos_indices by in_count (not n_valid): with bucketed N, pos_indices has only n_loop
         # <= n_bucket columns, and in_count (count[bid] <= n_loop) never reads OOB.
         item_ids = tl.load(
-            pos_indices_ptr + bid * stride_pb + n_off * stride_pp,
+            row_base(pos_indices_ptr, bid, stride_pb, WIDE) + n_off * stride_pp,
             mask=in_count,
             other=0,
         ).to(tl.int64)
@@ -90,8 +93,9 @@ def _oporp_1bit_match_topk_kernel(
         )
         valid_score = in_count
     else:
+        bits_base, ids = tile_rows(item_bits_ptr, row0, tl.arange(0, BLOCK_N), stride_ib_n, WIDE)
         item_rows = tl.load(
-            item_bits_ptr + n_off[:, None] * stride_ib_n + w_off[None, :] * stride_ib_w,
+            bits_base + ids[:, None] * stride_ib_n + w_off[None, :] * stride_ib_w,
             mask=n_valid[:, None],
             other=0,
         )
@@ -105,7 +109,7 @@ def _oporp_1bit_match_topk_kernel(
     scores = tl.where(valid_score, scores, float("-inf"))
 
     tl.store(
-        out_scores_ptr + bid * stride_sb + n_off * stride_sn,
+        row_base(out_scores_ptr, bid, stride_sb, WIDE) + n_off * stride_sn,
         scores,
         mask=n_valid,
     )
@@ -193,6 +197,7 @@ def _oporp_prep(
         stride_sn=all_scores.stride(1),
         HAS_INDICES=has_indices,
         BLOCK_N=cfg.block_n,
+        WIDE=wide(item_bits, pos_arg, all_scores),
         num_warps=cfg.num_warps,
         num_stages=cfg.num_stages,
     )

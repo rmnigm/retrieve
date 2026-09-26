@@ -19,8 +19,8 @@ from torch import Tensor
 # By name, not `common.<fn>` — see the note in clause_mask.py: inductor's
 # re-compilation of a @triton_op kernel captures @triton.jit callees from
 # the kernel's globals by name, and a module object is not one.
-from retrieve.ops.triton._host import compact_finish, grid_batch_tiles
-from retrieve.ops.triton.common import clause_pass, compact_stash
+from retrieve.ops.triton._host import compact_finish, grid_batch_tiles, wide
+from retrieve.ops.triton.common import clause_pass, compact_stash, tile_rows
 
 
 @dataclass(frozen=True)
@@ -54,23 +54,22 @@ def _clause_compact_kernel(
     stride_tb,
     stride_sb,
     BLOCK_N: tl.constexpr,
+    WIDE: tl.constexpr,
 ):
-    # 3D grid: batch on grid_x (L2 reuse on item_attrs), tiles split across grid_y × grid_z to dodge
-    # the 65535 single-axis cap; tile_id = tile_x * tiles_y + tile_y keeps tiles contiguous.
     bid = tl.program_id(0)
-    tile_y = tl.program_id(1)
-    tile_x = tl.program_id(2)
-    tile_id = tile_x * tiles_y + tile_y
-
-    n_offsets = tile_id * BLOCK_N + tl.arange(0, BLOCK_N)
+    tile_id = tl.program_id(2) * tiles_y + tl.program_id(1)
+    row0 = tile_id * BLOCK_N
+    lane = tl.arange(0, BLOCK_N)
+    n_offsets = row0 + lane
     n_valid = n_offsets < N
 
     # Result is already ANDed with n_valid inside the helper (keep seeds from load_mask).
+    attrs_base, ids = tile_rows(item_attrs_ptr, row0, lane, stride_in, WIDE)
     pass_mask = clause_pass(
-        item_attrs_ptr,
+        attrs_base,
         is_reverse_ptr,
         query_attrs_ptr,
-        n_offsets,
+        ids,
         n_valid,
         bid,
         stride_in,
@@ -92,6 +91,7 @@ def _clause_compact_kernel(
         stride_tb,
         stride_sb,
         BLOCK_N,
+        WIDE,
     )
 
 
@@ -153,6 +153,7 @@ def _clause_compact_prep(
         stride_tb=tile_counts.stride(0),
         stride_sb=scratch.stride(0),
         BLOCK_N=cfg.block_n,
+        WIDE=wide(item_clause_attrs, scratch),
         num_warps=cfg.num_warps,
         num_stages=cfg.num_stages,
     )
