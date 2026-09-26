@@ -3,9 +3,7 @@ path, in two phases: the predicate launch writes each tile's survivor count and 
 its surviving ids, compacted, in the tile's own slot range of an int32 scratch;
 ``_host.compact_finish`` scans the counts and a second, predicate-free launch moves every run to
 ``tile_offset``. A row's ids therefore come out in **ascending item order**, ``torch.equal`` to
-``ops.reference.clause_compact`` and to itself launch after launch — the ``atomic_add`` row base
-this replaced ordered them by tile completion, which the downstream tie-breakers turned into
-run-to-run quality noise."""
+``ops.reference.clause_compact`` and to itself launch after launch."""
 
 from __future__ import annotations
 
@@ -20,6 +18,7 @@ from torch import Tensor
 # re-compilation of a @triton_op kernel captures @triton.jit callees from
 # the kernel's globals by name, and a module object is not one.
 from retrieve.ops.triton._host import (
+    CompactLaunch,
     check_contiguous,
     compact_finish,
     grid_batch_tiles,
@@ -100,24 +99,15 @@ def _clause_compact_kernel(
     )
 
 
-@dataclass(frozen=True)
-class _ClauseCompactLaunch:
-    grid: tuple[int, int, int]
-    tiles_y: int
-    kwargs: dict[str, object]  # every kernel arg: tensors, strides, constexprs, cfg
-    tile_counts: Tensor
-    scratch: Tensor
-
-
 def _clause_compact_prep(
     item_clause_attrs: Tensor,  # [N, C, A_max] int64
     clause_is_reverse: Tensor,  # [C] bool
     query_clause_attrs: Tensor,  # [B, C] int64
     *,
     cfg: ClauseCompactConfig,
-) -> _ClauseCompactLaunch:
-    """Validation + contiguity + the phase-1 buffers + the launch-arg dict. THE single place input
-    checking happens — shared by ``_clause_compact_impl`` and the public op. ``tile_counts`` and
+) -> CompactLaunch:
+    """Validation + contiguity + the phase-1 buffers + the launch-arg dict. The one place inputs
+    are checked — shared by ``_clause_compact_impl`` and the public op. ``tile_counts`` and
     ``scratch`` cover the grid's ``T = tiles_y * tiles_x`` tiles, every one of which the launch
     writes (tiles past ``cdiv(N, BLOCK_N)`` write zeros)."""
     if item_clause_attrs.dim() != 3:
@@ -162,7 +152,7 @@ def _clause_compact_prep(
         "num_warps": cfg.num_warps,
         "num_stages": cfg.num_stages,
     }
-    return _ClauseCompactLaunch(grid, tiles_y, kwargs, tile_counts, scratch)
+    return CompactLaunch(grid, tiles_y, kwargs, tile_counts, scratch)
 
 
 def _clause_compact_impl(
@@ -179,13 +169,7 @@ def _clause_compact_impl(
     launch = _clause_compact_prep(item_clause_attrs, clause_is_reverse, query_clause_attrs, cfg=cfg)
     _clause_compact_kernel[launch.grid](**launch.kwargs)
     return compact_finish(
-        launch.grid,
-        launch.tiles_y,
-        launch.tile_counts,
-        launch.scratch,
-        item_clause_attrs.shape[0],
-        block_n=cfg.block_n,
-        num_warps=cfg.num_warps,
+        launch, item_clause_attrs.shape[0], block_n=cfg.block_n, num_warps=cfg.num_warps
     )
 
 

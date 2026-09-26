@@ -60,9 +60,7 @@ def _codesigned_probe_score_exact_kernel(
     # split across grid_y × grid_z (kernels.md § SilverTorch kernels).
     bid = tl.program_id(0)
     t = tl.program_id(2) * tiles_y + tl.program_id(1)
-    pos, slot, valid, total, tail = probe_tile(
-        probe_ids_ptr, offsets_ptr, bid, t, n_probe, NPP, BLOCK_P
-    )
+    pos, slot, valid, tail = probe_tile(probe_ids_ptr, offsets_ptr, bid, t, n_probe, NPP, BLOCK_P)
     out_row = row_base(out_scores_ptr, bid, stride_ob, WIDE)
     if tail:
         # Past the row's clusters (most of the width on a skewed IVF): the -inf tail.
@@ -122,7 +120,7 @@ def _cpse_prep(
     query_clause_attrs: Tensor,
     cfg: CodesignedProbeScoreExactConfig,
 ) -> ProbeLaunch:
-    """``_host.probe_prep`` plus the clause arguments. THE single place input checking happens —
+    """``_host.probe_prep`` plus the clause arguments. The one place inputs are checked —
     shared by ``_codesigned_probe_score_exact_impl`` and the ``@triton_op`` wrapper (which keeps
     only its textually-inline ``wrap_triton`` launch)."""
     if item_clause_attrs.dim() != 3:

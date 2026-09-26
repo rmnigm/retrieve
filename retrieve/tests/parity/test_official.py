@@ -51,7 +51,7 @@ from tests.parity.conftest import (
     make_probe_family,
 )
 
-# --- bit-order pin (roadmap A3, footnote † in 00-roadmap.md §2.1) ---------------------------
+# --- bit-order pin ----------------------------------------------------------------------
 #
 # The order in which the official scorer reads a ``filtering_bit_mask`` word — and in which
 # ``bloom_index_search_batch`` packs its output — was measured on the A100 on 2026-09-06

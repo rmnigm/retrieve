@@ -98,8 +98,8 @@ def _clause_mask_prep(
     *,
     cfg: ClauseMaskConfig,
 ) -> _ClauseMaskLaunch:
-    """Validation + contiguity + output buffer + the full launch-arg dict. THE single place input
-    checking happens — shared by ``_clause_mask_impl`` and the public op."""
+    """Validation + contiguity + output buffer + the full launch-arg dict. The one place inputs
+    are checked — shared by ``_clause_mask_impl`` and the public op."""
     if item_clause_attrs.dim() != 3:
         raise ValueError("item_clause_attrs must be [N, C, A_max]")
     if query_clause_attrs.dim() != 2:

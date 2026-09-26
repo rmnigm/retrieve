@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
 
 import torch
 
@@ -184,15 +185,16 @@ def poison_empty(
     Returns the list the patched allocator appends to: a test asserts it is non-empty, which
     fails if the kernel's output buffer moved to another allocator and the poison was never
     used."""
-    real_empty = torch.empty
     hits: list[tuple[int, ...]] = []
-
-    def poisoned(*args, **kwargs):
-        t = real_empty(*args, **kwargs)
-        if t.dtype == dtype and tuple(t.shape) == shape:
-            t.fill_(value)
-            hits.append(shape)
-        return t
-
-    monkeypatch.setattr(torch, "empty", poisoned)
+    monkeypatch.setattr(
+        torch, "empty", partial(_poisoned_empty, torch.empty, shape, dtype, value, hits)
+    )
     return hits
+
+
+def _poisoned_empty(real_empty, shape, dtype, value, hits, *args, **kwargs):
+    t = real_empty(*args, **kwargs)
+    if t.dtype == dtype and tuple(t.shape) == shape:
+        t.fill_(value)
+        hits.append(shape)
+    return t

@@ -553,20 +553,19 @@ class TestBuilder:
         kw.update(filter_mode=filter_mode, **overrides)
         return SilverTorchBuilder(**kw)
 
+    def _fresh(self, data, backend, filter_mode):
+        b = self._builder(backend, filter_mode).set_item_embeddings(data["embs"])
+        if filter_mode != "none":
+            b.set_item_attributes(data["attrs"])
+        return b.build()
+
     @pytest.mark.parametrize("backend", BACKENDS)
     @pytest.mark.parametrize("filter_mode", ["none", "bloom", "exact"])
     def test_state_dict_reproduces_a_fresh_build(self, data, backend, filter_mode):
         _require_backend(backend)
-
-        def fresh():
-            b = self._builder(backend, filter_mode).set_item_embeddings(data["embs"])
-            if filter_mode != "none":
-                b.set_item_attributes(data["attrs"])
-            return b.build()
-
-        src = fresh()
+        src = self._fresh(data, backend, filter_mode)
         twin = self._builder(backend, filter_mode).set_state_dict(src.state_dict()).build()
-        again = fresh()
+        again = self._fresh(data, backend, filter_mode)
         assert twin.build_timings == {} and set(src.build_timings) == set(again.build_timings)
         assert list(twin.state_dict()) == list(again.state_dict())
         for (name, a), (_, b) in zip(again.named_buffers(), twin.named_buffers(), strict=True):

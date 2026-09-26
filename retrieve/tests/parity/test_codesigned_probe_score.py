@@ -6,6 +6,8 @@ index must answer exactly what the row-wise signatures do)."""
 
 from __future__ import annotations
 
+from functools import partial
+
 import pytest
 import torch
 
@@ -74,6 +76,10 @@ def test_codesigned_no_filters_matches_ref(n_lists, max_size, n_probe, d, k, b):
     assert_topk_equal(*out, *_oracle(query, lay, codes, gs, k))
 
 
+def _bloom_rowwise(qb, sigs, r, pos):
+    return ((qb[r] & sigs[pos]) == qb[r]).all(-1)
+
+
 @pytest.mark.parametrize(
     "n_lists,max_size,n_probe,d,k", [(64, 80, 4, 64, 16), (128, 700, 16, 128, 32)]
 )
@@ -86,11 +92,8 @@ def test_codesigned_with_bloom_matches_ref(n_lists, max_size, n_probe, d, k, b):
         query, *_args(lay, codes), qpos, bt, gs, k, lay.width
     )
     assert_topk_equal(*out, *ref)
-
-    def rowwise(r, pos):
-        return ((qb[r] & sigs[pos]) == qb[r]).all(-1)
-
-    assert_topk_equal(*out, *_oracle(query, lay, codes, gs, k, keep=rowwise))
+    keep = partial(_bloom_rowwise, qb, sigs)
+    assert_topk_equal(*out, *_oracle(query, lay, codes, gs, k, keep=keep))
     assert torch.isinf(out[1]).any() and torch.isfinite(out[1]).any(), "bloom regime not hit"
 
 

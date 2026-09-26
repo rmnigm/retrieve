@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
+from functools import partial
 from typing import Literal
 
 import torch
@@ -538,16 +540,16 @@ def _rederive_cached_scalars(module: SilverTorch, incompatible_keys) -> None:
         module._probe_width = probe_width(module.cluster_sizes, module.n_probe)
 
 
-def _lap(item_embs: Tensor):
+def _synced_clock(device: torch.device) -> float:
+    torch.cuda.synchronize(device)
+    return time.perf_counter()
+
+
+def _lap(item_embs: Tensor) -> Callable[[], float]:
     """Phase clock for ``build_timings``: device-synchronised wall seconds."""
     if not item_embs.is_cuda:
         return time.perf_counter
-
-    def lap() -> float:
-        torch.cuda.synchronize(item_embs.device)
-        return time.perf_counter()
-
-    return lap
+    return partial(_synced_clock, item_embs.device)
 
 
 class SilverTorchBuilder:

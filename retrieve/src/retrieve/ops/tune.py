@@ -11,6 +11,7 @@ import math
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, fields
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -236,9 +237,7 @@ class KernelTuneSpec:
 
     name: str  # click subcommand, e.g. "clause-mask"
     config_cls: type  # ClauseMaskConfig, ... — first dataclass field is the block size
-    # Candidate configs as positional field values: (block, num_warps) for most kernels,
-    # (block_p, num_warps, unroll) for the CUDA scorer. Entries are splatted into
-    # config_cls, so their order must match the dataclass field order.
+    # Candidate configs as positional (block, num_warps) field values, splatted into config_cls.
     grid: tuple[tuple[int, ...], ...]
     regime_labels: tuple[str, ...]  # names for the regime fields, e.g. ("N", "B", "C", "A_MAX")
     make_inputs: Callable[[torch.device, tuple[int, ...]], dict[str, Any]]  # regime → kwargs
@@ -262,7 +261,7 @@ def _config_fields(spec: KernelTuneSpec, entry: tuple[int, ...]) -> tuple[str, .
 
 
 def _fmt_entry(spec: KernelTuneSpec, entry: tuple[int, ...]) -> str:
-    """One grid entry as ``block_p=256  num_warps=4  unroll=1``, padded so the sweep log
+    """One grid entry as ``block_p=256  num_warps=4``, padded so the sweep log
     stays column-aligned across block sizes."""
     return " ".join(
         f"{name}={v:<4}" for name, v in zip(_config_fields(spec, entry), entry, strict=True)
@@ -271,8 +270,7 @@ def _fmt_entry(spec: KernelTuneSpec, entry: tuple[int, ...]) -> str:
 
 def _entry(spec: KernelTuneSpec, config: Any) -> tuple[int, ...]:
     """A config as a grid entry: its first ``len(grid entry)`` fields."""
-    names = [f.name for f in fields(spec.config_cls)][: len(spec.grid[0])]
-    return tuple(getattr(config, n) for n in names)
+    return tuple(getattr(config, n) for n in _config_fields(spec, spec.grid[0]))
 
 
 def _sm_mhz() -> int | None:
@@ -337,7 +335,7 @@ def _sweep(spec: KernelTuneSpec, dev: torch.device, regimes: tuple[tuple[int, ..
             for _ in range(3):
                 spec.run(inputs, cfg)
             torch.cuda.synchronize()
-            ms = _bench(lambda c=cfg, i=inputs: spec.run(i, c))
+            ms = _bench(partial(spec.run, inputs, cfg))
             timings[key][entry] = ms
             results.append({**dict(zip(_config_fields(spec, entry), entry, strict=True)), "ms": ms})
             click.echo(f"  [{key}] {_fmt_entry(spec, entry)}  -> {ms:.3f} ms", err=True)

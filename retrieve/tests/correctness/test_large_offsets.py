@@ -33,7 +33,7 @@ def output_axis():
     attrs = (torch.arange(n, device="cuda") % 7).view(n, 1, 1)
     qa = (torch.arange(b, device="cuda") % 7).view(b, 1)
     rev = torch.zeros(1, dtype=torch.bool, device="cuda")
-    yield b, n, attrs, rev, qa
+    return b, n, attrs, rev, qa
 
 
 def test_output_axis_clause_mask(output_axis):
@@ -85,7 +85,7 @@ def item_axis():
         [5, 2**31 // w + 3, n - 70, n - 2, n - 1], dtype=torch.int64, device="cuda"
     )
     table[marked, 0] = 1
-    yield n, table, marked
+    return n, table, marked
 
 
 def test_item_axis_bloom(item_axis):

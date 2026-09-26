@@ -24,6 +24,15 @@ class ProbeLaunch:
 
 
 @dataclass(frozen=True)
+class CompactLaunch:
+    grid: tuple[int, int, int]
+    tiles_y: int
+    kwargs: dict[str, object]  # every predicate-kernel arg: tensors, strides, constexprs, cfg
+    tile_counts: Tensor
+    scratch: Tensor
+
+
+@dataclass(frozen=True)
 class ProbeIds:
     grid: tuple[int]  # one program per row
     kwargs: dict[str, object]  # common.probe_ids_kernel's args
@@ -147,14 +156,7 @@ def grid_batch_tiles(b: int, n: int, block: int) -> tuple[tuple[int, int, int], 
 
 
 def compact_finish(
-    grid: tuple[int, int, int],
-    tiles_y: int,
-    tile_counts: Tensor,
-    scratch: Tensor,
-    n: int,
-    *,
-    block_n: int,
-    num_warps: int,
+    launch: CompactLaunch, n: int, *, block_n: int, num_warps: int
 ) -> tuple[Tensor, Tensor]:
     """Phases 2-3 of the two-phase compaction shared by ``clause_compact`` and ``bloom_compact``:
     exclusive-scan the ``[B, T]`` tile counts the predicate launch wrote (``torch.cumsum`` over
@@ -163,18 +165,19 @@ def compact_finish(
     row's tail. Returns ``(positive_indices [B, N] int64 with -1 tails, counts [B] int64)``;
     ``counts`` is a fresh tensor, not a view into the scan (inductor asserts custom-op outputs
     are aligned, and at ``B == 1`` the last column *is* contiguous)."""
+    tile_counts, scratch = launch.tile_counts, launch.scratch
     b = tile_counts.shape[0]
     tile_ends = tile_counts.cumsum(1)
     counts = tile_ends[:, -1].clone()
     out_indices = torch.empty((b, n), dtype=torch.int64, device=tile_counts.device)
-    compact_scatter_kernel[grid](
+    compact_scatter_kernel[launch.grid](
         scratch,
         tile_counts,
         tile_ends - tile_counts,
         counts,
         out_indices,
         n,
-        tiles_y,
+        launch.tiles_y,
         scratch.stride(0),
         tile_counts.stride(0),
         out_indices.stride(0),

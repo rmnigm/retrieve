@@ -25,12 +25,6 @@ from retrieve.ops.official import (
     ensure_loaded,
 )
 
-# --- layout: padded IVF → official CSR ----------------------------------------------------
-#
-# The cluster-sorted CSR (``sort_perm`` / ``inv_perm`` / ``cluster_offsets`` /
-# ``cluster_sizes``) is ``retrieve.indexing.csr_layout`` of the same assignment as the padded
-# layout, so both arms share one slot order; nothing here re-derives it.
-
 
 def default_divisor(d: int) -> int:
     """Smallest power of two ``v`` with ``127² · d / v ≤ 65504`` — the fp16 score path

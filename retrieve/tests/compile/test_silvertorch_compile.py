@@ -11,6 +11,8 @@ that it *refuses* to compile).
 
 from __future__ import annotations
 
+from functools import partial
+
 import pytest
 import torch
 from torch._dynamo.utils import counters
@@ -46,6 +48,11 @@ def _build(filter_mode, backend, *, n=512, d=64, n_lists=16, n_probe=4, k=8, c=2
     return b.build()
 
 
+def _inputs(filter_mode, b, c, dim, seed):
+    qa = make_query_attrs(b, c=c, seed=seed) if filter_mode != "none" else None
+    return make_query(b, dim, seed=seed), qa
+
+
 @pytest.mark.parametrize("filter_mode,backend,d", MODES)
 def test_compiled_forward_matches_eager(filter_mode, backend, d):
     """Warm up the ``reduce-overhead`` module on one query, then replay the captured graph on
@@ -54,12 +61,7 @@ def test_compiled_forward_matches_eager(filter_mode, backend, d):
 
     b, c = 4, 2
     eager = _build(filter_mode, backend, d=d)
-    dim = eager.item_codes.shape[1]
-
-    def inputs(seed):
-        qa = make_query_attrs(b, c=c, seed=seed) if filter_mode != "none" else None
-        return make_query(b, dim, seed=seed), qa
-
+    inputs = partial(_inputs, filter_mode, b, c, eager.item_codes.shape[1])
     torch._dynamo.reset()
     skips_before = int(counters["inductor"]["cudagraph_skips"])
     compiled = torch.compile(eager, dynamic=True, mode="reduce-overhead")
