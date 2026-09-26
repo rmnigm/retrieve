@@ -7,7 +7,7 @@ tags: [training]
 sources: [evaluation/training/, evaluation/eval_datasets/hub.py]
 ---
 
-# GSASRec checkpoints
+# Encoder checkpoints
 
 Trained on Yambda **500M** Listen+ (50% played-ratio threshold). All runs share
 the same architecture and gBCE loss; they differ in `embedding_dim` (and
@@ -48,7 +48,7 @@ Recall@10 0.0336 · Recall@100 0.1240.
 Common hyperparameters:
 ```
 num_blocks=2  num_heads=2  ffn_hidden_dim=4×embedding_dim
-max_seq_length=200  batch_size=256  negs_per_pos=256  gbce_t=0.75
+max_seq_length=200  batch_size=256  negs_per_pos=256 (per-position negatives)  gbce_t=0.75
 lr=1e-3  weight_decay=0  optimizer=AdamW (fused on cuda)
 autocast=bfloat16   tf32=on
 ```
@@ -58,7 +58,7 @@ runs with the bf16 / fused-AdamW / TF32 stack above.
 
 ## What's in each checkpoint dir
 
-- `gsasrec-ep{N}-ndcg10{X}.pt` — model `state_dict` saved at the best val epoch.
+- `gsasrec-ep{N}-ndcg10{X}.pt` — model `state_dict` saved at the best val epoch (runs of the current trainer name it `{encoder}-ep{N}-…`).
 - `best_model.pt` — same `state_dict`, copied at the end of training (or on
   manual stop). Use this one going forward.
 - `eval_quality.json` — final test metrics, `best_epoch`, `paper_target`.
@@ -69,10 +69,17 @@ runs with the bf16 / fused-AdamW / TF32 stack above.
 
 ## Loading a checkpoint
 
+`training.encode.load_model_for_eval` builds the `Encoder` from the
+sibling `config.json` (or `D128_DROP05_DEFAULTS` when there is none, as for
+`gsasrec-d128-drop0.5`) and renames the retired `GSASRec` keys
+(`encoder.layers.N.` → `blocks.N.`) on load. These published checkpoints
+were trained with the old trainer (per-position negatives); they load as
+`encoder=sasrec`.
+
 ```python
 import json, torch
 from pathlib import Path
-from training.model import GSASRec
+from training.encode import load_model_for_eval
 
 DATA_DIR = Path("data/yambda-500m")
 CKPT_DIR = DATA_DIR / "checkpoints/gsasrec-d128-drop0.5"
@@ -81,17 +88,7 @@ CKPT_DIR = DATA_DIR / "checkpoints/gsasrec-d128-drop0.5"
 with open(DATA_DIR / "item_id_map.json") as f:
     num_items = len(json.load(f))
 
-model = GSASRec(
-    num_items=num_items,
-    max_seq_length=200,
-    embedding_dim=128, num_heads=2, num_blocks=2,
-    ffn_hidden_dim=512, dropout=0.5,
-    reuse_item_embeddings=False,
-).cuda().eval()
-
-model.load_state_dict(
-    torch.load(CKPT_DIR / "best_model.pt", map_location="cuda", weights_only=True)
-)
+model = load_model_for_eval(CKPT_DIR / "best_model.pt", num_items, torch.device("cuda"))
 ```
 
 The `num_items + 1` row count of every embedding tensor reserves index 0 for
@@ -101,10 +98,11 @@ padding — never use id 0 for a real item.
 
 Two embedding tables exist on the model: the *input* item embedding (used inside
 the transformer) and the *output* embedding (used to score candidates).
-For retrieval / ranking, always use the output table.
+For retrieval / ranking, always use `scoring_table()`: the output table,
+L2-normalized when the run trained with `normalize`.
 
 ```python
-item_embs = model.get_output_embeddings().weight.detach().cpu()  # [num_items+1, D]
+item_embs = model.scoring_table().detach().cpu()                 # [num_items+1, D]
 item_embs[0, :] = 0.0                                            # zero out padding row
 torch.save(item_embs, CKPT_DIR / "item_embs.pt")
 ```
@@ -158,7 +156,7 @@ print(metrics)
 ```
 
 `evaluate()` also takes `num_workers=4` (DataLoader workers),
-`use_amp=True` (bf16 autocast on the forward pass), `max_users=None`
+`use_amp=True` (fp16 autocast on the forward pass), `max_users=None`
 (deterministic prefix subset, useful for quick iteration on the 5B
 catalog), and `score_chunk=262_144` (chunk size for the per-batch
 score matmul — drop it for OOM, raise it for throughput).
@@ -170,18 +168,13 @@ script is:
 uv run python -c "
 import json, torch
 from pathlib import Path
-from training.model import GSASRec
+from training.encode import load_model_for_eval
 from training.evaluate import evaluate
 
 DATA = Path('data/yambda-500m')
 CKPT = DATA / 'checkpoints/gsasrec-d128-drop0.5'
 n = len(json.load(open(DATA / 'item_id_map.json')))
-
-m = GSASRec(num_items=n, max_seq_length=200, embedding_dim=128,
-            num_heads=2, num_blocks=2, ffn_hidden_dim=512,
-            dropout=0.5, reuse_item_embeddings=False).cuda()
-m.load_state_dict(torch.load(CKPT / 'best_model.pt',
-                  map_location='cuda', weights_only=True))
+m = load_model_for_eval(CKPT / 'best_model.pt', n, torch.device('cuda'))
 print(evaluate(m, str(DATA / 'test.parquet'), num_items=n,
                max_length=200, batch_size=256, ks=(10, 100),
                device='cuda'))
@@ -267,7 +260,7 @@ uv run train upload-checkpoint \
 uv run train upload-checkpoint --dataset yambda-500m --ckpt-id all
 ```
 
-By default the script skips the epoch-tagged `gsasrec-ep*.pt` snapshot
+By default the script skips the epoch-tagged `gsasrec-ep*.pt` snapshot (`hub.EPOCH_SNAPSHOT_PATTERN`; it does not yet match the `{encoder}-ep*.pt` name the current trainer writes)
 because it has the same bytes as `best_model.pt` (just saved at a different
 moment in the training loop). That halves what gets pushed. Pass
 `--include-epoch-snapshots` if you want both copies. Other flags:

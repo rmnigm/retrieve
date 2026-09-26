@@ -150,7 +150,7 @@ uv run --directory evaluation bench run --dataset arxiv --dim 128 --suite filter
 uv run --directory evaluation bench campaign --suite filter --resume
 uv run --directory evaluation bench check --dataset goodreads     # validate a staged dataset's layout
 uv run --directory evaluation eval-data arxiv --help              # dataset ETL + Hub transfer (eval-data fetch|publish)
-uv run --directory evaluation train sasrec --help                 # gSASRec training; train upload-checkpoint
+uv run --directory evaluation train run --help                    # Encoder training (sasrec | hstu); train upload-checkpoint
 uv run --directory retrieve tune-kernels --help  # kernel autotune sweeps (GPU)
 ruff check retrieve evaluation && ruff format --check retrieve
 python3 scripts/check_doc_links.py

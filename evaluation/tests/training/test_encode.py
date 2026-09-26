@@ -14,7 +14,7 @@ import torch
 
 from bench.metrics import _hits, per_row
 from training import encode, evaluate
-from training.model import GSASRec
+from training.model import Encoder
 
 
 def test_training_metrics_agree_with_bench_metrics():
@@ -38,7 +38,7 @@ def _checkpoint(root: Path, num_items: int = 12) -> tuple[Path, Path]:
         "ffn_hidden_dim": 16, "dropout": 0.0, "reuse_item_embeddings": False,
     }  # fmt: skip
     torch.manual_seed(0)
-    model = GSASRec(num_items=num_items, **params)
+    model = Encoder(num_items=num_items, encoder="sasrec", **params)
     ckpt_dir = root / "checkpoints" / "tiny"
     ckpt_dir.mkdir(parents=True)
     torch.save(model.state_dict(), ckpt_dir / "best_model.pt")
