@@ -105,7 +105,7 @@ def combine_indices(
         b, p = ids.shape
         if p == 0:
             return ids, counts
-        valid = torch.arange(p, device=ids.device).unsqueeze(0) < counts.unsqueeze(1)
+        valid = counts_to_valid(counts, p)
         # ids past counts[b] are -1 (Triton) or argsort leftovers (torch); gather as 0, then
         # sub_mask & valid zeroes them out.
         safe_ids = torch.where(valid, ids, ids.new_zeros(()))

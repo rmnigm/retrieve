@@ -889,7 +889,7 @@ helper packs the sign-quantized output into `[..., W]` int64 words using
 The pure-torch hot bodies on V3's reference path —
 `project_oporp_1bit_query`
 ([`indexing/quantize.py`](../../retrieve/src/retrieve/indexing/quantize.py))
-and the reference op's `_score_full_bits`
+and the reference op's `_hamming_scores`
 ([`ops/reference/oporp_1bit_match_topk.py`](../../retrieve/src/retrieve/ops/reference/oporp_1bit_match_topk.py)) —
 are pure tensor-flow free of `.item()` and Python control flow, so the
 harness's `torch.compile(mode="reduce-overhead", dynamic=False,
@@ -900,7 +900,7 @@ into its cudagraph capture cleanly:
   Per-query OPORP projection: `multiply → index_select → sign-pack`
   (~5 small kernels in eager). Under the outer cudagraph_trees the
   launch tax collapses — measured ~2.5× speedup at B=8 and B=64.
-- **`_score_full_bits`** ([`ops/reference/oporp_1bit_match_topk.py`](../../retrieve/src/retrieve/ops/reference/oporp_1bit_match_topk.py)).
+- **`_hamming_scores`** ([`ops/reference/oporp_1bit_match_topk.py`](../../retrieve/src/retrieve/ops/reference/oporp_1bit_match_topk.py)).
   `xor → popcount → reduce` over the full corpus. The win here is
   *fusion*, not launch elision: eager materializes the `[B, N, W]` xor
   once and re-streams it through six SWAR popcount ops; Inductor fuses

@@ -11,6 +11,7 @@ from retrieve.indexing.bloom_hash import (
     build_query_bit_positions,
     build_signatures,
     build_transposed_sigs,
+    check_bloom_params,
     generate_clause_salt,
     generate_seeds,
 )
@@ -123,13 +124,7 @@ class SilverTorch(RetrievalModule):
                     "filter_mode='bloom' requires both m_bits and k_hash (m_bits is "
                     "optional on backend='official', whose width is OfficialConfig.b_multiplier)"
                 )
-            if m_bits is not None:
-                if m_bits <= 0 or (m_bits & (m_bits - 1)) != 0:
-                    raise ValueError(f"m_bits must be a positive power of 2, got {m_bits}")
-                if m_bits % 64 != 0:
-                    raise ValueError(f"m_bits must be a multiple of 64, got {m_bits}")
-            if k_hash <= 0:
-                raise ValueError(f"k_hash must be positive, got {k_hash}")
+            check_bloom_params(m_bits, k_hash)
             if backend == "official" and k_hash > official_mod.MAX_SEARCH_K:
                 raise ValueError(
                     f"k_hash must be <= {official_mod.MAX_SEARCH_K} on backend='official' "

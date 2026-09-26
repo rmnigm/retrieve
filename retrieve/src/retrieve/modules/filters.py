@@ -12,6 +12,7 @@ from retrieve.functional import bloom_subset_match, clause_subset_match
 from retrieve.indexing.bloom_hash import (
     build_query_signatures,
     build_signatures,
+    check_bloom_params,
     generate_clause_salt,
     generate_seeds,
 )
@@ -33,12 +34,7 @@ class BloomFilter(FilterModule):
     def __init__(self, m_bits: int, k_hash: int, backend: LinrBackend = "triton") -> None:
         super().__init__()
         check_backend(backend, LinrBackend)
-        if m_bits <= 0 or (m_bits & (m_bits - 1)) != 0:
-            raise ValueError(f"m_bits must be a positive power of 2, got {m_bits}")
-        if m_bits % 64 != 0:
-            raise ValueError(f"m_bits must be a multiple of 64, got {m_bits}")
-        if k_hash <= 0:
-            raise ValueError(f"k_hash must be positive, got {k_hash}")
+        check_bloom_params(m_bits, k_hash)
         self.m_bits = m_bits
         self.k_hash = k_hash
         self.word_count = m_bits // 64

@@ -69,8 +69,6 @@ def _pack_signs_to_int64(values: Tensor) -> Tensor:
 
     Bit ``b`` of word ``w`` is set iff ``values[..., 64*w + b] > 0``."""
     *prefix, d = values.shape
-    if d % 64 != 0:
-        raise ValueError(f"projected dim must be a multiple of 64, got {d}")
     w = d // 64
     bits = (values > 0).to(torch.int64)
     bits = bits.reshape(*prefix, w, 64)
@@ -88,7 +86,7 @@ def _oporp_project(x: Tensor, signs: Tensor, perm: Tensor, k_bits: int) -> Tenso
     if d % k_bits != 0:
         raise ValueError(f"k_bits must divide D; got k_bits={k_bits}, D={d}")
     if k_bits % 64 != 0:
-        raise ValueError(f"k_bits must be a multiple of 64, got {k_bits}")
+        raise ValueError(f"k_bits (D when 0) must be a multiple of 64, got {k_bits}")
     bin_w = d // k_bits
     proj = (x * signs.to(x.dtype)).index_select(1, perm)
     binned = proj.view(b_or_n, k_bits, bin_w).sum(dim=-1)
@@ -108,10 +106,7 @@ def quantize_oporp_1bit(
     2*popcount(q ^ item)."""
     if embs.dim() != 2:
         raise ValueError(f"expected 2-D [N, D] embeddings, got shape {tuple(embs.shape)}")
-    d = embs.shape[1]
-    if d % 64 != 0:
-        raise ValueError(f"D must be a multiple of 64 for 1-bit packing, got {d}")
-    signs, perm = _build_oporp(d, seed, embs.device)
+    signs, perm = _build_oporp(embs.shape[1], seed, embs.device)
     return _oporp_project(embs, signs, perm, k_bits), signs, perm
 
 

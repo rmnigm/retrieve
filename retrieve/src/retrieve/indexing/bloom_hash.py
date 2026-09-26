@@ -9,6 +9,8 @@ bit-valid across refactors, so any change here invalidates every stored index.
 
 from __future__ import annotations
 
+import math
+
 import torch
 from torch import Tensor
 
@@ -18,6 +20,18 @@ _SALT_C1 = 0x9E3779B97F4A7C15 - (1 << 64)
 _SALT_C2 = 0xBF58476D1CE4E5B9 - (1 << 64)
 
 _BUILD_SIGS_BATCH = 131072  # rows per chunk; bounds peak alloc to ~B*word_count*64*8 bytes
+
+
+def check_bloom_params(m_bits: int | None, k_hash: int) -> None:
+    """The bloom boundary check shared by ``BloomFilter`` and ``SilverTorch`` (``m_bits=None``:
+    the official backend sizes its own index)."""
+    if m_bits is not None:
+        if m_bits <= 0 or (m_bits & (m_bits - 1)) != 0:
+            raise ValueError(f"m_bits must be a positive power of 2, got {m_bits}")
+        if m_bits % 64 != 0:
+            raise ValueError(f"m_bits must be a multiple of 64, got {m_bits}")
+    if k_hash <= 0:
+        raise ValueError(f"k_hash must be positive, got {k_hash}")
 
 
 def generate_seeds(k_hash: int, device: torch.device) -> Tensor:
@@ -143,9 +157,7 @@ def build_signatures(
     alongside the index. ``clause_salt`` is the ``[C]`` buffer from
     :func:`generate_clause_salt`; ``None`` derives it on the fly (same bits)."""
     leading = attrs.shape[:-2]
-    n = 1
-    for d in leading:
-        n *= d
+    n = math.prod(leading)
     c_dim = attrs.shape[-2]
     a_max = attrs.shape[-1]
 
@@ -177,9 +189,7 @@ def build_query_signatures(
     peak alloc is fine. Pass the module's ``clause_salt`` buffer so the forward
     is free of host→device copies (see :func:`generate_clause_salt`)."""
     leading = attrs.shape[:-2]
-    n = 1
-    for d in leading:
-        n *= d
+    n = math.prod(leading)
     c_dim = attrs.shape[-2]
     a_max = attrs.shape[-1]
 
