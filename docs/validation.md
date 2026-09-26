@@ -156,7 +156,7 @@ These are data-integrity gates, not results; nothing here is citable.
 
 | gate | state | notes |
 |---|---|---|
-| G-yambda: `item_id_map.json` | **passes**: `trainer.new`, `trainer` and the Hub copy are byte-identical, sha256 `9cd9535f…6c3b02` | `/data/yambda-500m/trainer.new/` (prep 97 s, peak RSS 15.7 GB) |
+| G-yambda: `item_id_map.json` | **passes**: the re-prep (now `/data/yambda-500m/trainer`), the previous prep (`trainer.old`) and the Hub copy are byte-identical, sha256 `9cd9535f…6c3b02` | `/data/yambda-500m/trainer/` (prep 97 s, peak RSS 15.7 GB) |
 | G-yambda: `item_ids` / `targets` row for row | **train passes** (91,806 rows, `equals`); **val/test fail row for row, pass as row multisets** (45,796 / 45,932 rows; 11 and 0 rows in the same position) | Mechanism: `cmd_prep` builds val/test with `uid` joins (no `maintain_order`, no sort) and then drops `uid`, so their row order is a fresh draw each run. The old `trainer/test` and the Hub `test.parquet` differ from each other the same way (same rows, 1 in the same position). Contents are unchanged; the order is not reproducible and nothing on disk may be aligned to it by position. Not fixed (out of this step) |
 | G-yambda: `timestamps` | **passes**: `List(Int64)`, lengths equal to `item_ids` on every row, 0 rows with a decrease in train/val/test | seconds since the anonymized Yambda epoch, not unix (the raw data has no unix anchor) |
 | G-goodreads: `item_id_map.json` | **passes**: `/data/goodreads-work-id/trainer/item_id_map.json` sha256-equal to the Hub copy, `dd6b8005…107265` (797,084 items) | raw fetched fresh (books + interactions_dedup only, via parallel ranged `curl`; `eval-data goodreads download` then verified sizes, gzip and wrote the sha256 manifest), `convert` 19.5 min, `prep` 58 s at peak RSS 24.2 GB |
@@ -164,6 +164,25 @@ These are data-integrity gates, not results; nothing here is citable.
 | G-goodreads: `timestamps` | **passes**: `List(Int64)` unix seconds, lengths equal to `item_ids` on every row, 0 rows with a decrease in train (744,332) / val (190,278) / test (313,178) | |
 | KuaiRand `timestamps` | **code only**: `tests/eval_datasets/test_kuairand.py` pins the column (unix seconds, same windows as `item_ids`); no data run, raw not fetched | the staged `data/kuairand` predates the column |
 | Harness suite on `dev/hstu-etl` | **green**, 235 passed / 4 skipped, CPU (`CUDA_VISIBLE_DEVICES=""`) | |
+
+## Seqrec encoder rewrite
+
+Trainer rewrite (`evaluation/training/`, [datasets](system/datasets.md#training--evaluationtraining)).
+H100 80GB HBM3 (the pod, not the A100 above), torch 2.10.0+cu128. **Not yet validated, not
+citable.** Artifacts: [gate A](artifacts/seqrec-encoder/gate-a/),
+[gate B](artifacts/seqrec-encoder/gate-b-yambda-d64/),
+[compile A/B](artifacts/seqrec-encoder/compile/).
+
+| gate | state |
+|---|---|
+| A: published checkpoints through `load_model_for_eval` + `evaluate` reproduce `eval_quality.json` test ndcg@10 / recall@100 to 4 decimals | old and new code give **identical** numbers on all four. goodreads d64 and d128 match to 4 decimals. yambda-500m d64 and d128 **do not** (0.0846/0.1563 vs 0.0813/0.1489; 0.0811/0.1486 vs 0.0751/0.1362), before and after the change alike. Mechanism: the test split on disk is not the one those files were scored on. The d64 checkpoint re-scored on `trainer/val.parquet` gives 0.09198, which matches its own training-time best val (0.09200). `test.parquet` at the data root and under `trainer/` hold the same rows |
+| B: retrain yambda-500m d64 on the published recipe, test within ±0.002 | per-position gBCE negatives, `compile=true`, 100 epochs: test ndcg@10 **0.0837**, recall@100 **0.1558**. Against the brief's 0.0813 / 0.1489 (the stale split): +0.0024 / +0.0069, **outside**. Against the published checkpoint re-scored on the same file (0.0846 / 0.1563): −0.0009 / −0.0006, **inside**. Best val 0.0913 (published 0.0920). 10.37 s/epoch median, 8,772 seq/s, 1478 s total (A100 published run: 2809 s), peak 11.2 GB, sm_mhz 1980 |
+| B, shared negatives (plan §3) | one `[256]` negative vector per step collapses gBCE (test 0.0160 / 0.0377, 21 distinct items across 2048 users' top-10s); gBCE therefore samples per position ([mechanism](artifacts/seqrec-encoder/gate-b-yambda-d64/README.md)) |
+| `torch.compile` of the body | 3.93-4.03 s/epoch compiled against 4.8-5.9 eager (shared-negative gBCE, 3 epochs each, interleaved); kept |
+| unit gates | `tests/training/test_encoder.py`: a left-padded row stays finite and padding content does not move the last position (`sasrec`, `hstu`); `sampled_softmax_loss` equals a direct `F.cross_entropy` over explicit candidate lists; `TrainConfig` rejects an unknown `loss` and `normalize` with `gbce` (CPU) |
+
+Unverified: the `hstu` block and `sampled_softmax` beyond a 50-step smoke run and the unit gates;
+`use_time` on real timestamps (the yambda and goodreads trainer parquets now carry the column; no run has used it yet); resume (`--resume` has never run on the GPU).
 
 ## Still unverified
 

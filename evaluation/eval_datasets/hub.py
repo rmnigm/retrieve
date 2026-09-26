@@ -78,15 +78,17 @@ EVAL_IGNORE_PATTERNS: list[str] = [
     ".git/**",
 ]
 
-# `gsasrec-ep{N}-{metric}{X}.pt` is saved at the best val epoch and then copied
-# to `best_model.pt` at training end — same bytes, twice the storage. Skip the
-# epoch-tagged copy by default; pass `include_epoch_snapshots=True` to keep it.
-EPOCH_SNAPSHOT_PATTERN = "gsasrec-ep*.pt"
+# `{encoder}-ep{N}-{metric}{X}.pt` (`gsasrec-ep…` on the published runs) is saved at the
+# best val epoch and then copied to `best_model.pt` at training end — same bytes, twice the
+# storage. Skip the epoch-tagged copy by default; pass `include_epoch_snapshots=True` to keep it.
+EPOCH_SNAPSHOT_PATTERN = "*-ep*.pt"
 
 # Always-skip files in checkpoint dirs (run output, not training meta).
 CKPT_ALWAYS_IGNORE: list[str] = [
     "evaluate.json",
     "benchmark.json",
+    "_resume.pt",
+    "encoded_queries_v2.pt",
 ]
 
 

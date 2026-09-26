@@ -1,0 +1,42 @@
+[
+  {
+    "ckpt": "/data/goodreads-work-id/checkpoints/gsasrec-d64-drop0.5-id",
+    "data": "/data/goodreads-work-id",
+    "ndcg@10": 0.035028496290611146,
+    "ndcg@10_ref": 0.03503235324805486,
+    "ndcg@10_match4": true,
+    "recall@100": 0.1486201141660597,
+    "recall@100_ref": 0.1486116848964051,
+    "recall@100_match4": true
+  },
+  {
+    "ckpt": "/data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id",
+    "data": "/data/goodreads-work-id",
+    "ndcg@10": 0.036056939429130214,
+    "ndcg@10_ref": 0.03605539798737048,
+    "ndcg@10_match4": true,
+    "recall@100": 0.1479881919866512,
+    "recall@100_ref": 0.1479926924446184,
+    "recall@100_match4": true
+  },
+  {
+    "ckpt": "/data/yambda-500m/checkpoints/gsasrec-d64-drop0.5",
+    "data": "/data/yambda-500m",
+    "ndcg@10": 0.08461215706782366,
+    "ndcg@10_ref": 0.0812508812269742,
+    "ndcg@10_match4": false,
+    "recall@100": 0.15633528091754978,
+    "recall@100_ref": 0.14892254260171542,
+    "recall@100_match4": false
+  },
+  {
+    "ckpt": "/data/yambda-500m/checkpoints/gsasrec-d128-drop0.5",
+    "data": "/data/yambda-500m",
+    "ndcg@10": 0.08110437453763779,
+    "ndcg@10_ref": 0.0751,
+    "ndcg@10_match4": false,
+    "recall@100": 0.1485724161584776,
+    "recall@100_ref": 0.1362,
+    "recall@100_match4": false
+  }
+]

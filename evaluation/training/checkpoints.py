@@ -44,7 +44,7 @@ def _resolve_ckpt_ids(dataset: str, selector: str) -> list[str]:
 @click.option("--private/--public", default=True, help="Repo visibility (default: private).")
 @click.option("--dry-run", is_flag=True, help="List files without uploading.")
 @click.option("--write-card/--no-write-card", default=True, help="Generate README.md if absent.")
-@click.option("--include-epoch-snapshots", is_flag=True, help="Keep gsasrec-ep*.pt snapshots.")
+@click.option("--include-epoch-snapshots", is_flag=True, help="Keep *-ep*.pt snapshots.")
 def upload_checkpoint(
     dataset: str,
     ckpt_id: str,
