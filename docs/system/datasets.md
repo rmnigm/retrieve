@@ -239,6 +239,26 @@ Embeddings are written per dimension:
 A dataset config selects one per dim through its `content_dir` mapping
 ([evaluation](evaluation.md#config-one-yaml-per-dataset--suitesyaml)).
 
+**Filter attributes.** The published `item_attrs_narrow.pt` is the legacy
+`[N+1, 4, 4]` layout (pad row 0, dropped by the loader): C0 main category,
+C1 license bucket (`license_vocab.json`, 11 buckets), C2 update-year
+bucket, C3 version-count bucket. The current `attrs` step writes
+`[N, 5, 4]` instead (no pad row, a C4 top-2 author clause), so re-running
+it does not reproduce the published file; the published one is what
+`config/arxiv.yaml`'s `all4` sweep reads.
+
+Every `map_elements` over a nullable column passes `skip_nulls=False`.
+polars (1.40.1 here) skips nulls by default, so the helper's `None`
+branch never ran and the result stayed null, which `.to_numpy()
+.astype(np.int64)` turns into INT64_MIN. That hit C1: the 452,732 papers
+with a null license (15.1 %) carried INT64_MIN in the published file, and
+so did the 1,528 `eval_split.parquet` queries whose target is one of them,
+instead of bucket 9 `none`. C2 and C3 had the same latent pattern, but
+the source has no nulls there. The corrected C1 is re-derived by
+[`patch_license_clause.py`](../artifacts/arxiv-etl-fix/patch_license_clause.py),
+which rewrites only C1 and the matching query column and asserts that every
+non-null item's bucket is unchanged.
+
 ### yfcc10m
 
 `download` → `convert` → `prep` → `attrs`, or
