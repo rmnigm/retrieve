@@ -756,16 +756,24 @@ def cmd_attrs(args) -> int:
         .cast(pl.Int64, strict=False)
         .alias("year_int"),
         pl.col("versions")
-        .map_elements(_versions_count, return_dtype=pl.Int64)
+        .map_elements(_versions_count, return_dtype=pl.Int64, skip_nulls=False)
         .alias("vcount"),
     ).with_columns(
-        pl.col("year_int").map_elements(_year_to_bucket, return_dtype=pl.Int64).alias("year_id"),
-        pl.col("vcount").map_elements(_versions_to_bucket, return_dtype=pl.Int64).alias("ver_id"),
+        pl.col("year_int")
+        .map_elements(_year_to_bucket, return_dtype=pl.Int64, skip_nulls=False)
+        .alias("year_id"),
+        pl.col("vcount")
+        .map_elements(_versions_to_bucket, return_dtype=pl.Int64, skip_nulls=False)
+        .alias("ver_id"),
     ).select("item_id", "year_id", "ver_id")
 
     # ---- C1 license bucket per paper -------------------------------------
+    # skip_nulls=False: a null license is the "none" bucket, not a null that
+    # to_numpy() turns into INT64_MIN (docs/system/datasets.md § arxiv).
     plic = papers.with_columns(
-        pl.col("license").map_elements(_license_to_bucket, return_dtype=pl.Int64).alias("lic_id"),
+        pl.col("license")
+        .map_elements(_license_to_bucket, return_dtype=pl.Int64, skip_nulls=False)
+        .alias("lic_id"),
     ).select("item_id", "lic_id")
 
     # ---- per-paper main-cat id -------------------------------------------
