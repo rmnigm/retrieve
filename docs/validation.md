@@ -127,28 +127,34 @@ explains the mechanism behind the kernel-only split.
   FPR against width (both blooms showed zero false positives, so S8 needs
   roadmap D3), seeds 1-2, k in {500, 1000}.
 
-## Campaign (roadmap D1): not yet validated
+## Campaign (roadmap D1): in progress, not yet validated
 
-- Goodreads `filter` leg: 126 of 126 cells `ok` on the grid of
-  [decisions](decisions.md#harness). Quality numbers are not yet
-  validated, and the report marks the leg not citable (narrowed mode set).
-- arXiv leg, seeds 1-2, the `deep` suite and the `codesign` suite (S9) cells:
-  not run.
-- `codesign` (S9) wiring: `bloom_path` reaches `OfficialConfig` (unit tests
-  in `test_algos.py` / `test_config.py`), and one end-to-end job ran on
-  goodreads d128 `c0_genre`, `n_lists 1664`, `n_probe 32`, narrowed to
-  `k 1000` (the cached oracle), bs {1, 16}: both arms `ok` apart from the
-  narrowing, quality identical (`recall_oracle@1000` 0.78101 both). Eager
-  median, partial vs full: bs 1 1.09 vs 0.88 ms, bs 16 1.24 vs 1.05 ms;
-  `peak_fwd_mib` bs 16 19.8 vs 21.3. One seed, one sweep, unlocked clocks
-  (1305-1410 MHz): a smoke run, not a result, and the opposite latency
-  order to the paper's §4.4 is not yet a finding.
-- Measured cost: about 530 s per cell, of which about 330 s is the fixed
-  cost of nine `torch.compile` + CUDA-graph captures per cell; the timing
-  windows themselves take about 125 s (eager) and 68 s (graph). Graph is
-  1.84× faster than eager at the median.
-- Instability: 3-5 % of perf entries are `unstable` (window spread over
-  5 %), 98.6 % of them at batch 1 or 8, almost all in eager mode.
+`filter` legs done, in scale order: goodreads (105/105 ok), arxiv (126/126
+ok, after the license-clause fix and its all4 rerun), yfcc10m (7/7 ok, L4
+confirmed working at D=192), pubmed (44/56 ok — see [datasets](#datasets)
+for the `linr_v3` OOM and the 6 h timeout gaps). All four are on the Hub
+(`d1/<dataset>`), NOT CITABLE (D1's gate is not green). `deep` and
+`codesign` (S9) are running on arxiv, then goodreads.
+
+A cross-scale filter comparison across all four datasets (same operating
+point, same completed cells per arm) is in the `campaign-d1` chain,
+2026-09-28 — not reproduced here since it is not yet citable and this
+page tracks current state, not campaign narrative. Headline shape: exact
+LiNR (V1, V2) holds ~0.998-0.9997 recall at every scale measured;
+SilverTorch triton stays sub-millisecond at bs=1 through 10M items at
+D=192 then rises to 3-4 ms at D=768; SilverTorch's recall at fixed
+`n_probe` falls with scale (not scale-invariant — the `deep` sweep's
+`n_probe` curves are the right place to read this); official vs triton
+SilverTorch are within 1e-4 recall except on yfcc10m (official ~0.01
+lower), and official is slower everywhere except pubmed, where it
+overtakes triton at bs=16 QPS (598 vs 359) — worth investigating for the
+report, not yet done.
+
+`codesign` (S9) wiring: `bloom_path` reaches `OfficialConfig` (unit tests
+in `test_algos.py` / `test_config.py`); one early smoke cell (pre-dating
+the real `codesign` suite run) found `full` faster than `partial` on one
+goodreads cell, one seed, unlocked clocks — not a finding, the real
+`codesign` suite run (in progress) supersedes it.
 
 ## Datasets
 
@@ -157,7 +163,7 @@ explains the mechanism behind the kernel-only split.
 | goodreads | staged, layout checked, oracles built |
 | arxiv | staged, layout checked. **Clause 1 (license) was corrupt** (`dev/arxiv-etl-fix`, merged 2026-09-27): 452,732 null-license items (15.1 %) and 1,528 of the 10,000 queries carried INT64_MIN instead of bucket `none` ([datasets](system/datasets.md#arxiv)), corrupting every recorded `all4` cell's attribute space (the other sweeps don't read clause 1). **Fixed and installed**: the patched `item_attrs_narrow.pt`/`eval_split.parquet` are live in `/data/arxiv-papers` (verified independently: exactly 452,732 cells changed, all in clause 1, every other cell byte-identical, `bench check` ok at d64/128/256) and republished to `pinkmeme/eval-arxiv-papers`. Pre-fix originals kept as `*.pre-license-fix.bak` in `/data/arxiv-papers`. **Every arxiv `all4` cell recorded before this fix (in `d1/arxiv` on the Hub) is stale and not citable** until re-run under the corrected attrs — `--resume` won't catch this on its own since those cells are `ok`, not `failed`; needs an explicit forced rerun of just the `all4` sweep (42 cells) |
 | yfcc10m | our exact oracle reproduces the shipped filtered ground truth. **The exact-algorithm gate passes since L1**: `linr_v1_filter_mask`/triton clause `tags_and`, eager, `--skip-perf`, 10,000 queries: `recall_oracle@1000` **0.9944** (0.9652 and `QualityGateError` on the pre-L1 tree, same command); `LiNRV2(backend="torch")` against the same oracle blob 0.9944 (script). `linr_v2`/triton could not run at d192 before L4's padding (row *Non-power-of-two widths*); not yet run here since. The residual 0.006 is the fp16 item storage: an fp32 table gives 1.0 ([artifact](artifacts/l1-l2/README.md)); not yet validated beyond this one cell |
-| pubmed | 10 M slice staged locally (A100 box, 2026-09-26), not on the Hub: `bench check` passes, the exact `c0_mesh` oracle is built (pass rate 0.0002). One filter cell, `linr_v1_filter_mask`/triton clause `c0_mesh`, eager, `--skip-perf` (so `partial`): `recall_oracle@1000` 0.9991, held-out `recall@100` 0.9989, n = 8,428. SilverTorch's global int8 quantize OOM is fixed (chunked build, kernel-opt pass); `official` builds and queries (recall@100 0.664/0.709 at n_probe 24/32, held-out recall@100 0.842/0.880, quality-only); SilverTorch-`triton` and LiNR V2/V3 hit the Triton power-of-two `D` limit at native 768 before L4's padding (row *Non-power-of-two widths*), not yet run here since; not yet validated ([artifacts](artifacts/e2-pubmed/), [artifacts](artifacts/kernel-opt/pubmed/)) |
+| pubmed | 10 M slice staged locally (A100 box, 2026-09-26), on the Hub as `d1/pubmed` since D1's filter leg (2026-09-28). D=768 (L4-padded): `linr_v1_filter_mask`, `linr_v2`, `silvertorch` (triton + official) all run; `linr_v2` recall_oracle@100 0.998, matching V1. `linr_v3` **cannot build at this scale**: `torch.OutOfMemoryError` on every cell, a deterministic extra 28.61 GiB (one more full 10M × 768 fp32 copy) on top of 59 GiB already in use — a real library memory defect, not a data or config issue (roadmap, Known defects). 52/56 filter cells recorded (44 ok, 8 `linr_v3` OOM, 4 never ran — `linr_v2` ×1 and `silvertorch/triton` ×3 hit the campaign's 6 h per-group timeout, itself too short for D=768 × 10M cells at 20-46 min each); the 4 missing cells are a pending resume pass, not yet run. NOT CITABLE (D1's gate is not green) |
 | openalex | 10 M slice staged locally (A100 box, 2026-09-26; OpenAlex fallback for Semantic Scholar SPECTER2, no API key), not on the Hub: `bench check` passes. One filter cell, `linr_v1_filter_mask`/triton clause `field_era`, eager, `--skip-perf` (`partial`): `recall_oracle@1000` 0.9959, held-out `recall@100` 0.505, `recall@1000` 0.741, n = 10,000. Scoped down from an initial 15 M encode after `bench/oracle.py`'s `item_embs.t().contiguous()` OOMed at that size (a second full fp32 copy on top of the item table; the real 768-d limit is ~11-12 M, not 15 M) — 10 M items resharded from the already-encoded 15 M vectors (`torch.equal`-verified), matching the pubmed precedent. SilverTorch-`triton` and LiNR V2/V3 were blocked by the power-of-two `D` limit as on pubmed until L4, not yet run here since; not yet validated ([artifacts](artifacts/e3-openalex/)) |
 | kuairand | staged locally (A100 box, 2026-09-26); the dataset files are not on the Hub, the gSASRec checkpoint `gsasrec-d128-shared` is (private, `pinkmeme/eval-kuairand`). `bench check` passes. Trained with one shared item table, `--negs-per-pos 128` (256 OOMs), measured peak 82.9 GB allocated; stopped by patience 5 after epoch 18, best val NDCG@10 0.0361 at epoch 13, test NDCG@10 0.0088 / Recall@100 0.0024 (the 4× val→test drop is partly item cold start, 55 % of test targets never clicked in train; the rest is unexplained). One filter cell, `linr_v1_filter_mask`/triton clause `t_cat1`, eager, `--skip-perf` (`partial`): pass rate 0.0362, `recall_oracle@1000` 0.9996, held-out `recall@100` 0.020, `recall@1000` 0.064, n = 9,910; not yet validated ([artifacts](artifacts/e4-kuairand/)) |
 

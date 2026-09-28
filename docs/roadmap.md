@@ -191,6 +191,21 @@ in records, commits and code comments; they are not renumbered.
   [validation](validation.md#datasets)). A view instead of a contiguous
   copy would remove the second copy; `bench/` is gated, so this needs
   its own check against the existing oracle results and golden cells.
+- **LiNR V3 cannot build at pubmed scale (10 M × D=768): deterministic
+  `torch.OutOfMemoryError`**, an extra 28.61 GiB (one more full-corpus
+  fp32 copy) on top of 59 GiB already in use, on every cell (D1's pubmed
+  filter leg, 2026-09-28). First hit now that L4 unblocked V3's op
+  boundary at D=768; not a data or config problem. Same family as the
+  `bench/oracle.py` second-copy defect above, but in V3's own build path,
+  not the harness — needs its own investigation of what V3's build
+  allocates twice ([validation](validation.md#datasets)).
+- **The campaign's default `bench campaign --timeout` (6 h per group) is
+  too short for D=768 × 10 M-item groups**: individual cells there take
+  20-46 min, so a `silvertorch`/`linr_v2` group with many cells routinely
+  exceeds it, losing whatever cells hadn't finished (recoverable by
+  `--resume`, but it costs a manual follow-up pass rather than finishing
+  clean). Worth a larger default or a dataset-scaled timeout before the
+  next campaign this size runs.
 - The shared Inductor cache (`/tmp/torchinductor_root`) does not
   invalidate on a `code_version` change, so a graph-mode harness run
   after a library edit can silently replay stale kernel code (found
