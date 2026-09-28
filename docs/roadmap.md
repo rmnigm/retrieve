@@ -200,12 +200,14 @@ in records, commits and code comments; they are not renumbered.
   not the harness — needs its own investigation of what V3's build
   allocates twice ([validation](validation.md#datasets)).
 - **The campaign's default `bench campaign --timeout` (6 h per group) is
-  too short for D=768 × 10 M-item groups**: individual cells there take
-  20-46 min, so a `silvertorch`/`linr_v2` group with many cells routinely
-  exceeds it, losing whatever cells hadn't finished (recoverable by
-  `--resume`, but it costs a manual follow-up pass rather than finishing
-  clean). Worth a larger default or a dataset-scaled timeout before the
-  next campaign this size runs.
+  far too short at scale**: 20-46 min per cell at D=768 × 10 M (pubmed
+  filter) and whole `deep`/`codesign` groups running ~17 h on arxiv —
+  both routinely hit the default and lose unfinished cells (recoverable
+  by `--resume`, but costs a manual follow-up pass rather than finishing
+  clean; D1 raised it to `--timeout 48` for `deep`/`codesign`
+  mid-campaign, 2026-09-28). Worth a larger default or a
+  dataset/suite-scaled timeout before the next campaign this size runs,
+  rather than discovering the ceiling live each time.
 - The shared Inductor cache (`/tmp/torchinductor_root`) does not
   invalidate on a `code_version` change, so a graph-mode harness run
   after a library edit can silently replay stale kernel code (found
