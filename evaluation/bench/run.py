@@ -35,10 +35,11 @@ load right after its last window, ``env.sm_mhz_load`` is the median of those, an
 under-load sample of the process — load against load, never against idle.
 
 Cross-backend parity (§2.4, amended by §8.2 K): the first backend to run a cell writes its
-top-``k_max`` ids and scores to ``<out_dir>/_parity/<hash>.npz`` (hash over the key minus
-``backend``); later backends record ``jaccard_vs_first@k`` and ``score_max_abs_diff``
-against it. ``bench campaign`` deletes the directory when the ``(dataset, dim, algo)`` group
-closes. There is no "no reference" state: whichever backend runs a cell first *writes* the
+top-``k_max`` ids and scores to ``<out_dir>/_parity/<group>/<hash>.npz`` (``parity_group``;
+hash over the key minus ``backend``); later backends record ``jaccard_vs_first@k`` and
+``score_max_abs_diff`` against it, and the same backend's own spill (a kill between spill and
+record) is rewritten. ``bench campaign`` drops every other group's spill before each child.
+There is no "no reference" state: whichever backend runs a cell first *writes* the
 reference (``parity: "reference"``), so after ``--resume`` skips the triton cells, ``torch``
 becomes the reference and ``official`` is compared against torch (``parity: "vs_torch"``).
 """
@@ -224,6 +225,11 @@ def quality(
     return out, ids_t, sc_t
 
 
+def parity_group(dataset: str, dim: int, algo: str) -> str:
+    """The ``_parity/`` subdirectory of one ``(dataset, dim, algo)`` group."""
+    return f"{dataset}-d{dim}_{algo}"
+
+
 def parity(
     out_dir: Path,
     job: Job,
@@ -236,11 +242,11 @@ def parity(
     compare against it."""
     key = {k: v for k, v in job.key(params).items() if k != "backend"}
     h = hashlib.sha1(json.dumps(key, sort_keys=True, default=str).encode()).hexdigest()[:20]
-    ref = Path(out_dir) / "_parity" / f"{h}.npz"
+    ref = Path(out_dir) / "_parity" / parity_group(job.dataset, job.dim, job.algo) / f"{h}.npz"
     out: dict[str, Any] = {f"jaccard_vs_first@{k}": None for k in ks}
     out["score_max_abs_diff"] = None
-    if ref.exists():
-        z = np.load(ref)
+    z = np.load(ref) if ref.exists() else None
+    if z is not None and z["backend"].item() != job.backend:  # own spill = re-run after a kill
         r_ids, r_sc = torch.from_numpy(z["ids"]).long(), torch.from_numpy(z["scores"])
         ids, scores = ids.cpu(), scores.cpu()
         if r_ids.shape == ids.shape:

@@ -76,15 +76,20 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    run. Cross-backend correctness belongs to the library's parity suite
    ([testing](testing.md)); the harness keeps only a *wiring* check, the
    parity spill: the first backend to run a cell writes its top-`k_max` ids
-   (int32) and scores (float32) to `results/_parity/<hash>.npz` (hash over
-   the key block minus `backend`, so it includes `suite`, `filter_kind` and
-   `sweep`), and later backends record `jaccard_vs_first@k` and
-   `score_max_abs_diff` against it. There is no "missing reference" state:
-   whichever backend runs a cell first writes the spill (`parity:
-   "reference"`), so with `--resume` after the triton cells are done,
-   `torch` becomes the reference and `official` records `vs_torch`. `bench
-   run` never deletes the directory (the next backend's run needs it);
-   `bench campaign` deletes it when the `(dataset, dim, algo)` group closes.
+   (int32) and scores (float32) to
+   `results/_parity/<dataset>-d<dim>_<algo>/<hash>.npz` (`run.parity_group`
+   names the directory; the hash is over the key block minus `backend`, so
+   it includes `suite`, `filter_kind` and `sweep`), and later backends
+   record `jaccard_vs_first@k` and `score_max_abs_diff` against it. There is
+   no "missing reference" state: whichever backend runs a cell first writes
+   the spill (`parity: "reference"`), so with `--resume` after the triton
+   cells are done, `torch` becomes the reference and `official` records
+   `vs_torch`. A spill written by the *same* backend (killed after the spill,
+   before the record) is rewritten as the reference, never compared against.
+   `bench run` never deletes the directory (the next backend's run needs
+   it); `bench campaign` drops every other group's spill before each child,
+   so a campaign restarted mid-group still compares against the spill of
+   the backends the killed process finished.
 5. **Perf, per `(bs, k, mode)`** with `mode ∈ {eager, graph}` and
    `module.k = k` set before each variant. Inputs: the fixed-seed pool of
    query batches (and attr batches) rotated round-robin, identical across
@@ -433,8 +438,11 @@ is the worst child rc, or 1 when a listed dataset expands to no groups or
 no child was launched at all (`--dataset` / `--dim` selecting nothing).
 After the last child the campaign aggregates the tree into
 `results/results.parquet` (`records.aggregate`, logged as `=== aggregated`).
-`results/_parity/` is deleted when the `(dataset, dim, algo)` group
-closes. A backend is the thing under test, so it gets
+Before each child the campaign deletes every entry of `results/_parity/`
+but the child's own `(dataset, dim, algo)` subdirectory — decided from
+what is on disk, not from the loop, so a restart mid-group keeps the
+killed process's spill — and deletes the whole directory after each
+dataset. A backend is the thing under test, so it gets
 the process: no dynamo cache, allocator arena or CUDA-graph pool outlives
 it, at the cost of a dataset reload and a CUDA context init per group.
 `bench check --dataset D` runs `eval_datasets.layout.validate_layout` on
@@ -722,7 +730,7 @@ life, and git holds only the pointer.
 | the same records and samples, plus `results.parquet`, once a leg finishes | **HF Hub**, `pinkmeme/eval-results/<leg>/`, private (`bench upload`) | the archive. The JSONL goes up next to the Parquet because it is the lossless form: failed records with their tracebacks, superseded records, the nested `quality` and `env`, `window_medians_ms`, `kernels` — everything the flat table drops — and it is what resume and the manifest's provenance read |
 | `report/` (`*.tex`, figures, `report.md`) behind a gate | **git**, under `docs/artifacts/<plan>/` — without its `results.parquet` (gitignored), which `bench report` regenerates from the Hub copy | small, reviewed, and what a gate's text points at |
 | raw dumps behind a documented finding (kernel timings, probe outputs, ETL logs) | **HF Hub**, `pinkmeme/eval-results/artifacts/<plan>/<same path>` | the finding lives in prose in [validation](../validation.md) and the system pages; the dump is only for re-derivation |
-| `results/_parity/*.npz` (600–680 MB per run), `results/_logs/` | **nowhere** — deleted | rewritten by every run, and the parity *verdict* (`jaccard_vs_first@k`, `score_max_abs_diff`) is already inside the record. `bench upload` skips every `_`-prefixed path part |
+| `results/_parity/*/*.npz` (600–680 MB per run), `results/_logs/` | **nowhere** — deleted | rewritten by every run, and the parity *verdict* (`jaccard_vs_first@k`, `score_max_abs_diff`) is already inside the record. `bench upload` skips every `_`-prefixed path part |
 
 A leg is finished when its records are on the Hub and verified: `bench upload
 --results results --path-in-repo <leg> --verify`, after which the local tree
@@ -876,8 +884,8 @@ trailing-whitespace hooks (the last two never on `articles/`, `docs/artifacts/`,
 | `bench/test_config.py` | job counts and keys per suite on `tests/bench/data/{mini,text,suites}.yaml`; `disabled`; build/query split; seeds; narrows and `Job.narrowed`; the real `goodreads` / `arxiv` d128 cell sets; every `config/*.yaml` × every suite through `load_matrix` |
 | `bench/test_inputs.py` | `load_inputs` on the conftest writer, `users_limit` once, prefix and row-count checks, the legacy layout loading equal to the modern one, misalignment raising, `attrs_digest`, `sweep_qa`, filters by filter backend, `query_pool` |
 | `bench/test_oracle.py` | padding, v4 fields and arithmetic, fingerprint in the file name, an unreadable blob rebuilt, bloom FP rate, `code_version` |
-| `bench/test_run.py` | end to end on the tiny fixture, both modes (`graph` = the CPU null entry): record schema, resume, `code_version` invalidation, `partial`, a failed cell + continue, a sticky CUDA error, the quality gate, the parity spill, reachable-target masking, the plan cache off through `OfficialConfig` |
-| `bench/test_cli.py` | `bench run` via `CliRunner`, a real one-child `bench campaign` ending in `results.parquet`, a faked timed-out child, zero cells → exit 1, `bench report` over the campaign's own records, `bench env`'s JSON keys |
+| `bench/test_run.py` | end to end on the tiny fixture, both modes (`graph` = the CPU null entry): record schema, resume, `code_version` invalidation, `partial`, a failed cell + continue, a sticky CUDA error, the quality gate, the parity spill (and a same-backend spill rewritten), reachable-target masking, the plan cache off through `OfficialConfig` |
+| `bench/test_cli.py` | `bench run` via `CliRunner`, a real one-child `bench campaign` ending in `results.parquet`, a faked timed-out child, a restart mid-group keeping its parity spill (in-process children), zero cells → exit 1, `bench report` over the campaign's own records, `bench env`'s JSON keys |
 | `bench/test_upload.py` | `bench upload` with no network: `_logs/` and `_parity/` never listed, the manifest's sha256 per file, evidence beating `--gate` four ways, the generated README over several subtrees, `verify` catching a changed byte, the commit's operations (with the regenerated `results.parquet`) and `private=True`; `bench fetch` restoring a tree resume reads and refusing to overwrite a different local copy |
 | `bench/test_report.py` | every column the tables read still comes out of `records.aggregate`; every artifact emitted; the LaTeX structurally balanced with the thesis's labels and no unescaped `_`; a `failed` record excluded and a `partial` / `unstable` one marked; citability off by default and evidence beating `--gate`; an empty tree; a schema-1 record |
 | `bench/test_c4_gate.py` | the golden-comparison gate script, [`c4_gate.py`](../artifacts/evaluation-harness-v2/c4_gate.py), against synthesised schema-1 records |

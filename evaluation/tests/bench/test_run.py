@@ -251,7 +251,7 @@ def test_parity_spill_compares_the_second_backend(tiny_configs, tmp_path, monkey
     out = tmp_path / "results"
     kw = dict(out_dir=out, skip_perf=True, **KW)
     run.run(clause, **kw)
-    ref = list((out / "_parity").glob("*.npz"))
+    ref = list((out / "_parity" / "tiny-d8_linr_v1_filter_mask").glob("*.npz"))
     assert len(ref) == 1
     # A "second backend": the same cell relabelled, built on the torch path underneath.
     other = dataclasses.replace(clause[0], backend="torch2")
@@ -270,6 +270,17 @@ def test_parity_spill_compares_the_second_backend(tiny_configs, tmp_path, monkey
     assert recs[1]["quality"]["jaccard_vs_first@4"] == 1.0
     assert recs[1]["quality"]["score_max_abs_diff"] == 0.0
     assert recs[1]["status"] == "partial" and recs[1]["perf"] is None  # skip_perf
+
+
+def test_parity_spill_of_the_same_backend_is_rewritten(tiny_configs, tmp_path):
+    """A kill after the spill but before the record: the re-run is not its own cross-check."""
+    jobs = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=["c0"])
+    out = tmp_path / "results"
+    run.run(jobs, out_dir=out, skip_perf=True, **KW)
+    (out / "e2e" / "tiny-d8.jsonl").unlink()
+    run.run(jobs, out_dir=out, skip_perf=True, **KW)
+    recs = _records(out / "e2e" / "tiny-d8.jsonl")
+    assert [r["quality"]["parity"] for r in recs] == ["reference"] * len(jobs)
 
 
 class _Fixed(torch.nn.Module):

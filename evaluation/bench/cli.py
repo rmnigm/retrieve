@@ -175,11 +175,11 @@ def campaign(
                 if not groups:
                     say(f"{s} {ds}: no cells selected (dims {list(dims) or 'all'}) rc=1")
                     worst = max(worst, 1)
-                last: tuple | None = None
                 for d, dim, algo, backend in groups:
-                    if (d, dim, algo) != last:  # the parity group closes: drop the spill file
-                        shutil.rmtree(parity, ignore_errors=True)
-                        last = (d, dim, algo)
+                    # on disk, not in memory: a restart mid-group keeps the earlier process's spill
+                    for stale in parity.glob("*"):
+                        if stale.name != run_mod.parity_group(d, dim, algo):
+                            shutil.rmtree(stale) if stale.is_dir() else stale.unlink()
                     cmd = [
                         sys.executable, "-m", "bench.cli", "run", "--dataset", d,
                         "--dim", str(dim), "--suite", s, "--algo", algo, "--backend", backend,
