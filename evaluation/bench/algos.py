@@ -1,4 +1,5 @@
-"""The algorithm table (library-harness-boundary.md §3): harness name → library class, the
+"""The algorithm table (the retired library-harness-boundary plan; see
+docs/system/architecture.md for the current module map): harness name → library class, the
 filter kinds and backends, ``PATHS`` derived from ``retrieve.interfaces.DISPATCH``, and
 ``build`` — the one factory the cell loop calls.
 

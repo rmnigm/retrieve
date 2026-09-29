@@ -1,7 +1,8 @@
-"""The library side of the library / harness contract (library-harness-boundary.md §4, gate
-§5): for each algo-level module — ``SilverTorch``, ``LiNRV1``–``LiNRV4`` — on a tiny index,
-the properties the harness measures through. ``official`` is covered where the clause names it
-(``capturable``, ``DISPATCH``); its forward syncs by design (O D7)."""
+"""The library side of the library / harness contract (the retired library-harness-boundary
+plan; see docs/system/architecture.md for the current module map): for each algo-level module —
+``SilverTorch``, ``LiNRV1``–``LiNRV4`` — on a tiny index, the properties the harness measures
+through. ``official`` is covered where the clause names it (``capturable``, ``DISPATCH``); its
+forward syncs by design (O D7)."""
 
 from __future__ import annotations
 

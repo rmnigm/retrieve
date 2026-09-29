@@ -147,8 +147,9 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    number and is reported alongside, never instead.
 8. **Cell cost.** Quality once per cell (not per k); perf 3 k × 3 bs × 2
    modes × 3 windows. Build params sweep separately from query params (one
-   build, many query configs). The measured per-cell cost is in
-   [validation](../validation.md#campaign-roadmap-d1-in-progress-not-yet-validated).
+   build, many query configs). Measured per-cell costs (D1's arxiv `deep`
+   groups, pubmed's D=768 filter cells) are in the roadmap's timeout-defect
+   note ([roadmap](../roadmap.md#known-defects-unscheduled)).
 
 The record carries `schema_version`, `status`, `code_version` in the
 resume key, `git_branch` / `python` in `env`, `disabled: true` sweeps and

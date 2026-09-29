@@ -1,6 +1,7 @@
 """Meta's official SilverTorch ops (``torch.ops.st.*``, meta-recsys/silvertorch @ 21aa35e)
 vs the pure-torch reference, the Triton kernels and the ``SilverTorch`` layer — the
-T1–T7 gates of docs/plans/silvertorch-official-integration.md §5.2.
+T1–T7 gates (the retired silvertorch-official-integration plan; see the "Official against our
+Triton reimplementation" section of docs/validation.md).
 
 The official scorer and the Triton kernels read the same **cluster-sorted** int8 table
 through the same CSR (``cluster_offsets``), built here by ``make_probe_family``, so both arms
