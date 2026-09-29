@@ -1,7 +1,7 @@
 ---
 title: architecture
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-09-29
 type: entity
 tags: [library]
 sources: [retrieve/src/retrieve/]
@@ -514,13 +514,14 @@ The Triton kernels live flat under
 [`ops/triton/`](../../retrieve/src/retrieve/ops/triton/), one file per
 kernel, plus
 [`common.py`](../../retrieve/src/retrieve/ops/triton/common.py) —
-shared `@triton.jit` building blocks (`popcount_int64`,
-`bloom_subset_pass`, `clause_pass`, `compact_store`, `or_combine`)
-called from the kernel bodies — and
+shared `@triton.jit` building blocks called from the kernel bodies
+([kernels.md](kernels.md#shared-kernel-helpers-opstritoncommonpy)) — and
 [`_host.py`](../../retrieve/src/retrieve/ops/triton/_host.py), the plain-Python
-launch scaffold the files share (`ProbeLaunch` / `probe_finish` for the
-two probe scorers, `grid_batch_tiles` for the three 3-D-grid filter
-kernels); each kernel keeps its own loads and masking policy.
+launch scaffold the files share (`probe_prep` / `probe_topk` and
+`tile_for_width` for the two probe scorers, `compact_finish` for the two
+compaction ops, `grid_batch_tiles` for the 3-D grids of the four filter
+kernels and the probe scorers); each kernel keeps its own loads and
+masking policy.
 [`_load.py`](../../retrieve/src/retrieve/ops/triton/_load.py) is the one
 place the kernel files are imported, so `import retrieve.ops.triton` is
 the registration. Every kernel of ours is Triton (see

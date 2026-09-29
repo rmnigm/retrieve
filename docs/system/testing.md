@@ -1,7 +1,7 @@
 ---
 title: testing
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-09-29
 type: concept
 tags: [testing, library]
 sources: [retrieve/tests/]
@@ -214,8 +214,7 @@ The probe-layout builders, four assertions and the poisoned allocator:
 - `make_bloom(n, b, *, m_bits=512, k_hash=5)` — the transposed scorer's
   inputs (`query_bit_positions`, `bloom_transposed`) and the row-wise
   item and query signatures (`sigs, qb`) they are checked against. No live caller; kept for
-  the parity tests of the Triton transposed-bloom kernel (roadmap G-a,
-  TF-1).
+  the parity tests of the Triton transposed-bloom kernel (TF-1).
 - `make_words(n, w, seed)` — raw `[N, W]` int64 signatures and `[8, W]`
   query words, half subsets of an item's signature and half random sparse
   words, for the bloom ops at a `W` no `BloomFilter` produces.
@@ -727,8 +726,9 @@ OPORP) also carry, bit-exact: a **poisoned-output** test
 (`poison_empty` on the score buffer's shape, hit asserted, no `POISON` in
 the output, parity with the reference); **cutoff** runs on both sides of
 the code's own constants (`_P_BUCKETS[0]` / `_N_BUCKETS[0]` ± 1 and
-`P % DEFAULT_CONFIG.block_*` ∈ {0, 1}, the regime asserted inside the
-test); **degenerate rows** (`count = 0` → `(-1, -inf)` in every slot,
+`P % block` ∈ {0, 1}, with the block read from `DEFAULT_CONFIG` or, for
+the probe scorers, the `CONFIGS` tile of the width under test, the regime
+asserted inside the test); **degenerate rows** (`count = 0` → `(-1, -inf)` in every slot,
 `count = 1` → the one candidate then `(-1, -inf)`; the fused file's
 older test covers its own); **row alone ≡ row in batch**, and — on
 `fused_masked_knn_topk`, `codesigned_probe_score` and OPORP full —

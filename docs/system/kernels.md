@@ -1,7 +1,7 @@
 ---
 title: kernels
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-09-29
 type: concept
 tags: [kernels, library]
 sources: [retrieve/src/retrieve/ops/]
@@ -47,8 +47,10 @@ see [Shared kernel helpers](#shared-kernel-helpers-opstritoncommonpy) —
 and the plain-Python launch scaffold they share in
 [`_host.py`](../../retrieve/src/retrieve/ops/triton/_host.py): `probe_prep` +
 `probe_topk` (the probe scorers' shared launch arguments and their top-k +
-id-epilogue launch), the boundary checks and `wide`, and `grid_batch_tiles`
-(the 3-D grid split of the filter and probe kernels).
+id-epilogue launch), `tile_for_width` (their tile per width),
+`compact_finish` (the compaction ops' scan + scatter), the boundary checks
+and `wide`, and `grid_batch_tiles` (the 3-D grid split of the filter and
+probe kernels).
 
 The LinR kernels are the focus of this doc; the filter primitives
 (`clause_compact`, `clause_mask`, `bloom_match`, `bloom_compact`) are
@@ -76,11 +78,12 @@ All kernels follow the same conventions.
 - Tile config (`block_n`, `num_warps`, `num_stages`; `block_p` for the
   silvertorch kernels)
   is offline-tuned per kernel and shipped as a
-  single `DEFAULT_CONFIG` constant on the kernel module. No runtime
+  single `DEFAULT_CONFIG` constant on the kernel module (the two probe
+  scorers: a `CONFIGS` table, one tile per `D_PAD` bound). No runtime
   `@triton.autotune`. Callers who want a non-default tile pass
   `config=<Kernel>Config(...)` to the private
   `_<name>_impl(..., config=)` companion — the public op has a fixed
-  schema and always uses `DEFAULT_CONFIG`. The `tune-kernels` CLI
+  schema and always uses the shipped tile. The `tune-kernels` CLI
   (shipped with the library at `retrieve.ops.tune:main`) sweeps the
   candidate grid on a given arch and prints the line to paste into the
   kernel file. The same convention applies uniformly across linr,
@@ -96,7 +99,7 @@ All kernels follow the same conventions.
   production ops, not just `_impl`. (`bloom_match` is the one
   exception: a single-op ~80-line file with no `_impl`, no Config, no
   prep — see its section.)
-- Graph-break behavior. Ten ops are registered across the seven Triton
+- Graph-break behavior. Ten ops are registered across the eight Triton
   kernel files (the official backend registers no op of ours; it calls
   `torch.ops.st.*`), in two flavours.
 
@@ -159,7 +162,8 @@ The pattern, applied uniformly to every kernel in this tree:
    bound, resolved by `_host.tile_for_width`
    ([below](#silvertorch-kernels), "Tile config").
 3. The host wrapper takes `config: <Name>Config | None = None`;
-   `cfg = config if config is not None else DEFAULT_CONFIG` resolves it.
+   `cfg = config if config is not None else DEFAULT_CONFIG` resolves it
+   (the probe scorers: `tile_for_width(CONFIGS, D)`).
 4. A private `_<name>_impl(..., *, config: ...Config | None = None)`
    lives next to the public op(s) in every file. Both share the same
    `_<name>_prep` / `_<name>_finish` helpers, so their bodies differ
@@ -298,6 +302,9 @@ variants' SASS differed). There the masks are constexpr conditional expressions
 Gate: every kernel of this section, compiled at the power-of-two widths D1 runs, is
 SASS-identical to the tree before padding (30 of 30,
 [script](../artifacts/l4-pow2-pad/ptx_identity.py)).
+
+Padding makes every width correct, not every width fast: at `D_PAD = 1024` the probe
+scorers need a narrower tile ([SilverTorch kernels](#silvertorch-kernels), "Tile config").
 
 ## Shared kernel helpers (`ops/triton/common.py`)
 
@@ -712,7 +719,7 @@ and names the regression test.
 
 **Tile config.** `ClauseCompactConfig(block_n, num_warps, num_stages)`
 — shipped as `DEFAULT_CONFIG` on the kernel module (not tuned for the
-two-phase shape; the retune is roadmap G-a, TF-3); tests/tuner
+two-phase shape; the retune is roadmap TF-3); tests/tuner
 override via `_clause_compact_impl(..., config=)`. Re-tune on a new arch via
 `uv run tune-kernels clause-compact`.
 
@@ -890,7 +897,7 @@ the list in that order, which is what keeps their tie-breaks repeatable.
 **Tile config.** `BloomCompactConfig(block_n, num_warps, num_stages)` —
 shipped as `DEFAULT_CONFIG`; tests/tuner override via
 `_bloom_compact_impl(..., config=)` (not tuned for the two-phase shape;
-roadmap G-a, TF-3). Re-tune via `uv run tune-kernels
+roadmap TF-3). Re-tune via `uv run tune-kernels
 bloom-compact`. `qb` is built host-side via
 `bloom_hash.build_query_signatures`; folding it into the kernel adds
 register pressure with no obvious win and is explicitly out of scope.
@@ -1087,7 +1094,7 @@ the scorer's output is `[B, width]` with
 load hook. Slots past a row's items score `-inf`. This replaced a padded
 layout of width `n_probe · max_cluster_size`, which read one `-1` pad
 per slot: 611,520 slots against 64,757 on goodreads at `n_probe` 24, whose
-largest cluster holds 25,480 items (roadmap G-a, TF-9).
+largest cluster holds 25,480 items (TF-9).
 `SilverTorch.register_index` / `set_query_params` raise unless
 `width ≥ k`, so `topk(k)` needs no pad path.
 
@@ -1154,8 +1161,7 @@ exact and the tiling only moves slots), which every parity file checks.
 [`ops/triton/codesigned_probe_score.py`](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py).
 
 The `int8 → fp32` code cast never touches HBM. Bloom mode reads the
-**transposed index** of the paper's "rotate the matrix" phase 2 (roadmap
-G-a, TF-1): `bloom_transposed [m_bits, ceil(N/64)]`
+**transposed index** of the paper's "rotate the matrix" phase 2 (TF-1): `bloom_transposed [m_bits, ceil(N/64)]`
 (`bloom_hash.build_transposed_sigs` over the cluster-sorted row-wise
 signatures), in which bit `pos % 64` of word `pos // 64` of row `m` is bit
 `m` of item `pos`'s signature. The query comes in as its set-bit positions,
