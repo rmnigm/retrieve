@@ -100,6 +100,17 @@ in records, commits and code comments; they are not renumbered.
   < 16 × median_ms(bs=1)`; ids identical across modes; a rerun
   byte-identical in quality. Closes paper gaps G3 (P99 / QPS), G4 (seeds),
   G7, G8 (cross-dataset deep sweeps).
+  **Currently paused** (2026-09-29) for a fix pass the investigation
+  workers' findings required — the pubmed/triton register spill, LiNR
+  V3's OPORP OOM, the bloom-path divergence (verdict: not a bug) — now
+  merged (`code_version c0e42d1`,
+  [validation](validation.md#campaign-roadmap-d1-in-progress-not-yet-validated)
+  has the targeted-rerun policy). Resume plan: relaunch driver v4's
+  remaining queue from where it paused (arxiv `deep` was mid-`linr_v3`,
+  803/870 cells done), then a **targeted** rerun of only pubmed's
+  `silvertorch/triton` and `linr_v3` filter cells at the new
+  `code_version` — not a full D1 rerun, per the user's standing rule
+  (everything else is proven numerically unaffected).
 - [ ] **D2: add Faiss, HNSW, cuBLAS and cuVS baselines as harness
   algorithms.** Faiss-GPU and Faiss-CPU IVF-Flat, HNSW, a cuBLAS
   brute-force floor at matched recall; then cuVS IVF-Flat / IVF-PQ / CAGRA

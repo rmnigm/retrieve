@@ -139,6 +139,22 @@ for the `linr_v3` OOM and the 6 h timeout gaps). All four are on the Hub
 (`d1/<dataset>`), NOT CITABLE (D1's gate is not green). `deep` and
 `codesign` (S9) are running on arxiv, then goodreads.
 
+**Code_version policy for this campaign (user decision, 2026-09-29):**
+`code_version` is a whole-tree hash, but a `retrieve/src` fix does not
+retroactively invalidate every existing D1 record — only the specific
+arms the fix actually changes get rerun; everything else stays at its
+original `code_version`, tracked here rather than through the hash. The
+pubmed-fixes pass (`code_version` `72e5a90` → `c0e42d1`) is the first
+case: its own gates prove goodreads, arxiv, yfcc10m and
+pubmed's non-`silvertorch`-triton / non-`linr_v3` cells are numerically
+identical between the two versions (SASS-identical kernels at D≤192,
+`torch.equal` 1-bit codes at every width tested) — so only pubmed's
+`silvertorch/triton` filter cells (retimed, wrong tile) and `linr_v3`
+filter cells (previously OOM, now buildable) are rerun at `c0e42d1`.
+Every other D1 record stays at `72e5a90`. Do not repeat this reasoning
+from scratch for the next fix — re-derive it from that fix's own gates
+each time, and update this paragraph.
+
 A cross-scale filter comparison across all four datasets (same operating
 point, same completed cells per arm) is in the `campaign-d1` chain,
 2026-09-28 — not reproduced here since it is not yet citable and this
