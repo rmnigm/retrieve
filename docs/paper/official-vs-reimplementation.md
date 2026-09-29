@@ -187,10 +187,13 @@ real items**, so **97 % of what our kernel walks is `-1` padding**. On arXiv's
 less skewed IVF it is 171,648 slots and **59 %** padding. The official op reads a
 CSR and visits only real items. "At equal `n_probe`" is therefore equal *recall*
 but **not equal work**, and that — not bandwidth, not instruction mix, and not
-the 310-vs-3,500 line difference — is what the Goodreads factor measures. Both
-arms' scorers lower to the same `dp4a` instruction path
-([O §8 TF-3](../roadmap.md#phase-g-after-the-paper)), so the comparison is
-purely about what each design *reads*.
+the 310-vs-3,500 line difference — is what the Goodreads factor measures. The
+two scorers do not share an instruction path: Meta's `process_cluster` lowers
+its int8 dot to `IDP.4A` (dp4a) with no tensor-core instruction, ours lowers
+`tl.dot` to `IMMA` tensor-core instructions with no `IDP.4A`, at every width
+(SASS of both builds, [kernels § Numerics](../system/kernels.md#numerics)).
+Both accumulate int32 exactly, so the instruction mix changes no score, and
+the Goodreads factor tracks the padding share, not the instruction.
 
 **The official arm gives all of it back in payload prep.** Its scans,
 `repeat_interleave`s, fills and gathers cost **268–834 µs across 73–93 launches**

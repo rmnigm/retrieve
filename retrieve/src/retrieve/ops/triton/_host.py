@@ -7,6 +7,7 @@ tail of the two compaction ops.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TypeVar
 
 import torch
 import triton
@@ -14,6 +15,16 @@ from torch import Tensor
 
 from retrieve.indexing.quantize import quantize_int8
 from retrieve.ops.triton.common import compact_scatter_kernel
+
+Cfg = TypeVar("Cfg")
+
+
+def tile_for_width(configs: dict[int, Cfg], d: int) -> Cfg:
+    """The probe scorers' shipped tile at embedding width ``d``: the entry of the smallest
+    ``D_PAD`` bound in ``configs`` at or above ``next_power_of_2(d)``, the widest entry past the
+    last bound (kernels.md § SilverTorch kernels, "Tile config")."""
+    d_pad = triton.next_power_of_2(d)
+    return configs[min((b for b in configs if b >= d_pad), default=max(configs))]
 
 
 @dataclass(frozen=True)

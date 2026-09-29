@@ -13,8 +13,9 @@ import torch
 
 from retrieve.indexing.quantize import quantize_int8, quantize_int8_global
 from retrieve.ops import reference
+from retrieve.ops.triton._host import tile_for_width
 from retrieve.ops.triton.codesigned_probe_score import (
-    DEFAULT_CONFIG,
+    CONFIGS,
     CodesignedProbeScoreConfig,
     _codesigned_probe_score_impl,
     codesigned_probe_score,
@@ -173,12 +174,13 @@ def test_row_alone_equals_row_in_batch_and_id_relabel():
     assert_topk_equal(torch.where(ids >= 0, relabel[ids.clamp_min(0)], -1), scores, r_ids, r_scores)
 
 
+@pytest.mark.parametrize("d", [64, 768])
 @pytest.mark.parametrize("r", [0, 1])
-def test_across_tile_cutoff(r):
+def test_across_tile_cutoff(r, d):
     """A probed cluster of ``2·block_p + r`` items (``r`` in {0, 1}: a full last tile and a
     one-lane last tile) next to a one-item cluster, so the cluster-aligned tiling and the slot
-    arithmetic straddle a tile boundary; read from the kernel's shipped ``block_p``."""
-    bp = DEFAULT_CONFIG.block_p
+    arithmetic straddle a tile boundary; read from the kernel's shipped ``block_p`` at ``d``."""
+    bp = tile_for_width(CONFIGS, d).block_p
     sizes = torch.tensor([2 * bp + r, 1, 5], device="cuda")
     assert sizes[0] % bp == r
     offsets = torch.cat([torch.zeros(1, dtype=torch.long, device="cuda"), sizes.cumsum(0)])
@@ -187,8 +189,8 @@ def test_across_tile_cutoff(r):
         torch.tensor([[0, 1], [1, 0]], device="cuda"), offsets,
         torch.randperm(n, device="cuda"), int(sizes[0] + sizes[2]), n,
     )  # fmt: skip
-    codes, gs = quantize_int8_global(make_index(n, 64))
-    query = make_query(2, 64)
+    codes, gs = quantize_int8_global(make_index(n, d))
+    query = make_query(2, d)
     out = codesigned_probe_score(query, *_args(lay, codes), gs, 32, lay.width)
     assert_topk_equal(
         *out, *reference.codesigned_probe_score(query, *_args(lay, codes), gs, 32, lay.width)

@@ -396,3 +396,31 @@ def test_global_quantization_in_row_order_equals_permuted_codes():
     codes, scale = quantize.quantize_int8_global(embs)
     sorted_codes, sorted_scale = quantize.quantize_int8_global(embs, rows=perm)
     assert torch.equal(sorted_codes, codes[perm]) and sorted_scale == scale
+
+
+@pytest.mark.parametrize("method", ["oporp", "simhash"])
+def test_one_bit_build_chunked_is_bit_exact_and_bounded(method):
+    """The 1-bit builds project and pack chunk by chunk: their bits equal the one-shot
+    projection of the whole table (the query path) bit for bit, and the build's transient is a
+    fixed eight projected fp32 chunks (``[rows, k_bits]``) whatever N, where the one-shot chain
+    held about seven full-corpus copies."""
+
+    n = 12 * quantize._CODE_CHUNK_ROWS + 123
+    embs = torch.randn(n, 128, device="cuda")
+    torch.cuda.synchronize()
+    base = torch.cuda.memory_allocated()
+    torch.cuda.reset_peak_memory_stats()
+    if method == "oporp":
+        bits, signs, perm = quantize_oporp_1bit(embs, seed=5)
+        params = signs.numel() + perm.numel() * 8
+    else:
+        bits, r = quantize_simhash_1bit(embs, k_bits=256, seed=5)
+        params = r.numel() * 4
+    transient = torch.cuda.max_memory_allocated() - base - bits.numel() * 8 - params
+    if method == "oporp":
+        expected = project_oporp_1bit_query(embs, signs, perm)
+    else:
+        expected = project_simhash_1bit_query(embs, r)
+    assert torch.equal(bits, expected)
+    chunk = quantize._CODE_CHUNK_ROWS * bits.shape[1] * 64 * 4
+    assert transient < 8 * chunk, f"transient {transient / 2**20:.0f} MiB, chunk {chunk >> 20} MiB"

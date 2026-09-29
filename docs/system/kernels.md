@@ -154,7 +154,10 @@ The pattern, applied uniformly to every kernel in this tree:
 1. A `@dataclass(frozen=True) class <Name>Config` next to the
    `@triton.jit` body holds `block_n`, `num_warps`, `num_stages`.
 2. A `DEFAULT_CONFIG` module constant holds the single curated
-   default for the current arch (sm_80 / A100 in this repo).
+   default for the current arch (sm_80 / A100 in this repo). The two
+   probe scorers ship a `CONFIGS` table instead, one tile per `D_PAD`
+   bound, resolved by `_host.tile_for_width`
+   ([below](#silvertorch-kernels), "Tile config").
 3. The host wrapper takes `config: <Name>Config | None = None`;
    `cfg = config if config is not None else DEFAULT_CONFIG` resolves it.
 4. A private `_<name>_impl(..., *, config: ...Config | None = None)`
@@ -187,13 +190,17 @@ The pattern, applied uniformly to every kernel in this tree:
    repeatable `--regime N,B,C,A_MAX` (or `N,B,W`) flags; the
    dimension-swept kernels expose `--d`/`--b`/`--w` flags and derive
    regimes by crossing them with the module's bucket/P axes. The shipped
-   `DEFAULT_CONFIG` is always swept too, and it stays unless a
+   `DEFAULT_CONFIG` (for the probe scorers, the `CONFIGS` entry at the
+   regimes' `D`; regimes spanning two entries are refused, so tune one
+   width at a time) is always swept too, and it stays unless a
    candidate's geometric-mean time over the regimes is more than
    `NOISE_BAND` (3 %) below it, **and** the candidate is at most
    `WORST_CAP` (5 %) slower in every single regime (`tune._choose`, pinned by
    `test_tune_smoke.py`). A B = 1 regime whose own winner beats the pick
    by ≥ `B1_GAP` (10 %) is flagged, which is the evidence a separate batch-1
-   config would need. The CLI emits a pasteable `DEFAULT_CONFIG = ...` line.
+   config would need. The CLI emits a pasteable `DEFAULT_CONFIG = ...` line
+   (for the probe scorers, the config of the `CONFIGS` entry covering the
+   regimes' `D_PAD`).
    `--json-out` dumps the per-regime sweep (`per_regime`), the rule's
    ratios (`rule`), and `env`: the SM clock sampled after each regime, the
    commit, and the torch / triton versions and device. Re-run once per new
@@ -950,6 +957,19 @@ and one `index_select`, no matmul needed. The `_pack_signs_to_int64`
 helper packs the sign-quantized output into `[..., W]` int64 words using
 `<<` and `sum(-1)`; same packing used both at index time and at query time.
 
+**Chunked build.** Every step of the chain (sign-flip, permute, bin, row
+norm, pack) is row-local, so `quantize_oporp_1bit` and
+`quantize_simhash_1bit` (`x @ R^T` then the same pack) run it
+`_CODE_CHUNK_ROWS` = 65,536 rows at a time into a preallocated `[N, W]`
+int64 output (`_pack_chunked`, the shape of `quantize_int8_global`). The
+one-shot chain held about seven full-corpus fp32/int64 temporaries, about
+200 GiB at pubmed's 10M × 768 for a 0.9 GiB output, which is why
+`LiNRV3` could not build there; the transient is now about eight projected
+chunks (`[65,536, k_bits]` fp32, 192 MiB at 768 bits). The bits are
+`torch.equal` to the one-shot projection (`test_quantize.py`, and at
+the D1 tables, [artifact](../artifacts/pubmed-fixes/README.md#fix-2-chunked-1-bit-build)).
+The query side (`project_*_query`) stays one-shot: `B` rows.
+
 ### Compile on the V3 torch reference
 
 The pure-torch hot bodies on V3's reference path —
@@ -1002,6 +1022,15 @@ and Triton scores agree exactly, and
 [`test_oporp_1bit_match_topk.py`](../../retrieve/tests/parity/test_oporp_1bit_match_topk.py)
 pins it with `assert_topk_equal` (`torch.equal` scores, ids up to ties).
 A divergence means a popcount or packing bug.
+
+**The probe scorers' int8 dot is an IMMA, Meta's a dp4a.** `tl.dot` of
+the `[1, D]` query against the `[D, BLOCK_P]` codes pads `M = 1` to the
+MMA tile and lowers to tensor-core `IMMA` instructions: every
+`codesigned_probe_score*` cubin on this box has `IMMA` and no `IDP.4A`, at
+every width and tile. Meta's `fused_kmean_ann` int8 kernels (`process_cluster`)
+are the opposite, `IDP.4A.S8.S8` and no `IMMA` (`cuobjdump -sass` of the
+pinned build). Both are exact int32 accumulations, so the numbers agree
+bit for bit; only the instruction mix differs.
 
 **The SilverTorch dequant is one expression in five places.** The
 bit-exact contract across `triton` / `torch` / `official` rests on the
@@ -1094,6 +1123,32 @@ current form is 32–44 launches. Both launches stay textually inside
 each `@triton_op` body (`_host.probe_prep` / `probe_topk` build their
 arguments).
 
+**Tile config: one per width.** Both scorers load the whole `[BLOCK_P,
+D_PAD]` int8 code tile and feed it to one `tl.dot`; there is no K loop,
+so the tile's operands sit in registers and their footprint grows with
+`D_PAD`. With the `256 × 4` tile tuned at D = 128, `D_PAD = 1024`
+(pubmed, D = 768) asks for about 512 registers a thread against the 255
+limit: ptxas drops to 32 registers and spills about 10 KB a thread
+(2,300-3,000 `LDL` in the SASS; none at `D_PAD ≤ 256`), and the scorer
+is 10-15× slower at B = 16 than the best tile. Each kernel module
+therefore ships `CONFIGS`, a tile per `D_PAD` bound, and
+[`_host.tile_for_width`](../../retrieve/src/retrieve/ops/triton/_host.py)
+picks the smallest bound at or above `next_power_of_2(D)` (the widest
+entry past the last bound, untuned there). Tuned on the A100 with
+`tune-kernels` (its selection rule, one width at a time) and a
+realistic-layout sweep
+([artifact](../artifacts/pubmed-fixes/README.md#fix-1-d-aware-probe-scorer-tiles)):
+
+| `D_PAD` bound | `codesigned_probe_score` (none, bloom) | `codesigned_probe_score_exact` |
+|---|---|---|
+| ≤ 256 | `256 × 4` | `256 × 4` |
+| 512 | `128 × 4` | `128 × 4` |
+| 1024 | `64 × 4` | `128 × 4` |
+
+The ≤ 256 entry is the old default, so D = 128 / 192 launch the same
+kernel as before. Scores do not depend on the tile (the int32 dot is
+exact and the tiling only moves slots), which every parity file checks.
+
 ### `codesigned_probe_score` — IVF + INT8 + Bloom
 
 [`ops/triton/codesigned_probe_score.py`](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py).
@@ -1116,10 +1171,10 @@ oracle). The bloom inputs inherit the `(clause_idx, value)` keying
 invariant documented under `bloom_match`.
 
 **Tile config.** `CodesignedProbeScoreConfig(block_p, num_warps,
-num_stages)` — shipped as `DEFAULT_CONFIG` on the kernel module; pass
-`config=` to override. `256 × 4` was re-swept on the compact layout and
-stays the best of 9 configurations on both goodreads and arXiv. Re-tune
-on a new arch via `uv run tune-kernels codesigned-probe-score`. `HAS_QB`
+num_stages)`, one per `D_PAD` bound in the module's `CONFIGS` (table in
+[SilverTorch kernels](#silvertorch-kernels)); pass `config=` to override.
+Re-tune one width at a time on a new arch via `uv run tune-kernels
+codesigned-probe-score --d <D>`. `HAS_QB`
 is a body-level constexpr (the bloom-on and bloom-off paths JIT-specialise
 on it). The score buffer is `torch.empty([B, width])`: every slot is
 written (a dot, or `-inf`), so there is no pre-fill.
@@ -1143,11 +1198,11 @@ and more than the code row. This is why exact mode is the slowest of the
 three here (validation's head-to-head).
 
 **Tile config.** `CodesignedProbeScoreExactConfig(block_p, num_warps,
-num_stages=3)` — shipped as `DEFAULT_CONFIG` on the kernel module;
-default `block_p=256, num_warps=4`, re-swept on the compact layout. Re-tune
-via its own subcommand, `uv run tune-kernels codesigned-probe-score-exact`,
-whose regime axes are `(N, B, C, A_MAX)` clause shapes (repeatable
-`--regime`). The score buffer is `torch.empty([B, width])`, written in
+num_stages=3)`, one per `D_PAD` bound in the module's `CONFIGS` (table in
+[SilverTorch kernels](#silvertorch-kernels)). Re-tune via its own
+subcommand, `uv run tune-kernels codesigned-probe-score-exact`, whose
+regime axes are `(N, B, C, A_MAX, D)` (repeatable `--regime`, one `D` per
+run). The score buffer is `torch.empty([B, width])`, written in
 full, with the same id epilogue.
 
 
