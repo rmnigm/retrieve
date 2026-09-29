@@ -136,41 +136,63 @@ def cmd_prep(args) -> int:
         json.dump({str(k): v for k, v in data.item_id_to_idx.items()}, f)
     logger.info("Wrote {} ({} entries)", map_path, n_items)
 
-    train_out = train_lf.select(pl.col("item_id").alias("item_ids")).collect(engine="streaming")
+    train_lf = train_lf.with_columns(pl.col("timestamp").cast(pl.List(pl.Int64)))
+    train_out = train_lf.select(
+        pl.col("item_id").alias("item_ids"), pl.col("timestamp").alias("timestamps")
+    ).collect(engine="streaming")
     train_path = output / "train.parquet"
     train_out.write_parquet(train_path, compression="zstd")
     logger.info("Wrote {} (n_users={})", train_path, train_out.height)
 
-    train_hist = train_lf.select("uid", pl.col("item_id").alias("history"))
+    train_hist = train_lf.select(
+        "uid", pl.col("item_id").alias("history"), pl.col("timestamp").alias("history_ts")
+    )
 
     val_join = (
         train_hist.join(
             val_lf.select("uid", pl.col("item_id").alias("targets")), on="uid", how="inner"
         )
-        .select(pl.col("history").alias("item_ids"), pl.col("targets"))
+        .select(
+            pl.col("history").alias("item_ids"),
+            pl.col("history_ts").alias("timestamps"),
+            pl.col("targets"),
+        )
         .collect(engine="streaming")
     )
     val_path = output / "val.parquet"
     val_join.write_parquet(val_path, compression="zstd")
     logger.info("Wrote {} (n_users={})", val_path, val_join.height)
 
+    val_ts = pl.col("val_ts").cast(pl.List(pl.Int64))
     train_plus_val = (
         train_hist.join(
-            val_lf.select("uid", pl.col("item_id").alias("val_items")), on="uid", how="left"
+            val_lf.select(
+                "uid", pl.col("item_id").alias("val_items"), pl.col("timestamp").alias("val_ts")
+            ),
+            on="uid",
+            how="left",
         )
         .with_columns(
             pl.when(pl.col("val_items").is_null())
             .then(pl.col("history"))
             .otherwise(concat_then_tail(pl.col("history"), pl.col("val_items"), args.max_seq_len))
-            .alias("history")
+            .alias("history"),
+            pl.when(pl.col("val_items").is_null())
+            .then(pl.col("history_ts"))
+            .otherwise(concat_then_tail(pl.col("history_ts"), val_ts, args.max_seq_len))
+            .alias("history_ts"),
         )
-        .select("uid", "history")
+        .select("uid", "history", "history_ts")
     )
     test_join = (
         train_plus_val.join(
             test_lf.select("uid", pl.col("item_id").alias("targets")), on="uid", how="inner"
         )
-        .select(pl.col("history").alias("item_ids"), pl.col("targets"))
+        .select(
+            pl.col("history").alias("item_ids"),
+            pl.col("history_ts").alias("timestamps"),
+            pl.col("targets"),
+        )
         .collect(engine="streaming")
     )
     test_path = output / "test.parquet"

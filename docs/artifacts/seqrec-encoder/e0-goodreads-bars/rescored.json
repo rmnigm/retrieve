@@ -1,0 +1,42 @@
+[
+  {
+    "ckpt": "/data/goodreads-work-id/checkpoints/gsasrec-d64-drop0.5-id",
+    "test": "/data/goodreads-work-id/trainer/test.parquet",
+    "metrics": {
+      "ndcg@10": 0.0350259419693284,
+      "recall@10": 0.033303169075158984,
+      "ndcg@100": 0.06868638822184416,
+      "recall@100": 0.14862541818468702,
+      "coverage@10": 0.12862634302030904,
+      "coverage@100": 0.3530957841331654
+    },
+    "stored": {
+      "ndcg@10": 0.03503235324805486,
+      "ndcg@100": 0.06868482875502052,
+      "recall@10": 0.033310989803879094,
+      "recall@100": 0.1486116848964051,
+      "coverage@10": 0.1286100335723713,
+      "coverage@100": 0.3530606560914534
+    }
+  },
+  {
+    "ckpt": "/data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id",
+    "test": "/data/goodreads-work-id/trainer/test.parquet",
+    "metrics": {
+      "ndcg@10": 0.03605632143530343,
+      "recall@10": 0.034028677987865394,
+      "ndcg@100": 0.06913995243932522,
+      "recall@100": 0.1479869560523413,
+      "coverage@10": 0.1218115029281732,
+      "coverage@100": 0.3277872846525586
+    },
+    "stored": {
+      "ndcg@10": 0.03605539798737048,
+      "ndcg@100": 0.06914177449882612,
+      "recall@10": 0.034025843256545174,
+      "recall@100": 0.1479926924446184,
+      "coverage@10": 0.12180523006358175,
+      "coverage@100": 0.32779104837131345
+    }
+  }
+]

@@ -1,0 +1,18 @@
+{
+  "published_per_position": {
+    "mean_pairwise_query_cosine": 0.373365193605423,
+    "distinct_items_in_2048_top10s": 12273,
+    "top10_share_of_popular_0.1pct": 0.2830566465854645,
+    "row_norm_top_0.1pct_freq": 0.587367057800293,
+    "row_norm_never_in_train": 0.9261301159858704,
+    "row_norm_all": 1.0465667247772217
+  },
+  "shared_k256": {
+    "mean_pairwise_query_cosine": 0.9987703561782837,
+    "distinct_items_in_2048_top10s": 21,
+    "top10_share_of_popular_0.1pct": 1.0,
+    "row_norm_top_0.1pct_freq": 1.1484999656677246,
+    "row_norm_never_in_train": 0.17806094884872437,
+    "row_norm_all": 0.18638423085212708
+  }
+}

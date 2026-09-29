@@ -1,4 +1,4 @@
-"""History → query vector with a trained gSASRec: model load, ``predict_last`` over the eval
+"""History → query vector with a trained ``Encoder``: model load, ``predict_last`` over the eval
 split, and the on-disk cache next to the checkpoint (``encoded_queries_v2.pt``, keyed on the
 checkpoint's mtime + ``max_seq_length``, the *full* split — ``users_limit`` is applied by the
 harness after loading). Yambda / goodreads configs point at a checkpoint; pre-encoded text
@@ -12,14 +12,14 @@ import shutil
 from pathlib import Path
 
 import torch
-import torch.nn as nn
 from loguru import logger
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from eval_datasets.layout import atomic_write
+from training.config import TrainConfig
 from training.evaluate import EvalDataset, collate_eval
-from training.model import GSASRec
+from training.model import Encoder, build_encoder
 
 ENCODE_CACHE = "encoded_queries_v2.pt"
 _CACHE_FREE_FRACTION, _CACHE_RESERVE_BYTES = 0.7, 4 * 2**30
@@ -32,29 +32,25 @@ D128_DROP05_DEFAULTS = {
     "ffn_hidden_dim": 512,
     "dropout": 0.5,
     "reuse_item_embeddings": False,
+    "loss": "gbce",
 }
 
 
-def load_model_for_eval(checkpoint_path: Path, num_items: int, device: torch.device) -> GSASRec:
-    """A ``GSASRec`` from ``checkpoint_path``, hyperparameters from the sibling ``config.json``
-    when present (5B / freshly trained runs), else ``D128_DROP05_DEFAULTS``."""
+def load_model_for_eval(checkpoint_path: Path, num_items: int, device: torch.device) -> Encoder:
+    """An ``Encoder`` from ``checkpoint_path``, hyperparameters from the sibling ``config.json``
+    when present, else ``D128_DROP05_DEFAULTS``. State dicts saved by the retired ``GSASRec``
+    (``encoder.layers.N.``) load into ``blocks.N.``: the math is the same."""
     cfg_path = checkpoint_path.parent / "config.json"
-    if cfg_path.exists():
-        with open(cfg_path) as f:
-            cfg = json.load(f)
-        params = {k: cfg[k] for k in D128_DROP05_DEFAULTS if k in cfg}
-    else:
-        params = dict(D128_DROP05_DEFAULTS)
-    logger.info("model: GSASRec params={}", params)
-    model = GSASRec(num_items=num_items, **params).to(device).eval()
+    cfg = TrainConfig.load(cfg_path) if cfg_path.exists() else TrainConfig(**D128_DROP05_DEFAULTS)
+    model = build_encoder(cfg, num_items).to(device).eval()
     state = torch.load(str(checkpoint_path), map_location=str(device), weights_only=True)
-    model.load_state_dict(state)
+    model.load_state_dict({k.replace("encoder.layers.", "blocks."): v for k, v in state.items()})
     return model
 
 
 @torch.inference_mode()
 def encode_queries(
-    model: nn.Module,
+    model: Encoder,
     data_path: Path,
     *,
     max_length: int,
@@ -79,8 +75,6 @@ def encode_queries(
     amp_enabled = device.type == "cuda"
     for item_seqs, targets, num_targets in tqdm(loader, desc="encode queries"):
         item_seqs = item_seqs.to(device, non_blocking=True)
-        # As training/evaluate.py: fp32 attention NaNs out on fully masked left-padded rows;
-        # autocast dispatches to an SDPA kernel that handles the all-masked-keys case.
         with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp_enabled):
             q = model.predict_last(item_seqs)
         q_chunks.append(q.float().detach().cpu())
@@ -122,7 +116,7 @@ def encode_split(
     with open(data_dir / "item_id_map.json") as f:
         num_items = len(json.load(f))
     model = load_model_for_eval(checkpoint, num_items=num_items, device=device)
-    item_embs = model.get_output_embeddings().weight.detach()[1:].to(device).contiguous()
+    item_embs = model.scoring_table().detach()[1:].to(device).contiguous()
     queries, targets, n_targets = encode_queries(
         model,
         data_dir / "test.parquet",

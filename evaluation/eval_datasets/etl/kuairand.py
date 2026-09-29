@@ -285,20 +285,32 @@ def cmd_prep(args: argparse.Namespace) -> int:
         gap_size=gap,
         drop_non_train_items=False,
     )
-    train = train_lf.select("uid", pl.col("item_id").alias("history")).collect()
-    val = val_lf.select("uid", pl.col("item_id").alias("targets")).collect()
+    train = train_lf.select(
+        "uid", pl.col("item_id").alias("history"), pl.col("timestamp").alias("history_ts")
+    ).collect()
+    val = val_lf.select(
+        "uid", pl.col("item_id").alias("targets"), pl.col("timestamp").alias("val_ts")
+    ).collect()
     test = test_lf.select("uid", pl.col("item_id").alias("targets")).collect()
 
     windows = [
-        w.tolist()
-        for h in train["history"].to_list()
-        for w in train_windows(np.asarray(h, dtype=np.int64), L)
+        (w.tolist(), t.tolist())
+        for h, ts in train.select("history", "history_ts").iter_rows()
+        for w, t in zip(
+            train_windows(np.asarray(h, dtype=np.int64), L),
+            train_windows(np.asarray(ts, dtype=np.int64), L),
+            strict=True,
+        )
     ]
-    pl.DataFrame({"item_ids": windows}, schema={"item_ids": pl.List(pl.Int64)}).write_parquet(
-        output / "train.parquet", compression="zstd"
-    )
+    pl.DataFrame(
+        windows,
+        schema={"item_ids": pl.List(pl.Int64), "timestamps": pl.List(pl.Int64)},
+        orient="row",
+    ).write_parquet(output / "train.parquet", compression="zstd")
     val_rows = train.join(val, on="uid", how="inner").select(
-        pl.col("history").list.tail(L).alias("item_ids"), "targets"
+        pl.col("history").list.tail(L).alias("item_ids"),
+        pl.col("history_ts").list.tail(L).alias("timestamps"),
+        "targets",
     )
     val_rows.write_parquet(output / "val.parquet", compression="zstd")
     test_rows = (
@@ -311,10 +323,14 @@ def cmd_prep(args: argparse.Namespace) -> int:
             .list.concat(pl.col("val_items").fill_null([]))
             .list.tail(L)
             .alias("item_ids"),
+            pl.col("history_ts")
+            .list.concat(pl.col("val_ts").fill_null([]))
+            .list.tail(L)
+            .alias("timestamps"),
             "targets",
         )
     )
-    test_rows.select("item_ids", "targets").write_parquet(
+    test_rows.select("item_ids", "timestamps", "targets").write_parquet(
         output / "test.parquet", compression="zstd"
     )
     test_rows.select("uid").write_parquet(output / "test_users.parquet", compression="zstd")

@@ -1,0 +1,30 @@
+2026-09-26 12:18:50.134 | INFO     | training.train:train:220 - Epoch 71 — loss 0.0019 | 10.4 s, 8834 seq/s, peak 10.4 GB | val {"ndcg@10": 0.0884, "recall@10": 0.043, "ndcg@100": 0.1108, "recall@100": 0.16, "coverage@10": 0.0398, "coverage@100": 0.1102}
+2026-09-26 12:19:04.047 | INFO     | training.train:train:220 - Epoch 72 — loss 0.0019 | 10.3 s, 8859 seq/s, peak 10.4 GB | val {}
+2026-09-26 12:19:19.541 | INFO     | training.train:train:220 - Epoch 73 — loss 0.0019 | 10.3 s, 8865 seq/s, peak 10.4 GB | val {"ndcg@10": 0.0882, "recall@10": 0.0429, "ndcg@100": 0.1109, "recall@100": 0.1604, "coverage@10": 0.0404, "coverage@100": 0.1123}
+2026-09-26 12:19:32.573 | INFO     | training.train:train:220 - Epoch 74 — loss 0.0019 | 10.3 s, 8855 seq/s, peak 10.4 GB | val {}
+2026-09-26 12:19:52.174 | INFO     | training.train:train:220 - Epoch 75 — loss 0.0019 | 10.5 s, 8751 seq/s, peak 10.4 GB | val {"ndcg@10": 0.089, "recall@10": 0.0435, "ndcg@100": 0.1113, "recall@100": 0.1607, "coverage@10": 0.0412, "coverage@100": 0.1144}
+2026-09-26 12:20:06.220 | INFO     | training.train:train:220 - Epoch 76 — loss 0.0019 | 10.4 s, 8805 seq/s, peak 10.4 GB | val {}
+2026-09-26 12:20:25.088 | INFO     | training.train:train:220 - Epoch 77 — loss 0.0019 | 13.2 s, 6958 seq/s, peak 10.4 GB | val {"ndcg@10": 0.0886, "recall@10": 0.0431, "ndcg@100": 0.1108, "recall@100": 0.1598, "coverage@10": 0.0421, "coverage@100": 0.1161}
+2026-09-26 12:20:38.100 | INFO     | training.train:train:220 - Epoch 78 — loss 0.0019 | 10.3 s, 8858 seq/s, peak 10.4 GB | val {}
+2026-09-26 12:20:53.594 | INFO     | training.train:train:220 - Epoch 79 — loss 0.0019 | 10.3 s, 8861 seq/s, peak 10.4 GB | val {"ndcg@10": 0.0898, "recall@10": 0.0436, "ndcg@100": 0.1118, "recall@100": 0.1612, "coverage@10": 0.0424, "coverage@100": 0.1171}
+2026-09-26 12:21:07.465 | INFO     | training.train:train:220 - Epoch 80 — loss 0.0019 | 10.3 s, 8862 seq/s, peak 10.4 GB | val {}
+2026-09-26 12:21:22.998 | INFO     | training.train:train:220 - Epoch 81 — loss 0.0019 | 10.3 s, 8857 seq/s, peak 10.4 GB | val {"ndcg@10": 0.0894, "recall@10": 0.0432, "ndcg@100": 0.1119, "recall@100": 0.1617, "coverage@10": 0.0421, "coverage@100": 0.1163}
+2026-09-26 12:21:35.990 | INFO     | training.train:train:220 - Epoch 82 — loss 0.0019 | 10.3 s, 8862 seq/s, peak 10.4 GB | val {}
+2026-09-26 12:21:51.292 | INFO     | training.train:train:220 - Epoch 83 — loss 0.0019 | 10.3 s, 8861 seq/s, peak 10.4 GB | val {"ndcg@10": 0.0898, "recall@10": 0.0437, "ndcg@100": 0.1122, "recall@100": 0.1619, "coverage@10": 0.0429, "coverage@100": 0.1186}
+2026-09-26 12:22:04.304 | INFO     | training.train:train:220 - Epoch 84 — loss 0.0019 | 10.3 s, 8860 seq/s, peak 10.4 GB | val {}
+2026-09-26 12:22:19.708 | INFO     | training.train:train:220 - Epoch 85 — loss 0.0019 | 10.3 s, 8862 seq/s, peak 10.4 GB | val {"ndcg@10": 0.0896, "recall@10": 0.0433, "ndcg@100": 0.1122, "recall@100": 0.1618, "coverage@10": 0.0437, "coverage@100": 0.1208}
+2026-09-26 12:22:32.724 | INFO     | training.train:train:220 - Epoch 86 — loss 0.0019 | 10.3 s, 8860 seq/s, peak 10.4 GB | val {}
+2026-09-26 12:22:48.141 | INFO     | training.train:train:220 - Epoch 87 — loss 0.0019 | 10.3 s, 8857 seq/s, peak 10.4 GB | val {"ndcg@10": 0.0899, "recall@10": 0.0435, "ndcg@100": 0.1126, "recall@100": 0.1625, "coverage@10": 0.0432, "coverage@100": 0.1195}
+2026-09-26 12:23:02.043 | INFO     | training.train:train:220 - Epoch 88 — loss 0.0019 | 10.3 s, 8862 seq/s, peak 10.4 GB | val {}
+2026-09-26 12:23:17.480 | INFO     | training.train:train:220 - Epoch 89 — loss 0.0019 | 10.3 s, 8859 seq/s, peak 10.4 GB | val {"ndcg@10": 0.0912, "recall@10": 0.0442, "ndcg@100": 0.114, "recall@100": 0.164, "coverage@10": 0.0435, "coverage@100": 0.1193}
+2026-09-26 12:23:31.444 | INFO     | training.train:train:220 - Epoch 90 — loss 0.0019 | 10.4 s, 8847 seq/s, peak 10.4 GB | val {}
+2026-09-26 12:23:46.765 | INFO     | training.train:train:220 - Epoch 91 — loss 0.0019 | 10.3 s, 8862 seq/s, peak 10.4 GB | val {"ndcg@10": 0.0901, "recall@10": 0.0436, "ndcg@100": 0.1125, "recall@100": 0.162, "coverage@10": 0.0446, "coverage@100": 0.1223}
+2026-09-26 12:23:59.766 | INFO     | training.train:train:220 - Epoch 92 — loss 0.0019 | 10.3 s, 8860 seq/s, peak 10.4 GB | val {}
+2026-09-26 12:24:15.177 | INFO     | training.train:train:220 - Epoch 93 — loss 0.0018 | 10.3 s, 8863 seq/s, peak 10.4 GB | val {"ndcg@10": 0.0908, "recall@10": 0.0439, "ndcg@100": 0.1134, "recall@100": 0.1635, "coverage@10": 0.0442, "coverage@100": 0.1216}
+2026-09-26 12:24:28.213 | INFO     | training.train:train:220 - Epoch 94 — loss 0.0018 | 10.4 s, 8853 seq/s, peak 10.4 GB | val {}
+2026-09-26 12:24:43.804 | INFO     | training.train:train:220 - Epoch 95 — loss 0.0018 | 10.4 s, 8846 seq/s, peak 10.4 GB | val {"ndcg@10": 0.0905, "recall@10": 0.0441, "ndcg@100": 0.1135, "recall@100": 0.1641, "coverage@10": 0.0445, "coverage@100": 0.1227}
+2026-09-26 12:24:56.863 | INFO     | training.train:train:220 - Epoch 96 — loss 0.0018 | 10.4 s, 8846 seq/s, peak 10.4 GB | val {}
+2026-09-26 12:25:12.380 | INFO     | training.train:train:220 - Epoch 97 — loss 0.0018 | 10.3 s, 8859 seq/s, peak 10.4 GB | val {"ndcg@10": 0.091, "recall@10": 0.0436, "ndcg@100": 0.1134, "recall@100": 0.1631, "coverage@10": 0.0456, "coverage@100": 0.125}
+2026-09-26 12:25:25.389 | INFO     | training.train:train:220 - Epoch 98 — loss 0.0018 | 10.3 s, 8856 seq/s, peak 10.4 GB | val {}
+2026-09-26 12:25:40.685 | INFO     | training.train:train:220 - Epoch 99 — loss 0.0018 | 10.4 s, 8855 seq/s, peak 10.4 GB | val {"ndcg@10": 0.0913, "recall@10": 0.0444, "ndcg@100": 0.1136, "recall@100": 0.1636, "coverage@10": 0.0459, "coverage@100": 0.1258}
+2026-09-26 12:25:48.615 | INFO     | training.train:train:299 - Test metrics: {

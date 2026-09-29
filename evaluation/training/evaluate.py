@@ -37,28 +37,22 @@ def ndcg_at_k(hits: torch.Tensor, num_targets: torch.Tensor, k: int) -> torch.Te
 
 
 class EvalDataset(Dataset):
-    def __init__(
-        self,
-        parquet_path: str,
-        max_length: int,
-        padding_value: int = 0,
-    ) -> None:
-        df = pl.read_parquet(parquet_path)
+    """History left-padded to ``max_length``, plus the row's target ids."""
+
+    def __init__(self, parquet_path: str, max_length: int) -> None:
+        df = pl.read_parquet(parquet_path, columns=["item_ids", "targets"])
         self.sequences = df["item_ids"].to_list()
         self.targets = df["targets"].to_list()
         self.max_length = max_length
-        self.padding_value = padding_value
 
     def __len__(self) -> int:
         return len(self.sequences)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, list[int]]:
-        seq = self.sequences[idx]
-        if len(seq) > self.max_length:
-            seq = seq[-self.max_length :]
-        if len(seq) < self.max_length:
-            seq = [self.padding_value] * (self.max_length - len(seq)) + seq
-        return torch.tensor(seq, dtype=torch.long), self.targets[idx]
+        seq = self.sequences[idx][-self.max_length :]
+        return torch.tensor(
+            [0] * (self.max_length - len(seq)) + seq, dtype=torch.long
+        ), self.targets[idx]
 
 
 def collate_eval(
@@ -109,7 +103,7 @@ def evaluate(
         pin_memory=(dev.type == "cuda"),
     )
 
-    item_embs = model.get_output_embeddings().weight.detach()  # [N+1, D]
+    item_embs = model.scoring_table().detach()  # [N+1, D]
     n_total = item_embs.shape[0]
     chunk = min(max(score_chunk, 1), n_total)
     coverage_seen = {k: torch.zeros(num_items + 1, dtype=torch.bool, device=dev) for k in ks}

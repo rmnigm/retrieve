@@ -1,0 +1,14 @@
+{
+  "gate": "B", "gpu": "NVIDIA H100 80GB HBM3", "sm_mhz_per_epoch": "1980 in all 100 samples",
+  "test": {"ndcg@10": 0.08373958785578363, "recall@100": 0.15575472412818317},
+  "brief_targets_published_eval_quality": {"ndcg@10": 0.0813, "recall@100": 0.1489,
+    "delta": {"ndcg@10": 0.0024, "recall@100": 0.0069}, "within_0.002": false},
+  "published_ckpt_rescored_on_todays_test": {"ndcg@10": 0.08461215706782366, "recall@100": 0.15633528091754978,
+    "delta": {"ndcg@10": -0.0009, "recall@100": -0.0006}, "within_0.002": true},
+  "best_val_ndcg@10": {"new": 0.0913370437861525, "published": 0.09199607636509806, "epoch": 99},
+  "final_train_loss": {"new": 0.0018, "published": 0.001837},
+  "epoch_time_sec": {"median": 10.37, "min": 10.34, "max": 13.17, "train_sum": 1045, "total_incl_eval_and_saves": 1478},
+  "samples_per_sec": 8772, "peak_gpu_mem_bytes": 11173125120,
+  "reference_a100_published_run": {"total_time_sec": 2809, "peak_gpu_mem_bytes": 14779942400},
+  "prediction": "10 s/epoch train, ~25 min total, peak ~11 GB (prediction.md, second section)"
+}

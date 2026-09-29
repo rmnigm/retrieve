@@ -1,0 +1,30 @@
+{
+  "run": "e1c-yambda-d64-sasrec-ssm-logq",
+  "test": {
+    "ndcg@10": 0.0945,
+    "ndcg@100": 0.1157,
+    "recall@10": 0.046,
+    "recall@100": 0.1619,
+    "coverage@10": 0.0382
+  },
+  "delta_vs_bar": {
+    "ndcg@10": 0.0099,
+    "recall@100": 0.0056
+  },
+  "bar": {
+    "ndcg@10": 0.0846,
+    "recall@100": 0.1563
+  },
+  "best_epoch": 77,
+  "best_val_ndcg@10": 0.101,
+  "epochs_run": 98,
+  "epoch_time_median_s": 11.59,
+  "first_epoch_s": 20.0,
+  "samples_per_s": 7809,
+  "peak_gpu_mem_gb": 10.7,
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "sm_mhz": [
+    1980.0
+  ],
+  "total_wall_s": 1564
+}

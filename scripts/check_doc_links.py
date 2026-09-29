@@ -89,7 +89,8 @@ table = {prog: commands(ROOT / pkg) for prog, pkg in CLIS.items()}
 broken = n_paths = n_cli = 0
 runtime_seen = set()
 for md in sorted(ROOT.rglob("*.md")):
-    if any(p in md.parts for p in (".git", ".venv", "node_modules")):
+    # .chains/: an append-only note log, not wiki; its repo-relative links do not resolve there
+    if any(p in md.parts for p in (".git", ".venv", "node_modules", ".chains")):
         continue
     rel = md.relative_to(ROOT).as_posix()
     if only and not any(rel.startswith(o) for o in only):

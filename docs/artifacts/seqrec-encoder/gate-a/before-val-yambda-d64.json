@@ -1,0 +1,3 @@
+{"ckpt": "/data/yambda-500m/checkpoints/gsasrec-d64-drop0.5", "split": "/data/yambda-500m/trainer/val.parquet",
+ "ndcg@10": 0.091978807594988, "recall@100": 0.1641298788564488,
+ "train_metrics_best_val": {"epoch": 99, "ndcg@10": 0.09199607636509806, "recall@100": 0.16416072919324604}}

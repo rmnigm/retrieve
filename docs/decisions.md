@@ -4,7 +4,7 @@ created: 2026-09-26
 updated: 2026-09-26
 type: summary
 tags: [decisions]
-sources: [pyproject.toml, evaluation/config/suites.yaml, retrieve/src/retrieve/, evaluation/bench/]
+sources: [pyproject.toml, evaluation/config/suites.yaml, retrieve/src/retrieve/, evaluation/bench/, evaluation/training/]
 ---
 
 # Standing decisions and constraints
@@ -137,6 +137,43 @@ decisions.
 - **YFCC runs clause filters only**, no bloom, so bloom false positives
   cannot spoil the cross-check against the shipped ground truth.
 
+## Sequential encoder (dev/hstu)
+
+The goal is to replace the published gSASRec checkpoints as the history encoder behind the sequential benchmarks
+(roadmap: not a numbered step; the user scheduled it directly).
+- **Output contract unchanged.** Item embeddings are `[N, D]` from an embedding table, query
+  embeddings are `[B, D]` from `encode.py`, and scoring is the dot product. D stays 64, 128 or
+  256.
+- **The encoder is the gSASRec body** (`SASRecBlock`, the published architecture), with the
+  E1c recipe as the trainer's defaults (user, 2026-09-26). The trainer reads item ids and
+  positions only; a `timestamps` column in the data is ignored.
+- **Two losses** (user, 2026-09-26): gBCE with per-position negatives, the published gSASRec
+  baseline (one shared vector per step collapses it,
+  [evidence](artifacts/seqrec-encoder/gate-b-yambda-d64/README.md)); and sampled softmax on
+  L2-normalized embeddings with logQ (temperature 0.05, in-batch positives plus shared uniform
+  negatives, expected-count correction, positive uncorrected), the default since E1c
+  ([recipe search](validation.md#recipe-search-yambda-500m-d64)).
+- **HSTU was tried and dropped.** The softmax-attention HSTU body with time-bucket bias (E2a,
+  E2c) did not beat the gSASRec body with logQ (E1c); the user dropped it and its code
+  (`HSTUBlock`, `use_time`, `hidden_dim`), 2026-09-26. Pointwise (softmax-free) attention was
+  never pursued ([recipe search](validation.md#recipe-search-yambda-500m-d64)).
+- **Success is measured on the same test file with the same eval code.** A new encoder must
+  beat the published gSASRec checkpoint of the same D, re-scored on today's
+  `trainer/test.parquet`, on test NDCG@10 **and** R@100, on both yambda-500m and
+  goodreads-work-id, with one shared recipe. The stored `eval_quality.json` numbers are not the
+  bar: yambda's were scored on a test split that is no longer on disk
+  ([bars](validation.md#bars)).
+- **Runs** (user, 2026-09-26): the E1c recipe (ffn 4×D) at d64, d128 and d256 on yambda-500m and
+  goodreads-work-id, and at d64 on KuaiRand; only D, epochs, patience and eval cadence
+  vary ([final models](validation.md#final-models-the-e1c-recipe)).
+- **KuaiRand is final at d64, refit on train + val** (`train_on_val=true`, 4 epochs, the
+  train-only run's best epoch + 1). The refit, because next-day clicks drift and the val day is
+  otherwise never trained on ([temporal drift](validation.md#kuairand-temporal-drift)). d128 was
+  not run ([OOM](validation.md#final-models-the-e1c-recipe)); the user stopped KuaiRand at d64
+  (2026-09-26).
+- **Out of scope for this line:** a LLaMA block, row-wise Adagrad, a bf16 table,
+  FuXi-style channels and multi-GPU.
+
 ## Environment
 
 - **One GPU box, serialized** (CLAUDE.md rule 1). One GPU job at a time;
@@ -146,3 +183,6 @@ decisions.
   pod image's defaults put data and the Hub cache on `/workspace`
   instead; storage.md marks this contested.
 - **`ncu` is blocked**; kernel attribution uses `torch.profiler`.
+- **The sequential-encoder line runs on an H100 pod** (`rp-h100-hstu`, one H100 80GB HBM3).
+  Rule 1's "the A100 is the machine" does not apply to that line. Every number from it records
+  the GPU name.

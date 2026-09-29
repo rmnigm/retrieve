@@ -163,14 +163,21 @@ Downloads `<variant>/sequential/listens.parquet`, runs `preprocess()`
 trainer consumes:
 
 ```
-<output>/train.parquet      item_ids: list[int64]
-<output>/val.parquet        item_ids, targets
-<output>/test.parquet       item_ids, targets
+<output>/train.parquet      item_ids, timestamps: list[int64]
+<output>/val.parquet        item_ids, timestamps, targets
+<output>/test.parquet       item_ids, timestamps, targets
 <output>/item_id_map.json   {raw_yandex_id: dense_int}
 ```
 
 Validation history is the train portion (already sliced to the last 200
-items in `preprocess`); test history is train ++ val, last 200. Adapted
+items in `preprocess`); test history is train ++ val, last 200.
+`timestamps` is the event time of each `item_ids` entry, same length and
+order; it covers the input history only, never `targets`. Yambda ships
+its time as **seconds since an anonymized dataset epoch** (UInt32,
+0..26,000,000, about 301 days), not unix time, so no conversion to unix
+is possible: the ETL only widens it to int64. The val/test row order is
+not reproducible run to run (it comes out of a `uid` join that is then
+dropped); the row contents are. Adapted
 from the Yambda paper's reference `sasrec/data.py`; only the
 listens-Listen+ branch is kept, the rest is replaced by the `training`
 package ([`evaluation/training/`](../../evaluation/training/)).
@@ -187,7 +194,14 @@ filters `is_read=true`, parses `date_added`, collapses editions to a
 `work_id` catalog, runs an iterative n-core, then time-splits via
 `timesplit.sequential_split_train_val_test`. Outputs `train/val/test.parquet`,
 `item_id_map.json`, `book_to_work.parquet` (reused by the filter eval),
-and `prep_log.json`.
+and `prep_log.json`. The parquets have the yambda columns: `item_ids`,
+`timestamps` (unix seconds of `date_added`, int64, same length and order
+as `item_ids`, the input history only) and, for val/test, `targets`.
+Nothing breaks ties between one user's events at the same second, and
+goodreads has many (bulk shelving), so the order inside a tie, and which
+tied items survive the 200-item cut, change from run to run; a re-run
+differs from the Hub copy only there
+([validation](../validation.md#trainer-inputs-with-timestamps-data-gates-not-citable)).
 
 > `prep` deliberately passes `drop_non_train_items=False`, mirroring
 > `yambda.preprocess`. Setting it `True` makes polars re-evaluate an
@@ -613,15 +627,14 @@ quantization* and *Build-time 1-bit quantization*).
 
 ### kuairand
 
-**Status: staged, trained, on the Hub, one filter cell run.** `download` →
-`convert` → `prep` → `attrs` have run on the real data and `bench check
---dataset kuairand` is clean. The gSASRec checkpoint `gsasrec-d128-shared` is
-trained and published (private) to
-`pinkmeme/eval-kuairand/checkpoints/gsasrec-d128-shared`; the dataset files
-themselves are not published. The dataset is in the `filter` suite. One cell,
-`linr_v1_filter_mask`/triton clause `t_cat1`, eager, `--skip-perf` (so
-`partial`): pass rate 0.0362, `recall_oracle@1000` **0.9996**, held-out
-`recall@100` 0.020, `recall@1000` 0.064, n = 9,910. Nothing below is citable.
+**Status: staged and layout-clean; the eval inputs and the d64 checkpoint are not on the Hub.**
+`download` → `convert` → `prep` → `attrs` have run on the real data, and `bench check --dataset
+kuairand` is clean. Only the trainer inputs are on the Hub ([HuggingFace I/O](#huggingface-io)).
+The user chose to keep Hub space for evals, so the eval inputs are rebuilt with
+`eval-data kuairand all` (~20 min) and the d64 `train_on_val` checkpoint was not kept
+([validation](../validation.md#final-models-the-e1c-recipe)): retrain it with `train run` and the
+flags in [its command.sh](../artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh)
+(~20 min on the H100). d128 does not fit. The filter cell has not run (roadmap E4). Nothing below is citable.
 The run records are in
 [artifacts/e4-kuairand/](../artifacts/e4-kuairand/).
 
@@ -670,6 +683,9 @@ user.
   trainer reads only the last `max_seq_length + 1` items of a row. That
   gives 561,486 rows covering all 109.6 M train transitions, instead of the
   27k × 200 that one row per user would train.
+- **`timestamps`.** Every train/val/test row carries `timestamps`, the unix
+  seconds (`time_ms // 1000`) of each `item_ids` entry, cut into the same
+  windows and tails; it covers the history, not `targets`.
 
 **`attrs`.** It writes `item_attrs_narrow.pt` `[32,038,725, 7, 4]` int64
 (7.2 GB), `clause_is_reverse_narrow.pt`, `attr_vocab.json` (every
@@ -717,23 +733,19 @@ The sweeps of [`config/kuairand.yaml`](../../evaluation/config/kuairand.yaml)
 are `t_*` over C0–C3 and `b_*` over C4–C6. Bloom runs `t_cat1`, `t_tag`,
 `b_short` and `b_fresh`. The dataset is in the `filter` suite.
 
-**Training** runs over the full 32 M table with `reuse_item_embeddings`,
-the one item table the trainer already supports. The table is 32,038,726
-× 128 fp32 = 16.4 GB; with its dense gradient and AdamW's two moments that
-is 65.6 GB before activations, where two separate tables would need 131 GB.
-At the default `--negs-per-pos 256` the first backward OOMs (the gathered
-negatives alone are 6.7 GB fp32, with 74.8 GiB already allocated before
-AdamW's moments exist). At 128 the measured peak `max_memory_allocated` is
-82.9 GB (77.2 GiB) of the 80 GB card, the full-catalog val eval included.
-Every epoch scores the full catalog for the val users, so `--eval-max-users`
-bounds that cost. The command that produced `gsasrec-d128-shared`:
-
-```bash
-PYTORCH_ALLOC_CONF=expandable_segments:True uv run --directory evaluation train sasrec \
-    --data-dir data/kuairand --checkpoint-dir data/kuairand/checkpoints/gsasrec-d128-shared \
-    --embedding-dim 128 --dropout 0.5 --reuse-item-embeddings --eval-max-users 4096 \
-    --negs-per-pos 128 --patience 5 --num-epochs 100 --no-wandb
-```
+**Training** runs over the full 32 M catalog (32,038,725 items; 32,038,726 table rows with padding). At d64
+two separate tables fit (62.6 GB peak on the 80 GB H100). At d128 even one
+shared table (`reuse_item_embeddings`) does not: weight, two AdamW moments
+and the two dense gradients it receives in backward exceed 80 GB
+([probe](../artifacts/seqrec-encoder/k128-probe-oom/README.md)). Every epoch
+also scores the full catalog for the val users, so `eval_max_users` bounds
+that cost. The final
+KuaiRand model is refit with `train_on_val=true` at the epoch count chosen
+on val, because next-day clicks drift and the val day is otherwise never
+trained on ([validation](../validation.md#kuairand-temporal-drift)). The
+commands are the [train-only run](../artifacts/seqrec-encoder/k64-sasrec-ssm-logq/command.sh)
+that picks the epoch count and the
+[refit](../artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh).
 
 An epoch is 2,193 batches and takes ~11 min (4 it/s plus eval and a 49 GB
 `_resume.pt`). The goal was usable embeddings, not convergence, hence
@@ -749,8 +761,8 @@ checkpoint directory holds ~82 GB, 49 GB of it `_resume.pt`.
 ```
 data/kuairand/
 ├── item_id_map.json            identity over 32,038,725 videos (video_id v → v+1), 619 MB
-├── train.parquet               item_ids: 200-transition windows, 561,486 rows
-├── val.parquet / test.parquet  item_ids (last 200), targets
+├── train.parquet               item_ids, timestamps: 200-transition windows, 561,486 rows
+├── val.parquet / test.parquet  item_ids (last 200), timestamps, targets
 ├── test_users.parquet          user_id of each test row
 ├── item_attrs_narrow.pt        [32,038,725, 7, 4] int64, -1 pad
 ├── clause_is_reverse_narrow.pt [7] bool = [F, F, F, F, T, F, F]
@@ -1061,10 +1073,29 @@ are already public and unauthenticated, so `yfcc download` is the fetch
 path; the entry exists so the local directory layout resolves like every
 other dataset's.
 
-`pinkmeme/eval-pubmed` is **registered but not published**: the staged
-10 M slice is local only. `pinkmeme/eval-kuairand` holds only the
-`gsasrec-d128-shared` checkpoint (private); the dataset files are not
-published.
+`pinkmeme/eval-pubmed` is **registered but not published**; nothing is
+pushed to it before roadmap E2. `pinkmeme/eval-kuairand` (private) holds only the
+KuaiRand trainer inputs: the eval inputs and the checkpoint are not published
+(user choice, see [kuairand](#kuairand)). The old A100
+`checkpoints/gsasrec-d128-shared` was deleted from it to free space (user decision).
+
+**Trainer inputs** sit under `trainer/` in the private eval repos, uploaded with
+`upload_folder` ([script](../artifacts/seqrec-encoder/hub-upload/trainer_upload.py);
+`hub.py` has no helper for them). The trainer's `data_dir` needs
+`train/val/test.parquet` and `item_id_map.json` in one directory:
+
+- `pinkmeme/eval-goodreads-work-id` `trainer/`: all of `data/goodreads-work-id/trainer/`
+  (`train/val/test.parquet`, `item_id_map.json`, `prep_log.json`, `book_to_work.parquet`);
+- `pinkmeme/eval-yambda-500m` `trainer/`: all of `data/yambda-500m/trainer/`
+  (`train/val/test.parquet`, `item_id_map.json`, the re-prep with `timestamps`);
+- `pinkmeme/eval-kuairand` `trainer/`: `train.parquet`, `val.parquet`, `prep_log.json`.
+  The trainer also needs `test.parquet` and `item_id_map.json` from `data/kuairand/`,
+  which are not on the Hub; rebuild them with `eval-data kuairand all`.
+
+```bash
+hf download pinkmeme/eval-goodreads-work-id --repo-type dataset \
+    --include 'trainer/*' --local-dir data/goodreads-work-id
+```
 
 `eval-data fetch` pulls a prepared dataset (optionally a subset of dims),
 `eval-data publish` pushes one, `eval-data publish-checkpoint` pushes a
@@ -1075,75 +1106,165 @@ time.
 
 ## Training — `evaluation/training/`
 
-A compact gSASRec trainer plus the history → query-vector encoder the
-harness uses at eval time. It exists to produce the embeddings the
-sequential benchmarks need; it is not a research surface of its own. It
-imports `eval_datasets.{hub,layout}` and nothing from `bench`; the
-console script is `train`.
+One sequence `Encoder` (the gSASRec body), two losses (gBCE and sampled
+softmax with logQ, the default), plus the history → query-vector encoder the
+harness uses at eval time. It exists to produce the embeddings
+the sequential benchmarks need. It imports `eval_datasets.{hub,layout}` and
+nothing from `bench`; the console script is `train`.
 
 | file | role |
 |---|---|
-| [`config.py`](../../evaluation/training/config.py) | `GSASRecConfig` dataclass + `save` / `load` / `num_items` |
-| [`model.py`](../../evaluation/training/model.py) | `GSASRec` — `nn.TransformerEncoder`, `norm_first`, separate output embedding, `predict_last` |
-| [`dataset.py`](../../evaluation/training/dataset.py) | `SequenceDataset`, negative-sampling collate, train dataloader |
-| [`losses.py`](../../evaluation/training/losses.py) | `gbce_loss` |
+| [`config.py`](../../evaluation/training/config.py) | `TrainConfig` dataclass (defaults = the E1c recipe) + `save` / `load` (unknown keys dropped; no `loss` key means `gbce`) / `num_items` |
+| [`model.py`](../../evaluation/training/model.py) | `Encoder`, `SASRecBlock`, `build_encoder(cfg, num_items)` |
+| [`dataset.py`](../../evaluation/training/dataset.py) | `load_sequences` (the train split as left-padded `[U, L+1]` tensors on the device), `load_val_transitions` (val rows for `train_on_val`), `target_mask` (the trained target positions), `train_batches` (`randperm` slices) |
+| [`losses.py`](../../evaluation/training/losses.py) | `gbce_loss`, `sampled_softmax_loss` |
 | [`evaluate.py`](../../evaluation/training/evaluate.py) | chunked full-catalog scoring with its **own** recall / ndcg (`hits_at`, `recall_at_k`, `ndcg_at_k`): a checkpoint's reported quality must not move with the harness's metric code; `tests/training/test_encode.py` pins them to `bench.metrics` at 1e-9 |
 | [`encode.py`](../../evaluation/training/encode.py) | `load_model_for_eval`, `encode_queries`, `encode_split` — the eval-time encode of the test split with its cache (`<ckpt-dir>/encoded_queries_v2.pt`, keyed on ckpt mtime + `max_seq_length`, the full split); what `bench.inputs.load_inputs` calls on a `checkpoint` dataset |
-| [`train.py`](../../evaluation/training/train.py) | `train()` + the `train sasrec` command |
+| [`train.py`](../../evaluation/training/train.py) | `train()`, `step_loss()`, `target_frequencies()` + the `train run` command |
 | [`checkpoints.py`](../../evaluation/training/checkpoints.py) | `train upload-checkpoint`: push a checkpoint dir (or all) to HF through `hub.upload_checkpoint` |
 | [`cli.py`](../../evaluation/training/cli.py) | the `train` group |
 
 ### Running a training job
 
 ```bash
-uv run --directory evaluation train sasrec \
-    --data-dir data/yambda/500m-listens \
-    --checkpoint-dir checkpoints/yambda-500m-d128 \
-    --embedding-dim 128 --dropout 0.5
+uv run --directory evaluation train run \
+    data_dir=/data/yambda-500m/trainer checkpoint_dir=/scratch/ckpt/yambda-d64
+uv run --directory evaluation train run data_dir=/data/yambda-500m/trainer \
+    checkpoint_dir=/scratch/ckpt/yambda-d128 embedding_dim=128 ffn_hidden_dim=512
+uv run --directory evaluation train run data_dir=/data/yambda-500m/trainer loss=gbce num_negatives=256 warmup_steps=0
 ```
 
-Every `GSASRecConfig` field has a matching flag; alternatively pass
-`--config <json>` to load a saved config verbatim. `--resume` picks up
-from `<ckpt_dir>/_resume.pt`, which is written every epoch and carries
-model, optimizer, epoch, best metric, and the Python / numpy / torch /
-CUDA RNG states — so a resumed run is reproducible, not merely
-restarted.
+The defaults are the E1c recipe
+([artifact](../artifacts/seqrec-encoder/e1c-yambda-d64-sasrec-ssm-logq/config.json)):
+d64, 2 blocks, 2 heads, ffn 256, dropout 0.5; `loss=sampled_softmax` with
+`normalize`, `temperature=0.05`, `num_negatives=8192`,
+`inbatch_negatives=4096`, `logq`; lr 1e-3, batch 256, L 200, warmup 1000,
+`compile`; 100 epochs, eval every 2, early stop on `ndcg@10` with patience
+10. The published gSASRec recipe (Gate B) is `loss=gbce num_negatives=256
+warmup_steps=0`.
 
-### The loss
+Arguments are `TrainConfig` `FIELD=VALUE` pairs, the value parsed as JSON
+when it parses and taken as a string otherwise; an unknown field is a usage
+error. `--config <json>` starts from a saved config instead of the defaults
+and the pairs override it (`TrainConfig.load(path, **overrides)`); a pair
+that changes `loss` drops the saved `normalize` and `logq`, so they resolve
+for the new loss unless given as pairs too. `--resume` picks up from
+`<ckpt_dir>/_resume.pt`, holding model, optimizer, scheduler, epoch, best
+metric and the Python / numpy / torch / CUDA RNG states, so a resumed run is
+reproducible, not merely restarted.
 
-`gbce_loss` implements gBCE: uniform negatives per positive, with the
-positive logit passed through a calibration transform parameterized by
-`gbce_t` (`0.75` default). The transform runs in **float64** — the
-`pow(-beta)` and `1/(x-1)` steps lose the positive class entirely in
-fp32. The rest of the step runs under bf16 autocast.
+`resume_every` (default 1) is the number of epochs between `_resume.pt`
+writes (`resume_due`); the last epoch, including an early stop, always
+writes it, so a finished run stays resumable. The file is model + both AdamW
+moments, three times `best_model.pt`: 49.2 GB and ~45 s per write at
+KuaiRand d64 (two 32 M × 64 tables), about a fifth of a ~210 s epoch. The
+trade-off: a crash loses up to `resume_every − 1` finished epochs, which
+`--resume` retrains. A superseded best snapshot is deleted at once unless
+the current `_resume.pt` names it; that one goes at the next `_resume.pt`
+write, so resuming always finds its best, looked up by file name in
+`checkpoint_dir`. On `--resume`, every other snapshot (from epochs about to
+be retrained, or all of them when no `_resume.pt` was written yet) is
+deleted. Disk peak: one extra best snapshot.
+
+`train_on_val=true` is the final fit, run after `num_epochs` has been chosen
+on val by an ordinary run. It adds one training row per `val.parquet` row:
+the last `max_seq_length + 1` items of `item_ids ++ targets`, with the val
+day's clicks in time order (`load_val_transitions`). Only the target
+positions whose target is a val-day item are trained (`target_mask`, from
+the per-row `first`), because the history transitions are already train
+rows. A row with more than `max_seq_length` targets keeps only its last
+`max_seq_length`. The logQ frequencies count these positions too. The
+run evaluates nothing on val and never stops early: it trains exactly
+`num_epochs`, and the last epoch is the model saved as `best_model.pt` and
+scored on test (`eval_quality.json`; `best_val_metric` is `{}`). `patience`,
+`eval_every` and `early_stop_metric` then have nothing to act on.
+
+### The encoder
+
+`Encoder(items [B, L]) -> [B, L, D]`: `item_embedding [N+1, D]` (row 0 is
+padding) `+ position_embedding` → dropout → `blocks` (`num_blocks` ×
+`SASRecBlock`) → `final_norm` (LayerNorm). `SASRecBlock` is
+`nn.TransformerEncoderLayer` (gelu, `norm_first`, `batch_first`), the
+retired `GSASRec` body, so its state dicts load with `encoder.layers.N.`
+renamed to `blocks.N.`. `predict_last` takes position −1 (sequences are
+left-padded). `scoring_table()` is the `[N+1, D]` output table queries are
+scored against; with `normalize` both it and `predict_last` return unit
+vectors, so a dot product of the stored vectors is the cosine the loss
+trained on. The trainer reads only `item_ids` (and `targets` at eval); a
+`timestamps` column in the parquet is ignored.
+
+The attention mask is built once per forward: `causal & (key_valid | eye)`,
+`True` = attend. Real positions see exactly their real causal prefix; a
+left-padding row sees only itself, so no row is empty and nothing
+softmaxes to NaN (`tests/training/test_encoder.py`).
+
+### The losses
+
+`loss` picks one of two; `sampled_softmax` with logQ is the default.
+Negatives are uniform over `1..N`, drawn on the GPU inside the step.
+
+- `gbce` — gBCE as gSASRec publishes it (the published checkpoints' loss): `num_negatives` negatives **per
+  position** (`[P, K]`, a `[P, K, D]` gather), the positive logit through
+  the float64 calibration transform (`gbce_t`, `alpha = K / (N − 1)`), BCE
+  over positive + K negatives. The `pow(−beta)` and `1/(x−1)` steps lose
+  the positive class in fp32, hence float64. One `[K]` vector shared by the
+  batch does not train: only K table rows get a negative gradient per step,
+  and on yambda-500m d64 the user queries collapse onto a few popular items
+  ([validation](../validation.md#seqrec-encoder)).
+- `sampled_softmax` — cross-entropy of the positive against one candidate
+  vector shared by the batch: `inbatch_negatives` positives of the batch (a
+  random subset) plus `num_negatives` uniform ids, at `temperature` (default 0.05), in fp32 outside
+  autocast. A candidate equal to the row's own positive is masked to
+  `−inf`. `normalize` (default: on for this loss, off for gbce; recorded in
+  `config.json`) L2-normalizes queries and items first. `TrainConfig` rejects
+  `normalize=true` with `gbce` and any other `loss` value.
+  `logq` (default: on for this loss, off for gbce; `TrainConfig` rejects
+  it with `gbce`) subtracts
+  `log q_j` from every candidate column after the temperature scaling,
+  where `q_j = M·p_train(j) + K/N` is the expected number of times item j
+  is drawn among the M + K candidates (M the in-batch candidates actually
+  used, K = `num_negatives`, N the item count; `logq_correction`, float64
+  until the log). `p_train` is each item's share of
+  the trained target positions (`target_frequencies` over `target_mask`,
+  one GPU bincount at startup). The positive column is not corrected (arXiv 2507.09331);
+  accidental hits stay `−inf`. With M = 0, `q_j = K/N` for every
+  candidate, so each moves by `+log(N/K)` against the uncorrected positive:
+  the plain uniform sampled-softmax correction.
 
 ### Loop shape
 
-Per epoch: bf16 autocast forward → `gbce_loss` → grad-clip at 1.0 →
-AdamW (fused on CUDA). Every `eval_every` epochs it evaluates on
-`val.parquet` by scoring the full catalog in `[B, eval_score_chunk]`
-chunks and merging top-k across chunks, optionally masking history.
-Checkpoints on improvement in `early_stop_metric` (`ndcg@10`), stops
-after `patience` epochs without one.
+Per epoch: `randperm` over the device-resident train tensors → bf16
+autocast forward → loss → grad-clip at 1.0 over all parameters → fused
+AdamW → linear warmup over `warmup_steps` (0 = none, default 1000). `compile=true` wraps
+`Encoder.body` (blocks + final norm) in `torch.compile`; the
+embedding lookup and the loss stay eager. Every `eval_every` epochs it
+evaluates on `val.parquet` by scoring the full catalog in
+`[B, eval_score_chunk]` chunks and merging top-k across chunks, optionally
+masking history. Checkpoints on improvement in `early_stop_metric`, stops
+after `patience` evaluations without one. With `train_on_val` there is no
+val eval, no snapshot and no early stop.
 
 TF32 is **enabled** here (`_enable_tf32`) — the opposite of the
 benchmark harness, which pins it off for measurement determinism.
-Training throughput matters more than bit-reproducibility of a matmul.
 
 ### What a finished run leaves behind
 
 ```
 <checkpoint_dir>/
-├── best_model.pt          # reloaded, then re-saved from the best epoch
-├── config.json            # the GSASRecConfig — the eval loader reads this
-├── item_embs.pt           # output embedding matrix, row 0 zeroed
+├── best_model.pt          # reloaded, then re-saved from the best epoch (train_on_val: the last epoch)
+├── config.json            # the TrainConfig — the eval loader reads this
+├── item_embs.pt           # scoring_table(), row 0 zeroed
 ├── item_id_map.json       # copied from data_dir
 ├── item_attrs.parquet     # copied from data_dir when present
 ├── eval_quality.json      # test-split metrics
-├── train_metrics.json
-├── gsasrec-ep{N}-{metric}{v}.pt   # per-improvement snapshots
+├── train_metrics.json     # losses, val curve, test metrics, epoch_time_sec, samples_per_sec, gpu_name, sm_mhz, peak_gpu_mem_bytes
+├── sasrec-ep{N}-{metric}{v}.pt   # the current best-epoch snapshot (plus the one _resume.pt names, until its next write)
 └── _resume.pt
 ```
+
+`samples_per_sec` counts training sequences over the training part of the
+epochs (eval excluded); `sm_mhz` is one SM clock sample per epoch taken
+mid-epoch under load (clocks cannot be locked on this box).
 
 `config.json` is what makes a checkpoint self-describing at eval time.
 A checkpoint without it falls back to

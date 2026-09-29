@@ -187,6 +187,122 @@ goodreads cell, one seed, unlocked clocks — not a finding, the real
 | openalex | 10 M slice staged locally (A100 box, 2026-09-26; OpenAlex fallback for Semantic Scholar SPECTER2, no API key), not on the Hub: `bench check` passes. One filter cell, `linr_v1_filter_mask`/triton clause `field_era`, eager, `--skip-perf` (`partial`): `recall_oracle@1000` 0.9959, held-out `recall@100` 0.505, `recall@1000` 0.741, n = 10,000. Scoped down from an initial 15 M encode after `bench/oracle.py`'s `item_embs.t().contiguous()` OOMed at that size (a second full fp32 copy on top of the item table; the real 768-d limit is ~11-12 M, not 15 M) — 10 M items resharded from the already-encoded 15 M vectors (`torch.equal`-verified), matching the pubmed precedent. SilverTorch-`triton` and LiNR V2/V3 were blocked by the power-of-two `D` limit as on pubmed until L4, not yet run here since; not yet validated ([artifacts](artifacts/e3-openalex/)) |
 | kuairand | staged locally (A100 box, 2026-09-26); the dataset files are not on the Hub, the gSASRec checkpoint `gsasrec-d128-shared` is (private, `pinkmeme/eval-kuairand`). `bench check` passes. Trained with one shared item table, `--negs-per-pos 128` (256 OOMs), measured peak 82.9 GB allocated; stopped by patience 5 after epoch 18, best val NDCG@10 0.0361 at epoch 13, test NDCG@10 0.0088 / Recall@100 0.0024 (the 4× val→test drop is partly item cold start, 55 % of test targets never clicked in train; the rest is unexplained). One filter cell, `linr_v1_filter_mask`/triton clause `t_cat1`, eager, `--skip-perf` (`partial`): pass rate 0.0362, `recall_oracle@1000` 0.9996, held-out `recall@100` 0.020, `recall@1000` 0.064, n = 9,910; not yet validated ([artifacts](artifacts/e4-kuairand/)) |
 
+### Trainer inputs with `timestamps` (data gates, not citable)
+
+The three trainer-input ETLs (yambda, goodreads, kuairand) write a
+`timestamps` column next to `item_ids` ([datasets](system/datasets.md#yambda)).
+Environment: the pod, CPU only, branch `dev/hstu-etl`
+([artifacts](artifacts/seqrec-encoder/etl-timestamps/): `gates.py` and its JSON).
+These are data-integrity gates, not results; nothing here is citable.
+
+| gate | state | notes |
+|---|---|---|
+| G-yambda: `item_id_map.json` | **passes**: the re-prep (now `/data/yambda-500m/trainer`), the previous prep (`trainer.old`) and the Hub copy are byte-identical, sha256 `9cd9535f…6c3b02` | `/data/yambda-500m/trainer/` (prep 97 s, peak RSS 15.7 GB) |
+| G-yambda: `item_ids` / `targets` row for row | **train passes** (91,806 rows, `equals`); **val/test fail row for row, pass as row multisets** (45,796 / 45,932 rows; 11 and 0 rows in the same position) | Mechanism: `cmd_prep` builds val/test with `uid` joins (no `maintain_order`, no sort) and then drops `uid`, so their row order is a fresh draw each run. The old `trainer/test` and the Hub `test.parquet` differ from each other the same way (same rows, 1 in the same position). Contents are unchanged; the order is not reproducible and nothing on disk may be aligned to it by position. Not fixed (out of this step) |
+| G-yambda: `timestamps` | **passes**: `List(Int64)`, lengths equal to `item_ids` on every row, 0 rows with a decrease in train/val/test | seconds since the anonymized Yambda epoch, not unix (the raw data has no unix anchor) |
+| G-goodreads: `item_id_map.json` | **passes**: `/data/goodreads-work-id/trainer/item_id_map.json` sha256-equal to the Hub copy, `dd6b8005…107265` (797,084 items) | raw fetched fresh (books + interactions_dedup only, via parallel ranged `curl`; `eval-data goodreads download` then verified sizes, gzip and wrote the sha256 manifest), `convert` 19.5 min, `prep` 58 s at peak RSS 24.2 GB |
+| G-goodreads: `test.parquet` vs the Hub `test.parquet` (`item_ids`, `targets`, both `list[int64]`) | **fails bit-exact; every difference is a timestamp tie**. Same 313,178 rows in the same user order; 274,254 rows identical; of the 38,924 that differ, 36,576 differ only in `item_ids` order inside runs of equal timestamps, 782 differ in which items fill the oldest end of the 200-item window, always inside the window's leading run of equal timestamps (equal length), and 2,398 differ only in `targets` order (same multiset). Nothing else differs | Mechanism: `cmd_prep` orders each user's events with `sort(["user_id", "ts"])` and nothing breaks ties, and goodreads timestamps tie often (bulk shelving, e.g. many rows at `2007-01-01 00:00`). The order inside a tie comes from the multithreaded scan/join and changes run to run; `list.tail(max_seq + 1)` on the full sequence then keeps a different subset when the cut lands in a tie. Not fixed (out of this step): a tiebreak would also move the output off the Hub copy |
+| G-goodreads: `timestamps` | **passes**: `List(Int64)` unix seconds, lengths equal to `item_ids` on every row, 0 rows with a decrease in train (744,332) / val (190,278) / test (313,178) | |
+| KuaiRand `timestamps` | **passes**: `List(Int64)` unix seconds, lengths equal to `item_ids` on every row, 0 rows with a decrease in train (561,486) / val (24,503) / test (26,221); `tests/eval_datasets/test_kuairand.py` pins the column | `/data/kuairand` re-staged by `eval-data kuairand all` (pod, 2026-09-26); the check script is not committed. The test histories end at 1651850999, 30 min before `test_timestamp_unix` 1651852800 |
+| Harness suite on `dev/hstu-etl` | **green**, 235 passed / 4 skipped, CPU (`CUDA_VISIBLE_DEVICES=""`) | |
+
+## Seqrec encoder
+
+Trainer rewrite (`evaluation/training/`, [datasets](system/datasets.md#training--evaluationtraining)).
+H100 80GB HBM3 (the pod, not the A100 above), torch 2.10.0+cu128, sm_mhz 1980 in every sample.
+**Not yet validated, not citable.** Test is full-catalog on the trainer's `test.parquet`,
+recorded only for the checkpoint selected on val ndcg@10.
+
+### Bars
+
+The published gSASRec checkpoint of the same D, re-scored on the same `trainer/test.parquet`
+with the same eval code (ndcg@10 / recall@100):
+
+| dataset | d64 | d128 | d256 |
+|---|---|---|---|
+| yambda-500m | 0.0846 / 0.1563 ([gate A](artifacts/seqrec-encoder/gate-a/)) | 0.0811 / 0.1486 ([gate A](artifacts/seqrec-encoder/gate-a/)) | 0.0814 / 0.1398 ([E0b](artifacts/seqrec-encoder/e0b-yambda-d256-bar/)) |
+| goodreads-work-id | 0.0350 / 0.1486 ([E0](artifacts/seqrec-encoder/e0-goodreads-bars/)) | 0.0361 / 0.1480 ([E0](artifacts/seqrec-encoder/e0-goodreads-bars/)) | 0.0354 / 0.1472 ([E0c](artifacts/seqrec-encoder/e0c-goodreads-d256-bar/)) |
+| KuaiRand | none: no published KuaiRand-27K checkpoint; calibrated against most-popular lists instead ([temporal drift](#kuairand-temporal-drift)) | not run | not run |
+
+### Final models (the E1c recipe)
+
+gSASRec body, ffn 4×D, sampled softmax (in-batch 4096 + uniform 8192) with logQ: the trainer's
+defaults. Only D, epochs, patience and eval cadence vary (yambda: 100 epochs, eval every 2;
+goodreads: 75-epoch cap, eval every epoch; patience 10 on both; KuaiRand: 48-epoch cap, eval
+every epoch, patience 10, then the train + val refit).
+
+| model | test ndcg@10 | R@100 | ndcg@100 | cov@10 | Δ vs bar (ndcg@10 / R@100) | best epoch (val ndcg@10) | s/epoch (median) | peak GB | W&B |
+|---|---|---|---|---|---|---|---|---|---|
+| [yambda d64](artifacts/seqrec-encoder/e1c-yambda-d64-sasrec-ssm-logq/) | 0.0945 | 0.1619 | 0.1157 | 0.0382 | **+0.0099 / +0.0056** | 77 (0.1010); early stop at 97 | 11.6 | 10.7 | [zxkmti7a](https://wandb.ai/pinkmeme/seqrec-encoder/runs/zxkmti7a) |
+| [yambda d128](artifacts/seqrec-encoder/y128-sasrec-ssm-logq/) | 0.1006 | 0.1662 | 0.1207 | 0.0389 | **+0.0195 / +0.0176** | 99 of 100 (0.1078), still rising | 13.8 | 13.6 | [03idzv11](https://wandb.ai/pinkmeme/seqrec-encoder/runs/03idzv11) |
+| [yambda d256](artifacts/seqrec-encoder/y256-sasrec-ssm-logq/) | 0.0966 | 0.1481 | 0.1108 | 0.0401 | **+0.0152 / +0.0083** | 97 of 100 (0.1040), still rising | 18.7 | 19.7 | [rqmh9ai9](https://wandb.ai/pinkmeme/seqrec-encoder/runs/rqmh9ai9) |
+| [goodreads d64](artifacts/seqrec-encoder/e3-goodreads-d64-sasrec-ssm-logq/) | 0.0381 | 0.1447 | 0.0695 | 0.1232 | +0.0031 / **−0.0039** | 16 (0.0402); early stop at 26 | 49.4 | 6.7 | [338ohzq4](https://wandb.ai/pinkmeme/seqrec-encoder/runs/338ohzq4) |
+| [goodreads d128](artifacts/seqrec-encoder/g128-sasrec-ssm-logq/) | 0.0410 | 0.1518 | 0.0736 | 0.1577 | **+0.0049 / +0.0038** | 34 (0.0440); early stop at 44 | 59.0 | 8.1 | [fcian7qz](https://wandb.ai/pinkmeme/seqrec-encoder/runs/fcian7qz) |
+| [goodreads d256](artifacts/seqrec-encoder/g256-sasrec-ssm-logq/) | 0.0418 | 0.1530 | 0.0743 | 0.1616 | **+0.0064 / +0.0058** | 13 (0.0463); early stop at 23 | 80.3 | 11.0 | [b42n4obv](https://wandb.ai/pinkmeme/seqrec-encoder/runs/b42n4obv) |
+| [KuaiRand d64](artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/): train + val day (`train_on_val=true`), 4 epochs | 0.0276 | 0.0063 | 0.0197 | 0.0009 | no bar; val-day most-popular 0.0314 / 0.0073, all-time most-popular 0.0027 / 0.0007 | none: 4 epochs fixed, the first k64's best epoch + 1 | 260.8 | 62.7 | [f11y636d](https://wandb.ai/pinkmeme/seqrec-encoder/runs/f11y636d) |
+| [KuaiRand d64, train only](artifacts/seqrec-encoder/k64-sasrec-ssm-logq/) (the first k64; drift evidence, not the model) | 0.0046 | 0.0016 | 0.0040 | 0.0006 | as above | 3 (0.0232); early stop at 13 | 249.4 | 62.6 | [xkk96p6k](https://wandb.ai/pinkmeme/seqrec-encoder/runs/xkk96p6k) |
+| KuaiRand d128 | not run: OOM in backward even with one table ([probe](artifacts/seqrec-encoder/k128-probe-oom/README.md)). The shared 32 M × 128 fp32 table (15.28 GiB) needs weight + two AdamW moments (45.8 GiB) plus two dense gradients held at once, input lookup and output scoring (30.6 GiB): ~78 of 79.18 GiB | | | | | | | | |
+
+Against the success rule ([decisions](decisions.md#sequential-encoder-devhstu)): five of six
+beat the bar on both metrics; goodreads d64 misses on R@100. KuaiRand is outside the rule (no
+bar). yambda d128 and d256 were still improving at the 100-epoch cap. yambda d128's s/epoch includes 14 epochs slowed by a shared GPU.
+
+### KuaiRand: temporal drift
+
+From the [diagnosis](artifacts/seqrec-encoder/k64-diagnosis/README.md) of the train-only k64
+(`diag.json`, `recency.json`; evals only, H100).
+
+- **Protocol.** Val targets are the clicks of 2022-05-06, the day after train ends; test targets are
+  2022-05-07's. The val day is never trained on without `train_on_val`. Every history is capped at
+  200. Targets per row, median (mean): val 118 (158), test 246 (320). recall@10 / recall@100
+  ceilings: val 0.183 / 0.732, test 0.096 / 0.505. Targets seen in train: val 65.9 %, test 44.7 %.
+  The 1.45× recall ceiling gap does not explain a 5× ndcg@10 gap (val 0.0232, test 0.0046).
+- **Calibration** (the same `evaluate`, full catalog, on test, ndcg@10 / R@100): most-popular over
+  train 0.0027 / 0.0007; most-popular over the val day's targets **0.0314 / 0.0073**; train-only
+  k64 0.0046 / 0.0016, and 0.0046 / 0.0032 on train-seen targets only, so cold items are not the
+  cause. The refit reaches 0.0276 / 0.0063: 6.0× / 3.9× the train-only model, still 12 % / 14 %
+  below yesterday's most-popular list.
+- **Curve.** Val ndcg@10 peaks at epoch 3 (0.0232) and drifts to ~0.020 while train loss keeps
+  falling (12.7 → 11.3) and coverage@10 rises (0.0007 → 0.0018): overfitting to the train
+  distribution, not a popularity collapse.
+- **Mechanism.** Next-day clicks follow trending items: 47.6 % of test targets were clicked on the
+  val day, 13.0 % only on the val day, 42.3 % in neither train nor the val day. logQ subtracts
+  all-time train popularity, the wrong prior for a later day. The train-only model is one day
+  stale on val and two on test; more capacity does not address that, training on the val day does.
+
+### Recipe search (yambda-500m d64)
+
+| run | recipe | test ndcg@10 / R@100 | Δ vs bar | verdict |
+|---|---|---|---|---|
+| [E1](artifacts/seqrec-encoder/e1-yambda-d64-sasrec-ssm/) | gSASRec body, sampled softmax, no logQ | 0.0661 / 0.1093 | −0.0185 / −0.0470 | loss: without logQ the in-batch negatives push popular items down (cov@10 0.0674 against E1c's 0.0382) |
+| [E1c](artifacts/seqrec-encoder/e1c-yambda-d64-sasrec-ssm-logq/) | E1 + logQ | 0.0945 / 0.1619 | +0.0099 / +0.0056 | loss: logQ alone takes the same body from −0.0185 to +0.0099; selected |
+| [E2a](artifacts/seqrec-encoder/e2a-yambda-d64-hstu-ssm-uniform/) (partial: stopped after epoch 58 of 100) | HSTU body (hidden 256, 4 blocks, 4 heads, time bias), uniform 8192 only | 0.0743 / 0.1379 | −0.0103 / −0.0184 | loss: the same body gains +0.0140 / +0.0121 with E1c's loss (E2c) |
+| [E2b](artifacts/seqrec-encoder/e2b-yambda-d64-hstu-gbce/) (partial: stopped in epoch 15 of 100) | HSTU body, per-position gBCE | 0.0290 / 0.0658 | −0.0556 / −0.0905 | loss: gBCE on the HSTU body learns slowly (val 0.0301 and rising at the stop); inconclusive |
+| [E2c](artifacts/seqrec-encoder/e2c-yambda-d64-hstu-ssm-logq/) | HSTU body, E1c's loss | 0.0883 / 0.1500 | +0.0037 / −0.0063 | body: with the same loss, HSTU is below gSASRec (−0.0062 / −0.0119 against E1c) at 3.6× the s/epoch |
+
+The loss carries the gain; the HSTU body adds cost, not quality.
+
+### Gates
+
+Artifacts: [gate A](artifacts/seqrec-encoder/gate-a/),
+[gate B](artifacts/seqrec-encoder/gate-b-yambda-d64/),
+[compile A/B](artifacts/seqrec-encoder/compile/),
+[W6 equivalence](artifacts/seqrec-encoder/w6-cleanup-equivalence/).
+
+| gate | state |
+|---|---|
+| A: published checkpoints through `load_model_for_eval` + `evaluate` reproduce `eval_quality.json` test ndcg@10 / recall@100 to 4 decimals | old and new code give **identical** numbers on all four. goodreads d64 and d128 match to 4 decimals. yambda-500m d64 and d128 **do not** (0.0846/0.1563 vs 0.0813/0.1489; 0.0811/0.1486 vs 0.0751/0.1362), before and after the change alike. Mechanism: the test split on disk is not the one those files were scored on. The d64 checkpoint re-scored on `trainer/val.parquet` gives 0.09198, which matches its own training-time best val (0.09200). `test.parquet` at the data root and under `trainer/` hold the same rows. After the W6 cleanup (`loss` missing from the published `config.json` read as `gbce`): all four numbers `==` the pre-cleanup loader's ([artifact](artifacts/seqrec-encoder/w6-cleanup-equivalence/)). |
+| B: retrain yambda-500m d64 on the published recipe, test within ±0.002 | per-position gBCE negatives, `compile=true`, 100 epochs: test ndcg@10 **0.0837**, recall@100 **0.1558**. Against the brief's 0.0813 / 0.1489 (the stale split): +0.0024 / +0.0069, **outside**. Against the published checkpoint re-scored on the same file (0.0846 / 0.1563): −0.0009 / −0.0006, **inside**. Best val 0.0913 (published 0.0920). 10.37 s/epoch median, 8,772 seq/s, 1478 s total (A100 published run: 2809 s), peak 11.2 GB, sm_mhz 1980 |
+| B, shared negatives (plan §3) | one `[256]` negative vector per step collapses gBCE (test 0.0160 / 0.0377, 21 distinct items across 2048 users' top-10s); gBCE therefore samples per position ([mechanism](artifacts/seqrec-encoder/gate-b-yambda-d64/README.md)) |
+| W6 cleanup equivalence (per-step training losses bit-identical before/after, both losses) | **passes** ([artifact](artifacts/seqrec-encoder/w6-cleanup-equivalence/)). H100, yambda-500m d64, 50 steps, seed 42, `compile=false`: the E1c `config.json` on the pre-cleanup trainer against the bare new `TrainConfig` defaults, and the Gate B gBCE `config.json` on both, give `==` per-step losses (50/50 each); the pre-cleanup trainer run twice is also identical to itself. CPU proxy (synthetic split, 18 steps per loss) bit-identical single-threaded; on 64 threads gBCE differs run to run in the last bit for the same code |
+| `torch.compile` of the body | 3.93-4.03 s/epoch compiled against 4.8-5.9 eager (shared-negative gBCE, 3 epochs each, interleaved); kept |
+| unit gates | `tests/training/test_encoder.py`: a left-padded row stays finite and padding content does not move the last position; `sampled_softmax_loss` equals a direct `F.cross_entropy` over explicit candidate lists, without and with a hand-built logQ (uneven explicit q; fails on a flipped sign or a corrected positive); `logq_correction` equals a hand-written `log(M·p + K/N)` vector for M = 2, K = 3, N = 4 (fails with the per-slot `/(M+K)`); `TrainConfig` rejects an unknown `loss`, and `normalize` or `logq` with `gbce`; defaults to `sampled_softmax` with `normalize` and `logq` on, `gbce` resolves both off; `TrainConfig.load` reads a `config.json` without `loss` as gbce, re-resolves `normalize`/`logq` when an override changes `loss` (both directions), keeps an explicit override and keeps the saved values when `loss` is unchanged (each case fails on its mutation, hand-checked) (CPU) |
+| `resume_every` (`_resume.pt` cadence) | `test_resume_is_written_every_n_epochs_and_on_the_last` pins the write epochs at `num_epochs` 8: N = 1 every epoch; N = 3 → 2, 5, 7; N = 3 with an early stop at 3 → 2, 3; N = 4 with a stop at 5 → 3, 5. Each of three mutations (`epoch %` for `(epoch + 1) %`, the last-epoch off-by-one, dropping `stopping`) fails it (CPU). Snapshot retention across a crash (N = 3, crash in epoch 4, `--resume` retrains from epoch 3 and loads the right best; a changed `checkpoint_dir` spelling; a crash before the first `_resume.pt`) is checked only by uncommitted CPU smoke runs. On the GPU only the default N = 1 has run (k64-refit). `_resume.pt` is still written in place, not atomically ([roadmap](roadmap.md#sequential-encoder-follow-ups-devhstu-not-scheduled)) |
+| `train_on_val` (final fit on train + val) | `test_train_on_val_rows_are_the_tail_of_history_then_targets` pins, on a hand-built 4-row `val.parquet` at L = 4, the rows (tail of `item_ids ++ targets`, left padding, more targets than L), `first`, the positions `target_mask` trains and the `target_frequencies` counts. `test_train_on_val_runs_no_val_eval`: a CPU `train()` never calls `evaluate`, writes `best_model.pt`, feeds the val rows after the train rows with `first` aligned, and stores `best_val_metric` `{}`. Each of six mutations (no `do_eval` guard, no `first` in the mask, val rows before train rows, no concat, an off-by-one in `first`, `if True` for the `{}` guard) fails a test (CPU). `train_on_val=false` unchanged: the new mask and `target_frequencies` `torch.equal` the old ones on 50 random left-padded tensors (uncommitted CPU check). GPU: k64-refit ran it (H100, 4 epochs). Rows with more than 200 val-day clicks keep their last 200, so 979,261 of 3,871,194 KuaiRand val-day transitions (25 %) are not trained |
+
+Unverified: `target_frequencies` (logQ) is checked only by hand on CPU; E2c ran `logq=true` on the GPU;
+resume (`--resume` has never run on the GPU).
+
 ## Still unverified
 
 - Any compiled (`graph`-mode) measurement taken on a warm inductor cache after a library

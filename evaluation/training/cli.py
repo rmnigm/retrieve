@@ -1,4 +1,4 @@
-"""``train`` — the trainer's console script: ``sasrec`` (``training.train``) and
+"""``train`` — the trainer's console script: ``run`` (``training.train``) and
 ``upload-checkpoint`` (``training.checkpoints``)."""
 
 from __future__ import annotations
@@ -6,15 +6,15 @@ from __future__ import annotations
 import click
 
 from training.checkpoints import upload_checkpoint
-from training.train import sasrec
+from training.train import run
 
 
 @click.group()
 def main() -> None:
-    """gSASRec training and checkpoint upload."""
+    """Encoder training and checkpoint upload."""
 
 
-main.add_command(sasrec)
+main.add_command(run)
 main.add_command(upload_checkpoint, "upload-checkpoint")
 
 
