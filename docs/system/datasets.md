@@ -25,7 +25,7 @@ gets is decided by whether it sets `checkpoint`:
 
 | shape | datasets | query embeddings come from | filters |
 |---|---|---|---|
-| **sequential** | yambda-500m, yambda-5b, goodreads, kuairand | a trained SASRec checkpoint, encoded at eval time | goodreads, kuairand |
+| **sequential** | yambda-500m, yambda-5b, goodreads, kuairand | a trained SASRec checkpoint ([which one](checkpoints.md#what-the-harness-reads)), encoded at eval time | goodreads, kuairand |
 | **text** | arxiv, arxiv-synth, yfcc10m, pubmed, openalex | pre-encoded embeddings on disk | yes |
 
 A third variant, **synthetic**, is a text dataset grown to arbitrary `N`
@@ -733,8 +733,8 @@ What the data ruled out:
 
 The sweeps of [`config/kuairand.yaml`](../../evaluation/config/kuairand.yaml)
 are `t_*` over C0–C3 and `b_*` over C4–C6. Bloom runs `t_cat1`, `t_tag`,
-`b_short` and `b_fresh`. The dataset is listed in the `filter` suite, but at d64 it expands to
-no cells until the suite's dims admit it (roadmap E4).
+`b_short` and `b_fresh`. The dataset is out of the `filter` suite until roadmap E4 settles its
+width (d64 only; the suite runs d128 / 192 / 768).
 
 **Training** runs over the full 32 M catalog (32,038,725 items; 32,038,726 table rows with padding). At d64
 two separate tables fit (62.6 GB peak on the 80 GB H100). At d128 even one

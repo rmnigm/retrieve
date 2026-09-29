@@ -35,8 +35,10 @@ in records, commits and code comments; they are not renumbered.
   are intersected with each dataset's (`bench/config.py` `load_matrix`),
   and kuairand is now d64 only; adding 64 to the suite would also pull
   goodreads d64 into it, breaking "each dataset contributes one width".
-  Options: a per-dataset width in `suites.yaml`, or kuairand run with an
-  explicit `bench run --dim 64` outside the matrix. Blocks E4's leg.
+  It is out of the suite's `datasets` list meanwhile (the config gate
+  requires every listed dataset to expand to cells). Options: a
+  per-dataset width in `suites.yaml`, or 64 in the suite's dims with
+  goodreads narrowed to d128. Blocks E4's leg.
 - **Official vs Triton on goodreads (F2).** The head-to-head's goodreads
   numbers are on the gSASRec embeddings; rerun them on the new encoder, or
   keep them labelled as a gSASRec-embedding measurement

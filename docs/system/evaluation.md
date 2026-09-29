@@ -291,8 +291,9 @@ Nine files under [`evaluation/config/`](../../evaluation/config/):
 [`yfcc10m.yaml`](../../evaluation/config/yfcc10m.yaml),
 [`pubmed.yaml`](../../evaluation/config/pubmed.yaml) and
 [`openalex.yaml`](../../evaluation/config/openalex.yaml) and
-[`kuairand.yaml`](../../evaluation/config/kuairand.yaml) (all four in
-the `filter` suite; pubmed and openalex at 768, kuairand at 128), and
+[`kuairand.yaml`](../../evaluation/config/kuairand.yaml) (the first three in
+the `filter` suite, pubmed and openalex at 768; kuairand, d64 only, is out of
+it until roadmap E4 settles its width), and
 [`suites.yaml`](../../evaluation/config/suites.yaml). `users_limit:
 10000` and the goodreads/arXiv sweeps, ks and batch sizes match the
 [golden cells](../../evaluation/golden/README.md), so the two stay

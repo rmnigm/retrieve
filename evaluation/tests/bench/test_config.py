@@ -238,7 +238,8 @@ _OLD_FILTER = {  # config/<dataset>/d128-filter.yaml @ 06bc4c7: sweeps per filte
         "clause": ["c0_genre", "c1_lang_reverse", "c2_format", "c3_year", "c0c1", "all4"],
         "bloom": ["c0_genre", "c2_format", "c3_year"],
         "data_dir": "data/goodreads-work-id",
-        "checkpoint": "data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/best_model.pt",
+        # The old YAML named gsasrec-d128-drop0.5-id; the E1c checkpoint replaced it.
+        "checkpoint": "data/goodreads-work-id/checkpoints/sasrec-ssm-logq-d128/best_model.pt",
         "content_dir": None,
     },
     "arxiv": {
