@@ -1,7 +1,7 @@
 ---
 title: datasets
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-09-29
 type: entity
 tags: [datasets, training]
 sources: [evaluation/eval_datasets/, evaluation/training/]
@@ -411,25 +411,23 @@ the suite's `ks` (100 / 500 / 1000) are deeper than the shipped GT's
 k = 10, which is fine because recall is measured against the harness's own
 cosine oracle over the capped attrs (deviations 1 and 3 above); the
 `none` cells are in no suite of `suites.yaml` (unfiltered cells come back
-with roadmap E5); and **the
-exact-algo cell fails the harness's quality gate on this dataset** — the
-library's `PostfilterKNN` scores in fp16, whose 4.9 × 10⁻⁴ spacing is
-coarser than YFCC's score density (a median 0.0072 cosine between rank 1
-and rank 1000, plus 5 % exact-duplicate vectors), so `linr_v1_filter_mask`
-reaches only `recall_oracle@1000 ≈ 0.96` against the fp32 oracle and
-`QualityGateError` ends the run before the other algos. The oracle is right
-(0.9998 against fp64); the module's fp16 is the cause; it is
-backend-independent. What to do about it is an open decision on the
-[roadmap](../roadmap.md#needs-the-user).
+with roadmap E5); and **the exact-algo cell is the one YFCC is hard on**.
+fp16 scores, whose 4.9 × 10⁻⁴ spacing is coarser than YFCC's score density
+(a median 0.0072 cosine between rank 1 and rank 1000, plus 5 %
+exact-duplicate vectors), gave `linr_v1_filter_mask` only
+`recall_oracle@1000 ≈ 0.96` against the fp32 oracle, and `QualityGateError`
+ended the run before the other algos. The oracle is right (0.9998 against
+fp64). The exact scorers now return fp32 scores
+([decisions](../decisions.md#library)), which pass the gate at 0.9944; the
+residual is the fp16 item storage ([validation](../validation.md#datasets)).
 
 ### pubmed
 
 **Status: staged as the 10 M slice** (`--keep-items 10000000 --seed 0`,
 roadmap E2) under `$RETRIEVE_DATA_ROOT/pubmed-medcpt`: `bench check`
-passes, the `c0_mesh` oracle is built, and one exact filter cell runs.
-SilverTorch cannot build at this size yet (see *Disk budget and the
-slice*); state in [validation](../validation.md#datasets). Not on the Hub.
-Nothing below is citable.
+passes, the `c0_mesh` oracle is built, and D1's `filter` leg runs on it;
+state in [validation](../validation.md#datasets). The dataset is not on
+the Hub. Nothing below is citable.
 
 `plan` → `download --what pmids` → `convert --fetch --delete-raw` →
 `medline --stream` → `attrs` → `queries` → `encode_queries`. Source is the
@@ -604,16 +602,14 @@ all 38 shards, with `medline --stream` (21 min, 39,994,988 rows) running
 beside it. On disk: 17 GB under `pubmed-medcpt/` (15 GB of fp16 shards,
 1.5 GB of attrs, 0.7 GB of `staging/` article parquets, 0.1 GB of MEDLINE
 parquet), plus 0.4 GB of PMID lists kept in `_raw/pubmed/`. The exact
-`c0_mesh` oracle (k_gt 1000, 10,000 queries) builds in 23 s. The item
-budget above does **not** cover SilverTorch's build.
-`retrieve.indexing.quantize.quantize_int8_global_codes` computes
-`(embs / abs_max * 127.0).round()` over the whole fp32 matrix. That makes
-two more 28.6 GiB fp32 temporaries next to the 28.6 GiB of items, so
-`register_index` OOMs on the 80 GB A100 on both the `triton` and
-`official` backends. A chunked or in-place quantize in the library fixes
-it, and `bench/` and the slice stay as they are. The exact
-`linr_v1_filter_mask` cell does run
-([artifacts/e2-pubmed/](../artifacts/e2-pubmed/)).
+`c0_mesh` oracle (k_gt 1000, 10,000 queries) builds in 23 s
+([artifacts/e2-pubmed/](../artifacts/e2-pubmed/)). The item budget above
+leaves little room for the index builds' own temporaries: SilverTorch's
+one-shot int8 quantize (two more 28.6 GiB fp32 copies) and LiNR V3's
+one-shot 1-bit build both OOMed here. Both now quantize chunk by chunk in
+the library, with `bench/` and the slice unchanged
+([validation](../validation.md#library-gates), rows *Build-time int8
+quantization* and *Build-time 1-bit quantization*).
 
 ### kuairand
 
@@ -1065,8 +1061,8 @@ are already public and unauthenticated, so `yfcc download` is the fetch
 path; the entry exists so the local directory layout resolves like every
 other dataset's.
 
-`pinkmeme/eval-pubmed` is **registered but not published**; nothing is
-pushed to it before roadmap E2. `pinkmeme/eval-kuairand` holds only the
+`pinkmeme/eval-pubmed` is **registered but not published**: the staged
+10 M slice is local only. `pinkmeme/eval-kuairand` holds only the
 `gsasrec-d128-shared` checkpoint (private); the dataset files are not
 published.
 

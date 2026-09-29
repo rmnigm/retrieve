@@ -1,7 +1,7 @@
 ---
 title: evaluation
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-09-29
 type: entity
 tags: [harness]
 sources: [evaluation/bench/, evaluation/config/, evaluation/tests/]
@@ -148,7 +148,7 @@ docstrings cite these steps as `§2.1`-`§2.8`.
 8. **Cell cost.** Quality once per cell (not per k); perf 3 k × 3 bs × 2
    modes × 3 windows. Build params sweep separately from query params (one
    build, many query configs). The measured per-cell cost is in
-   [validation](../validation.md#campaign-roadmap-d1-not-yet-validated).
+   [validation](../validation.md#campaign-roadmap-d1-in-progress-not-yet-validated).
 
 The record carries `schema_version`, `status`, `code_version` in the
 resume key, `git_branch` / `python` in `env`, `disabled: true` sweeps and
@@ -585,8 +585,10 @@ subtree's tree hash (`git rev-parse HEAD:retrieve/src/retrieve`) when the
 subtree is clean, else `files:<sha256>` over the `retrieve/**/*.py` sources
 actually on disk (also the value outside a git checkout; the two namespaces
 are disjoint). A kernel edit — committed or not — therefore invalidates
-every cell; a doc or plan edit invalidates none. `records.read_keys(path)`
-rebuilds the key from a record as `resume_key({k: rec[k] for k in
+every cell; a doc or plan edit invalidates none. (D1 reruns only the arms
+a fix changes, by narrow `bench run`s: its [code_version
+policy](../validation.md#campaign-roadmap-d1-in-progress-not-yet-validated).)
+`records.read_keys(path)` rebuilds the key from a record as `resume_key({k: rec[k] for k in
 KEY_FIELDS}, rec["env"]["code_version"])` and keeps the last status per
 key; a cell is skipped when that status is `ok`. `--force` runs everything
 and appends. Resume reads the local JSONL only, never the network: a
@@ -863,8 +865,8 @@ bench.cli …` from `evaluation/`.
 Each per-file ignore in `evaluation/pyproject.toml` carries its reason: the
 ETL CLIs defer torch, sentence-transformers and transformers to the
 subcommand that needs them, and goodreads' broad `except`s wait on their own
-cleanup. An inline `noqa` says why too. `retrieve/` keeps its narrower set
-until roadmap Q4. One ruff version everywhere: `ruff==0.15.6` in the
+cleanup. An inline `noqa` says why too. `retrieve/` selects the same set.
+One ruff version everywhere: `ruff==0.15.6` in the
 workspace `dev` group and the same `rev` in `.pre-commit-config.yaml`, whose
 hooks run `ruff check` on `retrieve/` and `evaluation/`, `ruff format` on
 `retrieve/` (`evaluation/` is not format-clean yet), the merge-conflict,
@@ -890,7 +892,7 @@ trailing-whitespace hooks (the last two never on `articles/`, `docs/artifacts/`,
 | `bench/test_report.py` | every column the tables read still comes out of `records.aggregate`; every artifact emitted; the LaTeX structurally balanced with the thesis's labels and no unescaped `_`; a `failed` record excluded and a `partial` / `unstable` one marked; citability off by default and evidence beating `--gate`; an empty tree; a schema-1 record |
 | `bench/test_c4_gate.py` | the golden-comparison gate script, [`c4_gate.py`](../artifacts/evaluation-harness-v2/c4_gate.py), against synthesised schema-1 records |
 | `eval_datasets/test_layout.py` | the legacy pad-row rule, `apply_users_limit`, `validate_layout` clean on both layouts and flagging a short `eval_split`, a missing or swapped prefix sidecar, misaligned attrs |
-| `eval_datasets/test_yfcc.py`, `test_pubmed.py`, `test_kuairand.py` | the three ETL loaders on synthetic fixtures |
+| `eval_datasets/test_yfcc.py`, `test_pubmed.py`, `test_kuairand.py`, `test_openalex.py` | the four ETL loaders on synthetic fixtures |
 | `training/test_encode.py` | `training.evaluate`'s recall / ndcg equal `bench.metrics` to 1e-9; `encode_split`'s cache hit / stale key |
 
 ## How to run
@@ -907,9 +909,9 @@ uv run bench run --dataset goodreads --dim 128 --suite filter --filter-kind clau
 # one cell, eager only, no perf — the fastest iteration
 uv run bench run --dataset arxiv --dim 128 --suite filter --algo silvertorch --backend triton \
     --filter-kind bloom --sweep c0_maincat --mode eager --skip-perf
-# the campaign (roadmap D1), one suite at a time until the SUITES bug is fixed
+# the campaign (roadmap D1), one suite at a time
 uv run bench campaign --suite filter --resume
-uv run bench campaign --suite deep --resume
+uv run bench campaign --suite deep --resume --timeout 48   # the 6 h default cuts deep groups short
 uv run bench upload --results results --path-in-repo d1-a --verify   # publish, then check the round trip
 uv run bench fetch --path-in-repo d1-a                               # a published leg back into results/
 ```

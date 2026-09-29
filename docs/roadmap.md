@@ -1,7 +1,7 @@
 ---
 title: roadmap
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-09-29
 type: summary
 tags: [roadmap]
 sources: [evaluation/config/suites.yaml, docs/validation.md]
@@ -26,76 +26,30 @@ in records, commits and code comments; they are not renumbered.
 ## Needs the user
 
 - **Citability of a narrowed campaign.** A run with a narrowed mode set is
-  recorded `status: partial` and reported NOT CITABLE. User's call,
-  2026-09-26: decide after D1's actual report is in front of us, not in
-  the abstract — revisit this the moment `bench report` runs on real D1
-  output.
-- **E0**: the Semantic Scholar API key is an identity-bound form; E3
-  is running the OpenAlex fallback instead, not waiting on this.
+  recorded `status: partial` and reported NOT CITABLE. The user decides
+  once `bench report` runs on D1's real output, not in the abstract.
+- **E0**: the Semantic Scholar API key is an identity-bound form (E3 runs
+  the OpenAlex fallback meanwhile).
 - **A4**: merging `staging` into `main` is on hold until the user decides.
-- **`.git` history size.** H1 (2026-09-26) removed 221 tracked
-  JSON/JSONL files from `HEAD` going forward, but a plain `git rm` keeps
-  their bytes in history — the `.git` directory itself doesn't shrink.
-  Actually shrinking it needs a history rewrite (`git filter-repo` or
-  equivalent), which is disruptive on an already-pushed shared branch
-  (every existing clone/worktree needs to re-sync). Not done; a separate
-  decision from H1 itself.
+- **`.git` history size.** H1 removed the tracked JSON/JSONL results from
+  `HEAD`, but their bytes stay in history; shrinking `.git` needs a
+  history rewrite (`git filter-repo`), which forces every clone and
+  worktree to re-sync ([decisions](decisions.md#harness)).
 
 ## Phase D: campaign and baselines (GPU)
 
-- [ ] **D1: run the full campaign on the harness.** Re-sequenced live by
-  the user, 2026-09-26, directly in the `d1` campaign session (not
-  through the orchestrator — reconciled here after the fact, three
-  times, as the live sequencing kept changing — see the `d1` chain notes
-  if the order below and reality disagree): `filter` runs first, in
-  scale order, on **goodreads, arxiv, yfcc10m, pubmed** — then `deep`
-  and `codesign` (S9) run on **both** arxiv and goodreads. **openalex and
-  kuairand are dropped from D1's `filter` queue** (user, 2026-09-26,
-  16:26Z): other sessions are working them directly — `dev/hstu` is
-  retraining kuairand's gSASRec/HSTU encoder, not something this
-  orchestrator tracks or touches. This absorbs pubmed's `filter` leg
-  from E5 (E5 still narrows to nothing extra for pubmed) and leaves the
-  earlier "KuaiRand excluded for now" decision's status genuinely
-  unclear — not reversed, not reaffirmed, just superseded by kuairand
-  being out of D1's scope entirely for a different reason (another
-  session owns it now). For the record, the caveat behind the original
-  exclusion still stands as of this writing: E4's gSASRec checkpoint is
-  weak (val NDCG@10 0.0361, test 0.0088, a 4× drop only partly explained
-  by item cold start) — whether `dev/hstu`'s retraining addresses that is
-  for whoever reviews its output, not this chain. Deliverable after the `filter`
-  legs, before `deep`/`codesign`: a cross-scale filter comparison across
-  algorithms (`recall_oracle`, latency, QPS, memory per algo per dataset
-  at the headline operating point). Seeds {0, 1, 2} on the headline
-  sweeps; `n_probe` in {24, 32}. Q1-Q4, G-a, G-d, L1/L2, the S9
-  `codesign` suite, L3 (a CPU path for L1's fp32-output `mm`/`bmm`,
-  which had no CPU kernel and broke the harness's CPU-only test suite —
-  found by the S9 worker, fixed 2026-09-26, harness suite back to 255
-  passed / 1 skipped) and L4 (padding non-power-of-two `D`/`W` to the
-  next power of two in the Triton kernels — every kernel with a
-  `tl.arange` over the embedding/word width needed one; raised in
-  priority 2026-09-26 when the user pulled yfcc10m's D=192 and pubmed's
-  D=768 filter legs into scope, since `silvertorch`/triton, `linr_v2` and
-  `linr_v3` failed at the op boundary on both before this; fixed with
-  masked lanes, no data padding, bit-exact/tolerance-matching parity
-  gates at D=192 and 768, SASS-identical and noise-band timing at the
-  already-power-of-two D=128 — see
-  [validation](validation.md#library-gates)) all landed first
-  (orchestrator re-sequencing, 2026-09-26:
-  the only reason to run D1 before a library change was to avoid
-  invalidating a campaign in flight, not a data dependency, so doing the
-  code changes once and D1 once afterward avoids ever rerunning it).
-  Consequence: the 126 previously-committed goodreads `filter`-leg records
-  (seed 0) carry a pre-L1/L2 `code_version` and will be re-run by
-  `--resume` (~19 GPU hours; quality is expected identical except
-  `linr_v1_filter_mask`, which moves by design per L1 — see
-  [validation](validation.md#datasets); `official`/`silvertorch` timings
-  faster per the kernel-opt artifacts). YFCC's exact-algorithm gate is
-  expected to pass now (L1 fixed it in the library suite,
-  `recall_oracle@1000` 0.994 on one manual cell) — confirm on the actual
-  D1 YFCC cell rather than assuming. `codesign`'s one smoke cell (S9
-  worker, 2026-09-26) found `full` *faster* than `partial` on goodreads —
-  the opposite order to the paper's §4.4 — on one seed, one sweep,
-  unlocked clocks: not a finding, confirm or overturn on D1's real sweep.
+- [ ] **D1: run the full campaign on the harness.** Scope (user,
+  2026-09-26; the `campaign-d1` chain notes win if this and reality
+  disagree): `filter` on **goodreads, arxiv, yfcc10m, pubmed**, in scale
+  order, then `deep` and `codesign` (S9) on **arxiv, then goodreads**.
+  openalex's `filter` leg is E5's; kuairand is out of D1 and E5
+  (`dev/hstu`, a separate session, owns it). Deliverable after the
+  `filter` legs, before `deep`/`codesign`: a cross-scale filter comparison
+  across algorithms (`recall_oracle`, latency, QPS, memory per algo per
+  dataset at the headline operating point). Seeds {0, 1, 2} on the
+  headline sweeps; `n_probe` in {24, 32}. `codesign`'s early smoke cell is
+  not a finding; the real sweep decides
+  ([validation](validation.md#campaign-roadmap-d1-in-progress-not-yet-validated)).
   Gate per stage: `bench report` with no missing cells; `median_ms(bs=16)
   < 16 × median_ms(bs=1)`; ids identical across modes; a rerun
   byte-identical in quality. Closes paper gaps G3 (P99 / QPS), G4 (seeds),
@@ -124,17 +78,12 @@ in records, commits and code comments; they are not renumbered.
 ## Phase E: datasets
 
 - [ ] **E0: request the Semantic Scholar API key** (needs the user). Not
-  blocking E3 any more: it is running the OpenAlex fallback instead.
-  Still open if the user wants the proper Semantic Scholar source later.
+  blocking: E3 runs the OpenAlex fallback. Open in case the user wants
+  the proper Semantic Scholar source later.
 - [ ] **E5: run openalex's `filter` leg, extend the report with the
-  unfiltered cells retired from the `quality` suite.** Needs D1, E2, E3.
-  Pubmed's `filter` leg and `deep`/`codesign` on arxiv/goodreads moved
-  into D1 itself (live re-sequencing by the user, 2026-09-26 — see D1
-  above); openalex was in that same D1 scope briefly but was dropped
-  again 16:26Z the same day (other sessions working it directly), so
-  it's back to being E5's job. **KuaiRand is out of both D1 and E5** —
-  `dev/hstu` (a separate session, not tracked by this orchestrator) owns
-  it now.
+  unfiltered cells retired from the `quality` suite.** Needs D1 (E2, E3
+  are done). Pubmed's `filter` leg and `deep`/`codesign` belong to D1;
+  kuairand is out of E5 (see D1).
 
 ## Phase F: the paper
 
@@ -151,27 +100,26 @@ in records, commits and code comments; they are not renumbered.
 
 ## Phase G: after the paper
 
-- [ ] **TF-3/TF-4 retune**: TF-9 (probe layout) and TF-1 (transposed bloom
-  index) landed in the kernel-opt pass (2026-09-26); TF-3 (retune) and
-  TF-4 (`evict_first`, 0-5 %) were second-order after those two and are
-  still open — small, low priority. Needs a fresh `bench report` head-to-
-  head against the post-kernel-opt code (the kernel-opt gate only checked
-  the bloom kernel-only ratio, not the full official-vs-reimplementation
-  comparison in [validation](validation.md#official-against-our-triton-reimplementation-citable-contested),
-  which still reflects the pre-kernel-opt numbers).
+- [ ] **TF-3/TF-4 retune**: TF-3 (retune) and TF-4 (`evict_first`,
+  0-5 %), second-order after TF-9 (probe layout) and TF-1 (transposed
+  bloom index), which landed. Small, low priority. Needs a fresh
+  `bench report` head-to-head against the post-kernel-opt code: the
+  kernel-opt gate checked only the bloom kernel-only ratio, and the
+  end-to-end comparison in
+  [validation](validation.md#official-against-our-triton-reimplementation-citable-contested)
+  still reflects the pre-kernel-opt code.
 - [ ] **G-b: extended experiments**: a synthetic scale ladder to 240M and
   1B items (L4, L5), a controlled pass-rate sweep (the LiNR V1/V2
   crossover), co-design ablation depth, V3 bit width, an extended batch
   grid (G10-G12, G15, G16).
 - [ ] **G-c: a resource paper about the library.** After F5.
-- [ ] **G-e: the two re-scoped parked plans** (re-scoping done
-  2026-09-26, implementation not started, deferred until after F5 by the
-  user): `torch.export` of the composites is now small (the kernel side
-  was already export-clean from other work; only three `Tensor | None`
-  forward params in `modules/linr.py` remain). The live upsert/delete API
-  (`LiveIndexMixin` on `retrieve.modules`) is still medium-large,
-  comparable in scope to the kernel-opt pass — a new subsystem across
-  five module classes and both filters.
+- [ ] **G-e: the two re-scoped parked plans** (implementation deferred
+  until after F5 by the user): `torch.export` of the composites is small
+  (the kernel side is export-clean; only three `Tensor | None` forward
+  params in `modules/linr.py` remain). The live upsert/delete API
+  (`LiveIndexMixin` on `retrieve.modules`) is medium-large, comparable in
+  scope to the kernel-opt pass: a new subsystem across five module
+  classes and both filters.
 - [ ] **TF-10: official capturability.** File the upstream issue: Meta's
   scorer syncs because `fused_kmean_ann_cuda.cu` never passes the explicit
   output size `faster_repeat_interleave` accepts. A patched build may be
@@ -189,10 +137,6 @@ in records, commits and code comments; they are not renumbered.
 - `partial` is stamped per process (`bench/run.py`, the `reasons0` list):
   an eager-only pass marks every record `partial`, including `official`,
   whose graph entry would be `not_capturable` anyway.
-- `bench upload`'s LFS path is unexercised above 37 MB; the D1 sidecars
-  (~450 MB) will hit it. The 73 MB samples sidecar in git belongs on the
-  Hub.
-- `bench report` has not been rerun over all 126 goodreads cells.
 - `bench/oracle.py`'s `item_embs.t().contiguous()` holds a second full
   fp32 copy of the item table on top of the item table itself, so the
   harness's real per-dataset limit at native width is about half the
@@ -202,23 +146,14 @@ in records, commits and code comments; they are not renumbered.
   [validation](validation.md#datasets)). A view instead of a contiguous
   copy would remove the second copy; `bench/` is gated, so this needs
   its own check against the existing oracle results and golden cells.
-- **LiNR V3 cannot build at pubmed scale (10 M × D=768): deterministic
-  `torch.OutOfMemoryError`**, an extra 28.61 GiB (one more full-corpus
-  fp32 copy) on top of 59 GiB already in use, on every cell (D1's pubmed
-  filter leg, 2026-09-28). First hit now that L4 unblocked V3's op
-  boundary at D=768; not a data or config problem. Same family as the
-  `bench/oracle.py` second-copy defect above, but in V3's own build path,
-  not the harness — needs its own investigation of what V3's build
-  allocates twice ([validation](validation.md#datasets)).
-- **The campaign's default `bench campaign --timeout` (6 h per group) is
-  far too short at scale**: 20-46 min per cell at D=768 × 10 M (pubmed
-  filter) and whole `deep`/`codesign` groups running ~17 h on arxiv —
-  both routinely hit the default and lose unfinished cells (recoverable
-  by `--resume`, but costs a manual follow-up pass rather than finishing
-  clean; D1 raised it to `--timeout 48` for `deep`/`codesign`
-  mid-campaign, 2026-09-28). Worth a larger default or a
-  dataset/suite-scaled timeout before the next campaign this size runs,
-  rather than discovering the ceiling live each time.
+- **`bench campaign`'s default `--timeout` (6 h per group) is far too
+  short at scale**: pubmed `filter` cells take 20-46 min each at
+  D=768 × 10 M, and an arxiv `deep` `silvertorch` group took ~10 h.
+  pubmed's `filter` groups hit the default and lost 4 cells (recoverable
+  by `--resume`, at the cost of a manual follow-up pass); D1 restarted
+  `deep`/`codesign` with `--timeout 48` before they did. Worth a larger
+  default or a dataset/suite-scaled timeout before the next campaign this
+  size.
 - The shared Inductor cache (`/tmp/torchinductor_root`) does not
   invalidate on a `code_version` change, so a graph-mode harness run
   after a library edit can silently replay stale kernel code (found
@@ -226,9 +161,9 @@ in records, commits and code comments; they are not renumbered.
   cache and failed correctly against a fresh one). The harness should key
   its cache directory by `code_version`
   ([storage](system/storage.md#environment)).
-- The golden-baseline row in [validation](validation.md#harness-gates)
-  was stale: `linr_v2` and `linr_v3` already diverged from the golden
-  files before the kernel-opt pass, for a cause still unidentified.
+- `linr_v2` and `linr_v3` diverge from their golden files (recall@100
+  4.5e-4 / 1.7e-5), for a cause still unidentified that predates the
+  kernel-opt pass ([validation](validation.md#harness-gates)).
 - The quality subset is a 10k prefix of the query file, not a seeded
   sample. It is safe on the current datasets (files are shuffled) by
   accident.
