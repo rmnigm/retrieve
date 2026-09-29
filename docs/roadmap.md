@@ -31,10 +31,58 @@ in records, commits and code comments; they are not renumbered.
 - **E0**: the Semantic Scholar API key is an identity-bound form (E3 runs
   the OpenAlex fallback meanwhile).
 - **A4**: merging `staging` into `main` is on hold until the user decides.
+- **Kuairand's width in the `filter` suite (E4).** The suite's `dims`
+  are intersected with each dataset's (`bench/config.py` `load_matrix`),
+  and kuairand is now d64 only; adding 64 to the suite would also pull
+  goodreads d64 into it, breaking "each dataset contributes one width".
+  Options: a per-dataset width in `suites.yaml`, or kuairand run with an
+  explicit `bench run --dim 64` outside the matrix. Blocks E4's leg.
+- **Official vs Triton on goodreads (F2).** The head-to-head's goodreads
+  numbers are on the gSASRec embeddings; rerun them on the new encoder, or
+  keep them labelled as a gSASRec-embedding measurement
+  ([validation](validation.md#encoder-switch-evals-to-redo)).
+- **HF: squash `pinkmeme/eval-goodreads-work-id`** to reclaim 2.3 GB
+  (`HfApi().super_squash_history(repo_id=..., repo_type="dataset")`); the
+  seqrec line's cleanup left it to the user.
 - **`.git` history size.** H1 removed the tracked JSON/JSONL results from
   `HEAD`, but their bytes stay in history; shrinking `.git` needs a
   history rewrite (`git filter-repo`), which forces every clone and
   worktree to re-sync ([decisions](decisions.md#harness)).
+
+## Phase H: harness prerequisites for the encoder switch
+
+The harness encodes goodreads, yambda-500m and kuairand with the E1c
+checkpoints since the `dev/hstu` merge; what that invalidates is in
+[validation](validation.md#encoder-switch-evals-to-redo). These two steps
+come before any sequential-dataset cell runs again.
+
+- [ ] **H2: the record key carries the input identity; the golden gate
+  pins its checkpoint.** `bench/records.py` `KEY_FIELDS` has no checkpoint
+  or input fingerprint, so `--resume` would skip a goodreads cell on the
+  new encoder as `ok` and `aggregate` would let it overwrite (or be
+  overwritten by) the gSASRec record. Add an `inputs` identity to the key
+  block (the checkpoint's ckpt-id for sequential datasets, the
+  `content_dir` for text ones; a digest of the item/query tensors if the
+  name is not enough) and a schema bump; old records read as their
+  gSASRec / content identity. The golden goodreads cells must keep running
+  on `gsasrec-d128-drop0.5-id`: give the golden gate a way to pin that
+  checkpoint (a checkpoint override on `bench run`, or a golden dataset
+  file) instead of following `config/goodreads.yaml`. Gate: the harness
+  suite green; a test that two records differing only in checkpoint get
+  different resume keys; the golden gate rerun on the pinned checkpoint
+  gives today's numbers (validation row *Golden baseline*). CPU plus one
+  short GPU golden run. Harness code: `fable` per the orchestration
+  contract if it grows past a key-field change, else `opus`.
+- [ ] **R1: stage the E1c checkpoints on the box and prove the harness
+  reads them.** `hf download` goodreads and yambda-500m
+  `checkpoints/sasrec-ssm-logq-d{64,128,256}` into
+  `$RETRIEVE_DATA_ROOT/<dataset>/checkpoints/`; `bench check --dataset
+  goodreads` at d128; one `--skip-perf` goodreads cell
+  (`linr_v1_filter_mask`/triton `c0_genre`) to confirm the encode path
+  (`encode_split` with a `normalize=true` config, fresh encode cache,
+  fresh oracle blob) and that the exact gate (`recall_oracle@k_max ≥
+  0.99`) holds on normalized embeddings. Record the query norms (1.0 under
+  `normalize`) and the cell in validation. Needs H2.
 
 ## Phase D: campaign and baselines (GPU)
 
@@ -42,8 +90,13 @@ in records, commits and code comments; they are not renumbered.
   2026-09-26; the `campaign-d1` chain notes win if this and reality
   disagree): `filter` on **goodreads, arxiv, yfcc10m, pubmed**, in scale
   order, then `deep` and `codesign` (S9) on **arxiv, then goodreads**.
-  openalex's `filter` leg is E5's; kuairand is out of D1 and E5
-  (`dev/hstu`, a separate session, owns it). Deliverable after the
+  openalex's `filter` leg is E5's; kuairand is E4's.
+  **Goodreads runs on the new encoder** (`sasrec-ssm-logq-d128`, since
+  the 2026-09-29 `dev/hstu` merge): its `filter` leg is rerun in full
+  (105 cells; `d1/goodreads` on the Hub stays as the gSASRec run, not
+  deleted), and its `deep` / `codesign` legs run on the new encoder only.
+  The goodreads part needs H2 and R1; the arxiv/pubmed resume below does
+  not. Deliverable after the
   `filter` legs, before `deep`/`codesign`: a cross-scale filter comparison
   across algorithms (`recall_oracle`, latency, QPS, memory per algo per
   dataset at the headline operating point). Seeds {0, 1, 2} on the
@@ -87,6 +140,20 @@ in records, commits and code comments; they are not renumbered.
 
 ## Phase E: datasets
 
+- [ ] **E4: KuaiRand on the E1c encoder.** Needs R1 and the user's
+  decision on kuairand's width in the `filter` suite (above). (a) Rebuild
+  the eval inputs with `eval-data kuairand all` (~20 min; they are not on
+  the Hub) and `hf download pinkmeme/eval-kuairand --include 'trainer/*'`
+  for the trainer inputs, plus `test.parquet` / `item_id_map.json` from
+  the rebuild. (b) Retrain `sasrec-ssm-logq-d64-trainval` with the flags
+  in [its command.sh](artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh)
+  (`train_on_val=true`, 4 epochs; 62.7 GB peak on the H100, so it fits an
+  80 GB A100; ~20 min there, expect longer on an A100) into
+  `data/kuairand/checkpoints/sasrec-ssm-logq-d64-trainval/`. Gate: test
+  ndcg@10 / R@100 within ±0.002 of 0.0276 / 0.0063 (the refit is seeded;
+  a miss is reported, not tuned). Keep it off the Hub (user). (c) `bench
+  check --dataset kuairand`, then the `filter` leg at d64. Replaces the
+  stale gSASRec `t_cat1` cell. GPU.
 - [ ] **E0: request the Semantic Scholar API key** (needs the user). Not
   blocking: E3 runs the OpenAlex fallback. Open in case the user wants
   the proper Semantic Scholar source later.
@@ -99,7 +166,8 @@ in records, commits and code comments; they are not renumbered.
 
 - [ ] **F2: finish the official-vs-reimplementation section** with D1's
   numbers: confidence intervals, paired tests and a second seed, p95 and
-  p99. The section exists ([paper](paper/official-vs-reimplementation.md))
+  p99. Its goodreads numbers are on the gSASRec embeddings: rerun or
+  relabel per the user's decision (Needs the user). The section exists ([paper](paper/official-vs-reimplementation.md))
   and marks each line that waits on D1. Needs D1.
 - [ ] **F4: package the artifacts**: a tagged `torchretrieve` release, a
   Zenodo DOI including the pinned official sdist, Hub datasets, oracles
@@ -135,12 +203,13 @@ in records, commits and code comments; they are not renumbered.
   output size `faster_repeat_interleave` accepts. A patched build may be
   measured only if a reviewer asks, labelled "not the official release".
 
-## Sequential encoder follow-ups (dev/hstu, not scheduled)
+## Sequential encoder follow-ups (not scheduled)
 
 - [ ] **KuaiRand d128 memory fix**: a single gather for the shared table's two
   lookups (one dense gradient instead of two) or a sparse / row-wise
   optimizer; d128 runs out of memory without it
-  ([probe](artifacts/seqrec-encoder/k128-probe-oom/README.md)).
+  ([probe](artifacts/seqrec-encoder/k128-probe-oom/README.md)). With it,
+  kuairand could join the `filter` suite at d128 like the others.
 - [ ] **Atomic `_resume.pt` write** (R10 F1): it is written in place, so a
   crash during the ~45 s write destroys the only resume state. Writing to a
   temporary file and `os.replace` doubles its peak on disk (~98 GB at
@@ -152,7 +221,14 @@ in records, commits and code comments; they are not renumbered.
 - [ ] **Launch overhead / CUDA graphs** in the training step.
 - [ ] **goodreads d64 R@100**: −0.0039 against the bar, the one miss of the
   success rule ([final models](validation.md#final-models-the-e1c-recipe)).
-- [ ] **Merge dev/hstu into staging**: the user's call.
+- [ ] **Goodreads trainer-input tiebreak**: `cmd_prep` sorts by
+  `(user_id, ts)` with no tiebreak, so the order inside timestamp ties
+  (and which items fill a 200-window's oldest end) changes run to run
+  ([validation](validation.md#trainer-inputs-with-timestamps-data-gates-not-citable)).
+  A tiebreak moves the output off the Hub copy.
+- [ ] **yambda val/test row order**: the `uid` joins in `cmd_prep` give a
+  fresh row order each run; nothing may align to it by position.
+- [ ] **`--resume` of a `train_on_val` run on the GPU** has never run.
 
 ## Known defects, unscheduled
 
@@ -229,6 +305,8 @@ in records, commits and code comments; they are not renumbered.
 ## Dependencies
 
 ```
+H2 ─> R1 ─┬─> D1 (goodreads part; arxiv/pubmed resume needs neither)
+          └─> E4 (also needs the user's width decision)
 D1 ─┬─> D2, D3 ─┐
     ├─> F2      ├─> F5 ─> G-c
     ├─> F4      │
@@ -236,5 +314,5 @@ D1 ─┬─> D2, D3 ─┐
 TF-3/TF-4 retune ─> rerun the head-to-head
 ```
 
-GPU steps still open: D1, D2, D3, E5, G-b. Everything else runs
+GPU steps still open: R1, D1, D2, D3, E4, E5, G-b (H2 needs one short golden run). Everything else runs
 on CPUs beside them.

@@ -322,7 +322,7 @@ and run `partial`); latency and `peak_fwd_mib` are the compared fields.
 ```yaml
 # config/<dataset>.yaml — one per dataset; every string may carry {dim}
 data_dir: data/goodreads-work-id
-checkpoint: data/goodreads-work-id/checkpoints/gsasrec-d{dim}-drop0.5-id/best_model.pt
+checkpoint: data/goodreads-work-id/checkpoints/sasrec-ssm-logq-d{dim}/best_model.pt
 #   or, for pre-encoded text datasets, a per-dim mapping instead of `checkpoint`:
 #   content_dir: {64: content_d64, 128: content_d128, 256: content}   # relative to data_dir
 dims: [64, 128, 256]

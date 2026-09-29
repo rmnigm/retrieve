@@ -38,7 +38,7 @@ How the code works today. Code comments cite these pages by section.
   protocol, config and suites, CLI, cell loop, records, report, upload.
 - [datasets](system/datasets.md): `eval_datasets` ETL per dataset, the
   on-disk layout contract, Hub I/O, gSASRec training.
-- [checkpoints](system/checkpoints.md): the gSASRec checkpoints: loading,
+- [checkpoints](system/checkpoints.md): which encoder checkpoint each dataset reads (E1c), the kept gSASRec ones, loading,
   embeddings, evaluation, Hub transfer.
 - [storage](system/storage.md): the GPU pods' disks, what lives where, the
   budget (contested: the image's data root against the placement rule).

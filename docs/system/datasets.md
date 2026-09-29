@@ -634,8 +634,10 @@ The user chose to keep Hub space for evals, so the eval inputs are rebuilt with
 `eval-data kuairand all` (~20 min) and the d64 `train_on_val` checkpoint was not kept
 ([validation](../validation.md#final-models-the-e1c-recipe)): retrain it with `train run` and the
 flags in [its command.sh](../artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh)
-(~20 min on the H100). d128 does not fit. The filter cell has not run (roadmap E4). Nothing below is citable.
-The run records are in
+(~20 min on the H100) into `checkpoints/sasrec-ssm-logq-d64-trainval/`, the path
+`config/kuairand.yaml` reads. d128 does not fit. The one filter cell recorded so far ran on the
+deleted gSASRec `gsasrec-d128-shared` checkpoint and is stale; the leg reruns at roadmap E4.
+Nothing below is citable. The staging scripts and the gSASRec run's config and metrics are in
 [artifacts/e4-kuairand/](../artifacts/e4-kuairand/).
 
 `uv run eval-data kuairand all --output-dir data/kuairand`, or the four
@@ -731,7 +733,8 @@ What the data ruled out:
 
 The sweeps of [`config/kuairand.yaml`](../../evaluation/config/kuairand.yaml)
 are `t_*` over C0–C3 and `b_*` over C4–C6. Bloom runs `t_cat1`, `t_tag`,
-`b_short` and `b_fresh`. The dataset is in the `filter` suite.
+`b_short` and `b_fresh`. The dataset is listed in the `filter` suite, but at d64 it expands to
+no cells until the suite's dims admit it (roadmap E4).
 
 **Training** runs over the full 32 M catalog (32,038,725 items; 32,038,726 table rows with padding). At d64
 two separate tables fit (62.6 GB peak on the 80 GB H100). At d128 even one
@@ -747,16 +750,8 @@ commands are the [train-only run](../artifacts/seqrec-encoder/k64-sasrec-ssm-log
 that picks the epoch count and the
 [refit](../artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh).
 
-An epoch is 2,193 batches and takes ~11 min (4 it/s plus eval and a 49 GB
-`_resume.pt`). The goal was usable embeddings, not convergence, hence
-patience 5. Val NDCG@10 (4,096 users) peaked at 0.0361 at epoch 13 and
-early stopping ended the run after epoch 18 (3.2 h); `best_model.pt` is
-epoch 13. Test (all 26,221 users): NDCG@10 0.0088, NDCG@100 0.0059,
-Recall@100 0.0024, 4× below val (val over all users: 0.0355). Item
-cold start is part of that: only 44.7 % of test targets were clicked in
-train, against 65.9 % of val targets, and an item never clicked in train
-keeps its random init. The rest of the gap is unexplained. The finished
-checkpoint directory holds ~82 GB, 49 GB of it `_resume.pt`.
+The d64 refit takes ~261 s/epoch at 62.7 GB peak on the H100 (4 epochs); its test
+numbers and the drift diagnosis are in [validation](../validation.md#final-models-the-e1c-recipe).
 
 ```
 data/kuairand/
@@ -769,11 +764,10 @@ data/kuairand/
 ├── attr_vocab.json
 ├── eval_split.parquet          target_id, query_attrs_narrow [7]
 ├── prep_log.json
-├── gt_d128/                    exact oracles, built by the harness per sweep
-└── checkpoints/gsasrec-d128-shared/
-    ├── best_model.pt / item_embs.pt   16.4 GB each (epoch 13)
-    ├── config.json, eval_quality.json, train_metrics.json, item_id_map.json
-    └── _resume.pt              49 GB, model + AdamW state after epoch 18; not on the Hub
+├── gt_d64/                     exact oracles, built by the harness per sweep
+└── checkpoints/sasrec-ssm-logq-d64-trainval/   the harness checkpoint (config/kuairand.yaml); retrained, never on the Hub
+    ├── best_model.pt, config.json, eval_quality.json, train_metrics.json
+    └── _resume.pt              model + AdamW state (the bulk of the dir); not on the Hub
 ```
 
 ### openalex

@@ -1,7 +1,7 @@
 ---
 title: agent-orchestration
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-09-29
 type: summary
 tags: [process]
 sources: [CLAUDE.md]
@@ -200,6 +200,3 @@ box is rented, and the repository is the only durable artifact. The
 orchestrator owns the merge and the push; it commits when the user asks
 (CLAUDE.md rule 6), and pushing is the same outward-facing action under
 the same permission. Merging `staging` into `main` is the user's call.
-
-**Exception, the sequential-encoder line:** its work merges into `dev/hstu` and is
-pushed there, not to `staging`. Merging `dev/hstu` into `staging` is the user's call.

@@ -1,7 +1,7 @@
 ---
 title: checkpoints
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-09-29
 type: entity
 tags: [training]
 sources: [evaluation/training/, evaluation/eval_datasets/hub.py]
@@ -9,54 +9,72 @@ sources: [evaluation/training/, evaluation/eval_datasets/hub.py]
 
 # Encoder checkpoints
 
-Trained on Yambda **500M** Listen+ (50% played-ratio threshold). All runs share
-the same architecture and gBCE loss; they differ in `embedding_dim` (and
-`ffn_hidden_dim = 4 × embedding_dim`) and dropout. Eval is full catalog ranking
-against all 1,866,170 items, no history masking — matches the
-[Yambda paper](https://arxiv.org/abs/2505.22238) Table 2 (Listen+) protocol.
-
 Checkpoints live under each dataset's data dir:
-`data/<dataset>/checkpoints/<ckpt-id>/` (e.g.
-`data/yambda-500m/checkpoints/gsasrec-d128-drop0.5/`), under the data
-root of [datasets.md](datasets.md) (`RETRIEVE_DATA_ROOT`, default
+`data/<dataset>/checkpoints/<ckpt-id>/`, under the data root of
+[datasets.md](datasets.md) (`RETRIEVE_DATA_ROOT`, default
 `evaluation/data/`). The harness configs in
 [`evaluation/config/`](../../evaluation/config/) point at these paths
 verbatim.
 
-This document is the **inventory** — which checkpoints exist, how they
-scored, and how to move them around. For how the trainer itself works
-(the loss, the loop, the config, what a finished run writes out) see
-[datasets.md](datasets.md#training--evaluationtraining).
+This document is the **inventory** — which checkpoints exist, which one
+the harness reads, how they scored, and how to move them around. For how
+the trainer itself works (the loss, the loop, the config, what a finished
+run writes out) see [datasets.md](datasets.md#training--evaluationtraining).
 
-## Available checkpoints
+## What the harness reads
 
-| Path | Dim | Dropout | Best epoch | Test NDCG@10 | NDCG@100 | Recall@10 | Recall@100 | Notes |
-|---|---|---|---|---|---|---|---|---|
-| `data/yambda-500m/checkpoints/gsasrec-d128-drop0.5/` | 128 | 0.5 | 54 | 0.0751 | 0.0946 | 0.0353 | 0.1362 | beats paper on every metric except NDCG@10 (tie); stopped before convergence |
-| `data/yambda-500m/checkpoints/gsasrec-d64-drop0.5/` | 64 | 0.5 | 99 | **0.0813** | **0.1029** | **0.0384** | **0.1489** | bf16 + fused AdamW recipe; still climbing at the 100-epoch budget cap; **best on every quality metric** |
-| `data/yambda-500m/checkpoints/gsasrec-d256-drop0.5/` | 256 | 0.5 | 95 | 0.0753 | 0.0910 | 0.0364 | 0.1284 | same recipe as d64; higher coverage (0.126 vs 0.124) but worse R@100 — extra capacity hurts here |
+Since the 2026-09-29 `dev/hstu` merge the sequential datasets are encoded
+with the current trainer's E1c checkpoints (gSASRec body, sampled softmax
+with logQ, L2-normalized; [decisions](../decisions.md#sequential-encoder)).
+Metrics: [validation](../validation.md#final-models-the-e1c-recipe) (not
+yet validated, not citable). Which older records this invalidates:
+[validation](../validation.md#encoder-switch-evals-to-redo).
 
-The current trainer's yambda and goodreads final models (the E1c recipe: gSASRec body, sampled softmax with logQ)
-are on the Hub (private) under `checkpoints/<ckpt-id>/`, each with `best_model.pt`,
-`item_embs.pt`, `config.json`, `item_id_map.json`, `eval_quality.json`, `train_metrics.json`
-and a short `README.md`. Metrics and state: [validation](../validation.md#final-models-the-e1c-recipe)
-(not yet validated, not citable).
-
-| HF repo | ckpt-id | D | Recipe |
+| dataset config | ckpt-id | D | where it is |
 |---|---|---|---|
-| `pinkmeme/eval-yambda-500m` | `sasrec-ssm-logq-d64` | 64 | E1c, best val epoch |
-| `pinkmeme/eval-yambda-500m` | `sasrec-ssm-logq-d128` | 128 | E1c, best val epoch |
-| `pinkmeme/eval-yambda-500m` | `sasrec-ssm-logq-d256` | 256 | E1c, best val epoch |
-| `pinkmeme/eval-goodreads-work-id` | `sasrec-ssm-logq-d64` | 64 | E1c, best val epoch |
-| `pinkmeme/eval-goodreads-work-id` | `sasrec-ssm-logq-d128` | 128 | E1c, best val epoch |
-| `pinkmeme/eval-goodreads-work-id` | `sasrec-ssm-logq-d256` | 256 | E1c, best val epoch |
+| `goodreads.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | Hub (private) `pinkmeme/eval-goodreads-work-id` `checkpoints/` |
+| `yambda-500m.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | Hub (private) `pinkmeme/eval-yambda-500m` `checkpoints/` |
+| `kuairand.yaml` | `sasrec-ssm-logq-d64-trainval` | 64 | not kept anywhere (user): retrain with the [refit command.sh](../artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh) (roadmap E4) |
+| `yambda-5b.yaml` | `gsasrec-d{dim}` | 64, 128 | Hub `pinkmeme/eval-yambda-5b`; no E1c model trained |
 
-Other datasets follow the same `data/<dataset>/checkpoints/<ckpt-id>/`
-layout: 5B runs at `data/yambda-5b/checkpoints/gsasrec-d{64,128}/`,
-goodreads at `data/goodreads-work-id/checkpoints/gsasrec-d{64,128,256}-drop0.5-id/`,
-kuairand at `data/kuairand/checkpoints/gsasrec-d128-shared/` (one shared item
-table, `negs_per_pos=128`, epoch 13 of 18, test NDCG@10 0.0088; on the Hub —
-[datasets](datasets.md#kuairand)).
+Each E1c dir holds `best_model.pt`, `item_embs.pt`, `config.json`,
+`item_id_map.json`, `eval_quality.json`, `train_metrics.json` and a short
+`README.md`. Fetch one with
+
+```bash
+hf download pinkmeme/eval-goodreads-work-id --repo-type dataset \
+    --include 'checkpoints/sasrec-ssm-logq-d128/*' --local-dir "$RETRIEVE_DATA_ROOT/goodreads-work-id"
+```
+
+## The published gSASRec checkpoints (kept, not read by the harness)
+
+Trained by the retired trainer with gBCE (per-position negatives). They
+are the bars the E1c models were measured against
+([bars](../validation.md#bars)), and the inputs of every record made
+before the switch: the golden goodreads cells and D1's `d1/goodreads` leg
+use `gsasrec-d128-drop0.5-id`.
+
+| HF repo | ckpt-id |
+|---|---|
+| `pinkmeme/eval-goodreads-work-id` | `gsasrec-d{64,128,256}-drop0.5-id` |
+| `pinkmeme/eval-yambda-500m` | `gsasrec-d{64,128,256}-drop0.5` |
+| `pinkmeme/eval-yambda-5b` | `gsasrec-d{64,128}` |
+
+KuaiRand's gSASRec `gsasrec-d128-shared` was deleted from the Hub (user);
+nothing reproduces the one filter cell made with it.
+
+The yambda-500m ones as recorded at training time (Listen+, full-catalog
+ranking against all 1,866,170 items, no history masking, the
+[Yambda paper](https://arxiv.org/abs/2505.22238) Table 2 protocol). Their
+test numbers came from a split no longer on disk; re-scored on today's
+file they are the [bars](../validation.md#bars):
+
+| ckpt-id | Dim | Dropout | Best epoch | Test NDCG@10 | NDCG@100 | Recall@10 | Recall@100 |
+|---|---|---|---|---|---|---|---|
+| `gsasrec-d128-drop0.5` | 128 | 0.5 | 54 | 0.0751 | 0.0946 | 0.0353 | 0.1362 |
+| `gsasrec-d64-drop0.5` | 64 | 0.5 | 99 | 0.0813 | 0.1029 | 0.0384 | 0.1489 |
+| `gsasrec-d256-drop0.5` | 256 | 0.5 | 95 | 0.0753 | 0.0910 | 0.0364 | 0.1284 |
+
 Arxiv has no SASRec checkpoint — its queries come from a pre-encoded text
 embedding tensor (see [evaluation.md](evaluation.md)).
 

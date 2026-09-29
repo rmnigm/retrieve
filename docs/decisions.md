@@ -1,7 +1,7 @@
 ---
 title: decisions
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-09-29
 type: summary
 tags: [decisions]
 sources: [pyproject.toml, evaluation/config/suites.yaml, retrieve/src/retrieve/, evaluation/bench/, evaluation/training/]
@@ -137,10 +137,10 @@ decisions.
 - **YFCC runs clause filters only**, no bloom, so bloom false positives
   cannot spoil the cross-check against the shipped ground truth.
 
-## Sequential encoder (dev/hstu)
+## Sequential encoder
 
-The goal is to replace the published gSASRec checkpoints as the history encoder behind the sequential benchmarks
-(roadmap: not a numbered step; the user scheduled it directly).
+The current trainer's checkpoints replace the published gSASRec ones as the history encoder behind the sequential
+benchmarks (merged from `dev/hstu` into `staging`, 2026-09-29).
 - **Output contract unchanged.** Item embeddings are `[N, D]` from an embedding table, query
   embeddings are `[B, D]` from `encode.py`, and scoring is the dot product. D stays 64, 128 or
   256.
@@ -171,6 +171,13 @@ The goal is to replace the published gSASRec checkpoints as the history encoder 
   otherwise never trained on ([temporal drift](validation.md#kuairand-temporal-drift)). d128 was
   not run ([OOM](validation.md#final-models-the-e1c-recipe)); the user stopped KuaiRand at d64
   (2026-09-26).
+- **The harness uses the E1c checkpoints** (user, 2026-09-29): goodreads and yambda-500m
+  `sasrec-ssm-logq-d{dim}`, kuairand `sasrec-ssm-logq-d64-trainval`; yambda-5b keeps `gsasrec-d{dim}`
+  (no new model). Records made on a gSASRec checkpoint are kept as that experiment, not deleted and not
+  mixed with the new ones; the golden baseline stays on `gsasrec-d128-drop0.5-id`, because it compares
+  two harnesses on fixed inputs ([what must be redone](validation.md#encoder-switch-evals-to-redo)).
+- **KuaiRand eval inputs and its checkpoint stay off the Hub** (user, 2026-09-26): only the trainer
+  inputs are published; the rest is rebuilt (`eval-data kuairand all`) and retrained.
 - **Out of scope for this line:** a LLaMA block, row-wise Adagrad, a bf16 table,
   FuXi-style channels and multi-GPU.
 
@@ -183,6 +190,6 @@ The goal is to replace the published gSASRec checkpoints as the history encoder 
   pod image's defaults put data and the Hub cache on `/workspace`
   instead; storage.md marks this contested.
 - **`ncu` is blocked**; kernel attribution uses `torch.profiler`.
-- **The sequential-encoder line runs on an H100 pod** (`rp-h100-hstu`, one H100 80GB HBM3).
-  Rule 1's "the A100 is the machine" does not apply to that line. Every number from it records
-  the GPU name.
+- **The sequential-encoder results were measured on an H100 pod** (one H100 80GB HBM3, since
+  deleted); every number from it records the GPU name. Retraining (E4) runs on whatever box the
+  step gets and records its GPU the same way.

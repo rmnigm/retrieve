@@ -3,7 +3,7 @@
 # substituted per entry of `dims`. Suites (ks, batch sizes, algos, backends,
 # params, seeds) live in suites.yaml. gt_dir is derived: <data_dir>/gt_d{dim}.
 data_dir: data/goodreads-work-id
-checkpoint: data/goodreads-work-id/checkpoints/gsasrec-d{dim}-drop0.5-id/best_model.pt
+checkpoint: data/goodreads-work-id/checkpoints/sasrec-ssm-logq-d{dim}/best_model.pt
 dims: [64, 128, 256]
 encode: {batch_size: 512, num_workers: 8, max_seq_length: 200}
 users_limit: 10000
