@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import torch
 from torch import Tensor
 
@@ -76,17 +78,33 @@ def _pack_signs_to_int64(values: Tensor) -> Tensor:
     return (bits << shifts).sum(dim=-1)
 
 
-def _oporp_project(x: Tensor, signs: Tensor, perm: Tensor, k_bits: int) -> Tensor:
-    """Shared Sign-OPORP chain (index- and query-side): sign-flip → permute → bin into ``k_bits``
-    groups → L2-normalize → pack to 64-bit words, with the shared ``k_bits`` validation
-    (``k_bits=0`` resolves to ``D``)."""
-    b_or_n, d = x.shape
+def _pack_chunked(embs: Tensor, w: int, project: Callable[[Tensor], Tensor]) -> Tensor:
+    """``project(embs)`` ([N, D] → [N, W] int64 bit words) written chunk by chunk into the output,
+    as ``quantize_int8_global`` does its codes: every step of both 1-bit projections is
+    row-local, so the transient is one chunk's instead of several full-corpus copies."""
+    bits = torch.empty((embs.shape[0], w), dtype=torch.int64, device=embs.device)
+    for start in range(0, embs.shape[0], _CODE_CHUNK_ROWS):
+        stop = start + _CODE_CHUNK_ROWS
+        bits[start:stop] = project(embs[start:stop])
+    return bits
+
+
+def _oporp_k_bits(d: int, k_bits: int) -> int:
+    """The shared ``k_bits`` validation (``k_bits=0`` resolves to ``D``)."""
     if k_bits == 0:
         k_bits = d
     if d % k_bits != 0:
         raise ValueError(f"k_bits must divide D; got k_bits={k_bits}, D={d}")
     if k_bits % 64 != 0:
         raise ValueError(f"k_bits (D when 0) must be a multiple of 64, got {k_bits}")
+    return k_bits
+
+
+def _oporp_project(x: Tensor, signs: Tensor, perm: Tensor, k_bits: int) -> Tensor:
+    """Shared Sign-OPORP chain (index- and query-side): sign-flip → permute → bin into ``k_bits``
+    groups → L2-normalize → pack to 64-bit words."""
+    b_or_n, d = x.shape
+    k_bits = _oporp_k_bits(d, k_bits)
     bin_w = d // k_bits
     proj = (x * signs.to(x.dtype)).index_select(1, perm)
     binned = proj.view(b_or_n, k_bits, bin_w).sum(dim=-1)
@@ -100,14 +118,17 @@ def quantize_oporp_1bit(
     k_bits: int = 0,
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Sign-OPORP 1-bit quantization (Li et al. 2019): sign-flip, permute, bin into k_bits groups,
-    L2-normalize, pack to 64-bit words. k_bits=0 resolves to D (bit-stable default).
+    L2-normalize, pack to 64-bit words. k_bits=0 resolves to D (bit-stable default). Build-time,
+    in row chunks (``_pack_chunked``): bit-identical to ``project_oporp_1bit_query`` on the table.
 
     Returns (bits [N, k_bits//64] int64, signs [D] int8, perm [D] int64); query sim = k_bits -
     2*popcount(q ^ item)."""
     if embs.dim() != 2:
         raise ValueError(f"expected 2-D [N, D] embeddings, got shape {tuple(embs.shape)}")
+    k_bits = _oporp_k_bits(embs.shape[1], k_bits)
     signs, perm = _build_oporp(embs.shape[1], seed, embs.device)
-    return _oporp_project(embs, signs, perm, k_bits), signs, perm
+    bits = _pack_chunked(embs, k_bits // 64, lambda x: _oporp_project(x, signs, perm, k_bits))
+    return bits, signs, perm
 
 
 def project_oporp_1bit_query(
@@ -138,6 +159,7 @@ def quantize_simhash_1bit(
 ) -> tuple[Tensor, Tensor]:
     """SimHash 1-bit quantization (Charikar 2002 / Manku 2007): each output bit = sign(r_j · x), r_j
     ~ N(0, I_D); unlike Sign-OPORP it admits k_bits > D since every bit mixes all coordinates.
+    Build-time, in row chunks (``_pack_chunked``).
 
     Returns (bits [N, k_bits//64] int64, r [k_bits, D] fp32); query sim = k_bits - 2*popcount(q ^
     item)."""
@@ -146,7 +168,7 @@ def quantize_simhash_1bit(
     if k_bits % 64 != 0:
         raise ValueError(f"k_bits must be a multiple of 64, got {k_bits}")
     r = _build_simhash_R(embs.shape[1], k_bits, seed, embs.device)
-    return _pack_signs_to_int64(embs @ r.t()), r
+    return _pack_chunked(embs, k_bits // 64, lambda x: _pack_signs_to_int64(x @ r.t())), r
 
 
 def project_simhash_1bit_query(query: Tensor, r: Tensor) -> Tensor:
