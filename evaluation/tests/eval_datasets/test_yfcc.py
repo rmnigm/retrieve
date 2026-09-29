@@ -150,9 +150,7 @@ class TestCapTagBags:
 
     def test_keeps_most_query_frequent_first_and_pads_with_minus_one(self):
         # query freq: tag 5 -> 3, tag 6 -> 2, tag 7 -> 1  =>  dense 0, 1, 2.
-        bags, stats = self._bags(
-            [[7, 6, 5]], q_tags=[5, 5, 5, 6, 6, 7], n_tags=8, max_tags=2
-        )
+        bags, stats = self._bags([[7, 6, 5]], q_tags=[5, 5, 5, 6, 6, 7], n_tags=8, max_tags=2)
         assert bags.shape == (1, 2)
         assert bags[0].tolist() == [0, 1]  # dense ids of tags 5 and 6
         assert stats["tag_entries_kept"] == 2
@@ -176,9 +174,7 @@ class TestCapTagBags:
             assert kept <= everything
 
     def test_stats_report_the_real_distribution(self):
-        bags, stats = self._bags(
-            [[1, 2, 3], [1], [1, 2]], q_tags=[1, 2, 3], n_tags=4, max_tags=2
-        )
+        bags, stats = self._bags([[1, 2, 3], [1], [1, 2]], q_tags=[1, 2, 3], n_tags=4, max_tags=2)
         assert stats["tags_per_item_mean"] == pytest.approx(2.0)
         assert stats["tags_per_item_max"] == 3
         assert stats["restricted_tags_per_item_max"] == 3
@@ -285,9 +281,7 @@ class TestCheckGtHelpers:
         assert chk.candidates_narrow(narrow, np.array([1, -1])).tolist() == [0, 1]
 
     def test_topk_l2_is_exact_over_uint8_valued_fp16(self):
-        embs = torch.tensor(
-            [[0, 0], [3, 4], [255, 255], [1, 0]], dtype=torch.float16
-        )
+        embs = torch.tensor([[0, 0], [3, 4], [255, 255], [1, 0]], dtype=torch.float16)
         q = torch.tensor([[0.0, 0.0]])
         cand = torch.tensor([0, 1, 2, 3])
         ids, sc = chk.topk_for_candidates(embs, q, cand, k=3, metric="l2", chunk=2)
@@ -376,9 +370,7 @@ class TestRealSlice:
         tags, dense = chk.load_query_predicates(REAL)
         assert tags.shape == (yfcc.N_QUERY, yfcc.C_NARROW)
         assert (dense[:, 0] >= 0).all(), "every query has a first tag"
-        q_indptr, q_indices, _ = yfcc.read_spmat(
-            yfcc.ROOT / "query.metadata.public.100K.spmat"
-        )
+        q_indptr, q_indices, _ = yfcc.read_spmat(yfcc.ROOT / "query.metadata.public.100K.spmat")
         for r in (0, 1, 17, 99_999):
             want = q_indices[q_indptr[r] : q_indptr[r + 1]].tolist()
             got = [t for t in tags[r].tolist() if t >= 0]

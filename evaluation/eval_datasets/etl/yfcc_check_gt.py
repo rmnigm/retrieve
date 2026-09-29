@@ -65,9 +65,7 @@ CONTENT_SUBDIR = "content_d192"
 # ----- loading ----------------------------------------------------------------
 
 
-def load_tag_csc(
-    data_dir: Path, query_tags: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
+def load_tag_csc(data_dir: Path, query_tags: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Transpose the item→tags CSR into a tag→items CSC, restricted to the
     tags the queries actually use.
 
@@ -119,9 +117,7 @@ def load_query_predicates(data_dir: Path) -> tuple[np.ndarray, np.ndarray]:
 # ----- candidate sets ---------------------------------------------------------
 
 
-def candidates_full(
-    ptr: np.ndarray, idx: np.ndarray, tags_row: np.ndarray
-) -> np.ndarray:
+def candidates_full(ptr: np.ndarray, idx: np.ndarray, tags_row: np.ndarray) -> np.ndarray:
     """Items passing the true predicate for one query: intersect the CSC
     postings of every active tag.
 
@@ -280,8 +276,10 @@ def run_check(args) -> int:
         recall_sum += float(np.isin(want, ours).mean())
         if ours.size == want.size and np.array_equal(ours, want):
             n_id_exact += 1
-        elif args.metric == "l2" and ours.size == want.size and np.allclose(
-            np.sort(sc.cpu().numpy()), np.sort(gt_d[r][:k]), rtol=0, atol=0
+        elif (
+            args.metric == "l2"
+            and ours.size == want.size
+            and np.allclose(np.sort(sc.cpu().numpy()), np.sort(gt_d[r][:k]), rtol=0, atol=0)
         ):
             n_tie_equiv += 1
         else:
@@ -299,8 +297,10 @@ def run_check(args) -> int:
         if args.metric == "l2":
             common = np.intersect1d(ours, want)
             if common.size:
-                d_ours = {int(i): float(s) for i, s in zip(
-                    ids.cpu().numpy(), sc.cpu().numpy(), strict=True)}
+                d_ours = {
+                    int(i): float(s)
+                    for i, s in zip(ids.cpu().numpy(), sc.cpu().numpy(), strict=True)
+                }
                 d_gt = {int(i): float(s) for i, s in zip(gt_ids[r][:k], gt_d[r][:k], strict=True)}
                 for i in common:
                     max_dist_err = max(max_dist_err, abs(d_ours[int(i)] - d_gt[int(i)]))
@@ -336,8 +336,10 @@ def run_check(args) -> int:
         "wall_clock_sec": round(elapsed, 1),
         "bad_examples": bad_examples,
     }
-    print(json.dumps({k2: v for k2, v in report.items() if k2 != "bad_examples"}, indent=2),
-          flush=True)
+    print(
+        json.dumps({k2: v for k2, v in report.items() if k2 != "bad_examples"}, indent=2),
+        flush=True,
+    )
     if bad_examples:
         print("first mismatches:", json.dumps(bad_examples, indent=2), flush=True)
     if args.report:

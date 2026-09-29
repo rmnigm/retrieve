@@ -307,6 +307,7 @@ def test_filter_suite_matches_old_d128_filter_config(dataset):
 # `test_quality_suite_matches_old_d128_quality_config_modulo_collapse` removed 2026-09-16:
 # the `quality` suite is retired from the campaign and yambda left the study at Phase E.
 
+
 def test_deep_suite_builds_once_per_n_lists():
     jobs = load_matrix(
         CFG / "arxiv.yaml",
@@ -330,7 +331,6 @@ def test_deep_suite_builds_once_per_n_lists():
     assert [j.query for j in jobs if j.algo == "linr_v3"] == [
         tuple({"candidate_pool": c} for c in (2000, 4000, 8000, 16000, 32000))
     ]
-
 
 
 DATASET_YAMLS = sorted(p for p in CFG.glob("*.yaml") if p.name != "suites.yaml")

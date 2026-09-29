@@ -4,9 +4,8 @@ repos:
     hooks:
       - id: ruff-check
         files: ^(retrieve|evaluation)/
-      # evaluation/ joins once its formatting-only commit lands; it does not pass today.
       - id: ruff-format
-        files: ^retrieve/
+        files: ^(retrieve|evaluation)/
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0

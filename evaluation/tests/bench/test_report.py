@@ -43,10 +43,27 @@ def _perf(k, bs, mode, ms, unstable=False):
     }  # fmt: skip
 
 
-def _rec(dataset, algo, backend, *, filter_kind="clause", sweep="c0_genre", params=None,
-         status="ok", seed=0, ms=1.0, unstable=False, recall=0.9, jaccard=None):
-    perf = [_perf(k, bs, mode, ms * (1 + 0.1 * bs), unstable)
-            for k in (100,) for bs in (1, 8, 16) for mode in ("eager", "graph")]
+def _rec(
+    dataset,
+    algo,
+    backend,
+    *,
+    filter_kind="clause",
+    sweep="c0_genre",
+    params=None,
+    status="ok",
+    seed=0,
+    ms=1.0,
+    unstable=False,
+    recall=0.9,
+    jaccard=None,
+):
+    perf = [
+        _perf(k, bs, mode, ms * (1 + 0.1 * bs), unstable)
+        for k in (100,)
+        for bs in (1, 8, 16)
+        for mode in ("eager", "graph")
+    ]
     return {
         "schema_version": records.SCHEMA_VERSION, "status": status, "partial_reasons":
         ["skip_perf"] if status == "partial" else None,
@@ -76,30 +93,67 @@ def results(tmp_path):
     for rec in (
         _rec("goodreads", "linr_v1_filter_mask", "triton", ms=0.5),
         _rec("goodreads", "linr_v1_filter_mask", "torch", ms=0.8, jaccard=1.0),
-        _rec("goodreads", "silvertorch", "triton", params={"n_probe": 24}, ms=0.3,
-             unstable=True, recall=0.91),
-        _rec("goodreads", "silvertorch", "triton", params={"n_probe": 32}, ms=0.4,
-             recall=0.94),
+        _rec(
+            "goodreads",
+            "silvertorch",
+            "triton",
+            params={"n_probe": 24},
+            ms=0.3,
+            unstable=True,
+            recall=0.91,
+        ),
+        _rec("goodreads", "silvertorch", "triton", params={"n_probe": 32}, ms=0.4, recall=0.94),
         _rec("goodreads", "linr_v2", "triton", status="failed"),
         _rec("goodreads", "linr_v3", "triton", status="partial", ms=1.2, recall=0.7),
     ):
         records.append_record(p, rec)
     q = tmp_path / "results" / "quality" / "goodreads-d128.jsonl"
-    records.append_record(q, {**_rec("goodreads", "linr_v1_filter_mask", "triton",
-                                     filter_kind="none", sweep="full_scan"), "suite": "quality"})
+    records.append_record(
+        q,
+        {
+            **_rec(
+                "goodreads", "linr_v1_filter_mask", "triton", filter_kind="none", sweep="full_scan"
+            ),
+            "suite": "quality",
+        },
+    )
     samples = records.samples_path(p)
-    records.append_record(samples, {
-        "dataset": "goodreads", "dim": 128, "suite": "filter", "filter_kind": "clause",
-        "sweep": "c0_genre", "algo": "linr_v1_filter_mask", "backend": "triton", "params": {},
-        "seed": 0, "k": 100, "bs": 1, "mode": "eager", "ms": [0.5, 0.51, 0.49, 0.52],
-    })
+    records.append_record(
+        samples,
+        {
+            "dataset": "goodreads",
+            "dim": 128,
+            "suite": "filter",
+            "filter_kind": "clause",
+            "sweep": "c0_genre",
+            "algo": "linr_v1_filter_mask",
+            "backend": "triton",
+            "params": {},
+            "seed": 0,
+            "k": 100,
+            "bs": 1,
+            "mode": "eager",
+            "ms": [0.5, 0.51, 0.49, 0.52],
+        },
+    )
     return tmp_path / "results"
 
 
 def _generate(results, out, **kw):
-    return report.generate(results, out, dim=128, k=100, bs=1, compare_bs=16, mode="eager",
-                           backend="triton", sweep=None, batch_dataset=None,
-                           budgets=(1.0, 5.0), **kw)
+    return report.generate(
+        results,
+        out,
+        dim=128,
+        k=100,
+        bs=1,
+        compare_bs=16,
+        mode="eager",
+        backend="triton",
+        sweep=None,
+        batch_dataset=None,
+        budgets=(1.0, 5.0),
+        **kw,
+    )
 
 
 def test_results_parquet_still_carries_every_column_the_tables_read(results, tmp_path):
@@ -112,9 +166,18 @@ def test_every_artifact_is_emitted_and_the_latex_is_structurally_sound(results, 
     c = _generate(results, tmp_path / "out")
     names = {p.name for p in c.written}
     assert {"results.parquet", "report.md", "methodology.tex"} <= names
-    assert {f"tab-{n}.tex" for n in ("recall_nofilter", "pareto_goodreads", "batch_scaling",
-                                     "memory", "backend_parity", "recall_at_budget",
-                                     "paper_comparison")} <= names
+    assert {
+        f"tab-{n}.tex"
+        for n in (
+            "recall_nofilter",
+            "pareto_goodreads",
+            "batch_scaling",
+            "memory",
+            "backend_parity",
+            "recall_at_budget",
+            "paper_comparison",
+        )
+    } <= names
     assert sum(1 for p in c.written if p.suffix == ".png") >= 5
     labels = set()
     for path in [p for p in c.written if p.suffix == ".tex"]:
@@ -127,8 +190,12 @@ def test_every_artifact_is_emitted_and_the_latex_is_structurally_sound(results, 
         labels |= set(re.findall(r"\\label\{([^}]*)\}", body))
         stripped = re.sub(r"\$[^$]*\$|\\(?:label|texttt|ref)\{[^}]*\}", "", body)
         assert "_" not in stripped.replace("\\_", ""), f"unescaped underscore in {path}"
-    assert {"tab:recall_nofilter", "tab:pareto_goodreads", "tab:batch_scaling",
-            "tab:memory"} <= labels, "a thesis label went missing (docs/thesis/main.tex)"
+    assert {
+        "tab:recall_nofilter",
+        "tab:pareto_goodreads",
+        "tab:batch_scaling",
+        "tab:memory",
+    } <= labels, "a thesis label went missing (docs/thesis/main.tex)"
 
 
 def test_failed_is_excluded_partial_and_unstable_are_marked(results, tmp_path):

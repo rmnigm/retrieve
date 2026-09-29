@@ -150,8 +150,6 @@ ARTICLE_PARQUET_BYTES_PER_ROW = 60
 MEDLINE_PARQUET_BYTES = 1_200_000_000
 
 
-
-
 def parse_mesh_field(m: str | None) -> list[str]:
     """``"humans!|rectal neoplasms*|rectal neoplasms!therapy|"`` → descriptors.
 
@@ -228,8 +226,6 @@ def mesh_category_of(tree_numbers: list[str]) -> int:
         if c in MESH_CATEGORIES:
             return MESH_CATEGORIES.index(c)
     return -1
-
-
 
 
 def _remote_size(url: str) -> int:
@@ -409,8 +405,6 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 1 if bad else 0
 
 
-
-
 def plan_budget(
     sizes: dict[int, dict[str, int]],
     rows: dict[int, int],
@@ -542,7 +536,6 @@ def cmd_plan(args: argparse.Namespace) -> int:
     return 0
 
 
-
 _RE_PMID = re.compile(rb"<PMID[^>]*>(\d+)</PMID>")
 _RE_TA = re.compile(rb"<MedlineTA>(.*?)</MedlineTA>", re.S)
 _RE_LANG = re.compile(rb"<Language>(.*?)</Language>")
@@ -632,13 +625,10 @@ def cmd_medline(args: argparse.Namespace) -> int:
                 print(f"  medline {n_done}/{n_files} files, {n_rows:,} rows", flush=True)
 
     print(
-        f"DONE medline {n_done} files, {n_rows:,} rows in {time.monotonic() - t0:.0f}s "
-        f"→ {out_dir}",
+        f"DONE medline {n_done} files, {n_rows:,} rows in {time.monotonic() - t0:.0f}s → {out_dir}",
         flush=True,
     )
     return 0
-
-
 
 
 def _shard_name(i: int) -> str:
@@ -909,8 +899,6 @@ def cmd_convert(args: argparse.Namespace) -> int:
     return 0
 
 
-
-
 def load_mesh_tree_tops(path: Path) -> dict[str, int]:
     """``desc2026.gz`` → ``{lower-cased descriptor name: category index}``."""
     if not path.exists():
@@ -979,11 +967,7 @@ def cmd_attrs(args: argparse.Namespace) -> int:
     counts = Counter()
     for bag in arts["mesh"].to_list():
         counts.update(bag or [])
-    kept = [
-        (d, c)
-        for d, c in counts.most_common(args.mesh_vocab)
-        if c >= args.mesh_min_count
-    ]
+    kept = [(d, c) for d, c in counts.most_common(args.mesh_vocab) if c >= args.mesh_min_count]
     mesh_names = [d for d, _ in kept]
     mesh_freq = np.asarray([c for _, c in kept], dtype=np.int64)
     mesh_vocab = {d: i for i, d in enumerate(mesh_names)}
@@ -1123,9 +1107,9 @@ def cmd_attrs(args: argparse.Namespace) -> int:
         flush=True,
     )
 
-    arts.select(
-        "item_id", "pmid", "year", "has_abstract", "journal_id", "lang_id"
-    ).sort("item_id").write_parquet(output / "articles.parquet", compression="zstd")
+    arts.select("item_id", "pmid", "year", "has_abstract", "journal_id", "lang_id").sort(
+        "item_id"
+    ).write_parquet(output / "articles.parquet", compression="zstd")
 
     print("STEP heldout + eval_split", flush=True)
     rng = np.random.default_rng(args.seed)
@@ -1154,8 +1138,6 @@ def cmd_attrs(args: argparse.Namespace) -> int:
     merge_prep_log(output, "attrs", log)
     print(f"ALL DONE attrs in {log['wall_clock_sec']:.0f}s", flush=True)
     return 0
-
-
 
 
 def cmd_queries(args: argparse.Namespace) -> int:
@@ -1252,8 +1234,6 @@ def _titles_for_pmids(output: Path, want: set[int]) -> dict[int, str]:
     return out
 
 
-
-
 def cmd_encode_queries(args: argparse.Namespace) -> int:
     import torch
     import torch.nn.functional as F
@@ -1319,8 +1299,6 @@ def cmd_encode_queries(args: argparse.Namespace) -> int:
     return 0
 
 
-
-
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="ETL for the PubMed + MedCPT filter-bench dataset.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -1363,8 +1341,12 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("convert", help="streaming: pmids → id map; shards → parquet + fp16")
     sp.add_argument("--output-dir", type=str, default=default_out)
     sp.add_argument("--shards", type=str, default=None)
-    sp.add_argument("--keep-items", type=int, default=None,
-                    help="keep exactly N articles, chosen by a seeded PMID hash (default: all)")
+    sp.add_argument(
+        "--keep-items",
+        type=int,
+        default=None,
+        help="keep exactly N articles, chosen by a seeded PMID hash (default: all)",
+    )
     sp.add_argument("--seed", type=int, default=0)
     sp.add_argument("--batch-rows", type=int, default=100_000)
     sp.add_argument("--fetch", action="store_true", help="download missing raw files as needed")

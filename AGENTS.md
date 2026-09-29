@@ -165,7 +165,7 @@ uv run --directory evaluation bench check --dataset goodreads     # validate a s
 uv run --directory evaluation eval-data arxiv --help              # dataset ETL + Hub transfer (eval-data fetch|publish)
 uv run --directory evaluation train sasrec --help                 # gSASRec training; train upload-checkpoint
 uv run --directory retrieve tune-kernels --help  # kernel autotune sweeps (GPU)
-ruff check retrieve evaluation && ruff format --check retrieve
+ruff check retrieve evaluation && ruff format --check retrieve evaluation
 python3 scripts/check_doc_links.py
 ```
 

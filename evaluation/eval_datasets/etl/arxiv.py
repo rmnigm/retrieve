@@ -81,6 +81,7 @@ LICENSE_BUCKETS = [
     "other",
 ]
 
+
 # Year buckets for C2.
 def _year_to_bucket(y: int | None) -> int:
     """Map an integer year to one of {0..6} or -1 if missing/oor."""
@@ -272,8 +273,10 @@ def cmd_prep(args) -> int:
     )
 
     # Sort by arxiv id for a deterministic dense remap.
-    df = df.sort("id").with_row_index(name="item_id", offset=1).with_columns(
-        pl.col("item_id").cast(pl.Int64)
+    df = (
+        df.sort("id")
+        .with_row_index(name="item_id", offset=1)
+        .with_columns(pl.col("item_id").cast(pl.Int64))
     )
     n_items = df.height
 
@@ -310,11 +313,8 @@ def cmd_prep(args) -> int:
     heldout_ids = np.sort(
         rng.choice(np.arange(1, n_items + 1, dtype=np.int64), size=n_heldout, replace=False)
     )
-    heldout_df = (
-        pl.DataFrame(
-            {"item_id": heldout_ids.tolist()}, schema={"item_id": pl.Int64}
-        )
-        .join(papers.select("item_id", "arxiv_id"), on="item_id", how="inner")
+    heldout_df = pl.DataFrame({"item_id": heldout_ids.tolist()}, schema={"item_id": pl.Int64}).join(
+        papers.select("item_id", "arxiv_id"), on="item_id", how="inner"
     )
     heldout_df.write_parquet(output / "heldout.parquet", compression="zstd")
     print(f"  wrote {heldout_df.height:,} held-out queries → heldout.parquet", flush=True)
@@ -427,9 +427,7 @@ def _encode_with_prefix(
 
     d_native = int(model.get_sentence_embedding_dimension())
     if d_max > d_native:
-        raise ValueError(
-            f"max(truncate_dims)={d_max} > native dim={d_native} for {encoder}"
-        )
+        raise ValueError(f"max(truncate_dims)={d_max} > native dim={d_native} for {encoder}")
 
     # Length-sort for batch packing efficiency, then unsort at the end.
     order = sorted(range(len(texts)), key=lambda i: len(texts[i]))
@@ -438,14 +436,22 @@ def _encode_with_prefix(
     tokenizer = model.tokenizer
 
     class _TextDS(torch.utils.data.Dataset):
-        def __init__(self, items): self.items = items
-        def __len__(self): return len(self.items)
-        def __getitem__(self, i): return self.items[i]
+        def __init__(self, items):
+            self.items = items
+
+        def __len__(self):
+            return len(self.items)
+
+        def __getitem__(self, i):
+            return self.items[i]
 
     def _collate(batch):
         return tokenizer(
-            batch, padding=True, truncation=True,
-            max_length=max_seq_length, return_tensors="pt",
+            batch,
+            padding=True,
+            truncation=True,
+            max_length=max_seq_length,
+            return_tensors="pt",
         )
 
     loader = torch.utils.data.DataLoader(
@@ -468,8 +474,7 @@ def _encode_with_prefix(
         batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
         with (
             torch.inference_mode(),
-            torch.autocast(device_type=device, dtype=autocast_dtype,
-                           enabled=device == "cuda"),
+            torch.autocast(device_type=device, dtype=autocast_dtype, enabled=device == "cuda"),
         ):
             features = model(batch)
             embs = features["sentence_embedding"].float()
@@ -669,9 +674,7 @@ def cmd_attrs(args) -> int:
         )
         .filter(pl.col("main0") != "")
     )
-    main_freq = (
-        leaf0.group_by("main0").len().sort("len", descending=True)
-    )
+    main_freq = leaf0.group_by("main0").len().sort("len", descending=True)
     cat_main_names = main_freq["main0"].to_list()
     cat_main_vocab = {n: i for i, n in enumerate(cat_main_names)}
     with open(output / "cat_main_vocab.json", "w") as f:
@@ -687,6 +690,7 @@ def cmd_attrs(args) -> int:
 
     # ---- C4 author dense remap (over all papers, top-2 per paper) ---------
     print("STEP C4 authors (top-2 per paper, dense by global freq)", flush=True)
+
     # authors_parsed is a JSON-encoded string like '[["LastName","FirstName",""], ...]'
     def _extract_top2_authors(s: str | None) -> list[str]:
         if not s:
@@ -716,9 +720,7 @@ def cmd_attrs(args) -> int:
     auth_explode = pa.explode("auth_top2").filter(
         pl.col("auth_top2").is_not_null() & (pl.col("auth_top2") != "")
     )
-    auth_freq = (
-        auth_explode.group_by("auth_top2").len().sort("len", descending=True)
-    )
+    auth_freq = auth_explode.group_by("auth_top2").len().sort("len", descending=True)
     author_keys = auth_freq["auth_top2"].to_list()
     # 0-indexed dense; -1 reserved as padding.
     author_vocab = {k: i for i, k in enumerate(author_keys)}
@@ -750,22 +752,23 @@ def cmd_attrs(args) -> int:
             return 0
         return len(arr) if isinstance(arr, list) else 0
 
-    pyv = papers.with_columns(
-        pl.col("update_date")
-        .str.slice(0, 4)
-        .cast(pl.Int64, strict=False)
-        .alias("year_int"),
-        pl.col("versions")
-        .map_elements(_versions_count, return_dtype=pl.Int64, skip_nulls=False)
-        .alias("vcount"),
-    ).with_columns(
-        pl.col("year_int")
-        .map_elements(_year_to_bucket, return_dtype=pl.Int64, skip_nulls=False)
-        .alias("year_id"),
-        pl.col("vcount")
-        .map_elements(_versions_to_bucket, return_dtype=pl.Int64, skip_nulls=False)
-        .alias("ver_id"),
-    ).select("item_id", "year_id", "ver_id")
+    pyv = (
+        papers.with_columns(
+            pl.col("update_date").str.slice(0, 4).cast(pl.Int64, strict=False).alias("year_int"),
+            pl.col("versions")
+            .map_elements(_versions_count, return_dtype=pl.Int64, skip_nulls=False)
+            .alias("vcount"),
+        )
+        .with_columns(
+            pl.col("year_int")
+            .map_elements(_year_to_bucket, return_dtype=pl.Int64, skip_nulls=False)
+            .alias("year_id"),
+            pl.col("vcount")
+            .map_elements(_versions_to_bucket, return_dtype=pl.Int64, skip_nulls=False)
+            .alias("ver_id"),
+        )
+        .select("item_id", "year_id", "ver_id")
+    )
 
     # ---- C1 license bucket per paper -------------------------------------
     # skip_nulls=False: a null license is the "none" bucket, not a null that
@@ -782,7 +785,9 @@ def cmd_attrs(args) -> int:
         schema={"main0": pl.Utf8, "main_id": pl.Int64},
     )
     pmain = (
-        leaf0.select("item_id", "main0").join(main_remap, on="main0", how="left").select(
+        leaf0.select("item_id", "main0")
+        .join(main_remap, on="main0", how="left")
+        .select(
             "item_id",
             pl.col("main_id").fill_null(-1).cast(pl.Int64),
         )
@@ -839,9 +844,7 @@ def cmd_attrs(args) -> int:
     print(f"  per-clause coverage = {coverage}", flush=True)
 
     torch.save(narrow_t, output / "item_attrs_narrow.pt")
-    clause_is_reverse_narrow = torch.tensor(
-        [False, False, False, False, False], dtype=torch.bool
-    )
+    clause_is_reverse_narrow = torch.tensor([False, False, False, False, False], dtype=torch.bool)
     torch.save(clause_is_reverse_narrow, output / "clause_is_reverse_narrow.pt")
     print(
         f"  wrote item_attrs_narrow.pt {tuple(narrow_t.shape)} + clause_is_reverse_narrow.pt",
@@ -996,7 +999,7 @@ def main(argv: list[str] | None = None) -> int:
             nargs="+",
             default=[64, 128, 256],
             help="Matryoshka dims to write. Largest goes to content/, smaller "
-                 "dims go to content_d{k}/ (slice + L2-renormalize).",
+            "dims go to content_d{k}/ (slice + L2-renormalize).",
         )
         p.add_argument("--description-chars", type=int, default=1500)
         p.add_argument("--batch-size", type=int, default=256)
@@ -1031,8 +1034,12 @@ def main(argv: list[str] | None = None) -> int:
     sp_at = sub.add_parser("attrs", help="build narrow + wide attrs + eval_split")
     sp_at.add_argument("--output-dir", type=str, required=True)
     sp_at.add_argument("--seed", type=int, default=0)
-    sp_at.add_argument("--wide-min-count", type=int, default=50,
-                       help="drop wide-bag categories with global count below this")
+    sp_at.add_argument(
+        "--wide-min-count",
+        type=int,
+        default=50,
+        help="drop wide-bag categories with global count below this",
+    )
     sp_at.set_defaults(func=cmd_attrs)
 
     sp_al = sub.add_parser(

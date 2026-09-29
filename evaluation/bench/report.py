@@ -121,11 +121,18 @@ def provenance(recs: list[dict[str, Any]], gate: str | None) -> dict[str, Any]:
         blockers.append(f"{status['partial']} record(s) with status=partial")
     if dirty:
         blockers.append(f"{len(dirty)} record(s) with env.dirty (library subtree was dirty)")
-    off = sorted({e["git_branch"] for e in env
-                  if e.get("git_branch") and e["git_branch"] not in MAIN_BRANCHES})
+    off = sorted(
+        {
+            e["git_branch"]
+            for e in env
+            if e.get("git_branch") and e["git_branch"] not in MAIN_BRANCHES
+        }
+    )
     if off:
-        blockers.append(f"record(s) produced on {', '.join(off)} — CLAUDE.md rule 2: "
-                        "harness numbers from a branch are not paper material")
+        blockers.append(
+            f"record(s) produced on {', '.join(off)} — CLAUDE.md rule 2: "
+            "harness numbers from a branch are not paper material"
+        )
     if not recs:
         blockers.append("no records")
     started = sorted(e.get("started") or "" for e in env)
@@ -198,8 +205,10 @@ def _reduce(rows: list[dict[str, Any]], field: str, notes: list[str], what: str)
         by_params[r.get("params") or "{}"].append(r)
     params = sorted(by_params)
     if len(params) > 1:
-        notes.append(f"{_esc(what)}: {len(params)} parameter sets present "
-                     f"{_esc(', '.join(params))}; showing {_esc(params[0])}")
+        notes.append(
+            f"{_esc(what)}: {len(params)} parameter sets present "
+            f"{_esc(', '.join(params))}; showing {_esc(params[0])}"
+        )
     chosen = by_params[params[0]]
     by_seed: dict[Any, list[float]] = defaultdict(list)
     for r in chosen:
@@ -210,8 +219,7 @@ def _reduce(rows: list[dict[str, Any]], field: str, notes: list[str], what: str)
         "lo": min(per_seed),
         "hi": max(per_seed),
         "n_seeds": len(per_seed),
-        "unstable": field.startswith("perf_") and any(r.get("perf_unstable")
-                                                        for r in chosen),
+        "unstable": field.startswith("perf_") and any(r.get("perf_unstable") for r in chosen),
         "partial": any(r.get("status") == "partial" for r in chosen),
         "spread": max((r.get("perf_spread") or 0.0) for r in chosen),
         "params": params[0],
@@ -232,8 +240,15 @@ def _cells(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _esc(text: Any) -> str:
     """LaTeX-escape a string that came out of the records (sweep names, parameter JSON)."""
     out = str(text)
-    for ch, rep in (("_", "\\_"), ("{", "\\{"), ("}", "\\}"), ("#", "\\#"),
-                    ("%", "\\%"), ("&", "\\&"), ("$", "\\$")):
+    for ch, rep in (
+        ("_", "\\_"),
+        ("{", "\\{"),
+        ("}", "\\}"),
+        ("#", "\\#"),
+        ("%", "\\%"),
+        ("&", "\\&"),
+        ("$", "\\$"),
+    ):
         out = out.replace(ch, rep)
     return out
 
@@ -249,7 +264,7 @@ def _sci(x: float | None) -> str:
     if x == 0:
         return "$0$"
     e = int(f"{x:e}".split("e")[1])
-    return f"${x / 10 ** e:.2f}{{\\times}}10^{{{e}}}$".replace(".", "{,}", 1)
+    return f"${x / 10**e:.2f}{{\\times}}10^{{{e}}}$".replace(".", "{,}", 1)
 
 
 def _mark(v: dict[str, Any]) -> str:
@@ -283,11 +298,13 @@ def _table(prov, results_dir, *, caption, label, colspec, header, body, notes) -
     note_tex = ""
     if notes:
         inner = "\n".join(f"    \\footnotesize {n} \\\\" for n in notes)
-        note_tex = ("\n    \\vspace{2pt}\\par\n    \\begin{minipage}{\\linewidth}\n"
-                    + inner + "\n    \\end{minipage}")
+        note_tex = (
+            "\n    \\vspace{2pt}\\par\n    \\begin{minipage}{\\linewidth}\n"
+            + inner
+            + "\n    \\end{minipage}"
+        )
     return (
-        _banner(prov, results_dir)
-        + "\\begin{table}[htbp]\n"
+        _banner(prov, results_dir) + "\\begin{table}[htbp]\n"
         f"    \\caption{{{_caption(prov, caption)}}}\n"
         f"    \\label{{{label}}}\n"
         "    \\centering\n"
@@ -348,20 +365,35 @@ def tab_pareto(c) -> list[Path]:
         sweeps = sorted({r["sweep"] for r in rows if r["filter_kind"] != "none"})
         notes, body = [], []
         for sw in sweeps:
-            base = _reduce(_sel(perf, sweep=sw, algo=SPEEDUP_BASE), "perf_median_ms",
-                           [], f"{ds}/{sw}/base")
-            for i, a in enumerate([x for x in ALGO_LABEL
-                                   if any(r["algo"] == x and r["sweep"] == sw for r in rows)]):
-                q = _reduce(_cells(_sel(rows, sweep=sw, algo=a)), f"oracle_recall@{c.k}",
-                            notes, f"{ds}/{sw}/{a}")
+            base = _reduce(
+                _sel(perf, sweep=sw, algo=SPEEDUP_BASE), "perf_median_ms", [], f"{ds}/{sw}/base"
+            )
+            for i, a in enumerate(
+                [x for x in ALGO_LABEL if any(r["algo"] == x and r["sweep"] == sw for r in rows)]
+            ):
+                q = _reduce(
+                    _cells(_sel(rows, sweep=sw, algo=a)),
+                    f"oracle_recall@{c.k}",
+                    notes,
+                    f"{ds}/{sw}/{a}",
+                )
                 t = _reduce(_sel(perf, sweep=sw, algo=a), "perf_median_ms", [], f"{ds}/{sw}/{a}")
                 m = _reduce(_cells(_sel(rows, sweep=sw, algo=a)), "index_mib", [], f"{ds}/{sw}/{a}")
-                sp = ("---" if not (base and t)
-                      else _f(base["value"] / t["value"], 2)[:-1] + "\\times$")
-                body.append([
-                    f"\\textbf{{{_esc(sw)}}}" if i == 0 else "",
-                    ALGO_LABEL[a], _num(q), _num(t, 3), sp, _num(m, 1),
-                ])
+                sp = (
+                    "---"
+                    if not (base and t)
+                    else _f(base["value"] / t["value"], 2)[:-1] + "\\times$"
+                )
+                body.append(
+                    [
+                        f"\\textbf{{{_esc(sw)}}}" if i == 0 else "",
+                        ALGO_LABEL[a],
+                        _num(q),
+                        _num(t, 3),
+                        sp,
+                        _num(m, 1),
+                    ]
+                )
         tex = _table(
             c.prov, c.results_dir,
             caption=f"Качество, время работы и память на {DATASET_LABEL.get(ds, ds)} "
@@ -465,16 +497,25 @@ def tab_backend_parity(c) -> list[Path]:
         cell = _cells(sub)[0]
         eager = _reduce(_sel(sub, perf_mode="eager"), "perf_median_ms", [], "")
         graph = _reduce(_sel(sub, perf_mode="graph"), "perf_median_ms", [], "")
-        ratio = (_f(eager["value"] / graph["value"], 2)[:-1] + "\\times$"
-                 if eager and graph else "---")
+        ratio = (
+            _f(eager["value"] / graph["value"], 2)[:-1] + "\\times$" if eager and graph else "---"
+        )
         jac = cell.get(f"quality_jaccard_vs_first@{c.k}")
         diff = cell.get("quality_score_max_abs_diff")
-        body.append([
-            DATASET_LABEL.get(ds, ds), _esc(sw), ALGO_LABEL.get(algo, algo),
-            f"\\texttt{{{_esc(be)}}}", f"\\texttt{{{_esc(cell.get('path'))}}}",
-            _f(jac, 6), _sci(diff),
-            _num(eager, 3), _num(graph, 3), ratio,
-        ])
+        body.append(
+            [
+                DATASET_LABEL.get(ds, ds),
+                _esc(sw),
+                ALGO_LABEL.get(algo, algo),
+                f"\\texttt{{{_esc(be)}}}",
+                f"\\texttt{{{_esc(cell.get('path'))}}}",
+                _f(jac, 6),
+                _sci(diff),
+                _num(eager, 3),
+                _num(graph, 3),
+                ratio,
+            ]
+        )
     tex = _table(
         c.prov, c.results_dir,
         caption=f"Backend parity and eager-vs-graph latency ($d={c.dim}$, $K={c.k}$, "
@@ -506,12 +547,16 @@ def tab_recall_at_budget(c) -> list[Path]:
             best = None
             for r in sub:
                 p99, rec = r.get("perf_p99_ms"), r.get(f"oracle_recall@{c.k}")
-                if p99 is not None and rec is not None and p99 <= budget and (
-                    best is None or rec > best[0]
+                if (
+                    p99 is not None
+                    and rec is not None
+                    and p99 <= budget
+                    and (best is None or rec > best[0])
                 ):
                     best = (rec, r["algo"], r["backend"])
-            cells.append("---" if best is None
-                         else _f(best[0]) + f" ({ALGO_LABEL.get(best[1], best[1])})")
+            cells.append(
+                "---" if best is None else _f(best[0]) + f" ({ALGO_LABEL.get(best[1], best[1])})"
+            )
         body.append([DATASET_LABEL.get(ds, ds), _esc(sw)] + cells)
     tex = _table(
         c.prov, c.results_dir,
@@ -527,8 +572,9 @@ def tab_recall_at_budget(c) -> list[Path]:
 
 
 def tab_paper_comparison(c) -> list[Path]:
-    rows = _sel(c.rows, dim=c.dim, perf_bs=c.compare_bs, perf_k=c.k, perf_mode="eager",
-                backend=c.backend)
+    rows = _sel(
+        c.rows, dim=c.dim, perf_bs=c.compare_bs, perf_k=c.k, perf_mode="eager", backend=c.backend
+    )
     notes, body = [], []
     for ds, sw, algo in sorted({(r["dataset"], r["sweep"], r["algo"]) for r in rows}):
         sub = _sel(rows, dataset=ds, sweep=sw, algo=algo)
@@ -537,13 +583,18 @@ def tab_paper_comparison(c) -> list[Path]:
         p99 = _reduce(sub, "perf_p99_ms", [], "")
         qps = _reduce(sub, "perf_qps", [], "")
         pr = cell.get("pass_rate")
-        body.append([
-            f"ours: {ALGO_LABEL.get(algo, algo)}",
-            f"{DATASET_LABEL.get(ds, ds)} {_esc(sw)}, "
-            f"{cell.get('n_items')} items, $B={c.compare_bs}$",
-            _num(mean, 3), _num(p99, 3), _num(qps, 0), _f(pr, 3),
-            "this work",
-        ])
+        body.append(
+            [
+                f"ours: {ALGO_LABEL.get(algo, algo)}",
+                f"{DATASET_LABEL.get(ds, ds)} {_esc(sw)}, "
+                f"{cell.get('n_items')} items, $B={c.compare_bs}$",
+                _num(mean, 3),
+                _num(p99, 3),
+                _num(qps, 0),
+                _f(pr, 3),
+                "this work",
+            ]
+        )
     body += [list(r) for r in PAPER_REPORTED]
     tex = _table(
         c.prov, c.results_dir,
@@ -570,12 +621,26 @@ def tab_paper_comparison(c) -> list[Path]:
 
 def _figure(path: Path, fig, prov: dict[str, Any]) -> Path:
     if not prov["citable"]:
-        fig.text(0.5, 0.5, "PRE-CAMPAIGN\nNOT CITABLE", ha="center", va="center",
-                 fontsize=34, color="red", alpha=0.18, rotation=25, zorder=10)
-    fig.text(0.005, 0.005,
-             f"bench report {prov['generated']} | code_version "
-             f"{','.join(prov['code_versions'])[:12]} | commit {','.join(prov['commits'])}",
-             fontsize=5, color="0.35")
+        fig.text(
+            0.5,
+            0.5,
+            "PRE-CAMPAIGN\nNOT CITABLE",
+            ha="center",
+            va="center",
+            fontsize=34,
+            color="red",
+            alpha=0.18,
+            rotation=25,
+            zorder=10,
+        )
+    fig.text(
+        0.005,
+        0.005,
+        f"bench report {prov['generated']} | code_version "
+        f"{','.join(prov['code_versions'])[:12]} | commit {','.join(prov['commits'])}",
+        fontsize=5,
+        color="0.35",
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=160, bbox_inches="tight")
     plt.close(fig)
@@ -593,23 +658,39 @@ def fig_pareto(c) -> list[Path]:
     written = []
     for ds in sorted({r["dataset"] for r in c.rows}) or [None]:
         path = c.out / "figures" / f"fig-pareto-{ds}.png"
-        rows = _sel(c.rows, dataset=ds, dim=c.dim, perf_k=c.k, perf_bs=c.bs, perf_mode=c.mode,
-                    backend=c.backend)
+        rows = _sel(
+            c.rows,
+            dataset=ds,
+            dim=c.dim,
+            perf_k=c.k,
+            perf_bs=c.bs,
+            perf_mode=c.mode,
+            backend=c.backend,
+        )
         pts = [(r, r.get("perf_median_ms"), r.get(f"oracle_recall@{c.k}")) for r in rows]
         pts = [p for p in pts if p[1] is not None and p[2] is not None]
         if not pts:
-            written.append(_empty(path, c.prov, f"no cells: {ds} d{c.dim} k{c.k} "
-                                                f"bs{c.bs} {c.mode} {c.backend}"))
+            written.append(
+                _empty(
+                    path, c.prov, f"no cells: {ds} d{c.dim} k{c.k} bs{c.bs} {c.mode} {c.backend}"
+                )
+            )
             continue
         fig, ax = plt.subplots(figsize=(6.5, 4.2))
         for algo in [a for a in ALGO_LABEL if any(p[0]["algo"] == a for p in pts)]:
             sub = [p for p in pts if p[0]["algo"] == algo]
-            ax.scatter([p[1] for p in sub], [p[2] for p in sub], s=38,
-                       label=ALGO_LABEL.get(algo, algo))
+            ax.scatter(
+                [p[1] for p in sub], [p[2] for p in sub], s=38, label=ALGO_LABEL.get(algo, algo)
+            )
             for r, x, y in sub:
-                ax.annotate(f"{r['sweep']} {r['params'] if r['params'] != '{}' else ''}",
-                            (x, y), fontsize=6, xytext=(3, 3),
-                            textcoords="offset points", color="0.4")
+                ax.annotate(
+                    f"{r['sweep']} {r['params'] if r['params'] != '{}' else ''}",
+                    (x, y),
+                    fontsize=6,
+                    xytext=(3, 3),
+                    textcoords="offset points",
+                    color="0.4",
+                )
         ax.set_xlabel(f"$t_{{med}}$ (ms), {c.mode}, $B={c.bs}$")
         ax.set_ylabel(f"Recall@{c.k} vs the exact filtered oracle")
         ax.set_title(f"Recall–latency Pareto, {DATASET_LABEL.get(ds, ds)} d{c.dim}")
@@ -629,8 +710,7 @@ def fig_qps_recall(c) -> list[Path]:
     fig, ax = plt.subplots(figsize=(6.5, 4.2))
     for algo in [a for a in ALGO_LABEL if any(p[0]["algo"] == a for p in pts)]:
         sub = [p for p in pts if p[0]["algo"] == algo]
-        ax.scatter([p[2] for p in sub], [p[1] for p in sub], s=38,
-                   label=ALGO_LABEL.get(algo, algo))
+        ax.scatter([p[2] for p in sub], [p[1] for p in sub], s=38, label=ALGO_LABEL.get(algo, algo))
     ax.set_xlabel(f"Recall@{c.k}")
     ax.set_ylabel(f"QPS (closed loop, $B={c.bs}$, {c.mode})")
     ax.set_title(f"QPS vs recall, d{c.dim}")
@@ -661,8 +741,10 @@ def fig_batch_scaling(c) -> list[Path]:
     ax.set_yscale("log")
     ax.set_xlabel("batch size $B$")
     ax.set_ylabel("amortised ms / query")
-    ax.set_title(f"Batch scaling, {DATASET_LABEL.get(ds, ds)} d{c.dim}, K={c.k}, {c.mode}"
-                 "\n(error bars = window spread; $B=1$ is noise-dominated on this box)")
+    ax.set_title(
+        f"Batch scaling, {DATASET_LABEL.get(ds, ds)} d{c.dim}, K={c.k}, {c.mode}"
+        "\n(error bars = window spread; $B=1$ is noise-dominated on this box)"
+    )
     ax.grid(alpha=0.3, which="both")
     ax.legend(fontsize=8)
     return [_figure(path, fig, c.prov)]
@@ -678,8 +760,13 @@ def fig_deep_sweep(c) -> list[Path]:
             groups[(r["dataset"], r["sweep"], r["algo"], name)].append((value, r))
     swept = {g: v for g, v in groups.items() if len({x for x, _ in v}) > 1}
     if not swept:
-        return [_empty(c.out / "figures" / "fig-deep-sweep.png", c.prov,
-                       "no parameter is swept over more than one value in these records")]
+        return [
+            _empty(
+                c.out / "figures" / "fig-deep-sweep.png",
+                c.prov,
+                "no parameter is swept over more than one value in these records",
+            )
+        ]
     for (ds, sw, algo, name), items in sorted(swept.items()):
         fig, ax = plt.subplots(figsize=(6.5, 4.2))
         ax2 = ax.twinx()
@@ -696,42 +783,73 @@ def fig_deep_sweep(c) -> list[Path]:
                 lo.append(None if v is None else v["value"] - v["lo"])
                 hi.append(None if v is None else v["hi"] - v["value"])
             if any(y is not None for y in ys):
-                handles.append(axis.errorbar(xs, ys, yerr=[lo, hi], marker=marker, capsize=3,
-                                             color=colour, linestyle=style, label=lbl))
+                handles.append(
+                    axis.errorbar(
+                        xs,
+                        ys,
+                        yerr=[lo, hi],
+                        marker=marker,
+                        capsize=3,
+                        color=colour,
+                        linestyle=style,
+                        label=lbl,
+                    )
+                )
             axis.set_ylabel(lbl, color=colour)
             axis.tick_params(axis="y", labelcolor=colour)
         ax.legend(handles=handles, fontsize=8, loc="best")
         ax.set_xlabel(name)
         n_seeds = len({r.get("seed") for _, r in items})
-        ax.set_title(f"{ALGO_LABEL.get(algo, algo)} on {DATASET_LABEL.get(ds, ds)} {sw}: "
-                     f"{name} sweep\n(whiskers = min--max over {n_seeds} seed(s))")
+        ax.set_title(
+            f"{ALGO_LABEL.get(algo, algo)} on {DATASET_LABEL.get(ds, ds)} {sw}: "
+            f"{name} sweep\n(whiskers = min--max over {n_seeds} seed(s))"
+        )
         ax.grid(alpha=0.3)
-        written.append(_figure(
-            c.out / "figures" / f"fig-deep-sweep-{ds}-{sw}-{algo}-{name}.png", fig, c.prov))
+        written.append(
+            _figure(c.out / "figures" / f"fig-deep-sweep-{ds}-{sw}-{algo}-{name}.png", fig, c.prov)
+        )
     return written
 
 
 def fig_latency_violin(c) -> list[Path]:
     path = c.out / "figures" / "fig-latency-violin.png"
-    sel = [s for s in c.samples
-           if s.get("k") == c.k and s.get("bs") == c.bs and s.get("mode") == c.mode
-           and (c.dim is None or s.get("dim") == c.dim) and s.get("ms")]
+    sel = [
+        s
+        for s in c.samples
+        if s.get("k") == c.k
+        and s.get("bs") == c.bs
+        and s.get("mode") == c.mode
+        and (c.dim is None or s.get("dim") == c.dim)
+        and s.get("ms")
+    ]
     if not sel:
-        return [_empty(path, c.prov,
-                       f"no samples sidecar rows at k={c.k} bs={c.bs} mode={c.mode}")]
-    sel = sorted(sel, key=lambda s: (s["dataset"], s["algo"], s["backend"],
-                                     json.dumps(s.get("params"), sort_keys=True)))
+        return [_empty(path, c.prov, f"no samples sidecar rows at k={c.k} bs={c.bs} mode={c.mode}")]
+    sel = sorted(
+        sel,
+        key=lambda s: (
+            s["dataset"],
+            s["algo"],
+            s["backend"],
+            json.dumps(s.get("params"), sort_keys=True),
+        ),
+    )
     fig, ax = plt.subplots(figsize=(max(6.5, 0.8 * len(sel)), 4.4))
     ax.violinplot([s["ms"] for s in sel], showmedians=True, widths=0.85)
     ax.set_xticks(range(1, len(sel) + 1))
     ax.set_xticklabels(
-        [f"{s['dataset'][:4]}\n{ALGO_LABEL.get(s['algo'], s['algo'])}\n{s['backend']}"
-         + (f"\n{json.dumps(s['params'])}" if s.get("params") else "")
-         for s in sel], fontsize=6)
+        [
+            f"{s['dataset'][:4]}\n{ALGO_LABEL.get(s['algo'], s['algo'])}\n{s['backend']}"
+            + (f"\n{json.dumps(s['params'])}" if s.get("params") else "")
+            for s in sel
+        ],
+        fontsize=6,
+    )
     ax.set_ylabel("per-call latency (ms)")
     ax.set_yscale("log")
-    ax.set_title(f"Per-call latency distribution, K={c.k}, $B={c.bs}$, {c.mode} "
-                 "(the chosen timing window's per-call vector)")
+    ax.set_title(
+        f"Per-call latency distribution, K={c.k}, $B={c.bs}$, {c.mode} "
+        "(the chosen timing window's per-call vector)"
+    )
     ax.grid(alpha=0.3, axis="y")
     return [_figure(path, fig, c.prov)]
 
@@ -773,7 +891,7 @@ def methodology(c) -> list[Path]:
         "\\texttt{unstable}.",
         f"\\item \\textbf{{Режимы.}} {', '.join(run.MODES)}: \\texttt{{eager}} — число, "
         "сопоставимое с обеими статьями, \\texttt{graph} "
-        "(\\texttt{torch.compile(mode=\"reduce-overhead\", dynamic=False, fullgraph=True)}) "
+        '(\\texttt{torch.compile(mode="reduce-overhead", dynamic=False, fullgraph=True)}) '
         "— приводится рядом, никогда вместо. Захват графа проверяется: "
         "\\texttt{cudagraph\\_skips} обязан быть 0, иначе ячейка — ошибка, а не число.",
         f"\\item \\textbf{{Качество.}} Один проход в режиме eager при "
@@ -792,7 +910,9 @@ def methodology(c) -> list[Path]:
     tex = (
         _banner(c.prov, c.results_dir)
         + "% Для \\section{Методология замеров скорости и памяти} (docs/thesis/main.tex).\n"
-        + "\\begin{itemize}\n" + "\n".join("    " + b for b in body) + "\n\\end{itemize}\n"
+        + "\\begin{itemize}\n"
+        + "\n".join("    " + b for b in body)
+        + "\n\\end{itemize}\n"
     )
     return [_write(c.out / "methodology.tex", tex)]
 
@@ -808,8 +928,7 @@ def coverage(c) -> list[Path]:
         f"(window spread or clock drift): {p['unstable']}",
         f"- schema_version: {p['schema_versions']}  |  code_version: {p['code_versions']}",
         f"- runs (commit, branch): {p['runs']}",
-        f"- gpu: {p['gpus']}  host: {p['hosts']}  window: {p['started'][0]} .. "
-        f"{p['started'][1]}",
+        f"- gpu: {p['gpus']}  host: {p['hosts']}  window: {p['started'][0]} .. {p['started'][1]}",
         "",
         "## Citability (CLAUDE.md rule 2)",
         "",
@@ -819,8 +938,12 @@ def coverage(c) -> list[Path]:
     else:
         lines += ["**NOT CITABLE.** Every artifact carries the marker. Reasons:", ""]
         lines += [f"- {b}" for b in p["blockers"]]
-        lines += ["", "These records predate the D1 campaign; they come from C4's gate run "
-                  "and C5's one-cell check and are evidence about the harness, not results.", ""]
+        lines += [
+            "",
+            "These records predate the D1 campaign; they come from C4's gate run "
+            "and C5's one-cell check and are evidence about the harness, not results.",
+            "",
+        ]
     lines += [
         "## Selection used by the tables",
         "",
@@ -836,37 +959,60 @@ def coverage(c) -> list[Path]:
     ]
     groups = defaultdict(lambda: [set(), Counter()])
     for r in c.recs:
-        key = (r["dataset"], r["dim"], r["suite"], r["filter_kind"], r["sweep"], r["algo"],
-               r["backend"], json.dumps(r["params"], sort_keys=True))
+        key = (
+            r["dataset"],
+            r["dim"],
+            r["suite"],
+            r["filter_kind"],
+            r["sweep"],
+            r["algo"],
+            r["backend"],
+            json.dumps(r["params"], sort_keys=True),
+        )
         groups[key][0].add(r["seed"])
         groups[key][1][r.get("status", "ok")] += 1
     for key in sorted(groups, key=str):
         seeds, status = groups[key]
-        lines.append("| " + " | ".join(
-            [*(str(x) for x in key), str(sorted(seeds)), str(dict(status))]) + " |")
+        lines.append(
+            "| "
+            + " | ".join([*(str(x) for x in key), str(sorted(seeds)), str(dict(status))])
+            + " |"
+        )
     failed = [r for r in c.recs if r.get("status") == "failed"]
     partial = [r for r in c.recs if r.get("status") == "partial"]
     lines += ["", "## Failed cells (excluded from every number)", ""]
-    lines += [f"- `{ {k: r[k] for k in records.KEY_FIELDS} }` — stage `{r.get('stage')}`: "
-              f"{(r.get('error') or '').splitlines()[-1][:160] if r.get('error') else '?'}"
-              for r in failed] or ["none"]
+    lines += [
+        f"- `{ {k: r[k] for k in records.KEY_FIELDS} }` — stage `{r.get('stage')}`: "
+        f"{(r.get('error') or '').splitlines()[-1][:160] if r.get('error') else '?'}"
+        for r in failed
+    ] or ["none"]
     lines += ["", "## Partial records (marked `*`)", ""]
-    lines += [f"- `{ {k: r[k] for k in records.KEY_FIELDS} }` — {r.get('partial_reasons')}"
-              for r in partial] or ["none"]
+    lines += [
+        f"- `{ {k: r[k] for k in records.KEY_FIELDS} }` — {r.get('partial_reasons')}"
+        for r in partial
+    ] or ["none"]
     unstable = [(r, e) for r in c.recs for e in (r.get("perf") or []) if e.get("unstable")]
     lines += ["", f"## Unstable perf variants (marked `†`): {len(unstable)}", ""]
-    lines += [f"- {r['dataset']} {r['algo']}/{r['backend']} k={e['k']} bs={e['bs']} "
-              f"{e['mode']}: spread {e['spread'] * 100:.1f}%" for r, e in unstable[:40]] or ["none"]
+    lines += [
+        f"- {r['dataset']} {r['algo']}/{r['backend']} k={e['k']} bs={e['bs']} "
+        f"{e['mode']}: spread {e['spread'] * 100:.1f}%"
+        for r, e in unstable[:40]
+    ] or ["none"]
     if len(unstable) > 40:
         lines.append(f"- ... {len(unstable) - 40} more")
     lines += ["", "## Artifacts", ""]
     lines += [f"- `{q.relative_to(c.out)}`" for q in sorted(c.written)]
-    lines += ["", "## Clock estimator", "",
-              "Latency artifacts use the per-variant under-load `perf[].sm_mhz`. "
-              "Idle samples (`env.sm_mhz_idle`, and the schema-1 `env.sm_mhz`, which is a "
-              "whole-run median dominated by idle) are provenance only and are never "
-              "compared with an under-load sample — the error that made 92 of 99 of C4's "
-              "latency rows appear to fail.", ""]
+    lines += [
+        "",
+        "## Clock estimator",
+        "",
+        "Latency artifacts use the per-variant under-load `perf[].sm_mhz`. "
+        "Idle samples (`env.sm_mhz_idle`, and the schema-1 `env.sm_mhz`, which is a "
+        "whole-run median dominated by idle) are provenance only and are never "
+        "compared with an under-load sample — the error that made 92 of 99 of C4's "
+        "latency rows appear to fail.",
+        "",
+    ]
     return [_write(c.out / "report.md", "\n".join(lines) + "\n")]
 
 
@@ -908,8 +1054,9 @@ class Ctx:
             setattr(self, k, v)
 
 
-def generate(results_dir: Path, out: Path, *, gate: str | None = None,
-             only: tuple[str, ...] = (), **sel: Any) -> Ctx:
+def generate(
+    results_dir: Path, out: Path, *, gate: str | None = None, only: tuple[str, ...] = (), **sel: Any
+) -> Ctx:
     c = Ctx(results_dir, out, gate, **sel)
     for name in only or tuple(ARTIFACTS):
         c.written += ARTIFACTS[name](c)
@@ -920,39 +1067,72 @@ def generate(results_dir: Path, out: Path, *, gate: str | None = None,
 @click.command()
 @click.argument("results", default="results")
 @click.option("--out", default=None, help="output directory [default: <results>/report]")
-@click.option("--gate", default=None,
-              help="the roadmap step whose gate is green for these records (e.g. D1). Without "
-                   "it every artifact is marked NOT CITABLE; it cannot override evidence.")
-@click.option("--only", multiple=True, type=click.Choice(sorted(ARTIFACTS)),
-              help="emit only these artifacts (report.md is always written)")
+@click.option(
+    "--gate",
+    default=None,
+    help="the roadmap step whose gate is green for these records (e.g. D1). Without "
+    "it every artifact is marked NOT CITABLE; it cannot override evidence.",
+)
+@click.option(
+    "--only",
+    multiple=True,
+    type=click.Choice(sorted(ARTIFACTS)),
+    help="emit only these artifacts (report.md is always written)",
+)
 @click.option("--dim", default=128, show_default=True, type=int)
 @click.option("--k", default=100, show_default=True, type=int)
 @click.option("--bs", default=1, show_default=True, type=int, help="batch size for the tables")
-@click.option("--compare-bs", default=16, show_default=True, type=int,
-              help="batch size of the paper comparison table (H §2.7 compares at B=16)")
+@click.option(
+    "--compare-bs",
+    default=16,
+    show_default=True,
+    type=int,
+    help="batch size of the paper comparison table (H §2.7 compares at B=16)",
+)
 @click.option("--mode", default="eager", type=click.Choice(("eager", "graph")), show_default=True)
 @click.option("--backend", default="triton", show_default=True)
 @click.option("--sweep", default=None, help="narrow the batch-scaling table to one condition")
-@click.option("--batch-dataset", default=None,
-              help="dataset of tab:batch_scaling [default: the best-covered one]")
-@click.option("--budget-ms", "budgets", multiple=True, type=float,
-              default=(0.5, 1.0, 2.0, 5.0), show_default=True)
-def report(results, out, gate, only, dim, k, bs, compare_bs, mode, backend, sweep,
-           batch_dataset, budgets) -> None:
+@click.option(
+    "--batch-dataset",
+    default=None,
+    help="dataset of tab:batch_scaling [default: the best-covered one]",
+)
+@click.option(
+    "--budget-ms",
+    "budgets",
+    multiple=True,
+    type=float,
+    default=(0.5, 1.0, 2.0, 5.0),
+    show_default=True,
+)
+def report(
+    results, out, gate, only, dim, k, bs, compare_bs, mode, backend, sweep, batch_dataset, budgets
+) -> None:
     """Thesis and paper tables and figures from the records (roadmap D4, H §6 WP-6)."""
     results_dir = Path(results)
     if not results_dir.is_dir():
         raise click.ClickException(f"{results_dir}: not a directory")
     c = generate(
-        results_dir, Path(out) if out else results_dir / "report", gate=gate, only=only,
-        dim=dim, k=k, bs=bs, compare_bs=compare_bs, mode=mode, backend=backend, sweep=sweep,
-        batch_dataset=batch_dataset, budgets=tuple(budgets),
+        results_dir,
+        Path(out) if out else results_dir / "report",
+        gate=gate,
+        only=only,
+        dim=dim,
+        k=k,
+        bs=bs,
+        compare_bs=compare_bs,
+        mode=mode,
+        backend=backend,
+        sweep=sweep,
+        batch_dataset=batch_dataset,
+        budgets=tuple(budgets),
     )
     for path in c.written:
         click.echo(str(path))
-    click.echo(f"{len(c.written)} artifacts from {c.prov['n_records']} records — "
-               + ("CITABLE" if c.prov["citable"] else "NOT CITABLE: " + "; ".join(
-                   c.prov["blockers"])))
+    click.echo(
+        f"{len(c.written)} artifacts from {c.prov['n_records']} records — "
+        + ("CITABLE" if c.prov["citable"] else "NOT CITABLE: " + "; ".join(c.prov["blockers"]))
+    )
 
 
 __all__ = ["ARTIFACTS", "generate", "provenance", "report"]
