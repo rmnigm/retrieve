@@ -132,9 +132,7 @@ def _spherical_kmeans(
     return centroids, assignment
 
 
-def _build_csr_members(
-    assignment: torch.Tensor, k: int
-) -> tuple[torch.Tensor, torch.Tensor]:
+def _build_csr_members(assignment: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
     """Build CSR (offsets, members) for a per-item cluster assignment.
 
     ``assignment`` is ``[N_real]`` int32 with values in ``[0, k)``. The members
@@ -195,7 +193,11 @@ def cmd_cluster(args) -> int:
     print(f"  n_real={n_real:,} dim={d} k={k}", flush=True)
 
     centroids, assignment = _spherical_kmeans(
-        items, k, n_iter=args.n_iter, seed=args.seed, device=device,
+        items,
+        k,
+        n_iter=args.n_iter,
+        seed=args.seed,
+        device=device,
     )
 
     cluster_offsets, cluster_members = _build_csr_members(assignment.cpu(), k)
@@ -270,8 +272,7 @@ def cmd_synth(args) -> int:
     n_synth = args.target_n - n_real
     n_total = args.target_n
     print(
-        f"  n_real={n_real:,} dim={dim} target_n={args.target_n:,} "
-        f"n_synth={n_synth:,}",
+        f"  n_real={n_real:,} dim={dim} target_n={args.target_n:,} n_synth={n_synth:,}",
         flush=True,
     )
 
@@ -306,9 +307,7 @@ def cmd_synth(args) -> int:
         f"≈ {narrow_bytes / 1e9:.2f} GB",
         flush=True,
     )
-    target_narrow = torch.empty(
-        (n_total, C_NARROW, A_MAX_NARROW), dtype=torch.long
-    )
+    target_narrow = torch.empty((n_total, C_NARROW, A_MAX_NARROW), dtype=torch.long)
     target_narrow[:n_real] = source_narrow
 
     def _gen_synth_block(
@@ -316,17 +315,13 @@ def cmd_synth(args) -> int:
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Returns (embs [n_block, D] fp16 cpu, parent_a_ids [n_block] int64 cpu,
         parent_b_ids [n_block] int64 cpu)."""
-        cluster_ids = torch.multinomial(
-            cluster_p, n_block, replacement=True, generator=g_dev
-        ).to(torch.int64)
+        cluster_ids = torch.multinomial(cluster_p, n_block, replacement=True, generator=g_dev).to(
+            torch.int64
+        )
         c_off = cluster_offsets[cluster_ids]
         c_sz = (cluster_offsets[cluster_ids + 1] - c_off).to(torch.float32)
-        rand_a = (
-            torch.rand(n_block, generator=g_dev, device=device) * c_sz
-        ).to(torch.int64)
-        rand_b = (
-            torch.rand(n_block, generator=g_dev, device=device) * (c_sz - 1)
-        ).to(torch.int64)
+        rand_a = (torch.rand(n_block, generator=g_dev, device=device) * c_sz).to(torch.int64)
+        rand_b = (torch.rand(n_block, generator=g_dev, device=device) * (c_sz - 1)).to(torch.int64)
         rand_b = torch.where(rand_b >= rand_a, rand_b + 1, rand_b)
         parent_a = cluster_members[c_off + rand_a]
         parent_b = cluster_members[c_off + rand_b]
@@ -350,8 +345,7 @@ def cmd_synth(args) -> int:
     shard_idx = 0
 
     print(
-        f"STEP synthesize {n_synth:,} items via {args.method!r} "
-        f"(shard_size={args.shard_size:,})",
+        f"STEP synthesize {n_synth:,} items via {args.method!r} (shard_size={args.shard_size:,})",
         flush=True,
     )
     pbar = tqdm(total=n_synth, desc="synth", unit="items")
@@ -388,9 +382,7 @@ def cmd_synth(args) -> int:
 
         shard_name = f"text_emb_shard_{shard_idx:05d}.pt"
         torch.save(shard_buf, output_content / shard_name)
-        shards_meta.append(
-            {"filename": shard_name, "start_id": item_offset, "n_rows": shard_rows}
-        )
+        shards_meta.append({"filename": shard_name, "start_id": item_offset, "n_rows": shard_rows})
         print(
             f"  wrote {shard_name} rows=[{item_offset}, {end}) "
             f"({shard_rows * dim * 2 / 1e9:.2f} GB)",
@@ -483,30 +475,35 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     def _add_common(p):
-        p.add_argument("--source-dir", type=str, required=True,
-                       help="top-level source dataset dir (where heldout.parquet, "
-                            "item_attrs_*.pt, content/ live)")
-        p.add_argument("--source-content-subdir", type=str, default="content",
-                       help="which Matryoshka variant to use "
-                            "(content / content_d128 / content_d64)")
+        p.add_argument(
+            "--source-dir",
+            type=str,
+            required=True,
+            help="top-level source dataset dir (where heldout.parquet, "
+            "item_attrs_*.pt, content/ live)",
+        )
+        p.add_argument(
+            "--source-content-subdir",
+            type=str,
+            default="content",
+            help="which Matryoshka variant to use (content / content_d128 / content_d64)",
+        )
         p.add_argument("--seed", type=int, default=0)
         p.add_argument("--device", type=str, default="cuda")
 
     def _add_cluster_args(p):
-        p.add_argument("--n-clusters", type=int, default=0,
-                       help="0 → int(sqrt(N_real))")
+        p.add_argument("--n-clusters", type=int, default=0, help="0 → int(sqrt(N_real))")
         p.add_argument("--n-iter", type=int, default=20)
 
     def _add_synth_args(p):
         p.add_argument("--output-dir", type=str, required=True)
-        p.add_argument("--target-n", type=int, required=True,
-                       help=f"total catalog size (max {MAX_TARGET_N:,})")
-        p.add_argument("--method", type=str, default="slerp",
-                       choices=("slerp", "gaussian"))
+        p.add_argument(
+            "--target-n", type=int, required=True, help=f"total catalog size (max {MAX_TARGET_N:,})"
+        )
+        p.add_argument("--method", type=str, default="slerp", choices=("slerp", "gaussian"))
         p.add_argument("--alpha-lo", type=float, default=0.30)
         p.add_argument("--alpha-hi", type=float, default=0.70)
-        p.add_argument("--sigma", type=float, default=0.10,
-                       help="only used when --method gaussian")
+        p.add_argument("--sigma", type=float, default=0.10, help="only used when --method gaussian")
         p.add_argument("--shard-size", type=int, default=8_000_000)
 
     sp_cl = sub.add_parser("cluster", help="spherical k-means on source text_emb")

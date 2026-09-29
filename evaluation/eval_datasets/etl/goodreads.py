@@ -192,7 +192,7 @@ def cmd_download(args) -> int:
         sha = file_hexdigest(dest, "sha256")
         manifest_lines.append(f"{name}  {size}  {sha}")
         print(
-            f"DONE [{i}/{len(files)}] {name} {fmt(size)} in " f"{time.monotonic() - t0:.0f}s",
+            f"DONE [{i}/{len(files)}] {name} {fmt(size)} in {time.monotonic() - t0:.0f}s",
             flush=True,
         )
 
@@ -208,7 +208,7 @@ def cmd_download(args) -> int:
             print(f"ERROR gzip {f.name}: {e}", flush=True)
             fail += 1
     print(
-        f"ALL DONE download in {time.monotonic() - overall_t0:.0f}s, " f"gzip failures={fail}",
+        f"ALL DONE download in {time.monotonic() - overall_t0:.0f}s, gzip failures={fail}",
         flush=True,
     )
     return 0 if fail == 0 else 1
@@ -416,9 +416,9 @@ def cmd_prep(args) -> int:
         pl.col("dt").dt.epoch(time_unit="s").cast(pl.Int64).alias("ts"),
     )
 
-    n_after_parse = inter.filter(pl.col("dt").is_not_null()).select(pl.len()).collect(
-        engine="streaming"
-    ).item()
+    n_after_parse = (
+        inter.filter(pl.col("dt").is_not_null()).select(pl.len()).collect(engine="streaming").item()
+    )
     parse_fail = n_pre_parse - n_after_parse
     parse_fail_pct = (100.0 * parse_fail / n_pre_parse) if n_pre_parse else 0.0
     log["parse_fail_pct"] = round(parse_fail_pct, 4)
@@ -566,10 +566,9 @@ def cmd_prep(args) -> int:
     # joins lazily through the streaming engine triggered list-op explosions
     # past the 129 GB cgroup limit.
     print("STEP compose train/val/test parquets", flush=True)
-    train_df = (
-        train_lf.select("uid", pl.col("item_id").list.tail(max_seq).alias("item_ids"))
-        .collect(engine="streaming")
-    )
+    train_df = train_lf.select(
+        "uid", pl.col("item_id").list.tail(max_seq).alias("item_ids")
+    ).collect(engine="streaming")
     print(f"  collected train_df (n_users={train_df.height})", flush=True)
     val_df = val_lf.collect(engine="streaming")
     print(f"  collected val_df (n_users={val_df.height})", flush=True)
@@ -579,14 +578,11 @@ def cmd_prep(args) -> int:
     train_df.select("item_ids").write_parquet(output / "train.parquet", compression="zstd")
     print(f"  wrote train.parquet (n_users={train_df.height})", flush=True)
 
-    val_join = (
-        train_df.join(
-            val_df.select("uid", pl.col("item_id").alias("targets")),
-            on="uid",
-            how="inner",
-        )
-        .select("item_ids", "targets")
-    )
+    val_join = train_df.join(
+        val_df.select("uid", pl.col("item_id").alias("targets")),
+        on="uid",
+        how="inner",
+    ).select("item_ids", "targets")
     val_join.write_parquet(output / "val.parquet", compression="zstd")
     print(f"  wrote val.parquet (n_users={val_join.height})", flush=True)
 
@@ -655,13 +651,35 @@ FORMAT_BUCKETS = ["paperback", "hardcover", "ebook", "audio", "other"]
 
 # Wide-shelf blocklist: shelves that say "I want to read this", "I own this",
 # or "this is a book", carrying no topical signal.
-SHELF_BLOCKLIST = frozenset({
-    "to-read", "currently-reading", "owned", "owned-books", "books-i-own",
-    "default", "favorites", "favourites", "kindle", "ebook", "audiobook",
-    "library", "library-book", "wishlist", "want-to-read", "dnf",
-    "did-not-finish", "unread", "read", "my-books", "my-library",
-    "all-books", "books", "fiction", "non-fiction",
-})
+SHELF_BLOCKLIST = frozenset(
+    {
+        "to-read",
+        "currently-reading",
+        "owned",
+        "owned-books",
+        "books-i-own",
+        "default",
+        "favorites",
+        "favourites",
+        "kindle",
+        "ebook",
+        "audiobook",
+        "library",
+        "library-book",
+        "wishlist",
+        "want-to-read",
+        "dnf",
+        "did-not-finish",
+        "unread",
+        "read",
+        "my-books",
+        "my-library",
+        "all-books",
+        "books",
+        "fiction",
+        "non-fiction",
+    }
+)
 
 # Regex drops applied AFTER the lowercase-name lookup against SHELF_BLOCKLIST.
 SHELF_RE_DROPS = (
@@ -696,12 +714,7 @@ def _format_to_bucket(s: str | None) -> int:
         return FORMAT_BUCKETS.index("ebook")
     if "hardcover" in n or "hardback" in n or "library binding" in n:
         return FORMAT_BUCKETS.index("hardcover")
-    if (
-        "paperback" in n
-        or "softcover" in n
-        or "mass market" in n
-        or n in {"paper", "trade pb"}
-    ):
+    if "paperback" in n or "softcover" in n or "mass market" in n or n in {"paper", "trade pb"}:
         return FORMAT_BUCKETS.index("paperback")
     return FORMAT_BUCKETS.index("other")
 
@@ -843,16 +856,12 @@ def cmd_attrs(args) -> int:
         )
         .explode("authors_top2")
         .filter(pl.col("authors_top2").is_not_null())
-        .with_columns(
-            pl.col("authors_top2").struct.field("author_id").alias("author_id_str")
-        )
+        .with_columns(pl.col("authors_top2").struct.field("author_id").alias("author_id_str"))
         .filter(pl.col("author_id_str").is_not_null() & (pl.col("author_id_str") != ""))
     )
     # global author frequency (only counting in-catalog editions)
     auth_freq = (
-        ab_pairs.group_by("author_id_str")
-        .agg(pl.len().alias("freq"))
-        .sort("freq", descending=True)
+        ab_pairs.group_by("author_id_str").agg(pl.len().alias("freq")).sort("freq", descending=True)
     )
     author_ids_str = auth_freq["author_id_str"].to_list()
     # 0-indexed dense ids; -1 reserved as padding sentinel.
@@ -902,9 +911,7 @@ def cmd_attrs(args) -> int:
         )
     )
     pb = pb.with_columns(
-        pl.col("year_int")
-        .map_elements(_year_to_bucket, return_dtype=pl.Int64)
-        .alias("year_id")
+        pl.col("year_int").map_elements(_year_to_bucket, return_dtype=pl.Int64).alias("year_id")
     ).select("book_id", "item_id", "lang_id", "format_id", "year_id")
 
     # Top-2 author ids per book.
@@ -961,9 +968,11 @@ def cmd_attrs(args) -> int:
     #   (already encoded — lower id = more frequent).
 
     # genre roll-up
-    g_explode = pb.select("item_id", "genre_ids", "genre_counts").explode(
-        ["genre_ids", "genre_counts"]
-    ).filter(pl.col("genre_ids").is_not_null())
+    g_explode = (
+        pb.select("item_id", "genre_ids", "genre_counts")
+        .explode(["genre_ids", "genre_counts"])
+        .filter(pl.col("genre_ids").is_not_null())
+    )
     g_per_work = (
         g_explode.group_by(["item_id", "genre_ids"])
         .agg(pl.col("genre_counts").sum().alias("total"))
@@ -974,8 +983,10 @@ def cmd_attrs(args) -> int:
 
     # author roll-up: union, dedup, sort by author_id asc (smaller id = more-frequent),
     # take 2.
-    a_explode = pb.select("item_id", "author_ids").explode("author_ids").filter(
-        pl.col("author_ids").is_not_null()
+    a_explode = (
+        pb.select("item_id", "author_ids")
+        .explode("author_ids")
+        .filter(pl.col("author_ids").is_not_null())
     )
     a_per_work = (
         a_explode.unique(subset=["item_id", "author_ids"])
@@ -1009,9 +1020,7 @@ def cmd_attrs(args) -> int:
     print("STEP assemble item_attrs_narrow", flush=True)
     # Start from a frame of every catalog item_id (so works with no editions
     # in-catalog still get a row of -1s — should be 0 in practice).
-    all_items = pl.DataFrame(
-        {"item_id": list(range(1, n_items + 1))}, schema={"item_id": pl.Int64}
-    )
+    all_items = pl.DataFrame({"item_id": list(range(1, n_items + 1))}, schema={"item_id": pl.Int64})
     narrow = (
         all_items.join(g_per_work, on="item_id", how="left")
         .join(c1, on="item_id", how="left")
@@ -1064,9 +1073,7 @@ def cmd_attrs(args) -> int:
     print(f"  per-clause coverage = {coverage}", flush=True)
 
     torch.save(narrow_t, output / "item_attrs_narrow.pt")
-    clause_is_reverse_narrow = torch.tensor(
-        [False, True, False, False, False], dtype=torch.bool
-    )
+    clause_is_reverse_narrow = torch.tensor([False, True, False, False, False], dtype=torch.bool)
     torch.save(clause_is_reverse_narrow, output / "clause_is_reverse_narrow.pt")
     print(
         f"  wrote item_attrs_narrow.pt {tuple(narrow_t.shape)} + clause_is_reverse_narrow.pt",
@@ -1093,11 +1100,13 @@ def cmd_attrs(args) -> int:
     # Apply Python predicate via map_elements — the regex+blocklist is awkward
     # to express purely in polars.  ~5M rows after explode; ~30 s on the user's
     # box, fine for one-shot.
-    shelves_long = shelves_long.with_columns(
-        pl.col("name")
-        .map_elements(_shelf_keep, return_dtype=pl.Boolean)
-        .alias("keep")
-    ).filter(pl.col("keep")).drop("keep")
+    shelves_long = (
+        shelves_long.with_columns(
+            pl.col("name").map_elements(_shelf_keep, return_dtype=pl.Boolean).alias("keep")
+        )
+        .filter(pl.col("keep"))
+        .drop("keep")
+    )
     # lower-case the surviving names (blocklist matched lowercase but the raw
     # name might mix case; canonicalize for the per-work group-by).
     shelves_long = shelves_long.with_columns(pl.col("name").str.to_lowercase().alias("name"))
@@ -1110,12 +1119,9 @@ def cmd_attrs(args) -> int:
     )
     # Build wide-shelf vocab from the union of all per-work top-32 names
     # (sorted by global aggregated count desc; 0-indexed dense ids).
-    work_shelf_top = (
-        work_shelf.group_by("item_id", maintain_order=True)
-        .agg(
-            pl.col("name").head(WIDE_BAG_SIZE).alias("names"),
-            pl.col("count").head(WIDE_BAG_SIZE).alias("counts"),
-        )
+    work_shelf_top = work_shelf.group_by("item_id", maintain_order=True).agg(
+        pl.col("name").head(WIDE_BAG_SIZE).alias("names"),
+        pl.col("count").head(WIDE_BAG_SIZE).alias("counts"),
     )
     used_names_freq = (
         work_shelf_top.select(pl.col("names").alias("name"), pl.col("counts").alias("count"))

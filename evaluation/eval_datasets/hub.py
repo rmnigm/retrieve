@@ -28,21 +28,21 @@ from loguru import logger
 # Registry
 
 EVAL_REPOS: dict[str, str] = {
-    "arxiv-papers":      "pinkmeme/eval-arxiv-papers",
-    "yambda-500m":       "pinkmeme/eval-yambda-500m",
-    "yambda-5b":         "pinkmeme/eval-yambda-5b",
+    "arxiv-papers": "pinkmeme/eval-arxiv-papers",
+    "yambda-500m": "pinkmeme/eval-yambda-500m",
+    "yambda-5b": "pinkmeme/eval-yambda-5b",
     "goodreads-work-id": "pinkmeme/eval-goodreads-work-id",
-    "yfcc10m":           "pinkmeme/eval-yfcc10m",
-    "pubmed":            "pinkmeme/eval-pubmed",
-    "kuairand":          "pinkmeme/eval-kuairand",
-    "openalex":          "pinkmeme/eval-openalex",
+    "yfcc10m": "pinkmeme/eval-yfcc10m",
+    "pubmed": "pinkmeme/eval-pubmed",
+    "kuairand": "pinkmeme/eval-kuairand",
+    "openalex": "pinkmeme/eval-openalex",
 }
 
 # Upstream raw repos kept here only so their local target dirs are centralized.
 RAW_REPOS: dict[str, tuple[str, str]] = {
     # source -> (repo_id, repo_type)
-    "arxiv":  ("open-index/open-arxiv", "dataset"),
-    "yambda": ("yandex/yambda",         "dataset"),
+    "arxiv": ("open-index/open-arxiv", "dataset"),
+    "yambda": ("yandex/yambda", "dataset"),
     # yfcc10m is fetched over plain HTTPS from dl.fbaipublicfiles.com by
     # `yfcc download`, not from the Hub — it is listed here only so that
     # `raw_dir("yfcc10m")` has a documented home next to the others.
@@ -58,22 +58,22 @@ RAW_REPOS: dict[str, tuple[str, str]] = {
 EVAL_IGNORE_PATTERNS: list[str] = [
     "train.parquet",
     "val.parquet",
-    "papers.parquet",        # arxiv ETL artifact (raw text, used only at encode time)
+    "papers.parquet",  # arxiv ETL artifact (raw text, used only at encode time)
     "book_to_work.parquet",  # goodreads ETL artifact
     "item_attrs_wide.pt",
     "wide_*",
     "*.bak",
     "*.bak.*",
     "gt/**",
-    "gt_*/**",               # dim-suffixed oracle caches (gt_d64, gt_d128, ...)
+    "gt_*/**",  # dim-suffixed oracle caches (gt_d64, gt_d128, ...)
     "checkpoints/**",
-    "evaluate*.json",        # run logs
+    "evaluate*.json",  # run logs
     "eval_arxiv_retrieval.json",
     "train_metrics.json",
     "prep_log.json",
     "*.tmp",
     "__pycache__/**",
-    ".cache/**",             # HF download cache from prior snapshot_download calls
+    ".cache/**",  # HF download cache from prior snapshot_download calls
     ".gitattributes",
     ".git/**",
 ]
@@ -97,6 +97,7 @@ CKPT_ALWAYS_IGNORE: list[str] = [
 
 
 # Path helpers
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]  # evaluation/
@@ -130,6 +131,7 @@ def _require_dataset(dataset: str) -> str:
 
 # Downloads
 
+
 def download_eval_dataset(
     dataset: str,
     *,
@@ -152,8 +154,11 @@ def download_eval_dataset(
         allow = None
     else:
         allow = [
-            "*.json", "*.parquet", "*.pt",
-            "README.md", "manifest.json",
+            "*.json",
+            "*.parquet",
+            "*.pt",
+            "README.md",
+            "manifest.json",
             "content/*",
         ]
         if dims:
@@ -207,8 +212,12 @@ def download_raw(
     local.mkdir(parents=True, exist_ok=True)
 
     logger.info("snapshot_download {} -> {} (allow={})", repo_id, local, allow_patterns)
-    kwargs: dict = {"repo_id": repo_id, "repo_type": repo_type, "local_dir": str(local),
-                    "allow_patterns": allow_patterns}
+    kwargs: dict = {
+        "repo_id": repo_id,
+        "repo_type": repo_type,
+        "local_dir": str(local),
+        "allow_patterns": allow_patterns,
+    }
     if max_workers is not None:
         kwargs["max_workers"] = max_workers
     snapshot_download(**kwargs)
@@ -233,6 +242,7 @@ def download_raw_file(source: str, filename: str) -> Path:
 
 
 # Uploads
+
 
 def _ignored(rel: str, name: str, patterns: list[str]) -> bool:
     """Match `rel` (posix relative path) against fnmatch patterns. Handles
@@ -280,7 +290,11 @@ def upload_eval_dataset(
     total_mb = sum(p.stat().st_size for p in files) / (1024 * 1024)
     logger.info(
         "Uploading eval dataset {} ({} files, {:.1f} MB) -> {} (private={})",
-        dataset, len(files), total_mb, repo_id, private,
+        dataset,
+        len(files),
+        total_mb,
+        repo_id,
+        private,
     )
     for p in files:
         logger.info("  + {}", p.relative_to(src))
@@ -337,7 +351,7 @@ def _build_model_card(ckpt_path: Path, repo_id: str, ckpt_id: str, files: list[P
         "\n## Loading\n"
         "```python\n"
         "from eval_datasets.hub import download_checkpoint\n"
-        f'download_checkpoint({repo_id.split("/")[-1].removeprefix("eval-")!r}, {ckpt_id!r})\n'
+        f"download_checkpoint({repo_id.split('/')[-1].removeprefix('eval-')!r}, {ckpt_id!r})\n"
         "```\n"
     )
     return "\n".join(parts)
@@ -370,7 +384,11 @@ def upload_checkpoint(
     total_mb = sum(p.stat().st_size for p in files) / (1024 * 1024)
     logger.info(
         "Uploading checkpoint {} -> {}/checkpoints/{} ({} files, {:.1f} MB)",
-        src, repo_id, ckpt_id, len(files), total_mb,
+        src,
+        repo_id,
+        ckpt_id,
+        len(files),
+        total_mb,
     )
     for p in files:
         logger.info("  + {}", p.relative_to(src))

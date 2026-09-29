@@ -493,9 +493,7 @@ def test_select_pmids_is_exact_seeded_and_order_free():
     keep_perm = common.select_pmids(pmids[perm], 100, seed=0)
     assert set(pmids[keep].tolist()) == set(pmids[perm][keep_perm].tolist())
     # a different seed is a different slice; None / oversize keep everything
-    assert set(pmids[common.select_pmids(pmids, 100, seed=1)].tolist()) != set(
-        pmids[keep].tolist()
-    )
+    assert set(pmids[common.select_pmids(pmids, 100, seed=1)].tolist()) != set(pmids[keep].tolist())
     assert common.select_pmids(pmids, None).all() and common.select_pmids(pmids, 5000).all()
     # spread over the range, not a prefix: both halves are represented
     assert 20 <= (pmids[keep] < 1_000_500).sum() <= 80

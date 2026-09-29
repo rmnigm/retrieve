@@ -196,9 +196,7 @@ def read_spmat(path: Path) -> tuple[np.ndarray, np.ndarray, int]:
 # ----- tag-bag capping (docs/system/datasets.md § yfcc10m) --------------------
 
 
-def build_tag_rank(
-    q_indices: np.ndarray, n_tags: int
-) -> tuple[np.ndarray, np.ndarray]:
+def build_tag_rank(q_indices: np.ndarray, n_tags: int) -> tuple[np.ndarray, np.ndarray]:
     """Dense-remap the tags the queries actually use, most-frequent first.
 
     Returns ``(vocab, rank)`` where ``vocab[d]`` is the upstream tag id of
@@ -339,9 +337,10 @@ def _download_one(url: str, dest: Path, expected: int, log_path: Path) -> bool:
         req.add_header("Range", f"bytes={have}-")
     t0 = time.monotonic()
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp, open(
-            dest, "ab" if have else "wb"
-        ) as out:
+        with (
+            urllib.request.urlopen(req, timeout=120) as resp,
+            open(dest, "ab" if have else "wb") as out,
+        ):
             while chunk := resp.read(1 << 22):
                 out.write(chunk)
     except (urllib.error.URLError, TimeoutError, OSError) as e:
@@ -439,8 +438,12 @@ def cmd_convert(args) -> int:
             "tags_per_query_hist": np.bincount(q_counts).tolist(),
             "unique_query_tags": int(np.unique(q_indices).shape[0]),
         },
-        "gt_filtered": {"n": int(gt_ids.shape[0]), "k": int(gt_ids.shape[1]),
-                        "metric": "squared_l2", "d_max": float(gt_d.max())},
+        "gt_filtered": {
+            "n": int(gt_ids.shape[0]),
+            "k": int(gt_ids.shape[1]),
+            "metric": "squared_l2",
+            "d_max": float(gt_d.max()),
+        },
         "gt_unfiltered": {"n": int(ugt_ids.shape[0]), "k": int(ugt_ids.shape[1])},
     }
     with open(PROCESSED_DIR / "manifest.json", "w") as f:
@@ -719,9 +722,7 @@ def cmd_all(args) -> int:
     rc = cmd_prep(argparse.Namespace(output_dir=args.output_dir))
     if rc:
         return rc
-    return cmd_attrs(
-        argparse.Namespace(output_dir=args.output_dir, max_tags=args.max_tags)
-    )
+    return cmd_attrs(argparse.Namespace(output_dir=args.output_dir, max_tags=args.max_tags))
 
 
 # ----- main -------------------------------------------------------------------

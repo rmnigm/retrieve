@@ -202,23 +202,41 @@ def _other_manifests(api, repo_id: str, prefix: str) -> list[dict]:
     for f in api.list_repo_files(repo_id=repo_id, repo_type="dataset"):
         if not f.endswith("MANIFEST.json") or f.rpartition("/")[0] == prefix:
             continue
-        out.append(json.loads(Path(hf_hub_download(repo_id=repo_id, repo_type="dataset",
-                                                   filename=f)).read_text()))
+        out.append(
+            json.loads(
+                Path(hf_hub_download(repo_id=repo_id, repo_type="dataset", filename=f)).read_text()
+            )
+        )
     return out
 
 
 @click.command()
 @click.option("--repo-id", default=RESULTS_REPO, show_default=True, help="target HF dataset repo")
-@click.option("--results", type=click.Path(path_type=Path), default=EVAL_DIR / "results",
-              help="the results tree to publish")
+@click.option(
+    "--results",
+    type=click.Path(path_type=Path),
+    default=EVAL_DIR / "results",
+    help="the results tree to publish",
+)
 @click.option("--path-in-repo", "prefix", default="", help="subtree in the repo, e.g. d1-a")
-@click.option("--gate", default=None,
-              help="the roadmap step whose gate is green for these records (e.g. D1). Without "
-                   "it the manifest says NOT CITABLE; it cannot override the evidence.")
-@click.option("--private/--public", default=True, show_default=True,
-              help="public is roadmap F4's decision, never a default")
-@click.option("--verify", "do_verify", is_flag=True,
-              help="download the subtree back to a temp dir and check every sha256")
+@click.option(
+    "--gate",
+    default=None,
+    help="the roadmap step whose gate is green for these records (e.g. D1). Without "
+    "it the manifest says NOT CITABLE; it cannot override the evidence.",
+)
+@click.option(
+    "--private/--public",
+    default=True,
+    show_default=True,
+    help="public is roadmap F4's decision, never a default",
+)
+@click.option(
+    "--verify",
+    "do_verify",
+    is_flag=True,
+    help="download the subtree back to a temp dir and check every sha256",
+)
 @click.option("--dry-run", is_flag=True, help="print the listing and the manifest, upload nothing")
 def upload(repo_id, results, prefix, gate, private, do_verify, dry_run) -> None:  # fmt: skip
     """Publish a results tree to a HuggingFace dataset repo, with its provenance."""
@@ -258,7 +276,7 @@ def upload(repo_id, results, prefix, gate, private, do_verify, dry_run) -> None:
         repo_type="dataset",
         operations=ops,
         commit_message=f"results {prefix or 'root'}: {man['n_records']} records, "
-                       f"{'citable' if man['citable'] else 'NOT CITABLE'}",
+        f"{'citable' if man['citable'] else 'NOT CITABLE'}",
     )
     click.echo(f"done: https://huggingface.co/datasets/{repo_id}/tree/main/{prefix}")
     click.echo(f"MANIFEST.json sha256 {hashlib.sha256(man_bytes).hexdigest()}")
@@ -274,8 +292,12 @@ def upload(repo_id, results, prefix, gate, private, do_verify, dry_run) -> None:
 @click.command()
 @click.option("--repo-id", default=RESULTS_REPO, show_default=True, help="source HF dataset repo")
 @click.option("--path-in-repo", "prefix", required=True, help="the subtree to fetch, e.g. d1-a")
-@click.option("--results", type=click.Path(path_type=Path), default=EVAL_DIR / "results",
-              help="the results tree to fetch into")
+@click.option(
+    "--results",
+    type=click.Path(path_type=Path),
+    default=EVAL_DIR / "results",
+    help="the results tree to fetch into",
+)
 def fetch(repo_id, prefix, results) -> None:
     """Download one published subtree into a results tree, checked against its manifest."""
     results = (results if results.is_absolute() else EVAL_DIR / results).resolve()

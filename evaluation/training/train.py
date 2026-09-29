@@ -245,7 +245,7 @@ def train(config: GSASRecConfig, resume: bool = False) -> None:
                 steps_not_improved = 0
                 if best_path is not None and best_path.exists():
                     best_path.unlink()
-                best_path = ckpt_dir / f"gsasrec-ep{epoch}-{metric.replace('@','')}{cur:.4f}.pt"
+                best_path = ckpt_dir / f"gsasrec-ep{epoch}-{metric.replace('@', '')}{cur:.4f}.pt"
                 torch.save(model.state_dict(), best_path)
             else:
                 steps_not_improved += 1

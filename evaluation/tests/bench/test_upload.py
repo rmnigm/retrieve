@@ -31,10 +31,21 @@ ENV = {
 
 def _rec(**over):
     rec = {
-        "schema_version": records.SCHEMA_VERSION, "status": "ok", "dataset": "goodreads",
-        "dim": 128, "suite": "filter", "filter_kind": "clause", "sweep": "c0_genre",
-        "algo": "silvertorch", "backend": "triton", "params": {}, "seed": 0, "path": "triton",
-        "perf": None, "unstable": False, "env": dict(ENV),
+        "schema_version": records.SCHEMA_VERSION,
+        "status": "ok",
+        "dataset": "goodreads",
+        "dim": 128,
+        "suite": "filter",
+        "filter_kind": "clause",
+        "sweep": "c0_genre",
+        "algo": "silvertorch",
+        "backend": "triton",
+        "params": {},
+        "seed": 0,
+        "path": "triton",
+        "perf": None,
+        "unstable": False,
+        "env": dict(ENV),
     }
     rec["env"].update(over.pop("env", {}))
     return {**rec, **over}

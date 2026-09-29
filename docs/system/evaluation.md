@@ -866,8 +866,7 @@ subcommand that needs them, and goodreads' broad `except`s wait on their own
 cleanup. An inline `noqa` says why too. `retrieve/` keeps its narrower set
 until roadmap Q4. One ruff version everywhere: `ruff==0.15.6` in the
 workspace `dev` group and the same `rev` in `.pre-commit-config.yaml`, whose
-hooks run `ruff check` on `retrieve/` and `evaluation/`, `ruff format` on
-`retrieve/` (`evaluation/` is not format-clean yet), the merge-conflict,
+hooks run `ruff check` and `ruff format` on `retrieve/` and `evaluation/`, the merge-conflict,
 large-file (1 MB — records and dumps belong on the Hub), end-of-file and
 trailing-whitespace hooks (the last two never on `articles/`, `docs/artifacts/`,
 `evaluation/golden/`), and `scripts/check_doc_links.py`.
