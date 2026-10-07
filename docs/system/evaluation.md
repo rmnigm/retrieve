@@ -458,6 +458,20 @@ object — the provenance fields of the record's `env` block plus one
 [validation](../validation.md) record next to a number measured outside the
 harness.
 
+### Inductor cache
+
+`bench run` sets
+`TORCHINDUCTOR_CACHE_DIR` to `<tmp>/bench-inductor/<code_version>` (`:`
+→ `-`; `measure.inductor_cache_dir`) and prints it, so a `graph`-mode run
+after a library edit compiles afresh instead of replaying a stale
+`@triton_op` body ([testing](testing.md#running)). A
+`TORCHINDUCTOR_CACHE_DIR` the caller set wins (the pods' per-job
+`/scratch/inductor/<job>`). The caller's value is read in
+`bench/__init__.py`, before any `bench` module imports `torch._inductor`,
+whose import writes torch's default into the environment; for the same
+reason `bench campaign` gives its children the caller's value (or none),
+not its own environment's.
+
 ## The cell loop (`run.py`)
 
 `run(jobs, *, out_dir, out_path=None, resume=True, modes=MODES,

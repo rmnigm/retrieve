@@ -69,6 +69,7 @@ rerun the library suite before trusting any row on it.
 | Rerun byte-identical in quality | **passes** on all 12 rerun records of the goodreads leg | |
 | Ids identical across `eager` and `graph` | **not run** | |
 | Batch scaling `median_ms(bs=16) < 16 × median_ms(bs=1)` | passes, worst ratio 14.4 | |
+| H4: the harness's inductor cache keyed by `code_version` ([evaluation](system/evaluation.md#inductor-cache)) | **green on CPU** (`dev/h4`, an A100 pod, CPU): two code_versions resolve to two dirs and a given dir wins (`test_measure.py`); `bench run` sets the keyed dir with torch's import-time default already in the environment, and the caller's dir when one was given; `bench campaign` hands children the caller's value, not that default (`test_cli.py`); measured on CPU that setting the variable after `torch._inductor` is imported still moves the FX-graph and AOT-autograd caches; harness suite 276 passed / 4 skipped | not yet exercised by a GPU `graph`-mode run |
 
 ## Official against our Triton reimplementation (citable, contested)
 

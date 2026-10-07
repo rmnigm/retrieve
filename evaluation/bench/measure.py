@@ -23,6 +23,7 @@ import json
 import platform
 import socket
 import subprocess
+import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -112,6 +113,16 @@ def files_hash() -> str:
         h.update(p.relative_to(root).as_posix().encode())
         h.update(p.read_bytes())
     return "files:" + h.hexdigest()[:40]
+
+
+def inductor_cache_dir(code_version: str, given: str | None) -> str:
+    """Roadmap H4: the inductor cache ``bench run`` uses, ``given`` when the caller set
+    ``TORCHINDUCTOR_CACHE_DIR``, else one directory per ``code_version``. The FX-graph and
+    AOT-autograd caches key a graph on the custom op, not on its ``@triton_op`` body, so a
+    shared cache can replay a stale kernel after a library edit (testing.md § Running)."""
+    if given:
+        return given
+    return str(Path(tempfile.gettempdir()) / "bench-inductor" / code_version.replace(":", "-"))
 
 
 def _nvidia_smi(query: str) -> list[str] | None:
