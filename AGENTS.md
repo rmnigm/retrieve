@@ -78,20 +78,24 @@ lists every page; [`docs/SCHEMA.md`](docs/SCHEMA.md) holds the conventions
 
 ## Hard rules
 
-1. **One GPU, and it is the machine you are on.** Since 2026-09-06 the
-   working environment is the A100 box itself (A100-SXM4-80GB, torch
-   2.10.0+cu128, triton 3.6.0, nvcc 12.4, Python 3.11). Mac support was
-   dropped that day: GPU environments are the only target. Do not build
-   CPU emulators, shim headers, or simulations of device code, and do not
-   add test scaffolding beyond the existing pytest suites — the user
-   rejected that explicitly. Every GPU claim is validated on this box:
-   SM clocks **cannot be locked** in this container (`nvidia-smi -lgc`
-   is denied, no sudo) — record the sampled `sm_mhz` and the `unstable`
-   flag instead ([`docs/decisions.md`](docs/decisions.md#harness));
-   `ncu` is blocked, use `torch.profiler`. The GPU is shared: serialize
-   GPU work, one job at a time. Disk: `/workspace` is a small quota
-   volume (measured in `docs/system/storage.md`); put venvs under
-   `/venvs/` on the local disk.
+1. **GPU work runs on pods, one job per GPU.** The orchestrator runs on
+   the user's laptop or on a RunPod pod; GPU work runs on RunPod pods
+   launched with `infra/runpod/pod.sh` (image: torch 2.10.0+cu128,
+   triton 3.6.0, CUDA 12.8, Python 3.11). A100-SXM4-80GB is the reference
+   GPU for every citable number. GPU environments are the only target: do
+   not build CPU emulators, shim headers, or simulations of device code,
+   and do not add test scaffolding beyond the existing pytest suites —
+   the user rejected that explicitly. Every GPU claim is validated on a
+   pod GPU and records it: SM clocks **cannot be locked** in the container
+   (`nvidia-smi -lgc` is denied, no sudo) — record the sampled `sm_mhz`
+   and the `unstable` flag instead
+   ([`docs/decisions.md`](docs/decisions.md#harness)); `ncu` is blocked,
+   use `torch.profiler`. Serialize per GPU, not per pod: one job per GPU
+   at a time, each with its own `CUDA_VISIBLE_DEVICES`, inductor cache
+   and results path ([`docs/roadmap.md`](docs/roadmap.md#multi-gpu-execution)).
+   Disk: `/workspace` is small (measured in `docs/system/storage.md`);
+   data, venvs and scratch go on the container disk (`/data`, `/venvs/`,
+   `/scratch`).
 2. **Nothing is citable until its gate passed.** Harness numbers from a
    branch are not paper material until their gate is green in
    [`docs/validation.md`](docs/validation.md). Say "not yet validated"
@@ -121,7 +125,7 @@ lists every page; [`docs/SCHEMA.md`](docs/SCHEMA.md) holds the conventions
    on `staging` at `origin`**: whatever branch or worktree produced it, a
    step is not finished until it is merged into `staging` and pushed
    ([`docs/contracts/agent-orchestration.md`](docs/contracts/agent-orchestration.md)
-   §6). The box is rented; the repository is the only durable artifact.
+   §6). The pods are rented; the repository is the only durable artifact.
 7. **One orchestrator, constrained workers.** One user-controlled
    orchestrator session dispatches workers that do code, tests,
    evaluations or docs; workers do not widen their own scope, start a step

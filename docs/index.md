@@ -1,7 +1,7 @@
 ---
 title: index
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-10-07
 type: summary
 tags: [process]
 sources: [docs/]
@@ -9,7 +9,7 @@ sources: [docs/]
 
 # retrieve documentation wiki
 
-> Last updated: 2026-09-26 | Total pages: 13
+> Last updated: 2026-10-07 | Total pages: 14
 
 What is true now about the code and the project. Conventions, page
 format and tags: [SCHEMA.md](SCHEMA.md). Structural changes:
@@ -17,7 +17,10 @@ format and tags: [SCHEMA.md](SCHEMA.md). Structural changes:
 
 ## Start here
 
-- [roadmap](roadmap.md): the open work queue, its gates and dependencies.
+- [roadmap](roadmap.md): the open work queue, its gates, GPU-hour
+  estimates and dependencies, and how GPU work runs on a pod.
+- [backlog](backlog.md): known work that is not queued (unscheduled
+  defects, post-paper work, background reading).
 - [decisions](decisions.md): standing decisions and constraints, and why.
 - [validation](validation.md): which gates pass now, and the measured
   results that stand (citable or not yet).
@@ -41,7 +44,7 @@ How the code works today. Code comments cite these pages by section.
 - [checkpoints](system/checkpoints.md): which encoder checkpoint each dataset reads (E1c), the kept gSASRec ones, loading,
   embeddings, evaluation, Hub transfer.
 - [storage](system/storage.md): the GPU pods' disks, what lives where, the
-  budget (contested: the image's data root against the placement rule).
+  budget, the Hub quota.
 
 ## Contracts
 

@@ -12,7 +12,7 @@ This repo is a [uv workspace](https://docs.astral.sh/uv/concepts/projects/worksp
 - [`evaluation/`](evaluation/) — training and benchmark harness; depends on `retrieve` editable. Not published.
 
 Datasets, virtual environments and campaign scratch live *outside* the repo, on
-the GPU box's local disk — see [`docs/system/storage.md`](docs/system/storage.md)
+the GPU pod's container disk (pods are launched with [`infra/runpod/pod.sh`](infra/runpod/pod.sh)) — see [`docs/system/storage.md`](docs/system/storage.md)
 for the paths, the environment variables and the space budget.
 
 ## Install (library only)
@@ -56,7 +56,8 @@ The lockfile lives at the root (`uv.lock`); the per-member lockfiles are obsolet
 [`index.md`](docs/index.md) lists every page and
 [`SCHEMA.md`](docs/SCHEMA.md) its conventions. Start with
 [`roadmap.md`](docs/roadmap.md) (the open work queue, gates and
-dependencies), [`decisions.md`](docs/decisions.md) (standing decisions and
+dependencies), [`backlog.md`](docs/backlog.md) (known work that is not
+queued), [`decisions.md`](docs/decisions.md) (standing decisions and
 constraints) and [`validation.md`](docs/validation.md) (which gates pass and
 the measured results that stand). Two contracts apply everywhere:
 [`agent-orchestration.md`](docs/contracts/agent-orchestration.md) (one
@@ -78,7 +79,7 @@ sync with the code:
 - [`evaluation.md`](docs/system/evaluation.md) — the benchmark harness.
 - [`datasets.md`](docs/system/datasets.md) — dataset ETL and the SASRec training pipeline.
 - [`checkpoints.md`](docs/system/checkpoints.md) — trained models + HF Hub workflow.
-- [`storage.md`](docs/system/storage.md) — the box's disks, what may live on each, and the space budget.
+- [`storage.md`](docs/system/storage.md) — the GPU pods' disks, what may live on each, and the space budget.
 
 **Library user guide** ([`retrieve/docs/`](retrieve/docs/)) — ships in the sdist,
 written for someone who installed `torchretrieve` and does not have this repo:

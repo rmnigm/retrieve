@@ -1,7 +1,7 @@
 ---
 title: datasets
 created: 2026-09-26
-updated: 2026-09-29
+updated: 2026-10-07
 type: entity
 tags: [datasets, training]
 sources: [evaluation/eval_datasets/, evaluation/training/]
@@ -25,7 +25,7 @@ gets is decided by whether it sets `checkpoint`:
 
 | shape | datasets | query embeddings come from | filters |
 |---|---|---|---|
-| **sequential** | yambda-500m, yambda-5b, goodreads, kuairand | a trained SASRec checkpoint ([which one](checkpoints.md#what-the-harness-reads)), encoded at eval time | goodreads, kuairand |
+| **sequential** | goodreads; out of the study: yambda-500m, yambda-5b, kuairand | a trained SASRec checkpoint ([which one](checkpoints.md#what-the-harness-reads)), encoded at eval time | goodreads, kuairand |
 | **text** | arxiv, arxiv-synth, yfcc10m, pubmed, openalex | pre-encoded embeddings on disk | yes |
 
 A third variant, **synthetic**, is a text dataset grown to arbitrary `N`
@@ -579,7 +579,7 @@ the unfiltered cross-check sweep is meaningful rather than an identity lookup.
 
 #### Disk budget and the slice
 
-Computed by `eval-data pubmed plan --medline --keep-items N` on 2026-09-16
+Computed by `eval-data pubmed plan --medline --keep-items N`
 from the server's own sizes (the JSON reports are in
 [dataset-candidates-artifacts/pubmed/](../artifacts/dataset-candidates/pubmed/)),
 at the 23.9 MB/s a single-stream 64 MB probe measured that day (an earlier
@@ -611,7 +611,7 @@ largest catalog the harness as written can take at 768-d is ~15 M. Going
 above that is a harness decision (fp16 items + a chunked oracle), not an
 ETL one.
 
-**Measured on the staged slice (2026-09-26).** `convert` took 57 min for
+**Measured on the staged slice.** `convert` took 57 min for
 all 38 shards, with `medline --stream` (21 min, 39,994,988 rows) running
 beside it. On disk: 17 GB under `pubmed-medcpt/` (15 GB of fp16 shards,
 1.5 GB of attrs, 0.7 GB of `staging/` article parquets, 0.1 GB of MEDLINE
@@ -627,16 +627,13 @@ quantization* and *Build-time 1-bit quantization*).
 
 ### kuairand
 
-**Status: staged and layout-clean; the eval inputs and the d64 checkpoint are not on the Hub.**
-`download` → `convert` → `prep` → `attrs` have run on the real data, and `bench check --dataset
-kuairand` is clean. Only the trainer inputs are on the Hub ([HuggingFace I/O](#huggingface-io)).
-The user chose to keep Hub space for evals, so the eval inputs are rebuilt with
-`eval-data kuairand all` (~20 min) and the d64 `train_on_val` checkpoint was not kept
-([validation](../validation.md#final-models-the-e1c-recipe)): retrain it with `train run` and the
-flags in [its command.sh](../artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh)
-(~20 min on the H100) into `checkpoints/sasrec-ssm-logq-d64-trainval/`, the path
-`config/kuairand.yaml` reads. d128 does not fit. The one filter cell recorded so far ran on the
-deleted gSASRec `gsasrec-d128-shared` checkpoint and is stale; the leg reruns at roadmap E4.
+**Status: out of the study** ([decisions](../decisions.md#datasets)); its ETL, config and
+trainer inputs stay. The eval inputs are rebuilt with `eval-data kuairand all` (~20 min); only
+the trainer inputs are on the Hub ([HuggingFace I/O](#huggingface-io)), and the d64
+`train_on_val` checkpoint was not kept ([validation](../validation.md#final-models-the-e1c-recipe);
+its flags are in [its command.sh](../artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh)).
+d128 does not fit. The one filter cell recorded ran on the deleted gSASRec `gsasrec-d128-shared`
+checkpoint and is not reproducible.
 Nothing below is citable. The staging scripts and the gSASRec run's config and metrics are in
 [artifacts/e4-kuairand/](../artifacts/e4-kuairand/).
 
@@ -733,8 +730,7 @@ What the data ruled out:
 
 The sweeps of [`config/kuairand.yaml`](../../evaluation/config/kuairand.yaml)
 are `t_*` over C0–C3 and `b_*` over C4–C6. Bloom runs `t_cat1`, `t_tag`,
-`b_short` and `b_fresh`. The dataset is out of the `filter` suite until roadmap E4 settles its
-width (d64 only; the suite runs d128 / 192 / 768).
+`b_short` and `b_fresh`. The dataset is not in the `filter` suite (out of the study).
 
 **Training** runs over the full 32 M catalog (32,038,725 items; 32,038,726 table rows with padding). At d64
 two separate tables fit (62.6 GB peak on the 80 GB H100). At d128 even one
@@ -772,8 +768,8 @@ data/kuairand/
 
 ### openalex
 
-**Status: staged at 10 M, `bench check` clean, one filter cell run.** Roadmap E3's
-OpenAlex fallback (no Semantic Scholar key), a 10 M catalog like pubmed's. On 2026-09-26
+**Status: built at 10 M, `bench check` clean, one filter cell run; not on the Hub, so roadmap
+E5 restages it.** The OpenAlex fallback (no Semantic Scholar key), a 10 M catalog like pubmed's.
 `convert --sample-rate 0.35 --workers 64` streamed all 2,040 files of release 2026-09-23
 (297.1 GB read in 572 s, 0 failures); a 15 M catalog was prepped and encoded
 (`encode_text` 15,663 s on the A100, 958 docs/s), did not fit the harness (below), and was
@@ -803,7 +799,7 @@ passes the query's field and era clauses for every query (subfield 75 %). The su
 15 M run (`run15m-*` logs) held 4.77 in-catalog references per query, 2.85 same field +
 earlier era.
 
-The dry run (2026-09-26, artifacts in [e3-openalex/](../artifacts/e3-openalex/)):
+The dry run (artifacts in [e3-openalex/](../artifacts/e3-openalex/)):
 `convert` on 8 real snapshot files (50,304 records) staged 4,581 works; a few thousand
 rows barely cite each other, so [`api_citation_topup.py`](../artifacts/e3-openalex/api_citation_topup.py)
 added the 1,060 eligible works that 60 pool papers really cite (OpenAlex API, same
@@ -819,7 +815,7 @@ reader (`layout.load_text_items` / `load_text_queries` / `load_item_attrs` /
 `plan` first; for a smaller catalog of the same staging, `reshard --from-dir <larger>`
 replaces `encode_text` (the N smallest hashes are a subset of any larger N, so the rows are
 copied, not encoded). Source: the OpenAlex quarterly snapshot on public S3, anonymous, CC0.
-Verified 2026-09-26 against release **2026-09-23**: the 2026 layout is
+Verified against release **2026-09-23**: the 2026 layout is
 `s3://openalex/data/{jsonl,parquet}/<entity>/updated_date=*/part_*` with a
 `manifest.json` per format, written last (the old `data/works/` path is an S3 delete
 marker; `legacy-data/` is frozen). `works` is **476,196,327 records in 2,040 files**:
@@ -932,7 +928,7 @@ the main thread costs ~6 %. `flash_attn` is not installed.
 
 #### Budget
 
-As measured on 2026-09-26; `plan` from its
+As measured; `plan` from its
 [report](https://huggingface.co/datasets/pinkmeme/eval-results/blob/main/artifacts/e3-openalex/plan-2026-09-23.json):
 
 | | 10 M catalog |
@@ -1067,8 +1063,8 @@ are already public and unauthenticated, so `yfcc download` is the fetch
 path; the entry exists so the local directory layout resolves like every
 other dataset's.
 
-`pinkmeme/eval-pubmed` is **registered but not published**; nothing is
-pushed to it before roadmap E2. `pinkmeme/eval-kuairand` (private) holds only the
+`pinkmeme/eval-pubmed` is **registered but not published**; the 10 M slice
+is rebuilt with `eval-data pubmed`. `pinkmeme/eval-openalex` likewise. `pinkmeme/eval-kuairand` (private) holds only the
 KuaiRand trainer inputs: the eval inputs and the checkpoint are not published
 (user choice, see [kuairand](#kuairand)). The old A100
 `checkpoints/gsasrec-d128-shared` was deleted from it to free space (user decision).

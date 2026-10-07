@@ -1,7 +1,7 @@
 ---
 title: agent-orchestration
 created: 2026-09-26
-updated: 2026-09-29
+updated: 2026-10-07
 type: summary
 tags: [process]
 sources: [CLAUDE.md]
@@ -95,8 +95,9 @@ every pod orchestrator:
 At most three workers at once. Three constraints bind below that ceiling,
 and each wins against it:
 
-1. **The GPU is serialized** (CLAUDE.md rule 1). At most one worker holds
-   GPU work at any time.
+1. **Each GPU is serialized** (AGENTS.md rule 1). One job per GPU at a
+   time; a worker holds GPU work only on GPUs no other job uses, each job
+   with its own `CUDA_VISIBLE_DEVICES`, inductor cache and results path.
 2. **Subtree exclusivity.** When a step claims a subtree (a library rewrite
    over `retrieve/`), no second worker touches that subtree until it merges.
 3. **Disjoint trees.** Two concurrent workers never edit the same files.
@@ -159,12 +160,13 @@ leaves it). A worker does not edit the roadmap.
 
 ### Where briefs, instructions and reports live
 
-In the line of work's chain, `.chains/<chain>/`. The directory is git-excluded while the line
-runs, and the user's laptop session syncs it back; a snapshot is committed at the end of a line
-of work. Notes stay append-only. Scratch files are not used for this: they are invisible
-to the laptop and die with the pod.
+In the orchestrator's local handoff notes for the line of work (AGENTS.md rule 7). They are
+excluded from the repository and never committed; the user's laptop session syncs them back from
+a pod. Notes stay append-only. Scratch files are not used for this: they are invisible to the
+laptop and die with the pod. What a note establishes reaches the repository only as wiki state
+(D7).
 
-Each dispatched agent gets a **chain branch** named after it (`branch: w1-encoder`):
+Each dispatched agent gets a **branch of notes** named after it (`branch: w1-encoder`):
 - **The first note** is the brief exactly as sent. Its `parent` is the `main` note that
   decided the dispatch.
 - **Every later instruction** from the orchestrator is a new note on that branch.
@@ -172,7 +174,7 @@ Each dispatched agent gets a **chain branch** named after it (`branch: w1-encode
   set to the previous note on the branch.
 - **The outcome** (merged, rejected) goes on `main`.
 - Notes are never edited; a correction is a new note.
-- Filenames use the laptop's timestamp frame so the chain sorts.
+- Filenames use the laptop's timestamp frame so the notes sort.
 
 Every brief also carries two lines:
 - **Never print env or secrets files** (AGENTS.md rule 9).
@@ -196,7 +198,7 @@ staging  ──push──►  origin/staging
 
 All work ends on `staging` at `origin`. A step whose code sits only in a
 local branch, a worktree or a detached checkout is not finished: the GPU
-box is rented, and the repository is the only durable artifact. The
+pods are rented, and the repository is the only durable artifact. The
 orchestrator owns the merge and the push; it commits when the user asks
 (CLAUDE.md rule 6), and pushing is the same outward-facing action under
 the same permission. Merging `staging` into `main` is the user's call.

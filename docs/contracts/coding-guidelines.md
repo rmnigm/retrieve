@@ -1,7 +1,7 @@
 ---
 title: coding-guidelines
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-10-07
 type: summary
 tags: [process]
 sources: [CLAUDE.md]
@@ -107,10 +107,10 @@ conflicts with one of them, the priority wins.
 | Defensive rewrites of working code "to be safe" | fix what a gate or a finding shows is broken |
 | Compatibility shims, deprecation cycles, version negotiation for our own API | delete and move on (D2) |
 
-## 4. Open tension with the queue
+## 4. Baselines
 
-Baselines. Faiss, HNSW, cuBLAS, cuVS and filtered-graph baselines are not
-the goal for their own sake, but any submission needs them: an absent or
-untuned baseline invalidates a speedup claim. They
-are a scheduled step (roadmap D2), run when it comes up, and no wider than
-the paper needs.
+The study's baseline is generic torch (a dense matmul, top-K, then a
+postfilter: roadmap D5, [decisions](../decisions.md#harness)). Faiss, HNSW,
+cuBLAS, cuVS and filtered-graph baselines are out of the study
+([backlog](../backlog.md#baselines-outside-the-study)); none is added
+unscheduled.

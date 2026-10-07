@@ -1,7 +1,7 @@
 ---
 title: decisions
 created: 2026-09-26
-updated: 2026-09-29
+updated: 2026-10-07
 type: summary
 tags: [decisions]
 sources: [pyproject.toml, evaluation/config/suites.yaml, retrieve/src/retrieve/, evaluation/bench/, evaluation/training/]
@@ -73,27 +73,36 @@ decisions.
 - **Bloom hashes are keyed on `(clause_idx, value)`**, a deviation from
   the paper that stops equal values in different clauses from colliding
   ([filtering](system/filtering.md#bloom-hash-keys-clause_idx-value)).
-- **No library change while campaign records accumulate.** The records'
-  resume key includes the library tree hash, so any edit under
-  `retrieve/src/retrieve/` invalidates the campaign. The two scorer
-  improvements TF-1 (transposed bloom index in Triton) and TF-9 (CSR or
-  capped-pad probe layout) wait for the campaign to end.
+- **A library fix reruns only the arms it changes** (user). The records'
+  resume key includes the library tree hash (`code_version`), so any edit
+  under `retrieve/src/retrieve/` would make `bench campaign --resume`
+  rerun everything. Instead the fix's own gates decide which arms it
+  changes; those are rerun by narrow `bench run`s, and no record is
+  re-stamped ([policy](validation.md#campaign-roadmap-d1-in-progress-not-yet-validated)).
 
 ## Harness
 
+- **The baseline is generic torch** (user): a dense matmul over the whole
+  item table on the GPU, `torch.topk(K)`, then drop the ids that fail the
+  filter, losing candidates from K. It is what a practitioner writes
+  without a retrieval library. No library or ANN baselines (Faiss, HNSW,
+  cuVS) are in the study ([backlog](backlog.md#baselines-outside-the-study)).
 - **Three packages, one dependency direction**: `bench` → `training` →
   `eval_datasets`, enforced by `tests/test_dependency_direction.py`. The
   library retrieves; the harness measures.
 - **One backend per algorithm in the campaign grid.** `triton` everywhere,
   because it is the fastest arm on every algorithm measured (eager median
   torch/triton 4.16× on V1, 7.27× on V2, 10.19× on V3). `silvertorch`
-  runs `[triton, official]`, because that comparison is the paper. The
-  `torch` floor is not swept again.
+  runs `[triton, official]`, because that comparison is the paper; the
+  generic-torch baseline (above) runs on `torch`, being torch by
+  definition. The `torch` backends of the library algorithms are not
+  swept again.
 - **`linr_v4` is out of the grid.** It is ours, not LiNR's: the paper
   defines V1-V3.
 - **No unfiltered `quality` suite.** Its datasets were Yambda's, which
-  left the study; unfiltered cells return with the new datasets (roadmap
-  E5). The report's no-filter table emits a placeholder until then.
+  are out of the study; unfiltered cells return for the text datasets
+  (roadmap E5). The report's no-filter table emits a placeholder until
+  then.
 - **Modes: `eager` everywhere, `graph` on `triton`.** Graph-only was
   rejected: the official ops cannot be captured, and eager is the papers'
   comparable mode. A run with a narrowed mode set records
@@ -106,7 +115,7 @@ decisions.
   21 % is noise.
 - **Timed official forwards run with `OfficialConfig(cache_plans=False)`**,
   so Meta's plan cache does not flatter repeated identical queries.
-- **Results storage** (user, 2026-09-26): no results in git. A run appends
+- **Results storage** (user): no results in git. A run appends
   JSONL to a local, gitignored results tree (one `write` + `fsync` per cell,
   and resume reads it back without the network); a finished leg is
   aggregated into Parquet (`results.parquet`, one row per perf entry — the
@@ -120,13 +129,15 @@ decisions.
 
 ## Datasets
 
-- **The study's datasets**: arXiv and Goodreads (current), YFCC-10M,
-  PubMed + MedCPT, Semantic Scholar SPECTER2 (OpenAlex if the API key is
-  refused) and KuaiRand-27K. Each has real filters and an open or local
-  query encoder.
-- **Dropped**: Amazon Reviews 2023; Yambda-full and Cohere Wikipedia (scale
-  without meaningful filters, closed query encoder). Existing Yambda
-  unfiltered runs and checkpoints stay as they are.
+- **The study's datasets: semantic search on text plus one recsys
+  dataset** (user): arXiv, YFCC-10M, PubMed + MedCPT, Semantic Scholar
+  SPECTER2 (OpenAlex while the API key is missing), and Goodreads. Each
+  has real filters and an open or local query encoder.
+- **Dropped**: Amazon Reviews 2023; Cohere Wikipedia (scale without
+  meaningful filters, closed query encoder); yambda-500m and yambda-5b
+  (user: no attributes, so no filtered cells); KuaiRand-27K (user: does
+  not fit the study). Their checkpoints and trainer results stay as they
+  are.
 - **No PCA.** Every dataset runs at its encoder's native width (YFCC 192,
   PubMed 768); each dataset contributes one width, and the dim ablation is
   dropped.
@@ -140,14 +151,14 @@ decisions.
 ## Sequential encoder
 
 The current trainer's checkpoints replace the published gSASRec ones as the history encoder behind the sequential
-benchmarks (merged from `dev/hstu` into `staging`, 2026-09-29).
+benchmarks.
 - **Output contract unchanged.** Item embeddings are `[N, D]` from an embedding table, query
   embeddings are `[B, D]` from `encode.py`, and scoring is the dot product. D stays 64, 128 or
   256.
 - **The encoder is the gSASRec body** (`SASRecBlock`, the published architecture), with the
-  E1c recipe as the trainer's defaults (user, 2026-09-26). The trainer reads item ids and
+  E1c recipe as the trainer's defaults (user). The trainer reads item ids and
   positions only; a `timestamps` column in the data is ignored.
-- **Two losses** (user, 2026-09-26): gBCE with per-position negatives, the published gSASRec
+- **Two losses** (user): gBCE with per-position negatives, the published gSASRec
   baseline (one shared vector per step collapses it,
   [evidence](artifacts/seqrec-encoder/gate-b-yambda-d64/README.md)); and sampled softmax on
   L2-normalized embeddings with logQ (temperature 0.05, in-batch positives plus shared uniform
@@ -155,7 +166,7 @@ benchmarks (merged from `dev/hstu` into `staging`, 2026-09-29).
   ([recipe search](validation.md#recipe-search-yambda-500m-d64)).
 - **HSTU was tried and dropped.** The softmax-attention HSTU body with time-bucket bias (E2a,
   E2c) did not beat the gSASRec body with logQ (E1c); the user dropped it and its code
-  (`HSTUBlock`, `use_time`, `hidden_dim`), 2026-09-26. Pointwise (softmax-free) attention was
+  (`HSTUBlock`, `use_time`, `hidden_dim`). Pointwise (softmax-free) attention was
   never pursued ([recipe search](validation.md#recipe-search-yambda-500m-d64)).
 - **Success is measured on the same test file with the same eval code.** A new encoder must
   beat the published gSASRec checkpoint of the same D, re-scored on today's
@@ -163,33 +174,30 @@ benchmarks (merged from `dev/hstu` into `staging`, 2026-09-29).
   goodreads-work-id, with one shared recipe. The stored `eval_quality.json` numbers are not the
   bar: yambda's were scored on a test split that is no longer on disk
   ([bars](validation.md#bars)).
-- **Runs** (user, 2026-09-26): the E1c recipe (ffn 4×D) at d64, d128 and d256 on yambda-500m and
+- **Runs** (user): the E1c recipe (ffn 4×D) at d64, d128 and d256 on yambda-500m and
   goodreads-work-id, and at d64 on KuaiRand; only D, epochs, patience and eval cadence
   vary ([final models](validation.md#final-models-the-e1c-recipe)).
 - **KuaiRand is final at d64, refit on train + val** (`train_on_val=true`, 4 epochs, the
   train-only run's best epoch + 1). The refit, because next-day clicks drift and the val day is
   otherwise never trained on ([temporal drift](validation.md#kuairand-temporal-drift)). d128 was
-  not run ([OOM](validation.md#final-models-the-e1c-recipe)); the user stopped KuaiRand at d64
-  (2026-09-26).
-- **The harness uses the E1c checkpoints** (user, 2026-09-29): goodreads and yambda-500m
-  `sasrec-ssm-logq-d{dim}`, kuairand `sasrec-ssm-logq-d64-trainval`; yambda-5b keeps `gsasrec-d{dim}`
-  (no new model). Records made on a gSASRec checkpoint are kept as that experiment, not deleted and not
+  not run ([OOM](validation.md#final-models-the-e1c-recipe)). KuaiRand is out of the study
+  (Datasets above); the refit stands as a trainer result only.
+- **The harness uses the E1c checkpoints** (user): goodreads `sasrec-ssm-logq-d{dim}` (yambda-500m's
+  config reads its own, but yambda is out of the study). Records made on a gSASRec checkpoint are kept as that experiment, not deleted and not
   mixed with the new ones; the golden baseline stays on `gsasrec-d128-drop0.5-id`, because it compares
   two harnesses on fixed inputs ([what must be redone](validation.md#encoder-switch-evals-to-redo)).
-- **KuaiRand eval inputs and its checkpoint stay off the Hub** (user, 2026-09-26): only the trainer
-  inputs are published; the rest is rebuilt (`eval-data kuairand all`) and retrained.
 - **Out of scope for this line:** a LLaMA block, row-wise Adagrad, a bf16 table,
   FuXi-style channels and multi-GPU.
 
 ## Environment
 
-- **One GPU box, serialized** (CLAUDE.md rule 1). One GPU job at a time;
-  each concurrent GPU job needs its own `TORCHINDUCTOR_CACHE_DIR`.
-- **Disks**: the repository on the persistent network volume, everything
-  large on the ephemeral local disk ([storage](system/storage.md)). The
-  pod image's defaults put data and the Hub cache on `/workspace`
-  instead; storage.md marks this contested.
+- **GPU work runs on RunPod pods** (AGENTS.md rule 1), launched with
+  `infra/runpod/pod.sh`; A100-SXM4-80GB is the reference GPU for every
+  citable number. One job per GPU at a time; each job has its own
+  `TORCHINDUCTOR_CACHE_DIR` ([roadmap](roadmap.md#multi-gpu-execution)).
+  The orchestrator runs on the user's laptop or on a pod.
+- **Disks**: the repository on `/workspace`, everything large on the
+  ephemeral container disk ([storage](system/storage.md)).
 - **`ncu` is blocked**; kernel attribution uses `torch.profiler`.
-- **The sequential-encoder results were measured on an H100 pod** (one H100 80GB HBM3, since
-  deleted); every number from it records the GPU name. Retraining (E4) runs on whatever box the
-  step gets and records its GPU the same way.
+- **The sequential-encoder results were measured on an H100 80GB HBM3 pod**; every number
+  records the GPU name.
