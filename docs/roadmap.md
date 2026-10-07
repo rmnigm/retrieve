@@ -1,176 +1,348 @@
 ---
 title: roadmap
 created: 2026-09-26
-updated: 2026-09-29
+updated: 2026-10-07
 type: summary
 tags: [roadmap]
-sources: [evaluation/config/suites.yaml, docs/validation.md]
+sources: [evaluation/config/suites.yaml, evaluation/bench/, infra/runpod/, docs/validation.md, docs/artifacts/hub-index.md]
 ---
 
 # Roadmap: the open queue
 
-The single ordered work queue. It lists only what is still to do; what
-already holds is in [validation](validation.md), and the standing
-decisions are in [decisions](decisions.md). An agent starting a session
-reads [AGENTS.md](../AGENTS.md), then this page, then only the wiki pages
-its step names. Who executes a step is
+The single ordered work queue: what is left to run or implement, in
+dependency order. What already holds is in [validation](validation.md),
+the standing decisions in [decisions](decisions.md), work that is not
+queued in the [backlog](backlog.md). An agent starting a session reads
+[AGENTS.md](../AGENTS.md), then this page, then only the wiki pages its
+step names. Who executes a step is
 [agent orchestration](contracts/agent-orchestration.md).
 
 **Rules.** No dates: every step is done, in the order given, and nothing
 is optional. Do not start a step whose dependencies are open. When a step
 finishes, its gate's row in [validation](validation.md) and the affected
-`docs/system` page are updated, and the step is **removed** from this page
-by the orchestrator. Step names (D1, E2, ...) are stable identifiers used
-in records, commits and code comments; they are not renumbered.
+`docs/system` page are updated, and the orchestrator **removes** the step
+from this page. Step names (D1, H2, ...) are stable identifiers used in
+records, commits and code comments; they are not renumbered.
+
+**Estimates** are A100-SXM4-80GB GPU-hours (the reference GPU for every
+citable number), taken from the per-cell times D1 measured; a *stream* is
+a slice of a step that can run on its own GPU at the same time as the
+others (see [Multi-GPU execution](#multi-gpu-execution)).
 
 ## Needs the user
 
+- **Official vs Triton on goodreads (F2): rerun or relabel.** The
+  head-to-head's goodreads numbers are on the gSASRec embeddings; rerun
+  them on the E1c encoder (F2-R below), or keep them labelled as a
+  gSASRec-embedding measurement
+  ([validation](validation.md#encoder-switch-evals-to-redo)).
 - **Citability of a narrowed campaign.** A run with a narrowed mode set is
   recorded `status: partial` and reported NOT CITABLE. The user decides
-  once `bench report` runs on D1's real output, not in the abstract.
-- **E0**: the Semantic Scholar API key is an identity-bound form (E3 runs
+  once `bench report` runs on D1's real output (D1-G), not in the abstract.
+- **E0**: the Semantic Scholar API key is an identity-bound form (E5 runs
   the OpenAlex fallback meanwhile).
 - **A4**: merging `staging` into `main` is on hold until the user decides.
-- **Kuairand's width in the `filter` suite (E4).** The suite's `dims`
-  are intersected with each dataset's (`bench/config.py` `load_matrix`),
-  and kuairand is now d64 only; adding 64 to the suite would also pull
-  goodreads d64 into it, breaking "each dataset contributes one width".
-  It is out of the suite's `datasets` list meanwhile (the config gate
-  requires every listed dataset to expand to cells). Options: a
-  per-dataset width in `suites.yaml`, or 64 in the suite's dims with
-  goodreads narrowed to d128. Blocks E4's leg.
-- **Official vs Triton on goodreads (F2).** The head-to-head's goodreads
-  numbers are on the gSASRec embeddings; rerun them on the new encoder, or
-  keep them labelled as a gSASRec-embedding measurement
-  ([validation](validation.md#encoder-switch-evals-to-redo)).
 - **HF: squash `pinkmeme/eval-goodreads-work-id`** to reclaim 2.3 GB
-  (`HfApi().super_squash_history(repo_id=..., repo_type="dataset")`); the
-  seqrec line's cleanup left it to the user.
-- **`.git` history size.** H1 removed the tracked JSON/JSONL results from
-  `HEAD`, but their bytes stay in history; shrinking `.git` needs a
-  history rewrite (`git filter-repo`), which forces every clone and
-  worktree to re-sync ([decisions](decisions.md#harness)).
+  (`HfApi().super_squash_history(repo_id=..., repo_type="dataset")`).
+- **`.git` history size.** The JSON/JSONL results left `HEAD`, but their
+  bytes stay in history; shrinking `.git` needs a history rewrite (`git
+  filter-repo`), which forces every clone and worktree to re-sync
+  ([decisions](decisions.md#harness)).
 
-## Phase H: harness prerequisites for the encoder switch
+## Running GPU work on a pod
 
-The harness encodes goodreads, yambda-500m and kuairand with the E1c
-checkpoints since the `dev/hstu` merge; what that invalidates is in
-[validation](validation.md#encoder-switch-evals-to-redo). These two steps
-come before any sequential-dataset cell runs again.
+GPU work runs on RunPod pods launched with
+[`infra/runpod/pod.sh`](../infra/runpod/pod.sh) (`pod.sh up --gpu a100
+--gpus N`); disks and environment in [storage](system/storage.md).
+
+### Restore on a fresh pod
+
+1. Checkout `staging` (the image clones it into `/workspace/retrieve`);
+   the venv is `/venvs/retrieve`. A worker that needs a different
+   environment gets its own venv (`UV_PROJECT_ENVIRONMENT=/venvs/<name> uv
+   sync --all-packages --all-groups --extra official`): a worker that
+   re-syncs the shared venv to its worktree breaks every running job.
+2. Data under `/data` (`RETRIEVE_DATA_ROOT`), with `evaluation/data ->
+   /data` (a gitignored symlink) in every checkout and worktree. `eval-data
+   fetch` only what the step reads: `arxiv-papers` (the license-fixed
+   version: `item_attrs_narrow.pt` min = -1, `eval_split.parquet`
+   `query_attrs_narrow` min = 0), `goodreads-work-id` with its checkpoints
+   (R1 lists them). PubMed is not on the Hub: rebuild the 10 M slice with
+   `eval-data pubmed` ([datasets](system/datasets.md#pubmed); ~1 h
+   download-bound `convert`, 17 GB). OpenAlex is not on the Hub either (E5
+   restages it).
+3. Results: the remaining runs do not need the old records locally (the
+   narrow scoping below never resumes against them), but the final uploads
+   and the report do: `bench fetch --path-in-repo d1/<subtree> --results
+   <dir>` per [hub-index](artifacts/hub-index.md) row, merged into
+   `evaluation/results/<suite>/`.
+4. Every GPU job: a fresh `TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/<job>`
+   (the cache is not keyed by `code_version`, H4), `HF_HOME=/scratch/hf`.
+   Run from `evaluation/` as `/venvs/retrieve/bin/python -m bench.cli …`,
+   **not** `uv run`, which masks bench's exit code. Pass `--timeout 48` to
+   every `bench campaign` (the 6 h default kills `deep` groups, H3). A long
+   job runs from one sequential driver script per GPU (one process group,
+   no chained waiters, and no log line containing the text a watcher
+   greps for).
+
+### Multi-GPU execution
+
+On a pod with several GPUs, each job owns one GPU
+(`CUDA_VISIBLE_DEVICES=<i>`), its own inductor cache dir and its own
+`--out` tree or `--output` file; `aggregate` reads every
+`<suite>/*.jsonl`, so per-stream files in one tree merge without a step.
+Pin each job's CPU threads to its GPU's NUMA-local cores (`taskset -c`,
+the affinity column of `nvidia-smi topo -m`): batch-1 latency is
+launch-bound, so a neighbour's host load moves it. Record in the step's
+validation row that neighbour GPUs were busy. Split streams by `--algo`,
+then by `--filter-kind` / `--sweep` / `--seed`; keep `silvertorch`'s
+`triton` and `official` backends in **one** stream, in that order: they
+share a `_parity/<dataset, dim, algo>` spill and the second backend's
+`jaccard_vs_first` compares against the first's. `bench campaign` has no
+`--algo`, so a split stream is a `bench run`. M1 decides whether
+multi-GPU numbers are comparable at all.
+
+### Rerun policy
+
+**No record is re-stamped.** `code_version` (the tree hash of
+`retrieve/src/retrieve`) is in the resume key, so a library fix makes
+`bench campaign --resume` rerun everything. Instead, a fix's own gates
+decide which arms it changes, and only those arms are rerun with narrow
+`bench run` scoping (`--algo` / `--backend` / `--filter-kind` / `--sweep`
+/ `--seed`); every other record keeps its `code_version`
+([policy](validation.md#campaign-roadmap-d1-in-progress-not-yet-validated)).
+Today's `code_version` is `c0e42d1`; D1's existing records are at
+`72e5a90`, so **never run `bench campaign --resume` on a leg that already
+has records** (arxiv `filter`/`deep`, pubmed `filter`). Campaign is safe
+only on a leg with no records yet.
+
+## Phase H: harness prerequisites
 
 - [ ] **H2: the record key carries the input identity; the golden gate
-  pins its checkpoint.** `bench/records.py` `KEY_FIELDS` has no checkpoint
-  or input fingerprint, so `--resume` would skip a goodreads cell on the
-  new encoder as `ok` and `aggregate` would let it overwrite (or be
-  overwritten by) the gSASRec record. Add an `inputs` identity to the key
-  block (the checkpoint's ckpt-id for sequential datasets, the
-  `content_dir` for text ones; a digest of the item/query tensors if the
-  name is not enough) and a schema bump; old records read as their
-  gSASRec / content identity. The golden goodreads cells must keep running
-  on `gsasrec-d128-drop0.5-id`: give the golden gate a way to pin that
-  checkpoint (a checkpoint override on `bench run`, or a golden dataset
-  file) instead of following `config/goodreads.yaml`. Gate: the harness
-  suite green; a test that two records differing only in checkpoint get
-  different resume keys; the golden gate rerun on the pinned checkpoint
-  gives today's numbers (validation row *Golden baseline*). CPU plus one
-  short GPU golden run. Harness code: `fable` per the orchestration
-  contract if it grows past a key-field change, else `opus`.
-- [ ] **R1: stage the E1c checkpoints on the box and prove the harness
-  reads them.** `hf download` goodreads and yambda-500m
-  `checkpoints/sasrec-ssm-logq-d{64,128,256}` into
-  `$RETRIEVE_DATA_ROOT/<dataset>/checkpoints/`; `bench check --dataset
-  goodreads` at d128; one `--skip-perf` goodreads cell
-  (`linr_v1_filter_mask`/triton `c0_genre`) to confirm the encode path
-  (`encode_split` with a `normalize=true` config, fresh encode cache,
-  fresh oracle blob) and that the exact gate (`recall_oracle@k_max ≥
-  0.99`) holds on normalized embeddings. Record the query norms (1.0 under
-  `normalize`) and the cell in validation. Needs H2.
+  pins its checkpoint.** *Problem*: `bench/records.py` `KEY_FIELDS`
+  (dataset, dim, suite, filter_kind, sweep, algo, backend, params, seed;
+  + `code_version` in the resume key) names no checkpoint or embedding
+  source, so a goodreads cell on the E1c encoder has the same resume key
+  as its gSASRec record in `d1/goodreads`: `--resume` skips it as `ok`, and
+  `records.latest` / `aggregate` keep one of the two. *Build*: (1) an
+  `inputs` identity in the key block: the ckpt-id for sequential datasets
+  (the checkpoint's directory name, e.g. `sasrec-ssm-logq-d128`), the
+  resolved `content_dir` for text ones; whether a name is enough or a
+  digest is needed is written in [evaluation](system/evaluation.md#resume).
+  (2) **Existing records must keep their resume key**: a record without
+  the field derives it (sequential: the gSASRec ckpt-id its config named,
+  goodreads `gsasrec-d{dim}-drop0.5-id`, kuairand `gsasrec-d128-shared`;
+  text: the `content_dir` today's config resolves), and a new arxiv/pubmed
+  job computes the same key, or D1's remaining arxiv/pubmed scoping reruns
+  hundreds of hours. Bump `SCHEMA_VERSION` only if the record layout
+  changes, and say why either way. (3) `results.parquet` and `bench report`
+  carry the identity as a column; a report groups or refuses mixed
+  identities within one dataset × dim. (4) The golden goodreads cells run
+  on `gsasrec-d128-drop0.5-id`: the smallest honest pin (a `--checkpoint`
+  override on `bench run` recorded in the record, or a golden dataset
+  file). *Gates*: the harness suite green on CPU; a test that two jobs
+  differing only in checkpoint get different resume keys, and that an old
+  arxiv record (a fixture from a real D1 key block) keeps today's key; the
+  real Hub records (`d1/arxiv-deep-partial`, `d1/pubmed` fetched to
+  scratch) give the same set of done cells before and after (script under the
+  H2 artifacts directory); the golden gate rerun on the pinned checkpoint
+  gives today's numbers (validation *Golden baseline*: 8/9 identical, V1
+  at 0.0; fetch `checkpoints/gsasrec-d128-drop0.5-id/*` from
+  `pinkmeme/eval-goodreads-work-id`). **0.5 GPU-h** (the golden run), one
+  stream; the rest is CPU. `opus` if it stays a key-field + override
+  change, `fable` if it forces a redesign of `records` / `report`.
+- [ ] **R1: stage the E1c checkpoints and prove the harness reads them.**
+  Needs H2. `hf download pinkmeme/eval-goodreads-work-id --repo-type
+  dataset --include "checkpoints/sasrec-ssm-logq-d128/*" --local-dir
+  /data/goodreads-work-id`; the directory has `best_model.pt`, a
+  `config.json` with `"loss": "sampled_softmax"` and `"normalize": true`,
+  and an `item_id_map.json` sha256-equal to the data root's
+  (`dd6b8005…107265`). `bench check --dataset goodreads` at d128; then one
+  cell on a fresh inductor dir: `bench.cli run --dataset goodreads --dim
+  128 --suite filter --algo linr_v1_filter_mask --backend triton
+  --filter-kind clause --sweep c0_genre --seed 0 --skip-perf`. *Gates*: a
+  fresh encode (a new cache file in the checkpoint dir) and a fresh oracle
+  blob; the exact gate `recall_oracle@k_max ≥ 0.99` holds on normalized
+  embeddings (a miss is a finding, reported, `EXACT_MIN_RECALL` not
+  loosened); query L2 norms 1.0 ± 1e-3; `n_kept` recorded against the
+  gSASRec cell's 9,859. Record the cell in validation (not yet validated)
+  and on the Hub as `artifacts/r1`. **0.5 GPU-h**, one stream.
+- [ ] **H3: `bench campaign`'s per-group timeout fits the work.** The
+  default `--timeout 6.0` killed pubmed `filter` groups (cells take 20-46
+  min at D = 768 × 10 M) and is far below an arxiv `deep` `silvertorch`
+  group (~10 h). A default sized for the largest group, or one scaled by
+  dataset and suite. *Gate*: the harness suite green, a test on the
+  default; until it lands, every campaign passes `--timeout 48`. CPU.
+- [ ] **H4: the harness keys its inductor cache by `code_version`.** The
+  on-disk FX-graph / AOT-autograd caches do not invalidate when a
+  `@triton_op` body changes, so a `graph`-mode run after a library edit can
+  replay stale kernel code ([testing](system/testing.md#running)). `bench
+  run` sets a `TORCHINDUCTOR_CACHE_DIR` that includes `code_version` unless
+  one is given. *Gate*: a test that two code_versions resolve to two cache
+  dirs; the harness suite green. CPU. Until it lands, the restore steps'
+  fresh cache per job is the workaround.
+- [ ] **H5: `bench report` states true provenance.** `bench/report.py`
+  appends "These records predate the D1 campaign…" to every non-citable
+  report, marks every non-citable caption `[PRE-CAMPAIGN RECORDS — NOT
+  CITABLE]` (`_caption`) and watermarks figures "PRE-CAMPAIGN" (`_figure`),
+  all false for D1's own records. Each names the actual reason a report is
+  not citable (the record's `status`, `dirty`, `partial_reasons`, or a
+  gate not green). *Gate*: `test_report.py` pins the text for each reason.
+  CPU. Before D1-G and F5.
+- [ ] **H6: `partial` is stamped per job, not per process.** `bench/run.py`
+  builds `reasons0` once per process, so an eager-only pass marks every
+  record `partial`, including `official`, whose `graph` entry is
+  `not_capturable` anyway. *Gate*: a test that an `official` record from an
+  eager-only run is not `partial` for `modes`, and a `triton` one is. CPU.
+  Before D1-G.
+- [ ] **H7: a held-out metric with no target is null, not 0.0.** Pubmed's
+  `c3_journal_reverse` records carry held-out recall 0.0 where no held-out
+  target passes the filter, which a report averages in as a miss. The
+  harness writes null there, and `bench report` skips null held-out
+  metrics. *Gate*: a test on a cell with no in-filter held-out target; the
+  existing `d1/pubmed` records read as null through the same rule (no
+  rerun). CPU. Before D1-G.
+- [ ] **L6: widen the official T1 parity gate past powers of two.**
+  `retrieve/tests/parity/test_official.py` `test_t1_int32_path_bitexact`
+  still compares official against Triton only when `d` is a power of two
+  (`d = 96` is reference-only), a guard from before L4's padding. Drop the
+  guard and add a D1 width (192, 768) to the parametrization. *Gate*: the
+  int32 path `torch.equal` official vs Triton at every width (bit-exact;
+  a mismatch is reported, not tolerated). **≈ 0.2 GPU-h**, library suite.
+- [ ] **M1: multi-GPU interference control.** Before any number from a
+  multi-GPU pod is compared with a single-GPU one: one D1 cell (an arxiv
+  `filter` cell at bs = 1, `silvertorch`/triton and `linr_v2`) timed alone
+  on the pod, then with every other GPU loaded by a D1 job, interleaved,
+  cores pinned. *Gate*: the bs = 1 and bs = 16 medians with neighbours
+  loaded within each arm's own repeat noise of the alone runs; otherwise
+  the timed steps run one GPU at a time and only `--skip-perf` work runs
+  in parallel. **0.5 GPU-h** on a ≥ 2-GPU pod.
 
 ## Phase D: campaign and baselines (GPU)
 
-- [ ] **D1: run the full campaign on the harness.** Scope (user,
-  2026-09-26; the `campaign-d1` chain notes win if this and reality
-  disagree): `filter` on **goodreads, arxiv, yfcc10m, pubmed**, in scale
-  order, then `deep` and `codesign` (S9) on **arxiv, then goodreads**.
-  openalex's `filter` leg is E5's; kuairand is E4's.
-  **Goodreads runs on the new encoder** (`sasrec-ssm-logq-d128`, since
-  the 2026-09-29 `dev/hstu` merge): its `filter` leg is rerun in full
-  (105 cells; `d1/goodreads` on the Hub stays as the gSASRec run, not
-  deleted), and its `deep` / `codesign` legs run on the new encoder only.
-  The goodreads part needs H2 and R1; the arxiv/pubmed resume below does
-  not. Deliverable after the
-  `filter` legs, before `deep`/`codesign`: a cross-scale filter comparison
-  across algorithms (`recall_oracle`, latency, QPS, memory per algo per
-  dataset at the headline operating point). Seeds {0, 1, 2} on the
-  headline sweeps; `n_probe` in {24, 32}. `codesign`'s early smoke cell is
-  not a finding; the real sweep decides
+- [ ] **D1: the full campaign.** Scope (user): `filter` on goodreads,
+  arxiv, yfcc10m and pubmed, in scale order, then `deep` and `codesign`
+  (S9) on arxiv, then goodreads. openalex's `filter` leg is E5's. Seeds {0, 1, 2} on the headline sweeps; `n_probe` ∈ {24, 32}. Done:
+  the `filter` legs of arxiv (126/126), yfcc10m (7/7) and pubmed (44/56),
+  and 803 of arxiv `deep`'s 870 cells
   ([validation](validation.md#campaign-roadmap-d1-in-progress-not-yet-validated)).
-  Gate per stage: `bench report` with no missing cells; `median_ms(bs=16)
-  < 16 × median_ms(bs=1)`; ids identical across modes; a rerun
-  byte-identical in quality. Closes paper gaps G3 (P99 / QPS), G4 (seeds),
-  G7, G8 (cross-dataset deep sweeps).
-  **Currently paused, VM stopped** (2026-09-29): paused for a fix pass
-  the investigation workers' findings required — the pubmed/triton
-  register spill, LiNR V3's OPORP OOM, the bloom-path divergence
-  (verdict: not a bug) — merged as `code_version c0e42d1`
-  ([validation](validation.md#campaign-roadmap-d1-in-progress-not-yet-validated)
-  has the targeted-rerun policy), then the box itself had to stop.
-  Everything is saved: every leg's records are verified byte-identical
-  on the Hub, nothing exists only locally (`d1/goodreads`, `d1/arxiv`,
-  `d1/yfcc10m`, `d1/pubmed`, `d1/arxiv-deep-partial`, plus the campaign's
-  own scripts/logs as `artifacts/d1-campaign`, all in
-  [hub-index.md](artifacts/hub-index.md)). The exact resume plan (steps
-  A-E, precise `bench run` commands, **narrow `--algo`/`--backend`
-  scoping — not `bench campaign --resume`, which would rerun everything
-  since the resume key includes `code_version`**) is in
-  `.chains/campaign-d1/2026-09-29-093000000-d1-saved-before-vm-stop.md`
-  (a chain note, not committed — read it on the box that resumes this,
-  or restage from the Hub artifact if the box is new). Per the user's
-  standing rule, this is a **targeted** rerun of only pubmed's
-  `silvertorch/triton` and `linr_v3` filter cells plus arxiv deep's
-  remaining `linr_v3` jobs — not a full D1 rerun; every other record is
-  proven numerically unaffected and no record is re-stamped.
-- [ ] **D2: add Faiss, HNSW, cuBLAS and cuVS baselines as harness
-  algorithms.** Faiss-GPU and Faiss-CPU IVF-Flat, HNSW, a cuBLAS
-  brute-force floor at matched recall; then cuVS IVF-Flat / IVF-PQ / CAGRA
-  with a bitset prefilter (G13) and Filtered-DiskANN or ACORN (G14).
-  Required for any submission (G5). Needs D1's records to compare against.
-- [ ] **D3: measure bloom false-positive rate and memory against filter
-  width**, for both blooms on real attributes (G6; paper claim S8). The
+  Goodreads runs on the E1c encoder `sasrec-ssm-logq-d128`; `d1/goodreads`
+  stays on the Hub as the gSASRec run. Everything below runs at
+  `c0e42d1` (the rerun policy above). After each sub-step, `bench upload
+  --verify` and a [hub-index](artifacts/hub-index.md) row. Closes paper
+  gaps G3 (P99 / QPS), G4 (seeds), G7, G8 (cross-dataset deep sweeps).
+  `R=$REPO_DIR/evaluation/results`; every command is `python -m bench.cli`
+  from `evaluation/`, with `--out $R --config-dir config`.
+  - [ ] **D1-A: arxiv `deep`, the remaining `linr_v3`** (14 of its 30
+    jobs, 70 cells; the 16 jobs done at `72e5a90` are not rerun; bloom
+    `c0_maincat` seed 1 has 3 of 5 pools at `72e5a90`, and the newer
+    record supersedes them):
+    ```
+    run --dataset arxiv --dim 128 --suite deep --algo linr_v3 --backend triton --filter-kind bloom --sweep c0_maincat --seed 1 --seed 2 --resume
+    run --dataset arxiv --dim 128 --suite deep --algo linr_v3 --backend triton --filter-kind bloom --sweep c2_year --sweep c3_nversions --sweep c0c2 --sweep all4 --resume
+    ```
+    Upload the complete leg as `d1/arxiv-deep` (803 records at `72e5a90` +
+    70 at `c0e42d1`, the mixed version noted in the row), replacing
+    `d1/arxiv-deep-partial`. If H2 merged first, confirm its
+    old-records-keep-their-key gate before trusting `--resume`. **≈ 6
+    GPU-h** (~5 min a cell); 2 streams (the two commands).
+  - [ ] **D1-B: arxiv `codesign`** (10 jobs, no records yet): `campaign
+    --suite codesign --dataset arxiv --resume --timeout 48`. Upload
+    `d1/arxiv-codesign`. **≈ 3-5 GPU-h**, one stream (both `bloom_path`
+    arms are `silvertorch`/official).
+  - [ ] **D1-E: pubmed `filter`, the targeted rerun** (the three-fix pass
+    changed only these arms):
+    ```
+    run --dataset pubmed --dim 768 --suite filter --algo silvertorch --backend triton --resume   # all 16 cells, retimed on the per-width tile
+    run --dataset pubmed --dim 768 --suite filter --algo linr_v3 --backend triton --resume       # 8 cells, OOM at build before
+    run --dataset pubmed --dim 768 --suite filter --algo linr_v2 --backend triton --filter-kind bloom --sweep c0c2 --seed 0 --resume   # the cell the 6 h timeout cut
+    ```
+    Re-upload `d1/pubmed`. `records.latest` keys on `code_version`, so
+    the 13 old `silvertorch`/triton records and the 8 failed `linr_v3`
+    ones stay beside the new ones: the D1 report reads only the `c0e42d1`
+    records for those two arms (say so in validation). **≈ 12 GPU-h**
+    (`silvertorch`/triton 16 × ~22 min, `linr_v3` 8 cells, `linr_v2` 1);
+    3 streams (the three commands; ~6 h wall).
+  - [ ] **D1-F: goodreads `filter` on the E1c encoder, the full leg** (105
+    cells). Needs H2 and R1. `campaign --suite filter --dataset goodreads
+    --resume --timeout 48`. Upload as `d1/goodreads-e1c`; label
+    `d1/goodreads` as the gSASRec run in hub-index. **≈ 4 GPU-h**; up to 4
+    streams by `--algo` (`bench run`, `silvertorch` holding both backends).
+  - [ ] **D1-C: goodreads `deep`** (135 jobs, no records yet). Needs H2
+    and R1. `campaign --suite deep --dataset goodreads --resume --timeout
+    48`. Upload `d1/goodreads-deep`. **≈ 25-45 GPU-h** (arxiv `deep`: ~2
+    min a cell over 870 cells, ~30 h; goodreads has more jobs on a 0.8 M
+    catalog, 4× smaller); 2 streams by `--algo` (`silvertorch` both
+    backends, `linr_v3`), each splittable by `--filter-kind`.
+  - [ ] **D1-D: goodreads `codesign`** (6 jobs). Needs H2 and R1. `campaign
+    --suite codesign --dataset goodreads --resume --timeout 48`. Upload
+    `d1/goodreads-codesign`. **≈ 2 GPU-h**, one stream.
+  - [ ] **D1-G: D1's report and gate.** Needs D1-A..F, H5, H6 and H7. `bench
+    report` over every leg (goodreads rows from the E1c records only;
+    pubmed's `silvertorch`/triton and `linr_v3` from `c0e42d1` only); the
+    cross-scale filter comparison across algorithms (`recall_oracle`,
+    latency, QPS, memory per algo per dataset at the headline operating
+    point), goodreads redone on E1c. *Gate per leg*: `bench report` with no
+    missing cells; `median_ms(bs=16) < 16 × median_ms(bs=1)`; ids identical
+    across `eager` and `graph` (never run yet); a rerun byte-identical in
+    quality (a subset of each leg's cells, rerun with `--force` into a
+    scratch tree). `codesign`'s early smoke cell is not a finding; the
+    real sweep decides. **≈ 5 GPU-h** for the reruns; streams by leg.
+- [ ] **D3: bloom false-positive rate and memory against filter width**,
+  for both blooms on real attributes (G6; paper claim S8). The
   head-to-head saw zero false positives at `m_bits 1024`, so the sweep
-  must go below it.
+  goes below it. Needs D1. Code first (a width sweep in the harness or an
+  artifact script), then **≈ 3 GPU-h**; streams by dataset.
+- [ ] **D5: the generic-torch postfilter baseline.** The study's baseline
+  is what a practitioner writes without a retrieval library
+  ([decisions](decisions.md#harness)): a dense matmul over the whole item
+  table on the GPU, `torch.topk`, then drop the ids that fail the filter,
+  so a row returns fewer than K results whenever filtered-out items took
+  top-K slots. No harness algorithm does this today
+  (`linr_v1_filter_mask` masks *before* top-k and is exact).
+  - [ ] **D5-code: the `postfilter` algo.** In `bench` (torch backend
+    only; clause and bloom filter kinds): fetch top-αK, filter, keep the
+    first K survivors, pad short rows with the `-1` / `-inf` sentinel so
+    lost candidates count as a recall loss. α is a query param swept over
+    {1, 2, 4, 8} (`params.postfilter` in the `filter` suite), so the
+    report shows what a naive system pays in latency to recover recall;
+    α = 1 is the headline baseline. *Gate*: on a small fixture its ids and
+    scores equal a hand-computed torch reference (matmul → topk(αK) →
+    filter → first K) at every α; `recall_oracle` reported against the
+    exact oracle; the config gate expands it on every `filter` dataset;
+    the harness suite green. Needs H2 (its goodreads cells need the input
+    identity). CPU plus a smoke cell, `opus`.
+  - [ ] **D5-run: the baseline on every `filter`-suite dataset** (goodreads
+    on E1c, arxiv, yfcc10m, pubmed, openalex) with narrow `bench run
+    --algo postfilter` scoping, so no existing record reruns; upload as
+    `d5/<dataset>`. Needs D5-code and R1 (goodreads); openalex after E5's
+    restage. **≈ 5-8 GPU-h** (4 α values; a dense matmul per batch);
+    streams by dataset.
 
 ## Phase E: datasets
 
-- [ ] **E4: KuaiRand on the E1c encoder.** Needs R1 and the user's
-  decision on kuairand's width in the `filter` suite (above). (a) Rebuild
-  the eval inputs with `eval-data kuairand all` (~20 min; they are not on
-  the Hub) and `hf download pinkmeme/eval-kuairand --include 'trainer/*'`
-  for the trainer inputs, plus `test.parquet` / `item_id_map.json` from
-  the rebuild. (b) Retrain `sasrec-ssm-logq-d64-trainval` with the flags
-  in [its command.sh](artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh)
-  (`train_on_val=true`, 4 epochs; 62.7 GB peak on the H100, so it fits an
-  80 GB A100; ~20 min there, expect longer on an A100) into
-  `data/kuairand/checkpoints/sasrec-ssm-logq-d64-trainval/`. Gate: test
-  ndcg@10 / R@100 within ±0.002 of 0.0276 / 0.0063 (the refit is seeded;
-  a miss is reported, not tuned). Keep it off the Hub (user). (c) `bench
-  check --dataset kuairand`, then the `filter` leg at d64. Replaces the
-  stale gSASRec `t_cat1` cell. GPU.
-- [ ] **E0: request the Semantic Scholar API key** (needs the user). Not
-  blocking: E3 runs the OpenAlex fallback. Open in case the user wants
-  the proper Semantic Scholar source later.
-- [ ] **E5: run openalex's `filter` leg, extend the report with the
-  unfiltered cells retired from the `quality` suite.** Needs D1 (E2, E3
-  are done). Pubmed's `filter` leg and `deep`/`codesign` belong to D1;
-  kuairand is out of E5 (see D1).
+- [ ] **E5: openalex's `filter` leg; the report gains the unfiltered
+  cells retired from the `quality` suite, for the text datasets only.**
+  Ordered after D1; technically
+  independent of it and of H2 (a text dataset). The 10 M OpenAlex catalog
+  is not on the Hub: restage it on the pod (`openalex convert` streams 297
+  GB over S3, then `prep --keep-items 10000000`, `encode_text`,
+  `encode_queries`, `attrs`; [datasets](system/datasets.md#openalex)), or
+  `reshard` from a larger staged copy. `bench check --dataset openalex`,
+  then `campaign --suite filter --dataset openalex --resume --timeout 48`;
+  upload `e5/openalex`. **≈ 25-35 GPU-h** (10 M × 768 like pubmed, 20-46
+  min a cell) **+ ≈ 3 GPU-h** for a fresh encode; 4 streams by `--algo`.
 
 ## Phase F: the paper
 
 - [ ] **F2: finish the official-vs-reimplementation section** with D1's
   numbers: confidence intervals, paired tests and a second seed, p95 and
-  p99. Its goodreads numbers are on the gSASRec embeddings: rerun or
-  relabel per the user's decision (Needs the user). The section exists ([paper](paper/official-vs-reimplementation.md))
-  and marks each line that waits on D1. Needs D1.
+  p99. The section ([paper](paper/official-vs-reimplementation.md))
+  marks each line that waits on D1. Needs D1 and the user's goodreads
+  decision. **F2-R** (if the user chooses rerun): the goodreads
+  head-to-head on the E1c embeddings, b3 methodology
+  ([h2h.py](artifacts/kernel-opt/h2h.py)), **≈ 2 GPU-h**, one stream (the
+  arms interleave in one process).
 - [ ] **F4: package the artifacts**: a tagged `torchretrieve` release, a
   Zenodo DOI including the pinned official sdist, Hub datasets, oracles
   and results, a one-command reproduction, an anonymised mirror for
@@ -178,143 +350,40 @@ come before any sequential-dataset cell runs again.
 - [ ] **F5: write the paper**, every table produced by `bench report`.
   Needs everything above.
 
-## Phase G: after the paper
+## Estimates
 
-- [ ] **TF-3/TF-4 retune**: TF-3 (retune) and TF-4 (`evict_first`,
-  0-5 %), second-order after TF-9 (probe layout) and TF-1 (transposed
-  bloom index), which landed. Small, low priority. Needs a fresh
-  `bench report` head-to-head against the post-kernel-opt code: the
-  kernel-opt gate checked only the bloom kernel-only ratio, and the
-  end-to-end comparison in
-  [validation](validation.md#official-against-our-triton-reimplementation-citable-contested)
-  still reflects the pre-kernel-opt code.
-- [ ] **G-b: extended experiments**: a synthetic scale ladder to 240M and
-  1B items (L4, L5), a controlled pass-rate sweep (the LiNR V1/V2
-  crossover), co-design ablation depth, V3 bit width, an extended batch
-  grid (G10-G12, G15, G16).
-- [ ] **G-c: a resource paper about the library.** After F5.
-- [ ] **G-e: the two re-scoped parked plans** (implementation deferred
-  until after F5 by the user): `torch.export` of the composites is small
-  (the kernel side is export-clean; only three `Tensor | None` forward
-  params in `modules/linr.py` remain). The live upsert/delete API
-  (`LiveIndexMixin` on `retrieve.modules`) is medium-large, comparable in
-  scope to the kernel-opt pass: a new subsystem across five module
-  classes and both filters.
-- [ ] **TF-10: official capturability.** File the upstream issue: Meta's
-  scorer syncs because `fused_kmean_ann_cuda.cu` never passes the explicit
-  output size `faster_repeat_interleave` accepts. A patched build may be
-  measured only if a reviewer asks, labelled "not the official release".
+| step | A100 GPU-h | parallel streams |
+|---|---|---|
+| H2 | 0.5 | 1 |
+| R1 | 0.5 | 1 |
+| M1 | 0.5 | 1 (on a ≥ 2-GPU pod) |
+| L6 | ≈ 0.2 | 1 |
+| D1-A arxiv `deep` `linr_v3` | ≈ 6 | 2 |
+| D1-B arxiv `codesign` | ≈ 3-5 | 1 |
+| D1-E pubmed targeted rerun | ≈ 12 | 3 |
+| D1-F goodreads `filter` (E1c) | ≈ 4 | up to 4 |
+| D1-C goodreads `deep` | ≈ 25-45 | 2, each splittable by filter kind |
+| D1-D goodreads `codesign` | ≈ 2 | 1 |
+| D1-G gate reruns | ≈ 5 | by leg |
+| E5 openalex `filter` | ≈ 25-35 (+ 3 encode) | 4 |
+| D5-run postfilter baseline | ≈ 5-8 | by dataset |
+| D3 (after its code) | ≈ 3 | by dataset |
+| F2-R (if chosen) | ≈ 2 | 1 |
 
-## Sequential encoder follow-ups (not scheduled)
-
-- [ ] **KuaiRand d128 memory fix**: a single gather for the shared table's two
-  lookups (one dense gradient instead of two) or a sparse / row-wise
-  optimizer; d128 runs out of memory without it
-  ([probe](artifacts/seqrec-encoder/k128-probe-oom/README.md)). With it,
-  kuairand could join the `filter` suite at d128 like the others.
-- [ ] **Atomic `_resume.pt` write** (R10 F1): it is written in place, so a
-  crash during the ~45 s write destroys the only resume state. Writing to a
-  temporary file and `os.replace` doubles its peak on disk (~98 GB at
-  KuaiRand d64).
-- [ ] **Window val-day clicks** for `train_on_val` users with more than 200
-  of them, as `train.parquet` is windowed: 25 % of KuaiRand's val-day
-  transitions are not trained
-  ([validation](validation.md#gates)).
-- [ ] **Launch overhead / CUDA graphs** in the training step.
-- [ ] **goodreads d64 R@100**: −0.0039 against the bar, the one miss of the
-  success rule ([final models](validation.md#final-models-the-e1c-recipe)).
-- [ ] **Goodreads trainer-input tiebreak**: `cmd_prep` sorts by
-  `(user_id, ts)` with no tiebreak, so the order inside timestamp ties
-  (and which items fill a 200-window's oldest end) changes run to run
-  ([validation](validation.md#trainer-inputs-with-timestamps-data-gates-not-citable)).
-  A tiebreak moves the output off the Hub copy.
-- [ ] **yambda val/test row order**: the `uid` joins in `cmd_prep` give a
-  fresh row order each run; nothing may align to it by position.
-- [ ] **`--resume` of a `train_on_val` run on the GPU** has never run.
-
-## Known defects, unscheduled
-
-- Large `.log`/`.txt` dumps elsewhere in `docs/artifacts/` (the biggest:
-  two `cute-dsl-scorer` `kernel_only-*.txt` at ~182 KB each, an
-  `e3-openalex` convert log at 176 KB, a `cute-dsl-scorer` diagnostic at
-  135 KB) weren't touched by H1's cleanup — candidates for the same
-  Hub-or-drop treatment if the user wants them gone too.
-- `bench/report.py` appends a false provenance sentence ("These records
-  predate the D1 campaign...") to every non-citable report.
-- `partial` is stamped per process (`bench/run.py`, the `reasons0` list):
-  an eager-only pass marks every record `partial`, including `official`,
-  whose graph entry would be `not_capturable` anyway.
-- `bench/oracle.py`'s `item_embs.t().contiguous()` holds a second full
-  fp32 copy of the item table on top of the item table itself, so the
-  harness's real per-dataset limit at native width is about half the
-  device memory divided by `4·D` bytes, not the full device memory —
-  found staging OpenAlex at 768-d (15 M items fit the item table alone
-  but not both copies; scoped to 10 M instead, see
-  [validation](validation.md#datasets)). A view instead of a contiguous
-  copy would remove the second copy; `bench/` is gated, so this needs
-  its own check against the existing oracle results and golden cells.
-- **`bench campaign`'s default `--timeout` (6 h per group) is far too
-  short at scale**: pubmed `filter` cells take 20-46 min each at
-  D=768 × 10 M, and an arxiv `deep` `silvertorch` group took ~10 h.
-  pubmed's `filter` groups hit the default and lost 4 cells (recoverable
-  by `--resume`, at the cost of a manual follow-up pass); D1 restarted
-  `deep`/`codesign` with `--timeout 48` before they did. Worth a larger
-  default or a dataset/suite-scaled timeout before the next campaign this
-  size.
-- The shared Inductor cache (`/tmp/torchinductor_root`) does not
-  invalidate on a `code_version` change, so a graph-mode harness run
-  after a library edit can silently replay stale kernel code (found
-  during the kernel-opt pass: four compile tests passed against a stale
-  cache and failed correctly against a fresh one). The harness should key
-  its cache directory by `code_version`
-  ([storage](system/storage.md#environment)).
-- `linr_v2` and `linr_v3` diverge from their golden files (recall@100
-  4.5e-4 / 1.7e-5), for a cause still unidentified that predates the
-  kernel-opt pass ([validation](validation.md#harness-gates)).
-- The quality subset is a 10k prefix of the query file, not a seeded
-  sample. It is safe on the current datasets (files are shuffled) by
-  accident.
-
-## Unmeasured, unscheduled
-
-- LiNR V2 after the backend-parity fix: the arxiv and bloom cells, and
-  V3 stage 2 (the same kernel).
-- What the old harness's quality pass did to `linr_v4`'s batch; needs the
-  frozen golden worktree (`tmp/golden-rederive`).
-- `bloom_compact`'s `block_n` has not been retuned for the two-phase
-  compaction shape the kernel-opt pass introduced.
-- A GPU-kernel-technique survey (2026-09-26, web research) found
-  background reading, not scheduled work: a warp-ballot (`__ballot_sync`)
-  candidate-selection pattern used across recent GPU-IVF kNN kernels,
-  worth a one-time check against whether the probe kernel already does
-  something equivalent; a tunable-vectorization GPU bloom filter design
-  (arXiv 2512.15595) and a cuckoo-filter alternative (arXiv 2603.15486)
-  as citable comparisons for the transposed bloom-index kernel; a
-  bucket-based coalesced-access layout for filtered graph search
-  (GRAB-ANNS, arXiv 2604.16402) as a citable alternative mechanism to
-  the compact CSR-like probe layout; recall-bucketed / Pareto-frontier
-  reporting (NVIDIA cuVS Bench methodology) as a possible improvement to
-  `bench report`'s recall/latency tables, instead of point comparisons.
-  Two citations for the paper: Meta's own public SilverTorch numbers
-  (`github.com/meta-recsys/silvertorch`, an Engineering-at-Meta blog
-  post) as target figures for
-  [official-vs-reimplementation](paper/official-vs-reimplementation.md);
-  two ANN-benchmark trustworthiness critiques (arXiv 2507.00379, a
-  YDB.tech write-up) for
-  [provenance-and-disclosure](paper/provenance-and-disclosure.md). No
-  public LiNR reproduction exists anywhere to compare against.
+H3-H7 are CPU; L6 is a short library-suite run. Runnable now, before H2: D1-A, D1-B, D1-E (and E5's
+restage). The total is ≈ 95-130 GPU-h, of which D1 is ≈ 57-79.
 
 ## Dependencies
 
 ```
-H2 ─> R1 ─┬─> D1 (goodreads part; arxiv/pubmed resume needs neither)
-          └─> E4 (also needs the user's width decision)
-D1 ─┬─> D2, D3 ─┐
-    ├─> F2      ├─> F5 ─> G-c
-    ├─> F4      │
-    └─> E5 (E2, E3 done; openalex's `filter` leg + report extension)
-TF-3/TF-4 retune ─> rerun the head-to-head
+D1-A, D1-B, D1-E  (runnable now)
+H2 ─> R1 ─┬─> D1-F, D1-C, D1-D ─┐
+          └─> D5-code ─> D5-run (openalex cells also after E5)
+H5, H6, H7 ─────────────────────┼─> D1-G ─┬─> D3 ──────────┐
+D1-A, D1-B, D1-E ───────────────┘         ├─> F2 (+ F2-R)  ├─> F5
+                                          ├─> F4           │
+                                          └─> E5 ──────────┘
+D5-run ───────────────────────────────────────────────────┘
+H3, H4: before the next campaign (workarounds meanwhile: --timeout 48, a fresh cache per job)
+M1: before any timed step runs on a multi-GPU pod
 ```
-
-GPU steps still open: R1, D1, D2, D3, E4, E5, G-b (H2 needs one short golden run). Everything else runs
-on CPUs beside them.

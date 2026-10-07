@@ -44,7 +44,7 @@ prior for what trends on a later day.
 
 ## 4. Context
 
-`.chains/e4-kuairand/`: the A100 gSASRec d128 run logged val ndcg@10 0.0133 at epoch 2 and has no
+The A100 gSASRec d128 run (logs: Hub `artifacts/e4-kuairand`) logged val ndcg@10 0.0133 at epoch 2 and has no
 test number; the baseline research found no comparable published number.
 
 ## 5. Mechanism

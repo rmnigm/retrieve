@@ -1,7 +1,7 @@
 ---
 title: checkpoints
 created: 2026-09-26
-updated: 2026-09-29
+updated: 2026-10-07
 type: entity
 tags: [training]
 sources: [evaluation/training/, evaluation/eval_datasets/hub.py]
@@ -23,7 +23,7 @@ run writes out) see [datasets.md](datasets.md#training--evaluationtraining).
 
 ## What the harness reads
 
-Since the 2026-09-29 `dev/hstu` merge the sequential datasets are encoded
+The sequential datasets are encoded
 with the current trainer's E1c checkpoints (gSASRec body, sampled softmax
 with logQ, L2-normalized; [decisions](../decisions.md#sequential-encoder)).
 Metrics: [validation](../validation.md#final-models-the-e1c-recipe) (not
@@ -33,8 +33,8 @@ yet validated, not citable). Which older records this invalidates:
 | dataset config | ckpt-id | D | where it is |
 |---|---|---|---|
 | `goodreads.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | Hub (private) `pinkmeme/eval-goodreads-work-id` `checkpoints/` |
-| `yambda-500m.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | Hub (private) `pinkmeme/eval-yambda-500m` `checkpoints/` |
-| `kuairand.yaml` | `sasrec-ssm-logq-d64-trainval` | 64 | not kept anywhere (user): retrain with the [refit command.sh](../artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh) (roadmap E4) |
+| `yambda-500m.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | Hub (private) `pinkmeme/eval-yambda-500m` `checkpoints/`; yambda is out of the study |
+| `kuairand.yaml` | `sasrec-ssm-logq-d64-trainval` | 64 | not kept anywhere (user); KuaiRand is out of the study ([refit command.sh](../artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh)) |
 | `yambda-5b.yaml` | `gsasrec-d{dim}` | 64, 128 | Hub `pinkmeme/eval-yambda-5b`; no E1c model trained |
 
 Each E1c dir holds `best_model.pt`, `item_embs.pt`, `config.json`,

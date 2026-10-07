@@ -20,5 +20,5 @@ is unchanged (val 0.0233, test 0.0046). The measured mechanism is temporal drift
 the val day's most-clicked items scores 0.0314 on test, ~7x this model. See
 [the diagnosis](../k64-diagnosis/README.md).
 
-Context, not a bar: the earlier A100 gSASRec d128 KuaiRand run (`.chains/e4-kuairand/`) logged val
+Context, not a bar: the earlier A100 gSASRec d128 KuaiRand run (logs: Hub `artifacts/e4-kuairand`) logged val
 ndcg@10 0.0133 at epoch 2 and has no final test number; R-k64 had val 0.0218 at epoch 2.

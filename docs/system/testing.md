@@ -1,7 +1,7 @@
 ---
 title: testing
 created: 2026-09-26
-updated: 2026-09-29
+updated: 2026-10-07
 type: concept
 tags: [testing, library]
 sources: [retrieve/tests/]
@@ -85,7 +85,7 @@ checking, or it exists to catch a defect the shared twin could share),
 and the test's docstring says why, the way
 [`test_clause_mask.py`](../../retrieve/tests/parity/test_clause_mask.py)
 does ("intentionally materializing the `[B, N, C, A_max]` intermediate
-this kernel exists to avoid"). At the time of writing,
+this kernel exists to avoid"). Today
 `test_codesigned_probe_score.py`, `test_codesigned_probe_score_exact.py`,
 `test_compact_order.py` and `test_official.py` import `ops.reference`
 directly; `test_bloom_match.py`, `test_bloom_compact.py`,
@@ -839,7 +839,7 @@ on the custom op, not on the Python source of its `@triton_op` body. With a warm
 cache (`/tmp/torchinductor_<user>`), a compiled call can replay the *old* body. Measured:
 after the OPORP candidate path changed its output width, four `test_linr.py` compile gates
 failed with the pre-change width on the warm cache and passed on a cold one. The same
-hazard applies to any compiled (`graph`-mode) harness run on a box whose cache predates a
+hazard applies to any compiled (`graph`-mode) harness run on a pod whose cache predates a
 library change.
 The pytest config in [pyproject.toml](../../retrieve/pyproject.toml)
 collects `test_*.py` only.

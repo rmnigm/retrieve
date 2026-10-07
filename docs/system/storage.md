@@ -1,12 +1,11 @@
 ---
 title: storage
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-10-07
 type: entity
 tags: [environment]
 sources: [infra/runpod/]
 confidence: medium
-contested: true
 ---
 
 # Storage on the GPU pods
@@ -23,26 +22,22 @@ from the image in [`infra/runpod/Dockerfile`](../../infra/runpod/Dockerfile):
 
 | | where | default |
 |---|---|---|
-| container disk (`/`) | ephemeral, recreated with the container | 60 GB (`pod.sh up --disk`) |
-| `/workspace` | a pod volume, or a RunPod network volume with `--nv` (the repo then sits at `/workspace/<pod>/retrieve`) | 100 GB pod volume (`--volume`) |
+| container disk (`/`) | ephemeral, recreated with the container | 200 GB (`pod.sh up --disk`) |
+| `/workspace` | a pod volume, or a RunPod network volume with `--nv` (the repo then sits at `/workspace/<pod>/retrieve`) | 30 GB pod volume (`--volume`) |
 | venv | `/venvs/retrieve` (`UV_PROJECT_ENVIRONMENT`), baked into the image | |
 
+`pod.sh up --gpus N` gives one pod N GPUs, `--pods M` launches M pods. The
+image creates `/data` and `/scratch/{campaigns,inductor,parity,hf,wt,tmp}`;
 [`bashrc.sh`](../../infra/runpod/rootfs/opt/retrieve-pod/bashrc.sh) sets
-`REPO_DIR=/workspace/retrieve`, `RETRIEVE_DATA_ROOT=/workspace/data`,
-`HF_HOME=/workspace/.cache/huggingface` and `POD_STATE=/workspace/.pod-home`;
-bootstrap clones the repo and runs `rp-sync` (`uv sync --all-packages
---all-groups --extra official`).
-
-**Contested.** The image keeps data and the Hub cache on `/workspace`,
-while the placement rule below keeps only the repository there. The rule
-comes from a pod with a network volume, where `/workspace` is slow and
-small; the image's defaults come from `pod.sh`'s pod volume, which has not
-been measured. Until it is, check which kind of `/workspace` a pod has
-before staging a dataset.
+`REPO_DIR=/workspace/retrieve`, `RETRIEVE_DATA_ROOT=/data`,
+`HF_HOME=/scratch/hf` and `POD_STATE=/workspace/.pod-home`; bootstrap
+clones the repo and installs the pre-commit hook. So the image's defaults
+follow the placement rule below: only the repository and the pod's own
+state live on `/workspace`.
 
 ## Measured on a network-volume pod
 
-Measured 2026-09-15 on pod `5ajcbzrjau5z1f` (A100-SXM4-80GB, EUR-IS-1):
+Measured on an A100-SXM4-80GB pod with a network volume (EUR-IS-1):
 
 | | `/` (container overlay) | `/workspace` (network volume) |
 |---|---|---|
@@ -88,6 +83,11 @@ outputs behind documented findings live at `pinkmeme/eval-results`
 and may be deleted locally — once `bench upload --verify` has passed.
 Staging is **pull → use → prune → re-pull**, never hoard.
 
+The private Hub quota is not exposed by the API; it measures between ~95.8
+and 116 GB. Deleting a path frees no private quota until the repo's history
+is squashed (`HfApi().super_squash_history`): usage after the results
+cleanup is 95.76 GB, of which 84.09 GB are current files.
+
 A layout that follows the rule on a network-volume pod:
 
 ```
@@ -108,13 +108,13 @@ resolved by `evaluation/eval_datasets/hub.py:data_root()`.
 ### Environment
 
 ```bash
-export RETRIEVE_DATA_ROOT=/data                           # the image default is /workspace/data
+export RETRIEVE_DATA_ROOT=/data                           # the image default
 export UV_PROJECT_ENVIRONMENT=/venvs/retrieve             # reuse; see the venv budget
 export TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/<job>    # private per job
 export HF_HOME=/scratch/hf
 ```
 
-`TORCHINDUCTOR_CACHE_DIR` must be **private per concurrent job**: inductor's
+`TORCHINDUCTOR_CACHE_DIR` must be **private per job** (one job per GPU, so per GPU on a multi-GPU pod): inductor's
 on-disk FX cache does not invalidate when a `@triton_op` host wrapper's Python
 source changes, so a shared `/tmp/torchinductor_root` silently serves stale
 kernels ([reproduction-deviations.md](../paper/reproduction-deviations.md) D-7).
@@ -169,20 +169,13 @@ df -h /                                 # confirm
 
 Size the pod's disks for these at `pod.sh up` (`--disk`, `--volume`):
 
-- **E2 (PubMed), as the 10 M slice, streams.** The ETL consumes the
+- **PubMed, as the 10 M slice, streams.** The ETL consumes the
   download shard by shard. Planned peak is about 27 GB for the slice
   (69 GB for the full catalog). Measured on the staged copy: 17 GB of
   layout plus 0.4 GB of PMID lists kept in `_raw/`, and 57 min of
   download-bound `convert` with MEDLINE streaming beside it
   ([datasets](datasets.md#disk-budget-and-the-slice)).
-- **E4 (KuaiRand-27K) is small on disk.** Measured on the staged copy:
-  13.6 GB raw (the tarball and the category supplement), 4.5 GB of
-  processed parquet and 8.3 GB of bench layout. Most of the layout is the
-  7.2 GB attribute tensor. `convert` streams the tarball, so the 46 GB
-  unpacked form never lands on disk. Its checkpoint adds one
-  32 M × 128 fp32 table, 16.4 GB
-  ([datasets](datasets.md#kuairand)).
-- **E3 (OpenAlex) only fits as a stream.** The works snapshot is 707 GB of
+- **OpenAlex (roadmap E5) only fits as a stream.** The works snapshot is 707 GB of
   parquet and is never landed: `openalex convert` reads 297 GB of projected
   columns over S3 (572 s at 64 workers) and stages the filtered, hash-sampled
   rows (16 GB). The 10 M catalog is ~23 GB (papers 6.3, fp16 items 15, attrs

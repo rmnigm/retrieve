@@ -1,8 +1,7 @@
 # Filtering
 
-Attribute-filtered retrieval: only return items matching a structured predicate. (The
-quantization utilities this page used to describe are in
-[`indexing-and-ops.md`](indexing-and-ops.md).)
+Attribute-filtered retrieval: only return items matching a structured predicate. The
+quantization utilities are in [`indexing-and-ops.md`](indexing-and-ops.md).
 
 ## Attribute filtering
 

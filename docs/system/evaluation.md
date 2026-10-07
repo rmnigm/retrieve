@@ -1,7 +1,7 @@
 ---
 title: evaluation
 created: 2026-09-26
-updated: 2026-09-29
+updated: 2026-10-07
 type: entity
 tags: [harness]
 sources: [evaluation/bench/, evaluation/config/, evaluation/tests/]
@@ -40,7 +40,7 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    commit, git commit + dirty flags, branch,
    `code_version`, hostname, python, UTC start, and one `nvidia-smi` clock
    sample (`env.sm_mhz_idle`, `mem_mhz`, `sm_max_mhz`, `power_limit_w`).
-   Clocks cannot be locked on this box
+   Clocks cannot be locked on the pods
    ([decisions](../decisions.md#harness)), so every perf entry carries its
    own under-load `sm_mhz` (see [Reading the numbers](#reading-the-numbers)).
 2. **Inputs, once per (dataset, dim).** Item embeddings, queries, held-out
@@ -148,8 +148,8 @@ docstrings cite these steps as `§2.1`-`§2.8`.
 8. **Cell cost.** Quality once per cell (not per k); perf 3 k × 3 bs × 2
    modes × 3 windows. Build params sweep separately from query params (one
    build, many query configs). Measured per-cell costs (D1's arxiv `deep`
-   groups, pubmed's D=768 filter cells) are in the roadmap's timeout-defect
-   note ([roadmap](../roadmap.md#known-defects-unscheduled)).
+   groups, pubmed's D=768 filter cells) are in roadmap H3
+   ([roadmap](../roadmap.md#phase-h-harness-prerequisites)).
 
 The record carries `schema_version`, `status`, `code_version` in the
 resume key, `git_branch` / `python` in `env`, `disabled: true` sweeps and
@@ -174,7 +174,7 @@ the oracle fingerprint in the blob's file name; see
   samples, and `env.clocks_drift` fires (and sets the record's `unstable`)
   when any of them is more than 5 % (`run.CLOCK_DRIFT`) from the process's
   *first* under-load sample. An idle sample reads low and would flag the GPU
-  boosting, and there is no `clocks_locked` field because this box cannot
+  boosting, and there is no `clocks_locked` field because the pods cannot
   lock clocks. Compare latencies across runs against `perf[].sm_mhz`.
   [c4_gate.py](../artifacts/evaluation-harness-v2/c4_gate.py) reads the
   schema-1 `env.sm_mhz` field.
@@ -291,9 +291,9 @@ Nine files under [`evaluation/config/`](../../evaluation/config/):
 [`yfcc10m.yaml`](../../evaluation/config/yfcc10m.yaml),
 [`pubmed.yaml`](../../evaluation/config/pubmed.yaml) and
 [`openalex.yaml`](../../evaluation/config/openalex.yaml) and
-[`kuairand.yaml`](../../evaluation/config/kuairand.yaml) (the first three in
-the `filter` suite, pubmed and openalex at 768; kuairand, d64 only, is out of
-it until roadmap E4 settles its width), and
+[`kuairand.yaml`](../../evaluation/config/kuairand.yaml) (goodreads, arxiv,
+yfcc10m, pubmed and openalex in the `filter` suite, pubmed and openalex at
+768; yambda and kuairand are out of the study), and
 [`suites.yaml`](../../evaluation/config/suites.yaml). `users_limit:
 10000` and the goodreads/arXiv sweeps, ks and batch sizes match the
 [golden cells](../../evaluation/golden/README.md), so the two stay

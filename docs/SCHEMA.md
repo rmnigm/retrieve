@@ -1,7 +1,7 @@
 ---
 title: schema
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-10-07
 type: summary
 tags: [process]
 sources: [CLAUDE.md]
@@ -22,7 +22,7 @@ When a fact stops being true, change or delete it.
 ## Domain and scope
 
 In scope: the `retrieve` library, the `evaluation` harness (`bench`,
-`training`, `eval_datasets`), the datasets, the A100 environment, the
+`training`, `eval_datasets`), the datasets, the GPU pods, the
 work queue, the standing decisions and the two process contracts.
 
 Out of scope: the library user guide, which ships in the sdist and lives in
@@ -38,7 +38,8 @@ docs/
 ├── SCHEMA.md        this file
 ├── index.md         catalog, one line per page
 ├── log.md           one line per structural change to the wiki
-├── roadmap.md       the open work queue: steps, gates, dependencies
+├── roadmap.md       the open work queue: steps, gates, estimates, dependencies
+├── backlog.md       known work that is not queued
 ├── decisions.md     standing decisions and constraints in force
 ├── validation.md    what is validated now: every gate's state, and the measured results that stand
 ├── contracts/       process contracts: agent orchestration, coding guidelines
@@ -92,7 +93,7 @@ contested: true                   # optional; see the contradiction policy
 
 Types used here: `entity` for a package, a dataset family or the box;
 `concept` for a mechanism (filtering, the measurement protocol); `summary`
-for the roadmap, the decisions and the contracts.
+for the roadmap, the backlog, the decisions and the contracts.
 
 ## Tag taxonomy
 
@@ -103,7 +104,7 @@ for the roadmap, the decisions and the contracts.
 - datasets: `eval_datasets`, the on-disk layout, dataset ETL
 - training: the `training` package, gSASRec checkpoints
 - testing: the pytest suites and their gates
-- environment: the GPU box, disks, venvs
+- environment: the GPU pods, disks, venvs
 - process: how work is dispatched, written, validated
 - validation: gates and the measured results that stand
 - roadmap: the queue, its steps and gates

@@ -1,7 +1,7 @@
 ---
 title: validation
 created: 2026-09-26
-updated: 2026-09-29
+updated: 2026-10-07
 type: summary
 tags: [validation, testing, harness]
 sources: [retrieve/tests/, evaluation/tests/, evaluation/golden/, evaluation/results/, docs/artifacts/, docs/artifacts/hub-index.md]
@@ -19,7 +19,7 @@ under [artifacts/](artifacts/).
 **Environment all rows were measured on**: A100-SXM4-80GB, torch
 2.10.0+cu128, triton 3.6.0, nvcc 12.4 (CUDA 12.8 runtime), Python 3.11,
 Meta's `silvertorch` at the pinned commit. SM clocks cannot be locked; the
-sampled clock under load was 1410 MHz. A new box is a new environment:
+sampled clock under load was 1410 MHz. A new pod is a new environment:
 rerun the library suite before trusting any row on it.
 
 ## Library gates
@@ -29,7 +29,7 @@ rerun the library suite before trusting any row on it.
 | Library suite (`retrieve/tests`, GPU, `official` extra installed) | **green**, 799 passed at the last full run (branch `dev/pubmed-fixes`, cold inductor and Triton caches; nothing skipped) | no tolerance loosened; the cross-backend LiNR tolerances tightened from `1e-3` to `2e-6`; every tolerance stated at its call site; see [testing](system/testing.md) |
 | Exact LiNR scoring precision (L1) | **green**: `PostfilterKNN` (± mask) and `PrefilterKNN` (dense; torch and Triton candidates) return fp32 scores within `2e-6` of an fp64 dot of their own fp16 inputs and select the fp64 top-100 up to ties inside that bound, on a YFCC-shaped case whose top-100 spans ~20 fp16 quanta; an fp16 score of the same dots misses (recall 0.88 / 0.92), asserted on the same inputs. Four of the five cases go red with the fp16 output restored (the Triton kernel already wrote fp32) ([`test_accumulation.py`](../retrieve/tests/parity/test_accumulation.py)) | the cuBLAS path's tensor-core accumulator measures 1.1e-6 from fp64 at D=128 (a plain fp32 sum ~1e-7); storage stays fp16 ([decisions](decisions.md#library)) |
 | Triton vs reference ops, every parity file | **bit-exact** (`torch.equal` scores, ids up to ties) for `codesigned_probe_score` (+ bloom) and `codesigned_probe_score_exact` on the compact CSR layout (also against a loop-built oracle and, for bloom, the row-wise subset test), and for `oporp_1bit_match_topk_*`, `clause_mask`, the compaction ops; **not bit-exact** for `fused_masked_knn_topk` | the fused kernel's fp32 `tl.sum` and the reference's `bmm` reduce in different orders: measured drift ≤ 6e-8 at D ≤ 128 on unit-norm data, gated at `atol=1e-6` |
-| Kernel identities (Q3) | **bit-exact**: indirect OPORP over `arange(N)` ≡ full scan; bloom op with an all-pass query signature ≡ no-bloom op; `clause_compact` ≡ `compact_mask(clause_mask)` on counts and the `[:counts]` prefix; row alone ≡ row in batch (fused, both probe scorers, OPORP); item-table permutation permutes ids only (fused, `codesigned_probe_score`, OPORP) | Triton only, on this box |
+| Kernel identities (Q3) | **bit-exact**: indirect OPORP over `arange(N)` ≡ full scan; bloom op with an all-pass query signature ≡ no-bloom op; `clause_compact` ≡ `compact_mask(clause_mask)` on counts and the `[:counts]` prefix; row alone ≡ row in batch (fused, both probe scorers, OPORP); item-table permutation permutes ids only (fused, `codesigned_probe_score`, OPORP) | Triton only, on the A100 |
 | Kernel cutoffs and degenerate rows (Q3) | **green**: both sides of `_P_BUCKETS[0]` / `_N_BUCKETS[0]` and `P % block` ∈ {0, 1} (read from the kernels' constants, regime asserted); `count = 0` / `1` rows give exact `(-1, -inf)` tails | |
 | Addressing past 2³¹ elements (kernel-opt) | **green**: [`test_large_offsets.py`](../retrieve/tests/correctness/test_large_offsets.py), output axis (`B = 144, N = 16M`: `clause_mask`, `clause_compact`, `fused_masked_knn_topk`, `oporp_1bit_match_topk_indirect`) and item axis (a `[140M, 16]` table: `bloom_match`, `bloom_compact`, `clause_mask`, `clause_compact`, `oporp_1bit_match_topk_full`), planted answers. All five cases fail on the pre-change code (illegal address; `bloom_match` also overflowed `grid_y`), and each kernel's widening was mutation-checked | skipped below 48 / 24 GiB free. The probe scorers' `B·P ≥ 2³¹` output axis has the same `row_base` but no large case. Timing of the narrow path: all 13 cases within noise of the pre-change kernels, interleaved ([artifact](artifacts/kernel-opt/phase1.md); [kernels](system/kernels.md#addressing)) |
 | Unwritten-slot (poisoned `torch.empty`) | **green** for every kernel writing into `torch.empty`: `fused_masked_knn_topk`, `codesigned_probe_score` (+ bloom), `codesigned_probe_score_exact`, OPORP full and indirect (no poison in the output); the two compaction ops write `[:counts]` only, so there the prefix equals the reference and the poison **survives** past `counts` (red if a tail store comes back) | allocation hit counted, so a moved allocation fails the test |
@@ -57,12 +57,12 @@ rerun the library suite before trusting any row on it.
 
 | gate | state | notes |
 |---|---|---|
-| Harness suite (`evaluation/tests`, CPU with `CUDA_VISIBLE_DEVICES=""`) | **green**: 277 passed / 1 skipped at the `dev/hstu` merge into `staging` (`61f69e4`, the A100 box, CPU). L1's fp32-output `mm` / `bmm` (`out_dtype=`) have no CPU kernel; the three call sites now branch on `is_cuda` and use fp32 operands on CPU ([kernels](system/kernels.md#score-conventions)), CUDA unchanged | the skip reads the raw `_raw/yfcc10m/query.metadata.public.100K.spmat`, which is not on the box. pytest's `pythonpath` makes the suite import the checkout it sits in; before that, a worktree on the shared venv tested the main checkout |
+| Harness suite (`evaluation/tests`, CPU with `CUDA_VISIBLE_DEVICES=""`) | **green**: 277 passed / 1 skipped at the `dev/hstu` merge into `staging` (`61f69e4`, an A100 pod, CPU). L1's fp32-output `mm` / `bmm` (`out_dtype=`) have no CPU kernel; the three call sites now branch on `is_cuda` and use fp32 operands on CPU ([kernels](system/kernels.md#score-conventions)), CUDA unchanged | the skip reads the raw `_raw/yfcc10m/query.metadata.public.100K.spmat`, which is not staged by default. pytest's `pythonpath` makes the suite import the checkout it sits in; before that, a worktree on the shared venv tested the main checkout |
 | Convention gates in the harness suite | **green** | one reader per `RETRIEVE_*` variable (`test_env_readers.py`); the dependency direction with a file-count floor and stale-entry failures (`test_dependency_direction.py`, which dropped four stale edges and nine unused library names); every `config/*.yaml` × every suite through `load_matrix` (`test_config.py`). Each was checked to go red on a planted violation |
 | `ruff check evaluation` (B, C4, SIM, RUF100, BLE001, PLC0415 on top of E, W, F, I, UP) | **clean**, ruff 0.15.6 | per-file ignores with reasons: ETL inline imports, goodreads' broad `except` (its own cleanup) ([evaluation](system/evaluation.md#lint)) |
 | `ruff format --check evaluation` | **clean**, ruff 0.15.6 | the pre-commit format hook covers `retrieve/` and `evaluation/` ([evaluation](system/evaluation.md#lint)) |
 | `scripts/check_doc_links.py` | **0 problems**: links, 126 backticked repo paths, 131 `bench` / `eval-data` / `train` subcommands | subcommands read from the click sources with `ast`; floors of 60 paths / 50 calls catch a broken pattern; `docs/log.md` (history) is exempt from the path check and `evaluation/data` (gitignored) is allowed. Needs the gitignored `articles/` present: a fresh clone or worktree reports its four `articles/` links broken. It checks link targets, not `#section` anchors |
-| Golden baseline (`evaluation/golden/`) against the v2 harness | Rerun on `dev/l1-l2` against the pre-change tree on this box, same command both sides (quality only, eager; [artifact](artifacts/l1-l2/README.md#golden-cells)). 8 of the 9 comparable cells (goodreads LiNR V2-V3, SilverTorch triton / official at `n_probe` 24 and 32; arXiv SilverTorch triton at 24 and 32) are **identical** to the pre-change tree (max \|diff\| 0 over 24 oracle and held-out metrics each), after L1 and again after L2. `linr_v1_filter_mask` **moves by design** (L1's fp32 scores): every oracle metric up, `recall_oracle@100` +2.9e-5, `@1000` +1.5e-4, now equal to `linr_v2`/triton's (already fp32) at @100 and @500; held-out within ±3e-5. V1's golden cell was **re-derived** accordingly (old harness, L1 + L2's library, twice, identical on every quality column; [golden README](../evaluation/golden/README.md#provenance)), so V1 now meets it at 0.0: the old harness's new numbers equal the v2 harness's. The standing residuals are unchanged: arXiv `silvertorch` recall@100 2.0e-6; `linr_v2` 4.5e-4 and `linr_v3` 1.7e-5 against their golden JSONs, cause unidentified and predating `dev/kernel-opt` | the golden `torch` and `linr_v4` cells have no counterpart in today's suites; the old `linr_v4` residual (recall@100 7.3e-5) is not rerunnable. The goodreads golden cells are on the gSASRec checkpoint `gsasrec-d128-drop0.5-id`, which `config/goodreads.yaml` no longer points at ([encoder switch](#encoder-switch-evals-to-redo)) |
+| Golden baseline (`evaluation/golden/`) against the v2 harness | Rerun on `dev/l1-l2` against the pre-change tree on the A100, same command both sides (quality only, eager; [artifact](artifacts/l1-l2/README.md#golden-cells)). 8 of the 9 comparable cells (goodreads LiNR V2-V3, SilverTorch triton / official at `n_probe` 24 and 32; arXiv SilverTorch triton at 24 and 32) are **identical** to the pre-change tree (max \|diff\| 0 over 24 oracle and held-out metrics each), after L1 and again after L2. `linr_v1_filter_mask` **moves by design** (L1's fp32 scores): every oracle metric up, `recall_oracle@100` +2.9e-5, `@1000` +1.5e-4, now equal to `linr_v2`/triton's (already fp32) at @100 and @500; held-out within ±3e-5. V1's golden cell was **re-derived** accordingly (old harness, L1 + L2's library, twice, identical on every quality column; [golden README](../evaluation/golden/README.md#provenance)), so V1 now meets it at 0.0: the old harness's new numbers equal the v2 harness's. The standing residuals are unchanged: arXiv `silvertorch` recall@100 2.0e-6; `linr_v2` 4.5e-4 and `linr_v3` 1.7e-5 against their golden JSONs, cause unidentified and predating `dev/kernel-opt` | the golden `torch` and `linr_v4` cells have no counterpart in today's suites; the old `linr_v4` residual (recall@100 7.3e-5) is not rerunnable. The goodreads golden cells are on the gSASRec checkpoint `gsasrec-d128-drop0.5-id`, which `config/goodreads.yaml` no longer points at ([encoder switch](#encoder-switch-evals-to-redo)) |
 | Graph latency against the golden | passes at batch 8 and 16 (ratio 0.96-1.03 at matched clock) | batch 1 is inside the golden's own repeat noise (up to 21 %) |
 | CUDA-graph capture | every capturable arm captured, `cudagraph_skips == 0` | `official` is not capturable and records a null entry with a reason |
 | Resume after SIGTERM | passes, no duplicate records | |
@@ -140,10 +140,11 @@ ok, after the license-clause fix and its all4 rerun), yfcc10m (7/7 ok, L4
 confirmed working at D=192), pubmed (44/56 ok — see [datasets](#datasets)
 for the `linr_v3` OOM and the 6 h timeout gaps). All four are on the Hub
 (`d1/<dataset>`), NOT CITABLE (D1's gate is not green). `deep` and
-`codesign` (S9) ran partly on arxiv (`d1/arxiv-deep-partial`); goodreads's have not started
-and run on the new encoder.
+`codesign` (S9): arxiv `deep` holds 803 of 870 cells (`d1/arxiv-deep-partial`), arxiv
+`codesign` and goodreads's two legs have no records; goodreads runs on the E1c encoder. What
+remains is roadmap D1-A..G.
 
-**Code_version policy for this campaign (user decision, 2026-09-29):**
+**Code_version policy for this campaign (user decision):**
 `code_version` is a hash of the `retrieve/src/retrieve` subtree (`bench/measure.py`), but a fix there does not
 retroactively invalidate every existing D1 record — only the specific
 arms the fix actually changes get rerun; everything else stays at its
@@ -159,33 +160,85 @@ Every other D1 record stays at `72e5a90`. Do not repeat this reasoning
 from scratch for the next fix — re-derive it from that fix's own gates
 each time, and update this paragraph.
 
-A cross-scale filter comparison across all four datasets (same operating
-point, same completed cells per arm) is in the `campaign-d1` chain,
-2026-09-28 — not reproduced here since it is not yet citable and this
-page tracks current state, not campaign narrative. Headline shape: exact
-LiNR (V1, V2) holds ~0.998-0.9997 recall at every scale measured;
-SilverTorch triton stays sub-millisecond at bs=1 through 10M items at
-D=192 then rises to 3-4 ms at D=768; SilverTorch's recall at fixed
-`n_probe` falls with scale (not scale-invariant — the `deep` sweep's
-`n_probe` curves are the right place to read this); official vs triton
-SilverTorch are within 1e-4 recall except on yfcc10m (official ~0.01
-lower), and official is slower everywhere except pubmed, where it
-overtakes triton at bs=16 QPS (598 vs 359). That crossover was the triton
-probe scorer's register spill at `D_PAD = 1024`, since fixed (row
-*Probe-scorer tile per width*); pubmed's triton cells predate the fix.
-
 `codesign` (S9) wiring: `bloom_path` reaches `OfficialConfig` (unit tests
 in `test_algos.py` / `test_config.py`); one early smoke cell (pre-dating
 the real `codesign` suite run) found `full` faster than `partial` on one
-goodreads cell, one seed, unlocked clocks — not a finding, the real
-`codesign` suite run (in progress) supersedes it.
+goodreads cell, one seed, unlocked clocks — not a finding; the `codesign`
+legs (roadmap D1-B, D1-D) decide.
+
+### Cross-scale filter comparison (not yet validated)
+
+The four `filter` legs at the same operating point, over the cells every
+arm completed; table and script on the Hub in `artifacts/d1-campaign`
+([hub-index](artifacts/hub-index.md)). Redone at roadmap D1-G. Goodreads
+is on the gSASRec embeddings (**stale**, [encoder switch](#encoder-switch-evals-to-redo));
+yfcc10m is one cell; pubmed is 6 cells, its Triton SilverTorch timed on
+the spilling tile (row *Probe-scorer tile per width*).
+
+| dataset | arm | `recall_oracle@100` mean (min) | bs 1 ms | bs 16 QPS | index MiB |
+|---|---|---|---|---|---|
+| goodreads (stale) | V1 | 0.9997 | 0.558 | 7,456 | 292 |
+| | V2 | 0.9997 | 0.611 | 5,714 | |
+| | V3 | 0.8772 (0.6946) | 1.309 | | |
+| | official, `n_probe` 24 / 32 | 0.8364 / 0.8708 | ~1.02 | | |
+| | triton, `n_probe` 24 / 32 | 0.8364 / 0.8708 | 0.561 / 0.567 | ~27.2k | |
+| arxiv | V1 | 0.9988 | 1.520 | | |
+| | V2 | 0.9988 | 0.905 | | |
+| | V3 | 0.7598 | 1.393 | | |
+| | official | 0.8373 / 0.8651 | ~1.11 | | |
+| | triton | 0.8375 / 0.8653 | 0.551 / 0.615 | ~25.9k | |
+| yfcc10m | V1 | 0.9886 | 9.327 | | |
+| | V2 | | 24.076 | | |
+| | V3 | 0.4967 | 23.43 | | |
+| | official | 0.5349 / 0.5595 | 7.44 | | |
+| | triton | 0.5454 / 0.5700 | 0.438 / 0.532 | | |
+| pubmed | V1 | 0.9978 | 11.468 | | |
+| | V2 | | 6.031 | | |
+| | official | 0.6744 / 0.7115 | 3.003 | 598 | |
+| | triton (pre-fix tile) | 0.6745 / 0.7116 | 3.110 / 4.015 | 359 / 272 | |
+
+Exact LiNR (V1, V2) holds ~0.998-0.9997 recall at every scale; SilverTorch's
+recall at fixed `n_probe` falls with scale (the `deep` sweep's `n_probe`
+curves are where to read it); Triton SilverTorch stays sub-millisecond at
+bs 1 through 10 M items at D = 192.
+
+**Official against Triton by filter kind** (ms at bs 1 / bs 16, official
+first). Official clause cells time our `pack_mask` adapter (51.67 MiB × bs,
+flat in `n_probe`), not Meta's kernels.
+
+| dataset | clause | bloom |
+|---|---|---|
+| goodreads (stale) | 1.01 / 2.44 vs 0.53 / 0.53 | 1.16 / 1.33 vs 0.73 / 0.72 |
+| arxiv | 1.11 / 7.07 vs 0.53 / 0.54 | 1.10 / 1.32 vs 0.70 / 0.72 |
+| yfcc10m (clause only; Meta's kernels never timed) | 7.44 / 72.6 vs 0.49 / 2.92 | — |
+| pubmed (Triton pre-fix tile) | 3.00 / 26.96 vs 3.61 / 52.3 | 1.11 / 2.22 vs 3.31 / 47.1 |
+
+**yfcc10m: official recall ~0.0105 below Triton.** The official arm runs
+its default `score_path="fp16"`; the bit-exact gate covers the int32 path
+only. Held-out recall@100 is identical (0.95493 / 0.95915), but mrr@100
+0.7783 → 0.7626, ndcg@100 0.8198 → 0.8074, `jaccard@100` 0.8896.
+
+**Results audit** (the D1 records as of the pause):
+
+- 39 arxiv `deep` official cells hold only the parity `reference` entry,
+  so their parity cannot be checked; pubmed bloom `c0c2` official has no
+  Triton partner.
+- Triton `n_probe` 4 is slower than 8 in `graph` mode at `n_lists` 1664,
+  bs 8 / 16 (0.200 vs 0.174 ms, 180 of 180 pairs): `n_probe` 4 is
+  dominated.
+- Eager-vs-graph bit-exactness cannot be checked from the records (the
+  ids are not stored per mode).
+- `unstable` fired on 349 of 644 records, 268 from clock drift alone
+  (1275 ↔ 1410 MHz).
+- Seed spread ≤ 0.0076 recall; V1 and V2 recall agree to 1.7e-5.
+- Pubmed `c3_journal_reverse` records carry held-out recall 0.0 where it
+  should be null (roadmap H7).
 
 ## Encoder switch: evals to redo
 
-Since the `dev/hstu` merge (2026-09-29) the harness encodes the sequential datasets with the
-current trainer's E1c checkpoints ([decisions](decisions.md#sequential-encoder)): goodreads and
-yambda-500m `sasrec-ssm-logq-d{dim}`, kuairand `sasrec-ssm-logq-d64-trainval`. yambda-5b keeps
-`gsasrec-d{dim}` (no new model). The new checkpoints are L2-normalized, so both the item table and
+The harness encodes the sequential datasets with the current trainer's E1c checkpoints
+([decisions](decisions.md#sequential-encoder)): goodreads and yambda-500m
+`sasrec-ssm-logq-d{dim}`. yambda-5b keeps `gsasrec-d{dim}` (no new model). Both yambda datasets are out of the study. The new checkpoints are L2-normalized, so both the item table and
 the queries change: every oracle, recall and latency number on these datasets is a different
 experiment. Text datasets (arxiv, yfcc10m, pubmed, openalex) are unaffected.
 
@@ -200,8 +253,8 @@ key carries the input identity (roadmap H2).
 | D1 `deep` / `codesign`, goodreads | not started | — | run on the new encoder only (roadmap D1) |
 | Official vs Triton head-to-head, goodreads (`b3`, kernel-opt `h2h`) | `gsasrec-d128-drop0.5-id` | stands as a gSASRec-embedding measurement; not comparable to D1's new goodreads cells | rerun on the new encoder before F2 quotes goodreads |
 | Golden baseline, goodreads cells (`evaluation/golden/`) | `gsasrec-d128-drop0.5-id` | stands; the gate compares harnesses on fixed inputs | keep on the gSASRec checkpoint (roadmap H2 pins it); no rerun |
-| E4 filter cell, kuairand (`artifacts/e4-kuairand`) | `gsasrec-d128-shared` (deleted) | **stale, not reproducible** | retrain d64, rerun the leg (roadmap E4) |
-| `quality` suite, yambda-500m | `gsasrec-d{dim}-drop0.5` | retired suite; no current records | only if unfiltered cells come back (E5) |
+| kuairand filter cell (`artifacts/e4-kuairand`) | `gsasrec-d128-shared` (deleted) | stale, not reproducible; KuaiRand is out of the study | none |
+| `quality` suite, yambda-500m | `gsasrec-d{dim}-drop0.5` | retired suite; no current records; yambda is out of the study | none |
 | arxiv, yfcc10m, pubmed, openalex (every suite) | text embeddings | unaffected | none |
 
 ## Datasets
@@ -209,11 +262,11 @@ key carries the input identity (roadmap H2).
 | dataset | state |
 |---|---|
 | goodreads | staged, layout checked. Oracles built for the gSASRec d128 inputs only; the harness now encodes with `sasrec-ssm-logq-d{dim}` ([encoder switch](#encoder-switch-evals-to-redo)), whose oracles the next run builds (the blob fingerprint covers the item and query tensors, so a gSASRec blob is never read for them) |
-| arxiv | staged, layout checked. **Clause 1 (license) was corrupt** (`dev/arxiv-etl-fix`, merged 2026-09-27): 452,732 null-license items (15.1 %) and 1,528 of the 10,000 queries carried INT64_MIN instead of bucket `none` ([datasets](system/datasets.md#arxiv)), corrupting every recorded `all4` cell's attribute space (the other sweeps don't read clause 1). **Fixed and installed**: the patched `item_attrs_narrow.pt`/`eval_split.parquet` are live in `/data/arxiv-papers` (verified independently: exactly 452,732 cells changed, all in clause 1, every other cell byte-identical, `bench check` ok at d64/128/256) and republished to `pinkmeme/eval-arxiv-papers`. Pre-fix originals kept as `*.pre-license-fix.bak` in `/data/arxiv-papers`. **Every arxiv `all4` cell recorded before this fix (in `d1/arxiv` on the Hub) is stale and not citable** until re-run under the corrected attrs — `--resume` won't catch this on its own since those cells are `ok`, not `failed`; needs an explicit forced rerun of just the `all4` sweep (42 cells) |
+| arxiv | staged, layout checked, on the Hub as `pinkmeme/eval-arxiv-papers`. Clause 1 (license) maps the 452,732 null-license items (15.1 %) and 1,528 of the 10,000 queries to bucket `none` ([datasets](system/datasets.md#arxiv)); a table built before that fix carried INT64_MIN there (check: `item_attrs_narrow.pt` min = -1, `eval_split.parquet` `query_attrs_narrow` min = 0). Only the `all4` sweep reads clause 1; `d1/arxiv`'s 42 `all4` cells are on the fixed table (numbers unchanged to 4 decimals against the corrupt one) |
 | yfcc10m | our exact oracle reproduces the shipped filtered ground truth. **The exact-algorithm gate passes since L1**: `linr_v1_filter_mask`/triton clause `tags_and`, eager, `--skip-perf`, 10,000 queries: `recall_oracle@1000` **0.9944** (0.9652 and `QualityGateError` on the pre-L1 tree, same command); `LiNRV2(backend="torch")` against the same oracle blob 0.9944 (script). `linr_v2`/triton could not run at d192 before L4's padding (row *Non-power-of-two widths*); D1's yfcc10m filter leg has since run it (7/7 ok, [Campaign](#campaign-roadmap-d1-in-progress-not-yet-validated)). The residual 0.006 is the fp16 item storage: an fp32 table gives 1.0 ([artifact](artifacts/l1-l2/README.md)); not yet validated beyond this one cell |
-| pubmed | 10 M slice staged locally (A100 box, 2026-09-26), on the Hub as `d1/pubmed` since D1's filter leg (2026-09-28). D=768 (L4-padded): `linr_v1_filter_mask`, `linr_v2`, `silvertorch` (triton + official) all run; `linr_v2` recall_oracle@100 0.998, matching V1. `linr_v3` could not build in D1 (`torch.OutOfMemoryError` on all 8 cells: the one-shot 1-bit build's full-corpus temporaries); the chunked build fixes it (row *Build-time 1-bit quantization*). One cell since, clause `c0_mesh` seed 0, `--skip-perf`: `recall_oracle@100` 0.9985, `@1000` 0.9995 (V1 on the same cell 0.9985 / 0.9997), index 17.1 GiB, 50.8 GB reserved; the 8 D1 cells are still to run. The `silvertorch/triton` cells were timed on the spilling `D_PAD = 1024` tile (row *Probe-scorer tile per width*) and need a rerun. 52/56 filter cells recorded (44 ok, 8 `linr_v3` OOM, 4 never ran — `linr_v2` ×1 and `silvertorch/triton` ×3 hit the campaign's 6 h per-group timeout, itself too short for D=768 × 10M cells at 20-46 min each); the 4 missing cells are a pending resume pass, not yet run. NOT CITABLE (D1's gate is not green) |
-| openalex | 10 M slice staged locally (A100 box, 2026-09-26; OpenAlex fallback for Semantic Scholar SPECTER2, no API key), not on the Hub: `bench check` passes. One filter cell, `linr_v1_filter_mask`/triton clause `field_era`, eager, `--skip-perf` (`partial`): `recall_oracle@1000` 0.9959, held-out `recall@100` 0.505, `recall@1000` 0.741, n = 10,000. Scoped down from an initial 15 M encode after `bench/oracle.py`'s `item_embs.t().contiguous()` OOMed at that size (a second full fp32 copy on top of the item table; the real 768-d limit is ~11-12 M, not 15 M) — 10 M items resharded from the already-encoded 15 M vectors (`torch.equal`-verified), matching the pubmed precedent. SilverTorch-`triton` and LiNR V2/V3 were blocked by the power-of-two `D` limit as on pubmed until L4, not yet run here since; not yet validated ([artifacts](artifacts/e3-openalex/)) |
-| kuairand | staged and `bench check`-clean on the A100 box (2026-09-26, restaged since on the H100 pod); only the trainer inputs are on the Hub, the eval inputs are rebuilt with `eval-data kuairand all` ([datasets](system/datasets.md#kuairand)). The harness checkpoint is `sasrec-ssm-logq-d64-trainval` (the d64 refit, [final models](#final-models-the-e1c-recipe)), which was **not kept**: it is retrained from its `command.sh` before any cell runs. The one filter cell recorded so far (`linr_v1_filter_mask`/triton `t_cat1`, recall_oracle@1000 0.9996) used the gSASRec `gsasrec-d128-shared` checkpoint, since deleted from the Hub, so it is **stale and not reproducible** ([encoder switch](#encoder-switch-evals-to-redo)); its logs are `artifacts/e4-kuairand` on the Hub. Out of the `filter` suite until roadmap E4 settles its width |
+| pubmed | 10 M slice under `pubmed-medcpt`, not on the Hub (`pinkmeme/eval-pubmed` is registered, not published: [datasets](system/datasets.md#huggingface-io)). D1's filter leg is `d1/pubmed`. D=768 (L4-padded): `linr_v1_filter_mask`, `linr_v2`, `silvertorch` (triton + official) run; `linr_v2` recall_oracle@100 0.998, matching V1. `linr_v3` builds since the chunked 1-bit build (row *Build-time 1-bit quantization*): one cell, clause `c0_mesh` seed 0, `--skip-perf`: `recall_oracle@100` 0.9985, `@1000` 0.9995 (V1 on the same cell 0.9985 / 0.9997), index 17.1 GiB, 50.8 GB reserved. `d1/pubmed`: 52/56 filter cells recorded (44 ok, 8 `linr_v3` OOM before that fix, 4 never ran — `linr_v2` ×1 and `silvertorch/triton` ×3 hit the campaign's 6 h per-group timeout); the `silvertorch/triton` cells were timed on the spilling `D_PAD = 1024` tile (row *Probe-scorer tile per width*). Roadmap D1-E reruns those arms. NOT CITABLE (D1's gate is not green) |
+| openalex | 10 M slice (OpenAlex fallback for Semantic Scholar SPECTER2, no API key), not on the Hub: roadmap E5 restages it. `bench check` passed on the staged copy. One filter cell, `linr_v1_filter_mask`/triton clause `field_era`, eager, `--skip-perf` (`partial`): `recall_oracle@1000` 0.9959, held-out `recall@100` 0.505, `recall@1000` 0.741, n = 10,000. Scoped down from an initial 15 M encode after `bench/oracle.py`'s `item_embs.t().contiguous()` OOMed at that size (a second full fp32 copy on top of the item table; the real 768-d limit is ~11-12 M, not 15 M) — 10 M items resharded from the already-encoded 15 M vectors (`torch.equal`-verified), matching the pubmed precedent. SilverTorch-`triton` and LiNR V2/V3 were blocked by the power-of-two `D` limit as on pubmed until L4, not yet run here since; not yet validated ([artifacts](artifacts/e3-openalex/)) |
+| kuairand | **out of the study** ([decisions](decisions.md#datasets)). The one filter cell recorded (`linr_v1_filter_mask`/triton `t_cat1`, recall_oracle@1000 0.9996) used the deleted gSASRec `gsasrec-d128-shared` checkpoint and is not reproducible; its logs are `artifacts/e4-kuairand` on the Hub. The E1c trainer results below stand as trainer results |
 
 ### Trainer inputs with `timestamps` (data gates, not citable)
 
@@ -231,7 +284,7 @@ These are data-integrity gates, not results; nothing here is citable.
 | G-goodreads: `item_id_map.json` | **passes**: `/data/goodreads-work-id/trainer/item_id_map.json` sha256-equal to the Hub copy, `dd6b8005…107265` (797,084 items) | raw fetched fresh (books + interactions_dedup only, via parallel ranged `curl`; `eval-data goodreads download` then verified sizes, gzip and wrote the sha256 manifest), `convert` 19.5 min, `prep` 58 s at peak RSS 24.2 GB |
 | G-goodreads: `test.parquet` vs the Hub `test.parquet` (`item_ids`, `targets`, both `list[int64]`) | **fails bit-exact; every difference is a timestamp tie**. Same 313,178 rows in the same user order; 274,254 rows identical; of the 38,924 that differ, 36,576 differ only in `item_ids` order inside runs of equal timestamps, 782 differ in which items fill the oldest end of the 200-item window, always inside the window's leading run of equal timestamps (equal length), and 2,398 differ only in `targets` order (same multiset). Nothing else differs | Mechanism: `cmd_prep` orders each user's events with `sort(["user_id", "ts"])` and nothing breaks ties, and goodreads timestamps tie often (bulk shelving, e.g. many rows at `2007-01-01 00:00`). The order inside a tie comes from the multithreaded scan/join and changes run to run; `list.tail(max_seq + 1)` on the full sequence then keeps a different subset when the cut lands in a tie. Not fixed (out of this step): a tiebreak would also move the output off the Hub copy |
 | G-goodreads: `timestamps` | **passes**: `List(Int64)` unix seconds, lengths equal to `item_ids` on every row, 0 rows with a decrease in train (744,332) / val (190,278) / test (313,178) | |
-| KuaiRand `timestamps` | **passes**: `List(Int64)` unix seconds, lengths equal to `item_ids` on every row, 0 rows with a decrease in train (561,486) / val (24,503) / test (26,221); `tests/eval_datasets/test_kuairand.py` pins the column | `/data/kuairand` re-staged by `eval-data kuairand all` (pod, 2026-09-26); the check script is not committed. The test histories end at 1651850999, 30 min before `test_timestamp_unix` 1651852800 |
+| KuaiRand `timestamps` | **passes**: `List(Int64)` unix seconds, lengths equal to `item_ids` on every row, 0 rows with a decrease in train (561,486) / val (24,503) / test (26,221); `tests/eval_datasets/test_kuairand.py` pins the column | `/data/kuairand` staged by `eval-data kuairand all`; the check script is not committed. The test histories end at 1651850999, 30 min before `test_timestamp_unix` 1651852800 |
 | Harness suite on `dev/hstu-etl` | **green**, 235 passed / 4 skipped, CPU (`CUDA_VISIBLE_DEVICES=""`) | |
 
 ## Seqrec encoder
@@ -274,6 +327,10 @@ every epoch, patience 10, then the train + val refit).
 Against the success rule ([decisions](decisions.md#sequential-encoder)): five of six
 beat the bar on both metrics; goodreads d64 misses on R@100. KuaiRand is outside the rule (no
 bar). yambda d128 and d256 were still improving at the 100-epoch cap. yambda d128's s/epoch includes 14 epochs slowed by a shared GPU.
+
+**KuaiRand, measured before it left the study** (A100, gSASRec d128, 128 negatives): peak
+77.2 GiB, ~11 min/epoch, test ndcg@10 0.0088, R@100 0.0024; its `t_cat1` filter cell: pass rate
+0.0362, `recall_oracle@1000` 0.9996; disk: 13.6 GB raw, a 49 GB `_resume.pt`.
 
 ### KuaiRand: temporal drift
 
@@ -325,7 +382,7 @@ Artifacts: [gate A](artifacts/seqrec-encoder/gate-a/),
 | W6 cleanup equivalence (per-step training losses bit-identical before/after, both losses) | **passes** ([artifact](artifacts/seqrec-encoder/w6-cleanup-equivalence/)). H100, yambda-500m d64, 50 steps, seed 42, `compile=false`: the E1c `config.json` on the pre-cleanup trainer against the bare new `TrainConfig` defaults, and the Gate B gBCE `config.json` on both, give `==` per-step losses (50/50 each); the pre-cleanup trainer run twice is also identical to itself. CPU proxy (synthetic split, 18 steps per loss) bit-identical single-threaded; on 64 threads gBCE differs run to run in the last bit for the same code |
 | `torch.compile` of the body | 3.93-4.03 s/epoch compiled against 4.8-5.9 eager (shared-negative gBCE, 3 epochs each, interleaved); kept |
 | unit gates | `tests/training/test_encoder.py`: a left-padded row stays finite and padding content does not move the last position; `sampled_softmax_loss` equals a direct `F.cross_entropy` over explicit candidate lists, without and with a hand-built logQ (uneven explicit q; fails on a flipped sign or a corrected positive); `logq_correction` equals a hand-written `log(M·p + K/N)` vector for M = 2, K = 3, N = 4 (fails with the per-slot `/(M+K)`); `TrainConfig` rejects an unknown `loss`, and `normalize` or `logq` with `gbce`; defaults to `sampled_softmax` with `normalize` and `logq` on, `gbce` resolves both off; `TrainConfig.load` reads a `config.json` without `loss` as gbce, re-resolves `normalize`/`logq` when an override changes `loss` (both directions), keeps an explicit override and keeps the saved values when `loss` is unchanged (each case fails on its mutation, hand-checked) (CPU) |
-| `resume_every` (`_resume.pt` cadence) | `test_resume_is_written_every_n_epochs_and_on_the_last` pins the write epochs at `num_epochs` 8: N = 1 every epoch; N = 3 → 2, 5, 7; N = 3 with an early stop at 3 → 2, 3; N = 4 with a stop at 5 → 3, 5. Each of three mutations (`epoch %` for `(epoch + 1) %`, the last-epoch off-by-one, dropping `stopping`) fails it (CPU). Snapshot retention across a crash (N = 3, crash in epoch 4, `--resume` retrains from epoch 3 and loads the right best; a changed `checkpoint_dir` spelling; a crash before the first `_resume.pt`) is checked only by uncommitted CPU smoke runs. On the GPU only the default N = 1 has run (k64-refit). `_resume.pt` is still written in place, not atomically ([roadmap](roadmap.md#sequential-encoder-follow-ups-not-scheduled)) |
+| `resume_every` (`_resume.pt` cadence) | `test_resume_is_written_every_n_epochs_and_on_the_last` pins the write epochs at `num_epochs` 8: N = 1 every epoch; N = 3 → 2, 5, 7; N = 3 with an early stop at 3 → 2, 3; N = 4 with a stop at 5 → 3, 5. Each of three mutations (`epoch %` for `(epoch + 1) %`, the last-epoch off-by-one, dropping `stopping`) fails it (CPU). Snapshot retention across a crash (N = 3, crash in epoch 4, `--resume` retrains from epoch 3 and loads the right best; a changed `checkpoint_dir` spelling; a crash before the first `_resume.pt`) is checked only by uncommitted CPU smoke runs. On the GPU only the default N = 1 has run (k64-refit). `_resume.pt` is still written in place, not atomically ([backlog](backlog.md#sequential-encoder-follow-ups)) |
 | `train_on_val` (final fit on train + val) | `test_train_on_val_rows_are_the_tail_of_history_then_targets` pins, on a hand-built 4-row `val.parquet` at L = 4, the rows (tail of `item_ids ++ targets`, left padding, more targets than L), `first`, the positions `target_mask` trains and the `target_frequencies` counts. `test_train_on_val_runs_no_val_eval`: a CPU `train()` never calls `evaluate`, writes `best_model.pt`, feeds the val rows after the train rows with `first` aligned, and stores `best_val_metric` `{}`. Each of six mutations (no `do_eval` guard, no `first` in the mask, val rows before train rows, no concat, an off-by-one in `first`, `if True` for the `{}` guard) fails a test (CPU). `train_on_val=false` unchanged: the new mask and `target_frequencies` `torch.equal` the old ones on 50 random left-padded tensors (uncommitted CPU check). GPU: k64-refit ran it (H100, 4 epochs). Rows with more than 200 val-day clicks keep their last 200, so 979,261 of 3,871,194 KuaiRand val-day transitions (25 %) are not trained |
 
 Unverified: `target_frequencies` (logQ) is checked only by hand on CPU; E2c ran `logq=true` on the GPU;
@@ -343,4 +400,4 @@ resume (`--resume` has never run on the GPU).
   `ok`, but their ids have not been compared with eager (next line).
 - Clause 5 of the campaign gate (ids identical across modes).
 - The official exact path without our adapter's mask packing.
-- Every row above on a new box, until the library suite has run there.
+- Every row above on a new pod, until the library suite has run there.

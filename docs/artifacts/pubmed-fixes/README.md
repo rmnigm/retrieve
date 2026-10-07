@@ -1,7 +1,7 @@
 # pubmed-fixes — D-aware probe tiles, chunked 1-bit build, the bloom divergence
 
-The three defects the `campaign-d1` investigations found at pubmed scale (chain notes
-`official-vs-triton-crossover-report`, `finding-official-bloom-tail-score-divergence`). A100-SXM4-80GB,
+The three defects D1's investigations found at pubmed scale (the official-vs-Triton
+crossover and the official bloom tail-score divergence). A100-SXM4-80GB,
 torch 2.10.0+cu128, triton 3.6.0; SM clocks not lockable, sampled per window. Current state is in
 [validation](../../validation.md); mechanism in [kernels](../../system/kernels.md). Raw outputs
 (sweep / tuner / timing JSONs, census logs) are for the Hub under `artifacts/pubmed-fixes/`

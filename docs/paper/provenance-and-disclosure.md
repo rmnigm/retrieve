@@ -207,7 +207,7 @@ the item is not paper material (CLAUDE.md rule 2).
 | fp32 accumulation in `fused_masked_knn_topk`, the reduction-width audit across every Triton kernel, and the fp64-oracle parity file that would have caught the class | **L5** |
 | multi-seed cells, bootstrap CIs, paired tests for every "A is faster than B" sentence | **D1** (gap G4) |
 | mean / p95 / p99 latency, per-query latency vectors, closed- and open-loop QPS under a P99 budget | **D1** (gap G3) |
-| external baselines at matched recall (Faiss GPU/CPU, HNSW, cuBLAS floor; then cuVS, filtered-graph CPU indexes) | **D2** (gaps G5, G13, G14) |
+| external baselines at matched recall (Faiss GPU/CPU, HNSW, cuBLAS floor; then cuVS, filtered-graph CPU indexes) | out of the study ([backlog](../backlog.md#baselines-outside-the-study)); the baseline is generic torch, roadmap **D5** (gaps G5, G13, G14) |
 | bloom false-positive rate and memory against filter width on **real** attributes, for our bloom and Meta's | **D3** (gap G6) |
 | the SilverTorch co-design ablation (full mask → IVF vs fused partial bloom) as scratch memory and latency vs probe count | **D1** S9 cells / **G-b** |
 | the LiNR V1/V2 pass-rate crossover and the liquidity curve on a controlled sweep | **G-b** (gap G11) |
