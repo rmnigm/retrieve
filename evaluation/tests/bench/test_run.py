@@ -215,8 +215,9 @@ def test_read_keys_tolerates_one_torn_trailing_line(tmp_path):
     line anywhere else is corruption and raises."""
     p = tmp_path / "x.jsonl"
     key = {
-        "dataset": "tiny", "dim": 8, "suite": "e2e", "filter_kind": "none", "sweep": "full_scan",
-        "algo": "linr_v1_filter_mask", "backend": "torch", "params": {}, "seed": 0,
+        "dataset": "tiny", "dim": 8, "inputs": "content", "suite": "e2e", "filter_kind": "none",
+        "sweep": "full_scan", "algo": "linr_v1_filter_mask", "backend": "torch", "params": {},
+        "seed": 0,
     }  # fmt: skip
     rec = {**key, "status": "ok", "env": {"code_version": "c"}}
     records.append_record(p, rec)

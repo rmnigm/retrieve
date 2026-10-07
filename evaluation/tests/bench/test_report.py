@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 
+import click
 import pytest
 
 from bench import records, report
@@ -67,7 +68,8 @@ def _rec(
     return {
         "schema_version": records.SCHEMA_VERSION, "status": status, "partial_reasons":
         ["skip_perf"] if status == "partial" else None,
-        "dataset": dataset, "dim": 128, "suite": "filter", "filter_kind": filter_kind,
+        "dataset": dataset, "dim": 128, "inputs": "sasrec-ssm-logq-d128", "suite": "filter",
+        "filter_kind": filter_kind,
         "sweep": sweep, "algo": algo, "backend": backend, "params": params or {},
         "seed": seed, "path": backend, "n_items": 797084, "n_queries": 10000, "n_kept": 9859,
         "n_queries_heldout": 9859, "n_queries_oracle": 9859, "pass_rate": 0.33,
@@ -239,6 +241,14 @@ def test_citability_is_off_by_default_and_evidence_beats_the_gate(results, tmp_p
     b = _generate(tmp_path / "branch", tmp_path / "e", gate="D1")
     assert not b.prov["citable"], "rule 2: a number from a dev/* branch is not citable"
     assert any("dev/c4-gate-rerun" in x for x in b.prov["blockers"])
+
+
+def test_two_encoders_under_one_dataset_and_dim_are_refused(results, tmp_path):
+    legacy = _rec("goodreads", "linr_v2", "torch")
+    del legacy["inputs"]  # a pre-H2 goodreads record: gSASRec
+    records.append_record(results / "filter" / "goodreads-d128.jsonl", legacy)
+    with pytest.raises(click.ClickException, match="gsasrec-d128-drop0.5-id"):
+        _generate(results, tmp_path / "out")
 
 
 def test_an_empty_results_tree_emits_placeholders_rather_than_failing(tmp_path):

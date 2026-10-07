@@ -90,9 +90,14 @@ main.add_command(report)
 @click.option("--output", type=click.Path(), default=None, help="override the JSONL file")
 @click.option("--resume/--force", default=True, help="skip cells already ok at this code_version")
 @click.option("--config-dir", default="config", show_default=True)
+@click.option(
+    "--checkpoint",
+    default=None,
+    help="replace the dataset's checkpoint ({dim} templated); recorded as the key's `inputs`",
+)
 def run(
     dataset, suite, dims, algos, backends, filter_kinds, sweeps, ks, batch_sizes, seeds, modes,
-    skip_quality, skip_perf, profile, out, output, resume, config_dir,
+    skip_quality, skip_perf, profile, out, output, resume, config_dir, checkpoint,
 ) -> None:  # fmt: skip
     """Run the cells of one (dataset, suite) in this process."""
     ds_yaml, suites_yaml = _paths(config_dir, dataset)
@@ -108,6 +113,7 @@ def run(
         seeds=_multi(seeds),
         ks=_multi(ks),
         batch_sizes=_multi(batch_sizes),
+        checkpoint=checkpoint,
     )
     if not jobs:
         raise click.ClickException(

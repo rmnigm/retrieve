@@ -15,8 +15,9 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from bench import cli, measure, records, run
+from bench import cli, inputs, measure, records, run
 from bench.config import load_matrix
+from eval_datasets import layout
 
 
 def _records(path: Path) -> list[dict]:
@@ -161,3 +162,32 @@ def test_env_prints_provenance_and_clocks_as_json(monkeypatch):
     env = json.loads(r.output)
     assert set(env) == set(measure.provenance()) | set(measure.clocks())
     assert env["official_commit"] == "abc123" and "sm_mhz" in env and "code_version" in env
+
+
+def test_cli_run_checkpoint_override_lands_as_inputs(tiny_configs, tmp_path, monkeypatch):
+    """``--checkpoint`` replaces the YAML's and the written key carries its directory name.
+    The encoder is faked with the fixture's text embeddings (no SASRec on CPU)."""
+    ds, _ = tiny_configs
+    data_dir = Path(ds.read_text().split("\n")[0].removeprefix("data_dir: "))
+    ds.write_text(
+        ds.read_text().replace("content_dir: content", f"checkpoint: {data_dir}/ck/a/x.pt")
+    )
+    seen = []
+
+    def fake_encode(ckpt, data_dir, **kw):
+        seen.append(ckpt)
+        items = layout.load_text_items(data_dir / "content", kw["device"])
+        return (items, *layout.load_text_queries(data_dir, data_dir / "content", items.shape[1]))
+
+    monkeypatch.setattr(inputs, "encode_split", fake_encode)
+    out = tmp_path / "results"
+    r = CliRunner().invoke(
+        cli.main,
+        ["run", "--dataset", "tiny", "--suite", "e2e", "--algo", "linr_v1_filter_mask",
+         "--sweep", "c0", "--mode", "eager", "--skip-perf", "--config-dir", str(ds.parent),
+         "--out", str(out), "--checkpoint", f"{data_dir}/ck/pinned-d{{dim}}/x.pt"],
+    )  # fmt: skip
+    assert r.exit_code == 0, r.output
+    assert seen == [data_dir / "ck" / "pinned-d8" / "x.pt"]
+    (rec,) = _records(out / "e2e" / "tiny-d8.jsonl")
+    assert rec["inputs"] == "pinned-d8"

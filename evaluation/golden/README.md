@@ -125,6 +125,19 @@ uv run evaluate --config config/arxiv/d128-filter.yaml \
 The working directory matters: both configs' `data_dir` and filter
 `attrs_path` are cwd-relative (`retrieval.loaders.resolve_path`).
 
+**Against the v2 harness** (the comparison [validation](../../docs/validation.md#harness-gates)
+records), from `evaluation/`, quality only. The goodreads cells are pinned to the
+checkpoint they were produced on, which `config/goodreads.yaml` no longer names; the
+records carry it as `inputs: gsasrec-d128-drop0.5-id`:
+
+```bash
+uv run bench run --dataset goodreads --dim 128 --suite filter --filter-kind clause \
+  --sweep c0_genre --mode eager --skip-perf \
+  --checkpoint data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/best_model.pt
+uv run bench run --dataset arxiv --dim 128 --suite filter --algo silvertorch --backend triton \
+  --filter-kind clause --sweep c0_maincat --mode eager --skip-perf
+```
+
 ## Provenance
 
 **These cells were re-derived on 2026-09-15** (roadmap eval-queue item 1).

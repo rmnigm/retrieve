@@ -398,7 +398,7 @@ record's key block. `none` cells have `sweep == "full_scan"` and
 bench run      --dataset D --suite S [--dim N]* [--algo A]* [--backend B]* [--filter-kind K]*
                [--sweep W]* [--k N]* [--bs N]* [--seed N]* [--mode eager|graph]*
                [--skip-quality] [--skip-perf] [--profile] [--out results] [--output FILE]
-               [--resume|--force] [--config-dir config]
+               [--resume|--force] [--config-dir config] [--checkpoint PATH]
 bench campaign --suite filter|deep|codesign|all [--dataset D]* [--dim N]* [--mode M]*
                [--skip-quality] [--skip-perf] [--profile] [--out results] [--resume|--force]
                [--config-dir config] [--timeout 6.0]
@@ -423,6 +423,11 @@ lists rather than select cells, so a run with any of them (or a
 and a later full run never counts a narrowed cell as done. The exit
 code is 1 when any cell failed, and 1 with a message when the narrows
 select zero cells (a `--sweep` typo is an error, not an empty success).
+`--checkpoint PATH` (`{dim}` templated) replaces a sequential dataset's
+`checkpoint` for this run and is refused on a `content_dir` dataset; the
+key's `inputs` follows it, so the pinned cells key and report apart from
+the config's encoder. It exists for the golden cells, which stay on
+`gsasrec-d128-drop0.5-id` ([How to run](#how-to-run)).
 
 `bench campaign` is the process loop: for every suite (in the
 order of `SUITES = ("filter", "deep", "codesign")` for `all`), every listed dataset and every
@@ -530,10 +535,10 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 
 | field | type | value |
 |---|---|---|
-| `schema_version` | int | `2`; schema 1 lacks the under-load clock fields below (`env.sm_mhz` instead) |
+| `schema_version` | int | `3`; schema 2 lacks `inputs` (derived on read, [Resume](#resume)); schema 1 also lacks the under-load clock fields below (`env.sm_mhz` instead) |
 | `status` | str | `ok`, `partial` (the record does not carry everything the suite asked for), `failed` |
 | `partial_reasons` | list / null | why `partial`: any of `skip_quality`, `skip_perf`, `modes` (a `--mode` subset), `ks_bs` (`--k` / `--bs` replaced the suite's lists — `Job.narrowed`) |
-| `dataset`, `dim`, `suite`, `filter_kind`, `sweep`, `algo`, `backend`, `params`, `seed` | | the key block = `Job.key(params)` (`KEY_FIELDS`); `params` is the native dict of build + query params (`{}` when the algo takes none) |
+| `dataset`, `dim`, `inputs`, `suite`, `filter_kind`, `sweep`, `algo`, `backend`, `params`, `seed` | | the key block = `Job.key(params)` (`KEY_FIELDS`); `params` is the native dict of build + query params (`{}` when the algo takes none); `inputs` is the input identity below |
 | `path` | str | `PATHS[(algo, filter_kind, backend)]` |
 | `n_items`, `n_queries` | int | catalogue size, queries after `users_limit` |
 | `n_kept` | int | queries not skip-masked (every query on `none` cells) |
@@ -590,12 +595,35 @@ are disjoint). A kernel edit — committed or not — therefore invalidates
 every cell; a doc or plan edit invalidates none. (D1 reruns only the arms
 a fix changes, by narrow `bench run`s: its [code_version
 policy](../validation.md#campaign-roadmap-d1-in-progress-not-yet-validated).)
-`records.read_keys(path)` rebuilds the key from a record as `resume_key({k: rec[k] for k in
-KEY_FIELDS}, rec["env"]["code_version"])` and keeps the last status per
+`records.read_keys(path)` rebuilds the key from a record as
+`resume_key(records.key_block(rec), rec["env"]["code_version"])` and keeps the last status per
 key; a cell is skipped when that status is `ok`. `--force` runs everything
 and appends. Resume reads the local JSONL only, never the network: a
 campaign resumed on a box that lost its tree first restores it with
 `bench fetch --path-in-repo <leg>` and then appends to the fetched files.
+
+**The input identity (`inputs`).** The key block names what was encoded, not
+only which dataset: `Dataset.inputs` is the checkpoint's directory name
+(`sasrec-ssm-logq-d128`) on a sequential dataset and the resolved
+`content_dir`'s name (`content_d128`; arxiv d256 is `content`) on a text
+dataset. Without it a goodreads cell on the E1c checkpoint had the resume
+key of its gSASRec record at the same `code_version`, so `--resume` skipped
+it and `latest` kept one of the two. A name, not a digest: checkpoints and
+content directories are published under immutable names (a retrained
+encoder gets a new checkpoint directory), a digest would cost a pass over
+GBs per process, and a pre-schema-3 record can only be given a name — its
+files are not on the box that reads it. Content drift under one name is the
+oracle fingerprint's job ([Oracle blob v4](#oracle-blob-v4)), not the key's.
+A schema-2 record has no `inputs`; `records.inputs_of` derives it:
+goodreads → `gsasrec-d{dim}-drop0.5-id` (what every pre-H2 goodreads record
+ran on); a text dataset → today's `config/<dataset>.yaml` resolved at the
+record's dim, so D1's arxiv / pubmed records keep exactly the resume key a
+new run computes (they were written with the same `content_dir`); any other
+checkpoint dataset raises (kuairand's E4 cell and yambda's retired suite
+have no identity left). The derivation reads the repository's
+`evaluation/config/`, not a run's `--config-dir`: it describes what D1's
+records ran on, which is the checked-in config. `SCHEMA_VERSION` went 2 → 3 because the record
+layout gained a key field.
 
 `records.aggregate(results_dir)` writes `results.parquet` — `records.latest`
 (the last record per key of every `<suite>/*.jsonl`), one row per perf entry
@@ -660,7 +688,10 @@ with the paper), then one file per artifact, then `report.md`. Every table
 and figure is built from `results.parquet`; `records.latest` is read a
 second time for the provenance block alone, which needs the nested `env`
 the table flattens to seven columns. To report on a leg that is no longer
-on disk, `bench fetch` it first.
+on disk, `bench fetch` it first. The tables select by dataset and dim,
+never by encoder, so a results tree holding two `inputs` under one
+`(dataset, dim)` (a gSASRec and an E1c goodreads leg) is refused with the
+identities named; report each encoder from its own tree.
 
 | artifact (`--only` name) | file | what it is |
 |---|---|---|
@@ -880,7 +911,7 @@ trailing-whitespace hooks (the last two never on `articles/`, `docs/artifacts/`,
 | `test_dependency_direction.py` | every `import` / `from` in `bench/`, `training/`, `eval_datasets/` resolved with `ast`: `bench` → `training.encode`, `eval_datasets.layout`; `training` → `eval_datasets.{hub,layout}`; `eval_datasets` → nothing; the library only from `bench`, through `retrieve` (the algo and filter classes) and `retrieve.interfaces` (`DISPATCH`, `FilterModule`). The walk must see more than 25 files, and an allow-list entry no import uses fails as stale |
 | `test_env_readers.py` | every `os.environ.get` / `os.getenv` / `os.environ[...]` of a `RETRIEVE_*` name under `evaluation/` sits in its owner (`RETRIEVE_DATA_ROOT`: `eval_datasets/hub.py`, read through `data_root()`); same file-count and stale-owner guards |
 | `bench/test_paths.py` | `PATHS == derive(DISPATCH)`: the derived table equals the harness's expected paths, the grid is complete, `DISPATCH` names every algo × backend |
-| `bench/test_records.py` | `resume_key` canonical and `code_version`-sensitive; append / read round trip; one torn trailing line; `aggregate` one row per perf entry, last record per key, typed columns |
+| `bench/test_records.py` | `resume_key` canonical and `code_version`-sensitive; append / read round trip; one torn trailing line; `aggregate` one row per perf entry, last record per key, typed columns; two jobs differing only in `--checkpoint` key apart; a real D1 arxiv key block (schema 2) keeps today's arxiv job's resume key; a schema-2 goodreads record is gSASRec |
 | `bench/test_measure.py` | `stats` vs numpy, `latency` control flow, `index_bytes` dedup, `provenance` git fields, `official_commit` from PEP 610 (git, local dir, no `direct_url.json`, not installed), `dirty` scoped to the library subtree with the `files:` fallback, `atomic_write`, `clocks` shape, `graph_callable` refusals |
 | `bench/test_metrics.py` | padding / IDCG / denominator contracts; running sums equal per-row means to 1e-9; `jaccard_at_k` |
 | `bench/test_algos.py` | `build` on every `(algo, filter_kind)` torch cell: the `k` setter slices the top-k and changes no buffer; the filter submodule in `index_bytes`; `set_query_params`; build refusals |
@@ -888,9 +919,9 @@ trailing-whitespace hooks (the last two never on `articles/`, `docs/artifacts/`,
 | `bench/test_inputs.py` | `load_inputs` on the conftest writer, `users_limit` once, prefix and row-count checks, the legacy layout loading equal to the modern one, misalignment raising, `attrs_digest`, `sweep_qa`, filters by filter backend, `query_pool` |
 | `bench/test_oracle.py` | padding, v4 fields and arithmetic, fingerprint in the file name, an unreadable blob rebuilt, bloom FP rate, `code_version` |
 | `bench/test_run.py` | end to end on the tiny fixture, both modes (`graph` = the CPU null entry): record schema, resume, `code_version` invalidation, `partial`, a failed cell + continue, a sticky CUDA error, the quality gate, the parity spill (and a same-backend spill rewritten), reachable-target masking, the plan cache off through `OfficialConfig` |
-| `bench/test_cli.py` | `bench run` via `CliRunner`, a real one-child `bench campaign` ending in `results.parquet`, a faked timed-out child, a restart mid-group keeping its parity spill (in-process children), zero cells → exit 1, `bench report` over the campaign's own records, `bench env`'s JSON keys |
+| `bench/test_cli.py` | `bench run` via `CliRunner`, `--checkpoint` landing as the record's `inputs` (encoder faked), a real one-child `bench campaign` ending in `results.parquet`, a faked timed-out child, a restart mid-group keeping its parity spill (in-process children), zero cells → exit 1, `bench report` over the campaign's own records, `bench env`'s JSON keys |
 | `bench/test_upload.py` | `bench upload` with no network: `_logs/` and `_parity/` never listed, the manifest's sha256 per file, evidence beating `--gate` four ways, the generated README over several subtrees, `verify` catching a changed byte, the commit's operations (with the regenerated `results.parquet`) and `private=True`; `bench fetch` restoring a tree resume reads and refusing to overwrite a different local copy |
-| `bench/test_report.py` | every column the tables read still comes out of `records.aggregate`; every artifact emitted; the LaTeX structurally balanced with the thesis's labels and no unescaped `_`; a `failed` record excluded and a `partial` / `unstable` one marked; citability off by default and evidence beating `--gate`; an empty tree; a schema-1 record |
+| `bench/test_report.py` | every column the tables read still comes out of `records.aggregate`; every artifact emitted; the LaTeX structurally balanced with the thesis's labels and no unescaped `_`; a `failed` record excluded and a `partial` / `unstable` one marked; citability off by default and evidence beating `--gate`; two `inputs` under one `(dataset, dim)` refused; an empty tree; a schema-1 record |
 | `bench/test_c4_gate.py` | the golden-comparison gate script, [`c4_gate.py`](../artifacts/evaluation-harness-v2/c4_gate.py), against synthesised schema-1 records |
 | `eval_datasets/test_layout.py` | the legacy pad-row rule, `apply_users_limit`, `validate_layout` clean on both layouts and flagging a short `eval_split`, a missing or swapped prefix sidecar, misaligned attrs |
 | `eval_datasets/test_yfcc.py`, `test_pubmed.py`, `test_kuairand.py`, `test_openalex.py` | the four ETL loaders on synthetic fixtures |
@@ -905,8 +936,11 @@ read latencies against `perf[].sm_mhz` and `env.clocks_drift`.
 
 ```bash
 cd evaluation
-# the golden-comparison cell set: goodreads d128, clause c0_genre, every algo and backend
-uv run bench run --dataset goodreads --dim 128 --suite filter --filter-kind clause --sweep c0_genre
+# the golden-comparison cell set: goodreads d128, clause c0_genre, every algo and backend, on the
+# golden's gSASRec checkpoint (the config points at E1c); the arxiv golden cell and the full
+# commands: evaluation/golden/README.md, "Exact commands"
+uv run bench run --dataset goodreads --dim 128 --suite filter --filter-kind clause --sweep c0_genre \
+    --checkpoint data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/best_model.pt
 # one cell, eager only, no perf — the fastest iteration
 uv run bench run --dataset arxiv --dim 128 --suite filter --algo silvertorch --backend triton \
     --filter-kind bloom --sweep c0_maincat --mode eager --skip-perf
