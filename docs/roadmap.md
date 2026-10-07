@@ -119,41 +119,8 @@ only on a leg with no records yet.
 
 ## Phase H: harness prerequisites
 
-- [ ] **H2: the record key carries the input identity; the golden gate
-  pins its checkpoint.** *Problem*: `bench/records.py` `KEY_FIELDS`
-  (dataset, dim, suite, filter_kind, sweep, algo, backend, params, seed;
-  + `code_version` in the resume key) names no checkpoint or embedding
-  source, so a goodreads cell on the E1c encoder has the same resume key
-  as its gSASRec record in `d1/goodreads`: `--resume` skips it as `ok`, and
-  `records.latest` / `aggregate` keep one of the two. *Build*: (1) an
-  `inputs` identity in the key block: the ckpt-id for sequential datasets
-  (the checkpoint's directory name, e.g. `sasrec-ssm-logq-d128`), the
-  resolved `content_dir` for text ones; whether a name is enough or a
-  digest is needed is written in [evaluation](system/evaluation.md#resume).
-  (2) **Existing records must keep their resume key**: a record without
-  the field derives it (sequential: the gSASRec ckpt-id its config named,
-  goodreads `gsasrec-d{dim}-drop0.5-id`, kuairand `gsasrec-d128-shared`;
-  text: the `content_dir` today's config resolves), and a new arxiv/pubmed
-  job computes the same key, or D1's remaining arxiv/pubmed scoping reruns
-  hundreds of hours. Bump `SCHEMA_VERSION` only if the record layout
-  changes, and say why either way. (3) `results.parquet` and `bench report`
-  carry the identity as a column; a report groups or refuses mixed
-  identities within one dataset × dim. (4) The golden goodreads cells run
-  on `gsasrec-d128-drop0.5-id`: the smallest honest pin (a `--checkpoint`
-  override on `bench run` recorded in the record, or a golden dataset
-  file). *Gates*: the harness suite green on CPU; a test that two jobs
-  differing only in checkpoint get different resume keys, and that an old
-  arxiv record (a fixture from a real D1 key block) keeps today's key; the
-  real Hub records (`d1/arxiv-deep-partial`, `d1/pubmed` fetched to
-  scratch) give the same set of done cells before and after (script under the
-  H2 artifacts directory); the golden gate rerun on the pinned checkpoint
-  gives today's numbers (validation *Golden baseline*: 8/9 identical, V1
-  at 0.0; fetch `checkpoints/gsasrec-d128-drop0.5-id/*` from
-  `pinkmeme/eval-goodreads-work-id`). **0.5 GPU-h** (the golden run), one
-  stream; the rest is CPU. `opus` if it stays a key-field + override
-  change, `fable` if it forces a redesign of `records` / `report`.
 - [ ] **R1: stage the E1c checkpoints and prove the harness reads them.**
-  Needs H2. `hf download pinkmeme/eval-goodreads-work-id --repo-type
+  `hf download pinkmeme/eval-goodreads-work-id --repo-type
   dataset --include "checkpoints/sasrec-ssm-logq-d128/*" --local-dir
   /data/goodreads-work-id`; the directory has `best_model.pt`, a
   `config.json` with `"loss": "sampled_softmax"` and `"normalize": true`,
@@ -168,21 +135,6 @@ only on a leg with no records yet.
   loosened); query L2 norms 1.0 ± 1e-3; `n_kept` recorded against the
   gSASRec cell's 9,859. Record the cell in validation (not yet validated)
   and on the Hub as `artifacts/r1`. **0.5 GPU-h**, one stream.
-- [ ] **H5: `bench report` states true provenance.** `bench/report.py`
-  appends "These records predate the D1 campaign…" to every non-citable
-  report, marks every non-citable caption `[PRE-CAMPAIGN RECORDS — NOT
-  CITABLE]` (`_caption`) and watermarks figures "PRE-CAMPAIGN" (`_figure`),
-  all false for D1's own records. Each names the actual reason a report is
-  not citable (the record's `status`, `dirty`, `partial_reasons`, or a
-  gate not green). *Gate*: `test_report.py` pins the text for each reason.
-  CPU. Before D1-G and F5.
-- [ ] **H7: a held-out metric with no target is null, not 0.0.** Pubmed's
-  `c3_journal_reverse` records carry held-out recall 0.0 where no held-out
-  target passes the filter, which a report averages in as a miss. The
-  harness writes null there, and `bench report` skips null held-out
-  metrics. *Gate*: a test on a cell with no in-filter held-out target; the
-  existing `d1/pubmed` records read as null through the same rule (no
-  rerun). CPU. Before D1-G.
 - [ ] **L6: widen the official T1 parity gate past powers of two.**
   `retrieve/tests/parity/test_official.py` `test_t1_int32_path_bitexact`
   still compares official against Triton only when `d` is a power of two
@@ -238,20 +190,20 @@ only on a leg with no records yet.
     (`silvertorch`/triton 16 × ~22 min, `linr_v3` 8 cells, `linr_v2` 1);
     3 streams (the three commands; ~6 h wall).
   - [ ] **D1-F: goodreads `filter` on the E1c encoder, the full leg** (105
-    cells). Needs H2 and R1. `campaign --suite filter --dataset goodreads
+    cells). Needs R1. `campaign --suite filter --dataset goodreads
     --resume --timeout 48`. Upload as `d1/goodreads-e1c`; label
     `d1/goodreads` as the gSASRec run in hub-index. **≈ 4 GPU-h**; up to 4
     streams by `--algo` (`bench run`, `silvertorch` holding both backends).
-  - [ ] **D1-C: goodreads `deep`** (135 jobs, no records yet). Needs H2
-    and R1. `campaign --suite deep --dataset goodreads --resume --timeout
+  - [ ] **D1-C: goodreads `deep`** (135 jobs, no records yet). Needs
+    R1. `campaign --suite deep --dataset goodreads --resume --timeout
     48`. Upload `d1/goodreads-deep`. **≈ 25-45 GPU-h** (arxiv `deep`: ~2
     min a cell over 870 cells, ~30 h; goodreads has more jobs on a 0.8 M
     catalog, 4× smaller); 2 streams by `--algo` (`silvertorch` both
     backends, `linr_v3`), each splittable by `--filter-kind`.
-  - [ ] **D1-D: goodreads `codesign`** (6 jobs). Needs H2 and R1. `campaign
+  - [ ] **D1-D: goodreads `codesign`** (6 jobs). Needs R1. `campaign
     --suite codesign --dataset goodreads --resume --timeout 48`. Upload
     `d1/goodreads-codesign`. **≈ 2 GPU-h**, one stream.
-  - [ ] **D1-G: D1's report and gate.** Needs D1-B..F, H5 and H7. `bench
+  - [ ] **D1-G: D1's report and gate.** Needs D1-B..F. `bench
     report` over every leg (goodreads rows from the E1c records only;
     pubmed's `silvertorch`/triton and `linr_v3` from `c0e42d1` only); the
     cross-scale filter comparison across algorithms (`recall_oracle`,
@@ -284,8 +236,7 @@ only on a leg with no records yet.
     scores equal a hand-computed torch reference (matmul → topk(αK) →
     filter → first K) at every α; `recall_oracle` reported against the
     exact oracle; the config gate expands it on every `filter` dataset;
-    the harness suite green. Needs H2 (its goodreads cells need the input
-    identity). CPU plus a smoke cell, `opus`.
+    the harness suite green. CPU plus a smoke cell, `opus`.
   - [ ] **D5-run: the baseline on every `filter`-suite dataset** (goodreads
     on E1c, arxiv, yfcc10m, pubmed, openalex) with narrow `bench run
     --algo postfilter` scoping, so no existing record reruns; upload as
@@ -298,7 +249,7 @@ only on a leg with no records yet.
 - [ ] **E5: openalex's `filter` leg; the report gains the unfiltered
   cells retired from the `quality` suite, for the text datasets only.**
   Ordered after D1; technically
-  independent of it and of H2 (a text dataset). The 10 M OpenAlex catalog
+  independent of it. The 10 M OpenAlex catalog
   is not on the Hub: restage it on the pod (`openalex convert` streams 297
   GB over S3, then `prep --keep-items 10000000`, `encode_text`,
   `encode_queries`, `attrs`; [datasets](system/datasets.md#openalex)), or
@@ -328,7 +279,6 @@ only on a leg with no records yet.
 
 | step | A100 GPU-h | parallel streams |
 |---|---|---|
-| H2 | 0.5 | 1 |
 | R1 | 0.5 | 1 |
 | M1 | 0.5 | 1 (on a ≥ 2-GPU pod) |
 | L6 | ≈ 0.2 | 1 |
@@ -343,17 +293,17 @@ only on a leg with no records yet.
 | D3 (after its code) | ≈ 3 | by dataset |
 | F2-R (if chosen) | ≈ 2 | 1 |
 
-H5 and H7 are CPU; L6 is a short library-suite run. Runnable now, before H2: D1-B, D1-E (and E5's
+L6 is a short library-suite run. Runnable now: R1, D1-B, D1-E, D5-code (and E5's
 restage). The total is ≈ 89-124 GPU-h, of which D1 is ≈ 51-73.
 
 ## Dependencies
 
 ```
-D1-B, D1-E  (runnable now)
-H2 ─> R1 ─┬─> D1-F, D1-C, D1-D ─┐
-          └─> D5-code ─> D5-run (openalex cells also after E5)
-H5, H7 ─────────────────────────┼─> D1-G ─┬─> D3 ──────────┐
-D1-B, D1-E ─────────────────────┘         ├─> F2 (+ F2-R)  ├─> F5
+R1, D1-B, D1-E, D5-code  (runnable now)
+R1 ─┬─> D1-F, D1-C, D1-D ───────┐
+    └─> D5-run <─ D5-code       │  (D5-run's openalex cells also after E5)
+D1-B, D1-E ─────────────────────┴─> D1-G ─┬─> D3 ──────────┐
+                                          ├─> F2 (+ F2-R)  ├─> F5
                                           ├─> F4           │
                                           └─> E5 ──────────┘
 D5-run ───────────────────────────────────────────────────┘
