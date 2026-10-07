@@ -394,3 +394,27 @@ def test_append_record_writes_valid_json_for_non_finite_and_tensors(tmp_path):
     )
     records.append_record(p, {"a": 1})
     assert _records(p) == [{"a": None, "b": [1, 2], "c": [1.0, None]}, {"a": 1}]
+
+
+def test_a_cell_with_no_in_filter_heldout_target_records_null(tiny_configs, tmp_path, monkeypatch):
+    """Pubmed's reverse clause: no kept query has a held-out target the filter admits. The
+    held-out side has no mean, so it is null with ``n == 0``, never 0.0 (roadmap H7)."""
+    real = run.oracle.load_or_build
+
+    def unreachable(*a, **kw):
+        blob = real(*a, **kw)
+        return {
+            **blob,
+            "targets_in_filter": torch.zeros_like(blob["targets_in_filter"]),
+            "target_in_filter": torch.zeros_like(blob["target_in_filter"]),
+        }
+
+    monkeypatch.setattr(run.oracle, "load_or_build", unreachable)
+    jobs = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=["c0"])
+    out = tmp_path / "results"
+    assert dict(run.run(jobs, out_dir=out, skip_perf=True, **KW)) == {"partial": 1}
+    (rec,) = _records(out / "e2e" / "tiny-d8.jsonl")
+    held = rec["quality"]["heldout"]
+    assert held["n"] == 0 and rec["n_queries_heldout"] == 0
+    assert all(v is None for m, v in held.items() if m != "n")
+    assert rec["quality"]["oracle"]["recall@4"] == pytest.approx(1.0)  # the oracle side scores

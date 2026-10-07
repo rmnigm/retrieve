@@ -92,14 +92,18 @@ def accumulate(
     acc["n"] += int(ids.shape[0])
 
 
-def finalize(acc: dict) -> dict[str, float]:
+def finalize(acc: dict) -> dict[str, float | None]:
     """Means over the accumulated rows — one device→host copy for all keys."""
     keys = [key for key in acc if key != "n"]
-    n = max(acc["n"], 1)
-    values = torch.stack([acc[key] for key in keys]).div(n).tolist() if keys else []
-    out = dict(zip(keys, values, strict=True))
-    out["n"] = acc["n"]
-    return out
+    values = torch.stack([acc[key] for key in keys]).div(max(acc["n"], 1)).tolist() if keys else []
+    return null_if_empty({**dict(zip(keys, values, strict=True)), "n": acc["n"]})
+
+
+def null_if_empty(side: dict) -> dict:
+    """No scored row (``n == 0``: no kept query with a reachable held-out target) has no mean,
+    so every metric is ``None``, never a 0.0 a report would average in as a miss. Also applied
+    to records written before this rule."""
+    return ({m: None for m in side if m != "n"} | {"n": 0}) if side.get("n") == 0 else side
 
 
 def jaccard_at_k(ids_a: Tensor, ids_b: Tensor, k: int) -> float:

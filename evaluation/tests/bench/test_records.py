@@ -123,3 +123,14 @@ def test_a_pre_h2_goodreads_record_is_gsasrec_not_today_s_encoder():
     del old["inputs"]
     assert records.inputs_of(old) == "gsasrec-d128-drop0.5-id"
     assert records.record_key(old) != records.resume_key(KEY, "c")
+
+
+def test_a_pre_h7_empty_heldout_side_reads_as_null(tmp_path):
+    """The d1/pubmed ``c3_journal_reverse`` shape: ``n == 0`` with 0.0 means."""
+    held = {f"{m}@100": 0.0 for m in ("recall", "ndcg", "precision", "mrr")} | {"n": 0}
+    rec = {**KEY, "status": "ok", "env": {"code_version": "c"}, "perf": None,
+           "quality": {"heldout": held, "oracle": {"recall@100": 0.4, "n": 8600}}}  # fmt: skip
+    records.append_record(tmp_path / "filter" / "goodreads-d128.jsonl", rec)
+    (row,) = records.read_table(records.aggregate(tmp_path))
+    assert row["heldout_recall@100"] is None and row["heldout_n"] == 0
+    assert row["oracle_recall@100"] == 0.4

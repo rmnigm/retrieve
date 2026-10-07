@@ -536,7 +536,7 @@ def run(
                     rec["quality"] = qual
                     if job.algo in EXACT_ALGOS and "oracle" in qual:
                         r = qual["oracle"][f"recall@{k_max}"]
-                        if r < EXACT_MIN_RECALL:
+                        if r is not None and r < EXACT_MIN_RECALL:  # None: no oracle row
                             raise QualityGateError(
                                 f"{job.algo}/{job.backend} recall_oracle@{k_max} = {r:.4f} "
                                 f"< {EXACT_MIN_RECALL}"
