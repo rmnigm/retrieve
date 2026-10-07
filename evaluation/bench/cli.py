@@ -21,6 +21,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -32,6 +33,7 @@ from typing import TextIO
 import click
 import yaml
 
+import bench
 from bench import measure, records
 from bench import run as run_mod
 from bench.algos import BACKENDS, FILTER_KINDS
@@ -98,6 +100,9 @@ def run(
     skip_quality, skip_perf, profile, out, output, resume, config_dir,
 ) -> None:  # fmt: skip
     """Run the cells of one (dataset, suite) in this process."""
+    cache = measure.inductor_cache_dir(measure.code_version(), bench.GIVEN_INDUCTOR_CACHE)
+    os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache
+    click.echo(f"inductor cache: {cache}")
     ds_yaml, suites_yaml = _paths(config_dir, dataset)
     jobs = load_matrix(
         ds_yaml,
@@ -160,6 +165,10 @@ def campaign(
     log_dir = out_dir / "_logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     parity = out_dir / "_parity"
+    # The children key their own inductor cache; hand them the caller's value, not torch's default.
+    child_env = {k: v for k, v in os.environ.items() if k != "TORCHINDUCTOR_CACHE_DIR"}
+    if bench.GIVEN_INDUCTOR_CACHE:
+        child_env["TORCHINDUCTOR_CACHE_DIR"] = bench.GIVEN_INDUCTOR_CACHE
     worst = 0
     n_children = 0
     with open(log_dir / "campaign.log", "a") as summary:
@@ -208,6 +217,7 @@ def campaign(
                                 stdout=lf,
                                 stderr=subprocess.STDOUT,
                                 cwd=EVAL_DIR,
+                                env=child_env,
                                 timeout=timeout_h * 3600,
                             )
                         except subprocess.TimeoutExpired:  # the child was killed

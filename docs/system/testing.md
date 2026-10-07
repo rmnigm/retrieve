@@ -840,6 +840,7 @@ cache (`/tmp/torchinductor_<user>`), a compiled call can replay the *old* body. 
 after the OPORP candidate path changed its output width, four `test_linr.py` compile gates
 failed with the pre-change width on the warm cache and passed on a cold one. The same
 hazard applies to any compiled (`graph`-mode) harness run on a pod whose cache predates a
-library change.
+library change; `bench run` therefore keys its cache by `code_version` unless one is given
+([evaluation](evaluation.md#inductor-cache)).
 The pytest config in [pyproject.toml](../../retrieve/pyproject.toml)
 collects `test_*.py` only.

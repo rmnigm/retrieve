@@ -15,6 +15,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+import bench
 from bench import cli, measure, records, run
 from bench.config import load_matrix
 
@@ -180,3 +181,30 @@ def test_env_prints_provenance_and_clocks_as_json(monkeypatch):
     env = json.loads(r.output)
     assert set(env) == set(measure.provenance()) | set(measure.clocks())
     assert env["official_commit"] == "abc123" and "sm_mhz" in env and "code_version" in env
+
+
+def test_bench_run_keys_the_inductor_cache_unless_given(tiny_configs, tmp_path, monkeypatch):
+    """Roadmap H4: ``bench run`` points inductor at the ``code_version`` directory, or at the
+    caller's ``TORCHINDUCTOR_CACHE_DIR``; ``bench campaign`` passes children the caller's
+    value, never the default torch wrote into its own environment on import."""
+    ds, _ = tiny_configs
+    args = ["run", "--dataset", "tiny", "--suite", "e2e", "--algo", "linr_v1_filter_mask",
+            "--sweep", "c0", "--skip-quality", "--skip-perf", "--config-dir", str(ds.parent),
+            "--out", str(tmp_path / "results"), "--force"]  # fmt: skip
+    monkeypatch.setenv("TORCHINDUCTOR_CACHE_DIR", "/tmp/torchinductor_default")
+    for given, want in ((None, measure.inductor_cache_dir(measure.code_version(), None)),
+                        ("/scratch/inductor/mine", "/scratch/inductor/mine")):  # fmt: skip
+        monkeypatch.setattr(bench, "GIVEN_INDUCTOR_CACHE", given)
+        r = CliRunner().invoke(cli.main, args)
+        assert r.exit_code == 0, r.output
+        assert cli.os.environ["TORCHINDUCTOR_CACHE_DIR"] == want
+        assert f"inductor cache: {want}" in r.output
+
+    seen = []
+    monkeypatch.setattr(cli.subprocess, "call", lambda cmd, *, env, **kw: seen.append(env) or 0)
+    camp = ["campaign", "--suite", "e2e1", "--config-dir", str(ds.parent), "--out",
+            str(tmp_path / "camp")]  # fmt: skip
+    for given in (None, "/scratch/inductor/mine"):
+        monkeypatch.setattr(bench, "GIVEN_INDUCTOR_CACHE", given)
+        assert CliRunner().invoke(cli.main, camp).exit_code == 0
+        assert seen[-1].get("TORCHINDUCTOR_CACHE_DIR") == given

@@ -236,3 +236,11 @@ def test_setup_seeds_and_pins_precision():
     bench.setup(7)
     assert torch.equal(a, torch.randn(4))
     assert torch.get_float32_matmul_precision() == "highest"
+
+
+def test_inductor_cache_is_keyed_by_code_version_unless_given():
+    """Roadmap H4: two code_versions, two cache dirs; an explicit directory wins."""
+    a = bench.inductor_cache_dir("0123abcd", None)
+    b = bench.inductor_cache_dir("files:4567ef", None)
+    assert a != b and a.endswith("0123abcd") and b.endswith("files-4567ef")
+    assert bench.inductor_cache_dir("0123abcd", "/scratch/inductor/x") == "/scratch/inductor/x"
