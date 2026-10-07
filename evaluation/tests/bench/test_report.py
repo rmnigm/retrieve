@@ -272,3 +272,34 @@ def test_it_reads_schema_1_records_without_the_c5_clock_fields(results, tmp_path
     assert c.prov["schema_versions"] == [1]
     note = (tmp_path / "out" / "tables" / "tab-pareto_goodreads.tex").read_text()
     assert "1410--1410" in note  # the under-load per-variant sample, not the 1155 median
+
+
+def test_each_reason_is_stated_in_the_banner_caption_and_report(results, tmp_path):
+    """Roadmap H5: a non-citable report names its actual reasons, never "pre-campaign"."""
+    rec = _rec("goodreads", "linr_v1_filter_mask", "triton")
+    rec["env"] = {**ENV, "dirty": True, "git_branch": "dev/x"}
+    records.append_record(results / "filter" / "goodreads-d128.jsonl", rec)
+    c = _generate(results, tmp_path / "out")
+    assert c.prov["blockers"] == [
+        "no --gate given: no roadmap gate is declared green for these records",
+        "1 record(s) with status=failed",
+        "1 record(s) with status=partial (partial_reasons: skip_perf 1)",
+        "1 record(s) with env.dirty (library subtree was dirty)",
+        "record(s) produced on dev/x — CLAUDE.md rule 2: harness numbers from a branch are "
+        "not paper material",
+    ]
+    assert c.prov["marks"] == [
+        "gate not green", "1 failed", "1 partial: skip_perf 1", "1 dirty", "branch dev/x"
+    ]  # fmt: skip
+    tex = (tmp_path / "out" / "tables" / "tab-memory.tex").read_text()
+    assert (
+        "\\textbf{[NOT CITABLE: gate not green; 1 failed; 1 partial: skip\\_perf 1; 1 dirty; "
+        "branch dev/x]}~" in tex
+    )
+    assert "%   - 1 record(s) with status=partial (partial_reasons: skip_perf 1)" in tex
+    md = (tmp_path / "out" / "report.md").read_text()
+    assert "- 1 record(s) with env.dirty (library subtree was dirty)" in md
+    for path in c.written:
+        if path.suffix in (".tex", ".md"):
+            text = path.read_text().lower()
+            assert "pre-campaign" not in text and "predate" not in text, path

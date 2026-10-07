@@ -112,15 +112,31 @@ def provenance(recs: list[dict[str, Any]], gate: str | None) -> dict[str, Any]:
     env = [r.get("env") or {} for r in recs]
     status = Counter(r.get("status", "ok") for r in recs)
     dirty = [r for r, e in zip(recs, env, strict=True) if e.get("dirty")]
-    blockers = []
+    why = Counter(
+        x for r in recs if r.get("status") == "partial" for x in r.get("partial_reasons") or ["?"]
+    )
+    why_s = ", ".join(f"{x} {n}" for x, n in sorted(why.items()))
+    found: list[tuple[str, str]] = []  # (blocker for report.md / the manifest, caption mark)
+
+    def add(blocker: str, mark: str) -> None:
+        found.append((blocker, mark))
+
     if not gate:
-        blockers.append("no --gate given: these records come from no green roadmap gate")
+        add(
+            "no --gate given: no roadmap gate is declared green for these records", "gate not green"
+        )
     if status["failed"]:
-        blockers.append(f"{status['failed']} record(s) with status=failed")
+        add(f"{status['failed']} record(s) with status=failed", f"{status['failed']} failed")
     if status["partial"]:
-        blockers.append(f"{status['partial']} record(s) with status=partial")
+        add(
+            f"{status['partial']} record(s) with status=partial (partial_reasons: {why_s})",
+            f"{status['partial']} partial: {why_s}",
+        )
     if dirty:
-        blockers.append(f"{len(dirty)} record(s) with env.dirty (library subtree was dirty)")
+        add(
+            f"{len(dirty)} record(s) with env.dirty (library subtree was dirty)",
+            f"{len(dirty)} dirty",
+        )
     off = sorted(
         {
             e["git_branch"]
@@ -129,12 +145,14 @@ def provenance(recs: list[dict[str, Any]], gate: str | None) -> dict[str, Any]:
         }
     )
     if off:
-        blockers.append(
+        add(
             f"record(s) produced on {', '.join(off)} — CLAUDE.md rule 2: "
-            "harness numbers from a branch are not paper material"
+            "harness numbers from a branch are not paper material",
+            f"branch {', '.join(off)}",
         )
     if not recs:
-        blockers.append("no records")
+        add("no records", "no records")
+    blockers = [b for b, _ in found]
     started = sorted(e.get("started") or "" for e in env)
     return {
         "n_records": len(recs),
@@ -151,6 +169,7 @@ def provenance(recs: list[dict[str, Any]], gate: str | None) -> dict[str, Any]:
         "gate": gate,
         "citable": gate is not None and not blockers,
         "blockers": blockers,
+        "marks": [m for _, m in found],
         "generated": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
@@ -174,13 +193,13 @@ def _banner(prov: dict[str, Any], results_dir: Path) -> str:
     else:
         lines.append("% PROVENANCE: *** NOT CITABLE *** (CLAUDE.md rule 2). Reasons:")
         lines += [f"%   - {b}" for b in prov["blockers"]]
-        lines.append("%   Built from pre-campaign records: roadmap D1 has not produced these.")
     return "\n".join(lines) + "\n"
 
 
 def _caption(prov: dict[str, Any], text: str) -> str:
-    mark = "" if prov["citable"] else "\\textbf{[PRE-CAMPAIGN RECORDS — NOT CITABLE]}~"
-    return mark + text
+    if prov["citable"]:
+        return text
+    return f"\\textbf{{[NOT CITABLE: {_esc('; '.join(prov['marks']))}]}}~{text}"
 
 
 # ----- selection and reduction -------------------------------------------------
@@ -624,7 +643,7 @@ def _figure(path: Path, fig, prov: dict[str, Any]) -> Path:
         fig.text(
             0.5,
             0.5,
-            "PRE-CAMPAIGN\nNOT CITABLE",
+            "NOT CITABLE",
             ha="center",
             va="center",
             fontsize=34,
@@ -633,6 +652,7 @@ def _figure(path: Path, fig, prov: dict[str, Any]) -> Path:
             rotation=25,
             zorder=10,
         )
+        fig.text(0.5, 0.3, "; ".join(prov["marks"]), ha="center", fontsize=9, color="red")
     fig.text(
         0.005,
         0.005,
@@ -938,12 +958,7 @@ def coverage(c) -> list[Path]:
     else:
         lines += ["**NOT CITABLE.** Every artifact carries the marker. Reasons:", ""]
         lines += [f"- {b}" for b in p["blockers"]]
-        lines += [
-            "",
-            "These records predate the D1 campaign; they come from C4's gate run "
-            "and C5's one-cell check and are evidence about the harness, not results.",
-            "",
-        ]
+        lines += [""]
     lines += [
         "## Selection used by the tables",
         "",
