@@ -232,7 +232,13 @@ only on a leg with no records yet.
     `d1/arxiv-codesign`. **≈ 3-5 GPU-h**, one stream (both `bloom_path`
     arms are `silvertorch`/official).
   - [ ] **D1-E: pubmed `filter`, the targeted rerun** (the three-fix pass
-    changed only these arms):
+    changed only these arms). First, on the restaged slice (CPU facts already shown identical,
+    [artifact](artifacts/pubmed-restage/README.md)): `eval-data pubmed
+    encode_queries` on the GPU, `bench check --dataset pubmed`, then one
+    `linr_v1_filter_mask`/triton clause `c0_mesh` cell `--mode eager
+    --skip-perf` into a scratch tree; its quality block must equal the
+    `d1/pubmed` record's (held-out recall@100 0.9989321309919317, oracle
+    0.9985346478071041), or the rerun is on different embeddings: stop and report. Then:
     ```
     run --dataset pubmed --dim 768 --suite filter --algo silvertorch --backend triton --resume   # all 16 cells, retimed on the per-width tile
     run --dataset pubmed --dim 768 --suite filter --algo linr_v3 --backend triton --resume       # 8 cells, OOM at build before
