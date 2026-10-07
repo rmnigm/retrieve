@@ -140,9 +140,13 @@ ok, after the license-clause fix and its all4 rerun), yfcc10m (7/7 ok, L4
 confirmed working at D=192), pubmed (44/56 ok — see [datasets](#datasets)
 for the `linr_v3` OOM and the 6 h timeout gaps). All four are on the Hub
 (`d1/<dataset>`), NOT CITABLE (D1's gate is not green). `deep` and
-`codesign` (S9): arxiv `deep` holds 803 of 870 cells (`d1/arxiv-deep-partial`), arxiv
-`codesign` and goodreads's two legs have no records; goodreads runs on the E1c encoder. What
-remains is roadmap D1-A..G.
+`codesign` (S9): arxiv `deep` is complete, 870/870 cells ok, 0 failed (`d1/arxiv-deep`),
+at a **mixed code_version**: 800 cells at `72e5a90` (silvertorch triton 360, official 360,
+`linr_v3` 80) and 70 `linr_v3` bloom cells at `c0e42d1` (staging `40790b7`, A100-SXM4-80GB;
+3 older bloom `c0_maincat` seed 1 records at `72e5a90` stay in the file, superseded); of
+the 70, 34 are flagged `unstable`, sampled `sm_mhz` 1140–1410 (8 of 3,780 timing windows
+below 1410), NOT CITABLE. arxiv `codesign` and goodreads's two legs have no records;
+goodreads runs on the E1c encoder. What remains is roadmap D1-B..G.
 
 **Code_version policy for this campaign (user decision):**
 `code_version` is a hash of the `retrieve/src/retrieve` subtree (`bench/measure.py`), but a fix there does not
