@@ -13,7 +13,8 @@ Resume (§8.2 B): a cell is skipped when its ``records.resume_key`` — the key 
 library tree hash — is already in the file with ``status: ok``; failed and partial records
 are re-run, and ``report.py`` reads the last record per key. A record is ``partial`` when
 it does not carry everything the suite asked for: ``--skip-quality`` / ``--skip-perf``, a
-``--mode`` subset, or ``--k`` / ``--bs`` replacing the suite's lists (``Job.narrowed``);
+``--mode`` subset that drops a mode the module can run (not ``graph`` on an uncapturable
+one), or ``--k`` / ``--bs`` replacing the suite's lists (``Job.narrowed``);
 ``partial_reasons`` names which. Failures (§8.2 D, §7): any
 exception inside a cell is written as ``status: failed`` with the traceback and the loop
 continues — an OOM on the torch path is a finding, not noise. Three things stop the
@@ -412,8 +413,7 @@ def run(
     sm_ref: float | None = None  # the process's first under-load sample
     latency_kw = dict(latency_kw or {})
     reasons0 = [r for r, on in (("skip_quality", skip_quality), ("skip_perf", skip_perf)) if on]
-    if set(modes) != set(MODES):
-        reasons0.append("modes")
+    skipped_modes = set(MODES) - set(modes)
     with_filters = {(j.dataset, j.dim): False for j in jobs}
     for j in jobs:
         with_filters[j.dataset, j.dim] |= j.filter_kind != "none"
@@ -488,6 +488,9 @@ def run(
             continue
         index_mib = measure.index_bytes(module) / MiB
         filter_mib = measure.index_bytes(getattr(module, "filter", None)) / MiB
+        # A module that cannot capture loses nothing to a skipped graph mode.
+        lost = skipped_modes - (set() if getattr(module, "capturable", True) else {"graph"})
+        job_reasons = reasons0 + (["modes"] if lost else [])
 
         for params in todo:
             t0 = time.perf_counter()
@@ -496,7 +499,7 @@ def run(
                 q = {k: v for k, v in params.items() if k in QUERY_PARAMS}
                 if q:
                     module.set_query_params(**q)
-                reasons = reasons0 + (["ks_bs"] if job.narrowed else [])
+                reasons = job_reasons + (["ks_bs"] if job.narrowed else [])
                 rec: dict[str, Any] = {
                     "schema_version": records.SCHEMA_VERSION,
                     "status": "partial" if reasons else "ok",
