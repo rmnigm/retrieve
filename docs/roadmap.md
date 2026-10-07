@@ -76,11 +76,12 @@ GPU work runs on RunPod pods launched with
    and the report do: `bench fetch --path-in-repo d1/<subtree> --results
    <dir>` per [hub-index](artifacts/hub-index.md) row, merged into
    `evaluation/results/<suite>/`.
-4. Every GPU job: a fresh `TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/<job>`
-   (the cache is not keyed by `code_version`, H4), `HF_HOME=/scratch/hf`.
+4. Every GPU job: its own `TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/<job>`
+   (`bench run` keys a default by `code_version` when none is given,
+   [evaluation](system/evaluation.md#inductor-cache)), `HF_HOME=/scratch/hf`.
    Run from `evaluation/` as `/venvs/retrieve/bin/python -m bench.cli …`,
-   **not** `uv run`, which masks bench's exit code. Pass `--timeout 48` to
-   every `bench campaign` (the 6 h default kills `deep` groups, H3). A long
+   **not** `uv run`, which masks bench's exit code. `bench campaign`'s
+   per-group timeout defaults to 48 h. A long
    job runs from one sequential driver script per GPU (one process group,
    no chained waiters, and no log line containing the text a watcher
    greps for).
@@ -167,20 +168,6 @@ only on a leg with no records yet.
   loosened); query L2 norms 1.0 ± 1e-3; `n_kept` recorded against the
   gSASRec cell's 9,859. Record the cell in validation (not yet validated)
   and on the Hub as `artifacts/r1`. **0.5 GPU-h**, one stream.
-- [ ] **H3: `bench campaign`'s per-group timeout fits the work.** The
-  default `--timeout 6.0` killed pubmed `filter` groups (cells take 20-46
-  min at D = 768 × 10 M) and is far below an arxiv `deep` `silvertorch`
-  group (~10 h). A default sized for the largest group, or one scaled by
-  dataset and suite. *Gate*: the harness suite green, a test on the
-  default; until it lands, every campaign passes `--timeout 48`. CPU.
-- [ ] **H4: the harness keys its inductor cache by `code_version`.** The
-  on-disk FX-graph / AOT-autograd caches do not invalidate when a
-  `@triton_op` body changes, so a `graph`-mode run after a library edit can
-  replay stale kernel code ([testing](system/testing.md#running)). `bench
-  run` sets a `TORCHINDUCTOR_CACHE_DIR` that includes `code_version` unless
-  one is given. *Gate*: a test that two code_versions resolve to two cache
-  dirs; the harness suite green. CPU. Until it lands, the restore steps'
-  fresh cache per job is the workaround.
 - [ ] **H5: `bench report` states true provenance.** `bench/report.py`
   appends "These records predate the D1 campaign…" to every non-citable
   report, marks every non-citable caption `[PRE-CAMPAIGN RECORDS — NOT
@@ -189,12 +176,6 @@ only on a leg with no records yet.
   not citable (the record's `status`, `dirty`, `partial_reasons`, or a
   gate not green). *Gate*: `test_report.py` pins the text for each reason.
   CPU. Before D1-G and F5.
-- [ ] **H6: `partial` is stamped per job, not per process.** `bench/run.py`
-  builds `reasons0` once per process, so an eager-only pass marks every
-  record `partial`, including `official`, whose `graph` entry is
-  `not_capturable` anyway. *Gate*: a test that an `official` record from an
-  eager-only run is not `partial` for `modes`, and a `triton` one is. CPU.
-  Before D1-G.
 - [ ] **H7: a held-out metric with no target is null, not 0.0.** Pubmed's
   `c3_journal_reverse` records carry held-out recall 0.0 where no held-out
   target passes the filter, which a report averages in as a miss. The
@@ -277,7 +258,7 @@ only on a leg with no records yet.
   - [ ] **D1-D: goodreads `codesign`** (6 jobs). Needs H2 and R1. `campaign
     --suite codesign --dataset goodreads --resume --timeout 48`. Upload
     `d1/goodreads-codesign`. **≈ 2 GPU-h**, one stream.
-  - [ ] **D1-G: D1's report and gate.** Needs D1-A..F, H5, H6 and H7. `bench
+  - [ ] **D1-G: D1's report and gate.** Needs D1-A..F, H5 and H7. `bench
     report` over every leg (goodreads rows from the E1c records only;
     pubmed's `silvertorch`/triton and `linr_v3` from `c0e42d1` only); the
     cross-scale filter comparison across algorithms (`recall_oracle`,
@@ -370,7 +351,7 @@ only on a leg with no records yet.
 | D3 (after its code) | ≈ 3 | by dataset |
 | F2-R (if chosen) | ≈ 2 | 1 |
 
-H3-H7 are CPU; L6 is a short library-suite run. Runnable now, before H2: D1-A, D1-B, D1-E (and E5's
+H5 and H7 are CPU; L6 is a short library-suite run. Runnable now, before H2: D1-A, D1-B, D1-E (and E5's
 restage). The total is ≈ 95-130 GPU-h, of which D1 is ≈ 57-79.
 
 ## Dependencies
@@ -379,11 +360,10 @@ restage). The total is ≈ 95-130 GPU-h, of which D1 is ≈ 57-79.
 D1-A, D1-B, D1-E  (runnable now)
 H2 ─> R1 ─┬─> D1-F, D1-C, D1-D ─┐
           └─> D5-code ─> D5-run (openalex cells also after E5)
-H5, H6, H7 ─────────────────────┼─> D1-G ─┬─> D3 ──────────┐
+H5, H7 ─────────────────────────┼─> D1-G ─┬─> D3 ──────────┐
 D1-A, D1-B, D1-E ───────────────┘         ├─> F2 (+ F2-R)  ├─> F5
                                           ├─> F4           │
                                           └─> E5 ──────────┘
 D5-run ───────────────────────────────────────────────────┘
-H3, H4: before the next campaign (workarounds meanwhile: --timeout 48, a fresh cache per job)
 M1: before any timed step runs on a multi-GPU pod
 ```
