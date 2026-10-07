@@ -401,7 +401,7 @@ bench run      --dataset D --suite S [--dim N]* [--algo A]* [--backend B]* [--fi
                [--resume|--force] [--config-dir config]
 bench campaign --suite filter|deep|codesign|all [--dataset D]* [--dim N]* [--mode M]*
                [--skip-quality] [--skip-perf] [--profile] [--out results] [--resume|--force]
-               [--config-dir config] [--timeout 6.0]
+               [--config-dir config] [--timeout 48.0]
 bench check    --dataset D [--dim N]* [--config-dir config]   # eval_datasets.layout.validate_layout
 bench upload   [--repo-id user/repo] [--results DIR] [--path-in-repo PREFIX] [--gate STEP]
                [--private|--public] [--verify] [--dry-run]
@@ -434,7 +434,9 @@ The child's stdout + stderr go to
 command line first); one summary line per child (`time suite dataset dim
 algo backend rc seconds log`) goes to `results/_logs/campaign.log` and the
 terminal; a non-zero rc is recorded and the loop continues; a child
-still running after `--timeout` hours (default 6) is killed and recorded
+still running after `--timeout` hours (default 48, `cli.TIMEOUT_H`: sized
+for the largest group, arxiv `deep` `silvertorch` at ≈ 10 h, so it catches
+hangs rather than budgeting work) is killed and recorded
 as `rc=timeout` (exit code 124, noted in its log); the exit code
 is the worst child rc, or 1 when a listed dataset expands to no groups or
 no child was launched at all (`--dataset` / `--dim` selecting nothing).
@@ -912,7 +914,7 @@ uv run bench run --dataset arxiv --dim 128 --suite filter --algo silvertorch --b
     --filter-kind bloom --sweep c0_maincat --mode eager --skip-perf
 # the campaign (roadmap D1), one suite at a time
 uv run bench campaign --suite filter --resume
-uv run bench campaign --suite deep --resume --timeout 48   # the 6 h default cuts deep groups short
+uv run bench campaign --suite deep --resume
 uv run bench upload --results results --path-in-repo d1-a --verify   # publish, then check the round trip
 uv run bench fetch --path-in-repo d1-a                               # a published leg back into results/
 ```

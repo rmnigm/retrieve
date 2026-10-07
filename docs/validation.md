@@ -69,6 +69,7 @@ rerun the library suite before trusting any row on it.
 | Rerun byte-identical in quality | **passes** on all 12 rerun records of the goodreads leg | |
 | Ids identical across `eager` and `graph` | **not run** | |
 | Batch scaling `median_ms(bs=16) < 16 × median_ms(bs=1)` | passes, worst ratio 14.4 | |
+| H3: `bench campaign`'s per-group timeout | **green on CPU** (`dev/h3`, an A100 pod, CPU): the default is 48 h (`cli.TIMEOUT_H`), above the largest group (arxiv `deep` `silvertorch`, ≈ 10 h); `test_cli.py` pins that a campaign without `--timeout` hands every child 48 h; harness suite 275 passed / 4 skipped | the old 6 h default is why `d1/pubmed` lacks four cells (row *pubmed* below) |
 
 ## Official against our Triton reimplementation (citable, contested)
 
