@@ -205,7 +205,7 @@ only on a leg with no records yet.
   arxiv, yfcc10m and pubmed, in scale order, then `deep` and `codesign`
   (S9) on arxiv, then goodreads. openalex's `filter` leg is E5's. Seeds {0, 1, 2} on the headline sweeps; `n_probe` ∈ {24, 32}. Done:
   the `filter` legs of arxiv (126/126), yfcc10m (7/7) and pubmed (44/56),
-  and 803 of arxiv `deep`'s 870 cells
+  and arxiv `deep` (870/870, mixed `72e5a90` / `c0e42d1`)
   ([validation](validation.md#campaign-roadmap-d1-in-progress-not-yet-validated)).
   Goodreads runs on the E1c encoder `sasrec-ssm-logq-d128`; `d1/goodreads`
   stays on the Hub as the gSASRec run. Everything below runs at
@@ -214,19 +214,6 @@ only on a leg with no records yet.
   gaps G3 (P99 / QPS), G4 (seeds), G7, G8 (cross-dataset deep sweeps).
   `R=$REPO_DIR/evaluation/results`; every command is `python -m bench.cli`
   from `evaluation/`, with `--out $R --config-dir config`.
-  - [ ] **D1-A: arxiv `deep`, the remaining `linr_v3`** (14 of its 30
-    jobs, 70 cells; the 16 jobs done at `72e5a90` are not rerun; bloom
-    `c0_maincat` seed 1 has 3 of 5 pools at `72e5a90`, and the newer
-    record supersedes them):
-    ```
-    run --dataset arxiv --dim 128 --suite deep --algo linr_v3 --backend triton --filter-kind bloom --sweep c0_maincat --seed 1 --seed 2 --resume
-    run --dataset arxiv --dim 128 --suite deep --algo linr_v3 --backend triton --filter-kind bloom --sweep c2_year --sweep c3_nversions --sweep c0c2 --sweep all4 --resume
-    ```
-    Upload the complete leg as `d1/arxiv-deep` (803 records at `72e5a90` +
-    70 at `c0e42d1`, the mixed version noted in the row), replacing
-    `d1/arxiv-deep-partial`. If H2 merged first, confirm its
-    old-records-keep-their-key gate before trusting `--resume`. **≈ 6
-    GPU-h** (~5 min a cell); 2 streams (the two commands).
   - [ ] **D1-B: arxiv `codesign`** (10 jobs, no records yet): `campaign
     --suite codesign --dataset arxiv --resume --timeout 48`. Upload
     `d1/arxiv-codesign`. **≈ 3-5 GPU-h**, one stream (both `bloom_path`
@@ -264,7 +251,7 @@ only on a leg with no records yet.
   - [ ] **D1-D: goodreads `codesign`** (6 jobs). Needs H2 and R1. `campaign
     --suite codesign --dataset goodreads --resume --timeout 48`. Upload
     `d1/goodreads-codesign`. **≈ 2 GPU-h**, one stream.
-  - [ ] **D1-G: D1's report and gate.** Needs D1-A..F, H5 and H7. `bench
+  - [ ] **D1-G: D1's report and gate.** Needs D1-B..F, H5 and H7. `bench
     report` over every leg (goodreads rows from the E1c records only;
     pubmed's `silvertorch`/triton and `linr_v3` from `c0e42d1` only); the
     cross-scale filter comparison across algorithms (`recall_oracle`,
@@ -345,7 +332,6 @@ only on a leg with no records yet.
 | R1 | 0.5 | 1 |
 | M1 | 0.5 | 1 (on a ≥ 2-GPU pod) |
 | L6 | ≈ 0.2 | 1 |
-| D1-A arxiv `deep` `linr_v3` | ≈ 6 | 2 |
 | D1-B arxiv `codesign` | ≈ 3-5 | 1 |
 | D1-E pubmed targeted rerun | ≈ 12 | 3 |
 | D1-F goodreads `filter` (E1c) | ≈ 4 | up to 4 |
@@ -357,17 +343,17 @@ only on a leg with no records yet.
 | D3 (after its code) | ≈ 3 | by dataset |
 | F2-R (if chosen) | ≈ 2 | 1 |
 
-H5 and H7 are CPU; L6 is a short library-suite run. Runnable now, before H2: D1-A, D1-B, D1-E (and E5's
-restage). The total is ≈ 95-130 GPU-h, of which D1 is ≈ 57-79.
+H5 and H7 are CPU; L6 is a short library-suite run. Runnable now, before H2: D1-B, D1-E (and E5's
+restage). The total is ≈ 89-124 GPU-h, of which D1 is ≈ 51-73.
 
 ## Dependencies
 
 ```
-D1-A, D1-B, D1-E  (runnable now)
+D1-B, D1-E  (runnable now)
 H2 ─> R1 ─┬─> D1-F, D1-C, D1-D ─┐
           └─> D5-code ─> D5-run (openalex cells also after E5)
 H5, H7 ─────────────────────────┼─> D1-G ─┬─> D3 ──────────┐
-D1-A, D1-B, D1-E ───────────────┘         ├─> F2 (+ F2-R)  ├─> F5
+D1-B, D1-E ─────────────────────┘         ├─> F2 (+ F2-R)  ├─> F5
                                           ├─> F4           │
                                           └─> E5 ──────────┘
 D5-run ───────────────────────────────────────────────────┘
