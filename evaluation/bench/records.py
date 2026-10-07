@@ -27,6 +27,7 @@ import torch
 from loguru import logger
 
 from bench.config import load_dataset
+from bench.metrics import null_if_empty
 
 SCHEMA_VERSION = 3
 KEY_FIELDS = (
@@ -156,7 +157,7 @@ def _row(rec: dict[str, Any], entry: dict[str, Any] | None) -> dict[str, Any]:
     row.update({f"env_{c}": rec["env"].get(c) for c in _ENV_COLUMNS})
     q = rec.get("quality") or {}
     for side in ("heldout", "oracle"):
-        for m, v in (q.get(side) or {}).items():
+        for m, v in null_if_empty(q.get(side) or {}).items():
             row[f"{side}_{m}"] = v
     for m, v in q.items():
         if not isinstance(v, dict):

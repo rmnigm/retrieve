@@ -193,7 +193,7 @@ def test_num_targets_derived_when_omitted():
 
 def test_finalize_empty_accumulator():
     out = finalize(accumulator([3], "cpu"))
-    assert out == {"recall@3": 0.0, "ndcg@3": 0.0, "precision@3": 0.0, "mrr@3": 0.0, "n": 0}
+    assert out == {"recall@3": None, "ndcg@3": None, "precision@3": None, "mrr@3": None, "n": 0}
 
 
 def test_jaccard_at_k():

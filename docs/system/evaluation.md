@@ -222,7 +222,7 @@ cascade.
 |---|---|
 | [`measure.py`](../../evaluation/bench/measure.py) | `setup`, `warm_gpu_once`, `provenance` (GPU, driver, CUDA, torch, triton, `official_commit` — the installed `silvertorch`'s PEP 610 `direct_url.json` `vcs_info.commit_id`, `None` when it is not installed from git — commit, `dirty` = `subtree_dirty()` over `retrieve/src/retrieve`, `repo_dirty`, branch, `code_version` = the subtree's tree hash, or `files:<sha256>` of the sources on disk when the subtree is dirty, host, python, started), `clocks()` (one `nvidia-smi` sample), `timed_build`, `index_bytes` (Σ buffers, submodules included, deduplicated), `stats`, `latency(fn, bs=, mode=)` (§2.5 windows, IQR + outlier counts, `load: closed_loop`, `peak_fwd_mib`, the under-load `sm_mhz`), `graph_callable` (raises `NotCapturable` with the record's `reason`), `profile_once` |
 | [`records.py`](../../evaluation/bench/records.py) | what a record *is*: `SCHEMA_VERSION`, `KEY_FIELDS`, `resume_key`, `record_path`, `samples_path`, `append_record` (one `write` + `fsync`), `read_records` / `read_keys` (one torn trailing line tolerated), `record_files`, `latest` (last record per key), `aggregate(results_dir) → results.parquet` (one row per perf entry — what `report.py` reads), `read_table` |
-| [`metrics.py`](../../evaluation/bench/metrics.py) | `accumulator(ks, device)` / `accumulate(acc, ids, targets, num_targets=None, ranked=False)` / `finalize(acc)` — recall, ndcg, precision, mrr at every `k` from one top-`k_max` list as float64 running sums on device; `ranked=True` scores against the oracle's own top-`k` prefix; `per_row`, `jaccard_at_k`. `training/evaluate.py` keeps its own frozen copy, pinned to agree (`training/test_encode.py`) |
+| [`metrics.py`](../../evaluation/bench/metrics.py) | `accumulator(ks, device)` / `accumulate(acc, ids, targets, num_targets=None, ranked=False)` / `finalize(acc)` (`null` metrics when `n == 0`, `null_if_empty`) — recall, ndcg, precision, mrr at every `k` from one top-`k_max` list as float64 running sums on device; `ranked=True` scores against the oracle's own top-`k` prefix; `per_row`, `jaccard_at_k`. `training/evaluate.py` keeps its own frozen copy, pinned to agree (`training/test_encode.py`) |
 | [`algos.py`](../../evaluation/bench/algos.py) | the algorithm table: `ALGOS` name → library class (`LiNRV1`–`LiNRV4`, `SilverTorch`), `FILTER_KINDS`, `BACKENDS`, `FILTER_MODE` (`clause` → `exact`), `PATHS` **derived from `retrieve.interfaces.DISPATCH`**, `filter_backend` (`official` → `triton`), `build(algo, item_embs, k=, backend=, …)` (construct + `register_index`, ≈ 25 lines), `build_filter`, `is_valid_combo` |
 | [`config.py`](../../evaluation/bench/config.py) | `Dataset`, `Job`, `load_dataset`, `load_matrix` — the config matrix below |
 | [`inputs.py`](../../evaluation/bench/inputs.py) | `load_inputs` (dispatch to `training.encode.encode_split` or the `eval_datasets.layout` text readers; `users_limit` once, as a prefix), `sweep_qa`, `build_filters` (keyed by filter backend), `exact_filter`, `query_pool` |
@@ -491,7 +491,11 @@ latency_kw=None, device=None) -> Counter` runs the jobs in order:
    cells the targets the exact mask excludes are set to `-1` first and
    `n_targets` counts only the reachable ones (`blob["targets_in_filter"]`),
    since no algo can retrieve a masked-out item; row selection
-   by CPU masks + `index_select`, so no per-chunk sync); the parity spill;
+   by CPU masks + `index_select`, so no per-chunk sync). A side that scored
+   no row (`n == 0`: pubmed's `c3_journal_reverse`, where no kept query has
+   an in-filter held-out target) has no mean: every metric is `null`, not
+   0.0 (`metrics.null_if_empty`, applied by `finalize`; the exact-algo
+   oracle gate skips a `null` recall); the parity spill;
    the exact-algo gate; perf per `(bs, k, mode)` (`query_pool` per bs,
    `module.k = k`, `graph_callable` or a null entry with `reason`,
    `latency`, optional `profile_once`); `clocks_drift` over the perf
@@ -552,7 +556,7 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 | `build_s` | float | construction + `register_index`, sync on each side (same value on every cell of one build) |
 | `index_mib` | float | Σ buffers of the algo module, filter submodule included |
 | `filter_mib` | float | Σ buffers of the filter submodule alone (`0.0` without one; `silvertorch` carries its attrs inside `index_mib`) |
-| `quality` | dict / null | `heldout: {recall@k, ndcg@k, precision@k, mrr@k for k in ks, n}`; on filter cells also `oracle: {…}` (ranked-prefix targets); `jaccard_vs_first@k` per `k`, `score_max_abs_diff`, `parity` (`reference` = this record wrote the spill file, `vs_<backend>` = compared against it, `shape_mismatch:…`); `null` with `--skip-quality` |
+| `quality` | dict / null | `heldout: {recall@k, ndcg@k, precision@k, mrr@k for k in ks, n}`, each metric `null` when `n == 0`; on filter cells also `oracle: {…}` (ranked-prefix targets); `jaccard_vs_first@k` per `k`, `score_max_abs_diff`, `parity` (`reference` = this record wrote the spill file, `vs_<backend>` = compared against it, `shape_mismatch:…`); `null` with `--skip-quality` |
 | `perf` | list / null | one entry per `(bs, k, mode)` (table below); `null` with `--skip-perf` |
 | `unstable` | bool | any perf entry `unstable` (window spread > 5 %), or `clocks_drift` |
 | `memory_reserved_mib` | float / null | `torch.cuda.memory_reserved()` after the cell — the leak detector across a group's cells |
@@ -635,7 +639,8 @@ bloom_fp_rate, k_max, build_s, index_mib, filter_mib, unstable,
 memory_reserved_mib, elapsed_s, schema_version, stage, error,
 partial_reasons` (a list); `env_code_version, env_commit, env_dirty, env_gpu,
 env_sm_mhz_load, env_clocks_drift, env_git_branch`; `heldout_<metric>@k`,
-`oracle_<metric>@k` and the non-dict `quality_*` entries (`quality_parity`,
+`oracle_<metric>@k` (through `null_if_empty`, so a record written before H7
+with `n == 0` and 0.0 means reads `null` too) and the non-dict `quality_*` entries (`quality_parity`,
 `quality_jaccard_vs_first@k`, `quality_score_max_abs_diff`); `perf_<key>` for
 every perf-entry key except `window_medians_ms`, `window_sm_mhz` and
 `kernels`. Types are inferred per column (int, double, bool, string,
@@ -739,7 +744,8 @@ and makes matched latencies look like regressions.
 cell and the records hold several parameter sets, the smallest by
 canonical-JSON order is shown and a caption footnote names all of them;
 several seeds are reduced to their median (min–max whiskers in the
-figures). `tab:batch_scaling` needs one dataset: `--batch-dataset`, else
+figures). A `null` value (a held-out side with no scored row) is skipped,
+not averaged in as a miss. `tab:batch_scaling` needs one dataset: `--batch-dataset`, else
 the best-covered one, named in the caption. A selection that matches
 nothing emits the table with a `--- no matching cells ---` row rather than
 failing.
