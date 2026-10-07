@@ -97,6 +97,7 @@ def test_quality_suite_collapses_same_path_backends():
     assert j.key() == {
         "dataset": "mini",
         "dim": 16,
+        "inputs": "d16",
         "suite": "quality",
         "filter_kind": "none",
         "sweep": NONE_SWEEP,

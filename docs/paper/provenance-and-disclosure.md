@@ -79,7 +79,7 @@ cell, and each record's `env` block is the authority for that cell
 | `env.clocks_drift` | fires when any under-load sample is more than 5 % from the process's first *under-load* sample |
 | `perf[].sm_mhz` | the SM clock sampled immediately after that variant's last timing window's sync, with the GPU still at its load clock. **This is the clock a latency number in the paper is normalised against** |
 | `perf[].*` | per `(k, batch, mode)`: median / p20 / p80 / IQR, outlier counts, window spread, `peak_fwd_mib`, `load: closed_loop`, and for a non-capturable path a null median with a `reason` |
-| `schema_version` | **2** since C5 |
+| `schema_version` | **3** since H2 (the key block gained `inputs`, the encoder / embedding identity); **2** since C5 |
 
 Seeds: **`seed: 0` only** in everything measured to date. Multi-seed cells and
 confidence intervals are roadmap **D1** (paper gap G4) and are listed in §6.

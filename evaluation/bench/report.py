@@ -982,15 +982,14 @@ def coverage(c) -> list[Path]:
     partial = [r for r in c.recs if r.get("status") == "partial"]
     lines += ["", "## Failed cells (excluded from every number)", ""]
     lines += [
-        f"- `{ {k: r[k] for k in records.KEY_FIELDS} }` — stage `{r.get('stage')}`: "
+        f"- `{records.key_block(r)}` — stage `{r.get('stage')}`: "
         f"{(r.get('error') or '').splitlines()[-1][:160] if r.get('error') else '?'}"
         for r in failed
     ] or ["none"]
     lines += ["", "## Partial records (marked `*`)", ""]
-    lines += [
-        f"- `{ {k: r[k] for k in records.KEY_FIELDS} }` — {r.get('partial_reasons')}"
-        for r in partial
-    ] or ["none"]
+    lines += [f"- `{records.key_block(r)}` — {r.get('partial_reasons')}" for r in partial] or [
+        "none"
+    ]
     unstable = [(r, e) for r in c.recs for e in (r.get("perf") or []) if e.get("unstable")]
     lines += ["", f"## Unstable perf variants (marked `†`): {len(unstable)}", ""]
     lines += [
@@ -1033,6 +1032,20 @@ ARTIFACTS = {
 }
 
 
+def _one_inputs_per_dataset(rows: list[dict[str, Any]]) -> None:
+    """Tables select by dataset and dim, never by encoder: two encoders under one
+    ``(dataset, dim)`` would land in one cell, so the report refuses them."""
+    seen: dict[tuple[str, int], set[str]] = defaultdict(set)
+    for r in rows:
+        seen[r["dataset"], r["dim"]].add(r["inputs"])
+    mixed = {f"{d} d{dim}": sorted(v) for (d, dim), v in seen.items() if len(v) > 1}
+    if mixed:
+        raise click.ClickException(
+            f"records on more than one input identity: {mixed}; report one encoder per "
+            "results directory"
+        )
+
+
 def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
@@ -1047,6 +1060,7 @@ class Ctx:
         self.results_dir, self.out = Path(results_dir), Path(out)
         self.flat, self.rows = _load(self.results_dir, self.out)
         self.recs = records.latest(self.results_dir)
+        _one_inputs_per_dataset(self.rows)
         self.samples = _samples(self.results_dir)
         self.prov = provenance(self.recs, gate)
         self.written: list[Path] = [self.flat]

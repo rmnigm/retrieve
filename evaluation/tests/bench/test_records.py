@@ -4,14 +4,26 @@ line, and ``aggregate`` → ``results.parquet`` (one row per perf entry, last re
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import torch
 
 from bench import records
+from bench.config import load_matrix
+
+CONFIG = Path(__file__).resolve().parents[2] / "config"
+FIX = Path(__file__).parent / "data"
+# A real D1 arxiv record's key block and code_version (d1/arxiv, schema 2: no `inputs`).
+D1_ARXIV = {
+    "schema_version": 2, "dataset": "arxiv", "dim": 128, "suite": "filter",
+    "filter_kind": "clause", "sweep": "c0_maincat", "algo": "linr_v1_filter_mask",
+    "backend": "triton", "params": {}, "seed": 0,
+    "env": {"code_version": "72e5a90c148435d070496ae59e8b4c26bb825d68"},
+}  # fmt: skip
 
 KEY = {
-    "dataset": "goodreads", "dim": 128, "suite": "filter", "filter_kind": "clause",
-    "sweep": "c0_genre", "algo": "silvertorch", "backend": "triton",
+    "dataset": "goodreads", "dim": 128, "inputs": "sasrec-ssm-logq-d128", "suite": "filter",
+    "filter_kind": "clause", "sweep": "c0_genre", "algo": "silvertorch", "backend": "triton",
     "params": {"n_probe": 24, "n_lists": 1024}, "seed": 0,
 }  # fmt: skip
 
@@ -78,3 +90,36 @@ def test_aggregate_one_row_per_perf_entry_last_record_per_key(tmp_path):
     assert "perf_window_medians_ms" not in rows[0] and "perf_window_sm_mhz" not in rows[0]
     (r1,) = [r for r in rows if r["seed"] == 1]
     assert r1["perf_mode"] is None and r1["heldout_recall@100"] is None
+
+
+def test_a_pre_h2_text_record_keeps_the_key_a_run_computes_today():
+    (job,) = load_matrix(
+        CONFIG / "arxiv.yaml", CONFIG / "suites.yaml", "filter", dims=[128],
+        algos=["linr_v1_filter_mask"], backends=["triton"], filter_kinds=["clause"],
+        sweeps=["c0_maincat"], seeds=[0],
+    )  # fmt: skip
+    assert job.key()["inputs"] == "content_d128"
+    assert records.record_key(D1_ARXIV) == records.resume_key(
+        job.key(), D1_ARXIV["env"]["code_version"]
+    )
+
+
+def test_the_checkpoint_is_part_of_the_key():
+    kw = {"dims": [32], "algos": ["linr_v2"], "backends": ["torch"], "sweeps": ["c0"], "seeds": [0]}
+    (a,) = load_matrix(
+        FIX / "mini.yaml", FIX / "suites.yaml", "filter", filter_kinds=["clause"], **kw
+    )
+    (b,) = load_matrix(
+        FIX / "mini.yaml", FIX / "suites.yaml", "filter", filter_kinds=["clause"],
+        checkpoint="data/mini/checkpoints/other-d{dim}/best_model.pt", **kw,
+    )  # fmt: skip
+    assert (a.key()["inputs"], b.key()["inputs"]) == ("d32", "other-d32")
+    assert {**a.key(), "inputs": None} == {**b.key(), "inputs": None}
+    assert records.resume_key(a.key(), "c") != records.resume_key(b.key(), "c")
+
+
+def test_a_pre_h2_goodreads_record_is_gsasrec_not_today_s_encoder():
+    old = {**KEY, "env": {"code_version": "c"}}
+    del old["inputs"]
+    assert records.inputs_of(old) == "gsasrec-d128-drop0.5-id"
+    assert records.record_key(old) != records.resume_key(KEY, "c")

@@ -65,6 +65,12 @@ class Dataset:
     def gt_dir(self) -> Path:
         return self.data_dir / f"gt_d{self.dim}"
 
+    @property
+    def inputs(self) -> str:
+        """The record key's input identity: the checkpoint's directory name, or the
+        ``content_dir`` name (docs/system/evaluation.md, "The key block")."""
+        return self.checkpoint.parent.name if self.checkpoint else self.content_dir.name
+
 
 @dataclass(frozen=True)
 class Job:
@@ -95,6 +101,7 @@ class Job:
         return {
             "dataset": self.dataset,
             "dim": self.dim,
+            "inputs": self.data.inputs,
             "suite": self.suite,
             "filter_kind": self.filter_kind,
             "sweep": self.sweep,
@@ -167,8 +174,9 @@ def _sweeps(where: str, kind: str, raw: Any) -> dict[str, tuple[int, ...]]:
     return out
 
 
-def load_dataset(path: Path, dim: int) -> Dataset:
-    """Resolve ``config/<dataset>.yaml`` at one dim."""
+def load_dataset(path: Path, dim: int, checkpoint: str | None = None) -> Dataset:
+    """Resolve ``config/<dataset>.yaml`` at one dim; ``checkpoint`` (``{dim}`` templated)
+    replaces the YAML's, for a run pinned to another encoder (the golden cells)."""
     raw, where = _read(path), str(path)
     _check_keys(where, raw, _DATASET_KEYS, ["data_dir", "dims"])
     if dim not in _ints(f"{where}: dims", raw["dims"]):
@@ -191,6 +199,10 @@ def load_dataset(path: Path, dim: int) -> Dataset:
     if users_limit is not None and (not isinstance(users_limit, int) or users_limit <= 0):
         raise ConfigError(f"{where}: users_limit must be a positive int or null")
     ckpt, content = raw.get("checkpoint"), raw.get("content_dir")
+    if checkpoint is not None:
+        if content is not None:
+            raise ConfigError(f"{where}: a checkpoint override on a content_dir dataset")
+        ckpt = checkpoint
     return Dataset(
         name=path.stem,
         dim=dim,
@@ -275,6 +287,7 @@ def load_matrix(
     seeds: Sequence[int] | None = None,
     ks: Sequence[int] | None = None,
     batch_sizes: Sequence[int] | None = None,
+    checkpoint: str | None = None,
 ) -> list[Job]:
     """Expand one ``(dataset, suite)`` into jobs, grouped by ``Job.group`` in the order
     ``dim → algo → backend → filter_kind → sweep → build → seed``. Keyword narrows are the
@@ -314,7 +327,7 @@ def load_matrix(
 
     jobs: list[Job] = []
     for dim in dims_:
-        ds = load_dataset(Path(dataset_yaml), dim)
+        ds = load_dataset(Path(dataset_yaml), dim, checkpoint)
         for algo in _narrow(list(s["algos"]), algos, "algo"):
             builds, queries = _params(f"{where}: params.{algo}", (s.get("params") or {}).get(algo))
             seen: dict[tuple[str, str], str] = {}  # (filter_kind, path) -> first backend

@@ -6,10 +6,14 @@ Schema 2 (C5): ``env.expected_sm_mhz`` and ``env.clocks_locked`` are gone (a box
 lock clocks cannot record whether they are locked), ``env.sm_mhz`` is ``env.sm_mhz_idle`` (the
 process-start sample) and ``env.sm_mhz_load`` is the median of the cell's under-load samples;
 ``clocks_drift`` compares under-load samples with under-load samples only.
+
+Schema 3 (H2): the key block carries ``inputs``, the encoder / embedding identity
+(``config.Dataset.inputs``). A record written before it gets one from :func:`inputs_of`.
 """
 
 from __future__ import annotations
 
+import functools
 import json
 import math
 import os
@@ -22,10 +26,13 @@ import pyarrow.parquet as pq
 import torch
 from loguru import logger
 
-SCHEMA_VERSION = 2
+from bench.config import load_dataset
+
+SCHEMA_VERSION = 3
 KEY_FIELDS = (
     "dataset",
     "dim",
+    "inputs",
     "suite",
     "filter_kind",
     "sweep",
@@ -50,6 +57,30 @@ _ENV_COLUMNS = (
 _PERF_SKIP = ("window_medians_ms", "window_sm_mhz", "kernels")
 
 
+# Before schema 3 goodreads ran on gSASRec and the text datasets' content_dir never changed;
+# other checkpoint datasets (kuairand's E4 cell, yambda's retired suite) have no identity left.
+_LEGACY_CHECKPOINTS = {"goodreads": "gsasrec-d{dim}-drop0.5-id"}
+_CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
+
+
+@functools.cache
+def _legacy_inputs(dataset: str, dim: int) -> str:
+    if dataset in _LEGACY_CHECKPOINTS:
+        return _LEGACY_CHECKPOINTS[dataset].format(dim=dim)
+    ds = load_dataset(_CONFIG_DIR / f"{dataset}.yaml", dim)
+    if ds.checkpoint is not None:
+        raise ValueError(f"{dataset} d{dim}: a record without `inputs` on a checkpoint dataset")
+    return ds.inputs
+
+
+def inputs_of(rec: dict[str, Any]) -> str:
+    return rec.get("inputs") or _legacy_inputs(rec["dataset"], rec["dim"])
+
+
+def key_block(rec: dict[str, Any]) -> dict[str, Any]:
+    return {k: inputs_of(rec) if k == "inputs" else rec[k] for k in KEY_FIELDS}
+
+
 def resume_key(key: dict[str, Any], code_version: str) -> str:
     """Canonical JSON of ``Job.key(params)`` plus the library's ``code_version`` (H §8.2 B):
     a kernel change invalidates a cell instead of silently reusing it."""
@@ -57,7 +88,7 @@ def resume_key(key: dict[str, Any], code_version: str) -> str:
 
 
 def record_key(rec: dict[str, Any]) -> str:
-    return resume_key({k: rec[k] for k in KEY_FIELDS}, rec["env"]["code_version"])
+    return resume_key(key_block(rec), rec["env"]["code_version"])
 
 
 def record_path(out_dir: Path, job) -> Path:
@@ -119,7 +150,7 @@ def read_keys(path: Path) -> dict[str, str]:
 
 
 def _row(rec: dict[str, Any], entry: dict[str, Any] | None) -> dict[str, Any]:
-    row: dict[str, Any] = {k: rec[k] for k in KEY_FIELDS}
+    row: dict[str, Any] = key_block(rec)
     row["params"] = json.dumps(rec["params"], sort_keys=True)
     row.update({c: rec.get(c) for c in _RECORD_COLUMNS})
     row.update({f"env_{c}": rec["env"].get(c) for c in _ENV_COLUMNS})
@@ -172,6 +203,8 @@ __all__ = [
     "SCHEMA_VERSION",
     "aggregate",
     "append_record",
+    "inputs_of",
+    "key_block",
     "latest",
     "read_keys",
     "read_records",
