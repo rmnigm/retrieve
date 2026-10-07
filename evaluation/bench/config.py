@@ -2,12 +2,12 @@
 
 One YAML per dataset (``config/<dataset>.yaml``) plus one ``config/suites.yaml``;
 ``load_matrix`` expands ``(dataset, suite)`` into ``Job``s. A ``Job`` is one index *build*:
-``(dataset, dim, filter_kind, sweep, algo, backend, build params, seed)`` carrying the
-query-param combos measured against that build (§8.2 A: ``n_probe`` / ``candidate_pool``
-mutate via ``set_query_params``, they never rebuild), the suite's ``ks`` / ``batch_sizes``,
-the bloom defaults and the resolved ``Dataset`` (paths with ``{dim}`` substituted). One
-*cell* is ``(job, params)`` with ``params = build | query combo``; ``Job.key(params)`` is
-the record's key block and the input to ``records.resume_key``.
+``(dataset, dim, filter_kind, sweep, algo, backend, build params, seed)`` carrying the query-param
+combos measured against that build (§8.2 A: ``n_probe`` / ``candidate_pool`` / ``alpha`` mutate via
+``set_query_params``, they never rebuild), the suite's ``ks`` / ``batch_sizes``, the bloom defaults
+and the resolved ``Dataset`` (paths with ``{dim}`` substituted). One *cell* is ``(job, params)``
+with ``params = build | query combo``; ``Job.key(params)`` is the record's key block and the input
+to ``records.resume_key``.
 
 Backends that run the same code collapse to one job (``PATHS``: ``linr_v1``/``linr_v4`` on
 ``none`` are cuBLAS whatever the flag says) and ``(algo, filter_kind, backend)`` triples
@@ -29,7 +29,7 @@ from loguru import logger
 
 from bench.algos import ALGOS, BACKENDS, FILTER_KINDS, PATHS, is_valid_combo, official_config
 
-QUERY_PARAMS = frozenset({"n_probe", "candidate_pool"})  # set_query_params, never a rebuild
+QUERY_PARAMS = frozenset({"n_probe", "candidate_pool", "alpha"})  # set_query_params, no rebuild
 NONE_SWEEP = "full_scan"  # the one sweep of filter_kind ``none`` (the old harness's name)
 _DATASET_KEYS = {"data_dir", "checkpoint", "content_dir", "dims", "encode", "users_limit"}
 _DATASET_KEYS |= {"filters"}

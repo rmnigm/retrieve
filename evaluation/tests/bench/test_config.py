@@ -280,13 +280,14 @@ def test_filter_suite_matches_old_d128_filter_config(dataset):
     # diverged since, so it now pins the CURRENT grid -- still catching accidental drift, no
     # longer demanding a superseded shape.
     assert _new_cells(jobs) == {
-        (a, "triton", fk, sw, k, bs)
-        for a in ("linr_v1_filter_mask", "linr_v2", "linr_v3", "silvertorch")
+        (a, b, fk, sw, k, bs)
+        for a, b in (("linr_v1_filter_mask", "triton"), ("linr_v2", "triton"),
+                     ("linr_v3", "triton"), ("silvertorch", "triton"), ("postfilter", "torch"))
         for fk in ("clause", "bloom")
         for sw in old[fk]
         for k in (100, 500, 1000)
         for bs in (1, 8, 16)
-    }
+    }  # fmt: skip
     # Every filter cell has the same users_limit and paths the old config named.
     ds = jobs[0].data
     assert ds.users_limit == 10000
@@ -304,6 +305,25 @@ def test_filter_suite_matches_old_d128_filter_config(dataset):
     st = next(j for j in all_jobs if j.algo == "silvertorch")
     assert st.build == {} and st.query == ({"n_probe": 24}, {"n_probe": 32})
     assert st.bloom == {"m_bits": 1024, "k_hash": 5}
+
+
+FILTER_DATASETS = yaml.safe_load((CFG / "suites.yaml").read_text())["filter"]["datasets"]
+
+
+@pytest.mark.parametrize("dataset", FILTER_DATASETS)
+def test_filter_suite_expands_postfilter_on_every_dataset(dataset):
+    """Roadmap D5-code's config gate: one torch job per sweep of every filter kind the
+    dataset defines, each measuring the four alphas against one build."""
+    ds_yaml = CFG / f"{dataset}.yaml"
+    jobs = load_matrix(ds_yaml, CFG / "suites.yaml", "filter", algos=["postfilter"], seeds=[0])
+    suite_dims = yaml.safe_load((CFG / "suites.yaml").read_text())["filter"]["dims"]
+    want = set()
+    for dim in set(yaml.safe_load(ds_yaml.read_text())["dims"]) & set(suite_dims):
+        clauses = load_dataset(ds_yaml, dim).clauses
+        want |= {(dim, fk, sw) for fk in ("clause", "bloom") for sw in clauses.get(fk, {})}
+    assert {(j.dim, j.filter_kind, j.sweep) for j in jobs} == want and want
+    assert all(j.backend == "torch" and j.path == "cublas+torch" and j.build == {} for j in jobs)
+    assert all(j.query == tuple({"alpha": a} for a in (1, 2, 4, 8)) for j in jobs)
 
 
 # `test_quality_suite_matches_old_d128_quality_config_modulo_collapse` removed 2026-09-16:

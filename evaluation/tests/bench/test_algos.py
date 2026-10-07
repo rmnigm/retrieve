@@ -96,7 +96,7 @@ def _check_k_slice(module, call, k_big: int = 8, k_small: int = 3) -> None:
 
 
 def _cells():
-    for algo in A.ALGOS:
+    for algo in A.ALGOS.keys() - {"postfilter"}:  # its pool is alpha*k: no prefix property
         for fk in A.FILTER_KINDS:
             if A.PATHS[algo, fk, "torch"] is not None:
                 yield algo, fk
@@ -167,3 +167,55 @@ def test_build_refusals():
     assert A.is_valid_combo("silvertorch", {"n_lists": 16, "n_probe": 16})
     assert not A.is_valid_combo("silvertorch", {"n_lists": 16})  # default n_probe=24 > 16
     assert A.is_valid_combo("linr_v3", {"n_probe": 100}) and A.is_valid_combo("silvertorch", {})
+
+
+# ----- postfilter: the generic-torch baseline ----------------------------------------------
+
+
+def _postfilter_reference(x, q, mask, k: int, alpha: int):
+    """matmul -> topk(alpha*k) -> drop ids the dense mask rejects -> first k, -1/-inf pad."""
+    scores = torch.mm(q.half().float(), x.half().t().contiguous().float())
+    top_s, top_i = torch.topk(scores, min(alpha * k, x.shape[0]), dim=1)
+    ids = torch.full((q.shape[0], k), -1, dtype=torch.long)
+    sc = torch.full((q.shape[0], k), float("-inf"))
+    for r in range(q.shape[0]):
+        kept = [j for j in range(top_i.shape[1]) if mask[r, top_i[r, j]]][:k]
+        ids[r, : len(kept)] = top_i[r, kept]
+        sc[r, : len(kept)] = top_s[r, kept]
+    return ids, sc
+
+
+@pytest.mark.parametrize("fk", ["clause", "bloom"])
+@torch.inference_mode()
+def test_postfilter_equals_the_torch_reference(fk):
+    x, q, attrs, qa = _data()
+    f = A.build_filter(fk, attrs, backend="torch", **BLOOM)
+    mask = f.evaluate_mask(qa)
+    m = A.build("postfilter", x, k=8, backend="torch", filter_kind=fk, filter_mod=f)
+    assert m.capturable and m.filter is f and index_bytes(m) > index_bytes(f)
+    short = 0
+    for k in (8, 40, N + 44):  # alpha*k past N at 40; k itself past N at the last
+        m.k = k
+        for alpha in (1, 2, 4, 8):
+            m.set_query_params(alpha=alpha)
+            ids, scores = m(q, qa)
+            ref_ids, ref_scores = _postfilter_reference(x, q, mask, k, alpha)
+            assert torch.equal(scores, ref_scores), (k, alpha)
+            assert torch.equal(ids, ref_ids), (k, alpha)
+            assert bool(mask.gather(1, ids.clamp(min=0))[ids >= 0].all())
+            short += int((ids[:, : min(k, N)] == -1).any())
+    assert short > 0  # the sentinel path ran
+
+
+def test_postfilter_refusals():
+    x, _, attrs, _ = _data()
+    f = A.build_filter("clause", attrs, backend="torch")
+    for fk, backend in (("none", "torch"), ("clause", "triton"), ("clause", "official")):
+        with pytest.raises(ValueError, match="no code path"):
+            A.build("postfilter", x, k=4, backend=backend, filter_kind=fk, filter_mod=f)
+    m = A.build("postfilter", x, k=4, backend="torch", filter_kind="clause", filter_mod=f,
+                params={"alpha": 4})  # fmt: skip
+    assert m.alpha == 4
+    for bad in (0, 2.0):
+        with pytest.raises(ValueError, match="alpha must be"):
+            m.set_query_params(alpha=bad)

@@ -3,7 +3,8 @@ dataset on disk (``write_tiny_dataset``, the one writer ``test_inputs.py`` and
 ``test_layout.py`` share) plus the matching dataset / suites YAMLs, so ``run.run`` can be
 driven end to end through ``config.load_matrix`` without a GPU or real data. The ``e2e``
 suite has two algos (the in-process loop); ``e2e1`` has one, for the campaign test's single
-child. Tests marked ``gpu`` skip without CUDA."""
+child; ``postfilter`` runs the baseline next to the exact V1 it is measured against. Tests
+marked ``gpu`` skip without CUDA."""
 
 from __future__ import annotations
 
@@ -83,6 +84,9 @@ def tiny_configs(tmp_path: Path) -> tuple[Path, Path]:
         "  algos: {linr_v1_filter_mask: [torch], linr_v4: [torch]}\n"
         "e2e1:\n  datasets: [tiny]\n  filter_kinds: [none, clause]\n  ks: [2, 4]\n"
         "  batch_sizes: [1, 2]\n  algos: {linr_v1_filter_mask: [torch]}\n"
+        "postfilter:\n  datasets: [tiny]\n  filter_kinds: [clause, bloom]\n  ks: [2, 4]\n"
+        "  batch_sizes: [1, 2]\n  algos: {linr_v1_filter_mask: [torch], postfilter: [torch]}\n"
+        "  params: {postfilter: {query: {alpha: [1, 2]}}}\n"
         "bloom: {m_bits: 64, k_hash: 2}\n"
     )
     return ds, suites

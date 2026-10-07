@@ -45,8 +45,10 @@ filter:                        # vs exact oracle + held-out-in-filter (old d*-fi
     linr_v2: [triton]
     linr_v3: [triton]
     silvertorch: [triton, official]
+    postfilter: [torch]        # the generic-torch baseline, torch by definition (decisions.md)
   params:
     silvertorch: {query: {n_probe: [24, 32]}}   # roadmap D1: headline n_probe ∈ {24, 32}
+    postfilter: {query: {alpha: [1, 2, 4, 8]}}  # topk(alpha*k) before the filter; 1 = headline
   seeds:
     default: [0]
     headline: {sweeps: [c0_genre, c0_maincat, all4], dims: [128], seeds: [0, 1, 2]}

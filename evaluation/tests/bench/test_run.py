@@ -292,6 +292,37 @@ class _Fixed(torch.nn.Module):
         return ids, torch.linspace(1.0, 0.7, 4).repeat(q.shape[0], 1)
 
 
+def test_postfilter_records_oracle_recall_per_k(tiny_configs, tmp_path):
+    """Roadmap D5-code: ``recall_oracle`` against the exact oracle, at each k from a run at
+    that k (``PER_K_QUALITY``), never above the exact V1 of the same sweep."""
+    ds, suites = tiny_configs
+    jobs = load_matrix(ds, suites, "postfilter")
+    out = tmp_path / "results"
+    assert dict(run.run(jobs, out_dir=out, **KW)) == {"ok": 9}
+    recs = _records(out / "postfilter" / "tiny-d8.jsonl")
+    exact = {(r["filter_kind"], r["sweep"]): r for r in recs if r["algo"] != "postfilter"}
+    post = [r for r in recs if r["algo"] == "postfilter"]
+    assert sorted((r["filter_kind"], r["sweep"], r["params"]["alpha"]) for r in post) == [
+        (fk, sw, a) for fk, sw in (("bloom", "c0"), ("clause", "c0"), ("clause", "c0c1"))
+        for a in (1, 2)
+    ]  # fmt: skip
+    for r in post:
+        assert r["backend"] == "torch" and r["path"] == "cublas+torch"
+        for k in (2, 4):
+            got = r["quality"]["oracle"][f"recall@{k}"]
+            assert 0 <= got <= exact[r["filter_kind"], r["sweep"]]["quality"]["oracle"][
+                f"recall@{k}"] + 1e-12  # fmt: skip
+    job = next(j for j in jobs if j.algo == "postfilter" and j.sweep == "c0c1")
+    rec = next(r for r in post if r["sweep"] == "c0c1" and r["params"]["alpha"] == 1)
+    inp = run.inputs.load_inputs(job.data, torch.device("cpu"), with_filters=True)
+    assets = run.sweep_assets(job, inp, 4, torch.device("cpu"))
+    module = run.build_module(job, inp, assets, 4, {"alpha": 1})
+    module.k = 2
+    at_2, _, _ = run.quality(module, inp, assets, [2], torch.device("cpu"))
+    assert rec["quality"]["oracle"]["recall@2"] == at_2["oracle"]["recall@2"]
+    assert rec["quality"]["heldout"]["recall@2"] == at_2["heldout"]["recall@2"]
+
+
 def test_heldout_recall_counts_only_reachable_targets():
     """Review §2.3: on a filter cell a held-out target the exact mask excludes cannot be
     retrieved by any algo. Three queries with targets {0, 5}, {1, 5}, {5}; the mask admits
