@@ -735,9 +735,14 @@ artifact come out unmarked — but the evidence vetoes the flag: a `failed`
 or `partial` record, an `env.dirty` one, or one whose `env.git_branch` is
 not `staging` / `development` / `main` (rule 2's own wording: "harness numbers from a
 branch are not paper material") keeps the marker on. Otherwise
-every `.tex` carries a `% PROVENANCE: *** NOT CITABLE ***` banner with the
-reasons, its caption starts with `\textbf{[PRE-CAMPAIGN RECORDS — NOT
-CITABLE]}`, and every figure gets a diagonal watermark. Every artifact
+every `.tex` carries a `% PROVENANCE: *** NOT CITABLE ***` banner listing
+the reasons in full, its caption starts with `\textbf{[NOT CITABLE: …]}`
+naming them short (`gate not green`, `N failed`, `N partial: <partial_reasons
+with counts>`, `N dirty`, `branch <name>`, `no records`; `provenance()["marks"]`),
+every figure gets a diagonal "NOT CITABLE" watermark over the same short
+reasons, and `report.md` lists the full ones (`provenance()["blockers"]`,
+also what `bench upload` puts in the manifest). The marker states the
+evidence only: it says nothing about when the records were taken. Every artifact
 carries the `code_version`, the commit, the branch, the GPU, the schema
 version and the run window regardless.
 
