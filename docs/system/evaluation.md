@@ -940,7 +940,7 @@ cd evaluation
 # golden's gSASRec checkpoint (the config points at E1c); the arxiv golden cell and the full
 # commands: evaluation/golden/README.md, "Exact commands"
 uv run bench run --dataset goodreads --dim 128 --suite filter --filter-kind clause --sweep c0_genre \
-    --checkpoint data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/best_model.pt
+    --seed 0 --checkpoint data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/best_model.pt
 # one cell, eager only, no perf — the fastest iteration
 uv run bench run --dataset arxiv --dim 128 --suite filter --algo silvertorch --backend triton \
     --filter-kind bloom --sweep c0_maincat --mode eager --skip-perf

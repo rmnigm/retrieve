@@ -128,14 +128,16 @@ The working directory matters: both configs' `data_dir` and filter
 **Against the v2 harness** (the comparison [validation](../../docs/validation.md#harness-gates)
 records), from `evaluation/`, quality only. The goodreads cells are pinned to the
 checkpoint they were produced on, which `config/goodreads.yaml` no longer names; the
-records carry it as `inputs: gsasrec-d128-drop0.5-id`:
+records carry it as `inputs: gsasrec-d128-drop0.5-id`. `--seed 0` matters: `c0_genre` and
+`c0_maincat` are headline sweeps (seeds 0-2), and SilverTorch's k-means is seeded, so a
+comparison keyed without the seed reads seed 2's SilverTorch against a seed-0 golden:
 
 ```bash
 uv run bench run --dataset goodreads --dim 128 --suite filter --filter-kind clause \
-  --sweep c0_genre --mode eager --skip-perf \
+  --sweep c0_genre --seed 0 --mode eager --skip-perf \
   --checkpoint data/goodreads-work-id/checkpoints/gsasrec-d128-drop0.5-id/best_model.pt
 uv run bench run --dataset arxiv --dim 128 --suite filter --algo silvertorch --backend triton \
-  --filter-kind clause --sweep c0_maincat --mode eager --skip-perf
+  --filter-kind clause --sweep c0_maincat --seed 0 --mode eager --skip-perf
 ```
 
 ## Provenance
