@@ -69,6 +69,13 @@ the user moving it onto the roadmap.
 
 ## Defects that block no remaining run
 
+- **`eval-data pubmed plan` trips NCBI's throttle.** Its 16 parallel HEAD +
+  Range requests draw HTTP 503 on most of a burst (12 of 18 at 16-way; 1-8
+  concurrent pass); `_remote_size` turns the error into size 0 and `plan`
+  aborts. Related: `_fetch_one` accepts a GET that ends early when its HEAD
+  failed (no length to check), so the MedCPT shards then rest on `verify`'s
+  structural check alone. The 2026-10-07 restage worked around it with a
+  2-connection size check ([artifact](artifacts/pubmed-restage/README.md)).
 - `bench/oracle.py`'s `item_embs.t().contiguous()` holds a second full
   fp32 copy of the item table, so the harness's per-dataset limit at
   native width is about half the device memory divided by `4·D` bytes
