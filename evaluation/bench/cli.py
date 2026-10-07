@@ -43,6 +43,9 @@ from eval_datasets.layout import validate_layout
 EVAL_DIR = Path(__file__).resolve().parents[1]
 SUITES = ("filter", "deep", "codesign")
 RC_TIMEOUT = 124  # the ``timeout(1)`` convention
+# Sized for the largest group (arxiv `deep` silvertorch ~10 h; pubmed `filter` groups past 6 h):
+# the timeout catches hangs, it does not budget work.
+TIMEOUT_H = 48.0
 
 
 def _say(summary: TextIO, line: str) -> None:
@@ -144,7 +147,7 @@ def run(
 @click.option(
     "--timeout",
     "timeout_h",
-    default=6.0,
+    default=TIMEOUT_H,
     show_default=True,
     help="hours per child before it is killed and recorded as rc=timeout",
 )

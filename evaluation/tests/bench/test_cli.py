@@ -89,6 +89,25 @@ def test_campaign_records_a_timed_out_child(tiny_configs, tmp_path, monkeypatch)
     assert "killed after 0.5 h" in child_log
 
 
+def test_campaign_default_timeout_fits_the_largest_group(tiny_configs, tmp_path, monkeypatch):
+    """Roadmap H3: without ``--timeout`` every child gets 48 h, above the ~10 h arxiv ``deep``
+    ``silvertorch`` group the old 6 h default cut short."""
+    ds, _ = tiny_configs
+    seen = []
+
+    def ok(cmd, *, timeout, **kw):
+        seen.append(timeout)
+        return 0
+
+    monkeypatch.setattr(cli.subprocess, "call", ok)
+    r = CliRunner().invoke(
+        cli.main,
+        ["campaign", "--suite", "e2e", "--config-dir", str(ds.parent), "--out", str(tmp_path)],
+    )
+    assert r.exit_code == 0, r.output
+    assert cli.TIMEOUT_H == 48.0 and seen == [48 * 3600.0] * 2
+
+
 def test_campaign_restart_keeps_the_groups_parity_spill(tiny_configs, tmp_path, monkeypatch):
     """A kill mid-group, then a new campaign process: its first child still compares against
     the spill the killed process wrote; another group's leftover spill is dropped. Children
