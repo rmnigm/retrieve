@@ -363,6 +363,29 @@ def test_perf_times_with_the_plan_cache_off_and_records_it(tiny_configs):
     assert all(e["reason"] == "cuda_unavailable" and e["cache_plans"] is False for e in entries)
 
 
+def test_eager_only_partial_is_per_job(tiny_configs, tmp_path, monkeypatch):
+    """Roadmap H6: an eager-only run marks a capturable module's record ``partial`` for
+    ``modes`` and not an ``official`` one, whose graph entry is ``not_capturable`` anyway.
+    Both run the torch path underneath; the ``official`` build is flagged uncapturable."""
+    job = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=[NONE_SWEEP])[0]
+    jobs = [dataclasses.replace(job, backend=b) for b in ("triton", "official")]
+    real_build = run.build_module
+
+    def build(job, *a, **kw):
+        m = real_build(dataclasses.replace(job, backend="torch"), *a, **kw)
+        if job.backend == "official":
+            m.capturable = False
+        return m
+
+    monkeypatch.setattr(run, "build_module", build)
+    out = tmp_path / "results"
+    assert dict(run.run(jobs, out_dir=out, modes=EAGER, **KW)) == {"partial": 1, "ok": 1}
+    recs = {r["backend"]: r for r in _records(out / "e2e" / "tiny-d8.jsonl")}
+    assert recs["triton"]["status"] == "partial"
+    assert recs["triton"]["partial_reasons"] == ["modes"]
+    assert recs["official"]["status"] == "ok" and recs["official"]["partial_reasons"] is None
+
+
 def test_append_record_writes_valid_json_for_non_finite_and_tensors(tmp_path):
     p = tmp_path / "x.jsonl"
     records.append_record(

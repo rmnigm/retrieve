@@ -69,6 +69,7 @@ rerun the library suite before trusting any row on it.
 | Rerun byte-identical in quality | **passes** on all 12 rerun records of the goodreads leg | |
 | Ids identical across `eager` and `graph` | **not run** | |
 | Batch scaling `median_ms(bs=16) < 16 × median_ms(bs=1)` | passes, worst ratio 14.4 | |
+| H6: `partial` for `modes` stamped per job | **green on CPU** (`dev/h6`, an A100 pod, CPU): an eager-only run records an uncapturable (`official`-flagged) module `ok` and a capturable (`triton`-labelled) one `partial` with `["modes"]` (`test_run.py`, red under the old per-process rule); harness suite 275 passed / 4 skipped | records written before this change keep whatever stamp they got; nothing was rerun |
 
 ## Official against our Triton reimplementation (citable, contested)
 
