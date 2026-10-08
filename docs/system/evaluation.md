@@ -132,7 +132,15 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    allocates nothing). The first eager call runs under
    `torch.cuda.set_sync_debug_mode("warn")` to catch hidden host syncs.
    `--profile` (off by default) wraps one eager call in `torch.profiler`
-   and stores per-kernel CUDA µs (top 8 kernels) as `kernels`.
+   and stores per-kernel CUDA µs (top 8 kernels) as `kernels`. In a
+   long-lived process the profiler drops the device activities at the end of
+   a short window, one more kernel per session as the process ages, so H2H-FINAL
+   stored empty or truncated lists
+   ([validation](../validation.md#harness-gates)). `measure.profile_once` therefore
+   brackets the call with two `torch.cuda._sleep` sentinel kernels
+   (`spin_kernel`, left out of `kernels`). It retries with an idle pad of
+   0.01, 0.1, 1 and 5 s on both sides of the window until both sentinels are
+   recorded, and raises (the cell fails at the perf stage) if they never are.
 6. **Seeds and repeats.** Timing repeats are the 3 windows above (no
    rebuild). Seeds change the IVF (k-means), the OPORP projection
    (`v3_seed`) and the pool; V1/V2 and the postfilter are seed-invariant in
