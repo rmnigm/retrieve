@@ -23,6 +23,7 @@ import datetime as dt
 import functools
 import inspect
 import json
+import shutil
 import statistics
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -66,6 +67,81 @@ def _load(results_dir: Path, out: Path) -> tuple[Path, list[dict[str, Any]]]:
     out.mkdir(parents=True, exist_ok=True)  # records.aggregate writes, it does not create
     table = records.aggregate(results_dir, out / "results.parquet")
     return table, records.read_table(table)
+
+
+# ----- campaign manifest (docs/system/evaluation.md § Campaign manifest) -------------------
+
+MATCH_REQUIRED = ("dataset", "suite", "algo", "backend")
+MATCH_FIELDS = (*MATCH_REQUIRED, "filter_kind", "sweep")
+# Record fields that come from the quality pass, taken from the quality-accepted record.
+QUALITY_FIELDS = (
+    "quality", "per_query", "pass_rate", "bloom_fp_rate", "n_queries_oracle",
+    "n_queries_heldout", "n_targets_in_filter",
+)  # fmt: skip
+
+
+def load_manifest(path: Path) -> dict[str, Any]:
+    m = yaml.safe_load(Path(path).read_text())
+    for e in m.get("entries") or []:
+        bad = set(e["match"]) - set(MATCH_FIELDS)
+        lacks = set(MATCH_REQUIRED) - set(e["match"])
+        if bad or lacks or set(e) - {"match", "quality", "perf"}:
+            raise click.ClickException(f"{path}: bad entry {e} (match on {MATCH_FIELDS})")
+    for side in ("quality", "perf"):
+        for e in [m.get("default"), *(m.get("entries") or [])]:
+            if e is not None and "code_version" not in (e.get(side) or {}):
+                raise click.ClickException(f"{path}: {side} needs a code_version in {e}")
+    return m
+
+
+def _entry(m: dict[str, Any], rec: dict[str, Any]) -> dict[str, Any] | None:
+    """The manifest entry of one cell: the most specific matching entry, else ``default``."""
+    hits = [e for e in m.get("entries") or [] if all(rec[f] == v for f, v in e["match"].items())]
+    if not hits:
+        return m.get("default")
+    best = max(len(e["match"]) for e in hits)
+    top = [e for e in hits if len(e["match"]) == best]
+    if len(top) > 1:
+        raise click.ClickException(f"manifest: {len(top)} entries match {records.key_block(rec)}")
+    return top[0]
+
+
+def select(
+    recs: list[dict[str, Any]], m: dict[str, Any]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict]:
+    """Per cell (key block), quality from the record at the entry's quality ``code_version`` and
+    perf from the record at its perf ``code_version``; nothing from any other code_version. A
+    cell with no entry is excluded, one with no record at an accepted version is missing.
+    Returns the merged records, every source record accepted (what provenance judges), and
+    the excluded / missing cells."""
+    cells: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
+    for r in recs:
+        key = json.dumps(records.key_block(r), sort_keys=True)
+        cells[key][r["env"]["code_version"]] = r
+    out, used, why = [], [], {"no entry": [], "quality missing": [], "perf missing": []}
+    for key, by_cv in sorted(cells.items()):
+        e = _entry(m, next(iter(by_cv.values())))
+        if e is None:
+            why["no entry"].append(key)
+            continue
+        q, p = by_cv.get(e["quality"]["code_version"]), by_cv.get(e["perf"]["code_version"])
+        if q is None:
+            why["quality missing"].append(key)
+        if p is None:
+            why["perf missing"].append(key)
+        if q is None and p is None:
+            continue
+        used += [q] if q is p else [r for r in (q, p) if r is not None]
+        rec = dict(p or q)
+        if p is None:
+            rec["perf"] = None
+        elif q is None:
+            rec |= dict.fromkeys(QUALITY_FIELDS)
+        elif q is not p:
+            rec |= {f: q.get(f) for f in QUALITY_FIELDS}
+            rec["quality_source"] = {"seed": q["seed"], "code_version": q["env"]["code_version"]}
+        out.append(rec)
+    return out, used, why
 
 
 def _samples(results_dir: Path) -> list[dict[str, Any]]:
@@ -1627,6 +1703,17 @@ def methodology(c) -> list[Path]:
     return [_write(c.out / "methodology.tex", tex)]
 
 
+def _manifest_md(c) -> list[str]:
+    if c.manifest is None:
+        return ["## Selection", "", "Latest record per resume key (no `--manifest`).", ""]
+    lines = ["## Manifest selection", ""]
+    for name, keys in c.why.items():
+        lines += [f"### {name}: {len(keys)}", ""] + [f"- `{k}`" for k in keys] + [""]
+    lines += ["### Manifest log", ""]
+    lines += [f"- {x}" for x in c.manifest.get("log") or []] or ["none"]
+    return [*lines, ""]
+
+
 def coverage(c) -> list[Path]:
     """``report.md`` — the view a person reviewing a run reads."""
     p = c.prov
@@ -1650,6 +1737,7 @@ def coverage(c) -> list[Path]:
         lines += [f"- {b}" for b in p["blockers"]]
         lines += [""]
     lines += [
+        *_manifest_md(c),
         "## Selection used by the tables",
         "",
         f"`--dim {c.dim}` `--k {c.k}` `--bs {c.bs}` `--mode {c.mode}` `--backend {c.backend}`.",
@@ -1760,23 +1848,43 @@ class Ctx:
     """Everything every artifact needs: the flat rows, the nested records, the samples, the
     provenance verdict and the one set of selectors."""
 
-    def __init__(self, results_dir: Path, out: Path, gate: str | None, **sel: Any) -> None:
+    def __init__(
+        self, results_dir: Path, out: Path, gate: str | None, manifest: Path | None, **sel: Any
+    ) -> None:
         self.results_dir, self.out = Path(results_dir), Path(out)
-        self.flat, self.rows = _load(self.results_dir, self.out)
-        self.recs = records.latest(self.results_dir)
+        self.manifest, self.why = None, None
+        if manifest is None:
+            self.flat, self.rows = _load(self.results_dir, self.out)
+            self.recs = records.latest(self.results_dir)
+            self.samples = _samples(self.results_dir)
+        else:
+            self.manifest = load_manifest(manifest)
+            merged, used, self.why = select(records.latest(self.results_dir), self.manifest)
+            tree = self.out / "selected"
+            shutil.rmtree(tree, ignore_errors=True)
+            for r in merged:
+                records.append_record(tree / r["suite"] / f"{r['dataset']}-d{r['dim']}.jsonl", r)
+            self.flat, self.rows = _load(tree, self.out)
+            self.recs = records.latest(tree)
+            self.samples = []  # the samples sidecar carries no code_version to select by
         _attach(self.rows, self.recs)
         _one_inputs_per_dataset(self.rows)
-        self.samples = _samples(self.results_dir)
-        self.prov = provenance(self.recs, gate)
+        self.prov = provenance(self.recs if manifest is None else used, gate)
         self.written: list[Path] = [self.flat]
         for k, v in sel.items():
             setattr(self, k, v)
 
 
 def generate(
-    results_dir: Path, out: Path, *, gate: str | None = None, only: tuple[str, ...] = (), **sel: Any
+    results_dir: Path,
+    out: Path,
+    *,
+    gate: str | None = None,
+    only: tuple[str, ...] = (),
+    manifest: Path | None = None,
+    **sel: Any,
 ) -> Ctx:
-    c = Ctx(results_dir, out, gate, **sel)
+    c = Ctx(results_dir, out, gate, manifest, **sel)
     for name in only or tuple(ARTIFACTS):
         c.written += ARTIFACTS[name](c)
     c.written += coverage(c)
@@ -1784,13 +1892,20 @@ def generate(
 
 
 @click.command()
-@click.argument("results", default="results")
-@click.option("--out", default=None, help="output directory [default: <results>/report]")
+@click.argument("root", default="results")
+@click.option("--out", default=None, help="output directory [default: <root>/report]")
 @click.option(
     "--gate",
     default=None,
     help="the roadmap step whose gate is green for these records (e.g. D1). Without "
     "it every artifact is marked NOT CITABLE; it cannot override evidence.",
+)
+@click.option(
+    "--manifest",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="campaign manifest (evaluation/campaign.yaml): select each cell's quality and perf "
+    "records by their accepted code_version instead of the latest record",
 )
 @click.option(
     "--only",
@@ -1803,9 +1918,9 @@ def generate(
 @click.option("--bs", default=1, show_default=True, type=int, help="batch size for the tables")
 @click.option("--mode", default="eager", type=click.Choice(("eager", "graph")), show_default=True)
 @click.option("--backend", default="triton", show_default=True)
-def report(results, out, gate, only, dim, k, bs, mode, backend) -> None:
+def report(root, out, gate, manifest, only, dim, k, bs, mode, backend) -> None:
     """Paper tables and figures from the records (docs/system/evaluation.md § Report)."""
-    results_dir = Path(results)
+    results_dir = Path(root)
     if not results_dir.is_dir():
         raise click.ClickException(f"{results_dir}: not a directory")
     c = generate(
@@ -1813,6 +1928,7 @@ def report(results, out, gate, only, dim, k, bs, mode, backend) -> None:
         Path(out) if out else results_dir / "report",
         gate=gate,
         only=only,
+        manifest=manifest,
         dim=dim,
         k=k,
         bs=bs,
@@ -1821,6 +1937,8 @@ def report(results, out, gate, only, dim, k, bs, mode, backend) -> None:
     )
     for path in c.written:
         click.echo(str(path))
+    if c.why:
+        click.echo("manifest: " + ", ".join(f"{len(v)} {n}" for n, v in c.why.items()))
     click.echo(
         f"{len(c.written)} artifacts from {c.prov['n_records']} records — "
         + ("CITABLE" if c.prov["citable"] else "NOT CITABLE: " + "; ".join(c.prov["blockers"]))

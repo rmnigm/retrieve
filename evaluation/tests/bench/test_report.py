@@ -16,6 +16,7 @@ import zlib
 import click
 import numpy as np
 import pytest
+import yaml
 
 from bench import records, report
 
@@ -970,3 +971,61 @@ def test_f2_overlays_real_sweeps_as_per_query_buckets(campaign):
     buckets = report._buckets(c, report._with(rows, n_probe=24), 100)
     assert buckets and sum(n for _, _, n in buckets) <= 2 * 200
     assert all(0.0 <= y <= 1.0 and 1e-6 < x <= 1.0 for x, y, _ in buckets)
+
+
+def test_the_manifest_selects_quality_and_perf_by_their_accepted_code_version(tmp_path):
+    """G-manifest: two code_versions of one cell; quality and perf each come from their own
+    entry's code_version, a cell without an entry or without a record is missing."""
+    root = tmp_path / "results"
+    p = root / "filter" / "goodreads-d128.jsonl"
+
+    def at(cv, rec):
+        rec["env"] = {**ENV, "code_version": cv}
+        records.append_record(p, rec)
+
+    at("old", _rec("goodreads", "linr_v2", "triton", recall=0.5, ms=5.0))
+    at("new", _rec("goodreads", "linr_v2", "triton", recall=0.9, ms=1.0))
+    at("new", _rec("goodreads", "linr_v1_filter_mask", "triton", recall=0.8, ms=2.0))
+    at("new", _rec("goodreads", "silvertorch", "triton", params={"n_probe": 24}))
+    manifest = tmp_path / "campaign.yaml"
+    cell = {"dataset": "goodreads", "suite": "filter", "backend": "triton"}
+    manifest.write_text(yaml.safe_dump({"entries": [
+        {"match": {**cell, "algo": "linr_v2"},
+         "quality": {"code_version": "old"}, "perf": {"code_version": "new"}},
+        {"match": {**cell, "algo": "linr_v1_filter_mask"},
+         "quality": {"code_version": "new"}, "perf": {"code_version": "gone"}},
+    ]}))  # fmt: skip
+    c = _generate(root, tmp_path / "out", manifest=manifest)
+    v2 = [r for r in c.recs if r["algo"] == "linr_v2"]
+    assert len(v2) == 1 and v2[0]["quality"]["oracle"]["recall@100"] == 0.5
+    assert v2[0]["perf"][0]["median_ms"] == 1.1 and v2[0]["env"]["code_version"] == "new"
+    assert v2[0]["quality_source"] == {"seed": 0, "code_version": "old"}
+    v1 = next(r for r in c.recs if r["algo"] == "linr_v1_filter_mask")
+    assert v1["perf"] is None and v1["quality"]["oracle"]["recall@100"] == 0.8
+    assert {r["algo"] for r in c.recs} == {"linr_v2", "linr_v1_filter_mask"}
+    pareto = (tmp_path / "out" / "tables" / "tab-pareto_goodreads.tex").read_text()
+    row = next(ln for ln in pareto.splitlines() if "LiNR V2" in ln)
+    assert "$0.5000$" in row and "$1.100$" in row and "SilverTorch" not in pareto
+    md = (tmp_path / "out" / "report.md").read_text()
+    assert (
+        "### no entry: 1" in md and "### perf missing: 1" in md and "### quality missing: 0" in md
+    )
+    assert '"algo": "silvertorch"' in md.split("### no entry: 1")[1].split("###")[0]
+
+    assert c.prov["n_records"] == 3  # the accepted sources: v2 old + new, v1 new
+    old = next(r for r in records.read_records(p) if r["env"]["code_version"] == "old")
+    old["env"] = {**ENV, "code_version": "old", "git_branch": "dev/x"}
+    records.append_record(p, old)  # the reused quality record now comes from a branch
+    branch = _generate(root, tmp_path / "branch", manifest=manifest, gate="D1")
+    assert not branch.prov["citable"] and any("dev/x" in b for b in branch.prov["blockers"])
+
+    latest = _generate(root, tmp_path / "latest")  # no manifest: every record, as before
+    assert sum(r["algo"] == "linr_v2" for r in latest.recs) == 2
+
+
+def test_the_shipped_manifest_and_claims_load():
+    m = report.load_manifest(report.CLAIMS.parent / "campaign.yaml")
+    assert m["default"]["quality"]["code_version"] == "campaign-v2" and m["entries"] == []
+    claims = yaml.safe_load(report.CLAIMS.read_text())["claims"]
+    assert [c["id"] for c in claims] == [f"C{i}" for i in range(1, 8)]
+    assert all(c["verdict"] is None and c["ours"] for c in claims)

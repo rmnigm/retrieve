@@ -440,8 +440,8 @@ bench check    --dataset D [--dim N]* [--config-dir config]   # eval_datasets.la
 bench upload   [--repo-id user/repo] [--results DIR] [--path-in-repo PREFIX] [--gate STEP]
                [--private|--public] [--verify] [--dry-run]
 bench fetch    --path-in-repo PREFIX [--repo-id user/repo] [--results DIR]
-bench report   [results] [--out DIR] [--gate STEP] [--only NAME]* [--dim 128] [--k 100]
-               [--bs 1] [--mode eager|graph] [--backend triton]
+bench report   [results] [--out DIR] [--gate STEP] [--manifest FILE] [--only NAME]*
+               [--dim 128] [--k 100] [--bs 1] [--mode eager|graph] [--backend triton]
 bench env                                                     # provenance | clocks, as JSON
 ```
 
@@ -849,6 +849,35 @@ it (`_arm`): `postfilter ($\alpha$=1)` is the baseline's headline row and
 `alpha` or any other parameter. The postfilter is torch by definition
 ([The postfilter baseline](#the-postfilter-baseline)), so `--backend`
 selects it whatever its value (`FIXED_BACKEND`).
+
+### Campaign manifest
+
+[`evaluation/campaign.yaml`](../../evaluation/campaign.yaml) says which
+records the paper reads. `bench report <fetched tree> --manifest
+evaluation/campaign.yaml` groups the tree's records by cell (the key block)
+and, per cell, takes the quality fields (`quality`, `per_query`,
+`pass_rate`, `bloom_fp_rate`, the oracle / held-out counts) from the record
+at the entry's `quality.code_version` and everything else from the record
+at its `perf.code_version` — the reuse rule keeps an old record's quality
+while its timing is rerun; such a merged record carries `quality_source:
+{seed, code_version}`. The entry is the most specific `entries[].match`
+(dataset, suite, algo, backend, optionally filter_kind and sweep; two
+equally specific matches fail), else `default`. A cell with no entry is
+excluded; one with no record at an accepted code_version is missing its
+quality or its perf; neither is ever filled from another code_version.
+`report.md` lists all three groups and the manifest's `log` (date, change,
+arms rerun). The merged records are written to `<out>/selected/` and
+`results.parquet` is aggregated from there, so the shipped table is
+exactly what the exhibits read; the provenance verdict judges every
+accepted source record (a reused quality record from a branch still vetoes
+`--gate`). The samples sidecar has no `code_version` to select by, so the
+violin figure is empty under `--manifest`. `hub` names the
+`pinkmeme/eval-results` subtree holding an entry's records (`{field}` = the
+cell's key field) for the planner's `bench fetch`; the report does not read
+it. Without `--manifest` the report takes the latest record per resume key,
+for scratch trees and smokes. The shipped manifest has only `default`
+(`campaign-v2`, a placeholder the freeze replaces with the tree hash) and
+no reuse entries.
 
 ### Paper exhibits
 
