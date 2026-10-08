@@ -181,11 +181,20 @@ co-design.
   move *evaluation/campaign.yaml*'s code_version; rerun the V2 (and changed
   V3) Triton perf cells of V-PILOT and V-GR-FILTER, quality reused.
   **≈ 2-3 GPU-h** incl. reruns, GPU 0.
-- [ ] **V-GRAPH-IDS: Triton graph vs eager canonical ids differ** (H2H-FINAL:
-  arXiv bs 16, 4 of 80 entries, 1 seed per (kind, k)). Mechanism first, from
-  the stored records and sidecars (ties at the k-th score vs a real
-  divergence), then one GPU repro if needed. Eager-vs-graph id identity is a
-  D1-G gate, so this runs before D1-G. **≈ 0.5 GPU-h.**
+- [ ] **V-GRAPH-IDS: graph-mode `quantize_int8` rounds differently from
+  eager** (H2H-FINAL: arXiv bs 16, 4 of 80 entries). Mechanism found:
+  inductor lowers the fp32 divide to an approximate one, so a half-way
+  element takes a different int8 code and 0-3 ids swap across the k-th
+  cut. A correctness fix (eager-vs-graph ids are a bit-exact gate): the
+  smallest library change that makes graph equal eager, eager output
+  unchanged against `campaign-v2`, library suite on a pod GPU. Folded into
+  `campaign-v2.1` if gated before V2-FIX-A merges, else `campaign-v2.2`
+  before V-SEEDS. **≈ 0.5 GPU-h.**
+- [ ] **ARXIV-N95: arXiv's `n95`**: arXiv added to the quality-only `n95`
+  suite on its median kept `filter` sweep (no arXiv `deep` in v2, and
+  `synth` sweeps `n_probe` explicitly); the value fills arXiv's `filter`
+  n95 slots for V-SEEDS. SilverTorch only, so it runs at either tag.
+  **≈ 0.3 GPU-h.**
 - [ ] **H-PROFILE: `--profile` stores an empty Triton `kernels` list**
   (H2H-FINAL: 40/40 bloom and 13/40 `none` eager entries; official always
   populated), so T3's Triton kernel-only column is empty for bloom (C7).
@@ -200,7 +209,7 @@ co-design.
   timed points on GPU 0).
 - [ ] **V-AX-SYNTH: arXiv synth**, uniform 7 points, then the
   cluster-correlated variant (3 points) if the uniform sweep shows the IVF
-  recall collapse at low p; arXiv's `n95`. F1/F2 3M panel. **≈ 15-45 GPU-h**
+  recall collapse at low p. F1/F2 3M panel. **≈ 15-45 GPU-h**
   (the pilot measured 8.7 GPU-h at 0.8 M), GPU 0. Its timed cells run at
   `campaign-v2.1` (after V2-FIX-A).
 - [ ] **V-GR-DEEP: goodreads `deep`**, trimmed (`n_lists` {1024, 4096},
@@ -258,6 +267,7 @@ co-design.
 | M1 | 0.5 | both | |
 | V2-FIX-A | ≈ 2-3 | 0 | gates ~0.5; reruns: goodreads-synth + goodreads filter V2 perf |
 | V-GRAPH-IDS | ≈ 0.5 | 0 | |
+| ARXIV-N95 | ≈ 0.3 | 0 | quality-only |
 | H-PROFILE | ≈ 0.5 | 0 | |
 | V-CODESIGN | ≈ 1 | 0 | `d1/arxiv-codesign`: 60 cells in 0.4 h |
 | D3 bloomwidth | ≈ 3-5 | 1 (+0) | quality-only cells |
