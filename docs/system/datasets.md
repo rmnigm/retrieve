@@ -424,8 +424,8 @@ is the whole path. Three things to keep in mind when reading its records:
 the suite's `ks` (100 / 500 / 1000) are deeper than the shipped GT's
 k = 10, which is fine because recall is measured against the harness's own
 cosine oracle over the capped attrs (deviations 1 and 3 above); the
-`none` cells are in no suite of `suites.yaml` (unfiltered cells come back
-with roadmap E5); and **the exact-algo cell is the one YFCC is hard on**.
+`none` cells are in no suite of `suites.yaml` (the unfiltered cell is the planned
+`synth` suite's p = 1.0 point); and **the exact-algo cell is the one YFCC is hard on**.
 fp16 scores, whose 4.9 × 10⁻⁴ spacing is coarser than YFCC's score density
 (a median 0.0072 cosine between rank 1 and rank 1000, plus 5 %
 exact-duplicate vectors), gave `linr_v1_filter_mask` only
@@ -768,8 +768,8 @@ data/kuairand/
 
 ### openalex
 
-**Status: built at 10 M, `bench check` clean, one filter cell run; not on the Hub, so roadmap
-E5 restages it.** The OpenAlex fallback (no Semantic Scholar key), a 10 M catalog like pubmed's.
+**Status: built at 10 M, `bench check` clean, one filter cell run; not on the Hub; dropped from the
+study (user, 2026-10-08; [backlog](../backlog.md#datasets-not-in-the-study)).** The OpenAlex fallback (no Semantic Scholar key), a 10 M catalog like pubmed's.
 `convert --sample-rate 0.35 --workers 64` streamed all 2,040 files of release 2026-09-23
 (297.1 GB read in 572 s, 0 failures); a 15 M catalog was prepped and encoded
 (`encode_text` 15,663 s on the A100, 958 docs/s), did not fit the harness (below), and was

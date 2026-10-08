@@ -340,7 +340,7 @@ resolves at each of its dims.
 
 `suites.yaml` holds three suites, `filter`, `deep` and `codesign`. There
 is no unfiltered `quality` suite ([decisions](../decisions.md#harness));
-unfiltered cells return with the new datasets (roadmap E5).
+the unfiltered cell is the planned `synth` suite's p = 1.0 point ([decisions](../decisions.md#campaign-v2-user-2026-10-08)).
 
 `codesign` is the S9 ablation of the official backend's bloom path:
 `silvertorch / official / bloom` only, `build: {n_lists: [1664],

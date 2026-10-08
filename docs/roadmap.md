@@ -1,7 +1,7 @@
 ---
 title: roadmap
 created: 2026-09-26
-updated: 2026-10-07
+updated: 2026-10-08
 type: summary
 tags: [roadmap]
 sources: [evaluation/config/suites.yaml, evaluation/bench/, infra/runpod/, docs/validation.md, docs/artifacts/hub-index.md]
@@ -25,17 +25,22 @@ from this page. Step names (D1, H2, ...) are stable identifiers used in
 records, commits and code comments; they are not renumbered.
 
 **Estimates** are A100-SXM4-80GB GPU-hours (the reference GPU for every
-citable number), taken from the per-cell times D1 measured; a *stream* is
+citable number), from the re-plan's per-cell times of D1 until the record
+inventory (P-INV) replaces them with measured ones; a *stream* is
 a slice of a step that can run on its own GPU at the same time as the
 others (see [Multi-GPU execution](#multi-gpu-execution)).
 
 ## Needs the user
 
-- **Citability of a narrowed campaign.** A run with a narrowed mode set is
+- **Contact the original authors** (re-plan decision 7): the LinkedIn LiNR
+  team and Meta's SilverTorch team — filter-set details, the V1/V2 setup,
+  the SilverTorch paper's FPR inconsistency (0.067 % vs 0.00173 %) — and
+  file the official-code defects (OF-3, OF-4, OF-6 in
+  [deviations](paper/reproduction-deviations.md)) upstream as issues. The
+  ECIR call asks what contact happened; replies take weeks.
+- **Citability of a narrowed run.** A run with a narrowed mode set is
   recorded `status: partial` and reported NOT CITABLE. The user decides
-  once `bench report` runs on D1's real output (D1-G), not in the abstract.
-- **E0**: the Semantic Scholar API key is an identity-bound form (E5 runs
-  the OpenAlex fallback meanwhile).
+  once `bench report` runs on the campaign's output (D1-G).
 - **A4**: merging `staging` into `main` is on hold until the user decides.
 - **HF: squash `pinkmeme/eval-goodreads-work-id`** to reclaim 2.3 GB
   (`HfApi().super_squash_history(repo_id=..., repo_type="dataset")`).
@@ -64,8 +69,10 @@ GPU work runs on RunPod pods launched with
    `query_attrs_narrow` min = 0), `goodreads-work-id` with its checkpoints
    ([checkpoints](system/checkpoints.md#what-the-harness-reads)). PubMed is not on the Hub: rebuild the 10 M slice with
    `eval-data pubmed` ([datasets](system/datasets.md#pubmed); ~1 h
-   download-bound `convert`, 17 GB). OpenAlex is not on the Hub either (E5
-   restages it).
+   download-bound `convert`, 17 GB). YFCC-10M is public: `eval-data yfcc
+   all` ([datasets](system/datasets.md#yfcc10m), ~12.5 GB with the raw).
+   The synth attrs are built on the pod (*eval-data synth-filter*, CPU,
+   deterministic from its seed).
 3. Results: the remaining runs do not need the old records locally (the
    narrow scoping below never resumes against them), but the final uploads
    and the report do: `bench fetch --path-in-repo d1/<subtree> --results
@@ -79,7 +86,8 @@ GPU work runs on RunPod pods launched with
    per-group timeout defaults to 48 h. A long
    job runs from one sequential driver script per GPU (one process group,
    no chained waiters, and no log line containing the text a watcher
-   greps for).
+   greps for). Every job's log carries the pod's `nvidia-smi -q -d CLOCK`
+   and its `sm_mhz` histogram, uploaded with the results.
 
 ### Multi-GPU execution
 
@@ -98,187 +106,223 @@ share a `_parity/<dataset, dim, algo>` spill and the second backend's
 `--algo`, so a split stream is a `bench run`. M1 decides whether
 multi-GPU numbers are comparable at all.
 
-### Rerun policy
+### Campaign code_version and reruns
 
-**No record is re-stamped.** `code_version` (the tree hash of
-`retrieve/src/retrieve`) is in the resume key, so a library fix makes
-`bench campaign --resume` rerun everything. Instead, a fix's own gates
-decide which arms it changes, and only those arms are rerun with narrow
-`bench run` scoping (`--algo` / `--backend` / `--filter-kind` / `--sweep`
-/ `--seed`); every other record keeps its `code_version`
-([policy](validation.md#campaign-roadmap-d1-in-progress-not-yet-validated)).
-Today's `code_version` is `c0e42d1`; D1's existing records are at
-`72e5a90`, so **never run `bench campaign --resume` on a leg that already
-has records** (arxiv `filter`/`deep`, pubmed `filter`). Campaign is safe
-only on a leg with no records yet.
+Every campaign cell runs at the `campaign-v2` tag's code_version (the
+tree hash of `retrieve/src/retrieve`), recorded in
+*evaluation/campaign.yaml* (to be created by CV2-REPORT) ([decisions](decisions.md#campaign-v2-user-2026-10-08)).
+New legs run into fresh result trees; old records are never re-stamped and
+enter the paper only through the reuse rule and the manifest. A
+correctness bug found mid-campaign stops every run; it is fixed and
+re-tagged, only the arms its own gates prove changed are rerun, and the
+manifest's `log` says so. After each step: `bench upload --verify`, a
+[hub-index](artifacts/hub-index.md) row, the manifest and the validation
+row updated, `bench report` on the cumulative tree, and a look at the
+exhibit the step feeds; if that exhibit already settles its claim, the
+claim's remaining runs are skipped and the reason logged.
 
-## Phase H: harness prerequisites
+### Stop rules
 
-- [ ] **L6: widen the official T1 parity gate past powers of two.**
-  `retrieve/tests/parity/test_official.py` `test_t1_int32_path_bitexact`
-  still compares official against Triton only when `d` is a power of two
-  (`d = 96` is reference-only), a guard from before L4's padding. Drop the
-  guard and add a D1 width (192, 768) to the parametrization. *Gate*: the
-  int32 path `torch.equal` official vs Triton at every width (bit-exact;
-  a mismatch is reported, not tolerated). **≈ 0.2 GPU-h**, library suite.
-- [ ] **M1: multi-GPU interference control.** Before any number from a
-  multi-GPU pod is compared with a single-GPU one: one D1 cell (an arxiv
-  `filter` cell at bs = 1, `silvertorch`/triton and `linr_v2`) timed alone
-  on the pod, then with every other GPU loaded by a D1 job, interleaved,
-  cores pinned. *Gate*: the bs = 1 and bs = 16 medians with neighbours
-  loaded within each arm's own repeat noise of the alone runs; otherwise
-  the timed steps run one GPU at a time and only `--skip-perf` work runs
-  in parallel. **0.5 GPU-h** on a ≥ 2-GPU pod.
+- **Pilot gate** (after V-PILOT): proceed to the arXiv and YFCC synth legs
+  only if achieved pass rates are within 1 % relative of target, V1's
+  `recall_oracle` is ≥ 0.99 at every p, and the curves are monotone where
+  they must be (V1 latency roughly flat in p, postfilter recall falling
+  with p). Otherwise stop and report.
+- **Noise gate.** Every timed comparison in an exhibit has a 95 % CI on its
+  ratio that excludes 1.0, or it is reported as "no difference". No more
+  than 5 repeats to force significance.
+- **Densify only on demand**: a parameter point is added only where an
+  exhibit's curve has a kink or crossover between two measured points and
+  the claim depends on where it is.
+- **Budget gate.** If cumulative GPU-h exceed 1.25× the estimate at any
+  step, stop and re-plan with the user.
+- **Surprise gate.** A result that contradicts an earlier one (e.g. Triton
+  slower than official end to end on the frozen code) stops the queue:
+  rerun that one cell interleaved and report before anything else runs.
 
-## Phase D: campaign and baselines (GPU)
+## Phase C: the campaign-v2 code batch (development pod, before any cell)
 
-- [ ] **D1: the full campaign.** Scope (user): `filter` on goodreads,
-  arxiv, yfcc10m and pubmed, in scale order, then `deep` and `codesign`
-  (S9) on arxiv, then goodreads. openalex's `filter` leg is E5's. Seeds {0, 1, 2} on the headline sweeps; `n_probe` ∈ {24, 32}. Done:
-  the `filter` legs of arxiv (126/126), yfcc10m (7/7) and pubmed (44/56),
-  arxiv `deep` (870/870, mixed `72e5a90` / `c0e42d1`) and arxiv `codesign` (60/60, 58 `unstable`)
-  ([validation](validation.md#campaign-roadmap-d1-in-progress-not-yet-validated)).
-  Goodreads runs on the E1c encoder `sasrec-ssm-logq-d128`; `d1/goodreads`
-  stays on the Hub as the gSASRec run. Everything below runs at
-  `c0e42d1` (the rerun policy above). After each sub-step, `bench upload
-  --verify` and a [hub-index](artifacts/hub-index.md) row. Closes paper
-  gaps G3 (P99 / QPS), G4 (seeds), G7, G8 (cross-dataset deep sweeps).
-  `R=$REPO_DIR/evaluation/results`; every command is `python -m bench.cli`
-  from `evaluation/`, with `--out $R --config-dir config`.
-  - [ ] **D1-E: pubmed `filter`, the targeted rerun** (the three-fix pass
-    changed only these arms). First, on the restaged slice (CPU facts already shown identical,
-    [artifact](artifacts/pubmed-restage/README.md)): `eval-data pubmed
-    encode_queries` on the GPU, `bench check --dataset pubmed`, then one
-    `linr_v1_filter_mask`/triton clause `c0_mesh` cell `--mode eager
-    --skip-perf` into a scratch tree; its quality block must equal the
-    `d1/pubmed` record's (held-out recall@100 0.9989321309919317, oracle
-    0.9985346478071041), or the rerun is on different embeddings: stop and report. Then:
-    ```
-    run --dataset pubmed --dim 768 --suite filter --algo silvertorch --backend triton --resume   # all 16 cells, retimed on the per-width tile
-    run --dataset pubmed --dim 768 --suite filter --algo linr_v3 --backend triton --resume       # 8 cells, OOM at build before
-    run --dataset pubmed --dim 768 --suite filter --algo linr_v2 --backend triton --filter-kind bloom --sweep c0c2 --seed 0 --resume   # the cell the 6 h timeout cut
-    ```
-    Re-upload `d1/pubmed`. `records.latest` keys on `code_version`, so
-    the 13 old `silvertorch`/triton records and the 8 failed `linr_v3`
-    ones stay beside the new ones: the D1 report reads only the `c0e42d1`
-    records for those two arms (say so in validation). **≈ 12 GPU-h**
-    (`silvertorch`/triton 16 × ~22 min, `linr_v3` 8 cells, `linr_v2` 1);
-    3 streams (the three commands; ~6 h wall).
-  - [ ] **D1-F: goodreads `filter` on the E1c encoder, the full leg** (105
-    cells). The `filter` suite now also lists `postfilter` (D5), so the leg
-    is a `bench run` over D1's four algos, not a `campaign`: `run --dataset
-    goodreads --dim 128 --suite filter --algo linr_v1_filter_mask --algo
-    linr_v2 --algo linr_v3 --algo silvertorch --resume`. Upload as
-    `d1/goodreads-e1c`; label `d1/goodreads` as the gSASRec run in
-    hub-index. **≈ 4 GPU-h**; up to 4 streams by `--algo` (`silvertorch`
-    holding both backends).
-  - [ ] **D1-C: goodreads `deep`** (135 jobs, no records yet). `campaign --suite deep --dataset goodreads --resume --timeout
-    48`. Upload `d1/goodreads-deep`. **≈ 25-45 GPU-h** (arxiv `deep`: ~2
-    min a cell over 870 cells, ~30 h; goodreads has more jobs on a 0.8 M
-    catalog, 4× smaller); 2 streams by `--algo` (`silvertorch` both
-    backends, `linr_v3`), each splittable by `--filter-kind`.
-  - [ ] **D1-D: goodreads `codesign`** (6 jobs). `campaign
-    --suite codesign --dataset goodreads --resume --timeout 48`. Upload
-    `d1/goodreads-codesign`. **≈ 2 GPU-h**, one stream.
-  - [ ] **D1-B2: arxiv `codesign` rerun on steady clocks** (user,
-    2026-10-08). D1-B's 60 cells are at `c0e42d1` but 58 are `unstable`
-    (sampled `sm_mhz` 1140-1410), and the leg exists for the full-vs-partial
-    `bloom_path` timing. Rerun the same 60 cells with `--force` into a
-    fresh tree, on a pod whose sampled clocks hold (first check a few
-    cells' `unstable` flag); if no steadier pod comes, rerun on this one
-    when the queue is otherwise idle and keep whichever leg has fewer
-    `unstable` cells, saying so. Upload `d1/arxiv-codesign-r2`. **≈ 0.5
-    GPU-h**, one stream.
-  - [ ] **D1-G: D1's report and gate.** Needs D1-B2..F. `bench
-    report` over every leg (goodreads rows from the E1c records only;
-    pubmed's `silvertorch`/triton and `linr_v3` from `c0e42d1` only); the
-    cross-scale filter comparison across algorithms (`recall_oracle`,
-    latency, QPS, memory per algo per dataset at the headline operating
-    point), goodreads redone on E1c. *Gate per leg*: `bench report` with no
-    missing cells; `median_ms(bs=16) < 16 × median_ms(bs=1)`; ids identical
-    across `eager` and `graph` (never run yet); a rerun byte-identical in
-    quality (a subset of each leg's cells, rerun with `--force` into a
-    scratch tree). `codesign`'s early smoke cell is not a finding; the
-    real sweep decides. **≈ 5 GPU-h** for the reruns; streams by leg.
-- [ ] **D3: bloom false-positive rate and memory against filter width**,
-  for both blooms on real attributes (G6; paper claim S8). The
-  head-to-head saw zero false positives at `m_bits 1024`, so the sweep
-  goes below it. Needs D1. Code first (a width sweep in the harness or an
-  artifact script), then **≈ 3 GPU-h**; streams by dataset.
-- [ ] **D5: the generic-torch postfilter baseline.** The study's baseline
-  is what a practitioner writes without a retrieval library
-  ([decisions](decisions.md#harness)): a dense matmul over the whole item
-  table on the GPU, `torch.topk`, then drop the ids that fail the filter,
-  so a row returns fewer than K results whenever filtered-out items took
-  top-K slots. No harness algorithm does this today
-  (`linr_v1_filter_mask` masks *before* top-k and is exact).
-  - [ ] **D5-run: the baseline on every `filter`-suite dataset** (goodreads
-    on E1c, arxiv, yfcc10m, pubmed) with narrow `bench run --algo
-    postfilter` scoping, so no existing record reruns; upload as
-    `d5/<dataset>`. openalex's postfilter cells run inside E5's `campaign`
-    (the suite lists the algo) and upload with `e5/openalex`. Before its
-    report: `bench report` has no `ALGO_LABEL` for `postfilter` and no rule
-    for its α rows, so its tables omit it today; add both (CPU,
-    `test_report.py` pins them). Smoke (arxiv d128 `c0_maincat`, 4/4 ok) in
-    [validation](validation.md). **≈ 5-8 GPU-h** (4 α values; a dense
-    matmul per batch); streams by dataset.
+All of #1-#16 of the re-plan land before the freeze; nothing is cut. Four
+workloads on `dev/cv2-<w>` off `dev/campaign-v2`, editing disjoint files,
+at most two at once; the orchestrator merges green workloads into
+`dev/campaign-v2`. Each workload's gates are in its brief; the headline
+ones are below.
 
-## Phase E: datasets
+- [ ] **CV2-LIB** (library): #7 LiNR V4 and `PostfilterKNNInt8` out of the
+  library (tag `linr-v4-final` first; golden V4 cells go); #14's library
+  side, an item-range `evaluate_mask(q, start, end)` on both filters; #11
+  L6, official int32 parity against Triton at d ∈ {64, 128, 192, 768}; #16
+  filter-first tile skipping in the fused bloom/exact probe scorer,
+  measured first (`torch.profiler`, kernel-only, interleaved) and kept only
+  if it wins at low pass rate without a regression at p = 1.0. *Gates*:
+  library suite green; L6 and the probe-scorer parity tests **bit-exact**;
+  range mask `torch.equal` to the full mask's slice. **≈ 1 GPU-h** of
+  testing.
+- [ ] **CV2-DATA** (harness config and data): the harness side of #7; #1
+  the synth builder *eval-data synth-filter*, `<ds>-synth.yaml` siblings
+  and `filters.query_attrs`; the `suites.yaml` grid redesign (seeds
+  {0, 1, 2} everywhere, bs {1, 16}, k {100, 1000}, kept sweeps, official on
+  bloom/none only, per-dataset `n_lists` / `n_probe`, `filter` / `deep` /
+  `synth` / `codesign` / `bloomwidth` / `n95` suites); #12 the SilverTorch
+  torch-reference arm; #13 the `torch.compile(mode="max-autotune")` arm;
+  #15 `m_bits` / `k_hash` as build params; V3 `candidate_pool` as a
+  fraction of passing items. *Gates*: synth CPU test (pass rate within 1 %
+  relative, nesting, determinism); existing record keys byte-identical
+  (**bit-exact**); expansion counts pinned. Merges before CV2-LIB (the
+  harness imports `LiNRV4` until it lands).
+- [ ] **CV2-CORE** (cell loop; after CV2-DATA): #2 quality cache
+  (`seed_scope`); #3 `--interleave` with comparison groups, official
+  `score_path` as a build param and the `h2h` suite; #4 per-query npz
+  sidecars (uploaded); #5 per-(mode, bs, k) id hashes; #14 the chunked
+  exact oracle and *bench oracle*; the per-job clock log. Record schema 4.
+  *Gates*: cached quality equals fresh quality (**bit-exact**); chunked
+  oracle equals the existing blobs on arXiv and PubMed up to counted
+  exact-score ties (**bit-exact otherwise**); ABAB order and per-arm keys
+  pinned.
+- [ ] **CV2-REPORT** (beside CV2-CORE): #8 report fixes (dev/d5-report's
+  postfilter label and the α rule, English labels, matched-recall rows and
+  `n95`, the T1/T2/T3 and F1-F4 generators); #9 statistics (median of
+  window medians, bootstrap CIs over seed × window and over queries, paired
+  ratio CIs for interleaved groups); #6 the campaign manifest
+  *evaluation/campaign.yaml*, read by `bench report --manifest`; #15's
+  FPR / memory columns. *Gates*: every exhibit builds from a fixture tree
+  with one schema-4 record of every arm; known-answer stats tests.
+- [ ] **CV2-FREEZE** (needs the four above): on the integrated tree, the
+  library suite, the harness suite, the golden harness gate (**bit-exact**
+  against the H2 rerun, standing residuals unchanged), one `--skip-perf`
+  smoke cell per suite per dataset (yfcc10m staged first), one timed
+  interleaved smoke, `bench report` over a tree with one record of every
+  arm; then the code_version goes into the manifest, `dev/campaign-v2`
+  merges into staging once, and the orchestrator tags `campaign-v2`.
+  **≈ 2 GPU-h.**
 
-- [ ] **E5: openalex's `filter` leg; the report gains the unfiltered
-  cells retired from the `quality` suite, for the text datasets only.**
-  Ordered after D1; technically
-  independent of it. The 10 M OpenAlex catalog
-  is not on the Hub: restage it on the pod (`openalex convert` streams 297
-  GB over S3, then `prep --keep-items 10000000`, `encode_text`,
-  `encode_queries`, `attrs`; [datasets](system/datasets.md#openalex)), or
-  `reshard` from a larger staged copy. `bench check --dataset openalex`,
-  then `campaign --suite filter --dataset openalex --resume --timeout 48`;
-  upload `e5/openalex`. **≈ 25-35 GPU-h** (10 M × 768 like pubmed, 20-46
-  min a cell) **+ ≈ 3 GPU-h** for a fresh encode; 4 streams by `--algo`.
+## Phase P: claims and inventory (CPU, beside Phase C)
+
+- [ ] **P-INV: the claims and the record inventory.** *docs/paper/claims.md* (to be written):
+  every quantitative claim of LiNR (arXiv 2407.13218) and SilverTorch
+  (arXiv 2511.14881) with section and figure, then the claim-to-evidence
+  matrix C1-C7 (original number, exhibit, exact cells, reusable records,
+  missing cells, measured GPU-h, verdict so far). The inventory: every Hub
+  subtree of [hub-index](artifacts/hub-index.md) fetched, one row per
+  record (*inventory.csv* + pivot under `docs/artifacts/`), per-sweep
+  pass rates, measured per-cell wall time, which records pass the reuse
+  rule; uploaded as `artifacts/campaign-v2`. Its numbers replace the
+  estimates below and fill the manifest's reuse entries. Any planned cell
+  that maps to no claim leaves this page.
+- [ ] **R-RES: the unexplained residuals**, time-boxed to 2 h of CPU:
+  `linr_v2` 4.5e-4 and `linr_v3` 1.7e-5 against their golden JSONs, arXiv
+  SilverTorch 2.0e-6 ([validation](validation.md#harness-gates)). Still
+  unexplained after the box: reported as-is in the deviations table.
+
+## Phase V: the campaign (pods the user creates; needs CV2-FREEZE)
+
+GPU 0 takes all timed work from one sequential driver, cores pinned
+NUMA-local; GPU 1 takes quality-only work (`--skip-perf`: oracle builds via
+*bench oracle* (CV2-CORE), bloomwidth quality, the PubMed embedding check, the `n95`
+probe). Timed work moves to a second GPU only if M1 passes. Exhibits:
+T1 claims, T2 real-filter headline, T3 official vs Triton, F1 latency vs
+pass rate, F2 recall vs pass rate, F3 Pareto, F4a bloom FPR/memory, F4b
+co-design.
+
+- [ ] **M1: multi-GPU interference control**, before any timed step on a
+  multi-GPU pod: one arxiv `filter` cell at bs 1 and 16
+  (`silvertorch`/triton, `linr_v2`) alone, then with every other GPU
+  loaded, interleaved, cores pinned. *Gate*: loaded medians within each
+  arm's own repeat noise; otherwise timed steps run one GPU at a time.
+  **0.5 GPU-h** on a ≥ 2-GPU pod.
+- [ ] **V-PILOT: goodreads synth** (uniform, 7 points), the pilot gate
+  above decides the rest of the synth axis. **≈ 4 GPU-h**, GPU 0.
+- [ ] **V-GR-FILTER: goodreads `filter` on E1c** (3 sweeps, 3 seeds, every
+  arm); hub-index labels `d1/goodreads` "gSASRec, superseded". T2's
+  goodreads row. **≈ 5 GPU-h**, GPU 0.
+- [ ] **H2H-FINAL: official vs Triton on the release code** (`h2h` suite:
+  goodreads E1c and arXiv, interleaved, 5 repeats, official `score_path`
+  fp16 and int32; e2e, kernel-only, launches, memory, parity). The only
+  T3 source; replaces b3 and the kernel-opt head-to-head (C7). **≈ 3
+  GPU-h**, GPU 0.
+- [ ] **V-CODESIGN: `codesign` on arXiv and goodreads**, interleaved
+  partial/full, `n_probe` {8, 32, 128}, 3 sweeps, 3 seeds; replaces D1-B2
+  and D1-D. F4b, C5. **≈ 2 GPU-h**, GPU 0.
+- [ ] **D3: `bloomwidth`** on goodreads, arXiv and PubMed (`c0_mesh`):
+  both blooms, `m_bits` 64-2048 × `k_hash` {3, 5}, quality-only plus one
+  timed point per width at bs 16. F4a, C4. **≈ 3-5 GPU-h**, GPU 1 (the
+  timed points on GPU 0).
+- [ ] **V-AX-SYNTH: arXiv synth**, uniform 7 points, then the
+  cluster-correlated variant (3 points) if the uniform sweep shows the IVF
+  recall collapse at low p; arXiv's `n95`. F1/F2 3M panel. Needs V-PILOT.
+  **≈ 11 GPU-h**, GPU 0.
+- [ ] **V-GR-DEEP: goodreads `deep`**, trimmed (`n_lists` {1024, 4096},
+  `n_probe` {8, 16, 32, 64, 128}, V3 pool fractions); replaces D1-C.
+  F3; goodreads' `n95`. Needs V-PILOT. **≈ 6 GPU-h**, GPU 0/1.
+- [ ] **V-YFCC: YFCC synth (5 points) and a small `deep`** (`n_lists`
+  {4096, 16384}). F1/F2 10M panel; YFCC's `n95`. Needs V-AX-SYNTH.
+  **≈ 18 GPU-h**, GPU 0/1.
+- [ ] **V-SEEDS: arXiv and YFCC `filter` backfill**: seeds 1-2 and the
+  `n95` column on the kept sweeps (arXiv's other-sweep records stay as
+  they are). T2 with CIs. Needs V-AX-SYNTH and V-YFCC. **≈ 4 GPU-h**,
+  GPU 0.
+- [ ] **V-PUBMED: PubMed `filter` under the new grid** (replaces D1-E):
+  the embedding identity check on GPU 1 first (`eval-data pubmed
+  encode_queries`, `bench check`, one V1 cell equal to `d1/pubmed`'s
+  quality, or stop), the `n95` probe suite (quality-only), then the 3
+  kept sweeps, 3 seeds, every arm. T2's 768-d row. **≈ 14 GPU-h**, GPU 0.
+- [ ] **D1-G: gate reruns and the report.** Needs every step above.
+  Eager-vs-graph id identity from the stored hashes, a byte-identical
+  quality subset per leg (`--force` into a scratch tree),
+  `median_ms(bs=16) < 16 × median_ms(bs=1)`, then `bench report
+  --manifest` over everything. **≈ 4 GPU-h**, both GPUs.
 
 ## Phase F: the paper
 
-- [ ] **F2: finish the official-vs-reimplementation section** with D1's
-  numbers: confidence intervals, paired tests and a second seed, p95 and
-  p99. The section ([paper](paper/official-vs-reimplementation.md))
-  marks each line that waits on D1. Needs D1 and F2-R. **F2-R** (user, 2026-10-08: rerun; runnable now, needs only the E1c checkpoints): the goodreads
-  head-to-head on the E1c embeddings, b3 methodology
-  ([h2h.py](artifacts/kernel-opt/h2h.py)), **≈ 2 GPU-h**, one stream (the
-  arms interleave in one process).
-- [ ] **F4: package the artifacts**: a tagged `torchretrieve` release, a
-  Zenodo DOI including the pinned official sdist, Hub datasets, oracles
-  and results, a one-command reproduction, an anonymised mirror for
-  review. Needs D1 and the user's accounts.
-- [ ] **F5: write the paper**, every table produced by `bench report`.
+- [ ] **F2: the official-vs-reimplementation section** rewritten from
+  H2H-final's numbers, with CIs and paired tests
+  ([paper](paper/official-vs-reimplementation.md)). Needs H2H-FINAL and
+  D1-G.
+- [ ] **F4: package the artifacts**: the results public, the PubMed slice
+  or its build recipe with checksums, a tagged `torchretrieve` release, a
+  Zenodo DOI including the pinned official sdist, a one-command
+  reproduction, an anonymised mirror (anonymous.4open.science) for the
+  double-blind review. Needs D1-G and the user's accounts.
+- [ ] **F5: write the paper** (ECIR 2027 reproducibility format, 12 pages
+  LNCS): every table from `bench report`, the `docs/paper/` drafts
+  rewritten against claims C1-C7 (they still cite retired plan labels).
   Needs everything above.
 
 ## Estimates
 
-| step | A100 GPU-h | parallel streams |
+| step | A100 GPU-h | GPU |
 |---|---|---|
-| M1 | 0.5 | 1 (on a ≥ 2-GPU pod) |
-| L6 | ≈ 0.2 | 1 |
-| D1-E pubmed targeted rerun | ≈ 12 | 3 |
-| D1-F goodreads `filter` (E1c) | ≈ 4 | up to 4 |
-| D1-C goodreads `deep` | ≈ 25-45 | 2, each splittable by filter kind |
-| D1-D goodreads `codesign` | ≈ 2 | 1 |
-| D1-G gate reruns | ≈ 5 | by leg |
-| E5 openalex `filter` | ≈ 25-35 (+ 3 encode) | 4 |
-| D5-run postfilter baseline | ≈ 5-8 | by dataset |
-| D3 (after its code) | ≈ 3 | by dataset |
-| F2-R | ≈ 2 | 1 |
+| CV2-LIB … CV2-FREEZE | ≈ 3 | development pod |
+| M1 | 0.5 | both |
+| V-PILOT | ≈ 4 | 0 |
+| V-GR-FILTER | ≈ 5 | 0 |
+| H2H-FINAL | ≈ 3 | 0 |
+| V-CODESIGN | ≈ 2 | 0 |
+| D3 bloomwidth | ≈ 3-5 | 1 (+0) |
+| V-AX-SYNTH | ≈ 11 | 0 |
+| V-GR-DEEP | ≈ 6 | 0/1 |
+| V-YFCC | ≈ 18 | 0/1 |
+| V-SEEDS | ≈ 4 | 0 |
+| V-PUBMED | ≈ 14 | 0 (+1 for the checks) |
+| D1-G | ≈ 4 | both |
 
-L6 is a short library-suite run. Runnable now: everything in D1 but D1-G, D5-run (and E5's
-restage). The total is ≈ 85-120 GPU-h, of which D1 is ≈ 47-69.
+Total ≈ 75-95 GPU-h (the re-plan's 70-90 plus 3 seeds on bloomwidth's
+random builds); wall ≈ 40-45 h if M1 lets both GPUs time, ≈ 65-80 h with
+one timing GPU. The SilverTorch/Triton perf-only rerun the re-plan held in
+reserve costs 0 GPU-h: the CSR probe layout and transposed bloom predate
+`72e5a90`, and the one later library change (per-width probe tiles) moves
+tiles only at `D_PAD > 256` ([validation](validation.md#library-gates),
+*Probe-scorer tile per width*).
 
 ## Dependencies
 
 ```
-D1-B2, D1-E, D1-F, D1-C, D1-D ────┬─> D1-G ─┬─> D3 ──────────┐
-                                            ├─> F2 (+ F2-R)  ├─> F5
-                                            ├─> F4           │
-                                            └─> E5 ──────────┤
-D5-run (its openalex cells run inside E5) ───────────────────┘
-M1: before any timed step runs on a multi-GPU pod
+CV2-DATA ─> CV2-LIB merge;  CV2-DATA ─> CV2-CORE;  CV2-REPORT ∥ CV2-CORE
+CV2-LIB, CV2-DATA, CV2-CORE, CV2-REPORT ─> CV2-FREEZE (tag campaign-v2)
+P-INV (CPU, beside Phase C) ─> the manifest's reuse entries, the estimates
+CV2-FREEZE ─┬─> V-PILOT ─┬─> V-AX-SYNTH ─> V-YFCC ─> V-SEEDS ─┐
+            │            └─> V-GR-DEEP ─────────────────────────┤
+            ├─> V-GR-FILTER, H2H-FINAL, V-CODESIGN, D3 ─────────┤
+            └─> V-PUBMED ───────────────────────────────────────┴─> D1-G ─> F2, F4, F5
+M1: before any timed step on a multi-GPU pod
 ```

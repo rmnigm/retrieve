@@ -22,7 +22,8 @@ layer is *SilverTorch Algorithm 1 reimplemented* (in the thesis it was
 called QuantizedIVF — retired 2026-09-15 in the thesis and `docs/paper/`;
 the already-delivered defense talk still says it and stays that way); `meta-recsys/silvertorch`
 is Meta's *official* code and, once integrated, `backend="official"`; the
-LiNR variants are V1–V4 as in the paper.
+LiNR variants are V1–V3 as in the paper (our int8 V4 leaves the
+library in campaign v2; [decisions](docs/decisions.md#campaign-v2-user-2026-10-08)).
 
 ## Where things are documented
 

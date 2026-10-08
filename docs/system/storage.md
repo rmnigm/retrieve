@@ -175,7 +175,7 @@ Size the pod's disks for these at `pod.sh up` (`--disk`, `--volume`):
   layout plus 0.4 GB of PMID lists kept in `_raw/`, and 57 min of
   download-bound `convert` with MEDLINE streaming beside it
   ([datasets](datasets.md#disk-budget-and-the-slice)).
-- **OpenAlex (roadmap E5) only fits as a stream.** The works snapshot is 707 GB of
+- **OpenAlex (out of the study, [backlog](../backlog.md#datasets-not-in-the-study)) only fits as a stream.** The works snapshot is 707 GB of
   parquet and is never landed: `openalex convert` reads 297 GB of projected
   columns over S3 (572 s at 64 workers) and stages the filtered, hash-sampled
   rows (16 GB). The 10 M catalog is ~23 GB (papers 6.3, fp16 items 15, attrs

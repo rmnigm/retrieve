@@ -1,7 +1,7 @@
 ---
 title: backlog
 created: 2026-10-07
-updated: 2026-10-07
+updated: 2026-10-08
 type: summary
 tags: [roadmap]
 sources: [docs/roadmap.md, docs/validation.md, evaluation/bench/, evaluation/training/]
@@ -20,11 +20,37 @@ the user moving it onto the roadmap.
   Faiss-CPU IVF-Flat, HNSW, a cuBLAS brute-force floor at matched recall;
   cuVS IVF-Flat / IVF-PQ / CAGRA with a bitset prefilter (G13);
   Filtered-DiskANN or ACORN (G14). Struck from the eval plan: the study's
-  baseline is generic torch (roadmap D5). Possibly done later by a
-  separate agent on a separate VM.
+  baseline is generic torch plus the torch-importable arms
+  ([decisions](decisions.md#campaign-v2-user-2026-10-08)). Possibly done
+  later by a separate agent on a separate VM.
+
+## Datasets not in the study
+
+- **OpenAlex** (dropped 2026-10-08, was roadmap E5): the 10 M × 768 slice
+  duplicates PubMed's N, width and domain family, for 28-38 GPU-h plus a
+  297 GB restage ([datasets](system/datasets.md#openalex) keeps the
+  pipeline). **Option, the first thing added back:** a 30 M scale point at
+  low width from the same pipeline — 30 M works, nomic-embed-text-v1.5
+  truncated to d128 (Matryoshka) — turning OpenAlex into the scale axis
+  (0.8 M, 3 M, 10 M, 30 M). Needs the chunked oracle (campaign-v2 code
+  batch) and the item table on the GPU (30 M × 128 fp16 = 7.7 GB). Cost:
+  ~9 GPU-h of encoding plus the restage, and a reduced grid (`filter` on 3
+  sweeps, `synth` at {0.001, 0.01, 0.1, 1.0}, no `deep`) of ~12-18 GPU-h.
+  Only after the campaign's run order is done, and only on the user's
+  call.
+- **LAION / Re-LAION-5B**: same scale ceiling plus a new staging and
+  encode, no natural query-side filters (NSFW, aesthetic, size and
+  language metadata, so predicates would be synthetic anyway), and
+  provenance baggage (LAION-5B was pulled in December 2023; Re-LAION-5B is
+  the release to use if ever). At 10 M it duplicates YFCC (CLIP
+  image-text, already the field's filtered benchmark).
 
 ## After the paper
 
+- **Fusing top-k into the probe scorer**: top-k is ~100 µs of ~250 µs
+  device time in both implementations
+  ([h2h](artifacts/kernel-opt/h2h.md), one run, not validated); beyond
+  both papers, so post-paper.
 - **TF-3 / TF-4 retune**: TF-3 (retune) and TF-4 (`evict_first`, 0-5 %),
   second-order after TF-9 (probe layout) and TF-1 (transposed bloom
   index). Needs a fresh `bench report` head-to-head against the current
@@ -33,8 +59,7 @@ the user moving it onto the roadmap.
   [validation](validation.md#official-against-our-triton-reimplementation-citable-contested)
   reflects the code before TF-1 / TF-9.
 - **G-b: extended experiments**: a synthetic scale ladder to 240M and 1B
-  items (L4, L5), a controlled pass-rate sweep (the LiNR V1/V2
-  crossover), co-design ablation depth, V3 bit width, an extended batch
+  items (L4, L5), co-design ablation depth, V3 bit width, an extended batch
   grid (G10-G12, G15, G16).
 - **G-c: a resource paper about the library.** After F5.
 - **G-e: two re-scoped plans** (deferred until after F5 by the user):
