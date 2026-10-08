@@ -179,22 +179,6 @@ co-design.
   loaded, interleaved, cores pinned. *Gate*: loaded medians within each
   arm's own repeat noise; otherwise timed steps run one GPU at a time.
   **0.5 GPU-h** on a ≥ 2-GPU pod.
-- [ ] **IVF-TUNE: `n_lists` and `n_probe` by dataset size** (user,
-  2026-10-08, [decisions](decisions.md#campaign-v2-user-2026-10-08)).
-  Fast and quality-only (user: tune first, full sweeps once): SilverTorch
-  triton clause, median sweep, seed 0, bs 16, k 100, `n_lists` ×
-  `n_probe` doubling to past recall 0.95; pick by items scanned, no timed
-  cells; records are artifacts, not paper numbers. Two datasets only: **goodreads**
-  ({1024, 4096}; done: 4096 / 64) and **PubMed** ({4096, 16384}, capped at
-  25 % scanned). Lands in two parts: **A** (done: `n_lists` for all four
-  datasets and their synth twins, goodreads' n95) unblocks every leg that
-  sweeps `n_probe` itself; **B** adds the n95 of PubMed and of arXiv and
-  YFCC (a quick capped `n_probe` check at their one `n_lists`). Output: the size rule, and the `n_lists` /
-  n95 values written into the `filter` and `synth` slots of all four
-  datasets (arXiv and YFCC by the rule). Replaces the `n95` suite. If
-  goodreads' choice is not 1024, its SilverTorch `filter` and `synth`
-  cells already run are rerun. Runs at `campaign-v2` (SilverTorch is
-  untouched by Fix A). **≈ 0.5-1 GPU-h**, one piece per pod.
 - [ ] **H-PROFILE + H2H-FINAL at `campaign-v2.1`.** `--profile` stores an
   empty Triton `kernels` list (H2H-FINAL: 40/40 bloom and 13/40 `none`
   eager entries; official always populated), so T3's Triton kernel-only
@@ -288,7 +272,6 @@ co-design.
 |---|---|---|---|
 | M1 | 0.5 | both | |
 | V-RERUN-V21 | ≈ 2-3 | 0 | goodreads-synth + goodreads filter (V2, V3, SilverTorch at n_lists 4096) |
-| IVF-TUNE | ≈ 0.5-1 | 0 | quality-only, seed 0, goodreads + PubMed |
 | H-PROFILE + H2H-FINAL | ≈ 1.5 | 0 | 1.18 GPU-h measured at 408b1188 |
 | V-CODESIGN | ≈ 1 | 0 | `d1/arxiv-codesign`: 60 cells in 0.4 h |
 | D3 bloomwidth | ≈ 3-5 | 1 (+0) | quality-only cells |
@@ -315,5 +298,5 @@ tag campaign-v2 ─────────────────────�
                                        ├─> V-CODESIGN, D3 ─────────────────────┤
                                        └─> V-PUBMED ───────────────────────────────────────┴─> D1-G ─> F2, F4, F5
 M1: before any timed step on a multi-GPU pod
-tag campaign-v2.1 (done) and IVF-TUNE: before every timed V-AX-SYNTH, V-YFCC, V-PUBMED, V-SEEDS cell
+tag campaign-v2.1 and IVF-TUNE (both done): before every timed V-AX-SYNTH, V-YFCC, V-PUBMED, V-SEEDS cell
 ```
