@@ -44,7 +44,11 @@ records ok, rc 0; children triton 1,875 s and official 247 s, 0.59 GPU-h with th
   (1.351 / 0.768 ms). H2H-FINAL's goodreads bloom bs 16 k 100 cell at `408b1188` measured 1.785 /
   0.827 ms (2.16), with the three arms interleaved in one process and `--profile`. Graph agrees
   (0.195 vs 0.201 ms). Both eager arms are faster here, although v2.1's quantize fix was expected
-  to add ~30 µs. The direction holds. The cause (interleaving three arms, `--profile`, or v2.1) is
-  not established; the surprise gate's interleaved rerun of the one cell was not run.
+  to add ~30 µs. The direction holds. arXiv shows the same gap at one code_version: its
+  separate-process `bloomwidth-timed` at `408b1188` measured official eager 1.52 ms on `c0_maincat`
+  bloom bs 16 k 100, against H2H-FINAL's 1.806 ms ([d3-arxiv](../d3-arxiv/README.md)), and v2.1 then
+  added the expected +≈ 30 µs. So the gap follows H2H-FINAL's protocol (three arms interleaved in
+  one process, `--profile`), not v2.1; which part of it is not established, and the surprise gate's
+  interleaved one-cell rerun was not run.
 - **Clocks.** 60 / 117 timing windows below 1410 MHz (min 1140), 20 / 21 records `unstable`; the
   1 Hz trace under > 50 % load held 1410 MHz (63 / 63 samples), max 39 °C, 318 W.
