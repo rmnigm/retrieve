@@ -38,6 +38,8 @@ class FusedMaskedKnnTopkConfig:
     block_n: int
     num_warps: int
     num_stages: int = 3
+    # Target grid size over all rows: each row gets G = cdiv(programs, B) tile-striding programs.
+    programs: int = 864
 
 
 # Default tile config (tuned on A100/sm_80); pass config= to the wrapper to override.
@@ -65,19 +67,15 @@ def _fused_masked_knn_topk_kernel(
     BLOCK_N: tl.constexpr,
     WIDE: tl.constexpr,
 ):
-    # Tile on grid_x (≤ 2³¹), batch on grid_y (≤ 65535): cdiv(P, BLOCK_N) can overflow grid_y at
-    # large P.
-    tile_id = tl.program_id(0)
+    # Grid (G, B), G fixed per shape: program g strides over tiles g, g + G, ... of row bid, so the
+    # grid does not grow with P (kernels.md § fused_masked_knn_topk, "Launch grid"). Batch on
+    # grid_y (≤ 65535).
     bid = tl.program_id(1)
 
-    n_offsets = tile_id * BLOCK_N + tl.arange(0, BLOCK_N)
     d_offsets = tl.arange(0, D_PAD)
     d_in = d_offsets < D
-
-    p_valid = n_offsets < P
-
     count = tl.load(counts_ptr + bid)
-    in_count = n_offsets < count
+    out_row = row_base(out_scores_ptr, bid, stride_sb, WIDE)
 
     # Widen before the multiply: tl.sum reduces in its operand dtype (fp16 in production, plan
     # L4 §6.1), and fp16 × fp16 is exact in fp32.
@@ -85,26 +83,30 @@ def _fused_masked_knn_topk_kernel(
         tl.float32
     )
 
-    item_ids = tl.load(
-        row_base(pos_indices_ptr, bid, stride_pb, WIDE) + n_offsets * stride_pp,
-        mask=in_count,
-        other=0,
-    )
-
-    emb_rows = tl.load(
-        item_embs_ptr + item_ids[:, None] * stride_in + d_offsets[None, :] * stride_id,
-        mask=in_count[:, None] & d_in[None, :],
-        other=0.0,
-    ).to(tl.float32)
-
-    dots = tl.sum(emb_rows * q[None, :], axis=1)
-    dots = tl.where(in_count, dots, float("-inf"))
-
-    tl.store(
-        row_base(out_scores_ptr, bid, stride_sb, WIDE) + n_offsets * stride_sp,
-        dots,
-        mask=p_valid,
-    )
+    for tile_id in range(tl.program_id(0), tl.cdiv(P, BLOCK_N), tl.num_programs(0)):
+        n_offsets = tile_id * BLOCK_N + tl.arange(0, BLOCK_N)
+        p_valid = n_offsets < P
+        if tile_id * BLOCK_N < count:
+            in_count = n_offsets < count
+            item_ids = tl.load(
+                row_base(pos_indices_ptr, bid, stride_pb, WIDE) + n_offsets * stride_pp,
+                mask=in_count,
+                other=0,
+            )
+            emb_rows = tl.load(
+                item_embs_ptr + item_ids[:, None] * stride_in + d_offsets[None, :] * stride_id,
+                mask=in_count[:, None] & d_in[None, :],
+                other=0.0,
+            ).to(tl.float32)
+            dots = tl.sum(emb_rows * q[None, :], axis=1)
+            dots = tl.where(in_count, dots, float("-inf"))
+            tl.store(out_row + n_offsets * stride_sp, dots, mask=p_valid)
+        else:
+            tl.store(
+                out_row + n_offsets * stride_sp,
+                tl.full((BLOCK_N,), float("-inf"), tl.float32),
+                mask=p_valid,
+            )
 
 
 @dataclass(frozen=True)
@@ -177,8 +179,8 @@ def _fmkt_prep(
         "num_warps": cfg.num_warps,
         "num_stages": cfg.num_stages,
     }
-    # Tile axis on grid_x, batch on grid_y — see kernel comment.
-    grid = (triton.cdiv(p_kernel, cfg.block_n), b)
+    # Tile programs on grid_x, batch on grid_y — see kernel comment.
+    grid = (min(triton.cdiv(p_kernel, cfg.block_n), triton.cdiv(cfg.programs, b)), b)
     return _FmktLaunch(grid, kwargs, all_scores, positive_indices, p, b)
 
 
@@ -236,8 +238,9 @@ def _fused_masked_knn_topk_impl(
     config: FusedMaskedKnnTopkConfig | None = None,
 ) -> tuple[Tensor, Tensor]:
     """Fused masked gather + dot + topk → (ids [B, K], scores [B, K]). 2-D launch over
-    ``(cdiv(P_BUCKET, BLOCK_N), B)``; each program holds one query and gathers a ``BLOCK_N`` slab of
-    candidate ids by indirect load, items past ``counts[b]`` scoring ``-inf``. Scoring is
+    ``(G, B)``, ``G = min(cdiv(P_BUCKET, BLOCK_N), cdiv(programs, B))``; each program holds one
+    query and strides over ``BLOCK_N`` slabs of candidate ids, gathered by indirect load; slabs past
+    ``counts[b]`` store ``-inf`` without loads. Scoring is
     elementwise (``tl.sum``, not ``tl.dot``) since rows differ per cell — the dense no-filter
     path should use ``query @ item_embs.T`` instead. Runs over a bucketed width ``P_BUCKET =
     _bucket_p(P)`` so the JIT cache compiles once per bucket × D."""

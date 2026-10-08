@@ -12,7 +12,9 @@ def quantize_int8(embs: Tensor) -> tuple[Tensor, Tensor]:
     ``embs ≈ codes.float() * scales.unsqueeze(1)``."""
     abs_max = embs.abs().amax(dim=1, keepdim=True).clamp(min=1e-8)
     scales = (abs_max / 127.0).squeeze(1)
-    codes = (embs / abs_max * 127.0).round().clamp(-128, 127).to(torch.int8)
+    # Inductor's fp32 `/` is approximate; a correctly rounded fp64 quotient rounded to fp32 is
+    # eager's exact fp32 quotient, so compiled codes equal eager's (kernels.md § quantize_int8).
+    codes = ((embs.double() / abs_max).float() * 127.0).round().clamp(-128, 127).to(torch.int8)
     return codes, scales
 
 
