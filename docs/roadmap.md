@@ -36,6 +36,11 @@ others (see [Multi-GPU execution](#multi-gpu-execution)).
   them on the E1c encoder (F2-R below), or keep them labelled as a
   gSASRec-embedding measurement
   ([validation](validation.md#encoder-switch-evals-to-redo)).
+- **Unstable clocks on the 1x A100 pod.** arxiv `codesign` (D1-B) has 58
+  of 60 cells `unstable` (sampled `sm_mhz` 1140-1410; clocks cannot be
+  locked), and the leg exists for a full-vs-partial `bloom_path` timing
+  comparison. Rerun it on a steadier pod before D1-G, or report it as
+  measured with the flag ([validation](validation.md#campaign-roadmap-d1-in-progress-not-yet-validated)).
 - **Citability of a narrowed campaign.** A run with a narrowed mode set is
   recorded `status: partial` and reported NOT CITABLE. The user decides
   once `bench report` runs on D1's real output (D1-G), not in the abstract.
@@ -141,7 +146,7 @@ only on a leg with no records yet.
   arxiv, yfcc10m and pubmed, in scale order, then `deep` and `codesign`
   (S9) on arxiv, then goodreads. openalex's `filter` leg is E5's. Seeds {0, 1, 2} on the headline sweeps; `n_probe` ∈ {24, 32}. Done:
   the `filter` legs of arxiv (126/126), yfcc10m (7/7) and pubmed (44/56),
-  and arxiv `deep` (870/870, mixed `72e5a90` / `c0e42d1`)
+  arxiv `deep` (870/870, mixed `72e5a90` / `c0e42d1`) and arxiv `codesign` (60/60, 58 `unstable`)
   ([validation](validation.md#campaign-roadmap-d1-in-progress-not-yet-validated)).
   Goodreads runs on the E1c encoder `sasrec-ssm-logq-d128`; `d1/goodreads`
   stays on the Hub as the gSASRec run. Everything below runs at
@@ -150,10 +155,6 @@ only on a leg with no records yet.
   gaps G3 (P99 / QPS), G4 (seeds), G7, G8 (cross-dataset deep sweeps).
   `R=$REPO_DIR/evaluation/results`; every command is `python -m bench.cli`
   from `evaluation/`, with `--out $R --config-dir config`.
-  - [ ] **D1-B: arxiv `codesign`** (10 jobs, no records yet): `campaign
-    --suite codesign --dataset arxiv --resume --timeout 48`. Upload
-    `d1/arxiv-codesign`. **≈ 3-5 GPU-h**, one stream (both `bloom_path`
-    arms are `silvertorch`/official).
   - [ ] **D1-E: pubmed `filter`, the targeted rerun** (the three-fix pass
     changed only these arms). First, on the restaged slice (CPU facts already shown identical,
     [artifact](artifacts/pubmed-restage/README.md)): `eval-data pubmed
@@ -189,7 +190,7 @@ only on a leg with no records yet.
   - [ ] **D1-D: goodreads `codesign`** (6 jobs). `campaign
     --suite codesign --dataset goodreads --resume --timeout 48`. Upload
     `d1/goodreads-codesign`. **≈ 2 GPU-h**, one stream.
-  - [ ] **D1-G: D1's report and gate.** Needs D1-B..F. `bench
+  - [ ] **D1-G: D1's report and gate.** Needs D1-C..F. `bench
     report` over every leg (goodreads rows from the E1c records only;
     pubmed's `silvertorch`/triton and `linr_v3` from `c0e42d1` only); the
     cross-scale filter comparison across algorithms (`recall_oracle`,
@@ -260,7 +261,6 @@ only on a leg with no records yet.
 |---|---|---|
 | M1 | 0.5 | 1 (on a ≥ 2-GPU pod) |
 | L6 | ≈ 0.2 | 1 |
-| D1-B arxiv `codesign` | ≈ 3-5 | 1 |
 | D1-E pubmed targeted rerun | ≈ 12 | 3 |
 | D1-F goodreads `filter` (E1c) | ≈ 4 | up to 4 |
 | D1-C goodreads `deep` | ≈ 25-45 | 2, each splittable by filter kind |
@@ -272,12 +272,12 @@ only on a leg with no records yet.
 | F2-R (if chosen) | ≈ 2 | 1 |
 
 L6 is a short library-suite run. Runnable now: everything in D1 but D1-G, D5-run (and E5's
-restage). The total is ≈ 89-124 GPU-h, of which D1 is ≈ 51-73.
+restage). The total is ≈ 85-120 GPU-h, of which D1 is ≈ 47-69.
 
 ## Dependencies
 
 ```
-D1-B, D1-E, D1-F, D1-C, D1-D ─────┬─> D1-G ─┬─> D3 ──────────┐
+D1-E, D1-F, D1-C, D1-D ───────────┬─> D1-G ─┬─> D3 ──────────┐
                                             ├─> F2 (+ F2-R)  ├─> F5
                                             ├─> F4           │
                                             └─> E5 ──────────┤
