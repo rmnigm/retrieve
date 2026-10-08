@@ -27,7 +27,6 @@ from retrieve import (
     LiNRV1,
     LiNRV2,
     LiNRV3,
-    LiNRV4,
     OfficialConfig,
     SilverTorch,
 )
@@ -38,7 +37,6 @@ ALGOS: dict[str, type[nn.Module]] = {
     "linr_v1_filter_mask": LiNRV1,
     "linr_v2": LiNRV2,
     "linr_v3": LiNRV3,
-    "linr_v4": LiNRV4,
     "silvertorch": SilverTorch,
     "postfilter": Postfilter,
 }

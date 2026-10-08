@@ -11,7 +11,6 @@ EXPECTED = {
     "linr_v1_filter_mask": {"none": "cublas", "clause": "cublas+{b}", "bloom": "cublas+{b}"},
     "linr_v2": {"none": None, "clause": "{b}", "bloom": "{b}"},
     "linr_v3": {"none": "{b}", "clause": "{b}", "bloom": "{b}"},
-    "linr_v4": {"none": "cublas", "clause": "cublas+{b}", "bloom": "cublas+{b}"},
     "silvertorch": {"none": "{b}", "clause": "{b}", "bloom": "{b}"},
     "postfilter": {"none": None, "clause": "cublas+{b}", "bloom": "cublas+{b}"},
 }

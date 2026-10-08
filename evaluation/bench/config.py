@@ -9,8 +9,8 @@ and the resolved ``Dataset`` (paths with ``{dim}`` substituted). One *cell* is `
 with ``params = build | query combo``; ``Job.key(params)`` is the record's key block and the input
 to ``records.resume_key``.
 
-Backends that run the same code collapse to one job (``PATHS``: ``linr_v1``/``linr_v4`` on
-``none`` are cuBLAS whatever the flag says) and ``(algo, filter_kind, backend)`` triples
+Backends that run the same code collapse to one job (``PATHS``: ``linr_v1`` on ``none``
+is cuBLAS whatever the flag says) and ``(algo, filter_kind, backend)`` triples
 ``PATHS`` marks ``None`` are skipped; both are logged once. Sweep entries accept the long
 form ``{clauses: [...], disabled: true}`` (§8.2 J). No anchors, no env interpolation, no
 schema library: unknown keys and malformed values raise ``ConfigError`` naming the file.

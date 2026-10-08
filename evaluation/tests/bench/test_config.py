@@ -251,8 +251,6 @@ _OLD_FILTER = {  # config/<dataset>/d128-filter.yaml @ 06bc4c7: sweeps per filte
         "content_dir": "data/arxiv-papers/content_d128",
     },
 }
-_OLD_ALGOS = ["linr_v1_filter_mask", "linr_v2", "linr_v3", "linr_v4", "silvertorch"]
-_OLD_BACKENDS = ["triton", "torch"]
 
 
 def _new_cells(jobs) -> set[tuple]:
@@ -274,7 +272,7 @@ def test_filter_suite_matches_old_d128_filter_config(dataset):
         )
         if j.backend != "official"
     ]
-    # The grid narrowed on 2026-09-16 (user): one backend per algo, `linr_v4` dropped as ours
+    # The grid narrowed on 2026-09-16 (user): one backend per algo, LiNR V4 dropped as ours
     # rather than LiNR's, no dim ablation. This once asserted equality with the pre-v2
     # `d128-filter.yaml`; that migration check was closed by C4 and the matrix has deliberately
     # diverged since, so it now pins the CURRENT grid -- still catching accidental drift, no

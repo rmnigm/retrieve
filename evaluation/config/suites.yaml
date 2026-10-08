@@ -22,7 +22,7 @@
 # every algo is pinned to it. The one deliberate deviation is `silvertorch`, which carries two
 # implementations because *that comparison is the paper* (Triton reimplementation vs Meta's
 # official kernels, gap G2). The `torch` floor is not swept: it is already banked in D1-a's 71
-# records at d128 and is reported from there. `linr_v4` is dropped entirely -- it is ours, not
+# records at d128 and is reported from there. LiNR V4 is gone from the harness -- it was ours, not
 # LiNR's: the paper defines V1-V3 only (articles/linr.md, figures knn_v1..v3).
 filter:                        # vs exact oracle + held-out-in-filter (old d*-filter.yaml)
   # yfcc10m joined 2026-09-16 (roadmap E1): one dim (192, its native CLIP width — the
