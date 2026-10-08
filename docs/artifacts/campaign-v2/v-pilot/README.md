@@ -13,6 +13,7 @@ citable until D1-G. The gate verdict and the headline numbers are in
 | [`PREDICTIONS.md`](PREDICTIONS.md) | the pre-registered predictions, committed before the first cell (`cc7d35e`) |
 | [`driver.sh`](driver.sh) | the sequential driver: code_version check, `bench oracle`, `bench campaign --suite synth --dataset goodreads-synth --resume --interleave`, `nvidia-smi` at 1 Hz |
 | [`gate.py`](gate.py) | the pilot gate and every table below, from the records and `synth_filter.json` |
+| [`v3_seed_check.py`](v3_seed_check.py) | CPU: OPORP at `k_bits = D` is seed-invariant in its scores (output on the Hub, `v3_seed_check.txt`) |
 
 ```bash
 setsid nohup bash docs/artifacts/campaign-v2/v-pilot/driver.sh > /scratch/v-pilot/driver.log 2>&1 &
@@ -48,10 +49,16 @@ Not predicted, found:
 
 - **V2 has a floor at bs 16**: about 1.41 ms (graph) at every p ≤ 0.03, 1.5× V1, while at bs 1
   graph it is 0.56× V1. The floor does not move with the number of survivors.
-- **V3 quality is identical across seeds 0-2** in all 84 records (each computed, not copied),
-  although its `seed_scope` is `pool+build`: the job seed does not reach the OPORP projection
-  in this run. Its three seeds measure only the perf pool. SilverTorch's quality does vary across
-  seeds (k-means).
+- **V3 quality is identical across seeds 0-2** in all 84 records (each computed, not copied).
+  This is by construction. At the default `k_bits = D` every OPORP bin holds one coordinate, so the
+  projection is a signed permutation, and `popcount(q ^ x)` is invariant under it. The seed changes
+  the bits, never the Hamming score, except on an exact-0 coordinate, which packs as bit 0 under
+  either sign. The harness table has none: its only zero row is the pad row 0, which is dropped.
+  [`v3_seed_check.py`](v3_seed_check.py) (CPU) checks this on a random table and on the first 20,000
+  real E1c items. Bits differ across seeds 0-2, while the Hamming scores and LiNRV3 torch ids and
+  scores are `torch.equal`. At `k_bits = D/2` the scores differ, and with two exact zeros kept they
+  differ too. The `seed_scope: pool+build` label overstates the seed for V3; SilverTorch's quality
+  does vary with the seed (k-means).
 - The compiled V2 torch arm's recall is 0.0015 below eager at p 1 (0.9981 against 0.9996); V1
   compiled is equal to eager.
 - **Clocks.** The 1 Hz trace never left 1410 MHz while the GPU was more than 50 % busy (max 44 °C,

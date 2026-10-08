@@ -44,6 +44,11 @@ others (see [Multi-GPU execution](#multi-gpu-execution)).
   interleaved rounds (8 of 9 records `unstable`). Interleaving pairs drift
   but cannot equalise a load-dependent clock. Decide before those exhibits
   get verdicts ([validation](validation.md)).
+- **V3's bit budget** ([LN-8](paper/reproduction-deviations.md#4-linr-v1v4--deviations)).
+  LiNR's V3 benchmark used 512-bit codes on 128-d embeddings. Ours is capped at `k_bits = D`
+  (128), where Sign-OPORP is plain sign quantization. Matching 512 bits needs a library change,
+  for example a multi-permutation OPORP or `SimHashKNN` as V3's stage 1. That moves code_version
+  and V3's recall, so the V3 cells would rerun. Otherwise LN-8 stays a stated deviation.
 - **Citability of a narrowed run.** A run with a narrowed mode set is
   recorded `status: partial` and reported NOT CITABLE. The user decides
   once `bench report` runs on the campaign's output (D1-G).

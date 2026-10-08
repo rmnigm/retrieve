@@ -135,7 +135,8 @@ def build(
 ) -> nn.Module:
     """Construct and register one cell's module. ``params`` = build + query params merged
     (``n_lists``, ``n_probe``, ``n_iter``, ``m_bits``, ``k_hash``, ``candidate_pool``, ``alpha``,
-    ``compile``); ``seed`` drives the k-means and the OPORP projection. SilverTorch fuses the
+    ``compile``); ``seed`` drives the k-means and the OPORP projection (whose scores ignore it at
+    ``k_bits = D``, docs/system/kernels.md § OPORP layout). SilverTorch fuses the
     predicate (the attribute buffers live inside it, ``filter_mod`` is unused); the LiNR modules
     and ``postfilter`` take the standalone filter as ``self.filter``. ``compile`` wraps the built
     module in place (``compile_module``). Raises on cells ``PATHS`` marks ``None``."""

@@ -695,10 +695,16 @@ such seed other than its own; `run.cached_quality`). It takes that record's
 `quality` and `per_query` and records `quality_source: {seed, code_version}`;
 perf still runs at its own seed. The parity spill and the exact-algo gate are
 not redone on a copied cell. SilverTorch (k-means) and `linr_v3` (OPORP
-projection) always recompute. The records are the cache: `run` indexes the
-file's computed records when it first opens it (`quality_sources`) and adds
-each new one. Every record carries `seed_scope`, `pool` for the seed-free arms
-and `pool+build` for the others.
+projection) always recompute. The seed changes SilverTorch's quality, but not
+`linr_v3`'s at its default `k_bits = D`. There the OPORP projection is a signed
+permutation, so the seed moves the bits but not the Hamming scores
+([kernels](kernels.md#oporp-layout)): V3's quality is the same at every seed, and
+its three seeds measure perf-pool variance only. The records are the cache: `run`
+indexes the file's computed records when it first opens it (`quality_sources`) and
+adds each new one. Every record carries `seed_scope`, `pool` for the seed-free arms
+and `pool+build` for the others. For `linr_v3` at `k_bits = D`, `pool+build`
+overstates the seed's reach. It stays as recorded, because the campaign freezes
+behaviour.
 
 ### Bloom widths as build params
 
@@ -777,7 +783,7 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 | `candidate_pool` | int / null | the `candidate_pool` the module ran with when `params` sets one: the literal, or the value `candidate_pool_frac` resolved to ([pool fractions](#pool-fractions)) |
 | `index_mib` | float | Σ buffers of the algo module, filter submodule included |
 | `filter_mib` | float | Σ buffers of the filter submodule alone (`0.0` without one; `silvertorch` carries its attrs inside `index_mib`) |
-| `seed_scope` | str | `pool` on the seed-free arms (`SEED_FREE_QUALITY`: the seed moves only the perf pool), `pool+build` on SilverTorch and `linr_v3` |
+| `seed_scope` | str | `pool` on the seed-free arms (`SEED_FREE_QUALITY`: the seed moves only the perf pool), `pool+build` on SilverTorch and `linr_v3`; for `linr_v3` at `k_bits = D` the label overstates the seed's reach, because its quality is seed-free ([Quality cache](#quality-cache)) |
 | `interleave` | dict / null | `{group, arms, position}` when the cell ran in an [interleave group](#interleaved-groups); `null` otherwise |
 | `quality_source` | dict / null | `null` when this record computed its quality; `{seed, code_version}` of the record the [quality cache](#quality-cache) copied it from |
 | `per_query` | str / null | the [per-query sidecar](#per-query-sidecar) relative to the results root; `null` without quality |
