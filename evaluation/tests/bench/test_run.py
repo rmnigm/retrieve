@@ -449,3 +449,26 @@ def test_a_cell_with_no_in_filter_heldout_target_records_null(tiny_configs, tmp_
     assert held["n"] == 0 and rec["n_queries_heldout"] == 0
     assert all(v is None for m, v in held.items() if m != "n")
     assert rec["quality"]["oracle"]["recall@4"] == pytest.approx(1.0)  # the oracle side scores
+
+
+def _arms(cfgs, **narrow):
+    ds, suites = cfgs
+    return load_matrix(ds, suites, "arms", **narrow)
+
+
+def test_gridded_bloom_width_is_the_cells_own(tiny_configs, tmp_path):
+    """G-bloomwidth (CPU): ``m_bits`` in ``params`` sets that job's bloom — the module's index,
+    the standalone filter's pass counts and ``bloom_fp_rate``, the record's ``bloom`` — while
+    the ungridded cell keeps the suite default and a key without ``m_bits``."""
+    jobs = _arms(tiny_configs, filter_kinds=["bloom"])
+    out = tmp_path / "results"
+    assert dict(run.run(jobs, out_dir=out, skip_perf=True, **KW)) == {"partial": 3}
+    recs = _records(out / "arms" / "tiny-d64.jsonl")
+    by = {r["params"].get("m_bits"): r for r in recs}
+    assert by[64]["bloom"] == {"m_bits": 64, "k_hash": 2}
+    assert by[256]["bloom"] == {"m_bits": 256, "k_hash": 2}
+    assert by[None]["bloom"] == {"m_bits": 64, "k_hash": 2}  # the suite default
+    assert by[None]["params"] == {"n_lists": 4, "n_probe": 2}
+    assert by[256]["index_mib"] > by[64]["index_mib"]  # the bloom words live in the index
+    assert all(r["bloom_fp_rate"] is not None for r in recs)
+    assert by[256]["bloom_fp_rate"] <= by[64]["bloom_fp_rate"]

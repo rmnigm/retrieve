@@ -433,7 +433,9 @@ the index. Its `query:` params (`n_probe`, `candidate_pool`,
 `(dataset, sweep, seed)`, not ten. Putting a query param under `build:`
 (or the reverse) is a `ConfigError`. So is a param on an arm where it has
 no meaning: `bloom_path` off silvertorch / bloom / official, `m_bits` /
-`k_hash` off silvertorch / bloom, `compile` off a torch arm, and `candidate_pool_frac` off `linr_v3`. Two arms that expand to the same
+`k_hash` off silvertorch / bloom ([bloom widths](#bloom-widths-as-build-params)),
+`compile` off a torch arm, and
+`candidate_pool_frac` off `linr_v3`. Two arms that expand to the same
 cell are also an error. When two backends of one algo run the same code
 path (`PATHS`) over the same cells, they collapse to the first, logged
 once. A collapse that would cover only part of a job's cells is a
@@ -609,6 +611,17 @@ cannot leave a resumable record without its vector; `read_keys` ignores
 (and logs) one torn trailing line — the cell in flight when the process
 died — and raises on a malformed line anywhere else.
 
+### Bloom widths as build params
+
+`m_bits` / `k_hash` in an arm's `build:` grid (silvertorch / bloom only,
+else a `ConfigError`) become that job's `bloom`. It feeds the module's
+index, the standalone filter of step 3 and so the bloom pass counts and
+`bloom_fp_rate`, the record's `bloom`, and `index_mib` / `filter_mib`. The
+step-3 asset key carries the bloom, so each width builds its own filter.
+The exact oracle does not depend on the width and is shared. A cell that
+does not grid them keeps the suite default outside `params`, so its key is
+byte-for-byte the pre-grid one. The `bloomwidth` suites grid them.
+
 ## Output: one JSONL record per cell
 
 `results/<suite>/<dataset>-d<dim>.jsonl`, appended by the process the
@@ -632,7 +645,7 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 | `n_targets_in_filter` | int | held-out targets those queries are scored against: every valid target on `none` cells, only the ones the exact mask admits on filter cells |
 | `pass_rate` | float | exact mask pass rate over kept queries (`1.0` on `none`) |
 | `bloom_fp_rate` | float / null | mean per-query `(bloom − exact) / (N − exact)`; bloom cells only |
-| `bloom` | dict / null | `{m_bits, k_hash}` on bloom cells |
+| `bloom` | dict / null | `{m_bits, k_hash}` on bloom cells: the suite default, or the cell's own when `params` grids them ([bloom widths](#bloom-widths-as-build-params)) |
 | `k_max`, `ks`, `batch_sizes` | | the suite's, `k_max = max(ks)` |
 | `build_s` | float | construction + `register_index`, sync on each side (same value on every cell of one build) |
 | `index_mib` | float | Σ buffers of the algo module, filter submodule included |

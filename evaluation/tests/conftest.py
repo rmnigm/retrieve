@@ -3,8 +3,9 @@ dataset on disk (``write_tiny_dataset``, the one writer ``test_inputs.py`` and
 ``test_layout.py`` share) plus the matching dataset / suites YAMLs, so ``run.run`` can be
 driven end to end through ``config.load_matrix`` without a GPU or real data. The ``e2e``
 suite has two algos (the in-process loop); ``e2e1`` has one, for the campaign test's single
-child; ``postfilter`` runs the baseline next to the exact V1 it is measured against. Tests
-marked ``gpu`` skip without CUDA."""
+child; ``postfilter`` runs the baseline next to the exact V1 it is measured against; ``arms``
+holds the campaign-v2 params (gridded bloom widths, ``compile``, ``candidate_pool_frac``).
+Tests marked ``gpu`` skip without CUDA."""
 
 from __future__ import annotations
 
@@ -90,6 +91,16 @@ def tiny_configs(tmp_path: Path) -> tuple[Path, Path]:
         "postfilter:\n  datasets: [tiny]\n  filter_kinds: [clause, bloom]\n  ks: [2, 4]\n"
         "  batch_sizes: [1, 2]\n  arms:\n    - {algo: linr_v1_filter_mask, backends: [torch]}\n"
         "    - {algo: postfilter, backends: [torch], query: {alpha: [1, 2]}}\n"
+        "arms:\n  datasets: [tiny]\n  filter_kinds: [clause, bloom]\n  ks: [2, 4]\n"
+        "  batch_sizes: [1]\n  arms:\n"
+        "    - {algo: silvertorch, backends: [torch], filter_kinds: [bloom],\n"
+        "       build: {n_lists: [4], m_bits: [64, 256]}, query: {n_probe: [2]}}\n"
+        "    - {algo: silvertorch, backends: [torch], filter_kinds: [bloom],\n"
+        "       build: {n_lists: [4]}, query: {n_probe: [2]}}\n"
+        "    - {algo: silvertorch, backends: [torch], filter_kinds: [clause],\n"
+        "       build: {n_lists: [4], compile: [max-autotune]}, query: {n_probe: [2]}}\n"
+        "    - {algo: linr_v3, backends: [torch], filter_kinds: [clause],\n"
+        "       query: {candidate_pool_frac: [0.5, 1.0]}}\n"
         "bloom: {m_bits: 64, k_hash: 2}\n"
     )
     return ds, suites
