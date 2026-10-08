@@ -1165,6 +1165,21 @@ is a body-level constexpr (the bloom-on and bloom-off paths JIT-specialise
 on it). The score buffer is `torch.empty([B, width])`: every slot is
 written (a dot, or `-inf`), so there is no pre-fill.
 
+**Filtered items cost no HBM bytes; whole tiles are not skipped.** Both
+filtered scorers (this one with `HAS_QB`, and the exact one below) evaluate
+the filter first and mask the int8 code load with `keep`, so a failing
+item's code row is never fetched: at bs 16, a pass rate of 0.001 scores
+18–39 % faster than a pass rate of 1.0 on the same layout. What a failing
+lane still costs is its share of the tile's `tl.dot` and epilogue. Skipping a
+tile when no lane passes (`tl.max(keep) == 0` → store `-inf`, no load, no dot)
+was measured and **not shipped**. It is bit-exact and about 30 % faster at
+p = 0.001, but at p = 0.01 about 92 % of 256-lane tiles still hold a passing
+item (`1 − 0.99²⁵⁶`), so the gain disappears (arXiv exact 1.000 [0.992,
+1.008]). The extra reduction and branch cost +2 to 6 % at p ≥ 0.1. Meta's scorer gains about 3× at p ≤ 0.01, consistent
+with a finer skip unit; this is not validated (validation
+row *Probe-scorer tile skipping*;
+[artifact](../artifacts/campaign-v2/tile-skip/README.md)).
+
 ### `codesigned_probe_score_exact` — IVF + INT8 + exact AND-of-OR
 
 [`ops/triton/codesigned_probe_score_exact.py`](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score_exact.py).

@@ -1,0 +1,157 @@
+diff --git a/retrieve/src/retrieve/ops/triton/codesigned_probe_score.py b/retrieve/src/retrieve/ops/triton/codesigned_probe_score.py
+index c199073..8280272 100644
+--- a/retrieve/src/retrieve/ops/triton/codesigned_probe_score.py
++++ b/retrieve/src/retrieve/ops/triton/codesigned_probe_score.py
+@@ -85,36 +85,45 @@ def _codesigned_probe_score_kernel(
+                 w = tl.load(bloom_t_ptr + m * stride_tm + word, mask=keep & (m >= 0), other=-1)
+                 keep = keep & (((w >> bit) & 1) != 0)
+ 
+-        # Lanes [D, D_PAD) load 0 on both sides: exact zeros in the int32 dot (kernels.md §
+-        # Padding). At D == D_PAD the loads stay unmasked: even an all-true mask perturbs this
+-        # kernel's register allocation.
+-        d_off = tl.arange(0, D_PAD)
+-        d_in = d_off < D
+-        q_codes = tl.load(
+-            q_codes_ptr + bid * stride_qcb + d_off,
+-            mask=None if D == D_PAD else d_in,
+-            other=None if D == D_PAD else 0,
+-        )
+-        q_scale = tl.load(q_scales_ptr + bid)
+-        codes = tl.load(
+-            item_codes_ptr + pos[:, None] * stride_cn + d_off[None, :],
+-            mask=keep[:, None] if D == D_PAD else keep[:, None] & d_in[None, :],
+-            other=0,
+-        )
+-        # int8 × int8 → int32 (paper §4.2): q[1,D] @ codes^T[D,BLOCK_P]. Triton pads M=1 to the MMA
+-        # tile: this lowers to IMMA tensor-core instructions, not dp4a (kernels.md § Numerics).
+-        dots_2d = tl.dot(q_codes[None, :], tl.trans(codes), out_dtype=tl.int32)
+-        # Squeeze the length-1 M axis: tl.sum over length-1 (no reshape to drop a dim).
+-        dots_i32 = tl.sum(dots_2d, axis=0)
+-        # fp32 pinned: Inductor passes global_scale as a Python float (kernels.md § Numerics).
+-        dots = (
+-            dots_i32.to(tl.float32)
+-            * tl.cast(q_scale, tl.float32)
+-            * tl.cast(global_scale, tl.float32)
+-        )
+-        dots = tl.where(keep, dots, float("-inf"))
+-        # Lanes past the cluster's end hold the next cluster's slots: leave them to its tile.
+-        tl.store(out_row + slot, dots, mask=valid)
++        any_pass = 1  # unfiltered: a Python int, so the branch below folds away
++        if HAS_QB:
++            any_pass = tl.max(keep.to(tl.int32), axis=0)
++        if any_pass == 0:
++            # No lane passes the filter: skip the code load and the dot (kernels.md §
++            # codesigned_probe_score, "Tile skipping").
++            tl.store(out_row + slot, tl.full([BLOCK_P], float("-inf"), tl.float32), mask=valid)
++        else:
++            # Lanes [D, D_PAD) load 0 on both sides: exact zeros in the int32 dot (kernels.md §
++            # Padding). At D == D_PAD the loads stay unmasked: even an all-true mask perturbs
++            # this kernel's register allocation.
++            d_off = tl.arange(0, D_PAD)
++            d_in = d_off < D
++            q_codes = tl.load(
++                q_codes_ptr + bid * stride_qcb + d_off,
++                mask=None if D == D_PAD else d_in,
++                other=None if D == D_PAD else 0,
++            )
++            q_scale = tl.load(q_scales_ptr + bid)
++            codes = tl.load(
++                item_codes_ptr + pos[:, None] * stride_cn + d_off[None, :],
++                mask=keep[:, None] if D == D_PAD else keep[:, None] & d_in[None, :],
++                other=0,
++            )
++            # int8 × int8 → int32 (paper §4.2): q[1,D] @ codes^T[D,BLOCK_P]. Triton pads M=1 to
++            # the MMA tile: this lowers to IMMA tensor-core instructions, not dp4a (kernels.md §
++            # Numerics).
++            dots_2d = tl.dot(q_codes[None, :], tl.trans(codes), out_dtype=tl.int32)
++            # Squeeze the length-1 M axis: tl.sum over length-1 (no reshape to drop a dim).
++            dots_i32 = tl.sum(dots_2d, axis=0)
++            # fp32 pinned: Inductor passes global_scale as a Python float (kernels.md § Numerics).
++            dots = (
++                dots_i32.to(tl.float32)
++                * tl.cast(q_scale, tl.float32)
++                * tl.cast(global_scale, tl.float32)
++            )
++            dots = tl.where(keep, dots, float("-inf"))
++            # Lanes past the cluster's end hold the next cluster's slots: leave them to its tile.
++            tl.store(out_row + slot, dots, mask=valid)
+ 
+ 
+ def _cps_prep(
+diff --git a/retrieve/src/retrieve/ops/triton/codesigned_probe_score_exact.py b/retrieve/src/retrieve/ops/triton/codesigned_probe_score_exact.py
+index 3b77d2c..ca92ec2 100644
+--- a/retrieve/src/retrieve/ops/triton/codesigned_probe_score_exact.py
++++ b/retrieve/src/retrieve/ops/triton/codesigned_probe_score_exact.py
+@@ -94,36 +94,42 @@ def _codesigned_probe_score_exact_kernel(
+             A_MAX=A_MAX,
+         )
+ 
+-        # Lanes [D, D_PAD) load 0 on both sides: exact zeros in the int32 dot (kernels.md §
+-        # Padding). At D == D_PAD the loads stay unmasked: even an all-true mask perturbs this
+-        # kernel's register allocation.
+-        d_off = tl.arange(0, D_PAD)
+-        d_in = d_off < D
+-        q_codes = tl.load(
+-            q_codes_ptr + bid * stride_qcb + d_off,
+-            mask=None if D == D_PAD else d_in,
+-            other=None if D == D_PAD else 0,
+-        )
+-        q_scale = tl.load(q_scales_ptr + bid)
+-        codes = tl.load(
+-            item_codes_ptr + pos[:, None] * stride_cn + d_off[None, :],
+-            mask=keep[:, None] if D == D_PAD else keep[:, None] & d_in[None, :],
+-            other=0,
+-        )
+-        # int8 × int8 → int32 (paper §4.2): q[1,D] @ codes^T[D,BLOCK_P]. Triton pads M=1 to the MMA
+-        # tile: this lowers to IMMA tensor-core instructions, not dp4a (kernels.md § Numerics).
+-        dots_2d = tl.dot(q_codes[None, :], tl.trans(codes), out_dtype=tl.int32)
+-        # Squeeze the length-1 M axis: tl.sum over length-1 (no reshape to drop a dim).
+-        dots_i32 = tl.sum(dots_2d, axis=0)
+-        # fp32 pinned: Inductor passes global_scale as a Python float (kernels.md § Numerics).
+-        dots = (
+-            dots_i32.to(tl.float32)
+-            * tl.cast(q_scale, tl.float32)
+-            * tl.cast(global_scale, tl.float32)
+-        )
+-        dots = tl.where(keep, dots, float("-inf"))
+-        # Lanes past the cluster's end hold the next cluster's slots: leave them to its tile.
+-        tl.store(out_row + slot, dots, mask=valid)
++        if tl.max(keep.to(tl.int32), axis=0) == 0:
++            # No lane passes the filter: skip the code load and the dot (kernels.md §
++            # codesigned_probe_score, "Tile skipping").
++            tl.store(out_row + slot, tl.full([BLOCK_P], float("-inf"), tl.float32), mask=valid)
++        else:
++            # Lanes [D, D_PAD) load 0 on both sides: exact zeros in the int32 dot (kernels.md §
++            # Padding). At D == D_PAD the loads stay unmasked: even an all-true mask perturbs
++            # this kernel's register allocation.
++            d_off = tl.arange(0, D_PAD)
++            d_in = d_off < D
++            q_codes = tl.load(
++                q_codes_ptr + bid * stride_qcb + d_off,
++                mask=None if D == D_PAD else d_in,
++                other=None if D == D_PAD else 0,
++            )
++            q_scale = tl.load(q_scales_ptr + bid)
++            codes = tl.load(
++                item_codes_ptr + pos[:, None] * stride_cn + d_off[None, :],
++                mask=keep[:, None] if D == D_PAD else keep[:, None] & d_in[None, :],
++                other=0,
++            )
++            # int8 × int8 → int32 (paper §4.2): q[1,D] @ codes^T[D,BLOCK_P]. Triton pads M=1 to
++            # the MMA tile: this lowers to IMMA tensor-core instructions, not dp4a (kernels.md §
++            # Numerics).
++            dots_2d = tl.dot(q_codes[None, :], tl.trans(codes), out_dtype=tl.int32)
++            # Squeeze the length-1 M axis: tl.sum over length-1 (no reshape to drop a dim).
++            dots_i32 = tl.sum(dots_2d, axis=0)
++            # fp32 pinned: Inductor passes global_scale as a Python float (kernels.md § Numerics).
++            dots = (
++                dots_i32.to(tl.float32)
++                * tl.cast(q_scale, tl.float32)
++                * tl.cast(global_scale, tl.float32)
++            )
++            dots = tl.where(keep, dots, float("-inf"))
++            # Lanes past the cluster's end hold the next cluster's slots: leave them to its tile.
++            tl.store(out_row + slot, dots, mask=valid)
+ 
+ 
+ def _cpse_prep(
