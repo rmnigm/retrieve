@@ -471,15 +471,28 @@ pins every scoring kernel against an fp64 oracle, because the other
 parity files compare Triton against `ops.reference` at the same input
 dtype and cannot see this class of defect.
 
-**Launch grid** `(cdiv(P, BLOCK_N), B)`, tile axis on `grid_x`, batch on
-`grid_y`. Each program owns one
-`(query, p-tile)` cell and gathers `BLOCK_N` item rows by indirect load:
+**Launch grid** `(G, B)`, `G = min(cdiv(P, BLOCK_N), cdiv(programs, B))`,
+tile programs on `grid_x`, batch on `grid_y` (≤ 65535). A program loads its
+query once and strides over the row's tiles `g, g + G, …`. A tile at or
+past `counts[b]` stores `BLOCK_N` lanes of `-inf` with no load; a tile
+below it gathers `BLOCK_N` item rows by indirect load:
 
 ```
 item_ids[BLOCK_N] = pos_indices[b, p_off]
 emb_rows[BLOCK_N, D] = item_embs[item_ids]
 dots[BLOCK_N] = sum(emb_rows * q[None, :], axis=1)
 ```
+
+The grid is sized by the config, not by `P`. The compact family returns
+full-width `[B, N]` candidates, so a grid of `cdiv(P, BLOCK_N)` one-tile
+programs launched ~400k 8-warp programs at goodreads N, bs 16, nearly all
+only storing `-inf`: 913 µs, bound by program count, not bytes
+([v2-prof](../artifacts/campaign-v2/v2-prof/README.md)). The stride
+does not change which program reduces a lane or how: each lane is still
+one `tl.sum` over D in the same layout, so scores are bit-identical to
+the one-tile grid ([validation](../validation.md#v2-fix-a)).
+`programs` (default 1728 = 108 SMs × 8 resident 8-warp programs × 2) is a
+field of the tile config.
 
 **Per-cell scoring is elementwise**, not `tl.dot`. Different `(b, p)` cells
 gather different rows, so a true GEMM would re-load each row across the
@@ -504,7 +517,7 @@ kernel (real dot or `-inf`), so the post-topk `where(isfinite(scores),
 pre-fill kernel launch.
 
 **Tile config.** `FusedMaskedKnnTopkConfig(block_n, num_warps,
-num_stages)` — shipped as `DEFAULT_CONFIG` on the kernel module; pass
+num_stages, programs)` — shipped as `DEFAULT_CONFIG` on the kernel module; pass
 `config=` to override. Re-tune on a new arch via `uv run tune-kernels
 fused-masked-knn-topk` and paste the printed
 `DEFAULT_CONFIG = ...` line.
@@ -562,24 +575,35 @@ reference [`popcount_int64`](../../retrieve/src/retrieve/functional.py) is
 still SWAR, because this torch has no `bitwise_count`. Popcount is exact, so torch and Triton
 produce **bit-exact** identical scores.
 
-**Launch grid** `(cdiv(n, BLOCK_N), B)`: tile axis on `grid_x` (up to
-2³¹), batch on `grid_y` (up to 65535), because `cdiv(N, BLOCK_N)` can
-overflow `grid_y` at large N. The body is modeled on `bloom_match`
-(int64-word reduction over `W`), which launches batch-first.
+**Launch grid** `(G, B)`, tile programs on `grid_x`, batch on `grid_y`
+(up to 65535). Full scan: `G = cdiv(N, BLOCK_N)`, one tile per program,
+every lane real. Indirect: `G = min(cdiv(P, BLOCK_N), cdiv(programs,
+B))` and a program strides over tiles `g, g + G, …`; a tile at or past
+`counts[b]` stores `-inf` with no load. This is the same fix as
+[`fused_masked_knn_topk`](#fused_masked_knn_topk--prefilterknn-sparse-path):
+V3's filtered stage 1 gets full-width `[B, N]` candidates from the compact
+family. Scores are integers computed by the same lane body, so the stride
+is exact. The body is modeled on `bloom_match` (int64-word reduction
+over `W`), which launches batch-first.
 
 **HAS_INDICES path**: replaces the contiguous `n_off` load with an
 indirect `pos_indices[b, n_off]` lookup; otherwise identical. Used for
 candidate-set rerank and for the masked V3 path (after `compact_mask`).
 
 **Tile config.** `Oporp1BitMatchTopkConfig(block_n, num_warps,
-num_stages)` — shipped as `DEFAULT_CONFIG` on the kernel module; pass
+num_stages, programs)` — shipped as `DEFAULT_CONFIG` on the kernel module; pass
 `config=` to override. Re-tune on a new arch via `uv run tune-kernels
 oporp-1bit-match-topk`.
 
-**Bucketing.** For the `HAS_INDICES=True` path, the score-buffer
-width is `n_kernel = _bucket_n(positive_indices.shape[1])` (buckets
+**Bucketing.** The eager `_oporp_1bit_match_topk_impl` (tune sweeps,
+parity tests) runs the `HAS_INDICES=True` path at score-buffer width
+`n_kernel = _bucket_n(positive_indices.shape[1])` (buckets
 `{4096, 65536, 1048576, 16777216}`), passed as `tl.constexpr N`: the
-same JIT-cache invariant as `fused_masked_knn_topk`. The candidate path
+same JIT-cache invariant as `fused_masked_knn_topk`. The **public
+indirect op does not bucket** (`bucket=False`, `n_kernel = P`), like
+`fused_masked_knn_topk`'s: its candidate width is static per deployment,
+and the bucket sized the buffer, the grid and the top-k by the ladder's
+next rung. At arxiv N = 2,988,996 that rung is 16,777,216, 5.6 × N. The candidate path
 returns **`min(k, P)` columns** (`torch.sym_min`, symbolic under
 `dynamic=True`), with no pad. That is the convention of the torch twin and of
 the other candidate-path layers, and `P = 0` gives an empty `[B, 0]`.

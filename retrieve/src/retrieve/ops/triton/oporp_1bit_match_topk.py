@@ -1,7 +1,8 @@
 """Fused Sign-OPORP 1-bit Hamming similarity + top-K (full-scan and indirect ops).
 
-The indirect path buckets its candidate width (docs/system/kernels.md § Bucketing) and returns
-``min(k, P)`` columns, the no-pad convention of the torch twin.
+The eager ``_impl`` buckets the indirect path's candidate width but the public op does not
+(docs/system/kernels.md § ``oporp_1bit_match_topk``, "Bucketing"); both return ``min(k, P)``
+columns, the no-pad convention of the torch twin.
 """
 
 from __future__ import annotations
@@ -35,6 +36,8 @@ class Oporp1BitMatchTopkConfig:
     block_n: int
     num_warps: int
     num_stages: int = 3
+    # Indirect path only: target grid size over all rows, G = cdiv(programs, B) per row.
+    programs: int = 1728
 
 
 # Default tile config (tuned on A100/sm_80); pass config= to the wrapper to override.
@@ -64,57 +67,59 @@ def _oporp_1bit_match_topk_kernel(
     BLOCK_N: tl.constexpr,
     WIDE: tl.constexpr,
 ):
-    # Tile on grid_x (≤ 2³¹), batch on grid_y (≤ 65535): cdiv(N, BLOCK_N) can overflow grid_y at
-    # large N.
-    tile_id = tl.program_id(0)
+    # Grid (G, B): program g strides over tiles g, g + G, ... of row bid (full scan: G = all tiles,
+    # one tile per program). Batch on grid_y (≤ 65535). kernels.md § oporp_1bit_match_topk.
     bid = tl.program_id(1)
-
-    row0 = tile_id * BLOCK_N
-    n_off = row0 + tl.arange(0, BLOCK_N)
     # Words [W, W_PAD) load 0 on both sides: 0 ^ 0 has no set bits (kernels.md § Padding).
     w_off = tl.arange(0, W_PAD)
     w_in = w_off < W
-    n_valid = n_off < N
+    out_row = row_base(out_scores_ptr, bid, stride_sb, WIDE)
 
     qb = tl.load(qb_ptr + bid * stride_qb_b + w_off * stride_qb_w, mask=w_in, other=0)
-
     if HAS_INDICES:
         count = tl.load(counts_ptr + bid)
-        in_count = n_off < count
-        # Gate pos_indices by in_count (not n_valid): with bucketed N, pos_indices has only n_loop
-        # <= n_bucket columns, and in_count (count[bid] <= n_loop) never reads OOB.
-        item_ids = tl.load(
-            row_base(pos_indices_ptr, bid, stride_pb, WIDE) + n_off * stride_pp,
-            mask=in_count,
-            other=0,
-        ).to(tl.int64)
-        item_rows = tl.load(
-            item_bits_ptr + item_ids[:, None] * stride_ib_n + w_off[None, :] * stride_ib_w,
-            mask=in_count[:, None] & w_in[None, :],
-            other=0,
-        )
-        valid_score = in_count
-    else:
-        bits_base, ids = tile_rows(item_bits_ptr, row0, tl.arange(0, BLOCK_N), stride_ib_n, WIDE)
-        item_rows = tl.load(
-            bits_base + ids[:, None] * stride_ib_n + w_off[None, :] * stride_ib_w,
-            mask=n_valid[:, None] & w_in[None, :],
-            other=0,
-        )
-        valid_score = n_valid
 
-    xor_words = qb[None, :] ^ item_rows
-    pop_words = popcount_int64(xor_words)
-    hamming = tl.sum(pop_words, axis=1)
-
-    scores = (D_TOTAL - 2 * hamming).to(tl.float32)
-    scores = tl.where(valid_score, scores, float("-inf"))
-
-    tl.store(
-        row_base(out_scores_ptr, bid, stride_sb, WIDE) + n_off * stride_sn,
-        scores,
-        mask=n_valid,
-    )
+    for tile_id in range(tl.program_id(0), tl.cdiv(N, BLOCK_N), tl.num_programs(0)):
+        row0 = tile_id * BLOCK_N
+        n_off = row0 + tl.arange(0, BLOCK_N)
+        n_valid = n_off < N
+        if HAS_INDICES:
+            if row0 < count:
+                in_count = n_off < count
+                # Gate pos_indices by in_count (not n_valid): with bucketed N, pos_indices has
+                # only n_loop <= n_bucket columns, and in_count (count[bid] <= n_loop) never
+                # reads OOB.
+                item_ids = tl.load(
+                    row_base(pos_indices_ptr, bid, stride_pb, WIDE) + n_off * stride_pp,
+                    mask=in_count,
+                    other=0,
+                ).to(tl.int64)
+                item_rows = tl.load(
+                    item_bits_ptr + item_ids[:, None] * stride_ib_n + w_off[None, :] * stride_ib_w,
+                    mask=in_count[:, None] & w_in[None, :],
+                    other=0,
+                )
+                hamming = tl.sum(popcount_int64(qb[None, :] ^ item_rows), axis=1)
+                scores = tl.where(in_count, (D_TOTAL - 2 * hamming).to(tl.float32), float("-inf"))
+                tl.store(out_row + n_off * stride_sn, scores, mask=n_valid)
+            else:
+                tl.store(
+                    out_row + n_off * stride_sn,
+                    tl.full((BLOCK_N,), float("-inf"), tl.float32),
+                    mask=n_valid,
+                )
+        else:
+            bits_base, ids = tile_rows(
+                item_bits_ptr, row0, tl.arange(0, BLOCK_N), stride_ib_n, WIDE
+            )
+            item_rows = tl.load(
+                bits_base + ids[:, None] * stride_ib_n + w_off[None, :] * stride_ib_w,
+                mask=n_valid[:, None] & w_in[None, :],
+                other=0,
+            )
+            hamming = tl.sum(popcount_int64(qb[None, :] ^ item_rows), axis=1)
+            scores = tl.where(n_valid, (D_TOTAL - 2 * hamming).to(tl.float32), float("-inf"))
+            tl.store(out_row + n_off * stride_sn, scores, mask=n_valid)
 
 
 @dataclass(frozen=True)
@@ -133,10 +138,13 @@ def _oporp_prep(
     positive_indices: Tensor | None,
     counts: Tensor | None,
     cfg: Oporp1BitMatchTopkConfig,
+    *,
+    bucket: bool,
 ) -> _OporpLaunch:
     """Validation + contiguity + buffers (incl. the HAS_INDICES dummy-tensor branch) + launch-arg
     dict + grid dims. The one place inputs are checked — shared by ``_impl`` and both
-    ops."""
+    ops. ``bucket=True`` (``_impl``) runs the indirect path at ``_bucket_n(P)``; the public op runs
+    at ``P``."""
     if query_bits.dim() != 2 or item_bits.dim() != 2:
         raise ValueError("query_bits must be [B, W] and item_bits [N, W]")
     if query_bits.dtype != torch.int64 or item_bits.dtype != torch.int64:
@@ -162,7 +170,7 @@ def _oporp_prep(
         counts = counts.contiguous()
         n_loop = positive_indices.shape[1]
         # Lanes in [n_loop, n_kernel) score -inf (via in_count); topk takes min(k, n_loop).
-        n_kernel = _bucket_n(n_loop)
+        n_kernel = _bucket_n(n_loop) if bucket else n_loop
         pos_arg = positive_indices
         counts_arg = counts
     else:
@@ -201,7 +209,8 @@ def _oporp_prep(
         "num_warps": cfg.num_warps,
         "num_stages": cfg.num_stages,
     }
-    grid = (triton.cdiv(n_kernel, cfg.block_n), b)
+    tiles = triton.cdiv(n_kernel, cfg.block_n)
+    grid = (min(tiles, triton.cdiv(cfg.programs, b)) if has_indices else tiles, b)
     return _OporpLaunch(grid, kwargs, all_scores, positive_indices, has_indices, n_loop)
 
 
@@ -244,7 +253,7 @@ def _oporp_1bit_match_topk_impl(
     point for tune scripts / parity tests; the compiled path goes through the ``@triton_op``
     wrappers."""
     cfg = config if config is not None else DEFAULT_CONFIG
-    launch = _oporp_prep(query_bits, item_bits, positive_indices, counts, cfg)
+    launch = _oporp_prep(query_bits, item_bits, positive_indices, counts, cfg, bucket=True)
     _oporp_1bit_match_topk_kernel[launch.grid](**launch.kwargs)
     return _oporp_finish(launch, k)
 
@@ -259,7 +268,7 @@ def oporp_1bit_match_topk_full(
     ``_oporp_1bit_match_topk_impl`` — only the launch line lives here (``wrap_triton`` must
     appear textually in the decorated source for torch.export). Layer asserts ``k <=
     n_items_total`` so topk(k) needs no pad tail."""
-    launch = _oporp_prep(query_bits, item_bits, None, None, DEFAULT_CONFIG)
+    launch = _oporp_prep(query_bits, item_bits, None, None, DEFAULT_CONFIG, bucket=False)
     wrap_triton(_oporp_1bit_match_topk_kernel)[launch.grid](**launch.kwargs)
     return _oporp_finish(launch, k)
 
@@ -274,8 +283,10 @@ def oporp_1bit_match_topk_indirect(
 ) -> tuple[Tensor, Tensor]:
     """Indirect-load Sign-OPORP 1-bit Hamming top-K — scores only ``positive_indices[b,
     :counts[b]]`` per row; shares ``_oporp_prep``/``_oporp_finish`` with
-    ``_oporp_1bit_match_topk_impl`` (see the full wrapper). Buffer width is ``_bucket_n(P)``;
-    lanes in ``[P, n_kernel)`` carry -inf. Returns ``min(k, P)`` columns."""
-    launch = _oporp_prep(query_bits, item_bits, positive_indices, counts, DEFAULT_CONFIG)
+    ``_oporp_1bit_match_topk_impl`` (see the full wrapper). Buffer width is ``P``, unbucketed
+    (candidate widths are static per deployment). Returns ``min(k, P)`` columns."""
+    launch = _oporp_prep(
+        query_bits, item_bits, positive_indices, counts, DEFAULT_CONFIG, bucket=False
+    )
     wrap_triton(_oporp_1bit_match_topk_kernel)[launch.grid](**launch.kwargs)
     return _oporp_finish(launch, k)
