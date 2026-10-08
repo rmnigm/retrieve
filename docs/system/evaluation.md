@@ -370,7 +370,7 @@ unfiltered `quality` suite ([decisions](../decisions.md#harness)); synth's
 |---|---|---|---|
 | `filter` | goodreads, arxiv, yfcc10m, pubmed, three kept sweeps each (yfcc10m: `tags_and`) | V1, V2, V3 (pool 5000) triton; `silvertorch` triton clause + bloom and official bloom at `n_probe` {24, n95}; `silvertorch` torch (#12) and torch compiled (#13) at 24, goodreads + arxiv only; `postfilter` alpha {1, 8} | T2, C3, C6 |
 | `deep` | goodreads, arxiv, yfcc10m, kept sweeps | `silvertorch` triton clause + bloom, official bloom: `n_lists` per dataset (goodreads {1024, 4096}, arxiv {1664, 8192}, yfcc10m {4096, 16384}) × `n_probe` {8, 16, 32, 64, 128}; V3 `candidate_pool_frac` {0.005, 0.01, 0.02, 0.05, 0.1} | F3, C6 |
-| `synth` | goodreads-, arxiv-, yfcc10m-synth ([datasets](datasets.md#synthetic-selectivity-attrs)) | V1, V2 triton; V3 `candidate_pool_frac` {0.01, 0.05}; `silvertorch` triton clause {24, n95, 4·n95}, triton and official bloom at n95; `postfilter` {1, 8}; V1 / V2 torch, eager and compiled, on `p001, p01, p1`, goodreads + arxiv only. k 1000 is dropped where N·p < 4000 (goodreads `p0001`, `p0003`; arxiv `p0001`) | F1, F2, C1, C2, C6 |
+| `synth` | goodreads-, arxiv-, yfcc10m-synth ([datasets](datasets.md#synthetic-selectivity-attrs)) | V1, V2 triton; V3 `candidate_pool_frac` {0.01, 0.05}; `silvertorch` triton clause `n_probe` {24, 64, 128, 256, 512, 1024} (yfcc10m-synth {24, 256, 1024}; synth `n_lists` is 1024, so none is capped), triton and official bloom {24, 256}; `postfilter` {1, 8}; V1 / V2 torch, eager and compiled, on `p001, p01, p1`, goodreads + arxiv only. k 1000 is dropped where N·p < 4000 (goodreads `p0001`, `p0003`; arxiv `p0001`) | F1, F2, C1, C2, C6 |
 | `n95` | pubmed `all5` (its median kept sweep) | `silvertorch` triton clause, `n_probe` {8, 16, 32, 64, 128}, bs 16; quality only (`perf: false`) | pubmed's n95 |
 | `codesign` | arxiv (kept sweeps), goodreads (`c0_genre, c2_format, c3_year`) | official bloom, `bloom_path` {partial, full} × `n_probe` {8, 32, 128}, `n_lists` arxiv 1664 / goodreads 1024, k 100 | F4b, C5 |
 | `bloomwidth` | goodreads `c0_genre`, arxiv kept, pubmed `c0_mesh` | `silvertorch` triton bloom `m_bits` {64 … 2048} × `k_hash` {3, 5}; official bloom `k_hash` {3, 5} (its width is `OfficialConfig.b_multiplier`, not `m_bits`); bs 16; quality only (`perf: false`) | F4a, C4 |
@@ -378,12 +378,12 @@ unfiltered `quality` suite ([decisions](../decisions.md#harness)); synth's
 | `h2h` | goodreads `c0_genre`, arxiv `c0_maincat`, `none` + `bloom`, d128 | `silvertorch` triton and official with `score_path` {fp16, int32}, `n_probe` 24, bs {1, 16}, k {100, 1000}, seeds {0 … 4} (the repeats); one interleave group of the three arms; run with `--interleave --profile` | T3, C7 (H2H-final) |
 
 **n95** is the smallest `n_probe` that reaches `recall_oracle@100 ≥ 0.95`
-on a dataset's median sweep. It is read off `deep` / `synth` / `n95` after
-the code freeze. Until then the n95 entries are absent, so every suite
-still loads. Filling one is a value edit in the arm's `datasets:` slot
-(e.g. `goodreads: {query: {n_probe: [24, 37]}}`). The synth bloom arms
-are slots with no datasets (`datasets: {}`), so they run nowhere until
-then.
+on a dataset's median sweep. It is read off `deep` / `n95` after the
+code freeze, and only the `filter` suite's SilverTorch arms carry it: until
+measured their n95 entries are absent, so every suite still loads. Filling
+one is a value edit in the arm's `datasets:` slot (e.g. `goodreads:
+{query: {n_probe: [24, 37]}}`). `synth` sweeps `n_probe` explicitly
+instead (user, 2026-10-08), so it has no n95 dependency.
 
 `codesign` is the S9 ablation of the official backend's bloom path:
 `partial` (fused partial masks over the probed clusters, the library
@@ -1121,7 +1121,7 @@ every dataset at its own width, `k` 100, bs 1 and 16, latency in `graph`
 (the headline mode) or in `eager` where the arm has no `graph` entry
 (official; marked $^{e}$). SilverTorch's operating point is
 `n_probe` 24; "matched" is `stats.at_recall` on that arm's curve. F2 draws
-SilverTorch at each measured `n_probe` (24, `n95`, 4×`n95`), not "at
+SilverTorch at each measured `n_probe` (the `synth` sweep), not "at
 matched recall", which would be a flat line at the target. The real-sweep
 buckets of F2 are half-decade bins of `pass_count / n_items` holding ≥ 20
 queries. T1's `claims.yaml` selects with any parquet column plus a
