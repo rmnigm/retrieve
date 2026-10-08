@@ -499,6 +499,8 @@ def test_codesign_bloomwidth_and_n95_suites():
         ("silvertorch", "triton", "clause", "all5")
     }
     assert {(j.ks, j.batch_sizes) for j in n95} == {((100, 1000), (16,))}
+    # quality-only by declaration (perf: false), so their records are ok, not partial
+    assert not any(j.timed for j in n95 + bw) and all(j.timed for j in timed + cd)
 
 
 # G-key: resume keys of cells that exist before and after the redesign, as today's code

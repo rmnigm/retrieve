@@ -485,7 +485,7 @@ def run(
     code_version = env0["code_version"]
     sm_ref: float | None = None  # the process's first under-load sample
     latency_kw = dict(latency_kw or {})
-    reasons0 = [r for r, on in (("skip_quality", skip_quality), ("skip_perf", skip_perf)) if on]
+    reasons0 = ["skip_quality"] if skip_quality else []
     skipped_modes = set(MODES) - set(modes)
     with_filters = {(j.dataset, j.dim): False for j in jobs}
     for j in jobs:
@@ -568,9 +568,12 @@ def run(
             continue
         index_mib = measure.index_bytes(module) / MiB
         filter_mib = measure.index_bytes(getattr(module, "filter", None)) / MiB
-        # A module that cannot capture loses nothing to a skipped graph mode.
+        # A module that cannot capture loses nothing to a skipped graph mode; a quality-only
+        # suite (``Job.timed`` false) loses nothing to a skipped perf.
         lost = skipped_modes - (set() if getattr(module, "capturable", True) else {"graph"})
-        job_reasons = reasons0 + (["modes"] if lost else [])
+        timed = job.timed and not skip_perf
+        job_reasons = reasons0 + (["skip_perf"] if job.timed and skip_perf else [])
+        job_reasons += ["modes"] if lost and job.timed else []
 
         for params in todo:
             t0 = time.perf_counter()
@@ -643,7 +646,7 @@ def run(
                                 f"{job.algo}/{job.backend} recall_oracle@{k_max} = {r:.4f} "
                                 f"< {EXACT_MIN_RECALL}"
                             )
-                if not skip_perf:
+                if timed:
                     stage = "perf"
                     rec["perf"], samples = perf(
                         module,

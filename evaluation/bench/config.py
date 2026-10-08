@@ -41,7 +41,7 @@ _DATASET_KEYS = {"data_dir", "checkpoint", "content_dir", "dims", "encode", "use
 _DATASET_KEYS |= {"filters"}
 _FILTER_KEYS = {"attrs", "reverse", "query_attrs", "clause", "bloom"}
 _SUITE_KEYS = {"datasets", "dims", "filter_kinds", "ks", "batch_sizes", "arms", "seeds", "bloom"}
-_SUITE_KEYS |= {"sweeps", "ks_by_sweep"}
+_SUITE_KEYS |= {"sweeps", "ks_by_sweep", "perf"}
 _ARM_KEYS = {"algo", "backends", "filter_kinds", "sweeps", "build", "query", "datasets"}
 _ENCODE = {"batch_size": 512, "num_workers": 8, "max_seq_length": 200}
 _BLOOM = {"m_bits": 1024, "k_hash": 5}
@@ -100,6 +100,7 @@ class Job:
     bloom: dict[str, int]  # m_bits, k_hash (used on bloom cells)
     data: Dataset = field(compare=False, repr=False)
     narrowed: bool = False  # --k / --bs replaced the suite's lists: records are ``partial``
+    timed: bool = True  # False on a quality-only suite (``perf: false``): no perf, still ``ok``
 
     def cells(self) -> list[dict[str, Any]]:
         """``params`` of every cell of this job, in query order."""
@@ -363,6 +364,9 @@ def load_matrix(
     if not isinstance(seed_list, list) or not all(isinstance(x, int) and x >= 0 for x in seed_list):
         raise ConfigError(f"{where}: seeds must be a list of ints >= 0, got {seed_list!r}")
     bloom = {**_BLOOM, **(suites.get("bloom") or {}), **(s.get("bloom") or {})}
+    timed = s.get("perf", True)
+    if not isinstance(timed, bool):
+        raise ConfigError(f"{where}: perf must be true or false, got {timed!r}")
     raw_dims = _ints(f"{dataset_yaml}: dims", _read(dataset_yaml).get("dims"))
     dims_ = _narrow([d for d in raw_dims if d in s.get("dims", raw_dims)], dims, "dim")
     fks = _narrow(s["filter_kinds"], filter_kinds, "filter-kind")
@@ -469,6 +473,7 @@ def load_matrix(
                                             bloom={**bloom, **widths},
                                             data=ds,
                                             narrowed=narrowed,
+                                            timed=timed,
                                         )
                                     )
     logger.info("{}/{}: {} jobs, {} cells", name, suite, len(jobs), sum(len(j.query) for j in jobs))

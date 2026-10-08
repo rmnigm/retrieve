@@ -133,7 +133,8 @@ synth:                         # pass rate as the x axis (F1, F2, C1, C2, C6)
       build: {compile: [max-autotune]}
       datasets: {goodreads-synth: {}, arxiv-synth: {}}
 
-n95:                           # pubmed's n95 source (it runs no deep / synth); run --skip-perf
+n95:                           # pubmed's n95 source (it runs no deep / synth)
+  perf: false                  # quality only: its records are `ok` without timing
   datasets: [pubmed]
   dims: [768]
   filter_kinds: [clause]
@@ -166,7 +167,8 @@ codesign:                      # S9 / F4b, C5: the official bloom path, partial 
         arxiv: {build: {n_lists: [1664]}}
         goodreads: {build: {n_lists: [1024]}}
 
-bloomwidth:                    # D3 / F4a, C4: bloom width vs FPR and recall; run --skip-perf
+bloomwidth:                    # D3 / F4a, C4: bloom width vs FPR and recall
+  perf: false
   datasets: [goodreads, arxiv, pubmed]
   dims: [128, 768]
   filter_kinds: [bloom]

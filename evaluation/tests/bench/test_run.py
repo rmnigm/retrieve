@@ -561,3 +561,19 @@ def test_quality_cache_copies_seed_free_arms_only(tiny_configs, tmp_path, monkey
     jobs = load_matrix(ds, suites, "cache", algos=["linr_v1_filter_mask"], seeds=[1])
     run.run(jobs, out_dir=out, **KW)
     assert _records(path)[-1]["quality_source"] is None
+
+
+def test_a_quality_only_suite_is_ok_without_perf(tiny_configs, tmp_path):
+    """Addendum 1: ``perf: false`` (n95, bloomwidth) runs no perf and is ``ok``, not ``partial``
+    for ``skip_perf``; ``--skip-perf`` or ``--mode eager`` on it drops nothing either."""
+    ds, suites = tiny_configs
+    jobs = load_matrix(ds, suites, "untimed")
+    assert jobs and not any(j.timed for j in jobs)
+    out = tmp_path / "results"
+    assert dict(run.run(jobs, out_dir=out, **KW)) == {"ok": 2}
+    recs = _records(out / "untimed" / "tiny-d64.jsonl")
+    assert all(r["perf"] is None and r["quality"] and r["partial_reasons"] is None for r in recs)
+    assert dict(run.run(jobs, out_dir=out, resume=False, skip_perf=True, modes=EAGER, **KW)) == {
+        "ok": 2
+    }
+    assert not (out / "untimed" / "tiny-d64.samples.jsonl").exists()

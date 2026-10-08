@@ -358,9 +358,9 @@ unfiltered `quality` suite ([decisions](../decisions.md#harness)); synth's
 | `filter` | goodreads, arxiv, yfcc10m, pubmed, three kept sweeps each (yfcc10m: `tags_and`) | V1, V2, V3 (pool 5000) triton; `silvertorch` triton clause + bloom and official bloom at `n_probe` {24, n95}; `silvertorch` torch (#12) and torch compiled (#13) at 24, goodreads + arxiv only; `postfilter` alpha {1, 8} | T2, C3, C6 |
 | `deep` | goodreads, arxiv, yfcc10m, kept sweeps | `silvertorch` triton clause + bloom, official bloom: `n_lists` per dataset (goodreads {1024, 4096}, arxiv {1664, 8192}, yfcc10m {4096, 16384}) × `n_probe` {8, 16, 32, 64, 128}; V3 `candidate_pool_frac` {0.005, 0.01, 0.02, 0.05, 0.1} | F3, C6 |
 | `synth` | goodreads-, arxiv-, yfcc10m-synth ([datasets](datasets.md#synthetic-selectivity-attrs)) | V1, V2 triton; V3 `candidate_pool_frac` {0.01, 0.05}; `silvertorch` triton clause {24, n95, 4·n95}, triton and official bloom at n95; `postfilter` {1, 8}; V1 / V2 torch, eager and compiled, on `p001, p01, p1`, goodreads + arxiv only. k 1000 is dropped where N·p < 4000 (goodreads `p0001`, `p0003`; arxiv `p0001`) | F1, F2, C1, C2, C6 |
-| `n95` | pubmed `all5` (its median kept sweep) | `silvertorch` triton clause, `n_probe` {8, 16, 32, 64, 128}, bs 16; run with `--skip-perf` | pubmed's n95 |
+| `n95` | pubmed `all5` (its median kept sweep) | `silvertorch` triton clause, `n_probe` {8, 16, 32, 64, 128}, bs 16; quality only (`perf: false`) | pubmed's n95 |
 | `codesign` | arxiv (kept sweeps), goodreads (`c0_genre, c2_format, c3_year`) | official bloom, `bloom_path` {partial, full} × `n_probe` {8, 32, 128}, `n_lists` arxiv 1664 / goodreads 1024, k 100 | F4b, C5 |
-| `bloomwidth` | goodreads `c0_genre`, arxiv kept, pubmed `c0_mesh` | `silvertorch` triton bloom `m_bits` {64 … 2048} × `k_hash` {3, 5}; official bloom `k_hash` {3, 5} (its width is `OfficialConfig.b_multiplier`, not `m_bits`); bs 16; run with `--skip-perf` | F4a, C4 |
+| `bloomwidth` | goodreads `c0_genre`, arxiv kept, pubmed `c0_mesh` | `silvertorch` triton bloom `m_bits` {64 … 2048} × `k_hash` {3, 5}; official bloom `k_hash` {3, 5} (its width is `OfficialConfig.b_multiplier`, not `m_bits`); bs 16; quality only (`perf: false`) | F4a, C4 |
 | `bloomwidth-timed` | the same | the same widths at `k_hash` 5 (official: its one width), k 100, bs 16, timed | F4a |
 
 **n95** is the smallest `n_probe` that reaches `recall_oracle@100 ≥ 0.95`
@@ -377,8 +377,11 @@ default, which every `filter` / `deep` official cell runs with the key
 absent) against `full` (a full-N bool mask, then IVF). Both arms carry
 `bloom_path` in `params`, so their keys never collide with the `filter` /
 `deep` official cells; latency and `peak_fwd_mib` are the compared fields.
-`--skip-perf` records are `partial` (run.py); `n95` and `bloomwidth` are
-quality-only by intent.
+`n95` and `bloomwidth` declare `perf: false`: `load_matrix` sets
+`Job.timed = False`, `run` skips perf on their jobs without being asked, and
+their records are `ok` (a `--skip-perf` record of a timed suite is `partial`,
+because it lacks what the suite asked for; `--skip-perf` or `--mode` on an
+untimed suite drops nothing).
 
 ```yaml
 # config/<dataset>.yaml — one per dataset; every string may carry {dim}
@@ -409,6 +412,7 @@ filter:
   ks: [100, 1000]
   batch_sizes: [1, 16]
   seeds: [0, 1, 2]                  # optional; default [0]
+  perf: true                        # optional; false = a quality-only suite (n95, bloomwidth)
   sweeps: {goodreads: [c0_genre, c1_lang_reverse, all4], ...}   # optional per-dataset selector
   ks_by_sweep: {goodreads-synth: {p0001: [100]}}                # optional per-(dataset, sweep) ks
   arms:
@@ -453,7 +457,7 @@ filter_kind → sweep → build → seed`. A `Job` is one build, with its own
 `ks` (the suite's or its `ks_by_sweep` entry) and `bloom` (the suite's
 default, or the arm's gridded widths): `dataset, dim, suite,
 filter_kind, sweep, clauses, algo, backend, path, build, query, ks,
-batch_sizes, seed, bloom, data: Dataset, narrowed`; `job.cells()` lists the
+batch_sizes, seed, bloom, data: Dataset, narrowed, timed`; `job.cells()` lists the
 `params = build | query` of each cell and `job.key(params)` is the
 record's key block. `none` cells have `sweep == "full_scan"` and
 `clauses is None`.
@@ -707,7 +711,7 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 | `seed_scope` | str | `pool` on the seed-free arms (`SEED_FREE_QUALITY`: the seed moves only the perf pool), `pool+build` on SilverTorch and `linr_v3` |
 | `quality_source` | dict / null | `null` when this record computed its quality; `{seed, code_version}` of the record the [quality cache](#quality-cache) copied it from |
 | `quality` | dict / null | `heldout: {recall@k, ndcg@k, precision@k, mrr@k for k in ks, n}`, each metric `null` when `n == 0`; on filter cells also `oracle: {…}` (ranked-prefix targets); `jaccard_vs_first@k` per `k`, `score_max_abs_diff`, `parity` (`reference` = this record wrote the spill file, `vs_<backend>` = compared against it, `shape_mismatch:…`); `null` with `--skip-quality` |
-| `perf` | list / null | one entry per `(bs, k, mode)` (table below); `null` with `--skip-perf` |
+| `perf` | list / null | one entry per `(bs, k, mode)` (table below); `null` with `--skip-perf` and on a quality-only suite (`perf: false`) |
 | `unstable` | bool | any perf entry `unstable` (window spread > 5 %), or `clocks_drift` |
 | `memory_reserved_mib` | float / null | `torch.cuda.memory_reserved()` after the cell — the leak detector across a group's cells |
 | `elapsed_s` | float | wall time of the cell |
