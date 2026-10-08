@@ -39,7 +39,7 @@ class FusedMaskedKnnTopkConfig:
     num_warps: int
     num_stages: int = 3
     # Target grid size over all rows: each row gets G = cdiv(programs, B) tile-striding programs.
-    programs: int = 1728
+    programs: int = 864
 
 
 # Default tile config (tuned on A100/sm_80); pass config= to the wrapper to override.

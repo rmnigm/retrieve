@@ -491,8 +491,11 @@ only storing `-inf`: 913 µs, bound by program count, not bytes
 does not change which program reduces a lane or how: each lane is still
 one `tl.sum` over D in the same layout, so scores are bit-identical to
 the one-tile grid ([validation](../validation.md#v2-fix-a)).
-`programs` (default 1728 = 108 SMs × 8 resident 8-warp programs × 2) is a
-field of the tile config.
+`programs` is a field of the tile config. The default 864 is one wave on
+A100 (108 SMs × 8 resident 8-warp programs); swept over {864, …, 13824},
+it was the best or within 1 % of the best at bs {1, 16}, p {0.001, 0.01, 1},
+and at bs 16, p 1 fewer programs gather faster (864: 1.39 ms with top-k, 1728: 1.61,
+13824: 2.45; [v2-fix-a](../artifacts/campaign-v2/v2-fix-a/README.md)).
 
 **Per-cell scoring is elementwise**, not `tl.dot`. Different `(b, p)` cells
 gather different rows, so a true GEMM would re-load each row across the
@@ -583,7 +586,8 @@ B))` and a program strides over tiles `g, g + G, …`; a tile at or past
 [`fused_masked_knn_topk`](#fused_masked_knn_topk--prefilterknn-sparse-path):
 V3's filtered stage 1 gets full-width `[B, N]` candidates from the compact
 family. Scores are integers computed by the same lane body, so the stride
-is exact. The body is modeled on `bloom_match` (int64-word reduction
+is exact. `programs` defaults to 1728 here (4-warp programs); it was not
+swept. The body is modeled on `bloom_match` (int64-word reduction
 over `W`), which launches batch-first.
 
 **HAS_INDICES path**: replaces the contiguous `n_off` load with an

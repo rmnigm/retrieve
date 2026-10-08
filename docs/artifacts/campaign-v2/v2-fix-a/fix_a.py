@@ -34,12 +34,14 @@ import torch
 from torch.profiler import ProfilerActivity, profile
 
 import retrieve.interfaces as rif
-import retrieve.ops.triton.fused_masked_knn_topk as fm
-import retrieve.ops.triton.oporp_1bit_match_topk as om
 from bench import algos, inputs
 from bench.config import load_dataset
 from bench.measure import clocks, graph_callable, setup, warm_gpu_once
 from retrieve.ops.triton.clause_compact import clause_compact
+
+# The package re-exports the ops under the submodules' names, so ``import ... as`` gets the op.
+fm = importlib.import_module("retrieve.ops.triton.fused_masked_knn_topk")
+om = importlib.import_module("retrieve.ops.triton.oporp_1bit_match_topk")
 
 SYNTH = ("p0001", "p0003", "p001", "p003", "p01", "p03", "p1")
 TIMED = ("p0001", "p001", "p1")
