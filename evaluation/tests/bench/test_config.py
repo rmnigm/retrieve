@@ -50,6 +50,30 @@ def test_load_dataset_per_dim_mapping():
         load_dataset(TEXT, 64)
 
 
+@pytest.mark.parametrize("parent", ["goodreads", "arxiv", "yfcc10m"])
+def test_synth_dataset_shares_the_parents_inputs(parent):
+    """``<parent>-synth.yaml``: the parent's items, queries, encoder (so its encode cache) and
+    users_limit; the synth attrs and query attrs; sweep names disjoint from the parent's in
+    the shared ``gt_d{dim}``."""
+    dim = load_dataset(CFG / f"{parent}.yaml", 128 if parent != "yfcc10m" else 192).dim
+    p, s = (load_dataset(CFG / f"{n}.yaml", dim) for n in (parent, f"{parent}-synth"))
+    for f in ("dim", "data_dir", "checkpoint", "content_dir", "users_limit", "encode", "inputs"):
+        assert getattr(s, f) == getattr(p, f), f
+    assert s.gt_dir == p.gt_dir and s.name == f"{parent}-synth"
+    assert (s.attrs.name, s.query_attrs.name, s.reverse) == (
+        "item_attrs_synth.pt",
+        "query_attrs_synth.pt",
+        None,
+    )
+    assert p.query_attrs == p.data_dir / "eval_split.parquet"
+    rates = ["p0001", "p0003", "p001", "p003", "p01", "p03", "p1"]
+    if parent == "yfcc10m":
+        rates = ["p0001", "p001", "p003", "p01", "p1"]
+    want = {r: (["p0001", "p0003", "p001", "p003", "p01", "p03", "p1"].index(r),) for r in rates}
+    assert s.clauses == {"clause": want, "bloom": want}
+    assert not {sw for fk in p.clauses.values() for sw in fk} & set(want)
+
+
 def test_load_dataset_rejects_bad_files(tmp_path):
     bad = tmp_path / "bad.yaml"
     bad.write_text("data_dir: d\ndims: [16]\ncheckpoint: c\ncontent_dir: x\n")

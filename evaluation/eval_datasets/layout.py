@@ -166,13 +166,17 @@ def load_text_queries(
     return queries, targets, torch.ones(heldout.height, dtype=torch.long)
 
 
-def load_query_attrs(eval_split: Path, n_queries: int) -> torch.Tensor:
-    """``[U, C]`` int64 ``query_attrs_narrow`` from ``eval_split.parquet``, aligned 1:1 with the
-    *full* test split — checked here, before any trim."""
-    df = pl.read_parquet(eval_split)
-    if df.height != n_queries:
-        raise RuntimeError(f"{eval_split}: rows={df.height} != queries={n_queries}; regen `attrs`")
-    return torch.tensor(df["query_attrs_narrow"].to_list(), dtype=torch.long)
+def load_query_attrs(path: Path, n_queries: int) -> torch.Tensor:
+    """``[U, C]`` int64 query attrs aligned 1:1 with the *full* test split — checked here,
+    before any trim: ``query_attrs_narrow`` of ``eval_split.parquet``, or a ``.pt`` tensor
+    (``filters.query_attrs``, the synthetic attrs)."""
+    if Path(path).suffix == ".pt":
+        qa = torch.load(str(path), map_location="cpu", weights_only=True).long()
+    else:
+        qa = torch.tensor(pl.read_parquet(path)["query_attrs_narrow"].to_list(), dtype=torch.long)
+    if qa.shape[0] != n_queries:
+        raise RuntimeError(f"{path}: rows={qa.shape[0]} != queries={n_queries}; regen `attrs`")
+    return qa
 
 
 def load_item_attrs(

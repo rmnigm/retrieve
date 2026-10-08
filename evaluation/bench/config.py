@@ -33,7 +33,7 @@ QUERY_PARAMS = frozenset({"n_probe", "candidate_pool", "alpha"})  # set_query_pa
 NONE_SWEEP = "full_scan"  # the one sweep of filter_kind ``none`` (the old harness's name)
 _DATASET_KEYS = {"data_dir", "checkpoint", "content_dir", "dims", "encode", "users_limit"}
 _DATASET_KEYS |= {"filters"}
-_FILTER_KEYS = {"attrs", "reverse", "clause", "bloom"}
+_FILTER_KEYS = {"attrs", "reverse", "query_attrs", "clause", "bloom"}
 _SUITE_KEYS = {"datasets", "dims", "filter_kinds", "ks", "batch_sizes", "algos", "seeds", "params"}
 _SUITE_KEYS |= {"bloom"}
 _ENCODE = {"batch_size": 512, "num_workers": 8, "max_seq_length": 200}
@@ -48,7 +48,8 @@ class ConfigError(ValueError):
 class Dataset:
     """One dataset at one dim, every path resolved. ``checkpoint`` set = SASRec-encoded
     queries; ``content_dir`` set = pre-encoded text embeddings (arxiv). ``attrs`` /
-    ``reverse`` are ``None`` without a ``filters:`` block. ``gt_dir`` is derived."""
+    ``reverse`` are ``None`` without a ``filters:`` block; ``query_attrs`` is the query side,
+    ``eval_split.parquet`` unless ``filters.query_attrs`` names a file. ``gt_dir`` is derived."""
 
     name: str
     dim: int
@@ -59,6 +60,7 @@ class Dataset:
     encode: dict[str, int]
     attrs: Path | None
     reverse: Path | None
+    query_attrs: Path
     clauses: dict[str, dict[str, tuple[int, ...]]]  # filter_kind -> sweep -> active clauses
 
     @property
@@ -188,12 +190,15 @@ def load_dataset(path: Path, dim: int, checkpoint: str | None = None) -> Dataset
     _check_keys(f"{where}: encode", encode, set(_ENCODE))
     filters = raw.get("filters")
     attrs = reverse = None
+    query_attrs = data_dir / "eval_split.parquet"
     clauses: dict[str, dict[str, tuple[int, ...]]] = {}
     if filters is not None:
         _check_keys(f"{where}: filters", filters, _FILTER_KEYS, ["attrs"])
         attrs = data_dir / _template(where, filters["attrs"], dim)
         if filters.get("reverse"):
             reverse = data_dir / _template(where, filters["reverse"], dim)
+        if filters.get("query_attrs"):
+            query_attrs = data_dir / _template(where, filters["query_attrs"], dim)
         clauses = {k: _sweeps(where, k, filters.get(k)) for k in ("clause", "bloom")}
     users_limit = raw.get("users_limit")
     if users_limit is not None and (not isinstance(users_limit, int) or users_limit <= 0):
@@ -213,6 +218,7 @@ def load_dataset(path: Path, dim: int, checkpoint: str | None = None) -> Dataset
         encode=encode,
         attrs=attrs,
         reverse=reverse,
+        query_attrs=query_attrs,
         clauses=clauses,
     )
 

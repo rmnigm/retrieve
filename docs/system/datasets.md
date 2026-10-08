@@ -121,6 +121,7 @@ and give each new loader a fixture test that runs `validate_layout` on
 what it wrote. `test_openalex.py` builds its rows in the snapshot's projected
 parquet schema (nested `primary_topic.field.id` etc.) and runs `prep` →
 `attrs` → `validate_layout` on a 60-paper citation-connected staging dir.
+`test_synth_filter.py` is G-synth ([below](#synthetic-selectivity-attrs)).
 
 ### Shared conventions
 
@@ -989,6 +990,41 @@ narrow-only).
 There is a hard cap on `N`: above it the attribute tensors exceed
 comfortable host RAM during construction.
 
+### Synthetic selectivity attrs
+
+`eval-data synth-filter --dataset <goodreads|arxiv|yfcc10m> [--rates …]
+[--seed 20261008]` ([`synth_filter.py`](../../evaluation/eval_datasets/synth_filter.py))
+gives a dataset a controllable pass rate on its real embeddings. It draws
+one `u_i ~ U(0, 1)` (float64) per catalog item from
+`torch.Generator().manual_seed(seed)`, in item-row order: N is the row
+count of `item_attrs_narrow.pt` with the legacy pad row dropped, the N
+`layout.load_item_attrs` checks. Item `i` passes the clause of rate `p`
+iff `u_i < p`, so the pass sets nest across rates (the `p = 0.01` set is
+inside the `p = 0.03` set) and `p = 1.0` is the unfiltered point. It
+writes four files into the dataset's `data_dir`:
+
+| file | content |
+|---|---|
+| `item_attrs_synth.pt` | `[N, 7, 1]` int64, 1 = pass, 0 = fail; clause `j` is rate `j` of `(0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0)` |
+| `synth_u.pt` | the `[N]` `u` vector |
+| `query_attrs_synth.pt` | `[U_full, 7]` int64, all ones, aligned 1:1 with the full test split like `eval_split.parquet` |
+| `synth_filter.json` | rates, seed, `n_items`, `n_queries`, achieved `pass_counts` / `pass_rates` per rate |
+
+All seven columns are always written. A dataset picks its rates in YAML:
+[`goodreads-synth.yaml`](../../evaluation/config/goodreads-synth.yaml),
+[`arxiv-synth.yaml`](../../evaluation/config/arxiv-synth.yaml) and
+[`yfcc10m-synth.yaml`](../../evaluation/config/yfcc10m-synth.yaml) (five
+rates). Each keeps the parent's `data_dir`, encoder and `users_limit`, so
+it shares the parent's encode cache. Its sweeps are named `p0001` … `p1`,
+so they cannot collide with the parent's names in the shared `gt_d{dim}`,
+and each oracle blob's name also carries the attrs digest. The builder
+never touches `item_attrs_narrow.pt`, whose digest keys every existing
+oracle and record. With one value per clause a bloom filter has almost no
+false positives here, so synth bloom cells measure only what the bloom
+path costs as the pass rate changes. Measured pass counts per rate:
+[validation](../validation.md#harness-gates). yfcc10m is built on its
+campaign pod (it is not staged everywhere). The files are not on the Hub.
+
 ### On-disk layout the harness expects
 
 Sequential datasets:
@@ -1029,6 +1065,8 @@ Filter sweeps additionally need:
 ├── eval_split.parquet
 └── ... per-clause vocab JSONs
 ```
+
+plus, for a `-synth` config, the four `synth-filter` files ([above](#synthetic-selectivity-attrs)).
 
 ### Dead artifacts
 

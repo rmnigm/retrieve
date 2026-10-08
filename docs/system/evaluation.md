@@ -314,7 +314,7 @@ only, clause and bloom filter kinds; capturable.
 
 ## Config: one YAML per dataset + `suites.yaml`
 
-Nine files under [`evaluation/config/`](../../evaluation/config/):
+Twelve files under [`evaluation/config/`](../../evaluation/config/):
 [`goodreads.yaml`](../../evaluation/config/goodreads.yaml),
 [`arxiv.yaml`](../../evaluation/config/arxiv.yaml),
 [`yambda-500m.yaml`](../../evaluation/config/yambda-500m.yaml),
@@ -322,7 +322,9 @@ Nine files under [`evaluation/config/`](../../evaluation/config/):
 [`yfcc10m.yaml`](../../evaluation/config/yfcc10m.yaml),
 [`pubmed.yaml`](../../evaluation/config/pubmed.yaml) and
 [`openalex.yaml`](../../evaluation/config/openalex.yaml) and
-[`kuairand.yaml`](../../evaluation/config/kuairand.yaml) (goodreads, arxiv,
+[`kuairand.yaml`](../../evaluation/config/kuairand.yaml), the three
+synthetic-selectivity siblings `goodreads-synth.yaml`, `arxiv-synth.yaml`
+and `yfcc10m-synth.yaml` ([datasets](datasets.md#synthetic-selectivity-attrs)) (goodreads, arxiv,
 yfcc10m, pubmed and openalex in the `filter` suite, pubmed and openalex at
 768; yambda and kuairand are out of the study), and
 [`suites.yaml`](../../evaluation/config/suites.yaml). `users_limit:
@@ -363,7 +365,8 @@ encode: {batch_size: 512, num_workers: 8, max_seq_length: 200}       # SASRec da
 users_limit: 10000                                                    # or null
 filters:                                                              # optional
   attrs: item_attrs_narrow.pt                                         # relative to data_dir
-  reverse: clause_is_reverse_narrow.pt
+  reverse: clause_is_reverse_narrow.pt                                # optional
+  # query_attrs: query_attrs_synth.pt  # optional .pt [U_full, C]; default eval_split.parquet
   clause: {c0_genre: [0], c1_lang_reverse: [1], all4: [0, 1, 2, 3]}   # name: active clauses
   bloom: {c0_genre: [0], old_sweep: {clauses: [2], disabled: true}}   # long form: disabled
 ```
@@ -924,8 +927,10 @@ on-disk contract as code, shared with the ETL that writes it
 ([datasets.md](datasets.md#the-layout-contract-layoutpy)): both item
 layouts load (the modern `[N, …]` one and the legacy 1-indexed `[N+1, …]`
 one the Hub copies still are — `drop_legacy_padding_row` by content, then
-`check_items_aligned`), `load_query_attrs` checks `eval_split.parquet`'s
-row count against the *full* split, and `apply_users_limit` is the one
+`check_items_aligned`), `load_query_attrs` reads the `Dataset`'s
+`query_attrs` (`eval_split.parquet`'s `query_attrs_narrow`, or the `.pt`
+named by `filters.query_attrs`) and checks its row count against the
+*full* split, and `apply_users_limit` is the one
 `users_limit` site: a prefix over queries, targets, `n_targets` and `qa`
 together (a prefix, not a sample, so quality stays comparable with the golden cells). `sweep_qa(qa, clauses)`
 codes inactive clauses `-1` and skip-masks rows left without a live
@@ -979,7 +984,7 @@ trailing-whitespace hooks (the last two never on `articles/`, `docs/artifacts/`,
 | `bench/test_metrics.py` | padding / IDCG / denominator contracts; running sums equal per-row means to 1e-9; `jaccard_at_k` |
 | `bench/test_algos.py` | `build` on every `(algo, filter_kind)` torch cell: the `k` setter slices the top-k and changes no buffer; the filter submodule in `index_bytes`; `set_query_params`; build refusals; `postfilter` equal (`torch.equal` on ids and scores) to a hand-computed matmul → topk(`alpha*k`) → dense-mask filter → first `k` reference at every `alpha` in `{1, 2, 4, 8}`, `k` within and past `N`, clause and bloom, the sentinel path exercised; its refusals |
 | `bench/test_config.py` | job counts and keys per suite on `tests/bench/data/{mini,text,suites}.yaml`; `disabled`; build/query split; seeds; narrows and `Job.narrowed`; the real `goodreads` / `arxiv` d128 cell sets; `postfilter` expanded on every `filter` dataset (one torch job per sweep, the four alphas); every `config/*.yaml` × every suite through `load_matrix` |
-| `bench/test_inputs.py` | `load_inputs` on the conftest writer, `users_limit` once, prefix and row-count checks, the legacy layout loading equal to the modern one, misalignment raising, `attrs_digest`, `sweep_qa`, filters by filter backend, `query_pool` |
+| `bench/test_inputs.py` | `load_inputs` on the conftest writer, `users_limit` once, prefix and row-count checks, the legacy layout loading equal to the modern one, misalignment raising, `attrs_digest`, `filters.query_attrs` (a `.pt` replacing `eval_split.parquet`: same full-split row check, same `users_limit` prefix), `sweep_qa`, filters by filter backend, `query_pool` |
 | `bench/test_oracle.py` | padding, v4 fields and arithmetic, fingerprint in the file name, an unreadable blob rebuilt, bloom FP rate, `code_version` |
 | `bench/test_run.py` | end to end on the tiny fixture, both modes (`graph` = the CPU null entry): record schema, resume, `code_version` invalidation, `partial`, a failed cell + continue, a sticky CUDA error, the quality gate, the parity spill (and a same-backend spill rewritten), reachable-target masking, the plan cache off through `OfficialConfig`, `modes` stamped per job (an eager-only uncapturable record `ok`, a capturable one `partial`), `postfilter`'s `recall_oracle` per `k` (equal to a pass at that `k`, never above the exact V1's) |
 | `bench/test_cli.py` | `bench run` via `CliRunner`, `--checkpoint` landing as the record's `inputs` (encoder faked), a real one-child `bench campaign` ending in `results.parquet`, a faked timed-out child, a restart mid-group keeping its parity spill (in-process children), zero cells → exit 1, `bench report` over the campaign's own records, `bench env`'s JSON keys |
@@ -987,6 +992,7 @@ trailing-whitespace hooks (the last two never on `articles/`, `docs/artifacts/`,
 | `bench/test_report.py` | every column the tables read still comes out of `records.aggregate`; every artifact emitted; the LaTeX structurally balanced with the thesis's labels and no unescaped `_`; a `failed` record excluded and a `partial` / `unstable` one marked; citability off by default and evidence beating `--gate`; two `inputs` under one `(dataset, dim)` refused; an empty tree; a schema-1 record |
 | `bench/test_c4_gate.py` | the golden-comparison gate script, [`c4_gate.py`](../artifacts/evaluation-harness-v2/c4_gate.py), against synthesised schema-1 records |
 | `eval_datasets/test_layout.py` | the legacy pad-row rule, `apply_users_limit`, `validate_layout` clean on both layouts and flagging a short `eval_split`, a missing or swapped prefix sidecar, misaligned attrs |
+| `eval_datasets/test_synth_filter.py` | G-synth: achieved pass rate within 1 % of target wherever `N·p ≥ 10^4` (N = 2 M), pass sets nested, same seed byte-identical, `query_attrs_synth` all ones at the full-split row count, the real attrs' bytes and `attrs_digest` untouched (modern and legacy layouts), the CLI resolving `data_dir` from the dataset YAML |
 | `eval_datasets/test_yfcc.py`, `test_pubmed.py`, `test_kuairand.py`, `test_openalex.py` | the four ETL loaders on synthetic fixtures |
 | `training/test_encode.py` | `training.evaluate`'s recall / ndcg equal `bench.metrics` to 1e-9; `encode_split`'s cache hit / stale key |
 

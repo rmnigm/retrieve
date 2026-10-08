@@ -1,0 +1,17 @@
+# YFCC-10M on synthetic selectivity attrs (docs/system/datasets.md § Synthetic selectivity attrs):
+# the parent's data_dir, encoder and users_limit, so the item embeddings, queries and encode cache are
+# the parent's; the attrs are `eval-data synth-filter --dataset yfcc10m`'s. Clause j passes item i
+# iff u_i < rates[j], rates (0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0); the query side is all ones.
+# Sweep names stay apart from the parent's in the shared gt_d{dim} (and every blob name carries
+# the attrs digest anyway). One value per clause, so bloom here measures the bloom path's cost,
+# not its false-positive rate (that is bloomwidth's job).
+# Five of the seven rates (the 10 M catalog is the costliest); the attrs file still has all 7.
+data_dir: data/yfcc10m
+content_dir: content_d192                 # relative to data_dir
+dims: [192]
+users_limit: 10000
+filters:
+  attrs: item_attrs_synth.pt             # relative to data_dir
+  query_attrs: query_attrs_synth.pt
+  clause: {p0001: [0], p001: [2], p003: [3], p01: [4], p1: [6]}
+  bloom: {p0001: [0], p001: [2], p003: [3], p01: [4], p1: [6]}

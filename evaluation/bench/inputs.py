@@ -47,7 +47,7 @@ def load_inputs(ds: Dataset, device: torch.device, *, with_filters: bool = True)
         )
     qa = item_attrs = reverse = None
     if with_filters and ds.attrs is not None:
-        qa = layout.load_query_attrs(ds.data_dir / "eval_split.parquet", queries.shape[0])
+        qa = layout.load_query_attrs(ds.query_attrs, queries.shape[0])
         item_attrs, reverse = layout.load_item_attrs(
             ds.attrs, ds.reverse, int(item_embs.shape[0]), device
         )
@@ -78,7 +78,7 @@ def sweep_qa(
     if clauses is None:
         return None, None
     if qa is None:
-        raise ValueError(f"sweep over clauses {clauses} needs query attrs (eval_split.parquet)")
+        raise ValueError(f"sweep over clauses {clauses} needs query attrs")
     n_clauses = qa.shape[1]
     if any(not 0 <= c < n_clauses for c in clauses):
         raise ValueError(f"clauses {clauses} out of range for {n_clauses} clauses")
