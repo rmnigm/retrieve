@@ -950,12 +950,17 @@ and the official adapter). Codes are `round(x / abs_max * 127)`, so an
 element whose quotient sits on a half-integer flips a code when the
 division is off by one ulp. Eager uses PyTorch's correctly rounded fp32
 division; under `torch.compile`, inductor emits Triton's `/`, which lowers to
-the approximate `div.full.f32` (≤ 2 ulp). So when `torch.compiler.is_compiling()`,
-both divisions (`x / abs_max` and `abs_max / 127`) run in fp64 and round to
-fp32. fp64 has 53 ≥ 2·24 + 2 mantissa bits, so that double rounding returns the
-correctly rounded fp32 quotient: graph-mode codes and scales equal eager's bit
-for bit. The eager branch is the pre-fix arithmetic unchanged (no extra
-kernels in eager timing). Measured in
+the approximate `div.full.f32` (≤ 2 ulp). So the code quotient `x / abs_max` is
+computed in fp64 and rounded to fp32, in eager and compiled alike (no branch:
+inside a `triton_op` inductor traces the implementation with make_fx, where
+`torch.compiler.is_compiling()` is false). fp64 has 53 ≥ 2·24 + 2 mantissa bits,
+so that double rounding returns the correctly rounded fp32 quotient, and Triton's
+fp64 `/` is correctly rounded: graph-mode codes equal eager's bit for bit, and
+eager's codes equal the pre-fix fp32 ones. Cost: two extra elementwise casts in eager.
+The scales stay `abs_max / 127.0`: eager PyTorch evaluates a division by a
+Python scalar as a multiply by fp32(1/127), and inductor emits the same multiply,
+so they already agree (a correctly rounded division would not).
+Measured in
 [validation](../validation.md#campaign-v2-phase-v-not-yet-validated), *V-GRAPH-IDS*.
 
 ### [`quantize_oporp_1bit`](../../retrieve/src/retrieve/indexing/quantize.py) (`retrieve.indexing`)

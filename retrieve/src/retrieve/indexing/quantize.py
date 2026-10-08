@@ -11,16 +11,11 @@ def quantize_int8(embs: Tensor) -> tuple[Tensor, Tensor]:
 
     ``embs ≈ codes.float() * scales.unsqueeze(1)``."""
     abs_max = embs.abs().amax(dim=1, keepdim=True).clamp(min=1e-8)
-    if torch.compiler.is_compiling():
-        # Inductor's fp32 `/` is approximate; an fp64 quotient rounded to fp32 is the correctly
-        # rounded one, so graph mode gets eager's codes (docs/system/kernels.md § quantize_int8).
-        scales = (abs_max.double() / 127.0).float()
-        ratio = (embs.double() / abs_max.double()).float()
-    else:
-        scales = abs_max / 127.0
-        ratio = embs / abs_max
-    codes = (ratio * 127.0).round().clamp(-128, 127).to(torch.int8)
-    return codes, scales.squeeze(1)
+    scales = (abs_max / 127.0).squeeze(1)
+    # Inductor's fp32 `/` is approximate; a correctly rounded fp64 quotient rounded to fp32 is
+    # eager's exact fp32 quotient, so compiled codes equal eager's (kernels.md § quantize_int8).
+    codes = ((embs.double() / abs_max).float() * 127.0).round().clamp(-128, 127).to(torch.int8)
+    return codes, scales
 
 
 _CODE_CHUNK_ROWS = 1 << 16  # build-time quantization chunk: 256 MiB of fp32 at D = 1024

@@ -6,14 +6,15 @@
    (seed 1, bs 16, first IDS_PROBE_BATCHES pool batches, none + bloom, k 100 + 1000) and every
    kept arXiv query in bs 16 chunks (none, clause `c0_maincat`, bloom; k 100 + 1000). Two graph
    arms side by side: `new` (this library) and `old` (compiled with OLD patched into `_host`).
-3. Interleaved graph latency old vs new (`measure.latency_group`, ROUNDS rounds) on the clause
-   cell, k 100, bs 1 + 16: median and 95 % CI per arm, paired ratio new / old.
+3. Interleaved latency old vs new (`measure.latency_group`, ROUNDS rounds) on the clause
+   cell, k 100, eager + graph, bs 1 + 16: median and 95 % CI per arm, paired ratio new / old.
 
 usage: fix_gates.py OUT_DIR
 """
 
 import argparse
 import copy
+import itertools
 import json
 from pathlib import Path
 
@@ -64,6 +65,20 @@ def arm(module, cls, quant, example):
         _host.quantize_int8 = quantize_int8
 
 
+def patched(module, quant):
+    """Eager arm: ``module`` with ``quant`` installed in ``_host`` for each call (both arms pay
+    the same attribute swap)."""
+
+    def call(*x):
+        _host.quantize_int8 = quant
+        try:
+            return module(*x)
+        finally:
+            _host.quantize_int8 = quantize_int8
+
+    return call
+
+
 def chunks(rows):
     out = [rows[i : i + BS] for i in range(0, rows.numel() - BS + 1, BS)]
     if rows.numel() % BS:
@@ -106,6 +121,8 @@ def gate1(inp):
         "compiled_new_equals_old_eager": bool(
             torch.equal(cn, co) and torch.equal(sn, so)
         ),
+        "compiled_new_code_elems_diff": int((cn != co).sum()),
+        "compiled_new_scales_diff": int((sn != so).sum()),
         "compiled_old_code_rows_diff": int((cc != co).any(1).sum()),
         "compiled_old_code_elems_diff": int((cc != co).sum()),
         "compiled_old_scales_diff": int((sc != so).sum()),
@@ -115,19 +132,22 @@ def gate1(inp):
 def timing(module, assets, inp, job, device):
     out = []
     module.k = 100
-    for bs in (1, 16):
+    for mode, bs in itertools.product(("eager", "graph"), (1, 16)):
         pool, qa = inputs.query_pool(
             inp, assets["qa_s"], assets["skip"], bs=bs, seed=job.seed, device=device
         )
         ex = (pool[0],) if qa is None else (pool[0], qa[0])
         torch._dynamo.reset()
-        arms = {
-            "old": arm(module, Old, OLD, ex),
-            "new": arm(module, New, quantize_int8, ex),
-        }
+        if mode == "graph":
+            arms = {
+                "old": arm(module, Old, OLD, ex),
+                "new": arm(module, New, quantize_int8, ex),
+            }
+        else:
+            arms = {"old": patched(module, OLD), "new": patched(module, quantize_int8)}
         fns = [run._rotate(c, pool, qa) for c in arms.values()]
         with torch.inference_mode():
-            res = measure.latency_group(fns, bs=bs, mode="graph", windows=ROUNDS)
+            res = measure.latency_group(fns, bs=bs, mode=mode, windows=ROUNDS)
         w = {
             name: d["window_medians_ms"] for name, (d, _) in zip(arms, res, strict=True)
         }
@@ -135,13 +155,14 @@ def timing(module, assets, inp, job, device):
             {
                 "k": 100,
                 "bs": bs,
+                "mode": mode,
                 "rounds": ROUNDS,
                 **{
                     name: {
                         "median_ci": stats.median_ci(w[name]),
                         "window_medians_ms": w[name],
                         "window_sm_mhz": d["window_sm_mhz"],
-                        "sm_mhz": d["sm_mhz"],
+                        "sm_mhz": d.get("sm_mhz"),
                         "unstable": d["unstable"],
                     }
                     for name, (d, _) in zip(arms, res, strict=True)
