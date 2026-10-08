@@ -203,12 +203,17 @@ co-design.
   goodreads' choice is not 1024, its SilverTorch `filter` and `synth`
   cells already run are rerun. Runs at `campaign-v2` (SilverTorch is
   untouched by Fix A). **≈ 0.5-1 GPU-h**, one piece per pod.
-- [ ] **H-PROFILE: `--profile` stores an empty Triton `kernels` list**
-  (H2H-FINAL: 40/40 bloom and 13/40 `none` eager entries; official always
-  populated), so T3's Triton kernel-only column is empty for bloom (C7).
-  Harness fix in `measure.profile_once` (code_version unaffected), then
-  rerun only the h2h `--profile` pass on goodreads + arXiv. **≈ 0.5 GPU-h.**
-- [ ] **V-CODESIGN: `codesign` on arXiv and goodreads**, interleaved
+- [ ] **H-PROFILE + H2H-FINAL at `campaign-v2.1`.** `--profile` stores an
+  empty Triton `kernels` list (H2H-FINAL: 40/40 bloom and 13/40 `none`
+  eager entries; official always populated), so T3's Triton kernel-only
+  column is empty for bloom (C7). Harness fix in `measure.profile_once`
+  (code_version unaffected), then the whole `h2h` leg (goodreads + arXiv,
+  `--interleave --profile`) once at `campaign-v2.1`: the 408b1188 run is
+  stale (eager SilverTorch +30 µs from the quantize fix) and stays the
+  record of the old code. The only T3 source. **≈ 1.5 GPU-h.**
+- [ ] **V-CODESIGN: `codesign` on arXiv and goodreads**, at `campaign-v2.1`
+  (the 408b1188 run, 108/108, is stale: the quantize fix moves every
+  SilverTorch eager time; Hub `artifacts/v-codesign-408b`), interleaved
   partial/full, `n_probe` {8, 32, 128}, 3 sweeps, 3 seeds; replaces D1-B2
   and D1-D. F4b, C5. **≈ 2 GPU-h**, GPU 0.
 - [ ] **D3: `bloomwidth`** on goodreads and PubMed (`c0_mesh`); arXiv done
@@ -277,7 +282,7 @@ co-design.
 | V2-FIX-A | ≈ 2-3 | 0 | gates ~0.5; reruns: goodreads-synth + goodreads filter V2 perf |
 | V-GRAPH-IDS | ≈ 0.5 | 0 | |
 | IVF-TUNE | ≈ 0.5-1 | 0 | quality-only, seed 0, goodreads + PubMed |
-| H-PROFILE | ≈ 0.5 | 0 | |
+| H-PROFILE + H2H-FINAL | ≈ 1.5 | 0 | 1.18 GPU-h measured at 408b1188 |
 | V-CODESIGN | ≈ 1 | 0 | `d1/arxiv-codesign`: 60 cells in 0.4 h |
 | D3 bloomwidth | ≈ 3-5 | 1 (+0) | quality-only cells |
 | V-AX-SYNTH | ≈ 15-45 | 0 | Triton ~2,000 s per pass point; V1/V2 torch at 3 points ×3 seeds is most of it |
