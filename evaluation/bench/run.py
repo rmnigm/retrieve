@@ -604,6 +604,7 @@ def run(
     }
     code_version = env0["code_version"]
     sm_ref: float | None = None  # the process's first under-load sample
+    sm_windows: list[float] = []  # every window's under-load sample: the job log's histogram
     latency_kw = dict(latency_kw or {})
     reasons0 = ["skip_quality"] if skip_quality else []
     skipped_modes = set(MODES) - set(modes)
@@ -852,10 +853,16 @@ def run(
                     torch.cuda.memory_reserved() / MiB if torch.cuda.is_available() else None
                 )
                 rec["elapsed_s"] = time.perf_counter() - t0
+                win = [w for e in rec["perf"] or [] for w in e.get("window_sm_mhz") or [] if w]
+                sm_windows += win
+                sm_max = max(sm_windows, default=None)
                 rec["env"] = {
                     **env0,
                     "sm_mhz_load": statistics.median(loads) if loads else None,
                     "clocks_drift": drift,
+                    "frac_windows_below_max": sum(w < sm_max for w in win) / len(win)
+                    if win
+                    else None,
                 }
                 key = job.key({**job.build, **q})
                 for smp in samples_by.get(id(job), []):  # samples first: never a record without
@@ -874,6 +881,7 @@ def run(
         del built
         _release()
     counts = +counts  # drop zero entries
+    logger.info(measure.clock_histogram(sm_windows))
     logger.info("done: {}", dict(counts))
     return counts
 

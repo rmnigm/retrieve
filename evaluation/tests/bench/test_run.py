@@ -706,3 +706,24 @@ def test_interleaved_group_keys_rounds_and_resume(tiny_configs, tmp_path, monkey
         (a, 1, victim["sweep"]) for a in ("linr_v1_filter_mask", "linr_v2")
     }
     assert rerun[0]["interleave"]["group"] == victim["interleave"]["group"]
+
+
+def test_frac_windows_below_the_jobs_max_clock(tiny_configs, tmp_path, monkeypatch):
+    """Per-job clock log: ``env.frac_windows_below_max`` is the share of a record's window
+    clock samples below the highest sample the process has seen so far, itself included."""
+    clocks = iter([[1395.0, 1395.0, 1395.0], [1410.0, 1395.0, 1305.0, 1410.0]])
+
+    def fake_perf(modules, *a, **k):
+        win = next(clocks)
+        e = {"k": 2, "bs": 1, "mode": "eager", "sm_mhz": win[-1], "window_sm_mhz": win}
+        return [([e], []) for _ in modules]
+
+    monkeypatch.setattr(run, "perf", fake_perf)
+    jobs = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=["c0", "c0c1"])
+    run.run(jobs, out_dir=tmp_path, skip_quality=True, **KW)
+    recs = _records(tmp_path / "e2e" / "tiny-d64.jsonl")
+    assert [r["env"]["frac_windows_below_max"] for r in recs] == [0.0, 0.5]
+    assert bench.clock_histogram([1410.0, 1395.0, 1410.0]) == (
+        "sm_mhz under load (n=3): 1410×2, 1395×1"
+    )
+    assert bench.clock_histogram([]) == "sm_mhz under load (n=0): no samples"

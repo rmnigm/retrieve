@@ -262,6 +262,7 @@ def campaign(
                     t0 = time.monotonic()
                     with open(log, "a") as lf:
                         lf.write(f"=== {' '.join(cmd)}\n")
+                        lf.write(f"=== clocks at start\n{measure.clock_report()}")
                         lf.flush()
                         try:
                             rc = subprocess.call(
@@ -275,6 +276,7 @@ def campaign(
                         except subprocess.TimeoutExpired:  # the child was killed
                             lf.write(f"=== killed after {timeout_h} h (--timeout)\n")
                             rc = RC_TIMEOUT
+                        lf.write(f"=== clocks at end\n{measure.clock_report()}")
                     worst = max(worst, rc)
                     n_children += 1
                     say(

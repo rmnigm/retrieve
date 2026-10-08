@@ -26,6 +26,7 @@ import socket
 import subprocess
 import tempfile
 import time
+from collections import Counter
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -186,6 +187,28 @@ def clocks() -> dict[str, Any]:
         for key, v in zip(out, vals, strict=True):
             out[key] = float(v) if v.replace(".", "", 1).isdigit() else None
     return out
+
+
+def clock_report() -> str:
+    """``nvidia-smi -q -d CLOCK``: the job log's start / end clock block (current, application,
+    default and max clocks, clock policy)."""
+    try:
+        return subprocess.check_output(
+            ["nvidia-smi", "-q", "-d", "CLOCK", "-i", "0"],
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"nvidia-smi unavailable: {exc}\n"
+
+
+def clock_histogram(samples: Sequence[float]) -> str:
+    """One line: ``n`` under-load SM clock samples as ``MHz×count``, highest first."""
+    counts = sorted(Counter(int(s) for s in samples).items(), reverse=True)
+    return f"sm_mhz under load (n={len(samples)}): " + (
+        ", ".join(f"{mhz}×{n}" for mhz, n in counts) or "no samples"
+    )
 
 
 # ----- build / memory ---------------------------------------------------------
@@ -411,6 +434,8 @@ def profile_once(fn: Callable[[], Any], top: int = 8) -> list[dict[str, Any]]:
 __all__ = [
     "LIB_SUBTREE",
     "NotCapturable",
+    "clock_histogram",
+    "clock_report",
     "clocks",
     "code_version",
     "files_hash",

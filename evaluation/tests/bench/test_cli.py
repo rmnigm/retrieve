@@ -48,7 +48,10 @@ def test_cli_run_campaign_and_report(tiny_configs, tmp_path):
     assert r.exit_code == 0, r.output
     logs = sorted(p.name for p in (out / "_logs").iterdir())
     assert logs == ["campaign.log", "e2e1_tiny-d64_linr_v1_filter_mask_torch.log"]
-    assert (out / "_logs" / logs[1]).read_text().startswith("=== ")  # the command line first
+    child_log = (out / "_logs" / logs[1]).read_text()
+    assert child_log.startswith("=== ")  # the command line first
+    start, end = child_log.index("=== clocks at start"), child_log.index("=== clocks at end")
+    assert start < child_log.index("sm_mhz under load (n=0)") < end  # the child's histogram
     summary = (out / "_logs" / "campaign.log").read_text()
     assert summary.count(" rc=0 ") == 1 and "finished children=1 rc=0" in summary
     assert not (out / "_parity").exists()  # dropped when the algo group closed

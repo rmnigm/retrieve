@@ -180,6 +180,15 @@ the oracle fingerprint in the blob's file name; see
   *first* under-load sample. An idle sample reads low and would flag the GPU
   boosting, and there is no `clocks_locked` field because the pods cannot
   lock clocks. Compare latencies across runs against `perf[].sm_mhz`.
+- **The job's clock log.** `env.frac_windows_below_max` is the share of a
+  cell's window samples below the highest under-load sample of its process
+  so far (the record reuse rule reads it: under 10 %). "So far" because a
+  record is written when its cell ends: a cell measured before the process
+  first reached its top clock compares against a lower maximum. The full
+  view is in the job's log: `bench campaign` writes `nvidia-smi -q -d CLOCK`
+  before the child starts and after it ends, and `run` logs the histogram
+  of every window sample of the process at its end
+  (`sm_mhz under load (n=…): 1410×…, 1395×…`, `measure.clock_histogram`).
   [c4_gate.py](../artifacts/evaluation-harness-v2/c4_gate.py) reads the
   schema-1 `env.sm_mhz` field.
 - **No L2 flush between calls.** `measure.latency` does not flush L2
@@ -517,7 +526,9 @@ and the log name joins them with `+` (`codesign_arxiv-d128_silvertorch_official.
 `filter_arxiv-d128_linr_v1_filter_mask+linr_v2_triton.log`).
 The child's stdout + stderr go to
 `results/_logs/<suite>_<dataset>-d<dim>_<algo>_<backend>.log` (appended, the
-command line first); one summary line per child (`time suite dataset dim
+command line first, then `nvidia-smi -q -d CLOCK` under `=== clocks at start`,
+the child's output with its closing under-load clock histogram, and the clock
+block again under `=== clocks at end`); one summary line per child (`time suite dataset dim
 algo backend rc seconds log`) goes to `results/_logs/campaign.log` and the
 terminal; a non-zero rc is recorded and the loop continues; a child
 still running after `--timeout` hours (default 48, `cli.TIMEOUT_H`: sized
@@ -772,7 +783,7 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 | `unstable` | bool | any perf entry `unstable` (window spread > 5 %), or `clocks_drift` |
 | `memory_reserved_mib` | float / null | `torch.cuda.memory_reserved()` after the cell — the leak detector across a group's cells |
 | `elapsed_s` | float | wall time of the cell |
-| `env` | dict | `gpu, driver, cuda, torch, triton, official_commit, commit, dirty, repo_dirty, git_branch, code_version, host, python, started, config_sha`; the process-start sample `sm_mhz_idle, mem_mhz, sm_max_mhz, power_limit_w`; the cell's `sm_mhz_load` (median of its perf entries' under-load samples; `null` without perf or CUDA) and `clocks_drift` (any under-load sample > 5 % from the process's first) |
+| `env` | dict | `gpu, driver, cuda, torch, triton, official_commit, commit, dirty, repo_dirty, git_branch, code_version, host, python, started, config_sha`; the process-start sample `sm_mhz_idle, mem_mhz, sm_max_mhz, power_limit_w`; the cell's `sm_mhz_load` (median of its perf entries' under-load samples; `null` without perf or CUDA), `clocks_drift` (any under-load sample > 5 % from the process's first) and `frac_windows_below_max` (the share of the cell's `window_sm_mhz` samples below the highest sample the process has seen so far, these included; `null` without samples) |
 | `stage`, `error` | str | `failed` records only: where it died and the traceback |
 
 Perf entry:
