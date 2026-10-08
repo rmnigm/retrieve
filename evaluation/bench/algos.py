@@ -3,13 +3,15 @@ docs/system/architecture.md for the current module map): harness name → librar
 filter kinds and backends, ``PATHS`` derived from ``retrieve.interfaces.DISPATCH``, and
 ``build`` — the one factory the cell loop calls.
 
-``PATHS[(algo, filter_kind, backend)]`` is the code path that actually runs, or ``None`` when
-there is no such cell: ``DISPATCH``'s label for the module's backend (``cublas`` where the flag
-is a no-op, ``None`` where the constructor raises — ``official`` outside SilverTorch), suffixed
-with the filter's backend on filter cells of the cuBLAS algos (``cublas+triton``: cuBLAS
-scoring, Triton ``clause_mask``), and ``None`` on ``linr_v2 / none`` — its candidate source
-*is* the filter. ``tests/bench/test_paths.py`` pins the derived table. The standalone filter
-modules of ``official`` cells are Triton (O §6.2): ``filter_backend``.
+``PATHS[(algo, filter_kind, backend)]`` is the code path that actually runs, or ``None`` when there
+is no such cell: ``DISPATCH``'s label for the module's backend (``cublas`` where the flag is a
+no-op, ``None`` where the constructor raises — ``official`` outside SilverTorch), suffixed with the
+filter's backend on filter cells of the cuBLAS algos (``cublas+triton``: cuBLAS scoring, Triton
+``clause_mask``), and ``None`` on ``linr_v2 / none`` — its candidate source *is* the filter.
+``postfilter`` is the harness's own baseline (``bench.postfilter``), not a library module:
+``DISPATCH`` gains its row here, torch only, filter cells only. ``tests/bench/test_paths.py`` pins
+the derived table. The standalone filter modules of ``official`` cells are Triton (O §6.2):
+``filter_backend``.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from typing import Any
 
 from torch import Tensor, nn
 
+from bench.postfilter import Postfilter
 from retrieve import (
     BloomFilter,
     ExactAttributeFilter,
@@ -28,7 +31,8 @@ from retrieve import (
     OfficialConfig,
     SilverTorch,
 )
-from retrieve.interfaces import DISPATCH, FilterModule
+from retrieve.interfaces import DISPATCH as LIBRARY_DISPATCH
+from retrieve.interfaces import FilterModule
 
 ALGOS: dict[str, type[nn.Module]] = {
     "linr_v1_filter_mask": LiNRV1,
@@ -36,6 +40,11 @@ ALGOS: dict[str, type[nn.Module]] = {
     "linr_v3": LiNRV3,
     "linr_v4": LiNRV4,
     "silvertorch": SilverTorch,
+    "postfilter": Postfilter,
+}
+DISPATCH = {
+    **LIBRARY_DISPATCH,
+    "Postfilter": {"triton": None, "torch": "cublas", "official": None},
 }
 FILTER_KINDS = ("none", "clause", "bloom")
 BACKENDS = ("triton", "torch", "official")
@@ -50,7 +59,7 @@ def filter_backend(backend: str) -> str:
 
 def _path(algo: str, filter_kind: str, backend: str) -> str | None:
     p = DISPATCH[ALGOS[algo].__name__][backend]
-    if p is None or (algo == "linr_v2" and filter_kind == "none"):
+    if p is None or (algo in ("linr_v2", "postfilter") and filter_kind == "none"):
         return None
     return f"{p}+{backend}" if p == "cublas" and filter_kind != "none" else p
 
@@ -122,10 +131,10 @@ def build(
     seed: int = 0,
 ) -> nn.Module:
     """Construct and register one cell's module. ``params`` = build + query params merged
-    (``n_lists``, ``n_probe``, ``n_iter``, ``m_bits``, ``k_hash``, ``candidate_pool``); ``seed``
-    drives the k-means and the OPORP projection. SilverTorch fuses the predicate (the
-    attribute buffers live inside it, ``filter_mod`` is unused); the LiNR modules take the
-    standalone filter as ``self.filter``. Raises on cells ``PATHS`` marks ``None``."""
+    (``n_lists``, ``n_probe``, ``n_iter``, ``m_bits``, ``k_hash``, ``candidate_pool``, ``alpha``);
+    ``seed`` drives the k-means and the OPORP projection. SilverTorch fuses the predicate (the
+    attribute buffers live inside it, ``filter_mod`` is unused); the LiNR modules and ``postfilter``
+    take the standalone filter as ``self.filter``. Raises on cells ``PATHS`` marks ``None``."""
     p = dict(params or {})
     if PATHS[algo, filter_kind, backend] is None:
         raise ValueError(f"no code path for ({algo}, {filter_kind}, {backend})")
@@ -159,6 +168,7 @@ __all__ = [
     "ALGOS",
     "BACKENDS",
     "BLOOM_DEFAULTS",
+    "DISPATCH",
     "FILTER_KINDS",
     "FILTER_MODE",
     "PATHS",

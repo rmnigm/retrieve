@@ -75,6 +75,9 @@ MODES = ("eager", "graph")
 QUALITY_CHUNK = 16  # the OOM bound of the old passes.py (H §2.4): [B, P, D] on loose filters
 EXACT_ALGOS = ("linr_v1_filter_mask", "linr_v2")  # §2.4: recall_oracle@k_max >= 0.99 or die
 EXACT_MIN_RECALL = 0.99
+# The top-k prefix of these algos' k_max run is not their top-k run (postfilter's pool is
+# alpha*k), so quality runs once per k.
+PER_K_QUALITY = ("postfilter",)
 CLOCK_DRIFT = 0.05  # §2.1: an under-load sample > 5 % off the process's first one
 # An exception whose message carries one of these has killed the CUDA context: recorded, then
 # re-raised so the child exits and ``bench campaign`` moves on (review §2.9).
@@ -531,6 +534,13 @@ def run(
                     stage = "quality"
                     module.k = k_max
                     qual, ids, scores = quality(module, inp, assets, job.ks, device)
+                    if job.algo in PER_K_QUALITY:
+                        for k in (k for k in job.ks if k != k_max):
+                            module.k = int(k)
+                            qk, _, _ = quality(module, inp, assets, [k], device)
+                            for part, m in qk.items():
+                                qual[part].update(m)
+                        module.k = k_max
                     qual.update(parity(out_dir, job, params, ids, scores, job.ks))
                     del ids, scores
                     rec["quality"] = qual
@@ -606,6 +616,7 @@ __all__ = [
     "EXACT_ALGOS",
     "MODES",
     "PERF_STAT_KEYS",
+    "PER_K_QUALITY",
     "QUALITY_CHUNK",
     "STICKY_CUDA",
     "QualityGateError",
