@@ -3,14 +3,15 @@ build timing, index size, the latency windows, graph capture and the profiler sp
 
 Imports torch, the stdlib, ``triton`` (version) and ``retrieve`` (files). ``run.py`` composes
 these: ``setup`` → ``warm_gpu_once`` → ``provenance`` / ``clocks`` → ``timed_build`` →
-``index_bytes`` → per ``(k, bs, mode)`` ``latency`` (with ``graph_callable`` for
-``mode="graph"``) → optional ``profile_once``.
+``index_bytes`` → per ``(k, bs, mode)`` ``latency`` / ``latency_group`` (with ``graph_callable``
+for ``mode="graph"``) → optional ``profile_once``.
 
 Timing protocol (§2.5): 50 warm-up calls → sync → ``N = clamp(2 s / median_est, 1000,
 5000)`` → 3 windows of N calls, each call bracketed by CUDA events on the current stream,
 wall clock around the window with one sync at the end, one ``nvidia-smi`` SM clock sample
-after each window. The reported dict comes from the window with the median median;
-``spread`` is over the three window medians. No L2 flush: the caller's pool rotation keeps
+after each window; an interleaved group runs window ``i`` of every arm before window
+``i + 1``. The reported dict comes from the window with the median median; ``spread`` is
+over the three window medians. No L2 flush: the caller's pool rotation keeps
 index reads naturally cold. Closed-loop, one client.
 """
 
@@ -25,7 +26,8 @@ import socket
 import subprocess
 import tempfile
 import time
-from collections.abc import Callable
+from collections import Counter
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -187,6 +189,28 @@ def clocks() -> dict[str, Any]:
     return out
 
 
+def clock_report() -> str:
+    """``nvidia-smi -q -d CLOCK``: the job log's start / end clock block (current, application,
+    default and max clocks, clock policy)."""
+    try:
+        return subprocess.check_output(
+            ["nvidia-smi", "-q", "-d", "CLOCK", "-i", "0"],
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"nvidia-smi unavailable: {exc}\n"
+
+
+def clock_histogram(samples: Sequence[float]) -> str:
+    """One line: ``n`` under-load SM clock samples as ``MHz×count``, highest first."""
+    counts = sorted(Counter(int(s) for s in samples).items(), reverse=True)
+    return f"sm_mhz under load (n={len(samples)}): " + (
+        ", ".join(f"{mhz}×{n}" for mhz, n in counts) or "no samples"
+    )
+
+
 # ----- build / memory ---------------------------------------------------------
 
 
@@ -274,58 +298,85 @@ def latency(
     n_min: int = 1000,
     n_max: int = 5000,
 ) -> tuple[dict[str, Any], list[float]]:
-    """§2.5 for one ``(k, bs, mode)`` variant. ``fn`` is the zero-arg call that rotates the
-    pool (eager forward, or ``graph_callable``'s replay). Returns ``(perf dict, per-call ms
-    of the chosen window)``. Eager only: the first call runs under
-    ``set_sync_debug_mode("warn")`` and ``peak_fwd_mib`` is taken over the first window.
-    ``window_sm_mhz`` is the SM clock sampled right after each window's sync, while the GPU
-    is still at its load clock; ``sm_mhz`` is its last element — the per-variant value H §7's
-    unlocked-clock fallback needs and the only clock sample ``clocks_drift`` compares.
+    """§2.5 for one ``(k, bs, mode)`` variant: :func:`latency_group` of one arm. The defaults
+    are :func:`latency_group`'s, repeated because ``report.methodology`` prints them from this
+    signature."""
+    kw = {"warmup": warmup, "windows": windows, "target_s": target_s}
+    return latency_group([fn], bs=bs, mode=mode, n_min=n_min, n_max=n_max, **kw)[0]
+
+
+def latency_group(
+    fns: Sequence[Callable[[], Any]],
+    *,
+    bs: int,
+    mode: str,
+    warmup: int = 50,
+    windows: int = 3,
+    target_s: float = 2.0,
+    n_min: int = 1000,
+    n_max: int = 5000,
+) -> list[tuple[dict[str, Any], list[float]]]:
+    """§2.5 for the arms of one ``(k, bs, mode)`` variant, timed round-robin: every arm is
+    warmed up and calibrated (its own ``N``), then round ``i`` runs window ``i`` of each arm in
+    order (A, B, A, B, …), so clock drift lands on every arm alike. Each ``fn`` is a zero-arg
+    call that rotates the pool (eager forward, or ``graph_callable``'s replay). Returns, per
+    arm, ``(perf dict, per-call ms of its chosen window)``. Eager only: the first call runs
+    under ``set_sync_debug_mode("warn")`` and ``peak_fwd_mib`` is taken over the arm's first
+    window. ``window_sm_mhz`` is the SM clock sampled right after each window's sync, while
+    the GPU is still at its load clock; ``sm_mhz`` is its last element — the per-variant value
+    H §7's unlocked-clock fallback needs and the only clock sample ``clocks_drift`` compares.
     Samples are ``None`` without CUDA."""
     if mode not in ("eager", "graph"):
         raise ValueError(f"mode must be 'eager' or 'graph', got {mode!r}")
     cuda = torch.cuda.is_available()
-    if mode == "eager" and cuda:
-        torch.cuda.set_sync_debug_mode("warn")
-        try:
+    ns = []
+    for fn in fns:
+        if mode == "eager" and cuda:
+            torch.cuda.set_sync_debug_mode("warn")
+            try:
+                fn()
+            finally:
+                torch.cuda.set_sync_debug_mode("default")
+        for _ in range(warmup):
             fn()
-        finally:
-            torch.cuda.set_sync_debug_mode("default")
-    for _ in range(warmup):
-        fn()
-    if cuda:
-        torch.cuda.synchronize()
-    est, _ = _time_calls(fn, 20)
-    n = int(min(max(target_s * 1e3 / max(torch.tensor(est).median().item(), 1e-6), n_min), n_max))
-
-    peak_fwd_mib = None
-    runs: list[tuple[list[float], float]] = []
-    window_sm_mhz: list[float | None] = []
-    for w in range(windows):
-        measure = w == 0 and mode == "eager" and cuda
-        if measure:
+        if cuda:
             torch.cuda.synchronize()
-            torch.cuda.reset_peak_memory_stats()
-            before = torch.cuda.memory_allocated()
-        runs.append(_time_calls(fn, n))
-        if measure:
-            peak_fwd_mib = (torch.cuda.max_memory_allocated() - before) / MiB
-        window_sm_mhz.append(clocks()["sm_mhz"] if cuda else None)  # under load, after sync
-    medians = [torch.tensor(ms).median().item() for ms, _ in runs]
-    pick = sorted(range(windows), key=lambda i: medians[i])[windows // 2]
-    out = stats(*runs[pick], bs)
-    spread = (max(medians) - min(medians)) / medians[pick] if medians[pick] > 0 else 0.0
-    out.update(
-        mode=mode,
-        bs=bs,
-        spread=spread,
-        unstable=spread > 0.05,
-        peak_fwd_mib=peak_fwd_mib,
-        window_medians_ms=medians,
-        window_sm_mhz=window_sm_mhz,
-        sm_mhz=window_sm_mhz[-1],
-    )
-    return out, runs[pick][0]
+        est, _ = _time_calls(fn, 20)
+        med = max(torch.tensor(est).median().item(), 1e-6)
+        ns.append(int(min(max(target_s * 1e3 / med, n_min), n_max)))
+
+    peak_fwd_mib: list[float | None] = [None] * len(fns)
+    runs: list[list[tuple[list[float], float]]] = [[] for _ in fns]
+    window_sm_mhz: list[list[float | None]] = [[] for _ in fns]
+    for w in range(windows):
+        for i, fn in enumerate(fns):
+            measure = w == 0 and mode == "eager" and cuda
+            if measure:
+                torch.cuda.synchronize()
+                torch.cuda.reset_peak_memory_stats()
+                before = torch.cuda.memory_allocated()
+            runs[i].append(_time_calls(fn, ns[i]))
+            if measure:
+                peak_fwd_mib[i] = (torch.cuda.max_memory_allocated() - before) / MiB
+            window_sm_mhz[i].append(clocks()["sm_mhz"] if cuda else None)  # under load
+    out = []
+    for i in range(len(fns)):
+        medians = [torch.tensor(ms).median().item() for ms, _ in runs[i]]
+        pick = sorted(range(windows), key=medians.__getitem__)[windows // 2]
+        d = stats(*runs[i][pick], bs)
+        spread = (max(medians) - min(medians)) / medians[pick] if medians[pick] > 0 else 0.0
+        d.update(
+            mode=mode,
+            bs=bs,
+            spread=spread,
+            unstable=spread > 0.05,
+            peak_fwd_mib=peak_fwd_mib[i],
+            window_medians_ms=medians,
+            window_sm_mhz=window_sm_mhz[i],
+            sm_mhz=window_sm_mhz[i][-1],
+        )
+        out.append((d, runs[i][pick][0]))
+    return out
 
 
 # ----- graph mode / profiling -------------------------------------------------
@@ -333,7 +384,9 @@ def latency(
 
 def graph_callable(module: nn.Module, *example_args: Any, warmup: int = 5) -> Callable[..., Any]:
     """``torch.compile(mode="reduce-overhead", dynamic=False, fullgraph=True)`` of ``module``,
-    warmed on ``example_args`` (one static shape = one capture per bs). Raises
+    warmed on ``example_args`` (one static shape = one capture per bs). It does not reset
+    dynamo, so the arms of an interleaved group stay captured side by side; the caller resets
+    before the first capture of a variant. Raises
     ``NotCapturable`` unless the warm-up recorded ``cudagraph_skips == 0`` and one call is
     exactly one ``cudaGraphLaunch``; modules flagged ``capturable = False`` (the ``official``
     backend, O D7) raise before compiling. Call with the same-shaped pool batches."""
@@ -342,7 +395,6 @@ def graph_callable(module: nn.Module, *example_args: Any, warmup: int = 5) -> Ca
     if not torch.cuda.is_available():
         raise NotCapturable("cuda_unavailable")
 
-    torch._dynamo.reset()
     skips_before = int(counters["inductor"]["cudagraph_skips"])
     compiled = torch.compile(module, mode="reduce-overhead", dynamic=False, fullgraph=True)
     with torch.inference_mode():
@@ -382,12 +434,15 @@ def profile_once(fn: Callable[[], Any], top: int = 8) -> list[dict[str, Any]]:
 __all__ = [
     "LIB_SUBTREE",
     "NotCapturable",
+    "clock_histogram",
+    "clock_report",
     "clocks",
     "code_version",
     "files_hash",
     "graph_callable",
     "index_bytes",
     "latency",
+    "latency_group",
     "profile_once",
     "provenance",
     "repo_dirty",

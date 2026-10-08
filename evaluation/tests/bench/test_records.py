@@ -8,7 +8,7 @@ from pathlib import Path
 
 import torch
 
-from bench import records
+from bench import records, report
 from bench.config import load_matrix
 
 CONFIG = Path(__file__).resolve().parents[2] / "config"
@@ -87,7 +87,7 @@ def test_aggregate_one_row_per_perf_entry_last_record_per_key(tmp_path):
     assert seed0[0]["quality_parity"] == "reference" and seed0[0]["env_code_version"] == "c"
     assert json.loads(seed0[0]["params"]) == KEY["params"] and seed0[0]["status"] == "ok"
     assert seed0[0]["env_dirty"] is False and seed0[0]["perf_bs"] == 1  # typed, not strings
-    assert "perf_window_medians_ms" not in rows[0] and "perf_window_sm_mhz" not in rows[0]
+    assert seed0[0]["perf_window_medians_ms"] == [1, 2, 3] and "perf_window_sm_mhz" not in rows[0]
     (r1,) = [r for r in rows if r["seed"] == 1]
     assert r1["perf_mode"] is None and r1["heldout_recall@100"] is None
 
@@ -134,3 +134,35 @@ def test_a_pre_h7_empty_heldout_side_reads_as_null(tmp_path):
     (row,) = records.read_table(records.aggregate(tmp_path))
     assert row["heldout_recall@100"] is None and row["heldout_n"] == 0
     assert row["oracle_recall@100"] == 0.4
+
+
+def test_schema_4_columns_and_the_windows_agree_with_the_nested_record(tmp_path):
+    """The schema-4 body fields reach results.parquet, and the windows the report's bootstrap
+    resamples are the same in the table as in the record ``report._attach`` joins (addendum 2).
+    A schema-3 record reads every new column as null."""
+    p = tmp_path / "filter" / "goodreads-d128.jsonl"
+    entry = {"k": 100, "bs": 16, "mode": "graph", "median_ms": 1.0, "ids_sha256": "ab" * 32,
+             "rounds": 3, "window_medians_ms": [0.9, 1.0, 1.1]}  # fmt: skip
+    rec = {
+        **KEY, "schema_version": 4, "status": "ok", "seed": 1, "seed_scope": "pool",
+        "quality_source": {"seed": 0, "code_version": "c"}, "per_query": "filter/x.npz",
+        "interleave": {"group": "g1", "arms": ["a", "b"], "position": 1}, "quality": None,
+        "perf": [entry], "env": {"code_version": "c", "frac_windows_below_max": 0.25},
+    }  # fmt: skip
+    old = {**KEY, "schema_version": 3, "status": "ok", "quality": None, "perf": [entry],
+           "env": {"code_version": "c"}}  # fmt: skip
+    records.append_record(p, rec)
+    records.append_record(p, old)
+    rows = records.read_table(records.aggregate(tmp_path))
+    new, three = sorted(rows, key=lambda r: -r["schema_version"])
+    assert (new["seed_scope"], new["quality_source_seed"], new["per_query"]) == (
+        "pool", 0, "filter/x.npz")  # fmt: skip
+    assert (new["interleave_group"], new["interleave_position"]) == ("g1", 1)
+    assert (new["perf_ids_sha256"], new["perf_rounds"]) == ("ab" * 32, 3)
+    assert new["env_frac_windows_below_max"] == 0.25
+    for c in ("seed_scope", "quality_source_seed", "per_query", "interleave_group",
+              "interleave_position", "env_frac_windows_below_max"):  # fmt: skip
+        assert three[c] is None
+    report._attach(rows, records.latest(tmp_path))
+    for r in rows:
+        assert r["perf_window_medians_ms"] == r["_entry"]["window_medians_ms"]

@@ -1,0 +1,116 @@
+# The paper's claims table (T1), read by `bench report` (docs/system/evaluation.md § Paper exhibits).
+# Per claim: what the original paper reports and where, the record selectors that yield "ours",
+# and a verdict written by hand after the campaign (holds | partially | does not hold |
+# untestable). The report fills "ours"; it never writes a verdict.
+#
+# An `ours` item: `where` selects records by any results.parquet column (dataset, suite,
+# filter_kind, sweep, algo, backend, seed, ...) plus `params` (a subset of the record's params,
+# null = absent) and must select one arm;
+# `metric` is latency | recall | matched:<recall target> | field:<column>; `vs` (optional)
+# selects the denominator of a ratio; `bs` (default 1) and `k` (default 100).
+# Section numbers marked "section: planner" are not yet traced to the paper text
+# (docs/paper/, roadmap claims matrix).
+
+claims:
+  - id: C1
+    claim: "LiNR V1 (mask) beats V2 (compact) at high pass rate; V2 wins at low pass rate"
+    original: "V1 4.8 ms vs V2 14.6 ms at high pass (B=1); V2 1.9 ms at low pass; 15.5M items"
+    source: "LiNR, arXiv 2407.13218, sec. 5.3 tab. 3 and tab. 5"
+    ours:
+      - label: "V2 / V1 latency, arXiv synthetic p=0.1, B=1"
+        metric: latency
+        bs: 1
+        where: {dataset: arxiv-synth, sweep: p01, algo: linr_v2, backend: triton}
+        vs: {dataset: arxiv-synth, sweep: p01, algo: linr_v1_filter_mask, backend: triton}
+      - label: "V2 / V1 latency, arXiv synthetic p=0.001, B=1"
+        metric: latency
+        bs: 1
+        where: {dataset: arxiv-synth, sweep: p0001, algo: linr_v2, backend: triton}
+        vs: {dataset: arxiv-synth, sweep: p0001, algo: linr_v1_filter_mask, backend: triton}
+    verdict: null
+
+  - id: C2
+    claim: "LiNR V3 (1-bit Sign-OPORP pre-score, rescore ~1%) gives ~10% speedup at near-parity recall"
+    original: "~10% speedup over V2, near-parity recall"
+    source: "LiNR, arXiv 2407.13218, section: planner"
+    ours:
+      - label: "V3 (1% of passing) / V2 latency, arXiv synthetic p=1, B=1"
+        metric: latency
+        bs: 1
+        where: {dataset: arxiv-synth, sweep: p1, algo: linr_v3, backend: triton, params: {candidate_pool_frac: 0.01}}
+        vs: {dataset: arxiv-synth, sweep: p1, algo: linr_v2, backend: triton}
+      - label: "V3 (1% of passing) recall, arXiv synthetic p=1"
+        metric: recall
+        where: {dataset: arxiv-synth, sweep: p1, algo: linr_v3, backend: triton, params: {candidate_pool_frac: 0.01}}
+    verdict: null
+
+  - id: C3
+    claim: "a custom filter kernel is ~100x faster than native masking / indexing"
+    original: "~100x"
+    source: "LiNR, arXiv 2407.13218, section: planner"
+    ours:
+      - label: "V1 torch / triton latency, arXiv synthetic p=0.1, B=1"
+        metric: latency
+        bs: 1
+        where: {dataset: arxiv-synth, sweep: p01, algo: linr_v1_filter_mask, backend: torch, params: {compile: null}}
+        vs: {dataset: arxiv-synth, sweep: p01, algo: linr_v1_filter_mask, backend: triton}
+      - label: "V2 torch / triton latency, arXiv synthetic p=0.1, B=1"
+        metric: latency
+        bs: 1
+        where: {dataset: arxiv-synth, sweep: p01, algo: linr_v2, backend: torch, params: {compile: null}}
+        vs: {dataset: arxiv-synth, sweep: p01, algo: linr_v2, backend: triton}
+    verdict: null
+
+  - id: C4
+    claim: "the SilverTorch bloom index has a low false-positive rate at 1024 bits and small memory"
+    original: "FPR ~0.067% at 1024 bits; 291-523x faster than an inverted index"
+    source: "SilverTorch, arXiv 2511.14881, section: planner"
+    ours:
+      - label: "bloom FPR, Goodreads c0_genre, m_bits 1024, k_hash 5 (official)"
+        metric: field:bloom_fp_rate
+        where: {dataset: goodreads, suite: bloomwidth, sweep: c0_genre, algo: silvertorch, backend: official, params: {m_bits: 1024, k_hash: 5}}
+      - label: "bloom FPR, PubMed c0_mesh, m_bits 1024, k_hash 5 (official)"
+        metric: field:bloom_fp_rate
+        where: {dataset: pubmed, suite: bloomwidth, sweep: c0_mesh, algo: silvertorch, backend: official, params: {m_bits: 1024, k_hash: 5}}
+    verdict: null
+
+  - id: C5
+    claim: "co-design (fused partial masks over the probed clusters) lowers latency against full mask then IVF"
+    original: "1.79-2.15x lower latency"
+    source: "SilverTorch, arXiv 2511.14881, sec. 4.4 (section: planner)"
+    ours:
+      - label: "full / partial latency, arXiv c0_maincat, n_probe 32, B=1 (official)"
+        metric: latency
+        bs: 1
+        where: {dataset: arxiv, suite: codesign, sweep: c0_maincat, backend: official, params: {bloom_path: full, n_probe: 32}}
+        vs: {dataset: arxiv, suite: codesign, sweep: c0_maincat, backend: official, params: {bloom_path: partial, n_probe: 32}}
+    verdict: null
+
+  - id: C6
+    claim: "int8 IVF with the filter in the probe kernel: QPS and latency at high recall"
+    original: "80M items, 24 probes, 1210 QPS on 2 A100; 10M items, 3802 QPS on 1 A100; latency budget at most 200 ms"
+    source: "SilverTorch, arXiv 2511.14881, sec. 6.2"
+    ours:
+      - label: "SilverTorch triton recall, YFCC-10M tags_and, n_probe 24"
+        metric: recall
+        where: {dataset: yfcc10m, suite: filter, sweep: tags_and, filter_kind: clause, algo: silvertorch, backend: triton, params: {n_probe: 24}}
+      - label: "SilverTorch triton latency at recall 0.95, arXiv deep c0_maincat, n_lists 1664, B=1"
+        metric: "matched:0.95"
+        bs: 1
+        where: {dataset: arxiv, suite: deep, sweep: c0_maincat, filter_kind: clause, algo: silvertorch, backend: triton, params: {n_lists: 1664}}
+    verdict: null
+
+  - id: C7
+    claim: "an independent Triton reimplementation matches official int32 results bit-exactly and is faster end to end, while Meta's scorer kernel is faster in isolation"
+    original: "ours (no original number)"
+    source: "this work; h2h suite"
+    ours:
+      - label: "official fp16 / triton latency, Goodreads bloom, B=16"
+        metric: latency
+        bs: 16
+        where: {dataset: goodreads, suite: h2h, filter_kind: bloom, backend: official, params: {score_path: fp16}}
+        vs: {dataset: goodreads, suite: h2h, filter_kind: bloom, backend: triton}
+      - label: "official int32 jaccard@100 against triton, Goodreads bloom"
+        metric: "field:quality_jaccard_vs_first@100"
+        where: {dataset: goodreads, suite: h2h, filter_kind: bloom, backend: official, params: {score_path: int32}}
+    verdict: null

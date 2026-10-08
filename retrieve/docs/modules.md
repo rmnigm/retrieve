@@ -10,8 +10,8 @@ Two families, and the paper's variants of the first:
 
 - **LiNR** — score the corpus directly (full scan or over a candidate set). Simple, exact or
   near-exact, no index-build step. Best at small-to-medium `N` or when you already have a
-  candidate set from an upstream filter. The paper's four variants ship as modules
-  (`LiNRV1`–`LiNRV4`), each composing the primitives (`PostfilterKNN`, `PostfilterKNNInt8`,
+  candidate set from an upstream filter. The paper's variants ship as modules
+  (`LiNRV1`–`LiNRV3`), each composing the primitives (`PostfilterKNN`,
   `PrefilterKNN`, `OneBitKNN`, `SimHashKNN`, `FullScanKNN`) with an optional filter; the
   primitives are public for your own compositions.
 - **SilverTorch** — IVF (clustered) + INT8 ANN. Adds an index-build (k-means) step and approximate
@@ -22,11 +22,9 @@ Two families, and the paper's variants of the first:
 | `LiNRV1` | fp16 inputs, fp32 dot | 1× (fp16) | Dense scan, filter as a mask. |
 | `LiNRV2` | fp16 inputs, fp32 dot | 1× (fp16) | Filter → candidates → exact rescoring; filter required. |
 | `LiNRV3` | Hamming, then fp16-input fp32 dot | ~1/16× + 1× | 1-bit top-`candidate_pool`, then exact rescoring. |
-| `LiNRV4` | INT8 dot product | 0.5× | Dense int8 scan, filter as a mask. |
 | `SilverTorch` | INT8 ANN over IVF | 0.5× + centroids | Scales to large `N`; optional fused filter. |
 | `FullScanKNN` | exact dot product | 1× (fp32) | Reference / small-N. |
 | `PostfilterKNN` | fp16 inputs, fp32 dot | 1× (fp16) | Dense scan + optional boolean mask. |
-| `PostfilterKNNInt8` | INT8 dot product | 0.5× | Dense scan, int32 end-to-end. |
 | `PrefilterKNN` | fp16 inputs, fp32 dot | 1× (fp16) | Scores only a candidate set. |
 | `OneBitKNN` | Hamming (1-bit) | ~1/16× | Sign-OPORP quantization. |
 | `SimHashKNN` | Hamming (1-bit) | ~1/16× | SimHash; `k_bits` can exceed `D`. |
@@ -37,8 +35,8 @@ The public surface, in one import:
 from retrieve import (
     LinrBackend, SilverTorchBackend, RetrievalModule, FilterModule,   # interfaces
     SilverTorch, SilverTorchBuilder, OfficialConfig,                  # Algorithm 1
-    LiNRV1, LiNRV2, LiNRV3, LiNRV4, LiNRBuilder,                      # LiNR paper variants
-    PostfilterKNN, PostfilterKNNInt8, PrefilterKNN, FullScanKNN,      # dense / sparse primitives
+    LiNRV1, LiNRV2, LiNRV3, LiNRBuilder,                              # LiNR paper variants
+    PostfilterKNN, PrefilterKNN, FullScanKNN,                         # dense / sparse primitives
     OneBitKNN, SimHashKNN,                                            # 1-bit primitives
     BloomFilter, ExactAttributeFilter,                                # filters
 )
@@ -49,8 +47,8 @@ import retrieve.modules.official   # Meta's BloomIndexSearchModule(+Builder), Fi
 
 Most modules accept `backend="triton"` (default) or `backend="torch"`. The Triton path runs fused
 kernels; the torch path is pure PyTorch (still GPU) and is `torch.compile`-friendly. Results are
-equivalent. `PostfilterKNN` / `PostfilterKNNInt8` accept the flag for API symmetry but always run
-the same code (cuBLAS already covers their case). `SilverTorch` alone also accepts
+equivalent. `PostfilterKNN` accepts the flag for API symmetry but always runs
+the same code (cuBLAS already covers its case). `SilverTorch` alone also accepts
 `backend="official"`: Meta's own `meta-recsys/silvertorch` kernels (`torch.ops.st.*`, the
 `official` extra — built from source, needs a CUDA toolkit matching your torch) for the scoring
 and bloom phases, with our k-means and quantization in front; it is the reference the Triton
@@ -65,7 +63,7 @@ backend literal — raises `ValueError` at construction.
 
 Each holds its filter (a `BloomFilter` or `ExactAttributeFilter`, see the
 [filtering guide](filtering-and-quantization.md)) as the `filter` submodule, so `buffers()` and
-`state_dict()` cover index and filter (the filter's buffers under `filter.`). All four:
+`state_dict()` cover index and filter (the filter's buffers under `filter.`). All three:
 
 - `register_index(item_embs, item_clause_attrs=None, clause_is_reverse=None)` — registers the
   index and, when attributes are given, the attached filter.
@@ -86,12 +84,9 @@ Each holds its filter (a `BloomFilter` or `ExactAttributeFilter`, see the
   the filter's candidates when there is one), then exact rescoring of the survivors (fp16 inputs, fp32 scores).
   `set_query_params(candidate_pool=...)` changes the pool later (must be `<= N`).
 
-### `LiNRV4(k, *, filter=None, backend="triton")`
-- `PostfilterKNNInt8` + the filter's mask: dense int8 dot product, masked, top-k.
-
 ### `LiNRBuilder(variant, **kwargs)`
 
-`variant` is `"v1"` … `"v4"`, `kwargs` the variant's constructor keywords. Then:
+`variant` is `"v1"`, `"v2"` or `"v3"`, `kwargs` the variant's constructor keywords. Then:
 
 ```python
 v3 = (LiNRBuilder("v3", k=100, candidate_pool=8000)
@@ -116,7 +111,7 @@ Constructor → `register_index` → `forward`. Unless noted, `item_embs` is `[N
 `[B, D]`, and the return is `([B, k] int64 ids, [B, k] scores)`. The score dtype follows the
 module's arithmetic: `FullScanKNN` returns the input dtype (fp32 for fp32 inputs), `OneBitKNN` /
 `SimHashKNN` return fp32, `PostfilterKNN` and `PrefilterKNN` return fp32 on every backend (fp16
-inputs, fp32 accumulation), and `PostfilterKNNInt8` returns fp16. Ranking is what the layers promise; cast at the boundary if you need one dtype.
+inputs, fp32 accumulation). Ranking is what the layers promise; cast at the boundary if you need one dtype.
 
 ### `FullScanKNN(k)`
 - `forward(query, mask=None, candidate_ids=None)`
@@ -127,10 +122,6 @@ inputs, fp32 accumulation), and `PostfilterKNNInt8` returns fp16. Ranking is wha
 ### `PostfilterKNN(k, backend="triton")`
 - `forward(query, mask=None)`
 - Dense dot product (fp16 inputs, fp32 scores) + top-K, with an optional `mask: [B, N] bool` applied before selection.
-
-### `PostfilterKNNInt8(k, backend="triton")`
-- `forward(query, mask=None)`
-- Same as `PostfilterKNN` but INT8 (one global scale), int32 end-to-end. Half the index memory.
 
 ### `PrefilterKNN(k, backend="triton")`
 - `forward(query, candidate_ids=None, counts=None)`

@@ -45,6 +45,12 @@ others (see [Multi-GPU execution](#multi-gpu-execution)).
   Nothing waits on it now (code comes first); the budget gate stops the
   queue before V-AX-SYNTH / V-YFCC if the pilot confirms it, and the user
   then chooses between the full grid and a trimmed one.
+- **Clock-normalised or as-measured ratios (T3, F4b).** Clocks cannot be
+  locked and follow the load: in the freeze's timed smoke, official arms
+  sampled ~1140-1170 MHz while Triton graph sampled 1410 in the same
+  interleaved rounds (8 of 9 records `unstable`). Interleaving pairs drift
+  but cannot equalise a load-dependent clock. Decide before those exhibits
+  get verdicts ([validation](validation.md)).
 - **Citability of a narrowed run.** A run with a narrowed mode set is
   recorded `status: partial` and reported NOT CITABLE. The user decides
   once `bench report` runs on the campaign's output (D1-G).
@@ -117,7 +123,7 @@ multi-GPU numbers are comparable at all.
 
 Every campaign cell runs at the `campaign-v2` tag's code_version (the
 tree hash of `retrieve/src/retrieve`), recorded in
-*evaluation/campaign.yaml* (to be created by CV2-REPORT) ([decisions](decisions.md#campaign-v2-user-2026-10-08)).
+*evaluation/campaign.yaml*: `408b1188d542634b3d18a2f5077bd23537a845fc` ([decisions](decisions.md#campaign-v2-user-2026-10-08)).
 New legs run into fresh result trees; old records are never re-stamped and
 enter the paper only through the reuse rule and the manifest. A
 correctness bug found mid-campaign stops every run; it is fixed and
@@ -147,85 +153,29 @@ claim's remaining runs are skipped and the reason logged.
   slower than official end to end on the frozen code) stops the queue:
   rerun that one cell interleaved and report before anything else runs.
 
-## Phase C: the campaign-v2 code batch (development pod, before any cell)
-
-All of #1-#16 of the re-plan land before the freeze; nothing is cut. Four
-workloads on `dev/cv2-<w>` off `dev/campaign-v2`, editing disjoint files,
-at most two at once; the orchestrator merges green workloads into
-`dev/campaign-v2`. Each workload's gates are in its brief; the headline
-ones are below.
-
-- [ ] **CV2-LIB** (library): #7 LiNR V4 and `PostfilterKNNInt8` out of the
-  library (tag `linr-v4-final` first; golden V4 cells go); #14's library
-  side, an item-range `evaluate_mask(q, start, end)` on both filters; #11
-  L6, official int32 parity against Triton at d ∈ {64, 128, 192, 768}; #16
-  filter-first tile skipping in the fused bloom/exact probe scorer,
-  measured first (`torch.profiler`, kernel-only, interleaved) and kept only
-  if it wins at low pass rate without a regression at p = 1.0. *Gates*:
-  library suite green; L6 and the probe-scorer parity tests **bit-exact**;
-  range mask `torch.equal` to the full mask's slice. **≈ 1 GPU-h** of
-  testing.
-- [ ] **CV2-DATA** (harness config and data): the harness side of #7; #1
-  the synth builder *eval-data synth-filter*, `<ds>-synth.yaml` siblings
-  and `filters.query_attrs`; the `suites.yaml` grid redesign (seeds
-  {0, 1, 2} everywhere, bs {1, 16}, k {100, 1000}, kept sweeps, official on
-  bloom/none only, per-dataset `n_lists` / `n_probe`, `filter` / `deep` /
-  `synth` / `codesign` / `bloomwidth` / `n95` suites); #12 the SilverTorch
-  torch-reference arm; #13 the `torch.compile(mode="max-autotune")` arm
-  (the torch arms on goodreads and arXiv only until C3 is settled there);
-  #15 `m_bits` / `k_hash` as build params; V3 `candidate_pool` as a
-  fraction of passing items. *Gates*: synth CPU test (pass rate within 1 %
-  relative, nesting, determinism); existing record keys byte-identical
-  (**bit-exact**); expansion counts pinned. Merges before CV2-LIB (the
-  harness imports `LiNRV4` until it lands).
-- [ ] **CV2-CORE** (cell loop; after CV2-DATA): #2 quality cache
-  (`seed_scope`); #3 `--interleave` with comparison groups, official
-  `score_path` as a build param and the `h2h` suite; #4 per-query npz
-  sidecars (uploaded); #5 per-(mode, bs, k) id hashes; #14 the chunked
-  exact oracle and *bench oracle*; the per-job clock log. Record schema 4.
-  *Gates*: cached quality equals fresh quality (**bit-exact**); chunked
-  oracle equals the existing blobs on arXiv and PubMed up to counted
-  exact-score ties (**bit-exact otherwise**); ABAB order and per-arm keys
-  pinned.
-- [ ] **CV2-REPORT** (beside CV2-CORE): #8 report fixes (dev/d5-report's
-  postfilter label and the α rule, English labels, matched-recall rows and
-  `n95`, the T1/T2/T3 and F1-F4 generators); #9 statistics (median of
-  window medians, bootstrap CIs over seed × window and over queries, paired
-  ratio CIs for interleaved groups); #6 the campaign manifest
-  *evaluation/campaign.yaml*, read by `bench report --manifest`; #15's
-  FPR / memory columns. *Gates*: every exhibit builds from a fixture tree
-  with one schema-4 record of every arm; known-answer stats tests.
-- [ ] **CV2-FREEZE** (needs the four above): on the integrated tree, the
-  library suite, the harness suite, the golden harness gate (**bit-exact**
-  against the H2 rerun, standing residuals unchanged), one `--skip-perf`
-  smoke cell per suite per dataset (yfcc10m staged first), one timed
-  interleaved smoke, `bench report` over a tree with one record of every
-  arm; then the code_version goes into the manifest, `dev/campaign-v2`
-  merges into staging once, and the orchestrator tags `campaign-v2`.
-  **≈ 2 GPU-h.**
-
-## Phase P: CPU work beside Phase C
+## Phase P: CPU work before the campaign
 
 The claims and the claim-to-evidence matrix are [claims](paper/claims.md);
 the record inventory is [artifacts/campaign-v2](artifacts/campaign-v2/README.md).
 
-- [ ] **Manifest reuse entries** (CPU, after CV2-REPORT): fill
+- [ ] **Manifest reuse entries** (CPU): fill
   *evaluation/campaign.yaml*'s quality and perf entries for the existing
   records that pass the reuse rule
   ([inventory](artifacts/campaign-v2/README.md#c-which-records-pass-the-reuse-rule):
   arXiv `filter` / `deep` quality, timing where the clock criterion holds;
-  SilverTorch-Triton timing only once CV2-LIB's #16 decision is known), and
+  SilverTorch-Triton timing too: #16 was measured and reverted, so the
+  probe-scorer kernels are those of `72e5a90`), and
   the claims' cell selectors ([claims](paper/claims.md)).
 - [ ] **R-RES: the unexplained residuals**, time-boxed to 2 h of CPU:
   `linr_v2` 4.5e-4 and `linr_v3` 1.7e-5 against their golden JSONs, arXiv
   SilverTorch 2.0e-6 ([validation](validation.md#harness-gates)). Still
   unexplained after the box: reported as-is in the deviations table.
 
-## Phase V: the campaign (pods the user creates; needs CV2-FREEZE)
+## Phase V: the campaign (pods the user creates)
 
 GPU 0 takes all timed work from one sequential driver, cores pinned
 NUMA-local; GPU 1 takes quality-only work (`--skip-perf`: oracle builds via
-*bench oracle* (CV2-CORE), bloomwidth quality, the PubMed embedding check, the `n95`
+*bench oracle*, bloomwidth quality, the PubMed embedding check, the `n95`
 probe). Timed work moves to a second GPU only if M1 passes. Exhibits:
 T1 claims, T2 real-filter headline, T3 official vs Triton, F1 latency vs
 pass rate, F2 recall vs pass rate, F3 Pareto, F4a bloom FPR/memory, F4b
@@ -299,7 +249,6 @@ co-design.
 
 | step | A100 GPU-h | GPU | basis |
 |---|---|---|---|
-| CV2-LIB … CV2-FREEZE | ≈ 3 | development pod | tests and smokes |
 | M1 | 0.5 | both | |
 | V-PILOT | ≈ 8-14 | 0 | goodreads Triton cells ~65 s at the v2 grid; the torch arms ~400-460 s and dominate |
 | V-GR-FILTER | ≈ 5 | 0 | ~114 cells; SilverTorch torch + compile ~3 of it |
@@ -324,12 +273,10 @@ tile per width*).
 ## Dependencies
 
 ```
-CV2-DATA ─> CV2-LIB merge;  CV2-DATA ─> CV2-CORE;  CV2-REPORT ∥ CV2-CORE
-CV2-LIB, CV2-DATA, CV2-CORE, CV2-REPORT ─> CV2-FREEZE (tag campaign-v2)
-CV2-REPORT ─> manifest reuse entries ─> CV2-FREEZE
-CV2-FREEZE ─┬─> V-PILOT ─┬─> V-AX-SYNTH ─> V-YFCC ─> V-SEEDS ─┐
-            │            └─> V-GR-DEEP ─────────────────────────┤
-            ├─> V-GR-FILTER, H2H-FINAL, V-CODESIGN, D3 ─────────┤
-            └─> V-PUBMED ───────────────────────────────────────┴─> D1-G ─> F2, F4, F5
+manifest reuse entries, R-RES (CPU) ─┐
+tag campaign-v2 ─────────────────────┴─┬─> V-PILOT ─┬─> V-AX-SYNTH ─> V-YFCC ─> V-SEEDS ─┐
+                                       │            └─> V-GR-DEEP ─────────────────────────┤
+                                       ├─> V-GR-FILTER, H2H-FINAL, V-CODESIGN, D3 ─────────┤
+                                       └─> V-PUBMED ───────────────────────────────────────┴─> D1-G ─> F2, F4, F5
 M1: before any timed step on a multi-GPU pod
 ```

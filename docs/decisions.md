@@ -61,7 +61,8 @@ now on; the [roadmap](roadmap.md) holds the steps.
   goodreads, the license-fixed arXiv attrs); its arm's kernels are proven
   identical to the frozen code by that change's own gates; and its timing
   came from an interleaved comparison or from a run with fewer than 10 %
-  of windows below the maximum sampled clock. Quality and timing are
+  of windows below the device's maximum SM clock (`env.sm_max_mhz`;
+  the record's `env.frac_windows_below_max`). Quality and timing are
   judged separately (quality is largely reusable). Otherwise it is rerun
   or dropped from the exhibit. The manifest names, per (dataset, suite,
   algo, backend), the accepted code_version and Hub subtree for quality and

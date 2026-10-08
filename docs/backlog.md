@@ -94,6 +94,9 @@ the user moving it onto the roadmap.
 
 ## Defects that block no remaining run
 
+- **`scripts/check_doc_links.py` cannot parse `for … in f(...)` in a CLI
+  module** (it reads `node.iter.func.value`); cv2-harness-core shaped
+  `bench/cli.py`'s `_children` around it instead of editing the checker.
 - **`eval-data pubmed plan` trips NCBI's throttle.** Its 16 parallel HEAD +
   Range requests draw HTTP 503 on most of a burst (12 of 18 at 16-way; 1-8
   concurrent pass); `_remote_size` turns the error into size 0 and `plan`

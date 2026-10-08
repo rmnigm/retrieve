@@ -1,0 +1,17 @@
+# Goodreads on synthetic selectivity attrs (docs/system/datasets.md § Synthetic selectivity attrs):
+# the parent's data_dir, encoder and users_limit, so the item embeddings, queries and encode cache are
+# the parent's; the attrs are `eval-data synth-filter --dataset goodreads`'s. Clause j passes item i
+# iff u_i < rates[j], rates (0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0); the query side is all ones.
+# Sweep names stay apart from the parent's in the shared gt_d{dim} (and every blob name carries
+# the attrs digest anyway). One value per clause, so bloom here measures the bloom path's cost,
+# not its false-positive rate (that is bloomwidth's job).
+data_dir: data/goodreads-work-id
+checkpoint: data/goodreads-work-id/checkpoints/sasrec-ssm-logq-d{dim}/best_model.pt
+dims: [64, 128, 256]
+encode: {batch_size: 512, num_workers: 8, max_seq_length: 200}
+users_limit: 10000
+filters:
+  attrs: item_attrs_synth.pt             # relative to data_dir
+  query_attrs: query_attrs_synth.pt
+  clause: {p0001: [0], p0003: [1], p001: [2], p003: [3], p01: [4], p03: [5], p1: [6]}
+  bloom: {p0001: [0], p0003: [1], p001: [2], p003: [3], p01: [4], p03: [5], p1: [6]}

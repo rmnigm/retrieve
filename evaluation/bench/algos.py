@@ -27,7 +27,6 @@ from retrieve import (
     LiNRV1,
     LiNRV2,
     LiNRV3,
-    LiNRV4,
     OfficialConfig,
     SilverTorch,
 )
@@ -38,7 +37,6 @@ ALGOS: dict[str, type[nn.Module]] = {
     "linr_v1_filter_mask": LiNRV1,
     "linr_v2": LiNRV2,
     "linr_v3": LiNRV3,
-    "linr_v4": LiNRV4,
     "silvertorch": SilverTorch,
     "postfilter": Postfilter,
 }
@@ -78,17 +76,22 @@ def is_valid_combo(algo: str, params: dict[str, Any]) -> bool:
 def official_config(
     algo: str, filter_kind: str, backend: str, params: dict[str, Any]
 ) -> OfficialConfig | None:
-    """The ``bloom_path`` build param (the S9 co-design ablation) as ``OfficialConfig``;
-    ``None`` (the library default, ``bloom_path="partial"``) when the key is absent. It has a
-    meaning on ``silvertorch / bloom / official`` only and raises anywhere else."""
-    if "bloom_path" not in params:
+    """The ``bloom_path`` (the S9 co-design ablation) and ``score_path`` (fp16 | int32, the
+    H2H-final arms) build params as ``OfficialConfig``; ``None`` (the library default,
+    ``partial`` / ``fp16``) when both keys are absent. ``bloom_path`` means something on
+    ``silvertorch / bloom / official`` only, ``score_path`` on ``silvertorch / official``;
+    each raises anywhere else."""
+    kw = {k: params[k] for k in ("bloom_path", "score_path") if k in params}
+    if not kw:
         return None
-    if (algo, filter_kind, backend) != ("silvertorch", "bloom", "official"):
+    if "bloom_path" in kw and (algo, filter_kind, backend) != ("silvertorch", "bloom", "official"):
         raise ValueError(
             f"bloom_path applies to silvertorch/bloom/official only, got {algo}/{filter_kind}/"
             f"{backend}"
         )
-    return OfficialConfig(bloom_path=params["bloom_path"])
+    if "score_path" in kw and (algo, backend) != ("silvertorch", "official"):
+        raise ValueError(f"score_path applies to silvertorch/official only, got {algo}/{backend}")
+    return OfficialConfig(**kw)
 
 
 def build_filter(
@@ -131,11 +134,13 @@ def build(
     seed: int = 0,
 ) -> nn.Module:
     """Construct and register one cell's module. ``params`` = build + query params merged
-    (``n_lists``, ``n_probe``, ``n_iter``, ``m_bits``, ``k_hash``, ``candidate_pool``, ``alpha``);
-    ``seed`` drives the k-means and the OPORP projection. SilverTorch fuses the predicate (the
-    attribute buffers live inside it, ``filter_mod`` is unused); the LiNR modules and ``postfilter``
-    take the standalone filter as ``self.filter``. Raises on cells ``PATHS`` marks ``None``."""
+    (``n_lists``, ``n_probe``, ``n_iter``, ``m_bits``, ``k_hash``, ``candidate_pool``, ``alpha``,
+    ``compile``); ``seed`` drives the k-means and the OPORP projection. SilverTorch fuses the
+    predicate (the attribute buffers live inside it, ``filter_mod`` is unused); the LiNR modules
+    and ``postfilter`` take the standalone filter as ``self.filter``. ``compile`` wraps the built
+    module in place (``compile_module``). Raises on cells ``PATHS`` marks ``None``."""
     p = dict(params or {})
+    compile_mode = p.pop("compile", None)
     if PATHS[algo, filter_kind, backend] is None:
         raise ValueError(f"no code path for ({algo}, {filter_kind}, {backend})")
     if not is_valid_combo(algo, p):
@@ -145,6 +150,7 @@ def build(
         bloom = BLOOM_DEFAULTS if mode == "bloom" else {}
         official = official_config(algo, filter_kind, backend, p)
         p.pop("bloom_path", None)
+        p.pop("score_path", None)
         module = SilverTorch(
             k=k, filter_mode=mode, seed=seed, backend=backend, official=official,
             **{**SILVERTORCH_DEFAULTS, **bloom, **p},
@@ -156,11 +162,22 @@ def build(
                 raise ValueError(f"silvertorch/{filter_kind} needs item_attrs")
             rev = clause_is_reverse if mode == "exact" else None
             module.register_index(item_embs, item_clause_attrs=item_attrs, clause_is_reverse=rev)
-        return module
-    if algo == "linr_v3":
-        p["seed"] = seed
-    module = ALGOS[algo](k, filter=filter_mod, backend=backend, **p)
-    module.register_index(item_embs)
+    else:
+        if algo == "linr_v3":
+            p["seed"] = seed
+        module = ALGOS[algo](k, filter=filter_mod, backend=backend, **p)
+        module.register_index(item_embs)
+    return module if compile_mode is None else compile_module(module, compile_mode)
+
+
+def compile_module(module: nn.Module, mode: str) -> nn.Module:
+    """``torch.compile(mode=mode)`` in place (``nn.Module.compile``), so ``k``,
+    ``set_query_params`` and the buffers stay the module's own. Compilation is lazy: the first
+    forward pays it. ``max-autotune`` already replays inductor's own CUDA graphs, so the module
+    is marked uncapturable and ``graph`` mode records a null entry (``not_capturable``)."""
+    module.compile(mode=mode)
+    cls = type(module)  # SilverTorch's capturable is a read-only property: override per instance
+    module.__class__ = type(cls.__name__, (cls,), {"capturable": False})
     return module
 
 
@@ -175,6 +192,7 @@ __all__ = [
     "SILVERTORCH_DEFAULTS",
     "build",
     "build_filter",
+    "compile_module",
     "filter_backend",
     "is_valid_combo",
     "official_config",

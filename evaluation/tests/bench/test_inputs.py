@@ -48,6 +48,7 @@ def _write_dataset(
         encode={},
         attrs=root / "item_attrs_narrow.pt",
         reverse=root / "clause_is_reverse_narrow.pt",
+        query_attrs=root / "eval_split.parquet",
         clauses={"clause": {"c0": (0,), "c0c1": (0, 1)}, "bloom": {"c0": (0,)}},
     )
 
@@ -97,6 +98,22 @@ def test_load_inputs_checks_prefix_and_eval_split_rows(tmp_path):
     ds = Dataset(**{**ds.__dict__, "users_limit": 2})
     with pytest.raises(RuntimeError, match="rows=5 != queries=6"):
         data.load_inputs(ds, torch.device("cpu"))
+
+
+def test_query_attrs_file_replaces_eval_split(tmp_path):
+    """G-qattrs: ``filters.query_attrs`` (a ``.pt``) is read instead of ``eval_split.parquet``
+    with the same full-split row check and the same ``users_limit`` prefix."""
+    ds = _write_dataset(tmp_path)
+    qa = torch.arange(U * 7).reshape(U, 7)
+    torch.save(qa, tmp_path / "query_attrs_synth.pt")
+    ds = Dataset(**{**ds.__dict__, "query_attrs": tmp_path / "query_attrs_synth.pt"})
+    assert torch.equal(data.load_inputs(ds, torch.device("cpu"))["qa"], qa)
+    ds3 = Dataset(**{**ds.__dict__, "users_limit": 3})
+    inp = data.load_inputs(ds3, torch.device("cpu"))
+    assert torch.equal(inp["qa"], qa[:3]) and inp["n_queries"] == 3
+    torch.save(qa[:-1], tmp_path / "query_attrs_synth.pt")
+    with pytest.raises(RuntimeError, match="rows=5 != queries=6"):
+        data.load_inputs(ds3, torch.device("cpu"))  # against the full split, not the prefix
 
 
 # ----- legacy [N+1] layout ---------------------------------------------------------------

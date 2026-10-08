@@ -205,10 +205,16 @@ README_HITS = [[0, 1, 3], [1, 3], [2, 3]]
 # --- T1: int32 path, bit-exact vs the reference and vs Triton --------------------------
 
 
-# d=96 is official-supported but not a Triton power-of-two width: reference gate only.
 @pytest.mark.parametrize(
     "n_lists,max_size,n_probe,d,k",
-    [(16, 64, 4, 64, 8), (64, 96, 8, 128, 32), (32, 64, 8, 96, 16), (32, 90, 8, 128, 32)],
+    [
+        (16, 64, 4, 64, 8),
+        (64, 96, 8, 128, 32),
+        (32, 64, 8, 96, 16),
+        (32, 90, 8, 128, 32),
+        (32, 90, 8, 192, 32),
+        (32, 90, 8, 768, 32),
+    ],
 )
 @pytest.mark.parametrize("b", [1, 16])
 def test_t1_int32_path_bitexact(n_lists, max_size, n_probe, d, k, b):
@@ -217,18 +223,18 @@ def test_t1_int32_path_bitexact(n_lists, max_size, n_probe, d, k, b):
     (same int32 dot, same two left-associated fp32 multiplies, same topk). Ids equal up
     to permutation within tied scores. ``max_size=90`` exercises probed clusters whose
     length is not a multiple of the warp (the official ``process_cluster_remaining``
-    path) and mask words with a pad tail."""
+    path) and mask words with a pad tail; d = 96 / 192 / 768 are not powers of two (Triton
+    pads to ``D_PAD``, kernels.md § Padding)."""
     f = Family(b, n_lists, max_size, n_probe, d)
     out = f.official(k, score_path="int32")
     ref = reference.codesigned_probe_score(*f.ours(), f.global_scale, k, f.width)
     _assert_bitexact(out, ref)
-    if d & (d - 1) == 0:
-        tri = _codesigned_probe_score_impl(*f.ours(), f.global_scale, k, f.width)
-        _assert_bitexact(out, tri)
+    tri = _codesigned_probe_score_impl(*f.ours(), f.global_scale, k, f.width)
+    _assert_bitexact(out, tri)
 
 
 @pytest.mark.parametrize("reverse", ["none", "mixed"])
-@pytest.mark.parametrize("d", [64, 128])
+@pytest.mark.parametrize("d", [64, 128, 192, 768])
 def test_t1_exact_mask_bitexact_vs_triton(d, reverse):
     """Exact mode on the official scorer is our ``clause_mask`` packed into
     ``filtering_bit_mask`` (phase 2 ours, full ``N``): the same AND-of-OR / reverse /
@@ -529,14 +535,18 @@ N_LISTS, N_PROBE = 64, 8
 C, A_MAX = 2, 2
 
 
-@pytest.fixture(scope="module")
-def data():
+def _make_data(d):
     return {
-        "embs": make_index(N, D),
-        "query": make_query(B, D),
+        "embs": make_index(N, d),
+        "query": make_query(B, d),
         "attrs": make_attrs(N, c=C, a_max=A_MAX),
         "q_attrs": make_query_attrs(B, c=C),
     }
+
+
+@pytest.fixture(scope="module")
+def data():
+    return _make_data(D)
 
 
 def _layer(data, backend, filter_mode="none", *, reverse=None, official=None, **kw):
@@ -580,11 +590,13 @@ def _transplant(off: SilverTorch, tri: SilverTorch) -> None:
 @pytest.mark.parametrize(
     "filter_mode,reverse", [("none", None), ("exact", None), ("exact", "mixed")]
 )
-def test_t6_layer_int32_bitexact_vs_triton(data, filter_mode, reverse):
+@pytest.mark.parametrize("d", [64, 128, 192, 768])
+def test_t6_layer_int32_bitexact_vs_triton(d, filter_mode, reverse):
     """``SilverTorch(backend="official", OfficialConfig(score_path="int32"))`` on the Triton
     module's index: scores ``torch.equal``, ids up to ties, on the plain and the exact paths
     (exact runs our ``clause_mask`` packed into the official scorer's bit mask — the same
-    predicate Triton fuses)."""
+    predicate Triton fuses), at power-of-two and padded widths (192, 768: YFCC, PubMed)."""
+    data = _make_data(d)
     rev = torch.tensor([True, False], device="cuda") if reverse else None
     tri = _layer(data, "triton", filter_mode, reverse=rev)
     off = _layer(

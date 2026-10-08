@@ -3,14 +3,16 @@
 One YAML per dataset (``config/<dataset>.yaml``) plus one ``config/suites.yaml``;
 ``load_matrix`` expands ``(dataset, suite)`` into ``Job``s. A ``Job`` is one index *build*:
 ``(dataset, dim, filter_kind, sweep, algo, backend, build params, seed)`` carrying the query-param
-combos measured against that build (§8.2 A: ``n_probe`` / ``candidate_pool`` / ``alpha`` mutate via
-``set_query_params``, they never rebuild), the suite's ``ks`` / ``batch_sizes``, the bloom defaults
-and the resolved ``Dataset`` (paths with ``{dim}`` substituted). One *cell* is ``(job, params)``
+combos measured against that build (§8.2 A: the ``QUERY_PARAMS`` mutate via ``set_query_params``,
+they never rebuild), its ``ks`` / ``batch_sizes``, its bloom (the defaults or the arm's gridded
+widths) and the resolved ``Dataset`` (paths with ``{dim}`` substituted). A suite is a list of
+*arms*: one algo on its backends with optional filter kinds, sweeps, grids and per-dataset
+overrides (docs/system/evaluation.md § Config). One *cell* is ``(job, params)``
 with ``params = build | query combo``; ``Job.key(params)`` is the record's key block and the input
 to ``records.resume_key``.
 
-Backends that run the same code collapse to one job (``PATHS``: ``linr_v1``/``linr_v4`` on
-``none`` are cuBLAS whatever the flag says) and ``(algo, filter_kind, backend)`` triples
+Backends that run the same code collapse to one job (``PATHS``: ``linr_v1`` on ``none``
+is cuBLAS whatever the flag says) and ``(algo, filter_kind, backend)`` triples
 ``PATHS`` marks ``None`` are skipped; both are logged once. Sweep entries accept the long
 form ``{clauses: [...], disabled: true}`` (§8.2 J). No anchors, no env interpolation, no
 schema library: unknown keys and malformed values raise ``ConfigError`` naming the file.
@@ -19,6 +21,7 @@ schema library: unknown keys and malformed values raise ``ConfigError`` naming t
 from __future__ import annotations
 
 import itertools
+import json
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,13 +32,17 @@ from loguru import logger
 
 from bench.algos import ALGOS, BACKENDS, FILTER_KINDS, PATHS, is_valid_combo, official_config
 
-QUERY_PARAMS = frozenset({"n_probe", "candidate_pool", "alpha"})  # set_query_params, no rebuild
+# set_query_params, no rebuild; candidate_pool_frac is resolved per sweep to candidate_pool (run.py)
+QUERY_PARAMS = frozenset({"n_probe", "candidate_pool", "candidate_pool_frac", "alpha"})
+BLOOM_PARAMS = frozenset({"m_bits", "k_hash"})  # gridded on silvertorch/bloom: the job's bloom
+COMPILE_MODES = ("max-autotune",)
 NONE_SWEEP = "full_scan"  # the one sweep of filter_kind ``none`` (the old harness's name)
 _DATASET_KEYS = {"data_dir", "checkpoint", "content_dir", "dims", "encode", "users_limit"}
 _DATASET_KEYS |= {"filters"}
-_FILTER_KEYS = {"attrs", "reverse", "clause", "bloom"}
-_SUITE_KEYS = {"datasets", "dims", "filter_kinds", "ks", "batch_sizes", "algos", "seeds", "params"}
-_SUITE_KEYS |= {"bloom"}
+_FILTER_KEYS = {"attrs", "reverse", "query_attrs", "clause", "bloom"}
+_SUITE_KEYS = {"datasets", "dims", "filter_kinds", "ks", "batch_sizes", "arms", "seeds", "bloom"}
+_SUITE_KEYS |= {"sweeps", "ks_by_sweep", "perf", "interleave"}
+_ARM_KEYS = {"algo", "backends", "filter_kinds", "sweeps", "build", "query", "datasets"}
 _ENCODE = {"batch_size": 512, "num_workers": 8, "max_seq_length": 200}
 _BLOOM = {"m_bits": 1024, "k_hash": 5}
 
@@ -48,7 +55,8 @@ class ConfigError(ValueError):
 class Dataset:
     """One dataset at one dim, every path resolved. ``checkpoint`` set = SASRec-encoded
     queries; ``content_dir`` set = pre-encoded text embeddings (arxiv). ``attrs`` /
-    ``reverse`` are ``None`` without a ``filters:`` block. ``gt_dir`` is derived."""
+    ``reverse`` are ``None`` without a ``filters:`` block; ``query_attrs`` is the query side,
+    ``eval_split.parquet`` unless ``filters.query_attrs`` names a file. ``gt_dir`` is derived."""
 
     name: str
     dim: int
@@ -59,6 +67,7 @@ class Dataset:
     encode: dict[str, int]
     attrs: Path | None
     reverse: Path | None
+    query_attrs: Path
     clauses: dict[str, dict[str, tuple[int, ...]]]  # filter_kind -> sweep -> active clauses
 
     @property
@@ -91,6 +100,8 @@ class Job:
     bloom: dict[str, int]  # m_bits, k_hash (used on bloom cells)
     data: Dataset = field(compare=False, repr=False)
     narrowed: bool = False  # --k / --bs replaced the suite's lists: records are ``partial``
+    timed: bool = True  # False on a quality-only suite (``perf: false``): no perf, still ``ok``
+    interleave: tuple[tuple[tuple[str, ...], tuple | None], ...] = ()  # the suite's (by, values)
 
     def cells(self) -> list[dict[str, Any]]:
         """``params`` of every cell of this job, in query order."""
@@ -188,12 +199,15 @@ def load_dataset(path: Path, dim: int, checkpoint: str | None = None) -> Dataset
     _check_keys(f"{where}: encode", encode, set(_ENCODE))
     filters = raw.get("filters")
     attrs = reverse = None
+    query_attrs = data_dir / "eval_split.parquet"
     clauses: dict[str, dict[str, tuple[int, ...]]] = {}
     if filters is not None:
         _check_keys(f"{where}: filters", filters, _FILTER_KEYS, ["attrs"])
         attrs = data_dir / _template(where, filters["attrs"], dim)
         if filters.get("reverse"):
             reverse = data_dir / _template(where, filters["reverse"], dim)
+        if filters.get("query_attrs"):
+            query_attrs = data_dir / _template(where, filters["query_attrs"], dim)
         clauses = {k: _sweeps(where, k, filters.get(k)) for k in ("clause", "bloom")}
     users_limit = raw.get("users_limit")
     if users_limit is not None and (not isinstance(users_limit, int) or users_limit <= 0):
@@ -213,6 +227,7 @@ def load_dataset(path: Path, dim: int, checkpoint: str | None = None) -> Dataset
         encode=encode,
         attrs=attrs,
         reverse=reverse,
+        query_attrs=query_attrs,
         clauses=clauses,
     )
 
@@ -230,13 +245,10 @@ def _combos(where: str, spec: Any) -> list[dict[str, Any]]:
     raise ConfigError(f"{where}: expected a grid or a list of combos, got {spec!r}")
 
 
-def _params(where: str, spec: Any) -> tuple[list[dict], list[dict]]:
-    """``params.<algo>: {build: ..., query: ...}`` → (build combos, query combos) (§8.2 A)."""
-    if spec is None:
-        return [{}], [{}]
-    _check_keys(where, spec, {"build", "query"})
-    build = _combos(f"{where}.build", spec.get("build"))
-    query = _combos(f"{where}.query", spec.get("query"))
+def _params(where: str, build_spec: Any, query_spec: Any) -> tuple[list[dict], list[dict]]:
+    """An arm's ``build:`` / ``query:`` grids → (build combos, query combos) (§8.2 A)."""
+    build = _combos(f"{where}.build", build_spec)
+    query = _combos(f"{where}.query", query_spec)
     bad_b = {k for c in build for k in c if k in QUERY_PARAMS}
     bad_q = {k for c in query for k in c if k not in QUERY_PARAMS}
     if bad_b or bad_q:
@@ -247,19 +259,27 @@ def _params(where: str, spec: Any) -> tuple[list[dict], list[dict]]:
     return build, query
 
 
-def _seeds(where: str, spec: Any, sweep: str, dim: int) -> tuple[int, ...]:
-    """``[0, 1]`` | ``{default: [...], headline: {sweeps, dims, seeds}}``; missing → ``(0,)``."""
-    if spec is None:
-        return (0,)
-    if isinstance(spec, list):
-        return tuple(int(s) for s in spec)
-    _check_keys(where, spec, {"default", "headline"}, ["default"])
-    head = spec.get("headline")
-    if head:
-        _check_keys(f"{where}.headline", head, {"sweeps", "dims", "seeds"}, ["sweeps", "seeds"])
-        if sweep in head["sweeps"] and dim in head.get("dims", [dim]):
-            return tuple(int(s) for s in head["seeds"])
-    return tuple(int(s) for s in spec["default"])
+def _merge(base: Any, override: Any) -> Any:
+    """A per-dataset override of one grid: key by key when both are dict grids, else whole."""
+    if override is None:
+        return base
+    if isinstance(base, dict) and isinstance(override, dict):
+        return {**base, **override}
+    return override
+
+
+def _check_params(where: str, algo: str, fk: str, backend: str, build: dict, query) -> None:
+    """The params that mean something on one arm only (raising, never ignored)."""
+    try:
+        official_config(algo, fk, backend, build)
+    except ValueError as e:
+        raise ConfigError(f"{where}: {e}") from e
+    if BLOOM_PARAMS & set(build) and (algo, fk) != ("silvertorch", "bloom"):
+        raise ConfigError(f"{where}: m_bits / k_hash are build params of silvertorch/bloom only")
+    if "compile" in build and (backend != "torch" or build["compile"] not in COMPILE_MODES):
+        raise ConfigError(f"{where}: compile is one of {COMPILE_MODES} on torch arms only")
+    if any("candidate_pool_frac" in q for q in query) and algo != "linr_v3":
+        raise ConfigError(f"{where}: candidate_pool_frac is a linr_v3 query param")
 
 
 def _narrow(values: Sequence, chosen: Sequence | None, what: str) -> list:
@@ -269,6 +289,97 @@ def _narrow(values: Sequence, chosen: Sequence | None, what: str) -> list:
     if not out:
         logger.warning("--{} {} selects nothing from {}", what, list(chosen), list(values))
     return out
+
+
+def _known_sweeps(where: str, names: Any, ds: Dataset) -> list[str]:
+    if not isinstance(names, list) or not all(isinstance(x, str) for x in names):
+        raise ConfigError(f"{where}: expected a list of sweep names, got {names!r}")
+    unknown = set(names) - {sw for sweeps in ds.clauses.values() for sw in sweeps}
+    if unknown:
+        raise ConfigError(f"{where}: sweeps {sorted(unknown)} not in {ds.name}")
+    return names
+
+
+def _check_suite(where: str, s: dict) -> None:
+    _check_keys(where, s, _SUITE_KEYS, ["datasets", "filter_kinds", "ks", "batch_sizes", "arms"])
+    unknown_fk = set(s["filter_kinds"]) - set(FILTER_KINDS)
+    if unknown_fk:
+        raise ConfigError(f"{where}: unknown filter_kinds {sorted(unknown_fk)}")
+    if not isinstance(s["arms"], list) or not s["arms"]:
+        raise ConfigError(f"{where}: arms must be a non-empty list")
+    for i, arm in enumerate(s["arms"]):
+        aw = f"{where}: arms[{i}]"
+        _check_keys(aw, arm, _ARM_KEYS, ["algo", "backends"])
+        if arm["algo"] not in ALGOS:
+            raise ConfigError(f"{aw}: unknown algo {arm['algo']!r}")
+        bad_be = set(arm["backends"]) - set(BACKENDS)
+        bad_fk = set(arm.get("filter_kinds") or []) - set(s["filter_kinds"])
+        bad_ds = set(arm.get("datasets") or {}) - set(s["datasets"])
+        if bad_be or bad_fk or bad_ds:
+            raise ConfigError(
+                f"{aw}: unknown backends {sorted(bad_be)}, filter_kinds {sorted(bad_fk)} or "
+                f"datasets {sorted(bad_ds)} (filter kinds and datasets must be the suite's)"
+            )
+
+
+def _interleave(where: str, raw: Any) -> tuple[tuple[tuple[str, ...], tuple | None], ...]:
+    """A suite's ``interleave:`` list → ``((by fields, values or None), ...)``. ``by`` is
+    ``algo``, ``backend`` or build params (one name or a list); ``values`` (one ``by`` field
+    only) limits which arms join."""
+    out = []
+    for i, g in enumerate(raw or []):
+        gw = f"{where}: interleave[{i}]"
+        _check_keys(gw, g, {"by", "values"}, ["by"])
+        by = tuple([g["by"]] if isinstance(g["by"], str) else g["by"])
+        if not by or not all(isinstance(f, str) for f in by) or QUERY_PARAMS & set(by):
+            raise ConfigError(f"{gw}: by is algo, backend or build params, got {g['by']!r}")
+        values = g.get("values")
+        if values is not None and (len(by) != 1 or not isinstance(values, list) or not values):
+            raise ConfigError(f"{gw}: values is a non-empty list, with one by field only")
+        out.append((by, None if values is None else tuple(values)))
+    return tuple(out)
+
+
+def _dim_value(job: Job, field: str) -> Any:
+    return getattr(job, field) if field in ("algo", "backend") else job.build.get(field)
+
+
+def shared_key(job: Job, params: dict[str, Any], by: tuple[str, ...]) -> dict[str, Any]:
+    """The key block of one cell minus the group's ``by`` fields: what the arms of one
+    interleave group have in common (the seed included, so a group is per seed)."""
+    key = job.key(params)
+    key["params"] = {k: v for k, v in key["params"].items() if k not in by}
+    return {k: v for k, v in key.items() if k not in by}
+
+
+def interleave_units(jobs: Sequence[Job]) -> list[tuple[tuple[str, ...] | None, list[Job]]]:
+    """Partition ``jobs`` into ``(by, members)`` units in first-member order: the jobs of one
+    suite comparison group (same key but for the ``by`` fields, query params aside) form one
+    unit, every other job is a unit of its own (``by`` None). A job in two groups of two or
+    more is a ``ConfigError``."""
+    clusters: dict[str, list[Job]] = {}
+    for j in jobs:
+        for by, values in j.interleave:
+            if values is not None and _dim_value(j, by[0]) not in values:
+                continue
+            c = json.dumps([by, shared_key(j, j.build, by)], sort_keys=True, default=str)
+            clusters.setdefault(c, []).append(j)
+    unit_of: dict[int, tuple[tuple[str, ...], list[Job]]] = {}
+    for c, members in clusters.items():
+        if len(members) < 2:
+            continue
+        for j in members:
+            if id(j) in unit_of:
+                raise ConfigError(f"{j.suite}: {j.key()} is in two interleave groups")
+            unit_of[id(j)] = (tuple(json.loads(c)[0]), members)
+    units: list[tuple[tuple[str, ...] | None, list[Job]]] = []
+    seen: set[int] = set()
+    for j in jobs:
+        if id(j) not in seen:
+            by, members = unit_of.get(id(j), (None, [j]))
+            seen.update(map(id, members))
+            units.append((by, members))
+    return units
 
 
 # ----- expansion ------------------------------------------------------------------------
@@ -290,103 +401,163 @@ def load_matrix(
     checkpoint: str | None = None,
 ) -> list[Job]:
     """Expand one ``(dataset, suite)`` into jobs, grouped by ``Job.group`` in the order
-    ``dim → algo → backend → filter_kind → sweep → build → seed``. Keyword narrows are the
-    CLI overrides (H §3.4): they filter the suite's lists *before* the PATHS collapse, so
-    ``backends=["torch"]`` on a ``none`` cell yields the cuBLAS job labelled ``torch``.
-    ``ks`` / ``batch_sizes`` *replace* the suite's lists rather than select cells, so when
-    they differ the jobs are ``narrowed`` and ``run`` records them as ``partial``."""
+    ``dim → algo → backend → arm → filter_kind → sweep → build → seed``. Each of a suite's
+    ``arms`` names an algo and its backends, optionally the filter kinds, sweeps, ``build`` /
+    ``query`` grids and the datasets it runs on, each with its own overrides
+    (docs/system/evaluation.md § Config). Keyword narrows are the CLI overrides (H §3.4): they
+    filter the lists *before* the PATHS collapse, so ``backends=["torch"]`` on a ``none`` cell
+    yields the cuBLAS job labelled ``torch``. ``ks`` / ``batch_sizes`` *replace* the suite's
+    lists rather than select cells, so when they differ the jobs are ``narrowed`` and ``run``
+    records them as ``partial``."""
     suites = _read(suites_yaml)
     if suite not in suites:
         raise ConfigError(f"{suites_yaml}: no suite {suite!r}; have {sorted(suites)}")
     where = f"{suites_yaml}: {suite}"
     s = suites[suite]
-    _check_keys(where, s, _SUITE_KEYS, ["datasets", "filter_kinds", "ks", "batch_sizes", "algos"])
+    _check_suite(where, s)
     name = Path(dataset_yaml).stem
     if name not in s["datasets"]:
         raise ConfigError(f"{where}: dataset {name!r} not in {s['datasets']}")
-    _check_keys(f"{where}: algos", s["algos"], set(ALGOS))
-    unknown_fk = set(s["filter_kinds"]) - set(FILTER_KINDS)
-    unknown_be = {b for bs in s["algos"].values() for b in bs} - set(BACKENDS)
-    if unknown_fk or unknown_be:
-        raise ConfigError(
-            f"{where}: unknown filter_kinds {sorted(unknown_fk)}, backends {sorted(unknown_be)}"
-        )
-    suite_ks, suite_bs = (
-        _ints(f"{where}: ks", s["ks"]),
-        _ints(f"{where}: batch_sizes", s["batch_sizes"]),
-    )
-    ks_ = suite_ks if ks is None else _ints("--k", list(ks))
+    suite_ks = _ints(f"{where}: ks", s["ks"])
+    suite_bs = _ints(f"{where}: batch_sizes", s["batch_sizes"])
     bs_ = suite_bs if batch_sizes is None else _ints("--bs", list(batch_sizes))
-    narrowed = set(ks_) != set(suite_ks) or set(bs_) != set(suite_bs)
-    if narrowed:
-        logger.info("--k / --bs replace the suite's lists: every record will be status: partial")
+    seed_list = s.get("seeds", [0])
+    if not isinstance(seed_list, list) or not all(isinstance(x, int) and x >= 0 for x in seed_list):
+        raise ConfigError(f"{where}: seeds must be a list of ints >= 0, got {seed_list!r}")
     bloom = {**_BLOOM, **(suites.get("bloom") or {}), **(s.get("bloom") or {})}
+    groups = _interleave(where, s.get("interleave"))
+    timed = s.get("perf", True)
+    if not isinstance(timed, bool):
+        raise ConfigError(f"{where}: perf must be true or false, got {timed!r}")
     raw_dims = _ints(f"{dataset_yaml}: dims", _read(dataset_yaml).get("dims"))
     dims_ = _narrow([d for d in raw_dims if d in s.get("dims", raw_dims)], dims, "dim")
     fks = _narrow(s["filter_kinds"], filter_kinds, "filter-kind")
+    sweep_ks = (s.get("ks_by_sweep") or {}).get(name) or {}
+    arm_algos = list(dict.fromkeys(a["algo"] for a in s["arms"]))
 
     jobs: list[Job] = []
+    owner: dict[tuple, str] = {}  # (dim, algo, fk, sweep, path, params, seed) -> backend
     for dim in dims_:
         ds = load_dataset(Path(dataset_yaml), dim, checkpoint)
-        for algo in _narrow(list(s["algos"]), algos, "algo"):
-            builds, queries = _params(f"{where}: params.{algo}", (s.get("params") or {}).get(algo))
-            seen: dict[tuple[str, str], str] = {}  # (filter_kind, path) -> first backend
-            for backend in _narrow(s["algos"][algo], backends, "backend"):
-                for fk in fks:
-                    path = PATHS[(algo, fk, backend)]
-                    if path is None:
-                        logger.info("skip {}/{}/{}: no code path", algo, fk, backend)
+        suite_sweeps = (s.get("sweeps") or {}).get(name)
+        if suite_sweeps is not None:
+            _known_sweeps(f"{where}: sweeps.{name}", suite_sweeps, ds)
+        _known_sweeps(f"{where}: ks_by_sweep.{name}", list(sweep_ks), ds)
+        for algo in _narrow(arm_algos, algos, "algo"):
+            arms = [(i, a) for i, a in enumerate(s["arms"]) if a["algo"] == algo]
+            arm_backends = list(dict.fromkeys(b for _, a in arms for b in a["backends"]))
+            for backend in _narrow(arm_backends, backends, "backend"):
+                for i, arm in arms:
+                    aw = f"{where}: arms[{i}]"
+                    if backend not in arm["backends"]:
                         continue
-                    if (fk, path) in seen:
-                        first = seen[fk, path]
-                        logger.info("collapse {}/{}/{} -> {} ({})", algo, fk, backend, first, path)
+                    if "datasets" in arm and name not in (arm["datasets"] or {}):
                         continue
-                    seen[fk, path] = backend
-                    sweep_defs = ds.clauses.get(fk, {}) if fk != "none" else {NONE_SWEEP: None}
-                    for sweep in _narrow(list(sweep_defs), sweeps, "sweep"):
-                        for build in builds:
-                            try:
-                                official_config(algo, fk, backend, build)
-                            except ValueError as e:
-                                raise ConfigError(f"{where}: {e}") from e
-                            qs = tuple(q for q in queries if is_valid_combo(algo, {**build, **q}))
-                            if len(qs) < len(queries):
-                                logger.info("{} build={}: invalid combos dropped", algo, build)
-                            if not qs:
-                                continue
-                            seed_list = _seeds(f"{where}: seeds", s.get("seeds"), sweep, dim)
-                            for seed in _narrow(seed_list, seeds, "seed"):
-                                jobs.append(
-                                    Job(
-                                        dataset=name,
-                                        dim=dim,
-                                        suite=suite,
-                                        filter_kind=fk,
-                                        sweep=sweep,
-                                        clauses=sweep_defs[sweep],
-                                        algo=algo,
-                                        backend=backend,
-                                        path=path,
-                                        build=dict(build),
-                                        query=qs,
-                                        ks=ks_,
-                                        batch_sizes=bs_,
-                                        seed=seed,
-                                        bloom=dict(bloom),
-                                        data=ds,
-                                        narrowed=narrowed,
-                                    )
+                    over = (arm.get("datasets") or {}).get(name) or {}
+                    _check_keys(f"{aw}.datasets.{name}", over, {"build", "query", "sweeps"})
+                    builds, queries = _params(
+                        aw,
+                        _merge(arm.get("build"), over.get("build")),
+                        _merge(arm.get("query"), over.get("query")),
+                    )
+                    arm_sweeps = over.get("sweeps", arm.get("sweeps"))
+                    if arm_sweeps is not None:
+                        _known_sweeps(f"{aw}: sweeps", arm_sweeps, ds)
+                    for fk in fks:
+                        if fk not in (arm.get("filter_kinds") or s["filter_kinds"]):
+                            continue
+                        path = PATHS[(algo, fk, backend)]
+                        if path is None:
+                            logger.info("skip {}/{}/{}: no code path", algo, fk, backend)
+                            continue
+                        sweep_defs = ds.clauses.get(fk, {}) if fk != "none" else {NONE_SWEEP: None}
+                        kept = [
+                            sw
+                            for sw in sweep_defs
+                            if fk == "none"
+                            or (suite_sweeps is None or sw in suite_sweeps)
+                            and (arm_sweeps is None or sw in arm_sweeps)
+                        ]
+                        for sweep in _narrow(kept, sweeps, "sweep"):
+                            job_ks = (
+                                _ints(f"{where}: ks_by_sweep", sweep_ks[sweep])
+                                if sweep in sweep_ks
+                                else suite_ks
+                            )
+                            ks_ = job_ks if ks is None else _ints("--k", list(ks))
+                            narrowed = set(ks_) != set(job_ks) or set(bs_) != set(suite_bs)
+                            for build in builds:
+                                _check_params(aw, algo, fk, backend, build, queries)
+                                qs = tuple(
+                                    q for q in queries if is_valid_combo(algo, {**build, **q})
                                 )
+                                if len(qs) < len(queries):
+                                    logger.info("{} build={}: invalid combos dropped", algo, build)
+                                if not qs:
+                                    continue
+                                widths = {k: build[k] for k in BLOOM_PARAMS & set(build)}
+                                for seed in _narrow(list(seed_list), seeds, "seed"):
+                                    cells = [
+                                        (dim, algo, fk, sweep, path, _canon({**build, **q}), seed)
+                                        for q in qs
+                                    ]
+                                    taken = [owner[c] for c in cells if c in owner]
+                                    if backend in taken:
+                                        raise ConfigError(f"{aw}: a cell twice: {cells[0]}")
+                                    if taken:
+                                        if len(taken) < len(cells):
+                                            raise ConfigError(
+                                                f"{aw}: {algo}/{fk}/{backend} shares part of "
+                                                f"its cells with {taken[0]} on path {path}"
+                                            )
+                                        logger.info(
+                                            "collapse {}/{}/{} -> {} ({})",
+                                            algo, fk, backend, taken[0], path,
+                                        )  # fmt: skip
+                                        continue
+                                    owner.update(dict.fromkeys(cells, backend))
+                                    jobs.append(
+                                        Job(
+                                            dataset=name,
+                                            dim=dim,
+                                            suite=suite,
+                                            filter_kind=fk,
+                                            sweep=sweep,
+                                            clauses=sweep_defs[sweep],
+                                            algo=algo,
+                                            backend=backend,
+                                            path=path,
+                                            build=dict(build),
+                                            query=qs,
+                                            ks=ks_,
+                                            batch_sizes=bs_,
+                                            seed=seed,
+                                            bloom={**bloom, **widths},
+                                            data=ds,
+                                            narrowed=narrowed,
+                                            timed=timed,
+                                            interleave=groups,
+                                        )
+                                    )
     logger.info("{}/{}: {} jobs, {} cells", name, suite, len(jobs), sum(len(j.query) for j in jobs))
+    interleave_units(jobs)  # a job in two groups fails here, not mid-run
     return jobs
 
 
+def _canon(params: dict[str, Any]) -> str:
+    return json.dumps(params, sort_keys=True)
+
+
 __all__ = [
+    "BLOOM_PARAMS",
+    "COMPILE_MODES",
     "NONE_SWEEP",
     "QUERY_PARAMS",
     "ConfigError",
     "Dataset",
     "Job",
+    "interleave_units",
     "load_dataset",
     "load_matrix",
+    "shared_key",
 ]

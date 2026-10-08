@@ -4,22 +4,22 @@ quality:
   filter_kinds: [none]
   ks: [10, 50]
   batch_sizes: [1]
-  algos:
-    linr_v1_filter_mask: [triton, torch]      # collapses to one cuBLAS job
-    linr_v3: [triton, torch]
-    silvertorch: [triton, torch, official]
+  arms:
+    - {algo: linr_v1_filter_mask, backends: [triton, torch]}   # collapses to one cuBLAS job
+    - {algo: linr_v3, backends: [triton, torch]}
+    - {algo: silvertorch, backends: [triton, torch, official]}
 filter:
   datasets: [mini]
   filter_kinds: [clause, bloom]
   ks: [10, 50]
   batch_sizes: [1, 2]
-  algos:
-    linr_v2: [triton, torch]
-    linr_v3: [torch]
-    silvertorch: [triton, official]
-  seeds:
-    default: [0]
-    headline: {sweeps: [c0], dims: [32], seeds: [0, 1, 2]}
+  seeds: [0, 1, 2]
+  sweeps: {mini: [c0, c0c1]}
+  arms:
+    - {algo: linr_v2, backends: [triton, torch]}
+    - {algo: linr_v3, backends: [torch], sweeps: [c0]}
+    - {algo: silvertorch, backends: [triton]}
+    - {algo: silvertorch, backends: [official], filter_kinds: [bloom]}
 deep:
   datasets: [mini]
   dims: [32]
@@ -27,12 +27,13 @@ deep:
   ks: [10]
   batch_sizes: [1]
   seeds: [0, 1]
-  algos:
-    silvertorch: [triton]
-    linr_v3: [torch]
-  params:
-    silvertorch: {build: {n_lists: [8, 64]}, query: {n_probe: [4, 16, 64]}}
-    linr_v3: {query: [{candidate_pool: 20}, {candidate_pool: 40}]}
+  arms:
+    - algo: silvertorch
+      backends: [triton]
+      build: {n_lists: [8]}
+      query: {n_probe: [4, 16, 64]}
+      datasets: {mini: {build: {n_lists: [8, 64]}}}
+    - {algo: linr_v3, backends: [torch], query: [{candidate_pool: 20}, {candidate_pool: 40}]}
   bloom: {m_bits: 128}
 codesign:
   datasets: [mini]
@@ -40,23 +41,36 @@ codesign:
   filter_kinds: [bloom]
   ks: [10]
   batch_sizes: [1]
-  algos: {silvertorch: [official]}
-  params:
-    silvertorch: {build: {n_lists: [8], bloom_path: [partial, full]}, query: {n_probe: [4, 8]}}
+  arms:
+    - algo: silvertorch
+      backends: [official]
+      build: {n_lists: [8], bloom_path: [partial, full]}
+      query: {n_probe: [4, 8]}
 bad_bloom_path:
   datasets: [mini]
   filter_kinds: [clause, bloom]
   ks: [10]
   batch_sizes: [1]
-  algos: {silvertorch: [official]}
-  params:
-    silvertorch: {build: {bloom_path: [full]}}   # bloom only: the clause job → ConfigError
+  arms:   # bloom only: the clause job → ConfigError
+    - {algo: silvertorch, backends: [official], build: {bloom_path: [full]}}
 bad_params:
   datasets: [mini]
   filter_kinds: [none]
   ks: [10]
   batch_sizes: [1]
-  algos: {silvertorch: [triton]}
-  params:
-    silvertorch: {build: {n_probe: [4]}}     # n_probe is a query param → ConfigError
+  arms:   # n_probe is a query param → ConfigError
+    - {algo: silvertorch, backends: [triton], build: {n_probe: [4]}}
+widths:
+  datasets: [mini]
+  dims: [32]
+  filter_kinds: [clause, bloom]
+  ks: [10, 50]
+  batch_sizes: [1]
+  ks_by_sweep: {mini: {c0c1: [10]}}
+  arms:
+    - {algo: silvertorch, backends: [triton], filter_kinds: [bloom], build: {m_bits: [64, 256]}}
+    - {algo: silvertorch, backends: [triton], filter_kinds: [clause]}
+    - {algo: silvertorch, backends: [torch], build: {compile: [max-autotune]}}
+    - {algo: linr_v3, backends: [triton], query: {candidate_pool_frac: [0.1]}}
+    - {algo: linr_v2, backends: [torch], datasets: {}}   # an empty slot runs nowhere
 bloom: {m_bits: 64, k_hash: 3}

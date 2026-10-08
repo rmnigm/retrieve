@@ -24,8 +24,7 @@ signature in [`ops/reference/`](../../retrieve/src/retrieve/ops/reference/)
 - LiNR — kernels used by `PrefilterKNN` / `OneBitKNN` / `SimHashKNN`
   (`fused_masked_knn_topk`,
   `oporp_1bit_match_topk`). `PostfilterKNN`'s dense fp16-input matmul +
-  top-K and `PostfilterKNNInt8`'s int8 `_int_mm` + int32 top-K are
-  both pure torch — there's no real fusion to win over cuBLAS LtGemm +
+  top-K is pure torch — there's no real fusion to win over cuBLAS LtGemm +
   CUB.
 - filters — standalone filter primitives consumed by the `FilterModule`
   family: `clause_compact` (powers `ExactAttributeFilter.evaluate_indices`),
@@ -427,24 +426,6 @@ host-side `torch.topk`, so its memory traffic and selection cost match
 cuBLAS + CUB exactly. `PostfilterKNN` accepts the
 `backend=` flag for API symmetry but both values dispatch to this same
 pure-torch path.
-
-## PostfilterKNNInt8 dense path — pure torch, no kernel
-
-`PostfilterKNNInt8`'s forward is `torch._int_mm(query_codes,
-item_codes_T)` (int8×int8 → int32, cuBLAS LtGemm, IMMA tensor cores on
-sm_80+) + optional `masked_fill(int32_min)` + `torch.topk` on the int32
-result — implemented directly in
-[`PostfilterKNNInt8`](../../retrieve/src/retrieve/modules/knn.py).
-Items and queries are int8-quantized with one global scalar scale each
-(SilverTorch §3.2); because both scales are global constants per call,
-the int32 dot product is a positive monotonic transform of the true
-fp32 dot, so topk ordering is exact (modulo per-element int8 rounding)
-without rescaling to fp32. Storage is one `[D, N]` int8 buffer — half
-of `PostfilterKNN`'s fp16 layout. `torch._int_mm` requires `M >=
-17`, so small batches are zero-padded before the matmul and sliced
-after; quantization runs **before** padding so the padded zero rows
-don't shift the global scale. No Triton kernel; `backend=` is accepted
-for API symmetry but both values dispatch here.
 
 ## `fused_masked_knn_topk` — PrefilterKNN sparse path
 
@@ -921,7 +902,6 @@ each module runs the same op chain in pure torch (no kernels), eager.
 | layer                       | path         | kernel(s) called                                  |
 |-----------------------------|--------------|---------------------------------------------------|
 | [`PostfilterKNN`](../../retrieve/src/retrieve/modules/knn.py) | always dense | none — pure torch `(q @ x.T)` + `masked_topk` |
-| [`PostfilterKNNInt8`](../../retrieve/src/retrieve/modules/knn.py) | always dense | none — pure torch `torch._int_mm(...)` + `masked_topk` (int8×int8 → int32, IMMA) |
 | [`PrefilterKNN`](../../retrieve/src/retrieve/modules/knn.py)         | candidates   | `fused_masked_knn_topk` over caller-precompacted `(candidate_ids, counts)` |
 |                                                                | unmasked     | none — pure torch dense path (nothing to pre-filter) |
 | [`OneBitKNN`](../../retrieve/src/retrieve/modules/bit_knn.py) / [`SimHashKNN`](../../retrieve/src/retrieve/modules/bit_knn.py) | full         | `oporp_1bit_match_topk_full` (HAS_INDICES=False)       |
@@ -1184,6 +1164,21 @@ codesigned-probe-score --d <D>`. `HAS_QB`
 is a body-level constexpr (the bloom-on and bloom-off paths JIT-specialise
 on it). The score buffer is `torch.empty([B, width])`: every slot is
 written (a dot, or `-inf`), so there is no pre-fill.
+
+**Filtered items cost no HBM bytes; whole tiles are not skipped.** Both
+filtered scorers (this one with `HAS_QB`, and the exact one below) evaluate
+the filter first and mask the int8 code load with `keep`, so a failing
+item's code row is never fetched: at bs 16, a pass rate of 0.001 scores
+18–39 % faster than a pass rate of 1.0 on the same layout. What a failing
+lane still costs is its share of the tile's `tl.dot` and epilogue. Skipping a
+tile when no lane passes (`tl.max(keep) == 0` → store `-inf`, no load, no dot)
+was measured and **not shipped**. It is bit-exact and about 30 % faster at
+p = 0.001, but at p = 0.01 about 92 % of 256-lane tiles still hold a passing
+item (`1 − 0.99²⁵⁶`), so the gain disappears (arXiv exact 1.000 [0.992,
+1.008]). The extra reduction and branch cost +2 to 6 % at p ≥ 0.1. Meta's scorer gains about 3× at p ≤ 0.01, consistent
+with a finer skip unit; this is not validated (validation
+row *Probe-scorer tile skipping*;
+[artifact](../artifacts/campaign-v2/tile-skip/README.md)).
 
 ### `codesigned_probe_score_exact` — IVF + INT8 + exact AND-of-OR
 

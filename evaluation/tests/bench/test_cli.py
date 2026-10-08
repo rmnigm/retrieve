@@ -35,7 +35,7 @@ def test_cli_run_campaign_and_report(tiny_configs, tmp_path):
          "--sweep", "c0", "--mode", "eager", "--skip-perf", *common],
     )  # fmt: skip
     assert r.exit_code == 0, r.output
-    recs = _records(out / "e2e" / "tiny-d8.jsonl")
+    recs = _records(out / "e2e" / "tiny-d64.jsonl")
     assert len(recs) == 1 and recs[0]["status"] == "partial" and recs[0]["perf"] is None
     assert len(recs[0]["env"]["config_sha"]) == 16 and "sm_mhz_idle" in recs[0]["env"]
     # campaign: one child per (dataset, dim, algo, backend) group — the e2e1 suite has one —
@@ -47,13 +47,16 @@ def test_cli_run_campaign_and_report(tiny_configs, tmp_path):
     )  # fmt: skip
     assert r.exit_code == 0, r.output
     logs = sorted(p.name for p in (out / "_logs").iterdir())
-    assert logs == ["campaign.log", "e2e1_tiny-d8_linr_v1_filter_mask_torch.log"]
-    assert (out / "_logs" / logs[1]).read_text().startswith("=== ")  # the command line first
+    assert logs == ["campaign.log", "e2e1_tiny-d64_linr_v1_filter_mask_torch.log"]
+    child_log = (out / "_logs" / logs[1]).read_text()
+    assert child_log.startswith("=== ")  # the command line first
+    start, end = child_log.index("=== clocks at start"), child_log.index("=== clocks at end")
+    assert start < child_log.index("sm_mhz under load (n=0)") < end  # the child's histogram
     summary = (out / "_logs" / "campaign.log").read_text()
     assert summary.count(" rc=0 ") == 1 and "finished children=1 rc=0" in summary
     assert not (out / "_parity").exists()  # dropped when the algo group closed
     assert len(records.read_table(out / "results.parquet")) == 4  # bench run's 1 + these 3
-    recs = _records(out / "e2e1" / "tiny-d8.jsonl")
+    recs = _records(out / "e2e1" / "tiny-d64.jsonl")
     assert [(r["filter_kind"], r["sweep"]) for r in recs] == [
         ("none", "full_scan"), ("clause", "c0"), ("clause", "c0c1")
     ]  # fmt: skip
@@ -87,7 +90,7 @@ def test_campaign_records_a_timed_out_child(tiny_configs, tmp_path, monkeypatch)
     assert seen == [1800.0, 1800.0]  # two groups, both attempted
     summary = (out / "_logs" / "campaign.log").read_text()
     assert summary.count(" rc=timeout ") == 2 and "finished children=2 rc=124" in summary
-    child_log = (out / "_logs" / "e2e_tiny-d8_linr_v4_torch.log").read_text()
+    child_log = (out / "_logs" / "e2e_tiny-d64_linr_v3_torch.log").read_text()
     assert "killed after 0.5 h" in child_log
 
 
@@ -125,7 +128,7 @@ def test_campaign_restart_keeps_the_groups_parity_spill(tiny_configs, tmp_path, 
         m.setattr(run.algos, "filter_backend", lambda b: "torch")
         run.run([dataclasses.replace(j, backend="official") for j in clause], out_dir=out,
                 skip_perf=True)  # fmt: skip
-    stale = out / "_parity" / "other-d8_linr_v4" / "0.npz"
+    stale = out / "_parity" / "other-d64_linr_v3" / "0.npz"
     stale.parent.mkdir()
     stale.write_bytes(b"")
     seen = []
@@ -144,15 +147,15 @@ def test_campaign_restart_keeps_the_groups_parity_spill(tiny_configs, tmp_path, 
     )
     assert r.exit_code == 0, r.output
     assert seen == [False, False]
-    recs = [r for r in _records(out / "e2e" / "tiny-d8.jsonl") if r["backend"] == "torch"]
+    recs = [r for r in _records(out / "e2e" / "tiny-d64.jsonl") if r["backend"] == "torch"]
     parity = {(r["algo"], r["sweep"]): r["quality"]["parity"] for r in recs}
     assert parity == {
         ("linr_v1_filter_mask", "full_scan"): "reference",
         ("linr_v1_filter_mask", "c0"): "vs_official",
         ("linr_v1_filter_mask", "c0c1"): "vs_official",
-        ("linr_v4", "full_scan"): "reference",
-        ("linr_v4", "c0"): "reference",
-        ("linr_v4", "c0c1"): "reference",
+        ("linr_v3", "full_scan"): "reference",
+        ("linr_v3", "c0"): "reference",
+        ("linr_v3", "c0c1"): "reference",
     }
     assert not (out / "_parity").exists()
 
@@ -235,6 +238,33 @@ def test_cli_run_checkpoint_override_lands_as_inputs(tiny_configs, tmp_path, mon
          "--out", str(out), "--checkpoint", f"{data_dir}/ck/pinned-d{{dim}}/x.pt"],
     )  # fmt: skip
     assert r.exit_code == 0, r.output
-    assert seen == [data_dir / "ck" / "pinned-d8" / "x.pt"]
-    (rec,) = _records(out / "e2e" / "tiny-d8.jsonl")
-    assert rec["inputs"] == "pinned-d8"
+    assert seen == [data_dir / "ck" / "pinned-d64" / "x.pt"]
+    (rec,) = _records(out / "e2e" / "tiny-d64.jsonl")
+    assert rec["inputs"] == "pinned-d64"
+
+
+def test_bench_oracle_prebuilds_every_sweep_and_run_builds_none(
+    tiny_configs, tmp_path, monkeypatch
+):
+    """G-oracle (CPU): ``bench oracle`` writes the blob of every filter sweep the suite reads
+    (clause c0, c0c1 at k_max 4), no timing; a following ``bench run`` finds them all."""
+    ds, _ = tiny_configs
+    common = ["--config-dir", str(ds.parent)]
+    r = CliRunner().invoke(cli.main, ["oracle", "--dataset", "tiny", "--suite", "e2e", *common])
+    assert r.exit_code == 0, r.output
+    gt = load_matrix(ds, ds.parent / "suites.yaml", "e2e")[0].data.gt_dir
+    assert sorted(p.name.split("_")[2] for p in gt.glob("oracle_v4_*.pt")) == ["c0", "c0c1"]
+
+    def boom(*a, **k):
+        raise AssertionError("bench run rebuilt a prebuilt oracle")
+
+    monkeypatch.setattr(run.oracle, "compute", boom)
+    r = CliRunner().invoke(
+        cli.main,
+        ["run", "--dataset", "tiny", "--suite", "e2e", "--skip-perf", "--out",
+         str(tmp_path / "res"), *common],
+    )  # fmt: skip
+    assert r.exit_code == 0, r.output
+    r = CliRunner().invoke(cli.main, ["oracle", "--dataset", "tiny", "--suite", "e2e",
+                                      "--sweep", "full_scan", *common])  # fmt: skip
+    assert r.exit_code != 0 and "no filter sweep" in r.output
