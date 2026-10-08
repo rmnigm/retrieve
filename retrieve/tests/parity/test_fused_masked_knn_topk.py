@@ -136,6 +136,23 @@ def test_empty_score_buffer_does_not_leak(monkeypatch):
     assert_topk_matches(out_ids, out_scores, ref_ids, ref_scores, atol=1e-6, rtol=0.0)
 
 
+def test_grid_stride_is_invisible(monkeypatch):
+    """``programs=B`` gives one program per row (G = 1), which strides over every tile; the output
+    is ``torch.equal`` to the default grid's and every slot of the poisoned buffer is written,
+    rows with count 0 and count P included."""
+    b, n, d, k = 4, 16_384, 128, 100
+    embs = make_index(n, d)
+    query = make_query(b, d)
+    pos, counts = compact_mask(make_mask(b, n, pass_rate=0.3))
+    counts[1], counts[2] = 0, pos.shape[1]
+    want = _fused_masked_knn_topk_impl(query, embs, pos, counts, k)
+    hits = poison_empty(monkeypatch, (b, _bucket_p(pos.shape[1])))
+    cfg = FusedMaskedKnnTopkConfig(DEFAULT_CONFIG.block_n, DEFAULT_CONFIG.num_warps, programs=b)
+    ids, scores = _fused_masked_knn_topk_impl(query, embs, pos, counts, k, config=cfg)
+    assert hits
+    assert torch.equal(ids, want[0]) and torch.equal(scores, want[1])
+
+
 def test_bucket_p_ladder():
     """``_bucket_p`` rounds runtime P up to a fixed ladder. The kernel's
     ``P: tl.constexpr`` is sized by this value, so two distinct runtime

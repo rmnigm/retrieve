@@ -98,7 +98,8 @@ now on; the [roadmap](roadmap.md) holds the steps.
   the unfiltered point. A cluster-correlated variant (arXiv, 3 points) runs
   only if arXiv's uniform sweep shows the IVF recall collapse at low p.
 - **Grid**: batch sizes {1, 16} (bs 8 dropped), k {100, 1000} (500 dropped;
-  1000 is the closest to LiNR's 2000), no `n_probe` 4 or 256.
+  1000 is the closest to LiNR's 2000), no `n_probe` 4 or 256 as fixed grid
+  points (a dataset's tuned n95 may be 256: arXiv).
   **3 seeds {0, 1, 2} everywhere** (user): every suite, every dataset, every
   sweep; the deterministic arms (V1, V2, postfilter) compute quality once
   and reuse it across seeds, perf repeats per seed. Postfilter α ∈ {1, 8}.
@@ -106,6 +107,34 @@ now on; the [roadmap](roadmap.md) holds the steps.
   the matched-recall `n95` (the smallest `n_probe` reaching
   `recall_oracle@100` ≥ 0.95 on the dataset's median sweep), not {24, 32}:
   a fixed `n_probe` across 0.8M-10M compares different recall levels.
+- **IVF tuned per dataset size** (user, 2026-10-08): `n_lists` and
+  `n_probe` depend on N and are tuned, not fixed at the library default
+  1024. The sweep runs on **one small and one big dataset only** (user):
+  goodreads (0.8 M) and PubMed (10 M), `n_lists` ≈ √N and 4√N ({1024,
+  4096} and {4096, 16384}), `n_probe` doubling as far as 0.95 needs (the
+  "no `n_probe` 256" grid rule does not bind tuning cells). **Tuning is
+  fast and separate from the paper sweeps** (user): quality-only, seed 0,
+  bs 16, k 100, median sweep; its records are artifacts, never paper
+  numbers, and the full sweeps run **once**, at the tuned values. Chosen
+  point per swept dataset: each `n_lists`' smallest `n_probe` with
+  `recall_oracle@100` ≥ 0.95, then the one scanning the fewest items
+  (`n_probe` · N / `n_lists` + `n_lists`), ties to the smaller `n_lists`. From the two, a size rule
+  (`n_lists` as a multiple of √N, `n_probe` as a fraction of `n_lists`)
+  sets arXiv (3 M) and YFCC (10 M). The `filter` and `synth` SilverTorch
+  arms of each dataset run at its `n_lists` with `n_probe` {24, n95}.
+  **Cap** (user, 2026-10-09): tuning stops at `n_probe` = `n_lists`/4
+  (25 % scanned); if 0.95 is not reached by then, the record says so with
+  the recall reached, and the slot takes `n_lists`/4. n95 follows the
+  filter's pass rate more than N (goodreads at pass 0.33: 1/64 of the
+  lists; PubMed at 0.018: not reached at 1/16), so the size rule sets only
+  `n_lists` (≈ 4√N to a power of two: goodreads 4096, arXiv 8192, YFCC
+  and PubMed 16384); arXiv's and YFCC's n95 come from a **quick check**
+  (user): that one `n_lists`, quality-only `n_probe` doubling on the
+  median sweep, seed 0, same cap. Measured picks: goodreads 4096 / 64, arXiv 2048 / 256
+  (2048-8192 all reach 0.95 at ≈ 12.7 % scanned), YFCC and PubMed 4096 /
+  1024 = the cap, 0.95 not reached (0.72, 0.873): at k 1000 the probe
+  scorers run `n_probe` ≤ 1024, which makes 4096 the largest `n_lists` whose
+  25 % cap runs.
 - **Official SilverTorch runs only on `none` and `bloom`.** Its clause and
   exact cells time our `pack_mask` adapter, not Meta's code; the existing
   official-clause records stay as an "adapter-bound upper bound" footnote.

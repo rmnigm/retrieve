@@ -14,10 +14,12 @@
 # except silvertorch, whose official-vs-ours comparison is the paper, and the C3 torch arms
 # named below.
 #
-# n95 = the smallest n_probe reaching recall_oracle@100 >= 0.95 on a dataset's median sweep,
-# read off deep / synth / n95 after the code freeze (campaign-v2 run order). Until measured the
-# n95 entries are left out: filling one is a value edit in an arm's `datasets:` slot, e.g.
-#   goodreads: {query: {n_probe: [24, 37]}}
+# IVF-TUNE (docs/artifacts/campaign-v2/ivf-tune): SilverTorch's n_lists and n95 per dataset, where
+# n95 = the smallest n_probe reaching recall_oracle@100 >= 0.95 on the dataset's median kept sweep,
+# tuned with n_probe capped at n_lists / 4 (user: at most 25 % scanned). n_lists ~ 4 sqrt(N) to a
+# power of two; goodreads is tuned (4096 / 64). n95 / n_lists depends on the pass rate, not only on
+# N (goodreads 1/64 at 0.33; PubMed all5 > 1/16 at 0.018), so arXiv's, YFCC's and PubMed's n95 slots
+# stay open until measured (part B).
 
 # Kept sweeps (one high pass rate, one low, one conjunctive / reverse), from measured pass rates:
 # arxiv c3_nversions 0.444, c0_maincat 0.136, all4 0.0094; pubmed c0_mesh 0.0002,
@@ -43,24 +45,32 @@ filter:                        # headline (T2, C3, C6)
     - {algo: linr_v3, backends: [triton]}                     # candidate_pool 5000
     - algo: silvertorch
       backends: [triton]
-      query: {n_probe: [24]}                                  # 24 = the paper's
-      datasets: {goodreads: {}, arxiv: {}, yfcc10m: {}, pubmed: {}}   # n95 slots: [24, n95]
+      query: {n_probe: [24]}                                  # 24 = the paper's; n95 per dataset
+      datasets:                                             # IVF-TUNE: n_lists by size, n_probe {24, n95}
+        goodreads: {build: {n_lists: [4096]}, query: {n_probe: [24, 64]}}
+        arxiv: {build: {n_lists: [2048]}, query: {n_probe: [24, 256]}}   # n95 256 (quick check, 2048 fewest items)
+        yfcc10m: {build: {n_lists: [4096]}, query: {n_probe: [24, 1024]}}   # 0.95 not reached: the 25 % cap, runnable at k 1000
+        pubmed: {build: {n_lists: [4096]}, query: {n_probe: [24, 1024]}}    # 0.95 not reached: the 25 % cap (0.873)
     - algo: silvertorch
       backends: [official]
       filter_kinds: [bloom]
-      query: {n_probe: [24]}
-      datasets: {goodreads: {}, arxiv: {}, yfcc10m: {}, pubmed: {}}   # n95 slots: [24, n95]
+      query: {n_probe: [24]}                                  # 24 = the paper's; n95 per dataset
+      datasets:                                             # IVF-TUNE: n_lists by size, n_probe {24, n95}
+        goodreads: {build: {n_lists: [4096]}, query: {n_probe: [24, 64]}}
+        arxiv: {build: {n_lists: [2048]}, query: {n_probe: [24, 256]}}   # n95 256 (quick check, 2048 fewest items)
+        yfcc10m: {build: {n_lists: [4096]}, query: {n_probe: [24, 1024]}}   # 0.95 not reached: the 25 % cap, runnable at k 1000
+        pubmed: {build: {n_lists: [4096]}, query: {n_probe: [24, 1024]}}    # 0.95 not reached: the 25 % cap (0.873)
     # C3's torch arms on goodreads + arxiv only (measured: 515-917 s a cell at 0.8 M; the 10 M
     # catalogs would take hours a cell); add yfcc10m / pubmed here if C3 stays ambiguous.
     - algo: silvertorch                                       # #12: plain-torch IVF
       backends: [torch]
       query: {n_probe: [24]}
-      datasets: {goodreads: {}, arxiv: {}}
+      datasets: {goodreads: {build: {n_lists: [4096]}}, arxiv: {build: {n_lists: [2048]}}}   # the triton arm's index
     - algo: silvertorch                                       # #13: the same, torch.compile'd
       backends: [torch]
       build: {compile: [max-autotune]}
       query: {n_probe: [24]}
-      datasets: {goodreads: {}, arxiv: {}}
+      datasets: {goodreads: {build: {n_lists: [4096]}}, arxiv: {build: {n_lists: [2048]}}}   # the triton arm's index
     - {algo: postfilter, backends: [torch], query: {alpha: [1, 8]}}   # the generic-torch baseline
 
 deep:                          # recall-vs-latency Pareto (F3, C6)
@@ -114,13 +124,21 @@ synth:                         # pass rate as the x axis (F1, F2, C1, C2, C6)
     - algo: silvertorch
       backends: [triton]
       filter_kinds: [clause]
-      query: {n_probe: [24, 64, 128, 256, 512, 1024]}       # an explicit sweep, not n95 (user);
-      datasets:                                             # synth n_lists is 1024: none capped
-        goodreads-synth: {}
-        arxiv-synth: {}
-        yfcc10m-synth: {query: {n_probe: [24, 256, 1024]}}
-    - {algo: silvertorch, backends: [triton], filter_kinds: [bloom], query: {n_probe: [24, 256]}}
-    - {algo: silvertorch, backends: [official], filter_kinds: [bloom], query: {n_probe: [24, 256]}}
+      query: {n_probe: [24, 64, 128, 256, 512, 1024]}       # an explicit sweep, not n95 (user)
+      datasets:                                             # n_lists from IVF-TUNE (real dataset's)
+        goodreads-synth: {build: {n_lists: [4096]}}
+        arxiv-synth: {build: {n_lists: [2048]}}
+        yfcc10m-synth: {build: {n_lists: [4096]}, query: {n_probe: [24, 256, 1024]}}
+    - algo: silvertorch
+      backends: [triton]
+      filter_kinds: [bloom]
+      query: {n_probe: [24, 256]}
+      datasets: {goodreads-synth: {build: {n_lists: [4096]}}, arxiv-synth: {build: {n_lists: [2048]}}, yfcc10m-synth: {build: {n_lists: [4096]}}}
+    - algo: silvertorch
+      backends: [official]
+      filter_kinds: [bloom]
+      query: {n_probe: [24, 256]}
+      datasets: {goodreads-synth: {build: {n_lists: [4096]}}, arxiv-synth: {build: {n_lists: [2048]}}, yfcc10m-synth: {build: {n_lists: [4096]}}}
     - {algo: postfilter, backends: [torch], query: {alpha: [1, 8]}}
     # C3 (native torch vs our kernels) as a function of p, eager and compiled; goodreads + arxiv
     # only, like filter's torch arms (add yfcc10m-synth: {} if C3 stays ambiguous)
@@ -143,17 +161,6 @@ synth:                         # pass rate as the x axis (F1, F2, C1, C2, C6)
       build: {compile: [max-autotune]}
       datasets: {goodreads-synth: {}, arxiv-synth: {}}
 
-n95:                           # pubmed's n95 source (it runs no deep / synth)
-  perf: false                  # quality only: its records are `ok` without timing
-  datasets: [pubmed]
-  dims: [768]
-  filter_kinds: [clause]
-  ks: [100, 1000]
-  batch_sizes: [16]
-  seeds: [0, 1, 2]
-  sweeps: {pubmed: [all5]}     # the median pass rate of its three kept sweeps
-  arms:
-    - {algo: silvertorch, backends: [triton], query: {n_probe: [8, 16, 32, 64, 128]}}
 
 codesign:                      # S9 / F4b, C5: the official bloom path, partial vs full masks
   # `bloom_path` exists on silvertorch / bloom / official only (anything else is a ConfigError);
