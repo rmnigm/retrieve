@@ -29,14 +29,12 @@ from .filter import build_filter, make_mask
 from .linr_v1 import LinrV1Algo
 from .linr_v2 import LinrV2Algo
 from .linr_v3 import LinrV3Algo
-from .linr_v4 import LinrV4Algo
 from .silvertorch import SilvertorchAlgo
 
 ALGORITHMS = (
     "triton_knn",
     "linr_v1_filter_mask",
     "linr_v3",
-    "linr_v4",
     "linr_v2",
     "silvertorch",
 )
@@ -49,7 +47,6 @@ SUPPORTED_FILTER_KINDS: dict[str, frozenset[FilterKind]] = {
     "linr_v1_filter_mask": frozenset({"none", "clause", "bloom"}),
     "linr_v2":             frozenset({"clause", "bloom"}),  # candidate source IS the filter
     "linr_v3":             frozenset({"none", "clause", "bloom"}),
-    "linr_v4":             frozenset({"none", "clause", "bloom"}),
     "silvertorch":         frozenset({"none", "clause", "bloom"}),
 }
 
@@ -101,8 +98,6 @@ def build_algorithm(
             filter_mod=filter_mod,
             backend=backend,
         )
-    elif name == "linr_v4":
-        algo = LinrV4Algo(item_embs, k, filter_mod=filter_mod, backend=backend)
     elif name == "linr_v2":
         if filter_mod is None:
             raise ValueError("linr_v2 requires a filter (clause or bloom)")
