@@ -94,6 +94,13 @@ the user moving it onto the roadmap.
 
 ## Defects that block no remaining run
 
+- **A finer manifest `match`** (seed and a `params` subset, or an ordered
+  list of code_versions per entry). Phase P found ~241 cells whose old
+  records pass the reuse rule cell by cell, but only 36 are reachable
+  through entries that cannot name a seed or params. Worth ≈ 3.5 GPU-h of
+  perf (mostly YFCC seed 0) plus the quality pass of ~200 arXiv `deep`
+  cells whose timing reruns anyway; not built (one more report mechanism
+  for ~2 % of the budget). [reuse](artifacts/campaign-v2/README.md#reuse-entries)
 - **`scripts/check_doc_links.py` cannot parse `for … in f(...)` in a CLI
   module** (it reads `node.iter.func.value`); cv2-harness-core shaped
   `bench/cli.py`'s `_children` around it instead of editing the checker.

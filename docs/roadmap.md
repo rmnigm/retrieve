@@ -158,15 +158,6 @@ claim's remaining runs are skipped and the reason logged.
 The claims and the claim-to-evidence matrix are [claims](paper/claims.md);
 the record inventory is [artifacts/campaign-v2](artifacts/campaign-v2/README.md).
 
-- [ ] **Manifest reuse entries** (CPU): fill
-  *evaluation/campaign.yaml*'s quality and perf entries for the existing
-  records that pass the reuse rule
-  ([inventory](artifacts/campaign-v2/README.md#c-which-records-pass-the-reuse-rule):
-  arXiv `filter` / `deep` quality, timing where the clock criterion holds;
-  SilverTorch-Triton timing too: #16 was measured and reverted, so the
-  probe-scorer kernels are those of `72e5a90`), and
-  the claims' cell selectors ([claims](paper/claims.md)).
-
 ## Phase V: the campaign (pods the user creates)
 
 GPU 0 takes all timed work from one sequential driver, cores pinned
@@ -210,10 +201,14 @@ co-design.
 - [ ] **V-YFCC: YFCC synth (5 points) and a small `deep`** (`n_lists`
   {4096, 16384}). F1/F2 10M panel; YFCC's `n95`. Needs V-AX-SYNTH.
   **≈ 18 GPU-h**, GPU 0/1.
-- [ ] **V-SEEDS: arXiv and YFCC `filter` backfill**: seeds 1-2 and the
-  `n95` column on the kept sweeps (arXiv's other-sweep records stay as
-  they are). T2 with CIs. Needs V-AX-SYNTH and V-YFCC. **≈ 4 GPU-h**,
-  GPU 0.
+- [ ] **V-SEEDS: arXiv and YFCC `filter`, the cells the manifest does not
+  reuse.** arXiv: 117 cells (V1-V3 `c3_nversions` seeds 0-2; SilverTorch
+  triton; official bloom; `postfilter` α {1, 8}; SilverTorch torch, plain
+  and compiled, for C3); V1-V3 on `c0_maincat` / `all4` are reused
+  through the manifest (36 cells, [campaign.yaml](../evaluation/campaign.yaml)).
+  YFCC: all 18 cells, seed 0 included (a manifest entry cannot name a
+  seed). Plus the `n95` column on the kept sweeps. T2 with CIs. Needs
+  V-AX-SYNTH and V-YFCC. **≈ 8-12 GPU-h**, GPU 0.
 - [ ] **V-PUBMED: PubMed `filter` under the new grid** (replaces D1-E):
   the embedding identity check on GPU 1 first (`eval-data pubmed
   encode_queries`, `bench check`, one V1 cell equal to `d1/pubmed`'s
@@ -269,8 +264,7 @@ tile per width*).
 ## Dependencies
 
 ```
-manifest reuse entries (CPU) ───────┐
-tag campaign-v2 ─────────────────────┴─┬─> V-PILOT ─┬─> V-AX-SYNTH ─> V-YFCC ─> V-SEEDS ─┐
+tag campaign-v2 ───────────────────────┬─> V-PILOT ─┬─> V-AX-SYNTH ─> V-YFCC ─> V-SEEDS ─┐
                                        │            └─> V-GR-DEEP ─────────────────────────┤
                                        ├─> V-GR-FILTER, H2H-FINAL, V-CODESIGN, D3 ─────────┤
                                        └─> V-PUBMED ───────────────────────────────────────┴─> D1-G ─> F2, F4, F5
