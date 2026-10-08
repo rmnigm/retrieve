@@ -67,7 +67,7 @@ GPU work runs on RunPod pods launched with
    fetch` only what the step reads: `arxiv-papers` (the license-fixed
    version: `item_attrs_narrow.pt` min = -1, `eval_split.parquet`
    `query_attrs_narrow` min = 0), `goodreads-work-id` with its checkpoints
-   (R1 lists them). PubMed is not on the Hub: rebuild the 10 M slice with
+   ([checkpoints](system/checkpoints.md#what-the-harness-reads)). PubMed is not on the Hub: rebuild the 10 M slice with
    `eval-data pubmed` ([datasets](system/datasets.md#pubmed); ~1 h
    download-bound `convert`, 17 GB). OpenAlex is not on the Hub either (E5
    restages it).
@@ -119,22 +119,6 @@ only on a leg with no records yet.
 
 ## Phase H: harness prerequisites
 
-- [ ] **R1: stage the E1c checkpoints and prove the harness reads them.**
-  `hf download pinkmeme/eval-goodreads-work-id --repo-type
-  dataset --include "checkpoints/sasrec-ssm-logq-d128/*" --local-dir
-  /data/goodreads-work-id`; the directory has `best_model.pt`, a
-  `config.json` with `"loss": "sampled_softmax"` and `"normalize": true`,
-  and an `item_id_map.json` sha256-equal to the data root's
-  (`dd6b8005…107265`). `bench check --dataset goodreads` at d128; then one
-  cell on a fresh inductor dir: `bench.cli run --dataset goodreads --dim
-  128 --suite filter --algo linr_v1_filter_mask --backend triton
-  --filter-kind clause --sweep c0_genre --seed 0 --skip-perf`. *Gates*: a
-  fresh encode (a new cache file in the checkpoint dir) and a fresh oracle
-  blob; the exact gate `recall_oracle@k_max ≥ 0.99` holds on normalized
-  embeddings (a miss is a finding, reported, `EXACT_MIN_RECALL` not
-  loosened); query L2 norms 1.0 ± 1e-3; `n_kept` recorded against the
-  gSASRec cell's 9,859. Record the cell in validation (not yet validated)
-  and on the Hub as `artifacts/r1`. **0.5 GPU-h**, one stream.
 - [ ] **L6: widen the official T1 parity gate past powers of two.**
   `retrieve/tests/parity/test_official.py` `test_t1_int32_path_bitexact`
   still compares official against Triton only when `d` is a power of two
@@ -190,17 +174,16 @@ only on a leg with no records yet.
     (`silvertorch`/triton 16 × ~22 min, `linr_v3` 8 cells, `linr_v2` 1);
     3 streams (the three commands; ~6 h wall).
   - [ ] **D1-F: goodreads `filter` on the E1c encoder, the full leg** (105
-    cells). Needs R1. `campaign --suite filter --dataset goodreads
+    cells). `campaign --suite filter --dataset goodreads
     --resume --timeout 48`. Upload as `d1/goodreads-e1c`; label
     `d1/goodreads` as the gSASRec run in hub-index. **≈ 4 GPU-h**; up to 4
     streams by `--algo` (`bench run`, `silvertorch` holding both backends).
-  - [ ] **D1-C: goodreads `deep`** (135 jobs, no records yet). Needs
-    R1. `campaign --suite deep --dataset goodreads --resume --timeout
+  - [ ] **D1-C: goodreads `deep`** (135 jobs, no records yet). `campaign --suite deep --dataset goodreads --resume --timeout
     48`. Upload `d1/goodreads-deep`. **≈ 25-45 GPU-h** (arxiv `deep`: ~2
     min a cell over 870 cells, ~30 h; goodreads has more jobs on a 0.8 M
     catalog, 4× smaller); 2 streams by `--algo` (`silvertorch` both
     backends, `linr_v3`), each splittable by `--filter-kind`.
-  - [ ] **D1-D: goodreads `codesign`** (6 jobs). Needs R1. `campaign
+  - [ ] **D1-D: goodreads `codesign`** (6 jobs). `campaign
     --suite codesign --dataset goodreads --resume --timeout 48`. Upload
     `d1/goodreads-codesign`. **≈ 2 GPU-h**, one stream.
   - [ ] **D1-G: D1's report and gate.** Needs D1-B..F. `bench
@@ -240,7 +223,7 @@ only on a leg with no records yet.
   - [ ] **D5-run: the baseline on every `filter`-suite dataset** (goodreads
     on E1c, arxiv, yfcc10m, pubmed, openalex) with narrow `bench run
     --algo postfilter` scoping, so no existing record reruns; upload as
-    `d5/<dataset>`. Needs D5-code and R1 (goodreads); openalex after E5's
+    `d5/<dataset>`. Needs D5-code; openalex after E5's
     restage. **≈ 5-8 GPU-h** (4 α values; a dense matmul per batch);
     streams by dataset.
 
@@ -279,7 +262,6 @@ only on a leg with no records yet.
 
 | step | A100 GPU-h | parallel streams |
 |---|---|---|
-| R1 | 0.5 | 1 |
 | M1 | 0.5 | 1 (on a ≥ 2-GPU pod) |
 | L6 | ≈ 0.2 | 1 |
 | D1-B arxiv `codesign` | ≈ 3-5 | 1 |
@@ -293,19 +275,16 @@ only on a leg with no records yet.
 | D3 (after its code) | ≈ 3 | by dataset |
 | F2-R (if chosen) | ≈ 2 | 1 |
 
-L6 is a short library-suite run. Runnable now: R1, D1-B, D1-E, D5-code (and E5's
+L6 is a short library-suite run. Runnable now: everything in D1 but D1-G, D5-code (and E5's
 restage). The total is ≈ 89-124 GPU-h, of which D1 is ≈ 51-73.
 
 ## Dependencies
 
 ```
-R1, D1-B, D1-E, D5-code  (runnable now)
-R1 ─┬─> D1-F, D1-C, D1-D ───────┐
-    └─> D5-run <─ D5-code       │  (D5-run's openalex cells also after E5)
-D1-B, D1-E ─────────────────────┴─> D1-G ─┬─> D3 ──────────┐
-                                          ├─> F2 (+ F2-R)  ├─> F5
-                                          ├─> F4           │
-                                          └─> E5 ──────────┘
-D5-run ───────────────────────────────────────────────────┘
+D1-B, D1-E, D1-F, D1-C, D1-D ─────┬─> D1-G ─┬─> D3 ──────────┐
+D5-code ─> D5-run (openalex after E5)       ├─> F2 (+ F2-R)  ├─> F5
+                                            ├─> F4           │
+                                            └─> E5 ──────────┤
+D5-run ──────────────────────────────────────────────────────┘
 M1: before any timed step runs on a multi-GPU pod
 ```
