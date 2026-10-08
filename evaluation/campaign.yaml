@@ -7,17 +7,60 @@
 # `default` applies to every cell no entry matches. An entry's `match` names dataset, suite,
 # algo and backend, optionally filter_kind and sweep; the most specific match wins. `hub` is the
 # pinkmeme/eval-results subtree that holds those records ({field} = the cell's key field).
-# Reuse entries (an old record's quality kept while its timing is rerun) are added by the
-# planner from the record inventory; `log` records every mid-campaign change.
+# Reuse entries keep an old record's quality, and its perf where it passes the clock clause, under
+# the record reuse rule (docs/decisions.md § Campaign v2); `log` records every mid-campaign change.
 
 default:
   quality: {code_version: 408b1188d542634b3d18a2f5077bd23537a845fc, hub: "campaign-v2/{dataset}-{suite}"}  # the freeze gate's tree hash (3c58488)
   perf: {code_version: 408b1188d542634b3d18a2f5077bd23537a845fc, hub: "campaign-v2/{dataset}-{suite}"}
 
-entries: []
-#  - match: {dataset: arxiv, suite: filter, algo: linr_v2, backend: triton, sweep: c0_maincat}
-#    quality: {code_version: <tree hash>, hub: d1/arxiv}
-#    perf: {code_version: 408b1188d542634b3d18a2f5077bd23537a845fc, hub: "campaign-v2/{dataset}-{suite}"}
+# Reuse entries from docs/artifacts/campaign-v2/reuse (reuse.py over the Hub subtrees). An entry
+# exists only where old records cover every v2 cell of its match (all seeds and params) and no
+# record off the v2 grid sits under it; the other reusable records stay unreferenced (validation.md,
+# "Manifest reuse entries"). All from d1/arxiv: license-fixed attrs, code_version 72e5a90, library
+# diff 72e5a90..408b1188 read per arm; perf: every v2-grid window at the 1410 MHz device max on all
+# three seeds, single-arm timing protocol unchanged (measure.latency = latency_group of one arm).
+#   [V1] golden V1 bit-exact at 408b1188 (freeze gate 3) = 72e5a90 (H2, 27 cells); its only diff is
+#        the evaluate_mask row-slice view (G-range bit-exact); query kernels unchanged
+#   [V2] as [V1]; no diff on its path (evaluate_indices, fused_masked_knn_topk)
+#   [V3] as [V1]; its only diff is the chunked 1-bit build (bits torch.equal); query kernels unchanged
+entries:
+  - match: {dataset: arxiv, suite: filter, algo: linr_v1_filter_mask, backend: triton, filter_kind: bloom, sweep: all4}  # [V1] quality + perf, seeds 0-2
+    quality: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+    perf: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+  - match: {dataset: arxiv, suite: filter, algo: linr_v1_filter_mask, backend: triton, filter_kind: bloom, sweep: c0_maincat}  # [V1] quality + perf, seeds 0-2
+    quality: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+    perf: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+  - match: {dataset: arxiv, suite: filter, algo: linr_v1_filter_mask, backend: triton, filter_kind: clause, sweep: all4}  # [V1] quality + perf, seeds 0-2
+    quality: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+    perf: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+  - match: {dataset: arxiv, suite: filter, algo: linr_v1_filter_mask, backend: triton, filter_kind: clause, sweep: c0_maincat}  # [V1] quality + perf, seeds 0-2
+    quality: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+    perf: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+  - match: {dataset: arxiv, suite: filter, algo: linr_v2, backend: triton, filter_kind: bloom, sweep: all4}  # [V2] quality + perf, seeds 0-2
+    quality: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+    perf: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+  - match: {dataset: arxiv, suite: filter, algo: linr_v2, backend: triton, filter_kind: bloom, sweep: c0_maincat}  # [V2] quality + perf, seeds 0-2
+    quality: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+    perf: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+  - match: {dataset: arxiv, suite: filter, algo: linr_v2, backend: triton, filter_kind: clause, sweep: all4}  # [V2] quality + perf, seeds 0-2
+    quality: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+    perf: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+  - match: {dataset: arxiv, suite: filter, algo: linr_v2, backend: triton, filter_kind: clause, sweep: c0_maincat}  # [V2] quality + perf, seeds 0-2
+    quality: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+    perf: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+  - match: {dataset: arxiv, suite: filter, algo: linr_v3, backend: triton, filter_kind: bloom, sweep: all4}  # [V3] quality + perf, seeds 0-2
+    quality: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+    perf: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+  - match: {dataset: arxiv, suite: filter, algo: linr_v3, backend: triton, filter_kind: bloom, sweep: c0_maincat}  # [V3] quality + perf, seeds 0-2
+    quality: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+    perf: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+  - match: {dataset: arxiv, suite: filter, algo: linr_v3, backend: triton, filter_kind: clause, sweep: all4}  # [V3] quality + perf, seeds 0-2
+    quality: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+    perf: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+  - match: {dataset: arxiv, suite: filter, algo: linr_v3, backend: triton, filter_kind: clause, sweep: c0_maincat}  # [V3] quality + perf, seeds 0-2
+    quality: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
+    perf: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
 
 log: []
 #  - {date: 2026-10-20, change: "<what changed, commit>", rerun: ["<suite>/<dataset> <arms>"]}
