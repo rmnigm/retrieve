@@ -208,3 +208,66 @@ def test_one_bit_knn_with_combined_filter_mask():
             if i < 0:
                 continue
             assert bool(clause_mask[r, i].item()), f"row {r}: returned id {i} fails clause filter"
+
+
+RANGE_N = 1000
+RANGES = [
+    (0, 0),
+    (500, 500),
+    (RANGE_N, RANGE_N),
+    (0, 1),
+    (7, 8),
+    (RANGE_N - 1, RANGE_N),
+    (33, 97),
+    (65, 191),
+    (129, RANGE_N),
+    (3, None),
+    (0, RANGE_N),
+    (0, None),
+]
+
+
+def _range_filters(backend):
+    attrs = make_attrs(RANGE_N, c=3, a_max=3, n_vocab=6, pad_rate=0.3, seed=21)
+    exact = ExactAttributeFilter(backend=backend)
+    exact.register_index(attrs, clause_is_reverse=torch.tensor([False, True, False], device="cuda"))
+    bloom = BloomFilter(m_bits=128, k_hash=3, backend=backend)
+    bloom.register_index(attrs)
+    return exact, bloom
+
+
+@pytest.mark.parametrize("backend", ["triton", "torch"])
+def test_evaluate_mask_range_equals_full_mask_slice(backend):
+    """``evaluate_mask(q, start, end)`` is the full mask's ``[:, start:end]`` bit for bit, for
+    empty, single-item and unaligned ranges, ranges ending at N and the whole catalog; exact
+    (with a reverse clause) and bloom, on both backends."""
+    q = make_query_attrs(b=5, c=3, n_vocab=6, inactive_rate=0.2, seed=22)
+    for f in _range_filters(backend):
+        full = f.evaluate_mask(q)
+        assert full.any() and not full.all()
+        for start, end in RANGES:
+            got = f.evaluate_mask(q, start, end)
+            assert got.shape == (5, (RANGE_N if end is None else end) - start)
+            assert torch.equal(got, full[:, start:end]), (type(f).__name__, start, end)
+
+
+@pytest.mark.parametrize("backend", ["triton", "torch"])
+def test_evaluate_mask_range_allocates_no_full_mask(backend):
+    """A range never builds the ``[B, N]`` mask: the call's peak transient stays far below it."""
+    n, b, lo, hi = 1 << 22, 16, 123_457, 124_457
+    attrs = make_attrs(n, c=1, a_max=1, n_vocab=4, pad_rate=0.0, seed=23)
+    q = make_query_attrs(b=b, c=1, n_vocab=4, inactive_rate=0.0, seed=24)
+    exact = ExactAttributeFilter(backend=backend)
+    exact.register_index(attrs)
+    bloom = BloomFilter(m_bits=64, k_hash=2, backend=backend)
+    bloom.register_index(attrs)
+    del attrs
+    for f in (exact, bloom):
+        torch.cuda.synchronize()
+        base = torch.cuda.memory_allocated()
+        torch.cuda.reset_peak_memory_stats()
+        out = f.evaluate_mask(q, lo, hi)
+        torch.cuda.synchronize()
+        transient = torch.cuda.max_memory_allocated() - base
+        assert out.shape == (b, hi - lo)
+        assert transient < b * n // 16, (type(f).__name__, transient)

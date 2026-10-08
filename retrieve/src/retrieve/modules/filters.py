@@ -79,9 +79,13 @@ class BloomFilter(FilterModule):
             clause_salt=self.clause_salt,
         )
 
-    def evaluate_mask(self, query_clause_attrs: Tensor) -> Tensor:
+    def evaluate_mask(
+        self, query_clause_attrs: Tensor, start: int = 0, end: int | None = None
+    ) -> Tensor:
+        """Returns [B, end - start] bool over items ``[start, end)``: the op runs on a row
+        slice of the signature table (a contiguous view), so no ``[B, N]`` exists."""
         qb = self._build_query_sigs(query_clause_attrs)  # [B, W]
-        return ops_for(self.backend).bloom_match(qb, self.bloom_sigs)
+        return ops_for(self.backend).bloom_match(qb, self.bloom_sigs[start:end])
 
     def evaluate_indices(self, query_clause_attrs: Tensor) -> tuple[Tensor, Tensor]:
         """Returns (positive_indices [B, N] int64, counts [B] int64); each row's ids are in
@@ -126,11 +130,15 @@ class ExactAttributeFilter(FilterModule):
             clause_is_reverse = torch.zeros(c, dtype=torch.bool, device=item_clause_attrs.device)
         self.register_buffer("clause_is_reverse", clause_is_reverse)
 
-    def evaluate_mask(self, query_clause_attrs: Tensor) -> Tensor:
-        """Returns [B, N] bool. ``backend="triton"`` uses the fused ``clause_mask`` kernel;
-        ``backend="torch"`` materializes the full ``[B, N, C, A_max]`` bool grid."""
+    def evaluate_mask(
+        self, query_clause_attrs: Tensor, start: int = 0, end: int | None = None
+    ) -> Tensor:
+        """Returns [B, end - start] bool over items ``[start, end)``, computed on a row slice of
+        the attribute table (a contiguous view), so no ``[B, N]`` exists. ``backend="triton"``
+        uses the fused ``clause_mask`` kernel; ``backend="torch"`` materializes the range's
+        ``[B, end - start, C, A_max]`` bool grid."""
         return ops_for(self.backend).clause_mask(
-            self.item_clause_attrs, self.clause_is_reverse, query_clause_attrs
+            self.item_clause_attrs[start:end], self.clause_is_reverse, query_clause_attrs
         )
 
     def evaluate_indices(self, query_clause_attrs: Tensor) -> tuple[Tensor, Tensor]:

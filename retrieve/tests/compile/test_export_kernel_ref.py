@@ -117,7 +117,7 @@ def test_export_preserves_kernel_reference():
     )
 
     # Round-trip execution: the exported module must launch the same kernel with the same
-    # DEFAULT_CONFIG, so ids and scores are bit-identical to eager.
+    # tile, so ids and scores are bit-identical to eager.
     out_ids, out_scores = ep.module()(*args)
     torch.testing.assert_close(out_ids, eager_ids, rtol=0, atol=0)
     torch.testing.assert_close(out_scores, eager_scores, rtol=0, atol=0)

@@ -11,7 +11,13 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
-from retrieve.ops.triton._host import ProbeLaunch, check_contiguous, probe_prep, probe_topk
+from retrieve.ops.triton._host import (
+    ProbeLaunch,
+    check_contiguous,
+    probe_prep,
+    probe_topk,
+    tile_for_width,
+)
 from retrieve.ops.triton.common import clause_pass, probe_ids_kernel, probe_tile, row_base
 
 
@@ -22,8 +28,13 @@ class CodesignedProbeScoreExactConfig:
     num_stages: int = 3
 
 
-# Default tile config (mirrors codesigned_probe_score's A100 tuning).
-DEFAULT_CONFIG = CodesignedProbeScoreExactConfig(block_p=256, num_warps=4)
+# Tile per D_PAD bound, tuned on A100/sm_80 (kernels.md § SilverTorch kernels, "Tile config"): the
+# [BLOCK_P, D_PAD] int8 code tile sits in registers with no K loop, so a wide D needs a narrow tile.
+CONFIGS = {
+    256: CodesignedProbeScoreExactConfig(block_p=256, num_warps=4),
+    512: CodesignedProbeScoreExactConfig(block_p=128, num_warps=4),
+    1024: CodesignedProbeScoreExactConfig(block_p=128, num_warps=4),
+}
 
 
 @triton.jit
@@ -42,6 +53,7 @@ def _codesigned_probe_score_exact_kernel(
     width,
     tiles_y,
     D: tl.constexpr,
+    D_PAD: tl.constexpr,
     NPP: tl.constexpr,
     C: tl.constexpr,
     A_MAX: tl.constexpr,
@@ -82,16 +94,24 @@ def _codesigned_probe_score_exact_kernel(
             A_MAX=A_MAX,
         )
 
-        d_off = tl.arange(0, D)
-        q_codes = tl.load(q_codes_ptr + bid * stride_qcb + d_off)
+        # Lanes [D, D_PAD) load 0 on both sides: exact zeros in the int32 dot (kernels.md §
+        # Padding). At D == D_PAD the loads stay unmasked: even an all-true mask perturbs this
+        # kernel's register allocation.
+        d_off = tl.arange(0, D_PAD)
+        d_in = d_off < D
+        q_codes = tl.load(
+            q_codes_ptr + bid * stride_qcb + d_off,
+            mask=None if D == D_PAD else d_in,
+            other=None if D == D_PAD else 0,
+        )
         q_scale = tl.load(q_scales_ptr + bid)
         codes = tl.load(
             item_codes_ptr + pos[:, None] * stride_cn + d_off[None, :],
-            mask=keep[:, None],
+            mask=keep[:, None] if D == D_PAD else keep[:, None] & d_in[None, :],
             other=0,
         )
-        # int8 × int8 → int32 (paper §4.2): q[1,D] @ codes^T[D,BLOCK_P]. M=1 can't use IMMA
-        # tensor cores, so Triton lowers to the dp4a int8 path the paper claims.
+        # int8 × int8 → int32 (paper §4.2): q[1,D] @ codes^T[D,BLOCK_P]. Triton pads M=1 to the MMA
+        # tile: this lowers to IMMA tensor-core instructions, not dp4a (kernels.md § Numerics).
         dots_2d = tl.dot(q_codes[None, :], tl.trans(codes), out_dtype=tl.int32)
         # Squeeze the length-1 M axis: tl.sum over length-1 (no reshape to drop a dim).
         dots_i32 = tl.sum(dots_2d, axis=0)
@@ -181,7 +201,7 @@ def _codesigned_probe_score_exact_impl(
     config: CodesignedProbeScoreExactConfig | None = None,
 ) -> tuple[Tensor, Tensor]:
     """Fused phase-2+3 with an exact-clause filter instead of Bloom — sibling of
-    ``codesigned_probe_score`` with the same int8×int8 → int32 dp4a path and ``-inf`` + top-K
+    ``codesigned_probe_score`` with the same int8×int8 → int32 IMMA path and ``-inf`` + top-K
     epilogue. The predicate (from ``clause_mask``) is AND across ``C`` clauses, OR across
     ``A_max`` values per clause, XOR with ``clause_is_reverse``, OR with the ``q_c == -1``
     inactive sentinel; the ``[BLOCK_P, C, A_max]`` gather stays off HBM.
@@ -192,7 +212,7 @@ def _codesigned_probe_score_exact_impl(
 
     Eager entry point for tune scripts / parity tests; the compiled path goes through the
     ``@triton_op`` wrapper."""
-    cfg = config if config is not None else DEFAULT_CONFIG
+    cfg = config if config is not None else tile_for_width(CONFIGS, query.shape[1])
     launch = _cpse_prep(
         query,
         probe_ids,
@@ -241,7 +261,7 @@ def codesigned_probe_score_exact(
         item_clause_attrs=item_clause_attrs,
         clause_is_reverse=clause_is_reverse,
         query_clause_attrs=query_clause_attrs,
-        cfg=DEFAULT_CONFIG,
+        cfg=tile_for_width(CONFIGS, query.shape[1]),
     )
     wrap_triton(_codesigned_probe_score_exact_kernel)[launch.grid](**launch.kwargs)
     fin = probe_topk(launch, k, probe_ids, cluster_offsets, sort_perm)

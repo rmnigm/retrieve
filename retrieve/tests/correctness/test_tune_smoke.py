@@ -1,7 +1,7 @@
 """One tiny invocation per tuner benchmark body, so schema drift between ``tune.py`` and the
 kernel ``_impl`` signatures breaks CI instead of a tuning session (the
 ``codesigned-probe-score`` subcommand rotted exactly this way when Stage 2b moved kwargs off the
-public op — see Phases K1/K7 in docs/plans/kernels-layers-design.md)."""
+public op)."""
 
 from __future__ import annotations
 

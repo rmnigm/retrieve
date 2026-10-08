@@ -21,7 +21,7 @@ from retrieve.ops.triton.bloom_compact import (
 )
 from retrieve.ops.triton.bloom_match import bloom_match
 from tests.conftest import make_attrs, make_query_attrs
-from tests.parity.conftest import poison_empty
+from tests.parity.conftest import make_words, poison_empty
 
 
 def _build_qb(bf: BloomFilter, q: torch.Tensor) -> torch.Tensor:
@@ -159,3 +159,11 @@ def test_bloom_compact_writes_nothing_past_counts(monkeypatch):
     width = torch.arange(n, device="cuda")[None, :] < ref_counts[:, None]
     assert torch.equal(counts, ref_counts)
     assert torch.equal(ids, torch.where(width, ref_ids, 123_456_789))
+
+
+@pytest.mark.parametrize("w", [3, 12])
+def test_bloom_compact_non_power_of_two_words(w):
+    sigs, qb = make_words(4096, w, seed=w)
+    out_ids, out_counts = bloom_compact(qb, sigs)
+    ref_ids, ref_counts = compact_mask(bloom_match(qb, sigs))
+    _rows_equal(out_ids, out_counts, ref_ids, ref_counts)

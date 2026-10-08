@@ -1,4 +1,5 @@
-"""The compaction kernels' ordering contract (plan L3, deterministic-compaction.md §5 gates 1-2).
+"""The compaction kernels' ordering contract (the retired deterministic-compaction plan; see
+docs/system/kernels.md § clause_compact for the current gates).
 
 ``clause_compact`` / ``bloom_compact`` return each row's surviving ids in ascending item order —
 ``torch.equal`` to ``ops.reference`` on ids *and* counts — and the same call returns the same

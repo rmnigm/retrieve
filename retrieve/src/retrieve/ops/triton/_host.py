@@ -7,6 +7,7 @@ tail of the two compaction ops.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TypeVar
 
 import torch
 import triton
@@ -14,6 +15,16 @@ from torch import Tensor
 
 from retrieve.indexing.quantize import quantize_int8
 from retrieve.ops.triton.common import compact_scatter_kernel
+
+Cfg = TypeVar("Cfg")
+
+
+def tile_for_width(configs: dict[int, Cfg], d: int) -> Cfg:
+    """The probe scorers' shipped tile at embedding width ``d``: the entry of the smallest
+    ``D_PAD`` bound in ``configs`` at or above ``next_power_of_2(d)``, the widest entry past the
+    last bound (kernels.md § SilverTorch kernels, "Tile config")."""
+    d_pad = triton.next_power_of_2(d)
+    return configs[min((b for b in configs if b >= d_pad), default=max(configs))]
 
 
 @dataclass(frozen=True)
@@ -64,7 +75,6 @@ def probe_prep(
     b, d = query.shape
     n_probe = probe_ids.shape[1]
     check_contiguous(item_codes=item_codes, sort_perm=sort_perm)
-    check_pow2(D=d)
     q_codes, q_scales = quantize_int8(query)
     all_scores = torch.empty((b, width), dtype=torch.float32, device=query.device)
     # Cluster-aligned tiles: at most one partial tile per probe, so n_probe extra tiles cover
@@ -82,6 +92,7 @@ def probe_prep(
         "width": width,
         "tiles_y": tiles_y,
         "D": d,
+        "D_PAD": triton.next_power_of_2(d),
         "NPP": triton.next_power_of_2(n_probe),
         "stride_qcb": q_codes.stride(0),
         "stride_cn": item_codes.stride(0),
@@ -131,14 +142,6 @@ def check_contiguous(**tables: Tensor) -> None:
             raise ValueError(f"{name} must be contiguous (copy it once at index build)")
 
 
-def check_pow2(**extents: int) -> None:
-    """A ``tl.arange`` extent must be a power of two; Triton otherwise fails inside the
-    compiler."""
-    for name, v in extents.items():
-        if v <= 0 or v & (v - 1):
-            raise ValueError(f"{name}={v} must be a power of two")
-
-
 def wide(*tensors: Tensor) -> bool:
     """A kernel's ``WIDE`` constexpr: some tensor it addresses has ``>= 2**31`` elements, so its
     row bases need int64 (kernels.md § Addressing)."""
@@ -150,7 +153,7 @@ def grid_batch_tiles(b: int, n: int, block: int) -> tuple[tuple[int, int, int], 
     ``cdiv(n, block)`` tiles split across grid_y × grid_z to dodge the 65535 single-axis cap;
     the kernel rebuilds ``tile_id = tile_x * tiles_y + tile_y`` from the returned ``tiles_y``."""
     tiles = triton.cdiv(n, block)
-    tiles_x = triton.cdiv(tiles, 65535)
+    tiles_x = max(1, triton.cdiv(tiles, 65535))  # n == 0: an empty grid, not cdiv(0, 0)
     tiles_y = triton.cdiv(tiles, tiles_x)
     return (b, tiles_y, tiles_x), tiles_y
 

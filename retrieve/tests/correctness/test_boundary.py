@@ -1,7 +1,8 @@
-"""The library side of the library / harness contract (library-harness-boundary.md §4, gate
-§5): for each algo-level module — ``SilverTorch``, ``LiNRV1``–``LiNRV4`` — on a tiny index,
-the properties the harness measures through. ``official`` is covered where the clause names it
-(``capturable``, ``DISPATCH``); its forward syncs by design (O D7)."""
+"""The library side of the library / harness contract (the retired library-harness-boundary
+plan; see docs/system/architecture.md for the current module map): for each algo-level module —
+``SilverTorch``, ``LiNRV1``–``LiNRV3`` — on a tiny index, the properties the harness measures
+through. ``official`` is covered where the clause names it (``capturable``, ``DISPATCH``); its
+forward syncs by design (O D7)."""
 
 from __future__ import annotations
 
@@ -17,7 +18,6 @@ from retrieve import (
     LiNRV1,
     LiNRV2,
     LiNRV3,
-    LiNRV4,
     SilverTorch,
     SilverTorchBuilder,
     modules as modules_pkg,
@@ -27,7 +27,7 @@ from tests.conftest import make_attrs, make_index, make_query, make_query_attrs,
 from tests.parity.conftest import assert_ids_equal_up_to_ties
 
 N, D, B, K = 512, 64, 8, 16
-CLASSES = [SilverTorch, LiNRV1, LiNRV2, LiNRV3, LiNRV4]
+CLASSES = [SilverTorch, LiNRV1, LiNRV2, LiNRV3]
 BACKENDS = ["triton", "torch"]
 ST = {"k": K, "n_lists": 8, "n_probe": 4, "n_iter": 2, "filter_mode": "exact"}
 V3 = {"candidate_pool": 64, "seed": 1}

@@ -16,7 +16,6 @@ from retrieve.indexing.quantize import (
     project_simhash_1bit_query,
     quantize_int8,
     quantize_int8_global,
-    quantize_int8_global_codes,
     quantize_oporp_1bit,
     quantize_simhash_1bit,
 )
@@ -35,7 +34,6 @@ __all__ = [
     "project_simhash_1bit_query",
     "quantize_int8",
     "quantize_int8_global",
-    "quantize_int8_global_codes",
     "quantize_oporp_1bit",
     "quantize_simhash_1bit",
 ]

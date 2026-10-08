@@ -17,6 +17,7 @@ from retrieve.ops.triton._host import (
     check_contiguous,
     probe_prep,
     probe_topk,
+    tile_for_width,
 )
 from retrieve.ops.triton.common import probe_ids_kernel, probe_tile, row_base
 
@@ -28,9 +29,13 @@ class CodesignedProbeScoreConfig:
     num_stages: int = 3
 
 
-# Default tile config (tuned on A100/sm_80); pass config= to _codesigned_probe_score_impl to
-# override.
-DEFAULT_CONFIG = CodesignedProbeScoreConfig(block_p=256, num_warps=4)
+# Tile per D_PAD bound, tuned on A100/sm_80 (kernels.md § SilverTorch kernels, "Tile config"): the
+# [BLOCK_P, D_PAD] int8 code tile sits in registers with no K loop, so a wide D needs a narrow tile.
+CONFIGS = {
+    256: CodesignedProbeScoreConfig(block_p=256, num_warps=4),
+    512: CodesignedProbeScoreConfig(block_p=128, num_warps=4),
+    1024: CodesignedProbeScoreConfig(block_p=64, num_warps=4),
+}
 
 
 @triton.jit
@@ -49,6 +54,7 @@ def _codesigned_probe_score_kernel(
     tiles_y,
     n_qbits,
     D: tl.constexpr,
+    D_PAD: tl.constexpr,
     NPP: tl.constexpr,
     stride_qcb,
     stride_cn,
@@ -79,16 +85,24 @@ def _codesigned_probe_score_kernel(
                 w = tl.load(bloom_t_ptr + m * stride_tm + word, mask=keep & (m >= 0), other=-1)
                 keep = keep & (((w >> bit) & 1) != 0)
 
-        d_off = tl.arange(0, D)
-        q_codes = tl.load(q_codes_ptr + bid * stride_qcb + d_off)
+        # Lanes [D, D_PAD) load 0 on both sides: exact zeros in the int32 dot (kernels.md §
+        # Padding). At D == D_PAD the loads stay unmasked: even an all-true mask perturbs this
+        # kernel's register allocation.
+        d_off = tl.arange(0, D_PAD)
+        d_in = d_off < D
+        q_codes = tl.load(
+            q_codes_ptr + bid * stride_qcb + d_off,
+            mask=None if D == D_PAD else d_in,
+            other=None if D == D_PAD else 0,
+        )
         q_scale = tl.load(q_scales_ptr + bid)
         codes = tl.load(
             item_codes_ptr + pos[:, None] * stride_cn + d_off[None, :],
-            mask=keep[:, None],
+            mask=keep[:, None] if D == D_PAD else keep[:, None] & d_in[None, :],
             other=0,
         )
-        # int8 × int8 → int32 (paper §4.2): q[1,D] @ codes^T[D,BLOCK_P]. M=1 can't use IMMA
-        # tensor cores, so Triton lowers to the dp4a int8 path the paper claims.
+        # int8 × int8 → int32 (paper §4.2): q[1,D] @ codes^T[D,BLOCK_P]. Triton pads M=1 to the MMA
+        # tile: this lowers to IMMA tensor-core instructions, not dp4a (kernels.md § Numerics).
         dots_2d = tl.dot(q_codes[None, :], tl.trans(codes), out_dtype=tl.int32)
         # Squeeze the length-1 M axis: tl.sum over length-1 (no reshape to drop a dim).
         dots_i32 = tl.sum(dots_2d, axis=0)
@@ -178,7 +192,7 @@ def _codesigned_probe_score_impl(
 
     Eager entry point for tune scripts / parity tests; the compiled path goes through the
     ``@triton_op`` wrappers."""
-    cfg = config if config is not None else DEFAULT_CONFIG
+    cfg = config if config is not None else tile_for_width(CONFIGS, query.shape[1])
     launch = _cps_prep(
         query,
         probe_ids,
@@ -221,7 +235,7 @@ def codesigned_probe_score(
         width,
         query_bit_positions=None,
         bloom_transposed=None,
-        cfg=DEFAULT_CONFIG,
+        cfg=tile_for_width(CONFIGS, query.shape[1]),
     )
     wrap_triton(_codesigned_probe_score_kernel)[launch.grid](**launch.kwargs)
     fin = probe_topk(launch, k, probe_ids, cluster_offsets, sort_perm)
@@ -255,7 +269,7 @@ def codesigned_probe_score_bloom(
         width,
         query_bit_positions=query_bit_positions,
         bloom_transposed=bloom_transposed,
-        cfg=DEFAULT_CONFIG,
+        cfg=tile_for_width(CONFIGS, query.shape[1]),
     )
     wrap_triton(_codesigned_probe_score_kernel)[launch.grid](**launch.kwargs)
     fin = probe_topk(launch, k, probe_ids, cluster_offsets, sort_perm)

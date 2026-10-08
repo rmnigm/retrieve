@@ -18,7 +18,6 @@ from torch import Tensor
 from retrieve.ops.triton._host import (
     CompactLaunch,
     check_contiguous,
-    check_pow2,
     compact_finish,
     grid_batch_tiles,
     wide,
@@ -48,6 +47,7 @@ def _bloom_compact_kernel(
     N,
     tiles_y,
     W: tl.constexpr,
+    W_PAD: tl.constexpr,
     stride_qb_b,
     stride_qb_w,
     stride_s_n,
@@ -64,15 +64,17 @@ def _bloom_compact_kernel(
     n_offsets = row0 + lane
     n_valid = n_offsets < N
 
-    w_off = tl.arange(0, W)
-    qb = tl.load(qb_ptr + bid * stride_qb_b + w_off * stride_qb_w)  # [W]
+    # Words [W, W_PAD) load qb = 0, which every signature contains (kernels.md § Padding).
+    w_off = tl.arange(0, W_PAD)
+    w_in = w_off < W
+    qb = tl.load(qb_ptr + bid * stride_qb_b + w_off * stride_qb_w, mask=w_in, other=0)
 
     sig_base, ids = tile_rows(sigs_ptr, row0, lane, stride_s_n, WIDE)
     sigs = tl.load(
         sig_base + ids[:, None] * stride_s_n + w_off[None, :] * stride_s_w,
-        mask=n_valid[:, None],
+        mask=n_valid[:, None] & w_in[None, :],
         other=0,
-    )  # [BLOCK_N, W]
+    )
 
     # Helper leaves masking to the caller (lanes loaded with other=0 pass iff qb == 0), so AND
     # with n_valid here.
@@ -114,7 +116,6 @@ def _bloom_compact_prep(
     n = sigs.shape[0]
 
     check_contiguous(sigs=sigs)
-    check_pow2(W=w)
     qb = qb.contiguous()
 
     grid, tiles_y = grid_batch_tiles(b, n, cfg.block_n)
@@ -130,6 +131,7 @@ def _bloom_compact_prep(
         "N": n,
         "tiles_y": tiles_y,
         "W": w,
+        "W_PAD": triton.next_power_of_2(w),
         "stride_qb_b": qb.stride(0),
         "stride_qb_w": qb.stride(1),
         "stride_s_n": sigs.stride(0),

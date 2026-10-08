@@ -6,7 +6,7 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
-from retrieve.ops.triton._host import check_contiguous, check_pow2, grid_batch_tiles, wide
+from retrieve.ops.triton._host import check_contiguous, grid_batch_tiles, wide
 from retrieve.ops.triton.common import bloom_subset_pass, row_base, tile_rows
 
 
@@ -18,6 +18,7 @@ def _bloom_match_kernel(
     N: tl.constexpr,
     tiles_y,
     W: tl.constexpr,
+    W_PAD: tl.constexpr,
     stride_qb_b,
     stride_qb_w,
     stride_s_n,
@@ -34,13 +35,15 @@ def _bloom_match_kernel(
     n_off = row0 + lane
     valid = n_off < N
 
-    w_off = tl.arange(0, W)
-    qb = tl.load(qb_ptr + bid * stride_qb_b + w_off * stride_qb_w)
+    # Words [W, W_PAD) load qb = 0, which every signature contains (kernels.md § Padding).
+    w_off = tl.arange(0, W_PAD)
+    w_in = w_off < W
+    qb = tl.load(qb_ptr + bid * stride_qb_b + w_off * stride_qb_w, mask=w_in, other=0)
 
     sig_base, ids = tile_rows(sigs_ptr, row0, lane, stride_s_n, WIDE)
     sigs = tl.load(
         sig_base + ids[:, None] * stride_s_n + w_off[None, :] * stride_s_w,
-        mask=valid[:, None],
+        mask=valid[:, None] & w_in[None, :],
         other=0,
     )
 
@@ -60,7 +63,6 @@ def bloom_match(qb: Tensor, sigs: Tensor) -> Tensor:
     b, w = qb.shape
     n = sigs.shape[0]
     check_contiguous(sigs=sigs)
-    check_pow2(W=w)
     qb = qb.contiguous()
 
     out = torch.empty(b, n, dtype=torch.bool, device=qb.device)
@@ -73,6 +75,7 @@ def bloom_match(qb: Tensor, sigs: Tensor) -> Tensor:
         N=n,
         tiles_y=tiles_y,
         W=w,
+        W_PAD=triton.next_power_of_2(w),
         stride_qb_b=qb.stride(0),
         stride_qb_w=qb.stride(1),
         stride_s_n=sigs.stride(0),

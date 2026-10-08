@@ -364,9 +364,8 @@ def test_simhash_seed_determinism():
 
 def test_global_quantization_chunked_is_bit_exact_and_bounded():
     """``quantize_int8_global`` quantizes chunk by chunk (build-time, large tables): its codes
-    and scale equal the one-shot formula bit for bit, ``quantize_int8_global_codes`` (the
-    loop-free query path) equals them too, and the build's transient stays under half the
-    fp32 table, where the one-shot formula held two fp32 copies of it."""
+    and scale equal the one-shot formula bit for bit, and the build's transient stays under
+    half the fp32 table, where the one-shot formula held two fp32 copies of it."""
 
     n = 12 * quantize._CODE_CHUNK_ROWS + 123  # the chunk temporaries are fixed; the table grows
     embs = torch.randn(n, 128, device="cuda") * 3
@@ -380,7 +379,6 @@ def test_global_quantization_chunked_is_bit_exact_and_bounded():
     transient = torch.cuda.max_memory_allocated() - base - codes.numel()
     assert torch.equal(codes, expected)
     assert scale == float((abs_max / 127.0).item())
-    assert torch.equal(quantize.quantize_int8_global_codes(embs), expected)
     table = embs.numel() * embs.element_size()
     assert transient < table // 2, (
         f"transient {transient / 2**20:.0f} MiB vs table {table / 2**20:.0f} MiB"
@@ -396,3 +394,31 @@ def test_global_quantization_in_row_order_equals_permuted_codes():
     codes, scale = quantize.quantize_int8_global(embs)
     sorted_codes, sorted_scale = quantize.quantize_int8_global(embs, rows=perm)
     assert torch.equal(sorted_codes, codes[perm]) and sorted_scale == scale
+
+
+@pytest.mark.parametrize("method", ["oporp", "simhash"])
+def test_one_bit_build_chunked_is_bit_exact_and_bounded(method):
+    """The 1-bit builds project and pack chunk by chunk: their bits equal the one-shot
+    projection of the whole table (the query path) bit for bit, and the build's transient is a
+    fixed eight projected fp32 chunks (``[rows, k_bits]``) whatever N, where the one-shot chain
+    held about seven full-corpus copies."""
+
+    n = 12 * quantize._CODE_CHUNK_ROWS + 123
+    embs = torch.randn(n, 128, device="cuda")
+    torch.cuda.synchronize()
+    base = torch.cuda.memory_allocated()
+    torch.cuda.reset_peak_memory_stats()
+    if method == "oporp":
+        bits, signs, perm = quantize_oporp_1bit(embs, seed=5)
+        params = signs.numel() + perm.numel() * 8
+    else:
+        bits, r = quantize_simhash_1bit(embs, k_bits=256, seed=5)
+        params = r.numel() * 4
+    transient = torch.cuda.max_memory_allocated() - base - bits.numel() * 8 - params
+    if method == "oporp":
+        expected = project_oporp_1bit_query(embs, signs, perm)
+    else:
+        expected = project_simhash_1bit_query(embs, r)
+    assert torch.equal(bits, expected)
+    chunk = quantize._CODE_CHUNK_ROWS * bits.shape[1] * 64 * 4
+    assert transient < 8 * chunk, f"transient {transient / 2**20:.0f} MiB, chunk {chunk >> 20} MiB"

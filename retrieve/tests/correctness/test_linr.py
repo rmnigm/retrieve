@@ -15,8 +15,8 @@ from retrieve.functional import compact_mask
 from retrieve.interfaces import ops_for
 from retrieve.modules import BloomFilter, ExactAttributeFilter
 from retrieve.modules.bit_knn import OneBitKNN, SimHashKNN
-from retrieve.modules.knn import FullScanKNN, PostfilterKNN, PostfilterKNNInt8, PrefilterKNN
-from retrieve.modules.linr import LiNRV1, LiNRV2, LiNRV3, LiNRV4
+from retrieve.modules.knn import FullScanKNN, PostfilterKNN, PrefilterKNN
+from retrieve.modules.linr import LiNRV1, LiNRV2, LiNRV3
 from tests.conftest import (
     assert_topk_id_sets_match,
     make_attrs,
@@ -355,49 +355,6 @@ class TestSimHashKNNCrossBackend:
 
 
 # ---------------------------------------------------------------------------
-# PostfilterKNNInt8: per-item symmetric int8 + per-query symmetric int8
-# + cuBLAS int8 GEMM (paper-faithful). Single-stage analog of
-# PostfilterKNN — full-scan dense scoring + optional mask + topk.
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("backend", BACKENDS)
-class TestPostfilterKNNInt8:
-    def test_no_mask_returns_topk(self, data, backend):
-        m = PostfilterKNNInt8(k=K, backend=backend)
-        m.register_index(data["embs"])
-        ids, scores = m(data["query"])
-        assert ids.shape == (B, K)
-        assert scores.shape == (B, K)
-        assert (scores[:, :-1] >= scores[:, 1:]).all()
-
-    def test_full_scan_topk_recall_against_exact(self, data, backend):
-        m = PostfilterKNNInt8(k=K, backend=backend)
-        m.register_index(data["embs"])
-        ids, _ = m(data["query"])
-
-        exact = FullScanKNN(k=K)
-        exact.register_index(data["embs"])
-        ex_ids, _ = exact(data["query"])
-
-        recall = recall_at_k(ids, ex_ids)
-        # Dual int8 (query + items) on unit-norm D=128 data: ≥0.95 typical
-        # (paper notes the dual-int8 path "cannot reach 0.95 recall" at
-        # production scale, but on random data the noise floor is lower).
-        assert recall >= 0.95, f"PostfilterKNNInt8 recall@{K} = {recall:.3f}"
-
-    @pytest.mark.parametrize("pass_rate", [0.01, 0.1, 0.8])
-    def test_external_mask(self, data, backend, pass_rate):
-        m = PostfilterKNNInt8(k=K, backend=backend)
-        m.register_index(data["embs"])
-        mask = make_mask(B, N, pass_rate=pass_rate)
-        ids, scores = m(data["query"], mask=mask)
-        for b in range(B):
-            valid = torch.isfinite(scores[b]) & (ids[b] >= 0)
-            assert mask[b, ids[b][valid]].all()
-
-
-# ---------------------------------------------------------------------------
 # Decoupled clause filter: caller composes ExactAttributeFilter with retriever.
 # ---------------------------------------------------------------------------
 
@@ -458,10 +415,9 @@ class TestClauseDecoupledComposition:
 
 class TestEdgeCases:
     @pytest.mark.parametrize("backend", BACKENDS)
-    @pytest.mark.parametrize("cls", [PostfilterKNN, PostfilterKNNInt8])
-    def test_mask_all_true_equals_unmasked(self, data, cls, backend):
+    def test_mask_all_true_equals_unmasked(self, data, backend):
         """All-True mask path returns the same top-K id set as the unmasked path."""
-        m = cls(k=K, backend=backend)
+        m = PostfilterKNN(k=K, backend=backend)
         m.register_index(data["embs"])
         ids_no_mask, sc_no_mask = m(data["query"])
         all_true = torch.ones(B, N, dtype=torch.bool, device="cuda")
@@ -471,16 +427,12 @@ class TestEdgeCases:
         assert_ids_equal_up_to_ties(ids_masked, ids_no_mask, sc_no_mask)
 
     @pytest.mark.parametrize("backend", BACKENDS)
-    @pytest.mark.parametrize("cls", [PostfilterKNN, PostfilterKNNInt8])
-    def test_mask_all_false_returns_no_finite_scores(self, data, cls, backend):
+    def test_mask_all_false_returns_no_finite_scores(self, data, backend):
         """All-False mask → every slot is padded (``id == -1``)."""
-        m = cls(k=K, backend=backend)
+        m = PostfilterKNN(k=K, backend=backend)
         m.register_index(data["embs"])
         all_false = torch.zeros(B, N, dtype=torch.bool, device="cuda")
         ids, _ = m(data["query"], mask=all_false)
-        # Sentinel is ``id == -1``; ``PostfilterKNNInt8`` returns int32
-        # scores so the previous ``torch.isfinite(scores)`` check would be
-        # vacuously True for it.
         assert (ids == -1).all()
 
     @pytest.mark.parametrize("backend", BACKENDS)
@@ -515,27 +467,6 @@ class TestEdgeCases:
         assert ids.shape == (B, K)
         assert (ids == -1).all()
         assert not torch.isfinite(scores).any()
-
-    @pytest.mark.parametrize("backend", BACKENDS)
-    @pytest.mark.parametrize("small_b", [1, 8, 16])
-    def test_postfilter_knn_int8_small_batch_padding(self, data, backend, small_b):
-        """``torch._int_mm`` requires M >= 17; the layer pads small batches
-        with zero rows and slices back. Verify the padded path returns
-        sensible top-K (high recall vs the exact fp32 baseline) — can't
-        compare against another ``PostfilterKNNInt8`` call because
-        the global query scale depends on batch contents and would
-        change between calls."""
-        m = PostfilterKNNInt8(k=K, backend=backend)
-        m.register_index(data["embs"])
-        ids, _ = m(data["query"][:small_b])
-        assert ids.shape == (small_b, K)
-        assert (ids >= 0).all()
-
-        exact = FullScanKNN(k=K)
-        exact.register_index(data["embs"])
-        ex_ids, _ = exact(data["query"][:small_b])
-        recall = recall_at_k(ids, ex_ids)
-        assert recall >= 0.95, f"small-batch padding recall@{K} = {recall:.3f}"
 
     @pytest.mark.parametrize("backend", BACKENDS)
     def test_b_one(self, data, backend):
@@ -670,13 +601,12 @@ def test_simhash_quality_lift_over_oporp_at_higher_kbits():
     "make",
     [
         lambda backend: PostfilterKNN(k=K, backend=backend),
-        lambda backend: PostfilterKNNInt8(k=K, backend=backend),
         lambda backend: PrefilterKNN(k=K, backend=backend),
         lambda backend: OneBitKNN(k=K, backend=backend),
         lambda backend: SimHashKNN(k=K, k_bits=64, backend=backend),
         lambda backend: ExactAttributeFilter(backend=backend),
     ],
-    ids=["postfilter", "postfilter_int8", "prefilter", "one_bit", "simhash", "exact_filter"],
+    ids=["postfilter", "prefilter", "one_bit", "simhash", "exact_filter"],
 )
 @pytest.mark.parametrize("backend", ["official", "cuda", "foo"])
 def test_unknown_backend_is_rejected(make, backend):
@@ -687,12 +617,12 @@ def test_unknown_backend_is_rejected(make, backend):
 
 
 # ---------------------------------------------------------------------------
-# The paper variants as modules: LiNRV1–V4 equal the primitives composed by hand.
+# The paper variants as modules: LiNRV1–V3 equal the primitives composed by hand.
 # ---------------------------------------------------------------------------
 
 
 class TestComposites:
-    """``LiNRV1``–``LiNRV4`` (plan L D5) are the harness wrappers moved, not rewritten: on the
+    """``LiNRV1``–``LiNRV3`` (plan L D5) are the harness wrappers moved, not rewritten: on the
     same inputs each equals the primitives composed by hand — scores ``torch.equal``, ids
     equal up to ties. A Triton filter's compaction order is unspecified between two launches,
     so V3's filter is the ``torch`` one on every row: fed a Triton candidate list, the 1-bit
@@ -766,20 +696,6 @@ class TestComposites:
         cand, _ = stage1(data["query"], candidate_ids=pos, counts=pcounts)
         ref = stage2(data["query"], candidate_ids=cand, counts=(cand >= 0).sum(dim=1))
         self._equal(v3(data["query"], qa), ref)
-
-    @pytest.mark.parametrize("backend", BACKENDS)
-    @pytest.mark.parametrize("kind", ["none", "clause", "bloom"])
-    def test_v4_equals_postfilter_knn_int8(self, data, attrs, backend, kind):
-        item_attrs, qa = attrs
-        f = self._filter(kind, backend, item_attrs)
-        v4 = LiNRV4(k=K, filter=f, backend=backend)
-        v4.register_index(data["embs"])
-        ref = PostfilterKNNInt8(k=K, backend=backend)
-        ref.register_index(data["embs"])
-        if kind == "none":
-            self._equal(v4(data["query"]), ref(data["query"]))
-        else:
-            self._equal(v4(data["query"], qa), ref(data["query"], mask=f.evaluate_mask(qa)))
 
     def test_register_index_registers_the_filter(self, data, attrs):
         """``register_index(embs, item_clause_attrs, clause_is_reverse)`` registers the attached
@@ -864,7 +780,7 @@ def test_linr_without_filter_rejects_clause_attrs():
     candidates are the filter's, refuses ``filter=None`` at construction."""
     attrs = torch.zeros(50, 1, 1, dtype=torch.long, device="cuda")
     qa = torch.zeros(2, 1, dtype=torch.long, device="cuda")
-    for cls in (LiNRV1, LiNRV3, LiNRV4):
+    for cls in (LiNRV1, LiNRV3):
         m = cls(k=5).cuda() if cls is not LiNRV3 else cls(k=5, candidate_pool=10).cuda()
         with pytest.raises(ValueError, match="has no filter"):
             m.register_index(make_index(50, 64), attrs)

@@ -20,11 +20,9 @@ MODULES = [
     "LiNRV1",
     "LiNRV2",
     "LiNRV3",
-    "LiNRV4",
     "OfficialConfig",
     "OneBitKNN",
     "PostfilterKNN",
-    "PostfilterKNNInt8",
     "PrefilterKNN",
     "SilverTorch",
     "SilverTorchBuilder",
@@ -38,7 +36,7 @@ pytestmark = pytest.mark.cpu
 def test_all_lists():
     assert retrieve.modules.__all__ == MODULES
     assert retrieve.__all__ == sorted(MODULES + INTERFACES)
-    assert len(retrieve.__all__) == 20
+    assert len(retrieve.__all__) == 18
     for name in retrieve.__all__:
         assert getattr(retrieve, name) is not None
 
