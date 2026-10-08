@@ -671,7 +671,9 @@ seed) in one unit, in matrix order; every other job is a unit of its own. A
 job in two groups of two or more is a `ConfigError` at `load_matrix`. The
 shipped groups: `filter` and `synth` V1 vs V2 (per backend and compile mode)
 and triton vs official (silvertorch bloom); `codesign` partial vs full; `h2h`
-triton vs official fp16 vs official int32.
+triton vs official fp16 vs official int32. `bloomwidth-timed` has none, and `by: backend` could not
+pair its arms: Triton's build carries `m_bits`, official's does not, so their keys differ
+beyond `backend`.
 
 Without `--interleave` nothing changes. With it, `run` builds every arm of a
 unit (assets per arm's step-3 key, usually shared), then per query combo runs
