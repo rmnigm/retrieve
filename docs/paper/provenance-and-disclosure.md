@@ -207,14 +207,14 @@ the item is not paper material (CLAUDE.md rule 2).
 | fp32 accumulation in `fused_masked_knn_topk`, the reduction-width audit across every Triton kernel, and the fp64-oracle parity file that would have caught the class | **L5** |
 | multi-seed cells, bootstrap CIs, paired tests for every "A is faster than B" sentence | **D1** (gap G4) |
 | mean / p95 / p99 latency, per-query latency vectors, closed- and open-loop QPS under a P99 budget | **D1** (gap G3) |
-| external baselines at matched recall (Faiss GPU/CPU, HNSW, cuBLAS floor; then cuVS, filtered-graph CPU indexes) | out of the study ([backlog](../backlog.md#baselines-outside-the-study)); the baseline is generic torch, roadmap **D5** (gaps G5, G13, G14) |
+| external baselines at matched recall (Faiss GPU/CPU, HNSW, cuBLAS floor; then cuVS, filtered-graph CPU indexes) | out of the study ([backlog](../backlog.md#baselines-outside-the-study)); the baseline is generic torch plus the torch-importable arms ([decisions](../decisions.md#campaign-v2-user-2026-10-08)) (gaps G5, G13, G14) |
 | bloom false-positive rate and memory against filter width on **real** attributes, for our bloom and Meta's | **D3** (gap G6) |
-| the SilverTorch co-design ablation (full mask → IVF vs fused partial bloom) as scratch memory and latency vs probe count | **D1** S9 cells / **G-b** |
-| the LiNR V1/V2 pass-rate crossover and the liquidity curve on a controlled sweep | **G-b** (gap G11) |
+| the SilverTorch co-design ablation (full mask → IVF vs fused partial bloom) as scratch memory and latency vs probe count | roadmap V-CODESIGN (campaign v2) |
+| the LiNR V1/V2 pass-rate crossover and the liquidity curve on a controlled sweep | the `synth` suite, campaign v2 (gap G11) |
 | the V3 bit-width sweep and the "keep 1 %" operating point | **G-b** (gap G15) |
 | a Triton transposed bloom index, and any claim about the paper's transposed-index win in current code | **G-a** |
 | scale beyond 5.4 M items (10 M real, synthetic ladder, the 240 M and 1 B stress points) | **G-b** (gap G10); the large datasets are **E2**–**E4**, deferred on disk |
-| the YFCC-10M, PubMed, Semantic Scholar and KuaiRand cells | **E5** (after D1) |
+| the YFCC-10M and PubMed cells under the final grid | campaign v2 ([roadmap](../roadmap.md)); Semantic Scholar, OpenAlex and KuaiRand are out of the study |
 | the packaged artifact: tagged release, Zenodo DOI including the pinned official sdist, HF data and oracles, one-command reproduction | **F4** |
 
 ## 7. Data provenance
@@ -224,7 +224,7 @@ the item is not paper material (CLAUDE.md rule 2).
 | Goodreads (work-id) | d128 item embeddings (gSASRec), `item_attrs_narrow` `[N, 4, 4]` int64, 313,178 test users of which the first **10,000** are used and **9,859** kept (141 have zero survivors under the `c0_genre` condition and are dropped), oracle top-K from the published `gt_d128/` blobs | `pinkmeme/eval-goodreads-work-id` on the Hugging Face Hub, the project's own mirror; 2.6 GB staged |
 | arXiv (papers) | `content_d128` item embeddings (Nomic-Embed), `item_attrs_narrow` `[N, 5, 4]`, 10,000 queries, `c0_maincat` condition | `pinkmeme/eval-arxiv-papers`, 1.3 GB staged |
 | Yambda-500M / Yambda-5B | unfiltered cells only, in the thesis; not re-run | `pinkmeme/eval-yambda-500m`, `pinkmeme/eval-yambda-5b` |
-| YFCC-10M | ingested, ground-truth gate passed; cells wait on **E5** | Big-ANN filter-track release |
+| YFCC-10M | ingested, ground-truth gate passed; cells: campaign v2 ([roadmap](../roadmap.md)) | Big-ANN filter-track release |
 
 **Disclosure on the mirror's layout.** The Hub mirror still publishes the
 **pre-`3b1b5b3` 1-indexed `[N + 1, …]`** artifact layout: goodreads

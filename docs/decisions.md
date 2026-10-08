@@ -1,7 +1,7 @@
 ---
 title: decisions
 created: 2026-09-26
-updated: 2026-10-07
+updated: 2026-10-08
 type: summary
 tags: [decisions]
 sources: [pyproject.toml, evaluation/config/suites.yaml, retrieve/src/retrieve/, evaluation/bench/, evaluation/training/]
@@ -28,6 +28,95 @@ decisions.
   are ordered first and CPU steps run beside them.
 - **Nothing is citable until its gate passed** (CLAUDE.md rule 2).
   [validation.md](validation.md) says which gates have passed.
+- **Venue: the ECIR 2027 reproducibility track format** (user, 2026-10-08):
+  12 pages LNCS, double-blind. No deadline pressure ("do not care about
+  deadlines, just do all the work; the most useful first"); nothing is cut
+  for time.
+
+## Campaign v2 (user, 2026-10-08)
+
+The campaign was re-planned backwards from the paper's claims (source: the
+user's re-plan, kept in the orchestrator's handoff notes; the claims are
+C1-C7, the exhibits T1-T3 and F1-F4). These rules govern every cell from
+now on; the [roadmap](roadmap.md) holds the steps.
+
+- **Claims drive cells.** Every planned cell maps to a figure or table row
+  of the paper; a cell that maps to none is cut. A parameter value stays
+  only if it moves a curve in an exhibit; if latency is monotone across
+  three measured points, the axis is not densified; a claim already
+  unambiguous on two datasets gets only the headline point on the third.
+- **Code first, then one code_version.** All code changes of the batch
+  (plan items #1-#16, P0 and P1, including the chunked oracle and the
+  probe-scorer tile skipping) land, pass their gates and are merged before
+  any campaign cell runs. Then the code is frozen at one tag,
+  `campaign-v2`, whose library tree hash is the campaign's code_version,
+  recorded in *evaluation/campaign.yaml* (to be created by CV2-REPORT). Allowed before the freeze:
+  profiling, unit and parity tests, smoke cells into scratch trees (no
+  campaign records). Not allowed during the campaign: feature or
+  optimization work. A correctness bug found mid-campaign stops all runs;
+  it is fixed, re-tagged, only the arms its own gates prove changed are
+  rerun, and the manifest logs it.
+- **Record reuse rule.** An existing record enters the paper only if all
+  three hold: its inputs match the final ones (the E1c encoder for
+  goodreads, the license-fixed arXiv attrs); its arm's kernels are proven
+  identical to the frozen code by that change's own gates; and its timing
+  came from an interleaved comparison or from a run with fewer than 10 %
+  of windows below the maximum sampled clock. Quality and timing are
+  judged separately (quality is largely reusable). Otherwise it is rerun
+  or dropped from the exhibit. The manifest names, per (dataset, suite,
+  algo, backend), the accepted code_version and Hub subtree for quality and
+  for perf; `bench report` reads the manifest, not "the latest record".
+- **Four datasets**: goodreads (E1c, 0.8M, d128), arXiv (3M, d128),
+  YFCC-10M (10M, d192), PubMed (10M, d768). **OpenAlex is dropped** (same
+  N, width and domain family as PubMed; the leg was E5;
+  [backlog](backlog.md#datasets-not-in-the-study)). No point above 10M
+  before submission; the chunked oracle is still built.
+- **Three kept sweeps per dataset** in the headline grid (one high pass
+  rate, one low, one conjunctive or reverse): goodreads `c0_genre`,
+  `c1_lang_reverse`, `all4`; arXiv `c3_nversions` (0.444), `c0_maincat`
+  (0.136), `all4` (0.0094); PubMed `c0_mesh` (0.0002),
+  `c3_journal_reverse` (0.9993), `all5` (0.018); YFCC `tags_and`. arXiv
+  records already run on the other sweeps are kept, not extended.
+- **A synthetic selectivity suite** (`synth`): one nested, per-item uniform
+  pass flag (`u_i < p`, generator seed 20261008) at
+  p ∈ {0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0} on goodreads, arXiv and
+  YFCC (YFCC at {0.001, 0.01, 0.03, 0.1, 1.0}), on the real embeddings,
+  as sibling dataset configs that never touch the real attrs. It is IVF's
+  worst case (the filter is independent of the embedding), and p = 1.0 is
+  the unfiltered point. A cluster-correlated variant (arXiv, 3 points) runs
+  only if arXiv's uniform sweep shows the IVF recall collapse at low p.
+- **Grid**: batch sizes {1, 16} (bs 8 dropped), k {100, 1000} (500 dropped;
+  1000 is the closest to LiNR's 2000), no `n_probe` 4 or 256.
+  **3 seeds {0, 1, 2} everywhere** (user): every suite, every dataset, every
+  sweep; the deterministic arms (V1, V2, postfilter) compute quality once
+  and reuse it across seeds, perf repeats per seed. Postfilter α ∈ {1, 8}.
+- **Headline SilverTorch operating point**: the paper's `n_probe` 24 plus
+  the matched-recall `n95` (the smallest `n_probe` reaching
+  `recall_oracle@100` ≥ 0.95 on the dataset's median sweep), not {24, 32}:
+  a fixed `n_probe` across 0.8M-10M compares different recall levels.
+- **Official SilverTorch runs only on `none` and `bloom`.** Its clause and
+  exact cells time our `pack_mask` adapter, not Meta's code; the existing
+  official-clause records stay as an "adapter-bound upper bound" footnote.
+- **Timing**: CUDA-graph is the headline mode, eager the secondary; the
+  official backend is eager-only (its ops cannot be captured), said in T3.
+  Every ratio claim (C1, C5, C7) is timed interleaved: the arms of one
+  comparison run round-robin (ABAB) in one process, so clock drift cancels.
+- **Baselines stay torch-importable; no Faiss** (user): the generic-torch
+  postfilter, LiNR V1/V2 on the torch backend (the native floor), the
+  SilverTorch torch-reference backend (unfused IVF) and a
+  `torch.compile(mode="max-autotune")` arm of the torch-reference ops. The
+  paper states the scope once in the setup and once in threats to
+  validity.
+- **LiNR V4 leaves the library** (user): it is ours, not LiNR's. The code
+  stays under the git tag `linr-v4-final`.
+- **H2H-final replaces b3 and the kernel-opt head-to-head** as the only
+  source of T3 (official vs Triton): goodreads E1c and arXiv, release code,
+  interleaved, 5 repeats, official in both `score_path` modes (fp16, the
+  default the paper reports; int32, parity).
+- **Execution**: code and GPU testing run on the 1×A100 development pod;
+  the long evaluations run on pods the user creates later, one sequential
+  timed driver on GPU 0, quality-only work on GPU 1, and timed work on a
+  second GPU only if M1 passes.
 
 ## Library
 
@@ -44,8 +133,8 @@ decisions.
   `reference`, `official`), plus `retrieve.indexing` and
   `retrieve.functional`. Meta's modules and ops are imported and wired in,
   never copied. See [architecture](system/architecture.md).
-- **LiNR V1-V4 are library modules**; the harness keeps only a name to
-  class table.
+- **LiNR V1-V3 are library modules**; the harness keeps only a name to
+  class table. V4 leaves (Campaign v2 above).
 - **Op names, module names, buffer names and op schemas are stable.** A
   state dict written by an earlier release loads into the current modules.
 - **k-means++ is opt-in** (`kmeans_init="random"` is the default) until
@@ -85,27 +174,24 @@ decisions.
 - **The baseline is generic torch** (user): a dense matmul over the whole
   item table on the GPU, `torch.topk(K)`, then drop the ids that fail the
   filter, losing candidates from K. It is what a practitioner writes
-  without a retrieval library. No library or ANN baselines (Faiss, HNSW,
-  cuVS) are in the study ([backlog](backlog.md#baselines-outside-the-study)).
+  without a retrieval library. Beside it, the torch-importable arms of
+  Campaign v2 above. No library or ANN baselines (Faiss, HNSW, cuVS) are in
+  the study ([backlog](backlog.md#baselines-outside-the-study)).
 - **Three packages, one dependency direction**: `bench` → `training` →
   `eval_datasets`, enforced by `tests/test_dependency_direction.py`. The
   library retrieves; the harness measures.
-- **One backend per algorithm in the campaign grid.** `triton` everywhere,
-  because it is the fastest arm on every algorithm measured (eager median
-  torch/triton 4.16× on V1, 7.27× on V2, 10.19× on V3). `silvertorch`
-  runs `[triton, official]`, because that comparison is the paper; the
-  generic-torch baseline (above) runs on `torch`, being torch by
-  definition. The `torch` backends of the library algorithms are not
-  swept again.
-- **`linr_v4` is out of the grid.** It is ours, not LiNR's: the paper
-  defines V1-V3.
-- **No unfiltered `quality` suite.** Its datasets were Yambda's, which
-  are out of the study; unfiltered cells return for the text datasets
-  (roadmap E5). The report's no-filter table emits a placeholder until
-  then.
-- **Modes: `eager` everywhere, `graph` on `triton`.** Graph-only was
-  rejected: the official ops cannot be captured, and eager is the papers'
-  comparable mode. A run with a narrowed mode set records
+- **`triton` is the algorithms' campaign backend**, because it is the
+  fastest arm on every algorithm measured (eager median torch/triton
+  4.16× on V1, 7.27× on V2, 10.19× on V3). `silvertorch` runs
+  `[triton, official]`, because that comparison is the paper; the torch
+  arms return only as the baselines of Campaign v2 above (V1/V2 torch on
+  three synth pass rates, the SilverTorch torch reference at the headline
+  point), not as a backend matrix.
+- **No unfiltered `quality` suite.** The synth suite's p = 1.0 point is
+  the unfiltered cell on goodreads, arXiv and YFCC.
+- **Modes: `eager` everywhere, `graph` on `triton`**; graph is the
+  headline (Campaign v2 above). Graph-only was rejected: the official ops
+  cannot be captured. A run with a narrowed mode set records
   `status: partial`, which the report treats as not citable; whether a
   deliberate, recorded narrowing should read differently is open (see the
   roadmap).
@@ -130,10 +216,10 @@ decisions.
 ## Datasets
 
 - **The study's datasets: semantic search on text plus one recsys
-  dataset** (user): arXiv, YFCC-10M, PubMed + MedCPT, Semantic Scholar
-  SPECTER2 (OpenAlex while the API key is missing), and Goodreads. Each
+  dataset** (user): arXiv, YFCC-10M, PubMed + MedCPT, and Goodreads. Each
   has real filters and an open or local query encoder.
-- **Dropped**: Amazon Reviews 2023; Cohere Wikipedia (scale without
+- **Dropped**: OpenAlex and Semantic Scholar SPECTER2 (user, 2026-10-08;
+  [backlog](backlog.md#datasets-not-in-the-study)); Amazon Reviews 2023; Cohere Wikipedia (scale without
   meaningful filters, closed query encoder); yambda-500m and yambda-5b
   (user: no attributes, so no filtered cells); KuaiRand-27K (user: does
   not fit the study). Their checkpoints and trainer results stay as they

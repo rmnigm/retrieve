@@ -1,7 +1,7 @@
 ---
 title: validation
 created: 2026-09-26
-updated: 2026-10-07
+updated: 2026-10-08
 type: summary
 tags: [validation, testing, harness]
 sources: [retrieve/tests/, evaluation/tests/, evaluation/golden/, evaluation/results/, docs/artifacts/, docs/artifacts/hub-index.md]
@@ -91,6 +91,12 @@ citable because the step is closed. The user decides; until then, quote
 them with that caveat. [kernels](system/kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend)
 explains the mechanism behind the kernel-only split.
 
+**Superseded as the paper's source** (user, 2026-10-08): T3 (official vs
+Triton) comes only from H2H-final on the frozen `campaign-v2` code
+([decisions](decisions.md#campaign-v2-user-2026-10-08)); b3 and the
+kernel-opt head-to-head stay below as history and are not quoted in the
+paper.
+
 - **End to end, batch 16, our Triton is the fastest arm in every cell**:
   1.5× (goodreads none), 1.9× (goodreads bloom), 3.3× (goodreads clause),
   1.3× (arXiv none), 1.2× (arXiv bloom), 10.1× (arXiv clause) against
@@ -157,7 +163,19 @@ below 1410), NOT CITABLE. arxiv `codesign` is complete, 60/60 cells ok, 0 failed
 4–256 (`n_lists` 1664) × the 5 sweeps, seed 0, all at `c0e42d1` (staging `b1d48d3`,
 A100-SXM4-80GB, schema 3); 58 of 60 flagged `unstable`, sampled `sm_mhz` 1140–1410 (258 of
 540 timing windows below 1410), NOT CITABLE. goodreads's two legs have no records; goodreads
-runs on the E1c encoder. What remains is roadmap D1-C..G.
+runs on the E1c encoder. Halted D1-E: 16 pubmed `silvertorch`/triton
+`filter` cells ran `ok` at `c0e42d1` after the pubmed identity check
+(restaged slice equal to D1's), recorded locally on the development pod and
+not uploaded; pubmed reruns under campaign v2 on the frozen code instead.
+
+**Superseded plan** (user, 2026-10-08): D1 as scoped here is replaced by
+the campaign-v2 steps of the [roadmap](roadmap.md). The records above are
+the input to the record reuse rule
+([decisions](decisions.md#campaign-v2-user-2026-10-08)); which of them the
+paper uses is decided per arm by the record inventory and the campaign
+manifest, not by this section. The code_version policy below explains the
+versions of these existing records; new cells all run at the
+`campaign-v2` code_version.
 
 **Code_version policy for this campaign (user decision):**
 `code_version` is a hash of the `retrieve/src/retrieve` subtree (`bench/measure.py`), but a fix there does not
@@ -179,7 +197,7 @@ each time, and update this paragraph.
 in `test_algos.py` / `test_config.py`); one early smoke cell (pre-dating
 the real `codesign` suite run) found `full` faster than `partial` on one
 goodreads cell, one seed, unlocked clocks — not a finding; the `codesign`
-legs (roadmap D1-B, D1-D) decide.
+legs (roadmap V-CODESIGN) decide.
 
 ### Cross-scale filter comparison (not yet validated)
 
@@ -247,7 +265,8 @@ only. Held-out recall@100 is identical (0.95493 / 0.95915), but mrr@100
   (1275 ↔ 1410 MHz).
 - Seed spread ≤ 0.0076 recall; V1 and V2 recall agree to 1.7e-5.
 - Pubmed `c3_journal_reverse` records carry held-out recall 0.0 where it
-  should be null (roadmap H7).
+  should be null; H7 fixed the rule in code, and the records read null
+  through the same rule, so they are not rewritten.
 
 ## Encoder switch: evals to redo
 
@@ -265,8 +284,8 @@ under one `(dataset, dim)`.
 | record set | encoder it used | state now | redo |
 |---|---|---|---|
 | D1 `filter` leg, goodreads d128 (`d1/goodreads`, 105 records) | `gsasrec-d128-drop0.5-id` | **stale**, kept on the Hub as the gSASRec run | full leg on `sasrec-ssm-logq-d128` (roadmap D1); the harness reads the E1c checkpoints (R1 done: [datasets](#datasets), goodreads row) |
-| D1 `deep` / `codesign`, goodreads | not started | — | run on the new encoder only (roadmap D1) |
-| Official vs Triton head-to-head, goodreads (`b3`, kernel-opt `h2h`) | `gsasrec-d128-drop0.5-id` | stands as a gSASRec-embedding measurement; not comparable to D1's new goodreads cells | rerun on the new encoder before F2 quotes goodreads |
+| D1 `deep` / `codesign`, goodreads | not started | — | run on the new encoder only (roadmap: goodreads `deep`, trimmed, and `codesign`) |
+| Official vs Triton head-to-head, goodreads (`b3`, kernel-opt `h2h`) | `gsasrec-d128-drop0.5-id` | stands as a gSASRec-embedding measurement, history only | replaced by H2H-final on E1c (roadmap) |
 | Golden baseline, goodreads cells (`evaluation/golden/`) | `gsasrec-d128-drop0.5-id` | stands; the gate compares harnesses on fixed inputs | keep on the gSASRec checkpoint (`bench run --checkpoint`); no rerun |
 | kuairand filter cell (`artifacts/e4-kuairand`) | `gsasrec-d128-shared` (deleted) | stale, not reproducible; KuaiRand is out of the study | none |
 | `quality` suite, yambda-500m | `gsasrec-d{dim}-drop0.5` | retired suite; no current records; yambda is out of the study | none |
@@ -279,8 +298,8 @@ under one `(dataset, dim)`.
 | goodreads | staged, layout checked (`bench check` d128). The E1c checkpoints `sasrec-ssm-logq-d{64,128,256}` are staged (`loss: sampled_softmax`, `normalize: true`, `item_id_map.json` sha256-equal to the data root's), and the harness reads them (R1, 2026-10-08, `dev/r1`, A100, code_version `c0e42d1`): one cell, `linr_v1_filter_mask`/triton clause `c0_genre` seed 0 `--skip-perf`, record `inputs: sasrec-ssm-logq-d128`, a fresh encode and a fresh `c0_genre` oracle (new fingerprint beside the gSASRec blob). `recall_oracle@100` 0.9997, `@1000` 0.9998 (exact gate ≥ 0.99 passes); held-out recall@100 / @500 / @1000 0.2151 / 0.4235 / 0.5256 (gSASRec, same cell: 0.2126 / 0.4243 / 0.5264); `n_kept` 9,859 as on gSASRec. Every query (313,178) and item (797,084) vector has L2 norm 1.000000; so does the dropped padding row 0 of the scoring table, which is never scored. Not yet validated: one cell, no perf ([artifact](artifacts/r1/run.sh), Hub `artifacts/r1`). Oracles for the other sweeps and dims are built by the next run |
 | arxiv | staged, layout checked, on the Hub as `pinkmeme/eval-arxiv-papers`. Clause 1 (license) maps the 452,732 null-license items (15.1 %) and 1,528 of the 10,000 queries to bucket `none` ([datasets](system/datasets.md#arxiv)); a table built before that fix carried INT64_MIN there (check: `item_attrs_narrow.pt` min = -1, `eval_split.parquet` `query_attrs_narrow` min = 0). Only the `all4` sweep reads clause 1; `d1/arxiv`'s 42 `all4` cells are on the fixed table (numbers unchanged to 4 decimals against the corrupt one) |
 | yfcc10m | our exact oracle reproduces the shipped filtered ground truth. **The exact-algorithm gate passes since L1**: `linr_v1_filter_mask`/triton clause `tags_and`, eager, `--skip-perf`, 10,000 queries: `recall_oracle@1000` **0.9944** (0.9652 and `QualityGateError` on the pre-L1 tree, same command); `LiNRV2(backend="torch")` against the same oracle blob 0.9944 (script). `linr_v2`/triton could not run at d192 before L4's padding (row *Non-power-of-two widths*); D1's yfcc10m filter leg has since run it (7/7 ok, [Campaign](#campaign-roadmap-d1-in-progress-not-yet-validated)). The residual 0.006 is the fp16 item storage: an fp32 table gives 1.0 ([artifact](artifacts/l1-l2/README.md)); not yet validated beyond this one cell |
-| pubmed | 10 M slice under `pubmed-medcpt`, not on the Hub; restaged 2026-10-07 for D1-E and shown to be D1's slice on every per-sweep record fact (attrs, split, targets, pass rates; embeddings not yet, they need the GPU `encode_queries`: [artifact](artifacts/pubmed-restage/README.md)) (`pinkmeme/eval-pubmed` is registered, not published: [datasets](system/datasets.md#huggingface-io)). D1's filter leg is `d1/pubmed`. D=768 (L4-padded): `linr_v1_filter_mask`, `linr_v2`, `silvertorch` (triton + official) run; `linr_v2` recall_oracle@100 0.998, matching V1. `linr_v3` builds since the chunked 1-bit build (row *Build-time 1-bit quantization*): one cell, clause `c0_mesh` seed 0, `--skip-perf`: `recall_oracle@100` 0.9985, `@1000` 0.9995 (V1 on the same cell 0.9985 / 0.9997), index 17.1 GiB, 50.8 GB reserved. `d1/pubmed`: 52/56 filter cells recorded (44 ok, 8 `linr_v3` OOM before that fix, 4 never ran — `linr_v2` ×1 and `silvertorch/triton` ×3 hit the campaign's 6 h per-group timeout); the `silvertorch/triton` cells were timed on the spilling `D_PAD = 1024` tile (row *Probe-scorer tile per width*). Roadmap D1-E reruns those arms. NOT CITABLE (D1's gate is not green) |
-| openalex | 10 M slice (OpenAlex fallback for Semantic Scholar SPECTER2, no API key), not on the Hub: roadmap E5 restages it. `bench check` passed on the staged copy. One filter cell, `linr_v1_filter_mask`/triton clause `field_era`, eager, `--skip-perf` (`partial`): `recall_oracle@1000` 0.9959, held-out `recall@100` 0.505, `recall@1000` 0.741, n = 10,000. Scoped down from an initial 15 M encode after `bench/oracle.py`'s `item_embs.t().contiguous()` OOMed at that size (a second full fp32 copy on top of the item table; the real 768-d limit is ~11-12 M, not 15 M) — 10 M items resharded from the already-encoded 15 M vectors (`torch.equal`-verified), matching the pubmed precedent. SilverTorch-`triton` and LiNR V2/V3 were blocked by the power-of-two `D` limit as on pubmed until L4, not yet run here since; not yet validated ([artifacts](artifacts/e3-openalex/)) |
+| pubmed | 10 M slice under `pubmed-medcpt`, not on the Hub; restaged 2026-10-07 for D1-E and shown to be D1's slice on every per-sweep record fact (attrs, split, targets, pass rates; embeddings not yet, they need the GPU `encode_queries`: [artifact](artifacts/pubmed-restage/README.md)) (`pinkmeme/eval-pubmed` is registered, not published: [datasets](system/datasets.md#huggingface-io)). D1's filter leg is `d1/pubmed`. D=768 (L4-padded): `linr_v1_filter_mask`, `linr_v2`, `silvertorch` (triton + official) run; `linr_v2` recall_oracle@100 0.998, matching V1. `linr_v3` builds since the chunked 1-bit build (row *Build-time 1-bit quantization*): one cell, clause `c0_mesh` seed 0, `--skip-perf`: `recall_oracle@100` 0.9985, `@1000` 0.9995 (V1 on the same cell 0.9985 / 0.9997), index 17.1 GiB, 50.8 GB reserved. `d1/pubmed`: 52/56 filter cells recorded (44 ok, 8 `linr_v3` OOM before that fix, 4 never ran — `linr_v2` ×1 and `silvertorch/triton` ×3 hit the campaign's 6 h per-group timeout); the `silvertorch/triton` cells were timed on the spilling `D_PAD = 1024` tile (row *Probe-scorer tile per width*). Roadmap V-PUBMED reruns PubMed under the final grid. NOT CITABLE (D1's gate is not green) |
+| openalex | 10 M slice (OpenAlex fallback for Semantic Scholar SPECTER2, no API key), not on the Hub. **Dropped from the study** (user, 2026-10-08; [backlog](backlog.md#datasets-not-in-the-study)); not restaged. `bench check` passed on the staged copy. One filter cell, `linr_v1_filter_mask`/triton clause `field_era`, eager, `--skip-perf` (`partial`): `recall_oracle@1000` 0.9959, held-out `recall@100` 0.505, `recall@1000` 0.741, n = 10,000. Scoped down from an initial 15 M encode after `bench/oracle.py`'s `item_embs.t().contiguous()` OOMed at that size (a second full fp32 copy on top of the item table; the real 768-d limit is ~11-12 M, not 15 M) — 10 M items resharded from the already-encoded 15 M vectors (`torch.equal`-verified), matching the pubmed precedent. SilverTorch-`triton` and LiNR V2/V3 were blocked by the power-of-two `D` limit as on pubmed until L4, not yet run here since; not yet validated ([artifacts](artifacts/e3-openalex/)) |
 | kuairand | **out of the study** ([decisions](decisions.md#datasets)). The one filter cell recorded (`linr_v1_filter_mask`/triton `t_cat1`, recall_oracle@1000 0.9996) used the deleted gSASRec `gsasrec-d128-shared` checkpoint and is not reproducible; its logs are `artifacts/e4-kuairand` on the Hub. The E1c trainer results below stand as trainer results |
 
 ### Trainer inputs with `timestamps` (data gates, not citable)
