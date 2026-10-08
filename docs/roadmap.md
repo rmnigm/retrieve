@@ -129,8 +129,10 @@ claim's remaining runs are skipped and the reason logged.
 
 ### Stop rules
 
-- **Pilot gate** (after V-PILOT): proceed to the arXiv and YFCC synth legs
-  only if achieved pass rates are within 1 % relative of target, V1's
+- **Pilot gate** (passed 2026-10-08 on goodreads-synth, [validation](validation.md)):
+  proceed to the arXiv and YFCC synth legs only if achieved pass rates are
+  within 1 % relative of target where N·p ≥ 10⁴ (below that the binomial
+  spread exceeds 1 %; goodreads p 0.001 is −1.01 % at N·p 797), V1's
   `recall_oracle` is ≥ 0.99 at every p, and the curves are monotone where
   they must be (V1 latency roughly flat in p, postfilter recall falling
   with p). Otherwise stop and report.
@@ -168,8 +170,6 @@ co-design.
   loaded, interleaved, cores pinned. *Gate*: loaded medians within each
   arm's own repeat noise; otherwise timed steps run one GPU at a time.
   **0.5 GPU-h** on a ≥ 2-GPU pod.
-- [ ] **V-PILOT: goodreads synth** (uniform, 7 points), the pilot gate
-  above decides the rest of the synth axis. **≈ 4 GPU-h**, GPU 0.
 - [ ] **V-GR-FILTER: goodreads `filter` on E1c** (3 sweeps, 3 seeds, every
   arm); hub-index labels `d1/goodreads` "gSASRec, superseded". T2's
   goodreads row. **≈ 5 GPU-h**, GPU 0.
@@ -185,13 +185,17 @@ co-design.
   both blooms, `m_bits` 64-2048 × `k_hash` {3, 5}, quality-only plus one
   timed point per width at bs 16. F4a, C4. **≈ 3-5 GPU-h**, GPU 1 (the
   timed points on GPU 0).
+- [ ] **V3 seed question** (CPU, before more V3 cells): the pilot's 84 V3
+  records have identical quality across seeds 0-2 although the seed is
+  meant to move the OPORP projection; mechanism being traced. V3 cells of
+  every leg wait for the answer.
 - [ ] **V-AX-SYNTH: arXiv synth**, uniform 7 points, then the
   cluster-correlated variant (3 points) if the uniform sweep shows the IVF
-  recall collapse at low p; arXiv's `n95`. F1/F2 3M panel. Needs V-PILOT.
-  **≈ 11 GPU-h**, GPU 0.
+  recall collapse at low p; arXiv's `n95`. F1/F2 3M panel. **≈ 15-45 GPU-h**
+  (the pilot measured 8.7 GPU-h at 0.8 M), GPU 0.
 - [ ] **V-GR-DEEP: goodreads `deep`**, trimmed (`n_lists` {1024, 4096},
   `n_probe` {8, 16, 32, 64, 128}, V3 pool fractions); replaces D1-C.
-  F3; goodreads' `n95`. Needs V-PILOT. **≈ 6 GPU-h**, GPU 0/1.
+  F3; goodreads' `n95`. **≈ 6 GPU-h**, GPU 0/1.
 - [ ] **V-YFCC: YFCC synth (5 points) and a small `deep`** (`n_lists`
   {4096, 16384}). F1/F2 10M panel; YFCC's `n95`. Needs V-AX-SYNTH.
   **≈ 18 GPU-h**, GPU 0/1.
@@ -235,7 +239,6 @@ co-design.
 | step | A100 GPU-h | GPU | basis |
 |---|---|---|---|
 | M1 | 0.5 | both | |
-| V-PILOT | ≈ 8-14 | 0 | goodreads Triton cells ~65 s at the v2 grid; the torch arms ~400-460 s and dominate |
 | V-GR-FILTER | ≈ 5 | 0 | ~114 cells; SilverTorch torch + compile ~3 of it |
 | H2H-FINAL | ≈ 3 | 0 | |
 | V-CODESIGN | ≈ 1 | 0 | `d1/arxiv-codesign`: 60 cells in 0.4 h |
