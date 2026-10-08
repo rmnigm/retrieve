@@ -79,6 +79,7 @@ EXACT_MIN_RECALL = 0.99
 # alpha*k), so quality runs once per k.
 PER_K_QUALITY = ("postfilter",)
 CLOCK_DRIFT = 0.05  # §2.1: an under-load sample > 5 % off the process's first one
+POOL_MIN = 2000  # the floor of a resolved candidate_pool_frac (the re-plan's "minimum 2k")
 # An exception whose message carries one of these has killed the CUDA context: recorded, then
 # re-raised so the child exits and ``bench campaign`` moves on (review §2.9).
 STICKY_CUDA = ("CUDA error", "illegal memory access", "device-side assert")
@@ -155,6 +156,20 @@ def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device
         "pass_rate": blob["pass_rate"] if blob is not None else 1.0,
         "bloom_fp_rate": bloom_fp,
     }
+
+
+def resolve_pool(params: dict, assets: dict) -> dict:
+    """``candidate_pool_frac`` → ``candidate_pool = max(POOL_MIN, round(frac × mean pass count
+    over the sweep's oracle rows))`` (on synth, N·p); other params pass through. The key keeps
+    the fraction, the module gets the int, the record body carries it."""
+    if "candidate_pool_frac" not in params:
+        return params
+    p = dict(params)
+    if assets["blob"] is None:
+        raise ValueError("candidate_pool_frac needs a filter cell's oracle pass counts")
+    mean = assets["blob"]["pass_counts"][assets["oracle_rows"]].double().mean().item()
+    p["candidate_pool"] = max(POOL_MIN, round(p.pop("candidate_pool_frac") * mean))
+    return p
 
 
 def compile_warmup(module: nn.Module, inp: dict, assets: dict, device: torch.device) -> float:
@@ -492,7 +507,7 @@ def run(
         )
         try:
             module, build_s = measure.timed_build(
-                lambda: build_module(job, inp, assets, k_max, todo[0])  # noqa: B023 — called at once
+                lambda: build_module(job, inp, assets, k_max, resolve_pool(todo[0], assets))  # noqa: B023 — called at once
             )
             compile_s = (
                 compile_warmup(module, inp, assets, device) if "compile" in job.build else None
@@ -517,7 +532,8 @@ def run(
             t0 = time.perf_counter()
             stage = "query_params"
             try:
-                q = {k: v for k, v in params.items() if k in QUERY_PARAMS}
+                resolved = resolve_pool(params, assets)
+                q = {k: v for k, v in resolved.items() if k in QUERY_PARAMS}
                 if q:
                     module.set_query_params(**q)
                 reasons = job_reasons + (["ks_bs"] if job.narrowed else [])
@@ -543,6 +559,7 @@ def run(
                     "batch_sizes": list(job.batch_sizes),
                     "build_s": build_s,
                     "compile_s": compile_s,
+                    "candidate_pool": resolved.get("candidate_pool"),
                     "index_mib": index_mib,
                     "filter_mib": filter_mib,
                     "quality": None,
@@ -632,6 +649,7 @@ def run(
 
 __all__ = [
     "CLOCK_DRIFT",
+    "POOL_MIN",
     "EXACT_ALGOS",
     "MODES",
     "PERF_STAT_KEYS",
@@ -641,5 +659,6 @@ __all__ = [
     "QualityGateError",
     "compile_warmup",
     "is_sticky",
+    "resolve_pool",
     "run",
 ]

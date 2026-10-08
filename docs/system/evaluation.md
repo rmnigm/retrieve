@@ -435,7 +435,7 @@ the index. Its `query:` params (`n_probe`, `candidate_pool`,
 no meaning: `bloom_path` off silvertorch / bloom / official, `m_bits` /
 `k_hash` off silvertorch / bloom ([bloom widths](#bloom-widths-as-build-params)),
 `compile` off a torch arm ([compiled arms](#compiled-arms)), and
-`candidate_pool_frac` off `linr_v3`. Two arms that expand to the same
+`candidate_pool_frac` off `linr_v3` ([pool fractions](#pool-fractions)). Two arms that expand to the same
 cell are also an error. When two backends of one algo run the same code
 path (`PATHS`) over the same cells, they collapse to the first, logged
 once. A collapse that would cover only part of a job's cells is a
@@ -644,6 +644,16 @@ name. A compile failure surfaces at `compile_warmup`, inside the build
 step, and is recorded as a `build` failure. There is no bit-exact gate
 between eager and compiled.
 
+### Pool fractions
+
+`candidate_pool_frac` (a `linr_v3` query param, in the key) is resolved
+per sweep by `run.resolve_pool`, before the build and before
+`set_query_params`, to `candidate_pool = max(POOL_MIN = 2000, round(frac
+× mean pass count over the sweep's oracle rows))`. On synth every query
+passes the same items, so the mean is the achieved pass count (N·p in
+expectation). The key keeps the fraction, the module gets the int, and
+the record's `candidate_pool` carries it.
+
 ## Output: one JSONL record per cell
 
 `results/<suite>/<dataset>-d<dim>.jsonl`, appended by the process the
@@ -671,6 +681,7 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 | `k_max`, `ks`, `batch_sizes` | | the suite's, `k_max = max(ks)` |
 | `build_s` | float | construction + `register_index`, sync on each side (same value on every cell of one build) |
 | `compile_s` | float / null | a `compile` arm's first forward (one quality chunk), apart from `build_s` ([compiled arms](#compiled-arms)); `null` elsewhere |
+| `candidate_pool` | int / null | the `candidate_pool` the module ran with when `params` sets one: the literal, or the value `candidate_pool_frac` resolved to ([pool fractions](#pool-fractions)) |
 | `index_mib` | float | Σ buffers of the algo module, filter submodule included |
 | `filter_mib` | float | Σ buffers of the filter submodule alone (`0.0` without one; `silvertorch` carries its attrs inside `index_mib`) |
 | `quality` | dict / null | `heldout: {recall@k, ndcg@k, precision@k, mrr@k for k in ks, n}`, each metric `null` when `n == 0`; on filter cells also `oracle: {…}` (ranked-prefix targets); `jaccard_vs_first@k` per `k`, `score_max_abs_diff`, `parity` (`reference` = this record wrote the spill file, `vs_<backend>` = compared against it, `shape_mismatch:…`); `null` with `--skip-quality` |

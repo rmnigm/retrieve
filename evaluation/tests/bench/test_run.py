@@ -474,6 +474,36 @@ def test_gridded_bloom_width_is_the_cells_own(tiny_configs, tmp_path):
     assert by[256]["bloom_fp_rate"] <= by[64]["bloom_fp_rate"]
 
 
+def test_resolve_pool_from_the_sweeps_pass_counts():
+    """G-pool: ``max(POOL_MIN, round(frac × mean pass count over the oracle rows))``; on synth
+    every query passes the same N·p items. Skipped rows (``-1``) do not count."""
+    count = 79_708  # goodreads-synth p01: 797,084 items × 0.1
+    blob = {"pass_counts": torch.tensor([count] * 5 + [-1])}
+    assets = {"blob": blob, "oracle_rows": torch.tensor([True] * 5 + [False])}
+    for frac in (0.005, 0.01, 0.05, 0.1):
+        p = run.resolve_pool({"candidate_pool_frac": frac}, assets)
+        assert p == {"candidate_pool": max(2000, round(frac * count))}
+    assert run.resolve_pool({"candidate_pool_frac": 0.01}, assets)["candidate_pool"] == 2000
+    assert run.resolve_pool({"n_probe": 8}, assets) == {"n_probe": 8}
+    with pytest.raises(ValueError, match="oracle pass counts"):
+        run.resolve_pool({"candidate_pool_frac": 0.1}, {"blob": None})
+
+
+def test_pool_fraction_end_to_end(tiny_configs, tmp_path, monkeypatch):
+    """The key keeps ``candidate_pool_frac``; the module and the record body get the int."""
+    monkeypatch.setattr(run, "POOL_MIN", 4)
+    jobs = _arms(tiny_configs, algos=["linr_v3"], sweeps=["c0"])
+    out = tmp_path / "results"
+    assert dict(run.run(jobs, out_dir=out, skip_perf=True, **KW)) == {"partial": 2}
+    recs = _records(out / "arms" / "tiny-d64.jsonl")
+    # clause c0: every live query passes 8 of the 24 items
+    assert [(r["params"], r["candidate_pool"]) for r in recs] == [
+        ({"candidate_pool_frac": 0.5}, 4),
+        ({"candidate_pool_frac": 1.0}, 8),
+    ]
+    assert recs[1]["quality"]["oracle"]["recall@4"] == pytest.approx(1.0)  # the whole pass set
+
+
 def test_compiled_arm_times_its_warmup_apart_and_skips_graph(tiny_configs, tmp_path, monkeypatch):
     """``compile`` is in the key, the module is compiled in place with its mode, the first
     forward is ``compile_s`` (not ``build_s``), and ``graph`` is a null ``not_capturable`` entry
@@ -492,3 +522,5 @@ def test_compiled_arm_times_its_warmup_apart_and_skips_graph(tiny_configs, tmp_p
         graph = [e for e in r["perf"] if e["mode"] == "graph"]
         assert graph and all(e["reason"] == "not_capturable" and e["median_ms"] is None
                              for e in graph)  # fmt: skip
+    plain = _records(out / "arms" / "tiny-d64.jsonl")
+    assert all(r["candidate_pool"] is None for r in plain)
