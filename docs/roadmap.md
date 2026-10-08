@@ -190,10 +190,6 @@ co-design.
   both blooms, `m_bits` 64-2048 × `k_hash` {3, 5}, quality-only plus one
   timed point per width at bs 16. F4a, C4. **≈ 3-5 GPU-h**, GPU 1 (the
   timed points on GPU 0).
-- [ ] **V3 seed question** (CPU, before more V3 cells): the pilot's 84 V3
-  records have identical quality across seeds 0-2 although the seed is
-  meant to move the OPORP projection; mechanism being traced. V3 cells of
-  every leg wait for the answer.
 - [ ] **V-AX-SYNTH: arXiv synth**, uniform 7 points, then the
   cluster-correlated variant (3 points) if the uniform sweep shows the IVF
   recall collapse at low p; arXiv's `n95`. F1/F2 3M panel. **≈ 15-45 GPU-h**
