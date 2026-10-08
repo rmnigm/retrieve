@@ -727,3 +727,15 @@ def test_frac_windows_below_the_jobs_max_clock(tiny_configs, tmp_path, monkeypat
         "sm_mhz under load (n=3): 1410×2, 1395×1"
     )
     assert bench.clock_histogram([]) == "sm_mhz under load (n=0): no samples"
+
+
+def test_score_path_arms_share_the_triton_parity_spill(tiny_configs, tmp_path):
+    """h2h's official arms carry ``score_path`` in ``params``; the spill hash drops it with
+    ``backend``, so they compare against the triton reference instead of each writing one."""
+    job = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=["c0"])[0]
+    ids, sc = torch.tensor([[0, 1], [2, 3]]), torch.tensor([[1.0, 0.5], [0.9, 0.1]])
+    assert run.parity(tmp_path, job, {}, ids, sc, [2])["parity"] == "reference"
+    off = dataclasses.replace(job, backend="official")
+    for sp in ("fp16", "int32"):
+        out = run.parity(tmp_path, off, {"score_path": sp}, ids, sc, [2])
+        assert out["parity"] == "vs_torch" and out["jaccard_vs_first@2"] == 1.0

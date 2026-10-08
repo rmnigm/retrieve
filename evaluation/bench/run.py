@@ -352,6 +352,8 @@ def parity(
     """The spill-file wiring check (§2.4 / §8.2 K): write the reference when absent, else
     compare against it."""
     key = {k: v for k, v in job.key(params).items() if k != "backend"}
+    # score_path picks the official kernel's epilogue, a backend knob: its arms share a spill
+    key["params"] = {k: v for k, v in key["params"].items() if k != "score_path"}
     h = hashlib.sha1(json.dumps(key, sort_keys=True, default=str).encode()).hexdigest()[:20]
     ref = Path(out_dir) / "_parity" / parity_group(job.dataset, job.dim, job.algo) / f"{h}.npz"
     out: dict[str, Any] = {f"jaccard_vs_first@{k}": None for k in ks}

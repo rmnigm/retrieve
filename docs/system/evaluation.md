@@ -81,8 +81,10 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    parity spill: the first backend to run a cell writes its top-`k_max` ids
    (int32) and scores (float32) to
    `results/_parity/<dataset>-d<dim>_<algo>/<hash>.npz` (`run.parity_group`
-   names the directory; the hash is over the key block minus `backend`, so
-   it includes `suite`, `filter_kind` and `sweep`), and later backends
+   names the directory; the hash is over the key block minus `backend` and
+   minus `params.score_path`, the official kernel's epilogue, so `h2h`'s
+   official arms compare against the triton spill; it includes `suite`,
+   `filter_kind` and `sweep`), and later backends
    record `jaccard_vs_first@k` and `score_max_abs_diff` against it. There is
    no "missing reference" state: whichever backend runs a cell first writes
    the spill (`parity: "reference"`), so with `--resume` after the triton
