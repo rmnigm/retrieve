@@ -73,6 +73,7 @@ re-upload of a subtree replaces its row.
 | `artifacts/ivf-tune/arxiv-4096` | IVF-TUNE quick check ([README](campaign-v2/ivf-tune/README.md)): quality-only SilverTorch triton clause cells (seed 0, bs 16, k 100, median sweep, f01255f1), table, logs; artifacts, never paper numbers | 10 | 281,615 | `96b72cf98d78035fae13397f6d519904a9ea4af3aec3f448f4ecadd3abc9b050` |
 | `artifacts/ivf-tune/arxiv` | IVF-TUNE quick check ([README](campaign-v2/ivf-tune/README.md)): quality-only SilverTorch triton clause cells (seed 0, bs 16, k 100, median sweep, f01255f1), table, logs; artifacts, never paper numbers | 11 | 316,299 | `ece3a58e2c71dee16a953df36d224dabadc909ef00ff56ff55f4e5f7f752bf28` |
 | `artifacts/ivf-tune/yfcc10m` | IVF-TUNE quick check ([README](campaign-v2/ivf-tune/README.md)): quality-only SilverTorch triton clause cells (seed 0, bs 16, k 100, median sweep, f01255f1), table, logs; artifacts, never paper numbers | 12 | 570,387 | `792bbf81c19e691bce62dcc962c3996c275b391195e550af5d6a73d15975e9f0` |
+| `artifacts/ivf-tune/pubmed` | IVF-TUNE PubMed piece ([README](campaign-v2/ivf-tune/README.md)): 19 quality-only cells (`all5`, seed 0, n_lists 4096 + 16384, 408b1188; 3 `failed` = the n_probe 2048 / k 1000 tile-limit evidence), sidecars, logs; artifacts, never paper numbers | 43 | 1,460,662 | `e18b49392c060ee11fa6c5d9e0c64e715445e29ba1ccf9f396f2c509835e2548` |
 
 The `d1-a` and `artifacts/*` subtrees were published by
 [H1](h1-results-storage/README.md) on 2026-09-26; their file counts and bytes
