@@ -1,0 +1,22 @@
+--- a/retrieve/src/retrieve/ops/triton/fused_masked_knn_topk.py	2026-10-08 06:06:22.809606874 +0000
++++ b/retrieve/src/retrieve/ops/triton/fused_masked_knn_topk.py	2026-10-08 06:10:58.773595112 +0000
+@@ -81,9 +81,7 @@
+ 
+     # Widen before the multiply: tl.sum reduces in its operand dtype (fp16 in production, plan
+     # L4 §6.1), and fp16 × fp16 is exact in fp32.
+-    q = tl.load(query_ptr + bid * stride_qb + d_offsets * stride_qd, mask=d_in, other=0.0).to(
+-        tl.float32
+-    )
++    q = tl.load(query_ptr + bid * stride_qb + d_offsets * stride_qd, mask=d_in, other=0.0)
+ 
+     item_ids = tl.load(
+         row_base(pos_indices_ptr, bid, stride_pb, WIDE) + n_offsets * stride_pp,
+@@ -95,7 +93,7 @@
+         item_embs_ptr + item_ids[:, None] * stride_in + d_offsets[None, :] * stride_id,
+         mask=in_count[:, None] & d_in[None, :],
+         other=0.0,
+-    ).to(tl.float32)
++    )
+ 
+     dots = tl.sum(emb_rows * q[None, :], axis=1)
+     dots = tl.where(in_count, dots, float("-inf"))
