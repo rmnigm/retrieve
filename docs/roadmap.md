@@ -218,9 +218,9 @@ co-design.
   SilverTorch eager time; Hub `artifacts/v-codesign-408b`), interleaved
   partial/full, `n_probe` {8, 32, 128}, 3 sweeps, 3 seeds; replaces D1-B2
   and D1-D. F4b, C5. **≈ 2 GPU-h**, GPU 0.
-- [ ] **D3: `bloomwidth`**: goodreads (both legs), PubMed `bloomwidth-timed`,
-  arXiv `bloomwidth-timed` rerun, all timed legs at `campaign-v2.1`; arXiv and
-  PubMed `bloomwidth` (quality) done
+- [ ] **D3: `bloomwidth`**: goodreads (both legs) and PubMed `bloomwidth-timed`,
+  timed legs at `campaign-v2.1`; arXiv done (timed at v2.1), PubMed
+  `bloomwidth` (quality) done
   ([validation](validation.md), Hub `campaign-v2/arxiv-bloomwidth[-timed]`):
   both blooms, `m_bits` 64-2048 × `k_hash` {3, 5}, quality-only plus one
   timed point per width at bs 16. F4a, C4. **≈ 3-5 GPU-h**, GPU 1 (the
