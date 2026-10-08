@@ -133,9 +133,9 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    and stores per-kernel CUDA µs (top 8 kernels) as `kernels`.
 6. **Seeds and repeats.** Timing repeats are the 3 windows above (no
    rebuild). Seeds change the IVF (k-means), the OPORP projection
-   (`v3_seed`) and the pool; V1/V2 are seed-invariant in quality, so seeds
-   `[0, 1, 2]` apply only to the `deep` suite and the headline `filter`
-   cells (d128 `c0_genre`, `c0_maincat`, `all4`). The report takes the
+   (`v3_seed`) and the pool; V1/V2 are seed-invariant in quality. Every
+   suite runs seeds `[0, 1, 2]` on every dataset and sweep (user,
+   2026-10-08), `codesign`'s as timing repeats. The report takes the
    median across seeds with min-max whiskers.
 7. **Comparability, stated once in the paper.** Same as SilverTorch: A100,
    D=128, INT8 IVF, an `n_probe` grid including **24** (their production
@@ -335,24 +335,49 @@ runs `official`), without LiNR V4 (it was ours, not LiNR's, and is
 out of the harness) and without a dim ablation
 ([decisions](../decisions.md#harness)).
 [`tests/bench/test_config.py`](../../evaluation/tests/bench/test_config.py)
-pins the current d128 `filter` cell set for goodreads and arxiv, and runs
+pins the grid: every (suite, dataset)'s job and cell counts and the
+rules above on every cell (G-grid), and the resume keys of cells the
+redesign kept, as `b96e1f2` computed them (G-key). It also runs
 every `config/*.yaml` against every suite through `load_matrix`: a listed
 dataset expands to jobs, an unlisted one is refused by name and still
 resolves at each of its dims.
 
-`suites.yaml` holds three suites, `filter`, `deep` and `codesign`. There
-is no unfiltered `quality` suite ([decisions](../decisions.md#harness));
-unfiltered cells return with the new datasets (roadmap E5).
+`suites.yaml` is the campaign-v2 grid (user decisions 2026-10-08). Every
+suite runs seeds `{0, 1, 2}` on every dataset and sweep. Batch sizes are
+`{1, 16}` and ks are `{100, 1000}` or a subset of those. No suite has
+`n_probe` 4 or 256, LiNR V4, or openalex (`config/openalex.yaml` and its
+ETL are backlog). Official SilverTorch runs only `bloom` cells: its clause
+cells timed our `pack_mask` adapter. The official clause path stays in
+`PATHS` and the library, so the old records still read. There is no
+unfiltered `quality` suite ([decisions](../decisions.md#harness)); synth's
+`p1` sweep is the unfiltered point.
+
+| suite | datasets | arms | feeds |
+|---|---|---|---|
+| `filter` | goodreads, arxiv, yfcc10m, pubmed, three kept sweeps each (yfcc10m: `tags_and`) | V1, V2, V3 (pool 5000) triton; `silvertorch` triton clause + bloom and official bloom at `n_probe` {24, n95}; `silvertorch` torch (#12) and torch compiled (#13) at 24, goodreads + arxiv only; `postfilter` alpha {1, 8} | T2, C3, C6 |
+| `deep` | goodreads, arxiv, yfcc10m, kept sweeps | `silvertorch` triton clause + bloom, official bloom: `n_lists` per dataset (goodreads {1024, 4096}, arxiv {1664, 8192}, yfcc10m {4096, 16384}) × `n_probe` {8, 16, 32, 64, 128}; V3 `candidate_pool_frac` {0.005, 0.01, 0.02, 0.05, 0.1} | F3, C6 |
+| `synth` | goodreads-, arxiv-, yfcc10m-synth ([datasets](datasets.md#synthetic-selectivity-attrs)) | V1, V2 triton; V3 `candidate_pool_frac` {0.01, 0.05}; `silvertorch` triton clause {24, n95, 4·n95}, triton and official bloom at n95; `postfilter` {1, 8}; V1 / V2 torch, eager and compiled, on `p001, p01, p1`, goodreads + arxiv only. k 1000 is dropped where N·p < 4000 (goodreads `p0001`, `p0003`; arxiv `p0001`) | F1, F2, C1, C2, C6 |
+| `n95` | pubmed `all5` (its median kept sweep) | `silvertorch` triton clause, `n_probe` {8, 16, 32, 64, 128}, bs 16; run with `--skip-perf` | pubmed's n95 |
+| `codesign` | arxiv (kept sweeps), goodreads (`c0_genre, c2_format, c3_year`) | official bloom, `bloom_path` {partial, full} × `n_probe` {8, 32, 128}, `n_lists` arxiv 1664 / goodreads 1024, k 100 | F4b, C5 |
+| `bloomwidth` | goodreads `c0_genre`, arxiv kept, pubmed `c0_mesh` | `silvertorch` triton + official bloom, `m_bits` {64 … 2048} × `k_hash` {3, 5}, bs 16; run with `--skip-perf` | F4a, C4 |
+| `bloomwidth-timed` | the same | the same widths at `k_hash` 5, k 100, bs 16, timed | F4a |
+
+**n95** is the smallest `n_probe` that reaches `recall_oracle@100 ≥ 0.95`
+on a dataset's median sweep. It is read off `deep` / `synth` / `n95` after
+the code freeze. Until then the n95 entries are absent, so every suite
+still loads. Filling one is a value edit in the arm's `datasets:` slot
+(e.g. `goodreads: {query: {n_probe: [24, 37]}}`). The synth bloom arms
+are slots with no datasets (`datasets: {}`), so they run nowhere until
+then.
 
 `codesign` is the S9 ablation of the official backend's bloom path:
-`silvertorch / official / bloom` only, `build: {n_lists: [1664],
-bloom_path: [partial, full]}` × `query: {n_probe: [4, 8, 24, 32, 128,
-256]}` on goodreads and arxiv at d128, `ks [100]`, `batch_sizes [1, 8,
-16]`, seed 0. It is its own suite because `params.<algo>` crosses every
-backend and filter kind of the algo, and `bloom_path` has a meaning on
-one of them. Both arms carry `bloom_path` in `params`, so their keys
-never collide with the `filter` / `deep` official cells (which omit it
-and run `partial`); latency and `peak_fwd_mib` are the compared fields.
+`partial` (fused partial masks over the probed clusters, the library
+default, which every `filter` / `deep` official cell runs with the key
+absent) against `full` (a full-N bool mask, then IVF). Both arms carry
+`bloom_path` in `params`, so their keys never collide with the `filter` /
+`deep` official cells; latency and `peak_fwd_mib` are the compared fields.
+`--skip-perf` records are `partial` (run.py); `n95` and `bloomwidth` are
+quality-only by intent.
 
 ```yaml
 # config/<dataset>.yaml — one per dataset; every string may carry {dim}
@@ -375,54 +400,55 @@ filters:                                                              # optional
 raise `ConfigError` naming the file.
 
 ```yaml
-# config/suites.yaml — a suite = cells run on every listed dataset × its dims
+# config/suites.yaml — a suite = cells run on every listed dataset × the dims both list
 filter:
-  datasets: [goodreads, arxiv, yfcc10m, pubmed, openalex, kuairand]
-  dims: [128, 192, 768]             # optional; default: the dataset's dims (yfcc10m 192, pubmed 768 only)
+  datasets: [goodreads, arxiv, yfcc10m, pubmed]
+  dims: [128, 192, 768]             # optional; default: the dataset's dims
   filter_kinds: [clause, bloom]     # none | clause | bloom
-  ks: [100, 500, 1000]
-  batch_sizes: [1, 8, 16]
-  algos:
-    linr_v1_filter_mask: [triton]
-    linr_v2: [triton]
-    linr_v3: [triton]
-    silvertorch: [triton, official]
-    postfilter: [torch]             # the baseline, torch by definition
-  params:                           # per algo; dict-of-lists = grid, list-of-dicts = combos
-    silvertorch: {query: {n_probe: [24, 32]}}
-    postfilter: {query: {alpha: [1, 2, 4, 8]}}
-  seeds:
-    default: [0]
-    headline: {sweeps: [c0_genre, c0_maincat, all4], dims: [128], seeds: [0, 1, 2]}
+  ks: [100, 1000]
+  batch_sizes: [1, 16]
+  seeds: [0, 1, 2]                  # optional; default [0]
+  sweeps: {goodreads: [c0_genre, c1_lang_reverse, all4], ...}   # optional per-dataset selector
+  ks_by_sweep: {goodreads-synth: {p0001: [100]}}                # optional per-(dataset, sweep) ks
+  arms:
+    - {algo: linr_v1_filter_mask, backends: [triton]}
+    - algo: silvertorch
+      backends: [official]
+      filter_kinds: [bloom]          # optional: a subset of the suite's
+      sweeps: [c0_genre]             # optional: a subset of the dataset's (and the selector's)
+      build: {n_lists: [1024]}       # dict-of-lists = grid, list-of-dicts = explicit combos
+      query: {n_probe: [24]}
+      datasets:                      # optional: only these datasets, each with overrides
+        goodreads: {query: {n_probe: [24, 37]}}   # merged key by key over the arm's grids
+        arxiv: {}
+    - {algo: silvertorch, backends: [torch], build: {compile: [max-autotune]}}
   # bloom: {...}                    # optional per-suite override of the top-level default
-deep:                               # 2 builds (n_lists) × 6 query configs, seeds 0-2
-  ...
-codesign:                           # S9: silvertorch/official/bloom only
-  ...
-  params:
-    silvertorch:
-      build: {n_lists: [1664], bloom_path: [partial, full]}
-      query: {n_probe: [4, 8, 24, 32, 128, 256]}
 bloom: {m_bits: 1024, k_hash: 5}
 ```
 
-`build:` params rebuild the index; `query:` params (`n_probe`,
-`candidate_pool`, `alpha` — the `QUERY_PARAMS` set) are applied with
-`set_query_params` to the built index, so the `deep` suite is two
-k-means per `(dataset, sweep, seed)`, not twelve. Putting a query param
-under `build:` (or vice versa) is a `ConfigError`. `seeds:` is a list, or
-the `default` / `headline` form (headline seeds apply to the named sweeps
-at the named dims, whatever the filter kind). CLI narrows (`dims`,
-`algos`, `backends`, `filter_kinds`, `sweeps`, `seeds`, `ks`,
-`batch_sizes`) filter the suite's lists *before* the `PATHS` collapse;
-`ks` / `batch_sizes` are replacements, not selections, and set
-`Job.narrowed` when they differ from the suite's (`run` then records
-`partial`).
+An arm is one algo on one or more backends. Its `build:` params rebuild
+the index. Its `query:` params (`n_probe`, `candidate_pool`,
+`candidate_pool_frac`, `alpha`, the `QUERY_PARAMS` set) are applied with
+`set_query_params` to the built index, so `deep` is two k-means per
+`(dataset, sweep, seed)`, not ten. Putting a query param under `build:`
+(or the reverse) is a `ConfigError`. So is a param on an arm where it has
+no meaning: `bloom_path` off silvertorch / bloom / official, `m_bits` /
+`k_hash` off silvertorch / bloom, `compile` off a torch arm, and `candidate_pool_frac` off `linr_v3`. Two arms that expand to the same
+cell are also an error. When two backends of one algo run the same code
+path (`PATHS`) over the same cells, they collapse to the first, logged
+once. A collapse that would cover only part of a job's cells is a
+`ConfigError`. CLI narrows (`dims`, `algos`, `backends`, `filter_kinds`,
+`sweeps`, `seeds`, `ks`, `batch_sizes`) filter the lists *before* the
+`PATHS` collapse. `ks` / `batch_sizes` are replacements, not selections:
+they set `Job.narrowed` when they differ from the job's own lists (the
+suite's, or its `ks_by_sweep` entry), and `run` then records `partial`.
 
 `load_matrix(dataset_yaml, suites_yaml, suite, **narrows)` returns `Job`s
 grouped by `Job.group == (dataset, dim, algo, backend)` — the campaign's
-process boundary — in the order `dim → algo → backend → filter_kind →
-sweep → build → seed`. A `Job` is one build: `dataset, dim, suite,
+process boundary — in the order `dim → algo → backend → arm →
+filter_kind → sweep → build → seed`. A `Job` is one build, with its own
+`ks` (the suite's or its `ks_by_sweep` entry) and `bloom` (the suite's
+default, or the arm's gridded widths): `dataset, dim, suite,
 filter_kind, sweep, clauses, algo, backend, path, build, query, ks,
 batch_sizes, seed, bloom, data: Dataset, narrowed`; `job.cells()` lists the
 `params = build | query` of each cell and `job.key(params)` is the
@@ -983,7 +1009,7 @@ trailing-whitespace hooks (the last two never on `articles/`, `docs/artifacts/`,
 | `bench/test_measure.py` | `stats` vs numpy, `latency` control flow, `index_bytes` dedup, `provenance` git fields, `official_commit` from PEP 610 (git, local dir, no `direct_url.json`, not installed), `dirty` scoped to the library subtree with the `files:` fallback, `atomic_write`, `clocks` shape, `graph_callable` refusals |
 | `bench/test_metrics.py` | padding / IDCG / denominator contracts; running sums equal per-row means to 1e-9; `jaccard_at_k` |
 | `bench/test_algos.py` | `build` on every `(algo, filter_kind)` torch cell: the `k` setter slices the top-k and changes no buffer; the filter submodule in `index_bytes`; `set_query_params`; build refusals; `postfilter` equal (`torch.equal` on ids and scores) to a hand-computed matmul → topk(`alpha*k`) → dense-mask filter → first `k` reference at every `alpha` in `{1, 2, 4, 8}`, `k` within and past `N`, clause and bloom, the sentinel path exercised; its refusals |
-| `bench/test_config.py` | job counts and keys per suite on `tests/bench/data/{mini,text,suites}.yaml`; `disabled`; build/query split; seeds; narrows and `Job.narrowed`; the real `goodreads` / `arxiv` d128 cell sets; `postfilter` expanded on every `filter` dataset (one torch job per sweep, the four alphas); every `config/*.yaml` × every suite through `load_matrix` |
+| `bench/test_config.py` | job counts and keys per suite on `tests/bench/data/{mini,text,suites}.yaml`; `disabled`; build/query split; arms (filter kinds, sweeps, per-dataset overrides, empty slots); `ks_by_sweep`; gridded bloom widths, `compile`, `candidate_pool_frac`; each arm error named; narrows and `Job.narrowed`; the `-synth` YAMLs sharing their parent's inputs; G-grid (every real suite × dataset's job / cell counts and the 2026-10-08 rules on every cell); G-key (pinned resume keys of kept cells); every `config/*.yaml` × every suite through `load_matrix` |
 | `bench/test_inputs.py` | `load_inputs` on the conftest writer, `users_limit` once, prefix and row-count checks, the legacy layout loading equal to the modern one, misalignment raising, `attrs_digest`, `filters.query_attrs` (a `.pt` replacing `eval_split.parquet`: same full-split row check, same `users_limit` prefix), `sweep_qa`, filters by filter backend, `query_pool` |
 | `bench/test_oracle.py` | padding, v4 fields and arithmetic, fingerprint in the file name, an unreadable blob rebuilt, bloom FP rate, `code_version` |
 | `bench/test_run.py` | end to end on the tiny fixture, both modes (`graph` = the CPU null entry): record schema, resume, `code_version` invalidation, `partial`, a failed cell + continue, a sticky CUDA error, the quality gate, the parity spill (and a same-backend spill rewritten), reachable-target masking, the plan cache off through `OfficialConfig`, `modes` stamped per job (an eager-only uncapturable record `ok`, a capturable one `partial`), `postfilter`'s `recall_oracle` per `k` (equal to a pass at that `k`, never above the exact V1's) |

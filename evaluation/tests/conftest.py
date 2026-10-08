@@ -83,13 +83,13 @@ def tiny_configs(tmp_path: Path) -> tuple[Path, Path]:
     suites.write_text(
         "e2e:\n  datasets: [tiny]\n  filter_kinds: [none, clause]\n  ks: [2, 4]\n"
         "  batch_sizes: [1, 2]\n"
-        "  algos: {linr_v1_filter_mask: [torch], linr_v3: [torch]}\n"
-        "  params: {linr_v3: {query: {candidate_pool: [8]}}}\n"
+        "  arms:\n    - {algo: linr_v1_filter_mask, backends: [torch]}\n"
+        "    - {algo: linr_v3, backends: [torch], query: {candidate_pool: [8]}}\n"
         "e2e1:\n  datasets: [tiny]\n  filter_kinds: [none, clause]\n  ks: [2, 4]\n"
-        "  batch_sizes: [1, 2]\n  algos: {linr_v1_filter_mask: [torch]}\n"
+        "  batch_sizes: [1, 2]\n  arms: [{algo: linr_v1_filter_mask, backends: [torch]}]\n"
         "postfilter:\n  datasets: [tiny]\n  filter_kinds: [clause, bloom]\n  ks: [2, 4]\n"
-        "  batch_sizes: [1, 2]\n  algos: {linr_v1_filter_mask: [torch], postfilter: [torch]}\n"
-        "  params: {postfilter: {query: {alpha: [1, 2]}}}\n"
+        "  batch_sizes: [1, 2]\n  arms:\n    - {algo: linr_v1_filter_mask, backends: [torch]}\n"
+        "    - {algo: postfilter, backends: [torch], query: {alpha: [1, 2]}}\n"
         "bloom: {m_bits: 64, k_hash: 2}\n"
     )
     return ds, suites
