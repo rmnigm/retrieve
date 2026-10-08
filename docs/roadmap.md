@@ -44,11 +44,6 @@ others (see [Multi-GPU execution](#multi-gpu-execution)).
   interleaved rounds (8 of 9 records `unstable`). Interleaving pairs drift
   but cannot equalise a load-dependent clock. Decide before those exhibits
   get verdicts ([validation](validation.md)).
-- **V3's bit budget** ([LN-8](paper/reproduction-deviations.md#4-linr-v1v4--deviations)).
-  LiNR's V3 benchmark used 512-bit codes on 128-d embeddings. Ours is capped at `k_bits = D`
-  (128), where Sign-OPORP is plain sign quantization. Matching 512 bits needs a library change,
-  for example a multi-permutation OPORP or `SimHashKNN` as V3's stage 1. That moves code_version
-  and V3's recall, so the V3 cells would rerun. Otherwise LN-8 stays a stated deviation.
 - **Citability of a narrowed run.** A run with a narrowed mode set is
   recorded `status: partial` and reported NOT CITABLE. The user decides
   once `bench report` runs on the campaign's output (D1-G).
@@ -187,15 +182,23 @@ co-design.
   both blooms, `m_bits` 64-2048 × `k_hash` {3, 5}, quality-only plus one
   timed point per width at bs 16. F4a, C4. **≈ 3-5 GPU-h**, GPU 1 (the
   timed points on GPU 0).
+- [ ] **V2-PROF: what sets V2's batch-16 floor** (user, 2026-10-08). On
+  goodreads-synth V2 is ≥ 1.5× V1 at bs 16 at every p (floor ~1.41 ms),
+  against LiNR's C1. `torch.profiler` on V1 vs V2 at bs {1, 16}, p {0.001,
+  0.01, 1}: name the kernel that sets the floor and whether it is LiNR's
+  design or our implementation. A fix, if any, is proposed, not applied:
+  the user decides (a library change moves code_version, tag
+  `campaign-v2.1`, and reruns the V2 arms already run). Before V-AX-SYNTH.
+  **≈ 1 GPU-h.**
 - [ ] **V-AX-SYNTH: arXiv synth**, uniform 7 points, then the
   cluster-correlated variant (3 points) if the uniform sweep shows the IVF
   recall collapse at low p; arXiv's `n95`. F1/F2 3M panel. **≈ 15-45 GPU-h**
   (the pilot measured 8.7 GPU-h at 0.8 M), GPU 0.
 - [ ] **V-GR-DEEP: goodreads `deep`**, trimmed (`n_lists` {1024, 4096},
   `n_probe` {8, 16, 32, 64, 128}, V3 pool fractions); replaces D1-C.
-  F3; goodreads' `n95`, then the goodreads `filter` and `synth` n95 cells
-  (fill the n95 slots in suites.yaml; resume adds only those cells; the
-  rest of both legs is on the Hub). **≈ 6 GPU-h**, GPU 0/1.
+  F3; goodreads' `n95`, then the goodreads `filter` n95 cells and the
+  goodreads-synth SilverTorch n_probe sweep cells (both config edits in
+  suites.yaml; resume adds only the new cells). **≈ 6 GPU-h**, GPU 0/1.
 - [ ] **V-YFCC: YFCC synth (5 points) and a small `deep`** (`n_lists`
   {4096, 16384}). F1/F2 10M panel; YFCC's `n95`. Needs V-AX-SYNTH.
   **≈ 18 GPU-h**, GPU 0/1.

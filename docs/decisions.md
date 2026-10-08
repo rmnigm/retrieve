@@ -40,6 +40,13 @@ user's re-plan, kept in the orchestrator's handoff notes; the claims are
 C1-C7, the exhibits T1-T3 and F1-F4). These rules govern every cell from
 now on; the [roadmap](roadmap.md) holds the steps.
 
+- **Grid and code changes after the pilot** (user, 2026-10-08): `synth`
+  sweeps SilverTorch clause n_probe {24, 64, 128, 256, 512, 1024} on
+  goodreads and arXiv and {24, 256, 1024} on YFCC (capped at the dataset's
+  `n_lists`; bloom arms {24, 256}), replacing synth's n95 slots, so matched
+  recall exists at low p; V2's batch-16 floor is profiled before arXiv
+  synth (V2-PROF). Declined: V3 `k_bits` > D (LN-8 stays a stated
+  deviation), an fp32-pinned compiled arm, an adaptive postfilter α.
 - **Budget: the full grid runs** (user, 2026-10-08, after the measured
   estimate of ~130-250 GPU-h replaced the re-plan's 70-90): no trimmed
   grid. The budget gate (roadmap § Stop rules) reports an overrun and
