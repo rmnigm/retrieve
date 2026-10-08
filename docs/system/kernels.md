@@ -409,7 +409,13 @@ Queries land in the same bit space via [`project_oporp_1bit_query`](../../retrie
 `query_bits = pack_signs(((query * signs)[perm]) > 0)`.
 
 The projection is **deterministic**: the seed determines `signs` and `perm`,
-so loading the same checkpoint produces the same bits. V3 store (`item_bits`,
+so loading the same checkpoint produces the same bits. At the default
+`k_bits = D` each bin holds one coordinate, so the projection is a signed
+permutation, and `popcount(q ^ x)` is invariant under it: the seed changes the
+bits but never the Hamming score, apart from an exactly-0 coordinate, which packs
+as bit 0 under either sign. V3's results are therefore the same at every seed.
+At `k_bits < D` the bins sum several coordinates and the seed does change the
+scores ([check](../artifacts/campaign-v2/v-pilot/v3_seed_check.py)). V3 store (`item_bits`,
 `signs`, `perm`) as buffers; both backends call the same projection helper
 on every forward, so the torch reference and the Triton kernel see byte-for-
 byte identical bits.
