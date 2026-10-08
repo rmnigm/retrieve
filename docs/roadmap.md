@@ -175,9 +175,6 @@ co-design.
   loaded, interleaved, cores pinned. *Gate*: loaded medians within each
   arm's own repeat noise; otherwise timed steps run one GPU at a time.
   **0.5 GPU-h** on a ≥ 2-GPU pod.
-- [ ] **V-GR-FILTER: goodreads `filter` on E1c** (3 sweeps, 3 seeds, every
-  arm); hub-index labels `d1/goodreads` "gSASRec, superseded". T2's
-  goodreads row. **≈ 5 GPU-h**, GPU 0.
 - [ ] **H2H-FINAL: official vs Triton on the release code** (`h2h` suite:
   goodreads E1c and arXiv, interleaved, 5 repeats, official `score_path`
   fp16 and int32; e2e, kernel-only, launches, memory, parity). The only
@@ -196,7 +193,9 @@ co-design.
   (the pilot measured 8.7 GPU-h at 0.8 M), GPU 0.
 - [ ] **V-GR-DEEP: goodreads `deep`**, trimmed (`n_lists` {1024, 4096},
   `n_probe` {8, 16, 32, 64, 128}, V3 pool fractions); replaces D1-C.
-  F3; goodreads' `n95`. **≈ 6 GPU-h**, GPU 0/1.
+  F3; goodreads' `n95`, then the goodreads `filter` and `synth` n95 cells
+  (fill the n95 slots in suites.yaml; resume adds only those cells; the
+  rest of both legs is on the Hub). **≈ 6 GPU-h**, GPU 0/1.
 - [ ] **V-YFCC: YFCC synth (5 points) and a small `deep`** (`n_lists`
   {4096, 16384}). F1/F2 10M panel; YFCC's `n95`. Needs V-AX-SYNTH.
   **≈ 18 GPU-h**, GPU 0/1.
@@ -240,7 +239,6 @@ co-design.
 | step | A100 GPU-h | GPU | basis |
 |---|---|---|---|
 | M1 | 0.5 | both | |
-| V-GR-FILTER | ≈ 5 | 0 | ~114 cells; SilverTorch torch + compile ~3 of it |
 | H2H-FINAL | ≈ 3 | 0 | |
 | V-CODESIGN | ≈ 1 | 0 | `d1/arxiv-codesign`: 60 cells in 0.4 h |
 | D3 bloomwidth | ≈ 3-5 | 1 (+0) | quality-only cells |
@@ -264,7 +262,7 @@ tile per width*).
 ```
 tag campaign-v2 ───────────────────────┬─> V-PILOT ─┬─> V-AX-SYNTH ─> V-YFCC ─> V-SEEDS ─┐
                                        │            └─> V-GR-DEEP ─────────────────────────┤
-                                       ├─> V-GR-FILTER, H2H-FINAL, V-CODESIGN, D3 ─────────┤
+                                       ├─> H2H-FINAL, V-CODESIGN, D3 ─────────┤
                                        └─> V-PUBMED ───────────────────────────────────────┴─> D1-G ─> F2, F4, F5
 M1: before any timed step on a multi-GPU pod
 ```
