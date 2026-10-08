@@ -8,7 +8,7 @@ Roadmap Phase V, V-PUBMED, on pod `a100-x1-b` (1x A100-SXM4-80GB). Current state
 | [`restage.sh`](restage.sh) | the 10 M slice from NCBI source: [pubmed-restage](../../pubmed-restage/README.md)'s recipe with this pod's NUMA node 1 (cores 96-191) and the shared venv |
 | [`identity.sh`](identity.sh) | `encode_queries`, `bench check`, one exact V1 cell (clause `c0_mesh`, seed 0, `--skip-perf`) into a side file |
 | [`compare_v1.py`](compare_v1.py) | that cell against `d1/pubmed`'s: every slice fact and every quality metric equal, or exit 1 |
-| [`driver.sh`](driver.sh) | `driver.sh n95`: the quality-only `n95` suite; `driver.sh filter`: the `filter` campaign (`--interleave --timeout 48`), refusing unless `bench env` equals *evaluation/campaign.yaml*'s code_version |
+| [`driver.sh`](driver.sh) | `driver.sh n95`: the quality-only `n95` suite (campaign-v2 tree); `driver.sh filter`: `bench oracle`, then the `filter` campaign (`--interleave --timeout 48`) into `/scratch/campaign-v2.1/results`, refusing unless `bench env` equals *evaluation/campaign.yaml*'s code_version (started once at v2.1, stopped by the surprise gate before any timed cell) |
 | [`n95.py`](n95.py) | n95 from the `n95` records, per seed and on the seed mean, and whether the grid brackets 0.95 (`bench report`'s matched table emits no quality-only curve) |
 
 Every GPU command runs as `flock /scratch/gpu0.lock taskset -c 0-95 …` (GPU 0 is shared on this pod).

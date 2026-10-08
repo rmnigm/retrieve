@@ -363,7 +363,11 @@ per-step record: [artifact](artifacts/campaign-v2/v-pubmed/README.md).
   (seeds within 0.021); no seed reaches 0.95. PubMed's `filter` n95 slot stays empty: going past
   128 breaks the grid's "no `n_probe` 256" rule and is with the user. Hub:
   `campaign-v2/pubmed-n95`.
-- **`filter` leg: not run.** It times at tag `campaign-v2.1` (V2 Fix A), not yet tagged.
+- **`filter` leg: not run; waits for campaign-v2.2.** Armed at `campaign-v2.1` (PubMed `n_lists` 4096, `n_probe`
+  {24, 1024} from IVF-TUNE), started 2026-10-08 23:08 and stopped by the surprise gate before any timed cell (only v2.1
+  oracles were being built): D3's `bloomwidth-timed` measured official faster than Triton at d768 (0.702 interleaved,
+  row *D3 PubMed: `bloomwidth-timed`*). The controller moved the leg to campaign-v2.2, after ST-DLOOP fixes the Triton
+  probe scorer at wide D.
 
 ## Encoder switch: evals to redo
 

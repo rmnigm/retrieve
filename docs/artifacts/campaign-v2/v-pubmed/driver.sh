@@ -7,11 +7,12 @@
 set -u
 W=/scratch/wt/v-pubmed
 PY=/venvs/retrieve/bin/python
-R=/scratch/campaign-v2/results
+R=/scratch/campaign-v2/results   # n95 ran at campaign-v2; filter at campaign-v2.1, below
 L=/scratch/v-pubmed
 EXPECT=$($PY -c "import yaml; print(yaml.safe_load(open(\"$W/evaluation/campaign.yaml\"))[\"default\"][\"perf\"][\"code_version\"])")
 export PYTHONPATH=$W/evaluation:$W/retrieve/src RETRIEVE_DATA_ROOT=/data HF_HOME=/scratch/hf
 export CUDA_VISIBLE_DEVICES=0 TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/v-pubmed
+[ "$1" = filter ] && R=/scratch/campaign-v2.1/results TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/v-pubmed-v21
 PIN="flock /scratch/gpu0.lock taskset -c 0-95"   # pod b shares GPU 0: every GPU command takes the lock
 mkdir -p "$R/_logs" "$L" "$TORCHINDUCTOR_CACHE_DIR"
 cd $W/evaluation
