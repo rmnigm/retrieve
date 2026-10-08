@@ -6,7 +6,7 @@ suite has two algos (the in-process loop); ``e2e1`` has one, for the campaign te
 child; ``postfilter`` runs the baseline next to the exact V1 it is measured against; ``arms``
 holds the campaign-v2 params (gridded bloom widths, ``compile``, ``candidate_pool_frac``);
 ``cache`` runs seeds 0-2 of seed-free and seed-dependent arms (the quality cache); ``untimed``
-is a quality-only suite (``perf: false``).
+is a quality-only suite (``perf: false``); ``pair`` interleaves V1 and V2 (``--interleave``).
 Tests marked ``gpu`` skip without CUDA."""
 
 from __future__ import annotations
@@ -105,6 +105,10 @@ def tiny_configs(tmp_path: Path) -> tuple[Path, Path]:
         "       query: {candidate_pool_frac: [0.5, 1.0]}}\n"
         "untimed:\n  perf: false\n  datasets: [tiny]\n  filter_kinds: [clause]\n  ks: [2, 4]\n"
         "  batch_sizes: [1]\n  arms: [{algo: linr_v1_filter_mask, backends: [torch]}]\n"
+        "pair:\n  datasets: [tiny]\n  filter_kinds: [clause]\n  ks: [2, 4]\n  batch_sizes: [1, 2]\n"
+        "  seeds: [0, 1]\n  sweeps: {tiny: [c0, c0c1]}\n  interleave: [{by: algo}]\n  arms:\n"
+        "    - {algo: linr_v1_filter_mask, backends: [torch]}\n"
+        "    - {algo: linr_v2, backends: [torch]}\n"
         "cache:\n  datasets: [tiny]\n  filter_kinds: [clause]\n  ks: [2, 4]\n  batch_sizes: [1]\n"
         "  seeds: [0, 1, 2]\n  sweeps: {tiny: [c0]}\n  arms:\n"
         "    - {algo: linr_v1_filter_mask, backends: [torch]}\n"

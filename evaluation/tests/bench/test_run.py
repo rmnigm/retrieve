@@ -385,14 +385,14 @@ def test_perf_times_with_the_plan_cache_off_and_records_it(tiny_configs):
     assets = {"qa_s": None, "skip": None}
     m = _Cached()
     assert m.official.cache_plans is True
-    entries, samples = run.perf(
-        m, inputs, assets, job, torch.device("cpu"), modes=EAGER, profile=False, latency_kw=LAT
+    ((entries, samples),) = run.perf(
+        [m], inputs, assets, job, torch.device("cpu"), modes=EAGER, profile=False, latency_kw=LAT
     )
     assert m.official == OfficialConfig(cache_plans=False)
     assert len(entries) == 4 == len(samples) and all(e["cache_plans"] is False for e in entries)
     # ... and the null (graph) entries carry it too.
-    entries, _ = run.perf(
-        m, inputs, assets, job, torch.device("cpu"), modes=("graph",), profile=False,
+    ((entries, _),) = run.perf(
+        [m], inputs, assets, job, torch.device("cpu"), modes=("graph",), profile=False,
         latency_kw=LAT,
     )  # fmt: skip
     assert all(e["reason"] == "cuda_unavailable" and e["cache_plans"] is False for e in entries)
@@ -658,3 +658,51 @@ def test_per_query_sidecar_matches_the_record_and_ships(tiny_configs, tmp_path):
     )
     assert res.exit_code == 0, res.output
     assert all(r["per_query"] in res.output for r in recs)
+
+
+def test_interleaved_group_keys_rounds_and_resume(tiny_configs, tmp_path, monkeypatch):
+    """G-interleave (CPU): with ``interleave`` each arm of a group writes the record (and key)
+    it writes without it, plus the group block (one group per seed and sweep); both arms are
+    timed in one ``latency_group`` call per variant with equal window counts (``rounds``); and
+    resume re-runs a group whole when one arm's cell is missing."""
+    ds, suites = tiny_configs
+    jobs = load_matrix(ds, suites, "pair")
+    plain, inter = tmp_path / "plain", tmp_path / "inter"
+    assert dict(run.run(jobs, out_dir=plain, **KW)) == {"ok": 8}
+    widths = []
+    real = run.measure.latency_group
+    monkeypatch.setattr(
+        run.measure, "latency_group", lambda fns, **kw: widths.append(len(fns)) or real(fns, **kw)
+    )
+    assert dict(run.run(jobs, out_dir=inter, interleave=True, **KW)) == {"ok": 8}
+    assert widths == [2] * (4 * 4)  # 4 groups x (2 bs x 2 k x eager); graph is null on CPU
+    a = _records(plain / "pair" / "tiny-d64.jsonl")
+    b = _records(inter / "pair" / "tiny-d64.jsonl")
+    assert sorted(map(records.record_key, a)) == sorted(map(records.record_key, b))
+    assert all(r["interleave"] is None for r in a)
+    groups: dict[str, list] = {}
+    for r in b:
+        groups.setdefault(r["interleave"]["group"], []).append(r)
+    assert len(groups) == 4  # 2 sweeps x 2 seeds
+    for g in groups.values():
+        assert [r["algo"] for r in g] == ["linr_v1_filter_mask", "linr_v2"]
+        assert [r["interleave"]["position"] for r in g] == [0, 1]
+        assert g[0]["interleave"]["arms"] == ["linr_v1_filter_mask/torch", "linr_v2/torch"]
+        assert len({(r["seed"], r["sweep"]) for r in g}) == 1
+        for e0, e1 in zip(g[0]["perf"], g[1]["perf"], strict=True):
+            assert (e0["bs"], e0["k"], e0["mode"]) == (e1["bs"], e1["k"], e1["mode"])
+            if e0["mode"] == "eager":
+                assert e0["rounds"] == e1["rounds"] == 3 == len(e0["window_medians_ms"])
+    assert {r["quality_source"] is None for r in b if r["seed"] == 0} == {True}
+    assert all(r["quality_source"] == {"seed": 0, "code_version": bench.code_version()}
+               for r in b if r["seed"] == 1)  # fmt: skip
+    # Drop one arm's record: the next interleaved run re-runs that group whole, nothing else.
+    path = inter / "pair" / "tiny-d64.jsonl"
+    victim = next(r for r in b if r["algo"] == "linr_v2" and r["seed"] == 1)
+    path.write_text("".join(json.dumps(r) + "\n" for r in b if r is not victim))
+    assert dict(run.run(jobs, out_dir=inter, interleave=True, **KW)) == {"ok": 2, "skipped": 6}
+    rerun = _records(path)[-2:]
+    assert {(r["algo"], r["seed"], r["sweep"]) for r in rerun} == {
+        (a, 1, victim["sweep"]) for a in ("linr_v1_filter_mask", "linr_v2")
+    }
+    assert rerun[0]["interleave"]["group"] == victim["interleave"]["group"]

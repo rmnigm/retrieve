@@ -134,9 +134,9 @@ docstrings cite these steps as `§2.1`-`§2.8`.
 6. **Seeds and repeats.** Timing repeats are the 3 windows above (no
    rebuild). Seeds change the IVF (k-means), the OPORP projection
    (`v3_seed`) and the pool; V1/V2 and the postfilter are seed-invariant in
-quality, so their seeds 1-2 copy seed 0's ([quality cache](#quality-cache)). Every
-   suite runs seeds `[0, 1, 2]` on every dataset and sweep (user,
-   2026-10-08), `codesign`'s as timing repeats. The report takes the
+   quality, so their later seeds copy seed 0's ([quality cache](#quality-cache)).
+   Every suite runs seeds `[0, 1, 2]` on every dataset and sweep (user,
+   2026-10-08), `codesign`'s as timing repeats; `h2h` runs five. The report takes the
    median across seeds with min-max whiskers.
 7. **Comparability, stated once in the paper.** Same as SilverTorch: A100,
    D=128, INT8 IVF, an `n_probe` grid including **24** (their production
@@ -224,15 +224,15 @@ which exist for `buffers()`, `.k`, `torch.compile` and because their
 
 | module | owns |
 |---|---|
-| [`measure.py`](../../evaluation/bench/measure.py) | `setup`, `warm_gpu_once`, `provenance` (GPU, driver, CUDA, torch, triton, `official_commit` — the installed `silvertorch`'s PEP 610 `direct_url.json` `vcs_info.commit_id`, `None` when it is not installed from git — commit, `dirty` = `subtree_dirty()` over `retrieve/src/retrieve`, `repo_dirty`, branch, `code_version` = the subtree's tree hash, or `files:<sha256>` of the sources on disk when the subtree is dirty, host, python, started), `clocks()` (one `nvidia-smi` sample), `timed_build`, `index_bytes` (Σ buffers, submodules included, deduplicated), `stats`, `latency(fn, bs=, mode=)` (§2.5 windows, IQR + outlier counts, `load: closed_loop`, `peak_fwd_mib`, the under-load `sm_mhz`), `graph_callable` (raises `NotCapturable` with the record's `reason`), `profile_once` |
+| [`measure.py`](../../evaluation/bench/measure.py) | `setup`, `warm_gpu_once`, `provenance` (GPU, driver, CUDA, torch, triton, `official_commit` — the installed `silvertorch`'s PEP 610 `direct_url.json` `vcs_info.commit_id`, `None` when it is not installed from git — commit, `dirty` = `subtree_dirty()` over `retrieve/src/retrieve`, `repo_dirty`, branch, `code_version` = the subtree's tree hash, or `files:<sha256>` of the sources on disk when the subtree is dirty, host, python, started), `clocks()` (one `nvidia-smi` sample), `timed_build`, `index_bytes` (Σ buffers, submodules included, deduplicated), `stats`, `latency_group(fns, bs=, mode=)` (§2.5 windows of each arm, round-robin across arms, IQR + outlier counts, `load: closed_loop`, `peak_fwd_mib`, the under-load `sm_mhz`) and `latency(fn, …)`, its one-arm case, `graph_callable` (raises `NotCapturable` with the record's `reason`; no dynamo reset, so interleaved arms stay captured side by side), `profile_once` |
 | [`records.py`](../../evaluation/bench/records.py) | what a record *is*: `SCHEMA_VERSION`, `KEY_FIELDS`, `resume_key`, `record_path`, `samples_path`, `append_record` (one `write` + `fsync`), `read_records` / `read_keys` (one torn trailing line tolerated), `record_files`, `latest` (last record per key), `aggregate(results_dir) → results.parquet` (one row per perf entry — what `report.py` reads), `read_table` |
-| [`metrics.py`](../../evaluation/bench/metrics.py) | `accumulator(ks, device)` / `accumulate(acc, ids, targets, num_targets=None, ranked=False)` / `finalize(acc)` (`null` metrics when `n == 0`, `null_if_empty`) — recall, ndcg, precision, mrr at every `k` from one top-`k_max` list as float64 running sums on device; `ranked=True` scores against the oracle's own top-`k` prefix; `per_row`, `jaccard_at_k`. `training/evaluate.py` keeps its own frozen copy, pinned to agree (`training/test_encode.py`) |
-| [`algos.py`](../../evaluation/bench/algos.py) | the algorithm table: `ALGOS` name → class (`LiNRV1`–`LiNRV3`, `SilverTorch`; `Postfilter`, the harness's own), `FILTER_KINDS`, `BACKENDS`, `FILTER_MODE` (`clause` → `exact`), `DISPATCH` (the library's table plus the `Postfilter` row), `PATHS` **derived from it**, `filter_backend` (`official` → `triton`), `build(algo, item_embs, k=, backend=, …)` (construct + `register_index`, ≈ 25 lines), `build_filter`, `is_valid_combo` |
+| [`metrics.py`](../../evaluation/bench/metrics.py) | `accumulator(ks, device)` / `accumulate(acc, ids, targets, num_targets=None, ranked=False)` (returns the chunk's per-row recall, the [sidecar](#per-query-sidecar)'s values) / `finalize(acc)` (`null` metrics when `n == 0`, `null_if_empty`) — recall, ndcg, precision, mrr at every `k` from one top-`k_max` list as float64 running sums on device; `ranked=True` scores against the oracle's own top-`k` prefix; `per_row`, `jaccard_at_k`. `training/evaluate.py` keeps its own frozen copy, pinned to agree (`training/test_encode.py`) |
+| [`algos.py`](../../evaluation/bench/algos.py) | the algorithm table: `ALGOS` name → class (`LiNRV1`–`LiNRV3`, `SilverTorch`; `Postfilter`, the harness's own), `FILTER_KINDS`, `BACKENDS`, `FILTER_MODE` (`clause` → `exact`), `DISPATCH` (the library's table plus the `Postfilter` row), `PATHS` **derived from it**, `filter_backend` (`official` → `triton`), `build(algo, item_embs, k=, backend=, …)` (construct + `register_index`, ≈ 25 lines), `build_filter`, `is_valid_combo`, `official_config` (`bloom_path` / `score_path` → `OfficialConfig`) |
 | [`postfilter.py`](../../evaluation/bench/postfilter.py) | `Postfilter`, the generic-torch baseline ([below](#the-postfilter-baseline)) |
-| [`config.py`](../../evaluation/bench/config.py) | `Dataset`, `Job`, `load_dataset`, `load_matrix` — the config matrix below |
+| [`config.py`](../../evaluation/bench/config.py) | `Dataset`, `Job`, `load_dataset`, `load_matrix` — the config matrix below; `interleave_units`, `shared_key` (the [interleave groups](#interleaved-groups)) |
 | [`inputs.py`](../../evaluation/bench/inputs.py) | `load_inputs` (dispatch to `training.encode.encode_split` or the `eval_datasets.layout` text readers; `users_limit` once, as a prefix), `sweep_qa`, `build_filters` (keyed by filter backend), `exact_filter`, `query_pool` |
 | [`oracle.py`](../../evaluation/bench/oracle.py) | the exact filtered oracle as blob v4, `attrs_digest`, `pass_counts`, `pass_rate`, `bloom_fp_rate` |
-| [`run.py`](../../evaluation/bench/run.py) | `run(jobs, out_dir=...)` — the cell loop; `MODES`, `QUALITY_CHUNK = 16`, `EXACT_ALGOS`, `PER_K_QUALITY`, `PERF_STAT_KEYS`, `CLOCK_DRIFT` |
+| [`run.py`](../../evaluation/bench/run.py) | `run(jobs, out_dir=...)` — the cell loop; `MODES`, `QUALITY_CHUNK = 16`, `EXACT_ALGOS`, `SEED_FREE_QUALITY`, `PER_K_QUALITY`, `PERF_STAT_KEYS`, `IDS_PROBE_BATCHES`, `CLOCK_DRIFT` |
 | [`cli.py`](../../evaluation/bench/cli.py) | `bench run` / `campaign` / `check` / `upload` / `fetch` / `report` / `env` |
 | [`report.py`](../../evaluation/bench/report.py) | `bench report`: `results.parquet`, the paper tables as LaTeX, the figures, the methodology paragraph and `report.md`; the `ARTIFACTS` dispatch table and the citability verdict. See [Report](#report-reportpy) |
 | [`upload.py`](../../evaluation/bench/upload.py) | `bench upload`: publish a results tree (records, samples, a freshly aggregated `results.parquet`) to the HF results repo with a `MANIFEST.json` (provenance + a sha256 per file) and a generated README; `bench fetch`: one subtree back, checked against its manifest. See [Results storage](#results-storage) |
@@ -344,7 +344,8 @@ dataset expands to jobs, an unlisted one is refused by name and still
 resolves at each of its dims.
 
 `suites.yaml` is the campaign-v2 grid (user decisions 2026-10-08). Every
-suite runs seeds `{0, 1, 2}` on every dataset and sweep. Batch sizes are
+suite runs seeds `{0, 1, 2}` on every dataset and sweep, except `h2h`'s five
+repeats `{0 … 4}`. Batch sizes are
 `{1, 16}` and ks are `{100, 1000}` or a subset of those. No suite has
 `n_probe` 4 or 256, LiNR V4, or openalex (`config/openalex.yaml` and its
 ETL are backlog). Official SilverTorch runs only `bloom` cells: its clause
@@ -362,6 +363,7 @@ unfiltered `quality` suite ([decisions](../decisions.md#harness)); synth's
 | `codesign` | arxiv (kept sweeps), goodreads (`c0_genre, c2_format, c3_year`) | official bloom, `bloom_path` {partial, full} × `n_probe` {8, 32, 128}, `n_lists` arxiv 1664 / goodreads 1024, k 100 | F4b, C5 |
 | `bloomwidth` | goodreads `c0_genre`, arxiv kept, pubmed `c0_mesh` | `silvertorch` triton bloom `m_bits` {64 … 2048} × `k_hash` {3, 5}; official bloom `k_hash` {3, 5} (its width is `OfficialConfig.b_multiplier`, not `m_bits`); bs 16; quality only (`perf: false`) | F4a, C4 |
 | `bloomwidth-timed` | the same | the same widths at `k_hash` 5 (official: its one width), k 100, bs 16, timed | F4a |
+| `h2h` | goodreads `c0_genre`, arxiv `c0_maincat`, `none` + `bloom`, d128 | `silvertorch` triton and official with `score_path` {fp16, int32}, `n_probe` 24, bs {1, 16}, k {100, 1000}, seeds {0 … 4} (the repeats); one interleave group of the three arms; run with `--interleave --profile` | T3, C7 (H2H-final) |
 
 **n95** is the smallest `n_probe` that reaches `recall_oracle@100 ≥ 0.95`
 on a dataset's median sweep. It is read off `deep` / `synth` / `n95` after
@@ -413,6 +415,9 @@ filter:
   batch_sizes: [1, 16]
   seeds: [0, 1, 2]                  # optional; default [0]
   perf: true                        # optional; false = a quality-only suite (n95, bloomwidth)
+  interleave:                       # optional: comparison groups timed round-robin (--interleave)
+    - {by: algo, values: [linr_v1_filter_mask, linr_v2]}   # `values` limits who joins
+    - {by: [backend, score_path]}   # algo, backend or build params
   sweeps: {goodreads: [c0_genre, c1_lang_reverse, all4], ...}   # optional per-dataset selector
   ks_by_sweep: {goodreads-synth: {p0001: [100]}}                # optional per-(dataset, sweep) ks
   arms:
@@ -437,7 +442,7 @@ the index. Its `query:` params (`n_probe`, `candidate_pool`,
 `set_query_params` to the built index, so `deep` is two k-means per
 `(dataset, sweep, seed)`, not ten. Putting a query param under `build:`
 (or the reverse) is a `ConfigError`. So is a param on an arm where it has
-no meaning: `bloom_path` off silvertorch / bloom / official, `m_bits` /
+no meaning: `bloom_path` off silvertorch / bloom / official, `score_path` off silvertorch / official, `m_bits` /
 `k_hash` off silvertorch / bloom ([bloom widths](#bloom-widths-as-build-params)),
 `compile` off a torch arm ([compiled arms](#compiled-arms)), and
 `candidate_pool_frac` off `linr_v3` ([pool fractions](#pool-fractions)). Two arms that expand to the same
@@ -467,10 +472,10 @@ record's key block. `none` cells have `sweep == "full_scan"` and
 ```
 bench run      --dataset D --suite S [--dim N]* [--algo A]* [--backend B]* [--filter-kind K]*
                [--sweep W]* [--k N]* [--bs N]* [--seed N]* [--mode eager|graph]*
-               [--skip-quality] [--skip-perf] [--profile] [--out results] [--output FILE]
+               [--skip-quality] [--skip-perf] [--profile] [--interleave] [--out results] [--output FILE]
                [--resume|--force] [--config-dir config] [--checkpoint PATH]
-bench campaign --suite filter|deep|codesign|all [--dataset D]* [--dim N]* [--mode M]*
-               [--skip-quality] [--skip-perf] [--profile] [--out results] [--resume|--force]
+bench campaign --suite filter|deep|codesign|…|all [--dataset D]* [--dim N]* [--mode M]*
+               [--skip-quality] [--skip-perf] [--profile] [--interleave] [--out results] [--resume|--force]
                [--config-dir config] [--timeout 48.0]
 bench check    --dataset D [--dim N]* [--config-dir config]   # eval_datasets.layout.validate_layout
 bench upload   [--repo-id user/repo] [--results DIR] [--path-in-repo PREFIX] [--gate STEP]
@@ -503,6 +508,12 @@ order of `SUITES = ("filter", "deep", "codesign")` for `all`), every listed data
 `(dataset, dim, algo, backend)` group of `load_matrix`, one child process
 `python -m bench.cli run --dataset … --dim … --suite … --algo …
 --backend … --resume` (same interpreter, `cwd = evaluation/`), sequential.
+With `--interleave` the groups one [interleave unit](#interleaved-groups)
+spans share a child (`cli._children`: connected groups of `config.interleave_units`),
+run as `--algo a … --backend b … --interleave`; the set has to be exactly one
+`--algo` × `--backend` product, else the campaign stops with the groups named,
+and the log name joins them with `+` (`codesign_arxiv-d128_silvertorch_official.log`,
+`filter_arxiv-d128_linr_v1_filter_mask+linr_v2_triton.log`).
 The child's stdout + stderr go to
 `results/_logs/<suite>_<dataset>-d<dim>_<algo>_<backend>.log` (appended, the
 command line first); one summary line per child (`time suite dataset dim
@@ -615,6 +626,43 @@ cannot leave a resumable record without its vector; `read_keys` ignores
 (and logs) one torn trailing line — the cell in flight when the process
 died — and raises on a malformed line anywhere else.
 
+### Interleaved groups
+
+A suite's `interleave:` list names comparison groups: `by` is the field the
+arms differ in (`algo`, `backend` or build params such as `bloom_path`,
+`score_path`; one name or a list), `values` (one `by` field only) limits which
+arms join. `config.interleave_units(jobs)` puts the jobs whose key is equal but
+for the `by` fields (query params aside, the seed included, so a group is per
+seed) in one unit, in matrix order; every other job is a unit of its own. A
+job in two groups of two or more is a `ConfigError` at `load_matrix`. The
+shipped groups: `filter` and `synth` V1 vs V2 (per backend and compile mode)
+and triton vs official (silvertorch bloom); `codesign` partial vs full; `h2h`
+triton vs official fp16 vs official int32.
+
+Without `--interleave` nothing changes. With it, `run` builds every arm of a
+unit (assets per arm's step-3 key, usually shared), then per query combo runs
+each arm's quality in order and times all arms together: per `(bs, k, mode)`
+one `measure.latency_group` call warms and calibrates each arm (its own `N`)
+and then runs window `i` of every arm before window `i + 1` (A, B, A, B, A, B
+over the 3 windows), the method of
+[h2h.py](../artifacts/kernel-opt/h2h.py) and
+[interleave.sh](../artifacts/kernel-opt/interleave.sh) inside one process. In
+`graph` mode dynamo is reset once before the variant, then each arm is
+captured (`graph_callable` no longer resets, so captures coexist); an arm that
+cannot capture (official) gets its null `not_capturable` entry and the others
+run round-robin without it. Each arm writes its own record, under the key a
+non-interleaved run gives it, with `interleave: {group, arms, position}`:
+`group` is the first 16 hex of the sha1 of the cell's key block minus the `by`
+fields (`config.shared_key`; the seed and query params included), `arms` the
+labels in run order (`algo/backend` plus each `by` build param, e.g.
+`silvertorch/official/score_path=int32`), `position` this arm's index. Its
+measured perf entries carry `rounds` (the window count, equal across the
+group), and window `i` of every arm is round `i`, which is what the report's
+paired ratios read. Resume works per arm, but a group whose arms are not all
+`ok` re-runs whole. A failure in one arm's quality drops that arm from the
+perf round-robin; a perf failure fails every arm of that cell. `elapsed_s`
+of an interleaved record is the whole group cell's wall time.
+
 ### Quality cache
 
 The seed only moves the perf pool of `linr_v1_filter_mask`, `linr_v2` and
@@ -709,6 +757,7 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 | `index_mib` | float | Σ buffers of the algo module, filter submodule included |
 | `filter_mib` | float | Σ buffers of the filter submodule alone (`0.0` without one; `silvertorch` carries its attrs inside `index_mib`) |
 | `seed_scope` | str | `pool` on the seed-free arms (`SEED_FREE_QUALITY`: the seed moves only the perf pool), `pool+build` on SilverTorch and `linr_v3` |
+| `interleave` | dict / null | `{group, arms, position}` when the cell ran in an [interleave group](#interleaved-groups); `null` otherwise |
 | `quality_source` | dict / null | `null` when this record computed its quality; `{seed, code_version}` of the record the [quality cache](#quality-cache) copied it from |
 | `per_query` | str / null | the [per-query sidecar](#per-query-sidecar) relative to the results root; `null` without quality |
 | `quality` | dict / null | `heldout: {recall@k, ndcg@k, precision@k, mrr@k for k in ks, n}`, each metric `null` when `n == 0`; on filter cells also `oracle: {…}` (ranked-prefix targets); `jaccard_vs_first@k` per `k`, `score_max_abs_diff`, `parity` (`reference` = this record wrote the spill file, `vs_<backend>` = compared against it, `shape_mismatch:…`); `null` with `--skip-quality` |
@@ -731,6 +780,7 @@ Perf entry:
 | `outliers_std`, `outliers_tukey` | counts beyond 3 σ / the 1.5 IQR fences, never dropped |
 | `spread`, `unstable` | `(max − min) / median` of the three window medians; `> 0.05` |
 | `window_medians_ms` | the three medians |
+| `rounds` | interleaved records only: the window count; window `i` of every arm of the group is round `i` |
 | `window_sm_mhz` | the SM clock sampled right after each window's sync, same order as `window_medians_ms`; `null` elements without CUDA; not in `results.parquet` |
 | `peak_fwd_mib` | eager only, first window: `max_memory_allocated − allocated_before` |
 | `sm_mhz` | `window_sm_mhz[-1]`: the SM clock sampled right after the last window's sync, with the GPU still at its load clock — the per-variant value cross-run latency comparisons read, and the only clock `clocks_drift` looks at; `null` without CUDA |

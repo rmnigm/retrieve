@@ -33,6 +33,9 @@ filter:                        # headline (T2, C3, C6)
     arxiv: [c3_nversions, c0_maincat, all4]
     pubmed: [c0_mesh, c3_journal_reverse, all5]
     yfcc10m: [tags_and]
+  interleave:                  # comparison groups, timed round-robin under --interleave
+    - {by: algo, values: [linr_v1_filter_mask, linr_v2]}
+    - {by: backend, values: [triton, official]}
   arms:
     - {algo: linr_v1_filter_mask, backends: [triton]}
     - {algo: linr_v2, backends: [triton]}
@@ -100,6 +103,9 @@ synth:                         # pass rate as the x axis (F1, F2, C1, C2, C6)
   ks_by_sweep:                 # k = 1000 dropped where N*p < 4*1000: "return every passing item"
     goodreads-synth: {p0001: [100], p0003: [100]}            # N 797,084
     arxiv-synth: {p0001: [100]}                              # N 2,988,996
+  interleave:                  # V1 vs V2 per backend and compile mode; triton vs official bloom
+    - {by: algo, values: [linr_v1_filter_mask, linr_v2]}
+    - {by: backend, values: [triton, official]}
   arms:
     - {algo: linr_v1_filter_mask, backends: [triton]}
     - {algo: linr_v2, backends: [triton]}
@@ -148,7 +154,6 @@ n95:                           # pubmed's n95 source (it runs no deep / synth)
 codesign:                      # S9 / F4b, C5: the official bloom path, partial vs full masks
   # `bloom_path` exists on silvertorch / bloom / official only (anything else is a ConfigError);
   # both arms carry it in `params`, so their keys never collide with filter / deep official cells.
-  # Interleaved partial/full timing in one process is a harness change, not a config one.
   datasets: [arxiv, goodreads]
   dims: [128]
   filter_kinds: [bloom]
@@ -158,6 +163,7 @@ codesign:                      # S9 / F4b, C5: the official bloom path, partial 
   sweeps:
     arxiv: [c3_nversions, c0_maincat, all4]
     goodreads: [c0_genre, c2_format, c3_year]
+  interleave: [{by: bloom_path}]   # partial vs full, timed round-robin under --interleave
   arms:
     - algo: silvertorch
       backends: [official]
@@ -166,6 +172,27 @@ codesign:                      # S9 / F4b, C5: the official bloom path, partial 
       datasets:
         arxiv: {build: {n_lists: [1664]}}
         goodreads: {build: {n_lists: [1024]}}
+
+h2h:                           # H2H-final / T3, C7: official vs our Triton on the release code
+  # Run with --interleave --profile: one group of the three arms per cell, timed round-robin, and
+  # the kernel-only split. `score_path` is a build param of silvertorch / official only (fp16 is
+  # the library default the paper reports, int32 the bit-exact parity path). Seeds are repeats.
+  datasets: [goodreads, arxiv]
+  dims: [128]
+  filter_kinds: [none, bloom]
+  ks: [100, 1000]
+  batch_sizes: [1, 16]
+  seeds: [0, 1, 2, 3, 4]
+  sweeps:
+    goodreads: [c0_genre]      # the b3 / kernel-opt cell
+    arxiv: [c0_maincat]        # its median kept sweep
+  interleave: [{by: [backend, score_path]}]
+  arms:
+    - {algo: silvertorch, backends: [triton], query: {n_probe: [24]}}
+    - algo: silvertorch
+      backends: [official]
+      build: {score_path: [fp16, int32]}
+      query: {n_probe: [24]}
 
 bloomwidth:                    # D3 / F4a, C4: bloom width vs FPR and recall
   perf: false

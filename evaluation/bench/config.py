@@ -41,7 +41,7 @@ _DATASET_KEYS = {"data_dir", "checkpoint", "content_dir", "dims", "encode", "use
 _DATASET_KEYS |= {"filters"}
 _FILTER_KEYS = {"attrs", "reverse", "query_attrs", "clause", "bloom"}
 _SUITE_KEYS = {"datasets", "dims", "filter_kinds", "ks", "batch_sizes", "arms", "seeds", "bloom"}
-_SUITE_KEYS |= {"sweeps", "ks_by_sweep", "perf"}
+_SUITE_KEYS |= {"sweeps", "ks_by_sweep", "perf", "interleave"}
 _ARM_KEYS = {"algo", "backends", "filter_kinds", "sweeps", "build", "query", "datasets"}
 _ENCODE = {"batch_size": 512, "num_workers": 8, "max_seq_length": 200}
 _BLOOM = {"m_bits": 1024, "k_hash": 5}
@@ -101,6 +101,7 @@ class Job:
     data: Dataset = field(compare=False, repr=False)
     narrowed: bool = False  # --k / --bs replaced the suite's lists: records are ``partial``
     timed: bool = True  # False on a quality-only suite (``perf: false``): no perf, still ``ok``
+    interleave: tuple[tuple[tuple[str, ...], tuple | None], ...] = ()  # the suite's (by, values)
 
     def cells(self) -> list[dict[str, Any]]:
         """``params`` of every cell of this job, in query order."""
@@ -321,6 +322,66 @@ def _check_suite(where: str, s: dict) -> None:
             )
 
 
+def _interleave(where: str, raw: Any) -> tuple[tuple[tuple[str, ...], tuple | None], ...]:
+    """A suite's ``interleave:`` list → ``((by fields, values or None), ...)``. ``by`` is
+    ``algo``, ``backend`` or build params (one name or a list); ``values`` (one ``by`` field
+    only) limits which arms join."""
+    out = []
+    for i, g in enumerate(raw or []):
+        gw = f"{where}: interleave[{i}]"
+        _check_keys(gw, g, {"by", "values"}, ["by"])
+        by = tuple([g["by"]] if isinstance(g["by"], str) else g["by"])
+        if not by or not all(isinstance(f, str) for f in by) or QUERY_PARAMS & set(by):
+            raise ConfigError(f"{gw}: by is algo, backend or build params, got {g['by']!r}")
+        values = g.get("values")
+        if values is not None and (len(by) != 1 or not isinstance(values, list) or not values):
+            raise ConfigError(f"{gw}: values is a non-empty list, with one by field only")
+        out.append((by, None if values is None else tuple(values)))
+    return tuple(out)
+
+
+def _dim_value(job: Job, field: str) -> Any:
+    return getattr(job, field) if field in ("algo", "backend") else job.build.get(field)
+
+
+def shared_key(job: Job, params: dict[str, Any], by: tuple[str, ...]) -> dict[str, Any]:
+    """The key block of one cell minus the group's ``by`` fields: what the arms of one
+    interleave group have in common (the seed included, so a group is per seed)."""
+    key = job.key(params)
+    key["params"] = {k: v for k, v in key["params"].items() if k not in by}
+    return {k: v for k, v in key.items() if k not in by}
+
+
+def interleave_units(jobs: Sequence[Job]) -> list[tuple[tuple[str, ...] | None, list[Job]]]:
+    """Partition ``jobs`` into ``(by, members)`` units in first-member order: the jobs of one
+    suite comparison group (same key but for the ``by`` fields, query params aside) form one
+    unit, every other job is a unit of its own (``by`` None). A job in two groups of two or
+    more is a ``ConfigError``."""
+    clusters: dict[str, list[Job]] = {}
+    for j in jobs:
+        for by, values in j.interleave:
+            if values is not None and _dim_value(j, by[0]) not in values:
+                continue
+            c = json.dumps([by, shared_key(j, j.build, by)], sort_keys=True, default=str)
+            clusters.setdefault(c, []).append(j)
+    unit_of: dict[int, tuple[tuple[str, ...], list[Job]]] = {}
+    for c, members in clusters.items():
+        if len(members) < 2:
+            continue
+        for j in members:
+            if id(j) in unit_of:
+                raise ConfigError(f"{j.suite}: {j.key()} is in two interleave groups")
+            unit_of[id(j)] = (tuple(json.loads(c)[0]), members)
+    units: list[tuple[tuple[str, ...] | None, list[Job]]] = []
+    seen: set[int] = set()
+    for j in jobs:
+        if id(j) not in seen:
+            by, members = unit_of.get(id(j), (None, [j]))
+            seen.update(map(id, members))
+            units.append((by, members))
+    return units
+
+
 # ----- expansion ------------------------------------------------------------------------
 
 
@@ -364,6 +425,7 @@ def load_matrix(
     if not isinstance(seed_list, list) or not all(isinstance(x, int) and x >= 0 for x in seed_list):
         raise ConfigError(f"{where}: seeds must be a list of ints >= 0, got {seed_list!r}")
     bloom = {**_BLOOM, **(suites.get("bloom") or {}), **(s.get("bloom") or {})}
+    groups = _interleave(where, s.get("interleave"))
     timed = s.get("perf", True)
     if not isinstance(timed, bool):
         raise ConfigError(f"{where}: perf must be true or false, got {timed!r}")
@@ -474,9 +536,11 @@ def load_matrix(
                                             data=ds,
                                             narrowed=narrowed,
                                             timed=timed,
+                                            interleave=groups,
                                         )
                                     )
     logger.info("{}/{}: {} jobs, {} cells", name, suite, len(jobs), sum(len(j.query) for j in jobs))
+    interleave_units(jobs)  # a job in two groups fails here, not mid-run
     return jobs
 
 
@@ -492,6 +556,8 @@ __all__ = [
     "ConfigError",
     "Dataset",
     "Job",
+    "interleave_units",
     "load_dataset",
     "load_matrix",
+    "shared_key",
 ]

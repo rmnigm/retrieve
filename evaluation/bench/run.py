@@ -71,7 +71,7 @@ from loguru import logger
 from torch import nn
 
 from bench import algos, inputs, measure, oracle, records
-from bench.config import QUERY_PARAMS, Job
+from bench.config import QUERY_PARAMS, Job, interleave_units, shared_key
 from bench.metrics import accumulate, accumulator, finalize, jaccard_at_k
 from eval_datasets.layout import atomic_write
 
@@ -416,7 +416,7 @@ def ids_sha256(callee: Any, pool: torch.Tensor, qa_pool: torch.Tensor | None) ->
 
 
 def perf(
-    module: nn.Module,
+    modules: Sequence[nn.Module],
     inp: dict,
     assets: dict,
     job: Job,
@@ -425,56 +425,72 @@ def perf(
     modes: Sequence[str],
     profile: bool,
     latency_kw: dict[str, Any],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """§2.5 per ``(bs, k, mode)``: the fixed-seed pool rotated round-robin, ``module.k = k``
-    before each variant, ``graph`` via ``measure.graph_callable`` (one capture per shape) or a
-    null entry with the ``reason`` (``official`` → ``not_capturable``, O D7). The official
-    backend's plan cache is switched *off* for timing — every forward pays the expression
-    parse, as serving fresh queries does (kernels.md); ``OfficialConfig.cache_plans`` is read
-    per forward, so this is an in-place replace, no rebuild — and every entry records
-    ``cache_plans`` (``None`` on backends without such a cache)."""
-    entries: list[dict[str, Any]] = []
-    samples: list[dict[str, Any]] = []
-    cache_plans = None
-    if module.backend == "official":
-        module.official = dataclasses.replace(module.official, cache_plans=False)
-        cache_plans = module.official.cache_plans
+) -> list[tuple[list[dict[str, Any]], list[dict[str, Any]]]]:
+    """§2.5 per ``(bs, k, mode)`` for the arms of one cell (one module, or the modules of an
+    interleave group, timed round-robin by ``measure.latency_group``): the fixed-seed pool of
+    ``job`` rotated round-robin, ``module.k = k`` before each variant, ``graph`` via
+    ``measure.graph_callable`` (one capture per shape, dynamo reset once before the variant's
+    captures) or a null entry with the ``reason`` (``official`` → ``not_capturable``, O D7).
+    The official backend's plan cache is switched *off* for timing — every forward pays the
+    expression parse, as serving fresh queries does (kernels.md); ``OfficialConfig.cache_plans``
+    is read per forward, so this is an in-place replace, no rebuild — and every entry records
+    ``cache_plans`` (``None`` on backends without such a cache). Each measured entry gets
+    ``ids_sha256``; in a group of two or more, also ``rounds``. Returns ``(entries, samples)``
+    per module."""
+    out: list[tuple[list[dict[str, Any]], list[dict[str, Any]]]] = [([], []) for _ in modules]
+    cache_plans: list[bool | None] = []
+    for m in modules:
+        if m.backend == "official":
+            m.official = dataclasses.replace(m.official, cache_plans=False)
+        cache_plans.append(m.official.cache_plans if m.backend == "official" else None)
     for bs in job.batch_sizes:
         pool, qa_pool = inputs.query_pool(
             inp, assets["qa_s"], assets["skip"], bs=bs, seed=job.seed, device=device
         )
         for k in job.ks:
-            module.k = int(k)
+            for m in modules:
+                m.k = int(k)
             for mode in modes:
-                entry: dict[str, Any] = {
-                    "k": int(k),
-                    "bs": int(bs),
-                    "mode": mode,
-                    "cache_plans": cache_plans,
-                }
+                callees: dict[int, Any] = {}
                 if mode == "graph":
+                    torch._dynamo.reset()
                     example = (pool[0],) if qa_pool is None else (pool[0], qa_pool[0])
+                for i, m in enumerate(modules):
+                    entry = {
+                        "k": int(k),
+                        "bs": int(bs),
+                        "mode": mode,
+                        "cache_plans": cache_plans[i],
+                    }
+                    if mode == "eager":
+                        callees[i] = m
+                        continue
                     try:
-                        callee = measure.graph_callable(module, *example)
+                        callees[i] = measure.graph_callable(m, *example)
                     except measure.NotCapturable as exc:
                         logger.info("  graph bs={} k={}: {}", bs, k, exc)
-                        entries.append(
+                        out[i][0].append(
                             {**entry, **dict.fromkeys(PERF_STAT_KEYS), "reason": str(exc)}
                         )
-                        continue
-                else:
-                    callee = module
-                fn = _rotate(callee, pool, qa_pool)
+                if not callees:
+                    continue
+                fns = {i: _rotate(c, pool, qa_pool) for i, c in callees.items()}
                 with torch.inference_mode():
-                    d, ms = measure.latency(fn, bs=int(bs), mode=mode, **latency_kw)
-                    if profile and mode == "eager":
-                        d["kernels"] = measure.profile_once(fn)
-                d["ids_sha256"] = ids_sha256(callee, pool, qa_pool)
-                entries.append({**entry, **d})
-                samples.append({"k": int(k), "bs": int(bs), "mode": mode, "ms": ms})
-                callee = fn = None
+                    timed = measure.latency_group(
+                        list(fns.values()), bs=int(bs), mode=mode, **latency_kw
+                    )
+                    for (i, fn), (d, ms) in zip(fns.items(), timed, strict=True):
+                        if profile and mode == "eager":
+                            d["kernels"] = measure.profile_once(fn)
+                        d["ids_sha256"] = ids_sha256(callees[i], pool, qa_pool)
+                        if len(modules) > 1:
+                            d["rounds"] = len(d["window_medians_ms"])
+                        entry = {"k": int(k), "bs": int(bs), "mode": mode}
+                        out[i][0].append({**entry, "cache_plans": cache_plans[i], **d})
+                        out[i][1].append({**entry, "ms": ms})
+                callees = fns = {}
             torch._dynamo.reset()
-    return entries, samples
+    return out
 
 
 # ----- the loop -----------------------------------------------------------------------------
@@ -500,6 +516,22 @@ def _failed(job: Job, params: dict, env: dict, stage: str, exc: BaseException, t
     }
 
 
+def _akey(job: Job) -> tuple:
+    """The step-3 asset key: what ``sweep_assets`` depends on."""
+    return (
+        job.filter_kind,
+        job.sweep,
+        algos.filter_backend(job.backend),
+        max(job.ks),
+        tuple(sorted(job.bloom.items())),
+    )
+
+
+def group_label(job: Job, by: Sequence[str]) -> str:
+    """One arm of an interleave group: ``algo/backend`` plus each ``by`` build param it sets."""
+    return "/".join([job.algo, job.backend, *(f"{f}={job.build[f]}" for f in by if f in job.build)])
+
+
 def run(
     jobs: Sequence[Job],
     *,
@@ -510,13 +542,17 @@ def run(
     skip_quality: bool = False,
     skip_perf: bool = False,
     profile: bool = False,
+    interleave: bool = False,
     env_extra: dict[str, Any] | None = None,
     latency_kw: dict[str, Any] | None = None,
     device: torch.device | None = None,
 ) -> Counter:
-    """Run every cell of ``jobs`` in this process (module docstring). ``out_path`` overrides
-    the per-``(suite, dataset, dim)`` file; ``latency_kw`` is forwarded to ``measure.latency``
-    (tests shrink the windows). Returns ``Counter(ok / partial / failed / skipped)``."""
+    """Run every cell of ``jobs`` in this process (module docstring). ``interleave`` builds
+    the arms of each suite comparison group (``config.interleave_units``) side by side and
+    times them round-robin; a group re-runs whole unless every arm's cell is ``ok``.
+    ``out_path`` overrides the per-``(suite, dataset, dim)`` file; ``latency_kw`` is forwarded
+    to ``measure.latency_group`` (tests shrink the windows). Returns ``Counter(ok / partial /
+    failed / skipped)``."""
     counts: Counter = Counter()
     if not jobs:
         return counts
@@ -539,222 +575,268 @@ def run(
     with_filters = {(j.dataset, j.dim): False for j in jobs}
     for j in jobs:
         with_filters[j.dataset, j.dim] |= j.filter_kind != "none"
+    units = interleave_units(jobs) if interleave else [(None, [j]) for j in jobs]
 
     existing: dict[Path, dict[str, str]] = {}
     sources: dict[Path, dict[str, dict[int, dict[str, Any]]]] = {}
     inp: dict[str, Any] | None = None
     inputs_key: tuple | None = None
-    assets: dict | None = None
-    assets_key: tuple | None = None
-    for job in jobs:
-        path = out_path or records.record_path(out_dir, job)
+    assets_by: dict[tuple, dict] = {}
+    for by, unit in units:
+        path = out_path or records.record_path(out_dir, unit[0])
         if path not in existing:
             recs = records.read_records(path)
             existing[path] = {records.record_key(r): r.get("status", "ok") for r in recs}
             sources[path] = quality_sources(recs)
             del recs
-        todo = [
-            p
-            for p in job.cells()
-            if not (
-                resume and existing[path].get(records.resume_key(job.key(p), code_version)) == "ok"
-            )
-        ]
-        counts["skipped"] += len(job.cells()) - len(todo)
-        if not todo:
-            logger.info("resume: {} all {} cells done", job.group, len(job.cells()))
+        todo: dict[int, list[dict[str, Any]]] = {id(j): [] for j in unit}
+        combos = list({json.dumps(q, sort_keys=True): q for j in unit for q in j.query}.values())
+        for q in combos:
+            cells = [(j, {**j.build, **q}) for j in unit if q in j.query]
+            done = [
+                resume and existing[path].get(records.resume_key(j.key(p), code_version)) == "ok"
+                for j, p in cells
+            ]
+            if all(done):
+                counts["skipped"] += len(cells)
+                continue
+            for j, p in cells:  # a group re-runs whole
+                todo[id(j)].append(p)
+        if not any(todo.values()):
+            logger.info("resume: {} all cells done", [j.group for j in unit])
             continue
-        if (job.dataset, job.dim) != inputs_key:
-            inp = assets = None
-            assets_key = None
+        if (unit[0].dataset, unit[0].dim) != inputs_key:
+            inp = None
+            assets_by = {}
             _release()
             inp = inputs.load_inputs(
-                job.data, device, with_filters=with_filters[job.dataset, job.dim]
+                unit[0].data, device, with_filters=with_filters[unit[0].dataset, unit[0].dim]
             )
-            inputs_key = (job.dataset, job.dim)
+            inputs_key = (unit[0].dataset, unit[0].dim)
         assert inp is not None
-        k_max = max(job.ks)
-        akey = (
-            job.filter_kind,
-            job.sweep,
-            algos.filter_backend(job.backend),
-            k_max,
-            tuple(sorted(job.bloom.items())),
-        )
-        if akey != assets_key:
-            assets = None
+        need = {_akey(j): j for j in unit if todo[id(j)]}
+        if set(assets_by) - set(need):
+            assets_by = {a: v for a, v in assets_by.items() if a in need}
             _release()
-            assets = sweep_assets(job, inp, k_max, device)
-            assets_key = akey
-        assert assets is not None
+        for a, j in need.items():
+            if a not in assets_by:
+                assets_by[a] = sweep_assets(j, inp, max(j.ks), device)
 
-        measure.setup(job.seed)
-        t0 = time.perf_counter()
-        logger.info(
-            "build {} {}/{} {} build={}",
-            job.algo,
-            job.filter_kind,
-            job.sweep,
-            job.backend,
-            job.build,
-        )
-        try:
-            module, build_s = measure.timed_build(
-                lambda: build_module(job, inp, assets, k_max, resolve_pool(todo[0], assets))  # noqa: B023 — called at once
-            )
-            compile_s = (
-                compile_warmup(module, inp, assets, device) if "compile" in job.build else None
-            )
-        except Exception as exc:  # recorded, the loop continues (H §7)
-            logger.exception("build failed: {}", job.key(todo[0]))
-            for p in todo:
-                records.append_record(path, _failed(job, p, env0, "build", exc, t0))
-                counts["failed"] += 1
-            if is_sticky(exc):
-                logger.error("sticky CUDA error: the context is dead, ending this process")
-                raise
-            _release()
-            continue
-        index_mib = measure.index_bytes(module) / MiB
-        filter_mib = measure.index_bytes(getattr(module, "filter", None)) / MiB
-        # A module that cannot capture loses nothing to a skipped graph mode; a quality-only
-        # suite (``Job.timed`` false) loses nothing to a skipped perf.
-        lost = skipped_modes - (set() if getattr(module, "capturable", True) else {"graph"})
-        timed = job.timed and not skip_perf
-        job_reasons = reasons0 + (["skip_perf"] if job.timed and skip_perf else [])
-        job_reasons += ["modes"] if lost and job.timed else []
-
-        for params in todo:
+        built: dict[int, dict[str, Any]] = {}
+        for job in unit:
+            if not todo[id(job)]:
+                continue
+            assets = assets_by[_akey(job)]
+            k_max = max(job.ks)
+            measure.setup(job.seed)
             t0 = time.perf_counter()
-            stage = "query_params"
+            logger.info(
+                "build {} {}/{} {} build={}",
+                job.algo,
+                job.filter_kind,
+                job.sweep,
+                job.backend,
+                job.build,
+            )
+            first = todo[id(job)][0]
             try:
-                resolved = resolve_pool(params, assets)
-                q = {k: v for k, v in resolved.items() if k in QUERY_PARAMS}
-                if q:
-                    module.set_query_params(**q)
-                reasons = job_reasons + (["ks_bs"] if job.narrowed else [])
-                rec: dict[str, Any] = {
-                    "schema_version": records.SCHEMA_VERSION,
-                    "status": "partial" if reasons else "ok",
-                    "partial_reasons": reasons or None,
-                    **job.key(params),
-                    "path": job.path,
-                    "n_items": inp["n_items"],
-                    "n_queries": inp["n_queries"],
-                    "n_kept": int(assets["keep"].sum()),
-                    "n_queries_heldout": int(assets["heldout_rows"].sum()),
-                    "n_targets_in_filter": assets["n_targets_in_filter"],
-                    "n_queries_oracle": int(assets["oracle_rows"].sum())
-                    if assets["oracle_rows"] is not None
-                    else None,
-                    "pass_rate": assets["pass_rate"],
-                    "bloom_fp_rate": assets["bloom_fp_rate"],
-                    "bloom": dict(job.bloom) if job.filter_kind == "bloom" else None,
-                    "k_max": k_max,
-                    "ks": list(job.ks),
-                    "batch_sizes": list(job.batch_sizes),
-                    "build_s": build_s,
-                    "compile_s": compile_s,
-                    "candidate_pool": resolved.get("candidate_pool"),
-                    "index_mib": index_mib,
-                    "filter_mib": filter_mib,
-                    "seed_scope": "pool" if job.algo in SEED_FREE_QUALITY else "pool+build",
-                    "quality_source": None,
-                    "per_query": None,
-                    "interleave": None,
-                    "quality": None,
-                    "perf": None,
-                }
-                samples: list[dict[str, Any]] = []
-                src = (
-                    None
-                    if skip_quality
-                    else cached_quality(sources[path], job, params, code_version)
+                module, build_s = measure.timed_build(
+                    lambda: build_module(job, inp, assets, k_max, resolve_pool(first, assets))  # noqa: B023 — called at once
                 )
-                if src is not None:
-                    rec["quality"], rec["per_query"] = src["quality"], src["per_query"]
-                    rec["quality_source"] = {"seed": src["seed"], "code_version": code_version}
-                elif not skip_quality:
-                    stage = "quality"
-                    module.k = k_max
-                    qual, per_q, ids, scores = quality(module, inp, assets, job.ks, device)
-                    if job.algo in PER_K_QUALITY:
-                        for k in (k for k in job.ks if k != k_max):
-                            module.k = int(k)
-                            qk, pk, _, _ = quality(module, inp, assets, [k], device)
-                            for part, m in qk.items():
-                                qual[part].update(m)
-                            per_q.update(pk)
+                compile_s = (
+                    compile_warmup(module, inp, assets, device) if "compile" in job.build else None
+                )
+            except Exception as exc:  # recorded, the loop continues (H §7)
+                logger.exception("build failed: {}", job.key(first))
+                for p in todo[id(job)]:
+                    records.append_record(path, _failed(job, p, env0, "build", exc, t0))
+                    counts["failed"] += 1
+                if is_sticky(exc):
+                    logger.error("sticky CUDA error: the context is dead, ending this process")
+                    raise
+                _release()
+                continue
+            # A module that cannot capture loses nothing to a skipped graph mode; a quality-only
+            # suite (``Job.timed`` false) loses nothing to a skipped perf.
+            lost = skipped_modes - (set() if getattr(module, "capturable", True) else {"graph"})
+            reasons = reasons0 + (["skip_perf"] if job.timed and skip_perf else [])
+            reasons += ["modes"] if lost and job.timed else []
+            built[id(job)] = {
+                "module": module,
+                "build_s": build_s,
+                "compile_s": compile_s,
+                "reasons": reasons + (["ks_bs"] if job.narrowed else []),
+                "index_mib": measure.index_bytes(module) / MiB,
+                "filter_mib": measure.index_bytes(getattr(module, "filter", None)) / MiB,
+            }
+
+        for q in combos:
+            arms = [j for j in unit if id(j) in built and {**j.build, **q} in todo[id(j)]]
+            if not arms:
+                continue
+            t0 = time.perf_counter()
+            group = None
+            if len(arms) > 1:
+                assert by is not None
+                shared = shared_key(arms[0], {**arms[0].build, **q}, by)
+                gid = json.dumps(shared, sort_keys=True, default=str)
+                group = {
+                    "group": hashlib.sha1(gid.encode()).hexdigest()[:16],
+                    "arms": [group_label(j, by) for j in arms],
+                }
+            recs_by: dict[int, dict[str, Any]] = {}
+            for pos, job in enumerate(arms):
+                b, assets, params = built[id(job)], assets_by[_akey(job)], {**job.build, **q}
+                module, k_max = b["module"], max(job.ks)
+                stage = "query_params"
+                try:
+                    resolved = resolve_pool(params, assets)
+                    qp = {k: v for k, v in resolved.items() if k in QUERY_PARAMS}
+                    if qp:
+                        module.set_query_params(**qp)
+                    rec: dict[str, Any] = {
+                        "schema_version": records.SCHEMA_VERSION,
+                        "status": "partial" if b["reasons"] else "ok",
+                        "partial_reasons": b["reasons"] or None,
+                        **job.key(params),
+                        "path": job.path,
+                        "n_items": inp["n_items"],
+                        "n_queries": inp["n_queries"],
+                        "n_kept": int(assets["keep"].sum()),
+                        "n_queries_heldout": int(assets["heldout_rows"].sum()),
+                        "n_targets_in_filter": assets["n_targets_in_filter"],
+                        "n_queries_oracle": int(assets["oracle_rows"].sum())
+                        if assets["oracle_rows"] is not None
+                        else None,
+                        "pass_rate": assets["pass_rate"],
+                        "bloom_fp_rate": assets["bloom_fp_rate"],
+                        "bloom": dict(job.bloom) if job.filter_kind == "bloom" else None,
+                        "k_max": k_max,
+                        "ks": list(job.ks),
+                        "batch_sizes": list(job.batch_sizes),
+                        "build_s": b["build_s"],
+                        "compile_s": b["compile_s"],
+                        "candidate_pool": resolved.get("candidate_pool"),
+                        "index_mib": b["index_mib"],
+                        "filter_mib": b["filter_mib"],
+                        "seed_scope": "pool" if job.algo in SEED_FREE_QUALITY else "pool+build",
+                        "quality_source": None,
+                        "per_query": None,
+                        "interleave": None if group is None else {**group, "position": pos},
+                        "quality": None,
+                        "perf": None,
+                    }
+                    src = (
+                        None
+                        if skip_quality
+                        else cached_quality(sources[path], job, params, code_version)
+                    )
+                    if src is not None:
+                        rec["quality"], rec["per_query"] = src["quality"], src["per_query"]
+                        rec["quality_source"] = {"seed": src["seed"], "code_version": code_version}
+                    elif not skip_quality:
+                        stage = "quality"
                         module.k = k_max
-                    qual.update(parity(out_dir, job, params, ids, scores, job.ks))
-                    del ids, scores
-                    rec["quality"] = qual
-                    rec["per_query"] = per_query_path(job, params, code_version)
-                    write_per_query(out_dir, rec["per_query"], assets, per_q)
-                    if job.algo in EXACT_ALGOS and "oracle" in qual:
-                        r = qual["oracle"][f"recall@{k_max}"]
-                        if r is not None and r < EXACT_MIN_RECALL:  # None: no oracle row
-                            raise QualityGateError(
-                                f"{job.algo}/{job.backend} recall_oracle@{k_max} = {r:.4f} "
-                                f"< {EXACT_MIN_RECALL}"
-                            )
-                if timed:
-                    stage = "perf"
-                    rec["perf"], samples = perf(
-                        module,
+                        qual, per_q, ids, scores = quality(module, inp, assets, job.ks, device)
+                        if job.algo in PER_K_QUALITY:
+                            for k in (k for k in job.ks if k != k_max):
+                                module.k = int(k)
+                                qk, pk, _, _ = quality(module, inp, assets, [k], device)
+                                for part, m in qk.items():
+                                    qual[part].update(m)
+                                per_q.update(pk)
+                            module.k = k_max
+                        qual.update(parity(out_dir, job, params, ids, scores, job.ks))
+                        del ids, scores
+                        rec["quality"] = qual
+                        rec["per_query"] = per_query_path(job, params, code_version)
+                        write_per_query(out_dir, rec["per_query"], assets, per_q)
+                        if job.algo in EXACT_ALGOS and "oracle" in qual:
+                            r = qual["oracle"][f"recall@{k_max}"]
+                            if r is not None and r < EXACT_MIN_RECALL:  # None: no oracle row
+                                raise QualityGateError(
+                                    f"{job.algo}/{job.backend} recall_oracle@{k_max} = {r:.4f} "
+                                    f"< {EXACT_MIN_RECALL}"
+                                )
+                    recs_by[id(job)] = rec
+                except QualityGateError as exc:
+                    records.append_record(path, _failed(job, params, env0, stage, exc, t0))
+                    counts["failed"] += 1
+                    raise
+                except Exception as exc:  # recorded, the loop continues (H §7)
+                    logger.exception("cell failed at {}: {}", stage, job.key(params))
+                    records.append_record(path, _failed(job, params, env0, stage, exc, t0))
+                    counts["failed"] += 1
+                    if is_sticky(exc):
+                        logger.error("sticky CUDA error: the context is dead, ending this process")
+                        raise
+                    _release()
+
+            samples_by: dict[int, list[dict[str, Any]]] = {}
+            timed = [j for j in arms if id(j) in recs_by and j.timed and not skip_perf]
+            if timed:
+                try:
+                    results = perf(
+                        [built[id(j)]["module"] for j in timed],
                         inp,
-                        assets,
-                        job,
+                        assets_by[_akey(timed[0])],
+                        timed[0],
                         device,
                         modes=modes,
                         profile=profile,
                         latency_kw=latency_kw,
                     )
+                except Exception as exc:  # recorded, the loop continues (H §7)
+                    logger.exception("perf failed: {}", [j.key(j.build) for j in timed])
+                    for j in timed:
+                        recs_by.pop(id(j))
+                        p = {**j.build, **q}
+                        records.append_record(path, _failed(j, p, env0, "perf", exc, t0))
+                        counts["failed"] += 1
+                    if is_sticky(exc):
+                        logger.error("sticky CUDA error: the context is dead, ending this process")
+                        raise
+                    _release()
+                else:
+                    for j, (entries, samples) in zip(timed, results, strict=True):
+                        recs_by[id(j)]["perf"] = entries
+                        samples_by[id(j)] = samples
+
+            for job in arms:
+                if id(job) not in recs_by:
+                    continue
+                rec = recs_by[id(job)]
                 loads = [e["sm_mhz"] for e in rec["perf"] or [] if e.get("sm_mhz")]
                 if loads and sm_ref is None:
                     sm_ref = loads[0]
                 drift = any(abs(s - sm_ref) > CLOCK_DRIFT * sm_ref for s in loads)
                 if drift:
                     logger.warning("under-load clocks.sm {} MHz vs first {} MHz", loads, sm_ref)
-                env = {
-                    **env0,
-                    "sm_mhz_load": statistics.median(loads) if loads else None,
-                    "clocks_drift": drift,
-                }
                 rec["unstable"] = drift or any(e.get("unstable") for e in rec["perf"] or [])
                 rec["memory_reserved_mib"] = (
                     torch.cuda.memory_reserved() / MiB if torch.cuda.is_available() else None
                 )
                 rec["elapsed_s"] = time.perf_counter() - t0
-                rec["env"] = env
-            except QualityGateError as exc:
-                records.append_record(path, _failed(job, params, env0, stage, exc, t0))
-                counts["failed"] += 1
-                raise
-            except Exception as exc:  # recorded, the loop continues (H §7)
-                logger.exception("cell failed at {}: {}", stage, job.key(params))
-                records.append_record(path, _failed(job, params, env0, stage, exc, t0))
-                counts["failed"] += 1
-                if is_sticky(exc):
-                    logger.error("sticky CUDA error: the context is dead, ending this process")
-                    raise
-                _release()
-                continue
-            key = job.key(params)
-            for s in samples:  # samples first: a record without its vector is never resumable
-                records.append_record(records.samples_path(path), {**key, **s})
-            records.append_record(path, rec)
-            existing[path][records.resume_key(key, code_version)] = rec["status"]
-            if rec["quality"] is not None and rec["quality_source"] is None:
-                qk = quality_key(key, code_version, job.ks)
-                sources[path].setdefault(qk, {})[job.seed] = rec
-            counts[rec["status"]] += 1
-            logger.info(
-                "  {} {}/{} {} params={} -> {} ({:.0f}s)",
-                job.algo, job.filter_kind, job.sweep, job.backend, params,
-                rec["status"], rec["elapsed_s"],
-            )  # fmt: skip
-        del module
+                rec["env"] = {
+                    **env0,
+                    "sm_mhz_load": statistics.median(loads) if loads else None,
+                    "clocks_drift": drift,
+                }
+                key = job.key({**job.build, **q})
+                for smp in samples_by.get(id(job), []):  # samples first: never a record without
+                    records.append_record(records.samples_path(path), {**key, **smp})
+                records.append_record(path, rec)
+                existing[path][records.resume_key(key, code_version)] = rec["status"]
+                if rec["quality"] is not None and rec["quality_source"] is None:
+                    qk = quality_key(key, code_version, job.ks)
+                    sources[path].setdefault(qk, {})[job.seed] = rec
+                counts[rec["status"]] += 1
+                logger.info(
+                    "  {} {}/{} {} params={} -> {} ({:.0f}s)",
+                    job.algo, job.filter_kind, job.sweep, job.backend, rec["params"],
+                    rec["status"], rec["elapsed_s"],
+                )  # fmt: skip
+        del built
         _release()
     counts = +counts  # drop zero entries
     logger.info("done: {}", dict(counts))
@@ -774,6 +856,7 @@ __all__ = [
     "STICKY_CUDA",
     "QualityGateError",
     "compile_warmup",
+    "group_label",
     "ids_sha256",
     "is_sticky",
     "per_query_path",

@@ -244,3 +244,18 @@ def test_inductor_cache_is_keyed_by_code_version_unless_given():
     b = bench.inductor_cache_dir("files:4567ef", None)
     assert a != b and a.endswith("0123abcd") and b.endswith("files-4567ef")
     assert bench.inductor_cache_dir("0123abcd", "/scratch/inductor/x") == "/scratch/inductor/x"
+
+
+def test_latency_group_alternates_windows_across_arms():
+    """G-interleave: every arm is calibrated first, then round i runs window i of each arm in
+    order — A, B, A, B, A, B — each arm with its own window size and summary."""
+    calls: list[str] = []
+    fns = [lambda: calls.append("A"), lambda: calls.append("B")]
+    out = bench.latency_group(fns, bs=1, mode="eager", warmup=2, windows=3, n_min=4, n_max=4)
+    calib = 2 + 20  # warm-up + the median estimate, per arm
+    assert calls[:calib] == ["A"] * calib and calls[calib : 2 * calib] == ["B"] * calib
+    assert calls[2 * calib :] == (["A"] * 4 + ["B"] * 4) * 3
+    assert [len(d["window_medians_ms"]) for d, _ in out] == [3, 3]
+    assert all(len(ms) == 4 and d["n"] == 4 for d, ms in out)
+    one, _ = bench.latency(fns[0], bs=1, mode="eager", warmup=2, windows=3, n_min=4, n_max=4)
+    assert set(one) == set(out[0][0])

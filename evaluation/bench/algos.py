@@ -76,17 +76,22 @@ def is_valid_combo(algo: str, params: dict[str, Any]) -> bool:
 def official_config(
     algo: str, filter_kind: str, backend: str, params: dict[str, Any]
 ) -> OfficialConfig | None:
-    """The ``bloom_path`` build param (the S9 co-design ablation) as ``OfficialConfig``;
-    ``None`` (the library default, ``bloom_path="partial"``) when the key is absent. It has a
-    meaning on ``silvertorch / bloom / official`` only and raises anywhere else."""
-    if "bloom_path" not in params:
+    """The ``bloom_path`` (the S9 co-design ablation) and ``score_path`` (fp16 | int32, the
+    H2H-final arms) build params as ``OfficialConfig``; ``None`` (the library default,
+    ``partial`` / ``fp16``) when both keys are absent. ``bloom_path`` means something on
+    ``silvertorch / bloom / official`` only, ``score_path`` on ``silvertorch / official``;
+    each raises anywhere else."""
+    kw = {k: params[k] for k in ("bloom_path", "score_path") if k in params}
+    if not kw:
         return None
-    if (algo, filter_kind, backend) != ("silvertorch", "bloom", "official"):
+    if "bloom_path" in kw and (algo, filter_kind, backend) != ("silvertorch", "bloom", "official"):
         raise ValueError(
             f"bloom_path applies to silvertorch/bloom/official only, got {algo}/{filter_kind}/"
             f"{backend}"
         )
-    return OfficialConfig(bloom_path=params["bloom_path"])
+    if "score_path" in kw and (algo, backend) != ("silvertorch", "official"):
+        raise ValueError(f"score_path applies to silvertorch/official only, got {algo}/{backend}")
+    return OfficialConfig(**kw)
 
 
 def build_filter(
@@ -145,6 +150,7 @@ def build(
         bloom = BLOOM_DEFAULTS if mode == "bloom" else {}
         official = official_config(algo, filter_kind, backend, p)
         p.pop("bloom_path", None)
+        p.pop("score_path", None)
         module = SilverTorch(
             k=k, filter_mode=mode, seed=seed, backend=backend, official=official,
             **{**SILVERTORCH_DEFAULTS, **bloom, **p},
