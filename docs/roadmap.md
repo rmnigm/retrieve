@@ -166,10 +166,6 @@ the record inventory is [artifacts/campaign-v2](artifacts/campaign-v2/README.md)
   SilverTorch-Triton timing too: #16 was measured and reverted, so the
   probe-scorer kernels are those of `72e5a90`), and
   the claims' cell selectors ([claims](paper/claims.md)).
-- [ ] **R-RES: the unexplained residuals**, time-boxed to 2 h of CPU:
-  `linr_v2` 4.5e-4 and `linr_v3` 1.7e-5 against their golden JSONs, arXiv
-  SilverTorch 2.0e-6 ([validation](validation.md#harness-gates)). Still
-  unexplained after the box: reported as-is in the deviations table.
 
 ## Phase V: the campaign (pods the user creates)
 
@@ -273,7 +269,7 @@ tile per width*).
 ## Dependencies
 
 ```
-manifest reuse entries, R-RES (CPU) ─┐
+manifest reuse entries (CPU) ───────┐
 tag campaign-v2 ─────────────────────┴─┬─> V-PILOT ─┬─> V-AX-SYNTH ─> V-YFCC ─> V-SEEDS ─┐
                                        │            └─> V-GR-DEEP ─────────────────────────┤
                                        ├─> V-GR-FILTER, H2H-FINAL, V-CODESIGN, D3 ─────────┤
