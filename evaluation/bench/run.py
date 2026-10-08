@@ -157,6 +157,20 @@ def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device
     }
 
 
+def compile_warmup(module: nn.Module, inp: dict, assets: dict, device: torch.device) -> float:
+    """Seconds of a compiled module's first forward (one quality chunk), kept apart from
+    ``build_s``; ``perf``'s per-``(bs, k)`` recompiles fall inside ``latency``'s warm-up."""
+    sel = assets["keep"].nonzero().reshape(-1)[:QUALITY_CHUNK]
+    q = inp["queries"][sel].to(device)
+    qa = assets["qa_s"][sel].to(device) if assets["qa_s"] is not None else None
+    t0 = time.perf_counter()
+    with torch.inference_mode():
+        module(q, qa)
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    return time.perf_counter() - t0
+
+
 def build_module(job: Job, inp: dict, assets: dict, k_max: int, params: dict) -> nn.Module:
     kw = dict(params)
     if job.algo == "silvertorch" and job.filter_kind == "bloom":
@@ -205,8 +219,9 @@ def quality(
             else None
         )
         ids, scores = module(q, qa)
-        ids_all.append(ids)
-        sc_all.append(scores.float())
+        # a compiled arm's outputs live in CUDA-graph buffers the next call overwrites
+        ids_all.append(ids.clone())
+        sc_all.append(scores.float().clone())
         if acc_o is not None:
             m = assets["oracle_rows"][sel]
             if bool(m.any()):
@@ -479,6 +494,9 @@ def run(
             module, build_s = measure.timed_build(
                 lambda: build_module(job, inp, assets, k_max, todo[0])  # noqa: B023 — called at once
             )
+            compile_s = (
+                compile_warmup(module, inp, assets, device) if "compile" in job.build else None
+            )
         except Exception as exc:  # recorded, the loop continues (H §7)
             logger.exception("build failed: {}", job.key(todo[0]))
             for p in todo:
@@ -524,6 +542,7 @@ def run(
                     "ks": list(job.ks),
                     "batch_sizes": list(job.batch_sizes),
                     "build_s": build_s,
+                    "compile_s": compile_s,
                     "index_mib": index_mib,
                     "filter_mib": filter_mib,
                     "quality": None,
@@ -620,6 +639,7 @@ __all__ = [
     "QUALITY_CHUNK",
     "STICKY_CUDA",
     "QualityGateError",
+    "compile_warmup",
     "is_sticky",
     "run",
 ]

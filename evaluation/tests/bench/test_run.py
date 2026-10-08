@@ -472,3 +472,23 @@ def test_gridded_bloom_width_is_the_cells_own(tiny_configs, tmp_path):
     assert by[256]["index_mib"] > by[64]["index_mib"]  # the bloom words live in the index
     assert all(r["bloom_fp_rate"] is not None for r in recs)
     assert by[256]["bloom_fp_rate"] <= by[64]["bloom_fp_rate"]
+
+
+def test_compiled_arm_times_its_warmup_apart_and_skips_graph(tiny_configs, tmp_path, monkeypatch):
+    """``compile`` is in the key, the module is compiled in place with its mode, the first
+    forward is ``compile_s`` (not ``build_s``), and ``graph`` is a null ``not_capturable`` entry
+    (max-autotune replays its own CUDA graphs). The compiler itself is faked on CPU."""
+    calls = []
+    monkeypatch.setattr(torch.nn.Module, "compile", lambda self, **kw: calls.append(kw))
+    jobs = _arms(tiny_configs, filter_kinds=["clause"], algos=["silvertorch"])
+    out = tmp_path / "results"
+    assert dict(run.run(jobs, out_dir=out, **KW)) == {"ok": 2}
+    assert calls == [{"mode": "max-autotune"}] * 2
+    recs = _records(out / "arms" / "tiny-d64.jsonl")
+    assert {r["sweep"] for r in recs} == {"c0", "c0c1"}
+    for r in recs:
+        assert r["params"] == {"n_lists": 4, "compile": "max-autotune", "n_probe": 2}
+        assert r["compile_s"] > 0 and r["build_s"] > 0
+        graph = [e for e in r["perf"] if e["mode"] == "graph"]
+        assert graph and all(e["reason"] == "not_capturable" and e["median_ms"] is None
+                             for e in graph)  # fmt: skip

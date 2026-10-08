@@ -434,7 +434,7 @@ the index. Its `query:` params (`n_probe`, `candidate_pool`,
 (or the reverse) is a `ConfigError`. So is a param on an arm where it has
 no meaning: `bloom_path` off silvertorch / bloom / official, `m_bits` /
 `k_hash` off silvertorch / bloom ([bloom widths](#bloom-widths-as-build-params)),
-`compile` off a torch arm, and
+`compile` off a torch arm ([compiled arms](#compiled-arms)), and
 `candidate_pool_frac` off `linr_v3`. Two arms that expand to the same
 cell are also an error. When two backends of one algo run the same code
 path (`PATHS`) over the same cells, they collapse to the first, logged
@@ -622,6 +622,28 @@ The exact oracle does not depend on the width and is shared. A cell that
 does not grid them keeps the suite default outside `params`, so its key is
 byte-for-byte the pre-grid one. The `bloomwidth` suites grid them.
 
+### Compiled arms
+
+`compile: max-autotune` (a build param, torch arms only) is the #13 arm:
+`algos.compile_module` calls `nn.Module.compile(mode=…)` on the built
+module in place, so `k`, `set_query_params` and the buffers stay the
+module's own. Compilation is lazy, so `build_s` does not include it.
+`run.compile_warmup` times the first forward on one quality chunk as the
+record's `compile_s`. `perf` resets dynamo per `(bs, k)`, so each variant
+recompiles inside `latency`'s 50-call warm-up, never in a timed window.
+`max-autotune` already replays inductor's own CUDA graphs, so the module is
+marked uncapturable: `graph` is a null entry with `reason:
+not_capturable`, the `eager` entry is the compiled path's latency, and an
+`--mode eager` run of it is not `partial`. Its outputs live in
+CUDA-graph buffers that the next call overwrites, so `quality` clones each
+chunk's ids and scores before keeping them for the parity spill. Torch
+raises on a read of an overwritten output, so a missed clone fails loudly.
+The timed calls discard their outputs. `SilverTorch.capturable` is a
+read-only property, so the override is a per-instance subclass of the same
+name. A compile failure surfaces at `compile_warmup`, inside the build
+step, and is recorded as a `build` failure. There is no bit-exact gate
+between eager and compiled.
+
 ## Output: one JSONL record per cell
 
 `results/<suite>/<dataset>-d<dim>.jsonl`, appended by the process the
@@ -648,6 +670,7 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 | `bloom` | dict / null | `{m_bits, k_hash}` on bloom cells: the suite default, or the cell's own when `params` grids them ([bloom widths](#bloom-widths-as-build-params)) |
 | `k_max`, `ks`, `batch_sizes` | | the suite's, `k_max = max(ks)` |
 | `build_s` | float | construction + `register_index`, sync on each side (same value on every cell of one build) |
+| `compile_s` | float / null | a `compile` arm's first forward (one quality chunk), apart from `build_s` ([compiled arms](#compiled-arms)); `null` elsewhere |
 | `index_mib` | float | Σ buffers of the algo module, filter submodule included |
 | `filter_mib` | float | Σ buffers of the filter submodule alone (`0.0` without one; `silvertorch` carries its attrs inside `index_mib`) |
 | `quality` | dict / null | `heldout: {recall@k, ndcg@k, precision@k, mrr@k for k in ks, n}`, each metric `null` when `n == 0`; on filter cells also `oracle: {…}` (ranked-prefix targets); `jaccard_vs_first@k` per `k`, `score_max_abs_diff`, `parity` (`reference` = this record wrote the spill file, `vs_<backend>` = compared against it, `shape_mismatch:…`); `null` with `--skip-quality` |
