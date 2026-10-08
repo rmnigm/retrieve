@@ -1,0 +1,93 @@
+diff --git a/evaluation/config/goodreads/d128-filter.yaml b/evaluation/config/goodreads/d128-filter.yaml
+index 8a9c730..e82964f 100644
+--- a/evaluation/config/goodreads/d128-filter.yaml
++++ b/evaluation/config/goodreads/d128-filter.yaml
+@@ -18,7 +18,6 @@ _defaults: &defaults
+     - linr_v1_filter_mask
+     - linr_v2              # exact filtered top-K — recall=1.0 baseline; speed/memory headline
+     - linr_v3
+-    - linr_v4
+     - silvertorch
+   # Backends to sweep — both wrapped with torch.compile(mode="reduce-overhead")
+   # (see the Algo classes for the call site).
+diff --git a/evaluation/retrieval/algos/__init__.py b/evaluation/retrieval/algos/__init__.py
+index 2e2f31a..c3a4f4e 100644
+--- a/evaluation/retrieval/algos/__init__.py
++++ b/evaluation/retrieval/algos/__init__.py
+@@ -29,14 +29,12 @@ from .filter import build_filter, make_mask
+ from .linr_v1 import LinrV1Algo
+ from .linr_v2 import LinrV2Algo
+ from .linr_v3 import LinrV3Algo
+-from .linr_v4 import LinrV4Algo
+ from .silvertorch import SilvertorchAlgo
+ 
+ ALGORITHMS = (
+     "triton_knn",
+     "linr_v1_filter_mask",
+     "linr_v3",
+-    "linr_v4",
+     "linr_v2",
+     "silvertorch",
+ )
+@@ -49,7 +47,6 @@ SUPPORTED_FILTER_KINDS: dict[str, frozenset[FilterKind]] = {
+     "linr_v1_filter_mask": frozenset({"none", "clause", "bloom"}),
+     "linr_v2":             frozenset({"clause", "bloom"}),  # candidate source IS the filter
+     "linr_v3":             frozenset({"none", "clause", "bloom"}),
+-    "linr_v4":             frozenset({"none", "clause", "bloom"}),
+     "silvertorch":         frozenset({"none", "clause", "bloom"}),
+ }
+ 
+@@ -101,8 +98,6 @@ def build_algorithm(
+             filter_mod=filter_mod,
+             backend=backend,
+         )
+-    elif name == "linr_v4":
+-        algo = LinrV4Algo(item_embs, k, filter_mod=filter_mod, backend=backend)
+     elif name == "linr_v2":
+         if filter_mod is None:
+             raise ValueError("linr_v2 requires a filter (clause or bloom)")
+diff --git a/evaluation/retrieval/algos/linr_v4.py b/evaluation/retrieval/algos/linr_v4.py
+deleted file mode 100644
+index 4e00366..0000000
+--- a/evaluation/retrieval/algos/linr_v4.py
++++ /dev/null
+@@ -1,39 +0,0 @@
+-"""LiNR V4 — int8 dense matmul + optional boolean mask, then topk.
+-
+-Single-stage twin of ``linr_v1_filter_mask`` backed by ``PostfilterKNNInt8``:
+-cuBLAS ``_int_mm`` (int8xint8 -> int32, IMMA on Ampere+) with per-row scale
+-recovery. No prefilter cascade — int8 preserves enough cosine signal to be the
+-final score (>=0.99 recall on unit-norm embeddings at D=128).
+-
+-``backend`` is accepted for API symmetry but has no effect: cuBLAS LtGemm runs the
+-same code on every path.
+-"""
+-
+-from __future__ import annotations
+-
+-from torch import Tensor
+-
+-from retrieval._compat import Backend
+-from retrieve.interfaces import FilterModule
+-from retrieve.modules import PostfilterKNNInt8
+-
+-from ._helpers import AlgoBase
+-from .filter import make_mask
+-
+-
+-class LinrV4Algo(AlgoBase):
+-    def __init__(
+-        self,
+-        item_embs: Tensor,
+-        k: int,
+-        *,
+-        filter_mod: FilterModule | None = None,
+-        backend: Backend = "triton",
+-    ) -> None:
+-        super().__init__()
+-        self.idx = PostfilterKNNInt8(k=k, backend=backend).to(item_embs.device)
+-        self.idx.register_index(item_embs)
+-        self._finalize(self.idx, filter_mod=filter_mod)
+-
+-    def forward(self, q: Tensor, qa_narrow: Tensor | None = None) -> tuple[Tensor, Tensor]:
+-        return self.idx(q, mask=make_mask(self.filter_mod, qa_narrow))

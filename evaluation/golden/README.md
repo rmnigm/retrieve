@@ -179,7 +179,7 @@ the originals could not be kept: they were one arbitrary sample of it. The two
 runs, logs, clock trace and provenance are in
 [`deterministic-compaction/golden-rederive/`](../../docs/artifacts/deterministic-compaction/golden-rederive/);
 Run 1's two cell logs are on the Hub under `artifacts/golden-logs/`. Sampled SM clock median during those cells:
-1155 MHz (same as the re-derive).
+1155 MHz (same as the re-derive). Both files were **superseded at R-RES (2026-10-08)**, below.
 
 **One cell was re-derived again at roadmap L1 (2026-09-26):**
 `goodreads-d128-c0_genre-linr_v1_filter_mask-triton.json`. L1 made the exact
@@ -218,6 +218,33 @@ inferred, not compared. 9,859 / 10,000 users kept, as before. Sampled SM clock
 not clock-controlled. Provenance and clock trace:
 [`l1-l2/golden-rederive/`](../../docs/artifacts/l1-l2/golden-rederive/); both
 runs' JSONs and logs are on the Hub under `artifacts/l1-l2/golden-rederive/`.
+
+**The same two cells were re-derived again at R-RES (2026-10-08):**
+`goodreads-d128-c0_genre-linr_v2-triton.json` and
+`goodreads-d128-c0_genre-linr_v3-triton.json`. They were the L3 files above, made
+before L5 gave `fused_masked_knn_topk` fp32 accumulation (it had reduced in fp16;
+[kernels](../../docs/system/kernels.md#score-conventions)), so every later tree missed
+them by 4.5e-4 (V2) and 1.7e-5 (V3). That was the L5 fix, not a defect: the frozen tree
+with the fp16 sum put back lands on both old files exactly
+([R-RES](../../docs/artifacts/campaign-v2/r-res/README.md)). Same method as L1 and L3:
+the old harness on a throwaway branch (`tmp/golden-rederive-cv2` @ `58474f1`, off
+`tmp/golden-rederive-l1l2`, never merged or pushed) with `retrieve/` replaced by tag
+`campaign-v2`'s, tree `408b1188` = the frozen code_version, unpatched. One harness port:
+LiNR V4 out of the registry and the goodreads config, since the library has no
+`PostfilterKNNInt8` ([diff](../../docs/artifacts/campaign-v2/r-res/golden_harness_port.diff)).
+Run **twice**, one process and a fresh inductor cache each; the two are identical on
+every quality column; the committed files are run 1 (`extra.commit` `58474f1`). Only the
+quality columns L5 moved changed, plus `extra`, latency and memory (context only);
+`mrr@k` and `n_users_kept` (9,859) are unchanged. V2 now equals V1's golden to the last
+digit at @100 and @500 (@1000: −1.0e-7, the cuBLAS vs `tl.sum` reduction order), and both
+cells meet the frozen v2-harness records at 0 on recall and ≤ 1.6e-9 on ndcg. Inputs:
+neither cache existed on this box, so the first cell (run 1, V2) re-encoded the pinned
+checkpoint's queries (`encoded_queries_test.pt`) and built `gt_d128/gt_topk_v3_c0_genre.pt`;
+the other three cell runs hit both.
+Sampled SM clock 285-1410 MHz, median 1140 (ten 30 s samples): the latency columns are
+not clock-controlled. Provenance, clocks, both runs' JSONs and logs: Hub
+`artifacts/r-res/golden-rederive/`; runbook
+[`golden_rederive.sh`](../../docs/artifacts/campaign-v2/r-res/golden_rederive.sh).
 
 ### Why they were re-derived
 

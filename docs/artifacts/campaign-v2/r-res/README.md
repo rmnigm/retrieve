@@ -44,8 +44,17 @@ runs once per k, as the old harness did. Both cells then land **on** their golde
 
 The ndcg remainders are ≤ 1.6e-9, inside the gap between the two harnesses' metric code: V1,
 which matches its golden, shows up to 4.8e-10. The residual is therefore **the L5 fix, measured
-against a pre-L5 golden**, not a defect of the frozen tree. The golden V2/V3 triton cells are
-stale in the same way V1's was before its L1 re-derive.
+against a pre-L5 golden**, not a defect of the frozen tree.
+
+**Re-derived.** [`golden_rederive.sh`](golden_rederive.sh) re-derives the two cells with the
+golden README's method: the old harness (`tmp/golden-rederive-l1l2`) with `retrieve/` replaced
+by tag `campaign-v2`'s, unpatched, on the throwaway branch `tmp/golden-rederive-cv2`, never
+merged. The one port, [`golden_harness_port.diff`](golden_harness_port.diff), drops LiNR V4.
+Each cell ran twice, and the two runs are identical on every quality column.
+[`golden_check.py`](golden_check.py) shows that V2's new cell equals V1's golden to the last
+digit at @100 and @500 (@1000: −1.0e-7). The freeze's `golden_vs_h2.py --golden` then passes
+V2 and V3 at 0 on recall and ≤ 1.6e-9 on ndcg. The arXiv cell is the only golden FAIL left.
+[Golden README](../../../../evaluation/golden/README.md#provenance) has the provenance.
 
 ## arXiv SilverTorch: unexplained after the 2 h box
 
@@ -87,6 +96,9 @@ Either can be separated only by running the old harness at `87a9b38` with a per-
 | [`pre_l5_fp16_sum.diff`](pre_l5_fp16_sum.diff) | the experiment's kernel revert; never committed to the library |
 | [`compare_confirm.py`](compare_confirm.py) | `confirm.sh`'s records against the golden JSONs |
 | [`oracle_oneshot.py`](oracle_oneshot.py) | GPU: the old-style one-shot oracle against the v4 blob |
+| [`golden_rederive.sh`](golden_rederive.sh) | GPU: the two golden cells re-derived at the frozen library, twice |
+| [`golden_harness_port.diff`](golden_harness_port.diff) | the throwaway branch's one harness port (LiNR V4 out) |
+| [`golden_check.py`](golden_check.py) | run 1 vs run 2, new vs old cells, V2 vs V1's golden |
 
-Raw outputs (records, sidecars, logs) are under `/scratch/r-res` on the pod and **not yet on the
-Hub**.
+Raw outputs (records, sidecars, logs, the re-derive) are on the Hub under `artifacts/r-res`
+([hub index](../../hub-index.md)); the `_parity` spills and compile caches are not kept.
