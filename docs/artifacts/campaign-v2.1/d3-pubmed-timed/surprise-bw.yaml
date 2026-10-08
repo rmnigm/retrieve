@@ -1,0 +1,12 @@
+surprise-bw:                   # surprise gate: bloomwidth-timed pubmed default width, triton vs official, interleaved
+  datasets: [pubmed]
+  dims: [768]
+  filter_kinds: [bloom]
+  ks: [100]
+  batch_sizes: [16]
+  seeds: [0]
+  sweeps: {pubmed: [c0_mesh]}
+  interleave:
+    - {by: backend, values: [triton, official]}
+  arms:
+    - {algo: silvertorch, backends: [triton, official]}   # both at the shared bloom default 1024 / 5, same params
