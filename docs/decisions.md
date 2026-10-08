@@ -110,11 +110,14 @@ now on; the [roadmap](roadmap.md) holds the steps.
   `n_probe` depend on N and are tuned, not fixed at the library default
   1024. The sweep runs on **one small and one big dataset only** (user):
   goodreads (0.8 M) and PubMed (10 M), `n_lists` ≈ √N and 4√N ({1024,
-  4096} and {4096, 16384}), `n_probe` measured as far as 0.95 needs (the
-  "no `n_probe` 256" grid rule does not bind tuning cells). Chosen point per
-  swept dataset: among each `n_lists`' smallest `n_probe` with mean
-  `recall_oracle@100` ≥ 0.95 on the median sweep, the lowest bs-16 graph
-  median, ties to the smaller `n_lists`. From the two, a size rule
+  4096} and {4096, 16384}), `n_probe` doubling as far as 0.95 needs (the
+  "no `n_probe` 256" grid rule does not bind tuning cells). **Tuning is
+  fast and separate from the paper sweeps** (user): quality-only, seed 0,
+  bs 16, k 100, median sweep; its records are artifacts, never paper
+  numbers, and the full sweeps run **once**, at the tuned values. Chosen
+  point per swept dataset: each `n_lists`' smallest `n_probe` with
+  `recall_oracle@100` ≥ 0.95, then the one scanning the fewest items
+  (`n_probe` · N / `n_lists` + `n_lists`), ties to the smaller `n_lists`. From the two, a size rule
   (`n_lists` as a multiple of √N, `n_probe` as a fraction of `n_lists`)
   sets arXiv (3 M) and YFCC (10 M). The `filter` and `synth` SilverTorch
   arms of each dataset run at its `n_lists` with `n_probe` {24, n95}. If

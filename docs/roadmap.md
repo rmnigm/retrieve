@@ -192,16 +192,17 @@ co-design.
   before V-SEEDS. **≈ 0.5 GPU-h.**
 - [ ] **IVF-TUNE: `n_lists` and `n_probe` by dataset size** (user,
   2026-10-08, [decisions](decisions.md#campaign-v2-user-2026-10-08)).
-  SilverTorch triton clause on the median sweep, quality-only over
-  `n_lists` × `n_probe` (to past recall 0.95), then each `n_lists`' n95
-  point timed at bs 16 graph, interleaved. Two datasets only: **goodreads**
+  Fast and quality-only (user: tune first, full sweeps once): SilverTorch
+  triton clause, median sweep, seed 0, bs 16, k 100, `n_lists` ×
+  `n_probe` doubling to past recall 0.95; pick by items scanned, no timed
+  cells; records are artifacts, not paper numbers. Two datasets only: **goodreads**
   ({1024, 4096}) and **PubMed** ({4096, 16384}; its n_lists-1024 `n95`
   leg reached 0.748 at 128). Output: the size rule, and the `n_lists` /
   n95 values written into the `filter` and `synth` slots of all four
   datasets (arXiv and YFCC by the rule). Replaces the `n95` suite. If
   goodreads' choice is not 1024, its SilverTorch `filter` and `synth`
   cells already run are rerun. Runs at `campaign-v2` (SilverTorch is
-  untouched by Fix A). **≈ 2-3 GPU-h**, one piece per pod.
+  untouched by Fix A). **≈ 0.5-1 GPU-h**, one piece per pod.
 - [ ] **H-PROFILE: `--profile` stores an empty Triton `kernels` list**
   (H2H-FINAL: 40/40 bloom and 13/40 `none` eager entries; official always
   populated), so T3's Triton kernel-only column is empty for bloom (C7).
@@ -274,7 +275,7 @@ co-design.
 | M1 | 0.5 | both | |
 | V2-FIX-A | ≈ 2-3 | 0 | gates ~0.5; reruns: goodreads-synth + goodreads filter V2 perf |
 | V-GRAPH-IDS | ≈ 0.5 | 0 | |
-| IVF-TUNE | ≈ 2-3 | 0 | quality sweep + a few timed points, goodreads + PubMed |
+| IVF-TUNE | ≈ 0.5-1 | 0 | quality-only, seed 0, goodreads + PubMed |
 | H-PROFILE | ≈ 0.5 | 0 | |
 | V-CODESIGN | ≈ 1 | 0 | `d1/arxiv-codesign`: 60 cells in 0.4 h |
 | D3 bloomwidth | ≈ 3-5 | 1 (+0) | quality-only cells |
