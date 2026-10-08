@@ -754,6 +754,7 @@ identities named; report each encoder from its own tree.
 | `pareto` | `tables/tab-pareto_<dataset>.tex` | sweep × arm (one row per parameter set): oracle recall, `median_ms`, speedup vs LiNR V1, `index_mib` (`tab:pareto_<dataset>`) |
 | `memory` | `tables/tab-memory.tex` | `index_mib`, datasets × algos (`tab:memory`) |
 | `parity` | `tables/tab-backend_parity.tex` | per `(dataset, sweep, algo, backend)`: `path`, `jaccard_vs_first@k`, `score_max_abs_diff`, eager vs graph median and their ratio |
+| `matched` | `tables/tab-matched_recall.tex`, `matched_recall.json` | per recall curve (SilverTorch along `n_probe`, one curve per `n_lists` / filter kind / backend / suite; V3 along `candidate_pool` or `candidate_pool_frac`) and batch size: latency at `recall_oracle@k` 0.90 and 0.95 with the two bracketing points named, or why not; `n95` per SilverTorch curve, the smallest measured `n_probe` with recall ≥ 0.95 — the value the campaign writes into `suites.yaml` (`tab:matched_recall`) |
 | `fig_pareto` | `figures/fig-pareto-<dataset>.png` | recall vs latency, every cell of the selection |
 | `fig_deep_sweep` | `figures/fig-deep-sweep-*.png` | one per swept parameter: recall and latency against its value, whiskers = min–max across seeds |
 | `fig_latency_violin` | `figures/fig-latency-violin.png` | per-call distributions from the samples sidecar (`<name>.samples.jsonl`, one torn trailing line tolerated) |
@@ -829,7 +830,9 @@ figures already use these estimators.
 recall on one curve: piecewise-linear between the two adjacent measured
 points that bracket the target on the recall-sorted curve, the measured
 point itself on an exact hit, never extrapolated ("not reached" past the
-last point; "first point already above" before the first).
+last point; "first point already above" before the first). The curve's
+latencies are taken in `graph`, the headline mode, or in `eager` where no
+`graph` entry ran (official); the mode used is printed (`_timed`).
 
 **Labels and the alpha rule.** `ALGO_LABEL` names every algo a table may
 show; a record of an algo without a label (a retired `linr_v4` leg) reaches

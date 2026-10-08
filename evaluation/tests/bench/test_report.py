@@ -9,6 +9,7 @@ declared *and* the evidence allows it.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 
 import click
@@ -377,3 +378,26 @@ def test_interleaved_arms_give_a_paired_speedup_and_sidecars_give_the_recall_ci(
     assert "$0.5000$\\,{\\tiny$[0.4" in v2  # the mean of the per-query recalls, with its CI
     v3 = next(ln for ln in tex.splitlines() if "LiNR V3" in ln)
     assert "no difference ($1.00\\times" in v3 and "^{u}" in v3  # unpaired, CI holds 1
+
+
+def test_matched_recall_interpolates_names_its_bracket_and_emits_n95(tmp_path):
+    p = tmp_path / "results" / "deep" / "goodreads-d128.jsonl"
+    for n_probe, recall, ms in ((8, 0.80, 1.0), (16, 0.90, 2.0), (32, 0.94, 3.0), (64, 0.97, 4.0)):
+        params = {"n_probe": n_probe, "n_lists": 1024}
+        rec = _rec("goodreads", "silvertorch", "triton", params=params, recall=recall, ms=ms)
+        records.append_record(p, {**rec, "suite": "deep"})
+    for pool, recall in ((1000, 0.5), (5000, 0.7)):
+        rec = _rec("goodreads", "linr_v3", "triton", params={"candidate_pool": pool}, recall=recall)
+        records.append_record(p, {**rec, "suite": "deep"})
+    _generate(tmp_path / "results", tmp_path / "out")
+    dump = json.loads((tmp_path / "out" / "matched_recall.json").read_text())
+    st = next(d for d in dump if d["algo"] == "silvertorch" and d["bs"] == 1)
+    assert st["params"] == {"n_lists": 1024} and st["n95"] == 64
+    assert st["at_0.90"] == {"latency": 2.2, "bracket": ["n_probe=16"] * 2, "mode": "graph"}
+    assert st["at_0.95"]["latency"] == pytest.approx(3.3 + 1.1 / 3)  # (0.95-0.94)/(0.97-0.94)
+    assert st["at_0.95"]["bracket"] == ["n_probe=32", "n_probe=64"]
+    v3 = next(d for d in dump if d["algo"] == "linr_v3" and d["bs"] == 16)
+    assert v3["axis"] == "candidate_pool" and v3["n95"] is None
+    assert v3["at_0.90"] == {"latency": None, "reason": "not reached", "mode": "graph"}
+    tex = (tmp_path / "out" / "tables" / "tab-matched_recall.tex").read_text()
+    assert "(n\\_probe=32 .. n\\_probe=64)" in tex and "not reached" in tex

@@ -578,6 +578,125 @@ def tab_backend_parity(c) -> list[Path]:
     return [_write(c.out / "tables" / "tab-backend_parity.tex", tex)]
 
 
+# ----- matched recall -----------------------------------------------------------
+
+# The parameter a curve is swept along, per algo; every other param (n_lists, ...) splits curves.
+CURVE_AXIS = {"silvertorch": ("n_probe",), "linr_v3": ("candidate_pool", "candidate_pool_frac")}
+TARGETS = (0.90, 0.95)
+
+
+def _timed(rows: list[dict[str, Any]], bs: int, k: int) -> tuple[list[dict[str, Any]], str]:
+    """The rows of one ``(bs, k)``: ``graph`` (the headline mode) when it ran, else ``eager``
+    (official is not capturable)."""
+    for mode in ("graph", "eager"):
+        sub = [
+            r
+            for r in rows
+            if (r.get("perf_bs"), r.get("perf_k"), r.get("perf_mode")) == (bs, k, mode)
+            and r["_entry"]
+            and r["_entry"].get("median_ms") is not None
+        ]
+        if sub:
+            return sub, mode
+    return [], "-"
+
+
+def curves(c, rows: list[dict[str, Any]], k: int) -> list[dict[str, Any]]:
+    """Every recall curve in ``rows``: one per (dataset, dim, suite, filter_kind, sweep, algo,
+    backend, the params other than the axis), its points sorted by the axis value."""
+    groups = defaultdict(lambda: defaultdict(list))
+    for r in rows:
+        params = json.loads(r["params"])
+        axis = next((a for a in CURVE_AXIS.get(r["algo"], ()) if a in params), None)
+        if axis is None or r.get("status") == "failed":
+            continue
+        rest = {n: v for n, v in params.items() if n != axis}
+        key = (r["dataset"], r["dim"], r["suite"], r["filter_kind"], r["sweep"], r["algo"],
+               r["backend"], json.dumps(rest, sort_keys=True), axis)  # fmt: skip
+        groups[key][params[axis]].append(r)
+    out = []
+    for key, by_x in sorted(groups.items(), key=lambda kv: str(kv[0])):
+        ds, dim, suite, fk, sw, algo, be, rest, axis = key
+        pts = [(x, _recall(c, _cells(rs), k), rs) for x, rs in sorted(by_x.items())]
+        pts = [(x, q, rs) for x, q, rs in pts if q is not None]
+        reach = [x for x, q, _ in pts if q["value"] >= 0.95]
+        out.append({
+            "dataset": ds, "dim": dim, "suite": suite, "filter_kind": fk, "sweep": sw,
+            "algo": algo, "backend": be, "rest": rest, "axis": axis, "points": pts,
+            "n95": min(reach) if axis == "n_probe" and reach else None,
+        })  # fmt: skip
+    return out
+
+
+def matched(curve: dict[str, Any], bs: int, k: int, target: float) -> dict[str, Any]:
+    """Latency of one curve at ``recall_oracle@k == target`` at batch size ``bs``."""
+    pts, modes = [], set()
+    for x, q, rs in curve["points"]:
+        sub, mode = _timed(rs, bs, k)
+        t = _lat(sub)
+        if t is not None:
+            pts.append((q["value"], t["value"], f"{curve['axis']}={x}"))
+            modes.add(mode)
+    return {**stats.at_recall(pts, target), "mode": "/".join(sorted(modes)) or "-"}
+
+
+def _curve_label(cv: dict[str, Any], tex: bool = True) -> str:
+    be = "" if cv["algo"] in FIXED_BACKEND else f" [{cv['backend']}]"
+    return (
+        f"{_arm(cv['algo'], cv['rest'], tex)}{be} along {_esc(cv['axis']) if tex else cv['axis']}"
+    )
+
+
+def tab_matched(c) -> list[Path]:
+    """Latency at matched recall (0.90, 0.95) per curve and batch size, the bracketing points
+    named, and ``n95`` per curve (the value the campaign writes into suites.yaml)."""
+    body, dump = [], []
+    for cv in curves(c, c.rows, c.k):
+        bss = sorted({r["perf_bs"] for _, _, rs in cv["points"] for r in rs if r.get("perf_bs")})
+        for bs in bss:
+            hits = {t: matched(cv, bs, c.k, t) for t in TARGETS}
+            cells = []
+            for t in TARGETS:
+                h = hits[t]
+                cells.append(
+                    f"${h['latency']:.3f}$ ({_esc(' .. '.join(h['bracket']))})"
+                    if h["latency"] is not None
+                    else _esc(h["reason"])
+                )
+            body.append([
+                f"{DATASET_LABEL.get(cv['dataset'], cv['dataset'])} d{cv['dim']}",
+                f"{_esc(cv['sweep'])} ({cv['filter_kind']}, {_esc(cv['suite'])})",
+                _curve_label(cv), f"${bs}$", hits[TARGETS[0]]["mode"], *cells,
+                "---" if cv["n95"] is None else f"${cv['n95']}$",
+            ])  # fmt: skip
+            dump.append({
+                **{f: cv[f] for f in ("dataset", "dim", "suite", "filter_kind", "sweep", "algo",
+                                       "backend", "axis", "n95")},
+                "params": json.loads(cv["rest"]), "bs": bs, "k": c.k,
+                **{f"at_{t:.2f}": hits[t] for t in TARGETS},
+            })  # fmt: skip
+    tex = _table(
+        c.prov, c.results_dir,
+        caption=f"Latency (ms) at matched \\texttt{{recall\\_oracle@{c.k}}} and the smallest "
+                "measured $n_\\mathrm{probe}$ reaching 0.95.",
+        label="tab:matched_recall",
+        colspec="lllcl" + "c" * len(TARGETS) + "c",
+        header=["Dataset", "Sweep", "Curve", "$B$", "mode",
+                *[f"@{t:.2f} (bracket)" for t in TARGETS], "$n_{95}$"],
+        body=body,
+        notes=_legend([
+            "Piecewise-linear between the two adjacent measured points that bracket the "
+            "target on the recall-sorted curve (named in brackets), never extrapolated. "
+            "$n_{95}$: the smallest measured $n_\\mathrm{probe}$ with recall $\\geq 0.95$. "
+            + STATS_NOTE,
+        ]),
+    )  # fmt: skip
+    return [
+        _write(c.out / "tables" / "tab-matched_recall.tex", tex),
+        _write(c.out / "matched_recall.json", json.dumps(dump, indent=1) + "\n"),
+    ]
+
+
 # ----- figures -----------------------------------------------------------------
 
 
@@ -935,6 +1054,7 @@ ARTIFACTS = {
     "pareto": tab_pareto,
     "memory": tab_memory,
     "parity": tab_backend_parity,
+    "matched": tab_matched,
     "fig_pareto": fig_pareto,
     "fig_deep_sweep": fig_deep_sweep,
     "fig_latency_violin": fig_latency_violin,
