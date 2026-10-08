@@ -95,7 +95,7 @@ MiB = measure.MiB
 PERF_STAT_KEYS = (
     "n", "median_ms", "mean_ms", "trimmed_mean_ms", "p95_ms", "p99_ms", "min_ms", "iqr_ms", "qps",
     "host_gap_ms", "outliers_std", "outliers_tukey", "spread", "unstable", "peak_fwd_mib",
-    "window_medians_ms", "window_sm_mhz", "ids_sha256",
+    "window_medians_ms", "window_sm_mhz", "ids_sha256", "ids_sha256_canon",
 )  # fmt: skip
 IDS_PROBE_BATCHES = 8  # the pool batches ``ids_sha256`` hashes, outside the timed windows
 
@@ -440,16 +440,23 @@ def _rotate(callee: Any, pool: torch.Tensor, qa_pool: torch.Tensor | None) -> An
 
 
 @torch.inference_mode()
-def ids_sha256(callee: Any, pool: torch.Tensor, qa_pool: torch.Tensor | None) -> str:
+def ids_sha256(callee: Any, pool: torch.Tensor, qa_pool: torch.Tensor | None) -> tuple[str, str]:
     """sha256 of the ids ``callee`` returns on the first ``IDS_PROBE_BATCHES`` batches of the
-    pool, int64 row-major, batch after batch: equal hashes across modes are the D1-G
-    eager-vs-graph identity gate. Each batch is copied out before the next call (a graph
-    replay overwrites its output buffer)."""
-    h = hashlib.sha256()
+    pool, int64 row-major, batch after batch: ``(exact, canon)``. ``exact`` hashes the ids as
+    returned (equal across modes is the D1-G eager-vs-graph identity gate); ``canon`` first
+    re-orders each row by (score desc, id asc), so two backends whose scores are bit-equal and
+    whose tied ids come in another order hash equal (official vs Triton). Each batch is copied
+    out before the next call (a graph replay overwrites its output buffers)."""
+    exact, canon = hashlib.sha256(), hashlib.sha256()
     for i in range(min(IDS_PROBE_BATCHES, pool.shape[0])):
-        ids, _ = callee(pool[i]) if qa_pool is None else callee(pool[i], qa_pool[i])
-        h.update(ids.to(torch.int64).cpu().contiguous().numpy().tobytes())
-    return h.hexdigest()
+        ids, scores = callee(pool[i]) if qa_pool is None else callee(pool[i], qa_pool[i])
+        ids, scores = ids.to(torch.int64).cpu(), scores.float().cpu()
+        exact.update(ids.contiguous().numpy().tobytes())
+        by_id = ids.argsort(dim=1, stable=True)
+        ids, scores = ids.gather(1, by_id), scores.gather(1, by_id)
+        order = scores.argsort(dim=1, descending=True, stable=True)
+        canon.update(ids.gather(1, order).contiguous().numpy().tobytes())
+    return exact.hexdigest(), canon.hexdigest()
 
 
 def perf(
@@ -519,7 +526,9 @@ def perf(
                     for (i, fn), (d, ms) in zip(fns.items(), timed, strict=True):
                         if profile and mode == "eager":
                             d["kernels"] = measure.profile_once(fn)
-                        d["ids_sha256"] = ids_sha256(callees[i], pool, qa_pool)
+                        d["ids_sha256"], d["ids_sha256_canon"] = ids_sha256(
+                            callees[i], pool, qa_pool
+                        )
                         if len(modules) > 1:
                             d["rounds"] = len(d["window_medians_ms"])
                         entry = {"k": int(k), "bs": int(bs), "mode": mode}
@@ -857,13 +866,13 @@ def run(
                 rec["elapsed_s"] = time.perf_counter() - t0
                 win = [w for e in rec["perf"] or [] for w in e.get("window_sm_mhz") or [] if w]
                 sm_windows += win
-                sm_max = max(sm_windows, default=None)
+                sm_max = env0["sm_max_mhz"]  # the device's max SM clock: order-free
                 rec["env"] = {
                     **env0,
                     "sm_mhz_load": statistics.median(loads) if loads else None,
                     "clocks_drift": drift,
                     "frac_windows_below_max": sum(w < sm_max for w in win) / len(win)
-                    if win
+                    if win and sm_max
                     else None,
                 }
                 key = job.key({**job.build, **q})

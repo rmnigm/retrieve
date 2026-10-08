@@ -458,10 +458,13 @@ def _rec4(
             for mode in ("eager", "graph"):
                 t = ms * (1 + 0.05 * bs) * (1 + 0.01 * seed)
                 e = _perf(k, bs, mode, t, False, windows)
-                e |= {"ids_sha256": ids, "rounds": 3}
+                # exact order differs per backend (tied ids), the canonical hash does not
+                e |= {"ids_sha256": f"{ids}-{backend}", "ids_sha256_canon": ids, "rounds": 3}
                 if mode == "graph" and eager_only:
                     e = {"k": k, "bs": bs, "mode": mode, "reason": "not_capturable"}
-                    e |= dict.fromkeys(("median_ms", "window_medians_ms", "ids_sha256"))
+                    e |= dict.fromkeys(
+                        ("median_ms", "window_medians_ms", "ids_sha256", "ids_sha256_canon")
+                    )
                 if kernels and mode == "eager":
                     e["kernels"] = kernels
                 entries.append(e)

@@ -605,13 +605,41 @@ def test_ids_sha256_is_stable_and_tracks_the_ids(tiny_configs, tmp_path):
             ids, sc = super().forward(q, qa)
             return ids.flip(1), sc
 
-    assert run.ids_sha256(_Shifted(), pool, None) != fixed
+    assert all(a != b for a, b in zip(run.ids_sha256(_Shifted(), pool, None), fixed, strict=True))
     assert (
-        fixed
+        fixed[0]
         == hashlib.sha256(
             torch.tensor([[0, 1, 2, 3]] * 2).numpy().tobytes() * run.IDS_PROBE_BATCHES
         ).hexdigest()
     )
+
+
+class _Tied(torch.nn.Module):
+    """Items 5 and 2 tie at 0.9: ``swap`` returns them in the other order, scores unchanged."""
+
+    def __init__(self, swap: bool) -> None:
+        super().__init__()
+        self.ids = torch.tensor([7, 2, 5, 1] if swap else [7, 5, 2, 1])
+
+    def forward(self, q, qa=None):
+        sc = torch.tensor([1.0, 0.9, 0.9, 0.3])
+        return self.ids.repeat(q.shape[0], 1), sc.repeat(q.shape[0], 1)
+
+
+def test_canonical_ids_hash_ignores_the_order_of_tied_ids():
+    """Follow-up 1: a tied pair in two orders hashes differently exactly (``ids_sha256``, the
+    eager-vs-graph gate) and equal canonically (``ids_sha256_canon``, official vs Triton:
+    rows re-ordered by score desc, then id asc); a real id difference changes both."""
+    pool = torch.zeros(10, 2, 8)
+    a, b = run.ids_sha256(_Tied(False), pool, None), run.ids_sha256(_Tied(True), pool, None)
+    assert a[0] != b[0] and a[1] == b[1]
+    assert (
+        a[1]
+        == hashlib.sha256(
+            torch.tensor([[7, 2, 5, 1]] * 2).numpy().tobytes() * run.IDS_PROBE_BATCHES
+        ).hexdigest()
+    )  # ties to the lower id
+    assert run.ids_sha256(_Fixed(), pool, None)[1] != a[1]
 
 
 def test_per_query_sidecar_matches_the_record_and_ships(tiny_configs, tmp_path):
@@ -708,21 +736,35 @@ def test_interleaved_group_keys_rounds_and_resume(tiny_configs, tmp_path, monkey
     assert rerun[0]["interleave"]["group"] == victim["interleave"]["group"]
 
 
-def test_frac_windows_below_the_jobs_max_clock(tiny_configs, tmp_path, monkeypatch):
-    """Per-job clock log: ``env.frac_windows_below_max`` is the share of a record's window
-    clock samples below the highest sample the process has seen so far, itself included."""
-    clocks = iter([[1395.0, 1395.0, 1395.0], [1410.0, 1395.0, 1305.0, 1410.0]])
-
-    def fake_perf(modules, *a, **k):
-        win = next(clocks)
-        e = {"k": 2, "bs": 1, "mode": "eager", "sm_mhz": win[-1], "window_sm_mhz": win}
-        return [([e], []) for _ in modules]
-
-    monkeypatch.setattr(run, "perf", fake_perf)
+def test_frac_windows_below_the_devices_max_clock(tiny_configs, tmp_path, monkeypatch):
+    """Follow-up 2: ``env.frac_windows_below_max`` is the share of a record's window clock
+    samples below the device's max SM clock (``env.sm_max_mhz``), whatever ran before: a cell
+    whose windows all sample below it reads 1.0 first or second; no device max, no value."""
+    real = bench.clocks
+    monkeypatch.setattr(bench, "clocks", lambda: {**real(), "sm_max_mhz": 1410.0})
+    low, mixed = [1140.0, 1140.0, 1140.0], [1410.0, 1395.0, 1305.0, 1410.0]
     jobs = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=["c0", "c0c1"])
-    run.run(jobs, out_dir=tmp_path, skip_quality=True, **KW)
-    recs = _records(tmp_path / "e2e" / "tiny-d64.jsonl")
-    assert [r["env"]["frac_windows_below_max"] for r in recs] == [0.0, 0.5]
+    for order, want in (((low, mixed), [1.0, 0.5]), ((mixed, low), [0.5, 1.0])):
+        clocks = iter(order)
+
+        def fake_perf(modules, *a, clocks=clocks, **k):
+            win = next(clocks)
+            e = {"k": 2, "bs": 1, "mode": "eager", "sm_mhz": win[-1], "window_sm_mhz": win}
+            return [([e], []) for _ in modules]
+
+        monkeypatch.setattr(run, "perf", fake_perf)
+        out = tmp_path / str(want)
+        run.run(jobs, out_dir=out, skip_quality=True, **KW)
+        recs = _records(out / "e2e" / "tiny-d64.jsonl")
+        assert [r["env"]["frac_windows_below_max"] for r in recs] == want
+        assert all(r["env"]["sm_max_mhz"] == 1410.0 for r in recs)
+    monkeypatch.setattr(bench, "clocks", lambda: {**real(), "sm_max_mhz": None})
+    monkeypatch.setattr(run, "perf", lambda modules, *a, **k: [(
+        [{"k": 2, "bs": 1, "mode": "eager", "sm_mhz": 1.0, "window_sm_mhz": [1.0]}], []
+    ) for _ in modules])  # fmt: skip
+    run.run(jobs[:1], out_dir=tmp_path / "none", skip_quality=True, **KW)
+    (r,) = _records(tmp_path / "none" / "e2e" / "tiny-d64.jsonl")
+    assert r["env"]["frac_windows_below_max"] is None
     assert bench.clock_histogram([1410.0, 1395.0, 1410.0]) == (
         "sm_mhz under load (n=3): 1410×2, 1395×1"
     )

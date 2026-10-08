@@ -183,10 +183,11 @@ the oracle fingerprint in the blob's file name; see
   boosting, and there is no `clocks_locked` field because the pods cannot
   lock clocks. Compare latencies across runs against `perf[].sm_mhz`.
 - **The job's clock log.** `env.frac_windows_below_max` is the share of a
-  cell's window samples below the highest under-load sample of its process
-  so far (the record reuse rule reads it: under 10 %). "So far" because a
-  record is written when its cell ends: a cell measured before the process
-  first reached its top clock compares against a lower maximum. The full
+  cell's window samples below the device's max SM clock, `env.sm_max_mhz`
+  (`nvidia-smi` `clocks.max.sm`, sampled at process start; 1410 MHz on the
+  A100), so it does not depend on which cells ran before; `null` without a
+  device max. The record reuse rule reads it (under 10 %,
+  [decisions](../decisions.md#campaign-v2-user-2026-10-08)). The full
   view is in the job's log: `bench campaign` writes `nvidia-smi -q -d CLOCK`
   before the child starts and after it ends, and `run` logs the histogram
   of every window sample of the process at its end
@@ -757,7 +758,7 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 
 | field | type | value |
 |---|---|---|
-| `schema_version` | int | `4`; schema 3 lacks `seed_scope`, `quality_source`, `per_query`, `interleave`, the perf entries' `ids_sha256` / `rounds` and `env.frac_windows_below_max` (all read as null); schema 2 also lacks `inputs` (derived on read, [Resume](#resume)); schema 1 also lacks the under-load clock fields below (`env.sm_mhz` instead) |
+| `schema_version` | int | `4`; schema 3 lacks `seed_scope`, `quality_source`, `per_query`, `interleave`, the perf entries' `ids_sha256` / `ids_sha256_canon` / `rounds` and `env.frac_windows_below_max` (all read as null); schema 2 also lacks `inputs` (derived on read, [Resume](#resume)); schema 1 also lacks the under-load clock fields below (`env.sm_mhz` instead) |
 | `status` | str | `ok`, `partial` (the record does not carry everything the suite asked for), `failed` |
 | `partial_reasons` | list / null | why `partial`: any of `skip_quality`, `skip_perf`, `modes` (a `--mode` subset that drops a mode this job's module can run: an eager-only run stamps it on a capturable module, not on one with `capturable = False` such as `official`, whose `graph` entry would be `not_capturable` anyway; decided per job after the build), `ks_bs` (`--k` / `--bs` replaced the suite's lists — `Job.narrowed`) |
 | `dataset`, `dim`, `inputs`, `suite`, `filter_kind`, `sweep`, `algo`, `backend`, `params`, `seed` | | the key block = `Job.key(params)` (`KEY_FIELDS`); `params` is the native dict of build + query params (`{}` when the algo takes none); `inputs` is the input identity below |
@@ -785,7 +786,7 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 | `unstable` | bool | any perf entry `unstable` (window spread > 5 %), or `clocks_drift` |
 | `memory_reserved_mib` | float / null | `torch.cuda.memory_reserved()` after the cell — the leak detector across a group's cells |
 | `elapsed_s` | float | wall time of the cell |
-| `env` | dict | `gpu, driver, cuda, torch, triton, official_commit, commit, dirty, repo_dirty, git_branch, code_version, host, python, started, config_sha`; the process-start sample `sm_mhz_idle, mem_mhz, sm_max_mhz, power_limit_w`; the cell's `sm_mhz_load` (median of its perf entries' under-load samples; `null` without perf or CUDA), `clocks_drift` (any under-load sample > 5 % from the process's first) and `frac_windows_below_max` (the share of the cell's `window_sm_mhz` samples below the highest sample the process has seen so far, these included; `null` without samples) |
+| `env` | dict | `gpu, driver, cuda, torch, triton, official_commit, commit, dirty, repo_dirty, git_branch, code_version, host, python, started, config_sha`; the process-start sample `sm_mhz_idle, mem_mhz, sm_max_mhz, power_limit_w`; the cell's `sm_mhz_load` (median of its perf entries' under-load samples; `null` without perf or CUDA), `clocks_drift` (any under-load sample > 5 % from the process's first) and `frac_windows_below_max` (the share of the cell's `window_sm_mhz` samples below `sm_max_mhz`, the device's max SM clock; `null` without samples or without a device max) |
 | `stage`, `error` | str | `failed` records only: where it died and the traceback |
 
 Perf entry:
@@ -808,6 +809,7 @@ Perf entry:
 | `load` | `"closed_loop"` |
 | `kernels` | `--profile`, eager only: top-8 CUDA kernels `{kernel, us, calls}` |
 | `ids_sha256` | sha256 of the ids the timed callee (the eager module or the graph replay) returns on the first 8 batches of that `(bs, seed)` pool (`run.IDS_PROBE_BATCHES`), int64 row-major, batch after batch, run once after the windows; `null` when the variant did not run. Equal eager and graph hashes are the D1-G identity gate |
+| `ids_sha256_canon` | the same ids with each row re-ordered by (score desc, id asc) before hashing: two backends with bit-equal scores whose tied ids come in another order hash equal (official int32 against Triton). `bench report`'s T3 identity column reads it; eager vs graph reads `ids_sha256`. An added field, schema stays 4 |
 | `reason` | present when the variant could not run (`not_capturable`, `cuda_unavailable`, `cudagraph_skips=N`, `cudaGraphLaunch per call = N, expected 1`); every stat key is then `null` |
 
 `results/<suite>/<dataset>-d<dim>.samples.jsonl` holds the per-call vector
@@ -895,7 +897,7 @@ env_git_branch, env_frac_windows_below_max`; `quality_source_seed`,
 with `n == 0` and 0.0 means reads `null` too) and the non-dict `quality_*` entries (`quality_parity`,
 `quality_jaccard_vs_first@k`, `quality_score_max_abs_diff`); `perf_<key>` for
 every perf-entry key except `window_sm_mhz` and `kernels`, so
-`perf_window_medians_ms` (a list column), `perf_ids_sha256` and `perf_rounds`
+`perf_window_medians_ms` (a list column), `perf_ids_sha256`, `perf_ids_sha256_canon` and `perf_rounds`
 are in it: the table alone carries the bootstrap's inputs, and
 `tests/bench/test_records.py` pins it equal to the nested entry `report._attach`
 joins. Types are inferred per column (int, double, bool, string,
@@ -976,7 +978,7 @@ identities named; report each encoder from its own tree.
 | `matched` | `tables/tab-matched_recall.tex`, `matched_recall.json` | per recall curve (SilverTorch along `n_probe`, one curve per `n_lists` / filter kind / backend / suite; V3 along `candidate_pool` or `candidate_pool_frac`) and batch size: latency at `recall_oracle@k` 0.90 and 0.95 with the two bracketing points named, or why not; `n95` per SilverTorch curve, the smallest measured `n_probe` with recall ≥ 0.95 — the value the campaign writes into `suites.yaml` (`tab:matched_recall`) |
 | `t1` | `tables/tab-t1_claims.tex` | T1, the claims table: per claim C1–C7 of [`evaluation/claims.yaml`](../../evaluation/claims.yaml) the original number and source, "ours" from the yaml's record selectors, the hand-written verdict (`---` while `null`) |
 | `t2` | `tables/tab-t2_<dataset>.tex` | T2, real filters (`filter` suite, goodreads / arxiv / yfcc10m / pubmed): per sweep, every arm at the operating point (SilverTorch `n_probe` 24) and SilverTorch at matched recall 0.95, recall@100 and p50 at bs 1 and 16 |
-| `t3` | `tables/tab-t3.tex` | T3, official vs Triton (`h2h` suite): per cell, `k`, `bs`, arm and mode: p50 with CI, the paired ratio over Triton eager, kernel-only µs and launches (top-8 kernels of the `--profile` call), `index_mib`, `peak_fwd_mib`, `ids_sha256` identity with Triton eager, jaccard, max score difference |
+| `t3` | `tables/tab-t3.tex` | T3, official vs Triton (`h2h` suite): per cell, `k`, `bs`, arm and mode: p50 with CI, the paired ratio over Triton eager, kernel-only µs and launches (top-8 kernels of the `--profile` call), `index_mib`, `peak_fwd_mib`, `ids_sha256_canon` identity with Triton eager (equal up to tied-id order), jaccard, max score difference |
 | `f1` | `figures/fig-f1-latency-vs-pass-rate.png` | F1: p50 vs pass rate on the `*-synth` datasets (log x), one panel per scale × bs; V1, V2, V3 per pool, postfilter per alpha, SilverTorch Triton at matched recall 0.95 |
 | `f2` | `figures/fig-f2-recall-vs-pass-rate.png` | F2: `recall_oracle@100` vs pass rate; synth SilverTorch per measured `n_probe` and V3 per pool, the real `filter` sweeps overlaid as per-query pass-rate buckets from the sidecars |
 | `f3` | `figures/fig-f3-pareto.png` | F3: the `deep` suite's recall–latency curves (matched-recall curves), one panel per dataset × bs, 0.90 / 0.95 marked |
@@ -1294,7 +1296,7 @@ trailing-whitespace hooks (the last two never on `articles/`, `docs/artifacts/`,
 | `bench/test_config.py` | job counts and keys per suite on `tests/bench/data/{mini,text,suites}.yaml`; `disabled`; build/query split; arms (filter kinds, sweeps, per-dataset overrides, empty slots); `ks_by_sweep`; gridded bloom widths, `compile`, `candidate_pool_frac`; each arm error named; narrows and `Job.narrowed`; the `-synth` YAMLs sharing their parent's inputs; `perf: false`; the interleave groups of the real suites, their parse errors, a job in two groups, the merged campaign children, `score_path` off official; G-grid (every real suite × dataset's job / cell counts and the 2026-10-08 rules on every cell); G-key (pinned resume keys of kept cells); every `config/*.yaml` × every suite through `load_matrix` |
 | `bench/test_inputs.py` | `load_inputs` on the conftest writer, `users_limit` once, prefix and row-count checks, the legacy layout loading equal to the modern one, misalignment raising, `attrs_digest`, `filters.query_attrs` (a `.pt` replacing `eval_split.parquet`: same full-split row check, same `users_limit` prefix), `sweep_qa`, filters by filter backend, `query_pool` |
 | `bench/test_oracle.py` | padding, v4 fields and arithmetic, fingerprint in the file name, an unreadable blob rebuilt, bloom FP rate, `code_version`; the item-chunked oracle and pass counts equal to a one-shot stable-sort reference at three chunk sizes, ties to the lower id; TF32 refused (G-oracle) |
-| `bench/test_run.py` | end to end on the tiny fixture, both modes (`graph` = the CPU null entry): record schema, resume, `code_version` invalidation, `partial`, a failed cell + continue, a sticky CUDA error, the quality gate, the parity spill (and a same-backend spill rewritten), reachable-target masking, the plan cache off through `OfficialConfig`, `modes` stamped per job (an eager-only uncapturable record `ok`, a capturable one `partial`), `postfilter`'s `recall_oracle` per `k` (equal to a pass at that `k`, never above the exact V1's); G-cache (seed-free arms copy, V3 / SilverTorch never, misses on other `ks` / `code_version`); a quality-only suite `ok`; G-ids; G-dump (sidecar mean = record, upload lists it, aggregate skips it); G-interleave (same keys, one group per sweep and seed, `rounds`, whole-group resume); `frac_windows_below_max`; `score_path` arms sharing the triton parity spill |
+| `bench/test_run.py` | end to end on the tiny fixture, both modes (`graph` = the CPU null entry): record schema, resume, `code_version` invalidation, `partial`, a failed cell + continue, a sticky CUDA error, the quality gate, the parity spill (and a same-backend spill rewritten), reachable-target masking, the plan cache off through `OfficialConfig`, `modes` stamped per job (an eager-only uncapturable record `ok`, a capturable one `partial`), `postfilter`'s `recall_oracle` per `k` (equal to a pass at that `k`, never above the exact V1's); G-cache (seed-free arms copy, V3 / SilverTorch never, misses on other `ks` / `code_version`); a quality-only suite `ok`; G-ids (exact hash, and the canonical hash equal across a tied pair's two orders); G-dump (sidecar mean = record, upload lists it, aggregate skips it); G-interleave (same keys, one group per sweep and seed, `rounds`, whole-group resume); `frac_windows_below_max` against the device max, whichever cell ran first; `score_path` arms sharing the triton parity spill |
 | `bench/test_cli.py` | `bench run` via `CliRunner`, `--checkpoint` landing as the record's `inputs` (encoder faked), a real one-child `bench campaign` ending in `results.parquet`, a faked timed-out child, a restart mid-group keeping its parity spill (in-process children), zero cells → exit 1, `bench report` over the campaign's own records, `bench env`'s JSON keys, the child log's start / end clock blocks and histogram, `bench oracle` prebuilding every sweep so `bench run` builds none |
 | `bench/test_upload.py` | `bench upload` with no network: `_logs/` and `_parity/` never listed, the manifest's sha256 per file, evidence beating `--gate` four ways, the generated README over several subtrees, `verify` catching a changed byte, the commit's operations (with the regenerated `results.parquet`) and `private=True`; `bench fetch` restoring a tree resume reads and refusing to overwrite a different local copy |
 | `bench/test_report.py` | every column the tables read still comes out of `records.aggregate`; every artifact emitted; the LaTeX structurally balanced with its labels and no unescaped `_`; one row per postfilter alpha; an unlabelled algo (`linr_v4`) in no table; a `failed` record excluded and a `partial` / `unstable` one marked; citability off by default and evidence beating `--gate`; two `inputs` under one `(dataset, dim)` refused; an empty tree; a schema-1 record; paired speedups from interleaved arms and recall CIs from sidecars |
