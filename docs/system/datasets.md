@@ -441,6 +441,8 @@ residual is the fp16 item storage ([validation](../validation.md#datasets)).
 **Status: staged as the 10 M slice** (`--keep-items 10000000 --seed 0`,
 roadmap E2) under `$RETRIEVE_DATA_ROOT/pubmed-medcpt`: `bench check`
 passes, the `c0_mesh` oracle is built, and D1's `filter` leg runs on it;
+rebuilt from source on a fresh pod for V-PUBMED (63 min, CPU) and shown to be D1's slice,
+embeddings included (an exact V1 cell bit-equal to `d1/pubmed`'s);
 state in [validation](../validation.md#datasets). The dataset is not on
 the Hub. Nothing below is citable.
 
