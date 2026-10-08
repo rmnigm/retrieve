@@ -1,7 +1,7 @@
 """``bench.report``: the table-generating path over a synthetic results tree.
 
 The gate this pins: the columns ``report.py`` reads out of ``records.aggregate`` still exist,
-every emitted fragment is structurally balanced LaTeX with the thesis's labels, a
+every emitted fragment is structurally balanced LaTeX with its labels, a
 ``failed`` record never reaches a number, and the citability marker is on unless a gate is
 declared *and* the evidence allows it.
 """
@@ -148,12 +148,8 @@ def _generate(results, out, **kw):
         dim=128,
         k=100,
         bs=1,
-        compare_bs=16,
         mode="eager",
         backend="triton",
-        sweep=None,
-        batch_dataset=None,
-        budgets=(1.0, 5.0),
         **kw,
     )
 
@@ -168,19 +164,8 @@ def test_every_artifact_is_emitted_and_the_latex_is_structurally_sound(results, 
     c = _generate(results, tmp_path / "out")
     names = {p.name for p in c.written}
     assert {"results.parquet", "report.md", "methodology.tex"} <= names
-    assert {
-        f"tab-{n}.tex"
-        for n in (
-            "recall_nofilter",
-            "pareto_goodreads",
-            "batch_scaling",
-            "memory",
-            "backend_parity",
-            "recall_at_budget",
-            "paper_comparison",
-        )
-    } <= names
-    assert sum(1 for p in c.written if p.suffix == ".png") >= 5
+    assert {"tab-pareto_goodreads.tex", "tab-memory.tex", "tab-backend_parity.tex"} <= names
+    assert sum(1 for p in c.written if p.suffix == ".png") >= 2
     labels = set()
     for path in [p for p in c.written if p.suffix == ".tex"]:
         text = path.read_text()
@@ -192,12 +177,7 @@ def test_every_artifact_is_emitted_and_the_latex_is_structurally_sound(results, 
         labels |= set(re.findall(r"\\label\{([^}]*)\}", body))
         stripped = re.sub(r"\$[^$]*\$|\\(?:label|texttt|ref)\{[^}]*\}", "", body)
         assert "_" not in stripped.replace("\\_", ""), f"unescaped underscore in {path}"
-    assert {
-        "tab:recall_nofilter",
-        "tab:pareto_goodreads",
-        "tab:batch_scaling",
-        "tab:memory",
-    } <= labels, "a thesis label went missing (docs/thesis/main.tex)"
+    assert {"tab:pareto_goodreads", "tab:memory", "tab:backend_parity"} <= labels
 
 
 def test_failed_is_excluded_partial_and_unstable_are_marked(results, tmp_path):
@@ -321,7 +301,7 @@ def test_postfilter_rows_carry_their_alpha_and_are_never_averaged(tmp_path):
         alpha: next(ln for ln in pareto.splitlines() if f"postfilter ($\\alpha$={alpha})" in ln)
         for alpha in (1, 2, 4, 8)
     }
-    assert "0{,}7100" in rows[1] and "0{,}9700" in rows[8] and "0{,}85" not in rows[1]
+    assert "0.7100" in rows[1] and "0.9700" in rows[8] and "0.85" not in rows[1]
     assert "postfilter" in (tmp_path / "out" / "tables" / "tab-memory.tex").read_text()
     names = {p.name for p in c.written}
     assert "fig-deep-sweep-goodreads-c0_genre-postfilter-alpha.png" in names

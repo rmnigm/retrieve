@@ -1,8 +1,8 @@
-"""``bench report`` — every thesis and paper table and figure, from the records only
-(roadmap D4, H §6 WP-6, V §5.3).
+"""``bench report``: every paper table and figure, from the records only
+(docs/system/evaluation.md § Report).
 
 ``records.aggregate`` writes ``results.parquet`` first and every table and figure is built
-from it (H §8.2 G); ``records.latest`` is read a second time for the provenance block alone,
+from it; ``records.latest`` is read a second time for the provenance block alone,
 which needs the nested ``env`` the table flattens to a few columns.
 
 **Nothing emitted here is citable unless ``--gate`` names a green roadmap gate** (CLAUDE.md
@@ -14,7 +14,7 @@ default.
 Failed cells never enter a number and are listed in ``report.md``; `partial` records are
 marked ``*`` and `unstable` perf entries ``†``, both counted in the caption. Latency
 artifacts state which clock estimator they used: the per-variant under-load
-``perf[].sm_mhz``, never an idle or whole-run median (H §12.4).
+``perf[].sm_mhz``, never an idle or whole-run median.
 """
 
 from __future__ import annotations
@@ -45,39 +45,16 @@ ALGO_LABEL = {
 PARAM_LABEL = {"alpha": "$\\alpha$"}
 # The baseline is torch by definition (decisions.md § Harness): it passes any --backend.
 FIXED_BACKEND = {"postfilter": "torch"}
-DATASET_LABEL = {"goodreads": "Goodreads", "arxiv": "arXiv"}
-SPEEDUP_BASE = "linr_v1_filter_mask"  # the thesis's 1.00x column
-
-# H §2.7, verbatim: the differences that make our numbers not theirs.
-COMPARABILITY = (
-    "in-process measurement: no RPC, no user tower, no 5\\,000-request replay, "
-    "closed-loop single client rather than open-loop client-side QPS",
-    "0.8--5.4\\,M items against SilverTorch's 10/80\\,M and LiNR's 15.5\\,M; "
-    "one A100-SXM4-80GB, never sharded",
-    "$k \\leq 1000$ against SilverTorch's top-2048 and LiNR's label recall@2000",
-    "no OverArch, no Value Model, no multi-embedding queries, no live updates",
-    "query predicates synthesised from item attributes on public datasets, "
-    "not replayed production traffic",
-)
-
-# Reported by the papers, for the comparison table. Constants, cited per row; never derived.
-PAPER_REPORTED = (
-    ("SilverTorch", "80M items, 24 probes, 2$\\times$A100", "--", "$\\leq$200 (budget)",
-     "1210", "--", "silvertorch.md \\S6.2"),
-    ("SilverTorch", "10M items, 1 A100", "--", "$\\leq$200 (budget)",
-     "3802", "--", "silvertorch.md \\S6.2"),
-    ("LiNR V1 (PyTorch)", "high pass, 15.5M, $B=1$", "4.8", "4.9 (p95)",
-     "--", "0.688", "linr.md \\S5.3 tab.3"),
-    ("LiNR V1 (PyTorch)", "high pass, 15.5M, $B=16$", "22.8", "23.1 (p95)",
-     "--", "0.688", "linr.md \\S5.3 tab.3"),
-    ("LiNR V2 (PyTorch)", "high pass, 15.5M, $B=1$", "14.6", "47.8 (p95)",
-     "--", "0.688", "linr.md \\S5.3 tab.3"),
-    ("LiNR V2 (PyTorch)", "low pass, 15.5M, $B=1$", "1.9", "2.1 (p95)",
-     "--", "--", "linr.md \\S5.3 tab.5"),
-    ("LiNR V2 (PyTorch)", "low pass, 15.5M, $B=16$", "21.4", "21.9 (p95)",
-     "--", "--", "linr.md \\S5.3 tab.5"),
-)  # fmt: skip
-
+DATASET_LABEL = {
+    "goodreads": "Goodreads",
+    "arxiv": "arXiv",
+    "yfcc10m": "YFCC-10M",
+    "pubmed": "PubMed",
+    "goodreads-synth": "Goodreads (synthetic filter)",
+    "arxiv-synth": "arXiv (synthetic filter)",
+    "yfcc10m-synth": "YFCC-10M (synthetic filter)",
+}
+SPEEDUP_BASE = "linr_v1_filter_mask"
 
 # ----- loading ----------------------------------------------------------------
 
@@ -290,8 +267,7 @@ def _esc(text: Any) -> str:
 
 
 def _f(x: float | None, places: int = 4) -> str:
-    """A bare number in the thesis's decimal-comma convention."""
-    return "---" if x is None else f"${format(x, f'.{places}f').replace('.', '{,}')}$"
+    return "---" if x is None else f"${x:.{places}f}$"
 
 
 def _sci(x: float | None) -> str:
@@ -300,7 +276,7 @@ def _sci(x: float | None) -> str:
     if x == 0:
         return "$0$"
     e = int(f"{x:e}".split("e")[1])
-    return f"${x / 10**e:.2f}{{\\times}}10^{{{e}}}$".replace(".", "{,}", 1)
+    return f"${x / 10**e:.2f}{{\\times}}10^{{{e}}}$"
 
 
 def _mark(v: dict[str, Any]) -> str:
@@ -310,8 +286,7 @@ def _mark(v: dict[str, Any]) -> str:
 def _num(v: dict[str, Any] | None, places: int = 4) -> str:
     if v is None:
         return "---"
-    body = format(v["value"], f".{places}f").replace(".", "{,}")
-    return f"${body}{_mark(v)}$"
+    return f"${v['value']:.{places}f}{_mark(v)}$"
 
 
 def _clock_note(rows: list[dict[str, Any]]) -> str:
@@ -367,32 +342,6 @@ def _legend(notes: list[str]) -> list[str]:
 # ----- artifacts ---------------------------------------------------------------
 
 
-def tab_recall_nofilter(c) -> list[Path]:
-    rows = _sel(c.rows, filter_kind="none", dim=c.dim, backend=c.backend)
-    datasets = sorted({r["dataset"] for r in rows})
-    algos = [a for a in ALGO_LABEL if any(r["algo"] == a for r in rows)]
-    notes: list[str] = []
-    body = [
-        [DATASET_LABEL.get(d, d)]
-        + [
-            _num(_reduce(_cells(_sel(rows, dataset=d, algo=a)), f"heldout_recall@{c.k}",
-                         notes, f"{d}/{a}"))
-            for a in algos
-        ]
-        for d in datasets
-    ]  # fmt: skip
-    tex = _table(
-        c.prov, c.results_dir,
-        caption=f"Recall@{c.k} относительно пользовательских действий (без фильтрации), "
-                f"$d={c.dim}$, backend \\texttt{{{c.backend}}}",
-        label="tab:recall_nofilter",
-        colspec="l" + "c" * len(algos),
-        header=["Набор данных"] + [ALGO_LABEL[a] for a in algos],
-        body=body, notes=_legend(notes),
-    )  # fmt: skip
-    return [_write(c.out / "tables" / "tab-recall_nofilter.tex", tex)]
-
-
 def tab_pareto(c) -> list[Path]:
     written = []
     for ds in sorted({r["dataset"] for r in c.rows}):
@@ -438,69 +387,22 @@ def tab_pareto(c) -> list[Path]:
                 )
         tex = _table(
             c.prov, c.results_dir,
-            caption=f"Качество, время работы и память на {DATASET_LABEL.get(ds, ds)} "
-                    f"($d={c.dim}$, $K={c.k}$, $B={c.bs}$, режим \\texttt{{{c.mode}}}, "
+            caption=f"Quality, latency and memory on {DATASET_LABEL.get(ds, ds)} "
+                    f"($d={c.dim}$, $K={c.k}$, $B={c.bs}$, mode \\texttt{{{c.mode}}}, "
                     f"backend \\texttt{{{c.backend}}}).",
             label=f"tab:pareto_{ds}",
             colspec="llcccc",
-            header=["Условие", "Алгоритм", "Полнота", "$t_\\mathrm{med}$ (мс)",
-                    "Ускорение", "Память (МиБ)"],
+            header=["Sweep", "Arm", f"Recall@{c.k}", "$t_\\mathrm{med}$ (ms)",
+                    "Speedup", "Memory (MiB)"],
             body=body,
             notes=_legend(notes + [
-                f"Ускорение относительно {ALGO_LABEL.get(SPEEDUP_BASE, SPEEDUP_BASE)} "
-                "в том же условии ('---' when that row is absent).",
+                f"Speedup over {ALGO_LABEL[SPEEDUP_BASE]} on the same sweep "
+                "('---' when that row is absent). Recall is against the exact filtered oracle.",
                 _clock_note(perf),
             ]),
         )  # fmt: skip
         written.append(_write(c.out / "tables" / f"tab-pareto_{ds}.tex", tex))
     return written
-
-
-def _batch_dataset(c) -> str | None:
-    """The dataset with the most (algo, bs) coverage; ties alphabetically. Printed in the
-    banner and in report.md so the choice is never invisible."""
-    counts = Counter()
-    for r in _sel(c.rows, dim=c.dim, perf_k=c.k, perf_mode=c.mode, backend=c.backend):
-        counts[r["dataset"]] = counts[r["dataset"]] + 1
-    return min(sorted(counts), key=lambda d: -counts[d]) if counts else None
-
-
-def tab_batch_scaling(c) -> list[Path]:
-    ds = c.batch_dataset or _batch_dataset(c)
-    rows = _sel(c.rows, dataset=ds, dim=c.dim, perf_k=c.k, perf_mode=c.mode, backend=c.backend)
-    rows = [r for r in rows if r.get("sweep") == c.sweep] if c.sweep else rows
-    bss = sorted({r["perf_bs"] for r in rows if r.get("perf_bs") is not None})
-    algos = [a for a in ALGO_LABEL if any(r["algo"] == a for r in rows)]
-    notes, body = [], []
-    for a in algos:
-        cells = []
-        for bs in bss:
-            v = _reduce(_sel(rows, algo=a, perf_bs=bs), "perf_median_ms", notes, f"{a}/bs{bs}")
-            if v is None:
-                cells.append("---")
-                continue
-            amortised = {**v, "value": v["value"] / bs}
-            cells.append(_num(amortised, 3) + f"\\,{{\\tiny$\\pm${v['spread'] * 100:.1f}\\%}}")
-        body.append([ALGO_LABEL[a]] + cells)
-    tex = _table(
-        c.prov, c.results_dir,
-        caption=f"Время работы (мс/запрос) при различных размерах батча $B$ "
-                f"({DATASET_LABEL.get(ds, ds)}, $d={c.dim}$, $K={c.k}$, "
-                f"режим \\texttt{{{c.mode}}}).",
-        label="tab:batch_scaling",
-        colspec="l" + "c" * len(bss),
-        header=["Алгоритм"] + [f"$B={b}$" for b in bss],
-        body=body,
-        notes=_legend(notes + [
-            f"Dataset chosen by coverage: \\texttt{{{ds}}}. $\\pm$ is the window spread "
-            "$(\\max-\\min)/\\mathrm{med}$ of the three timing windows. "
-            "\\textbf{$B=1$ is noise-dominated on this box} — the pre-v2 harness's own "
-            "repeats spread up to 21.1\\,\\% at $B=1$ against $\\leq$0.4\\,\\% at $B=8$ — "
-            "so no speedup claim is made from a $B=1$ column.",
-            _clock_note(rows),
-        ]),
-    )  # fmt: skip
-    return [_write(c.out / "tables" / "tab-batch_scaling.tex", tex)]
 
 
 def tab_memory(c) -> list[Path]:
@@ -516,10 +418,10 @@ def tab_memory(c) -> list[Path]:
     ]  # fmt: skip
     tex = _table(
         c.prov, c.results_dir,
-        caption=f"Размер индекса (МиБ) при $d={c.dim}$.",
+        caption=f"Index size (MiB) at $d={c.dim}$.",
         label="tab:memory",
         colspec="l" + "c" * len(algos),
-        header=["Датасет"] + [ALGO_LABEL[a] for a in algos],
+        header=["Dataset"] + [ALGO_LABEL[a] for a in algos],
         body=body,
         notes=_legend(notes + [
             "\\texttt{index\\_mib} is $\\sum$ buffers of the algorithm module, its filter "
@@ -565,7 +467,7 @@ def tab_backend_parity(c) -> list[Path]:
         label="tab:backend_parity",
         colspec="lllllccccc",
         header=["Dataset", "Sweep", "Algo", "Backend", "Path", f"jaccard@{c.k}",
-                "$|\\Delta s|_{\\max}$", "eager (мс)", "graph (мс)", "eager/graph"],
+                "$|\\Delta s|_{\\max}$", "eager (ms)", "graph (ms)", "eager/graph"],
         body=body,
         notes=_legend([
             "\\texttt{jaccard} and $|\\Delta s|_{\\max}$ are against the first backend of the "
@@ -576,86 +478,6 @@ def tab_backend_parity(c) -> list[Path]:
         ]),
     )  # fmt: skip
     return [_write(c.out / "tables" / "tab-backend_parity.tex", tex)]
-
-
-def tab_recall_at_budget(c) -> list[Path]:
-    """H §8.2 H: the best recall reachable under a p99 latency budget."""
-    rows = _sel(c.rows, dim=c.dim, perf_k=c.k, perf_bs=c.bs, perf_mode=c.mode)
-    body = []
-    for ds, sw in sorted({(r["dataset"], r["sweep"]) for r in rows}):
-        sub = _sel(rows, dataset=ds, sweep=sw)
-        cells = []
-        for budget in c.budgets:
-            best = None
-            for r in sub:
-                p99, rec = r.get("perf_p99_ms"), r.get(f"oracle_recall@{c.k}")
-                if (
-                    p99 is not None
-                    and rec is not None
-                    and p99 <= budget
-                    and (best is None or rec > best[0])
-                ):
-                    best = (rec, r["algo"], r["backend"])
-            cells.append(
-                "---" if best is None else _f(best[0]) + f" ({ALGO_LABEL.get(best[1], best[1])})"
-            )
-        body.append([DATASET_LABEL.get(ds, ds), _esc(sw)] + cells)
-    tex = _table(
-        c.prov, c.results_dir,
-        caption=f"Лучшая полнота Recall@{c.k} при бюджете p99 (режим \\texttt{{{c.mode}}}, "
-                f"$B={c.bs}$, $d={c.dim}$).",
-        label="tab:recall_at_budget",
-        colspec="ll" + "c" * len(c.budgets),
-        header=["Датасет", "Условие"] + [f"p99 $\\leq$ {b:g} мс" for b in c.budgets],
-        body=body,
-        notes=_legend([_clock_note(rows)]),
-    )  # fmt: skip
-    return [_write(c.out / "tables" / "tab-recall_at_budget.tex", tex)]
-
-
-def tab_paper_comparison(c) -> list[Path]:
-    rows = _sel(
-        c.rows, dim=c.dim, perf_bs=c.compare_bs, perf_k=c.k, perf_mode="eager", backend=c.backend
-    )
-    notes, body = [], []
-    for ds, sw, algo in sorted({(r["dataset"], r["sweep"], r["algo"]) for r in rows}):
-        sub = _sel(rows, dataset=ds, sweep=sw, algo=algo)
-        cell = _cells(sub)[0]
-        mean = _reduce(sub, "perf_mean_ms", notes, f"{ds}/{sw}/{algo}")
-        p99 = _reduce(sub, "perf_p99_ms", [], "")
-        qps = _reduce(sub, "perf_qps", [], "")
-        pr = cell.get("pass_rate")
-        body.append(
-            [
-                f"ours: {ALGO_LABEL.get(algo, algo)}",
-                f"{DATASET_LABEL.get(ds, ds)} {_esc(sw)}, "
-                f"{cell.get('n_items')} items, $B={c.compare_bs}$",
-                _num(mean, 3),
-                _num(p99, 3),
-                _num(qps, 0),
-                _f(pr, 3),
-                "this work",
-            ]
-        )
-    body += [list(r) for r in PAPER_REPORTED]
-    tex = _table(
-        c.prov, c.results_dir,
-        caption="Наши числа рядом с опубликованными SilverTorch и LiNR. "
-                "Строки не сопоставимы напрямую: см. сноски.",
-        label="tab:paper_comparison",
-        colspec="llccccl",
-        header=["Система", "Условия", "mean (мс)", "p99 / p95 (мс)", "QPS",
-                "pass rate / recall", "Источник"],
-        body=body,
-        notes=_legend(notes + [
-            "\\textbf{Не сравнение при равных условиях.} Отличия протокола (H \\S2.7): "
-            + "; ".join(COMPARABILITY) + ".",
-            "Наши строки — \\texttt{eager} (число, сопоставимое с обеими статьями); "
-            "\\texttt{graph} приводится отдельно и никогда вместо него.",
-            _clock_note(rows),
-        ]),
-    )  # fmt: skip
-    return [_write(c.out / "tables" / "tab-paper_comparison.tex", tex)]
 
 
 # ----- figures -----------------------------------------------------------------
@@ -741,56 +563,6 @@ def fig_pareto(c) -> list[Path]:
         ax.legend(fontsize=8)
         written.append(_figure(path, fig, c.prov))
     return written
-
-
-def fig_qps_recall(c) -> list[Path]:
-    path = c.out / "figures" / "fig-qps-recall.png"
-    rows = _sel(c.rows, dim=c.dim, perf_k=c.k, perf_bs=c.bs, perf_mode=c.mode, backend=c.backend)
-    pts = [(r, r.get("perf_qps"), r.get(f"oracle_recall@{c.k}")) for r in rows]
-    pts = [p for p in pts if p[1] is not None and p[2] is not None]
-    if not pts:
-        return [_empty(path, c.prov, f"no cells with qps and oracle_recall@{c.k}")]
-    fig, ax = plt.subplots(figsize=(6.5, 4.2))
-    for algo in [a for a in ALGO_LABEL if any(p[0]["algo"] == a for p in pts)]:
-        sub = [p for p in pts if p[0]["algo"] == algo]
-        ax.scatter([p[2] for p in sub], [p[1] for p in sub], s=38, label=ALGO_LABEL.get(algo, algo))
-    ax.set_xlabel(f"Recall@{c.k}")
-    ax.set_ylabel(f"QPS (closed loop, $B={c.bs}$, {c.mode})")
-    ax.set_title(f"QPS vs recall, d{c.dim}")
-    ax.grid(alpha=0.3)
-    ax.legend(fontsize=8)
-    return [_figure(path, fig, c.prov)]
-
-
-def fig_batch_scaling(c) -> list[Path]:
-    ds = c.batch_dataset or _batch_dataset(c)
-    path = c.out / "figures" / "fig-batch-scaling.png"
-    rows = _sel(c.rows, dataset=ds, dim=c.dim, perf_k=c.k, perf_mode=c.mode, backend=c.backend)
-    bss = sorted({r["perf_bs"] for r in rows if r.get("perf_bs") is not None})
-    if not bss:
-        return [_empty(path, c.prov, f"no perf rows for {ds} d{c.dim}")]
-    fig, ax = plt.subplots(figsize=(6.5, 4.2))
-    for algo in [a for a in ALGO_LABEL if any(r["algo"] == a for r in rows)]:
-        xs, ys, err = [], [], []
-        for bs in bss:
-            v = _reduce(_sel(rows, algo=algo, perf_bs=bs), "perf_median_ms", [], "")
-            if v:
-                xs.append(bs)
-                ys.append(v["value"] / bs)
-                err.append(v["value"] / bs * v["spread"])
-        if xs:
-            ax.errorbar(xs, ys, yerr=err, marker="o", capsize=3, label=ALGO_LABEL[algo])
-    ax.set_xscale("log", base=2)
-    ax.set_yscale("log")
-    ax.set_xlabel("batch size $B$")
-    ax.set_ylabel("amortised ms / query")
-    ax.set_title(
-        f"Batch scaling, {DATASET_LABEL.get(ds, ds)} d{c.dim}, K={c.k}, {c.mode}"
-        "\n(error bars = window spread; $B=1$ is noise-dominated on this box)"
-    )
-    ax.grid(alpha=0.3, which="both")
-    ax.legend(fontsize=8)
-    return [_figure(path, fig, c.prov)]
 
 
 def fig_deep_sweep(c) -> list[Path]:
@@ -901,8 +673,8 @@ def fig_latency_violin(c) -> list[Path]:
 
 
 def methodology(c) -> list[Path]:
-    """The §"Методология замеров" paragraph, with the constants read out of the code that
-    produced the records — so text and code cannot drift apart again (H WP-6)."""
+    """The measurement-methodology itemize, its constants read out of the code that produced
+    the records, so text and code cannot drift apart."""
     lat = inspect.signature(measure.latency).parameters
     pool = inspect.signature(inputs.query_pool).parameters["n_pool"].default
     recs = c.recs
@@ -911,48 +683,44 @@ def methodology(c) -> list[Path]:
     bss = sorted({b for r in recs for b in (r.get("batch_sizes") or [])})
     seeds = sorted({r.get("seed") for r in recs})
     body = [
-        f"\\item \\textbf{{Стенд.}} {env.get('gpu', '?')}, драйвер {env.get('driver', '?')}, "
+        f"\\item \\textbf{{Testbed.}} {env.get('gpu', '?')}, driver {env.get('driver', '?')}, "
         f"CUDA {env.get('cuda', '?')}, PyTorch {env.get('torch', '?')}, "
         f"Triton {env.get('triton', '?')}, Python {env.get('python', '?')}. "
-        "Частоты SM \\textbf{нельзя зафиксировать} в этом контейнере "
-        "(\\texttt{nvidia-smi -lgc} запрещён), поэтому каждая запись хранит выборку "
-        "частоты под нагрузкой (\\texttt{perf[].sm\\_mhz}), и все сравнения задержек "
-        "делаются при одинаковом оценщике частоты.",
-        "\\item \\textbf{Изоляция.} Один процесс на "
+        "SM clocks \\textbf{cannot be locked} in this container "
+        "(\\texttt{nvidia-smi -lgc} is denied), so every record keeps the under-load "
+        "clock sample (\\texttt{perf[].sm\\_mhz}) and every latency comparison uses the "
+        "same clock estimator.",
+        "\\item \\textbf{Isolation.} One process per "
         "$(\\mathrm{dataset}, \\mathrm{dim}, \\mathrm{algo}, \\mathrm{backend})$: "
-        "ни кэш \\texttt{torch.compile}, ни пул CUDA-графов, ни аллокатор не переживают "
-        "смену бэкенда.",
-        f"\\item \\textbf{{Прогрев и замер.}} {lat['warmup'].default} прогревочных вызовов, "
-        f"затем {lat['windows'].default} окна по "
-        f"$N = \\mathrm{{clamp}}({lat['target_s'].default:g}\\,\\text{{с}} / "
-        f"\\tilde t, {lat['n_min'].default}, {lat['n_max'].default})$ вызовов; каждый вызов "
-        "обрамлён CUDA-событиями, окно — одним \\texttt{synchronize} в конце. Запросы "
-        f"берутся из фиксированного пула в {pool} батчей по кругу, без сброса L2. "
-        "Отчёт ведётся по окну с медианным медианом: median / mean / p95 / p99 / min / IQR, "
-        "QPS (closed loop), \\texttt{host\\_gap}, разброс окон "
-        "$(\\max-\\min)/\\mathrm{med}$; разброс выше 5\\,\\% помечает ячейку "
-        "\\texttt{unstable}.",
-        f"\\item \\textbf{{Режимы.}} {', '.join(run.MODES)}: \\texttt{{eager}} — число, "
-        "сопоставимое с обеими статьями, \\texttt{graph} "
+        "no \\texttt{torch.compile} cache, CUDA-graph pool or allocator state survives a "
+        "change of backend.",
+        f"\\item \\textbf{{Warm-up and timing.}} {lat['warmup'].default} warm-up calls, "
+        f"then {lat['windows'].default} windows of "
+        f"$N = \\mathrm{{clamp}}({lat['target_s'].default:g}\\,\\mathrm{{s}} / "
+        f"\\tilde t, {lat['n_min'].default}, {lat['n_max'].default})$ calls; each call "
+        "is bracketed by CUDA events, each window by one \\texttt{synchronize} at its end. "
+        f"Queries cycle through a fixed pool of {pool} batches, without flushing L2. "
+        "Each window yields its median; a window spread "
+        "$(\\max-\\min)/\\mathrm{med}$ above 5\\,\\% marks the cell \\texttt{unstable}.",
+        f"\\item \\textbf{{Modes.}} {', '.join(run.MODES)}: \\texttt{{graph}} "
         '(\\texttt{torch.compile(mode="reduce-overhead", dynamic=False, fullgraph=True)}) '
-        "— приводится рядом, никогда вместо. Захват графа проверяется: "
-        "\\texttt{cudagraph\\_skips} обязан быть 0, иначе ячейка — ошибка, а не число.",
-        f"\\item \\textbf{{Качество.}} Один проход в режиме eager при "
-        f"$k_{{\\max}} = \\max(K)$, чанками по {run.QUALITY_CHUNK} запросов; метрики "
-        f"recall / ndcg / precision / mrr при $K \\in \\{{{', '.join(map(str, ks)) or '?'}\\}}$ "
-        "накапливаются на устройстве. Эталон: точный фильтрованный fp32-оракул на "
-        "фильтрующих ячейках и отложенные взаимодействия всегда.",
-        "\\item \\textbf{Память.} \\texttt{index\\_mib} — сумма всех буферов модуля поиска "
-        "вместе с подмодулем фильтра; \\texttt{peak\\_fwd\\_mib} — "
-        "\\texttt{max\\_memory\\_allocated} за первое eager-окно.",
-        f"\\item \\textbf{{Повторы.}} Размеры батча "
+        "is the headline, \\texttt{eager} the secondary; the official SilverTorch ops "
+        "cannot be captured and are timed eager only. Capture is checked: "
+        "\\texttt{cudagraph\\_skips} must be 0, otherwise the cell is an error, not a number.",
+        "\\item \\textbf{Quality.} One eager pass at "
+        f"$k_{{\\max}} = \\max(K)$, in chunks of {run.QUALITY_CHUNK} queries; "
+        f"recall / ndcg / precision / mrr at $K \\in \\{{{', '.join(map(str, ks)) or '?'}\\}}$ "
+        "accumulate on the device. References: the exact filtered fp32 oracle on filter "
+        "cells, and the held-out interactions always.",
+        "\\item \\textbf{Memory.} \\texttt{index\\_mib} is the sum of every buffer of the "
+        "retrieval module, its filter submodule included; \\texttt{peak\\_fwd\\_mib} is "
+        "\\texttt{max\\_memory\\_allocated} over the first eager window.",
+        "\\item \\textbf{Repeats.} Batch sizes "
         f"$B \\in \\{{{', '.join(map(str, bss)) or '?'}\\}}$, "
-        f"сиды $\\{{{', '.join(str(s) for s in seeds) or '?'}\\}}$; по сидам приводится "
-        "медиана с усами min--max.",
+        f"seeds $\\{{{', '.join(str(s) for s in seeds) or '?'}\\}}$.",
     ]
     tex = (
         _banner(c.prov, c.results_dir)
-        + "% Для \\section{Методология замеров скорости и памяти} (docs/thesis/main.tex).\n"
         + "\\begin{itemize}\n"
         + "\n".join("    " + b for b in body)
         + "\n\\end{itemize}\n"
@@ -985,10 +753,7 @@ def coverage(c) -> list[Path]:
     lines += [
         "## Selection used by the tables",
         "",
-        f"`--dim {c.dim}` `--k {c.k}` `--bs {c.bs}` `--mode {c.mode}` `--backend {c.backend}` "
-        f"`--compare-bs {c.compare_bs}` `--budget-ms {list(c.budgets)}`; "
-        f"batch-scaling dataset: `{c.batch_dataset or _batch_dataset(c)}`"
-        f"{'' if c.batch_dataset else ' (chosen by coverage)'}.",
+        f"`--dim {c.dim}` `--k {c.k}` `--bs {c.bs}` `--mode {c.mode}` `--backend {c.backend}`.",
         "",
         "## Coverage",
         "",
@@ -1054,16 +819,10 @@ def coverage(c) -> list[Path]:
 
 
 ARTIFACTS = {
-    "recall_nofilter": tab_recall_nofilter,
     "pareto": tab_pareto,
-    "batch_scaling": tab_batch_scaling,
     "memory": tab_memory,
     "parity": tab_backend_parity,
-    "recall_at_budget": tab_recall_at_budget,
-    "paper_comparison": tab_paper_comparison,
     "fig_pareto": fig_pareto,
-    "fig_qps_recall": fig_qps_recall,
-    "fig_batch_scaling": fig_batch_scaling,
     "fig_deep_sweep": fig_deep_sweep,
     "fig_latency_violin": fig_latency_violin,
     "methodology": methodology,
@@ -1134,33 +893,10 @@ def generate(
 @click.option("--dim", default=128, show_default=True, type=int)
 @click.option("--k", default=100, show_default=True, type=int)
 @click.option("--bs", default=1, show_default=True, type=int, help="batch size for the tables")
-@click.option(
-    "--compare-bs",
-    default=16,
-    show_default=True,
-    type=int,
-    help="batch size of the paper comparison table (H §2.7 compares at B=16)",
-)
 @click.option("--mode", default="eager", type=click.Choice(("eager", "graph")), show_default=True)
 @click.option("--backend", default="triton", show_default=True)
-@click.option("--sweep", default=None, help="narrow the batch-scaling table to one condition")
-@click.option(
-    "--batch-dataset",
-    default=None,
-    help="dataset of tab:batch_scaling [default: the best-covered one]",
-)
-@click.option(
-    "--budget-ms",
-    "budgets",
-    multiple=True,
-    type=float,
-    default=(0.5, 1.0, 2.0, 5.0),
-    show_default=True,
-)
-def report(
-    results, out, gate, only, dim, k, bs, compare_bs, mode, backend, sweep, batch_dataset, budgets
-) -> None:
-    """Thesis and paper tables and figures from the records (roadmap D4, H §6 WP-6)."""
+def report(results, out, gate, only, dim, k, bs, mode, backend) -> None:
+    """Paper tables and figures from the records (docs/system/evaluation.md § Report)."""
     results_dir = Path(results)
     if not results_dir.is_dir():
         raise click.ClickException(f"{results_dir}: not a directory")
@@ -1172,12 +908,8 @@ def report(
         dim=dim,
         k=k,
         bs=bs,
-        compare_bs=compare_bs,
         mode=mode,
         backend=backend,
-        sweep=sweep,
-        batch_dataset=batch_dataset,
-        budgets=tuple(budgets),
     )
     for path in c.written:
         click.echo(str(path))
