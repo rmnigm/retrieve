@@ -25,8 +25,8 @@ from this page. Step names (D1, H2, ...) are stable identifiers used in
 records, commits and code comments; they are not renumbered.
 
 **Estimates** are A100-SXM4-80GB GPU-hours (the reference GPU for every
-citable number), from the re-plan's per-cell times of D1 until the record
-inventory (P-INV) replaces them with measured ones; a *stream* is
+citable number), from the per-cell wall times the record inventory measured
+([artifact](artifacts/campaign-v2/README.md#b-measured-wall-time-per-cell-old-grid-3-bs--3-k--2-modes)); a *stream* is
 a slice of a step that can run on its own GPU at the same time as the
 others (see [Multi-GPU execution](#multi-gpu-execution)).
 
@@ -38,6 +38,13 @@ others (see [Multi-GPU execution](#multi-gpu-execution)).
   file the official-code defects (OF-3, OF-4, OF-6 in
   [deviations](paper/reproduction-deviations.md)) upstream as issues. The
   ECIR call asks what contact happened; replies take weeks.
+- **The campaign budget, after the pilot.** Measured per-cell times put
+  the campaign at roughly 130-250 GPU-h, not the re-plan's 70-90: the 10 M
+  exact arms cost 0.4-2.4 GPU-h a cell and the torch arms 5-9× Triton
+  ([inventory](artifacts/campaign-v2/README.md#b-measured-wall-time-per-cell-old-grid-3-bs--3-k--2-modes)).
+  Nothing waits on it now (code comes first); the budget gate stops the
+  queue before V-AX-SYNTH / V-YFCC if the pilot confirms it, and the user
+  then chooses between the full grid and a trimmed one.
 - **Citability of a narrowed run.** A run with a narrowed mode set is
   recorded `status: partial` and reported NOT CITABLE. The user decides
   once `bench report` runs on the campaign's output (D1-G).
@@ -164,7 +171,8 @@ ones are below.
   {0, 1, 2} everywhere, bs {1, 16}, k {100, 1000}, kept sweeps, official on
   bloom/none only, per-dataset `n_lists` / `n_probe`, `filter` / `deep` /
   `synth` / `codesign` / `bloomwidth` / `n95` suites); #12 the SilverTorch
-  torch-reference arm; #13 the `torch.compile(mode="max-autotune")` arm;
+  torch-reference arm; #13 the `torch.compile(mode="max-autotune")` arm
+  (the torch arms on goodreads and arXiv only until C3 is settled there);
   #15 `m_bits` / `k_hash` as build params; V3 `candidate_pool` as a
   fraction of passing items. *Gates*: synth CPU test (pass rate within 1 %
   relative, nesting, determinism); existing record keys byte-identical
@@ -196,19 +204,18 @@ ones are below.
   merges into staging once, and the orchestrator tags `campaign-v2`.
   **≈ 2 GPU-h.**
 
-## Phase P: claims and inventory (CPU, beside Phase C)
+## Phase P: CPU work beside Phase C
 
-- [ ] **P-INV: the claims and the record inventory.** *docs/paper/claims.md* (to be written):
-  every quantitative claim of LiNR (arXiv 2407.13218) and SilverTorch
-  (arXiv 2511.14881) with section and figure, then the claim-to-evidence
-  matrix C1-C7 (original number, exhibit, exact cells, reusable records,
-  missing cells, measured GPU-h, verdict so far). The inventory: every Hub
-  subtree of [hub-index](artifacts/hub-index.md) fetched, one row per
-  record (*inventory.csv* + pivot under `docs/artifacts/`), per-sweep
-  pass rates, measured per-cell wall time, which records pass the reuse
-  rule; uploaded as `artifacts/campaign-v2`. Its numbers replace the
-  estimates below and fill the manifest's reuse entries. Any planned cell
-  that maps to no claim leaves this page.
+The claims and the claim-to-evidence matrix are [claims](paper/claims.md);
+the record inventory is [artifacts/campaign-v2](artifacts/campaign-v2/README.md).
+
+- [ ] **Manifest reuse entries** (CPU, after CV2-REPORT): fill
+  *evaluation/campaign.yaml*'s quality and perf entries for the existing
+  records that pass the reuse rule
+  ([inventory](artifacts/campaign-v2/README.md#c-which-records-pass-the-reuse-rule):
+  arXiv `filter` / `deep` quality, timing where the clock criterion holds;
+  SilverTorch-Triton timing only once CV2-LIB's #16 decision is known), and
+  the claims' cell selectors ([claims](paper/claims.md)).
 - [ ] **R-RES: the unexplained residuals**, time-boxed to 2 h of CPU:
   `linr_v2` 4.5e-4 and `linr_v3` 1.7e-5 against their golden JSONs, arXiv
   SilverTorch 2.0e-6 ([validation](validation.md#harness-gates)). Still
@@ -290,36 +297,36 @@ co-design.
 
 ## Estimates
 
-| step | A100 GPU-h | GPU |
-|---|---|---|
-| CV2-LIB … CV2-FREEZE | ≈ 3 | development pod |
-| M1 | 0.5 | both |
-| V-PILOT | ≈ 4 | 0 |
-| V-GR-FILTER | ≈ 5 | 0 |
-| H2H-FINAL | ≈ 3 | 0 |
-| V-CODESIGN | ≈ 2 | 0 |
-| D3 bloomwidth | ≈ 3-5 | 1 (+0) |
-| V-AX-SYNTH | ≈ 11 | 0 |
-| V-GR-DEEP | ≈ 6 | 0/1 |
-| V-YFCC | ≈ 18 | 0/1 |
-| V-SEEDS | ≈ 4 | 0 |
-| V-PUBMED | ≈ 14 | 0 (+1 for the checks) |
-| D1-G | ≈ 4 | both |
+| step | A100 GPU-h | GPU | basis |
+|---|---|---|---|
+| CV2-LIB … CV2-FREEZE | ≈ 3 | development pod | tests and smokes |
+| M1 | 0.5 | both | |
+| V-PILOT | ≈ 8-14 | 0 | goodreads Triton cells ~65 s at the v2 grid; the torch arms ~400-460 s and dominate |
+| V-GR-FILTER | ≈ 5 | 0 | ~114 cells; SilverTorch torch + compile ~3 of it |
+| H2H-FINAL | ≈ 3 | 0 | |
+| V-CODESIGN | ≈ 1 | 0 | `d1/arxiv-codesign`: 60 cells in 0.4 h |
+| D3 bloomwidth | ≈ 3-5 | 1 (+0) | quality-only cells |
+| V-AX-SYNTH | ≈ 15-45 | 0 | Triton ~2,000 s per pass point; V1/V2 torch at 3 points ×3 seeds is most of it |
+| V-GR-DEEP | ≈ 3-6 | 0/1 | ~210 cells at ~50 s (`d1/arxiv-deep`: 873 cells in 36 h at 3 M) |
+| V-YFCC | ≈ 60-120 | 0/1 | V1 / V2 / V3 cells 0.3-1.2 h each at the v2 grid; V2/V3 cost vs p at 10 M unmeasured |
+| V-SEEDS | ≈ 8-12 | 0 | YFCC seeds 1-2: V2 and V3 ~1.1 h a cell |
+| V-PUBMED | ≈ 20-25 | 0 (+1 for the checks) | V1 ~650 s, V2 ~1,300 s, SilverTorch-Triton ~700 s a cell; 3 sweeps × 3 seeds |
+| D1-G | ≈ 4 | both | |
 
-Total ≈ 75-95 GPU-h (the re-plan's 70-90 plus 3 seeds on bloomwidth's
-random builds); wall ≈ 40-45 h if M1 lets both GPUs time, ≈ 65-80 h with
-one timing GPU. The SilverTorch/Triton perf-only rerun the re-plan held in
-reserve costs 0 GPU-h: the CSR probe layout and transposed bloom predate
-`72e5a90`, and the one later library change (per-width probe tiles) moves
-tiles only at `D_PAD > 256` ([validation](validation.md#library-gates),
-*Probe-scorer tile per width*).
+Total ≈ 130-250 GPU-h, against the re-plan's 70-90: the 10 M exact arms
+and the torch arms were underestimated there (see "Needs the user"). The
+SilverTorch/Triton perf-only rerun the re-plan held in reserve costs
+0 GPU-h: the CSR probe layout and transposed bloom predate `72e5a90`, and
+the one later library change (per-width probe tiles) moves tiles only at
+`D_PAD > 256` ([validation](validation.md#library-gates), *Probe-scorer
+tile per width*).
 
 ## Dependencies
 
 ```
 CV2-DATA ─> CV2-LIB merge;  CV2-DATA ─> CV2-CORE;  CV2-REPORT ∥ CV2-CORE
 CV2-LIB, CV2-DATA, CV2-CORE, CV2-REPORT ─> CV2-FREEZE (tag campaign-v2)
-P-INV (CPU, beside Phase C) ─> the manifest's reuse entries, the estimates
+CV2-REPORT ─> manifest reuse entries ─> CV2-FREEZE
 CV2-FREEZE ─┬─> V-PILOT ─┬─> V-AX-SYNTH ─> V-YFCC ─> V-SEEDS ─┐
             │            └─> V-GR-DEEP ─────────────────────────┤
             ├─> V-GR-FILTER, H2H-FINAL, V-CODESIGN, D3 ─────────┤
