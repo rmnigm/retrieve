@@ -95,8 +95,9 @@ MiB = measure.MiB
 PERF_STAT_KEYS = (
     "n", "median_ms", "mean_ms", "trimmed_mean_ms", "p95_ms", "p99_ms", "min_ms", "iqr_ms", "qps",
     "host_gap_ms", "outliers_std", "outliers_tukey", "spread", "unstable", "peak_fwd_mib",
-    "window_medians_ms", "window_sm_mhz",
+    "window_medians_ms", "window_sm_mhz", "ids_sha256",
 )  # fmt: skip
+IDS_PROBE_BATCHES = 8  # the pool batches ``ids_sha256`` hashes, outside the timed windows
 
 
 class QualityGateError(RuntimeError):
@@ -367,6 +368,19 @@ def _rotate(callee: Any, pool: torch.Tensor, qa_pool: torch.Tensor | None) -> An
     return partial(_call_next_filtered, callee, pool, qa_pool, itertools.count())
 
 
+@torch.inference_mode()
+def ids_sha256(callee: Any, pool: torch.Tensor, qa_pool: torch.Tensor | None) -> str:
+    """sha256 of the ids ``callee`` returns on the first ``IDS_PROBE_BATCHES`` batches of the
+    pool, int64 row-major, batch after batch: equal hashes across modes are the D1-G
+    eager-vs-graph identity gate. Each batch is copied out before the next call (a graph
+    replay overwrites its output buffer)."""
+    h = hashlib.sha256()
+    for i in range(min(IDS_PROBE_BATCHES, pool.shape[0])):
+        ids, _ = callee(pool[i]) if qa_pool is None else callee(pool[i], qa_pool[i])
+        h.update(ids.to(torch.int64).cpu().contiguous().numpy().tobytes())
+    return h.hexdigest()
+
+
 def perf(
     module: nn.Module,
     inp: dict,
@@ -421,6 +435,7 @@ def perf(
                     d, ms = measure.latency(fn, bs=int(bs), mode=mode, **latency_kw)
                     if profile and mode == "eager":
                         d["kernels"] = measure.profile_once(fn)
+                d["ids_sha256"] = ids_sha256(callee, pool, qa_pool)
                 entries.append({**entry, **d})
                 samples.append({"k": int(k), "bs": int(bs), "mode": mode, "ms": ms})
                 callee = fn = None
@@ -713,6 +728,7 @@ __all__ = [
     "CLOCK_DRIFT",
     "POOL_MIN",
     "EXACT_ALGOS",
+    "IDS_PROBE_BATCHES",
     "MODES",
     "PERF_STAT_KEYS",
     "PER_K_QUALITY",
@@ -721,6 +737,7 @@ __all__ = [
     "STICKY_CUDA",
     "QualityGateError",
     "compile_warmup",
+    "ids_sha256",
     "is_sticky",
     "resolve_pool",
     "run",

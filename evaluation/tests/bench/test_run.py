@@ -18,6 +18,7 @@ recorded as partial and re-run by resume). ``test_cli.py`` drives the same fixtu
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -577,3 +578,35 @@ def test_a_quality_only_suite_is_ok_without_perf(tiny_configs, tmp_path):
         "ok": 2
     }
     assert not (out / "untimed" / "tiny-d64.samples.jsonl").exists()
+
+
+def test_ids_sha256_is_stable_and_tracks_the_ids(tiny_configs, tmp_path):
+    """G-ids (CPU): two runs of a deterministic cell record the same ``ids_sha256`` per
+    ``(bs, k, mode)``; the hash is over the ids (int64, row-major) of the pool's first batches,
+    so different ids hash differently and a null entry has none."""
+    jobs = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=["c0"])
+    hashes = []
+    for out in (tmp_path / "a", tmp_path / "b"):
+        run.run(jobs, out_dir=out, **KW)
+        (rec,) = _records(out / "e2e" / "tiny-d64.jsonl")
+        hashes.append({(e["bs"], e["k"], e["mode"]): e["ids_sha256"] for e in rec["perf"]})
+    assert hashes[0] == hashes[1]
+    eager = {v for (_, _, m), v in hashes[0].items() if m == "eager"}
+    assert len(eager) == 4 and all(len(h) == 64 for h in eager)  # every (bs, k) differs
+    assert all(v is None for (_, _, m), v in hashes[0].items() if m == "graph")  # no CUDA
+    pool = torch.zeros(10, 2, 8)
+    fixed = run.ids_sha256(_Fixed(), pool, None)
+    assert fixed == run.ids_sha256(_Fixed(), pool, torch.zeros(10, 2, 1))  # qa ignored here
+
+    class _Shifted(_Fixed):
+        def forward(self, q, qa=None):
+            ids, sc = super().forward(q, qa)
+            return ids.flip(1), sc
+
+    assert run.ids_sha256(_Shifted(), pool, None) != fixed
+    assert (
+        fixed
+        == hashlib.sha256(
+            torch.tensor([[0, 1, 2, 3]] * 2).numpy().tobytes() * run.IDS_PROBE_BATCHES
+        ).hexdigest()
+    )
