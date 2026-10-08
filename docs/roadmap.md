@@ -32,6 +32,13 @@ others (see [Multi-GPU execution](#multi-gpu-execution)).
 
 ## Needs the user
 
+- **Fix A for V2's batch-16 floor** (V2-PROF, [artifact](artifacts/campaign-v2/v2-prof/README.md)):
+  the floor is our full-N grid in `fused_masked_knn_topk` (913 µs of 1.41 ms),
+  not LiNR's design. Fix A (grid-strided, bit-identical scores) is estimated
+  to take V2/V1 at bs 16, p ≤ 0.01 from 1.50 to ~0.6, which flips C1. It is a
+  library change: tag `campaign-v2.1`, rerun every V2 Triton perf cell
+  already run (quality reusable), and V3's if its sparse path shares the
+  grid. Until decided, no V2 timing cell runs; V-FIXA-PROBE measures it.
 - **Contact the original authors** (re-plan decision 7): the LinkedIn LiNR
   team and Meta's SilverTorch team — filter-set details, the V1/V2 setup,
   the SilverTorch paper's FPR inconsistency (0.067 % vs 0.00173 %) — and
@@ -170,11 +177,22 @@ co-design.
   loaded, interleaved, cores pinned. *Gate*: loaded medians within each
   arm's own repeat noise; otherwise timed steps run one GPU at a time.
   **0.5 GPU-h** on a ≥ 2-GPU pod.
-- [ ] **H2H-FINAL: official vs Triton on the release code** (`h2h` suite:
-  goodreads E1c and arXiv, interleaved, 5 repeats, official `score_path`
-  fp16 and int32; e2e, kernel-only, launches, memory, parity). The only
-  T3 source; replaces b3 and the kernel-opt head-to-head (C7). **≈ 3
-  GPU-h**, GPU 0.
+- [ ] **V-FIXA-PROBE: measure Fix A before the user decides.** A scratch
+  patch in a throwaway worktree, never committed: Fix A and its 3-line
+  variant against current V2 on arxiv-synth d128, clause and bloom, bs
+  {1, 16}, p {0.001, 0.01, 1}, `torch.equal` ids and scores; plus
+  `torch.profiler` on V3's sparse path (`oporp_1bit_match_topk` grid) at
+  the same points. Feeds the user's Fix A decision. **≈ 0.5 GPU-h.**
+- [ ] **V-GRAPH-IDS: Triton graph vs eager canonical ids differ** (H2H-FINAL:
+  arXiv bs 16, 4 of 80 entries, 1 seed per (kind, k)). Mechanism first, from
+  the stored records and sidecars (ties at the k-th score vs a real
+  divergence), then one GPU repro if needed. Eager-vs-graph id identity is a
+  D1-G gate, so this runs before D1-G. **≈ 0.5 GPU-h.**
+- [ ] **H-PROFILE: `--profile` stores an empty Triton `kernels` list**
+  (H2H-FINAL: 40/40 bloom and 13/40 `none` eager entries; official always
+  populated), so T3's Triton kernel-only column is empty for bloom (C7).
+  Harness fix in `measure.profile_once` (code_version unaffected), then
+  rerun only the h2h `--profile` pass on goodreads + arXiv. **≈ 0.5 GPU-h.**
 - [ ] **V-CODESIGN: `codesign` on arXiv and goodreads**, interleaved
   partial/full, `n_probe` {8, 32, 128}, 3 sweeps, 3 seeds; replaces D1-B2
   and D1-D. F4b, C5. **≈ 2 GPU-h**, GPU 0.
@@ -182,18 +200,11 @@ co-design.
   both blooms, `m_bits` 64-2048 × `k_hash` {3, 5}, quality-only plus one
   timed point per width at bs 16. F4a, C4. **≈ 3-5 GPU-h**, GPU 1 (the
   timed points on GPU 0).
-- [ ] **V2-PROF: what sets V2's batch-16 floor** (user, 2026-10-08). On
-  goodreads-synth V2 is ≥ 1.5× V1 at bs 16 at every p (floor ~1.41 ms),
-  against LiNR's C1. `torch.profiler` on V1 vs V2 at bs {1, 16}, p {0.001,
-  0.01, 1}: name the kernel that sets the floor and whether it is LiNR's
-  design or our implementation. A fix, if any, is proposed, not applied:
-  the user decides (a library change moves code_version, tag
-  `campaign-v2.1`, and reruns the V2 arms already run). Before V-AX-SYNTH.
-  **≈ 1 GPU-h.**
 - [ ] **V-AX-SYNTH: arXiv synth**, uniform 7 points, then the
   cluster-correlated variant (3 points) if the uniform sweep shows the IVF
   recall collapse at low p; arXiv's `n95`. F1/F2 3M panel. **≈ 15-45 GPU-h**
-  (the pilot measured 8.7 GPU-h at 0.8 M), GPU 0.
+  (the pilot measured 8.7 GPU-h at 0.8 M), GPU 0. Its timed cells wait for
+  the user's Fix A decision (Needs the user).
 - [ ] **V-GR-DEEP: goodreads `deep`**, trimmed (`n_lists` {1024, 4096},
   `n_probe` {8, 16, 32, 64, 128}, V3 pool fractions); replaces D1-C.
   F3; goodreads' `n95`, then the goodreads `filter` n95 cells and the
@@ -227,7 +238,7 @@ co-design.
 
 - [ ] **F2: the official-vs-reimplementation section** rewritten from
   H2H-final's numbers, with CIs and paired tests
-  ([paper](paper/official-vs-reimplementation.md)). Needs H2H-FINAL and
+  ([paper](paper/official-vs-reimplementation.md)). Needs H-PROFILE and
   D1-G.
 - [ ] **F4: package the artifacts**: the results public, the PubMed slice
   or its build recipe with checksums, a tagged `torchretrieve` release, a
@@ -244,7 +255,9 @@ co-design.
 | step | A100 GPU-h | GPU | basis |
 |---|---|---|---|
 | M1 | 0.5 | both | |
-| H2H-FINAL | ≈ 3 | 0 | |
+| V-FIXA-PROBE | ≈ 0.5 | 0 | |
+| V-GRAPH-IDS | ≈ 0.5 | 0 | |
+| H-PROFILE | ≈ 0.5 | 0 | |
 | V-CODESIGN | ≈ 1 | 0 | `d1/arxiv-codesign`: 60 cells in 0.4 h |
 | D3 bloomwidth | ≈ 3-5 | 1 (+0) | quality-only cells |
 | V-AX-SYNTH | ≈ 15-45 | 0 | Triton ~2,000 s per pass point; V1/V2 torch at 3 points ×3 seeds is most of it |
@@ -267,7 +280,7 @@ tile per width*).
 ```
 tag campaign-v2 ───────────────────────┬─> V-PILOT ─┬─> V-AX-SYNTH ─> V-YFCC ─> V-SEEDS ─┐
                                        │            └─> V-GR-DEEP ─────────────────────────┤
-                                       ├─> H2H-FINAL, V-CODESIGN, D3 ─────────┤
+                                       ├─> V-CODESIGN, D3 ─────────────────────┤
                                        └─> V-PUBMED ───────────────────────────────────────┴─> D1-G ─> F2, F4, F5
 M1: before any timed step on a multi-GPU pod
 ```
