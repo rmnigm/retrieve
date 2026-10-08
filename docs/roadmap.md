@@ -213,7 +213,7 @@ co-design.
   `72e5a90` reuse entries for V2 and V3 (their kernels changed). CPU only;
   `bench report --manifest` over the fetched trees reports 0 wrongly
   missing cells. Before D1-G.
-- [ ] **V-CODESIGN: `codesign` on arXiv and goodreads**, at `campaign-v2.1`
+- [ ] **V-CODESIGN: `codesign` on goodreads** (arXiv done at v2.1), at `campaign-v2.1`
   (the 408b1188 run, 108/108, is stale: the quantize fix moves every
   SilverTorch eager time; Hub `artifacts/v-codesign-408b`), interleaved
   partial/full, `n_probe` {8, 32, 128}, 3 sweeps, 3 seeds; replaces D1-B2
