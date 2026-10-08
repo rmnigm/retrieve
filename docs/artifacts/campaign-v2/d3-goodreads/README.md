@@ -33,4 +33,18 @@ Hub `campaign-v2/goodreads-bloomwidth`.
 
 ## `bloomwidth-timed` at `campaign-v2.1`
 
-Not run yet: it waits for the main checkout to move to `campaign-v2.1`.
+Same pod and pinning, main checkout at staging `fa3a730` (tag `campaign-v2.1`, code_version
+`f01255f1`), fresh tree `/scratch/campaign-v21/results`; bs 16, k 100, seeds 0-2, `k_hash` 5. 21 / 21
+records ok, rc 0; children triton 1,875 s and official 247 s, 0.59 GPU-h with the oracle. Hub
+`campaign-v2.1/goodreads-bloomwidth-timed`; logs and clocks `artifacts/d3-goodreads-timed-v21`.
+
+- **Latency does not depend on width.** Triton eager 0.758-0.830 ms and graph 0.177-0.195 ms over
+  64-2048 bits; official eager 1.351 ms (not capturable). Quality equals the `bloomwidth` cells.
+- **Against H2H-FINAL (not resolved).** At the default width, official / Triton eager is 1.76
+  (1.351 / 0.768 ms). H2H-FINAL's goodreads bloom bs 16 k 100 cell at `408b1188` measured 1.785 /
+  0.827 ms (2.16), with the three arms interleaved in one process and `--profile`. Graph agrees
+  (0.195 vs 0.201 ms). Both eager arms are faster here, although v2.1's quantize fix was expected
+  to add ~30 µs. The direction holds. The cause (interleaving three arms, `--profile`, or v2.1) is
+  not established; the surprise gate's interleaved rerun of the one cell was not run.
+- **Clocks.** 60 / 117 timing windows below 1410 MHz (min 1140), 20 / 21 records `unstable`; the
+  1 Hz trace under > 50 % load held 1410 MHz (63 / 63 samples), max 39 °C, 318 W.
