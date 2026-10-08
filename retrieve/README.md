@@ -40,9 +40,9 @@ For attribute-filtered retrieval, swap to `filter_mode="bloom"` (with `m_bits` /
 | `FullScanKNN` | Exhaustive matmul + top-K. Reference / small-N. |
 | `OneBitKNN` | OPORP 1-bit quantization + Hamming top-K. |
 | `SimHashKNN` | SimHash 1-bit quantization + Hamming top-K; `k_bits` may exceed `D`. |
-| `PostfilterKNN`, `PostfilterKNNInt8` | KNN then attribute filter. |
+| `PostfilterKNN` | KNN then attribute filter. |
 | `PrefilterKNN` | Attribute filter then KNN over the candidate set. |
-| `LiNRV1`–`LiNRV4` | The LiNR paper's variants, composed from the above with an optional filter submodule; `LiNRBuilder` builds one. |
+| `LiNRV1`–`LiNRV3` | The LiNR paper's variants, composed from the above with an optional filter submodule; `LiNRBuilder` builds one. |
 | `SilverTorch` | IVF + INT8 ANN with optional fused bloom / exact filter (paper Algorithm 1); `SilverTorchBuilder` builds or loads one. |
 | `BloomFilter`, `ExactAttributeFilter` | Standalone `FilterModule`s; compose via `retrieve.functional.combine_masks` / `combine_indices`. |
 | `retrieve.indexing.KMeans` | Index-build helper (clusters for IVF); `init="random"` or `"kmeans++"`. |

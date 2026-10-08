@@ -24,7 +24,7 @@ that item's values (OR over the `A_max` slot, AND across clauses).
 1. **SilverTorch inline** — the predicate is fused into the probe+score kernel; nothing
    intermediate touches HBM.
 2. **LiNR decoupled** — a standalone `FilterModule` computes a mask or candidate set. The
-   `LiNRV1`–`LiNRV4` modules hold one as `filter=` and call it for you; the primitives take the
+   `LiNRV1`–`LiNRV3` modules hold one as `filter=` and call it for you; the primitives take the
    mask or candidate set explicitly.
 
 ### SilverTorch inline filtering

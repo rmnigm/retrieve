@@ -3,7 +3,7 @@
 Precision contract: ``PostfilterKNN`` and ``PrefilterKNN`` store items fp16 (as the LiNR paper
 does), cast the query to fp16, accumulate in fp32 and return fp32 scores on every backend — an
 fp16 score would round near-tied items together (docs/system/kernels.md § Score conventions).
-``PostfilterKNNInt8`` is int32 end to end; ``FullScanKNN`` keeps the input dtype."""
+``FullScanKNN`` keeps the input dtype."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ import torch
 from torch import Tensor
 
 from retrieve.functional import masked_topk, post_filter_topk
-from retrieve.indexing.quantize import quantize_int8_global, quantize_int8_global_codes
 from retrieve.interfaces import LinrBackend, RetrievalModule, check_backend, ops_for
 
 
@@ -44,72 +43,6 @@ class PostfilterKNN(RetrievalModule):
         else:  # aten::mm.dtype has no CPU kernel
             scores = torch.mm(query.float(), self.item_embs_t.float())
         return masked_topk(scores, self.k, valid=mask)
-
-
-class PostfilterKNNInt8(RetrievalModule):
-    """Single-stage int8 dense scoring + optional mask + top-K, int32 end-to-end (SilverTorch §3.2):
-    ``torch._int_mm`` (int8×int8 → int32) feeds ``torch.topk`` directly with no fp32
-    intermediate, and the global scales make ``dot_int`` a monotonic transform of cosine, so
-    topk ordering is exact up to ties introduced by the ``>>5`` range compression (boundary
-    ties are quality-equivalent). Storage is one ``[D, N]`` int8 buffer, half of
-    ``PostfilterKNN``; ``backend=`` has no effect."""
-
-    # cuBLAS LtGemm's int8 kernel requires M >= 17 (see docs/system/kernels.md →
-    # PostfilterKNNInt8); smaller batches are zero-padded to this M and sliced back.
-    _PAD_M = 17
-
-    item_codes_t: Tensor  # [D, N_padded] int8
-    n_items: Tensor  # 0-d int64: N before padding (not recoverable from the padded table)
-
-    def __init__(self, k: int, backend: LinrBackend = "triton") -> None:
-        super().__init__()
-        check_backend(backend, LinrBackend)
-        self.k = k
-        self.backend = backend
-        self._n_real = 0
-        self.register_load_state_dict_post_hook(_rederive_n_real)
-
-    def register_index(self, item_embs: Tensor) -> None:
-        codes, _ = quantize_int8_global(item_embs)  # [N, D] int8, chunked at build
-        # _int_mm needs N (after transpose) a multiple of 8; pad with zero items (sliced off in
-        # forward), quantize before padding so the global scale is unaffected.
-        n = codes.shape[0]
-        self._n_real = n
-        pad_n = (-n) % 8
-        if pad_n:
-            pad = codes.new_zeros((pad_n, codes.shape[1]))
-            codes = torch.cat([codes, pad], dim=0)
-        self.register_buffer("item_codes_t", codes.t().contiguous())
-        self.register_buffer("n_items", torch.tensor(n, dtype=torch.int64, device=codes.device))
-
-    def forward(
-        self,
-        query: Tensor,
-        mask: Tensor | None = None,
-    ) -> tuple[Tensor, Tensor]:
-        q_codes = quantize_int8_global_codes(query)
-        b = q_codes.shape[0]
-
-        if b < self._PAD_M:
-            pad_rows = self._PAD_M - b
-            pad = q_codes.new_zeros((pad_rows, q_codes.shape[1]))
-            q_codes_pad = torch.cat([q_codes, pad], dim=0)
-            dots = torch._int_mm(q_codes_pad, self.item_codes_t)[:b]
-        else:
-            dots = torch._int_mm(q_codes, self.item_codes_t)
-        dots = dots[:, : self._n_real]
-
-        # int32 → fp16 for topk: >>5 brings worst-case |dot| ≈ D·127² (~2²¹) under fp16's ~2¹⁶ range
-        # while preserving order; fp16 also halves CUB radix-select passes (2 vs 4).
-        scores = (dots >> 5).to(torch.float16)
-        return masked_topk(scores, self.k, valid=mask)
-
-
-def _rederive_n_real(module: PostfilterKNNInt8, incompatible_keys) -> None:
-    """``load_state_dict`` post-hook: the forward slices the padded ``_int_mm`` output at the
-    Python int ``_n_real`` (no per-call sync); a load replaces the buffer it came from."""
-    if hasattr(module, "n_items"):
-        module._n_real = int(module.n_items.item())
 
 
 class PrefilterKNN(RetrievalModule):

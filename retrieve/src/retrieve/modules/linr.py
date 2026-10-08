@@ -1,4 +1,4 @@
-"""The LiNR paper's four variants as modules: each composes the primitives of
+"""The LiNR paper's variants V1–V3 as modules: each composes the primitives of
 ``modules.knn`` / ``modules.bit_knn`` with an optional ``FilterModule`` held as ``self.filter``
 (so ``buffers()`` covers index and filter) and exposes ``forward(query, query_clause_attrs=None)
 -> (ids [B, k], scores [B, k])``. ``k`` forwards to the primitive that owns the final top-k, so
@@ -11,9 +11,9 @@ from torch import Tensor
 
 from retrieve.interfaces import FilterModule, LinrBackend, RetrievalModule, load_prebuilt
 from retrieve.modules.bit_knn import OneBitKNN
-from retrieve.modules.knn import PostfilterKNN, PostfilterKNNInt8, PrefilterKNN
+from retrieve.modules.knn import PostfilterKNN, PrefilterKNN
 
-__all__ = ["LiNRBuilder", "LiNRV1", "LiNRV2", "LiNRV3", "LiNRV4"]
+__all__ = ["LiNRBuilder", "LiNRV1", "LiNRV2", "LiNRV3"]
 
 
 def _k_of(attr: str) -> property:
@@ -152,37 +152,7 @@ class LiNRV3(RetrievalModule):
         return self.stage2(query, candidate_ids=cand, counts=(cand >= 0).sum(dim=1))
 
 
-class LiNRV4(RetrievalModule):
-    """LiNR V4 — int8 dense matmul (cuBLAS ``_int_mm``), optional mask from the filter, top-k."""
-
-    capturable = True
-    k = _k_of("idx")
-
-    def __init__(
-        self, k: int, *, filter: FilterModule | None = None, backend: LinrBackend = "triton"
-    ) -> None:
-        super().__init__()
-        self.idx = PostfilterKNNInt8(k=k, backend=backend)
-        self.filter = filter
-        self.backend = backend
-
-    def register_index(
-        self,
-        item_embs: Tensor,
-        item_clause_attrs: Tensor | None = None,
-        clause_is_reverse: Tensor | None = None,
-    ) -> None:
-        self.idx.register_index(item_embs)
-        if item_clause_attrs is not None:
-            _filter(self.filter).register_index(
-                item_clause_attrs, clause_is_reverse=clause_is_reverse
-            )
-
-    def forward(self, query: Tensor, query_clause_attrs: Tensor | None = None):
-        return self.idx(query, mask=_mask(self.filter, query_clause_attrs))
-
-
-VARIANTS = {"v1": LiNRV1, "v2": LiNRV2, "v3": LiNRV3, "v4": LiNRV4}
+VARIANTS = {"v1": LiNRV1, "v2": LiNRV2, "v3": LiNRV3}
 
 
 class LiNRBuilder:

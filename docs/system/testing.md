@@ -36,7 +36,7 @@ retrieve/tests/
 │   ├── test_bit_knn_base.py        (_PackedBitsKNN base: ctor/buffers/k_bits sentinel/candidates semantics)
 │   ├── test_bloom_filter.py
 │   ├── test_bloom_hash.py          (bloom_hash builders: chunked vs loop-free equality, seed determinism)
-│   ├── test_boundary.py            (the library side of the library / harness contract: SilverTorch + LiNRV1–V4;
+│   ├── test_boundary.py            (the library side of the library / harness contract: SilverTorch + LiNRV1–V3;
 │   │                                no wide intermediate in a forward)
 │   ├── test_combine_filters.py
 │   ├── test_compact.py
@@ -44,8 +44,8 @@ retrieve/tests/
 │   ├── test_kmeans.py              (KMeans.fit bit-reproducible; kmeans++ init)
 │   ├── test_large_offsets.py       (addressing past 2³¹ elements, one planted case per overflow class; skipped
 │   │                                below 48 / 24 GiB free — kernels.md § Addressing)
-│   ├── test_linr.py                (PostfilterKNN, PostfilterKNNInt8, PrefilterKNN, OneBitKNN, SimHashKNN × torch / Triton;
-│   │                                LiNRV1–V4 torch.equal to the hand-composed primitives; short candidate lists,
+│   ├── test_linr.py                (PostfilterKNN, PrefilterKNN, OneBitKNN, SimHashKNN × torch / Triton;
+│   │                                LiNRV1–V3 torch.equal to the hand-composed primitives; short candidate lists,
 │   │                                missing filters)
 │   ├── test_op_boundary.py         (every Triton op rejects a non-contiguous item table with `ValueError`)
 │   ├── test_quantize.py            (int8, OPORP, popcount)
@@ -323,7 +323,7 @@ module under test.
 | `combine_indices`          | `compact_mask(combine_masks(*[f.evaluate_mask(q)]))` |
 | `SilverTorch` (no bloom)   | `FullScanKNN` for recall (asserts ≥ 0.85 at full probe) + recall monotone in `n_probe` |
 | `SilverTorch` (qa=None)    | `SilverTorch (no bloom)` directly — `query_clause_attrs=None` is a documented fast path |
-| `LiNRV1`–`LiNRV4`          | the primitives composed by hand on the same inputs (`torch.equal` scores, ids up to ties) |
+| `LiNRV1`–`LiNRV3`          | the primitives composed by hand on the same inputs (`torch.equal` scores, ids up to ties) |
 | `SilverTorchBuilder` / `LiNRBuilder` `set_state_dict` | a fresh `set_item_embeddings` build of the same seed (buffers `torch.equal`, forwards equal) |
 | `KMeans(init="kmeans++")`  | the seeds are distinct rows of the index, one per blob on separable blobs; inertia ≤ `init="random"` there |
 | `PostfilterKNN` semantics | `(q @ x.T).masked_fill(~mask, -inf).topk(k)` |
@@ -461,7 +461,7 @@ INT8 + OPORP + popcount.
 
 ### [`test_linr.py`](../../retrieve/tests/correctness/test_linr.py)
 
-LiNR V1, V2, V3, V4 plus `SimHashKNN` in both backends.
+LiNR V1, V2, V3 plus `SimHashKNN` in both backends.
 
 - V1 (`PostfilterKNN`): top-K is sorted descending; mask path
   returns ids satisfying the mask.
@@ -475,25 +475,18 @@ LiNR V1, V2, V3, V4 plus `SimHashKNN` in both backends.
   candidates ⊆, fullgraph compile) parametrized over `k_bits` incl.
   `k_bits > D`; plus a quality-lift assertion vs OPORP at higher
   `k_bits`.
-- V4 (`PostfilterKNNInt8`): full-scan recall vs `FullScanKNN` ≥
-  0.95 at K=10 on unit-norm random embeddings (the int8 quantization
-  preserves topk ordering modulo per-element rounding); mask path
-  returns ids satisfying the mask; small-batch `_int_mm` padding corner.
 - Cross-backend: torch ↔ Triton across
   `pass_rate ∈ {None, 0.01, 0.1, 0.8}`. The bit-KNNs (`OneBitKNN` incl.
   `k_bits < D`, `SimHashKNN`) are `torch.equal` on scores, ids up to
   ties; `PrefilterKNN` goes through `assert_topk_id_sets_match` at
-  `atol=2e-6`, `rtol=0` (both fp32 sums of the same fp16 products, different order). (For `PostfilterKNNInt8` the
-  `backend=` flag is a no-op — cuBLAS LtGemm runs the same code on
-  both paths.)
+  `atol=2e-6`, `rtol=0` (both fp32 sums of the same fp16 products, different order).
 - `PostfilterKNN` (mask path) ≡ `PrefilterKNN` (compact_mask of same
   mask) as id sets.
 - `ExactAttributeFilter` decoupled composition: `PostfilterKNN` with
   `mask = ef.evaluate_mask & extra`, `PrefilterKNN` with
   `compact_mask(combined)`, `PrefilterKNN` with `ef.evaluate_indices`.
 - Edge cases (`TestEdgeCases`):
-  - mask-all-True ≡ unmasked path (`PostfilterKNN`,
-    `PostfilterKNNInt8` × torch / Triton); all-candidates ≡ unmasked
+  - mask-all-True ≡ unmasked path (`PostfilterKNN` × torch / Triton); all-candidates ≡ unmasked
     for `OneBitKNN` — both `torch.equal` on scores, ids up to ties.
   - mask-all-False produces no finite scores.
   - `OneBitKNN` zero `counts` returns full `(-1, -inf)` sentinels.
@@ -513,8 +506,7 @@ LiNR V1, V2, V3, V4 plus `SimHashKNN` in both backends.
 - The composites (`TestComposites`, the composites' bit-exactness gate):
   `LiNRV1` ≡ `PostfilterKNN` + `filter.evaluate_mask`, `LiNRV2` ≡
   `PrefilterKNN` over `filter.evaluate_indices`, `LiNRV3` ≡ `OneBitKNN` →
-  `PrefilterKNN` bounded by the survivors' count, `LiNRV4` ≡
-  `PostfilterKNNInt8` + mask — on `torch` and `triton` × filter kind
+  `PrefilterKNN` bounded by the survivors' count — on `torch` and `triton` × filter kind
   `{none, clause, bloom}` (V2: the two filter kinds), scores `torch.equal`,
   ids `assert_ids_equal_up_to_ties`. V3's filter is the `torch` one on
   every row; both backends emit the same ascending candidate order, so the
@@ -671,7 +663,7 @@ chunk-tail size, on CUDA and CPU. And `init="kmeans++"`:
 
 The library side of the library-harness boundary
 ([decisions](../decisions.md#harness)), for
-each of `SilverTorch` (`filter_mode="exact"`), `LiNRV1`–`LiNRV4` (with an
+each of `SilverTorch` (`filter_mode="exact"`), `LiNRV1`–`LiNRV3` (with an
 `ExactAttributeFilter`) on a tiny index, on `triton` and `torch`:
 
 - `module.k = k'` changes the output width without re-registration and

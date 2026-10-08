@@ -30,8 +30,8 @@ retrieve/src/retrieve/
 │                          post_filter_topk, popcount_int64, clause_subset_match, bloom_subset_match
 ├── modules/
 │   ├── silvertorch.py     SilverTorch (Algorithm 1; triton | torch | official), SilverTorchBuilder, OfficialConfig
-│   ├── linr.py            LiNRV1–LiNRV4 (the paper variants over the primitives + a filter), LiNRBuilder
-│   ├── knn.py             PostfilterKNN, PostfilterKNNInt8, PrefilterKNN, FullScanKNN
+│   ├── linr.py            LiNRV1–LiNRV3 (the paper variants over the primitives + a filter), LiNRBuilder
+│   ├── knn.py             PostfilterKNN, PrefilterKNN, FullScanKNN
 │   ├── bit_knn.py         OneBitKNN, SimHashKNN (+ the _PackedBitsKNN base)
 │   ├── filters.py         BloomFilter, ExactAttributeFilter
 │   └── official.py        Meta's silvertorch.modules.* re-exported lazily (OfficialMissing without the extra)
@@ -90,9 +90,8 @@ included — so there is no silent torch fallback. See
 [Backend dispatch](#backend-dispatch) below.
 
 - **LiNR** ([`modules/knn.py`](../../retrieve/src/retrieve/modules/knn.py),
-  [`modules/bit_knn.py`](../../retrieve/src/retrieve/modules/bit_knn.py)) — five
-  primitives (`PostfilterKNN` dense fp16-input, `PostfilterKNNInt8` dense
-  int8, `PrefilterKNN` sparse pre-filter, `OneBitKNN` 1-bit Sign-OPORP,
+  [`modules/bit_knn.py`](../../retrieve/src/retrieve/modules/bit_knn.py)) — four
+  primitives (`PostfilterKNN` dense fp16-input, `PrefilterKNN` sparse pre-filter, `OneBitKNN` 1-bit Sign-OPORP,
   `SimHashKNN` 1-bit SimHash; the two bit-KNNs share the
   [`_PackedBitsKNN`](../../retrieve/src/retrieve/modules/bit_knn.py)
   base, which owns scoring/dispatch while subclasses own bit production).
@@ -104,9 +103,9 @@ included — so there is no silent torch fallback. See
   [`compact_mask`](../../retrieve/src/retrieve/functional.py), or
   any upstream cascade composed via
   [`combine_masks` / `combine_indices`](../../retrieve/src/retrieve/functional.py).
-  The paper's four variants are shipped as compositions of these in
+  The paper's variants V1–V3 are shipped as compositions of these in
   [`modules/linr.py`](../../retrieve/src/retrieve/modules/linr.py) —
-  `LiNRV1`–`LiNRV4`, each holding its filter as the `filter` submodule —
+  `LiNRV1`–`LiNRV3`, each holding its filter as the `filter` submodule —
   with the same `forward(query, query_clause_attrs=None)` as `SilverTorch`
   (see [LiNR variants](#linr-variants)).
 - **SilverTorch** ([`modules/silvertorch.py`](../../retrieve/src/retrieve/modules/silvertorch.py)) —
@@ -177,8 +176,8 @@ and must be overridden by every concrete filter; `evaluate_indices` and
 overridden only when a fused kernel beats the default:
 
 - `evaluate_mask(query_clause_attrs) → [B, N] bool` — dense path, fed to
-  the mask-taking dense layers (`PostfilterKNN` / `PostfilterKNNInt8`,
-  which mask scores before top-K) or compacted via `compact_mask` for
+  the mask-taking dense layers (`PostfilterKNN`,
+  which masks scores before top-K) or compacted via `compact_mask` for
   the candidates-taking layers. `ExactAttributeFilter` routes to the
   fused `clause_mask` Triton kernel on the `"triton"` backend (no
   `[B, N, C, A_max]` intermediate), pure-torch broadcast on `"torch"`.
@@ -220,12 +219,12 @@ Two composition helpers ship in
 
 ## LiNR variants
 
-The paper's V1–V4 are modules of their own
+The paper's V1–V3 are modules of their own
 ([`modules/linr.py`](../../retrieve/src/retrieve/modules/linr.py)), each a
 composition of the primitives below plus an optional `FilterModule`
 attached at construction as `filter=` (a submodule, so `buffers()` and a
 state dict cover index and filter; its buffers carry the `filter.` prefix).
-All four share `register_index(item_embs, item_clause_attrs=None,
+All three share `register_index(item_embs, item_clause_attrs=None,
 clause_is_reverse=None)` — which registers the filter too when attributes
 are given — and `forward(query, query_clause_attrs=None) -> (ids [B, k],
 scores [B, k])`; `k` forwards to the primitive that owns the final top-k and
@@ -237,9 +236,8 @@ is settable after registration; `capturable = True` is a class attribute
 | `LiNRV1(k, *, filter=None, backend)` | `PostfilterKNN` (`idx`) + `filter.evaluate_mask` | dense dot (fp16 inputs, fp32 scores), mask, top-k |
 | `LiNRV2(k, *, filter, backend)` | `PrefilterKNN` (`idx`) over `filter.evaluate_indices` | `query_clause_attrs` required — the filter is the candidate source |
 | `LiNRV3(k, *, candidate_pool=5000, seed=0, filter=None, backend)` | `OneBitKNN(k=candidate_pool)` (`stage1`) → `PrefilterKNN(k)` (`stage2`); the filter's candidates feed stage 1, stage 2 is bounded by the survivors' count | `set_query_params(candidate_pool=…)` re-validates against `N` |
-| `LiNRV4(k, *, filter=None, backend)` | `PostfilterKNNInt8` (`idx`) + `filter.evaluate_mask` | int8 dot, mask, top-k |
 
-`LiNRBuilder(variant, **kwargs)` (`variant ∈ {"v1", "v2", "v3", "v4"}`,
+`LiNRBuilder(variant, **kwargs)` (`variant ∈ {"v1", "v2", "v3"}`,
 `kwargs` the class's) builds one: `.set_item_embeddings(x)` and
 `.set_filter(filter, item_attrs=None, clause_is_reverse=None)` for a fresh
 index, or `.set_state_dict(sd)` (plus `.set_filter(filter)` so the `filter.`
@@ -248,10 +246,8 @@ buffers have a home) for a prebuilt one, then `.set_backend(...)`,
 [`interfaces.load_prebuilt`](../../retrieve/src/retrieve/interfaces.py): one
 buffer per state-dict key (shape and device from the saved tensor), then
 `load_state_dict`, so every load hook re-derives what a forward caches from
-a buffer — `SilverTorch`'s two scalars, `OneBitKNN`'s `k_bits` sentinel
-(from `oporp_signs`), `PostfilterKNNInt8`'s real item count (its `n_items`
-0-d buffer: the padded `_int_mm` table cannot tell a zero pad column from
-a zero item).
+a buffer — `SilverTorch`'s two scalars and `OneBitKNN`'s `k_bits` sentinel
+(from `oporp_signs`).
 
 The primitives all return `(ids[B, K], scores[B, K])`; `-1` / `-inf` are the
 "no item" sentinels for masked-out or short rows. Each module takes a
@@ -271,18 +267,6 @@ utility, not per-class copies.
   CUB already deliver the same memory traffic; the
   `backend=` flag is accepted for API symmetry but is a no-op on this
   class.
-- **`PostfilterKNNInt8` — dense int8 similarity, optional mask.**
-  Single-stage int8 dense matmul + optional mask + top-K, int32
-  end-to-end. Items and queries are int8-quantized with one global scale
-  each (SilverTorch §3.2); the matmul runs through `torch._int_mm`
-  (cuBLAS LtGemm, IMMA tensor cores on Ampere+) and the int32 result
-  feeds `torch.topk` directly — no rescale to fp32, no scale recovery,
-  because two global scalars are a positive monotonic transform of the
-  true dot product (topk ordering exact modulo int8 rounding). Storage
-  is one `[D, N]` int8 buffer — half the memory of `PostfilterKNN`'s
-  fp16 layout. Forward takes `(query, mask=None)`. The `backend=` flag
-  is accepted for API symmetry but is a no-op (cuBLAS LtGemm runs the
-  same code on both paths).
 - **`PrefilterKNN` — sparse pre-filter.** Forward takes
   `(query, candidate_ids=None, counts=None)` — passing item ids per query,
   precompacted by the caller (typically
@@ -498,9 +482,9 @@ builders with the filters package, not the module classes:
   `ops_for(backend)` (the backend → op-namespace resolver), `DISPATCH` (the
   dispatch table as data) and `load_prebuilt` (the builders' state-dict
   path). All retrieval layers
-  (`PostfilterKNN`, `PostfilterKNNInt8`, `PrefilterKNN`,
+  (`PostfilterKNN`, `PrefilterKNN`,
   `_PackedBitsKNN` and its two subclasses, `SilverTorch`, `FullScanKNN`,
-  `LiNRV1`–`LiNRV4`) subclass `RetrievalModule`.
+  `LiNRV1`–`LiNRV3`) subclass `RetrievalModule`.
 - [`modules/official.py`](../../retrieve/src/retrieve/modules/official.py) —
   Meta's own `silvertorch.modules` classes (`BloomIndexSearchModule`,
   `FilterQueryParserModule`, their builders), fetched on first attribute
@@ -578,12 +562,12 @@ label stands for:
 |---|---|---|---|
 | `SilverTorch` | fused Triton (`ops.triton.codesigned_probe_score*`) | eager torch (`ops.reference`) | Meta's `torch.ops.st.*` (eager-only) |
 | `LiNRV2` / `LiNRV3` | the primitives' Triton ops below | eager (`ops.reference`) | raises `ValueError` |
-| `LiNRV1` / `LiNRV4` | cuBLAS (flag is a no-op; a filter cell adds the filter's own path) | same | raises `ValueError` |
+| `LiNRV1` | cuBLAS (flag is a no-op; a filter cell adds the filter's own path) | same | raises `ValueError` |
 | `PrefilterKNN` | `fused_masked_knn_topk` | eager (`ops.reference`) | raises `ValueError` |
 | `OneBitKNN` / `SimHashKNN` | `oporp_1bit_match_topk` | eager (`ops.reference`) | raises `ValueError` |
 | `ExactAttributeFilter` | `clause_mask` / `clause_compact` | eager (`ops.reference`) | raises `ValueError` |
 | `BloomFilter` | `bloom_match` / `bloom_compact` | eager (`ops.reference`) | raises `ValueError` |
-| `PostfilterKNN` / `PostfilterKNNInt8` | cuBLAS (flag is a no-op) | same | raises `ValueError` |
+| `PostfilterKNN` | cuBLAS (flag is a no-op) | same | raises `ValueError` |
 
 A cell labelled `backend="official"` for anything other than
 `SilverTorch` therefore cannot exist. The eval harness mirrors that
@@ -617,7 +601,7 @@ gate. Performance characterization (latency, memory, recall sweeps) lives in
 ## Module layout
 
 The layout is by role ([Package layout](#package-layout)), with these
-conventions: the version-numbered classes are compositions only — `LiNRV1`–`LiNRV4` own no kernel and no quantizer, the
+conventions: the version-numbered classes are compositions only — `LiNRV1`–`LiNRV3` own no kernel and no quantizer, the
 primitives keep `register_index` as their only build path and the builders
 call it; no caller crosses quantizer families (the bit-KNNs never see INT8,
 `SilverTorch` never sees OPORP/SimHash); a kernel file is reached with
@@ -626,8 +610,7 @@ while the package attribute `retrieve.ops.triton.<kernel>` is the op of
 the same name. Op schemas, buffer names and registration order are
 stable, so a state dict written by an earlier release loads into the
 current modules ([decisions](../decisions.md#library)); state is added,
-never renamed (the composites' `filter.` prefix,
-`PostfilterKNNInt8.n_items`).
+never renamed (the composites' `filter.` prefix).
 
 ## Which page owns what
 

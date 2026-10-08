@@ -31,7 +31,7 @@ The package has two public layers and two helper namespaces:
 
 | namespace | what it holds |
 | --- | --- |
-| `retrieve` / `retrieve.modules` | the `nn.Module`s: `SilverTorch`, the LiNR paper variants `LiNRV1`–`LiNRV4`, the primitives they compose, the two filters; the two builders and `OfficialConfig`; `retrieve.modules.official` for Meta's own modules |
+| `retrieve` / `retrieve.modules` | the `nn.Module`s: `SilverTorch`, the LiNR paper variants `LiNRV1`–`LiNRV3`, the primitives they compose, the two filters; the two builders and `OfficialConfig`; `retrieve.modules.official` for Meta's own modules |
 | `retrieve.ops.triton` / `.reference` / `.official` | the kernels behind them, one namespace per backend with the same op names and signatures (`import retrieve.ops.triton` registers `torch.ops.retrieve.*`) |
 | `retrieve.indexing` | index-build math: `KMeans`, the IVF layouts, the quantizers, the bloom hash builders |
 | `retrieve.functional` | query-time glue: `masked_topk`, `compact_mask`, `combine_masks` / `combine_indices`, `post_filter_topk` |
@@ -98,9 +98,9 @@ same = SilverTorchBuilder(k=k, n_lists=1024, n_probe=16).set_state_dict(torch.lo
 
 ## Example: the LiNR variants
 
-The LiNR family scores the full corpus directly. The paper's four variants ship as modules:
-`LiNRV1` (dense fp16-input scan + mask), `LiNRV2` (filter → candidates → exact rescoring), `LiNRV3`
-(1-bit Hamming top-`candidate_pool` → exact rescoring) and `LiNRV4` (int8 dense + mask), each
+The LiNR family scores the full corpus directly. The paper's variants V1–V3 ship as modules:
+`LiNRV1` (dense fp16-input scan + mask), `LiNRV2` (filter → candidates → exact rescoring), and `LiNRV3`
+(1-bit Hamming top-`candidate_pool` → exact rescoring), each
 optionally holding a filter. V3 alone, no filter:
 
 ```python

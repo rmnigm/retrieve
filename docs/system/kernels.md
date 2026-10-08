@@ -24,8 +24,7 @@ signature in [`ops/reference/`](../../retrieve/src/retrieve/ops/reference/)
 - LiNR — kernels used by `PrefilterKNN` / `OneBitKNN` / `SimHashKNN`
   (`fused_masked_knn_topk`,
   `oporp_1bit_match_topk`). `PostfilterKNN`'s dense fp16-input matmul +
-  top-K and `PostfilterKNNInt8`'s int8 `_int_mm` + int32 top-K are
-  both pure torch — there's no real fusion to win over cuBLAS LtGemm +
+  top-K is pure torch — there's no real fusion to win over cuBLAS LtGemm +
   CUB.
 - filters — standalone filter primitives consumed by the `FilterModule`
   family: `clause_compact` (powers `ExactAttributeFilter.evaluate_indices`),
@@ -427,24 +426,6 @@ host-side `torch.topk`, so its memory traffic and selection cost match
 cuBLAS + CUB exactly. `PostfilterKNN` accepts the
 `backend=` flag for API symmetry but both values dispatch to this same
 pure-torch path.
-
-## PostfilterKNNInt8 dense path — pure torch, no kernel
-
-`PostfilterKNNInt8`'s forward is `torch._int_mm(query_codes,
-item_codes_T)` (int8×int8 → int32, cuBLAS LtGemm, IMMA tensor cores on
-sm_80+) + optional `masked_fill(int32_min)` + `torch.topk` on the int32
-result — implemented directly in
-[`PostfilterKNNInt8`](../../retrieve/src/retrieve/modules/knn.py).
-Items and queries are int8-quantized with one global scalar scale each
-(SilverTorch §3.2); because both scales are global constants per call,
-the int32 dot product is a positive monotonic transform of the true
-fp32 dot, so topk ordering is exact (modulo per-element int8 rounding)
-without rescaling to fp32. Storage is one `[D, N]` int8 buffer — half
-of `PostfilterKNN`'s fp16 layout. `torch._int_mm` requires `M >=
-17`, so small batches are zero-padded before the matmul and sliced
-after; quantization runs **before** padding so the padded zero rows
-don't shift the global scale. No Triton kernel; `backend=` is accepted
-for API symmetry but both values dispatch here.
 
 ## `fused_masked_knn_topk` — PrefilterKNN sparse path
 
@@ -921,7 +902,6 @@ each module runs the same op chain in pure torch (no kernels), eager.
 | layer                       | path         | kernel(s) called                                  |
 |-----------------------------|--------------|---------------------------------------------------|
 | [`PostfilterKNN`](../../retrieve/src/retrieve/modules/knn.py) | always dense | none — pure torch `(q @ x.T)` + `masked_topk` |
-| [`PostfilterKNNInt8`](../../retrieve/src/retrieve/modules/knn.py) | always dense | none — pure torch `torch._int_mm(...)` + `masked_topk` (int8×int8 → int32, IMMA) |
 | [`PrefilterKNN`](../../retrieve/src/retrieve/modules/knn.py)         | candidates   | `fused_masked_knn_topk` over caller-precompacted `(candidate_ids, counts)` |
 |                                                                | unmasked     | none — pure torch dense path (nothing to pre-filter) |
 | [`OneBitKNN`](../../retrieve/src/retrieve/modules/bit_knn.py) / [`SimHashKNN`](../../retrieve/src/retrieve/modules/bit_knn.py) | full         | `oporp_1bit_match_topk_full` (HAS_INDICES=False)       |

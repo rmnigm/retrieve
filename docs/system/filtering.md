@@ -12,8 +12,7 @@ sources: [retrieve/src/retrieve/modules/filters.py, retrieve/src/retrieve/indexi
 This repo reproduces two retrieval papers — SilverTorch (IVF + INT8 ANN
 with bloom or exact attribute filter fused inline) at
 [retrieve/src/retrieve/modules/silvertorch.py](../../retrieve/src/retrieve/modules/silvertorch.py)
-and LiNR (V1 fp16 dense / V2 sparse pre-filter / V3 1-bit OPORP, plus a
-V4 int8 dense variant added beyond the paper) at
+and LiNR (V1 fp16 dense / V2 sparse pre-filter / V3 1-bit OPORP) at
 [retrieve/src/retrieve/modules/knn.py](../../retrieve/src/retrieve/modules/knn.py) and
 [bit_knn.py](../../retrieve/src/retrieve/modules/bit_knn.py).
 The standalone filters are [retrieve/src/retrieve/modules/filters.py](../../retrieve/src/retrieve/modules/filters.py);
