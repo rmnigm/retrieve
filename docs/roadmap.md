@@ -278,9 +278,9 @@ tile per width*).
 
 ```
 tag campaign-v2 ───────────────────────┬─> V-PILOT ─┬─> V-AX-SYNTH ─> V-YFCC ─> V-SEEDS ─┐
-V2-FIX-A ─> tag campaign-v2.1: before every timed V-AX-SYNTH, V-YFCC, V-PUBMED, V-SEEDS cell
                                        │            └─> V-GR-DEEP ─────────────────────────┤
                                        ├─> V-CODESIGN, D3 ─────────────────────┤
                                        └─> V-PUBMED ───────────────────────────────────────┴─> D1-G ─> F2, F4, F5
 M1: before any timed step on a multi-GPU pod
+V2-FIX-A ─> tag campaign-v2.1: before every timed V-AX-SYNTH, V-YFCC, V-PUBMED, V-SEEDS cell
 ```
