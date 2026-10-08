@@ -45,6 +45,7 @@ re-upload of a subtree replaces its row.
 | `artifacts/linr-v2-backend-parity` | V2 parity probes | 4 | 37,287 | `7066509248e9b21d3a6cc085c9c7d6673621ae616155c4e67883cfbfda4694ac` |
 | `artifacts/official-silvertorch` | B3 kernel-only dumps, official facts, WP3 parity probes | 5 | 775,632 | `1d8d880391ce9d181d7e67c606838eb4fd2846f9e2c48da0f819937ceccb8b95` |
 | `artifacts/campaign-v2` | campaign-v2 record inventory (roadmap P-INV, [README](campaign-v2/README.md)): `inventory.csv` (1,579 records of every subtree above, one row per perf entry), `pivot.csv`, `pass_rates.csv`, `wall_time.csv`, `reuse.csv`; planning numbers, not citable | 5 | 9,430,224 | `8848b9f9fe72dd62e7ef04f1c89c1c0a0be46eeadee42568551c96ed7a507c66` |
+| `artifacts/r-res` | R-RES ([README](campaign-v2/r-res/README.md)): the `confirm.sh` records and sidecars (A: arXiv SilverTorch at `--k 100`; B: goodreads V2 / V3 with the pre-L5 fp16 sum, one tree per k), the CPU analysis outputs, the one-shot oracle log, and `golden-rederive/` (the two re-derived golden cells, both runs, logs, provenance, clocks, `golden_check.md`, `golden_vs_h2.txt`); `_parity` spills and compile caches not kept (the scripts regenerate them); not citable | 35 | 391,641 | `a5fb77f908aa8675af2b93560df8ecb63080cf3ce6876e812dbbb8a5cb0b298b` |
 
 The `d1-a` and `artifacts/*` subtrees were published by
 [H1](h1-results-storage/README.md) on 2026-09-26; their file counts and bytes
