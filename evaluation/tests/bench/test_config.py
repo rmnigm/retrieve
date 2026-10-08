@@ -354,12 +354,12 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("n95", "pubmed"): (3, 15),
     ("codesign", "arxiv"): (18, 54),
     ("codesign", "goodreads"): (18, 54),
-    ("bloomwidth", "goodreads"): (72, 72),
-    ("bloomwidth", "arxiv"): (216, 216),
-    ("bloomwidth", "pubmed"): (72, 72),
-    ("bloomwidth-timed", "goodreads"): (36, 36),
-    ("bloomwidth-timed", "arxiv"): (108, 108),
-    ("bloomwidth-timed", "pubmed"): (36, 36),
+    ("bloomwidth", "goodreads"): (42, 42),
+    ("bloomwidth", "arxiv"): (126, 126),
+    ("bloomwidth", "pubmed"): (42, 42),
+    ("bloomwidth-timed", "goodreads"): (21, 21),
+    ("bloomwidth-timed", "arxiv"): (63, 63),
+    ("bloomwidth-timed", "pubmed"): (21, 21),
 }
 KEPT = {
     "goodreads": {"c0_genre", "c1_lang_reverse", "all4"},
@@ -478,10 +478,14 @@ def test_codesign_bloomwidth_and_n95_suites():
         "triton",
         "official",
     }
-    assert sorted({(j.bloom["m_bits"], j.bloom["k_hash"]) for j in bw}) == [
+    tri = [j for j in bw if j.backend == "triton"]
+    assert sorted({(j.bloom["m_bits"], j.bloom["k_hash"]) for j in tri}) == [
         (m, k) for m in (64, 128, 256, 512, 1024, 2048) for k in (3, 5)
     ]
-    assert all(j.bloom == j.build and j.query == ({},) for j in bw)
+    assert all(j.bloom == j.build and j.query == ({},) for j in tri)
+    # official's width is OfficialConfig.b_multiplier, not m_bits: only k_hash is gridded
+    assert sorted(j.build["k_hash"] for j in bw if j.backend == "official") == [3, 5]
+    assert not any("m_bits" in j.build for j in bw if j.backend == "official")
     timed = _real("bloomwidth-timed", "pubmed", seeds=[0])
     assert {(j.ks, j.batch_sizes, j.bloom["k_hash"]) for j in timed} == {((100,), (16,), 5)}
     n95 = _real("n95", "pubmed")

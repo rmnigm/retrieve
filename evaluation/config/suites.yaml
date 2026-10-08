@@ -179,8 +179,11 @@ bloomwidth:                    # D3 / F4a, C4: bloom width vs FPR and recall; ru
     pubmed: [c0_mesh]          # multi-valued (K = 4)
   arms:
     - algo: silvertorch
-      backends: [triton, official]
+      backends: [triton]
       build: {m_bits: [64, 128, 256, 512, 1024, 2048], k_hash: [3, 5]}
+    # official ignores m_bits: its bloom width is OfficialConfig.b_multiplier (measured: the
+    # same index_mib and recall at 64 and 2048 bits), so only k_hash (its search k) is gridded
+    - {algo: silvertorch, backends: [official], build: {k_hash: [3, 5]}}
 
 bloomwidth-timed:              # one timed point per width
   datasets: [goodreads, arxiv, pubmed]
@@ -195,7 +198,8 @@ bloomwidth-timed:              # one timed point per width
     pubmed: [c0_mesh]
   arms:
     - algo: silvertorch
-      backends: [triton, official]
+      backends: [triton]
       build: {m_bits: [64, 128, 256, 512, 1024, 2048], k_hash: [5]}
+    - {algo: silvertorch, backends: [official], build: {k_hash: [5]}}   # its one width
 
 bloom: {m_bits: 1024, k_hash: 5}   # shared defaults; a suite may override with its own `bloom:`

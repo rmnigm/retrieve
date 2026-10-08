@@ -359,8 +359,8 @@ unfiltered `quality` suite ([decisions](../decisions.md#harness)); synth's
 | `synth` | goodreads-, arxiv-, yfcc10m-synth ([datasets](datasets.md#synthetic-selectivity-attrs)) | V1, V2 triton; V3 `candidate_pool_frac` {0.01, 0.05}; `silvertorch` triton clause {24, n95, 4·n95}, triton and official bloom at n95; `postfilter` {1, 8}; V1 / V2 torch, eager and compiled, on `p001, p01, p1`, goodreads + arxiv only. k 1000 is dropped where N·p < 4000 (goodreads `p0001`, `p0003`; arxiv `p0001`) | F1, F2, C1, C2, C6 |
 | `n95` | pubmed `all5` (its median kept sweep) | `silvertorch` triton clause, `n_probe` {8, 16, 32, 64, 128}, bs 16; run with `--skip-perf` | pubmed's n95 |
 | `codesign` | arxiv (kept sweeps), goodreads (`c0_genre, c2_format, c3_year`) | official bloom, `bloom_path` {partial, full} × `n_probe` {8, 32, 128}, `n_lists` arxiv 1664 / goodreads 1024, k 100 | F4b, C5 |
-| `bloomwidth` | goodreads `c0_genre`, arxiv kept, pubmed `c0_mesh` | `silvertorch` triton + official bloom, `m_bits` {64 … 2048} × `k_hash` {3, 5}, bs 16; run with `--skip-perf` | F4a, C4 |
-| `bloomwidth-timed` | the same | the same widths at `k_hash` 5, k 100, bs 16, timed | F4a |
+| `bloomwidth` | goodreads `c0_genre`, arxiv kept, pubmed `c0_mesh` | `silvertorch` triton bloom `m_bits` {64 … 2048} × `k_hash` {3, 5}; official bloom `k_hash` {3, 5} (its width is `OfficialConfig.b_multiplier`, not `m_bits`); bs 16; run with `--skip-perf` | F4a, C4 |
+| `bloomwidth-timed` | the same | the same widths at `k_hash` 5 (official: its one width), k 100, bs 16, timed | F4a |
 
 **n95** is the smallest `n_probe` that reaches `recall_oracle@100 ≥ 0.95`
 on a dataset's median sweep. It is read off `deep` / `synth` / `n95` after
@@ -620,7 +620,11 @@ index, the standalone filter of step 3 and so the bloom pass counts and
 step-3 asset key carries the bloom, so each width builds its own filter.
 The exact oracle does not depend on the width and is shared. A cell that
 does not grid them keeps the suite default outside `params`, so its key is
-byte-for-byte the pre-grid one. The `bloomwidth` suites grid them.
+byte-for-byte the pre-grid one. The `bloomwidth` suites grid them. On
+`official`, `SilverTorch` ignores `m_bits`: the official index's width is
+`OfficialConfig.b_multiplier`, and `k_hash` is its search `k`. An official
+cell's `bloom_fp_rate` is the standalone Triton filter's at the job's
+`m_bits`, not the official index's.
 
 ### Compiled arms
 
