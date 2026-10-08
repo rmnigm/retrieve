@@ -174,10 +174,13 @@ only on a leg with no records yet.
     (`silvertorch`/triton 16 × ~22 min, `linr_v3` 8 cells, `linr_v2` 1);
     3 streams (the three commands; ~6 h wall).
   - [ ] **D1-F: goodreads `filter` on the E1c encoder, the full leg** (105
-    cells). `campaign --suite filter --dataset goodreads
-    --resume --timeout 48`. Upload as `d1/goodreads-e1c`; label
-    `d1/goodreads` as the gSASRec run in hub-index. **≈ 4 GPU-h**; up to 4
-    streams by `--algo` (`bench run`, `silvertorch` holding both backends).
+    cells). The `filter` suite now also lists `postfilter` (D5), so the leg
+    is a `bench run` over D1's four algos, not a `campaign`: `run --dataset
+    goodreads --dim 128 --suite filter --algo linr_v1_filter_mask --algo
+    linr_v2 --algo linr_v3 --algo silvertorch --resume`. Upload as
+    `d1/goodreads-e1c`; label `d1/goodreads` as the gSASRec run in
+    hub-index. **≈ 4 GPU-h**; up to 4 streams by `--algo` (`silvertorch`
+    holding both backends).
   - [ ] **D1-C: goodreads `deep`** (135 jobs, no records yet). `campaign --suite deep --dataset goodreads --resume --timeout
     48`. Upload `d1/goodreads-deep`. **≈ 25-45 GPU-h** (arxiv `deep`: ~2
     min a cell over 870 cells, ~30 h; goodreads has more jobs on a 0.8 M
@@ -209,23 +212,16 @@ only on a leg with no records yet.
   so a row returns fewer than K results whenever filtered-out items took
   top-K slots. No harness algorithm does this today
   (`linr_v1_filter_mask` masks *before* top-k and is exact).
-  - [ ] **D5-code: the `postfilter` algo.** In `bench` (torch backend
-    only; clause and bloom filter kinds): fetch top-αK, filter, keep the
-    first K survivors, pad short rows with the `-1` / `-inf` sentinel so
-    lost candidates count as a recall loss. α is a query param swept over
-    {1, 2, 4, 8} (`params.postfilter` in the `filter` suite), so the
-    report shows what a naive system pays in latency to recover recall;
-    α = 1 is the headline baseline. *Gate*: on a small fixture its ids and
-    scores equal a hand-computed torch reference (matmul → topk(αK) →
-    filter → first K) at every α; `recall_oracle` reported against the
-    exact oracle; the config gate expands it on every `filter` dataset;
-    the harness suite green. CPU plus a smoke cell, `opus`.
   - [ ] **D5-run: the baseline on every `filter`-suite dataset** (goodreads
-    on E1c, arxiv, yfcc10m, pubmed, openalex) with narrow `bench run
-    --algo postfilter` scoping, so no existing record reruns; upload as
-    `d5/<dataset>`. Needs D5-code; openalex after E5's
-    restage. **≈ 5-8 GPU-h** (4 α values; a dense matmul per batch);
-    streams by dataset.
+    on E1c, arxiv, yfcc10m, pubmed) with narrow `bench run --algo
+    postfilter` scoping, so no existing record reruns; upload as
+    `d5/<dataset>`. openalex's postfilter cells run inside E5's `campaign`
+    (the suite lists the algo) and upload with `e5/openalex`. Before its
+    report: `bench report` has no `ALGO_LABEL` for `postfilter` and no rule
+    for its α rows, so its tables omit it today; add both (CPU,
+    `test_report.py` pins them). Smoke (arxiv d128 `c0_maincat`, 4/4 ok) in
+    [validation](validation.md). **≈ 5-8 GPU-h** (4 α values; a dense
+    matmul per batch); streams by dataset.
 
 ## Phase E: datasets
 
@@ -275,16 +271,16 @@ only on a leg with no records yet.
 | D3 (after its code) | ≈ 3 | by dataset |
 | F2-R (if chosen) | ≈ 2 | 1 |
 
-L6 is a short library-suite run. Runnable now: everything in D1 but D1-G, D5-code (and E5's
+L6 is a short library-suite run. Runnable now: everything in D1 but D1-G, D5-run (and E5's
 restage). The total is ≈ 89-124 GPU-h, of which D1 is ≈ 51-73.
 
 ## Dependencies
 
 ```
 D1-B, D1-E, D1-F, D1-C, D1-D ─────┬─> D1-G ─┬─> D3 ──────────┐
-D5-code ─> D5-run (openalex after E5)       ├─> F2 (+ F2-R)  ├─> F5
+                                            ├─> F2 (+ F2-R)  ├─> F5
                                             ├─> F4           │
                                             └─> E5 ──────────┤
-D5-run ──────────────────────────────────────────────────────┘
+D5-run (its openalex cells run inside E5) ───────────────────┘
 M1: before any timed step runs on a multi-GPU pod
 ```
