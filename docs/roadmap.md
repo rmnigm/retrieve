@@ -131,6 +131,13 @@ final tag, and D1-G gates it. After each leg: `bench upload --verify`, a
 [hub-index](artifacts/hub-index.md) row, the validation row, a look at the
 exhibit it feeds.
 
+**Library under a running leg.** The shared venv `/venvs/retrieve` is an
+editable install: every `bench` child imports `retrieve` from
+`/workspace/retrieve`, while `code_version` is read from the checkout that
+launched `bench`. Until H-PROVENANCE lands, a pod's `/workspace/retrieve`
+library tree stays fixed while any leg runs on that pod; it moves to a new
+tag only between legs (a docs/config-only fast-forward is fine).
+
 **Redo ledger** (cells whose code or parameters changed after they ran):
 
 | records | changed by | redo |
@@ -209,6 +216,13 @@ co-design.
   its nearest centroid), `arxiv-corr-synth.yaml`, CPU test (pass rate, query
   side); then arXiv at p {0.01, 0.03, 0.1}, every synth arm. IVF's best case
   next to the uniform worst case (F2). Pod c, slot 2. **≈ 3 GPU-h.**
+- [ ] **H-PROVENANCE: stamp the library that is imported.** `bench` computes
+  `code_version` from the checkout it runs in, but the editable venv imports
+  `retrieve` from `/workspace/retrieve`: a fast-forward there mid-leg makes
+  later children run new code under the old stamp, silently (found on pod c,
+  2026-10-09). Fix: the tree hash of `Path(retrieve.__file__)`'s subtree (or
+  refuse when it differs from the launching checkout's), per child. Harness
+  only, CPU test. **0 GPU-h.**
 - [ ] **ST-DLOOP: SilverTorch Triton probe scorers at wide embeddings**
   (user, 2026-10-09: match Meta's CUDA kernels). D3 PubMed at v2.1 tripped
   the surprise gate: Triton 2.80-2.98 ms vs official 1.99 ms at d768 (bs 16),
