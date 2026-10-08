@@ -524,3 +524,40 @@ def test_compiled_arm_times_its_warmup_apart_and_skips_graph(tiny_configs, tmp_p
                              for e in graph)  # fmt: skip
     plain = _records(out / "arms" / "tiny-d64.jsonl")
     assert all(r["candidate_pool"] is None for r in plain)
+
+
+def test_quality_cache_copies_seed_free_arms_only(tiny_configs, tmp_path, monkeypatch):
+    """G-cache (CPU): V1 and the postfilter copy seed 0's quality to seeds 1-2 (perf still runs
+    per seed); V3 and SilverTorch always recompute. A new code_version or other ks is a miss."""
+    ds, suites = tiny_configs
+    out = tmp_path / "results"
+    path = out / "cache" / "tiny-d64.jsonl"
+    assert dict(run.run(load_matrix(ds, suites, "cache"), out_dir=out, **KW)) == {"ok": 12}
+    by = {(r["algo"], r["seed"]): r for r in _records(path)}
+    for algo in ("linr_v1_filter_mask", "postfilter"):
+        assert by[algo, 0]["quality_source"] is None and by[algo, 0]["seed_scope"] == "pool"
+        for seed in (1, 2):
+            r = by[algo, seed]
+            assert r["quality_source"] == {"seed": 0, "code_version": bench.code_version()}
+            assert r["quality"] == by[algo, 0]["quality"] and r["perf"]
+    for algo in ("linr_v3", "silvertorch"):
+        for seed in (0, 1, 2):
+            r = by[algo, seed]
+            assert r["quality_source"] is None and r["seed_scope"] == "pool+build"
+    # Fresh quality at seed 1 equals what the cache copied.
+    fresh = tmp_path / "fresh"
+    jobs = load_matrix(ds, suites, "cache", algos=["linr_v1_filter_mask"], seeds=[1])
+    run.run(jobs, out_dir=fresh, skip_perf=True, **KW)
+    (r,) = _records(fresh / "cache" / "tiny-d64.jsonl")
+    assert r["quality_source"] is None
+    assert {k: v for k, v in r["quality"].items() if k != "parity"} == {
+        k: v for k, v in by["linr_v1_filter_mask", 1]["quality"].items() if k != "parity"
+    }
+    # Other ks, or another code_version: no source, quality is computed.
+    jobs = load_matrix(ds, suites, "cache", algos=["linr_v1_filter_mask"], seeds=[2], ks=[2])
+    run.run(jobs, out_dir=out, skip_perf=True, **KW)
+    assert _records(path)[-1]["quality_source"] is None
+    monkeypatch.setattr(bench, "code_version", lambda: "0" * 40)
+    jobs = load_matrix(ds, suites, "cache", algos=["linr_v1_filter_mask"], seeds=[1])
+    run.run(jobs, out_dir=out, **KW)
+    assert _records(path)[-1]["quality_source"] is None

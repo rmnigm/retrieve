@@ -24,6 +24,10 @@ device-side assert kills the context, so every later cell would fail in seconds 
 same traceback and ``--resume`` would re-run them all) — recorded, then re-raised so the
 campaign moves to the next group.
 
+Quality cache (docs/system/evaluation.md § Quality cache): a ``SEED_FREE_QUALITY`` cell copies
+the quality of another seed's record of the same file, key minus ``seed``, ``code_version`` and
+``ks`` (``quality_source``) instead of recomputing it; perf still runs. No parity spill then.
+
 Crash safety: the oracle blob, encode cache and parity file are written through
 ``layout.atomic_write`` (tmp + ``os.replace``); the JSONL lines are one ``write`` + ``fsync``
 each, samples *before* the record so a crash between the two cannot leave a resumable
@@ -75,6 +79,9 @@ MODES = ("eager", "graph")
 QUALITY_CHUNK = 16  # the OOM bound of the old passes.py (H §2.4): [B, P, D] on loose filters
 EXACT_ALGOS = ("linr_v1_filter_mask", "linr_v2")  # §2.4: recall_oracle@k_max >= 0.99 or die
 EXACT_MIN_RECALL = 0.99
+# Arms whose quality cannot depend on the seed (it only moves their perf pool): the quality
+# cache copies another seed's quality to them. SilverTorch (k-means) and V3 (OPORP) recompute.
+SEED_FREE_QUALITY = ("linr_v1_filter_mask", "linr_v2", "postfilter")
 # The top-k prefix of these algos' k_max run is not their top-k run (postfilter's pool is
 # alpha*k), so quality runs once per k.
 PER_K_QUALITY = ("postfilter",)
@@ -306,6 +313,39 @@ def parity(
     return out
 
 
+def quality_key(key: dict[str, Any], code_version: str, ks: Sequence[int]) -> str:
+    """The quality cache's lookup key: the key block minus ``seed``, plus ``code_version``
+    and ``ks``."""
+    rest = {k: v for k, v in key.items() if k != "seed"}
+    return json.dumps({**rest, "code_version": code_version, "ks": list(ks)}, sort_keys=True)
+
+
+def quality_sources(recs: Sequence[dict[str, Any]]) -> dict[str, dict[int, dict[str, Any]]]:
+    """``{quality_key: {seed: record}}`` over the ``ok`` / ``partial`` records that computed
+    their quality (``quality_source`` null), last record per seed."""
+    out: dict[str, dict[int, dict[str, Any]]] = {}
+    for r in recs:
+        if (
+            r.get("status") in ("ok", "partial")
+            and r.get("quality")
+            and not r.get("quality_source")
+        ):
+            qk = quality_key(records.key_block(r), r["env"]["code_version"], r["ks"])
+            out.setdefault(qk, {})[r["seed"]] = r
+    return out
+
+
+def cached_quality(
+    sources: dict[str, dict[int, dict[str, Any]]], job: Job, params: dict, code_version: str
+) -> dict[str, Any] | None:
+    """The record whose quality a ``SEED_FREE_QUALITY`` cell copies: the lowest other seed's."""
+    if job.algo not in SEED_FREE_QUALITY:
+        return None
+    by_seed = sources.get(quality_key(job.key(params), code_version, job.ks), {})
+    seeds = sorted(s for s in by_seed if s != job.seed)
+    return by_seed[seeds[0]] if seeds else None
+
+
 # ----- perf -----------------------------------------------------------------------------------
 
 
@@ -452,6 +492,7 @@ def run(
         with_filters[j.dataset, j.dim] |= j.filter_kind != "none"
 
     existing: dict[Path, dict[str, str]] = {}
+    sources: dict[Path, dict[str, dict[int, dict[str, Any]]]] = {}
     inp: dict[str, Any] | None = None
     inputs_key: tuple | None = None
     assets: dict | None = None
@@ -459,7 +500,10 @@ def run(
     for job in jobs:
         path = out_path or records.record_path(out_dir, job)
         if path not in existing:
-            existing[path] = records.read_keys(path)
+            recs = records.read_records(path)
+            existing[path] = {records.record_key(r): r.get("status", "ok") for r in recs}
+            sources[path] = quality_sources(recs)
+            del recs
         todo = [
             p
             for p in job.cells()
@@ -562,11 +606,23 @@ def run(
                     "candidate_pool": resolved.get("candidate_pool"),
                     "index_mib": index_mib,
                     "filter_mib": filter_mib,
+                    "seed_scope": "pool" if job.algo in SEED_FREE_QUALITY else "pool+build",
+                    "quality_source": None,
+                    "per_query": None,
+                    "interleave": None,
                     "quality": None,
                     "perf": None,
                 }
                 samples: list[dict[str, Any]] = []
-                if not skip_quality:
+                src = (
+                    None
+                    if skip_quality
+                    else cached_quality(sources[path], job, params, code_version)
+                )
+                if src is not None:
+                    rec["quality"], rec["per_query"] = src["quality"], src["per_query"]
+                    rec["quality_source"] = {"seed": src["seed"], "code_version": code_version}
+                elif not skip_quality:
                     stage = "quality"
                     module.k = k_max
                     qual, ids, scores = quality(module, inp, assets, job.ks, device)
@@ -634,6 +690,9 @@ def run(
                 records.append_record(records.samples_path(path), {**key, **s})
             records.append_record(path, rec)
             existing[path][records.resume_key(key, code_version)] = rec["status"]
+            if rec["quality"] is not None and rec["quality_source"] is None:
+                qk = quality_key(key, code_version, job.ks)
+                sources[path].setdefault(qk, {})[job.seed] = rec
             counts[rec["status"]] += 1
             logger.info(
                 "  {} {}/{} {} params={} -> {} ({:.0f}s)",
@@ -655,6 +714,7 @@ __all__ = [
     "PERF_STAT_KEYS",
     "PER_K_QUALITY",
     "QUALITY_CHUNK",
+    "SEED_FREE_QUALITY",
     "STICKY_CUDA",
     "QualityGateError",
     "compile_warmup",

@@ -133,7 +133,8 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    and stores per-kernel CUDA µs (top 8 kernels) as `kernels`.
 6. **Seeds and repeats.** Timing repeats are the 3 windows above (no
    rebuild). Seeds change the IVF (k-means), the OPORP projection
-   (`v3_seed`) and the pool; V1/V2 are seed-invariant in quality. Every
+   (`v3_seed`) and the pool; V1/V2 and the postfilter are seed-invariant in
+quality, so their seeds 1-2 copy seed 0's ([quality cache](#quality-cache)). Every
    suite runs seeds `[0, 1, 2]` on every dataset and sweep (user,
    2026-10-08), `codesign`'s as timing repeats. The report takes the
    median across seeds with min-max whiskers.
@@ -610,6 +611,22 @@ cannot leave a resumable record without its vector; `read_keys` ignores
 (and logs) one torn trailing line — the cell in flight when the process
 died — and raises on a malformed line anywhere else.
 
+### Quality cache
+
+The seed only moves the perf pool of `linr_v1_filter_mask`, `linr_v2` and
+`postfilter` on any backend, compiled or not (`run.SEED_FREE_QUALITY`): their
+quality is the same at every seed. Such a cell copies the quality of an
+`ok` / `partial` record of the same JSONL whose key differs only in `seed`, at
+the same `code_version` and `ks`, that computed its quality itself (the lowest
+such seed other than its own; `run.cached_quality`). It takes that record's
+`quality` and `per_query` and records `quality_source: {seed, code_version}`;
+perf still runs at its own seed. The parity spill and the exact-algo gate are
+not redone on a copied cell. SilverTorch (k-means) and `linr_v3` (OPORP
+projection) always recompute. The records are the cache: `run` indexes the
+file's computed records when it first opens it (`quality_sources`) and adds
+each new one. Every record carries `seed_scope`, `pool` for the seed-free arms
+and `pool+build` for the others.
+
 ### Bloom widths as build params
 
 `m_bits` / `k_hash` in an arm's `build:` grid (silvertorch / bloom only,
@@ -668,7 +685,7 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 
 | field | type | value |
 |---|---|---|
-| `schema_version` | int | `3`; schema 2 lacks `inputs` (derived on read, [Resume](#resume)); schema 1 also lacks the under-load clock fields below (`env.sm_mhz` instead) |
+| `schema_version` | int | `4`; schema 3 lacks `seed_scope`, `quality_source`, `per_query`, `interleave`, the perf entries' `ids_sha256` / `rounds` and `env.frac_windows_below_max` (all read as null); schema 2 also lacks `inputs` (derived on read, [Resume](#resume)); schema 1 also lacks the under-load clock fields below (`env.sm_mhz` instead) |
 | `status` | str | `ok`, `partial` (the record does not carry everything the suite asked for), `failed` |
 | `partial_reasons` | list / null | why `partial`: any of `skip_quality`, `skip_perf`, `modes` (a `--mode` subset that drops a mode this job's module can run: an eager-only run stamps it on a capturable module, not on one with `capturable = False` such as `official`, whose `graph` entry would be `not_capturable` anyway; decided per job after the build), `ks_bs` (`--k` / `--bs` replaced the suite's lists — `Job.narrowed`) |
 | `dataset`, `dim`, `inputs`, `suite`, `filter_kind`, `sweep`, `algo`, `backend`, `params`, `seed` | | the key block = `Job.key(params)` (`KEY_FIELDS`); `params` is the native dict of build + query params (`{}` when the algo takes none); `inputs` is the input identity below |
@@ -687,6 +704,8 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 | `candidate_pool` | int / null | the `candidate_pool` the module ran with when `params` sets one: the literal, or the value `candidate_pool_frac` resolved to ([pool fractions](#pool-fractions)) |
 | `index_mib` | float | Σ buffers of the algo module, filter submodule included |
 | `filter_mib` | float | Σ buffers of the filter submodule alone (`0.0` without one; `silvertorch` carries its attrs inside `index_mib`) |
+| `seed_scope` | str | `pool` on the seed-free arms (`SEED_FREE_QUALITY`: the seed moves only the perf pool), `pool+build` on SilverTorch and `linr_v3` |
+| `quality_source` | dict / null | `null` when this record computed its quality; `{seed, code_version}` of the record the [quality cache](#quality-cache) copied it from |
 | `quality` | dict / null | `heldout: {recall@k, ndcg@k, precision@k, mrr@k for k in ks, n}`, each metric `null` when `n == 0`; on filter cells also `oracle: {…}` (ranked-prefix targets); `jaccard_vs_first@k` per `k`, `score_max_abs_diff`, `parity` (`reference` = this record wrote the spill file, `vs_<backend>` = compared against it, `shape_mismatch:…`); `null` with `--skip-quality` |
 | `perf` | list / null | one entry per `(bs, k, mode)` (table below); `null` with `--skip-perf` |
 | `unstable` | bool | any perf entry `unstable` (window spread > 5 %), or `clocks_drift` |
@@ -768,13 +787,18 @@ JSON); the record scalars `status, path, n_items, n_queries, n_kept,
 n_queries_heldout, n_queries_oracle, n_targets_in_filter, pass_rate,
 bloom_fp_rate, k_max, build_s, index_mib, filter_mib, unstable,
 memory_reserved_mib, elapsed_s, schema_version, stage, error,
-partial_reasons` (a list); `env_code_version, env_commit, env_dirty, env_gpu,
-env_sm_mhz_load, env_clocks_drift, env_git_branch`; `heldout_<metric>@k`,
+partial_reasons` (a list), `seed_scope, per_query`; `env_code_version,
+env_commit, env_dirty, env_gpu, env_sm_mhz_load, env_clocks_drift,
+env_git_branch, env_frac_windows_below_max`; `quality_source_seed`,
+`interleave_group`, `interleave_position` (null on records without them); `heldout_<metric>@k`,
 `oracle_<metric>@k` (through `null_if_empty`, so a record written before H7
 with `n == 0` and 0.0 means reads `null` too) and the non-dict `quality_*` entries (`quality_parity`,
 `quality_jaccard_vs_first@k`, `quality_score_max_abs_diff`); `perf_<key>` for
-every perf-entry key except `window_medians_ms`, `window_sm_mhz` and
-`kernels`. Types are inferred per column (int, double, bool, string,
+every perf-entry key except `window_sm_mhz` and `kernels`, so
+`perf_window_medians_ms` (a list column), `perf_ids_sha256` and `perf_rounds`
+are in it: the table alone carries the bootstrap's inputs, and
+`tests/bench/test_records.py` pins it equal to the nested entry `report._attach`
+joins. Types are inferred per column (int, double, bool, string,
 list<string>), so a column that mixes types across records fails the
 aggregation instead of reaching a table; the column set is the union over
 the records, so it varies with `ks` and schema version. Parquet over CSV
@@ -908,9 +932,12 @@ the same records prints the same intervals.
 
 A ratio whose CI contains 1.0 prints "no difference" (the plan's noise
 gate); no repeat is added to force significance. `_attach` joins each
-`results.parquet` row to its nested record and perf entry, because the
-windows, the sidecar path and the interleave block are record fields, not
-parquet columns. The per-sweep table, the parity table and the deep-sweep
+`results.parquet` row to its nested record and perf entry and reads the
+windows, the sidecar path and the interleave block there. The parquet carries
+the same values as `perf_window_medians_ms`, `per_query` and
+`interleave_group` / `interleave_position` (pinned equal by
+`tests/bench/test_records.py`), so the shipped table alone holds the
+bootstrap's inputs. The per-sweep table, the parity table and the deep-sweep
 figures already use these estimators.
 
 **Matched recall.** `stats.at_recall` interpolates latency at a target
@@ -994,7 +1021,7 @@ life, and git holds only the pointer.
 | what | where | why |
 |---|---|---|
 | `results/<suite>/<dataset>-d<dim>.jsonl` (the records) and `*.samples.jsonl` while a leg runs | **local disk**, `results/` under `evaluation/` (gitignored; `--out` elsewhere) | the working state: `append_record` writes a cell and `fsync`s it, resume reads it back, and neither may depend on the network. Inside the repo checkout, which on a pod is `/workspace` and survives a restart |
-| the same records and samples, plus `results.parquet`, once a leg finishes | **HF Hub**, `pinkmeme/eval-results/<leg>/`, private (`bench upload`) | the archive. The JSONL goes up next to the Parquet because it is the lossless form: failed records with their tracebacks, superseded records, the nested `quality` and `env`, `window_medians_ms`, `kernels` — everything the flat table drops — and it is what resume and the manifest's provenance read |
+| the same records and samples, plus `results.parquet`, once a leg finishes | **HF Hub**, `pinkmeme/eval-results/<leg>/`, private (`bench upload`) | the archive. The JSONL goes up next to the Parquet because it is the lossless form: failed records with their tracebacks, superseded records, the nested `quality` and `env`, `window_sm_mhz`, `kernels` — everything the flat table drops — and it is what resume and the manifest's provenance read |
 | `report/` (`*.tex`, figures, `report.md`) behind a gate | **git**, under `docs/artifacts/<plan>/` — without its `results.parquet` (gitignored), which `bench report` regenerates from the Hub copy | small, reviewed, and what a gate's text points at |
 | raw dumps behind a documented finding (kernel timings, probe outputs, ETL logs) | **HF Hub**, `pinkmeme/eval-results/artifacts/<plan>/<same path>` | the finding lives in prose in [validation](../validation.md) and the system pages; the dump is only for re-derivation |
 | `results/_parity/*/*.npz` (600–680 MB per run), `results/_logs/` | **nowhere** — deleted | rewritten by every run, and the parity *verdict* (`jaccard_vs_first@k`, `score_max_abs_diff`) is already inside the record. `bench upload` skips every `_`-prefixed path part |
