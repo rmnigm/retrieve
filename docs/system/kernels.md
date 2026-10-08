@@ -490,7 +490,7 @@ only storing `-inf`: 913 µs, bound by program count, not bytes
 ([v2-prof](../artifacts/campaign-v2/v2-prof/README.md)). The stride
 does not change which program reduces a lane or how: each lane is still
 one `tl.sum` over D in the same layout, so scores are bit-identical to
-the one-tile grid ([validation](../validation.md#v2-fix-a)).
+the one-tile grid ([validation](../validation.md#campaign-v2-phase-v-not-yet-validated), "V2 Fix A").
 `programs` is a field of the tile config. The default 864 is one wave on
 A100 (108 SMs × 8 resident 8-warp programs); swept over {864, …, 13824},
 it was the best or within 1 % of the best at bs {1, 16}, p {0.001, 0.01, 1},
