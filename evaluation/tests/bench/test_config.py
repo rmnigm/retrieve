@@ -346,8 +346,8 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("h2h", "goodreads"): (30, 30),
     ("h2h", "arxiv"): (30, 30),
     ("filter", "goodreads"): (87, 114),
-    ("filter", "arxiv"): (135, 153),
-    ("filter", "yfcc10m"): (15, 18),
+    ("filter", "arxiv"): (135, 180),
+    ("filter", "yfcc10m"): (15, 21),
     ("filter", "pubmed"): (63, 75),
     ("deep", "goodreads"): (42, 210),
     ("deep", "arxiv"): (72, 360),
@@ -410,7 +410,8 @@ def test_grid_counts_and_invariants(suite, dataset):
         "postfilter",
     }
     assert not any(p.get("n_probe") == 4 for _, p in cells)
-    assert suite == "synth" or not any(p.get("n_probe") == 256 for _, p in cells)
+    tuned = IVF.get(dataset, (None, None))[1]
+    assert suite == "synth" or not any(p.get("n_probe") == 256 != tuned for _, p in cells)
     assert not any(j.narrowed for j in jobs)
     if suite in ("filter", "deep") and dataset in KEPT:
         assert {j.sweep for j in jobs} == KEPT[dataset] or (
@@ -439,7 +440,7 @@ def test_grid_counts_and_invariants(suite, dataset):
                       ("official", "bloom"): (24, 256)}  # fmt: skip
 
 
-IVF_ARXIV = ({"n_probe": 24},)
+IVF_ARXIV = ({"n_probe": 24}, {"n_probe": 256})
 
 
 def test_filter_suite_arms():
@@ -451,19 +452,19 @@ def test_filter_suite_arms():
     for fk in ("clause", "bloom"):
         for a in ("linr_v1_filter_mask", "linr_v2", "linr_v3"):
             want.add((a, "triton", fk, "{}", json.dumps(({},))))
-        want.add(("silvertorch", "triton", fk, '{"n_lists": 8192}', json.dumps(IVF_ARXIV)))
-        want.add(("silvertorch", "torch", fk, '{"n_lists": 8192}', json.dumps(({"n_probe": 24},))))
+        want.add(("silvertorch", "triton", fk, '{"n_lists": 2048}', json.dumps(IVF_ARXIV)))
+        want.add(("silvertorch", "torch", fk, '{"n_lists": 2048}', json.dumps(({"n_probe": 24},))))
         want.add(
             (
                 "silvertorch",
                 "torch",
                 fk,
-                '{"compile": "max-autotune", "n_lists": 8192}',
+                '{"compile": "max-autotune", "n_lists": 2048}',
                 json.dumps(({"n_probe": 24},)),
             )
         )
         want.add(("postfilter", "torch", fk, "{}", json.dumps(({"alpha": 1}, {"alpha": 8}))))
-    want.add(("silvertorch", "official", "bloom", '{"n_lists": 8192}', json.dumps(IVF_ARXIV)))
+    want.add(("silvertorch", "official", "bloom", '{"n_lists": 2048}', json.dumps(IVF_ARXIV)))
     assert arms == want
     ds = jobs[0].data
     assert ds.users_limit == 10000 and ds.gt_dir == Path("data/arxiv-papers/gt_d128")
@@ -634,8 +635,8 @@ def test_score_path_is_an_official_build_param():
 # IVF-TUNE (docs/artifacts/campaign-v2/ivf-tune): SilverTorch n_lists / n95 per dataset; None = open
 IVF = {
     "goodreads": (4096, 64),
-    "arxiv": (8192, None),
-    "yfcc10m": (16384, None),
+    "arxiv": (2048, 256),
+    "yfcc10m": (16384, 4096),
     "pubmed": (16384, None),
 }
 

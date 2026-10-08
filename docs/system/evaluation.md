@@ -385,9 +385,11 @@ dataset's median kept sweep. IVF-TUNE measures it quality-only (seed 0, bs 16, `
 doubling, capped at `n_lists` / 4 = 25 % of the items scanned, user) on goodreads and PubMed, per
 `n_lists`, and picks the point that scans the fewest items (`n_probe` · N / `n_lists` + `n_lists`). The scripts are in
 [`docs/artifacts/campaign-v2/ivf-tune/`](../artifacts/campaign-v2/ivf-tune/README.md). The tuning
-records are artifacts in their own results tree, never campaign cells. `n_lists` follows ≈ 4 √N to a power of two
-(goodreads 4096, arXiv 8192, YFCC and PubMed 16384). An n95 is written only where it was
-measured. Each value is one
+records are artifacts in their own results tree, never campaign cells. `n_lists` starts at ≈ 4 √N to a power of two
+(goodreads 4096, YFCC and PubMed 16384); arXiv was measured at 2048, 4096 and 8192, which reach
+0.95 at the same ≈ 12.7 % scanned (n95 = `n_lists` / 8), so it takes the fewest-items 2048 / 256.
+YFCC (`tags_and`, pass 0.0185) does not reach 0.95 within the cap at 16384 (0.72 at 4096), so
+its slot takes the cap. An n95 is written only where it was measured. Each value is one
 `datasets:` slot per arm: `filter`'s SilverTorch arms get `{build: {n_lists: [L]}, query:
 {n_probe: [24, n95]}}`, and `synth`'s get `n_lists` only, because it sweeps `n_probe`
 explicitly (user, 2026-10-08). A slot left `{}` runs at the library default `n_lists` with

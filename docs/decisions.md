@@ -98,7 +98,8 @@ now on; the [roadmap](roadmap.md) holds the steps.
   the unfiltered point. A cluster-correlated variant (arXiv, 3 points) runs
   only if arXiv's uniform sweep shows the IVF recall collapse at low p.
 - **Grid**: batch sizes {1, 16} (bs 8 dropped), k {100, 1000} (500 dropped;
-  1000 is the closest to LiNR's 2000), no `n_probe` 4 or 256.
+  1000 is the closest to LiNR's 2000), no `n_probe` 4 or 256 as fixed grid
+  points (a dataset's tuned n95 may be 256: arXiv).
   **3 seeds {0, 1, 2} everywhere** (user): every suite, every dataset, every
   sweep; the deterministic arms (V1, V2, postfilter) compute quality once
   and reuse it across seeds, perf repeats per seed. Postfilter α ∈ {1, 8}.
