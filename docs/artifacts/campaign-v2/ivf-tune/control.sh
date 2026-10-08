@@ -2,8 +2,9 @@
 # IVF-TUNE PubMed controller (replaces driver.sh mid-run, orchestrator-b's cost guidance): adopts the running
 # round's bench process ($1, may be empty), stops any round as soon as one of its cells reaches
 # recall_oracle@100 >= 0.95 (records are appended per cell, resume-safe), and above n_probe 256 runs one-point
-# rounds (a rebuild is cheaper than an overshoot cell). Then n_lists 16384 the same way. Ends with the table and
-# "ivf-tune rc=0" in /scratch/ivf-tune/chain.log (chain-v21's gate).
+# rounds (a rebuild is cheaper than an overshoot cell). Then n_lists 16384 the same way. Capped at n_probe =
+# n_lists / 4 (user, 2026-10-09: at most 25 % scanned): a round is stopped once the cap cell is written. Ends with
+# the table and "ivf-tune rc=0" in /scratch/ivf-tune/chain.log (chain-v21's gate).
 set -u
 W=/scratch/wt/ivf-tune
 PY=/venvs/retrieve/bin/python
@@ -16,13 +17,18 @@ export CUDA_VISIBLE_DEVICES=0 TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/ivf-tune
 PIN="flock /scratch/gpu0.lock taskset -c 0-95"
 cd $W/evaluation
 
+maxdone() { $PY -c "
+import json,sys
+xs=[json.loads(l)['params']['n_probe'] for l in open('$J') if json.loads(l)['status']=='ok' and json.loads(l)['params']['n_lists']==$1]
+print(max(xs, default=0))"; }
+
 watch() {  # $1 n_lists, $2 the round's flock pid (its child is the bench process)
   local nl=$1 pid=$2
   while kill -0 $pid 2>/dev/null; do
     sleep 10
-    if $T --reached $nl; then
+    if $T --reached $nl || [ "$(maxdone $nl)" -ge $(( nl / 4 )) ]; then
       pkill -TERM -P $pid; kill $pid 2>/dev/null
-      echo "$(date -Is) n_lists $nl reached 0.95: round stopped early"; return
+      echo "$(date -Is) n_lists $nl: 0.95 or the n_lists/4 cap reached: round stopped"; return
     fi
   done
 }
@@ -55,16 +61,11 @@ YAML
   echo "$(date -Is) n_lists $nl n_probe $* rc=$rc s=$(( $(date +%s) - t0 ))"
 }
 
-maxdone() { $PY -c "
-import json,sys
-xs=[json.loads(l)['params']['n_probe'] for l in open('$J') if json.loads(l)['status']=='ok' and json.loads(l)['params']['n_lists']==$1]
-print(max(xs, default=0))"; }
-
 tune() {  # $1 n_lists: continue from the last measured point
   local nl=$1
   while ! $T --reached $nl; do
     local np=$(( $(maxdone $nl) * 2 )); [ $np -ge 8 ] || np=8
-    [ $np -le $nl ] || { echo "$(date -Is) n_lists $nl: n_probe reached n_lists without 0.95"; return; }
+    [ $np -le $(( nl / 4 )) ] || { echo "$(date -Is) n_lists $nl: capped at n_probe $(( nl / 4 )) without 0.95"; return; }
     if [ $np -lt 256 ]; then round $nl $np $(( np * 2 )) $(( np * 4 )); else round $nl $np; fi
   done
 }
