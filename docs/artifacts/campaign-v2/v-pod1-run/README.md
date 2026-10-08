@@ -26,8 +26,9 @@ after a crash rerun the same command (every step resumes).
 
 ## Expansion against a fresh tree (tag `campaign-v2.1` + IVF-TUNE part A, dev/ivf-tune `153ee26`)
 
-Order (controller): goodreads `bloomwidth-timed` (v-short-legs' driver), goodreads `codesign`, h2h
-after dev/h-profile merges, then V-RERUN-V21, V-GR-DEEP and V-YFCC after IVF-TUNE part A merges, V-SEEDS' YFCC half after part B (YFCC's n95).
+Order (controller, exploration phase 2026-10-09): goodreads `codesign`, the H2H diagnostic + H-PROFILE
+GPU checks, h2h with the profiler fix, V-GR-DEEP, V-YFCC, V-SEEDS' YFCC half. V-RERUN-V21
+(`gr-reruns.sh`) is dropped to the controller's redo ledger and does not run now.
 
 | leg | dataset / suite (arms) | cells |
 |---|---|---|
