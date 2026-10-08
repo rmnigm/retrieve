@@ -72,24 +72,25 @@ def accumulate(
     num_targets: Tensor | None = None,
     *,
     ranked: bool = False,
-) -> None:
-    """Add one chunk's per-row metrics to ``acc`` (in place, no host sync)."""
+) -> dict[int, Tensor]:
+    """Add one chunk's per-row metrics to ``acc`` (in place, no host sync). Returns the
+    chunk's per-row recall ``{k: [B] float32}``, the values summed into ``recall@k``."""
     ks = sorted({int(key.split("@")[1]) for key in acc if "@" in key})
-    if ranked:
-        for k in ks:
+    recall: dict[int, Tensor] = {}
+    if num_targets is None and not ranked:
+        num_targets = (targets != -1).sum(dim=1)
+    hits = None if ranked else _hits(ids, targets)
+    for k in ks:
+        if ranked:
             t = targets[:, :k]
             rows = per_row(_hits(ids[:, :k], t), (t != -1).sum(dim=1), k)
-            for m in METRICS:
-                acc[f"{m}@{k}"] += rows[m].double().sum()
-    else:
-        if num_targets is None:
-            num_targets = (targets != -1).sum(dim=1)
-        hits = _hits(ids, targets)
-        for k in ks:
+        else:
             rows = per_row(hits, num_targets, k)
-            for m in METRICS:
-                acc[f"{m}@{k}"] += rows[m].double().sum()
+        for m in METRICS:
+            acc[f"{m}@{k}"] += rows[m].double().sum()
+        recall[k] = rows["recall"]
     acc["n"] += int(ids.shape[0])
+    return recall
 
 
 def finalize(acc: dict) -> dict[str, float | None]:

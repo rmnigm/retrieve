@@ -23,11 +23,13 @@ import json
 import math
 from pathlib import Path
 
+import numpy as np
 import pytest
 import torch
+from click.testing import CliRunner
 
 from bench import measure as bench
-from bench import records, run
+from bench import records, run, upload
 from bench.config import NONE_SWEEP, load_matrix
 from retrieve import OfficialConfig
 
@@ -319,7 +321,7 @@ def test_postfilter_records_oracle_recall_per_k(tiny_configs, tmp_path):
     assets = run.sweep_assets(job, inp, 4, torch.device("cpu"))
     module = run.build_module(job, inp, assets, 4, {"alpha": 1})
     module.k = 2
-    at_2, _, _ = run.quality(module, inp, assets, [2], torch.device("cpu"))
+    at_2, _, _, _ = run.quality(module, inp, assets, [2], torch.device("cpu"))
     assert rec["quality"]["oracle"]["recall@2"] == at_2["oracle"]["recall@2"]
     assert rec["quality"]["heldout"]["recall@2"] == at_2["heldout"]["recall@2"]
 
@@ -343,7 +345,7 @@ def test_heldout_recall_counts_only_reachable_targets():
         "oracle_rows": keep,
         "heldout_rows": keep & tif.any(dim=1),
     }
-    out, ids, _ = run.quality(_Fixed(), inputs, assets, [2, 4], torch.device("cpu"))
+    out, _, ids, _ = run.quality(_Fixed(), inputs, assets, [2, 4], torch.device("cpu"))
     assert ids.shape == (3, 4)
     h = out["heldout"]
     assert h["n"] == 2  # query 2 has no reachable target: not scored
@@ -610,3 +612,49 @@ def test_ids_sha256_is_stable_and_tracks_the_ids(tiny_configs, tmp_path):
             torch.tensor([[0, 1, 2, 3]] * 2).numpy().tobytes() * run.IDS_PROBE_BATCHES
         ).hexdigest()
     )
+
+
+def test_per_query_sidecar_matches_the_record_and_ships(tiny_configs, tmp_path):
+    """G-dump (CPU): one npz per record with quality, under ``<suite>/<ds>-d<dim>.perquery/``;
+    its per-query recall averages to the record's (to float32 summation), ``pass_count`` is
+    the blob's (``-1`` without a filter), a quality-cache copy points at its source's file,
+    ``bench upload --dry-run`` lists it and ``records.aggregate`` ignores it."""
+    ds, suites = tiny_configs
+    out = tmp_path / "results"
+    run.run(load_matrix(ds, suites, "e2e"), out_dir=out, skip_perf=True, **KW)
+    run.run(load_matrix(ds, suites, "cache"), out_dir=out, skip_perf=True, **KW)
+    recs = _records(out / "e2e" / "tiny-d64.jsonl") + _records(out / "cache" / "tiny-d64.jsonl")
+    worst = 0.0
+    for r in recs:
+        z = np.load(out / r["per_query"])
+        assert r["per_query"].startswith(f"{r['suite']}/tiny-d64.perquery/")
+        assert z["rows"].dtype == np.int32 and len(z["rows"]) == r["n_kept"]
+        assert z["pass_count"].dtype == np.int64
+        assert (z["pass_count"] == -1).all() == (r["filter_kind"] == "none")
+        for k in r["ks"]:
+            for side, name in (("oracle", "recall_oracle"), ("heldout", "heldout_recall")):
+                v = z[f"{name}@{k}"]
+                assert v.dtype == np.float32
+                if side not in r["quality"] or r["quality"][side]["n"] == 0:
+                    assert np.isnan(v).all()
+                    continue
+                assert (~np.isnan(v)).sum() == r["quality"][side]["n"]
+                diff = abs(
+                    float(np.nanmean(v.astype(np.float64))) - r["quality"][side][f"recall@{k}"]
+                )
+                worst = max(worst, diff)
+    assert worst < 1e-7
+    by = {(r["algo"], r["seed"]): r for r in recs if r["suite"] == "cache"}
+    assert by["postfilter", 2]["per_query"] == by["postfilter", 0]["per_query"]
+    assert by["linr_v3", 2]["per_query"] != by["linr_v3", 0]["per_query"]
+    cars = sorted(out.rglob("*.npz"))
+    assert {p.relative_to(out).as_posix() for p in cars if "_parity" not in p.parts} == {
+        r["per_query"] for r in recs
+    }
+    n_rows = len(records.read_table(records.aggregate(out)))
+    assert n_rows == len({records.record_key(r) for r in recs})  # one row each: no perf
+    res = CliRunner().invoke(
+        upload.upload, ["--results", str(out), "--path-in-repo", "x", "--dry-run"]
+    )
+    assert res.exit_code == 0, res.output
+    assert all(r["per_query"] in res.output for r in recs)

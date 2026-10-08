@@ -710,6 +710,7 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 | `filter_mib` | float | Σ buffers of the filter submodule alone (`0.0` without one; `silvertorch` carries its attrs inside `index_mib`) |
 | `seed_scope` | str | `pool` on the seed-free arms (`SEED_FREE_QUALITY`: the seed moves only the perf pool), `pool+build` on SilverTorch and `linr_v3` |
 | `quality_source` | dict / null | `null` when this record computed its quality; `{seed, code_version}` of the record the [quality cache](#quality-cache) copied it from |
+| `per_query` | str / null | the [per-query sidecar](#per-query-sidecar) relative to the results root; `null` without quality |
 | `quality` | dict / null | `heldout: {recall@k, ndcg@k, precision@k, mrr@k for k in ks, n}`, each metric `null` when `n == 0`; on filter cells also `oracle: {…}` (ranked-prefix targets); `jaccard_vs_first@k` per `k`, `score_max_abs_diff`, `parity` (`reference` = this record wrote the spill file, `vs_<backend>` = compared against it, `shape_mismatch:…`); `null` with `--skip-quality` |
 | `perf` | list / null | one entry per `(bs, k, mode)` (table below); `null` with `--skip-perf` and on a quality-only suite (`perf: false`) |
 | `unstable` | bool | any perf entry `unstable` (window spread > 5 %), or `clocks_drift` |
@@ -742,6 +743,30 @@ Perf entry:
 `results/<suite>/<dataset>-d<dim>.samples.jsonl` holds the per-call vector
 of the chosen window: one line per perf entry, `{key block, k, bs, mode,
 ms: [...]}`, written before the cell's record.
+
+### Per-query sidecar
+
+Every record that computed its quality points at one compressed npz,
+`per_query` = `<suite>/<dataset>-d<dim>.perquery/<sha1(resume key)[:20]>.npz`
+relative to the results root (`run.per_query_path`), written through
+`atomic_write` before the record (`run.write_per_query`):
+
+| array | dtype | value |
+|---|---|---|
+| `rows` | int32 | the query's index in the `users_limit`-trimmed query set; one entry per kept query |
+| `pass_count` | int64 | items the exact mask passes for that query (the oracle blob's `pass_counts`); `-1` on `none` cells |
+| `recall_oracle@{k}` | float32 | per-query recall against the oracle prefix, for every `k` in the record's `ks`; NaN where the row has no oracle (no survivor, or a `none` cell) |
+| `heldout_recall@{k}` | float32 | per-query held-out recall over the reachable targets; NaN where the row has none |
+
+The values are the per-row recalls `metrics.accumulate` sums into the
+record (it returns them), so their mean over non-NaN rows is the record's
+`recall@k` up to float32 summation order; a `PER_K_QUALITY` algo's `k` comes
+from its run at that `k`. A [quality-cache](#quality-cache) copy points at
+its source's file; a record without quality has `per_query: null`. A rerun
+of the same resume key (`--force`) rewrites the same file. The directory
+name has no `_` prefix, so `bench upload` publishes it and `bench fetch`
+brings it back; it does not match `*/*.jsonl`, so `records.aggregate`
+ignores it.
 
 ### Resume
 
@@ -1025,8 +1050,8 @@ life, and git holds only the pointer.
 
 | what | where | why |
 |---|---|---|
-| `results/<suite>/<dataset>-d<dim>.jsonl` (the records) and `*.samples.jsonl` while a leg runs | **local disk**, `results/` under `evaluation/` (gitignored; `--out` elsewhere) | the working state: `append_record` writes a cell and `fsync`s it, resume reads it back, and neither may depend on the network. Inside the repo checkout, which on a pod is `/workspace` and survives a restart |
-| the same records and samples, plus `results.parquet`, once a leg finishes | **HF Hub**, `pinkmeme/eval-results/<leg>/`, private (`bench upload`) | the archive. The JSONL goes up next to the Parquet because it is the lossless form: failed records with their tracebacks, superseded records, the nested `quality` and `env`, `window_sm_mhz`, `kernels` — everything the flat table drops — and it is what resume and the manifest's provenance read |
+| `results/<suite>/<dataset>-d<dim>.jsonl` (the records), `*.samples.jsonl` and the `*.perquery/` sidecars while a leg runs | **local disk**, `results/` under `evaluation/` (gitignored; `--out` elsewhere) | the working state: `append_record` writes a cell and `fsync`s it, resume reads it back, and neither may depend on the network. Inside the repo checkout, which on a pod is `/workspace` and survives a restart |
+| the same records, samples and per-query sidecars, plus `results.parquet`, once a leg finishes | **HF Hub**, `pinkmeme/eval-results/<leg>/`, private (`bench upload`) | the archive. The JSONL goes up next to the Parquet because it is the lossless form: failed records with their tracebacks, superseded records, the nested `quality` and `env`, `window_sm_mhz`, `kernels` — everything the flat table drops — and it is what resume and the manifest's provenance read |
 | `report/` (`*.tex`, figures, `report.md`) behind a gate | **git**, under `docs/artifacts/<plan>/` — without its `results.parquet` (gitignored), which `bench report` regenerates from the Hub copy | small, reviewed, and what a gate's text points at |
 | raw dumps behind a documented finding (kernel timings, probe outputs, ETL logs) | **HF Hub**, `pinkmeme/eval-results/artifacts/<plan>/<same path>` | the finding lives in prose in [validation](../validation.md) and the system pages; the dump is only for re-derivation |
 | `results/_parity/*/*.npz` (600–680 MB per run), `results/_logs/` | **nowhere** — deleted | rewritten by every run, and the parity *verdict* (`jaccard_vs_first@k`, `score_max_abs_diff`) is already inside the record. `bench upload` skips every `_`-prefixed path part |

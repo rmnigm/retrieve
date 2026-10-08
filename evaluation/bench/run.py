@@ -218,19 +218,23 @@ def build_module(job: Job, inp: dict, assets: dict, k_max: int, params: dict) ->
 @torch.inference_mode()
 def quality(
     module: nn.Module, inp: dict, assets: dict, ks: Sequence[int], device: torch.device
-) -> tuple[dict[str, Any], torch.Tensor, torch.Tensor]:
+) -> tuple[dict[str, Any], dict[str, torch.Tensor], torch.Tensor, torch.Tensor]:
     """§2.4: stream the kept rows in chunks of 16 through ``module`` at ``k_max``, accumulate
     every ``k`` from the one top-``k_max`` list (oracle: ranked prefix targets; held-out:
     fixed targets) as device running sums, one sync at the end. On filter cells a held-out
     target the exact mask excludes can never be retrieved, so it is masked to ``-1`` and
     ``nt`` counts only the reachable ones (``blob["targets_in_filter"]``) — Goodreads
     targets are lists, and scoring the unreachable ones biases recall down. Row selection
-    uses CPU masks and ``index_select``, so no chunk syncs. Returns the metrics and the
-    ``[n_kept, k_max]`` ids / scores (for the parity spill)."""
+    uses CPU masks and ``index_select``, so no chunk syncs. Returns the metrics, the per-query
+    recall ``{recall_oracle@k, heldout_recall@k: [n_kept] float32}`` (NaN on a row the side
+    does not score; the values the sums add up) and the ``[n_kept, k_max]`` ids / scores (for
+    the parity spill)."""
     rows = assets["keep"].nonzero().reshape(-1)
     blob = assets["blob"]
     acc_o = accumulator(list(ks), device) if blob is not None else None
     acc_h = accumulator(list(ks), device)
+    nan = partial(torch.full, (rows.numel(),), float("nan"), device=device)
+    per_q = {f"{name}@{k}": nan() for name in ("recall_oracle", "heldout_recall") for k in ks}
     ids_all: list[torch.Tensor] = []
     sc_all: list[torch.Tensor] = []
     for s in range(0, rows.numel(), QUALITY_CHUNK):
@@ -249,22 +253,52 @@ def quality(
             m = assets["oracle_rows"][sel]
             if bool(m.any()):
                 idx = m.nonzero().reshape(-1).to(device, non_blocking=True)
-                accumulate(
+                r = accumulate(
                     acc_o, ids.index_select(0, idx), blob["topk"][sel][m].to(device), ranked=True
                 )
+                for k, v in r.items():
+                    per_q[f"recall_oracle@{k}"].index_copy_(0, idx + s, v)
         m = assets["heldout_rows"][sel]
         if bool(m.any()):
             idx = m.nonzero().reshape(-1).to(device, non_blocking=True)
             t = inp["targets"][sel][m].to(device, non_blocking=True)
             if blob is not None:  # reachable targets only
                 t = t.masked_fill(~blob["targets_in_filter"][sel][m].to(device), -1)
-            accumulate(acc_h, ids.index_select(0, idx), t, (t != -1).sum(dim=1))
+            r = accumulate(acc_h, ids.index_select(0, idx), t, (t != -1).sum(dim=1))
+            for k, v in r.items():
+                per_q[f"heldout_recall@{k}"].index_copy_(0, idx + s, v)
     out: dict[str, Any] = {"heldout": finalize(acc_h)}
     if acc_o is not None:
         out["oracle"] = finalize(acc_o)
     ids_t = torch.cat(ids_all) if ids_all else torch.empty(0, 0, dtype=torch.long)
     sc_t = torch.cat(sc_all) if sc_all else torch.empty(0, 0)
-    return out, ids_t, sc_t
+    return out, {n: t.cpu() for n, t in per_q.items()}, ids_t, sc_t
+
+
+def per_query_path(job: Job, params: dict, code_version: str) -> str:
+    """The sidecar of one cell, relative to the results root: no ``_``-prefixed part, so
+    ``bench upload`` publishes it, and not ``*/*.jsonl``, so ``records.aggregate`` skips it."""
+    h = hashlib.sha1(records.resume_key(job.key(params), code_version).encode()).hexdigest()
+    return f"{job.suite}/{job.dataset}-d{job.dim}.perquery/{h[:20]}.npz"
+
+
+def write_per_query(root: Path, rel: str, assets: dict, per_q: dict[str, torch.Tensor]) -> None:
+    """The per-query sidecar (docs/system/evaluation.md § Per-query sidecar): ``rows`` (index
+    into the ``users_limit``-trimmed queries), ``pass_count`` (``-1`` without a filter) and
+    the per-query recall arrays, one row per kept query."""
+    rows = assets["keep"].nonzero().reshape(-1)
+    blob = assets["blob"]
+    counts = blob["pass_counts"][rows] if blob is not None else torch.full_like(rows, -1)
+    arrays = {n: t.numpy().astype(np.float32) for n, t in per_q.items()}
+    atomic_write(
+        Path(root) / rel,
+        lambda fh: np.savez_compressed(
+            fh,
+            rows=rows.numpy().astype(np.int32),
+            pass_count=counts.numpy().astype(np.int64),
+            **arrays,
+        ),
+    )
 
 
 def parity_group(dataset: str, dim: int, algo: str) -> str:
@@ -643,17 +677,20 @@ def run(
                 elif not skip_quality:
                     stage = "quality"
                     module.k = k_max
-                    qual, ids, scores = quality(module, inp, assets, job.ks, device)
+                    qual, per_q, ids, scores = quality(module, inp, assets, job.ks, device)
                     if job.algo in PER_K_QUALITY:
                         for k in (k for k in job.ks if k != k_max):
                             module.k = int(k)
-                            qk, _, _ = quality(module, inp, assets, [k], device)
+                            qk, pk, _, _ = quality(module, inp, assets, [k], device)
                             for part, m in qk.items():
                                 qual[part].update(m)
+                            per_q.update(pk)
                         module.k = k_max
                     qual.update(parity(out_dir, job, params, ids, scores, job.ks))
                     del ids, scores
                     rec["quality"] = qual
+                    rec["per_query"] = per_query_path(job, params, code_version)
+                    write_per_query(out_dir, rec["per_query"], assets, per_q)
                     if job.algo in EXACT_ALGOS and "oracle" in qual:
                         r = qual["oracle"][f"recall@{k_max}"]
                         if r is not None and r < EXACT_MIN_RECALL:  # None: no oracle row
@@ -739,6 +776,8 @@ __all__ = [
     "compile_warmup",
     "ids_sha256",
     "is_sticky",
+    "per_query_path",
     "resolve_pool",
     "run",
+    "write_per_query",
 ]
