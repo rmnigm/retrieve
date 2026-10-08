@@ -28,17 +28,17 @@ under test. Each process writes 9 rows: `ks = [100, 500, 1000]` ×
 | `goodreads-d128-c0_genre-linr_v1_filter_mask-{triton,torch}.json` | goodreads-work-id, d128 | clause / `c0_genre` | linr_v1_filter_mask | triton, torch |
 | `goodreads-d128-c0_genre-linr_v2-{triton,torch}.json` | " | " | linr_v2 | triton, torch |
 | `goodreads-d128-c0_genre-linr_v3-{triton,torch}.json` | " | " | linr_v3 | triton, torch |
-| `goodreads-d128-c0_genre-linr_v4-{triton,torch}.json` | " | " | linr_v4 | triton, torch |
 | `goodreads-d128-c0_genre-silvertorch-{triton,torch}.json` | " | " | silvertorch | triton, torch |
 | `arxiv-d128-c0_maincat-silvertorch-triton.json` | arxiv-papers, d128 | clause / `c0_maincat` | silvertorch | triton |
 
-11 files. `_logs/provenance.txt` (commit, host, UTC, `nvidia-smi`,
+9 files. The two `linr_v4` cells left with LiNR V4 (removed 2026-10-08); they
+live under tag `linr-v4-final`. `_logs/provenance.txt` (commit, host, UTC, `nvidia-smi`,
 torch/triton versions) ties them to the run that produced them; the
 stdout/stderr log per cell, the driver log and the clock trace are on the
 Hub under `artifacts/golden-logs/`
 ([hub index](../../docs/artifacts/hub-index.md)).
 
-`_main/` holds the same 11 cells run from a throwaway worktree off
+`_main/` holds the same cells run from a throwaway worktree off
 `main` — the other half of handoff step 6, below. It is **gitignored**:
 the diff report is the artifact worth keeping, and the JSONs are
 reproducible from that worktree.
@@ -109,9 +109,9 @@ refuses to run if its estimated wall time exceeds `STEP5_BUDGET_S`
 The golden stage runs, from `evaluation/`, one invocation per cell:
 
 ```bash
-# goodreads: 5 algos x {triton, torch}
+# goodreads: 4 algos x {triton, torch}
 uv run evaluate --config config/goodreads/d128-filter.yaml \
-  --algo <linr_v1_filter_mask|linr_v2|linr_v3|linr_v4|silvertorch> \
+  --algo <linr_v1_filter_mask|linr_v2|linr_v3|silvertorch> \
   --backend <triton|torch> --filter-kind clause --sweep c0_genre \
   --output golden/goodreads-d128-c0_genre-<algo>-<backend>.json
 
@@ -230,7 +230,7 @@ all held fixed, so every delta is a library delta.
 ### What moved
 
 **6 of 11 cells are bit-identical**: both `linr_v1_filter_mask` cells, both
-`linr_v4` cells, `linr_v2-torch`, `linr_v3-torch`. **5 moved**, all by
+LiNR V4 cells (since removed, under tag `linr-v4-final`), `linr_v2-torch`, `linr_v3-torch`. **5 moved**, all by
 ≤ 1.6e-4 — above the `1e-6` gate tolerance, which is the whole reason this
 re-derive had to happen:
 

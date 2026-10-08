@@ -36,16 +36,16 @@ retrieve/tests/
 │   ├── test_bit_knn_base.py        (_PackedBitsKNN base: ctor/buffers/k_bits sentinel/candidates semantics)
 │   ├── test_bloom_filter.py
 │   ├── test_bloom_hash.py          (bloom_hash builders: chunked vs loop-free equality, seed determinism)
-│   ├── test_boundary.py            (the library side of the library / harness contract: SilverTorch + LiNRV1–V4;
+│   ├── test_boundary.py            (the library side of the library / harness contract: SilverTorch + LiNRV1–V3;
 │   │                                no wide intermediate in a forward)
 │   ├── test_combine_filters.py
 │   ├── test_compact.py
-│   ├── test_filters.py             (ExactAttributeFilter)
+│   ├── test_filters.py             (ExactAttributeFilter; item-range masks of both filters)
 │   ├── test_kmeans.py              (KMeans.fit bit-reproducible; kmeans++ init)
 │   ├── test_large_offsets.py       (addressing past 2³¹ elements, one planted case per overflow class; skipped
 │   │                                below 48 / 24 GiB free — kernels.md § Addressing)
-│   ├── test_linr.py                (PostfilterKNN, PostfilterKNNInt8, PrefilterKNN, OneBitKNN, SimHashKNN × torch / Triton;
-│   │                                LiNRV1–V4 torch.equal to the hand-composed primitives; short candidate lists,
+│   ├── test_linr.py                (PostfilterKNN, PrefilterKNN, OneBitKNN, SimHashKNN × torch / Triton;
+│   │                                LiNRV1–V3 torch.equal to the hand-composed primitives; short candidate lists,
 │   │                                missing filters)
 │   ├── test_op_boundary.py         (every Triton op rejects a non-contiguous item table with `ValueError`)
 │   ├── test_quantize.py            (int8, OPORP, popcount)
@@ -323,7 +323,7 @@ module under test.
 | `combine_indices`          | `compact_mask(combine_masks(*[f.evaluate_mask(q)]))` |
 | `SilverTorch` (no bloom)   | `FullScanKNN` for recall (asserts ≥ 0.85 at full probe) + recall monotone in `n_probe` |
 | `SilverTorch` (qa=None)    | `SilverTorch (no bloom)` directly — `query_clause_attrs=None` is a documented fast path |
-| `LiNRV1`–`LiNRV4`          | the primitives composed by hand on the same inputs (`torch.equal` scores, ids up to ties) |
+| `LiNRV1`–`LiNRV3`          | the primitives composed by hand on the same inputs (`torch.equal` scores, ids up to ties) |
 | `SilverTorchBuilder` / `LiNRBuilder` `set_state_dict` | a fresh `set_item_embeddings` build of the same seed (buffers `torch.equal`, forwards equal) |
 | `KMeans(init="kmeans++")`  | the seeds are distinct rows of the index, one per blob on separable blobs; inertia ≤ `init="random"` there |
 | `PostfilterKNN` semantics | `(q @ x.T).masked_fill(~mask, -inf).topk(k)` |
@@ -412,6 +412,12 @@ INT8 + OPORP + popcount.
   `(~matched).all(dim=-1)`.
 - `N = 1` corner.
 - `evaluate_subset` with `[B, 0]` candidates returns `[B, 0]`.
+- Item ranges (`evaluate_mask(q, start, end)`, both filters, both
+  backends, exact with a reverse clause): `torch.equal` to
+  `evaluate_mask(q)[:, start:end]` for empty, single-item, unaligned
+  (to 32/64/128 and the 64-bit word), end-at-`N` and whole-catalog
+  ranges; and a peak-memory assertion at `N = 2²²`, `B = 16` that a
+  range's transient stays below `B·N/16` bytes (no `[B, N]` mask).
 - Cross-compat smoke: `combine_masks(clause_mask, bloom_mask)` →
   `compact_mask` → `OneBitKNN(backend="triton")` candidates path
   (the combined mask should equal the clause mask, since bloom is a
@@ -461,7 +467,7 @@ INT8 + OPORP + popcount.
 
 ### [`test_linr.py`](../../retrieve/tests/correctness/test_linr.py)
 
-LiNR V1, V2, V3, V4 plus `SimHashKNN` in both backends.
+LiNR V1, V2, V3 plus `SimHashKNN` in both backends.
 
 - V1 (`PostfilterKNN`): top-K is sorted descending; mask path
   returns ids satisfying the mask.
@@ -475,25 +481,18 @@ LiNR V1, V2, V3, V4 plus `SimHashKNN` in both backends.
   candidates ⊆, fullgraph compile) parametrized over `k_bits` incl.
   `k_bits > D`; plus a quality-lift assertion vs OPORP at higher
   `k_bits`.
-- V4 (`PostfilterKNNInt8`): full-scan recall vs `FullScanKNN` ≥
-  0.95 at K=10 on unit-norm random embeddings (the int8 quantization
-  preserves topk ordering modulo per-element rounding); mask path
-  returns ids satisfying the mask; small-batch `_int_mm` padding corner.
 - Cross-backend: torch ↔ Triton across
   `pass_rate ∈ {None, 0.01, 0.1, 0.8}`. The bit-KNNs (`OneBitKNN` incl.
   `k_bits < D`, `SimHashKNN`) are `torch.equal` on scores, ids up to
   ties; `PrefilterKNN` goes through `assert_topk_id_sets_match` at
-  `atol=2e-6`, `rtol=0` (both fp32 sums of the same fp16 products, different order). (For `PostfilterKNNInt8` the
-  `backend=` flag is a no-op — cuBLAS LtGemm runs the same code on
-  both paths.)
+  `atol=2e-6`, `rtol=0` (both fp32 sums of the same fp16 products, different order).
 - `PostfilterKNN` (mask path) ≡ `PrefilterKNN` (compact_mask of same
   mask) as id sets.
 - `ExactAttributeFilter` decoupled composition: `PostfilterKNN` with
   `mask = ef.evaluate_mask & extra`, `PrefilterKNN` with
   `compact_mask(combined)`, `PrefilterKNN` with `ef.evaluate_indices`.
 - Edge cases (`TestEdgeCases`):
-  - mask-all-True ≡ unmasked path (`PostfilterKNN`,
-    `PostfilterKNNInt8` × torch / Triton); all-candidates ≡ unmasked
+  - mask-all-True ≡ unmasked path (`PostfilterKNN` × torch / Triton); all-candidates ≡ unmasked
     for `OneBitKNN` — both `torch.equal` on scores, ids up to ties.
   - mask-all-False produces no finite scores.
   - `OneBitKNN` zero `counts` returns full `(-1, -inf)` sentinels.
@@ -513,8 +512,7 @@ LiNR V1, V2, V3, V4 plus `SimHashKNN` in both backends.
 - The composites (`TestComposites`, the composites' bit-exactness gate):
   `LiNRV1` ≡ `PostfilterKNN` + `filter.evaluate_mask`, `LiNRV2` ≡
   `PrefilterKNN` over `filter.evaluate_indices`, `LiNRV3` ≡ `OneBitKNN` →
-  `PrefilterKNN` bounded by the survivors' count, `LiNRV4` ≡
-  `PostfilterKNNInt8` + mask — on `torch` and `triton` × filter kind
+  `PrefilterKNN` bounded by the survivors' count — on `torch` and `triton` × filter kind
   `{none, clause, bloom}` (V2: the two filter kinds), scores `torch.equal`,
   ids `assert_ids_equal_up_to_ties`. V3's filter is the `torch` one on
   every row; both backends emit the same ascending candidate order, so the
@@ -671,7 +669,7 @@ chunk-tail size, on CUDA and CPU. And `init="kmeans++"`:
 
 The library side of the library-harness boundary
 ([decisions](../decisions.md#harness)), for
-each of `SilverTorch` (`filter_mode="exact"`), `LiNRV1`–`LiNRV4` (with an
+each of `SilverTorch` (`filter_mode="exact"`), `LiNRV1`–`LiNRV3` (with an
 `ExactAttributeFilter`) on a tiny index, on `triton` and `torch`:
 
 - `module.k = k'` changes the output width without re-registration and
@@ -755,7 +753,7 @@ holds the poison** — the scatter writes nothing there
 | [`test_codesigned_probe_score.py`](../../retrieve/tests/parity/test_codesigned_probe_score.py) | `codesigned_probe_score` (+ bloom) | the shared `ops.reference` twin, plus two private oracles: a per-row loop concatenating the probed clusters (no shared slot arithmetic) and the row-wise bloom subset test (the transposed index must answer as the row-wise signatures do) | the compact CSR probe layout; cluster-size cutoffs at `block_p`; bit-exact |
 | [`test_codesigned_probe_score_exact.py`](../../retrieve/tests/parity/test_codesigned_probe_score_exact.py) | `codesigned_probe_score_exact` | `_ref_phase23`: exact AND-of-OR predicate over narrow attrs + INT8 dequant + dot + topk | the SilverTorch exact-fused path; cases for active vs all-inactive query clauses; bit-exact |
 | [`test_accumulation.py`](../../retrieve/tests/parity/test_accumulation.py) | `fused_masked_knn_topk`, `codesigned_probe_score`, `codesigned_probe_score_exact`, `oporp_1bit_match_topk_indirect`; the exact LiNR scorers `PostfilterKNN` (± mask) and `PrefilterKNN` (dense, torch and Triton candidates) | **fp64** computation of the same operation on the same inputs, every candidate returned (`k = P`) and mapped back by id | the accumulation-width gate the other parity files cannot be (they compare both sides at the same input dtype, so a width defect cancels). Goodreads-like unnormalised fp16 inputs; the fp32 dot within `1e-4` abs of fp64 where an fp16 tree reduction of the same products is asserted to miss it; the int8 kernels' fp32 dequant within `1e-6` rel of fp64 where fp16 cannot hold the int32 dot; the popcount path `torch.equal` to the int64 truth; the LiNR scorers on YFCC-shaped near ties (every row's top-100 inside ~20 fp16 quanta): fp32 scores within `2e-6` of fp64 and the fp64 top-k selected up to ties inside that bound, where an fp16 score of the same dots is asserted to miss (recall < 0.95; measured 0.88 / 0.92) |
-| [`test_official.py`](../../retrieve/tests/parity/test_official.py) | Meta's `torch.ops.st.fused_kmean_ann` / `_with_partial_masks`, `bloom_index_build`, `parse_expression_query_batch`, `bloom_index_search_batch` / `_return_partial_response` through [`ops/official/`](../../retrieve/src/retrieve/ops/official/adapter.py) | `retrieve.ops.reference`, the Triton `_impl`s (plain and exact), `clause_mask`, and the `SilverTorch` layer itself | The official parity gates T1-T7. **T1** int32 path: scores `torch.equal` vs the reference and vs Triton (plain at `D ∈ {64, 128}`, `D=96` reference-only, a 90-wide cluster for the remainder path; exact via `clause_mask` → `pack_mask` → `filtering_bit_mask`, with reverse clauses), ids up to ties after normalising `-inf` slots to the `-1` sentinel; the raw op contract (int32/int32, width `round_up(·, 32)`, `INT32_MIN`/`-1` pads, returned positions = the probed set). **T2** fp16 path: `max_rel_err ≤ 2⁻¹⁰`, no overflow, `jaccard@32 ≥ 0.99`, and `default_divisor` is the overflow bound. **T3** bit order, pinned to the measured order ([kernels](kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend); `OFFICIAL_BIT_ORDER = "high_first"`, a test-side constant the adapter's `MASK_BIT_ORDER` / `BLOOM_OUTPUT_BIT_ORDER` must equal): the packed bloom output round-trips `pack_mask` under the pinned order and not the other (README corpus, README hits reproduced); a one-doc `filtering_bit_mask` over a 70-doc cluster (docs 0 / 5 / 40 / 69: both mask words, warp and remainder paths) is honoured under the pinned order and, under the other, scores exactly the mirrored doc `63 − d % 64` of the same word (nothing when that lies past the cluster); `unpack_partial_mask` decodes under the pinned order only; pack / unpack / `reverse_bits64` round trip. **T4** official bloom ⊇ exact on the full mask and on the partial masks (which must equal the full mask on the probed docs), FPR at `b_multiplier=10` recorded and `< 5 %`; `NOT` terms have **no false positives** (⊆ exact — the guarantee flips for a complemented bloom; false-negative rate recorded); expression mapping and the LRU plan cache. **T5** `_with_partial_masks` scores `torch.equal` the full-mask scores and the unfiltered scores masked by the bloom (paper §4.3). **T6** the layer on the Triton module's transplanted index (GPU k-means is not bit-deterministic): int32 path `torch.equal` vs Triton on `none` / `exact` / `exact`-reverse (+ all-inactive queries), fp16 default `jaccard@K ≥ 0.99`, bloom (`m_bits=None`, both `bloom_path`s bit-identical to each other and to the `cache_plans=False` run) ⊆ Triton's exact top-K up to bloom false positives — both after normalising `-inf` slots to the `-1` sentinel, since the Triton epilogue leaves the padded item id there while the official one goes through `masked_topk`, state-dict key order, candidates path through `inv_perm` bit-equal to Triton, state-dict round trip, attribute-less bloom index raises on attribute queries, `k_hash > 10` rejected. **Schemas**: `str(torch.ops.st.<op>.default._schema)` equals the string pinned for 21aa35e, for exactly the adapter's `REQUIRED_OPS`. **T7** `module.compile()` and a `fullgraph` `torch.compile` raise (`RuntimeError`), default-mode compile raises or matches eager; host syncs per op counted under `set_sync_debug_mode("warn")` — c10's `warn_or_error_on_sync` lines captured on fd 2 (a sync inside a C++ op never becomes a Python warning) plus Python-side warnings (aten syncs never reach fd 2), the two being disjoint — printed and recorded, asserted `> 0` for the scorer; and per `SilverTorch(backend="official")` forward on every filter path with `cache_plans` on and off (3 / 3 / 7 / 4 for none / exact / bloom-partial / bloom-full on the A100). Gated by `require_official()` |
+| [`test_official.py`](../../retrieve/tests/parity/test_official.py) | Meta's `torch.ops.st.fused_kmean_ann` / `_with_partial_masks`, `bloom_index_build`, `parse_expression_query_batch`, `bloom_index_search_batch` / `_return_partial_response` through [`ops/official/`](../../retrieve/src/retrieve/ops/official/adapter.py) | `retrieve.ops.reference`, the Triton `_impl`s (plain and exact), `clause_mask`, and the `SilverTorch` layer itself | The official parity gates T1-T7. **T1** int32 path: scores `torch.equal` vs the reference and vs Triton (plain vs both at `D ∈ {64, 96, 128, 192, 768}`, a 90-wide cluster for the remainder path; exact at `D ∈ {64, 128, 192, 768}` via `clause_mask` → `pack_mask` → `filtering_bit_mask`, with reverse clauses), ids up to ties after normalising `-inf` slots to the `-1` sentinel; the raw op contract (int32/int32, width `round_up(·, 32)`, `INT32_MIN`/`-1` pads, returned positions = the probed set). **T2** fp16 path: `max_rel_err ≤ 2⁻¹⁰`, no overflow, `jaccard@32 ≥ 0.99`, and `default_divisor` is the overflow bound. **T3** bit order, pinned to the measured order ([kernels](kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend); `OFFICIAL_BIT_ORDER = "high_first"`, a test-side constant the adapter's `MASK_BIT_ORDER` / `BLOOM_OUTPUT_BIT_ORDER` must equal): the packed bloom output round-trips `pack_mask` under the pinned order and not the other (README corpus, README hits reproduced); a one-doc `filtering_bit_mask` over a 70-doc cluster (docs 0 / 5 / 40 / 69: both mask words, warp and remainder paths) is honoured under the pinned order and, under the other, scores exactly the mirrored doc `63 − d % 64` of the same word (nothing when that lies past the cluster); `unpack_partial_mask` decodes under the pinned order only; pack / unpack / `reverse_bits64` round trip. **T4** official bloom ⊇ exact on the full mask and on the partial masks (which must equal the full mask on the probed docs), FPR at `b_multiplier=10` recorded and `< 5 %`; `NOT` terms have **no false positives** (⊆ exact — the guarantee flips for a complemented bloom; false-negative rate recorded); expression mapping and the LRU plan cache. **T5** `_with_partial_masks` scores `torch.equal` the full-mask scores and the unfiltered scores masked by the bloom (paper §4.3). **T6** the layer on the Triton module's transplanted index (GPU k-means is not bit-deterministic): int32 path `torch.equal` vs Triton on `none` / `exact` / `exact`-reverse (+ all-inactive queries) at `D ∈ {64, 128, 192, 768}`, fp16 default `jaccard@K ≥ 0.99`, bloom (`m_bits=None`, both `bloom_path`s bit-identical to each other and to the `cache_plans=False` run) ⊆ Triton's exact top-K up to bloom false positives — both after normalising `-inf` slots to the `-1` sentinel, since the Triton epilogue leaves the padded item id there while the official one goes through `masked_topk`, state-dict key order, candidates path through `inv_perm` bit-equal to Triton, state-dict round trip, attribute-less bloom index raises on attribute queries, `k_hash > 10` rejected. **Schemas**: `str(torch.ops.st.<op>.default._schema)` equals the string pinned for 21aa35e, for exactly the adapter's `REQUIRED_OPS`. **T7** `module.compile()` and a `fullgraph` `torch.compile` raise (`RuntimeError`), default-mode compile raises or matches eager; host syncs per op counted under `set_sync_debug_mode("warn")` — c10's `warn_or_error_on_sync` lines captured on fd 2 (a sync inside a C++ op never becomes a Python warning) plus Python-side warnings (aten syncs never reach fd 2), the two being disjoint — printed and recorded, asserted `> 0` for the scorer; and per `SilverTorch(backend="official")` forward on every filter path with `cache_plans` on and off (3 / 3 / 7 / 4 for none / exact / bloom-partial / bloom-full on the A100). Gated by `require_official()` |
 
 ## Adding a new test
 

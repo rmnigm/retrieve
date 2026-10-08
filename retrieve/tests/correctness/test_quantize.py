@@ -364,9 +364,8 @@ def test_simhash_seed_determinism():
 
 def test_global_quantization_chunked_is_bit_exact_and_bounded():
     """``quantize_int8_global`` quantizes chunk by chunk (build-time, large tables): its codes
-    and scale equal the one-shot formula bit for bit, ``quantize_int8_global_codes`` (the
-    loop-free query path) equals them too, and the build's transient stays under half the
-    fp32 table, where the one-shot formula held two fp32 copies of it."""
+    and scale equal the one-shot formula bit for bit, and the build's transient stays under
+    half the fp32 table, where the one-shot formula held two fp32 copies of it."""
 
     n = 12 * quantize._CODE_CHUNK_ROWS + 123  # the chunk temporaries are fixed; the table grows
     embs = torch.randn(n, 128, device="cuda") * 3
@@ -380,7 +379,6 @@ def test_global_quantization_chunked_is_bit_exact_and_bounded():
     transient = torch.cuda.max_memory_allocated() - base - codes.numel()
     assert torch.equal(codes, expected)
     assert scale == float((abs_max / 127.0).item())
-    assert torch.equal(quantize.quantize_int8_global_codes(embs), expected)
     table = embs.numel() * embs.element_size()
     assert transient < table // 2, (
         f"transient {transient / 2**20:.0f} MiB vs table {table / 2**20:.0f} MiB"
