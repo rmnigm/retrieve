@@ -152,8 +152,12 @@ at a **mixed code_version**: 800 cells at `72e5a90` (silvertorch triton 360, off
 `linr_v3` 80) and 70 `linr_v3` bloom cells at `c0e42d1` (staging `40790b7`, A100-SXM4-80GB;
 3 older bloom `c0_maincat` seed 1 records at `72e5a90` stay in the file, superseded); of
 the 70, 34 are flagged `unstable`, sampled `sm_mhz` 1140–1410 (8 of 3,780 timing windows
-below 1410), NOT CITABLE. arxiv `codesign` and goodreads's two legs have no records;
-goodreads runs on the E1c encoder. What remains is roadmap D1-B..G.
+below 1410), NOT CITABLE. arxiv `codesign` is complete, 60/60 cells ok, 0 failed
+(`d1/arxiv-codesign`): `silvertorch`/official bloom, `bloom_path` full and partial × `n_probe`
+4–256 (`n_lists` 1664) × the 5 sweeps, seed 0, all at `c0e42d1` (staging `b1d48d3`,
+A100-SXM4-80GB, schema 3); 58 of 60 flagged `unstable`, sampled `sm_mhz` 1140–1410 (258 of
+540 timing windows below 1410), NOT CITABLE. goodreads's two legs have no records; goodreads
+runs on the E1c encoder. What remains is roadmap D1-C..G.
 
 **Code_version policy for this campaign (user decision):**
 `code_version` is a hash of the `retrieve/src/retrieve` subtree (`bench/measure.py`), but a fix there does not
