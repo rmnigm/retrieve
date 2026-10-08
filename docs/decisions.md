@@ -98,7 +98,8 @@ now on; the [roadmap](roadmap.md) holds the steps.
   the unfiltered point. A cluster-correlated variant (arXiv, 3 points) runs
   only if arXiv's uniform sweep shows the IVF recall collapse at low p.
 - **Grid**: batch sizes {1, 16} (bs 8 dropped), k {100, 1000} (500 dropped;
-  1000 is the closest to LiNR's 2000), no `n_probe` 4 or 256.
+  1000 is the closest to LiNR's 2000), no `n_probe` 4 or 256 as fixed grid
+  points (a dataset's tuned n95 may be 256: arXiv).
   **3 seeds {0, 1, 2} everywhere** (user): every suite, every dataset, every
   sweep; the deterministic arms (V1, V2, postfilter) compute quality once
   and reuse it across seeds, perf repeats per seed. Postfilter α ∈ {1, 8}.
@@ -120,9 +121,16 @@ now on; the [roadmap](roadmap.md) holds the steps.
   (`n_probe` · N / `n_lists` + `n_lists`), ties to the smaller `n_lists`. From the two, a size rule
   (`n_lists` as a multiple of √N, `n_probe` as a fraction of `n_lists`)
   sets arXiv (3 M) and YFCC (10 M). The `filter` and `synth` SilverTorch
-  arms of each dataset run at its `n_lists` with `n_probe` {24, n95}. If
-  0.95 is not reached, the record says so and the highest measured point
-  is reported.
+  arms of each dataset run at its `n_lists` with `n_probe` {24, n95}.
+  **Cap** (user, 2026-10-09): tuning stops at `n_probe` = `n_lists`/4
+  (25 % scanned); if 0.95 is not reached by then, the record says so with
+  the recall reached, and the slot takes `n_lists`/4. n95 follows the
+  filter's pass rate more than N (goodreads at pass 0.33: 1/64 of the
+  lists; PubMed at 0.018: not reached at 1/16), so the size rule sets only
+  `n_lists` (≈ 4√N to a power of two: goodreads 4096, arXiv 8192, YFCC
+  and PubMed 16384); arXiv's and YFCC's n95 come from a **quick check**
+  (user): that one `n_lists`, quality-only `n_probe` doubling on the
+  median sweep, seed 0, same cap.
 - **Official SilverTorch runs only on `none` and `bloom`.** Its clause and
   exact cells time our `pack_mask` adapter, not Meta's code; the existing
   official-clause records stay as an "adapter-bound upper bound" footnote.

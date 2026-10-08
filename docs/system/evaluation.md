@@ -368,22 +368,33 @@ unfiltered `quality` suite ([decisions](../decisions.md#harness)); synth's
 
 | suite | datasets | arms | feeds |
 |---|---|---|---|
-| `filter` | goodreads, arxiv, yfcc10m, pubmed, three kept sweeps each (yfcc10m: `tags_and`) | V1, V2, V3 (pool 5000) triton; `silvertorch` triton clause + bloom and official bloom at `n_probe` {24, n95}; `silvertorch` torch (#12) and torch compiled (#13) at 24, goodreads + arxiv only; `postfilter` alpha {1, 8} | T2, C3, C6 |
+| `filter` | goodreads, arxiv, yfcc10m, pubmed, three kept sweeps each (yfcc10m: `tags_and`) | V1, V2, V3 (pool 5000) triton; `silvertorch` triton clause + bloom and official bloom at the dataset's tuned `n_lists` and `n_probe` {24, n95} ([IVF tuning](#ivf-tuning)); `silvertorch` torch (#12) and torch compiled (#13) at 24 on the same `n_lists`, goodreads + arxiv only; `postfilter` alpha {1, 8} | T2, C3, C6 |
 | `deep` | goodreads, arxiv, yfcc10m, kept sweeps | `silvertorch` triton clause + bloom, official bloom: `n_lists` per dataset (goodreads {1024, 4096}, arxiv {1664, 8192}, yfcc10m {4096, 16384}) × `n_probe` {8, 16, 32, 64, 128}; V3 `candidate_pool_frac` {0.005, 0.01, 0.02, 0.05, 0.1} | F3, C6 |
-| `synth` | goodreads-, arxiv-, yfcc10m-synth ([datasets](datasets.md#synthetic-selectivity-attrs)) | V1, V2 triton; V3 `candidate_pool_frac` {0.01, 0.05}; `silvertorch` triton clause `n_probe` {24, 64, 128, 256, 512, 1024} (yfcc10m-synth {24, 256, 1024}; synth `n_lists` is 1024, so none is capped), triton and official bloom {24, 256}; `postfilter` {1, 8}; V1 / V2 torch, eager and compiled, on `p001, p01, p1`, goodreads + arxiv only. k 1000 is dropped where N·p < 4000 (goodreads `p0001`, `p0003`; arxiv `p0001`) | F1, F2, C1, C2, C6 |
-| `n95` | pubmed `all5` (its median kept sweep) | `silvertorch` triton clause, `n_probe` {8, 16, 32, 64, 128}, bs 16; quality only (`perf: false`) | pubmed's n95 |
+| `synth` | goodreads-, arxiv-, yfcc10m-synth ([datasets](datasets.md#synthetic-selectivity-attrs)) | V1, V2 triton; V3 `candidate_pool_frac` {0.01, 0.05}; `silvertorch` triton clause `n_probe` {24, 64, 128, 256, 512, 1024} (yfcc10m-synth {24, 256, 1024}), triton and official bloom {24, 256}, every SilverTorch arm at its real dataset's tuned `n_lists` (none caps the sweep); `postfilter` {1, 8}; V1 / V2 torch, eager and compiled, on `p001, p01, p1`, goodreads + arxiv only. k 1000 is dropped where N·p < 4000 (goodreads `p0001`, `p0003`; arxiv `p0001`) | F1, F2, C1, C2, C6 |
 | `codesign` | arxiv (kept sweeps), goodreads (`c0_genre, c2_format, c3_year`) | official bloom, `bloom_path` {partial, full} × `n_probe` {8, 32, 128}, `n_lists` arxiv 1664 / goodreads 1024, k 100 | F4b, C5 |
 | `bloomwidth` | goodreads `c0_genre`, arxiv kept, pubmed `c0_mesh` | `silvertorch` triton bloom `m_bits` {64 … 2048} × `k_hash` {3, 5}; official bloom `k_hash` {3, 5} (its width is `OfficialConfig.b_multiplier`, not `m_bits`); bs 16; quality only (`perf: false`) | F4a, C4 |
 | `bloomwidth-timed` | the same | the same widths at `k_hash` 5 (official: its one width), k 100, bs 16, timed | F4a |
 | `h2h` | goodreads `c0_genre`, arxiv `c0_maincat`, `none` + `bloom`, d128 | `silvertorch` triton and official with `score_path` {fp16, int32}, `n_probe` 24, bs {1, 16}, k {100, 1000}, seeds {0 … 4} (the repeats); one interleave group of the three arms; run with `--interleave --profile` | T3, C7 (H2H-final) |
 
-**n95** is the smallest `n_probe` that reaches `recall_oracle@100 ≥ 0.95`
-on a dataset's median sweep. It is read off `deep` / `n95` after the
-code freeze, and only the `filter` suite's SilverTorch arms carry it: until
-measured their n95 entries are absent, so every suite still loads. Filling
-one is a value edit in the arm's `datasets:` slot (e.g. `goodreads:
-{query: {n_probe: [24, 37]}}`). `synth` sweeps `n_probe` explicitly
-instead (user, 2026-10-08), so it has no n95 dependency.
+### IVF tuning
+
+SilverTorch's `n_lists` and its matched-recall `n_probe` depend on the dataset and are tuned, not
+the library default 1024 ([decisions](../decisions.md#campaign-v2-user-2026-10-08), *IVF tuned
+per dataset size*). **n95** is the smallest `n_probe` reaching `recall_oracle@100 ≥ 0.95` on a
+dataset's median kept sweep. IVF-TUNE measures it quality-only (seed 0, bs 16, `n_probe`
+doubling, capped at `n_lists` / 4 = 25 % of the items scanned, user) on goodreads and PubMed, per
+`n_lists`, and picks the point that scans the fewest items (`n_probe` · N / `n_lists` + `n_lists`). The scripts are in
+[`docs/artifacts/campaign-v2/ivf-tune/`](../artifacts/campaign-v2/ivf-tune/README.md). The tuning
+records are artifacts in their own results tree, never campaign cells. `n_lists` starts at ≈ 4 √N to a power of two
+(goodreads 4096, YFCC and PubMed 16384); arXiv was measured at 2048, 4096 and 8192, which reach
+0.95 at the same ≈ 12.7 % scanned (n95 = `n_lists` / 8), so it takes the fewest-items 2048 / 256.
+YFCC (`tags_and`, pass 0.0185) does not reach 0.95 within the cap at 16384 (0.72 at 4096), so
+its slot takes the cap. An n95 is written only where it was measured. Each value is one
+`datasets:` slot per arm: `filter`'s SilverTorch arms get `{build: {n_lists: [L]}, query:
+{n_probe: [24, n95]}}`, and `synth`'s get `n_lists` only, because it sweeps `n_probe`
+explicitly (user, 2026-10-08). A slot left `{}` runs at the library default `n_lists` with
+`n_probe` 24 only. n95 / `n_lists` depends on the pass rate as well as N: goodreads `c0_genre`
+(0.33) needs `n_lists` / 64, and PubMed `all5` (0.018) needs more than `n_lists` / 16.
 
 `codesign` is the S9 ablation of the official backend's bloom path:
 `partial` (fused partial masks over the probed clusters, the library
@@ -391,7 +402,7 @@ default, which every `filter` / `deep` official cell runs with the key
 absent) against `full` (a full-N bool mask, then IVF). Both arms carry
 `bloom_path` in `params`, so their keys never collide with the `filter` /
 `deep` official cells; latency and `peak_fwd_mib` are the compared fields.
-`n95` and `bloomwidth` declare `perf: false`: `load_matrix` sets
+`bloomwidth` declares `perf: false`: `load_matrix` sets
 `Job.timed = False`, `run` skips perf on their jobs without being asked, and
 their records are `ok` (a `--skip-perf` record of a timed suite is `partial`,
 because it lacks what the suite asked for; `--skip-perf` or `--mode` on an
@@ -426,7 +437,7 @@ filter:
   ks: [100, 1000]
   batch_sizes: [1, 16]
   seeds: [0, 1, 2]                  # optional; default [0]
-  perf: true                        # optional; false = a quality-only suite (n95, bloomwidth)
+  perf: true                        # optional; false = a quality-only suite (bloomwidth)
   interleave:                       # optional: comparison groups timed round-robin (--interleave)
     - {by: algo, values: [linr_v1_filter_mask, linr_v2]}   # `values` limits who joins
     - {by: [backend, score_path]}   # algo, backend or build params

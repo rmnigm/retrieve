@@ -181,8 +181,11 @@ co-design.
   triton clause, median sweep, seed 0, bs 16, k 100, `n_lists` ×
   `n_probe` doubling to past recall 0.95; pick by items scanned, no timed
   cells; records are artifacts, not paper numbers. Two datasets only: **goodreads**
-  ({1024, 4096}) and **PubMed** ({4096, 16384}; its n_lists-1024 `n95`
-  leg reached 0.748 at 128). Output: the size rule, and the `n_lists` /
+  ({1024, 4096}; done: 4096 / 64) and **PubMed** ({4096, 16384}, capped at
+  25 % scanned). Lands in two parts: **A** (done: `n_lists` for all four
+  datasets and their synth twins, goodreads' n95) unblocks every leg that
+  sweeps `n_probe` itself; **B** adds the n95 of PubMed and of arXiv and
+  YFCC (a quick capped `n_probe` check at their one `n_lists`). Output: the size rule, and the `n_lists` /
   n95 values written into the `filter` and `synth` slots of all four
   datasets (arXiv and YFCC by the rule). Replaces the `n95` suite. If
   goodreads' choice is not 1024, its SilverTorch `filter` and `synth`
@@ -210,14 +213,14 @@ co-design.
   `72e5a90` reuse entries for V2 and V3 (their kernels changed). CPU only;
   `bench report --manifest` over the fetched trees reports 0 wrongly
   missing cells. Before D1-G.
-- [ ] **V-CODESIGN: `codesign` on arXiv and goodreads**, at `campaign-v2.1`
+- [ ] **V-CODESIGN: `codesign` on goodreads** (arXiv done at v2.1), at `campaign-v2.1`
   (the 408b1188 run, 108/108, is stale: the quantize fix moves every
   SilverTorch eager time; Hub `artifacts/v-codesign-408b`), interleaved
   partial/full, `n_probe` {8, 32, 128}, 3 sweeps, 3 seeds; replaces D1-B2
   and D1-D. F4b, C5. **≈ 2 GPU-h**, GPU 0.
-- [ ] **D3: `bloomwidth`**: goodreads (both legs), PubMed `bloomwidth-timed`,
-  arXiv `bloomwidth-timed` rerun, all timed legs at `campaign-v2.1`; arXiv and
-  PubMed `bloomwidth` (quality) done
+- [ ] **D3: `bloomwidth`**: goodreads (both legs) and PubMed `bloomwidth-timed`,
+  timed legs at `campaign-v2.1`; arXiv done (timed at v2.1), PubMed
+  `bloomwidth` (quality) done
   ([validation](validation.md), Hub `campaign-v2/arxiv-bloomwidth[-timed]`):
   both blooms, `m_bits` 64-2048 × `k_hash` {3, 5}, quality-only plus one
   timed point per width at bs 16. F4a, C4. **≈ 3-5 GPU-h**, GPU 1 (the
