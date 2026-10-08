@@ -346,7 +346,7 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("h2h", "goodreads"): (30, 30),
     ("h2h", "arxiv"): (30, 30),
     ("filter", "goodreads"): (87, 114),
-    ("filter", "arxiv"): (135, 180),
+    ("filter", "arxiv"): (135, 153),
     ("filter", "yfcc10m"): (15, 18),
     ("filter", "pubmed"): (63, 75),
     ("deep", "goodreads"): (42, 210),
@@ -439,7 +439,7 @@ def test_grid_counts_and_invariants(suite, dataset):
                       ("official", "bloom"): (24, 256)}  # fmt: skip
 
 
-IVF_ARXIV = ({"n_probe": 24}, {"n_probe": 128})
+IVF_ARXIV = ({"n_probe": 24},)
 
 
 def test_filter_suite_arms():
@@ -634,9 +634,9 @@ def test_score_path_is_an_official_build_param():
 # IVF-TUNE (docs/artifacts/campaign-v2/ivf-tune): SilverTorch n_lists / n95 per dataset; None = open
 IVF = {
     "goodreads": (4096, 64),
-    "arxiv": (8192, 128),
+    "arxiv": (8192, None),
     "yfcc10m": (16384, None),
-    "pubmed": (None, None),
+    "pubmed": (16384, None),
 }
 
 

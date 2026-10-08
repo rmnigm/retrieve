@@ -382,11 +382,12 @@ SilverTorch's `n_lists` and its matched-recall `n_probe` depend on the dataset a
 the library default 1024 ([decisions](../decisions.md#campaign-v2-user-2026-10-08), *IVF tuned
 per dataset size*). **n95** is the smallest `n_probe` reaching `recall_oracle@100 ≥ 0.95` on a
 dataset's median kept sweep. IVF-TUNE measures it quality-only (seed 0, bs 16, `n_probe`
-doubling) on goodreads and PubMed, per `n_lists`, and picks the point that scans the fewest items
-(`n_probe` · N / `n_lists` + `n_lists`). The scripts are in
+doubling, capped at `n_lists` / 4 = 25 % of the items scanned, user) on goodreads and PubMed, per
+`n_lists`, and picks the point that scans the fewest items (`n_probe` · N / `n_lists` + `n_lists`). The scripts are in
 [`docs/artifacts/campaign-v2/ivf-tune/`](../artifacts/campaign-v2/ivf-tune/README.md). The tuning
-records are artifacts in their own results tree, never campaign cells. The other datasets take a
-size rule (`fit.py`), and `apply.py` writes the values into `suites.yaml`. Each value is one
+records are artifacts in their own results tree, never campaign cells. `n_lists` follows ≈ 4 √N to a power of two
+(goodreads 4096, arXiv 8192, YFCC and PubMed 16384). An n95 is written only where it was
+measured. Each value is one
 `datasets:` slot per arm: `filter`'s SilverTorch arms get `{build: {n_lists: [L]}, query:
 {n_probe: [24, n95]}}`, and `synth`'s get `n_lists` only, because it sweeps `n_probe`
 explicitly (user, 2026-10-08). A slot left `{}` runs at the library default `n_lists` with

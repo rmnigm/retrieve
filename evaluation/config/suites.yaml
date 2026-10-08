@@ -15,11 +15,11 @@
 # named below.
 #
 # IVF-TUNE (docs/artifacts/campaign-v2/ivf-tune): SilverTorch's n_lists and n95 per dataset, where
-# n95 = the smallest n_probe reaching recall_oracle@100 >= 0.95 on the dataset's median kept sweep.
-# Tuned on goodreads (4096 / 64); arXiv (and YFCC's n_lists) by the size rule (n_lists ~ 4.6 sqrt(N), n95 =
-# n_lists / 64), which holds at goodreads' pass rate (0.33) only: n95 / n_lists grows as the pass
-# rate falls (PubMed all5, 0.018: > 1/16, recall 0.680 at 256 of 4096). PubMed's slot stays open
-# until its tuning ends.
+# n95 = the smallest n_probe reaching recall_oracle@100 >= 0.95 on the dataset's median kept sweep,
+# tuned with n_probe capped at n_lists / 4 (user: at most 25 % scanned). n_lists ~ 4 sqrt(N) to a
+# power of two; goodreads is tuned (4096 / 64). n95 / n_lists depends on the pass rate, not only on
+# N (goodreads 1/64 at 0.33; PubMed all5 > 1/16 at 0.018), so arXiv's, YFCC's and PubMed's n95 slots
+# stay open until measured (part B).
 
 # Kept sweeps (one high pass rate, one low, one conjunctive / reverse), from measured pass rates:
 # arxiv c3_nversions 0.444, c0_maincat 0.136, all4 0.0094; pubmed c0_mesh 0.0002,
@@ -48,18 +48,18 @@ filter:                        # headline (T2, C3, C6)
       query: {n_probe: [24]}                                  # 24 = the paper's; n95 per dataset
       datasets:                                             # IVF-TUNE: n_lists by size, n_probe {24, n95}
         goodreads: {build: {n_lists: [4096]}, query: {n_probe: [24, 64]}}
-        arxiv: {build: {n_lists: [8192]}, query: {n_probe: [24, 128]}}
-        yfcc10m: {build: {n_lists: [16384]}}   # n95 open: the rule says 256 (grid rule: no 256); pass rate ~ PubMed's
-        pubmed: {}   # IVF-TUNE PubMed pending
+        arxiv: {build: {n_lists: [8192]}}                     # n95 open (part B: pod c's check)
+        yfcc10m: {build: {n_lists: [16384]}}                  # n95 open (part B: pod c's check)
+        pubmed: {build: {n_lists: [16384]}}                   # n95 open (part B: PubMed's capped tuning)
     - algo: silvertorch
       backends: [official]
       filter_kinds: [bloom]
       query: {n_probe: [24]}                                  # 24 = the paper's; n95 per dataset
       datasets:                                             # IVF-TUNE: n_lists by size, n_probe {24, n95}
         goodreads: {build: {n_lists: [4096]}, query: {n_probe: [24, 64]}}
-        arxiv: {build: {n_lists: [8192]}, query: {n_probe: [24, 128]}}
-        yfcc10m: {build: {n_lists: [16384]}}   # n95 open: the rule says 256 (grid rule: no 256); pass rate ~ PubMed's
-        pubmed: {}   # IVF-TUNE PubMed pending
+        arxiv: {build: {n_lists: [8192]}}                     # n95 open (part B: pod c's check)
+        yfcc10m: {build: {n_lists: [16384]}}                  # n95 open (part B: pod c's check)
+        pubmed: {build: {n_lists: [16384]}}                   # n95 open (part B: PubMed's capped tuning)
     # C3's torch arms on goodreads + arxiv only (measured: 515-917 s a cell at 0.8 M; the 10 M
     # catalogs would take hours a cell); add yfcc10m / pubmed here if C3 stays ambiguous.
     - algo: silvertorch                                       # #12: plain-torch IVF
