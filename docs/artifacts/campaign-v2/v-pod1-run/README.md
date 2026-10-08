@@ -9,7 +9,7 @@ State per leg in [validation](../../../validation.md). NOT CITABLE until D1-G.
 |---|---|
 | [`common.sh`](common.sh) | sourced: env, code_version check, 1 Hz clock trace, `step` (a pinned `bench` subcommand) and `stream` (one `bench run --resume --interleave` with its log) |
 | [`v-codesign.sh`](v-codesign.sh) | leg 1: `codesign` on arXiv + goodreads, whole |
-| [`gr-reruns.sh`](gr-reruns.sh) | leg 2: goodreads `filter` and goodreads-synth `synth` SilverTorch arms (triton + official, torch), V2 and V3 Triton; goodreads `bloomwidth-timed` |
+| [`gr-reruns.sh`](gr-reruns.sh) | leg 2: goodreads `filter` and goodreads-synth `synth` SilverTorch arms (triton + official, torch), V1 + V2 Triton (paired, one interleave group), V3 Triton; goodreads `bloomwidth-timed` |
 | [`v-gr-deep.sh`](v-gr-deep.sh) | leg 3: goodreads `deep` |
 | [`v-yfcc.sh`](v-yfcc.sh) | leg 4: yfcc10m-synth `synth`, then yfcc10m `deep` |
 | [`v-seeds-yfcc.sh`](v-seeds-yfcc.sh) | leg 5: yfcc10m `filter`, every arm |
@@ -23,8 +23,8 @@ after a crash rerun the same command (every step resumes).
 | leg | dataset / suite (arms) | cells |
 |---|---|---|
 | 1 | arxiv / codesign; goodreads / codesign | 54; 54 |
-| 2 | goodreads / filter: silvertorch (all backends); linr_v2; linr_v3 | 39; 12; 12 |
-| 2 | goodreads-synth / synth: silvertorch; linr_v2; linr_v3 | 210; 78; 84 |
+| 2 | goodreads / filter: silvertorch (all backends); V1 + V2 triton; V3 triton | 39; 24; 12 |
+| 2 | goodreads-synth / synth: silvertorch; V1 + V2 triton; V3 triton | 210; 84; 84 |
 | 2 | goodreads / bloomwidth-timed | 21 |
 | 3 | goodreads / deep | 210 |
 | 4 | yfcc10m-synth / synth; yfcc10m / deep | 285; 45 |
