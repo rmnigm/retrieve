@@ -345,7 +345,7 @@ def test_arm_errors_are_named(tmp_path, arms, match):
 GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change it deliberately
     ("h2h", "goodreads"): (30, 30),
     ("h2h", "arxiv"): (30, 30),
-    ("filter", "goodreads"): (87, 99),
+    ("filter", "goodreads"): (87, 114),
     ("filter", "arxiv"): (135, 153),
     ("filter", "yfcc10m"): (15, 18),
     ("filter", "pubmed"): (63, 75),
@@ -355,7 +355,6 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("synth", "goodreads-synth"): (303, 534),
     ("synth", "arxiv-synth"): (303, 534),
     ("synth", "yfcc10m-synth"): (165, 285),
-    ("n95", "pubmed"): (3, 15),
     ("codesign", "arxiv"): (18, 54),
     ("codesign", "goodreads"): (18, 54),
     ("bloomwidth", "goodreads"): (42, 42),
@@ -440,6 +439,9 @@ def test_grid_counts_and_invariants(suite, dataset):
                       ("official", "bloom"): (24, 256)}  # fmt: skip
 
 
+IVF_ARXIV = ({"n_probe": 24},)
+
+
 def test_filter_suite_arms():
     jobs = _real("filter", "arxiv", seeds=[0])
     arms = {
@@ -449,19 +451,19 @@ def test_filter_suite_arms():
     for fk in ("clause", "bloom"):
         for a in ("linr_v1_filter_mask", "linr_v2", "linr_v3"):
             want.add((a, "triton", fk, "{}", json.dumps(({},))))
-        want.add(("silvertorch", "triton", fk, "{}", json.dumps(({"n_probe": 24},))))
-        want.add(("silvertorch", "torch", fk, "{}", json.dumps(({"n_probe": 24},))))
+        want.add(("silvertorch", "triton", fk, '{"n_lists": 8192}', json.dumps(IVF_ARXIV)))
+        want.add(("silvertorch", "torch", fk, '{"n_lists": 8192}', json.dumps(({"n_probe": 24},))))
         want.add(
             (
                 "silvertorch",
                 "torch",
                 fk,
-                '{"compile": "max-autotune"}',
+                '{"compile": "max-autotune", "n_lists": 8192}',
                 json.dumps(({"n_probe": 24},)),
             )
         )
         want.add(("postfilter", "torch", fk, "{}", json.dumps(({"alpha": 1}, {"alpha": 8}))))
-    want.add(("silvertorch", "official", "bloom", "{}", json.dumps(({"n_probe": 24},))))
+    want.add(("silvertorch", "official", "bloom", '{"n_lists": 8192}', json.dumps(IVF_ARXIV)))
     assert arms == want
     ds = jobs[0].data
     assert ds.users_limit == 10000 and ds.gt_dir == Path("data/arxiv-papers/gt_d128")
@@ -482,7 +484,7 @@ def test_deep_suite_per_dataset_n_lists_and_pool_fractions():
         )
 
 
-def test_codesign_bloomwidth_and_n95_suites():
+def test_codesign_and_bloomwidth_suites():
     cd = _real("codesign", "goodreads", seeds=[0])
     assert {j.sweep for j in cd} == {"c0_genre", "c2_format", "c3_year"}
     assert {(j.backend, j.build["n_lists"], j.build["bloom_path"]) for j in cd} == {
@@ -505,25 +507,16 @@ def test_codesign_bloomwidth_and_n95_suites():
     assert not any("m_bits" in j.build for j in bw if j.backend == "official")
     timed = _real("bloomwidth-timed", "pubmed", seeds=[0])
     assert {(j.ks, j.batch_sizes, j.bloom["k_hash"]) for j in timed} == {((100,), (16,), 5)}
-    n95 = _real("n95", "pubmed")
-    assert {(j.algo, j.backend, j.filter_kind, j.sweep) for j in n95} == {
-        ("silvertorch", "triton", "clause", "all5")
-    }
-    assert {(j.ks, j.batch_sizes) for j in n95} == {((100, 1000), (16,))}
-    # quality-only by declaration (perf: false), so their records are ok, not partial
-    assert not any(j.timed for j in n95 + bw) and all(j.timed for j in timed + cd)
+    assert not any(j.timed for j in bw) and all(j.timed for j in timed + cd)
 
 
 # G-key: resume keys of cells that exist before and after the redesign, as today's code
 # (b96e1f2) computed them. Old records must keep matching (docs/system/evaluation.md § Resume).
 OLD_KEYS = [
-    ("filter", "arxiv", '{"algo":"silvertorch","backend":"triton","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"clause","inputs":"content_d128","params":{"n_probe":24},"seed":0,"suite":"filter","sweep":"c0_maincat"}'),  # noqa: E501
-    ("filter", "arxiv", '{"algo":"silvertorch","backend":"official","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"bloom","inputs":"content_d128","params":{"n_probe":24},"seed":0,"suite":"filter","sweep":"c3_nversions"}'),  # noqa: E501
     ("filter", "arxiv", '{"algo":"linr_v3","backend":"triton","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"bloom","inputs":"content_d128","params":{},"seed":1,"suite":"filter","sweep":"all4"}'),  # noqa: E501
     ("filter", "goodreads", '{"algo":"postfilter","backend":"torch","code_version":"CV","dataset":"goodreads","dim":128,"filter_kind":"clause","inputs":"sasrec-ssm-logq-d128","params":{"alpha":8},"seed":0,"suite":"filter","sweep":"c1_lang_reverse"}'),  # noqa: E501
     ("filter", "goodreads", '{"algo":"linr_v1_filter_mask","backend":"triton","code_version":"CV","dataset":"goodreads","dim":128,"filter_kind":"clause","inputs":"sasrec-ssm-logq-d128","params":{},"seed":2,"suite":"filter","sweep":"all4"}'),  # noqa: E501
     ("filter", "pubmed", '{"algo":"linr_v2","backend":"triton","code_version":"CV","dataset":"pubmed","dim":768,"filter_kind":"clause","inputs":"content_d768","params":{},"seed":0,"suite":"filter","sweep":"all5"}'),  # noqa: E501
-    ("filter", "yfcc10m", '{"algo":"silvertorch","backend":"triton","code_version":"CV","dataset":"yfcc10m","dim":192,"filter_kind":"clause","inputs":"content_d192","params":{"n_probe":24},"seed":0,"suite":"filter","sweep":"tags_and"}'),  # noqa: E501
     ("deep", "arxiv", '{"algo":"silvertorch","backend":"triton","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"clause","inputs":"content_d128","params":{"n_lists":1664,"n_probe":8},"seed":2,"suite":"deep","sweep":"c0_maincat"}'),  # noqa: E501
     ("deep", "arxiv", '{"algo":"silvertorch","backend":"official","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"bloom","inputs":"content_d128","params":{"n_lists":8192,"n_probe":128},"seed":1,"suite":"deep","sweep":"all4"}'),  # noqa: E501
     ("codesign", "arxiv", '{"algo":"silvertorch","backend":"official","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"bloom","inputs":"content_d128","params":{"bloom_path":"full","n_lists":1664,"n_probe":32},"seed":0,"suite":"codesign","sweep":"c3_nversions"}'),  # noqa: E501
@@ -636,3 +629,28 @@ def test_score_path_is_an_official_build_param():
     assert official_config("silvertorch", "bloom", "official", {}) is None
     with pytest.raises(ValueError, match="score_path applies to silvertorch/official only"):
         official_config("silvertorch", "bloom", "triton", {"score_path": "int32"})
+
+
+# IVF-TUNE (docs/artifacts/campaign-v2/ivf-tune): SilverTorch n_lists / n95 per dataset; None = open
+IVF = {
+    "goodreads": (4096, 64),
+    "arxiv": (8192, None),
+    "yfcc10m": (16384, None),
+    "pubmed": (16384, None),
+}
+
+
+@pytest.mark.parametrize("dataset", list(IVF))
+def test_filter_silvertorch_runs_at_the_tuned_ivf(dataset):
+    n_lists, n95 = IVF[dataset]
+    st = [j for j in _real("filter", dataset, seeds=[0]) if j.algo == "silvertorch"]
+    assert st and {j.build.get("n_lists") for j in st} == {n_lists}
+    for j in st:
+        want = {24} if j.backend == "torch" or n95 is None else {24, n95}
+        assert {q["n_probe"] for q in j.query} == want
+
+
+@pytest.mark.parametrize("dataset", ["goodreads", "arxiv", "yfcc10m"])
+def test_synth_silvertorch_runs_on_the_real_datasets_ivf(dataset):
+    st = [j for j in _real("synth", f"{dataset}-synth", seeds=[0]) if j.algo == "silvertorch"]
+    assert st and {j.build["n_lists"] for j in st} == {IVF[dataset][0]}
