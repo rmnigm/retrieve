@@ -197,8 +197,10 @@ co-design.
 - [ ] **V-GR-DEEP: goodreads `deep`**, trimmed (`n_lists` {1024, 4096},
   `n_probe` {8, 16, 32, 64, 128}, V3 pool fractions); replaces D1-C.
   F3; goodreads' `n95`, then the goodreads `filter` n95 cells and the
-  goodreads-synth SilverTorch n_probe sweep cells (both config edits in
-  suites.yaml; resume adds only the new cells). **≈ 6 GPU-h**, GPU 0/1.
+  189 new goodreads-synth cells of the SilverTorch n_probe sweep (in
+  suites.yaml; resume adds only the new cells; driver
+  [v-gr-deep](artifacts/campaign-v2/v-gr-deep/driver.sh)). **≈ 6 GPU-h**,
+  GPU 0/1.
 - [ ] **V-YFCC: YFCC synth (5 points) and a small `deep`** (`n_lists`
   {4096, 16384}). F1/F2 10M panel; YFCC's `n95`. Needs V-AX-SYNTH.
   **≈ 18 GPU-h**, GPU 0/1.
