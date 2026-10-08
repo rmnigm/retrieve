@@ -17,6 +17,8 @@ State per leg in [validation](../../../validation.md). NOT CITABLE until D1-G.
 | [`v-gr-deep.sh`](v-gr-deep.sh) | V-GR-DEEP: goodreads `deep` |
 | [`v-yfcc.sh`](v-yfcc.sh) | V-YFCC: yfcc10m-synth `synth`, then yfcc10m `deep` |
 | [`v-seeds-yfcc.sh`](v-seeds-yfcc.sh) | V-SEEDS, YFCC half: yfcc10m `filter`, every arm |
+| [`h2h-diag.sh`](h2h-diag.sh) | H2H protocol diagnostic (controller addendum): goodreads `c0_genre` bloom bs 16 k 100 seed 0, the three h2h arms (a) interleaved + `--profile`, (b) interleaved, (c) one process per arm, orders abc / cba / bac; scratch trees, not a leg |
+| [`h2h_diag_config.py`](h2h_diag_config.py), [`h2h_diag_summary.py`](h2h_diag_summary.py) | its scratch config dirs (the real `h2h` suite cut to that cell) and its per-arm table |
 | [`stage-upload.sh`](stage-upload.sh) | copies one `(suite, dataset)` slice and the leg's logs and runs `bench upload --verify` |
 
 Launch: `setsid nohup flock -n /scratch/gpu0.lock bash <driver> > /scratch/v21/<leg>/driver.log 2>&1 &`;
