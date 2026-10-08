@@ -38,11 +38,11 @@ import matplotlib.pyplot as plt
 ALGO_LABEL = {
     "linr_v1_filter_mask": "LiNR V1",
     "linr_v2": "LiNR V2",
-    "linr_v4": "LiNR V4",
     "linr_v3": "LiNR V3",
     "silvertorch": "SilverTorch",
-    "postfilter": "torch postfilter",
+    "postfilter": "postfilter",
 }
+PARAM_LABEL = {"alpha": "$\\alpha$"}
 # The baseline is torch by definition (decisions.md § Harness): it passes any --backend.
 FIXED_BACKEND = {"postfilter": "torch"}
 DATASET_LABEL = {"goodreads": "Goodreads", "arxiv": "arXiv"}
@@ -263,6 +263,16 @@ def _cells(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def _arm(algo: str, params: str | dict, tex: bool = True) -> str:
+    """One row label per parameter set: ``postfilter ($\\alpha$=1)``. Rows are never averaged
+    across parameters (the alpha rule, docs/system/evaluation.md § Report)."""
+    p = json.loads(params) if isinstance(params, str) else params
+    bits = [
+        f"{PARAM_LABEL.get(n, _esc(n) if tex else n)}={v}" for n, v in sorted((p or {}).items())
+    ]
+    return ALGO_LABEL.get(algo, algo) + (f" ({', '.join(bits)})" if bits else "")
+
+
 def _esc(text: Any) -> str:
     """LaTeX-escape a string that came out of the records (sweep names, parameter JSON)."""
     out = str(text)
@@ -394,17 +404,23 @@ def tab_pareto(c) -> list[Path]:
             base = _reduce(
                 _sel(perf, sweep=sw, algo=SPEEDUP_BASE), "perf_median_ms", [], f"{ds}/{sw}/base"
             )
-            for i, a in enumerate(
-                [x for x in ALGO_LABEL if any(r["algo"] == x and r["sweep"] == sw for r in rows)]
-            ):
+            arms = sorted(
+                {
+                    (r["algo"], r["params"])
+                    for r in rows
+                    if r["sweep"] == sw and r["algo"] in ALGO_LABEL
+                },
+                key=lambda ap: (list(ALGO_LABEL).index(ap[0]), ap[1]),
+            )
+            for i, (a, pj) in enumerate(arms):
                 q = _reduce(
-                    _cells(_sel(rows, sweep=sw, algo=a)),
+                    _cells(_sel(rows, sweep=sw, algo=a, params=pj)),
                     f"oracle_recall@{c.k}",
                     notes,
                     f"{ds}/{sw}/{a}",
                 )
-                t = _reduce(_sel(perf, sweep=sw, algo=a), "perf_median_ms", [], f"{ds}/{sw}/{a}")
-                m = _reduce(_cells(_sel(rows, sweep=sw, algo=a)), "index_mib", [], f"{ds}/{sw}/{a}")
+                t = _reduce(_sel(perf, sweep=sw, algo=a, params=pj), "perf_median_ms", [], "")
+                m = _reduce(_cells(_sel(rows, sweep=sw, algo=a, params=pj)), "index_mib", [], "")
                 sp = (
                     "---"
                     if not (base and t)
@@ -413,7 +429,7 @@ def tab_pareto(c) -> list[Path]:
                 body.append(
                     [
                         f"\\textbf{{{_esc(sw)}}}" if i == 0 else "",
-                        ALGO_LABEL[a],
+                        _arm(a, pj),
                         _num(q),
                         _num(t, 3),
                         sp,

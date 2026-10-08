@@ -807,6 +807,15 @@ the best-covered one, named in the caption. A selection that matches
 nothing emits the table with a `--- no matching cells ---` row rather than
 failing.
 
+**Labels and the alpha rule.** `ALGO_LABEL` names every algo a table may
+show; a record of an algo without a label (a retired `linr_v4` leg) reaches
+no table. The per-sweep tables show one row per parameter set, labelled with
+it (`_arm`): `postfilter ($\alpha$=1)` is the baseline's headline row and
+`$\alpha$=8` its strong variant, and no number is ever averaged across
+`alpha` or any other parameter. The postfilter is torch by definition
+([The postfilter baseline](#the-postfilter-baseline)), so `--backend`
+selects it whatever its value (`FIXED_BACKEND`).
+
 **Not compiled.** No TeX toolchain is installed on this box, so the
 fragments are checked structurally (`tests/bench/test_report.py`:
 balanced environments, balanced braces and math, the thesis's labels

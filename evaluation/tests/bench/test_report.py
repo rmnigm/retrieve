@@ -305,10 +305,9 @@ def test_each_reason_is_stated_in_the_banner_caption_and_report(results, tmp_pat
             assert "pre-campaign" not in text and "predate" not in text, path
 
 
-def test_postfilter_rows_alpha_1_headline_and_the_alpha_curve(tmp_path):
-    """Roadmap D5-run's report prerequisite: the torch baseline passes ``--backend triton``
-    (``FIXED_BACKEND``), its table row is ``alpha = 1`` with the other alphas noted, and the
-    swept alphas draw the recovery curve."""
+def test_postfilter_rows_carry_their_alpha_and_are_never_averaged(tmp_path):
+    """The alpha rule: one row per alpha, labelled with it; the torch baseline passes
+    ``--backend triton`` (``FIXED_BACKEND``); the swept alphas draw the recovery curve."""
     p = tmp_path / "results" / "filter" / "goodreads-d128.jsonl"
     records.append_record(p, _rec("goodreads", "linr_v1_filter_mask", "triton", ms=0.5))
     for alpha, recall in ((1, 0.71), (2, 0.85), (4, 0.93), (8, 0.97)):
@@ -318,11 +317,21 @@ def test_postfilter_rows_alpha_1_headline_and_the_alpha_curve(tmp_path):
         )
     c = _generate(tmp_path / "results", tmp_path / "out")
     pareto = (tmp_path / "out" / "tables" / "tab-pareto_goodreads.tex").read_text()
-    row = next(ln for ln in pareto.splitlines() if "torch postfilter" in ln)
-    assert "0{,}7100" in row and "0{,}85" not in row
-    assert "4 parameter sets present" in pareto
-    assert "torch postfilter" in (tmp_path / "out" / "tables" / "tab-memory.tex").read_text()
+    rows = {
+        alpha: next(ln for ln in pareto.splitlines() if f"postfilter ($\\alpha$={alpha})" in ln)
+        for alpha in (1, 2, 4, 8)
+    }
+    assert "0{,}7100" in rows[1] and "0{,}9700" in rows[8] and "0{,}85" not in rows[1]
+    assert "postfilter" in (tmp_path / "out" / "tables" / "tab-memory.tex").read_text()
     names = {p.name for p in c.written}
     assert "fig-deep-sweep-goodreads-c0_genre-postfilter-alpha.png" in names
     assert report._sel(c.rows, backend="official", algo="postfilter")  # any backend selection
     assert not report._sel(c.rows, backend="official", algo="linr_v1_filter_mask")
+
+
+def test_an_algo_without_a_label_never_reaches_a_table(results, tmp_path):
+    p = results / "filter" / "goodreads-d128.jsonl"
+    records.append_record(p, _rec("goodreads", "linr_v4", "triton"))
+    _generate(results, tmp_path / "out")
+    for name in ("tab-pareto_goodreads.tex", "tab-memory.tex"):
+        assert "v4" not in (tmp_path / "out" / "tables" / name).read_text().lower()
