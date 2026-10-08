@@ -352,9 +352,9 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("deep", "goodreads"): (42, 210),
     ("deep", "arxiv"): (72, 360),
     ("deep", "yfcc10m"): (9, 45),
-    ("synth", "goodreads-synth"): (261, 345),
-    ("synth", "arxiv-synth"): (261, 345),
-    ("synth", "yfcc10m-synth"): (135, 195),
+    ("synth", "goodreads-synth"): (303, 534),
+    ("synth", "arxiv-synth"): (303, 534),
+    ("synth", "yfcc10m-synth"): (165, 285),
     ("n95", "pubmed"): (3, 15),
     ("codesign", "arxiv"): (18, 54),
     ("codesign", "goodreads"): (18, 54),
@@ -410,7 +410,8 @@ def test_grid_counts_and_invariants(suite, dataset):
         "silvertorch",
         "postfilter",
     }
-    assert not any(p.get("n_probe") in (4, 256) for _, p in cells)
+    assert not any(p.get("n_probe") == 4 for _, p in cells)
+    assert suite == "synth" or not any(p.get("n_probe") == 256 for _, p in cells)
     assert not any(j.narrowed for j in jobs)
     if suite in ("filter", "deep") and dataset in KEPT:
         assert {j.sweep for j in jobs} == KEPT[dataset] or (
@@ -432,6 +433,11 @@ def test_grid_counts_and_invariants(suite, dataset):
             ("linr_v1_filter_mask", '{"compile": "max-autotune"}'),
             ("linr_v2", '{"compile": "max-autotune"}'),
         }
+        sweep = (24, 256, 1024) if dataset == "yfcc10m-synth" else (24, 64, 128, 256, 512, 1024)
+        st = {(j.backend, j.filter_kind): tuple(q["n_probe"] for q in j.query)
+              for j in jobs if j.algo == "silvertorch"}  # fmt: skip
+        assert st == {("triton", "clause"): sweep, ("triton", "bloom"): (24, 256),
+                      ("official", "bloom"): (24, 256)}  # fmt: skip
 
 
 def test_filter_suite_arms():

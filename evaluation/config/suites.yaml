@@ -8,10 +8,11 @@
 # silvertorch n_lists=1024 n_probe=24 n_iter=10, linr_v3 candidate_pool=5000.
 #
 # Global rules: seeds {0, 1, 2} everywhere (codesign: timing repeats); bs {1, 16}; k {100, 1000};
-# no n_probe 4 / 256, no bs 8, no k 500, no openalex. Official SilverTorch runs `none` / `bloom`
-# only: its clause cells time our pack_mask adapter (the old records stay readable). One backend
-# per algo (`triton`, measured fastest everywhere) except silvertorch, whose official-vs-ours
-# comparison is the paper, and the C3 torch arms named below.
+# no n_probe 4 / 256 (synth's SilverTorch sweep aside, user), no bs 8, no k 500, no openalex.
+# Official SilverTorch runs `none` / `bloom` only: its clause cells time our pack_mask adapter
+# (the old records stay readable). One backend per algo (`triton`, measured fastest everywhere)
+# except silvertorch, whose official-vs-ours comparison is the paper, and the C3 torch arms
+# named below.
 #
 # n95 = the smallest n_probe reaching recall_oracle@100 >= 0.95 on a dataset's median sweep,
 # read off deep / synth / n95 after the code freeze (campaign-v2 run order). Until measured the
@@ -113,10 +114,13 @@ synth:                         # pass rate as the x axis (F1, F2, C1, C2, C6)
     - algo: silvertorch
       backends: [triton]
       filter_kinds: [clause]
-      query: {n_probe: [24]}
-      datasets: {goodreads-synth: {}, arxiv-synth: {}, yfcc10m-synth: {}}   # [24, n95, 4*n95]
-    - {algo: silvertorch, backends: [triton], filter_kinds: [bloom], datasets: {}}   # n95 only
-    - {algo: silvertorch, backends: [official], filter_kinds: [bloom], datasets: {}} # n95 only
+      query: {n_probe: [24, 64, 128, 256, 512, 1024]}       # an explicit sweep, not n95 (user);
+      datasets:                                             # synth n_lists is 1024: none capped
+        goodreads-synth: {}
+        arxiv-synth: {}
+        yfcc10m-synth: {query: {n_probe: [24, 256, 1024]}}
+    - {algo: silvertorch, backends: [triton], filter_kinds: [bloom], query: {n_probe: [24, 256]}}
+    - {algo: silvertorch, backends: [official], filter_kinds: [bloom], query: {n_probe: [24, 256]}}
     - {algo: postfilter, backends: [torch], query: {alpha: [1, 8]}}
     # C3 (native torch vs our kernels) as a function of p, eager and compiled; goodreads + arxiv
     # only, like filter's torch arms (add yfcc10m-synth: {} if C3 stays ambiguous)
