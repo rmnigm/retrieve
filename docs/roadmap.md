@@ -32,6 +32,10 @@ others (see [Multi-GPU execution](#multi-gpu-execution)).
 
 ## Needs the user
 
+- **`n_probe` > 1024 at k 1000** (optional): the probe scorers' id
+  epilogue tile caps `next_pow2(k) · next_pow2(n_probe)` at 2^20
+  ([kernels](system/kernels.md)). Tiling it over k would lift the limit; a
+  library change (campaign-v2.2). Not needed by the grid as tuned.
 - **Contact the original authors** (re-plan decision 7): the LinkedIn LiNR
   team and Meta's SilverTorch team — filter-set details, the V1/V2 setup,
   the SilverTorch paper's FPR inconsistency (0.067 % vs 0.00173 %) — and

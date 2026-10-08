@@ -49,8 +49,8 @@ filter:                        # headline (T2, C3, C6)
       datasets:                                             # IVF-TUNE: n_lists by size, n_probe {24, n95}
         goodreads: {build: {n_lists: [4096]}, query: {n_probe: [24, 64]}}
         arxiv: {build: {n_lists: [2048]}, query: {n_probe: [24, 256]}}   # n95 256 (quick check, 2048 fewest items)
-        yfcc10m: {build: {n_lists: [16384]}, query: {n_probe: [24, 4096]}}   # 0.95 not reached: the 25 % cap (recall 0.72)
-        pubmed: {build: {n_lists: [16384]}}                   # n95 open (part B: PubMed's capped tuning)
+        yfcc10m: {build: {n_lists: [4096]}, query: {n_probe: [24, 1024]}}   # 0.95 not reached: the 25 % cap, runnable at k 1000
+        pubmed: {build: {n_lists: [4096]}, query: {n_probe: [24, 1024]}}    # 0.95 not reached: the 25 % cap (0.873)
     - algo: silvertorch
       backends: [official]
       filter_kinds: [bloom]
@@ -58,8 +58,8 @@ filter:                        # headline (T2, C3, C6)
       datasets:                                             # IVF-TUNE: n_lists by size, n_probe {24, n95}
         goodreads: {build: {n_lists: [4096]}, query: {n_probe: [24, 64]}}
         arxiv: {build: {n_lists: [2048]}, query: {n_probe: [24, 256]}}   # n95 256 (quick check, 2048 fewest items)
-        yfcc10m: {build: {n_lists: [16384]}, query: {n_probe: [24, 4096]}}   # 0.95 not reached: the 25 % cap (recall 0.72)
-        pubmed: {build: {n_lists: [16384]}}                   # n95 open (part B: PubMed's capped tuning)
+        yfcc10m: {build: {n_lists: [4096]}, query: {n_probe: [24, 1024]}}   # 0.95 not reached: the 25 % cap, runnable at k 1000
+        pubmed: {build: {n_lists: [4096]}, query: {n_probe: [24, 1024]}}    # 0.95 not reached: the 25 % cap (0.873)
     # C3's torch arms on goodreads + arxiv only (measured: 515-917 s a cell at 0.8 M; the 10 M
     # catalogs would take hours a cell); add yfcc10m / pubmed here if C3 stays ambiguous.
     - algo: silvertorch                                       # #12: plain-torch IVF
@@ -128,17 +128,17 @@ synth:                         # pass rate as the x axis (F1, F2, C1, C2, C6)
       datasets:                                             # n_lists from IVF-TUNE (real dataset's)
         goodreads-synth: {build: {n_lists: [4096]}}
         arxiv-synth: {build: {n_lists: [2048]}}
-        yfcc10m-synth: {build: {n_lists: [16384]}, query: {n_probe: [24, 256, 1024]}}
+        yfcc10m-synth: {build: {n_lists: [4096]}, query: {n_probe: [24, 256, 1024]}}
     - algo: silvertorch
       backends: [triton]
       filter_kinds: [bloom]
       query: {n_probe: [24, 256]}
-      datasets: {goodreads-synth: {build: {n_lists: [4096]}}, arxiv-synth: {build: {n_lists: [2048]}}, yfcc10m-synth: {build: {n_lists: [16384]}}}
+      datasets: {goodreads-synth: {build: {n_lists: [4096]}}, arxiv-synth: {build: {n_lists: [2048]}}, yfcc10m-synth: {build: {n_lists: [4096]}}}
     - algo: silvertorch
       backends: [official]
       filter_kinds: [bloom]
       query: {n_probe: [24, 256]}
-      datasets: {goodreads-synth: {build: {n_lists: [4096]}}, arxiv-synth: {build: {n_lists: [2048]}}, yfcc10m-synth: {build: {n_lists: [16384]}}}
+      datasets: {goodreads-synth: {build: {n_lists: [4096]}}, arxiv-synth: {build: {n_lists: [2048]}}, yfcc10m-synth: {build: {n_lists: [4096]}}}
     - {algo: postfilter, backends: [torch], query: {alpha: [1, 8]}}
     # C3 (native torch vs our kernels) as a function of p, eager and compiled; goodreads + arxiv
     # only, like filter's torch arms (add yfcc10m-synth: {} if C3 stays ambiguous)

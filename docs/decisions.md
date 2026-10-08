@@ -130,7 +130,11 @@ now on; the [roadmap](roadmap.md) holds the steps.
   `n_lists` (≈ 4√N to a power of two: goodreads 4096, arXiv 8192, YFCC
   and PubMed 16384); arXiv's and YFCC's n95 come from a **quick check**
   (user): that one `n_lists`, quality-only `n_probe` doubling on the
-  median sweep, seed 0, same cap.
+  median sweep, seed 0, same cap. Measured picks: goodreads 4096 / 64, arXiv 2048 / 256
+  (2048-8192 all reach 0.95 at ≈ 12.7 % scanned), YFCC and PubMed 4096 /
+  1024 = the cap, 0.95 not reached (0.72, 0.873): at k 1000 the probe
+  scorers run `n_probe` ≤ 1024, which makes 4096 the largest `n_lists` whose
+  25 % cap runs.
 - **Official SilverTorch runs only on `none` and `bloom`.** Its clause and
   exact cells time our `pack_mask` adapter, not Meta's code; the existing
   official-clause records stay as an "adapter-bound upper bound" footnote.
