@@ -3,8 +3,8 @@
 set -u
 REPO=/workspace/retrieve
 PY=/venvs/retrieve/bin/python
-R=/scratch/campaign-v2/results
-EXPECT=408b1188d542634b3d18a2f5077bd23537a845fc
+R=${R:-/scratch/campaign-v2/results}
+EXPECT=${EXPECT:-408b1188d542634b3d18a2f5077bd23537a845fc}
 LOG=/scratch/$LEG
 export CUDA_VISIBLE_DEVICES=0 TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/$LEG HF_HOME=/scratch/hf
 PIN="taskset -c 0-63,128-191"
