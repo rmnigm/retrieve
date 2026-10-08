@@ -3,8 +3,9 @@ dataset on disk (``write_tiny_dataset``, the one writer ``test_inputs.py`` and
 ``test_layout.py`` share) plus the matching dataset / suites YAMLs, so ``run.run`` can be
 driven end to end through ``config.load_matrix`` without a GPU or real data. The ``e2e``
 suite has two algos (the in-process loop); ``e2e1`` has one, for the campaign test's single
-child; ``postfilter`` runs the baseline next to the exact V1 it is measured against. Tests
-marked ``gpu`` skip without CUDA."""
+child; ``postfilter`` runs the baseline next to the exact V1 it is measured against; ``arms``
+holds the campaign-v2 params (gridded bloom widths, ``compile``, ``candidate_pool_frac``).
+Tests marked ``gpu`` skip without CUDA."""
 
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ import pytest
 import torch
 
 N, U, D, C = 24, 8, 8, 2
+D_E2E = 64  # LiNR V3's OPORP packs bits in words of 64
 
 
 def pytest_collection_modifyitems(config, items):
@@ -32,6 +34,7 @@ def write_tiny_dataset(
     *,
     n: int = N,
     u: int = U,
+    d: int = D,
     doc_prefix: str = "search_document: ",
     n_split: int | None = None,
     legacy: bool = False,
@@ -46,11 +49,11 @@ def write_tiny_dataset(
     content = data_dir / "content"
     content.mkdir(parents=True)
     g = torch.Generator().manual_seed(0)
-    text_emb = torch.randn(n, D, generator=g).half()
+    text_emb = torch.randn(n, d, generator=g).half()
     if legacy:
-        text_emb = torch.cat([torch.zeros(1, D, dtype=text_emb.dtype), text_emb])
+        text_emb = torch.cat([torch.zeros(1, d, dtype=text_emb.dtype), text_emb])
     torch.save(text_emb, content / "text_emb.pt")
-    torch.save(torch.randn(u, D, generator=g).half(), content / "query_emb.pt")
+    torch.save(torch.randn(u, d, generator=g).half(), content / "query_emb.pt")
     (content / "text_emb.meta.json").write_text(json.dumps({"prefix": doc_prefix}))
     (content / "query_emb.meta.json").write_text(json.dumps({"prefix": "search_query: "}))
     pl.DataFrame({"item_id": list(range(1, u + 1))}).write_parquet(data_dir / "heldout.parquet")
@@ -70,10 +73,10 @@ def write_tiny_dataset(
 def tiny_configs(tmp_path: Path) -> tuple[Path, Path]:
     """``(tiny.yaml, suites.yaml)`` over the on-disk fixture; the ``e2e`` suite runs
     ``none`` + ``clause`` cells on ``backend="torch"`` (the CPU-capable path)."""
-    data_dir = write_tiny_dataset(tmp_path / "data" / "tiny")
+    data_dir = write_tiny_dataset(tmp_path / "data" / "tiny", d=D_E2E)
     ds = tmp_path / "tiny.yaml"
     ds.write_text(
-        f"data_dir: {data_dir}\ncontent_dir: content\ndims: [{D}]\n"
+        f"data_dir: {data_dir}\ncontent_dir: content\ndims: [{D_E2E}]\n"
         "filters:\n  attrs: item_attrs_narrow.pt\n  reverse: clause_is_reverse_narrow.pt\n"
         "  clause: {c0: [0], c0c1: [0, 1]}\n  bloom: {c0: [0]}\n"
     )
@@ -81,12 +84,23 @@ def tiny_configs(tmp_path: Path) -> tuple[Path, Path]:
     suites.write_text(
         "e2e:\n  datasets: [tiny]\n  filter_kinds: [none, clause]\n  ks: [2, 4]\n"
         "  batch_sizes: [1, 2]\n"
-        "  algos: {linr_v1_filter_mask: [torch], linr_v4: [torch]}\n"
+        "  arms:\n    - {algo: linr_v1_filter_mask, backends: [torch]}\n"
+        "    - {algo: linr_v3, backends: [torch], query: {candidate_pool: [8]}}\n"
         "e2e1:\n  datasets: [tiny]\n  filter_kinds: [none, clause]\n  ks: [2, 4]\n"
-        "  batch_sizes: [1, 2]\n  algos: {linr_v1_filter_mask: [torch]}\n"
+        "  batch_sizes: [1, 2]\n  arms: [{algo: linr_v1_filter_mask, backends: [torch]}]\n"
         "postfilter:\n  datasets: [tiny]\n  filter_kinds: [clause, bloom]\n  ks: [2, 4]\n"
-        "  batch_sizes: [1, 2]\n  algos: {linr_v1_filter_mask: [torch], postfilter: [torch]}\n"
-        "  params: {postfilter: {query: {alpha: [1, 2]}}}\n"
+        "  batch_sizes: [1, 2]\n  arms:\n    - {algo: linr_v1_filter_mask, backends: [torch]}\n"
+        "    - {algo: postfilter, backends: [torch], query: {alpha: [1, 2]}}\n"
+        "arms:\n  datasets: [tiny]\n  filter_kinds: [clause, bloom]\n  ks: [2, 4]\n"
+        "  batch_sizes: [1]\n  arms:\n"
+        "    - {algo: silvertorch, backends: [torch], filter_kinds: [bloom],\n"
+        "       build: {n_lists: [4], m_bits: [64, 256]}, query: {n_probe: [2]}}\n"
+        "    - {algo: silvertorch, backends: [torch], filter_kinds: [bloom],\n"
+        "       build: {n_lists: [4]}, query: {n_probe: [2]}}\n"
+        "    - {algo: silvertorch, backends: [torch], filter_kinds: [clause],\n"
+        "       build: {n_lists: [4], compile: [max-autotune]}, query: {n_probe: [2]}}\n"
+        "    - {algo: linr_v3, backends: [torch], filter_kinds: [clause],\n"
+        "       query: {candidate_pool_frac: [0.5, 1.0]}}\n"
         "bloom: {m_bits: 64, k_hash: 2}\n"
     )
     return ds, suites

@@ -1,94 +1,205 @@
-# Harness v2 suites (H §3.3, §8.2 A/J; backends per H's amendment: triton | torch | official).
-# A suite = the cells run on every listed dataset × its dims. `algos` maps each algo to the
-# backends it runs on (one per algo since 2026-09-16, see below); algos.PATHS drops
-# (algo, filter_kind, backend) triples with
-# no code path (linr_v2 on `none`, official on anything but silvertorch).
-# `params.<algo>`: `build:` (rebuilds the index) and `query:` (n_probe / candidate_pool,
-# mutated via set_query_params) — dict-of-lists = grid, list-of-dicts = explicit combos.
-# Algo defaults when no params are given: silvertorch n_lists=1024 n_probe=24 n_iter=10,
-# linr_v3 candidate_pool=5000 (the old configs' cells).
-
-# `quality` (unfiltered) is RETIRED from the campaign, 2026-09-16 (user): the study's datasets
-# are changing, and the suite's dataset list was stale anyway -- it still named yambda-500m and
-# yambda-5b, which roadmap Phase E dropped from the study on 2026-09-05 ("scale without
-# meaningful filters, closed query encoder; the existing Yambda unfiltered runs stay as they
-# are"). The unfiltered cells come back with the Phase E datasets at E5, not from yambda.
-# Consequence: report.py's `tab:recall_nofilter` has no source and emits its placeholder until
-# then -- that is expected, not a defect.
+# Harness v2 suites, the campaign-v2 grid (user decisions 2026-10-08; docs/system/evaluation.md
+# § Config). A suite = the cells run on every listed dataset at the dims both list. Each entry of
+# `arms` is one algo on its backends, optionally narrowed to `filter_kinds` / `sweeps`, with
+# `build:` (rebuilds the index) and `query:` (n_probe / candidate_pool / candidate_pool_frac /
+# alpha, applied with set_query_params) grids. An arm with `datasets:` runs only on the datasets
+# it lists, each with optional `build` / `query` / `sweeps` overrides merged over the arm's.
+# algos.PATHS drops (algo, filter_kind, backend) triples with no code path. Algo defaults:
+# silvertorch n_lists=1024 n_probe=24 n_iter=10, linr_v3 candidate_pool=5000.
 #
-# One backend per algo, decided 2026-09-16 (user) and by measurement, not by taste: an algo is
-# a row in the paper, not an implementation matrix. `triton` wins on every algo we measured --
-# eager median torch/triton 4.16x (v1), 7.27x (v2), 10.19x (v3), from D1-a's own records -- so
-# every algo is pinned to it. The one deliberate deviation is `silvertorch`, which carries two
-# implementations because *that comparison is the paper* (Triton reimplementation vs Meta's
-# official kernels, gap G2). The `torch` floor is not swept: it is already banked in D1-a's 71
-# records at d128 and is reported from there. `linr_v4` is dropped entirely -- it is ours, not
-# LiNR's: the paper defines V1-V3 only (articles/linr.md, figures knn_v1..v3).
-filter:                        # vs exact oracle + held-out-in-filter (old d*-filter.yaml)
-  # yfcc10m joined 2026-09-16 (roadmap E1): one dim (192, its native CLIP width — the
-  # d128 of the others is their chosen dim, not an ablation), one clause sweep, no bloom
-  # (config/yfcc10m.yaml). ks are the suite's: recall is against the harness's own cosine
-  # oracle, not the shipped k=10 squared-L2 GT (docs/system/datasets.md § yfcc10m).
-  # `dims` is [128, 192] for that reason and is NOT the dim ablation, which stays dropped:
-  # each dataset contributes exactly one width. pubmed joined at E2 at its native 768
-  # (MedCPT, config/pubmed.yaml), same rule; openalex at E3 at its native 768
-  # (nomic-embed-text-v1.5, config/openalex.yaml), a 10 M catalog like pubmed's. kuairand
-  # (config/kuairand.yaml, a 32 M catalog) is out until roadmap E4 settles its width: its
-  # checkpoint is d64 only, and adding 64 here would also pull goodreads d64 in.
-  datasets: [goodreads, arxiv, yfcc10m, pubmed, openalex]
-  dims: [128, 192, 768]
-  filter_kinds: [clause, bloom]
-  ks: [100, 500, 1000]
-  batch_sizes: [1, 8, 16]
-  algos:
-    linr_v1_filter_mask: [triton]
-    linr_v2: [triton]
-    linr_v3: [triton]
-    silvertorch: [triton, official]
-    postfilter: [torch]        # the generic-torch baseline, torch by definition (decisions.md)
-  params:
-    silvertorch: {query: {n_probe: [24, 32]}}   # roadmap D1: headline n_probe ∈ {24, 32}
-    postfilter: {query: {alpha: [1, 2, 4, 8]}}  # topk(alpha*k) before the filter; 1 = headline
-  seeds:
-    default: [0]
-    headline: {sweeps: [c0_genre, c0_maincat, all4], dims: [128], seeds: [0, 1, 2]}
+# Global rules: seeds {0, 1, 2} everywhere (codesign: timing repeats); bs {1, 16}; k {100, 1000};
+# no n_probe 4 / 256, no bs 8, no k 500, no openalex. Official SilverTorch runs `none` / `bloom`
+# only: its clause cells time our pack_mask adapter (the old records stay readable). One backend
+# per algo (`triton`, measured fastest everywhere) except silvertorch, whose official-vs-ours
+# comparison is the paper, and the C3 torch arms named below.
+#
+# n95 = the smallest n_probe reaching recall_oracle@100 >= 0.95 on a dataset's median sweep,
+# read off deep / synth / n95 after the code freeze (campaign-v2 run order). Until measured the
+# n95 entries are left out: filling one is a value edit in an arm's `datasets:` slot, e.g.
+#   goodreads: {query: {n_probe: [24, 37]}}
 
-deep:                          # recall-vs-latency curves (old config/deep_sweeps/*.yaml + H §2.7)
-  datasets: [goodreads, arxiv]
-  dims: [128]
+# Kept sweeps (one high pass rate, one low, one conjunctive / reverse), from measured pass rates:
+# arxiv c3_nversions 0.444, c0_maincat 0.136, all4 0.0094; pubmed c0_mesh 0.0002,
+# c3_journal_reverse 0.9993, all5 0.018. Bloom keeps the forward ones among them.
+filter:                        # headline (T2, C3, C6)
+  datasets: [goodreads, arxiv, yfcc10m, pubmed]
+  dims: [128, 192, 768]        # each dataset's one native / chosen width; no dim ablation
   filter_kinds: [clause, bloom]
-  ks: [100, 200, 400]
-  batch_sizes: [1, 8, 16]
+  ks: [100, 1000]
+  batch_sizes: [1, 16]
   seeds: [0, 1, 2]
-  algos:
-    silvertorch: [triton, official]
-    linr_v3: [triton]
-  params:
-    silvertorch:               # 2 builds (n_lists) × 6 query configs, not 12 builds (§8.2 A)
-      build: {n_lists: [1664, 8192]}
-      query: {n_probe: [4, 8, 24, 32, 128, 256]}
-    linr_v3:
-      query: {candidate_pool: [2000, 4000, 8000, 16000, 32000]}
+  sweeps:
+    goodreads: [c0_genre, c1_lang_reverse, all4]
+    arxiv: [c3_nversions, c0_maincat, all4]
+    pubmed: [c0_mesh, c3_journal_reverse, all5]
+    yfcc10m: [tags_and]
+  arms:
+    - {algo: linr_v1_filter_mask, backends: [triton]}
+    - {algo: linr_v2, backends: [triton]}
+    - {algo: linr_v3, backends: [triton]}                     # candidate_pool 5000
+    - algo: silvertorch
+      backends: [triton]
+      query: {n_probe: [24]}                                  # 24 = the paper's
+      datasets: {goodreads: {}, arxiv: {}, yfcc10m: {}, pubmed: {}}   # n95 slots: [24, n95]
+    - algo: silvertorch
+      backends: [official]
+      filter_kinds: [bloom]
+      query: {n_probe: [24]}
+      datasets: {goodreads: {}, arxiv: {}, yfcc10m: {}, pubmed: {}}   # n95 slots: [24, n95]
+    # C3's torch arms on goodreads + arxiv only (measured: 515-917 s a cell at 0.8 M; the 10 M
+    # catalogs would take hours a cell); add yfcc10m / pubmed here if C3 stays ambiguous.
+    - algo: silvertorch                                       # #12: plain-torch IVF
+      backends: [torch]
+      query: {n_probe: [24]}
+      datasets: {goodreads: {}, arxiv: {}}
+    - algo: silvertorch                                       # #13: the same, torch.compile'd
+      backends: [torch]
+      build: {compile: [max-autotune]}
+      query: {n_probe: [24]}
+      datasets: {goodreads: {}, arxiv: {}}
+    - {algo: postfilter, backends: [torch], query: {alpha: [1, 8]}}   # the generic-torch baseline
 
-codesign:                      # S9: the paper's §4.4 co-design ablation, latency + scratch vs probe count
-  # Its own suite, not an arm of `deep`: `params.<algo>` crosses every backend and filter kind
-  # of the algo, and `bloom_path` exists only on silvertorch / bloom / official (anything else
-  # is a ConfigError). `partial` (fused partial masks over the probed clusters, the library
-  # default and what every `filter` / `deep` official cell runs, with the key absent) vs
-  # `full` (full-N bool mask, then IVF). One build per arm at deep's smaller n_lists, deep's
-  # probe sweep; one seed, since both arms are bit-exact to each other by construction
-  # (validation.md, library gates) and only latency / peak_fwd_mib differ.
-  datasets: [goodreads, arxiv]
+deep:                          # recall-vs-latency Pareto (F3, C6)
+  datasets: [goodreads, arxiv, yfcc10m]
+  dims: [128, 192]
+  filter_kinds: [clause, bloom]
+  ks: [100, 1000]
+  batch_sizes: [1, 16]
+  seeds: [0, 1, 2]
+  sweeps:
+    goodreads: [c0_genre, c1_lang_reverse, all4]
+    arxiv: [c3_nversions, c0_maincat, all4]
+    yfcc10m: [tags_and]
+  arms:
+    - algo: silvertorch        # n_lists ~ sqrt(N) and 4x that
+      backends: [triton]
+      query: {n_probe: [8, 16, 32, 64, 128]}
+      datasets:
+        goodreads: {build: {n_lists: [1024, 4096]}}
+        arxiv: {build: {n_lists: [1664, 8192]}}
+        yfcc10m: {build: {n_lists: [4096, 16384]}}
+    - algo: silvertorch
+      backends: [official]
+      filter_kinds: [bloom]
+      query: {n_probe: [8, 16, 32, 64, 128]}
+      datasets:
+        goodreads: {build: {n_lists: [1024, 4096]}}
+        arxiv: {build: {n_lists: [1664, 8192]}}
+        yfcc10m: {build: {n_lists: [4096, 16384]}}
+    - algo: linr_v3            # candidate_pool as a fraction of the sweep's mean passing items
+      backends: [triton]
+      query: {candidate_pool_frac: [0.005, 0.01, 0.02, 0.05, 0.1]}
+
+synth:                         # pass rate as the x axis (F1, F2, C1, C2, C6)
+  datasets: [goodreads-synth, arxiv-synth, yfcc10m-synth]
+  dims: [128, 192]
+  filter_kinds: [clause, bloom]
+  ks: [100, 1000]
+  batch_sizes: [1, 16]
+  seeds: [0, 1, 2]
+  ks_by_sweep:                 # k = 1000 dropped where N*p < 4*1000: "return every passing item"
+    goodreads-synth: {p0001: [100], p0003: [100]}            # N 797,084
+    arxiv-synth: {p0001: [100]}                              # N 2,988,996
+  arms:
+    - {algo: linr_v1_filter_mask, backends: [triton]}
+    - {algo: linr_v2, backends: [triton]}
+    - {algo: linr_v3, backends: [triton], query: {candidate_pool_frac: [0.01, 0.05]}}
+    - algo: silvertorch
+      backends: [triton]
+      filter_kinds: [clause]
+      query: {n_probe: [24]}
+      datasets: {goodreads-synth: {}, arxiv-synth: {}, yfcc10m-synth: {}}   # [24, n95, 4*n95]
+    - {algo: silvertorch, backends: [triton], filter_kinds: [bloom], datasets: {}}   # n95 only
+    - {algo: silvertorch, backends: [official], filter_kinds: [bloom], datasets: {}} # n95 only
+    - {algo: postfilter, backends: [torch], query: {alpha: [1, 8]}}
+    # C3 (native torch vs our kernels) as a function of p, eager and compiled; goodreads + arxiv
+    # only, like filter's torch arms (add yfcc10m-synth: {} if C3 stays ambiguous)
+    - algo: linr_v1_filter_mask
+      backends: [torch]
+      sweeps: [p001, p01, p1]
+      datasets: {goodreads-synth: {}, arxiv-synth: {}}
+    - algo: linr_v2
+      backends: [torch]
+      sweeps: [p001, p01, p1]
+      datasets: {goodreads-synth: {}, arxiv-synth: {}}
+    - algo: linr_v1_filter_mask
+      backends: [torch]
+      sweeps: [p001, p01, p1]
+      build: {compile: [max-autotune]}
+      datasets: {goodreads-synth: {}, arxiv-synth: {}}
+    - algo: linr_v2
+      backends: [torch]
+      sweeps: [p001, p01, p1]
+      build: {compile: [max-autotune]}
+      datasets: {goodreads-synth: {}, arxiv-synth: {}}
+
+n95:                           # pubmed's n95 source (it runs no deep / synth); run --skip-perf
+  datasets: [pubmed]
+  dims: [768]
+  filter_kinds: [clause]
+  ks: [100, 1000]
+  batch_sizes: [16]
+  seeds: [0, 1, 2]
+  sweeps: {pubmed: [all5]}     # the median pass rate of its three kept sweeps
+  arms:
+    - {algo: silvertorch, backends: [triton], query: {n_probe: [8, 16, 32, 64, 128]}}
+
+codesign:                      # S9 / F4b, C5: the official bloom path, partial vs full masks
+  # `bloom_path` exists on silvertorch / bloom / official only (anything else is a ConfigError);
+  # both arms carry it in `params`, so their keys never collide with filter / deep official cells.
+  # Interleaved partial/full timing in one process is a harness change, not a config one.
+  datasets: [arxiv, goodreads]
   dims: [128]
   filter_kinds: [bloom]
   ks: [100]
-  batch_sizes: [1, 8, 16]
-  seeds: [0]
-  algos:
-    silvertorch: [official]
-  params:
-    silvertorch:
-      build: {n_lists: [1664], bloom_path: [partial, full]}
-      query: {n_probe: [4, 8, 24, 32, 128, 256]}
+  batch_sizes: [1, 16]
+  seeds: [0, 1, 2]
+  sweeps:
+    arxiv: [c3_nversions, c0_maincat, all4]
+    goodreads: [c0_genre, c2_format, c3_year]
+  arms:
+    - algo: silvertorch
+      backends: [official]
+      build: {bloom_path: [partial, full]}
+      query: {n_probe: [8, 32, 128]}
+      datasets:
+        arxiv: {build: {n_lists: [1664]}}
+        goodreads: {build: {n_lists: [1024]}}
+
+bloomwidth:                    # D3 / F4a, C4: bloom width vs FPR and recall; run --skip-perf
+  datasets: [goodreads, arxiv, pubmed]
+  dims: [128, 768]
+  filter_kinds: [bloom]
+  ks: [100, 1000]
+  batch_sizes: [16]
+  seeds: [0, 1, 2]
+  sweeps:
+    goodreads: [c0_genre]
+    arxiv: [c3_nversions, c0_maincat, all4]
+    pubmed: [c0_mesh]          # multi-valued (K = 4)
+  arms:
+    - algo: silvertorch
+      backends: [triton]
+      build: {m_bits: [64, 128, 256, 512, 1024, 2048], k_hash: [3, 5]}
+    # official ignores m_bits: its bloom width is OfficialConfig.b_multiplier (measured: the
+    # same index_mib and recall at 64 and 2048 bits), so only k_hash (its search k) is gridded
+    - {algo: silvertorch, backends: [official], build: {k_hash: [3, 5]}}
+
+bloomwidth-timed:              # one timed point per width
+  datasets: [goodreads, arxiv, pubmed]
+  dims: [128, 768]
+  filter_kinds: [bloom]
+  ks: [100]
+  batch_sizes: [16]
+  seeds: [0, 1, 2]
+  sweeps:
+    goodreads: [c0_genre]
+    arxiv: [c3_nversions, c0_maincat, all4]
+    pubmed: [c0_mesh]
+  arms:
+    - algo: silvertorch
+      backends: [triton]
+      build: {m_bits: [64, 128, 256, 512, 1024, 2048], k_hash: [5]}
+    - {algo: silvertorch, backends: [official], build: {k_hash: [5]}}   # its one width
 
 bloom: {m_bits: 1024, k_hash: 5}   # shared defaults; a suite may override with its own `bloom:`

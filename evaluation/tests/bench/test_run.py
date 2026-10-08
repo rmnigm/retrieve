@@ -54,7 +54,7 @@ def test_end_to_end_records(tiny_configs, tmp_path):
     out = tmp_path / "results"
     counts = run.run(jobs, out_dir=out, **KW)
     assert dict(counts) == {"ok": 3}
-    path = out / "e2e" / "tiny-d8.jsonl"
+    path = out / "e2e" / "tiny-d64.jsonl"
     recs = _records(path)
     assert len(recs) == 3
     # Key block + status + provenance on every record.
@@ -121,7 +121,7 @@ def test_resume_skips_ok_cells_and_code_version_change_reruns(tiny_configs, tmp_
     assert dict(run.run(jobs, **kw)) == {"ok": 2}
     assert dict(run.run(jobs, **kw)) == {"skipped": 2}
     assert dict(run.run(jobs, resume=False, **kw)) == {"ok": 2}
-    path = out / "e2e" / "tiny-d8.jsonl"
+    path = out / "e2e" / "tiny-d64.jsonl"
     assert len(_records(path)) == 4
     monkeypatch.setattr(bench, "code_version", lambda: "0" * 40)
     assert dict(run.run(jobs, **kw)) == {"ok": 2}
@@ -134,7 +134,7 @@ def test_narrowed_runs_are_partial_and_resume_reruns_them(tiny_configs, tmp_path
     """An iteration-day ``--mode eager`` / ``--k 2`` run must never make the next full run
     skip the cell: the record is ``partial`` (with the reasons), and only ``ok`` resumes."""
     out = tmp_path / "results"
-    path = out / "e2e" / "tiny-d8.jsonl"
+    path = out / "e2e" / "tiny-d64.jsonl"
     full = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=[NONE_SWEEP])
     assert not full[0].narrowed
     # --mode eager: a subset of MODES.
@@ -160,26 +160,26 @@ def test_narrowed_runs_are_partial_and_resume_reruns_them(tiny_configs, tmp_path
 
 
 def test_failed_cell_is_recorded_and_the_loop_continues(tiny_configs, tmp_path, monkeypatch):
-    jobs = _jobs(tiny_configs, sweeps=[NONE_SWEEP])  # v1 none, v4 none (int8 on CPU is slow)
-    assert [j.algo for j in jobs] == ["linr_v1_filter_mask", "linr_v4"]
+    jobs = _jobs(tiny_configs, sweeps=[NONE_SWEEP])  # v1 none, v3 none
+    assert [j.algo for j in jobs] == ["linr_v1_filter_mask", "linr_v3"]
     real = run.algos.build
 
     def flaky(algo, *a, **kw):
-        if algo == "linr_v4":
-            raise RuntimeError("boom: int8 path unavailable")
+        if algo == "linr_v3":
+            raise RuntimeError("boom: OPORP build failed")
         return real(algo, *a, **kw)
 
     monkeypatch.setattr(run.algos, "build", flaky)
     out = tmp_path / "results"
     counts = run.run(jobs, out_dir=out, **KW)
     assert dict(counts) == {"ok": 1, "failed": 1}
-    recs = _records(out / "e2e" / "tiny-d8.jsonl")
+    recs = _records(out / "e2e" / "tiny-d64.jsonl")
     assert [r["status"] for r in recs] == ["ok", "failed"]
     r = recs[1]
-    assert r["algo"] == "linr_v4" and r["stage"] == "build"
-    assert "boom: int8 path unavailable" in r["error"] and "Traceback" in r["error"]
+    assert r["algo"] == "linr_v3" and r["stage"] == "build"
+    assert "boom: OPORP build failed" in r["error"] and "Traceback" in r["error"]
     assert r["env"]["code_version"] == bench.code_version()
-    # A failed record does not count as done: resume re-runs it (v4 for real this time).
+    # A failed record does not count as done: resume re-runs it (v3 for real this time).
     monkeypatch.setattr(run.algos, "build", real)
     counts = run.run(jobs, out_dir=out, **KW)
     assert dict(counts) == {"skipped": 1, "ok": 1}
@@ -188,11 +188,11 @@ def test_failed_cell_is_recorded_and_the_loop_continues(tiny_configs, tmp_path, 
 def test_sticky_cuda_error_is_recorded_then_ends_the_process(tiny_configs, tmp_path, monkeypatch):
     """After an illegal memory access the context is dead: the cell is recorded as failed
     like any other, but the loop does not continue into cells that can only fail."""
-    jobs = _jobs(tiny_configs, sweeps=[NONE_SWEEP])  # v1 none, v4 none
+    jobs = _jobs(tiny_configs, sweeps=[NONE_SWEEP])  # v1 none, v3 none
     real = run.algos.build
 
     def dead(algo, *a, **kw):
-        if algo == "linr_v4":
+        if algo == "linr_v3":
             raise RuntimeError("CUDA error: an illegal memory access was encountered")
         return real(algo, *a, **kw)
 
@@ -200,10 +200,10 @@ def test_sticky_cuda_error_is_recorded_then_ends_the_process(tiny_configs, tmp_p
     out = tmp_path / "results"
     with pytest.raises(RuntimeError, match="illegal memory access"):
         run.run(jobs, out_dir=out, **KW)
-    recs = _records(out / "e2e" / "tiny-d8.jsonl")
+    recs = _records(out / "e2e" / "tiny-d64.jsonl")
     assert [(r["algo"], r["status"]) for r in recs] == [
         ("linr_v1_filter_mask", "ok"),
-        ("linr_v4", "failed"),
+        ("linr_v3", "failed"),
     ]
     assert recs[1]["stage"] == "build" and "illegal memory access" in recs[1]["error"]
     assert run.is_sticky(RuntimeError("CUDA error: device-side assert triggered"))
@@ -240,7 +240,7 @@ def test_quality_gate_kills_the_run_after_recording(tiny_configs, tmp_path, monk
     out = tmp_path / "results"
     with pytest.raises(run.QualityGateError, match="recall_oracle@4"):
         run.run(jobs, out_dir=out, **KW)
-    recs = _records(out / "e2e" / "tiny-d8.jsonl")
+    recs = _records(out / "e2e" / "tiny-d64.jsonl")
     assert [r["status"] for r in recs] == ["ok", "failed"]  # none cell has no oracle gate
     assert recs[1]["stage"] == "quality" and "QualityGateError" in recs[1]["error"]
 
@@ -252,7 +252,7 @@ def test_parity_spill_compares_the_second_backend(tiny_configs, tmp_path, monkey
     out = tmp_path / "results"
     kw = dict(out_dir=out, skip_perf=True, **KW)
     run.run(clause, **kw)
-    ref = list((out / "_parity" / "tiny-d8_linr_v1_filter_mask").glob("*.npz"))
+    ref = list((out / "_parity" / "tiny-d64_linr_v1_filter_mask").glob("*.npz"))
     assert len(ref) == 1
     # A "second backend": the same cell relabelled, built on the torch path underneath.
     other = dataclasses.replace(clause[0], backend="torch2")
@@ -264,7 +264,7 @@ def test_parity_spill_compares_the_second_backend(tiny_configs, tmp_path, monkey
     )
     monkeypatch.setattr(run.algos, "filter_backend", lambda b: "torch")
     run.run([other], **kw)
-    recs = _records(out / "e2e" / "tiny-d8.jsonl")
+    recs = _records(out / "e2e" / "tiny-d64.jsonl")
     assert recs[0]["quality"]["parity"] == "reference"
     assert recs[1]["quality"]["parity"] == "vs_torch"
     assert recs[1]["quality"]["jaccard_vs_first@2"] == 1.0
@@ -278,9 +278,9 @@ def test_parity_spill_of_the_same_backend_is_rewritten(tiny_configs, tmp_path):
     jobs = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=["c0"])
     out = tmp_path / "results"
     run.run(jobs, out_dir=out, skip_perf=True, **KW)
-    (out / "e2e" / "tiny-d8.jsonl").unlink()
+    (out / "e2e" / "tiny-d64.jsonl").unlink()
     run.run(jobs, out_dir=out, skip_perf=True, **KW)
-    recs = _records(out / "e2e" / "tiny-d8.jsonl")
+    recs = _records(out / "e2e" / "tiny-d64.jsonl")
     assert [r["quality"]["parity"] for r in recs] == ["reference"] * len(jobs)
 
 
@@ -299,7 +299,7 @@ def test_postfilter_records_oracle_recall_per_k(tiny_configs, tmp_path):
     jobs = load_matrix(ds, suites, "postfilter")
     out = tmp_path / "results"
     assert dict(run.run(jobs, out_dir=out, **KW)) == {"ok": 9}
-    recs = _records(out / "postfilter" / "tiny-d8.jsonl")
+    recs = _records(out / "postfilter" / "tiny-d64.jsonl")
     exact = {(r["filter_kind"], r["sweep"]): r for r in recs if r["algo"] != "postfilter"}
     post = [r for r in recs if r["algo"] == "postfilter"]
     assert sorted((r["filter_kind"], r["sweep"], r["params"]["alpha"]) for r in post) == [
@@ -412,7 +412,7 @@ def test_eager_only_partial_is_per_job(tiny_configs, tmp_path, monkeypatch):
     monkeypatch.setattr(run, "build_module", build)
     out = tmp_path / "results"
     assert dict(run.run(jobs, out_dir=out, modes=EAGER, **KW)) == {"partial": 1, "ok": 1}
-    recs = {r["backend"]: r for r in _records(out / "e2e" / "tiny-d8.jsonl")}
+    recs = {r["backend"]: r for r in _records(out / "e2e" / "tiny-d64.jsonl")}
     assert recs["triton"]["status"] == "partial"
     assert recs["triton"]["partial_reasons"] == ["modes"]
     assert recs["official"]["status"] == "ok" and recs["official"]["partial_reasons"] is None
@@ -444,8 +444,83 @@ def test_a_cell_with_no_in_filter_heldout_target_records_null(tiny_configs, tmp_
     jobs = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=["c0"])
     out = tmp_path / "results"
     assert dict(run.run(jobs, out_dir=out, skip_perf=True, **KW)) == {"partial": 1}
-    (rec,) = _records(out / "e2e" / "tiny-d8.jsonl")
+    (rec,) = _records(out / "e2e" / "tiny-d64.jsonl")
     held = rec["quality"]["heldout"]
     assert held["n"] == 0 and rec["n_queries_heldout"] == 0
     assert all(v is None for m, v in held.items() if m != "n")
     assert rec["quality"]["oracle"]["recall@4"] == pytest.approx(1.0)  # the oracle side scores
+
+
+def _arms(cfgs, **narrow):
+    ds, suites = cfgs
+    return load_matrix(ds, suites, "arms", **narrow)
+
+
+def test_gridded_bloom_width_is_the_cells_own(tiny_configs, tmp_path):
+    """G-bloomwidth (CPU): ``m_bits`` in ``params`` sets that job's bloom — the module's index,
+    the standalone filter's pass counts and ``bloom_fp_rate``, the record's ``bloom`` — while
+    the ungridded cell keeps the suite default and a key without ``m_bits``."""
+    jobs = _arms(tiny_configs, filter_kinds=["bloom"])
+    out = tmp_path / "results"
+    assert dict(run.run(jobs, out_dir=out, skip_perf=True, **KW)) == {"partial": 3}
+    recs = _records(out / "arms" / "tiny-d64.jsonl")
+    by = {r["params"].get("m_bits"): r for r in recs}
+    assert by[64]["bloom"] == {"m_bits": 64, "k_hash": 2}
+    assert by[256]["bloom"] == {"m_bits": 256, "k_hash": 2}
+    assert by[None]["bloom"] == {"m_bits": 64, "k_hash": 2}  # the suite default
+    assert by[None]["params"] == {"n_lists": 4, "n_probe": 2}
+    assert by[256]["index_mib"] > by[64]["index_mib"]  # the bloom words live in the index
+    assert all(r["bloom_fp_rate"] is not None for r in recs)
+    assert by[256]["bloom_fp_rate"] <= by[64]["bloom_fp_rate"]
+
+
+def test_resolve_pool_from_the_sweeps_pass_counts():
+    """G-pool: ``max(POOL_MIN, round(frac × mean pass count over the oracle rows))``; on synth
+    every query passes the same N·p items. Skipped rows (``-1``) do not count."""
+    count = 79_708  # goodreads-synth p01: 797,084 items × 0.1
+    blob = {"pass_counts": torch.tensor([count] * 5 + [-1])}
+    assets = {"blob": blob, "oracle_rows": torch.tensor([True] * 5 + [False])}
+    for frac in (0.005, 0.01, 0.05, 0.1):
+        p = run.resolve_pool({"candidate_pool_frac": frac}, assets)
+        assert p == {"candidate_pool": max(2000, round(frac * count))}
+    assert run.resolve_pool({"candidate_pool_frac": 0.01}, assets)["candidate_pool"] == 2000
+    assert run.resolve_pool({"n_probe": 8}, assets) == {"n_probe": 8}
+    with pytest.raises(ValueError, match="oracle pass counts"):
+        run.resolve_pool({"candidate_pool_frac": 0.1}, {"blob": None})
+
+
+def test_pool_fraction_end_to_end(tiny_configs, tmp_path, monkeypatch):
+    """The key keeps ``candidate_pool_frac``; the module and the record body get the int."""
+    monkeypatch.setattr(run, "POOL_MIN", 4)
+    jobs = _arms(tiny_configs, algos=["linr_v3"], sweeps=["c0"])
+    out = tmp_path / "results"
+    assert dict(run.run(jobs, out_dir=out, skip_perf=True, **KW)) == {"partial": 2}
+    recs = _records(out / "arms" / "tiny-d64.jsonl")
+    # clause c0: every live query passes 8 of the 24 items
+    assert [(r["params"], r["candidate_pool"]) for r in recs] == [
+        ({"candidate_pool_frac": 0.5}, 4),
+        ({"candidate_pool_frac": 1.0}, 8),
+    ]
+    assert recs[1]["quality"]["oracle"]["recall@4"] == pytest.approx(1.0)  # the whole pass set
+
+
+def test_compiled_arm_times_its_warmup_apart_and_skips_graph(tiny_configs, tmp_path, monkeypatch):
+    """``compile`` is in the key, the module is compiled in place with its mode, the first
+    forward is ``compile_s`` (not ``build_s``), and ``graph`` is a null ``not_capturable`` entry
+    (max-autotune replays its own CUDA graphs). The compiler itself is faked on CPU."""
+    calls = []
+    monkeypatch.setattr(torch.nn.Module, "compile", lambda self, **kw: calls.append(kw))
+    jobs = _arms(tiny_configs, filter_kinds=["clause"], algos=["silvertorch"])
+    out = tmp_path / "results"
+    assert dict(run.run(jobs, out_dir=out, **KW)) == {"ok": 2}
+    assert calls == [{"mode": "max-autotune"}] * 2
+    recs = _records(out / "arms" / "tiny-d64.jsonl")
+    assert {r["sweep"] for r in recs} == {"c0", "c0c1"}
+    for r in recs:
+        assert r["params"] == {"n_lists": 4, "compile": "max-autotune", "n_probe": 2}
+        assert r["compile_s"] > 0 and r["build_s"] > 0
+        graph = [e for e in r["perf"] if e["mode"] == "graph"]
+        assert graph and all(e["reason"] == "not_capturable" and e["median_ms"] is None
+                             for e in graph)  # fmt: skip
+    plain = _records(out / "arms" / "tiny-d64.jsonl")
+    assert all(r["candidate_pool"] is None for r in plain)

@@ -79,6 +79,7 @@ EXACT_MIN_RECALL = 0.99
 # alpha*k), so quality runs once per k.
 PER_K_QUALITY = ("postfilter",)
 CLOCK_DRIFT = 0.05  # §2.1: an under-load sample > 5 % off the process's first one
+POOL_MIN = 2000  # the floor of a resolved candidate_pool_frac (the re-plan's "minimum 2k")
 # An exception whose message carries one of these has killed the CUDA context: recorded, then
 # re-raised so the child exits and ``bench campaign`` moves on (review §2.9).
 STICKY_CUDA = ("CUDA error", "illegal memory access", "device-side assert")
@@ -157,6 +158,34 @@ def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device
     }
 
 
+def resolve_pool(params: dict, assets: dict) -> dict:
+    """``candidate_pool_frac`` → ``candidate_pool = max(POOL_MIN, round(frac × mean pass count
+    over the sweep's oracle rows))`` (on synth, N·p); other params pass through. The key keeps
+    the fraction, the module gets the int, the record body carries it."""
+    if "candidate_pool_frac" not in params:
+        return params
+    p = dict(params)
+    if assets["blob"] is None:
+        raise ValueError("candidate_pool_frac needs a filter cell's oracle pass counts")
+    mean = assets["blob"]["pass_counts"][assets["oracle_rows"]].double().mean().item()
+    p["candidate_pool"] = max(POOL_MIN, round(p.pop("candidate_pool_frac") * mean))
+    return p
+
+
+def compile_warmup(module: nn.Module, inp: dict, assets: dict, device: torch.device) -> float:
+    """Seconds of a compiled module's first forward (one quality chunk), kept apart from
+    ``build_s``; ``perf``'s per-``(bs, k)`` recompiles fall inside ``latency``'s warm-up."""
+    sel = assets["keep"].nonzero().reshape(-1)[:QUALITY_CHUNK]
+    q = inp["queries"][sel].to(device)
+    qa = assets["qa_s"][sel].to(device) if assets["qa_s"] is not None else None
+    t0 = time.perf_counter()
+    with torch.inference_mode():
+        module(q, qa)
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    return time.perf_counter() - t0
+
+
 def build_module(job: Job, inp: dict, assets: dict, k_max: int, params: dict) -> nn.Module:
     kw = dict(params)
     if job.algo == "silvertorch" and job.filter_kind == "bloom":
@@ -205,8 +234,9 @@ def quality(
             else None
         )
         ids, scores = module(q, qa)
-        ids_all.append(ids)
-        sc_all.append(scores.float())
+        # a compiled arm's outputs live in CUDA-graph buffers the next call overwrites
+        ids_all.append(ids.clone())
+        sc_all.append(scores.float().clone())
         if acc_o is not None:
             m = assets["oracle_rows"][sel]
             if bool(m.any()):
@@ -477,7 +507,10 @@ def run(
         )
         try:
             module, build_s = measure.timed_build(
-                lambda: build_module(job, inp, assets, k_max, todo[0])  # noqa: B023 — called at once
+                lambda: build_module(job, inp, assets, k_max, resolve_pool(todo[0], assets))  # noqa: B023 — called at once
+            )
+            compile_s = (
+                compile_warmup(module, inp, assets, device) if "compile" in job.build else None
             )
         except Exception as exc:  # recorded, the loop continues (H §7)
             logger.exception("build failed: {}", job.key(todo[0]))
@@ -499,7 +532,8 @@ def run(
             t0 = time.perf_counter()
             stage = "query_params"
             try:
-                q = {k: v for k, v in params.items() if k in QUERY_PARAMS}
+                resolved = resolve_pool(params, assets)
+                q = {k: v for k, v in resolved.items() if k in QUERY_PARAMS}
                 if q:
                     module.set_query_params(**q)
                 reasons = job_reasons + (["ks_bs"] if job.narrowed else [])
@@ -524,6 +558,8 @@ def run(
                     "ks": list(job.ks),
                     "batch_sizes": list(job.batch_sizes),
                     "build_s": build_s,
+                    "compile_s": compile_s,
+                    "candidate_pool": resolved.get("candidate_pool"),
                     "index_mib": index_mib,
                     "filter_mib": filter_mib,
                     "quality": None,
@@ -613,6 +649,7 @@ def run(
 
 __all__ = [
     "CLOCK_DRIFT",
+    "POOL_MIN",
     "EXACT_ALGOS",
     "MODES",
     "PERF_STAT_KEYS",
@@ -620,6 +657,8 @@ __all__ = [
     "QUALITY_CHUNK",
     "STICKY_CUDA",
     "QualityGateError",
+    "compile_warmup",
     "is_sticky",
+    "resolve_pool",
     "run",
 ]

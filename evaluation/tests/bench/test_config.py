@@ -12,6 +12,7 @@ and the ``official`` backend the old configs never had.
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from pathlib import Path
 
@@ -19,6 +20,7 @@ import pytest
 import yaml
 
 from bench.config import NONE_SWEEP, ConfigError, load_dataset, load_matrix
+from bench.records import resume_key
 
 FIX = Path(__file__).parent / "data"
 CFG = Path(__file__).resolve().parents[2] / "config"
@@ -48,6 +50,30 @@ def test_load_dataset_per_dim_mapping():
     assert ds.attrs is None and ds.clauses == {}
     with pytest.raises(ConfigError, match="dim 64 not in dims"):
         load_dataset(TEXT, 64)
+
+
+@pytest.mark.parametrize("parent", ["goodreads", "arxiv", "yfcc10m"])
+def test_synth_dataset_shares_the_parents_inputs(parent):
+    """``<parent>-synth.yaml``: the parent's items, queries, encoder (so its encode cache) and
+    users_limit; the synth attrs and query attrs; sweep names disjoint from the parent's in
+    the shared ``gt_d{dim}``."""
+    dim = load_dataset(CFG / f"{parent}.yaml", 128 if parent != "yfcc10m" else 192).dim
+    p, s = (load_dataset(CFG / f"{n}.yaml", dim) for n in (parent, f"{parent}-synth"))
+    for f in ("dim", "data_dir", "checkpoint", "content_dir", "users_limit", "encode", "inputs"):
+        assert getattr(s, f) == getattr(p, f), f
+    assert s.gt_dir == p.gt_dir and s.name == f"{parent}-synth"
+    assert (s.attrs.name, s.query_attrs.name, s.reverse) == (
+        "item_attrs_synth.pt",
+        "query_attrs_synth.pt",
+        None,
+    )
+    assert p.query_attrs == p.data_dir / "eval_split.parquet"
+    rates = ["p0001", "p0003", "p001", "p003", "p01", "p03", "p1"]
+    if parent == "yfcc10m":
+        rates = ["p0001", "p001", "p003", "p01", "p1"]
+    want = {r: (["p0001", "p0003", "p001", "p003", "p01", "p03", "p1"].index(r),) for r in rates}
+    assert s.clauses == {"clause": want, "bloom": want}
+    assert not {sw for fk in p.clauses.values() for sw in fk} & set(want)
 
 
 def test_load_dataset_rejects_bad_files(tmp_path):
@@ -112,36 +138,63 @@ def test_quality_suite_collapses_same_path_backends():
     assert groups == sorted(groups, key=groups.index)  # each group contiguous
 
 
-def test_filter_suite_counts_keys_and_headline_seeds():
+def test_filter_suite_arms_sweeps_and_seeds():
     jobs = load_matrix(MINI, SUITES, "filter")
-    # (fk, sweep) pairs per dim: clause c0, c0c1 (c9_off disabled) + bloom c0 = 3.
-    # algos per pair: linr_v2 2 paths, linr_v3 1, silvertorch 2 = 5.
-    # seeds: c0 at dim 32 (clause and bloom) → 3 seeds; everything else 1.
-    assert len(jobs) == 3 * 5 + (5 + 15 + 15)
+    # (fk, sweep) pairs per dim: clause c0, c0c1 (c9_off disabled) + bloom c0 = 3. Per pair and
+    # seed: linr_v2 2 paths on all 3; linr_v3 (sweeps [c0]) on 2; silvertorch triton on 3;
+    # official (bloom only) on 1 → 6 + 2 + 3 + 1 = 12 per dim and seed.
+    assert len(jobs) == 2 * 3 * 12
     assert _counts(jobs, "dim", "filter_kind", "sweep") == Counter(
         {
-            (16, "clause", "c0"): 5,
-            (16, "clause", "c0c1"): 5,
-            (16, "bloom", "c0"): 5,
-            (32, "clause", "c0"): 15,
-            (32, "clause", "c0c1"): 5,
-            (32, "bloom", "c0"): 15,
+            (d, fk, sw): n
+            for d in (16, 32)
+            for (fk, sw), n in {
+                ("clause", "c0"): 12,
+                ("clause", "c0c1"): 9,
+                ("bloom", "c0"): 15,
+            }.items()
         }
     )
-    assert {j.seed for j in jobs if j.dim == 32 and j.sweep == "c0"} == {0, 1, 2}
-    assert {j.seed for j in jobs if not (j.dim == 32 and j.sweep == "c0")} == {0}
-    assert {(j.algo, j.backend, j.path) for j in jobs} == {
-        ("linr_v2", "triton", "triton"),
-        ("linr_v2", "torch", "torch"),
-        ("linr_v3", "torch", "torch"),
-        ("silvertorch", "triton", "triton"),
-        ("silvertorch", "official", "official"),
-    }
+    assert {j.seed for j in jobs} == {0, 1, 2}
+    assert not any(j.backend == "official" and j.filter_kind == "clause" for j in jobs)
+    assert {j.sweep for j in jobs if j.algo == "linr_v3"} == {"c0"}
     assert all(j.ks == (10, 50) and j.batch_sizes == (1, 2) for j in jobs)
     assert {j.clauses for j in jobs if j.sweep == "c0c1"} == {(0, 1)}
-    assert len(
-        {(j.key()["sweep"], j.key()["seed"], j.algo, j.backend, j.dim, j.filter_kind) for j in jobs}
-    ) == len(jobs)
+    keys = [(j.dim, j.algo, j.backend, j.filter_kind, j.sweep, j.seed) for j in jobs]
+    assert len(set(keys)) == len(jobs)
+
+
+def test_widths_compile_frac_ks_by_sweep_and_empty_slots():
+    jobs = load_matrix(MINI, SUITES, "widths")
+    st_bloom = [
+        j for j in jobs if (j.algo, j.backend, j.filter_kind) == ("silvertorch", "triton", "bloom")
+    ]
+    # m_bits gridded: the job's bloom carries it, the suite default fills k_hash.
+    assert [(j.build, j.bloom) for j in st_bloom] == [
+        ({"m_bits": 64}, {"m_bits": 64, "k_hash": 3}),
+        ({"m_bits": 256}, {"m_bits": 256, "k_hash": 3}),
+    ]
+    # Not gridded: the key's params stay {} and the bloom is the default, as before.
+    plain = [
+        j for j in jobs if (j.algo, j.backend, j.filter_kind) == ("silvertorch", "triton", "clause")
+    ]
+    assert plain and all(j.build == {} for j in plain)
+    assert all(j.bloom == {"m_bits": 64, "k_hash": 3} for j in plain)
+    compiled = [j for j in jobs if j.backend == "torch" and j.algo == "silvertorch"]
+    assert compiled and all(j.build == {"compile": "max-autotune"} for j in compiled)
+    v3 = [j for j in jobs if j.algo == "linr_v3"]
+    assert v3 and all(j.query == ({"candidate_pool_frac": 0.1},) for j in v3)
+    assert not any(j.algo == "linr_v2" for j in jobs)  # `datasets: {}` runs nowhere
+    assert {j.sweep: j.ks for j in jobs if j.filter_kind == "clause"} == {
+        "c0": (10, 50),
+        "c0c1": (10,),
+    }
+    assert not any(j.narrowed for j in jobs)
+    narrowed = load_matrix(MINI, SUITES, "widths", ks=[10])
+    assert {j.sweep: j.narrowed for j in narrowed if j.filter_kind == "clause"} == {
+        "c0": True,
+        "c0c1": False,  # --k 10 is that sweep's own list
+    }
 
 
 def test_deep_suite_build_query_split():
@@ -198,12 +251,12 @@ def test_narrows_apply_before_collapse():
         ("silvertorch", "torch", "torch"),
     ]
     jobs = load_matrix(MINI, SUITES, "filter", sweeps=["c0c1"], seeds=[1], ks=[10], batch_sizes=[2])
-    assert jobs == [] or all(j.sweep == "c0c1" for j in jobs)
-    assert jobs == []  # c0c1 only has seed 0
+    # per dim: linr_v2 on two paths + silvertorch triton (no bloom c0c1, linr_v3 is c0-only)
+    assert len(jobs) == 6 and all(j.sweep == "c0c1" and j.seed == 1 for j in jobs)
     jobs = load_matrix(
         MINI, SUITES, "filter", sweeps=["c0"], dims=[32], seeds=[1], ks=[10], batch_sizes=[2]
     )
-    assert len(jobs) == 10 and all(
+    assert len(jobs) == 9 and all(
         j.ks == (10,) and j.batch_sizes == (2,) and j.seed == 1 for j in jobs
     )
 
@@ -232,127 +285,242 @@ def test_suite_errors_are_named():
         load_matrix(MINI, SUITES, "quality", ks=[0])
 
 
-# ----- the real configs against the old (deleted) d128 YAMLs ----------------------------
-
-_OLD_FILTER = {  # config/<dataset>/d128-filter.yaml @ 06bc4c7: sweeps per filter kind
-    "goodreads": {
-        "clause": ["c0_genre", "c1_lang_reverse", "c2_format", "c3_year", "c0c1", "all4"],
-        "bloom": ["c0_genre", "c2_format", "c3_year"],
-        "data_dir": "data/goodreads-work-id",
-        # The old YAML named gsasrec-d128-drop0.5-id; the E1c checkpoint replaced it.
-        "checkpoint": "data/goodreads-work-id/checkpoints/sasrec-ssm-logq-d128/best_model.pt",
-        "content_dir": None,
-    },
-    "arxiv": {
-        "clause": ["c0_maincat", "c2_year", "c3_nversions", "c0c2", "all4"],
-        "bloom": ["c0_maincat", "c2_year", "c3_nversions", "c0c2", "all4"],
-        "data_dir": "data/arxiv-papers",
-        "checkpoint": None,
-        "content_dir": "data/arxiv-papers/content_d128",
-    },
-}
-_OLD_ALGOS = ["linr_v1_filter_mask", "linr_v2", "linr_v3", "linr_v4", "silvertorch"]
-_OLD_BACKENDS = ["triton", "torch"]
-
-
-def _new_cells(jobs) -> set[tuple]:
-    return {
-        (j.algo, j.backend, j.filter_kind, j.sweep, k, bs)
-        for j in jobs
-        for k in j.ks
-        for bs in j.batch_sizes
-    }
-
-
-@pytest.mark.parametrize("dataset", ["goodreads", "arxiv"])
-def test_filter_suite_matches_old_d128_filter_config(dataset):
-    old = _OLD_FILTER[dataset]
-    jobs = [
-        j
-        for j in load_matrix(
-            CFG / f"{dataset}.yaml", CFG / "suites.yaml", "filter", dims=[128], seeds=[0]
-        )
-        if j.backend != "official"
-    ]
-    # The grid narrowed on 2026-09-16 (user): one backend per algo, `linr_v4` dropped as ours
-    # rather than LiNR's, no dim ablation. This once asserted equality with the pre-v2
-    # `d128-filter.yaml`; that migration check was closed by C4 and the matrix has deliberately
-    # diverged since, so it now pins the CURRENT grid -- still catching accidental drift, no
-    # longer demanding a superseded shape.
-    assert _new_cells(jobs) == {
-        (a, b, fk, sw, k, bs)
-        for a, b in (("linr_v1_filter_mask", "triton"), ("linr_v2", "triton"),
-                     ("linr_v3", "triton"), ("silvertorch", "triton"), ("postfilter", "torch"))
-        for fk in ("clause", "bloom")
-        for sw in old[fk]
-        for k in (100, 500, 1000)
-        for bs in (1, 8, 16)
-    }  # fmt: skip
-    # Every filter cell has the same users_limit and paths the old config named.
-    ds = jobs[0].data
-    assert ds.users_limit == 10000
-    assert str(ds.attrs) == f"{old['data_dir']}/item_attrs_narrow.pt"
-    assert str(ds.reverse) == f"{old['data_dir']}/clause_is_reverse_narrow.pt"
-    assert str(ds.data_dir) == old["data_dir"]
-    assert ds.gt_dir == Path(old["data_dir"]) / "gt_d128"
-    assert (str(ds.checkpoint) if ds.checkpoint else None) == old["checkpoint"]
-    assert (str(ds.content_dir) if ds.content_dir else None) == old["content_dir"]
-    # Headline sweeps carry seeds {0, 1, 2} at d128; the silvertorch n_probe grid is a query grid.
-    all_jobs = load_matrix(CFG / f"{dataset}.yaml", CFG / "suites.yaml", "filter", dims=[128])
-    headline = {"c0_genre", "c0_maincat", "all4"}
-    assert {j.seed for j in all_jobs if j.sweep in headline} == {0, 1, 2}
-    assert {j.seed for j in all_jobs if j.sweep not in headline} == {0}
-    st = next(j for j in all_jobs if j.algo == "silvertorch")
-    assert st.build == {} and st.query == ({"n_probe": 24}, {"n_probe": 32})
-    assert st.bloom == {"m_bits": 1024, "k_hash": 5}
-
-
-FILTER_DATASETS = yaml.safe_load((CFG / "suites.yaml").read_text())["filter"]["datasets"]
-
-
-@pytest.mark.parametrize("dataset", FILTER_DATASETS)
-def test_filter_suite_expands_postfilter_on_every_dataset(dataset):
-    """Roadmap D5-code's config gate: one torch job per sweep of every filter kind the
-    dataset defines, each measuring the four alphas against one build."""
-    ds_yaml = CFG / f"{dataset}.yaml"
-    jobs = load_matrix(ds_yaml, CFG / "suites.yaml", "filter", algos=["postfilter"], seeds=[0])
-    suite_dims = yaml.safe_load((CFG / "suites.yaml").read_text())["filter"]["dims"]
-    want = set()
-    for dim in set(yaml.safe_load(ds_yaml.read_text())["dims"]) & set(suite_dims):
-        clauses = load_dataset(ds_yaml, dim).clauses
-        want |= {(dim, fk, sw) for fk in ("clause", "bloom") for sw in clauses.get(fk, {})}
-    assert {(j.dim, j.filter_kind, j.sweep) for j in jobs} == want and want
-    assert all(j.backend == "torch" and j.path == "cublas+torch" and j.build == {} for j in jobs)
-    assert all(j.query == tuple({"alpha": a} for a in (1, 2, 4, 8)) for j in jobs)
-
-
-# `test_quality_suite_matches_old_d128_quality_config_modulo_collapse` removed 2026-09-16:
-# the `quality` suite is retired from the campaign and yambda left the study at Phase E.
-
-
-def test_deep_suite_builds_once_per_n_lists():
-    jobs = load_matrix(
-        CFG / "arxiv.yaml",
-        CFG / "suites.yaml",
-        "deep",
-        backends=["triton"],
-        seeds=[0],
-        filter_kinds=["bloom"],
-        sweeps=["c0_maincat"],
+@pytest.mark.parametrize(
+    ("arms", "match"),
+    [
+        (
+            "[{algo: silvertorch, backends: [triton], build: {m_bits: [64]}}]",
+            "silvertorch/bloom only",
+        ),
+        (
+            "[{algo: silvertorch, backends: [triton], build: {compile: [max-autotune]}}]",
+            "torch arms only",
+        ),
+        (
+            "[{algo: silvertorch, backends: [torch], build: {compile: [default]}}]",
+            "torch arms only",
+        ),
+        (
+            "[{algo: silvertorch, backends: [triton], query: {candidate_pool_frac: [0.1]}}]",
+            "linr_v3",
+        ),
+        ("[{algo: linr_v2, backends: [triton], sweeps: [nope]}]", r"sweeps \['nope'\] not in mini"),
+        (
+            "[{algo: linr_v2, backends: [triton]}, {algo: linr_v2, backends: [triton]}]",
+            "a cell twice",
+        ),
+        ("[{algo: linr_v2, backends: [triton], datasets: {other: {}}}]", "datasets \\['other'\\]"),
+        (
+            "[{algo: linr_v2, backends: [triton], filter_kinds: [exact]}]",
+            "filter_kinds \\['exact'\\]",
+        ),
+        ("[{algo: linr_v9, backends: [triton]}]", "unknown algo 'linr_v9'"),
+        (
+            "[{algo: linr_v1_filter_mask, backends: [triton]},"
+            " {algo: linr_v1_filter_mask, backends: [torch], filter_kinds: [none]}]",
+            None,  # the cuBLAS path collapses across arms, logged, not an error
+        ),
+    ],
+)
+def test_arm_errors_are_named(tmp_path, arms, match):
+    suites = tmp_path / "suites.yaml"
+    suites.write_text(
+        "s:\n  datasets: [mini]\n  filter_kinds: [none, clause, bloom]\n  ks: [10]\n"
+        f"  batch_sizes: [1]\n  arms: {arms}\n"
     )
-    st = [j for j in jobs if j.algo == "silvertorch"]
-    assert [j.build for j in st] == [{"n_lists": 1664}, {"n_lists": 8192}]  # 2 builds, not 12
-    assert all(len(j.query) == 6 for j in st) and {q["n_probe"] for q in st[0].query} == {
-        4,
-        8,
-        24,
-        32,
-        128,
-        256,
+    if match is None:
+        jobs = load_matrix(MINI, suites, "s", filter_kinds=["none"])
+        assert [(j.algo, j.backend, j.path) for j in jobs] == [
+            ("linr_v1_filter_mask", "triton", "cublas")
+        ] * 2
+        return
+    with pytest.raises(ConfigError, match=match):
+        load_matrix(MINI, suites, "s")
+
+
+# ----- the real grid (campaign-v2, user decisions 2026-10-08) ---------------------------
+
+GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change it deliberately
+    ("filter", "goodreads"): (87, 99),
+    ("filter", "arxiv"): (135, 153),
+    ("filter", "yfcc10m"): (15, 18),
+    ("filter", "pubmed"): (63, 75),
+    ("deep", "goodreads"): (42, 210),
+    ("deep", "arxiv"): (72, 360),
+    ("deep", "yfcc10m"): (9, 45),
+    ("synth", "goodreads-synth"): (261, 345),
+    ("synth", "arxiv-synth"): (261, 345),
+    ("synth", "yfcc10m-synth"): (135, 195),
+    ("n95", "pubmed"): (3, 15),
+    ("codesign", "arxiv"): (18, 54),
+    ("codesign", "goodreads"): (18, 54),
+    ("bloomwidth", "goodreads"): (42, 42),
+    ("bloomwidth", "arxiv"): (126, 126),
+    ("bloomwidth", "pubmed"): (42, 42),
+    ("bloomwidth-timed", "goodreads"): (21, 21),
+    ("bloomwidth-timed", "arxiv"): (63, 63),
+    ("bloomwidth-timed", "pubmed"): (21, 21),
+}
+KEPT = {
+    "goodreads": {"c0_genre", "c1_lang_reverse", "all4"},
+    "arxiv": {"c3_nversions", "c0_maincat", "all4"},
+    "pubmed": {"c0_mesh", "c3_journal_reverse", "all5"},
+    "yfcc10m": {"tags_and"},
+}
+SYNTH_N = {"goodreads-synth": 797_084, "arxiv-synth": 2_988_996, "yfcc10m-synth": 10_000_000}
+RATE = {"p0001": 0.001, "p0003": 0.003, "p001": 0.01, "p003": 0.03, "p01": 0.1, "p03": 0.3,
+        "p1": 1.0}  # fmt: skip
+
+
+def _real(suite: str, dataset: str, **kw):
+    return load_matrix(CFG / f"{dataset}.yaml", CFG / "suites.yaml", suite, **kw)
+
+
+def test_grid_covers_every_suite_and_dataset():
+    suites = yaml.safe_load((CFG / "suites.yaml").read_text())
+    listed = {(s, d) for s, v in suites.items() if isinstance(v, dict) and "datasets" in v
+              for d in v["datasets"]}  # fmt: skip
+    assert listed == set(GRID)
+
+
+@pytest.mark.parametrize(("suite", "dataset"), list(GRID))
+def test_grid_counts_and_invariants(suite, dataset):
+    """G-grid: the job / cell counts and the user's 2026-10-08 rules on every expanded cell."""
+    jobs = _real(suite, dataset)
+    assert (len(jobs), sum(len(j.query) for j in jobs)) == GRID[suite, dataset]
+    cells = [(j, {**j.build, **q}) for j in jobs for q in j.query]
+    by_seed: dict[tuple, set[int]] = {}
+    for j, p in cells:
+        cell = (j.dim, j.algo, j.backend, j.filter_kind, j.sweep, json.dumps(p, sort_keys=True))
+        by_seed.setdefault(cell, set()).add(j.seed)
+    assert all(s == {0, 1, 2} for s in by_seed.values())  # 3 seeds everywhere
+    assert all(set(j.batch_sizes) <= {1, 16} and set(j.ks) <= {100, 1000} for j in jobs)
+    if suite in ("filter", "deep", "synth", "codesign"):
+        assert all(j.batch_sizes == (1, 16) for j in jobs)
+    assert not any(j.backend == "official" and j.filter_kind == "clause" for j in jobs)
+    assert {j.algo for j in jobs} <= {
+        "linr_v1_filter_mask",
+        "linr_v2",
+        "linr_v3",
+        "silvertorch",
+        "postfilter",
     }
-    assert [j.query for j in jobs if j.algo == "linr_v3"] == [
-        tuple({"candidate_pool": c} for c in (2000, 4000, 8000, 16000, 32000))
+    assert not any(p.get("n_probe") in (4, 256) for _, p in cells)
+    assert not any(j.narrowed for j in jobs)
+    if suite in ("filter", "deep") and dataset in KEPT:
+        assert {j.sweep for j in jobs} == KEPT[dataset] or (
+            suite == "deep" and {j.sweep for j in jobs} <= KEPT[dataset]
+        )
+    c3_torch = {j.algo for j in jobs if j.backend == "torch" and j.algo != "postfilter"}
+    if suite in ("filter", "synth"):  # addendum 2: C3's torch arms on goodreads + arxiv only
+        assert bool(c3_torch) == (dataset.removesuffix("-synth") in ("goodreads", "arxiv"))
+    if suite == "synth":
+        for j in jobs:
+            assert (1000 in j.ks) == (SYNTH_N[dataset] * RATE[j.sweep] >= 4 * 1000), j.sweep
+            if j.backend == "torch" and j.algo != "postfilter":
+                assert j.sweep in {"p001", "p01", "p1"}
+        torch_arms = {(j.algo, json.dumps(j.build)) for j in jobs if j.backend == "torch"}
+        assert dataset == "yfcc10m-synth" or torch_arms == {
+            ("postfilter", "{}"),
+            ("linr_v1_filter_mask", "{}"),
+            ("linr_v2", "{}"),
+            ("linr_v1_filter_mask", '{"compile": "max-autotune"}'),
+            ("linr_v2", '{"compile": "max-autotune"}'),
+        }
+
+
+def test_filter_suite_arms():
+    jobs = _real("filter", "arxiv", seeds=[0])
+    arms = {
+        (j.algo, j.backend, j.filter_kind, json.dumps(j.build), json.dumps(j.query)) for j in jobs
+    }
+    want = set()
+    for fk in ("clause", "bloom"):
+        for a in ("linr_v1_filter_mask", "linr_v2", "linr_v3"):
+            want.add((a, "triton", fk, "{}", json.dumps(({},))))
+        want.add(("silvertorch", "triton", fk, "{}", json.dumps(({"n_probe": 24},))))
+        want.add(("silvertorch", "torch", fk, "{}", json.dumps(({"n_probe": 24},))))
+        want.add(
+            (
+                "silvertorch",
+                "torch",
+                fk,
+                '{"compile": "max-autotune"}',
+                json.dumps(({"n_probe": 24},)),
+            )
+        )
+        want.add(("postfilter", "torch", fk, "{}", json.dumps(({"alpha": 1}, {"alpha": 8}))))
+    want.add(("silvertorch", "official", "bloom", "{}", json.dumps(({"n_probe": 24},))))
+    assert arms == want
+    ds = jobs[0].data
+    assert ds.users_limit == 10000 and ds.gt_dir == Path("data/arxiv-papers/gt_d128")
+    assert all(j.bloom == {"m_bits": 1024, "k_hash": 5} for j in jobs)
+
+
+def test_deep_suite_per_dataset_n_lists_and_pool_fractions():
+    n_lists = {"goodreads": [1024, 4096], "arxiv": [1664, 8192], "yfcc10m": [4096, 16384]}
+    for dataset, want in n_lists.items():
+        jobs = _real("deep", dataset, seeds=[0])
+        st = [j for j in jobs if j.algo == "silvertorch"]
+        assert sorted({j.build["n_lists"] for j in st}) == want
+        assert all(j.query == tuple({"n_probe": n} for n in (8, 16, 32, 64, 128)) for j in st)
+        v3 = [j for j in jobs if j.algo == "linr_v3"]
+        assert v3 and all(
+            j.query == tuple({"candidate_pool_frac": f} for f in (0.005, 0.01, 0.02, 0.05, 0.1))
+            for j in v3
+        )
+
+
+def test_codesign_bloomwidth_and_n95_suites():
+    cd = _real("codesign", "goodreads", seeds=[0])
+    assert {j.sweep for j in cd} == {"c0_genre", "c2_format", "c3_year"}
+    assert {(j.backend, j.build["n_lists"], j.build["bloom_path"]) for j in cd} == {
+        ("official", 1024, "partial"),
+        ("official", 1024, "full"),
+    }
+    assert {(j.ks, j.batch_sizes) for j in cd} == {((100,), (1, 16))}
+    bw = _real("bloomwidth", "pubmed", seeds=[0])
+    assert {j.sweep for j in bw} == {"c0_mesh"} and {j.backend for j in bw} == {
+        "triton",
+        "official",
+    }
+    tri = [j for j in bw if j.backend == "triton"]
+    assert sorted({(j.bloom["m_bits"], j.bloom["k_hash"]) for j in tri}) == [
+        (m, k) for m in (64, 128, 256, 512, 1024, 2048) for k in (3, 5)
     ]
+    assert all(j.bloom == j.build and j.query == ({},) for j in tri)
+    # official's width is OfficialConfig.b_multiplier, not m_bits: only k_hash is gridded
+    assert sorted(j.build["k_hash"] for j in bw if j.backend == "official") == [3, 5]
+    assert not any("m_bits" in j.build for j in bw if j.backend == "official")
+    timed = _real("bloomwidth-timed", "pubmed", seeds=[0])
+    assert {(j.ks, j.batch_sizes, j.bloom["k_hash"]) for j in timed} == {((100,), (16,), 5)}
+    n95 = _real("n95", "pubmed")
+    assert {(j.algo, j.backend, j.filter_kind, j.sweep) for j in n95} == {
+        ("silvertorch", "triton", "clause", "all5")
+    }
+    assert {(j.ks, j.batch_sizes) for j in n95} == {((100, 1000), (16,))}
+
+
+# G-key: resume keys of cells that exist before and after the redesign, as today's code
+# (b96e1f2) computed them. Old records must keep matching (docs/system/evaluation.md § Resume).
+OLD_KEYS = [
+    ("filter", "arxiv", '{"algo":"silvertorch","backend":"triton","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"clause","inputs":"content_d128","params":{"n_probe":24},"seed":0,"suite":"filter","sweep":"c0_maincat"}'),  # noqa: E501
+    ("filter", "arxiv", '{"algo":"silvertorch","backend":"official","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"bloom","inputs":"content_d128","params":{"n_probe":24},"seed":0,"suite":"filter","sweep":"c3_nversions"}'),  # noqa: E501
+    ("filter", "arxiv", '{"algo":"linr_v3","backend":"triton","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"bloom","inputs":"content_d128","params":{},"seed":1,"suite":"filter","sweep":"all4"}'),  # noqa: E501
+    ("filter", "goodreads", '{"algo":"postfilter","backend":"torch","code_version":"CV","dataset":"goodreads","dim":128,"filter_kind":"clause","inputs":"sasrec-ssm-logq-d128","params":{"alpha":8},"seed":0,"suite":"filter","sweep":"c1_lang_reverse"}'),  # noqa: E501
+    ("filter", "goodreads", '{"algo":"linr_v1_filter_mask","backend":"triton","code_version":"CV","dataset":"goodreads","dim":128,"filter_kind":"clause","inputs":"sasrec-ssm-logq-d128","params":{},"seed":2,"suite":"filter","sweep":"all4"}'),  # noqa: E501
+    ("filter", "pubmed", '{"algo":"linr_v2","backend":"triton","code_version":"CV","dataset":"pubmed","dim":768,"filter_kind":"clause","inputs":"content_d768","params":{},"seed":0,"suite":"filter","sweep":"all5"}'),  # noqa: E501
+    ("filter", "yfcc10m", '{"algo":"silvertorch","backend":"triton","code_version":"CV","dataset":"yfcc10m","dim":192,"filter_kind":"clause","inputs":"content_d192","params":{"n_probe":24},"seed":0,"suite":"filter","sweep":"tags_and"}'),  # noqa: E501
+    ("deep", "arxiv", '{"algo":"silvertorch","backend":"triton","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"clause","inputs":"content_d128","params":{"n_lists":1664,"n_probe":8},"seed":2,"suite":"deep","sweep":"c0_maincat"}'),  # noqa: E501
+    ("deep", "arxiv", '{"algo":"silvertorch","backend":"official","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"bloom","inputs":"content_d128","params":{"n_lists":8192,"n_probe":128},"seed":1,"suite":"deep","sweep":"all4"}'),  # noqa: E501
+    ("codesign", "arxiv", '{"algo":"silvertorch","backend":"official","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"bloom","inputs":"content_d128","params":{"bloom_path":"full","n_lists":1664,"n_probe":32},"seed":0,"suite":"codesign","sweep":"c3_nversions"}'),  # noqa: E501
+]  # fmt: skip
+
+
+@pytest.mark.parametrize(("suite", "dataset", "key"), OLD_KEYS)
+def test_cells_kept_by_the_redesign_keep_their_keys(suite, dataset, key):
+    new = {resume_key(j.key(p), "CV") for j in _real(suite, dataset) for p in j.cells()}
+    assert key in new
 
 
 DATASET_YAMLS = sorted(p for p in CFG.glob("*.yaml") if p.name != "suites.yaml")

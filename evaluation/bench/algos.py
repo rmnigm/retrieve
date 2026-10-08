@@ -27,7 +27,6 @@ from retrieve import (
     LiNRV1,
     LiNRV2,
     LiNRV3,
-    LiNRV4,
     OfficialConfig,
     SilverTorch,
 )
@@ -38,7 +37,6 @@ ALGOS: dict[str, type[nn.Module]] = {
     "linr_v1_filter_mask": LiNRV1,
     "linr_v2": LiNRV2,
     "linr_v3": LiNRV3,
-    "linr_v4": LiNRV4,
     "silvertorch": SilverTorch,
     "postfilter": Postfilter,
 }
@@ -131,11 +129,13 @@ def build(
     seed: int = 0,
 ) -> nn.Module:
     """Construct and register one cell's module. ``params`` = build + query params merged
-    (``n_lists``, ``n_probe``, ``n_iter``, ``m_bits``, ``k_hash``, ``candidate_pool``, ``alpha``);
-    ``seed`` drives the k-means and the OPORP projection. SilverTorch fuses the predicate (the
-    attribute buffers live inside it, ``filter_mod`` is unused); the LiNR modules and ``postfilter``
-    take the standalone filter as ``self.filter``. Raises on cells ``PATHS`` marks ``None``."""
+    (``n_lists``, ``n_probe``, ``n_iter``, ``m_bits``, ``k_hash``, ``candidate_pool``, ``alpha``,
+    ``compile``); ``seed`` drives the k-means and the OPORP projection. SilverTorch fuses the
+    predicate (the attribute buffers live inside it, ``filter_mod`` is unused); the LiNR modules
+    and ``postfilter`` take the standalone filter as ``self.filter``. ``compile`` wraps the built
+    module in place (``compile_module``). Raises on cells ``PATHS`` marks ``None``."""
     p = dict(params or {})
+    compile_mode = p.pop("compile", None)
     if PATHS[algo, filter_kind, backend] is None:
         raise ValueError(f"no code path for ({algo}, {filter_kind}, {backend})")
     if not is_valid_combo(algo, p):
@@ -156,11 +156,22 @@ def build(
                 raise ValueError(f"silvertorch/{filter_kind} needs item_attrs")
             rev = clause_is_reverse if mode == "exact" else None
             module.register_index(item_embs, item_clause_attrs=item_attrs, clause_is_reverse=rev)
-        return module
-    if algo == "linr_v3":
-        p["seed"] = seed
-    module = ALGOS[algo](k, filter=filter_mod, backend=backend, **p)
-    module.register_index(item_embs)
+    else:
+        if algo == "linr_v3":
+            p["seed"] = seed
+        module = ALGOS[algo](k, filter=filter_mod, backend=backend, **p)
+        module.register_index(item_embs)
+    return module if compile_mode is None else compile_module(module, compile_mode)
+
+
+def compile_module(module: nn.Module, mode: str) -> nn.Module:
+    """``torch.compile(mode=mode)`` in place (``nn.Module.compile``), so ``k``,
+    ``set_query_params`` and the buffers stay the module's own. Compilation is lazy: the first
+    forward pays it. ``max-autotune`` already replays inductor's own CUDA graphs, so the module
+    is marked uncapturable and ``graph`` mode records a null entry (``not_capturable``)."""
+    module.compile(mode=mode)
+    cls = type(module)  # SilverTorch's capturable is a read-only property: override per instance
+    module.__class__ = type(cls.__name__, (cls,), {"capturable": False})
     return module
 
 
@@ -175,6 +186,7 @@ __all__ = [
     "SILVERTORCH_DEFAULTS",
     "build",
     "build_filter",
+    "compile_module",
     "filter_backend",
     "is_valid_combo",
     "official_config",
