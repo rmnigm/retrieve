@@ -305,6 +305,29 @@ only. Held-out recall@100 is identical (0.95493 / 0.95915), but mrr@100
   should be null; H7 fixed the rule in code, and the records read null
   through the same rule, so they are not rewritten.
 
+### V-GR-FILTER: goodreads `filter` on E1c
+
+**Done, NOT CITABLE until D1-G** (2026-10-08, A100-SXM4-80GB, one-GPU pod, no neighbour load;
+staging `f2be5c7`, code_version `408b1188`, `sasrec-ssm-logq-d128`). **99 / 99 cells `ok`, 0
+failed**: every arm the suite lists for goodreads (V1, V2, V3 triton; SilverTorch triton, official
+bloom, torch plain and `compile=max-autotune` at `n_probe` 24; postfilter α 1 / 8) × clause
+`c0_genre` / `c1_lang_reverse` / `all4` and bloom `c0_genre` × seeds 0-2. Ran as explicit `bench
+run --interleave` streams (V3 held back, then run second, by the orchestrator), each one campaign
+child. SilverTorch's n95 column is empty until V-GR-DEEP: `n_probe` 24 only. **2.58 GPU-h**
+against the estimated 5. Clocks: 51 of 99 records `unstable` (18 by clock drift), 162 of 2,196
+timing windows below the 1410 MHz max (`sm_mhz` 1140-1410); every SilverTorch triton record is
+`unstable` (91 of 288 windows low) and official's eager windows all sampled 1140 MHz, as did
+triton's eager windows in the same interleaved bloom group. V3's quality is identical across seeds
+(at `k_bits` = D the seed cannot move its scores). Hub: `campaign-v2/goodreads-filter`; table,
+driver and T2 exhibit: [artifact](artifacts/campaign-v2/v-gr-filter/README.md).
+
+At k 100 (median over seeds): exact V1 / V2 `recall_oracle@100` 0.9997-0.9998; SilverTorch
+`n_probe` 24 0.946 / 0.841 / 0.627 (`c0_genre` / `c1_lang_reverse` / `all4`), official bloom equal
+to triton's; V3 0.917 / 0.906 / 0.980; postfilter α 8 0.971 / 0.648 / 0.252. C3's SilverTorch torch
+reference: level with Triton at bs 1 in graph mode (0.18-0.20 ms both), Triton 4.2-4.5× ahead of
+plain torch and ~2.2× ahead of compiled torch at bs 16; no ~100× gap. No result contradicts an
+earlier one (the gSASRec leg is a different encoder: SilverTorch `c0_genre` recall 0.836 there).
+
 ## Encoder switch: evals to redo
 
 The harness encodes the sequential datasets with the current trainer's E1c checkpoints
@@ -320,7 +343,7 @@ under one `(dataset, dim)`.
 
 | record set | encoder it used | state now | redo |
 |---|---|---|---|
-| D1 `filter` leg, goodreads d128 (`d1/goodreads`, 105 records) | `gsasrec-d128-drop0.5-id` | **stale**, kept on the Hub as the gSASRec run | full leg on `sasrec-ssm-logq-d128` (roadmap D1); the harness reads the E1c checkpoints (R1 done: [datasets](#datasets), goodreads row) |
+| D1 `filter` leg, goodreads d128 (`d1/goodreads`, 105 records) | `gsasrec-d128-drop0.5-id` | **superseded** by `campaign-v2/goodreads-filter` ([V-GR-FILTER](#v-gr-filter-goodreads-filter-on-e1c)), kept on the Hub as the gSASRec run | done |
 | D1 `deep` / `codesign`, goodreads | not started | — | run on the new encoder only (roadmap: goodreads `deep`, trimmed, and `codesign`) |
 | Official vs Triton head-to-head, goodreads (`b3`, kernel-opt `h2h`) | `gsasrec-d128-drop0.5-id` | stands as a gSASRec-embedding measurement, history only | replaced by H2H-final on E1c (roadmap) |
 | Golden baseline, goodreads cells (`evaluation/golden/`) | `gsasrec-d128-drop0.5-id` | stands; the gate compares harnesses on fixed inputs | keep on the gSASRec checkpoint (`bench run --checkpoint`); no rerun |
