@@ -3,6 +3,7 @@
 # column from IVF-TUNE.
 LEG=v-seeds-yfcc
 . "$(dirname "$(readlink -f "$0")")/common.sh"
+old_oracles yfcc10m
 step oracle-filter oracle --dataset yfcc10m --suite filter
 step campaign-filter campaign --suite filter --dataset yfcc10m --resume --interleave --out "$R"
 finish

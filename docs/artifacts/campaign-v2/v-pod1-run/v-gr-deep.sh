@@ -3,6 +3,7 @@
 # IVF-TUNE), every arm.
 LEG=v-gr-deep
 . "$(dirname "$(readlink -f "$0")")/common.sh"
+old_oracles goodreads
 step oracle-deep oracle --dataset goodreads --suite deep
 step campaign-deep campaign --suite deep --dataset goodreads --resume --interleave --out "$R"
 finish

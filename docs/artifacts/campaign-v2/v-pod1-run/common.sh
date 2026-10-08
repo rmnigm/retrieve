@@ -1,6 +1,6 @@
 # Sourced by the v-pod1-run drivers (pod 1's legs at campaign-v2.1): environment, code_version ==
 # the tag's library tree hash, 1 Hz clock trace, `step NAME CMD...` (bench subcommand, pinned) and
-# `stream DS SUITE "ALGOS|BACKENDS"` (one `bench run --resume --interleave`, per-stream log under
+# `stream DS SUITE "ALGOS|BACKENDS"`, `old_oracles DS...` (one `bench run --resume --interleave`, per-stream log under
 # $R/_logs with clock blocks). Each stops the driver on a non-zero rc. Launch under the GPU 0 lock:
 #   setsid nohup flock -n /scratch/gpu0.lock bash <driver> > /scratch/v21/<leg>/driver.log 2>&1 &
 set -u
@@ -18,7 +18,9 @@ cd "$REPO/evaluation"
 EXPECT=$(git -C "$REPO" rev-parse "$TAG:retrieve/src/retrieve") || { echo "$(date -Is) no tag $TAG"; exit 2; }
 cv=$($PY -m bench.cli env | $PY -c 'import json,sys; print(json.load(sys.stdin)["code_version"])')
 echo "$(date -Is) $TAG code_version $cv"
-[ "$cv" = "$EXPECT" ] || { echo "$(date -Is) code_version mismatch (tag $EXPECT), refusing"; exit 2; }
+MANIFEST=$($PY -c 'import yaml; print(yaml.safe_load(open("campaign.yaml"))["default"]["perf"]["code_version"])')
+[ "$cv" = "$EXPECT" ] && [ "$cv" = "$MANIFEST" ] || {
+  echo "$(date -Is) code_version mismatch (tag $EXPECT, campaign.yaml $MANIFEST), refusing"; exit 2; }
 
 nvidia-smi -i 0 --query-gpu=timestamp,clocks.sm,clocks.max.sm,temperature.gpu,power.draw,utilization.gpu \
   --format=csv,noheader -lms 1000 >> "$LOG/clocks.csv" &
@@ -51,6 +53,9 @@ stream() {
   echo "$(date -Is) stream $ds/$suite ${algos// /+} ${backends// /+} rc=$rc s=$(( $(date +%s) - t0 )) log=$name"
   [ $rc -eq 0 ] || exit $rc
 }
+
+# oracles are rebuilt at the tag: blobs built at any other code_version move to <gt_dir>/pre-v21/
+old_oracles() { $PY "$HERE/move_old_oracles.py" "$cv" "$@" || exit 1; }
 
 dim() { case $1 in yfcc10m*) echo 192 ;; *) echo 128 ;; esac; }
 
