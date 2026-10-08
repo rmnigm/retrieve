@@ -182,7 +182,7 @@ co-design.
   `n_probe` doubling to past recall 0.95; pick by items scanned, no timed
   cells; records are artifacts, not paper numbers. Two datasets only: **goodreads**
   ({1024, 4096}; done: 4096 / 64) and **PubMed** ({4096, 16384}, capped at
-  25 % scanned). Lands in two parts: **A** (`n_lists` for all four
+  25 % scanned). Lands in two parts: **A** (done: `n_lists` for all four
   datasets and their synth twins, goodreads' n95) unblocks every leg that
   sweeps `n_probe` itself; **B** adds the n95 of PubMed and of arXiv and
   YFCC (a quick capped `n_probe` check at their one `n_lists`). Output: the size rule, and the `n_lists` /

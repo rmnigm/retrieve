@@ -62,6 +62,7 @@ re-upload of a subtree replaces its row.
 | `artifacts/v2-prof` | V2 batch-16 floor profile ([README](campaign-v2/v2-prof/README.md)): `profile.json` (24 V1/V2 cells with per-kernel µs, launches and grids, and the bs 16 component split) and `run.log`; not citable | 2 | 421,130 | `528c2edb78eaedf49cd6b3c227db16ec30196d717e7f5e4b2ff13c9d03c5648a` |
 | `artifacts/v2-fix-a` | V2 Fix A gates and before/after ([README](campaign-v2/v2-fix-a/README.md)): `gate_abab.json` (bit-exact gate cells, edges, V2/V3 ABAB windows and kernel tables), `profile_sweep.json` (V3 stage-1 components, fmkt `programs` sweep), the four logs; not citable | 6 | 842,246 | `8a776b97359ec4ec4bd21ee849b15bf43751aacd7ef38b67687b201b27396a8c` |
 | `artifacts/v-graph-ids` | V-GRAPH-IDS ([README](campaign-v2/v-graph-ids/README.md)): repro dumps, `report.json`, `element.json`, the fix gates (`fix/fix_gates.json`, the failed `fix-v1/`), `divprobe/`, logs, pytest log, inductor code and PTX; not citable | 36 | 13,647,413 | `a9ca66f5b97255b22f48e1201236d8d83b5cf3afb8c81c7f9fe835d65384b953` |
+| `artifacts/ivf-tune/goodreads` | IVF-TUNE goodreads piece ([README](campaign-v2/ivf-tune/README.md)): 12 quality-only cells (`c0_genre`, seed 0, n_lists {1024, 4096} × n_probe 8-256, 408b1188), table, logs; artifacts, never paper numbers | 14 | 500,351 | `f2e20325ea4cecad32a6247c48346ea43cc4ea8f32bda5458477b5a7761777f5` |
 
 The `d1-a` and `artifacts/*` subtrees were published by
 [H1](h1-results-storage/README.md) on 2026-09-26; their file counts and bytes
