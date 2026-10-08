@@ -32,13 +32,6 @@ others (see [Multi-GPU execution](#multi-gpu-execution)).
 
 ## Needs the user
 
-- **Fix A for V2's batch-16 floor** (V2-PROF, [artifact](artifacts/campaign-v2/v2-prof/README.md)):
-  the floor is our full-N grid in `fused_masked_knn_topk` (913 µs of 1.41 ms),
-  not LiNR's design. Fix A (grid-strided, bit-identical scores) is estimated
-  to take V2/V1 at bs 16, p ≤ 0.01 from 1.50 to ~0.6, which flips C1. It is a
-  library change: tag `campaign-v2.1`, rerun every V2 Triton perf cell
-  already run (quality reusable), and V3's if its sparse path shares the
-  grid. Until decided, no V2 timing cell runs; V-FIXA-PROBE measures it.
 - **Contact the original authors** (re-plan decision 7): the LinkedIn LiNR
   team and Meta's SilverTorch team — filter-set details, the V1/V2 setup,
   the SilverTorch paper's FPR inconsistency (0.067 % vs 0.00173 %) — and
@@ -177,12 +170,17 @@ co-design.
   loaded, interleaved, cores pinned. *Gate*: loaded medians within each
   arm's own repeat noise; otherwise timed steps run one GPU at a time.
   **0.5 GPU-h** on a ≥ 2-GPU pod.
-- [ ] **V-FIXA-PROBE: measure Fix A before the user decides.** A scratch
-  patch in a throwaway worktree, never committed: Fix A and its 3-line
-  variant against current V2 on arxiv-synth d128, clause and bloom, bs
-  {1, 16}, p {0.001, 0.01, 1}, `torch.equal` ids and scores; plus
-  `torch.profiler` on V3's sparse path (`oporp_1bit_match_topk` grid) at
-  the same points. Feeds the user's Fix A decision. **≈ 0.5 GPU-h.**
+- [ ] **V2-FIX-A: grid-strided `fused_masked_knn_topk`** (user, 2026-10-08:
+  apply Fix A, [V2-PROF](artifacts/campaign-v2/v2-prof/README.md)). The
+  kernel's grid stops scaling with N: tiles past `counts[b]` store `-inf`
+  with no loads; scores bit-identical. V3's sparse path is profiled in the
+  same step and fixed the same way if it shares the full-N grid. *Gates*:
+  `torch.equal` ids and scores against tag `campaign-v2` on V2 (and V3 if
+  changed), the parity files and the library suite on a pod GPU, one graph
+  launch per call, interleaved before/after. Then tag `campaign-v2.1` and
+  move *evaluation/campaign.yaml*'s code_version; rerun the V2 (and changed
+  V3) Triton perf cells of V-PILOT and V-GR-FILTER, quality reused.
+  **≈ 2-3 GPU-h** incl. reruns, GPU 0.
 - [ ] **V-GRAPH-IDS: Triton graph vs eager canonical ids differ** (H2H-FINAL:
   arXiv bs 16, 4 of 80 entries, 1 seed per (kind, k)). Mechanism first, from
   the stored records and sidecars (ties at the k-th score vs a real
@@ -203,8 +201,8 @@ co-design.
 - [ ] **V-AX-SYNTH: arXiv synth**, uniform 7 points, then the
   cluster-correlated variant (3 points) if the uniform sweep shows the IVF
   recall collapse at low p; arXiv's `n95`. F1/F2 3M panel. **≈ 15-45 GPU-h**
-  (the pilot measured 8.7 GPU-h at 0.8 M), GPU 0. Its timed cells wait for
-  the user's Fix A decision (Needs the user).
+  (the pilot measured 8.7 GPU-h at 0.8 M), GPU 0. Its timed cells run at
+  `campaign-v2.1` (after V2-FIX-A).
 - [ ] **V-GR-DEEP: goodreads `deep`**, trimmed (`n_lists` {1024, 4096},
   `n_probe` {8, 16, 32, 64, 128}, V3 pool fractions); replaces D1-C.
   F3; goodreads' `n95`, then the goodreads `filter` n95 cells and the
@@ -227,7 +225,8 @@ co-design.
   the embedding identity check on GPU 1 first (`eval-data pubmed
   encode_queries`, `bench check`, one V1 cell equal to `d1/pubmed`'s
   quality, or stop), the `n95` probe suite (quality-only), then the 3
-  kept sweeps, 3 seeds, every arm. T2's 768-d row. **≈ 14 GPU-h**, GPU 0.
+  kept sweeps, 3 seeds, every arm, at `campaign-v2.1`. T2's 768-d row.
+  **≈ 14 GPU-h**, GPU 0.
 - [ ] **D1-G: gate reruns and the report.** Needs every step above.
   Eager-vs-graph id identity from the stored hashes, a byte-identical
   quality subset per leg (`--force` into a scratch tree),
@@ -255,7 +254,7 @@ co-design.
 | step | A100 GPU-h | GPU | basis |
 |---|---|---|---|
 | M1 | 0.5 | both | |
-| V-FIXA-PROBE | ≈ 0.5 | 0 | |
+| V2-FIX-A | ≈ 2-3 | 0 | gates ~0.5; reruns: goodreads-synth + goodreads filter V2 perf |
 | V-GRAPH-IDS | ≈ 0.5 | 0 | |
 | H-PROFILE | ≈ 0.5 | 0 | |
 | V-CODESIGN | ≈ 1 | 0 | `d1/arxiv-codesign`: 60 cells in 0.4 h |
@@ -279,6 +278,7 @@ tile per width*).
 
 ```
 tag campaign-v2 ───────────────────────┬─> V-PILOT ─┬─> V-AX-SYNTH ─> V-YFCC ─> V-SEEDS ─┐
+V2-FIX-A ─> tag campaign-v2.1: before every timed V-AX-SYNTH, V-YFCC, V-PUBMED, V-SEEDS cell
                                        │            └─> V-GR-DEEP ─────────────────────────┤
                                        ├─> V-CODESIGN, D3 ─────────────────────┤
                                        └─> V-PUBMED ───────────────────────────────────────┴─> D1-G ─> F2, F4, F5
