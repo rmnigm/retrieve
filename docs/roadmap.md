@@ -211,8 +211,10 @@ co-design.
   [v-gr-deep](artifacts/campaign-v2/v-gr-deep/driver.sh)). **≈ 6 GPU-h**,
   GPU 0/1.
 - [ ] **V-YFCC: YFCC synth (5 points) and a small `deep`** (`n_lists`
-  {4096, 16384}). F1/F2 10M panel; YFCC's `n95`. Needs V-AX-SYNTH.
-  **≈ 18 GPU-h**, GPU 0/1.
+  {4096, 16384}). F1/F2 10M panel; YFCC's `n95`. Runs alongside
+  V-AX-SYNTH on another GPU (three pods, no fourth: user, 2026-10-08); a
+  collapse found on arXiv adds YFCC points afterwards. **≈ 18-120 GPU-h**
+  (unmeasured at 10 M; re-estimated from V-AX-SYNTH's first leg), GPU 0/1.
 - [ ] **V-SEEDS: arXiv and YFCC `filter`, the cells the manifest does not
   reuse.** arXiv: 117 cells (V1-V3 `c3_nversions` seeds 0-2; SilverTorch
   triton; official bloom; `postfilter` α {1, 8}; SilverTorch torch, plain
@@ -261,7 +263,7 @@ co-design.
 | D3 bloomwidth | ≈ 3-5 | 1 (+0) | quality-only cells |
 | V-AX-SYNTH | ≈ 15-45 | 0 | Triton ~2,000 s per pass point; V1/V2 torch at 3 points ×3 seeds is most of it |
 | V-GR-DEEP | ≈ 3-6 | 0/1 | ~210 cells at ~50 s (`d1/arxiv-deep`: 873 cells in 36 h at 3 M) |
-| V-YFCC | ≈ 60-120 | 0/1 | V1 / V2 / V3 cells 0.3-1.2 h each at the v2 grid; V2/V3 cost vs p at 10 M unmeasured |
+| V-YFCC | ≈ 18-120 | 0/1 | V1 / V2 / V3 cells 0.3-1.2 h each at the v2 grid; V2/V3 cost vs p at 10 M unmeasured |
 | V-SEEDS | ≈ 8-12 | 0 | YFCC seeds 1-2: V2 and V3 ~1.1 h a cell |
 | V-PUBMED | ≈ 20-25 | 0 (+1 for the checks) | V1 ~650 s, V2 ~1,300 s, SilverTorch-Triton ~700 s a cell; 3 sweeps × 3 seeds |
 | D1-G | ≈ 4 | both | |
@@ -277,7 +279,7 @@ tile per width*).
 ## Dependencies
 
 ```
-tag campaign-v2 ───────────────────────┬─> V-PILOT ─┬─> V-AX-SYNTH ─> V-YFCC ─> V-SEEDS ─┐
+tag campaign-v2 ───────────────────────┬─> V-PILOT ─┬─> V-AX-SYNTH, V-YFCC ─> V-SEEDS ─┐
                                        │            └─> V-GR-DEEP ─────────────────────────┤
                                        ├─> V-CODESIGN, D3 ─────────────────────┤
                                        └─> V-PUBMED ───────────────────────────────────────┴─> D1-G ─> F2, F4, F5
