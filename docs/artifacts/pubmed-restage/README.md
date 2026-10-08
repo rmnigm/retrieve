@@ -19,10 +19,13 @@ checked against what D1's pubmed records (`d1/pubmed`, code_version `72e5a90`) r
 - Identity: all 8 sweeps (clause `c0_mesh`, `c2_year`, `c3_journal_reverse`, `c0c2`, `all5`;
   bloom `c0_mesh`, `c2_year`, `c0c2`) **identical** on every fact for all 44 ok `d1/pubmed`
   records (pass_rate within 1e-12 relative), and for E2's `linr_v1_filter_mask` cell record.
-- Not shown: the item and query **embeddings**. The records carry no embedding digest, and the
-  query embeddings need `encode_queries` (GPU). The item shards follow deterministically from
-  the unchanged source and the same `--keep-items 10000000 --seed 0` id map. Rerunning one exact
-  cell (V1 clause `c0_mesh`, `--skip-perf`) and comparing its quality block with the D1 record
-  closes this.
+- Embeddings (D1-E step 0, 2026-10-08, A100, code_version `c0e42d1`,
+  [`d1e_driver.sh check`](../d1-campaign/d1e_driver.sh)): `encode_queries` on the GPU
+  (10,000 × 768), `bench check --dataset pubmed` ok, then the exact cell
+  `linr_v1_filter_mask`/triton clause `c0_mesh`, eager, `--skip-perf`. Its quality block
+  **equals the `d1/pubmed` record on every oracle and held-out metric** (held-out recall@100
+  0.9989321309919317, oracle 0.9985346478071041), so the restaged slice is D1's end to end.
+- Raw outputs on the Hub, `artifacts/pubmed-restage`: the restage logs, today's source sizes
+  (`source-today.json`), the identity cell's record and its encode / check / cell logs.
 - `plan`'s 16-way HEAD burst draws HTTP 503 from NCBI today and `_remote_size` reads that as
   "no Content-Length", so `plan` aborts. `source_check.py` stands in for it. The ETL was not edited.
