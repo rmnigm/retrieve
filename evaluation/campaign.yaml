@@ -11,13 +11,13 @@
 # planner from the record inventory; `log` records every mid-campaign change.
 
 default:
-  quality: {code_version: campaign-v2, hub: "campaign-v2/{dataset}-{suite}"}  # the freeze fills the hash
-  perf: {code_version: campaign-v2, hub: "campaign-v2/{dataset}-{suite}"}
+  quality: {code_version: 408b1188d542634b3d18a2f5077bd23537a845fc, hub: "campaign-v2/{dataset}-{suite}"}  # the freeze gate's tree hash (3c58488)
+  perf: {code_version: 408b1188d542634b3d18a2f5077bd23537a845fc, hub: "campaign-v2/{dataset}-{suite}"}
 
 entries: []
 #  - match: {dataset: arxiv, suite: filter, algo: linr_v2, backend: triton, sweep: c0_maincat}
 #    quality: {code_version: <tree hash>, hub: d1/arxiv}
-#    perf: {code_version: campaign-v2, hub: "campaign-v2/{dataset}-{suite}"}
+#    perf: {code_version: 408b1188d542634b3d18a2f5077bd23537a845fc, hub: "campaign-v2/{dataset}-{suite}"}
 
 log: []
 #  - {date: 2026-10-20, change: "<what changed, commit>", rerun: ["<suite>/<dataset> <arms>"]}

@@ -1100,8 +1100,8 @@ violin figure is empty under `--manifest`. `hub` names the
 cell's key field) for the planner's `bench fetch`; the report does not read
 it. Without `--manifest` the report takes the latest record per resume key,
 for scratch trees and smokes. The shipped manifest has only `default`
-(`campaign-v2`, a placeholder the freeze replaces with the tree hash) and
-no reuse entries.
+(the freeze gate's tree hash, `408b1188…`, the `code_version` of the
+`campaign-v2` tag) and no reuse entries.
 
 ### Paper exhibits
 
