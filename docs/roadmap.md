@@ -187,6 +187,17 @@ co-design.
   `--interleave --profile`) once at `campaign-v2.1`: the 408b1188 run is
   stale (eager SilverTorch +30 µs from the quantize fix) and stays the
   record of the old code. The only T3 source. **≈ 1.5 GPU-h.**
+- [ ] **ST-DLOOP: SilverTorch Triton probe scorers at wide embeddings**
+  (user, 2026-10-09: match Meta's CUDA kernels). D3 PubMed at v2.1 tripped
+  the surprise gate: Triton 2.80-2.98 ms vs official 1.99 ms at d768 (bs 16),
+  where every d ≤ 256 cell has Triton faster. The scorers do one `tl.dot` over
+  the whole padded width (768 → 1024) with no loop over D. Fix: loop over D
+  in chunks, D_PAD ≤ 256 code unchanged; plus an architecture comparison with
+  the official kernels, other improvements listed, not applied. *Gates*:
+  `torch.equal` ids and scores at D 128 / 192 / 768 against `campaign-v2.1`,
+  library suite on a pod GPU, interleaved before/after. Then tag
+  `campaign-v2.2`; stale: PubMed SilverTorch Triton perf (D3 PubMed timed).
+  V-PUBMED waits for it. Pod b. **≈ 1-2 GPU-h** plus the code.
 - [ ] **V-RERUN-V21: goodreads reruns at `campaign-v2.1`.** The perf of
   V2 and V3 Triton on goodreads-synth `synth` (V-PILOT) and goodreads
   `filter` (V-GR-FILTER), quality reused (both fixes bit-exact); and the
@@ -242,7 +253,7 @@ co-design.
   the embedding identity check on GPU 1 first (`eval-data pubmed
   encode_queries`, `bench check`, one V1 cell equal to `d1/pubmed`'s
   quality, or stop), the `n95` probe suite (quality-only), then the 3
-  kept sweeps, 3 seeds, every arm, at `campaign-v2.1` and IVF-TUNE's values. T2's 768-d row.
+  kept sweeps, 3 seeds, every arm, at `campaign-v2.2` (after ST-DLOOP) and IVF-TUNE's values. T2's 768-d row.
   **≈ 14 GPU-h**, GPU 0.
 - [ ] **D1-G: gate reruns and the report.** Needs every step above.
   Eager-vs-graph id identity from the stored hashes, a byte-identical
@@ -271,6 +282,7 @@ co-design.
 | step | A100 GPU-h | GPU | basis |
 |---|---|---|---|
 | M1 | 0.5 | both | |
+| ST-DLOOP | ≈ 1-2 | 0 | gates + before/after on pod b |
 | V-RERUN-V21 | ≈ 2-3 | 0 | goodreads-synth + goodreads filter (V2, V3, SilverTorch at n_lists 4096) |
 | H-PROFILE + H2H-FINAL | ≈ 1.5 | 0 | 1.18 GPU-h measured at 408b1188 |
 | V-CODESIGN | ≈ 1 | 0 | `d1/arxiv-codesign`: 60 cells in 0.4 h |
