@@ -106,6 +106,20 @@ now on; the [roadmap](roadmap.md) holds the steps.
   the matched-recall `n95` (the smallest `n_probe` reaching
   `recall_oracle@100` ≥ 0.95 on the dataset's median sweep), not {24, 32}:
   a fixed `n_probe` across 0.8M-10M compares different recall levels.
+- **IVF tuned per dataset size** (user, 2026-10-08): `n_lists` and
+  `n_probe` depend on N and are tuned, not fixed at the library default
+  1024. The sweep runs on **one small and one big dataset only** (user):
+  goodreads (0.8 M) and PubMed (10 M), `n_lists` ≈ √N and 4√N ({1024,
+  4096} and {4096, 16384}), `n_probe` measured as far as 0.95 needs (the
+  "no `n_probe` 256" grid rule does not bind tuning cells). Chosen point per
+  swept dataset: among each `n_lists`' smallest `n_probe` with mean
+  `recall_oracle@100` ≥ 0.95 on the median sweep, the lowest bs-16 graph
+  median, ties to the smaller `n_lists`. From the two, a size rule
+  (`n_lists` as a multiple of √N, `n_probe` as a fraction of `n_lists`)
+  sets arXiv (3 M) and YFCC (10 M). The `filter` and `synth` SilverTorch
+  arms of each dataset run at its `n_lists` with `n_probe` {24, n95}. If
+  0.95 is not reached, the record says so and the highest measured point
+  is reported.
 - **Official SilverTorch runs only on `none` and `bloom`.** Its clause and
   exact cells time our `pack_mask` adapter, not Meta's code; the existing
   official-clause records stay as an "adapter-bound upper bound" footnote.

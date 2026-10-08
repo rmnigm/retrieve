@@ -190,11 +190,18 @@ co-design.
   unchanged against `campaign-v2`, library suite on a pod GPU. Folded into
   `campaign-v2.1` if gated before V2-FIX-A merges, else `campaign-v2.2`
   before V-SEEDS. **≈ 0.5 GPU-h.**
-- [ ] **ARXIV-N95: arXiv's `n95`**: arXiv added to the quality-only `n95`
-  suite on its median kept `filter` sweep (no arXiv `deep` in v2, and
-  `synth` sweeps `n_probe` explicitly); the value fills arXiv's `filter`
-  n95 slots for V-SEEDS. SilverTorch only, so it runs at either tag.
-  **≈ 0.3 GPU-h.**
+- [ ] **IVF-TUNE: `n_lists` and `n_probe` by dataset size** (user,
+  2026-10-08, [decisions](decisions.md#campaign-v2-user-2026-10-08)).
+  SilverTorch triton clause on the median sweep, quality-only over
+  `n_lists` × `n_probe` (to past recall 0.95), then each `n_lists`' n95
+  point timed at bs 16 graph, interleaved. Two datasets only: **goodreads**
+  ({1024, 4096}) and **PubMed** ({4096, 16384}; its n_lists-1024 `n95`
+  leg reached 0.748 at 128). Output: the size rule, and the `n_lists` /
+  n95 values written into the `filter` and `synth` slots of all four
+  datasets (arXiv and YFCC by the rule). Replaces the `n95` suite. If
+  goodreads' choice is not 1024, its SilverTorch `filter` and `synth`
+  cells already run are rerun. Runs at `campaign-v2` (SilverTorch is
+  untouched by Fix A). **≈ 2-3 GPU-h**, one piece per pod.
 - [ ] **H-PROFILE: `--profile` stores an empty Triton `kernels` list**
   (H2H-FINAL: 40/40 bloom and 13/40 `none` eager entries; official always
   populated), so T3's Triton kernel-only column is empty for bloom (C7).
@@ -211,7 +218,7 @@ co-design.
   cluster-correlated variant (3 points) if the uniform sweep shows the IVF
   recall collapse at low p. F1/F2 3M panel. **≈ 15-45 GPU-h**
   (the pilot measured 8.7 GPU-h at 0.8 M), GPU 0. Its timed cells run at
-  `campaign-v2.1` (after V2-FIX-A).
+  `campaign-v2.1` (after V2-FIX-A), at IVF-TUNE's arXiv `n_lists`.
 - [ ] **V-GR-DEEP: goodreads `deep`**, trimmed (`n_lists` {1024, 4096},
   `n_probe` {8, 16, 32, 64, 128}, V3 pool fractions); replaces D1-C.
   F3; goodreads' `n95`, then the goodreads `filter` n95 cells and the
@@ -236,7 +243,7 @@ co-design.
   the embedding identity check on GPU 1 first (`eval-data pubmed
   encode_queries`, `bench check`, one V1 cell equal to `d1/pubmed`'s
   quality, or stop), the `n95` probe suite (quality-only), then the 3
-  kept sweeps, 3 seeds, every arm, at `campaign-v2.1`. T2's 768-d row.
+  kept sweeps, 3 seeds, every arm, at `campaign-v2.1` and IVF-TUNE's values. T2's 768-d row.
   **≈ 14 GPU-h**, GPU 0.
 - [ ] **D1-G: gate reruns and the report.** Needs every step above.
   Eager-vs-graph id identity from the stored hashes, a byte-identical
@@ -267,7 +274,7 @@ co-design.
 | M1 | 0.5 | both | |
 | V2-FIX-A | ≈ 2-3 | 0 | gates ~0.5; reruns: goodreads-synth + goodreads filter V2 perf |
 | V-GRAPH-IDS | ≈ 0.5 | 0 | |
-| ARXIV-N95 | ≈ 0.3 | 0 | quality-only |
+| IVF-TUNE | ≈ 2-3 | 0 | quality sweep + a few timed points, goodreads + PubMed |
 | H-PROFILE | ≈ 0.5 | 0 | |
 | V-CODESIGN | ≈ 1 | 0 | `d1/arxiv-codesign`: 60 cells in 0.4 h |
 | D3 bloomwidth | ≈ 3-5 | 1 (+0) | quality-only cells |
@@ -294,5 +301,5 @@ tag campaign-v2 ─────────────────────�
                                        ├─> V-CODESIGN, D3 ─────────────────────┤
                                        └─> V-PUBMED ───────────────────────────────────────┴─> D1-G ─> F2, F4, F5
 M1: before any timed step on a multi-GPU pod
-V2-FIX-A ─> tag campaign-v2.1: before every timed V-AX-SYNTH, V-YFCC, V-PUBMED, V-SEEDS cell
+V2-FIX-A ─> tag campaign-v2.1, and IVF-TUNE: before every timed V-AX-SYNTH, V-YFCC, V-PUBMED, V-SEEDS cell
 ```
