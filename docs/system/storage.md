@@ -76,7 +76,7 @@ spills.
 
 **The HF Hub — the archive.** Datasets live at `pinkmeme/eval-*` and
 checkpoints alongside them ([checkpoints.md](checkpoints.md)); every
-finished results tree (records, samples, `results.parquet`) and the raw
+finished results tree (records, samples, per-query sidecars, `results.parquet`) and the raw
 outputs behind documented findings live at `pinkmeme/eval-results`
 ([evaluation](evaluation.md#results-storage),
 [hub-index.md](../artifacts/hub-index.md)). A results tree is finished —

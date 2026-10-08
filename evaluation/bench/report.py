@@ -320,9 +320,10 @@ def _cells(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _attach(rows: list[dict[str, Any]], recs: list[dict[str, Any]]) -> None:
-    """Join each flat row to its nested record (``_rec``) and perf entry (``_entry``): the
-    windows, the sidecar path and the interleave block the statistics read are record fields
-    (the schema-4 record contract), not parquet columns."""
+    """Join each flat row to its nested record (``_rec``) and perf entry (``_entry``), where
+    the statistics read the windows, the sidecar path and the interleave block (the parquet
+    carries the same values as ``perf_window_medians_ms``, ``per_query`` and
+    ``interleave_*``)."""
     by_key = {records.record_key(r): r for r in recs}
     for row in rows:
         key = {f: json.loads(row[f]) if f == "params" else row[f] for f in records.KEY_FIELDS}
@@ -1073,7 +1074,9 @@ def tab_t3(c) -> list[Path]:
         for k in sorted({r["perf_k"] for r in cond if r.get("perf_k")}):
             for bs in sorted({r["perf_bs"] for r in cond if r.get("perf_bs")}):
                 ref = _sel(cond, backend="triton", perf_k=k, perf_bs=bs, perf_mode="eager")
-                ref_ids = {r["seed"]: r["_entry"].get("ids_sha256") for r in ref if r["_entry"]}
+                ref_ids = {
+                    r["seed"]: r["_entry"].get("ids_sha256_canon") for r in ref if r["_entry"]
+                }
                 first = True
                 for a, be, pj in _arms(cond):
                     arm = _sel(cond, algo=a, backend=be, params=pj, perf_k=k, perf_bs=bs)
@@ -1083,7 +1086,7 @@ def tab_t3(c) -> list[Path]:
                         if t is None:
                             continue
                         us, calls = _kernels(sub)
-                        ids = {r["seed"]: r["_entry"].get("ids_sha256") for r in sub}
+                        ids = {r["seed"]: r["_entry"].get("ids_sha256_canon") for r in sub}
                         same = [ids[s] == ref_ids.get(s) for s in ids if ids[s] and ref_ids.get(s)]
                         cell = _cells(sub)[0]
                         body.append(

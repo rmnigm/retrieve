@@ -1,7 +1,8 @@
 """``bench`` — the harness console script (H §3.4): ``run`` (one process), ``campaign`` (one
-child per group), ``check`` (the on-disk layout), ``upload`` / ``fetch`` (results ↔ the HF Hub),
-``report`` (tables and figures from the records; roadmap D4), ``env`` (the provenance and
-clock block as JSON, for a validation record).
+child per group), ``oracle`` (prebuild the exact-oracle blobs), ``check`` (the on-disk
+layout), ``upload`` / ``fetch`` (results ↔ the HF Hub), ``report`` (tables and figures from
+the records; roadmap D4), ``env`` (the provenance and clock block as JSON, for a validation
+record).
 
 ``bench run`` expands one ``(dataset, suite)`` through ``config.load_matrix`` (every option
 below ``--suite`` is a narrow; ``--k`` / ``--bs`` / ``--mode`` replace the suite's lists and
@@ -37,7 +38,7 @@ import bench
 from bench import measure, records
 from bench import run as run_mod
 from bench.algos import BACKENDS, FILTER_KINDS
-from bench.config import load_dataset, load_matrix
+from bench.config import interleave_units, load_dataset, load_matrix
 from bench.report import report
 from bench.upload import fetch, upload
 from eval_datasets.layout import validate_layout
@@ -66,9 +67,39 @@ def _multi(v) -> list | None:
     return list(v) or None
 
 
+def _children(jobs: list, interleave: bool) -> list[tuple[str, int, tuple, tuple]]:
+    """``(dataset, dim, algos, backends)`` per campaign child, in suite order: one per
+    ``Job.group``, or with ``interleave`` one per connected set of groups that an interleave
+    unit spans (its ``--algo`` × ``--backend`` narrows must select exactly that set)."""
+    if not interleave:
+        return [(d, dim, (a,), (b,)) for d, dim, a, b in dict.fromkeys(j.group for j in jobs)]
+    root: dict[tuple, tuple] = {j.group: j.group for j in jobs}
+
+    def find(g: tuple) -> tuple:
+        while root[g] != g:
+            g = root[g]
+        return g
+
+    units = interleave_units(jobs)
+    for _, unit in units:
+        for j in unit[1:]:
+            root[find(j.group)] = find(unit[0].group)
+    comps: dict[tuple, list[tuple]] = {}
+    for g in dict.fromkeys(j.group for j in jobs):
+        comps.setdefault(find(g), []).append(g)
+    out = []
+    for gs in comps.values():
+        algos = tuple(dict.fromkeys(g[2] for g in gs))
+        backends = tuple(dict.fromkeys(g[3] for g in gs))
+        if len(algos) * len(backends) != len(gs):
+            raise click.ClickException(f"interleave groups {gs} are not one --algo x --backend")
+        out.append((gs[0][0], gs[0][1], algos, backends))
+    return out
+
+
 @click.group()
 def main() -> None:
-    """The retrieval benchmark: run, campaign, check, upload, fetch, report, env."""
+    """The retrieval benchmark: run, campaign, oracle, check, upload, fetch, report, env."""
 
 
 main.add_command(upload)
@@ -78,7 +109,7 @@ main.add_command(report)
 
 @main.command()
 @click.option("--dataset", required=True, help="config/<dataset>.yaml")
-@click.option("--suite", required=True, help="a suite of suites.yaml (filter | deep | codesign)")
+@click.option("--suite", required=True, help="a suite of suites.yaml (filter | deep | h2h | ...)")
 @click.option("--dim", "dims", multiple=True, type=int)
 @click.option("--algo", "algos", multiple=True)
 @click.option("--backend", "backends", multiple=True, type=click.Choice(BACKENDS))
@@ -91,6 +122,9 @@ main.add_command(report)
 @click.option("--skip-quality", is_flag=True)
 @click.option("--skip-perf", is_flag=True)
 @click.option("--profile", is_flag=True, help="torch.profiler top-8 kernels per eager variant")
+@click.option(
+    "--interleave", is_flag=True, help="time each suite comparison group round-robin (ABAB)"
+)
 @click.option("--out", default="results", show_default=True, help="results directory")
 @click.option("--output", type=click.Path(), default=None, help="override the JSONL file")
 @click.option("--resume/--force", default=True, help="skip cells already ok at this code_version")
@@ -102,7 +136,7 @@ main.add_command(report)
 )
 def run(
     dataset, suite, dims, algos, backends, filter_kinds, sweeps, ks, batch_sizes, seeds, modes,
-    skip_quality, skip_perf, profile, out, output, resume, config_dir, checkpoint,
+    skip_quality, skip_perf, profile, interleave, out, output, resume, config_dir, checkpoint,
 ) -> None:  # fmt: skip
     """Run the cells of one (dataset, suite) in this process."""
     cache = measure.inductor_cache_dir(measure.code_version(), bench.GIVEN_INDUCTOR_CACHE)
@@ -138,6 +172,7 @@ def run(
         skip_quality=skip_quality,
         skip_perf=skip_perf,
         profile=profile,
+        interleave=interleave,
         env_extra={"config_sha": sha},
     )
     click.echo(f"{dataset}/{suite}: {dict(counts)}")
@@ -152,6 +187,11 @@ def run(
 @click.option("--skip-quality", is_flag=True, help="forwarded to every child")
 @click.option("--skip-perf", is_flag=True, help="forwarded to every child")
 @click.option("--profile", is_flag=True, help="forwarded to every child")
+@click.option(
+    "--interleave",
+    is_flag=True,
+    help="forwarded; the groups of a suite comparison share one child",
+)
 @click.option("--out", default="results", show_default=True)
 @click.option("--resume/--force", default=True)
 @click.option("--config-dir", default="config", show_default=True)
@@ -163,10 +203,11 @@ def run(
     help="hours per child before it is killed and recorded as rc=timeout",
 )
 def campaign(
-    suite, datasets, dims, modes, skip_quality, skip_perf, profile, out, resume, config_dir,
-    timeout_h,
+    suite, datasets, dims, modes, skip_quality, skip_perf, profile, interleave, out, resume,
+    config_dir, timeout_h,
 ) -> None:  # fmt: skip
-    """One child process per (dataset, dim, algo, backend) group, in suite order."""
+    """One child process per (dataset, dim, algo, backend) group, in suite order; with
+    --interleave the groups an interleave unit spans share one child."""
     out_dir = Path(out) if Path(out).is_absolute() else EVAL_DIR / out
     log_dir = out_dir / "_logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -189,18 +230,21 @@ def campaign(
                     continue
                 ds_yaml, _ = _paths(config_dir, ds)
                 jobs = load_matrix(ds_yaml, suites_yaml, s, dims=_multi(dims))
-                groups = list(dict.fromkeys(j.group for j in jobs))
-                if not groups:
+                children = _children(jobs, interleave)
+                if not children:
                     say(f"{s} {ds}: no cells selected (dims {list(dims) or 'all'}) rc=1")
                     worst = max(worst, 1)
-                for d, dim, algo, backend in groups:
+                for d, dim, algos, backends in children:
                     # on disk, not in memory: a restart mid-group keeps the earlier process's spill
+                    keep = {run_mod.parity_group(d, dim, a) for a in algos}
                     for stale in parity.glob("*"):
-                        if stale.name != run_mod.parity_group(d, dim, algo):
+                        if stale.name not in keep:
                             shutil.rmtree(stale) if stale.is_dir() else stale.unlink()
                     cmd = [
                         sys.executable, "-m", "bench.cli", "run", "--dataset", d,
-                        "--dim", str(dim), "--suite", s, "--algo", algo, "--backend", backend,
+                        "--dim", str(dim), "--suite", s,
+                        *(x for a in algos for x in ("--algo", a)),
+                        *(x for b in backends for x in ("--backend", b)),
                         "--out", str(out_dir), "--config-dir", config_dir,
                         "--resume" if resume else "--force",
                     ]  # fmt: skip
@@ -210,12 +254,15 @@ def campaign(
                         "skip-quality": skip_quality,
                         "skip-perf": skip_perf,
                         "profile": profile,
+                        "interleave": interleave,
                     }
                     cmd += [f"--{name}" for name, on in flags.items() if on]
+                    algo, backend = "+".join(algos), "+".join(backends)
                     log = log_dir / f"{s}_{d}-d{dim}_{algo}_{backend}.log"
                     t0 = time.monotonic()
                     with open(log, "a") as lf:
                         lf.write(f"=== {' '.join(cmd)}\n")
+                        lf.write(f"=== clocks at start\n{measure.clock_report()}")
                         lf.flush()
                         try:
                             rc = subprocess.call(
@@ -229,6 +276,7 @@ def campaign(
                         except subprocess.TimeoutExpired:  # the child was killed
                             lf.write(f"=== killed after {timeout_h} h (--timeout)\n")
                             rc = RC_TIMEOUT
+                        lf.write(f"=== clocks at end\n{measure.clock_report()}")
                     worst = max(worst, rc)
                     n_children += 1
                     say(
@@ -245,6 +293,22 @@ def campaign(
                 f"nothing in suite {suite!r}")  # fmt: skip
         say(f"=== campaign {suite} finished children={n_children} rc={worst}")
     sys.exit(worst)
+
+
+@main.command()
+@click.option("--dataset", required=True, help="config/<dataset>.yaml")
+@click.option("--suite", required=True, help="the suite whose sweeps need a blob")
+@click.option("--dim", "dims", multiple=True, type=int)
+@click.option("--sweep", "sweeps", multiple=True)
+@click.option("--config-dir", default="config", show_default=True)
+def oracle(dataset, suite, dims, sweeps, config_dir) -> None:
+    """Build (or find) the exact-oracle blob of every filter sweep a suite reads, no timing."""
+    ds_yaml, suites_yaml = _paths(config_dir, dataset)
+    jobs = load_matrix(ds_yaml, suites_yaml, suite, dims=_multi(dims), sweeps=_multi(sweeps))
+    if not any(j.filter_kind != "none" for j in jobs):
+        raise click.ClickException(f"{dataset}/{suite}: the narrows select no filter sweep")
+    counts = run_mod.prebuild_oracles(jobs)
+    click.echo(f"{dataset}/{suite}: {dict(counts)}")
 
 
 @main.command()

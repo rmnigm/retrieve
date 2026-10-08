@@ -18,15 +18,18 @@ recorded as partial and re-run by resume). ``test_cli.py`` drives the same fixtu
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import math
 from pathlib import Path
 
+import numpy as np
 import pytest
 import torch
+from click.testing import CliRunner
 
 from bench import measure as bench
-from bench import records, run
+from bench import records, run, upload
 from bench.config import NONE_SWEEP, load_matrix
 from retrieve import OfficialConfig
 
@@ -318,7 +321,7 @@ def test_postfilter_records_oracle_recall_per_k(tiny_configs, tmp_path):
     assets = run.sweep_assets(job, inp, 4, torch.device("cpu"))
     module = run.build_module(job, inp, assets, 4, {"alpha": 1})
     module.k = 2
-    at_2, _, _ = run.quality(module, inp, assets, [2], torch.device("cpu"))
+    at_2, _, _, _ = run.quality(module, inp, assets, [2], torch.device("cpu"))
     assert rec["quality"]["oracle"]["recall@2"] == at_2["oracle"]["recall@2"]
     assert rec["quality"]["heldout"]["recall@2"] == at_2["heldout"]["recall@2"]
 
@@ -342,7 +345,7 @@ def test_heldout_recall_counts_only_reachable_targets():
         "oracle_rows": keep,
         "heldout_rows": keep & tif.any(dim=1),
     }
-    out, ids, _ = run.quality(_Fixed(), inputs, assets, [2, 4], torch.device("cpu"))
+    out, _, ids, _ = run.quality(_Fixed(), inputs, assets, [2, 4], torch.device("cpu"))
     assert ids.shape == (3, 4)
     h = out["heldout"]
     assert h["n"] == 2  # query 2 has no reachable target: not scored
@@ -382,14 +385,14 @@ def test_perf_times_with_the_plan_cache_off_and_records_it(tiny_configs):
     assets = {"qa_s": None, "skip": None}
     m = _Cached()
     assert m.official.cache_plans is True
-    entries, samples = run.perf(
-        m, inputs, assets, job, torch.device("cpu"), modes=EAGER, profile=False, latency_kw=LAT
+    ((entries, samples),) = run.perf(
+        [m], inputs, assets, job, torch.device("cpu"), modes=EAGER, profile=False, latency_kw=LAT
     )
     assert m.official == OfficialConfig(cache_plans=False)
     assert len(entries) == 4 == len(samples) and all(e["cache_plans"] is False for e in entries)
     # ... and the null (graph) entries carry it too.
-    entries, _ = run.perf(
-        m, inputs, assets, job, torch.device("cpu"), modes=("graph",), profile=False,
+    ((entries, _),) = run.perf(
+        [m], inputs, assets, job, torch.device("cpu"), modes=("graph",), profile=False,
         latency_kw=LAT,
     )  # fmt: skip
     assert all(e["reason"] == "cuda_unavailable" and e["cache_plans"] is False for e in entries)
@@ -524,3 +527,257 @@ def test_compiled_arm_times_its_warmup_apart_and_skips_graph(tiny_configs, tmp_p
                              for e in graph)  # fmt: skip
     plain = _records(out / "arms" / "tiny-d64.jsonl")
     assert all(r["candidate_pool"] is None for r in plain)
+
+
+def test_quality_cache_copies_seed_free_arms_only(tiny_configs, tmp_path, monkeypatch):
+    """G-cache (CPU): V1 and the postfilter copy seed 0's quality to seeds 1-2 (perf still runs
+    per seed); V3 and SilverTorch always recompute. A new code_version or other ks is a miss."""
+    ds, suites = tiny_configs
+    out = tmp_path / "results"
+    path = out / "cache" / "tiny-d64.jsonl"
+    assert dict(run.run(load_matrix(ds, suites, "cache"), out_dir=out, **KW)) == {"ok": 12}
+    by = {(r["algo"], r["seed"]): r for r in _records(path)}
+    for algo in ("linr_v1_filter_mask", "postfilter"):
+        assert by[algo, 0]["quality_source"] is None and by[algo, 0]["seed_scope"] == "pool"
+        for seed in (1, 2):
+            r = by[algo, seed]
+            assert r["quality_source"] == {"seed": 0, "code_version": bench.code_version()}
+            assert r["quality"] == by[algo, 0]["quality"] and r["perf"]
+    for algo in ("linr_v3", "silvertorch"):
+        for seed in (0, 1, 2):
+            r = by[algo, seed]
+            assert r["quality_source"] is None and r["seed_scope"] == "pool+build"
+    # Fresh quality at seed 1 equals what the cache copied.
+    fresh = tmp_path / "fresh"
+    jobs = load_matrix(ds, suites, "cache", algos=["linr_v1_filter_mask"], seeds=[1])
+    run.run(jobs, out_dir=fresh, skip_perf=True, **KW)
+    (r,) = _records(fresh / "cache" / "tiny-d64.jsonl")
+    assert r["quality_source"] is None
+    assert {k: v for k, v in r["quality"].items() if k != "parity"} == {
+        k: v for k, v in by["linr_v1_filter_mask", 1]["quality"].items() if k != "parity"
+    }
+    # Other ks, or another code_version: no source, quality is computed.
+    jobs = load_matrix(ds, suites, "cache", algos=["linr_v1_filter_mask"], seeds=[2], ks=[2])
+    run.run(jobs, out_dir=out, skip_perf=True, **KW)
+    assert _records(path)[-1]["quality_source"] is None
+    monkeypatch.setattr(bench, "code_version", lambda: "0" * 40)
+    jobs = load_matrix(ds, suites, "cache", algos=["linr_v1_filter_mask"], seeds=[1])
+    run.run(jobs, out_dir=out, **KW)
+    assert _records(path)[-1]["quality_source"] is None
+
+
+def test_a_quality_only_suite_is_ok_without_perf(tiny_configs, tmp_path):
+    """Addendum 1: ``perf: false`` (n95, bloomwidth) runs no perf and is ``ok``, not ``partial``
+    for ``skip_perf``; ``--skip-perf`` or ``--mode eager`` on it drops nothing either."""
+    ds, suites = tiny_configs
+    jobs = load_matrix(ds, suites, "untimed")
+    assert jobs and not any(j.timed for j in jobs)
+    out = tmp_path / "results"
+    assert dict(run.run(jobs, out_dir=out, **KW)) == {"ok": 2}
+    recs = _records(out / "untimed" / "tiny-d64.jsonl")
+    assert all(r["perf"] is None and r["quality"] and r["partial_reasons"] is None for r in recs)
+    assert dict(run.run(jobs, out_dir=out, resume=False, skip_perf=True, modes=EAGER, **KW)) == {
+        "ok": 2
+    }
+    assert not (out / "untimed" / "tiny-d64.samples.jsonl").exists()
+
+
+def test_ids_sha256_is_stable_and_tracks_the_ids(tiny_configs, tmp_path):
+    """G-ids (CPU): two runs of a deterministic cell record the same ``ids_sha256`` per
+    ``(bs, k, mode)``; the hash is over the ids (int64, row-major) of the pool's first batches,
+    so different ids hash differently and a null entry has none."""
+    jobs = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=["c0"])
+    hashes = []
+    for out in (tmp_path / "a", tmp_path / "b"):
+        run.run(jobs, out_dir=out, **KW)
+        (rec,) = _records(out / "e2e" / "tiny-d64.jsonl")
+        hashes.append({(e["bs"], e["k"], e["mode"]): e["ids_sha256"] for e in rec["perf"]})
+    assert hashes[0] == hashes[1]
+    eager = {v for (_, _, m), v in hashes[0].items() if m == "eager"}
+    assert len(eager) == 4 and all(len(h) == 64 for h in eager)  # every (bs, k) differs
+    assert all(v is None for (_, _, m), v in hashes[0].items() if m == "graph")  # no CUDA
+    pool = torch.zeros(10, 2, 8)
+    fixed = run.ids_sha256(_Fixed(), pool, None)
+    assert fixed == run.ids_sha256(_Fixed(), pool, torch.zeros(10, 2, 1))  # qa ignored here
+
+    class _Shifted(_Fixed):
+        def forward(self, q, qa=None):
+            ids, sc = super().forward(q, qa)
+            return ids.flip(1), sc
+
+    assert all(a != b for a, b in zip(run.ids_sha256(_Shifted(), pool, None), fixed, strict=True))
+    assert (
+        fixed[0]
+        == hashlib.sha256(
+            torch.tensor([[0, 1, 2, 3]] * 2).numpy().tobytes() * run.IDS_PROBE_BATCHES
+        ).hexdigest()
+    )
+
+
+class _Tied(torch.nn.Module):
+    """Items 5 and 2 tie at 0.9: ``swap`` returns them in the other order, scores unchanged."""
+
+    def __init__(self, swap: bool) -> None:
+        super().__init__()
+        self.ids = torch.tensor([7, 2, 5, 1] if swap else [7, 5, 2, 1])
+
+    def forward(self, q, qa=None):
+        sc = torch.tensor([1.0, 0.9, 0.9, 0.3])
+        return self.ids.repeat(q.shape[0], 1), sc.repeat(q.shape[0], 1)
+
+
+def test_canonical_ids_hash_ignores_the_order_of_tied_ids():
+    """Follow-up 1: a tied pair in two orders hashes differently exactly (``ids_sha256``, the
+    eager-vs-graph gate) and equal canonically (``ids_sha256_canon``, official vs Triton:
+    rows re-ordered by score desc, then id asc); a real id difference changes both."""
+    pool = torch.zeros(10, 2, 8)
+    a, b = run.ids_sha256(_Tied(False), pool, None), run.ids_sha256(_Tied(True), pool, None)
+    assert a[0] != b[0] and a[1] == b[1]
+    assert (
+        a[1]
+        == hashlib.sha256(
+            torch.tensor([[7, 2, 5, 1]] * 2).numpy().tobytes() * run.IDS_PROBE_BATCHES
+        ).hexdigest()
+    )  # ties to the lower id
+    assert run.ids_sha256(_Fixed(), pool, None)[1] != a[1]
+
+
+def test_per_query_sidecar_matches_the_record_and_ships(tiny_configs, tmp_path):
+    """G-dump (CPU): one npz per record with quality, under ``<suite>/<ds>-d<dim>.perquery/``;
+    its per-query recall averages to the record's (to float32 summation), ``pass_count`` is
+    the blob's (``-1`` without a filter), a quality-cache copy points at its source's file,
+    ``bench upload --dry-run`` lists it and ``records.aggregate`` ignores it."""
+    ds, suites = tiny_configs
+    out = tmp_path / "results"
+    run.run(load_matrix(ds, suites, "e2e"), out_dir=out, skip_perf=True, **KW)
+    run.run(load_matrix(ds, suites, "cache"), out_dir=out, skip_perf=True, **KW)
+    recs = _records(out / "e2e" / "tiny-d64.jsonl") + _records(out / "cache" / "tiny-d64.jsonl")
+    worst = 0.0
+    for r in recs:
+        z = np.load(out / r["per_query"])
+        assert r["per_query"].startswith(f"{r['suite']}/tiny-d64.perquery/")
+        assert z["rows"].dtype == np.int32 and len(z["rows"]) == r["n_kept"]
+        assert z["pass_count"].dtype == np.int64
+        assert (z["pass_count"] == -1).all() == (r["filter_kind"] == "none")
+        for k in r["ks"]:
+            for side, name in (("oracle", "recall_oracle"), ("heldout", "heldout_recall")):
+                v = z[f"{name}@{k}"]
+                assert v.dtype == np.float32
+                if side not in r["quality"] or r["quality"][side]["n"] == 0:
+                    assert np.isnan(v).all()
+                    continue
+                assert (~np.isnan(v)).sum() == r["quality"][side]["n"]
+                diff = abs(
+                    float(np.nanmean(v.astype(np.float64))) - r["quality"][side][f"recall@{k}"]
+                )
+                worst = max(worst, diff)
+    assert worst < 1e-7
+    by = {(r["algo"], r["seed"]): r for r in recs if r["suite"] == "cache"}
+    assert by["postfilter", 2]["per_query"] == by["postfilter", 0]["per_query"]
+    assert by["linr_v3", 2]["per_query"] != by["linr_v3", 0]["per_query"]
+    cars = sorted(out.rglob("*.npz"))
+    assert {p.relative_to(out).as_posix() for p in cars if "_parity" not in p.parts} == {
+        r["per_query"] for r in recs
+    }
+    n_rows = len(records.read_table(records.aggregate(out)))
+    assert n_rows == len({records.record_key(r) for r in recs})  # one row each: no perf
+    res = CliRunner().invoke(
+        upload.upload, ["--results", str(out), "--path-in-repo", "x", "--dry-run"]
+    )
+    assert res.exit_code == 0, res.output
+    assert all(r["per_query"] in res.output for r in recs)
+
+
+def test_interleaved_group_keys_rounds_and_resume(tiny_configs, tmp_path, monkeypatch):
+    """G-interleave (CPU): with ``interleave`` each arm of a group writes the record (and key)
+    it writes without it, plus the group block (one group per seed and sweep); both arms are
+    timed in one ``latency_group`` call per variant with equal window counts (``rounds``); and
+    resume re-runs a group whole when one arm's cell is missing."""
+    ds, suites = tiny_configs
+    jobs = load_matrix(ds, suites, "pair")
+    plain, inter = tmp_path / "plain", tmp_path / "inter"
+    assert dict(run.run(jobs, out_dir=plain, **KW)) == {"ok": 8}
+    widths = []
+    real = run.measure.latency_group
+    monkeypatch.setattr(
+        run.measure, "latency_group", lambda fns, **kw: widths.append(len(fns)) or real(fns, **kw)
+    )
+    assert dict(run.run(jobs, out_dir=inter, interleave=True, **KW)) == {"ok": 8}
+    assert widths == [2] * (4 * 4)  # 4 groups x (2 bs x 2 k x eager); graph is null on CPU
+    a = _records(plain / "pair" / "tiny-d64.jsonl")
+    b = _records(inter / "pair" / "tiny-d64.jsonl")
+    assert sorted(map(records.record_key, a)) == sorted(map(records.record_key, b))
+    assert all(r["interleave"] is None for r in a)
+    groups: dict[str, list] = {}
+    for r in b:
+        groups.setdefault(r["interleave"]["group"], []).append(r)
+    assert len(groups) == 4  # 2 sweeps x 2 seeds
+    for g in groups.values():
+        assert [r["algo"] for r in g] == ["linr_v1_filter_mask", "linr_v2"]
+        assert [r["interleave"]["position"] for r in g] == [0, 1]
+        assert g[0]["interleave"]["arms"] == ["linr_v1_filter_mask/torch", "linr_v2/torch"]
+        assert len({(r["seed"], r["sweep"]) for r in g}) == 1
+        for e0, e1 in zip(g[0]["perf"], g[1]["perf"], strict=True):
+            assert (e0["bs"], e0["k"], e0["mode"]) == (e1["bs"], e1["k"], e1["mode"])
+            if e0["mode"] == "eager":
+                assert e0["rounds"] == e1["rounds"] == 3 == len(e0["window_medians_ms"])
+    assert {r["quality_source"] is None for r in b if r["seed"] == 0} == {True}
+    assert all(r["quality_source"] == {"seed": 0, "code_version": bench.code_version()}
+               for r in b if r["seed"] == 1)  # fmt: skip
+    # Drop one arm's record: the next interleaved run re-runs that group whole, nothing else.
+    path = inter / "pair" / "tiny-d64.jsonl"
+    victim = next(r for r in b if r["algo"] == "linr_v2" and r["seed"] == 1)
+    path.write_text("".join(json.dumps(r) + "\n" for r in b if r is not victim))
+    assert dict(run.run(jobs, out_dir=inter, interleave=True, **KW)) == {"ok": 2, "skipped": 6}
+    rerun = _records(path)[-2:]
+    assert {(r["algo"], r["seed"], r["sweep"]) for r in rerun} == {
+        (a, 1, victim["sweep"]) for a in ("linr_v1_filter_mask", "linr_v2")
+    }
+    assert rerun[0]["interleave"]["group"] == victim["interleave"]["group"]
+
+
+def test_frac_windows_below_the_devices_max_clock(tiny_configs, tmp_path, monkeypatch):
+    """Follow-up 2: ``env.frac_windows_below_max`` is the share of a record's window clock
+    samples below the device's max SM clock (``env.sm_max_mhz``), whatever ran before: a cell
+    whose windows all sample below it reads 1.0 first or second; no device max, no value."""
+    real = bench.clocks
+    monkeypatch.setattr(bench, "clocks", lambda: {**real(), "sm_max_mhz": 1410.0})
+    low, mixed = [1140.0, 1140.0, 1140.0], [1410.0, 1395.0, 1305.0, 1410.0]
+    jobs = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=["c0", "c0c1"])
+    for order, want in (((low, mixed), [1.0, 0.5]), ((mixed, low), [0.5, 1.0])):
+        clocks = iter(order)
+
+        def fake_perf(modules, *a, clocks=clocks, **k):
+            win = next(clocks)
+            e = {"k": 2, "bs": 1, "mode": "eager", "sm_mhz": win[-1], "window_sm_mhz": win}
+            return [([e], []) for _ in modules]
+
+        monkeypatch.setattr(run, "perf", fake_perf)
+        out = tmp_path / str(want)
+        run.run(jobs, out_dir=out, skip_quality=True, **KW)
+        recs = _records(out / "e2e" / "tiny-d64.jsonl")
+        assert [r["env"]["frac_windows_below_max"] for r in recs] == want
+        assert all(r["env"]["sm_max_mhz"] == 1410.0 for r in recs)
+    monkeypatch.setattr(bench, "clocks", lambda: {**real(), "sm_max_mhz": None})
+    monkeypatch.setattr(run, "perf", lambda modules, *a, **k: [(
+        [{"k": 2, "bs": 1, "mode": "eager", "sm_mhz": 1.0, "window_sm_mhz": [1.0]}], []
+    ) for _ in modules])  # fmt: skip
+    run.run(jobs[:1], out_dir=tmp_path / "none", skip_quality=True, **KW)
+    (r,) = _records(tmp_path / "none" / "e2e" / "tiny-d64.jsonl")
+    assert r["env"]["frac_windows_below_max"] is None
+    assert bench.clock_histogram([1410.0, 1395.0, 1410.0]) == (
+        "sm_mhz under load (n=3): 1410×2, 1395×1"
+    )
+    assert bench.clock_histogram([]) == "sm_mhz under load (n=0): no samples"
+
+
+def test_score_path_arms_share_the_triton_parity_spill(tiny_configs, tmp_path):
+    """h2h's official arms carry ``score_path`` in ``params``; the spill hash drops it with
+    ``backend``, so they compare against the triton reference instead of each writing one."""
+    job = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=["c0"])[0]
+    ids, sc = torch.tensor([[0, 1], [2, 3]]), torch.tensor([[1.0, 0.5], [0.9, 0.1]])
+    assert run.parity(tmp_path, job, {}, ids, sc, [2])["parity"] == "reference"
+    off = dataclasses.replace(job, backend="official")
+    for sp in ("fp16", "int32"):
+        out = run.parity(tmp_path, off, {"score_path": sp}, ids, sc, [2])
+        assert out["parity"] == "vs_torch" and out["jaccard_vs_first@2"] == 1.0

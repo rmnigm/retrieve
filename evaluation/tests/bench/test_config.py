@@ -19,7 +19,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from bench.config import NONE_SWEEP, ConfigError, load_dataset, load_matrix
+from bench import cli, run
+from bench.algos import official_config
+from bench.config import NONE_SWEEP, ConfigError, interleave_units, load_dataset, load_matrix
 from bench.records import resume_key
 
 FIX = Path(__file__).parent / "data"
@@ -341,6 +343,8 @@ def test_arm_errors_are_named(tmp_path, arms, match):
 # ----- the real grid (campaign-v2, user decisions 2026-10-08) ---------------------------
 
 GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change it deliberately
+    ("h2h", "goodreads"): (30, 30),
+    ("h2h", "arxiv"): (30, 30),
     ("filter", "goodreads"): (87, 99),
     ("filter", "arxiv"): (135, 153),
     ("filter", "yfcc10m"): (15, 18),
@@ -393,7 +397,8 @@ def test_grid_counts_and_invariants(suite, dataset):
     for j, p in cells:
         cell = (j.dim, j.algo, j.backend, j.filter_kind, j.sweep, json.dumps(p, sort_keys=True))
         by_seed.setdefault(cell, set()).add(j.seed)
-    assert all(s == {0, 1, 2} for s in by_seed.values())  # 3 seeds everywhere
+    seeds = {0, 1, 2, 3, 4} if suite == "h2h" else {0, 1, 2}  # h2h: 5 repeats
+    assert all(s == seeds for s in by_seed.values())
     assert all(set(j.batch_sizes) <= {1, 16} and set(j.ks) <= {100, 1000} for j in jobs)
     if suite in ("filter", "deep", "synth", "codesign"):
         assert all(j.batch_sizes == (1, 16) for j in jobs)
@@ -499,6 +504,8 @@ def test_codesign_bloomwidth_and_n95_suites():
         ("silvertorch", "triton", "clause", "all5")
     }
     assert {(j.ks, j.batch_sizes) for j in n95} == {((100, 1000), (16,))}
+    # quality-only by declaration (perf: false), so their records are ok, not partial
+    assert not any(j.timed for j in n95 + bw) and all(j.timed for j in timed + cd)
 
 
 # G-key: resume keys of cells that exist before and after the redesign, as today's code
@@ -547,3 +554,79 @@ def test_every_shipped_config_parses(dataset_yaml, suite):
         load_matrix(dataset_yaml, CFG / "suites.yaml", suite)
     for dim in yaml.safe_load(dataset_yaml.read_text())["dims"]:
         assert load_dataset(dataset_yaml, dim).dim == dim
+
+
+def test_interleave_groups_of_the_real_suites():
+    """The comparison groups ``--interleave`` times round-robin: h2h's three arms per (filter
+    kind, seed), codesign's partial / full, filter's V1 / V2 and triton / official bloom; a
+    group is per seed, and every arm keeps the key it has without ``--interleave``."""
+    units = interleave_units(_real("h2h", "goodreads"))
+    groups = [m for by, m in units if by]
+    assert len(groups) == len(units) == 2 * 5  # none + bloom, five seeds
+    for m in groups:
+        assert [(j.backend, j.build.get("score_path")) for j in m] == [
+            ("triton", None), ("official", "fp16"), ("official", "int32")
+        ]  # fmt: skip
+        assert len({j.seed for j in m}) == 1 and all(j.query == ({"n_probe": 24},) for j in m)
+    assert [run.group_label(j, ("backend", "score_path")) for j in groups[0]] == [
+        "silvertorch/triton", "silvertorch/official/score_path=fp16",
+        "silvertorch/official/score_path=int32",
+    ]  # fmt: skip
+    cd = [m for by, m in interleave_units(_real("codesign", "arxiv")) if by]
+    assert len(cd) == 9 and all(
+        [j.build["bloom_path"] for j in m] == ["partial", "full"] for m in cd
+    )
+    fil = [m for by, m in interleave_units(_real("filter", "arxiv")) if by]
+    assert sorted({tuple(f"{j.algo}/{j.backend}" for j in m) for m in fil}) == [
+        ("linr_v1_filter_mask/triton", "linr_v2/triton"),
+        ("silvertorch/triton", "silvertorch/official"),
+    ]
+    assert not any(j.backend == "torch" for m in fil for j in m)  # values: [triton, official]
+    assert cli._children(_real("filter", "arxiv"), True) == [
+        ("arxiv", 128, ("linr_v1_filter_mask", "linr_v2"), ("triton",)),
+        ("arxiv", 128, ("linr_v3",), ("triton",)),
+        ("arxiv", 128, ("silvertorch",), ("triton", "official")),
+        ("arxiv", 128, ("silvertorch",), ("torch",)),
+        ("arxiv", 128, ("postfilter",), ("torch",)),
+    ]
+    assert len(cli._children(_real("filter", "arxiv"), False)) == 7  # one per Job.group
+
+
+@pytest.mark.parametrize(
+    ("spec", "match"),
+    [
+        ("[{by: n_probe}]", "by is algo, backend or build params"),
+        ("[{by: [algo, backend], values: [x]}]", "one by field only"),
+        ("[{by: algo, extra: 1}]", "unknown keys"),
+    ],
+)
+def test_interleave_errors_are_named(tmp_path, spec, match):
+    suites = tmp_path / "suites.yaml"
+    suites.write_text(
+        "s:\n  datasets: [mini]\n  filter_kinds: [clause]\n  ks: [10]\n  batch_sizes: [1]\n"
+        f"  interleave: {spec}\n  arms: [{{algo: linr_v2, backends: [triton]}}]\n"
+    )
+    with pytest.raises(ConfigError, match=match):
+        load_matrix(MINI, suites, "s")
+
+
+def test_a_job_in_two_groups_is_a_config_error(tmp_path):
+    suites = tmp_path / "suites.yaml"
+    suites.write_text(
+        "s:\n  datasets: [mini]\n  filter_kinds: [clause]\n  ks: [10]\n  batch_sizes: [1]\n"
+        "  interleave: [{by: algo}, {by: backend}]\n  arms:\n"
+        "    - {algo: linr_v2, backends: [triton, torch]}\n"
+        "    - {algo: linr_v1_filter_mask, backends: [triton]}\n"
+    )
+    with pytest.raises(ConfigError, match="in two interleave groups"):
+        load_matrix(MINI, suites, "s")
+
+
+def test_score_path_is_an_official_build_param():
+    assert (
+        official_config("silvertorch", "none", "official", {"score_path": "int32"}).score_path
+        == "int32"
+    )
+    assert official_config("silvertorch", "bloom", "official", {}) is None
+    with pytest.raises(ValueError, match="score_path applies to silvertorch/official only"):
+        official_config("silvertorch", "bloom", "triton", {"score_path": "int32"})

@@ -9,6 +9,10 @@ process-start sample) and ``env.sm_mhz_load`` is the median of the cell's under-
 
 Schema 3 (H2): the key block carries ``inputs``, the encoder / embedding identity
 (``config.Dataset.inputs``). A record written before it gets one from :func:`inputs_of`.
+
+Schema 4 (campaign v2): the body gains ``seed_scope``, ``quality_source``, ``per_query`` and
+``interleave``, perf entries ``ids_sha256`` (and ``rounds`` when interleaved), ``env``
+``frac_windows_below_max``. A schema-3 record reads them as null.
 """
 
 from __future__ import annotations
@@ -29,7 +33,7 @@ from loguru import logger
 from bench.config import load_dataset
 from bench.metrics import null_if_empty
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 KEY_FIELDS = (
     "dataset",
     "dim",
@@ -47,15 +51,17 @@ _RECORD_COLUMNS = (
     "status", "path", "n_items", "n_queries", "n_kept", "n_queries_heldout", "n_queries_oracle",
     "n_targets_in_filter", "pass_rate", "bloom_fp_rate", "k_max", "build_s", "index_mib",
     "filter_mib", "unstable", "memory_reserved_mib", "elapsed_s",
-    "schema_version", "stage", "error", "partial_reasons",
+    "schema_version", "stage", "error", "partial_reasons", "seed_scope", "per_query",
 )  # fmt: skip
 # results.parquet is shipped as a paper artifact (P §B.7), so it has to carry why a row is
 # incomplete, not only that it is: `stage`/`error` on a failure, `partial_reasons` on a
 # narrowed cell, `schema_version` because v1 and v2 records coexist in one file.
 _ENV_COLUMNS = (
     "code_version", "commit", "dirty", "gpu", "sm_mhz_load", "clocks_drift", "git_branch",
+    "frac_windows_below_max",
 )  # fmt: skip
-_PERF_SKIP = ("window_medians_ms", "window_sm_mhz", "kernels")
+# window_medians_ms stays (perf_window_medians_ms): the bootstrap CIs resample it
+_PERF_SKIP = ("window_sm_mhz", "kernels")
 
 
 # Before schema 3 goodreads ran on gSASRec and the text datasets' content_dir never changed;
@@ -155,6 +161,9 @@ def _row(rec: dict[str, Any], entry: dict[str, Any] | None) -> dict[str, Any]:
     row["params"] = json.dumps(rec["params"], sort_keys=True)
     row.update({c: rec.get(c) for c in _RECORD_COLUMNS})
     row.update({f"env_{c}": rec["env"].get(c) for c in _ENV_COLUMNS})
+    row["quality_source_seed"] = (rec.get("quality_source") or {}).get("seed")
+    row["interleave_group"] = (rec.get("interleave") or {}).get("group")
+    row["interleave_position"] = (rec.get("interleave") or {}).get("position")
     q = rec.get("quality") or {}
     for side in ("heldout", "oracle"):
         for m, v in null_if_empty(q.get(side) or {}).items():

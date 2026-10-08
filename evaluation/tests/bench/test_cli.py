@@ -48,7 +48,10 @@ def test_cli_run_campaign_and_report(tiny_configs, tmp_path):
     assert r.exit_code == 0, r.output
     logs = sorted(p.name for p in (out / "_logs").iterdir())
     assert logs == ["campaign.log", "e2e1_tiny-d64_linr_v1_filter_mask_torch.log"]
-    assert (out / "_logs" / logs[1]).read_text().startswith("=== ")  # the command line first
+    child_log = (out / "_logs" / logs[1]).read_text()
+    assert child_log.startswith("=== ")  # the command line first
+    start, end = child_log.index("=== clocks at start"), child_log.index("=== clocks at end")
+    assert start < child_log.index("sm_mhz under load (n=0)") < end  # the child's histogram
     summary = (out / "_logs" / "campaign.log").read_text()
     assert summary.count(" rc=0 ") == 1 and "finished children=1 rc=0" in summary
     assert not (out / "_parity").exists()  # dropped when the algo group closed
@@ -238,3 +241,30 @@ def test_cli_run_checkpoint_override_lands_as_inputs(tiny_configs, tmp_path, mon
     assert seen == [data_dir / "ck" / "pinned-d64" / "x.pt"]
     (rec,) = _records(out / "e2e" / "tiny-d64.jsonl")
     assert rec["inputs"] == "pinned-d64"
+
+
+def test_bench_oracle_prebuilds_every_sweep_and_run_builds_none(
+    tiny_configs, tmp_path, monkeypatch
+):
+    """G-oracle (CPU): ``bench oracle`` writes the blob of every filter sweep the suite reads
+    (clause c0, c0c1 at k_max 4), no timing; a following ``bench run`` finds them all."""
+    ds, _ = tiny_configs
+    common = ["--config-dir", str(ds.parent)]
+    r = CliRunner().invoke(cli.main, ["oracle", "--dataset", "tiny", "--suite", "e2e", *common])
+    assert r.exit_code == 0, r.output
+    gt = load_matrix(ds, ds.parent / "suites.yaml", "e2e")[0].data.gt_dir
+    assert sorted(p.name.split("_")[2] for p in gt.glob("oracle_v4_*.pt")) == ["c0", "c0c1"]
+
+    def boom(*a, **k):
+        raise AssertionError("bench run rebuilt a prebuilt oracle")
+
+    monkeypatch.setattr(run.oracle, "compute", boom)
+    r = CliRunner().invoke(
+        cli.main,
+        ["run", "--dataset", "tiny", "--suite", "e2e", "--skip-perf", "--out",
+         str(tmp_path / "res"), *common],
+    )  # fmt: skip
+    assert r.exit_code == 0, r.output
+    r = CliRunner().invoke(cli.main, ["oracle", "--dataset", "tiny", "--suite", "e2e",
+                                      "--sweep", "full_scan", *common])  # fmt: skip
+    assert r.exit_code != 0 and "no filter sweep" in r.output
