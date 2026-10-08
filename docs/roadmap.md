@@ -136,7 +136,7 @@ exhibit it feeds.
 | records | changed by | redo |
 |---|---|---|
 | V2 + V3 Triton perf at `408b1188` (V-PILOT goodreads-synth, V-GR-FILTER) | V2-FIX-A (bit-exact; faster) | perf at the final tag, quality reused |
-| SilverTorch eager perf at `408b1188` (H2H-FINAL, V-CODESIGN goodreads, D3 goodreads timed n/a) | quantize fix (+≈30 µs eager, graph unchanged) | eager perf |
+| SilverTorch eager perf at `408b1188` (H2H-FINAL; V-CODESIGN and D3 timed already rerun at v2.1) | quantize fix (+≈30 µs eager, graph unchanged) | eager perf |
 | goodreads SilverTorch `filter` + `synth` at `n_lists` 1024 | IVF-TUNE (goodreads 4096 / n95 64) | whole SilverTorch arms |
 | arXiv `72e5a90` reuse entries, V2 / V3 perf half | V2-FIX-A | perf |
 | PubMed SilverTorch Triton perf (D3 PubMed timed at v2.1; V-PUBMED's Triton arms) | ST-DLOOP (scores bit-exact) | Triton perf |
@@ -293,7 +293,6 @@ co-design.
 | V-AX-CORR | ≈ 3 | 0 | 3 points, arXiv |
 | ST-DLOOP | ≈ 1-2 | 0 | gates + before/after on pod b |
 | H-PROFILE + H2H-FINAL | ≈ 1.5 | 0 | 1.18 GPU-h measured at 408b1188 |
-| V-CODESIGN | ≈ 1 | 0 | `d1/arxiv-codesign`: 60 cells in 0.4 h |
 | D3 bloomwidth | ≈ 3-5 | 1 (+0) | quality-only cells |
 | V-AX-SYNTH | ≈ 15-45 | 0 | Triton ~2,000 s per pass point; V1/V2 torch at 3 points ×3 seeds is most of it |
 | V-GR-DEEP | ≈ 3-6 | 0/1 | ~210 cells at ~50 s (`d1/arxiv-deep`: 873 cells in 36 h at 3 M) |
