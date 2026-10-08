@@ -1,7 +1,8 @@
 """``bench`` — the harness console script (H §3.4): ``run`` (one process), ``campaign`` (one
-child per group), ``check`` (the on-disk layout), ``upload`` / ``fetch`` (results ↔ the HF Hub),
-``report`` (tables and figures from the records; roadmap D4), ``env`` (the provenance and
-clock block as JSON, for a validation record).
+child per group), ``oracle`` (prebuild the exact-oracle blobs), ``check`` (the on-disk
+layout), ``upload`` / ``fetch`` (results ↔ the HF Hub), ``report`` (tables and figures from
+the records; roadmap D4), ``env`` (the provenance and clock block as JSON, for a validation
+record).
 
 ``bench run`` expands one ``(dataset, suite)`` through ``config.load_matrix`` (every option
 below ``--suite`` is a narrow; ``--k`` / ``--bs`` / ``--mode`` replace the suite's lists and
@@ -98,7 +99,7 @@ def _children(jobs: list, interleave: bool) -> list[tuple[str, int, tuple, tuple
 
 @click.group()
 def main() -> None:
-    """The retrieval benchmark: run, campaign, check, upload, fetch, report, env."""
+    """The retrieval benchmark: run, campaign, oracle, check, upload, fetch, report, env."""
 
 
 main.add_command(upload)
@@ -290,6 +291,22 @@ def campaign(
                 f"nothing in suite {suite!r}")  # fmt: skip
         say(f"=== campaign {suite} finished children={n_children} rc={worst}")
     sys.exit(worst)
+
+
+@main.command()
+@click.option("--dataset", required=True, help="config/<dataset>.yaml")
+@click.option("--suite", required=True, help="the suite whose sweeps need a blob")
+@click.option("--dim", "dims", multiple=True, type=int)
+@click.option("--sweep", "sweeps", multiple=True)
+@click.option("--config-dir", default="config", show_default=True)
+def oracle(dataset, suite, dims, sweeps, config_dir) -> None:
+    """Build (or find) the exact-oracle blob of every filter sweep a suite reads, no timing."""
+    ds_yaml, suites_yaml = _paths(config_dir, dataset)
+    jobs = load_matrix(ds_yaml, suites_yaml, suite, dims=_multi(dims), sweeps=_multi(sweeps))
+    if not any(j.filter_kind != "none" for j in jobs):
+        raise click.ClickException(f"{dataset}/{suite}: the narrows select no filter sweep")
+    counts = run_mod.prebuild_oracles(jobs)
+    click.echo(f"{dataset}/{suite}: {dict(counts)}")
 
 
 @main.command()

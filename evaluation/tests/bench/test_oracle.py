@@ -28,8 +28,8 @@ class _FixedMaskFilter:
     def __init__(self, item_mask):
         self.item_mask = torch.as_tensor(item_mask, dtype=torch.bool)
 
-    def evaluate_mask(self, qa):
-        return self.item_mask.unsqueeze(0).expand(qa.shape[0], -1)
+    def evaluate_mask(self, qa, start=0, end=None):
+        return self.item_mask[start:end].unsqueeze(0).expand(qa.shape[0], -1)
 
 
 class _PerQueryFilter:
@@ -38,8 +38,8 @@ class _PerQueryFilter:
     def __init__(self, masks):
         self.masks = torch.as_tensor(masks, dtype=torch.bool)
 
-    def evaluate_mask(self, qa):
-        return self.masks[qa[:, 0]]
+    def evaluate_mask(self, qa, start=0, end=None):
+        return self.masks[qa[:, 0], start:end]
 
 
 # ----- padding semantics ----------------------------------------------------------------
@@ -124,7 +124,7 @@ def test_v4_fields_and_pass_rate_arithmetic():
 
 def test_pass_counts_and_bloom_fp_rate():
     _, _, qa, filt, _ = _v4_inputs()
-    exact = oracle.pass_counts(filt, qa, None, device=CPU)
+    exact = oracle.pass_counts(filt, qa, None, 4, device=CPU)
     assert exact.tolist() == [3, 1, 0]
     assert oracle.pass_rate(exact, 4) == pytest.approx(4 / 12)
     assert oracle.pass_rate(torch.tensor([-1, -1]), 4) != oracle.pass_rate(
@@ -132,16 +132,16 @@ def test_pass_counts_and_bloom_fp_rate():
     )  # nan
     # A "bloom" that admits one extra item on queries 0 and 2, none on query 1.
     bloom = _PerQueryFilter([[1, 1, 1, 1], [0, 0, 1, 0], [1, 0, 0, 0]])
-    bcounts = oracle.pass_counts(bloom, qa, None, device=CPU)
+    bcounts = oracle.pass_counts(bloom, qa, None, 4, device=CPU)
     assert bcounts.tolist() == [4, 1, 1]
     # fp rate per query: (4-3)/(4-3)=1, (1-1)/(4-1)=0, (1-0)/(4-0)=0.25 → mean 0.41666
     assert oracle.bloom_fp_rate(bcounts, exact, 4) == pytest.approx((1 + 0 + 0.25) / 3)
     # Skipped rows (-1) drop out of the mean.
     skip = torch.tensor([False, True, False])
-    assert oracle.pass_counts(bloom, qa, skip, device=CPU).tolist() == [4, -1, 1]
+    assert oracle.pass_counts(bloom, qa, skip, 4, device=CPU).tolist() == [4, -1, 1]
     assert oracle.bloom_fp_rate(
-        oracle.pass_counts(bloom, qa, skip, device=CPU),
-        oracle.pass_counts(filt, qa, skip, device=CPU),
+        oracle.pass_counts(bloom, qa, skip, 4, device=CPU),
+        oracle.pass_counts(filt, qa, skip, 4, device=CPU),
         4,
     ) == pytest.approx((1 + 0.25) / 2)
 
@@ -276,3 +276,49 @@ def test_code_version_is_the_library_tree_hash_or_a_files_hash(monkeypatch):
     assert fb.startswith("files:") and len(fb) == len("files:") + 40
     assert bench.code_version() == fb  # deterministic
     assert bench.provenance()["code_version"] == fb
+
+
+def _reference(item_embs, queries, mask, k):
+    """One [U, N] score matrix, equal scores to the lowest id (a stable sort; ``torch.topk``
+    itself does not promise an order among ties), -inf written as -1."""
+    scores = (queries @ item_embs.t()).masked_fill(~mask, float("-inf"))
+    vals, ids = scores.sort(dim=1, descending=True, stable=True)
+    return torch.where(torch.isfinite(vals[:, :k]), ids[:, :k], -1)
+
+
+def test_item_chunked_oracle_equals_the_one_shot_oracle():
+    """G-oracle (CPU): chunks of 5, 7 and 24 of 24 items give the one-shot oracle's topk,
+    pass counts and targets_in_filter; two identical items tie and the lower id ranks first,
+    across a chunk boundary too."""
+    g = torch.Generator().manual_seed(1)
+    item_embs = torch.randn(24, 8, generator=g)
+    item_embs[13] = item_embs[2]  # an exact tie, the two copies in different chunks
+    queries = torch.randn(6, 8, generator=g)
+    queries[0] = item_embs[2]
+    masks = torch.rand(3, 24, generator=g) > 0.3
+    masks[:, [2, 13]] = True
+    qa = torch.tensor([[0], [1], [2], [0], [1], [2]])
+    targets = torch.tensor([[2, -1], [5, 20], [23, -1], [-1, -1], [0, 1], [7, 13]])
+    want = _reference(item_embs, queries, masks[qa[:, 0]], 6)
+    filt = _PerQueryFilter(masks)
+    for chunk in (5, 7, 24):
+        got = compute(item_embs, queries, qa, None, filt, 6, targets=targets, device=CPU,
+                      item_chunk=chunk)  # fmt: skip
+        assert torch.equal(got["topk"], want), chunk
+        assert got["topk"][5, 4:].tolist() == [2, 13]  # the tie: the lower id first
+        assert got["pass_counts"].tolist() == masks[qa[:, 0]].sum(dim=1).tolist()
+        m = masks[qa[:, 0]]
+        tif = (targets != -1) & m.gather(1, targets.clamp(min=0))
+        assert torch.equal(got["targets_in_filter"], tif)
+        counts = oracle.pass_counts(filt, qa, None, 24, device=CPU, item_chunk=chunk)
+        assert torch.equal(counts, got["pass_counts"])
+
+
+def test_the_oracle_refuses_tf32():
+    old = torch.backends.cuda.matmul.allow_tf32
+    torch.backends.cuda.matmul.allow_tf32 = True
+    try:
+        with pytest.raises(RuntimeError, match="exact fp32"):
+            compute(torch.eye(3), torch.eye(3), None, None, None, 2, device=CPU)
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = old

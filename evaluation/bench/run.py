@@ -130,26 +130,12 @@ def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device
     bloom_fp = None
     oracle_rows = None
     if fk != "none":
-        exact = inputs.exact_filter(fk, filters, inp, job.backend)
-        blob = oracle.load_or_build(
-            job.data.gt_dir,
-            job.sweep,
-            k_max,
-            item_embs=inp["item_embs"],
-            queries=inp["queries"],
-            targets=inp["targets"],
-            qa_sweep=qa_s,
-            skip_mask=skip,
-            clauses=job.clauses,
-            filter_mod=exact,
-            attrs_digest=inp["attrs_digest"],
-            device=device,
-        )
+        blob = sweep_oracle(job, inp, k_max, device, filters, warn_missing=True)
         heldout &= blob["target_in_filter"]
         oracle_rows = keep & (blob["topk"][:, 0] != -1)
         if fk == "bloom":
             assert filter_mod is not None
-            counts = oracle.pass_counts(filter_mod, qa_s, skip, device=device)
+            counts = oracle.pass_counts(filter_mod, qa_s, skip, inp["n_items"], device=device)
             bloom_fp = oracle.bloom_fp_rate(counts, blob["pass_counts"], inp["n_items"])
     n_tif = (inp["n_targets"] if blob is None else blob["targets_in_filter"])[heldout].sum()
     return {
@@ -164,6 +150,55 @@ def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device
         "pass_rate": blob["pass_rate"] if blob is not None else 1.0,
         "bloom_fp_rate": bloom_fp,
     }
+
+
+def sweep_oracle(
+    job: Job, inp: dict, k_max: int, device: torch.device, filters: dict, *, warn_missing: bool
+) -> dict[str, Any]:
+    """The blob v4 of a filter job's sweep at ``k_max`` (``oracle.load_or_build``) under the
+    exact mask (``inputs.exact_filter`` over the cell's standalone ``filters``)."""
+    qa_s, skip = inputs.sweep_qa(inp["qa"], job.clauses)
+    return oracle.load_or_build(
+        job.data.gt_dir,
+        job.sweep,
+        k_max,
+        item_embs=inp["item_embs"],
+        queries=inp["queries"],
+        targets=inp["targets"],
+        qa_sweep=qa_s,
+        skip_mask=skip,
+        clauses=job.clauses,
+        filter_mod=inputs.exact_filter(job.filter_kind, filters, inp, job.backend),
+        attrs_digest=inp["attrs_digest"],
+        device=device,
+        warn_missing=warn_missing,
+    )
+
+
+def prebuild_oracles(jobs: Sequence[Job], device: torch.device | None = None) -> Counter:
+    """``bench oracle``: every blob ``jobs`` read (one per filter ``(dataset, dim, sweep,
+    k_max)``), built or found, in this process, no timing. Returns ``Counter(sweeps=…)``."""
+    device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    measure.setup(0)
+    counts: Counter = Counter()
+    need = {
+        (j.dataset, j.dim, j.filter_kind, j.sweep, max(j.ks)): j
+        for j in jobs
+        if j.filter_kind != "none"
+    }
+    by_inputs: dict[tuple, list[Job]] = {}
+    for (ds, dim, *_), j in need.items():
+        by_inputs.setdefault((ds, dim), []).append(j)
+    for group in by_inputs.values():
+        inp = inputs.load_inputs(group[0].data, device, with_filters=True)
+        for j in group:
+            fk = "clause" if j.filter_kind == "clause" else "none"  # bloom builds its exact one
+            filters = inputs.build_filters(fk, inp, [j.backend], bloom=j.bloom)
+            sweep_oracle(j, inp, max(j.ks), device, filters, warn_missing=False)
+            counts["sweeps"] += 1
+        del inp
+        _release()
+    return counts
 
 
 def resolve_pool(params: dict, assets: dict) -> dict:
@@ -860,6 +895,7 @@ __all__ = [
     "ids_sha256",
     "is_sticky",
     "per_query_path",
+    "prebuild_oracles",
     "resolve_pool",
     "run",
     "write_per_query",

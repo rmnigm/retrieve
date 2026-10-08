@@ -477,6 +477,7 @@ bench run      --dataset D --suite S [--dim N]* [--algo A]* [--backend B]* [--fi
 bench campaign --suite filter|deep|codesign|…|all [--dataset D]* [--dim N]* [--mode M]*
                [--skip-quality] [--skip-perf] [--profile] [--interleave] [--out results] [--resume|--force]
                [--config-dir config] [--timeout 48.0]
+bench oracle   --dataset D --suite S [--dim N]* [--sweep W]* [--config-dir config]   # prebuild blobs
 bench check    --dataset D [--dim N]* [--config-dir config]   # eval_datasets.layout.validate_layout
 bench upload   [--repo-id user/repo] [--results DIR] [--path-in-repo PREFIX] [--gate STEP]
                [--private|--public] [--verify] [--dry-run]
@@ -534,6 +535,12 @@ killed process's spill — and deletes the whole directory after each
 dataset. A backend is the thing under test, so it gets
 the process: no dynamo cache, allocator arena or CUDA-graph pool outlives
 it, at the cost of a dataset reload and a CUDA context init per group.
+`bench oracle --dataset D --suite S` builds (or finds) the [oracle
+blob](#oracle-blob-v4) of every filter sweep the suite's jobs read, one per
+`(dim, sweep, k_max)`, in its own process, with no module and no timing
+(`run.prebuild_oracles`); it exits 1 when the narrows select no filter sweep.
+Run it before a campaign: `bench run` still builds a missing blob, but warns
+that it should have been prebuilt.
 `bench check --dataset D` runs `eval_datasets.layout.validate_layout` on
 the dataset's directory at every dim (files, prefix sidecars, the row
 alignments the readers enforce) and exits 1 on any problem — run it before
@@ -910,6 +917,21 @@ cached at `<gt_dir>/oracle_v4_<sweep>_<fingerprint[:16]>.pt`:
 | `n_items`, `n_queries`, `n_kept`, `k_gt`, `sweep`, `clauses` | shape of the build |
 | `fingerprint` | sha256 over shapes, dtypes and a 64-row linspace sample of `item_embs`, `queries`, `targets`, `qa_sweep`; the full bytes of `item_attrs` and `clause_is_reverse` (`oracle.attrs_digest`, computed once per `(dataset, dim)` in `inputs.load_inputs` as `inputs["attrs_digest"]`); plus `clauses` and `k_gt` |
 | `code_version`, `harness_commit`, `torch`, `created` | provenance |
+
+**Item-chunked** (`oracle.compute`): per batch of 64 kept queries the loop
+walks the items in chunks of `ITEM_CHUNK = 2_000_000` rows: `q @ chunk.T` in
+fp32 (the function raises unless TF32 is off and the matmul precision is
+`highest`, which `measure.setup` sets), `-inf` where the exact filter's
+`evaluate_mask(qa, start, end)` (a `[B, end − start]` bool over that item
+range) fails, a local `topk`, merged into the running `[B, k]` with ids
+offset by the chunk start; equal scores go to the lower id (a stable sort by
+id, then by score). `pass_counts` and `targets_in_filter` accumulate per
+chunk the same way, and `oracle.pass_counts` (the bloom counts) sums
+`evaluate_mask` over the same chunks. No `[B, N]` score or mask exists and
+`item_embs` is never transposed into a copy (the chunk's `.t()` is a view
+cuBLAS reads transposed). The blob version and fingerprint did not change:
+a blob built in one shot holds the same content up to exact-score ties
+(the one-shot `torch.topk` promised no order among them).
 
 The fingerprint is in the file name, so a stale blob is never read (a
 different dim off the same `data_dir`, regenerated attrs — even one
