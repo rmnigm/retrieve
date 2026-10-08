@@ -114,9 +114,14 @@ multi-GPU numbers are comparable at all.
 
 ### Campaign code_version and reruns
 
-Every campaign cell runs at the `campaign-v2` tag's code_version (the
-tree hash of `retrieve/src/retrieve`), recorded in
-*evaluation/campaign.yaml*: `408b1188d542634b3d18a2f5077bd23537a845fc` ([decisions](decisions.md#campaign-v2-user-2026-10-08)).
+Every new campaign cell runs at the `campaign-v2.1` tag's code_version
+(the tree hash of `retrieve/src/retrieve`), recorded in
+*evaluation/campaign.yaml*: `f01255f106214ec0f540352d0e2a5cd90b84b6a1`
+(V2-FIX-A and the V-GRAPH-IDS quantize fix over `campaign-v2`'s
+`408b1188`, [decisions](decisions.md#campaign-v2-user-2026-10-08)); its
+legs upload under `campaign-v2.1/<dataset>-<suite>`. Records at
+`408b1188` stay where they are and count only through manifest entries
+(MANIFEST-V21).
 New legs run into fresh result trees; old records are never re-stamped and
 enter the paper only through the reuse rule and the manifest. A
 correctness bug found mid-campaign stops every run; it is fixed and
@@ -170,26 +175,6 @@ co-design.
   loaded, interleaved, cores pinned. *Gate*: loaded medians within each
   arm's own repeat noise; otherwise timed steps run one GPU at a time.
   **0.5 GPU-h** on a ≥ 2-GPU pod.
-- [ ] **V2-FIX-A: grid-strided `fused_masked_knn_topk`** (user, 2026-10-08:
-  apply Fix A, [V2-PROF](artifacts/campaign-v2/v2-prof/README.md)). The
-  kernel's grid stops scaling with N: tiles past `counts[b]` store `-inf`
-  with no loads; scores bit-identical. V3's sparse path is profiled in the
-  same step and fixed the same way if it shares the full-N grid. *Gates*:
-  `torch.equal` ids and scores against tag `campaign-v2` on V2 (and V3 if
-  changed), the parity files and the library suite on a pod GPU, one graph
-  launch per call, interleaved before/after. Then tag `campaign-v2.1` and
-  move *evaluation/campaign.yaml*'s code_version; rerun the V2 (and changed
-  V3) Triton perf cells of V-PILOT and V-GR-FILTER, quality reused.
-  **≈ 2-3 GPU-h** incl. reruns, GPU 0.
-- [ ] **V-GRAPH-IDS: graph-mode `quantize_int8` rounds differently from
-  eager** (H2H-FINAL: arXiv bs 16, 4 of 80 entries). Mechanism found:
-  inductor lowers the fp32 divide to an approximate one, so a half-way
-  element takes a different int8 code and 0-3 ids swap across the k-th
-  cut. A correctness fix (eager-vs-graph ids are a bit-exact gate): the
-  smallest library change that makes graph equal eager, eager output
-  unchanged against `campaign-v2`, library suite on a pod GPU. Folded into
-  `campaign-v2.1` if gated before V2-FIX-A merges, else `campaign-v2.2`
-  before V-SEEDS. **≈ 0.5 GPU-h.**
 - [ ] **IVF-TUNE: `n_lists` and `n_probe` by dataset size** (user,
   2026-10-08, [decisions](decisions.md#campaign-v2-user-2026-10-08)).
   Fast and quality-only (user: tune first, full sweeps once): SilverTorch
@@ -211,12 +196,28 @@ co-design.
   `--interleave --profile`) once at `campaign-v2.1`: the 408b1188 run is
   stale (eager SilverTorch +30 µs from the quantize fix) and stays the
   record of the old code. The only T3 source. **≈ 1.5 GPU-h.**
+- [ ] **V-RERUN-V21: goodreads reruns at `campaign-v2.1`.** The perf of
+  V2 and V3 Triton on goodreads-synth `synth` (V-PILOT) and goodreads
+  `filter` (V-GR-FILTER), quality reused (both fixes bit-exact); and the
+  SilverTorch arms of both legs whole at IVF-TUNE's goodreads `n_lists`
+  4096 (n95 64). Uploads `campaign-v2.1/goodreads-synth-synth`,
+  `campaign-v2.1/goodreads-filter`. Needs IVF-TUNE merged. **≈ 2-3 GPU-h.**
+- [ ] **MANIFEST-V21: the manifest for two code_versions.** *campaign.yaml*'s
+  `default` is `campaign-v2.1`; add entries that keep the `408b1188`
+  records the tag did not touch (quality everywhere: both fixes are
+  bit-exact on eager outputs; perf of V1 and postfilter triton, and of
+  SilverTorch graph mode), and drop the perf half of the 12 arXiv
+  `72e5a90` reuse entries for V2 and V3 (their kernels changed). CPU only;
+  `bench report --manifest` over the fetched trees reports 0 wrongly
+  missing cells. Before D1-G.
 - [ ] **V-CODESIGN: `codesign` on arXiv and goodreads**, at `campaign-v2.1`
   (the 408b1188 run, 108/108, is stale: the quantize fix moves every
   SilverTorch eager time; Hub `artifacts/v-codesign-408b`), interleaved
   partial/full, `n_probe` {8, 32, 128}, 3 sweeps, 3 seeds; replaces D1-B2
   and D1-D. F4b, C5. **≈ 2 GPU-h**, GPU 0.
-- [ ] **D3: `bloomwidth`** on goodreads and PubMed (`c0_mesh`); arXiv done
+- [ ] **D3: `bloomwidth`**: goodreads (both legs), PubMed `bloomwidth-timed`,
+  arXiv `bloomwidth-timed` rerun, all timed legs at `campaign-v2.1`; arXiv and
+  PubMed `bloomwidth` (quality) done
   ([validation](validation.md), Hub `campaign-v2/arxiv-bloomwidth[-timed]`):
   both blooms, `m_bits` 64-2048 × `k_hash` {3, 5}, quality-only plus one
   timed point per width at bs 16. F4a, C4. **≈ 3-5 GPU-h**, GPU 1 (the
@@ -225,7 +226,7 @@ co-design.
   cluster-correlated variant (3 points) if the uniform sweep shows the IVF
   recall collapse at low p. F1/F2 3M panel. **≈ 15-45 GPU-h**
   (the pilot measured 8.7 GPU-h at 0.8 M), GPU 0. Its timed cells run at
-  `campaign-v2.1` (after V2-FIX-A), at IVF-TUNE's arXiv `n_lists`.
+  `campaign-v2.1`, at IVF-TUNE's arXiv `n_lists`.
 - [ ] **V-GR-DEEP: goodreads `deep`**, trimmed (`n_lists` {1024, 4096},
   `n_probe` {8, 16, 32, 64, 128}, V3 pool fractions); replaces D1-C.
   F3; goodreads' `n95`, then the goodreads `filter` n95 cells and the
@@ -279,8 +280,7 @@ co-design.
 | step | A100 GPU-h | GPU | basis |
 |---|---|---|---|
 | M1 | 0.5 | both | |
-| V2-FIX-A | ≈ 2-3 | 0 | gates ~0.5; reruns: goodreads-synth + goodreads filter V2 perf |
-| V-GRAPH-IDS | ≈ 0.5 | 0 | |
+| V-RERUN-V21 | ≈ 2-3 | 0 | goodreads-synth + goodreads filter (V2, V3, SilverTorch at n_lists 4096) |
 | IVF-TUNE | ≈ 0.5-1 | 0 | quality-only, seed 0, goodreads + PubMed |
 | H-PROFILE + H2H-FINAL | ≈ 1.5 | 0 | 1.18 GPU-h measured at 408b1188 |
 | V-CODESIGN | ≈ 1 | 0 | `d1/arxiv-codesign`: 60 cells in 0.4 h |
@@ -308,5 +308,5 @@ tag campaign-v2 ─────────────────────�
                                        ├─> V-CODESIGN, D3 ─────────────────────┤
                                        └─> V-PUBMED ───────────────────────────────────────┴─> D1-G ─> F2, F4, F5
 M1: before any timed step on a multi-GPU pod
-V2-FIX-A ─> tag campaign-v2.1, and IVF-TUNE: before every timed V-AX-SYNTH, V-YFCC, V-PUBMED, V-SEEDS cell
+tag campaign-v2.1 (done) and IVF-TUNE: before every timed V-AX-SYNTH, V-YFCC, V-PUBMED, V-SEEDS cell
 ```

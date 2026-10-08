@@ -814,7 +814,7 @@ Perf entry:
 | `cache_plans` | on every entry: `false` on `silvertorch`/`official` (`run.perf` replaces `module.official` with `cache_plans=False` before the first variant, so every timed forward pays the CPU expression parse), `null` on backends without a plan cache |
 | `load` | `"closed_loop"` |
 | `kernels` | `--profile`, eager only: top-8 CUDA kernels `{kernel, us, calls}` |
-| `ids_sha256` | sha256 of the ids the timed callee (the eager module or the graph replay) returns on the first 8 batches of that `(bs, seed)` pool (`run.IDS_PROBE_BATCHES`), int64 row-major, batch after batch, run once after the windows; `null` when the variant did not run. Equal eager and graph hashes are the D1-G identity gate |
+| `ids_sha256` | sha256 of the ids the timed callee (the eager module or the graph replay) returns on the first 8 batches of that `(bs, seed)` pool (`run.IDS_PROBE_BATCHES`), int64 row-major, batch after batch, run once after the windows; `null` when the variant did not run. Equal eager and graph hashes are the D1-G identity gate. Graph mode is inductor's code, not the eager ops replayed, so this gate catches arithmetic that inductor lowers differently. Records before library tree `5d158f20` differ in graph `quantize_int8` ([kernels](kernels.md#quantize_int8-retrieveindexing), [validation](../validation.md#campaign-v2-phase-v-not-yet-validated), *V-GRAPH-IDS*) |
 | `ids_sha256_canon` | the same ids with each row re-ordered by (score desc, id asc) before hashing: two backends with bit-equal scores whose tied ids come in another order hash equal (official int32 against Triton). `bench report`'s T3 identity column reads it; eager vs graph reads `ids_sha256`. An added field, schema stays 4 |
 | `reason` | present when the variant could not run (`not_capturable`, `cuda_unavailable`, `cudagraph_skips=N`, `cudaGraphLaunch per call = N, expected 1`); every stat key is then `null` |
 
@@ -1105,8 +1105,9 @@ violin figure is empty under `--manifest`. `hub` names the
 `pinkmeme/eval-results` subtree holding an entry's records (`{field}` = the
 cell's key field) for the planner's `bench fetch`; the report does not read
 it. Without `--manifest` the report takes the latest record per resume key,
-for scratch trees and smokes. The shipped manifest's `default` is the freeze gate's tree hash
-(`408b1188…`, the `code_version` of the `campaign-v2` tag); its 12 reuse
+for scratch trees and smokes. The shipped manifest's `default` is the `campaign-v2.1` tag's tree hash
+(`f01255f1…`, hub `campaign-v2.1/{dataset}-{suite}`; `campaign-v2` was
+`408b1188…`); its 12 reuse
 entries keep `d1/arxiv`'s `72e5a90` quality and perf for arXiv `filter`
 V1-V3 on `c0_maincat` / `all4`
 ([artifact](../artifacts/campaign-v2/README.md#reuse-entries)). A `match`
