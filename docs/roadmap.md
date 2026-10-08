@@ -193,6 +193,22 @@ co-design.
   `--interleave --profile`) once at `campaign-v2.1`: the 408b1188 run is
   stale (eager SilverTorch +30 µs from the quantize fix) and stays the
   record of the old code. The only T3 source. **≈ 1.5 GPU-h.**
+- [ ] **EXHIBITS: the exhibits and the checks, after every leg** (user,
+  2026-10-09: use the GPUs to catch bugs, compare, reproduce the main takes).
+  CPU: `bench fetch` every `campaign-v2/` and `campaign-v2.1/` leg, `bench
+  report` (latest record per key; mixed code_versions labelled), and build
+  T1 (claims table, verdict per C1-C7), T2, T3, F1, F2 (with the real-data
+  per-query selectivity overlay from the dumps), F3, F4a, F4b; plus the D1-G
+  checks on what exists (eager-vs-graph `ids_sha256`, bs 16 < 16 × bs 1,
+  recall sanity vs exact arms). Each run: an artifact page for the user and
+  a note naming new bugs, surprises and claim status. Pod 1, slot 2.
+- [ ] **V-AX-CORR: the cluster-correlated synth variant** (re-plan P1; its
+  trigger, the IVF recall collapse at low pass rate, shows on YFCC and
+  PubMed). Builder: `eval-data synth-filter --correlated` (coarse k-means
+  with round(1/p) centroids; item attribute = its cluster, a query's clause =
+  its nearest centroid), `arxiv-corr-synth.yaml`, CPU test (pass rate, query
+  side); then arXiv at p {0.01, 0.03, 0.1}, every synth arm. IVF's best case
+  next to the uniform worst case (F2). Pod c, slot 2. **≈ 3 GPU-h.**
 - [ ] **ST-DLOOP: SilverTorch Triton probe scorers at wide embeddings**
   (user, 2026-10-09: match Meta's CUDA kernels). D3 PubMed at v2.1 tripped
   the surprise gate: Triton 2.80-2.98 ms vs official 1.99 ms at d768 (bs 16),
@@ -211,9 +227,8 @@ co-design.
   both blooms, `m_bits` 64-2048 × `k_hash` {3, 5}, quality-only plus one
   timed point per width at bs 16. F4a, C4. **≈ 3-5 GPU-h**, GPU 1 (the
   timed points on GPU 0).
-- [ ] **V-AX-SYNTH: arXiv synth**, uniform 7 points, then the
-  cluster-correlated variant (3 points) if the uniform sweep shows the IVF
-  recall collapse at low p. F1/F2 3M panel. **≈ 15-45 GPU-h**
+- [ ] **V-AX-SYNTH: arXiv synth**, uniform 7 points (the correlated
+  variant is V-AX-CORR). F1/F2 3M panel. **≈ 15-45 GPU-h**
   (the pilot measured 8.7 GPU-h at 0.8 M), GPU 0. Its timed cells run at
   `campaign-v2.1`, at IVF-TUNE's arXiv `n_lists`.
 - [ ] **V-GR-DEEP: goodreads `deep`**, trimmed (`n_lists` {1024, 4096},
@@ -274,6 +289,8 @@ co-design.
 | step | A100 GPU-h | GPU | basis |
 |---|---|---|---|
 | M1 | 0.5 | both | |
+| EXHIBITS | 0 | CPU | after every leg |
+| V-AX-CORR | ≈ 3 | 0 | 3 points, arXiv |
 | ST-DLOOP | ≈ 1-2 | 0 | gates + before/after on pod b |
 | H-PROFILE + H2H-FINAL | ≈ 1.5 | 0 | 1.18 GPU-h measured at 408b1188 |
 | V-CODESIGN | ≈ 1 | 0 | `d1/arxiv-codesign`: 60 cells in 0.4 h |
