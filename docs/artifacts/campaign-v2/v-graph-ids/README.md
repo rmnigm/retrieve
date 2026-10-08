@@ -48,26 +48,42 @@ moves, but `ids_sha256` is a bit-exact gate, and D1-G compares it for every capt
 `quantize_int8` under compile (the `torch` reference op, the candidate re-rank path) have the
 same exposure; they were not run here.
 
-## Fix (proposed, not applied; the user decides)
+## Fix (applied on `dev/v-graph-ids`, library tree `5d158f20`; the controller ruled it a correctness fix)
 
-**Counterfactual, measured:** the same repro with `torch._inductor.config.emulate_divison_rounding
-= True` (inductor emits the correctly rounded `div_rn`, as eager) gives `torch.equal` ids **and**
-scores eager vs graph in all 4 cells, `q_codes` equal in every row (`repro-divrn/report.json`).
-Its latency cost was not measured.
+`quantize_int8` computes the code quotient as `(embs.double() / abs_max).float()`, in eager and
+compiled alike ([kernels](../../../system/kernels.md#quantize_int8-retrieveindexing)). A correctly rounded fp64
+quotient rounded to fp32 is the correctly rounded fp32 quotient (53 ≥ 2·24 + 2), and Triton's
+fp64 `/` is correctly rounded (`div_probe.py`: compiled fp64 0 of 1.28 M quotients differ from
+eager fp32, against 403,534 for compiled fp32). The scales stay `abs_max / 127.0`: eager evaluates a
+division by a Python scalar as a multiply by fp32(1/127), and inductor emits the same multiply.
+A first attempt (`fix-v1/` on the Hub) failed two ways, both measured: an
+`is_compiling()` branch is never taken, because inductor traces a `triton_op`'s implementation
+with make_fx, where the flag is false. Graph also kept the 36 diverging rows, and fp64 scales broke
+eager's reciprocal multiply (549 rows off by 1 ulp).
 
-Options, none applied:
+Gates (`fix_gates.py`, A100 GPU 0, library tree `5d158f20` clean, worktree library on `PYTHONPATH`):
 
-1. **Harness:** `measure.graph_callable` compiles with `emulate_divison_rounding = True`.
-   code_version unchanged. The graph number then times the correctly rounded division the eager
-   path runs (one per query element, inside an already-launched fused kernel: expected
-   negligible, unmeasured). It makes the gate hold for this mechanism without loosening it, but
-   it does not change what a library user gets under `torch.compile`.
-2. **Library:** quantize the query inside the Triton probe kernels (or a dedicated Triton
-   quantize op that both modes call), so eager and compiled run the same instructions. Changes
-   code_version and needs the Triton parity gates rerun.
-3. **Gate:** compare eager vs graph with a score tolerance or `ids_sha256_canon`. That loosens a
-   bit-exact gate (AGENTS.md rule 3), so it is only the user's to choose, and canon would not
-   have hidden this case anyway (the scores differ).
+| gate | result |
+|---|---|
+| 1. eager codes + scales vs 408b1188 (`OLD`, verbatim), all 10,000 arXiv d128 queries | `torch.equal` ✓; compiled new = eager too (0 code, 0 scale diffs); compiled old: 45 codes in 36 rows |
+| 2. graph == eager, ids and scores (`torch.equal`) | 4 H2H entries (seed 1, bs 16, 128 rows): new 0, old 1 row. All 10,000 queries in bs 16 chunks, `none`, clause `c0_maincat`, bloom `c0_maincat`, k 100 + 1000: new 0 rows, old 36 rows in every cell ✓ |
+| 3. library suite on the GPU | 779 passed (`retrieve.__file__` the worktree's) ✓ |
+| (c) latency new / old, interleaved, 10 rounds, clause `c0_maincat`, `n_probe` 24, k 100 | graph bs 1 0.997 [0.993, 1.004], bs 16 1.0007 [1.0006, 1.0009]; **eager bs 1 1.047 [1.044, 1.049], bs 16 1.047 [1.045, 1.052]** (0.615 → 0.644 ms, 0.622 → 0.654 ms: three more eager ops, ≈ 30 µs) |
+
+Clocks in (c): 1410 MHz in every window except eager bs 1, where both arms ran all 10 windows at
+1155 MHz (interleaved, so the ratio is paired); no window `unstable`.
+
+**What goes stale.** (a) The official backend calls our `quantize_int8` eagerly in its timed and
+scored path (`retrieve/src/retrieve/ops/official/adapter.py:294`, from `official_probe_score`,
+`modules/silvertorch.py:490`): its ids and scores are unchanged (gate 1), and its eager time
+gains the same ≈ 30 µs. (b) Quality runs eager (`evaluation/bench/run.py:283`, `module(q, qa)`), so
+recorded recall does not move. The one exception is the `filter` suite's `torch` + `compile: max-autotune`
+SilverTorch arm (`algos.compile_module`, `run.py:694`), whose quality goes through the compiled
+reference op and can move by these rows. Every SilverTorch eager time (Triton, torch, official)
+moves by ≈ +30 µs; graph times do not move.
+
+The eager cost could be removed with a branch that detects the make_fx trace (an internal
+proxy-mode check); not done, because it relies on private torch APIs. That choice is the controller's.
 
 ## Files
 
@@ -75,6 +91,8 @@ Options, none applied:
 |---|---|
 | [`repro.py`](repro.py) | builds the H2H-FINAL arXiv Triton cells as `bench run` does (seed, pool, k, bs), runs the first `IDS_PROBE_BATCHES` pool batches eager and through `measure.graph_callable`, dumps ids + scores, compares with `torch.equal`, isolates phase 1 and `quantize_int8` under the same compile mode; `--emulate-div` sets inductor's `emulate_divison_rounding` in-process |
 | [`element.py`](element.py) | the differing element, the inductor code of `quantize_int8`, and the causal check (eager module + compiled `quantize_int8` = graph) |
+| [`div_probe.py`](div_probe.py) | fp32, fp64, `true_divide` and a `tl.div_rn` Triton op, each compiled vs eager fp32 over every query, with the generated code |
+| [`fix_gates.py`](fix_gates.py) | gates 1, 2 and the interleaved latency (c) of the fix, old (`OLD` patched into `_host` at compile / per call) and new arms side by side |
 
 ```bash
 # from / so the config's relative data_dir resolves to /data/arxiv-papers
@@ -82,8 +100,12 @@ cd / && CUDA_VISIBLE_DEVICES=0 TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/v-graph
   taskset -c 64-127 /venvs/retrieve/bin/python $REPO/docs/artifacts/campaign-v2/v-graph-ids/repro.py /scratch/v-graph-ids/repro
 ... element.py /scratch/v-graph-ids/repro
 ... repro.py /scratch/v-graph-ids/repro-divrn --emulate-div
+# the fix: this worktree's library and harness ahead of the shared venv's
+cd / && flock /scratch/gpu0.lock env CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$WT/retrieve/src:$WT/evaluation \
+  taskset -c 64-127 /venvs/retrieve/bin/python $WT/docs/artifacts/campaign-v2/v-graph-ids/fix_gates.py /scratch/v-graph-ids/fix
 ```
 
-Raw outputs (the `.pt` dumps, `report.json`, `element.json`, logs, the inductor code and PTX):
-Hub `artifacts/v-graph-ids` ([hub-index](../../hub-index.md)). A100-SXM4-80GB GPU 0 on pod
-a100-x1-c, library tree `408b1188`, torch 2.10.0+cu128, triton 3.6.0, 2026-10-08.
+Raw outputs (the `.pt` dumps, `report.json`, `element.json`, `fix/fix_gates.json`, `fix-v1/`,
+`divprobe/`, logs, the pytest log, the inductor code and PTX): Hub `artifacts/v-graph-ids`
+([hub-index](../../hub-index.md)). A100-SXM4-80GB GPU 0 on pod a100-x1-c, torch 2.10.0+cu128,
+triton 3.6.0, 2026-10-08; the repro at library tree `408b1188`, the fix gates at `5d158f20`.
