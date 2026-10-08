@@ -212,9 +212,9 @@ def test_config_override_matches_default_full_and_indexed():
 
 @pytest.mark.parametrize("path", ["full", "indirect"])
 def test_empty_score_buffer_does_not_leak(monkeypatch, path):
-    """The score buffer is ``torch.empty`` — ``[B, N]`` on the full scan, ``[B,
-    _bucket_n(P)]`` on the indirect path, whose lanes past ``counts[b]`` and
-    past ``P`` must be written ``-inf``. Poisoned allocator, hit count, exact parity."""
+    """The score buffer is ``torch.empty`` — ``[B, N]`` on the full scan, ``[B, P]`` on the
+    indirect op, whose lanes past ``counts[b]`` must be written ``-inf``. Poisoned allocator,
+    hit count, exact parity."""
     n, d, p, k, b = 1024, 128, 100, 8, 4
     embs = make_index(n, d)
     query = make_query(b, d)
@@ -228,7 +228,7 @@ def test_empty_score_buffer_does_not_leak(monkeypatch, path):
         pos = torch.randint(0, n, (b, p), generator=g, device="cuda", dtype=torch.long)
         counts = torch.tensor([p, 50, 3, 0], dtype=torch.long, device="cuda")
         ref = _ref_indices(query_bits, item_bits, pos, counts, k)
-        hits = poison_empty(monkeypatch, (b, _bucket_n(p)))
+        hits = poison_empty(monkeypatch, (b, p))
         out = oporp_1bit_match_topk_indirect(query_bits, item_bits, k, pos, counts)
     assert hits, "the score buffer no longer comes from torch.empty — the poison never ran"
     assert not (out[1] == POISON).any(), "poison leaked into top-K: a slot went unwritten"
@@ -281,7 +281,7 @@ def test_row_alone_equals_row_in_batch_and_item_permutation():
     ],
 )
 def test_indirect_across_bucket_and_tile_cutoffs(p, regime):
-    """The indirect launch width comes from ``_N_BUCKETS`` and its tiles from
+    """The bucketed ``_impl``'s launch width comes from ``_N_BUCKETS`` and its tiles from
     ``DEFAULT_CONFIG.block_n``; both sides of each cutoff are exact against the oracle."""
     item_bits, query_bits = _oporp_data(n=8192)
     b, k = query_bits.shape[0], 32
@@ -293,8 +293,25 @@ def test_indirect_across_bucket_and_tile_cutoffs(p, regime):
     g = torch.Generator(device="cuda").manual_seed(p)
     pos = torch.randint(0, item_bits.shape[0], (b, p), generator=g, device="cuda")
     counts = torch.tensor([p, p - 1, p // 2, 1], dtype=torch.long, device="cuda")
-    out = oporp_1bit_match_topk_indirect(query_bits, item_bits, k, pos, counts)
+    out = _oporp_1bit_match_topk_impl(query_bits, item_bits, k, pos, counts)
     assert_topk_equal(*out, *_ref_indices(query_bits, item_bits, pos, counts, k))
+
+
+def test_grid_stride_is_invisible(monkeypatch):
+    """``programs=B`` gives the indirect path one program per row (G = 1), which strides over
+    every tile; the output is ``torch.equal`` to the default grid's and every slot of the
+    poisoned buffer is written, rows with count 0 and count P included."""
+    item_bits, query_bits = _oporp_data(n=16_384)
+    b, p, k = query_bits.shape[0], 12_000, 64
+    g = torch.Generator(device="cuda").manual_seed(3)
+    pos = torch.randint(0, item_bits.shape[0], (b, p), generator=g, device="cuda")
+    counts = torch.tensor([p, 0, 5_000, 1], dtype=torch.long, device="cuda")
+    want = _oporp_1bit_match_topk_impl(query_bits, item_bits, k, pos, counts)
+    hits = poison_empty(monkeypatch, (b, _bucket_n(p)))
+    cfg = Oporp1BitMatchTopkConfig(DEFAULT_CONFIG.block_n, DEFAULT_CONFIG.num_warps, programs=b)
+    ids, scores = _oporp_1bit_match_topk_impl(query_bits, item_bits, k, pos, counts, config=cfg)
+    assert hits
+    assert torch.equal(ids, want[0]) and torch.equal(scores, want[1])
 
 
 def test_degenerate_rows_give_exact_sentinels():
