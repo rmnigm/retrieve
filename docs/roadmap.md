@@ -118,23 +118,29 @@ multi-GPU numbers are comparable at all.
 
 ### Campaign code_version and reruns
 
-Every new campaign cell runs at the `campaign-v2.1` tag's code_version
-(the tree hash of `retrieve/src/retrieve`), recorded in
-*evaluation/campaign.yaml*: `f01255f106214ec0f540352d0e2a5cd90b84b6a1`
-(V2-FIX-A and the V-GRAPH-IDS quantize fix over `campaign-v2`'s
-`408b1188`, [decisions](decisions.md#campaign-v2-user-2026-10-08)); its
-legs upload under `campaign-v2.1/<dataset>-<suite>`. Records at
-`408b1188` stay where they are and count only through manifest entries
-(MANIFEST-V21).
-New legs run into fresh result trees; old records are never re-stamped and
-enter the paper only through the reuse rule and the manifest. A
-correctness bug found mid-campaign stops every run; it is fixed and
-re-tagged, only the arms its own gates prove changed are rerun, and the
-manifest's `log` says so. After each step: `bench upload --verify`, a
-[hub-index](artifacts/hub-index.md) row, the manifest and the validation
-row updated, `bench report` on the cumulative tree, and a look at the
-exhibit the step feeds; if that exhibit already settles its claim, the
-claim's remaining runs are skipped and the reason logged.
+**Exploration first, one clean pass last** (user, 2026-10-09,
+[decisions](decisions.md#campaign-v2-user-2026-10-08)). While the library
+is still improving, legs run at the current tag (now `campaign-v2.1`,
+code_version `f01255f106214ec0f540352d0e2a5cd90b84b6a1`, Hub
+`campaign-v2.1/<dataset>-<suite>`; `campaign-v2` was `408b1188`) to see how
+everything behaves and to make the charts. A new tag does not stop or
+invalidate anything: every record keeps its code_version, and a change adds
+rows to the **redo ledger** below only for the cells it actually changes.
+The final repro pass (F-REPRO) reruns the ledger, or the whole grid at the
+final tag, and D1-G gates it. After each leg: `bench upload --verify`, a
+[hub-index](artifacts/hub-index.md) row, the validation row, a look at the
+exhibit it feeds.
+
+**Redo ledger** (cells whose code or parameters changed after they ran):
+
+| records | changed by | redo |
+|---|---|---|
+| V2 + V3 Triton perf at `408b1188` (V-PILOT goodreads-synth, V-GR-FILTER) | V2-FIX-A (bit-exact; faster) | perf at the final tag, quality reused |
+| SilverTorch eager perf at `408b1188` (H2H-FINAL, V-CODESIGN goodreads, D3 goodreads timed n/a) | quantize fix (+≈30 µs eager, graph unchanged) | eager perf |
+| goodreads SilverTorch `filter` + `synth` at `n_lists` 1024 | IVF-TUNE (goodreads 4096 / n95 64) | whole SilverTorch arms |
+| arXiv `72e5a90` reuse entries, V2 / V3 perf half | V2-FIX-A | perf |
+| PubMed SilverTorch Triton perf (D3 PubMed timed at v2.1; V-PUBMED's Triton arms) | ST-DLOOP (scores bit-exact) | Triton perf |
+| graph-mode ids of SilverTorch records at `408b1188` | quantize fix | ids (D1-G's id gate) |
 
 ### Stop rules
 
@@ -197,26 +203,7 @@ co-design.
   `torch.equal` ids and scores at D 128 / 192 / 768 against `campaign-v2.1`,
   library suite on a pod GPU, interleaved before/after. Then tag
   `campaign-v2.2`; stale: PubMed SilverTorch Triton perf (D3 PubMed timed).
-  V-PUBMED waits for it. Pod b. **≈ 1-2 GPU-h** plus the code.
-- [ ] **V-RERUN-V21: goodreads reruns at `campaign-v2.1`.** The perf of
-  V2 and V3 Triton on goodreads-synth `synth` (V-PILOT) and goodreads
-  `filter` (V-GR-FILTER), quality reused (both fixes bit-exact); and the
-  SilverTorch arms of both legs whole at IVF-TUNE's goodreads `n_lists`
-  4096 (n95 64). Uploads `campaign-v2.1/goodreads-synth-synth`,
-  `campaign-v2.1/goodreads-filter`. Needs IVF-TUNE merged. **≈ 2-3 GPU-h.**
-- [ ] **MANIFEST-V21: the manifest for two code_versions.** *campaign.yaml*'s
-  `default` is `campaign-v2.1`; add entries that keep the `408b1188`
-  records the tag did not touch (quality everywhere: both fixes are
-  bit-exact on eager outputs; perf of V1 and postfilter triton, and of
-  SilverTorch graph mode), and drop the perf half of the 12 arXiv
-  `72e5a90` reuse entries for V2 and V3 (their kernels changed). CPU only;
-  `bench report --manifest` over the fetched trees reports 0 wrongly
-  missing cells. Before D1-G.
-- [ ] **V-CODESIGN: `codesign` on goodreads** (arXiv done at v2.1), at `campaign-v2.1`
-  (the 408b1188 run, 108/108, is stale: the quantize fix moves every
-  SilverTorch eager time; Hub `artifacts/v-codesign-408b`), interleaved
-  partial/full, `n_probe` {8, 32, 128}, 3 sweeps, 3 seeds; replaces D1-B2
-  and D1-D. F4b, C5. **≈ 2 GPU-h**, GPU 0.
+  Pod b, sharing the GPU with V-PUBMED. **≈ 1-2 GPU-h** plus the code.
 - [ ] **D3: `bloomwidth`**: PubMed `bloomwidth-timed` reruns at `campaign-v2.2`
   (its v2.1 run tripped the surprise gate, ST-DLOOP); goodreads and arXiv done
   (timed at v2.1), PubMed `bloomwidth` (quality) done
@@ -253,9 +240,14 @@ co-design.
   the embedding identity check on GPU 1 first (`eval-data pubmed
   encode_queries`, `bench check`, one V1 cell equal to `d1/pubmed`'s
   quality, or stop), the `n95` probe suite (quality-only), then the 3
-  kept sweeps, 3 seeds, every arm, at `campaign-v2.2` (after ST-DLOOP) and IVF-TUNE's values. T2's 768-d row.
+  kept sweeps, 3 seeds, every arm, now at `campaign-v2.1` and IVF-TUNE's values
+  (its SilverTorch Triton perf goes on the redo ledger for ST-DLOOP). T2's 768-d row.
   **≈ 14 GPU-h**, GPU 0.
-- [ ] **D1-G: gate reruns and the report.** Needs every step above.
+- [ ] **F-REPRO: the final pass.** When the library stops changing: tag the
+  final version, rerun the redo ledger (or the whole grid if the ledger is
+  most of it) at that tag into `campaign-final/`, write *campaign.yaml* for
+  one code_version. Then D1-G.
+- [ ] **D1-G: gate reruns and the report.** Needs F-REPRO.
   Eager-vs-graph id identity from the stored hashes, a byte-identical
   quality subset per leg (`--force` into a scratch tree),
   `median_ms(bs=16) < 16 × median_ms(bs=1)`, then `bench report
@@ -283,7 +275,6 @@ co-design.
 |---|---|---|---|
 | M1 | 0.5 | both | |
 | ST-DLOOP | ≈ 1-2 | 0 | gates + before/after on pod b |
-| V-RERUN-V21 | ≈ 2-3 | 0 | goodreads-synth + goodreads filter (V2, V3, SilverTorch at n_lists 4096) |
 | H-PROFILE + H2H-FINAL | ≈ 1.5 | 0 | 1.18 GPU-h measured at 408b1188 |
 | V-CODESIGN | ≈ 1 | 0 | `d1/arxiv-codesign`: 60 cells in 0.4 h |
 | D3 bloomwidth | ≈ 3-5 | 1 (+0) | quality-only cells |

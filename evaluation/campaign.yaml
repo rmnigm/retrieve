@@ -63,5 +63,5 @@ entries:
     perf: {code_version: 72e5a90c148435d070496ae59e8b4c26bb825d68, hub: d1/arxiv}
 
 log:
-  - {date: 2026-10-09, change: "tag campaign-v2.1 (library f01255f1): V2-FIX-A grid-strided fused_masked_knn_topk + OPORP indirect (bit-exact), V-GRAPH-IDS quantize_int8 fp64 quotient (eager codes unchanged, graph == eager); records at 408b1188 enter through entries (MANIFEST-V21)", rerun: ["filter, synth: linr_v2 + linr_v3 triton perf", "every SilverTorch (triton, official, torch) eager perf at 408b1188: h2h, codesign, bloomwidth-timed", "goodreads filter + synth silvertorch (IVF-TUNE n_lists 4096)"]}
+  - {date: 2026-10-09, change: "tag campaign-v2.1 (library f01255f1): V2-FIX-A grid-strided fused_masked_knn_topk + OPORP indirect (bit-exact), V-GRAPH-IDS quantize_int8 fp64 quotient (eager codes unchanged, graph == eager); records at 408b1188 keep their code_version; redo per the roadmap ledger", rerun: ["filter, synth: linr_v2 + linr_v3 triton perf", "every SilverTorch (triton, official, torch) eager perf at 408b1188: h2h, codesign, bloomwidth-timed", "goodreads filter + synth silvertorch (IVF-TUNE n_lists 4096)"]}
 #  - {date: 2026-10-20, change: "<what changed, commit>", rerun: ["<suite>/<dataset> <arms>"]}

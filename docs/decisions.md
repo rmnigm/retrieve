@@ -35,6 +35,13 @@ decisions.
 
 ## Campaign v2 (user, 2026-10-08)
 
+- **Exploration first, one final repro pass** (user, 2026-10-09): while the
+  library improves, legs run at the current tag to collect behaviour,
+  comparisons and charts; a library change does not stop or invalidate
+  runs. Records keep their code_version; the roadmap's redo ledger lists
+  only the cells a change actually moved; the final pass reruns them at the
+  final tag before D1-G.
+
 The campaign was re-planned backwards from the paper's claims (source: the
 user's re-plan, kept in the orchestrator's handoff notes; the claims are
 C1-C7, the exhibits T1-T3 and F1-F4). These rules govern every cell from
