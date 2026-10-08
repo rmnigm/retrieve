@@ -31,16 +31,6 @@ others (see [Multi-GPU execution](#multi-gpu-execution)).
 
 ## Needs the user
 
-- **Official vs Triton on goodreads (F2): rerun or relabel.** The
-  head-to-head's goodreads numbers are on the gSASRec embeddings; rerun
-  them on the E1c encoder (F2-R below), or keep them labelled as a
-  gSASRec-embedding measurement
-  ([validation](validation.md#encoder-switch-evals-to-redo)).
-- **Unstable clocks on the 1x A100 pod.** arxiv `codesign` (D1-B) has 58
-  of 60 cells `unstable` (sampled `sm_mhz` 1140-1410; clocks cannot be
-  locked), and the leg exists for a full-vs-partial `bloom_path` timing
-  comparison. Rerun it on a steadier pod before D1-G, or report it as
-  measured with the flag ([validation](validation.md#campaign-roadmap-d1-in-progress-not-yet-validated)).
 - **Citability of a narrowed campaign.** A run with a narrowed mode set is
   recorded `status: partial` and reported NOT CITABLE. The user decides
   once `bench report` runs on D1's real output (D1-G), not in the abstract.
@@ -190,7 +180,16 @@ only on a leg with no records yet.
   - [ ] **D1-D: goodreads `codesign`** (6 jobs). `campaign
     --suite codesign --dataset goodreads --resume --timeout 48`. Upload
     `d1/goodreads-codesign`. **≈ 2 GPU-h**, one stream.
-  - [ ] **D1-G: D1's report and gate.** Needs D1-C..F. `bench
+  - [ ] **D1-B2: arxiv `codesign` rerun on steady clocks** (user,
+    2026-10-08). D1-B's 60 cells are at `c0e42d1` but 58 are `unstable`
+    (sampled `sm_mhz` 1140-1410), and the leg exists for the full-vs-partial
+    `bloom_path` timing. Rerun the same 60 cells with `--force` into a
+    fresh tree, on a pod whose sampled clocks hold (first check a few
+    cells' `unstable` flag); if no steadier pod comes, rerun on this one
+    when the queue is otherwise idle and keep whichever leg has fewer
+    `unstable` cells, saying so. Upload `d1/arxiv-codesign-r2`. **≈ 0.5
+    GPU-h**, one stream.
+  - [ ] **D1-G: D1's report and gate.** Needs D1-B2..F. `bench
     report` over every leg (goodreads rows from the E1c records only;
     pubmed's `silvertorch`/triton and `linr_v3` from `c0e42d1` only); the
     cross-scale filter comparison across algorithms (`recall_oracle`,
@@ -243,8 +242,7 @@ only on a leg with no records yet.
 - [ ] **F2: finish the official-vs-reimplementation section** with D1's
   numbers: confidence intervals, paired tests and a second seed, p95 and
   p99. The section ([paper](paper/official-vs-reimplementation.md))
-  marks each line that waits on D1. Needs D1 and the user's goodreads
-  decision. **F2-R** (if the user chooses rerun): the goodreads
+  marks each line that waits on D1. Needs D1 and F2-R. **F2-R** (user, 2026-10-08: rerun; runnable now, needs only the E1c checkpoints): the goodreads
   head-to-head on the E1c embeddings, b3 methodology
   ([h2h.py](artifacts/kernel-opt/h2h.py)), **≈ 2 GPU-h**, one stream (the
   arms interleave in one process).
@@ -269,7 +267,7 @@ only on a leg with no records yet.
 | E5 openalex `filter` | ≈ 25-35 (+ 3 encode) | 4 |
 | D5-run postfilter baseline | ≈ 5-8 | by dataset |
 | D3 (after its code) | ≈ 3 | by dataset |
-| F2-R (if chosen) | ≈ 2 | 1 |
+| F2-R | ≈ 2 | 1 |
 
 L6 is a short library-suite run. Runnable now: everything in D1 but D1-G, D5-run (and E5's
 restage). The total is ≈ 85-120 GPU-h, of which D1 is ≈ 47-69.
@@ -277,7 +275,7 @@ restage). The total is ≈ 85-120 GPU-h, of which D1 is ≈ 47-69.
 ## Dependencies
 
 ```
-D1-E, D1-F, D1-C, D1-D ───────────┬─> D1-G ─┬─> D3 ──────────┐
+D1-B2, D1-E, D1-F, D1-C, D1-D ────┬─> D1-G ─┬─> D3 ──────────┐
                                             ├─> F2 (+ F2-R)  ├─> F5
                                             ├─> F4           │
                                             └─> E5 ──────────┤
