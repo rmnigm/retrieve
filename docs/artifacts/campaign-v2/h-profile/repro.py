@@ -57,7 +57,8 @@ def one(fn):
     return ka, [e.name() for e in dev], lag, skew
 
 
-print(torch.__version__, __import__("triton").__version__, torch.cuda.get_device_name())
+print(torch.__version__, __import__("triton").__version__, torch.cuda.get_device_name(), measure.__file__,
+      __import__("retrieve").__file__, measure.code_version())
 T0 = time.perf_counter()
 with torch.inference_mode():
     for s in range(sessions):
