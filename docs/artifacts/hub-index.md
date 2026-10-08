@@ -45,6 +45,7 @@ re-upload of a subtree replaces its row.
 | `artifacts/linr-v2-backend-parity` | V2 parity probes | 4 | 37,287 | `7066509248e9b21d3a6cc085c9c7d6673621ae616155c4e67883cfbfda4694ac` |
 | `artifacts/official-silvertorch` | B3 kernel-only dumps, official facts, WP3 parity probes | 5 | 775,632 | `1d8d880391ce9d181d7e67c606838eb4fd2846f9e2c48da0f819937ceccb8b95` |
 | `artifacts/campaign-v2` | campaign-v2 record inventory (roadmap P-INV, [README](campaign-v2/README.md)): `inventory.csv` (1,579 records of every subtree above, one row per perf entry), `pivot.csv`, `pass_rates.csv`, `wall_time.csv`, `reuse.csv`; planning numbers, not citable | 5 | 9,430,224 | `8848b9f9fe72dd62e7ef04f1c89c1c0a0be46eeadee42568551c96ed7a507c66` |
+| `artifacts/campaign-v2-reuse` | campaign-v2 manifest reuse (Phase P, [README](campaign-v2/README.md#reuse-entries)): `cells.csv` (2,343 v2 cells: reusable quality / perf record per cell and why not), `groups.csv` (per manifest match group), `entries.yaml` (the 12 entries in `evaluation/campaign.yaml`), `claims.csv` (arms per claims selector); planning output, not citable | 4 | 319,311 | `6f21cb6046532c3fcca0c1a1c39007db69cf89733703885899d8a85b8b622473` |
 
 The `d1-a` and `artifacts/*` subtrees were published by
 [H1](h1-results-storage/README.md) on 2026-09-26; their file counts and bytes

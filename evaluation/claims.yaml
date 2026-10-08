@@ -66,12 +66,12 @@ claims:
     original: "FPR ~0.067% at 1024 bits; 291-523x faster than an inverted index"
     source: "SilverTorch, arXiv 2511.14881, section: planner"
     ours:
-      - label: "bloom FPR, Goodreads c0_genre, m_bits 1024, k_hash 5 (official)"
+      - label: "bloom FPR, Goodreads c0_genre, m_bits 1024, k_hash 5 (triton; official has no m_bits)"
         metric: field:bloom_fp_rate
-        where: {dataset: goodreads, suite: bloomwidth, sweep: c0_genre, algo: silvertorch, backend: official, params: {m_bits: 1024, k_hash: 5}}
-      - label: "bloom FPR, PubMed c0_mesh, m_bits 1024, k_hash 5 (official)"
+        where: {dataset: goodreads, suite: bloomwidth, sweep: c0_genre, algo: silvertorch, backend: triton, params: {m_bits: 1024, k_hash: 5}}
+      - label: "bloom FPR, PubMed c0_mesh, m_bits 1024, k_hash 5 (triton; official has no m_bits)"
         metric: field:bloom_fp_rate
-        where: {dataset: pubmed, suite: bloomwidth, sweep: c0_mesh, algo: silvertorch, backend: official, params: {m_bits: 1024, k_hash: 5}}
+        where: {dataset: pubmed, suite: bloomwidth, sweep: c0_mesh, algo: silvertorch, backend: triton, params: {m_bits: 1024, k_hash: 5}}
     verdict: null
 
   - id: C5

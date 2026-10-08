@@ -80,3 +80,35 @@ on the spilling `D_PAD = 1024` tile. The arXiv `codesign` records pass the clock
 cells but C5 is a ratio claim, which the plan times interleaved: V-CODESIGN reruns it. The 16
 PubMed SilverTorch-Triton cells of the halted D1-E rerun are local to the development pod, not on
 the Hub, and are not counted.
+
+## Reuse entries
+
+[`reuse/reuse.py`](reuse/reuse.py) expands today's v2 grid with the harness's own `load_matrix`
+(2,343 cells over every suite in `evaluation/config/suites.yaml`), matches every fetched record to
+its cell by key block, and judges it by the reuse rule: inputs (E1c goodreads, license-fixed
+arXiv subtrees; PubMed held for V-PUBMED's embedding identity check), the arm's evidence (the
+per-arm table in the script: golden gates and the library diff `72e5a90..408b1188` read per code
+path), and for perf the clock clause against the 1410 MHz device max over the v2-grid windows
+(ratio suites `synth` / `codesign` / `h2h`: interleaved only). It runs from `evaluation/` (it
+imports `bench`); outputs are on the Hub as `artifacts/campaign-v2-reuse`
+([hub-index](../hub-index.md)).
+
+```bash
+cd evaluation && uv run python ../docs/artifacts/campaign-v2/reuse/reuse.py /scratch/cv2-inventory /scratch/p-reuse-out
+```
+
+A manifest `match` names dataset, suite, algo, backend, filter kind and sweep, never `params` or
+`seed`, so an entry is written only where reusable records cover **every** v2 cell under it and no
+record off the v2 grid (a dropped sweep or `n_probe` 32) sits under it. That gives 12 entries,
+36 cells, quality and perf:
+
+| what | cells |
+|---|---|
+| v2 cells | 2,343 |
+| a quality-reusable record exists | 241 (arXiv `deep` 162, `filter` 56, `codesign` 18, YFCC 4, goodreads 1) |
+| a perf-reusable record exists | 100 (arXiv `deep` 51, `filter` 45, YFCC 4) |
+| reused through `campaign.yaml` | 36: arXiv `filter` V1 / V2 / V3 triton, clause and bloom, `c0_maincat` and `all4`, seeds 0-2 |
+
+The 36 perf-reused cells took 10,345 s at D1's 18-variant grid (≈ 1.4 GPU-h at the v2 grid's 8
+variants). `bench report --manifest evaluation/campaign.yaml` over the fetched `d1/*` subtrees
+selects those 36 records; every other old cell reads "missing".
