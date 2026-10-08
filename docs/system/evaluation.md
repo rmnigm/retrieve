@@ -233,7 +233,7 @@ which exist for `buffers()`, `.k`, `torch.compile` and because their
 | [`oracle.py`](../../evaluation/bench/oracle.py) | the exact filtered oracle as blob v4, `attrs_digest`, `pass_counts`, `pass_rate`, `bloom_fp_rate` |
 | [`run.py`](../../evaluation/bench/run.py) | `run(jobs, out_dir=...)` — the cell loop; `MODES`, `QUALITY_CHUNK = 16`, `EXACT_ALGOS`, `PER_K_QUALITY`, `PERF_STAT_KEYS`, `CLOCK_DRIFT` |
 | [`cli.py`](../../evaluation/bench/cli.py) | `bench run` / `campaign` / `check` / `upload` / `fetch` / `report` / `env` |
-| [`report.py`](../../evaluation/bench/report.py) | `bench report`: `results.parquet`, the thesis and paper tables as LaTeX, the figures, the methodology paragraph and `report.md`; the `ARTIFACTS` dispatch table, the citability verdict and the `PAPER_REPORTED` constants. See [Report](#report-reportpy) |
+| [`report.py`](../../evaluation/bench/report.py) | `bench report`: `results.parquet`, the paper tables as LaTeX, the figures, the methodology paragraph and `report.md`; the `ARTIFACTS` dispatch table and the citability verdict. See [Report](#report-reportpy) |
 | [`upload.py`](../../evaluation/bench/upload.py) | `bench upload`: publish a results tree (records, samples, a freshly aggregated `results.parquet`) to the HF results repo with a `MANIFEST.json` (provenance + a sha256 per file) and a generated README; `bench fetch`: one subtree back, checked against its manifest. See [Results storage](#results-storage) |
 
 ### Algorithms and the `PATHS` table
@@ -471,9 +471,8 @@ bench check    --dataset D [--dim N]* [--config-dir config]   # eval_datasets.la
 bench upload   [--repo-id user/repo] [--results DIR] [--path-in-repo PREFIX] [--gate STEP]
                [--private|--public] [--verify] [--dry-run]
 bench fetch    --path-in-repo PREFIX [--repo-id user/repo] [--results DIR]
-bench report   [results] [--out DIR] [--gate STEP] [--only NAME]* [--dim 128] [--k 100]
-               [--bs 1] [--compare-bs 16] [--mode eager|graph] [--backend triton]
-               [--sweep W] [--batch-dataset D] [--budget-ms MS]*
+bench report   [results] [--out DIR] [--gate STEP] [--manifest FILE] [--only NAME]*
+               [--dim 128] [--k 100] [--bs 1] [--mode eager|graph] [--backend triton]
 bench env                                                     # provenance | clocks, as JSON
 ```
 
@@ -832,17 +831,21 @@ identities named; report each encoder from its own tree.
 
 | artifact (`--only` name) | file | what it is |
 |---|---|---|
-| `recall_nofilter` | `tables/tab-recall_nofilter.tex` | held-out Recall@k on `filter_kind: none` cells, datasets × algos (`tab:recall_nofilter`) |
-| `pareto` | `tables/tab-pareto_<dataset>.tex` | condition × algo: oracle recall, `median_ms`, speedup vs LiNR V1, `index_mib` (`tab:pareto_<dataset>`) |
-| `batch_scaling` | `tables/tab-batch_scaling.tex` | amortised ms/query per algo × batch size, each cell carrying its window spread (`tab:batch_scaling`) |
+| `pareto` | `tables/tab-pareto_<dataset>.tex` | sweep × arm (one row per parameter set): oracle recall, `median_ms`, speedup vs LiNR V1, `index_mib` (`tab:pareto_<dataset>`) |
 | `memory` | `tables/tab-memory.tex` | `index_mib`, datasets × algos (`tab:memory`) |
 | `parity` | `tables/tab-backend_parity.tex` | per `(dataset, sweep, algo, backend)`: `path`, `jaccard_vs_first@k`, `score_max_abs_diff`, eager vs graph median and their ratio |
-| `recall_at_budget` | `tables/tab-recall_at_budget.tex` | best recall reachable under each `--budget-ms` p99 budget, with the algo that reached it |
-| `paper_comparison` | `tables/tab-paper_comparison.tex` | our `--compare-bs` eager mean / p99 / QPS / pass rate beside the numbers SilverTorch and LiNR report, with the differences of [protocol step 7](#measurement-protocol) as footnotes. The published rows are the `PAPER_REPORTED` constant, cited per row |
-| `fig_pareto`, `fig_qps_recall`, `fig_batch_scaling` | `figures/*.png` | recall vs latency, QPS vs recall, amortised latency vs batch (error bars = window spread) |
+| `matched` | `tables/tab-matched_recall.tex`, `matched_recall.json` | per recall curve (SilverTorch along `n_probe`, one curve per `n_lists` / filter kind / backend / suite; V3 along `candidate_pool` or `candidate_pool_frac`) and batch size: latency at `recall_oracle@k` 0.90 and 0.95 with the two bracketing points named, or why not; `n95` per SilverTorch curve, the smallest measured `n_probe` with recall ≥ 0.95 — the value the campaign writes into `suites.yaml` (`tab:matched_recall`) |
+| `t1` | `tables/tab-t1_claims.tex` | T1, the claims table: per claim C1–C7 of [`evaluation/claims.yaml`](../../evaluation/claims.yaml) the original number and source, "ours" from the yaml's record selectors, the hand-written verdict (`---` while `null`) |
+| `t2` | `tables/tab-t2_<dataset>.tex` | T2, real filters (`filter` suite, goodreads / arxiv / yfcc10m / pubmed): per sweep, every arm at the operating point (SilverTorch `n_probe` 24) and SilverTorch at matched recall 0.95, recall@100 and p50 at bs 1 and 16 |
+| `t3` | `tables/tab-t3.tex` | T3, official vs Triton (`h2h` suite): per cell, `k`, `bs`, arm and mode: p50 with CI, the paired ratio over Triton eager, kernel-only µs and launches (top-8 kernels of the `--profile` call), `index_mib`, `peak_fwd_mib`, `ids_sha256` identity with Triton eager, jaccard, max score difference |
+| `f1` | `figures/fig-f1-latency-vs-pass-rate.png` | F1: p50 vs pass rate on the `*-synth` datasets (log x), one panel per scale × bs; V1, V2, V3 per pool, postfilter per alpha, SilverTorch Triton at matched recall 0.95 |
+| `f2` | `figures/fig-f2-recall-vs-pass-rate.png` | F2: `recall_oracle@100` vs pass rate; synth SilverTorch per measured `n_probe` and V3 per pool, the real `filter` sweeps overlaid as per-query pass-rate buckets from the sidecars |
+| `f3` | `figures/fig-f3-pareto.png` | F3: the `deep` suite's recall–latency curves (matched-recall curves), one panel per dataset × bs, 0.90 / 0.95 marked |
+| `f4a` | `figures/fig-f4a-bloomwidth.png`, `tables/tab-f4a_bloomwidth.tex` | F4a (`bloomwidth*` suites): `bloom_fp_rate` and `index_mib` vs `m_bits` per dataset / backend / `k_hash`; the table adds `filter_mib`, recall and the bs-16 timed point |
+| `f4b` | `figures/fig-f4b-codesign.png`, `tables/tab-f4b_codesign.tex` | F4b (`codesign` suite): partial vs full bloom path latency vs `n_probe` and the paired full / partial ratio with its CI |
 | `fig_deep_sweep` | `figures/fig-deep-sweep-*.png` | one per swept parameter: recall and latency against its value, whiskers = min–max across seeds |
 | `fig_latency_violin` | `figures/fig-latency-violin.png` | per-call distributions from the samples sidecar (`<name>.samples.jsonl`, one torn trailing line tolerated) |
-| `methodology` | `methodology.tex` | the thesis's §"Методология замеров" itemize, its constants read live out of `measure.latency`, `inputs.query_pool` and `run` so text and code cannot drift |
+| `methodology` | `methodology.tex` | the measurement-methodology itemize, its constants read live out of `measure.latency`, `inputs.query_pool` and `run` so text and code cannot drift |
 | — | `report.md` | provenance, citability verdict, the selection used, a coverage table, the failed cells with their stage and error, the partial records, the unstable variants with their spread, the artifact list |
 
 **Citability (CLAUDE.md rule 2).** Nothing is citable by default. `--gate
@@ -875,21 +878,107 @@ normalisation is applied, and the idle `env.sm_mhz_idle` (or a schema-1
 never compared with an under-load one, because an idle sample reads low
 and makes matched latencies look like regressions.
 
-**Selection.** One set of options narrows every artifact: `--dim`, `--k`,
-`--bs` (`--compare-bs` for the paper table), `--mode`, `--backend`,
-`--sweep`, `--budget-ms`. Where a table's shape allows only one value per
-cell and the records hold several parameter sets, the smallest by
-canonical-JSON order is shown and a caption footnote names all of them;
-several seeds are reduced to their median (min–max whiskers in the
-figures). A `null` value (a held-out side with no scored row) is skipped,
-not averaged in as a miss. `tab:batch_scaling` needs one dataset: `--batch-dataset`, else
-the best-covered one, named in the caption. A selection that matches
-nothing emits the table with a `--- no matching cells ---` row rather than
-failing.
+**Selection.** One set of options narrows the grid artifacts: `--dim`,
+`--k`, `--bs`, `--mode`, `--backend`. Where a table's shape allows only one
+value per cell and the records hold several parameter sets (`tab:memory`),
+the smallest by canonical-JSON order is shown and a caption footnote names
+all of them; several seeds are reduced to their median (min–max whiskers in
+the figures). A `null` value (a held-out side with no scored row) is
+skipped, not averaged in as a miss. A selection that matches nothing emits
+the table with a `--- no matching cells ---` row rather than failing.
+
+**Language.** Every label, caption and note is English with a decimal
+point; the thesis's Russian artifacts (decimal comma) stay in git history
+and the delivered thesis, and are not regenerated.
+
+### Statistics
+
+[`bench/stats.py`](../../evaluation/bench/stats.py) — its own module because
+it is pure numpy with known-answer tests (`tests/bench/test_stats.py`) and
+no record, LaTeX or plotting in it. Every resample uses `B = 10 000` draws
+from one fixed generator seed (`stats.SEED`), so regenerating a report from
+the same records prints the same intervals.
+
+| quantity | point estimate | 95 % CI (percentile bootstrap) |
+|---|---|---|
+| latency of one arm at one `(bs, k, mode)` | median of the per-window medians (`perf[].window_medians_ms`) pooled over seed × window | resampling seed × window units |
+| `recall_oracle@k` of one arm | mean over queries of the per-query recall from the [sidecar](#output-one-jsonl-record-per-cell) (`per_query`), averaged first across the arm's distinct sidecars (its seeds, when quality depends on the seed; a quality-cache copy points at its source's sidecar) | resampling queries. A schema ≤ 3 record has no sidecar: the median across seeds, no CI |
+| A over B, interleaved (every common seed ran both in one `interleave.group`) | median of the per-round ratios window *i* of A / window *i* of B | resampling seed × round |
+| A over B, otherwise | median(A) / median(B) | each side resampled independently; marked $^{u}$ |
+
+A ratio whose CI contains 1.0 prints "no difference" (the plan's noise
+gate); no repeat is added to force significance. `_attach` joins each
+`results.parquet` row to its nested record and perf entry, because the
+windows, the sidecar path and the interleave block are record fields, not
+parquet columns. The per-sweep table, the parity table and the deep-sweep
+figures already use these estimators.
+
+**Matched recall.** `stats.at_recall` interpolates latency at a target
+recall on one curve: piecewise-linear between the two adjacent measured
+points that bracket the target on the recall-sorted curve, the measured
+point itself on an exact hit, never extrapolated ("not reached" past the
+last point; "first point already above" before the first). The curve's
+latencies are taken in `graph`, the headline mode, or in `eager` where no
+`graph` entry ran (official); the mode used is printed (`_timed`).
+
+**Labels and the alpha rule.** `ALGO_LABEL` names every algo a table may
+show; a record of an algo without a label (a retired `linr_v4` leg) reaches
+no table. The per-sweep tables show one row per parameter set, labelled with
+it (`_arm`): `postfilter ($\alpha$=1)` is the baseline's headline row and
+`$\alpha$=8` its strong variant, and no number is ever averaged across
+`alpha` or any other parameter. The postfilter is torch by definition
+([The postfilter baseline](#the-postfilter-baseline)), so `--backend`
+selects it whatever its value (`FIXED_BACKEND`).
+
+### Campaign manifest
+
+[`evaluation/campaign.yaml`](../../evaluation/campaign.yaml) says which
+records the paper reads. `bench report <fetched tree> --manifest
+evaluation/campaign.yaml` groups the tree's records by cell (the key block)
+and, per cell, takes the quality fields (`quality`, `per_query`,
+`pass_rate`, `bloom_fp_rate`, the oracle / held-out counts) from the record
+at the entry's `quality.code_version` and everything else from the record
+at its `perf.code_version` — the reuse rule keeps an old record's quality
+while its timing is rerun; such a merged record carries `quality_source:
+{seed, code_version}`. The entry is the most specific `entries[].match`
+(dataset, suite, algo, backend, optionally filter_kind and sweep; two
+equally specific matches fail), else `default`. A cell with no entry is
+excluded; one with no record at an accepted code_version is missing its
+quality or its perf; neither is ever filled from another code_version.
+`report.md` lists all three groups and the manifest's `log` (date, change,
+arms rerun). The merged records are written to `<out>/selected/` and
+`results.parquet` is aggregated from there, so the shipped table is
+exactly what the exhibits read; the provenance verdict judges every
+accepted source record (a reused quality record from a branch still vetoes
+`--gate`). The samples sidecar has no `code_version` to select by, so the
+violin figure is empty under `--manifest`. `hub` names the
+`pinkmeme/eval-results` subtree holding an entry's records (`{field}` = the
+cell's key field) for the planner's `bench fetch`; the report does not read
+it. Without `--manifest` the report takes the latest record per resume key,
+for scratch trees and smokes. The shipped manifest has only `default`
+(`campaign-v2`, a placeholder the freeze replaces with the tree hash) and
+no reuse entries.
+
+### Paper exhibits
+
+Each exhibit is an `ARTIFACTS` function, so `--only t2` regenerates one.
+They select by suite and dataset, not by `--dim` / `--bs` / `--mode`:
+every dataset at its own width, `k` 100, bs 1 and 16, latency in `graph`
+(the headline mode) or in `eager` where the arm has no `graph` entry
+(official; marked $^{e}$). SilverTorch's operating point is
+`n_probe` 24; "matched" is `stats.at_recall` on that arm's curve. F2 draws
+SilverTorch at each measured `n_probe` (24, `n95`, 4×`n95`), not "at
+matched recall", which would be a flat line at the target. The real-sweep
+buckets of F2 are half-decade bins of `pass_count / n_items` holding ≥ 20
+queries. T1's `claims.yaml` selects with any parquet column plus a
+`params` subset (`null` = absent) and must hit one arm (else the report
+fails naming them); `metric` is `latency`, `recall`, `matched:<target>` or
+`field:<column>`, and `vs` makes it a ratio. The report never writes a
+verdict.
 
 **Not compiled.** No TeX toolchain is installed on this box, so the
 fragments are checked structurally (`tests/bench/test_report.py`:
-balanced environments, balanced braces and math, the thesis's labels
+balanced environments, balanced braces and math, the labels
 present, no unescaped `_` outside math, `\texttt` and `\label`), never
 compiled.
 
@@ -1066,7 +1155,8 @@ trailing-whitespace hooks (the last two never on `articles/`, `docs/artifacts/`,
 | `bench/test_run.py` | end to end on the tiny fixture, both modes (`graph` = the CPU null entry): record schema, resume, `code_version` invalidation, `partial`, a failed cell + continue, a sticky CUDA error, the quality gate, the parity spill (and a same-backend spill rewritten), reachable-target masking, the plan cache off through `OfficialConfig`, `modes` stamped per job (an eager-only uncapturable record `ok`, a capturable one `partial`), `postfilter`'s `recall_oracle` per `k` (equal to a pass at that `k`, never above the exact V1's) |
 | `bench/test_cli.py` | `bench run` via `CliRunner`, `--checkpoint` landing as the record's `inputs` (encoder faked), a real one-child `bench campaign` ending in `results.parquet`, a faked timed-out child, a restart mid-group keeping its parity spill (in-process children), zero cells → exit 1, `bench report` over the campaign's own records, `bench env`'s JSON keys |
 | `bench/test_upload.py` | `bench upload` with no network: `_logs/` and `_parity/` never listed, the manifest's sha256 per file, evidence beating `--gate` four ways, the generated README over several subtrees, `verify` catching a changed byte, the commit's operations (with the regenerated `results.parquet`) and `private=True`; `bench fetch` restoring a tree resume reads and refusing to overwrite a different local copy |
-| `bench/test_report.py` | every column the tables read still comes out of `records.aggregate`; every artifact emitted; the LaTeX structurally balanced with the thesis's labels and no unescaped `_`; a `failed` record excluded and a `partial` / `unstable` one marked; citability off by default and evidence beating `--gate`; two `inputs` under one `(dataset, dim)` refused; an empty tree; a schema-1 record |
+| `bench/test_report.py` | every column the tables read still comes out of `records.aggregate`; every artifact emitted; the LaTeX structurally balanced with its labels and no unescaped `_`; one row per postfilter alpha; an unlabelled algo (`linr_v4`) in no table; a `failed` record excluded and a `partial` / `unstable` one marked; citability off by default and evidence beating `--gate`; two `inputs` under one `(dataset, dim)` refused; an empty tree; a schema-1 record; paired speedups from interleaved arms and recall CIs from sidecars |
+| `bench/test_stats.py` | G-stats: a constant's CI is a point; A = 2B pairs to 2.0 with a CI excluding 1; identical arms are no difference; interpolation exact on a linear curve, never extrapolated |
 | `bench/test_c4_gate.py` | the golden-comparison gate script, [`c4_gate.py`](../artifacts/evaluation-harness-v2/c4_gate.py), against synthesised schema-1 records |
 | `eval_datasets/test_layout.py` | the legacy pad-row rule, `apply_users_limit`, `validate_layout` clean on both layouts and flagging a short `eval_split`, a missing or swapped prefix sidecar, misaligned attrs |
 | `eval_datasets/test_synth_filter.py` | G-synth: achieved pass rate within 1 % of target wherever `N·p ≥ 10^4` (N = 2 M), pass sets nested, same seed byte-identical, `query_attrs_synth` all ones at the full-split row count, the real attrs' bytes and `attrs_digest` untouched (modern and legacy layouts), the CLI resolving `data_dir` from the dataset YAML |

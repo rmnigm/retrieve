@@ -1,0 +1,23 @@
+# The campaign manifest: which records each paper exhibit reads (docs/system/evaluation.md
+# § Campaign manifest). `bench report --manifest evaluation/campaign.yaml --root <fetched tree>`
+# takes, per cell, quality from the record at `quality.code_version` and perf from the record
+# at `perf.code_version`; a cell with no entry, or no record at an accepted code_version, is
+# reported as missing and never filled from another code_version.
+#
+# `default` applies to every cell no entry matches. An entry's `match` names dataset, suite,
+# algo and backend, optionally filter_kind and sweep; the most specific match wins. `hub` is the
+# pinkmeme/eval-results subtree that holds those records ({field} = the cell's key field).
+# Reuse entries (an old record's quality kept while its timing is rerun) are added by the
+# planner from the record inventory; `log` records every mid-campaign change.
+
+default:
+  quality: {code_version: campaign-v2, hub: "campaign-v2/{dataset}-{suite}"}  # the freeze fills the hash
+  perf: {code_version: campaign-v2, hub: "campaign-v2/{dataset}-{suite}"}
+
+entries: []
+#  - match: {dataset: arxiv, suite: filter, algo: linr_v2, backend: triton, sweep: c0_maincat}
+#    quality: {code_version: <tree hash>, hub: d1/arxiv}
+#    perf: {code_version: campaign-v2, hub: "campaign-v2/{dataset}-{suite}"}
+
+log: []
+#  - {date: 2026-10-20, change: "<what changed, commit>", rerun: ["<suite>/<dataset> <arms>"]}
