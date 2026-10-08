@@ -4,6 +4,8 @@
 # $R/_logs with clock blocks). Each stops the driver on a non-zero rc. Launch under the GPU 0 lock:
 #   setsid nohup flock -n /scratch/gpu0.lock bash <driver> > /scratch/v21/<leg>/driver.log 2>&1 &
 set -u
+# a free lock means this driver was not launched under it (another holder would have made flock -n fail)
+if flock -n /scratch/gpu0.lock true; then echo "$(date -Is) not launched under /scratch/gpu0.lock, refusing"; exit 3; fi
 TAG=${TAG:-campaign-v2.1}
 REPO=/workspace/retrieve
 PY=/venvs/retrieve/bin/python
