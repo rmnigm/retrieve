@@ -181,8 +181,11 @@ co-design.
   triton clause, median sweep, seed 0, bs 16, k 100, `n_lists` ×
   `n_probe` doubling to past recall 0.95; pick by items scanned, no timed
   cells; records are artifacts, not paper numbers. Two datasets only: **goodreads**
-  ({1024, 4096}) and **PubMed** ({4096, 16384}; its n_lists-1024 `n95`
-  leg reached 0.748 at 128). Output: the size rule, and the `n_lists` /
+  ({1024, 4096}; done: 4096 / 64) and **PubMed** ({4096, 16384}, capped at
+  25 % scanned). Lands in two parts: **A** (`n_lists` for all four
+  datasets and their synth twins, goodreads' n95) unblocks every leg that
+  sweeps `n_probe` itself; **B** adds the n95 of PubMed and of arXiv and
+  YFCC (a quick capped `n_probe` check at their one `n_lists`). Output: the size rule, and the `n_lists` /
   n95 values written into the `filter` and `synth` slots of all four
   datasets (arXiv and YFCC by the rule). Replaces the `n95` suite. If
   goodreads' choice is not 1024, its SilverTorch `filter` and `synth`
