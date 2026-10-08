@@ -1105,8 +1105,9 @@ violin figure is empty under `--manifest`. `hub` names the
 `pinkmeme/eval-results` subtree holding an entry's records (`{field}` = the
 cell's key field) for the planner's `bench fetch`; the report does not read
 it. Without `--manifest` the report takes the latest record per resume key,
-for scratch trees and smokes. The shipped manifest's `default` is the freeze gate's tree hash
-(`408b1188…`, the `code_version` of the `campaign-v2` tag); its 12 reuse
+for scratch trees and smokes. The shipped manifest's `default` is the `campaign-v2.1` tag's tree hash
+(`f01255f1…`, hub `campaign-v2.1/{dataset}-{suite}`; `campaign-v2` was
+`408b1188…`); its 12 reuse
 entries keep `d1/arxiv`'s `72e5a90` quality and perf for arXiv `filter`
 V1-V3 on `c0_maincat` / `all4`
 ([artifact](../artifacts/campaign-v2/README.md#reuse-entries)). A `match`

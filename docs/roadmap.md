@@ -114,9 +114,14 @@ multi-GPU numbers are comparable at all.
 
 ### Campaign code_version and reruns
 
-Every campaign cell runs at the `campaign-v2` tag's code_version (the
-tree hash of `retrieve/src/retrieve`), recorded in
-*evaluation/campaign.yaml*: `408b1188d542634b3d18a2f5077bd23537a845fc` ([decisions](decisions.md#campaign-v2-user-2026-10-08)).
+Every new campaign cell runs at the `campaign-v2.1` tag's code_version
+(the tree hash of `retrieve/src/retrieve`), recorded in
+*evaluation/campaign.yaml*: `f01255f106214ec0f540352d0e2a5cd90b84b6a1`
+(V2-FIX-A and the V-GRAPH-IDS quantize fix over `campaign-v2`'s
+`408b1188`, [decisions](decisions.md#campaign-v2-user-2026-10-08)); its
+legs upload under `campaign-v2.1/<dataset>-<suite>`. Records at
+`408b1188` stay where they are and count only through manifest entries
+(MANIFEST-V21).
 New legs run into fresh result trees; old records are never re-stamped and
 enter the paper only through the reuse rule and the manifest. A
 correctness bug found mid-campaign stops every run; it is fixed and
@@ -211,6 +216,14 @@ co-design.
   `--interleave --profile`) once at `campaign-v2.1`: the 408b1188 run is
   stale (eager SilverTorch +30 µs from the quantize fix) and stays the
   record of the old code. The only T3 source. **≈ 1.5 GPU-h.**
+- [ ] **MANIFEST-V21: the manifest for two code_versions.** *campaign.yaml*'s
+  `default` is `campaign-v2.1`; add entries that keep the `408b1188`
+  records the tag did not touch (quality everywhere: both fixes are
+  bit-exact on eager outputs; perf of V1 and postfilter triton, and of
+  SilverTorch graph mode), and drop the perf half of the 12 arXiv
+  `72e5a90` reuse entries for V2 and V3 (their kernels changed). CPU only;
+  `bench report --manifest` over the fetched trees reports 0 wrongly
+  missing cells. Before D1-G.
 - [ ] **V-CODESIGN: `codesign` on arXiv and goodreads**, at `campaign-v2.1`
   (the 408b1188 run, 108/108, is stale: the quantize fix moves every
   SilverTorch eager time; Hub `artifacts/v-codesign-408b`), interleaved
