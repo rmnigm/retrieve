@@ -39,8 +39,17 @@ def median_ci(x: Sequence[float]) -> tuple[float, float, float] | None:
 
 
 def mean_ci(x: Sequence[float]) -> tuple[float, float, float] | None:
-    """Mean over units (per-query recall) and its CI."""
-    return _ci(x, np.mean)
+    """Mean over units (per-query recall) and its CI. A resample's mean depends only on how
+    often it draws each distinct value, so the counts are drawn as one multinomial over the
+    distinct values: the same bootstrap distribution in O(B x distinct) rather than O(B x n)
+    (per-query recall@k takes few distinct values)."""
+    a = np.asarray(x, dtype=np.float64)
+    if a.size == 0:
+        return None
+    vals, cnt = np.unique(a, return_counts=True)
+    draws = np.random.default_rng(SEED).multinomial(a.size, cnt / a.size, size=B)
+    lo, hi = np.percentile(draws @ vals / a.size, [50 * (1 - LEVEL), 50 * (1 + LEVEL)])
+    return float(a.mean()), float(lo), float(hi)
 
 
 def paired_ratio_ci(a: Sequence[float], b: Sequence[float]) -> tuple[float, float, float] | None:

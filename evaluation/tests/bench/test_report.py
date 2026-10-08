@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import zlib
 
 import click
 import numpy as np
@@ -95,7 +96,7 @@ def _rec(
     }  # fmt: skip
 
 
-def _with_sidecar(root, rec, recall):
+def _with_sidecar(root, rec, recall, ks=(100,), pass_count=None):
     """Write the schema-4 per-query sidecar of ``rec`` (the record contract) and point at it."""
     rel = (
         f"{rec['suite']}/{rec['dataset']}-d{rec['dim']}.perquery/"
@@ -106,12 +107,13 @@ def _with_sidecar(root, rec, recall):
     np.savez_compressed(
         root / rel,
         rows=np.arange(n, dtype=np.int32),
-        pass_count=np.full(n, 1000, dtype=np.int64),
-        **{"recall_oracle@100": np.asarray(recall, dtype=np.float32)},
-        **{"heldout_recall@100": np.full(n, np.nan, dtype=np.float32)},
+        pass_count=np.full(n, 1000, dtype=np.int64) if pass_count is None else pass_count,
+        **{f"recall_oracle@{k}": np.asarray(recall, dtype=np.float32) for k in ks},
+        **{f"heldout_recall@{k}": np.full(n, np.nan, dtype=np.float32) for k in ks},
     )
     rec["per_query"] = rel
-    rec["quality"]["oracle"]["recall@100"] = float(np.nanmean(recall))
+    for k in ks:
+        rec["quality"]["oracle"][f"recall@{k}"] = float(np.nanmean(recall))
     return rec
 
 
@@ -401,3 +403,570 @@ def test_matched_recall_interpolates_names_its_bracket_and_emits_n95(tmp_path):
     assert v3["at_0.90"] == {"latency": None, "reason": "not reached", "mode": "graph"}
     tex = (tmp_path / "out" / "tables" / "tab-matched_recall.tex").read_text()
     assert "(n\\_probe=32 .. n\\_probe=64)" in tex and "not reached" in tex
+
+
+# ----- G-report: a schema-4 campaign tree, every arm of every suite (the record contract) ---
+
+N_ITEMS = {"goodreads": 797_084, "arxiv": 2_984_617, "yfcc10m": 9_998_311, "pubmed": 10_000_000}
+DIM = {"goodreads": 128, "arxiv": 128, "yfcc10m": 192, "pubmed": 768}
+DETERMINISTIC = ("linr_v1_filter_mask", "linr_v2", "postfilter")
+
+
+def _rec4(
+    root,
+    dataset,
+    suite,
+    algo,
+    backend,
+    *,
+    sweep,
+    fk="clause",
+    params=None,
+    seed=0,
+    ms=1.0,
+    recall=0.9,
+    pass_rate=0.1,
+    ks=(100,),
+    bss=(1, 16),
+    perf=True,
+    interleave=None,
+    kernels=None,
+    ids="a",
+    fp_rate=None,
+    source=None,
+    status="ok",
+):
+    """One schema-4 record. ``source``: the seed-0 record a quality-cache copy points at."""
+    base = dataset.removesuffix("-synth")
+    rec = _rec(
+        dataset,
+        algo,
+        backend,
+        filter_kind=fk,
+        sweep=sweep,
+        params=params,
+        seed=seed,
+        recall=recall,
+        status=status,
+    )
+    eager_only = backend == "official"
+    windows = (1.0, 1.04, 0.97)
+    entries = []
+    for k in ks:
+        for bs in bss:
+            for mode in ("eager", "graph"):
+                t = ms * (1 + 0.05 * bs) * (1 + 0.01 * seed)
+                e = _perf(k, bs, mode, t, False, windows)
+                e |= {"ids_sha256": ids, "rounds": 3}
+                if mode == "graph" and eager_only:
+                    e = {"k": k, "bs": bs, "mode": mode, "reason": "not_capturable"}
+                    e |= dict.fromkeys(("median_ms", "window_medians_ms", "ids_sha256"))
+                if kernels and mode == "eager":
+                    e["kernels"] = kernels
+                entries.append(e)
+    rec |= {
+        "schema_version": 4,
+        "suite": suite,
+        "dim": DIM[base],
+        "n_items": N_ITEMS[base],
+        "inputs": f"inputs-{base}-d{DIM[base]}",
+        "pass_rate": pass_rate,
+        "ks": list(ks),
+        "k_max": max(ks),
+        "batch_sizes": list(bss),
+        "perf": entries if perf and status != "failed" else None,
+        "seed_scope": "pool" if algo in DETERMINISTIC else "pool+build",
+        "quality_source": None,
+        "interleave": interleave,
+        "bloom_fp_rate": fp_rate,
+        "filter_mib": 0.0 if backend != "triton" else 1.5,
+        "partial_reasons": ["skip_perf"] if status == "partial" else None,
+    }
+    rec["env"] = {**ENV, "frac_windows_below_max": 0.02}
+    for k in ks:
+        rec["quality"]["oracle"][f"recall@{k}"] = recall
+    if source is not None:
+        rec["quality_source"] = {"seed": source["seed"], "code_version": ENV["code_version"]}
+        rec["per_query"] = source["per_query"]
+        rec["quality"] = source["quality"]
+    elif status != "failed":
+        rng = np.random.default_rng(zlib.crc32(records.record_key(rec).encode()))
+        hits = (np.arange(200) < round(recall * 200)).astype(np.float32)
+        rec = _with_sidecar(root, rec, hits, ks=ks, pass_count=rng.integers(1, 10**6, 200))
+    p = root / suite / f"{dataset}-d{rec['dim']}.jsonl"
+    records.append_record(p, rec)
+    return rec
+
+
+def _group(name, arms, position):
+    return {"group": name, "arms": arms, "position": position}
+
+
+def _campaign_tree(root):
+    seeds = (0, 1)
+
+    def det(dataset, suite, algo, backend, **kw):
+        """A deterministic arm: seed 0 computes quality, seed 1 copies it (quality cache)."""
+        first = _rec4(root, dataset, suite, algo, backend, seed=0, **kw)
+        _rec4(root, dataset, suite, algo, backend, seed=1, source=first, **kw)
+
+    # filter: four datasets, the headline arms
+    for ds, sw in (
+        ("goodreads", "c0_genre"),
+        ("arxiv", "c0_maincat"),
+        ("yfcc10m", "tags_and"),
+        ("pubmed", "c0_mesh"),
+    ):
+        g = _group(f"{ds}-v1v2", ["linr_v1_filter_mask", "linr_v2"], 0)
+        det(
+            ds,
+            "filter",
+            "linr_v1_filter_mask",
+            "triton",
+            sweep=sw,
+            recall=1.0,
+            ms=1.2,
+            interleave=g,
+        )
+        det(
+            ds,
+            "filter",
+            "linr_v2",
+            "triton",
+            sweep=sw,
+            recall=1.0,
+            ms=0.6,
+            interleave={**g, "position": 1},
+        )
+        for alpha, recall in ((1, 0.7), (8, 0.97)):
+            det(
+                ds,
+                "filter",
+                "postfilter",
+                "torch",
+                sweep=sw,
+                params={"alpha": alpha},
+                recall=recall,
+                ms=2.0,
+            )
+        for s in seeds:
+            _rec4(
+                root,
+                ds,
+                "filter",
+                "linr_v3",
+                "triton",
+                sweep=sw,
+                seed=s,
+                recall=0.8,
+                params={"candidate_pool": 5000},
+                ms=0.9,
+            )
+            for n_probe, recall, ms in ((24, 0.90, 0.3), (64, 0.97, 0.5)):
+                _rec4(
+                    root,
+                    ds,
+                    "filter",
+                    "silvertorch",
+                    "triton",
+                    sweep=sw,
+                    seed=s,
+                    params={"n_probe": n_probe},
+                    recall=recall,
+                    ms=ms,
+                )
+                for be in ("triton", "official"):
+                    _rec4(
+                        root,
+                        ds,
+                        "filter",
+                        "silvertorch",
+                        be,
+                        sweep=sw,
+                        fk="bloom",
+                        seed=s,
+                        params={"n_probe": n_probe},
+                        recall=recall - 0.01,
+                        ms=ms * 1.1,
+                    )
+            _rec4(
+                root,
+                ds,
+                "filter",
+                "silvertorch",
+                "torch",
+                sweep=sw,
+                seed=s,
+                params={"n_probe": 24},
+                recall=0.90,
+                ms=3.0,
+            )
+            _rec4(
+                root,
+                ds,
+                "filter",
+                "silvertorch",
+                "torch",
+                sweep=sw,
+                seed=s,
+                params={"n_probe": 24, "compile": "max-autotune"},
+                recall=0.90,
+                ms=2.0,
+            )
+
+    # deep: arxiv, SilverTorch along n_probe per n_lists, V3 along the pool fraction
+    for s in seeds:
+        for n_lists in (1664, 8192):
+            for n_probe, recall, ms in (
+                (8, 0.80, 0.2),
+                (16, 0.90, 0.3),
+                (32, 0.94, 0.4),
+                (64, 0.97, 0.6),
+            ):
+                for fk, be in (("clause", "triton"), ("bloom", "triton"), ("bloom", "official")):
+                    _rec4(
+                        root,
+                        "arxiv",
+                        "deep",
+                        "silvertorch",
+                        be,
+                        sweep="c0_maincat",
+                        fk=fk,
+                        seed=s,
+                        params={"n_lists": n_lists, "n_probe": n_probe},
+                        recall=recall,
+                        ms=ms,
+                    )
+        for frac, recall in ((0.01, 0.85), (0.05, 0.96)):
+            _rec4(
+                root,
+                "arxiv",
+                "deep",
+                "linr_v3",
+                "triton",
+                sweep="c0_maincat",
+                seed=s,
+                params={"candidate_pool_frac": frac},
+                recall=recall,
+                ms=0.5 + frac,
+            )
+
+    # synth: two scales, pass rates 0.001 / 0.1 / 1.0
+    for ds in ("goodreads-synth", "arxiv-synth"):
+        for sw, p in (("p0001", 0.001), ("p01", 0.1), ("p1", 1.0)):
+            g = _group(f"{ds}-{sw}-v1v2", ["linr_v1_filter_mask", "linr_v2"], 0)
+            det(
+                ds,
+                "synth",
+                "linr_v1_filter_mask",
+                "triton",
+                sweep=sw,
+                pass_rate=p,
+                recall=1.0,
+                ms=1.0 + p,
+                interleave=g,
+            )
+            det(
+                ds,
+                "synth",
+                "linr_v2",
+                "triton",
+                sweep=sw,
+                pass_rate=p,
+                recall=1.0,
+                ms=0.2 + 2 * p,
+                interleave={**g, "position": 1},
+            )
+            for alpha in (1, 8):
+                det(
+                    ds,
+                    "synth",
+                    "postfilter",
+                    "torch",
+                    sweep=sw,
+                    pass_rate=p,
+                    params={"alpha": alpha},
+                    recall=min(1.0, p * alpha + 0.05),
+                    ms=2.0,
+                )
+            if sw != "p0001":
+                for algo in ("linr_v1_filter_mask", "linr_v2"):
+                    det(ds, "synth", algo, "torch", sweep=sw, pass_rate=p, recall=1.0, ms=9.0)
+                    det(
+                        ds,
+                        "synth",
+                        algo,
+                        "torch",
+                        sweep=sw,
+                        pass_rate=p,
+                        recall=1.0,
+                        ms=6.0,
+                        params={"compile": "max-autotune"},
+                    )
+            for s in seeds:
+                for frac in (0.01, 0.05):
+                    _rec4(
+                        root,
+                        ds,
+                        "synth",
+                        "linr_v3",
+                        "triton",
+                        sweep=sw,
+                        seed=s,
+                        pass_rate=p,
+                        params={"candidate_pool_frac": frac},
+                        recall=0.6 + 4 * frac,
+                        ms=0.8,
+                    )
+                for n_probe, gain in ((24, 0.0), (96, 0.06), (384, 0.1)):
+                    _rec4(
+                        root,
+                        ds,
+                        "synth",
+                        "silvertorch",
+                        "triton",
+                        sweep=sw,
+                        seed=s,
+                        pass_rate=p,
+                        params={"n_probe": n_probe},
+                        recall=min(1.0, 0.88 + gain),
+                        ms=0.2 + n_probe / 400,
+                    )
+                for be in ("triton", "official"):
+                    _rec4(
+                        root,
+                        ds,
+                        "synth",
+                        "silvertorch",
+                        be,
+                        sweep=sw,
+                        fk="bloom",
+                        seed=s,
+                        pass_rate=p,
+                        params={"n_probe": 96},
+                        recall=0.94,
+                        ms=0.5,
+                    )
+
+    # codesign: arxiv, official bloom, partial vs full interleaved, full 1.5x slower
+    for s in seeds:
+        for n_probe in (8, 32, 128):
+            g = f"codesign-{s}-{n_probe}"
+            for pos, (path, ms) in enumerate((("partial", 1.0), ("full", 1.5))):
+                _rec4(
+                    root,
+                    "arxiv",
+                    "codesign",
+                    "silvertorch",
+                    "official",
+                    sweep="c0_maincat",
+                    fk="bloom",
+                    seed=s,
+                    params={"bloom_path": path, "n_lists": 1664, "n_probe": n_probe},
+                    ms=ms * (1 + n_probe / 128),
+                    interleave=_group(g, ["partial", "full"], pos),
+                )
+
+    # bloomwidth: quality only; bloomwidth-timed: one timed point per width at bs 16
+    for ds, sw in (("goodreads", "c0_genre"), ("pubmed", "c0_mesh")):
+        for be in ("triton", "official"):
+            for m_bits in (64, 1024):
+                for k_hash in (3, 5):
+                    _rec4(
+                        root,
+                        ds,
+                        "bloomwidth",
+                        "silvertorch",
+                        be,
+                        sweep=sw,
+                        fk="bloom",
+                        params={"n_probe": 24, "m_bits": m_bits, "k_hash": k_hash},
+                        perf=False,
+                        fp_rate=0.0 if m_bits == 1024 else 0.02 / k_hash,
+                    )
+                _rec4(
+                    root,
+                    ds,
+                    "bloomwidth-timed",
+                    "silvertorch",
+                    be,
+                    sweep=sw,
+                    fk="bloom",
+                    params={"n_probe": 24, "m_bits": m_bits, "k_hash": 5},
+                    bss=(16,),
+                    fp_rate=0.0,
+                    ms=0.5,
+                )
+
+    # h2h: goodreads bloom, triton vs official fp16 / int32, interleaved, profiled
+    arms = ["silvertorch/triton", "silvertorch/official/fp16", "silvertorch/official/int32"]
+    kern = [
+        {"kernel": "scorer", "us": 40.0, "calls": 1},
+        {"kernel": "topk", "us": 10.0, "calls": 2},
+    ]
+    for s in seeds:
+        g = f"h2h-goodreads-{s}"
+        for pos, (be, params, ms, ids) in enumerate(
+            (
+                ("triton", {"n_probe": 24}, 0.4, "x"),
+                ("official", {"n_probe": 24, "score_path": "fp16"}, 0.6, "y"),
+                ("official", {"n_probe": 24, "score_path": "int32"}, 0.8, "x"),
+            )
+        ):
+            _rec4(
+                root,
+                "goodreads",
+                "h2h",
+                "silvertorch",
+                be,
+                sweep="c0_genre",
+                fk="bloom",
+                seed=s,
+                params=params,
+                ms=ms,
+                ks=(100, 1000),
+                kernels=kern,
+                ids=ids,
+                interleave=_group(g, arms, pos),
+            )
+
+    # n95: pubmed, quality only
+    for n_probe, recall in ((8, 0.7), (32, 0.93), (128, 0.96)):
+        _rec4(
+            root,
+            "pubmed",
+            "n95",
+            "silvertorch",
+            "triton",
+            sweep="all5",
+            params={"n_probe": n_probe},
+            recall=recall,
+            ks=(100, 1000),
+            perf=False,
+        )
+
+    # one failed and one partial record
+    _rec4(
+        root,
+        "arxiv",
+        "filter",
+        "linr_v3",
+        "triton",
+        sweep="c0_maincat",
+        seed=2,
+        params={"candidate_pool": 5000},
+        status="failed",
+    )
+    _rec4(
+        root,
+        "goodreads",
+        "filter",
+        "linr_v3",
+        "triton",
+        sweep="c0_genre",
+        seed=2,
+        params={"candidate_pool": 5000},
+        status="partial",
+        perf=False,
+    )
+    return root
+
+
+@pytest.fixture(scope="module")
+def campaign(tmp_path_factory):
+    root = _campaign_tree(tmp_path_factory.mktemp("campaign") / "results")
+    out = root.parent / "out"
+    return root, out, _generate(root, out)
+
+
+def test_every_paper_exhibit_is_produced_from_a_schema_4_campaign_tree(campaign):
+    """G-report: every exhibit from every arm of every suite, with the NOT CITABLE marker."""
+    _, out, c = campaign
+    names = {p.relative_to(out).as_posix() for p in c.written}
+    assert {
+        "tables/tab-t1_claims.tex",
+        "tables/tab-t3.tex",
+        "tables/tab-matched_recall.tex",
+        "tables/tab-f4a_bloomwidth.tex",
+        "tables/tab-f4b_codesign.tex",
+        "figures/fig-f1-latency-vs-pass-rate.png",
+        "figures/fig-f2-recall-vs-pass-rate.png",
+        "figures/fig-f3-pareto.png",
+        "figures/fig-f4a-bloomwidth.png",
+        "figures/fig-f4b-codesign.png",
+        "matched_recall.json",
+        *(f"tables/tab-t2_{d}.tex" for d in ("goodreads", "arxiv", "yfcc10m", "pubmed")),
+    } <= names
+    assert c.prov["status"] == {"failed": 1, "ok": c.prov["n_records"] - 2, "partial": 1}
+    for p in c.written:
+        if p.suffix == ".tex":
+            text = p.read_text()
+            assert "NOT CITABLE" in text, p
+            assert "\\caption" not in text or "[NOT CITABLE: gate not green; 1 failed;" in text, p
+
+
+def test_t1_fills_ours_from_the_selectors_and_never_a_verdict(campaign):
+    _, out, _ = campaign
+    t1 = (out / "tables" / "tab-t1_claims.tex").read_text()
+    c1 = next(ln for ln in t1.splitlines() if ln.strip().startswith("C1 &"))
+    # V2 / V1 interleaved at p=0.1, B=1: (0.2 + 0.2) / (1.0 + 0.1) in every round, paired
+    assert f"${0.4 / 1.1:.2f}\\times\\,[{0.4 / 1.1:.2f}, {0.4 / 1.1:.2f}]$" in c1
+    assert "^{u}" not in c1
+    c7 = next(ln for ln in t1.splitlines() if ln.strip().startswith("C7 &"))
+    assert "official fp16 / triton latency" in c7 and "$1.50\\times" in c7
+    for ln in t1.splitlines():
+        if re.match(r"\s*C\d &", ln):
+            assert ln.rstrip().endswith("& --- \\\\"), "a verdict was generated"
+
+
+def test_t2_has_both_operating_points_and_the_alpha_rows(campaign):
+    _, out, _ = campaign
+    t2 = (out / "tables" / "tab-t2_goodreads.tex").read_text()
+    for arm in (
+        "postfilter ($\\alpha$=1)",
+        "postfilter ($\\alpha$=8)",
+        "SilverTorch (n\\_probe=24) [official]",
+        "SilverTorch (compile=max-autotune, n\\_probe=24) [torch]",
+    ):
+        assert arm in t2, arm
+    assert "SilverTorch (n\\_probe=64)" not in t2  # only the operating point as a fixed row
+    matched = next(ln for ln in t2.splitlines() if "[triton] @ 0.95" in ln)
+    assert "matched" in matched and "(n\\_probe=24 .. n\\_probe=64)" in matched
+    official = next(ln for ln in t2.splitlines() if "[official]" in ln and "@" not in ln)
+    assert "$^{e}$" in official  # eager-only, marked
+
+
+def test_t3_pairs_the_interleaved_arms_and_checks_id_identity(campaign):
+    _, out, _ = campaign
+    t3 = (out / "tables" / "tab-t3.tex").read_text()
+    rows = [ln for ln in t3.splitlines() if "[official]" in ln and "eager" in ln]
+    int32 = next(ln for ln in rows if "int32" in ln)
+    fp16 = next(ln for ln in rows if "fp16" in ln)
+    assert "$2.00\\times\\,[2.00, 2.00]$" in int32 and "& $=$ &" in int32  # 0.8 / 0.4 per round
+    assert "$1.50\\times\\,[1.50, 1.50]$" in fp16 and "& $\\neq$ &" in fp16
+    assert "& $50.0$ & $3$ &" in int32  # kernel-only us and launches over the top-8 kernels
+
+
+def test_f4_tables_carry_fpr_memory_and_the_paired_codesign_ratio(campaign):
+    _, out, _ = campaign
+    f4a = (out / "tables" / "tab-f4a_bloomwidth.tex").read_text()
+    assert "$6.67{\\times}10^{-3}$" in f4a  # 0.02 / k_hash 3 at 64 bits
+    assert "& $1.50$ &" in f4a  # filter_mib of the triton module
+    f4b = (out / "tables" / "tab-f4b_codesign.tex").read_text()
+    ratios = re.findall(r"\$1\.50\\times\\,\[1\.50, 1\.50\]\$", f4b)
+    assert len(ratios) == 2 * 3, "full / partial paired at every (bs, n_probe)"
+
+
+def test_f2_overlays_real_sweeps_as_per_query_buckets(campaign):
+    root, _, c = campaign
+    rows = report._sel(
+        c.rows,
+        dataset="arxiv",
+        suite="filter",
+        algo="silvertorch",
+        filter_kind="clause",
+        backend="triton",
+    )
+    buckets = report._buckets(c, report._with(rows, n_probe=24), 100)
+    assert buckets and sum(n for _, _, n in buckets) <= 2 * 200
+    assert all(0.0 <= y <= 1.0 and 1e-6 < x <= 1.0 for x, y, _ in buckets)

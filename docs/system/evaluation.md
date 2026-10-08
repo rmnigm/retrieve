@@ -755,7 +755,14 @@ identities named; report each encoder from its own tree.
 | `memory` | `tables/tab-memory.tex` | `index_mib`, datasets × algos (`tab:memory`) |
 | `parity` | `tables/tab-backend_parity.tex` | per `(dataset, sweep, algo, backend)`: `path`, `jaccard_vs_first@k`, `score_max_abs_diff`, eager vs graph median and their ratio |
 | `matched` | `tables/tab-matched_recall.tex`, `matched_recall.json` | per recall curve (SilverTorch along `n_probe`, one curve per `n_lists` / filter kind / backend / suite; V3 along `candidate_pool` or `candidate_pool_frac`) and batch size: latency at `recall_oracle@k` 0.90 and 0.95 with the two bracketing points named, or why not; `n95` per SilverTorch curve, the smallest measured `n_probe` with recall ≥ 0.95 — the value the campaign writes into `suites.yaml` (`tab:matched_recall`) |
-| `fig_pareto` | `figures/fig-pareto-<dataset>.png` | recall vs latency, every cell of the selection |
+| `t1` | `tables/tab-t1_claims.tex` | T1, the claims table: per claim C1–C7 of [`evaluation/claims.yaml`](../../evaluation/claims.yaml) the original number and source, "ours" from the yaml's record selectors, the hand-written verdict (`---` while `null`) |
+| `t2` | `tables/tab-t2_<dataset>.tex` | T2, real filters (`filter` suite, goodreads / arxiv / yfcc10m / pubmed): per sweep, every arm at the operating point (SilverTorch `n_probe` 24) and SilverTorch at matched recall 0.95, recall@100 and p50 at bs 1 and 16 |
+| `t3` | `tables/tab-t3.tex` | T3, official vs Triton (`h2h` suite): per cell, `k`, `bs`, arm and mode: p50 with CI, the paired ratio over Triton eager, kernel-only µs and launches (top-8 kernels of the `--profile` call), `index_mib`, `peak_fwd_mib`, `ids_sha256` identity with Triton eager, jaccard, max score difference |
+| `f1` | `figures/fig-f1-latency-vs-pass-rate.png` | F1: p50 vs pass rate on the `*-synth` datasets (log x), one panel per scale × bs; V1, V2, V3 per pool, postfilter per alpha, SilverTorch Triton at matched recall 0.95 |
+| `f2` | `figures/fig-f2-recall-vs-pass-rate.png` | F2: `recall_oracle@100` vs pass rate; synth SilverTorch per measured `n_probe` and V3 per pool, the real `filter` sweeps overlaid as per-query pass-rate buckets from the sidecars |
+| `f3` | `figures/fig-f3-pareto.png` | F3: the `deep` suite's recall–latency curves (matched-recall curves), one panel per dataset × bs, 0.90 / 0.95 marked |
+| `f4a` | `figures/fig-f4a-bloomwidth.png`, `tables/tab-f4a_bloomwidth.tex` | F4a (`bloomwidth*` suites): `bloom_fp_rate` and `index_mib` vs `m_bits` per dataset / backend / `k_hash`; the table adds `filter_mib`, recall and the bs-16 timed point |
+| `f4b` | `figures/fig-f4b-codesign.png`, `tables/tab-f4b_codesign.tex` | F4b (`codesign` suite): partial vs full bloom path latency vs `n_probe` and the paired full / partial ratio with its CI |
 | `fig_deep_sweep` | `figures/fig-deep-sweep-*.png` | one per swept parameter: recall and latency against its value, whiskers = min–max across seeds |
 | `fig_latency_violin` | `figures/fig-latency-violin.png` | per-call distributions from the samples sidecar (`<name>.samples.jsonl`, one torn trailing line tolerated) |
 | `methodology` | `methodology.tex` | the measurement-methodology itemize, its constants read live out of `measure.latency`, `inputs.query_pool` and `run` so text and code cannot drift |
@@ -842,6 +849,23 @@ it (`_arm`): `postfilter ($\alpha$=1)` is the baseline's headline row and
 `alpha` or any other parameter. The postfilter is torch by definition
 ([The postfilter baseline](#the-postfilter-baseline)), so `--backend`
 selects it whatever its value (`FIXED_BACKEND`).
+
+### Paper exhibits
+
+Each exhibit is an `ARTIFACTS` function, so `--only t2` regenerates one.
+They select by suite and dataset, not by `--dim` / `--bs` / `--mode`:
+every dataset at its own width, `k` 100, bs 1 and 16, latency in `graph`
+(the headline mode) or in `eager` where the arm has no `graph` entry
+(official; marked $^{e}$). SilverTorch's operating point is
+`n_probe` 24; "matched" is `stats.at_recall` on that arm's curve. F2 draws
+SilverTorch at each measured `n_probe` (24, `n95`, 4×`n95`), not "at
+matched recall", which would be a flat line at the target. The real-sweep
+buckets of F2 are half-decade bins of `pass_count / n_items` holding ≥ 20
+queries. T1's `claims.yaml` selects with any parquet column plus a
+`params` subset (`null` = absent) and must hit one arm (else the report
+fails naming them); `metric` is `latency`, `recall`, `matched:<target>` or
+`field:<column>`, and `vs` makes it a ratio. The report never writes a
+verdict.
 
 **Not compiled.** No TeX toolchain is installed on this box, so the
 fragments are checked structurally (`tests/bench/test_report.py`:

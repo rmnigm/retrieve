@@ -31,6 +31,7 @@ from typing import Any
 import click
 import matplotlib
 import numpy as np
+import yaml
 
 from bench import inputs, measure, records, run, stats
 
@@ -250,6 +251,7 @@ def _attach(rows: list[dict[str, Any]], recs: list[dict[str, Any]]) -> None:
     for row in rows:
         key = {f: json.loads(row[f]) if f == "params" else row[f] for f in records.KEY_FIELDS}
         row["_rec"] = rec = by_key[records.resume_key(key, row["env_code_version"])]
+        row["_params"] = key["params"]
         want = (row.get("perf_k"), row.get("perf_bs"), row.get("perf_mode"))
         row["_entry"] = next(
             (e for e in rec.get("perf") or [] if (e["k"], e["bs"], e["mode"]) == want), None
@@ -304,12 +306,17 @@ def _recall(c, rows: list[dict[str, Any]], k: int) -> dict | None:
             for s in {r["seed"] for r in rows}
         )
         return {"value": v, "lo": None, "hi": None, **_marks(rows, False)}
-    cars = [_sidecar(c.results_dir / p) for p in paths]
+    est, lo, hi = _query_ci(c.results_dir, tuple(paths), k)
+    return {"value": est, "lo": lo, "hi": hi, **_marks(rows, False)}
+
+
+@functools.cache
+def _query_ci(root: Path, paths: tuple[str, ...], k: int) -> tuple[float, float, float]:
+    cars = [_sidecar(root / p) for p in paths]
     if any(not np.array_equal(cars[0]["rows"], z["rows"]) for z in cars[1:]):
         raise click.ClickException(f"sidecars of one arm cover different queries: {paths}")
     per_query = np.stack([z[f"recall_oracle@{k}"] for z in cars]).mean(axis=0)
-    est, lo, hi = stats.mean_ci(per_query[~np.isnan(per_query)])
-    return {"value": est, "lo": lo, "hi": hi, **_marks(rows, False)}
+    return stats.mean_ci(per_query[~np.isnan(per_query)])
 
 
 def _ratio(a: list[dict[str, Any]], b: list[dict[str, Any]]) -> tuple[tuple | None, bool]:
@@ -364,6 +371,7 @@ def _esc(text: Any) -> str:
         ("%", "\\%"),
         ("&", "\\&"),
         ("$", "\\$"),
+        ("~", "$\\sim$"),
     ):
         out = out.replace(ch, rep)
     return out
@@ -701,6 +709,7 @@ def tab_matched(c) -> list[Path]:
 
 
 def _figure(path: Path, fig, prov: dict[str, Any]) -> Path:
+    fig.tight_layout()
     if not prov["citable"]:
         fig.text(
             0.5,
@@ -734,52 +743,6 @@ def _empty(path: Path, prov, msg: str) -> Path:
     ax.axis("off")
     ax.text(0.5, 0.5, msg, ha="center", va="center", fontsize=9, wrap=True)
     return _figure(path, fig, prov)
-
-
-def fig_pareto(c) -> list[Path]:
-    written = []
-    for ds in sorted({r["dataset"] for r in c.rows}) or [None]:
-        path = c.out / "figures" / f"fig-pareto-{ds}.png"
-        rows = _sel(
-            c.rows,
-            dataset=ds,
-            dim=c.dim,
-            perf_k=c.k,
-            perf_bs=c.bs,
-            perf_mode=c.mode,
-            backend=c.backend,
-        )
-        pts = [(r, r.get("perf_median_ms"), r.get(f"oracle_recall@{c.k}")) for r in rows]
-        pts = [p for p in pts if p[1] is not None and p[2] is not None]
-        if not pts:
-            written.append(
-                _empty(
-                    path, c.prov, f"no cells: {ds} d{c.dim} k{c.k} bs{c.bs} {c.mode} {c.backend}"
-                )
-            )
-            continue
-        fig, ax = plt.subplots(figsize=(6.5, 4.2))
-        for algo in [a for a in ALGO_LABEL if any(p[0]["algo"] == a for p in pts)]:
-            sub = [p for p in pts if p[0]["algo"] == algo]
-            ax.scatter(
-                [p[1] for p in sub], [p[2] for p in sub], s=38, label=ALGO_LABEL.get(algo, algo)
-            )
-            for r, x, y in sub:
-                ax.annotate(
-                    f"{r['sweep']} {r['params'] if r['params'] != '{}' else ''}",
-                    (x, y),
-                    fontsize=6,
-                    xytext=(3, 3),
-                    textcoords="offset points",
-                    color="0.4",
-                )
-        ax.set_xlabel(f"$t_{{med}}$ (ms), {c.mode}, $B={c.bs}$")
-        ax.set_ylabel(f"Recall@{c.k} vs the exact filtered oracle")
-        ax.set_title(f"Recall–latency Pareto, {DATASET_LABEL.get(ds, ds)} d{c.dim}")
-        ax.grid(alpha=0.3)
-        ax.legend(fontsize=8)
-        written.append(_figure(path, fig, c.prov))
-    return written
 
 
 def fig_deep_sweep(c) -> list[Path]:
@@ -892,6 +855,710 @@ def fig_latency_violin(c) -> list[Path]:
     )
     ax.grid(alpha=0.3, axis="y")
     return [_figure(path, fig, c.prov)]
+
+
+# ----- paper exhibits (docs/system/evaluation.md § Paper exhibits) -----------------------
+
+REAL = ("goodreads", "arxiv", "yfcc10m", "pubmed")
+EXHIBIT_K = 100
+EXHIBIT_BS = (1, 16)
+CLAIMS = Path(__file__).resolve().parents[1] / "claims.yaml"
+
+
+def _with(rows: list[dict[str, Any]], **params: Any) -> list[dict[str, Any]]:
+    return [r for r in rows if all(r["_params"].get(n) == v for n, v in params.items())]
+
+
+def _order(arm: tuple) -> tuple:
+    return (list(ALGO_LABEL).index(arm[0]), arm[1:])
+
+
+def _arms(rows: list[dict[str, Any]]) -> list[tuple[str, str, str]]:
+    """The ``(algo, backend, params)`` arms of ``rows``, labelled algos only, in label order."""
+    found = {(r["algo"], r["backend"], r["params"]) for r in rows if r["algo"] in ALGO_LABEL}
+    return sorted(found, key=_order)
+
+
+def _arm_be(algo: str, backend: str, params: str | dict, tex: bool = True) -> str:
+    be = "" if algo in FIXED_BACKEND else f" [{backend}]"
+    return _arm(algo, params, tex) + be
+
+
+def _lat_tex(sub_mode: tuple[list[dict[str, Any]], str]) -> str:
+    sub, mode = sub_mode
+    v = _lat(sub)
+    return _num(v, 3) + _ci_tex(v, 3) + ("$^{e}$" if v and mode == "eager" else "")
+
+
+def _pass_rate(rows: list[dict[str, Any]]) -> float | None:
+    v = [r["pass_rate"] for r in _cells(rows) if r.get("pass_rate") is not None]
+    return statistics.median(v) if v else None
+
+
+def _by_scale(datasets: set[str], rows: list[dict[str, Any]]) -> list[str]:
+    n = {r["dataset"]: r.get("n_items") or 0 for r in rows}
+    return sorted(datasets, key=lambda d: (n.get(d, 0), d))
+
+
+EXHIBIT_NOTE = (
+    "$^{e}$ eager: the arm has no \\texttt{graph} entry (the official ops are not "
+    "capturable); every other latency is \\texttt{graph}, the headline mode."
+)
+
+
+def tab_t2(c) -> list[Path]:
+    """T2: the real-filter headline, per dataset: every arm at the paper's operating point
+    (SilverTorch at ``n_probe`` 24) and SilverTorch at matched recall 0.95, bs 1 and 16."""
+    written = []
+    for ds in [d for d in REAL if _sel(c.rows, dataset=d, suite="filter")]:
+        rows = _sel(c.rows, dataset=ds, suite="filter")
+        body = []
+        for fk, sw in sorted({(r["filter_kind"], r["sweep"]) for r in rows}):
+            cond = _sel(rows, filter_kind=fk, sweep=sw)
+            lines = []
+            for a, be, pj in _arms(cond):
+                if json.loads(pj).get("n_probe", 24) != 24:
+                    continue
+                arm = _sel(cond, algo=a, backend=be, params=pj)
+                q = _recall(c, _cells(arm), EXHIBIT_K)
+                lat = [_lat_tex(_timed(arm, bs, EXHIBIT_K)) for bs in EXHIBIT_BS]
+                lines.append([_arm_be(a, be, pj), _num(q) + _ci_tex(q, 4), *lat])
+            for cv in curves(c, cond, EXHIBIT_K):
+                if cv["algo"] != "silvertorch":
+                    continue
+                cells = []
+                for bs in EXHIBIT_BS:
+                    h = matched(cv, bs, EXHIBIT_K, 0.95)
+                    cells.append(
+                        f"${h['latency']:.3f}$ {{\\tiny({_esc(' .. '.join(h['bracket']))})}}"
+                        if h["latency"] is not None
+                        else _esc(h["reason"])
+                    )
+                label = f"{_arm_be('silvertorch', cv['backend'], cv['rest'])} @ 0.95"
+                lines.append([label, "matched", *cells])
+            body += [
+                [f"\\textbf{{{_esc(sw)}}} ({fk})" if i == 0 else "", *ln]
+                for i, ln in enumerate(lines)
+            ]
+        tex = _table(
+            c.prov,
+            c.results_dir,
+            caption=f"Real filters on {DATASET_LABEL.get(ds, ds)}: recall and p50 latency "
+            f"(ms) at the operating point ($n_\\mathrm{{probe}}=24$) and at matched "
+            f"recall 0.95, $K={EXHIBIT_K}$.",
+            label=f"tab:t2_{ds}",
+            colspec="llccc",
+            header=["Sweep", "Arm", f"Recall@{EXHIBIT_K}", "$B=1$", "$B=16$"],
+            body=body,
+            notes=_legend(
+                [
+                    "Matched rows interpolate latency at recall 0.95 along $n_\\mathrm{probe}$ "
+                    "between the bracketing measured points (in brackets), never extrapolated.",
+                    EXHIBIT_NOTE,
+                    STATS_NOTE,
+                    _clock_note(rows),
+                ]
+            ),
+        )
+        written.append(_write(c.out / "tables" / f"tab-t2_{ds}.tex", tex))
+    if written:
+        return written
+    tex = _table(
+        c.prov,
+        c.results_dir,
+        caption="Real filters: no \\texttt{filter} records.",
+        label="tab:t2",
+        colspec="llccc",
+        header=[],
+        body=[],
+        notes=[],
+    )
+    return [_write(c.out / "tables" / "tab-t2.tex", tex)]
+
+
+def _kernels(rows: list[dict[str, Any]]) -> tuple[float | None, int | None]:
+    """Kernel-only time (us) and launches of one eager call: the sum over the top-8 device
+    kernels ``--profile`` keeps, median over seeds."""
+    ks = [r["_entry"].get("kernels") for r in rows if r["_entry"] and r["_entry"].get("kernels")]
+    if not ks:
+        return None, None
+    return (
+        statistics.median(sum(x["us"] for x in k) for k in ks),
+        int(statistics.median(sum(x["calls"] for x in k) for k in ks)),
+    )
+
+
+def tab_t3(c) -> list[Path]:
+    """T3: official against our Triton reimplementation, from the interleaved ``h2h`` suite."""
+    rows = _sel(c.rows, suite="h2h")
+    body = []
+    for ds, fk, sw in sorted({(r["dataset"], r["filter_kind"], r["sweep"]) for r in rows}):
+        cond = _sel(rows, dataset=ds, filter_kind=fk, sweep=sw)
+        for k in sorted({r["perf_k"] for r in cond if r.get("perf_k")}):
+            for bs in sorted({r["perf_bs"] for r in cond if r.get("perf_bs")}):
+                ref = _sel(cond, backend="triton", perf_k=k, perf_bs=bs, perf_mode="eager")
+                ref_ids = {r["seed"]: r["_entry"].get("ids_sha256") for r in ref if r["_entry"]}
+                first = True
+                for a, be, pj in _arms(cond):
+                    arm = _sel(cond, algo=a, backend=be, params=pj, perf_k=k, perf_bs=bs)
+                    for mode in ("eager", "graph"):
+                        sub = _sel(arm, perf_mode=mode)
+                        t = _lat(sub)
+                        if t is None:
+                            continue
+                        us, calls = _kernels(sub)
+                        ids = {r["seed"]: r["_entry"].get("ids_sha256") for r in sub}
+                        same = [ids[s] == ref_ids.get(s) for s in ids if ids[s] and ref_ids.get(s)]
+                        cell = _cells(sub)[0]
+                        body.append(
+                            [
+                                f"{DATASET_LABEL.get(ds, ds)} {_esc(sw)} ({fk}), $K={k}$, $B={bs}$"
+                                if first
+                                else "",
+                                _arm_be(a, be, pj),
+                                mode,
+                                _num(t, 3) + _ci_tex(t, 3),
+                                "---"
+                                if be == "triton" and mode == "eager"
+                                else _ratio_tex(*_ratio(sub, ref)),
+                                "---" if us is None else f"${us:.1f}$",
+                                "---" if calls is None else f"${calls}$",
+                                _f(cell.get("index_mib"), 1),
+                                _f(cell.get("perf_peak_fwd_mib"), 1),
+                                ("---" if not same else "$=$" if all(same) else "$\\neq$"),
+                                _f(cell.get(f"quality_jaccard_vs_first@{k}"), 4),
+                                _sci(cell.get("quality_score_max_abs_diff")),
+                            ]
+                        )
+                        first = False
+    tex = _table(
+        c.prov,
+        c.results_dir,
+        caption="Official SilverTorch against our Triton reimplementation (\\texttt{h2h}, arms "
+        "timed interleaved in one process).",
+        label="tab:t3",
+        colspec="lllcccccccc" + "c",
+        header=[
+            "Cell",
+            "Arm",
+            "mode",
+            "p50 (ms)",
+            "/ triton eager",
+            "kernel ($\\mu$s)",
+            "launches",
+            "index MiB",
+            "peak MiB",
+            "ids",
+            "jaccard",
+            "$|\\Delta s|_{\\max}$",
+        ],
+        body=body,
+        notes=_legend(
+            [
+                "Kernel-only time and launches: one eager call under \\texttt{torch.profiler}, the "
+                "sum over the top-8 device kernels (a lower bound), median over seeds. ids: "
+                "the sha256 of the returned ids on the fixed probe batches equals ($=$) the "
+                "Triton eager arm's at every common seed. jaccard and $|\\Delta s|_{\\max}$ "
+                "against the first backend of the cell (the parity spill). Official is "
+                "eager-only.",
+                STATS_NOTE,
+                _clock_note(rows),
+            ]
+        ),
+    )
+    return [_write(c.out / "tables" / "tab-t3.tex", tex)]
+
+
+def fig_f1(c) -> list[Path]:
+    """F1: p50 latency against the synthetic pass rate, one panel per scale and batch size;
+    SilverTorch at matched recall 0.95."""
+    path = c.out / "figures" / "fig-f1-latency-vs-pass-rate.png"
+    rows = [r for r in c.rows if r["dataset"].endswith("-synth") and r["filter_kind"] == "clause"]
+    synth = _by_scale({r["dataset"] for r in rows}, rows)
+    if not synth:
+        return [_empty(path, c.prov, "F1: no synth records")]
+    fig, axes = plt.subplots(
+        len(EXHIBIT_BS), len(synth), figsize=(4.4 * len(synth), 7.2), squeeze=False
+    )
+    for j, ds in enumerate(synth):
+        dsr = _sel(rows, dataset=ds)
+        sweeps = sorted({r["sweep"] for r in dsr})
+        for i, bs in enumerate(EXHIBIT_BS):
+            ax = axes[i][j]
+            for a, be, pj in _arms(dsr):
+                if a == "silvertorch" or (be != "triton" and a not in FIXED_BACKEND):
+                    continue
+                pts = []
+                for sw in sweeps:
+                    sub = _sel(dsr, algo=a, backend=be, params=pj, sweep=sw)
+                    t, x = _lat(_timed(sub, bs, EXHIBIT_K)[0]), _pass_rate(sub)
+                    if t and x:
+                        pts.append((x, t))
+                if pts:
+                    ax.errorbar(
+                        [x for x, _ in pts],
+                        [t["value"] for _, t in pts],
+                        yerr=[
+                            [t["value"] - t["lo"] for _, t in pts],
+                            [t["hi"] - t["value"] for _, t in pts],
+                        ],
+                        marker="o",
+                        capsize=2,
+                        label=_arm_be(a, be, pj, tex=False),
+                    )
+            lines = defaultdict(list)
+            for cv in curves(c, _sel(dsr, algo="silvertorch", backend="triton"), EXHIBIT_K):
+                h = matched(cv, bs, EXHIBIT_K, 0.95)
+                x = _pass_rate([r for _, _, rs in cv["points"] for r in rs])
+                if h["latency"] is not None and x:
+                    lines[cv["rest"]].append((x, h["latency"]))
+            for rest, pts in sorted(lines.items()):
+                pts.sort()
+                ax.plot(
+                    [x for x, _ in pts],
+                    [t for _, t in pts],
+                    marker="D",
+                    linestyle="--",
+                    label=f"{_arm('silvertorch', rest, False)} [triton] @ recall 0.95",
+                )
+            ax.set_xscale("log")
+            ax.set_yscale("log")
+            ax.set_title(f"{DATASET_LABEL.get(ds, ds)}, B={bs}", fontsize=9)
+            ax.set_xlabel("pass rate")
+            ax.set_ylabel(f"p50 latency (ms), K={EXHIBIT_K}")
+            ax.grid(alpha=0.3, which="both")
+    axes[0][0].legend(fontsize=6)
+    fig.suptitle("F1: latency vs pass rate (graph; whiskers = 95% bootstrap CI)", fontsize=10)
+    return [_figure(path, fig, c.prov)]
+
+
+BUCKETS = 10.0 ** np.arange(-4.0, 0.01, 0.5)
+MIN_BUCKET = 20
+
+
+def _buckets(c, rows: list[dict[str, Any]], k: int) -> list[tuple[float, float, int]]:
+    """Per-query recall of real sweeps grouped by per-query pass rate (half-decade buckets of
+    ``pass_count / n_items``): (geometric-mean pass rate, mean recall, n) per bucket with at
+    least ``MIN_BUCKET`` queries."""
+    rate, rec = [], []
+    for r in _cells(rows):
+        rel = r["_rec"].get("per_query")
+        if not rel:
+            continue
+        z = _sidecar(c.results_dir / rel)
+        ok = (z["pass_count"] > 0) & ~np.isnan(z[f"recall_oracle@{k}"])
+        rate.append(z["pass_count"][ok] / r["n_items"])
+        rec.append(z[f"recall_oracle@{k}"][ok])
+    if not rate:
+        return []
+    rate, rec = np.concatenate(rate), np.concatenate(rec)
+    idx = np.digitize(rate, BUCKETS)
+    return [
+        (
+            float(np.exp(np.log(rate[idx == b]).mean())),
+            float(rec[idx == b].mean()),
+            int((idx == b).sum()),
+        )
+        for b in np.unique(idx)
+        if (idx == b).sum() >= MIN_BUCKET
+    ]
+
+
+def fig_f2(c) -> list[Path]:
+    """F2: recall_oracle@100 against the pass rate: synthetic curves (SilverTorch per fixed
+    ``n_probe``, V3 per pool) with the real ``filter`` sweeps overlaid as per-query buckets."""
+    path = c.out / "figures" / "fig-f2-recall-vs-pass-rate.png"
+    algos = ("silvertorch", "linr_v3")
+    synth = [
+        r
+        for r in c.rows
+        if r["dataset"].endswith("-synth")
+        and r["filter_kind"] == "clause"
+        and r["algo"] in algos
+        and r["backend"] == "triton"
+    ]
+    real = [
+        r
+        for r in c.rows
+        if r["suite"] == "filter"
+        and r["filter_kind"] == "clause"
+        and r["algo"] in algos
+        and r["backend"] == "triton"
+        and r["_rec"].get("per_query")
+    ]
+    panels = _by_scale({r["dataset"].removesuffix("-synth") for r in synth + real}, c.rows)
+    if not panels:
+        return [_empty(path, c.prov, "F2: no synth or real silvertorch / V3 records")]
+    fig, axes = plt.subplots(1, len(panels), figsize=(4.6 * len(panels), 4.2), squeeze=False)
+    for ax, ds in zip(axes[0], panels, strict=True):
+        dsr = _sel(synth, dataset=f"{ds}-synth")
+        for a, _, pj in _arms(dsr):
+            pts = []
+            for sw in sorted({r["sweep"] for r in dsr}):
+                sub = _sel(dsr, algo=a, params=pj, sweep=sw)
+                q, x = _recall(c, _cells(sub), EXHIBIT_K), _pass_rate(sub)
+                if q and x:
+                    pts.append((x, q))
+            if pts:
+                ax.errorbar(
+                    [x for x, _ in pts],
+                    [q["value"] for _, q in pts],
+                    yerr=[
+                        [0 if q["lo"] is None else q["value"] - q["lo"] for _, q in pts],
+                        [0 if q["hi"] is None else q["hi"] - q["value"] for _, q in pts],
+                    ],
+                    marker="o",
+                    capsize=2,
+                    label=f"synth: {_arm(a, pj, False)}",
+                )
+        for a, _, pj in _arms(_sel(real, dataset=ds)):
+            b = _buckets(c, _sel(real, dataset=ds, algo=a, params=pj), EXHIBIT_K)
+            if b:
+                ax.scatter(
+                    [x for x, _, _ in b],
+                    [y for _, y, _ in b],
+                    marker="x",
+                    s=30,
+                    label=f"real (per-query buckets): {_arm(a, pj, False)}",
+                )
+        ax.set_xscale("log")
+        ax.set_ylim(0, 1.02)
+        ax.set_title(DATASET_LABEL.get(ds, ds), fontsize=9)
+        ax.set_xlabel("pass rate")
+        ax.set_ylabel(f"recall_oracle@{EXHIBIT_K}")
+        ax.grid(alpha=0.3, which="both")
+        ax.legend(fontsize=5)
+    fig.suptitle(
+        "F2: recall vs pass rate (uniform synthetic filter; real sweeps as "
+        f"per-query buckets of >= {MIN_BUCKET} queries)",
+        fontsize=10,
+    )
+    return [_figure(path, fig, c.prov)]
+
+
+def fig_f3(c) -> list[Path]:
+    """F3: the recall-latency Pareto curves of the ``deep`` suite, one panel per dataset and
+    batch size."""
+    path = c.out / "figures" / "fig-f3-pareto.png"
+    rows = _sel(c.rows, suite="deep")
+    cvs = curves(c, rows, EXHIBIT_K)
+    datasets = _by_scale({cv["dataset"] for cv in cvs}, rows)
+    if not datasets:
+        return [_empty(path, c.prov, "F3: no deep-suite curves")]
+    fig, axes = plt.subplots(
+        len(EXHIBIT_BS), len(datasets), figsize=(4.6 * len(datasets), 7.4), squeeze=False
+    )
+    for j, ds in enumerate(datasets):
+        for i, bs in enumerate(EXHIBIT_BS):
+            ax = axes[i][j]
+            for cv in [cv for cv in cvs if cv["dataset"] == ds]:
+                pts = []
+                for x, q, rs in cv["points"]:
+                    t = _lat(_timed(rs, bs, EXHIBIT_K)[0])
+                    if t:
+                        pts.append((t["value"], q["value"], x))
+                if pts:
+                    ax.plot(
+                        [p[0] for p in pts],
+                        [p[1] for p in pts],
+                        marker="o",
+                        label=f"{_curve_label(cv, False)} {cv['filter_kind']} {cv['sweep']}",
+                    )
+            for target in TARGETS:
+                ax.axhline(target, color="0.5", linestyle=":", linewidth=0.8)
+            ax.set_xscale("log")
+            ax.set_title(f"{DATASET_LABEL.get(ds, ds)}, B={bs}", fontsize=9)
+            ax.set_xlabel("p50 latency (ms)")
+            ax.set_ylabel(f"recall_oracle@{EXHIBIT_K}")
+            ax.grid(alpha=0.3, which="both")
+            ax.legend(fontsize=5)
+    fig.suptitle("F3: recall-latency Pareto (deep suite)", fontsize=10)
+    return [_figure(path, fig, c.prov)]
+
+
+def fig_f4a(c) -> list[Path]:
+    """F4a: bloom false-positive rate and memory against ``m_bits`` (``bloomwidth*`` suites),
+    one line per (dataset, backend, k_hash); the same numbers as a table."""
+    rows = [r for r in c.rows if r["suite"].startswith("bloomwidth") and "m_bits" in r["_params"]]
+    path = c.out / "figures" / "fig-f4a-bloomwidth.png"
+    if not rows:
+        return [_empty(path, c.prov, "F4a: no bloomwidth records")]
+    series = defaultdict(lambda: defaultdict(list))
+    for r in rows:
+        key = (r["dataset"], r["sweep"], r["backend"], r["_params"].get("k_hash"))
+        series[key][r["_params"]["m_bits"]].append(r)
+    fig, (ax_fp, ax_mem) = plt.subplots(1, 2, figsize=(10, 4))
+    body = []
+    for (ds, sw, be, kh), by_m in sorted(series.items(), key=lambda kv: str(kv[0])):
+        ms = sorted(by_m)
+        fp = [
+            statistics.median(
+                r["bloom_fp_rate"] for r in _cells(by_m[m]) if r.get("bloom_fp_rate") is not None
+            )
+            for m in ms
+        ]
+        mem = [statistics.median(r["index_mib"] for r in _cells(by_m[m])) for m in ms]
+        label = f"{DATASET_LABEL.get(ds, ds)} {sw} [{be}] k_hash={kh}"
+        ax_fp.plot(ms, fp, marker="o", label=label)
+        ax_mem.plot(ms, mem, marker="o", label=label)
+        for m, f, mib in zip(ms, fp, mem, strict=True):
+            cells = _cells(by_m[m])
+            q = _recall(c, cells, EXHIBIT_K)
+            t = _lat(_timed(by_m[m], 16, EXHIBIT_K)[0])
+            body.append(
+                [
+                    f"{DATASET_LABEL.get(ds, ds)} {_esc(sw)}",
+                    f"\\texttt{{{be}}}",
+                    f"${kh}$",
+                    f"${m}$",
+                    _sci(f),
+                    _f(statistics.median(r["filter_mib"] for r in cells), 2),
+                    _f(mib, 1),
+                    _num(q),
+                    _num(t, 3),
+                ]
+            )
+    ax_fp.set_xscale("log", base=2)
+    ax_fp.set_yscale("symlog", linthresh=1e-6)
+    ax_fp.set_xlabel("m_bits")
+    ax_fp.set_ylabel("bloom false-positive rate (symlog below 1e-6)")
+    ax_mem.set_xscale("log", base=2)
+    ax_mem.set_xlabel("m_bits")
+    ax_mem.set_ylabel("index MiB (filter included)")
+    for ax in (ax_fp, ax_mem):
+        ax.grid(alpha=0.3, which="both")
+        ax.legend(fontsize=5)
+    fig.suptitle("F4a: bloom width", fontsize=10)
+    tex = _table(
+        c.prov,
+        c.results_dir,
+        caption="Bloom width: false-positive rate, memory and recall against $m_\\mathrm{bits}$.",
+        label="tab:f4a_bloomwidth",
+        colspec="lllcccccc",
+        header=[
+            "Sweep",
+            "Backend",
+            "$k_\\mathrm{hash}$",
+            "$m_\\mathrm{bits}$",
+            "FPR",
+            "filter MiB",
+            "index MiB",
+            f"Recall@{EXHIBIT_K}",
+            "p50 $B=16$ (ms)",
+        ],
+        body=body,
+        notes=_legend(
+            [
+                "FPR: \\texttt{bloom\\_fp\\_rate}, the mean per-query $(\\mathrm{bloom} - "
+                "\\mathrm{exact}) / (N - \\mathrm{exact})$. \\texttt{filter\\_mib} is the filter "
+                "submodule alone (0 where the module carries its attributes inside "
+                "\\texttt{index\\_mib}). Latency only on the timed widths.",
+                EXHIBIT_NOTE,
+                STATS_NOTE,
+            ]
+        ),
+    )
+    return [_figure(path, fig, c.prov), _write(c.out / "tables" / "tab-f4a_bloomwidth.tex", tex)]
+
+
+def fig_f4b(c) -> list[Path]:
+    """F4b: co-design, partial against full bloom path along ``n_probe`` with the paired
+    full / partial ratio and its CI (``codesign`` suite)."""
+    rows = [r for r in _sel(c.rows, suite="codesign") if "bloom_path" in r["_params"]]
+    path = c.out / "figures" / "fig-f4b-codesign.png"
+    if not rows:
+        return [_empty(path, c.prov, "F4b: no codesign records")]
+    panels = sorted({(r["dataset"], r["perf_bs"]) for r in rows if r.get("perf_bs")})
+    fig, axes = plt.subplots(len(panels), 2, figsize=(10, 3.4 * len(panels)), squeeze=False)
+    body = []
+    for (ds, bs), (ax_t, ax_r) in zip(panels, axes, strict=True):
+        for sw in sorted({r["sweep"] for r in rows if r["dataset"] == ds}):
+            cond = _sel(rows, dataset=ds, sweep=sw, perf_bs=bs, perf_k=EXHIBIT_K)
+            rest = sorted(
+                {
+                    json.dumps(
+                        {
+                            n: v
+                            for n, v in r["_params"].items()
+                            if n not in ("bloom_path", "n_probe")
+                        },
+                        sort_keys=True,
+                    )
+                    for r in cond
+                }
+            )
+            for other in rest:
+                probes = sorted({r["_params"]["n_probe"] for r in cond})
+                ratios = []
+                for path_name in ("partial", "full"):
+                    pts = []
+                    for n in probes:
+                        sub, _ = _timed(
+                            _with(cond, bloom_path=path_name, n_probe=n, **json.loads(other)),
+                            bs,
+                            EXHIBIT_K,
+                        )
+                        t = _lat(sub)
+                        if t:
+                            pts.append((n, t))
+                    if pts:
+                        ax_t.errorbar(
+                            [n for n, _ in pts],
+                            [t["value"] for _, t in pts],
+                            yerr=[
+                                [t["value"] - t["lo"] for _, t in pts],
+                                [t["hi"] - t["value"] for _, t in pts],
+                            ],
+                            marker="o",
+                            capsize=2,
+                            label=f"{sw} {path_name}",
+                        )
+                for n in probes:
+                    full = _timed(
+                        _with(cond, bloom_path="full", n_probe=n, **json.loads(other)),
+                        bs,
+                        EXHIBIT_K,
+                    )
+                    part = _timed(
+                        _with(cond, bloom_path="partial", n_probe=n, **json.loads(other)),
+                        bs,
+                        EXHIBIT_K,
+                    )
+                    ci, paired = _ratio(full[0], part[0])
+                    if ci:
+                        ratios.append((n, ci))
+                    body.append(
+                        [
+                            f"{DATASET_LABEL.get(ds, ds)} {_esc(sw)}",
+                            _esc(other),
+                            f"${bs}$",
+                            f"${n}$",
+                            _lat_tex(part),
+                            _lat_tex(full),
+                            _ratio_tex(ci, paired),
+                        ]
+                    )
+                if ratios:
+                    ax_r.errorbar(
+                        [n for n, _ in ratios],
+                        [ci[0] for _, ci in ratios],
+                        yerr=[
+                            [ci[0] - ci[1] for _, ci in ratios],
+                            [ci[2] - ci[0] for _, ci in ratios],
+                        ],
+                        marker="o",
+                        capsize=2,
+                        label=sw,
+                    )
+        ax_r.axhline(1.0, color="0.4", linestyle=":")
+        for ax, ylabel in ((ax_t, "p50 latency (ms)"), (ax_r, "full / partial (paired)")):
+            ax.set_xscale("log", base=2)
+            ax.set_xlabel("n_probe")
+            ax.set_ylabel(ylabel)
+            ax.set_title(f"{DATASET_LABEL.get(ds, ds)}, B={bs}", fontsize=9)
+            ax.grid(alpha=0.3, which="both")
+            ax.legend(fontsize=5)
+    fig.suptitle("F4b: co-design, partial vs full bloom mask (whiskers = 95% CI)", fontsize=10)
+    tex = _table(
+        c.prov,
+        c.results_dir,
+        caption="Co-design: partial against full bloom mask, p50 latency (ms) and the paired "
+        f"full / partial ratio, $K={EXHIBIT_K}$.",
+        label="tab:f4b_codesign",
+        colspec="llccccc",
+        header=[
+            "Sweep",
+            "Build",
+            "$B$",
+            "$n_\\mathrm{probe}$",
+            "partial",
+            "full",
+            "full / partial",
+        ],
+        body=body,
+        notes=_legend([EXHIBIT_NOTE, STATS_NOTE, _clock_note(rows)]),
+    )
+    return [_figure(path, fig, c.prov), _write(c.out / "tables" / "tab-f4b_codesign.tex", tex)]
+
+
+def _claim_value(c, item: dict[str, Any]) -> str:
+    """One ``ours`` entry of ``claims.yaml``: ``metric`` (latency | recall | matched:<target> |
+    field:<record column>) of the one arm ``where`` selects (``params`` is a subset match,
+    ``null`` = absent), or its ratio over the arm ``vs`` selects."""
+    k, bs = item.get("k", EXHIBIT_K), item.get("bs", 1)
+
+    def pick(where: dict[str, Any]) -> list[dict[str, Any]]:
+        where = dict(where)
+        params = where.pop("params", {})
+        rows = _with(_sel(c.rows, **where), **params)
+        arms = {(r["algo"], r["backend"], r["params"]) for r in rows}
+        if len(arms) > 1 and not item["metric"].startswith("matched:"):
+            raise click.ClickException(f"claims.yaml {item['label']!r}: {len(arms)} arms {arms}")
+        return rows
+
+    def value(rows: list[dict[str, Any]]) -> float | None:
+        metric = item["metric"]
+        if metric == "latency":
+            v = _lat(_timed(rows, bs, k)[0])
+        elif metric == "recall":
+            v = _recall(c, _cells(rows), k)
+        elif metric.startswith("matched:"):
+            hits = [matched(cv, bs, k, float(metric.split(":")[1])) for cv in curves(c, rows, k)]
+            return hits[0]["latency"] if len(hits) == 1 else None
+        else:
+            vals = [
+                r[metric.split(":")[1]]
+                for r in _cells(rows)
+                if r.get(metric.split(":")[1]) is not None
+            ]
+            return statistics.median(vals) if vals else None
+        return None if v is None else v["value"]
+
+    a = pick(item["where"])
+    if "vs" not in item:
+        v = value(a)
+        return "---" if v is None else f"${v:.4g}$"
+    b = pick(item["vs"])
+    if item["metric"] == "latency":
+        return _ratio_tex(*_ratio(_timed(a, bs, k)[0], _timed(b, bs, k)[0]))
+    va, vb = value(a), value(b)
+    return "---" if va is None or not vb else f"${va / vb:.3g}\\times$"
+
+
+def tab_t1(c) -> list[Path]:
+    """T1: the claims table. ``claims.yaml`` holds each claim's original number, its source and
+    the record selectors of "ours"; this fills "ours" and prints the human-written verdict,
+    never one of its own."""
+    claims = yaml.safe_load(CLAIMS.read_text())["claims"]
+    body = [
+        [
+            c_["id"],
+            _esc(c_["claim"]),
+            f"{_esc(c_['original'])} ({_esc(c_['source'])})",
+            "; ".join(f"{_esc(i['label'])}: {_claim_value(c, i)}" for i in c_["ours"]),
+            _esc(c_["verdict"]) if c_["verdict"] else "---",
+        ]
+        for c_ in claims
+    ]
+    tex = _table(
+        c.prov,
+        c.results_dir,
+        caption="Claims of the original papers against this reproduction.",
+        label="tab:t1_claims",
+        colspec="lp{3.2cm}p{3.2cm}p{4.2cm}l",
+        header=["", "Claim", "Original", "Ours", "Verdict"],
+        body=body,
+        notes=_legend(
+            [
+                "``Ours'' is computed from the records by the selectors in "
+                "\\texttt{evaluation/claims.yaml}; verdicts are written there by hand after the "
+                "campaign and never generated ('---' until then).",
+                EXHIBIT_NOTE,
+                STATS_NOTE,
+            ]
+        ),
+    )
+    return [_write(c.out / "tables" / "tab-t1_claims.tex", tex)]
 
 
 # ----- methodology and coverage -------------------------------------------------
@@ -1055,7 +1722,14 @@ ARTIFACTS = {
     "memory": tab_memory,
     "parity": tab_backend_parity,
     "matched": tab_matched,
-    "fig_pareto": fig_pareto,
+    "t1": tab_t1,
+    "t2": tab_t2,
+    "t3": tab_t3,
+    "f1": fig_f1,
+    "f2": fig_f2,
+    "f3": fig_f3,
+    "f4a": fig_f4a,
+    "f4b": fig_f4b,
     "fig_deep_sweep": fig_deep_sweep,
     "fig_latency_violin": fig_latency_violin,
     "methodology": methodology,
