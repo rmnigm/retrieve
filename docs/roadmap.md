@@ -38,13 +38,6 @@ others (see [Multi-GPU execution](#multi-gpu-execution)).
   file the official-code defects (OF-3, OF-4, OF-6 in
   [deviations](paper/reproduction-deviations.md)) upstream as issues. The
   ECIR call asks what contact happened; replies take weeks.
-- **The campaign budget, after the pilot.** Measured per-cell times put
-  the campaign at roughly 130-250 GPU-h, not the re-plan's 70-90: the 10 M
-  exact arms cost 0.4-2.4 GPU-h a cell and the torch arms 5-9× Triton
-  ([inventory](artifacts/campaign-v2/README.md#b-measured-wall-time-per-cell-old-grid-3-bs--3-k--2-modes)).
-  Nothing waits on it now (code comes first); the budget gate stops the
-  queue before V-AX-SYNTH / V-YFCC if the pilot confirms it, and the user
-  then chooses between the full grid and a trimmed one.
 - **Clock-normalised or as-measured ratios (T3, F4b).** Clocks cannot be
   locked and follow the load: in the freeze's timed smoke, official arms
   sampled ~1140-1170 MHz while Triton graph sampled 1410 in the same
@@ -147,8 +140,9 @@ claim's remaining runs are skipped and the reason logged.
 - **Densify only on demand**: a parameter point is added only where an
   exhibit's curve has a kink or crossover between two measured points and
   the claim depends on where it is.
-- **Budget gate.** If cumulative GPU-h exceed 1.25× the estimate at any
-  step, stop and re-plan with the user.
+- **Budget gate.** If a step's GPU-h exceed 1.25× its estimate, report it
+  and update the remaining estimates from the measured rate; the queue
+  continues (user, 2026-10-08: the full grid runs).
 - **Surprise gate.** A result that contradicts an earlier one (e.g. Triton
   slower than official end to end on the frozen code) stops the queue:
   rerun that one cell interleaved and report before anything else runs.

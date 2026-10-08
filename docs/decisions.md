@@ -40,6 +40,10 @@ user's re-plan, kept in the orchestrator's handoff notes; the claims are
 C1-C7, the exhibits T1-T3 and F1-F4). These rules govern every cell from
 now on; the [roadmap](roadmap.md) holds the steps.
 
+- **Budget: the full grid runs** (user, 2026-10-08, after the measured
+  estimate of ~130-250 GPU-h replaced the re-plan's 70-90): no trimmed
+  grid. The budget gate (roadmap § Stop rules) reports an overrun and
+  re-estimates; it does not stop the queue.
 - **Claims drive cells.** Every planned cell maps to a figure or table row
   of the paper; a cell that maps to none is cut. A parameter value stays
   only if it moves a curve in an exhibit; if latency is monotone across
