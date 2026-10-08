@@ -41,7 +41,10 @@ ALGO_LABEL = {
     "linr_v4": "LiNR V4",
     "linr_v3": "LiNR V3",
     "silvertorch": "SilverTorch",
+    "postfilter": "torch postfilter",
 }
+# The baseline is torch by definition (decisions.md § Harness): it passes any --backend.
+FIXED_BACKEND = {"postfilter": "torch"}
 DATASET_LABEL = {"goodreads": "Goodreads", "arxiv": "arXiv"}
 SPEEDUP_BASE = "linr_v1_filter_mask"  # the thesis's 1.00x column
 
@@ -208,7 +211,11 @@ def _caption(prov: dict[str, Any], text: str) -> str:
 def _sel(rows: list[dict[str, Any]], **eq: Any) -> list[dict[str, Any]]:
     keep = [r for r in rows if r.get("status") != "failed"]
     for field, want in eq.items():
-        if want is not None:
+        if want is None:
+            continue
+        if field == "backend":
+            keep = [r for r in keep if r[field] == want or r["algo"] in FIXED_BACKEND]
+        else:
             keep = [r for r in keep if r.get(field) == want]
     return keep
 
