@@ -39,3 +39,9 @@ GPU checks, h2h with the profiler fix, V-GR-DEEP, V-YFCC, V-SEEDS' YFCC half. V-
 | V-GR-DEEP | goodreads / deep | 210 |
 | V-YFCC | yfcc10m-synth / synth; yfcc10m / deep | 285; 45 |
 | V-SEEDS | yfcc10m / filter (before part B's n95 slot) | 18 |
+
+## Outcomes
+
+- **V-CODESIGN goodreads half** (2026-10-08, staging `69dd3d6`, `f01255f1`): 54 / 54 ok (44 `unstable`),
+  0.79 GPU-h; full / partial 0.81-0.86, recall identical; Hub `campaign-v2.1/goodreads-codesign`
+  ([validation](../../../validation.md)). Summary via [`../v-codesign/codesign_summary.py`](../v-codesign/codesign_summary.py).
