@@ -386,10 +386,12 @@ doubling, capped at `n_lists` / 4 = 25 % of the items scanned, user) on goodread
 `n_lists`, and picks the point that scans the fewest items (`n_probe` · N / `n_lists` + `n_lists`). The scripts are in
 [`docs/artifacts/campaign-v2/ivf-tune/`](../artifacts/campaign-v2/ivf-tune/README.md). The tuning
 records are artifacts in their own results tree, never campaign cells. `n_lists` starts at ≈ 4 √N to a power of two
-(goodreads 4096, YFCC and PubMed 16384); arXiv was measured at 2048, 4096 and 8192, which reach
+(goodreads 4096, YFCC and PubMed 16384, then 4096 by the cap below); arXiv was measured at 2048, 4096 and 8192, which reach
 0.95 at the same ≈ 12.7 % scanned (n95 = `n_lists` / 8), so it takes the fewest-items 2048 / 256.
-YFCC (`tags_and`, pass 0.0185) does not reach 0.95 within the cap at 16384 (0.72 at 4096), so
-its slot takes the cap. An n95 is written only where it was measured. Each value is one
+YFCC (`tags_and`, pass 0.0185; 0.72 at the cap at 16384) and PubMed (`all5`, 0.018; 0.873 at
+the cap at 4096) do not reach 0.95 within the 25 % cap. Their slot is the cap at `n_lists` 4096,
+`n_probe` 1024: both list counts scan the same 25 % there (ties go to the smaller), and the probe
+scorers cannot run `n_probe` > 1024 at k 1000 ([kernels](kernels.md)). yfcc10m-synth follows at 4096. An n95 is written only where it was measured. Each value is one
 `datasets:` slot per arm: `filter`'s SilverTorch arms get `{build: {n_lists: [L]}, query:
 {n_probe: [24, n95]}}`, and `synth`'s get `n_lists` only, because it sweeps `n_probe`
 explicitly (user, 2026-10-08). A slot left `{}` runs at the library default `n_lists` with
@@ -669,7 +671,9 @@ seed) in one unit, in matrix order; every other job is a unit of its own. A
 job in two groups of two or more is a `ConfigError` at `load_matrix`. The
 shipped groups: `filter` and `synth` V1 vs V2 (per backend and compile mode)
 and triton vs official (silvertorch bloom); `codesign` partial vs full; `h2h`
-triton vs official fp16 vs official int32.
+triton vs official fp16 vs official int32. `bloomwidth-timed` has none, and `by: backend` could not
+pair its arms: Triton's build carries `m_bits`, official's does not, so their keys differ
+beyond `backend`.
 
 Without `--interleave` nothing changes. With it, `run` builds every arm of a
 unit (assets per arm's step-3 key, usually shared), then per query combo runs
@@ -992,7 +996,7 @@ identities named; report each encoder from its own tree.
 | `pareto` | `tables/tab-pareto_<dataset>.tex` | sweep × arm (one row per parameter set): oracle recall, `median_ms`, speedup vs LiNR V1, `index_mib` (`tab:pareto_<dataset>`) |
 | `memory` | `tables/tab-memory.tex` | `index_mib`, datasets × algos (`tab:memory`) |
 | `parity` | `tables/tab-backend_parity.tex` | per `(dataset, sweep, algo, backend)`: `path`, `jaccard_vs_first@k`, `score_max_abs_diff`, eager vs graph median and their ratio |
-| `matched` | `tables/tab-matched_recall.tex`, `matched_recall.json` | per recall curve (SilverTorch along `n_probe`, one curve per `n_lists` / filter kind / backend / suite; V3 along `candidate_pool` or `candidate_pool_frac`) and batch size: latency at `recall_oracle@k` 0.90 and 0.95 with the two bracketing points named, or why not; `n95` per SilverTorch curve, the smallest measured `n_probe` with recall ≥ 0.95 — the value the campaign writes into `suites.yaml` (`tab:matched_recall`) |
+| `matched` | `tables/tab-matched_recall.tex`, `matched_recall.json` | per recall curve (SilverTorch along `n_probe`, one curve per `n_lists` / filter kind / backend / suite; V3 along `candidate_pool` or `candidate_pool_frac`) and batch size: latency at `recall_oracle@k` 0.90 and 0.95 with the two bracketing points named, or why not; `n95` per SilverTorch curve, the smallest measured `n_probe` with recall ≥ 0.95 — the value the campaign writes into `suites.yaml` (`tab:matched_recall`) A curve is emitted once per *timed* batch size, so a curve with no perf entries (a `perf: false` suite: `n95`, `bloomwidth`) is not emitted and neither is its `n95`; the `n95` suite's value is read off the records with [`n95.py`](../artifacts/campaign-v2/v-pubmed/n95.py) |
 | `t1` | `tables/tab-t1_claims.tex` | T1, the claims table: per claim C1–C7 of [`evaluation/claims.yaml`](../../evaluation/claims.yaml) the original number and source, "ours" from the yaml's record selectors, the hand-written verdict (`---` while `null`) |
 | `t2` | `tables/tab-t2_<dataset>.tex` | T2, real filters (`filter` suite, goodreads / arxiv / yfcc10m / pubmed): per sweep, every arm at the operating point (SilverTorch `n_probe` 24) and SilverTorch at matched recall 0.95, recall@100 and p50 at bs 1 and 16 |
 | `t3` | `tables/tab-t3.tex` | T3, official vs Triton (`h2h` suite): per cell, `k`, `bs`, arm and mode: p50 with CI, the paired ratio over Triton eager, kernel-only µs and launches (top-8 kernels of the `--profile` call), `index_mib`, `peak_fwd_mib`, `ids_sha256_canon` identity with Triton eager (equal up to tied-id order), jaccard, max score difference |

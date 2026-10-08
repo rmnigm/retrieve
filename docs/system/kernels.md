@@ -321,6 +321,10 @@ its own tile shape, launch grid, or masking policy:
   table built in-kernel ([SilverTorch kernels](#silvertorch-kernels)).
 - `probe_ids_kernel` — a *launched* kernel: the probe scorers' id
   epilogue after `torch.topk` (slot → `sort_perm[pos]`, `-1` at `-inf`).
+  Its tile is `[next_pow2(k), next_pow2(n_probe)]`, so Triton's 2^20-element
+  tensor limit caps a call at `next_pow2(k) · next_pow2(n_probe) ≤ 2^20`: k 1000
+  runs `n_probe` ≤ 1024, k 100 ≤ 8192 (larger fails at compile, `numel exceeds
+  triton maximum tensor numel`; seen in IVF-TUNE).
 - `popcount_int64(x) → int32` — the hardware `POPC` (`libdevice.popc` on
   int64, `__nv_popcll`); used by `oporp_1bit_match_topk`. Its torch twin
   [`functional.py::popcount_int64`](../../retrieve/src/retrieve/functional.py)

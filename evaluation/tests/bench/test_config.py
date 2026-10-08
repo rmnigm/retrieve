@@ -348,7 +348,7 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("filter", "goodreads"): (87, 114),
     ("filter", "arxiv"): (135, 180),
     ("filter", "yfcc10m"): (15, 21),
-    ("filter", "pubmed"): (63, 75),
+    ("filter", "pubmed"): (63, 90),
     ("deep", "goodreads"): (42, 210),
     ("deep", "arxiv"): (72, 360),
     ("deep", "yfcc10m"): (9, 45),
@@ -636,8 +636,8 @@ def test_score_path_is_an_official_build_param():
 IVF = {
     "goodreads": (4096, 64),
     "arxiv": (2048, 256),
-    "yfcc10m": (16384, 4096),
-    "pubmed": (16384, None),
+    "yfcc10m": (4096, 1024),
+    "pubmed": (4096, 1024),
 }
 
 
