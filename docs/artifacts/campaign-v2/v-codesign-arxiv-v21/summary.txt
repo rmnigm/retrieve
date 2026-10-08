@@ -1,0 +1,40 @@
+records: 54 ok: 54 unstable: 39
+sweep            np bs mode   partial     full       full/partial
+all4              8  1 eager    1.303    1.066  0.819 [0.817,0.820]
+all4              8 16 eager    1.667    1.424  0.855 [0.853,0.855]
+all4             32  1 eager    1.301    1.069  0.823 [0.821,0.823]
+all4             32 16 eager    1.664    1.424  0.855 [0.854,0.856]
+all4            128  1 eager    1.300    1.069  0.822 [0.822,0.824]
+all4            128 16 eager    1.882    1.645  0.876 [0.874,0.876]
+c0_maincat        8  1 eager    1.290    1.058  0.819 [0.819,0.823]
+c0_maincat        8 16 eager    1.556    1.318  0.847 [0.847,0.848]
+c0_maincat       32  1 eager    1.293    1.058  0.818 [0.818,0.822]
+c0_maincat       32 16 eager    1.548    1.313  0.849 [0.846,0.850]
+c0_maincat      128  1 eager    1.294    1.058  0.820 [0.817,0.821]
+c0_maincat      128 16 eager    1.925    1.693  0.878 [0.878,0.879]
+c3_nversions      8  1 eager    1.293    1.059  0.819 [0.817,0.820]
+c3_nversions      8 16 eager    1.556    1.319  0.847 [0.847,0.848]
+c3_nversions     32  1 eager    1.294    1.060  0.819 [0.815,0.821]
+c3_nversions     32 16 eager    1.547    1.313  0.849 [0.848,0.850]
+c3_nversions    128  1 eager    1.294    1.059  0.819 [0.818,0.819]
+c3_nversions    128 16 eager    1.937    1.705  0.880 [0.880,0.881]
+recall_oracle@100 (median over seeds):
+  ('all4', 8, 'full') 0.5219
+  ('all4', 8, 'partial') 0.5219
+  ('all4', 32, 'full') 0.7475
+  ('all4', 32, 'partial') 0.7475
+  ('all4', 128, 'full') 0.9017
+  ('all4', 128, 'partial') 0.9017
+  ('c0_maincat', 8, 'full') 0.7393
+  ('c0_maincat', 8, 'partial') 0.7393
+  ('c0_maincat', 32, 'full') 0.8841
+  ('c0_maincat', 32, 'partial') 0.8841
+  ('c0_maincat', 128, 'full') 0.942
+  ('c0_maincat', 128, 'partial') 0.942
+  ('c3_nversions', 8, 'full') 0.713
+  ('c3_nversions', 8, 'partial') 0.713
+  ('c3_nversions', 32, 'full') 0.8767
+  ('c3_nversions', 32, 'partial') 0.8767
+  ('c3_nversions', 128, 'full') 0.9429
+  ('c3_nversions', 128, 'partial') 0.9429
+windows 324, below 1410 MHz 242, min 1155.0
