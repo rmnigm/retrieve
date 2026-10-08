@@ -20,6 +20,7 @@ artifacts state which clock estimator they used: the per-variant under-load
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import inspect
 import json
 import statistics
@@ -29,8 +30,9 @@ from typing import Any
 
 import click
 import matplotlib
+import numpy as np
 
-from bench import inputs, measure, records, run
+from bench import inputs, measure, records, run, stats
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -240,6 +242,107 @@ def _cells(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def _attach(rows: list[dict[str, Any]], recs: list[dict[str, Any]]) -> None:
+    """Join each flat row to its nested record (``_rec``) and perf entry (``_entry``): the
+    windows, the sidecar path and the interleave block the statistics read are record fields
+    (the schema-4 record contract), not parquet columns."""
+    by_key = {records.record_key(r): r for r in recs}
+    for row in rows:
+        key = {f: json.loads(row[f]) if f == "params" else row[f] for f in records.KEY_FIELDS}
+        row["_rec"] = rec = by_key[records.resume_key(key, row["env_code_version"])]
+        want = (row.get("perf_k"), row.get("perf_bs"), row.get("perf_mode"))
+        row["_entry"] = next(
+            (e for e in rec.get("perf") or [] if (e["k"], e["bs"], e["mode"]) == want), None
+        )
+
+
+def _windows(rows: list[dict[str, Any]]) -> list[float]:
+    return [
+        w
+        for r in rows
+        if r["_entry"] and r["_entry"].get("median_ms") is not None
+        for w in r["_entry"]["window_medians_ms"]
+    ]
+
+
+def _marks(rows: list[dict[str, Any]], perf: bool) -> dict[str, Any]:
+    return {
+        "n_seeds": len({r.get("seed") for r in rows}),
+        "unstable": perf and any(r.get("perf_unstable") for r in rows),
+        "partial": any(r.get("status") == "partial" for r in rows),
+    }
+
+
+def _lat(rows: list[dict[str, Any]]) -> dict | None:
+    """One arm's latency at one ``(bs, k, mode)``: the median of its per-window medians over
+    seed x window, with the bootstrap CI (§ Statistics)."""
+    rows = [r for r in rows if r["_entry"] and r["_entry"].get("median_ms") is not None]
+    ci = stats.median_ci(_windows(rows))
+    if ci is None:
+        return None
+    return {"value": ci[0], "lo": ci[1], "hi": ci[2], **_marks(rows, True)}
+
+
+@functools.cache
+def _sidecar(path: Path) -> dict[str, np.ndarray]:
+    with np.load(path) as z:
+        return dict(z)
+
+
+def _recall(c, rows: list[dict[str, Any]], k: int) -> dict | None:
+    """One arm's ``recall_oracle@k``: the mean over queries of the per-query recall (averaged
+    across the arm's distinct sidecars, i.e. its seeds when quality depends on the seed), with
+    the bootstrap CI over queries. Without a sidecar (schema <= 3): the median across seeds,
+    no CI."""
+    rows = [r for r in rows if r.get(f"oracle_recall@{k}") is not None]
+    if not rows:
+        return None
+    paths = sorted({r["_rec"]["per_query"] for r in rows if r["_rec"].get("per_query")})
+    if not paths:
+        v = statistics.median(
+            statistics.median(float(r[f"oracle_recall@{k}"]) for r in rows if r["seed"] == s)
+            for s in {r["seed"] for r in rows}
+        )
+        return {"value": v, "lo": None, "hi": None, **_marks(rows, False)}
+    cars = [_sidecar(c.results_dir / p) for p in paths]
+    if any(not np.array_equal(cars[0]["rows"], z["rows"]) for z in cars[1:]):
+        raise click.ClickException(f"sidecars of one arm cover different queries: {paths}")
+    per_query = np.stack([z[f"recall_oracle@{k}"] for z in cars]).mean(axis=0)
+    est, lo, hi = stats.mean_ci(per_query[~np.isnan(per_query)])
+    return {"value": est, "lo": lo, "hi": hi, **_marks(rows, False)}
+
+
+def _ratio(a: list[dict[str, Any]], b: list[dict[str, Any]]) -> tuple[tuple | None, bool]:
+    """Latency of arm A over arm B at one ``(bs, k, mode)``. Paired per round when every
+    common seed ran both arms in one interleave group, else unpaired."""
+    ra = {r["seed"]: r for r in a if r["_entry"] and r["_entry"].get("median_ms") is not None}
+    rb = {r["seed"]: r for r in b if r["_entry"] and r["_entry"].get("median_ms") is not None}
+    seeds = sorted(ra.keys() & rb.keys())
+    groups = [
+        ((ra[s]["_rec"].get("interleave") or {}).get("group"),
+         (rb[s]["_rec"].get("interleave") or {}).get("group"))
+        for s in seeds
+    ]  # fmt: skip
+    if seeds and all(g is not None and g == h for g, h in groups):
+        return stats.paired_ratio_ci(
+            _windows([ra[s] for s in seeds]), _windows([rb[s] for s in seeds])
+        ), True
+    return stats.ratio_ci(_windows(list(ra.values())), _windows(list(rb.values()))), False
+
+
+def _ratio_tex(ci: tuple | None, paired: bool) -> str:
+    if ci is None:
+        return "---"
+    body = f"{ci[0]:.2f}\\times\\,[{ci[1]:.2f}, {ci[2]:.2f}]" + ("" if paired else "^{u}")
+    return f"${body}$" if stats.differs(ci) else f"no difference (${body}$)"
+
+
+def _ci_tex(v: dict | None, places: int) -> str:
+    if v is None or v["lo"] is None:
+        return ""
+    return f"\\,{{\\tiny$[{v['lo']:.{places}f}, {v['hi']:.{places}f}]$}}"
+
+
 def _arm(algo: str, params: str | dict, tex: bool = True) -> str:
     """One row label per parameter set: ``postfilter ($\\alpha$=1)``. Rows are never averaged
     across parameters (the alpha rule, docs/system/evaluation.md § Report)."""
@@ -330,6 +433,15 @@ def _table(prov, results_dir, *, caption, label, colspec, header, body, notes) -
     )
 
 
+STATS_NOTE = (
+    "Latency: median of the per-window medians over seed $\\times$ window; recall: mean "
+    "over queries of the per-query \\texttt{recall\\_oracle} (the exact filtered oracle). "
+    f"Brackets: 95\\,\\% percentile bootstrap CI, $B={stats.B}$. A ratio is paired per round "
+    "when both arms ran interleaved ($^{u}$: unpaired); a ratio CI containing 1 prints "
+    "``no difference''."
+)
+
+
 def _legend(notes: list[str]) -> list[str]:
     return [
         "$^{\\dagger}$ the cell's timing windows spread more than 5\\,\\% "
@@ -347,41 +459,31 @@ def tab_pareto(c) -> list[Path]:
     for ds in sorted({r["dataset"] for r in c.rows}):
         rows = _sel(c.rows, dataset=ds, dim=c.dim, backend=c.backend)
         perf = _sel(rows, perf_k=c.k, perf_bs=c.bs, perf_mode=c.mode)
-        sweeps = sorted({r["sweep"] for r in rows if r["filter_kind"] != "none"})
+        conds = sorted({(r["filter_kind"], r["sweep"]) for r in rows if r["filter_kind"] != "none"})
         notes, body = [], []
-        for sw in sweeps:
-            base = _reduce(
-                _sel(perf, sweep=sw, algo=SPEEDUP_BASE), "perf_median_ms", [], f"{ds}/{sw}/base"
-            )
+        for fk, sw in conds:
+            base = _sel(perf, filter_kind=fk, sweep=sw, algo=SPEEDUP_BASE)
             arms = sorted(
                 {
                     (r["algo"], r["params"])
                     for r in rows
-                    if r["sweep"] == sw and r["algo"] in ALGO_LABEL
+                    if (r["filter_kind"], r["sweep"]) == (fk, sw) and r["algo"] in ALGO_LABEL
                 },
                 key=lambda ap: (list(ALGO_LABEL).index(ap[0]), ap[1]),
             )
             for i, (a, pj) in enumerate(arms):
-                q = _reduce(
-                    _cells(_sel(rows, sweep=sw, algo=a, params=pj)),
-                    f"oracle_recall@{c.k}",
-                    notes,
-                    f"{ds}/{sw}/{a}",
-                )
-                t = _reduce(_sel(perf, sweep=sw, algo=a, params=pj), "perf_median_ms", [], "")
-                m = _reduce(_cells(_sel(rows, sweep=sw, algo=a, params=pj)), "index_mib", [], "")
-                sp = (
-                    "---"
-                    if not (base and t)
-                    else _f(base["value"] / t["value"], 2)[:-1] + "\\times$"
-                )
+                arm = _sel(rows, filter_kind=fk, sweep=sw, algo=a, params=pj)
+                arm_perf = _sel(perf, filter_kind=fk, sweep=sw, algo=a, params=pj)
+                q = _recall(c, _cells(arm), c.k)
+                t = _lat(arm_perf)
+                m = _reduce(_cells(arm), "index_mib", notes, f"{ds}/{sw}/{a}")
                 body.append(
                     [
-                        f"\\textbf{{{_esc(sw)}}}" if i == 0 else "",
+                        f"\\textbf{{{_esc(sw)}}} ({fk})" if i == 0 else "",
                         _arm(a, pj),
-                        _num(q),
-                        _num(t, 3),
-                        sp,
+                        _num(q) + _ci_tex(q, 4),
+                        _num(t, 3) + _ci_tex(t, 3),
+                        "---" if a == SPEEDUP_BASE else _ratio_tex(*_ratio(base, arm_perf)),
                         _num(m, 1),
                     ]
                 )
@@ -396,8 +498,8 @@ def tab_pareto(c) -> list[Path]:
                     "Speedup", "Memory (MiB)"],
             body=body,
             notes=_legend(notes + [
-                f"Speedup over {ALGO_LABEL[SPEEDUP_BASE]} on the same sweep "
-                "('---' when that row is absent). Recall is against the exact filtered oracle.",
+                f"Speedup = latency of {ALGO_LABEL[SPEEDUP_BASE]} on the same sweep over the "
+                "arm's ('---' when either is absent). " + STATS_NOTE,
                 _clock_note(perf),
             ]),
         )  # fmt: skip
@@ -439,11 +541,7 @@ def tab_backend_parity(c) -> list[Path]:
         ds, sw, algo, be = key
         sub = _sel(rows, dataset=ds, sweep=sw, algo=algo, backend=be)
         cell = _cells(sub)[0]
-        eager = _reduce(_sel(sub, perf_mode="eager"), "perf_median_ms", [], "")
-        graph = _reduce(_sel(sub, perf_mode="graph"), "perf_median_ms", [], "")
-        ratio = (
-            _f(eager["value"] / graph["value"], 2)[:-1] + "\\times$" if eager and graph else "---"
-        )
+        eager, graph = _sel(sub, perf_mode="eager"), _sel(sub, perf_mode="graph")
         jac = cell.get(f"quality_jaccard_vs_first@{c.k}")
         diff = cell.get("quality_score_max_abs_diff")
         body.append(
@@ -455,9 +553,9 @@ def tab_backend_parity(c) -> list[Path]:
                 f"\\texttt{{{_esc(cell.get('path'))}}}",
                 _f(jac, 6),
                 _sci(diff),
-                _num(eager, 3),
-                _num(graph, 3),
-                ratio,
+                _num(_lat(eager), 3),
+                _num(_lat(graph), 3),
+                _ratio_tex(*_ratio(eager, graph)),
             ]
         )
     tex = _table(
@@ -473,7 +571,7 @@ def tab_backend_parity(c) -> list[Path]:
             "\\texttt{jaccard} and $|\\Delta s|_{\\max}$ are against the first backend of the "
             "same $(dataset, dim, algo, params, seed)$ group (the parity spill file); the "
             "reference row itself shows '---'. A \\texttt{graph} column of '---' is a "
-            "non-capturable path (\\texttt{official} is eager-only).",
+            "non-capturable path (\\texttt{official} is eager-only). " + STATS_NOTE,
             _clock_note(rows),
         ]),
     )  # fmt: skip
@@ -566,13 +664,17 @@ def fig_pareto(c) -> list[Path]:
 
 
 def fig_deep_sweep(c) -> list[Path]:
-    """Quality and latency against the swept parameter, whiskers = seed min--max."""
+    """Quality and latency against each swept parameter, one curve per value of the others,
+    whiskers = 95 % bootstrap CI."""
     written = []
     rows = _sel(c.rows, dim=c.dim, perf_k=c.k, perf_bs=c.bs, perf_mode=c.mode, backend=c.backend)
     groups = defaultdict(list)
     for r in rows:
-        for name, value in json.loads(r.get("params") or "{}").items():
-            groups[(r["dataset"], r["sweep"], r["algo"], name)].append((value, r))
+        params = json.loads(r.get("params") or "{}")
+        for name, value in params.items():
+            rest = "".join(f"-{n}{v}" for n, v in sorted(params.items()) if n != name)
+            key = (r["dataset"], r["filter_kind"], r["sweep"], r["algo"], name, rest)
+            groups[key].append((value, r))
     swept = {g: v for g, v in groups.items() if len({x for x, _ in v}) > 1}
     if not swept:
         return [
@@ -582,27 +684,27 @@ def fig_deep_sweep(c) -> list[Path]:
                 "no parameter is swept over more than one value in these records",
             )
         ]
-    for (ds, sw, algo, name), items in sorted(swept.items()):
+    for (ds, fk, sw, algo, name, rest), items in sorted(swept.items()):
         fig, ax = plt.subplots(figsize=(6.5, 4.2))
         ax2 = ax.twinx()
         xs = sorted({x for x, _ in items})
         handles = []
-        for axis, field, colour, marker, style, lbl in (
-            (ax, f"oracle_recall@{c.k}", "tab:blue", "o", "-", f"Recall@{c.k}"),
-            (ax2, "perf_median_ms", "tab:red", "s", "--", f"$t_{{med}}$ (ms), {c.mode}"),
+        for axis, est, colour, marker, style, lbl in (
+            (ax, lambda rs: _recall(c, _cells(rs), c.k), "tab:blue", "o", "-", f"Recall@{c.k}"),
+            (ax2, _lat, "tab:red", "s", "--", f"$t_{{med}}$ (ms), {c.mode}"),
         ):
-            ys, lo, hi = [], [], []
-            for x in xs:
-                v = _reduce([r for val, r in items if val == x], field, [], "")
-                ys.append(None if v is None else v["value"])
-                lo.append(None if v is None else v["value"] - v["lo"])
-                hi.append(None if v is None else v["hi"] - v["value"])
-            if any(y is not None for y in ys):
+            vs = [est([r for val, r in items if val == x]) for x in xs]
+            pts = [(x, v) for x, v in zip(xs, vs, strict=True) if v is not None]
+            if pts:
+                err = [
+                    [0.0 if v["lo"] is None else v["value"] - v["lo"] for _, v in pts],
+                    [0.0 if v["hi"] is None else v["hi"] - v["value"] for _, v in pts],
+                ]
                 handles.append(
                     axis.errorbar(
-                        xs,
-                        ys,
-                        yerr=[lo, hi],
+                        [x for x, _ in pts],
+                        [v["value"] for _, v in pts],
+                        yerr=err,
                         marker=marker,
                         capsize=3,
                         color=colour,
@@ -616,12 +718,16 @@ def fig_deep_sweep(c) -> list[Path]:
         ax.set_xlabel(name)
         n_seeds = len({r.get("seed") for _, r in items})
         ax.set_title(
-            f"{ALGO_LABEL.get(algo, algo)} on {DATASET_LABEL.get(ds, ds)} {sw}: "
-            f"{name} sweep\n(whiskers = min--max over {n_seeds} seed(s))"
+            f"{ALGO_LABEL.get(algo, algo)} on {DATASET_LABEL.get(ds, ds)} {sw} ({fk}): "
+            f"{name} sweep {rest.lstrip('-')}\n(whiskers = 95% bootstrap CI, {n_seeds} seed(s))"
         )
         ax.grid(alpha=0.3)
         written.append(
-            _figure(c.out / "figures" / f"fig-deep-sweep-{ds}-{sw}-{algo}-{name}.png", fig, c.prov)
+            _figure(
+                c.out / "figures" / f"fig-deep-sweep-{ds}-{fk}-{sw}-{algo}-{name}{rest}.png",
+                fig,
+                c.prov,
+            )
         )
     return written
 
@@ -718,6 +824,13 @@ def methodology(c) -> list[Path]:
         "\\item \\textbf{Repeats.} Batch sizes "
         f"$B \\in \\{{{', '.join(map(str, bss)) or '?'}\\}}$, "
         f"seeds $\\{{{', '.join(str(s) for s in seeds) or '?'}\\}}$.",
+        "\\item \\textbf{Statistics.} A latency is the median of the per-window medians "
+        "pooled over seed $\\times$ window; a recall is the mean over queries of the "
+        "per-query \\texttt{recall\\_oracle}. Both carry a 95\\,\\% percentile bootstrap CI "
+        f"($B = {stats.B}$, fixed generator seed) over those units. Arms timed interleaved "
+        "(ABAB, one process) are compared by the per-round ratio, its median and its CI "
+        "over seed $\\times$ round; other comparisons resample each arm independently. A "
+        "ratio whose CI contains 1 is reported as no difference.",
     ]
     tex = (
         _banner(c.prov, c.results_dir)
@@ -857,6 +970,7 @@ class Ctx:
         self.results_dir, self.out = Path(results_dir), Path(out)
         self.flat, self.rows = _load(self.results_dir, self.out)
         self.recs = records.latest(self.results_dir)
+        _attach(self.rows, self.recs)
         _one_inputs_per_dataset(self.rows)
         self.samples = _samples(self.results_dir)
         self.prov = provenance(self.recs, gate)

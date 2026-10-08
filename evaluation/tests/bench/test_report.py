@@ -8,9 +8,11 @@ declared *and* the evidence allows it.
 
 from __future__ import annotations
 
+import hashlib
 import re
 
 import click
+import numpy as np
 import pytest
 
 from bench import records, report
@@ -34,13 +36,14 @@ ENV = {
 }  # fmt: skip
 
 
-def _perf(k, bs, mode, ms, unstable=False):
+def _perf(k, bs, mode, ms, unstable=False, windows=(1.0, 1.0, 1.0)):
     return {
         "k": k, "bs": bs, "mode": mode, "n": 1000, "median_ms": ms, "mean_ms": ms,
         "p95_ms": ms * 1.1, "p99_ms": ms * 1.2, "min_ms": ms * 0.9, "iqr_ms": 0.01,
         "qps": 1000 * bs / (ms * 1e-3 * 1000), "host_gap_ms": 0.01, "spread":
         0.2 if unstable else 0.001, "unstable": unstable, "peak_fwd_mib": 4.0,
-        "window_medians_ms": [ms, ms, ms], "sm_mhz": 1410.0, "load": "closed_loop",
+        "window_medians_ms": [ms * w for w in windows], "sm_mhz": 1410.0,
+        "load": "closed_loop",
     }  # fmt: skip
 
 
@@ -58,9 +61,11 @@ def _rec(
     unstable=False,
     recall=0.9,
     jaccard=None,
+    windows=(1.0, 1.0, 1.0),
+    interleave=None,
 ):
     perf = [
-        _perf(k, bs, mode, ms * (1 + 0.1 * bs), unstable)
+        _perf(k, bs, mode, ms * (1 + 0.1 * bs), unstable, windows)
         for k in (100,)
         for bs in (1, 8, 16)
         for mode in ("eager", "graph")
@@ -84,9 +89,29 @@ def _rec(
         },
         "perf": None if status == "failed" else perf,
         "unstable": unstable, "memory_reserved_mib": 1220.0, "elapsed_s": 10.0,
-        "env": dict(ENV),
+        "env": dict(ENV), "interleave": interleave, "per_query": None,
         **({"stage": "build", "error": "RuntimeError: boom"} if status == "failed" else {}),
     }  # fmt: skip
+
+
+def _with_sidecar(root, rec, recall):
+    """Write the schema-4 per-query sidecar of ``rec`` (the record contract) and point at it."""
+    rel = (
+        f"{rec['suite']}/{rec['dataset']}-d{rec['dim']}.perquery/"
+        f"{hashlib.sha1(records.record_key(rec).encode()).hexdigest()[:20]}.npz"
+    )
+    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+    n = len(recall)
+    np.savez_compressed(
+        root / rel,
+        rows=np.arange(n, dtype=np.int32),
+        pass_count=np.full(n, 1000, dtype=np.int64),
+        **{"recall_oracle@100": np.asarray(recall, dtype=np.float32)},
+        **{"heldout_recall@100": np.full(n, np.nan, dtype=np.float32)},
+    )
+    rec["per_query"] = rel
+    rec["quality"]["oracle"]["recall@100"] = float(np.nanmean(recall))
+    return rec
 
 
 @pytest.fixture
@@ -304,7 +329,7 @@ def test_postfilter_rows_carry_their_alpha_and_are_never_averaged(tmp_path):
     assert "0.7100" in rows[1] and "0.9700" in rows[8] and "0.85" not in rows[1]
     assert "postfilter" in (tmp_path / "out" / "tables" / "tab-memory.tex").read_text()
     names = {p.name for p in c.written}
-    assert "fig-deep-sweep-goodreads-c0_genre-postfilter-alpha.png" in names
+    assert "fig-deep-sweep-goodreads-clause-c0_genre-postfilter-alpha.png" in names
     assert report._sel(c.rows, backend="official", algo="postfilter")  # any backend selection
     assert not report._sel(c.rows, backend="official", algo="linr_v1_filter_mask")
 
@@ -315,3 +340,40 @@ def test_an_algo_without_a_label_never_reaches_a_table(results, tmp_path):
     _generate(results, tmp_path / "out")
     for name in ("tab-pareto_goodreads.tex", "tab-memory.tex"):
         assert "v4" not in (tmp_path / "out" / "tables" / name).read_text().lower()
+
+
+def test_interleaved_arms_give_a_paired_speedup_and_sidecars_give_the_recall_ci(tmp_path):
+    root = tmp_path / "results"
+    p = root / "filter" / "goodreads-d128.jsonl"
+    group = {"group": "g0", "arms": ["linr_v1_filter_mask", "linr_v2"]}
+    for seed in (0, 1):
+        v1 = _rec(
+            "goodreads",
+            "linr_v1_filter_mask",
+            "triton",
+            seed=seed,
+            ms=1.0,
+            windows=(1.0, 1.3, 0.8),
+            interleave={**group, "position": 0},
+        )
+        v2 = _rec(
+            "goodreads",
+            "linr_v2",
+            "triton",
+            seed=seed,
+            ms=0.5,
+            windows=(1.0, 1.3, 0.8),
+            interleave={**group, "position": 1},
+        )
+        records.append_record(p, _with_sidecar(root, v1, [1.0] * 400))
+        records.append_record(p, _with_sidecar(root, v2, [1.0, 0.0] * 200))
+    for seed, w in ((0, (1.0, 1.0, 1.0)), (1, (0.9, 1.1, 1.0))):  # not interleaved
+        records.append_record(p, _rec("goodreads", "linr_v3", "triton", seed=seed, ms=1.0,
+                                      windows=w))  # fmt: skip
+    _generate(root, tmp_path / "out")
+    tex = (tmp_path / "out" / "tables" / "tab-pareto_goodreads.tex").read_text()
+    v2 = next(ln for ln in tex.splitlines() if "LiNR V2" in ln)
+    assert "$2.00\\times\\,[2.00, 2.00]$" in v2  # 1.1 ms / 0.55 ms in every round
+    assert "$0.5000$\\,{\\tiny$[0.4" in v2  # the mean of the per-query recalls, with its CI
+    v3 = next(ln for ln in tex.splitlines() if "LiNR V3" in ln)
+    assert "no difference ($1.00\\times" in v3 and "^{u}" in v3  # unpaired, CI holds 1

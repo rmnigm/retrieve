@@ -803,6 +803,34 @@ the table with a `--- no matching cells ---` row rather than failing.
 point; the thesis's Russian artifacts (decimal comma) stay in git history
 and the delivered thesis, and are not regenerated.
 
+### Statistics
+
+[`bench/stats.py`](../../evaluation/bench/stats.py) — its own module because
+it is pure numpy with known-answer tests (`tests/bench/test_stats.py`) and
+no record, LaTeX or plotting in it. Every resample uses `B = 10 000` draws
+from one fixed generator seed (`stats.SEED`), so regenerating a report from
+the same records prints the same intervals.
+
+| quantity | point estimate | 95 % CI (percentile bootstrap) |
+|---|---|---|
+| latency of one arm at one `(bs, k, mode)` | median of the per-window medians (`perf[].window_medians_ms`) pooled over seed × window | resampling seed × window units |
+| `recall_oracle@k` of one arm | mean over queries of the per-query recall from the [sidecar](#output-one-jsonl-record-per-cell) (`per_query`), averaged first across the arm's distinct sidecars (its seeds, when quality depends on the seed; a quality-cache copy points at its source's sidecar) | resampling queries. A schema ≤ 3 record has no sidecar: the median across seeds, no CI |
+| A over B, interleaved (every common seed ran both in one `interleave.group`) | median of the per-round ratios window *i* of A / window *i* of B | resampling seed × round |
+| A over B, otherwise | median(A) / median(B) | each side resampled independently; marked $^{u}$ |
+
+A ratio whose CI contains 1.0 prints "no difference" (the plan's noise
+gate); no repeat is added to force significance. `_attach` joins each
+`results.parquet` row to its nested record and perf entry, because the
+windows, the sidecar path and the interleave block are record fields, not
+parquet columns. The per-sweep table, the parity table and the deep-sweep
+figures already use these estimators.
+
+**Matched recall.** `stats.at_recall` interpolates latency at a target
+recall on one curve: piecewise-linear between the two adjacent measured
+points that bracket the target on the recall-sorted curve, the measured
+point itself on an exact hit, never extrapolated ("not reached" past the
+last point; "first point already above" before the first).
+
 **Labels and the alpha rule.** `ALGO_LABEL` names every algo a table may
 show; a record of an algo without a label (a retired `linr_v4` leg) reaches
 no table. The per-sweep tables show one row per parameter set, labelled with
@@ -989,7 +1017,8 @@ trailing-whitespace hooks (the last two never on `articles/`, `docs/artifacts/`,
 | `bench/test_run.py` | end to end on the tiny fixture, both modes (`graph` = the CPU null entry): record schema, resume, `code_version` invalidation, `partial`, a failed cell + continue, a sticky CUDA error, the quality gate, the parity spill (and a same-backend spill rewritten), reachable-target masking, the plan cache off through `OfficialConfig`, `modes` stamped per job (an eager-only uncapturable record `ok`, a capturable one `partial`), `postfilter`'s `recall_oracle` per `k` (equal to a pass at that `k`, never above the exact V1's) |
 | `bench/test_cli.py` | `bench run` via `CliRunner`, `--checkpoint` landing as the record's `inputs` (encoder faked), a real one-child `bench campaign` ending in `results.parquet`, a faked timed-out child, a restart mid-group keeping its parity spill (in-process children), zero cells → exit 1, `bench report` over the campaign's own records, `bench env`'s JSON keys |
 | `bench/test_upload.py` | `bench upload` with no network: `_logs/` and `_parity/` never listed, the manifest's sha256 per file, evidence beating `--gate` four ways, the generated README over several subtrees, `verify` catching a changed byte, the commit's operations (with the regenerated `results.parquet`) and `private=True`; `bench fetch` restoring a tree resume reads and refusing to overwrite a different local copy |
-| `bench/test_report.py` | every column the tables read still comes out of `records.aggregate`; every artifact emitted; the LaTeX structurally balanced with its labels and no unescaped `_`; one row per postfilter alpha; an unlabelled algo (`linr_v4`) in no table; a `failed` record excluded and a `partial` / `unstable` one marked; citability off by default and evidence beating `--gate`; two `inputs` under one `(dataset, dim)` refused; an empty tree; a schema-1 record |
+| `bench/test_report.py` | every column the tables read still comes out of `records.aggregate`; every artifact emitted; the LaTeX structurally balanced with its labels and no unescaped `_`; one row per postfilter alpha; an unlabelled algo (`linr_v4`) in no table; a `failed` record excluded and a `partial` / `unstable` one marked; citability off by default and evidence beating `--gate`; two `inputs` under one `(dataset, dim)` refused; an empty tree; a schema-1 record; paired speedups from interleaved arms and recall CIs from sidecars |
+| `bench/test_stats.py` | G-stats: a constant's CI is a point; A = 2B pairs to 2.0 with a CI excluding 1; identical arms are no difference; interpolation exact on a linear curve, never extrapolated |
 | `bench/test_c4_gate.py` | the golden-comparison gate script, [`c4_gate.py`](../artifacts/evaluation-harness-v2/c4_gate.py), against synthesised schema-1 records |
 | `eval_datasets/test_layout.py` | the legacy pad-row rule, `apply_users_limit`, `validate_layout` clean on both layouts and flagging a short `eval_split`, a missing or swapped prefix sidecar, misaligned attrs |
 | `eval_datasets/test_yfcc.py`, `test_pubmed.py`, `test_kuairand.py`, `test_openalex.py` | the four ETL loaders on synthetic fixtures |
