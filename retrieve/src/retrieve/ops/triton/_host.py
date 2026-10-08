@@ -153,7 +153,7 @@ def grid_batch_tiles(b: int, n: int, block: int) -> tuple[tuple[int, int, int], 
     ``cdiv(n, block)`` tiles split across grid_y × grid_z to dodge the 65535 single-axis cap;
     the kernel rebuilds ``tile_id = tile_x * tiles_y + tile_y`` from the returned ``tiles_y``."""
     tiles = triton.cdiv(n, block)
-    tiles_x = triton.cdiv(tiles, 65535)
+    tiles_x = max(1, triton.cdiv(tiles, 65535))  # n == 0: an empty grid, not cdiv(0, 0)
     tiles_y = triton.cdiv(tiles, tiles_x)
     return (b, tiles_y, tiles_x), tiles_y
 

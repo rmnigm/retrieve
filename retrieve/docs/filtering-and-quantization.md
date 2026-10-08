@@ -66,7 +66,10 @@ runs plain ANN.
 A `FilterModule` (`BloomFilter`, `ExactAttributeFilter`) exposes three evaluation paths over a
 registered item set:
 
-- `evaluate_mask(query_clause_attrs) -> [B, N]` bool — dense.
+- `evaluate_mask(query_clause_attrs, start=0, end=None) -> [B, end - start]` bool — dense, over
+  items `[start, end)` (default: all `N`). A range is evaluated on a slice of the item table, so
+  walking a large catalog in chunks never allocates `[B, N]`; each chunk equals the full mask's
+  `[:, start:end]` exactly.
 - `evaluate_indices(query_clause_attrs) -> ([B, P] int64, [B] int64)` — a compact candidate set
   `(ids, counts)`; each row's ids are in ascending item order on both backends.
 - `evaluate_subset(query_clause_attrs, candidate_ids) -> [B, P]` bool — re-check an existing

@@ -40,7 +40,7 @@ retrieve/tests/
 │   │                                no wide intermediate in a forward)
 │   ├── test_combine_filters.py
 │   ├── test_compact.py
-│   ├── test_filters.py             (ExactAttributeFilter)
+│   ├── test_filters.py             (ExactAttributeFilter; item-range masks of both filters)
 │   ├── test_kmeans.py              (KMeans.fit bit-reproducible; kmeans++ init)
 │   ├── test_large_offsets.py       (addressing past 2³¹ elements, one planted case per overflow class; skipped
 │   │                                below 48 / 24 GiB free — kernels.md § Addressing)
@@ -412,6 +412,12 @@ INT8 + OPORP + popcount.
   `(~matched).all(dim=-1)`.
 - `N = 1` corner.
 - `evaluate_subset` with `[B, 0]` candidates returns `[B, 0]`.
+- Item ranges (`evaluate_mask(q, start, end)`, both filters, both
+  backends, exact with a reverse clause): `torch.equal` to
+  `evaluate_mask(q)[:, start:end]` for empty, single-item, unaligned
+  (to 32/64/128 and the 64-bit word), end-at-`N` and whole-catalog
+  ranges; and a peak-memory assertion at `N = 2²²`, `B = 16` that a
+  range's transient stays below `B·N/16` bytes (no `[B, N]` mask).
 - Cross-compat smoke: `combine_masks(clause_mask, bloom_mask)` →
   `compact_mask` → `OneBitKNN(backend="triton")` candidates path
   (the combined mask should equal the clause mask, since bloom is a

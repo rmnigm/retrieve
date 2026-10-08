@@ -175,7 +175,9 @@ and must be overridden by every concrete filter; `evaluate_indices` and
 `evaluate_mask(...).gather(1, candidate_ids)` respectively) and are
 overridden only when a fused kernel beats the default:
 
-- `evaluate_mask(query_clause_attrs) → [B, N] bool` — dense path, fed to
+- `evaluate_mask(query_clause_attrs, start=0, end=None) → [B, end - start]
+  bool` — dense path over items `[start, end)` (a row slice of the item
+  table; [filtering](filtering.md#item-range-masks)), fed to
   the mask-taking dense layers (`PostfilterKNN`,
   which masks scores before top-K) or compacted via `compact_mask` for
   the candidates-taking layers. `ExactAttributeFilter` routes to the

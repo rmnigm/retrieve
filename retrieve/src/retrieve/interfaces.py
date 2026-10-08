@@ -94,7 +94,8 @@ class RetrievalModule(nn.Module, abc.ABC):
 class FilterModule(nn.Module, abc.ABC):
     """Boolean predicate over a registered item index; ``forward`` aliases ``evaluate_mask``.
 
-    Three eval paths: ``evaluate_mask(q) -> [B, N] bool`` (dense), ``evaluate_indices(q) -> ([B,
+    Three eval paths: ``evaluate_mask(q, start=0, end=None) -> [B, end - start] bool`` (dense,
+    over items ``[start, end)``), ``evaluate_indices(q) -> ([B,
     P] int64, [B] int64)`` (compact candidates), ``evaluate_subset(q, candidate_ids) -> [B, P]
     bool`` (check only the given ids)."""
 
@@ -107,7 +108,9 @@ class FilterModule(nn.Module, abc.ABC):
     ) -> None: ...
 
     @abc.abstractmethod
-    def evaluate_mask(self, query_clause_attrs: Tensor) -> Tensor: ...
+    def evaluate_mask(
+        self, query_clause_attrs: Tensor, start: int = 0, end: int | None = None
+    ) -> Tensor: ...
 
     def evaluate_indices(
         self,

@@ -64,6 +64,22 @@ boolean composition.
 | `combine_masks` / `combine_indices` | [functional.py](../../retrieve/src/retrieve/functional.py) | mask-AND composition; sparse cascade via `evaluate_subset` |
 | Official SilverTorch filters (`backend="official"`) | [ops/official/adapter.py](../../retrieve/src/retrieve/ops/official/adapter.py) | `filter_mode="bloom"` is **Meta's bloom index** (`bloom_index_build` over `(clause, value)` features, murmur3, bundles of 2048 docs, width from `OfficialConfig.b_multiplier`) queried through their expression DSL (`"0:v AND 1:w"`, `NOT`, `""` = all) — a different hash from ours, never bit-compared, matched by FPR / memory instead; `filter_mode="exact"` is our `clause_mask` packed into the official scorer's `filtering_bit_mask`. See [kernels.md](kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend) |
 
+## Item-range masks
+
+`evaluate_mask(query_clause_attrs, start=0, end=None) → [B, end - start]
+bool` evaluates items `[start, end)` only; the default is the whole
+catalog. Both filters hand the op a row slice of their item table
+(`item_clause_attrs[start:end]`, `bloom_sigs[start:end]`): a contiguous
+view, so neither `clause_mask` nor `bloom_match` changed and no `[B, N]`
+mask exists for a range on either backend (`torch` materializes
+`[B, end - start, C, A_max]` for exact, `[B, end - start, W]` for bloom).
+The predicate is per item, so the range result is bit-identical to
+`evaluate_mask(q)[:, start:end]`, empty ranges included (an empty grid
+launches nothing). The consumer is the harness's chunked oracle, which
+walks the catalog in ranges where a `[B, N]` mask does not fit (10M items
+× 768). Gate: `test_evaluate_mask_range_*` in
+[`test_filters.py`](../../retrieve/tests/correctness/test_filters.py).
+
 ## Key observation: LiNR hosts *both* filter types
 
 LiNR's `forward` is decoupled from the filter — it accepts `mask: [B, N]`
