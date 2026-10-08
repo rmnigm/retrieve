@@ -314,7 +314,7 @@ def test_suite_errors_are_named():
             "[{algo: linr_v2, backends: [triton], filter_kinds: [exact]}]",
             "filter_kinds \\['exact'\\]",
         ),
-        ("[{algo: linr_v4, backends: [triton]}]", "unknown algo 'linr_v4'"),
+        ("[{algo: linr_v9, backends: [triton]}]", "unknown algo 'linr_v9'"),
         (
             "[{algo: linr_v1_filter_mask, backends: [triton]},"
             " {algo: linr_v1_filter_mask, backends: [torch], filter_kinds: [none]}]",
@@ -398,7 +398,13 @@ def test_grid_counts_and_invariants(suite, dataset):
     if suite in ("filter", "deep", "synth", "codesign"):
         assert all(j.batch_sizes == (1, 16) for j in jobs)
     assert not any(j.backend == "official" and j.filter_kind == "clause" for j in jobs)
-    assert not any(j.algo == "linr_v4" for j in jobs)
+    assert {j.algo for j in jobs} <= {
+        "linr_v1_filter_mask",
+        "linr_v2",
+        "linr_v3",
+        "silvertorch",
+        "postfilter",
+    }
     assert not any(p.get("n_probe") in (4, 256) for _, p in cells)
     assert not any(j.narrowed for j in jobs)
     if suite in ("filter", "deep") and dataset in KEPT:
