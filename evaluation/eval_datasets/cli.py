@@ -11,6 +11,7 @@ import sys
 import click
 
 from eval_datasets.hub import fetch, publish, publish_checkpoint
+from eval_datasets.ingest import ingest_cmd
 from eval_datasets.synth_filter import synth_filter
 
 ETL = {
@@ -23,6 +24,7 @@ ETL = {
     "pubmed": "pubmed",
     "kuairand": "kuairand",
     "openalex": "openalex",
+    "laion": "laion",
 }
 
 
@@ -47,6 +49,7 @@ main.add_command(fetch)
 main.add_command(publish)
 main.add_command(publish_checkpoint)
 main.add_command(synth_filter)
+main.add_command(ingest_cmd)
 
 
 if __name__ == "__main__":
