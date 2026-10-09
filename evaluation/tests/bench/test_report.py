@@ -433,6 +433,7 @@ def _rec4(
     interleave=None,
     kernels=None,
     kernels_us=None,
+    scopes=None,
     ids="a",
     fp_rate=None,
     source=None,
@@ -471,6 +472,8 @@ def _rec4(
                     e["kernels"] = kernels
                 if kernels_us and mode == "eager":
                     e["kernels_us"], e["kernels_calls"] = kernels_us
+                if scopes and mode == "eager":
+                    e["kernel_scopes"] = scopes
                 entries.append(e)
     rec |= {
         "schema_version": 4,
@@ -819,11 +822,21 @@ def _campaign_tree(root):
         g = f"h2h-goodreads-{s}"
         # int32: seed 1 returns another tied id at the k-th cut (scores bit-equal); fp16: other
         # ids and other scores. Triton is profiled over every kernel, official top-8 only.
-        for pos, (be, params, ms, ids, diff, kus) in enumerate(
+        # H-SCOPE: triton and official fp16 carry kernel_scopes, int32 does not (an older record)
+        sc = lambda us: {"scorer": {"us": us, "calls": 1}, "other": {"us": 1.0, "calls": 1}}  # noqa: E731
+        for pos, (be, params, ms, ids, diff, kus, scopes) in enumerate(
             (
-                ("triton", {"n_probe": 24}, 0.4, "x", None, (75.0, 7)),
-                ("official", {"n_probe": 24, "score_path": "fp16"}, 0.6, "y", 9.77e-3, None),
-                ("official", {"n_probe": 24, "score_path": "int32"}, 0.8, "xz"[s], 0.0, None),
+                ("triton", {"n_probe": 24}, 0.4, "x", None, (75.0, 7), sc(30.0 + s)),
+                (
+                    "official",
+                    {"n_probe": 24, "score_path": "fp16"},
+                    0.6,
+                    "y",
+                    9.77e-3,
+                    None,
+                    sc(60.0),
+                ),
+                ("official", {"n_probe": 24, "score_path": "int32"}, 0.8, "xz"[s], 0.0, None, None),
             )
         ):
             _rec4(
@@ -840,6 +853,7 @@ def _campaign_tree(root):
                 ks=(100, 1000),
                 kernels=kern,
                 kernels_us=kus,
+                scopes=scopes,
                 ids=ids,
                 score_diff=diff,
                 interleave=_group(g, arms, pos),
@@ -962,9 +976,13 @@ def test_t3_pairs_the_interleaved_arms_and_checks_id_identity(campaign):
     assert "$1.50\\times\\,[1.50, 1.50]$" in fp16 and "& $\\neq$ &" in fp16
     graph = next(ln for ln in t3.splitlines() if "[triton]" in ln and "& graph &" in ln)
     assert "& $=$ &" in graph  # the canonical hash is the eager arm's at every seed
-    assert "& $50.0^{8}$ & $3$ &" in int32  # no kernels_us: the top-8 sum, marked
+    assert "& $50.0^{8}$ & --- & $3$ &" in int32  # no kernels_us: the top-8 sum; no scopes: ---
     eager = next(ln for ln in t3.splitlines() if "[triton]" in ln and "& eager &" in ln)
-    assert "& $75.0$ & $7$ &" in eager  # kernels_us / kernels_calls, every kernel
+    # kernels_us / kernels_calls, every kernel; scorer = kernel_scopes' scorer, median over seeds
+    assert "& $75.0$ & $30.5$ & $7$ &" in eager
+    assert "& $60.0$ & $3$ &" in fp16  # official fp16: top-8 sum (no kernels_us), its scorer scope
+    graph_sc = next(ln for ln in t3.splitlines() if "[triton]" in ln and "& graph &" in ln)
+    assert "& --- & --- & --- &" in graph_sc  # graph mode is not profiled
 
 
 def test_f3_draws_one_panel_per_sweep_and_batch_size(campaign, monkeypatch):
