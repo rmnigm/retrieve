@@ -81,6 +81,6 @@ def perf(r, bs, k, mode):
 
 
 def pass_p(r):
-    """The synth sweep's target pass rate from its name (p0001 -> 0.001, p1 -> 1.0)."""
+    """The synth sweep's target pass rate from its name (p0001 -> 0.001, p1 -> 1.0; c001 -> 0.01)."""
     s = r["sweep"][1:]
     return float(s) if s == "1" else float("0." + s[1:])
