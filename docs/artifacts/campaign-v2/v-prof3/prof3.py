@@ -7,6 +7,7 @@ ITEM a: goodreads `codesign`, official bloom c0_genre, n_probe 32, bs 16, partia
 ITEM b: goodreads-synth `synth`, V1 clause p01, bs 1, Triton vs torch.compile(max-autotune).
 ITEM c0001 / c1: goodreads-synth `synth`, V1 Triton clause p0001 / p1, bs 16, eager vs graph.
 ITEM ac0001 / ac1: the same on arxiv-synth (3 M).
+ITEM bg1 / bg16 / ba1 / ba16: C3's pair (b) on goodreads-synth / arxiv-synth `p01` at bs 1 / 16.
 k 100, seed 0 everywhere. `profile` writes OUT/<item>-<variant>/ (kernels.csv, api.csv, summary.json,
 trace.json.gz); `time` writes OUT/<item>-timing.json."""
 
@@ -53,6 +54,26 @@ ITEMS = {
             "compile": ("torch", {"compile": "max-autotune"}, {}, "eager"),
         },
     ),
+    **{
+        f"b{tag}{bs}": (
+            *ds,
+            "clause",
+            "p01",
+            bs,
+            {
+                "triton": ("triton", {}, {}, "eager"),
+                "graph": (
+                    "triton",
+                    {},
+                    {},
+                    "graph",
+                ),  # before compile: its capture resets dynamo
+                "compile": ("torch", {"compile": "max-autotune"}, {}, "eager"),
+            },
+        )
+        for tag, ds in (("g", SY), ("a", AS))
+        for bs in (1, 16)
+    },
     **{
         f"{tag}{p[1:]}": (
             *ds,
