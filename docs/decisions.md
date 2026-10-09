@@ -249,6 +249,14 @@ now on; the [roadmap](roadmap.md) holds the steps.
 
 ## Harness
 
+- **Timings compare only within one box** (controller, 2026-10-10, from the
+  V2 graph crosstree): the pods share the GPU model (A100-SXM4-80GB) but not
+  the driver (570.195 / 570.172 / 595.91), CPU (EPYC 7763 / Xeon 8470 / EPYC
+  7742) or power limit (400 / 500 / 400 W), and the same code timed V2 under
+  CUDA graph 15-28 % slower on pod d than on pod 1 (v2.1 vs v2.5 ruled out on
+  one box). Every ratio or crossover is read inside one leg on one box; no
+  claim compares records from two pods; F-REPRO runs on one pod, whose
+  driver / CPU / power limit the provenance page records.
 - **The baseline is generic torch** (user): a dense matmul over the whole
   item table on the GPU, `torch.topk(K)`, then drop the ids that fail the
   filter, losing candidates from K. It is what a practitioner writes
