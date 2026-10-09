@@ -16,7 +16,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-from load import ALGO, box, cv, load, pass_p, perf, recall  # noqa: E402
+from load import ALGO, box, cv, load, pass_p, perf, pre_clause_skip, recall  # noqa: E402
 
 from bench import stats  # noqa: E402  (load.py put evaluation/ on sys.path)
 
@@ -221,6 +221,7 @@ def f1x(recs):
     out = []
     for i, (n, ds, c, bx) in enumerate(rows_):
         rs = [r for r in v if (r["n_items"], r["dataset"], cv(r), box(r)) == (n, ds, c, bx)]
+        width = ", 10-clause table, pre-CLAUSE-SKIP" if any(pre_clause_skip(r) for r in rs) else ""
         for fk, ls in (("clause", "-"), ("bloom", "--")):
             g = collections.defaultdict(lambda: collections.defaultdict(list))
             pair = collections.defaultdict(lambda: ([], []))
@@ -277,7 +278,8 @@ def f1x(recs):
             ax.set_xscale("log")
             ax.set_yscale("log")
             ax.set_title(
-                f"{ds}, N {n / 1e6:.1f} M ({c}, {FIX_A.get(c, c)}, box {bx}), B={bs}", fontsize=9
+                f"{ds}, N {n / 1e6:.1f} M ({c}, {FIX_A.get(c, c)}, box {bx}{width}), B={bs}",
+                fontsize=9,
             )
             ax.set_xlabel("pass rate p")
             ax.set_ylabel("p50 ms (graph), k 100")
