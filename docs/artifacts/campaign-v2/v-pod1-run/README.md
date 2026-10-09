@@ -56,3 +56,6 @@ GPU checks, h2h with the profiler fix, V-GR-DEEP, V-YFCC, V-SEEDS' YFCC half. V-
   Summary via [`../h2h-final/h2h_summary.py`](../h2h-final/h2h_summary.py).
 - **H-KSUM profile-only pass** (2026-10-09, staging `0627961`, `f01255f1`, 0.91 GPU-h): 60 records with the full kernel sum;
   official / Triton device time 1.5-2.2 everywhere; Hub `artifacts/h-ksum-h2h` ([validation](../../../validation.md)).
+- **V-V3BITS, goodreads-synth** (2026-10-09, staging `0693399`, `0d23c615`, 4.06 GPU-h): 168 / 168 ok; `k_bits` 64 loses 10-30 points
+  of recall@100 at p ≥ 0.01 for ≤ 3 % latency; goodreads (48 cells) deferred; Hub `campaign-v2.2/goodreads-synth-v3bits`.
+  The first run's `--skip-perf` pass was stopped at 128 / 168 (duplicate work); `v-v3bits.sh` keeps it behind `QUALITY=1`.
