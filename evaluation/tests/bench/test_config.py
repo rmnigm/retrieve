@@ -372,6 +372,7 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("router", "goodreads"): (72, 72),
     ("laion30m", "laion30m"): (6, 10),  # claims first: seed 0 (user 2026-10-10)
     ("laion30m-bs1", "laion30m"): (2, 6),
+    ("laion30m-synth", "laion30m-synth"): (12, 20),
 }
 KEPT = {
     "goodreads": {"c0_genre", "c1_lang_reverse", "all4"},
@@ -428,7 +429,9 @@ def test_grid_counts_and_invariants(suite, dataset):
     }
     assert not any(p.get("n_probe") == 4 for _, p in cells)
     tuned = IVF.get(dataset, (None, None))[1]
-    assert suite == "synth" or not any(p.get("n_probe") == 256 != tuned for _, p in cells)
+    assert suite in ("synth", "laion30m-synth") or not any(
+        p.get("n_probe") == 256 != tuned for _, p in cells
+    )
     assert not any(j.narrowed for j in jobs)
     if suite in ("filter", "deep") and dataset in KEPT:
         assert {j.sweep for j in jobs} == KEPT[dataset] or (

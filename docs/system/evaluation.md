@@ -377,8 +377,8 @@ Twelve files under [`evaluation/config/`](../../evaluation/config/):
 [`pubmed.yaml`](../../evaluation/config/pubmed.yaml) and
 [`openalex.yaml`](../../evaluation/config/openalex.yaml) and
 [`kuairand.yaml`](../../evaluation/config/kuairand.yaml), the three
-synthetic-selectivity siblings `goodreads-synth.yaml`, `arxiv-synth.yaml`
-and `yfcc10m-synth.yaml` plus arXiv's cluster-correlated `arxiv-corr-synth.yaml`
+synthetic-selectivity siblings `goodreads-synth.yaml`, `arxiv-synth.yaml`,
+`yfcc10m-synth.yaml` and `laion30m-synth.yaml` plus arXiv's cluster-correlated `arxiv-corr-synth.yaml`
 ([datasets](datasets.md#synthetic-selectivity-attrs)) (goodreads, arxiv,
 yfcc10m, pubmed and openalex in the `filter` suite, pubmed and openalex at
 768; yambda and kuairand are out of the study), and
@@ -419,6 +419,7 @@ unfiltered `quality` suite ([decisions](../decisions.md#harness)); synth's
 | `v3bits` | goodreads-synth (its first 7 rates), goodreads (`filter`'s kept sweeps); pubmed d768 (`filter`'s kept sweeps, clause only) | V3 triton only, `candidate_pool_frac` {0.01, 0.05}, seeds 0-2, bs {1, 16}, k {100, 1000} (synth's `ks_by_sweep`); goodreads `k_bits` {64, 128}, clause + bloom; pubmed `k_bits` {256, 768} (256 divides 768 and sits below LiNR's 512; 768 is the default, the comparison), clause only (bloom adds false-positive noise to a bits question), one arm per side so the goodreads keys are unchanged. LiNR's 512 bits at d128 would need a library change (declined) | C2 (V-V3BITS, V3-BITS-PUBMED) |
 | `router` | goodreads (kept sweeps; arXiv and PubMed get the fitted threshold afterwards) | `router` triton, `pre_n_probe` 8, `lq_threshold` {0.02, 0.05, 0.1, 0.2}, IVF branch `n_lists` 4096 / `n_probe` 24; its branches V2 triton and SilverTorch triton (4096 / 24) beside it; clause + bloom, seeds 0-2, bs {1, 16}, k {100, 1000} | F2 / T2 practical take (V-ROUTER) |
 | `h2h` | goodreads `c0_genre`, arxiv `c0_maincat`, `none` + `bloom`, d128 | `silvertorch` triton and official with `score_path` {fp16, int32}, `n_probe` 24, bs {1, 16}, k {100, 1000}, seeds {0 … 4} (the repeats); one interleave group of the three arms; run with `--interleave --profile` | T3, C7 (H2H-final) |
+| `laion30m`, `laion30m-bs1`, `laion30m-synth` | laion30m d256 `c0_domain`, `tags4` (pass ≈ 0.0095 / 0.0027); laion30m-synth `p01 p02 p05 p1` (its own suite: `synth`'s dims would add d256 jobs to goodreads- and arxiv-synth). Seed 0, k 100, clause | V1, V2 triton (bs 16; synth bs 1 + 16); `silvertorch` triton `n_lists` 16384, `n_probe` {24, 1024, 4096} (4096 = the 25 % cap = tags4's n95; c0_domain reaches 0.903 there), bs 16 and (`laion30m-bs1`) bs 1; synth {24, 256, 1024}. At 30 M one V1 + V2 process reserves 68 GB per sweep: run one process per sweep | scaling 10 M → 30 M (V-LAION30) |
 
 ### IVF tuning
 
