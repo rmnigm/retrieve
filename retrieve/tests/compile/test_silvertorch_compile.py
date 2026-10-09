@@ -26,12 +26,15 @@ from tests.conftest import (
 )
 from tests.parity.conftest import assert_topk_equal
 
-# (filter_mode, backend, D). The Triton kernels are shape-generic in D, so the cheap
-# D=64 build covers them.
+# (filter_mode, backend, D): D = 64 takes the probe scorers' single dot, D = 768 their D loop and
+# tile skip (kernels.md § SilverTorch kernels, "The D loop").
 MODES = [
     ("none", "triton", 64),
     ("bloom", "triton", 64),
     ("exact", "triton", 64),
+    ("none", "triton", 768),
+    ("bloom", "triton", 768),
+    ("exact", "triton", 768),
 ]
 
 

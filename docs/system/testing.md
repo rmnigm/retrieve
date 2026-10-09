@@ -116,8 +116,9 @@ The split is **by purpose**, not by module:
   graph on two queries it was not captured on, each **bit-exact** to eager
   (`assert_topk_equal`) with zero `cudagraph_skips`, and captures with
   **zero graph breaks** across
-  three `(filter_mode, backend, D)` rows: all three modes on `"triton"`
-  at `D=64` (the official backend is eager-only by contract;
+  six `(filter_mode, backend, D)` rows: all three modes on `"triton"`
+  at `D=64` (the probe scorers' single dot) and `D=768` (their D loop and
+  tile skip) (the official backend is eager-only by contract;
   `test_official.py` T7 asserts that it refuses to compile);
   `test_linr_compile.py` compiles the filtered LiNR variants with the
   harness's `graph` settings, warms up five times, then replays on two new
