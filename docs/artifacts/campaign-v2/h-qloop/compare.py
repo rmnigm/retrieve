@@ -1,9 +1,12 @@
 """H-QLOOP gate: every record of tree A has a record with the same key in tree B whose `quality` is identical (JSON,
-key order normalised) and whose per-query sidecar files are byte-identical. Exits 1 on any difference or missing record.
+key order normalised) and whose per-query sidecar holds bit-identical arrays (same names, dtype, shape and raw bytes; the
+.npz container itself carries zip timestamps, so its file bytes differ run to run). Exits 1 on any difference or missing record.
 Usage: python compare.py TREE_A TREE_B"""
 
 import json
 import sys
+
+import numpy as np
 from pathlib import Path
 
 from bench import records
@@ -32,13 +35,18 @@ for fa in sorted(a_root.glob("*/*-d*.jsonl")):
             rb["quality"], sort_keys=True
         )
         pa, pb = ra.get("per_query"), rb.get("per_query")
-        files = sorted((a_root / pa).glob("*")) if pa else []
-        same_pq = pa == pb and all(
-            (b_root / pb / f.name).read_bytes() == f.read_bytes() for f in files
-        )
+        files = 0
+        same_pq = pa == pb
+        if same_pq and pa:
+            with np.load(a_root / pa) as za, np.load(b_root / pb) as zb:
+                files = len(za.files)
+                same_pq = sorted(za.files) == sorted(zb.files) and all(
+                    za[n].dtype == zb[n].dtype and za[n].shape == zb[n].shape
+                    and za[n].tobytes() == zb[n].tobytes() for n in za.files
+                )  # fmt: skip
         ok = same_q and same_pq and ra["status"] == rb["status"]
         bad += not ok
-        print("OK  " if ok else "DIFF", tag, f"quality {'=' if same_q else '!='}", f"sidecar files {len(files)} {'=' if same_pq else '!='}",
+        print("OK  " if ok else "DIFF", tag, f"quality {'=' if same_q else '!='}", f"sidecar arrays {files} {'=' if same_pq else '!='}",
               f"elapsed A {ra['elapsed_s']:.0f}s B {rb['elapsed_s']:.0f}s")  # fmt: skip
 print(f"{n} records, {bad} differing or missing")
 sys.exit(1 if bad else 0)
