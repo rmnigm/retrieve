@@ -227,6 +227,16 @@ co-design.
   test over every real kernel name). Left: the report's T3 scorer column
   reads `kernel_scopes`, and one GPU test on a real call (pod 1, ~2 min, in
   the H-QLOOP gate slot).
+- [ ] **campaign-v2.5 (st-dloop, pod b): two kernel items from its list.**
+  (1) **ST-LANE**: a per-lane exit inside a scorer tile at moderate p (compact
+  the passing lanes before the dot, or skip the failing slots' writes), so
+  our d128 SilverTorch scorer scales with p as Meta's per-doc exit does
+  (ours stays near its unfiltered time down to a ≈ 31 µs floor below
+  p ≈ 0.1; the user wants our kernels to match Meta's in such cases).
+  (2) **V2-FILL**: V2-HIGHP's wide `-inf` fill at `D_PAD` ≤ 256 too (d128 V2
+  at low p looks fill-bound; it moves C1's crossover). Gates bit-exact +
+  keep rule across p, bs, d at each change; ledger: d128 / d192 SilverTorch
+  Triton perf (1), V2 Triton perf at d ≤ 256 (2).
 - [ ] **V-V3BITS (goodreads-synth done; goodreads' 48 cells deferred): V3 at LiNR's bit budget, next to our deviation** (C2 does
   not hold so far: recall −7-13 % at a 1 % pool, no gain at bs 1; our V3
   runs `k_bits` = D = 128 against LiNR's 512, LN-8). `k_bits` must divide D
