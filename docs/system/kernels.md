@@ -1340,6 +1340,16 @@ is exact, the tiling only moves slots, and a skipped tile holds only
 
 [`ops/triton/codesigned_probe_score.py`](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py).
 
+**Bloom build.** `build_transposed_sigs` rotates the row-wise signatures
+one bloom word at a time, and within a word in chunks of `TRANSPOSE_CHUNK`
+= 2¹⁸ items (whole 64-item words; the last chunk zero-padded as before).
+Each chunk's bit planes are a `[64, chunk]` int64 temporary plus the shifted
+copy, 128 MiB each, so the build needs the row-wise and transposed tables
+plus about 256 MiB at any `N`. Unchunked, the planes were `[64, N_pad]`
+per word (14.3 GiB at 30 M), and the triton bloom build did not fit at
+LAION 30 M (d-run, v2.6). The chunked index is `torch.equal` to the
+one-pass one.
+
 The `int8 → fp32` code cast never touches HBM. Bloom mode reads the
 **transposed index** of the paper's "rotate the matrix" phase 2 (TF-1): `bloom_transposed [m_bits, ceil(N/64)]`
 (`bloom_hash.build_transposed_sigs` over the cluster-sorted row-wise

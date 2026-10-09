@@ -149,6 +149,7 @@ re-upload of a subtree replaces its row.
 | `artifacts/v-ax-synth-v25-group2` | V-AX-SYNTH group 2 snapshot (cumulative, all 46 records; equal to the leg's files) | 52 | 19,900,751 | `290fd24a0232f8d2693c12f139f88b925037a8419b15d56034ac975bc162ef9f` |
 | `artifacts/v-ax-corr` | V-AX-CORR inputs from pod d (arXiv-derived, CC0): `item_attrs_corr.pt` [N, 3, 1], `query_attrs_corr.pt`, `synth_corr.json` (`eval-data synth-filter --dataset arxiv --correlated --rates 0.01,0.03,0.1`, seed 20261008: centroids, cluster-size and per-query pass-rate stats), and `gt_d128/oracle_v4_{c001,c003,c01}_*.pt` (the exact oracles the leg read, built at `472f2fc6`); for exhibits' analysis | 6 | 312,685,010 | `c4577494bffdc715034bc7981a7f61fa7fc2ea7f14821aba0d57b31089b41ecc` |
 | `artifacts/clause-skip` | CLAUSE-SKIP (pod b, NOT CITABLE): `out/` form A gate + SASS + suite, `out2/` form B (shipped) gate + SASS + suite, `variants/` forms C / D / E gates, registers per form, the all4 bs 1 kernel profile | 29 | 171,920 | `3dcd07b4e15f6733bcf9a200db76177f6bcc564aee35c9b6f734f0ba43752c5d` |
+| `artifacts/bloom-build-chunk` | BLOOM-BUILD-CHUNK gate (pod b, NOT CITABLE): chunked vs one-pass transposed bloom index on goodreads, arXiv, random 30 M (all equal, peak memory), library suite log | 4 | 4,506 | `d85f2ca78af6d7be50cc4d893803680244de0e39931d5870526964c397511cb7` |
 
 The `d1-a` and `artifacts/*` subtrees were published by
 [H1](h1-results-storage/README.md) on 2026-09-26; their file counts and bytes
