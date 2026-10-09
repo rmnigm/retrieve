@@ -192,6 +192,7 @@ def _bloom_filter_kernel(
     qpos_ptr,
     bloom_t_ptr,
     out_scores_ptr,
+    vote_ptr,
     list_ptr,
     count_ptr,
     n_probe,
@@ -233,9 +234,18 @@ def _bloom_filter_kernel(
     acc = span & bloom_words(
         qpos_ptr + bid * stride_qpos, n_qbits, bloom_t_ptr, stride_tm, word, span != 0
     )
-    passing = (tl.max((acc != 0).to(tl.int32), axis=1) > 0) & in_grid
+    tile = bid.to(tl.int64) * n_tiles_grid + tt
+    tl.store(
+        vote_ptr + tile, (tl.max((acc != 0).to(tl.int32), axis=1) > 0).to(tl.int8), mask=in_grid
+    )
+    # The vote goes through memory before it masks the append: inductor's mutation analysis
+    # traces a store's address back through every operand, so a vote read straight from the
+    # bloom loads would mark the query's bit positions (a graph input) mutated and skip
+    # cudagraphs (kernels.md § SilverTorch kernels, "Bloom two-pass").
+    tl.debug_barrier()
+    passing = tl.load(vote_ptr + tile, mask=in_grid, other=0) != 0
     at = tl.atomic_add(count_ptr + tl.zeros([TPP], tl.int32), 1, mask=passing)
-    tl.store(list_ptr + at, bid.to(tl.int64) * n_tiles_grid + tt, mask=passing)
+    tl.store(list_ptr + at, tile, mask=passing)
 
 
 @triton.jit
@@ -380,6 +390,7 @@ def _cps_prep(
     }
     shared["n_tiles_grid"] = n_tiles_grid
     filter_kwargs = shared | {
+        "vote_ptr": torch.empty(b * n_tiles_grid, dtype=torch.int8, device=query.device),
         "width": kw["width"],
         "TPP": tpp,
         # A tile spans at most BLOCK_P / 64 + 1 words.

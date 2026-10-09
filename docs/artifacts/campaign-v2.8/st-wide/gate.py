@@ -3,9 +3,10 @@ this tree, one process, each arm
 building the same index (same seed): per n_probe {24, 256,
 1024} x bs {1, 16}, the outputs `torch.equal` (ids and scores) on 16 pool batches, then ABAB windows of CALLS
 eager calls (or, with `graph`, replays of one captured CUDA graph a pool batch); ratio = after / before of the
-medians.
+medians. With `aa` the after arm is staging too (the identical-code floor); with `swap` the before arm is built and timed
+first.
 
-    cd evaluation && PYTHONPATH=.:../retrieve/src:PKGS python gate.py DATASET DIM KIND SWEEP N_LISTS MODE OUT.json [graph]
+    cd evaluation && PYTHONPATH=.:../retrieve/src:PKGS python gate.py DATASET DIM KIND SWEEP N_LISTS MODE OUT.json [graph] [aa] [swap]
       e.g. pubmed 768 bloom c0_mesh 4096 bloom out.json
 """
 
@@ -25,7 +26,10 @@ from retrieve.modules.silvertorch import SilverTorch
 DEV = torch.device("cuda")
 CALLS, ROUNDS, N_POOL = 30, 8, 16
 GRAPH = "graph" in sys.argv
-ds, dim, kind, sweep, n_lists, mode, out = [a for a in sys.argv[1:] if a != "graph"]
+AA = "aa" in sys.argv
+SWAP = "swap" in sys.argv
+FLAGS = ("graph", "aa", "swap")
+ds, dim, kind, sweep, n_lists, mode, out = [a for a in sys.argv[1:] if a not in FLAGS]
 cfg_path = Path(f"config/{ds}.yaml")
 inp = inputs.load_inputs(
     config.load_dataset(cfg_path, int(dim)), DEV, with_filters=True
@@ -43,7 +47,15 @@ kw = {
 }
 if mode == "bloom":
     kw |= {"m_bits": 1024, "k_hash": 5}
-arms = {"after": SilverTorch(**kw), "before": before_mod.SilverTorch(**kw)}
+# `aa`: the identical-code floor, staging against itself in the after slot.
+arms = {
+    "after": (before_mod.SilverTorch if AA else SilverTorch)(**kw),
+    "before": before_mod.SilverTorch(**kw),
+}
+# `swap`: build (and time) the before arm first; on PubMed 10 M the first-built index ran up to 14 %
+# faster with identical code.
+if SWAP:
+    arms = {"before": arms["before"], "after": arms["after"]}
 for m in arms.values():
     m.register_index(
         inp["item_embs"].to(DEV), item_clause_attrs=inp["item_attrs"].to(DEV)
@@ -117,10 +129,10 @@ with torch.inference_mode():
                 for a in arms:
                     t[a].append(window(run[a], pool, prep[a]))
             med = {a: statistics.median(v) for a, v in t.items()}
-            row = {"dataset": ds, "dim": int(dim), "mode": mode, "graph": GRAPH, "n_probe": n_probe, "bs": bs,
+            row = {"dataset": ds, "dim": int(dim), "mode": mode, "graph": GRAPH, "aa": AA, "swap": SWAP, "n_probe": n_probe, "bs": bs,
                    "width": arms["after"]._probe_width, "equal": equal, "ms": med, "windows_ms": t,
                    "ratio": med["after"] / med["before"]}  # fmt: skip
             rows.append(row)
-            print(f"{ds} d{dim} {mode}{' graph' if GRAPH else ''} np{n_probe} bs{bs} eq={equal} before {med['before']:.3f} after "
+            print(f"{ds} d{dim} {mode}{' graph' if GRAPH else ''}{' aa' if AA else ''}{' swap' if SWAP else ''} np{n_probe} bs{bs} eq={equal} before {med['before']:.3f} after "
                   f"{med['after']:.3f} ratio {row['ratio']:.3f}", flush=True)  # fmt: skip
 Path(out).write_text(json.dumps(rows, indent=1))

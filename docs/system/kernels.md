@@ -1267,7 +1267,13 @@ slots included (the 20 inactive of 25 slots on a one-clause query cost
    (`bloom_words`: slots in groups of four whose loads issue together, a
    group of four `-1` skipped), masks each word to the tile's own
    positions, and appends a tile with any surviving bit to a list
-   (`atomic_add` on a count zeroed by the table launch).
+   (`atomic_add` on a count zeroed by the table launch). The vote is
+   stored to a `[B · tiles]` int8 buffer and reloaded after a CTA barrier
+   before it masks the append. Inductor's mutation analysis
+   (`identify_mutated_tensors`) walks a store's address back through every
+   operand, so an append masked straight by the bloom loads marked the
+   query's bit positions, a graph input, as mutated, and `reduce-overhead`
+   skipped cudagraphs (`test_silvertorch_compile`, wide bloom).
 2. `_bloom_dot_kernel`, persistent (`DOT_PROGRAMS_PER_SM` × SMs programs
    looping over the list). For each listed tile it runs the per-lane bloom
    test and the dot of the one-pass kernel (`probe_dots`, the same
