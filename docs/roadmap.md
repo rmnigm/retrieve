@@ -32,12 +32,6 @@ others (see [Multi-GPU execution](#multi-gpu-execution)).
 
 ## Needs the user
 
-- **V3 at 512 bits** (C2): `k_bits` > D needs a library change (OPORP over
-  several projections), which the user declined for the campaign on
-  2026-10-08 (LN-8). V-V3BITS (goodreads-synth, v2.2) shows the bits drive
-  V3's recall: 64 vs 128 bits costs 10-30 points of recall@100 at p ≥ 0.01
-  for ≤ 3 % latency, so LiNR's 512 would likely close much of C2's recall
-  gap. Whether to add 512 as an opt-in for one comparison is the user's call.
 - **Contact the original authors** (re-plan decision 7): the LinkedIn LiNR
   team and Meta's SilverTorch team — filter-set details, the V1/V2 setup,
   the SilverTorch paper's FPR inconsistency (0.067 % vs 0.00173 %) — and
@@ -268,7 +262,17 @@ co-design.
   both blooms, `m_bits` 64-2048 × `k_hash` {3, 5}, quality-only plus one
   timed point per width at bs 16. F4a, C4. **≈ 3-5 GPU-h**, GPU 1 (the
   timed points on GPU 0).
-- [ ] **V-AX-SYNTH: arXiv synth**, uniform 7 points (the correlated
+- [ ] **SYNTH-TRIM: a smaller synth grid, dense in the middle** (user,
+  2026-10-10: the lowest rates add little, 0.1 / 0.2 / 0.5 matter more).
+  arxiv-synth rates {0.001, 0.01, 0.05, 0.1, 0.2, 0.5, 1.0}, yfcc10m-synth
+  {0.01, 0.1, 0.2, 0.5, 1.0}; seed 0 only, seeds 0-2 at p 0.01 and 0.2
+  (the variance check); SilverTorch clause `n_probe` {24, 64, 256, 1024}
+  (YFCC {24, 256, 1024}). New attrs (`eval-data synth-filter --rates`),
+  configs, `suites.yaml`, the YFCC chunk list regenerated; cell counts and
+  GPU-h re-projected before V-AX-SYNTH starts. goodreads-synth gains 0.05 /
+  0.2 / 0.5 at seed 0 (≈ 1-2 GPU-h) so the panels share the middle points.
+  d-run, pod d, before V-AX-SYNTH.
+- [ ] **V-AX-SYNTH: arXiv synth** on SYNTH-TRIM's grid (the correlated
   variant is V-AX-CORR). F1/F2 3M panel. **≈ 15-45 GPU-h**
   (the pilot measured 8.7 GPU-h at 0.8 M; re-projected ≈ 24-30 GPU-h, the
   torch arms run ≈ 385 s a cell at 3 M), GPU 0. Its timed cells run at
@@ -280,7 +284,7 @@ co-design.
   suites.yaml; resume adds only the new cells; driver
   [v-gr-deep](artifacts/campaign-v2/v-gr-deep/driver.sh)). **≈ 6 GPU-h**,
   GPU 0/1.
-- [ ] **V-YFCC: YFCC synth (5 points) and a small `deep`** (`n_lists`
+- [ ] **V-YFCC: YFCC synth (SYNTH-TRIM's 5 points) and a small `deep`** (`n_lists`
   {4096, 16384}). F1/F2 10M panel; YFCC's `n95`. Runs alongside
   V-AX-SYNTH on another GPU (three pods, no fourth: user, 2026-10-08); a
   collapse found on arXiv adds YFCC points afterwards. **≈ 31-54 GPU-h**
@@ -289,7 +293,10 @@ co-design.
   interleave unit never split), each taken by whichever of pod 1 and pod c
   frees first (V-AX-SYNTH is now ≈ 24-30 GPU-h on pod c).
 - [ ] **V-SEEDS: arXiv and YFCC `filter`, the cells the manifest does not
-  reuse.** arXiv: 117 cells (V1-V3 `c3_nversions` seeds 0-2; SilverTorch
+  reuse.** Deferred to F-REPRO (user, 2026-10-10: the exploration needs
+  numbers that decide the claims, not final ones; seed variance is a
+  final-pass question). The arXiv half runs only if pod b has nothing
+  claim-deciding queued. arXiv: 117 cells (V1-V3 `c3_nversions` seeds 0-2; SilverTorch
   triton; official bloom; `postfilter` α {1, 8}; SilverTorch torch, plain
   and compiled, for C3); V1-V3 on `c0_maincat` / `all4` are reused
   through the manifest (36 cells, [campaign.yaml](../evaluation/campaign.yaml)).
@@ -303,12 +310,6 @@ co-design.
   kept sweeps, 3 seeds, every arm, now at `campaign-v2.1` and IVF-TUNE's values
   (its SilverTorch Triton perf goes on the redo ledger for ST-DLOOP). T2's 768-d row.
   **≈ 14 GPU-h**, GPU 0.
-- [ ] **H-OVIEW: the oracle without its fp32 item copy** (backlog Known
-  defects): `bench/oracle.py`'s `item_embs.t().contiguous()` becomes a
-  view (or the item-chunked path reads the items in place). Gates: oracle
-  blobs `torch.equal` to existing ones on goodreads + arXiv (+ one PubMed
-  sweep), golden cells, harness suite. Needed by V-LAION30 at d256.
-  CPU code, a short GPU gate.
 - [ ] **V-LAION30: a 30 M scale point at d256, `filter` only** (user,
   2026-10-10; [decisions](decisions.md#datasets)).
   Re-LAION-2B-en-research-safe (gated, auto-approved; captions + url /
@@ -321,9 +322,41 @@ co-design.
   + `laion30m.yaml` + CPU tests + `bench check`; then a reduced `filter`
   grid (SilverTorch triton, V1, V2, bs 1 / 16, 3 sweeps, seed 0) at the
   current tag, IVF sized for 30 M under the 25 % cap. Memory: 31 GB fp32
-  items + 7.7 GB int8 codes, which fits only after H-OVIEW. Pod d, CPU
+  items + 7.7 GB int8 codes (the item-chunked oracle holds no copy). Pod d, CPU
   now, GPU after V-AX-SYNTH. **≈ 10-15 GPU-h** (estimate, scaled from
   PubMed's 10 M cells).
+- [ ] **V3-BITS-PUBMED: V3 at `k_bits` 256 on PubMed d768** (user,
+  2026-10-10). LiNR's V3 used 512 bits on d128; our OPORP gives at most D
+  bits (one per coordinate, LiNR's own §3.2 wording), so d128 / d192 run
+  D bits and V-V3BITS's 64; at d768 we already run 768 bits, and 256
+  (divides 768) brackets LiNR's 512 from below. PubMed `filter` kept
+  sweeps, V3 triton, pool {1 %, 5 %}, seed 0. Pod b after V-SEEDS arXiv.
+  **≈ 1-2 GPU-h.**
+- [ ] **ROUTER-LIB: the router as a library method** (the library goal,
+  user 2026-10-10): the harness `router` arm's logic (unfiltered pre-probe
+  → l_q → V2 below the threshold, SilverTorch above) as a `retrieve`
+  module with its docs page; the harness arm calls it; gates: the arm's
+  records unchanged (ids + scores `torch.equal`), library + harness suites.
+  After V-ROUTER's goodreads fit.
+- [ ] **H-ADDDATA: adding a dataset without writing an ETL** (the
+  benchmark goal, user 2026-10-10): a generic ingest subcommand of eval-data from
+  item embeddings + item attributes + query embeddings + query clauses
+  (parquet / npy) to a staged dataset + its yaml, `bench check`, and a
+  "how to add a dataset" page in `retrieve/docs/` and
+  [datasets](system/datasets.md). V-LAION30 is staged through it as the
+  first user. CPU.
+- [ ] **REL-LIC: license audit and the public-release plan** (user,
+  2026-10-10, ECIR Availability): per dataset (goodreads, arXiv, PubMed /
+  MedCPT, YFCC-10M, Re-LAION, the synth attrs) whether the derived data may
+  be redistributed or only its build recipe; which Hub repos go public at
+  submission (results, datasets, checkpoints) and what each must not hold;
+  a page under `docs/paper/`. Making anything public stays the user's
+  call. CPU.
+- [ ] **F-CRIT: the ECIR criteria checklist** (user, 2026-10-10): each
+  question of the replicability-track criteria (reliability, impact,
+  novelty, availability) mapped to the paper section, table or artifact
+  that answers it, with gaps named; a new page ecir-criteria.md under docs/paper. F5
+  writes against it.
 - [ ] **F-REPRO: the final pass.** When the library stops changing: tag the
   final version, rerun the redo ledger (or the whole grid if the ledger is
   most of it) at that tag into `campaign-final/`, write *campaign.yaml* for
@@ -365,7 +398,7 @@ co-design.
 | V-YFCC | ≈ 31-54 | 0/1 | V1 / V2 / V3 cells 0.3-1.2 h each at the v2 grid; V2/V3 cost vs p at 10 M unmeasured |
 | V-SEEDS | ≈ 8-12 | 0 | YFCC seeds 1-2: V2 and V3 ~1.1 h a cell |
 | V-PUBMED | ≈ 20-25 | 0 (+1 for the checks) | V1 ~650 s, V2 ~1,300 s, SilverTorch-Triton ~700 s a cell; 3 sweeps × 3 seeds |
-| V-LAION30 | ≈ 10-15 (+1.5 encode) | 0/1 | scaled from PubMed 10 M; 30 M d256, after H-OVIEW |
+| V-LAION30 | ≈ 10-15 (+1.5 encode) | 0/1 | scaled from PubMed 10 M; 30 M d256 |
 | D1-G | ≈ 4 | both | |
 
 Total ≈ 130-250 GPU-h, against the re-plan's 70-90: the 10 M exact arms

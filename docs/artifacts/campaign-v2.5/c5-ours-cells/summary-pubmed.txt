@@ -1,0 +1,16 @@
+records: 4 ok: 4 unstable: 1 code_version: ['472f2fc6']
+sweep             np bs mode   partial     full           full/partial    MiB p    MiB f ids
+c0_mesh           24  1 eager    0.596    0.779    1.308 [1.308,1.308]     0.80     2.09 equal
+c0_mesh           24  1 graph    0.159    0.168    1.053 [1.053,1.053]        -        - equal
+c0_mesh           24 16 eager    0.763    0.972    1.275 [1.275,1.275]    11.54    30.61 equal
+c0_mesh           24 16 graph    0.334    0.373    1.117 [1.117,1.117]        -        - equal
+c0_mesh         1024  1 eager    0.825    0.935    1.134 [1.134,1.134]    16.21    17.50 equal
+c0_mesh         1024  1 graph    0.748    0.793    1.060 [1.060,1.060]        -        - equal
+c0_mesh         1024 16 eager    8.851    9.867    1.115 [1.115,1.115]   241.98   261.05 equal
+c0_mesh         1024 16 graph    8.718    9.743    1.118 [1.118,1.118]        -        - equal
+recall_oracle@100 (median over seeds):
+  ('c0_mesh', 24, 'full') 0.5539
+  ('c0_mesh', 24, 'partial') 0.5539
+  ('c0_mesh', 1024, 'full') 0.9407
+  ('c0_mesh', 1024, 'partial') 0.9407
+windows 48, below 1410 MHz 3, min 1320.0
