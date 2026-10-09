@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Pod 1's queue as arguments (orchestrator, 2026-10-10): the named legs in order, one lock hold, at the tag common.sh
-# defaults to. Legs: v-gr-deep v-router v-yfcc-deep v-yfcc-synth. Stops on the first non-zero leg, or between legs when
+# defaults to. Legs: v-gr-deep v-router v-yfcc-deep v-yfcc-synth gr-synth-mid. Stops on the first non-zero leg, or between legs when
 # /scratch/<tv>/chain.stop exists. Launch: setsid nohup flock -n /scratch/gpu0.lock bash chain-legs.sh LEG... > /scratch/v25/chain.log 2>&1 &
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 TAG=${TAG:-campaign-v2.5}
 D=/scratch/$(echo "${TAG#campaign-}" | tr -d .)
 declare -A DRIVER=([v-gr-deep]=$HERE/v-gr-deep.sh [v-router]=$HERE/v-router.sh [v-yfcc-deep]=$HERE/v-yfcc-deep.sh
-                   [v-yfcc-synth]=$HERE/../v-yfcc/synth-chunks.sh)
+                   [v-yfcc-synth]=$HERE/v-yfcc-synth.sh [gr-synth-mid]=$HERE/gr-synth-mid.sh)
 for leg in "$@"; do [ -n "${DRIVER[$leg]:-}" ] || { echo "unknown leg $leg"; exit 2; }; done
 for leg in "$@"; do
   [ -e "$D/chain.stop" ] && { echo "$(date -Is) stop file, not starting $leg"; exit 0; }
