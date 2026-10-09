@@ -12,6 +12,9 @@ Tests marked ``gpu`` skip without CUDA."""
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import tempfile
 from pathlib import Path
 
 import polars as pl
@@ -20,6 +23,17 @@ import torch
 
 N, U, D, C = 24, 8, 8, 2
 D_E2E = 64  # LiNR V3's OPORP packs bits in words of 64
+
+
+def pytest_configure(config):
+    """H-INDCACHE: a fresh inductor cache per pytest run, so no compile gate replays a graph an
+    earlier tree cached for the same custom op (testing.md § Running)."""
+    config.inductor_dir = tempfile.mkdtemp(prefix="pytest-inductor-")
+    os.environ["TORCHINDUCTOR_CACHE_DIR"] = config.inductor_dir
+
+
+def pytest_unconfigure(config):
+    shutil.rmtree(config.inductor_dir, ignore_errors=True)
 
 
 def pytest_collection_modifyitems(config, items):
