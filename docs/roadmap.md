@@ -322,14 +322,11 @@ co-design.
   bit-identical). New official legs build their own venv with
   `scripts/build_official_o3.sh`; `env.official_build` records the loaded
   extension's sha256 and flags. Remaining: rebuild the shared venvs between legs.
-- [ ] **ST-WIDE: our d768 probe scorer at wide probes** (C7 at v2.7, PubMed bloom
-  `c0_mesh`, bs 16 eager: official / Triton 0.705 at `n_probe` 1024, while
-  Triton wins 1.7-2.8x everywhere else; `_codesigned_probe_score_kernel`
-  dominates). Find why Meta's `process_cluster<…, 768, …>` scales better at
-  `B · n_probe` ≈ 16 k clusters (tile shape, D-loop order, occupancy at
-  D_PAD 1024, the bloom word loads) and fix ours: bit-exact, keep rule across
-  `n_probe` {24, 256, 1024} × bs {1, 16} at d768 and unchanged at d128 / d192.
-  Tag after its gate.
+- [ ] **ST-WIDE-2: the bloom two-pass at `D_PAD` ≤ 256** (ST-WIDE engaged it only at
+  d768; at 30 M d256, n_probe 128, bs 64 Meta -O3 is 1.8-2.0x faster). Bit-exact;
+  keep rule across d128 / d192 / d256 × n_probe × bs incl. narrow cells; narrow
+  SASS unchanged where it does not engage. Then cross-query cluster sharing
+  only if the 30 M gap remains.
 - [ ] **C5-OURS-30M + C1 re-time at v2.7**: codesign-laion30m's triton half
   (our partial vs full at 30 M, beside Meta's, on one box; per-sweep processes
   until H-ARMFREE lands) and arxiv-synth's V1 / V2 cells re-timed (C1's 3 M
