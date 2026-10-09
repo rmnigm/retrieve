@@ -38,12 +38,10 @@ the user moving it onto the roadmap.
   sweeps, `synth` at {0.001, 0.01, 0.1, 1.0}, no `deep`) of ~12-18 GPU-h.
   Only after the campaign's run order is done, and only on the user's
   call.
-- **LAION / Re-LAION-5B**: same scale ceiling plus a new staging and
-  encode, no natural query-side filters (NSFW, aesthetic, size and
-  language metadata, so predicates would be synthetic anyway), and
-  provenance baggage (LAION-5B was pulled in December 2023; Re-LAION-5B is
-  the release to use if ever). At 10 M it duplicates YFCC (CLIP
-  image-text, already the field's filtered benchmark).
+- **LAION / Re-LAION-5B** above 30 M: the 30 M point is in the study
+  (roadmap V-LAION30, [decisions](decisions.md#datasets)); 100 M would
+  need fp16 items on the device and the oracle without its fp32 copy
+  (Known defects below).
 
 ## After the paper
 

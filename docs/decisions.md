@@ -280,6 +280,12 @@ now on; the [roadmap](roadmap.md) holds the steps.
   (user: no attributes, so no filtered cells); KuaiRand-27K (user: does
   not fit the study). Their checkpoints and trainer results stay as they
   are.
+- **LAION as a 30 M scale point, `filter` only** (user, 2026-10-10;
+  roadmap V-LAION30): Re-LAION-2B-en-research-safe captions encoded by us
+  (nomic-embed-text-v1.5, Matryoshka d256, a native width of that
+  encoder, so "No PCA" holds), metadata tags as filters. 30 M only: no
+  100 M point and no fp16-items harness change; d256 needs the oracle
+  without its fp32 item copy (roadmap H-OVIEW).
 - **No PCA.** Every dataset runs at its encoder's native width (YFCC 192,
   PubMed 768); each dataset contributes one width, and the dim ablation is
   dropped.

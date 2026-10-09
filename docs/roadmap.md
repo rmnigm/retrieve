@@ -312,6 +312,27 @@ co-design.
   kept sweeps, 3 seeds, every arm, now at `campaign-v2.1` and IVF-TUNE's values
   (its SilverTorch Triton perf goes on the redo ledger for ST-DLOOP). T2's 768-d row.
   **≈ 14 GPU-h**, GPU 0.
+- [ ] **H-OVIEW: the oracle without its fp32 item copy** (backlog Known
+  defects): `bench/oracle.py`'s `item_embs.t().contiguous()` becomes a
+  view (or the item-chunked path reads the items in place). Gates: oracle
+  blobs `torch.equal` to existing ones on goodreads + arXiv (+ one PubMed
+  sweep), golden cells, harness suite. Needed by V-LAION30 at d256.
+  CPU code, a short GPU gate.
+- [ ] **V-LAION30: a 30 M scale point at d256, `filter` only** (user,
+  2026-10-10; [decisions](decisions.md#datasets)).
+  Re-LAION-2B-en-research-safe (gated, auto-approved; captions + url /
+  size / similarity / punsafe / pwatermark, no embeddings): the first two
+  parquet parts (32.8 M rows), 30 M items + held-out caption queries;
+  captions encoded by us with nomic-embed-text-v1.5 at its Matryoshka
+  d256 (≈ 1.5 GPU-h). Filters from the metadata as tags: url domain
+  ("search within a site"), size, similarity and punsafe / pwatermark
+  buckets; a query's clause from its own tags. A new `eval-data` command
+  + `laion30m.yaml` + CPU tests + `bench check`; then a reduced `filter`
+  grid (SilverTorch triton, V1, V2, bs 1 / 16, 3 sweeps, seed 0) at the
+  current tag, IVF sized for 30 M under the 25 % cap. Memory: 31 GB fp32
+  items + 7.7 GB int8 codes, which fits only after H-OVIEW. Pod d, CPU
+  now, GPU after V-AX-SYNTH. **≈ 10-15 GPU-h** (estimate, scaled from
+  PubMed's 10 M cells).
 - [ ] **F-REPRO: the final pass.** When the library stops changing: tag the
   final version, rerun the redo ledger (or the whole grid if the ledger is
   most of it) at that tag into `campaign-final/`, write *campaign.yaml* for
@@ -353,6 +374,7 @@ co-design.
 | V-YFCC | ≈ 31-54 | 0/1 | V1 / V2 / V3 cells 0.3-1.2 h each at the v2 grid; V2/V3 cost vs p at 10 M unmeasured |
 | V-SEEDS | ≈ 8-12 | 0 | YFCC seeds 1-2: V2 and V3 ~1.1 h a cell |
 | V-PUBMED | ≈ 20-25 | 0 (+1 for the checks) | V1 ~650 s, V2 ~1,300 s, SilverTorch-Triton ~700 s a cell; 3 sweeps × 3 seeds |
+| V-LAION30 | ≈ 10-15 (+1.5 encode) | 0/1 | scaled from PubMed 10 M; 30 M d256, after H-OVIEW |
 | D1-G | ≈ 4 | both | |
 
 Total ≈ 130-250 GPU-h, against the re-plan's 70-90: the 10 M exact arms
