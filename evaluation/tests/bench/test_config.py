@@ -366,6 +366,7 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("bloomwidth-timed", "pubmed"): (21, 21),
     ("v3bits", "goodreads-synth"): (84, 168),
     ("v3bits", "goodreads"): (24, 48),
+    ("router", "goodreads"): (72, 72),
 }
 KEPT = {
     "goodreads": {"c0_genre", "c1_lang_reverse", "all4"},
@@ -412,6 +413,7 @@ def test_grid_counts_and_invariants(suite, dataset):
         "linr_v3",
         "silvertorch",
         "postfilter",
+        "router",
     }
     assert not any(p.get("n_probe") == 4 for _, p in cells)
     tuned = IVF.get(dataset, (None, None))[1]
