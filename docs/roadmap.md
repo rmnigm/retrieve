@@ -302,13 +302,6 @@ co-design.
   items + 7.7 GB int8 codes (the item-chunked oracle holds no copy).
   **≈ 10-15 GPU-h** (estimate, scaled from
   PubMed's 10 M cells).
-- [ ] **V3-BITS-PUBMED: V3 at `k_bits` 256 on PubMed d768** (user,
-  2026-10-10). LiNR's V3 used 512 bits on d128; our OPORP gives at most D
-  bits (one per coordinate, LiNR's own §3.2 wording), so d128 / d192 run
-  D bits and V-V3BITS's 64; at d768 we already run 768 bits, and 256
-  (divides 768) brackets LiNR's 512 from below. PubMed `filter` kept
-  sweeps, V3 triton, pool {1 %, 5 %}, seed 0. After V-SEEDS arXiv.
-  **≈ 1-2 GPU-h.**
 - [ ] **OFFICIAL-O3: Meta's extension built with `-O3`** (OF-11: Meta's setup passes no
   `-O`, host code at gcc `-O0`; `-O3` is 0.77-0.98 of the shipped time, outputs
   bit-identical). New official legs build their own venv with
