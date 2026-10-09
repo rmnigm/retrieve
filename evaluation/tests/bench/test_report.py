@@ -432,10 +432,12 @@ def _rec4(
     perf=True,
     interleave=None,
     kernels=None,
+    kernels_us=None,
     ids="a",
     fp_rate=None,
     source=None,
     status="ok",
+    score_diff=None,
 ):
     """One schema-4 record. ``source``: the seed-0 record a quality-cache copy points at."""
     base = dataset.removesuffix("-synth")
@@ -467,6 +469,8 @@ def _rec4(
                     )
                 if kernels and mode == "eager":
                     e["kernels"] = kernels
+                if kernels_us and mode == "eager":
+                    e["kernels_us"], e["kernels_calls"] = kernels_us
                 entries.append(e)
     rec |= {
         "schema_version": 4,
@@ -494,6 +498,8 @@ def _rec4(
         rec["per_query"] = source["per_query"]
         rec["quality"] = source["quality"]
     elif status != "failed":
+        if score_diff is not None:
+            rec["quality"]["score_max_abs_diff"] = score_diff
         rng = np.random.default_rng(zlib.crc32(records.record_key(rec).encode()))
         hits = (np.arange(200) < round(recall * 200)).astype(np.float32)
         rec = _with_sidecar(root, rec, hits, ks=ks, pass_count=rng.integers(1, 10**6, 200))
@@ -641,19 +647,20 @@ def _campaign_tree(root):
                         recall=recall,
                         ms=ms,
                     )
-        for frac, recall in ((0.01, 0.85), (0.05, 0.96)):
-            _rec4(
-                root,
-                "arxiv",
-                "deep",
-                "linr_v3",
-                "triton",
-                sweep="c0_maincat",
-                seed=s,
-                params={"candidate_pool_frac": frac},
-                recall=recall,
-                ms=0.5 + frac,
-            )
+        for sw in ("c0_maincat", "all4"):
+            for frac, recall in ((0.01, 0.85), (0.05, 0.96)):
+                _rec4(
+                    root,
+                    "arxiv",
+                    "deep",
+                    "linr_v3",
+                    "triton",
+                    sweep=sw,
+                    seed=s,
+                    params={"candidate_pool_frac": frac},
+                    recall=recall,
+                    ms=0.5 + frac,
+                )
 
     # synth: two scales, pass rates 0.001 / 0.1 / 1.0
     for ds in ("goodreads-synth", "arxiv-synth"):
@@ -810,11 +817,13 @@ def _campaign_tree(root):
     ]
     for s in seeds:
         g = f"h2h-goodreads-{s}"
-        for pos, (be, params, ms, ids) in enumerate(
+        # int32: seed 1 returns another tied id at the k-th cut (scores bit-equal); fp16: other
+        # ids and other scores. Triton is profiled over every kernel, official top-8 only.
+        for pos, (be, params, ms, ids, diff, kus) in enumerate(
             (
-                ("triton", {"n_probe": 24}, 0.4, "x"),
-                ("official", {"n_probe": 24, "score_path": "fp16"}, 0.6, "y"),
-                ("official", {"n_probe": 24, "score_path": "int32"}, 0.8, "x"),
+                ("triton", {"n_probe": 24}, 0.4, "x", None, (75.0, 7)),
+                ("official", {"n_probe": 24, "score_path": "fp16"}, 0.6, "y", 9.77e-3, None),
+                ("official", {"n_probe": 24, "score_path": "int32"}, 0.8, "xz"[s], 0.0, None),
             )
         ):
             _rec4(
@@ -830,7 +839,9 @@ def _campaign_tree(root):
                 ms=ms,
                 ks=(100, 1000),
                 kernels=kern,
+                kernels_us=kus,
                 ids=ids,
+                score_diff=diff,
                 interleave=_group(g, arms, pos),
             )
 
@@ -946,9 +957,34 @@ def test_t3_pairs_the_interleaved_arms_and_checks_id_identity(campaign):
     rows = [ln for ln in t3.splitlines() if "[official]" in ln and "eager" in ln]
     int32 = next(ln for ln in rows if "int32" in ln)
     fp16 = next(ln for ln in rows if "fp16" in ln)
-    assert "$2.00\\times\\,[2.00, 2.00]$" in int32 and "& $=$ &" in int32  # 0.8 / 0.4 per round
+    # int32: seed 0 equal, seed 1 another id at bit-equal scores; fp16: other scores too
+    assert "$2.00\\times\\,[2.00, 2.00]$" in int32 and "& $=$ (ties) &" in int32  # 0.8 / 0.4
     assert "$1.50\\times\\,[1.50, 1.50]$" in fp16 and "& $\\neq$ &" in fp16
-    assert "& $50.0$ & $3$ &" in int32  # kernel-only us and launches over the top-8 kernels
+    graph = next(ln for ln in t3.splitlines() if "[triton]" in ln and "& graph &" in ln)
+    assert "& $=$ &" in graph  # the canonical hash is the eager arm's at every seed
+    assert "& $50.0^{8}$ & $3$ &" in int32  # no kernels_us: the top-8 sum, marked
+    eager = next(ln for ln in t3.splitlines() if "[triton]" in ln and "& eager &" in ln)
+    assert "& $75.0$ & $7$ &" in eager  # kernels_us / kernels_calls, every kernel
+
+
+def test_f3_draws_one_panel_per_sweep_and_batch_size(campaign, monkeypatch):
+    _, _, c = campaign
+    figs = []
+    monkeypatch.setattr(report, "_figure", lambda path, fig, prov: figs.append(fig) or path)
+    report.fig_f3(c)
+    (fig,) = figs
+    titles = sorted(ax.get_title() for ax in fig.axes)
+    want = sorted(
+        f"arXiv {sw}, B={bs}" for sw in ("all4", "c0_maincat") for bs in report.EXHIBIT_BS
+    )
+    assert titles == want
+    for ax in fig.axes:
+        labels = [t.get_text() for t in ax.get_legend().get_texts()]
+        sw = ax.get_title().split()[1].rstrip(",")
+        assert labels and not any("c0_maincat" in t or "all4" in t for t in labels)
+        assert any("V3" in t for t in labels) and (sw == "c0_maincat") == any(
+            "bloom" in t for t in labels
+        )
 
 
 def test_f4_tables_carry_fpr_memory_and_the_paired_codesign_ratio(campaign):

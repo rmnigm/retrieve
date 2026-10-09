@@ -156,6 +156,38 @@ def test_linr_v3_query_params():
         m.set_query_params(candidate_pool=N + 1)
 
 
+def test_linr_v3_k_bits():
+    x = torch.randn(N, 128, generator=torch.Generator().manual_seed(0))
+    default = A.build("linr_v3", x, k=4, backend="torch", params={"candidate_pool": 16})
+    assert default.stage1.k_bits == 128 and default.stage1.item_bits.shape == (N, 2)
+    m = A.build("linr_v3", x, k=4, backend="torch", params={"candidate_pool": 16, "k_bits": 64})
+    assert m.stage1.k_bits == 64 and m.stage1.item_bits.shape == (N, 1) and m.stage1.k == 16
+    assert m(x[:6])[0].shape == (6, 4)
+
+
+@pytest.mark.parametrize("fk", ["clause", "bloom"])
+@pytest.mark.parametrize("seed", [0, 1])
+@torch.inference_mode()
+def test_linr_v3_k_bits_at_d_is_the_default_build(fk, seed):
+    """The swapped stage 1 at k_bits = D is the same V3 as the default build (the v3bits suite's
+    k_bits 128 row against every other leg's V3)."""
+    _, _, attrs, qa = _data()
+    g = torch.Generator().manual_seed(1)
+    x, q = torch.randn(N, 128, generator=g), torch.randn(6, 128, generator=g)
+    out = []
+    for extra in ({}, {"k_bits": 128}):
+        f = A.build_filter(fk, attrs, backend="torch", **BLOOM)
+        m = A.build(
+            "linr_v3", x, k=8, backend="torch", filter_kind=fk, filter_mod=f, item_attrs=attrs,
+            params={"candidate_pool": 64, **extra}, seed=seed,
+        )  # fmt: skip
+        out.append((m(q, qa), m.stage1.item_bits, m.stage1.oporp_signs, m.stage1.oporp_perm))
+    (ids0, s0), *bufs0 = out[0]
+    (ids1, s1), *bufs1 = out[1]
+    assert torch.equal(ids0, ids1) and torch.equal(s0, s1)
+    assert all(torch.equal(a, b) for a, b in zip(bufs0, bufs1, strict=True))
+
+
 def test_build_refusals():
     x, _, _, _ = _data()
     with pytest.raises(ValueError, match="no code path"):

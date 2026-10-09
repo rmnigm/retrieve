@@ -32,22 +32,16 @@ others (see [Multi-GPU execution](#multi-gpu-execution)).
 
 ## Needs the user
 
-- **`n_probe` > 1024 at k 1000** (optional): the probe scorers' id
-  epilogue tile caps `next_pow2(k) · next_pow2(n_probe)` at 2^20
-  ([kernels](system/kernels.md)). Tiling it over k would lift the limit; a
-  library change (campaign-v2.2). Not needed by the grid as tuned.
+- **V3 at 512 bits** (C2): `k_bits` > D needs a library change (OPORP over
+  several projections), which the user declined for the campaign on
+  2026-10-08 (LN-8). V-V3BITS measures {64, 128}; whether to add 512 as an
+  opt-in for one comparison is the user's call.
 - **Contact the original authors** (re-plan decision 7): the LinkedIn LiNR
   team and Meta's SilverTorch team — filter-set details, the V1/V2 setup,
   the SilverTorch paper's FPR inconsistency (0.067 % vs 0.00173 %) — and
   file the official-code defects (OF-3, OF-4, OF-6 in
   [deviations](paper/reproduction-deviations.md)) upstream as issues. The
   ECIR call asks what contact happened; replies take weeks.
-- **Clock-normalised or as-measured ratios (T3, F4b).** Clocks cannot be
-  locked and follow the load: in the freeze's timed smoke, official arms
-  sampled ~1140-1170 MHz while Triton graph sampled 1410 in the same
-  interleaved rounds (8 of 9 records `unstable`). Interleaving pairs drift
-  but cannot equalise a load-dependent clock. Decide before those exhibits
-  get verdicts ([validation](validation.md)).
 - **Citability of a narrowed run.** A run with a narrowed mode set is
   recorded `status: partial` and reported NOT CITABLE. The user decides
   once `bench report` runs on the campaign's output (D1-G).
@@ -118,23 +112,39 @@ multi-GPU numbers are comparable at all.
 
 ### Campaign code_version and reruns
 
-Every new campaign cell runs at the `campaign-v2.1` tag's code_version
-(the tree hash of `retrieve/src/retrieve`), recorded in
-*evaluation/campaign.yaml*: `f01255f106214ec0f540352d0e2a5cd90b84b6a1`
-(V2-FIX-A and the V-GRAPH-IDS quantize fix over `campaign-v2`'s
-`408b1188`, [decisions](decisions.md#campaign-v2-user-2026-10-08)); its
-legs upload under `campaign-v2.1/<dataset>-<suite>`. Records at
-`408b1188` stay where they are and count only through manifest entries
-(MANIFEST-V21).
-New legs run into fresh result trees; old records are never re-stamped and
-enter the paper only through the reuse rule and the manifest. A
-correctness bug found mid-campaign stops every run; it is fixed and
-re-tagged, only the arms its own gates prove changed are rerun, and the
-manifest's `log` says so. After each step: `bench upload --verify`, a
-[hub-index](artifacts/hub-index.md) row, the manifest and the validation
-row updated, `bench report` on the cumulative tree, and a look at the
-exhibit the step feeds; if that exhibit already settles its claim, the
-claim's remaining runs are skipped and the reason logged.
+**Exploration first, one clean pass last** (user, 2026-10-09,
+[decisions](decisions.md#campaign-v2-user-2026-10-08)). While the library
+is still improving, legs run at the current tag (now `campaign-v2.1`,
+code_version `f01255f106214ec0f540352d0e2a5cd90b84b6a1`, Hub
+`campaign-v2.1/<dataset>-<suite>`; `campaign-v2` was `408b1188`) to see how
+everything behaves and to make the charts. A new tag does not stop or
+invalidate anything: every record keeps its code_version, and a change adds
+rows to the **redo ledger** below only for the cells it actually changes.
+The final repro pass (F-REPRO) reruns the ledger, or the whole grid at the
+final tag, and D1-G gates it. After each leg: `bench upload --verify`, a
+[hub-index](artifacts/hub-index.md) row, the validation row, a look at the
+exhibit it feeds.
+
+**Library under a running leg.** The shared venv `/venvs/retrieve` is an
+editable install: every `bench` child imports `retrieve` from
+`/workspace/retrieve`. Since H-PROVENANCE, `code_version` is the imported
+package's tree, read per child, so a record is stamped with the code that
+ran. A leg launched with an older harness still reads the launching
+checkout: for those, `/workspace/retrieve`'s library stays fixed until the
+leg ends. A new tag still moves a pod's checkout only between legs, so one
+leg runs one library.
+
+**Redo ledger** (cells whose code or parameters changed after they ran):
+
+| records | changed by | redo |
+|---|---|---|
+| V2 + V3 Triton perf at `408b1188` (V-PILOT goodreads-synth, V-GR-FILTER) | V2-FIX-A (bit-exact; faster) | perf at the final tag, quality reused |
+| SilverTorch eager perf at `408b1188` (H2H-FINAL, V-CODESIGN, D3 timed: all rerun at v2.1) | quantize fix (+≈30 µs eager, graph unchanged) | eager perf |
+| goodreads SilverTorch `filter` + `synth` at `n_lists` 1024 | IVF-TUNE (goodreads 4096 / n95 64) | whole SilverTorch arms |
+| arXiv `72e5a90` reuse entries, V2 / V3 perf half | V2-FIX-A | perf |
+| PubMed SilverTorch Triton perf (D3 PubMed timed at v2.1; V-PUBMED's Triton arms) | ST-DLOOP (scores bit-exact) | Triton perf |
+| V2 Triton perf at `D_PAD` ≥ 1024 run at v2.1 (V-PUBMED; d128 / d192 legs gain or are neutral) | V2-HIGHP | V2 perf |
+| graph-mode ids of SilverTorch records at `408b1188` | quantize fix | ids (D1-G's id gate) |
 
 ### Stop rules
 
@@ -179,14 +189,69 @@ co-design.
   loaded, interleaved, cores pinned. *Gate*: loaded medians within each
   arm's own repeat noise; otherwise timed steps run one GPU at a time.
   **0.5 GPU-h** on a ≥ 2-GPU pod.
-- [ ] **H-PROFILE + H2H-FINAL at `campaign-v2.1`.** `--profile` stores an
-  empty Triton `kernels` list (H2H-FINAL: 40/40 bloom and 13/40 `none`
-  eager entries; official always populated), so T3's Triton kernel-only
-  column is empty for bloom (C7). Harness fix in `measure.profile_once`
-  (code_version unaffected), then the whole `h2h` leg (goodreads + arXiv,
-  `--interleave --profile`) once at `campaign-v2.1`: the 408b1188 run is
-  stale (eager SilverTorch +30 µs from the quantize fix) and stays the
-  record of the old code. The only T3 source. **≈ 1.5 GPU-h.**
+- [ ] **EXHIBITS: the exhibits and the checks, after every leg** (user,
+  2026-10-09: use the GPUs to catch bugs, compare, reproduce the main takes).
+  CPU: `bench fetch` every `campaign-v2/` and `campaign-v2.1/` leg, `bench
+  report` (latest record per key; mixed code_versions labelled), and build
+  T1 (claims table, verdict per C1-C7), T2, T3, F1, F2 (with the real-data
+  per-query selectivity overlay from the dumps), F3, F4a, F4b; plus the D1-G
+  checks on what exists (eager-vs-graph `ids_sha256`, bs 16 < 16 × bs 1,
+  recall sanity vs exact arms). Each run: an artifact page for the user and
+  a note naming new bugs, surprises and claim status. Pod 1, slot 2.
+- [ ] **V-AX-CORR: the cluster-correlated synth variant** (re-plan P1; its
+  trigger, the IVF recall collapse at low pass rate, shows on YFCC and
+  PubMed). Builder: `eval-data synth-filter --correlated` (coarse k-means
+  with round(1/p) centroids; item attribute = its cluster, a query's clause =
+  its nearest centroid), `arxiv-corr-synth.yaml`, CPU test (pass rate, query
+  side); then arXiv at p {0.01, 0.03, 0.1}, every synth arm. IVF's best case
+  next to the uniform worst case (F2). Pod c, slot 2. **≈ 3 GPU-h.**
+- [ ] **V2-HIGHP: Fix A's regression at d768** (surprise gate, pod b; located
+  by pod 1's cross-tree check, `artifacts/v2-crosstree`). V2 at v2.1 is
+  1.43-1.44× slower than at `campaign-v2` at PubMed 10 M d768 p 0.9993 (bs 1
+  and 16, eager and graph, V1 1.000), and faster or equal at d128 (0.8 M and
+  3 M, any p). No `programs` value recovers it, the one-tile-per-program grid
+  included (1.46×): the cause is the grid-strided body's codegen at `D_PAD`
+  1024 (`fused_masked_knn_topk` 141 -> 209 ms), not the launch shape. Fix: a
+  D loop inside the tile body (ST-DLOOP's form), or the old straight-line body
+  above `D_PAD` 256. Gates bit-exact + keep rule at d128 (0.8 M, 3 M) and d768
+  10 M across p. In the `campaign-v2.2` bundle; st-dloop, pod b.
+- [ ] **ST-IDS: the probe scorers' id epilogue loops over k** (pod c,
+  2026-10-09). `probe_ids_kernel` builds a dense `[next_pow2(k),
+  next_pow2(n_probe)]` tile: at k 1000 every new `n_probe` is a 2-4 MB IR
+  compile, `ptxas` 99-653 s each (~2,000 s on a fresh box), and k 1000 ×
+  n_probe > 1024 cannot compile at all (2^20 elements). Tile `[BLOCK_K, NPP]`
+  with a non-unrolled loop over k. Integer-exact: gate `torch.equal` ids and
+  scores, epilogue kernel time and compile time before/after. Lifts the
+  `n_probe` ≤ 1024 at k 1000 limit. In the `campaign-v2.2` bundle with
+  ST-DLOOP and V2-HIGHP; st-dloop, pod b.
+- [ ] **V1-FUSE: LiNR V1 at small batch and its masking** (V-PROF3,
+  `artifacts/v-prof3`). At bs 1 `torch.compile(max-autotune)` V1 runs 0.25 ms
+  against our Triton 0.49: one fused masked mat-vec (152 µs) vs cuBLAS gemv
+  (284 µs) + a separate mask kernel, fp16 top-k keys (2 radix passes vs 4),
+  one launch vs 32. In graph mode inductor turns V1's in-place mask into a
+  copy of the score matrix + a fused `where` (constant in p), which is why
+  V1 graph is 1-8 % slower than eager at bs 16 and low p. Fix: a fused
+  masked mat-vec for small bs, fp16 top-k keys where ids are unchanged, and a
+  mask form inductor fuses without the copy. Gates: ids `torch.equal` (scores
+  within the existing V1 tolerance if fp16 keys), keep rule over p, bs, N,
+  d. Library, tag `campaign-v2.3` after the v2.2 bundle. Pod c, v-ax-corr
+  (CPU first, one GPU window at an interleave-unit pause).
+- [ ] **H-KSUM: the full kernel sum in `profile_once`** (EXHIBITS run 3): T3's
+  device column sums the top 8 kernels only, a lower bound that favours
+  official (15-31 launches vs Triton's 17-18). Record every kernel's time
+  (and the count), harness only with CPU tests (done: `kernels_us` /
+  `kernels_calls`); then one profile-only `h2h`
+  pass on goodreads + arXiv at v2.1 (`--profile`, no new timing claims).
+  Settles C7's "Meta's scorer faster in isolation" (k 1000 vs k 100 split).
+  Pod 1 after V-PROF3. **≈ 0.3 GPU-h.**
+- [ ] **V-V3BITS: V3 at LiNR's bit budget, next to our deviation** (C2 does
+  not hold so far: recall −7-13 % at a 1 % pool, no gain at bs 1; our V3
+  runs `k_bits` = D = 128 against LiNR's 512, LN-8). `k_bits` must divide D
+  (`quantize.py` `_oporp_k_bits`), so at D 128 only {64, 128} exist without a
+  library change: goodreads-synth and goodreads `filter` V3 at `k_bits`
+  {64, 128}, pool {1 %, 5 %}, quality first, then the timed cells, to show
+  the recall-vs-bits slope. LN-8 stays the campaign's setting. Pod 1.
+  **≈ 1 GPU-h.**
 - [ ] **ST-DLOOP: SilverTorch Triton probe scorers at wide embeddings**
   (user, 2026-10-09: match Meta's CUDA kernels). D3 PubMed at v2.1 tripped
   the surprise gate: Triton 2.80-2.98 ms vs official 1.99 ms at d768 (bs 16),
@@ -197,37 +262,18 @@ co-design.
   `torch.equal` ids and scores at D 128 / 192 / 768 against `campaign-v2.1`,
   library suite on a pod GPU, interleaved before/after. Then tag
   `campaign-v2.2`; stale: PubMed SilverTorch Triton perf (D3 PubMed timed).
-  V-PUBMED waits for it. Pod b. **≈ 1-2 GPU-h** plus the code.
-- [ ] **V-RERUN-V21: goodreads reruns at `campaign-v2.1`.** The perf of
-  V2 and V3 Triton on goodreads-synth `synth` (V-PILOT) and goodreads
-  `filter` (V-GR-FILTER), quality reused (both fixes bit-exact); and the
-  SilverTorch arms of both legs whole at IVF-TUNE's goodreads `n_lists`
-  4096 (n95 64). Uploads `campaign-v2.1/goodreads-synth-synth`,
-  `campaign-v2.1/goodreads-filter`. Needs IVF-TUNE merged. **≈ 2-3 GPU-h.**
-- [ ] **MANIFEST-V21: the manifest for two code_versions.** *campaign.yaml*'s
-  `default` is `campaign-v2.1`; add entries that keep the `408b1188`
-  records the tag did not touch (quality everywhere: both fixes are
-  bit-exact on eager outputs; perf of V1 and postfilter triton, and of
-  SilverTorch graph mode), and drop the perf half of the 12 arXiv
-  `72e5a90` reuse entries for V2 and V3 (their kernels changed). CPU only;
-  `bench report --manifest` over the fetched trees reports 0 wrongly
-  missing cells. Before D1-G.
-- [ ] **V-CODESIGN: `codesign` on goodreads** (arXiv done at v2.1), at `campaign-v2.1`
-  (the 408b1188 run, 108/108, is stale: the quantize fix moves every
-  SilverTorch eager time; Hub `artifacts/v-codesign-408b`), interleaved
-  partial/full, `n_probe` {8, 32, 128}, 3 sweeps, 3 seeds; replaces D1-B2
-  and D1-D. F4b, C5. **≈ 2 GPU-h**, GPU 0.
-- [ ] **D3: `bloomwidth`**: PubMed `bloomwidth-timed` at `campaign-v2.1`
-  remains; goodreads and arXiv done (timed at v2.1), PubMed `bloomwidth`
-  (quality) done
+  Pod b, sharing the GPU with V-PUBMED. **≈ 1-2 GPU-h** plus the code.
+- [ ] **D3: `bloomwidth`**: PubMed `bloomwidth-timed` reruns at `campaign-v2.2`
+  (its v2.1 run tripped the surprise gate, ST-DLOOP); goodreads and arXiv done
+  (timed at v2.1), PubMed `bloomwidth` (quality) done
   ([validation](validation.md), Hub `campaign-v2/arxiv-bloomwidth[-timed]`):
   both blooms, `m_bits` 64-2048 × `k_hash` {3, 5}, quality-only plus one
   timed point per width at bs 16. F4a, C4. **≈ 3-5 GPU-h**, GPU 1 (the
   timed points on GPU 0).
-- [ ] **V-AX-SYNTH: arXiv synth**, uniform 7 points, then the
-  cluster-correlated variant (3 points) if the uniform sweep shows the IVF
-  recall collapse at low p. F1/F2 3M panel. **≈ 15-45 GPU-h**
-  (the pilot measured 8.7 GPU-h at 0.8 M), GPU 0. Its timed cells run at
+- [ ] **V-AX-SYNTH: arXiv synth**, uniform 7 points (the correlated
+  variant is V-AX-CORR). F1/F2 3M panel. **≈ 15-45 GPU-h**
+  (the pilot measured 8.7 GPU-h at 0.8 M; re-projected ≈ 24-30 GPU-h, the
+  torch arms run ≈ 385 s a cell at 3 M), GPU 0. Its timed cells run at
   `campaign-v2.1`, at IVF-TUNE's arXiv `n_lists`.
 - [ ] **V-GR-DEEP: goodreads `deep`**, trimmed (`n_lists` {1024, 4096},
   `n_probe` {8, 16, 32, 64, 128}, V3 pool fractions); replaces D1-C.
@@ -239,8 +285,11 @@ co-design.
 - [ ] **V-YFCC: YFCC synth (5 points) and a small `deep`** (`n_lists`
   {4096, 16384}). F1/F2 10M panel; YFCC's `n95`. Runs alongside
   V-AX-SYNTH on another GPU (three pods, no fourth: user, 2026-10-08); a
-  collapse found on arXiv adds YFCC points afterwards. **≈ 18-120 GPU-h**
-  (unmeasured at 10 M; re-estimated from V-AX-SYNTH's first leg), GPU 0/1.
+  collapse found on arXiv adds YFCC points afterwards. **≈ 31-54 GPU-h**
+  (EXHIBITS run 1; V3 at 10 M is most of the range: one timed V3 cell first).
+  `deep` on pod 1; `synth` split in arm-group chunks (`bench run --algo`, one
+  interleave unit never split), each taken by whichever of pod 1 and pod c
+  frees first (V-AX-SYNTH is now ≈ 24-30 GPU-h on pod c).
 - [ ] **V-SEEDS: arXiv and YFCC `filter`, the cells the manifest does not
   reuse.** arXiv: 117 cells (V1-V3 `c3_nversions` seeds 0-2; SilverTorch
   triton; official bloom; `postfilter` α {1, 8}; SilverTorch torch, plain
@@ -253,9 +302,14 @@ co-design.
   the embedding identity check on GPU 1 first (`eval-data pubmed
   encode_queries`, `bench check`, one V1 cell equal to `d1/pubmed`'s
   quality, or stop), the `n95` probe suite (quality-only), then the 3
-  kept sweeps, 3 seeds, every arm, at `campaign-v2.2` (after ST-DLOOP) and IVF-TUNE's values. T2's 768-d row.
+  kept sweeps, 3 seeds, every arm, now at `campaign-v2.1` and IVF-TUNE's values
+  (its SilverTorch Triton perf goes on the redo ledger for ST-DLOOP). T2's 768-d row.
   **≈ 14 GPU-h**, GPU 0.
-- [ ] **D1-G: gate reruns and the report.** Needs every step above.
+- [ ] **F-REPRO: the final pass.** When the library stops changing: tag the
+  final version, rerun the redo ledger (or the whole grid if the ledger is
+  most of it) at that tag into `campaign-final/`, write *campaign.yaml* for
+  one code_version. Then D1-G.
+- [ ] **D1-G: gate reruns and the report.** Needs F-REPRO.
   Eager-vs-graph id identity from the stored hashes, a byte-identical
   quality subset per leg (`--force` into a scratch tree),
   `median_ms(bs=16) < 16 × median_ms(bs=1)`, then `bench report
@@ -282,14 +336,15 @@ co-design.
 | step | A100 GPU-h | GPU | basis |
 |---|---|---|---|
 | M1 | 0.5 | both | |
+| EXHIBITS | 0 | CPU | after every leg |
+| V-AX-CORR | ≈ 3 | 0 | 3 points, arXiv |
+| V1-FUSE | ≈ 1 | 0 | gates + keep-rule grid |
+| V-V3BITS | ≈ 1-2 | 0 | goodreads |
 | ST-DLOOP | ≈ 1-2 | 0 | gates + before/after on pod b |
-| V-RERUN-V21 | ≈ 2-3 | 0 | goodreads-synth + goodreads filter (V2, V3, SilverTorch at n_lists 4096) |
-| H-PROFILE + H2H-FINAL | ≈ 1.5 | 0 | 1.18 GPU-h measured at 408b1188 |
-| V-CODESIGN | ≈ 1 | 0 | `d1/arxiv-codesign`: 60 cells in 0.4 h |
 | D3 bloomwidth | ≈ 3-5 | 1 (+0) | quality-only cells |
 | V-AX-SYNTH | ≈ 15-45 | 0 | Triton ~2,000 s per pass point; V1/V2 torch at 3 points ×3 seeds is most of it |
 | V-GR-DEEP | ≈ 3-6 | 0/1 | ~210 cells at ~50 s (`d1/arxiv-deep`: 873 cells in 36 h at 3 M) |
-| V-YFCC | ≈ 18-120 | 0/1 | V1 / V2 / V3 cells 0.3-1.2 h each at the v2 grid; V2/V3 cost vs p at 10 M unmeasured |
+| V-YFCC | ≈ 31-54 | 0/1 | V1 / V2 / V3 cells 0.3-1.2 h each at the v2 grid; V2/V3 cost vs p at 10 M unmeasured |
 | V-SEEDS | ≈ 8-12 | 0 | YFCC seeds 1-2: V2 and V3 ~1.1 h a cell |
 | V-PUBMED | ≈ 20-25 | 0 (+1 for the checks) | V1 ~650 s, V2 ~1,300 s, SilverTorch-Triton ~700 s a cell; 3 sweeps × 3 seeds |
 | D1-G | ≈ 4 | both | |

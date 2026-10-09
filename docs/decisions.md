@@ -35,6 +35,21 @@ decisions.
 
 ## Campaign v2 (user, 2026-10-08)
 
+- **T3 reports device time and end-to-end, as measured** (controller,
+  2026-10-09, user away and delegating): official SilverTorch eager is
+  host-bound (device kernels 0.18-0.31 ms of 1.1-1.85 ms end to end at v2.1;
+  its windows read ~1140 MHz because the GPU idles, and its end-to-end
+  moves with host load at the same device time), so clock-normalising would
+  correct a symptom. T3 gives kernel-only and end-to-end side by side, as
+  measured, with the host-bound mechanism stated; F4b (official vs official,
+  interleaved) is reported as measured.
+- **Exploration first, one final repro pass** (user, 2026-10-09): while the
+  library improves, legs run at the current tag to collect behaviour,
+  comparisons and charts; a library change does not stop or invalidate
+  runs. Records keep their code_version; the roadmap's redo ledger lists
+  only the cells a change actually moved; the final pass reruns them at the
+  final tag before D1-G.
+
 The campaign was re-planned backwards from the paper's claims (source: the
 user's re-plan, kept in the orchestrator's handoff notes; the claims are
 C1-C7, the exhibits T1-T3 and F1-F4). These rules govern every cell from

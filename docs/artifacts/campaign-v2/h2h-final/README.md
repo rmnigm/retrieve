@@ -44,11 +44,13 @@ gate). The direction is D1's (official ~1.02 ms vs Triton 0.56 ms on goodreads b
   ([validation](../../../validation.md), *Official vs Triton, int32 score path*). fp16 differs only
   at near-ties: max |Δs| 3.9e-4 (goodreads) / 4.8e-4 to 7.1e-4 (arXiv), Jaccard@100 ≥ 0.996 / ≥ 0.984.
   Held-out recall@100 is equal across the three arms (goodreads 0.1486 none, 0.2127 bloom; arXiv 0.9943).
-- **Kernel-only split incomplete for Triton.** `--profile` stored an empty `kernels` list on every
-  Triton bloom eager entry (40 / 40) and on 13 / 40 Triton `none` entries; official arms always have
-  theirs. `tab-t3`'s kernel µs / launches column is therefore `---` for Triton bloom. A harness
-  measurement defect (`measure.profile_once` captured no CUDA kernel for those calls), not fixed
-  here; the timed numbers do not depend on it.
+- **Kernel-only split incomplete.** `--profile` stored an empty `kernels` list on every Triton bloom
+  eager entry (40 / 40) and on 13 / 40 Triton `none` entries (8 more truncated). The official bloom arms
+  are hit too: 32 / 80 empty (goodreads fp16 11, int32 12; arXiv fp16 3, int32 6) and 8 truncated.
+  Only official `none` is always complete. `tab-t3`'s kernel µs / launches column is therefore `---` for
+  Triton bloom. A harness measurement defect: the profiler drops a short window's last device
+  activities, more of them as the child process ages. Fixed by H-PROFILE
+  ([validation](../../../validation.md#harness-gates)); the timed numbers do not depend on it.
 - **Eager vs graph ids.** Triton `graph` `ids_sha256_canon` differs from eager at arXiv bs 16 in one
   seed per `(kind, k)` (4 of 80 pairs); goodreads all equal. Left to D1-G's eager-vs-graph gate.
 - **Clocks.** 499 of 960 timing windows below 1410 MHz (min 1140); 54 / 60 records `unstable`.

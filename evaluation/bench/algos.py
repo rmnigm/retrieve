@@ -28,6 +28,7 @@ from retrieve import (
     LiNRV2,
     LiNRV3,
     OfficialConfig,
+    OneBitKNN,
     SilverTorch,
 )
 from retrieve.interfaces import DISPATCH as LIBRARY_DISPATCH
@@ -135,8 +136,8 @@ def build(
 ) -> nn.Module:
     """Construct and register one cell's module. ``params`` = build + query params merged
     (``n_lists``, ``n_probe``, ``n_iter``, ``m_bits``, ``k_hash``, ``candidate_pool``, ``alpha``,
-    ``compile``); ``seed`` drives the k-means and the OPORP projection (whose scores ignore it at
-    ``k_bits = D``, docs/system/kernels.md § OPORP layout). SilverTorch fuses the
+    ``k_bits``, ``compile``); ``seed`` drives the k-means and the OPORP projection (whose scores
+    ignore it at ``k_bits = D``, docs/system/kernels.md § OPORP layout). SilverTorch fuses the
     predicate (the attribute buffers live inside it, ``filter_mod`` is unused); the LiNR modules
     and ``postfilter`` take the standalone filter as ``self.filter``. ``compile`` wraps the built
     module in place (``compile_module``). Raises on cells ``PATHS`` marks ``None``."""
@@ -164,9 +165,12 @@ def build(
             rev = clause_is_reverse if mode == "exact" else None
             module.register_index(item_embs, item_clause_attrs=item_attrs, clause_is_reverse=rev)
     else:
+        k_bits = p.pop("k_bits", None) if algo == "linr_v3" else None
         if algo == "linr_v3":
             p["seed"] = seed
         module = ALGOS[algo](k, filter=filter_mod, backend=backend, **p)
+        if k_bits is not None:  # LiNRV3 does not take k_bits: its stage 1 does (V-V3BITS)
+            module.stage1 = OneBitKNN(k=module.stage1.k, seed=seed, backend=backend, k_bits=k_bits)
         module.register_index(item_embs)
     return module if compile_mode is None else compile_module(module, compile_mode)
 

@@ -105,7 +105,7 @@ deep:                          # recall-vs-latency Pareto (F3, C6)
       query: {candidate_pool_frac: [0.005, 0.01, 0.02, 0.05, 0.1]}
 
 synth:                         # pass rate as the x axis (F1, F2, C1, C2, C6)
-  datasets: [goodreads-synth, arxiv-synth, yfcc10m-synth]
+  datasets: [goodreads-synth, arxiv-synth, arxiv-corr-synth, yfcc10m-synth]
   dims: [128, 192]
   filter_kinds: [clause, bloom]
   ks: [100, 1000]
@@ -128,17 +128,18 @@ synth:                         # pass rate as the x axis (F1, F2, C1, C2, C6)
       datasets:                                             # n_lists from IVF-TUNE (real dataset's)
         goodreads-synth: {build: {n_lists: [4096]}}
         arxiv-synth: {build: {n_lists: [2048]}}
+        arxiv-corr-synth: {build: {n_lists: [2048]}}
         yfcc10m-synth: {build: {n_lists: [4096]}, query: {n_probe: [24, 256, 1024]}}
     - algo: silvertorch
       backends: [triton]
       filter_kinds: [bloom]
       query: {n_probe: [24, 256]}
-      datasets: {goodreads-synth: {build: {n_lists: [4096]}}, arxiv-synth: {build: {n_lists: [2048]}}, yfcc10m-synth: {build: {n_lists: [4096]}}}
+      datasets: {goodreads-synth: {build: {n_lists: [4096]}}, arxiv-synth: {build: {n_lists: [2048]}}, arxiv-corr-synth: {build: {n_lists: [2048]}}, yfcc10m-synth: {build: {n_lists: [4096]}}}
     - algo: silvertorch
       backends: [official]
       filter_kinds: [bloom]
       query: {n_probe: [24, 256]}
-      datasets: {goodreads-synth: {build: {n_lists: [4096]}}, arxiv-synth: {build: {n_lists: [2048]}}, yfcc10m-synth: {build: {n_lists: [4096]}}}
+      datasets: {goodreads-synth: {build: {n_lists: [4096]}}, arxiv-synth: {build: {n_lists: [2048]}}, arxiv-corr-synth: {build: {n_lists: [2048]}}, yfcc10m-synth: {build: {n_lists: [4096]}}}
     - {algo: postfilter, backends: [torch], query: {alpha: [1, 8]}}
     # C3 (native torch vs our kernels) as a function of p, eager and compiled; goodreads + arxiv
     # only, like filter's torch arms (add yfcc10m-synth: {} if C3 stays ambiguous)
@@ -241,5 +242,24 @@ bloomwidth-timed:              # one timed point per width
       backends: [triton]
       build: {m_bits: [64, 128, 256, 512, 1024, 2048], k_hash: [5]}
     - {algo: silvertorch, backends: [official], build: {k_hash: [5]}}   # its one width
+
+v3bits:                        # V-V3BITS, C2: V3 at k_bits 64 vs our LN-8 default (k_bits = D = 128); LiNR's
+  # 512 needs a library change (declined 2026-10-08). k_bits is a harness build param: algos.build
+  # swaps V3's OPORP stage 1. The real-filter half reads goodreads `filter`'s kept sweeps.
+  datasets: [goodreads-synth, goodreads]
+  dims: [128]
+  filter_kinds: [clause, bloom]
+  ks: [100, 1000]
+  batch_sizes: [1, 16]
+  seeds: [0, 1, 2]
+  sweeps:
+    goodreads: [c0_genre, c1_lang_reverse, all4]
+  ks_by_sweep:
+    goodreads-synth: {p0001: [100], p0003: [100]}
+  arms:
+    - algo: linr_v3
+      backends: [triton]
+      build: {k_bits: [64, 128]}
+      query: {candidate_pool_frac: [0.01, 0.05]}
 
 bloom: {m_bits: 1024, k_hash: 5}   # shared defaults; a suite may override with its own `bloom:`

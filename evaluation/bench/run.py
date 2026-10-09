@@ -525,7 +525,7 @@ def perf(
                     )
                     for (i, fn), (d, ms) in zip(fns.items(), timed, strict=True):
                         if profile and mode == "eager":
-                            d["kernels"] = measure.profile_once(fn)
+                            d.update(measure.profile_once(fn))
                         d["ids_sha256"], d["ids_sha256_canon"] = ids_sha256(
                             callees[i], pool, qa_pool
                         )
