@@ -4,6 +4,7 @@ Roadmap step ST-DLOOP (user, 2026-10-09; widened by the controller the same day 
 At campaign-v2.1, D3 PubMed `bloomwidth-timed` (d768, bloom `c0_mesh`, bs 16) had Triton at 2.84 ms
 eager against official at 1.99 ms, the only dataset where Triton lost (surprise gate). Current state:
 [validation](../../../validation.md) row *ST-DLOOP*; mechanism: [kernels](../../../system/kernels.md#silvertorch-kernels).
+Code: `dev/st-dloop` `db2a875` (merged with staging as `9e51347`), library code_version `0d23c615`.
 A100-SXM4-80GB (pod b, GPU 0), torch 2.10.0+cu128, triton 3.6.0. SM clocks cannot be locked; they are sampled per
 window. Raw outputs are on the Hub under `artifacts/st-dloop/` ([hub-index](../../hub-index.md)).
 
@@ -74,9 +75,11 @@ after the code-tile load, which reordered scheduling and register allocation (th
 (2) At D = 192, `q_scales_ptr + bid` was computed at the call site, before the q_codes load (TTIR). `probe_dots` now
 loads the scale between the two tiles and computes its address itself. So no d128 / d192 record goes stale.
 
-**Library suite** on pod b's GPU: 781 passed (`pytest tests/`, the full library suite, parity files included).
-**Graph capture:** the `reduce-overhead` replay tests in the suite pass unchanged. The bench's graph mode ran every
-Triton cell, with ids equal to eager's (the same `ids_sha256` as v2.1's).
+**Library suite** on pod b's GPU: **787 passed** on the committed, merged tree (`9e51347`), nothing skipped.
+**Graph capture:** `tests/compile/test_silvertorch_compile.py` now also runs D 768 (the D loop and the skip; it ran D 64
+only, which never reaches them). None / bloom / exact `reduce-overhead` replay is `torch.equal` to eager, with 0
+cudagraph skips and 0 graph breaks. The bench's graph mode ran every Triton cell with ids equal to eager (the same
+`ids_sha256` as v2.1). Launches per replay were not profiled separately.
 
 **Keep rule, interleaved, 95 % CI: holds at every width × pass rate × bs.**
 
