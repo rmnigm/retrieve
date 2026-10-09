@@ -293,7 +293,10 @@ co-design.
   interleave unit never split), each taken by whichever of pod 1 and pod c
   frees first (V-AX-SYNTH is now ≈ 24-30 GPU-h on pod c).
 - [ ] **V-SEEDS: arXiv and YFCC `filter`, the cells the manifest does not
-  reuse.** arXiv: 117 cells (V1-V3 `c3_nversions` seeds 0-2; SilverTorch
+  reuse.** Deferred to F-REPRO (user, 2026-10-10: the exploration needs
+  numbers that decide the claims, not final ones; seed variance is a
+  final-pass question). The arXiv half runs only if pod b has nothing
+  claim-deciding queued. arXiv: 117 cells (V1-V3 `c3_nversions` seeds 0-2; SilverTorch
   triton; official bloom; `postfilter` α {1, 8}; SilverTorch torch, plain
   and compiled, for C3); V1-V3 on `c0_maincat` / `all4` are reused
   through the manifest (36 cells, [campaign.yaml](../evaluation/campaign.yaml)).
