@@ -81,7 +81,9 @@ def test_ingest_stages_a_dataset_the_harness_reads(tmp_path):
     site_codes = {"x.com": 0, "y.org": 1, "z.net": 2}  # 14 / 13 / 13 items
     assert attrs[:, 0, 0].tolist() == [site_codes[sites[i % 3]] for i in range(n)]
 
-    config = yaml.safe_load((cfg / "tiny.yaml").read_text())
+    text = (cfg / "tiny.yaml").read_text()
+    assert "&" not in text  # no yaml anchors between the clause and bloom blocks
+    config = yaml.safe_load(text)
     assert config["data_dir"] == str(out) and config["dims"] == [16]
     assert config["filters"]["clause"] == {"c0": [0], "c2": [2], "both": [0, 1]}
     assert config["filters"]["bloom"] == {"c0": [0], "both": [0, 1]}

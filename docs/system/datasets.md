@@ -978,8 +978,8 @@ data/openalex/
 
 ### laion30m
 
-**Status: `prep` done on pod d (2026-10-10); encode and ingest running on GPU 1; `bench check` and
-the Hub copy not yet run.** Roadmap V-LAION30: a 30 M scale point at d256, `filter` only
+**Status: staged on pod d (2026-10-10), `bench check` ok; not on the Hub (Re-LAION may be
+shared as vectors only, and the user decides whether: [release](../paper/release-and-licenses.md)).** Roadmap V-LAION30: a 30 M scale point at d256, `filter` only
 ([decisions](../decisions.md#datasets)). Nothing here is citable. The first dataset staged
 through the [generic ingest](#the-generic-ingest-eval-data-ingest).
 
@@ -1043,7 +1043,7 @@ over the 768 output dims, keep the first 256, L2-normalise, store fp16. Prefixes
 without the `layer_norm`, so the two datasets' vectors are not built the same way.
 `encode_text` writes `_raw/relaion/laion30m/items_NNN.npy` (1 M rows each), resumable per
 shard and pinned by `encode_params.json`; `encode_queries` writes `queries.npy`. The ingest
-re-normalises them in fp32 into the staged fp16 shards. Targets: the ingest's default, each
+re-normalises them in fp32 into the staged fp16 shards. Measured on GPU 1 of pod d (A100): 10.1 k captions/s, 2,957 s for the 30 M; the ingest (with the targets on the GPU) 118 s; query↔target cosine median 0.80. Targets: the ingest's default, each
 query's exact unfiltered top-1 item (a caption query has no relevant item of its own). The
 headline is `recall_oracle`, as everywhere.
 

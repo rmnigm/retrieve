@@ -217,7 +217,7 @@ def ingest(
     ).write_parquet(out / "eval_split.parquet")
 
     rel = out.relative_to(data_root()) if out.is_relative_to(data_root()) else None
-    bloom = {k: v for k, v in sweep_map.items() if not any(reverse[c] for c in v)}
+    bloom = {k: list(v) for k, v in sweep_map.items() if not any(reverse[c] for c in v)}
     config = {
         "data_dir": f"data/{rel}" if rel else str(out),
         "content_dir": f"content_d{d}",

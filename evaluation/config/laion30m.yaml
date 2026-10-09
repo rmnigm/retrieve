@@ -1,16 +1,17 @@
-# Re-LAION-2B-en-research-safe, 30 M captions from its first two parquet parts, encoded by us
-# with nomic-embed-text-v1.5 at its Matryoshka d256 (roadmap V-LAION30, `filter` only).
-# Nothing produced from this file is citable until its gate is green in docs/validation.md.
-# Clause layout (docs/system/datasets.md § laion30m), every query value the held-out
-# caption's own tag: C0 url registered domain, C1 size bucket, C2 CLIP-similarity bucket,
-# C3 domain REVERSE ("other sites"; bloom-incompatible), C4 watermark bucket, C5 punsafe
-# bucket. C0 and C3 share a value, so no sweep holds both.
+# Written by `eval-data ingest laion30m` (eval_datasets/ingest.py). Clauses, in order: C0 domain, C1 size, C2 similarity, C3 domain_reverse (reverse), C4 watermark, C5 unsafe.
 data_dir: data/laion30m
-content_dir: content_d256                 # relative to data_dir
+content_dir: content_d256
 dims: [256]
 users_limit: 10000
 filters:
   attrs: item_attrs_narrow.pt
   reverse: clause_is_reverse_narrow.pt
-  clause: {c0_domain: [0], c3_domain_reverse: [3], tags4: [1, 2, 4, 5], all_fwd: [0, 1, 2, 4, 5]}
-  bloom: {c0_domain: [0], tags4: [1, 2, 4, 5]}
+  clause:
+    c0_domain: [0]
+    c3_domain_reverse: [3]
+    tags4: [1, 2, 4, 5]
+    all_fwd: [0, 1, 2, 4, 5]
+  bloom:
+    c0_domain: [0]
+    tags4: [1, 2, 4, 5]
+    all_fwd: [0, 1, 2, 4, 5]
