@@ -315,7 +315,12 @@ def f1x(recs):
 
 
 def cv_tree(t):
-    return {"v2": "v2 408b1188", "v21": "v2.1 f01255f1", "d1": "d1 72e5a90"}.get(t, t)
+    return {
+        "v2": "v2 408b1188",
+        "v21": "v2.1 f01255f1",
+        "v22": "v2.2 0d23c615",
+        "d1": "d1 72e5a90",
+    }.get(t, t)
 
 
 def f3x(recs):
