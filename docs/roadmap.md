@@ -110,10 +110,10 @@ multi-GPU numbers are comparable at all.
 
 **Exploration first, one clean pass last** (user, 2026-10-09,
 [decisions](decisions.md#campaign-v2-user-2026-10-08)). While the library
-is still improving, legs run at the current tag (now `campaign-v2.6`,
-code_version `20e83bfc3c2875258d504233311e30d278d21438` = v2.5 + OFFICIAL-REWORK M1
-(query prep out of the timed forward), Hub `campaign-v2.6/<dataset>-<suite>`;
-`campaign-v2.5` was `472f2fc6` (v2.4 + ST-LANE + V2-FILL + C5-OURS); `campaign-v2.4` was
+is still improving, legs run at the current tag (now `campaign-v2.7`,
+code_version `641ec3b8e09034647f426ca7f68204a1f2866536` = v2.6 + CLAUSE-SKIP + BLOOM-BUILD-CHUNK,
+Hub `campaign-v2.7/<dataset>-<suite>`; `campaign-v2.6` was `20e83bfc` (v2.5 +
+OFFICIAL-REWORK M1, query prep out of the timed forward); `campaign-v2.5` was `472f2fc6` (v2.4 + ST-LANE + V2-FILL + C5-OURS); `campaign-v2.4` was
 `d67d6263` (v2.3 + ST-SKIP128), `campaign-v2.3` was `1258a63e`
 (v2.2 + ST-IDS + V2-HIGHP + V1-FUSE), `campaign-v2.2` was
 `0d23c615`, `campaign-v2.1` `f01255f1`, `campaign-v2` `408b1188`) to see how
@@ -341,19 +341,6 @@ co-design.
   then C5 official and T3 h2h re-run claims-first. st-dloop, pod b; C5's
   verdict on Meta's code waits for it. M1 is in `campaign-v2.6`; M2-M4
   (epilogue, index layouts, profiles, docs) remain.
-- [ ] **CLAUSE-SKIP: inactive clauses load nothing** (st-dloop, 2026-10-10):
-  `clause_pass` loaded every clause's item attrs per item and row, used or
-  not, so SYNTH-TRIM's 7 → 10-clause synth tables slowed every clause kernel
-  (V1 +15 %, V2 +30-39 % at bs 16 on arxiv-synth, flat in p). Mask the loads
-  of clauses the query does not use (bit-exact by construction) in
-  `clause_mask` / `_scores` / `_packed`, `clause_compact`,
-  `codesigned_probe_score_exact`. Gates: bit-exact, keep rule on synth and
-  real sweeps, SASS limited to the clause kernels, library suite. Tag
-  `campaign-v2.7`; then C1's synth V1 / V2 cells on pod 1. `dev/clause-skip`.
-  Same bundle: **BLOOM-BUILD-CHUNK**, `build_transposed_sigs` chunked over N
-  (its `[64, N_pad]` int64 temporaries, 14.3 GiB at 30 M, made our triton
-  bloom build OOM on laion30m); gate: sigs `torch.equal` to the unchunked
-  build. Then codesign-laion30m's triton half (C5 ours vs Meta's at 30 M).
 - [ ] **H-ARMFREE: one `bench run` frees each arm before the next** (2026-10-10:
   laion30m and V-ROUTER PubMed OOMed when one process ran several arms; each
   arm's 10 M-30 M index stayed resident and the next arm's allocation
@@ -362,6 +349,10 @@ co-design.
   near the shared inputs'); drivers stop needing one process per arm.
   Gates: harness suite; one multi-arm 10 M run without OOM; records
   byte-identical to a per-arm run on two cells. v-pod1-run (CPU first).
+- [ ] **C5-OURS-30M + C1 re-time at v2.7**: codesign-laion30m's triton half
+  (our partial vs full at 30 M, beside Meta's, pod d; per-sweep processes until
+  H-ARMFREE lands) and arxiv-synth's V1 / V2 cells re-timed on pod 1 (C1's 3 M
+  crossover without the clause-width cost).
 - [ ] **ROUTER-LIB: the router as a library method** (the library goal,
   user 2026-10-10; only if V-ROUTER on PubMed puts it on the Pareto
   front, [decisions](decisions.md#datasets); WIP on `dev/router-lib`): the harness `router` arm's logic (unfiltered pre-probe
