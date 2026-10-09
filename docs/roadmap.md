@@ -236,14 +236,23 @@ co-design.
   p ≤ 0.001. Gates bit-exact + keep rule across p at d128 / d192. Re-times
   every d128 / d192 SilverTorch Triton cell (ledger). Last in the
   `campaign-v2.3` bundle; st-dloop, pod b.
-- [ ] **H-INDCACHE: the inductor cache always carries the code_version**
-  (pod b, 2026-10-09). Inductor's FX / AOT caches key a graph on the custom
-  op, not its body, so a `TORCHINDUCTOR_CACHE_DIR` reused across library
-  edits replays an old kernel in graph mode (it hid V1-FUSE's clause result
-  and voided V2-HIGHP's first graph numbers). `bench` keys its default dir
-  per code_version; make it append the code_version to a caller-set dir too,
-  and have the pytest conftest use a fresh dir per run. Harness, CPU tests.
-  Pod 1's runner between legs.
+- [ ] **H-QLOOP: the quality pass is CPU-bound** (pod 1, 2026-10-09, live
+  profile of V-V3BITS). `run.quality` spends ≈ 33 ms of CPU work per 16-row
+  chunk (row masks, `blob["topk"][sel]`, `targets[sel]`, `.to(device)`
+  staging, per-chunk `nonzero`; ~128 OpenMP threads spinning) against a ≈ 2 ms
+  forward: ≈ 22-33 s per cell with the GPU idle, about a third of the wall of
+  every cell that computes quality (V3 / SilverTorch every seed; V1 / V2 /
+  postfilter seed 0). Fix: stage the oracle top-k, targets and masks on the
+  device once per cell and index there; bound torch's CPU threads for the
+  loop. Gate: quality fields and per-query sidecars **byte-identical** to
+  existing records (golden cells + one record per arm from the Hub), harness
+  suite. Harness only. Pod 1's runner, now (CPU while V-GR-DEEP runs).
+- [ ] **H-SCOPE: a named-scope kernel sum in `profile_once`** (EXHIBITS, C7).
+  T3's scorer column needs like-for-like scopes (ours fuses the bloom test;
+  Meta's bloom search and payload are separate kernels): record per-call
+  sums over named kernel groups (scorer incl. its filter, top-k, epilogue,
+  other) next to `kernels_us`, so the report builds the column without a
+  hand split. Harness, CPU tests. Pod 1's runner between legs.
 - [ ] **V1-FUSE: LiNR V1 at small batch and its masking** (V-PROF3,
   `artifacts/v-prof3`). At bs 1 `torch.compile(max-autotune)` V1 runs 0.25 ms
   against our Triton 0.49: one fused masked mat-vec (152 µs) vs cuBLAS gemv

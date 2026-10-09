@@ -358,12 +358,14 @@ def test_setup_seeds_and_pins_precision():
     assert torch.get_float32_matmul_precision() == "highest"
 
 
-def test_inductor_cache_is_keyed_by_code_version_unless_given():
-    """Roadmap H4: two code_versions, two cache dirs; an explicit directory wins."""
+def test_inductor_cache_is_keyed_by_code_version_even_when_given():
+    """H-INDCACHE: two code_versions, two cache dirs, under the default root and under a
+    caller-set directory alike (the caller's dir gets the code_version appended)."""
     a = bench.inductor_cache_dir("0123abcd", None)
     b = bench.inductor_cache_dir("files:4567ef", None)
-    assert a != b and a.endswith("0123abcd") and b.endswith("files-4567ef")
-    assert bench.inductor_cache_dir("0123abcd", "/scratch/inductor/x") == "/scratch/inductor/x"
+    assert a != b and a.endswith("/0123abcd") and b.endswith("/files-4567ef")
+    given = [bench.inductor_cache_dir(cv, "/scratch/inductor/x") for cv in ("0123abcd", "89ab")]
+    assert given == ["/scratch/inductor/x/0123abcd", "/scratch/inductor/x/89ab"]
 
 
 def test_latency_group_alternates_windows_across_arms():
