@@ -63,7 +63,7 @@ def clock_unknown(r):
 # kernels load every clause per item whatever the query uses (+~0.7 ms at bs 16 on 3 M, flat in p;
 # controller 2026-10-10). Records carry no width field: uniform synth records at v2.5 / v2.6 are the
 # 10-clause, pre-CLAUSE-SKIP ones; their clause timings carry the width cost, their recall does not.
-UNIFORM_SYNTH = ("arxiv-synth", "goodreads-synth", "yfcc10m-synth")
+UNIFORM_SYNTH = ("arxiv-synth", "goodreads-synth", "yfcc10m-synth", "laion30m-synth")
 
 
 def pre_clause_skip(r):
