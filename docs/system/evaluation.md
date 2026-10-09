@@ -78,7 +78,10 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    `n_targets_in_filter` recorded). Metrics accumulate as running sums on
    device, one sync at the end. The exact algos (`EXACT_ALGOS`:
    `linr_v1_filter_mask`, `linr_v2`) must
-   reach `recall_oracle@k_max ≥ 0.99` (fp16 tolerance); a failure is
+   reach `recall_oracle@k_max ≥ 0.99` (fp16 tolerance), or the dataset's
+   `exact_gate` when `k_max` < 1000 (`run.exact_gate`; only `yfcc10m-synth`,
+   0.9716: its fp16 item storage costs 0.013-0.026 at k 100, an fp32 table
+   gives 1.0, [validation](../validation.md#campaign-v2-phase-v-not-yet-validated)); a failure is
    recorded as `failed` and then raises `QualityGateError`, which ends the
    run. Cross-backend correctness belongs to the library's parity suite
    ([testing](testing.md)); the harness keeps only a *wiring* check, the
@@ -468,6 +471,7 @@ checkpoint: data/goodreads-work-id/checkpoints/sasrec-ssm-logq-d{dim}/best_model
 dims: [64, 128, 256]
 encode: {batch_size: 512, num_workers: 8, max_seq_length: 200}       # SASRec datasets only
 users_limit: 10000                                                    # or null
+# exact_gate: 0.9716                                                  # optional: the exact-algo floor at k_max < 1000
 filters:                                                              # optional
   attrs: item_attrs_narrow.pt                                         # relative to data_dir
   reverse: clause_is_reverse_narrow.pt                                # optional
@@ -696,7 +700,7 @@ Any exception inside a cell (an OOM on the torch path included) becomes a
 `status: failed` record with the traceback and `stage` (`build`,
 `query_params`, `quality`, `perf`) and the loop continues. Three things
 stop the process: `KeyboardInterrupt`; `QualityGateError` — an exact
-algo (`linr_v1_filter_mask`, `linr_v2`) below `recall_oracle@k_max ≥ 0.99`
+algo (`linr_v1_filter_mask`, `linr_v2`) below `recall_oracle@k_max ≥ 0.99` (or its dataset's `exact_gate`)
 — which is recorded first; and a sticky CUDA error (`run.STICKY_CUDA`:
 `CUDA error`, `illegal memory access`, `device-side assert` in the
 message), also recorded first and then re-raised, because the context is

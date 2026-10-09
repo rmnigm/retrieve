@@ -71,7 +71,7 @@ from loguru import logger
 from torch import nn
 
 from bench import algos, inputs, measure, oracle, records
-from bench.config import QUERY_PARAMS, Job, interleave_units, shared_key
+from bench.config import QUERY_PARAMS, Dataset, Job, interleave_units, shared_key
 from bench.metrics import accumulate, accumulator, finalize, jaccard_at_k
 from bench.router import Router
 from eval_datasets.layout import atomic_write
@@ -104,6 +104,12 @@ IDS_PROBE_BATCHES = 8  # the pool batches ``ids_sha256`` hashes, outside the tim
 
 class QualityGateError(RuntimeError):
     """An exact algo scored below ``EXACT_MIN_RECALL`` against the oracle (H §2.4)."""
+
+
+def exact_gate(ds: Dataset, k_max: int) -> float:
+    """§2.4's floor: ``EXACT_MIN_RECALL``, or the dataset's ``exact_gate`` below k 1000 (YFCC's
+    fp16-storage allowance at k 100, user 2026-10-10; @1000 stays 0.99)."""
+    return ds.exact_gate if ds.exact_gate is not None and k_max < 1000 else EXACT_MIN_RECALL
 
 
 def is_sticky(exc: BaseException) -> bool:
@@ -824,10 +830,11 @@ def run(
                         write_per_query(out_dir, rec["per_query"], assets, per_q)
                         if job.algo in EXACT_ALGOS and "oracle" in qual:
                             r = qual["oracle"][f"recall@{k_max}"]
-                            if r is not None and r < EXACT_MIN_RECALL:  # None: no oracle row
+                            gate = exact_gate(job.data, k_max)
+                            if r is not None and r < gate:  # None: no oracle row
                                 raise QualityGateError(
                                     f"{job.algo}/{job.backend} recall_oracle@{k_max} = {r:.4f} "
-                                    f"< {EXACT_MIN_RECALL}"
+                                    f"< {gate}"
                                 )
                     recs_by[id(job)] = rec
                 except QualityGateError as exc:
