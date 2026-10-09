@@ -418,13 +418,20 @@ def graph_callable(module: nn.Module, *example_args: Any, warmup: int = 5) -> Ca
 
 PROFILE_PADS_S = (0.0, 0.01, 0.1, 1.0, 5.0)
 SENTINEL = "spin_kernel"  # torch.cuda._sleep's kernel; nothing in a forward launches it
+RANGE_PREFIX = "## "  # profiler range annotations booked as device events (compiled graph calls)
+
+
+def _range(event: Any) -> bool:
+    return event.key.startswith(RANGE_PREFIX)
 
 
 def kernel_summary(events: Sequence[Any], top: int = 8) -> dict[str, Any]:
     """The entry fields of one profiled call from its device events (``key``,
     ``self_device_time_total``, ``count``), sentinels dropped: ``kernels``, the ``top`` by self
     time (``{"kernel", "us", "calls"}``), and ``kernels_us`` / ``kernels_calls``, the device time
-    and launches summed over every kernel (H-KSUM: the top-8 sum is only a lower bound)."""
+    and launches summed over every kernel (H-KSUM: the top-8 sum is only a lower bound). The sums
+    skip ``## …`` events: the profiler books a compiled graph's ``## Call CompiledFxGraph …`` range
+    as a device event spanning that graph's kernels, which would count them twice."""
     kernels = sorted(
         (e for e in events if SENTINEL not in e.key),
         key=lambda e: e.self_device_time_total,
@@ -435,8 +442,8 @@ def kernel_summary(events: Sequence[Any], top: int = 8) -> dict[str, Any]:
             {"kernel": e.key, "us": float(e.self_device_time_total), "calls": int(e.count)}
             for e in kernels[:top]
         ],
-        "kernels_us": float(sum(e.self_device_time_total for e in kernels)),
-        "kernels_calls": int(sum(e.count for e in kernels)),
+        "kernels_us": float(sum(e.self_device_time_total for e in kernels if not _range(e))),
+        "kernels_calls": int(sum(e.count for e in kernels if not _range(e))),
     }
 
 
