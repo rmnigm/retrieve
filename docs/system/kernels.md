@@ -46,7 +46,8 @@ see [Shared kernel helpers](#shared-kernel-helpers-opstritoncommonpy) —
 and the plain-Python launch scaffold they share in
 [`_host.py`](../../retrieve/src/retrieve/ops/triton/_host.py): `probe_prep` +
 `probe_topk` (the probe scorers' shared launch arguments and their top-k +
-id-epilogue launch), `tile_for_width` (their tile per width),
+id-epilogue launch), `width_tiles` / `tile_for_width` (their tile per width and
+program count),
 `compact_finish` (the compaction ops' scan + scatter), the boundary checks
 and `wide`, and `grid_batch_tiles` (the 3-D grid split of the filter and
 probe kernels).
@@ -157,12 +158,12 @@ The pattern, applied uniformly to every kernel in this tree:
    `@triton.jit` body holds `block_n`, `num_warps`, `num_stages`.
 2. A `DEFAULT_CONFIG` module constant holds the single curated
    default for the current arch (sm_80 / A100 in this repo). The two
-   probe scorers ship a `CONFIGS` table instead, one tile per `D_PAD`
-   bound, resolved by `_host.tile_for_width`
+   probe scorers ship a `CONFIGS` table instead, a tuple of tiles per
+   `D_PAD` bound, resolved by `_host.tile_for_width`
    ([below](#silvertorch-kernels), "Tile config").
 3. The host wrapper takes `config: <Name>Config | None = None`;
    `cfg = config if config is not None else DEFAULT_CONFIG` resolves it
-   (the probe scorers: `tile_for_width(CONFIGS, D)`).
+   (the probe scorers: `tile_for_width(CONFIGS, D, B, width)`).
 4. A private `_<name>_impl(..., *, config: ...Config | None = None)`
    lives next to the public op(s) in every file. Both share the same
    `_<name>_prep` / `_<name>_finish` helpers, so their bodies differ
@@ -302,8 +303,8 @@ Gate: every kernel of this section, compiled at the power-of-two widths D1 runs,
 SASS-identical to the tree before padding (30 of 30,
 [script](../artifacts/l4-pow2-pad/ptx_identity.py)).
 
-Padding makes every width correct, not every width fast: at `D_PAD = 1024` the probe
-scorers need a narrower tile ([SilverTorch kernels](#silvertorch-kernels), "Tile config").
+Padding makes every width correct, not every width fast. Past `D_PAD = 256` the probe
+scorers do not pad: they loop over D ([SilverTorch kernels](#silvertorch-kernels), "The D loop").
 
 ## Shared kernel helpers (`ops/triton/common.py`)
 
@@ -319,6 +320,11 @@ its own tile shape, launch grid, or masking policy:
 - `probe_tile(probe_ids_ptr, offsets_ptr, bid, t, n_probe, NPP, BLOCK_P)` —
   a probe scorer program's slice of the compact CSR layout, the row's
   table built in-kernel ([SilverTorch kernels](#silvertorch-kernels)).
+- `probe_dots(q_row_ptr, q_scales_ptr, bid, item_codes_ptr, pos, stride_cn, keep, D, D_PAD,
+  BLOCK_D, BLOCK_P) → (int32 [BLOCK_P], q_scale)` — both probe scorers' int8 dot: one
+  `tl.dot` at `D_PAD ≤ 256` (loads in the v2.1 order, which fixes that path's SASS), a
+  `BLOCK_D` loop into an int32 accumulator past it
+  ([SilverTorch kernels](#silvertorch-kernels), "The D loop").
 - `probe_ids_kernel` — a *launched* kernel: the probe scorers' id
   epilogue after `torch.topk` (slot → `sort_perm[pos]`, `-1` at `-inf`).
   Its tile is `[next_pow2(k), next_pow2(n_probe)]`, so Triton's 2^20-element
@@ -1169,31 +1175,64 @@ current form is 32–44 launches. Both launches stay textually inside
 each `@triton_op` body (`_host.probe_prep` / `probe_topk` build their
 arguments).
 
-**Tile config: one per width.** Both scorers load the whole `[BLOCK_P,
-D_PAD]` int8 code tile and feed it to one `tl.dot`; there is no K loop,
-so the tile's operands sit in registers and their footprint grows with
-`D_PAD`. With the `256 × 4` tile tuned at D = 128, `D_PAD = 1024`
-(pubmed, D = 768) asks for about 512 registers a thread against the 255
-limit: ptxas drops to 32 registers and spills about 10 KB a thread
-(2,300-3,000 `LDL` in the SASS; none at `D_PAD ≤ 256`), and the scorer
-is 10-15× slower at B = 16 than the best tile. Each kernel module
-therefore ships `CONFIGS`, a tile per `D_PAD` bound, and
-[`_host.tile_for_width`](../../retrieve/src/retrieve/ops/triton/_host.py)
-picks the smallest bound at or above `next_power_of_2(D)` (the widest
-entry past the last bound, untuned there). Tuned on the A100 with
-`tune-kernels` (its selection rule, one width at a time) and a
-realistic-layout sweep
-([artifact](../artifacts/pubmed-fixes/README.md#fix-1-d-aware-probe-scorer-tiles)):
+**The D loop** (`common.probe_dots`). At `D_PAD ≤ 256` a scorer loads
+the whole `[BLOCK_P, D_PAD]` int8 code tile and feeds it to one `tl.dot`.
+This is the v2.1 code, SASS-identical at D = 128 and 192
+([ST-DLOOP](../artifacts/campaign-v2/st-dloop/README.md)). Wider, it
+loops over D in `BLOCK_D` chunks into one int32 accumulator
+(`tl.dot(..., acc=acc)`, `tl.range`, pipelined by `num_stages`). The
+register tile is then `[BLOCK_P, BLOCK_D]` whatever D is. D = 768 is
+three or six chunks with no lanes masked, instead of a 1024-wide pad (a
+quarter of the dot on zero lanes), and a 256-item tile fits. The single
+dot over `D_PAD = 1024` needed a `64 × 4` tile (wider spilled: about 512
+registers a thread asked against the 255 limit). Meta's scorer loops
+over D the same way: 256-byte chunks of 16 `int4` loads and 64 `dp4a`
+per thread, one document per thread. Accumulation is exact int32, so the
+chunking changes no score.
+
+**Tile skip** (`SKIP`, filtered scorers at `D_PAD > 256`). After the
+filter test, a tile whose `keep` has no passing lane (`tl.max(keep) ==
+0`) stores `-inf` over its valid slots and skips the code loads, the dot
+and the epilogue. The skip is a constexpr taken from the width's
+`CONFIGS` entry and the filter's presence (`HAS_QB` in
+`codesigned_probe_score`; always in the exact scorer). So no host sync,
+and graph capture is unchanged. It is off at `D_PAD ≤ 256`, where the
+vote's cross-warp reduction costs as much as the 128-wide dot it saves:
+there it cost 1-6 % at high pass rates and failed the keep rule (#16,
+[artifact](../artifacts/campaign-v2/tile-skip/README.md)). At D = 768
+the dot is the tile's cost, and a 256-lane tile at pass rate 0.0002
+(PubMed `c0_mesh`) is all-fail with probability 0.95. Meta skips per
+document (a filtered thread returns before any load), a finer unit;
+ours is the tile.
+
+**Tile config: per width, then per program count.** Each kernel module
+ships `CONFIGS`: per `D_PAD` bound, a tuple of tiles, largest first.
+[`_host.width_tiles`](../../retrieve/src/retrieve/ops/triton/_host.py)
+picks the bound (the smallest at or above `next_power_of_2(D)`, the widest
+past the last one). `_host.tile_for_width` then takes the first tile that
+gives at least `MIN_PROGRAMS = 1024` programs (`B · cdiv(width,
+block_p)`), else the smallest. B and the probe width are static Python
+ints, so the choice is fixed under capture. Below about 1,000 programs
+(fewer than ten programs per SM on the A100's 108), a wide tile cannot
+hide its latency. On a 2 M-item d768 layout (width 64 K) the 256-item
+tile at bs 1 launched 276 programs and ran 1.68× v2.1's 64-item single
+dot; 64 × 4 / `BLOCK_D` 256 at 1,029 programs ran 0.86×
+([artifact](../artifacts/campaign-v2/st-dloop/README.md)). The ≤ 256
+entries are the D = 128 tuning (`tune-kernels`). The wide tiles were swept on
+the real PubMed d768 cell (none, bloom and exact `c0_mesh`, bs 16; 54
+tiles each, every one `torch.equal` to the shipped tile) and chosen by
+the geometric mean over none and bloom, since one entry serves both. The
+fallbacks were chosen on the synthetic bs sweep. The 1024 entry also
+serves D_PAD 512 and is not tuned at D = 384 / 512:
 
 | `D_PAD` bound | `codesigned_probe_score` (none, bloom) | `codesigned_probe_score_exact` |
 |---|---|---|
-| ≤ 256 | `256 × 4` | `256 × 4` |
-| 512 | `128 × 4` | `128 × 4` |
-| 1024 | `64 × 4` | `128 × 4` |
+| ≤ 256 | `256 × 4`, one dot, no skip | `256 × 4`, one dot, no skip |
+| > 256 | `256 × 4` / `BLOCK_D` 128, then `128 × 4` / 256, then `64 × 4` / 256; 2 stages, skip | `128 × 4`, 2 stages, `BLOCK_D` 128, skip |
 
-The ≤ 256 entry is the old default, so D = 128 / 192 launch the same
-kernel as before. Scores do not depend on the tile (the int32 dot is
-exact and the tiling only moves slots), which every parity file checks.
+Scores do not depend on the tile, the chunking or the skip (the int32 dot
+is exact, the tiling only moves slots, and a skipped tile holds only
+`-inf` slots), which every parity file checks.
 
 ### `codesigned_probe_score` — IVF + INT8 + Bloom
 
@@ -1216,28 +1255,27 @@ oracle). The bloom inputs inherit the `(clause_idx, value)` keying
 invariant documented under `bloom_match`.
 
 **Tile config.** `CodesignedProbeScoreConfig(block_p, num_warps,
-num_stages)`, one per `D_PAD` bound in the module's `CONFIGS` (table in
+num_stages, block_d, skip)`, one per `D_PAD` bound in the module's `CONFIGS` (table in
 [SilverTorch kernels](#silvertorch-kernels)); pass `config=` to override.
 Re-tune one width at a time on a new arch via `uv run tune-kernels
-codesigned-probe-score --d <D>`. `HAS_QB`
+codesigned-probe-score --d <D>`. Past `D_PAD` 256 both probe-scorer
+subcommands sweep `(block_p, num_warps, num_stages, block_d)` with the
+skip on (`tune._CPS_WIDE_GRID`). Its equal-cluster random-code layout
+has no realistic pass rate, so the shipped wide entries came from the
+real-cell sweep instead. `HAS_QB`
 is a body-level constexpr (the bloom-on and bloom-off paths JIT-specialise
 on it). The score buffer is `torch.empty([B, width])`: every slot is
 written (a dot, or `-inf`), so there is no pre-fill.
 
-**Filtered items cost no HBM bytes; whole tiles are not skipped.** Both
-filtered scorers (this one with `HAS_QB`, and the exact one below) evaluate
-the filter first and mask the int8 code load with `keep`, so a failing
-item's code row is never fetched: at bs 16, a pass rate of 0.001 scores
-18–39 % faster than a pass rate of 1.0 on the same layout. What a failing
-lane still costs is its share of the tile's `tl.dot` and epilogue. Skipping a
-tile when no lane passes (`tl.max(keep) == 0` → store `-inf`, no load, no dot)
-was measured and **not shipped**. It is bit-exact and about 30 % faster at
-p = 0.001, but at p = 0.01 about 92 % of 256-lane tiles still hold a passing
-item (`1 − 0.99²⁵⁶`), so the gain disappears (arXiv exact 1.000 [0.992,
-1.008]). The extra reduction and branch cost +2 to 6 % at p ≥ 0.1. Meta's scorer gains about 3× at p ≤ 0.01, consistent
-with a finer skip unit; this is not validated (validation
-row *Probe-scorer tile skipping*;
-[artifact](../artifacts/campaign-v2/tile-skip/README.md)).
+**Filtered items cost no HBM bytes; whole tiles are skipped only at wide
+D.** Both filtered scorers (this one with `HAS_QB`, and the exact one
+below) evaluate the filter first and mask the int8 code load with `keep`,
+so a failing item's code row is never fetched: at bs 16, a pass rate of
+0.001 scores 18–39 % faster than a pass rate of 1.0 on the same layout
+(D = 128). What a failing lane still costs at `D_PAD ≤ 256` is its share
+of the tile's `tl.dot` and epilogue. Past 256 the tile skip above removes
+both for an all-fail tile (validation rows *ST-DLOOP* and *Probe-scorer
+tile skipping (#16)*).
 
 ### `codesigned_probe_score_exact` — IVF + INT8 + exact AND-of-OR
 
@@ -1258,7 +1296,7 @@ and more than the code row. This is why exact mode is the slowest of the
 three here (validation's head-to-head).
 
 **Tile config.** `CodesignedProbeScoreExactConfig(block_p, num_warps,
-num_stages=3)`, one per `D_PAD` bound in the module's `CONFIGS` (table in
+num_stages, block_d, skip)`, one per `D_PAD` bound in the module's `CONFIGS` (table in
 [SilverTorch kernels](#silvertorch-kernels)). Re-tune via its own
 subcommand, `uv run tune-kernels codesigned-probe-score-exact`, whose
 regime axes are `(N, B, C, A_MAX, D)` (repeatable `--regime`, one `D` per

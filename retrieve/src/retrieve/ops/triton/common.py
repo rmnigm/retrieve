@@ -5,11 +5,11 @@ addressing from the caller. **No helper decides its own tile shape, launch grid,
 masking policy** — callers keep their own grids, loads, and epilogue policy. That
 invariant is what lets one helper serve kernels with very different launch shapes.
 
-Helpers: ``row_base``, ``tile_rows``, ``probe_tile``, ``or_combine``, ``popcount_int64``,
-``bloom_subset_pass``, ``clause_pass``, ``compact_store``, ``compact_stash``; plus two
-launched kernels: ``compact_scatter_kernel`` (the predicate-free second phase both compaction
-ops share, driven by ``_host.compact_finish``) and ``probe_ids_kernel`` (the probe scorers' id
-epilogue). Per-helper semantics and the call-site map live in
+Helpers: ``row_base``, ``tile_rows``, ``probe_tile``, ``probe_dots``, ``or_combine``,
+``popcount_int64``, ``bloom_subset_pass``, ``clause_pass``, ``compact_store``, ``compact_stash``;
+plus two launched kernels: ``compact_scatter_kernel`` (the predicate-free second phase both
+compaction ops share, driven by ``_host.compact_finish``) and ``probe_ids_kernel`` (the probe
+scorers' id epilogue). Per-helper semantics and the call-site map live in
 docs/system/kernels.md § Shared kernel helpers.
 """
 
@@ -73,6 +73,67 @@ def probe_tile(
     pos = tl.sum(tl.where(hit, lo, 0)) + off + lane
     valid = (off + lane < tl.sum(tl.where(hit, size, 0))) & ~tail
     return pos, slot, valid, tail
+
+
+@triton.jit
+def probe_dots(
+    q_row_ptr,
+    q_scales_ptr,
+    bid,
+    item_codes_ptr,
+    pos,
+    stride_cn,
+    keep,
+    D: tl.constexpr,
+    D_PAD: tl.constexpr,
+    BLOCK_D: tl.constexpr,
+    BLOCK_P: tl.constexpr,
+):
+    """The probe scorers' int8 dot → ``(int32 [BLOCK_P], the row's q_scale)``: ``q[1, D] @
+    codes[pos]^T``, failing lanes' code rows unread (kernels.md § SilverTorch kernels, "The D
+    loop"). ``D_PAD <= 256``: one ``tl.dot`` over the padded width. Wider: ``BLOCK_D`` chunks into
+    one int32 accumulator, so the register tile does not grow with ``D`` and D = 768 costs 768
+    lanes, not a 1024 pad."""
+    if D_PAD <= 256:
+        # Lanes [D, D_PAD) load 0 on both sides: exact zeros in the int32 dot (kernels.md §
+        # Padding). At D == D_PAD the loads stay unmasked: even an all-true mask perturbs the
+        # scorers' register allocation.
+        d_off = tl.arange(0, D_PAD)
+        d_in = d_off < D
+        q_codes = tl.load(
+            q_row_ptr + d_off,
+            mask=None if D == D_PAD else d_in,
+            other=None if D == D_PAD else 0,
+        )
+        # Loaded between the two tiles as at v2.1: the order fixes the D_PAD <= 256 SASS.
+        q_scale = tl.load(q_scales_ptr + bid)
+        codes = tl.load(
+            item_codes_ptr + pos[:, None] * stride_cn + d_off[None, :],
+            mask=keep[:, None] if D == D_PAD else keep[:, None] & d_in[None, :],
+            other=0,
+        )
+        # int8 × int8 → int32 (paper §4.2): Triton pads M=1 to the MMA tile, so this lowers to
+        # IMMA tensor-core instructions, not dp4a (kernels.md § Numerics).
+        acc = tl.dot(q_codes[None, :], tl.trans(codes), out_dtype=tl.int32)
+    else:
+        q_scale = tl.load(q_scales_ptr + bid)
+        acc = tl.zeros([1, BLOCK_P], dtype=tl.int32)
+        for d0 in tl.range(0, D, BLOCK_D):
+            d_off = d0 + tl.arange(0, BLOCK_D)
+            d_in = d_off < D
+            q_codes = tl.load(
+                q_row_ptr + d_off,
+                mask=None if D % BLOCK_D == 0 else d_in,
+                other=None if D % BLOCK_D == 0 else 0,
+            )
+            codes = tl.load(
+                item_codes_ptr + pos[:, None] * stride_cn + d_off[None, :],
+                mask=keep[:, None] if D % BLOCK_D == 0 else keep[:, None] & d_in[None, :],
+                other=0,
+            )
+            acc = tl.dot(q_codes[None, :], tl.trans(codes), acc=acc, out_dtype=tl.int32)
+    # Squeeze the length-1 M axis: tl.sum over length-1 (no reshape to drop a dim).
+    return tl.sum(acc, axis=0), q_scale
 
 
 @triton.jit

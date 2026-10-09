@@ -21,7 +21,7 @@ import torch
 import triton
 import triton.testing as ttesting
 
-from retrieve.ops.triton._host import tile_for_width
+from retrieve.ops.triton._host import width_tiles
 from retrieve.ops.triton.bloom_compact import (
     DEFAULT_CONFIG as BLOOM_COMPACT_DEFAULT,
     BloomCompactConfig,
@@ -72,6 +72,15 @@ B1_GAP = 0.10
 _FMKT_GRID = tuple((bn, nw) for bn in (32, 64, 128, 256) for nw in (4, 8))
 _OPORP_GRID = tuple((bn, nw) for bn in (64, 128, 256, 512) for nw in (4, 8))
 _CPS_GRID = tuple((bp, nw) for bp in (32, 64, 128, 256) for nw in (4, 8))
+# Past D_PAD 256 the probe scorers loop over D (kernels.md § SilverTorch kernels, "The D loop"):
+# (block_p, num_warps, num_stages, block_d, skip), the tile skip kept on.
+_CPS_WIDE_GRID = tuple(
+    (bp, nw, ns, bd, True)
+    for bp in (64, 128, 256)
+    for nw in (4, 8)
+    for ns in (1, 2, 3)
+    for bd in (64, 128, 256)
+)
 # Filter-index kernels sweep a wider BLOCK_N range since the inner body varies and the optimum can
 # land far from 256.
 _FILTER_GRID = tuple((bn, nw) for bn in (128, 256, 512, 1024) for nw in (2, 4, 8))
@@ -253,6 +262,8 @@ class KernelTuneSpec:
     # Dimension-swept kernels (--d/--b/--w):
     dims: tuple[tuple[str, int, str], ...] = ()  # (flag, default, help)
     expand_regimes: Callable[..., tuple[tuple[int, ...], ...]] | None = None
+    # The grid at regimes whose width pads past 256 (the probe scorers' D loop); () = ``grid``.
+    wide_grid: tuple[tuple[int, ...], ...] = ()
     # The regime field that picks a per-width CONFIGS entry (the probe scorers' "D"); None for
     # kernels with one DEFAULT_CONFIG.
     width_label: str | None = None
@@ -272,9 +283,17 @@ def _fmt_entry(spec: KernelTuneSpec, entry: tuple[int, ...]) -> str:
     ).rstrip()
 
 
-def _entry(spec: KernelTuneSpec, config: Any) -> tuple[int, ...]:
+def _grid(spec: KernelTuneSpec, regime: tuple[int, ...]) -> tuple[tuple[int, ...], ...]:
+    """The candidate grid at ``regime``: ``wide_grid`` past ``D_PAD`` 256, else ``grid``."""
+    if spec.wide_grid and spec.width_label is not None:
+        d = regime[spec.regime_labels.index(spec.width_label)]
+        return spec.wide_grid if triton.next_power_of_2(d) > 256 else spec.grid
+    return spec.grid
+
+
+def _entry(spec: KernelTuneSpec, config: Any, grid: tuple[tuple[int, ...], ...]) -> tuple[int, ...]:
     """A config as a grid entry: its first ``len(grid entry)`` fields."""
-    return tuple(getattr(config, n) for n in _config_fields(spec, spec.grid[0]))
+    return tuple(getattr(config, n) for n in _config_fields(spec, grid[0]))
 
 
 def _sm_mhz() -> int | None:
@@ -322,11 +341,11 @@ def _sweep(spec: KernelTuneSpec, dev: torch.device, regimes: tuple[tuple[int, ..
     """Time every grid entry (plus the shipped default, if the grid lacks it) on every regime,
     then pick with ``_choose``. Tuning is offline and out-of-kernel on purpose; see
     docs/system/kernels.md § Autotune separation."""
-    incumbents = {_entry(spec, spec.current(r)) for r in regimes}
+    incumbents = {(_entry(spec, spec.current(r), _grid(spec, r)), _grid(spec, r)) for r in regimes}
     if len(incumbents) != 1:
         raise click.ClickException("the regimes span several shipped tiles: tune one D at a time")
-    (current,) = incumbents
-    grid = spec.grid if current in spec.grid else (*spec.grid, current)
+    ((current, grid),) = incumbents
+    grid = grid if current in grid else (*grid, current)
     per_regime: dict[str, dict] = {}
     timings: dict[str, dict[tuple[int, ...], float]] = {}
     sm_mhz: list[int | None] = []
@@ -433,11 +452,12 @@ KERNELS: tuple[KernelTuneSpec, ...] = (
         name="codesigned-probe-score",
         config_cls=CodesignedProbeScoreConfig,
         grid=_CPS_GRID,
+        wide_grid=_CPS_WIDE_GRID,
         regime_labels=("P", "HAS_QB", "D", "B", "W"),
         make_inputs=_cps_inputs,
         run=lambda inputs, config: _codesigned_probe_score_impl(**inputs, config=config),
         paste_path="retrieve/src/retrieve/ops/triton/codesigned_probe_score.py",
-        current=lambda r: tile_for_width(CODESIGNED_PROBE_SCORE_CONFIGS, r[2]),
+        current=lambda r: width_tiles(CODESIGNED_PROBE_SCORE_CONFIGS, r[2])[0],
         width_label="D",
         smoke_regime=(1024, 1, 64, 2, 4),
         dims=(
@@ -456,11 +476,12 @@ KERNELS: tuple[KernelTuneSpec, ...] = (
         name="codesigned-probe-score-exact",
         config_cls=CodesignedProbeScoreExactConfig,
         grid=_CPS_GRID,
+        wide_grid=_CPS_WIDE_GRID,
         regime_labels=("N", "B", "C", "A_MAX", "D"),
         make_inputs=_cpse_inputs,
         run=lambda inputs, config: _codesigned_probe_score_exact_impl(**inputs, config=config),
         paste_path="retrieve/src/retrieve/ops/triton/codesigned_probe_score_exact.py",
-        current=lambda r: tile_for_width(CODESIGNED_PROBE_SCORE_EXACT_CONFIGS, r[4]),
+        current=lambda r: width_tiles(CODESIGNED_PROBE_SCORE_EXACT_CONFIGS, r[4])[0],
         smoke_regime=(4096, 2, 2, 2, 64),
         default_regimes=tuple((*r, 128) for r in _DEFAULT_CLAUSE_REGIMES),
         regime_arity=5,

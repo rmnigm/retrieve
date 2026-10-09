@@ -19,12 +19,25 @@ from retrieve.ops.triton.common import compact_scatter_kernel
 Cfg = TypeVar("Cfg")
 
 
-def tile_for_width(configs: dict[int, Cfg], d: int) -> Cfg:
-    """The probe scorers' shipped tile at embedding width ``d``: the entry of the smallest
+# Fewer programs than this leave the A100's 108 SMs short of work on a narrow probe width: the
+# tile falls back to a smaller one (kernels.md § SilverTorch kernels, "Tile config").
+MIN_PROGRAMS = 1024
+
+
+def width_tiles(configs: dict[int, tuple[Cfg, ...]], d: int) -> tuple[Cfg, ...]:
+    """The probe scorers' tiles at embedding width ``d``, largest first: the entry of the smallest
     ``D_PAD`` bound in ``configs`` at or above ``next_power_of_2(d)``, the widest entry past the
     last bound (kernels.md § SilverTorch kernels, "Tile config")."""
     d_pad = triton.next_power_of_2(d)
     return configs[min((b for b in configs if b >= d_pad), default=max(configs))]
+
+
+def tile_for_width(configs: dict[int, tuple[Cfg, ...]], d: int, b: int, width: int) -> Cfg:
+    """The shipped tile for a ``[b, width]`` probe launch at width ``d``: the first of
+    ``width_tiles`` giving ``b · cdiv(width, block_p) >= MIN_PROGRAMS``, else the smallest.
+    ``b`` and ``width`` are static Python ints, so the choice is fixed under capture."""
+    tiles = width_tiles(configs, d)
+    return next((c for c in tiles if b * triton.cdiv(width, c.block_p) >= MIN_PROGRAMS), tiles[-1])
 
 
 @dataclass(frozen=True)
@@ -63,6 +76,8 @@ def probe_prep(
     block_p: int,
     num_warps: int,
     num_stages: int,
+    block_d: int,
+    skip: bool,
 ) -> ProbeLaunch:
     """The half of both probe scorers' prep that is the same: validation, the per-row int8
     query, the ``[B, width]`` score buffer (``torch.empty``: the kernel writes every slot, a
@@ -98,6 +113,8 @@ def probe_prep(
         "stride_cn": item_codes.stride(0),
         "stride_ob": all_scores.stride(0),
         "BLOCK_P": block_p,
+        "BLOCK_D": block_d,
+        "SKIP": skip,
         "WIDE": wide(all_scores),
         "num_warps": num_warps,
         "num_stages": num_stages,
