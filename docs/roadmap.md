@@ -32,6 +32,10 @@ others (see [Multi-GPU execution](#multi-gpu-execution)).
 
 ## Needs the user
 
+- **V3 at 512 bits** (C2): `k_bits` > D needs a library change (OPORP over
+  several projections), which the user declined for the campaign on
+  2026-10-08 (LN-8). V-V3BITS measures {64, 128}; whether to add 512 as an
+  opt-in for one comparison is the user's call.
 - **`n_probe` > 1024 at k 1000** (optional): the probe scorers' id
   epilogue tile caps `next_pow2(k) · next_pow2(n_probe)` at 2^20
   ([kernels](system/kernels.md)). Tiling it over k would lift the limit; a
@@ -225,10 +229,12 @@ co-design.
   found in (b) or (c) is a library step of its own. **≈ 1 GPU-h.**
 - [ ] **V-V3BITS: V3 at LiNR's bit budget, next to our deviation** (C2 does
   not hold so far: recall −7-13 % at a 1 % pool, no gain at bs 1; our V3
-  runs `k_bits` = D = 128 against LiNR's 512, LN-8). goodreads-synth and
-  goodreads `filter` V3 at `k_bits` {128, 512}, pool {1 %, 5 %}, quality
-  first, then the timed cells; LN-8 stays the campaign's setting, this is
-  the comparison the paper reports. Pod 1. **≈ 1-2 GPU-h.**
+  runs `k_bits` = D = 128 against LiNR's 512, LN-8). `k_bits` must divide D
+  (`quantize.py` `_oporp_k_bits`), so at D 128 only {64, 128} exist without a
+  library change: goodreads-synth and goodreads `filter` V3 at `k_bits`
+  {64, 128}, pool {1 %, 5 %}, quality first, then the timed cells, to show
+  the recall-vs-bits slope. LN-8 stays the campaign's setting. Pod 1.
+  **≈ 1 GPU-h.**
 - [ ] **H-REPORT: two report fixes from EXHIBITS.** T3's ids column reads
   "equal up to boundary ties" when the scores are equal and only the tied
   id at the k-th cut differs; F3 one panel per sweep × bs (the d1 deep tree
