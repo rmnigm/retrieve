@@ -1,0 +1,58 @@
+records: 54 ok: 54 unstable: 54 code_version: ['472f2fc6']
+sweep             np bs mode   partial     full           full/partial    MiB p    MiB f ids
+all4               8  1 eager    0.718    0.926    1.289 [1.286,1.312]     0.14     0.49 equal
+all4               8  1 graph    0.138    0.138    1.002 [0.998,1.002]        -        - equal
+all4               8 16 eager    0.742    0.951    1.282 [1.281,1.284]     2.23     8.35 equal
+all4               8 16 graph    0.149    0.180    1.206 [1.206,1.206]        -        - equal
+all4              32  1 eager    0.732    0.943    1.289 [1.288,1.292]     0.47     0.83 equal
+all4              32  1 graph    0.138    0.139    1.005 [0.997,1.009]        -        - equal
+all4              32 16 eager    0.733    0.941    1.284 [1.281,1.285]     6.95    13.07 equal
+all4              32 16 graph    0.228    0.247    1.081 [1.079,1.083]        -        - equal
+all4             128  1 eager    0.714    0.932    1.291 [1.289,1.315]     1.61     1.97 equal
+all4             128  1 graph    0.182    0.190    1.044 [1.040,1.044]        -        - equal
+all4             128 16 eager    0.739    0.940    1.283 [1.269,1.291]    23.14    29.26 equal
+all4             128 16 graph    0.639    0.546    0.854 [0.854,0.855]        -        - equal
+c0_maincat         8  1 eager    0.731    0.943    1.290 [1.288,1.314]     0.14     0.49 equal
+c0_maincat         8  1 graph    0.141    0.141    0.994 [0.992,1.004]        -        - equal
+c0_maincat         8 16 eager    0.750    0.965    1.289 [1.286,1.293]     2.23     8.35 equal
+c0_maincat         8 16 graph    0.151    0.168    1.115 [1.114,1.115]        -        - equal
+c0_maincat        32  1 eager    0.744    0.959    1.289 [1.288,1.289]     0.47     0.83 equal
+c0_maincat        32  1 graph    0.141    0.140    0.988 [0.988,0.996]        -        - equal
+c0_maincat        32 16 eager    0.751    0.959    1.281 [1.277,1.284]     6.95    13.07 equal
+c0_maincat        32 16 graph    0.234    0.241    1.031 [1.030,1.037]        -        - equal
+c0_maincat       128  1 eager    0.727    0.939    1.292 [1.290,1.301]     1.61     1.97 equal
+c0_maincat       128  1 graph    0.181    0.187    1.029 [1.025,1.031]        -        - equal
+c0_maincat       128 16 eager    0.742    0.956    1.290 [1.286,1.295]    23.14    29.26 equal
+c0_maincat       128 16 graph    0.601    0.556    0.927 [0.925,0.929]        -        - equal
+c3_nversions       8  1 eager    0.742    0.956    1.289 [1.288,1.304]     0.14     0.49 equal
+c3_nversions       8  1 graph    0.144    0.145    1.006 [1.003,1.007]        -        - equal
+c3_nversions       8 16 eager    0.756    0.969    1.280 [1.276,1.281]     2.23     8.35 equal
+c3_nversions       8 16 graph    0.150    0.162    1.082 [1.078,1.082]        -        - equal
+c3_nversions      32  1 eager    0.748    0.961    1.288 [1.284,1.291]     0.47     0.83 equal
+c3_nversions      32  1 graph    0.143    0.144    1.007 [0.999,1.011]        -        - equal
+c3_nversions      32 16 eager    0.759    0.971    1.280 [1.276,1.285]     6.95    13.07 equal
+c3_nversions      32 16 graph    0.232    0.236    1.016 [1.015,1.017]        -        - equal
+c3_nversions     128  1 eager    0.734    0.945    1.286 [1.271,1.290]     1.61     1.97 equal
+c3_nversions     128  1 graph    0.181    0.186    1.029 [1.025,1.029]        -        - equal
+c3_nversions     128 16 eager    0.751    0.967    1.284 [1.257,1.297]    23.14    29.26 equal
+c3_nversions     128 16 graph    0.603    0.555    0.921 [0.919,0.922]        -        - equal
+recall_oracle@100 (median over seeds):
+  ('all4', 8, 'full') 0.5219
+  ('all4', 8, 'partial') 0.5219
+  ('all4', 32, 'full') 0.7475
+  ('all4', 32, 'partial') 0.7475
+  ('all4', 128, 'full') 0.9019
+  ('all4', 128, 'partial') 0.9019
+  ('c0_maincat', 8, 'full') 0.7394
+  ('c0_maincat', 8, 'partial') 0.7394
+  ('c0_maincat', 32, 'full') 0.8844
+  ('c0_maincat', 32, 'partial') 0.8844
+  ('c0_maincat', 128, 'full') 0.9425
+  ('c0_maincat', 128, 'partial') 0.9425
+  ('c3_nversions', 8, 'full') 0.7131
+  ('c3_nversions', 8, 'partial') 0.7131
+  ('c3_nversions', 32, 'full') 0.8769
+  ('c3_nversions', 32, 'partial') 0.8769
+  ('c3_nversions', 128, 'full') 0.9431
+  ('c3_nversions', 128, 'partial') 0.9431
+windows 648, below 1410 MHz 235, min 1140.0
