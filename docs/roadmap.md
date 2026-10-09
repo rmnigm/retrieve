@@ -229,17 +229,6 @@ co-design.
   filter-cluster alignment (GLS) to explain F2's real-vs-synth gap, with
   V-AX-CORR; Big-ANN-style QPS at recall 0.95 per selectivity band, and a
   reproduction defect ledger.
-- [ ] **V-ROUTER: a local-pass-rate router as a measured arm** (EXHIBITS idea
-  #2: IVF recall follows the local pass rate l_q, the share of a query's
-  unfiltered top-100 that pass; Spearman 0.82 / 0.48 vs 0.38 / 0.30 for the
-  global p; the counterfactual l_q router is within 5 % of the per-query
-  oracle on goodreads). Harness arm `router`: a cheap unfiltered SilverTorch
-  pre-probe (small n_probe, k 100) gives l_q per query, then exact (V2) below
-  a threshold, IVF above; the pre-probe's cost is timed in the arm. Fit the
-  threshold on goodreads, report it fixed on arXiv and PubMed (transfer).
-  Gates: recall equal to its two branches per query (ids from the routed arm),
-  harness suite. Beyond the original papers; F2 / T2 practical take. Pod 1's
-  runner after V-GR-DEEP. **≈ 1-2 GPU-h.**
 - [ ] **V-V3BITS (goodreads-synth done; goodreads' 48 cells deferred): V3 at LiNR's bit budget, next to our deviation** (C2 does
   not hold so far: recall −7-13 % at a 1 % pool, no gain at bs 1; our V3
   runs `k_bits` = D = 128 against LiNR's 512, LN-8). `k_bits` must divide D
@@ -353,15 +342,6 @@ co-design.
   (our partial vs full at 30 M, beside Meta's, pod d; per-sweep processes until
   H-ARMFREE lands) and arxiv-synth's V1 / V2 cells re-timed on pod 1 (C1's 3 M
   crossover without the clause-width cost).
-- [ ] **ROUTER-LIB: the router as a library method** (the library goal,
-  user 2026-10-10; only if V-ROUTER on PubMed puts it on the Pareto
-  front, [decisions](decisions.md#datasets); WIP on `dev/router-lib`): the harness `router` arm's logic (unfiltered pre-probe
-  → l_q → V2 below the threshold, SilverTorch above) as a `retrieve`
-  module with its docs page, the split done on the device with no host
-  sync so the arm can be CUDA-graph captured (V-ROUTER at 0.8 M: the
-  eager-only host split is why it never beat graph V2); the harness arm calls it; gates: the arm's
-  records unchanged (ids + scores `torch.equal`), library + harness suites.
-  After V-ROUTER's goodreads fit.
 - [ ] **REL-LIC: license audit and the public-release plan** (user,
   2026-10-10, ECIR Availability): per dataset (goodreads, arXiv, PubMed /
   MedCPT, YFCC-10M, Re-LAION, the synth attrs) whether the derived data may
