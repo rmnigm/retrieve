@@ -236,6 +236,17 @@ co-design.
   p ≤ 0.001. Gates bit-exact + keep rule across p at d128 / d192. Re-times
   every d128 / d192 SilverTorch Triton cell (ledger). Last in the
   `campaign-v2.3` bundle; st-dloop, pod b.
+- [ ] **H-QLOOP: the quality pass is CPU-bound** (pod 1, 2026-10-09, live
+  profile of V-V3BITS). `run.quality` spends ≈ 33 ms of CPU work per 16-row
+  chunk (row masks, `blob["topk"][sel]`, `targets[sel]`, `.to(device)`
+  staging, per-chunk `nonzero`; ~128 OpenMP threads spinning) against a ≈ 2 ms
+  forward: ≈ 22-33 s per cell with the GPU idle, about a third of the wall of
+  every cell that computes quality (V3 / SilverTorch every seed; V1 / V2 /
+  postfilter seed 0). Fix: stage the oracle top-k, targets and masks on the
+  device once per cell and index there; bound torch's CPU threads for the
+  loop. Gate: quality fields and per-query sidecars **byte-identical** to
+  existing records (golden cells + one record per arm from the Hub), harness
+  suite. Harness only. Pod 1's runner, now (CPU while V-GR-DEEP runs).
 - [ ] **H-SCOPE: a named-scope kernel sum in `profile_once`** (EXHIBITS, C7).
   T3's scorer column needs like-for-like scopes (ours fuses the bloom test;
   Meta's bloom search and payload are separate kernels): record per-call
