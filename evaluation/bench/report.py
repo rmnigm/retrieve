@@ -1096,6 +1096,18 @@ def _ids_identity(sub: list[dict[str, Any]], ref: list[dict[str, Any]]) -> str:
     return "$\\neq$"
 
 
+def _scorer(rows: list[dict[str, Any]]) -> float | None:
+    """The like-for-like scorer time (us) of one eager call, median over seeds: the entry's
+    ``kernel_scopes["scorer"]`` (H-SCOPE: ours with its fused bloom test, Meta's scoring with its
+    payload and bloom-search kernels). ``None`` for records profiled before the scopes existed."""
+    us = [
+        e["kernel_scopes"]["scorer"]["us"]
+        for r in rows
+        if (e := r["_entry"]) and e.get("kernel_scopes")
+    ]
+    return statistics.median(us) if us else None
+
+
 def tab_t3(c) -> list[Path]:
     """T3: official against our Triton reimplementation, from the interleaved ``h2h`` suite."""
     rows = _sel(c.rows, suite="h2h")
@@ -1114,6 +1126,7 @@ def tab_t3(c) -> list[Path]:
                         if t is None:
                             continue
                         us, calls, top8 = _kernels(sub)
+                        scorer = _scorer(sub)
                         cell = _cells(sub)[0]
                         body.append(
                             [
@@ -1127,6 +1140,7 @@ def tab_t3(c) -> list[Path]:
                                 if be == "triton" and mode == "eager"
                                 else _ratio_tex(*_ratio(sub, ref)),
                                 "---" if us is None else f"${us:.1f}" + ("^{8}$" if top8 else "$"),
+                                "---" if scorer is None else f"${scorer:.1f}$",
                                 "---" if calls is None else f"${calls}$",
                                 _f(cell.get("index_mib"), 1),
                                 _f(cell.get("perf_peak_fwd_mib"), 1),
@@ -1142,7 +1156,7 @@ def tab_t3(c) -> list[Path]:
         caption="Official SilverTorch against our Triton reimplementation (\\texttt{h2h}, arms "
         "timed interleaved in one process).",
         label="tab:t3",
-        colspec="lllcccccccc" + "c",
+        colspec="lllccccccccc" + "c",
         header=[
             "Cell",
             "Arm",
@@ -1150,6 +1164,7 @@ def tab_t3(c) -> list[Path]:
             "p50 (ms)",
             "/ triton eager",
             "kernel ($\\mu$s)",
+            "scorer ($\\mu$s)",
             "launches",
             "index MiB",
             "peak MiB",
@@ -1162,7 +1177,10 @@ def tab_t3(c) -> list[Path]:
             [
                 "Kernel-only time and launches: one eager call under \\texttt{torch.profiler}, the "
                 "sum over every device kernel, median over seeds; $^{8}$: a record profiled "
-                "before every kernel was summed, the top-8 kernels only (a lower bound). ids: "
+                "before every kernel was summed, the top-8 kernels only (a lower bound). scorer: "
+                "the like-for-like scoring kernels of the same call (ours with its fused bloom "
+                "test; official's cluster scoring, payload and bloom-search kernels), median over "
+                "seeds; --- on records profiled without the scope split. ids: "
                 "the sha256 of the returned ids on the fixed probe batches equals ($=$) the "
                 "Triton eager arm's at every common seed; $=$ (ties): equal up to boundary ties "
                 "(where it differs the scores are bit-equal, $|\\Delta s|_{\\max}=0$, so only a "
