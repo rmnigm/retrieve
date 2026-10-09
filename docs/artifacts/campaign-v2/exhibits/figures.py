@@ -108,7 +108,11 @@ def f2x(recs):
     synth = [
         r
         for r in recs
-        if r["suite"] == "synth" and r["status"] == "ok" and r["filter_kind"] == "clause"
+        if r["suite"] == "synth"
+        and r["filter_kind"] == "clause"
+        # recall only: a quality-only record (`skip_perf`) is complete for this figure
+        and (r["status"] == "ok" or set(r.get("partial_reasons") or []) <= {"skip_perf", "ks_bs"})
+        and r["status"] != "failed"
     ]
     dss = sorted({(r["dataset"], r["_tree"]) for r in synth})
     if not dss:
@@ -329,7 +333,7 @@ def cv_tree(t):
         "v25": "v2.5 472f2fc6",
         "v26": "v2.6 20e83bfc",
         "d1": "d1 72e5a90",
-    }.get(t, t)
+    }.get(t, t.split("__")[0].replace("campaign-", "") if t.startswith("campaign-v") else t)
 
 
 def f3x(recs):
