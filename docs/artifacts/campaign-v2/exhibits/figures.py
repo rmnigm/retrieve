@@ -26,6 +26,7 @@ REAL = {
     "goodreads-synth": "goodreads",
     "arxiv-synth": "arxiv",
     "yfcc10m-synth": "yfcc10m",
+    "arxiv-corr-synth": "arxiv",
 }
 
 

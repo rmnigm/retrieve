@@ -87,7 +87,9 @@ def fingerprint(
             h.update(b"none")
             continue
         h.update(repr((tuple(t.shape), str(t.dtype))).encode())
-        idx = torch.linspace(0, t.shape[0] - 1, steps=min(_FP_SAMPLE_ROWS, t.shape[0])).long()
+        n = t.shape[0]
+        # float32 linspace rounds n - 1 up to n past 2^24 rows; the clamp keeps smaller fingerprints
+        idx = torch.linspace(0, n - 1, steps=min(_FP_SAMPLE_ROWS, n)).long().clamp_(max=n - 1)
         h.update(t[idx].detach().float().cpu().contiguous().numpy().tobytes())
     h.update(attrs_digest.encode())
     h.update(repr((None if clauses is None else tuple(clauses), int(k_gt))).encode())

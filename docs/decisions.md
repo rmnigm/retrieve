@@ -309,6 +309,19 @@ now on; the [roadmap](roadmap.md) holds the steps.
   100 M point and no fp16-items harness change. At d256 the fp32 items
   are 31 GB; the item-chunked oracle adds no item copy
   ([validation](validation.md#harness-gates), G-oracle).
+- **The router stays only if it is on the Pareto front** (user, 2026-10-10):
+  between IVF and exact search — recall above IVF's and latency below exact
+  search's, at the same batch size and mode — on PubMed 10 M (the large
+  dataset; LAION is not used for it). If it is not on the front there, it is
+  dropped from the paper and the library (ROUTER-LIB is not built).
+- **YFCC exact gate: an fp16-storage allowance at k 100** (user, 2026-10-10).
+  The §2.4 gate (`recall_oracle@k_max ≥ 0.99` for V1 / V2) stays as is
+  everywhere else. For the fp16-stored 10 M YFCC catalogs (`yfcc10m`,
+  `yfcc10m-synth`) at `k_max` 100, the threshold is a per-dataset value set
+  from a quality-only probe, and only if the probe shows the residual is
+  fp16 item storage: V1 = V2 = the library's exact torch path on the same
+  inputs, and an fp32 item table gives 1.0. The value, the probe and its
+  numbers are recorded in validation.md; @1000 keeps 0.99.
 - **No PCA.** Every dataset runs at its encoder's native width (YFCC 192,
   PubMed 768); each dataset contributes one width, and the dim ablation is
   dropped.
