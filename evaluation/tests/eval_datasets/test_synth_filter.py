@@ -46,10 +46,12 @@ def test_build_writes_the_four_files_and_leaves_the_real_attrs(tmp_path, legacy)
     item = torch.load(d / sf.ITEM_ATTRS, weights_only=True)
     u = torch.load(d / sf.U_FILE, weights_only=True)
     qa = torch.load(d / sf.QUERY_ATTRS, weights_only=True)
-    assert item.shape == (40, 7, 1) and item.dtype == torch.long  # the pad row is not an item
+    assert (
+        item.shape == (40, len(sf.RATES), 1) and item.dtype == torch.long
+    )  # the pad row is not an item
     assert torch.equal(item, sf.synth_flags(sf.synth_u(40), sf.RATES))
     assert torch.equal(u, sf.synth_u(40))
-    assert qa.dtype == torch.long and qa.shape == (9, 7) and bool((qa == 1).all())
+    assert qa.dtype == torch.long and qa.shape == (9, len(sf.RATES)) and bool((qa == 1).all())
     assert torch.equal(layout.load_query_attrs(d / sf.QUERY_ATTRS, 9), qa)  # full-split rows
     side = json.loads((d / sf.SIDECAR).read_text())
     assert side == meta and side["seed"] == sf.SEED and side["rates"] == list(sf.RATES)
@@ -158,3 +160,13 @@ def test_cli_correlated_reads_the_content_dir_at_dim(tmp_path):
         cli.main, ["synth-filter", "--dataset", "seq", "--correlated", "--config-dir", str(cfg)]
     )
     assert r.exit_code != 0 and "has no content_dir" in r.output
+
+
+def test_synth_attrs_for_other_rates_are_refused(tmp_path):
+    d = tmp_path / "ds"
+    d.mkdir()
+    (d / sf.SIDECAR).write_text(json.dumps({"rates": [0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0]}))
+    with pytest.raises(ValueError, match="rerun eval-data synth-filter"):
+        layout.check_synth_rates(d / sf.ITEM_ATTRS)
+    (d / sf.SIDECAR).write_text(json.dumps({"rates": list(sf.RATES)}))
+    layout.check_synth_rates(d / sf.ITEM_ATTRS)

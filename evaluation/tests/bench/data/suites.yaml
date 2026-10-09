@@ -67,6 +67,7 @@ widths:
   ks: [10, 50]
   batch_sizes: [1]
   ks_by_sweep: {mini: {c0c1: [10]}}
+  seeds_by_sweep: {mini: {c0c1: [0, 2]}}
   arms:
     - {algo: silvertorch, backends: [triton], filter_kinds: [bloom], build: {m_bits: [64, 256]}}
     - {algo: silvertorch, backends: [triton], filter_kinds: [clause]}
