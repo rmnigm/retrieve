@@ -36,10 +36,6 @@ others (see [Multi-GPU execution](#multi-gpu-execution)).
   several projections), which the user declined for the campaign on
   2026-10-08 (LN-8). V-V3BITS measures {64, 128}; whether to add 512 as an
   opt-in for one comparison is the user's call.
-- **`n_probe` > 1024 at k 1000** (optional): the probe scorers' id
-  epilogue tile caps `next_pow2(k) · next_pow2(n_probe)` at 2^20
-  ([kernels](system/kernels.md)). Tiling it over k would lift the limit; a
-  library change (campaign-v2.2). Not needed by the grid as tuned.
 - **Contact the original authors** (re-plan decision 7): the LinkedIn LiNR
   team and Meta's SilverTorch team — filter-set details, the V1/V2 setup,
   the SilverTorch paper's FPR inconsistency (0.067 % vs 0.00173 %) — and
@@ -215,6 +211,15 @@ co-design.
   control), EXHIBITS' old-vs-new map over p, N, d; if confirmed, a grid fix
   (per-width / per-N `programs`, or multi-wave) in the `campaign-v2.2` bundle
   with ST-DLOOP, gated bit-exact + keep rule at 0.8 M d128 and 10 M d768.
+- [ ] **ST-IDS: the probe scorers' id epilogue loops over k** (pod c,
+  2026-10-09). `probe_ids_kernel` builds a dense `[next_pow2(k),
+  next_pow2(n_probe)]` tile: at k 1000 every new `n_probe` is a 2-4 MB IR
+  compile, `ptxas` 99-653 s each (~2,000 s on a fresh box), and k 1000 ×
+  n_probe > 1024 cannot compile at all (2^20 elements). Tile `[BLOCK_K, NPP]`
+  with a non-unrolled loop over k. Integer-exact: gate `torch.equal` ids and
+  scores, epilogue kernel time and compile time before/after. Lifts the
+  `n_probe` ≤ 1024 at k 1000 limit. In the `campaign-v2.2` bundle with
+  ST-DLOOP and V2-HIGHP; st-dloop, pod b.
 - [ ] **V-PROF3: three profiles the first EXHIBITS run asks for** (pod 1,
   goodreads, `torch.profiler`, one cell each, interleaved): (a) official bloom
   `bloom_path` partial vs full: co-design is 14-22 % *slower* than full in
