@@ -34,7 +34,7 @@ def test_clause_index_and_or_semantics():
         dtype=torch.long,
         device="cuda",
     )
-    mask = ci.evaluate_mask(q)
+    mask = ci.evaluate_mask(ci.prepare_queries(q))
     assert mask.shape == (4, n)
     assert mask[0, :100].all() and not mask[0, 100:].any()
     assert mask[1, 100:].all() and not mask[1, :100].any()
@@ -51,10 +51,10 @@ def test_evaluate_indices_matches_compact_evaluate_mask():
     ci.register_index(attrs)
     q = make_query_attrs(b=8, c=3, n_vocab=20, inactive_rate=0.2, seed=100)
 
-    expected_mask = ci.evaluate_mask(q)
+    expected_mask = ci.evaluate_mask(ci.prepare_queries(q))
     expected_ids, expected_counts = compact_mask(expected_mask)
 
-    got_ids, got_counts = ci.evaluate_indices(q)
+    got_ids, got_counts = ci.evaluate_indices(ci.prepare_queries(q))
 
     # counts must match exactly.
     assert torch.equal(got_counts, expected_counts), (
@@ -78,9 +78,9 @@ def test_evaluate_indices_with_reverse_clauses():
     ci.register_index(attrs, clause_is_reverse=is_reverse)
     q = make_query_attrs(b=4, c=2, n_vocab=10, inactive_rate=0.5, seed=8)
 
-    expected_mask = ci.evaluate_mask(q)
+    expected_mask = ci.evaluate_mask(ci.prepare_queries(q))
     expected_ids, expected_counts = compact_mask(expected_mask)
-    got_ids, got_counts = ci.evaluate_indices(q)
+    got_ids, got_counts = ci.evaluate_indices(ci.prepare_queries(q))
 
     assert torch.equal(got_counts, expected_counts)
     for b in range(q.shape[0]):
@@ -94,7 +94,7 @@ def test_evaluate_indices_all_inactive_passes_all():
     ci = ExactAttributeFilter()
     ci.register_index(attrs)
     q = torch.full((3, 2), -1, dtype=torch.long, device="cuda")
-    cand, counts = ci.evaluate_indices(q)
+    cand, counts = ci.evaluate_indices(ci.prepare_queries(q))
     assert torch.equal(counts, torch.full((3,), n, dtype=torch.int64, device="cuda"))
     for b in range(3):
         assert set(cand[b, :n].tolist()) == set(range(n))
@@ -109,7 +109,7 @@ def test_clause_index_all_reverse():
     ci.register_index(attrs, clause_is_reverse=is_reverse)
 
     q = make_query_attrs(b=4, c=c, n_vocab=20, inactive_rate=0.0, seed=52)
-    mask = ci.evaluate_mask(q)
+    mask = ci.evaluate_mask(ci.prepare_queries(q))
 
     # Reference: a_match[r, b, n, c] := q[b, c] in attrs[n, c, :]
     item = attrs.unsqueeze(0)  # [1, N, C, A]
@@ -125,13 +125,13 @@ def test_clause_index_single_item_index():
     ci = ExactAttributeFilter().to("cuda")
     ci.register_index(attrs)
     q = torch.tensor([[5, 10], [5, 11], [-1, -1]], dtype=torch.long, device="cuda")
-    mask = ci.evaluate_mask(q)
+    mask = ci.evaluate_mask(ci.prepare_queries(q))
     assert mask.shape == (3, 1)
     assert mask[0, 0].item() is True or bool(mask[0, 0].item())  # both clauses match
     assert not bool(mask[1, 0].item())  # second clause fails
     assert bool(mask[2, 0].item())  # both inactive
 
-    ids, counts = ci.evaluate_indices(q)
+    ids, counts = ci.evaluate_indices(ci.prepare_queries(q))
     assert counts.tolist() == [1, 0, 1]
 
 
@@ -148,8 +148,8 @@ def test_evaluate_subset_matches_mask_gather():
     g = torch.Generator(device="cuda").manual_seed(83)
     ids = torch.randint(0, n, (8, 128), generator=g, dtype=torch.long, device="cuda")
 
-    expected = ci.evaluate_mask(q).gather(1, ids)
-    assert torch.equal(ci.evaluate_subset(q, ids), expected)
+    expected = ci.evaluate_mask(ci.prepare_queries(q)).gather(1, ids)
+    assert torch.equal(ci.evaluate_subset(ci.prepare_queries(q), ids), expected)
 
 
 def test_register_index_clause_is_reverse_keyword_only():
@@ -169,7 +169,7 @@ def test_clause_index_evaluate_subset_p_zero():
     ci.register_index(attrs)
     q = make_query_attrs(b=4, c=2, n_vocab=10, inactive_rate=0.0, seed=62)
     empty = torch.empty(4, 0, dtype=torch.long, device="cuda")
-    out = ci.evaluate_subset(q, empty)
+    out = ci.evaluate_subset(ci.prepare_queries(q), empty)
     assert out.shape == (4, 0)
     assert out.dtype == torch.bool
 
@@ -243,10 +243,10 @@ def test_evaluate_mask_range_equals_full_mask_slice(backend):
     (with a reverse clause) and bloom, on both backends."""
     q = make_query_attrs(b=5, c=3, n_vocab=6, inactive_rate=0.2, seed=22)
     for f in _range_filters(backend):
-        full = f.evaluate_mask(q)
+        full = f.evaluate_mask(f.prepare_queries(q))
         assert full.any() and not full.all()
         for start, end in RANGES:
-            got = f.evaluate_mask(q, start, end)
+            got = f.evaluate_mask(f.prepare_queries(q), start, end)
             assert got.shape == (5, (RANGE_N if end is None else end) - start)
             assert torch.equal(got, full[:, start:end]), (type(f).__name__, start, end)
 
@@ -266,7 +266,7 @@ def test_evaluate_mask_range_allocates_no_full_mask(backend):
         torch.cuda.synchronize()
         base = torch.cuda.memory_allocated()
         torch.cuda.reset_peak_memory_stats()
-        out = f.evaluate_mask(q, lo, hi)
+        out = f.evaluate_mask(f.prepare_queries(q), lo, hi)
         torch.cuda.synchronize()
         transient = torch.cuda.max_memory_allocated() - base
         assert out.shape == (b, hi - lo)

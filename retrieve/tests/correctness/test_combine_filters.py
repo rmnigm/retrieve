@@ -46,7 +46,9 @@ def test_combine_indices_matches_compact_of_combined_masks():
     qc = make_query_attrs(b=8, c=2, n_vocab=80, inactive_rate=0.2, seed=4)
     qb = qc.clone()  # both filters built from the same attrs
 
-    expected_mask = combine_masks(ci.evaluate_mask(qc), bf.evaluate_mask(qb))
+    expected_mask = combine_masks(
+        ci.evaluate_mask(ci.prepare_queries(qc)), bf.evaluate_mask(bf.prepare_queries(qb))
+    )
     exp_ids, exp_counts = compact_mask(expected_mask)
     got_ids, got_counts = combine_indices([ci, bf], [qc, qb])
 
@@ -93,7 +95,7 @@ def test_combine_indices_single_filter():
     ci, _ = _mk_filters(n=512, c=2, a_max=3, seed=11)
     q = make_query_attrs(b=4, c=2, n_vocab=80, inactive_rate=0.2, seed=12)
     ids, counts = combine_indices([ci], [q])
-    ref_ids, ref_counts = ci.evaluate_indices(q)
+    ref_ids, ref_counts = ci.evaluate_indices(ci.prepare_queries(q))
     assert torch.equal(counts, ref_counts)
     for r in range(q.shape[0]):
         c = int(ref_counts[r].item())

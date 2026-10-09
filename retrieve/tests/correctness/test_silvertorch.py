@@ -534,8 +534,8 @@ class TestStateDict:
         for (name, a), (_, b) in zip(src.named_buffers(), twin.named_buffers(), strict=True):
             assert torch.equal(a, b), name
         qa = data["q_attrs"] if filter_mode != "none" else None
-        ids_s, sc_s = src(data["query"], src.prepare_queries(qa))
-        ids_t, sc_t = twin(data["query"], twin.prepare_queries(qa))
+        ids_s, sc_s = src(data["query"], None if qa is None else src.prepare_queries(qa))
+        ids_t, sc_t = twin(data["query"], None if qa is None else twin.prepare_queries(qa))
         assert torch.equal(sc_s, sc_t)
         for b in range(B):
             assert_topk_id_sets_match(ids_t, sc_t, ids_s, sc_s, b, atol=0, rtol=0)
@@ -575,8 +575,8 @@ class TestBuilder:
         assert twin._global_scale_f == again._global_scale_f
         assert twin._probe_width == again._probe_width
         qa = data["q_attrs"] if filter_mode != "none" else None
-        ids_a, sc_a = again(data["query"], again.prepare_queries(qa))
-        ids_t, sc_t = twin(data["query"], twin.prepare_queries(qa))
+        ids_a, sc_a = again(data["query"], None if qa is None else again.prepare_queries(qa))
+        ids_t, sc_t = twin(data["query"], None if qa is None else twin.prepare_queries(qa))
         assert torch.equal(sc_a, sc_t)
         assert_ids_equal_up_to_ties(ids_t, ids_a, sc_a)
 

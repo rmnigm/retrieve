@@ -24,6 +24,7 @@ MODULES = [
     "OneBitKNN",
     "PostfilterKNN",
     "PrefilterKNN",
+    "PreparedFilter",
     "SilverTorch",
     "SilverTorchBuilder",
     "SimHashKNN",

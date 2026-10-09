@@ -27,7 +27,7 @@ from tests.parity.conftest import poison_empty
 def _ref(attrs: torch.Tensor, is_reverse: torch.Tensor, q: torch.Tensor):
     ci = ExactAttributeFilter().to("cuda")
     ci.register_index(attrs, clause_is_reverse=is_reverse)
-    ref_mask = ci.evaluate_mask(q)
+    ref_mask = ci.evaluate_mask(ci.prepare_queries(q))
     ref_ids, ref_counts = compact_mask(ref_mask)
     return ref_ids, ref_counts
 

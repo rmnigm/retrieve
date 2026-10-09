@@ -67,12 +67,12 @@ OTHER_ORDER: of.BitOrder = "low_first"
 K_SEARCH, HASH_K, B_MULT = 5, 7, 10.0
 
 
-@pytest.fixture(autouse=True)
 def _prep(module, qa):
     """The module's prepared filter for ``qa`` (``None`` unfiltered)."""
     return None if qa is None else module.prepare_queries(qa)
 
 
+@pytest.fixture(autouse=True)
 def _needs_official():
     require_official()
 

@@ -135,14 +135,14 @@ def test_clause_salt_registered_as_buffer_and_moves_with_module():
     expected_q = build_query_signatures(
         q.long().unsqueeze(-1), bf.hash_seeds, M_BITS, K_HASH, WORD_COUNT
     )
-    assert torch.equal(bf._build_query_sigs(q), expected_q)
-    mask_before = bf.evaluate_mask(q)
+    assert torch.equal(bf.prepare_queries(q), expected_q)
+    mask_before = bf.evaluate_mask(bf.prepare_queries(q))
     bf_cpu = bf.cpu()
     assert bf_cpu.clause_salt.device.type == "cpu"
     assert torch.equal(bf_cpu.clause_salt, generate_clause_salt(2, torch.device("cpu")))
     bf_back = bf_cpu.cuda()
     assert bf_back.clause_salt.device.type == "cuda"
-    assert torch.equal(bf_back.evaluate_mask(q), mask_before)
+    assert torch.equal(bf_back.evaluate_mask(bf_back.prepare_queries(q)), mask_before)
 
     embs = make_index(256, 64)
     kw = {"k": 8, "n_lists": 8, "n_probe": 4, "n_iter": 2}
