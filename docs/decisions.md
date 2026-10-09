@@ -35,7 +35,7 @@ decisions.
   baselines and measures the originals lack) or availability (code, data,
   documentation, no gap between paper and material); the checklist is
   roadmap F-CRIT. Beside the paper: an open-source library of the methods
-  and an easy way to benchmark them on more datasets (roadmap ROUTER-LIB,
+  and an easy way to benchmark them on more datasets (roadmap
   H-ADDDATA).
 - **Scope: retrieval as torch ops inside the model graph** (user,
   2026-10-10), the frame both papers use (SilverTorch: retrieval as
@@ -288,7 +288,7 @@ now on; the [roadmap](roadmap.md) holds the steps.
   21 % is noise.
 - **Query preparation is outside the timed forward, for every arm** (user,
   2026-10-10): each arm's query-side filter encoding (official plans, bloom
-  signatures, the router's) runs in its `prepare_queries` before timing and
+  signatures) runs in its `prepare_queries` before timing and
   is recorded as `query_prep_ms`
   ([evaluation](system/evaluation.md#query-preparation)). It replaces the
   earlier rule that timed official forwards paid the expression parse
@@ -330,7 +330,8 @@ now on; the [roadmap](roadmap.md) holds the steps.
   dropped from the paper and the library (ROUTER-LIB is not built).
   **Verdict (2026-10-11): dropped** — on PubMed 10 M it is slower than
   exact V2 at bs 1 and collapses onto IVF at p ≈ 1; its two bs-16 passes are
-  within 2 % of the front (Hub `campaign-v2.5/pubmed-router`).
+  within 2 % of the front (Hub `campaign-v2.5/pubmed-router`). The harness arm
+  is deleted (ROUTER-DROP); its records stay on the Hub.
 - **YFCC exact gate: an fp16-storage allowance at k 100** (user, 2026-10-10).
   The §2.4 gate (`recall_oracle@k_max ≥ 0.99` for V1 / V2) stays as is
   everywhere else. For the fp16-stored 10 M YFCC catalogs (`yfcc10m`,
