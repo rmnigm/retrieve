@@ -26,7 +26,7 @@ gets is decided by whether it sets `checkpoint`:
 | shape | datasets | query embeddings come from | filters |
 |---|---|---|---|
 | **sequential** | goodreads; out of the study: yambda-500m, yambda-5b, kuairand | a trained SASRec checkpoint ([which one](checkpoints.md#what-the-harness-reads)), encoded at eval time | goodreads, kuairand |
-| **text** | arxiv, arxiv-synth, arxiv-corr-synth, yfcc10m, pubmed, openalex | pre-encoded embeddings on disk | yes |
+| **text** | arxiv, arxiv-synth, arxiv-corr-synth, yfcc10m, pubmed, laion30m, openalex | pre-encoded embeddings on disk | yes |
 
 A third variant, **synthetic**, is a text dataset grown to arbitrary `N`
 by interpolating between real embeddings — used for scale sweeps where a
@@ -63,6 +63,7 @@ HuggingFace's `datasets` in the shared venv.
 | [`etl/pubmed.py`](../../evaluation/eval_datasets/etl/pubmed.py) | `pubmed` | NCBI FTP MedCPT embeddings + MEDLINE baseline (~36M articles) |
 | [`etl/kuairand.py`](../../evaluation/eval_datasets/etl/kuairand.py) | `kuairand` | Zenodo KuaiRand-27K + category supplement (32M videos) |
 | [`etl/openalex.py`](../../evaluation/eval_datasets/etl/openalex.py) | `openalex` | OpenAlex snapshot on public S3, parquet copy (476M works, streamed) |
+| [`etl/laion.py`](../../evaluation/eval_datasets/etl/laion.py) | `laion` | HF `laion/relaion2B-en-research-safe` (gated, auto-approved), first two parquet parts |
 | [`etl/synth_arxiv.py`](../../evaluation/eval_datasets/etl/synth_arxiv.py) | `synth-arxiv` | an already-encoded arxiv directory |
 | [`common.py`](../../evaluation/eval_datasets/common.py) | — | shared attribute synthesis, id-hash sampling, `prep_log.json` merge, range specs |
 | [`timesplit.py`](../../evaluation/eval_datasets/timesplit.py) | — | vendored sequential time-split |
@@ -974,6 +975,97 @@ data/openalex/
 └── prep_log.json
 ```
 
+### laion30m
+
+**Status: `prep` done on pod d (2026-10-10); encode, `targets`, `attrs`, `bench check` and the
+Hub copy not yet run.** Roadmap V-LAION30: a 30 M scale point at d256, `filter` only
+([decisions](../decisions.md#datasets)). Nothing here is citable.
+
+`download` → `prep` → `encode_text` → `encode_queries` → `targets` → `attrs`
+([`etl/laion.py`](../../evaluation/eval_datasets/etl/laion.py),
+[`config/laion30m.yaml`](../../evaluation/config/laion30m.yaml)). Source: Re-LAION-2B-en-research-safe
+on the Hub, gated with automatic approval (the pod's token reads it); `download` takes parts
+`0-1`, 2 × 3.6 GB, 32,776,409 rows (16,388,209 + 16,388,200), with url, caption, similarity
+(CLIP image-caption cosine), pwatermark, punsafe, original width / height, key and a 64-bit
+row hash. It has no embeddings; we encode the captions.
+
+**`prep`** (42 s on 56 threads): strip the captions and drop the blank ones (108); keep
+**one row per distinct caption**, because an identical text is an identical vector. Of the
+rows sharing a caption, the one with the smallest `common.pmid_hash(hash, seed)` survives:
+30,928,288 distinct. The catalog is the 30,000,000 smallest ranks, in source order
+(`items.parquet`, `item_id` 1..N). The remaining 928,288 rows are the held-out pool, never in
+the catalog; 10,000 are drawn with the seed (`queries.parquet`). Both files carry each row's
+`key`, `url`, registered `domain` and the raw tag values. There is no `item_id_map.json`
+(30 M keys as JSON); `items.parquet` maps `item_id` to `key`, and `eval-data publish` leaves
+it out (the captions and urls are the gated upstream's).
+
+**Domains.** `domain` is the url host's registrable domain under the public suffix list that
+`tldextract` bundles (offline, no fetch: deterministic per tldextract version), so
+`cdn.shopify.com` becomes `shopify.com`. A host with no registrable domain (an IP address)
+keeps the host. The catalog has 1,430,979 domains; the largest is shopify.com at 5.9 %, then
+pinimg.com, wp.com and cloudfront.net. Image CDNs count as sites. 97.2 % of the queries' domains
+occur in the catalog. A query's own domain passes, at the 10 / 25 / 50 / 75 / 90 % quantiles,
+5e-7 / 1.7e-5 / 1.6e-3 / 1.1e-2 / 4.1e-2 of the items: this is the selectivity range that
+"search within a site" spans.
+
+#### Attribute semantics
+
+`item_attrs_narrow.pt` is `[N, 6, 1]` int64. Every tag is single-valued, so `A_max = 1`
+(1.4 GB at 30 M, against 5.8 GB padded to the other datasets' 4 slots). Bucket edges are
+upper-exclusive (`np.searchsorted(..., side="right")`), picked near the quintiles; a missing
+value is `-1`. The shares are measured on the 30 M items:
+
+| clause | attribute | values | item shares |
+|---|---|---|---|
+| C0 | url registered domain | 1,430,979 (codes by count, descending; `domain_vocab.json`) | — |
+| C1 | `max(original_width, original_height)`, edges 200 / 300 / 500 / 800 px | 5 | 11.8 / 19.4 / 29.4 / 19.7 / 16.3 %, 3.45 % missing |
+| C2 | similarity, edges 0.30 / 0.315 / 0.33 / 0.35 | 5 | 7.8 / 26.1 / 22.5 / 21.2 / 22.2 % |
+| C3 | url registered domain — **reverse** ("other sites") | as C0 | — |
+| C4 | pwatermark, edges 0.1 / 0.2 / 0.35 / 0.6 | 5 | 19.9 / 24.6 / 22.8 / 18.6 / 13.4 %, 0.68 % missing |
+| C5 | punsafe, edges 1e-5 / 1e-4 / 1e-3 / 1e-2 | 5 | 15.9 / 28.2 / 29.3 / 16.9 / 9.6 % |
+
+`clause_is_reverse_narrow.pt` is `[F, F, F, T, F, F]`. Every query value is the held-out
+caption's own tag; a domain absent from the catalog is `-1`, so that row has no live
+clause in a domain sweep and is skip-masked. C0 and C3 hold the same code, so no sweep
+contains both (C0 ∧ C3 is empty). The sweeps: `c0_domain`, `c3_domain_reverse` (bloom-incompatible),
+`tags4` = C1 ∧ C2 ∧ C4 ∧ C5, and `all_fwd` = C0 ∧ `tags4`.
+
+#### Encoding and targets
+
+`nomic-embed-text-v1.5` with the model card's Matryoshka recipe: bf16 weights, `layer_norm`
+over the 768 output dims, keep the first 256, L2-normalise, store fp16. Prefixes
+`search_document: ` (items) and `search_query: ` (queries), text = the caption,
+`max_seq_length` 128 (the 99th-percentile caption is 295 characters). arxiv's d256 truncates
+without the `layer_norm`, so the two datasets' vectors are not built the same way.
+`encode_text` writes `content_d256/text_emb_shard_NNN.pt` (1 M rows each), resumable per
+shard and pinned by `encode_params.json`; `shard_index.json` and `text_emb.meta.json` are
+written last.
+
+**Targets** follow yfcc10m's convention. A caption query has no relevant item of its own, so
+`targets` writes `heldout.parquet` (`item_id`, `query_key`, `nn_score`) with each query's
+**exact unfiltered top-1 item**: fp32 inner product on the normalised vectors, TF32 off, ties
+to the lowest id (`nearest_items`). Held-out recall on a filtered sweep is then the share of
+queries whose nearest caption also passes the filter and is found. The headline is
+`recall_oracle`, as everywhere.
+
+```
+data/laion30m/
+├── items.parquet               item_id, key, url, domain, caption, similarity, pwatermark, punsafe, original_width/height
+├── queries.parquet             query_row + the same columns (held-out captions)
+├── heldout.parquet             item_id (the unfiltered top-1), query_key, nn_score
+├── content_d256/
+│   ├── text_emb_shard_NNN.pt + shard_index.json + text_emb.meta.json
+│   ├── query_emb.pt + query_emb.meta.json
+│   └── encode_params.json
+├── item_attrs_narrow.pt        [N, 6, 1] int64
+├── clause_is_reverse_narrow.pt [6] bool = [F, F, F, T, F, F]
+├── domain_vocab.json, bucket_edges.json
+├── eval_split.parquet          target_id, query_attrs_narrow [6]
+└── prep_log.json
+```
+
+On the device: items fp32 30.7 GB, attrs 1.4 GB, SilverTorch's int8 codes 7.7 GB.
+
 ### synth_arxiv
 
 Grows an encoded arxiv directory to arbitrary `N` (15M / 30M / 50M) by
@@ -1121,6 +1213,8 @@ EVAL_REPOS = {
     "yfcc10m":           "pinkmeme/eval-yfcc10m",
     "pubmed":            "pinkmeme/eval-pubmed",
     "kuairand":          "pinkmeme/eval-kuairand",
+    "openalex":          "pinkmeme/eval-openalex",
+    "laion30m":          "pinkmeme/eval-laion30m",
 }
 ```
 
@@ -1132,7 +1226,8 @@ other dataset's.
 `pinkmeme/eval-pubmed` is **registered but not published**; the 10 M slice
 is rebuilt with `eval-data pubmed`. `pinkmeme/eval-openalex` likewise. `pinkmeme/eval-kuairand` (private) holds only the
 KuaiRand trainer inputs: the eval inputs and the checkpoint are not published
-(user choice, see [kuairand](#kuairand)). The old A100
+(user choice, see [kuairand](#kuairand)). `pinkmeme/eval-laion30m` (private) is to hold the
+staged laion30m minus `items.parquet` (the gated captions and urls); not yet published. The old A100
 `checkpoints/gsasrec-d128-shared` was deleted from it to free space (user decision).
 
 **Trainer inputs** sit under `trainer/` in the private eval repos, uploaded with

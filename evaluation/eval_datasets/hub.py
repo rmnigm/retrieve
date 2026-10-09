@@ -36,6 +36,7 @@ EVAL_REPOS: dict[str, str] = {
     "pubmed": "pinkmeme/eval-pubmed",
     "kuairand": "pinkmeme/eval-kuairand",
     "openalex": "pinkmeme/eval-openalex",
+    "laion30m": "pinkmeme/eval-laion30m",
 }
 
 # Upstream raw repos kept here only so their local target dirs are centralized.
@@ -59,6 +60,7 @@ EVAL_IGNORE_PATTERNS: list[str] = [
     "train.parquet",
     "val.parquet",
     "papers.parquet",  # arxiv ETL artifact (raw text, used only at encode time)
+    "items.parquet",  # laion ETL artifact (Re-LAION captions + urls, gated upstream)
     "book_to_work.parquet",  # goodreads ETL artifact
     "item_attrs_wide.pt",
     "wide_*",

@@ -23,6 +23,7 @@ ETL = {
     "pubmed": "pubmed",
     "kuairand": "kuairand",
     "openalex": "openalex",
+    "laion": "laion",
 }
 
 
