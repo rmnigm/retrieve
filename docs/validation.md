@@ -364,11 +364,28 @@ per-step record: [artifact](artifacts/campaign-v2/v-pubmed/README.md).
   (seeds within 0.021); no seed reaches 0.95. PubMed's `filter` n95 slot stays empty: going past
   128 breaks the grid's "no `n_probe` 256" rule and is with the user. Hub:
   `campaign-v2/pubmed-n95`.
-- **`filter` leg: not run; waits for campaign-v2.2.** Armed at `campaign-v2.1` (PubMed `n_lists` 4096, `n_probe`
-  {24, 1024} from IVF-TUNE), started 2026-10-08 23:08 and stopped by the surprise gate before any timed cell (only v2.1
-  oracles were being built): D3's `bloomwidth-timed` measured official faster than Triton at d768 (0.702 interleaved,
-  row *D3 PubMed: `bloomwidth-timed`*). The controller moved the leg to campaign-v2.2, after ST-DLOOP fixes the Triton
-  probe scorer at wide D.
+- **`filter` leg: running at `campaign-v2.1`** (exploration policy, user 2026-10-09: legs run at the current tag; V2 perf and
+  SilverTorch Triton perf are on the redo ledger). 90 cells in 48 chunks of the real suite (`chunks.py` asserts that every
+  record key and interleave unit equals the full suite's), shortest first, each yielding to st-dloop's GPU flags. PubMed
+  `n_lists` 4096, `n_probe` {24, 1024} (IVF-TUNE). Done so far: V1+V2 `c0_mesh` and `c3_journal_reverse` at seed 0 (4 / 4 ok).
+- **LiNR V2 is about 45 % slower than D1 at pass rate ≈ 1 (surprise gate, 2026-10-09; not a correctness issue).** V1 and V2
+  are timed interleaved in one group, seed 0, k 100, every window at 1410 MHz; V1 is the in-run control.
+
+  | `c3_journal_reverse` (p 0.9993) | V1 D1 (`72e5a90`) | V1 v2.1 | V2 D1 | **V2 v2.1** |
+  |---|---|---|---|---|
+  | bs 1 eager / graph ms | 11.50 / 11.42 | 11.50 / 11.43 | 10.47 / 10.41 | **15.01 / 14.96** (+43 %) |
+  | bs 16 eager / graph ms | 36.61 / 36.26 | 36.51 / 36.16 | 155.92 / 155.86 | **225.59 / 225.55** (+45 %) |
+
+  | `c0_mesh` (p 0.0002) | V1 D1 | V1 v2.1 | V2 D1 | V2 v2.1 |
+  |---|---|---|---|---|
+  | bs 1 eager ms | 11.47 | 11.47 | 6.03 | 1.62 (-73 %) |
+  | bs 16 eager ms | 36.16 | 36.02 | 86.10 | 15.50 (-82 %) |
+
+  V1 reproduces D1 within 0.3 % on both sweeps, so this is not clocks or the environment. V2 / V1 at bs 16 on
+  `c3_journal_reverse` is 6.2 at v2.1 and 4.3 in D1, with recall equal (0.996). *Hypothesis, unverified:* V2-FIX-A's
+  grid-strided `fused_masked_knn_topk` skips `-inf` tiles, a large win at low p. At p ≈ 1 nothing is skipped, and fewer
+  programs loop over the full `[B, N]` width. Fix A's timing gate was measured at low p (goodreads-synth). The paired
+  cross-tree check (408b1188 vs f01255f1, p ≈ 1) is the controller's (proposed: pod 1, goodreads-synth `p1`).
 
 ## Encoder switch: evals to redo
 
