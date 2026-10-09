@@ -75,10 +75,11 @@ def codesigned_probe_score_bloom(
     global_scale: float,
     k: int,
     width: int,
+    sparse: bool = False,
 ) -> tuple[Tensor, Tensor]:
     """Int8 ANN scoring gated by the bloom subset test: every set query bit ``m`` (``-1`` =
     none) must be set for the item, bit ``pos % 64`` of ``bloom_transposed[m, pos // 64]``.
-    ``bloom_bit_freq`` is the Triton scorer's skip gate (a speed hint); unused here."""
+    ``bloom_bit_freq`` and ``sparse`` are the Triton scorer's speed hints; unused here."""
     pos, valid = probe_positions(probe_ids, cluster_offsets, width)
     m = query_bit_positions.clamp_min(0).unsqueeze(2)  # [B, n_bits, 1]
     words = bloom_transposed[m, (pos >> 6).unsqueeze(1)]  # [B, n_bits, width]

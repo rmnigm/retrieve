@@ -329,11 +329,13 @@ def _cps_prep(
     bloom_transposed: Tensor | None,
     cfg: CodesignedProbeScoreConfig,
     bit_freq: Tensor | None = None,
+    sparse: bool = False,
 ) -> tuple[ProbeLaunch, BloomTwoPass | None]:
     """``_host.probe_prep`` plus the bloom arguments, and the bloom two-pass that replaces the
-    one-pass kernel on a tile-skip config with the per-row table. The one place inputs are
-    checked — shared by ``_codesigned_probe_score_impl`` and both ``@triton_op`` wrappers (which
-    keep only their textually-inline ``wrap_triton`` launches)."""
+    one-pass kernel with the per-row table on a tile-skip config, or at any width on a
+    ``sparse`` batch. The one place inputs are checked — shared by
+    ``_codesigned_probe_score_impl`` and both ``@triton_op`` wrappers (which keep only their
+    textually-inline ``wrap_triton`` launches)."""
     launch = probe_prep(
         query,
         probe_ids,
@@ -372,7 +374,7 @@ def _cps_prep(
         stride_tm=bloom_transposed.stride(0),
         HAS_QB=has_qb,
     )
-    if not (has_qb and launch.table is not None):
+    if not (has_qb and launch.table is not None and (cfg.skip or sparse)):
         return launch, None
     kw = launch.kwargs
     b, tiles_y, tiles_x = launch.grid
@@ -432,6 +434,7 @@ def _codesigned_probe_score_impl(
     bloom_transposed: Tensor | None = None,
     bloom_bit_freq: Tensor | None = None,
     config: CodesignedProbeScoreConfig | None = None,
+    sparse: bool = False,
 ) -> tuple[Tensor, Tensor]:
     """Fused phase-2+3 of SilverTorch's co-designed int8 ANN + optional bloom filter (paper
     Algorithm 1, §4.2): query and items stay int8 through an int32-accumulated dot, dequantized
@@ -464,6 +467,7 @@ def _codesigned_probe_score_impl(
         bloom_transposed=bloom_transposed,
         cfg=cfg,
         bit_freq=bloom_bit_freq,
+        sparse=sparse,
     )
     if launch.table is not None:
         probe_table_kernel[launch.table.grid](**launch.table.kwargs)
@@ -528,6 +532,7 @@ def codesigned_probe_score_bloom(
     global_scale: float,
     k: int,
     width: int,
+    sparse: bool = False,
 ) -> tuple[Tensor, Tensor]:
     """Int8 ANN scoring fused with the paper's bloom subset test over the transposed index —
     sibling of ``codesigned_probe_score``, split into a separate op (not one op with an
@@ -544,6 +549,7 @@ def codesigned_probe_score_bloom(
         bloom_transposed=bloom_transposed,
         cfg=tile_for_width(CONFIGS, query.shape[1], query.shape[0], width),
         bit_freq=bloom_bit_freq,
+        sparse=sparse,
     )
     if launch.table is not None:
         wrap_triton(probe_table_kernel)[launch.table.grid](**launch.table.kwargs)

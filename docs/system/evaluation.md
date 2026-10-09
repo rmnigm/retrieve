@@ -356,7 +356,7 @@ the algorithm; preparation is reported, not hidden):
 
 | arm | `prepare_queries` returns |
 |---|---|
-| `silvertorch` triton / torch, bloom | the query bit positions (`PreparedFilter.query_bits`) |
+| `silvertorch` triton / torch, bloom | the query bit positions (`PreparedFilter.query_bits`), and `sparse`: every row's pass-rate bound under 1/256, read back to the host (the scorer's two-pass switch, [kernels](kernels.md#silvertorch-kernels)) |
 | `silvertorch` official, bloom | Meta's parsed plans on the CPU (`plans_data` / `plans_offsets`) |
 | `silvertorch`, exact (every backend) | the int64 attrs (`query_attrs`) |
 | LiNR V1-V3, `postfilter` | the standalone filter's encoding: bloom query signatures, or the int64 attrs |

@@ -124,7 +124,7 @@ def test_export_preserves_kernel_reference():
     torch.testing.assert_close(out_scores, eager_scores, rtol=0, atol=0)
 
 
-_SCHEMA_KIND = {"Tensor": "Tensor", "float": "float", "SymInt": "int", "int": "int"}
+_SCHEMA_KIND = {"Tensor": "Tensor", "float": "float", "SymInt": "int", "int": "int", "bool": "bool"}
 
 
 def _retrieve_schemas() -> dict[str, torch.FunctionSchema]:

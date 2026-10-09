@@ -106,6 +106,9 @@ with torch.inference_mode():
                     a: [m.prepare_queries(qa_pool[i]) for i in range(N_POOL)]
                     for a, m in arms.items()
                 }
+                sparse = (
+                    sum(getattr(p, "sparse", False) for p in prep["after"]) / N_POOL
+                )
                 outs = {
                     a: [m(pool[i], prep[a][i]) for i in range(N_POOL)]
                     for a, m in arms.items()
@@ -130,9 +133,9 @@ with torch.inference_mode():
                 med = {a: statistics.median(v) for a, v in t.items()}
                 row = {"dataset": ds, "dim": SLICE or int(dim), "mode": mode, "sweep": sweep, "graph": GRAPH,
                        "swap": SWAP, "aa": AA, "n_probe": n_probe, "bs": bs, "width": arms["after"]._probe_width,
-                       "equal": equal, "ms": med, "windows_ms": t, "ratio": med["after"] / med["before"]}  # fmt: skip
+                       "equal": equal, "sparse": sparse, "ms": med, "windows_ms": t, "ratio": med["after"] / med["before"]}  # fmt: skip
                 rows.append(row)
                 print(f"{ds} d{SLICE or dim} {mode} {sweep}{' graph' if GRAPH else ''}{' swap' if SWAP else ''}"
-                      f"{' aa' if AA else ''} np{n_probe} bs{bs} eq={equal} before {med['before']:.3f} after "
+                      f"{' aa' if AA else ''} np{n_probe} bs{bs} sparse={sparse:.2f} eq={equal} before {med['before']:.3f} after "
                       f"{med['after']:.3f} ratio {row['ratio']:.3f}", flush=True)  # fmt: skip
 Path(out).write_text(json.dumps(rows, indent=1))

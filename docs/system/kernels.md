@@ -1221,7 +1221,7 @@ largest cluster holds 25,480 items (TF-9).
 `width ≥ k`, so `topk(k)` needs no pad path.
 
 **How a program finds its items** (`common.probe_tile`). Below
-`_host.TABLE_MIN_PAIRS` (512) `(row, probe)` pairs there is no table. Each
+`_host.TABLE_MIN_WORK` (next paragraph) there is no table. Each
 program loads its row's `n_probe` cluster ids as one vector
 (`NPP`, the next power of two), gathers their offsets, and builds the
 row's tile and slot prefix sums with `tl.cumsum`. Its tile is then
@@ -1234,24 +1234,40 @@ the width on goodreads. A lane past its cluster's end holds the next
 cluster's slot, so the score store is masked by in-cluster validity, not
 by the predicate.
 
-**Probe table** (`common.probe_table_kernel`, `probe_tile_table`). From
-`B · n_probe ≥ 512` the in-kernel build is O(`n_probe`) work in every one
-of the `B · (cdiv(width, BLOCK_P) + n_probe)` programs: three `NPP`-wide
-gathers and two `tl.cumsum`s per tile, about 262k programs at C7's PubMed
-cell (`n_probe` 1024, bs 16, width 3.93 M). There one extra launch, one program
+**Probe table** (`common.probe_table_kernel`, `probe_tile_table`). The
+in-kernel build is O(`n_probe`) work in every one of the
+`B · (cdiv(width, BLOCK_P) + n_probe)` programs: three `NPP`-wide gathers
+and two `tl.cumsum`s per tile, about 262k programs at C7's PubMed cell
+(`n_probe` 1024, bs 16, width 3.93 M). Past a threshold, one extra launch, one program
 per row, writes the row's `[3, n_probe]` int64 table (tile ends, slot
 ends, cluster starts), and each tile finds its cluster by a two-level
 `FAN`-ary count over the tile ends (`FAN = 2^⌊bit_length(NPP)/2⌋`, so
 `FAN² ≥ NPP`): two dependent `FAN`-lane loads, then the cluster's four
 scalars. A binary search was 11 dependent scalar loads and measured
 slower. Positions and slots are the same integers, so outputs are
-`torch.equal`. Below the threshold the extra launch and the lookup's
-latency cost more than the build saves (bs 1, `n_probe` 256: 1.07–1.09×
-at d128 and d768), so those launches compile the in-kernel build
-(`TABLE=False`) unchanged.
+`torch.equal`. The threshold depends on whether the launch costs host
+time (`_host.launch_free`):
 
-**Bloom two-pass** (`codesigned_probe_score`, a tile-skip config with the
-probe table, so `D_PAD > 256` and `B · n_probe ≥ 512`). In the one-pass
+- **Eager.** The table needs `TABLE_MIN_WORK` = 4 M lanes of in-kernel
+  build (`B · (cdiv(width, BLOCK_P) + n_probe) · NPP`). Below that, the
+  launch, the allocation and the lookup latency cost more than the build
+  saves. The measured losses sit at ≤ 1.7 M lanes: bs 1, `n_probe` 256 at
+  d128 / d768 (1.07–1.09×), and goodreads 0.8 M bs 16 at `n_probe` 32–128
+  (1.085–1.105×, +35–40 µs on a host-bound 0.41 ms forward). The wins sit
+  at ≥ 8.4 M.
+- **Captured into a CUDA graph or traced by `torch.compile`.** The extra
+  launch is device time only, and the table pays from
+  `TABLE_MIN_PAIRS` = 512 `(row, probe)` pairs. Under the work rule, the
+  table off cost 1.05–1.14× at goodreads bs 16 `n_probe` 64–128 and 1.08×
+  at arXiv `n_probe` 512 bs 1 (graph replay).
+
+`torch.compiler.is_compiling()` reads False inside a `triton_op` body, so
+the compile check is the tracing context. Launches without the table
+compile the in-kernel build (`TABLE=False`) unchanged.
+
+**Bloom two-pass** (`codesigned_probe_score`, with the probe table:
+always on a tile-skip config, `D_PAD > 256`; at
+`D_PAD ≤ 256` only on a `sparse` batch, below). In the one-pass
 kernel a skipped tile still costs its program: about 11 ns of device time
 a tile at C7's cell, where under 4 % of tiles have a passing item. The
 program is a latency chain (table lookup, the query's bit slots, the bloom
@@ -1284,6 +1300,24 @@ dot is the same int32 sum and fp32 epilogue, so the scores are
 `torch.equal` to the one-pass kernel's; the list order varies run to run
 but each slot is written once. Smaller two-pass tiles (64, 128) made the
 filter pass costlier than the dot pass saved.
+
+**When the two-pass pays at `D_PAD ≤ 256`.** Once most tiles hold a
+passing item, the filter pass's `-inf` fill and vote add to a full dot
+pass. Measured against the one-pass kernel with the table on arxiv-synth
+(graph replay, `n_probe` 128-1024, bs 16-64), it pays up to a pass rate of
+0.003 (d128 0.57-0.89, d192 / d256 0.60-0.89). It breaks even at 0.01
+(d128 0.89-0.95, d256 1.00-1.10), and it loses above that (up to 1.23 at
+d128 and 1.36 at d192 at p 1). At d768 the dot dominates, and the
+two-pass stays on: PubMed `c2_year` 0.95-1.02, `c0_mesh` / `c0c2`
+0.56-0.84. So at `D_PAD ≤ 256` the op takes it only when its `sparse`
+argument is set. `SilverTorch.prepare_queries` sets `PreparedFilter.sparse`
+outside the timed call when every row's rarest queried bit is set on under
+`SPARSE_PASS_BOUND` = 1/256 of the items, under one passing item per
+256-item tile. That bound is the gated skip's, an upper bound on the row's
+pass rate: tight on one-clause queries, loose on several clauses (arXiv
+`all4`: median bound 0.11 against a true rate of 0.005), so the switch can
+miss a win but not take a loss. Under compile the flag is a guarded Python
+bool: at most two graphs per shape.
 
 **Launch grid** `(B, tiles_y, tiles_x)` via `_host.grid_batch_tiles`, the
 batch on `grid_x`. The rows' early probes then run concurrently, and

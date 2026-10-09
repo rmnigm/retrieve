@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import partial
 
+import pytest
 import torch
 
 from retrieve.indexing.bloom_hash import (
@@ -213,3 +214,12 @@ def make_words(n, w, seed):
     sparse = sparse[:, 0] & sparse[:, 1] & sparse[:, 2] & sparse[:, 3]
     rows = torch.randint(0, n, (4,), generator=g, device="cuda")
     return sigs, torch.cat([sigs[rows] & sparse[:4], sparse[4:]])
+
+
+@pytest.fixture(autouse=True)
+def _wide_cases_take_the_probe_table(request, monkeypatch):
+    """The parity layouts are small, so the wide cases (``n_probe >= 128``) would fall under
+    ``_host.TABLE_MIN_WORK``; force the table there so they cover the table / two-pass paths."""
+    params = getattr(request.node, "callspec", None)
+    if params is not None and params.params.get("n_probe", 0) >= 128:
+        monkeypatch.setattr("retrieve.ops.triton._host.TABLE_MIN_WORK", 0)

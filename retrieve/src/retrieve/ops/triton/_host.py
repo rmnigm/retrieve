@@ -29,10 +29,23 @@ MIN_PROGRAMS = 1024
 IDS_BLOCK_K = 16
 IDS_BLOCK_N = 512
 
-# From this many (row, probe) pairs the scorers read their tile's cluster from a per-row table
-# (one extra launch) instead of rebuilding the row's layout in every tile (kernels.md §
-# SilverTorch kernels, "Probe table").
+# When the scorers read their tile's cluster from a per-row table (one extra launch) instead of
+# rebuilding the row's layout in every tile (kernels.md § SilverTorch kernels, "Probe table"):
+# eager, from this much in-kernel layout work (programs x NPP lanes), below which the launch's
+# host cost exceeds the saving; captured or compiled, where the launch costs no host time per
+# call, from this many (row, probe) pairs.
+TABLE_MIN_WORK = 4 << 20
 TABLE_MIN_PAIRS = 512
+
+
+def launch_free() -> bool:
+    """The call is being captured into a CUDA graph or traced by ``torch.compile``: an extra
+    launch adds device time only (``is_compiling`` reads False inside a ``triton_op`` body, the
+    tracing context does not)."""
+    return (
+        torch.cuda.is_current_stream_capturing()
+        or torch._guards.TracingContext.try_get() is not None
+    )
 
 
 def gate_pays(launch: ProbeLaunch) -> bool:
@@ -118,8 +131,9 @@ def probe_prep(
     """The half of both probe scorers' prep that is the same: validation, the per-row int8
     query, the ``[B, width]`` score buffer (``torch.empty``: the kernel writes every slot, a
     dot or ``-inf``) and the launch kwargs they share. The probe layout is built inside the
-    kernel (``common.probe_tile``), or from ``TABLE_MIN_PAIRS`` ``(row, probe)`` pairs once per
-    row by the ``table`` launch the caller runs first (``common.probe_tile_table``)."""
+    kernel (``common.probe_tile``), or, past ``TABLE_MIN_WORK`` / ``TABLE_MIN_PAIRS`` (eager /
+    captured), once per row by the ``table`` launch the caller runs first
+    (``common.probe_tile_table``)."""
     if query.dim() != 2 or probe_ids.dim() != 2:
         raise ValueError("query must be [B, D] and probe_ids [B, n_probe]")
     if item_codes.dtype != torch.int8:
@@ -136,7 +150,11 @@ def probe_prep(
     probe_ids = probe_ids.contiguous()
     table = None
     table_ptr = probe_ids  # TABLE=False compiles its loads out, so any int64 tensor stands in
-    if b * n_probe >= TABLE_MIN_PAIRS:
+    if launch_free():
+        use_table = b * n_probe >= TABLE_MIN_PAIRS
+    else:
+        use_table = b * (triton.cdiv(width, block_p) + n_probe) * npp >= TABLE_MIN_WORK
+    if use_table:
         table_ptr = torch.empty((b, 3, n_probe), dtype=torch.int64, device=query.device)
         table = ProbeTable(
             (b,),

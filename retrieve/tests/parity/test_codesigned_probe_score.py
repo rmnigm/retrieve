@@ -105,11 +105,13 @@ def _bloom_rowwise(qb, sigs, r, pos):
     ],
 )
 @pytest.mark.parametrize("b", [1, 16])
-def test_codesigned_with_bloom_matches_ref(n_lists, max_size, n_probe, d, k, b):
+@pytest.mark.parametrize("sparse", [False, True])
+def test_codesigned_with_bloom_matches_ref(n_lists, max_size, n_probe, d, k, b, sparse):
+    """``sparse`` only picks the scorer's path (the two-pass at any width with the table)."""
     query, lay, codes, gs = _scored(b, n_lists, max_size, n_probe, d)
     qpos, bt, sigs, qb = make_bloom(lay.n, b)
     out = codesigned_probe_score_bloom(
-        query, *_args(lay, codes), qpos, bt, bloom_bit_freq(bt, lay.n), gs, k, lay.width
+        query, *_args(lay, codes), qpos, bt, bloom_bit_freq(bt, lay.n), gs, k, lay.width, sparse
     )
     ref = reference.codesigned_probe_score_bloom(
         query, *_args(lay, codes), qpos, bt, bloom_bit_freq(bt, lay.n), gs, k, lay.width
