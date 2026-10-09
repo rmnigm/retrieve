@@ -1,5 +1,6 @@
 """C5-OURS bit-exact gates on the SilverTorch layer, one (N, D) per process. Arms: `before` = the tree before the
-option (dev/v2-fill 394d3e9, package `retrieve_pre` from ../st-ids/make_pkg.sh), `after` = this tree.
+option (dev/v2-fill 394d3e9, package `retrieve_pre` from ../st-ids/make_pkg.sh; `C5_BEFORE=retrieve_v24` for the
+campaign-v2.5 bundle gate), `after` = this tree.
 
 Inputs: Gaussian unit-norm items, four single-value clauses with vocabularies {1000, 100, 7, 1} (pass rates ≈ 0.001,
 0.01, 0.14, 1 plus bloom false positives), m_bits 1024, k_hash 5, n_lists 1024, k 100. A query batch activates one clause
@@ -17,12 +18,16 @@ for n_probe {8, 32, 128} × bs {1, 16} × four query seeds.
 import argparse
 import importlib
 import json
+import os
 
 import torch
 from tests.parity.conftest import assert_topk_equal
 
+BEFORE = os.environ.get(
+    "C5_BEFORE", "retrieve_pre"
+)  # the bundle gate sets retrieve_v24
 ST = {a: importlib.import_module(f"{p}.modules.silvertorch").SilverTorch
-      for a, p in (("before", "retrieve_pre"), ("after", "retrieve"))}  # fmt: skip
+      for a, p in (("before", BEFORE), ("after", "retrieve"))}  # fmt: skip
 VOCAB = (1000, 100, 7, 1)
 DEV = torch.device("cuda")
 
@@ -89,6 +94,6 @@ for n_probe in (8, 32, 128):
 ok = all(
     all(v for k, v in r.items() if k.startswith(("default", "full_vs"))) for r in rows
 )
-json.dump({"n": args.n, "d": args.d, "device": torch.cuda.get_device_name(), "all_equal": ok, "rows": rows},
+json.dump({"n": args.n, "d": args.d, "before": BEFORE, "device": torch.cuda.get_device_name(), "all_equal": ok, "rows": rows},
           open(args.out, "w"), indent=1)  # fmt: skip
 print("ALL EQUAL" if ok else "MISMATCH", flush=True)
