@@ -413,17 +413,38 @@ def graph_callable(module: nn.Module, *example_args: Any, warmup: int = 5) -> Ca
     return compiled
 
 
+PROFILE_PADS_S = (0.0, 0.01, 0.1, 1.0, 5.0)
+SENTINEL = "spin_kernel"  # torch.cuda._sleep's kernel; nothing in a forward launches it
+
+
 def profile_once(fn: Callable[[], Any], top: int = 8) -> list[dict[str, Any]]:
     """One eager call under ``torch.profiler``; the ``top`` device kernels by self time
-    (``{"kernel", "us", "calls"}``) — the wp4 ``kernel_only.py`` split. Empty without CUDA."""
+    (``{"kernel", "us", "calls"}``) — the wp4 ``kernel_only.py`` split. Empty without CUDA.
+    The call is bracketed by two sentinel kernels and the profile is retried with a longer
+    idle pad on both sides of the window until both sentinels are recorded; raises if they
+    never are (evaluation.md § Measurement protocol)."""
     if not torch.cuda.is_available():
         return []
     fn()
     torch.cuda.synchronize()
-    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
-        fn()
-        torch.cuda.synchronize()
-    kernels = [e for e in prof.key_averages() if e.device_type == torch.autograd.DeviceType.CUDA]
+    for pad in PROFILE_PADS_S:
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            time.sleep(pad)
+            torch.cuda._sleep(1)
+            fn()
+            torch.cuda._sleep(1)
+            torch.cuda.synchronize()
+            time.sleep(pad)
+        events = [e for e in prof.key_averages() if e.device_type == torch.autograd.DeviceType.CUDA]
+        sentinels = sum(e.count for e in events if SENTINEL in e.key)
+        if sentinels == 2:
+            break
+    else:
+        raise RuntimeError(
+            f"profile_once: {sentinels} of 2 sentinel kernels recorded at pad {pad} s; "
+            "the profiler dropped device activities at the window edges"
+        )
+    kernels = [e for e in events if SENTINEL not in e.key]
     kernels.sort(key=lambda e: e.self_device_time_total, reverse=True)
     return [
         {"kernel": e.key, "us": float(e.self_device_time_total), "calls": int(e.count)}

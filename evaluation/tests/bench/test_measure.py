@@ -1,11 +1,11 @@
-"""CPU-only tests for ``bench.measure``.
+"""Tests for ``bench.measure``, CPU-only but for the ``gpu``-marked ``profile_once`` one.
 
 What can be checked without a GPU: the window statistics against a numpy reference, the
 control flow of ``latency`` (window count, chosen window, keys, spread), ``index_bytes``
 over shared submodules, ``provenance``'s git fields, the ``clocks`` record shape, and that
-``graph_callable`` refuses (with the record's ``reason``) before compiling anything. The
-CUDA-event timing path, the cudagraph skip / launch assertions and ``profile_once``'s kernel
-table are exercised on the A100 in roadmap C4.
+``graph_callable`` refuses (with the record's ``reason``) before compiling anything. On a GPU,
+``profile_once`` returns a Triton bloom call's kernels (H-PROFILE). The CUDA-event timing path
+and the cudagraph skip / launch assertions are exercised on the A100 in roadmap C4.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from torch import nn
 
 from bench import measure as bench
 from eval_datasets.layout import atomic_write
+from retrieve import SilverTorch
 
 
 def test_stats_matches_numpy_reference():
@@ -207,6 +208,24 @@ def test_graph_callable_refuses_without_cuda():
 @pytest.mark.skipif(torch.cuda.is_available(), reason="CPU-only branch")
 def test_profile_once_is_empty_without_cuda():
     assert bench.profile_once(lambda: torch.ones(2) + 1) == []
+
+
+@pytest.mark.gpu
+def test_profile_once_records_the_triton_bloom_kernels():
+    g = torch.Generator(device="cuda").manual_seed(0)
+    embs = nn.functional.normalize(torch.randn(4096, 128, generator=g, device="cuda"), dim=1)
+    q = nn.functional.normalize(torch.randn(16, 128, generator=g, device="cuda"), dim=1)
+    m = SilverTorch(
+        k=100, n_lists=64, n_probe=8, filter_mode="bloom", m_bits=512, k_hash=5, n_iter=3,
+        backend="triton",
+    )  # fmt: skip
+    m.register_index(embs, torch.randint(0, 50, (4096, 1, 2), generator=g, device="cuda"))
+    q_attrs = torch.randint(0, 50, (16, 1), generator=g, device="cuda")
+    with torch.inference_mode():
+        kernels = bench.profile_once(lambda: m(q, q_attrs), top=64)
+    names = {e["kernel"] for e in kernels}
+    assert {"probe_ids_kernel", "_codesigned_probe_score_kernel"} <= names
+    assert not any(bench.SENTINEL in n for n in names)
 
 
 def test_atomic_write_replaces_or_leaves_nothing(tmp_path):

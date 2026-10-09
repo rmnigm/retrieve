@@ -192,14 +192,12 @@ co-design.
   loaded, interleaved, cores pinned. *Gate*: loaded medians within each
   arm's own repeat noise; otherwise timed steps run one GPU at a time.
   **0.5 GPU-h** on a ≥ 2-GPU pod.
-- [ ] **H-PROFILE + H2H-FINAL at `campaign-v2.1`.** `--profile` stores an
-  empty Triton `kernels` list (H2H-FINAL: 40/40 bloom and 13/40 `none`
-  eager entries; official always populated), so T3's Triton kernel-only
-  column is empty for bloom (C7). Harness fix in `measure.profile_once`
-  (code_version unaffected), then the whole `h2h` leg (goodreads + arXiv,
-  `--interleave --profile`) once at `campaign-v2.1`: the 408b1188 run is
-  stale (eager SilverTorch +30 µs from the quantize fix) and stays the
-  record of the old code. The only T3 source. **≈ 1.5 GPU-h.**
+- [ ] **H2H-FINAL at `campaign-v2.1` with the profiler fix.** H-PROFILE is
+  merged (complete kernel lists, ≈ 12.5 s padded retry per profiled entry;
+  mechanism of the loss open). The whole `h2h` leg (goodreads + arXiv,
+  `--interleave --profile`) once at `campaign-v2.1`, after pod 1's
+  official-eager diagnostic settles the protocol. The only T3 source.
+  **≈ 1.5 GPU-h.**
 - [ ] **EXHIBITS: the exhibits and the checks, after every leg** (user,
   2026-10-09: use the GPUs to catch bugs, compare, reproduce the main takes).
   CPU: `bench fetch` every `campaign-v2/` and `campaign-v2.1/` leg, `bench
@@ -306,7 +304,7 @@ co-design.
 | EXHIBITS | 0 | CPU | after every leg |
 | V-AX-CORR | ≈ 3 | 0 | 3 points, arXiv |
 | ST-DLOOP | ≈ 1-2 | 0 | gates + before/after on pod b |
-| H-PROFILE + H2H-FINAL | ≈ 1.5 | 0 | 1.18 GPU-h measured at 408b1188 |
+| H2H-FINAL (v2.1) | ≈ 1.5 | 0 | 1.18 GPU-h measured at 408b1188 |
 | D3 bloomwidth | ≈ 3-5 | 1 (+0) | quality-only cells |
 | V-AX-SYNTH | ≈ 15-45 | 0 | Triton ~2,000 s per pass point; V1/V2 torch at 3 points ×3 seeds is most of it |
 | V-GR-DEEP | ≈ 3-6 | 0/1 | ~210 cells at ~50 s (`d1/arxiv-deep`: 873 cells in 36 h at 3 M) |
