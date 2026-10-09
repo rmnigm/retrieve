@@ -71,18 +71,17 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     # the profile-only pass is `partial` (skip_quality) by design; it only supplies kernels_us
     allrecs = [
-        r for r in load(sys.argv[2:]) if r["suite"] == "h2h" and r["status"] in ("ok", "partial")
+        r
+        for r in load(sys.argv[2:])
+        if r["suite"] == "h2h" and r["status"] in ("ok", "partial")
     ]
     ksum = {}  # (cv, dataset, filter, sweep, backend, score_path, seed, k, bs) -> eager perf entry
     for r in allrecs:
         for e in r["perf"] or []:
             if e["mode"] == "eager" and e.get("kernels_us") is not None:
                 ksum[cell_key(r, e)] = e
-    recs = [
-        r
-        for r in allrecs
-        if r["status"] == "ok" and not any(e.get("kernels_us") is not None for e in r["perf"] or [])
-    ]
+    # an `ok` record timed with --profile carries its own kernels_us; only `partial` ones are profile-only
+    recs = [r for r in allrecs if r["status"] == "ok"]
     cells = collections.defaultdict(lambda: collections.defaultdict(list))
     for r in recs:
         for e in r["perf"] or []:
@@ -101,15 +100,21 @@ def main():
             es = arms[a]
             p50 = st.median(e["median_ms"] for _, e in es)
             full = [
-                ksum[cell_key(r, e)] for r, e in es if a[2] == "eager" and cell_key(r, e) in ksum
+                ksum[cell_key(r, e)]
+                for r, e in es
+                if a[2] == "eager" and cell_key(r, e) in ksum
             ]
             ks = [e["kernels"] for _, e in es if e.get("kernels")]
-            top8 = st.median(sum(k["us"] for k in kk) for kk in ks) / 1000 if ks else None
+            top8 = (
+                st.median(sum(k["us"] for k in kk) for kk in ks) / 1000 if ks else None
+            )
             sc = [
                 scorer_us(f.get("kernels") or [], a[0], key[2])
                 for f in (full or [e for _, e in es if e.get("kernels")])
             ]
-            scorer = st.median(sc) / 1000 if sc and all(x is not None for x in sc) else None
+            scorer = (
+                st.median(sc) / 1000 if sc and all(x is not None for x in sc) else None
+            )
             if full:
                 src = f"all ({len(full)}/{len(es)})"
                 dev = st.median(f["kernels_us"] for f in full) / 1000
@@ -117,7 +122,9 @@ def main():
             else:
                 src = "top8" if ks else ""
                 dev = top8
-                launches = st.median(sum(k["calls"] for k in kk) for kk in ks) if ks else None
+                launches = (
+                    st.median(sum(k["calls"] for k in kk) for kk in ks) if ks else None
+                )
             num, den = [], []
             for r, e in es:
                 b = base.get((r["seed"], (r.get("interleave") or {}).get("group")))
@@ -129,9 +136,9 @@ def main():
             ids = (
                 [
                     e.get("ids_sha256_canon")
-                    == base.get((r["seed"], (r.get("interleave") or {}).get("group")), {}).get(
-                        "ids_sha256_canon"
-                    )
+                    == base.get(
+                        (r["seed"], (r.get("interleave") or {}).get("group")), {}
+                    ).get("ids_sha256_canon")
                     for r, e in es
                 ]
                 if a[0] == "official"
@@ -146,7 +153,9 @@ def main():
                     "bs": key[4],
                     "arm": f"{a[0]}{'/' + a[1] if a[1] else ''} {a[2]}",
                     "seeds": len(es),
-                    "official_build": "/".join(sorted({official_build(r) for r, _ in es})),
+                    "official_build": "/".join(
+                        sorted({official_build(r) for r, _ in es})
+                    ),
                     "p50_ms": round(p50, 4),
                     "over_triton_eager": ""
                     if not ci
@@ -171,7 +180,9 @@ def main():
     dev_ratio = []
     by = collections.defaultdict(dict)
     for x in rows:
-        by[(x["code_version"], x["dataset"], x["filter"], x["k"], x["bs"])][x["arm"]] = x
+        by[(x["code_version"], x["dataset"], x["filter"], x["k"], x["bs"])][
+            x["arm"]
+        ] = x
     for key, d in sorted(by.items()):
         t = d.get("triton eager", {}).get("device_ms")
         for a in ("official/fp16 eager", "official/int32 eager"):
