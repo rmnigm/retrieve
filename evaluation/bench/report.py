@@ -1053,16 +1053,47 @@ def tab_t2(c) -> list[Path]:
     return [_write(c.out / "tables" / "tab-t2.tex", tex)]
 
 
-def _kernels(rows: list[dict[str, Any]]) -> tuple[float | None, int | None]:
-    """Kernel-only time (us) and launches of one eager call: the sum over the top-8 device
-    kernels ``--profile`` keeps, median over seeds."""
-    ks = [r["_entry"].get("kernels") for r in rows if r["_entry"] and r["_entry"].get("kernels")]
+def _kernels(rows: list[dict[str, Any]]) -> tuple[float | None, int | None, bool]:
+    """Kernel-only time (us) and launches of one eager call, median over seeds: the entry's
+    ``kernels_us`` / ``kernels_calls`` (every kernel). Records profiled before those fields
+    existed (H2H-FINAL at campaign-v2.1) fall back to the sum over the top-8 kernels, a lower
+    bound, flagged by the third value so the table marks it."""
+    es = [r["_entry"] for r in rows if r["_entry"]]
+    full = [e for e in es if e.get("kernels_us") is not None]
+    if full:
+        return (
+            statistics.median(e["kernels_us"] for e in full),
+            int(statistics.median(e["kernels_calls"] for e in full)),
+            False,
+        )
+    ks = [e["kernels"] for e in es if e.get("kernels")]
     if not ks:
-        return None, None
+        return None, None, False
     return (
         statistics.median(sum(x["us"] for x in k) for k in ks),
         int(statistics.median(sum(x["calls"] for x in k) for k in ks)),
+        True,
     )
+
+
+def _ids_identity(sub: list[dict[str, Any]], ref: list[dict[str, Any]]) -> str:
+    """T3's ids column against the Triton eager arm, per common seed: ``=`` when the canonical
+    ids hash is equal at every one; ``= (ties)`` when every seed that differs has bit-equal
+    scores (the parity spill's ``|Δs|_max`` is 0 over every query at ``k_max``, so the sorted
+    score lists agree at every k and only a tied id at the k-th cut can differ); else ``≠``."""
+    ref_ids = {r["seed"]: r["_entry"].get("ids_sha256_canon") for r in ref if r["_entry"]}
+    pairs = [
+        (r["_entry"].get("ids_sha256_canon") == ref_ids[r["seed"]], r)
+        for r in sub
+        if r["_entry"] and r["_entry"].get("ids_sha256_canon") and ref_ids.get(r["seed"])
+    ]
+    if not pairs:
+        return "---"
+    if all(same for same, _ in pairs):
+        return "$=$"
+    if all(same or r.get("quality_score_max_abs_diff") == 0 for same, r in pairs):
+        return "$=$ (ties)"
+    return "$\\neq$"
 
 
 def tab_t3(c) -> list[Path]:
@@ -1074,9 +1105,6 @@ def tab_t3(c) -> list[Path]:
         for k in sorted({r["perf_k"] for r in cond if r.get("perf_k")}):
             for bs in sorted({r["perf_bs"] for r in cond if r.get("perf_bs")}):
                 ref = _sel(cond, backend="triton", perf_k=k, perf_bs=bs, perf_mode="eager")
-                ref_ids = {
-                    r["seed"]: r["_entry"].get("ids_sha256_canon") for r in ref if r["_entry"]
-                }
                 first = True
                 for a, be, pj in _arms(cond):
                     arm = _sel(cond, algo=a, backend=be, params=pj, perf_k=k, perf_bs=bs)
@@ -1085,9 +1113,7 @@ def tab_t3(c) -> list[Path]:
                         t = _lat(sub)
                         if t is None:
                             continue
-                        us, calls = _kernels(sub)
-                        ids = {r["seed"]: r["_entry"].get("ids_sha256_canon") for r in sub}
-                        same = [ids[s] == ref_ids.get(s) for s in ids if ids[s] and ref_ids.get(s)]
+                        us, calls, top8 = _kernels(sub)
                         cell = _cells(sub)[0]
                         body.append(
                             [
@@ -1100,11 +1126,11 @@ def tab_t3(c) -> list[Path]:
                                 "---"
                                 if be == "triton" and mode == "eager"
                                 else _ratio_tex(*_ratio(sub, ref)),
-                                "---" if us is None else f"${us:.1f}$",
+                                "---" if us is None else f"${us:.1f}" + ("^{8}$" if top8 else "$"),
                                 "---" if calls is None else f"${calls}$",
                                 _f(cell.get("index_mib"), 1),
                                 _f(cell.get("perf_peak_fwd_mib"), 1),
-                                ("---" if not same else "$=$" if all(same) else "$\\neq$"),
+                                _ids_identity(sub, ref),
                                 _f(cell.get(f"quality_jaccard_vs_first@{k}"), 4),
                                 _sci(cell.get("quality_score_max_abs_diff")),
                             ]
@@ -1135,9 +1161,12 @@ def tab_t3(c) -> list[Path]:
         notes=_legend(
             [
                 "Kernel-only time and launches: one eager call under \\texttt{torch.profiler}, the "
-                "sum over the top-8 device kernels (a lower bound), median over seeds. ids: "
+                "sum over every device kernel, median over seeds; $^{8}$: a record profiled "
+                "before every kernel was summed, the top-8 kernels only (a lower bound). ids: "
                 "the sha256 of the returned ids on the fixed probe batches equals ($=$) the "
-                "Triton eager arm's at every common seed. jaccard and $|\\Delta s|_{\\max}$ "
+                "Triton eager arm's at every common seed; $=$ (ties): equal up to boundary ties "
+                "(where it differs the scores are bit-equal, $|\\Delta s|_{\\max}=0$, so only a "
+                "tied id at the $k$-th cut differs). jaccard and $|\\Delta s|_{\\max}$ "
                 "against the first backend of the cell (the parity spill). Official is "
                 "eager-only.",
                 STATS_NOTE,
@@ -1316,21 +1345,29 @@ def fig_f2(c) -> list[Path]:
 
 
 def fig_f3(c) -> list[Path]:
-    """F3: the recall-latency Pareto curves of the ``deep`` suite, one panel per dataset and
-    batch size."""
+    """F3: the recall-latency Pareto curves of the ``deep`` suite, one panel per (dataset,
+    sweep) and batch size, filter kinds as separate curves."""
     path = c.out / "figures" / "fig-f3-pareto.png"
     rows = _sel(c.rows, suite="deep")
     cvs = curves(c, rows, EXHIBIT_K)
     datasets = _by_scale({cv["dataset"] for cv in cvs}, rows)
-    if not datasets:
+    panels = [
+        (ds, sw)
+        for ds in datasets
+        for sw in sorted({cv["sweep"] for cv in cvs if cv["dataset"] == ds})
+    ]
+    if not panels:
         return [_empty(path, c.prov, "F3: no deep-suite curves")]
     fig, axes = plt.subplots(
-        len(EXHIBIT_BS), len(datasets), figsize=(4.6 * len(datasets), 7.4), squeeze=False
+        len(panels),
+        len(EXHIBIT_BS),
+        figsize=(4.6 * len(EXHIBIT_BS), 3.7 * len(panels)),
+        squeeze=False,
     )
-    for j, ds in enumerate(datasets):
-        for i, bs in enumerate(EXHIBIT_BS):
+    for i, (ds, sw) in enumerate(panels):
+        for j, bs in enumerate(EXHIBIT_BS):
             ax = axes[i][j]
-            for cv in [cv for cv in cvs if cv["dataset"] == ds]:
+            for cv in [cv for cv in cvs if cv["dataset"] == ds and cv["sweep"] == sw]:
                 pts = []
                 for x, q, rs in cv["points"]:
                     t = _lat(_timed(rs, bs, EXHIBIT_K)[0])
@@ -1341,12 +1378,12 @@ def fig_f3(c) -> list[Path]:
                         [p[0] for p in pts],
                         [p[1] for p in pts],
                         marker="o",
-                        label=f"{_curve_label(cv, False)} {cv['filter_kind']} {cv['sweep']}",
+                        label=f"{_curve_label(cv, False)} {cv['filter_kind']}",
                     )
             for target in TARGETS:
                 ax.axhline(target, color="0.5", linestyle=":", linewidth=0.8)
             ax.set_xscale("log")
-            ax.set_title(f"{DATASET_LABEL.get(ds, ds)}, B={bs}", fontsize=9)
+            ax.set_title(f"{DATASET_LABEL.get(ds, ds)} {sw}, B={bs}", fontsize=9)
             ax.set_xlabel("p50 latency (ms)")
             ax.set_ylabel(f"recall_oracle@{EXHIBIT_K}")
             ax.grid(alpha=0.3, which="both")
