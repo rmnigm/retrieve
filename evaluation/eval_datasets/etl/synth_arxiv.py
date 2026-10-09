@@ -84,7 +84,7 @@ SYNTH_SUBCHUNK = 1_000_000
 # ----- spherical k-means ----------------------------------------------------
 
 
-def _spherical_kmeans(
+def spherical_kmeans(
     items: torch.Tensor,
     k: int,
     *,
@@ -192,7 +192,7 @@ def cmd_cluster(args) -> int:
     k = args.n_clusters if args.n_clusters else max(2, int(n_real**0.5))
     print(f"  n_real={n_real:,} dim={d} k={k}", flush=True)
 
-    centroids, assignment = _spherical_kmeans(
+    centroids, assignment = spherical_kmeans(
         items,
         k,
         n_iter=args.n_iter,

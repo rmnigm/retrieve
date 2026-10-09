@@ -345,7 +345,8 @@ Twelve files under [`evaluation/config/`](../../evaluation/config/):
 [`openalex.yaml`](../../evaluation/config/openalex.yaml) and
 [`kuairand.yaml`](../../evaluation/config/kuairand.yaml), the three
 synthetic-selectivity siblings `goodreads-synth.yaml`, `arxiv-synth.yaml`
-and `yfcc10m-synth.yaml` ([datasets](datasets.md#synthetic-selectivity-attrs)) (goodreads, arxiv,
+and `yfcc10m-synth.yaml` plus arXiv's cluster-correlated `arxiv-corr-synth.yaml`
+([datasets](datasets.md#synthetic-selectivity-attrs)) (goodreads, arxiv,
 yfcc10m, pubmed and openalex in the `filter` suite, pubmed and openalex at
 768; yambda and kuairand are out of the study), and
 [`suites.yaml`](../../evaluation/config/suites.yaml). `users_limit:
@@ -378,10 +379,11 @@ unfiltered `quality` suite ([decisions](../decisions.md#harness)); synth's
 |---|---|---|---|
 | `filter` | goodreads, arxiv, yfcc10m, pubmed, three kept sweeps each (yfcc10m: `tags_and`) | V1, V2, V3 (pool 5000) triton; `silvertorch` triton clause + bloom and official bloom at the dataset's tuned `n_lists` and `n_probe` {24, n95} ([IVF tuning](#ivf-tuning)); `silvertorch` torch (#12) and torch compiled (#13) at 24 on the same `n_lists`, goodreads + arxiv only; `postfilter` alpha {1, 8} | T2, C3, C6 |
 | `deep` | goodreads, arxiv, yfcc10m, kept sweeps | `silvertorch` triton clause + bloom, official bloom: `n_lists` per dataset (goodreads {1024, 4096}, arxiv {1664, 8192}, yfcc10m {4096, 16384}) × `n_probe` {8, 16, 32, 64, 128}; V3 `candidate_pool_frac` {0.005, 0.01, 0.02, 0.05, 0.1} | F3, C6 |
-| `synth` | goodreads-, arxiv-, yfcc10m-synth ([datasets](datasets.md#synthetic-selectivity-attrs)) | V1, V2 triton; V3 `candidate_pool_frac` {0.01, 0.05}; `silvertorch` triton clause `n_probe` {24, 64, 128, 256, 512, 1024} (yfcc10m-synth {24, 256, 1024}), triton and official bloom {24, 256}, every SilverTorch arm at its real dataset's tuned `n_lists` (none caps the sweep); `postfilter` {1, 8}; V1 / V2 torch, eager and compiled, on `p001, p01, p1`, goodreads + arxiv only. k 1000 is dropped where N·p < 4000 (goodreads `p0001`, `p0003`; arxiv `p0001`) | F1, F2, C1, C2, C6 |
+| `synth` | goodreads-, arxiv-, yfcc10m-synth (uniform) and arxiv-corr-synth (cluster-correlated, `c001` `c003` `c01`, d128, arxiv-synth's `n_lists` so the two curves pair) ([datasets](datasets.md#synthetic-selectivity-attrs)) | V1, V2 triton; V3 `candidate_pool_frac` {0.01, 0.05}; `silvertorch` triton clause `n_probe` {24, 64, 128, 256, 512, 1024} (yfcc10m-synth {24, 256, 1024}), triton and official bloom {24, 256}, every SilverTorch arm at its real dataset's tuned `n_lists` (none caps the sweep); `postfilter` {1, 8}; V1 / V2 torch, eager and compiled, on `p001, p01, p1`, goodreads + arxiv only. k 1000 is dropped where N·p < 4000 (goodreads `p0001`, `p0003`; arxiv `p0001`) | F1, F2, C1, C2, C6 |
 | `codesign` | arxiv (kept sweeps), goodreads (`c0_genre, c2_format, c3_year`) | official bloom, `bloom_path` {partial, full} × `n_probe` {8, 32, 128}, `n_lists` arxiv 1664 / goodreads 1024, k 100 | F4b, C5 |
 | `bloomwidth` | goodreads `c0_genre`, arxiv kept, pubmed `c0_mesh` | `silvertorch` triton bloom `m_bits` {64 … 2048} × `k_hash` {3, 5}; official bloom `k_hash` {3, 5} (its width is `OfficialConfig.b_multiplier`, not `m_bits`); bs 16; quality only (`perf: false`) | F4a, C4 |
 | `bloomwidth-timed` | the same | the same widths at `k_hash` 5 (official: its one width), k 100, bs 16, timed | F4a |
+| `v3bits` | goodreads-synth (7 rates), goodreads (`filter`'s kept sweeps) | V3 triton only, `k_bits` {64, 128} × `candidate_pool_frac` {0.01, 0.05}, clause + bloom, seeds 0-2, bs {1, 16}, k {100, 1000} (synth's `ks_by_sweep`); LiNR's 512 bits would need a library change (declined) | C2 (V-V3BITS) |
 | `h2h` | goodreads `c0_genre`, arxiv `c0_maincat`, `none` + `bloom`, d128 | `silvertorch` triton and official with `score_path` {fp16, int32}, `n_probe` 24, bs {1, 16}, k {100, 1000}, seeds {0 … 4} (the repeats); one interleave group of the three arms; run with `--interleave --profile` | T3, C7 (H2H-final) |
 
 ### IVF tuning
@@ -477,8 +479,11 @@ the index. Its `query:` params (`n_probe`, `candidate_pool`,
 (or the reverse) is a `ConfigError`. So is a param on an arm where it has
 no meaning: `bloom_path` off silvertorch / bloom / official, `score_path` off silvertorch / official, `m_bits` /
 `k_hash` off silvertorch / bloom ([bloom widths](#bloom-widths-as-build-params)),
-`compile` off a torch arm ([compiled arms](#compiled-arms)), and
-`candidate_pool_frac` off `linr_v3` ([pool fractions](#pool-fractions)). Two arms that expand to the same
+`compile` off a torch arm ([compiled arms](#compiled-arms)),
+`candidate_pool_frac` off `linr_v3` ([pool fractions](#pool-fractions)), and `k_bits` off
+`linr_v3`. `k_bits` is a harness build param: `LiNRV3` takes none, so `algos.build`
+replaces its stage 1 with `OneBitKNN(k_bits=...)` before `register_index`; absent, stage 1
+keeps the library default `k_bits = D` (V-V3BITS). Two arms that expand to the same
 cell are also an error. When two backends of one algo run the same code
 path (`PATHS`) over the same cells, they collapse to the first, logged
 once. A collapse that would cover only part of a job's cells is a
@@ -722,7 +727,8 @@ projection) always recompute. The seed changes SilverTorch's quality, but not
 `linr_v3`'s at its default `k_bits = D`. There the OPORP projection is a signed
 permutation, so the seed moves the bits but not the Hamming scores
 ([kernels](kernels.md#oporp-layout)): V3's quality is the same at every seed, and
-its three seeds measure perf-pool variance only. The records are the cache: `run`
+its three seeds measure perf-pool variance only. Below `D` (the `v3bits` suite's
+`k_bits` 64) OPORP bins dimensions together, so there the seed does move V3's quality. The records are the cache: `run`
 indexes the file's computed records when it first opens it (`quality_sources`) and
 adds each new one. Every record carries `seed_scope`, `pool` for the seed-free arms
 and `pool+build` for the others. For `linr_v3` at `k_bits = D`, `pool+build`
@@ -771,9 +777,9 @@ between eager and compiled.
 `candidate_pool_frac` (a `linr_v3` query param, in the key) is resolved
 per sweep by `run.resolve_pool`, before the build and before
 `set_query_params`, to `candidate_pool = max(POOL_MIN = 2000, round(frac
-× mean pass count over the sweep's oracle rows))`. On synth every query
-passes the same items, so the mean is the achieved pass count (N·p in
-expectation). The key keeps the fraction, the module gets the int, and
+× mean pass count over the sweep's oracle rows))`. On uniform synth every
+query passes the same items, so the mean is the achieved pass count (N·p in
+expectation); on arxiv-corr-synth it is the mean of the queries' cluster sizes. The key keeps the fraction, the module gets the int, and
 the record's `candidate_pool` carries it.
 
 ## Output: one JSONL record per cell
@@ -1337,7 +1343,7 @@ trailing-whitespace hooks (the last two never on `articles/`, `docs/artifacts/`,
 | `bench/test_stats.py` | G-stats: a constant's CI is a point; A = 2B pairs to 2.0 with a CI excluding 1; identical arms are no difference; interpolation exact on a linear curve, never extrapolated |
 | `bench/test_c4_gate.py` | the golden-comparison gate script, [`c4_gate.py`](../artifacts/evaluation-harness-v2/c4_gate.py), against synthesised schema-1 records |
 | `eval_datasets/test_layout.py` | the legacy pad-row rule, `apply_users_limit`, `validate_layout` clean on both layouts and flagging a short `eval_split`, a missing or swapped prefix sidecar, misaligned attrs |
-| `eval_datasets/test_synth_filter.py` | G-synth: achieved pass rate within 1 % of target wherever `N·p ≥ 10^4` (N = 2 M), pass sets nested, same seed byte-identical, `query_attrs_synth` all ones at the full-split row count, the real attrs' bytes and `attrs_digest` untouched (modern and legacy layouts), the CLI resolving `data_dir` from the dataset YAML |
+| `eval_datasets/test_synth_filter.py` | G-synth: achieved pass rate within 1 % of target wherever `N·p ≥ 10^4` (N = 2 M), pass sets nested, same seed byte-identical, `query_attrs_synth` all ones at the full-split row count, the real attrs' bytes and `attrs_digest` untouched (modern and legacy layouts), the CLI resolving `data_dir` from the dataset YAML. G-corr (`--correlated`, on 10 tight blobs): items and queries both at their nearest centroid (brute force), the sidecar's mean pass rate equal to the attrs' and within 50 % of p (a random-init local optimum), over 80 % of a query's 10 nearest items passing, the real and uniform files untouched, rebuilds byte-identical, the CLI picking `content_dir` at `--dim` and refusing a dataset without one |
 | `eval_datasets/test_yfcc.py`, `test_pubmed.py`, `test_kuairand.py`, `test_openalex.py` | the four ETL loaders on synthetic fixtures |
 | `training/test_encode.py` | `training.evaluate`'s recall / ndcg equal `bench.metrics` to 1e-9; `encode_split`'s cache hit / stale key |
 

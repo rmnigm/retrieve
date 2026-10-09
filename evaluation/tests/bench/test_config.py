@@ -354,6 +354,7 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("deep", "yfcc10m"): (9, 45),
     ("synth", "goodreads-synth"): (303, 534),
     ("synth", "arxiv-synth"): (303, 534),
+    ("synth", "arxiv-corr-synth"): (99, 198),
     ("synth", "yfcc10m-synth"): (165, 285),
     ("codesign", "arxiv"): (18, 54),
     ("codesign", "goodreads"): (18, 54),
@@ -363,6 +364,8 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("bloomwidth-timed", "goodreads"): (21, 21),
     ("bloomwidth-timed", "arxiv"): (63, 63),
     ("bloomwidth-timed", "pubmed"): (21, 21),
+    ("v3bits", "goodreads-synth"): (84, 168),
+    ("v3bits", "goodreads"): (24, 48),
 }
 KEPT = {
     "goodreads": {"c0_genre", "c1_lang_reverse", "all4"},
@@ -370,9 +373,10 @@ KEPT = {
     "pubmed": {"c0_mesh", "c3_journal_reverse", "all5"},
     "yfcc10m": {"tags_and"},
 }
-SYNTH_N = {"goodreads-synth": 797_084, "arxiv-synth": 2_988_996, "yfcc10m-synth": 10_000_000}
+SYNTH_N = {"goodreads-synth": 797_084, "arxiv-synth": 2_988_996, "arxiv-corr-synth": 2_988_996,
+           "yfcc10m-synth": 10_000_000}  # fmt: skip
 RATE = {"p0001": 0.001, "p0003": 0.003, "p001": 0.01, "p003": 0.03, "p01": 0.1, "p03": 0.3,
-        "p1": 1.0}  # fmt: skip
+        "p1": 1.0, "c001": 0.01, "c003": 0.03, "c01": 0.1}  # fmt: skip
 
 
 def _real(suite: str, dataset: str, **kw):
@@ -426,13 +430,18 @@ def test_grid_counts_and_invariants(suite, dataset):
             if j.backend == "torch" and j.algo != "postfilter":
                 assert j.sweep in {"p001", "p01", "p1"}
         torch_arms = {(j.algo, json.dumps(j.build)) for j in jobs if j.backend == "torch"}
-        assert dataset == "yfcc10m-synth" or torch_arms == {
-            ("postfilter", "{}"),
-            ("linr_v1_filter_mask", "{}"),
-            ("linr_v2", "{}"),
-            ("linr_v1_filter_mask", '{"compile": "max-autotune"}'),
-            ("linr_v2", '{"compile": "max-autotune"}'),
-        }
+        assert (
+            torch_arms == {("postfilter", "{}")}
+            if not c3_torch
+            else torch_arms
+            == {
+                ("postfilter", "{}"),
+                ("linr_v1_filter_mask", "{}"),
+                ("linr_v2", "{}"),
+                ("linr_v1_filter_mask", '{"compile": "max-autotune"}'),
+                ("linr_v2", '{"compile": "max-autotune"}'),
+            }
+        )
         sweep = (24, 256, 1024) if dataset == "yfcc10m-synth" else (24, 64, 128, 256, 512, 1024)
         st = {(j.backend, j.filter_kind): tuple(q["n_probe"] for q in j.query)
               for j in jobs if j.algo == "silvertorch"}  # fmt: skip

@@ -26,7 +26,7 @@ gets is decided by whether it sets `checkpoint`:
 | shape | datasets | query embeddings come from | filters |
 |---|---|---|---|
 | **sequential** | goodreads; out of the study: yambda-500m, yambda-5b, kuairand | a trained SASRec checkpoint ([which one](checkpoints.md#what-the-harness-reads)), encoded at eval time | goodreads, kuairand |
-| **text** | arxiv, arxiv-synth, yfcc10m, pubmed, openalex | pre-encoded embeddings on disk | yes |
+| **text** | arxiv, arxiv-synth, arxiv-corr-synth, yfcc10m, pubmed, openalex | pre-encoded embeddings on disk | yes |
 
 A third variant, **synthetic**, is a text dataset grown to arbitrary `N`
 by interpolating between real embeddings — used for scale sweeps where a
@@ -1027,6 +1027,31 @@ path costs as the pass rate changes. Measured pass counts per rate:
 [validation](../validation.md#harness-gates). yfcc10m is built on its
 campaign pod (it is not staged everywhere). The files are not on the Hub.
 
+**Cluster-correlated variant.** `eval-data synth-filter --dataset arxiv
+--correlated [--rates 0.01,0.03,0.1] [--dim 128] [--seed 20261008]`
+(`build_correlated`) is the uniform variant's opposite: IVF's best case,
+where the pass set sits around the query. For each rate `p` it runs a
+spherical k-means (`etl/synth_arxiv.spherical_kmeans`, random init from the
+seed, at most 25 Lloyd iterations, CPU) with `round(1/p)` centroids over the
+item embeddings the harness loads from the dataset's `content_dir` at
+`--dim`. Items are then re-assigned to the final centroids. An item's value
+is its cluster id, and a query's value is the id of its nearest centroid by
+inner product, the same rule, computed from the full test split's
+`query_emb.pt`. A query's pass rate is its cluster's size over N: about `p`
+on average, varying per query, and not nested across rates. It writes three
+files beside the uniform ones and touches no existing file:
+
+| file | content |
+|---|---|
+| `item_attrs_corr.pt` | `[N, R, 1]` int64 cluster ids, clause `j` = rate `j` |
+| `query_attrs_corr.pt` | `[U_full, R]` int64 nearest-centroid ids, aligned like `query_attrs_synth.pt` |
+| `synth_corr.json` | rates, seed, k-means settings, `content_dir`, `n_items`, `n_queries`; per rate `n_lists`, the centroids, cluster-size stats and per-query pass-rate stats (mean, std, min, median, max) |
+
+[`arxiv-corr-synth.yaml`](../../evaluation/config/arxiv-corr-synth.yaml)
+reads them at d128 only (the clusters are d128's) with sweeps `c001`,
+`c003` and `c01`. Achieved pass rates:
+[validation](../validation.md#harness-gates).
+
 ### On-disk layout the harness expects
 
 Sequential datasets:
@@ -1068,7 +1093,8 @@ Filter sweeps additionally need:
 └── ... per-clause vocab JSONs
 ```
 
-plus, for a `-synth` config, the four `synth-filter` files ([above](#synthetic-selectivity-attrs)).
+plus, for a `-synth` config, the four `synth-filter` files, or for
+`arxiv-corr-synth` the three `--correlated` ones ([above](#synthetic-selectivity-attrs)).
 
 ### Dead artifacts
 
