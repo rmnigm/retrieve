@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import subprocess
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -207,7 +208,25 @@ def test_graph_callable_refuses_without_cuda():
 
 @pytest.mark.skipif(torch.cuda.is_available(), reason="CPU-only branch")
 def test_profile_once_is_empty_without_cuda():
-    assert bench.profile_once(lambda: torch.ones(2) + 1) == []
+    assert bench.profile_once(lambda: torch.ones(2) + 1) == {
+        "kernels": [],
+        "kernels_us": 0.0,
+        "kernels_calls": 0,
+    }
+
+
+def test_kernel_summary_sums_every_kernel_but_the_sentinels():
+    """H-KSUM: ``kernels`` keeps the top ``top`` by self time; ``kernels_us`` / ``kernels_calls``
+    sum all of them, the tail past ``top`` included, and never the two sentinels."""
+    ev = lambda key, us, n: SimpleNamespace(key=key, self_device_time_total=us, count=n)  # noqa: E731
+    events = [ev(f"k{i}", float(i + 1), i % 3 + 1) for i in range(12)]
+    events.insert(5, ev(bench.SENTINEL, 1e6, 2))
+    out = bench.kernel_summary(events, top=8)
+    assert [k["kernel"] for k in out["kernels"]] == [f"k{i}" for i in range(11, 3, -1)]
+    assert out["kernels"][0] == {"kernel": "k11", "us": 12.0, "calls": 3}
+    assert out["kernels_us"] == sum(range(1, 13)) == 78.0
+    assert out["kernels_calls"] == sum(i % 3 + 1 for i in range(12)) == 24
+    assert out["kernels_us"] > sum(k["us"] for k in out["kernels"])
 
 
 @pytest.mark.gpu
@@ -222,10 +241,13 @@ def test_profile_once_records_the_triton_bloom_kernels():
     m.register_index(embs, torch.randint(0, 50, (4096, 1, 2), generator=g, device="cuda"))
     q_attrs = torch.randint(0, 50, (16, 1), generator=g, device="cuda")
     with torch.inference_mode():
-        kernels = bench.profile_once(lambda: m(q, q_attrs), top=64)
-    names = {e["kernel"] for e in kernels}
+        prof = bench.profile_once(lambda: m(q, q_attrs), top=64)
+    names = {e["kernel"] for e in prof["kernels"]}
     assert {"probe_ids_kernel", "_codesigned_probe_score_kernel"} <= names
     assert not any(bench.SENTINEL in n for n in names)
+    # top 64 covers every kernel of this call, so the list and the sums agree
+    assert prof["kernels_us"] == pytest.approx(sum(e["us"] for e in prof["kernels"]))
+    assert prof["kernels_calls"] == sum(e["calls"] for e in prof["kernels"])
 
 
 def test_atomic_write_replaces_or_leaves_nothing(tmp_path):

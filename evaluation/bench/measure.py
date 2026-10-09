@@ -417,14 +417,34 @@ PROFILE_PADS_S = (0.0, 0.01, 0.1, 1.0, 5.0)
 SENTINEL = "spin_kernel"  # torch.cuda._sleep's kernel; nothing in a forward launches it
 
 
-def profile_once(fn: Callable[[], Any], top: int = 8) -> list[dict[str, Any]]:
-    """One eager call under ``torch.profiler``; the ``top`` device kernels by self time
-    (``{"kernel", "us", "calls"}``) — the wp4 ``kernel_only.py`` split. Empty without CUDA.
+def kernel_summary(events: Sequence[Any], top: int = 8) -> dict[str, Any]:
+    """The entry fields of one profiled call from its device events (``key``,
+    ``self_device_time_total``, ``count``), sentinels dropped: ``kernels``, the ``top`` by self
+    time (``{"kernel", "us", "calls"}``), and ``kernels_us`` / ``kernels_calls``, the device time
+    and launches summed over every kernel (H-KSUM: the top-8 sum is only a lower bound)."""
+    kernels = sorted(
+        (e for e in events if SENTINEL not in e.key),
+        key=lambda e: e.self_device_time_total,
+        reverse=True,
+    )
+    return {
+        "kernels": [
+            {"kernel": e.key, "us": float(e.self_device_time_total), "calls": int(e.count)}
+            for e in kernels[:top]
+        ],
+        "kernels_us": float(sum(e.self_device_time_total for e in kernels)),
+        "kernels_calls": int(sum(e.count for e in kernels)),
+    }
+
+
+def profile_once(fn: Callable[[], Any], top: int = 8) -> dict[str, Any]:
+    """One eager call under ``torch.profiler``: ``kernel_summary`` of its device kernels — the
+    wp4 ``kernel_only.py`` split plus the full sum. Empty kernels and zero sums without CUDA.
     The call is bracketed by two sentinel kernels and the profile is retried with a longer
     idle pad on both sides of the window until both sentinels are recorded; raises if they
     never are (evaluation.md § Measurement protocol)."""
     if not torch.cuda.is_available():
-        return []
+        return kernel_summary([], top)
     fn()
     torch.cuda.synchronize()
     for pad in PROFILE_PADS_S:
@@ -444,12 +464,7 @@ def profile_once(fn: Callable[[], Any], top: int = 8) -> list[dict[str, Any]]:
             f"profile_once: {sentinels} of 2 sentinel kernels recorded at pad {pad} s; "
             "the profiler dropped device activities at the window edges"
         )
-    kernels = [e for e in events if SENTINEL not in e.key]
-    kernels.sort(key=lambda e: e.self_device_time_total, reverse=True)
-    return [
-        {"kernel": e.key, "us": float(e.self_device_time_total), "calls": int(e.count)}
-        for e in kernels[:top]
-    ]
+    return kernel_summary(events, top)
 
 
 __all__ = [
@@ -462,6 +477,7 @@ __all__ = [
     "files_hash",
     "graph_callable",
     "index_bytes",
+    "kernel_summary",
     "latency",
     "latency_group",
     "profile_once",

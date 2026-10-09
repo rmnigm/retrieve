@@ -132,7 +132,10 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    allocates nothing). The first eager call runs under
    `torch.cuda.set_sync_debug_mode("warn")` to catch hidden host syncs.
    `--profile` (off by default) wraps one eager call in `torch.profiler`
-   and stores per-kernel CUDA µs (top 8 kernels) as `kernels`. In a
+   and stores per-kernel CUDA µs (top 8 kernels) as `kernels`, and the device
+   time and launches summed over every kernel as `kernels_us` / `kernels_calls`
+   (`measure.kernel_summary`; H-KSUM: the top-8 sum is a lower bound that favours
+   the arm with more launches). In a
    long-lived process the profiler drops the device activities at the end of
    a short window, one more kernel per session as the process ages, so H2H-FINAL
    stored empty or truncated lists
@@ -843,6 +846,7 @@ Perf entry:
 | `cache_plans` | on every entry: `false` on `silvertorch`/`official` (`run.perf` replaces `module.official` with `cache_plans=False` before the first variant, so every timed forward pays the CPU expression parse), `null` on backends without a plan cache |
 | `load` | `"closed_loop"` |
 | `kernels` | `--profile`, eager only: top-8 CUDA kernels `{kernel, us, calls}` |
+| `kernels_us`, `kernels_calls` | `--profile`, eager only: device µs and kernel launches summed over every kernel of the call, sentinels excluded (records before H-KSUM lack them; T3 still reads the top-8 sum) |
 | `ids_sha256` | sha256 of the ids the timed callee (the eager module or the graph replay) returns on the first 8 batches of that `(bs, seed)` pool (`run.IDS_PROBE_BATCHES`), int64 row-major, batch after batch, run once after the windows; `null` when the variant did not run. Equal eager and graph hashes are the D1-G identity gate. Graph mode is inductor's code, not the eager ops replayed, so this gate catches arithmetic that inductor lowers differently. Records before library tree `5d158f20` differ in graph `quantize_int8` ([kernels](kernels.md#quantize_int8-retrieveindexing), [validation](../validation.md#campaign-v2-phase-v-not-yet-validated), *V-GRAPH-IDS*) |
 | `ids_sha256_canon` | the same ids with each row re-ordered by (score desc, id asc) before hashing: two backends with bit-equal scores whose tied ids come in another order hash equal (official int32 against Triton). `bench report`'s T3 identity column reads it; eager vs graph reads `ids_sha256`. An added field, schema stays 4 |
 | `reason` | present when the variant could not run (`not_capturable`, `cuda_unavailable`, `cudagraph_skips=N`, `cudaGraphLaunch per call = N, expected 1`); every stat key is then `null` |
