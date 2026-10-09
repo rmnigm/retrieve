@@ -156,6 +156,15 @@ def test_linr_v3_query_params():
         m.set_query_params(candidate_pool=N + 1)
 
 
+def test_linr_v3_k_bits():
+    x = torch.randn(N, 128, generator=torch.Generator().manual_seed(0))
+    default = A.build("linr_v3", x, k=4, backend="torch", params={"candidate_pool": 16})
+    assert default.stage1.k_bits == 128 and default.stage1.item_bits.shape == (N, 2)
+    m = A.build("linr_v3", x, k=4, backend="torch", params={"candidate_pool": 16, "k_bits": 64})
+    assert m.stage1.k_bits == 64 and m.stage1.item_bits.shape == (N, 1) and m.stage1.k == 16
+    assert m(x[:6])[0].shape == (6, 4)
+
+
 def test_build_refusals():
     x, _, _, _ = _data()
     with pytest.raises(ValueError, match="no code path"):

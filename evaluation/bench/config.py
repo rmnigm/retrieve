@@ -278,6 +278,8 @@ def _check_params(where: str, algo: str, fk: str, backend: str, build: dict, que
         raise ConfigError(f"{where}: m_bits / k_hash are build params of silvertorch/bloom only")
     if "compile" in build and (backend != "torch" or build["compile"] not in COMPILE_MODES):
         raise ConfigError(f"{where}: compile is one of {COMPILE_MODES} on torch arms only")
+    if "k_bits" in build and algo != "linr_v3":
+        raise ConfigError(f"{where}: k_bits is a linr_v3 build param (its OPORP stage 1)")
     if any("candidate_pool_frac" in q for q in query) and algo != "linr_v3":
         raise ConfigError(f"{where}: candidate_pool_frac is a linr_v3 query param")
 
