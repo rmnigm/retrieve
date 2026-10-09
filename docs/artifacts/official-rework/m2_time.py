@@ -94,18 +94,21 @@ with torch.inference_mode():
                 build("before", backend, mode, path),
             )
             before.load_state_dict(after.state_dict())
-            prep = [
-                None if mode == "none" else after.prepare_queries(qa_pool[i])
-                for i in range(N_POOL)
-            ]
+            prep = {
+                arm: [
+                    None if mode == "none" else m.prepare_queries(qa_pool[i])
+                    for i in range(N_POOL)
+                ]
+                for arm, m in (("before", before), ("after", after))
+            }
             arms = {
-                "before": lambda i: before(
-                    pool[i], None if mode == "none" else qa_pool[i]
+                "before": lambda i: before(pool[i], prep["before"][i]),
+                "after": lambda i: after(pool[i], prep["after"][i]),
+                "prep_before": lambda i: (
+                    None if mode == "none" else before.prepare_queries(qa_pool[i])
                 ),
-                "after": lambda i: after(pool[i], prep[i]),
-                "prep+after": lambda i: after(
-                    pool[i],
-                    None if mode == "none" else after.prepare_queries(qa_pool[i]),
+                "prep_after": lambda i: (
+                    None if mode == "none" else after.prepare_queries(qa_pool[i])
                 ),
             }
             for fn in arms.values():
