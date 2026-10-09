@@ -243,4 +243,23 @@ bloomwidth-timed:              # one timed point per width
       build: {m_bits: [64, 128, 256, 512, 1024, 2048], k_hash: [5]}
     - {algo: silvertorch, backends: [official], build: {k_hash: [5]}}   # its one width
 
+v3bits:                        # V-V3BITS, C2: V3 at k_bits 64 vs our LN-8 default (k_bits = D = 128); LiNR's
+  # 512 needs a library change (declined 2026-10-08). k_bits is a harness build param: algos.build
+  # swaps V3's OPORP stage 1. The real-filter half reads goodreads `filter`'s kept sweeps.
+  datasets: [goodreads-synth, goodreads]
+  dims: [128]
+  filter_kinds: [clause, bloom]
+  ks: [100, 1000]
+  batch_sizes: [1, 16]
+  seeds: [0, 1, 2]
+  sweeps:
+    goodreads: [c0_genre, c1_lang_reverse, all4]
+  ks_by_sweep:
+    goodreads-synth: {p0001: [100], p0003: [100]}
+  arms:
+    - algo: linr_v3
+      backends: [triton]
+      build: {k_bits: [64, 128]}
+      query: {candidate_pool_frac: [0.01, 0.05]}
+
 bloom: {m_bits: 1024, k_hash: 5}   # shared defaults; a suite may override with its own `bloom:`

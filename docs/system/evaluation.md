@@ -383,6 +383,7 @@ unfiltered `quality` suite ([decisions](../decisions.md#harness)); synth's
 | `codesign` | arxiv (kept sweeps), goodreads (`c0_genre, c2_format, c3_year`) | official bloom, `bloom_path` {partial, full} × `n_probe` {8, 32, 128}, `n_lists` arxiv 1664 / goodreads 1024, k 100 | F4b, C5 |
 | `bloomwidth` | goodreads `c0_genre`, arxiv kept, pubmed `c0_mesh` | `silvertorch` triton bloom `m_bits` {64 … 2048} × `k_hash` {3, 5}; official bloom `k_hash` {3, 5} (its width is `OfficialConfig.b_multiplier`, not `m_bits`); bs 16; quality only (`perf: false`) | F4a, C4 |
 | `bloomwidth-timed` | the same | the same widths at `k_hash` 5 (official: its one width), k 100, bs 16, timed | F4a |
+| `v3bits` | goodreads-synth (7 rates), goodreads (`filter`'s kept sweeps) | V3 triton only, `k_bits` {64, 128} × `candidate_pool_frac` {0.01, 0.05}, clause + bloom, seeds 0-2, bs {1, 16}, k {100, 1000} (synth's `ks_by_sweep`); LiNR's 512 bits would need a library change (declined) | C2 (V-V3BITS) |
 | `h2h` | goodreads `c0_genre`, arxiv `c0_maincat`, `none` + `bloom`, d128 | `silvertorch` triton and official with `score_path` {fp16, int32}, `n_probe` 24, bs {1, 16}, k {100, 1000}, seeds {0 … 4} (the repeats); one interleave group of the three arms; run with `--interleave --profile` | T3, C7 (H2H-final) |
 
 ### IVF tuning
@@ -478,8 +479,11 @@ the index. Its `query:` params (`n_probe`, `candidate_pool`,
 (or the reverse) is a `ConfigError`. So is a param on an arm where it has
 no meaning: `bloom_path` off silvertorch / bloom / official, `score_path` off silvertorch / official, `m_bits` /
 `k_hash` off silvertorch / bloom ([bloom widths](#bloom-widths-as-build-params)),
-`compile` off a torch arm ([compiled arms](#compiled-arms)), and
-`candidate_pool_frac` off `linr_v3` ([pool fractions](#pool-fractions)). Two arms that expand to the same
+`compile` off a torch arm ([compiled arms](#compiled-arms)),
+`candidate_pool_frac` off `linr_v3` ([pool fractions](#pool-fractions)), and `k_bits` off
+`linr_v3`. `k_bits` is a harness build param: `LiNRV3` takes none, so `algos.build`
+replaces its stage 1 with `OneBitKNN(k_bits=...)` before `register_index`; absent, stage 1
+keeps the library default `k_bits = D` (V-V3BITS). Two arms that expand to the same
 cell are also an error. When two backends of one algo run the same code
 path (`PATHS`) over the same cells, they collapse to the first, logged
 once. A collapse that would cover only part of a job's cells is a
@@ -723,7 +727,8 @@ projection) always recompute. The seed changes SilverTorch's quality, but not
 `linr_v3`'s at its default `k_bits = D`. There the OPORP projection is a signed
 permutation, so the seed moves the bits but not the Hamming scores
 ([kernels](kernels.md#oporp-layout)): V3's quality is the same at every seed, and
-its three seeds measure perf-pool variance only. The records are the cache: `run`
+its three seeds measure perf-pool variance only. Below `D` (the `v3bits` suite's
+`k_bits` 64) OPORP bins dimensions together, so there the seed does move V3's quality. The records are the cache: `run`
 indexes the file's computed records when it first opens it (`quality_sources`) and
 adds each new one. Every record carries `seed_scope`, `pool` for the seed-free arms
 and `pool+build` for the others. For `linr_v3` at `k_bits = D`, `pool+build`

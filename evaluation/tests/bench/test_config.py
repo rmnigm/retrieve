@@ -364,6 +364,8 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("bloomwidth-timed", "goodreads"): (21, 21),
     ("bloomwidth-timed", "arxiv"): (63, 63),
     ("bloomwidth-timed", "pubmed"): (21, 21),
+    ("v3bits", "goodreads-synth"): (84, 168),
+    ("v3bits", "goodreads"): (24, 48),
 }
 KEPT = {
     "goodreads": {"c0_genre", "c1_lang_reverse", "all4"},
