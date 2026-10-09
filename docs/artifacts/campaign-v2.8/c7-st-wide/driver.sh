@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ST-WIDE at 30 M, cross-tree: the 4 n_probe-128 laion30m cells (c0_domain + tags4, bs 16 + 64, bloom partial, eager, k 100, seed 0) on pod d
-# GPU 1, 3 rounds; each round A = v2.8 (ours + Meta -O3 interleaved by backend, /venvs/d-run-v28) then B = dev/st-wide 36aa2f4 (ours,
-# /venvs/d-run-stwide), one process per sweep, --profile; each tree its own inductor dir. Ratios per round; CI across rounds (analyze.py).
+# GPU 1, 3 rounds of A = v2.8 (ours + Meta -O3 interleaved by backend, /venvs/d-run-v28) and B = dev/st-wide 36aa2f4 (ours, /venvs/d-run-stwide),
+# the tree that builds first alternating per round (A B, B A, A B: st-dloop, a first-built index can read up to 14 % faster), one process per sweep, --profile; each tree its own inductor dir. Ratios per round; CI across rounds (analyze.py).
 #   setsid nohup flock -n /scratch/gpu1.lock bash driver.sh > /scratch/v28/c7-st-wide.driver.log 2>&1 &
 set -u
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -25,7 +25,9 @@ for s in A B; do
   [ "$got" = "${CV[$s]} False" ] || { echo "$(date -Is) tree $s code_version mismatch, refusing"; exit 2; }
 done
 for round in 1 2 3; do
-  for s in A B; do
+  order="A B"; [ $round -eq 2 ] && order="B A"
+  echo "$(date -Is) round $round order $order"
+  for s in $order; do
     for sw in c0_domain tags4; do
       args=(); for b in ${BACK[$s]}; do args+=(--backend $b); done
       t0=$(date +%s)
