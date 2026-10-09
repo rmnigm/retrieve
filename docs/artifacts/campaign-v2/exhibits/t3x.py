@@ -23,9 +23,29 @@ ARMS = [
     ("official", "fp16", "eager"),
     ("official", "int32", "eager"),
 ]
-# the scoring kernel of each backend, matched by name in the kernel list (C7's "scorer in isolation")
-SCORER = {"official": "process_cluster", "triton": "_codesigned_probe_score_kernel"}
+# C7's "scorer in isolation", like for like: ours fuses probe list, bloom test and scoring in one kernel;
+# Meta runs them as separate kernels (pod b's split, V-PROF3 a's full table). A side counts only when
+# every one of its kernels is in the entry's kernel list (top-8 lists usually miss Meta's small ones).
+SCORER = {
+    "triton": ("_codesigned_probe_score_kernel",),
+    "official": (
+        "process_cluster",
+        "generate_warp_payload",
+        "generate_remaining_payload",
+        "generate_cluster_warp_size",
+    ),
+}
+BLOOM_SEARCH = "bloom_search"
 HOST_BOUND = 0.5  # flag an arm whose host share exceeds half of its p50
+
+
+def scorer_us(kernels, backend, filter_kind):
+    """The comparable scorer scope's µs, or None when a kernel of that scope is not in the list."""
+    names = SCORER[backend] + (
+        (BLOOM_SEARCH,) if backend == "official" and filter_kind == "bloom" else ()
+    )
+    hit = {n: sum(k["us"] for k in kernels if n in k["kernel"]) for n in names}
+    return None if not all(hit.values()) else sum(hit.values())
 
 
 def cell_key(r, e):
@@ -86,10 +106,10 @@ def main():
             ks = [e["kernels"] for _, e in es if e.get("kernels")]
             top8 = st.median(sum(k["us"] for k in kk) for kk in ks) / 1000 if ks else None
             sc = [
-                sum(k["us"] for k in (f.get("kernels") or []) if SCORER[a[0]] in k["kernel"])
+                scorer_us(f.get("kernels") or [], a[0], key[2])
                 for f in (full or [e for _, e in es if e.get("kernels")])
             ]
-            scorer = st.median(sc) / 1000 if sc and all(sc) else None
+            scorer = st.median(sc) / 1000 if sc and all(x is not None for x in sc) else None
             if full:
                 src = f"all ({len(full)}/{len(es)})"
                 dev = st.median(f["kernels_us"] for f in full) / 1000
@@ -208,9 +228,11 @@ def main():
         )
     md += [
         "\n## Device time, official / Triton eager (source: triton / official)\n",
-        "Scorer kernel: official `process_cluster` vs Triton `_codesigned_probe_score_kernel` (the Triton "
-        "kernel fuses the bloom test; official's bloom work runs in separate kernels).\n",
-        "| cv | dataset | filter | k | bs | arm | device ratio | scorer-kernel ratio | src |",
+        "Scorer scope, like for like: ours = `_codesigned_probe_score_kernel` (probe list, bloom test and "
+        "scoring fused); Meta = `process_cluster*` + `generate_*payload*` + `generate_cluster_warp_size` (+ "
+        "`bloom_search` on bloom). Blank when a kernel of the scope is missing from the recorded list (the "
+        "top-8 lists miss Meta's small payload and bloom kernels).\n",
+        "| cv | dataset | filter | k | bs | arm | device ratio | scorer-scope ratio | src |",
         "|---|---|---|---|---|---|---|---|---|",
     ]
     md += ["| " + " | ".join(map(str, r)) + " |" for r in dev_ratio]
