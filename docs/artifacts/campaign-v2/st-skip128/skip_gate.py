@@ -1,4 +1,4 @@
-"""ST-SKIP128 gates, one width per process. Before = the v2.3 candidate (`dev/v2-highp` f537c91, package
+"""ST-SKIP128 gates, one width per process. Before = campaign-v2.3 (library 1258a63e; first run: the candidate f537c91), package
 `retrieve_v23` from st-ids/make_pkg.sh), after = this tree: its bloom scorer takes the pass-rate table
 (`bloom_bit_freq`) the after `SilverTorch` registers; exact is the same code on both sides. Index, filters and timing helpers:
 ST-DLOOP's dloop_gate.py (N Gaussian items, n_lists 1024; one clause, item value 1 with probability p,

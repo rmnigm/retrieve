@@ -124,6 +124,13 @@ Gated cells (bloom, bs 16, p ≤ 0.003): **0.58-0.81**. Elsewhere 0.98-1.02. Two
 +0.7 %, p 1 +0.4 %). The same run's exact rows are identical code and read up to 1.003 [1.002, 1.004], so +0.3-0.4 % is the
 method's floor; +0.7 % is slightly above it. This is borderline, and stated as such.
 
+## Re-gate against campaign-v2.3 (1258a63e, incl. V1-FUSE; the controller moved this step to campaign-v2.4)
+
+`phase.sh` with `BEFORE_TREE` = a `campaign-v2.3` worktree and `PKGS` = its `retrieve_v23`, on `dev/st-skip128` merged with
+staging ae7fcd0: bit-exact **360 / 360**, library suite 800 passed. Keep rule: bloom bs 16 0.579 / 0.669 at p 0.001,
+0.752 / 0.810 at p 0.003 (d192 / d128); elsewhere 0.98-1.02, d128 bloom p 1 bs 16 1.006 [1.005, 1.007]. The controller
+accepted the borderline cells as within the method floor (option (a)). Raw outputs on pod b, `/scratch/st-skip128/phase-v23/`.
+
 ## Bundle gate (campaign-v2.3: ST-IDS + V2-HIGHP + ST-SKIP128, on `dev/st-skip128` merged with staging incl. H-INDCACHE)
 
 Library suite **791 passed** (fresh inductor dir per run, H-INDCACHE); `tests/parity` + `tests/compile` **350 passed**;

@@ -5,17 +5,19 @@
 set -u
 OUT=$1; mkdir -p "$OUT"
 W=/scratch/wt/st-skip128 ART=$W/docs/artifacts/campaign-v2/st-skip128
+# The before side: a tree for the SASS hashes and its `retrieve_v23` package (defaults: the v2.3 candidate f537c91).
+BEFORE_TREE=${BEFORE_TREE:-/scratch/wt/v2-highp} PKGS=${PKGS:-/scratch/st-skip128/pkgs}
 export CUDA_VISIBLE_DEVICES=0 PY=/venvs/retrieve/bin/python
 gpu() {
   touch /scratch/gpu0.st-dloop-wants
   flock /scratch/gpu0.lock "$@"; local rc=$?
   rm -f /scratch/gpu0.st-dloop-wants; echo "$(date -Is) rc=$rc: $*"; return $rc
 }
-for t in v2-highp st-skip128; do
+for t in $BEFORE_TREE $W; do
   TRITON_CACHE_DIR=$(mktemp -d -p /scratch/st-skip128) PYTHONPATH=$W/retrieve gpu $PY $ART/sass_ungated.py \
-    --src /scratch/wt/$t/retrieve/src > $OUT/sass_$t.txt 2> $OUT/sass_$t.err
+    --src $t/retrieve/src > $OUT/sass_$(basename $t).txt 2> $OUT/sass_$(basename $t).err
 done
-export PYTHONPATH=/scratch/st-skip128/pkgs:/scratch/st-dloop/v21:$W/retrieve/src:$W/retrieve:$W/docs/artifacts/campaign-v2/st-dloop
+export PYTHONPATH=$PKGS:/scratch/st-dloop/v21:$W/retrieve/src:$W/retrieve:$W/docs/artifacts/campaign-v2/st-dloop
 for d in 128 192 768; do gpu $PY $ART/skip_gate.py exact $d $OUT/exact_d$d.json > $OUT/exact_d$d.log 2>&1; done
 for d in 128 192 768; do gpu $PY $ART/skip_gate.py time $d $OUT/time_d$d.json > $OUT/time_d$d.log 2>&1; done
 echo "$(date -Is) phase done"
