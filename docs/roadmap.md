@@ -210,17 +210,6 @@ co-design.
   its nearest centroid), `arxiv-corr-synth.yaml`, CPU test (pass rate, query
   side); then arXiv at p {0.01, 0.03, 0.1}, every synth arm. IVF's best case
   next to the uniform worst case (F2). Pod c, slot 2. **≈ 3 GPU-h.**
-- [ ] **H-QLOOP: the quality pass is CPU-bound** (pod 1, 2026-10-09, live
-  profile of V-V3BITS). `run.quality` spends ≈ 33 ms of CPU work per 16-row
-  chunk (row masks, `blob["topk"][sel]`, `targets[sel]`, `.to(device)`
-  staging, per-chunk `nonzero`; ~128 OpenMP threads spinning) against a ≈ 2 ms
-  forward: ≈ 22-33 s per cell with the GPU idle, about a third of the wall of
-  every cell that computes quality (V3 / SilverTorch every seed; V1 / V2 /
-  postfilter seed 0). Fix: stage the oracle top-k, targets and masks on the
-  device once per cell and index there; bound torch's CPU threads for the
-  loop. Gate: quality fields and per-query sidecars **byte-identical** to
-  existing records (golden cells + one record per arm from the Hub), harness
-  suite. Harness only. Pod 1's runner, now (CPU while V-GR-DEEP runs).
 - [ ] **H-SCOPE follow-ups**: `kernel_scopes` is merged (harness, CPU
   test over every real kernel name). Left: the report's T3 scorer column
   reads `kernel_scopes`, and one GPU test on a real call (pod 1, ~2 min, in
