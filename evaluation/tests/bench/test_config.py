@@ -710,3 +710,17 @@ def test_v3bits_pubmed_is_clause_only_at_k_bits_256_and_768():
     assert {q["candidate_pool_frac"] for j in pm for q in j.query} == {0.01, 0.05}
     gr = _real("v3bits", "goodreads")
     assert {j.build["k_bits"] for j in gr} == {64, 128}
+
+
+def test_exact_gate_is_yfcc_synths_below_k_1000():
+    """The fp16-storage allowance (user 2026-10-10): yfcc10m-synth at k_max < 1000 only."""
+    gates = {f.stem: load_dataset(f, _ds_dim(f)).exact_gate for f in sorted(CFG.glob("*.yaml"))
+             if f.stem != "suites"}  # fmt: skip
+    assert {n: g for n, g in gates.items() if g is not None} == {"yfcc10m-synth": 0.9716}
+    ys = load_dataset(CFG / "yfcc10m-synth.yaml", 192)
+    assert run.exact_gate(ys, 100) == 0.9716 and run.exact_gate(ys, 1000) == run.EXACT_MIN_RECALL
+    assert run.exact_gate(load_dataset(CFG / "yfcc10m.yaml", 192), 100) == run.EXACT_MIN_RECALL
+
+
+def _ds_dim(f: Path) -> int:
+    return yaml.safe_load(f.read_text())["dims"][0]
