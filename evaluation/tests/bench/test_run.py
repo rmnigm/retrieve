@@ -21,6 +21,7 @@ import dataclasses
 import hashlib
 import json
 import math
+import weakref
 from pathlib import Path
 
 import numpy as np
@@ -838,3 +839,21 @@ def test_score_path_arms_share_the_triton_parity_spill(tiny_configs, tmp_path):
     for sp in ("fp16", "int32"):
         out = run.parity(tmp_path, off, {"score_path": sp}, ids, sc, [2])
         assert out["parity"] == "vs_torch" and out["jaccard_vs_first@2"] == 1.0
+
+
+def test_each_finished_arm_is_freed_before_the_next_is_built(tiny_configs, tmp_path, monkeypatch):
+    """Roadmap H-ARMFREE: no module of a finished unit is alive when the next unit builds, so
+    one process can run several 10-30 M arms in a row."""
+    jobs = _jobs(tiny_configs, algos=["linr_v1_filter_mask"])
+    assert len(jobs) == 3
+    real_build, built = run.build_module, []
+
+    def build(*a, **kw):
+        assert [r for r in built if r() is not None] == []
+        m = real_build(*a, **kw)
+        built.append(weakref.ref(m))
+        return m
+
+    monkeypatch.setattr(run, "build_module", build)
+    assert dict(run.run(jobs, out_dir=tmp_path / "results", modes=EAGER, **KW)) == {"partial": 3}
+    assert len(built) == 3

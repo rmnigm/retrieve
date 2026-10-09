@@ -86,6 +86,7 @@ SEED_FREE_QUALITY = ("linr_v1_filter_mask", "linr_v2", "postfilter")
 # The top-k prefix of these algos' k_max run is not their top-k run (postfilter's pool is
 # alpha*k), so quality runs once per k.
 PER_K_QUALITY = ("postfilter",)
+ARM_FREE_SLACK_MIB = 256
 CLOCK_DRIFT = 0.05  # §2.1: an under-load sample > 5 % off the process's first one
 POOL_MIN = 2000  # the floor of a resolved candidate_pool_frac (the re-plan's "minimum 2k")
 # An exception whose message carries one of these has killed the CUDA context: recorded, then
@@ -592,6 +593,18 @@ def _release() -> None:
         torch.cuda.empty_cache()
 
 
+def _allocated() -> int:
+    return torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+
+
+def _assert_freed(base: int) -> None:
+    """A unit's arms are gone once it ends (evaluation.md § Arm release): device memory back to
+    the shared inputs' and assets' ``base``, within ``ARM_FREE_SLACK_MIB``."""
+    left = (_allocated() - base) / MiB
+    if left > ARM_FREE_SLACK_MIB:
+        raise RuntimeError(f"{left:.0f} MiB still allocated after the unit's arms were released")
+
+
 def _failed(job: Job, params: dict, env: dict, stage: str, exc: BaseException, t0: float) -> dict:
     return {
         "schema_version": records.SCHEMA_VERSION,
@@ -711,6 +724,7 @@ def run(
         for a, j in need.items():
             if a not in assets_by:
                 assets_by[a] = sweep_assets(j, inp, max(j.ks), device)
+        base = _allocated()
 
         built: dict[int, dict[str, Any]] = {}
         for job in unit:
@@ -933,8 +947,9 @@ def run(
                     job.algo, job.filter_kind, job.sweep, job.backend, rec["params"],
                     rec["status"], rec["elapsed_s"],
                 )  # fmt: skip
-        del built
+        module = b = built = None  # the last arm's locals still hold its index
         _release()
+        _assert_freed(base)
     counts = +counts  # drop zero entries
     logger.info(measure.clock_histogram(sm_windows))
     logger.info("done: {}", dict(counts))
@@ -942,6 +957,7 @@ def run(
 
 
 __all__ = [
+    "ARM_FREE_SLACK_MIB",
     "CLOCK_DRIFT",
     "POOL_MIN",
     "EXACT_ALGOS",
