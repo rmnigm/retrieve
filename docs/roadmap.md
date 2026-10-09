@@ -229,17 +229,6 @@ co-design.
   filter-cluster alignment (GLS) to explain F2's real-vs-synth gap, with
   V-AX-CORR; Big-ANN-style QPS at recall 0.95 per selectivity band, and a
   reproduction defect ledger.
-- [ ] **V-ROUTER: a local-pass-rate router as a measured arm** (EXHIBITS idea
-  #2: IVF recall follows the local pass rate l_q, the share of a query's
-  unfiltered top-100 that pass; Spearman 0.82 / 0.48 vs 0.38 / 0.30 for the
-  global p; the counterfactual l_q router is within 5 % of the per-query
-  oracle on goodreads). Harness arm `router`: a cheap unfiltered SilverTorch
-  pre-probe (small n_probe, k 100) gives l_q per query, then exact (V2) below
-  a threshold, IVF above; the pre-probe's cost is timed in the arm. Fit the
-  threshold on goodreads, report it fixed on arXiv and PubMed (transfer).
-  Gates: recall equal to its two branches per query (ids from the routed arm),
-  harness suite. Beyond the original papers; F2 / T2 practical take. Pod 1's
-  runner after V-GR-DEEP. **≈ 1-2 GPU-h.**
 - [ ] **V-V3BITS (goodreads-synth done; goodreads' 48 cells deferred): V3 at LiNR's bit budget, next to our deviation** (C2 does
   not hold so far: recall −7-13 % at a 1 % pool, no gain at bs 1; our V3
   runs `k_bits` = D = 128 against LiNR's 512, LN-8). `k_bits` must divide D
@@ -349,11 +338,6 @@ co-design.
   near the shared inputs'); drivers stop needing one process per arm.
   Gates: harness suite; one multi-arm 10 M run without OOM; records
   byte-identical to a per-arm run on two cells. v-pod1-run (CPU first).
-- [ ] **ROUTER-DROP: remove the router** (user rule 2026-10-10, verdict 2026-10-11:
-  not on the Pareto front on PubMed 10 M): delete the harness `router` arm
-  (`bench/router.py`, the `router` suite, its tests and docs), keep its
-  records on the Hub as artifacts; the paper mentions it as a tried idea in one
-  line at most. v-pod1-run (CPU).
 - [ ] **C5-OURS-30M + C1 re-time at v2.7**: codesign-laion30m's triton half
   (our partial vs full at 30 M, beside Meta's, pod d; per-sweep processes until
   H-ARMFREE lands) and arxiv-synth's V1 / V2 cells re-timed on pod 1 (C1's 3 M
