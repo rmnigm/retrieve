@@ -29,6 +29,9 @@ from loguru import logger
 
 EXPECTED_DOC_PREFIX = "search_document: "
 EXPECTED_QUERY_PREFIX = "search_query: "
+# Uniform synth attrs (synth_filter): column j is rate j; the -synth YAMLs index these columns.
+SYNTH_RATES = (0.001, 0.003, 0.01, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5, 1.0)
+SYNTH_ITEM_ATTRS, SYNTH_SIDECAR = "item_attrs_synth.pt", "synth_filter.json"
 
 
 def atomic_write(path: Path, write: Callable[[BinaryIO], None]) -> None:
@@ -177,6 +180,17 @@ def load_query_attrs(path: Path, n_queries: int) -> torch.Tensor:
     if qa.shape[0] != n_queries:
         raise RuntimeError(f"{path}: rows={qa.shape[0]} != queries={n_queries}; regen `attrs`")
     return qa
+
+
+def check_synth_rates(attrs: Path) -> None:
+    """Refuse uniform synth attrs built for another rate list than ``SYNTH_RATES``."""
+    if attrs.name != SYNTH_ITEM_ATTRS:
+        return
+    built = json.loads((attrs.parent / SYNTH_SIDECAR).read_text())["rates"]
+    if tuple(built) != SYNTH_RATES:
+        raise ValueError(
+            f"{attrs}: built for rates {built}, not {SYNTH_RATES}: rerun eval-data synth-filter"
+        )
 
 
 def load_item_attrs(
