@@ -12,7 +12,7 @@ import statistics as st
 import sys
 from pathlib import Path
 
-from load import cv, load, perf
+from load import cv, load
 
 from bench import stats
 
