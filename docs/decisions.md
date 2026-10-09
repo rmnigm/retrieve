@@ -1,10 +1,11 @@
 ---
 title: decisions
 created: 2026-09-26
-updated: 2026-10-08
+updated: 2026-10-11
 type: summary
 tags: [decisions]
 sources: [pyproject.toml, evaluation/config/suites.yaml, retrieve/src/retrieve/, evaluation/bench/, evaluation/training/]
+contested: true
 ---
 
 # Standing decisions and constraints
@@ -98,12 +99,15 @@ now on; the [roadmap](roadmap.md) holds the steps.
   probe-scorer tile skipping) land, pass their gates and are merged before
   any campaign cell runs. Then the code is frozen at one tag,
   `campaign-v2`, whose library tree hash is the campaign's code_version,
-  recorded in *evaluation/campaign.yaml* (to be created by CV2-REPORT). Allowed before the freeze:
+  recorded in [`evaluation/campaign.yaml`](../evaluation/campaign.yaml). Allowed before the freeze:
   profiling, unit and parity tests, smoke cells into scratch trees (no
   campaign records). Not allowed during the campaign: feature or
   optimization work. A correctness bug found mid-campaign stops all runs;
   it is fixed, re-tagged, only the arms its own gates prove changed are
   rerun, and the manifest logs it.
+  *Contested:* the later *Exploration first* (user, 2026-10-09, above)
+  lets legs run at each new tag while the library improves, with a redo
+  ledger instead of a freeze.
 - **Record reuse rule.** An existing record enters the paper only if all
   three hold: its inputs match the final ones (the E1c encoder for
   goodreads, the license-fixed arXiv attrs); its arm's kernels are proven
@@ -120,6 +124,8 @@ now on; the [roadmap](roadmap.md) holds the steps.
   N, width and domain family as PubMed; the leg was E5;
   [backlog](backlog.md#datasets-not-in-the-study)). No point above 10M
   before submission; the chunked oracle is still built.
+  *Contested:* LAION 30 M joins as a fifth, `filter`-only dataset (user,
+  2026-10-10, [Datasets](#datasets)).
 - **Three kept sweeps per dataset** in the headline grid (one high pass
   rate, one low, one conjunctive or reverse): goodreads `c0_genre`,
   `c1_lang_reverse`, `all4`; arXiv `c3_nversions` (0.444), `c0_maincat`
@@ -132,7 +138,11 @@ now on; the [roadmap](roadmap.md) holds the steps.
   YFCC (YFCC at {0.001, 0.01, 0.03, 0.1, 1.0}), on the real embeddings,
   as sibling dataset configs that never touch the real attrs. It is IVF's
   worst case (the filter is independent of the embedding), and p = 1.0 is
-  the unfiltered point. A cluster-correlated variant (arXiv, 3 points) runs
+  the unfiltered point. *Contested:* the roadmap's SYNTH-TRIM (user,
+  2026-10-10) sets ten rates and a smaller grid (arXiv {0.001, 0.01, 0.05,
+  0.1, 0.2, 0.5, 1.0}, YFCC {0.01, 0.1, 0.2, 0.5, 1.0}, seed 0 with seeds
+  0-2 at p 0.01 and 0.2, clause `n_probe` {24, 64, 256, 1024}).
+  A cluster-correlated variant (arXiv, 3 points) runs
   only if arXiv's uniform sweep shows the IVF recall collapse at low p.
 - **Grid**: batch sizes {1, 16} (bs 8 dropped), k {100, 1000} (500 dropped;
   1000 is the closest to LiNR's 2000), no `n_probe` 4 or 256 as fixed grid
@@ -140,6 +150,8 @@ now on; the [roadmap](roadmap.md) holds the steps.
   **3 seeds {0, 1, 2} everywhere** (user): every suite, every dataset, every
   sweep; the deterministic arms (V1, V2, postfilter) compute quality once
   and reuse it across seeds, perf repeats per seed. Postfilter α ∈ {1, 8}.
+  *Contested:* during exploration the extra seeds are deferred to the
+  final pass (user, 2026-10-10; roadmap V-SEEDS, SYNTH-TRIM).
 - **Headline SilverTorch operating point**: the paper's `n_probe` 24 plus
   the matched-recall `n95` (the smallest `n_probe` reaching
   `recall_oracle@100` ≥ 0.95 on the dataset's median sweep), not {24, 32}:
@@ -192,7 +204,7 @@ now on; the [roadmap](roadmap.md) holds the steps.
   interleaved, 5 repeats, official in both `score_path` modes (fp16, the
   default the paper reports; int32, parity).
 - **Execution**: code and GPU testing run on the 1×A100 development pod;
-  the long evaluations run on pods the user creates later, one sequential
+  the long evaluations run on pods the user creates, one sequential
   timed driver on GPU 0, quality-only work on GPU 1, and timed work on a
   second GPU only if M1 passes.
 
@@ -245,7 +257,7 @@ now on; the [roadmap](roadmap.md) holds the steps.
   under `retrieve/src/retrieve/` would make `bench campaign --resume`
   rerun everything. Instead the fix's own gates decide which arms it
   changes; those are rerun by narrow `bench run`s, and no record is
-  re-stamped ([policy](validation.md#campaign-roadmap-d1-in-progress-not-yet-validated)).
+  re-stamped ([policy](validation.md#code_version-policy)).
 
 ## Harness
 

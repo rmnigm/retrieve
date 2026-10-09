@@ -1,7 +1,7 @@
 ---
 title: datasets
 created: 2026-09-26
-updated: 2026-10-07
+updated: 2026-10-11
 type: entity
 tags: [datasets, training]
 sources: [evaluation/eval_datasets/, evaluation/training/]
@@ -440,11 +440,10 @@ residual is the fp16 item storage ([validation](../validation.md#datasets)).
 
 ### pubmed
 
-**Status: staged as the 10 M slice** (`--keep-items 10000000 --seed 0`,
-roadmap E2) under `$RETRIEVE_DATA_ROOT/pubmed-medcpt`: `bench check`
-passes, the `c0_mesh` oracle is built, and D1's `filter` leg runs on it;
-rebuilt from source on a fresh pod for V-PUBMED (63 min, CPU) and shown to be D1's slice,
-embeddings included (an exact V1 cell bit-equal to `d1/pubmed`'s);
+**Status: the 10 M slice** (`--keep-items 10000000 --seed 0`) under
+`$RETRIEVE_DATA_ROOT/pubmed-medcpt`: `bench check` passes. A rebuild from
+source on a fresh pod (63 min, CPU) gives D1's slice, embeddings included
+(an exact V1 cell bit-equal to `d1/pubmed`'s);
 state in [validation](../validation.md#datasets). The dataset is not on
 the Hub. Nothing below is citable.
 
@@ -978,8 +977,9 @@ data/openalex/
 
 ### laion30m
 
-**Status: staged on pod d (2026-10-10), `bench check` ok; not on the Hub (Re-LAION may be
-shared as vectors only, and the user decides whether: [release](../paper/release-and-licenses.md)).** Roadmap V-LAION30: a 30 M scale point at d256, `filter` only
+**Status: built, `bench check` ok; not on the Hub, so a pod that needs it rebuilds it with the
+steps below (Re-LAION may be shared as vectors only, and the user decides whether:
+[release](../paper/release-and-licenses.md)).** Roadmap V-LAION30: a 30 M scale point at d256, `filter` only
 ([decisions](../decisions.md#datasets)). Nothing here is citable. The first dataset staged
 through the [generic ingest](#the-generic-ingest-eval-data-ingest).
 
