@@ -51,3 +51,5 @@ GPU checks, h2h with the profiler fix, V-GR-DEEP, V-YFCC, V-SEEDS' YFCC half. V-
 - **H2H-FINAL at v2.1** (2026-10-09, staging `cb1dbc3`, `f01255f1`, 1.33 GPU-h): 60 / 60 ok, kernel lists complete,
   eager = graph ids 80 / 80; Hub `campaign-v2.1/{goodreads,arxiv}-h2h` ([validation](../../../validation.md)).
   Summary via [`../h2h-final/h2h_summary.py`](../h2h-final/h2h_summary.py).
+- **H-KSUM profile-only pass** (2026-10-09, staging `0627961`, `f01255f1`, 0.91 GPU-h): 60 records with the full kernel sum;
+  official / Triton device time 1.5-2.2 everywhere; Hub `artifacts/h-ksum-h2h` ([validation](../../../validation.md)).
