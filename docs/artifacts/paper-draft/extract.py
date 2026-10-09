@@ -90,8 +90,8 @@ data["scaling"] = scal
 lai = st_recall("campaign-v2.5/laion30m-filter")
 yf = st_recall("campaign-v2.5/yfcc10m-deep")
 data["laion"] = {f"{s}@{n}": round(v, 3) for (s, n), v in lai.items()}
-data["laion_ivf_ms_v29"] = {f"{r['sweep']}@{r['params']['n_probe']}": round(perf(r, 16), 3)
-                            for r in recs("campaign-v2.9/laion30m-filter") if perf(r, 16)}
+# 30 M at matched recall, same leg / box / code (v2.9): exact V1, V2 and SilverTorch at the 25 % cap, graph.
+data["laion_x"] = {f"{r['algo']}|{r['sweep']}": {bs: round(perf(r, bs), 3) for bs in (1, 16)} for r in recs("campaign-v2.9/laion30m-x")}
 data["yfcc_real"] = {f"{s}@{n}": round(v, 3) for (s, n), v in yf.items()}
 
 # V1 vs V2.
@@ -106,30 +106,16 @@ data["c1"] = {
 data["int8"] = {s: json.load(open(HUB / f"artifacts/yfcc-int8/int8-{s}.json"))["recall_oracle@100"] for s in ("p1", "p001")}
 
 # Co-design: full / partial, > 1 = co-design faster.
-c5 = list(csv.DictReader(open(HUB / "artifacts/exhibits/20261009-1324-c5/c5.csv")))
-pts = [{"who": "ours (Triton)", "dataset": r["dataset"], "sweep": r["sweep"],
-        "n_probe": int(r["n_probe"]), "bs": int(r["bs"]), "mode": r["mode"], "ratio": float(r["full_over_partial"])}
-       for r in c5 if r["backend"] != "official" and r["mode"] == "graph" and r["dataset"] == "pubmed"]
-ours = defaultdict(dict)
-for leg in ("campaign-v2.9/arxiv-codesign-ours", "campaign-v2.9/goodreads-codesign-ours"):
-    for r in recs(leg):
-        for p in r["perf"]:
-            if p["mode"] == "graph" and p["k"] == 100:
-                ours[(r["dataset"], r["sweep"], r["params"]["n_probe"], p["bs"])][r["params"]["bloom_path"]] = p["median_ms"]
-for (ds, sw, npb, bs), d in ours.items():
-    if len(d) == 2 and None not in d.values():
-        pts.append({"who": "ours (Triton)", "dataset": ds, "sweep": sw, "n_probe": npb, "bs": bs, "mode": "graph",
-                    "ratio": round(d["full"] / d["partial"], 3)})
-meta = defaultdict(dict)
-for leg in ("campaign-v2.8/arxiv-codesign", "campaign-v2.8/goodreads-codesign"):
-    for r in recs(leg):
-        for p in r["perf"]:
-            if p["mode"] == "eager" and p["k"] == 100:
-                meta[(r["dataset"], r["sweep"], r["params"]["n_probe"], p["bs"])][r["params"]["bloom_path"]] = p["median_ms"]
-for (ds, sw, npb, bs), d in meta.items():
-    if len(d) == 2 and None not in d.values():
-        pts.append({"who": "Meta's code", "dataset": ds, "sweep": sw, "n_probe": npb, "bs": bs, "mode": "eager",
-                    "ratio": round(d["full"] / d["partial"], 3)})
+# Below 30 M on current code: exhibits' paired full / partial (ours v2.9 graph, Meta v2.8 -O3 eager).
+pts = []
+for r in csv.DictReader(open(HUB / "artifacts/exhibits/20261009-2125-c5/c5-below30m.csv")):
+    if (r["code_version"], r["backend"], r["mode"]) in (("v2.8", "official", "eager"), ("v2.9", "triton", "graph")):
+        pts.append({"who": "Meta's code" if r["backend"] == "official" else "ours (Triton)", "dataset": r["dataset"], "sweep": r["sweep"],
+                    "n_probe": int(r["n_probe"]), "bs": int(r["bs"]), "mode": r["mode"], "ratio": float(r["full_over_partial"])})
+# Ours at 10 M PubMed, v2.9: from exhibits' c5-pubmed-v29 note until campaign-v2.9/pubmed-codesign-ours is on the Hub.
+if not any(p["dataset"] == "pubmed" for p in pts):
+    for npb, bs, v in ((24, 1, 1.05), (24, 16, 1.11), (1024, 1, 1.025), (1024, 16, 1.008)):
+        pts.append({"who": "ours (Triton)", "dataset": "pubmed", "sweep": "c0_mesh", "n_probe": npb, "bs": bs, "mode": "graph", "ratio": v})
 lai30 = defaultdict(dict)
 for r in recs("campaign-v2.8/laion30m-codesign-laion30m"):
     for p in r["perf"]:
