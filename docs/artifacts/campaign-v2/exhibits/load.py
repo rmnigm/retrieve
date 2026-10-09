@@ -59,6 +59,19 @@ def clock_unknown(r):
     return any(box(r) == b and r["dataset"].startswith(d) for b, d in CLOCK_UNKNOWN)
 
 
+# SYNTH-TRIM widened the uniform synth attrs 7 -> 10 clauses, and until CLAUSE-SKIP (v2.7) the clause
+# kernels load every clause per item whatever the query uses (+~0.7 ms at bs 16 on 3 M, flat in p;
+# controller 2026-10-10). Records carry no width field: uniform synth records at v2.5 / v2.6 are the
+# 10-clause, pre-CLAUSE-SKIP ones; their clause timings carry the width cost, their recall does not.
+UNIFORM_SYNTH = ("arxiv-synth", "goodreads-synth", "yfcc10m-synth")
+
+
+def pre_clause_skip(r):
+    return (
+        r["dataset"] in UNIFORM_SYNTH and r["filter_kind"] == "clause" and cv(r) in ("v2.5", "v2.6")
+    )
+
+
 def arm(r):
     p = {k: v for k, v in r["params"].items()}
     s = f"{ALGO.get(r['algo'], r['algo'])}/{r['backend']}"
