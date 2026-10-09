@@ -237,6 +237,31 @@ co-design.
   at low p looks fill-bound; it moves C1's crossover). Gates bit-exact +
   keep rule across p, bs, d at each change; ledger: d128 / d192 SilverTorch
   Triton perf (1), V2 Triton perf at d ≤ 256 (2).
+- [ ] **C5-OURS: co-design vs full mask inside our Triton backend** (idea #3,
+  `.chains/ideas/`). C5's reversal is Meta's host-side partial path (V-PROF3:
+  device +35 µs, +3 syncs, +14 launches); our Triton SilverTorch is the
+  co-design by construction (filter fused in the probe scorer). Add a
+  `bloom_path=full` option to our backend (full-N mask, then the unfiltered
+  probe scorer) and run the `codesign` cells interleaved partial / full on
+  goodreads + arXiv: separates the co-design idea from Meta's implementation.
+  Library option (default unchanged, bit-exact recall partial = full by S-13).
+  st-dloop after V2-FILL, in `campaign-v2.5`. **≈ 1 GPU-h.**
+- [ ] **EXHIBITS ideas #1, #2, #6** (CPU, exhibits analyst on pod 1): a per-query
+  pass-rate router (IVF / V2 / V1) as a counterfactual from the sidecars;
+  filter-cluster alignment (GLS) to explain F2's real-vs-synth gap, with
+  V-AX-CORR; Big-ANN-style QPS at recall 0.95 per selectivity band, and a
+  reproduction defect ledger.
+- [ ] **V-ROUTER: a local-pass-rate router as a measured arm** (EXHIBITS idea
+  #2: IVF recall follows the local pass rate l_q, the share of a query's
+  unfiltered top-100 that pass; Spearman 0.82 / 0.48 vs 0.38 / 0.30 for the
+  global p; the counterfactual l_q router is within 5 % of the per-query
+  oracle on goodreads). Harness arm `router`: a cheap unfiltered SilverTorch
+  pre-probe (small n_probe, k 100) gives l_q per query, then exact (V2) below
+  a threshold, IVF above; the pre-probe's cost is timed in the arm. Fit the
+  threshold on goodreads, report it fixed on arXiv and PubMed (transfer).
+  Gates: recall equal to its two branches per query (ids from the routed arm),
+  harness suite. Beyond the original papers; F2 / T2 practical take. Pod 1's
+  runner after V-GR-DEEP. **≈ 1-2 GPU-h.**
 - [ ] **V-V3BITS (goodreads-synth done; goodreads' 48 cells deferred): V3 at LiNR's bit budget, next to our deviation** (C2 does
   not hold so far: recall −7-13 % at a 1 % pool, no gain at bs 1; our V3
   runs `k_bits` = D = 128 against LiNR's 512, LN-8). `k_bits` must divide D
