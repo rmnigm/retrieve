@@ -350,6 +350,10 @@ co-design.
   `codesigned_probe_score_exact`. Gates: bit-exact, keep rule on synth and
   real sweeps, SASS limited to the clause kernels, library suite. Tag
   `campaign-v2.7`; then C1's synth V1 / V2 cells on pod 1. `dev/clause-skip`.
+  Same bundle: **BLOOM-BUILD-CHUNK**, `build_transposed_sigs` chunked over N
+  (its `[64, N_pad]` int64 temporaries, 14.3 GiB at 30 M, made our triton
+  bloom build OOM on laion30m); gate: sigs `torch.equal` to the unchunked
+  build. Then codesign-laion30m's triton half (C5 ours vs Meta's at 30 M).
 - [ ] **H-ARMFREE: one `bench run` frees each arm before the next** (2026-10-10:
   laion30m and V-ROUTER PubMed OOMed when one process ran several arms; each
   arm's 10 M-30 M index stayed resident and the next arm's allocation
