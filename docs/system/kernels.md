@@ -530,8 +530,30 @@ kernel (real dot or `-inf`), so the post-topk `where(isfinite(scores),
 …, -1)` mask sees deterministic values without a `torch.full(-inf)`
 pre-fill kernel launch.
 
+**Wide D** (`SPLIT`, `D_PAD > 256`). The strided body holds the query
+and the `[BLOCK_N, D_PAD]` tile across its tile loop, which at D 768 costs
+98-112 registers a thread: 2 resident 8-warp CTAs an SM instead of the
+straight-line body's 4, and 1.43× the time of that body at p ≈ 1 (V2 at
+PubMed 10 M; the grid size does not matter). Past 256 the strided grid is
+split into a scoring loop over the row's counted tiles (the query reloaded
+per tile, an L1 hit) and a `-inf` fill over `[cdiv(count, BLOCK_N) ·
+BLOCK_N, P)` in `FILL_N` = 1,024-lane chunks, strided over the same
+programs. `WIDE_CONFIG` (`block_n` 8, `num_warps` 4, `programs` 3456)
+then holds no spill and needs no register cap. The larger `programs`
+covers skewed batches: PubMed `all5` puts most candidates in one or two
+rows of a bs-16 batch (median 142 a row, p90 1.2 M), and at 864 programs
+(54 a row) such a row ran 1.21× v2.2's time; at 3,456 it runs 0.45×,
+for 0.69× instead of 0.47× on a uniform p 1 batch. A `maxnreg` cap also worked eagerly, but
+inductor's launcher drops it, so it was rejected. Against v2.2's kernel at
+10 M d768: 0.16-0.72 across p 0.0002-1
+([V2-HIGHP](../artifacts/campaign-v2/v2-highp/README.md)). Each lane's
+score is the same `tl.sum` over D, so scores are bit-identical to the
+strided body. At `D_PAD ≤ 256` the strided body is unchanged
+(SASS-identical).
+
 **Tile config.** `FusedMaskedKnnTopkConfig(block_n, num_warps,
-num_stages, programs)` — shipped as `DEFAULT_CONFIG` on the kernel module; pass
+num_stages, programs)` — shipped as `DEFAULT_CONFIG` (`D_PAD ≤ 256`) and
+`WIDE_CONFIG` (past it), picked by `config_for_width`; pass
 `config=` to override. Re-tune on a new arch via `uv run tune-kernels
 fused-masked-knn-topk` and paste the printed
 `DEFAULT_CONFIG = ...` line.
@@ -606,7 +628,8 @@ indirect `pos_indices[b, n_off]` lookup; otherwise identical. Used for
 candidate-set rerank and for the masked V3 path (after `compact_mask`).
 
 **Tile config.** `Oporp1BitMatchTopkConfig(block_n, num_warps,
-num_stages, programs)` — shipped as `DEFAULT_CONFIG` on the kernel module; pass
+num_stages, programs)` — shipped as `DEFAULT_CONFIG` (`D_PAD ≤ 256`) and
+`WIDE_CONFIG` (past it), picked by `config_for_width`; pass
 `config=` to override. Re-tune on a new arch via `uv run tune-kernels
 oporp-1bit-match-topk`.
 
