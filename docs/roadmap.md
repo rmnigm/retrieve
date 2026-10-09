@@ -300,7 +300,8 @@ co-design.
   kept sweeps, 3 seeds, every arm, now at `campaign-v2.1` and IVF-TUNE's values
   (its SilverTorch Triton perf goes on the redo ledger for ST-DLOOP). T2's 768-d row.
   **≈ 14 GPU-h**, GPU 0.
-- [ ] **V-LAION30: a 30 M scale point at d256, `filter` only** (user,
+- [ ] **V-LAION30: a 30 M scale point at d256, `filter` only** (data staged
+  through the generic ingest, `bench check` ok; the grid remains) (user,
   2026-10-10; [decisions](decisions.md#datasets)).
   Re-LAION-2B-en-research-safe (gated, auto-approved; captions + url /
   size / similarity / punsafe / pwatermark, no embeddings): the first two
@@ -342,13 +343,6 @@ co-design.
   module with its docs page; the harness arm calls it; gates: the arm's
   records unchanged (ids + scores `torch.equal`), library + harness suites.
   After V-ROUTER's goodreads fit.
-- [ ] **H-ADDDATA: adding a dataset without writing an ETL** (the
-  benchmark goal, user 2026-10-10): a generic ingest subcommand of eval-data from
-  item embeddings + item attributes + query embeddings + query clauses
-  (parquet / npy) to a staged dataset + its yaml, `bench check`, and a
-  "how to add a dataset" page in `retrieve/docs/` and
-  [datasets](system/datasets.md). V-LAION30 is staged through it as the
-  first user. CPU.
 - [ ] **REL-LIC: license audit and the public-release plan** (user,
   2026-10-10, ECIR Availability): per dataset (goodreads, arXiv, PubMed /
   MedCPT, YFCC-10M, Re-LAION, the synth attrs) whether the derived data may
