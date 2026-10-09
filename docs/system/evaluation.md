@@ -166,11 +166,10 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    1024/2000, closed-loop QPS rather than open-loop load, no live updates.
    `eager` is the comparable number; `graph` is the deployed-best-case
    number and is reported alongside, never instead.
-8. **Cell cost.** Quality once per cell (not per k); perf 3 k × 3 bs × 2
-   modes × 3 windows. Build params sweep separately from query params (one
-   build, many query configs). Measured per-cell costs (D1's arxiv `deep`
-   groups, pubmed's D=768 filter cells) are in roadmap H3
-   ([roadmap](../roadmap.md#phase-h-harness-prerequisites)).
+8. **Cell cost.** Quality once per cell (not per k); perf the suite's
+   k × bs × modes × 3 windows. Build params sweep separately from query params (one
+   build, many query configs). Measured per-cell wall times are in the
+   [record inventory](../artifacts/campaign-v2/README.md#b-measured-wall-time-per-cell-old-grid-3-bs--3-k--2-modes).
 
 The record carries `schema_version`, `status`, `code_version` in the
 resume key, `git_branch` / `python` in `env`, `disabled: true` sweeps and
@@ -941,7 +940,7 @@ runs. `env.lib_dir` records the directory.
 A kernel edit — committed or not — therefore invalidates
 every cell; a doc or plan edit invalidates none. (D1 reruns only the arms
 a fix changes, by narrow `bench run`s: its [code_version
-policy](../validation.md#campaign-roadmap-d1-in-progress-not-yet-validated).)
+policy](../validation.md#code_version-policy).)
 `records.read_keys(path)` rebuilds the key from a record as
 `resume_key(records.key_block(rec), rec["env"]["code_version"])` and keeps the last status per
 key; a cell is skipped when that status is `ok`. `--force` runs everything
