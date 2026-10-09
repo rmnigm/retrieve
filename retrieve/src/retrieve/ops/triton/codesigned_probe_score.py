@@ -99,7 +99,9 @@ def _codesigned_probe_score_kernel(
             bit = pos & 63
             for i in range(n_qbits):
                 m = tl.load(qpos_ptr + bid * stride_qpos + i)  # -1: an inactive clause's slot
-                w = tl.load(bloom_t_ptr + m * stride_tm + word, mask=keep & (m >= 0), other=-1)
+                # Masked by `valid`, not the running `keep`, so the bits' loads do not wait on
+                # each other (kernels.md § codesigned_probe_score).
+                w = tl.load(bloom_t_ptr + m * stride_tm + word, mask=valid & (m >= 0), other=-1)
                 keep = keep & (((w >> bit) & 1) != 0)
 
         any_pass = 1  # a Python int when the skip is off, so the branch folds away

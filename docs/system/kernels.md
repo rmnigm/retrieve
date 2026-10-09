@@ -1341,6 +1341,24 @@ is a body-level constexpr (the bloom-on and bloom-off paths JIT-specialise
 on it). The score buffer is `torch.empty([B, width])`: every slot is
 written (a dot, or `-inf`), so there is no pre-fill.
 
+**Independent bloom word loads.** Each queried bit's word load is masked
+by the tile's `valid` lanes, not by the running `keep`. The loads then do
+not wait on each other, which shortens each program's latency chain (probe
+table → bloom words → code gather → store). The extra bytes are 8-byte words
+shared by 64 lanes, and the resulting `keep` is the same. Against v2.4:
+0.90-0.99× at d128, 0.93-1.01× at d192, 0.93-1.00× at d768 across p and bs
+([ST-LANE](../artifacts/campaign-v2/st-lane/README.md)).
+
+**A per-lane exit was measured and is not used.** At d128 the scorer's
+floor below p ≈ 0.1 (about 22 µs of a 38 µs bloom tile at p 0.01, bs 16)
+is that per-program latency chain, not the tile's work. Compacting the
+passing lanes before the gather (a scan into a per-program scratch, then
+32-lane chunks) removed the tile work but added a chain of its own: 0.91×
+at p 0.01, 1.03× at p 0.136. Larger or smaller tiles do not move the floor
+either. Meta's scorer scales with p because it runs one thread per
+document, with its bloom search and payload kernels outside; like-for-like
+the two are level or ours is faster at every p measured.
+
 **Filtered items cost no HBM bytes; whole tiles are skipped only at wide
 D.** Both filtered scorers (this one with `HAS_QB`, and the exact one
 below) evaluate the filter first and mask the int8 code load with `keep`,
