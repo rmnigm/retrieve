@@ -105,7 +105,7 @@ deep:                          # recall-vs-latency Pareto (F3, C6)
       query: {candidate_pool_frac: [0.005, 0.01, 0.02, 0.05, 0.1]}
 
 synth:                         # pass rate as the x axis (F1, F2, C1, C2, C6)
-  datasets: [goodreads-synth, arxiv-synth, yfcc10m-synth]
+  datasets: [goodreads-synth, arxiv-synth, arxiv-corr-synth, yfcc10m-synth]
   dims: [128, 192]
   filter_kinds: [clause, bloom]
   ks: [100, 1000]
@@ -128,17 +128,18 @@ synth:                         # pass rate as the x axis (F1, F2, C1, C2, C6)
       datasets:                                             # n_lists from IVF-TUNE (real dataset's)
         goodreads-synth: {build: {n_lists: [4096]}}
         arxiv-synth: {build: {n_lists: [2048]}}
+        arxiv-corr-synth: {build: {n_lists: [2048]}}
         yfcc10m-synth: {build: {n_lists: [4096]}, query: {n_probe: [24, 256, 1024]}}
     - algo: silvertorch
       backends: [triton]
       filter_kinds: [bloom]
       query: {n_probe: [24, 256]}
-      datasets: {goodreads-synth: {build: {n_lists: [4096]}}, arxiv-synth: {build: {n_lists: [2048]}}, yfcc10m-synth: {build: {n_lists: [4096]}}}
+      datasets: {goodreads-synth: {build: {n_lists: [4096]}}, arxiv-synth: {build: {n_lists: [2048]}}, arxiv-corr-synth: {build: {n_lists: [2048]}}, yfcc10m-synth: {build: {n_lists: [4096]}}}
     - algo: silvertorch
       backends: [official]
       filter_kinds: [bloom]
       query: {n_probe: [24, 256]}
-      datasets: {goodreads-synth: {build: {n_lists: [4096]}}, arxiv-synth: {build: {n_lists: [2048]}}, yfcc10m-synth: {build: {n_lists: [4096]}}}
+      datasets: {goodreads-synth: {build: {n_lists: [4096]}}, arxiv-synth: {build: {n_lists: [2048]}}, arxiv-corr-synth: {build: {n_lists: [2048]}}, yfcc10m-synth: {build: {n_lists: [4096]}}}
     - {algo: postfilter, backends: [torch], query: {alpha: [1, 8]}}
     # C3 (native torch vs our kernels) as a function of p, eager and compiled; goodreads + arxiv
     # only, like filter's torch arms (add yfcc10m-synth: {} if C3 stays ambiguous)
