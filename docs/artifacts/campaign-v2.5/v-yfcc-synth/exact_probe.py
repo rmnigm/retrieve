@@ -1,6 +1,6 @@
 """YFCC synth exact-gate probe (controller 2026-10-10 17:00), quality only, no gate: V1 + V2 triton recall_oracle@100 / @1000
 per rate through the harness's own inputs, assets, module build and quality pass (k_max 1000, the cached oracle blobs); at p001
-also the library's torch V2 path and an fp32-math exact top-k over the fp16-rounded item table (is the residual the storage?).
+also the library's torch V2 path and an fp32-math exact top-k over the item table, fp16-rounded and fp32 (is the residual the storage?).
 Run from evaluation/: python exact_probe.py OUT.json"""
 
 import dataclasses
@@ -33,9 +33,9 @@ def recalls(module, assets):
 
 
 @torch.inference_mode()
-def fp16_table_exact(assets, k=1000):
-    """Exact masked top-k with fp32 math over the item table rounded to fp16 (the exact arms' storage)."""
-    emb16 = inp["item_embs"].half().float()
+def table_exact(assets, half, k=1000):
+    """Exact masked top-k with fp32 math over the item table, rounded to fp16 first (the exact arms' storage) or not."""
+    emb16 = inp["item_embs"].half().float() if half else inp["item_embs"]
     rows = assets["oracle_rows"].nonzero().reshape(-1)
     topk = assets["blob"]["topk"]
     hit = {100: 0.0, 1000: 0.0}
@@ -80,7 +80,8 @@ for sweep in sorted({j.sweep for j in jobs}):
         )
         res["linr_v2_torch"], _ = recalls(m, assets)
         del m
-        res["fp16_table_fp32_math"] = fp16_table_exact(assets)
+        res["fp16_table_fp32_math"] = table_exact(assets, True)
+        res["fp32_table_fp32_math"] = table_exact(assets, False)
     out[sweep] = res
     print(sweep, json.dumps(res), flush=True)
     torch.cuda.empty_cache()
