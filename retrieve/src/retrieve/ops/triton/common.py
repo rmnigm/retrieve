@@ -223,19 +223,22 @@ def clause_pass(
     caller moved to its tile with ``row_base``, or absolute int64 gathered ``safe_ids``;
     kernels.md § Addressing);
     ``load_mask`` gates the attr loads (``other=-1``) and seeds ``keep``, so
-    the result is already ANDed with it. ``is_reverse_ptr`` must point at int8
-    storage (host wrappers do ``.to(torch.int8)``; Triton can't load native
-    torch.bool) — loaded per clause and cast ``.to(tl.int1)``. ``q_c == -1``
-    marks an inactive clause: always passes, overriding reverse."""
+    the result is already ANDed with it; an inactive clause's loads are skipped.
+    ``is_reverse_ptr`` must point at int8 storage (host wrappers do ``.to(torch.int8)``;
+    Triton can't load native torch.bool) — loaded per clause and cast ``.to(tl.int1)``.
+    ``q_c == -1`` marks an inactive clause: always passes, overriding reverse."""
     keep = load_mask
     for c in tl.static_range(C):
         q_c = tl.load(query_attrs_ptr + bid * stride_qb + c * stride_qc)
         rev_c = tl.load(is_reverse_ptr + c).to(tl.int1)
         clause_match = tl.zeros(ids.shape, tl.int1)
+        # An inactive clause passes whatever the item holds, so its item attrs are not read
+        # (kernels.md § Shared kernel helpers, "Inactive clauses").
+        live = load_mask & (q_c != -1)
         for a in tl.static_range(A_MAX):
             ia = tl.load(
                 item_attrs_ptr + ids * stride_in + c * stride_ic + a * stride_ia,
-                mask=load_mask,
+                mask=live,
                 other=-1,
             )
             clause_match = clause_match | (ia == q_c)

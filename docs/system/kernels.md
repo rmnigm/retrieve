@@ -348,7 +348,13 @@ its own tile shape, launch grid, or masking policy:
   load_mask, bid, strides..., C, A_MAX) → [BLOCK] int1` — the exact
   AND-of-OR clause predicate (inner OR over `A_MAX` slots, outer AND
   over `C`, reverse XOR, `q_c == -1` inactive override), already ANDed
-  with `load_mask`. Used by `clause_mask` / `clause_compact`
+  with `load_mask`. **Inactive clauses** are not read: a clause the query
+  leaves at `-1` passes whatever the item holds, so its item-attr loads are
+  masked off (`load_mask & (q_c != -1)`). Without that, every item paid
+  `C · A_MAX` loads per batch row however few clauses the query used, so
+  the cost grew with the table's width: the 10-clause synth tables
+  (SYNTH-TRIM, from 7) made V1 / V2 clause cells slower by the width,
+  flat in p and growing with the batch. Used by `clause_mask` / `clause_compact`
   (`ids=n_offsets`, `load_mask=n_valid`) and
   `codesigned_probe_score_exact` (`ids=safe_ids`, `load_mask=valid`).
   `is_reverse_ptr` must point at int8 storage (host preps do
