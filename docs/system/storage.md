@@ -110,7 +110,7 @@ resolved by `evaluation/eval_datasets/hub.py:data_root()`.
 ```bash
 export RETRIEVE_DATA_ROOT=/data                           # the image default
 export UV_PROJECT_ENVIRONMENT=/venvs/retrieve             # reuse; see the venv budget
-export TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/<job>    # private per job
+export TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/<job>   # private per job; the code_version subdir is appended by the harness
 export HF_HOME=/scratch/hf
 ```
 
@@ -118,6 +118,13 @@ export HF_HOME=/scratch/hf
 on-disk FX cache does not invalidate when a `@triton_op` host wrapper's Python
 source changes, so a shared `/tmp/torchinductor_root` silently serves stale
 kernels ([reproduction-deviations.md](../paper/reproduction-deviations.md) D-7).
+For the same reason it must change with the library tree: a job directory reused
+after a library edit replays the old body in every `graph`-mode cell (V1-FUSE's
+second window timed the previous tile's clause kernel this way, [validation](../validation.md#library-gates)),
+so it is keyed by `code_version`: `bench` appends the library tree's
+`code_version` to the directory it is given (H-INDCACHE), and the library
+pytest suite uses a fresh directory per run. A script that compiles outside
+`bench` and pytest keys its own directory by `code_version`.
 `/tmp/inductor-<job>` is on the same disk and works as well.
 
 `rp-sync`, the pod's `uv sync` wrapper, sources `/opt/retrieve-pod/bashrc.sh`. That file

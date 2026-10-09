@@ -15,6 +15,7 @@ from retrieve.ops.triton.clause_mask import (
     ClauseMaskConfig,
     _clause_mask_impl,
     clause_mask,
+    clause_mask_scores,
 )
 from tests.conftest import make_attrs, make_query_attrs
 
@@ -132,3 +133,36 @@ def test_clause_mask_config_override(block_n, num_warps):
     out = _clause_mask_impl(attrs, is_reverse, q, config=cfg)
     ref = _ref_mask(attrs, is_reverse, q)
     assert torch.equal(out, ref)
+
+
+def _scores(b, n, seed):
+    """fp32 scores with exact ties and genuine ``-inf`` lanes, so a pass-through is checked
+    bit for bit and a real ``-inf`` stays ``-inf`` on a passing item."""
+    g = torch.Generator(device="cuda").manual_seed(seed)
+    s = torch.randn(b, n, generator=g, device="cuda").round(decimals=2)
+    s[:, ::97] = float("-inf")
+    return s
+
+
+@pytest.mark.parametrize("n", [256, 4096])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_clause_mask_scores_is_where_over_the_mask(n, reverse):
+    c = 3
+    attrs = make_attrs(n, c=c, a_max=3, n_vocab=20, pad_rate=0.2, seed=n)
+    is_reverse = torch.tensor([reverse, False, reverse], device="cuda")
+    q = make_query_attrs(b=8, c=c, n_vocab=20, inactive_rate=0.2, seed=n + 1)
+    scores = _scores(8, n, seed=n)
+    out = clause_mask_scores(scores, attrs, is_reverse, q)
+    ref = torch.where(_ref_mask(attrs, is_reverse, q), scores, float("-inf"))
+    assert out.dtype == torch.float32 and torch.equal(out, ref)
+    assert 0 < int(torch.isfinite(out).sum()) < int(torch.isfinite(scores).sum())
+
+
+def test_clause_mask_scores_rejects_scores_of_the_wrong_shape_or_dtype():
+    attrs = make_attrs(512, c=2, a_max=2, n_vocab=10, pad_rate=0.0, seed=3)
+    is_reverse = torch.zeros(2, dtype=torch.bool, device="cuda")
+    q = make_query_attrs(b=4, c=2, n_vocab=10, inactive_rate=0.0, seed=4)
+    with pytest.raises(ValueError, match="scores must be"):
+        clause_mask_scores(_scores(4, 512, seed=1).half(), attrs, is_reverse, q)
+    with pytest.raises(ValueError, match="scores must be"):
+        clause_mask_scores(_scores(4, 511, seed=1), attrs, is_reverse, q)

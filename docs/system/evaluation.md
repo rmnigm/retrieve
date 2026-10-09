@@ -139,7 +139,9 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    and stores per-kernel CUDA µs (top 8 kernels) as `kernels`, and the device
    time and launches summed over every kernel as `kernels_us` / `kernels_calls`
    (`measure.kernel_summary`; H-KSUM: the top-8 sum is a lower bound that favours
-   the arm with more launches). The sums skip `## …` events: the profiler books a
+   the arm with more launches), and the same sums per named kernel scope as
+   `kernel_scopes` (H-SCOPE, scorer / topk / epilogue / other, so T3's scorer
+   column compares like with like). The sums skip `## …` events: the profiler books a
    compiled call's `## Call CompiledFxGraph <hash> ##` range as a device event
    spanning that graph's kernels, so counting it would count them twice (the top-8
    list keeps it). In a
@@ -410,8 +412,8 @@ records are artifacts in their own results tree, never campaign cells. `n_lists`
 0.95 at the same ≈ 12.7 % scanned (n95 = `n_lists` / 8), so it takes the fewest-items 2048 / 256.
 YFCC (`tags_and`, pass 0.0185; 0.72 at the cap at 16384) and PubMed (`all5`, 0.018; 0.873 at
 the cap at 4096) do not reach 0.95 within the 25 % cap. Their slot is the cap at `n_lists` 4096,
-`n_probe` 1024: both list counts scan the same 25 % there (ties go to the smaller), and the probe
-scorers cannot run `n_probe` > 1024 at k 1000 ([kernels](kernels.md)). yfcc10m-synth follows at 4096. An n95 is written only where it was measured. Each value is one
+`n_probe` 1024: both list counts scan the same 25 % there (ties go to the smaller). The choice
+predates ST-IDS, which lifted the probe scorers' `n_probe` ≤ 1024 at k 1000 limit ([kernels](kernels.md)). yfcc10m-synth follows at 4096. An n95 is written only where it was measured. Each value is one
 `datasets:` slot per arm: `filter`'s SilverTorch arms get `{build: {n_lists: [L]}, query:
 {n_probe: [24, n95]}}`, and `synth`'s get `n_lists` only, because it sweeps `n_probe`
 explicitly (user, 2026-10-08). A slot left `{}` runs at the library default `n_lists` with
@@ -856,6 +858,7 @@ Perf entry:
 | `load` | `"closed_loop"` |
 | `kernels` | `--profile`, eager only: top-8 CUDA kernels `{kernel, us, calls}` |
 | `kernels_us`, `kernels_calls` | `--profile`, eager only: device µs and kernel launches summed over every kernel of the call, sentinels and `## …` profiler ranges excluded (records before H-KSUM lack them; records between H-KSUM and its fix double-count compiled calls, which no eager `h2h` arm is; T3 reads these, and for such a record the top-8 sum, marked as a lower bound) |
+| `kernel_scopes` | `--profile`, eager only: `{scope: {us, calls}}` for `scorer`, `topk`, `epilogue`, `other` (`measure.KERNEL_SCOPES`, by substring of the kernel name, first match wins), adding up to `kernels_us` / `kernels_calls`. `scorer` holds the like-for-like scoring scope: ours `_codesigned_probe_score*` (bloom test fused), Meta's `fused_kmean_ann::` (`process_cluster*`, payload and warp-size kernels) and `bloom_search::` kernels; `topk` the torch top-k / sort kernels (`mbtopk`, `sbtopk`, `radixSortKVInPlace`, `bitonicSortKVInPlace`); `epilogue` the index / gather / scatter kernels. In `results.parquet` as `perf_kernels_<scope>_us` / `_calls` (H-SCOPE; records before it lack them) |
 | `ids_sha256` | sha256 of the ids the timed callee (the eager module or the graph replay) returns on the first 8 batches of that `(bs, seed)` pool (`run.IDS_PROBE_BATCHES`), int64 row-major, batch after batch, run once after the windows; `null` when the variant did not run. Equal eager and graph hashes are the D1-G identity gate. Graph mode is inductor's code, not the eager ops replayed, so this gate catches arithmetic that inductor lowers differently. Records before library tree `5d158f20` differ in graph `quantize_int8` ([kernels](kernels.md#quantize_int8-retrieveindexing), [validation](../validation.md#campaign-v2-phase-v-not-yet-validated), *V-GRAPH-IDS*) |
 | `ids_sha256_canon` | the same ids with each row re-ordered by (score desc, id asc) before hashing: two backends with bit-equal scores whose tied ids come in another order hash equal (official int32 against Triton). `bench report`'s T3 identity column reads it; eager vs graph reads `ids_sha256`. An added field, schema stays 4 |
 | `reason` | present when the variant could not run (`not_capturable`, `cuda_unavailable`, `cudagraph_skips=N`, `cudaGraphLaunch per call = N, expected 1`); every stat key is then `null` |

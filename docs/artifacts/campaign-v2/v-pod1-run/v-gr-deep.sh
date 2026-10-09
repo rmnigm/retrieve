@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Leg 3, V-GR-DEEP at campaign-v2.1: goodreads `deep` (n_lists and n_probe from suites.yaml after
+# V-GR-DEEP (at the tag in common.sh): goodreads `deep` (n_lists and n_probe from suites.yaml after
 # IVF-TUNE), every arm.
 LEG=v-gr-deep
 . "$(dirname "$(readlink -f "$0")")/common.sh"

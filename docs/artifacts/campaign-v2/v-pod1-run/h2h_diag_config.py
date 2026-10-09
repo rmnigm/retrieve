@@ -24,10 +24,12 @@ h2h.update(
 h2h["sweeps"] = {"goodreads": ["c0_genre"]}
 triton, official = h2h["arms"]
 assert triton["backends"] == ["triton"] and official["backends"] == ["official"]
-one = lambda path: {
-    **official,
-    "build": {**official.get("build", {}), "score_path": [path]},
-}  # noqa: E731
+
+
+def one(path):
+    return {**official, "build": {**official.get("build", {}), "score_path": [path]}}
+
+
 variants = {
     "all": h2h["arms"],
     "triton": [triton],

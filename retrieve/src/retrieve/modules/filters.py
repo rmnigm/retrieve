@@ -93,6 +93,11 @@ class BloomFilter(FilterModule):
         qb = self._build_query_sigs(query_clause_attrs)  # [B, W]
         return ops_for(self.backend).bloom_compact(qb, self.bloom_sigs)
 
+    def mask_scores(self, scores: Tensor, query_clause_attrs: Tensor) -> Tensor:
+        """``scores`` [B, N] with the failing items at ``-inf``, one fused pass on triton."""
+        qb = self._build_query_sigs(query_clause_attrs)  # [B, W]
+        return ops_for(self.backend).bloom_match_scores(scores, qb, self.bloom_sigs)
+
     def evaluate_subset(
         self,
         query_clause_attrs: Tensor,
@@ -139,6 +144,12 @@ class ExactAttributeFilter(FilterModule):
         ``[B, end - start, C, A_max]`` bool grid."""
         return ops_for(self.backend).clause_mask(
             self.item_clause_attrs[start:end], self.clause_is_reverse, query_clause_attrs
+        )
+
+    def mask_scores(self, scores: Tensor, query_clause_attrs: Tensor) -> Tensor:
+        """``scores`` [B, N] with the failing items at ``-inf``, one fused pass on triton."""
+        return ops_for(self.backend).clause_mask_scores(
+            scores, self.item_clause_attrs, self.clause_is_reverse, query_clause_attrs
         )
 
     def evaluate_indices(self, query_clause_attrs: Tensor) -> tuple[Tensor, Tensor]:

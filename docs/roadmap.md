@@ -34,8 +34,10 @@ others (see [Multi-GPU execution](#multi-gpu-execution)).
 
 - **V3 at 512 bits** (C2): `k_bits` > D needs a library change (OPORP over
   several projections), which the user declined for the campaign on
-  2026-10-08 (LN-8). V-V3BITS measures {64, 128}; whether to add 512 as an
-  opt-in for one comparison is the user's call.
+  2026-10-08 (LN-8). V-V3BITS (goodreads-synth, v2.2) shows the bits drive
+  V3's recall: 64 vs 128 bits costs 10-30 points of recall@100 at p ≥ 0.01
+  for ≤ 3 % latency, so LiNR's 512 would likely close much of C2's recall
+  gap. Whether to add 512 as an opt-in for one comparison is the user's call.
 - **Contact the original authors** (re-plan decision 7): the LinkedIn LiNR
   team and Meta's SilverTorch team — filter-set details, the V1/V2 setup,
   the SilverTorch paper's FPR inconsistency (0.067 % vs 0.00173 %) — and
@@ -114,10 +116,10 @@ multi-GPU numbers are comparable at all.
 
 **Exploration first, one clean pass last** (user, 2026-10-09,
 [decisions](decisions.md#campaign-v2-user-2026-10-08)). While the library
-is still improving, legs run at the current tag (now `campaign-v2.2`,
-code_version `0d23c615a60c6d170fbf3e79c66999406bd5006c` = v2.1 + ST-DLOOP,
-Hub `campaign-v2.2/<dataset>-<suite>`; `campaign-v2.1` was `f01255f1`,
-`campaign-v2` `408b1188`) to see how
+is still improving, legs run at the current tag (now `campaign-v2.3`,
+code_version `1258a63e7ebd170d7270111b5206b4ea0b8ca7f9` = v2.2 + ST-IDS +
+V2-HIGHP + V1-FUSE, Hub `campaign-v2.3/<dataset>-<suite>`; `campaign-v2.2` was
+`0d23c615`, `campaign-v2.1` `f01255f1`, `campaign-v2` `408b1188`) to see how
 everything behaves and to make the charts. A new tag does not stop or
 invalidate anything: every record keeps its code_version, and a change adds
 rows to the **redo ledger** below only for the cells it actually changes.
@@ -146,6 +148,8 @@ leg runs one library.
 | PubMed SilverTorch Triton perf (D3 PubMed timed at v2.1; V-PUBMED's Triton arms) | ST-DLOOP (scores bit-exact) | Triton perf |
 | d128 / d192 SilverTorch Triton perf (every leg) | ST-SKIP128, if it lands | Triton perf |
 | V2 Triton perf at `D_PAD` ≥ 1024 run at v2.1 (V-PUBMED; d128 / d192 legs gain or are neutral) | V2-HIGHP | V2 perf |
+| every SilverTorch Triton perf record before v2.3 (all widths; ≈ −3 µs at k 100 × n_probe 24, more at k 1000) | ST-IDS | Triton perf |
+| V1 Triton perf before v2.3 | V1-FUSE | V1 perf |
 | graph-mode ids of SilverTorch records at `408b1188` | quantize fix | ids (D1-G's id gate) |
 
 ### Stop rules
@@ -207,26 +211,6 @@ co-design.
   its nearest centroid), `arxiv-corr-synth.yaml`, CPU test (pass rate, query
   side); then arXiv at p {0.01, 0.03, 0.1}, every synth arm. IVF's best case
   next to the uniform worst case (F2). Pod c, slot 2. **≈ 3 GPU-h.**
-- [ ] **V2-HIGHP: Fix A's regression at d768** (surprise gate, pod b; located
-  by pod 1's cross-tree check, `artifacts/v2-crosstree`). V2 at v2.1 is
-  1.43-1.44× slower than at `campaign-v2` at PubMed 10 M d768 p 0.9993 (bs 1
-  and 16, eager and graph, V1 1.000), and faster or equal at d128 (0.8 M and
-  3 M, any p). No `programs` value recovers it, the one-tile-per-program grid
-  included (1.46×): the cause is the grid-strided body's codegen at `D_PAD`
-  1024 (`fused_masked_knn_topk` 141 -> 209 ms), not the launch shape. Fix: a
-  D loop inside the tile body (ST-DLOOP's form), or the old straight-line body
-  above `D_PAD` 256. Gates bit-exact + keep rule at d128 (0.8 M, 3 M) and d768
-  10 M across p. In the `campaign-v2.3` bundle
-  with ST-IDS and V1-FUSE; st-dloop, pod b.
-- [ ] **ST-IDS: the probe scorers' id epilogue loops over k** (pod c,
-  2026-10-09). `probe_ids_kernel` builds a dense `[next_pow2(k),
-  next_pow2(n_probe)]` tile: at k 1000 every new `n_probe` is a 2-4 MB IR
-  compile, `ptxas` 99-653 s each (~2,000 s on a fresh box), and k 1000 ×
-  n_probe > 1024 cannot compile at all (2^20 elements). Tile `[BLOCK_K, NPP]`
-  with a non-unrolled loop over k. Integer-exact: gate `torch.equal` ids and
-  scores, epilogue kernel time and compile time before/after. Lifts the
-  `n_probe` ≤ 1024 at k 1000 limit. In the `campaign-v2.3` bundle with
-  V2-HIGHP and V1-FUSE; st-dloop, pod b.
 - [ ] **ST-SKIP128: Meta's early exit at d ≤ 256** (EXHIBITS run 4, ST-DLOOP's
   improvement list). Meta's scorer kernel alone is faster than ours on
   bloom at d128 (0.60-0.80, exact device times) because a failing doc
@@ -234,8 +218,8 @@ co-design.
   forced skip cost 2-8 % at p ≥ 0.1. Fix: a skip gated by a device-side
   pass-rate bound (no host sync), ≈ −30-35 % on the d128 scorer at
   p ≤ 0.001. Gates bit-exact + keep rule across p at d128 / d192. Re-times
-  every d128 / d192 SilverTorch Triton cell (ledger). Last in the
-  `campaign-v2.3` bundle; st-dloop, pod b.
+  every d128 / d192 SilverTorch Triton cell (ledger). Tag `campaign-v2.4`;
+  st-dloop, pod b.
 - [ ] **H-QLOOP: the quality pass is CPU-bound** (pod 1, 2026-10-09, live
   profile of V-V3BITS). `run.quality` spends ≈ 33 ms of CPU work per 16-row
   chunk (row masks, `blob["topk"][sel]`, `targets[sel]`, `.to(device)`
@@ -247,25 +231,11 @@ co-design.
   loop. Gate: quality fields and per-query sidecars **byte-identical** to
   existing records (golden cells + one record per arm from the Hub), harness
   suite. Harness only. Pod 1's runner, now (CPU while V-GR-DEEP runs).
-- [ ] **H-SCOPE: a named-scope kernel sum in `profile_once`** (EXHIBITS, C7).
-  T3's scorer column needs like-for-like scopes (ours fuses the bloom test;
-  Meta's bloom search and payload are separate kernels): record per-call
-  sums over named kernel groups (scorer incl. its filter, top-k, epilogue,
-  other) next to `kernels_us`, so the report builds the column without a
-  hand split. Harness, CPU tests. Pod 1's runner between legs.
-- [ ] **V1-FUSE: LiNR V1 at small batch and its masking** (V-PROF3,
-  `artifacts/v-prof3`). At bs 1 `torch.compile(max-autotune)` V1 runs 0.25 ms
-  against our Triton 0.49: one fused masked mat-vec (152 µs) vs cuBLAS gemv
-  (284 µs) + a separate mask kernel, fp16 top-k keys (2 radix passes vs 4),
-  one launch vs 32. In graph mode inductor turns V1's in-place mask into a
-  copy of the score matrix + a fused `where` (constant in p), which is why
-  V1 graph is 1-8 % slower than eager at bs 16 and low p. Fix: a fused
-  masked mat-vec for small bs, fp16 top-k keys where ids are unchanged, and a
-  mask form inductor fuses without the copy. Gates: ids `torch.equal` (scores
-  within the existing V1 tolerance if fp16 keys), keep rule over p, bs, N,
-  d. Library, in `campaign-v2.3` with ST-IDS and V2-HIGHP. Pod c, v-ax-corr
-  (CPU first, one GPU window at an interleave-unit pause).
-- [ ] **V-V3BITS: V3 at LiNR's bit budget, next to our deviation** (C2 does
+- [ ] **H-SCOPE follow-ups**: `kernel_scopes` is merged (harness, CPU
+  test over every real kernel name). Left: the report's T3 scorer column
+  reads `kernel_scopes`, and one GPU test on a real call (pod 1, ~2 min, in
+  the H-QLOOP gate slot).
+- [ ] **V-V3BITS (goodreads-synth done; goodreads' 48 cells deferred): V3 at LiNR's bit budget, next to our deviation** (C2 does
   not hold so far: recall −7-13 % at a 1 % pool, no gain at bs 1; our V3
   runs `k_bits` = D = 128 against LiNR's 512, LN-8). `k_bits` must divide D
   (`quantize.py` `_oporp_k_bits`), so at D 128 only {64, 128} exist without a
