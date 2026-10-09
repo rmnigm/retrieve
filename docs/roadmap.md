@@ -350,6 +350,14 @@ co-design.
   `codesigned_probe_score_exact`. Gates: bit-exact, keep rule on synth and
   real sweeps, SASS limited to the clause kernels, library suite. Tag
   `campaign-v2.7`; then C1's synth V1 / V2 cells on pod 1. `dev/clause-skip`.
+- [ ] **H-ARMFREE: one `bench run` frees each arm before the next** (2026-10-10:
+  laion30m and V-ROUTER PubMed OOMed when one process ran several arms; each
+  arm's 10 M-30 M index stayed resident and the next arm's allocation
+  failed). The run loop releases the finished job's module, index and
+  caches before building the next (and asserts the reserved memory is back
+  near the shared inputs'); drivers stop needing one process per arm.
+  Gates: harness suite; one multi-arm 10 M run without OOM; records
+  byte-identical to a per-arm run on two cells. v-pod1-run (CPU first).
 - [ ] **ROUTER-LIB: the router as a library method** (the library goal,
   user 2026-10-10; only if V-ROUTER on PubMed puts it on the Pareto
   front, [decisions](decisions.md#datasets); WIP on `dev/router-lib`): the harness `router` arm's logic (unfiltered pre-probe
