@@ -238,14 +238,6 @@ co-design.
   within the existing V1 tolerance if fp16 keys), keep rule over p, bs, N,
   d. Library, in `campaign-v2.3` with ST-IDS and V2-HIGHP. Pod c, v-ax-corr
   (CPU first, one GPU window at an interleave-unit pause).
-- [ ] **H-KSUM: the full kernel sum in `profile_once`** (EXHIBITS run 3): T3's
-  device column sums the top 8 kernels only, a lower bound that favours
-  official (15-31 launches vs Triton's 17-18). Record every kernel's time
-  (and the count), harness only with CPU tests (done: `kernels_us` /
-  `kernels_calls`); then one profile-only `h2h`
-  pass on goodreads + arXiv at v2.1 (`--profile`, no new timing claims).
-  Settles C7's "Meta's scorer faster in isolation" (k 1000 vs k 100 split).
-  Pod 1 after V-PROF3. **≈ 0.3 GPU-h.**
 - [ ] **V-V3BITS: V3 at LiNR's bit budget, next to our deviation** (C2 does
   not hold so far: recall −7-13 % at a 1 % pool, no gain at bs 1; our V3
   runs `k_bits` = D = 128 against LiNR's 512, LN-8). `k_bits` must divide D
