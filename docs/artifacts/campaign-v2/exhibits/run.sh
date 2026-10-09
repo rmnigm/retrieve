@@ -45,6 +45,7 @@ done
 trees="$BASE/tree/v2 $BASE/tree/v21 $BASE/tree/d1"
 uv run python "$HERE/checks.py" "$OUT" $trees
 uv run python "$HERE/figures.py" "$OUT" $trees
+uv run python "$HERE/t3x.py" "$OUT" $trees
 uv run python "$HERE/gpuh.py" "$OUT/synth-arms.csv" "$BASE/tree/d1/filter/yfcc10m-d192.jsonl" > "$OUT/gpuh-v-yfcc.csv"
 ls "$BASE/legs" > "$OUT/legs.txt"
 
