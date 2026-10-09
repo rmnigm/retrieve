@@ -23,6 +23,12 @@ from torch.profiler import ProfilerActivity, profile
 GROUPS = {
     "gs": ("goodreads-synth", "synth", ["p1", "p0001"], {}),
     "pm": ("pubmed", "filter", ["c3_journal_reverse"], {"n_min": 20, "target_s": 1.5}),
+    "ax3": (
+        "arxiv-synth",
+        "synth",
+        ["p0001", "p01", "p1"],
+        {},
+    ),  # the v2.1 / v2.4 / v2.5 V2-graph check
 }
 ALGOS = ["linr_v1_filter_mask", "linr_v2"]
 K, SEED, BSS = 100, 0, (1, 16)
@@ -113,8 +119,15 @@ def main(group: str, out: Path, prof: bool) -> None:
                     )
                     continue
                 timed = measure.latency_group(fns, bs=bs, mode=mode, **kw)
-                for algo, (d, _) in zip(ALGOS, timed, strict=True):
-                    res[f"{sweep}/bs{bs}/{mode}/{algo}"] = {
+                for algo, c, (d, _) in zip(ALGOS, callees, timed, strict=True):
+                    ids = dict(
+                        zip(
+                            ("ids_sha256", "ids_sha256_canon"),
+                            run.ids_sha256(c, pool, qa),
+                            strict=True,
+                        )
+                    )
+                    res[f"{sweep}/bs{bs}/{mode}/{algo}"] = ids | {
                         k: d.get(k)
                         for k in (
                             "median_ms",
