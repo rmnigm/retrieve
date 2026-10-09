@@ -662,8 +662,11 @@ class TestComposites:
         ref.register_index(data["embs"])
         if kind == "none":
             self._equal(v1(data["query"]), ref(data["query"]))
-        else:
-            self._equal(v1(data["query"], qa), ref(data["query"], mask=f.evaluate_mask(qa)))
+            return
+        # The filter folded into the score write feeds topk the same tensor the bool mask + where
+        # did, so ids and scores are bit-identical, not just equal up to ties.
+        out, want = v1(data["query"], qa), ref(data["query"], mask=f.evaluate_mask(qa))
+        assert torch.equal(out[0], want[0]) and torch.equal(out[1], want[1])
 
     @pytest.mark.parametrize("backend", BACKENDS)
     @pytest.mark.parametrize("kind", ["clause", "bloom"])

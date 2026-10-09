@@ -32,17 +32,19 @@ class PostfilterKNN(RetrievalModule):
         # kernel whose accumulator order can flip K-th-place tiebreaks at the noise floor.
         self.register_buffer("item_embs_t", item_embs.to(torch.float16).t().contiguous())
 
+    def score(self, query: Tensor) -> Tensor:
+        """``[B, N]`` fp32 scores, every item."""
+        query = query.to(torch.float16)
+        if query.is_cuda:
+            return torch.mm(query, self.item_embs_t, out_dtype=torch.float32)
+        return torch.mm(query.float(), self.item_embs_t.float())  # aten::mm.dtype: no CPU kernel
+
     def forward(
         self,
         query: Tensor,
         mask: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
-        query = query.to(torch.float16)
-        if query.is_cuda:
-            scores = torch.mm(query, self.item_embs_t, out_dtype=torch.float32)
-        else:  # aten::mm.dtype has no CPU kernel
-            scores = torch.mm(query.float(), self.item_embs_t.float())
-        return masked_topk(scores, self.k, valid=mask)
+        return masked_topk(self.score(query), self.k, valid=mask)
 
 
 class PrefilterKNN(RetrievalModule):

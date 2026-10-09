@@ -73,7 +73,7 @@ Each holds its filter (a `BloomFilter` or `ExactAttributeFilter`, see the
 - `k` is settable after `register_index`; `capturable` is `True` (a class attribute).
 
 ### `LiNRV1(k, *, filter=None, backend="triton")`
-- `PostfilterKNN` + the filter's mask: dense dot product (fp16 inputs, fp32 scores), masked, top-k.
+- `PostfilterKNN` + the filter folded into the score write (`filter.mask_scores`): dense dot product (fp16 inputs, fp32 scores), failing items at `-inf` in one pass, top-k.
 
 ### `LiNRV2(k, *, filter, backend="triton")`
 - `PrefilterKNN` over `filter.evaluate_indices`: the filter's compact candidate list, rescored
