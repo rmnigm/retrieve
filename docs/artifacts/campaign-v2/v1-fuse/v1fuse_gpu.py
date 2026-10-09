@@ -21,6 +21,7 @@ from __future__ import annotations
 import itertools
 import json
 import math
+import os
 import statistics
 import sys
 from pathlib import Path
@@ -135,7 +136,8 @@ def gate(dataset: str, records: str, out_path: str) -> None:
                     row["eager_vs_old_equal"] = _probe_equal(new, old, pool, qa_pool)
                     torch._dynamo.reset()
                     g_new = measure.graph_callable(new, pool[0], qa_pool[0])
-                    g_old = measure.graph_callable(old, pool[0], qa_pool[0]) if k == 100 else None
+                    timed_k = k == 100 and not os.environ.get("V1FUSE_NO_TIMING")
+                    g_old = measure.graph_callable(old, pool[0], qa_pool[0]) if timed_k else None
                     for mode, fn in (("eager", new), ("graph", g_new)):
                         got = ids_sha256(fn, pool, qa_pool)
                         want = rec.get((fk, sw, bs, k, mode))

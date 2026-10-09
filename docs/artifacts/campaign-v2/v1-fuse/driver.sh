@@ -31,7 +31,8 @@ step() {
   local name=$1; shift
   local t0; t0=$(date +%s)
   "$@"
-  echo "$(date -Is) step $name rc=$? s=$(( $(date +%s) - t0 ))"
+  local rc=$?
+  echo "$(date -Is) step $name rc=$rc s=$(( $(date +%s) - t0 ))"
 }
 
 step library_suite $PIN $PY -m pytest "$REPO/retrieve/tests" -q -p no:cacheprovider --junitxml="$OUT/library-suite.xml" \
