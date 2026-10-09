@@ -112,10 +112,16 @@ for r in csv.DictReader(open(HUB / "artifacts/exhibits/20261009-2125-c5/c5-below
     if (r["code_version"], r["backend"], r["mode"]) in (("v2.8", "official", "eager"), ("v2.9", "triton", "graph")):
         pts.append({"who": "Meta's code" if r["backend"] == "official" else "ours (Triton)", "dataset": r["dataset"], "sweep": r["sweep"],
                     "n_probe": int(r["n_probe"]), "bs": int(r["bs"]), "mode": r["mode"], "ratio": float(r["full_over_partial"])})
-# Ours at 10 M PubMed, v2.9: from exhibits' c5-pubmed-v29 note until campaign-v2.9/pubmed-codesign-ours is on the Hub.
-if not any(p["dataset"] == "pubmed" for p in pts):
-    for npb, bs, v in ((24, 1, 1.05), (24, 16, 1.11), (1024, 1, 1.025), (1024, 16, 1.008)):
-        pts.append({"who": "ours (Triton)", "dataset": "pubmed", "sweep": "c0_mesh", "n_probe": npb, "bs": bs, "mode": "graph", "ratio": v})
+# Ours at 10 M PubMed, v2.9 (graph p50 per interleaved pair).
+pm = defaultdict(dict)
+for r in recs("campaign-v2.9/pubmed-codesign-ours"):
+    for p in r["perf"]:
+        if p["mode"] == "graph" and p["k"] == 100:
+            pm[(r["params"]["n_probe"], p["bs"])][r["params"]["bloom_path"]] = p["median_ms"]
+for (npb, bs), d in pm.items():
+    if len(d) == 2 and None not in d.values():
+        pts.append({"who": "ours (Triton)", "dataset": "pubmed", "sweep": "c0_mesh", "n_probe": npb, "bs": bs, "mode": "graph",
+                    "ratio": round(d["full"] / d["partial"], 3)})
 lai30 = defaultdict(dict)
 for r in recs("campaign-v2.8/laion30m-codesign-laion30m"):
     for p in r["perf"]:
@@ -126,7 +132,7 @@ for (sw, npb, bs), d in lai30.items():
         pts.append({"who": "Meta's code", "dataset": "laion30m", "sweep": sw, "n_probe": npb, "bs": bs, "mode": "eager",
                     "ratio": round(d["full"] / d["partial"], 3)})
 ours30 = defaultdict(dict)
-for r in recs("campaign-v2.7/laion30m-codesign-laion30m"):
+for r in recs("campaign-v2.9/laion30m-codesign-laion30m"):
     for p in r["perf"]:
         if p["mode"] == "graph" and p["k"] == 100:
             ours30[(r["sweep"], r["params"]["n_probe"], p["bs"])][r["params"]["bloom_path"]] = p["median_ms"]

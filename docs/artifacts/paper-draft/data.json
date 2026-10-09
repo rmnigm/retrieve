@@ -894,7 +894,7 @@
    "n_probe": 24,
    "bs": 1,
    "mode": "graph",
-   "ratio": 1.05
+   "ratio": 1.052
   },
   {
    "who": "ours (Triton)",
@@ -903,7 +903,7 @@
    "n_probe": 24,
    "bs": 16,
    "mode": "graph",
-   "ratio": 1.11
+   "ratio": 1.112
   },
   {
    "who": "ours (Triton)",
@@ -1002,7 +1002,7 @@
    "n_probe": 32,
    "bs": 16,
    "mode": "graph",
-   "ratio": 1.447
+   "ratio": 1.454
   },
   {
    "who": "ours (Triton)",
@@ -1011,7 +1011,7 @@
    "n_probe": 32,
    "bs": 64,
    "mode": "graph",
-   "ratio": 1.672
+   "ratio": 1.7
   },
   {
    "who": "ours (Triton)",
@@ -1020,7 +1020,7 @@
    "n_probe": 128,
    "bs": 16,
    "mode": "graph",
-   "ratio": 1.035
+   "ratio": 1.08
   },
   {
    "who": "ours (Triton)",
@@ -1029,7 +1029,7 @@
    "n_probe": 128,
    "bs": 64,
    "mode": "graph",
-   "ratio": 1.029
+   "ratio": 1.092
   },
   {
    "who": "ours (Triton)",
@@ -1038,7 +1038,7 @@
    "n_probe": 32,
    "bs": 16,
    "mode": "graph",
-   "ratio": 2.367
+   "ratio": 2.395
   },
   {
    "who": "ours (Triton)",
@@ -1047,7 +1047,7 @@
    "n_probe": 32,
    "bs": 64,
    "mode": "graph",
-   "ratio": 3.319
+   "ratio": 3.429
   },
   {
    "who": "ours (Triton)",
@@ -1056,7 +1056,7 @@
    "n_probe": 128,
    "bs": 16,
    "mode": "graph",
-   "ratio": 1.327
+   "ratio": 1.42
   },
   {
    "who": "ours (Triton)",
@@ -1065,7 +1065,7 @@
    "n_probe": 128,
    "bs": 64,
    "mode": "graph",
-   "ratio": 1.447
+   "ratio": 1.611
   }
  ],
  "c7": [
