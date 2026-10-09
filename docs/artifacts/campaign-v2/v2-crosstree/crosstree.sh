@@ -41,6 +41,9 @@ step() {
 step move-oracles inrun new "$HERE/../v-pod1-run/move_old_oracles.py" "${WANT[new]}" goodreads-synth pubmed
 step oracle-gs inrun new -m bench.cli oracle --dataset goodreads-synth --suite synth --sweep p1 --sweep p0001
 step oracle-pm inrun new -m bench.cli oracle --dataset pubmed --suite filter --sweep c3_journal_reverse
+step move-oracles-ax inrun new "$HERE/../v-pod1-run/move_old_oracles.py" "${WANT[new]}" arxiv
+step oracle-ax inrun new -m bench.cli oracle --dataset arxiv --suite filter --sweep c3_nversions
+step oracle-axs inrun new -m bench.cli oracle --dataset arxiv-synth --suite synth --sweep p1
 for g in $GROUPS_; do
   for i in $(seq 1 "$PAIRS"); do
     if [ $((i % 2)) -eq 1 ]; then order="old new"; else order="new old"; fi
@@ -48,5 +51,11 @@ for g in $GROUPS_; do
   done
   for t in old new; do step "$g-$t-prof" inrun "$t" "$HERE/crosstree.py" "$g" "$OUT/$g-$t-prof.json" --profile; done
 done
+# programs sweep: the v2.1 tree's variants and the old tree's kernel, old/new/new/old over the cells
+for c in pm ax axs; do
+  if [ "$c" = ax ]; then order="new old"; else order="old new"; fi
+  for t in $order; do step "sweep-$c-$t" inrun "$t" "$HERE/sweep.py" "$c" "$OUT/sweep-$c-$t.json"; done
+done
+$PY "$HERE/sweep_summary.py" "$OUT" | tee "$LOG/sweep-summary.txt"
 $PY "$HERE/crosstree_summary.py" "$OUT" | tee "$LOG/summary.txt"
 echo "$(date -Is) driver done"
