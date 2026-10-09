@@ -197,6 +197,11 @@ the oracle fingerprint in the blob's file name; see
   *first* under-load sample. An idle sample reads low and would flag the GPU
   boosting, and there is no `clocks_locked` field because the pods cannot
   lock clocks. Compare latencies across runs against `perf[].sm_mhz`.
+  Every `nvidia-smi` call (`clocks()`, `clock_report()`) targets
+  `measure.smi_device()`, the first entry of `CUDA_VISIBLE_DEVICES` (an index
+  or a UUID; `0` when unset), because `nvidia-smi -i` ignores that variable.
+  Before dev/clock-device the calls read physical GPU 0, so records timed on
+  another GPU carry GPU 0's clock fields ([validation](../validation.md)).
 - **The job's clock log.** `env.frac_windows_below_max` is the share of a
   cell's window samples below the device's max SM clock, `env.sm_max_mhz`
   (`nvidia-smi` `clocks.max.sm`, sampled at process start; 1410 MHz on the

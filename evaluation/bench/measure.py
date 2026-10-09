@@ -21,6 +21,7 @@ import datetime as dt
 import hashlib
 import importlib.metadata
 import json
+import os
 import platform
 import socket
 import subprocess
@@ -129,10 +130,22 @@ def inductor_cache_dir(code_version: str, given: str | None) -> str:
     return str(base / code_version.replace(":", "-"))
 
 
+def smi_device() -> str:
+    """The process's device for ``nvidia-smi -i``, which ignores ``CUDA_VISIBLE_DEVICES``: its
+    first entry (an index or a UUID), ``"0"`` when unset or empty."""
+    return os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")[0].strip() or "0"
+
+
 def _nvidia_smi(query: str) -> list[str] | None:
     try:
         out = subprocess.check_output(
-            ["nvidia-smi", f"--query-gpu={query}", "--format=csv,noheader,nounits", "-i", "0"],
+            [
+                "nvidia-smi",
+                f"--query-gpu={query}",
+                "--format=csv,noheader,nounits",
+                "-i",
+                smi_device(),
+            ],
             stderr=subprocess.DEVNULL,
             text=True,
             timeout=10,
@@ -197,7 +210,7 @@ def clock_report() -> str:
     default and max clocks, clock policy)."""
     try:
         return subprocess.check_output(
-            ["nvidia-smi", "-q", "-d", "CLOCK", "-i", "0"],
+            ["nvidia-smi", "-q", "-d", "CLOCK", "-i", smi_device()],
             stderr=subprocess.STDOUT,
             text=True,
             timeout=10,
@@ -520,6 +533,7 @@ __all__ = [
     "provenance",
     "repo_dirty",
     "setup",
+    "smi_device",
     "stats",
     "subtree_dirty",
     "timed_build",
