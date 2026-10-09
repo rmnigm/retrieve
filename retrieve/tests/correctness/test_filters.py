@@ -187,8 +187,8 @@ def test_one_bit_knn_with_combined_filter_mask():
     bf = BloomFilter(m_bits=1024, k_hash=5).to("cuda")
     bf.register_index(attrs)
 
-    clause_mask = ci.evaluate_mask(q_attrs)
-    bloom_mask = bf.evaluate_mask(q_attrs)
+    clause_mask = ci.evaluate_mask(ci.prepare_queries(q_attrs))
+    bloom_mask = bf.evaluate_mask(bf.prepare_queries(q_attrs))
     mask = combine_masks(clause_mask, bloom_mask)
     # Combined mask must be the clause mask exactly (bloom is a superset).
     assert torch.equal(mask, clause_mask)

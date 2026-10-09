@@ -21,7 +21,7 @@ import torch
 
 from retrieve.indexing.quantize import quantize_int8_global
 from retrieve.modules.knn import FullScanKNN
-from retrieve.modules.silvertorch import SilverTorch, SilverTorchBuilder
+from retrieve.modules.silvertorch import PreparedFilter, SilverTorch, SilverTorchBuilder
 from tests.conftest import (
     assert_recall_monotone,
     assert_topk_id_sets_match,
@@ -104,7 +104,7 @@ def _build_exact(data, backend: str = "triton", clause_is_reverse=None, **overri
 class TestShape:
     def test_with_attrs(self, data, backend):
         m = _build(with_attrs=True, data=data, backend=backend)
-        ids, scores = m(data["query"], data["q_attrs"])
+        ids, scores = m(data["query"], m.prepare_queries(data["q_attrs"]))
         assert ids.shape == (B, K)
         assert scores.shape == (B, K)
         assert ids.dtype == torch.long
@@ -125,7 +125,7 @@ class TestShape:
 
     def test_exact_with_attrs(self, data, backend):
         m = _build_exact(data, backend=backend)
-        ids, scores = m(data["query"], data["q_attrs"])
+        ids, scores = m(data["query"], m.prepare_queries(data["q_attrs"]))
         assert ids.shape == (B, K)
         assert scores.shape == (B, K)
         assert ids.dtype == torch.long
@@ -208,11 +208,13 @@ class TestParamValidation:
         with pytest.raises(ValueError, match="n_probe"):
             m2.register_index(data["embs"])
 
-    def test_query_clause_attrs_without_filter_rejected(self, data):
+    def test_prepared_filter_without_filter_rejected(self, data):
         m = _build_no_bloom(data)
         qa = torch.zeros(B, 1, dtype=torch.long, device="cuda")
-        with pytest.raises(ValueError, match="query_clause_attrs requires"):
-            m(data["query"], query_clause_attrs=qa)
+        with pytest.raises(ValueError, match="prepare_queries needs"):
+            m.prepare_queries(qa)
+        with pytest.raises(ValueError, match="a prepared filter requires"):
+            m(data["query"], PreparedFilter(query_attrs=qa))
 
     def test_item_clause_attrs_without_filter_rejected(self, data):
         m = SilverTorch(k=K, n_lists=N_LISTS, n_probe=N_PROBE, n_iter=3)
@@ -284,7 +286,7 @@ class TestEquivalence:
         nb = _build_no_bloom(data, backend=backend)
         qa = torch.full((B, C), -1, dtype=torch.long, device="cuda")
 
-        ex_ids, ex_scores = ex(data["query"], qa)
+        ex_ids, ex_scores = ex(data["query"], ex.prepare_queries(qa))
         nb_ids, nb_scores = nb(data["query"])
 
         for b in range(B):
@@ -303,8 +305,8 @@ class TestCrossBackend:
     def test_with_bloom(self, data):
         tri = _build(with_attrs=True, data=data, backend="triton")
         trc = _build(with_attrs=True, data=data, backend="torch")
-        ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
-        ids_trc, sc_trc = trc(data["query"], data["q_attrs"])
+        ids_tri, sc_tri = tri(data["query"], tri.prepare_queries(data["q_attrs"]))
+        ids_trc, sc_trc = trc(data["query"], trc.prepare_queries(data["q_attrs"]))
         # Same int32 dot and fp32 dequant on both backends (kernels.md → Numerics).
         assert torch.equal(sc_trc, sc_tri)
         assert_ids_equal_up_to_ties(ids_trc, ids_tri, sc_tri)
@@ -321,8 +323,8 @@ class TestCrossBackend:
     def test_with_exact(self, data):
         tri = _build_exact(data, backend="triton")
         trc = _build_exact(data, backend="torch")
-        ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
-        ids_trc, sc_trc = trc(data["query"], data["q_attrs"])
+        ids_tri, sc_tri = tri(data["query"], tri.prepare_queries(data["q_attrs"]))
+        ids_trc, sc_trc = trc(data["query"], trc.prepare_queries(data["q_attrs"]))
         # Same int32 dot and fp32 dequant on both backends (kernels.md → Numerics).
         assert torch.equal(sc_trc, sc_tri)
         assert_ids_equal_up_to_ties(ids_trc, ids_tri, sc_tri)
@@ -331,8 +333,8 @@ class TestCrossBackend:
         rev = torch.tensor([True, False], dtype=torch.bool, device="cuda")
         tri = _build_exact(data, backend="triton", clause_is_reverse=rev)
         trc = _build_exact(data, backend="torch", clause_is_reverse=rev)
-        ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
-        ids_trc, sc_trc = trc(data["query"], data["q_attrs"])
+        ids_tri, sc_tri = tri(data["query"], tri.prepare_queries(data["q_attrs"]))
+        ids_trc, sc_trc = trc(data["query"], trc.prepare_queries(data["q_attrs"]))
         # Same int32 dot and fp32 dequant on both backends (kernels.md → Numerics).
         assert torch.equal(sc_trc, sc_tri)
         assert_ids_equal_up_to_ties(ids_trc, ids_tri, sc_tri)
@@ -349,8 +351,8 @@ class TestCrossBackend:
     def test_official_with_exact(self, data):
         tri = _build_exact(data, backend="triton")
         off = _build_exact(data, backend="official")
-        ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
-        ids_off, sc_off = off(data["query"], data["q_attrs"])
+        ids_tri, sc_tri = tri(data["query"], tri.prepare_queries(data["q_attrs"]))
+        ids_off, sc_off = off(data["query"], off.prepare_queries(data["q_attrs"]))
         for b in range(B):
             # official's default fp16 path: T2 bounds it at 2^-10 relative.
             assert_topk_id_sets_match(ids_off, sc_off, ids_tri, sc_tri, b, atol=1e-3, rtol=1e-3)
@@ -359,8 +361,8 @@ class TestCrossBackend:
         rev = torch.tensor([True, False], dtype=torch.bool, device="cuda")
         tri = _build_exact(data, backend="triton", clause_is_reverse=rev)
         off = _build_exact(data, backend="official", clause_is_reverse=rev)
-        ids_tri, sc_tri = tri(data["query"], data["q_attrs"])
-        ids_off, sc_off = off(data["query"], data["q_attrs"])
+        ids_tri, sc_tri = tri(data["query"], tri.prepare_queries(data["q_attrs"]))
+        ids_off, sc_off = off(data["query"], off.prepare_queries(data["q_attrs"]))
         for b in range(B):
             # official's default fp16 path: T2 bounds it at 2^-10 relative.
             assert_topk_id_sets_match(ids_off, sc_off, ids_tri, sc_tri, b, atol=1e-3, rtol=1e-3)
@@ -401,7 +403,7 @@ class TestRecallVsExact:
         (predicate always passes; only quantization noise vs FullScanKNN)."""
         m = _build_exact(data, n_probe=N_LISTS, backend=backend)
         qa = torch.full((B, C), -1, dtype=torch.long, device="cuda")
-        ids, _ = m(data["query"], qa)
+        ids, _ = m(data["query"], m.prepare_queries(qa))
 
         exact = FullScanKNN(k=K)
         exact.register_index(data["embs"])
@@ -447,7 +449,7 @@ class TestCandidates:
             _build_exact(data, k=2, backend=backend),
         ):
             with pytest.raises(ValueError, match="not both"):
-                m(data["query"], data["q_attrs"], candidate_ids=cand)
+                m(data["query"], m.prepare_queries(data["q_attrs"]), candidate_ids=cand)
 
     def test_candidate_ids_pad_tail_never_scored(self, data, backend):
         """``-1``-tailed candidate ids (what every compact producer emits) are padding:
@@ -532,8 +534,8 @@ class TestStateDict:
         for (name, a), (_, b) in zip(src.named_buffers(), twin.named_buffers(), strict=True):
             assert torch.equal(a, b), name
         qa = data["q_attrs"] if filter_mode != "none" else None
-        ids_s, sc_s = src(data["query"], qa)
-        ids_t, sc_t = twin(data["query"], qa)
+        ids_s, sc_s = src(data["query"], src.prepare_queries(qa))
+        ids_t, sc_t = twin(data["query"], twin.prepare_queries(qa))
         assert torch.equal(sc_s, sc_t)
         for b in range(B):
             assert_topk_id_sets_match(ids_t, sc_t, ids_s, sc_s, b, atol=0, rtol=0)
@@ -573,8 +575,8 @@ class TestBuilder:
         assert twin._global_scale_f == again._global_scale_f
         assert twin._probe_width == again._probe_width
         qa = data["q_attrs"] if filter_mode != "none" else None
-        ids_a, sc_a = again(data["query"], qa)
-        ids_t, sc_t = twin(data["query"], qa)
+        ids_a, sc_a = again(data["query"], again.prepare_queries(qa))
+        ids_t, sc_t = twin(data["query"], twin.prepare_queries(qa))
         assert torch.equal(sc_a, sc_t)
         assert_ids_equal_up_to_ties(ids_t, ids_a, sc_a)
 
@@ -590,7 +592,7 @@ class TestBuilder:
         )
         assert isinstance(m, SilverTorch) and m.backend == "torch" and m.filter_mode == "exact"
         assert torch.equal(m.clause_is_reverse, rev)
-        ids, _ = m(data["query"], data["q_attrs"])
+        ids, _ = m(data["query"], m.prepare_queries(data["q_attrs"]))
         assert ids.shape == (B, K)
 
     def test_build_needs_exactly_one_source(self, data):
@@ -681,7 +683,7 @@ class TestFewSurvivorsSentinel:
     @pytest.mark.parametrize("filter_mode", ["exact", "bloom"])
     def test_triton_writes_minus_one_at_inf_slots(self, few, filter_mode):
         m = self._build_few(few, filter_mode, "triton")
-        ids, scores = m(few["query"], few["q_attrs"])
+        ids, scores = m(few["query"], m.prepare_queries(few["q_attrs"]))
 
         dead = ~torch.isfinite(scores)
         assert dead.any(), "fixture no longer produces rows with fewer than K survivors"
@@ -699,8 +701,8 @@ class TestFewSurvivorsSentinel:
         """The two backends' ids now compare directly — no finiteness normalisation first."""
         tri = self._build_few(few, filter_mode, "triton")
         trc = self._build_few(few, filter_mode, "torch")
-        ids_tri, sc_tri = tri(few["query"], few["q_attrs"])
-        ids_trc, sc_trc = trc(few["query"], few["q_attrs"])
+        ids_tri, sc_tri = tri(few["query"], tri.prepare_queries(few["q_attrs"]))
+        ids_trc, sc_trc = trc(few["query"], trc.prepare_queries(few["q_attrs"]))
 
         assert torch.equal(sc_tri, sc_trc), (
             f"{filter_mode}: scores differ between triton and torch on the shared int8 index"
