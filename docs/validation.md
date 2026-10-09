@@ -367,7 +367,12 @@ per-step record: [artifact](artifacts/campaign-v2/v-pubmed/README.md).
 - **`filter` leg: running at `campaign-v2.1`** (exploration policy, user 2026-10-09: legs run at the current tag; V2 perf and
   SilverTorch Triton perf are on the redo ledger). 90 cells in 48 chunks of the real suite (`chunks.py` asserts that every
   record key and interleave unit equals the full suite's), shortest first, each yielding to st-dloop's GPU flags. PubMed
-  `n_lists` 4096, `n_probe` {24, 1024} (IVF-TUNE). Done so far: V1+V2 `c0_mesh` and `c3_journal_reverse` at seed 0 (4 / 4 ok).
+  `n_lists` 4096, `n_probe` {24, 1024} (IVF-TUNE); chunk order re-sorted by measured time (V1+V2 at low p, V3,
+  postfilter, SilverTorch clause, SilverTorch bloom, V1+V2 `c3_journal_reverse` last). First SilverTorch cells (clause
+  `c0_mesh`, seed 0): `n_probe` 24 recall@100 0.554, bs 16 graph 0.82 ms, 93 s a cell; **`n_probe` 1024 recall@100 0.941,
+  bs 16 graph 28.4 ms (exact V1 36.0 ms on the same sweep), 1,998 s a cell**. Of those 1,998 s, the timed windows are
+  407 s (8 variants × 3 windows × 1,000 calls; `N` sits at its floor), the quality pass ≈ 17 s (chunks of 16 at k 1000
+  over 8,428 rows), the build 85 s; **≈ 1,490 s are not attributable from the log** (no stage timestamps), not investigated.
 - **LiNR V2 is about 45 % slower than D1 at pass rate ≈ 1 (surprise gate, 2026-10-09; not a correctness issue).** V1 and V2
   are timed interleaved in one group, seed 0, k 100, every window at 1410 MHz; V1 is the in-run control.
 

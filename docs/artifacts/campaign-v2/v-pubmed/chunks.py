@@ -25,12 +25,15 @@ CHUNKS = [dict(algos=a, backends=b, filter_kinds=[k], sweeps=[w], seeds=[s])
 
 
 def est_min(c):
-    """Rough minutes per chunk (st-dloop meets short gaps first): V1+V2 measured 15 at c0_mesh and >= 60 at
-    c3_journal_reverse (V2's per-row gather at p ~ 1, D1's slowest cell); the rest unmeasured at v2.1."""
+    """Minutes per chunk, measured at v2.1 where known (st-dloop meets short gaps first): V1+V2 15 at low p, 62 at
+    c3_journal_reverse (V2's per-row gather at p ~ 1); SilverTorch clause 37 (the n_probe 1024 cell: 1,998 s), bloom
+    with official at 1024 ~70 (est.); V3 and postfilter unmeasured (est. 18 / 20)."""
     algo, kind, sweep = c["algos"][0], c["filter_kinds"][0], c["sweeps"][0]
     if algo == "linr_v1_filter_mask":
         return 75 if sweep == "c3_journal_reverse" else 15
-    return {"silvertorch": 25 if kind == "bloom" else 12, "linr_v3": 18, "postfilter": 20}[algo]
+    if algo == "silvertorch":
+        return 70 if kind == "bloom" else 37
+    return {"linr_v3": 18, "postfilter": 20}[algo]
 
 
 CHUNKS.sort(key=est_min)  # stable: seed order kept within an estimate
