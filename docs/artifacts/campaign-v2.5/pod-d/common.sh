@@ -9,8 +9,8 @@ set -u
 if flock -n /scratch/gpu$GPU.lock true; then echo "$(date -Is) not launched under /scratch/gpu$GPU.lock, refusing"; exit 3; fi
 TAG=${TAG:-campaign-v2.5}
 TV=$(echo "${TAG#campaign-}" | tr -d .)
-REPO=/workspace/retrieve
-PY=/venvs/retrieve/bin/python
+REPO=${REPO:-/workspace/retrieve}
+PY=${PY:-/venvs/retrieve/bin/python}
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 LOG=/scratch/$TV/$LEG
 CH=$REPO/.chains
