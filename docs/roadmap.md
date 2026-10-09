@@ -127,10 +127,12 @@ exhibit it feeds.
 
 **Library under a running leg.** The shared venv `/venvs/retrieve` is an
 editable install: every `bench` child imports `retrieve` from
-`/workspace/retrieve`, while `code_version` is read from the checkout that
-launched `bench`. Until H-PROVENANCE lands, a pod's `/workspace/retrieve`
-library tree stays fixed while any leg runs on that pod; it moves to a new
-tag only between legs (a docs/config-only fast-forward is fine).
+`/workspace/retrieve`. Since H-PROVENANCE, `code_version` is the imported
+package's tree, read per child, so a record is stamped with the code that
+ran. A leg launched with an older harness still reads the launching
+checkout: for those, `/workspace/retrieve`'s library stays fixed until the
+leg ends. A new tag still moves a pod's checkout only between legs, so one
+leg runs one library.
 
 **Redo ledger** (cells whose code or parameters changed after they ran):
 
@@ -232,7 +234,8 @@ co-design.
 - [ ] **H-KSUM: the full kernel sum in `profile_once`** (EXHIBITS run 3): T3's
   device column sums the top 8 kernels only, a lower bound that favours
   official (15-31 launches vs Triton's 17-18). Record every kernel's time
-  (and the count), harness only with CPU tests; then one profile-only `h2h`
+  (and the count), harness only with CPU tests (done: `kernels_us` /
+  `kernels_calls`); then one profile-only `h2h`
   pass on goodreads + arXiv at v2.1 (`--profile`, no new timing claims).
   Settles C7's "Meta's scorer faster in isolation" (k 1000 vs k 100 split).
   Pod 1 after V-PROF3. **≈ 0.3 GPU-h.**
@@ -247,15 +250,9 @@ co-design.
 - [ ] **H-REPORT: two report fixes from EXHIBITS.** T3's ids column reads
   "equal up to boundary ties" when the scores are equal and only the tied
   id at the k-th cut differs; F3 one panel per sweep × bs (the d1 deep tree
-  draws ~70 legend entries in one panel). Harness, CPU tests. Pod c's coder
-  after H-PROVENANCE.
-- [ ] **H-PROVENANCE: stamp the library that is imported.** `bench` computes
-  `code_version` from the checkout it runs in, but the editable venv imports
-  `retrieve` from `/workspace/retrieve`: a fast-forward there mid-leg makes
-  later children run new code under the old stamp, silently (found on pod c,
-  2026-10-09). Fix: the tree hash of `Path(retrieve.__file__)`'s subtree (or
-  refuse when it differs from the launching checkout's), per child. Harness
-  only, CPU test. **0 GPU-h.**
+  draws ~70 legend entries in one panel); T3's kernel-only column from
+  `kernels_us` (every kernel, H-KSUM) instead of the top-8 sum in
+  `report._kernels`. Harness, CPU tests. Pod c's coder after H-PROVENANCE.
 - [ ] **ST-DLOOP: SilverTorch Triton probe scorers at wide embeddings**
   (user, 2026-10-09: match Meta's CUDA kernels). D3 PubMed at v2.1 tripped
   the surprise gate: Triton 2.80-2.98 ms vs official 1.99 ms at d768 (bs 16),
