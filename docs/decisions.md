@@ -277,8 +277,13 @@ now on; the [roadmap](roadmap.md) holds the steps.
   sampled under load after every timing window and an `unstable` flag
   (window spread over 5 %). A batch-size-1 comparison narrower than about
   21 % is noise.
-- **Timed official forwards run with `OfficialConfig(cache_plans=False)`**,
-  so Meta's plan cache does not flatter repeated identical queries.
+- **Query preparation is outside the timed forward, for every arm** (user,
+  2026-10-10): each arm's query-side filter encoding (official plans, bloom
+  signatures, the router's) runs in its `prepare_queries` before timing and
+  is recorded as `query_prep_ms`
+  ([evaluation](system/evaluation.md#query-preparation)). It replaces the
+  earlier rule that timed official forwards paid the expression parse
+  (`cache_plans=False`).
 - **Results storage** (user): no results in git. A run appends
   JSONL to a local, gitignored results tree (one `write` + `fsync` per cell,
   and resume reads it back without the network); a finished leg is

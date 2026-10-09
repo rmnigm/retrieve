@@ -117,7 +117,9 @@ bf = BloomFilter(m_bits=1024, k_hash=5, backend="triton").to("cuda")
 bf.register_index(item_attrs)
 
 # Mask path — combine exact + approximate, feed PostfilterKNN / OneBitKNN.
-mask = combine_masks(ef.evaluate_mask(qa), bf.evaluate_mask(qa))
+mask = combine_masks(
+    ef.evaluate_mask(ef.prepare_queries(qa)), bf.evaluate_mask(bf.prepare_queries(qa))
+)
 ids, scores = postfilter_knn(query, mask=mask)
 
 # Candidate-id path — sparse cascade (most-selective filter first), feed PrefilterKNN.

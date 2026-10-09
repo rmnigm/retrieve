@@ -106,8 +106,8 @@ included — so there is no silent torch fallback. See
   The paper's variants V1–V3 are shipped as compositions of these in
   [`modules/linr.py`](../../retrieve/src/retrieve/modules/linr.py) —
   `LiNRV1`–`LiNRV3`, each holding its filter as the `filter` submodule —
-  with the same `forward(query, query_clause_attrs=None)` as `SilverTorch`
-  (see [LiNR variants](#linr-variants)).
+  with the same `prepare_queries(query_clause_attrs)` → `forward(query,
+  prepared=None)` pair as `SilverTorch` (see [LiNR variants](#linr-variants)).
 - **SilverTorch** ([`modules/silvertorch.py`](../../retrieve/src/retrieve/modules/silvertorch.py)) —
   co-designed IVF + INT8 ANN with an inline attribute filter selected by
   a `filter_mode ∈ {"none", "bloom", "exact"}` flag. `"bloom"` fuses Bloom
@@ -185,7 +185,10 @@ overridden only when a fused kernel beats the default:
   `[B, N, C, A_max]` intermediate), pure-torch broadcast on `"torch"`.
   `BloomFilter` routes to the `bloom_match` Triton kernel on
   `"triton"`, pure-torch subset test on `"torch"`.
-- `evaluate_indices(query_clause_attrs) → (positive_indices[B, N] int64,
+- `prepare_queries(query_clause_attrs)` → the filter's query encoding (the
+  bloom query signatures `[B, W]`; the int64 attrs for the exact filter),
+  done once per batch outside any timed call; every eval path below takes it.
+- `evaluate_indices(q) → (positive_indices[B, N] int64,
   counts[B] int64)` — sparse path, used by the callers that feed
   `PrefilterKNN` / the bit-KNNs' candidates path. The returned index
   buffer is **full-width** `[B, N]`: only the first `counts[b]` entries
@@ -228,8 +231,8 @@ attached at construction as `filter=` (a submodule, so `buffers()` and a
 state dict cover index and filter; its buffers carry the `filter.` prefix).
 All three share `register_index(item_embs, item_clause_attrs=None,
 clause_is_reverse=None)` — which registers the filter too when attributes
-are given — and `forward(query, query_clause_attrs=None) -> (ids [B, k],
-scores [B, k])`; `k` forwards to the primitive that owns the final top-k and
+are given — `prepare_queries(query_clause_attrs)` (the filter's encoding)
+and `forward(query, prepared=None) -> (ids [B, k], scores [B, k])`; `k` forwards to the primitive that owns the final top-k and
 is settable after registration; `capturable = True` is a class attribute
 (every LiNR backend captures):
 
@@ -345,14 +348,13 @@ The implementation, `backend ∈ {"triton", "torch", "official"}`:
   (`meta-recsys/silvertorch`, pinned; the `official` extra) as the
   **reference**: our k-means, quantization and probe selection, their
   `fused_kmean_ann` scorer over a cluster-sorted int8 table, their bloom
-  index and expression parser for `filter_mode="bloom"`, our
-  `clause_mask` packed into their scorer's bit mask for
-  `filter_mode="exact"`. Eager-only: `torch.compile` of an official module
+  index and expression parser for `filter_mode="bloom"` (the parse runs in
+  `prepare_queries`), our `clause_mask_packed` as their scorer's bit mask
+  for `filter_mode="exact"`. Eager-only: `torch.compile` of an official module
   raises. Constructor extras via `official=OfficialConfig(...)`
   (`score_path` `"fp16"` (default, the shipped int8 serving path) or
   `"int32"` (bit-identical to Triton), `bloom_path` `"partial"` /
-  `"full"`, `b_multiplier`, `n_stored_hashes`, `cache_plans` — `False` for any
-  timing run, so the per-forward expression parse is paid, …). Details in
+  `"full"`, `b_multiplier`, `n_stored_hashes`, …). Details in
   [kernels.md](kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend).
 
 Constructed directly (`SilverTorch(k, n_lists, n_probe, filter_mode="none",

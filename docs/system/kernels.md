@@ -1499,22 +1499,24 @@ casts the int32 dot to fp16 *before* dividing by it, which overflows for
 any realistic `D`.
 
 **Filter modes.** `none` → `fused_kmean_ann`. `exact` → our Triton
-`clause_mask` over the cluster-sorted `item_clause_attrs`, packed by
-`pack_mask` into the scorer's `filtering_bit_mask` (int64 `[B,
-ceil(N/64)]`, doc `d` at bit `63 − d % 64` of word `d // 64` —
-`MASK_BIT_ORDER`, see below) and passed to `fused_kmean_ann`: phase 2
-ours and full-`N`, labelled so in every table. `bloom` → **Meta's
+`clause_mask_packed` over the cluster-sorted `item_clause_attrs`, written
+straight as the scorer's `filtering_bit_mask` (int64 `[B, ceil(N/64)]`,
+doc `d` at bit `63 − d % 64` of word `d // 64` — `MASK_BIT_ORDER`, see
+below; no `[B, N]` bool) and passed to `fused_kmean_ann`: phase 2 ours
+(filling a step Meta does not provide) and full-`N`, labelled so in
+every table. `bloom` → **Meta's
 bloom**, not ours: at `register_index`, `attrs_to_features` turns the
 sorted `[N, C, A_max]` attrs into the jagged `(feature_ids int32 [C],
 feature_offsets int64 [N·C+1], feature_values int64)` layout — the
 clause index is the feature id, the same `(clause, value)` keying as our
 salt — and `bloom_index_build(b_multiplier, k)` builds `bloom_index [W]`
-+ `bundle_b_offsets`; per forward, `queries_to_expressions` renders each
-`[C]` query row as `"0:v0 AND 1:v1"` (`NOT c:v` for reverse clauses,
-`""` = match all), `parse_plans` runs the CPU parser (plans kept on
-CPU; memoised per distinct expression tuple by default —
-`OfficialConfig.cache_plans=True` — or parsed on every forward with
-`cache_plans=False`), and then either
++ `bundle_b_offsets`; in `prepare_queries` (once per batch, outside
+`forward`), `queries_to_expressions` renders each `[C]` query row as
+`"0:v0 AND 1:v1"` (`NOT c:v` for reverse clauses, `""` = match all) and
+`parse_plans` runs Meta's CPU parser. The plans stay on the CPU: Meta's
+search decodes them on the host per call
+(`bloom_index_search_cuda.cu:1045`), so device plans would only add a D2H.
+Per forward, either
 (`bloom_path="partial"`, default — the paper's co-design)
 `bloom_index_search_batch_return_partial_response` over the probed
 clusters feeds `fused_kmean_ann_with_partial_masks`, or
@@ -1555,14 +1557,11 @@ forward raises `RuntimeError` when traced. Measured on the A100
 `repeat_interleave`, fills), `fused_kmean_ann_with_partial_masks` 19 / 4,
 the partial-response bloom search 13 / 2 with two H2D plan uploads, so a
 bloom forward is ≈ 32 launches and ≥ 5 syncs against Triton's one launch.
-On top of that the CPU expression parse costs ≈ 59 µs per call at B=16
-(`c:v AND c:v`), 10–20 % of an eager bloom forward, which the
-`parse_plans` LRU cache hides after the first call for a repeated
-batch. **A timing run must therefore set `OfficialConfig(cache_plans=
-False)`** — every forward pays the parse, as serving fresh queries does
-— **or report both settings, labelled**; results are identical either
-way (T6 checks the uncached path bit for bit, T7 records its sync
-count). The official arm loses at small `P` / `B=1` for host reasons, so
+The CPU expression parse (≈ 59 µs per call at B=16) is query
+preparation: it runs in `prepare_queries`, outside the timed forward,
+and the harness records it as `query_prep_ms`
+([evaluation](evaluation.md#query-preparation)). T7 records the forward's
+syncs with the filter already prepared. The official arm loses at small `P` / `B=1` for host reasons, so
 the kernel-only tier of the head-to-head is what compares kernels.
 
 **Measured.** The head-to-head against Triton (end to end, kernel-only,
