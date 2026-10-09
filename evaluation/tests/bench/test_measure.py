@@ -10,8 +10,10 @@ and the cudagraph skip / launch assertions are exercised on the A100 in roadmap 
 
 from __future__ import annotations
 
+import hashlib
 import importlib.metadata
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -19,6 +21,7 @@ import pytest
 import torch
 from torch import nn
 
+import retrieve
 from bench import measure as bench
 from eval_datasets.layout import atomic_write
 from retrieve import SilverTorch
@@ -111,9 +114,10 @@ def test_provenance_fields():
     assert p["torch"] == torch.__version__
     assert isinstance(p["dirty"], bool) and isinstance(p["repo_dirty"], bool)
     assert p["started"].endswith("+00:00")
+    assert p["lib_dir"] == str(Path(retrieve.__file__).resolve().parent)
     try:
         tree = subprocess.check_output(
-            ["git", "rev-parse", f"HEAD:{bench.LIB_SUBTREE}"], cwd=bench.ROOT, text=True
+            ["git", "rev-parse", "HEAD:./"], cwd=bench.LIB, text=True
         ).strip()
     except (OSError, subprocess.SubprocessError):
         pytest.skip("git unavailable")
@@ -154,19 +158,19 @@ def test_official_commit_reads_pep610(monkeypatch, dist, want):
 
 
 def _fake_git(subtree_status: str, repo_status: str):
-    """A ``bench._git`` stand-in: ``status`` answers depend on the pathspec, the rest is real."""
+    """A ``bench._git`` stand-in: ``status`` answers depend on where it runs, the rest is real."""
     real = bench._git
 
-    def fake(*args):
+    def fake(*args, cwd=bench.ROOT):
         if args[0] == "status":
-            return subtree_status if bench.LIB_SUBTREE in args else repo_status
-        return real(*args)
+            return subtree_status if cwd == bench.LIB else repo_status
+        return real(*args, cwd=cwd)
 
     return fake
 
 
 def test_dirty_is_scoped_to_the_library_subtree(monkeypatch):
-    tree = bench._git("rev-parse", f"HEAD:{bench.LIB_SUBTREE}")
+    tree = bench._git("rev-parse", "HEAD:./", cwd=bench.LIB)
     if not tree:
         pytest.skip("git unavailable")
     # Docs / harness edits: repo dirty, library clean → the tree hash still names the code.
@@ -181,10 +185,52 @@ def test_dirty_is_scoped_to_the_library_subtree(monkeypatch):
     assert p["code_version"] == bench.files_hash() != tree
     assert p["code_version"].startswith("files:")
     # Outside a git checkout: unknown, and the content hash.
-    monkeypatch.setattr(bench, "_git", lambda *a: None)
+    monkeypatch.setattr(bench, "_git", lambda *a, cwd=None: None)
     p = bench.provenance()
     assert p["dirty"] is None and p["repo_dirty"] is None and p["commit"] is None
     assert p["code_version"] == bench.files_hash()
+
+
+def _git_in(repo, *args):
+    return subprocess.check_output(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=repo, text=True
+    ).strip()
+
+
+def test_code_version_names_the_imported_library_not_the_launching_checkout(tmp_path, monkeypatch):
+    """H-PROVENANCE: an editable install whose package sits in another checkout (the pods'
+    shared venv) is stamped from that checkout, and moves when it moves."""
+    other = tmp_path / "other"
+    lib = other / "retrieve" / "src" / "retrieve"
+    lib.mkdir(parents=True)
+    (lib / "__init__.py").write_text("x = 1\n")
+    _git_in(other, "init", "-q")
+    _git_in(other, "add", ".")
+    _git_in(other, "commit", "-q", "-m", "a")
+    monkeypatch.setattr(bench, "LIB", lib)
+    first = bench.code_version()
+    assert first == _git_in(other, "rev-parse", "HEAD:retrieve/src/retrieve")
+    assert first != bench._git(
+        "rev-parse", "HEAD:retrieve/src/retrieve"
+    )  # the launching checkout's
+    assert bench.provenance()["dirty"] is False
+    # A fast-forward of the imported tree mid-leg: the next child's stamp follows it.
+    (lib / "__init__.py").write_text("x = 2\n")
+    _git_in(other, "commit", "-q", "-am", "b")
+    second = bench.code_version()
+    assert second == _git_in(other, "rev-parse", "HEAD:retrieve/src/retrieve") != first
+    # An uncommitted edit there: dirty, and the content hash of what is on disk there.
+    (lib / "__init__.py").write_text("x = 3\n")
+    assert bench.subtree_dirty() is True
+    assert bench.code_version() == bench.files_hash() != second
+    want = hashlib.sha256(b"__init__.py" + b"x = 3\n").hexdigest()[:40]
+    assert bench.files_hash() == "files:" + want
+    # Not in a git checkout at all (an installed wheel): unknown, and the content hash.
+    plain = tmp_path / "site" / "retrieve"
+    plain.mkdir(parents=True)
+    (plain / "__init__.py").write_text("x = 3\n")
+    monkeypatch.setattr(bench, "LIB", plain)
+    assert bench.subtree_dirty() is None and bench.code_version() == "files:" + want
 
 
 def test_clocks_record_shape():
