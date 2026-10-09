@@ -63,7 +63,11 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    does not record it yet.
 4. **Quality, eager, once per cell at `k_max = max(ks)`.** Stream all kept
    users in chunks of 16 (`QUALITY_CHUNK`, the OOM bound of `[B, P, D]` on
-   loose filters), accumulate `recall/ndcg/precision/mrr` at every `k` in
+   loose filters; the per-row queries, attrs, targets and oracle top-k /
+   `targets_in_filter` go to the device once per cell and each chunk gathers
+   its rows there, torch's CPU threads held at `QUALITY_CPU_THREADS` = 1 for
+   the loop: H-QLOOP, the host gathers and pageable copies were ~80 % of the
+   pass), accumulate `recall/ndcg/precision/mrr` at every `k` in
    `ks` from the one top-`k_max` list (exact for every library algo: same
    candidate set, same scores, `torch.topk` sorted). `postfilter` is the
    exception (`run.PER_K_QUALITY`): its candidate pool is `alpha * k`, so
@@ -258,7 +262,7 @@ which exist for `buffers()`, `.k`, `torch.compile` and because their
 | [`config.py`](../../evaluation/bench/config.py) | `Dataset`, `Job`, `load_dataset`, `load_matrix` — the config matrix below; `interleave_units`, `shared_key` (the [interleave groups](#interleaved-groups)) |
 | [`inputs.py`](../../evaluation/bench/inputs.py) | `load_inputs` (dispatch to `training.encode.encode_split` or the `eval_datasets.layout` text readers; `users_limit` once, as a prefix), `sweep_qa`, `build_filters` (keyed by filter backend), `exact_filter`, `query_pool` |
 | [`oracle.py`](../../evaluation/bench/oracle.py) | the exact filtered oracle as blob v4, `attrs_digest`, `pass_counts`, `pass_rate`, `bloom_fp_rate` |
-| [`run.py`](../../evaluation/bench/run.py) | `run(jobs, out_dir=...)` — the cell loop; `MODES`, `QUALITY_CHUNK = 16`, `EXACT_ALGOS`, `SEED_FREE_QUALITY`, `PER_K_QUALITY`, `PERF_STAT_KEYS`, `IDS_PROBE_BATCHES`, `CLOCK_DRIFT` |
+| [`run.py`](../../evaluation/bench/run.py) | `run(jobs, out_dir=...)` — the cell loop; `MODES`, `QUALITY_CHUNK = 16`, `QUALITY_CPU_THREADS = 1`, `EXACT_ALGOS`, `SEED_FREE_QUALITY`, `PER_K_QUALITY`, `PERF_STAT_KEYS`, `IDS_PROBE_BATCHES`, `CLOCK_DRIFT` |
 | [`cli.py`](../../evaluation/bench/cli.py) | `bench run` / `campaign` / `check` / `upload` / `fetch` / `report` / `env` |
 | [`report.py`](../../evaluation/bench/report.py) | `bench report`: `results.parquet`, the paper tables as LaTeX, the figures, the methodology paragraph and `report.md`; the `ARTIFACTS` dispatch table and the citability verdict. See [Report](#report-reportpy) |
 | [`upload.py`](../../evaluation/bench/upload.py) | `bench upload`: publish a results tree (records, samples, a freshly aggregated `results.parquet`) to the HF results repo with a `MANIFEST.json` (provenance + a sha256 per file) and a generated README; `bench fetch`: one subtree back, checked against its manifest. See [Results storage](#results-storage) |
