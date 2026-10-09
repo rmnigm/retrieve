@@ -421,8 +421,23 @@ SENTINEL = "spin_kernel"  # torch.cuda._sleep's kernel; nothing in a forward lau
 RANGE_PREFIX = "## "  # profiler range annotations booked as device events (compiled graph calls)
 
 
+# H-SCOPE: like-for-like kernel groups for T3; a kernel's group is the first whose substrings its
+# name contains (evaluation.md § Measurement protocol). Our scorer fuses the bloom test; Meta's
+# scoring is process_cluster + payload kernels, its bloom test bloom_search kernels: all "scorer".
+KERNEL_SCOPES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("scorer", ("_codesigned_probe_score", "::fused_kmean_ann::", "::bloom_search::")),
+    ("topk", ("::mbtopk::", "::sbtopk::", "radixSortKVInPlace", "bitonicSortKVInPlace")),
+    ("epilogue", ("gpu_index_kernel", "_scatter_gather_elementwise_kernel")),
+)
+
+
 def _range(event: Any) -> bool:
     return event.key.startswith(RANGE_PREFIX)
+
+
+def kernel_scope(name: str) -> str:
+    """The ``KERNEL_SCOPES`` group of one kernel name, else ``"other"``."""
+    return next((s for s, subs in KERNEL_SCOPES if any(x in name for x in subs)), "other")
 
 
 def kernel_summary(events: Sequence[Any], top: int = 8) -> dict[str, Any]:
@@ -431,12 +446,21 @@ def kernel_summary(events: Sequence[Any], top: int = 8) -> dict[str, Any]:
     time (``{"kernel", "us", "calls"}``), and ``kernels_us`` / ``kernels_calls``, the device time
     and launches summed over every kernel (H-KSUM: the top-8 sum is only a lower bound). The sums
     skip ``## …`` events: the profiler books a compiled graph's ``## Call CompiledFxGraph …`` range
-    as a device event spanning that graph's kernels, which would count them twice."""
+    as a device event spanning that graph's kernels, which would count them twice.
+    ``kernel_scopes`` splits the same sums by ``kernel_scope`` (H-SCOPE): ``{scope: {"us",
+    "calls"}}`` for scorer, topk, epilogue and other, adding up to ``kernels_us`` /
+    ``kernels_calls``."""
     kernels = sorted(
         (e for e in events if SENTINEL not in e.key),
         key=lambda e: e.self_device_time_total,
         reverse=True,
     )
+    scopes = {s: {"us": 0.0, "calls": 0} for s in (*(s for s, _ in KERNEL_SCOPES), "other")}
+    for e in kernels:
+        if not _range(e):
+            sc = scopes[kernel_scope(e.key)]
+            sc["us"] += float(e.self_device_time_total)
+            sc["calls"] += int(e.count)
     return {
         "kernels": [
             {"kernel": e.key, "us": float(e.self_device_time_total), "calls": int(e.count)}
@@ -444,6 +468,7 @@ def kernel_summary(events: Sequence[Any], top: int = 8) -> dict[str, Any]:
         ],
         "kernels_us": float(sum(e.self_device_time_total for e in kernels if not _range(e))),
         "kernels_calls": int(sum(e.count for e in kernels if not _range(e))),
+        "kernel_scopes": scopes,
     }
 
 
@@ -487,6 +512,7 @@ __all__ = [
     "files_hash",
     "graph_callable",
     "index_bytes",
+    "kernel_scope",
     "kernel_summary",
     "latency",
     "latency_group",
