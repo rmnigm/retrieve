@@ -20,7 +20,9 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import importlib.metadata
+import importlib.util
 import json
+import os
 import platform
 import socket
 import subprocess
@@ -129,10 +131,22 @@ def inductor_cache_dir(code_version: str, given: str | None) -> str:
     return str(base / code_version.replace(":", "-"))
 
 
+def smi_device() -> str:
+    """The process's device for ``nvidia-smi -i``, which ignores ``CUDA_VISIBLE_DEVICES``: its
+    first entry (an index or a UUID), ``"0"`` when unset or empty."""
+    return os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")[0].strip() or "0"
+
+
 def _nvidia_smi(query: str) -> list[str] | None:
     try:
         out = subprocess.check_output(
-            ["nvidia-smi", f"--query-gpu={query}", "--format=csv,noheader,nounits", "-i", "0"],
+            [
+                "nvidia-smi",
+                f"--query-gpu={query}",
+                "--format=csv,noheader,nounits",
+                "-i",
+                smi_device(),
+            ],
             stderr=subprocess.DEVNULL,
             text=True,
             timeout=10,
@@ -153,12 +167,38 @@ def official_commit() -> str | None:
     return direct.get("vcs_info", {}).get("commit_id")
 
 
+# Written next to silvertorch/_C*.so by a build recipe that changes Meta's defaults (OF-11).
+OFFICIAL_BUILD_FLAGS = "_build_flags.json"
+
+
+def official_build() -> dict[str, Any] | None:
+    """The ``silvertorch`` extension the official backend would load, found without importing it:
+    ``so_path``, ``so_sha256`` and ``so_bytes`` (the build's identity), and ``nvcc_append_flags``
+    from a ``_build_flags.json`` beside the ``.so`` (written by the build recipe; ``None`` = Meta's
+    ``setup.py`` defaults, host code at gcc ``-O0``, OF-11). ``None`` when silvertorch is absent."""
+    spec = importlib.util.find_spec("silvertorch")
+    if spec is None or not spec.submodule_search_locations:
+        return None
+    pkg = Path(next(iter(spec.submodule_search_locations)))
+    so = sorted(pkg.glob("_C*.so"))
+    flags = pkg / OFFICIAL_BUILD_FLAGS
+    return {
+        "so_path": str(so[0]) if so else None,
+        "so_sha256": hashlib.sha256(so[0].read_bytes()).hexdigest() if so else None,
+        "so_bytes": so[0].stat().st_size if so else None,
+        "nvcc_append_flags": (
+            json.loads(flags.read_text()).get("nvcc_append_flags") if flags.exists() else None
+        ),
+    }
+
+
 def provenance() -> dict[str, Any]:
     """The record's ``env`` block minus clocks (§3.2, §8.2 B/F). ``commit`` is the repo HEAD;
     ``dirty`` is ``subtree_dirty()`` — the flag ``report.py`` enforces (§8.2 F) — and
     ``repo_dirty`` the informational whole-tree one; ``code_version`` follows ``dirty`` (a
     kernel edit, committed or not, invalidates a campaign; doc churn never does).
-    ``official_commit`` is the installed ``silvertorch`` build's git commit."""
+    ``official_commit`` is the installed ``silvertorch`` build's git commit, ``official_build``
+    the extension that loads and its build flags."""
     driver = _nvidia_smi("driver_version")
     return {
         "gpu": torch.cuda.get_device_name() if torch.cuda.is_available() else "cpu",
@@ -167,6 +207,7 @@ def provenance() -> dict[str, Any]:
         "torch": torch.__version__,
         "triton": triton.__version__,
         "official_commit": official_commit(),
+        "official_build": official_build(),
         "commit": _git("rev-parse", "--short", "HEAD"),
         "dirty": subtree_dirty(),
         "repo_dirty": repo_dirty(),
@@ -197,7 +238,7 @@ def clock_report() -> str:
     default and max clocks, clock policy)."""
     try:
         return subprocess.check_output(
-            ["nvidia-smi", "-q", "-d", "CLOCK", "-i", "0"],
+            ["nvidia-smi", "-q", "-d", "CLOCK", "-i", smi_device()],
             stderr=subprocess.STDOUT,
             text=True,
             timeout=10,
@@ -520,6 +561,7 @@ __all__ = [
     "provenance",
     "repo_dirty",
     "setup",
+    "smi_device",
     "stats",
     "subtree_dirty",
     "timed_build",

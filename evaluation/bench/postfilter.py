@@ -39,7 +39,11 @@ class Postfilter(nn.Module):
             raise ValueError(f"alpha must be a positive int, got {alpha!r}")
         self.alpha = alpha
 
-    def forward(self, query: Tensor, query_clause_attrs: Tensor) -> tuple[Tensor, Tensor]:
+    def prepare_queries(self, query_clause_attrs: Tensor) -> Tensor:
+        """The filter's query encoding for one batch, outside the timed call."""
+        return self.filter.prepare_queries(query_clause_attrs)
+
+    def forward(self, query: Tensor, prepared: Tensor) -> tuple[Tensor, Tensor]:
         query = query.to(torch.float16)
         if query.is_cuda:
             scores = torch.mm(query, self.item_embs_t, out_dtype=torch.float32)
@@ -47,7 +51,7 @@ class Postfilter(nn.Module):
             scores = torch.mm(query.float(), self.item_embs_t.float())
         p = min(self.alpha * self.k, scores.shape[1])
         scores, ids = torch.topk(scores, p, dim=1)
-        keep = self.filter.evaluate_subset(query_clause_attrs, ids)
+        keep = self.filter.evaluate_subset(prepared, ids)
         order = torch.sort(keep.to(torch.int8), dim=1, descending=True, stable=True).indices
         order = order[:, : self.k]
         keep = keep.gather(1, order)

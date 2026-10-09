@@ -11,8 +11,8 @@
 # the record reuse rule (docs/decisions.md § Campaign v2); `log` records every mid-campaign change.
 
 default:
-  quality: {code_version: 472f2fc68c697179b463d3b5a6b19ade194e6e2f, hub: "campaign-v2.5/{dataset}-{suite}"}  # tag campaign-v2.5
-  perf: {code_version: 472f2fc68c697179b463d3b5a6b19ade194e6e2f, hub: "campaign-v2.5/{dataset}-{suite}"}
+  quality: {code_version: e8958bd234cf9f814d1afcb2e5eb3f95e25dbec3, hub: "campaign-v2.9/{dataset}-{suite}"}  # tag campaign-v2.9
+  perf: {code_version: e8958bd234cf9f814d1afcb2e5eb3f95e25dbec3, hub: "campaign-v2.9/{dataset}-{suite}"}
 
 # Reuse entries from docs/artifacts/campaign-v2/reuse (reuse.py over the Hub subtrees). An entry
 # exists only where old records cover every v2 cell of its match (all seeds and params) and no
@@ -69,3 +69,7 @@ log:
   - {date: 2026-10-09, change: "tag campaign-v2.3 (library 1258a63e): ST-IDS probe id epilogue loops over k (compile seconds, no k 1000 n_probe limit); V2-HIGHP fmkt past D_PAD 256 split into a counted-tile scoring loop + wide -inf fill; V1-FUSE predicate folded into the score write (bit-exact)", rerun: ["every SilverTorch triton perf record (ST-IDS)", "V2 triton perf at D_PAD > 256 (V2-HIGHP)", "V1 triton perf (V1-FUSE)"]}
   - {date: 2026-10-09, change: "tag campaign-v2.4 (library d67d6263): ST-SKIP128, SilverTorch triton bloom scorer skips all-fail tiles at D_PAD <= 256 under a device-side pass-rate bound (bit-exact)", rerun: ["SilverTorch triton bloom perf at D_PAD <= 256 with p < 1/256 (synth low-p bloom)"]}
   - {date: 2026-10-10, change: "tag campaign-v2.5 (library 472f2fc6): ST-LANE independent bloom word loads; V2-FILL counted-tile scoring + wide -inf fill at D_PAD <= 256; C5-OURS bloom_path=full option (default unchanged); all bit-exact", rerun: ["SilverTorch triton bloom perf (ST-LANE)", "V2 triton perf at D_PAD <= 256 (V2-FILL)"]}
+  - {date: 2026-10-10, change: "tag campaign-v2.6 (library 20e83bfc): OFFICIAL-REWORK M1, prepare_queries on every filtered arm (query-side filter encoding out of the timed forward, recorded as query_prep_ms), clause_mask_packed for official exact; bit-exact", rerun: ["every bloom-filter perf record (forward no longer includes query prep)", "official exact perf"]}
+  - {date: 2026-10-11, change: "tag campaign-v2.7 (library 641ec3b8): CLAUSE-SKIP form B (inactive clauses load nothing; bit-exact) + BLOOM-BUILD-CHUNK (transposed sigs built in chunks; bit-exact; 30 M builds fit)", rerun: ["clause perf (V1, V2, SilverTorch exact) on tables with unused clauses", "codesign-laion30m triton half (never ran)"]}
+  - {date: 2026-10-11, change: "tag campaign-v2.8 (library 78cfbc72): OFFICIAL-REWORK M2-M4, the official epilogue (top-k on raw scores, [B,k] dequant and id-map) and partial-path plan dedup; bit-exact", rerun: ["official perf (every path)"]}
+  - {date: 2026-10-11, change: "tag campaign-v2.9 (library e8958bd2): ST-WIDE, per-row probe table + bloom two-pass for wide probes (B*n_probe >= 512; narrow configs unchanged); bit-exact", rerun: ["SilverTorch triton perf at B*n_probe >= 512 (every width; the two-pass at d768)"]}

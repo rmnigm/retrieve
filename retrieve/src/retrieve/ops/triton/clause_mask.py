@@ -217,3 +217,91 @@ def clause_mask_scores(
     )
     wrap_triton(_clause_mask_kernel)[launch.grid](**launch.kwargs)  # keep inline (export)
     return launch.out
+
+
+@triton.jit
+def _clause_mask_packed_kernel(
+    item_attrs_ptr,  # [N, C, A_max] int64
+    is_reverse_ptr,  # [C] bool (stored as int8 in torch)
+    query_attrs_ptr,  # [B, C] int64
+    out_ptr,  # [B, ceil(N / 64)] int64
+    N,
+    n_words,
+    tiles_y,
+    C: tl.constexpr,
+    A_MAX: tl.constexpr,
+    stride_in,
+    stride_ic,
+    stride_ia,
+    stride_qb,
+    stride_qc,
+    stride_ob,
+    BLOCK_N: tl.constexpr,
+    WIDE: tl.constexpr,
+):
+    bid = tl.program_id(0)
+    tile_id = tl.program_id(2) * tiles_y + tl.program_id(1)
+    row0 = tile_id * BLOCK_N
+    lane = tl.arange(0, BLOCK_N)
+    n_valid = row0 + lane < N
+    attrs_base, ids = tile_rows(item_attrs_ptr, row0, lane, stride_in, WIDE)
+    pass_mask = clause_pass(
+        attrs_base,
+        is_reverse_ptr,
+        query_attrs_ptr,
+        ids,
+        n_valid,
+        bid,
+        stride_in,
+        stride_ic,
+        stride_ia,
+        stride_qb,
+        stride_qc,
+        C=C,
+        A_MAX=A_MAX,
+    )
+    # Doc d at bit 63 - d % 64 of word d // 64 (high-first); disjoint bits, so the sum is the OR.
+    bits = pass_mask.to(tl.int64) << (63 - (lane % 64)).to(tl.int64)
+    words = tl.sum(tl.reshape(bits, (BLOCK_N // 64, 64)), axis=1)
+    w_offsets = row0 // 64 + tl.arange(0, BLOCK_N // 64)
+    tl.store(row_base(out_ptr, bid, stride_ob, WIDE) + w_offsets, words, mask=w_offsets < n_words)
+
+
+@triton_op("retrieve::clause_mask_packed", mutates_args=())
+def clause_mask_packed(
+    item_clause_attrs: Tensor,  # [N, C, A_max] int64
+    clause_is_reverse: Tensor,  # [C] bool
+    query_clause_attrs: Tensor,  # [B, C] int64
+) -> Tensor:
+    """The clause test over every item, packed: ``[B, ceil(N / 64)]`` int64 with doc ``d`` at bit
+    ``63 - d % 64`` of word ``d // 64`` (the official scorer's ``filtering_bit_mask`` order), no
+    ``[B, N]`` bool on the way (kernels.md § clause_mask)."""
+    launch = _clause_mask_prep(
+        item_clause_attrs, clause_is_reverse, query_clause_attrs, cfg=DEFAULT_CONFIG
+    )
+    b, n = launch.out.shape
+    n_words = triton.cdiv(n, 64)
+    out = torch.empty((b, n_words), dtype=torch.int64, device=query_clause_attrs.device)
+    kw = launch.kwargs
+    wrap_triton(_clause_mask_packed_kernel)[launch.grid](
+        item_attrs_ptr=kw["item_attrs_ptr"],
+        is_reverse_ptr=kw["is_reverse_ptr"],
+        query_attrs_ptr=kw["query_attrs_ptr"],
+        out_ptr=out,
+        N=n,
+        n_words=n_words,
+        tiles_y=kw["tiles_y"],
+        C=kw["C"],
+        A_MAX=kw["A_MAX"],
+        stride_in=kw["stride_in"],
+        stride_ic=kw["stride_ic"],
+        stride_ia=kw["stride_ia"],
+        stride_qb=kw["stride_qb"],
+        stride_qc=kw["stride_qc"],
+        stride_ob=out.stride(0),
+        BLOCK_N=DEFAULT_CONFIG.block_n,
+        WIDE=wide(item_clause_attrs, out),
+        num_warps=DEFAULT_CONFIG.num_warps,
+        num_stages=DEFAULT_CONFIG.num_stages,
+    )  # keep inline (export)
+    return out

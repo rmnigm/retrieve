@@ -51,8 +51,11 @@ class _V1(nn.Module):
         self.idx.register_index(embs)
         self.filter = filter_mod
 
-    def forward(self, q: Tensor, qa: Tensor):
-        return self.idx(q, mask=self.filter.evaluate_mask(qa))
+    def prepare_queries(self, qa: Tensor) -> Tensor:
+        return self.filter.prepare_queries(qa)
+
+    def forward(self, q: Tensor, qf: Tensor):
+        return self.idx(q, mask=self.filter.evaluate_mask(qf))
 
 
 class _V2(nn.Module):
@@ -64,8 +67,11 @@ class _V2(nn.Module):
         self.idx.register_index(embs)
         self.filter = filter_mod
 
-    def forward(self, q: Tensor, qa: Tensor):
-        cand, counts = self.filter.evaluate_indices(qa)
+    def prepare_queries(self, qa: Tensor) -> Tensor:
+        return self.filter.prepare_queries(qa)
+
+    def forward(self, q: Tensor, qf: Tensor):
+        cand, counts = self.filter.evaluate_indices(qf)
         return self.idx(q, candidate_ids=cand, counts=counts)
 
 
@@ -80,8 +86,11 @@ class _V3(nn.Module):
         self.stage2.register_index(embs)
         self.filter = filter_mod
 
-    def forward(self, q: Tensor, qa: Tensor):
-        pos, pcounts = self.filter.evaluate_indices(qa)
+    def prepare_queries(self, qa: Tensor) -> Tensor:
+        return self.filter.prepare_queries(qa)
+
+    def forward(self, q: Tensor, qf: Tensor):
+        pos, pcounts = self.filter.evaluate_indices(qf)
         cand, _ = self.stage1(q, candidate_ids=pos, counts=pcounts)
         return self.stage2(q, candidate_ids=cand, counts=(cand >= 0).sum(dim=1))
 
@@ -111,12 +120,14 @@ def _assert_replays_match_eager(module: nn.Module, b: int, label: str, d: int = 
     compiled = torch.compile(module, mode="reduce-overhead", dynamic=False, fullgraph=True)
     with torch.inference_mode():
         for _ in range(5):
-            compiled(make_query(b, d), make_query_attrs(b, c=C))
+            compiled(make_query(b, d), module.prepare_queries(make_query_attrs(b, c=C)))
         for seed in (21, 22):
             query, q_attrs = make_query(b, d, seed=seed), make_query_attrs(b, c=C, seed=seed)
             # cudagraph-tree outputs are reclaimed on the next call — clone before comparing.
-            out_ids, out_scores = (t.clone() for t in compiled(query, q_attrs))
-            eager_ids, eager_scores = module(query, q_attrs)
+            out_ids, out_scores = (
+                t.clone() for t in compiled(query, module.prepare_queries(q_attrs))
+            )
+            eager_ids, eager_scores = module(query, module.prepare_queries(q_attrs))
             assert_topk_equal(out_ids, out_scores, eager_ids, eager_scores)
     skips = int(counters["inductor"]["cudagraph_skips"]) - skips_before
     assert skips == 0, (

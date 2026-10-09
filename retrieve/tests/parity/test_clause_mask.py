@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 import torch
 
+from retrieve.ops import reference, triton as T
 from retrieve.ops.triton.clause_mask import (
     ClauseMaskConfig,
     _clause_mask_impl,
@@ -18,6 +19,7 @@ from retrieve.ops.triton.clause_mask import (
     clause_mask_scores,
 )
 from tests.conftest import make_attrs, make_query_attrs
+from tests.parity.conftest import make_exact
 
 
 def _ref_mask(
@@ -166,3 +168,18 @@ def test_clause_mask_scores_rejects_scores_of_the_wrong_shape_or_dtype():
         clause_mask_scores(_scores(4, 512, seed=1).half(), attrs, is_reverse, q)
     with pytest.raises(ValueError, match="scores must be"):
         clause_mask_scores(_scores(4, 511, seed=1), attrs, is_reverse, q)
+
+
+@pytest.mark.parametrize("n", [64, 1000, 4096 + 37])
+@pytest.mark.parametrize("reverse", ["none", "mixed"])
+def test_clause_mask_packed_is_the_packed_bool_mask(n, reverse):
+    """``clause_mask_packed`` = ``pack_mask(clause_mask(...))`` word for word (the official exact
+    path's ``filtering_bit_mask``, high-first), and = its torch twin."""
+    attrs, rev, q_attrs = make_exact(n, 9, reverse=reverse)
+    packed = T.clause_mask_packed(attrs, rev, q_attrs)
+    words = (n + 63) // 64
+    bits = torch.zeros(9, words * 64, dtype=torch.int64, device="cuda")
+    bits[:, :n] = T.clause_mask(attrs, rev, q_attrs)
+    shifts = 63 - torch.arange(64, dtype=torch.int64, device="cuda")
+    assert torch.equal(packed, (bits.view(9, words, 64) << shifts).sum(dim=-1))
+    assert torch.equal(packed, reference.clause_mask_packed(attrs, rev, q_attrs))

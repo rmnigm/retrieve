@@ -51,7 +51,6 @@ becomes the reference and ``official`` is compared against torch (``parity: "vs_
 
 from __future__ import annotations
 
-import dataclasses
 import gc
 import hashlib
 import itertools
@@ -73,7 +72,6 @@ from torch import nn
 from bench import algos, inputs, measure, oracle, records
 from bench.config import QUERY_PARAMS, Dataset, Job, interleave_units, shared_key
 from bench.metrics import accumulate, accumulator, finalize, jaccard_at_k
-from bench.router import Router
 from eval_datasets.layout import atomic_write
 
 MODES = ("eager", "graph")
@@ -87,6 +85,7 @@ SEED_FREE_QUALITY = ("linr_v1_filter_mask", "linr_v2", "postfilter")
 # The top-k prefix of these algos' k_max run is not their top-k run (postfilter's pool is
 # alpha*k), so quality runs once per k.
 PER_K_QUALITY = ("postfilter",)
+ARM_FREE_SLACK_MIB = 256
 CLOCK_DRIFT = 0.05  # §2.1: an under-load sample > 5 % off the process's first one
 POOL_MIN = 2000  # the floor of a resolved candidate_pool_frac (the re-plan's "minimum 2k")
 # An exception whose message carries one of these has killed the CUDA context: recorded, then
@@ -231,7 +230,7 @@ def compile_warmup(module: nn.Module, inp: dict, assets: dict, device: torch.dev
     qa = assets["qa_s"][sel].to(device) if assets["qa_s"] is not None else None
     t0 = time.perf_counter()
     with torch.inference_mode():
-        module(q, qa)
+        module(q, filter_arg(module, qa))
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     return time.perf_counter() - t0
@@ -239,7 +238,7 @@ def compile_warmup(module: nn.Module, inp: dict, assets: dict, device: torch.dev
 
 def build_module(job: Job, inp: dict, assets: dict, k_max: int, params: dict) -> nn.Module:
     kw = dict(params)
-    if job.algo in ("silvertorch", "router") and job.filter_kind == "bloom":
+    if job.algo == "silvertorch" and job.filter_kind == "bloom":
         kw = {**job.bloom, **kw}
     return algos.build(
         job.algo,
@@ -298,14 +297,10 @@ def quality(
             sel_d = rows_d[s : s + QUALITY_CHUNK]
             q = queries.index_select(0, sel_d)
             qa = qa_all.index_select(0, sel_d) if qa_all is not None else None
-            ids, scores = module(q, qa)
+            ids, scores = module(q, filter_arg(module, qa))
             # a compiled arm's outputs live in CUDA-graph buffers the next call overwrites
             ids_all.append(ids.clone())
             sc_all.append(scores.float().clone())
-            if isinstance(module, Router):  # V-ROUTER: each query's l_q and route, to the sidecar
-                at = torch.arange(s, s + sel.numel(), device=device)
-                for name, v in (("router_lq", module.last_lq), ("router_exact", module.last_exact)):
-                    per_q.setdefault(name, nan()).index_copy_(0, at, v.float())
             if acc_o is not None:
                 m = assets["oracle_rows"][sel]
                 if bool(m.any()):
@@ -331,8 +326,6 @@ def quality(
     finally:
         torch.set_num_threads(threads)
     out: dict[str, Any] = {"heldout": finalize(acc_h)}
-    if "router_exact" in per_q:
-        out["router_exact_share"] = per_q["router_exact"].mean().item()
     if acc_o is not None:
         out["oracle"] = finalize(acc_o)
     ids_t = torch.cat(ids_all) if ids_all else torch.empty(0, 0, dtype=torch.long)
@@ -462,7 +455,30 @@ def _call_next_filtered(
     return callee(pool[i], qa_pool[i])
 
 
-def _rotate(callee: Any, pool: torch.Tensor, qa_pool: torch.Tensor | None) -> Any:
+def filter_arg(module: nn.Module, qa: torch.Tensor | None) -> Any:
+    """What ``module``'s forward takes for a batch's query attrs: its ``prepare_queries`` result
+    (query-side filter work done outside the call) or the attrs."""
+    prepare = getattr(module, "prepare_queries", None)
+    return qa if qa is None or prepare is None else prepare(qa)
+
+
+def prepare_pool(module: nn.Module, qa_pool: torch.Tensor | None) -> tuple[Any, float | None]:
+    """Every pool batch's filter argument, prepared once before timing (evaluation.md § Query
+    preparation): ``(per-batch arguments, query_prep_ms)``, the mean host + device ms of one
+    batch's ``prepare_queries`` (``None`` for a module without one, or an unfiltered cell)."""
+    if qa_pool is None or getattr(module, "prepare_queries", None) is None:
+        return qa_pool, None
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    t0 = time.perf_counter()
+    with torch.inference_mode():
+        prepared = [module.prepare_queries(qa_pool[i]) for i in range(qa_pool.shape[0])]
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    return prepared, (time.perf_counter() - t0) * 1e3 / len(prepared)
+
+
+def _rotate(callee: Any, pool: torch.Tensor, qa_pool: Any) -> Any:
     """The zero-arg call ``measure.latency`` times: the pool rotated round-robin (§2.5)."""
     if qa_pool is None:
         return partial(_call_next, callee, pool, itertools.count())
@@ -470,7 +486,7 @@ def _rotate(callee: Any, pool: torch.Tensor, qa_pool: torch.Tensor | None) -> An
 
 
 @torch.inference_mode()
-def ids_sha256(callee: Any, pool: torch.Tensor, qa_pool: torch.Tensor | None) -> tuple[str, str]:
+def ids_sha256(callee: Any, pool: torch.Tensor, qa_pool: Any) -> tuple[str, str]:
     """sha256 of the ids ``callee`` returns on the first ``IDS_PROBE_BATCHES`` batches of the
     pool, int64 row-major, batch after batch: ``(exact, canon)``. ``exact`` hashes the ids as
     returned (equal across modes is the D1-G eager-vs-graph identity gate); ``canon`` first
@@ -505,22 +521,17 @@ def perf(
     ``job`` rotated round-robin, ``module.k = k`` before each variant, ``graph`` via
     ``measure.graph_callable`` (one capture per shape, dynamo reset once before the variant's
     captures) or a null entry with the ``reason`` (``official`` → ``not_capturable``, O D7).
-    The official backend's plan cache is switched *off* for timing — every forward pays the
-    expression parse, as serving fresh queries does (kernels.md); ``OfficialConfig.cache_plans``
-    is read per forward, so this is an in-place replace, no rebuild — and every entry records
-    ``cache_plans`` (``None`` on backends without such a cache). Each measured entry gets
+    Each module's pool filters are prepared before timing (``prepare_pool``) and every entry
+    records the cost as ``query_prep_ms`` (``None`` where there is no prepare step). Each
+    measured entry gets
     ``ids_sha256``; in a group of two or more, also ``rounds``. Returns ``(entries, samples)``
     per module."""
     out: list[tuple[list[dict[str, Any]], list[dict[str, Any]]]] = [([], []) for _ in modules]
-    cache_plans: list[bool | None] = []
-    for m in modules:
-        if m.backend == "official":
-            m.official = dataclasses.replace(m.official, cache_plans=False)
-        cache_plans.append(m.official.cache_plans if m.backend == "official" else None)
     for bs in job.batch_sizes:
         pool, qa_pool = inputs.query_pool(
             inp, assets["qa_s"], assets["skip"], bs=bs, seed=job.seed, device=device
         )
+        preps = [prepare_pool(m, qa_pool) for m in modules]
         for k in job.ks:
             for m in modules:
                 m.k = int(k)
@@ -528,17 +539,13 @@ def perf(
                 callees: dict[int, Any] = {}
                 if mode == "graph":
                     torch._dynamo.reset()
-                    example = (pool[0],) if qa_pool is None else (pool[0], qa_pool[0])
                 for i, m in enumerate(modules):
-                    entry = {
-                        "k": int(k),
-                        "bs": int(bs),
-                        "mode": mode,
-                        "cache_plans": cache_plans[i],
-                    }
+                    entry = {"k": int(k), "bs": int(bs), "mode": mode, "query_prep_ms": preps[i][1]}
                     if mode == "eager":
                         callees[i] = m
                         continue
+                    fa = preps[i][0]
+                    example = (pool[0],) if fa is None else (pool[0], fa[0])
                     try:
                         callees[i] = measure.graph_callable(m, *example)
                     except measure.NotCapturable as exc:
@@ -548,7 +555,7 @@ def perf(
                         )
                 if not callees:
                     continue
-                fns = {i: _rotate(c, pool, qa_pool) for i, c in callees.items()}
+                fns = {i: _rotate(c, pool, preps[i][0]) for i, c in callees.items()}
                 with torch.inference_mode():
                     timed = measure.latency_group(
                         list(fns.values()), bs=int(bs), mode=mode, **latency_kw
@@ -557,12 +564,12 @@ def perf(
                         if profile and mode == "eager":
                             d.update(measure.profile_once(fn))
                         d["ids_sha256"], d["ids_sha256_canon"] = ids_sha256(
-                            callees[i], pool, qa_pool
+                            callees[i], pool, preps[i][0]
                         )
                         if len(modules) > 1:
                             d["rounds"] = len(d["window_medians_ms"])
                         entry = {"k": int(k), "bs": int(bs), "mode": mode}
-                        out[i][0].append({**entry, "cache_plans": cache_plans[i], **d})
+                        out[i][0].append({**entry, "query_prep_ms": preps[i][1], **d})
                         out[i][1].append({**entry, "ms": ms})
                 callees = fns = {}
             torch._dynamo.reset()
@@ -572,11 +579,33 @@ def perf(
 # ----- the loop -----------------------------------------------------------------------------
 
 
+def _log_failure(msg: str, exc: BaseException) -> None:
+    """``logger.exception`` without loguru's ``diagnose``, which reads ``run``'s ``f_locals`` and
+    leaves that snapshot cached on the frame: ``exc``, its traceback and the failed arm's tensors
+    stay referenced for the rest of the run (evaluation.md § Arm release)."""
+    logger.error("{}\n{}", msg, "".join(traceback.format_exception(exc)))
+
+
+_FAILED = object()  # a build that raised: released once its traceback is gone
+
+
 def _release() -> None:
     gc.collect()
     torch._dynamo.reset()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+
+
+def _allocated() -> int:
+    return torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+
+
+def _assert_freed(base: int) -> None:
+    """A unit's arms are gone once it ends (evaluation.md § Arm release): device memory back to
+    the shared inputs' and assets' ``base``, within ``ARM_FREE_SLACK_MIB``."""
+    left = (_allocated() - base) / MiB
+    if left > ARM_FREE_SLACK_MIB:
+        raise RuntimeError(f"{left:.0f} MiB still allocated after the unit's arms were released")
 
 
 def _failed(job: Job, params: dict, env: dict, stage: str, exc: BaseException, t0: float) -> dict:
@@ -698,6 +727,7 @@ def run(
         for a, j in need.items():
             if a not in assets_by:
                 assets_by[a] = sweep_assets(j, inp, max(j.ks), device)
+        base = _allocated()
 
         built: dict[int, dict[str, Any]] = {}
         for job in unit:
@@ -716,6 +746,7 @@ def run(
                 job.build,
             )
             first = todo[id(job)][0]
+            module = None
             try:
                 module, build_s = measure.timed_build(
                     lambda: build_module(job, inp, assets, k_max, resolve_pool(first, assets))  # noqa: B023 — called at once
@@ -724,14 +755,16 @@ def run(
                     compile_warmup(module, inp, assets, device) if "compile" in job.build else None
                 )
             except Exception as exc:  # recorded, the loop continues (H §7)
-                logger.exception("build failed: {}", job.key(first))
+                _log_failure(f"build failed: {job.key(first)}", exc)
                 for p in todo[id(job)]:
                     records.append_record(path, _failed(job, p, env0, "build", exc, t0))
                     counts["failed"] += 1
                 if is_sticky(exc):
                     logger.error("sticky CUDA error: the context is dead, ending this process")
                     raise
-                _release()
+                module = _FAILED
+            if module is _FAILED:
+                _release()  # after the except: its traceback holds the failed build's tensors
                 continue
             # A module that cannot capture loses nothing to a skipped graph mode; a quality-only
             # suite (``Job.timed`` false) loses nothing to a skipped perf.
@@ -842,12 +875,13 @@ def run(
                     counts["failed"] += 1
                     raise
                 except Exception as exc:  # recorded, the loop continues (H §7)
-                    logger.exception("cell failed at {}: {}", stage, job.key(params))
+                    _log_failure(f"cell failed at {stage}: {job.key(params)}", exc)
                     records.append_record(path, _failed(job, params, env0, stage, exc, t0))
                     counts["failed"] += 1
                     if is_sticky(exc):
                         logger.error("sticky CUDA error: the context is dead, ending this process")
                         raise
+                if id(job) not in recs_by:
                     _release()
 
             samples_by: dict[int, list[dict[str, Any]]] = {}
@@ -865,7 +899,7 @@ def run(
                         latency_kw=latency_kw,
                     )
                 except Exception as exc:  # recorded, the loop continues (H §7)
-                    logger.exception("perf failed: {}", [j.key(j.build) for j in timed])
+                    _log_failure(f"perf failed: {[j.key(j.build) for j in timed]}", exc)
                     for j in timed:
                         recs_by.pop(id(j))
                         p = {**j.build, **q}
@@ -874,6 +908,8 @@ def run(
                     if is_sticky(exc):
                         logger.error("sticky CUDA error: the context is dead, ending this process")
                         raise
+                    results = None
+                if results is None:
                     _release()
                 else:
                     for j, (entries, samples) in zip(timed, results, strict=True):
@@ -920,8 +956,9 @@ def run(
                     job.algo, job.filter_kind, job.sweep, job.backend, rec["params"],
                     rec["status"], rec["elapsed_s"],
                 )  # fmt: skip
-        del built
+        module = b = built = None  # the last arm's locals still hold its index
         _release()
+        _assert_freed(base)
     counts = +counts  # drop zero entries
     logger.info(measure.clock_histogram(sm_windows))
     logger.info("done: {}", dict(counts))
@@ -929,6 +966,7 @@ def run(
 
 
 __all__ = [
+    "ARM_FREE_SLACK_MIB",
     "CLOCK_DRIFT",
     "POOL_MIN",
     "EXACT_ALGOS",

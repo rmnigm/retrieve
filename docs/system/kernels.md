@@ -321,6 +321,12 @@ its own tile shape, launch grid, or masking policy:
 - `probe_tile(probe_ids_ptr, offsets_ptr, bid, t, n_probe, NPP, BLOCK_P)` —
   a probe scorer program's slice of the compact CSR layout, the row's
   table built in-kernel ([SilverTorch kernels](#silvertorch-kernels)).
+- `probe_tile_table(table_ptr, bid, t, n_probe, FAN, BLOCK_P)` /
+  `probe_tiles_table(…, tt, …)` — the same slice (one tile / a vector of
+  tiles) read from `probe_table_kernel`'s per-row table ("Probe table").
+- `probe_table_kernel` — a *launched* kernel, one program per row: the
+  row's tile ends, slot ends and cluster starts for the lookups above;
+  it also zeroes the bloom two-pass's list count.
 - `probe_dots(q_row_ptr, q_scales_ptr, bid, item_codes_ptr, pos, stride_cn, keep, D, D_PAD,
   BLOCK_D, BLOCK_P) → (int32 [BLOCK_P], q_scale)` — both probe scorers' int8 dot: one
   `tl.dot` at `D_PAD ≤ 256` (loads in the v2.1 order, which fixes that path's SASS), a
@@ -348,7 +354,19 @@ its own tile shape, launch grid, or masking policy:
   load_mask, bid, strides..., C, A_MAX) → [BLOCK] int1` — the exact
   AND-of-OR clause predicate (inner OR over `A_MAX` slots, outer AND
   over `C`, reverse XOR, `q_c == -1` inactive override), already ANDed
-  with `load_mask`. Used by `clause_mask` / `clause_compact`
+  with `load_mask`. **Inactive clauses** are not read: a clause the query
+  leaves at `-1` passes whatever the item holds, so a uniform branch
+  (`if q_c != -1`, one value per program) skips its loads and compares.
+  Unrolled over every clause, the predicate paid `C · A_MAX` loads per item
+  and batch row however few clauses the query used. The 10-clause synth
+  tables (SYNTH-TRIM, from 7) made the V1 / V2 clause cells slower by the
+  width, flat in p and growing with the batch, and `clause_compact` went
+  from 56 registers (C 4, A_MAX 4) to 121 (C 10, A_MAX 1); with the branch
+  it is 48. **Known cost:** with every clause active the branch skips
+  nothing, and goodreads `all4` V2 at bs 1 in graph mode is 1.095× (+26 µs
+  of 0.27 ms). Masked loads (1.04×, but 255 registers with spills at
+  A_MAX 4) and 4 warps (1.14×) were measured and are not used
+  ([CLAUSE-SKIP](../artifacts/campaign-v2.6/clause-skip/README.md)). Used by `clause_mask` / `clause_compact`
   (`ids=n_offsets`, `load_mask=n_valid`) and
   `codesigned_probe_score_exact` (`ids=safe_ids`, `load_mask=valid`).
   `is_reverse_ptr` must point at int8 storage (host preps do
@@ -1202,8 +1220,9 @@ largest cluster holds 25,480 items (TF-9).
 `SilverTorch.register_index` / `set_query_params` raise unless
 `width ≥ k`, so `topk(k)` needs no pad path.
 
-**How a program finds its items** (`common.probe_tile`). There is no host
-table. Each program loads its row's `n_probe` cluster ids as one vector
+**How a program finds its items** (`common.probe_tile`). Below
+`_host.TABLE_MIN_PAIRS` (512) `(row, probe)` pairs there is no table. Each
+program loads its row's `n_probe` cluster ids as one vector
 (`NPP`, the next power of two), gathers their offsets, and builds the
 row's tile and slot prefix sums with `tl.cumsum`. Its tile is then
 located by a masked vector reduction. Tiles are **cluster-aligned**: a
@@ -1214,6 +1233,57 @@ tiles only store the `-inf` tail over `[total, width)`, which is 70 % of
 the width on goodreads. A lane past its cluster's end holds the next
 cluster's slot, so the score store is masked by in-cluster validity, not
 by the predicate.
+
+**Probe table** (`common.probe_table_kernel`, `probe_tile_table`). From
+`B · n_probe ≥ 512` the in-kernel build is O(`n_probe`) work in every one
+of the `B · (cdiv(width, BLOCK_P) + n_probe)` programs: three `NPP`-wide
+gathers and two `tl.cumsum`s per tile, about 262k programs at C7's PubMed
+cell (`n_probe` 1024, bs 16, width 3.93 M). There one extra launch, one program
+per row, writes the row's `[3, n_probe]` int64 table (tile ends, slot
+ends, cluster starts), and each tile finds its cluster by a two-level
+`FAN`-ary count over the tile ends (`FAN = 2^⌊bit_length(NPP)/2⌋`, so
+`FAN² ≥ NPP`): two dependent `FAN`-lane loads, then the cluster's four
+scalars. A binary search was 11 dependent scalar loads and measured
+slower. Positions and slots are the same integers, so outputs are
+`torch.equal`. Below the threshold the extra launch and the lookup's
+latency cost more than the build saves (bs 1, `n_probe` 256: 1.07–1.09×
+at d128 and d768), so those launches compile the in-kernel build
+(`TABLE=False`) unchanged.
+
+**Bloom two-pass** (`codesigned_probe_score`, a tile-skip config with the
+probe table, so `D_PAD > 256` and `B · n_probe ≥ 512`). In the one-pass
+kernel a skipped tile still costs its program: about 11 ns of device time
+a tile at C7's cell, where under 4 % of tiles have a passing item. The
+program is a latency chain (table lookup, the query's bit slots, the bloom
+words, the vote, the `-inf` store) at the occupancy of a 112-register dot
+kernel, and the bit-slot loop paid one latency per slot, inactive `-1`
+slots included (the 20 inactive of 25 slots on a one-clause query cost
+1.2 ms of 2.0 in a filter-only measurement). Two launches replace it:
+
+1. `_bloom_filter_kernel`, `TWO_PASS_LANES / BLOCK_P` tiles of one row per
+   program (16 at `BLOCK_P` 256). It stores `-inf` over every slot
+   (in-cluster and tail), then votes per tile on the ≤ `BLOCK_P / 64 + 1`
+   bloom words the tile spans. It ANDs the query's rows at those words
+   (`bloom_words`: slots in groups of four whose loads issue together, a
+   group of four `-1` skipped), masks each word to the tile's own
+   positions, and appends a tile with any surviving bit to a list
+   (`atomic_add` on a count zeroed by the table launch). The vote is
+   stored to a `[B · tiles]` int8 buffer and reloaded after a CTA barrier
+   before it masks the append. Inductor's mutation analysis
+   (`identify_mutated_tensors`) walks a store's address back through every
+   operand, so an append masked straight by the bloom loads marked the
+   query's bit positions, a graph input, as mutated, and `reduce-overhead`
+   skipped cudagraphs (`test_silvertorch_compile`, wide bloom).
+2. `_bloom_dot_kernel`, persistent (`DOT_PROGRAMS_PER_SM` × SMs programs
+   looping over the list). For each listed tile it runs the per-lane bloom
+   test and the dot of the one-pass kernel (`probe_dots`, the same
+   `BLOCK_D`), and stores the dots of the passing lanes.
+
+A tile's vote is the OR of its lanes' tests over the same bits, and the
+dot is the same int32 sum and fp32 epilogue, so the scores are
+`torch.equal` to the one-pass kernel's; the list order varies run to run
+but each slot is written once. Smaller two-pass tiles (64, 128) made the
+filter pass costlier than the dot pass saved.
 
 **Launch grid** `(B, tiles_y, tiles_x)` via `_host.grid_batch_tiles`, the
 batch on `grid_x`. The rows' early probes then run concurrently, and
@@ -1327,6 +1397,16 @@ is exact, the tiling only moves slots, and a skipped tile holds only
 ### `codesigned_probe_score` — IVF + INT8 + Bloom
 
 [`ops/triton/codesigned_probe_score.py`](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py).
+
+**Bloom build.** `build_transposed_sigs` rotates the row-wise signatures
+one bloom word at a time, and within a word in chunks of `TRANSPOSE_CHUNK`
+= 2¹⁸ items (whole 64-item words; the last chunk zero-padded as before).
+Each chunk's bit planes are a `[64, chunk]` int64 temporary plus the shifted
+copy, 128 MiB each, so the build needs the row-wise and transposed tables
+plus about 256 MiB at any `N`. Unchunked, the planes were `[64, N_pad]`
+per word (14.3 GiB at 30 M), and the triton bloom build did not fit at
+LAION 30 M (d-run, v2.6). The chunked index is `torch.equal` to the
+one-pass one.
 
 The `int8 → fp32` code cast never touches HBM. Bloom mode reads the
 **transposed index** of the paper's "rotate the matrix" phase 2 (TF-1): `bloom_transposed [m_bits, ceil(N/64)]`
@@ -1499,22 +1579,24 @@ casts the int32 dot to fp16 *before* dividing by it, which overflows for
 any realistic `D`.
 
 **Filter modes.** `none` → `fused_kmean_ann`. `exact` → our Triton
-`clause_mask` over the cluster-sorted `item_clause_attrs`, packed by
-`pack_mask` into the scorer's `filtering_bit_mask` (int64 `[B,
-ceil(N/64)]`, doc `d` at bit `63 − d % 64` of word `d // 64` —
-`MASK_BIT_ORDER`, see below) and passed to `fused_kmean_ann`: phase 2
-ours and full-`N`, labelled so in every table. `bloom` → **Meta's
+`clause_mask_packed` over the cluster-sorted `item_clause_attrs`, written
+straight as the scorer's `filtering_bit_mask` (int64 `[B, ceil(N/64)]`,
+doc `d` at bit `63 − d % 64` of word `d // 64` — `MASK_BIT_ORDER`, see
+below; no `[B, N]` bool) and passed to `fused_kmean_ann`: phase 2 ours
+(filling a step Meta does not provide) and full-`N`, labelled so in
+every table. `bloom` → **Meta's
 bloom**, not ours: at `register_index`, `attrs_to_features` turns the
 sorted `[N, C, A_max]` attrs into the jagged `(feature_ids int32 [C],
 feature_offsets int64 [N·C+1], feature_values int64)` layout — the
 clause index is the feature id, the same `(clause, value)` keying as our
 salt — and `bloom_index_build(b_multiplier, k)` builds `bloom_index [W]`
-+ `bundle_b_offsets`; per forward, `queries_to_expressions` renders each
-`[C]` query row as `"0:v0 AND 1:v1"` (`NOT c:v` for reverse clauses,
-`""` = match all), `parse_plans` runs the CPU parser (plans kept on
-CPU; memoised per distinct expression tuple by default —
-`OfficialConfig.cache_plans=True` — or parsed on every forward with
-`cache_plans=False`), and then either
++ `bundle_b_offsets`; in `prepare_queries` (once per batch, outside
+`forward`), `queries_to_expressions` renders each `[C]` query row as
+`"0:v0 AND 1:v1"` (`NOT c:v` for reverse clauses, `""` = match all) and
+`parse_plans` runs Meta's CPU parser. The plans stay on the CPU: Meta's
+search decodes them on the host per call
+(`bloom_index_search_cuda.cu:1045`), so device plans would only add a D2H.
+Per forward, either
 (`bloom_path="partial"`, default — the paper's co-design)
 `bloom_index_search_batch_return_partial_response` over the probed
 clusters feeds `fused_kmean_ann_with_partial_masks`, or
@@ -1555,15 +1637,49 @@ forward raises `RuntimeError` when traced. Measured on the A100
 `repeat_interleave`, fills), `fused_kmean_ann_with_partial_masks` 19 / 4,
 the partial-response bloom search 13 / 2 with two H2D plan uploads, so a
 bloom forward is ≈ 32 launches and ≥ 5 syncs against Triton's one launch.
-On top of that the CPU expression parse costs ≈ 59 µs per call at B=16
-(`c:v AND c:v`), 10–20 % of an eager bloom forward, which the
-`parse_plans` LRU cache hides after the first call for a repeated
-batch. **A timing run must therefore set `OfficialConfig(cache_plans=
-False)`** — every forward pays the parse, as serving fresh queries does
-— **or report both settings, labelled**; results are identical either
-way (T6 checks the uncached path bit for bit, T7 records its sync
-count). The official arm loses at small `P` / `B=1` for host reasons, so
+The CPU expression parse (≈ 59 µs per call at B=16) is query
+preparation: it runs in `prepare_queries`, outside the timed forward,
+and the harness records it as `query_prep_ms`
+([evaluation](evaluation.md#query-preparation)). T7 records the forward's
+syncs with the filter already prepared. The official arm loses at small `P` / `B=1` for host reasons, so
 the kernel-only tier of the head-to-head is what compares kernels.
+
+**Run as Meta intends (OFFICIAL-REWORK).** Everything query-side runs in
+`prepare_queries`, outside the timed forward:
+- **bloom:** the expressions are rendered and parsed into CPU plans. On the
+  partial path there is one plan per distinct expression, plus a device
+  row → plan index (`query_plan_index`, which Meta's partial search
+  accepts); Meta's full search takes one plan per row.
+- **exact:** the int64 attrs.
+
+The forward is Meta's ops plus our glue:
+- the probe (centroid matmul + `topk`);
+- **ours, filling a step Meta does not provide:** `clause_mask_packed` for
+  exact;
+- Meta's search and scorer;
+- **"Epilogue":** a top-k on the scorer's raw `[B, M]` (int32 dots or
+  `fp16(dot / divisor)`, pads at the dtype's minimum), then only the
+  `[B, k]` winners are dequantized and mapped through `sort_perm`.
+
+Dequantizing multiplies by positive scales, so the winners and their scores
+are bit-identical to dequantizing every slot first, ties aside.
+
+Upstream has no top-k inside the scorer: its tests sort the compact output
+themselves. `is_topk` is a separate op, a full row sort plus a `≥ kth`
+membership mask whose ties exceed k, so it is not used.
+
+Our part of the forward issues **no host sync**. The first sync on every
+path is inside Meta's op:
+- `fused_kmean_ann` reads `remaining_docs` back (`fused_kmean_ann_cuda.cu:465`);
+- the partial scorer reads its warp totals back (`:2054, :2072`);
+- the partial search reads its chunk sums back
+  (`bloom_index_search_cuda.cu:1495`);
+- both searches decode the plans on the host per call (`:1045`).
+
+So a whole-forward CUDA-graph capture fails on every path, and the arm stays
+eager (OF-3). Meta's released `setup.py` compiles the host side of its `.cu`
+files at gcc `-O0` (OF-11). The same sources at `-O3` are bit-identical and
+0.77-0.98× as fast ([OFFICIAL-REWORK](../artifacts/official-rework/README.md)).
 
 **Measured.** The head-to-head against Triton (end to end, kernel-only,
 phase 2, parity, memory) is in

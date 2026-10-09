@@ -18,9 +18,11 @@ recorded as partial and re-run by resume). ``test_cli.py`` drives the same fixtu
 from __future__ import annotations
 
 import dataclasses
+import gc
 import hashlib
 import json
 import math
+import weakref
 from pathlib import Path
 
 import numpy as np
@@ -28,10 +30,9 @@ import pytest
 import torch
 from click.testing import CliRunner
 
-from bench import algos, records, run, upload
 from bench import measure as bench
+from bench import records, run, upload
 from bench.config import NONE_SWEEP, load_matrix
-from retrieve import OfficialConfig
 
 LAT = {"warmup": 2, "n_min": 4, "n_max": 4, "windows": 3}
 EAGER = ("eager",)
@@ -82,7 +83,9 @@ def test_end_to_end_records(tiny_configs, tmp_path):
         ]
         for e in rec["perf"]:
             assert set(run.PERF_STAT_KEYS) <= set(e)
-            assert e["cache_plans"] is None  # no plan cache on this backend (official only)
+            # The filter's query encoding is prepared outside the timed calls (none on "none").
+            prep = e["query_prep_ms"]
+            assert prep is None if job.filter_kind == "none" else prep >= 0
             if e["mode"] == "eager":
                 assert e["n"] == 4 and e["load"] == "closed_loop" and "reason" not in e
                 assert e["sm_mhz"] is None  # sampled under load on CUDA only
@@ -385,63 +388,50 @@ def test_quality_holds_torch_cpu_threads_for_the_loop_and_restores_them():
         torch.set_num_threads(before)
 
 
-def test_quality_records_the_routers_local_pass_rate_and_route_per_query():
-    """V-ROUTER: the sidecar arrays carry each kept query's l_q and route (1.0 = exact V2), and the
-    record the share routed to the exact branch."""
-    g = torch.Generator().manual_seed(0)
-    n, d, rows = 256, 64, 20
-    x, q = torch.randn(n, d, generator=g), torch.randn(rows, d, generator=g)
-    attrs = torch.randint(0, 3, (n, 2, 1), generator=g)
-    qa = torch.randint(0, 3, (rows, 2), generator=g)
-    f = algos.build_filter("clause", attrs, backend="torch")
-    params = {"n_lists": 8, "n_probe": 4, "n_iter": 2, "pre_n_probe": 8, "lq_threshold": 0.3}
-    m = algos.build("router", x, k=4, backend="torch", filter_kind="clause", filter_mod=f,
-                item_attrs=attrs, params=params)  # fmt: skip
-    keep = torch.ones(rows, dtype=torch.bool)
-    keep[3] = False  # a skipped row is not scored and not in the sidecar
-    inputs = {"queries": q, "targets": torch.zeros(rows, 1, dtype=torch.long)}
-    assets = {"qa_s": qa, "keep": keep, "blob": None, "oracle_rows": None, "heldout_rows": keep}
-    out, per_q, _, _ = run.quality(m, inputs, assets, [4], torch.device("cpu"))
-    lq = m.local_pass_rate(q[keep], qa[keep])
-    assert torch.equal(per_q["router_lq"], lq) and per_q["router_lq"].shape == (rows - 1,)
-    assert torch.equal(per_q["router_exact"], (lq < 0.3).float())
-    assert out["router_exact_share"] == pytest.approx(float((lq < 0.3).float().mean()))
-
-
-class _Cached(torch.nn.Module):
-    """A module with a plan cache, as ``SilverTorch`` on the official backend."""
+class _Prepared(torch.nn.Module):
+    """A module with a query-prep step, as ``SilverTorch``: counts its preps and records what each
+    forward received."""
 
     backend = "official"
 
     def __init__(self) -> None:
         super().__init__()
-        self.official = OfficialConfig()
         self.k = 4
+        self.preps = 0
+        self.seen: list = []
 
-    def forward(self, q, qa=None):
+    def prepare_queries(self, qa):
+        self.preps += 1
+        return ("prepared", qa)
+
+    def forward(self, q, prepared=None):
+        self.seen.append(prepared[0] if prepared is not None else None)
         return torch.zeros(q.shape[0], self.k, dtype=torch.long), torch.zeros(q.shape[0], self.k)
 
 
-def test_perf_times_with_the_plan_cache_off_and_records_it(tiny_configs):
-    """kernels.md: an official timing run must set ``cache_plans=False`` (or label both).
-    ``run.perf`` replaces ``OfficialConfig`` before the first variant, touching nothing else,
-    and every entry carries the value."""
+def test_perf_prepares_the_pool_before_timing_and_records_it(tiny_configs, monkeypatch):
+    """evaluation.md § Query preparation: every pool batch is prepared once before the timed calls
+    (no forward prepares), each timed call gets the prepared batch, and every entry records
+    ``query_prep_ms``; graph null entries carry it too."""
     job = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=[NONE_SWEEP])[0]
-    inputs = {"queries": torch.zeros(8, 8)}
-    assets = {"qa_s": None, "skip": None}
-    m = _Cached()
-    assert m.official.cache_plans is True
+    n_pool = 6
+    pool = torch.zeros(n_pool, 1, 8)
+    qa_pool = torch.zeros(n_pool, 1, 2, dtype=torch.long)
+    monkeypatch.setattr(run.inputs, "query_pool", lambda *a, **kw: (pool, qa_pool))
+    m = _Prepared()
     ((entries, samples),) = run.perf(
-        [m], inputs, assets, job, torch.device("cpu"), modes=EAGER, profile=False, latency_kw=LAT
-    )
-    assert m.official == OfficialConfig(cache_plans=False)
-    assert len(entries) == 4 == len(samples) and all(e["cache_plans"] is False for e in entries)
-    # ... and the null (graph) entries carry it too.
-    ((entries, _),) = run.perf(
-        [m], inputs, assets, job, torch.device("cpu"), modes=("graph",), profile=False,
-        latency_kw=LAT,
+        [m], {}, {"qa_s": None, "skip": None}, job, torch.device("cpu"), modes=EAGER,
+        profile=False, latency_kw=LAT,
     )  # fmt: skip
-    assert all(e["reason"] == "cuda_unavailable" and e["cache_plans"] is False for e in entries)
+    per_bs = len(job.batch_sizes)
+    assert m.preps == n_pool * per_bs and set(m.seen) == {"prepared"}
+    assert len(entries) == len(samples) == per_bs * len(job.ks)
+    assert all(e["query_prep_ms"] is not None and e["query_prep_ms"] >= 0 for e in entries)
+    ((entries, _),) = run.perf(
+        [m], {}, {"qa_s": None, "skip": None}, job, torch.device("cpu"), modes=("graph",),
+        profile=False, latency_kw=LAT,
+    )  # fmt: skip
+    assert all(e["reason"] == "cuda_unavailable" and e["query_prep_ms"] >= 0 for e in entries)
 
 
 def test_eager_only_partial_is_per_job(tiny_configs, tmp_path, monkeypatch):
@@ -827,3 +817,49 @@ def test_score_path_arms_share_the_triton_parity_spill(tiny_configs, tmp_path):
     for sp in ("fp16", "int32"):
         out = run.parity(tmp_path, off, {"score_path": sp}, ids, sc, [2])
         assert out["parity"] == "vs_torch" and out["jaccard_vs_first@2"] == 1.0
+
+
+def test_each_finished_arm_is_freed_before_the_next_is_built(tiny_configs, tmp_path, monkeypatch):
+    """Roadmap H-ARMFREE: no module of a finished unit is alive when the next unit builds, so
+    one process can run several 10-30 M arms in a row."""
+    jobs = _jobs(tiny_configs, algos=["linr_v1_filter_mask"])
+    assert len(jobs) == 3
+    real_build, built = run.build_module, []
+
+    def build(*a, **kw):
+        assert [r for r in built if r() is not None] == []
+        m = real_build(*a, **kw)
+        built.append(weakref.ref(m))
+        return m
+
+    monkeypatch.setattr(run, "build_module", build)
+    assert dict(run.run(jobs, out_dir=tmp_path / "results", modes=EAGER, **KW)) == {"partial": 3}
+    assert len(built) == 3
+
+
+def test_a_failed_build_is_released_after_its_traceback_is_gone(
+    tiny_configs, tmp_path, monkeypatch
+):
+    """Roadmap H-ARMFREE: the release after a failed build runs once the exception (whose
+    traceback holds the half-built tensors) is gone, so a retry does not see them held."""
+    jobs = _jobs(tiny_configs, algos=["linr_v1_filter_mask"])
+    real_build, real_release, held, seen = run.build_module, run._release, [], []
+
+    def build(*a, **kw):
+        if not held:
+            partial_index = torch.zeros(1024)
+            held.append(weakref.ref(partial_index))
+            raise RuntimeError("out of memory (simulated)")
+        return real_build(*a, **kw)
+
+    def release():
+        gc.collect()  # what the real release does first: can it free them yet?
+        if held:  # the releases after the failure
+            seen.append(held[0]() is None)
+        real_release()
+
+    monkeypatch.setattr(run, "build_module", build)
+    monkeypatch.setattr(run, "_release", release)
+    counts = run.run(jobs, out_dir=tmp_path / "results", modes=EAGER, **KW)
+    assert dict(counts) == {"failed": 1, "partial": 2}
+    assert seen[0] is True

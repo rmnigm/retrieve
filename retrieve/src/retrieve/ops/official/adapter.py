@@ -5,13 +5,11 @@ the upstream constants live in the package ``__init__``). Everything is eager on
 
 from __future__ import annotations
 
-import functools
 import math
 
 import torch
 from torch import Tensor
 
-from retrieve.functional import masked_topk
 from retrieve.indexing.quantize import quantize_int8
 from retrieve.ops.official import (
     BLOOM_OUTPUT_BIT_ORDER,
@@ -113,10 +111,13 @@ def queries_to_expressions(
     return out
 
 
-def _parse_plans(
-    expressions: tuple[str, ...], hash_k: int, max_sub_queries: int
+def parse_plans(
+    expressions: list[str], hash_k: int, max_sub_queries: int = 5
 ) -> tuple[Tensor, Tensor]:
-    """One call into the CPU parser — the uncached body of :func:`parse_plans`."""
+    """``(plans_data int8, plans_offsets int64)`` on **CPU** for a batch of expressions, one call
+    into Meta's CPU parser (≈ 59 µs at B=16). The search ops decode plans on the host per call
+    (``bloom_index_search_cuda.cu:1045``), so CPU plans spare them a D2H. Query preparation:
+    ``SilverTorch.prepare_queries`` runs it outside ``forward``."""
     st = ensure_loaded()
     # `silvertorch_ks` is accepted and ignored upstream (expression_query_parser.cpp:395).
     ks = torch.ones(len(expressions), dtype=torch.int64)
@@ -125,24 +126,6 @@ def _parse_plans(
     )
     data, offsets = plans
     return data.contiguous(), offsets.contiguous()
-
-
-_parse_plans_cached = functools.lru_cache(maxsize=4096)(_parse_plans)
-
-
-def parse_plans(
-    expressions: list[str], hash_k: int, max_sub_queries: int = 5, *, cache: bool = True
-) -> tuple[Tensor, Tensor]:
-    """``(plans_data int8, plans_offsets int64)`` on **CPU** for a batch of expressions.
-    Plans depend only on ``(strings, hash_k, max_sub_queries)``; the search ops decode them
-    host-side per call and would copy CUDA-resident plans back to the CPU first, so keeping
-    them on CPU is the cheaper choice. ``cache=True`` memoises on the string
-    tuple (LRU, 4096 batches); ``cache=False`` parses every call — ≈ 59 µs at B=16 (plan
-    §13.2) — which is what a timing run must use so the parse is not hidden behind a
-    replayed batch (``OfficialConfig.cache_plans``)."""
-    if not cache:
-        return _parse_plans(tuple(expressions), int(hash_k), int(max_sub_queries))
-    return _parse_plans_cached(tuple(expressions), int(hash_k), int(max_sub_queries))
 
 
 # --- masks ------------------------------------------------------------------------------
@@ -327,23 +310,46 @@ def official_probe_score(
     filtering_bit_mask: Tensor | None = None,
     partial: tuple[Tensor, Tensor, Tensor] | None = None,
 ) -> tuple[Tensor, Tensor]:
-    """:func:`official_scores_full` + the shared ``masked_topk`` epilogue → ``(ids int64
-    [B, k], scores fp32 [B, k])`` with ``-1`` / ``-inf`` pads, like every other backend."""
-    scores, ids, valid = official_scores_full(
-        query,
+    """The official scorer + our top-k epilogue → ``(ids int64 [B, k], scores fp32 [B, k])`` with
+    ``-1`` / ``-inf`` pads, like every other backend. The top-k runs on the scorer's raw ``[B, M]``
+    (int32 dots, or ``fp16(dot / divisor)``); only the ``[B, k]`` winners are dequantized and
+    mapped through ``sort_perm`` (kernels.md § official, "Epilogue"). Dequantizing multiplies by
+    positive scales, so the order is the dequantized scores' and each winner's score is the same
+    two fp32 multiplies as :func:`dequantize_scores`: bit-identical, ties aside."""
+    q_codes, q_scales = quantize_int8(query)
+    div = (
+        -1
+        if score_path == "int32"
+        else (default_divisor(item_codes_sorted.shape[1]) if divisor is None else int(divisor))
+    )
+    raw, idx = fused_scores(
+        q_codes,
         probe_ids,
         cluster_offsets,
         cluster_sizes,
         item_codes_sorted,
-        sort_perm,
-        global_scale,
         max_tensor_size_per_row,
-        score_path=score_path,
-        divisor=divisor,
+        divisor=div,
         filtering_bit_mask=filtering_bit_mask,
         partial=partial,
     )
-    return masked_topk(scores, k, valid=valid, gather_ids=ids)
+    valid = idx >= 0
+    floor = torch.iinfo(raw.dtype).min if raw.dtype == torch.int32 else float("-inf")
+    actual_k = min(k, raw.shape[1])
+    top_raw, top_slot = torch.topk(torch.where(valid, raw, floor), actual_k, dim=1)
+    top_valid = valid.gather(1, top_slot)
+    pos = idx.gather(1, top_slot).long().clamp_min(0)
+    ids = torch.where(top_valid, sort_perm[pos], -1)
+    if raw.dtype == torch.int32:
+        scores = top_raw.to(torch.float32) * q_scales.unsqueeze(1) * global_scale
+    else:
+        scores = top_raw.to(torch.float32) * (div * q_scales * global_scale).unsqueeze(1)
+    scores = torch.where(top_valid, scores, float("-inf"))
+    if actual_k < k:
+        pad = k - actual_k
+        ids = torch.cat([ids, ids.new_full((ids.shape[0], pad), -1)], dim=1)
+        scores = torch.cat([scores, scores.new_full((scores.shape[0], pad), float("-inf"))], dim=1)
+    return ids, scores
 
 
 # --- bloom search ---------------------------------------------------------------------
@@ -357,13 +363,16 @@ def bloom_partial_masks(
     selected_cluster_lengths: Tensor,
     k: int,
     hash_k: int,
+    query_plan_index: Tensor | None = None,
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Phase 2 of the paper's co-design: the official bloom evaluated **only over the
     probed clusters**, returned as the ``(column_counts_cumsum int32 [B·P],
     first_item_offset_in_column int8 [B·P], column_mask_response int64 [Σ])`` triple
     ``fused_kmean_ann_with_partial_masks`` consumes. ``selected_cluster_offsets`` /
     ``lengths`` are int64 ``[B, P]`` (``cluster_offsets[probe_ids]``,
-    ``cluster_sizes[probe_ids]``)."""
+    ``cluster_sizes[probe_ids]``). ``query_plan_index`` (int64 ``[B]`` on the device) maps each
+    row to its plan, so ``plans`` may hold one plan per distinct expression
+    (``bloom_index_search_cuda.cu:1230``)."""
     st = ensure_loaded()
     if not 0 < k <= MAX_SEARCH_K:
         raise ValueError(
@@ -379,6 +388,7 @@ def bloom_partial_masks(
         selected_cluster_lengths.to(torch.int64).contiguous(),
         int(k),
         int(hash_k),
+        query_plan_index,
     )
 
 

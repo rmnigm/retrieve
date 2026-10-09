@@ -5,12 +5,13 @@ addressing from the caller. **No helper decides its own tile shape, launch grid,
 masking policy** — callers keep their own grids, loads, and epilogue policy. That
 invariant is what lets one helper serve kernels with very different launch shapes.
 
-Helpers: ``row_base``, ``tile_rows``, ``probe_tile``, ``probe_dots``, ``or_combine``,
-``popcount_int64``, ``bloom_subset_pass``, ``clause_pass``, ``compact_store``, ``compact_stash``;
-plus two launched kernels: ``compact_scatter_kernel`` (the predicate-free second phase both
-compaction ops share, driven by ``_host.compact_finish``) and ``probe_ids_kernel`` (the probe
-scorers' id epilogue). Per-helper semantics and the call-site map live in
-docs/system/kernels.md § Shared kernel helpers.
+Helpers: ``row_base``, ``tile_rows``, ``probe_tile``, ``probe_tile_table``,
+``probe_tiles_table``, ``probe_dots``, ``or_combine``, ``popcount_int64``, ``bloom_subset_pass``,
+``clause_pass``, ``compact_store``, ``compact_stash``; plus three launched kernels:
+``probe_table_kernel`` (the wide-probe scorers' per-row layout), ``compact_scatter_kernel`` (the
+predicate-free second phase both compaction ops share, driven by ``_host.compact_finish``) and
+``probe_ids_kernel`` (the probe scorers' id epilogue). Per-helper semantics and the call-site
+map live in docs/system/kernels.md § Shared kernel helpers.
 """
 
 import triton
@@ -73,6 +74,95 @@ def probe_tile(
     pos = tl.sum(tl.where(hit, lo, 0)) + off + lane
     valid = (off + lane < tl.sum(tl.where(hit, size, 0))) & ~tail
     return pos, slot, valid, tail
+
+
+@triton.jit
+def probe_table_kernel(
+    probe_ids_ptr,
+    offsets_ptr,
+    table_ptr,
+    count_ptr,
+    n_probe,
+    NPP: tl.constexpr,
+    BLOCK_P: tl.constexpr,
+    ZERO_COUNT: tl.constexpr,
+):
+    """One program per row: the row's probe layout as ``[3, n_probe]`` int64 rows (tile ends,
+    slot ends, cluster starts) for ``probe_tile_table``, so the wide-probe scorers build it once
+    per row, not once per tile (kernels.md § SilverTorch kernels, "Probe table"). ``ZERO_COUNT``:
+    also zero the bloom two-pass's passing-tile count, saving a memset launch."""
+    bid = tl.program_id(0)
+    i = tl.arange(0, NPP)
+    live = i < n_probe
+    c = tl.load(probe_ids_ptr + bid * n_probe + i, mask=live, other=0)
+    lo = tl.load(offsets_ptr + c, mask=live, other=0)
+    size = tl.load(offsets_ptr + c + 1, mask=live, other=0) - lo
+    row = table_ptr + bid * 3 * n_probe
+    tl.store(row + i, tl.cumsum((size + BLOCK_P - 1) // BLOCK_P, 0), mask=live)
+    tl.store(row + n_probe + i, tl.cumsum(size, 0), mask=live)
+    tl.store(row + 2 * n_probe + i, lo, mask=live)
+    if ZERO_COUNT and bid == 0:
+        tl.store(count_ptr, 0)
+
+
+@triton.jit
+def probe_tile_table(table_ptr, bid, t, n_probe, FAN: tl.constexpr, BLOCK_P: tl.constexpr):
+    """``probe_tile`` read from ``probe_table_kernel``'s row: the tile's cluster by a two-level
+    ``FAN``-ary search over the tile ends (``FAN ** 2 >= n_probe``), two dependent vector loads of
+    ``FAN`` lanes instead of the row's whole table per tile. Same ``(pos, slot, valid, tail)``."""
+    row = table_ptr + bid * 3 * n_probe
+    n_tiles = tl.load(row + n_probe - 1)
+    total = tl.load(row + 2 * n_probe - 1)
+    # j: the first cluster whose tile end lies past t (n_probe in the tail) = the count of tile
+    # ends <= t, counted per block of FAN ends, then inside the block.
+    f = tl.arange(0, FAN)
+    ends = (f + 1) * FAN - 1
+    e = tl.load(row + ends, mask=ends < n_probe, other=t + 1)
+    j = tl.sum((e <= t).to(tl.int32)) * FAN
+    idx = j + f
+    e = tl.load(row + idx, mask=idx < n_probe, other=t + 1)
+    j += tl.sum((e <= t).to(tl.int32))
+    tail = t >= n_tiles
+    inside = j < n_probe
+    first = j > 0
+    tile_start = tl.load(row + j - 1, mask=inside & first, other=0)
+    slot_start = tl.load(row + n_probe + j - 1, mask=inside & first, other=0)
+    size = tl.load(row + n_probe + j, mask=inside, other=0) - slot_start
+    lo = tl.load(row + 2 * n_probe + j, mask=inside, other=0)
+    off = (t - tile_start) * BLOCK_P
+    lane = tl.arange(0, BLOCK_P)
+    slot = tl.where(tail, total + (t - n_tiles) * BLOCK_P + lane, slot_start + off + lane)
+    pos = lo + off + lane
+    valid = (off + lane < size) & ~tail
+    return pos, slot, valid, tail
+
+
+@triton.jit
+def probe_tiles_table(table_ptr, bid, tt, n_probe, FAN: tl.constexpr, BLOCK_P: tl.constexpr):
+    """``probe_tile_table`` over a vector of tiles ``tt`` → per tile ``(pos0, n_valid, slot0,
+    tail)``: its first sorted position, its in-cluster lane count (0 in the tail), its first
+    slot."""
+    row = table_ptr + bid * 3 * n_probe
+    n_tiles = tl.load(row + n_probe - 1)
+    total = tl.load(row + 2 * n_probe - 1)
+    f = tl.arange(0, FAN)
+    ends = (f + 1) * FAN - 1
+    e = tl.load(row + ends, mask=ends < n_probe, other=tl.cast(1 << 62, tl.int64))
+    j = tl.sum((e[None, :] <= tt[:, None]).to(tl.int32), 1) * FAN
+    idx = j[:, None] + f[None, :]
+    e = tl.load(row + idx, mask=idx < n_probe, other=tl.cast(1 << 62, tl.int64))
+    j += tl.sum((e <= tt[:, None]).to(tl.int32), 1)
+    tail = tt >= n_tiles
+    inside = j < n_probe
+    first = inside & (j > 0)
+    tile_start = tl.load(row + j - 1, mask=first, other=0)
+    slot_start = tl.load(row + n_probe + j - 1, mask=first, other=0)
+    size = tl.load(row + n_probe + j, mask=inside, other=0) - slot_start
+    lo = tl.load(row + 2 * n_probe + j, mask=inside, other=0)
+    off = (tt - tile_start) * BLOCK_P
+    slot0 = tl.where(tail, total + (tt - n_tiles) * BLOCK_P, slot_start + off)
+    n_valid = tl.where(tail, 0, tl.minimum(size - off, BLOCK_P))
+    return lo + off, n_valid, slot0, tail
 
 
 @triton.jit
@@ -223,25 +313,26 @@ def clause_pass(
     caller moved to its tile with ``row_base``, or absolute int64 gathered ``safe_ids``;
     kernels.md § Addressing);
     ``load_mask`` gates the attr loads (``other=-1``) and seeds ``keep``, so
-    the result is already ANDed with it. ``is_reverse_ptr`` must point at int8
-    storage (host wrappers do ``.to(torch.int8)``; Triton can't load native
-    torch.bool) — loaded per clause and cast ``.to(tl.int1)``. ``q_c == -1``
-    marks an inactive clause: always passes, overriding reverse."""
+    the result is already ANDed with it; an inactive clause's loads are skipped.
+    ``is_reverse_ptr`` must point at int8 storage (host wrappers do ``.to(torch.int8)``;
+    Triton can't load native torch.bool) — loaded per clause and cast ``.to(tl.int1)``.
+    ``q_c == -1`` marks an inactive clause: always passes, overriding reverse."""
     keep = load_mask
     for c in tl.static_range(C):
         q_c = tl.load(query_attrs_ptr + bid * stride_qb + c * stride_qc)
-        rev_c = tl.load(is_reverse_ptr + c).to(tl.int1)
-        clause_match = tl.zeros(ids.shape, tl.int1)
-        for a in tl.static_range(A_MAX):
-            ia = tl.load(
-                item_attrs_ptr + ids * stride_in + c * stride_ic + a * stride_ia,
-                mask=load_mask,
-                other=-1,
-            )
-            clause_match = clause_match | (ia == q_c)
-        clause_match = clause_match ^ rev_c
-        clause_match = clause_match | (q_c == -1)  # inactive clause always passes
-        keep = keep & clause_match
+        # An inactive clause passes whatever the item holds: a uniform branch skips its loads
+        # (kernels.md § Shared kernel helpers, "Inactive clauses").
+        if q_c != -1:
+            rev_c = tl.load(is_reverse_ptr + c).to(tl.int1)
+            clause_match = tl.zeros(ids.shape, tl.int1)
+            for a in tl.static_range(A_MAX):
+                ia = tl.load(
+                    item_attrs_ptr + ids * stride_in + c * stride_ic + a * stride_ia,
+                    mask=load_mask,
+                    other=-1,
+                )
+                clause_match = clause_match | (ia == q_c)
+            keep = keep & (clause_match ^ rev_c)
     return keep
 
 

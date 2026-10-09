@@ -1,7 +1,7 @@
 ---
 title: roadmap
 created: 2026-09-26
-updated: 2026-10-08
+updated: 2026-10-11
 type: summary
 tags: [roadmap]
 sources: [evaluation/config/suites.yaml, evaluation/bench/, infra/runpod/, docs/validation.md, docs/artifacts/hub-index.md]
@@ -110,13 +110,10 @@ multi-GPU numbers are comparable at all.
 
 **Exploration first, one clean pass last** (user, 2026-10-09,
 [decisions](decisions.md#campaign-v2-user-2026-10-08)). While the library
-is still improving, legs run at the current tag (now `campaign-v2.5`,
-code_version `472f2fc68c697179b463d3b5a6b19ade194e6e2f` = v2.4 + ST-LANE +
-V2-FILL + C5-OURS, Hub `campaign-v2.5/<dataset>-<suite>`; `campaign-v2.4` was
-`d67d6263` (v2.3 + ST-SKIP128), `campaign-v2.3` was `1258a63e`
-(v2.2 + ST-IDS + V2-HIGHP + V1-FUSE), `campaign-v2.2` was
-`0d23c615`, `campaign-v2.1` `f01255f1`, `campaign-v2` `408b1188`) to see how
-everything behaves and to make the charts. A new tag does not stop or
+is still improving, legs run at the current tag (the `default` of
+[campaign.yaml](../evaluation/campaign.yaml), Hub `<tag>/<dataset>-<suite>`;
+its `log` lists every tag, its library code_version and what it changed)
+to see how everything behaves and to make the charts. A new tag does not stop or
 invalidate anything: every record keeps its code_version, and a change adds
 rows to the **redo ledger** below only for the cells it actually changes.
 The final repro pass (F-REPRO) reruns the ledger, or the whole grid at the
@@ -147,6 +144,8 @@ leg runs one library.
 | every SilverTorch Triton perf record before v2.3 (all widths; ≈ −3 µs at k 100 × n_probe 24, more at k 1000) | ST-IDS | Triton perf |
 | V1 Triton perf before v2.3 | V1-FUSE | V1 perf |
 | every official perf record before v2.6 (C5 codesign official, T3 h2h, D3 / bloomwidth official) | OFFICIAL-REWORK (our adapter's per-forward host work left the timed call) | official perf |
+| every bloom-filter perf record before v2.6, every backend (SilverTorch, LiNR V1-V3, postfilter, router) | OFFICIAL-REWORK M1: the query-side filter encoding left the timed forward (now `query_prep_ms`) | bloom perf (forward) |
+| synth clause perf (V1, V2, SilverTorch exact) on the 10-clause synth tables before v2.7 | CLAUSE-SKIP (inactive clauses were loaded) | clause perf |
 | SilverTorch Triton bloom perf before v2.5 (all widths; 0 to −10 %) | ST-LANE (bit-exact; none / exact SASS unchanged) | Triton bloom perf |
 | V2 Triton perf at `D_PAD` ≤ 256 before v2.5 (incl. C1's crossover; 0.22-0.97 of v2.4) | V2-FILL (bit-exact) | V2 perf |
 | graph-mode ids of SilverTorch records at `408b1188` | quantize fix | ids (D1-G's id gate) |
@@ -202,53 +201,41 @@ co-design.
   per-query selectivity overlay from the dumps), F3, F4a, F4b; plus the D1-G
   checks on what exists (eager-vs-graph `ids_sha256`, bs 16 < 16 × bs 1,
   recall sanity vs exact arms). Each run: an artifact page for the user and
-  a note naming new bugs, surprises and claim status. Pod 1, slot 2.
+  a note naming new bugs, surprises and claim status.
 - [ ] **V-AX-CORR: the cluster-correlated synth variant** (re-plan P1; its
   trigger, the IVF recall collapse at low pass rate, shows on YFCC and
   PubMed). Builder: `eval-data synth-filter --correlated` (coarse k-means
   with round(1/p) centroids; item attribute = its cluster, a query's clause =
   its nearest centroid), `arxiv-corr-synth.yaml`, CPU test (pass rate, query
   side); then arXiv at p {0.01, 0.03, 0.1}, every synth arm. IVF's best case
-  next to the uniform worst case (F2). Pod c, slot 2. **≈ 3 GPU-h.**
+  next to the uniform worst case (F2). **≈ 3 GPU-h.**
 - [ ] **H-SCOPE follow-ups**: `kernel_scopes` is merged (harness, CPU
   test over every real kernel name). Left: the report's T3 scorer column
-  reads `kernel_scopes`, and one GPU test on a real call (pod 1, ~2 min, in
-  the H-QLOOP gate slot).
+  reads `kernel_scopes`, and one GPU test on a real call (~2 min).
 - [ ] **C5-OURS cells: co-design vs full mask inside our Triton backend**
   (idea #3; the `bloom_path=full` option is in `campaign-v2.5`). Run the
   `codesign` triton cells interleaved partial / full on goodreads + arXiv,
   plus one PubMed 10 M point (C5 is claimed at 20 M; the full mask's
   scratch grows with N). Separates the co-design idea from Meta's host-side
-  partial path (V-PROF3). st-dloop, pod b, at `campaign-v2.5`, Hub
-  `campaign-v2.5/<dataset>-codesign-ours`. **≈ 1-2 GPU-h.**
-- [ ] **EXHIBITS ideas #1, #2, #6** (CPU, exhibits analyst on pod 1): a per-query
+  partial path (V-PROF3). At `campaign-v2.5` or later, Hub
+  `<tag>/<dataset>-codesign-ours`. **≈ 1-2 GPU-h.**
+- [ ] **EXHIBITS ideas #1, #2, #6** (CPU): a per-query
   pass-rate router (IVF / V2 / V1) as a counterfactual from the sidecars;
   filter-cluster alignment (GLS) to explain F2's real-vs-synth gap, with
   V-AX-CORR; Big-ANN-style QPS at recall 0.95 per selectivity band, and a
   reproduction defect ledger.
-- [ ] **V-ROUTER: a local-pass-rate router as a measured arm** (EXHIBITS idea
-  #2: IVF recall follows the local pass rate l_q, the share of a query's
-  unfiltered top-100 that pass; Spearman 0.82 / 0.48 vs 0.38 / 0.30 for the
-  global p; the counterfactual l_q router is within 5 % of the per-query
-  oracle on goodreads). Harness arm `router`: a cheap unfiltered SilverTorch
-  pre-probe (small n_probe, k 100) gives l_q per query, then exact (V2) below
-  a threshold, IVF above; the pre-probe's cost is timed in the arm. Fit the
-  threshold on goodreads, report it fixed on arXiv and PubMed (transfer).
-  Gates: recall equal to its two branches per query (ids from the routed arm),
-  harness suite. Beyond the original papers; F2 / T2 practical take. Pod 1's
-  runner after V-GR-DEEP. **≈ 1-2 GPU-h.**
-- [ ] **V-V3BITS (goodreads-synth done; goodreads' 48 cells deferred): V3 at LiNR's bit budget, next to our deviation** (C2 does
-  not hold so far: recall −7-13 % at a 1 % pool, no gain at bs 1; our V3
-  runs `k_bits` = D = 128 against LiNR's 512, LN-8). `k_bits` must divide D
+- [ ] **V-V3BITS: V3 at LiNR's bit budget, next to our deviation**: what is
+  left is goodreads' 48 cells (goodreads-synth holds in
+  [validation](validation.md)); our V3 runs `k_bits` = D = 128 against
+  LiNR's 512 (LN-8). `k_bits` must divide D
   (`quantize.py` `_oporp_k_bits`), so at D 128 only {64, 128} exist without a
   library change: goodreads-synth and goodreads `filter` V3 at `k_bits`
   {64, 128}, pool {1 %, 5 %}, quality first, then the timed cells, to show
-  the recall-vs-bits slope. LN-8 stays the campaign's setting. Pod 1.
+  the recall-vs-bits slope. LN-8 stays the campaign's setting.
   **≈ 1 GPU-h.**
-- [ ] **D3: `bloomwidth`**: PubMed `bloomwidth-timed` reruns at `campaign-v2.2`
-  (its v2.1 run tripped the surprise gate, ST-DLOOP); goodreads and arXiv done
-  (timed at v2.1), PubMed `bloomwidth` (quality) done
-  ([validation](validation.md), Hub `campaign-v2/arxiv-bloomwidth[-timed]`):
+- [ ] **D3: `bloomwidth`**: what is left is PubMed `bloomwidth-timed` at
+  `campaign-v2.2` or later (the v2.1 run tripped the surprise gate; the
+  other legs hold in [validation](validation.md)):
   both blooms, `m_bits` 64-2048 × `k_hash` {3, 5}, quality-only plus one
   timed point per width at bs 16. F4a, C4. **≈ 3-5 GPU-h**, GPU 1 (the
   timed points on GPU 0).
@@ -261,7 +248,7 @@ co-design.
   configs, `suites.yaml`, the YFCC chunk list regenerated; cell counts and
   GPU-h re-projected before V-AX-SYNTH starts. goodreads-synth gains 0.05 /
   0.2 / 0.5 at seed 0 (≈ 1-2 GPU-h) so the panels share the middle points.
-  d-run, pod d, before V-AX-SYNTH.
+  Before V-AX-SYNTH.
 - [ ] **V-AX-SYNTH: arXiv synth** on SYNTH-TRIM's grid (the correlated
   variant is V-AX-CORR). F1/F2 3M panel. **≈ 15-45 GPU-h**
   (the pilot measured 8.7 GPU-h at 0.8 M; re-projected ≈ 24-30 GPU-h, the
@@ -279,14 +266,13 @@ co-design.
   V-AX-SYNTH on another GPU (three pods, no fourth: user, 2026-10-08); a
   collapse found on arXiv adds YFCC points afterwards. **≈ 31-54 GPU-h**
   (EXHIBITS run 1; V3 at 10 M is most of the range: one timed V3 cell first).
-  `deep` on pod 1; `synth` split in arm-group chunks (`bench run --algo`, one
-  interleave unit never split), each taken by whichever of pod 1 and pod c
-  frees first (V-AX-SYNTH is now ≈ 24-30 GPU-h on pod c).
+  `synth` splits in arm-group chunks (`bench run --algo`, one interleave
+  unit never split) across free GPUs.
 - [ ] **V-SEEDS: arXiv and YFCC `filter`, the cells the manifest does not
   reuse.** Deferred to F-REPRO (user, 2026-10-10: the exploration needs
   numbers that decide the claims, not final ones; seed variance is a
-  final-pass question). The arXiv half runs only if pod b has nothing
-  claim-deciding queued. arXiv: 117 cells (V1-V3 `c3_nversions` seeds 0-2; SilverTorch
+  final-pass question). The arXiv half runs only if no claim-deciding
+  work is queued. arXiv: 117 cells (V1-V3 `c3_nversions` seeds 0-2; SilverTorch
   triton; official bloom; `postfilter` α {1, 8}; SilverTorch torch, plain
   and compiled, for C3); V1-V3 on `c0_maincat` / `all4` are reused
   through the manifest (36 cells, [campaign.yaml](../evaluation/campaign.yaml)).
@@ -313,39 +299,30 @@ co-design.
   + `laion30m.yaml` + CPU tests + `bench check`; then a reduced `filter`
   grid (SilverTorch triton, V1, V2, bs 1 / 16, 3 sweeps, seed 0) at the
   current tag, IVF sized for 30 M under the 25 % cap. Memory: 31 GB fp32
-  items + 7.7 GB int8 codes (the item-chunked oracle holds no copy). Pod d, CPU
-  now, GPU after V-AX-SYNTH. **≈ 10-15 GPU-h** (estimate, scaled from
+  items + 7.7 GB int8 codes (the item-chunked oracle holds no copy).
+  **≈ 10-15 GPU-h** (estimate, scaled from
   PubMed's 10 M cells).
 - [ ] **V3-BITS-PUBMED: V3 at `k_bits` 256 on PubMed d768** (user,
   2026-10-10). LiNR's V3 used 512 bits on d128; our OPORP gives at most D
   bits (one per coordinate, LiNR's own §3.2 wording), so d128 / d192 run
   D bits and V-V3BITS's 64; at d768 we already run 768 bits, and 256
   (divides 768) brackets LiNR's 512 from below. PubMed `filter` kept
-  sweeps, V3 triton, pool {1 %, 5 %}, seed 0. Pod b after V-SEEDS arXiv.
+  sweeps, V3 triton, pool {1 %, 5 %}, seed 0. After V-SEEDS arXiv.
   **≈ 1-2 GPU-h.**
-- [ ] **OFFICIAL-REWORK: the official backend run as Meta intends** (user,
-  2026-10-10: "the algo speed should not suffer from the need to adapt the
-  code"). Our adapter did per-forward host work inside every timed call
-  (`queries_to_expressions` with a `.tolist()` sync, the CPU parse with the
-  plan cache off for timing, an 826 MiB `pack_mask` intermediate in exact
-  mode). Redesign: every index-side transform at `register_index`, every
-  query-side transform in `prepare_queries` (outside the timed call,
-  reported as `query_prep_ms` for every backend alike), a forward of Meta's
-  ops plus minimal glue with zero host syncs of ours, Meta's in-kernel
-  top-k if it has one, a packed exact-mask kernel, CUDA-graph capture
-  wherever Meta's ops allow. Gates: ids + scores `torch.equal` against the
-  current paths, library + harness suites, keep rule; tag `campaign-v2.6`;
-  then C5 official and T3 h2h re-run claims-first. st-dloop, pod b; C5's
-  verdict on Meta's code waits for it.
-- [ ] **ROUTER-LIB: the router as a library method** (the library goal,
-  user 2026-10-10; only if V-ROUTER on PubMed puts it on the Pareto
-  front, [decisions](decisions.md#datasets); WIP on `dev/router-lib`): the harness `router` arm's logic (unfiltered pre-probe
-  → l_q → V2 below the threshold, SilverTorch above) as a `retrieve`
-  module with its docs page, the split done on the device with no host
-  sync so the arm can be CUDA-graph captured (V-ROUTER at 0.8 M: the
-  eager-only host split is why it never beat graph V2); the harness arm calls it; gates: the arm's
-  records unchanged (ids + scores `torch.equal`), library + harness suites.
-  After V-ROUTER's goodreads fit.
+- [ ] **OFFICIAL-O3: Meta's extension built with `-O3`** (OF-11: Meta's setup passes no
+  `-O`, host code at gcc `-O0`; `-O3` is 0.77-0.98 of the shipped time, outputs
+  bit-identical). New official legs build their own venv with
+  `scripts/build_official_o3.sh`; `env.official_build` records the loaded
+  extension's sha256 and flags. Remaining: rebuild the shared venvs between legs.
+- [ ] **ST-WIDE-2: the bloom two-pass at `D_PAD` ≤ 256** (ST-WIDE engaged it only at
+  d768; at 30 M d256, n_probe 128, bs 64 Meta -O3 is 1.8-2.0x faster). Bit-exact;
+  keep rule across d128 / d192 / d256 × n_probe × bs incl. narrow cells; narrow
+  SASS unchanged where it does not engage. Then cross-query cluster sharing
+  only if the 30 M gap remains.
+- [ ] **C5-OURS-30M + C1 re-time at v2.7**: codesign-laion30m's triton half
+  (our partial vs full at 30 M, beside Meta's, on one box; per-sweep processes
+  until H-ARMFREE lands) and arxiv-synth's V1 / V2 cells re-timed (C1's 3 M
+  crossover without the clause-width cost).
 - [ ] **REL-LIC: license audit and the public-release plan** (user,
   2026-10-10, ECIR Availability): per dataset (goodreads, arXiv, PubMed /
   MedCPT, YFCC-10M, Re-LAION, the synth attrs) whether the derived data may
@@ -391,7 +368,6 @@ co-design.
 | M1 | 0.5 | both | |
 | EXHIBITS | 0 | CPU | after every leg |
 | V-AX-CORR | ≈ 3 | 0 | 3 points, arXiv |
-| V1-FUSE | ≈ 1 | 0 | gates + keep-rule grid |
 | V-V3BITS | ≈ 1-2 | 0 | goodreads |
 | D3 bloomwidth | ≈ 3-5 | 1 (+0) | quality-only cells |
 | V-AX-SYNTH | ≈ 15-45 | 0 | Triton ~2,000 s per pass point; V1/V2 torch at 3 points ×3 seeds is most of it |

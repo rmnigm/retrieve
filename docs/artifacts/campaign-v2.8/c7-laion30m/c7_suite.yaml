@@ -1,0 +1,17 @@
+# C7 at 30 M (controller 2026-10-11): ours (triton) vs Meta (official, -O3) on the bloom partial path, one interleave group per cell
+# (by backend), laion30m d256 n_lists 16384, n_probe {32, 128}, bs {16, 64}, k 100, seed 0. Appended to a copy of config/suites.yaml.
+c7-laion30m:
+  datasets: [laion30m]
+  dims: [256]
+  filter_kinds: [bloom]
+  ks: [100]
+  batch_sizes: [16, 64]
+  seeds: [0]
+  sweeps:
+    laion30m: [c0_domain, tags4]
+  interleave: [{by: backend, values: [triton, official]}]
+  arms:
+    - algo: silvertorch
+      backends: [triton, official]
+      build: {bloom_path: [partial], n_lists: [16384]}
+      query: {n_probe: [32, 128]}

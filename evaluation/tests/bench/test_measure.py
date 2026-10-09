@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import hashlib
 import importlib.metadata
+import importlib.util
+import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -109,6 +111,7 @@ def test_provenance_fields():
     expected = {
         "gpu", "driver", "cuda", "torch", "triton", "commit", "dirty", "repo_dirty",
         "git_branch", "code_version", "host", "python", "started", "official_commit",
+        "official_build",
     }  # fmt: skip
     assert expected <= set(p)
     assert p["torch"] == torch.__version__
@@ -432,3 +435,36 @@ def test_latency_group_alternates_windows_across_arms():
     assert all(len(ms) == 4 and d["n"] == 4 for d, ms in out)
     one, _ = bench.latency(fns[0], bs=1, mode="eager", warmup=2, windows=3, n_min=4, n_max=4)
     assert set(one) == set(out[0][0])
+
+
+@pytest.mark.parametrize(
+    ("visible", "want"),
+    [(None, "0"), ("", "0"), ("1", "1"), ("1,0", "1"), ("GPU-8f2c-aa01,1", "GPU-8f2c-aa01")],
+)
+def test_smi_device_is_the_first_visible_device(monkeypatch, visible, want):
+    if visible is None:
+        monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    else:
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", visible)
+    assert bench.smi_device() == want
+
+
+def test_official_build_records_the_extension_and_its_flags(monkeypatch, tmp_path):
+    """OF-11: the loaded extension's sha256, and the nvcc flags its build recipe wrote beside it
+    (``None`` = Meta's setup.py defaults); ``None`` overall without silvertorch."""
+    pkg = tmp_path / "silvertorch"
+    pkg.mkdir()
+    (pkg / "_C.cpython-311-x86_64-linux-gnu.so").write_bytes(b"not really an elf")
+    spec = SimpleNamespace(submodule_search_locations=[str(pkg)])
+    monkeypatch.setattr(
+        importlib.util, "find_spec", lambda name: spec if name == "silvertorch" else None
+    )
+    got = bench.official_build()
+    assert got["so_sha256"] == hashlib.sha256(b"not really an elf").hexdigest()
+    assert got["so_path"].endswith(".so") and got["nvcc_append_flags"] is None
+    assert got["so_bytes"] == len(b"not really an elf")
+    flags = {"nvcc_append_flags": "-O3 -Xcompiler -O3"}
+    (pkg / bench.OFFICIAL_BUILD_FLAGS).write_text(json.dumps(flags))
+    assert bench.official_build()["nvcc_append_flags"] == "-O3 -Xcompiler -O3"
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
+    assert bench.official_build() is None

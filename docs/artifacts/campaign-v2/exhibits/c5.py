@@ -14,7 +14,7 @@ import statistics as st
 import sys
 from pathlib import Path
 
-from load import cv, load, recall
+from load import cv, load, official_build, recall
 
 from bench import stats
 
@@ -35,10 +35,20 @@ def main():
             r["params"]["n_probe"],
             r["params"].get("n_lists"),
             r["seed"],
+            official_build(r),
         )
         pairs[k][r["params"]["bloom_path"]] = r
     cells = collections.defaultdict(
-        lambda: {"f": [], "p": [], "rec": [], "mhz": set(), "spread": [], "unst": 0}
+        lambda: {
+            "f": [],
+            "p": [],
+            "rec": [],
+            "mhz": set(),
+            "spread": [],
+            "unst": 0,
+            "prep_f": [],
+            "prep_p": [],
+        }
     )
     for k, d in pairs.items():
         if set(d) != {"full", "partial"}:
@@ -58,7 +68,7 @@ def main():
             )
             if not ep or ef.get("median_ms") is None or ep.get("median_ms") is None:
                 continue
-            c = cells[k[:6] + (ef["bs"], ef["mode"])]
+            c = cells[k[:6] + (ef["bs"], ef["mode"], k[7])]
             if same_group and len(ef["window_medians_ms"]) == len(ep["window_medians_ms"]):
                 c["f"] += ef["window_medians_ms"]
                 c["p"] += ep["window_medians_ms"]
@@ -70,6 +80,10 @@ def main():
             }
             c["spread"] += [ef.get("spread") or 0, ep.get("spread") or 0]
             c["unst"] += bool(ef.get("unstable")) + bool(ep.get("unstable"))
+            # from v2.6 the query-side filter encoding is out of the timed forward (evaluation.md)
+            for side, e in (("prep_f", ef), ("prep_p", ep)):
+                if e.get("query_prep_ms") is not None:
+                    c[side].append(e["query_prep_ms"])
     rows = []
     for k, c in sorted(cells.items(), key=lambda x: tuple(map(str, x[0]))):
         ci = stats.paired_ratio_ci(c["f"], c["p"]) if c["f"] else None
@@ -84,6 +98,7 @@ def main():
                 "n_lists": k[5],
                 "bs": k[6],
                 "mode": k[7],
+                "official_build": k[8],
                 "rounds": len(c["f"]),
                 "full_over_partial": "" if not ci else round(ci[0], 3),
                 "ci_lo": "" if not ci else round(ci[1], 3),
@@ -95,6 +110,8 @@ def main():
                 "unstable_entries": c["unst"],
                 "spread_max": round(max(c["spread"]), 3),
                 "sm_mhz": "/".join(map(str, sorted(c["mhz"]))),
+                "query_prep_ms_full": round(st.median(c["prep_f"]), 4) if c["prep_f"] else "",
+                "query_prep_ms_partial": round(st.median(c["prep_p"]), 4) if c["prep_p"] else "",
             }
         )
     with open(out / "c5.csv", "w", newline="") as fh:
