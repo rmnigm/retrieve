@@ -230,21 +230,19 @@ def clause_pass(
     keep = load_mask
     for c in tl.static_range(C):
         q_c = tl.load(query_attrs_ptr + bid * stride_qb + c * stride_qc)
-        rev_c = tl.load(is_reverse_ptr + c).to(tl.int1)
-        clause_match = tl.zeros(ids.shape, tl.int1)
-        # An inactive clause passes whatever the item holds, so its item attrs are not read
+        # An inactive clause passes whatever the item holds: a uniform branch skips its loads
         # (kernels.md § Shared kernel helpers, "Inactive clauses").
-        live = load_mask & (q_c != -1)
-        for a in tl.static_range(A_MAX):
-            ia = tl.load(
-                item_attrs_ptr + ids * stride_in + c * stride_ic + a * stride_ia,
-                mask=live,
-                other=-1,
-            )
-            clause_match = clause_match | (ia == q_c)
-        clause_match = clause_match ^ rev_c
-        clause_match = clause_match | (q_c == -1)  # inactive clause always passes
-        keep = keep & clause_match
+        if q_c != -1:
+            rev_c = tl.load(is_reverse_ptr + c).to(tl.int1)
+            clause_match = tl.zeros(ids.shape, tl.int1)
+            for a in tl.static_range(A_MAX):
+                ia = tl.load(
+                    item_attrs_ptr + ids * stride_in + c * stride_ic + a * stride_ia,
+                    mask=load_mask,
+                    other=-1,
+                )
+                clause_match = clause_match | (ia == q_c)
+            keep = keep & (clause_match ^ rev_c)
     return keep
 
 
