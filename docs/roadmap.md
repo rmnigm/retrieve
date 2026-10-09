@@ -327,8 +327,8 @@ co-design.
 - [ ] **OFFICIAL-O3: Meta's extension built with `-O3`** (OF-11: Meta's setup passes no
   `-O`, host code at gcc `-O0`; `-O3` is 0.77-0.98 of the shipped time, outputs
   bit-identical). New official legs build their own venv with
-  `NVCC_APPEND_FLAGS='-O3 -Xcompiler -O3'`; the record must say which build ran
-  (an env field, harness). The shared venvs are rebuilt only between legs.
+  `scripts/build_official_o3.sh`; `env.official_build` records the loaded
+  extension's sha256 and flags. Remaining: rebuild the shared venvs between legs.
 - [ ] **ST-WIDE: our d768 probe scorer at wide probes** (C7 at v2.7, PubMed bloom
   `c0_mesh`, bs 16 eager: official / Triton 0.705 at `n_probe` 1024, while
   Triton wins 1.7-2.8x everywhere else; `_codesigned_probe_score_kernel`
