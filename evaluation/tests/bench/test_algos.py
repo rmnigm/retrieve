@@ -65,6 +65,7 @@ def test_official_config_rejects_bloom_path_elsewhere(algo, filter_kind, backend
 
 
 ST_PARAMS = {"n_lists": 8, "n_probe": 4, "n_iter": 2}
+ROUTER = {**ST_PARAMS, "pre_n_probe": 8}  # the pre-probe takes every list: a pool >= its k of 100
 BLOOM = {"m_bits": 64, "k_hash": 2}
 
 
@@ -111,12 +112,15 @@ def test_built_module_k_setter_slices(algo, fk, silvertorch_modules):
         assert isinstance(m, SilverTorch) and m.filter_mode == A.FILTER_MODE[fk]
     else:
         f = A.build_filter(fk, attrs, backend="torch", m_bits=64, k_hash=2)
-        params = {"linr_v3": {"candidate_pool": 64}}.get(algo, {})
+        params = {
+            "linr_v3": {"candidate_pool": 64},
+            "router": {**ROUTER, "lq_threshold": 0.05, **(BLOOM if fk == "bloom" else {})},
+        }.get(algo, {})
         m = A.build(
             algo, x, k=8, backend="torch", filter_kind=fk, filter_mod=f, item_attrs=attrs,
             params=params,
         )  # fmt: skip
-    assert m.backend == "torch" and m.capturable is True
+    assert m.backend == "torch" and m.capturable is (algo != "router")  # router: eager only
     _check_k_slice(m, lambda: m(q, qa if fk != "none" else None))
 
 
@@ -186,6 +190,67 @@ def test_linr_v3_k_bits_at_d_is_the_default_build(fk, seed):
     (ids1, s1), *bufs1 = out[1]
     assert torch.equal(ids0, ids1) and torch.equal(s0, s1)
     assert all(torch.equal(a, b) for a, b in zip(bufs0, bufs1, strict=True))
+
+
+ROUTER = {
+    "n_lists": 8,
+    "n_probe": 4,
+    "n_iter": 2,
+    "pre_n_probe": 8,
+}  # pre-probe: every list, >= 100
+
+
+def _router(lq_threshold, fk="clause"):
+    x, q, attrs, qa = _data()
+    f = A.build_filter(fk, attrs, backend="torch", **BLOOM)
+    kw = {"filter_kind": fk, "filter_mod": f, "item_attrs": attrs}
+    params = {**ROUTER, "lq_threshold": lq_threshold, **(BLOOM if fk == "bloom" else {})}
+    return A.build("router", x, k=8, backend="torch", params=params, **kw), q, qa
+
+
+@pytest.mark.parametrize("fk", ["clause", "bloom"])
+@torch.inference_mode()
+def test_router_routes_by_local_pass_rate_and_matches_its_branches(fk):
+    """V-ROUTER: l_q is the share of the unfiltered top-100 the filter admits; rows below the
+    threshold come out of exact V2, the others out of filtered SilverTorch, each row equal to that
+    branch's own output on the whole batch."""
+    m, q, qa = _router(0.0, fk)
+    lq = m.local_pass_rate(q, qa)
+    assert lq.min() < lq.max()  # the fixture's l_q spreads, so a mid threshold routes both ways
+    m.lq_threshold = float((lq.min() + lq.max()) / 2)
+    pre_ids, _ = m.pre(q)
+    want_lq = (m.filter.evaluate_subset(qa, pre_ids.clamp_min(0)) & (pre_ids >= 0)).sum(1) / 100
+    ids, scores = m(q, qa)
+    assert torch.equal(m.last_lq, want_lq.float())
+    assert torch.equal(m.last_exact, m.last_lq < m.lq_threshold)
+    assert 0 < int(m.last_exact.sum()) < q.shape[0]
+    for branch, rows in ((m.exact, m.last_exact), (m.ivf, ~m.last_exact)):
+        b_ids, b_scores = branch(q, qa)
+        assert torch.equal(ids[rows], b_ids[rows].long())
+        assert torch.equal(scores[rows], b_scores[rows].float())
+    all_ivf, _, _ = _router(0.0, fk)
+    assert (
+        torch.equal(all_ivf(q, qa)[0], all_ivf.ivf(q, qa)[0].long())
+        and not all_ivf.last_exact.any()
+    )
+
+
+@torch.inference_mode()
+def test_router_times_the_pre_probe_and_is_eager_only():
+    """The pre-probe runs inside every forward (its cost is in the arm's timing); the data-dependent
+    split makes the arm uncapturable, so graph mode records a null entry."""
+    m, q, qa = _router(0.5)
+    calls = []
+    m.pre.register_forward_hook(lambda *a: calls.append(1))
+    for _ in range(3):
+        m(q, qa)
+    assert len(calls) == 3 and m.capturable is False
+    m.k = 4
+    assert m.ivf.k == m.exact.k == 4 and m(q, qa)[0].shape == (6, 4)
+    m.set_query_params(n_probe=8)
+    assert m.ivf.n_probe == 8
+    with pytest.raises(ValueError, match="lq_threshold"):
+        _router(1.5)
 
 
 def test_build_refusals():
