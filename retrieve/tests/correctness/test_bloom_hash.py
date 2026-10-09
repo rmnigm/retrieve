@@ -203,3 +203,17 @@ def test_build_transposed_sigs_bits():
         else:
             expected = (sigs[s][m // 64] >> (m % 64)) & 1
         assert torch.equal(actual, expected), f"slot {s}"
+
+
+def test_build_transposed_sigs_chunks_equal_one_pass():
+    """The build's item chunks (multiples of 64; the last one padded) give the one-chunk index
+    word for word, including an ``N`` that is neither a multiple of the chunk nor of 64."""
+    n, w = 1000, 3
+    g = torch.Generator(device="cuda").manual_seed(5)
+    ii = torch.iinfo(torch.int64)
+    sigs = torch.randint(ii.min, ii.max, (n, w), generator=g, dtype=torch.int64, device="cuda")
+    whole = build_transposed_sigs(sigs, chunk=1 << 18)
+    for chunk in (64, 128, 384):
+        assert torch.equal(build_transposed_sigs(sigs, chunk=chunk), whole), chunk
+    with pytest.raises(ValueError, match="multiple of 64"):
+        build_transposed_sigs(sigs, chunk=100)
