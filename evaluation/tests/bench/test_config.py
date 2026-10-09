@@ -235,7 +235,7 @@ def test_codesign_suite_carries_bloom_path_in_the_key():
 
 
 def test_bloom_path_off_the_official_bloom_path_is_a_config_error():
-    with pytest.raises(ConfigError, match="bloom_path applies to silvertorch/bloom/official"):
+    with pytest.raises(ConfigError, match="bloom_path applies to silvertorch/bloom on official"):
         load_matrix(MINI, SUITES, "bad_bloom_path")
 
 
@@ -356,8 +356,8 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("synth", "arxiv-synth"): (303, 534),
     ("synth", "arxiv-corr-synth"): (99, 198),
     ("synth", "yfcc10m-synth"): (165, 285),
-    ("codesign", "arxiv"): (18, 54),
-    ("codesign", "goodreads"): (18, 54),
+    ("codesign", "arxiv"): (36, 108),  # official + triton (C5-OURS)
+    ("codesign", "goodreads"): (36, 108),
     ("bloomwidth", "goodreads"): (42, 42),
     ("bloomwidth", "arxiv"): (126, 126),
     ("bloomwidth", "pubmed"): (42, 42),
@@ -502,6 +502,8 @@ def test_codesign_and_bloomwidth_suites():
     assert {(j.backend, j.build["n_lists"], j.build["bloom_path"]) for j in cd} == {
         ("official", 1024, "partial"),
         ("official", 1024, "full"),
+        ("triton", 1024, "partial"),
+        ("triton", 1024, "full"),
     }
     assert {(j.ks, j.batch_sizes) for j in cd} == {((100,), (1, 16))}
     bw = _real("bloomwidth", "pubmed", seeds=[0])
@@ -584,8 +586,10 @@ def test_interleave_groups_of_the_real_suites():
         "silvertorch/official/score_path=int32",
     ]  # fmt: skip
     cd = [m for by, m in interleave_units(_real("codesign", "arxiv")) if by]
-    assert len(cd) == 9 and all(
-        [j.build["bloom_path"] for j in m] == ["partial", "full"] for m in cd
+    assert len(cd) == 18 and all(
+        [j.build["bloom_path"] for j in m] == ["partial", "full"]
+        and len({j.backend for j in m}) == 1
+        for m in cd
     )
     fil = [m for by, m in interleave_units(_real("filter", "arxiv")) if by]
     assert sorted({tuple(f"{j.algo}/{j.backend}" for j in m) for m in fil}) == [

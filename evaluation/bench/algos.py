@@ -84,21 +84,24 @@ def official_config(
     algo: str, filter_kind: str, backend: str, params: dict[str, Any]
 ) -> OfficialConfig | None:
     """The ``bloom_path`` (the S9 co-design ablation) and ``score_path`` (fp16 | int32, the
-    H2H-final arms) build params as ``OfficialConfig``; ``None`` (the library default,
-    ``partial`` / ``fp16``) when both keys are absent. ``bloom_path`` means something on
-    ``silvertorch / bloom / official`` only, ``score_path`` on ``silvertorch / official``;
-    each raises anywhere else."""
+    H2H-final arms) build params as ``OfficialConfig`` on the official backend; ``None`` (the
+    library default, ``partial`` / ``fp16``) when both keys are absent or the backend is triton.
+    ``bloom_path`` means something on ``silvertorch / bloom`` on official and triton (there the
+    layer's own ``bloom_path``, C5-OURS), ``score_path`` on ``silvertorch / official``; each
+    raises anywhere else."""
     kw = {k: params[k] for k in ("bloom_path", "score_path") if k in params}
     if not kw:
         return None
-    if "bloom_path" in kw and (algo, filter_kind, backend) != ("silvertorch", "bloom", "official"):
+    if "bloom_path" in kw and (
+        (algo, filter_kind) != ("silvertorch", "bloom") or backend not in ("official", "triton")
+    ):
         raise ValueError(
-            f"bloom_path applies to silvertorch/bloom/official only, got {algo}/{filter_kind}/"
-            f"{backend}"
+            f"bloom_path applies to silvertorch/bloom on official or triton only, got "
+            f"{algo}/{filter_kind}/{backend}"
         )
     if "score_path" in kw and (algo, backend) != ("silvertorch", "official"):
         raise ValueError(f"score_path applies to silvertorch/official only, got {algo}/{backend}")
-    return OfficialConfig(**kw)
+    return OfficialConfig(**kw) if backend == "official" else None
 
 
 def build_filter(
@@ -168,8 +171,10 @@ def build(
         mode = FILTER_MODE[filter_kind]
         bloom = BLOOM_DEFAULTS if mode == "bloom" else {}
         official = official_config(algo, filter_kind, backend, p)
-        p.pop("bloom_path", None)
+        bloom_path = p.pop("bloom_path", None)
         p.pop("score_path", None)
+        if backend == "triton" and bloom_path is not None:
+            p["bloom_path"] = bloom_path
         module = SilverTorch(
             k=k, filter_mode=mode, seed=seed, backend=backend, official=official,
             **{**SILVERTORCH_DEFAULTS, **bloom, **p},

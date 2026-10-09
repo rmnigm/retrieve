@@ -306,11 +306,15 @@ buffers inside `index_mib`). `build(algo, item_embs, k=, backend=,
 filter_kind=, filter_mod=, item_attrs=, clause_is_reverse=, params=,
 seed=)` is the one factory; it refuses `None`-path cells and `n_probe >
 n_lists`. The build param `bloom_path` (`partial` | `full`, the S9
-co-design ablation) becomes `SilverTorch(official=OfficialConfig(bloom_path=…))`
-through `algos.official_config`; it exists on `silvertorch / bloom /
-official` only (anywhere else `load_matrix` raises `ConfigError`), and
-without the key the library default `OfficialConfig()` runs, which is
-`bloom_path="partial"`. `params` are the merged build + query params over
+co-design ablation) exists on `silvertorch / bloom` on two backends
+(anywhere else `load_matrix` raises `ConfigError`):
+- **official:** `SilverTorch(official=OfficialConfig(bloom_path=…))`,
+  through `algos.official_config`;
+- **triton:** the layer's own `SilverTorch(bloom_path=…)` (C5-OURS,
+  [kernels](kernels.md#bloom_full_mask--the-full-n-mask-bloom_pathfull)).
+
+Without the key the library default runs, which is `bloom_path="partial"`
+on both. `params` are the merged build + query params over
 `algos.SILVERTORCH_DEFAULTS` (`n_lists 1024, n_probe 24, n_iter 10`); on
 `silvertorch` bloom cells `run.py` merges the suite's `bloom` defaults
 (`m_bits`, `k_hash`) in as well. The probe-pool check is the library's,
@@ -405,7 +409,7 @@ unfiltered `quality` suite ([decisions](../decisions.md#harness)); synth's
 | `filter` | goodreads, arxiv, yfcc10m, pubmed, three kept sweeps each (yfcc10m: `tags_and`) | V1, V2, V3 (pool 5000) triton; `silvertorch` triton clause + bloom and official bloom at the dataset's tuned `n_lists` and `n_probe` {24, n95} ([IVF tuning](#ivf-tuning)); `silvertorch` torch (#12) and torch compiled (#13) at 24 on the same `n_lists`, goodreads + arxiv only; `postfilter` alpha {1, 8} | T2, C3, C6 |
 | `deep` | goodreads, arxiv, yfcc10m, kept sweeps | `silvertorch` triton clause + bloom, official bloom: `n_lists` per dataset (goodreads {1024, 4096}, arxiv {1664, 8192}, yfcc10m {4096, 16384}) × `n_probe` {8, 16, 32, 64, 128}; V3 `candidate_pool_frac` {0.005, 0.01, 0.02, 0.05, 0.1} | F3, C6 |
 | `synth` | goodreads-, arxiv-, yfcc10m-synth (uniform) and arxiv-corr-synth (cluster-correlated, `c001` `c003` `c01`, d128, arxiv-synth's `n_lists` so the two curves pair) ([datasets](datasets.md#synthetic-selectivity-attrs)) | V1, V2 triton; V3 `candidate_pool_frac` {0.01, 0.05}; `silvertorch` triton clause `n_probe` {24, 64, 128, 256, 512, 1024} (yfcc10m-synth {24, 256, 1024}), triton and official bloom {24, 256}, every SilverTorch arm at its real dataset's tuned `n_lists` (none caps the sweep); `postfilter` {1, 8}; V1 / V2 torch, eager and compiled, on `p001, p01, p1`, goodreads + arxiv only. k 1000 is dropped where N·p < 4000 (goodreads `p0001`, `p0003`; arxiv `p0001`) | F1, F2, C1, C2, C6 |
-| `codesign` | arxiv (kept sweeps), goodreads (`c0_genre, c2_format, c3_year`) | official bloom, `bloom_path` {partial, full} × `n_probe` {8, 32, 128}, `n_lists` arxiv 1664 / goodreads 1024, k 100 | F4b, C5 |
+| `codesign` | arxiv (kept sweeps), goodreads (`c0_genre, c2_format, c3_year`) | official and triton bloom, `bloom_path` {partial, full} × `n_probe` {8, 32, 128}, `n_lists` arxiv 1664 / goodreads 1024, k 100 | F4b, C5 |
 | `bloomwidth` | goodreads `c0_genre`, arxiv kept, pubmed `c0_mesh` | `silvertorch` triton bloom `m_bits` {64 … 2048} × `k_hash` {3, 5}; official bloom `k_hash` {3, 5} (its width is `OfficialConfig.b_multiplier`, not `m_bits`); bs 16; quality only (`perf: false`) | F4a, C4 |
 | `bloomwidth-timed` | the same | the same widths at `k_hash` 5 (official: its one width), k 100, bs 16, timed | F4a |
 | `v3bits` | goodreads-synth (7 rates), goodreads (`filter`'s kept sweeps) | V3 triton only, `k_bits` {64, 128} × `candidate_pool_frac` {0.01, 0.05}, clause + bloom, seeds 0-2, bs {1, 16}, k {100, 1000} (synth's `ks_by_sweep`); LiNR's 512 bits would need a library change (declined) | C2 (V-V3BITS) |
@@ -434,12 +438,17 @@ explicitly (user, 2026-10-08). A slot left `{}` runs at the library default `n_l
 `n_probe` 24 only. n95 / `n_lists` depends on the pass rate as well as N: goodreads `c0_genre`
 (0.33) needs `n_lists` / 64, and PubMed `all5` (0.018) needs more than `n_lists` / 16.
 
-`codesign` is the S9 ablation of the official backend's bloom path:
-`partial` (fused partial masks over the probed clusters, the library
-default, which every `filter` / `deep` official cell runs with the key
-absent) against `full` (a full-N bool mask, then IVF). Both arms carry
-`bloom_path` in `params`, so their keys never collide with the `filter` /
-`deep` official cells; latency and `peak_fwd_mib` are the compared fields.
+`codesign` is the S9 ablation of the bloom path, on both backends.
+- **official:** `partial` (fused partial masks over the probed clusters,
+  the library default, which every `filter` / `deep` official cell runs
+  with the key absent) against `full` (a full-N bool mask, then IVF).
+- **triton** (C5-OURS): our fused scorer against `bloom_full_mask`, then
+  the same scorer. This separates the co-design idea from Meta's
+  implementation of it.
+
+`--interleave` pairs partial and full of one backend per group. Every
+cell carries `bloom_path` in `params`, so no key collides with the
+`filter` / `deep` cells; latency and `peak_fwd_mib` are the compared fields.
 `bloomwidth` declares `perf: false`: `load_matrix` sets
 `Job.timed = False`, `run` skips perf on their jobs without being asked, and
 their records are `ok` (a `--skip-perf` record of a timed suite is `partial`,

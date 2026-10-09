@@ -163,9 +163,10 @@ synth:                         # pass rate as the x axis (F1, F2, C1, C2, C6)
       datasets: {goodreads-synth: {}, arxiv-synth: {}}
 
 
-codesign:                      # S9 / F4b, C5: the official bloom path, partial vs full masks
-  # `bloom_path` exists on silvertorch / bloom / official only (anything else is a ConfigError);
-  # both arms carry it in `params`, so their keys never collide with filter / deep official cells.
+codesign:                      # S9 / F4b, C5: the bloom path, partial vs full masks
+  # `bloom_path` exists on silvertorch / bloom on official (Meta's partial-mask ops vs its full
+  # mask) and triton (C5-OURS: our fused scorer vs bloom_full_mask, then the same scorer); anything
+  # else is a ConfigError. Every cell carries it in `params`, so no key collides with filter / deep.
   datasets: [arxiv, goodreads]
   dims: [128]
   filter_kinds: [bloom]
@@ -178,7 +179,7 @@ codesign:                      # S9 / F4b, C5: the official bloom path, partial 
   interleave: [{by: bloom_path}]   # partial vs full, timed round-robin under --interleave
   arms:
     - algo: silvertorch
-      backends: [official]
+      backends: [official, triton]
       build: {bloom_path: [partial, full]}
       query: {n_probe: [8, 32, 128]}
       datasets:

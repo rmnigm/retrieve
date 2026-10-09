@@ -55,13 +55,19 @@ def test_official_config_from_bloom_path(params, bloom_path):
 
 @pytest.mark.parametrize(
     ("algo", "filter_kind", "backend"),
-    [("silvertorch", "bloom", "triton"), ("silvertorch", "clause", "official"),
-     ("linr_v3", "bloom", "triton")],
+    [("silvertorch", "bloom", "torch"), ("silvertorch", "clause", "official"),
+     ("silvertorch", "clause", "triton"), ("linr_v3", "bloom", "triton")],
 )  # fmt: skip
 def test_official_config_rejects_bloom_path_elsewhere(algo, filter_kind, backend):
     with pytest.raises(ValueError, match="bloom_path applies to"):
         A.official_config(algo, filter_kind, backend, {"bloom_path": "full"})
     assert A.official_config(algo, filter_kind, backend, {"n_probe": 4}) is None
+
+
+def test_bloom_path_on_triton_is_the_layers_own():
+    """C5-OURS: on silvertorch / bloom / triton ``bloom_path`` is a SilverTorch kwarg, not an
+    ``OfficialConfig``."""
+    assert A.official_config("silvertorch", "bloom", "triton", {"bloom_path": "full"}) is None
 
 
 ST_PARAMS = {"n_lists": 8, "n_probe": 4, "n_iter": 2}

@@ -153,6 +153,7 @@ def _op_args() -> dict[str, tuple]:
     q_bits = quantize_oporp_1bit(query, seed=0)[0]
     scores = torch.randn(b, n, generator=g, device="cuda")
     return {
+        "bloom_full_mask": (qpos, bt),
         "bloom_match": (qb, sigs),
         "bloom_match_scores": (scores, qb, sigs),
         "bloom_compact": (qb, sigs),

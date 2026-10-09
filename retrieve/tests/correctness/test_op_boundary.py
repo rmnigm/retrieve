@@ -53,6 +53,7 @@ def _cases():
         "cps_bloom_transposed": lambda t=bt: T.codesigned_probe_score_bloom(
             qf, *lay[:2], codes, lay[2], qpos, t, bloom_bit_freq(t, N), 0.1, 4, N
         ),
+        "bfm_bloom_transposed": lambda t=bt: T.bloom_full_mask(qpos, t),
         "cpse_attrs": lambda a=attrs: T.codesigned_probe_score_exact(
             qf, *lay[:2], codes, lay[2], a, rev, qa, 0.1, 4, N
         ),
@@ -77,6 +78,7 @@ _TABLE = {
     "oporp_candidates": "pos",
     "cps_codes": "codes",
     "cps_bloom_transposed": "bt",
+    "bfm_bloom_transposed": "bt",
     "cpse_attrs": "attrs",
 }
 
