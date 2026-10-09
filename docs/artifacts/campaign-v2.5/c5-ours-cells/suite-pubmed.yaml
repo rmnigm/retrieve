@@ -1,0 +1,17 @@
+# C5-OURS: the one PubMed 10 M codesign point (C5 is claimed at 20 M; the full mask grows with N). Appended to the
+# campaign-v2.5 suites.yaml in a one-off config dir (driver.sh's third argument). The `filter` suite's SilverTorch
+# bloom slot on PubMed: c0_mesh, n_lists 4096, n_probe {24, 1024}.
+codesign-pubmed:
+  datasets: [pubmed]
+  dims: [768]
+  filter_kinds: [bloom]
+  ks: [100]
+  batch_sizes: [1, 16]
+  seeds: [0, 1, 2]
+  sweeps: {pubmed: [c0_mesh]}
+  interleave: [{by: bloom_path}]
+  arms:
+    - algo: silvertorch
+      backends: [triton]
+      build: {bloom_path: [partial, full], n_lists: [4096]}
+      query: {n_probe: [24, 1024]}
