@@ -77,7 +77,7 @@ upload() {  # PREFIX: the whole tree $R, aggregated first; sets UP to the manife
 # oracles are rebuilt at the tag: blobs built at any other code_version move to <gt_dir>/before-<cv[:8]>/
 old_oracles() { $PY "$HERE/../../campaign-v2/v-pod1-run/move_old_oracles.py" "$cv" "$@" || exit 1; }
 
-dim() { case $1 in yfcc10m*) echo 192 ;; *) echo 128 ;; esac; }
+dim() { case $1 in yfcc10m*) echo 192 ;; laion30m*) echo 256 ;; *) echo 128 ;; esac; }
 
 finish() {
   { echo "=== nvidia-smi -q -d CLOCK at end $(date -Is)"; nvidia-smi -i $GPU -q -d CLOCK; } >> "$LOG/clocks-q.txt"
