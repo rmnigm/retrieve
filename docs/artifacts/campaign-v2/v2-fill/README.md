@@ -60,8 +60,9 @@ allocation. `fill_variants.py` records registers per body, and a toolchain chang
 | 3 M d192 | 0.25 / 0.22 | 0.35 / 0.36 | 0.67 / 0.66 | 0.85 / 0.69 | 0.73 / 1.007 |
 | 10 M d768 (unchanged) | 0.99 / 1.00 | 1.01 / 1.00 | 1.00 / 1.00 | 1.00 / 1.00 | 1.00 / 1.00 |
 
-  Three cells above 1 were rechecked with 16 pairs and an A/A arm (v2.4 against itself) in the same run:
-  - **p 1 bs 1:** the library read 1.011 at 3 M d64 and 1.013 at 0.8 M d128, against A/A 1.013 and 1.017.
-  - **d192 skewed bs 16:** 1.000 [0.993, 1.008] against A/A 0.999.
-
-  All are inside the identical-code floor, which reaches 1.013-1.017 at bs 1 p 1.
+  Cells above 1 were rechecked next to an A/A arm (v2.4 against itself) in the same run:
+  - **p 1 bs 1:** the library read 1.011 at 3 M d64 and 1.013 at 0.8 M d128 (16 pairs), against A/A 1.013 and 1.017.
+    Inside the identical-code floor.
+  - **d192 skewed bs 16: not cleared.** It reads 1.007 [1.006, 1.008] in both gate runs (this step and the campaign-v2.5
+    bundle). Next to A/A it read 1.000 [0.993, 1.008] (16 pairs) and 1.002 [0.996, 1.007] (24 pairs; medians +0.65 %).
+    A possible ≤ 0.7 % slowdown at that one cell, not separable from the floor.

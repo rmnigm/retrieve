@@ -31,7 +31,7 @@ import triton
 DEV = torch.device("cuda")
 POOL, LAUNCHES = 4, 8
 SKEW_BASE = 0.00002  # the skewed cell: rows 0-1 at p 0.12, the other 14 at this rate
-T975 = {7: 2.365, 9: 2.262, 11: 2.201, 15: 2.131}
+T975 = {7: 2.365, 9: 2.262, 11: 2.201, 15: 2.131, 23: 2.069}
 PKGS = {"before": "retrieve_v24", "after": "retrieve"}
 MODS = {
     a: importlib.import_module(f"{p}.ops.triton.fused_masked_knn_topk")
