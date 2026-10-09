@@ -462,6 +462,7 @@ def test_official_build_records_the_extension_and_its_flags(monkeypatch, tmp_pat
     got = bench.official_build()
     assert got["so_sha256"] == hashlib.sha256(b"not really an elf").hexdigest()
     assert got["so_path"].endswith(".so") and got["nvcc_append_flags"] is None
+    assert got["so_bytes"] == len(b"not really an elf")
     flags = {"nvcc_append_flags": "-O3 -Xcompiler -O3"}
     (pkg / bench.OFFICIAL_BUILD_FLAGS).write_text(json.dumps(flags))
     assert bench.official_build()["nvcc_append_flags"] == "-O3 -Xcompiler -O3"

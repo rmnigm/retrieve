@@ -173,8 +173,8 @@ OFFICIAL_BUILD_FLAGS = "_build_flags.json"
 
 def official_build() -> dict[str, Any] | None:
     """The ``silvertorch`` extension the official backend would load, found without importing it:
-    ``so_path``, ``so_sha256`` (the build's identity), and ``nvcc_append_flags`` from a
-    ``_build_flags.json`` beside the ``.so`` (written by the build recipe; ``None`` = Meta's
+    ``so_path``, ``so_sha256`` and ``so_bytes`` (the build's identity), and ``nvcc_append_flags``
+    from a ``_build_flags.json`` beside the ``.so`` (written by the build recipe; ``None`` = Meta's
     ``setup.py`` defaults, host code at gcc ``-O0``, OF-11). ``None`` when silvertorch is absent."""
     spec = importlib.util.find_spec("silvertorch")
     if spec is None or not spec.submodule_search_locations:
@@ -185,6 +185,7 @@ def official_build() -> dict[str, Any] | None:
     return {
         "so_path": str(so[0]) if so else None,
         "so_sha256": hashlib.sha256(so[0].read_bytes()).hexdigest() if so else None,
+        "so_bytes": so[0].stat().st_size if so else None,
         "nvcc_append_flags": (
             json.loads(flags.read_text()).get("nvcc_append_flags") if flags.exists() else None
         ),
