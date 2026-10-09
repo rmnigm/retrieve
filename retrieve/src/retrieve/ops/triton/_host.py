@@ -14,7 +14,6 @@ import torch
 import triton
 from torch import Tensor
 
-from retrieve.indexing.quantize import quantize_int8
 from retrieve.ops.triton.common import compact_scatter_kernel
 
 Cfg = TypeVar("Cfg")
@@ -30,7 +29,7 @@ IDS_BLOCK_K = 16
 IDS_BLOCK_N = 512
 
 # From this many (row, probe) pairs the scorers read their tile's cluster from a per-row table
-# (one extra launch) instead of rebuilding the row's layout in every tile (kernels.md §
+# that the prep launch writes, instead of rebuilding the row's layout in every tile (kernels.md §
 # SilverTorch kernels, "Probe table").
 TABLE_MIN_PAIRS = 512
 
@@ -74,13 +73,13 @@ class ProbeLaunch:
     grid: tuple[int, int, int]  # (B, tiles_y, tiles_x) over the cluster-aligned + tail tiles
     kwargs: dict[str, object]  # every kernel arg: tensors, strides, constexprs, cfg
     all_scores: Tensor
-    table: ProbeTable | None  # launched first when the scorer reads the per-row table
+    prep: ProbePrep  # launched first: the int8 query and, with "TABLE", the per-row table
 
 
 @dataclass(frozen=True)
-class ProbeTable:
+class ProbePrep:
     grid: tuple[int]  # (B,)
-    kwargs: dict[str, object]  # common.probe_table_kernel's args
+    kwargs: dict[str, object]  # common.probe_prep_kernel's args
 
 
 @dataclass(frozen=True)
@@ -118,8 +117,9 @@ def probe_prep(
     """The half of both probe scorers' prep that is the same: validation, the per-row int8
     query, the ``[B, width]`` score buffer (``torch.empty``: the kernel writes every slot, a
     dot or ``-inf``) and the launch kwargs they share. The probe layout is built inside the
-    kernel (``common.probe_tile``), or from ``TABLE_MIN_PAIRS`` ``(row, probe)`` pairs once per
-    row by the ``table`` launch the caller runs first (``common.probe_tile_table``)."""
+    kernel (``common.probe_tile``), or, from ``TABLE_MIN_PAIRS`` pairs, once per row by the
+    ``prep`` launch the caller runs first (``common.probe_prep_kernel``), which also writes the
+    int8 query."""
     if query.dim() != 2 or probe_ids.dim() != 2:
         raise ValueError("query must be [B, D] and probe_ids [B, n_probe]")
     if item_codes.dtype != torch.int8:
@@ -127,34 +127,48 @@ def probe_prep(
     b, d = query.shape
     n_probe = probe_ids.shape[1]
     check_contiguous(item_codes=item_codes, sort_perm=sort_perm)
-    q_codes, q_scales = quantize_int8(query)
+    if query.dtype != torch.float32:
+        raise TypeError(f"query must be fp32, got {query.dtype}")
+    query = query.contiguous()
+    q_codes = torch.empty((b, d), dtype=torch.int8, device=query.device)
+    q_scales = torch.empty(b, dtype=torch.float32, device=query.device)
     all_scores = torch.empty((b, width), dtype=torch.float32, device=query.device)
     # Cluster-aligned tiles: at most one partial tile per probe, so n_probe extra tiles cover
     # the rounding and the -inf tail past the row's items.
     grid, tiles_y = grid_batch_tiles(b, triton.cdiv(width, block_p) + n_probe, 1)
     npp = triton.next_power_of_2(n_probe)
     probe_ids = probe_ids.contiguous()
-    table = None
-    table_ptr = probe_ids  # TABLE=False compiles its loads out, so any int64 tensor stands in
-    if b * n_probe >= TABLE_MIN_PAIRS:
-        table_ptr = torch.empty((b, 3, n_probe), dtype=torch.int64, device=query.device)
-        table = ProbeTable(
-            (b,),
-            {
-                "probe_ids_ptr": probe_ids,
-                "offsets_ptr": cluster_offsets,
-                "table_ptr": table_ptr,
-                "n_probe": n_probe,
-                "count_ptr": table_ptr,  # the bloom two-pass's list count, zeroed here
-                "NPP": npp,
-                "BLOCK_P": block_p,
-                "ZERO_COUNT": False,
-                "num_warps": 4,
-            },
-        )
+    use_table = b * n_probe >= TABLE_MIN_PAIRS
+    # Without the table the prep's table loads compile out, so any int64 tensor stands in.
+    table_ptr = (
+        torch.empty((b, 3, n_probe), dtype=torch.int64, device=query.device)
+        if use_table
+        else probe_ids
+    )
+    prep = ProbePrep(
+        (b,),
+        {
+            "query_ptr": query,
+            "q_codes_ptr": q_codes,
+            "q_scales_ptr": q_scales,
+            "probe_ids_ptr": probe_ids,
+            "offsets_ptr": cluster_offsets,
+            "table_ptr": table_ptr,
+            "count_ptr": table_ptr,  # the bloom two-pass's list count, zeroed here
+            "stride_qb": query.stride(0),
+            "n_probe": n_probe,
+            "D": d,
+            "D_PAD": triton.next_power_of_2(d),
+            "NPP": npp,
+            "BLOCK_P": block_p,
+            "TABLE": use_table,
+            "ZERO_COUNT": False,
+            "num_warps": 4,
+        },
+    )
     kwargs: dict[str, object] = {
-        "q_codes_ptr": q_codes.contiguous(),
-        "q_scales_ptr": q_scales.contiguous(),
+        "q_codes_ptr": q_codes,
+        "q_scales_ptr": q_scales,
         "probe_ids_ptr": probe_ids,
         "offsets_ptr": cluster_offsets,
         "table_ptr": table_ptr,
@@ -168,7 +182,7 @@ def probe_prep(
         "D_PAD": triton.next_power_of_2(d),
         "NPP": npp,
         "FAN": 1 << (npp.bit_length() // 2),  # FAN ** 2 >= NPP
-        "TABLE": table is not None,
+        "TABLE": use_table,
         "stride_qcb": q_codes.stride(0),
         "stride_cn": item_codes.stride(0),
         "stride_ob": all_scores.stride(0),
@@ -179,7 +193,7 @@ def probe_prep(
         "num_warps": num_warps,
         "num_stages": num_stages,
     }
-    return ProbeLaunch(grid, kwargs, all_scores, table)
+    return ProbeLaunch(grid, kwargs, all_scores, prep)
 
 
 def probe_topk(
