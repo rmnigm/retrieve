@@ -13,3 +13,4 @@
 ## [2026-10-10] add | V-LAION30 (Re-LAION 30 M, d256, `filter` only) and H-OVIEW (oracle without its fp32 copy) on the roadmap; decisions/Datasets records the user's call; backlog LAION entry narrowed to > 30 M
 ## [2026-10-10] decide | ECIR replicability criteria + library/benchmark goal, in-graph scope, V3 one bit per coordinate (decisions); roadmap: SYNTH-TRIM, V3-BITS-PUBMED, ROUTER-LIB, H-ADDDATA, REL-LIC, F-CRIT; H-OVIEW closed (already done)
 ## [2026-10-10] add | paper/release-and-licenses.md (REL-LIC: per-dataset license and redistribution, third-party code, Hub/GitHub inventory, leak scan, double-blind plan, decisions for the user); paper/ecir-criteria.md (F-CRIT: every ECIR question mapped to claims, exhibits, evidence, state, gap step); datasets: eval-yfcc10m holds the staged files
+## [2026-10-10] decide | YFCC exact gate: per-dataset fp16-storage allowance at k 100, conditional on the probe (decisions § Datasets)
