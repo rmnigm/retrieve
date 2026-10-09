@@ -81,7 +81,9 @@ def official_build(r):
     if r["backend"] != "official":
         return ""
     b = r["env"].get("official_build")
-    return str(b) if b else "unrecorded"
+    if not b:
+        return "unrecorded"
+    return f"{b.get('nvcc_append_flags') or 'shipped flags'} so:{(b.get('so_sha256') or '?')[:8]}"
 
 
 def arm(r):
