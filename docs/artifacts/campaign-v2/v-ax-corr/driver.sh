@@ -2,6 +2,9 @@
 # V-AX-CORR driver on pod c (a100-x1-c): the synth suite on arxiv-corr-synth d128 at campaign-v2.1, GPU 0,
 # its own venv and results tree, under the pod's GPU lock. Two passes into the same tree:
 #   flock /scratch/gpu0.lock bash driver.sh quality    (bench check + oracle + campaign --skip-perf: partial records)
+#   flock /scratch/gpu0.lock bash driver.sh rest       (quality --skip-perf of the groups the first window did not reach:
+#                                                      SilverTorch triton + official, postfilter; resume skips only ok cells,
+#                                                      so the campaign form would redo V1-V3)
 #   flock /scratch/gpu0.lock bash driver.sh timed      (campaign --interleave: resume re-runs every partial cell)
 # The venv /venvs/v-ax-corr is an editable install of this worktree, so `retrieve` and `bench` are imported from
 # $REPO and code_version is read from the same tree; the driver refuses unless that is so and it is $EXPECT.
@@ -47,8 +50,13 @@ case $PASS in
     step oracle $PIN $PY -m bench.cli oracle --dataset $DS --dim 128 --suite $SUITE
     step campaign $PIN $PY -m bench.cli campaign --suite $SUITE --dataset $DS --dim 128 --resume --skip-perf \
       --timeout 48 --out "$R" ;;
+  rest)
+    RUN=($PIN $PY -m bench.cli run --dataset $DS --dim 128 --suite $SUITE --out "$R" --resume --skip-perf)
+    step silvertorch_triton "${RUN[@]}" --algo silvertorch --backend triton
+    step silvertorch_official "${RUN[@]}" --algo silvertorch --backend official
+    step postfilter "${RUN[@]}" --algo postfilter --backend torch ;;
   timed)
     step campaign $PIN $PY -m bench.cli campaign --suite $SUITE --dataset $DS --dim 128 --resume --interleave \
       --timeout 48 --out "$R" ;;
-  *) echo "usage: driver.sh quality|timed"; exit 2 ;;
+  *) echo "usage: driver.sh quality|rest|timed"; exit 2 ;;
 esac
