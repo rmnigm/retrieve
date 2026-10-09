@@ -122,7 +122,7 @@ def pass_counts(
     bloom pass count (H §2.2 ``bloom_fp_rate``)."""
     out = torch.full((qa_sweep.shape[0],), -1, dtype=torch.long)
     for idx in _batches(qa_sweep.shape[0], skip_mask, batch_size, "pass_counts"):
-        qa = qa_sweep[idx].to(device, non_blocking=True)
+        qa = filter_mod.prepare_queries(qa_sweep[idx].to(device, non_blocking=True))
         n = torch.zeros(idx.numel(), dtype=torch.long, device=device)
         for start, end in _chunks(n_items, item_chunk):
             n += filter_mod.evaluate_mask(qa, start, end).sum(dim=1)
@@ -189,7 +189,11 @@ def compute(
     filtered = filter_mod is not None and qa_sweep is not None
     for idx in _batches(n_users, skip_mask, batch_size, "oracle"):
         q = queries[idx].to(device, non_blocking=True)
-        qa = qa_sweep[idx].to(device, non_blocking=True) if filtered else None
+        qa = (
+            filter_mod.prepare_queries(qa_sweep[idx].to(device, non_blocking=True))
+            if filtered
+            else None
+        )
         best_s = torch.full((idx.numel(), k_eff), float("-inf"), device=device)
         best_i = torch.full((idx.numel(), k_eff), -1, dtype=torch.long, device=device)
         n_pass = torch.zeros(idx.numel(), dtype=torch.long, device=device)

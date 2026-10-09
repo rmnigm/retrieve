@@ -69,7 +69,8 @@ class BloomFilter(FilterModule):
         )
         self.register_buffer("bloom_sigs", sigs)
 
-    def _build_query_sigs(self, query_clause_attrs: Tensor) -> Tensor:
+    def prepare_queries(self, query_clause_attrs: Tensor) -> Tensor:
+        """The batch's query signatures ``[B, W]`` int64, hashed once outside the timed call."""
         return build_query_signatures(
             query_clause_attrs.long().unsqueeze(-1),
             self.hash_seeds,
@@ -79,33 +80,24 @@ class BloomFilter(FilterModule):
             clause_salt=self.clause_salt,
         )
 
-    def evaluate_mask(
-        self, query_clause_attrs: Tensor, start: int = 0, end: int | None = None
-    ) -> Tensor:
-        """Returns [B, end - start] bool over items ``[start, end)``: the op runs on a row
-        slice of the signature table (a contiguous view), so no ``[B, N]`` exists."""
-        qb = self._build_query_sigs(query_clause_attrs)  # [B, W]
-        return ops_for(self.backend).bloom_match(qb, self.bloom_sigs[start:end])
+    def evaluate_mask(self, q: Tensor, start: int = 0, end: int | None = None) -> Tensor:
+        """Returns [B, end - start] bool over items ``[start, end)`` for the query signatures
+        ``q``: the op runs on a row slice of the signature table (a contiguous view), so no
+        ``[B, N]`` exists."""
+        return ops_for(self.backend).bloom_match(q, self.bloom_sigs[start:end])
 
-    def evaluate_indices(self, query_clause_attrs: Tensor) -> tuple[Tensor, Tensor]:
+    def evaluate_indices(self, q: Tensor) -> tuple[Tensor, Tensor]:
         """Returns (positive_indices [B, N] int64, counts [B] int64); each row's ids are in
         ascending item order on both backends."""
-        qb = self._build_query_sigs(query_clause_attrs)  # [B, W]
-        return ops_for(self.backend).bloom_compact(qb, self.bloom_sigs)
+        return ops_for(self.backend).bloom_compact(q, self.bloom_sigs)
 
-    def mask_scores(self, scores: Tensor, query_clause_attrs: Tensor) -> Tensor:
+    def mask_scores(self, scores: Tensor, q: Tensor) -> Tensor:
         """``scores`` [B, N] with the failing items at ``-inf``, one fused pass on triton."""
-        qb = self._build_query_sigs(query_clause_attrs)  # [B, W]
-        return ops_for(self.backend).bloom_match_scores(scores, qb, self.bloom_sigs)
+        return ops_for(self.backend).bloom_match_scores(scores, q, self.bloom_sigs)
 
-    def evaluate_subset(
-        self,
-        query_clause_attrs: Tensor,
-        candidate_ids: Tensor,
-    ) -> Tensor:
-        qb = self._build_query_sigs(query_clause_attrs)  # [B, W]
+    def evaluate_subset(self, q: Tensor, candidate_ids: Tensor) -> Tensor:
         sigs = self.bloom_sigs[candidate_ids]  # [B, P, W]
-        return bloom_subset_match(qb, sigs)
+        return bloom_subset_match(q, sigs)
 
 
 class ExactAttributeFilter(FilterModule):
@@ -135,36 +127,30 @@ class ExactAttributeFilter(FilterModule):
             clause_is_reverse = torch.zeros(c, dtype=torch.bool, device=item_clause_attrs.device)
         self.register_buffer("clause_is_reverse", clause_is_reverse)
 
-    def evaluate_mask(
-        self, query_clause_attrs: Tensor, start: int = 0, end: int | None = None
-    ) -> Tensor:
+    def evaluate_mask(self, q: Tensor, start: int = 0, end: int | None = None) -> Tensor:
         """Returns [B, end - start] bool over items ``[start, end)``, computed on a row slice of
         the attribute table (a contiguous view), so no ``[B, N]`` exists. ``backend="triton"``
         uses the fused ``clause_mask`` kernel; ``backend="torch"`` materializes the range's
         ``[B, end - start, C, A_max]`` bool grid."""
         return ops_for(self.backend).clause_mask(
-            self.item_clause_attrs[start:end], self.clause_is_reverse, query_clause_attrs
+            self.item_clause_attrs[start:end], self.clause_is_reverse, q
         )
 
-    def mask_scores(self, scores: Tensor, query_clause_attrs: Tensor) -> Tensor:
+    def mask_scores(self, scores: Tensor, q: Tensor) -> Tensor:
         """``scores`` [B, N] with the failing items at ``-inf``, one fused pass on triton."""
         return ops_for(self.backend).clause_mask_scores(
-            scores, self.item_clause_attrs, self.clause_is_reverse, query_clause_attrs
+            scores, self.item_clause_attrs, self.clause_is_reverse, q
         )
 
-    def evaluate_indices(self, query_clause_attrs: Tensor) -> tuple[Tensor, Tensor]:
+    def evaluate_indices(self, q: Tensor) -> tuple[Tensor, Tensor]:
         """Returns (positive_indices [B, N] int64, counts [B] int64); each row's ids are in
         ascending item order on both backends."""
         return ops_for(self.backend).clause_compact(
-            self.item_clause_attrs, self.clause_is_reverse, query_clause_attrs
+            self.item_clause_attrs, self.clause_is_reverse, q
         )
 
-    def evaluate_subset(
-        self,
-        query_clause_attrs: Tensor,
-        candidate_ids: Tensor,
-    ) -> Tensor:
+    def evaluate_subset(self, q: Tensor, candidate_ids: Tensor) -> Tensor:
         """Apply this filter only to ``candidate_ids: [B, P]`` (gather + broadcast equality, no
         full-N scan); reverse-clause and inactive-query (-1) semantics match ``evaluate_mask``."""
         gathered = self.item_clause_attrs[candidate_ids]  # [B, P, C, A_max]
-        return clause_subset_match(gathered, query_clause_attrs, self.clause_is_reverse)
+        return clause_subset_match(gathered, q, self.clause_is_reverse)

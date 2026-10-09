@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from functools import partial
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import torch
 from torch import Tensor
@@ -32,6 +32,30 @@ from retrieve.ops import official as official_mod
 from retrieve.ops.official import DEFAULT_CONFIG as OFFICIAL_DEFAULT, BloomPath, OfficialConfig
 
 FilterMode = Literal["none", "bloom", "exact"]
+
+
+class PreparedFilter(NamedTuple):
+    """A batch's filter, prepared outside ``forward`` by ``SilverTorch.prepare_queries`` (the
+    query-side work of the filter: hashing, expression parsing). Exactly one form is set:
+    ``query_bits`` ``[B, C·k_hash]`` (bloom on triton / torch), ``query_attrs`` ``[B, C]`` int64
+    (exact, every backend), or the official parser's CPU ``plans_data`` / ``plans_offsets`` (bloom
+    on official; Meta's search decodes plans on the host, kernels.md § official)."""
+
+    query_bits: Tensor | None = None
+    query_attrs: Tensor | None = None
+    plans_data: Tensor | None = None
+    plans_offsets: Tensor | None = None
+
+    def select(self, rows: Tensor) -> PreparedFilter:
+        """The prepared filter of a row subset (device ``index_select``; not for official plans)."""
+        if self.plans_data is not None:
+            raise ValueError("official bloom plans are not row-sliceable; prepare the subset")
+        bits, attrs = self.query_bits, self.query_attrs
+        return PreparedFilter(
+            query_bits=None if bits is None else bits.index_select(0, rows),
+            query_attrs=None if attrs is None else attrs.index_select(0, rows),
+        )
+
 
 __all__ = ["FilterMode", "OfficialConfig", "SilverTorch", "SilverTorchBuilder"]
 
@@ -368,34 +392,58 @@ class SilverTorch(RetrievalModule):
             )
         return super().compile(*args, **kwargs)
 
+    def prepare_queries(self, query_clause_attrs: Tensor) -> PreparedFilter:
+        """The query side of the filter for one batch, done once outside ``forward``: the bloom
+        query bit positions (triton / torch), the official parser's plans (official bloom; CPU,
+        as Meta's search reads them), or the attrs as int64 (exact). Host work and syncs belong
+        here; ``forward`` has none of ours."""
+        if self.filter_mode == "none":
+            raise ValueError("prepare_queries needs filter_mode='bloom' or filter_mode='exact'")
+        if self.filter_mode == "exact":
+            return PreparedFilter(query_attrs=query_clause_attrs.long().contiguous())
+        if self.backend != "official":
+            return PreparedFilter(query_bits=self._query_bit_positions(query_clause_attrs))
+        if self.bloom_index.numel() == 0:
+            raise RuntimeError(
+                "this official bloom index was registered without item_clause_attrs, so there "
+                "is nothing to search; register_index with attributes or forward unfiltered"
+            )
+        cfg = self.official
+        data, offsets = official_mod.parse_plans(
+            official_mod.queries_to_expressions(query_clause_attrs),
+            cfg.n_stored_hashes,
+            cfg.max_sub_queries,
+        )
+        return PreparedFilter(plans_data=data, plans_offsets=offsets)
+
     def forward(
         self,
         query: Tensor,
-        query_clause_attrs: Tensor | None = None,
+        prepared: PreparedFilter | None = None,
         candidate_ids: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
-        """IVF + (optional) attribute-filter-fused retrieval; ``query_clause_attrs`` is valid only
-        for ``filter_mode="bloom"|"exact"`` and when ``None`` the filter branch is skipped (plain
-        IVF + INT8 ANN). ``candidate_ids [B, P]`` (``-1`` = padding) switches to a pure
+        """IVF + (optional) attribute-filter-fused retrieval. ``prepared`` comes from
+        ``prepare_queries`` (filter modes ``"bloom"`` / ``"exact"``); ``None`` skips the filter
+        (plain IVF + INT8 ANN). ``candidate_ids [B, P]`` (``-1`` = padding) switches to a pure
         re-rank of the given original ids with no filter."""
         if candidate_ids is not None:
-            if query_clause_attrs is not None:
+            if prepared is not None:
                 raise ValueError(
                     "candidate_ids path scores the given candidates without the fused "
-                    "attribute filter; pass query_clause_attrs OR candidate_ids, not both"
+                    "attribute filter; pass prepared OR candidate_ids, not both"
                 )
             return self._forward_candidates(query, candidate_ids)
-        if self.filter_mode == "none" and query_clause_attrs is not None:
+        if self.filter_mode == "none" and prepared is not None:
             raise ValueError(
-                "query_clause_attrs requires filter_mode='bloom' or filter_mode='exact'"
+                "a prepared filter requires filter_mode='bloom' or filter_mode='exact'"
             )
         if self.backend == "official" and torch.compiler.is_compiling():
             raise RuntimeError(
                 "SilverTorch(backend='official') is eager-only and cannot be traced by "
-                "torch.compile / torch.export: every official op syncs the host. "
-                "Call the module eagerly, or use backend='triton' / 'torch'."
+                "torch.compile / torch.export: Meta's scorers sync the host (kernels.md § "
+                "official). Call the module eagerly, or use backend='triton' / 'torch'."
             )
-        return self._forward_impl(query, query_clause_attrs)
+        return self._forward_impl(query, prepared)
 
     def _phase1_probe_ids(self, query: Tensor) -> Tensor:
         """Phase 1 proper: centroid scores → top-``n_probe`` cluster ids ``[B, n_probe]``."""
@@ -418,7 +466,7 @@ class SilverTorch(RetrievalModule):
     def _forward_ops(
         self,
         query: Tensor,
-        query_clause_attrs: Tensor | None,
+        prepared: PreparedFilter | None,
     ) -> tuple[Tensor, Tensor]:
         """Phases 2+3 on the backend's op namespace: ``retrieve.ops.triton`` (one fused launch)
         or ``retrieve.ops.reference`` (the same semantics eager, materializing ``[B, width,
@@ -427,18 +475,18 @@ class SilverTorch(RetrievalModule):
         layout = (self._phase1_probe_ids(query), self.cluster_offsets, self.item_codes)
         tail = (self._global_scale_f, self.k, self._probe_width)
 
-        if self.has_exact and query_clause_attrs is not None:
+        if self.has_exact and prepared is not None:
             return ops.codesigned_probe_score_exact(
                 query,
                 *layout,
                 self.sort_perm,
                 self.item_clause_attrs,
                 self.clause_is_reverse,
-                query_clause_attrs.long(),
+                prepared.query_attrs,
                 *tail,
             )
-        if self.has_bloom and query_clause_attrs is not None:
-            qpos = self._query_bit_positions(query_clause_attrs)
+        if self.has_bloom and prepared is not None:
+            qpos = prepared.query_bits
             table, freq = self.bloom_transposed, self.bloom_bit_freq
             if self.bloom_path == "full":
                 # The full-N packed mask, read by the same scorer as a one-row table per query
@@ -454,43 +502,30 @@ class SilverTorch(RetrievalModule):
     def _forward_official(
         self,
         query: Tensor,
-        query_clause_attrs: Tensor | None,
+        prepared: PreparedFilter | None,
     ) -> tuple[Tensor, Tensor]:
-        """Algorithm 1 phases 2+3 on Meta's official ops, eager only.
+        """Algorithm 1 phases 2+3 on Meta's official ops, eager only (kernels.md § official).
 
-        ``none`` → ``fused_kmean_ann``; ``bloom`` → the official expression parser (plans
-        on CPU, memoised per expression tuple unless ``OfficialConfig.cache_plans=False``,
-        the setting a timing run needs) + ``bloom_index_search_batch_return_partial_response``
-        over the probed clusters + ``fused_kmean_ann_with_partial_masks``
-        (``OfficialConfig.bloom_path="partial"``, the paper's co-design) or the full-``N``
-        packed mask into
-        ``fused_kmean_ann(filtering_bit_mask=…)`` (``"full"``, the S9 ablation); ``exact`` →
-        our Triton ``clause_mask`` over the sorted attrs, packed into the same
-        ``filtering_bit_mask`` (phase 2 ours, full ``N`` — labelled so in every table).
+        ``none`` → ``fused_kmean_ann``; ``bloom`` → the prepared plans into
+        ``bloom_index_search_batch_return_partial_response`` over the probed clusters +
+        ``fused_kmean_ann_with_partial_masks`` (``OfficialConfig.bloom_path="partial"``, the
+        paper's co-design) or the full-``N`` packed mask into
+        ``fused_kmean_ann(filtering_bit_mask=…)`` (``"full"``, the S9 ablation); ``exact`` → our
+        Triton ``clause_mask_packed`` over the sorted attrs as the ``filtering_bit_mask`` (ours,
+        filling a step Meta does not provide).
         ``max_tensor_size_per_row`` is the compact probe width the Triton scorer writes, so the
-        official output has the same ``[B, width]`` (rounded to 32) and the ``masked_topk``
-        epilogue costs the same in every arm."""
+        official output has the same ``[B, width]`` (rounded to 32)."""
         probe_ids = self._phase1_probe_ids(query)
         cfg = self.official
         filtering_bit_mask: Tensor | None = None
         partial: tuple[Tensor, Tensor, Tensor] | None = None
 
-        if self.has_exact and query_clause_attrs is not None:
-            mask = ops_for("triton").clause_mask(
-                self.item_clause_attrs, self.clause_is_reverse, query_clause_attrs.long()
-            )  # [B, N] bool over cluster-sorted ids
-            filtering_bit_mask = official_mod.pack_mask(mask, official_mod.MASK_BIT_ORDER)
-        elif self.has_bloom and query_clause_attrs is not None:
-            if self.bloom_index.numel() == 0:
-                raise RuntimeError(
-                    "this official bloom index was registered without item_clause_attrs, "
-                    "so there is nothing to search; register_index with attributes or call "
-                    "forward without query_clause_attrs"
-                )
-            expressions = official_mod.queries_to_expressions(query_clause_attrs)
-            plans = official_mod.parse_plans(
-                expressions, cfg.n_stored_hashes, cfg.max_sub_queries, cache=cfg.cache_plans
-            )
+        if self.has_exact and prepared is not None:
+            filtering_bit_mask = ops_for("triton").clause_mask_packed(
+                self.item_clause_attrs, self.clause_is_reverse, prepared.query_attrs
+            )  # high-first words over cluster-sorted ids = the scorer's read order
+        elif self.has_bloom and prepared is not None:
+            plans = (prepared.plans_data, prepared.plans_offsets)
             if cfg.bloom_path == "partial":
                 partial = official_mod.bloom_partial_masks(
                     self.bloom_index,

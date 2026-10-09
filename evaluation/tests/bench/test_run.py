@@ -31,7 +31,6 @@ from click.testing import CliRunner
 from bench import algos, records, run, upload
 from bench import measure as bench
 from bench.config import NONE_SWEEP, load_matrix
-from retrieve import OfficialConfig
 
 LAT = {"warmup": 2, "n_min": 4, "n_max": 4, "windows": 3}
 EAGER = ("eager",)
@@ -82,7 +81,9 @@ def test_end_to_end_records(tiny_configs, tmp_path):
         ]
         for e in rec["perf"]:
             assert set(run.PERF_STAT_KEYS) <= set(e)
-            assert e["cache_plans"] is None  # no plan cache on this backend (official only)
+            # The filter's query encoding is prepared outside the timed calls (none on "none").
+            prep = e["query_prep_ms"]
+            assert prep is None if job.filter_kind == "none" else prep >= 0
             if e["mode"] == "eager":
                 assert e["n"] == 4 and e["load"] == "closed_loop" and "reason" not in e
                 assert e["sm_mhz"] is None  # sampled under load on CUDA only
@@ -379,46 +380,56 @@ def test_quality_records_the_routers_local_pass_rate_and_route_per_query():
     inputs = {"queries": q, "targets": torch.zeros(rows, 1, dtype=torch.long)}
     assets = {"qa_s": qa, "keep": keep, "blob": None, "oracle_rows": None, "heldout_rows": keep}
     out, per_q, _, _ = run.quality(m, inputs, assets, [4], torch.device("cpu"))
-    lq = m.local_pass_rate(q[keep], qa[keep])
+    lq = m.local_pass_rate(q[keep], m.filter.prepare_queries(qa[keep]))
     assert torch.equal(per_q["router_lq"], lq) and per_q["router_lq"].shape == (rows - 1,)
     assert torch.equal(per_q["router_exact"], (lq < 0.3).float())
     assert out["router_exact_share"] == pytest.approx(float((lq < 0.3).float().mean()))
 
 
-class _Cached(torch.nn.Module):
-    """A module with a plan cache, as ``SilverTorch`` on the official backend."""
+class _Prepared(torch.nn.Module):
+    """A module with a query-prep step, as ``SilverTorch``: counts its preps and records what each
+    forward received."""
 
     backend = "official"
 
     def __init__(self) -> None:
         super().__init__()
-        self.official = OfficialConfig()
         self.k = 4
+        self.preps = 0
+        self.seen: list = []
 
-    def forward(self, q, qa=None):
+    def prepare_queries(self, qa):
+        self.preps += 1
+        return ("prepared", qa)
+
+    def forward(self, q, prepared=None):
+        self.seen.append(prepared[0] if prepared is not None else None)
         return torch.zeros(q.shape[0], self.k, dtype=torch.long), torch.zeros(q.shape[0], self.k)
 
 
-def test_perf_times_with_the_plan_cache_off_and_records_it(tiny_configs):
-    """kernels.md: an official timing run must set ``cache_plans=False`` (or label both).
-    ``run.perf`` replaces ``OfficialConfig`` before the first variant, touching nothing else,
-    and every entry carries the value."""
+def test_perf_prepares_the_pool_before_timing_and_records_it(tiny_configs, monkeypatch):
+    """evaluation.md § Query preparation: every pool batch is prepared once before the timed calls
+    (no forward prepares), each timed call gets the prepared batch, and every entry records
+    ``query_prep_ms``; graph null entries carry it too."""
     job = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=[NONE_SWEEP])[0]
-    inputs = {"queries": torch.zeros(8, 8)}
-    assets = {"qa_s": None, "skip": None}
-    m = _Cached()
-    assert m.official.cache_plans is True
+    n_pool = 6
+    pool = torch.zeros(n_pool, 1, 8)
+    qa_pool = torch.zeros(n_pool, 1, 2, dtype=torch.long)
+    monkeypatch.setattr(run.inputs, "query_pool", lambda *a, **kw: (pool, qa_pool))
+    m = _Prepared()
     ((entries, samples),) = run.perf(
-        [m], inputs, assets, job, torch.device("cpu"), modes=EAGER, profile=False, latency_kw=LAT
-    )
-    assert m.official == OfficialConfig(cache_plans=False)
-    assert len(entries) == 4 == len(samples) and all(e["cache_plans"] is False for e in entries)
-    # ... and the null (graph) entries carry it too.
-    ((entries, _),) = run.perf(
-        [m], inputs, assets, job, torch.device("cpu"), modes=("graph",), profile=False,
-        latency_kw=LAT,
+        [m], {}, {"qa_s": None, "skip": None}, job, torch.device("cpu"), modes=EAGER,
+        profile=False, latency_kw=LAT,
     )  # fmt: skip
-    assert all(e["reason"] == "cuda_unavailable" and e["cache_plans"] is False for e in entries)
+    per_bs = len(job.batch_sizes)
+    assert m.preps == n_pool * per_bs and set(m.seen) == {"prepared"}
+    assert len(entries) == len(samples) == per_bs * len(job.ks)
+    assert all(e["query_prep_ms"] is not None and e["query_prep_ms"] >= 0 for e in entries)
+    ((entries, _),) = run.perf(
+        [m], {}, {"qa_s": None, "skip": None}, job, torch.device("cpu"), modes=("graph",),
+        profile=False, latency_kw=LAT,
+    )  # fmt: skip
+    assert all(e["reason"] == "cuda_unavailable" and e["query_prep_ms"] >= 0 for e in entries)
 
 
 def test_eager_only_partial_is_per_job(tiny_configs, tmp_path, monkeypatch):

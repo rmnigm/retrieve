@@ -7,7 +7,12 @@ from retrieve.modules.bit_knn import OneBitKNN, SimHashKNN
 from retrieve.modules.filters import BloomFilter, ExactAttributeFilter
 from retrieve.modules.knn import FullScanKNN, PostfilterKNN, PrefilterKNN
 from retrieve.modules.linr import LiNRBuilder, LiNRV1, LiNRV2, LiNRV3
-from retrieve.modules.silvertorch import OfficialConfig, SilverTorch, SilverTorchBuilder
+from retrieve.modules.silvertorch import (
+    OfficialConfig,
+    PreparedFilter,
+    SilverTorch,
+    SilverTorchBuilder,
+)
 
 __all__ = [
     "BloomFilter",
@@ -20,6 +25,7 @@ __all__ = [
     "OfficialConfig",
     "OneBitKNN",
     "PostfilterKNN",
+    "PreparedFilter",
     "PrefilterKNN",
     "SilverTorch",
     "SilverTorchBuilder",
