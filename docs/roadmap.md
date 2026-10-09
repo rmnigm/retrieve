@@ -338,9 +338,12 @@ co-design.
   then C5 official and T3 h2h re-run claims-first. st-dloop, pod b; C5's
   verdict on Meta's code waits for it.
 - [ ] **ROUTER-LIB: the router as a library method** (the library goal,
-  user 2026-10-10; unassigned, after OFFICIAL-REWORK; WIP on `dev/router-lib`): the harness `router` arm's logic (unfiltered pre-probe
+  user 2026-10-10; only if V-ROUTER on PubMed puts it on the Pareto
+  front, [decisions](decisions.md#datasets); WIP on `dev/router-lib`): the harness `router` arm's logic (unfiltered pre-probe
   → l_q → V2 below the threshold, SilverTorch above) as a `retrieve`
-  module with its docs page; the harness arm calls it; gates: the arm's
+  module with its docs page, the split done on the device with no host
+  sync so the arm can be CUDA-graph captured (V-ROUTER at 0.8 M: the
+  eager-only host split is why it never beat graph V2); the harness arm calls it; gates: the arm's
   records unchanged (ids + scores `torch.equal`), library + harness suites.
   After V-ROUTER's goodreads fit.
 - [ ] **REL-LIC: license audit and the public-release plan** (user,
