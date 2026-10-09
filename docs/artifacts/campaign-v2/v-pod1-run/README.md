@@ -45,3 +45,8 @@ GPU checks, h2h with the profiler fix, V-GR-DEEP, V-YFCC, V-SEEDS' YFCC half. V-
 - **V-CODESIGN goodreads half** (2026-10-08, staging `69dd3d6`, `f01255f1`): 54 / 54 ok (44 `unstable`),
   0.79 GPU-h; full / partial 0.81-0.86, recall identical; Hub `campaign-v2.1/goodreads-codesign`
   ([validation](../../../validation.md)). Summary via [`../v-codesign/codesign_summary.py`](../v-codesign/codesign_summary.py).
+- **H2H protocol diagnostic** (2026-10-09, `f01255f1`, 0.35 GPU-h): (a) = (b) = (c) within noise on every arm
+  (official ≈ 1.44 ms, Triton eager ≈ 0.68, graph ≈ 0.19; official / Triton 2.13); Hub `artifacts/h2h-diag-v21`.
+- **H2H-FINAL at v2.1** (2026-10-09, staging `cb1dbc3`, `f01255f1`, 1.33 GPU-h): 60 / 60 ok, kernel lists complete,
+  eager = graph ids 80 / 80; Hub `campaign-v2.1/{goodreads,arxiv}-h2h` ([validation](../../../validation.md)).
+  Summary via [`../h2h-final/h2h_summary.py`](../h2h-final/h2h_summary.py).
