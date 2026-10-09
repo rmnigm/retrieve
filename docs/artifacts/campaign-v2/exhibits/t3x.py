@@ -78,11 +78,8 @@ def main():
         for e in r["perf"] or []:
             if e["mode"] == "eager" and e.get("kernels_us") is not None:
                 ksum[cell_key(r, e)] = e
-    recs = [
-        r
-        for r in allrecs
-        if r["status"] == "ok" and not any(e.get("kernels_us") is not None for e in r["perf"] or [])
-    ]
+    # an `ok` record timed with --profile carries its own kernels_us; only `partial` ones are profile-only
+    recs = [r for r in allrecs if r["status"] == "ok"]
     cells = collections.defaultdict(lambda: collections.defaultdict(list))
     for r in recs:
         for e in r["perf"] or []:
