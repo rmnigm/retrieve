@@ -255,6 +255,32 @@
   "tags4@1024": 0.854,
   "tags4@4096": 0.955
  },
+ "laion_x": {
+  "linr_v2|tags4": {
+   "1": 3.745,
+   "16": 20.023
+  },
+  "silvertorch|tags4": {
+   "1": 1.352,
+   "16": 15.679
+  },
+  "linr_v1_filter_mask|tags4": {
+   "1": 11.714,
+   "16": 27.572
+  },
+  "linr_v2|c0_domain": {
+   "1": 1.927,
+   "16": 18.322
+  },
+  "silvertorch|c0_domain": {
+   "1": 1.297,
+   "16": 14.967
+  },
+  "linr_v1_filter_mask|c0_domain": {
+   "1": 11.659,
+   "16": 25.787
+  }
+ },
  "yfcc_real": {
   "tags_and@24": 0.451,
   "tags_and@256": 0.63,
@@ -538,301 +564,13 @@
  },
  "c5": [
   {
-   "who": "ours (Triton)",
-   "dataset": "arxiv",
-   "sweep": "all4",
-   "n_probe": 128,
-   "bs": 1,
-   "mode": "graph",
-   "ratio": 1.041
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "arxiv",
-   "sweep": "all4",
-   "n_probe": 128,
-   "bs": 16,
-   "mode": "graph",
-   "ratio": 0.854
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "arxiv",
-   "sweep": "all4",
-   "n_probe": 32,
-   "bs": 1,
-   "mode": "graph",
-   "ratio": 1.002
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "arxiv",
-   "sweep": "all4",
-   "n_probe": 32,
-   "bs": 16,
-   "mode": "graph",
-   "ratio": 1.081
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "arxiv",
-   "sweep": "all4",
-   "n_probe": 8,
-   "bs": 1,
-   "mode": "graph",
-   "ratio": 1.0
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "arxiv",
-   "sweep": "all4",
-   "n_probe": 8,
-   "bs": 16,
-   "mode": "graph",
-   "ratio": 1.206
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "arxiv",
-   "sweep": "c0_maincat",
-   "n_probe": 128,
-   "bs": 1,
-   "mode": "graph",
-   "ratio": 1.027
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "arxiv",
-   "sweep": "c0_maincat",
-   "n_probe": 128,
-   "bs": 16,
-   "mode": "graph",
-   "ratio": 0.927
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "arxiv",
-   "sweep": "c0_maincat",
-   "n_probe": 32,
-   "bs": 1,
-   "mode": "graph",
-   "ratio": 0.994
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "arxiv",
-   "sweep": "c0_maincat",
-   "n_probe": 32,
-   "bs": 16,
-   "mode": "graph",
-   "ratio": 1.031
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "arxiv",
-   "sweep": "c0_maincat",
-   "n_probe": 8,
-   "bs": 1,
-   "mode": "graph",
-   "ratio": 0.998
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "arxiv",
-   "sweep": "c0_maincat",
-   "n_probe": 8,
-   "bs": 16,
-   "mode": "graph",
-   "ratio": 1.114
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "arxiv",
-   "sweep": "c3_nversions",
-   "n_probe": 128,
-   "bs": 1,
-   "mode": "graph",
-   "ratio": 1.026
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "arxiv",
-   "sweep": "c3_nversions",
-   "n_probe": 128,
-   "bs": 16,
-   "mode": "graph",
-   "ratio": 0.921
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "arxiv",
-   "sweep": "c3_nversions",
-   "n_probe": 32,
-   "bs": 1,
-   "mode": "graph",
-   "ratio": 0.999
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "arxiv",
-   "sweep": "c3_nversions",
-   "n_probe": 32,
-   "bs": 16,
-   "mode": "graph",
-   "ratio": 1.016
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "arxiv",
-   "sweep": "c3_nversions",
-   "n_probe": 8,
-   "bs": 1,
-   "mode": "graph",
-   "ratio": 1.006
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "arxiv",
-   "sweep": "c3_nversions",
-   "n_probe": 8,
-   "bs": 16,
-   "mode": "graph",
-   "ratio": 1.081
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "goodreads",
-   "sweep": "c0_genre",
-   "n_probe": 128,
-   "bs": 1,
-   "mode": "graph",
-   "ratio": 1.01
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "goodreads",
-   "sweep": "c0_genre",
-   "n_probe": 128,
-   "bs": 16,
-   "mode": "graph",
-   "ratio": 0.965
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "goodreads",
-   "sweep": "c0_genre",
-   "n_probe": 32,
-   "bs": 1,
-   "mode": "graph",
-   "ratio": 1.006
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "goodreads",
-   "sweep": "c0_genre",
-   "n_probe": 32,
-   "bs": 16,
-   "mode": "graph",
-   "ratio": 1.041
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "goodreads",
-   "sweep": "c0_genre",
-   "n_probe": 8,
-   "bs": 1,
-   "mode": "graph",
-   "ratio": 1.003
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "goodreads",
-   "sweep": "c0_genre",
-   "n_probe": 8,
-   "bs": 16,
-   "mode": "graph",
-   "ratio": 1.019
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "pubmed",
-   "sweep": "c0_mesh",
-   "n_probe": 1024,
-   "bs": 1,
-   "mode": "graph",
-   "ratio": 1.06
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "pubmed",
-   "sweep": "c0_mesh",
-   "n_probe": 1024,
-   "bs": 16,
-   "mode": "graph",
-   "ratio": 1.118
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "pubmed",
-   "sweep": "c0_mesh",
-   "n_probe": 24,
-   "bs": 1,
-   "mode": "graph",
-   "ratio": 1.053
-  },
-  {
-   "who": "ours (Triton)",
-   "dataset": "pubmed",
-   "sweep": "c0_mesh",
-   "n_probe": 24,
-   "bs": 16,
-   "mode": "graph",
-   "ratio": 1.117
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "c0_maincat",
-   "n_probe": 8,
-   "bs": 1,
-   "mode": "eager",
-   "ratio": 0.802
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "c0_maincat",
-   "n_probe": 8,
-   "bs": 16,
-   "mode": "eager",
-   "ratio": 0.835
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "c0_maincat",
-   "n_probe": 32,
-   "bs": 1,
-   "mode": "eager",
-   "ratio": 0.802
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "c0_maincat",
-   "n_probe": 32,
-   "bs": 16,
-   "mode": "eager",
-   "ratio": 0.835
-  },
-  {
    "who": "Meta's code",
    "dataset": "arxiv",
    "sweep": "c0_maincat",
    "n_probe": 128,
    "bs": 1,
    "mode": "eager",
-   "ratio": 0.796
+   "ratio": 0.795
   },
   {
    "who": "Meta's code",
@@ -845,39 +583,39 @@
   },
   {
    "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c0_genre",
-   "n_probe": 8,
-   "bs": 1,
-   "mode": "eager",
-   "ratio": 0.808
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c0_genre",
-   "n_probe": 8,
-   "bs": 16,
-   "mode": "eager",
-   "ratio": 0.967
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c0_genre",
+   "dataset": "arxiv",
+   "sweep": "c0_maincat",
    "n_probe": 32,
    "bs": 1,
    "mode": "eager",
-   "ratio": 0.81
+   "ratio": 0.797
   },
   {
    "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c0_genre",
+   "dataset": "arxiv",
+   "sweep": "c0_maincat",
    "n_probe": 32,
    "bs": 16,
    "mode": "eager",
-   "ratio": 0.862
+   "ratio": 0.834
+  },
+  {
+   "who": "Meta's code",
+   "dataset": "arxiv",
+   "sweep": "c0_maincat",
+   "n_probe": 8,
+   "bs": 1,
+   "mode": "eager",
+   "ratio": 0.807
+  },
+  {
+   "who": "Meta's code",
+   "dataset": "arxiv",
+   "sweep": "c0_maincat",
+   "n_probe": 8,
+   "bs": 16,
+   "mode": "eager",
+   "ratio": 0.836
   },
   {
    "who": "Meta's code",
@@ -895,7 +633,295 @@
    "n_probe": 128,
    "bs": 16,
    "mode": "eager",
-   "ratio": 0.855
+   "ratio": 0.851
+  },
+  {
+   "who": "Meta's code",
+   "dataset": "goodreads",
+   "sweep": "c0_genre",
+   "n_probe": 32,
+   "bs": 1,
+   "mode": "eager",
+   "ratio": 0.809
+  },
+  {
+   "who": "Meta's code",
+   "dataset": "goodreads",
+   "sweep": "c0_genre",
+   "n_probe": 32,
+   "bs": 16,
+   "mode": "eager",
+   "ratio": 0.862
+  },
+  {
+   "who": "Meta's code",
+   "dataset": "goodreads",
+   "sweep": "c0_genre",
+   "n_probe": 8,
+   "bs": 1,
+   "mode": "eager",
+   "ratio": 0.805
+  },
+  {
+   "who": "Meta's code",
+   "dataset": "goodreads",
+   "sweep": "c0_genre",
+   "n_probe": 8,
+   "bs": 16,
+   "mode": "eager",
+   "ratio": 0.857
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "arxiv",
+   "sweep": "all4",
+   "n_probe": 128,
+   "bs": 1,
+   "mode": "graph",
+   "ratio": 0.98
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "arxiv",
+   "sweep": "all4",
+   "n_probe": 128,
+   "bs": 16,
+   "mode": "graph",
+   "ratio": 0.84
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "arxiv",
+   "sweep": "all4",
+   "n_probe": 32,
+   "bs": 1,
+   "mode": "graph",
+   "ratio": 0.991
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "arxiv",
+   "sweep": "all4",
+   "n_probe": 32,
+   "bs": 16,
+   "mode": "graph",
+   "ratio": 1.053
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "arxiv",
+   "sweep": "all4",
+   "n_probe": 8,
+   "bs": 1,
+   "mode": "graph",
+   "ratio": 1.015
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "arxiv",
+   "sweep": "all4",
+   "n_probe": 8,
+   "bs": 16,
+   "mode": "graph",
+   "ratio": 1.007
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "arxiv",
+   "sweep": "c0_maincat",
+   "n_probe": 128,
+   "bs": 1,
+   "mode": "graph",
+   "ratio": 1.0
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "arxiv",
+   "sweep": "c0_maincat",
+   "n_probe": 128,
+   "bs": 16,
+   "mode": "graph",
+   "ratio": 0.909
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "arxiv",
+   "sweep": "c0_maincat",
+   "n_probe": 32,
+   "bs": 1,
+   "mode": "graph",
+   "ratio": 1.002
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "arxiv",
+   "sweep": "c0_maincat",
+   "n_probe": 32,
+   "bs": 16,
+   "mode": "graph",
+   "ratio": 1.019
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "arxiv",
+   "sweep": "c0_maincat",
+   "n_probe": 8,
+   "bs": 1,
+   "mode": "graph",
+   "ratio": 0.994
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "arxiv",
+   "sweep": "c0_maincat",
+   "n_probe": 8,
+   "bs": 16,
+   "mode": "graph",
+   "ratio": 0.996
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "arxiv",
+   "sweep": "c3_nversions",
+   "n_probe": 128,
+   "bs": 1,
+   "mode": "graph",
+   "ratio": 1.016
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "arxiv",
+   "sweep": "c3_nversions",
+   "n_probe": 128,
+   "bs": 16,
+   "mode": "graph",
+   "ratio": 0.899
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "arxiv",
+   "sweep": "c3_nversions",
+   "n_probe": 32,
+   "bs": 1,
+   "mode": "graph",
+   "ratio": 1.003
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "arxiv",
+   "sweep": "c3_nversions",
+   "n_probe": 32,
+   "bs": 16,
+   "mode": "graph",
+   "ratio": 1.0
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "arxiv",
+   "sweep": "c3_nversions",
+   "n_probe": 8,
+   "bs": 1,
+   "mode": "graph",
+   "ratio": 0.976
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "arxiv",
+   "sweep": "c3_nversions",
+   "n_probe": 8,
+   "bs": 16,
+   "mode": "graph",
+   "ratio": 1.029
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "goodreads",
+   "sweep": "c0_genre",
+   "n_probe": 128,
+   "bs": 1,
+   "mode": "graph",
+   "ratio": 1.005
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "goodreads",
+   "sweep": "c0_genre",
+   "n_probe": 128,
+   "bs": 16,
+   "mode": "graph",
+   "ratio": 0.948
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "goodreads",
+   "sweep": "c0_genre",
+   "n_probe": 32,
+   "bs": 1,
+   "mode": "graph",
+   "ratio": 0.997
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "goodreads",
+   "sweep": "c0_genre",
+   "n_probe": 32,
+   "bs": 16,
+   "mode": "graph",
+   "ratio": 1.011
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "goodreads",
+   "sweep": "c0_genre",
+   "n_probe": 8,
+   "bs": 1,
+   "mode": "graph",
+   "ratio": 0.987
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "goodreads",
+   "sweep": "c0_genre",
+   "n_probe": 8,
+   "bs": 16,
+   "mode": "graph",
+   "ratio": 1.026
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "pubmed",
+   "sweep": "c0_mesh",
+   "n_probe": 24,
+   "bs": 1,
+   "mode": "graph",
+   "ratio": 1.052
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "pubmed",
+   "sweep": "c0_mesh",
+   "n_probe": 24,
+   "bs": 16,
+   "mode": "graph",
+   "ratio": 1.112
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "pubmed",
+   "sweep": "c0_mesh",
+   "n_probe": 1024,
+   "bs": 1,
+   "mode": "graph",
+   "ratio": 1.025
+  },
+  {
+   "who": "ours (Triton)",
+   "dataset": "pubmed",
+   "sweep": "c0_mesh",
+   "n_probe": 1024,
+   "bs": 16,
+   "mode": "graph",
+   "ratio": 1.008
   },
   {
    "who": "Meta's code",
@@ -976,7 +1002,7 @@
    "n_probe": 32,
    "bs": 16,
    "mode": "graph",
-   "ratio": 1.447
+   "ratio": 1.454
   },
   {
    "who": "ours (Triton)",
@@ -985,7 +1011,7 @@
    "n_probe": 32,
    "bs": 64,
    "mode": "graph",
-   "ratio": 1.672
+   "ratio": 1.7
   },
   {
    "who": "ours (Triton)",
@@ -994,7 +1020,7 @@
    "n_probe": 128,
    "bs": 16,
    "mode": "graph",
-   "ratio": 1.035
+   "ratio": 1.08
   },
   {
    "who": "ours (Triton)",
@@ -1003,7 +1029,7 @@
    "n_probe": 128,
    "bs": 64,
    "mode": "graph",
-   "ratio": 1.029
+   "ratio": 1.092
   },
   {
    "who": "ours (Triton)",
@@ -1012,7 +1038,7 @@
    "n_probe": 32,
    "bs": 16,
    "mode": "graph",
-   "ratio": 2.367
+   "ratio": 2.395
   },
   {
    "who": "ours (Triton)",
@@ -1021,7 +1047,7 @@
    "n_probe": 32,
    "bs": 64,
    "mode": "graph",
-   "ratio": 3.319
+   "ratio": 3.429
   },
   {
    "who": "ours (Triton)",
@@ -1030,7 +1056,7 @@
    "n_probe": 128,
    "bs": 16,
    "mode": "graph",
-   "ratio": 1.327
+   "ratio": 1.42
   },
   {
    "who": "ours (Triton)",
@@ -1039,67 +1065,67 @@
    "n_probe": 128,
    "bs": 64,
    "mode": "graph",
-   "ratio": 1.447
+   "ratio": 1.611
   }
  ],
  "c7": [
   {
    "cell": "arxiv bloom bs 1",
-   "e2e": 1.92,
+   "e2e": 2.06,
    "device": 1.7,
-   "graph_vs_official": 8.2
+   "graph_vs_official": 6.56
   },
   {
    "cell": "arxiv bloom bs 16",
-   "e2e": 2.13,
-   "device": 1.8,
-   "graph_vs_official": 7.1
+   "e2e": 2.08,
+   "device": 1.52,
+   "graph_vs_official": 5.5
   },
   {
    "cell": "arxiv none bs 1",
-   "e2e": 1.81,
-   "device": 1.7,
-   "graph_vs_official": 6.48
+   "e2e": 1.45,
+   "device": 1.4,
+   "graph_vs_official": 4.33
   },
   {
    "cell": "arxiv none bs 16",
-   "e2e": 1.75,
-   "device": 1.83,
-   "graph_vs_official": 4.37
+   "e2e": 1.53,
+   "device": 1.41,
+   "graph_vs_official": 3.92
   },
   {
    "cell": "goodreads bloom bs 1",
-   "e2e": 1.9,
-   "device": 1.74,
-   "graph_vs_official": 8.17
+   "e2e": 2.08,
+   "device": 1.79,
+   "graph_vs_official": 6.74
   },
   {
    "cell": "goodreads bloom bs 16",
-   "e2e": 2.14,
-   "device": 1.79,
-   "graph_vs_official": 9.29
+   "e2e": 2.09,
+   "device": 1.75,
+   "graph_vs_official": 6.88
   },
   {
    "cell": "goodreads none bs 1",
-   "e2e": 1.79,
-   "device": 1.74,
-   "graph_vs_official": 6.35
+   "e2e": 1.43,
+   "device": 1.53,
+   "graph_vs_official": 4.22
   },
   {
    "cell": "goodreads none bs 16",
-   "e2e": 1.78,
-   "device": 1.82,
-   "graph_vs_official": 6.5
+   "e2e": 1.53,
+   "device": 1.79,
+   "graph_vs_official": 5.58
   }
  ],
  "c7_d768": {
   "24": {
    "1": 1.992,
-   "16": 2.177
+   "16": 2.184
   },
   "1024": {
-   "1": 1.301,
-   "16": 0.295
+   "1": 1.697,
+   "16": 1.07
   }
  },
  "v3": {

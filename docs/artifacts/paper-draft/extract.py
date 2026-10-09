@@ -90,6 +90,8 @@ data["scaling"] = scal
 lai = st_recall("campaign-v2.5/laion30m-filter")
 yf = st_recall("campaign-v2.5/yfcc10m-deep")
 data["laion"] = {f"{s}@{n}": round(v, 3) for (s, n), v in lai.items()}
+# 30 M at matched recall, same leg / box / code (v2.9): exact V1, V2 and SilverTorch at the 25 % cap, graph.
+data["laion_x"] = {f"{r['algo']}|{r['sweep']}": {bs: round(perf(r, bs), 3) for bs in (1, 16)} for r in recs("campaign-v2.9/laion30m-x")}
 data["yfcc_real"] = {f"{s}@{n}": round(v, 3) for (s, n), v in yf.items()}
 
 # V1 vs V2.
@@ -104,19 +106,21 @@ data["c1"] = {
 data["int8"] = {s: json.load(open(HUB / f"artifacts/yfcc-int8/int8-{s}.json"))["recall_oracle@100"] for s in ("p1", "p001")}
 
 # Co-design: full / partial, > 1 = co-design faster.
-c5 = list(csv.DictReader(open(HUB / "artifacts/exhibits/20261009-1324-c5/c5.csv")))
-pts = [{"who": "ours (Triton)", "dataset": r["dataset"], "sweep": r["sweep"],
-        "n_probe": int(r["n_probe"]), "bs": int(r["bs"]), "mode": r["mode"], "ratio": float(r["full_over_partial"])}
-       for r in c5 if r["backend"] != "official" and r["mode"] == "graph"]
-meta = defaultdict(dict)
-for leg in ("campaign-v2.8/arxiv-codesign", "campaign-v2.8/goodreads-codesign"):
-    for r in recs(leg):
-        for p in r["perf"]:
-            if p["mode"] == "eager" and p["k"] == 100:
-                meta[(r["dataset"], r["sweep"], r["params"]["n_probe"], p["bs"])][r["params"]["bloom_path"]] = p["median_ms"]
-for (ds, sw, npb, bs), d in meta.items():
+# Below 30 M on current code: exhibits' paired full / partial (ours v2.9 graph, Meta v2.8 -O3 eager).
+pts = []
+for r in csv.DictReader(open(HUB / "artifacts/exhibits/20261009-2125-c5/c5-below30m.csv")):
+    if (r["code_version"], r["backend"], r["mode"]) in (("v2.8", "official", "eager"), ("v2.9", "triton", "graph")):
+        pts.append({"who": "Meta's code" if r["backend"] == "official" else "ours (Triton)", "dataset": r["dataset"], "sweep": r["sweep"],
+                    "n_probe": int(r["n_probe"]), "bs": int(r["bs"]), "mode": r["mode"], "ratio": float(r["full_over_partial"])})
+# Ours at 10 M PubMed, v2.9 (graph p50 per interleaved pair).
+pm = defaultdict(dict)
+for r in recs("campaign-v2.9/pubmed-codesign-ours"):
+    for p in r["perf"]:
+        if p["mode"] == "graph" and p["k"] == 100:
+            pm[(r["params"]["n_probe"], p["bs"])][r["params"]["bloom_path"]] = p["median_ms"]
+for (npb, bs), d in pm.items():
     if len(d) == 2 and None not in d.values():
-        pts.append({"who": "Meta's code", "dataset": ds, "sweep": sw, "n_probe": npb, "bs": bs, "mode": "eager",
+        pts.append({"who": "ours (Triton)", "dataset": "pubmed", "sweep": "c0_mesh", "n_probe": npb, "bs": bs, "mode": "graph",
                     "ratio": round(d["full"] / d["partial"], 3)})
 lai30 = defaultdict(dict)
 for r in recs("campaign-v2.8/laion30m-codesign-laion30m"):
@@ -128,7 +132,7 @@ for (sw, npb, bs), d in lai30.items():
         pts.append({"who": "Meta's code", "dataset": "laion30m", "sweep": sw, "n_probe": npb, "bs": bs, "mode": "eager",
                     "ratio": round(d["full"] / d["partial"], 3)})
 ours30 = defaultdict(dict)
-for r in recs("campaign-v2.7/laion30m-codesign-laion30m"):
+for r in recs("campaign-v2.9/laion30m-codesign-laion30m"):
     for p in r["perf"]:
         if p["mode"] == "graph" and p["k"] == 100:
             ours30[(r["sweep"], r["params"]["n_probe"], p["bs"])][r["params"]["bloom_path"]] = p["median_ms"]
@@ -138,34 +142,33 @@ for (sw, npb, bs), d in ours30.items():
                     "ratio": round(d["full"] / d["partial"], 3)})
 data["c5"] = pts
 
-# C7: official / Triton eager end to end and device time, v2.1 h2h (d128).
-t3 = list(csv.DictReader(open(HUB / "artifacts/exhibits/20261009-0843-c7/t3x.csv")))
-c7 = defaultdict(dict)
-for r in t3:
-    if r["code_version"] != "v2.1":
-        continue
-    c7[(r["dataset"], r["filter"], r["k"], r["bs"])][r["arm"]] = r
+# C7 at d128: official (fp16, -O3 build) / Triton, final adapter, h2h at v2.8 (one interleave group per cell), k 100.
+h2h = defaultdict(dict)
+for leg in ("campaign-v2.8/goodreads-h2h", "campaign-v2.8/arxiv-h2h"):
+    for r in recs(leg):
+        arm = r["backend"] + ("/" + r["params"]["score_path"] if "score_path" in r["params"] else "")
+        for p in r["perf"]:
+            if p["k"] == 100 and p["median_ms"]:
+                h2h[(r["dataset"], r["filter_kind"], p["bs"])][(arm, p["mode"])] = p
 rows = []
-for (ds, fl, k, bs), d in c7.items():
-    te, of = d.get("triton eager"), d.get("official/fp16 eager")
-    if te and of and k == "100":
-        dev = (float(of["device_ms"]) / float(te["device_ms"])) if of.get("device_ms") and te.get("device_ms") else None
-        rows.append({"cell": f"{ds} {fl} bs {bs}", "e2e": round(float(of["p50_ms"]) / float(te["p50_ms"]), 2),
-                     "device": round(dev, 2) if dev else None,
-                     "graph_vs_official": round(float(of["p50_ms"]) / float(d["triton graph"]["p50_ms"]), 2) if "triton graph" in d else None})
-data["c7"] = sorted(rows, key=lambda x: x["cell"])
+for (ds, fl, bs), d in sorted(h2h.items()):
+    te, tg, of = d[("triton", "eager")], d[("triton", "graph")], d[("official/fp16", "eager")]
+    rows.append({"cell": f"{ds} {fl} bs {bs}", "e2e": round(of["median_ms"] / te["median_ms"], 2),
+                 "device": round(of["kernels_us"] / te["kernels_us"], 2),
+                 "graph_vs_official": round(of["median_ms"] / tg["median_ms"], 2)})
+data["c7"] = rows
 
 # C7 at d768: official (-O3 build) / Triton eager, final adapter, one interleave group per n_probe.
-# Until campaign-v2.8/pubmed-filter is on the Hub, the ratios come from pod b's c7-pubmed-v28 control note.
+# Until campaign-v2.9/pubmed-filter is on the Hub, the ratios come from pod b's c7-pubmed-v29 control note.
 c7p = defaultdict(dict)
-for r in recs("campaign-v2.8/pubmed-filter"):
+for r in recs("campaign-v2.9/pubmed-filter"):
     if r["algo"] == "silvertorch":
         c7p[r["params"]["n_probe"]][r["backend"]] = r
 if c7p:
     data["c7_d768"] = {npb: {bs: round(perf(d["official"], bs, "eager") / perf(d["triton"], bs, "eager"), 3) for bs in (1, 16)}
                        for npb, d in sorted(c7p.items())}
 else:
-    data["c7_d768"] = {24: {1: round(0.822 / 0.412, 3), 16: round(1.161 / 0.533, 3)}, 1024: {1: round(1.039 / 0.799, 3), 16: round(2.605 / 8.837, 3)}}
+    data["c7_d768"] = {24: {1: round(0.822 / 0.413, 3), 16: round(1.155 / 0.529, 3)}, 1024: {1: round(1.056 / 0.622, 3), 16: round(2.614 / 2.442, 3)}}
 
 # V3 bits on PubMed d768.
 v3 = defaultdict(dict)
