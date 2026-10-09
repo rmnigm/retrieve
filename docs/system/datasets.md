@@ -944,17 +944,17 @@ As measured; `plan` from its
 | fp16 item shards | 15 GB (10 × 1 M) |
 | attrs | 1.5 GB (`[10 M, 5, 4]` int64) |
 | encode | a fresh encode is ~2.9 A100-hours at 958 docs/s (the 15 M one took 15,663 s); this catalog was `reshard`ed from it in 34 s |
-| on the device | items fp32 30.7 GB, plus the oracle's transposed copy; the cell reserved 64 GB |
+| on the device | items fp32 30.7 GB; the cell (run before the item-chunked oracle) reserved 64 GB |
 
-**What fits the harness.** `load_inputs` holds items fp32 on the device and the oracle
-adds a transposed fp32 copy, so a run needs ~2 × N × D × 4 B plus attrs and workspace: at
-768-d that is ~11–12 M items on the 80 GB A100. 50 M (307 GB) and 15 M (92 GB) do not
-fit; pubmed's 10 M (57 GB) does. Before that, the loader itself peaked at three copies
-(fp16 + `.float()` + `F.normalize`, 107 GB at 15 M); `layout.load_text_items` now
-normalises a sharded matrix shard by shard into one fp32 buffer (`load_sharded(...,
-normalize=True)`, `torch.equal` to the old path on 3 M real rows), which is what got the
-15 M run as far as the oracle. So E3 runs at 10 M: `prep --keep-items 10000000`, then
-`reshard --from-dir` the 15 M catalog's vectors.
+**What fits the harness.** `load_inputs` holds items fp32 on the device: N × D × 4 B plus
+attrs and workspace. When the 15 M catalog was built, the then one-shot oracle added a
+transposed fp32 copy, which capped 768-d at ~11–12 M items on the 80 GB A100, so E3 was cut
+to 10 M (`prep --keep-items 10000000`, then `reshard --from-dir` the 15 M vectors). The
+item-chunked oracle has no such copy ([evaluation](evaluation.md#oracle-blob-v4)). The
+loader itself once peaked at three copies (fp16 + `.float()` + `F.normalize`, 107 GB at
+15 M); `layout.load_text_items` normalises a sharded matrix shard by shard into one fp32
+buffer (`load_sharded(..., normalize=True)`, `torch.equal` to the old path on 3 M real
+rows), so a large catalog is written sharded.
 
 ```
 data/openalex/
