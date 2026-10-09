@@ -63,6 +63,7 @@ HuggingFace's `datasets` in the shared venv.
 | [`etl/pubmed.py`](../../evaluation/eval_datasets/etl/pubmed.py) | `pubmed` | NCBI FTP MedCPT embeddings + MEDLINE baseline (~36M articles) |
 | [`etl/kuairand.py`](../../evaluation/eval_datasets/etl/kuairand.py) | `kuairand` | Zenodo KuaiRand-27K + category supplement (32M videos) |
 | [`etl/openalex.py`](../../evaluation/eval_datasets/etl/openalex.py) | `openalex` | OpenAlex snapshot on public S3, parquet copy (476M works, streamed) |
+| [`ingest.py`](../../evaluation/eval_datasets/ingest.py) | `ingest` | vectors + attribute tables, no ETL ([below](#the-generic-ingest-eval-data-ingest)) |
 | [`etl/laion.py`](../../evaluation/eval_datasets/etl/laion.py) | `laion` | HF `laion/relaion2B-en-research-safe` (gated, auto-approved), first two parquet parts |
 | [`etl/synth_arxiv.py`](../../evaluation/eval_datasets/etl/synth_arxiv.py) | `synth-arxiv` | an already-encoded arxiv directory |
 | [`common.py`](../../evaluation/eval_datasets/common.py) | — | shared attribute synthesis, id-hash sampling, `prep_log.json` merge, range specs |
@@ -977,27 +978,28 @@ data/openalex/
 
 ### laion30m
 
-**Status: `prep` done on pod d (2026-10-10); encode, `targets`, `attrs`, `bench check` and the
-Hub copy not yet run.** Roadmap V-LAION30: a 30 M scale point at d256, `filter` only
-([decisions](../decisions.md#datasets)). Nothing here is citable.
+**Status: `prep` done on pod d (2026-10-10); encode and ingest running on GPU 1; `bench check` and
+the Hub copy not yet run.** Roadmap V-LAION30: a 30 M scale point at d256, `filter` only
+([decisions](../decisions.md#datasets)). Nothing here is citable. The first dataset staged
+through the [generic ingest](#the-generic-ingest-eval-data-ingest).
 
-`download` → `prep` → `encode_text` → `encode_queries` → `targets` → `attrs`
-([`etl/laion.py`](../../evaluation/eval_datasets/etl/laion.py),
-[`config/laion30m.yaml`](../../evaluation/config/laion30m.yaml)). Source: Re-LAION-2B-en-research-safe
+`download` → `prep` → `encode_text` → `encode_queries` → `ingest`
+([`etl/laion.py`](../../evaluation/eval_datasets/etl/laion.py)). The LAION-specific steps write
+to `_raw/relaion/laion30m/`; `ingest` stages `data/laion30m/` and writes
+[`config/laion30m.yaml`](../../evaluation/config/laion30m.yaml). Source: Re-LAION-2B-en-research-safe
 on the Hub, gated with automatic approval (the pod's token reads it); `download` takes parts
 `0-1`, 2 × 3.6 GB, 32,776,409 rows (16,388,209 + 16,388,200), with url, caption, similarity
 (CLIP image-caption cosine), pwatermark, punsafe, original width / height, key and a 64-bit
 row hash. It has no embeddings; we encode the captions.
 
-**`prep`** (42 s on 56 threads): strip the captions and drop the blank ones (108); keep
+**`prep`** (70 s on 56 threads): strip the captions and drop the blank ones (108); keep
 **one row per distinct caption**, because an identical text is an identical vector. Of the
 rows sharing a caption, the one with the smallest `common.pmid_hash(hash, seed)` survives:
 30,928,288 distinct. The catalog is the 30,000,000 smallest ranks, in source order
 (`items.parquet`, `item_id` 1..N). The remaining 928,288 rows are the held-out pool, never in
 the catalog; 10,000 are drawn with the seed (`queries.parquet`). Both files carry each row's
-`key`, `url`, registered `domain` and the raw tag values. There is no `item_id_map.json`
-(30 M keys as JSON); `items.parquet` maps `item_id` to `key`, and `eval-data publish` leaves
-it out (the captions and urls are the gated upstream's).
+`key`, `url`, registered `domain`, the raw tag values and the four tag buckets. They stay
+under `_raw/` and are never published (the captions and urls are the gated upstream's).
 
 **Domains.** `domain` is the url host's registrable domain under the public suffix list that
 `tldextract` bundles (offline, no fetch: deterministic per tldextract version), so
@@ -1010,59 +1012,40 @@ occur in the catalog. A query's own domain passes, at the 10 / 25 / 50 / 75 / 90
 
 #### Attribute semantics
 
-`item_attrs_narrow.pt` is `[N, 6, 1]` int64. Every tag is single-valued, so `A_max = 1`
-(1.4 GB at 30 M, against 5.8 GB padded to the other datasets' 4 slots). Bucket edges are
-upper-exclusive (`np.searchsorted(..., side="right")`), picked near the quintiles; a missing
-value is `-1`. The shares are measured on the 30 M items:
+Every tag is single-valued, so the ingest writes `[N, 6, 1]` int64 (1.4 GB at 30 M, against
+5.8 GB padded to the other datasets' 4 slots). Bucket edges are upper-exclusive
+(`np.searchsorted(..., side="right")`), picked near the quintiles; a missing value is null,
+which the ingest codes as `-1`. The ingest codes every column by count, so a bucket's code
+is not its bucket index; `vocab.json` maps codes back to values. The shares are measured on
+the 30 M items:
 
-| clause | attribute | values | item shares |
+| clause (`laion.CLAUSES`) | column | values | item shares by bucket |
 |---|---|---|---|
-| C0 | url registered domain | 1,430,979 (codes by count, descending; `domain_vocab.json`) | — |
-| C1 | `max(original_width, original_height)`, edges 200 / 300 / 500 / 800 px | 5 | 11.8 / 19.4 / 29.4 / 19.7 / 16.3 %, 3.45 % missing |
-| C2 | similarity, edges 0.30 / 0.315 / 0.33 / 0.35 | 5 | 7.8 / 26.1 / 22.5 / 21.2 / 22.2 % |
-| C3 | url registered domain — **reverse** ("other sites") | as C0 | — |
-| C4 | pwatermark, edges 0.1 / 0.2 / 0.35 / 0.6 | 5 | 19.9 / 24.6 / 22.8 / 18.6 / 13.4 %, 0.68 % missing |
-| C5 | punsafe, edges 1e-5 / 1e-4 / 1e-3 / 1e-2 | 5 | 15.9 / 28.2 / 29.3 / 16.9 / 9.6 % |
+| C0 `domain` | registered domain | 1,430,979 | — |
+| C1 `size` | `max(original_width, original_height)`, edges 200 / 300 / 500 / 800 px | 5 | 11.8 / 19.4 / 29.4 / 19.7 / 16.3 %, 3.45 % missing |
+| C2 `similarity` | similarity, edges 0.30 / 0.315 / 0.33 / 0.35 | 5 | 7.8 / 26.1 / 22.5 / 21.2 / 22.2 % |
+| C3 `domain_reverse` | `domain`, **reverse** ("other sites") | as C0 | — |
+| C4 `watermark` | pwatermark, edges 0.1 / 0.2 / 0.35 / 0.6 | 5 | 19.9 / 24.6 / 22.8 / 18.6 / 13.4 %, 0.68 % missing |
+| C5 `unsafe` | punsafe, edges 1e-5 / 1e-4 / 1e-3 / 1e-2 | 5 | 15.9 / 28.2 / 29.3 / 16.9 / 9.6 % |
 
-`clause_is_reverse_narrow.pt` is `[F, F, F, T, F, F]`. Every query value is the held-out
-caption's own tag; a domain absent from the catalog is `-1`, so that row has no live
-clause in a domain sweep and is skip-masked. C0 and C3 hold the same code, so no sweep
-contains both (C0 ∧ C3 is empty). The sweeps: `c0_domain`, `c3_domain_reverse` (bloom-incompatible),
-`tags4` = C1 ∧ C2 ∧ C4 ∧ C5, and `all_fwd` = C0 ∧ `tags4`.
+Every query value is the held-out caption's own tag; a domain absent from the catalog is
+`-1`, so that row has no live clause in a domain sweep and is skip-masked. C0 and C3 read
+one column, so no sweep contains both (C0 ∧ C3 is empty). The sweeps (`laion.SWEEPS`):
+`c0_domain`, `c3_domain_reverse` (bloom-incompatible), `tags4` = C1 ∧ C2 ∧ C4 ∧ C5, and
+`all_fwd` = C0 ∧ `tags4`.
 
-#### Encoding and targets
+#### Encoding
 
 `nomic-embed-text-v1.5` with the model card's Matryoshka recipe: bf16 weights, `layer_norm`
 over the 768 output dims, keep the first 256, L2-normalise, store fp16. Prefixes
 `search_document: ` (items) and `search_query: ` (queries), text = the caption,
 `max_seq_length` 128 (the 99th-percentile caption is 295 characters). arxiv's d256 truncates
 without the `layer_norm`, so the two datasets' vectors are not built the same way.
-`encode_text` writes `content_d256/text_emb_shard_NNN.pt` (1 M rows each), resumable per
-shard and pinned by `encode_params.json`; `shard_index.json` and `text_emb.meta.json` are
-written last.
-
-**Targets** follow yfcc10m's convention. A caption query has no relevant item of its own, so
-`targets` writes `heldout.parquet` (`item_id`, `query_key`, `nn_score`) with each query's
-**exact unfiltered top-1 item**: fp32 inner product on the normalised vectors, TF32 off, ties
-to the lowest id (`nearest_items`). Held-out recall on a filtered sweep is then the share of
-queries whose nearest caption also passes the filter and is found. The headline is
-`recall_oracle`, as everywhere.
-
-```
-data/laion30m/
-├── items.parquet               item_id, key, url, domain, caption, similarity, pwatermark, punsafe, original_width/height
-├── queries.parquet             query_row + the same columns (held-out captions)
-├── heldout.parquet             item_id (the unfiltered top-1), query_key, nn_score
-├── content_d256/
-│   ├── text_emb_shard_NNN.pt + shard_index.json + text_emb.meta.json
-│   ├── query_emb.pt + query_emb.meta.json
-│   └── encode_params.json
-├── item_attrs_narrow.pt        [N, 6, 1] int64
-├── clause_is_reverse_narrow.pt [6] bool = [F, F, F, T, F, F]
-├── domain_vocab.json, bucket_edges.json
-├── eval_split.parquet          target_id, query_attrs_narrow [6]
-└── prep_log.json
-```
+`encode_text` writes `_raw/relaion/laion30m/items_NNN.npy` (1 M rows each), resumable per
+shard and pinned by `encode_params.json`; `encode_queries` writes `queries.npy`. The ingest
+re-normalises them in fp32 into the staged fp16 shards. Targets: the ingest's default, each
+query's exact unfiltered top-1 item (a caption query has no relevant item of its own). The
+headline is `recall_oracle`, as everywhere.
 
 On the device: items fp32 30.7 GB, attrs 1.4 GB, SilverTorch's int8 codes 7.7 GB.
 
@@ -1227,7 +1210,7 @@ other dataset's.
 is rebuilt with `eval-data pubmed`. `pinkmeme/eval-openalex` likewise. `pinkmeme/eval-kuairand` (private) holds only the
 KuaiRand trainer inputs: the eval inputs and the checkpoint are not published
 (user choice, see [kuairand](#kuairand)). `pinkmeme/eval-laion30m` (private) is to hold the
-staged laion30m minus `items.parquet` (the gated captions and urls); not yet published. The old A100
+staged laion30m (vectors, attrs, vocab; the captions and urls stay under `_raw/`); not yet published. The old A100
 `checkpoints/gsasrec-d128-shared` was deleted from it to free space (user decision).
 
 **Trainer inputs** sit under `trainer/` in the private eval repos, uploaded with
@@ -1424,6 +1407,42 @@ A checkpoint without it falls back to
 [checkpoints.md](checkpoints.md) for which runs those are.
 
 ## Adding a dataset
+
+### The generic ingest (`eval-data ingest`)
+
+When a dataset is vectors plus attributes (the text shape), no ETL module is needed:
+[`ingest.py`](../../evaluation/eval_datasets/ingest.py) stages it, writes its
+`config/<name>.yaml` and runs `validate_layout`. The user-facing walkthrough is
+[`retrieve/docs/adding-a-dataset.md`](../../retrieve/docs/adding-a-dataset.md).
+
+```bash
+uv run --directory evaluation eval-data ingest mydata \
+  --items items_000.npy --items items_001.npy \
+  --item-attrs item_attrs.parquet --queries queries.npy --query-attrs query_attrs.parquet \
+  --clause site --clause year --clause other_site=site! \
+  --sweep c0_site=site --sweep site_year=site,year
+```
+
+| input | shape | what the ingest does |
+|---|---|---|
+| `--items` (repeat) | `.npy [n_i, D]`, fp16 or fp32, concatenated in order | L2-normalised in fp32, stored fp16 as `content_d<D>/text_emb_shard_NNN.pt` (`--shard-rows`, 1 M) + `shard_index.json` |
+| `--item-attrs` | parquet, row `i` = item `i`; any scalar or list column | each column dictionary-coded, codes by count descending (ties by value), null `-1` → `item_attrs_narrow.pt [N, C, A]`, `A` = the longest list; `vocab.json` |
+| `--queries` | `.npy [U, D]` | `query_emb.pt`, normalised fp16 |
+| `--query-attrs` | parquet with the same columns, scalars | coded with the items' vocabulary; a value no item has is `-1` (that clause is off for that query) → `eval_split.parquet` |
+| `--targets` (optional) | `.npy [U]`, 0-indexed item rows | `heldout.parquet`. Without it, each query's exact unfiltered top-1 item (fp32, TF32 off, ties to the lowest id; `--device cuda` for large catalogs) |
+| `--clause` (repeat, in order) | `NAME[=COLUMN][!]` | `!` = reverse; several clauses may read one column → `clause_is_reverse_narrow.pt` |
+| `--sweep` (repeat) | `NAME=CLAUSE,CLAUSE` | the yaml's `filters.clause`; `filters.bloom` = the sweeps with no reverse clause |
+| `--doc-prefix` / `--query-prefix` | the encoder's prefixes | written to the meta sidecars; default `null` (no prefix concept). The prefix policy above applies |
+
+`prep_log.json["ingest"]` records the counts, vocab sizes, the share of queries with each
+clause live, and each clause's mean pass rate over the first 100 queries. Then add the
+dataset to a suite in `config/suites.yaml`, and `EVAL_REPOS` in `hub.py` to publish it.
+laion30m is the first user: its ETL does only what is LAION-specific (download, dedup and
+split, domains and buckets, caption encode), then calls `ingest`.
+
+### A dataset that needs its own ETL
+
+For the sequential shape, or when the source needs work before it is vectors + tables:
 
 1. Write `eval_datasets/etl/<name>.py` with `download` / `convert` / `prep`
    subcommands emitting the layout above (`main(argv)` over an `argparse`

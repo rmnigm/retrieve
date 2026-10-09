@@ -86,7 +86,8 @@ written for someone who installed `torchretrieve` and does not have this repo:
 [getting-started](retrieve/docs/getting-started.md),
 [modules](retrieve/docs/modules.md),
 [filtering-and-quantization](retrieve/docs/filtering-and-quantization.md),
-[indexing-and-ops](retrieve/docs/indexing-and-ops.md).
+[indexing-and-ops](retrieve/docs/indexing-and-ops.md),
+[adding-a-dataset](retrieve/docs/adding-a-dataset.md).
 
 **Papers** ([`articles/`](articles/)) — pandoc renderings of the three papers
 this repo reproduces or benchmarks against (SilverTorch, LiNR, Yambda). Frozen
