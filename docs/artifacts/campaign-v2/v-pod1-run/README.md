@@ -28,7 +28,7 @@ State per leg in [validation](../../../validation.md). NOT CITABLE until D1-G.
 | [`ax-synth-v1v2.sh`](ax-synth-v1v2.sh) | arXiv-synth V1 + V2 interleaved, the synth suite's 7 rates (14 cells): C1's 3 M crossover on pod 1; 8 cells ran at v2.6 (pre-CLAUSE-SKIP), the rest after v2.7 |
 | [`yfcc-int8.sh`](yfcc-int8.sh) | the YFCC int8-precision check (quality only; [`../../campaign-v2.5/yfcc-int8/int8_check.py`](../../campaign-v2.5/yfcc-int8/int8_check.py)) |
 | [`chain-legs.sh`](chain-legs.sh) | the queue as arguments (`v-gr-deep`, `v-router`, `v-yfcc-deep`, `v-yfcc-synth`, `gr-synth-mid`, `yfcc-int8`, `ax-synth-v1v2`, `gr-synth-mid-q`), one lock hold, stop file between legs |
-| [`chain.sh`](chain.sh) | the queue after V-V3BITS (at the tag common.sh defaults to, now campaign-v2.6): V-GR-DEEP, V-YFCC deep, the synth chunks, one lock hold, stop file between legs |
+| [`chain.sh`](chain.sh) | the queue after V-V3BITS (at the tag common.sh defaults to, now campaign-v2.7): V-GR-DEEP, V-YFCC deep, the synth chunks, one lock hold, stop file between legs |
 | [`v-seeds-yfcc.sh`](v-seeds-yfcc.sh) | V-SEEDS, YFCC half: yfcc10m `filter`, every arm |
 | [`h2h-diag.sh`](h2h-diag.sh) | H2H protocol diagnostic (controller addendum): goodreads `c0_genre` bloom bs 16 k 100 seed 0, the three h2h arms (a) interleaved + `--profile`, (b) interleaved, (c) one process per arm, orders abc / cba / bac; scratch trees, not a leg |
 | [`h2h_diag_config.py`](h2h_diag_config.py), [`h2h_diag_summary.py`](h2h_diag_summary.py) | its scratch config dirs (the real `h2h` suite cut to that cell) and its per-arm table |
