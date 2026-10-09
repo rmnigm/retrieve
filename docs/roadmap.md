@@ -114,9 +114,10 @@ multi-GPU numbers are comparable at all.
 
 **Exploration first, one clean pass last** (user, 2026-10-09,
 [decisions](decisions.md#campaign-v2-user-2026-10-08)). While the library
-is still improving, legs run at the current tag (now `campaign-v2.1`,
-code_version `f01255f106214ec0f540352d0e2a5cd90b84b6a1`, Hub
-`campaign-v2.1/<dataset>-<suite>`; `campaign-v2` was `408b1188`) to see how
+is still improving, legs run at the current tag (now `campaign-v2.2`,
+code_version `0d23c615a60c6d170fbf3e79c66999406bd5006c` = v2.1 + ST-DLOOP,
+Hub `campaign-v2.2/<dataset>-<suite>`; `campaign-v2.1` was `f01255f1`,
+`campaign-v2` `408b1188`) to see how
 everything behaves and to make the charts. A new tag does not stop or
 invalidate anything: every record keeps its code_version, and a change adds
 rows to the **redo ledger** below only for the cells it actually changes.
@@ -214,7 +215,8 @@ co-design.
   1024 (`fused_masked_knn_topk` 141 -> 209 ms), not the launch shape. Fix: a
   D loop inside the tile body (ST-DLOOP's form), or the old straight-line body
   above `D_PAD` 256. Gates bit-exact + keep rule at d128 (0.8 M, 3 M) and d768
-  10 M across p. In the `campaign-v2.2` bundle; st-dloop, pod b.
+  10 M across p. In the `campaign-v2.3` bundle
+  with ST-IDS and V1-FUSE; st-dloop, pod b.
 - [ ] **ST-IDS: the probe scorers' id epilogue loops over k** (pod c,
   2026-10-09). `probe_ids_kernel` builds a dense `[next_pow2(k),
   next_pow2(n_probe)]` tile: at k 1000 every new `n_probe` is a 2-4 MB IR
@@ -222,8 +224,8 @@ co-design.
   n_probe > 1024 cannot compile at all (2^20 elements). Tile `[BLOCK_K, NPP]`
   with a non-unrolled loop over k. Integer-exact: gate `torch.equal` ids and
   scores, epilogue kernel time and compile time before/after. Lifts the
-  `n_probe` ≤ 1024 at k 1000 limit. In the `campaign-v2.2` bundle with
-  ST-DLOOP and V2-HIGHP; st-dloop, pod b.
+  `n_probe` ≤ 1024 at k 1000 limit. In the `campaign-v2.3` bundle with
+  V2-HIGHP and V1-FUSE; st-dloop, pod b.
 - [ ] **V1-FUSE: LiNR V1 at small batch and its masking** (V-PROF3,
   `artifacts/v-prof3`). At bs 1 `torch.compile(max-autotune)` V1 runs 0.25 ms
   against our Triton 0.49: one fused masked mat-vec (152 µs) vs cuBLAS gemv
@@ -234,7 +236,7 @@ co-design.
   masked mat-vec for small bs, fp16 top-k keys where ids are unchanged, and a
   mask form inductor fuses without the copy. Gates: ids `torch.equal` (scores
   within the existing V1 tolerance if fp16 keys), keep rule over p, bs, N,
-  d. Library, tag `campaign-v2.3` after the v2.2 bundle. Pod c, v-ax-corr
+  d. Library, in `campaign-v2.3` with ST-IDS and V2-HIGHP. Pod c, v-ax-corr
   (CPU first, one GPU window at an interleave-unit pause).
 - [ ] **H-KSUM: the full kernel sum in `profile_once`** (EXHIBITS run 3): T3's
   device column sums the top 8 kernels only, a lower bound that favours
@@ -252,17 +254,6 @@ co-design.
   {64, 128}, pool {1 %, 5 %}, quality first, then the timed cells, to show
   the recall-vs-bits slope. LN-8 stays the campaign's setting. Pod 1.
   **≈ 1 GPU-h.**
-- [ ] **ST-DLOOP: SilverTorch Triton probe scorers at wide embeddings**
-  (user, 2026-10-09: match Meta's CUDA kernels). D3 PubMed at v2.1 tripped
-  the surprise gate: Triton 2.80-2.98 ms vs official 1.99 ms at d768 (bs 16),
-  where every d ≤ 256 cell has Triton faster. The scorers do one `tl.dot` over
-  the whole padded width (768 → 1024) with no loop over D. Fix: loop over D
-  in chunks, D_PAD ≤ 256 code unchanged; plus an architecture comparison with
-  the official kernels, other improvements listed, not applied. *Gates*:
-  `torch.equal` ids and scores at D 128 / 192 / 768 against `campaign-v2.1`,
-  library suite on a pod GPU, interleaved before/after. Then tag
-  `campaign-v2.2`; stale: PubMed SilverTorch Triton perf (D3 PubMed timed).
-  Pod b, sharing the GPU with V-PUBMED. **≈ 1-2 GPU-h** plus the code.
 - [ ] **D3: `bloomwidth`**: PubMed `bloomwidth-timed` reruns at `campaign-v2.2`
   (its v2.1 run tripped the surprise gate, ST-DLOOP); goodreads and arXiv done
   (timed at v2.1), PubMed `bloomwidth` (quality) done
@@ -340,7 +331,6 @@ co-design.
 | V-AX-CORR | ≈ 3 | 0 | 3 points, arXiv |
 | V1-FUSE | ≈ 1 | 0 | gates + keep-rule grid |
 | V-V3BITS | ≈ 1-2 | 0 | goodreads |
-| ST-DLOOP | ≈ 1-2 | 0 | gates + before/after on pod b |
 | D3 bloomwidth | ≈ 3-5 | 1 (+0) | quality-only cells |
 | V-AX-SYNTH | ≈ 15-45 | 0 | Triton ~2,000 s per pass point; V1/V2 torch at 3 points ×3 seeds is most of it |
 | V-GR-DEEP | ≈ 3-6 | 0/1 | ~210 cells at ~50 s (`d1/arxiv-deep`: 873 cells in 36 h at 3 M) |

@@ -1064,7 +1064,7 @@ def test_the_manifest_selects_quality_and_perf_by_their_accepted_code_version(tm
 
 def test_the_shipped_manifest_and_claims_load():
     m = report.load_manifest(report.CLAIMS.parent / "campaign.yaml")
-    assert m["default"]["quality"]["code_version"] == "f01255f106214ec0f540352d0e2a5cd90b84b6a1"
+    assert m["default"]["quality"]["code_version"] == "0d23c615a60c6d170fbf3e79c66999406bd5006c"
     assert all(len(e[s]["code_version"]) == 40 for e in m["entries"] for s in ("quality", "perf"))
     claims = yaml.safe_load(report.CLAIMS.read_text())["claims"]
     assert [c["id"] for c in claims] == [f"C{i}" for i in range(1, 8)]

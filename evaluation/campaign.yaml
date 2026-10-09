@@ -11,8 +11,8 @@
 # the record reuse rule (docs/decisions.md § Campaign v2); `log` records every mid-campaign change.
 
 default:
-  quality: {code_version: f01255f106214ec0f540352d0e2a5cd90b84b6a1, hub: "campaign-v2.1/{dataset}-{suite}"}  # tag campaign-v2.1
-  perf: {code_version: f01255f106214ec0f540352d0e2a5cd90b84b6a1, hub: "campaign-v2.1/{dataset}-{suite}"}
+  quality: {code_version: 0d23c615a60c6d170fbf3e79c66999406bd5006c, hub: "campaign-v2.2/{dataset}-{suite}"}  # tag campaign-v2.2
+  perf: {code_version: 0d23c615a60c6d170fbf3e79c66999406bd5006c, hub: "campaign-v2.2/{dataset}-{suite}"}
 
 # Reuse entries from docs/artifacts/campaign-v2/reuse (reuse.py over the Hub subtrees). An entry
 # exists only where old records cover every v2 cell of its match (all seeds and params) and no
@@ -65,3 +65,4 @@ entries:
 log:
   - {date: 2026-10-09, change: "tag campaign-v2.1 (library f01255f1): V2-FIX-A grid-strided fused_masked_knn_topk + OPORP indirect (bit-exact), V-GRAPH-IDS quantize_int8 fp64 quotient (eager codes unchanged, graph == eager); records at 408b1188 keep their code_version; redo per the roadmap ledger", rerun: ["filter, synth: linr_v2 + linr_v3 triton perf", "every SilverTorch (triton, official, torch) eager perf at 408b1188: h2h, codesign, bloomwidth-timed", "goodreads filter + synth silvertorch (IVF-TUNE n_lists 4096)"]}
 #  - {date: 2026-10-20, change: "<what changed, commit>", rerun: ["<suite>/<dataset> <arms>"]}
+  - {date: 2026-10-09, change: "tag campaign-v2.2 (library 0d23c615): ST-DLOOP, SilverTorch Triton probe scorers loop over D past D_PAD 256 + width-gated tile skip (bit-exact; D 128/192 SASS-identical)", rerun: ["PubMed (d768) SilverTorch triton perf: D3 PubMed bloomwidth-timed, V-PUBMED triton chunks run before the tag"]}
