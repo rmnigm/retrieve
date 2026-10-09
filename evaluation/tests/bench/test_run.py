@@ -18,6 +18,7 @@ recorded as partial and re-run by resume). ``test_cli.py`` drives the same fixtu
 from __future__ import annotations
 
 import dataclasses
+import gc
 import hashlib
 import json
 import math
@@ -857,3 +858,31 @@ def test_each_finished_arm_is_freed_before_the_next_is_built(tiny_configs, tmp_p
     monkeypatch.setattr(run, "build_module", build)
     assert dict(run.run(jobs, out_dir=tmp_path / "results", modes=EAGER, **KW)) == {"partial": 3}
     assert len(built) == 3
+
+
+def test_a_failed_build_is_released_after_its_traceback_is_gone(
+    tiny_configs, tmp_path, monkeypatch
+):
+    """Roadmap H-ARMFREE: the release after a failed build runs once the exception (whose
+    traceback holds the half-built tensors) is gone, so a retry does not see them held."""
+    jobs = _jobs(tiny_configs, algos=["linr_v1_filter_mask"])
+    real_build, real_release, held, seen = run.build_module, run._release, [], []
+
+    def build(*a, **kw):
+        if not held:
+            partial_index = torch.zeros(1024)
+            held.append(weakref.ref(partial_index))
+            raise RuntimeError("out of memory (simulated)")
+        return real_build(*a, **kw)
+
+    def release():
+        gc.collect()  # what the real release does first: can it free them yet?
+        if held:  # the releases after the failure
+            seen.append(held[0]() is None)
+        real_release()
+
+    monkeypatch.setattr(run, "build_module", build)
+    monkeypatch.setattr(run, "_release", release)
+    counts = run.run(jobs, out_dir=tmp_path / "results", modes=EAGER, **KW)
+    assert dict(counts) == {"failed": 1, "partial": 2}
+    assert seen[0] is True

@@ -586,6 +586,16 @@ def perf(
 # ----- the loop -----------------------------------------------------------------------------
 
 
+def _log_failure(msg: str, exc: BaseException) -> None:
+    """``logger.exception`` without loguru's ``diagnose``, which reads ``run``'s ``f_locals`` and
+    leaves that snapshot cached on the frame: ``exc``, its traceback and the failed arm's tensors
+    stay referenced for the rest of the run (evaluation.md § Arm release)."""
+    logger.error("{}\n{}", msg, "".join(traceback.format_exception(exc)))
+
+
+_FAILED = object()  # a build that raised: released once its traceback is gone
+
+
 def _release() -> None:
     gc.collect()
     torch._dynamo.reset()
@@ -743,6 +753,7 @@ def run(
                 job.build,
             )
             first = todo[id(job)][0]
+            module = None
             try:
                 module, build_s = measure.timed_build(
                     lambda: build_module(job, inp, assets, k_max, resolve_pool(first, assets))  # noqa: B023 — called at once
@@ -751,14 +762,16 @@ def run(
                     compile_warmup(module, inp, assets, device) if "compile" in job.build else None
                 )
             except Exception as exc:  # recorded, the loop continues (H §7)
-                logger.exception("build failed: {}", job.key(first))
+                _log_failure(f"build failed: {job.key(first)}", exc)
                 for p in todo[id(job)]:
                     records.append_record(path, _failed(job, p, env0, "build", exc, t0))
                     counts["failed"] += 1
                 if is_sticky(exc):
                     logger.error("sticky CUDA error: the context is dead, ending this process")
                     raise
-                _release()
+                module = _FAILED
+            if module is _FAILED:
+                _release()  # after the except: its traceback holds the failed build's tensors
                 continue
             # A module that cannot capture loses nothing to a skipped graph mode; a quality-only
             # suite (``Job.timed`` false) loses nothing to a skipped perf.
@@ -869,12 +882,13 @@ def run(
                     counts["failed"] += 1
                     raise
                 except Exception as exc:  # recorded, the loop continues (H §7)
-                    logger.exception("cell failed at {}: {}", stage, job.key(params))
+                    _log_failure(f"cell failed at {stage}: {job.key(params)}", exc)
                     records.append_record(path, _failed(job, params, env0, stage, exc, t0))
                     counts["failed"] += 1
                     if is_sticky(exc):
                         logger.error("sticky CUDA error: the context is dead, ending this process")
                         raise
+                if id(job) not in recs_by:
                     _release()
 
             samples_by: dict[int, list[dict[str, Any]]] = {}
@@ -892,7 +906,7 @@ def run(
                         latency_kw=latency_kw,
                     )
                 except Exception as exc:  # recorded, the loop continues (H §7)
-                    logger.exception("perf failed: {}", [j.key(j.build) for j in timed])
+                    _log_failure(f"perf failed: {[j.key(j.build) for j in timed]}", exc)
                     for j in timed:
                         recs_by.pop(id(j))
                         p = {**j.build, **q}
@@ -901,6 +915,8 @@ def run(
                     if is_sticky(exc):
                         logger.error("sticky CUDA error: the context is dead, ending this process")
                         raise
+                    results = None
+                if results is None:
                     _release()
                 else:
                     for j, (entries, samples) in zip(timed, results, strict=True):

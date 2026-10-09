@@ -751,6 +751,15 @@ it drops every name that still holds an arm (`built` and the per-arm
 next build failing on an out-of-memory error. The arms of one interleave group stay resident
 together by design (they are timed round-robin).
 
+A failure frees its tensors too. The build, cell and perf failure paths release
+*after* their `except` block, once the exception (whose traceback holds the
+half-built tensors) is gone, and they log through `run._log_failure`
+(`logger.error` with `traceback.format_exception`) instead of
+`logger.exception`: loguru's default `diagnose` reads `run`'s own `f_locals`,
+and on Python 3.11 that snapshot stays cached on the frame, keeping `exc`
+and with it the failed arm's tensors for the rest of the run (each retry of a
+failed 30 M build saw more memory held).
+
 ### Interleaved groups
 
 A suite's `interleave:` list names comparison groups: `by` is the field the
