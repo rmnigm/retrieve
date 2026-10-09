@@ -21,6 +21,7 @@ from typing import Any
 from torch import Tensor, nn
 
 from bench.postfilter import Postfilter
+from bench.router import PRE_K, Router
 from retrieve import (
     BloomFilter,
     ExactAttributeFilter,
@@ -40,10 +41,12 @@ ALGOS: dict[str, type[nn.Module]] = {
     "linr_v3": LiNRV3,
     "silvertorch": SilverTorch,
     "postfilter": Postfilter,
+    "router": Router,
 }
 DISPATCH = {
     **LIBRARY_DISPATCH,
     "Postfilter": {"triton": None, "torch": "cublas", "official": None},
+    "Router": {"triton": "router", "torch": "router", "official": None},
 }
 FILTER_KINDS = ("none", "clause", "bloom")
 BACKENDS = ("triton", "torch", "official")
@@ -58,7 +61,7 @@ def filter_backend(backend: str) -> str:
 
 def _path(algo: str, filter_kind: str, backend: str) -> str | None:
     p = DISPATCH[ALGOS[algo].__name__][backend]
-    if p is None or (algo in ("linr_v2", "postfilter") and filter_kind == "none"):
+    if p is None or (algo in ("linr_v2", "postfilter", "router") and filter_kind == "none"):
         return None
     return f"{p}+{backend}" if p == "cublas" and filter_kind != "none" else p
 
@@ -69,8 +72,11 @@ PATHS: dict[tuple[str, str, str], str | None] = {
 
 
 def is_valid_combo(algo: str, params: dict[str, Any]) -> bool:
-    """``n_probe <= n_lists`` — the one combo the library would reject at build."""
+    """``n_probe <= n_lists`` — the one combo the library would reject at build (the router's
+    pre-probe too)."""
     p = {**SILVERTORCH_DEFAULTS, **params}
+    if algo == "router":
+        return p["n_probe"] <= p["n_lists"] and p.get("pre_n_probe", 0) <= p["n_lists"]
     return not (algo == "silvertorch" and p["n_probe"] > p["n_lists"])
 
 
@@ -147,6 +153,17 @@ def build(
         raise ValueError(f"no code path for ({algo}, {filter_kind}, {backend})")
     if not is_valid_combo(algo, p):
         raise ValueError(f"invalid params for {algo}: {p}")
+    if algo == "router":  # V-ROUTER: the three parts from this function, one seed (one k-means)
+        pre_n_probe, lq = p.pop("pre_n_probe"), p.pop("lq_threshold")
+        ivf_kw = {"item_attrs": item_attrs, "clause_is_reverse": clause_is_reverse, "seed": seed}
+        pre = build("silvertorch", item_embs, k=PRE_K, backend=backend, seed=seed,
+                    params={**{x: v for x, v in p.items() if x not in ("m_bits", "k_hash")},
+                            "n_probe": pre_n_probe})  # fmt: skip
+        ivf = build("silvertorch", item_embs, k=k, backend=backend, filter_kind=filter_kind,
+                    params=p, **ivf_kw)  # fmt: skip
+        exact = build("linr_v2", item_embs, k=k, backend=backend, filter_kind=filter_kind,
+                      filter_mod=filter_mod)  # fmt: skip
+        return Router(pre=pre, ivf=ivf, exact=exact, filter=filter_mod, lq_threshold=lq)
     if algo == "silvertorch":
         mode = FILTER_MODE[filter_kind]
         bloom = BLOOM_DEFAULTS if mode == "bloom" else {}

@@ -280,6 +280,11 @@ def _check_params(where: str, algo: str, fk: str, backend: str, build: dict, que
         raise ConfigError(f"{where}: compile is one of {COMPILE_MODES} on torch arms only")
     if "k_bits" in build and algo != "linr_v3":
         raise ConfigError(f"{where}: k_bits is a linr_v3 build param (its OPORP stage 1)")
+    router = {"pre_n_probe", "lq_threshold"}
+    if router & set(build) and algo != "router":
+        raise ConfigError(f"{where}: pre_n_probe / lq_threshold are build params of router only")
+    if algo == "router" and not router <= set(build):
+        raise ConfigError(f"{where}: router needs build params pre_n_probe and lq_threshold")
     if any("candidate_pool_frac" in q for q in query) and algo != "linr_v3":
         raise ConfigError(f"{where}: candidate_pool_frac is a linr_v3 query param")
 
