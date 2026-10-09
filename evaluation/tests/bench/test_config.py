@@ -366,6 +366,7 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("bloomwidth-timed", "pubmed"): (21, 21),
     ("v3bits", "goodreads-synth"): (84, 168),
     ("v3bits", "goodreads"): (24, 48),
+    ("v3bits", "pubmed"): (9, 18),
     ("router", "goodreads"): (72, 72),
 }
 KEPT = {
@@ -670,3 +671,16 @@ def test_filter_silvertorch_runs_at_the_tuned_ivf(dataset):
 def test_synth_silvertorch_runs_on_the_real_datasets_ivf(dataset):
     st = [j for j in _real("synth", f"{dataset}-synth", seeds=[0]) if j.algo == "silvertorch"]
     assert st and {j.build["n_lists"] for j in st} == {IVF[dataset][0]}
+
+
+def test_v3bits_pubmed_is_clause_only_at_k_bits_256():
+    """V3-BITS-PUBMED: PubMed d768 at k_bits 256, clause only; goodreads keeps 64 / 128."""
+    pm = _real("v3bits", "pubmed")
+    assert {(j.dim, j.algo, j.backend, j.filter_kind) for j in pm} == {
+        (768, "linr_v3", "triton", "clause")
+    }
+    assert {j.build["k_bits"] for j in pm} == {256}
+    assert {j.sweep for j in pm} == KEPT["pubmed"]
+    assert {q["candidate_pool_frac"] for j in pm for q in j.query} == {0.01, 0.05}
+    gr = _real("v3bits", "goodreads")
+    assert {j.build["k_bits"] for j in gr} == {64, 128}
