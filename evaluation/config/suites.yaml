@@ -247,14 +247,17 @@ bloomwidth-timed:              # one timed point per width
 v3bits:                        # V-V3BITS, C2: V3 at k_bits 64 vs our LN-8 default (k_bits = D = 128); LiNR's
   # 512 needs a library change (declined 2026-10-08). k_bits is a harness build param: algos.build
   # swaps V3's OPORP stage 1. The real-filter half reads goodreads `filter`'s kept sweeps.
-  datasets: [goodreads-synth, goodreads]
-  dims: [128]
+  # V3-BITS-PUBMED: PubMed d768 at k_bits 256 (divides 768; brackets LiNR's 512 from below) vs the default 768, clause only
+  # (bloom adds false-positive noise to a bits question), its `filter` kept sweeps; run at seed 0.
+  datasets: [goodreads-synth, goodreads, pubmed]
+  dims: [128, 768]
   filter_kinds: [clause, bloom]
   ks: [100, 1000]
   batch_sizes: [1, 16]
   seeds: [0, 1, 2]
   sweeps:
     goodreads: [c0_genre, c1_lang_reverse, all4]
+    pubmed: [c0_mesh, c3_journal_reverse, all5]
   ks_by_sweep:
     goodreads-synth: {p0001: [100], p0003: [100]}
   arms:
@@ -262,6 +265,13 @@ v3bits:                        # V-V3BITS, C2: V3 at k_bits 64 vs our LN-8 defau
       backends: [triton]
       build: {k_bits: [64, 128]}
       query: {candidate_pool_frac: [0.01, 0.05]}
+      datasets: {goodreads-synth: {}, goodreads: {}}
+    - algo: linr_v3
+      backends: [triton]
+      filter_kinds: [clause]
+      build: {k_bits: [256, 768]}                            # 768 = the default (k_bits = D)
+      query: {candidate_pool_frac: [0.01, 0.05]}
+      datasets: {pubmed: {}}
 
 router:                        # V-ROUTER (EXHIBITS idea #2): l_q pre-probe, exact V2 below the threshold, IVF above
   # The threshold is fit on goodreads (the lq_threshold grid); arXiv and PubMed get the fitted value as a

@@ -7,8 +7,8 @@ behind an open dependency.
 
 ## What this is
 
-`retrieve/` is a GPU retrieval library (PyTorch + Triton; on PyPI as
-`torchretrieve`, imports as `retrieve`) that reimplements two industry
+`retrieve/` is a GPU retrieval library (PyTorch + Triton; package name
+`torchretrieve`, not yet on PyPI; imports as `retrieve`) that reimplements two industry
 papers — SilverTorch (Meta, `articles/silvertorch.md`) and LiNR (LinkedIn,
 `articles/linr.md`) — from their text. `evaluation/` is the benchmark and
 training harness that produces the numbers for a master's thesis
