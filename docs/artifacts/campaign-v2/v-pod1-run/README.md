@@ -24,6 +24,7 @@ State per leg in [validation](../../../validation.md). NOT CITABLE until D1-G.
 | [`v-gr-deep-triton.sh`](v-gr-deep-triton.sh) | V-GR-DEEP's trimmed end: the SilverTorch-triton arm only, at campaign-v2.3 |
 | [`v-yfcc-synth.sh`](v-yfcc-synth.sh) | V-YFCC synth (D): the SYNTH-TRIM `synth` suite on yfcc10m-synth, whole (25 cells) |
 | [`gr-synth-mid.sh`](gr-synth-mid.sh) | goodreads-synth's middle rates p 0.05 / 0.2 / 0.5 (24 cells) |
+| [`yfcc-int8.sh`](yfcc-int8.sh) | the YFCC int8-precision check (quality only; [`../../campaign-v2.5/yfcc-int8/int8_check.py`](../../campaign-v2.5/yfcc-int8/int8_check.py)) |
 | [`chain-legs.sh`](chain-legs.sh) | the queue as arguments (`v-gr-deep`, `v-router`, `v-yfcc-deep`, `v-yfcc-synth`, `gr-synth-mid`), one lock hold, stop file between legs |
 | [`chain.sh`](chain.sh) | the queue after V-V3BITS (at the tag common.sh defaults to, now campaign-v2.5): V-GR-DEEP, V-YFCC deep, the synth chunks, one lock hold, stop file between legs |
 | [`v-seeds-yfcc.sh`](v-seeds-yfcc.sh) | V-SEEDS, YFCC half: yfcc10m `filter`, every arm |
