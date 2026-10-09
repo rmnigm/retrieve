@@ -14,6 +14,7 @@ A resume key carries the code_version, so a single tree would hold both versions
 | [`load.py`](load.py) | `records.latest` per tree, plus the key/label helpers |
 | [`checks.py`](checks.py) | `checks.md` + `checks.csv`: status / partial / unstable counts, exact-arm recall ≥ 0.99, eager vs graph `ids_sha256`, bs 16 < 16 × bs 1, graph / eager latency, monotone curves (V1 flat in p, postfilter recall in p, SilverTorch recall in `n_probe`), Triton vs official recall, the same cell across code_versions and suites, co-design partial = full recall, and cells planned in `suites.yaml` but absent. Documented causes are tagged `known` |
 | [`figures.py`](figures.py) | the figures the report lacks or draws unreadably. `f2x`: every synth arm incl. postfilter and V1, real sweeps as per-query pass-rate buckets. `f3x`: deep Pareto, one panel per sweep × bs. `g1`: V1 graph / eager vs pass rate. `synth-arms.csv`: the per-arm medians behind T1's ratios |
+| [`v2_old_new.py`](v2_old_new.py) | V2 before / after Fix A by pass rate: the old-side V1 / V2 table of every fetched leg, plus the V2-FIX-A artifact's ABAB ratios and `programs` sweep (`v2_old_new.md`) |
 | [`gpuh.py`](gpuh.py) | the V-YFCC GPU-h projection (`gpuh-v-yfcc.csv`); model and assumptions below |
 
 ```bash
