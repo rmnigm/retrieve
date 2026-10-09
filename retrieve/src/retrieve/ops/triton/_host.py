@@ -23,6 +23,11 @@ Cfg = TypeVar("Cfg")
 # tile falls back to a smaller one (kernels.md § SilverTorch kernels, "Tile config").
 MIN_PROGRAMS = 1024
 
+# The id epilogue's [BLOCK_K, BLOCK_N] tile caps (kernels.md § SilverTorch kernels, "Ids after the
+# top-k").
+IDS_BLOCK_K = 16
+IDS_BLOCK_N = 512
+
 
 def width_tiles(configs: dict[int, tuple[Cfg, ...]], d: int) -> tuple[Cfg, ...]:
     """The probe scorers' tiles at embedding width ``d``, largest first: the entry of the smallest
@@ -58,7 +63,7 @@ class CompactLaunch:
 
 @dataclass(frozen=True)
 class ProbeIds:
-    grid: tuple[int]  # one program per row
+    grid: tuple[int, int]  # (B, cdiv(k, BLOCK_K)): one program per row and k chunk
     kwargs: dict[str, object]  # common.probe_ids_kernel's args
     ids: Tensor  # [B, k] int64, written by the launch
     scores: Tensor  # [B, k] fp32
@@ -132,6 +137,7 @@ def probe_topk(
     ``masked_topk`` does for the other backends. The caller launches it (the op bodies keep
     their ``wrap_triton`` lines inline). Capture-safe: no host sync, no data-dependent branch."""
     scores, slots = torch.topk(launch.all_scores, k, dim=1)
+    block_k = min(triton.next_power_of_2(k), IDS_BLOCK_K)
     ids = torch.empty_like(slots)
     n_probe = probe_ids.shape[1]
     kwargs: dict[str, object] = {
@@ -143,11 +149,11 @@ def probe_topk(
         "ids_ptr": ids,
         "n_probe": n_probe,
         "k": k,
-        "NPP": triton.next_power_of_2(n_probe),
-        "KP": triton.next_power_of_2(k),
+        "BLOCK_K": block_k,
+        "BLOCK_N": min(triton.next_power_of_2(n_probe), IDS_BLOCK_N),
         "num_warps": 4,
     }
-    return ProbeIds((scores.shape[0],), kwargs, ids, scores)
+    return ProbeIds((scores.shape[0], triton.cdiv(k, block_k)), kwargs, ids, scores)
 
 
 def check_contiguous(**tables: Tensor) -> None:

@@ -89,8 +89,8 @@ class _V3(nn.Module):
 VARIANTS = {"linr_v1": _V1, "linr_v2": _V2, "linr_v3": _V3}
 
 
-def _build(algo: str, filter_kind: str) -> nn.Module:
-    embs = make_index(N, D)
+def _build(algo: str, filter_kind: str, d: int = D) -> nn.Module:
+    embs = make_index(N, d)
     attrs = make_attrs(N, c=C, a_max=A_MAX)
     if filter_kind == "clause":
         f = ExactAttributeFilter(backend="triton")
@@ -101,7 +101,7 @@ def _build(algo: str, filter_kind: str) -> nn.Module:
     return VARIANTS[algo](embs, f)
 
 
-def _assert_replays_match_eager(module: nn.Module, b: int, label: str) -> None:
+def _assert_replays_match_eager(module: nn.Module, b: int, label: str, d: int = D) -> None:
     """Compile as the harness does, warm up five times on one query, then replay the captured
     graph on two different queries: zero ``cudagraph_skips``, and each replay equals eager on
     the same inputs (scores ``torch.equal``, ids up to ties)."""
@@ -111,9 +111,9 @@ def _assert_replays_match_eager(module: nn.Module, b: int, label: str) -> None:
     compiled = torch.compile(module, mode="reduce-overhead", dynamic=False, fullgraph=True)
     with torch.inference_mode():
         for _ in range(5):
-            compiled(make_query(b, D), make_query_attrs(b, c=C))
+            compiled(make_query(b, d), make_query_attrs(b, c=C))
         for seed in (21, 22):
-            query, q_attrs = make_query(b, D, seed=seed), make_query_attrs(b, c=C, seed=seed)
+            query, q_attrs = make_query(b, d, seed=seed), make_query_attrs(b, c=C, seed=seed)
             # cudagraph-tree outputs are reclaimed on the next call — clone before comparing.
             out_ids, out_scores = (t.clone() for t in compiled(query, q_attrs))
             eager_ids, eager_scores = module(query, q_attrs)
@@ -141,3 +141,11 @@ def test_compiled_batch_of_one_bloom_v2():
     forward. ``N = 512`` at ``block_n = 256`` is the smallest odd-offset shape."""
     torch.manual_seed(0)
     _assert_replays_match_eager(_build("linr_v2", "bloom"), 1, "linr_v2 / bloom, B=1")
+
+
+def test_compiled_v2_wide_d():
+    """V2 past D_PAD 256 runs ``fused_masked_knn_topk``'s SPLIT body at ``WIDE_CONFIG``
+    (kernels.md § fused_masked_knn_topk, "Wide D"): it captures and replays like D = 64."""
+    torch.manual_seed(0)
+    module = _build("linr_v2", "clause", d=768)
+    _assert_replays_match_eager(module, B, "linr_v2 / clause, D=768", d=768)

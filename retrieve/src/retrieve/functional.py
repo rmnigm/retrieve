@@ -31,11 +31,12 @@ def masked_topk(
     valid: Tensor | None = None,  # [B, P] bool; None = all valid
     gather_ids: Tensor | None = None,  # [B, P] local→global map; None = identity
     pad_to_k: bool = True,  # rows with P < k or few survivors pad -1/-inf
+    masked: bool = False,  # scores already carry -inf at invalid lanes (a fused mask)
 ) -> tuple[Tensor, Tensor]:
     """Mask invalid scores to -inf → topk → map local→global ids → replace
     non-finite winners with -1 → optionally pad to k. Returns (ids, scores).
 
-    The -1 sentinel is applied whenever ``valid`` is given (or P < k): winners
+    The -1 sentinel is applied whenever ``valid`` is given or ``masked`` (or P < k): winners
     with a non-finite score — masked lanes *and* genuine -inf scores alike —
     get id -1. With ``valid=None`` and P >= k no sentinel pass runs, matching
     the dense call sites that had no -inf handling. ``pad_to_k=False`` with
@@ -47,7 +48,7 @@ def masked_topk(
     actual_k = min(k, p)
     topk_scores, topk_local = torch.topk(scores, actual_k, dim=1)
     topk_ids = gather_ids.gather(1, topk_local) if gather_ids is not None else topk_local
-    if valid is not None or actual_k < k:
+    if valid is not None or masked or actual_k < k:
         topk_ids = torch.where(torch.isfinite(topk_scores), topk_ids, topk_ids.new_full((), -1))
     if pad_to_k and actual_k < k:
         pad = k - actual_k
