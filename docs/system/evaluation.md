@@ -1017,7 +1017,7 @@ cached at `<gt_dir>/oracle_v4_<sweep>_<fingerprint[:16]>.pt`:
 | `targets_in_filter` | `[U, T]` bool, target `t` of user `u` passes the mask |
 | `target_in_filter` | `[U]` bool, any target passes |
 | `n_items`, `n_queries`, `n_kept`, `k_gt`, `sweep`, `clauses` | shape of the build |
-| `fingerprint` | sha256 over shapes, dtypes and a 64-row linspace sample of `item_embs`, `queries`, `targets`, `qa_sweep`; the full bytes of `item_attrs` and `clause_is_reverse` (`oracle.attrs_digest`, computed once per `(dataset, dim)` in `inputs.load_inputs` as `inputs["attrs_digest"]`); plus `clauses` and `k_gt` |
+| `fingerprint` | sha256 over shapes, dtypes and a 64-row linspace sample (its float32 index clamped to the last row, which past 2^24 rows it overshoots) of `item_embs`, `queries`, `targets`, `qa_sweep`; the full bytes of `item_attrs` and `clause_is_reverse` (`oracle.attrs_digest`, computed once per `(dataset, dim)` in `inputs.load_inputs` as `inputs["attrs_digest"]`); plus `clauses` and `k_gt` |
 | `code_version`, `harness_commit`, `torch`, `created` | provenance |
 
 **Item-chunked** (`oracle.compute`): per batch of 64 kept queries the loop
