@@ -120,6 +120,7 @@ re-upload of a subtree replaces its row.
 | `artifacts/ctl-v24-gate` | campaign-v2.4 gate on pod b (dev/ctl-v24 a916665, library d67d6263, NOT CITABLE): library suite log (800 passed), arXiv-synth d128 bloom smoke at p 0.001 / 0.1 (SilverTorch + LiNR V1, eager + graph) and the SilverTorch cells on campaign-v2.3 for the ids comparison, the suite config | 14 | 1,576,263 | `487ad304cb7e5a9d67649f5c4d3e362c7c689c942b2b036cb3ca1dce077b67e9` |
 | `artifacts/m1` | M1 on pod d at campaign-v2.4 (`d67d6263`; driver `campaign-v2.5/m1/`): 8 ABBA run trees (arXiv `filter` d128 c0_maincat, SilverTorch triton + `linr_v2`, perf only), the neighbour's records, `gate.md` / `gate.json`, 1 Hz clocks of both GPUs, logs; NOT CITABLE | 37 | 9,485,540 | `b43310cd140a45c5ac449b218177155b39f18e407ee3ec3d108a0f3512238968` |
 | `artifacts/m1-v25` | M1 on pod d at campaign-v2.5 (`472f2fc6`), same design ([driver](campaign-v2.5/m1/m1.sh)); NOT CITABLE | 37 | 9,555,002 | `3d73117f80e5b4be1738dd5a78f82c6ad6a44e2046e3f1ff6e9289d73f248005` |
+| `campaign-v2.5/arxiv-corr-synth-synth` | V-AX-CORR at campaign-v2.5 (`472f2fc6`, pod d GPU 0; [driver](campaign-v2.5/v-ax-corr/claims.sh)): 42 records (V3, SilverTorch triton clause `n_probe` 24-1024, postfilter; seed 0; c001 / c003 / c01), samples, per-query sidecars, `results.parquet`, logs, clocks; NOT CITABLE | 49 | 17647084 | `872371c7c70ff8546349c21582313ecc47d70d26e4565b8714c15be13dfe40f1` |
 
 The `d1-a` and `artifacts/*` subtrees were published by
 [H1](h1-results-storage/README.md) on 2026-09-26; their file counts and bytes

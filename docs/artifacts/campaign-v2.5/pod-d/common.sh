@@ -54,7 +54,7 @@ stream() {
   local ds=$1 suite=$2 algos=${3%|*} backends=${3#*|} a b
   local args=(); for a in $algos; do args+=(--algo "$a"); done; for b in $backends; do args+=(--backend "$b"); done
   local name="${suite}_${ds}-d$(dim "$ds")_${algos// /+}_${backends// /+}.log"
-  local cmd=($PIN $PY -m bench.cli run --dataset "$ds" --dim "$(dim "$ds")" --suite "$suite" "${args[@]}" --out "$R" --resume --interleave ${SKIP_PERF:+--skip-perf})
+  local cmd=($PIN $PY -m bench.cli run --dataset "$ds" --dim "$(dim "$ds")" --suite "$suite" "${args[@]}" --out "$R" --resume --interleave ${SKIP_PERF:+--skip-perf} ${NARROW:-})
   local t0=$(date +%s)
   { echo "=== ${cmd[*]}"; echo "=== clocks at start"; clocks; } >> "$R/logs/$name"
   "${cmd[@]}" >> "$R/logs/$name" 2>&1 < /dev/null
