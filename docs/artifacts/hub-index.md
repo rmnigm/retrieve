@@ -102,6 +102,7 @@ re-upload of a subtree replaces its row.
 | `artifacts/v1-fuse` | V1-FUSE window 1 (library `4c7119d0` on v2.1): library suite log, ids gate + keep-rule timing on goodreads- and arxiv-synth, the item-1 mat-vec experiment, the per-kernel profile, export-test rerun, clocks ([README](campaign-v2/v1-fuse/README.md)) | 19 | 372,339 | `736cf494d32de77b0f3cfa7f0a21b857176bb1ec45a147a979f65a5facc753c5` |
 | `artifacts/v1-fuse-w2` | V1-FUSE window 2 (library `36387035` on v2.2): library suite, tile sweep, both gates (clause graph cells void: stale inductor cache) | 12 | 151,639 | `792bc0e7e645cd1fb9ddffbd4aa9bfc56bb975178ea64f57d04532c42520b1cc` |
 | `artifacts/v1-fuse-w3` | V1-FUSE window 3 (library `36387035`, fresh inductor cache): library suite, clause gate on both datasets | 8 | 66,840 | `6abfd793a51c9412280ff05a7fbe5fae7f6930f1bf32599201974cf77d0ef174` |
+| `artifacts/st-lane` | ST-LANE (pod b, NOT CITABLE; before = campaign-v2.4 d67d6263): `final/` (bit-exact JSONs at D 128 / 192 / 768, 360 / 360; keep-rule grids; SASS hashes; library suite log), `explore/` (the kernel split, the compacted-lane prototype, the low-p tile sweep) | 21 | 154,675 | `efa27e6ccb4be1e46a54e9f5786428303f2b5cd1af4b3e772c0a7bda86d8a1a2` |
 
 The `d1-a` and `artifacts/*` subtrees were published by
 [H1](h1-results-storage/README.md) on 2026-09-26; their file counts and bytes
