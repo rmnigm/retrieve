@@ -1007,15 +1007,15 @@ writes four files into the dataset's `data_dir`:
 
 | file | content |
 |---|---|
-| `item_attrs_synth.pt` | `[N, 7, 1]` int64, 1 = pass, 0 = fail; clause `j` is rate `j` of `(0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0)` |
+| `item_attrs_synth.pt` | `[N, 10, 1]` int64, 1 = pass, 0 = fail; clause `j` is rate `j` of `layout.SYNTH_RATES` = `(0.001, 0.003, 0.01, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5, 1.0)` |
 | `synth_u.pt` | the `[N]` `u` vector |
-| `query_attrs_synth.pt` | `[U_full, 7]` int64, all ones, aligned 1:1 with the full test split like `eval_split.parquet` |
+| `query_attrs_synth.pt` | `[U_full, 10]` int64, all ones, aligned 1:1 with the full test split like `eval_split.parquet` |
 | `synth_filter.json` | rates, seed, `n_items`, `n_queries`, achieved `pass_counts` / `pass_rates` per rate |
 
-All seven columns are always written. A dataset picks its rates in YAML:
+All ten columns are always written, and the harness refuses attrs whose `synth_filter.json` names another rate list (`layout.check_synth_rates`: the YAMLs index columns, so attrs built before SYNTH-TRIM's ten rates must be rebuilt). The YAMLs name every column (`p0001` … `p1`, `p005` = 0.05, `p02` = 0.2, `p05` = 0.5); the `synth` suite picks the rates per dataset:
 [`goodreads-synth.yaml`](../../evaluation/config/goodreads-synth.yaml),
 [`arxiv-synth.yaml`](../../evaluation/config/arxiv-synth.yaml) and
-[`yfcc10m-synth.yaml`](../../evaluation/config/yfcc10m-synth.yaml) (five
+[`yfcc10m-synth.yaml`](../../evaluation/config/yfcc10m-synth.yaml) (the suite runs five
 rates). Each keeps the parent's `data_dir`, encoder and `users_limit`, so
 it shares the parent's encode cache. Its sweeps are named `p0001` … `p1`,
 so they cannot collide with the parent's names in the shared `gt_d{dim}`,

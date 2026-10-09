@@ -23,16 +23,15 @@ from eval_datasets import layout
 from eval_datasets.etl.synth_arxiv import spherical_kmeans
 from eval_datasets.layout import atomic_write, drop_legacy_padding_row
 
-RATES = (0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0)
+RATES = layout.SYNTH_RATES
 CORR_RATES = (0.01, 0.03, 0.1)
 CORR_ITERS = 25
 CORR_ITEM_ATTRS, CORR_QUERY_ATTRS, CORR_SIDECAR = (
     "item_attrs_corr.pt", "query_attrs_corr.pt", "synth_corr.json"
 )  # fmt: skip
 SEED = 20261008
-ITEM_ATTRS, U_FILE, QUERY_ATTRS, SIDECAR = (
-    "item_attrs_synth.pt", "synth_u.pt", "query_attrs_synth.pt", "synth_filter.json"
-)  # fmt: skip
+ITEM_ATTRS, SIDECAR = layout.SYNTH_ITEM_ATTRS, layout.SYNTH_SIDECAR
+U_FILE, QUERY_ATTRS = "synth_u.pt", "query_attrs_synth.pt"
 CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 
 

@@ -23,6 +23,7 @@ from bench import cli, run
 from bench.algos import official_config
 from bench.config import NONE_SWEEP, ConfigError, interleave_units, load_dataset, load_matrix
 from bench.records import resume_key
+from eval_datasets import synth_filter
 
 FIX = Path(__file__).parent / "data"
 CFG = Path(__file__).resolve().parents[2] / "config"
@@ -70,10 +71,9 @@ def test_synth_dataset_shares_the_parents_inputs(parent):
         None,
     )
     assert p.query_attrs == p.data_dir / "eval_split.parquet"
-    rates = ["p0001", "p0003", "p001", "p003", "p01", "p03", "p1"]
-    if parent == "yfcc10m":
-        rates = ["p0001", "p001", "p003", "p01", "p1"]
-    want = {r: (["p0001", "p0003", "p001", "p003", "p01", "p03", "p1"].index(r),) for r in rates}
+    names = ["p0001", "p0003", "p001", "p003", "p005", "p01", "p02", "p03", "p05", "p1"]
+    assert len(names) == len(synth_filter.RATES)
+    want = {r: (j,) for j, r in enumerate(names)}
     assert s.clauses == {"clause": want, "bloom": want}
     assert not {sw for fk in p.clauses.values() for sw in fk} & set(want)
 
@@ -191,6 +191,8 @@ def test_widths_compile_frac_ks_by_sweep_and_empty_slots():
         "c0": (10, 50),
         "c0c1": (10,),
     }
+    assert {j.seed for j in jobs if j.sweep == "c0"} == {0}
+    assert {j.seed for j in jobs if j.sweep == "c0c1"} == {0, 2}
     assert not any(j.narrowed for j in jobs)
     narrowed = load_matrix(MINI, SUITES, "widths", ks=[10])
     assert {j.sweep: j.narrowed for j in narrowed if j.filter_kind == "clause"} == {
@@ -352,10 +354,10 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("deep", "goodreads"): (42, 210),
     ("deep", "arxiv"): (72, 360),
     ("deep", "yfcc10m"): (9, 45),
-    ("synth", "goodreads-synth"): (303, 534),
-    ("synth", "arxiv-synth"): (303, 534),
-    ("synth", "arxiv-corr-synth"): (99, 198),
-    ("synth", "yfcc10m-synth"): (165, 285),
+    ("synth", "goodreads-synth"): (312, 558),
+    ("synth", "arxiv-synth"): (25, 46),
+    ("synth", "arxiv-corr-synth"): (15, 42),
+    ("synth", "yfcc10m-synth"): (15, 25),
     ("codesign", "arxiv"): (36, 108),  # official + triton (C5-OURS)
     ("codesign", "goodreads"): (36, 108),
     ("bloomwidth", "goodreads"): (42, 42),
@@ -377,8 +379,9 @@ KEPT = {
 }
 SYNTH_N = {"goodreads-synth": 797_084, "arxiv-synth": 2_988_996, "arxiv-corr-synth": 2_988_996,
            "yfcc10m-synth": 10_000_000}  # fmt: skip
-RATE = {"p0001": 0.001, "p0003": 0.003, "p001": 0.01, "p003": 0.03, "p01": 0.1, "p03": 0.3,
-        "p1": 1.0, "c001": 0.01, "c003": 0.03, "c01": 0.1}  # fmt: skip
+RATE = {"p0001": 0.001, "p0003": 0.003, "p001": 0.01, "p003": 0.03, "p005": 0.05, "p01": 0.1,
+        "p02": 0.2, "p03": 0.3, "p05": 0.5, "p1": 1.0,
+        "c001": 0.01, "c003": 0.03, "c01": 0.1}  # fmt: skip
 
 
 def _real(suite: str, dataset: str, **kw):
@@ -402,8 +405,13 @@ def test_grid_counts_and_invariants(suite, dataset):
     for j, p in cells:
         cell = (j.dim, j.algo, j.backend, j.filter_kind, j.sweep, json.dumps(p, sort_keys=True))
         by_seed.setdefault(cell, set()).add(j.seed)
-    seeds = {0, 1, 2, 3, 4} if suite == "h2h" else {0, 1, 2}  # h2h: 5 repeats
-    assert all(s == seeds for s in by_seed.values())
+    spec = yaml.safe_load((CFG / "suites.yaml").read_text())[suite]
+    by_sweep = (spec.get("seeds_by_sweep") or {}).get(dataset, {})
+    for (
+        cell,
+        got,
+    ) in by_seed.items():  # h2h: 5 repeats; synth: seed 0, 0-2 where variance is the question
+        assert got == set(by_sweep.get(cell[4], spec["seeds"])), cell
     assert all(set(j.batch_sizes) <= {1, 16} and set(j.ks) <= {100, 1000} for j in jobs)
     if suite in ("filter", "deep", "synth", "codesign"):
         assert all(j.batch_sizes == (1, 16) for j in jobs)
@@ -425,31 +433,47 @@ def test_grid_counts_and_invariants(suite, dataset):
             suite == "deep" and {j.sweep for j in jobs} <= KEPT[dataset]
         )
     c3_torch = {j.algo for j in jobs if j.backend == "torch" and j.algo != "postfilter"}
-    if suite in ("filter", "synth"):  # addendum 2: C3's torch arms on goodreads + arxiv only
-        assert bool(c3_torch) == (dataset.removesuffix("-synth") in ("goodreads", "arxiv"))
-    if suite == "synth":
+    if suite == "filter":  # addendum 2: C3's torch arms on goodreads + arxiv only
+        assert bool(c3_torch) == (dataset in ("goodreads", "arxiv"))
+    if suite == "synth":  # SYNTH-TRIM sized by claim (controller 2026-10-10)
+        assert bool(c3_torch) == (dataset == "goodreads-synth")
         for j in jobs:
-            assert (1000 in j.ks) == (SYNTH_N[dataset] * RATE[j.sweep] >= 4 * 1000), j.sweep
+            big_enough = SYNTH_N[dataset] * RATE[j.sweep] >= 4 * 1000
+            assert (1000 in j.ks) == (big_enough and dataset != "yfcc10m-synth"), j.sweep
             if j.backend == "torch" and j.algo != "postfilter":
                 assert j.sweep in {"p001", "p01", "p1"}
         torch_arms = {(j.algo, json.dumps(j.build)) for j in jobs if j.backend == "torch"}
-        assert (
-            torch_arms == {("postfilter", "{}")}
-            if not c3_torch
-            else torch_arms
-            == {
+        assert torch_arms == {
+            "goodreads-synth": {
                 ("postfilter", "{}"),
                 ("linr_v1_filter_mask", "{}"),
                 ("linr_v2", "{}"),
                 ("linr_v1_filter_mask", '{"compile": "max-autotune"}'),
                 ("linr_v2", '{"compile": "max-autotune"}'),
-            }
+            },
+            "arxiv-corr-synth": {("postfilter", "{}")},
+        }.get(dataset, set())
+        assert (
+            {j.algo for j in jobs if j.algo.startswith("linr_v")}
+            & {"linr_v1_filter_mask", "linr_v2"}
+        ) == (set() if dataset == "arxiv-corr-synth" else {"linr_v1_filter_mask", "linr_v2"})
+        assert any(j.algo == "linr_v3" for j in jobs) == (
+            dataset in ("goodreads-synth", "arxiv-corr-synth")
         )
-        sweep = (24, 256, 1024) if dataset == "yfcc10m-synth" else (24, 64, 128, 256, 512, 1024)
+        full = (24, 64, 128, 256, 512, 1024)
         st = {(j.backend, j.filter_kind): tuple(q["n_probe"] for q in j.query)
               for j in jobs if j.algo == "silvertorch"}  # fmt: skip
-        assert st == {("triton", "clause"): sweep, ("triton", "bloom"): (24, 256),
-                      ("official", "bloom"): (24, 256)}  # fmt: skip
+        assert st == {
+            "goodreads-synth": {("triton", "clause"): full, ("triton", "bloom"): (24, 256),
+                                ("official", "bloom"): (24, 256)},
+            "arxiv-synth": {("triton", "clause"): (24, 64, 256, 1024), ("triton", "bloom"): (24,),
+                            ("official", "bloom"): (24,)},
+            "arxiv-corr-synth": {("triton", "clause"): full},
+            "yfcc10m-synth": {("triton", "clause"): (24, 256, 1024)},
+        }[dataset]  # fmt: skip
+        bloom = {j.sweep for j in jobs if j.filter_kind == "bloom"}
+        if dataset == "arxiv-synth":
+            assert bloom == {"p001", "p1"}
 
 
 IVF_ARXIV = ({"n_probe": 24}, {"n_probe": 256})
