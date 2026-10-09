@@ -3,9 +3,13 @@
 the full expansion's, the chunks partition the whole suite (no manifest reuse on PubMed), and no chunk splits an interleave
 unit. Prints one `bench run` argument line per chunk, shortest first (est_min).
 
-    python chunks.py            (cwd evaluation/)
+    VPUBMED_CHUNKS=all|nost|st python chunks.py   (cwd evaluation/)
+
+The assertion always covers all chunks; VPUBMED_CHUNKS only filters the printed list: `nost` every chunk but SilverTorch,
+`st` the SilverTorch ones (run last, after V-SEEDS arXiv: controller, 2026-10-09).
 """
 
+import os
 from pathlib import Path
 
 from bench.config import interleave_units, load_matrix
@@ -48,6 +52,7 @@ def units(jobs):
 
 
 full = load_matrix(DS, SUITE, "filter")
+SELECT = os.environ.get("VPUBMED_CHUNKS", "all")
 seen = set()
 for c in CHUNKS:
     js = load_matrix(DS, SUITE, "filter", **c)
@@ -60,6 +65,8 @@ for c in CHUNKS:
     assert not (cells(js) & seen), c
     seen |= cells(js)
     args = " ".join(f"--{f.rstrip('s').replace('_', '-')} {v}" for f, vs in c.items() for v in vs)
-    print(f"{len(cells(js)):3d} cells  {args}")
+    st = c["algos"] == ["silvertorch"]
+    if SELECT == "all" or (SELECT == "st") == st:
+        print(f"{len(cells(js)):3d} cells  {args}")
 assert seen == cells(full), (len(seen), len(cells(full)))
 print(f"{len(seen)} cells = the full suite; every interleave unit inside one chunk")
