@@ -610,7 +610,9 @@ def test_t6_layer_int32_bitexact_vs_triton(d, filter_mode, reverse):
     if filter_mode == "exact":
         # And with all clauses inactive: the predicate is identically true.
         qa_all = torch.full((B, C), -1, dtype=torch.long, device="cuda")
-        _assert_bitexact(off(data["query"], qa_all), tri(data["query"], qa_all))
+        _assert_bitexact(
+            off(data["query"], _prep(off, qa_all)), tri(data["query"], _prep(tri, qa_all))
+        )
 
 
 @pytest.mark.parametrize("filter_mode", ["none", "exact"])

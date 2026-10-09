@@ -37,7 +37,7 @@ pytestmark = pytest.mark.cpu
 def test_all_lists():
     assert retrieve.modules.__all__ == MODULES
     assert retrieve.__all__ == sorted(MODULES + INTERFACES)
-    assert len(retrieve.__all__) == 18
+    assert len(retrieve.__all__) == 19
     for name in retrieve.__all__:
         assert getattr(retrieve, name) is not None
 
