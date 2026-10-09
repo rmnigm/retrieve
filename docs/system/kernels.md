@@ -483,16 +483,22 @@ parity files compare Triton against `ops.reference` at the same input
 dtype and cannot see this class of defect.
 
 **Launch grid** `(G, B)`, `G = min(cdiv(P, BLOCK_N), cdiv(programs, B))`,
-tile programs on `grid_x`, batch on `grid_y` (≤ 65535). A program loads its
-query once and strides over the row's tiles `g, g + G, …`. A tile at or
-past `counts[b]` stores `BLOCK_N` lanes of `-inf` with no load; a tile
-below it gathers `BLOCK_N` item rows by indirect load:
+tile programs on `grid_x`, batch on `grid_y` (≤ 65535). A program runs two
+loops over its row. The scoring loop strides over the row's counted tiles
+`g, g + G, …` below `cdiv(counts[b], BLOCK_N)`; each gathers `BLOCK_N`
+item rows by indirect load:
 
 ```
 item_ids[BLOCK_N] = pos_indices[b, p_off]
 emb_rows[BLOCK_N, D] = item_embs[item_ids]
 dots[BLOCK_N] = sum(emb_rows * q[None, :], axis=1)
 ```
+
+The fill loop then stores `-inf` over `[cdiv(counts[b], BLOCK_N) ·
+BLOCK_N, P)` in `FILL_N` = 1,024-lane chunks, strided over the same
+programs, so a mostly empty row costs a few wide stores per program, not
+one `BLOCK_N`-lane tile per iteration
+([V2-FILL](../artifacts/campaign-v2/v2-fill/README.md)).
 
 The grid is sized by the config, not by `P`. The compact family returns
 full-width `[B, N]` candidates, so a grid of `cdiv(P, BLOCK_N)` one-tile
@@ -530,16 +536,13 @@ kernel (real dot or `-inf`), so the post-topk `where(isfinite(scores),
 …, -1)` mask sees deterministic values without a `torch.full(-inf)`
 pre-fill kernel launch.
 
-**Wide D** (`SPLIT`, `D_PAD > 256`). The strided body holds the query
-and the `[BLOCK_N, D_PAD]` tile across its tile loop, which at D 768 costs
-98-112 registers a thread: 2 resident 8-warp CTAs an SM instead of the
-straight-line body's 4, and 1.43× the time of that body at p ≈ 1 (V2 at
-PubMed 10 M; the grid size does not matter). Past 256 the strided grid is
-split into a scoring loop over the row's counted tiles (the query reloaded
-per tile, an L1 hit) and a `-inf` fill over `[cdiv(count, BLOCK_N) ·
-BLOCK_N, P)` in `FILL_N` = 1,024-lane chunks, strided over the same
-programs. `WIDE_CONFIG` (`block_n` 8, `num_warps` 4, `programs` 3456)
-then holds no spill and needs no register cap. The larger `programs`
+**Wide D** (`SPLIT`, `D_PAD > 256`). Holding the query and the
+`[BLOCK_N, D_PAD]` tile across the tile loop costs 98-112 registers a
+thread at D 768: 2 resident 8-warp CTAs an SM instead of the straight-line
+body's 4, and 1.43× the time of that body at p ≈ 1 (V2 at PubMed 10 M; the
+grid size does not matter). Past 256 the scoring loop therefore reloads
+the query per tile (an L1 hit). `WIDE_CONFIG` (`block_n` 8, `num_warps` 4,
+`programs` 3456) then holds no spill and needs no register cap. The larger `programs`
 covers skewed batches: PubMed `all5` puts most candidates in one or two
 rows of a bs-16 batch (median 142 a row, p90 1.2 M), and at 864 programs
 (54 a row) such a row ran 1.21× v2.2's time; at 3,456 it runs 0.45×,
@@ -548,8 +551,20 @@ inductor's launcher drops it, so it was rejected. Against v2.2's kernel at
 10 M d768: 0.16-0.72 across p 0.0002-1
 ([V2-HIGHP](../artifacts/campaign-v2/v2-highp/README.md)). Each lane's
 score is the same `tl.sum` over D, so scores are bit-identical to the
-strided body. At `D_PAD ≤ 256` the strided body is unchanged
-(SASS-identical).
+one-loop body.
+
+**Count width** (`INT32_COUNT`, `D_PAD ≤ 128`). At `D_PAD ≤ 256` the
+query is held across the scoring loop. The loop's bound comes from the
+int64 `counts`, so its induction variable and every tile offset are 64-bit
+unless the count is narrowed (`counts[b] ≤ P < 2³¹`, index arithmetic
+only). Narrowed, the body is shorter and at `D_PAD` 64-128 compiles to
+25-32 registers. At `D_PAD` 256 it compiles to 40, and so did the one-loop
+body before it: 6 resident 8-warp programs an SM instead of 8, so the
+default 864 programs take a second, one-third-full wave. Left 64-bit at
+256, the same body compiles to 32 registers and fits one wave. So the count
+is narrowed only at `D_PAD ≤ 128`. This rests on the compiler's register
+allocation; [`fill_variants.py`](../artifacts/campaign-v2/v2-fill/fill_variants.py)
+records registers per body, and a toolchain change should re-check it.
 
 **Tile config.** `FusedMaskedKnnTopkConfig(block_n, num_warps,
 num_stages, programs)` — shipped as `DEFAULT_CONFIG` (`D_PAD ≤ 256`) and
