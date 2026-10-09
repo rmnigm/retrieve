@@ -143,7 +143,7 @@ leg runs one library.
 | goodreads SilverTorch `filter` + `synth` at `n_lists` 1024 | IVF-TUNE (goodreads 4096 / n95 64) | whole SilverTorch arms |
 | arXiv `72e5a90` reuse entries, V2 / V3 perf half | V2-FIX-A | perf |
 | PubMed SilverTorch Triton perf (D3 PubMed timed at v2.1; V-PUBMED's Triton arms) | ST-DLOOP (scores bit-exact) | Triton perf |
-| V2 Triton perf at high pass rate (p ≳ 0.3) run at v2.1 (V-AX-SYNTH, V-PUBMED, V-SEEDS, V-GR-DEEP, V-YFCC) | V2-HIGHP, if it lands | V2 perf |
+| V2 Triton perf at `D_PAD` ≥ 1024 run at v2.1 (V-PUBMED; d128 / d192 legs gain or are neutral) | V2-HIGHP | V2 perf |
 | graph-mode ids of SilverTorch records at `408b1188` | quantize fix | ids (D1-G's id gate) |
 
 ### Stop rules
@@ -205,14 +205,16 @@ co-design.
   its nearest centroid), `arxiv-corr-synth.yaml`, CPU test (pass rate, query
   side); then arXiv at p {0.01, 0.03, 0.1}, every synth arm. IVF's best case
   next to the uniform worst case (F2). Pod c, slot 2. **≈ 3 GPU-h.**
-- [ ] **V2-HIGHP: Fix A's high-pass-rate regression** (surprise gate, pod b,
-  2026-10-09). At v2.1 LiNR V2 is +43-45 % at p ≈ 1 on PubMed d768 10 M
-  (bs 16 225.6 vs 155.9 ms) and −73-82 % at p 0.0002; V1 in the same runs
-  matches D1 within 0.3 %. Fix A's timing gate covered 0.8 M d128 only.
-  Paired cross-tree check (pod 1, ABAB processes, 408b1188 vs f01255f1, V1
-  control), EXHIBITS' old-vs-new map over p, N, d; if confirmed, a grid fix
-  (per-width / per-N `programs`, or multi-wave) in the `campaign-v2.2` bundle
-  with ST-DLOOP, gated bit-exact + keep rule at 0.8 M d128 and 10 M d768.
+- [ ] **V2-HIGHP: Fix A's regression at d768** (surprise gate, pod b; located
+  by pod 1's cross-tree check, `artifacts/v2-crosstree`). V2 at v2.1 is
+  1.43-1.44× slower than at `campaign-v2` at PubMed 10 M d768 p 0.9993 (bs 1
+  and 16, eager and graph, V1 1.000), and faster or equal at d128 (0.8 M and
+  3 M, any p). No `programs` value recovers it, the one-tile-per-program grid
+  included (1.46×): the cause is the grid-strided body's codegen at `D_PAD`
+  1024 (`fused_masked_knn_topk` 141 -> 209 ms), not the launch shape. Fix: a
+  D loop inside the tile body (ST-DLOOP's form), or the old straight-line body
+  above `D_PAD` 256. Gates bit-exact + keep rule at d128 (0.8 M, 3 M) and d768
+  10 M across p. In the `campaign-v2.2` bundle; st-dloop, pod b.
 - [ ] **ST-IDS: the probe scorers' id epilogue loops over k** (pod c,
   2026-10-09). `probe_ids_kernel` builds a dense `[next_pow2(k),
   next_pow2(n_probe)]` tile: at k 1000 every new `n_probe` is a 2-4 MB IR
