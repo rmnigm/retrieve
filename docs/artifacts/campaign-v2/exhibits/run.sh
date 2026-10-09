@@ -15,7 +15,7 @@ cd "$REPO/evaluation"
 
 # every campaign-v2* leg in hub-index, plus the d1 legs the manifest reuses (arxiv) or the estimates read
 legs=$(grep -o '^| `campaign-v2[^`]*`' "$REPO/docs/artifacts/hub-index.md" | tr -d '|` ')
-legs="$legs d1/arxiv d1/arxiv-deep d1/yfcc10m d1/pubmed"
+legs="$legs d1/arxiv d1/arxiv-deep d1/yfcc10m d1/pubmed ${EXTRA_LEGS:-}"   # EXTRA_LEGS: record trees published under artifacts/
 for leg in $legs; do
   d=$BASE/legs/${leg//\//__}
   [ -f "$d/.done" ] && continue
@@ -25,11 +25,15 @@ done
 # one tree per code_version: a resume key carries the code_version, so one tree would hold both
 # versions of a cell and the report would draw them into one curve
 rm -rf "$BASE/tree" && mkdir -p "$BASE/tree"/{v2,v21,d1}
+# a suite dir goes to the tree of its records' code_version (a leg may sit under artifacts/)
 for d in "$BASE"/legs/*/; do
-  n=$(basename "$d")
-  case $n in campaign-v2.1__*) t=v21 ;; campaign-v2__*) t=v2 ;; d1__*) t=d1 ;; *) continue ;; esac
   for s in "$d"*/; do
-    s=$(basename "$s"); [ "$s" = logs ] && continue
+    f=$(ls "$s"*.jsonl 2>/dev/null | grep -v samples | head -1) || true
+    [ -n "$f" ] || continue
+    case $(python3 -c 'import json,sys; print(json.loads(open(sys.argv[1]).readline())["env"]["code_version"][:8])' "$f") in
+      408b1188) t=v2 ;; f01255f1) t=v21 ;; 72e5a90c | c0e42d1a) t=d1 ;; *) echo "skip $s: unknown code_version" >&2; continue ;;
+    esac
+    s=$(basename "$s")
     mkdir -p "$BASE/tree/$t/$s" && cp -al "$d$s/." "$BASE/tree/$t/$s/"
   done
 done
