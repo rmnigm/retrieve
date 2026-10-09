@@ -23,7 +23,29 @@ ARMS = [
     ("official", "fp16", "eager"),
     ("official", "int32", "eager"),
 ]
+# C7's "scorer in isolation", like for like: ours fuses probe list, bloom test and scoring in one kernel;
+# Meta runs them as separate kernels (pod b's split, V-PROF3 a's full table). A side counts only when
+# every one of its kernels is in the entry's kernel list (top-8 lists usually miss Meta's small ones).
+SCORER = {
+    "triton": ("_codesigned_probe_score_kernel",),
+    "official": (
+        "process_cluster",
+        "generate_warp_payload",
+        "generate_remaining_payload",
+        "generate_cluster_warp_size",
+    ),
+}
+BLOOM_SEARCH = "bloom_search"
 HOST_BOUND = 0.5  # flag an arm whose host share exceeds half of its p50
+
+
+def scorer_us(kernels, backend, filter_kind):
+    """The comparable scorer scope's µs, or None when a kernel of that scope is not in the list."""
+    names = SCORER[backend] + (
+        (BLOOM_SEARCH,) if backend == "official" and filter_kind == "bloom" else ()
+    )
+    hit = {n: sum(k["us"] for k in kernels if n in k["kernel"]) for n in names}
+    return None if not all(hit.values()) else sum(hit.values())
 
 
 def cell_key(r, e):
@@ -47,13 +69,20 @@ def arm_of(r, mode):
 def main():
     out = Path(sys.argv[1])
     out.mkdir(parents=True, exist_ok=True)
-    allrecs = [r for r in load(sys.argv[2:]) if r["suite"] == "h2h" and r["status"] == "ok"]
+    # the profile-only pass is `partial` (skip_quality) by design; it only supplies kernels_us
+    allrecs = [
+        r for r in load(sys.argv[2:]) if r["suite"] == "h2h" and r["status"] in ("ok", "partial")
+    ]
     ksum = {}  # (cv, dataset, filter, sweep, backend, score_path, seed, k, bs) -> eager perf entry
     for r in allrecs:
         for e in r["perf"] or []:
             if e["mode"] == "eager" and e.get("kernels_us") is not None:
                 ksum[cell_key(r, e)] = e
-    recs = [r for r in allrecs if not any(e.get("kernels_us") is not None for e in r["perf"] or [])]
+    recs = [
+        r
+        for r in allrecs
+        if r["status"] == "ok" and not any(e.get("kernels_us") is not None for e in r["perf"] or [])
+    ]
     cells = collections.defaultdict(lambda: collections.defaultdict(list))
     for r in recs:
         for e in r["perf"] or []:
@@ -76,6 +105,11 @@ def main():
             ]
             ks = [e["kernels"] for _, e in es if e.get("kernels")]
             top8 = st.median(sum(k["us"] for k in kk) for kk in ks) / 1000 if ks else None
+            sc = [
+                scorer_us(f.get("kernels") or [], a[0], key[2])
+                for f in (full or [e for _, e in es if e.get("kernels")])
+            ]
+            scorer = st.median(sc) / 1000 if sc and all(x is not None for x in sc) else None
             if full:
                 src = f"all ({len(full)}/{len(es)})"
                 dev = st.median(f["kernels_us"] for f in full) / 1000
@@ -120,6 +154,7 @@ def main():
                     "device_src": src,
                     "top8_ms": "" if top8 is None else round(top8, 4),
                     "launches": "" if launches is None else int(launches),
+                    "scorer_ms": "" if scorer is None else round(scorer, 4),
                     "host_share_max": "" if dev is None else round(1 - dev / p50, 3),
                     "host_bound": "" if dev is None else (1 - dev / p50) > HOST_BOUND,
                     "unstable": sum(bool(e.get("unstable")) for _, e in es),
@@ -146,7 +181,9 @@ def main():
                     + " / "
                     + d[a]["device_src"].split()[0]
                 )
-                dev_ratio.append((*key, a, round(o / t, 2), src))
+                ts, os_ = d["triton eager"].get("scorer_ms"), d[a].get("scorer_ms")
+                sr = round(os_ / ts, 2) if ts and os_ else ""
+                dev_ratio.append((*key, a, round(o / t, 2), sr, src))
     with open(out / "t3x.csv", "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=list(rows[0]))
         w.writeheader()
@@ -158,8 +195,8 @@ def main():
         "says `all`, else the top-8 kernels of one profiled eager call (`top8`, a lower bound); host share = "
         f"1 - device / p50; `host_bound` = host share > {HOST_BOUND}.\n",
         "| cv | dataset | filter | k | bs | arm | p50 ms | / triton eager | device ms | src | top-8 ms | launches "
-        "| host share | unstable | ids canon = | jaccard min | max abs ds |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "| scorer ms | host share | unstable | ids canon = | jaccard min | max abs ds |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for x in rows:
         md.append(
@@ -179,6 +216,7 @@ def main():
                     "device_src",
                     "top8_ms",
                     "launches",
+                    "scorer_ms",
                     "host_share_max",
                     "unstable",
                     "ids_canon_eq",
@@ -190,8 +228,12 @@ def main():
         )
     md += [
         "\n## Device time, official / Triton eager (source: triton / official)\n",
-        "| cv | dataset | filter | k | bs | arm | ratio | src |",
-        "|---|---|---|---|---|---|---|---|",
+        "Scorer scope, like for like: ours = `_codesigned_probe_score_kernel` (probe list, bloom test and "
+        "scoring fused); Meta = `process_cluster*` + `generate_*payload*` + `generate_cluster_warp_size` (+ "
+        "`bloom_search` on bloom). Blank when a kernel of the scope is missing from the recorded list (the "
+        "top-8 lists miss Meta's small payload and bloom kernels).\n",
+        "| cv | dataset | filter | k | bs | arm | device ratio | scorer-scope ratio | src |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     md += ["| " + " | ".join(map(str, r)) + " |" for r in dev_ratio]
     (out / "t3x.md").write_text("\n".join(md) + "\n")

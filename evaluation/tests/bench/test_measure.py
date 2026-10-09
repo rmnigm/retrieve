@@ -275,6 +275,21 @@ def test_kernel_summary_sums_every_kernel_but_the_sentinels():
     assert out["kernels_us"] > sum(k["us"] for k in out["kernels"])
 
 
+def test_kernel_summary_skips_compiled_graph_ranges_in_the_sums():
+    """A compiled call books ``## Call CompiledFxGraph <hash> ##`` as a device event spanning its
+    kernels: it stays in the top list but never in ``kernels_us`` / ``kernels_calls``."""
+    ev = lambda key, us, n: SimpleNamespace(key=key, self_device_time_total=us, count=n)  # noqa: E731
+    events = [
+        ev("## Call CompiledFxGraph fabc123 ##", 288.0, 1),
+        ev("triton_red_fused_mm_where_0", 152.0, 1),
+        ev("gatherTopK", 113.0, 2),
+        ev(bench.SENTINEL, 1e6, 2),
+    ]
+    out = bench.kernel_summary(events, top=8)
+    assert out["kernels"][0]["kernel"].startswith("## Call CompiledFxGraph")
+    assert out["kernels_us"] == 265.0 and out["kernels_calls"] == 3
+
+
 @pytest.mark.gpu
 def test_profile_once_records_the_triton_bloom_kernels():
     g = torch.Generator(device="cuda").manual_seed(0)
@@ -294,6 +309,24 @@ def test_profile_once_records_the_triton_bloom_kernels():
     # top 64 covers every kernel of this call, so the list and the sums agree
     assert prof["kernels_us"] == pytest.approx(sum(e["us"] for e in prof["kernels"]))
     assert prof["kernels_calls"] == sum(e["calls"] for e in prof["kernels"])
+
+
+@pytest.mark.gpu
+def test_profile_once_sums_a_compiled_call_without_its_graph_range():
+    """A real torch.compile'd call: the profiler books its ``## Call CompiledFxGraph`` range as a
+    device event; the top list may carry it, the sums never do."""
+    x = torch.randn(4096, 256, device="cuda")
+    w = torch.randn(256, 256, device="cuda")
+    f = torch.compile(lambda: torch.relu(x @ w).sum(dim=1).topk(16), mode="reduce-overhead")
+    with torch.inference_mode():
+        for _ in range(3):  # cudagraph trees record on a later call
+            f()
+        prof = bench.profile_once(f, top=64)
+    names = [e["kernel"] for e in prof["kernels"]]
+    assert any(n.startswith(bench.RANGE_PREFIX) for n in names)
+    kernels = [e for e in prof["kernels"] if not e["kernel"].startswith(bench.RANGE_PREFIX)]
+    assert kernels and prof["kernels_us"] == pytest.approx(sum(e["us"] for e in kernels))
+    assert prof["kernels_calls"] == sum(e["calls"] for e in kernels)
 
 
 def test_atomic_write_replaces_or_leaves_nothing(tmp_path):
@@ -325,12 +358,14 @@ def test_setup_seeds_and_pins_precision():
     assert torch.get_float32_matmul_precision() == "highest"
 
 
-def test_inductor_cache_is_keyed_by_code_version_unless_given():
-    """Roadmap H4: two code_versions, two cache dirs; an explicit directory wins."""
+def test_inductor_cache_is_keyed_by_code_version_even_when_given():
+    """H-INDCACHE: two code_versions, two cache dirs, under the default root and under a
+    caller-set directory alike (the caller's dir gets the code_version appended)."""
     a = bench.inductor_cache_dir("0123abcd", None)
     b = bench.inductor_cache_dir("files:4567ef", None)
-    assert a != b and a.endswith("0123abcd") and b.endswith("files-4567ef")
-    assert bench.inductor_cache_dir("0123abcd", "/scratch/inductor/x") == "/scratch/inductor/x"
+    assert a != b and a.endswith("/0123abcd") and b.endswith("/files-4567ef")
+    given = [bench.inductor_cache_dir(cv, "/scratch/inductor/x") for cv in ("0123abcd", "89ab")]
+    assert given == ["/scratch/inductor/x/0123abcd", "/scratch/inductor/x/89ab"]
 
 
 def test_latency_group_alternates_windows_across_arms():

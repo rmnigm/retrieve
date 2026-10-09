@@ -135,7 +135,10 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    and stores per-kernel CUDA µs (top 8 kernels) as `kernels`, and the device
    time and launches summed over every kernel as `kernels_us` / `kernels_calls`
    (`measure.kernel_summary`; H-KSUM: the top-8 sum is a lower bound that favours
-   the arm with more launches). In a
+   the arm with more launches). The sums skip `## …` events: the profiler books a
+   compiled call's `## Call CompiledFxGraph <hash> ##` range as a device event
+   spanning that graph's kernels, so counting it would count them twice (the top-8
+   list keeps it). In a
    long-lived process the profiler drops the device activities at the end of
    a short window, one more kernel per session as the process ages, so H2H-FINAL
    stored empty or truncated lists
@@ -598,16 +601,18 @@ harness.
 ### Inductor cache
 
 `bench run` sets
-`TORCHINDUCTOR_CACHE_DIR` to `<tmp>/bench-inductor/<code_version>` (`:`
-→ `-`; `measure.inductor_cache_dir`) and prints it, so a `graph`-mode run
+`TORCHINDUCTOR_CACHE_DIR` to `<base>/<code_version>` (`:` → `-`;
+`measure.inductor_cache_dir`) and prints it, so a `graph`-mode run
 after a library edit compiles afresh instead of replaying a stale
-`@triton_op` body ([testing](testing.md#running)). A
-`TORCHINDUCTOR_CACHE_DIR` the caller set wins (the pods' per-job
-`/scratch/inductor/<job>`). The caller's value is read in
+`@triton_op` body ([testing](testing.md#running)). `<base>` is the
+`TORCHINDUCTOR_CACHE_DIR` the caller set (the pods' per-job
+`/scratch/inductor/<job>`), else `<tmp>/bench-inductor`: a caller's dir
+reused across library edits gets one subdirectory per tree and never
+serves another tree's graphs (H-INDCACHE). The caller's value is read in
 `bench/__init__.py`, before any `bench` module imports `torch._inductor`,
 whose import writes torch's default into the environment; for the same
 reason `bench campaign` gives its children the caller's value (or none),
-not its own environment's.
+not its own environment's; each child appends its own `code_version`.
 
 ## The cell loop (`run.py`)
 
@@ -846,7 +851,7 @@ Perf entry:
 | `cache_plans` | on every entry: `false` on `silvertorch`/`official` (`run.perf` replaces `module.official` with `cache_plans=False` before the first variant, so every timed forward pays the CPU expression parse), `null` on backends without a plan cache |
 | `load` | `"closed_loop"` |
 | `kernels` | `--profile`, eager only: top-8 CUDA kernels `{kernel, us, calls}` |
-| `kernels_us`, `kernels_calls` | `--profile`, eager only: device µs and kernel launches summed over every kernel of the call, sentinels excluded (records before H-KSUM lack them; T3 reads these, and for such a record the top-8 sum, marked as a lower bound) |
+| `kernels_us`, `kernels_calls` | `--profile`, eager only: device µs and kernel launches summed over every kernel of the call, sentinels and `## …` profiler ranges excluded (records before H-KSUM lack them; records between H-KSUM and its fix double-count compiled calls, which no eager `h2h` arm is; T3 reads these, and for such a record the top-8 sum, marked as a lower bound) |
 | `ids_sha256` | sha256 of the ids the timed callee (the eager module or the graph replay) returns on the first 8 batches of that `(bs, seed)` pool (`run.IDS_PROBE_BATCHES`), int64 row-major, batch after batch, run once after the windows; `null` when the variant did not run. Equal eager and graph hashes are the D1-G identity gate. Graph mode is inductor's code, not the eager ops replayed, so this gate catches arithmetic that inductor lowers differently. Records before library tree `5d158f20` differ in graph `quantize_int8` ([kernels](kernels.md#quantize_int8-retrieveindexing), [validation](../validation.md#campaign-v2-phase-v-not-yet-validated), *V-GRAPH-IDS*) |
 | `ids_sha256_canon` | the same ids with each row re-ordered by (score desc, id asc) before hashing: two backends with bit-equal scores whose tied ids come in another order hash equal (official int32 against Triton). `bench report`'s T3 identity column reads it; eager vs graph reads `ids_sha256`. An added field, schema stays 4 |
 | `reason` | present when the variant could not run (`not_capturable`, `cuda_unavailable`, `cudagraph_skips=N`, `cudaGraphLaunch per call = N, expected 1`); every stat key is then `null` |

@@ -144,6 +144,7 @@ leg runs one library.
 | goodreads SilverTorch `filter` + `synth` at `n_lists` 1024 | IVF-TUNE (goodreads 4096 / n95 64) | whole SilverTorch arms |
 | arXiv `72e5a90` reuse entries, V2 / V3 perf half | V2-FIX-A | perf |
 | PubMed SilverTorch Triton perf (D3 PubMed timed at v2.1; V-PUBMED's Triton arms) | ST-DLOOP (scores bit-exact) | Triton perf |
+| d128 / d192 SilverTorch Triton perf (every leg) | ST-SKIP128, if it lands | Triton perf |
 | V2 Triton perf at `D_PAD` ≥ 1024 run at v2.1 (V-PUBMED; d128 / d192 legs gain or are neutral) | V2-HIGHP | V2 perf |
 | graph-mode ids of SilverTorch records at `408b1188` | quantize fix | ids (D1-G's id gate) |
 
@@ -226,6 +227,32 @@ co-design.
   scores, epilogue kernel time and compile time before/after. Lifts the
   `n_probe` ≤ 1024 at k 1000 limit. In the `campaign-v2.3` bundle with
   V2-HIGHP and V1-FUSE; st-dloop, pod b.
+- [ ] **ST-SKIP128: Meta's early exit at d ≤ 256** (EXHIBITS run 4, ST-DLOOP's
+  improvement list). Meta's scorer kernel alone is faster than ours on
+  bloom at d128 (0.60-0.80, exact device times) because a failing doc
+  returns before any load; our tile skip is off at `D_PAD` ≤ 256 because a
+  forced skip cost 2-8 % at p ≥ 0.1. Fix: a skip gated by a device-side
+  pass-rate bound (no host sync), ≈ −30-35 % on the d128 scorer at
+  p ≤ 0.001. Gates bit-exact + keep rule across p at d128 / d192. Re-times
+  every d128 / d192 SilverTorch Triton cell (ledger). Last in the
+  `campaign-v2.3` bundle; st-dloop, pod b.
+- [ ] **H-QLOOP: the quality pass is CPU-bound** (pod 1, 2026-10-09, live
+  profile of V-V3BITS). `run.quality` spends ≈ 33 ms of CPU work per 16-row
+  chunk (row masks, `blob["topk"][sel]`, `targets[sel]`, `.to(device)`
+  staging, per-chunk `nonzero`; ~128 OpenMP threads spinning) against a ≈ 2 ms
+  forward: ≈ 22-33 s per cell with the GPU idle, about a third of the wall of
+  every cell that computes quality (V3 / SilverTorch every seed; V1 / V2 /
+  postfilter seed 0). Fix: stage the oracle top-k, targets and masks on the
+  device once per cell and index there; bound torch's CPU threads for the
+  loop. Gate: quality fields and per-query sidecars **byte-identical** to
+  existing records (golden cells + one record per arm from the Hub), harness
+  suite. Harness only. Pod 1's runner, now (CPU while V-GR-DEEP runs).
+- [ ] **H-SCOPE: a named-scope kernel sum in `profile_once`** (EXHIBITS, C7).
+  T3's scorer column needs like-for-like scopes (ours fuses the bloom test;
+  Meta's bloom search and payload are separate kernels): record per-call
+  sums over named kernel groups (scorer incl. its filter, top-k, epilogue,
+  other) next to `kernels_us`, so the report builds the column without a
+  hand split. Harness, CPU tests. Pod 1's runner between legs.
 - [ ] **V1-FUSE: LiNR V1 at small batch and its masking** (V-PROF3,
   `artifacts/v-prof3`). At bs 1 `torch.compile(max-autotune)` V1 runs 0.25 ms
   against our Triton 0.49: one fused masked mat-vec (152 µs) vs cuBLAS gemv
@@ -238,14 +265,6 @@ co-design.
   within the existing V1 tolerance if fp16 keys), keep rule over p, bs, N,
   d. Library, in `campaign-v2.3` with ST-IDS and V2-HIGHP. Pod c, v-ax-corr
   (CPU first, one GPU window at an interleave-unit pause).
-- [ ] **H-KSUM: the full kernel sum in `profile_once`** (EXHIBITS run 3): T3's
-  device column sums the top 8 kernels only, a lower bound that favours
-  official (15-31 launches vs Triton's 17-18). Record every kernel's time
-  (and the count), harness only with CPU tests (done: `kernels_us` /
-  `kernels_calls`); then one profile-only `h2h`
-  pass on goodreads + arXiv at v2.1 (`--profile`, no new timing claims).
-  Settles C7's "Meta's scorer faster in isolation" (k 1000 vs k 100 split).
-  Pod 1 after V-PROF3. **≈ 0.3 GPU-h.**
 - [ ] **V-V3BITS: V3 at LiNR's bit budget, next to our deviation** (C2 does
   not hold so far: recall −7-13 % at a 1 % pool, no gain at bs 1; our V3
   runs `k_bits` = D = 128 against LiNR's 512, LN-8). `k_bits` must divide D
