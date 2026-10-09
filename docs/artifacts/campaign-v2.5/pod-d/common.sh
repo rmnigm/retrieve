@@ -3,11 +3,11 @@
 # `step NAME CMD...` (bench subcommand, pinned), `stream DS SUITE "ALGOS|BACKENDS"` (one `bench run --resume
 # --interleave`, log under $R/logs with clock blocks), `upload PREFIX` (bench upload --verify of $R), `note DIR TEXT`.
 # Each stops the driver on a non-zero rc. Launch:
-#   GPU=<i> setsid nohup flock -n /scratch/gpu<i>.lock bash <driver> > /scratch/v24/<leg>/driver.log 2>&1 &
+#   GPU=<i> setsid nohup flock -n /scratch/gpu<i>.lock bash <driver> > /scratch/v25/<leg>/driver.log 2>&1 &
 set -u
 : "${GPU:?GPU=0|1}" "${LEG:?}" "${R:?}"
 if flock -n /scratch/gpu$GPU.lock true; then echo "$(date -Is) not launched under /scratch/gpu$GPU.lock, refusing"; exit 3; fi
-TAG=${TAG:-campaign-v2.4}
+TAG=${TAG:-campaign-v2.5}
 TV=$(echo "${TAG#campaign-}" | tr -d .)
 REPO=/workspace/retrieve
 PY=/venvs/retrieve/bin/python
@@ -73,6 +73,9 @@ upload() {  # PREFIX: the whole tree $R, aggregated first; sets UP to the manife
   echo "$(date -Is) upload $1: $UP"
   grep -q "round trip verified" <<< "$UP" || { note pod-d "$LEG: upload $1 failed; $LOG/upload.log; driver stopped"; exit 4; }
 }
+
+# oracles are rebuilt at the tag: blobs built at any other code_version move to <gt_dir>/before-<cv[:8]>/
+old_oracles() { $PY "$HERE/../../campaign-v2/v-pod1-run/move_old_oracles.py" "$cv" "$@" || exit 1; }
 
 dim() { case $1 in yfcc10m*) echo 192 ;; *) echo 128 ;; esac; }
 

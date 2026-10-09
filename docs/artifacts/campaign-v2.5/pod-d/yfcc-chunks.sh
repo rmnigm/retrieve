@@ -3,14 +3,15 @@
 # protocol in ../../campaign-v2/v-yfcc/README.md). For each chunk, last first: skip it if done, resume it if pod d
 # claimed it, stop at the first chunk claimed elsewhere (the meeting point: everything above is pod 1's); otherwise a
 # claim note, `bench run --resume --interleave` into /scratch/v-yfcc-synth/<chunk>, `bench upload --verify` to
-# artifacts/v-yfcc-synth-<chunk>, a done note. Stops on any non-zero chunk, and between chunks on /scratch/v24/v-yfcc-d.stop.
-#   GPU=<i> setsid nohup flock -n /scratch/gpu<i>.lock bash yfcc-chunks.sh > /scratch/v24/v-yfcc-d-gpu<i>.driver.log 2>&1 &
+# artifacts/v-yfcc-synth-<chunk>, a done note. Stops on any non-zero chunk, and between chunks on /scratch/v25/v-yfcc-d.stop.
+#   GPU=<i> setsid nohup flock -n /scratch/gpu<i>.lock bash yfcc-chunks.sh > /scratch/v25/v-yfcc-d-gpu<i>.driver.log 2>&1 &
 export LEG=v-yfcc-d-gpu${GPU:?} R=/scratch/v-yfcc-synth/_driver-gpu${GPU}
 . "$(dirname "$(readlink -f "$0")")/common.sh"
 CHY=$CH/v-yfcc
 POD=pod-d
 DS=yfcc10m-synth
 mkdir -p "$CHY"
+old_oracles $DS
 step oracle oracle --dataset $DS --suite synth --dim 192
 $PY "$HERE/../../campaign-v2/v-yfcc/yfcc_chunks.py" 2>/dev/null | grep -- "--algo" | tac > "$LOG/chunks-bottom-up.txt"
 ynote() {  # state chunk text
@@ -22,7 +23,7 @@ mine() { grep -lx -- "chunk: $1" "$CHY"/*-$POD-claim-*.md 2>/dev/null | head -1;
 done_() { local f; for f in $(grep -lx -- "chunk: $1" "$CHY"/*.md 2>/dev/null); do grep -qx "state: done" "$f" && return 0; done; return 1; }
 taken() { grep -qx -- "chunk: $1" "$CHY"/*.md 2>/dev/null; }
 while read -r name n args; do
-  [ -e /scratch/v24/v-yfcc-d.stop ] && { echo "$(date -Is) stop file, ending before $name"; break; }
+  [ -e /scratch/v25/v-yfcc-d.stop ] && { echo "$(date -Is) stop file, ending before $name"; break; }
   if done_ "$name"; then continue; fi
   if taken "$name" && [ -z "$(mine "$name")" ]; then echo "$(date -Is) $name claimed elsewhere: meeting point, ending"; break; fi
   # a claim by this driver on the other GPU is in flight there
