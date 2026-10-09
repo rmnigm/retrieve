@@ -18,7 +18,13 @@ from retrieve.ops.triton._host import (
     probe_topk,
     tile_for_width,
 )
-from retrieve.ops.triton.common import clause_pass, probe_ids_kernel, probe_tile, row_base
+from retrieve.ops.triton.common import (
+    clause_pass,
+    probe_dots,
+    probe_ids_kernel,
+    probe_tile,
+    row_base,
+)
 
 
 @dataclass(frozen=True)
@@ -26,14 +32,19 @@ class CodesignedProbeScoreExactConfig:
     block_p: int
     num_warps: int
     num_stages: int = 3
+    block_d: int = 256  # the D loop's chunk; unused at D_PAD <= 256 (one dot)
+    skip: bool = False  # skip a filtered tile with no passing lane
 
 
-# Tile per D_PAD bound, tuned on A100/sm_80 (kernels.md § SilverTorch kernels, "Tile config"): the
-# [BLOCK_P, D_PAD] int8 code tile sits in registers with no K loop, so a wide D needs a narrow tile.
+# Tiles per D_PAD bound, largest first, tuned on A100/sm_80 (kernels.md § SilverTorch kernels,
+# "Tile config").
 CONFIGS = {
-    256: CodesignedProbeScoreExactConfig(block_p=256, num_warps=4),
-    512: CodesignedProbeScoreExactConfig(block_p=128, num_warps=4),
-    1024: CodesignedProbeScoreExactConfig(block_p=128, num_warps=4),
+    256: (CodesignedProbeScoreExactConfig(block_p=256, num_warps=4),),
+    1024: (
+        CodesignedProbeScoreExactConfig(
+            block_p=128, num_warps=4, num_stages=2, block_d=128, skip=True
+        ),
+    ),
 }
 
 
@@ -66,6 +77,8 @@ def _codesigned_probe_score_exact_kernel(
     stride_qac,
     stride_ob,
     BLOCK_P: tl.constexpr,
+    BLOCK_D: tl.constexpr,
+    SKIP: tl.constexpr,
     WIDE: tl.constexpr,
 ):
     # Batch on grid_x, so the rows' early probes run together and share clusters in L2; tiles
@@ -94,36 +107,36 @@ def _codesigned_probe_score_exact_kernel(
             A_MAX=A_MAX,
         )
 
-        # Lanes [D, D_PAD) load 0 on both sides: exact zeros in the int32 dot (kernels.md §
-        # Padding). At D == D_PAD the loads stay unmasked: even an all-true mask perturbs this
-        # kernel's register allocation.
-        d_off = tl.arange(0, D_PAD)
-        d_in = d_off < D
-        q_codes = tl.load(
-            q_codes_ptr + bid * stride_qcb + d_off,
-            mask=None if D == D_PAD else d_in,
-            other=None if D == D_PAD else 0,
-        )
-        q_scale = tl.load(q_scales_ptr + bid)
-        codes = tl.load(
-            item_codes_ptr + pos[:, None] * stride_cn + d_off[None, :],
-            mask=keep[:, None] if D == D_PAD else keep[:, None] & d_in[None, :],
-            other=0,
-        )
-        # int8 × int8 → int32 (paper §4.2): q[1,D] @ codes^T[D,BLOCK_P]. Triton pads M=1 to the MMA
-        # tile: this lowers to IMMA tensor-core instructions, not dp4a (kernels.md § Numerics).
-        dots_2d = tl.dot(q_codes[None, :], tl.trans(codes), out_dtype=tl.int32)
-        # Squeeze the length-1 M axis: tl.sum over length-1 (no reshape to drop a dim).
-        dots_i32 = tl.sum(dots_2d, axis=0)
-        # fp32 pinned: Inductor passes global_scale as a Python float (kernels.md § Numerics).
-        dots = (
-            dots_i32.to(tl.float32)
-            * tl.cast(q_scale, tl.float32)
-            * tl.cast(global_scale, tl.float32)
-        )
-        dots = tl.where(keep, dots, float("-inf"))
-        # Lanes past the cluster's end hold the next cluster's slots: leave them to its tile.
-        tl.store(out_row + slot, dots, mask=valid)
+        any_pass = 1  # a Python int when the skip is off, so the branch folds away
+        if SKIP:
+            any_pass = tl.max(keep.to(tl.int32), axis=0)
+        if any_pass == 0:
+            # No lane passes the filter: no code load, no dot (kernels.md § SilverTorch
+            # kernels, "Tile skip").
+            tl.store(out_row + slot, tl.full([BLOCK_P], float("-inf"), tl.float32), mask=valid)
+        else:
+            dots_i32, q_scale = probe_dots(
+                q_codes_ptr + bid * stride_qcb,
+                q_scales_ptr,
+                bid,
+                item_codes_ptr,
+                pos,
+                stride_cn,
+                keep,
+                D,
+                D_PAD,
+                BLOCK_D,
+                BLOCK_P,
+            )
+            # fp32 pinned: Inductor passes global_scale as a Python float (kernels.md § Numerics).
+            dots = (
+                dots_i32.to(tl.float32)
+                * tl.cast(q_scale, tl.float32)
+                * tl.cast(global_scale, tl.float32)
+            )
+            dots = tl.where(keep, dots, float("-inf"))
+            # Lanes past the cluster's end hold the next cluster's slots: leave them to its tile.
+            tl.store(out_row + slot, dots, mask=valid)
 
 
 def _cpse_prep(
@@ -167,6 +180,8 @@ def _cpse_prep(
         block_p=cfg.block_p,
         num_warps=cfg.num_warps,
         num_stages=cfg.num_stages,
+        block_d=cfg.block_d,
+        skip=cfg.skip,
     )
     query_clause_attrs = query_clause_attrs.contiguous()
     launch.kwargs.update(
@@ -212,7 +227,11 @@ def _codesigned_probe_score_exact_impl(
 
     Eager entry point for tune scripts / parity tests; the compiled path goes through the
     ``@triton_op`` wrapper."""
-    cfg = config if config is not None else tile_for_width(CONFIGS, query.shape[1])
+    cfg = (
+        config
+        if config is not None
+        else tile_for_width(CONFIGS, query.shape[1], query.shape[0], width)
+    )
     launch = _cpse_prep(
         query,
         probe_ids,
@@ -261,7 +280,7 @@ def codesigned_probe_score_exact(
         item_clause_attrs=item_clause_attrs,
         clause_is_reverse=clause_is_reverse,
         query_clause_attrs=query_clause_attrs,
-        cfg=tile_for_width(CONFIGS, query.shape[1]),
+        cfg=tile_for_width(CONFIGS, query.shape[1], query.shape[0], width),
     )
     wrap_triton(_codesigned_probe_score_exact_kernel)[launch.grid](**launch.kwargs)
     fin = probe_topk(launch, k, probe_ids, cluster_offsets, sort_perm)

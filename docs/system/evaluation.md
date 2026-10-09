@@ -63,7 +63,11 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    does not record it yet.
 4. **Quality, eager, once per cell at `k_max = max(ks)`.** Stream all kept
    users in chunks of 16 (`QUALITY_CHUNK`, the OOM bound of `[B, P, D]` on
-   loose filters), accumulate `recall/ndcg/precision/mrr` at every `k` in
+   loose filters; the per-row queries, attrs, targets and oracle top-k /
+   `targets_in_filter` go to the device once per cell and each chunk gathers
+   its rows there, torch's CPU threads held at `QUALITY_CPU_THREADS` = 1 for
+   the loop: H-QLOOP, the host gathers and pageable copies were ~80 % of the
+   pass), accumulate `recall/ndcg/precision/mrr` at every `k` in
    `ks` from the one top-`k_max` list (exact for every library algo: same
    candidate set, same scores, `torch.topk` sorted). `postfilter` is the
    exception (`run.PER_K_QUALITY`): its candidate pool is `alpha * k`, so
@@ -132,7 +136,23 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    allocates nothing). The first eager call runs under
    `torch.cuda.set_sync_debug_mode("warn")` to catch hidden host syncs.
    `--profile` (off by default) wraps one eager call in `torch.profiler`
-   and stores per-kernel CUDA µs (top 8 kernels) as `kernels`.
+   and stores per-kernel CUDA µs (top 8 kernels) as `kernels`, and the device
+   time and launches summed over every kernel as `kernels_us` / `kernels_calls`
+   (`measure.kernel_summary`; H-KSUM: the top-8 sum is a lower bound that favours
+   the arm with more launches), and the same sums per named kernel scope as
+   `kernel_scopes` (H-SCOPE, scorer / topk / epilogue / other, so T3's scorer
+   column compares like with like). The sums skip `## …` events: the profiler books a
+   compiled call's `## Call CompiledFxGraph <hash> ##` range as a device event
+   spanning that graph's kernels, so counting it would count them twice (the top-8
+   list keeps it). In a
+   long-lived process the profiler drops the device activities at the end of
+   a short window, one more kernel per session as the process ages, so H2H-FINAL
+   stored empty or truncated lists
+   ([validation](../validation.md#harness-gates)). `measure.profile_once` therefore
+   brackets the call with two `torch.cuda._sleep` sentinel kernels
+   (`spin_kernel`, left out of `kernels`). It retries with an idle pad of
+   0.01, 0.1, 1 and 5 s on both sides of the window until both sentinels are
+   recorded, and raises (the cell fails at the perf stage) if they never are.
 6. **Seeds and repeats.** Timing repeats are the 3 windows above (no
    rebuild). Seeds change the IVF (k-means), the OPORP projection
    (`v3_seed`) and the pool; V1/V2 and the postfilter are seed-invariant in
@@ -236,7 +256,7 @@ which exist for `buffers()`, `.k`, `torch.compile` and because their
 
 | module | owns |
 |---|---|
-| [`measure.py`](../../evaluation/bench/measure.py) | `setup`, `warm_gpu_once`, `provenance` (GPU, driver, CUDA, torch, triton, `official_commit` — the installed `silvertorch`'s PEP 610 `direct_url.json` `vcs_info.commit_id`, `None` when it is not installed from git — commit, `dirty` = `subtree_dirty()` over `retrieve/src/retrieve`, `repo_dirty`, branch, `code_version` = the subtree's tree hash, or `files:<sha256>` of the sources on disk when the subtree is dirty, host, python, started), `clocks()` (one `nvidia-smi` sample), `timed_build`, `index_bytes` (Σ buffers, submodules included, deduplicated), `stats`, `latency_group(fns, bs=, mode=)` (§2.5 windows of each arm, round-robin across arms, IQR + outlier counts, `load: closed_loop`, `peak_fwd_mib`, the under-load `sm_mhz`) and `latency(fn, …)`, its one-arm case, `graph_callable` (raises `NotCapturable` with the record's `reason`; no dynamo reset, so interleaved arms stay captured side by side), `profile_once` |
+| [`measure.py`](../../evaluation/bench/measure.py) | `setup`, `warm_gpu_once`, `provenance` (GPU, driver, CUDA, torch, triton, `official_commit` — the installed `silvertorch`'s PEP 610 `direct_url.json` `vcs_info.commit_id`, `None` when it is not installed from git — commit, `dirty` = `subtree_dirty()` over `LIB` (the imported `retrieve` package's directory, in whichever checkout holds it), `repo_dirty`, branch, `code_version` = `LIB`'s tree hash, or `files:<sha256>` of the sources on disk when it is dirty, `lib_dir` = `LIB`, host, python, started; [Resume](#resume)), `clocks()` (one `nvidia-smi` sample), `timed_build`, `index_bytes` (Σ buffers, submodules included, deduplicated), `stats`, `latency_group(fns, bs=, mode=)` (§2.5 windows of each arm, round-robin across arms, IQR + outlier counts, `load: closed_loop`, `peak_fwd_mib`, the under-load `sm_mhz`) and `latency(fn, …)`, its one-arm case, `graph_callable` (raises `NotCapturable` with the record's `reason`; no dynamo reset, so interleaved arms stay captured side by side), `profile_once` |
 | [`records.py`](../../evaluation/bench/records.py) | what a record *is*: `SCHEMA_VERSION`, `KEY_FIELDS`, `resume_key`, `record_path`, `samples_path`, `append_record` (one `write` + `fsync`), `read_records` / `read_keys` (one torn trailing line tolerated), `record_files`, `latest` (last record per key), `aggregate(results_dir) → results.parquet` (one row per perf entry — what `report.py` reads), `read_table` |
 | [`metrics.py`](../../evaluation/bench/metrics.py) | `accumulator(ks, device)` / `accumulate(acc, ids, targets, num_targets=None, ranked=False)` (returns the chunk's per-row recall, the [sidecar](#per-query-sidecar)'s values) / `finalize(acc)` (`null` metrics when `n == 0`, `null_if_empty`) — recall, ndcg, precision, mrr at every `k` from one top-`k_max` list as float64 running sums on device; `ranked=True` scores against the oracle's own top-`k` prefix; `per_row`, `jaccard_at_k`. `training/evaluate.py` keeps its own frozen copy, pinned to agree (`training/test_encode.py`) |
 | [`algos.py`](../../evaluation/bench/algos.py) | the algorithm table: `ALGOS` name → class (`LiNRV1`–`LiNRV3`, `SilverTorch`; `Postfilter`, the harness's own), `FILTER_KINDS`, `BACKENDS`, `FILTER_MODE` (`clause` → `exact`), `DISPATCH` (the library's table plus the `Postfilter` row), `PATHS` **derived from it**, `filter_backend` (`official` → `triton`), `build(algo, item_embs, k=, backend=, …)` (construct + `register_index`, ≈ 25 lines), `build_filter`, `is_valid_combo`, `official_config` (`bloom_path` / `score_path` → `OfficialConfig`) |
@@ -244,7 +264,7 @@ which exist for `buffers()`, `.k`, `torch.compile` and because their
 | [`config.py`](../../evaluation/bench/config.py) | `Dataset`, `Job`, `load_dataset`, `load_matrix` — the config matrix below; `interleave_units`, `shared_key` (the [interleave groups](#interleaved-groups)) |
 | [`inputs.py`](../../evaluation/bench/inputs.py) | `load_inputs` (dispatch to `training.encode.encode_split` or the `eval_datasets.layout` text readers; `users_limit` once, as a prefix), `sweep_qa`, `build_filters` (keyed by filter backend), `exact_filter`, `query_pool` |
 | [`oracle.py`](../../evaluation/bench/oracle.py) | the exact filtered oracle as blob v4, `attrs_digest`, `pass_counts`, `pass_rate`, `bloom_fp_rate` |
-| [`run.py`](../../evaluation/bench/run.py) | `run(jobs, out_dir=...)` — the cell loop; `MODES`, `QUALITY_CHUNK = 16`, `EXACT_ALGOS`, `SEED_FREE_QUALITY`, `PER_K_QUALITY`, `PERF_STAT_KEYS`, `IDS_PROBE_BATCHES`, `CLOCK_DRIFT` |
+| [`run.py`](../../evaluation/bench/run.py) | `run(jobs, out_dir=...)` — the cell loop; `MODES`, `QUALITY_CHUNK = 16`, `QUALITY_CPU_THREADS = 1`, `EXACT_ALGOS`, `SEED_FREE_QUALITY`, `PER_K_QUALITY`, `PERF_STAT_KEYS`, `IDS_PROBE_BATCHES`, `CLOCK_DRIFT` |
 | [`cli.py`](../../evaluation/bench/cli.py) | `bench run` / `campaign` / `check` / `upload` / `fetch` / `report` / `env` |
 | [`report.py`](../../evaluation/bench/report.py) | `bench report`: `results.parquet`, the paper tables as LaTeX, the figures, the methodology paragraph and `report.md`; the `ARTIFACTS` dispatch table and the citability verdict. See [Report](#report-reportpy) |
 | [`upload.py`](../../evaluation/bench/upload.py) | `bench upload`: publish a results tree (records, samples, a freshly aggregated `results.parquet`) to the HF results repo with a `MANIFEST.json` (provenance + a sha256 per file) and a generated README; `bench fetch`: one subtree back, checked against its manifest. See [Results storage](#results-storage) |
@@ -290,11 +310,15 @@ buffers inside `index_mib`). `build(algo, item_embs, k=, backend=,
 filter_kind=, filter_mod=, item_attrs=, clause_is_reverse=, params=,
 seed=)` is the one factory; it refuses `None`-path cells and `n_probe >
 n_lists`. The build param `bloom_path` (`partial` | `full`, the S9
-co-design ablation) becomes `SilverTorch(official=OfficialConfig(bloom_path=…))`
-through `algos.official_config`; it exists on `silvertorch / bloom /
-official` only (anywhere else `load_matrix` raises `ConfigError`), and
-without the key the library default `OfficialConfig()` runs, which is
-`bloom_path="partial"`. `params` are the merged build + query params over
+co-design ablation) exists on `silvertorch / bloom` on two backends
+(anywhere else `load_matrix` raises `ConfigError`):
+- **official:** `SilverTorch(official=OfficialConfig(bloom_path=…))`,
+  through `algos.official_config`;
+- **triton:** the layer's own `SilverTorch(bloom_path=…)` (C5-OURS,
+  [kernels](kernels.md#bloom_full_mask--the-full-n-mask-bloom_pathfull)).
+
+Without the key the library default runs, which is `bloom_path="partial"`
+on both. `params` are the merged build + query params over
 `algos.SILVERTORCH_DEFAULTS` (`n_lists 1024, n_probe 24, n_iter 10`); on
 `silvertorch` bloom cells `run.py` merges the suite's `bloom` defaults
 (`m_bits`, `k_hash`) in as well. The probe-pool check is the library's,
@@ -325,6 +349,23 @@ current `k` at every forward, so perf at `k` and quality at `k` (the
 per-`k` pass, `run.PER_K_QUALITY`) measure the same pool. Torch backend
 only, clause and bloom filter kinds; capturable.
 
+### The router arm
+
+`router` ([`bench/router.py`](../../evaluation/bench/router.py), roadmap V-ROUTER) routes each query
+by its **local pass rate** `l_q`: the share of its unfiltered top-100 that its filter admits (EXHIBITS
+idea #2: IVF recall follows `l_q`, not the global pass rate). `algos.build("router", …)` assembles
+three parts with the ordinary builders and one seed, so both SilverTorch indexes share one k-means:
+an unfiltered SilverTorch pre-probe (`pre_n_probe`, k 100), a filtered SilverTorch (`n_lists`,
+`n_probe`, the IVF branch) and exact LiNR V2 on the standalone filter. `forward` runs the pre-probe,
+takes `l_q` from the filter's `evaluate_subset` on its 100 ids, sends the rows with `l_q <
+lq_threshold` to V2 and the others to the IVF branch (each on its own sub-batch), and scatters the
+results back; the pre-probe is inside `forward`, so the arm's timing includes it. The split is
+data-dependent: `capturable = False`, so `graph` records `not_capturable`. Build params
+`pre_n_probe`, `lq_threshold` (router only, both required, a `ConfigError` otherwise); query param
+`n_probe` (the IVF branch). The quality pass writes `router_lq` and `router_exact` (1.0 = V2) per
+kept query to the per-query sidecar and `quality.router_exact_share` to the record. Triton and
+torch backends, clause and bloom.
+
 ## Config: one YAML per dataset + `suites.yaml`
 
 Twelve files under [`evaluation/config/`](../../evaluation/config/):
@@ -337,7 +378,8 @@ Twelve files under [`evaluation/config/`](../../evaluation/config/):
 [`openalex.yaml`](../../evaluation/config/openalex.yaml) and
 [`kuairand.yaml`](../../evaluation/config/kuairand.yaml), the three
 synthetic-selectivity siblings `goodreads-synth.yaml`, `arxiv-synth.yaml`
-and `yfcc10m-synth.yaml` ([datasets](datasets.md#synthetic-selectivity-attrs)) (goodreads, arxiv,
+and `yfcc10m-synth.yaml` plus arXiv's cluster-correlated `arxiv-corr-synth.yaml`
+([datasets](datasets.md#synthetic-selectivity-attrs)) (goodreads, arxiv,
 yfcc10m, pubmed and openalex in the `filter` suite, pubmed and openalex at
 768; yambda and kuairand are out of the study), and
 [`suites.yaml`](../../evaluation/config/suites.yaml). `users_limit:
@@ -370,10 +412,12 @@ unfiltered `quality` suite ([decisions](../decisions.md#harness)); synth's
 |---|---|---|---|
 | `filter` | goodreads, arxiv, yfcc10m, pubmed, three kept sweeps each (yfcc10m: `tags_and`) | V1, V2, V3 (pool 5000) triton; `silvertorch` triton clause + bloom and official bloom at the dataset's tuned `n_lists` and `n_probe` {24, n95} ([IVF tuning](#ivf-tuning)); `silvertorch` torch (#12) and torch compiled (#13) at 24 on the same `n_lists`, goodreads + arxiv only; `postfilter` alpha {1, 8} | T2, C3, C6 |
 | `deep` | goodreads, arxiv, yfcc10m, kept sweeps | `silvertorch` triton clause + bloom, official bloom: `n_lists` per dataset (goodreads {1024, 4096}, arxiv {1664, 8192}, yfcc10m {4096, 16384}) × `n_probe` {8, 16, 32, 64, 128}; V3 `candidate_pool_frac` {0.005, 0.01, 0.02, 0.05, 0.1} | F3, C6 |
-| `synth` | goodreads-, arxiv-, yfcc10m-synth ([datasets](datasets.md#synthetic-selectivity-attrs)) | V1, V2 triton; V3 `candidate_pool_frac` {0.01, 0.05}; `silvertorch` triton clause `n_probe` {24, 64, 128, 256, 512, 1024} (yfcc10m-synth {24, 256, 1024}), triton and official bloom {24, 256}, every SilverTorch arm at its real dataset's tuned `n_lists` (none caps the sweep); `postfilter` {1, 8}; V1 / V2 torch, eager and compiled, on `p001, p01, p1`, goodreads + arxiv only. k 1000 is dropped where N·p < 4000 (goodreads `p0001`, `p0003`; arxiv `p0001`) | F1, F2, C1, C2, C6 |
-| `codesign` | arxiv (kept sweeps), goodreads (`c0_genre, c2_format, c3_year`) | official bloom, `bloom_path` {partial, full} × `n_probe` {8, 32, 128}, `n_lists` arxiv 1664 / goodreads 1024, k 100 | F4b, C5 |
+| `synth` | goodreads-, arxiv-, yfcc10m-synth (uniform) and arxiv-corr-synth (cluster-correlated, `c001` `c003` `c01`, d128, arxiv-synth's `n_lists` so the two curves pair) ([datasets](datasets.md#synthetic-selectivity-attrs)); sized by claim (SYNTH-TRIM, 2026-10-10): seed 0 everywhere but goodreads-synth's first seven rates (seeds 0-2, the pilot's cells) | **arxiv-synth** (`p0001 p001 p005 p01 p02 p05 p1`, 46 cells): V1, V2 triton clause; `silvertorch` triton clause `n_probe` {24, 64, 256, 1024}; triton and official bloom `n_probe` 24 at `p001`, `p1`. **yfcc10m-synth** (`p001 p01 p02 p05 p1`, k 100, 25 cells): V1, V2 triton clause; `silvertorch` triton clause {24, 256, 1024}. **arxiv-corr-synth** (42 cells): V3 `candidate_pool_frac` {0.01, 0.05}; `silvertorch` triton clause {24, 64, 128, 256, 512, 1024}; `postfilter` {1, 8}. **goodreads-synth** (all ten rates, 558 cells): on the first seven, V1, V2 triton clause + bloom, V3, `silvertorch` triton clause {24, 64, 128, 256, 512, 1024} and triton + official bloom {24, 256}, `postfilter`, V1 / V2 torch eager and compiled on `p001, p01, p1`; on `p005 p02 p05` V1, V2 clause and the SilverTorch clause sweep. Every SilverTorch arm at its real dataset's tuned `n_lists`. k 1000 is dropped where N·p < 4000 (goodreads `p0001`, `p0003`; arxiv `p0001`) | F1, F2, C1, C6 (C2 on corr) |
+| `codesign` | arxiv (kept sweeps), goodreads (`c0_genre, c2_format, c3_year`) | official and triton bloom, `bloom_path` {partial, full} × `n_probe` {8, 32, 128}, `n_lists` arxiv 1664 / goodreads 1024, k 100 | F4b, C5 |
 | `bloomwidth` | goodreads `c0_genre`, arxiv kept, pubmed `c0_mesh` | `silvertorch` triton bloom `m_bits` {64 … 2048} × `k_hash` {3, 5}; official bloom `k_hash` {3, 5} (its width is `OfficialConfig.b_multiplier`, not `m_bits`); bs 16; quality only (`perf: false`) | F4a, C4 |
 | `bloomwidth-timed` | the same | the same widths at `k_hash` 5 (official: its one width), k 100, bs 16, timed | F4a |
+| `v3bits` | goodreads-synth (its first 7 rates), goodreads (`filter`'s kept sweeps); pubmed d768 (`filter`'s kept sweeps, clause only) | V3 triton only, `candidate_pool_frac` {0.01, 0.05}, seeds 0-2, bs {1, 16}, k {100, 1000} (synth's `ks_by_sweep`); goodreads `k_bits` {64, 128}, clause + bloom; pubmed `k_bits` {256, 768} (256 divides 768 and sits below LiNR's 512; 768 is the default, the comparison), clause only (bloom adds false-positive noise to a bits question), one arm per side so the goodreads keys are unchanged. LiNR's 512 bits at d128 would need a library change (declined) | C2 (V-V3BITS, V3-BITS-PUBMED) |
+| `router` | goodreads (kept sweeps; arXiv and PubMed get the fitted threshold afterwards) | `router` triton, `pre_n_probe` 8, `lq_threshold` {0.02, 0.05, 0.1, 0.2}, IVF branch `n_lists` 4096 / `n_probe` 24; its branches V2 triton and SilverTorch triton (4096 / 24) beside it; clause + bloom, seeds 0-2, bs {1, 16}, k {100, 1000} | F2 / T2 practical take (V-ROUTER) |
 | `h2h` | goodreads `c0_genre`, arxiv `c0_maincat`, `none` + `bloom`, d128 | `silvertorch` triton and official with `score_path` {fp16, int32}, `n_probe` 24, bs {1, 16}, k {100, 1000}, seeds {0 … 4} (the repeats); one interleave group of the three arms; run with `--interleave --profile` | T3, C7 (H2H-final) |
 
 ### IVF tuning
@@ -390,20 +434,25 @@ records are artifacts in their own results tree, never campaign cells. `n_lists`
 0.95 at the same ≈ 12.7 % scanned (n95 = `n_lists` / 8), so it takes the fewest-items 2048 / 256.
 YFCC (`tags_and`, pass 0.0185; 0.72 at the cap at 16384) and PubMed (`all5`, 0.018; 0.873 at
 the cap at 4096) do not reach 0.95 within the 25 % cap. Their slot is the cap at `n_lists` 4096,
-`n_probe` 1024: both list counts scan the same 25 % there (ties go to the smaller), and the probe
-scorers cannot run `n_probe` > 1024 at k 1000 ([kernels](kernels.md)). yfcc10m-synth follows at 4096. An n95 is written only where it was measured. Each value is one
+`n_probe` 1024: both list counts scan the same 25 % there (ties go to the smaller). The choice
+predates ST-IDS, which lifted the probe scorers' `n_probe` ≤ 1024 at k 1000 limit ([kernels](kernels.md)). yfcc10m-synth follows at 4096. An n95 is written only where it was measured. Each value is one
 `datasets:` slot per arm: `filter`'s SilverTorch arms get `{build: {n_lists: [L]}, query:
 {n_probe: [24, n95]}}`, and `synth`'s get `n_lists` only, because it sweeps `n_probe`
 explicitly (user, 2026-10-08). A slot left `{}` runs at the library default `n_lists` with
 `n_probe` 24 only. n95 / `n_lists` depends on the pass rate as well as N: goodreads `c0_genre`
 (0.33) needs `n_lists` / 64, and PubMed `all5` (0.018) needs more than `n_lists` / 16.
 
-`codesign` is the S9 ablation of the official backend's bloom path:
-`partial` (fused partial masks over the probed clusters, the library
-default, which every `filter` / `deep` official cell runs with the key
-absent) against `full` (a full-N bool mask, then IVF). Both arms carry
-`bloom_path` in `params`, so their keys never collide with the `filter` /
-`deep` official cells; latency and `peak_fwd_mib` are the compared fields.
+`codesign` is the S9 ablation of the bloom path, on both backends.
+- **official:** `partial` (fused partial masks over the probed clusters,
+  the library default, which every `filter` / `deep` official cell runs
+  with the key absent) against `full` (a full-N bool mask, then IVF).
+- **triton** (C5-OURS): our fused scorer against `bloom_full_mask`, then
+  the same scorer. This separates the co-design idea from Meta's
+  implementation of it.
+
+`--interleave` pairs partial and full of one backend per group. Every
+cell carries `bloom_path` in `params`, so no key collides with the
+`filter` / `deep` cells; latency and `peak_fwd_mib` are the compared fields.
 `bloomwidth` declares `perf: false`: `load_matrix` sets
 `Job.timed = False`, `run` skips perf on their jobs without being asked, and
 their records are `ok` (a `--skip-perf` record of a timed suite is `partial`,
@@ -445,6 +494,7 @@ filter:
     - {by: [backend, score_path]}   # algo, backend or build params
   sweeps: {goodreads: [c0_genre, c1_lang_reverse, all4], ...}   # optional per-dataset selector
   ks_by_sweep: {goodreads-synth: {p0001: [100]}}                # optional per-(dataset, sweep) ks
+  seeds_by_sweep: {arxiv-synth: {p001: [0, 1, 2]}}              # optional per-(dataset, sweep) seeds, replacing `seeds`
   arms:
     - {algo: linr_v1_filter_mask, backends: [triton]}
     - algo: silvertorch
@@ -469,8 +519,11 @@ the index. Its `query:` params (`n_probe`, `candidate_pool`,
 (or the reverse) is a `ConfigError`. So is a param on an arm where it has
 no meaning: `bloom_path` off silvertorch / bloom / official, `score_path` off silvertorch / official, `m_bits` /
 `k_hash` off silvertorch / bloom ([bloom widths](#bloom-widths-as-build-params)),
-`compile` off a torch arm ([compiled arms](#compiled-arms)), and
-`candidate_pool_frac` off `linr_v3` ([pool fractions](#pool-fractions)). Two arms that expand to the same
+`compile` off a torch arm ([compiled arms](#compiled-arms)),
+`candidate_pool_frac` off `linr_v3` ([pool fractions](#pool-fractions)), and `k_bits` off
+`linr_v3`. `k_bits` is a harness build param: `LiNRV3` takes none, so `algos.build`
+replaces its stage 1 with `OneBitKNN(k_bits=...)` before `register_index`; absent, stage 1
+keeps the library default `k_bits = D` (V-V3BITS). Two arms that expand to the same
 cell are also an error. When two backends of one algo run the same code
 path (`PATHS`) over the same cells, they collapse to the first, logged
 once. A collapse that would cover only part of a job's cells is a
@@ -582,16 +635,18 @@ harness.
 ### Inductor cache
 
 `bench run` sets
-`TORCHINDUCTOR_CACHE_DIR` to `<tmp>/bench-inductor/<code_version>` (`:`
-→ `-`; `measure.inductor_cache_dir`) and prints it, so a `graph`-mode run
+`TORCHINDUCTOR_CACHE_DIR` to `<base>/<code_version>` (`:` → `-`;
+`measure.inductor_cache_dir`) and prints it, so a `graph`-mode run
 after a library edit compiles afresh instead of replaying a stale
-`@triton_op` body ([testing](testing.md#running)). A
-`TORCHINDUCTOR_CACHE_DIR` the caller set wins (the pods' per-job
-`/scratch/inductor/<job>`). The caller's value is read in
+`@triton_op` body ([testing](testing.md#running)). `<base>` is the
+`TORCHINDUCTOR_CACHE_DIR` the caller set (the pods' per-job
+`/scratch/inductor/<job>`), else `<tmp>/bench-inductor`: a caller's dir
+reused across library edits gets one subdirectory per tree and never
+serves another tree's graphs (H-INDCACHE). The caller's value is read in
 `bench/__init__.py`, before any `bench` module imports `torch._inductor`,
 whose import writes torch's default into the environment; for the same
 reason `bench campaign` gives its children the caller's value (or none),
-not its own environment's.
+not its own environment's; each child appends its own `code_version`.
 
 ## The cell loop (`run.py`)
 
@@ -714,7 +769,8 @@ projection) always recompute. The seed changes SilverTorch's quality, but not
 `linr_v3`'s at its default `k_bits = D`. There the OPORP projection is a signed
 permutation, so the seed moves the bits but not the Hamming scores
 ([kernels](kernels.md#oporp-layout)): V3's quality is the same at every seed, and
-its three seeds measure perf-pool variance only. The records are the cache: `run`
+its three seeds measure perf-pool variance only. Below `D` (the `v3bits` suite's
+`k_bits` 64) OPORP bins dimensions together, so there the seed does move V3's quality. The records are the cache: `run`
 indexes the file's computed records when it first opens it (`quality_sources`) and
 adds each new one. Every record carries `seed_scope`, `pool` for the seed-free arms
 and `pool+build` for the others. For `linr_v3` at `k_bits = D`, `pool+build`
@@ -763,9 +819,9 @@ between eager and compiled.
 `candidate_pool_frac` (a `linr_v3` query param, in the key) is resolved
 per sweep by `run.resolve_pool`, before the build and before
 `set_query_params`, to `candidate_pool = max(POOL_MIN = 2000, round(frac
-× mean pass count over the sweep's oracle rows))`. On synth every query
-passes the same items, so the mean is the achieved pass count (N·p in
-expectation). The key keeps the fraction, the module gets the int, and
+× mean pass count over the sweep's oracle rows))`. On uniform synth every
+query passes the same items, so the mean is the achieved pass count (N·p in
+expectation); on arxiv-corr-synth it is the mean of the queries' cluster sizes. The key keeps the fraction, the module gets the int, and
 the record's `candidate_pool` carries it.
 
 ## Output: one JSONL record per cell
@@ -807,7 +863,7 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 | `unstable` | bool | any perf entry `unstable` (window spread > 5 %), or `clocks_drift` |
 | `memory_reserved_mib` | float / null | `torch.cuda.memory_reserved()` after the cell — the leak detector across a group's cells |
 | `elapsed_s` | float | wall time of the cell |
-| `env` | dict | `gpu, driver, cuda, torch, triton, official_commit, commit, dirty, repo_dirty, git_branch, code_version, host, python, started, config_sha`; the process-start sample `sm_mhz_idle, mem_mhz, sm_max_mhz, power_limit_w`; the cell's `sm_mhz_load` (median of its perf entries' under-load samples; `null` without perf or CUDA), `clocks_drift` (any under-load sample > 5 % from the process's first) and `frac_windows_below_max` (the share of the cell's `window_sm_mhz` samples below `sm_max_mhz`, the device's max SM clock; `null` without samples or without a device max) |
+| `env` | dict | `gpu, driver, cuda, torch, triton, official_commit, commit, dirty, repo_dirty, git_branch, code_version, lib_dir, host, python, started, config_sha`; the process-start sample `sm_mhz_idle, mem_mhz, sm_max_mhz, power_limit_w`; the cell's `sm_mhz_load` (median of its perf entries' under-load samples; `null` without perf or CUDA), `clocks_drift` (any under-load sample > 5 % from the process's first) and `frac_windows_below_max` (the share of the cell's `window_sm_mhz` samples below `sm_max_mhz`, the device's max SM clock; `null` without samples or without a device max) |
 | `stage`, `error` | str | `failed` records only: where it died and the traceback |
 
 Perf entry:
@@ -829,6 +885,8 @@ Perf entry:
 | `cache_plans` | on every entry: `false` on `silvertorch`/`official` (`run.perf` replaces `module.official` with `cache_plans=False` before the first variant, so every timed forward pays the CPU expression parse), `null` on backends without a plan cache |
 | `load` | `"closed_loop"` |
 | `kernels` | `--profile`, eager only: top-8 CUDA kernels `{kernel, us, calls}` |
+| `kernels_us`, `kernels_calls` | `--profile`, eager only: device µs and kernel launches summed over every kernel of the call, sentinels and `## …` profiler ranges excluded (records before H-KSUM lack them; records between H-KSUM and its fix double-count compiled calls, which no eager `h2h` arm is; T3 reads these, and for such a record the top-8 sum, marked as a lower bound) |
+| `kernel_scopes` | `--profile`, eager only: `{scope: {us, calls}}` for `scorer`, `topk`, `epilogue`, `other` (`measure.KERNEL_SCOPES`, by substring of the kernel name, first match wins), adding up to `kernels_us` / `kernels_calls`. `scorer` holds the like-for-like scoring scope: ours `_codesigned_probe_score*` (bloom test fused), Meta's `fused_kmean_ann::` (`process_cluster*`, payload and warp-size kernels) and `bloom_search::` kernels; `topk` the torch top-k / sort kernels (`mbtopk`, `sbtopk`, `radixSortKVInPlace`, `bitonicSortKVInPlace`); `epilogue` the index / gather / scatter kernels. In `results.parquet` as `perf_kernels_<scope>_us` / `_calls` (H-SCOPE; records before it lack them) |
 | `ids_sha256` | sha256 of the ids the timed callee (the eager module or the graph replay) returns on the first 8 batches of that `(bs, seed)` pool (`run.IDS_PROBE_BATCHES`), int64 row-major, batch after batch, run once after the windows; `null` when the variant did not run. Equal eager and graph hashes are the D1-G identity gate. Graph mode is inductor's code, not the eager ops replayed, so this gate catches arithmetic that inductor lowers differently. Records before library tree `5d158f20` differ in graph `quantize_int8` ([kernels](kernels.md#quantize_int8-retrieveindexing), [validation](../validation.md#campaign-v2-phase-v-not-yet-validated), *V-GRAPH-IDS*) |
 | `ids_sha256_canon` | the same ids with each row re-ordered by (score desc, id asc) before hashing: two backends with bit-equal scores whose tied ids come in another order hash equal (official int32 against Triton). `bench report`'s T3 identity column reads it; eager vs graph reads `ids_sha256`. An added field, schema stays 4 |
 | `reason` | present when the variant could not run (`not_capturable`, `cuda_unavailable`, `cudagraph_skips=N`, `cudaGraphLaunch per call = N, expected 1`); every stat key is then `null` |
@@ -864,11 +922,19 @@ ignores it.
 ### Resume
 
 The resume key is `records.resume_key(job.key(params), code_version)` —
-canonical JSON of the key block plus `measure.code_version()`: the library
-subtree's tree hash (`git rev-parse HEAD:retrieve/src/retrieve`) when the
-subtree is clean, else `files:<sha256>` over the `retrieve/**/*.py` sources
-actually on disk (also the value outside a git checkout; the two namespaces
-are disjoint). A kernel edit — committed or not — therefore invalidates
+canonical JSON of the key block plus `measure.code_version()`: the tree
+hash of the *imported* `retrieve` package (`git rev-parse HEAD:./` run in
+`Path(retrieve.__file__).parent`, i.e. in whichever checkout the venv's
+editable install points at) when that subtree is clean, else
+`files:<sha256>` over its `**/*.py` sources actually on disk (also the
+value outside a git checkout; the two namespaces are disjoint). It is
+computed in every `bench run` child and `bench oracle` process, never taken
+from the checkout that launched `bench`: on the pods the shared venv
+imports `/workspace/retrieve` while `bench` runs from a worktree, and a
+fast-forward there mid-leg moves the next child's stamp with the code it
+runs. `env.lib_dir` records the directory.
+
+A kernel edit — committed or not — therefore invalidates
 every cell; a doc or plan edit invalidates none. (D1 reruns only the arms
 a fix changes, by narrow `bench run`s: its [code_version
 policy](../validation.md#campaign-roadmap-d1-in-progress-not-yet-validated).)
@@ -929,7 +995,7 @@ because the table is typed (no string round trip to re-guess `True`, `""` or
 `1e-05`), smaller than the JSONL it comes from (D1-a: 1.4 MB → 0.2 MB), and read in one call by polars, pyarrow or DuckDB.
 
 Two dirty flags, both `null` outside a git checkout: `env.dirty` is
-`git status --porcelain -- retrieve/src/retrieve` (untracked files
+`git status --porcelain -- .` in the imported package's directory (untracked files
 included — a new kernel module is measured code too) and is the flag
 `report.py` refuses to cite; `env.repo_dirty` is the tracked
 files anywhere else (`--untracked-files=no`, informational: a docs or
@@ -996,13 +1062,13 @@ identities named; report each encoder from its own tree.
 | `pareto` | `tables/tab-pareto_<dataset>.tex` | sweep × arm (one row per parameter set): oracle recall, `median_ms`, speedup vs LiNR V1, `index_mib` (`tab:pareto_<dataset>`) |
 | `memory` | `tables/tab-memory.tex` | `index_mib`, datasets × algos (`tab:memory`) |
 | `parity` | `tables/tab-backend_parity.tex` | per `(dataset, sweep, algo, backend)`: `path`, `jaccard_vs_first@k`, `score_max_abs_diff`, eager vs graph median and their ratio |
-| `matched` | `tables/tab-matched_recall.tex`, `matched_recall.json` | per recall curve (SilverTorch along `n_probe`, one curve per `n_lists` / filter kind / backend / suite; V3 along `candidate_pool` or `candidate_pool_frac`) and batch size: latency at `recall_oracle@k` 0.90 and 0.95 with the two bracketing points named, or why not; `n95` per SilverTorch curve, the smallest measured `n_probe` with recall ≥ 0.95 — the value the campaign writes into `suites.yaml` (`tab:matched_recall`) A curve is emitted once per *timed* batch size, so a curve with no perf entries (a `perf: false` suite: `n95`, `bloomwidth`) is not emitted and neither is its `n95`; the `n95` suite's value is read off the records with [`n95.py`](../artifacts/campaign-v2/v-pubmed/n95.py) |
+| `matched` | `tables/tab-matched_recall.tex`, `matched_recall.json` | per recall curve (SilverTorch along `n_probe`, one curve per `n_lists` / filter kind / backend / suite; V3 along `candidate_pool` or `candidate_pool_frac`) and batch size: latency at `recall_oracle@k` 0.90 and 0.95 with the two bracketing points named, or why not; `n95` per SilverTorch curve, the smallest measured `n_probe` with recall ≥ 0.95 — the value the campaign writes into `suites.yaml` (`tab:matched_recall`) A curve is emitted once per *timed* batch size, so a curve with no perf entries (a `perf: false` suite: `n95`, `bloomwidth`) is not emitted and neither is its `n95`; the `n95` suite's value is read off the records with [`n95.py`](../artifacts/campaign-v2/v-pubmed/n95.py); with `--bands e1,e2,…` also `tables/tab-matched_bands.tex` / `matched_bands.json`: QPS at `recall_oracle@k` 0.95 per selectivity band (`[0, e1)`, …, `[e_last, 1]`), each band's recall the mean per-query recall of the cell's queries whose own pass rate (`pass_count / n_items`) falls in it (≥ 20 queries, else `---`) against the cell's latency, interpolated as above; exact arms (V1, V2) at their own latency, recall shown where below 0.95 (EXHIBITS idea #6) |
 | `t1` | `tables/tab-t1_claims.tex` | T1, the claims table: per claim C1–C7 of [`evaluation/claims.yaml`](../../evaluation/claims.yaml) the original number and source, "ours" from the yaml's record selectors, the hand-written verdict (`---` while `null`) |
 | `t2` | `tables/tab-t2_<dataset>.tex` | T2, real filters (`filter` suite, goodreads / arxiv / yfcc10m / pubmed): per sweep, every arm at the operating point (SilverTorch `n_probe` 24) and SilverTorch at matched recall 0.95, recall@100 and p50 at bs 1 and 16 |
-| `t3` | `tables/tab-t3.tex` | T3, official vs Triton (`h2h` suite): per cell, `k`, `bs`, arm and mode: p50 with CI, the paired ratio over Triton eager, kernel-only µs and launches (top-8 kernels of the `--profile` call), `index_mib`, `peak_fwd_mib`, `ids_sha256_canon` identity with Triton eager (equal up to tied-id order), jaccard, max score difference |
+| `t3` | `tables/tab-t3.tex` | T3, official vs Triton (`h2h` suite): per cell, `k`, `bs`, arm and mode: p50 with CI, the paired ratio over Triton eager, kernel-only µs and launches (`kernels_us` / `kernels_calls`, every kernel of the `--profile` call; a record without them shows the top-8 sum marked $^{8}$), the like-for-like scorer µs (`kernel_scopes["scorer"]`, H-SCOPE; `---` on records without scopes), `index_mib`, `peak_fwd_mib`, `ids_sha256_canon` identity with Triton eager per common seed: `=` (equal up to tied-id order), `= (ties)` (equal up to boundary ties: where the hash differs, `quality_score_max_abs_diff` is exactly 0, so only a tied id at the k-th cut differs), else `≠`; jaccard, max score difference |
 | `f1` | `figures/fig-f1-latency-vs-pass-rate.png` | F1: p50 vs pass rate on the `*-synth` datasets (log x), one panel per scale × bs; V1, V2, V3 per pool, postfilter per alpha, SilverTorch Triton at matched recall 0.95 |
 | `f2` | `figures/fig-f2-recall-vs-pass-rate.png` | F2: `recall_oracle@100` vs pass rate; synth SilverTorch per measured `n_probe` and V3 per pool, the real `filter` sweeps overlaid as per-query pass-rate buckets from the sidecars |
-| `f3` | `figures/fig-f3-pareto.png` | F3: the `deep` suite's recall–latency curves (matched-recall curves), one panel per dataset × bs, 0.90 / 0.95 marked |
+| `f3` | `figures/fig-f3-pareto.png` | F3: the `deep` suite's recall–latency curves (matched-recall curves), one panel per (dataset, sweep) × bs (one row per sweep), filter kinds as separate curves, 0.90 / 0.95 marked |
 | `f4a` | `figures/fig-f4a-bloomwidth.png`, `tables/tab-f4a_bloomwidth.tex` | F4a (`bloomwidth*` suites): `bloom_fp_rate` and `index_mib` vs `m_bits` per dataset / backend / `k_hash`; the table adds `filter_mib`, recall and the bs-16 timed point |
 | `f4b` | `figures/fig-f4b-codesign.png`, `tables/tab-f4b_codesign.tex` | F4b (`codesign` suite): partial vs full bloom path latency vs `n_probe` and the paired full / partial ratio with its CI |
 | `fig_deep_sweep` | `figures/fig-deep-sweep-*.png` | one per swept parameter: recall and latency against its value, whiskers = min–max across seeds |
@@ -1316,7 +1382,7 @@ trailing-whitespace hooks (the last two never on `articles/`, `docs/artifacts/`,
 | `test_env_readers.py` | every `os.environ.get` / `os.getenv` / `os.environ[...]` of a `RETRIEVE_*` name under `evaluation/` sits in its owner (`RETRIEVE_DATA_ROOT`: `eval_datasets/hub.py`, read through `data_root()`); same file-count and stale-owner guards |
 | `bench/test_paths.py` | `PATHS == derive(DISPATCH)`: the derived table equals the harness's expected paths, the grid is complete, `DISPATCH` names every algo × backend and adds only `Postfilter` to the library's |
 | `bench/test_records.py` | `resume_key` canonical and `code_version`-sensitive; append / read round trip; one torn trailing line; `aggregate` one row per perf entry, last record per key, typed columns; two jobs differing only in `--checkpoint` key apart; a real D1 arxiv key block (schema 2) keeps today's arxiv job's resume key; a schema-2 goodreads record is gSASRec; the schema-4 columns (null on a schema-3 record) and `perf_window_medians_ms` equal to the nested entry `report._attach` joins |
-| `bench/test_measure.py` | `stats` vs numpy, `latency` control flow, `latency_group`'s A, B, A, B windows (G-interleave), `index_bytes` dedup, `provenance` git fields, `official_commit` from PEP 610 (git, local dir, no `direct_url.json`, not installed), `dirty` scoped to the library subtree with the `files:` fallback, `atomic_write`, `clocks` shape, `graph_callable` refusals |
+| `bench/test_measure.py` | `stats` vs numpy, `latency` control flow, `latency_group`'s A, B, A, B windows (G-interleave), `index_bytes` dedup, `provenance` git fields, `official_commit` from PEP 610 (git, local dir, no `direct_url.json`, not installed), `dirty` scoped to the library subtree with the `files:` fallback, H-PROVENANCE (`code_version` / `dirty` / `files_hash` follow an imported package in another checkout, a commit there moves the stamp, a wheel outside git gets the content hash), `atomic_write`, `clocks` shape, `graph_callable` refusals |
 | `bench/test_metrics.py` | padding / IDCG / denominator contracts; running sums equal per-row means to 1e-9; `jaccard_at_k` |
 | `bench/test_algos.py` | `build` on every `(algo, filter_kind)` torch cell: the `k` setter slices the top-k and changes no buffer; the filter submodule in `index_bytes`; `set_query_params`; build refusals; `postfilter` equal (`torch.equal` on ids and scores) to a hand-computed matmul → topk(`alpha*k`) → dense-mask filter → first `k` reference at every `alpha` in `{1, 2, 4, 8}`, `k` within and past `N`, clause and bloom, the sentinel path exercised; its refusals |
 | `bench/test_config.py` | job counts and keys per suite on `tests/bench/data/{mini,text,suites}.yaml`; `disabled`; build/query split; arms (filter kinds, sweeps, per-dataset overrides, empty slots); `ks_by_sweep`; gridded bloom widths, `compile`, `candidate_pool_frac`; each arm error named; narrows and `Job.narrowed`; the `-synth` YAMLs sharing their parent's inputs; `perf: false`; the interleave groups of the real suites, their parse errors, a job in two groups, the merged campaign children, `score_path` off official; G-grid (every real suite × dataset's job / cell counts and the 2026-10-08 rules on every cell); G-key (pinned resume keys of kept cells); every `config/*.yaml` × every suite through `load_matrix` |
@@ -1325,11 +1391,11 @@ trailing-whitespace hooks (the last two never on `articles/`, `docs/artifacts/`,
 | `bench/test_run.py` | end to end on the tiny fixture, both modes (`graph` = the CPU null entry): record schema, resume, `code_version` invalidation, `partial`, a failed cell + continue, a sticky CUDA error, the quality gate, the parity spill (and a same-backend spill rewritten), reachable-target masking, the plan cache off through `OfficialConfig`, `modes` stamped per job (an eager-only uncapturable record `ok`, a capturable one `partial`), `postfilter`'s `recall_oracle` per `k` (equal to a pass at that `k`, never above the exact V1's); G-cache (seed-free arms copy, V3 / SilverTorch never, misses on other `ks` / `code_version`); a quality-only suite `ok`; G-ids (exact hash, and the canonical hash equal across a tied pair's two orders); G-dump (sidecar mean = record, upload lists it, aggregate skips it); G-interleave (same keys, one group per sweep and seed, `rounds`, whole-group resume); `frac_windows_below_max` against the device max, whichever cell ran first; `score_path` arms sharing the triton parity spill |
 | `bench/test_cli.py` | `bench run` via `CliRunner`, `--checkpoint` landing as the record's `inputs` (encoder faked), a real one-child `bench campaign` ending in `results.parquet`, a faked timed-out child, a restart mid-group keeping its parity spill (in-process children), zero cells → exit 1, `bench report` over the campaign's own records, `bench env`'s JSON keys, the child log's start / end clock blocks and histogram, `bench oracle` prebuilding every sweep so `bench run` builds none |
 | `bench/test_upload.py` | `bench upload` with no network: `_logs/` and `_parity/` never listed, the manifest's sha256 per file, evidence beating `--gate` four ways, the generated README over several subtrees, `verify` catching a changed byte, the commit's operations (with the regenerated `results.parquet`) and `private=True`; `bench fetch` restoring a tree resume reads and refusing to overwrite a different local copy |
-| `bench/test_report.py` | every column the tables read still comes out of `records.aggregate`; every artifact emitted; the LaTeX structurally balanced with its labels and no unescaped `_`; one row per postfilter alpha; an unlabelled algo (`linr_v4`) in no table; a `failed` record excluded and a `partial` / `unstable` one marked; citability off by default and evidence beating `--gate`; two `inputs` under one `(dataset, dim)` refused; an empty tree; a schema-1 record; paired speedups from interleaved arms and recall CIs from sidecars |
+| `bench/test_report.py` | every column the tables read still comes out of `records.aggregate`; every artifact emitted; the LaTeX structurally balanced with its labels and no unescaped `_`; one row per postfilter alpha; an unlabelled algo (`linr_v4`) in no table; a `failed` record excluded and a `partial` / `unstable` one marked; citability off by default and evidence beating `--gate`; two `inputs` under one `(dataset, dim)` refused; an empty tree; a schema-1 record; paired speedups from interleaved arms and recall CIs from sidecars; T3 ids `=` / `= (ties)` / `≠` and kernel-only from `kernels_us` (top-8 fallback marked); F3 one panel per sweep × bs |
 | `bench/test_stats.py` | G-stats: a constant's CI is a point; A = 2B pairs to 2.0 with a CI excluding 1; identical arms are no difference; interpolation exact on a linear curve, never extrapolated |
 | `bench/test_c4_gate.py` | the golden-comparison gate script, [`c4_gate.py`](../artifacts/evaluation-harness-v2/c4_gate.py), against synthesised schema-1 records |
 | `eval_datasets/test_layout.py` | the legacy pad-row rule, `apply_users_limit`, `validate_layout` clean on both layouts and flagging a short `eval_split`, a missing or swapped prefix sidecar, misaligned attrs |
-| `eval_datasets/test_synth_filter.py` | G-synth: achieved pass rate within 1 % of target wherever `N·p ≥ 10^4` (N = 2 M), pass sets nested, same seed byte-identical, `query_attrs_synth` all ones at the full-split row count, the real attrs' bytes and `attrs_digest` untouched (modern and legacy layouts), the CLI resolving `data_dir` from the dataset YAML |
+| `eval_datasets/test_synth_filter.py` | G-synth: achieved pass rate within 1 % of target wherever `N·p ≥ 10^4` (N = 2 M), pass sets nested, same seed byte-identical, `query_attrs_synth` all ones at the full-split row count, the real attrs' bytes and `attrs_digest` untouched (modern and legacy layouts), the CLI resolving `data_dir` from the dataset YAML. G-corr (`--correlated`, on 10 tight blobs): items and queries both at their nearest centroid (brute force), the sidecar's mean pass rate equal to the attrs' and within 50 % of p (a random-init local optimum), over 80 % of a query's 10 nearest items passing, the real and uniform files untouched, rebuilds byte-identical, the CLI picking `content_dir` at `--dim` and refusing a dataset without one |
 | `eval_datasets/test_yfcc.py`, `test_pubmed.py`, `test_kuairand.py`, `test_openalex.py` | the four ETL loaders on synthetic fixtures |
 | `training/test_encode.py` | `training.evaluate`'s recall / ndcg equal `bench.metrics` to 1e-9; `encode_split`'s cache hit / stale key |
 

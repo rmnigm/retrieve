@@ -1,0 +1,16 @@
+# ST-DLOOP before/after: the D3 PubMed cell (n_lists 1024, n_probe 24, bloom 1024 / 5) at bs {1, 16}, k 100, seed 0;
+# triton interleaved with official on none / bloom, triton alone on clause (official's clause arm times our adapter).
+st-dloop:
+  datasets: [pubmed]
+  dims: [768]
+  filter_kinds: [none, bloom, clause]
+  ks: [100]
+  batch_sizes: [1, 16]
+  seeds: [0]
+  sweeps: {pubmed: [c0_mesh, all5]}
+  interleave:
+    - {by: backend, values: [triton, official]}
+  arms:
+    - {algo: silvertorch, backends: [triton]}
+    - {algo: silvertorch, backends: [official], filter_kinds: [none, bloom]}
+bloom: {m_bits: 1024, k_hash: 5}

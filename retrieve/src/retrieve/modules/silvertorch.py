@@ -20,6 +20,7 @@ from retrieve.indexing.bloom_hash import (
 from retrieve.indexing.ivf import csr_layout, probe_width
 from retrieve.indexing.kmeans import KMeans, KMeansInit
 from retrieve.indexing.quantize import quantize_int8, quantize_int8_global
+from retrieve.indexing.selectivity import bloom_bit_freq
 from retrieve.interfaces import (
     RetrievalModule,
     SilverTorchBackend,
@@ -28,7 +29,7 @@ from retrieve.interfaces import (
     ops_for,
 )
 from retrieve.ops import official as official_mod
-from retrieve.ops.official import DEFAULT_CONFIG as OFFICIAL_DEFAULT, OfficialConfig
+from retrieve.ops.official import DEFAULT_CONFIG as OFFICIAL_DEFAULT, BloomPath, OfficialConfig
 
 FilterMode = Literal["none", "bloom", "exact"]
 
@@ -40,7 +41,10 @@ class SilverTorch(RetrievalModule):
     D]`` int8 index with one global scale, per-row int8-quantized queries, and an int8×int8 →
     int32 dot dequantized once. ``filter_mode`` fuses a predicate into the probe+score kernel —
     ``"none"`` (plain ANN), ``"bloom"`` (subset test, needs ``m_bits``/``k_hash``), or
-    ``"exact"`` (exact-clause, no false positives).
+    ``"exact"`` (exact-clause, no false positives). ``bloom_path="full"`` (bloom on triton /
+    torch) runs the subset test over all N first (``bloom_full_mask``) and the probe scorer reads
+    that packed mask: the co-design ablation against the fused default ``"partial"``, same
+    results (kernels.md § bloom_full_mask).
 
     ``backend="triton"`` (default) keeps all probe intermediates off HBM; ``backend="torch"``
     runs the same semantics eager but materializes ``[B, P, D]``, so large ``P·B·D`` needs the
@@ -81,6 +85,7 @@ class SilverTorch(RetrievalModule):
     bloom_index: Tensor  # official + bloom: [W] int64
     bundle_b_offsets: Tensor  # official + bloom: [n_bundles + 1] int64
     bloom_transposed: Tensor  # triton / torch + bloom: [m_bits, ceil(N / 64)] int64
+    bloom_bit_freq: Tensor  # triton / torch + bloom: [m_bits] fp32, the skip gate's bound
     hash_seeds: Tensor
     clause_salt: Tensor
     item_clause_attrs: Tensor
@@ -99,6 +104,7 @@ class SilverTorch(RetrievalModule):
         kmeans_init: KMeansInit = "random",
         backend: SilverTorchBackend = "triton",
         official: OfficialConfig | None = None,
+        bloom_path: BloomPath = "partial",
     ) -> None:
         super().__init__()
         if filter_mode not in ("none", "bloom", "exact"):
@@ -108,6 +114,13 @@ class SilverTorch(RetrievalModule):
         check_backend(backend, SilverTorchBackend)
         if official is not None and backend != "official":
             raise ValueError("official=OfficialConfig(...) only applies to backend='official'")
+        if bloom_path not in ("partial", "full"):
+            raise ValueError(f"bloom_path must be 'partial' or 'full', got {bloom_path!r}")
+        if bloom_path == "full" and (filter_mode != "bloom" or backend == "official"):
+            raise ValueError(
+                "bloom_path='full' applies to filter_mode='bloom' on backend='triton' or 'torch' "
+                "(the official backend takes OfficialConfig(bloom_path=...))"
+            )
         # Import the backend's op namespace now (a Triton JIT registration, or the official
         # extension: OfficialMissing when the package cannot run here, ImportError when it is
         # present but broken) so failures surface at construction, not at the first forward.
@@ -153,6 +166,7 @@ class SilverTorch(RetrievalModule):
         self.seed = seed
         self.kmeans_init: KMeansInit = kmeans_init
         self.backend = backend
+        self.bloom_path: BloomPath = bloom_path
         self.build_timings: dict[str, float] = {}
         # Dispatch table built once; forward calls the bound method for this backend.
         self._forward_impl = {
@@ -331,6 +345,8 @@ class SilverTorch(RetrievalModule):
                     attrs, seeds, self.m_bits, self.k_hash, self.word_count, clause_salt=salt
                 )
             self.register_buffer("bloom_transposed", build_transposed_sigs(sigs))
+            # The scorer's pass-rate bound for its tile-skip gate (kernels.md § SilverTorch).
+            self.register_buffer("bloom_bit_freq", bloom_bit_freq(self.bloom_transposed, n))
             self.register_buffer("hash_seeds", seeds)
             # Registered (not rebuilt per call) so the bloom forward issues no
             # host→device copy — see bloom_hash.generate_clause_salt.
@@ -422,13 +438,16 @@ class SilverTorch(RetrievalModule):
                 *tail,
             )
         if self.has_bloom and query_clause_attrs is not None:
+            qpos = self._query_bit_positions(query_clause_attrs)
+            table, freq = self.bloom_transposed, self.bloom_bit_freq
+            if self.bloom_path == "full":
+                # The full-N packed mask, read by the same scorer as a one-row table per query
+                # with the partial path's pass-rate bound (kernels.md § bloom_full_mask).
+                table = ops.bloom_full_mask(qpos, table)
+                freq = torch.where(qpos >= 0, freq[qpos.clamp_min(0)], 1.0).amin(dim=1)
+                qpos = torch.arange(qpos.shape[0], device=qpos.device).unsqueeze(1)
             return ops.codesigned_probe_score_bloom(
-                query,
-                *layout,
-                self.sort_perm,
-                self._query_bit_positions(query_clause_attrs),
-                self.bloom_transposed,
-                *tail,
+                query, *layout, self.sort_perm, qpos, table, freq, *tail
             )
         return ops.codesigned_probe_score(query, *layout, self.sort_perm, *tail)
 

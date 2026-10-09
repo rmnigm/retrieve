@@ -28,6 +28,28 @@ decisions.
   are ordered first and CPU steps run beside them.
 - **Nothing is citable until its gate passed** (CLAUDE.md rule 2).
   [validation.md](validation.md) says which gates have passed.
+- **The study answers the ECIR replicability-track criteria, and ships a
+  library plus a benchmark** (user, 2026-10-10): every step serves
+  reliability (methodology, representative and tuned baselines, described
+  parameters, the right portions replicated), impact, novelty (insights,
+  baselines and measures the originals lack) or availability (code, data,
+  documentation, no gap between paper and material); the checklist is
+  roadmap F-CRIT. Beside the paper: an open-source library of the methods
+  and an easy way to benchmark them on more datasets (roadmap ROUTER-LIB,
+  H-ADDDATA).
+- **Scope: retrieval as torch ops inside the model graph** (user,
+  2026-10-10), the frame both papers use (SilverTorch: retrieval as
+  PyTorch model ops; LiNR: retrieval as a model on the GPU). Baselines are
+  what a practitioner can put in that graph (generic torch, compiled
+  torch, the torch reference backends); standalone ANN libraries (Faiss,
+  cuVS, HNSW) are outside that frame and stay out
+  ([Harness](#harness)); the paper states the frame and why.
+- **V3's bit budget is one bit per coordinate** (user, 2026-10-10): LiNR's
+  V3 benchmark used 512 bits on d128, and its §3.2 describes a 1-bit code
+  "of the same dimension"; our OPORP gives at most D bits. The paper states
+  that d128 / d192 run D bits (and 64 in V-V3BITS) where the dimension is
+  below LiNR's budget; PubMed d768 runs 768 and 256 bits (roadmap
+  V3-BITS-PUBMED), bracketing 512. No `k_bits` > D.
 - **Venue: the ECIR 2027 reproducibility track format** (user, 2026-10-08):
   12 pages LNCS, double-blind. No deadline pressure ("do not care about
   deadlines, just do all the work; the most useful first"); nothing is cut
@@ -35,6 +57,14 @@ decisions.
 
 ## Campaign v2 (user, 2026-10-08)
 
+- **T3 reports device time and end-to-end, as measured** (controller,
+  2026-10-09, user away and delegating): official SilverTorch eager is
+  host-bound (device kernels 0.18-0.31 ms of 1.1-1.85 ms end to end at v2.1;
+  its windows read ~1140 MHz because the GPU idles, and its end-to-end
+  moves with host load at the same device time), so clock-normalising would
+  correct a symptom. T3 gives kernel-only and end-to-end side by side, as
+  measured, with the host-bound mechanism stated; F4b (official vs official,
+  interleaved) is reported as measured.
 - **Exploration first, one final repro pass** (user, 2026-10-09): while the
   library improves, legs run at the current tag to collect behaviour,
   comparisons and charts; a library change does not stop or invalidate
@@ -272,6 +302,13 @@ now on; the [roadmap](roadmap.md) holds the steps.
   (user: no attributes, so no filtered cells); KuaiRand-27K (user: does
   not fit the study). Their checkpoints and trainer results stay as they
   are.
+- **LAION as a 30 M scale point, `filter` only** (user, 2026-10-10;
+  roadmap V-LAION30): Re-LAION-2B-en-research-safe captions encoded by us
+  (nomic-embed-text-v1.5, Matryoshka d256, a native width of that
+  encoder, so "No PCA" holds), metadata tags as filters. 30 M only: no
+  100 M point and no fp16-items harness change. At d256 the fp32 items
+  are 31 GB; the item-chunked oracle adds no item copy
+  ([validation](validation.md#harness-gates), G-oracle).
 - **No PCA.** Every dataset runs at its encoder's native width (YFCC 192,
   PubMed 768); each dataset contributes one width, and the dim ablation is
   dropped.

@@ -40,7 +40,8 @@ from torch.profiler import ProfilerActivity, profile
 import retrieve
 
 ROOT = Path(__file__).resolve().parents[2]
-LIB_SUBTREE = "retrieve/src/retrieve"  # code_version = tree hash of this (H §8.2 B)
+# code_version names the library this process imports, wherever its checkout is (H §8.2 B)
+LIB = Path(retrieve.__file__).resolve().parent
 MiB = 1024 * 1024
 
 
@@ -71,19 +72,19 @@ def warm_gpu_once() -> None:
     torch.cuda.synchronize()
 
 
-def _git(*args: str) -> str | None:
+def _git(*args: str, cwd: Path = ROOT) -> str | None:
     try:
         return subprocess.check_output(
-            ["git", *args], cwd=ROOT, stderr=subprocess.DEVNULL, text=True
+            ["git", *args], cwd=cwd, stderr=subprocess.DEVNULL, text=True
         ).strip()
     except (OSError, subprocess.SubprocessError):
         return None
 
 
 def subtree_dirty() -> bool | None:
-    """Uncommitted changes (untracked files included) under ``LIB_SUBTREE`` — the code the
-    harness measures. ``None`` outside a git checkout."""
-    out = _git("status", "--porcelain", "--", LIB_SUBTREE)
+    """Uncommitted changes (untracked files included) under ``LIB``, in the checkout that holds
+    it — the code the harness measures. ``None`` when ``LIB`` is not in a git checkout."""
+    out = _git("status", "--porcelain", "--", ".", cwd=LIB)
     return None if out is None else bool(out)
 
 
@@ -96,35 +97,36 @@ def repo_dirty() -> bool | None:
 
 
 def code_version() -> str:
-    """The resume key's code component (H §8.2 B): the library subtree's tree hash at HEAD
-    when the subtree is clean, else ``files:<sha256>`` over the ``retrieve`` sources actually
-    on disk (also the value outside a git checkout). The two namespaces are disjoint, and a
-    dirty subtree never reuses a cell measured at the committed tree."""
+    """The resume key's code component (H §8.2 B): the tree hash at HEAD of the imported
+    package's directory, in its own checkout, when that subtree is clean; else
+    ``files:<sha256>`` over the sources actually on disk (also the value outside a git
+    checkout). Read from ``LIB``, not from the checkout that launched ``bench``, so an editable
+    install pointing at another tree is stamped as what it runs. The two namespaces are
+    disjoint, and a dirty subtree never reuses a cell measured at the committed tree."""
     if subtree_dirty() is False:
-        tree = _git("rev-parse", f"HEAD:{LIB_SUBTREE}")
+        tree = _git("rev-parse", "HEAD:./", cwd=LIB)
         if tree:
             return tree
     return files_hash()
 
 
 def files_hash() -> str:
-    """``files:<sha256>`` over every ``*.py`` under the installed ``retrieve`` package."""
-    root = Path(retrieve.__file__).resolve().parent
+    """``files:<sha256>`` over every ``*.py`` under the imported ``retrieve`` package."""
     h = hashlib.sha256()
-    for p in sorted(root.rglob("*.py")):
-        h.update(p.relative_to(root).as_posix().encode())
+    for p in sorted(LIB.rglob("*.py")):
+        h.update(p.relative_to(LIB).as_posix().encode())
         h.update(p.read_bytes())
     return "files:" + h.hexdigest()[:40]
 
 
 def inductor_cache_dir(code_version: str, given: str | None) -> str:
-    """Roadmap H4: the inductor cache ``bench run`` uses, ``given`` when the caller set
-    ``TORCHINDUCTOR_CACHE_DIR``, else one directory per ``code_version``. The FX-graph and
-    AOT-autograd caches key a graph on the custom op, not on its ``@triton_op`` body, so a
-    shared cache can replay a stale kernel after a library edit (testing.md § Running)."""
-    if given:
-        return given
-    return str(Path(tempfile.gettempdir()) / "bench-inductor" / code_version.replace(":", "-"))
+    """Roadmap H4 / H-INDCACHE: the inductor cache ``bench run`` uses, always one directory per
+    ``code_version``: under the caller's ``TORCHINDUCTOR_CACHE_DIR`` when set, else under the
+    temp dir. The FX-graph and AOT-autograd caches key a graph on the custom op, not on its
+    ``@triton_op`` body, so a cache shared across library edits replays a stale kernel in graph
+    mode (testing.md § Running); a reused caller dir must not serve another tree's graphs."""
+    base = Path(given) if given else Path(tempfile.gettempdir()) / "bench-inductor"
+    return str(base / code_version.replace(":", "-"))
 
 
 def _nvidia_smi(query: str) -> list[str] | None:
@@ -170,6 +172,7 @@ def provenance() -> dict[str, Any]:
         "repo_dirty": repo_dirty(),
         "git_branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
         "code_version": code_version(),
+        "lib_dir": str(LIB),
         "host": socket.gethostname(),
         "python": platform.python_version(),
         "started": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
@@ -413,26 +416,94 @@ def graph_callable(module: nn.Module, *example_args: Any, warmup: int = 5) -> Ca
     return compiled
 
 
-def profile_once(fn: Callable[[], Any], top: int = 8) -> list[dict[str, Any]]:
-    """One eager call under ``torch.profiler``; the ``top`` device kernels by self time
-    (``{"kernel", "us", "calls"}``) — the wp4 ``kernel_only.py`` split. Empty without CUDA."""
+PROFILE_PADS_S = (0.0, 0.01, 0.1, 1.0, 5.0)
+SENTINEL = "spin_kernel"  # torch.cuda._sleep's kernel; nothing in a forward launches it
+RANGE_PREFIX = "## "  # profiler range annotations booked as device events (compiled graph calls)
+
+
+# H-SCOPE: like-for-like kernel groups for T3; a kernel's group is the first whose substrings its
+# name contains (evaluation.md § Measurement protocol). Our scorer fuses the bloom test; Meta's
+# scoring is process_cluster + payload kernels, its bloom test bloom_search kernels: all "scorer".
+KERNEL_SCOPES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("scorer", ("_codesigned_probe_score", "::fused_kmean_ann::", "::bloom_search::")),
+    ("topk", ("::mbtopk::", "::sbtopk::", "radixSortKVInPlace", "bitonicSortKVInPlace")),
+    ("epilogue", ("gpu_index_kernel", "_scatter_gather_elementwise_kernel")),
+)
+
+
+def _range(event: Any) -> bool:
+    return event.key.startswith(RANGE_PREFIX)
+
+
+def kernel_scope(name: str) -> str:
+    """The ``KERNEL_SCOPES`` group of one kernel name, else ``"other"``."""
+    return next((s for s, subs in KERNEL_SCOPES if any(x in name for x in subs)), "other")
+
+
+def kernel_summary(events: Sequence[Any], top: int = 8) -> dict[str, Any]:
+    """The entry fields of one profiled call from its device events (``key``,
+    ``self_device_time_total``, ``count``), sentinels dropped: ``kernels``, the ``top`` by self
+    time (``{"kernel", "us", "calls"}``), and ``kernels_us`` / ``kernels_calls``, the device time
+    and launches summed over every kernel (H-KSUM: the top-8 sum is only a lower bound). The sums
+    skip ``## …`` events: the profiler books a compiled graph's ``## Call CompiledFxGraph …`` range
+    as a device event spanning that graph's kernels, which would count them twice.
+    ``kernel_scopes`` splits the same sums by ``kernel_scope`` (H-SCOPE): ``{scope: {"us",
+    "calls"}}`` for scorer, topk, epilogue and other, adding up to ``kernels_us`` /
+    ``kernels_calls``."""
+    kernels = sorted(
+        (e for e in events if SENTINEL not in e.key),
+        key=lambda e: e.self_device_time_total,
+        reverse=True,
+    )
+    scopes = {s: {"us": 0.0, "calls": 0} for s in (*(s for s, _ in KERNEL_SCOPES), "other")}
+    for e in kernels:
+        if not _range(e):
+            sc = scopes[kernel_scope(e.key)]
+            sc["us"] += float(e.self_device_time_total)
+            sc["calls"] += int(e.count)
+    return {
+        "kernels": [
+            {"kernel": e.key, "us": float(e.self_device_time_total), "calls": int(e.count)}
+            for e in kernels[:top]
+        ],
+        "kernels_us": float(sum(e.self_device_time_total for e in kernels if not _range(e))),
+        "kernels_calls": int(sum(e.count for e in kernels if not _range(e))),
+        "kernel_scopes": scopes,
+    }
+
+
+def profile_once(fn: Callable[[], Any], top: int = 8) -> dict[str, Any]:
+    """One eager call under ``torch.profiler``: ``kernel_summary`` of its device kernels — the
+    wp4 ``kernel_only.py`` split plus the full sum. Empty kernels and zero sums without CUDA.
+    The call is bracketed by two sentinel kernels and the profile is retried with a longer
+    idle pad on both sides of the window until both sentinels are recorded; raises if they
+    never are (evaluation.md § Measurement protocol)."""
     if not torch.cuda.is_available():
-        return []
+        return kernel_summary([], top)
     fn()
     torch.cuda.synchronize()
-    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
-        fn()
-        torch.cuda.synchronize()
-    kernels = [e for e in prof.key_averages() if e.device_type == torch.autograd.DeviceType.CUDA]
-    kernels.sort(key=lambda e: e.self_device_time_total, reverse=True)
-    return [
-        {"kernel": e.key, "us": float(e.self_device_time_total), "calls": int(e.count)}
-        for e in kernels[:top]
-    ]
+    for pad in PROFILE_PADS_S:
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            time.sleep(pad)
+            torch.cuda._sleep(1)
+            fn()
+            torch.cuda._sleep(1)
+            torch.cuda.synchronize()
+            time.sleep(pad)
+        events = [e for e in prof.key_averages() if e.device_type == torch.autograd.DeviceType.CUDA]
+        sentinels = sum(e.count for e in events if SENTINEL in e.key)
+        if sentinels == 2:
+            break
+    else:
+        raise RuntimeError(
+            f"profile_once: {sentinels} of 2 sentinel kernels recorded at pad {pad} s; "
+            "the profiler dropped device activities at the window edges"
+        )
+    return kernel_summary(events, top)
 
 
 __all__ = [
-    "LIB_SUBTREE",
+    "LIB",
     "NotCapturable",
     "clock_histogram",
     "clock_report",
@@ -441,6 +512,8 @@ __all__ = [
     "files_hash",
     "graph_callable",
     "index_bytes",
+    "kernel_scope",
+    "kernel_summary",
     "latency",
     "latency_group",
     "profile_once",

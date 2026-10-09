@@ -9,9 +9,23 @@ library code that intentionally creates CPU-side generators.
 from __future__ import annotations
 
 import itertools
+import os
+import shutil
+import tempfile
 
 import pytest
 import torch
+
+
+def pytest_configure(config):
+    """H-INDCACHE: a fresh inductor cache per pytest run, so no compile gate replays a graph an
+    earlier tree cached for the same custom op (testing.md § Running)."""
+    config.inductor_dir = tempfile.mkdtemp(prefix="pytest-inductor-")
+    os.environ["TORCHINDUCTOR_CACHE_DIR"] = config.inductor_dir
+
+
+def pytest_unconfigure(config):
+    shutil.rmtree(config.inductor_dir, ignore_errors=True)
 
 
 def pytest_collection_modifyitems(config, items):

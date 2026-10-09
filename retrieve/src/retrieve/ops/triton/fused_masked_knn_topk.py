@@ -44,6 +44,17 @@ class FusedMaskedKnnTopkConfig:
 
 # Default tile config (tuned on A100/sm_80); pass config= to the wrapper to override.
 DEFAULT_CONFIG = FusedMaskedKnnTopkConfig(block_n=32, num_warps=8)
+# Past D_PAD 256 (the SPLIT body), tuned on A100 at 10 M d768 (kernels.md § fused_masked_knn_topk,
+# "Wide D").
+# programs 3456: a batch whose candidates sit in one or two rows (PubMed all5: median 142, p90 1.2 M
+# a row) still spreads each heavy row over 216 programs at bs 16.
+WIDE_CONFIG = FusedMaskedKnnTopkConfig(block_n=8, num_warps=4, programs=3456)
+# The -inf fill chunk past a row's counted tiles: independent of BLOCK_N.
+FILL_N = 1024
+
+
+def config_for_width(d: int) -> FusedMaskedKnnTopkConfig:
+    return WIDE_CONFIG if triton.next_power_of_2(d) > 256 else DEFAULT_CONFIG
 
 
 @triton.jit
@@ -65,28 +76,67 @@ def _fused_masked_knn_topk_kernel(
     stride_sb,
     stride_sp,
     BLOCK_N: tl.constexpr,
+    SPLIT: tl.constexpr,
+    FILL_N: tl.constexpr,
+    INT32_COUNT: tl.constexpr,
     WIDE: tl.constexpr,
 ):
     # Grid (G, B), G fixed per shape: program g strides over tiles g, g + G, ... of row bid, so the
     # grid does not grow with P (kernels.md § fused_masked_knn_topk, "Launch grid"). Batch on
-    # grid_y (≤ 65535).
+    # grid_y (≤ 65535). Both bodies score the row's counted tiles in one loop and store -inf past
+    # them in FILL_N-lane chunks in a second. SPLIT (D_PAD > 256) reloads q per tile: holding it
+    # put the tile at 98-112 registers, half the occupancy ("Wide D"). INT32_COUNT: the narrower
+    # count only where it keeps the body at ≤ 32 registers ("Count width").
     bid = tl.program_id(1)
-
-    d_offsets = tl.arange(0, D_PAD)
-    d_in = d_offsets < D
-    count = tl.load(counts_ptr + bid)
-    out_row = row_base(out_scores_ptr, bid, stride_sb, WIDE)
-
-    # Widen before the multiply: tl.sum reduces in its operand dtype (fp16 in production, plan
-    # L4 §6.1), and fp16 × fp16 is exact in fp32.
-    q = tl.load(query_ptr + bid * stride_qb + d_offsets * stride_qd, mask=d_in, other=0.0).to(
-        tl.float32
-    )
-
-    for tile_id in range(tl.program_id(0), tl.cdiv(P, BLOCK_N), tl.num_programs(0)):
-        n_offsets = tile_id * BLOCK_N + tl.arange(0, BLOCK_N)
-        p_valid = n_offsets < P
-        if tile_id * BLOCK_N < count:
+    if SPLIT:
+        pid = tl.program_id(0)
+        n_prog = tl.num_programs(0)
+        count = tl.load(counts_ptr + bid)
+        out_row = row_base(out_scores_ptr, bid, stride_sb, WIDE)
+        d_offsets = tl.arange(0, D_PAD)
+        d_in = d_offsets < D
+        n_score = tl.cdiv(count, BLOCK_N)
+        for tile_id in range(pid, n_score, n_prog):
+            n_offsets = tile_id * BLOCK_N + tl.arange(0, BLOCK_N)
+            in_count = n_offsets < count
+            q = tl.load(
+                query_ptr + bid * stride_qb + d_offsets * stride_qd, mask=d_in, other=0.0
+            ).to(tl.float32)
+            item_ids = tl.load(
+                row_base(pos_indices_ptr, bid, stride_pb, WIDE) + n_offsets * stride_pp,
+                mask=in_count,
+                other=0,
+            )
+            emb_rows = tl.load(
+                item_embs_ptr + item_ids[:, None] * stride_in + d_offsets[None, :] * stride_id,
+                mask=in_count[:, None] & d_in[None, :],
+                other=0.0,
+            ).to(tl.float32)
+            dots = tl.sum(emb_rows * q[None, :], axis=1)
+            dots = tl.where(in_count, dots, float("-inf"))
+            tl.store(out_row + n_offsets * stride_sp, dots, mask=n_offsets < P)
+        tail0 = n_score * BLOCK_N
+        for c in range(pid, tl.cdiv(P - tail0, FILL_N), n_prog):
+            offs = tail0 + c * FILL_N + tl.arange(0, FILL_N)
+            inf = tl.full((FILL_N,), float("-inf"), tl.float32)
+            tl.store(out_row + offs * stride_sp, inf, mask=offs < P)
+    else:
+        pid = tl.program_id(0)
+        n_prog = tl.num_programs(0)
+        count = tl.load(counts_ptr + bid)
+        if INT32_COUNT:
+            count = count.to(tl.int32)
+        out_row = row_base(out_scores_ptr, bid, stride_sb, WIDE)
+        d_offsets = tl.arange(0, D_PAD)
+        d_in = d_offsets < D
+        # Widen before the multiply: tl.sum reduces in its operand dtype (fp16 in production, plan
+        # L4 §6.1), and fp16 × fp16 is exact in fp32.
+        q = tl.load(query_ptr + bid * stride_qb + d_offsets * stride_qd, mask=d_in, other=0.0).to(
+            tl.float32
+        )
+        n_score = tl.cdiv(count, BLOCK_N)
+        for tile_id in range(pid, n_score, n_prog):
+            n_offsets = tile_id * BLOCK_N + tl.arange(0, BLOCK_N)
             in_count = n_offsets < count
             item_ids = tl.load(
                 row_base(pos_indices_ptr, bid, stride_pb, WIDE) + n_offsets * stride_pp,
@@ -100,13 +150,12 @@ def _fused_masked_knn_topk_kernel(
             ).to(tl.float32)
             dots = tl.sum(emb_rows * q[None, :], axis=1)
             dots = tl.where(in_count, dots, float("-inf"))
-            tl.store(out_row + n_offsets * stride_sp, dots, mask=p_valid)
-        else:
-            tl.store(
-                out_row + n_offsets * stride_sp,
-                tl.full((BLOCK_N,), float("-inf"), tl.float32),
-                mask=p_valid,
-            )
+            tl.store(out_row + n_offsets * stride_sp, dots, mask=n_offsets < P)
+        tail0 = n_score * BLOCK_N
+        for c in range(pid, tl.cdiv(P - tail0, FILL_N), n_prog):
+            offs = tail0 + c * FILL_N + tl.arange(0, FILL_N)
+            inf = tl.full((FILL_N,), float("-inf"), tl.float32)
+            tl.store(out_row + offs * stride_sp, inf, mask=offs < P)
 
 
 @dataclass(frozen=True)
@@ -175,6 +224,9 @@ def _fmkt_prep(
         "stride_sb": all_scores.stride(0),
         "stride_sp": all_scores.stride(1),
         "BLOCK_N": cfg.block_n,
+        "SPLIT": triton.next_power_of_2(d) > 256,
+        "FILL_N": FILL_N,
+        "INT32_COUNT": triton.next_power_of_2(d) <= 128,
         "WIDE": wide(positive_indices, all_scores),
         "num_warps": cfg.num_warps,
         "num_stages": cfg.num_stages,
@@ -253,7 +305,7 @@ def _fused_masked_knn_topk_impl(
             torch.full((b, k), float("-inf"), dtype=torch.float32, device=query.device),
         )
 
-    cfg = config if config is not None else DEFAULT_CONFIG
+    cfg = config if config is not None else config_for_width(query.shape[1])
     launch = _fmkt_prep(query, item_embs, positive_indices, counts, cfg, bucket=True)
     _fused_masked_knn_topk_kernel[launch.grid](**launch.kwargs)
     return _fmkt_finish(launch, k, pad_to_k=True)
@@ -268,7 +320,7 @@ def fused_masked_knn_topk(
     k: int,
 ) -> tuple[Tensor, Tensor]:
     """Production wrapper for ``_fused_masked_knn_topk_impl``, registered as a ``triton_op`` for
-    ``torch.compile`` capture. Differs from ``_impl``: hard-codes ``DEFAULT_CONFIG``, skips
+    ``torch.compile`` capture. Differs from ``_impl``: hard-codes ``config_for_width``, skips
     bucketing (catalog size is fixed per deployment; see the module docstring), and requires
     ``P >= k`` (``ValueError`` otherwise, as the torch twin; ``PrefilterKNN`` pads a short
     candidate list) — no pad tail."""
@@ -276,6 +328,8 @@ def fused_masked_knn_topk(
         raise ValueError(
             f"positive_indices has {positive_indices.shape[1]} columns, fewer than k={k}"
         )
-    launch = _fmkt_prep(query, item_embs, positive_indices, counts, DEFAULT_CONFIG, bucket=False)
+    launch = _fmkt_prep(
+        query, item_embs, positive_indices, counts, config_for_width(query.shape[1]), bucket=False
+    )
     wrap_triton(_fused_masked_knn_topk_kernel)[launch.grid](**launch.kwargs)
     return _fmkt_finish(launch, k, pad_to_k=False)

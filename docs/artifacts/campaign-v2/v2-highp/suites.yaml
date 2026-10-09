@@ -1,0 +1,12 @@
+# V2-HIGHP before/after: LiNR V2 Triton (clause) on PubMed d768, the high-p sweep and two low-p ones, bs {1, 16}, k 100, seed 0.
+v2-highp:
+  datasets: [pubmed]
+  dims: [768]
+  filter_kinds: [clause]
+  ks: [100]
+  batch_sizes: [1, 16]
+  seeds: [0]
+  sweeps: {pubmed: [c3_journal_reverse, c0_mesh, all5]}
+  arms:
+    - {algo: linr_v2, backends: [triton]}
+bloom: {m_bits: 1024, k_hash: 5}

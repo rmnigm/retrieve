@@ -38,12 +38,10 @@ the user moving it onto the roadmap.
   sweeps, `synth` at {0.001, 0.01, 0.1, 1.0}, no `deep`) of ~12-18 GPU-h.
   Only after the campaign's run order is done, and only on the user's
   call.
-- **LAION / Re-LAION-5B**: same scale ceiling plus a new staging and
-  encode, no natural query-side filters (NSFW, aesthetic, size and
-  language metadata, so predicates would be synthetic anyway), and
-  provenance baggage (LAION-5B was pulled in December 2023; Re-LAION-5B is
-  the release to use if ever). At 10 M it duplicates YFCC (CLIP
-  image-text, already the field's filtered benchmark).
+- **LAION / Re-LAION-5B** above 30 M: the 30 M point is in the study
+  (roadmap V-LAION30, [decisions](decisions.md#datasets)); 100 M would
+  need fp16 items on the device and the oracle without its fp32 copy
+  (Known defects below).
 
 ## After the paper
 
@@ -111,12 +109,6 @@ the user moving it onto the roadmap.
   failed (no length to check), so the MedCPT shards then rest on `verify`'s
   structural check alone. The 2026-10-07 restage worked around it with a
   2-connection size check ([artifact](artifacts/pubmed-restage/README.md)).
-- `bench/oracle.py`'s `item_embs.t().contiguous()` holds a second full
-  fp32 copy of the item table, so the harness's per-dataset limit at
-  native width is about half the device memory divided by `4·D` bytes
-  (OpenAlex at 768-d: ~11-12 M items, hence the 10 M slice). A view would
-  remove the copy; it needs its own check against the existing oracle
-  results and golden cells.
 - `linr_v2` and `linr_v3` diverge from their golden files (recall@100
   4.5e-4 / 1.7e-5), cause unidentified, predating the kernel-opt pass
   ([validation](validation.md#harness-gates)).

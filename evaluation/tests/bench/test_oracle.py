@@ -270,8 +270,8 @@ def test_code_version_is_the_library_tree_hash_or_a_files_hash(monkeypatch):
     if bench.subtree_dirty():
         assert v.startswith("files:")
     else:
-        assert v == bench._git("rev-parse", "HEAD:retrieve/src/retrieve") and len(v) == 40
-    monkeypatch.setattr(bench, "_git", lambda *a: None)
+        assert v == bench._git("rev-parse", "HEAD:./", cwd=bench.LIB) and len(v) == 40
+    monkeypatch.setattr(bench, "_git", lambda *a, cwd=None: None)
     fb = bench.code_version()
     assert fb.startswith("files:") and len(fb) == len("files:") + 40
     assert bench.code_version() == fb  # deterministic

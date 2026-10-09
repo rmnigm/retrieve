@@ -2,13 +2,13 @@
 
 GPU retrieval framework for recommender systems (PyTorch + Triton). My master's thesis.
 
-The library half ships on PyPI as [`torchretrieve`](https://pypi.org/project/torchretrieve/); this repo also holds the training / evaluation harness used in the thesis.
+The library half is the package `torchretrieve` (not yet published on PyPI; release is roadmap F4); this repo also holds the training / evaluation harness used in the thesis.
 
 ## Layout
 
 This repo is a [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/) with two members sharing a single `.venv` at the workspace root:
 
-- [`retrieve/`](retrieve/) — the library: kernels, modules, correctness tests. Published to PyPI as `torchretrieve`; imports as `retrieve`.
+- [`retrieve/`](retrieve/) — the library: kernels, modules, correctness tests. Package `torchretrieve` (not yet on PyPI); imports as `retrieve`.
 - [`evaluation/`](evaluation/) — training and benchmark harness; depends on `retrieve` editable. Not published.
 
 Datasets, virtual environments and campaign scratch live *outside* the repo, on
@@ -86,7 +86,8 @@ written for someone who installed `torchretrieve` and does not have this repo:
 [getting-started](retrieve/docs/getting-started.md),
 [modules](retrieve/docs/modules.md),
 [filtering-and-quantization](retrieve/docs/filtering-and-quantization.md),
-[indexing-and-ops](retrieve/docs/indexing-and-ops.md).
+[indexing-and-ops](retrieve/docs/indexing-and-ops.md),
+[adding-a-dataset](retrieve/docs/adding-a-dataset.md).
 
 **Papers** ([`articles/`](articles/)) — pandoc renderings of the three papers
 this repo reproduces or benchmarks against (SilverTorch, LiNR, Yambda). Frozen

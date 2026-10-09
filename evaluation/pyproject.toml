@@ -18,6 +18,7 @@ dependencies = [
     "sentence-transformers>=3.0",
     "einops>=0.7",  # nomic-embed-text-v1.5's remote code (arxiv, openalex encode)
     "matplotlib>=3.8",
+    "tldextract>=5.1",  # registered domains for the laion ETL (bundled suffix list, offline)
 ]
 
 [project.scripts]

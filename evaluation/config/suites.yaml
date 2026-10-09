@@ -7,7 +7,7 @@
 # algos.PATHS drops (algo, filter_kind, backend) triples with no code path. Algo defaults:
 # silvertorch n_lists=1024 n_probe=24 n_iter=10, linr_v3 candidate_pool=5000.
 #
-# Global rules: seeds {0, 1, 2} everywhere (codesign: timing repeats); bs {1, 16}; k {100, 1000};
+# Global rules: seeds {0, 1, 2} everywhere but the laion30m suites (seed 0, claims first) (codesign: timing repeats); bs {1, 16}; k {100, 1000};
 # no n_probe 4 / 256 (synth's SilverTorch sweep aside, user), no bs 8, no k 500, no openalex.
 # Official SilverTorch runs `none` / `bloom` only: its clause cells time our pack_mask adapter
 # (the old records stay readable). One backend per algo (`triton`, measured fastest everywhere)
@@ -104,67 +104,68 @@ deep:                          # recall-vs-latency Pareto (F3, C6)
       backends: [triton]
       query: {candidate_pool_frac: [0.005, 0.01, 0.02, 0.05, 0.1]}
 
-synth:                         # pass rate as the x axis (F1, F2, C1, C2, C6)
-  datasets: [goodreads-synth, arxiv-synth, yfcc10m-synth]
+synth:                         # pass rate as the x axis (F1, F2, C1, C6)
+  # SYNTH-TRIM, sized by claim (controller 2026-10-10, claims first): C1's crossover (V1 + V2 at every rate, clause) and
+  # C6 / F2 (SilverTorch triton clause over n_probe); C2 and C4 are decided, so no V3 and bloom only at two rates. goodreads-synth
+  # keeps the pilot's cells (its first seven rates, seeds 0-2, every arm) and adds 0.05 / 0.2 / 0.5 for C1 and C6 only;
+  # arxiv-corr-synth runs the arms whose recall the correlated pass set moves (V3, SilverTorch clause, postfilter).
+  datasets: [goodreads-synth, arxiv-synth, arxiv-corr-synth, yfcc10m-synth]
   dims: [128, 192]
   filter_kinds: [clause, bloom]
   ks: [100, 1000]
   batch_sizes: [1, 16]
-  seeds: [0, 1, 2]
-  ks_by_sweep:                 # k = 1000 dropped where N*p < 4*1000: "return every passing item"
+  seeds: [0]
+  seeds_by_sweep:              # the pilot's seeds on goodreads-synth's first seven rates
+    goodreads-synth: {p0001: [0, 1, 2], p0003: [0, 1, 2], p001: [0, 1, 2], p003: [0, 1, 2], p01: [0, 1, 2], p03: [0, 1, 2], p1: [0, 1, 2]}
+  sweeps:                      # goodreads-synth all ten rates; arxiv-corr-synth its three
+    arxiv-synth: [p0001, p001, p005, p01, p02, p05, p1]
+    yfcc10m-synth: [p001, p01, p02, p05, p1]
+  ks_by_sweep:                 # k = 1000 dropped where N*p < 4*1000: "return every passing item"; YFCC at k 100 only
     goodreads-synth: {p0001: [100], p0003: [100]}            # N 797,084
     arxiv-synth: {p0001: [100]}                              # N 2,988,996
+    yfcc10m-synth: {p001: [100], p01: [100], p02: [100], p05: [100], p1: [100]}
   interleave:                  # V1 vs V2 per backend and compile mode; triton vs official bloom
     - {by: algo, values: [linr_v1_filter_mask, linr_v2]}
     - {by: backend, values: [triton, official]}
   arms:
-    - {algo: linr_v1_filter_mask, backends: [triton]}
-    - {algo: linr_v2, backends: [triton]}
-    - {algo: linr_v3, backends: [triton], query: {candidate_pool_frac: [0.01, 0.05]}}
+    - {algo: linr_v1_filter_mask, backends: [triton], filter_kinds: [clause], datasets: {goodreads-synth: {}, arxiv-synth: {}, yfcc10m-synth: {}}}
+    - {algo: linr_v2, backends: [triton], filter_kinds: [clause], datasets: {goodreads-synth: {}, arxiv-synth: {}, yfcc10m-synth: {}}}
+    - {algo: linr_v1_filter_mask, backends: [triton], filter_kinds: [bloom], datasets: {goodreads-synth: {sweeps: [p0001, p0003, p001, p003, p01, p03, p1]}}}
+    - {algo: linr_v2, backends: [triton], filter_kinds: [bloom], datasets: {goodreads-synth: {sweeps: [p0001, p0003, p001, p003, p01, p03, p1]}}}
+    - algo: linr_v3
+      backends: [triton]
+      query: {candidate_pool_frac: [0.01, 0.05]}
+      datasets: {goodreads-synth: {sweeps: [p0001, p0003, p001, p003, p01, p03, p1]}, arxiv-corr-synth: {}}
     - algo: silvertorch
       backends: [triton]
       filter_kinds: [clause]
-      query: {n_probe: [24, 64, 128, 256, 512, 1024]}       # an explicit sweep, not n95 (user)
+      query: {n_probe: [24, 64, 256, 1024]}                 # an explicit sweep, not n95 (user; SYNTH-TRIM)
       datasets:                                             # n_lists from IVF-TUNE (real dataset's)
-        goodreads-synth: {build: {n_lists: [4096]}}
+        goodreads-synth: {build: {n_lists: [4096]}, query: {n_probe: [24, 64, 128, 256, 512, 1024]}}
         arxiv-synth: {build: {n_lists: [2048]}}
+        arxiv-corr-synth: {build: {n_lists: [2048]}, query: {n_probe: [24, 64, 128, 256, 512, 1024]}}
         yfcc10m-synth: {build: {n_lists: [4096]}, query: {n_probe: [24, 256, 1024]}}
     - algo: silvertorch
       backends: [triton]
       filter_kinds: [bloom]
       query: {n_probe: [24, 256]}
-      datasets: {goodreads-synth: {build: {n_lists: [4096]}}, arxiv-synth: {build: {n_lists: [2048]}}, yfcc10m-synth: {build: {n_lists: [4096]}}}
+      datasets: {goodreads-synth: {build: {n_lists: [4096]}, sweeps: [p0001, p0003, p001, p003, p01, p03, p1]}, arxiv-synth: {build: {n_lists: [2048]}, query: {n_probe: [24]}, sweeps: [p001, p1]}}
     - algo: silvertorch
       backends: [official]
       filter_kinds: [bloom]
       query: {n_probe: [24, 256]}
-      datasets: {goodreads-synth: {build: {n_lists: [4096]}}, arxiv-synth: {build: {n_lists: [2048]}}, yfcc10m-synth: {build: {n_lists: [4096]}}}
-    - {algo: postfilter, backends: [torch], query: {alpha: [1, 8]}}
-    # C3 (native torch vs our kernels) as a function of p, eager and compiled; goodreads + arxiv
-    # only, like filter's torch arms (add yfcc10m-synth: {} if C3 stays ambiguous)
-    - algo: linr_v1_filter_mask
-      backends: [torch]
-      sweeps: [p001, p01, p1]
-      datasets: {goodreads-synth: {}, arxiv-synth: {}}
-    - algo: linr_v2
-      backends: [torch]
-      sweeps: [p001, p01, p1]
-      datasets: {goodreads-synth: {}, arxiv-synth: {}}
-    - algo: linr_v1_filter_mask
-      backends: [torch]
-      sweeps: [p001, p01, p1]
-      build: {compile: [max-autotune]}
-      datasets: {goodreads-synth: {}, arxiv-synth: {}}
-    - algo: linr_v2
-      backends: [torch]
-      sweeps: [p001, p01, p1]
-      build: {compile: [max-autotune]}
-      datasets: {goodreads-synth: {}, arxiv-synth: {}}
+      datasets: {goodreads-synth: {build: {n_lists: [4096]}, sweeps: [p0001, p0003, p001, p003, p01, p03, p1]}, arxiv-synth: {build: {n_lists: [2048]}, query: {n_probe: [24]}, sweeps: [p001, p1]}}
+    - {algo: postfilter, backends: [torch], query: {alpha: [1, 8]}, datasets: {goodreads-synth: {sweeps: [p0001, p0003, p001, p003, p01, p03, p1]}, arxiv-corr-synth: {}}}
+    # C3 (native torch vs our kernels) as a function of p, eager and compiled: the pilot's goodreads-synth cells
+    - {algo: linr_v1_filter_mask, backends: [torch], sweeps: [p001, p01, p1], datasets: {goodreads-synth: {}}}
+    - {algo: linr_v2, backends: [torch], sweeps: [p001, p01, p1], datasets: {goodreads-synth: {}}}
+    - {algo: linr_v1_filter_mask, backends: [torch], sweeps: [p001, p01, p1], build: {compile: [max-autotune]}, datasets: {goodreads-synth: {}}}
+    - {algo: linr_v2, backends: [torch], sweeps: [p001, p01, p1], build: {compile: [max-autotune]}, datasets: {goodreads-synth: {}}}
 
-
-codesign:                      # S9 / F4b, C5: the official bloom path, partial vs full masks
-  # `bloom_path` exists on silvertorch / bloom / official only (anything else is a ConfigError);
-  # both arms carry it in `params`, so their keys never collide with filter / deep official cells.
+codesign:                      # S9 / F4b, C5: the bloom path, partial vs full masks
+  # `bloom_path` exists on silvertorch / bloom on official (Meta's partial-mask ops vs its full
+  # mask) and triton (C5-OURS: our fused scorer vs bloom_full_mask, then the same scorer); anything
+  # else is a ConfigError. Every cell carries it in `params`, so no key collides with filter / deep.
   datasets: [arxiv, goodreads]
   dims: [128]
   filter_kinds: [bloom]
@@ -177,7 +178,7 @@ codesign:                      # S9 / F4b, C5: the official bloom path, partial 
   interleave: [{by: bloom_path}]   # partial vs full, timed round-robin under --interleave
   arms:
     - algo: silvertorch
-      backends: [official]
+      backends: [official, triton]
       build: {bloom_path: [partial, full]}
       query: {n_probe: [8, 32, 128]}
       datasets:
@@ -242,4 +243,89 @@ bloomwidth-timed:              # one timed point per width
       build: {m_bits: [64, 128, 256, 512, 1024, 2048], k_hash: [5]}
     - {algo: silvertorch, backends: [official], build: {k_hash: [5]}}   # its one width
 
+v3bits:                        # V-V3BITS, C2: V3 at k_bits 64 vs our LN-8 default (k_bits = D = 128); LiNR's
+  # 512 needs a library change (declined 2026-10-08). k_bits is a harness build param: algos.build
+  # swaps V3's OPORP stage 1. The real-filter half reads goodreads `filter`'s kept sweeps.
+  # V3-BITS-PUBMED: PubMed d768 at k_bits 256 (divides 768; brackets LiNR's 512 from below) vs the default 768, clause only
+  # (bloom adds false-positive noise to a bits question), its `filter` kept sweeps; run at seed 0.
+  datasets: [goodreads-synth, goodreads, pubmed]
+  dims: [128, 768]
+  filter_kinds: [clause, bloom]
+  ks: [100, 1000]
+  batch_sizes: [1, 16]
+  seeds: [0, 1, 2]
+  sweeps:
+    goodreads: [c0_genre, c1_lang_reverse, all4]
+    pubmed: [c0_mesh, c3_journal_reverse, all5]
+    goodreads-synth: [p0001, p0003, p001, p003, p01, p03, p1]
+  ks_by_sweep:
+    goodreads-synth: {p0001: [100], p0003: [100]}
+  arms:
+    - algo: linr_v3
+      backends: [triton]
+      build: {k_bits: [64, 128]}
+      query: {candidate_pool_frac: [0.01, 0.05]}
+      datasets: {goodreads-synth: {}, goodreads: {}}
+    - algo: linr_v3
+      backends: [triton]
+      filter_kinds: [clause]
+      build: {k_bits: [256, 768]}                            # 768 = the default (k_bits = D)
+      query: {candidate_pool_frac: [0.01, 0.05]}
+      datasets: {pubmed: {}}
+
+router:                        # V-ROUTER (EXHIBITS idea #2): l_q pre-probe, exact V2 below the threshold, IVF above
+  # The threshold is fit on goodreads (the lq_threshold grid); arXiv and PubMed get the fitted value as a
+  # one-value slot afterwards (transfer). The two branches run beside it at the same code_version.
+  datasets: [goodreads]
+  dims: [128]
+  filter_kinds: [clause, bloom]
+  ks: [100, 1000]
+  batch_sizes: [1, 16]
+  seeds: [0, 1, 2]
+  sweeps:
+    goodreads: [c0_genre, c1_lang_reverse, all4]
+  arms:
+    - algo: router
+      backends: [triton]
+      build: {pre_n_probe: [8], lq_threshold: [0.02, 0.05, 0.1, 0.2]}
+      query: {n_probe: [24]}
+      datasets: {goodreads: {build: {n_lists: [4096]}}}
+    - {algo: linr_v2, backends: [triton]}
+    - algo: silvertorch
+      backends: [triton]
+      query: {n_probe: [24]}
+      datasets: {goodreads: {build: {n_lists: [4096]}}}
+
 bloom: {m_bits: 1024, k_hash: 5}   # shared defaults; a suite may override with its own `bloom:`
+
+# V-LAION30 (claims first, user 2026-10-10): how SilverTorch / V1 / V2 scale to 30 M under a site
+# filter (c0_domain, pass 5e-7 ... 4e-2) and a bucket conjunction (tags4). Seed 0, k 100, clause only;
+# SilverTorch alone at bs 1 (laion30m-bs1). n_lists ~ 4 sqrt(30 M) to a power of two; n_probe
+# under the 25 % cap, set from the calibration cells (docs/validation.md, laion30m).
+laion30m:
+  datasets: [laion30m]
+  dims: [256]
+  filter_kinds: [clause]
+  ks: [100]
+  batch_sizes: [16]
+  seeds: [0]
+  sweeps:
+    laion30m: [c0_domain, tags4]
+  interleave:
+    - {by: algo, values: [linr_v1_filter_mask, linr_v2]}
+  arms:
+    - {algo: linr_v1_filter_mask, backends: [triton]}
+    - {algo: linr_v2, backends: [triton]}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, query: {n_probe: [24, 1024, 4096]}}
+
+laion30m-bs1:
+  datasets: [laion30m]
+  dims: [256]
+  filter_kinds: [clause]
+  ks: [100]
+  batch_sizes: [1]
+  seeds: [0]
+  sweeps:
+    laion30m: [c0_domain, tags4]
+  arms:
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, query: {n_probe: [24, 1024, 4096]}}

@@ -172,7 +172,11 @@ def _row(rec: dict[str, Any], entry: dict[str, Any] | None) -> dict[str, Any]:
         if not isinstance(v, dict):
             row[f"quality_{m}"] = v
     for m, v in (entry or {}).items():
-        if m not in _PERF_SKIP:
+        if m == "kernel_scopes":
+            for scope, d in v.items():
+                row[f"perf_kernels_{scope}_us"] = d["us"]
+                row[f"perf_kernels_{scope}_calls"] = d["calls"]
+        elif m not in _PERF_SKIP:
             row[f"perf_{m}"] = v
     return row
 

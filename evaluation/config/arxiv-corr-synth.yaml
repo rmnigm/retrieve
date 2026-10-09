@@ -1,0 +1,14 @@
+# arXiv on cluster-correlated synthetic attrs (docs/system/datasets.md § Synthetic selectivity
+# attrs): arxiv-synth's data_dir, content and users_limit, the attrs from `eval-data synth-filter
+# --dataset arxiv --correlated`. Clause j is a k-means over the d128 items with round(1/p_j)
+# centroids, p (0.01, 0.03, 0.1); item value = its cluster, query value = its nearest centroid.
+# The clusters come from d128, so d128 is the only dim. Bloom, as on arxiv-synth, measures cost.
+data_dir: data/arxiv-papers
+content_dir: {128: content_d128}   # relative to data_dir
+dims: [128]
+users_limit: 10000
+filters:
+  attrs: item_attrs_corr.pt             # relative to data_dir
+  query_attrs: query_attrs_corr.pt
+  clause: {c001: [0], c003: [1], c01: [2]}
+  bloom: {c001: [0], c003: [1], c01: [2]}

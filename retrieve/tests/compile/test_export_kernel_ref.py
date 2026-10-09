@@ -37,6 +37,7 @@ import torch
 
 import retrieve.ops.triton  # noqa: F401  (registers torch.ops.retrieve.*)
 from retrieve.indexing.quantize import quantize_int8_global, quantize_oporp_1bit
+from retrieve.indexing.selectivity import bloom_bit_freq
 from retrieve.ops import reference
 from retrieve.ops.triton.codesigned_probe_score_exact import (
     codesigned_probe_score_exact,
@@ -150,13 +151,26 @@ def _op_args() -> dict[str, tuple]:
     counts = torch.tensor([64, 10, 0], device="cuda")
     item_bits = quantize_oporp_1bit(embs, seed=0)[0]
     q_bits = quantize_oporp_1bit(query, seed=0)[0]
+    scores = torch.randn(b, n, generator=g, device="cuda")
     return {
+        "bloom_full_mask": (qpos, bt),
         "bloom_match": (qb, sigs),
+        "bloom_match_scores": (scores, qb, sigs),
         "bloom_compact": (qb, sigs),
         "clause_mask": (attrs, rev, q_attrs),
+        "clause_mask_scores": (scores, attrs, rev, q_attrs),
         "clause_compact": (attrs, rev, q_attrs),
         "codesigned_probe_score": (query, *probe, gs, k, lay.width),
-        "codesigned_probe_score_bloom": (query, *probe, qpos, bt, gs, k, lay.width),
+        "codesigned_probe_score_bloom": (
+            query,
+            *probe,
+            qpos,
+            bt,
+            bloom_bit_freq(bt, lay.n),
+            gs,
+            k,
+            lay.width,
+        ),  # fmt: skip
         "codesigned_probe_score_exact": (query, *probe, attrs, rev, q_attrs, gs, k, lay.width),
         "fused_masked_knn_topk": (query, embs, pos, counts, k),
         "oporp_1bit_match_topk_full": (q_bits, item_bits, k),
@@ -166,7 +180,7 @@ def _op_args() -> dict[str, tuple]:
 
 def test_every_op_has_a_same_signature_reference_twin():
     schemas = _retrieve_schemas()
-    assert len(schemas) >= 10, sorted(schemas)
+    assert len(schemas) >= 12, sorted(schemas)
     assert sorted(schemas) == sorted(_op_args()), "an op has no input builder here"
     for name, schema in schemas.items():
         twin = inspect.signature(getattr(reference, name))
@@ -177,7 +191,7 @@ def test_every_op_has_a_same_signature_reference_twin():
 
 def test_no_op_declares_a_mutable_argument():
     schemas = _retrieve_schemas()
-    assert len(schemas) >= 10
+    assert len(schemas) >= 12
     for name, schema in schemas.items():
         assert schema.is_mutable is False, name
         assert all(a.alias_info is None for a in schema.arguments), name

@@ -8,7 +8,7 @@ import torch
 
 from retrieve.indexing.quantize import quantize_int8_global
 from retrieve.ops import reference
-from retrieve.ops.triton._host import tile_for_width
+from retrieve.ops.triton._host import width_tiles
 from retrieve.ops.triton.codesigned_probe_score import codesigned_probe_score
 from retrieve.ops.triton.codesigned_probe_score_exact import (
     CONFIGS,
@@ -126,19 +126,24 @@ def test_row_alone_equals_row_in_batch():
 @pytest.mark.parametrize("r", [0, 1])
 def test_across_tile_cutoff(r, d):
     """A probed cluster of ``2·block_p + r`` items (a full and a one-lane last tile) beside a
-    one-item cluster; ``block_p`` read from the kernel's shipped config at ``d``."""
-    bp = tile_for_width(CONFIGS, d).block_p
-    sizes = torch.tensor([2 * bp + r, 1, 5], device="cuda")
-    assert sizes[0] % bp == r
-    off = torch.cat([torch.zeros(1, dtype=torch.long, device="cuda"), sizes.cumsum(0)])
-    n = int(off[-1])
-    lay = ProbeLayout(torch.tensor([[0, 1], [1, 0]], device="cuda"), off,
-                      torch.randperm(n, device="cuda"), int(sizes[0] + sizes[2]), n)  # fmt: skip
-    codes, gs = quantize_int8_global(make_index(n, d))
-    attrs, rev, q_attrs = make_exact(n, 2, reverse="mixed")
-    args = [make_query(2, d), lay.probe_ids, off, codes, lay.sort_perm, attrs, rev, q_attrs, gs]
-    out = codesigned_probe_score_exact(*args, 32, lay.width)
-    assert_topk_equal(*out, *reference.codesigned_probe_score_exact(*args, 32, lay.width))
+    one-item cluster, for every shipped tile at ``d``."""
+    for cfg in width_tiles(CONFIGS, d):
+        bp = cfg.block_p
+        sizes = torch.tensor([2 * bp + r, 1, 5], device="cuda")
+        assert sizes[0] % bp == r
+        off = torch.cat([torch.zeros(1, dtype=torch.long, device="cuda"), sizes.cumsum(0)])
+        n = int(off[-1])
+        probe = torch.tensor([[0, 1], [1, 0]], device="cuda")
+        perm = torch.randperm(n, device="cuda")
+        lay = ProbeLayout(probe, off, perm, int(sizes[0] + sizes[2]), n)
+        codes, gs = quantize_int8_global(make_index(n, d))
+        attrs, rev, q_attrs = make_exact(n, 2, reverse="mixed")
+        args = [make_query(2, d), lay.probe_ids, off, codes, lay.sort_perm, attrs, rev, q_attrs, gs]
+        out = _codesigned_probe_score_exact_impl(
+            *args[:5], gs, 32, lay.width, item_clause_attrs=attrs, clause_is_reverse=rev,
+            query_clause_attrs=q_attrs, config=cfg,
+        )  # fmt: skip
+        assert_topk_equal(*out, *reference.codesigned_probe_score_exact(*args, 32, lay.width))
 
 
 def test_degenerate_rows_give_exact_sentinels():
