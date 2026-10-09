@@ -15,6 +15,9 @@ CV_LABEL = {
     "d67d6263": "v2.4",
     "472f2fc6": "v2.5",
     "20e83bfc": "v2.6",
+    "641ec3b8": "v2.7",
+    "78cfbc72": "v2.8",
+    "e8958bd2": "v2.9",
     "72e5a90c": "d1",
     "c0e42d1a": "d1-c0e4",
 }
@@ -52,23 +55,54 @@ def box(r):
 # Records timed off physical GPU 0 before the clock-device fix: their clock fields read GPU 0, so a
 # clock-driven `unstable` means clock-unknown; latencies and quality stand (controller, 2026-10-10;
 # pod d GPU 1 legs). Records carry no device field, so the legs are named here: (box, dataset prefix).
-CLOCK_UNKNOWN = (("38f5e1", "laion30m"),)
+# The fix (clock-device, d1d24d8) is in every harness from the campaign-v2.7 tag on (b0fbd11), so only
+# the legs before it qualify.
+CLOCK_UNKNOWN = (("38f5e1", "laion30m", ("v2.5", "v2.6")),)
 
 
 def clock_unknown(r):
-    return any(box(r) == b and r["dataset"].startswith(d) for b, d in CLOCK_UNKNOWN)
+    return any(
+        box(r) == b and r["dataset"].startswith(d) and cv(r) in vs for b, d, vs in CLOCK_UNKNOWN
+    )
 
 
 # SYNTH-TRIM widened the uniform synth attrs 7 -> 10 clauses, and until CLAUSE-SKIP (v2.7) the clause
 # kernels load every clause per item whatever the query uses (+~0.7 ms at bs 16 on 3 M, flat in p;
 # controller 2026-10-10). Records carry no width field: uniform synth records at v2.5 / v2.6 are the
 # 10-clause, pre-CLAUSE-SKIP ones; their clause timings carry the width cost, their recall does not.
-UNIFORM_SYNTH = ("arxiv-synth", "goodreads-synth", "yfcc10m-synth")
+UNIFORM_SYNTH = ("arxiv-synth", "goodreads-synth", "yfcc10m-synth", "laion30m-synth")
 
 
 def pre_clause_skip(r):
     return (
         r["dataset"] in UNIFORM_SYNTH and r["filter_kind"] == "clause" and cv(r) in ("v2.5", "v2.6")
+    )
+
+
+def official_build(r):
+    """How Meta's extension was built for an official record: the recorded flags once the env field
+    exists (campaign-v2.8 adds the -O3 build, OF-11), else "unrecorded" (shipped -O0 host code before
+    v2.8 unless the leg's validation row says otherwise)."""
+    if r["backend"] != "official":
+        return ""
+    b = r["env"].get("official_build")
+    if not b:
+        return "unrecorded"
+    return f"{b.get('nvcc_append_flags') or 'shipped flags'} so:{(b.get('so_sha256') or '?')[:8]}"
+
+
+# ST-WIDE (campaign-v2.9) changed SilverTorch Triton only at B * n_probe >= 512 (per-row probe table, and
+# at d768 the bloom two-pass); narrow configs' opcodes are unchanged. Wide timings before v2.9 are
+# provisional for any claim that leans on them (controller, 2026-10-11).
+PRE_ST_WIDE = ("v2", "v2.1", "v2.2", "v2.3", "v2.4", "v2.5", "v2.6", "v2.7", "v2.8")
+
+
+def pre_st_wide(r, bs):
+    return (
+        r["algo"] == "silvertorch"
+        and r["backend"] == "triton"
+        and cv(r) in PRE_ST_WIDE
+        and bs * r["params"].get("n_probe", 24) >= 512
     )
 
 

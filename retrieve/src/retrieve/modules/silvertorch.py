@@ -39,12 +39,15 @@ class PreparedFilter(NamedTuple):
     query-side work of the filter: hashing, expression parsing). Exactly one form is set:
     ``query_bits`` ``[B, C·k_hash]`` (bloom on triton / torch), ``query_attrs`` ``[B, C]`` int64
     (exact, every backend), or the official parser's CPU ``plans_data`` / ``plans_offsets`` (bloom
-    on official; Meta's search decodes plans on the host, kernels.md § official)."""
+    on official; Meta's search decodes plans on the host, kernels.md § official). On the partial
+    bloom path the plans are one per distinct expression and ``plan_index`` ``[B]`` (device int64)
+    maps each row to its plan."""
 
     query_bits: Tensor | None = None
     query_attrs: Tensor | None = None
     plans_data: Tensor | None = None
     plans_offsets: Tensor | None = None
+    plan_index: Tensor | None = None
 
     def select(self, rows: Tensor) -> PreparedFilter:
         """The prepared filter of a row subset (device ``index_select``; not for official plans)."""
@@ -409,12 +412,22 @@ class SilverTorch(RetrievalModule):
                 "is nothing to search; register_index with attributes or forward unfiltered"
             )
         cfg = self.official
-        data, offsets = official_mod.parse_plans(
-            official_mod.queries_to_expressions(query_clause_attrs),
-            cfg.n_stored_hashes,
-            cfg.max_sub_queries,
+        expressions = official_mod.queries_to_expressions(query_clause_attrs)
+        if cfg.bloom_path == "full":  # Meta's full search takes one plan per row
+            data, offsets = official_mod.parse_plans(
+                expressions, cfg.n_stored_hashes, cfg.max_sub_queries
+            )
+            return PreparedFilter(plans_data=data, plans_offsets=offsets)
+        # One plan per distinct expression, as a server batching shared filters would send.
+        unique = list(dict.fromkeys(expressions))
+        row_plan = {e: i for i, e in enumerate(unique)}
+        data, offsets = official_mod.parse_plans(unique, cfg.n_stored_hashes, cfg.max_sub_queries)
+        index = torch.tensor([row_plan[e] for e in expressions], dtype=torch.int64)
+        return PreparedFilter(
+            plans_data=data,
+            plans_offsets=offsets,
+            plan_index=index.to(query_clause_attrs.device, non_blocking=True),
         )
-        return PreparedFilter(plans_data=data, plans_offsets=offsets)
 
     def forward(
         self,
@@ -535,6 +548,7 @@ class SilverTorch(RetrievalModule):
                     self.cluster_sizes[probe_ids],
                     self.k_hash,
                     cfg.n_stored_hashes,
+                    prepared.plan_index,
                 )
             else:
                 filtering_bit_mask = official_mod.bloom_filtering_mask(

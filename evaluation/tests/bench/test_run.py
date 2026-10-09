@@ -30,8 +30,8 @@ import pytest
 import torch
 from click.testing import CliRunner
 
-from bench import algos, records, run, upload
 from bench import measure as bench
+from bench import records, run, upload
 from bench.config import NONE_SWEEP, load_matrix
 
 LAT = {"warmup": 2, "n_min": 4, "n_max": 4, "windows": 3}
@@ -386,29 +386,6 @@ def test_quality_holds_torch_cpu_threads_for_the_loop_and_restores_them():
         assert torch.get_num_threads() == max(2, before)
     finally:
         torch.set_num_threads(before)
-
-
-def test_quality_records_the_routers_local_pass_rate_and_route_per_query():
-    """V-ROUTER: the sidecar arrays carry each kept query's l_q and route (1.0 = exact V2), and the
-    record the share routed to the exact branch."""
-    g = torch.Generator().manual_seed(0)
-    n, d, rows = 256, 64, 20
-    x, q = torch.randn(n, d, generator=g), torch.randn(rows, d, generator=g)
-    attrs = torch.randint(0, 3, (n, 2, 1), generator=g)
-    qa = torch.randint(0, 3, (rows, 2), generator=g)
-    f = algos.build_filter("clause", attrs, backend="torch")
-    params = {"n_lists": 8, "n_probe": 4, "n_iter": 2, "pre_n_probe": 8, "lq_threshold": 0.3}
-    m = algos.build("router", x, k=4, backend="torch", filter_kind="clause", filter_mod=f,
-                item_attrs=attrs, params=params)  # fmt: skip
-    keep = torch.ones(rows, dtype=torch.bool)
-    keep[3] = False  # a skipped row is not scored and not in the sidecar
-    inputs = {"queries": q, "targets": torch.zeros(rows, 1, dtype=torch.long)}
-    assets = {"qa_s": qa, "keep": keep, "blob": None, "oracle_rows": None, "heldout_rows": keep}
-    out, per_q, _, _ = run.quality(m, inputs, assets, [4], torch.device("cpu"))
-    lq = m.local_pass_rate(q[keep], m.filter.prepare_queries(qa[keep]))
-    assert torch.equal(per_q["router_lq"], lq) and per_q["router_lq"].shape == (rows - 1,)
-    assert torch.equal(per_q["router_exact"], (lq < 0.3).float())
-    assert out["router_exact_share"] == pytest.approx(float((lq < 0.3).float().mean()))
 
 
 class _Prepared(torch.nn.Module):

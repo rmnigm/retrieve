@@ -8,7 +8,7 @@ mkdir -p "$R/logs"
 for s in laion30m laion30m-bs1; do
   run "grid-$s" campaign --dataset laion30m --dim 256 --suite $s --interleave --out "$R" --resume
 done
-cp -a "$L/logs/clocks.csv" "$R/logs/" && cp -a "$L"/logs/grid-*.log "$R/logs/"
+cp -a "$L/logs/clocks-gpu$GPU.csv" "$R/logs/" && cp -a "$L"/logs/grid-*.log "$R/logs/"
 $PY -c 'import sys; from pathlib import Path; from bench import records; print("aggregated", records.aggregate(Path(sys.argv[1])))' "$R"
 $PY "$HERE/cal_table.py" "$R" | tee "$R/table.md"
 run upload upload --results "$R" --path-in-repo campaign-v2.5/laion30m-filter --verify

@@ -1,7 +1,7 @@
 ---
 title: index
 created: 2026-09-26
-updated: 2026-10-07
+updated: 2026-10-11
 type: summary
 tags: [process]
 sources: [docs/]
@@ -9,7 +9,7 @@ sources: [docs/]
 
 # retrieve documentation wiki
 
-> Last updated: 2026-10-07 | Total pages: 14
+> Last updated: 2026-10-11 | Total pages: 17
 
 What is true now about the code and the project. Conventions, page
 format and tags: [SCHEMA.md](SCHEMA.md). Structural changes:

@@ -1,7 +1,7 @@
 ---
 title: storage
 created: 2026-09-26
-updated: 2026-10-07
+updated: 2026-10-11
 type: entity
 tags: [environment]
 sources: [infra/runpod/]
@@ -172,7 +172,7 @@ uv cache prune                          # uv's own wheel/source cache
 df -h /                                 # confirm
 ```
 
-## The queued datasets
+## The large datasets
 
 Size the pod's disks for these at `pod.sh up` (`--disk`, `--volume`):
 

@@ -55,7 +55,7 @@ updated from the exhibits control notes of 2026-10-10:
 | C6 | holds |
 | C7 | holds in part |
 | new: local pass rate l_q governs IVF recall | holds on goodreads and arXiv |
-| new: l_q router | mixed: helps on arXiv, not on goodreads; thresholds do not transfer |
+| new: l_q router | dropped: not on the recall-latency Pareto front on PubMed 10 M (decisions); one line in the paper as a tried idea at most |
 
 ## Reliability
 
@@ -104,6 +104,6 @@ Every "partly" or "gap" above, by the step that closes it:
 | **F-REPRO → D1-G** | citable verdicts, one code_version, one-command reproduction, multi-seed CIs (V-SEEDS folded in) |
 | **F5** | the in-graph scope argument and the ANN-library exclusion; parameter table; motivation and venue impact; deviations rewritten against C1-C7 |
 | **V-AX-SYNTH, V-YFCC, V-GR-DEEP, V-PUBMED, V-AX-CORR, D3, V-LAION30, V3-BITS-PUBMED, C5-OURS cells** | the remaining experiments behind C1-C6 and the new experiments |
-| **V-ROUTER, ROUTER-LIB, EXHIBITS #1/#2/#6** | the new insights (l_q router, QPS bands, defect ledger) |
+| **EXHIBITS #1/#2/#6** | the new insights (local pass rate, QPS bands, defect ledger); the l_q router was tried and dropped |
 | **H-ADDDATA** | "documented well enough", benchmark side |
 | **Needs the user** | REL-LIC decisions 1-6 ([release §5](release-and-licenses.md#5-decisions-for-the-user)); author contact and upstream issues |
