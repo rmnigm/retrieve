@@ -247,12 +247,6 @@ co-design.
   {64, 128}, pool {1 %, 5 %}, quality first, then the timed cells, to show
   the recall-vs-bits slope. LN-8 stays the campaign's setting. Pod 1.
   **≈ 1 GPU-h.**
-- [ ] **H-REPORT: two report fixes from EXHIBITS.** T3's ids column reads
-  "equal up to boundary ties" when the scores are equal and only the tied
-  id at the k-th cut differs; F3 one panel per sweep × bs (the d1 deep tree
-  draws ~70 legend entries in one panel); T3's kernel-only column from
-  `kernels_us` (every kernel, H-KSUM) instead of the top-8 sum in
-  `report._kernels`. Harness, CPU tests. Pod c's coder after H-PROVENANCE.
 - [ ] **ST-DLOOP: SilverTorch Triton probe scorers at wide embeddings**
   (user, 2026-10-09: match Meta's CUDA kernels). D3 PubMed at v2.1 tripped
   the surprise gate: Triton 2.80-2.98 ms vs official 1.99 ms at d768 (bs 16),
@@ -273,7 +267,8 @@ co-design.
   timed points on GPU 0).
 - [ ] **V-AX-SYNTH: arXiv synth**, uniform 7 points (the correlated
   variant is V-AX-CORR). F1/F2 3M panel. **≈ 15-45 GPU-h**
-  (the pilot measured 8.7 GPU-h at 0.8 M), GPU 0. Its timed cells run at
+  (the pilot measured 8.7 GPU-h at 0.8 M; re-projected ≈ 24-30 GPU-h, the
+  torch arms run ≈ 385 s a cell at 3 M), GPU 0. Its timed cells run at
   `campaign-v2.1`, at IVF-TUNE's arXiv `n_lists`.
 - [ ] **V-GR-DEEP: goodreads `deep`**, trimmed (`n_lists` {1024, 4096},
   `n_probe` {8, 16, 32, 64, 128}, V3 pool fractions); replaces D1-C.
@@ -287,7 +282,9 @@ co-design.
   V-AX-SYNTH on another GPU (three pods, no fourth: user, 2026-10-08); a
   collapse found on arXiv adds YFCC points afterwards. **≈ 31-54 GPU-h**
   (EXHIBITS run 1; V3 at 10 M is most of the range: one timed V3 cell first).
-  `synth` on pod c after V-AX-CORR (YFCC staged there), `deep` on pod 1.
+  `deep` on pod 1; `synth` split in arm-group chunks (`bench run --algo`, one
+  interleave unit never split), each taken by whichever of pod 1 and pod c
+  frees first (V-AX-SYNTH is now ≈ 24-30 GPU-h on pod c).
 - [ ] **V-SEEDS: arXiv and YFCC `filter`, the cells the manifest does not
   reuse.** arXiv: 117 cells (V1-V3 `c3_nversions` seeds 0-2; SilverTorch
   triton; official bloom; `postfilter` α {1, 8}; SilverTorch torch, plain
