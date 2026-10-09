@@ -332,6 +332,7 @@ def cv_tree(t):
         "v24": "v2.4 d67d6263",
         "v25": "v2.5 472f2fc6",
         "v26": "v2.6 20e83bfc",
+        "v27": "v2.7 641ec3b8",
         "d1": "d1 72e5a90",
     }.get(t, t.split("__")[0].replace("campaign-", "") if t.startswith("campaign-v") else t)
 
