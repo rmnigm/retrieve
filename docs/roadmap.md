@@ -236,6 +236,14 @@ co-design.
   p ≤ 0.001. Gates bit-exact + keep rule across p at d128 / d192. Re-times
   every d128 / d192 SilverTorch Triton cell (ledger). Last in the
   `campaign-v2.3` bundle; st-dloop, pod b.
+- [ ] **H-INDCACHE: the inductor cache always carries the code_version**
+  (pod b, 2026-10-09). Inductor's FX / AOT caches key a graph on the custom
+  op, not its body, so a `TORCHINDUCTOR_CACHE_DIR` reused across library
+  edits replays an old kernel in graph mode (it hid V1-FUSE's clause result
+  and voided V2-HIGHP's first graph numbers). `bench` keys its default dir
+  per code_version; make it append the code_version to a caller-set dir too,
+  and have the pytest conftest use a fresh dir per run. Harness, CPU tests.
+  Pod 1's runner between legs.
 - [ ] **V1-FUSE: LiNR V1 at small batch and its masking** (V-PROF3,
   `artifacts/v-prof3`). At bs 1 `torch.compile(max-autotune)` V1 runs 0.25 ms
   against our Triton 0.49: one fused masked mat-vec (152 µs) vs cuBLAS gemv
