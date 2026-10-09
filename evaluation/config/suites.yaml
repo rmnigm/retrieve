@@ -349,6 +349,25 @@ laion30m-bs1:
   arms:
     - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, query: {n_probe: [24, 1024, 4096]}}
 
+# laion30m on uniform synth attrs (user 2026-10-10: the real filters are too harsh), the rates yfcc10m-synth's `synth`
+# cells share, so pass rate is fixed across 0.8 / 3 / 10 / 30 M. Its own suite: `synth`'s dims would add d256 jobs
+# to goodreads- and arxiv-synth.
+laion30m-synth:
+  datasets: [laion30m-synth]
+  dims: [256]
+  filter_kinds: [clause]
+  ks: [100]
+  batch_sizes: [1, 16]
+  seeds: [0]
+  sweeps:
+    laion30m-synth: [p01, p02, p05, p1]
+  interleave:
+    - {by: algo, values: [linr_v1_filter_mask, linr_v2]}
+  arms:
+    - {algo: linr_v1_filter_mask, backends: [triton]}
+    - {algo: linr_v2, backends: [triton]}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, query: {n_probe: [24, 256, 1024]}}
+
 # C5 in the paper's regime (controller 2026-10-10, C5-META-CHECK): co-design partial vs full mask at 30 M,
 # Meta's official kernels and our Triton ones, interleaved per backend. Sub-queries per expression: 1
 # (c0_domain), 4 (tags4: size, CLIP, watermark, punsafe buckets). Eager (run with --mode eager); seed 0.
