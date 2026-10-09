@@ -15,6 +15,7 @@ import importlib
 import json
 import sys
 import time
+import traceback
 from pathlib import Path
 
 import torch
@@ -124,8 +125,11 @@ if len(sys.argv) > 3 and sys.argv[3] == "capture":
     pool, qa_pool = inputs.query_pool(
         inp, qa_s, skip, bs=16, seed=0, n_pool=2, device=DEV
     )
+    only = (
+        sys.argv[4] if len(sys.argv) > 4 else None
+    )  # "mode-path": one capture per process
     with torch.inference_mode():
-        for mode, path in PATHS:
+        for mode, path in [x for x in PATHS if only in (None, f"{x[0]}-{x[1]}")]:
             m = build("after", mode, path)
             prep = None if mode == "none" else m.prepare_queries(qa_pool[0])
             m(pool[0], prep)
@@ -138,6 +142,8 @@ if len(sys.argv) > 3 and sys.argv[3] == "capture":
                 result = "ok"
             except Exception as exc:  # noqa: BLE001 — what refuses capture is the record
                 result = f"{type(exc).__name__}: {str(exc).splitlines()[0][:300]}"
+                frames = traceback.extract_tb(exc.__traceback__)
+                result += " | at " + " < ".join(f.name for f in reversed(frames[-5:]))
             rows.append(
                 {
                     "dataset": ds,
