@@ -33,6 +33,8 @@ class ClauseMaskConfig:
 # Default tile config (tuned on A100/sm_80 against real-eval shapes); pass config= to
 # _clause_mask_impl to override.
 DEFAULT_CONFIG = ClauseMaskConfig(block_n=512, num_warps=2)
+# clause_mask_scores streams fp32 scores in and out: its own tile (kernels.md § clause_mask).
+SCORES_CONFIG = ClauseMaskConfig(block_n=128, num_warps=4)
 
 
 @triton.jit
@@ -171,12 +173,15 @@ def _clause_mask_impl(
     query_clause_attrs: Tensor,  # [B, C] int64
     *,
     config: ClauseMaskConfig | None = None,
+    scores: Tensor | None = None,
 ) -> Tensor:
     """Direct-launch body used by the offline tuner and unit tests. Takes an optional ``config=`` so
-    tile parameters can be swept; the public ``@triton_op``-wrapped ``clause_mask`` always uses
-    ``DEFAULT_CONFIG``."""
-    cfg = config if config is not None else DEFAULT_CONFIG
-    launch = _clause_mask_prep(item_clause_attrs, clause_is_reverse, query_clause_attrs, cfg=cfg)
+    tile parameters can be swept, and ``scores=`` for the ``clause_mask_scores`` form; the public
+    ops use ``DEFAULT_CONFIG`` / ``SCORES_CONFIG``."""
+    cfg = config if config is not None else DEFAULT_CONFIG if scores is None else SCORES_CONFIG
+    launch = _clause_mask_prep(
+        item_clause_attrs, clause_is_reverse, query_clause_attrs, cfg=cfg, scores=scores
+    )
     _clause_mask_kernel[launch.grid](**launch.kwargs)
     return launch.out
 
@@ -208,7 +213,7 @@ def clause_mask_scores(
     kernel as a ``[B, N]`` bool. Functional (a new buffer), so inductor has no in-place mask to
     copy."""
     launch = _clause_mask_prep(
-        item_clause_attrs, clause_is_reverse, query_clause_attrs, cfg=DEFAULT_CONFIG, scores=scores
+        item_clause_attrs, clause_is_reverse, query_clause_attrs, cfg=SCORES_CONFIG, scores=scores
     )
     wrap_triton(_clause_mask_kernel)[launch.grid](**launch.kwargs)  # keep inline (export)
     return launch.out

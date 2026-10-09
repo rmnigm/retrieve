@@ -786,8 +786,12 @@ clauses, reverse XOR, inactive override. The epilogue is a single
 `tl.store` of the `pass_mask` tile — no cumsum, no atomics.
 
 **Tile config.** `ClauseMaskConfig(block_n, num_warps, num_stages)` —
-shipped as `DEFAULT_CONFIG` on the kernel module; tests/tuner override
-via `_clause_mask_impl(..., config=)`. Re-tune on a new arch via
+shipped as `DEFAULT_CONFIG` (the bool form) and `SCORES_CONFIG` (the
+`clause_mask_scores` form, 128 lanes on 4 warps: the bool tile ran the
+fp32 form far slower, [validation](../validation.md#library-gates)) on
+the kernel module; tests/tuner override via `_clause_mask_impl(...,
+config=, scores=)`. `bloom_match_scores`' tile is swept through
+`bloom_match._bloom_match_scores_impl`. Re-tune on a new arch via
 `uv run tune-kernels clause-mask`.
 
 ## `bloom_match` — Bloom subset test

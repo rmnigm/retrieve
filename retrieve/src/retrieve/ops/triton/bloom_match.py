@@ -61,7 +61,9 @@ def _bloom_match_kernel(
         tl.store(out, pass_all, mask=valid)
 
 
-def _prep(qb: Tensor, sigs: Tensor, scores: Tensor | None) -> tuple[tuple, dict, Tensor]:
+def _prep(
+    qb: Tensor, sigs: Tensor, scores: Tensor | None, *, block_n: int = 128, num_warps: int = 4
+) -> tuple[tuple, dict, Tensor]:
     """Validation, output buffer and the launch args shared by both ops."""
     b, w = qb.shape
     n = sigs.shape[0]
@@ -75,7 +77,7 @@ def _prep(qb: Tensor, sigs: Tensor, scores: Tensor | None) -> tuple[tuple, dict,
         scores = scores.contiguous()
     out = torch.empty(b, n, dtype=torch.bool if scores is None else torch.float32, device=qb.device)
     src = out if scores is None else scores  # an unread pointer when not HAS_SCORES
-    grid, tiles_y = grid_batch_tiles(b, n, 128)
+    grid, tiles_y = grid_batch_tiles(b, n, block_n)
     kwargs = {
         "qb_ptr": qb,
         "sigs_ptr": sigs,
@@ -93,9 +95,10 @@ def _prep(qb: Tensor, sigs: Tensor, scores: Tensor | None) -> tuple[tuple, dict,
         "stride_sc_n": src.stride(1),
         "stride_o_b": out.stride(0),
         "stride_o_n": out.stride(1),
-        "BLOCK_N": 128,
+        "BLOCK_N": block_n,
         "WIDE": wide(sigs, out),
         "HAS_SCORES": scores is not None,
+        "num_warps": num_warps,
     }
     return grid, kwargs, out
 
@@ -119,4 +122,13 @@ def bloom_match_scores(scores: Tensor, qb: Tensor, sigs: Tensor) -> Tensor:
     inductor has no in-place mask to copy."""
     grid, kwargs, out = _prep(qb, sigs, scores)
     wrap_triton(_bloom_match_kernel)[grid](**kwargs)  # keep inline (export)
+    return out
+
+
+def _bloom_match_scores_impl(
+    scores: Tensor, qb: Tensor, sigs: Tensor, *, block_n: int, num_warps: int
+) -> Tensor:
+    """Direct launch of the ``bloom_match_scores`` form at a given tile, for sweeps."""
+    grid, kwargs, out = _prep(qb, sigs, scores, block_n=block_n, num_warps=num_warps)
+    _bloom_match_kernel[grid](**kwargs)
     return out
