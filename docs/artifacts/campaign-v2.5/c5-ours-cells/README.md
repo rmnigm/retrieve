@@ -34,15 +34,15 @@ State: [validation](../../../validation.md) row *C5-OURS cells*. Option and gate
 ## Results (median over seeds; full / partial)
 | | eager | graph, narrow probe | graph, widest probe bs 16 | peak MiB bs 16, partial → full |
 |---|---|---|---|---|
-| arXiv (≈ 2.6 M) | 1.28-1.29 | 0.99-1.21 (n_probe ≤ 32) | 0.85-0.93 (128) | 2.2 → 8.4 (8), 23 → 29 (128) |
-| goodreads | 1.28-1.29 | 1.00-1.04 (≤ 32) | 0.97 (128) | 2.6 → 4.4 (8), 11 → 13 (128) |
+| arXiv (3.0 M) | 1.28-1.29 | 0.99-1.21 (n_probe ≤ 32) | 0.85-0.93 (128) | 2.2 → 8.4 (8), 23 → 29 (128) |
+| goodreads (0.8 M) | 1.28-1.29 | 1.00-1.04 (≤ 32) | 0.97 (128) | 2.6 → 4.4 (8), 11 → 13 (128) |
 | PubMed 10 M | 1.12-1.31 | 1.05-1.12 (24) | 1.12 (1024) | 11.5 → 30.6 (24), 242 → 261 (1024) |
 
 Ids (`ids_sha256_canon`) and recall@100 are identical between the two paths in every cell.
 
 ## What it means for C5
-**Direction: holds on our kernels at 10 M, and mostly at 2-3 M.** The co-designed (partial) path is faster at PubMed 10 M
-at every point (graph 1.05-1.12×). At 2-3 M it is faster or level at narrow probes. At the widest probe it loses (full
+**Direction: holds on our kernels at 10 M, and mostly at 0.8-3 M.** The co-designed (partial) path is faster at PubMed 10 M
+at every point (graph 1.05-1.12×). At 0.8-3 M it is faster or level at narrow probes. At the widest probe it loses (full
 0.85-0.97×): the fused scorer evaluates about `C · k_hash` bloom words per slot, where the full path reads one mask word.
 
 **Magnitude: not reproduced.** Our largest co-design gain is 1.12× in graph mode and 1.31× eager. Meta reports 1.79-2.15×
