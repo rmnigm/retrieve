@@ -16,3 +16,4 @@
 ## [2026-10-10] decide | YFCC exact gate: per-dataset fp16-storage allowance at k 100, conditional on the probe (decisions § Datasets)
 ## [2026-10-10] decide | router kept only if on the recall-latency Pareto front between IVF and exact on PubMed 10 M
 ## [2026-10-10] decide | timings compare only within one box (pods differ in driver / CPU / power limit; V2 graph 15-28 % box effect)
+## [2026-10-10] fix | box-effect estimate withdrawn (confounded by the 7 -> 10-clause synth tables); roadmap CLAUSE-SKIP + ledger row

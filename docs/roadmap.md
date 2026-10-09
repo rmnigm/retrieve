@@ -149,6 +149,7 @@ leg runs one library.
 | V1 Triton perf before v2.3 | V1-FUSE | V1 perf |
 | every official perf record before v2.6 (C5 codesign official, T3 h2h, D3 / bloomwidth official) | OFFICIAL-REWORK (our adapter's per-forward host work left the timed call) | official perf |
 | every bloom-filter perf record before v2.6, every backend (SilverTorch, LiNR V1-V3, postfilter, router) | OFFICIAL-REWORK M1: the query-side filter encoding left the timed forward (now `query_prep_ms`) | bloom perf (forward) |
+| synth clause perf (V1, V2, SilverTorch exact) on the 10-clause synth tables before v2.7 | CLAUSE-SKIP (inactive clauses were loaded) | clause perf |
 | SilverTorch Triton bloom perf before v2.5 (all widths; 0 to −10 %) | ST-LANE (bit-exact; none / exact SASS unchanged) | Triton bloom perf |
 | V2 Triton perf at `D_PAD` ≤ 256 before v2.5 (incl. C1's crossover; 0.22-0.97 of v2.4) | V2-FILL (bit-exact) | V2 perf |
 | graph-mode ids of SilverTorch records at `408b1188` | quantize fix | ids (D1-G's id gate) |
@@ -340,6 +341,15 @@ co-design.
   then C5 official and T3 h2h re-run claims-first. st-dloop, pod b; C5's
   verdict on Meta's code waits for it. M1 is in `campaign-v2.6`; M2-M4
   (epilogue, index layouts, profiles, docs) remain.
+- [ ] **CLAUSE-SKIP: inactive clauses load nothing** (st-dloop, 2026-10-10):
+  `clause_pass` loaded every clause's item attrs per item and row, used or
+  not, so SYNTH-TRIM's 7 → 10-clause synth tables slowed every clause kernel
+  (V1 +15 %, V2 +30-39 % at bs 16 on arxiv-synth, flat in p). Mask the loads
+  of clauses the query does not use (bit-exact by construction) in
+  `clause_mask` / `_scores` / `_packed`, `clause_compact`,
+  `codesigned_probe_score_exact`. Gates: bit-exact, keep rule on synth and
+  real sweeps, SASS limited to the clause kernels, library suite. Tag
+  `campaign-v2.7`; then C1's synth V1 / V2 cells on pod 1. `dev/clause-skip`.
 - [ ] **ROUTER-LIB: the router as a library method** (the library goal,
   user 2026-10-10; only if V-ROUTER on PubMed puts it on the Pareto
   front, [decisions](decisions.md#datasets); WIP on `dev/router-lib`): the harness `router` arm's logic (unfiltered pre-probe
