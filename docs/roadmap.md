@@ -110,9 +110,10 @@ multi-GPU numbers are comparable at all.
 
 **Exploration first, one clean pass last** (user, 2026-10-09,
 [decisions](decisions.md#campaign-v2-user-2026-10-08)). While the library
-is still improving, legs run at the current tag (now `campaign-v2.7`,
-code_version `641ec3b8e09034647f426ca7f68204a1f2866536` = v2.6 + CLAUSE-SKIP + BLOOM-BUILD-CHUNK,
-Hub `campaign-v2.7/<dataset>-<suite>`; `campaign-v2.6` was `20e83bfc` (v2.5 +
+is still improving, legs run at the current tag (now `campaign-v2.8`,
+code_version `78cfbc721f0c7ab62831832b3791e1f30dc7357c` = v2.7 + OFFICIAL-REWORK M2-M4 (the official
+epilogue and plan dedup), Hub `campaign-v2.8/<dataset>-<suite>`; `campaign-v2.7`
+was `641ec3b8` (v2.6 + CLAUSE-SKIP + BLOOM-BUILD-CHUNK); `campaign-v2.6` was `20e83bfc` (v2.5 +
 OFFICIAL-REWORK M1, query prep out of the timed forward); `campaign-v2.5` was `472f2fc6` (v2.4 + ST-LANE + V2-FILL + C5-OURS); `campaign-v2.4` was
 `d67d6263` (v2.3 + ST-SKIP128), `campaign-v2.3` was `1258a63e`
 (v2.2 + ST-IDS + V2-HIGHP + V1-FUSE), `campaign-v2.2` was
@@ -229,17 +230,6 @@ co-design.
   filter-cluster alignment (GLS) to explain F2's real-vs-synth gap, with
   V-AX-CORR; Big-ANN-style QPS at recall 0.95 per selectivity band, and a
   reproduction defect ledger.
-- [ ] **V-ROUTER: a local-pass-rate router as a measured arm** (EXHIBITS idea
-  #2: IVF recall follows the local pass rate l_q, the share of a query's
-  unfiltered top-100 that pass; Spearman 0.82 / 0.48 vs 0.38 / 0.30 for the
-  global p; the counterfactual l_q router is within 5 % of the per-query
-  oracle on goodreads). Harness arm `router`: a cheap unfiltered SilverTorch
-  pre-probe (small n_probe, k 100) gives l_q per query, then exact (V2) below
-  a threshold, IVF above; the pre-probe's cost is timed in the arm. Fit the
-  threshold on goodreads, report it fixed on arXiv and PubMed (transfer).
-  Gates: recall equal to its two branches per query (ids from the routed arm),
-  harness suite. Beyond the original papers; F2 / T2 practical take. Pod 1's
-  runner after V-GR-DEEP. **≈ 1-2 GPU-h.**
 - [ ] **V-V3BITS (goodreads-synth done; goodreads' 48 cells deferred): V3 at LiNR's bit budget, next to our deviation** (C2 does
   not hold so far: recall −7-13 % at a 1 % pool, no gain at bs 1; our V3
   runs `k_bits` = D = 128 against LiNR's 512, LN-8). `k_bits` must divide D
@@ -326,21 +316,6 @@ co-design.
   (divides 768) brackets LiNR's 512 from below. PubMed `filter` kept
   sweeps, V3 triton, pool {1 %, 5 %}, seed 0. Pod b after V-SEEDS arXiv.
   **≈ 1-2 GPU-h.**
-- [ ] **OFFICIAL-REWORK: the official backend run as Meta intends** (user,
-  2026-10-10: "the algo speed should not suffer from the need to adapt the
-  code"). Our adapter did per-forward host work inside every timed call
-  (`queries_to_expressions` with a `.tolist()` sync, the CPU parse with the
-  plan cache off for timing, an 826 MiB `pack_mask` intermediate in exact
-  mode). Redesign: every index-side transform at `register_index`, every
-  query-side transform in `prepare_queries` (outside the timed call,
-  reported as `query_prep_ms` for every backend alike), a forward of Meta's
-  ops plus minimal glue with zero host syncs of ours, Meta's in-kernel
-  top-k if it has one, a packed exact-mask kernel, CUDA-graph capture
-  wherever Meta's ops allow. Gates: ids + scores `torch.equal` against the
-  current paths, library + harness suites, keep rule; tag `campaign-v2.6`;
-  then C5 official and T3 h2h re-run claims-first. st-dloop, pod b; C5's
-  verdict on Meta's code waits for it. M1 is in `campaign-v2.6`; M2-M4
-  (epilogue, index layouts, profiles, docs) remain.
 - [ ] **H-ARMFREE: one `bench run` frees each arm before the next** (2026-10-10:
   laion30m and V-ROUTER PubMed OOMed when one process ran several arms; each
   arm's 10 M-30 M index stayed resident and the next arm's allocation
@@ -349,19 +324,23 @@ co-design.
   near the shared inputs'); drivers stop needing one process per arm.
   Gates: harness suite; one multi-arm 10 M run without OOM; records
   byte-identical to a per-arm run on two cells. v-pod1-run (CPU first).
+- [ ] **OFFICIAL-O3: Meta's extension built with `-O3`** (OF-11: Meta's setup passes no
+  `-O`, host code at gcc `-O0`; `-O3` is 0.77-0.98 of the shipped time, outputs
+  bit-identical). New official legs build their own venv with
+  `NVCC_APPEND_FLAGS='-O3 -Xcompiler -O3'`; the record must say which build ran
+  (an env field, harness). The shared venvs are rebuilt only between legs.
+- [ ] **ST-WIDE: our d768 probe scorer at wide probes** (C7 at v2.7, PubMed bloom
+  `c0_mesh`, bs 16 eager: official / Triton 0.705 at `n_probe` 1024, while
+  Triton wins 1.7-2.8x everywhere else; `_codesigned_probe_score_kernel`
+  dominates). Find why Meta's `process_cluster<…, 768, …>` scales better at
+  `B · n_probe` ≈ 16 k clusters (tile shape, D-loop order, occupancy at
+  D_PAD 1024, the bloom word loads) and fix ours: bit-exact, keep rule across
+  `n_probe` {24, 256, 1024} × bs {1, 16} at d768 and unchanged at d128 / d192.
+  st-dloop, after OFFICIAL-O3's env field; tag after its gate.
 - [ ] **C5-OURS-30M + C1 re-time at v2.7**: codesign-laion30m's triton half
   (our partial vs full at 30 M, beside Meta's, pod d; per-sweep processes until
   H-ARMFREE lands) and arxiv-synth's V1 / V2 cells re-timed on pod 1 (C1's 3 M
   crossover without the clause-width cost).
-- [ ] **ROUTER-LIB: the router as a library method** (the library goal,
-  user 2026-10-10; only if V-ROUTER on PubMed puts it on the Pareto
-  front, [decisions](decisions.md#datasets); WIP on `dev/router-lib`): the harness `router` arm's logic (unfiltered pre-probe
-  → l_q → V2 below the threshold, SilverTorch above) as a `retrieve`
-  module with its docs page, the split done on the device with no host
-  sync so the arm can be CUDA-graph captured (V-ROUTER at 0.8 M: the
-  eager-only host split is why it never beat graph V2); the harness arm calls it; gates: the arm's
-  records unchanged (ids + scores `torch.equal`), library + harness suites.
-  After V-ROUTER's goodreads fit.
 - [ ] **REL-LIC: license audit and the public-release plan** (user,
   2026-10-10, ECIR Availability): per dataset (goodreads, arXiv, PubMed /
   MedCPT, YFCC-10M, Re-LAION, the synth attrs) whether the derived data may

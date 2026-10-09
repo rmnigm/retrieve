@@ -349,23 +349,6 @@ current `k` at every forward, so perf at `k` and quality at `k` (the
 per-`k` pass, `run.PER_K_QUALITY`) measure the same pool. Torch backend
 only, clause and bloom filter kinds; capturable.
 
-### The router arm
-
-`router` ([`bench/router.py`](../../evaluation/bench/router.py), roadmap V-ROUTER) routes each query
-by its **local pass rate** `l_q`: the share of its unfiltered top-100 that its filter admits (EXHIBITS
-idea #2: IVF recall follows `l_q`, not the global pass rate). `algos.build("router", …)` assembles
-three parts with the ordinary builders and one seed, so both SilverTorch indexes share one k-means:
-an unfiltered SilverTorch pre-probe (`pre_n_probe`, k 100), a filtered SilverTorch (`n_lists`,
-`n_probe`, the IVF branch) and exact LiNR V2 on the standalone filter. `forward` runs the pre-probe,
-takes `l_q` from the filter's `evaluate_subset` on its 100 ids, sends the rows with `l_q <
-lq_threshold` to V2 and the others to the IVF branch (each on its own sub-batch), and scatters the
-results back; the pre-probe is inside `forward`, so the arm's timing includes it. The split is
-data-dependent: `capturable = False`, so `graph` records `not_capturable`. Build params
-`pre_n_probe`, `lq_threshold` (router only, both required, a `ConfigError` otherwise); query param
-`n_probe` (the IVF branch). The quality pass writes `router_lq` and `router_exact` (1.0 = V2) per
-kept query to the per-query sidecar and `quality.router_exact_share` to the record. Triton and
-torch backends, clause and bloom.
-
 ### Query preparation
 
 Every filtered arm encodes its batch's query attrs once, outside the timed
@@ -378,7 +361,6 @@ the algorithm; preparation is reported, not hidden):
 | `silvertorch` official, bloom | Meta's parsed plans on the CPU (`plans_data` / `plans_offsets`) |
 | `silvertorch`, exact (every backend) | the int64 attrs (`query_attrs`) |
 | LiNR V1-V3, `postfilter` | the standalone filter's encoding: bloom query signatures, or the int64 attrs |
-| `router` | the filter's encoding and its IVF branch's `PreparedFilter` |
 
 `run.perf` prepares every batch of a cell's fixed pool before its first
 timed call (`run.prepare_pool`), each module with its own encoding. Every
@@ -438,7 +420,6 @@ unfiltered `quality` suite ([decisions](../decisions.md#harness)); synth's
 | `bloomwidth` | goodreads `c0_genre`, arxiv kept, pubmed `c0_mesh` | `silvertorch` triton bloom `m_bits` {64 … 2048} × `k_hash` {3, 5}; official bloom `k_hash` {3, 5} (its width is `OfficialConfig.b_multiplier`, not `m_bits`); bs 16; quality only (`perf: false`) | F4a, C4 |
 | `bloomwidth-timed` | the same | the same widths at `k_hash` 5 (official: its one width), k 100, bs 16, timed | F4a |
 | `v3bits` | goodreads-synth (its first 7 rates), goodreads (`filter`'s kept sweeps); pubmed d768 (`filter`'s kept sweeps, clause only) | V3 triton only, `candidate_pool_frac` {0.01, 0.05}, seeds 0-2, bs {1, 16}, k {100, 1000} (synth's `ks_by_sweep`); goodreads `k_bits` {64, 128}, clause + bloom; pubmed `k_bits` {256, 768} (256 divides 768 and sits below LiNR's 512; 768 is the default, the comparison), clause only (bloom adds false-positive noise to a bits question), one arm per side so the goodreads keys are unchanged. LiNR's 512 bits at d128 would need a library change (declined) | C2 (V-V3BITS, V3-BITS-PUBMED) |
-| `router` | goodreads (kept sweeps; arXiv gets the fitted threshold afterwards); pubmed d768 (V-ROUTER PubMed, the keep/kill Pareto test: clause kept sweeps, k 100 via `ks_by_sweep`, `lq_threshold` {0.05 (goodreads' fit), 0.2}, and in the same leg the IVF curve SilverTorch 4096 at `n_probe` {24, 64, 256, 1024} plus exact V1 and V2; its own arms, so goodreads' keys are unchanged) | `router` triton, `pre_n_probe` 8, `lq_threshold` {0.02, 0.05, 0.1, 0.2}, IVF branch `n_lists` 4096 / `n_probe` 24; its branches V2 triton and SilverTorch triton (4096 / 24) beside it; clause + bloom, seeds 0-2, bs {1, 16}, k {100, 1000} | F2 / T2 practical take (V-ROUTER) |
 | `h2h` | goodreads `c0_genre`, arxiv `c0_maincat`, `none` + `bloom`, d128 | `silvertorch` triton and official with `score_path` {fp16, int32}, `n_probe` 24, bs {1, 16}, k {100, 1000}, seeds {0 … 4} (the repeats); one interleave group of the three arms; run with `--interleave --profile` | T3, C7 (H2H-final) |
 | `laion30m`, `laion30m-bs1`, `laion30m-synth` | laion30m d256 `c0_domain`, `tags4` (pass ≈ 0.0095 / 0.0027); laion30m-synth `p01 p02 p05 p1` (its own suite: `synth`'s dims would add d256 jobs to goodreads- and arxiv-synth). Seed 0, k 100, clause | V1, V2 triton (bs 16; synth bs 1 + 16); `silvertorch` triton `n_lists` 16384, `n_probe` {24, 1024, 4096} (4096 = the 25 % cap = tags4's n95; c0_domain reaches 0.903 there), bs 16 and (`laion30m-bs1`) bs 1; synth {24, 256, 1024}. At 30 M one V1 + V2 process reserves 68 GB per sweep: run one process per sweep | scaling 10 M → 30 M (V-LAION30) |
 

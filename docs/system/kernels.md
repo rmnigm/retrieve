@@ -1586,6 +1586,43 @@ and the harness records it as `query_prep_ms`
 syncs with the filter already prepared. The official arm loses at small `P` / `B=1` for host reasons, so
 the kernel-only tier of the head-to-head is what compares kernels.
 
+**Run as Meta intends (OFFICIAL-REWORK).** Everything query-side runs in
+`prepare_queries`, outside the timed forward:
+- **bloom:** the expressions are rendered and parsed into CPU plans. On the
+  partial path there is one plan per distinct expression, plus a device
+  row → plan index (`query_plan_index`, which Meta's partial search
+  accepts); Meta's full search takes one plan per row.
+- **exact:** the int64 attrs.
+
+The forward is Meta's ops plus our glue:
+- the probe (centroid matmul + `topk`);
+- **ours, filling a step Meta does not provide:** `clause_mask_packed` for
+  exact;
+- Meta's search and scorer;
+- **"Epilogue":** a top-k on the scorer's raw `[B, M]` (int32 dots or
+  `fp16(dot / divisor)`, pads at the dtype's minimum), then only the
+  `[B, k]` winners are dequantized and mapped through `sort_perm`.
+
+Dequantizing multiplies by positive scales, so the winners and their scores
+are bit-identical to dequantizing every slot first, ties aside.
+
+Upstream has no top-k inside the scorer: its tests sort the compact output
+themselves. `is_topk` is a separate op, a full row sort plus a `≥ kth`
+membership mask whose ties exceed k, so it is not used.
+
+Our part of the forward issues **no host sync**. The first sync on every
+path is inside Meta's op:
+- `fused_kmean_ann` reads `remaining_docs` back (`fused_kmean_ann_cuda.cu:465`);
+- the partial scorer reads its warp totals back (`:2054, :2072`);
+- the partial search reads its chunk sums back
+  (`bloom_index_search_cuda.cu:1495`);
+- both searches decode the plans on the host per call (`:1045`).
+
+So a whole-forward CUDA-graph capture fails on every path, and the arm stays
+eager (OF-3). Meta's released `setup.py` compiles the host side of its `.cu`
+files at gcc `-O0` (OF-11). The same sources at `-O3` are bit-identical and
+0.77-0.98× as fast ([OFFICIAL-REWORK](../artifacts/official-rework/README.md)).
+
 **Measured.** The head-to-head against Triton (end to end, kernel-only,
 phase 2, parity, memory) is in
 [validation](../validation.md#official-against-our-triton-reimplementation-citable-contested),
