@@ -3,20 +3,23 @@
 Roadmap Phase V reruns and legs on pod 1, GPU 0, at the `campaign-v2.1` tag's code_version (each
 driver refuses unless `bench env` equals both the tag's `retrieve/src/retrieve` tree hash and
 *evaluation/campaign.yaml*'s default). Oracle blobs of the leg's datasets built at another
-code_version move to `<gt_dir>/pre-v21/` first, so `bench oracle` rebuilds them at the tag. Results tree
+code_version move to `<gt_dir>/before-<code_version[:8]>/` first, so `bench oracle` rebuilds them at the tag. Results tree
 `/scratch/campaign-v21/results`; uploads `campaign-v2.1/<dataset>-<suite>` ([hub-index](../../hub-index.md)).
 State per leg in [validation](../../../validation.md). NOT CITABLE until D1-G.
 
 | file | what |
 |---|---|
 | [`common.sh`](common.sh) | sourced: env, code_version check, 1 Hz clock trace, `step` (a pinned `bench` subcommand), `stream` (one `bench run --resume --interleave` with its log), `old_oracles` |
-| [`move_old_oracles.py`](move_old_oracles.py) | moves blobs whose `code_version` is not the tag's into `pre-v21/` (never deletes) |
+| [`move_old_oracles.py`](move_old_oracles.py) | moves blobs whose `code_version` is not the tag's into `before-<code_version[:8]>/` (never deletes; v2.1 legs used `pre-v21/`) |
 | [`h2h.sh`](h2h.sh) | H-PROFILE + H2H-FINAL: `h2h` on goodreads + arXiv, whole, `--interleave --profile`, one pass |
 | [`h-ksum.sh`](h-ksum.sh) | H-KSUM's profile-only `h2h` pass (goodreads + arXiv, `--interleave --profile --skip-quality`, every kernel summed) into `/scratch/h-ksum/results`; artifact `artifacts/h-ksum-h2h`, not a leg |
+| [`v-v3bits.sh`](v-v3bits.sh), [`v3bits_quality.py`](v3bits_quality.py) | V-V3BITS: `v3bits` on goodreads-synth + goodreads, a `--skip-perf` quality pass and its recall table, then the whole suite timed |
 | [`v-codesign.sh`](v-codesign.sh) | V-CODESIGN, goodreads half (pod c runs arXiv): `codesign` on goodreads, whole |
 | [`gr-reruns.sh`](gr-reruns.sh) | V-RERUN-V21: goodreads `filter` and goodreads-synth `synth` SilverTorch arms (triton + official, torch), V1 + V2 Triton (paired, one interleave group), V3 Triton |
 | [`v-gr-deep.sh`](v-gr-deep.sh) | V-GR-DEEP: goodreads `deep` |
-| [`v-yfcc.sh`](v-yfcc.sh) | V-YFCC: yfcc10m-synth `synth`, then yfcc10m `deep` |
+| [`v-yfcc-deep.sh`](v-yfcc-deep.sh), [`yfcc_calib_config.py`](yfcc_calib_config.py) | V-YFCC deep: one timed V3 calibration cell at 10 M (scratch config and tree), then the whole yfcc10m `deep` suite; the synth half runs as chunks ([`../v-yfcc/`](../v-yfcc/README.md)) |
+| [`boundary-gates.sh`](boundary-gates.sh), [`gate_smoke.py`](gate_smoke.py) | the V-V3BITS boundary: GPU library suite on the main checkout (H-INDCACHE's gate), then the campaign-v2.3 candidate (dev/ctl-v23, library 1258a63e): its GPU library suite on a fresh inductor cache and goodreads `filter` smoke cells per changed path, eager + graph, capture checked |
+| [`chain-v22.sh`](chain-v22.sh) | the v2.2 queue after V-V3BITS: V-GR-DEEP, V-YFCC deep, the synth chunks, one lock hold, stop file between legs |
 | [`v-seeds-yfcc.sh`](v-seeds-yfcc.sh) | V-SEEDS, YFCC half: yfcc10m `filter`, every arm |
 | [`h2h-diag.sh`](h2h-diag.sh) | H2H protocol diagnostic (controller addendum): goodreads `c0_genre` bloom bs 16 k 100 seed 0, the three h2h arms (a) interleaved + `--profile`, (b) interleaved, (c) one process per arm, orders abc / cba / bac; scratch trees, not a leg |
 | [`h2h_diag_config.py`](h2h_diag_config.py), [`h2h_diag_summary.py`](h2h_diag_summary.py) | its scratch config dirs (the real `h2h` suite cut to that cell) and its per-arm table |
@@ -53,3 +56,6 @@ GPU checks, h2h with the profiler fix, V-GR-DEEP, V-YFCC, V-SEEDS' YFCC half. V-
   Summary via [`../h2h-final/h2h_summary.py`](../h2h-final/h2h_summary.py).
 - **H-KSUM profile-only pass** (2026-10-09, staging `0627961`, `f01255f1`, 0.91 GPU-h): 60 records with the full kernel sum;
   official / Triton device time 1.5-2.2 everywhere; Hub `artifacts/h-ksum-h2h` ([validation](../../../validation.md)).
+- **V-V3BITS, goodreads-synth** (2026-10-09, staging `0693399`, `0d23c615`, 4.06 GPU-h): 168 / 168 ok; `k_bits` 64 loses 10-30 points
+  of recall@100 at p ≥ 0.01 for ≤ 3 % latency; goodreads (48 cells) deferred; Hub `campaign-v2.2/goodreads-synth-v3bits`.
+  The first run's `--skip-perf` pass was stopped at 128 / 168 (duplicate work); `v-v3bits.sh` keeps it behind `QUALITY=1`.

@@ -1,5 +1,5 @@
-"""Move every oracle blob of the given datasets not built at CODE_VERSION into <gt_dir>/pre-v21/
-(controller: oracles for v2.1 legs are rebuilt at v2.1; old blobs are moved, never deleted).
+"""Move every oracle blob of the given datasets not built at CODE_VERSION into <gt_dir>/before-<CODE_VERSION[:8]>/
+(controller: oracles are rebuilt at a leg's tag; old blobs are moved, never deleted).
 Usage (from evaluation/): python move_old_oracles.py CODE_VERSION DATASET [DATASET ...]"""
 
 import sys
@@ -19,6 +19,6 @@ for gt in sorted(g for d in dirs for g in d.glob("gt_d*")):
             "code_version"
         ]
         if built != cv:
-            (gt / "pre-v21").mkdir(exist_ok=True)
-            p.rename(gt / "pre-v21" / p.name)
+            (gt / f"before-{cv[:8]}").mkdir(exist_ok=True)
+            p.rename(gt / f"before-{cv[:8]}" / p.name)
             print(f"moved {p} (built at {built[:8]})")
