@@ -143,17 +143,22 @@ synth:                         # pass rate as the x axis (F1, F2, C1, C2, C6)
       build: {compile: [max-autotune]}
       datasets: {goodreads-synth: {}, arxiv-synth: {}}
 
-n95:                           # pubmed's n95 source (it runs no deep / synth)
+n95:                           # pubmed's and arxiv's n95 source (no deep on either; synth sweeps n_probe itself)
   perf: false                  # quality only: its records are `ok` without timing
-  datasets: [pubmed]
-  dims: [768]
+  datasets: [pubmed, arxiv]
+  dims: [128, 768]
   filter_kinds: [clause]
   ks: [100, 1000]
   batch_sizes: [16]
   seeds: [0, 1, 2]
-  sweeps: {pubmed: [all5]}     # the median pass rate of its three kept sweeps
+  sweeps:                      # the median achieved pass rate of the three kept filter sweeps
+    pubmed: [all5]             # 0.018 (c0_mesh 0.0002, c3_journal_reverse 0.9993)
+    arxiv: [c0_maincat]        # 0.136 (c3_nversions 0.444, all4 0.0094)
   arms:
-    - {algo: silvertorch, backends: [triton], query: {n_probe: [8, 16, 32, 64, 128]}}
+    - algo: silvertorch
+      backends: [triton]
+      query: {n_probe: [8, 16, 32, 64, 128]}
+      datasets: {pubmed: {}, arxiv: {query: {n_probe: [8, 16, 24, 32, 48, 64, 96, 128]}}}
 
 codesign:                      # S9 / F4b, C5: the official bloom path, partial vs full masks
   # `bloom_path` exists on silvertorch / bloom / official only (anything else is a ConfigError);

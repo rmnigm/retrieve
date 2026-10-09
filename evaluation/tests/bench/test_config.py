@@ -356,6 +356,7 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("synth", "arxiv-synth"): (303, 534),
     ("synth", "yfcc10m-synth"): (165, 285),
     ("n95", "pubmed"): (3, 15),
+    ("n95", "arxiv"): (3, 24),
     ("codesign", "arxiv"): (18, 54),
     ("codesign", "goodreads"): (18, 54),
     ("bloomwidth", "goodreads"): (42, 42),
@@ -510,6 +511,13 @@ def test_codesign_bloomwidth_and_n95_suites():
         ("silvertorch", "triton", "clause", "all5")
     }
     assert {(j.ks, j.batch_sizes) for j in n95} == {((100, 1000), (16,))}
+    ax = _real("n95", "arxiv")
+    assert {(j.dim, j.algo, j.backend, j.filter_kind, j.sweep) for j in ax} == {
+        (128, "silvertorch", "triton", "clause", "c0_maincat")
+    }
+    assert {q["n_probe"] for j in ax for q in j.query} == {8, 16, 24, 32, 48, 64, 96, 128}
+    assert {q["n_probe"] for j in n95 for q in j.query} == {8, 16, 32, 64, 128}
+    n95 += ax
     # quality-only by declaration (perf: false), so their records are ok, not partial
     assert not any(j.timed for j in n95 + bw) and all(j.timed for j in timed + cd)
 
