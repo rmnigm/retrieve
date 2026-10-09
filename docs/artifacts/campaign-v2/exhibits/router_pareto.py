@@ -10,7 +10,7 @@ piecewise-linearly in recall between measured points (never extrapolated), has r
 <= it, one of them strictly. Latency is each arm's served mode: graph where it has one, else eager
 (the router is eager-only); the verdict is also given eager-vs-eager. The router is kept if at least
 one of its points is undominated in the served-mode comparison on every sweep of the leg, at bs 1 or
-bs 16 (both reported). Same code_version and same tree only: never across boxes.
+bs 16 (both reported). Same code_version, tree and box only: never across boxes (decisions, 2026-10-10).
 """
 
 import collections
@@ -18,7 +18,7 @@ import csv
 import sys
 from pathlib import Path
 
-from load import cv, load, perf, recall
+from load import box, cv, load, perf, recall
 
 ROUTER, IVF, EXACT = "router", "silvertorch", ("linr_v1_filter_mask", "linr_v2")
 
@@ -65,7 +65,7 @@ def main():
     ]
     g = collections.defaultdict(lambda: collections.defaultdict(list))
     for r in recs:
-        g[(cv(r), r["_tree"], r["filter_kind"], r["sweep"])][r["algo"]].append(r)
+        g[(cv(r), r["_tree"] + "@" + box(r), r["filter_kind"], r["sweep"])][r["algo"]].append(r)
     rows, verdict = [], collections.defaultdict(list)
     for (c, tree, fk, sw), arms in sorted(g.items()):
         if ROUTER not in arms or IVF not in arms:

@@ -10,7 +10,7 @@ import statistics as st
 import sys
 from pathlib import Path
 
-from load import EXACT, arm, cv, key, load, pass_p, perf, recall, short
+from load import EXACT, arm, box, cv, key, load, pass_p, perf, recall, short
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "evaluation"))
 import yaml  # noqa: E402
@@ -398,7 +398,7 @@ def cross(recs, md):
             ra, rb = recall(a, kk), recall(b, kk)
             pe = [perf(x, 16, kk, "eager") for x in (a, b)]
             pg = [perf(x, 16, kk, "graph") for x in (a, b)]
-            g = summ[(cv(a), a["suite"], cv(b), b["suite"], k[0], a["backend"])]
+            g = summ[(cv(a), a["suite"], cv(b), b["suite"], k[0], a["backend"], box(a), box(b))]
             g["n"].append(1)
             if ra is not None and rb is not None:
                 g["dr"].append(abs(ra - rb))
@@ -419,12 +419,20 @@ def cross(recs, md):
                     f"k{kk} {ra:.5f} vs {rb:.5f}",
                 )
     md.append("\n**Summary: b / a per pair of places** (bs 16 p50 medians; max |Δ recall|)\n")
-    md.append("| a | b | dataset | backend | pairs | eager b/a | graph b/a | max abs Δ recall |")
-    md.append("|---|---|---|---|---|---|---|---|")
-    for (ca, sa, cb, sb, ds, be), g in sorted(summ.items()):
+    md.append(
+        "| a | b | dataset | backend | box a / b | pairs | eager b/a | graph b/a | max abs Δ recall |"
+    )
+    md.append("|---|---|---|---|---|---|---|---|---|")
+    for (ca, sa, cb, sb, ds, be, xa, xb), g in sorted(summ.items()):
         f = lambda x: f"{st.median(x):.3f}" if x else "-"  # noqa: E731
+        # timings compare only within one box (decisions, 2026-10-10); recall compares anywhere
+        tm = (
+            (f(g["e"]), f(g["g"]))
+            if xa == xb
+            else ("cross-box, not compared", "cross-box, not compared")
+        )
         md.append(
-            f"| {ca}:{sa} | {cb}:{sb} | {ds} | {be} | {len(g['n'])} | {f(g['e'])} | {f(g['g'])} "
+            f"| {ca}:{sa} | {cb}:{sb} | {ds} | {be} | {xa} / {xb} | {len(g['n'])} | {tm[0]} | {tm[1]} "
             f"| {max(g['dr']) if g['dr'] else '-'} |"
         )
     md.append("\n**Co-design: partial and full recall must be equal (S-13)**\n")

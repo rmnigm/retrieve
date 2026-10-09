@@ -43,6 +43,12 @@ def load(trees):
     return out
 
 
+def box(r):
+    """The box a record ran on (`env.host`, first 6 chars). Timings compare only within one box
+    (decisions, 2026-10-10)."""
+    return (r["env"].get("host") or "?")[:6]
+
+
 def arm(r):
     p = {k: v for k, v in r["params"].items()}
     s = f"{ALGO.get(r['algo'], r['algo'])}/{r['backend']}"
