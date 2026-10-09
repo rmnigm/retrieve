@@ -606,7 +606,7 @@ harness.
 after a library edit compiles afresh instead of replaying a stale
 `@triton_op` body ([testing](testing.md#running)). A
 `TORCHINDUCTOR_CACHE_DIR` the caller set wins (the pods' per-job
-`/scratch/inductor/<job>`). The caller's value is read in
+directory, which must then carry the code_version itself: [storage](storage.md)). The caller's value is read in
 `bench/__init__.py`, before any `bench` module imports `torch._inductor`,
 whose import writes torch's default into the environment; for the same
 reason `bench campaign` gives its children the caller's value (or none),
