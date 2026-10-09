@@ -40,7 +40,8 @@ from torch.profiler import ProfilerActivity, profile
 import retrieve
 
 ROOT = Path(__file__).resolve().parents[2]
-LIB_SUBTREE = "retrieve/src/retrieve"  # code_version = tree hash of this (H §8.2 B)
+# code_version names the library this process imports, wherever its checkout is (H §8.2 B)
+LIB = Path(retrieve.__file__).resolve().parent
 MiB = 1024 * 1024
 
 
@@ -71,19 +72,19 @@ def warm_gpu_once() -> None:
     torch.cuda.synchronize()
 
 
-def _git(*args: str) -> str | None:
+def _git(*args: str, cwd: Path = ROOT) -> str | None:
     try:
         return subprocess.check_output(
-            ["git", *args], cwd=ROOT, stderr=subprocess.DEVNULL, text=True
+            ["git", *args], cwd=cwd, stderr=subprocess.DEVNULL, text=True
         ).strip()
     except (OSError, subprocess.SubprocessError):
         return None
 
 
 def subtree_dirty() -> bool | None:
-    """Uncommitted changes (untracked files included) under ``LIB_SUBTREE`` — the code the
-    harness measures. ``None`` outside a git checkout."""
-    out = _git("status", "--porcelain", "--", LIB_SUBTREE)
+    """Uncommitted changes (untracked files included) under ``LIB``, in the checkout that holds
+    it — the code the harness measures. ``None`` when ``LIB`` is not in a git checkout."""
+    out = _git("status", "--porcelain", "--", ".", cwd=LIB)
     return None if out is None else bool(out)
 
 
@@ -96,23 +97,24 @@ def repo_dirty() -> bool | None:
 
 
 def code_version() -> str:
-    """The resume key's code component (H §8.2 B): the library subtree's tree hash at HEAD
-    when the subtree is clean, else ``files:<sha256>`` over the ``retrieve`` sources actually
-    on disk (also the value outside a git checkout). The two namespaces are disjoint, and a
-    dirty subtree never reuses a cell measured at the committed tree."""
+    """The resume key's code component (H §8.2 B): the tree hash at HEAD of the imported
+    package's directory, in its own checkout, when that subtree is clean; else
+    ``files:<sha256>`` over the sources actually on disk (also the value outside a git
+    checkout). Read from ``LIB``, not from the checkout that launched ``bench``, so an editable
+    install pointing at another tree is stamped as what it runs. The two namespaces are
+    disjoint, and a dirty subtree never reuses a cell measured at the committed tree."""
     if subtree_dirty() is False:
-        tree = _git("rev-parse", f"HEAD:{LIB_SUBTREE}")
+        tree = _git("rev-parse", "HEAD:./", cwd=LIB)
         if tree:
             return tree
     return files_hash()
 
 
 def files_hash() -> str:
-    """``files:<sha256>`` over every ``*.py`` under the installed ``retrieve`` package."""
-    root = Path(retrieve.__file__).resolve().parent
+    """``files:<sha256>`` over every ``*.py`` under the imported ``retrieve`` package."""
     h = hashlib.sha256()
-    for p in sorted(root.rglob("*.py")):
-        h.update(p.relative_to(root).as_posix().encode())
+    for p in sorted(LIB.rglob("*.py")):
+        h.update(p.relative_to(LIB).as_posix().encode())
         h.update(p.read_bytes())
     return "files:" + h.hexdigest()[:40]
 
@@ -170,6 +172,7 @@ def provenance() -> dict[str, Any]:
         "repo_dirty": repo_dirty(),
         "git_branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
         "code_version": code_version(),
+        "lib_dir": str(LIB),
         "host": socket.gethostname(),
         "python": platform.python_version(),
         "started": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
@@ -453,7 +456,7 @@ def profile_once(fn: Callable[[], Any], top: int = 8) -> list[dict[str, Any]]:
 
 
 __all__ = [
-    "LIB_SUBTREE",
+    "LIB",
     "NotCapturable",
     "clock_histogram",
     "clock_report",
