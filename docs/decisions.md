@@ -249,6 +249,15 @@ now on; the [roadmap](roadmap.md) holds the steps.
 
 ## Harness
 
+- **Timings compare only within one box** (controller, 2026-10-10): the pods
+  share the GPU model (A100-SXM4-80GB) but not the driver (570.195 / 570.172
+  / 595.91), CPU (EPYC 7763 / Xeon 8470 / EPYC 7742) or power limit (400 / 500
+  / 400 W). Every ratio or crossover is read inside one leg on one box; no
+  claim compares records from two pods; F-REPRO runs on one pod, whose driver
+  / CPU / power limit the provenance page records. The size of the box effect
+  is not measured: the first estimate (V2 graph +15-28 % on pod d) also
+  crossed a data change (synth tables widened from 7 to 10 clauses, which
+  every clause kernel paid for until CLAUSE-SKIP), so it is withdrawn.
 - **The baseline is generic torch** (user): a dense matmul over the whole
   item table on the GPU, `torch.topk(K)`, then drop the ids that fail the
   filter, losing candidates from K. It is what a practitioner writes

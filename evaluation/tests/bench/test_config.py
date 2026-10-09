@@ -373,6 +373,8 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("router", "pubmed"): (45, 72),
     ("laion30m", "laion30m"): (6, 10),  # claims first: seed 0 (user 2026-10-10)
     ("laion30m-bs1", "laion30m"): (2, 6),
+    ("laion30m-synth", "laion30m-synth"): (12, 20),
+    ("codesign-laion30m", "laion30m"): (8, 16),  # C5 at 30 M: 2 sweeps x 2 backends x 2 paths
 }
 KEPT = {
     "goodreads": {"c0_genre", "c1_lang_reverse", "all4"},
@@ -415,7 +417,9 @@ def test_grid_counts_and_invariants(suite, dataset):
         got,
     ) in by_seed.items():  # h2h: 5 repeats; synth: seed 0, 0-2 where variance is the question
         assert got == set(by_sweep.get(cell[4], spec["seeds"])), cell
-    assert all(set(j.batch_sizes) <= {1, 16} and set(j.ks) <= {100, 1000} for j in jobs)
+    # bs 64 only in C5's 30 M regime (controller 2026-10-10, C5-META-CHECK)
+    big = {64} if suite == "codesign-laion30m" else set()
+    assert all(set(j.batch_sizes) <= {1, 16} | big and set(j.ks) <= {100, 1000} for j in jobs)
     if suite in ("filter", "deep", "synth", "codesign"):
         assert all(j.batch_sizes == (1, 16) for j in jobs)
     assert not any(j.backend == "official" and j.filter_kind == "clause" for j in jobs)
@@ -431,7 +435,8 @@ def test_grid_counts_and_invariants(suite, dataset):
     tuned = IVF.get(dataset, (None, None))[1]
     # router on pubmed: the IVF curve of the keep/kill Pareto test (controller, 2026-10-10)
     curve = suite == "router" and dataset == "pubmed"
-    assert suite == "synth" or curve or not any(p.get("n_probe") == 256 != tuned for _, p in cells)
+    synth = suite in ("synth", "laion30m-synth")
+    assert synth or curve or not any(p.get("n_probe") == 256 != tuned for _, p in cells)
     assert not any(j.narrowed for j in jobs)
     if suite in ("filter", "deep") and dataset in KEPT:
         assert {j.sweep for j in jobs} == KEPT[dataset] or (

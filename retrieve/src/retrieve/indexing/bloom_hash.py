@@ -221,19 +221,31 @@ def build_query_bit_positions(
     return pos.reshape(b, c_dim * k_hash)
 
 
-def build_transposed_sigs(sorted_sigs: Tensor) -> Tensor:
+# Items per transposed chunk: two [64, chunk] int64 temporaries, 128 MiB each.
+TRANSPOSE_CHUNK = 1 << 18
+
+
+def build_transposed_sigs(sorted_sigs: Tensor, *, chunk: int = TRANSPOSE_CHUNK) -> Tensor:
     """Rotate a row-wise ``[N, W]`` bloom index, rows in cluster-sorted order, into the
     transposed index of the paper's "rotate the matrix" phase 2 (SilverTorch §Bloom Index):
     ``[W * 64, ceil(N / 64)]`` int64, bit ``s % 64`` of word ``s // 64`` of row ``m`` is bit
     ``m`` of ``sorted_sigs[s]``. A query reads one word per set bit per 64 items instead of a
-    ``W``-word row per item. Chunked over words; build-time only."""
+    ``W``-word row per item. Build-time only, chunked over words and over ``chunk`` items (a
+    multiple of 64), so the temporaries above the table stay a few hundred MB at any ``N``
+    (kernels.md § SilverTorch kernels, "Bloom build")."""
+    if chunk % 64:
+        raise ValueError(f"chunk must be a multiple of 64, got {chunk}")
     n, w = sorted_sigs.shape
     n_words = (n + 63) // 64
     shifts = torch.arange(64, device=sorted_sigs.device, dtype=torch.int64)
-    padded = torch.zeros(n_words * 64, w, dtype=torch.int64, device=sorted_sigs.device)
-    padded[:n] = sorted_sigs
     out = torch.empty(w * 64, n_words, dtype=torch.int64, device=sorted_sigs.device)
     for word in range(w):
-        bits = (padded[:, word].unsqueeze(0) >> shifts.unsqueeze(1)) & 1  # [64 (m), N_pad]
-        out[word * 64 : (word + 1) * 64] = (bits.view(64, n_words, 64) << shifts).sum(-1)
+        for s0 in range(0, n, chunk):
+            col = sorted_sigs[s0 : s0 + chunk, word]
+            if col.numel() % 64:  # the last chunk: pad to whole words, as the unchunked build did
+                col = torch.cat([col, col.new_zeros(64 - col.numel() % 64)])
+            bits = (col.unsqueeze(0) >> shifts.unsqueeze(1)) & 1  # [64 (m), chunk]
+            out[word * 64 : (word + 1) * 64, s0 // 64 : s0 // 64 + col.numel() // 64] = (
+                bits.view(64, -1, 64) << shifts
+            ).sum(-1)
     return out

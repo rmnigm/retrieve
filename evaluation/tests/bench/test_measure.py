@@ -432,3 +432,15 @@ def test_latency_group_alternates_windows_across_arms():
     assert all(len(ms) == 4 and d["n"] == 4 for d, ms in out)
     one, _ = bench.latency(fns[0], bs=1, mode="eager", warmup=2, windows=3, n_min=4, n_max=4)
     assert set(one) == set(out[0][0])
+
+
+@pytest.mark.parametrize(
+    ("visible", "want"),
+    [(None, "0"), ("", "0"), ("1", "1"), ("1,0", "1"), ("GPU-8f2c-aa01,1", "GPU-8f2c-aa01")],
+)
+def test_smi_device_is_the_first_visible_device(monkeypatch, visible, want):
+    if visible is None:
+        monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    else:
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", visible)
+    assert bench.smi_device() == want
