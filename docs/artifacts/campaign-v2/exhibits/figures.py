@@ -16,7 +16,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-from load import ALGO, cv, load, pass_p, perf, recall  # noqa: E402
+from load import ALGO, box, cv, load, pass_p, perf, recall  # noqa: E402
 
 from bench import stats  # noqa: E402  (load.py put evaluation/ on sys.path)
 
@@ -214,13 +214,13 @@ def f1x(recs):
         and r["backend"] == "triton"
         and r["algo"] in ("linr_v1_filter_mask", "linr_v2")
     ]
-    rows_ = sorted({(r["n_items"], r["dataset"], cv(r)) for r in v})
+    rows_ = sorted({(r["n_items"], r["dataset"], cv(r), box(r)) for r in v})
     if not rows_:
         return
     fig, axes = plt.subplots(len(rows_), 3, figsize=(15, 3.8 * len(rows_)), squeeze=False)
     out = []
-    for i, (n, ds, c) in enumerate(rows_):
-        rs = [r for r in v if (r["n_items"], r["dataset"], cv(r)) == (n, ds, c)]
+    for i, (n, ds, c, bx) in enumerate(rows_):
+        rs = [r for r in v if (r["n_items"], r["dataset"], cv(r), box(r)) == (n, ds, c, bx)]
         for fk, ls in (("clause", "-"), ("bloom", "--")):
             g = collections.defaultdict(lambda: collections.defaultdict(list))
             pair = collections.defaultdict(lambda: ([], []))
@@ -276,7 +276,9 @@ def f1x(recs):
             ax = axes[i][j]
             ax.set_xscale("log")
             ax.set_yscale("log")
-            ax.set_title(f"{ds}, N {n / 1e6:.1f} M ({c}, {FIX_A.get(c, c)}), B={bs}", fontsize=9)
+            ax.set_title(
+                f"{ds}, N {n / 1e6:.1f} M ({c}, {FIX_A.get(c, c)}, box {bx}), B={bs}", fontsize=9
+            )
             ax.set_xlabel("pass rate p")
             ax.set_ylabel("p50 ms (graph), k 100")
             ax.grid(alpha=0.3, which="both")
@@ -290,7 +292,7 @@ def f1x(recs):
         ax.grid(alpha=0.3, which="both")
         ax.legend(fontsize=6)
     fig.suptitle(
-        "F1x / C1: LiNR V1 vs V2 by pass rate and scale (rows differ in code_version: say which V2)"
+        "F1x / C1: LiNR V1 vs V2 by pass rate and scale (rows differ in code_version and box: compare ratios within a row only)"
     )
     mark(fig, v)
     fig.tight_layout()
@@ -323,6 +325,7 @@ def cv_tree(t):
         "v23": "v2.3 1258a63e",
         "v24": "v2.4 d67d6263",
         "v25": "v2.5 472f2fc6",
+        "v26": "v2.6 20e83bfc",
         "d1": "d1 72e5a90",
     }.get(t, t)
 
