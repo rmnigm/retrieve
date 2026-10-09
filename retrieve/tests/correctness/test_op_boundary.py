@@ -6,6 +6,7 @@ from __future__ import annotations
 import pytest
 import torch
 
+from retrieve.indexing.selectivity import bloom_bit_freq
 from retrieve.ops import triton as T
 
 N, B = 512, 2
@@ -50,7 +51,7 @@ def _cases():
         "oporp_candidates": lambda p=pos: T.oporp_1bit_match_topk_indirect(qb, sigs, 4, p, counts),
         "cps_codes": lambda c=codes: T.codesigned_probe_score(qf, *lay[:2], c, lay[2], 0.1, 4, N),
         "cps_bloom_transposed": lambda t=bt: T.codesigned_probe_score_bloom(
-            qf, *lay[:2], codes, lay[2], qpos, t, 0.1, 4, N
+            qf, *lay[:2], codes, lay[2], qpos, t, bloom_bit_freq(t, N), 0.1, 4, N
         ),
         "cpse_attrs": lambda a=attrs: T.codesigned_probe_score_exact(
             qf, *lay[:2], codes, lay[2], a, rev, qa, 0.1, 4, N

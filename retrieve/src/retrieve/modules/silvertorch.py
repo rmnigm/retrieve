@@ -20,6 +20,7 @@ from retrieve.indexing.bloom_hash import (
 from retrieve.indexing.ivf import csr_layout, probe_width
 from retrieve.indexing.kmeans import KMeans, KMeansInit
 from retrieve.indexing.quantize import quantize_int8, quantize_int8_global
+from retrieve.indexing.selectivity import bloom_bit_freq
 from retrieve.interfaces import (
     RetrievalModule,
     SilverTorchBackend,
@@ -81,6 +82,7 @@ class SilverTorch(RetrievalModule):
     bloom_index: Tensor  # official + bloom: [W] int64
     bundle_b_offsets: Tensor  # official + bloom: [n_bundles + 1] int64
     bloom_transposed: Tensor  # triton / torch + bloom: [m_bits, ceil(N / 64)] int64
+    bloom_bit_freq: Tensor  # triton / torch + bloom: [m_bits] fp32, the skip gate's bound
     hash_seeds: Tensor
     clause_salt: Tensor
     item_clause_attrs: Tensor
@@ -331,6 +333,8 @@ class SilverTorch(RetrievalModule):
                     attrs, seeds, self.m_bits, self.k_hash, self.word_count, clause_salt=salt
                 )
             self.register_buffer("bloom_transposed", build_transposed_sigs(sigs))
+            # The scorer's pass-rate bound for its tile-skip gate (kernels.md § SilverTorch).
+            self.register_buffer("bloom_bit_freq", bloom_bit_freq(self.bloom_transposed, n))
             self.register_buffer("hash_seeds", seeds)
             # Registered (not rebuilt per call) so the bloom forward issues no
             # host→device copy — see bloom_hash.generate_clause_salt.
@@ -428,6 +432,7 @@ class SilverTorch(RetrievalModule):
                 self.sort_perm,
                 self._query_bit_positions(query_clause_attrs),
                 self.bloom_transposed,
+                self.bloom_bit_freq,
                 *tail,
             )
         return ops.codesigned_probe_score(query, *layout, self.sort_perm, *tail)

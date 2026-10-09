@@ -407,7 +407,9 @@ builders with the filters package, not the module classes:
   query from Python-int constants — still no copy). **Which signature buffer is
   registered depends on the backend**: `"triton"` / `"torch"` store the
   transposed index `bloom_transposed[m_bits, ceil(N/64)]`
-  ([kernels](kernels.md#codesigned_probe_score--ivf--int8--bloom)); `"official"` stores Meta's own index — `bloom_index[W]` int64 and
+  ([kernels](kernels.md#codesigned_probe_score--ivf--int8--bloom)) and its per-bit item frequency
+  `bloom_bit_freq[m_bits]` fp32 (the Triton scorer's skip gate; kernels.md "Gated tile skip");
+  `"official"` stores Meta's own index — `bloom_index[W]` int64 and
   `bundle_b_offsets[n_bundles+1]` from `torch.ops.st.bloom_index_build`
   over the cluster-sorted attrs (their murmur3 hash, width set by
   `OfficialConfig.b_multiplier`; `m_bits` is optional and ignored, `k_hash`
