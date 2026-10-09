@@ -48,6 +48,7 @@ trees="$BASE/tree/v2 $BASE/tree/v21 $BASE/tree/v22 $BASE/tree/v23 $BASE/tree/v24
 uv run python "$HERE/checks.py" "$OUT" $trees
 uv run python "$HERE/figures.py" "$OUT" $trees
 uv run python "$HERE/c5.py" "$OUT" $trees
+uv run python "$HERE/qps_bands.py" "$OUT" $trees
 uv run python "$HERE/v3bits.py" "$OUT" $trees
 uv run python "$HERE/t3x.py" "$OUT" $trees $(ls -d "$BASE"/tree/*-* 2>/dev/null)
 uv run python "$HERE/gpuh.py" "$OUT/synth-arms.csv" "$BASE/tree/d1/filter/yfcc10m-d192.jsonl" > "$OUT/gpuh-v-yfcc.csv"
