@@ -8,7 +8,8 @@ set -u
 if flock -n /scratch/gpu0.lock true; then echo "$(date -Is) not launched under /scratch/gpu0.lock, refusing"; exit 3; fi
 TAG=${TAG:-campaign-v2.7}
 TV=$(echo "${TAG#campaign-}" | tr -d .)  # v22
-REPO=/workspace/retrieve
+REPO=${REPO:-/workspace/retrieve}
+export PYTHONPATH="$REPO/evaluation:$REPO/retrieve/src"  # the tree's own harness and library, whichever checkout REPO names
 PY=/venvs/retrieve/bin/python
 R=${R:-/scratch/campaign-$TV/results}
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
