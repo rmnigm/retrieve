@@ -49,6 +49,16 @@ def box(r):
     return (r["env"].get("host") or "?")[:6]
 
 
+# Records timed off physical GPU 0 before the clock-device fix: their clock fields read GPU 0, so a
+# clock-driven `unstable` means clock-unknown; latencies and quality stand (controller, 2026-10-10;
+# pod d GPU 1 legs). Records carry no device field, so the legs are named here: (box, dataset prefix).
+CLOCK_UNKNOWN = (("38f5e1", "laion30m"),)
+
+
+def clock_unknown(r):
+    return any(box(r) == b and r["dataset"].startswith(d) for b, d in CLOCK_UNKNOWN)
+
+
 def arm(r):
     p = {k: v for k, v in r["params"].items()}
     s = f"{ALGO.get(r['algo'], r['algo'])}/{r['backend']}"

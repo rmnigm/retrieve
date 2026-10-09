@@ -10,7 +10,7 @@ import statistics as st
 import sys
 from pathlib import Path
 
-from load import EXACT, arm, box, cv, key, load, pass_p, perf, recall, short
+from load import EXACT, arm, box, clock_unknown, cv, key, load, pass_p, perf, recall, short
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "evaluation"))
 import yaml  # noqa: E402
@@ -55,15 +55,18 @@ def med(x):
 def status(recs, md):
     md.append("## Status, partial, unstable per tree × suite × dataset\n")
     md.append(
-        "| tree | suite | dataset | records | ok | failed | partial | unstable | quality copies |"
+        "| tree | suite | dataset | records | ok | failed | partial | unstable | clock-unknown | quality copies |"
     )
-    md.append("|---|---|---|---|---|---|---|---|---|")
+    md.append("|---|---|---|---|---|---|---|---|---|---|")
     c = collections.defaultdict(collections.Counter)
     for r in recs:
         g = c[(r["_tree"], r["suite"], r["dataset"])]
         g["n"] += 1
         g[r["status"]] += 1
-        g["unstable"] += bool(r.get("unstable"))
+        if clock_unknown(r):
+            g["clock_unknown"] += 1
+        else:
+            g["unstable"] += bool(r.get("unstable"))
         g["copies"] += r.get("quality_source") is not None
         if r["status"] != "ok":
             flag(
@@ -75,7 +78,7 @@ def status(recs, md):
     for k, g in sorted(c.items()):
         md.append(
             f"| {' | '.join(map(str, k))} | {g['n']} | {g['ok']} | {g['failed']} | {g['partial']} "
-            f"| {g['unstable']} | {g['copies']} |"
+            f"| {g['unstable']} | {g['clock_unknown']} | {g['copies']} |"
         )
 
 
