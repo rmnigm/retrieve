@@ -109,12 +109,6 @@ the user moving it onto the roadmap.
   failed (no length to check), so the MedCPT shards then rest on `verify`'s
   structural check alone. The 2026-10-07 restage worked around it with a
   2-connection size check ([artifact](artifacts/pubmed-restage/README.md)).
-- `bench/oracle.py`'s `item_embs.t().contiguous()` holds a second full
-  fp32 copy of the item table, so the harness's per-dataset limit at
-  native width is about half the device memory divided by `4·D` bytes
-  (OpenAlex at 768-d: ~11-12 M items, hence the 10 M slice). A view would
-  remove the copy; it needs its own check against the existing oracle
-  results and golden cells.
 - `linr_v2` and `linr_v3` diverge from their golden files (recall@100
   4.5e-4 / 1.7e-5), cause unidentified, predating the kernel-opt pass
   ([validation](validation.md#harness-gates)).
