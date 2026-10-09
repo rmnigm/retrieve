@@ -115,7 +115,7 @@ a { color: var(--accent); }
     <ul>
       <li>The ~100× gap between a custom filter kernel and native PyTorch masking. We see 1.4–12×.</li>
       <li>V3's "keep 1 %, gain ~10 %" at low pass rates. It pays only when most items pass.</li>
-      <li>Co-design below a few million items: Meta's code is 3–21 % slower with it.</li>
+      <li>Co-design below a few million items: Meta's code is 14–21 % slower with it.</li>
       <li>The bloom false-positive figures: the paper's two numbers disagree, and ours are far lower.</li>
     </ul>
   </div>
@@ -124,7 +124,7 @@ a { color: var(--accent); }
     <ul>
       <li>IVF recall follows each query's <em>local</em> pass rate, not the global one.</li>
       <li>SilverTorch's recall ceiling comes from its single global int8 scale. Per-row scales recover half the loss, fp16 nearly all.</li>
-      <li>At 30 M with selective real filters, IVF needs a quarter of the index to reach 0.95 recall and is then only about as fast as exact filtered search.</li>
+      <li>At 30 M with selective real filters, IVF needs a quarter of the index to reach 0.95 recall and is then only 1.3× faster than exact filtered search, against 3–11× at 0.8–3 M.</li>
       <li>Meta's released path is host-bound. An independent 600-line Triton version is faster end to end in every cell we measure.</li>
     </ul>
   </div>
@@ -141,7 +141,7 @@ a { color: var(--accent); }
       <tr><td class="id">C2</td><td>LiNR V3 keeps ~1 % for rescoring: ~10 % faster, near-parity recall</td><td>No gain at low pass rates. Near-parity recall needs one bit per dimension. Large gains only when most items pass.</td><td><span class="pill part">partly</span></td></tr>
       <tr><td class="id">C3</td><td>A custom filter kernel is ~100× faster than native masking</td><td>1.4–12× over plain and compiled PyTorch.</td><td><span class="pill bad">does not hold</span></td></tr>
       <tr><td class="id">C4</td><td>Bloom filter: low false positives at 1024 bits, flat latency in width</td><td>Zero false positives from 256 bits on two datasets; latency flat in width. The inverted-index comparison is not testable.</td><td><span class="pill part">partly</span></td></tr>
-      <tr><td class="id">C5</td><td>Co-design (probe, then filter) is 1.79–2.15× faster</td><td>2.1× at 30 M with multi-term filters in Meta's code, 2.4× in ours (provisional); reversed at 0.8–3 M in Meta's code (0.79–0.97), at most 1.2× in ours below 10 M.</td><td><span class="pill part">holds at scale</span></td></tr>
+      <tr><td class="id">C5</td><td>Co-design (probe, then filter) is 1.79–2.15× faster</td><td>2.1× at 30 M with multi-term filters in Meta's code, 2.4× in ours (provisional); reversed at 0.8–3 M in Meta's code (0.79–0.86), at most 1.1× in ours below 30 M.</td><td><span class="pill part">holds at scale</span></td></tr>
       <tr><td class="id">C6</td><td>Int8 IVF cannot reach 0.95; selective filters need more probes</td><td>Holds from 0.8 M to 30 M. The cause on YFCC is the global int8 scale.</td><td><span class="pill good">holds</span></td></tr>
       <tr><td class="id">C7</td><td>Ours (our claim): bit-exact with Meta's int32, faster end to end, Meta's scorer faster alone</td><td>Bit-exact holds. Faster end to end everywhere measured: 1.4–2.1× at d128 (1.4–1.8× on device), 1.1–2.2× at d768.</td><td><span class="pill part">partly</span></td></tr>
     </tbody>
@@ -167,7 +167,7 @@ a { color: var(--accent); }
 
 <section class="take" id="scale">
   <p class="eyebrow">Scale · C6</p>
-  <h2>As N grows, IVF gets faster than exact search but loses recall, and at 30 M the two meet</h2>
+  <h2>As N grows, IVF gets faster than exact search but loses recall; at matched recall its edge shrinks to 1.3× at 30 M</h2>
   <div class="figs">
     <div class="figure"><div class="ft">IVF recall at the paper's 24 probes</div><div class="canvas-box"><canvas id="ch-n" aria-label="IVF recall at 24 probes against number of items"></canvas></div>
       <div class="fn">Each point is its own dataset and index size (0.8 M d128 → 30 M d256). Real filters: broadest kept sweep per dataset.</div></div>
@@ -176,9 +176,9 @@ a { color: var(--accent); }
   </div>
   <div class="text">
     <p>At a fixed 24 probes IVF scans ever less of a growing index, so its raw speed edge over a full scan widens from about 5× at 0.8 M to about 80× at 30 M. Its recall falls in step, and matching 0.95 recall eats the edge.</p>
-    <p>At 0.8–3 M with broad filters, IVF at 0.95 is 3–11× faster than exact search; at 3 M with a 0.1 % uniform filter the two are already even. At 10 M on YFCC it never gets there. At 30 M with selective real filters it needs a quarter of the index to reach 0.95, and is then only about 1.2× faster than exact V2; where the filter is a single term it never reaches 0.95.</p>
+    <p>At 0.8–3 M with broad filters, IVF at 0.95 is 3–11× faster than exact search; at 3 M with a 0.1 % uniform filter the two are already even. At 10 M on YFCC it never gets there. At 30 M with selective real filters it needs a quarter of the index to reach 0.95, and is then only 1.3× faster than exact V2 at batch 16 (2.8× at batch 1); where the filter is a single term it never reaches 0.95.</p>
   </div>
-  <p class="caveat">Each bar compares IVF and exact search timed on the same machine. The 3 M uniform-filter bars at p 0.01 and 0.001 interpolate the probe count; those bars and the 0.8 M exact time come from older kernel versions and will be re-timed on the current ones. The 30 M LAION bar pairs a current IVF time with an exact V2 time from an older version (before a clause-kernel fix that speeds up V2), so the true ratio is likely nearer 1; a same-version exact time is requested.</p>
+  <p class="caveat">Each bar compares IVF and exact search timed on the same machine. The 3 M uniform-filter bars at p 0.01 and 0.001 interpolate the probe count; those bars and the 0.8 M exact time come from older kernel versions and will be re-timed on the current ones. The 30 M bar's two arms ran in the same run on current code, one after the other rather than interleaved.</p>
 </section>
 
 <section class="take" id="int8">
@@ -198,8 +198,8 @@ a { color: var(--accent); }
   <div class="figure"><div class="ft">Full mask time ÷ co-design time (above 1 = co-design faster)</div><div class="canvas-box tall"><canvas id="ch-c5" aria-label="Co-design speed-up by scale and backend"></canvas></div>
     <div class="fn">Each dot is one interleaved pair (sweep × probes × batch). Meta's code runs eager only; ours in CUDA graph. Shaded band: the paper's 1.79–2.15×. Recall is identical on every pair.</div></div>
   <div class="text">
-    <p>Meta's co-design path does extra host work per call, synchronising inside its ops. Below 3 M that fixed cost outweighs the masking it saves, and co-design is 3–21 % slower. At 30 M with a four-term filter the saved work dominates: 2.1× at batch 16, the top of the paper's 1.79–2.15×, and 4.2–5.3× at batch 64. With a single filter term the gain at batch 16 is under 1.1×.</p>
-    <p>Our own backend shows the same scale dependence. Below 10 M our kernels fold the filter test into the scorer, so there is little separate mask work to save: 0.91–1.03× at 0.8–3 M, slightly slower at 128 probes, and 1.05–1.12× at 10 M. At 30 M the full mask over every item becomes the cost, and co-design gives 1.45–1.67× with one filter term and 2.4–3.3× with four at 32 probes. With 128 probes, more of the index is scanned anyway and the gain shrinks to 1.0–1.45×.</p>
+    <p>Meta's co-design path does extra host work per call, synchronising inside its ops. Below 3 M that fixed cost outweighs the masking it saves, and co-design is 14–21 % slower. At 30 M with a four-term filter the saved work dominates: 2.1× at batch 16, the top of the paper's 1.79–2.15×, and 4.2–5.3× at batch 64. With a single filter term the gain at batch 16 is under 1.1×.</p>
+    <p>Our own backend shows the same scale dependence. Below 10 M our kernels fold the filter test into the scorer, so there is little separate mask work to save: 0.98–1.05× at 0.8–3 M, slightly slower (0.84–0.95×) at 128 probes and batch 16, and 1.01–1.11× at 10 M. At 30 M the full mask over every item becomes the cost, and co-design gives 1.45–1.67× with one filter term and 2.4–3.3× with four at 32 probes. With 128 probes, more of the index is scanned anyway and the gain shrinks to 1.0–1.45×.</p>
   </div>
   <p class="caveat">Every Meta point runs on the final adapter and Meta's optimised build. Meta's 0.8–3 M points cover one sweep per dataset (arXiv main category, goodreads genre). Our 30 M points are provisional: at batch 16 and above they run many probes per batch, the regime our wide-probe scorer fix changes, and both paths of each pair will be re-timed with it.</p>
 </section>
@@ -295,7 +295,7 @@ const MATCH = [
   { k: "3 M · uniform p 0.01", v: 2.60 / 1.96 },
   { k: "3 M · uniform p 0.001", v: 2.57 / 3.3 },
   { k: "10 M · YFCC tags", v: null, best: D.yfcc_real["tags_and@1024"] },
-  { k: "30 M · LAION tags (4 terms)", v: 19.31 / D.laion_ivf_ms_v29["tags4@4096"] },
+  { k: "30 M · LAION tags (4 terms)", v: D.laion_x["linr_v2|tags4"]["16"] / D.laion_x["silvertorch|tags4"]["16"] },
   { k: "30 M · LAION domain", v: null, best: D.laion["c0_domain@4096"] },
 ];
 

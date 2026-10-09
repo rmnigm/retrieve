@@ -335,6 +335,21 @@ co-design.
   novelty, availability) mapped to the paper section, table or artifact
   that answers it, with gaps named; a new page ecir-criteria.md under docs/paper. F5
   writes against it.
+- [ ] **AFTER-QUEUE: more experiments and kernel work, ranked by paper value**
+  (user, 2026-10-11: once the planned work is done, more experiments, deeper
+  sweeps and Triton kernel performance work, staying close to what the
+  reproducibility paper needs). In order:
+  1. **Close the provisional cells**: every T1 / figure number still marked
+     pre-ST-WIDE or pre-CLAUSE-SKIP re-timed at the newest tag.
+  2. **Sharpen the figures the paper leads with**: F1 / F2 at 10 M and 30 M
+     with the low and middle pass rates (0.001, 0.003, 0.03, 0.05) on uniform
+     synth; the probe curve at 30 M (n_probe 64 / 256); seeds 0-2 on the cells
+     a T2 confidence interval rests on.
+  3. **Triton kernel work where ours trails Meta's or the compiler**:
+     cross-query cluster sharing in the probe scorer (30 M d256, n_probe 128,
+     bs 64: Meta 1.8-2.0x); the top-k epilogue (ours 1.18 ms vs Meta's 0.79
+     at 30 M); V1 at bs 1 (`torch.compile` 1.77x faster, C3). Each bit-exact
+     plus the keep rule, then a tag.
 - [ ] **F-REPRO: the final pass.** When the library stops changing: tag the
   final version, rerun the redo ledger (or the whole grid if the ledger is
   most of it) at that tag into `campaign-final/`, write *campaign.yaml* for
