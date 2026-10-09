@@ -2,8 +2,9 @@
 
 usage: t3x.py OUT TREE [TREE ...]
 
-Device time is the sum of the eager `--profile` call's top-8 kernels (`profile_once`), a lower bound,
-so the host share 1 - device / p50 is an upper bound. Graph replays are not profiled.
+Device time is `kernels_us` (every kernel of the profiled eager call, H-KSUM) wherever a record of the
+same cell, arm and seed carries it, in any tree given (the profile-only pass); else the top-8 sum
+(`kernels`), a lower bound, and the row says which (`device_src`). Graph replays are not profiled.
 """
 
 import collections
@@ -25,6 +26,20 @@ ARMS = [
 HOST_BOUND = 0.5  # flag an arm whose host share exceeds half of its p50
 
 
+def cell_key(r, e):
+    return (
+        cv(r),
+        r["dataset"],
+        r["filter_kind"],
+        r["sweep"],
+        r["backend"],
+        r["params"].get("score_path"),
+        r["seed"],
+        e["k"],
+        e["bs"],
+    )
+
+
 def arm_of(r, mode):
     return (r["backend"], r["params"].get("score_path"), mode)
 
@@ -32,7 +47,13 @@ def arm_of(r, mode):
 def main():
     out = Path(sys.argv[1])
     out.mkdir(parents=True, exist_ok=True)
-    recs = [r for r in load(sys.argv[2:]) if r["suite"] == "h2h" and r["status"] == "ok"]
+    allrecs = [r for r in load(sys.argv[2:]) if r["suite"] == "h2h" and r["status"] == "ok"]
+    ksum = {}  # (cv, dataset, filter, sweep, backend, score_path, seed, k, bs) -> eager perf entry
+    for r in allrecs:
+        for e in r["perf"] or []:
+            if e["mode"] == "eager" and e.get("kernels_us") is not None:
+                ksum[cell_key(r, e)] = e
+    recs = [r for r in allrecs if not any(e.get("kernels_us") is not None for e in r["perf"] or [])]
     cells = collections.defaultdict(lambda: collections.defaultdict(list))
     for r in recs:
         for e in r["perf"] or []:
@@ -50,9 +71,19 @@ def main():
                 continue
             es = arms[a]
             p50 = st.median(e["median_ms"] for _, e in es)
+            full = [
+                ksum[cell_key(r, e)] for r, e in es if a[2] == "eager" and cell_key(r, e) in ksum
+            ]
             ks = [e["kernels"] for _, e in es if e.get("kernels")]
-            dev = st.median(sum(k["us"] for k in kk) for kk in ks) / 1000 if ks else None
-            launches = st.median(sum(k["calls"] for k in kk) for kk in ks) if ks else None
+            top8 = st.median(sum(k["us"] for k in kk) for kk in ks) / 1000 if ks else None
+            if full:
+                src = f"all ({len(full)}/{len(es)})"
+                dev = st.median(f["kernels_us"] for f in full) / 1000
+                launches = st.median(f["kernels_calls"] for f in full)
+            else:
+                src = "top8" if ks else ""
+                dev = top8
+                launches = st.median(sum(k["calls"] for k in kk) for kk in ks) if ks else None
             num, den = [], []
             for r, e in es:
                 b = base.get((r["seed"], (r.get("interleave") or {}).get("group")))
@@ -85,8 +116,10 @@ def main():
                     "over_triton_eager": ""
                     if not ci
                     else f"{ci[0]:.2f} [{ci[1]:.2f}, {ci[2]:.2f}]",
-                    "device_ms_top8": "" if dev is None else round(dev, 4),
-                    "launches_top8": "" if launches is None else int(launches),
+                    "device_ms": "" if dev is None else round(dev, 4),
+                    "device_src": src,
+                    "top8_ms": "" if top8 is None else round(top8, 4),
+                    "launches": "" if launches is None else int(launches),
                     "host_share_max": "" if dev is None else round(1 - dev / p50, 3),
                     "host_bound": "" if dev is None else (1 - dev / p50) > HOST_BOUND,
                     "unstable": sum(bool(e.get("unstable")) for _, e in es),
@@ -104,11 +137,16 @@ def main():
     for x in rows:
         by[(x["code_version"], x["dataset"], x["filter"], x["k"], x["bs"])][x["arm"]] = x
     for key, d in sorted(by.items()):
-        t = d.get("triton eager", {}).get("device_ms_top8")
+        t = d.get("triton eager", {}).get("device_ms")
         for a in ("official/fp16 eager", "official/int32 eager"):
-            o = d.get(a, {}).get("device_ms_top8")
+            o = d.get(a, {}).get("device_ms")
             if t and o:
-                dev_ratio.append((*key, a, round(o / t, 2)))
+                src = (
+                    d["triton eager"]["device_src"].split()[0]
+                    + " / "
+                    + d[a]["device_src"].split()[0]
+                )
+                dev_ratio.append((*key, a, round(o / t, 2), src))
     with open(out / "t3x.csv", "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=list(rows[0]))
         w.writeheader()
@@ -116,11 +154,12 @@ def main():
     md = [
         "# T3x: official vs Triton, end to end and device (NOT CITABLE)\n",
         "p50 = median over seeds (repeats) of the cell's p50; `/ triton eager` = paired per-round ratio over the "
-        "interleaved group (seed x window), 95 % CI. Device = top-8 kernels of one profiled eager call (a lower "
-        f"bound); host share = 1 - device / p50 (an upper bound); `host_bound` = host share > {HOST_BOUND}.\n",
-        "| cv | dataset | filter | k | bs | arm | p50 ms | / triton eager | device ms | launches | host share | "
-        "unstable | ids canon = | jaccard min | max abs ds |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "interleaved group (seed x window), 95 % CI. Device = `kernels_us` (every kernel, H-KSUM) where `src` "
+        "says `all`, else the top-8 kernels of one profiled eager call (`top8`, a lower bound); host share = "
+        f"1 - device / p50; `host_bound` = host share > {HOST_BOUND}.\n",
+        "| cv | dataset | filter | k | bs | arm | p50 ms | / triton eager | device ms | src | top-8 ms | launches "
+        "| host share | unstable | ids canon = | jaccard min | max abs ds |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for x in rows:
         md.append(
@@ -136,8 +175,10 @@ def main():
                     "arm",
                     "p50_ms",
                     "over_triton_eager",
-                    "device_ms_top8",
-                    "launches_top8",
+                    "device_ms",
+                    "device_src",
+                    "top8_ms",
+                    "launches",
                     "host_share_max",
                     "unstable",
                     "ids_canon_eq",
@@ -148,9 +189,9 @@ def main():
             + " |"
         )
     md += [
-        "\n## Device time, official / Triton eager (top-8 sums)\n",
-        "| cv | dataset | filter | k | bs | arm | ratio |",
-        "|---|---|---|---|---|---|---|",
+        "\n## Device time, official / Triton eager (source: triton / official)\n",
+        "| cv | dataset | filter | k | bs | arm | ratio | src |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     md += ["| " + " | ".join(map(str, r)) + " |" for r in dev_ratio]
     (out / "t3x.md").write_text("\n".join(md) + "\n")
