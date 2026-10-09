@@ -1,0 +1,467 @@
+<title>LiNR + SilverTorch Repro Materials</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,500..800&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a lab report. One reading column, charts break slightly wider; each take = claim line, chart, three sentences. */
+:root {
+  --bg: #f5f6f8; --surface: #ffffff; --ink: #14171c; --ink-2: #4a5160; --ink-3: #7a8191;
+  --rule: #dde1e8; --grid: #e8ebf0; --accent: #2a78d6;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s7: #4a3aa7; --ref: #8a909c;
+  --good: #1d7f4e; --good-bg: #e3f3ea; --part: #9a6400; --part-bg: #fbf0d9; --bad: #b8322f; --bad-bg: #fbe5e4;
+  --stamp: #b8322f;
+  --f-display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "Source Sans 3", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111317; --surface: #191c21; --ink: #eef0f3; --ink-2: #b4bac6; --ink-3: #868d9b;
+  --rule: #2b3038; --grid: #252a31; --accent: #3987e5;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s7: #9085e9; --ref: #8d939e;
+  --good: #5cc28e; --good-bg: #17301f; --part: #e0a94a; --part-bg: #33270f; --bad: #ee7a77; --bad-bg: #3a1a1a;
+  --stamp: #ee7a77; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #111317; --surface: #191c21; --ink: #eef0f3; --ink-2: #b4bac6; --ink-3: #868d9b;
+  --rule: #2b3038; --grid: #252a31; --accent: #3987e5;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s7: #9085e9; --ref: #8d939e;
+  --good: #5cc28e; --good-bg: #17301f; --part: #e0a94a; --part-bg: #33270f; --bad: #ee7a77; --bad-bg: #3a1a1a;
+  --stamp: #ee7a77; color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 17px; line-height: 1.55; }
+.wrap { max-width: 1040px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 80px; display: grid; gap: 56px; }
+.col { max-width: 700px; }
+h1, h2, h3 { font-family: var(--f-display); font-stretch: 82%; text-wrap: balance; margin: 0; line-height: 1.12; }
+h1 { font-size: clamp(30px, 5vw, 46px); font-weight: 800; letter-spacing: -0.01em; }
+h2 { font-size: 27px; font-weight: 700; }
+h3 { font-size: 18px; font-weight: 700; font-stretch: 90%; }
+p { margin: 0; }
+.eyebrow { font-family: var(--f-mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+.mono { font-family: var(--f-mono); font-size: 0.86em; }
+header { display: grid; gap: 14px; }
+.stamp { justify-self: start; font-family: var(--f-mono); font-weight: 600; font-size: 12px; letter-spacing: 0.12em; color: var(--stamp);
+  border: 1.5px solid var(--stamp); padding: 4px 9px; border-radius: 3px; transform: rotate(-1.2deg); }
+.lede { font-size: 19px; color: var(--ink-2); max-width: 700px; }
+.meta { font-size: 14px; color: var(--ink-3); max-width: 700px; }
+
+.story { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border-top: 2px solid var(--ink); }
+.story > div { padding: 16px 18px 4px 0; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.story > div + div { padding-left: 18px; border-left: 1px solid var(--rule); }
+.story ul { margin: 0; padding-left: 18px; display: grid; gap: 7px; font-size: 16px; }
+.story h3 { display: flex; gap: 8px; align-items: center; }
+.dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+
+table { border-collapse: collapse; width: 100%; font-size: 15px; }
+.tablebox { overflow-x: auto; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px 9px 0; border-bottom: 1px solid var(--rule); }
+th { font-family: var(--f-mono); font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+td.id { font-family: var(--f-mono); font-weight: 600; white-space: nowrap; }
+.pill { display: inline-block; white-space: nowrap; font-family: var(--f-mono); font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
+.pill.good { color: var(--good); background: var(--good-bg); }
+.pill.part { color: var(--part); background: var(--part-bg); }
+.pill.bad { color: var(--bad); background: var(--bad-bg); }
+
+section.take { display: grid; gap: 16px; }
+.take .claim { font-size: 15px; color: var(--ink-3); }
+.take .claim b { color: var(--ink-2); font-weight: 600; }
+.figure { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 16px 16px 10px; display: grid; gap: 8px; min-width: 0; }
+.figs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.figure .ft { font-family: var(--f-display); font-stretch: 90%; font-weight: 600; font-size: 15px; }
+.figure .fn { font-size: 13px; color: var(--ink-3); }
+.canvas-box { position: relative; height: 300px; }
+.canvas-box.tall { height: 340px; }
+.text { display: grid; gap: 10px; max-width: 700px; }
+.caveat { font-size: 14px; color: var(--ink-3); border-left: 2px solid var(--rule); padding-left: 12px; max-width: 700px; }
+
+.ledger { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.ledger div { border-top: 2px solid var(--ink); padding-top: 8px; display: grid; gap: 2px; }
+.ledger .n { font-family: var(--f-display); font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.ledger .l { font-size: 14px; color: var(--ink-2); }
+.lessons { display: grid; gap: 14px; max-width: 700px; }
+.lessons p b { font-weight: 600; }
+footer { font-size: 13px; color: var(--ink-3); border-top: 1px solid var(--rule); padding-top: 14px; max-width: 700px; }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (max-width: 760px) {
+  .story, .figs, .ledger { grid-template-columns: minmax(0, 1fr); }
+  .ledger { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .story > div + div { padding-left: 0; border-left: 0; border-top: 1px solid var(--rule); }
+  .wrap { padding-inline: 16px; gap: 44px; }
+  .canvas-box, .canvas-box.tall { height: 280px; }
+}
+</style>
+
+<div class="wrap">
+<header>
+  <span class="stamp">DRAFT · NOT CITABLE</span>
+  <p class="eyebrow">Reproducibility study · LiNR (CIKM '24) and SilverTorch (SIGIR '26)</p>
+  <h1>Filtered GPU retrieval, reproduced: what holds, what breaks, what is new</h1>
+  <p class="lede">We reimplemented LinkedIn's LiNR and Meta's SilverTorch in Triton from the papers' text, ran Meta's released kernels next to ours, and tested every claim we could on five public datasets from 0.8 M to 30 M items on one A100.</p>
+  <p class="meta">These are exploration numbers. A final pass at one frozen code version reruns every cell before anything is cited. Every timing comparison here is read inside one machine and, where it is a ratio, inside one interleaved run. Recall is at top-100 against an exact filtered fp32 oracle.</p>
+</header>
+
+<section class="story" aria-label="Summary">
+  <div>
+    <h3><span class="dot" style="background:var(--good)"></span>Reproduces</h3>
+    <ul>
+      <li>LiNR's V1/V2 trade-off: the full scan wins at high pass rates, the gather-first scan at low ones.</li>
+      <li>SilverTorch's int8 IVF tops out below 0.95 recall, and unaligned selective filters need more probes.</li>
+      <li>Co-design's ~1.8× speed-up, at the paper's own scale and filter complexity.</li>
+      <li>Our Triton kernels match Meta's int32 path bit for bit.</li>
+    </ul>
+  </div>
+  <div>
+    <h3><span class="dot" style="background:var(--bad)"></span>Does not reproduce</h3>
+    <ul>
+      <li>The ~100× gap between a custom filter kernel and native PyTorch masking. We see 1.4–12×.</li>
+      <li>V3's "keep 1 %, gain ~10 %" at low pass rates. It pays only when most items pass.</li>
+      <li>Co-design below a few million items: Meta's code is slower with it.</li>
+      <li>The bloom false-positive figures: the paper's two numbers disagree, and ours are far lower.</li>
+    </ul>
+  </div>
+  <div>
+    <h3><span class="dot" style="background:var(--accent)"></span>New</h3>
+    <ul>
+      <li>IVF recall follows each query's <em>local</em> pass rate, not the global one.</li>
+      <li>SilverTorch's recall ceiling comes from its single global int8 scale. Per-row scales recover half the loss, fp16 nearly all.</li>
+      <li>At 30 M with selective real filters, exact filtered search is cheaper than IVF at 0.95 recall.</li>
+      <li>Meta's released path is host-bound. An independent 600-line Triton version is faster end to end.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="take" id="claims">
+  <p class="eyebrow">At a glance</p>
+  <h2>The seven claims</h2>
+  <div class="tablebox">
+  <table>
+    <thead><tr><th>id</th><th>claim (paper)</th><th>what we see</th><th>verdict</th></tr></thead>
+    <tbody>
+      <tr><td class="id">C1</td><td>LiNR V1 beats V2 at high pass rate, V2 wins at low</td><td>Holds at batch 16; the crossover moves to lower pass rates as N grows. At batch 1 V2 wins almost everywhere.</td><td><span class="pill good">holds</span></td></tr>
+      <tr><td class="id">C2</td><td>LiNR V3 keeps ~1 % for rescoring: ~10 % faster, near-parity recall</td><td>No gain at low pass rates. Near-parity recall needs one bit per dimension. Large gains only when most items pass.</td><td><span class="pill part">partly</span></td></tr>
+      <tr><td class="id">C3</td><td>A custom filter kernel is ~100× faster than native masking</td><td>1.4–12× over plain and compiled PyTorch.</td><td><span class="pill bad">does not hold</span></td></tr>
+      <tr><td class="id">C4</td><td>Bloom filter: low false positives at 1024 bits, flat latency in width</td><td>Zero false positives from 256 bits on two datasets; latency flat in width. The inverted-index comparison is not testable.</td><td><span class="pill part">partly</span></td></tr>
+      <tr><td class="id">C5</td><td>Co-design (probe, then filter) is 1.79–2.15× faster</td><td>1.7–1.8× at 30 M with multi-term filters; reversed at 0.8–3 M in Meta's code; at most 1.2× in ours.</td><td><span class="pill part">holds at scale</span></td></tr>
+      <tr><td class="id">C6</td><td>Int8 IVF cannot reach 0.95; selective filters need more probes</td><td>Holds from 0.8 M to 30 M. The cause on YFCC is the global int8 scale.</td><td><span class="pill good">holds</span></td></tr>
+      <tr><td class="id">C7</td><td>Ours (our claim): bit-exact with Meta's int32, faster end to end, Meta's scorer faster alone</td><td>Bit-exact and faster hold (1.7–2.1× end to end). Like for like, our fused scorer is also faster.</td><td><span class="pill part">partly</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="caveat">Not testable on public data and one GPU, and listed as such in the paper: production pipelines, A/B tests, cost of ownership, live updates, the 240 M and 1 B stress points.</p>
+</section>
+
+<section class="take" id="local">
+  <p class="eyebrow">New take · C6</p>
+  <h2>IVF recall follows the local pass rate, not the global one</h2>
+  <div class="figs">
+    <div class="figure"><div class="ft">Recall vs pass rate, arXiv 3 M</div><div class="canvas-box"><canvas id="ch-f2" aria-label="Recall against pass rate for uniform and correlated filters"></canvas></div>
+      <div class="fn">SilverTorch (our Triton), 2048 lists. Uniform = each item passes at random; correlated = the filter follows the embedding's clusters.</div></div>
+    <div class="figure"><div class="ft">What predicts per-query recall (Spearman ρ)</div><div class="canvas-box"><canvas id="ch-gls" aria-label="Spearman correlation of recall with local and global pass rate"></canvas></div>
+      <div class="fn">Local pass rate = share of a query's unfiltered top-100 that pass. 24 probes, real filters.</div></div>
+  </div>
+  <div class="text">
+    <p>With the same pass rate, the same index and the same number of probes, a uniform filter collapses IVF recall at low pass rates while a cluster-aligned one leaves it flat. The global pass rate cannot tell the two apart; the share of a query's own neighbours that pass can, and it predicts per-query recall far better on both real datasets.</p>
+    <p>The probes needed for 0.95 grow far slower than 1/p: a hundred times lower pass rate needs about 3.3× the probes. Real filters fall between the two synthetic curves, placed by how aligned they are with the embedding.</p>
+  </div>
+</section>
+
+<section class="take" id="scale">
+  <p class="eyebrow">Scale · C6</p>
+  <h2>As N grows, IVF gets faster than exact search but loses recall, and at 30 M exact wins</h2>
+  <div class="figs">
+    <div class="figure"><div class="ft">IVF recall at the paper's 24 probes</div><div class="canvas-box"><canvas id="ch-n" aria-label="IVF recall at 24 probes against number of items"></canvas></div>
+      <div class="fn">Each point is its own dataset and index size (0.8 M d128 → 30 M d256). Real filters: broadest kept sweep per dataset.</div></div>
+    <div class="figure"><div class="ft">IVF speed-up over exact search at recall 0.95</div><div class="canvas-box"><canvas id="ch-match" aria-label="IVF speed-up over exact at matched recall"></canvas></div>
+      <div class="fn">Batch 16, CUDA graph. Below 1 = exact is faster. Hollow bars: IVF never reaches 0.95 within a quarter of the index; the bar shows the best recall instead (right axis label).</div></div>
+  </div>
+  <div class="text">
+    <p>At a fixed 24 probes IVF scans ever less of a growing index, so its raw speed edge over a full scan widens from about 5× at 0.8 M to about 80× at 30 M. Its recall falls in step, and matching 0.95 recall eats the edge.</p>
+    <p>At 0.8–3 M with broad filters, IVF at 0.95 is 3–11× faster than exact search; at 3 M with a 0.1 % uniform filter the two are already even. At 10 M on YFCC it never gets there. At 30 M with selective real filters it needs a quarter of the index to reach 0.95, and is then 3.7× slower than exact V2.</p>
+  </div>
+  <p class="caveat">Each bar compares IVF and exact search timed on the same machine. The 3 M uniform-filter bars at p 0.01 and 0.001 interpolate the probe count and predate a clause-kernel fix; the 0.8 M exact time predates a V1 kernel fix. Both will be re-read.</p>
+</section>
+
+<section class="take" id="int8">
+  <p class="eyebrow">Mechanism · C6</p>
+  <h2>The YFCC ceiling is SilverTorch's single global int8 scale</h2>
+  <div class="figure"><div class="ft">Recall@100 on YFCC 10 M at the same 256 probes, by item precision</div><div class="canvas-box"><canvas id="ch-int8" aria-label="Recall by quantization scheme"></canvas></div>
+    <div class="fn">Same index, same probed lists; only the item score precision changes. Uniform synthetic filters.</div></div>
+  <div class="text">
+    <p>On YFCC's CLIP embeddings, more probes stop helping early: recall sits near 0.55–0.76 whatever the probe count. Holding the probes fixed and changing only item precision moves it: per-row int8 scales recover about half the gap and fp16 nearly all of it.</p>
+    <p>SilverTorch states the ceiling but not its cause. Its released kernel already carries an unused per-embedding scale, which is the fix.</p>
+  </div>
+</section>
+
+<section class="take" id="codesign">
+  <p class="eyebrow">C5</p>
+  <h2>Co-design pays off only at the paper's scale and filter complexity</h2>
+  <div class="figure"><div class="ft">Full mask time ÷ co-design time (above 1 = co-design faster)</div><div class="canvas-box tall"><canvas id="ch-c5" aria-label="Co-design speed-up by scale and backend"></canvas></div>
+    <div class="fn">Each dot is one interleaved pair (sweep × probes × batch). Meta's code runs eager only; ours in CUDA graph. Shaded band: the paper's 1.79–2.15×. Recall is identical on every pair.</div></div>
+  <div class="text">
+    <p>In Meta's released code the co-design path adds three host syncs and fourteen launches per call. Below 3 M that fixed cost outweighs the masking it saves, so co-design is 12–18 % slower. At 30 M with a four-term filter and batch 16 the saved work dominates and we get the paper's 1.7–1.8×, rising to 2.5–3.7× at batch 64.</p>
+    <p>Our kernels fold the filter test into the scorer, so there is little separate mask work left to save: at most 1.2×, and slower at 128 probes.</p>
+  </div>
+  <p class="caveat">The Meta points ran on earlier versions of our adapter around Meta's ops, and on Meta's extension as its setup builds it, with host code unoptimised. The adapter is now final and an optimised build of the unmodified kernels runs in 0.77–0.98 of the time; Meta's side will be re-timed on both. Ratios inside a pair are less exposed than absolute times, since both paths share the build.</p>
+</section>
+
+<section class="take" id="v1v2">
+  <p class="eyebrow">C1</p>
+  <h2>V1 vs V2: the crossover moves to lower pass rates as N grows</h2>
+  <div class="figs">
+    <div class="figure"><div class="ft">V2 time ÷ V1 time, batch 16</div><div class="canvas-box"><canvas id="ch-c1-16" aria-label="V2 over V1 at batch 16"></canvas></div>
+      <div class="fn">Above 1 = the full scan (V1) is faster. Each line is one interleaved run on one machine.</div></div>
+    <div class="figure"><div class="ft">V2 time ÷ V1 time, batch 1</div><div class="canvas-box"><canvas id="ch-c1-1" aria-label="V2 over V1 at batch 1"></canvas></div>
+      <div class="fn">LiNR's own point: 15.5 M items, ~11 % passing, unfused ops, V2 3× slower than V1.</div></div>
+  </div>
+  <div class="text">
+    <p>With fused kernels V2 wins at low pass rates everywhere, and V1 wins at high ones at batch 16: near p 0.27 at 3 M, near p 0.06–0.1 at 10–30 M. At batch 1 a crossover appears only at 10 M and above.</p>
+    <p>LiNR's setting (15.5 M, 11 % passing, V2 3× slower at batch 1) is more extreme than any point we measure. The paper itself notes its numbers use unfused ops, and fusing narrows V2's penalty.</p>
+  </div>
+  <p class="caveat">The 3 M lines are on the same machine. The dashed line ran on a wider synthetic filter table that charged every clause to every item; fixing that moved the crossover from 0.19 to 0.27. The 10 M and 30 M lines still carry that cost and will be re-timed.</p>
+</section>
+
+<section class="take" id="c7">
+  <p class="eyebrow">C7 · official vs ours</p>
+  <h2>Meta's kernels against our Triton: ours is faster end to end and on device</h2>
+  <div class="figure"><div class="ft">Meta's time ÷ our time (above 1 = ours faster), d128, eager, top-100</div><div class="canvas-box"><canvas id="ch-c7" aria-label="Official over Triton time ratios"></canvas></div>
+    <div class="fn">End to end = wall time per call. Device = sum of every GPU kernel. Meta's path cannot be captured in a CUDA graph; ours in graph mode is a further 4–9× faster than Meta's eager.</div></div>
+  <div class="text">
+    <p>Meta's path launches 79–102 kernels per call against our 38–52 and syncs with the host between them, so most eager calls on both sides are host-bound. Summing only device time, ours is still 1.4–2.2× faster, and our fused scorer is faster than Meta's scorer plus its payload and bloom kernels taken together.</p>
+    <p>At d768 our first probe scorer used a tile that spilled registers and made Meta look 1.4× faster. Looping over the dimension fixed it: Meta's / ours went from 0.70 to 2.40 on the same cell.</p>
+  </div>
+  <p class="caveat">Pending re-time. These ratios used an earlier version of our adapter around Meta's ops and Meta's extension built as shipped, with host code unoptimised. With the final adapter and an optimised build (the same kernels, 0.77–0.98 of the shipped time), the end-to-end gap should narrow. The device-time ratio and bit-exactness should not move.</p>
+</section>
+
+<section class="take" id="v3">
+  <p class="eyebrow">C2</p>
+  <h2>V3's bit budget: one bit per dimension, and gains only where most items pass</h2>
+  <div class="figs">
+    <div class="figure"><div class="ft">V3 recall@100, goodreads d128, 1 % kept</div><div class="canvas-box"><canvas id="ch-v3g" aria-label="V3 recall by bits and pass rate"></canvas></div>
+      <div class="fn">64 bits (half the dimension) vs 128 (one per dimension).</div></div>
+    <div class="figure"><div class="ft">V3 speed-up over exact V2, PubMed 10 M d768</div><div class="canvas-box"><canvas id="ch-v3p" aria-label="V3 speed-up over V2 by sweep"></canvas></div>
+      <div class="fn">768 bits, 1 % kept, batch 16, CUDA graph. Recall 0.990–0.998 for V3.</div></div>
+  </div>
+  <div class="text">
+    <p>Our 1-bit codes give at most one bit per dimension; LiNR used 512 bits on d128. Halving the bits saves 1–3 % of the time and costs up to 26 recall points, and at d768 a third of the bits buys no speed at low pass rates.</p>
+    <p>V3 only pays where the filter keeps most of the corpus: 5.9× on the 99.9 %-pass PubMed sweep, 1.2× at 1.8 %, nothing at 0.02 %.</p>
+  </div>
+</section>
+
+<section class="take" id="bloom">
+  <p class="eyebrow">C4</p>
+  <h2>Bloom false positives vanish far below the paper's width</h2>
+  <div class="figure"><div class="ft">Bloom false-positive rate vs bits per item (5 hashes)</div><div class="canvas-box"><canvas id="ch-fpr" aria-label="Bloom false positive rate by width"></canvas></div>
+    <div class="fn">Our transposed bloom index on real attributes. A missing point means no false positive among all candidates checked. Grey marks: the paper's two figures at 1024 bits, read as percent.</div></div>
+  <div class="text">
+    <p>On arXiv and goodreads no false positive survives from 128 bits with 5 hashes; on PubMed, whose MeSH attributes are far richer, the rate drops by more than a decade per doubling and reaches 6×10⁻⁸ at 1024 bits. Latency is flat in width, as the paper says.</p>
+    <p>SilverTorch reports 0.067 at 1024 bits in one section and 0.00173 % in another; neither can be pinned without the authors.</p>
+  </div>
+</section>
+
+<section class="take" id="lessons">
+  <p class="eyebrow">Reproduction lessons</p>
+  <h2>What reproducing found in the code, ours and Meta's</h2>
+  <div class="ledger">
+    <div><span class="n">15</span><span class="l">defects in our library, 13 fixed</span></div>
+    <div><span class="n">8</span><span class="l">in our harness and analysis</span></div>
+    <div><span class="n">9</span><span class="l">in Meta's released code against its paper</span></div>
+    <div><span class="n">4</span><span class="l">open points in the papers' text</span></div>
+  </div>
+  <div class="lessons">
+    <p><b>Suspect your own glue first.</b> Timing our adapter around Meta's ops (query encoding, mask packing) inflated Meta's numbers. The timed call now holds kernels only; preparation is measured and reported apart.</p>
+    <p><b>A profiler that keeps the top kernels lies by omission.</b> Summing the top eight made Meta look faster on device at top-1000; summing every kernel reversed it.</p>
+    <p><b>A slow baseline hides a claim.</b> Our first V2 had a fixed floor at batch 16 and lost to V1 at every pass rate; LiNR's crossover appeared only after fixing it.</p>
+    <p><b>Confounds hide in the test data.</b> A synthetic filter table with 10 clauses instead of 7 shifted the V1/V2 crossover; we first blamed the machine. Timings now compare only within one machine, and clock speeds, which cannot be locked in the container, are sampled and flagged.</p>
+    <p><b>Meta's code against Meta's paper.</b> The official path cannot run in a CUDA graph, ignores the bloom width setting, uses a different bloom hash and adds host syncs in its co-design path. Its setup compiles the host code without optimisation; building it optimised, with the same kernels, gives identical outputs in 0.77–0.98 of the time.</p>
+    <p><b>A good signal is not a good method.</b> Routing low-local-pass-rate queries to exact search picked exactly the queries IVF fails, but the router's own overhead kept it off the speed–recall front on every dataset, so we dropped it.</p>
+  </div>
+</section>
+
+<footer>Draft for the authors. Sources: the campaign records on the private results hub and their exhibit tables. Chart data and the script that builds it sit in the repository under the paper-draft artifacts. Nothing here is citable until the final pass.</footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+<script>
+const D = /*DATA*/null;
+
+// Hand-entered points, each from a measured leg (sources in docs/artifacts/paper-draft/README.md).
+const REAL_AT24 = [
+  { n: 0.8, r: 0.94, label: "goodreads · genre (33 %)" },
+  { n: 3, r: 0.87, label: "arXiv · main category (14 %)" },
+  { n: 10, r: 0.66, label: "PubMed · MeSH (0.02 %)" },
+  { n: 10, r: 0.451, label: "YFCC · tags (1.9 %)" },
+  { n: 30, r: D.laion["c0_domain@24"], label: "LAION · domain (0.95 %)" },
+];
+const MATCH = [
+  { k: "0.8 M · goodreads genre", v: 2.147 / 0.199 },
+  { k: "3 M · uniform p ≥ 0.05", v: 3.18 / 1.13 },
+  { k: "3 M · uniform p 0.01", v: 2.60 / 1.96 },
+  { k: "3 M · uniform p 0.001", v: 2.57 / 3.3 },
+  { k: "10 M · YFCC tags", v: null, best: D.yfcc_real["tags_and@1024"] },
+  { k: "30 M · LAION tags (4 terms)", v: 19.31 / 72.32 },
+  { k: "30 M · LAION domain", v: null, best: D.laion["c0_domain@4096"] },
+];
+
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const charts = [];
+const pct = p => (p >= 0.01 ? (p * 100).toFixed(p >= 0.1 ? 0 : 1) : (p * 100).toFixed(2)) + " %";
+const logTicks = keep => ({ callback(v) { return keep.includes(+v.toPrecision(3)) ? (keep.fmt ? keep.fmt(v) : v) : ""; }, autoSkip: false, maxRotation: 0 });
+
+function base(extra = {}) {
+  const ink2 = css("--ink-2"), grid = css("--grid");
+  return Object.assign({
+    responsive: true, maintainAspectRatio: false, animation: false,
+    interaction: { mode: "nearest", intersect: false },
+    plugins: {
+      legend: { labels: { color: ink2, boxWidth: 14, boxHeight: 2, font: { family: css("--f-body"), size: 12 } } },
+      tooltip: { backgroundColor: css("--surface"), titleColor: css("--ink"), bodyColor: ink2, borderColor: css("--rule"), borderWidth: 1, padding: 10,
+        titleFont: { family: css("--f-body"), weight: "600" }, bodyFont: { family: css("--f-mono"), size: 11 } },
+    },
+  }, extra);
+}
+function axis(o = {}) {
+  return Object.assign({ grid: { color: css("--grid"), drawTicks: false }, border: { color: css("--rule") },
+    ticks: { color: css("--ink-3"), font: { family: css("--f-mono"), size: 11 }, padding: 6 },
+    title: o.title ? { display: true, text: o.title, color: css("--ink-3"), font: { family: css("--f-body"), size: 12 } } : undefined }, o.extra || {});
+}
+const line = (label, data, color, o = {}) => Object.assign({ label, data, borderColor: color, backgroundColor: color, borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, pointBorderColor: css("--surface"), pointBorderWidth: 2, tension: 0 }, o);
+const refLine = (label, x0, x1, y) => ({ label, data: [{ x: x0, y }, { x: x1, y }], borderColor: css("--ref"), borderDash: [4, 4], borderWidth: 1.2, pointRadius: 0, pointHoverRadius: 0, type: "line" });
+
+function draw() {
+  charts.splice(0).forEach(c => c.destroy());
+  const S = ["--s1", "--s2", "--s3", "--s4", "--s7"].map(css);
+  const P = [0.001, 0.01, 0.1, 1];
+
+  // F2
+  const xy = a => a.map(([x, y]) => ({ x, y }));
+  charts.push(new Chart(document.getElementById("ch-f2"), { type: "line", data: { datasets: [
+    line("uniform · 24 probes", xy(D.f2.uniform["24"]), S[1]),
+    line("uniform · 256 probes", xy(D.f2.uniform["256"]), S[1], { borderDash: [5, 4] }),
+    line("correlated · 24 probes", xy(D.f2.correlated["24"]), S[0]),
+    line("correlated · 256 probes", xy(D.f2.correlated["256"]), S[0], { borderDash: [5, 4] }),
+    refLine("recall 0.95", 0.001, 1, 0.95),
+  ] }, options: base({ scales: {
+    x: axis({ title: "global pass rate", extra: { type: "logarithmic", min: 0.0008, max: 1.2, ticks: Object.assign(axis().ticks, logTicks(Object.assign([0.001, 0.01, 0.1, 1], { fmt: pct }))) } }),
+    y: axis({ title: "recall@100", extra: { min: 0.2, max: 1 } }) },
+    plugins: Object.assign(base().plugins, { tooltip: Object.assign(base().plugins.tooltip, { callbacks: { title: i => "pass rate " + pct(i[0].parsed.x), label: i => `${i.dataset.label}: ${i.parsed.y.toFixed(3)}` } }) }) }) }));
+
+  // GLS
+  const g = D.gls.map(r => ({ k: (r.dataset === "arxiv" ? "arXiv " : "goodreads ") + r.sweep.replace(/_/g, " "), l: +r.spearman_recall_l, p: +r.spearman_recall_logp }));
+  charts.push(new Chart(document.getElementById("ch-gls"), { type: "bar", data: { labels: g.map(x => x.k), datasets: [
+    { label: "local pass rate", data: g.map(x => x.l), backgroundColor: S[0], borderRadius: 4, borderSkipped: "start", barPercentage: 0.8, categoryPercentage: 0.7 },
+    { label: "global pass rate (log)", data: g.map(x => x.p), backgroundColor: S[1], borderRadius: 4, borderSkipped: "start", barPercentage: 0.8, categoryPercentage: 0.7 },
+  ] }, options: base({ indexAxis: "y", scales: { x: axis({ title: "Spearman ρ with per-query recall", extra: { min: -0.1, max: 1 } }), y: axis({ extra: { grid: { display: false } } }) } }) }));
+
+  // Recall at 24 vs N
+  const scal = D.scaling;
+  charts.push(new Chart(document.getElementById("ch-n"), { type: "line", data: { datasets: [
+    line("uniform filter · p 0.1", scal.map(s => ({ x: s.n, y: s.p01 })), S[1]),
+    line("unfiltered", scal.map(s => ({ x: s.n, y: s.p1 })), S[2], { borderDash: [5, 4] }),
+    Object.assign(line("real filters", REAL_AT24.map(s => ({ x: s.n, y: s.r, label: s.label })), S[0]), { showLine: false, pointStyle: "rectRot", pointRadius: 7 }),
+    refLine("recall 0.95", 0.7, 35, 0.95),
+  ] }, options: base({ scales: {
+    x: axis({ title: "items (millions)", extra: { type: "logarithmic", min: 0.6, max: 40, ticks: Object.assign(axis().ticks, logTicks([0.8, 1, 3, 10, 30])) } }),
+    y: axis({ title: "recall@100 at 24 probes", extra: { min: 0.3, max: 1 } }) },
+    plugins: Object.assign(base().plugins, { tooltip: Object.assign(base().plugins.tooltip, { callbacks: { title: i => i[0].raw.label || (i[0].parsed.x + " M items"), label: i => `${i.dataset.label}: ${i.parsed.y.toFixed(3)}` } }) }) }) }));
+
+  // Matched recall
+  charts.push(new Chart(document.getElementById("ch-match"), { type: "bar", data: { labels: MATCH.map(m => m.k), datasets: [{
+    label: "IVF speed-up at 0.95", data: MATCH.map(m => m.v ?? 0.12),
+    backgroundColor: MATCH.map(m => m.v == null ? "transparent" : m.v >= 1 ? S[0] : S[1]),
+    borderColor: MATCH.map(m => m.v == null ? css("--ink-3") : "transparent"), borderWidth: MATCH.map(m => m.v == null ? 1.2 : 0),
+    borderDash: [3, 3], borderRadius: 4, borderSkipped: "start", barPercentage: 0.75 }] },
+    options: base({ indexAxis: "y", plugins: Object.assign(base().plugins, { legend: { display: false },
+      tooltip: Object.assign(base().plugins.tooltip, { callbacks: { label: i => { const m = MATCH[i.dataIndex]; return m.v == null ? `never reaches 0.95 (best ${m.best.toFixed(2)} at 25 % scanned)` : m.v >= 1 ? `IVF ${m.v.toFixed(1)}× faster` : `exact ${(1 / m.v).toFixed(1)}× faster`; } } }) }),
+      scales: { x: axis({ title: "exact time ÷ IVF time (log)", extra: { type: "logarithmic", min: 0.12, max: 16, ticks: Object.assign(axis().ticks, logTicks([0.25, 0.5, 1, 2, 4, 8, 16])) } }),
+        y: axis({ extra: { grid: { display: false }, ticks: Object.assign(axis().ticks, { callback(v) { const m = MATCH[v]; return m.v == null ? m.k + " · not reached" : m.k; } }) } }) } }) }));
+
+  // int8
+  const I = D.int8;
+  const keys = [["shipped", "shipped (global int8)"], ["per_row", "per-row int8"], ["fp16", "fp16"]];
+  charts.push(new Chart(document.getElementById("ch-int8"), { type: "bar", data: { labels: ["unfiltered (p 1)", "1 % pass (p 0.01)"], datasets: keys.map(([k, l], j) => ({
+    label: l, data: [I.p1[k], I.p001[k]], backgroundColor: [S[1], S[3], S[0]][j], borderRadius: 4, borderSkipped: "start", categoryPercentage: 0.6, barPercentage: 0.9 })) },
+    options: base({ scales: { y: axis({ title: "recall@100", extra: { min: 0, max: 1 } }), x: axis({ extra: { grid: { display: false } } }) },
+      plugins: Object.assign(base().plugins, { tooltip: Object.assign(base().plugins.tooltip, { callbacks: { label: i => `${i.dataset.label}: ${i.parsed.y.toFixed(3)}` } }) }) }) }));
+
+  // Co-design
+  const groups = [
+    ["Meta · 0.8–3 M", c => c.who === "Meta's code" && c.dataset !== "laion30m"],
+    ["Meta · 30 M · 1 term", c => c.dataset === "laion30m" && c.sweep === "c0_domain"],
+    ["Meta · 30 M · 4 terms", c => c.dataset === "laion30m" && c.sweep === "tags4"],
+    ["ours · 0.8–3 M", c => c.who !== "Meta's code" && c.dataset !== "pubmed"],
+    ["ours · 10 M", c => c.who !== "Meta's code" && c.dataset === "pubmed"],
+  ];
+  const jit = (i, n) => (n > 1 ? (i / (n - 1) - 0.5) * 0.5 : 0);
+  const bsColor = { 1: S[2], 16: S[0], 64: S[4] };
+  const sets = [1, 16, 64].map(bs => {
+    const pts = [];
+    groups.forEach(([, f], gi) => { const sel = D.c5.filter(c => f(c) && c.bs === bs); sel.forEach((c, i) => pts.push({ x: gi + jit(i, sel.length) + (bs === 1 ? -0.12 : bs === 64 ? 0.12 : 0), y: c.ratio, c })); });
+    return { label: "batch " + bs, data: pts, backgroundColor: bsColor[bs], borderColor: css("--surface"), borderWidth: 1.5, pointRadius: 5, pointHoverRadius: 7, type: "scatter" };
+  });
+  charts.push(new Chart(document.getElementById("ch-c5"), { type: "scatter", data: { datasets: [
+    { label: "paper 1.79–2.15×", data: [{ x: -0.6, y: 2.15 }, { x: 4.6, y: 2.15 }], type: "line", fill: { target: { value: 1.79 } }, backgroundColor: css("--grid"), borderWidth: 0, pointRadius: 0, pointHoverRadius: 0 },
+    refLine("no difference", -0.6, 4.6, 1), ...sets ] },
+    options: base({ scales: {
+      x: axis({ extra: { type: "linear", min: -0.6, max: 4.6, grid: { display: false }, ticks: Object.assign(axis().ticks, { stepSize: 1, callback: v => (Number.isInteger(v) && groups[v] ? groups[v][0] : "") }) } }),
+      y: axis({ title: "full ÷ co-design (log)", extra: { type: "logarithmic", min: 0.7, max: 4, ticks: Object.assign(axis().ticks, logTicks([0.8, 1, 1.5, 2, 3, 4])) } }) },
+      plugins: Object.assign(base().plugins, { tooltip: Object.assign(base().plugins.tooltip, { mode: "nearest", intersect: true, filter: i => !!i.raw.c,
+        callbacks: { title: i => i[0].raw.c ? `${i[0].raw.c.who} · ${i[0].raw.c.dataset} ${i[0].raw.c.sweep}` : "", label: i => `${i.raw.c.n_probe} probes, batch ${i.raw.c.bs}: ${i.parsed.y.toFixed(2)}×` } }) }) }) }));
+
+  // C1
+  const C = D.c1, names = Object.keys(C);
+  const style = { 0: [S[0], []], 1: [S[0], [5, 4]], 2: [S[3], []], 3: [S[1], []], 4: [S[1], []] };
+  for (const bs of ["16", "1"]) {
+    const ds = names.map((nm, j) => C[nm][bs] ? Object.assign(line(nm, C[nm][bs].map(r => ({ x: r.p, y: r.ratio, r })), style[j][0], { borderDash: style[j][1] }),
+      j === 4 ? { showLine: false, pointStyle: "rectRot", pointRadius: 7 } : {}) : null).filter(Boolean);
+    ds.push(refLine("equal", 0.0008, 1.2, 1));
+    if (bs === "1") ds.push({ label: "LiNR paper (15.5 M, unfused)", data: [{ x: 0.11, y: 14.6 / 4.8 }], type: "scatter", pointStyle: "crossRot", pointRadius: 9, borderWidth: 2.5, borderColor: css("--ink"), backgroundColor: css("--ink") });
+    charts.push(new Chart(document.getElementById("ch-c1-" + bs), { type: "line", data: { datasets: ds },
+      options: base({ scales: {
+        x: axis({ title: "pass rate", extra: { type: "logarithmic", min: 0.0008, max: 1.2, ticks: Object.assign(axis().ticks, logTicks(Object.assign([0.001, 0.01, 0.1, 1], { fmt: pct }))) } }),
+        y: axis({ title: "V2 ÷ V1 (log)", extra: { type: "logarithmic", min: 0.2, max: 4, ticks: Object.assign(axis().ticks, logTicks([0.25, 0.5, 1, 2, 3, 4])) } }) },
+        plugins: Object.assign(base().plugins, { legend: { display: bs === "16", labels: base().plugins.legend.labels },
+          tooltip: Object.assign(base().plugins.tooltip, { callbacks: { title: i => "pass rate " + pct(i[0].parsed.x), label: i => `${i.dataset.label}: ${i.parsed.y.toFixed(2)}` + (i.raw.r ? ` (V1 ${i.raw.r.v1_ms} ms, V2 ${i.raw.r.v2_ms} ms)` : "") } }) }) }) }));
+  }
+
+  // C7
+  const c7 = D.c7;
+  charts.push(new Chart(document.getElementById("ch-c7"), { type: "bar", data: { labels: c7.map(r => r.cell.replace("arxiv", "arXiv").replace("none", "no filter")), datasets: [
+    { label: "end to end", data: c7.map(r => r.e2e), backgroundColor: S[0], borderRadius: 4, borderSkipped: "start", categoryPercentage: 0.7, barPercentage: 0.9 },
+    { label: "device time only", data: c7.map(r => r.device), backgroundColor: S[2], borderRadius: 4, borderSkipped: "start", categoryPercentage: 0.7, barPercentage: 0.9 },
+  ] }, options: base({ scales: { y: axis({ title: "Meta ÷ ours", extra: { min: 0, max: 2.5 } }), x: axis({ extra: { grid: { display: false }, ticks: Object.assign(axis().ticks, { maxRotation: 40, minRotation: 0 }) } }) },
+    plugins: Object.assign(base().plugins, { tooltip: Object.assign(base().plugins.tooltip, { callbacks: { label: i => `${i.dataset.label}: ours ${i.parsed.y.toFixed(2)}× faster` } }) }) }) }));
+
+  // V3 goodreads
+  const vg = bits => D.v3_goodreads.filter(r => r[0] === bits).map(r => ({ x: r[1], y: r[2] }));
+  charts.push(new Chart(document.getElementById("ch-v3g"), { type: "line", data: { datasets: [
+    line("128 bits (= dimension)", vg(128), S[0]), line("64 bits", vg(64), S[1]) ] },
+    options: base({ scales: {
+      x: axis({ title: "pass rate", extra: { type: "logarithmic", min: 0.0008, max: 1.2, ticks: Object.assign(axis().ticks, logTicks(Object.assign([0.001, 0.01, 0.1, 1], { fmt: pct }))) } }),
+      y: axis({ title: "recall@100", extra: { min: 0.5, max: 1 } }) },
+      plugins: Object.assign(base().plugins, { tooltip: Object.assign(base().plugins.tooltip, { callbacks: { title: i => "pass rate " + pct(i[0].parsed.x), label: i => `${i.dataset.label}: ${i.parsed.y.toFixed(3)}` } }) }) }) }));
+
+  // V3 PubMed vs V2 (V2 graph bs 16 from the V-PUBMED filter leg, same code version)
+  const V2MS = { c0_mesh: 13.47, all5: 16.66, c3_journal_reverse: 167.1 };
+  const vp = [["c0_mesh", "MeSH · 0.02 % pass"], ["all5", "5 terms · 1.8 %"], ["c3_journal_reverse", "journal reverse · 99.9 %"]]
+    .map(([s, l]) => ({ l, v: V2MS[s] / D.v3[s + "|0.01"]["768"].ms16, r: D.v3[s + "|0.01"]["768"].recall }));
+  charts.push(new Chart(document.getElementById("ch-v3p"), { type: "bar", data: { labels: vp.map(x => x.l), datasets: [{
+    label: "V2 time ÷ V3 time", data: vp.map(x => x.v), backgroundColor: S[0], borderRadius: 4, borderSkipped: "start", barPercentage: 0.6 }] },
+    options: base({ scales: { y: axis({ title: "speed-up over V2 (log)", extra: { type: "logarithmic", min: 0.8, max: 8, ticks: Object.assign(axis().ticks, logTicks([1, 2, 4, 8])) } }), x: axis({ extra: { grid: { display: false } } }) },
+      plugins: Object.assign(base().plugins, { legend: { display: false }, tooltip: Object.assign(base().plugins.tooltip, { callbacks: { label: i => `${vp[i.dataIndex].v.toFixed(2)}× · V3 recall ${vp[i.dataIndex].r.toFixed(3)}` } }) }) }) }));
+
+  // FPR
+  const fp = ds => D.fpr.filter(r => r[0] === ds && r[1] === 5 && r[3] > 0).map(r => ({ x: r[2], y: r[3] }));
+  charts.push(new Chart(document.getElementById("ch-fpr"), { type: "line", data: { datasets: [
+    line("PubMed (MeSH)", fp("pubmed"), S[0]), line("arXiv", fp("arxiv"), S[1]), line("goodreads", fp("goodreads"), S[2]),
+    { label: "SilverTorch paper", data: [{ x: 1024, y: 0.067 / 100 }, { x: 1024, y: 0.00173 / 100 }], type: "scatter", pointStyle: "line", pointRadius: 12, borderWidth: 3, borderColor: css("--ref"), backgroundColor: css("--ref") },
+  ] }, options: base({ scales: {
+    x: axis({ title: "bits per item", extra: { type: "logarithmic", min: 50, max: 2600, ticks: Object.assign(axis().ticks, logTicks([64, 128, 256, 512, 1024, 2048])) } }),
+    y: axis({ title: "false-positive rate (log)", extra: { type: "logarithmic", min: 1e-9, max: 0.1, ticks: Object.assign(axis().ticks, { callback: v => { const e = Math.log10(v); return Number.isInteger(Math.round(e * 1000) / 1000) && Math.round(e) % 2 === 1 ? "1e" + Math.round(e) : ""; } }) } }) },
+    plugins: Object.assign(base().plugins, { tooltip: Object.assign(base().plugins.tooltip, { callbacks: { title: i => i[0].parsed.x + " bits", label: i => `${i.dataset.label}: ${i.parsed.y.toExponential(1)}` } }) }) }) }));
+}
+
+function boot() { if (!window.Chart) return; draw(); }
+boot();
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", boot);
+new MutationObserver(boot).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+</script>
