@@ -385,8 +385,8 @@ earlier one (the gSASRec leg is a different encoder: SilverTorch `c0_genre` reca
 
 ### V-PUBMED: PubMed `filter` under the new grid
 
-**In progress, NOT CITABLE until D1-G** (2026-10-08, A100-SXM4-80GB, pod `a100-x1-b`, GPU 0 shared
-under a lock with one other worker's short passes; code_version `408b1188`). Scripts and the
+**Done at seed 0, NOT CITABLE until D1-G** (2026-10-08 / 09, A100-SXM4-80GB, pod `a100-x1-b`, GPU 0 shared
+under a lock with st-dloop; restage, identity and `n95` at `408b1188`, `filter` at v2.1-v2.3 as below). Scripts and the
 per-step record: [artifact](artifacts/campaign-v2/v-pubmed/README.md).
 
 - **Restage + embedding identity: EQUAL.** The 10 M slice rebuilt from NCBI source (63 min, CPU,
@@ -399,18 +399,34 @@ per-step record: [artifact](artifacts/campaign-v2/v-pubmed/README.md).
   (seeds within 0.021); no seed reaches 0.95. PubMed's `filter` n95 slot stays empty: going past
   128 breaks the grid's "no `n_probe` 256" rule and is with the user. Hub:
   `campaign-v2/pubmed-n95`.
-- **`filter` leg: running at `campaign-v2.1`** (exploration policy, user 2026-10-09: legs run at the current tag; V2 perf and
-  SilverTorch Triton perf are on the redo ledger). 90 cells in 48 chunks of the real suite (`chunks.py` asserts that every
-  record key and interleave unit equals the full suite's), shortest first, each yielding to st-dloop's GPU flags. PubMed
-  `n_lists` 4096, `n_probe` {24, 1024} (IVF-TUNE); chunk order re-sorted by measured time (V1+V2 at low p, V3,
-  postfilter, SilverTorch clause, SilverTorch bloom, V1+V2 `c3_journal_reverse` last). First SilverTorch cells (clause
-  `c0_mesh`, seed 0): `n_probe` 24 recall@100 0.554, bs 16 graph 0.82 ms, 93 s a cell; **`n_probe` 1024 recall@100 0.941,
-  bs 16 graph 28.4 ms (exact V1 36.0 ms on the same sweep), 1,998 s a cell**. Of those 1,998 s, the timed windows are
-  407 s (8 variants × 3 windows × 1,000 calls; `N` sits at its floor), the quality pass ≈ 17 s (chunks of 16 at k 1000
-  over 8,428 rows), the build 85 s; **≈ 1,490 s are not attributable from the log** (no stage timestamps): likely Triton/ptxas compiling the probe-ids
-  epilogue at its 2^20 tile (k 1000 × `n_probe` 1024; the ST-IDS diagnosis, pod c measured 99-653 s per variant), not verified
-  here; ST-IDS (v2.2) addresses it. The next `n_probe` 1024 cell on the same shapes (clause `c3_journal_reverse`, seed 0, warm
-  cache) took **599 s** (recall@100 0.922; `n_probe` 24: 74 s, 0.811), about 1,400 s less: consistent with a one-off compile.
+- **`filter` leg: done at seed 0 (claims first, user 2026-10-10; seeds 1-2 go to F-REPRO).** 90-cell suite in 48
+  chunks of the real suite (`chunks.py` asserts every record key and interleave unit equals the full suite's); PubMed
+  `n_lists` 4096, `n_probe` {24, 1024} (IVF-TUNE). Each cell sits at the code_version current when it ran, all `ok`, every
+  window at 1410 MHz: V1+V2 clause at **v2.1** (`f01255f1`, Hub `campaign-v2.1/pubmed-filter`), SilverTorch clause at
+  **v2.2** (`0d23c615`, `campaign-v2.2/pubmed-filter`), V1+V2 bloom, V3, postfilter and the SilverTorch bloom units at
+  **v2.3** (`1258a63e`, `campaign-v2.3/pubmed-filter`). Oracles rebuilt at each version are `torch.equal` to the earlier
+  ones (v2.2 and v2.3 vs v2.1). Scripts: [v2.1](artifacts/campaign-v2/v-pubmed/README.md),
+  `docs/artifacts/campaign-v2.2/v-pubmed/`, `docs/artifacts/campaign-v2.3/v-pubmed/`. Seed 0, k 100, ms graph (eager for
+  official), recall_oracle@100:
+
+  | arm (version) | `c0_mesh` p 0.0002 | `all5` p 0.018 | `c3_journal_reverse` p 0.9993 | bloom `c0_mesh` |
+  |---|---|---|---|---|
+  | V1 (v2.1 clause / v2.3 bloom), bs 1 / 16 | 11.42 / 36.1, 0.9985 | 11.42 / 36.1, 0.9988 | 11.43 / 36.2, 0.9960 | 10.13 / 17.8, 0.9984 |
+  | V2 (same), bs 1 / 16 | 1.57 / 15.4 | 1.57 / 21.9 | 14.96 / 225.5 | 1.15 / 9.56 |
+  | V3 pool 5000 (v2.3), bs 1 / 16 | 1.55 / 13.6, 0.9985 | 1.56 / 13.9, 0.9965 | 2.54 / 26.4, 0.9682 | 1.28 / 9.69, 0.9984 |
+  | SilverTorch `n_probe` 24 (v2.2 clause / v2.3 bloom), bs 16 | 0.42, 0.554 | 0.42, 0.385 | 1.00, 0.811 | 0.33, 0.554 |
+  | SilverTorch `n_probe` 1024, bs 16 | 13.2, 0.941 | 13.3, 0.873 | 31.6, 0.922 | 8.76, 0.941 |
+  | official bloom `n_probe` 24 / 1024 (v2.3), bs 16 eager | | | | 1.63 / 6.61 (Triton eager 0.75 / 8.90) |
+  | postfilter α 1 / 8 (v2.3), bs 16 | 13.7, 0.123 / 0.354 | 13.7, 0.052 / 0.196 | 13.7, 0.959 / 0.996 | 13.7, 0.123 / 0.354 |
+
+  Claims (exploration numbers, NOT CITABLE): **C1 holds at 10 M** (V1-vs-V2 interleaved at v2.1: V2 7.3× faster at low p
+  bs 1, V1 1.3× / 6.2× faster at p ≈ 1 bs 1 / 16). **C6 holds**: SilverTorch never reaches 0.95, even at `n_probe` 1024
+  (25 % scanned), and the selective `all5` needs the most probes. **C2** at `filter`'s pool 5000: V3 is no faster than V2 at
+  equal recall on the like-for-like bloom pair (v2.3: 9.69 vs 9.56 ms bs 16); its clause rows sit at v2.3 against V2 at v2.1,
+  so they do not compare; V3-BITS-PUBMED (pool {1 %, 5 %}) is the C2 test. **C7 at d768 (interleaved bloom units, v2.3)**:
+  Triton beats official at `n_probe` 24 (0.75 vs 1.63 ms eager), official beats Triton at `n_probe` 1024 (6.61 vs 8.90 ms):
+  the d768 ordering is restored at the paper's operating point but still flips at high `n_probe` (not investigated).
+  Postfilter recall collapses at low p (0.12-0.35 at α 1-8).
 - **LiNR V2 is about 45 % slower than D1 at pass rate ≈ 1 (surprise gate, 2026-10-09; not a correctness issue).** V1 and V2
   are timed interleaved in one group, seed 0, k 100, every window at 1410 MHz; V1 is the in-run control.
 
