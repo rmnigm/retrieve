@@ -311,8 +311,8 @@ now on; the [roadmap](roadmap.md) holds the steps.
   ([validation](validation.md#harness-gates), G-oracle).
 - **The router stays only if it is on the Pareto front** (user, 2026-10-10):
   between IVF and exact search — recall above IVF's and latency below exact
-  search's, at the same batch size and mode — on the large datasets (PubMed
-  10 M, LAION 30 M). If it is not on the recall-latency front there, it is
+  search's, at the same batch size and mode — on PubMed 10 M (the large
+  dataset; LAION is not used for it). If it is not on the front there, it is
   dropped from the paper and the library (ROUTER-LIB is not built).
 - **YFCC exact gate: an fp16-storage allowance at k 100** (user, 2026-10-10).
   The §2.4 gate (`recall_oracle@k_max ≥ 0.99` for V1 / V2) stays as is

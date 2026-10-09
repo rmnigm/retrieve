@@ -338,7 +338,7 @@ co-design.
   then C5 official and T3 h2h re-run claims-first. st-dloop, pod b; C5's
   verdict on Meta's code waits for it.
 - [ ] **ROUTER-LIB: the router as a library method** (the library goal,
-  user 2026-10-10; only if V-ROUTER on PubMed / LAION puts it on the Pareto
+  user 2026-10-10; only if V-ROUTER on PubMed puts it on the Pareto
   front, [decisions](decisions.md#datasets); WIP on `dev/router-lib`): the harness `router` arm's logic (unfiltered pre-probe
   → l_q → V2 below the threshold, SilverTorch above) as a `retrieve`
   module with its docs page, the split done on the device with no host
