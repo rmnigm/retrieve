@@ -9,6 +9,8 @@ D=/scratch/$(echo "${TAG#campaign-}" | tr -d .)
 declare -A DRIVER=([v-gr-deep]=$HERE/v-gr-deep.sh [v-router]=$HERE/v-router.sh [v-yfcc-deep]=$HERE/v-yfcc-deep.sh
                    [v-yfcc-synth]=$HERE/v-yfcc-synth.sh [gr-synth-mid]=$HERE/gr-synth-mid.sh)
 for leg in "$@"; do [ -n "${DRIVER[$leg]:-}" ] || { echo "unknown leg $leg"; exit 2; }; done
+# the chain starts between legs (the lock is ours, nothing runs from the main checkout): take staging's harness now
+git -C /workspace/retrieve pull -q --ff-only origin staging && echo "$(date -Is) main checkout $(git -C /workspace/retrieve log --oneline -1)"
 for leg in "$@"; do
   [ -e "$D/chain.stop" ] && { echo "$(date -Is) stop file, not starting $leg"; exit 0; }
   mkdir -p "$D/$leg"
