@@ -1,0 +1,96 @@
+--- frozen_cps.py
++++ k_wskip.py
+@@ -85,6 +85,7 @@
+     GATED: tl.constexpr,
+     NQB: tl.constexpr,
+     WIDE: tl.constexpr,
++    NW: tl.constexpr = 8,
+ ):
+     # Batch on grid_x, so the rows' early probes run together and share clusters in L2; tiles
+     # split across grid_y × grid_z (kernels.md § SilverTorch kernels).
+@@ -108,26 +109,67 @@
+         tl.store(out_row + slot, tl.full([BLOCK_P], float("-inf"), tl.float32), mask=slot < width)
+     else:
+         keep = valid
+-        if HAS_QB:
+-            # Transposed bloom: bit `pos % 64` of word `pos // 64` of row m is item pos's bit m.
++        any_pass = 1
++        if SKIP and HAS_QB:
++            pos0 = tl.min(pos, axis=0)
++            pos1 = pos0 + tl.sum(valid.to(tl.int64), axis=0)
++            wi = (pos0 >> 6) + tl.arange(0, NW)
++            lo_b = tl.minimum(tl.maximum(pos0 - wi * 64, 0), 64)
++            hi_b = tl.minimum(tl.maximum(pos1 - wi * 64, 0), 64)
++            one = tl.full([NW], 1, tl.int64)
++            m_hi = tl.where(hi_b >= 64, -1, (one << hi_b) - 1)
++            m_lo = tl.where(lo_b >= 64, -1, (one << lo_b) - 1)
++            span = m_hi & ~m_lo
++            live = span != 0
++            wacc = span
++            for i0 in range(0, n_qbits, 4):
++                m0 = tl.load(qpos_ptr + bid * stride_qpos + i0)
++                m1 = tl.load(qpos_ptr + bid * stride_qpos + i0 + 1, mask=i0 + 1 < n_qbits, other=-1)
++                m2 = tl.load(qpos_ptr + bid * stride_qpos + i0 + 2, mask=i0 + 2 < n_qbits, other=-1)
++                m3 = tl.load(qpos_ptr + bid * stride_qpos + i0 + 3, mask=i0 + 3 < n_qbits, other=-1)
++                if (m0 >= 0) | (m1 >= 0) | (m2 >= 0) | (m3 >= 0):
++                    v0 = tl.load(bloom_t_ptr + m0 * stride_tm + wi, mask=live & (m0 >= 0), other=-1)
++                    v1 = tl.load(bloom_t_ptr + m1 * stride_tm + wi, mask=live & (m1 >= 0), other=-1)
++                    v2 = tl.load(bloom_t_ptr + m2 * stride_tm + wi, mask=live & (m2 >= 0), other=-1)
++                    v3 = tl.load(bloom_t_ptr + m3 * stride_tm + wi, mask=live & (m3 >= 0), other=-1)
++                    wacc = wacc & v0 & v1 & v2 & v3
++            any_pass = tl.max((wacc != 0).to(tl.int32), axis=0)
++            if any_pass != 0:
++                word = pos >> 6
++                bit = pos & 63
++                acc = tl.full(pos.shape, -1, tl.int64)
++                for i0 in range(0, n_qbits, 4):
++                    m0 = tl.load(qpos_ptr + bid * stride_qpos + i0)
++                    m1 = tl.load(qpos_ptr + bid * stride_qpos + i0 + 1, mask=i0 + 1 < n_qbits, other=-1)
++                    m2 = tl.load(qpos_ptr + bid * stride_qpos + i0 + 2, mask=i0 + 2 < n_qbits, other=-1)
++                    m3 = tl.load(qpos_ptr + bid * stride_qpos + i0 + 3, mask=i0 + 3 < n_qbits, other=-1)
++                    if (m0 >= 0) | (m1 >= 0) | (m2 >= 0) | (m3 >= 0):
++                        w0 = tl.load(bloom_t_ptr + m0 * stride_tm + word, mask=valid & (m0 >= 0), other=-1)
++                        w1 = tl.load(bloom_t_ptr + m1 * stride_tm + word, mask=valid & (m1 >= 0), other=-1)
++                        w2 = tl.load(bloom_t_ptr + m2 * stride_tm + word, mask=valid & (m2 >= 0), other=-1)
++                        w3 = tl.load(bloom_t_ptr + m3 * stride_tm + word, mask=valid & (m3 >= 0), other=-1)
++                        acc = acc & w0 & w1 & w2 & w3
++                keep = keep & (((acc >> bit) & 1) != 0)
++        elif HAS_QB:
+             word = pos >> 6
+             bit = pos & 63
+-            for i in range(n_qbits):
+-                m = tl.load(qpos_ptr + bid * stride_qpos + i)  # -1: an inactive clause's slot
+-                # Masked by `valid`, not the running `keep`, so the bits' loads do not wait on
+-                # each other (kernels.md § codesigned_probe_score).
+-                w = tl.load(bloom_t_ptr + m * stride_tm + word, mask=valid & (m >= 0), other=-1)
+-                keep = keep & (((w >> bit) & 1) != 0)
+-
+-        any_pass = 1  # a Python int when the skip is off, so the branch folds away
+-        if SKIP and HAS_QB:
+-            any_pass = tl.max(keep.to(tl.int32), axis=0)
+-        elif GATED and HAS_QB:
+-            # Vote only where under one passing lane per tile is expected (kernels.md § SilverTorch
+-            # kernels, "Gated tile skip").
+-            any_pass = tl.full([], 1, tl.int32)
+-            if bound * BLOCK_P < 1.0:
+-                any_pass = tl.max(keep.to(tl.int32), axis=0)
++            acc = tl.full(pos.shape, -1, tl.int64)
++            for i0 in range(0, n_qbits, 4):
++                m0 = tl.load(qpos_ptr + bid * stride_qpos + i0)
++                m1 = tl.load(qpos_ptr + bid * stride_qpos + i0 + 1, mask=i0 + 1 < n_qbits, other=-1)
++                m2 = tl.load(qpos_ptr + bid * stride_qpos + i0 + 2, mask=i0 + 2 < n_qbits, other=-1)
++                m3 = tl.load(qpos_ptr + bid * stride_qpos + i0 + 3, mask=i0 + 3 < n_qbits, other=-1)
++                if (m0 >= 0) | (m1 >= 0) | (m2 >= 0) | (m3 >= 0):
++                    w0 = tl.load(bloom_t_ptr + m0 * stride_tm + word, mask=valid & (m0 >= 0), other=-1)
++                    w1 = tl.load(bloom_t_ptr + m1 * stride_tm + word, mask=valid & (m1 >= 0), other=-1)
++                    w2 = tl.load(bloom_t_ptr + m2 * stride_tm + word, mask=valid & (m2 >= 0), other=-1)
++                    w3 = tl.load(bloom_t_ptr + m3 * stride_tm + word, mask=valid & (m3 >= 0), other=-1)
++                    acc = acc & w0 & w1 & w2 & w3
++            keep = keep & (((acc >> bit) & 1) != 0)
++            if GATED:
++                any_pass = tl.full([], 1, tl.int32)
++                if bound * BLOCK_P < 1.0:
++                    any_pass = tl.max(keep.to(tl.int32), axis=0)
+         if any_pass == 0:
+             # No lane passes the filter: no code load, no dot (kernels.md § SilverTorch
+             # kernels, "Tile skip").

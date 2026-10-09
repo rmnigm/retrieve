@@ -1,0 +1,40 @@
+--- frozen_cps.py
++++ k_g8_32.py
+@@ -110,14 +110,29 @@
+         keep = valid
+         if HAS_QB:
+             # Transposed bloom: bit `pos % 64` of word `pos // 64` of row m is item pos's bit m.
+-            word = pos >> 6
+-            bit = pos & 63
+-            for i in range(n_qbits):
+-                m = tl.load(qpos_ptr + bid * stride_qpos + i)  # -1: an inactive clause's slot
+-                # Masked by `valid`, not the running `keep`, so the bits' loads do not wait on
+-                # each other (kernels.md § codesigned_probe_score).
+-                w = tl.load(bloom_t_ptr + m * stride_tm + word, mask=valid & (m >= 0), other=-1)
+-                keep = keep & (((w >> bit) & 1) != 0)
++            word = pos >> 5
++            bit = pos & 31
++            acc = tl.full(pos.shape, -1, tl.int32)
++            for i0 in range(0, n_qbits, 8):
++                m0 = tl.load(qpos_ptr + bid * stride_qpos + i0 + 0)
++                m1 = tl.load(qpos_ptr + bid * stride_qpos + i0 + 1, mask=i0 + 1 < n_qbits, other=-1)
++                m2 = tl.load(qpos_ptr + bid * stride_qpos + i0 + 2, mask=i0 + 2 < n_qbits, other=-1)
++                m3 = tl.load(qpos_ptr + bid * stride_qpos + i0 + 3, mask=i0 + 3 < n_qbits, other=-1)
++                m4 = tl.load(qpos_ptr + bid * stride_qpos + i0 + 4, mask=i0 + 4 < n_qbits, other=-1)
++                m5 = tl.load(qpos_ptr + bid * stride_qpos + i0 + 5, mask=i0 + 5 < n_qbits, other=-1)
++                m6 = tl.load(qpos_ptr + bid * stride_qpos + i0 + 6, mask=i0 + 6 < n_qbits, other=-1)
++                m7 = tl.load(qpos_ptr + bid * stride_qpos + i0 + 7, mask=i0 + 7 < n_qbits, other=-1)
++                if (m0 >= 0) | (m1 >= 0) | (m2 >= 0) | (m3 >= 0) | (m4 >= 0) | (m5 >= 0) | (m6 >= 0) | (m7 >= 0):
++                    w0 = tl.load(bloom_t_ptr + m0 * stride_tm + word, mask=valid & (m0 >= 0), other=-1)
++                    w1 = tl.load(bloom_t_ptr + m1 * stride_tm + word, mask=valid & (m1 >= 0), other=-1)
++                    w2 = tl.load(bloom_t_ptr + m2 * stride_tm + word, mask=valid & (m2 >= 0), other=-1)
++                    w3 = tl.load(bloom_t_ptr + m3 * stride_tm + word, mask=valid & (m3 >= 0), other=-1)
++                    w4 = tl.load(bloom_t_ptr + m4 * stride_tm + word, mask=valid & (m4 >= 0), other=-1)
++                    w5 = tl.load(bloom_t_ptr + m5 * stride_tm + word, mask=valid & (m5 >= 0), other=-1)
++                    w6 = tl.load(bloom_t_ptr + m6 * stride_tm + word, mask=valid & (m6 >= 0), other=-1)
++                    w7 = tl.load(bloom_t_ptr + m7 * stride_tm + word, mask=valid & (m7 >= 0), other=-1)
++                    acc = acc & w0 & w1 & w2 & w3 & w4 & w5 & w6 & w7
++            keep = keep & (((acc >> bit) & 1) != 0)
+ 
+         any_pass = 1  # a Python int when the skip is off, so the branch folds away
+         if SKIP and HAS_QB:
