@@ -118,8 +118,8 @@ def test_bloom_compact_routed_via_layer():
 
     q = make_query_attrs(b=4, c=2, n_vocab=80, inactive_rate=0.1, seed=22)
 
-    got_ids, got_counts = bf.evaluate_indices(q)
-    ref_ids, ref_counts = compact_mask(bf.evaluate_mask(q))
+    got_ids, got_counts = bf.evaluate_indices(bf.prepare_queries(q))
+    ref_ids, ref_counts = compact_mask(bf.evaluate_mask(bf.prepare_queries(q)))
     _rows_equal(got_ids, got_counts, ref_ids, ref_counts)
 
 

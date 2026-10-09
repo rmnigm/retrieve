@@ -112,16 +112,8 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    `measure.graph_callable` asserts `cudagraph_skips == 0` and exactly one
    `cudaGraphLaunch` per call, else the entry is null with a `reason`, never
    a mislabelled number. `official` is not capturable and records `reason:
-   not_capturable`. Its bloom forward parses each query batch into
-   expression plans on the CPU (about 59 µs per call at B=16,
-   [kernels](kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend))
-   and memoises them by default; the pool replays batches, so a cached cell
-   would not pay what serving fresh queries costs. Quality runs with the
-   library default (cache on); `run.perf` then swaps in
-   `OfficialConfig(cache_plans=False)` in place (read per forward, no
-   rebuild, bit-identical results) before the first timed variant, and every
-   entry records `cache_plans`. An entry with `cache_plans: true` is not a
-   timing number. Per variant (`measure.latency`): 50 warm-up calls → sync →
+   not_capturable`. The filter's query side is prepared outside the timed
+   call (§ Query preparation below). Per variant (`measure.latency`): 50 warm-up calls → sync →
    **3 windows** of `N = clamp(2 s / median_est, 1000, 5000)` calls, each
    call bracketed by CUDA events on the current stream, wall clock around
    the window with one sync at the end. From the window with the median
@@ -368,6 +360,27 @@ data-dependent: `capturable = False`, so `graph` records `not_capturable`. Build
 `n_probe` (the IVF branch). The quality pass writes `router_lq` and `router_exact` (1.0 = V2) per
 kept query to the per-query sidecar and `quality.router_exact_share` to the record. Triton and
 torch backends, clause and bloom.
+
+### Query preparation
+
+Every filtered arm encodes its batch's query attrs once, outside the timed
+call, through its `prepare_queries` (the user's rule, 2026-10-10: forward is
+the algorithm; preparation is reported, not hidden):
+
+| arm | `prepare_queries` returns |
+|---|---|
+| `silvertorch` triton / torch, bloom | the query bit positions (`PreparedFilter.query_bits`) |
+| `silvertorch` official, bloom | Meta's parsed plans on the CPU (`plans_data` / `plans_offsets`) |
+| `silvertorch`, exact (every backend) | the int64 attrs (`query_attrs`) |
+| LiNR V1-V3, `postfilter` | the standalone filter's encoding: bloom query signatures, or the int64 attrs |
+| `router` | the filter's encoding and its IVF branch's `PreparedFilter` |
+
+`run.perf` prepares every batch of a cell's fixed pool before its first
+timed call (`run.prepare_pool`), each module with its own encoding. Every
+timed and hashed call then takes `(query batch, prepared batch)`. The mean
+cost of one batch's preparation (host + device, synced) is recorded on every
+entry as `query_prep_ms`. The quality pass and the compile warm-up prepare
+each chunk the same way.
 
 ## Config: one YAML per dataset + `suites.yaml`
 
@@ -886,7 +899,7 @@ Perf entry:
 | `window_sm_mhz` | the SM clock sampled right after each window's sync, same order as `window_medians_ms`; `null` elements without CUDA; not in `results.parquet` |
 | `peak_fwd_mib` | eager only, first window: `max_memory_allocated − allocated_before` |
 | `sm_mhz` | `window_sm_mhz[-1]`: the SM clock sampled right after the last window's sync, with the GPU still at its load clock — the per-variant value cross-run latency comparisons read, and the only clock `clocks_drift` looks at; `null` without CUDA |
-| `cache_plans` | on every entry: `false` on `silvertorch`/`official` (`run.perf` replaces `module.official` with `cache_plans=False` before the first variant, so every timed forward pays the CPU expression parse), `null` on backends without a plan cache |
+| `query_prep_ms` | on every entry: the mean host + device ms of one pool batch's `prepare_queries` (the filter's query encoding, done before timing, § Query preparation); `null` on unfiltered cells and arms without a prepare step. Records before OFFICIAL-REWORK carry `cache_plans` instead (`false` = the official expression parse was inside every timed forward) |
 | `load` | `"closed_loop"` |
 | `kernels` | `--profile`, eager only: top-8 CUDA kernels `{kernel, us, calls}` |
 | `kernels_us`, `kernels_calls` | `--profile`, eager only: device µs and kernel launches summed over every kernel of the call, sentinels and `## …` profiler ranges excluded (records before H-KSUM lack them; records between H-KSUM and its fix double-count compiled calls, which no eager `h2h` arm is; T3 reads these, and for such a record the top-8 sum, marked as a lower bound) |
@@ -1028,7 +1041,7 @@ cached at `<gt_dir>/oracle_v4_<sweep>_<fingerprint[:16]>.pt`:
 walks the items in chunks of `ITEM_CHUNK = 2_000_000` rows: `q @ chunk.T` in
 fp32 (the function raises unless TF32 is off and the matmul precision is
 `highest`, which `measure.setup` sets), `-inf` where the exact filter's
-`evaluate_mask(qa, start, end)` (a `[B, end − start]` bool over that item
+`evaluate_mask(prepare_queries(qa), start, end)` (a `[B, end − start]` bool over that item
 range) fails, a local `topk`, merged into the running `[B, k]` with ids
 offset by the chunk start; equal scores go to the lower id (a stable sort by
 id, then by score). `pass_counts` and `targets_in_filter` accumulate per
@@ -1439,8 +1452,9 @@ in `quality`; `memory_reserved_mib` flat (±5 %) across a group's cells;
 `retrieve.modules.linr`; a new composition is added there, because the
 library retrieves and the harness measures —
 [decisions](../decisions.md#harness)):
-the filter as `self.filter`, `forward(query, query_clause_attrs=None) ->
-(ids, scores)`, `k` forwarding to the final top-k layer, `set_query_params`
+the filter as `self.filter`, `prepare_queries(query_clause_attrs)` (the
+filter's query encoding) and `forward(query, prepared=None) -> (ids,
+scores)`, `k` forwarding to the final top-k layer, `set_query_params`
 for any query-time knob, `capturable` as a class attribute, a `DISPATCH`
 row. Then one line in [`algos.py`](../../evaluation/bench/algos.py)'s
 `ALGOS` (and a branch in `build` if it registers differently; `PER_K_QUALITY`

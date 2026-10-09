@@ -100,7 +100,7 @@ def combine_indices(
         )
 
     f0, q0 = filters[0], query_clause_attrs[0]
-    ids, counts = f0.evaluate_indices(q0)
+    ids, counts = f0.evaluate_indices(f0.prepare_queries(q0))
 
     for f, q in zip(filters[1:], query_clause_attrs[1:], strict=True):
         b, p = ids.shape
@@ -110,7 +110,7 @@ def combine_indices(
         # ids past counts[b] are unwritten (Triton) or argsort leftovers (torch); gather as 0, then
         # sub_mask & valid zeroes them out.
         safe_ids = torch.where(valid, ids, ids.new_zeros(()))
-        sub_mask = f.evaluate_subset(q, safe_ids)  # [B, P] bool
+        sub_mask = f.evaluate_subset(f.prepare_queries(q), safe_ids)  # [B, P] bool
         sub_mask = sub_mask & valid
         new_counts = sub_mask.sum(dim=1)
         new_p = int(new_counts.max().item())

@@ -94,11 +94,13 @@ class RetrievalModule(nn.Module, abc.ABC):
 class FilterModule(nn.Module, abc.ABC):
     """Boolean predicate over a registered item index; ``forward`` aliases ``evaluate_mask``.
 
-    Three eval paths: ``evaluate_mask(q, start=0, end=None) -> [B, end - start] bool`` (dense,
-    over items ``[start, end)``), ``evaluate_indices(q) -> ([B,
-    P] int64, [B] int64)`` (compact candidates), ``evaluate_subset(q, candidate_ids) -> [B, P]
-    bool`` (check only the given ids); plus ``mask_scores(scores, q) -> [B, N]``, dense scores
-    with the failing items at ``-inf``."""
+    A batch's query attrs are encoded once by ``prepare_queries(query_clause_attrs)`` (the bloom
+    query signatures; the int64 attrs for the exact filter), outside any timed call, and every
+    eval path takes that encoding ``q``: ``evaluate_mask(q, start=0, end=None) -> [B, end -
+    start] bool`` (dense, over items ``[start, end)``), ``evaluate_indices(q) -> ([B, P] int64,
+    [B] int64)`` (compact candidates), ``evaluate_subset(q, candidate_ids) -> [B, P] bool``
+    (check only the given ids); plus ``mask_scores(scores, q) -> [B, N]``, dense scores with the
+    failing items at ``-inf``."""
 
     @abc.abstractmethod
     def register_index(
@@ -108,28 +110,22 @@ class FilterModule(nn.Module, abc.ABC):
         clause_is_reverse: Tensor | None = None,
     ) -> None: ...
 
+    def prepare_queries(self, query_clause_attrs: Tensor) -> Tensor:
+        """The query side of the predicate for one batch; the exact filter's is the attrs."""
+        return query_clause_attrs.long().contiguous()
+
     @abc.abstractmethod
-    def evaluate_mask(
-        self, query_clause_attrs: Tensor, start: int = 0, end: int | None = None
-    ) -> Tensor: ...
+    def evaluate_mask(self, q: Tensor, start: int = 0, end: int | None = None) -> Tensor: ...
 
-    def evaluate_indices(
-        self,
-        query_clause_attrs: Tensor,
-    ) -> tuple[Tensor, Tensor]:
+    def evaluate_indices(self, q: Tensor) -> tuple[Tensor, Tensor]:
+        return compact_mask(self.evaluate_mask(q))
 
-        return compact_mask(self.evaluate_mask(query_clause_attrs))
-
-    def evaluate_subset(
-        self,
-        query_clause_attrs: Tensor,
-        candidate_ids: Tensor,
-    ) -> Tensor:
-        mask = self.evaluate_mask(query_clause_attrs)
+    def evaluate_subset(self, q: Tensor, candidate_ids: Tensor) -> Tensor:
+        mask = self.evaluate_mask(q)
         return mask.gather(1, candidate_ids)
 
-    def mask_scores(self, scores: Tensor, query_clause_attrs: Tensor) -> Tensor:
-        return torch.where(self.evaluate_mask(query_clause_attrs), scores, float("-inf"))
+    def mask_scores(self, scores: Tensor, q: Tensor) -> Tensor:
+        return torch.where(self.evaluate_mask(q), scores, float("-inf"))
 
-    def forward(self, query_clause_attrs: Tensor) -> Tensor:
-        return self.evaluate_mask(query_clause_attrs)
+    def forward(self, q: Tensor) -> Tensor:
+        return self.evaluate_mask(q)

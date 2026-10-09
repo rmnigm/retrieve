@@ -55,8 +55,8 @@ and bloom phases, with our k-means and quantization in front; it is the referenc
 kernels are checked against, eager-only (`torch.compile` raises), and its bloom mode is Meta's
 bloom index rather than ours (`m_bits` is optional; `official=OfficialConfig(...)` carries
 `b_multiplier`, `n_stored_hashes`, the `"int32"` bit-exact vs `"fp16"` serving score path, the
-partial-vs-full bloom path, and `cache_plans` — set it `False` when timing so every forward pays
-the expression parse). Any other module given `"official"` — or any string outside its
+and the partial-vs-full bloom path; the expression parse runs in `prepare_queries`). Any other
+module given `"official"` — or any string outside its
 backend literal — raises `ValueError` at construction.
 
 ## LiNR variants
@@ -67,9 +67,10 @@ Each holds its filter (a `BloomFilter` or `ExactAttributeFilter`, see the
 
 - `register_index(item_embs, item_clause_attrs=None, clause_is_reverse=None)` — registers the
   index and, when attributes are given, the attached filter.
-- `forward(query, query_clause_attrs=None) -> (ids [B, k] int64, scores [B, k])`; without
-  `query_clause_attrs` the filter is skipped (V2 requires it: the filter is its candidate
-  source).
+- `prepare_queries(query_clause_attrs)` — the filter's query encoding for one batch (bloom
+  query signatures, or the attrs as int64). Do it once per batch, outside anything you time.
+- `forward(query, prepared=None) -> (ids [B, k] int64, scores [B, k])`; without `prepared` the
+  filter is skipped (V2 requires it: the filter is its candidate source).
 - `k` is settable after `register_index`; `capturable` is `True` (a class attribute).
 
 ### `LiNRV1(k, *, filter=None, backend="triton")`
@@ -147,10 +148,13 @@ SilverTorch(k, n_lists, n_probe, filter_mode="none", m_bits=None, k_hash=None,
 ```
 
 - `register_index(item_embs, item_clause_attrs=None, clause_is_reverse=None)`
-- `forward(query, query_clause_attrs=None, candidate_ids=None)` — `candidate_ids: [B, P]`
-  (original ids, `-1` = padding) switches to a pure re-rank of those ids with no filter; pads are
-  never scored or returned, a row with fewer than `min(k, P)` real candidates ends in
-  `-1` / `-inf`, and passing `query_clause_attrs` alongside raises.
+- `prepare_queries(query_clause_attrs) -> PreparedFilter` — the batch's filter, prepared
+  outside `forward`: the bloom query bit positions (triton / torch), Meta's parsed plans
+  (official bloom), or the int64 attrs (exact). All host work lives here.
+- `forward(query, prepared=None, candidate_ids=None)` — `prepared` from `prepare_queries`, `None`
+  for plain ANN. `candidate_ids: [B, P]` (original ids, `-1` = padding) switches to a pure
+  re-rank of those ids with no filter; pads are never scored or returned, a row with fewer than
+  `min(k, P)` real candidates ends in `-1` / `-inf`, and passing `prepared` alongside raises.
 
 Parameters:
 
@@ -179,7 +183,7 @@ After `register_index`, `build_timings` holds the seconds of the four build phas
 ann = (SilverTorchBuilder(k=100, n_lists=1024, n_probe=24, filter_mode="bloom", m_bits=1024, k_hash=5)
        .set_item_embeddings(item_embs)
        .set_item_attributes(item_attrs, clause_is_reverse=None)
-       .set_backend("official", official=OfficialConfig(cache_plans=False))
+       .set_backend("official", official=OfficialConfig(score_path="int32"))
        .set_device("cuda")
        .build())                                   # == construct + register_index + .to(device)
 

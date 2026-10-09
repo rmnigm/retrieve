@@ -51,7 +51,6 @@ becomes the reference and ``official`` is compared against torch (``parity: "vs_
 
 from __future__ import annotations
 
-import dataclasses
 import gc
 import hashlib
 import itertools
@@ -231,7 +230,7 @@ def compile_warmup(module: nn.Module, inp: dict, assets: dict, device: torch.dev
     qa = assets["qa_s"][sel].to(device) if assets["qa_s"] is not None else None
     t0 = time.perf_counter()
     with torch.inference_mode():
-        module(q, qa)
+        module(q, filter_arg(module, qa))
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     return time.perf_counter() - t0
@@ -298,7 +297,7 @@ def quality(
             sel_d = rows_d[s : s + QUALITY_CHUNK]
             q = queries.index_select(0, sel_d)
             qa = qa_all.index_select(0, sel_d) if qa_all is not None else None
-            ids, scores = module(q, qa)
+            ids, scores = module(q, filter_arg(module, qa))
             # a compiled arm's outputs live in CUDA-graph buffers the next call overwrites
             ids_all.append(ids.clone())
             sc_all.append(scores.float().clone())
@@ -462,7 +461,30 @@ def _call_next_filtered(
     return callee(pool[i], qa_pool[i])
 
 
-def _rotate(callee: Any, pool: torch.Tensor, qa_pool: torch.Tensor | None) -> Any:
+def filter_arg(module: nn.Module, qa: torch.Tensor | None) -> Any:
+    """What ``module``'s forward takes for a batch's query attrs: its ``prepare_queries`` result
+    (SilverTorch, the router: query-side filter work done outside the call) or the attrs."""
+    prepare = getattr(module, "prepare_queries", None)
+    return qa if qa is None or prepare is None else prepare(qa)
+
+
+def prepare_pool(module: nn.Module, qa_pool: torch.Tensor | None) -> tuple[Any, float | None]:
+    """Every pool batch's filter argument, prepared once before timing (evaluation.md § Query
+    preparation): ``(per-batch arguments, query_prep_ms)``, the mean host + device ms of one
+    batch's ``prepare_queries`` (``None`` for a module without one, or an unfiltered cell)."""
+    if qa_pool is None or getattr(module, "prepare_queries", None) is None:
+        return qa_pool, None
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    t0 = time.perf_counter()
+    with torch.inference_mode():
+        prepared = [module.prepare_queries(qa_pool[i]) for i in range(qa_pool.shape[0])]
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    return prepared, (time.perf_counter() - t0) * 1e3 / len(prepared)
+
+
+def _rotate(callee: Any, pool: torch.Tensor, qa_pool: Any) -> Any:
     """The zero-arg call ``measure.latency`` times: the pool rotated round-robin (§2.5)."""
     if qa_pool is None:
         return partial(_call_next, callee, pool, itertools.count())
@@ -470,7 +492,7 @@ def _rotate(callee: Any, pool: torch.Tensor, qa_pool: torch.Tensor | None) -> An
 
 
 @torch.inference_mode()
-def ids_sha256(callee: Any, pool: torch.Tensor, qa_pool: torch.Tensor | None) -> tuple[str, str]:
+def ids_sha256(callee: Any, pool: torch.Tensor, qa_pool: Any) -> tuple[str, str]:
     """sha256 of the ids ``callee`` returns on the first ``IDS_PROBE_BATCHES`` batches of the
     pool, int64 row-major, batch after batch: ``(exact, canon)``. ``exact`` hashes the ids as
     returned (equal across modes is the D1-G eager-vs-graph identity gate); ``canon`` first
@@ -505,22 +527,17 @@ def perf(
     ``job`` rotated round-robin, ``module.k = k`` before each variant, ``graph`` via
     ``measure.graph_callable`` (one capture per shape, dynamo reset once before the variant's
     captures) or a null entry with the ``reason`` (``official`` → ``not_capturable``, O D7).
-    The official backend's plan cache is switched *off* for timing — every forward pays the
-    expression parse, as serving fresh queries does (kernels.md); ``OfficialConfig.cache_plans``
-    is read per forward, so this is an in-place replace, no rebuild — and every entry records
-    ``cache_plans`` (``None`` on backends without such a cache). Each measured entry gets
+    Each module's pool filters are prepared before timing (``prepare_pool``) and every entry
+    records the cost as ``query_prep_ms`` (``None`` where there is no prepare step). Each
+    measured entry gets
     ``ids_sha256``; in a group of two or more, also ``rounds``. Returns ``(entries, samples)``
     per module."""
     out: list[tuple[list[dict[str, Any]], list[dict[str, Any]]]] = [([], []) for _ in modules]
-    cache_plans: list[bool | None] = []
-    for m in modules:
-        if m.backend == "official":
-            m.official = dataclasses.replace(m.official, cache_plans=False)
-        cache_plans.append(m.official.cache_plans if m.backend == "official" else None)
     for bs in job.batch_sizes:
         pool, qa_pool = inputs.query_pool(
             inp, assets["qa_s"], assets["skip"], bs=bs, seed=job.seed, device=device
         )
+        preps = [prepare_pool(m, qa_pool) for m in modules]
         for k in job.ks:
             for m in modules:
                 m.k = int(k)
@@ -528,17 +545,13 @@ def perf(
                 callees: dict[int, Any] = {}
                 if mode == "graph":
                     torch._dynamo.reset()
-                    example = (pool[0],) if qa_pool is None else (pool[0], qa_pool[0])
                 for i, m in enumerate(modules):
-                    entry = {
-                        "k": int(k),
-                        "bs": int(bs),
-                        "mode": mode,
-                        "cache_plans": cache_plans[i],
-                    }
+                    entry = {"k": int(k), "bs": int(bs), "mode": mode, "query_prep_ms": preps[i][1]}
                     if mode == "eager":
                         callees[i] = m
                         continue
+                    fa = preps[i][0]
+                    example = (pool[0],) if fa is None else (pool[0], fa[0])
                     try:
                         callees[i] = measure.graph_callable(m, *example)
                     except measure.NotCapturable as exc:
@@ -548,7 +561,7 @@ def perf(
                         )
                 if not callees:
                     continue
-                fns = {i: _rotate(c, pool, qa_pool) for i, c in callees.items()}
+                fns = {i: _rotate(c, pool, preps[i][0]) for i, c in callees.items()}
                 with torch.inference_mode():
                     timed = measure.latency_group(
                         list(fns.values()), bs=int(bs), mode=mode, **latency_kw
@@ -557,12 +570,12 @@ def perf(
                         if profile and mode == "eager":
                             d.update(measure.profile_once(fn))
                         d["ids_sha256"], d["ids_sha256_canon"] = ids_sha256(
-                            callees[i], pool, qa_pool
+                            callees[i], pool, preps[i][0]
                         )
                         if len(modules) > 1:
                             d["rounds"] = len(d["window_medians_ms"])
                         entry = {"k": int(k), "bs": int(bs), "mode": mode}
-                        out[i][0].append({**entry, "cache_plans": cache_plans[i], **d})
+                        out[i][0].append({**entry, "query_prep_ms": preps[i][1], **d})
                         out[i][1].append({**entry, "ms": ms})
                 callees = fns = {}
             torch._dynamo.reset()
