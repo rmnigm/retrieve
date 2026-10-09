@@ -15,6 +15,7 @@ from load import EXACT, arm, box, clock_unknown, cv, key, load, pass_p, perf, re
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "evaluation"))
 import yaml  # noqa: E402
 from bench import config  # noqa: E402
+from bench.run import exact_gate  # noqa: E402
 
 CFG = Path(__file__).resolve().parents[4] / "evaluation" / "config"
 rows = []  # (check, severity, where, numbers)
@@ -83,9 +84,9 @@ def status(recs, md):
 
 
 def exact(recs, md):
-    md.append("\n## Exact arms (V1, V2): recall_oracle ≥ 0.99\n")
-    md.append("| tree | dataset | suite | arm | k | records | min recall | worst record |")
-    md.append("|---|---|---|---|---|---|---|---|")
+    md.append("\n## Exact arms (V1, V2): recall_oracle ≥ the harness gate (`run.exact_gate`)\n")
+    md.append("| tree | dataset | suite | arm | k | records | min recall | gate | worst record |")
+    md.append("|---|---|---|---|---|---|---|---|---|")
     g = collections.defaultdict(list)
     for r in recs:
         if r["algo"] in EXACT and r["status"] == "ok":
@@ -102,13 +103,14 @@ def exact(recs, md):
                     ].append((recall(r, k), r))
     for k, v in sorted(g.items()):
         lo, r = min(v, key=lambda x: x[0])
-        md.append(f"| {' | '.join(map(str, k))} | {len(v)} | {lo:.4f} | {short(r)} |")
-        if lo < 0.99:
+        gate = exact_gate(config.load_dataset(CFG / f"{r['dataset']}.yaml", r["dim"]), r["k_max"])
+        md.append(f"| {' | '.join(map(str, k))} | {len(v)} | {lo:.4f} | {gate} | {short(r)} |")
+        if lo < gate:
             flag(
                 "exact_recall",
                 "high",
                 short(r),
-                f"recall_oracle@{k[-1]} {lo:.4f} < 0.99",
+                f"recall_oracle@{k[-1]} {lo:.4f} < {gate}",
             )
 
 
