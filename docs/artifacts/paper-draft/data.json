@@ -446,60 +446,60 @@
     {
      "p": 0.10001109999999992,
      "sweep": "p01",
-     "ratio": 0.338,
-     "v1_ms": 12.295,
-     "v2_ms": 4.159
+     "ratio": 0.267,
+     "v1_ms": 11.953,
+     "v2_ms": 3.188
     },
     {
      "p": 0.20007470000000002,
      "sweep": "p02",
-     "ratio": 0.42,
-     "v1_ms": 12.294,
-     "v2_ms": 5.158
+     "ratio": 0.351,
+     "v1_ms": 11.951,
+     "v2_ms": 4.196
     },
     {
      "p": 0.5000066333333333,
      "sweep": "p05",
-     "ratio": 0.669,
-     "v1_ms": 12.292,
-     "v2_ms": 8.22
+     "ratio": 0.607,
+     "v1_ms": 11.951,
+     "v2_ms": 7.251
     },
     {
      "p": 1.0,
      "sweep": "p1",
-     "ratio": 1.085,
-     "v1_ms": 12.292,
-     "v2_ms": 13.333
+     "ratio": 1.033,
+     "v1_ms": 11.95,
+     "v2_ms": 12.34
     }
    ],
    "16": [
     {
      "p": 0.10001109999999992,
      "sweep": "p01",
-     "ratio": 0.988,
-     "v1_ms": 32.019,
-     "v2_ms": 31.647
+     "ratio": 0.862,
+     "v1_ms": 26.35,
+     "v2_ms": 22.705
     },
     {
      "p": 0.20007470000000002,
      "sweep": "p02",
-     "ratio": 1.249,
-     "v1_ms": 32.033,
-     "v2_ms": 39.999
+     "ratio": 1.179,
+     "v1_ms": 26.362,
+     "v2_ms": 31.07
     },
     {
      "p": 0.5000066333333333,
      "sweep": "p05",
-     "ratio": 2.053,
-     "v1_ms": 32.055,
-     "v2_ms": 65.812
+     "ratio": 2.156,
+     "v1_ms": 26.375,
+     "v2_ms": 56.862
     },
     {
      "p": 1.0,
      "sweep": "p1",
-     "ratio": 3.38,
-     "v1_ms": 32.055,
-     "v2_ms": 108.353
+     "ratio": 3.771,
+     "v1_ms": 26.36,
+     "v2_ms": 99.394
     }
    ]
   },
@@ -537,330 +537,6 @@
   }
  },
  "c5": [
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "all4",
-   "n_probe": 128,
-   "bs": 1,
-   "mode": "eager",
-   "ratio": 0.823
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "all4",
-   "n_probe": 128,
-   "bs": 16,
-   "mode": "eager",
-   "ratio": 0.876
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "all4",
-   "n_probe": 32,
-   "bs": 1,
-   "mode": "eager",
-   "ratio": 0.821
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "all4",
-   "n_probe": 32,
-   "bs": 16,
-   "mode": "eager",
-   "ratio": 0.856
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "all4",
-   "n_probe": 8,
-   "bs": 1,
-   "mode": "eager",
-   "ratio": 0.819
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "all4",
-   "n_probe": 8,
-   "bs": 16,
-   "mode": "eager",
-   "ratio": 0.855
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "c0_maincat",
-   "n_probe": 128,
-   "bs": 1,
-   "mode": "eager",
-   "ratio": 0.82
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "c0_maincat",
-   "n_probe": 128,
-   "bs": 16,
-   "mode": "eager",
-   "ratio": 0.879
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "c0_maincat",
-   "n_probe": 32,
-   "bs": 1,
-   "mode": "eager",
-   "ratio": 0.82
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "c0_maincat",
-   "n_probe": 32,
-   "bs": 16,
-   "mode": "eager",
-   "ratio": 0.849
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "c0_maincat",
-   "n_probe": 8,
-   "bs": 1,
-   "mode": "eager",
-   "ratio": 0.819
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "c0_maincat",
-   "n_probe": 8,
-   "bs": 16,
-   "mode": "eager",
-   "ratio": 0.847
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "c3_nversions",
-   "n_probe": 128,
-   "bs": 1,
-   "mode": "eager",
-   "ratio": 0.819
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "c3_nversions",
-   "n_probe": 128,
-   "bs": 16,
-   "mode": "eager",
-   "ratio": 0.881
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "c3_nversions",
-   "n_probe": 32,
-   "bs": 1,
-   "mode": "eager",
-   "ratio": 0.82
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "c3_nversions",
-   "n_probe": 32,
-   "bs": 16,
-   "mode": "eager",
-   "ratio": 0.848
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "c3_nversions",
-   "n_probe": 8,
-   "bs": 1,
-   "mode": "eager",
-   "ratio": 0.82
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "arxiv",
-   "sweep": "c3_nversions",
-   "n_probe": 8,
-   "bs": 16,
-   "mode": "eager",
-   "ratio": 0.847
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c0_genre",
-   "n_probe": 128,
-   "bs": 1,
-   "mode": "eager",
-   "ratio": 0.825
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c0_genre",
-   "n_probe": 128,
-   "bs": 16,
-   "mode": "eager",
-   "ratio": 0.843
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c0_genre",
-   "n_probe": 32,
-   "bs": 1,
-   "mode": "eager",
-   "ratio": 0.825
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c0_genre",
-   "n_probe": 32,
-   "bs": 16,
-   "mode": "eager",
-   "ratio": 0.842
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c0_genre",
-   "n_probe": 8,
-   "bs": 1,
-   "mode": "eager",
-   "ratio": 0.836
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c0_genre",
-   "n_probe": 8,
-   "bs": 16,
-   "mode": "eager",
-   "ratio": 0.845
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c2_format",
-   "n_probe": 128,
-   "bs": 1,
-   "mode": "eager",
-   "ratio": 0.823
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c2_format",
-   "n_probe": 128,
-   "bs": 16,
-   "mode": "eager",
-   "ratio": 0.856
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c2_format",
-   "n_probe": 32,
-   "bs": 1,
-   "mode": "eager",
-   "ratio": 0.83
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c2_format",
-   "n_probe": 32,
-   "bs": 16,
-   "mode": "eager",
-   "ratio": 0.84
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c2_format",
-   "n_probe": 8,
-   "bs": 1,
-   "mode": "eager",
-   "ratio": 0.817
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c2_format",
-   "n_probe": 8,
-   "bs": 16,
-   "mode": "eager",
-   "ratio": 0.839
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c3_year",
-   "n_probe": 128,
-   "bs": 1,
-   "mode": "eager",
-   "ratio": 0.819
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c3_year",
-   "n_probe": 128,
-   "bs": 16,
-   "mode": "eager",
-   "ratio": 0.846
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c3_year",
-   "n_probe": 32,
-   "bs": 1,
-   "mode": "eager",
-   "ratio": 0.819
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c3_year",
-   "n_probe": 32,
-   "bs": 16,
-   "mode": "eager",
-   "ratio": 0.845
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c3_year",
-   "n_probe": 8,
-   "bs": 1,
-   "mode": "eager",
-   "ratio": 0.815
-  },
-  {
-   "who": "Meta's code",
-   "dataset": "goodreads",
-   "sweep": "c3_year",
-   "n_probe": 8,
-   "bs": 16,
-   "mode": "eager",
-   "ratio": 0.844
-  },
   {
    "who": "ours (Triton)",
    "dataset": "arxiv",
@@ -1112,6 +788,114 @@
    "bs": 16,
    "mode": "graph",
    "ratio": 1.117
+  },
+  {
+   "who": "Meta's code",
+   "dataset": "arxiv",
+   "sweep": "c0_maincat",
+   "n_probe": 8,
+   "bs": 1,
+   "mode": "eager",
+   "ratio": 0.802
+  },
+  {
+   "who": "Meta's code",
+   "dataset": "arxiv",
+   "sweep": "c0_maincat",
+   "n_probe": 8,
+   "bs": 16,
+   "mode": "eager",
+   "ratio": 0.835
+  },
+  {
+   "who": "Meta's code",
+   "dataset": "arxiv",
+   "sweep": "c0_maincat",
+   "n_probe": 32,
+   "bs": 1,
+   "mode": "eager",
+   "ratio": 0.802
+  },
+  {
+   "who": "Meta's code",
+   "dataset": "arxiv",
+   "sweep": "c0_maincat",
+   "n_probe": 32,
+   "bs": 16,
+   "mode": "eager",
+   "ratio": 0.835
+  },
+  {
+   "who": "Meta's code",
+   "dataset": "arxiv",
+   "sweep": "c0_maincat",
+   "n_probe": 128,
+   "bs": 1,
+   "mode": "eager",
+   "ratio": 0.796
+  },
+  {
+   "who": "Meta's code",
+   "dataset": "arxiv",
+   "sweep": "c0_maincat",
+   "n_probe": 128,
+   "bs": 16,
+   "mode": "eager",
+   "ratio": 0.786
+  },
+  {
+   "who": "Meta's code",
+   "dataset": "goodreads",
+   "sweep": "c0_genre",
+   "n_probe": 8,
+   "bs": 1,
+   "mode": "eager",
+   "ratio": 0.808
+  },
+  {
+   "who": "Meta's code",
+   "dataset": "goodreads",
+   "sweep": "c0_genre",
+   "n_probe": 8,
+   "bs": 16,
+   "mode": "eager",
+   "ratio": 0.967
+  },
+  {
+   "who": "Meta's code",
+   "dataset": "goodreads",
+   "sweep": "c0_genre",
+   "n_probe": 32,
+   "bs": 1,
+   "mode": "eager",
+   "ratio": 0.81
+  },
+  {
+   "who": "Meta's code",
+   "dataset": "goodreads",
+   "sweep": "c0_genre",
+   "n_probe": 32,
+   "bs": 16,
+   "mode": "eager",
+   "ratio": 0.862
+  },
+  {
+   "who": "Meta's code",
+   "dataset": "goodreads",
+   "sweep": "c0_genre",
+   "n_probe": 128,
+   "bs": 1,
+   "mode": "eager",
+   "ratio": 0.818
+  },
+  {
+   "who": "Meta's code",
+   "dataset": "goodreads",
+   "sweep": "c0_genre",
+   "n_probe": 128,
+   "bs": 16,
+   "mode": "eager",
+   "ratio": 0.855
   },
   {
    "who": "Meta's code",

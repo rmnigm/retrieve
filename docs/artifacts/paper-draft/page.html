@@ -115,7 +115,7 @@ a { color: var(--accent); }
     <ul>
       <li>The ~100× gap between a custom filter kernel and native PyTorch masking. We see 1.4–12×.</li>
       <li>V3's "keep 1 %, gain ~10 %" at low pass rates. It pays only when most items pass.</li>
-      <li>Co-design below a few million items: Meta's code is slower with it.</li>
+      <li>Co-design below a few million items: Meta's code is 3–21 % slower with it.</li>
       <li>The bloom false-positive figures: the paper's two numbers disagree, and ours are far lower.</li>
     </ul>
   </div>
@@ -141,7 +141,7 @@ a { color: var(--accent); }
       <tr><td class="id">C2</td><td>LiNR V3 keeps ~1 % for rescoring: ~10 % faster, near-parity recall</td><td>No gain at low pass rates. Near-parity recall needs one bit per dimension. Large gains only when most items pass.</td><td><span class="pill part">partly</span></td></tr>
       <tr><td class="id">C3</td><td>A custom filter kernel is ~100× faster than native masking</td><td>1.4–12× over plain and compiled PyTorch.</td><td><span class="pill bad">does not hold</span></td></tr>
       <tr><td class="id">C4</td><td>Bloom filter: low false positives at 1024 bits, flat latency in width</td><td>Zero false positives from 256 bits on two datasets; latency flat in width. The inverted-index comparison is not testable.</td><td><span class="pill part">partly</span></td></tr>
-      <tr><td class="id">C5</td><td>Co-design (probe, then filter) is 1.79–2.15× faster</td><td>2.1× at 30 M with multi-term filters in Meta's code, 2.4× in ours; reversed at 0.8–3 M in Meta's code, at most 1.2× in ours below 10 M.</td><td><span class="pill part">holds at scale</span></td></tr>
+      <tr><td class="id">C5</td><td>Co-design (probe, then filter) is 1.79–2.15× faster</td><td>2.1× at 30 M with multi-term filters in Meta's code, 2.4× in ours; reversed at 0.8–3 M in Meta's code (0.79–0.97), at most 1.2× in ours below 10 M.</td><td><span class="pill part">holds at scale</span></td></tr>
       <tr><td class="id">C6</td><td>Int8 IVF cannot reach 0.95; selective filters need more probes</td><td>Holds from 0.8 M to 30 M. The cause on YFCC is the global int8 scale.</td><td><span class="pill good">holds</span></td></tr>
       <tr><td class="id">C7</td><td>Ours (our claim): bit-exact with Meta's int32, faster end to end, Meta's scorer faster alone</td><td>Bit-exact holds. Faster end to end at the operating point (1.7–2.1× at d128, 2.0–2.2× at d768), but Meta's kernel wins at d768 with 1024 probes and batch 16 (3.4×).</td><td><span class="pill part">partly</span></td></tr>
     </tbody>
@@ -198,10 +198,10 @@ a { color: var(--accent); }
   <div class="figure"><div class="ft">Full mask time ÷ co-design time (above 1 = co-design faster)</div><div class="canvas-box tall"><canvas id="ch-c5" aria-label="Co-design speed-up by scale and backend"></canvas></div>
     <div class="fn">Each dot is one interleaved pair (sweep × probes × batch). Meta's code runs eager only; ours in CUDA graph. Shaded band: the paper's 1.79–2.15×. Recall is identical on every pair.</div></div>
   <div class="text">
-    <p>Meta's co-design path does extra host work per call, synchronising inside its ops. Below 3 M that fixed cost outweighs the masking it saves, so co-design is 12–18 % slower. At 30 M with a four-term filter the saved work dominates: 2.1× at batch 16, the top of the paper's 1.79–2.15×, and 4.2–5.3× at batch 64. With a single filter term the gain at batch 16 is under 1.1×.</p>
+    <p>Meta's co-design path does extra host work per call, synchronising inside its ops. Below 3 M that fixed cost outweighs the masking it saves, and co-design is 3–21 % slower. At 30 M with a four-term filter the saved work dominates: 2.1× at batch 16, the top of the paper's 1.79–2.15×, and 4.2–5.3× at batch 64. With a single filter term the gain at batch 16 is under 1.1×.</p>
     <p>Our own backend shows the same scale dependence. Below 10 M our kernels fold the filter test into the scorer, so there is little separate mask work to save: at most 1.2×, and slower at 128 probes. At 30 M the full mask over every item becomes the cost, and co-design gives 1.45–1.67× with one filter term and 2.4–3.3× with four at 32 probes. With 128 probes, more of the index is scanned anyway and the gain shrinks to 1.0–1.45×.</p>
   </div>
-  <p class="caveat">The Meta points at 30 M are on the final adapter and Meta's optimised build. The Meta points at 0.8–3 M still use an older adapter and Meta's shipped build and will be re-timed; ratios inside a pair are less exposed than absolute times, since both paths share the build.</p>
+  <p class="caveat">Every Meta point runs on the final adapter and Meta's optimised build. Meta's 0.8–3 M points cover one sweep per dataset (arXiv main category, goodreads genre).</p>
 </section>
 
 <section class="take" id="v1v2">
@@ -214,10 +214,10 @@ a { color: var(--accent); }
       <div class="fn">LiNR's own point: 15.5 M items, ~11 % passing, unfused ops, V2 3× slower than V1.</div></div>
   </div>
   <div class="text">
-    <p>With fused kernels V2 wins at low pass rates everywhere, and V1 wins at high ones at batch 16: near p 0.27 at 3 M, near p 0.12 at 10 M and near p 0.1 at 30 M. At batch 1 a crossover appears only at 10 M and above, close to the unfiltered end (p ≈ 0.9 at 10 M).</p>
-    <p>LiNR's setting (15.5 M, 11 % passing, V2 3× slower at batch 1) is more extreme than any point we measure. The paper itself notes its numbers use unfused ops, and fusing narrows V2's penalty.</p>
+    <p>With fused kernels V2 wins at low pass rates everywhere, and V1 wins at high ones at batch 16: near p 0.27 at 3 M and near p 0.12–0.14 at 10–30 M. At batch 1 a crossover appears only from 10 M, close to the unfiltered end (p ≈ 0.87–0.96).</p>
+    <p>LiNR's 15.5 M high-pass set (11 % passing, V1 faster) sits right at our 10–30 M batch-16 crossover. Its batch-1 gap (V2 3× slower) is larger than anything we measure; the paper notes its numbers use unfused ops, and fusing narrows V2's penalty. Item count and dimension grow together in our series (d128, d192, d256).</p>
   </div>
-  <p class="caveat">The 30 M synthetic line was timed on a wider filter table whose clause cost falls more on V2; it will be re-timed, which may move its crossover to a higher pass rate.</p>
+  <p class="caveat">All three synthetic lines ran on one machine with the same code; each ratio is read inside one interleaved run.</p>
 </section>
 
 <section class="take" id="c7">

@@ -96,7 +96,7 @@ data["yfcc_real"] = {f"{s}@{n}": round(v, 3) for (s, n), v in yf.items()}
 data["c1"] = {
     "3 M": v2_over_v1("campaign-v2.7/arxiv-synth-synth"),
     "10 M YFCC": v2_over_v1("campaign-v2.7/yfcc10m-synth-synth"),
-    "30 M LAION": v2_over_v1("campaign-v2.5/laion30m-synth-synth"),
+    "30 M LAION": v2_over_v1("campaign-v2.7/laion30m-synth-laion30m-synth"),
     "30 M LAION, real filters": v2_over_v1("campaign-v2.5/laion30m-filter"),
 }
 
@@ -105,9 +105,19 @@ data["int8"] = {s: json.load(open(HUB / f"artifacts/yfcc-int8/int8-{s}.json"))["
 
 # Co-design: full / partial, > 1 = co-design faster.
 c5 = list(csv.DictReader(open(HUB / "artifacts/exhibits/20261009-1324-c5/c5.csv")))
-pts = [{"who": "Meta's code" if r["backend"] == "official" else "ours (Triton)", "dataset": r["dataset"], "sweep": r["sweep"],
+pts = [{"who": "ours (Triton)", "dataset": r["dataset"], "sweep": r["sweep"],
         "n_probe": int(r["n_probe"]), "bs": int(r["bs"]), "mode": r["mode"], "ratio": float(r["full_over_partial"])}
-       for r in c5 if r["mode"] == ("eager" if r["backend"] == "official" else "graph")]
+       for r in c5 if r["backend"] != "official" and r["mode"] == "graph"]
+meta = defaultdict(dict)
+for leg in ("campaign-v2.8/arxiv-codesign", "campaign-v2.8/goodreads-codesign"):
+    for r in recs(leg):
+        for p in r["perf"]:
+            if p["mode"] == "eager" and p["k"] == 100:
+                meta[(r["dataset"], r["sweep"], r["params"]["n_probe"], p["bs"])][r["params"]["bloom_path"]] = p["median_ms"]
+for (ds, sw, npb, bs), d in meta.items():
+    if len(d) == 2 and None not in d.values():
+        pts.append({"who": "Meta's code", "dataset": ds, "sweep": sw, "n_probe": npb, "bs": bs, "mode": "eager",
+                    "ratio": round(d["full"] / d["partial"], 3)})
 lai30 = defaultdict(dict)
 for r in recs("campaign-v2.8/laion30m-codesign-laion30m"):
     for p in r["perf"]:
