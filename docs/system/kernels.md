@@ -348,7 +348,19 @@ its own tile shape, launch grid, or masking policy:
   load_mask, bid, strides..., C, A_MAX) → [BLOCK] int1` — the exact
   AND-of-OR clause predicate (inner OR over `A_MAX` slots, outer AND
   over `C`, reverse XOR, `q_c == -1` inactive override), already ANDed
-  with `load_mask`. Used by `clause_mask` / `clause_compact`
+  with `load_mask`. **Inactive clauses** are not read: a clause the query
+  leaves at `-1` passes whatever the item holds, so a uniform branch
+  (`if q_c != -1`, one value per program) skips its loads and compares.
+  Unrolled over every clause, the predicate paid `C · A_MAX` loads per item
+  and batch row however few clauses the query used. The 10-clause synth
+  tables (SYNTH-TRIM, from 7) made the V1 / V2 clause cells slower by the
+  width, flat in p and growing with the batch, and `clause_compact` went
+  from 56 registers (C 4, A_MAX 4) to 121 (C 10, A_MAX 1); with the branch
+  it is 48. **Known cost:** with every clause active the branch skips
+  nothing, and goodreads `all4` V2 at bs 1 in graph mode is 1.095× (+26 µs
+  of 0.27 ms). Masked loads (1.04×, but 255 registers with spills at
+  A_MAX 4) and 4 warps (1.14×) were measured and are not used
+  ([CLAUSE-SKIP](../artifacts/campaign-v2.6/clause-skip/README.md)). Used by `clause_mask` / `clause_compact`
   (`ids=n_offsets`, `load_mask=n_valid`) and
   `codesigned_probe_score_exact` (`ids=safe_ids`, `load_mask=valid`).
   `is_reverse_ptr` must point at int8 storage (host preps do
@@ -1327,6 +1339,16 @@ is exact, the tiling only moves slots, and a skipped tile holds only
 ### `codesigned_probe_score` — IVF + INT8 + Bloom
 
 [`ops/triton/codesigned_probe_score.py`](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py).
+
+**Bloom build.** `build_transposed_sigs` rotates the row-wise signatures
+one bloom word at a time, and within a word in chunks of `TRANSPOSE_CHUNK`
+= 2¹⁸ items (whole 64-item words; the last chunk zero-padded as before).
+Each chunk's bit planes are a `[64, chunk]` int64 temporary plus the shifted
+copy, 128 MiB each, so the build needs the row-wise and transposed tables
+plus about 256 MiB at any `N`. Unchunked, the planes were `[64, N_pad]`
+per word (14.3 GiB at 30 M), and the triton bloom build did not fit at
+LAION 30 M (d-run, v2.6). The chunked index is `torch.equal` to the
+one-pass one.
 
 The `int8 → fp32` code cast never touches HBM. Bloom mode reads the
 **transposed index** of the paper's "rotate the matrix" phase 2 (TF-1): `bloom_transposed [m_bits, ceil(N/64)]`
