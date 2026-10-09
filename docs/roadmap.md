@@ -41,7 +41,7 @@ others (see [Multi-GPU execution](#multi-gpu-execution)).
 - **Contact the original authors** (re-plan decision 7): the LinkedIn LiNR
   team and Meta's SilverTorch team — filter-set details, the V1/V2 setup,
   the SilverTorch paper's FPR inconsistency (0.067 % vs 0.00173 %) — and
-  file the official-code defects (OF-3, OF-4, OF-6 in
+  file the official-code defects (OF-3, OF-4, OF-6, OF-9, OF-10 in
   [deviations](paper/reproduction-deviations.md)) upstream as issues. The
   ECIR call asks what contact happened; replies take weeks.
 - **Citability of a narrowed run.** A run with a narrowed mode set is
