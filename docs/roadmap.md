@@ -236,6 +236,12 @@ co-design.
   p ≤ 0.001. Gates bit-exact + keep rule across p at d128 / d192. Re-times
   every d128 / d192 SilverTorch Triton cell (ledger). Last in the
   `campaign-v2.3` bundle; st-dloop, pod b.
+- [ ] **H-SCOPE: a named-scope kernel sum in `profile_once`** (EXHIBITS, C7).
+  T3's scorer column needs like-for-like scopes (ours fuses the bloom test;
+  Meta's bloom search and payload are separate kernels): record per-call
+  sums over named kernel groups (scorer incl. its filter, top-k, epilogue,
+  other) next to `kernels_us`, so the report builds the column without a
+  hand split. Harness, CPU tests. Pod 1's runner between legs.
 - [ ] **V1-FUSE: LiNR V1 at small batch and its masking** (V-PROF3,
   `artifacts/v-prof3`). At bs 1 `torch.compile(max-autotune)` V1 runs 0.25 ms
   against our Triton 0.49: one fused masked mat-vec (152 µs) vs cuBLAS gemv
