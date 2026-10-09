@@ -329,3 +329,22 @@ laion30m-bs1:
     laion30m: [c0_domain, tags4]
   arms:
     - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, query: {n_probe: [24, 1024, 4096]}}
+
+# C5 in the paper's regime (controller 2026-10-10, C5-META-CHECK): co-design partial vs full mask at 30 M,
+# Meta's official kernels and our Triton ones, interleaved per backend. Sub-queries per expression: 1
+# (c0_domain), 4 (tags4: size, CLIP, watermark, punsafe buckets). Eager (run with --mode eager); seed 0.
+codesign-laion30m:
+  datasets: [laion30m]
+  dims: [256]
+  filter_kinds: [bloom]
+  ks: [100]
+  batch_sizes: [16, 64]
+  seeds: [0]
+  sweeps:
+    laion30m: [c0_domain, tags4]
+  interleave: [{by: bloom_path}]
+  arms:
+    - algo: silvertorch
+      backends: [official, triton]
+      build: {bloom_path: [partial, full], n_lists: [16384]}
+      query: {n_probe: [32, 128]}
