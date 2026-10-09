@@ -321,6 +321,12 @@ its own tile shape, launch grid, or masking policy:
 - `probe_tile(probe_ids_ptr, offsets_ptr, bid, t, n_probe, NPP, BLOCK_P)` —
   a probe scorer program's slice of the compact CSR layout, the row's
   table built in-kernel ([SilverTorch kernels](#silvertorch-kernels)).
+- `probe_tile_table(table_ptr, bid, t, n_probe, FAN, BLOCK_P)` /
+  `probe_tiles_table(…, tt, …)` — the same slice (one tile / a vector of
+  tiles) read from `probe_table_kernel`'s per-row table ("Probe table").
+- `probe_table_kernel` — a *launched* kernel, one program per row: the
+  row's tile ends, slot ends and cluster starts for the lookups above;
+  it also zeroes the bloom two-pass's list count.
 - `probe_dots(q_row_ptr, q_scales_ptr, bid, item_codes_ptr, pos, stride_cn, keep, D, D_PAD,
   BLOCK_D, BLOCK_P) → (int32 [BLOCK_P], q_scale)` — both probe scorers' int8 dot: one
   `tl.dot` at `D_PAD ≤ 256` (loads in the v2.1 order, which fixes that path's SASS), a
@@ -1214,8 +1220,9 @@ largest cluster holds 25,480 items (TF-9).
 `SilverTorch.register_index` / `set_query_params` raise unless
 `width ≥ k`, so `topk(k)` needs no pad path.
 
-**How a program finds its items** (`common.probe_tile`). There is no host
-table. Each program loads its row's `n_probe` cluster ids as one vector
+**How a program finds its items** (`common.probe_tile`). Below
+`_host.TABLE_MIN_PAIRS` (512) `(row, probe)` pairs there is no table. Each
+program loads its row's `n_probe` cluster ids as one vector
 (`NPP`, the next power of two), gathers their offsets, and builds the
 row's tile and slot prefix sums with `tl.cumsum`. Its tile is then
 located by a masked vector reduction. Tiles are **cluster-aligned**: a
@@ -1226,6 +1233,51 @@ tiles only store the `-inf` tail over `[total, width)`, which is 70 % of
 the width on goodreads. A lane past its cluster's end holds the next
 cluster's slot, so the score store is masked by in-cluster validity, not
 by the predicate.
+
+**Probe table** (`common.probe_table_kernel`, `probe_tile_table`). From
+`B · n_probe ≥ 512` the in-kernel build is O(`n_probe`) work in every one
+of the `B · (cdiv(width, BLOCK_P) + n_probe)` programs: three `NPP`-wide
+gathers and two `tl.cumsum`s per tile, about 262k programs at C7's PubMed
+cell (`n_probe` 1024, bs 16, width 3.93 M). There one extra launch, one program
+per row, writes the row's `[3, n_probe]` int64 table (tile ends, slot
+ends, cluster starts), and each tile finds its cluster by a two-level
+`FAN`-ary count over the tile ends (`FAN = 2^⌊bit_length(NPP)/2⌋`, so
+`FAN² ≥ NPP`): two dependent `FAN`-lane loads, then the cluster's four
+scalars. A binary search was 11 dependent scalar loads and measured
+slower. Positions and slots are the same integers, so outputs are
+`torch.equal`. Below the threshold the extra launch and the lookup's
+latency cost more than the build saves (bs 1, `n_probe` 256: 1.07–1.09×
+at d128 and d768), so those launches compile the in-kernel build
+(`TABLE=False`) unchanged.
+
+**Bloom two-pass** (`codesigned_probe_score`, a tile-skip config with the
+probe table, so `D_PAD > 256` and `B · n_probe ≥ 512`). In the one-pass
+kernel a skipped tile still costs its program: about 11 ns of device time
+a tile at C7's cell, where under 4 % of tiles have a passing item. The
+program is a latency chain (table lookup, the query's bit slots, the bloom
+words, the vote, the `-inf` store) at the occupancy of a 112-register dot
+kernel, and the bit-slot loop paid one latency per slot, inactive `-1`
+slots included (the 20 inactive of 25 slots on a one-clause query cost
+1.2 ms of 2.0 in a filter-only measurement). Two launches replace it:
+
+1. `_bloom_filter_kernel`, `TWO_PASS_LANES / BLOCK_P` tiles of one row per
+   program (16 at `BLOCK_P` 256). It stores `-inf` over every slot
+   (in-cluster and tail), then votes per tile on the ≤ `BLOCK_P / 64 + 1`
+   bloom words the tile spans. It ANDs the query's rows at those words
+   (`bloom_words`: slots in groups of four whose loads issue together, a
+   group of four `-1` skipped), masks each word to the tile's own
+   positions, and appends a tile with any surviving bit to a list
+   (`atomic_add` on a count zeroed by the table launch).
+2. `_bloom_dot_kernel`, persistent (`DOT_PROGRAMS_PER_SM` × SMs programs
+   looping over the list). For each listed tile it runs the per-lane bloom
+   test and the dot of the one-pass kernel (`probe_dots`, the same
+   `BLOCK_D`), and stores the dots of the passing lanes.
+
+A tile's vote is the OR of its lanes' tests over the same bits, and the
+dot is the same int32 sum and fp32 epilogue, so the scores are
+`torch.equal` to the one-pass kernel's; the list order varies run to run
+but each slot is written once. Smaller two-pass tiles (64, 128) made the
+filter pass costlier than the dot pass saved.
 
 **Launch grid** `(B, tiles_y, tiles_x)` via `_host.grid_batch_tiles`, the
 batch on `grid_x`. The rows' early probes then run concurrently, and
