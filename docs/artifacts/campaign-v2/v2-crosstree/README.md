@@ -1,0 +1,16 @@
+# V2 cross-tree check: `campaign-v2` (408b1188) vs `campaign-v2.1` (f01255f1)
+
+The surprise gate from pod b: V2 +43-45 % at p ≈ 1 on PubMed 10 M d768 at v2.1, against a Fix A gate that
+covered goodreads 0.8 M d128 only. NOT CITABLE.
+
+Two detached worktrees, `/scratch/wt/tree-408b` (tag `campaign-v2`) and `/scratch/wt/tree-v21` (tag
+`campaign-v2.1`), one venv; each process imports one tree's `bench` and `retrieve` through `PYTHONPATH`
+(logged per process) and builds the cells with that tree's own harness. V1 triton is the control.
+
+| file | what |
+|---|---|
+| [`crosstree.py`](crosstree.py) | one process: group `gs` (goodreads-synth clause `p1`, `p0001`) or `pm` (PubMed d768 clause `c3_journal_reverse`, pass 0.9993), V1 + V2 triton timed round-robin per (bs {1, 16}, mode {eager, graph}), k 100, seed 0; `--profile`: one profiler session over V2's graph replays at bs 16 |
+| [`crosstree.sh`](crosstree.sh) | the driver: tree checks, old oracle blobs moved aside and rebuilt by the new tree, then per group 4 ABAB pairs of processes (old/new, new/old, ...), one profile process per tree, then the `programs` sweep |
+| [`sweep.py`](sweep.py) | the `fused_masked_knn_topk` `programs` sweep inside V2 (controller): v2.1 tree at programs {864, 1728, 3456, 6912, 13824} and `full` (one tile per program, the old grid's shape) via the op module's `DEFAULT_CONFIG` (read per call; no library edit), the old tree's kernel as reference; cells PubMed d768 10 M `c3_journal_reverse` (p 0.9993), arXiv d128 3 M `c3_nversions` (0.444, its highest real pass) and arXiv-synth `p1` (1.0); bs {1, 16}, k 100; eager and hand-captured CUDA graphs timed round-robin, fmkt kernel µs from one profiler session per variant |
+| [`sweep_summary.py`](sweep_summary.py) | the sweep table against the old tree |
+| [`crosstree_summary.py`](crosstree_summary.py) | per cell and arm: old / new ms per repeat, paired new / old geomean with a t 95 % CI, sm_mhz ranges; V2's top kernels per tree |
