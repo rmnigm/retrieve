@@ -116,9 +116,10 @@ multi-GPU numbers are comparable at all.
 
 **Exploration first, one clean pass last** (user, 2026-10-09,
 [decisions](decisions.md#campaign-v2-user-2026-10-08)). While the library
-is still improving, legs run at the current tag (now `campaign-v2.4`,
-code_version `d67d6263c1f4387d7acc769a42b44532941913d5` = v2.3 + ST-SKIP128,
-Hub `campaign-v2.4/<dataset>-<suite>`; `campaign-v2.3` was `1258a63e`
+is still improving, legs run at the current tag (now `campaign-v2.5`,
+code_version `472f2fc68c697179b463d3b5a6b19ade194e6e2f` = v2.4 + ST-LANE +
+V2-FILL + C5-OURS, Hub `campaign-v2.5/<dataset>-<suite>`; `campaign-v2.4` was
+`d67d6263` (v2.3 + ST-SKIP128), `campaign-v2.3` was `1258a63e`
 (v2.2 + ST-IDS + V2-HIGHP + V1-FUSE), `campaign-v2.2` was
 `0d23c615`, `campaign-v2.1` `f01255f1`, `campaign-v2` `408b1188`) to see how
 everything behaves and to make the charts. A new tag does not stop or
@@ -151,6 +152,8 @@ leg runs one library.
 | V2 Triton perf at `D_PAD` ≥ 1024 run at v2.1 (V-PUBMED; d128 / d192 legs gain or are neutral) | V2-HIGHP | V2 perf |
 | every SilverTorch Triton perf record before v2.3 (all widths; ≈ −3 µs at k 100 × n_probe 24, more at k 1000) | ST-IDS | Triton perf |
 | V1 Triton perf before v2.3 | V1-FUSE | V1 perf |
+| SilverTorch Triton bloom perf before v2.5 (all widths; 0 to −10 %) | ST-LANE (bit-exact; none / exact SASS unchanged) | Triton bloom perf |
+| V2 Triton perf at `D_PAD` ≤ 256 before v2.5 (incl. C1's crossover; 0.22-0.97 of v2.4) | V2-FILL (bit-exact) | V2 perf |
 | graph-mode ids of SilverTorch records at `408b1188` | quantize fix | ids (D1-G's id gate) |
 
 ### Stop rules
@@ -227,25 +230,13 @@ co-design.
   test over every real kernel name). Left: the report's T3 scorer column
   reads `kernel_scopes`, and one GPU test on a real call (pod 1, ~2 min, in
   the H-QLOOP gate slot).
-- [ ] **campaign-v2.5 (st-dloop, pod b): two kernel items from its list.**
-  (1) **ST-LANE**: a per-lane exit inside a scorer tile at moderate p (compact
-  the passing lanes before the dot, or skip the failing slots' writes), so
-  our d128 SilverTorch scorer scales with p as Meta's per-doc exit does
-  (ours stays near its unfiltered time down to a ≈ 31 µs floor below
-  p ≈ 0.1; the user wants our kernels to match Meta's in such cases).
-  (2) **V2-FILL**: V2-HIGHP's wide `-inf` fill at `D_PAD` ≤ 256 too (d128 V2
-  at low p looks fill-bound; it moves C1's crossover). Gates bit-exact +
-  keep rule across p, bs, d at each change; ledger: d128 / d192 SilverTorch
-  Triton perf (1), V2 Triton perf at d ≤ 256 (2).
-- [ ] **C5-OURS: co-design vs full mask inside our Triton backend** (idea #3,
-  `.chains/ideas/`). C5's reversal is Meta's host-side partial path (V-PROF3:
-  device +35 µs, +3 syncs, +14 launches); our Triton SilverTorch is the
-  co-design by construction (filter fused in the probe scorer). Add a
-  `bloom_path=full` option to our backend (full-N mask, then the unfiltered
-  probe scorer) and run the `codesign` cells interleaved partial / full on
-  goodreads + arXiv: separates the co-design idea from Meta's implementation.
-  Library option (default unchanged, bit-exact recall partial = full by S-13).
-  st-dloop after V2-FILL, in `campaign-v2.5`. **≈ 1 GPU-h.**
+- [ ] **C5-OURS cells: co-design vs full mask inside our Triton backend**
+  (idea #3; the `bloom_path=full` option is in `campaign-v2.5`). Run the
+  `codesign` triton cells interleaved partial / full on goodreads + arXiv,
+  plus one PubMed 10 M point (C5 is claimed at 20 M; the full mask's
+  scratch grows with N). Separates the co-design idea from Meta's host-side
+  partial path (V-PROF3). st-dloop, pod b, at `campaign-v2.5`, Hub
+  `campaign-v2.5/<dataset>-codesign-ours`. **≈ 1-2 GPU-h.**
 - [ ] **EXHIBITS ideas #1, #2, #6** (CPU, exhibits analyst on pod 1): a per-query
   pass-rate router (IVF / V2 / V1) as a counterfactual from the sidecars;
   filter-cluster alignment (GLS) to explain F2's real-vs-synth gap, with
