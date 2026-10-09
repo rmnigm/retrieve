@@ -120,13 +120,13 @@ def files_hash() -> str:
 
 
 def inductor_cache_dir(code_version: str, given: str | None) -> str:
-    """Roadmap H4: the inductor cache ``bench run`` uses, ``given`` when the caller set
-    ``TORCHINDUCTOR_CACHE_DIR``, else one directory per ``code_version``. The FX-graph and
-    AOT-autograd caches key a graph on the custom op, not on its ``@triton_op`` body, so a
-    shared cache can replay a stale kernel after a library edit (testing.md § Running)."""
-    if given:
-        return given
-    return str(Path(tempfile.gettempdir()) / "bench-inductor" / code_version.replace(":", "-"))
+    """Roadmap H4 / H-INDCACHE: the inductor cache ``bench run`` uses, always one directory per
+    ``code_version``: under the caller's ``TORCHINDUCTOR_CACHE_DIR`` when set, else under the
+    temp dir. The FX-graph and AOT-autograd caches key a graph on the custom op, not on its
+    ``@triton_op`` body, so a cache shared across library edits replays a stale kernel in graph
+    mode (testing.md § Running); a reused caller dir must not serve another tree's graphs."""
+    base = Path(given) if given else Path(tempfile.gettempdir()) / "bench-inductor"
+    return str(base / code_version.replace(":", "-"))
 
 
 def _nvidia_smi(query: str) -> list[str] | None:

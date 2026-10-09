@@ -832,14 +832,16 @@ uv run pytest --collect-only tests/
 
 There is no marker to select and no `--bench` flag.
 
-**After editing a `triton_op` body, run the compile gates on a fresh inductor cache**
-(`TORCHINDUCTOR_CACHE_DIR=$(mktemp -d)`). The on-disk FX-graph / AOT-autograd caches key a graph
+**Every pytest run compiles on a fresh inductor cache.** Both `conftest.py` files
+(`retrieve/tests`, `evaluation/tests`) set `TORCHINDUCTOR_CACHE_DIR` to a new
+`<tmp>/pytest-inductor-*` directory in `pytest_configure` and remove it in
+`pytest_unconfigure` (H-INDCACHE; `test_inductor_dir.py` in each tree pins it). The on-disk FX-graph / AOT-autograd caches key a graph
 on the custom op, not on the Python source of its `@triton_op` body. With a warm default
 cache (`/tmp/torchinductor_<user>`), a compiled call can replay the *old* body. Measured:
 after the OPORP candidate path changed its output width, four `test_linr.py` compile gates
 failed with the pre-change width on the warm cache and passed on a cold one. The same
 hazard applies to any compiled (`graph`-mode) harness run on a pod whose cache predates a
-library change; `bench run` therefore keys its cache by `code_version` unless one is given
-([evaluation](evaluation.md#inductor-cache)).
+library change; `bench run` therefore keys its cache by `code_version`, under a caller-set
+directory too ([evaluation](evaluation.md#inductor-cache)).
 The pytest config in [pyproject.toml](../../retrieve/pyproject.toml)
 collects `test_*.py` only.

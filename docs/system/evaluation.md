@@ -601,16 +601,18 @@ harness.
 ### Inductor cache
 
 `bench run` sets
-`TORCHINDUCTOR_CACHE_DIR` to `<tmp>/bench-inductor/<code_version>` (`:`
-→ `-`; `measure.inductor_cache_dir`) and prints it, so a `graph`-mode run
+`TORCHINDUCTOR_CACHE_DIR` to `<base>/<code_version>` (`:` → `-`;
+`measure.inductor_cache_dir`) and prints it, so a `graph`-mode run
 after a library edit compiles afresh instead of replaying a stale
-`@triton_op` body ([testing](testing.md#running)). A
-`TORCHINDUCTOR_CACHE_DIR` the caller set wins (the pods' per-job
-`/scratch/inductor/<job>`). The caller's value is read in
+`@triton_op` body ([testing](testing.md#running)). `<base>` is the
+`TORCHINDUCTOR_CACHE_DIR` the caller set (the pods' per-job
+`/scratch/inductor/<job>`), else `<tmp>/bench-inductor`: a caller's dir
+reused across library edits gets one subdirectory per tree and never
+serves another tree's graphs (H-INDCACHE). The caller's value is read in
 `bench/__init__.py`, before any `bench` module imports `torch._inductor`,
 whose import writes torch's default into the environment; for the same
 reason `bench campaign` gives its children the caller's value (or none),
-not its own environment's.
+not its own environment's; each child appends its own `code_version`.
 
 ## The cell loop (`run.py`)
 
