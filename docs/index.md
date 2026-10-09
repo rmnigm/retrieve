@@ -60,7 +60,10 @@ How the code works today. Code comments cite these pages by section.
 - [paper/](paper/): the reproducibility paper's sections
   ([deviations](paper/reproduction-deviations.md),
   [provenance](paper/provenance-and-disclosure.md),
-  [official vs reimplementation](paper/official-vs-reimplementation.md)).
+  [official vs reimplementation](paper/official-vs-reimplementation.md),
+  [claims](paper/claims.md),
+  [ECIR criteria](paper/ecir-criteria.md),
+  [release and licenses](paper/release-and-licenses.md)).
 - [artifacts/](artifacts/): raw scripts behind measured numbers, one
   directory per plan; the raw outputs are on the Hub
   ([hub-index.md](artifacts/hub-index.md)).
