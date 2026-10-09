@@ -22,7 +22,9 @@ State per leg in [validation](../../../validation.md). NOT CITABLE until D1-G.
 | [`v-router.sh`](v-router.sh) | V-ROUTER: the `router` suite on goodreads at seed 0, k 100, clause (18 cells; claims-first) |
 | [`c3-pair.sh`](c3-pair.sh) | C3's bs-1 pair: V1 Triton vs `torch.compile` V1 on goodreads-synth / arxiv-synth `p01` (records with quality; interleaved timing via `../v-prof3/prof3.py`) |
 | [`v-gr-deep-triton.sh`](v-gr-deep-triton.sh) | V-GR-DEEP's trimmed end: the SilverTorch-triton arm only, at campaign-v2.3 |
-| [`chain-legs.sh`](chain-legs.sh) | the queue as arguments (`v-gr-deep`, `v-router`, `v-yfcc-deep`, `v-yfcc-synth`), one lock hold, stop file between legs |
+| [`v-yfcc-synth.sh`](v-yfcc-synth.sh) | V-YFCC synth (D): the SYNTH-TRIM `synth` suite on yfcc10m-synth, whole (25 cells) |
+| [`gr-synth-mid.sh`](gr-synth-mid.sh) | goodreads-synth's middle rates p 0.05 / 0.2 / 0.5 (24 cells) |
+| [`chain-legs.sh`](chain-legs.sh) | the queue as arguments (`v-gr-deep`, `v-router`, `v-yfcc-deep`, `v-yfcc-synth`, `gr-synth-mid`), one lock hold, stop file between legs |
 | [`chain.sh`](chain.sh) | the queue after V-V3BITS (at the tag common.sh defaults to, now campaign-v2.5): V-GR-DEEP, V-YFCC deep, the synth chunks, one lock hold, stop file between legs |
 | [`v-seeds-yfcc.sh`](v-seeds-yfcc.sh) | V-SEEDS, YFCC half: yfcc10m `filter`, every arm |
 | [`h2h-diag.sh`](h2h-diag.sh) | H2H protocol diagnostic (controller addendum): goodreads `c0_genre` bloom bs 16 k 100 seed 0, the three h2h arms (a) interleaved + `--profile`, (b) interleaved, (c) one process per arm, orders abc / cba / bac; scratch trees, not a leg |
