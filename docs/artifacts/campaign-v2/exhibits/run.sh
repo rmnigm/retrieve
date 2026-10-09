@@ -26,7 +26,7 @@ done
 # versions of a cell and the report would draw them into one curve
 rm -rf "$BASE/tree" && mkdir -p "$BASE/tree"/{v2,v21,d1}
 # a suite dir goes to the tree of its records' code_version (a leg may sit under artifacts/)
-for d in "$BASE"/legs/*/; do
+for d in $(ls -d "$BASE"/legs/*/ | grep -v /artifacts__) $(ls -d "$BASE"/legs/artifacts__*/ 2>/dev/null); do
   for s in "$d"*/; do
     f=$(ls "$s"*.jsonl 2>/dev/null | grep -v samples | head -1) || true
     [ -n "$f" ] || continue
@@ -34,6 +34,8 @@ for d in "$BASE"/legs/*/; do
       408b1188) t=v2 ;; f01255f1) t=v21 ;; 72e5a90c | c0e42d1a) t=d1 ;; *) echo "skip $s: unknown code_version" >&2; continue ;;
     esac
     s=$(basename "$s")
+    # a pass that re-records cells already in the tree (H-KSUM's profile-only h2h) keeps its own tree
+    [ -e "$BASE/tree/$t/$s/$(basename "$f")" ] && t=$t-$(basename "$d")
     mkdir -p "$BASE/tree/$t/$s" && cp -al "$d$s/." "$BASE/tree/$t/$s/"
   done
 done
@@ -45,7 +47,7 @@ done
 trees="$BASE/tree/v2 $BASE/tree/v21 $BASE/tree/d1"
 uv run python "$HERE/checks.py" "$OUT" $trees
 uv run python "$HERE/figures.py" "$OUT" $trees
-uv run python "$HERE/t3x.py" "$OUT" $trees
+uv run python "$HERE/t3x.py" "$OUT" $trees $(ls -d "$BASE"/tree/*-* 2>/dev/null)
 uv run python "$HERE/gpuh.py" "$OUT/synth-arms.csv" "$BASE/tree/d1/filter/yfcc10m-d192.jsonl" > "$OUT/gpuh-v-yfcc.csv"
 ls "$BASE/legs" > "$OUT/legs.txt"
 
