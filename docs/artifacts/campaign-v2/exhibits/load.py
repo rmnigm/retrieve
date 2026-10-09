@@ -91,6 +91,21 @@ def official_build(r):
     return f"{b.get('nvcc_append_flags') or 'shipped flags'} so:{(b.get('so_sha256') or '?')[:8]}"
 
 
+# ST-WIDE (campaign-v2.9) changed SilverTorch Triton only at B * n_probe >= 512 (per-row probe table, and
+# at d768 the bloom two-pass); narrow configs' opcodes are unchanged. Wide timings before v2.9 are
+# provisional for any claim that leans on them (controller, 2026-10-11).
+PRE_ST_WIDE = ("v2", "v2.1", "v2.2", "v2.3", "v2.4", "v2.5", "v2.6", "v2.7", "v2.8")
+
+
+def pre_st_wide(r, bs):
+    return (
+        r["algo"] == "silvertorch"
+        and r["backend"] == "triton"
+        and cv(r) in PRE_ST_WIDE
+        and bs * r["params"].get("n_probe", 24) >= 512
+    )
+
+
 def arm(r):
     p = {k: v for k, v in r["params"].items()}
     s = f"{ALGO.get(r['algo'], r['algo'])}/{r['backend']}"
