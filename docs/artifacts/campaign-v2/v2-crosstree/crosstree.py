@@ -7,7 +7,9 @@ built and timed by one tree's own harness and library, imported through PYTHONPA
 GROUP gs: goodreads-synth clause p1 and p0001; pm: pubmed d768 clause c3_journal_reverse (pass 0.9993).
 Per sweep, bs {1, 16} x mode {eager, graph}: V1 and V2 timed round-robin by `measure.latency_group`
 (k 100, seed 0). --profile instead runs one torch.profiler session over 20 V2 graph replays at bs 16
-per sweep and records the device kernels."""
+per sweep and records the device kernels
+(`--profile` with `ax3`: V1 and V2, eager and graph). `--prep` (v2.6+ trees) feeds each module its
+`run.prepare_pool` result, the harness path, instead of the pool's attrs."""
 
 import json
 import sys
@@ -23,6 +25,12 @@ from torch.profiler import ProfilerActivity, profile
 GROUPS = {
     "gs": ("goodreads-synth", "synth", ["p1", "p0001"], {}),
     "pm": ("pubmed", "filter", ["c3_journal_reverse"], {"n_min": 20, "target_s": 1.5}),
+    "ax3": (
+        "arxiv-synth",
+        "synth",
+        ["p0001", "p01", "p1"],
+        {},
+    ),  # the v2.1 / v2.4 / v2.5 V2-graph check
 }
 ALGOS = ["linr_v1_filter_mask", "linr_v2"]
 K, SEED, BSS = 100, 0, (1, 16)
@@ -48,7 +56,7 @@ def jobs_for(ds: str, suite: str, sweep: str):
 
 
 @torch.inference_mode()
-def main(group: str, out: Path, prof: bool) -> None:
+def main(group: str, out: Path, prof: bool, prep: bool) -> None:
     ds, suite, sweeps, kw = GROUPS[group]
     head = {
         "bench": bench.__file__,
@@ -58,6 +66,7 @@ def main(group: str, out: Path, prof: bool) -> None:
         "gpu": torch.cuda.get_device_name(0),
         "group": group,
         "profile": prof,
+        "prep": prep,
     }
     print(json.dumps(head), flush=True)
     measure.warm_gpu_once()
@@ -76,16 +85,25 @@ def main(group: str, out: Path, prof: bool) -> None:
             pool, qa = inputs.query_pool(
                 inp, assets["qa_s"], assets["skip"], bs=bs, seed=SEED, device=DEV
             )
-            for mode in ("graph",) if prof else ("eager", "graph"):
+            qas = [run.prepare_pool(m, qa)[0] if prep else qa for m in mods]
+            for mode in ("eager", "graph"):
+                if prof and group != "ax3" and mode == "eager":
+                    continue
                 torch._dynamo.reset()
                 callees = (
                     mods
                     if mode == "eager"
-                    else [measure.graph_callable(m, pool[0], qa[0]) for m in mods]
+                    else [
+                        measure.graph_callable(m, pool[0], q[0])
+                        for m, q in zip(mods, qas, strict=True)
+                    ]
                 )
-                fns = [run._rotate(c, pool, qa) for c in callees]
-                if prof:
-                    fn = fns[1]
+                fns = [
+                    run._rotate(c, pool, q) for c, q in zip(callees, qas, strict=True)
+                ]
+                for ai, fn in enumerate(fns if prof else []):
+                    if group != "ax3" and ai == 0:
+                        continue
                     for _ in range(10):
                         fn()
                     torch.cuda.synchronize()
@@ -100,7 +118,7 @@ def main(group: str, out: Path, prof: bool) -> None:
                         for e in p.key_averages()
                         if e.device_type == torch.autograd.DeviceType.CUDA
                     ]
-                    res[f"{sweep}/bs{bs}/{mode}/linr_v2"] = sorted(
+                    res[f"{sweep}/bs{bs}/{mode}/{ALGOS[ai]}"] = sorted(
                         (
                             {
                                 "kernel": e.key,
@@ -111,10 +129,18 @@ def main(group: str, out: Path, prof: bool) -> None:
                         ),
                         key=lambda d: -d["us_per_call"],
                     )
+                if prof:
                     continue
                 timed = measure.latency_group(fns, bs=bs, mode=mode, **kw)
-                for algo, (d, _) in zip(ALGOS, timed, strict=True):
-                    res[f"{sweep}/bs{bs}/{mode}/{algo}"] = {
+                for algo, c, q, (d, _) in zip(ALGOS, callees, qas, timed, strict=True):
+                    ids = dict(
+                        zip(
+                            ("ids_sha256", "ids_sha256_canon"),
+                            run.ids_sha256(c, pool, q),
+                            strict=True,
+                        )
+                    )
+                    res[f"{sweep}/bs{bs}/{mode}/{algo}"] = ids | {
                         k: d.get(k)
                         for k in (
                             "median_ms",
@@ -143,4 +169,9 @@ def main(group: str, out: Path, prof: bool) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], Path(sys.argv[2]), "--profile" in sys.argv[3:])
+    main(
+        sys.argv[1],
+        Path(sys.argv[2]),
+        "--profile" in sys.argv[3:],
+        "--prep" in sys.argv[3:],
+    )

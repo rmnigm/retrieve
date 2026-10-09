@@ -42,10 +42,15 @@ def test_full_path_equals_the_fused_path(d, b):
     embs = make_index(4096, d)
     attrs = make_attrs(4096, c=2, a_max=2, n_vocab=4)
     query, q_attrs = make_query(b, d), make_query_attrs(b, c=2, n_vocab=4)
-    full = _layer(embs, attrs, "triton", "full")(query, q_attrs)
-    assert_topk_equal(*full, *_layer(embs, attrs, "triton", "partial")(query, q_attrs))
-    assert_topk_equal(*full, *_layer(embs, attrs, "torch", "partial")(query, q_attrs))
-    assert_topk_equal(*full, *_layer(embs, attrs, "torch", "full")(query, q_attrs))
+
+    def run(backend, path):
+        m = _layer(embs, attrs, backend, path)
+        return m(query, m.prepare_queries(q_attrs))
+
+    full = run("triton", "full")
+    assert_topk_equal(*full, *run("triton", "partial"))
+    assert_topk_equal(*full, *run("torch", "partial"))
+    assert_topk_equal(*full, *run("torch", "full"))
 
 
 def test_full_path_is_bloom_on_triton_or_torch_only():

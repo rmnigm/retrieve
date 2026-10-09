@@ -1,7 +1,8 @@
 """The LiNR paper's variants V1–V3 as modules: each composes the primitives of
 ``modules.knn`` / ``modules.bit_knn`` with an optional ``FilterModule`` held as ``self.filter``
-(so ``buffers()`` covers index and filter) and exposes ``forward(query, query_clause_attrs=None)
--> (ids [B, k], scores [B, k])``. ``k`` forwards to the primitive that owns the final top-k, so
+(so ``buffers()`` covers index and filter) and exposes ``prepare_queries(query_clause_attrs)`` (the
+filter's query encoding, done outside the timed call) and ``forward(query, prepared=None) -> (ids
+[B, k], scores [B, k])``. ``k`` forwards to the primitive that owns the final top-k, so
 it is settable after ``register_index``; ``capturable`` is a class attribute (every LiNR backend
 captures). The bodies are the harness wrappers' bodies, moved verbatim."""
 
@@ -23,6 +24,11 @@ def _k_of(attr: str) -> property:
         lambda self: getattr(self, attr).k,
         lambda self, k: setattr(getattr(self, attr), "k", int(k)),
     )
+
+
+def _prepare(self, query_clause_attrs: Tensor) -> Tensor:
+    """The filter's query encoding for one batch (``FilterModule.prepare_queries``)."""
+    return _filter(self.filter).prepare_queries(query_clause_attrs)
 
 
 def _filter(filter_mod: FilterModule | None) -> FilterModule:
@@ -58,16 +64,18 @@ class LiNRV1(RetrievalModule):
                 item_clause_attrs, clause_is_reverse=clause_is_reverse
             )
 
-    def forward(self, query: Tensor, query_clause_attrs: Tensor | None = None):
-        if query_clause_attrs is None:
+    prepare_queries = _prepare
+
+    def forward(self, query: Tensor, prepared: Tensor | None = None):
+        if prepared is None:
             return self.idx(query)
-        scores = _filter(self.filter).mask_scores(self.idx.score(query), query_clause_attrs)
+        scores = _filter(self.filter).mask_scores(self.idx.score(query), prepared)
         return masked_topk(scores, self.idx.k, masked=True)
 
 
 class LiNRV2(RetrievalModule):
     """LiNR V2 — the filter's compact candidate list rescored exactly (``PrefilterKNN``). The
-    candidate source *is* the filter, so ``query_clause_attrs`` is required."""
+    candidate source *is* the filter, so ``prepared`` is required."""
 
     capturable = True
     k = _k_of("idx")
@@ -91,8 +99,10 @@ class LiNRV2(RetrievalModule):
                 item_clause_attrs, clause_is_reverse=clause_is_reverse
             )
 
-    def forward(self, query: Tensor, query_clause_attrs: Tensor):
-        cand, counts = self.filter.evaluate_indices(query_clause_attrs)
+    prepare_queries = _prepare
+
+    def forward(self, query: Tensor, prepared: Tensor):
+        cand, counts = self.filter.evaluate_indices(prepared)
         return self.idx(query, candidate_ids=cand, counts=counts)
 
 
@@ -140,11 +150,13 @@ class LiNRV3(RetrievalModule):
             raise ValueError(f"candidate_pool={candidate_pool} is below k={self.k}")
         self.stage1.k = int(candidate_pool)
 
-    def forward(self, query: Tensor, query_clause_attrs: Tensor | None = None):
-        if query_clause_attrs is None:
+    prepare_queries = _prepare
+
+    def forward(self, query: Tensor, prepared: Tensor | None = None):
+        if prepared is None:
             cand, _ = self.stage1(query)
             return self.stage2(query, candidate_ids=cand)
-        pos, pcounts = _filter(self.filter).evaluate_indices(query_clause_attrs)
+        pos, pcounts = _filter(self.filter).evaluate_indices(prepared)
         cand, _ = self.stage1(query, candidate_ids=pos, counts=pcounts)
         # Rows with fewer survivors than candidate_pool carry -1 tails; bound stage 2 by counts.
         return self.stage2(query, candidate_ids=cand, counts=(cand >= 0).sum(dim=1))

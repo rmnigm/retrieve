@@ -133,13 +133,9 @@ class OfficialConfig:
     - ``max_sub_queries``: parser fan-out bound per AND/OR node (semantics unchanged).
     - ``fast_build``: the CUDA builder's single-pass signature-free build (ignored by the
       CPU builder).
-    - ``cache_plans``: memoise :func:`parse_plans` on the expression tuple (default). The
-      CPU expression parse costs ≈ 59 µs per call at B=16 —
-      10–20 % of an eager bloom forward — and a benchmark that replays one fixed batch
-      would hide it behind the cache after the first call. **Timing must use
-      ``cache_plans=False``** (every forward pays the parse, as a serving path with fresh
-      queries does) **or report both, labelled.** Results are identical either way.
-    """
+
+    The expression parse is query preparation: ``SilverTorch.prepare_queries`` runs it once
+    per batch, outside ``forward``."""
 
     score_path: ScorePath = "fp16"
     divisor: int | None = None
@@ -148,7 +144,6 @@ class OfficialConfig:
     build_k: int | None = None
     max_sub_queries: int = 5
     fast_build: bool = False
-    cache_plans: bool = True
     n_stored_hashes: int = 7
 
     def __post_init__(self) -> None:

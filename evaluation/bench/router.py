@@ -10,6 +10,7 @@ from __future__ import annotations
 import torch
 from torch import Tensor, nn
 
+from retrieve import PreparedFilter
 from retrieve.interfaces import FilterModule
 
 PRE_K = 100  # l_q's neighbourhood: the share of the unfiltered top-100 that passes
@@ -48,14 +49,25 @@ class Router(nn.Module):
     def set_query_params(self, *, n_probe: int) -> None:
         self.ivf.set_query_params(n_probe=n_probe)
 
-    def local_pass_rate(self, query: Tensor, query_clause_attrs: Tensor) -> Tensor:
+    def local_pass_rate(self, query: Tensor, q_filter: Tensor) -> Tensor:
+        """``l_q`` for the filter's prepared query encoding ``q_filter``."""
         ids, _ = self.pre(query)
         found = ids >= 0
-        passing = self.filter.evaluate_subset(query_clause_attrs, ids.clamp_min(0)) & found
+        passing = self.filter.evaluate_subset(q_filter, ids.clamp_min(0)) & found
         return passing.sum(dim=1).float() / PRE_K
 
-    def forward(self, query: Tensor, query_clause_attrs: Tensor) -> tuple[Tensor, Tensor]:
-        lq = self.local_pass_rate(query, query_clause_attrs)
+    def prepare_queries(self, query_clause_attrs: Tensor) -> tuple[Tensor, PreparedFilter]:
+        """The standalone filter's query encoding (the pre-probe check and the exact branch read
+        it) and the IVF branch's prepared filter, made once per batch outside ``forward``."""
+        return self.filter.prepare_queries(query_clause_attrs), self.ivf.prepare_queries(
+            query_clause_attrs
+        )
+
+    def forward(
+        self, query: Tensor, prepared: tuple[Tensor, PreparedFilter]
+    ) -> tuple[Tensor, Tensor]:
+        q_filter, ivf_prepared = prepared
+        lq = self.local_pass_rate(query, q_filter)
         exact = lq < self.lq_threshold
         self.last_lq, self.last_exact = lq, exact
         ids = torch.full((query.shape[0], self.k), -1, dtype=torch.long, device=query.device)
@@ -65,7 +77,12 @@ class Router(nn.Module):
             (self.ivf, (~exact).nonzero().reshape(-1)),
         ):
             if rows.numel():
-                i, s = branch(query.index_select(0, rows), query_clause_attrs.index_select(0, rows))
+                f = (
+                    ivf_prepared.select(rows)
+                    if branch is self.ivf
+                    else q_filter.index_select(0, rows)
+                )
+                i, s = branch(query.index_select(0, rows), f)
                 ids.index_copy_(0, rows, i.long())
                 scores.index_copy_(0, rows, s.float())
         return ids, scores

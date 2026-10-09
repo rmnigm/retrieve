@@ -10,6 +10,6 @@ step oracle-filter oracle --dataset yfcc10m --suite filter
 C=$LOG/deep-config
 $PY "$HERE/yfcc_deep_config.py" "$C" || exit 1
 step deep run --config-dir "$C" --dataset yfcc10m --dim 192 --suite deep --out "$R" --resume
-step v2-ref run --dataset yfcc10m --dim 192 --suite filter --algo linr_v2 --backend triton --seed 0 --k 100 --bs 16 \
-  --out "$R" --resume
+# V2 at the suite's ks: the exact gate reads recall at k_max, and YFCC's fp16 ties hold @100 at 0.9886 (known, d1); @1000 passes
+step v2-ref run --dataset yfcc10m --dim 192 --suite filter --algo linr_v2 --backend triton --seed 0 --bs 16 --out "$R" --resume
 finish

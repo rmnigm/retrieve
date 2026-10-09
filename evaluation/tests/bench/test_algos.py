@@ -127,7 +127,7 @@ def test_built_module_k_setter_slices(algo, fk, silvertorch_modules):
             params=params,
         )  # fmt: skip
     assert m.backend == "torch" and m.capturable is (algo != "router")  # router: eager only
-    _check_k_slice(m, lambda: m(q, qa if fk != "none" else None))
+    _check_k_slice(m, lambda: m(q, m.prepare_queries(qa) if fk != "none" else None))
 
 
 def test_index_bytes_includes_filter_submodule(silvertorch_modules):
@@ -191,7 +191,14 @@ def test_linr_v3_k_bits_at_d_is_the_default_build(fk, seed):
             "linr_v3", x, k=8, backend="torch", filter_kind=fk, filter_mod=f, item_attrs=attrs,
             params={"candidate_pool": 64, **extra}, seed=seed,
         )  # fmt: skip
-        out.append((m(q, qa), m.stage1.item_bits, m.stage1.oporp_signs, m.stage1.oporp_perm))
+        out.append(
+            (
+                m(q, m.prepare_queries(qa)),
+                m.stage1.item_bits,
+                m.stage1.oporp_signs,
+                m.stage1.oporp_perm,
+            )
+        )
     (ids0, s0), *bufs0 = out[0]
     (ids1, s1), *bufs1 = out[1]
     assert torch.equal(ids0, ids1) and torch.equal(s0, s1)
@@ -221,22 +228,26 @@ def test_router_routes_by_local_pass_rate_and_matches_its_branches(fk):
     threshold come out of exact V2, the others out of filtered SilverTorch, each row equal to that
     branch's own output on the whole batch."""
     m, q, qa = _router(0.0, fk)
-    lq = m.local_pass_rate(q, qa)
+    qf = m.filter.prepare_queries(qa)
+    lq = m.local_pass_rate(q, qf)
     assert lq.min() < lq.max()  # the fixture's l_q spreads, so a mid threshold routes both ways
     m.lq_threshold = float((lq.min() + lq.max()) / 2)
     pre_ids, _ = m.pre(q)
-    want_lq = (m.filter.evaluate_subset(qa, pre_ids.clamp_min(0)) & (pre_ids >= 0)).sum(1) / 100
-    ids, scores = m(q, qa)
+    want_lq = (m.filter.evaluate_subset(qf, pre_ids.clamp_min(0)) & (pre_ids >= 0)).sum(1) / 100
+    ids, scores = m(q, m.prepare_queries(qa))
     assert torch.equal(m.last_lq, want_lq.float())
     assert torch.equal(m.last_exact, m.last_lq < m.lq_threshold)
     assert 0 < int(m.last_exact.sum()) < q.shape[0]
     for branch, rows in ((m.exact, m.last_exact), (m.ivf, ~m.last_exact)):
-        b_ids, b_scores = branch(q, qa)
+        b_ids, b_scores = branch(q, branch.prepare_queries(qa))
         assert torch.equal(ids[rows], b_ids[rows].long())
         assert torch.equal(scores[rows], b_scores[rows].float())
     all_ivf, _, _ = _router(0.0, fk)
     assert (
-        torch.equal(all_ivf(q, qa)[0], all_ivf.ivf(q, qa)[0].long())
+        torch.equal(
+            all_ivf(q, all_ivf.prepare_queries(qa))[0],
+            all_ivf.ivf(q, all_ivf.ivf.prepare_queries(qa))[0].long(),
+        )
         and not all_ivf.last_exact.any()
     )
 
@@ -248,11 +259,12 @@ def test_router_times_the_pre_probe_and_is_eager_only():
     m, q, qa = _router(0.5)
     calls = []
     m.pre.register_forward_hook(lambda *a: calls.append(1))
+    prepared = m.prepare_queries(qa)
     for _ in range(3):
-        m(q, qa)
+        m(q, prepared)
     assert len(calls) == 3 and m.capturable is False
     m.k = 4
-    assert m.ivf.k == m.exact.k == 4 and m(q, qa)[0].shape == (6, 4)
+    assert m.ivf.k == m.exact.k == 4 and m(q, prepared)[0].shape == (6, 4)
     m.set_query_params(n_probe=8)
     assert m.ivf.n_probe == 8
     with pytest.raises(ValueError, match="lq_threshold"):
@@ -293,7 +305,7 @@ def _postfilter_reference(x, q, mask, k: int, alpha: int):
 def test_postfilter_equals_the_torch_reference(fk):
     x, q, attrs, qa = _data()
     f = A.build_filter(fk, attrs, backend="torch", **BLOOM)
-    mask = f.evaluate_mask(qa)
+    mask = f.evaluate_mask(f.prepare_queries(qa))
     m = A.build("postfilter", x, k=8, backend="torch", filter_kind=fk, filter_mod=f)
     assert m.capturable and m.filter is f and index_bytes(m) > index_bytes(f)
     short = 0
@@ -301,7 +313,7 @@ def test_postfilter_equals_the_torch_reference(fk):
         m.k = k
         for alpha in (1, 2, 4, 8):
             m.set_query_params(alpha=alpha)
-            ids, scores = m(q, qa)
+            ids, scores = m(q, m.prepare_queries(qa))
             ref_ids, ref_scores = _postfilter_reference(x, q, mask, k, alpha)
             assert torch.equal(scores, ref_scores), (k, alpha)
             assert torch.equal(ids, ref_ids), (k, alpha)

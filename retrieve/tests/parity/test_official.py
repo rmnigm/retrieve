@@ -67,6 +67,11 @@ OTHER_ORDER: of.BitOrder = "low_first"
 K_SEARCH, HASH_K, B_MULT = 5, 7, 10.0
 
 
+def _prep(module, qa):
+    """The module's prepared filter for ``qa`` (``None`` unfiltered)."""
+    return None if qa is None else module.prepare_queries(qa)
+
+
 @pytest.fixture(autouse=True)
 def _needs_official():
     require_official()
@@ -481,10 +486,7 @@ def test_t4_expression_mapping():
     assert of.queries_to_expressions(qa, rev) == ["0:7", "0:7 AND NOT 1:9", ""]
     a, b = of.parse_plans(["0:7", ""], HASH_K)
     a2, b2 = of.parse_plans(["0:7", ""], HASH_K)
-    assert a is a2 and b is b2, "plans are LRU-cached on the expression tuple"
-    a3, b3 = of.parse_plans(["0:7", ""], HASH_K, cache=False)
-    assert a3 is not a and b3 is not b, "cache=False parses every call"
-    assert torch.equal(a3, a) and torch.equal(b3, b)
+    assert torch.equal(a2, a) and torch.equal(b2, b) and a.device.type == "cpu"
     # EMPTY plan = match all.
     attrs = _readme_corpus()
     index, boff = of.build_bloom_index(attrs, b_multiplier=5.0, build_k=3)
@@ -604,11 +606,13 @@ def test_t6_layer_int32_bitexact_vs_triton(d, filter_mode, reverse):
     )
     _transplant(off, tri)
     qa = data["q_attrs"] if filter_mode != "none" else None
-    _assert_bitexact(off(data["query"], qa), tri(data["query"], qa))
+    _assert_bitexact(off(data["query"], _prep(off, qa)), tri(data["query"], _prep(tri, qa)))
     if filter_mode == "exact":
         # And with all clauses inactive: the predicate is identically true.
         qa_all = torch.full((B, C), -1, dtype=torch.long, device="cuda")
-        _assert_bitexact(off(data["query"], qa_all), tri(data["query"], qa_all))
+        _assert_bitexact(
+            off(data["query"], _prep(off, qa_all)), tri(data["query"], _prep(tri, qa_all))
+        )
 
 
 @pytest.mark.parametrize("filter_mode", ["none", "exact"])
@@ -620,8 +624,8 @@ def test_t6_layer_fp16_default_ranks_like_triton(data, filter_mode):
     assert off.official.score_path == "fp16"
     _transplant(off, tri)
     qa = data["q_attrs"] if filter_mode != "none" else None
-    ids_o, sc_o = off(data["query"], qa)
-    ids_t, sc_t = tri(data["query"], qa)
+    ids_o, sc_o = off(data["query"], _prep(off, qa))
+    ids_t, sc_t = tri(data["query"], _prep(tri, qa))
     assert ids_o.shape == ids_t.shape == (B, K) and ids_o.dtype == torch.long
     assert sc_o.dtype == torch.float32
     jac = _jaccard(ids_o, ids_t)
@@ -643,8 +647,8 @@ def test_t6_layer_bloom(data, bloom_path, record_property):
     assert off.m_bits == 0 and off.k_hash == K_SEARCH
     assert off.bloom_index.dtype == torch.int64 and off.bundle_b_offsets.numel() == N // 2048 + 1
     _transplant(off, tri)
-    ids_o, sc_o = off(data["query"], data["q_attrs"])
-    ids_t, sc_t = tri(data["query"], data["q_attrs"])
+    ids_o, sc_o = off(data["query"], off.prepare_queries(data["q_attrs"]))
+    ids_t, sc_t = tri(data["query"], tri.prepare_queries(data["q_attrs"]))
     exact = clause_subset_match(
         data["attrs"][ids_o.clamp_min(0)], data["q_attrs"], tri.clause_is_reverse
     ) & (ids_o >= 0)
@@ -667,17 +671,19 @@ def test_t6_layer_bloom(data, bloom_path, record_property):
     record_property("bloom_topk_false_positives", fp)
     print(f"T6 bloom[{bloom_path}]: {fp} bloom false positives among {B * K} returned slots")
     if bloom_path == "full":
-        # The partial path, with the plan cache off (a timing run's setting): same result.
+        # The partial path: same result.
         off_p = _layer(
             data,
             "official",
             "bloom",
             official=OfficialConfig(
-                score_path="int32", b_multiplier=B_MULT, n_stored_hashes=HASH_K, cache_plans=False
+                score_path="int32", b_multiplier=B_MULT, n_stored_hashes=HASH_K
             ),
         )
         _transplant(off_p, tri)
-        _assert_bitexact(off_p(data["query"], data["q_attrs"]), (ids_o, sc_o))
+        _assert_bitexact(
+            off_p(data["query"], off_p.prepare_queries(data["q_attrs"])), (ids_o, sc_o)
+        )
 
 
 def test_t6_layer_contract(data):
@@ -726,7 +732,7 @@ def test_t6_layer_contract(data):
     assert bare.bloom_index.numel() == 0
     assert bare(data["query"])[0].shape == (B, K)
     with pytest.raises(RuntimeError, match="without item_clause_attrs"):
-        bare(data["query"], data["q_attrs"])
+        bare(data["query"], bare.prepare_queries(data["q_attrs"]))
     with pytest.raises(ValueError, match="k_hash must be <= 10"):
         SilverTorch(
             k=K,
@@ -818,11 +824,9 @@ def test_t7_sync_count_per_op(record_property):
         index, boff, plans, offsets[probe_ids], sizes[probe_ids], K_SEARCH, HASH_K
     )
     counts = {
-        # The parse a timing run pays per forward (OfficialConfig.cache_plans=False): a CPU
-        # op, so 0 device syncs is the expected record; the plan upload is the search ops'.
-        "parse_expression_query_batch[cache=False]": _count_syncs(
-            lambda: of.parse_plans(expressions, HASH_K, cache=False)
-        ),
+        # The parse (prepare_queries' work): a CPU op, so 0 device syncs is the expected record;
+        # the plan upload is the search ops'.
+        "parse_expression_query_batch": _count_syncs(lambda: of.parse_plans(expressions, HASH_K)),
         "fused_kmean_ann": _count_syncs(
             lambda: of.fused_scores(q_codes, probe_ids, offsets, sizes, codes, max_row)
         ),
@@ -848,29 +852,26 @@ def test_t7_sync_count_per_op(record_property):
     )
 
 
-@pytest.mark.parametrize("cache_plans", [True, False])
-def test_t7_layer_forward_sync_count(data, cache_plans, record_property):
-    """Host syncs of one ``SilverTorch(backend="official")`` forward per filter path, with
-    the plan cache on (a replayed batch) and off (the timing setting): the numbers behind
-    plan D7's "eager only". Phase 1 and the ``masked_topk`` epilogue add none of their own,
-    so ``none`` should equal ``fused_kmean_ann``'s count and the bloom paths the sum of the
-    search and scorer ops'; ``cache_plans`` moves no device sync (the parse is CPU work)."""
-    cfg = {"b_multiplier": B_MULT, "n_stored_hashes": HASH_K, "cache_plans": cache_plans}
+def test_t7_layer_forward_sync_count(data, record_property):
+    """Host syncs of one ``SilverTorch(backend="official")`` forward per filter path, the filter
+    prepared beforehand (``prepare_queries``): the numbers behind plan D7's "eager only". Our
+    part (phase 1, the packed exact mask, the epilogue) adds none, so every count is Meta's ops'
+    (kernels.md § official)."""
+    cfg = {"b_multiplier": B_MULT, "n_stored_hashes": HASH_K}
     modules = {
-        "none": (_layer(data, "official", "none"), None),
-        "exact": (_layer(data, "official", "exact"), data["q_attrs"]),
-        "bloom[partial]": (
-            _layer(data, "official", "bloom", official=OfficialConfig(bloom_path="partial", **cfg)),
-            data["q_attrs"],
+        "none": _layer(data, "official", "none"),
+        "exact": _layer(data, "official", "exact"),
+        "bloom[partial]": _layer(
+            data, "official", "bloom", official=OfficialConfig(bloom_path="partial", **cfg)
         ),
-        "bloom[full]": (
-            _layer(data, "official", "bloom", official=OfficialConfig(bloom_path="full", **cfg)),
-            data["q_attrs"],
+        "bloom[full]": _layer(
+            data, "official", "bloom", official=OfficialConfig(bloom_path="full", **cfg)
         ),
     }
-    for name, (module, qa) in modules.items():
-        module(data["query"], qa)  # warm-up: first-call lazy work is not the steady state
-        n_sync = _count_syncs(lambda m=module, a=qa: m(data["query"], a))
-        record_property(f"forward_syncs_{name}_cache_plans={cache_plans}", n_sync)
-        print(f"T7 forward syncs — {name}, cache_plans={cache_plans}: {n_sync}")
+    for name, module in modules.items():
+        prepared = None if name == "none" else module.prepare_queries(data["q_attrs"])
+        module(data["query"], prepared)  # warm-up: first-call lazy work is not the steady state
+        n_sync = _count_syncs(lambda m=module, p=prepared: m(data["query"], p))
+        record_property(f"forward_syncs_{name}", n_sync)
+        print(f"T7 forward syncs — {name}: {n_sync}")
         assert n_sync > 0

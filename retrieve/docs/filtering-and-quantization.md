@@ -45,7 +45,8 @@ ann.register_index(item_embs, item_clause_attrs=item_attrs)
 
 query = torch.randn(4, 128, device="cuda")
 query_attrs = ...  # [B, C] int64, -1 = inactive clause
-topk_ids, topk_scores = ann(query, query_clause_attrs=query_attrs)
+prepared = ann.prepare_queries(query_attrs)  # the query side of the filter, outside anything you time
+topk_ids, topk_scores = ann(query, prepared)
 ```
 
 For exact-clause filtering (no false positives, supports reverse):
@@ -54,36 +55,37 @@ For exact-clause filtering (no false positives, supports reverse):
 ann = SilverTorch(k=10, n_lists=1024, n_probe=16, filter_mode="exact").cuda()
 ann.register_index(item_embs, item_clause_attrs=item_attrs,
                    clause_is_reverse=clause_is_reverse)   # [C] bool, optional
-topk_ids, topk_scores = ann(query, query_clause_attrs=query_attrs)
+topk_ids, topk_scores = ann(query, ann.prepare_queries(query_attrs))
 ```
 
 `bloom` trades hash flexibility for a small false-positive rate; `exact` is bandwidth-cheaper at
-small `C × A_max` and exact. Calling `forward` with `query_clause_attrs=None` skips filtering and
-runs plain ANN.
+small `C × A_max` and exact. Calling `forward` without a prepared filter skips filtering and runs
+plain ANN.
 
 ### LiNR decoupled filtering
 
-A `FilterModule` (`BloomFilter`, `ExactAttributeFilter`) exposes three evaluation paths over a
-registered item set:
+A `FilterModule` (`BloomFilter`, `ExactAttributeFilter`) encodes a batch's query attrs once with
+`q = f.prepare_queries(query_clause_attrs)` (the bloom query signatures; the int64 attrs for the
+exact filter) and exposes three evaluation paths over a registered item set, each taking `q`:
 
-- `evaluate_mask(query_clause_attrs, start=0, end=None) -> [B, end - start]` bool — dense, over
+- `evaluate_mask(q, start=0, end=None) -> [B, end - start]` bool — dense, over
   items `[start, end)` (default: all `N`). A range is evaluated on a slice of the item table, so
   walking a large catalog in chunks never allocates `[B, N]`; each chunk equals the full mask's
   `[:, start:end]` exactly.
-- `evaluate_indices(query_clause_attrs) -> ([B, P] int64, [B] int64)` — a compact candidate set
+- `evaluate_indices(q) -> ([B, P] int64, [B] int64)` — a compact candidate set
   `(ids, counts)`; each row's ids are in ascending item order on both backends.
-- `evaluate_subset(query_clause_attrs, candidate_ids) -> [B, P]` bool — re-check an existing
+- `evaluate_subset(q, candidate_ids) -> [B, P]` bool — re-check an existing
   candidate set.
 
 Build a filter, then hand it to a LiNR variant — it registers with the index and is evaluated on
-every forward that carries `query_clause_attrs`:
+every forward that carries a prepared filter (`m.prepare_queries(query_clause_attrs)`):
 
 ```python
 from retrieve import ExactAttributeFilter, LiNRV2
 
 v2 = LiNRV2(k=10, filter=ExactAttributeFilter()).cuda()
 v2.register_index(item_embs, item_attrs, clause_is_reverse)   # registers the filter too
-ids, scores = v2(query, query_attrs)                           # filter → candidates → rescoring
+ids, scores = v2(query, v2.prepare_queries(query_attrs))       # filter → candidates → rescoring
 ```
 
 Or feed a filter's output to a primitive yourself:
@@ -95,12 +97,13 @@ filt = ExactAttributeFilter().cuda()
 filt.register_index(item_attrs, clause_is_reverse=clause_is_reverse)
 
 # Dense path: mask → PostfilterKNN (or FullScanKNN)
-mask = filt.evaluate_mask(query_attrs)               # [B, N] bool
+q = filt.prepare_queries(query_attrs)                # the query encoding, once per batch
+mask = filt.evaluate_mask(q)                         # [B, N] bool
 knn = PostfilterKNN(k=10).cuda(); knn.register_index(item_embs)
 ids, scores = knn(query, mask=mask)
 
 # Sparse path: candidate set → PrefilterKNN (or OneBitKNN)
-cand_ids, counts = filt.evaluate_indices(query_attrs)   # ([B, P], [B])
+cand_ids, counts = filt.evaluate_indices(q)          # ([B, P], [B])
 pre = PrefilterKNN(k=10).cuda(); pre.register_index(item_embs)
 ids, scores = pre(query, candidate_ids=cand_ids, counts=counts)
 ```

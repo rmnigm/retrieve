@@ -7,7 +7,7 @@ from retrieve.ops.reference.bloom_compact import bloom_compact
 from retrieve.ops.reference.bloom_full_mask import bloom_full_mask
 from retrieve.ops.reference.bloom_match import bloom_match, bloom_match_scores
 from retrieve.ops.reference.clause_compact import clause_compact
-from retrieve.ops.reference.clause_mask import clause_mask, clause_mask_scores
+from retrieve.ops.reference.clause_mask import clause_mask, clause_mask_packed, clause_mask_scores
 from retrieve.ops.reference.codesigned_probe_score import (
     codesigned_probe_score,
     codesigned_probe_score_bloom,
@@ -26,6 +26,7 @@ __all__ = [
     "bloom_match_scores",
     "clause_compact",
     "clause_mask",
+    "clause_mask_packed",
     "clause_mask_scores",
     "codesigned_probe_score",
     "codesigned_probe_score_bloom",

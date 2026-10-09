@@ -14,6 +14,7 @@ CV_LABEL = {
     "1258a63e": "v2.3",
     "d67d6263": "v2.4",
     "472f2fc6": "v2.5",
+    "20e83bfc": "v2.6",
     "72e5a90c": "d1",
     "c0e42d1a": "d1-c0e4",
 }
@@ -40,6 +41,35 @@ def load(trees):
             r["_tree"] = Path(t).name
             out.append(r)
     return out
+
+
+def box(r):
+    """The box a record ran on (`env.host`, first 6 chars). Timings compare only within one box
+    (decisions, 2026-10-10)."""
+    return (r["env"].get("host") or "?")[:6]
+
+
+# Records timed off physical GPU 0 before the clock-device fix: their clock fields read GPU 0, so a
+# clock-driven `unstable` means clock-unknown; latencies and quality stand (controller, 2026-10-10;
+# pod d GPU 1 legs). Records carry no device field, so the legs are named here: (box, dataset prefix).
+CLOCK_UNKNOWN = (("38f5e1", "laion30m"),)
+
+
+def clock_unknown(r):
+    return any(box(r) == b and r["dataset"].startswith(d) for b, d in CLOCK_UNKNOWN)
+
+
+# SYNTH-TRIM widened the uniform synth attrs 7 -> 10 clauses, and until CLAUSE-SKIP (v2.7) the clause
+# kernels load every clause per item whatever the query uses (+~0.7 ms at bs 16 on 3 M, flat in p;
+# controller 2026-10-10). Records carry no width field: uniform synth records at v2.5 / v2.6 are the
+# 10-clause, pre-CLAUSE-SKIP ones; their clause timings carry the width cost, their recall does not.
+UNIFORM_SYNTH = ("arxiv-synth", "goodreads-synth", "yfcc10m-synth")
+
+
+def pre_clause_skip(r):
+    return (
+        r["dataset"] in UNIFORM_SYNTH and r["filter_kind"] == "clause" and cv(r) in ("v2.5", "v2.6")
+    )
 
 
 def arm(r):
@@ -81,6 +111,6 @@ def perf(r, bs, k, mode):
 
 
 def pass_p(r):
-    """The synth sweep's target pass rate from its name (p0001 -> 0.001, p1 -> 1.0)."""
+    """The synth sweep's target pass rate from its name (p0001 -> 0.001, p1 -> 1.0; c001 -> 0.01)."""
     s = r["sweep"][1:]
     return float(s) if s == "1" else float("0." + s[1:])

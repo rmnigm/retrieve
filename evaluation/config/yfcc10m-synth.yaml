@@ -10,6 +10,7 @@ data_dir: data/yfcc10m
 content_dir: content_d192                 # relative to data_dir
 dims: [192]
 users_limit: 10000
+exact_gate: 0.9716    # fp16-storage allowance at k_max < 1000 (user 2026-10-10): min recall_oracle@100 over the 5 rates - 0.002
 filters:
   attrs: item_attrs_synth.pt             # relative to data_dir
   query_attrs: query_attrs_synth.pt

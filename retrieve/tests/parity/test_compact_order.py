@@ -141,9 +141,9 @@ out = {}
 for tail in (-1, 2**40):
     hits = []
     torch.empty = partial(_poisoned_empty, real_empty, (b, n), torch.int64, tail, hits)
-    ids, counts = exact.evaluate_indices(qa)
+    ids, counts = exact.evaluate_indices(exact.prepare_queries(qa))
     assert hits and (counts < n).all() and (ids[~counts_to_valid(counts, n)] == tail).all()
-    res = [m(query, qa) for m in mods]
+    res = [m(query, m.prepare_queries(qa)) for m in mods]
     c_ids, c_counts = combine_indices([exact, bloom], [qa, qa])
     res.append((torch.where(counts_to_valid(c_counts, c_ids.shape[1]), c_ids, -1), c_counts))
     torch.empty = real_empty

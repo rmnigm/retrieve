@@ -83,9 +83,9 @@ class TestPerClass:
         C, A_max]`` broadcast) on Triton; the torch backend, which materializes them by design,
         is the control that proves the recorder sees them."""
         m = _build(cls, backend, data)
-        m(data["query"], data["q_attrs"])
+        m(data["query"], m.prepare_queries(data["q_attrs"]))
         with _Shapes() as rec:
-            m(data["query"], data["q_attrs"])
+            m(data["query"], m.prepare_queries(data["q_attrs"]))
         assert len(rec.seen) >= 3, rec.seen
         wide = [(op, s) for op, s in rec.seen if len(s) >= 3 and torch.Size(s).numel() > B * N]
         if backend == "triton":
@@ -95,13 +95,13 @@ class TestPerClass:
 
     def test_k_mutation_changes_width_without_reregistration(self, data, cls, backend):
         m = _build(cls, backend, data)
-        assert m(data["query"], data["q_attrs"])[0].shape == (B, K)
+        assert m(data["query"], m.prepare_queries(data["q_attrs"]))[0].shape == (B, K)
         before = {n: b.clone() for n, b in m.state_dict().items()}
         m.k = K // 2
-        ids, scores = m(data["query"], data["q_attrs"])
+        ids, scores = m(data["query"], m.prepare_queries(data["q_attrs"]))
         assert ids.shape == scores.shape == (B, K // 2)
         m.k = K
-        assert m(data["query"], data["q_attrs"])[0].shape == (B, K)
+        assert m(data["query"], m.prepare_queries(data["q_attrs"]))[0].shape == (B, K)
         for name, b in m.state_dict().items():
             assert torch.equal(b, before[name]), name
 
@@ -115,11 +115,13 @@ class TestPerClass:
 
     def test_forward_is_sync_free(self, data, cls, backend):
         m = _build(cls, backend, data)
-        m(data["query"], data["q_attrs"])  # first call: Triton JIT, cuBLAS handles
+        m(
+            data["query"], m.prepare_queries(data["q_attrs"])
+        )  # first call: Triton JIT, cuBLAS handles
         torch.cuda.synchronize()
         torch.cuda.set_sync_debug_mode("error")
         try:
-            m(data["query"], data["q_attrs"])
+            m(data["query"], m.prepare_queries(data["q_attrs"]))
             if cls is not LiNRV2:
                 m(data["query"])
         finally:
@@ -132,8 +134,8 @@ class TestPerClass:
         assert list(twin.state_dict()) == list(fresh.state_dict())
         for (name, a), (_, b) in zip(fresh.named_buffers(), twin.named_buffers(), strict=True):
             assert torch.equal(a, b), name
-        ids_f, sc_f = fresh(data["query"], data["q_attrs"])
-        ids_t, sc_t = twin(data["query"], data["q_attrs"])
+        ids_f, sc_f = fresh(data["query"], fresh.prepare_queries(data["q_attrs"]))
+        ids_t, sc_t = twin(data["query"], twin.prepare_queries(data["q_attrs"]))
         assert torch.equal(sc_f, sc_t)
         assert_ids_equal_up_to_ties(ids_t, ids_f, sc_f)
 
@@ -174,7 +176,7 @@ class TestQueryParams:
         m.k = K
         m.set_query_params(n_probe=8)
         assert m.n_probe == 8
-        ids, _ = m(data["query"], data["q_attrs"])
+        ids, _ = m(data["query"], m.prepare_queries(data["q_attrs"]))
         assert ids.shape == (B, K)
 
     def test_linr_v3_candidate_pool(self, data):

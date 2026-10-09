@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from load import ALGO, cv, load, perf, recall
+from load import ALGO, box, cv, load, perf, recall
 
 from bench import stats
 
@@ -70,9 +70,10 @@ def per_sweep(recs, rows):
                 r["sweep"],
                 f"{ALGO[r['algo']]}/{r['backend']}",
                 nl,
+                box(r),
             )
         ].append((r, x))
-    for (c, ds, fk, sw, arm, nl), lst in sorted(
+    for (c, ds, fk, sw, arm, nl, bx), lst in sorted(
         curves.items(), key=lambda x: tuple(map(str, x[0]))
     ):
         p = st.median(r["pass_rate"] for r, _ in lst)
@@ -90,17 +91,30 @@ def per_sweep(recs, rows):
                 continue
             q, br = qps_at(pts, bs)
             rows.append(
-                ("per-sweep", c, ds, fk, band(p), sw, round(p, 4), f"{arm} n_lists={nl}", bs, q, br)
+                (
+                    "per-sweep",
+                    c,
+                    ds,
+                    fk,
+                    band(p),
+                    sw,
+                    round(p, 4),
+                    f"{arm} n_lists={nl}",
+                    bs,
+                    q,
+                    br,
+                    bx,
+                )
             )
-    # exact arms of the `filter` suite at the same code_versions
-    have = {(row[1], row[2]) for row in rows}
+    # exact arms of the `filter` suite at the same code_version and box (timings never cross boxes)
+    have = {(row[1], row[2], row[11]) for row in rows}
     g = collections.defaultdict(list)
     for r in recs:
         if (
             r["suite"] == "filter"
             and r["algo"] in ("linr_v1_filter_mask", "linr_v2")
             and r["status"] == "ok"
-            and (cv(r), r["dataset"]) in have
+            and (cv(r), r["dataset"], box(r)) in have
         ):
             g[
                 (
@@ -109,9 +123,10 @@ def per_sweep(recs, rows):
                     r["filter_kind"],
                     r["sweep"],
                     f"{ALGO[r['algo']]}/{r['backend']}",
+                    box(r),
                 )
             ].append(r)
-    for (c, ds, fk, sw, arm), rs in sorted(g.items()):
+    for (c, ds, fk, sw, arm, bx), rs in sorted(g.items()):
         p = st.median(r["pass_rate"] for r in rs)
         for bs in (1, 16):
             ts = [lat(r, bs)[0] for r in rs if lat(r, bs)[0]]
@@ -130,6 +145,7 @@ def per_sweep(recs, rows):
                         bs,
                         f"{bs * 1000 / st.median(ts):.0f}",
                         "exact",
+                        bx,
                     )
                 )
 
@@ -186,6 +202,7 @@ def per_query(recs, trees, rows):
                             bs,
                             q,
                             br,
+                            box(rs[0]),
                         )
                     )
 
@@ -213,6 +230,7 @@ def main():
                 "bs",
                 "qps_at_0.95",
                 "bracket",
+                "box",
             ]
         )
         w.writerows(rows)

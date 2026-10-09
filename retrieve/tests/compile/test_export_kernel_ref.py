@@ -158,6 +158,7 @@ def _op_args() -> dict[str, tuple]:
         "bloom_match_scores": (scores, qb, sigs),
         "bloom_compact": (qb, sigs),
         "clause_mask": (attrs, rev, q_attrs),
+        "clause_mask_packed": (attrs, rev, q_attrs),
         "clause_mask_scores": (scores, attrs, rev, q_attrs),
         "clause_compact": (attrs, rev, q_attrs),
         "codesigned_probe_score": (query, *probe, gs, k, lay.width),

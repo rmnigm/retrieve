@@ -38,7 +38,16 @@ def main():
         )
         pairs[k][r["params"]["bloom_path"]] = r
     cells = collections.defaultdict(
-        lambda: {"f": [], "p": [], "rec": [], "mhz": set(), "spread": [], "unst": 0}
+        lambda: {
+            "f": [],
+            "p": [],
+            "rec": [],
+            "mhz": set(),
+            "spread": [],
+            "unst": 0,
+            "prep_f": [],
+            "prep_p": [],
+        }
     )
     for k, d in pairs.items():
         if set(d) != {"full", "partial"}:
@@ -70,6 +79,10 @@ def main():
             }
             c["spread"] += [ef.get("spread") or 0, ep.get("spread") or 0]
             c["unst"] += bool(ef.get("unstable")) + bool(ep.get("unstable"))
+            # from v2.6 the query-side filter encoding is out of the timed forward (evaluation.md)
+            for side, e in (("prep_f", ef), ("prep_p", ep)):
+                if e.get("query_prep_ms") is not None:
+                    c[side].append(e["query_prep_ms"])
     rows = []
     for k, c in sorted(cells.items(), key=lambda x: tuple(map(str, x[0]))):
         ci = stats.paired_ratio_ci(c["f"], c["p"]) if c["f"] else None
@@ -95,6 +108,8 @@ def main():
                 "unstable_entries": c["unst"],
                 "spread_max": round(max(c["spread"]), 3),
                 "sm_mhz": "/".join(map(str, sorted(c["mhz"]))),
+                "query_prep_ms_full": round(st.median(c["prep_f"]), 4) if c["prep_f"] else "",
+                "query_prep_ms_partial": round(st.median(c["prep_p"]), 4) if c["prep_p"] else "",
             }
         )
     with open(out / "c5.csv", "w", newline="") as fh:
