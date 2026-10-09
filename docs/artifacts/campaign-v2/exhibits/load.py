@@ -54,11 +54,15 @@ def box(r):
 # Records timed off physical GPU 0 before the clock-device fix: their clock fields read GPU 0, so a
 # clock-driven `unstable` means clock-unknown; latencies and quality stand (controller, 2026-10-10;
 # pod d GPU 1 legs). Records carry no device field, so the legs are named here: (box, dataset prefix).
-CLOCK_UNKNOWN = (("38f5e1", "laion30m"),)
+# The fix (clock-device, d1d24d8) is in every harness from the campaign-v2.7 tag on (b0fbd11), so only
+# the legs before it qualify.
+CLOCK_UNKNOWN = (("38f5e1", "laion30m", ("v2.5", "v2.6")),)
 
 
 def clock_unknown(r):
-    return any(box(r) == b and r["dataset"].startswith(d) for b, d in CLOCK_UNKNOWN)
+    return any(
+        box(r) == b and r["dataset"].startswith(d) and cv(r) in vs for b, d, vs in CLOCK_UNKNOWN
+    )
 
 
 # SYNTH-TRIM widened the uniform synth attrs 7 -> 10 clauses, and until CLAUSE-SKIP (v2.7) the clause
