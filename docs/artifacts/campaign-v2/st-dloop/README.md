@@ -79,7 +79,10 @@ loads the scale between the two tiles and computes its address itself. So no d12
 **Graph capture:** `tests/compile/test_silvertorch_compile.py` now also runs D 768 (the D loop and the skip; it ran D 64
 only, which never reaches them). None / bloom / exact `reduce-overhead` replay is `torch.equal` to eager, with 0
 cudagraph skips and 0 graph breaks. The bench's graph mode ran every Triton cell with ids equal to eager (the same
-`ids_sha256` as v2.1). Launches per replay were not profiled separately.
+`ids_sha256` as v2.1). Launches per replay ([`graph_launches.py`](graph_launches.py), D 768, 10 profiled replays per cell, run
+after the v2.2 tag on the same library): **one `cudaGraphLaunch` per replay** for none / bloom / exact at bs 1 and 16.
+The only launch outside the graph is CUDA-graph trees' own input copy (`aten::_foreach_copy_` of the query into the
+static input buffer, on none).
 
 **Keep rule, interleaved, 95 % CI: holds at every width × pass rate × bs.**
 
@@ -308,5 +311,6 @@ Measured or estimated; none applied here. Ordered by expected gain on the campai
 | [`dloop_gate.py`](dloop_gate.py) | synthetic pass rates: `exact` (the bit-exact gate) and `time` (the keep-rule grid against official, #16's ABAB method) |
 | [`bs_sweep.py`](bs_sweep.py) | tile × batch size at d768, kernel-only against v2.1 (the program-count mechanism) |
 | [`real_gate.py`](real_gate.py) | the bit-exact gate on PubMed's real sweeps |
+| [`graph_launches.py`](graph_launches.py) | `cudaGraphLaunch` and outside-graph launches per `reduce-overhead` replay at D 768 |
 | [`summarize_bench.py`](summarize_bench.py), [`suites.yaml`](suites.yaml) | the interleaved `bench run` before/after table |
 | [`phase.sh`](phase.sh), [`phase2.sh`](phase2.sh) | the GPU phases as run |

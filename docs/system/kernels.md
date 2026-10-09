@@ -327,10 +327,11 @@ its own tile shape, launch grid, or masking policy:
   ([SilverTorch kernels](#silvertorch-kernels), "The D loop").
 - `probe_ids_kernel` — a *launched* kernel: the probe scorers' id
   epilogue after `torch.topk` (slot → `sort_perm[pos]`, `-1` at `-inf`).
-  Its tile is `[next_pow2(k), next_pow2(n_probe)]`, so Triton's 2^20-element
-  tensor limit caps a call at `next_pow2(k) · next_pow2(n_probe) ≤ 2^20`: k 1000
-  runs `n_probe` ≤ 1024, k 100 ≤ 8192 (larger fails at compile, `numel exceeds
-  triton maximum tensor numel`; seen in IVF-TUNE).
+  One program per row and `BLOCK_K` slots (grid `(B, cdiv(k, BLOCK_K))`),
+  walking the probes in `BLOCK_N` chunks (`_host.IDS_BLOCK_K` 16 /
+  `IDS_BLOCK_N` 512 caps), so neither k nor `n_probe` sizes the program and
+  any (k, `n_probe`) compiles in seconds
+  ([SilverTorch kernels](#silvertorch-kernels), "Ids after the top-k").
 - `popcount_int64(x) → int32` — the hardware `POPC` (`libdevice.popc` on
   int64, `__nv_popcll`); used by `oporp_1bit_match_topk`. Its torch twin
   [`functional.py::popcount_int64`](../../retrieve/src/retrieve/functional.py)
@@ -529,8 +530,30 @@ kernel (real dot or `-inf`), so the post-topk `where(isfinite(scores),
 …, -1)` mask sees deterministic values without a `torch.full(-inf)`
 pre-fill kernel launch.
 
+**Wide D** (`SPLIT`, `D_PAD > 256`). The strided body holds the query
+and the `[BLOCK_N, D_PAD]` tile across its tile loop, which at D 768 costs
+98-112 registers a thread: 2 resident 8-warp CTAs an SM instead of the
+straight-line body's 4, and 1.43× the time of that body at p ≈ 1 (V2 at
+PubMed 10 M; the grid size does not matter). Past 256 the strided grid is
+split into a scoring loop over the row's counted tiles (the query reloaded
+per tile, an L1 hit) and a `-inf` fill over `[cdiv(count, BLOCK_N) ·
+BLOCK_N, P)` in `FILL_N` = 1,024-lane chunks, strided over the same
+programs. `WIDE_CONFIG` (`block_n` 8, `num_warps` 4, `programs` 3456)
+then holds no spill and needs no register cap. The larger `programs`
+covers skewed batches: PubMed `all5` puts most candidates in one or two
+rows of a bs-16 batch (median 142 a row, p90 1.2 M), and at 864 programs
+(54 a row) such a row ran 1.21× v2.2's time; at 3,456 it runs 0.45×,
+for 0.69× instead of 0.47× on a uniform p 1 batch. A `maxnreg` cap also worked eagerly, but
+inductor's launcher drops it, so it was rejected. Against v2.2's kernel at
+10 M d768: 0.16-0.72 across p 0.0002-1
+([V2-HIGHP](../artifacts/campaign-v2/v2-highp/README.md)). Each lane's
+score is the same `tl.sum` over D, so scores are bit-identical to the
+strided body. At `D_PAD ≤ 256` the strided body is unchanged
+(SASS-identical).
+
 **Tile config.** `FusedMaskedKnnTopkConfig(block_n, num_warps,
-num_stages, programs)` — shipped as `DEFAULT_CONFIG` on the kernel module; pass
+num_stages, programs)` — shipped as `DEFAULT_CONFIG` (`D_PAD ≤ 256`) and
+`WIDE_CONFIG` (past it), picked by `config_for_width`; pass
 `config=` to override. Re-tune on a new arch via `uv run tune-kernels
 fused-masked-knn-topk` and paste the printed
 `DEFAULT_CONFIG = ...` line.
@@ -605,7 +628,8 @@ indirect `pos_indices[b, n_off]` lookup; otherwise identical. Used for
 candidate-set rerank and for the masked V3 path (after `compact_mask`).
 
 **Tile config.** `Oporp1BitMatchTopkConfig(block_n, num_warps,
-num_stages, programs)` — shipped as `DEFAULT_CONFIG` on the kernel module; pass
+num_stages, programs)` — shipped as `DEFAULT_CONFIG` (`D_PAD ≤ 256`) and
+`WIDE_CONFIG` (past it), picked by `config_for_width`; pass
 `config=` to override. Re-tune on a new arch via `uv run tune-kernels
 oporp-1bit-match-topk`.
 
@@ -1168,7 +1192,19 @@ against a tile-first grid: arXiv none 112 → 91 µs, bloom 126 → 107 µs
 kernel maps each winning slot back to its sorted position with the same
 per-row table, and writes `sort_perm[pos]`, or `-1` at every `-inf`
 slot. That is the `masked_topk` sentinel contract the other backends meet
-(`interfaces.py`). Writing ids from the scorer measured 13–20 µs slower
+(`interfaces.py`). The map is built in `[BLOCK_K, BLOCK_N]` tiles: one
+program per row and `min(next_pow2(k), 16)` slots (grid `(B, cdiv(k,
+BLOCK_K))`), and inside it a loop over the probes in chunks of
+`min(next_pow2(n_probe), 512)` that carries the running cluster end, so each
+slot gets the same `lo − start + slot` position as a dense table would. The
+k chunks run in parallel; a first cut that looped over them inside one
+program per row was 1.55× slower than the dense tile at k 100 × `n_probe`
+1024 (a serial chain on 1-16 programs). A dense `[next_pow2(k),
+next_pow2(n_probe)]` tile compiled for minutes at k 1000 (ptxas 99-653 s per
+`n_probe`), spilled up to a 122 KB stack a thread at k 1000 × `n_probe`
+1024 (which made the driver hold a ~25 GB local-memory pool), and did not
+compile past 2^20 elements (k 1000 × `n_probe` > 1024)
+([ST-IDS](../artifacts/campaign-v2/st-ids/README.md)). Writing ids from the scorer measured 13–20 µs slower
 on arXiv, and eight torch ops per epilogue measured ~230 µs of eager
 launch overhead (57 launches against the padded design's 38). The
 current form is 32–44 launches. Both launches stay textually inside
