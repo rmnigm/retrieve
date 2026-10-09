@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Stage one (suite, dataset) slice of a tag's tree plus the leg's logs and publish it as
-# <TAG>/<dataset>-<suite> (`bench upload --verify`; the MANIFEST sha256 goes in hub-index). TAG defaults to campaign-v2.7.
+# HUB (default <TAG>/<dataset>-<suite>; set it when a leg's Hub name differs, e.g. ...-codesign-ours) with `bench upload
+# --verify`; the MANIFEST sha256 goes in hub-index. TAG defaults to campaign-v2.7.
 # Usage: stage-upload.sh LEG SUITE DATASET DIM
 set -eu
 LEG=$1 SUITE=$2 DS=$3 DIM=$4
@@ -14,5 +15,5 @@ cp -a "$R/$SUITE/$DS-d$DIM".* "$S/$SUITE/"   # .jsonl, .samples.jsonl, .perquery
 for f in "$L"/*.log "$L"/clocks* "$L"/summary*; do [ -e "$f" ] && cp -a "$f" "$S/logs/"; done
 cp -a "$R/_logs/"*"${SUITE}_$DS-d$DIM"*.log "$R/_logs/campaign.log" "$S/logs/" 2>/dev/null || true
 cd /workspace/retrieve/evaluation
-/venvs/retrieve/bin/python -m bench.cli upload --results "$S" --path-in-repo "$TAG/$DS-$SUITE" --verify \
+/venvs/retrieve/bin/python -m bench.cli upload --results "$S" --path-in-repo "${HUB:-$TAG/$DS-$SUITE}" --verify \
   2>&1 | tee "$L/upload-$DS-$SUITE.log"
