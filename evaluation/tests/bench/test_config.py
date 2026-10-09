@@ -357,7 +357,7 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("synth", "goodreads-synth"): (312, 558),
     ("synth", "arxiv-synth"): (25, 46),
     ("synth", "arxiv-corr-synth"): (15, 42),
-    ("synth", "yfcc10m-synth"): (15, 25),
+    ("synth", "yfcc10m-synth"): (27, 45),  # 9 rates x (V1, V2, SilverTorch at 3 n_probe)
     ("codesign", "arxiv"): (36, 108),  # official + triton (C5-OURS)
     ("codesign", "goodreads"): (36, 108),
     ("bloomwidth", "goodreads"): (42, 42),

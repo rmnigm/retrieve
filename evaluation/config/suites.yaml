@@ -119,11 +119,11 @@ synth:                         # pass rate as the x axis (F1, F2, C1, C6)
     goodreads-synth: {p0001: [0, 1, 2], p0003: [0, 1, 2], p001: [0, 1, 2], p003: [0, 1, 2], p01: [0, 1, 2], p03: [0, 1, 2], p1: [0, 1, 2]}
   sweeps:                      # goodreads-synth all ten rates; arxiv-corr-synth its three
     arxiv-synth: [p0001, p001, p005, p01, p02, p05, p1]
-    yfcc10m-synth: [p001, p01, p02, p05, p1]
+    yfcc10m-synth: [p0001, p0003, p001, p003, p005, p01, p02, p05, p1]   # 0.001 / 0.003 / 0.03 / 0.05: AFTER-QUEUE 2 (v2.9)
   ks_by_sweep:                 # k = 1000 dropped where N*p < 4*1000: "return every passing item"; YFCC at k 100 only
     goodreads-synth: {p0001: [100], p0003: [100]}            # N 797,084
     arxiv-synth: {p0001: [100]}                              # N 2,988,996
-    yfcc10m-synth: {p001: [100], p01: [100], p02: [100], p05: [100], p1: [100]}
+    yfcc10m-synth: {p0001: [100], p0003: [100], p001: [100], p003: [100], p005: [100], p01: [100], p02: [100], p05: [100], p1: [100]}
   interleave:                  # V1 vs V2 per backend and compile mode; triton vs official bloom
     - {by: algo, values: [linr_v1_filter_mask, linr_v2]}
     - {by: backend, values: [triton, official]}
