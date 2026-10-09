@@ -1260,6 +1260,25 @@ the dot is the tile's cost, and a 256-lane tile at pass rate 0.0002
 document (a filtered thread returns before any load), a finer unit;
 ours is the tile.
 
+**Gated tile skip** (`GATED`, the bloom scorer at `D_PAD ≤ 256`). The same
+vote, run only in programs whose row is provably selective. An item passes
+only if every queried bit is set, so the row's pass rate is at most its
+rarest bit's frequency: `bloom_bit_freq [m_bits]` (fp32, from
+`bloom_transposed` at `register_index`;
+[`indexing/selectivity.py`](../../retrieve/src/retrieve/indexing/selectivity.py)).
+Each program loads the query's bit frequencies first (one vector load, so
+the latency overlaps the tile's own loads) and votes only when `bound ·
+BLOCK_P < 1`, i.e. under one expected passing lane per tile. The host sets
+`GATED` only for grids of at least `MIN_PROGRAMS` programs: below one wave a
+skipped tile does not shorten the run, and the vote is pure cost. Measured
+against v2.3 (d128 / d192, kernel-only, [ST-SKIP128](../artifacts/campaign-v2/st-skip128/README.md)):
+0.58-0.67× at p 0.001 bs 16, 0.75-0.81× at p 0.003, and 0.994-1.007× above
+the threshold and at bs 1. A skipped tile holds only `-inf` slots, so the
+gate is bit-exact whatever the bound says. **Not on the exact scorer:** the
+same gate there (per active clause, the frequency of the query's value)
+raised the d128 tile from 96 to 108 registers (5 → 4 resident CTAs), costing
+1.4-7.8 % at p ≥ 0.01; the exact scorer is unchanged.
+
 **Tile config: per width, then per program count.** Each kernel module
 ships `CONFIGS`: per `D_PAD` bound, a tuple of tiles, largest first.
 [`_host.width_tiles`](../../retrieve/src/retrieve/ops/triton/_host.py)

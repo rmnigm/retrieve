@@ -29,6 +29,14 @@ IDS_BLOCK_K = 16
 IDS_BLOCK_N = 512
 
 
+def gate_pays(launch: ProbeLaunch) -> bool:
+    """Whether a probe scorer's pass-rate-gated tile skip can pay: at least ``MIN_PROGRAMS``
+    programs, so skipped tiles shorten the run; below that the vote is pure cost (kernels.md §
+    SilverTorch kernels, "Gated tile skip")."""
+    b, tiles_y, tiles_x = launch.grid
+    return b * tiles_y * tiles_x >= MIN_PROGRAMS
+
+
 def width_tiles(configs: dict[int, tuple[Cfg, ...]], d: int) -> tuple[Cfg, ...]:
     """The probe scorers' tiles at embedding width ``d``, largest first: the entry of the smallest
     ``D_PAD`` bound in ``configs`` at or above ``next_power_of_2(d)``, the widest entry past the

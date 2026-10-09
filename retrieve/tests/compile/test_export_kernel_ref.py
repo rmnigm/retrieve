@@ -37,6 +37,7 @@ import torch
 
 import retrieve.ops.triton  # noqa: F401  (registers torch.ops.retrieve.*)
 from retrieve.indexing.quantize import quantize_int8_global, quantize_oporp_1bit
+from retrieve.indexing.selectivity import bloom_bit_freq
 from retrieve.ops import reference
 from retrieve.ops.triton.codesigned_probe_score_exact import (
     codesigned_probe_score_exact,
@@ -159,7 +160,16 @@ def _op_args() -> dict[str, tuple]:
         "clause_mask_scores": (scores, attrs, rev, q_attrs),
         "clause_compact": (attrs, rev, q_attrs),
         "codesigned_probe_score": (query, *probe, gs, k, lay.width),
-        "codesigned_probe_score_bloom": (query, *probe, qpos, bt, gs, k, lay.width),
+        "codesigned_probe_score_bloom": (
+            query,
+            *probe,
+            qpos,
+            bt,
+            bloom_bit_freq(bt, lay.n),
+            gs,
+            k,
+            lay.width,
+        ),  # fmt: skip
         "codesigned_probe_score_exact": (query, *probe, attrs, rev, q_attrs, gs, k, lay.width),
         "fused_masked_knn_topk": (query, embs, pos, counts, k),
         "oporp_1bit_match_topk_full": (q_bits, item_bits, k),
