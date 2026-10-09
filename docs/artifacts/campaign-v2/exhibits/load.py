@@ -15,6 +15,8 @@ CV_LABEL = {
     "d67d6263": "v2.4",
     "472f2fc6": "v2.5",
     "20e83bfc": "v2.6",
+    "641ec3b8": "v2.7",
+    "78cfbc72": "v2.8",
     "72e5a90c": "d1",
     "c0e42d1a": "d1-c0e4",
 }
@@ -70,6 +72,16 @@ def pre_clause_skip(r):
     return (
         r["dataset"] in UNIFORM_SYNTH and r["filter_kind"] == "clause" and cv(r) in ("v2.5", "v2.6")
     )
+
+
+def official_build(r):
+    """How Meta's extension was built for an official record: the recorded flags once the env field
+    exists (campaign-v2.8 adds the -O3 build, OF-11), else "unrecorded" (shipped -O0 host code before
+    v2.8 unless the leg's validation row says otherwise)."""
+    if r["backend"] != "official":
+        return ""
+    b = r["env"].get("official_build")
+    return str(b) if b else "unrecorded"
 
 
 def arm(r):

@@ -13,7 +13,7 @@ import statistics as st
 import sys
 from pathlib import Path
 
-from load import cv, load
+from load import cv, load, official_build
 
 from bench import stats
 
@@ -146,6 +146,7 @@ def main():
                     "bs": key[4],
                     "arm": f"{a[0]}{'/' + a[1] if a[1] else ''} {a[2]}",
                     "seeds": len(es),
+                    "official_build": "/".join(sorted({official_build(r) for r, _ in es})),
                     "p50_ms": round(p50, 4),
                     "over_triton_eager": ""
                     if not ci
