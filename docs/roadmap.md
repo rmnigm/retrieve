@@ -231,12 +231,10 @@ co-design.
   loop. Gate: quality fields and per-query sidecars **byte-identical** to
   existing records (golden cells + one record per arm from the Hub), harness
   suite. Harness only. Pod 1's runner, now (CPU while V-GR-DEEP runs).
-- [ ] **H-SCOPE: a named-scope kernel sum in `profile_once`** (EXHIBITS, C7).
-  T3's scorer column needs like-for-like scopes (ours fuses the bloom test;
-  Meta's bloom search and payload are separate kernels): record per-call
-  sums over named kernel groups (scorer incl. its filter, top-k, epilogue,
-  other) next to `kernels_us`, so the report builds the column without a
-  hand split. Harness, CPU tests. Pod 1's runner between legs.
+- [ ] **H-SCOPE follow-ups**: `kernel_scopes` is merged (harness, CPU
+  test over every real kernel name). Left: the report's T3 scorer column
+  reads `kernel_scopes`, and one GPU test on a real call (pod 1, ~2 min, in
+  the H-QLOOP gate slot).
 - [ ] **V-V3BITS (goodreads-synth done; goodreads' 48 cells deferred): V3 at LiNR's bit budget, next to our deviation** (C2 does
   not hold so far: recall −7-13 % at a 1 % pool, no gain at bs 1; our V3
   runs `k_bits` = D = 128 against LiNR's 512, LN-8). `k_bits` must divide D
