@@ -370,6 +370,7 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("v3bits", "goodreads"): (24, 48),
     ("v3bits", "pubmed"): (18, 36),
     ("router", "goodreads"): (72, 72),
+    ("router", "pubmed"): (36, 36),
     ("laion30m", "laion30m"): (6, 10),  # claims first: seed 0 (user 2026-10-10)
     ("laion30m-bs1", "laion30m"): (2, 6),
 }
@@ -710,3 +711,13 @@ def test_v3bits_pubmed_is_clause_only_at_k_bits_256_and_768():
     assert {q["candidate_pool_frac"] for j in pm for q in j.query} == {0.01, 0.05}
     gr = _real("v3bits", "goodreads")
     assert {j.build["k_bits"] for j in gr} == {64, 128}
+
+
+def test_router_pubmed_runs_the_goodreads_threshold_beside_its_branches():
+    """V-ROUTER PubMed: thresholds 0.05 / 0.2, n_lists 4096, both branches beside, clause."""
+    pm = _real("router", "pubmed")
+    assert {j.filter_kind for j in pm} == {"clause"} and {j.sweep for j in pm} == KEPT["pubmed"]
+    assert {j.ks for j in pm} == {(100,)}
+    assert {j.build["lq_threshold"] for j in pm if j.algo == "router"} == {0.05, 0.2}
+    assert {j.build.get("n_lists") for j in pm if j.algo != "linr_v2"} == {4096}
+    assert {j.algo for j in pm} == {"router", "linr_v2", "silvertorch"}
