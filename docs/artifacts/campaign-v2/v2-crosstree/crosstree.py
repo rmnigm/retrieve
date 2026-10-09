@@ -31,6 +31,7 @@ GROUPS = {
         ["p0001", "p01", "p1"],
         {},
     ),  # the v2.1 / v2.4 / v2.5 V2-graph check
+    "yf": ("yfcc10m", "filter", ["tags_and"], {}),  # V2's v2.5 -> v2.9 0.21x (profile)
 }
 ALGOS = ["linr_v1_filter_mask", "linr_v2"]
 K, SEED, BSS = 100, 0, (1, 16)
