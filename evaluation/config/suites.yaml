@@ -276,8 +276,9 @@ v3bits:                        # V-V3BITS, C2: V3 at k_bits 64 vs our LN-8 defau
 router:                        # V-ROUTER (EXHIBITS idea #2): l_q pre-probe, exact V2 below the threshold, IVF above
   # The threshold is fit on goodreads (the lq_threshold grid); arXiv and PubMed get the fitted value as a
   # one-value slot afterwards (transfer). The two branches run beside it at the same code_version.
-  # PubMed (V-ROUTER PubMed, claims first: does routing pay where exact is expensive?): the goodreads threshold
-  # 0.05 plus 0.2 to bracket, clause kept sweeps, k 100, the two branches beside it; its own arms keep goodreads' keys.
+  # PubMed (V-ROUTER PubMed, the keep/kill test: is the router on the recall-latency Pareto front between IVF and
+  # exact?): the goodreads threshold 0.05 plus 0.2 to bracket, and in the same leg the IVF curve (SilverTorch 4096 at
+  # n_probe 24 / 64 / 256 / 1024) and exact V1 + V2; clause kept sweeps, k 100; its own arms keep goodreads' keys.
   datasets: [goodreads, pubmed]
   dims: [128, 768]
   filter_kinds: [clause, bloom]
@@ -307,10 +308,11 @@ router:                        # V-ROUTER (EXHIBITS idea #2): l_q pre-probe, exa
       query: {n_probe: [24]}
       datasets: {pubmed: {}}
     - {algo: linr_v2, backends: [triton], filter_kinds: [clause], datasets: {pubmed: {}}}
+    - {algo: linr_v1_filter_mask, backends: [triton], filter_kinds: [clause], datasets: {pubmed: {}}}
     - algo: silvertorch
       backends: [triton]
       filter_kinds: [clause]
-      query: {n_probe: [24]}
+      query: {n_probe: [24, 64, 256, 1024]}                  # the IVF curve the Pareto test needs (exhibits)
       datasets: {pubmed: {build: {n_lists: [4096]}}}
 
 bloom: {m_bits: 1024, k_hash: 5}   # shared defaults; a suite may override with its own `bloom:`
