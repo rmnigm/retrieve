@@ -20,12 +20,12 @@ step oracle oracle --dataset "$DS" --suite "$SUITE" --dim "$(dim "$DS")"
 n=0
 while IFS= read -r ch; do
   n=$((n + 1))
-  [ -e "$LOG/uploaded-$n" ] && continue
+  [ -e "$LOG/uploaded-$n${SKIP_PERF:+-quality}" ] && continue
   [ -e "/scratch/v25/$LEG.stop" ] && { echo "$(date -Is) stop file, ending before child $n"; finish; exit 0; }
   t0=$(date +%s)
   stream "$DS" "$SUITE" "$ch"
   upload "$GRP$n${SKIP_PERF:+-quality}"
-  touch "$LOG/uploaded-$n"
+  touch "$LOG/uploaded-$n${SKIP_PERF:+-quality}"
   msg="$LEG child $n ($ch) done on pod d GPU $GPU in $(( $(date +%s) - t0 ))s at $cv; Hub $GRP$n${SKIP_PERF:+-quality} (cumulative): $UP"
   note pod-d "$msg"; note control "$msg"
   herdr agent prompt controller "d-run driver: $msg" > /dev/null 2>&1 < /dev/null
