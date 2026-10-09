@@ -752,6 +752,17 @@ override via `_clause_compact_impl(..., config=)`. Re-tune on a new arch via
 
 [`ops/triton/clause_mask.py`](../../retrieve/src/retrieve/ops/triton/clause_mask.py).
 
+**`clause_mask_scores(scores, item_clause_attrs, clause_is_reverse, query_clause_attrs)`** is
+the same kernel with `HAS_SCORES`: it loads the `[B, N]` fp32 score at the lane it just tested
+and stores `score` or `-inf` into a new fp32 buffer, instead of the bool. `LiNRV1` calls it
+(through `ExactAttributeFilter.mask_scores`) on the cuBLAS scores, so the old mask kernel →
+`[B, N]` bool → `torch.where` chain is one pass, the bool never reaches memory, and `topk` gets
+the bit-identical tensor (ids and scores `torch.equal` to the mask + `where` path). It is
+functional, not in place: under `torch.compile` inductor has no mutation to turn into a copy of
+the score matrix (V-PROF3 measured that copy in V1's graph). The score matrix stays cuBLAS's,
+because any other fp32 reduction re-orders the D products and flips k-th-place ties
+([validation](../validation.md#library-gates), V1-FUSE).
+
 Powers `ExactAttributeFilter.evaluate_mask` on CUDA. Same inner loop as
 `clause_compact` minus the count → scan → write compaction — emits the
 `[B, N]` bool directly, without the `[B, N, C, A_max]` bool (`C·A_max`×
@@ -780,6 +791,10 @@ via `_clause_mask_impl(..., config=)`. Re-tune on a new arch via
 `uv run tune-kernels clause-mask`.
 
 ## `bloom_match` — Bloom subset test
+
+**`bloom_match_scores(scores, qb, sigs)`** is the same kernel with `HAS_SCORES` (store `score`
+or `-inf` into a new fp32 buffer), `LiNRV1`'s bloom path through `BloomFilter.mask_scores`; the
+same reasoning as `clause_mask_scores` above.
 
 [`ops/triton/bloom_match.py`](../../retrieve/src/retrieve/ops/triton/bloom_match.py).
 A standalone filter primitive: it powers

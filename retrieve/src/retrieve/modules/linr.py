@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from torch import Tensor
 
+from retrieve.functional import masked_topk
 from retrieve.interfaces import FilterModule, LinrBackend, RetrievalModule, load_prebuilt
 from retrieve.modules.bit_knn import OneBitKNN
 from retrieve.modules.knn import PostfilterKNN, PrefilterKNN
@@ -24,12 +25,6 @@ def _k_of(attr: str) -> property:
     )
 
 
-def _mask(filter_mod: FilterModule | None, qa: Tensor | None) -> Tensor | None:
-    if qa is None:
-        return None
-    return _filter(filter_mod).evaluate_mask(qa)
-
-
 def _filter(filter_mod: FilterModule | None) -> FilterModule:
     if filter_mod is None:
         raise ValueError("query or item clause attrs given, but the module has no filter")
@@ -37,8 +32,8 @@ def _filter(filter_mod: FilterModule | None) -> FilterModule:
 
 
 class LiNRV1(RetrievalModule):
-    """LiNR V1 — dense fp16-input, fp32-score matmul (cuBLAS), optional ``[B, N]`` bool mask from
-    the filter, top-k."""
+    """LiNR V1 — dense fp16-input, fp32-score matmul (cuBLAS), the filter folded into the score
+    write (``FilterModule.mask_scores``: one fused pass, no ``[B, N]`` bool), top-k."""
 
     capturable = True
     k = _k_of("idx")
@@ -64,7 +59,10 @@ class LiNRV1(RetrievalModule):
             )
 
     def forward(self, query: Tensor, query_clause_attrs: Tensor | None = None):
-        return self.idx(query, mask=_mask(self.filter, query_clause_attrs))
+        if query_clause_attrs is None:
+            return self.idx(query)
+        scores = _filter(self.filter).mask_scores(self.idx.score(query), query_clause_attrs)
+        return masked_topk(scores, self.idx.k, masked=True)
 
 
 class LiNRV2(RetrievalModule):

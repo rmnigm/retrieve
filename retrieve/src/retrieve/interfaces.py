@@ -97,7 +97,8 @@ class FilterModule(nn.Module, abc.ABC):
     Three eval paths: ``evaluate_mask(q, start=0, end=None) -> [B, end - start] bool`` (dense,
     over items ``[start, end)``), ``evaluate_indices(q) -> ([B,
     P] int64, [B] int64)`` (compact candidates), ``evaluate_subset(q, candidate_ids) -> [B, P]
-    bool`` (check only the given ids)."""
+    bool`` (check only the given ids); plus ``mask_scores(scores, q) -> [B, N]``, dense scores
+    with the failing items at ``-inf``."""
 
     @abc.abstractmethod
     def register_index(
@@ -126,6 +127,9 @@ class FilterModule(nn.Module, abc.ABC):
     ) -> Tensor:
         mask = self.evaluate_mask(query_clause_attrs)
         return mask.gather(1, candidate_ids)
+
+    def mask_scores(self, scores: Tensor, query_clause_attrs: Tensor) -> Tensor:
+        return torch.where(self.evaluate_mask(query_clause_attrs), scores, float("-inf"))
 
     def forward(self, query_clause_attrs: Tensor) -> Tensor:
         return self.evaluate_mask(query_clause_attrs)

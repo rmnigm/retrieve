@@ -1,6 +1,7 @@
 """Fused clause evaluation emitting ``[B, N]`` bool directly, avoiding the ``[B, N, C, A_max]``
 intermediate of the pure-torch path; same inner loop as ``clause_compact`` minus the compaction
-epilogue."""
+epilogue. ``clause_mask_scores`` is the same pass writing ``scores`` or ``-inf`` instead of the
+bool (LiNR V1's mask folded into its score write, kernels.md § clause_mask)."""
 
 from __future__ import annotations
 
@@ -39,7 +40,8 @@ def _clause_mask_kernel(
     item_attrs_ptr,  # [N, C, A_max] int64
     is_reverse_ptr,  # [C] bool (stored as int8 in torch)
     query_attrs_ptr,  # [B, C] int64
-    out_ptr,  # [B, N] bool
+    scores_ptr,  # [B, N] fp32, read only when HAS_SCORES
+    out_ptr,  # [B, N] bool, or fp32 when HAS_SCORES
     N,
     tiles_y,
     C: tl.constexpr,
@@ -49,10 +51,13 @@ def _clause_mask_kernel(
     stride_ia,
     stride_qb,
     stride_qc,
+    stride_sb,
+    stride_sn,
     stride_ob,
     stride_on,
     BLOCK_N: tl.constexpr,
     WIDE: tl.constexpr,
+    HAS_SCORES: tl.constexpr,
 ):
     bid = tl.program_id(0)
     tile_id = tl.program_id(2) * tiles_y + tl.program_id(1)
@@ -79,9 +84,14 @@ def _clause_mask_kernel(
         A_MAX=A_MAX,
     )
 
-    tl.store(
-        row_base(out_ptr, bid, stride_ob, WIDE) + n_offsets * stride_on, pass_mask, mask=n_valid
-    )
+    out = row_base(out_ptr, bid, stride_ob, WIDE) + n_offsets * stride_on
+    if HAS_SCORES:
+        s = tl.load(
+            row_base(scores_ptr, bid, stride_sb, WIDE) + n_offsets * stride_sn, mask=n_valid
+        )
+        tl.store(out, tl.where(pass_mask, s, float("-inf")), mask=n_valid)
+    else:
+        tl.store(out, pass_mask, mask=n_valid)
 
 
 @dataclass(frozen=True)
@@ -97,9 +107,10 @@ def _clause_mask_prep(
     query_clause_attrs: Tensor,  # [B, C] int64
     *,
     cfg: ClauseMaskConfig,
+    scores: Tensor | None = None,  # [B, N] fp32: emit masked scores instead of the bool
 ) -> _ClauseMaskLaunch:
     """Validation + contiguity + output buffer + the full launch-arg dict. The one place inputs
-    are checked — shared by ``_clause_mask_impl`` and the public op."""
+    are checked — shared by ``_clause_mask_impl`` and the public ops."""
     if item_clause_attrs.dim() != 3:
         raise ValueError("item_clause_attrs must be [N, C, A_max]")
     if query_clause_attrs.dim() != 2:
@@ -114,7 +125,15 @@ def _clause_mask_prep(
     clause_is_reverse = clause_is_reverse.contiguous().to(torch.int8)
     query_clause_attrs = query_clause_attrs.contiguous()
 
-    out = torch.empty((b, n), dtype=torch.bool, device=query_clause_attrs.device)
+    if scores is not None:
+        if scores.shape != (b, n) or scores.dtype != torch.float32:
+            raise ValueError(
+                f"scores must be [B, N] = {[b, n]} float32, got {scores.shape} {scores.dtype}"
+            )
+        scores = scores.contiguous()
+    dtype = torch.bool if scores is None else torch.float32
+    out = torch.empty((b, n), dtype=dtype, device=query_clause_attrs.device)
+    src = out if scores is None else scores  # an unread pointer when not HAS_SCORES
 
     grid, tiles_y = grid_batch_tiles(b, n, cfg.block_n)
 
@@ -122,6 +141,7 @@ def _clause_mask_prep(
         "item_attrs_ptr": item_clause_attrs,
         "is_reverse_ptr": clause_is_reverse,
         "query_attrs_ptr": query_clause_attrs,
+        "scores_ptr": src,
         "out_ptr": out,
         "N": n,
         "tiles_y": tiles_y,
@@ -132,10 +152,13 @@ def _clause_mask_prep(
         "stride_ia": item_clause_attrs.stride(2),
         "stride_qb": query_clause_attrs.stride(0),
         "stride_qc": query_clause_attrs.stride(1),
+        "stride_sb": src.stride(0),
+        "stride_sn": src.stride(1),
         "stride_ob": out.stride(0),
         "stride_on": out.stride(1),
         "BLOCK_N": cfg.block_n,
         "WIDE": wide(item_clause_attrs, out),
+        "HAS_SCORES": scores is not None,
         "num_warps": cfg.num_warps,
         "num_stages": cfg.num_stages,
     }
@@ -169,6 +192,23 @@ def clause_mask(
     ``DEFAULT_CONFIG``."""
     launch = _clause_mask_prep(
         item_clause_attrs, clause_is_reverse, query_clause_attrs, cfg=DEFAULT_CONFIG
+    )
+    wrap_triton(_clause_mask_kernel)[launch.grid](**launch.kwargs)  # keep inline (export)
+    return launch.out
+
+
+@triton_op("retrieve::clause_mask_scores", mutates_args=())
+def clause_mask_scores(
+    scores: Tensor,  # [B, N] fp32
+    item_clause_attrs: Tensor,  # [N, C, A_max] int64
+    clause_is_reverse: Tensor,  # [C] bool
+    query_clause_attrs: Tensor,  # [B, C] int64
+) -> Tensor:
+    """``where(clause_mask(...), scores, -inf)`` in one pass: the predicate never leaves the
+    kernel as a ``[B, N]`` bool. Functional (a new buffer), so inductor has no in-place mask to
+    copy."""
+    launch = _clause_mask_prep(
+        item_clause_attrs, clause_is_reverse, query_clause_attrs, cfg=DEFAULT_CONFIG, scores=scores
     )
     wrap_triton(_clause_mask_kernel)[launch.grid](**launch.kwargs)  # keep inline (export)
     return launch.out
