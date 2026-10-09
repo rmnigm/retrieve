@@ -151,6 +151,7 @@ tag only between legs (a docs/config-only fast-forward is fine).
 | goodreads SilverTorch `filter` + `synth` at `n_lists` 1024 | IVF-TUNE (goodreads 4096 / n95 64) | whole SilverTorch arms |
 | arXiv `72e5a90` reuse entries, V2 / V3 perf half | V2-FIX-A | perf |
 | PubMed SilverTorch Triton perf (D3 PubMed timed at v2.1; V-PUBMED's Triton arms) | ST-DLOOP (scores bit-exact) | Triton perf |
+| V2 Triton perf at high pass rate (p ≳ 0.3) run at v2.1 (V-AX-SYNTH, V-PUBMED, V-SEEDS, V-GR-DEEP, V-YFCC) | V2-HIGHP, if it lands | V2 perf |
 | graph-mode ids of SilverTorch records at `408b1188` | quantize fix | ids (D1-G's id gate) |
 
 ### Stop rules
@@ -218,6 +219,14 @@ co-design.
   its nearest centroid), `arxiv-corr-synth.yaml`, CPU test (pass rate, query
   side); then arXiv at p {0.01, 0.03, 0.1}, every synth arm. IVF's best case
   next to the uniform worst case (F2). Pod c, slot 2. **≈ 3 GPU-h.**
+- [ ] **V2-HIGHP: Fix A's high-pass-rate regression** (surprise gate, pod b,
+  2026-10-09). At v2.1 LiNR V2 is +43-45 % at p ≈ 1 on PubMed d768 10 M
+  (bs 16 225.6 vs 155.9 ms) and −73-82 % at p 0.0002; V1 in the same runs
+  matches D1 within 0.3 %. Fix A's timing gate covered 0.8 M d128 only.
+  Paired cross-tree check (pod 1, ABAB processes, 408b1188 vs f01255f1, V1
+  control), EXHIBITS' old-vs-new map over p, N, d; if confirmed, a grid fix
+  (per-width / per-N `programs`, or multi-wave) in the `campaign-v2.2` bundle
+  with ST-DLOOP, gated bit-exact + keep rule at 0.8 M d128 and 10 M d768.
 - [ ] **V-PROF3: three profiles the first EXHIBITS run asks for** (pod 1,
   goodreads, `torch.profiler`, one cell each, interleaved): (a) official bloom
   `bloom_path` partial vs full: co-design is 14-22 % *slower* than full in
