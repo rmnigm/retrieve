@@ -1124,10 +1124,10 @@ EVAL_REPOS = {
 }
 ```
 
-`yfcc10m`'s repo is registered but **not published** — the upstream files
-are already public and unauthenticated, so `yfcc download` is the fetch
-path; the entry exists so the local directory layout resolves like every
-other dataset's.
+`pinkmeme/eval-yfcc10m` (private) holds the staged dataset (`content_d192`,
+attrs, tag CSR, `gt_shipped.pt`), but the upstream files are public and
+unauthenticated, so `yfcc download` is the documented fetch path. What may be
+published from each repo: [release and licenses](../paper/release-and-licenses.md).
 
 `pinkmeme/eval-pubmed` is **registered but not published**; the 10 M slice
 is rebuilt with `eval-data pubmed`. `pinkmeme/eval-openalex` likewise. `pinkmeme/eval-kuairand` (private) holds only the
