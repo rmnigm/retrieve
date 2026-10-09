@@ -7,7 +7,7 @@ codesign-pubmed:
   filter_kinds: [bloom]
   ks: [100]
   batch_sizes: [1, 16]
-  seeds: [0, 1, 2]
+  seeds: [0]                    # claims first (controller 2026-10-10 09:00): seeds agree within 0.01 on arXiv
   sweeps: {pubmed: [c0_mesh]}
   interleave: [{by: bloom_path}]
   arms:
