@@ -367,6 +367,8 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("v3bits", "goodreads-synth"): (84, 168),
     ("v3bits", "goodreads"): (24, 48),
     ("router", "goodreads"): (72, 72),
+    ("laion30m", "laion30m"): (6, 10),  # claims first: seed 0 (user 2026-10-10)
+    ("laion30m-bs1", "laion30m"): (2, 6),
 }
 KEPT = {
     "goodreads": {"c0_genre", "c1_lang_reverse", "all4"},
@@ -401,7 +403,10 @@ def test_grid_counts_and_invariants(suite, dataset):
     for j, p in cells:
         cell = (j.dim, j.algo, j.backend, j.filter_kind, j.sweep, json.dumps(p, sort_keys=True))
         by_seed.setdefault(cell, set()).add(j.seed)
-    seeds = {0, 1, 2, 3, 4} if suite == "h2h" else {0, 1, 2}  # h2h: 5 repeats
+    # h2h: 5 repeats; laion30m: seed 0 (claims first, user 2026-10-10)
+    seeds = (
+        {0, 1, 2, 3, 4} if suite == "h2h" else {0} if suite.startswith("laion30m") else {0, 1, 2}
+    )
     assert all(s == seeds for s in by_seed.values())
     assert all(set(j.batch_sizes) <= {1, 16} and set(j.ks) <= {100, 1000} for j in jobs)
     if suite in ("filter", "deep", "synth", "codesign"):
