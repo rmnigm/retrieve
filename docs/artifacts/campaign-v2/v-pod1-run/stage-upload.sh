@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Stage one (suite, dataset) slice of a tag's tree plus the leg's logs and publish it as
-# <TAG>/<dataset>-<suite> (`bench upload --verify`; the MANIFEST sha256 goes in hub-index). TAG defaults to campaign-v2.3.
+# <TAG>/<dataset>-<suite> (`bench upload --verify`; the MANIFEST sha256 goes in hub-index). TAG defaults to campaign-v2.4.
 # Usage: stage-upload.sh LEG SUITE DATASET DIM
 set -eu
 LEG=$1 SUITE=$2 DS=$3 DIM=$4
-TAG=${TAG:-campaign-v2.3}
+TAG=${TAG:-campaign-v2.4}
 TV=$(echo "${TAG#campaign-}" | tr -d .)
 R=${R:-/scratch/campaign-$TV/results}
 L=/scratch/$TV/$LEG

@@ -1,12 +1,12 @@
-# Sourced by the v-pod1-run drivers (pod 1's legs at $TAG, default campaign-v2.3): environment, code_version ==
+# Sourced by the v-pod1-run drivers (pod 1's legs at $TAG, default campaign-v2.4): environment, code_version ==
 # the tag's library tree hash, 1 Hz clock trace, `step NAME CMD...` (bench subcommand, pinned) and
 # `stream DS SUITE "ALGOS|BACKENDS"`, `old_oracles DS...` (one `bench run --resume --interleave`, per-stream log under
 # $R/_logs with clock blocks). Each stops the driver on a non-zero rc. Launch under the GPU 0 lock:
-#   setsid nohup flock -n /scratch/gpu0.lock bash <driver> > /scratch/v23/<leg>/driver.log 2>&1 &
+#   setsid nohup flock -n /scratch/gpu0.lock bash <driver> > /scratch/v24/<leg>/driver.log 2>&1 &
 set -u
 # a free lock means this driver was not launched under it (another holder would have made flock -n fail)
 if flock -n /scratch/gpu0.lock true; then echo "$(date -Is) not launched under /scratch/gpu0.lock, refusing"; exit 3; fi
-TAG=${TAG:-campaign-v2.3}
+TAG=${TAG:-campaign-v2.4}
 TV=$(echo "${TAG#campaign-}" | tr -d .)  # v22
 REPO=/workspace/retrieve
 PY=/venvs/retrieve/bin/python
