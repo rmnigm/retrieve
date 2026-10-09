@@ -1,18 +1,19 @@
-# Sourced by the v-pod1-run drivers (pod 1's legs at campaign-v2.1): environment, code_version ==
+# Sourced by the v-pod1-run drivers (pod 1's legs at $TAG, default campaign-v2.2): environment, code_version ==
 # the tag's library tree hash, 1 Hz clock trace, `step NAME CMD...` (bench subcommand, pinned) and
 # `stream DS SUITE "ALGOS|BACKENDS"`, `old_oracles DS...` (one `bench run --resume --interleave`, per-stream log under
 # $R/_logs with clock blocks). Each stops the driver on a non-zero rc. Launch under the GPU 0 lock:
-#   setsid nohup flock -n /scratch/gpu0.lock bash <driver> > /scratch/v21/<leg>/driver.log 2>&1 &
+#   setsid nohup flock -n /scratch/gpu0.lock bash <driver> > /scratch/v22/<leg>/driver.log 2>&1 &
 set -u
 # a free lock means this driver was not launched under it (another holder would have made flock -n fail)
 if flock -n /scratch/gpu0.lock true; then echo "$(date -Is) not launched under /scratch/gpu0.lock, refusing"; exit 3; fi
-TAG=${TAG:-campaign-v2.1}
+TAG=${TAG:-campaign-v2.2}
+TV=$(echo "${TAG#campaign-}" | tr -d .)  # v22
 REPO=/workspace/retrieve
 PY=/venvs/retrieve/bin/python
-R=${R:-/scratch/campaign-v21/results}
+R=${R:-/scratch/campaign-$TV/results}
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-LOG=/scratch/v21/$LEG
-export CUDA_VISIBLE_DEVICES=0 TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/$LEG-v21 HF_HOME=/scratch/hf
+LOG=/scratch/$TV/$LEG
+export CUDA_VISIBLE_DEVICES=0 TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/$LEG-$TV HF_HOME=/scratch/hf
 PIN="taskset -c 0-63,128-191"
 mkdir -p "$R/_logs" "$LOG" "$TORCHINDUCTOR_CACHE_DIR"
 cd "$REPO/evaluation"
@@ -56,7 +57,7 @@ stream() {
   [ $rc -eq 0 ] || exit $rc
 }
 
-# oracles are rebuilt at the tag: blobs built at any other code_version move to <gt_dir>/pre-v21/
+# oracles are rebuilt at the tag: blobs built at any other code_version move to <gt_dir>/before-<tag tree[:8]>/
 old_oracles() { $PY "$HERE/move_old_oracles.py" "$cv" "$@" || exit 1; }
 
 dim() { case $1 in yfcc10m*) echo 192 ;; *) echo 128 ;; esac; }

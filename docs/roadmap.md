@@ -34,8 +34,10 @@ others (see [Multi-GPU execution](#multi-gpu-execution)).
 
 - **V3 at 512 bits** (C2): `k_bits` > D needs a library change (OPORP over
   several projections), which the user declined for the campaign on
-  2026-10-08 (LN-8). V-V3BITS measures {64, 128}; whether to add 512 as an
-  opt-in for one comparison is the user's call.
+  2026-10-08 (LN-8). V-V3BITS (goodreads-synth, v2.2) shows the bits drive
+  V3's recall: 64 vs 128 bits costs 10-30 points of recall@100 at p ≥ 0.01
+  for ≤ 3 % latency, so LiNR's 512 would likely close much of C2's recall
+  gap. Whether to add 512 as an opt-in for one comparison is the user's call.
 - **Contact the original authors** (re-plan decision 7): the LinkedIn LiNR
   team and Meta's SilverTorch team — filter-set details, the V1/V2 setup,
   the SilverTorch paper's FPR inconsistency (0.067 % vs 0.00173 %) — and
@@ -265,7 +267,7 @@ co-design.
   within the existing V1 tolerance if fp16 keys), keep rule over p, bs, N,
   d. Library, in `campaign-v2.3` with ST-IDS and V2-HIGHP. Pod c, v-ax-corr
   (CPU first, one GPU window at an interleave-unit pause).
-- [ ] **V-V3BITS: V3 at LiNR's bit budget, next to our deviation** (C2 does
+- [ ] **V-V3BITS (goodreads-synth done; goodreads' 48 cells deferred): V3 at LiNR's bit budget, next to our deviation** (C2 does
   not hold so far: recall −7-13 % at a 1 % pool, no gain at bs 1; our V3
   runs `k_bits` = D = 128 against LiNR's 512, LN-8). `k_bits` must divide D
   (`quantize.py` `_oporp_k_bits`), so at D 128 only {64, 128} exist without a
