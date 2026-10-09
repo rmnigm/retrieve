@@ -11,8 +11,8 @@
 # the record reuse rule (docs/decisions.md § Campaign v2); `log` records every mid-campaign change.
 
 default:
-  quality: {code_version: 1258a63e7ebd170d7270111b5206b4ea0b8ca7f9, hub: "campaign-v2.3/{dataset}-{suite}"}  # tag campaign-v2.3
-  perf: {code_version: 1258a63e7ebd170d7270111b5206b4ea0b8ca7f9, hub: "campaign-v2.3/{dataset}-{suite}"}
+  quality: {code_version: d67d6263c1f4387d7acc769a42b44532941913d5, hub: "campaign-v2.4/{dataset}-{suite}"}  # tag campaign-v2.4
+  perf: {code_version: d67d6263c1f4387d7acc769a42b44532941913d5, hub: "campaign-v2.4/{dataset}-{suite}"}
 
 # Reuse entries from docs/artifacts/campaign-v2/reuse (reuse.py over the Hub subtrees). An entry
 # exists only where old records cover every v2 cell of its match (all seeds and params) and no
@@ -67,3 +67,4 @@ log:
 #  - {date: 2026-10-20, change: "<what changed, commit>", rerun: ["<suite>/<dataset> <arms>"]}
   - {date: 2026-10-09, change: "tag campaign-v2.2 (library 0d23c615): ST-DLOOP, SilverTorch Triton probe scorers loop over D past D_PAD 256 + width-gated tile skip (bit-exact; D 128/192 SASS-identical)", rerun: ["PubMed (d768) SilverTorch triton perf: D3 PubMed bloomwidth-timed, V-PUBMED triton chunks run before the tag"]}
   - {date: 2026-10-09, change: "tag campaign-v2.3 (library 1258a63e): ST-IDS probe id epilogue loops over k (compile seconds, no k 1000 n_probe limit); V2-HIGHP fmkt past D_PAD 256 split into a counted-tile scoring loop + wide -inf fill; V1-FUSE predicate folded into the score write (bit-exact)", rerun: ["every SilverTorch triton perf record (ST-IDS)", "V2 triton perf at D_PAD > 256 (V2-HIGHP)", "V1 triton perf (V1-FUSE)"]}
+  - {date: 2026-10-09, change: "tag campaign-v2.4 (library d67d6263): ST-SKIP128, SilverTorch triton bloom scorer skips all-fail tiles at D_PAD <= 256 under a device-side pass-rate bound (bit-exact)", rerun: ["SilverTorch triton bloom perf at D_PAD <= 256 with p < 1/256 (synth low-p bloom)"]}

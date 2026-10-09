@@ -116,9 +116,10 @@ multi-GPU numbers are comparable at all.
 
 **Exploration first, one clean pass last** (user, 2026-10-09,
 [decisions](decisions.md#campaign-v2-user-2026-10-08)). While the library
-is still improving, legs run at the current tag (now `campaign-v2.3`,
-code_version `1258a63e7ebd170d7270111b5206b4ea0b8ca7f9` = v2.2 + ST-IDS +
-V2-HIGHP + V1-FUSE, Hub `campaign-v2.3/<dataset>-<suite>`; `campaign-v2.2` was
+is still improving, legs run at the current tag (now `campaign-v2.4`,
+code_version `d67d6263c1f4387d7acc769a42b44532941913d5` = v2.3 + ST-SKIP128,
+Hub `campaign-v2.4/<dataset>-<suite>`; `campaign-v2.3` was `1258a63e`
+(v2.2 + ST-IDS + V2-HIGHP + V1-FUSE), `campaign-v2.2` was
 `0d23c615`, `campaign-v2.1` `f01255f1`, `campaign-v2` `408b1188`) to see how
 everything behaves and to make the charts. A new tag does not stop or
 invalidate anything: every record keeps its code_version, and a change adds
@@ -146,7 +147,7 @@ leg runs one library.
 | goodreads SilverTorch `filter` + `synth` at `n_lists` 1024 | IVF-TUNE (goodreads 4096 / n95 64) | whole SilverTorch arms |
 | arXiv `72e5a90` reuse entries, V2 / V3 perf half | V2-FIX-A | perf |
 | PubMed SilverTorch Triton perf (D3 PubMed timed at v2.1; V-PUBMED's Triton arms) | ST-DLOOP (scores bit-exact) | Triton perf |
-| d128 / d192 SilverTorch Triton perf (every leg) | ST-SKIP128, if it lands | Triton perf |
+| SilverTorch Triton bloom perf at d128 / d192 with p < 1/256 (synth low-p bloom) | ST-SKIP128 | Triton bloom perf |
 | V2 Triton perf at `D_PAD` ≥ 1024 run at v2.1 (V-PUBMED; d128 / d192 legs gain or are neutral) | V2-HIGHP | V2 perf |
 | every SilverTorch Triton perf record before v2.3 (all widths; ≈ −3 µs at k 100 × n_probe 24, more at k 1000) | ST-IDS | Triton perf |
 | V1 Triton perf before v2.3 | V1-FUSE | V1 perf |
@@ -211,15 +212,6 @@ co-design.
   its nearest centroid), `arxiv-corr-synth.yaml`, CPU test (pass rate, query
   side); then arXiv at p {0.01, 0.03, 0.1}, every synth arm. IVF's best case
   next to the uniform worst case (F2). Pod c, slot 2. **≈ 3 GPU-h.**
-- [ ] **ST-SKIP128: Meta's early exit at d ≤ 256** (EXHIBITS run 4, ST-DLOOP's
-  improvement list). Meta's scorer kernel alone is faster than ours on
-  bloom at d128 (0.60-0.80, exact device times) because a failing doc
-  returns before any load; our tile skip is off at `D_PAD` ≤ 256 because a
-  forced skip cost 2-8 % at p ≥ 0.1. Fix: a skip gated by a device-side
-  pass-rate bound (no host sync), ≈ −30-35 % on the d128 scorer at
-  p ≤ 0.001. Gates bit-exact + keep rule across p at d128 / d192. Re-times
-  every d128 / d192 SilverTorch Triton cell (ledger). Tag `campaign-v2.4`;
-  st-dloop, pod b.
 - [ ] **H-QLOOP: the quality pass is CPU-bound** (pod 1, 2026-10-09, live
   profile of V-V3BITS). `run.quality` spends ≈ 33 ms of CPU work per 16-row
   chunk (row masks, `blob["topk"][sel]`, `targets[sel]`, `.to(device)`
