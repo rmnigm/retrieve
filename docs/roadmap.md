@@ -309,14 +309,6 @@ co-design.
   (divides 768) brackets LiNR's 512 from below. PubMed `filter` kept
   sweeps, V3 triton, pool {1 %, 5 %}, seed 0. After V-SEEDS arXiv.
   **≈ 1-2 GPU-h.**
-- [ ] **H-ARMFREE: one `bench run` frees each arm before the next** (2026-10-10:
-  laion30m and V-ROUTER PubMed OOMed when one process ran several arms; each
-  arm's 10 M-30 M index stayed resident and the next arm's allocation
-  failed). The run loop releases the finished job's module, index and
-  caches before building the next (and asserts the reserved memory is back
-  near the shared inputs'); drivers stop needing one process per arm.
-  Gates: harness suite; one multi-arm 10 M run without OOM; records
-  byte-identical to a per-arm run on two cells.
 - [ ] **OFFICIAL-O3: Meta's extension built with `-O3`** (OF-11: Meta's setup passes no
   `-O`, host code at gcc `-O0`; `-O3` is 0.77-0.98 of the shipped time, outputs
   bit-identical). New official legs build their own venv with
