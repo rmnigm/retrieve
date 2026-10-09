@@ -146,27 +146,33 @@ def probe_ids_kernel(
     ids_ptr,  # [B, k] int64 out
     n_probe,
     k,
-    NPP: tl.constexpr,
-    KP: tl.constexpr,
+    BLOCK_K: tl.constexpr,
+    BLOCK_N: tl.constexpr,
 ):
-    """The probe scorers' id epilogue, one program per row: each top-k slot's original id, the
-    same slot → position map as ``probe_tile`` (without the tiles), and ``-1`` at every
-    ``-inf`` score. Launched by both ``codesigned_probe_score*`` files after ``torch.topk``."""
+    """The probe scorers' id epilogue, one program per ``(row, BLOCK_K slots)``: each top-k slot's
+    original id, the same slot → position map as ``probe_tile``, and ``-1`` at every ``-inf``
+    score. Launched by both ``codesigned_probe_score*`` files after ``torch.topk``. The probes are
+    walked in ``BLOCK_N`` chunks with the cluster end carried across them, so neither k nor
+    ``n_probe`` sizes the program (kernels.md § SilverTorch kernels, "Ids after the top-k")."""
     bid = tl.program_id(0)
-    i = tl.arange(0, NPP)
-    live = i < n_probe
-    c = tl.load(probe_ids_ptr + bid * n_probe + i, mask=live, other=0)
-    lo = tl.load(offsets_ptr + c, mask=live, other=0)
-    size = tl.load(offsets_ptr + c + 1, mask=live, other=0) - lo
-    end = tl.cumsum(size, 0)
-    r = tl.arange(0, KP)
+    r = tl.program_id(1) * BLOCK_K + tl.arange(0, BLOCK_K)
     in_k = r < k
     slot = tl.load(slots_ptr + bid * k + r, mask=in_k, other=0)
     score = tl.load(scores_ptr + bid * k + r, mask=in_k, other=float("-inf"))
-    hit = (slot[:, None] >= (end - size)[None, :]) & (slot[:, None] < end[None, :])
-    pos = tl.sum(tl.where(hit, (lo - (end - size))[None, :], 0), axis=1) + slot
+    shift = tl.zeros([BLOCK_K], dtype=tl.int64)
+    base = tl.zeros([], dtype=tl.int64)
+    for n0 in tl.range(0, n_probe, BLOCK_N):
+        i = n0 + tl.arange(0, BLOCK_N)
+        live = i < n_probe
+        c = tl.load(probe_ids_ptr + bid * n_probe + i, mask=live, other=0)
+        lo = tl.load(offsets_ptr + c, mask=live, other=0)
+        size = tl.load(offsets_ptr + c + 1, mask=live, other=0) - lo
+        end = base + tl.cumsum(size, 0)
+        hit = (slot[:, None] >= (end - size)[None, :]) & (slot[:, None] < end[None, :])
+        shift += tl.sum(tl.where(hit, (lo - (end - size))[None, :], 0), axis=1)
+        base += tl.sum(size)
     # A -inf slot (reject, or past the row's items) is the -1 sentinel via the masked load.
-    ids = tl.load(sort_perm_ptr + pos, mask=in_k & (score > float("-inf")), other=-1)
+    ids = tl.load(sort_perm_ptr + shift + slot, mask=in_k & (score > float("-inf")), other=-1)
     tl.store(ids_ptr + bid * k + r, ids, mask=in_k)
 
 
