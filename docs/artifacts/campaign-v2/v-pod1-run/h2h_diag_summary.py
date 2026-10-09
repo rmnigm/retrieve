@@ -23,6 +23,8 @@ for f in sorted(root.glob("[abc]/r*/h2h/goodreads-d128.jsonl")):
             else f"official-{r['params']['score_path']}"
         )
         for p in r["perf"]:
+            if p["median_ms"] is None:  # official graph: not capturable
+                continue
             cells[arm, proto, p["mode"]].append(
                 (rep, p["median_ms"], p["window_sm_mhz"], p["unstable"])
             )
