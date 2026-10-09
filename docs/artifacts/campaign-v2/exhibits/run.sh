@@ -24,14 +24,14 @@ done
 
 # one tree per code_version: a resume key carries the code_version, so one tree would hold both
 # versions of a cell and the report would draw them into one curve
-rm -rf "$BASE/tree" && mkdir -p "$BASE/tree"/{v2,v21,d1}
+rm -rf "$BASE/tree" && mkdir -p "$BASE/tree"/{v2,v21,v22,d1}
 # a suite dir goes to the tree of its records' code_version (a leg may sit under artifacts/)
 for d in $(ls -d "$BASE"/legs/*/ | grep -v /artifacts__) $(ls -d "$BASE"/legs/artifacts__*/ 2>/dev/null); do
   for s in "$d"*/; do
     f=$(ls "$s"*.jsonl 2>/dev/null | grep -v samples | head -1) || true
     [ -n "$f" ] || continue
     case $(python3 -c 'import json,sys; print(json.loads(open(sys.argv[1]).readline())["env"]["code_version"][:8])' "$f") in
-      408b1188) t=v2 ;; f01255f1) t=v21 ;; 72e5a90c | c0e42d1a) t=d1 ;; *) echo "skip $s: unknown code_version" >&2; continue ;;
+      408b1188) t=v2 ;; f01255f1) t=v21 ;; 0d23c615) t=v22 ;; 72e5a90c | c0e42d1a) t=d1 ;; *) echo "skip $s: unknown code_version" >&2; continue ;;
     esac
     s=$(basename "$s")
     # a pass that re-records cells already in the tree (H-KSUM's profile-only h2h) keeps its own tree
@@ -40,13 +40,14 @@ for d in $(ls -d "$BASE"/legs/*/ | grep -v /artifacts__) $(ls -d "$BASE"/legs/ar
   done
 done
 
-for t in v2 v21 d1; do
+for t in v2 v21 v22 d1; do
   uv run bench report "$BASE/tree/$t" --out "$OUT/report-$t" > "$OUT/report-$t.log" 2>&1
   rm -f "$OUT/report-$t/results.parquet"
 done
-trees="$BASE/tree/v2 $BASE/tree/v21 $BASE/tree/d1"
+trees="$BASE/tree/v2 $BASE/tree/v21 $BASE/tree/v22 $BASE/tree/d1"
 uv run python "$HERE/checks.py" "$OUT" $trees
 uv run python "$HERE/figures.py" "$OUT" $trees
+uv run python "$HERE/v3bits.py" "$OUT" $trees
 uv run python "$HERE/t3x.py" "$OUT" $trees $(ls -d "$BASE"/tree/*-* 2>/dev/null)
 uv run python "$HERE/gpuh.py" "$OUT/synth-arms.csv" "$BASE/tree/d1/filter/yfcc10m-d192.jsonl" > "$OUT/gpuh-v-yfcc.csv"
 ls "$BASE/legs" > "$OUT/legs.txt"

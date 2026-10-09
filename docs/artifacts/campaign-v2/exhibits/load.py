@@ -10,6 +10,7 @@ from bench import records  # noqa: E402
 CV_LABEL = {
     "408b1188": "v2",
     "f01255f1": "v2.1",
+    "0d23c615": "v2.2",
     "72e5a90c": "d1",
     "c0e42d1a": "d1-c0e4",
 }
