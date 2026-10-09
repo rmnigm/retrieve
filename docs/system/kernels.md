@@ -348,7 +348,19 @@ its own tile shape, launch grid, or masking policy:
   load_mask, bid, strides..., C, A_MAX) → [BLOCK] int1` — the exact
   AND-of-OR clause predicate (inner OR over `A_MAX` slots, outer AND
   over `C`, reverse XOR, `q_c == -1` inactive override), already ANDed
-  with `load_mask`. Used by `clause_mask` / `clause_compact`
+  with `load_mask`. **Inactive clauses** are not read: a clause the query
+  leaves at `-1` passes whatever the item holds, so a uniform branch
+  (`if q_c != -1`, one value per program) skips its loads and compares.
+  Unrolled over every clause, the predicate paid `C · A_MAX` loads per item
+  and batch row however few clauses the query used. The 10-clause synth
+  tables (SYNTH-TRIM, from 7) made the V1 / V2 clause cells slower by the
+  width, flat in p and growing with the batch, and `clause_compact` went
+  from 56 registers (C 4, A_MAX 4) to 121 (C 10, A_MAX 1); with the branch
+  it is 48. **Known cost:** with every clause active the branch skips
+  nothing, and goodreads `all4` V2 at bs 1 in graph mode is 1.095× (+26 µs
+  of 0.27 ms). Masked loads (1.04×, but 255 registers with spills at
+  A_MAX 4) and 4 warps (1.14×) were measured and are not used
+  ([CLAUSE-SKIP](../artifacts/campaign-v2.6/clause-skip/README.md)). Used by `clause_mask` / `clause_compact`
   (`ids=n_offsets`, `load_mask=n_valid`) and
   `codesigned_probe_score_exact` (`ids=safe_ids`, `load_mask=valid`).
   `is_reverse_ptr` must point at int8 storage (host preps do
@@ -1328,6 +1340,16 @@ is exact, the tiling only moves slots, and a skipped tile holds only
 
 [`ops/triton/codesigned_probe_score.py`](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py).
 
+**Bloom build.** `build_transposed_sigs` rotates the row-wise signatures
+one bloom word at a time, and within a word in chunks of `TRANSPOSE_CHUNK`
+= 2¹⁸ items (whole 64-item words; the last chunk zero-padded as before).
+Each chunk's bit planes are a `[64, chunk]` int64 temporary plus the shifted
+copy, 128 MiB each, so the build needs the row-wise and transposed tables
+plus about 256 MiB at any `N`. Unchunked, the planes were `[64, N_pad]`
+per word (14.3 GiB at 30 M), and the triton bloom build did not fit at
+LAION 30 M (d-run, v2.6). The chunked index is `torch.equal` to the
+one-pass one.
+
 The `int8 → fp32` code cast never touches HBM. Bloom mode reads the
 **transposed index** of the paper's "rotate the matrix" phase 2 (TF-1): `bloom_transposed [m_bits, ceil(N/64)]`
 (`bloom_hash.build_transposed_sigs` over the cluster-sorted row-wise
@@ -1499,22 +1521,24 @@ casts the int32 dot to fp16 *before* dividing by it, which overflows for
 any realistic `D`.
 
 **Filter modes.** `none` → `fused_kmean_ann`. `exact` → our Triton
-`clause_mask` over the cluster-sorted `item_clause_attrs`, packed by
-`pack_mask` into the scorer's `filtering_bit_mask` (int64 `[B,
-ceil(N/64)]`, doc `d` at bit `63 − d % 64` of word `d // 64` —
-`MASK_BIT_ORDER`, see below) and passed to `fused_kmean_ann`: phase 2
-ours and full-`N`, labelled so in every table. `bloom` → **Meta's
+`clause_mask_packed` over the cluster-sorted `item_clause_attrs`, written
+straight as the scorer's `filtering_bit_mask` (int64 `[B, ceil(N/64)]`,
+doc `d` at bit `63 − d % 64` of word `d // 64` — `MASK_BIT_ORDER`, see
+below; no `[B, N]` bool) and passed to `fused_kmean_ann`: phase 2 ours
+(filling a step Meta does not provide) and full-`N`, labelled so in
+every table. `bloom` → **Meta's
 bloom**, not ours: at `register_index`, `attrs_to_features` turns the
 sorted `[N, C, A_max]` attrs into the jagged `(feature_ids int32 [C],
 feature_offsets int64 [N·C+1], feature_values int64)` layout — the
 clause index is the feature id, the same `(clause, value)` keying as our
 salt — and `bloom_index_build(b_multiplier, k)` builds `bloom_index [W]`
-+ `bundle_b_offsets`; per forward, `queries_to_expressions` renders each
-`[C]` query row as `"0:v0 AND 1:v1"` (`NOT c:v` for reverse clauses,
-`""` = match all), `parse_plans` runs the CPU parser (plans kept on
-CPU; memoised per distinct expression tuple by default —
-`OfficialConfig.cache_plans=True` — or parsed on every forward with
-`cache_plans=False`), and then either
++ `bundle_b_offsets`; in `prepare_queries` (once per batch, outside
+`forward`), `queries_to_expressions` renders each `[C]` query row as
+`"0:v0 AND 1:v1"` (`NOT c:v` for reverse clauses, `""` = match all) and
+`parse_plans` runs Meta's CPU parser. The plans stay on the CPU: Meta's
+search decodes them on the host per call
+(`bloom_index_search_cuda.cu:1045`), so device plans would only add a D2H.
+Per forward, either
 (`bloom_path="partial"`, default — the paper's co-design)
 `bloom_index_search_batch_return_partial_response` over the probed
 clusters feeds `fused_kmean_ann_with_partial_masks`, or
@@ -1555,14 +1579,11 @@ forward raises `RuntimeError` when traced. Measured on the A100
 `repeat_interleave`, fills), `fused_kmean_ann_with_partial_masks` 19 / 4,
 the partial-response bloom search 13 / 2 with two H2D plan uploads, so a
 bloom forward is ≈ 32 launches and ≥ 5 syncs against Triton's one launch.
-On top of that the CPU expression parse costs ≈ 59 µs per call at B=16
-(`c:v AND c:v`), 10–20 % of an eager bloom forward, which the
-`parse_plans` LRU cache hides after the first call for a repeated
-batch. **A timing run must therefore set `OfficialConfig(cache_plans=
-False)`** — every forward pays the parse, as serving fresh queries does
-— **or report both settings, labelled**; results are identical either
-way (T6 checks the uncached path bit for bit, T7 records its sync
-count). The official arm loses at small `P` / `B=1` for host reasons, so
+The CPU expression parse (≈ 59 µs per call at B=16) is query
+preparation: it runs in `prepare_queries`, outside the timed forward,
+and the harness records it as `query_prep_ms`
+([evaluation](evaluation.md#query-preparation)). T7 records the forward's
+syncs with the filter already prepared. The official arm loses at small `P` / `B=1` for host reasons, so
 the kernel-only tier of the head-to-head is what compares kernels.
 
 **Measured.** The head-to-head against Triton (end to end, kernel-only,

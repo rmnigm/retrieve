@@ -55,9 +55,10 @@ def _build(filter_mode, backend, *, n=512, d=64, n_lists=16, n_probe=4, k=8, c=2
     return b.build()
 
 
-def _inputs(filter_mode, b, c, dim, seed):
+def _inputs(module, filter_mode, b, c, dim, seed):
+    """A query batch and its prepared filter (``None`` unfiltered), prepared outside the call."""
     qa = make_query_attrs(b, c=c, seed=seed) if filter_mode != "none" else None
-    return make_query(b, dim, seed=seed), qa
+    return make_query(b, dim, seed=seed), None if qa is None else module.prepare_queries(qa)
 
 
 @pytest.mark.parametrize("filter_mode,backend,d", MODES)
@@ -68,17 +69,17 @@ def test_compiled_forward_matches_eager(filter_mode, backend, d):
 
     b, c = 4, 2
     eager = _build(filter_mode, backend, d=d)
-    inputs = partial(_inputs, filter_mode, b, c, eager.item_codes.shape[1])
+    inputs = partial(_inputs, eager, filter_mode, b, c, eager.item_codes.shape[1])
     torch._dynamo.reset()
     skips_before = int(counters["inductor"]["cudagraph_skips"])
     compiled = torch.compile(eager, dynamic=True, mode="reduce-overhead")
     for _ in range(3):
         compiled(*inputs(1))
     for seed in (21, 22):
-        query, q_attrs = inputs(seed)
+        query, prepared = inputs(seed)
         # cudagraph-tree outputs are reclaimed on the next call — clone before comparing.
-        out_ids, out_scores = (t.clone() for t in compiled(query, q_attrs))
-        eager_ids, eager_scores = eager(query, q_attrs)
+        out_ids, out_scores = (t.clone() for t in compiled(query, prepared))
+        eager_ids, eager_scores = eager(query, prepared)
         assert_topk_equal(out_ids, out_scores, eager_ids, eager_scores)
     assert int(counters["inductor"]["cudagraph_skips"]) == skips_before
 
@@ -93,10 +94,9 @@ def test_no_graph_breaks_on_forward(filter_mode, backend, d):
     """
     eager = _build(filter_mode, backend, d=d)
     b, c = 4, 2
-    query = make_query(b, eager.item_codes.shape[1])
-    q_attrs = make_query_attrs(b, c=c) if filter_mode != "none" else None
+    query, prepared = _inputs(eager, filter_mode, b, c, eager.item_codes.shape[1], 1)
 
-    explanation = torch._dynamo.explain(eager.forward)(query, q_attrs)
+    explanation = torch._dynamo.explain(eager.forward)(query, prepared)
     assert explanation.graph_break_count == 0, (
         f"filter_mode={filter_mode}, backend={backend}, d={d}: expected 0 graph "
         f"breaks, got {explanation.graph_break_count}\n{explanation}"

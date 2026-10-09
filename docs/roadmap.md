@@ -110,9 +110,10 @@ multi-GPU numbers are comparable at all.
 
 **Exploration first, one clean pass last** (user, 2026-10-09,
 [decisions](decisions.md#campaign-v2-user-2026-10-08)). While the library
-is still improving, legs run at the current tag (now `campaign-v2.5`,
-code_version `472f2fc68c697179b463d3b5a6b19ade194e6e2f` = v2.4 + ST-LANE +
-V2-FILL + C5-OURS, Hub `campaign-v2.5/<dataset>-<suite>`; `campaign-v2.4` was
+is still improving, legs run at the current tag (now `campaign-v2.7`,
+code_version `641ec3b8e09034647f426ca7f68204a1f2866536` = v2.6 + CLAUSE-SKIP + BLOOM-BUILD-CHUNK,
+Hub `campaign-v2.7/<dataset>-<suite>`; `campaign-v2.6` was `20e83bfc` (v2.5 +
+OFFICIAL-REWORK M1, query prep out of the timed forward); `campaign-v2.5` was `472f2fc6` (v2.4 + ST-LANE + V2-FILL + C5-OURS); `campaign-v2.4` was
 `d67d6263` (v2.3 + ST-SKIP128), `campaign-v2.3` was `1258a63e`
 (v2.2 + ST-IDS + V2-HIGHP + V1-FUSE), `campaign-v2.2` was
 `0d23c615`, `campaign-v2.1` `f01255f1`, `campaign-v2` `408b1188`) to see how
@@ -147,6 +148,8 @@ leg runs one library.
 | every SilverTorch Triton perf record before v2.3 (all widths; ≈ −3 µs at k 100 × n_probe 24, more at k 1000) | ST-IDS | Triton perf |
 | V1 Triton perf before v2.3 | V1-FUSE | V1 perf |
 | every official perf record before v2.6 (C5 codesign official, T3 h2h, D3 / bloomwidth official) | OFFICIAL-REWORK (our adapter's per-forward host work left the timed call) | official perf |
+| every bloom-filter perf record before v2.6, every backend (SilverTorch, LiNR V1-V3, postfilter, router) | OFFICIAL-REWORK M1: the query-side filter encoding left the timed forward (now `query_prep_ms`) | bloom perf (forward) |
+| synth clause perf (V1, V2, SilverTorch exact) on the 10-clause synth tables before v2.7 | CLAUSE-SKIP (inactive clauses were loaded) | clause perf |
 | SilverTorch Triton bloom perf before v2.5 (all widths; 0 to −10 %) | ST-LANE (bit-exact; none / exact SASS unchanged) | Triton bloom perf |
 | V2 Triton perf at `D_PAD` ≤ 256 before v2.5 (incl. C1's crossover; 0.22-0.97 of v2.4) | V2-FILL (bit-exact) | V2 perf |
 | graph-mode ids of SilverTorch records at `408b1188` | quantize fix | ids (D1-G's id gate) |
@@ -336,15 +339,25 @@ co-design.
   wherever Meta's ops allow. Gates: ids + scores `torch.equal` against the
   current paths, library + harness suites, keep rule; tag `campaign-v2.6`;
   then C5 official and T3 h2h re-run claims-first. st-dloop, pod b; C5's
-  verdict on Meta's code waits for it.
-- [ ] **ROUTER-LIB: the router as a library method** (the library goal,
-  user 2026-10-10; unassigned, after OFFICIAL-REWORK; WIP on `dev/router-lib`): the harness `router` arm's logic (unfiltered pre-probe
-  → l_q → V2 below the threshold, SilverTorch above) as a `retrieve`
-  module with its docs page, the split done on the device with no host
-  sync so the arm can be CUDA-graph captured (V-ROUTER at 0.8 M: the
-  eager-only host split is why it never beat graph V2); the harness arm calls it; gates: the arm's
-  records unchanged (ids + scores `torch.equal`), library + harness suites.
-  After V-ROUTER's goodreads fit.
+  verdict on Meta's code waits for it. M1 is in `campaign-v2.6`; M2-M4
+  (epilogue, index layouts, profiles, docs) remain.
+- [ ] **H-ARMFREE: one `bench run` frees each arm before the next** (2026-10-10:
+  laion30m and V-ROUTER PubMed OOMed when one process ran several arms; each
+  arm's 10 M-30 M index stayed resident and the next arm's allocation
+  failed). The run loop releases the finished job's module, index and
+  caches before building the next (and asserts the reserved memory is back
+  near the shared inputs'); drivers stop needing one process per arm.
+  Gates: harness suite; one multi-arm 10 M run without OOM; records
+  byte-identical to a per-arm run on two cells. v-pod1-run (CPU first).
+- [ ] **ROUTER-DROP: remove the router** (user rule 2026-10-10, verdict 2026-10-11:
+  not on the Pareto front on PubMed 10 M): delete the harness `router` arm
+  (`bench/router.py`, the `router` suite, its tests and docs), keep its
+  records on the Hub as artifacts; the paper mentions it as a tried idea in one
+  line at most. v-pod1-run (CPU).
+- [ ] **C5-OURS-30M + C1 re-time at v2.7**: codesign-laion30m's triton half
+  (our partial vs full at 30 M, beside Meta's, pod d; per-sweep processes until
+  H-ARMFREE lands) and arxiv-synth's V1 / V2 cells re-timed on pod 1 (C1's 3 M
+  crossover without the clause-width cost).
 - [ ] **REL-LIC: license audit and the public-release plan** (user,
   2026-10-10, ECIR Availability): per dataset (goodreads, arXiv, PubMed /
   MedCPT, YFCC-10M, Re-LAION, the synth attrs) whether the derived data may

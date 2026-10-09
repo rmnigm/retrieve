@@ -28,6 +28,9 @@ class _FixedMaskFilter:
     def __init__(self, item_mask):
         self.item_mask = torch.as_tensor(item_mask, dtype=torch.bool)
 
+    def prepare_queries(self, qa):
+        return qa
+
     def evaluate_mask(self, qa, start=0, end=None):
         return self.item_mask[start:end].unsqueeze(0).expand(qa.shape[0], -1)
 
@@ -37,6 +40,9 @@ class _PerQueryFilter:
 
     def __init__(self, masks):
         self.masks = torch.as_tensor(masks, dtype=torch.bool)
+
+    def prepare_queries(self, qa):
+        return qa
 
     def evaluate_mask(self, qa, start=0, end=None):
         return self.masks[qa[:, 0], start:end]

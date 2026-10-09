@@ -127,7 +127,8 @@ v3 = (LiNRBuilder("v3", k=k, candidate_pool=2000)
       .set_item_embeddings(item_embs)
       .set_filter(ExactAttributeFilter(), item_attrs)     # [N, C, A_max] int64, -1 padded
       .build())
-topk_ids, topk_scores = v3(queries, query_attrs)          # [B, C] int64, -1 = inactive clause
+prepared = v3.prepare_queries(query_attrs)               # [B, C] int64, -1 = inactive clause
+topk_ids, topk_scores = v3(queries, prepared)             # query encoding outside the call
 ```
 
 The primitives the variants compose (`OneBitKNN`, `PrefilterKNN`, …) are public too — see

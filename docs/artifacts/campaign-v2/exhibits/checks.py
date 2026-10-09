@@ -10,7 +10,7 @@ import statistics as st
 import sys
 from pathlib import Path
 
-from load import EXACT, arm, cv, key, load, pass_p, perf, recall, short
+from load import EXACT, arm, box, clock_unknown, cv, key, load, pass_p, perf, recall, short
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "evaluation"))
 import yaml  # noqa: E402
@@ -55,15 +55,18 @@ def med(x):
 def status(recs, md):
     md.append("## Status, partial, unstable per tree × suite × dataset\n")
     md.append(
-        "| tree | suite | dataset | records | ok | failed | partial | unstable | quality copies |"
+        "| tree | suite | dataset | records | ok | failed | partial | unstable | clock-unknown | quality copies |"
     )
-    md.append("|---|---|---|---|---|---|---|---|---|")
+    md.append("|---|---|---|---|---|---|---|---|---|---|")
     c = collections.defaultdict(collections.Counter)
     for r in recs:
         g = c[(r["_tree"], r["suite"], r["dataset"])]
         g["n"] += 1
         g[r["status"]] += 1
-        g["unstable"] += bool(r.get("unstable"))
+        if clock_unknown(r):
+            g["clock_unknown"] += 1
+        else:
+            g["unstable"] += bool(r.get("unstable"))
         g["copies"] += r.get("quality_source") is not None
         if r["status"] != "ok":
             flag(
@@ -75,7 +78,7 @@ def status(recs, md):
     for k, g in sorted(c.items()):
         md.append(
             f"| {' | '.join(map(str, k))} | {g['n']} | {g['ok']} | {g['failed']} | {g['partial']} "
-            f"| {g['unstable']} | {g['copies']} |"
+            f"| {g['unstable']} | {g['clock_unknown']} | {g['copies']} |"
         )
 
 
@@ -398,7 +401,7 @@ def cross(recs, md):
             ra, rb = recall(a, kk), recall(b, kk)
             pe = [perf(x, 16, kk, "eager") for x in (a, b)]
             pg = [perf(x, 16, kk, "graph") for x in (a, b)]
-            g = summ[(cv(a), a["suite"], cv(b), b["suite"], k[0], a["backend"])]
+            g = summ[(cv(a), a["suite"], cv(b), b["suite"], k[0], a["backend"], box(a), box(b))]
             g["n"].append(1)
             if ra is not None and rb is not None:
                 g["dr"].append(abs(ra - rb))
@@ -419,12 +422,20 @@ def cross(recs, md):
                     f"k{kk} {ra:.5f} vs {rb:.5f}",
                 )
     md.append("\n**Summary: b / a per pair of places** (bs 16 p50 medians; max |Δ recall|)\n")
-    md.append("| a | b | dataset | backend | pairs | eager b/a | graph b/a | max abs Δ recall |")
-    md.append("|---|---|---|---|---|---|---|---|")
-    for (ca, sa, cb, sb, ds, be), g in sorted(summ.items()):
+    md.append(
+        "| a | b | dataset | backend | box a / b | pairs | eager b/a | graph b/a | max abs Δ recall |"
+    )
+    md.append("|---|---|---|---|---|---|---|---|---|")
+    for (ca, sa, cb, sb, ds, be, xa, xb), g in sorted(summ.items()):
         f = lambda x: f"{st.median(x):.3f}" if x else "-"  # noqa: E731
+        # timings compare only within one box (decisions, 2026-10-10); recall compares anywhere
+        tm = (
+            (f(g["e"]), f(g["g"]))
+            if xa == xb
+            else ("cross-box, not compared", "cross-box, not compared")
+        )
         md.append(
-            f"| {ca}:{sa} | {cb}:{sb} | {ds} | {be} | {len(g['n'])} | {f(g['e'])} | {f(g['g'])} "
+            f"| {ca}:{sa} | {cb}:{sb} | {ds} | {be} | {xa} / {xb} | {len(g['n'])} | {tm[0]} | {tm[1]} "
             f"| {max(g['dr']) if g['dr'] else '-'} |"
         )
     md.append("\n**Co-design: partial and full recall must be equal (S-13)**\n")

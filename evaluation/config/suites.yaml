@@ -276,25 +276,44 @@ v3bits:                        # V-V3BITS, C2: V3 at k_bits 64 vs our LN-8 defau
 router:                        # V-ROUTER (EXHIBITS idea #2): l_q pre-probe, exact V2 below the threshold, IVF above
   # The threshold is fit on goodreads (the lq_threshold grid); arXiv and PubMed get the fitted value as a
   # one-value slot afterwards (transfer). The two branches run beside it at the same code_version.
-  datasets: [goodreads]
-  dims: [128]
+  # PubMed (V-ROUTER PubMed, the keep/kill test: is the router on the recall-latency Pareto front between IVF and
+  # exact?): the goodreads threshold 0.05 plus 0.2 to bracket, and in the same leg the IVF curve (SilverTorch 4096 at
+  # n_probe 24 / 64 / 256 / 1024) and exact V1 + V2; clause kept sweeps, k 100; its own arms keep goodreads' keys.
+  datasets: [goodreads, pubmed]
+  dims: [128, 768]
   filter_kinds: [clause, bloom]
   ks: [100, 1000]
   batch_sizes: [1, 16]
   seeds: [0, 1, 2]
   sweeps:
     goodreads: [c0_genre, c1_lang_reverse, all4]
+    pubmed: [c0_mesh, c3_journal_reverse, all5]
+  ks_by_sweep:
+    pubmed: {c0_mesh: [100], c3_journal_reverse: [100], all5: [100]}
   arms:
     - algo: router
       backends: [triton]
       build: {pre_n_probe: [8], lq_threshold: [0.02, 0.05, 0.1, 0.2]}
       query: {n_probe: [24]}
       datasets: {goodreads: {build: {n_lists: [4096]}}}
-    - {algo: linr_v2, backends: [triton]}
+    - {algo: linr_v2, backends: [triton], datasets: {goodreads: {}}}
     - algo: silvertorch
       backends: [triton]
       query: {n_probe: [24]}
       datasets: {goodreads: {build: {n_lists: [4096]}}}
+    - algo: router
+      backends: [triton]
+      filter_kinds: [clause]
+      build: {pre_n_probe: [8], lq_threshold: [0.05, 0.2], n_lists: [4096]}
+      query: {n_probe: [24]}
+      datasets: {pubmed: {}}
+    - {algo: linr_v2, backends: [triton], filter_kinds: [clause], datasets: {pubmed: {}}}
+    - {algo: linr_v1_filter_mask, backends: [triton], filter_kinds: [clause], datasets: {pubmed: {}}}
+    - algo: silvertorch
+      backends: [triton]
+      filter_kinds: [clause]
+      query: {n_probe: [24, 64, 256, 1024]}                  # the IVF curve the Pareto test needs (exhibits)
+      datasets: {pubmed: {build: {n_lists: [4096]}}}
 
 bloom: {m_bits: 1024, k_hash: 5}   # shared defaults; a suite may override with its own `bloom:`
 
@@ -329,3 +348,41 @@ laion30m-bs1:
     laion30m: [c0_domain, tags4]
   arms:
     - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, query: {n_probe: [24, 1024, 4096]}}
+
+# laion30m on uniform synth attrs (user 2026-10-10: the real filters are too harsh), the rates yfcc10m-synth's `synth`
+# cells share, so pass rate is fixed across 0.8 / 3 / 10 / 30 M. Its own suite: `synth`'s dims would add d256 jobs
+# to goodreads- and arxiv-synth.
+laion30m-synth:
+  datasets: [laion30m-synth]
+  dims: [256]
+  filter_kinds: [clause]
+  ks: [100]
+  batch_sizes: [1, 16]
+  seeds: [0]
+  sweeps:
+    laion30m-synth: [p01, p02, p05, p1]
+  interleave:
+    - {by: algo, values: [linr_v1_filter_mask, linr_v2]}
+  arms:
+    - {algo: linr_v1_filter_mask, backends: [triton]}
+    - {algo: linr_v2, backends: [triton]}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, query: {n_probe: [24, 256, 1024]}}
+
+# C5 in the paper's regime (controller 2026-10-10, C5-META-CHECK): co-design partial vs full mask at 30 M,
+# Meta's official kernels and our Triton ones, interleaved per backend. Sub-queries per expression: 1
+# (c0_domain), 4 (tags4: size, CLIP, watermark, punsafe buckets). Eager (run with --mode eager); seed 0.
+codesign-laion30m:
+  datasets: [laion30m]
+  dims: [256]
+  filter_kinds: [bloom]
+  ks: [100]
+  batch_sizes: [16, 64]
+  seeds: [0]
+  sweeps:
+    laion30m: [c0_domain, tags4]
+  interleave: [{by: bloom_path}]
+  arms:
+    - algo: silvertorch
+      backends: [official, triton]
+      build: {bloom_path: [partial, full], n_lists: [16384]}
+      query: {n_probe: [32, 128]}

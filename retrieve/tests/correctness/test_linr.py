@@ -371,7 +371,7 @@ class TestClauseDecoupledComposition:
     @pytest.mark.parametrize("backend", BACKENDS)
     def test_postfilter_knn_with_clause_and_external_mask(self, data, backend):
         f, q_attrs, extra = self._setup()
-        mask = f.evaluate_mask(q_attrs) & extra
+        mask = f.evaluate_mask(f.prepare_queries(q_attrs)) & extra
         m = PostfilterKNN(k=K, backend=backend)
         m.register_index(data["embs"])
         ids, scores = m(data["query"], mask=mask)
@@ -384,7 +384,7 @@ class TestClauseDecoupledComposition:
         f, q_attrs, extra = self._setup()
         # When combining with an external mask, just AND the two masks first
         # then compact (callers compose explicitly).
-        combined = f.evaluate_mask(q_attrs) & extra
+        combined = f.evaluate_mask(f.prepare_queries(q_attrs)) & extra
         cand, counts = compact_mask(combined)
         m = PrefilterKNN(k=K, backend=backend)
         m.register_index(data["embs"])
@@ -397,9 +397,9 @@ class TestClauseDecoupledComposition:
     def test_prefilter_with_evaluate_indices_kernel_path(self, data, backend):
         """Direct fused-kernel path: ExactAttributeFilter.evaluate_indices → PrefilterKNN."""
         f, q_attrs, _ = self._setup()
-        cand, counts = f.evaluate_indices(q_attrs)
+        cand, counts = f.evaluate_indices(f.prepare_queries(q_attrs))
         # Cross-check against the dense path.
-        expected_mask = f.evaluate_mask(q_attrs)
+        expected_mask = f.evaluate_mask(f.prepare_queries(q_attrs))
         m = PrefilterKNN(k=K, backend=backend)
         m.register_index(data["embs"])
         ids, scores = m(data["query"], candidate_ids=cand, counts=counts)
@@ -665,7 +665,10 @@ class TestComposites:
             return
         # The filter folded into the score write feeds topk the same tensor the bool mask + where
         # did, so ids and scores are bit-identical, not just equal up to ties.
-        out, want = v1(data["query"], qa), ref(data["query"], mask=f.evaluate_mask(qa))
+        out, want = (
+            v1(data["query"], v1.prepare_queries(qa)),
+            ref(data["query"], mask=f.evaluate_mask(f.prepare_queries(qa))),
+        )
         assert torch.equal(out[0], want[0]) and torch.equal(out[1], want[1])
 
     @pytest.mark.parametrize("backend", BACKENDS)
@@ -677,8 +680,11 @@ class TestComposites:
         v2.register_index(data["embs"])
         ref = PrefilterKNN(k=K, backend=backend)
         ref.register_index(data["embs"])
-        cand, counts = f.evaluate_indices(qa)
-        self._equal(v2(data["query"], qa), ref(data["query"], candidate_ids=cand, counts=counts))
+        cand, counts = f.evaluate_indices(f.prepare_queries(qa))
+        self._equal(
+            v2(data["query"], v2.prepare_queries(qa)),
+            ref(data["query"], candidate_ids=cand, counts=counts),
+        )
 
     @pytest.mark.parametrize("backend", BACKENDS)
     @pytest.mark.parametrize("kind", ["none", "clause", "bloom"])
@@ -695,10 +701,10 @@ class TestComposites:
             cand, _ = stage1(data["query"])
             self._equal(v3(data["query"]), stage2(data["query"], candidate_ids=cand))
             return
-        pos, pcounts = f.evaluate_indices(qa)
+        pos, pcounts = f.evaluate_indices(f.prepare_queries(qa))
         cand, _ = stage1(data["query"], candidate_ids=pos, counts=pcounts)
         ref = stage2(data["query"], candidate_ids=cand, counts=(cand >= 0).sum(dim=1))
-        self._equal(v3(data["query"], qa), ref)
+        self._equal(v3(data["query"], v3.prepare_queries(qa)), ref)
 
     def test_register_index_registers_the_filter(self, data, attrs):
         """``register_index(embs, item_clause_attrs, clause_is_reverse)`` registers the attached
@@ -715,7 +721,10 @@ class TestComposites:
         ]
         ref = ExactAttributeFilter()
         ref.register_index(item_attrs, clause_is_reverse=rev)
-        assert torch.equal(v2.filter.evaluate_mask(qa), ref.evaluate_mask(qa))
+        assert torch.equal(
+            v2.filter.evaluate_mask(v2.filter.prepare_queries(qa)),
+            ref.evaluate_mask(ref.prepare_queries(qa)),
+        )
 
 
 # --- short candidate lists and missing filters ---------------------------------------
@@ -789,6 +798,6 @@ def test_linr_without_filter_rejects_clause_attrs():
             m.register_index(make_index(50, 64), attrs)
         m.register_index(make_index(50, 64))
         with pytest.raises(ValueError, match="has no filter"):
-            m(make_query(2, 64), qa)
+            m(make_query(2, 64), m.prepare_queries(qa))
     with pytest.raises(ValueError, match="has no filter"):
         LiNRV2(k=5, filter=None)

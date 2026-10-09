@@ -78,7 +78,10 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    `n_targets_in_filter` recorded). Metrics accumulate as running sums on
    device, one sync at the end. The exact algos (`EXACT_ALGOS`:
    `linr_v1_filter_mask`, `linr_v2`) must
-   reach `recall_oracle@k_max ≥ 0.99` (fp16 tolerance); a failure is
+   reach `recall_oracle@k_max ≥ 0.99` (fp16 tolerance), or the dataset's
+   `exact_gate` when `k_max` < 1000 (`run.exact_gate`; only `yfcc10m-synth`,
+   0.9716: its fp16 item storage costs 0.013-0.026 at k 100, an fp32 table
+   gives 1.0, [validation](../validation.md#campaign-v2-phase-v-not-yet-validated)); a failure is
    recorded as `failed` and then raises `QualityGateError`, which ends the
    run. Cross-backend correctness belongs to the library's parity suite
    ([testing](testing.md)); the harness keeps only a *wiring* check, the
@@ -109,16 +112,8 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    `measure.graph_callable` asserts `cudagraph_skips == 0` and exactly one
    `cudaGraphLaunch` per call, else the entry is null with a `reason`, never
    a mislabelled number. `official` is not capturable and records `reason:
-   not_capturable`. Its bloom forward parses each query batch into
-   expression plans on the CPU (about 59 µs per call at B=16,
-   [kernels](kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend))
-   and memoises them by default; the pool replays batches, so a cached cell
-   would not pay what serving fresh queries costs. Quality runs with the
-   library default (cache on); `run.perf` then swaps in
-   `OfficialConfig(cache_plans=False)` in place (read per forward, no
-   rebuild, bit-identical results) before the first timed variant, and every
-   entry records `cache_plans`. An entry with `cache_plans: true` is not a
-   timing number. Per variant (`measure.latency`): 50 warm-up calls → sync →
+   not_capturable`. The filter's query side is prepared outside the timed
+   call (§ Query preparation below). Per variant (`measure.latency`): 50 warm-up calls → sync →
    **3 windows** of `N = clamp(2 s / median_est, 1000, 5000)` calls, each
    call bracketed by CUDA events on the current stream, wall clock around
    the window with one sync at the end. From the window with the median
@@ -202,6 +197,11 @@ the oracle fingerprint in the blob's file name; see
   *first* under-load sample. An idle sample reads low and would flag the GPU
   boosting, and there is no `clocks_locked` field because the pods cannot
   lock clocks. Compare latencies across runs against `perf[].sm_mhz`.
+  Every `nvidia-smi` call (`clocks()`, `clock_report()`) targets
+  `measure.smi_device()`, the first entry of `CUDA_VISIBLE_DEVICES` (an index
+  or a UUID; `0` when unset), because `nvidia-smi -i` ignores that variable.
+  Before dev/clock-device the calls read physical GPU 0, so records timed on
+  another GPU carry GPU 0's clock fields ([validation](../validation.md)).
 - **The job's clock log.** `env.frac_windows_below_max` is the share of a
   cell's window samples below the device's max SM clock, `env.sm_max_mhz`
   (`nvidia-smi` `clocks.max.sm`, sampled at process start; 1410 MHz on the
@@ -366,6 +366,27 @@ data-dependent: `capturable = False`, so `graph` records `not_capturable`. Build
 kept query to the per-query sidecar and `quality.router_exact_share` to the record. Triton and
 torch backends, clause and bloom.
 
+### Query preparation
+
+Every filtered arm encodes its batch's query attrs once, outside the timed
+call, through its `prepare_queries` (the user's rule, 2026-10-10: forward is
+the algorithm; preparation is reported, not hidden):
+
+| arm | `prepare_queries` returns |
+|---|---|
+| `silvertorch` triton / torch, bloom | the query bit positions (`PreparedFilter.query_bits`) |
+| `silvertorch` official, bloom | Meta's parsed plans on the CPU (`plans_data` / `plans_offsets`) |
+| `silvertorch`, exact (every backend) | the int64 attrs (`query_attrs`) |
+| LiNR V1-V3, `postfilter` | the standalone filter's encoding: bloom query signatures, or the int64 attrs |
+| `router` | the filter's encoding and its IVF branch's `PreparedFilter` |
+
+`run.perf` prepares every batch of a cell's fixed pool before its first
+timed call (`run.prepare_pool`), each module with its own encoding. Every
+timed and hashed call then takes `(query batch, prepared batch)`. The mean
+cost of one batch's preparation (host + device, synced) is recorded on every
+entry as `query_prep_ms`. The quality pass and the compile warm-up prepare
+each chunk the same way.
+
 ## Config: one YAML per dataset + `suites.yaml`
 
 Twelve files under [`evaluation/config/`](../../evaluation/config/):
@@ -377,8 +398,8 @@ Twelve files under [`evaluation/config/`](../../evaluation/config/):
 [`pubmed.yaml`](../../evaluation/config/pubmed.yaml) and
 [`openalex.yaml`](../../evaluation/config/openalex.yaml) and
 [`kuairand.yaml`](../../evaluation/config/kuairand.yaml), the three
-synthetic-selectivity siblings `goodreads-synth.yaml`, `arxiv-synth.yaml`
-and `yfcc10m-synth.yaml` plus arXiv's cluster-correlated `arxiv-corr-synth.yaml`
+synthetic-selectivity siblings `goodreads-synth.yaml`, `arxiv-synth.yaml`,
+`yfcc10m-synth.yaml` and `laion30m-synth.yaml` plus arXiv's cluster-correlated `arxiv-corr-synth.yaml`
 ([datasets](datasets.md#synthetic-selectivity-attrs)) (goodreads, arxiv,
 yfcc10m, pubmed and openalex in the `filter` suite, pubmed and openalex at
 768; yambda and kuairand are out of the study), and
@@ -417,8 +438,9 @@ unfiltered `quality` suite ([decisions](../decisions.md#harness)); synth's
 | `bloomwidth` | goodreads `c0_genre`, arxiv kept, pubmed `c0_mesh` | `silvertorch` triton bloom `m_bits` {64 … 2048} × `k_hash` {3, 5}; official bloom `k_hash` {3, 5} (its width is `OfficialConfig.b_multiplier`, not `m_bits`); bs 16; quality only (`perf: false`) | F4a, C4 |
 | `bloomwidth-timed` | the same | the same widths at `k_hash` 5 (official: its one width), k 100, bs 16, timed | F4a |
 | `v3bits` | goodreads-synth (its first 7 rates), goodreads (`filter`'s kept sweeps); pubmed d768 (`filter`'s kept sweeps, clause only) | V3 triton only, `candidate_pool_frac` {0.01, 0.05}, seeds 0-2, bs {1, 16}, k {100, 1000} (synth's `ks_by_sweep`); goodreads `k_bits` {64, 128}, clause + bloom; pubmed `k_bits` {256, 768} (256 divides 768 and sits below LiNR's 512; 768 is the default, the comparison), clause only (bloom adds false-positive noise to a bits question), one arm per side so the goodreads keys are unchanged. LiNR's 512 bits at d128 would need a library change (declined) | C2 (V-V3BITS, V3-BITS-PUBMED) |
-| `router` | goodreads (kept sweeps; arXiv and PubMed get the fitted threshold afterwards) | `router` triton, `pre_n_probe` 8, `lq_threshold` {0.02, 0.05, 0.1, 0.2}, IVF branch `n_lists` 4096 / `n_probe` 24; its branches V2 triton and SilverTorch triton (4096 / 24) beside it; clause + bloom, seeds 0-2, bs {1, 16}, k {100, 1000} | F2 / T2 practical take (V-ROUTER) |
+| `router` | goodreads (kept sweeps; arXiv gets the fitted threshold afterwards); pubmed d768 (V-ROUTER PubMed, the keep/kill Pareto test: clause kept sweeps, k 100 via `ks_by_sweep`, `lq_threshold` {0.05 (goodreads' fit), 0.2}, and in the same leg the IVF curve SilverTorch 4096 at `n_probe` {24, 64, 256, 1024} plus exact V1 and V2; its own arms, so goodreads' keys are unchanged) | `router` triton, `pre_n_probe` 8, `lq_threshold` {0.02, 0.05, 0.1, 0.2}, IVF branch `n_lists` 4096 / `n_probe` 24; its branches V2 triton and SilverTorch triton (4096 / 24) beside it; clause + bloom, seeds 0-2, bs {1, 16}, k {100, 1000} | F2 / T2 practical take (V-ROUTER) |
 | `h2h` | goodreads `c0_genre`, arxiv `c0_maincat`, `none` + `bloom`, d128 | `silvertorch` triton and official with `score_path` {fp16, int32}, `n_probe` 24, bs {1, 16}, k {100, 1000}, seeds {0 … 4} (the repeats); one interleave group of the three arms; run with `--interleave --profile` | T3, C7 (H2H-final) |
+| `laion30m`, `laion30m-bs1`, `laion30m-synth` | laion30m d256 `c0_domain`, `tags4` (pass ≈ 0.0095 / 0.0027); laion30m-synth `p01 p02 p05 p1` (its own suite: `synth`'s dims would add d256 jobs to goodreads- and arxiv-synth). Seed 0, k 100, clause | V1, V2 triton (bs 16; synth bs 1 + 16); `silvertorch` triton `n_lists` 16384, `n_probe` {24, 1024, 4096} (4096 = the 25 % cap = tags4's n95; c0_domain reaches 0.903 there), bs 16 and (`laion30m-bs1`) bs 1; synth {24, 256, 1024}. At 30 M one V1 + V2 process reserves 68 GB per sweep: run one process per sweep | scaling 10 M → 30 M (V-LAION30) |
 
 ### IVF tuning
 
@@ -468,6 +490,7 @@ checkpoint: data/goodreads-work-id/checkpoints/sasrec-ssm-logq-d{dim}/best_model
 dims: [64, 128, 256]
 encode: {batch_size: 512, num_workers: 8, max_seq_length: 200}       # SASRec datasets only
 users_limit: 10000                                                    # or null
+# exact_gate: 0.9716                                                  # optional: the exact-algo floor at k_max < 1000
 filters:                                                              # optional
   attrs: item_attrs_narrow.pt                                         # relative to data_dir
   reverse: clause_is_reverse_narrow.pt                                # optional
@@ -696,7 +719,7 @@ Any exception inside a cell (an OOM on the torch path included) becomes a
 `status: failed` record with the traceback and `stage` (`build`,
 `query_params`, `quality`, `perf`) and the loop continues. Three things
 stop the process: `KeyboardInterrupt`; `QualityGateError` — an exact
-algo (`linr_v1_filter_mask`, `linr_v2`) below `recall_oracle@k_max ≥ 0.99`
+algo (`linr_v1_filter_mask`, `linr_v2`) below `recall_oracle@k_max ≥ 0.99` (or its dataset's `exact_gate`)
 — which is recorded first; and a sticky CUDA error (`run.STICKY_CUDA`:
 `CUDA error`, `illegal memory access`, `device-side assert` in the
 message), also recorded first and then re-raised, because the context is
@@ -882,7 +905,7 @@ Perf entry:
 | `window_sm_mhz` | the SM clock sampled right after each window's sync, same order as `window_medians_ms`; `null` elements without CUDA; not in `results.parquet` |
 | `peak_fwd_mib` | eager only, first window: `max_memory_allocated − allocated_before` |
 | `sm_mhz` | `window_sm_mhz[-1]`: the SM clock sampled right after the last window's sync, with the GPU still at its load clock — the per-variant value cross-run latency comparisons read, and the only clock `clocks_drift` looks at; `null` without CUDA |
-| `cache_plans` | on every entry: `false` on `silvertorch`/`official` (`run.perf` replaces `module.official` with `cache_plans=False` before the first variant, so every timed forward pays the CPU expression parse), `null` on backends without a plan cache |
+| `query_prep_ms` | on every entry: the mean host + device ms of one pool batch's `prepare_queries` (the filter's query encoding, done before timing, § Query preparation); `null` on unfiltered cells and arms without a prepare step. Records before OFFICIAL-REWORK carry `cache_plans` instead (`false` = the official expression parse was inside every timed forward) |
 | `load` | `"closed_loop"` |
 | `kernels` | `--profile`, eager only: top-8 CUDA kernels `{kernel, us, calls}` |
 | `kernels_us`, `kernels_calls` | `--profile`, eager only: device µs and kernel launches summed over every kernel of the call, sentinels and `## …` profiler ranges excluded (records before H-KSUM lack them; records between H-KSUM and its fix double-count compiled calls, which no eager `h2h` arm is; T3 reads these, and for such a record the top-8 sum, marked as a lower bound) |
@@ -1017,14 +1040,14 @@ cached at `<gt_dir>/oracle_v4_<sweep>_<fingerprint[:16]>.pt`:
 | `targets_in_filter` | `[U, T]` bool, target `t` of user `u` passes the mask |
 | `target_in_filter` | `[U]` bool, any target passes |
 | `n_items`, `n_queries`, `n_kept`, `k_gt`, `sweep`, `clauses` | shape of the build |
-| `fingerprint` | sha256 over shapes, dtypes and a 64-row linspace sample of `item_embs`, `queries`, `targets`, `qa_sweep`; the full bytes of `item_attrs` and `clause_is_reverse` (`oracle.attrs_digest`, computed once per `(dataset, dim)` in `inputs.load_inputs` as `inputs["attrs_digest"]`); plus `clauses` and `k_gt` |
+| `fingerprint` | sha256 over shapes, dtypes and a 64-row linspace sample (its float32 index clamped to the last row, which past 2^24 rows it overshoots) of `item_embs`, `queries`, `targets`, `qa_sweep`; the full bytes of `item_attrs` and `clause_is_reverse` (`oracle.attrs_digest`, computed once per `(dataset, dim)` in `inputs.load_inputs` as `inputs["attrs_digest"]`); plus `clauses` and `k_gt` |
 | `code_version`, `harness_commit`, `torch`, `created` | provenance |
 
 **Item-chunked** (`oracle.compute`): per batch of 64 kept queries the loop
 walks the items in chunks of `ITEM_CHUNK = 2_000_000` rows: `q @ chunk.T` in
 fp32 (the function raises unless TF32 is off and the matmul precision is
 `highest`, which `measure.setup` sets), `-inf` where the exact filter's
-`evaluate_mask(qa, start, end)` (a `[B, end − start]` bool over that item
+`evaluate_mask(prepare_queries(qa), start, end)` (a `[B, end − start]` bool over that item
 range) fails, a local `topk`, merged into the running `[B, k]` with ids
 offset by the chunk start; equal scores go to the lower id (a stable sort by
 id, then by score). `pass_counts` and `targets_in_filter` accumulate per
@@ -1435,8 +1458,9 @@ in `quality`; `memory_reserved_mib` flat (±5 %) across a group's cells;
 `retrieve.modules.linr`; a new composition is added there, because the
 library retrieves and the harness measures —
 [decisions](../decisions.md#harness)):
-the filter as `self.filter`, `forward(query, query_clause_attrs=None) ->
-(ids, scores)`, `k` forwarding to the final top-k layer, `set_query_params`
+the filter as `self.filter`, `prepare_queries(query_clause_attrs)` (the
+filter's query encoding) and `forward(query, prepared=None) -> (ids,
+scores)`, `k` forwarding to the final top-k layer, `set_query_params`
 for any query-time knob, `capturable` as a class attribute, a `DISPATCH`
 row. Then one line in [`algos.py`](../../evaluation/bench/algos.py)'s
 `ALGOS` (and a branch in `build` if it registers differently; `PER_K_QUALITY`

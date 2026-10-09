@@ -5,7 +5,6 @@ the upstream constants live in the package ``__init__``). Everything is eager on
 
 from __future__ import annotations
 
-import functools
 import math
 
 import torch
@@ -113,10 +112,13 @@ def queries_to_expressions(
     return out
 
 
-def _parse_plans(
-    expressions: tuple[str, ...], hash_k: int, max_sub_queries: int
+def parse_plans(
+    expressions: list[str], hash_k: int, max_sub_queries: int = 5
 ) -> tuple[Tensor, Tensor]:
-    """One call into the CPU parser — the uncached body of :func:`parse_plans`."""
+    """``(plans_data int8, plans_offsets int64)`` on **CPU** for a batch of expressions, one call
+    into Meta's CPU parser (≈ 59 µs at B=16). The search ops decode plans on the host per call
+    (``bloom_index_search_cuda.cu:1045``), so CPU plans spare them a D2H. Query preparation:
+    ``SilverTorch.prepare_queries`` runs it outside ``forward``."""
     st = ensure_loaded()
     # `silvertorch_ks` is accepted and ignored upstream (expression_query_parser.cpp:395).
     ks = torch.ones(len(expressions), dtype=torch.int64)
@@ -125,24 +127,6 @@ def _parse_plans(
     )
     data, offsets = plans
     return data.contiguous(), offsets.contiguous()
-
-
-_parse_plans_cached = functools.lru_cache(maxsize=4096)(_parse_plans)
-
-
-def parse_plans(
-    expressions: list[str], hash_k: int, max_sub_queries: int = 5, *, cache: bool = True
-) -> tuple[Tensor, Tensor]:
-    """``(plans_data int8, plans_offsets int64)`` on **CPU** for a batch of expressions.
-    Plans depend only on ``(strings, hash_k, max_sub_queries)``; the search ops decode them
-    host-side per call and would copy CUDA-resident plans back to the CPU first, so keeping
-    them on CPU is the cheaper choice. ``cache=True`` memoises on the string
-    tuple (LRU, 4096 batches); ``cache=False`` parses every call — ≈ 59 µs at B=16 (plan
-    §13.2) — which is what a timing run must use so the parse is not hidden behind a
-    replayed batch (``OfficialConfig.cache_plans``)."""
-    if not cache:
-        return _parse_plans(tuple(expressions), int(hash_k), int(max_sub_queries))
-    return _parse_plans_cached(tuple(expressions), int(hash_k), int(max_sub_queries))
 
 
 # --- masks ------------------------------------------------------------------------------

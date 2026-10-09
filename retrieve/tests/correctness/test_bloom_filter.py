@@ -32,7 +32,7 @@ class TestShapeAndDtype:
     def test_evaluate_mask_shape_and_dtype(self, attrs, query):
         bf = BloomFilter(m_bits=512, k_hash=5).to("cuda")
         bf.register_index(attrs)
-        mask = bf.evaluate_mask(query)
+        mask = bf.evaluate_mask(bf.prepare_queries(query))
         assert mask.shape == (query.shape[0], attrs.shape[0])
         assert mask.dtype == torch.bool
 
@@ -56,11 +56,11 @@ class TestNoFalseNegatives:
 
         bf = BloomFilter(m_bits=2048, k_hash=7).to("cuda")
         bf.register_index(attrs)
-        bloom_mask = bf.evaluate_mask(q)
+        bloom_mask = bf.evaluate_mask(bf.prepare_queries(q))
 
         ci = ExactAttributeFilter().to("cuda")
         ci.register_index(attrs)
-        clause_mask = ci.evaluate_mask(q)
+        clause_mask = ci.evaluate_mask(ci.prepare_queries(q))
 
         assert (clause_mask <= bloom_mask).all()
 
@@ -68,7 +68,7 @@ class TestNoFalseNegatives:
         bf = BloomFilter(m_bits=512, k_hash=5).to("cuda")
         bf.register_index(attrs)
         q = torch.tensor([[-1, -1]], dtype=torch.long, device="cuda")
-        mask = bf.evaluate_mask(q)
+        mask = bf.evaluate_mask(bf.prepare_queries(q))
         assert mask.all()
 
 
@@ -98,10 +98,10 @@ class TestFalsePositiveRate:
 
         ci = ExactAttributeFilter().to("cuda")
         ci.register_index(attrs)
-        true_match_rate = ci.evaluate_mask(q).float().mean().item()
+        true_match_rate = ci.evaluate_mask(ci.prepare_queries(q)).float().mean().item()
         assert true_match_rate < 1e-3, "Expected near-zero true match rate"
 
-        bloom_match_rate = bf.evaluate_mask(q).float().mean().item()
+        bloom_match_rate = bf.evaluate_mask(bf.prepare_queries(q)).float().mean().item()
         per_item_fill = 1.0 - math.exp(-k_hash / m_bits)
         analytic_fpr = per_item_fill**k_hash
         assert bloom_match_rate <= max(analytic_fpr * 4, 1e-6), (
@@ -136,8 +136,8 @@ class TestFalsePositiveRate:
             q = torch.full((b, c), -1, dtype=torch.long, device="cuda")
             q[:, active] = torch.randint(0, 8, (b,), generator=g, device="cuda")
 
-            bm = bf.evaluate_mask(q)
-            em = ci.evaluate_mask(q)
+            bm = bf.evaluate_mask(bf.prepare_queries(q))
+            em = ci.evaluate_mask(ci.prepare_queries(q))
             non_match = ~em
             denom = non_match.float().sum().item()
             if denom == 0:
@@ -169,9 +169,9 @@ class TestEvaluateSubset:
         g = torch.Generator(device="cuda").manual_seed(42)
         ids = torch.randint(0, n, (b, p), generator=g, dtype=torch.long, device="cuda")
 
-        mask_full = bf.evaluate_mask(query)
+        mask_full = bf.evaluate_mask(bf.prepare_queries(query))
         expected = mask_full.gather(1, ids)
-        got = bf.evaluate_subset(query, ids)
+        got = bf.evaluate_subset(bf.prepare_queries(query), ids)
         assert torch.equal(got, expected)
 
     def test_subset_parity_with_inactive_queries(self, attrs):
@@ -183,8 +183,8 @@ class TestEvaluateSubset:
         ids = torch.randint(
             0, attrs.shape[0], (32, 64), generator=g, dtype=torch.long, device="cuda"
         )
-        expected = bf.evaluate_mask(q).gather(1, ids)
-        assert torch.equal(bf.evaluate_subset(q, ids), expected)
+        expected = bf.evaluate_mask(bf.prepare_queries(q)).gather(1, ids)
+        assert torch.equal(bf.evaluate_subset(bf.prepare_queries(q), ids), expected)
 
 
 class TestEdgeCases:
@@ -192,7 +192,7 @@ class TestEdgeCases:
         bf = BloomFilter(m_bits=512, k_hash=5).to("cuda")
         bf.register_index(attrs)
         empty = torch.empty(query.shape[0], 0, dtype=torch.long, device="cuda")
-        out = bf.evaluate_subset(query, empty)
+        out = bf.evaluate_subset(bf.prepare_queries(query), empty)
         assert out.shape == (query.shape[0], 0)
         assert out.dtype == torch.bool
 
@@ -202,7 +202,7 @@ class TestEdgeCases:
         bf = BloomFilter(m_bits=256, k_hash=3).to("cuda")
         bf.register_index(attrs)
         q = make_query_attrs(b=4, c=2, n_vocab=10, inactive_rate=0.0, seed=34)
-        mask = bf.evaluate_mask(q)
+        mask = bf.evaluate_mask(bf.prepare_queries(q))
         assert mask.shape == (4, 1)
         assert mask.dtype == torch.bool
 
@@ -210,17 +210,17 @@ class TestEdgeCases:
         """The torch-side broadcast subset path must agree with the Triton kernel."""
         bf_triton = BloomFilter(m_bits=512, k_hash=5, backend="triton").to("cuda")
         bf_triton.register_index(attrs)
-        triton_mask = bf_triton.evaluate_mask(query)
+        triton_mask = bf_triton.evaluate_mask(bf_triton.prepare_queries(query))
 
         bf_torch = BloomFilter(m_bits=512, k_hash=5, backend="torch").to("cuda")
         bf_torch.register_index(attrs)
-        torch_mask = bf_torch.evaluate_mask(query)
+        torch_mask = bf_torch.evaluate_mask(bf_torch.prepare_queries(query))
 
         assert torch.equal(triton_mask, torch_mask)
         # And the compact path agrees on the per-row id set (atomics shuffle order on the
         # triton path, so compare counts + sets rather than full tensors).
-        tri_ids, tri_counts = bf_triton.evaluate_indices(query)
-        tor_ids, tor_counts = bf_torch.evaluate_indices(query)
+        tri_ids, tri_counts = bf_triton.evaluate_indices(bf_triton.prepare_queries(query))
+        tor_ids, tor_counts = bf_torch.evaluate_indices(bf_torch.prepare_queries(query))
         assert torch.equal(tri_counts, tor_counts)
         for b in range(query.shape[0]):
             cnt = int(tri_counts[b].item())
