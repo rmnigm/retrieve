@@ -27,13 +27,15 @@ from tests.conftest import (
 from tests.parity.conftest import assert_topk_equal
 
 # (filter_mode, backend, D): D = 64 takes the probe scorers' single dot, D = 768 their D loop and
-# tile skip (kernels.md § SilverTorch kernels, "The D loop").
+# tile skip (kernels.md § SilverTorch kernels, "The D loop"). "bloom-full" is bloom_path="full".
 MODES = [
     ("none", "triton", 64),
     ("bloom", "triton", 64),
+    ("bloom-full", "triton", 64),
     ("exact", "triton", 64),
     ("none", "triton", 768),
     ("bloom", "triton", 768),
+    ("bloom-full", "triton", 768),
     ("exact", "triton", 768),
 ]
 
@@ -41,8 +43,10 @@ MODES = [
 def _build(filter_mode, backend, *, n=512, d=64, n_lists=16, n_probe=4, k=8, c=2, a_max=2):
     embs = make_index(n, d)
     kw = {"k": k, "n_lists": n_lists, "n_probe": n_probe, "n_iter": 3, "backend": backend}
-    if filter_mode == "bloom":
+    if filter_mode.startswith("bloom"):
         kw.update(filter_mode="bloom", m_bits=512, k_hash=4)
+    if filter_mode == "bloom-full":
+        kw.update(bloom_path="full")
     if filter_mode == "exact":
         kw.update(filter_mode="exact")
     b = SilverTorchBuilder(**kw).set_item_embeddings(embs)
