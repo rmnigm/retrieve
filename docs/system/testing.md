@@ -323,7 +323,7 @@ module under test.
 | `combine_masks`            | iterated `&` of non-`None` inputs |
 | `combine_indices`          | `compact_mask(combine_masks(*[f.evaluate_mask(q)]))` |
 | `SilverTorch` (no bloom)   | `FullScanKNN` for recall (asserts ≥ 0.85 at full probe) + recall monotone in `n_probe` |
-| `SilverTorch` (qa=None)    | `SilverTorch (no bloom)` directly — `query_clause_attrs=None` is a documented fast path |
+| `SilverTorch` (qa=None)    | `SilverTorch (no bloom)` directly — `prepared=None` is a documented fast path |
 | `LiNRV1`–`LiNRV3`          | the primitives composed by hand on the same inputs (`torch.equal` scores, ids up to ties) |
 | `SilverTorchBuilder` / `LiNRBuilder` `set_state_dict` | a fresh `set_item_embeddings` build of the same seed (buffers `torch.equal`, forwards equal) |
 | `KMeans(init="kmeans++")`  | the seeds are distinct rows of the index, one per blob on separable blobs; inertia ≤ `init="random"` there |
@@ -547,9 +547,9 @@ live in `test_official.py`.
   `filter_mode="exact"` without `item_clause_attrs`,
   `clause_is_reverse` outside `filter_mode="exact"`, `n_lists > N`, and
   `n_probe > n_lists` all raise `ValueError`. Passing
-  `query_clause_attrs` or `item_clause_attrs` to a no-filter module
-  raises.
-- **Equivalence**: `query_clause_attrs=None` on a bloom-configured module
+  a prepared filter or `item_clause_attrs` to a no-filter module (or calling its
+  `prepare_queries`) raises.
+- **Equivalence**: `prepared=None` on a bloom-configured module
   ≡ a freshly built no-filter module with the same kmeans seed; same
   invariant holds for `filter_mode="exact"`, plus an all-inactive query
   (`[-1, ...]`) on `filter_mode="exact"` matches the no-filter result.

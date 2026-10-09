@@ -370,6 +370,9 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("v3bits", "goodreads"): (24, 48),
     ("v3bits", "pubmed"): (18, 36),
     ("router", "goodreads"): (72, 72),
+    ("router", "pubmed"): (45, 72),
+    ("laion30m", "laion30m"): (6, 10),  # claims first: seed 0 (user 2026-10-10)
+    ("laion30m-bs1", "laion30m"): (2, 6),
 }
 KEPT = {
     "goodreads": {"c0_genre", "c1_lang_reverse", "all4"},
@@ -426,7 +429,9 @@ def test_grid_counts_and_invariants(suite, dataset):
     }
     assert not any(p.get("n_probe") == 4 for _, p in cells)
     tuned = IVF.get(dataset, (None, None))[1]
-    assert suite == "synth" or not any(p.get("n_probe") == 256 != tuned for _, p in cells)
+    # router on pubmed: the IVF curve of the keep/kill Pareto test (controller, 2026-10-10)
+    curve = suite == "router" and dataset == "pubmed"
+    assert suite == "synth" or curve or not any(p.get("n_probe") == 256 != tuned for _, p in cells)
     assert not any(j.narrowed for j in jobs)
     if suite in ("filter", "deep") and dataset in KEPT:
         assert {j.sweep for j in jobs} == KEPT[dataset] or (
@@ -708,3 +713,29 @@ def test_v3bits_pubmed_is_clause_only_at_k_bits_256_and_768():
     assert {q["candidate_pool_frac"] for j in pm for q in j.query} == {0.01, 0.05}
     gr = _real("v3bits", "goodreads")
     assert {j.build["k_bits"] for j in gr} == {64, 128}
+
+
+def test_router_pubmed_runs_the_goodreads_threshold_beside_its_branches():
+    """V-ROUTER PubMed: thresholds 0.05 / 0.2, n_lists 4096, both branches beside, clause."""
+    pm = _real("router", "pubmed")
+    assert {j.filter_kind for j in pm} == {"clause"} and {j.sweep for j in pm} == KEPT["pubmed"]
+    assert {j.ks for j in pm} == {(100,)}
+    assert {j.build["lq_threshold"] for j in pm if j.algo == "router"} == {0.05, 0.2}
+    assert {j.build.get("n_lists") for j in pm if j.algo in ("router", "silvertorch")} == {4096}
+    assert {j.algo for j in pm} == {"router", "linr_v1_filter_mask", "linr_v2", "silvertorch"}
+    ivf = {q["n_probe"] for j in pm if j.algo == "silvertorch" for q in j.query}
+    assert ivf == {24, 64, 256, 1024}
+
+
+def test_exact_gate_is_yfcc_synths_below_k_1000():
+    """The fp16-storage allowance (user 2026-10-10): yfcc10m-synth at k_max < 1000 only."""
+    gates = {f.stem: load_dataset(f, _ds_dim(f)).exact_gate for f in sorted(CFG.glob("*.yaml"))
+             if f.stem != "suites"}  # fmt: skip
+    assert {n: g for n, g in gates.items() if g is not None} == {"yfcc10m-synth": 0.9716}
+    ys = load_dataset(CFG / "yfcc10m-synth.yaml", 192)
+    assert run.exact_gate(ys, 100) == 0.9716 and run.exact_gate(ys, 1000) == run.EXACT_MIN_RECALL
+    assert run.exact_gate(load_dataset(CFG / "yfcc10m.yaml", 192), 100) == run.EXACT_MIN_RECALL
+
+
+def _ds_dim(f: Path) -> int:
+    return yaml.safe_load(f.read_text())["dims"][0]

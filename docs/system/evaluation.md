@@ -63,7 +63,11 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    does not record it yet.
 4. **Quality, eager, once per cell at `k_max = max(ks)`.** Stream all kept
    users in chunks of 16 (`QUALITY_CHUNK`, the OOM bound of `[B, P, D]` on
-   loose filters), accumulate `recall/ndcg/precision/mrr` at every `k` in
+   loose filters; the per-row queries, attrs, targets and oracle top-k /
+   `targets_in_filter` go to the device once per cell and each chunk gathers
+   its rows there, torch's CPU threads held at `QUALITY_CPU_THREADS` = 1 for
+   the loop: H-QLOOP, the host gathers and pageable copies were ~80 % of the
+   pass), accumulate `recall/ndcg/precision/mrr` at every `k` in
    `ks` from the one top-`k_max` list (exact for every library algo: same
    candidate set, same scores, `torch.topk` sorted). `postfilter` is the
    exception (`run.PER_K_QUALITY`): its candidate pool is `alpha * k`, so
@@ -74,7 +78,10 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    `n_targets_in_filter` recorded). Metrics accumulate as running sums on
    device, one sync at the end. The exact algos (`EXACT_ALGOS`:
    `linr_v1_filter_mask`, `linr_v2`) must
-   reach `recall_oracle@k_max ≥ 0.99` (fp16 tolerance); a failure is
+   reach `recall_oracle@k_max ≥ 0.99` (fp16 tolerance), or the dataset's
+   `exact_gate` when `k_max` < 1000 (`run.exact_gate`; only `yfcc10m-synth`,
+   0.9716: its fp16 item storage costs 0.013-0.026 at k 100, an fp32 table
+   gives 1.0, [validation](../validation.md#campaign-v2-phase-v-not-yet-validated)); a failure is
    recorded as `failed` and then raises `QualityGateError`, which ends the
    run. Cross-backend correctness belongs to the library's parity suite
    ([testing](testing.md)); the harness keeps only a *wiring* check, the
@@ -252,7 +259,7 @@ which exist for `buffers()`, `.k`, `torch.compile` and because their
 | [`config.py`](../../evaluation/bench/config.py) | `Dataset`, `Job`, `load_dataset`, `load_matrix` — the config matrix below; `interleave_units`, `shared_key` (the [interleave groups](#interleaved-groups)) |
 | [`inputs.py`](../../evaluation/bench/inputs.py) | `load_inputs` (dispatch to `training.encode.encode_split` or the `eval_datasets.layout` text readers; `users_limit` once, as a prefix), `sweep_qa`, `build_filters` (keyed by filter backend), `exact_filter`, `query_pool` |
 | [`oracle.py`](../../evaluation/bench/oracle.py) | the exact filtered oracle as blob v4, `attrs_digest`, `pass_counts`, `pass_rate`, `bloom_fp_rate` |
-| [`run.py`](../../evaluation/bench/run.py) | `run(jobs, out_dir=...)` — the cell loop; `MODES`, `QUALITY_CHUNK = 16`, `EXACT_ALGOS`, `SEED_FREE_QUALITY`, `PER_K_QUALITY`, `PERF_STAT_KEYS`, `IDS_PROBE_BATCHES`, `CLOCK_DRIFT` |
+| [`run.py`](../../evaluation/bench/run.py) | `run(jobs, out_dir=...)` — the cell loop; `MODES`, `QUALITY_CHUNK = 16`, `QUALITY_CPU_THREADS = 1`, `EXACT_ALGOS`, `SEED_FREE_QUALITY`, `PER_K_QUALITY`, `PERF_STAT_KEYS`, `IDS_PROBE_BATCHES`, `CLOCK_DRIFT` |
 | [`cli.py`](../../evaluation/bench/cli.py) | `bench run` / `campaign` / `check` / `upload` / `fetch` / `report` / `env` |
 | [`report.py`](../../evaluation/bench/report.py) | `bench report`: `results.parquet`, the paper tables as LaTeX, the figures, the methodology paragraph and `report.md`; the `ARTIFACTS` dispatch table and the citability verdict. See [Report](#report-reportpy) |
 | [`upload.py`](../../evaluation/bench/upload.py) | `bench upload`: publish a results tree (records, samples, a freshly aggregated `results.parquet`) to the HF results repo with a `MANIFEST.json` (provenance + a sha256 per file) and a generated README; `bench fetch`: one subtree back, checked against its manifest. See [Results storage](#results-storage) |
@@ -426,7 +433,7 @@ unfiltered `quality` suite ([decisions](../decisions.md#harness)); synth's
 | `bloomwidth` | goodreads `c0_genre`, arxiv kept, pubmed `c0_mesh` | `silvertorch` triton bloom `m_bits` {64 … 2048} × `k_hash` {3, 5}; official bloom `k_hash` {3, 5} (its width is `OfficialConfig.b_multiplier`, not `m_bits`); bs 16; quality only (`perf: false`) | F4a, C4 |
 | `bloomwidth-timed` | the same | the same widths at `k_hash` 5 (official: its one width), k 100, bs 16, timed | F4a |
 | `v3bits` | goodreads-synth (its first 7 rates), goodreads (`filter`'s kept sweeps); pubmed d768 (`filter`'s kept sweeps, clause only) | V3 triton only, `candidate_pool_frac` {0.01, 0.05}, seeds 0-2, bs {1, 16}, k {100, 1000} (synth's `ks_by_sweep`); goodreads `k_bits` {64, 128}, clause + bloom; pubmed `k_bits` {256, 768} (256 divides 768 and sits below LiNR's 512; 768 is the default, the comparison), clause only (bloom adds false-positive noise to a bits question), one arm per side so the goodreads keys are unchanged. LiNR's 512 bits at d128 would need a library change (declined) | C2 (V-V3BITS, V3-BITS-PUBMED) |
-| `router` | goodreads (kept sweeps; arXiv and PubMed get the fitted threshold afterwards) | `router` triton, `pre_n_probe` 8, `lq_threshold` {0.02, 0.05, 0.1, 0.2}, IVF branch `n_lists` 4096 / `n_probe` 24; its branches V2 triton and SilverTorch triton (4096 / 24) beside it; clause + bloom, seeds 0-2, bs {1, 16}, k {100, 1000} | F2 / T2 practical take (V-ROUTER) |
+| `router` | goodreads (kept sweeps; arXiv gets the fitted threshold afterwards); pubmed d768 (V-ROUTER PubMed, the keep/kill Pareto test: clause kept sweeps, k 100 via `ks_by_sweep`, `lq_threshold` {0.05 (goodreads' fit), 0.2}, and in the same leg the IVF curve SilverTorch 4096 at `n_probe` {24, 64, 256, 1024} plus exact V1 and V2; its own arms, so goodreads' keys are unchanged) | `router` triton, `pre_n_probe` 8, `lq_threshold` {0.02, 0.05, 0.1, 0.2}, IVF branch `n_lists` 4096 / `n_probe` 24; its branches V2 triton and SilverTorch triton (4096 / 24) beside it; clause + bloom, seeds 0-2, bs {1, 16}, k {100, 1000} | F2 / T2 practical take (V-ROUTER) |
 | `h2h` | goodreads `c0_genre`, arxiv `c0_maincat`, `none` + `bloom`, d128 | `silvertorch` triton and official with `score_path` {fp16, int32}, `n_probe` 24, bs {1, 16}, k {100, 1000}, seeds {0 … 4} (the repeats); one interleave group of the three arms; run with `--interleave --profile` | T3, C7 (H2H-final) |
 
 ### IVF tuning
@@ -477,6 +484,7 @@ checkpoint: data/goodreads-work-id/checkpoints/sasrec-ssm-logq-d{dim}/best_model
 dims: [64, 128, 256]
 encode: {batch_size: 512, num_workers: 8, max_seq_length: 200}       # SASRec datasets only
 users_limit: 10000                                                    # or null
+# exact_gate: 0.9716                                                  # optional: the exact-algo floor at k_max < 1000
 filters:                                                              # optional
   attrs: item_attrs_narrow.pt                                         # relative to data_dir
   reverse: clause_is_reverse_narrow.pt                                # optional
@@ -705,7 +713,7 @@ Any exception inside a cell (an OOM on the torch path included) becomes a
 `status: failed` record with the traceback and `stage` (`build`,
 `query_params`, `quality`, `perf`) and the loop continues. Three things
 stop the process: `KeyboardInterrupt`; `QualityGateError` — an exact
-algo (`linr_v1_filter_mask`, `linr_v2`) below `recall_oracle@k_max ≥ 0.99`
+algo (`linr_v1_filter_mask`, `linr_v2`) below `recall_oracle@k_max ≥ 0.99` (or its dataset's `exact_gate`)
 — which is recorded first; and a sticky CUDA error (`run.STICKY_CUDA`:
 `CUDA error`, `illegal memory access`, `device-side assert` in the
 message), also recorded first and then re-raised, because the context is
@@ -1026,7 +1034,7 @@ cached at `<gt_dir>/oracle_v4_<sweep>_<fingerprint[:16]>.pt`:
 | `targets_in_filter` | `[U, T]` bool, target `t` of user `u` passes the mask |
 | `target_in_filter` | `[U]` bool, any target passes |
 | `n_items`, `n_queries`, `n_kept`, `k_gt`, `sweep`, `clauses` | shape of the build |
-| `fingerprint` | sha256 over shapes, dtypes and a 64-row linspace sample of `item_embs`, `queries`, `targets`, `qa_sweep`; the full bytes of `item_attrs` and `clause_is_reverse` (`oracle.attrs_digest`, computed once per `(dataset, dim)` in `inputs.load_inputs` as `inputs["attrs_digest"]`); plus `clauses` and `k_gt` |
+| `fingerprint` | sha256 over shapes, dtypes and a 64-row linspace sample (its float32 index clamped to the last row, which past 2^24 rows it overshoots) of `item_embs`, `queries`, `targets`, `qa_sweep`; the full bytes of `item_attrs` and `clause_is_reverse` (`oracle.attrs_digest`, computed once per `(dataset, dim)` in `inputs.load_inputs` as `inputs["attrs_digest"]`); plus `clauses` and `k_gt` |
 | `code_version`, `harness_commit`, `torch`, `created` | provenance |
 
 **Item-chunked** (`oracle.compute`): per batch of 64 kept queries the loop

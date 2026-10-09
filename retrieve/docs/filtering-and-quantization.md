@@ -45,7 +45,8 @@ ann.register_index(item_embs, item_clause_attrs=item_attrs)
 
 query = torch.randn(4, 128, device="cuda")
 query_attrs = ...  # [B, C] int64, -1 = inactive clause
-topk_ids, topk_scores = ann(query, query_clause_attrs=query_attrs)
+prepared = ann.prepare_queries(query_attrs)  # the query side of the filter, outside anything you time
+topk_ids, topk_scores = ann(query, prepared)
 ```
 
 For exact-clause filtering (no false positives, supports reverse):
@@ -54,12 +55,12 @@ For exact-clause filtering (no false positives, supports reverse):
 ann = SilverTorch(k=10, n_lists=1024, n_probe=16, filter_mode="exact").cuda()
 ann.register_index(item_embs, item_clause_attrs=item_attrs,
                    clause_is_reverse=clause_is_reverse)   # [C] bool, optional
-topk_ids, topk_scores = ann(query, query_clause_attrs=query_attrs)
+topk_ids, topk_scores = ann(query, ann.prepare_queries(query_attrs))
 ```
 
 `bloom` trades hash flexibility for a small false-positive rate; `exact` is bandwidth-cheaper at
-small `C × A_max` and exact. Calling `forward` with `query_clause_attrs=None` skips filtering and
-runs plain ANN.
+small `C × A_max` and exact. Calling `forward` without a prepared filter skips filtering and runs
+plain ANN.
 
 ### LiNR decoupled filtering
 

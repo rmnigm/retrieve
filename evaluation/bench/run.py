@@ -70,12 +70,13 @@ from loguru import logger
 from torch import nn
 
 from bench import algos, inputs, measure, oracle, records
-from bench.config import QUERY_PARAMS, Job, interleave_units, shared_key
+from bench.config import QUERY_PARAMS, Dataset, Job, interleave_units, shared_key
 from bench.metrics import accumulate, accumulator, finalize, jaccard_at_k
 from bench.router import Router
 from eval_datasets.layout import atomic_write
 
 MODES = ("eager", "graph")
+QUALITY_CPU_THREADS = 1  # H-QLOOP: the loop's host work is [chunk]-row masks; more threads spin
 QUALITY_CHUNK = 16  # the OOM bound of the old passes.py (H §2.4): [B, P, D] on loose filters
 EXACT_ALGOS = ("linr_v1_filter_mask", "linr_v2")  # §2.4: recall_oracle@k_max >= 0.99 or die
 EXACT_MIN_RECALL = 0.99
@@ -102,6 +103,12 @@ IDS_PROBE_BATCHES = 8  # the pool batches ``ids_sha256`` hashes, outside the tim
 
 class QualityGateError(RuntimeError):
     """An exact algo scored below ``EXACT_MIN_RECALL`` against the oracle (H §2.4)."""
+
+
+def exact_gate(ds: Dataset, k_max: int) -> float:
+    """§2.4's floor: ``EXACT_MIN_RECALL``, or the dataset's ``exact_gate`` below k 1000 (YFCC's
+    fp16-storage allowance at k 100, user 2026-10-10; @1000 stays 0.99)."""
+    return ds.exact_gate if ds.exact_gate is not None and k_max < 1000 else EXACT_MIN_RECALL
 
 
 def is_sticky(exc: BaseException) -> bool:
@@ -259,8 +266,10 @@ def quality(
     fixed targets) as device running sums, one sync at the end. On filter cells a held-out
     target the exact mask excludes can never be retrieved, so it is masked to ``-1`` and
     ``nt`` counts only the reachable ones (``blob["targets_in_filter"]``) — Goodreads
-    targets are lists, and scoring the unreachable ones biases recall down. Row selection
-    uses CPU masks and ``index_select``, so no chunk syncs. Returns the metrics, the per-query
+    targets are lists, and scoring the unreachable ones biases recall down. The queries,
+    attrs, targets and oracle tensors are staged on the device once; each chunk selects its
+    rows with CPU masks and device ``index_select``, so no chunk syncs, and torch's CPU threads
+    are held at ``QUALITY_CPU_THREADS`` for the loop. Returns the metrics, the per-query
     recall ``{recall_oracle@k, heldout_recall@k: [n_kept] float32}`` (NaN on a row the side
     does not score; the values the sums add up) and the ``[n_kept, k_max]`` ids / scores (for
     the parity spill)."""
@@ -272,40 +281,54 @@ def quality(
     per_q = {f"{name}@{k}": nan() for name in ("recall_oracle", "heldout_recall") for k in ks}
     ids_all: list[torch.Tensor] = []
     sc_all: list[torch.Tensor] = []
-    for s in range(0, rows.numel(), QUALITY_CHUNK):
-        sel = rows[s : s + QUALITY_CHUNK]
-        q = inp["queries"][sel].to(device, non_blocking=True)
-        qa = (
-            assets["qa_s"][sel].to(device, non_blocking=True)
-            if assets["qa_s"] is not None
-            else None
-        )
-        ids, scores = module(q, filter_arg(module, qa))
-        # a compiled arm's outputs live in CUDA-graph buffers the next call overwrites
-        ids_all.append(ids.clone())
-        sc_all.append(scores.float().clone())
-        if isinstance(module, Router):  # V-ROUTER: each query's l_q and route, to the sidecar
-            at = torch.arange(s, s + sel.numel(), device=device)
-            for name, v in (("router_lq", module.last_lq), ("router_exact", module.last_exact)):
-                per_q.setdefault(name, nan()).index_copy_(0, at, v.float())
-        if acc_o is not None:
-            m = assets["oracle_rows"][sel]
+    # H-QLOOP: the per-row tensors go to the device once; gathering them per chunk on the host and
+    # copying from pageable memory was ~80 % of the pass (evaluation.md § Quality pass)
+    rows_d = rows.to(device)
+    queries = inp["queries"].to(device)
+    qa_all = assets["qa_s"].to(device) if assets["qa_s"] is not None else None
+    targets = inp["targets"].to(device)
+    topk = blob["topk"].to(device) if blob is not None else None
+    in_filter = blob["targets_in_filter"].to(device) if blob is not None else None
+    threads = torch.get_num_threads()
+    torch.set_num_threads(QUALITY_CPU_THREADS)
+    try:
+        for s in range(0, rows.numel(), QUALITY_CHUNK):
+            sel = rows[s : s + QUALITY_CHUNK]
+            sel_d = rows_d[s : s + QUALITY_CHUNK]
+            q = queries.index_select(0, sel_d)
+            qa = qa_all.index_select(0, sel_d) if qa_all is not None else None
+            ids, scores = module(q, filter_arg(module, qa))
+            # a compiled arm's outputs live in CUDA-graph buffers the next call overwrites
+            ids_all.append(ids.clone())
+            sc_all.append(scores.float().clone())
+            if isinstance(module, Router):  # V-ROUTER: each query's l_q and route, to the sidecar
+                at = torch.arange(s, s + sel.numel(), device=device)
+                for name, v in (("router_lq", module.last_lq), ("router_exact", module.last_exact)):
+                    per_q.setdefault(name, nan()).index_copy_(0, at, v.float())
+            if acc_o is not None:
+                m = assets["oracle_rows"][sel]
+                if bool(m.any()):
+                    idx = m.nonzero().reshape(-1).to(device, non_blocking=True)
+                    r = accumulate(
+                        acc_o,
+                        ids.index_select(0, idx),
+                        topk.index_select(0, sel_d.index_select(0, idx)),
+                        ranked=True,
+                    )
+                    for k, v in r.items():
+                        per_q[f"recall_oracle@{k}"].index_copy_(0, idx + s, v)
+            m = assets["heldout_rows"][sel]
             if bool(m.any()):
                 idx = m.nonzero().reshape(-1).to(device, non_blocking=True)
-                r = accumulate(
-                    acc_o, ids.index_select(0, idx), blob["topk"][sel][m].to(device), ranked=True
-                )
+                held = sel_d.index_select(0, idx)
+                t = targets.index_select(0, held)
+                if in_filter is not None:  # reachable targets only
+                    t = t.masked_fill(~in_filter.index_select(0, held), -1)
+                r = accumulate(acc_h, ids.index_select(0, idx), t, (t != -1).sum(dim=1))
                 for k, v in r.items():
-                    per_q[f"recall_oracle@{k}"].index_copy_(0, idx + s, v)
-        m = assets["heldout_rows"][sel]
-        if bool(m.any()):
-            idx = m.nonzero().reshape(-1).to(device, non_blocking=True)
-            t = inp["targets"][sel][m].to(device, non_blocking=True)
-            if blob is not None:  # reachable targets only
-                t = t.masked_fill(~blob["targets_in_filter"][sel][m].to(device), -1)
-            r = accumulate(acc_h, ids.index_select(0, idx), t, (t != -1).sum(dim=1))
-            for k, v in r.items():
-                per_q[f"heldout_recall@{k}"].index_copy_(0, idx + s, v)
+                    per_q[f"heldout_recall@{k}"].index_copy_(0, idx + s, v)
+    finally:
+        torch.set_num_threads(threads)
     out: dict[str, Any] = {"heldout": finalize(acc_h)}
     if "router_exact" in per_q:
         out["router_exact_share"] = per_q["router_exact"].mean().item()
@@ -820,10 +843,11 @@ def run(
                         write_per_query(out_dir, rec["per_query"], assets, per_q)
                         if job.algo in EXACT_ALGOS and "oracle" in qual:
                             r = qual["oracle"][f"recall@{k_max}"]
-                            if r is not None and r < EXACT_MIN_RECALL:  # None: no oracle row
+                            gate = exact_gate(job.data, k_max)
+                            if r is not None and r < gate:  # None: no oracle row
                                 raise QualityGateError(
                                     f"{job.algo}/{job.backend} recall_oracle@{k_max} = {r:.4f} "
-                                    f"< {EXACT_MIN_RECALL}"
+                                    f"< {gate}"
                                 )
                     recs_by[id(job)] = rec
                 except QualityGateError as exc:
@@ -926,6 +950,7 @@ __all__ = [
     "PERF_STAT_KEYS",
     "PER_K_QUALITY",
     "QUALITY_CHUNK",
+    "QUALITY_CPU_THREADS",
     "SEED_FREE_QUALITY",
     "STICKY_CUDA",
     "QualityGateError",

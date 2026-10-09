@@ -26,6 +26,7 @@ REAL = {
     "goodreads-synth": "goodreads",
     "arxiv-synth": "arxiv",
     "yfcc10m-synth": "yfcc10m",
+    "arxiv-corr-synth": "arxiv",
 }
 
 
@@ -321,6 +322,7 @@ def cv_tree(t):
         "v22": "v2.2 0d23c615",
         "v23": "v2.3 1258a63e",
         "v24": "v2.4 d67d6263",
+        "v25": "v2.5 472f2fc6",
         "d1": "d1 72e5a90",
     }.get(t, t)
 

@@ -11,7 +11,7 @@ L=/scratch/$TV/$LEG
 S=$L/hub/$DS-$SUITE
 rm -rf "$S"; mkdir -p "$S/$SUITE" "$S/logs"
 cp -a "$R/$SUITE/$DS-d$DIM".* "$S/$SUITE/"   # .jsonl, .samples.jsonl, .perquery/
-cp -a "$L"/*.log "$L"/clocks* "$L"/summary* "$S/logs/"
+for f in "$L"/*.log "$L"/clocks* "$L"/summary*; do [ -e "$f" ] && cp -a "$f" "$S/logs/"; done
 cp -a "$R/_logs/"*"${SUITE}_$DS-d$DIM"*.log "$R/_logs/campaign.log" "$S/logs/" 2>/dev/null || true
 cd /workspace/retrieve/evaluation
 /venvs/retrieve/bin/python -m bench.cli upload --results "$S" --path-in-repo "$TAG/$DS-$SUITE" --verify \

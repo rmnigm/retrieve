@@ -7,7 +7,7 @@
 # algos.PATHS drops (algo, filter_kind, backend) triples with no code path. Algo defaults:
 # silvertorch n_lists=1024 n_probe=24 n_iter=10, linr_v3 candidate_pool=5000.
 #
-# Global rules: seeds {0, 1, 2} everywhere (codesign: timing repeats); bs {1, 16}; k {100, 1000};
+# Global rules: seeds {0, 1, 2} everywhere but the laion30m suites (seed 0, claims first) (codesign: timing repeats); bs {1, 16}; k {100, 1000};
 # no n_probe 4 / 256 (synth's SilverTorch sweep aside, user), no bs 8, no k 500, no openalex.
 # Official SilverTorch runs `none` / `bloom` only: its clause cells time our pack_mask adapter
 # (the old records stay readable). One backend per algo (`triton`, measured fastest everywhere)
@@ -276,24 +276,75 @@ v3bits:                        # V-V3BITS, C2: V3 at k_bits 64 vs our LN-8 defau
 router:                        # V-ROUTER (EXHIBITS idea #2): l_q pre-probe, exact V2 below the threshold, IVF above
   # The threshold is fit on goodreads (the lq_threshold grid); arXiv and PubMed get the fitted value as a
   # one-value slot afterwards (transfer). The two branches run beside it at the same code_version.
-  datasets: [goodreads]
-  dims: [128]
+  # PubMed (V-ROUTER PubMed, the keep/kill test: is the router on the recall-latency Pareto front between IVF and
+  # exact?): the goodreads threshold 0.05 plus 0.2 to bracket, and in the same leg the IVF curve (SilverTorch 4096 at
+  # n_probe 24 / 64 / 256 / 1024) and exact V1 + V2; clause kept sweeps, k 100; its own arms keep goodreads' keys.
+  datasets: [goodreads, pubmed]
+  dims: [128, 768]
   filter_kinds: [clause, bloom]
   ks: [100, 1000]
   batch_sizes: [1, 16]
   seeds: [0, 1, 2]
   sweeps:
     goodreads: [c0_genre, c1_lang_reverse, all4]
+    pubmed: [c0_mesh, c3_journal_reverse, all5]
+  ks_by_sweep:
+    pubmed: {c0_mesh: [100], c3_journal_reverse: [100], all5: [100]}
   arms:
     - algo: router
       backends: [triton]
       build: {pre_n_probe: [8], lq_threshold: [0.02, 0.05, 0.1, 0.2]}
       query: {n_probe: [24]}
       datasets: {goodreads: {build: {n_lists: [4096]}}}
-    - {algo: linr_v2, backends: [triton]}
+    - {algo: linr_v2, backends: [triton], datasets: {goodreads: {}}}
     - algo: silvertorch
       backends: [triton]
       query: {n_probe: [24]}
       datasets: {goodreads: {build: {n_lists: [4096]}}}
+    - algo: router
+      backends: [triton]
+      filter_kinds: [clause]
+      build: {pre_n_probe: [8], lq_threshold: [0.05, 0.2], n_lists: [4096]}
+      query: {n_probe: [24]}
+      datasets: {pubmed: {}}
+    - {algo: linr_v2, backends: [triton], filter_kinds: [clause], datasets: {pubmed: {}}}
+    - {algo: linr_v1_filter_mask, backends: [triton], filter_kinds: [clause], datasets: {pubmed: {}}}
+    - algo: silvertorch
+      backends: [triton]
+      filter_kinds: [clause]
+      query: {n_probe: [24, 64, 256, 1024]}                  # the IVF curve the Pareto test needs (exhibits)
+      datasets: {pubmed: {build: {n_lists: [4096]}}}
 
 bloom: {m_bits: 1024, k_hash: 5}   # shared defaults; a suite may override with its own `bloom:`
+
+# V-LAION30 (claims first, user 2026-10-10): how SilverTorch / V1 / V2 scale to 30 M under a site
+# filter (c0_domain, pass 5e-7 ... 4e-2) and a bucket conjunction (tags4). Seed 0, k 100, clause only;
+# SilverTorch alone at bs 1 (laion30m-bs1). n_lists ~ 4 sqrt(30 M) to a power of two; n_probe
+# under the 25 % cap, set from the calibration cells (docs/validation.md, laion30m).
+laion30m:
+  datasets: [laion30m]
+  dims: [256]
+  filter_kinds: [clause]
+  ks: [100]
+  batch_sizes: [16]
+  seeds: [0]
+  sweeps:
+    laion30m: [c0_domain, tags4]
+  interleave:
+    - {by: algo, values: [linr_v1_filter_mask, linr_v2]}
+  arms:
+    - {algo: linr_v1_filter_mask, backends: [triton]}
+    - {algo: linr_v2, backends: [triton]}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, query: {n_probe: [24, 1024, 4096]}}
+
+laion30m-bs1:
+  datasets: [laion30m]
+  dims: [256]
+  filter_kinds: [clause]
+  ks: [100]
+  batch_sizes: [1]
+  seeds: [0]
+  sweeps:
+    laion30m: [c0_domain, tags4]
+  arms:
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, query: {n_probe: [24, 1024, 4096]}}

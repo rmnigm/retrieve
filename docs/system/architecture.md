@@ -374,10 +374,11 @@ changes the probe width with the two `register_index` validations re-run
 `n_probe` largest clusters, [kernels](kernels.md#silvertorch-kernels)); `k` is a plain
 attribute. `capturable` is a property: `True` on `triton` / `torch`, `False`
 on `official`. Forward takes
-`(query, query_clause_attrs=None, candidate_ids=None)` — there is no
-mask parameter. `query_clause_attrs=None` is a documented fast path
-that skips predicate evaluation entirely; passing `query_clause_attrs`
-together with `candidate_ids` raises `ValueError` (the candidates path
+`(query, prepared=None, candidate_ids=None)`, `prepared` from
+`prepare_queries(query_clause_attrs)` (a `PreparedFilter`; the query side
+of the filter, done outside the timed call) — there is no mask parameter.
+`prepared=None` is a documented fast path that skips predicate evaluation
+entirely; passing `prepared` together with `candidate_ids` raises `ValueError` (the candidates path
 scores the given candidates *without* the fused filter, so accepting
 both would silently drop the predicate). On that path `-1` candidate
 ids are padding — a compaction's output (`evaluate_indices`,
@@ -423,8 +424,8 @@ builders with the filters package, not the module classes:
   doc space on every backend. (On `"official"` our Triton `clause_mask`
   evaluates it and the `[B, N]` mask is packed into the official
   scorer's `filtering_bit_mask`.)
-- For `"none"`, both attribute buffers are skipped and `forward`
-  requires `query_clause_attrs=None`.
+- For `"none"`, both attribute buffers are skipped, `prepare_queries`
+  raises and `forward` requires `prepared=None`.
 
 > **State dicts are portable between `"triton"` and `"torch"` in every
 > `filter_mode`, and to `"official"` in `"none"` and `"exact"`**: every

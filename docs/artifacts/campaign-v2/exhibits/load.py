@@ -13,6 +13,7 @@ CV_LABEL = {
     "0d23c615": "v2.2",
     "1258a63e": "v2.3",
     "d67d6263": "v2.4",
+    "472f2fc6": "v2.5",
     "72e5a90c": "d1",
     "c0e42d1a": "d1-c0e4",
 }
@@ -80,6 +81,6 @@ def perf(r, bs, k, mode):
 
 
 def pass_p(r):
-    """The synth sweep's target pass rate from its name (p0001 -> 0.001, p1 -> 1.0)."""
+    """The synth sweep's target pass rate from its name (p0001 -> 0.001, p1 -> 1.0; c001 -> 0.01)."""
     s = r["sweep"][1:]
     return float(s) if s == "1" else float("0." + s[1:])

@@ -137,6 +137,7 @@ The primitives the variants compose (`OneBitKNN`, `PrefilterKNN`, …) are publi
 ## Where to next
 
 - [`modules.md`](modules.md) — which module to pick, and the per-module API reference.
+- [`adding-a-dataset.md`](adding-a-dataset.md) — benchmarking the modules on your own vectors and attributes with the repository's harness.
 - [`filtering-and-quantization.md`](filtering-and-quantization.md) — attribute-filtered retrieval.
 - [`indexing-and-ops.md`](indexing-and-ops.md) — `retrieve.indexing` (k-means, the IVF layouts,
   the quantizers, the bloom hash), `retrieve.functional` and the three op namespaces.
