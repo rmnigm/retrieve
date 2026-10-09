@@ -12,6 +12,7 @@ State per leg in [validation](../../../validation.md). NOT CITABLE until D1-G.
 | [`common.sh`](common.sh) | sourced: env, code_version check, 1 Hz clock trace, `step` (a pinned `bench` subcommand), `stream` (one `bench run --resume --interleave` with its log), `old_oracles` |
 | [`move_old_oracles.py`](move_old_oracles.py) | moves blobs whose `code_version` is not the tag's into `pre-v21/` (never deletes) |
 | [`h2h.sh`](h2h.sh) | H-PROFILE + H2H-FINAL: `h2h` on goodreads + arXiv, whole, `--interleave --profile`, one pass |
+| [`h-ksum.sh`](h-ksum.sh) | H-KSUM's profile-only `h2h` pass (goodreads + arXiv, `--interleave --profile --skip-quality`, every kernel summed) into `/scratch/h-ksum/results`; artifact `artifacts/h-ksum-h2h`, not a leg |
 | [`v-codesign.sh`](v-codesign.sh) | V-CODESIGN, goodreads half (pod c runs arXiv): `codesign` on goodreads, whole |
 | [`gr-reruns.sh`](gr-reruns.sh) | V-RERUN-V21: goodreads `filter` and goodreads-synth `synth` SilverTorch arms (triton + official, torch), V1 + V2 Triton (paired, one interleave group), V3 Triton |
 | [`v-gr-deep.sh`](v-gr-deep.sh) | V-GR-DEEP: goodreads `deep` |
