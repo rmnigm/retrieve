@@ -146,6 +146,7 @@ leg runs one library.
 | V2 Triton perf at `D_PAD` ≥ 1024 run at v2.1 (V-PUBMED; d128 / d192 legs gain or are neutral) | V2-HIGHP | V2 perf |
 | every SilverTorch Triton perf record before v2.3 (all widths; ≈ −3 µs at k 100 × n_probe 24, more at k 1000) | ST-IDS | Triton perf |
 | V1 Triton perf before v2.3 | V1-FUSE | V1 perf |
+| every official perf record before v2.6 (C5 codesign official, T3 h2h, D3 / bloomwidth official) | OFFICIAL-REWORK (our adapter's per-forward host work left the timed call) | official perf |
 | SilverTorch Triton bloom perf before v2.5 (all widths; 0 to −10 %) | ST-LANE (bit-exact; none / exact SASS unchanged) | Triton bloom perf |
 | V2 Triton perf at `D_PAD` ≤ 256 before v2.5 (incl. C1's crossover; 0.22-0.97 of v2.4) | V2-FILL (bit-exact) | V2 perf |
 | graph-mode ids of SilverTorch records at `408b1188` | quantize fix | ids (D1-G's id gate) |
@@ -209,17 +210,6 @@ co-design.
   its nearest centroid), `arxiv-corr-synth.yaml`, CPU test (pass rate, query
   side); then arXiv at p {0.01, 0.03, 0.1}, every synth arm. IVF's best case
   next to the uniform worst case (F2). Pod c, slot 2. **≈ 3 GPU-h.**
-- [ ] **H-QLOOP: the quality pass is CPU-bound** (pod 1, 2026-10-09, live
-  profile of V-V3BITS). `run.quality` spends ≈ 33 ms of CPU work per 16-row
-  chunk (row masks, `blob["topk"][sel]`, `targets[sel]`, `.to(device)`
-  staging, per-chunk `nonzero`; ~128 OpenMP threads spinning) against a ≈ 2 ms
-  forward: ≈ 22-33 s per cell with the GPU idle, about a third of the wall of
-  every cell that computes quality (V3 / SilverTorch every seed; V1 / V2 /
-  postfilter seed 0). Fix: stage the oracle top-k, targets and masks on the
-  device once per cell and index there; bound torch's CPU threads for the
-  loop. Gate: quality fields and per-query sidecars **byte-identical** to
-  existing records (golden cells + one record per arm from the Hub), harness
-  suite. Harness only. Pod 1's runner, now (CPU while V-GR-DEEP runs).
 - [ ] **H-SCOPE follow-ups**: `kernel_scopes` is merged (harness, CPU
   test over every real kernel name). Left: the report's T3 scorer column
   reads `kernel_scopes`, and one GPU test on a real call (pod 1, ~2 min, in
@@ -310,7 +300,8 @@ co-design.
   kept sweeps, 3 seeds, every arm, now at `campaign-v2.1` and IVF-TUNE's values
   (its SilverTorch Triton perf goes on the redo ledger for ST-DLOOP). T2's 768-d row.
   **≈ 14 GPU-h**, GPU 0.
-- [ ] **V-LAION30: a 30 M scale point at d256, `filter` only** (user,
+- [ ] **V-LAION30: a 30 M scale point at d256, `filter` only** (data staged
+  through the generic ingest, `bench check` ok; the grid remains) (user,
   2026-10-10; [decisions](decisions.md#datasets)).
   Re-LAION-2B-en-research-safe (gated, auto-approved; captions + url /
   size / similarity / punsafe / pwatermark, no embeddings): the first two
@@ -332,19 +323,26 @@ co-design.
   (divides 768) brackets LiNR's 512 from below. PubMed `filter` kept
   sweeps, V3 triton, pool {1 %, 5 %}, seed 0. Pod b after V-SEEDS arXiv.
   **≈ 1-2 GPU-h.**
+- [ ] **OFFICIAL-REWORK: the official backend run as Meta intends** (user,
+  2026-10-10: "the algo speed should not suffer from the need to adapt the
+  code"). Our adapter did per-forward host work inside every timed call
+  (`queries_to_expressions` with a `.tolist()` sync, the CPU parse with the
+  plan cache off for timing, an 826 MiB `pack_mask` intermediate in exact
+  mode). Redesign: every index-side transform at `register_index`, every
+  query-side transform in `prepare_queries` (outside the timed call,
+  reported as `query_prep_ms` for every backend alike), a forward of Meta's
+  ops plus minimal glue with zero host syncs of ours, Meta's in-kernel
+  top-k if it has one, a packed exact-mask kernel, CUDA-graph capture
+  wherever Meta's ops allow. Gates: ids + scores `torch.equal` against the
+  current paths, library + harness suites, keep rule; tag `campaign-v2.6`;
+  then C5 official and T3 h2h re-run claims-first. st-dloop, pod b; C5's
+  verdict on Meta's code waits for it.
 - [ ] **ROUTER-LIB: the router as a library method** (the library goal,
-  user 2026-10-10): the harness `router` arm's logic (unfiltered pre-probe
+  user 2026-10-10; unassigned, after OFFICIAL-REWORK; WIP on `dev/router-lib`): the harness `router` arm's logic (unfiltered pre-probe
   → l_q → V2 below the threshold, SilverTorch above) as a `retrieve`
   module with its docs page; the harness arm calls it; gates: the arm's
   records unchanged (ids + scores `torch.equal`), library + harness suites.
   After V-ROUTER's goodreads fit.
-- [ ] **H-ADDDATA: adding a dataset without writing an ETL** (the
-  benchmark goal, user 2026-10-10): a generic ingest subcommand of eval-data from
-  item embeddings + item attributes + query embeddings + query clauses
-  (parquet / npy) to a staged dataset + its yaml, `bench check`, and a
-  "how to add a dataset" page in `retrieve/docs/` and
-  [datasets](system/datasets.md). V-LAION30 is staged through it as the
-  first user. CPU.
 - [ ] **REL-LIC: license audit and the public-release plan** (user,
   2026-10-10, ECIR Availability): per dataset (goodreads, arXiv, PubMed /
   MedCPT, YFCC-10M, Re-LAION, the synth attrs) whether the derived data may

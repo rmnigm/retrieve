@@ -370,6 +370,8 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("v3bits", "goodreads"): (24, 48),
     ("v3bits", "pubmed"): (18, 36),
     ("router", "goodreads"): (72, 72),
+    ("laion30m", "laion30m"): (6, 10),  # claims first: seed 0 (user 2026-10-10)
+    ("laion30m-bs1", "laion30m"): (2, 6),
 }
 KEPT = {
     "goodreads": {"c0_genre", "c1_lang_reverse", "all4"},
