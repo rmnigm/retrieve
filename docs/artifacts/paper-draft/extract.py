@@ -94,11 +94,10 @@ data["yfcc_real"] = {f"{s}@{n}": round(v, 3) for (s, n), v in yf.items()}
 
 # V1 vs V2.
 data["c1"] = {
-    "3 M · v2.7 (after the clause fix)": v2_over_v1("campaign-v2.7/arxiv-synth-synth"),
-    "3 M · v2.5 (10-clause table, pre-fix)": v2_over_v1("campaign-v2.5/arxiv-synth-synth"),
-    "10 M YFCC · v2.5 (pre-fix)": v2_over_v1("campaign-v2.5/yfcc10m-synth-synth"),
-    "30 M LAION · v2.5 (pre-fix)": v2_over_v1("campaign-v2.5/laion30m-synth-synth"),
-    "30 M LAION real filters · v2.5": v2_over_v1("campaign-v2.5/laion30m-filter"),
+    "3 M": v2_over_v1("campaign-v2.7/arxiv-synth-synth"),
+    "10 M YFCC": v2_over_v1("campaign-v2.7/yfcc10m-synth-synth"),
+    "30 M LAION": v2_over_v1("campaign-v2.5/laion30m-synth-synth"),
+    "30 M LAION, real filters": v2_over_v1("campaign-v2.5/laion30m-filter"),
 }
 
 # int8 mechanism on YFCC.
@@ -110,13 +109,22 @@ pts = [{"who": "Meta's code" if r["backend"] == "official" else "ours (Triton)",
         "n_probe": int(r["n_probe"]), "bs": int(r["bs"]), "mode": r["mode"], "ratio": float(r["full_over_partial"])}
        for r in c5 if r["mode"] == ("eager" if r["backend"] == "official" else "graph")]
 lai30 = defaultdict(dict)
-for r in recs("artifacts/codesign-laion30m-v26-official"):
+for r in recs("campaign-v2.8/laion30m-codesign-laion30m"):
     for p in r["perf"]:
         if p["mode"] == "eager" and p["k"] == 100:
             lai30[(r["sweep"], r["params"]["n_probe"], p["bs"])][r["params"]["bloom_path"]] = p["median_ms"]
 for (sw, npb, bs), d in lai30.items():
     if len(d) == 2 and None not in d.values():
         pts.append({"who": "Meta's code", "dataset": "laion30m", "sweep": sw, "n_probe": npb, "bs": bs, "mode": "eager",
+                    "ratio": round(d["full"] / d["partial"], 3)})
+ours30 = defaultdict(dict)
+for r in recs("campaign-v2.7/laion30m-codesign-laion30m"):
+    for p in r["perf"]:
+        if p["mode"] == "graph" and p["k"] == 100:
+            ours30[(r["sweep"], r["params"]["n_probe"], p["bs"])][r["params"]["bloom_path"]] = p["median_ms"]
+for (sw, npb, bs), d in ours30.items():
+    if len(d) == 2 and None not in d.values():
+        pts.append({"who": "ours (Triton)", "dataset": "laion30m", "sweep": sw, "n_probe": npb, "bs": bs, "mode": "graph",
                     "ratio": round(d["full"] / d["partial"], 3)})
 data["c5"] = pts
 
@@ -136,6 +144,18 @@ for (ds, fl, k, bs), d in c7.items():
                      "device": round(dev, 2) if dev else None,
                      "graph_vs_official": round(float(of["p50_ms"]) / float(d["triton graph"]["p50_ms"]), 2) if "triton graph" in d else None})
 data["c7"] = sorted(rows, key=lambda x: x["cell"])
+
+# C7 at d768: official (-O3 build) / Triton eager, final adapter, one interleave group per n_probe.
+# Until campaign-v2.8/pubmed-filter is on the Hub, the ratios come from pod b's c7-pubmed-v28 control note.
+c7p = defaultdict(dict)
+for r in recs("campaign-v2.8/pubmed-filter"):
+    if r["algo"] == "silvertorch":
+        c7p[r["params"]["n_probe"]][r["backend"]] = r
+if c7p:
+    data["c7_d768"] = {npb: {bs: round(perf(d["official"], bs, "eager") / perf(d["triton"], bs, "eager"), 3) for bs in (1, 16)}
+                       for npb, d in sorted(c7p.items())}
+else:
+    data["c7_d768"] = {24: {1: round(0.822 / 0.412, 3), 16: round(1.161 / 0.533, 3)}, 1024: {1: round(1.039 / 0.799, 3), 16: round(2.605 / 8.837, 3)}}
 
 # V3 bits on PubMed d768.
 v3 = defaultdict(dict)
