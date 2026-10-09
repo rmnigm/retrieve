@@ -119,7 +119,7 @@ def gate(dataset: str, records: str, out_path: str) -> None:
     ds = load_dataset(Path("config") / f"{dataset}.yaml", 128)
     inp = inputs.load_inputs(ds, DEV)
     rows = []
-    for fk in KINDS:
+    for fk in os.environ.get("V1FUSE_KINDS", ",".join(KINDS)).split(","):
         filters = inputs.build_filters(fk, inp, ["triton"], bloom=algos.BLOOM_DEFAULTS)
         new = algos.build(
             "linr_v1_filter_mask", inp["item_embs"], k=100, backend="triton",
