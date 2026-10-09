@@ -406,6 +406,49 @@ def test_matched_recall_interpolates_names_its_bracket_and_emits_n95(tmp_path):
     assert "(n\\_probe=32 .. n\\_probe=64)" in tex and "not reached" in tex
 
 
+def test_matched_bands_give_qps_at_recall_per_selectivity_band(tmp_path):
+    """EXHIBITS idea #6: per band, the band's recall from the sidecars against the cell's latency,
+    interpolated at 0.95; QPS = B * 1000 / latency; an empty band blank; exact arms at their own
+    latency, with their recall where it misses the target."""
+    root = tmp_path / "results"
+    p = root / "deep" / "goodreads-d128.jsonl"
+    n = 797084
+    passes = np.array([int(0.005 * n)] * 40 + [int(0.3 * n)] * 40, dtype=np.int64)  # 2 bands
+    curve = (
+        (8, 0.80, 0.94, 1.0),
+        (16, 0.88, 0.97, 2.0),
+        (32, 0.93, 0.99, 3.0),
+        (64, 0.96, 1.0, 4.0),
+    )
+    for n_probe, low, high, ms in curve:
+        params = {"n_probe": n_probe, "n_lists": 1024}
+        rec = _rec("goodreads", "silvertorch", "triton", params=params, ms=ms)
+        rec = _with_sidecar(root, {**rec, "suite": "deep"}, [low] * 40 + [high] * 40,
+                            pass_count=passes)  # fmt: skip
+        records.append_record(p, rec)
+    v1 = _rec("goodreads", "linr_v1_filter_mask", "triton", ms=0.5)
+    records.append_record(p, _with_sidecar(root, {**v1, "suite": "deep"}, [1.0] * 40 + [0.9] * 40,
+                                           pass_count=passes))  # fmt: skip
+    _generate(root, tmp_path / "out", bands=(0.01, 0.1, 0.5))
+    dump = json.loads((tmp_path / "out" / "matched_bands.json").read_text())
+    st = next(d for d in dump if d["algo"] == "silvertorch" and d["bs"] == 1)
+    low, mid, high, top = st["bands"]
+    assert [b["band"] for b in st["bands"]] == ["p < 0.01", "0.01-0.1", "0.1-0.5", "p >= 0.5"]
+    scale = 2.2 / 2.0  # _rec's bs-1 latency of a 2 ms cell (test_matched_recall above)
+    assert low["bracket"] == ["n_probe=32", "n_probe=64"]
+    assert low["latency"] == pytest.approx(scale * (3.0 + 0.02 / 0.03))  # 0.93 -> 0.96
+    assert high["bracket"] == ["n_probe=8", "n_probe=16"]
+    assert high["latency"] == pytest.approx(scale * (1.0 + 0.01 / 0.03))  # 0.94 -> 0.97
+    assert mid["latency"] is None and top["latency"] is None  # no query in those bands
+    tex = (tmp_path / "out" / "tables" / "tab-matched_bands.tex").read_text()
+    row = next(ln for ln in tex.splitlines() if "n\\_probe" in ln and "& $1$ &" in ln)
+    assert f"${1000 / low['latency']:,.0f}$".replace(",", "{,}") in row and "---" in row
+    exact = next(ln for ln in tex.splitlines() if "(exact)" in ln and "& $1$ &" in ln)
+    qps = f"${1000 / (0.5 * scale):,.0f}$".replace(",", "{,}")
+    assert f"& {qps} & --- & {qps} (recall 0.900) & --- " in exact  # low band 1.0, high 0.9
+    assert "per-cell latency, an assumption" in tex
+
+
 # ----- G-report: a schema-4 campaign tree, every arm of every suite (the record contract) ---
 
 N_ITEMS = {"goodreads": 797_084, "arxiv": 2_984_617, "yfcc10m": 9_998_311, "pubmed": 10_000_000}
