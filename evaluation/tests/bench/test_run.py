@@ -362,6 +362,29 @@ def test_heldout_recall_counts_only_reachable_targets():
     assert out["heldout"]["recall@4"] == pytest.approx((0.5 + 0.5 + 0.0) / 3)
 
 
+def test_quality_holds_torch_cpu_threads_for_the_loop_and_restores_them():
+    """H-QLOOP: the chunk loop runs at ``QUALITY_CPU_THREADS`` and gives the caller's count back."""
+    seen = []
+
+    class Probe(_Fixed):
+        def forward(self, q, qa=None):
+            seen.append(torch.get_num_threads())
+            return super().forward(q, qa)
+
+    rows = 40  # three chunks
+    inputs = {"queries": torch.zeros(rows, 2), "targets": torch.zeros(rows, 1, dtype=torch.long)}
+    keep = torch.ones(rows, dtype=torch.bool)
+    assets = {"qa_s": None, "keep": keep, "blob": None, "oracle_rows": None, "heldout_rows": keep}
+    before = torch.get_num_threads()
+    torch.set_num_threads(max(2, before))
+    try:
+        run.quality(Probe(), inputs, assets, [4], torch.device("cpu"))
+        assert seen == [run.QUALITY_CPU_THREADS] * 3
+        assert torch.get_num_threads() == max(2, before)
+    finally:
+        torch.set_num_threads(before)
+
+
 def test_quality_records_the_routers_local_pass_rate_and_route_per_query():
     """V-ROUTER: the sidecar arrays carry each kept query's l_q and route (1.0 = exact V2), and the
     record the share routed to the exact branch."""
