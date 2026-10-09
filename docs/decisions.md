@@ -328,6 +328,9 @@ now on; the [roadmap](roadmap.md) holds the steps.
   search's, at the same batch size and mode — on PubMed 10 M (the large
   dataset; LAION is not used for it). If it is not on the front there, it is
   dropped from the paper and the library (ROUTER-LIB is not built).
+  **Verdict (2026-10-11): dropped** — on PubMed 10 M it is slower than
+  exact V2 at bs 1 and collapses onto IVF at p ≈ 1; its two bs-16 passes are
+  within 2 % of the front (Hub `campaign-v2.5/pubmed-router`).
 - **YFCC exact gate: an fp16-storage allowance at k 100** (user, 2026-10-10).
   The §2.4 gate (`recall_oracle@k_max ≥ 0.99` for V1 / V2) stays as is
   everywhere else. For the fp16-stored 10 M YFCC catalogs (`yfcc10m`,

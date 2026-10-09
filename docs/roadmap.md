@@ -349,19 +349,15 @@ co-design.
   near the shared inputs'); drivers stop needing one process per arm.
   Gates: harness suite; one multi-arm 10 M run without OOM; records
   byte-identical to a per-arm run on two cells. v-pod1-run (CPU first).
+- [ ] **ROUTER-DROP: remove the router** (user rule 2026-10-10, verdict 2026-10-11:
+  not on the Pareto front on PubMed 10 M): delete the harness `router` arm
+  (`bench/router.py`, the `router` suite, its tests and docs), keep its
+  records on the Hub as artifacts; the paper mentions it as a tried idea in one
+  line at most. v-pod1-run (CPU).
 - [ ] **C5-OURS-30M + C1 re-time at v2.7**: codesign-laion30m's triton half
   (our partial vs full at 30 M, beside Meta's, pod d; per-sweep processes until
   H-ARMFREE lands) and arxiv-synth's V1 / V2 cells re-timed on pod 1 (C1's 3 M
   crossover without the clause-width cost).
-- [ ] **ROUTER-LIB: the router as a library method** (the library goal,
-  user 2026-10-10; only if V-ROUTER on PubMed puts it on the Pareto
-  front, [decisions](decisions.md#datasets); WIP on `dev/router-lib`): the harness `router` arm's logic (unfiltered pre-probe
-  → l_q → V2 below the threshold, SilverTorch above) as a `retrieve`
-  module with its docs page, the split done on the device with no host
-  sync so the arm can be CUDA-graph captured (V-ROUTER at 0.8 M: the
-  eager-only host split is why it never beat graph V2); the harness arm calls it; gates: the arm's
-  records unchanged (ids + scores `torch.equal`), library + harness suites.
-  After V-ROUTER's goodreads fit.
 - [ ] **REL-LIC: license audit and the public-release plan** (user,
   2026-10-10, ECIR Availability): per dataset (goodreads, arXiv, PubMed /
   MedCPT, YFCC-10M, Re-LAION, the synth attrs) whether the derived data may

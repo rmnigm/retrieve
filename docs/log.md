@@ -17,3 +17,4 @@
 ## [2026-10-10] decide | router kept only if on the recall-latency Pareto front between IVF and exact on PubMed 10 M
 ## [2026-10-10] decide | timings compare only within one box (pods differ in driver / CPU / power limit; V2 graph 15-28 % box effect)
 ## [2026-10-10] fix | box-effect estimate withdrawn (confounded by the 7 -> 10-clause synth tables); roadmap CLAUSE-SKIP + ledger row
+## [2026-10-11] decide | router dropped (not on the Pareto front on PubMed 10 M); roadmap ROUTER-DROP replaces ROUTER-LIB
