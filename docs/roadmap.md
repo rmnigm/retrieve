@@ -224,15 +224,18 @@ co-design.
   scores, epilogue kernel time and compile time before/after. Lifts the
   `n_probe` ≤ 1024 at k 1000 limit. In the `campaign-v2.2` bundle with
   ST-DLOOP and V2-HIGHP; st-dloop, pod b.
-- [ ] **V-PROF3: three profiles the first EXHIBITS run asks for** (pod 1,
-  goodreads, `torch.profiler`, one cell each, interleaved): (a) official bloom
-  `bloom_path` partial vs full: co-design is 14-22 % *slower* than full in
-  Meta's own code on all 108 v2.1 cells, against SilverTorch's 1.79-2.15×
-  (C5, a headline): launches, scratch, kernel split; (b) V1 bs 1 Triton vs
-  `torch.compile(max-autotune)` (0.45 vs 0.25 ms on goodreads-synth, C3):
-  what the compiled graph does that our kernel does not; (c) V1 bs 16 graph vs
-  eager at p 0.001 and 1 (graph 1-8 % slower at low p, systematic). A fix
-  found in (b) or (c) is a library step of its own. **≈ 1 GPU-h.**
+- [ ] **V1-FUSE: LiNR V1 at small batch and its masking** (V-PROF3,
+  `artifacts/v-prof3`). At bs 1 `torch.compile(max-autotune)` V1 runs 0.25 ms
+  against our Triton 0.49: one fused masked mat-vec (152 µs) vs cuBLAS gemv
+  (284 µs) + a separate mask kernel, fp16 top-k keys (2 radix passes vs 4),
+  one launch vs 32. In graph mode inductor turns V1's in-place mask into a
+  copy of the score matrix + a fused `where` (constant in p), which is why
+  V1 graph is 1-8 % slower than eager at bs 16 and low p. Fix: a fused
+  masked mat-vec for small bs, fp16 top-k keys where ids are unchanged, and a
+  mask form inductor fuses without the copy. Gates: ids `torch.equal` (scores
+  within the existing V1 tolerance if fp16 keys), keep rule over p, bs, N,
+  d. Library, tag `campaign-v2.3` after the v2.2 bundle. Pod c, v-ax-corr
+  (CPU first, one GPU window at an interleave-unit pause).
 - [ ] **H-KSUM: the full kernel sum in `profile_once`** (EXHIBITS run 3): T3's
   device column sums the top 8 kernels only, a lower bound that favours
   official (15-31 launches vs Triton's 17-18). Record every kernel's time
@@ -335,7 +338,7 @@ co-design.
 | M1 | 0.5 | both | |
 | EXHIBITS | 0 | CPU | after every leg |
 | V-AX-CORR | ≈ 3 | 0 | 3 points, arXiv |
-| V-PROF3 | ≈ 1 | 0 | three one-cell profiles |
+| V1-FUSE | ≈ 1 | 0 | gates + keep-rule grid |
 | V-V3BITS | ≈ 1-2 | 0 | goodreads |
 | ST-DLOOP | ≈ 1-2 | 0 | gates + before/after on pod b |
 | D3 bloomwidth | ≈ 3-5 | 1 (+0) | quality-only cells |
