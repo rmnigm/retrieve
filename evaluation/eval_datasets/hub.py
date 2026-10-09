@@ -60,6 +60,8 @@ EVAL_IGNORE_PATTERNS: list[str] = [
     "train.parquet",
     "val.parquet",
     "papers.parquet",  # arxiv ETL artifact (raw text, used only at encode time)
+    "items.parquet",  # raw text + urls (laion keeps it under _raw/; Re-LAION: vectors only)
+    "queries.parquet",
     "book_to_work.parquet",  # goodreads ETL artifact
     "item_attrs_wide.pt",
     "wide_*",
