@@ -18,6 +18,8 @@ import numpy as np  # noqa: E402
 
 from load import ALGO, cv, load, pass_p, perf, recall  # noqa: E402
 
+from bench import stats  # noqa: E402  (load.py put evaluation/ on sys.path)
+
 OUT = Path(sys.argv[1])
 TREES = [Path(t) for t in sys.argv[2:]]
 REAL = {
@@ -194,6 +196,121 @@ def f2x(recs):
         "f2x-recall-vs-pass-rate.csv",
         ["dataset", "code_version", "kind", "arm", "pass_rate", "recall@100", "n"],
         rows,
+    )
+
+
+FIX_A = {"v2": "V2 pre-Fix A", "v2.1": "V2 post-Fix A"}
+
+
+def f1x(recs):
+    """C1: V1 and V2 [triton] p50 vs pass rate, one row per (synth dataset, code_version), with the
+    paired V2/V1 ratio over interleaved rounds (seed x window) and its 95 % CI."""
+    v = [
+        r
+        for r in recs
+        if r["suite"] == "synth"
+        and r["status"] == "ok"
+        and r["backend"] == "triton"
+        and r["algo"] in ("linr_v1_filter_mask", "linr_v2")
+    ]
+    rows_ = sorted({(r["n_items"], r["dataset"], cv(r)) for r in v})
+    if not rows_:
+        return
+    fig, axes = plt.subplots(len(rows_), 3, figsize=(15, 3.8 * len(rows_)), squeeze=False)
+    out = []
+    for i, (n, ds, c) in enumerate(rows_):
+        rs = [r for r in v if (r["n_items"], r["dataset"], cv(r)) == (n, ds, c)]
+        for fk, ls in (("clause", "-"), ("bloom", "--")):
+            g = collections.defaultdict(lambda: collections.defaultdict(list))
+            pair = collections.defaultdict(lambda: ([], []))
+            for r in rs:
+                if r["filter_kind"] != fk:
+                    continue
+                g[r["algo"]][pass_p(r)].append(r)
+            for j, bs in enumerate((1, 16)):
+                for algo, by in sorted(g.items()):
+                    ps = sorted(by)
+                    ys = [lat(by[p], bs) for p in ps]
+                    axes[i][j].plot(ps, ys, ls, marker="o", ms=3, label=f"{ALGO[algo]} {fk}")
+                ratio_pts = []
+                for p in sorted(g.get("linr_v2", {})):
+                    a, b = pair[(p, bs)]
+                    for r2 in g["linr_v2"][p]:
+                        r1 = [
+                            x
+                            for x in g.get("linr_v1_filter_mask", {}).get(p, [])
+                            if x["seed"] == r2["seed"]
+                        ]
+                        e2, e1 = perf(r2, bs, 100, "graph"), r1 and perf(r1[0], bs, 100, "graph")
+                        same = r1 and (r2.get("interleave") or {}).get("group") == (
+                            r1[0].get("interleave") or {}
+                        ).get("group")
+                        if (
+                            e2
+                            and e1
+                            and same
+                            and len(e2["window_medians_ms"]) == len(e1["window_medians_ms"])
+                        ):
+                            a += e2["window_medians_ms"]
+                            b += e1["window_medians_ms"]
+                    ci = stats.paired_ratio_ci(a, b) if a else None
+                    if ci:
+                        ratio_pts.append((p, *ci))
+                        out.append(
+                            (ds, n, c, FIX_A.get(c, c), fk, bs, p, *ci, len(a), stats.differs(ci))
+                        )
+                if ratio_pts:
+                    ax = axes[i][2]
+                    x = [q[0] for q in ratio_pts]
+                    ax.errorbar(
+                        x,
+                        [q[1] for q in ratio_pts],
+                        yerr=[[q[1] - q[2] for q in ratio_pts], [q[3] - q[1] for q in ratio_pts]],
+                        fmt=ls + ("o" if bs == 1 else "s"),
+                        ms=3,
+                        capsize=2,
+                        label=f"{fk} B={bs}",
+                    )
+        for j, bs in enumerate((1, 16)):
+            ax = axes[i][j]
+            ax.set_xscale("log")
+            ax.set_yscale("log")
+            ax.set_title(f"{ds}, N {n / 1e6:.1f} M ({c}, {FIX_A.get(c, c)}), B={bs}", fontsize=9)
+            ax.set_xlabel("pass rate p")
+            ax.set_ylabel("p50 ms (graph), k 100")
+            ax.grid(alpha=0.3, which="both")
+            ax.legend(fontsize=6)
+        ax = axes[i][2]
+        ax.axhline(1.0, color="k", lw=0.7)
+        ax.set_xscale("log")
+        ax.set_title(f"V2/V1 paired over interleaved rounds ({c}, {FIX_A.get(c, c)})", fontsize=9)
+        ax.set_xlabel("pass rate p")
+        ax.set_ylabel("V2 / V1 (< 1: V2 faster), 95 % CI")
+        ax.grid(alpha=0.3, which="both")
+        ax.legend(fontsize=6)
+    fig.suptitle(
+        "F1x / C1: LiNR V1 vs V2 by pass rate and scale (rows differ in code_version: say which V2)"
+    )
+    mark(fig, v)
+    fig.tight_layout()
+    fig.savefig(OUT / "f1x-v1-v2-vs-pass-rate.png", dpi=120)
+    write_csv(
+        "f1x-v2-over-v1.csv",
+        [
+            "dataset",
+            "n_items",
+            "code_version",
+            "v2_state",
+            "filter_kind",
+            "bs",
+            "p",
+            "v2_over_v1",
+            "ci_lo",
+            "ci_hi",
+            "rounds",
+            "differs",
+        ],
+        out,
     )
 
 
@@ -407,6 +524,7 @@ def ratios(recs):
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     recs = load(TREES)
+    f1x(recs)
     f2x(recs)
     f3x(recs)
     g1(recs)

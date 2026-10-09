@@ -10,10 +10,10 @@ A resume key carries the code_version, so a single tree would hold both versions
 
 | file | what |
 |---|---|
-| [`run.sh`](run.sh) | one run: fetch (idempotent), trees, `bench report` per tree, the three scripts below, `bench upload --verify` |
+| [`run.sh`](run.sh) | one run: fetch (idempotent; `EXTRA_LEGS` adds record trees published under `artifacts/`), trees by each suite's record code_version, `bench report` per tree, the three scripts below, `bench upload --verify` |
 | [`load.py`](load.py) | `records.latest` per tree, plus the key/label helpers |
 | [`checks.py`](checks.py) | `checks.md` + `checks.csv`: status / partial / unstable counts, exact-arm recall ≥ 0.99, eager vs graph `ids_sha256`, bs 16 < 16 × bs 1, graph / eager latency, monotone curves (V1 flat in p, postfilter recall in p, SilverTorch recall in `n_probe`), Triton vs official recall, the same cell across code_versions and suites, co-design partial = full recall, and cells planned in `suites.yaml` but absent. Documented causes are tagged `known` |
-| [`figures.py`](figures.py) | the figures the report lacks or draws unreadably. `f2x`: every synth arm incl. postfilter and V1, real sweeps as per-query pass-rate buckets. `f3x`: deep Pareto, one panel per sweep × bs. `g1`: V1 graph / eager vs pass rate. `synth-arms.csv`: the per-arm medians behind T1's ratios |
+| [`figures.py`](figures.py) | the figures the report lacks or draws unreadably. `f1x`: V1 / V2 Triton p50 vs pass rate per scale and code_version, with the paired V2/V1 ratio over interleaved rounds and its CI (each row says whether its V2 is pre- or post-Fix A). `f2x`: every synth arm incl. postfilter and V1, real sweeps as per-query pass-rate buckets. `f3x`: deep Pareto, one panel per sweep × bs. `g1`: V1 graph / eager vs pass rate. `synth-arms.csv`: the per-arm medians behind T1's ratios |
 | [`v2_old_new.py`](v2_old_new.py) | V2 before / after Fix A by pass rate: the old-side V1 / V2 table of every fetched leg, plus the V2-FIX-A artifact's ABAB ratios and `programs` sweep (`v2_old_new.md`) |
 | [`gpuh.py`](gpuh.py) | the V-YFCC GPU-h projection (`gpuh-v-yfcc.csv`); model and assumptions below |
 
