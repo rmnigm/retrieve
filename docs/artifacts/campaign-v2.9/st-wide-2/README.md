@@ -33,8 +33,14 @@ On the real sweeps no batch is marked sparse, so the gain shows on low-pass-rate
 **Reproduced.** v2.9 against v2.8, goodreads d128 exact, eager, bs 16, `n_probe` 32-128: 1.085-1.105, +35-40 µs on a
 host-bound 0.41 ms forward.
 
-**Mechanism.** The per-row table was its own Triton launch. It cost about 15 µs of host time per call, plus about 6 µs of
-prep, which shows wherever the eager forward is host-bound (`host_cost.py`).
+**Mechanism.** The per-row table was its own Triton launch, and that shows wherever the eager forward is host-bound.
+Measured on v2.9 (`host_cost.py`, `host_cost/host_cost_v29.json`), one eager exact-scorer call at bs 16, `n_probe` 128:
+
+| | host µs |
+|---|---|
+| op with the table | 305 |
+| op without the table | 273 |
+| the table launch alone | 14.6 |
 
 **What did not work.** Gating the table on layout work, then on work or probed bytes, only moved the boundary. Eager
 cells of 1.08-1.19 remained either way:
@@ -69,7 +75,7 @@ The table rule is v2.9's `B · n_probe ≥ 512` again, in every mode.
 
 ## 4. Suites
 - Library: 873 passed on fresh caches.
-- Harness: 568 passed, 6 skipped (`test_laion.py` left out: `tldextract`).
+- Harness: 570 passed, 6 skipped on the staging-merged tree (`test_laion.py` left out: `tldextract`).
 - New tests:
   - `test_prep_quantizes_as_quantize_int8` (d 64-768, zero / constant / extreme / tie rows);
   - `sparse` × the bloom parity cases;
@@ -80,3 +86,6 @@ The table rule is v2.9's `B · n_probe ≥ 512` again, in every mode.
 - `bounds.py`: pass-rate bound against the true rate.
 - `sass_narrow.py`: narrow-config SASS hashes per tree.
 - `host_cost.py`: host µs of the table path on v2.9.
+
+Hub `gate/` also keeps the earlier iterations' outputs, by name in the [hub-index](../../hub-index.md) row; the tables
+above are the final gate's.
