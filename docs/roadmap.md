@@ -110,9 +110,10 @@ multi-GPU numbers are comparable at all.
 
 **Exploration first, one clean pass last** (user, 2026-10-09,
 [decisions](decisions.md#campaign-v2-user-2026-10-08)). While the library
-is still improving, legs run at the current tag (now `campaign-v2.7`,
-code_version `641ec3b8e09034647f426ca7f68204a1f2866536` = v2.6 + CLAUSE-SKIP + BLOOM-BUILD-CHUNK,
-Hub `campaign-v2.7/<dataset>-<suite>`; `campaign-v2.6` was `20e83bfc` (v2.5 +
+is still improving, legs run at the current tag (now `campaign-v2.8`,
+code_version `78cfbc721f0c7ab62831832b3791e1f30dc7357c` = v2.7 + OFFICIAL-REWORK M2-M4 (the official
+epilogue and plan dedup), Hub `campaign-v2.8/<dataset>-<suite>`; `campaign-v2.7`
+was `641ec3b8` (v2.6 + CLAUSE-SKIP + BLOOM-BUILD-CHUNK); `campaign-v2.6` was `20e83bfc` (v2.5 +
 OFFICIAL-REWORK M1, query prep out of the timed forward); `campaign-v2.5` was `472f2fc6` (v2.4 + ST-LANE + V2-FILL + C5-OURS); `campaign-v2.4` was
 `d67d6263` (v2.3 + ST-SKIP128), `campaign-v2.3` was `1258a63e`
 (v2.2 + ST-IDS + V2-HIGHP + V1-FUSE), `campaign-v2.2` was
@@ -315,21 +316,6 @@ co-design.
   (divides 768) brackets LiNR's 512 from below. PubMed `filter` kept
   sweeps, V3 triton, pool {1 %, 5 %}, seed 0. Pod b after V-SEEDS arXiv.
   **≈ 1-2 GPU-h.**
-- [ ] **OFFICIAL-REWORK: the official backend run as Meta intends** (user,
-  2026-10-10: "the algo speed should not suffer from the need to adapt the
-  code"). Our adapter did per-forward host work inside every timed call
-  (`queries_to_expressions` with a `.tolist()` sync, the CPU parse with the
-  plan cache off for timing, an 826 MiB `pack_mask` intermediate in exact
-  mode). Redesign: every index-side transform at `register_index`, every
-  query-side transform in `prepare_queries` (outside the timed call,
-  reported as `query_prep_ms` for every backend alike), a forward of Meta's
-  ops plus minimal glue with zero host syncs of ours, Meta's in-kernel
-  top-k if it has one, a packed exact-mask kernel, CUDA-graph capture
-  wherever Meta's ops allow. Gates: ids + scores `torch.equal` against the
-  current paths, library + harness suites, keep rule; tag `campaign-v2.6`;
-  then C5 official and T3 h2h re-run claims-first. st-dloop, pod b; C5's
-  verdict on Meta's code waits for it. M1 is in `campaign-v2.6`; M2-M4
-  (epilogue, index layouts, profiles, docs) remain.
 - [ ] **H-ARMFREE: one `bench run` frees each arm before the next** (2026-10-10:
   laion30m and V-ROUTER PubMed OOMed when one process ran several arms; each
   arm's 10 M-30 M index stayed resident and the next arm's allocation
@@ -338,6 +324,11 @@ co-design.
   near the shared inputs'); drivers stop needing one process per arm.
   Gates: harness suite; one multi-arm 10 M run without OOM; records
   byte-identical to a per-arm run on two cells. v-pod1-run (CPU first).
+- [ ] **OFFICIAL-O3: Meta's extension built with `-O3`** (OF-11: Meta's setup passes no
+  `-O`, host code at gcc `-O0`; `-O3` is 0.77-0.98 of the shipped time, outputs
+  bit-identical). New official legs build their own venv with
+  `NVCC_APPEND_FLAGS='-O3 -Xcompiler -O3'`; the record must say which build ran
+  (an env field, harness). The shared venvs are rebuilt only between legs.
 - [ ] **C5-OURS-30M + C1 re-time at v2.7**: codesign-laion30m's triton half
   (our partial vs full at 30 M, beside Meta's, pod d; per-sweep processes until
   H-ARMFREE lands) and arxiv-synth's V1 / V2 cells re-timed on pod 1 (C1's 3 M
