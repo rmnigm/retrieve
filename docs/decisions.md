@@ -284,8 +284,9 @@ now on; the [roadmap](roadmap.md) holds the steps.
   roadmap V-LAION30): Re-LAION-2B-en-research-safe captions encoded by us
   (nomic-embed-text-v1.5, Matryoshka d256, a native width of that
   encoder, so "No PCA" holds), metadata tags as filters. 30 M only: no
-  100 M point and no fp16-items harness change; d256 needs the oracle
-  without its fp32 item copy (roadmap H-OVIEW).
+  100 M point and no fp16-items harness change. At d256 the fp32 items
+  are 31 GB; the item-chunked oracle adds no item copy
+  ([validation](validation.md#harness-gates), G-oracle).
 - **No PCA.** Every dataset runs at its encoder's native width (YFCC 192,
   PubMed 768); each dataset contributes one width, and the dim ablation is
   dropped.
