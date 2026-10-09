@@ -6,6 +6,7 @@
 ITEM a: goodreads `codesign`, official bloom c0_genre, n_probe 32, bs 16, partial vs full.
 ITEM b: goodreads-synth `synth`, V1 clause p01, bs 1, Triton vs torch.compile(max-autotune).
 ITEM c0001 / c1: goodreads-synth `synth`, V1 Triton clause p0001 / p1, bs 16, eager vs graph.
+ITEM ac0001 / ac1: the same on arxiv-synth (3 M).
 k 100, seed 0 everywhere. `profile` writes OUT/<item>-<variant>/ (kernels.csv, api.csv, summary.json,
 trace.json.gz); `time` writes OUT/<item>-timing.json."""
 
@@ -24,6 +25,7 @@ from torch.profiler import ProfilerActivity, profile
 
 GR = ("goodreads", "codesign", "silvertorch")
 SY = ("goodreads-synth", "synth", "linr_v1_filter_mask")
+AS = ("arxiv-synth", "synth", "linr_v1_filter_mask")
 # item -> (dataset, suite, algo, filter_kind, sweep, bs, {variant: (backend, build match, query, mode)})
 ITEMS = {
     "a": (
@@ -52,8 +54,8 @@ ITEMS = {
         },
     ),
     **{
-        f"c{p[1:]}": (
-            *SY,
+        f"{tag}{p[1:]}": (
+            *ds,
             "clause",
             p,
             16,
@@ -62,6 +64,7 @@ ITEMS = {
                 "graph": ("triton", {}, {}, "graph"),
             },
         )
+        for tag, ds in (("c", SY), ("ac", AS))
         for p in ("p0001", "p1")
     },
 }
