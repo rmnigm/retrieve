@@ -73,6 +73,7 @@ from torch import nn
 from bench import algos, inputs, measure, oracle, records
 from bench.config import QUERY_PARAMS, Job, interleave_units, shared_key
 from bench.metrics import accumulate, accumulator, finalize, jaccard_at_k
+from bench.router import Router
 from eval_datasets.layout import atomic_write
 
 MODES = ("eager", "graph")
@@ -232,7 +233,7 @@ def compile_warmup(module: nn.Module, inp: dict, assets: dict, device: torch.dev
 
 def build_module(job: Job, inp: dict, assets: dict, k_max: int, params: dict) -> nn.Module:
     kw = dict(params)
-    if job.algo == "silvertorch" and job.filter_kind == "bloom":
+    if job.algo in ("silvertorch", "router") and job.filter_kind == "bloom":
         kw = {**job.bloom, **kw}
     return algos.build(
         job.algo,
@@ -295,6 +296,10 @@ def quality(
             # a compiled arm's outputs live in CUDA-graph buffers the next call overwrites
             ids_all.append(ids.clone())
             sc_all.append(scores.float().clone())
+            if isinstance(module, Router):  # V-ROUTER: each query's l_q and route, to the sidecar
+                at = torch.arange(s, s + sel.numel(), device=device)
+                for name, v in (("router_lq", module.last_lq), ("router_exact", module.last_exact)):
+                    per_q.setdefault(name, nan()).index_copy_(0, at, v.float())
             if acc_o is not None:
                 m = assets["oracle_rows"][sel]
                 if bool(m.any()):
@@ -320,6 +325,8 @@ def quality(
     finally:
         torch.set_num_threads(threads)
     out: dict[str, Any] = {"heldout": finalize(acc_h)}
+    if "router_exact" in per_q:
+        out["router_exact_share"] = per_q["router_exact"].mean().item()
     if acc_o is not None:
         out["oracle"] = finalize(acc_o)
     ids_t = torch.cat(ids_all) if ids_all else torch.empty(0, 0, dtype=torch.long)

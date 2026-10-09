@@ -99,13 +99,14 @@ All kernels follow the same conventions.
   production ops, not just `_impl`. (`bloom_match` is the one
   exception: a single-op ~80-line file with no `_impl`, no Config, no
   prep — see its section.)
-- Graph-break behavior. Ten ops are registered across the eight Triton
+- Graph-break behavior. Thirteen ops are registered across the nine Triton
   kernel files (the official backend registers no op of ours; it calls
   `torch.ops.st.*`), in two flavours.
 
-  **Eight on `@torch.library.triton_op`**, each with a textually-inline
+  **Eleven on `@torch.library.triton_op`**, each with a textually-inline
   `wrap_triton(_kernel)[grid](**launch.kwargs)` launch: `clause_mask`,
-  `fused_masked_knn_topk`, `bloom_match`, `codesigned_probe_score`,
+  `clause_mask_scores`, `fused_masked_knn_topk`, `bloom_match`,
+  `bloom_match_scores`, `bloom_full_mask`, `codesigned_probe_score`,
   `codesigned_probe_score_bloom`, `codesigned_probe_score_exact`,
   `oporp_1bit_match_topk_full`, `oporp_1bit_match_topk_indirect`. The
   decorator stops dynamo from graph-breaking at the wrapper boundary, so
@@ -483,16 +484,22 @@ parity files compare Triton against `ops.reference` at the same input
 dtype and cannot see this class of defect.
 
 **Launch grid** `(G, B)`, `G = min(cdiv(P, BLOCK_N), cdiv(programs, B))`,
-tile programs on `grid_x`, batch on `grid_y` (≤ 65535). A program loads its
-query once and strides over the row's tiles `g, g + G, …`. A tile at or
-past `counts[b]` stores `BLOCK_N` lanes of `-inf` with no load; a tile
-below it gathers `BLOCK_N` item rows by indirect load:
+tile programs on `grid_x`, batch on `grid_y` (≤ 65535). A program runs two
+loops over its row. The scoring loop strides over the row's counted tiles
+`g, g + G, …` below `cdiv(counts[b], BLOCK_N)`; each gathers `BLOCK_N`
+item rows by indirect load:
 
 ```
 item_ids[BLOCK_N] = pos_indices[b, p_off]
 emb_rows[BLOCK_N, D] = item_embs[item_ids]
 dots[BLOCK_N] = sum(emb_rows * q[None, :], axis=1)
 ```
+
+The fill loop then stores `-inf` over `[cdiv(counts[b], BLOCK_N) ·
+BLOCK_N, P)` in `FILL_N` = 1,024-lane chunks, strided over the same
+programs, so a mostly empty row costs a few wide stores per program, not
+one `BLOCK_N`-lane tile per iteration
+([V2-FILL](../artifacts/campaign-v2/v2-fill/README.md)).
 
 The grid is sized by the config, not by `P`. The compact family returns
 full-width `[B, N]` candidates, so a grid of `cdiv(P, BLOCK_N)` one-tile
@@ -530,16 +537,13 @@ kernel (real dot or `-inf`), so the post-topk `where(isfinite(scores),
 …, -1)` mask sees deterministic values without a `torch.full(-inf)`
 pre-fill kernel launch.
 
-**Wide D** (`SPLIT`, `D_PAD > 256`). The strided body holds the query
-and the `[BLOCK_N, D_PAD]` tile across its tile loop, which at D 768 costs
-98-112 registers a thread: 2 resident 8-warp CTAs an SM instead of the
-straight-line body's 4, and 1.43× the time of that body at p ≈ 1 (V2 at
-PubMed 10 M; the grid size does not matter). Past 256 the strided grid is
-split into a scoring loop over the row's counted tiles (the query reloaded
-per tile, an L1 hit) and a `-inf` fill over `[cdiv(count, BLOCK_N) ·
-BLOCK_N, P)` in `FILL_N` = 1,024-lane chunks, strided over the same
-programs. `WIDE_CONFIG` (`block_n` 8, `num_warps` 4, `programs` 3456)
-then holds no spill and needs no register cap. The larger `programs`
+**Wide D** (`SPLIT`, `D_PAD > 256`). Holding the query and the
+`[BLOCK_N, D_PAD]` tile across the tile loop costs 98-112 registers a
+thread at D 768: 2 resident 8-warp CTAs an SM instead of the straight-line
+body's 4, and 1.43× the time of that body at p ≈ 1 (V2 at PubMed 10 M; the
+grid size does not matter). Past 256 the scoring loop therefore reloads
+the query per tile (an L1 hit). `WIDE_CONFIG` (`block_n` 8, `num_warps` 4,
+`programs` 3456) then holds no spill and needs no register cap. The larger `programs`
 covers skewed batches: PubMed `all5` puts most candidates in one or two
 rows of a bs-16 batch (median 142 a row, p90 1.2 M), and at 864 programs
 (54 a row) such a row ran 1.21× v2.2's time; at 3,456 it runs 0.45×,
@@ -548,8 +552,20 @@ inductor's launcher drops it, so it was rejected. Against v2.2's kernel at
 10 M d768: 0.16-0.72 across p 0.0002-1
 ([V2-HIGHP](../artifacts/campaign-v2/v2-highp/README.md)). Each lane's
 score is the same `tl.sum` over D, so scores are bit-identical to the
-strided body. At `D_PAD ≤ 256` the strided body is unchanged
-(SASS-identical).
+one-loop body.
+
+**Count width** (`INT32_COUNT`, `D_PAD ≤ 128`). At `D_PAD ≤ 256` the
+query is held across the scoring loop. The loop's bound comes from the
+int64 `counts`, so its induction variable and every tile offset are 64-bit
+unless the count is narrowed (`counts[b] ≤ P < 2³¹`, index arithmetic
+only). Narrowed, the body is shorter and at `D_PAD` 64-128 compiles to
+25-32 registers. At `D_PAD` 256 it compiles to 40, and so did the one-loop
+body before it: 6 resident 8-warp programs an SM instead of 8, so the
+default 864 programs take a second, one-third-full wave. Left 64-bit at
+256, the same body compiles to 32 registers and fits one wave. So the count
+is narrowed only at `D_PAD ≤ 128`. This rests on the compiler's register
+allocation; [`fill_variants.py`](../artifacts/campaign-v2/v2-fill/fill_variants.py)
+records registers per body, and a toolchain change should re-check it.
 
 **Tile config.** `FusedMaskedKnnTopkConfig(block_n, num_warps,
 num_stages, programs)` — shipped as `DEFAULT_CONFIG` (`D_PAD ≤ 256`) and
@@ -1260,6 +1276,25 @@ the dot is the tile's cost, and a 256-lane tile at pass rate 0.0002
 document (a filtered thread returns before any load), a finer unit;
 ours is the tile.
 
+**Gated tile skip** (`GATED`, the bloom scorer at `D_PAD ≤ 256`). The same
+vote, run only in programs whose row is provably selective. An item passes
+only if every queried bit is set, so the row's pass rate is at most its
+rarest bit's frequency: `bloom_bit_freq [m_bits]` (fp32, from
+`bloom_transposed` at `register_index`;
+[`indexing/selectivity.py`](../../retrieve/src/retrieve/indexing/selectivity.py)).
+Each program loads the query's bit frequencies first (one vector load, so
+the latency overlaps the tile's own loads) and votes only when `bound ·
+BLOCK_P < 1`, i.e. under one expected passing lane per tile. The host sets
+`GATED` only for grids of at least `MIN_PROGRAMS` programs: below one wave a
+skipped tile does not shorten the run, and the vote is pure cost. Measured
+against v2.3 (d128 / d192, kernel-only, [ST-SKIP128](../artifacts/campaign-v2/st-skip128/README.md)):
+0.58-0.67× at p 0.001 bs 16, 0.75-0.81× at p 0.003, and 0.994-1.007× above
+the threshold and at bs 1. A skipped tile holds only `-inf` slots, so the
+gate is bit-exact whatever the bound says. **Not on the exact scorer:** the
+same gate there (per active clause, the frequency of the query's value)
+raised the d128 tile from 96 to 108 registers (5 → 4 resident CTAs), costing
+1.4-7.8 % at p ≥ 0.01; the exact scorer is unchanged.
+
 **Tile config: per width, then per program count.** Each kernel module
 ships `CONFIGS`: per `D_PAD` bound, a tuple of tiles, largest first.
 [`_host.width_tiles`](../../retrieve/src/retrieve/ops/triton/_host.py)
@@ -1322,6 +1357,24 @@ is a body-level constexpr (the bloom-on and bloom-off paths JIT-specialise
 on it). The score buffer is `torch.empty([B, width])`: every slot is
 written (a dot, or `-inf`), so there is no pre-fill.
 
+**Independent bloom word loads.** Each queried bit's word load is masked
+by the tile's `valid` lanes, not by the running `keep`. The loads then do
+not wait on each other, which shortens each program's latency chain (probe
+table → bloom words → code gather → store). The extra bytes are 8-byte words
+shared by 64 lanes, and the resulting `keep` is the same. Against v2.4:
+0.90-0.99× at d128, 0.93-1.01× at d192, 0.93-1.00× at d768 across p and bs
+([ST-LANE](../artifacts/campaign-v2/st-lane/README.md)).
+
+**A per-lane exit was measured and is not used.** At d128 the scorer's
+floor below p ≈ 0.1 (about 22 µs of a 38 µs bloom tile at p 0.01, bs 16)
+is that per-program latency chain, not the tile's work. Compacting the
+passing lanes before the gather (a scan into a per-program scratch, then
+32-lane chunks) removed the tile work but added a chain of its own: 0.91×
+at p 0.01, 1.03× at p 0.136. Larger or smaller tiles do not move the floor
+either. Meta's scorer scales with p because it runs one thread per
+document, with its bloom search and payload kernels outside; like-for-like
+the two are level or ours is faster at every p measured.
+
 **Filtered items cost no HBM bytes; whole tiles are skipped only at wide
 D.** Both filtered scorers (this one with `HAS_QB`, and the exact one
 below) evaluate the filter first and mask the int8 code load with `keep`,
@@ -1358,6 +1411,45 @@ regime axes are `(N, B, C, A_MAX, D)` (repeatable `--regime`, one `D` per
 run). The score buffer is `torch.empty([B, width])`, written in
 full, with the same id epilogue.
 
+
+### `bloom_full_mask` — the full-N mask (`bloom_path="full"`)
+
+[`ops/triton/bloom_full_mask.py`](../../retrieve/src/retrieve/ops/triton/bloom_full_mask.py).
+`SilverTorch(bloom_path="full")` (bloom, triton or torch) is the
+co-design ablation inside our own kernels (roadmap C5-OURS). The subset
+test first runs over every item. The probe scorer then reads that
+result instead of evaluating the filter on the probed slots. This
+separates the co-design idea from Meta's host-bound partial-mask path,
+which is what the official `bloom_path` compares (V-PROF3).
+
+The mask is the AND of the query's rows of `bloom_transposed`:
+
+```
+mask[b, w] = AND over active i of bloom_transposed[qpos[b, i], w]   # [B, ceil(N / 64)] int64
+```
+
+So bit `n % 64` of word `n // 64` is item `n`'s subset test (cluster-sorted
+order, as the scorer addresses it). One program covers 1,024 words of one
+row and reads `C · k_hash` rows of the index: `B · C · k_hash · N / 8`
+bytes, the full-N cost the partial path avoids. A query with no active
+clause gets an all-ones row.
+
+**The scorer is unchanged.** The layer passes the mask to
+`codesigned_probe_score_bloom` as a one-row table per query:
+- `query_bit_positions = [[b]]`;
+- `bloom_transposed = mask`;
+- `bloom_bit_freq` = the partial path's own bound, `min` over the query's
+  active bits.
+
+Each slot then loads one mask word instead of `C · k_hash` index words.
+The skip gate makes the same decisions, and the keep set and the dot are
+the same, so `full` equals `partial` bit for bit: ids and scores, triton
+and torch
+([`test_bloom_full_mask.py`](../../retrieve/tests/parity/test_bloom_full_mask.py)).
+The default `partial` path calls the same op with the same tensors as
+before the option existed. The forward is graph-capturable, with no
+skips or breaks
+([`test_silvertorch_compile.py`](../../retrieve/tests/compile/test_silvertorch_compile.py)).
 
 ### `official` — Meta's `torch.ops.st.*` kernels as the reference backend
 

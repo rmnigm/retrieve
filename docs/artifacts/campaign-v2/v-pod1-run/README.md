@@ -17,9 +17,13 @@ State per leg in [validation](../../../validation.md). NOT CITABLE until D1-G.
 | [`v-codesign.sh`](v-codesign.sh) | V-CODESIGN, goodreads half (pod c runs arXiv): `codesign` on goodreads, whole |
 | [`gr-reruns.sh`](gr-reruns.sh) | V-RERUN-V21: goodreads `filter` and goodreads-synth `synth` SilverTorch arms (triton + official, torch), V1 + V2 Triton (paired, one interleave group), V3 Triton |
 | [`v-gr-deep.sh`](v-gr-deep.sh) | V-GR-DEEP: goodreads `deep` |
-| [`v-yfcc-deep.sh`](v-yfcc-deep.sh), [`yfcc_calib_config.py`](yfcc_calib_config.py) | V-YFCC deep: one timed V3 calibration cell at 10 M (scratch config and tree), then the whole yfcc10m `deep` suite; the synth half runs as chunks ([`../v-yfcc/`](../v-yfcc/README.md)) |
+| [`v-yfcc-deep.sh`](v-yfcc-deep.sh), [`yfcc_deep_config.py`](yfcc_deep_config.py) | V-YFCC deep, claims-first: SilverTorch triton n_lists 4096 × n_probe {24, 256, 1024} (a cut of `deep`) + V2 bs 16 on `filter`; 4 cells |
 | [`boundary-gates.sh`](boundary-gates.sh), [`gate_smoke.py`](gate_smoke.py) | the V-V3BITS boundary: GPU library suite on the main checkout (H-INDCACHE's gate), then the campaign-v2.3 candidate (dev/ctl-v23, library 1258a63e): its GPU library suite on a fresh inductor cache and goodreads `filter` smoke cells per changed path, eager + graph, capture checked |
-| [`chain-v22.sh`](chain-v22.sh) | the v2.2 queue after V-V3BITS: V-GR-DEEP, V-YFCC deep, the synth chunks, one lock hold, stop file between legs |
+| [`v-router.sh`](v-router.sh) | V-ROUTER: the `router` suite on goodreads at seed 0, k 100, clause (18 cells; claims-first) |
+| [`c3-pair.sh`](c3-pair.sh) | C3's bs-1 pair: V1 Triton vs `torch.compile` V1 on goodreads-synth / arxiv-synth `p01` (records with quality; interleaved timing via `../v-prof3/prof3.py`) |
+| [`v-gr-deep-triton.sh`](v-gr-deep-triton.sh) | V-GR-DEEP's trimmed end: the SilverTorch-triton arm only, at campaign-v2.3 |
+| [`chain-legs.sh`](chain-legs.sh) | the queue as arguments (`v-gr-deep`, `v-router`, `v-yfcc-deep`, `v-yfcc-synth`), one lock hold, stop file between legs |
+| [`chain.sh`](chain.sh) | the queue after V-V3BITS (at the tag common.sh defaults to, now campaign-v2.5): V-GR-DEEP, V-YFCC deep, the synth chunks, one lock hold, stop file between legs |
 | [`v-seeds-yfcc.sh`](v-seeds-yfcc.sh) | V-SEEDS, YFCC half: yfcc10m `filter`, every arm |
 | [`h2h-diag.sh`](h2h-diag.sh) | H2H protocol diagnostic (controller addendum): goodreads `c0_genre` bloom bs 16 k 100 seed 0, the three h2h arms (a) interleaved + `--profile`, (b) interleaved, (c) one process per arm, orders abc / cba / bac; scratch trees, not a leg |
 | [`h2h_diag_config.py`](h2h_diag_config.py), [`h2h_diag_summary.py`](h2h_diag_summary.py) | its scratch config dirs (the real `h2h` suite cut to that cell) and its per-arm table |

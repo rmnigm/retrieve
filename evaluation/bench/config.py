@@ -41,7 +41,7 @@ _DATASET_KEYS = {"data_dir", "checkpoint", "content_dir", "dims", "encode", "use
 _DATASET_KEYS |= {"filters"}
 _FILTER_KEYS = {"attrs", "reverse", "query_attrs", "clause", "bloom"}
 _SUITE_KEYS = {"datasets", "dims", "filter_kinds", "ks", "batch_sizes", "arms", "seeds", "bloom"}
-_SUITE_KEYS |= {"sweeps", "ks_by_sweep", "perf", "interleave"}
+_SUITE_KEYS |= {"sweeps", "ks_by_sweep", "seeds_by_sweep", "perf", "interleave"}
 _ARM_KEYS = {"algo", "backends", "filter_kinds", "sweeps", "build", "query", "datasets"}
 _ENCODE = {"batch_size": 512, "num_workers": 8, "max_seq_length": 200}
 _BLOOM = {"m_bits": 1024, "k_hash": 5}
@@ -280,6 +280,11 @@ def _check_params(where: str, algo: str, fk: str, backend: str, build: dict, que
         raise ConfigError(f"{where}: compile is one of {COMPILE_MODES} on torch arms only")
     if "k_bits" in build and algo != "linr_v3":
         raise ConfigError(f"{where}: k_bits is a linr_v3 build param (its OPORP stage 1)")
+    router = {"pre_n_probe", "lq_threshold"}
+    if router & set(build) and algo != "router":
+        raise ConfigError(f"{where}: pre_n_probe / lq_threshold are build params of router only")
+    if algo == "router" and not router <= set(build):
+        raise ConfigError(f"{where}: router needs build params pre_n_probe and lq_threshold")
     if any("candidate_pool_frac" in q for q in query) and algo != "linr_v3":
         raise ConfigError(f"{where}: candidate_pool_frac is a linr_v3 query param")
 
@@ -435,6 +440,10 @@ def load_matrix(
     dims_ = _narrow([d for d in raw_dims if d in s.get("dims", raw_dims)], dims, "dim")
     fks = _narrow(s["filter_kinds"], filter_kinds, "filter-kind")
     sweep_ks = (s.get("ks_by_sweep") or {}).get(name) or {}
+    sweep_seeds = (s.get("seeds_by_sweep") or {}).get(name) or {}
+    for sw, sl in sweep_seeds.items():
+        if not isinstance(sl, list) or not sl or not all(isinstance(x, int) and x >= 0 for x in sl):
+            raise ConfigError(f"{where}: seeds_by_sweep.{name}.{sw} must be a list of ints >= 0")
     arm_algos = list(dict.fromkeys(a["algo"] for a in s["arms"]))
 
     jobs: list[Job] = []
@@ -445,6 +454,7 @@ def load_matrix(
         if suite_sweeps is not None:
             _known_sweeps(f"{where}: sweeps.{name}", suite_sweeps, ds)
         _known_sweeps(f"{where}: ks_by_sweep.{name}", list(sweep_ks), ds)
+        _known_sweeps(f"{where}: seeds_by_sweep.{name}", list(sweep_seeds), ds)
         for algo in _narrow(arm_algos, algos, "algo"):
             arms = [(i, a) for i, a in enumerate(s["arms"]) if a["algo"] == algo]
             arm_backends = list(dict.fromkeys(b for _, a in arms for b in a["backends"]))
@@ -498,7 +508,9 @@ def load_matrix(
                                 if not qs:
                                     continue
                                 widths = {k: build[k] for k in BLOOM_PARAMS & set(build)}
-                                for seed in _narrow(list(seed_list), seeds, "seed"):
+                                for seed in _narrow(
+                                    sweep_seeds.get(sweep, seed_list), seeds, "seed"
+                                ):
                                     cells = [
                                         (dim, algo, fk, sweep, path, _canon({**build, **q}), seed)
                                         for q in qs

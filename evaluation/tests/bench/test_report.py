@@ -406,6 +406,49 @@ def test_matched_recall_interpolates_names_its_bracket_and_emits_n95(tmp_path):
     assert "(n\\_probe=32 .. n\\_probe=64)" in tex and "not reached" in tex
 
 
+def test_matched_bands_give_qps_at_recall_per_selectivity_band(tmp_path):
+    """EXHIBITS idea #6: per band, the band's recall from the sidecars against the cell's latency,
+    interpolated at 0.95; QPS = B * 1000 / latency; an empty band blank; exact arms at their own
+    latency, with their recall where it misses the target."""
+    root = tmp_path / "results"
+    p = root / "deep" / "goodreads-d128.jsonl"
+    n = 797084
+    passes = np.array([int(0.005 * n)] * 40 + [int(0.3 * n)] * 40, dtype=np.int64)  # 2 bands
+    curve = (
+        (8, 0.80, 0.94, 1.0),
+        (16, 0.88, 0.97, 2.0),
+        (32, 0.93, 0.99, 3.0),
+        (64, 0.96, 1.0, 4.0),
+    )
+    for n_probe, low, high, ms in curve:
+        params = {"n_probe": n_probe, "n_lists": 1024}
+        rec = _rec("goodreads", "silvertorch", "triton", params=params, ms=ms)
+        rec = _with_sidecar(root, {**rec, "suite": "deep"}, [low] * 40 + [high] * 40,
+                            pass_count=passes)  # fmt: skip
+        records.append_record(p, rec)
+    v1 = _rec("goodreads", "linr_v1_filter_mask", "triton", ms=0.5)
+    records.append_record(p, _with_sidecar(root, {**v1, "suite": "deep"}, [1.0] * 40 + [0.9] * 40,
+                                           pass_count=passes))  # fmt: skip
+    _generate(root, tmp_path / "out", bands=(0.01, 0.1, 0.5))
+    dump = json.loads((tmp_path / "out" / "matched_bands.json").read_text())
+    st = next(d for d in dump if d["algo"] == "silvertorch" and d["bs"] == 1)
+    low, mid, high, top = st["bands"]
+    assert [b["band"] for b in st["bands"]] == ["p < 0.01", "0.01-0.1", "0.1-0.5", "p >= 0.5"]
+    scale = 2.2 / 2.0  # _rec's bs-1 latency of a 2 ms cell (test_matched_recall above)
+    assert low["bracket"] == ["n_probe=32", "n_probe=64"]
+    assert low["latency"] == pytest.approx(scale * (3.0 + 0.02 / 0.03))  # 0.93 -> 0.96
+    assert high["bracket"] == ["n_probe=8", "n_probe=16"]
+    assert high["latency"] == pytest.approx(scale * (1.0 + 0.01 / 0.03))  # 0.94 -> 0.97
+    assert mid["latency"] is None and top["latency"] is None  # no query in those bands
+    tex = (tmp_path / "out" / "tables" / "tab-matched_bands.tex").read_text()
+    row = next(ln for ln in tex.splitlines() if "n\\_probe" in ln and "& $1$ &" in ln)
+    assert f"${1000 / low['latency']:,.0f}$".replace(",", "{,}") in row and "---" in row
+    exact = next(ln for ln in tex.splitlines() if "(exact)" in ln and "& $1$ &" in ln)
+    qps = f"${1000 / (0.5 * scale):,.0f}$".replace(",", "{,}")
+    assert f"& {qps} & --- & {qps} (recall 0.900) & --- " in exact  # low band 1.0, high 0.9
+    assert "per-cell latency, an assumption" in tex
+
+
 # ----- G-report: a schema-4 campaign tree, every arm of every suite (the record contract) ---
 
 N_ITEMS = {"goodreads": 797_084, "arxiv": 2_984_617, "yfcc10m": 9_998_311, "pubmed": 10_000_000}
@@ -433,6 +476,7 @@ def _rec4(
     interleave=None,
     kernels=None,
     kernels_us=None,
+    scopes=None,
     ids="a",
     fp_rate=None,
     source=None,
@@ -471,6 +515,8 @@ def _rec4(
                     e["kernels"] = kernels
                 if kernels_us and mode == "eager":
                     e["kernels_us"], e["kernels_calls"] = kernels_us
+                if scopes and mode == "eager":
+                    e["kernel_scopes"] = scopes
                 entries.append(e)
     rec |= {
         "schema_version": 4,
@@ -819,11 +865,21 @@ def _campaign_tree(root):
         g = f"h2h-goodreads-{s}"
         # int32: seed 1 returns another tied id at the k-th cut (scores bit-equal); fp16: other
         # ids and other scores. Triton is profiled over every kernel, official top-8 only.
-        for pos, (be, params, ms, ids, diff, kus) in enumerate(
+        # H-SCOPE: triton and official fp16 carry kernel_scopes, int32 does not (an older record)
+        sc = lambda us: {"scorer": {"us": us, "calls": 1}, "other": {"us": 1.0, "calls": 1}}  # noqa: E731
+        for pos, (be, params, ms, ids, diff, kus, scopes) in enumerate(
             (
-                ("triton", {"n_probe": 24}, 0.4, "x", None, (75.0, 7)),
-                ("official", {"n_probe": 24, "score_path": "fp16"}, 0.6, "y", 9.77e-3, None),
-                ("official", {"n_probe": 24, "score_path": "int32"}, 0.8, "xz"[s], 0.0, None),
+                ("triton", {"n_probe": 24}, 0.4, "x", None, (75.0, 7), sc(30.0 + s)),
+                (
+                    "official",
+                    {"n_probe": 24, "score_path": "fp16"},
+                    0.6,
+                    "y",
+                    9.77e-3,
+                    None,
+                    sc(60.0),
+                ),
+                ("official", {"n_probe": 24, "score_path": "int32"}, 0.8, "xz"[s], 0.0, None, None),
             )
         ):
             _rec4(
@@ -840,6 +896,7 @@ def _campaign_tree(root):
                 ks=(100, 1000),
                 kernels=kern,
                 kernels_us=kus,
+                scopes=scopes,
                 ids=ids,
                 score_diff=diff,
                 interleave=_group(g, arms, pos),
@@ -962,9 +1019,13 @@ def test_t3_pairs_the_interleaved_arms_and_checks_id_identity(campaign):
     assert "$1.50\\times\\,[1.50, 1.50]$" in fp16 and "& $\\neq$ &" in fp16
     graph = next(ln for ln in t3.splitlines() if "[triton]" in ln and "& graph &" in ln)
     assert "& $=$ &" in graph  # the canonical hash is the eager arm's at every seed
-    assert "& $50.0^{8}$ & $3$ &" in int32  # no kernels_us: the top-8 sum, marked
+    assert "& $50.0^{8}$ & --- & $3$ &" in int32  # no kernels_us: the top-8 sum; no scopes: ---
     eager = next(ln for ln in t3.splitlines() if "[triton]" in ln and "& eager &" in ln)
-    assert "& $75.0$ & $7$ &" in eager  # kernels_us / kernels_calls, every kernel
+    # kernels_us / kernels_calls, every kernel; scorer = kernel_scopes' scorer, median over seeds
+    assert "& $75.0$ & $30.5$ & $7$ &" in eager
+    assert "& $60.0$ & $3$ &" in fp16  # official fp16: top-8 sum (no kernels_us), its scorer scope
+    graph_sc = next(ln for ln in t3.splitlines() if "[triton]" in ln and "& graph &" in ln)
+    assert "& --- & --- & --- &" in graph_sc  # graph mode is not profiled
 
 
 def test_f3_draws_one_panel_per_sweep_and_batch_size(campaign, monkeypatch):
@@ -1064,7 +1125,7 @@ def test_the_manifest_selects_quality_and_perf_by_their_accepted_code_version(tm
 
 def test_the_shipped_manifest_and_claims_load():
     m = report.load_manifest(report.CLAIMS.parent / "campaign.yaml")
-    assert m["default"]["quality"]["code_version"] == "1258a63e7ebd170d7270111b5206b4ea0b8ca7f9"
+    assert m["default"]["quality"]["code_version"] == "472f2fc68c697179b463d3b5a6b19ade194e6e2f"
     assert all(len(e[s]["code_version"]) == 40 for e in m["entries"] for s in ("quality", "perf"))
     claims = yaml.safe_load(report.CLAIMS.read_text())["claims"]
     assert [c["id"] for c in claims] == [f"C{i}" for i in range(1, 8)]

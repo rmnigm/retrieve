@@ -407,7 +407,9 @@ builders with the filters package, not the module classes:
   query from Python-int constants — still no copy). **Which signature buffer is
   registered depends on the backend**: `"triton"` / `"torch"` store the
   transposed index `bloom_transposed[m_bits, ceil(N/64)]`
-  ([kernels](kernels.md#codesigned_probe_score--ivf--int8--bloom)); `"official"` stores Meta's own index — `bloom_index[W]` int64 and
+  ([kernels](kernels.md#codesigned_probe_score--ivf--int8--bloom)) and its per-bit item frequency
+  `bloom_bit_freq[m_bits]` fp32 (the Triton scorer's skip gate; kernels.md "Gated tile skip");
+  `"official"` stores Meta's own index — `bloom_index[W]` int64 and
   `bundle_b_offsets[n_bundles+1]` from `torch.ops.st.bloom_index_build`
   over the cluster-sorted attrs (their murmur3 hash, width set by
   `OfficialConfig.b_multiplier`; `m_bits` is optional and ignored, `k_hash`
@@ -524,7 +526,7 @@ not a kernel of ours at all:
 [`ops/official/`](../../retrieve/src/retrieve/ops/official/adapter.py)
 adapts Meta's `torch.ops.st.*` ops (measured on the A100: 19 launches
 and 3 host syncs per unfiltered forward, ≈ 32 launches and ≥ 5 syncs
-with bloom). Ten of the twelve ops are registered with
+with bloom). Eleven of the thirteen ops are registered with
 `@torch.library.triton_op` so inductor can see the `@triton.jit` body; the
 two stream-compaction kernels (`clause_compact`, `bloom_compact`) are
 opaque `@torch.library.custom_op`s instead, because their data-dependent
@@ -543,6 +545,7 @@ mechanism, in [kernels.md](kernels.md).
 | `ops.triton` | [`bloom_match`](../../retrieve/src/retrieve/ops/triton/bloom_match.py) — bool subset test | `BloomFilter.evaluate_mask` |
 | `ops.triton` | [`bloom_match_scores`](../../retrieve/src/retrieve/ops/triton/bloom_match.py) — the same test writing `scores` or `-inf` | `BloomFilter.mask_scores` (`LiNRV1`) |
 | `ops.triton` | [`codesigned_probe_score` / `_bloom`](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py) — fused IVF + INT8 (+ Bloom) | `SilverTorch(filter_mode="none" \| "bloom")` |
+| `ops.triton` | [`bloom_full_mask`](../../retrieve/src/retrieve/ops/triton/bloom_full_mask.py) — the bloom subset test over all N, packed `[B, ceil(N / 64)]` | `SilverTorch(filter_mode="bloom", bloom_path="full")` |
 | `ops.triton` | [`codesigned_probe_score_exact`](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score_exact.py) — fused IVF + INT8 + exact AND-of-OR | `SilverTorch(filter_mode="exact")` |
 | `ops.official` | [`official_probe_score`, `bloom_partial_masks`, `bloom_filtering_mask`, …](../../retrieve/src/retrieve/ops/official/adapter.py) — adapter over Meta's `torch.ops.st.fused_kmean_ann*` / bloom ops (no kernel of ours; eager-only) | `SilverTorch(backend="official")` |
 

@@ -310,11 +310,15 @@ buffers inside `index_mib`). `build(algo, item_embs, k=, backend=,
 filter_kind=, filter_mod=, item_attrs=, clause_is_reverse=, params=,
 seed=)` is the one factory; it refuses `None`-path cells and `n_probe >
 n_lists`. The build param `bloom_path` (`partial` | `full`, the S9
-co-design ablation) becomes `SilverTorch(official=OfficialConfig(bloom_path=…))`
-through `algos.official_config`; it exists on `silvertorch / bloom /
-official` only (anywhere else `load_matrix` raises `ConfigError`), and
-without the key the library default `OfficialConfig()` runs, which is
-`bloom_path="partial"`. `params` are the merged build + query params over
+co-design ablation) exists on `silvertorch / bloom` on two backends
+(anywhere else `load_matrix` raises `ConfigError`):
+- **official:** `SilverTorch(official=OfficialConfig(bloom_path=…))`,
+  through `algos.official_config`;
+- **triton:** the layer's own `SilverTorch(bloom_path=…)` (C5-OURS,
+  [kernels](kernels.md#bloom_full_mask--the-full-n-mask-bloom_pathfull)).
+
+Without the key the library default runs, which is `bloom_path="partial"`
+on both. `params` are the merged build + query params over
 `algos.SILVERTORCH_DEFAULTS` (`n_lists 1024, n_probe 24, n_iter 10`); on
 `silvertorch` bloom cells `run.py` merges the suite's `bloom` defaults
 (`m_bits`, `k_hash`) in as well. The probe-pool check is the library's,
@@ -344,6 +348,23 @@ report can show what a naive system pays in latency to recover recall;
 current `k` at every forward, so perf at `k` and quality at `k` (the
 per-`k` pass, `run.PER_K_QUALITY`) measure the same pool. Torch backend
 only, clause and bloom filter kinds; capturable.
+
+### The router arm
+
+`router` ([`bench/router.py`](../../evaluation/bench/router.py), roadmap V-ROUTER) routes each query
+by its **local pass rate** `l_q`: the share of its unfiltered top-100 that its filter admits (EXHIBITS
+idea #2: IVF recall follows `l_q`, not the global pass rate). `algos.build("router", …)` assembles
+three parts with the ordinary builders and one seed, so both SilverTorch indexes share one k-means:
+an unfiltered SilverTorch pre-probe (`pre_n_probe`, k 100), a filtered SilverTorch (`n_lists`,
+`n_probe`, the IVF branch) and exact LiNR V2 on the standalone filter. `forward` runs the pre-probe,
+takes `l_q` from the filter's `evaluate_subset` on its 100 ids, sends the rows with `l_q <
+lq_threshold` to V2 and the others to the IVF branch (each on its own sub-batch), and scatters the
+results back; the pre-probe is inside `forward`, so the arm's timing includes it. The split is
+data-dependent: `capturable = False`, so `graph` records `not_capturable`. Build params
+`pre_n_probe`, `lq_threshold` (router only, both required, a `ConfigError` otherwise); query param
+`n_probe` (the IVF branch). The quality pass writes `router_lq` and `router_exact` (1.0 = V2) per
+kept query to the per-query sidecar and `quality.router_exact_share` to the record. Triton and
+torch backends, clause and bloom.
 
 ## Config: one YAML per dataset + `suites.yaml`
 
@@ -391,11 +412,12 @@ unfiltered `quality` suite ([decisions](../decisions.md#harness)); synth's
 |---|---|---|---|
 | `filter` | goodreads, arxiv, yfcc10m, pubmed, three kept sweeps each (yfcc10m: `tags_and`) | V1, V2, V3 (pool 5000) triton; `silvertorch` triton clause + bloom and official bloom at the dataset's tuned `n_lists` and `n_probe` {24, n95} ([IVF tuning](#ivf-tuning)); `silvertorch` torch (#12) and torch compiled (#13) at 24 on the same `n_lists`, goodreads + arxiv only; `postfilter` alpha {1, 8} | T2, C3, C6 |
 | `deep` | goodreads, arxiv, yfcc10m, kept sweeps | `silvertorch` triton clause + bloom, official bloom: `n_lists` per dataset (goodreads {1024, 4096}, arxiv {1664, 8192}, yfcc10m {4096, 16384}) × `n_probe` {8, 16, 32, 64, 128}; V3 `candidate_pool_frac` {0.005, 0.01, 0.02, 0.05, 0.1} | F3, C6 |
-| `synth` | goodreads-, arxiv-, yfcc10m-synth (uniform) and arxiv-corr-synth (cluster-correlated, `c001` `c003` `c01`, d128, arxiv-synth's `n_lists` so the two curves pair) ([datasets](datasets.md#synthetic-selectivity-attrs)) | V1, V2 triton; V3 `candidate_pool_frac` {0.01, 0.05}; `silvertorch` triton clause `n_probe` {24, 64, 128, 256, 512, 1024} (yfcc10m-synth {24, 256, 1024}), triton and official bloom {24, 256}, every SilverTorch arm at its real dataset's tuned `n_lists` (none caps the sweep); `postfilter` {1, 8}; V1 / V2 torch, eager and compiled, on `p001, p01, p1`, goodreads + arxiv only. k 1000 is dropped where N·p < 4000 (goodreads `p0001`, `p0003`; arxiv `p0001`) | F1, F2, C1, C2, C6 |
-| `codesign` | arxiv (kept sweeps), goodreads (`c0_genre, c2_format, c3_year`) | official bloom, `bloom_path` {partial, full} × `n_probe` {8, 32, 128}, `n_lists` arxiv 1664 / goodreads 1024, k 100 | F4b, C5 |
+| `synth` | goodreads-, arxiv-, yfcc10m-synth (uniform) and arxiv-corr-synth (cluster-correlated, `c001` `c003` `c01`, d128, arxiv-synth's `n_lists` so the two curves pair) ([datasets](datasets.md#synthetic-selectivity-attrs)); sized by claim (SYNTH-TRIM, 2026-10-10): seed 0 everywhere but goodreads-synth's first seven rates (seeds 0-2, the pilot's cells) | **arxiv-synth** (`p0001 p001 p005 p01 p02 p05 p1`, 46 cells): V1, V2 triton clause; `silvertorch` triton clause `n_probe` {24, 64, 256, 1024}; triton and official bloom `n_probe` 24 at `p001`, `p1`. **yfcc10m-synth** (`p001 p01 p02 p05 p1`, k 100, 25 cells): V1, V2 triton clause; `silvertorch` triton clause {24, 256, 1024}. **arxiv-corr-synth** (42 cells): V3 `candidate_pool_frac` {0.01, 0.05}; `silvertorch` triton clause {24, 64, 128, 256, 512, 1024}; `postfilter` {1, 8}. **goodreads-synth** (all ten rates, 558 cells): on the first seven, V1, V2 triton clause + bloom, V3, `silvertorch` triton clause {24, 64, 128, 256, 512, 1024} and triton + official bloom {24, 256}, `postfilter`, V1 / V2 torch eager and compiled on `p001, p01, p1`; on `p005 p02 p05` V1, V2 clause and the SilverTorch clause sweep. Every SilverTorch arm at its real dataset's tuned `n_lists`. k 1000 is dropped where N·p < 4000 (goodreads `p0001`, `p0003`; arxiv `p0001`) | F1, F2, C1, C6 (C2 on corr) |
+| `codesign` | arxiv (kept sweeps), goodreads (`c0_genre, c2_format, c3_year`) | official and triton bloom, `bloom_path` {partial, full} × `n_probe` {8, 32, 128}, `n_lists` arxiv 1664 / goodreads 1024, k 100 | F4b, C5 |
 | `bloomwidth` | goodreads `c0_genre`, arxiv kept, pubmed `c0_mesh` | `silvertorch` triton bloom `m_bits` {64 … 2048} × `k_hash` {3, 5}; official bloom `k_hash` {3, 5} (its width is `OfficialConfig.b_multiplier`, not `m_bits`); bs 16; quality only (`perf: false`) | F4a, C4 |
 | `bloomwidth-timed` | the same | the same widths at `k_hash` 5 (official: its one width), k 100, bs 16, timed | F4a |
-| `v3bits` | goodreads-synth (7 rates), goodreads (`filter`'s kept sweeps) | V3 triton only, `k_bits` {64, 128} × `candidate_pool_frac` {0.01, 0.05}, clause + bloom, seeds 0-2, bs {1, 16}, k {100, 1000} (synth's `ks_by_sweep`); LiNR's 512 bits would need a library change (declined) | C2 (V-V3BITS) |
+| `v3bits` | goodreads-synth (its first 7 rates), goodreads (`filter`'s kept sweeps); pubmed d768 (`filter`'s kept sweeps, clause only) | V3 triton only, `candidate_pool_frac` {0.01, 0.05}, seeds 0-2, bs {1, 16}, k {100, 1000} (synth's `ks_by_sweep`); goodreads `k_bits` {64, 128}, clause + bloom; pubmed `k_bits` {256, 768} (256 divides 768 and sits below LiNR's 512; 768 is the default, the comparison), clause only (bloom adds false-positive noise to a bits question), one arm per side so the goodreads keys are unchanged. LiNR's 512 bits at d128 would need a library change (declined) | C2 (V-V3BITS, V3-BITS-PUBMED) |
+| `router` | goodreads (kept sweeps; arXiv and PubMed get the fitted threshold afterwards) | `router` triton, `pre_n_probe` 8, `lq_threshold` {0.02, 0.05, 0.1, 0.2}, IVF branch `n_lists` 4096 / `n_probe` 24; its branches V2 triton and SilverTorch triton (4096 / 24) beside it; clause + bloom, seeds 0-2, bs {1, 16}, k {100, 1000} | F2 / T2 practical take (V-ROUTER) |
 | `h2h` | goodreads `c0_genre`, arxiv `c0_maincat`, `none` + `bloom`, d128 | `silvertorch` triton and official with `score_path` {fp16, int32}, `n_probe` 24, bs {1, 16}, k {100, 1000}, seeds {0 … 4} (the repeats); one interleave group of the three arms; run with `--interleave --profile` | T3, C7 (H2H-final) |
 
 ### IVF tuning
@@ -420,12 +442,17 @@ explicitly (user, 2026-10-08). A slot left `{}` runs at the library default `n_l
 `n_probe` 24 only. n95 / `n_lists` depends on the pass rate as well as N: goodreads `c0_genre`
 (0.33) needs `n_lists` / 64, and PubMed `all5` (0.018) needs more than `n_lists` / 16.
 
-`codesign` is the S9 ablation of the official backend's bloom path:
-`partial` (fused partial masks over the probed clusters, the library
-default, which every `filter` / `deep` official cell runs with the key
-absent) against `full` (a full-N bool mask, then IVF). Both arms carry
-`bloom_path` in `params`, so their keys never collide with the `filter` /
-`deep` official cells; latency and `peak_fwd_mib` are the compared fields.
+`codesign` is the S9 ablation of the bloom path, on both backends.
+- **official:** `partial` (fused partial masks over the probed clusters,
+  the library default, which every `filter` / `deep` official cell runs
+  with the key absent) against `full` (a full-N bool mask, then IVF).
+- **triton** (C5-OURS): our fused scorer against `bloom_full_mask`, then
+  the same scorer. This separates the co-design idea from Meta's
+  implementation of it.
+
+`--interleave` pairs partial and full of one backend per group. Every
+cell carries `bloom_path` in `params`, so no key collides with the
+`filter` / `deep` cells; latency and `peak_fwd_mib` are the compared fields.
 `bloomwidth` declares `perf: false`: `load_matrix` sets
 `Job.timed = False`, `run` skips perf on their jobs without being asked, and
 their records are `ok` (a `--skip-perf` record of a timed suite is `partial`,
@@ -467,6 +494,7 @@ filter:
     - {by: [backend, score_path]}   # algo, backend or build params
   sweeps: {goodreads: [c0_genre, c1_lang_reverse, all4], ...}   # optional per-dataset selector
   ks_by_sweep: {goodreads-synth: {p0001: [100]}}                # optional per-(dataset, sweep) ks
+  seeds_by_sweep: {arxiv-synth: {p001: [0, 1, 2]}}              # optional per-(dataset, sweep) seeds, replacing `seeds`
   arms:
     - {algo: linr_v1_filter_mask, backends: [triton]}
     - algo: silvertorch
@@ -1034,10 +1062,10 @@ identities named; report each encoder from its own tree.
 | `pareto` | `tables/tab-pareto_<dataset>.tex` | sweep × arm (one row per parameter set): oracle recall, `median_ms`, speedup vs LiNR V1, `index_mib` (`tab:pareto_<dataset>`) |
 | `memory` | `tables/tab-memory.tex` | `index_mib`, datasets × algos (`tab:memory`) |
 | `parity` | `tables/tab-backend_parity.tex` | per `(dataset, sweep, algo, backend)`: `path`, `jaccard_vs_first@k`, `score_max_abs_diff`, eager vs graph median and their ratio |
-| `matched` | `tables/tab-matched_recall.tex`, `matched_recall.json` | per recall curve (SilverTorch along `n_probe`, one curve per `n_lists` / filter kind / backend / suite; V3 along `candidate_pool` or `candidate_pool_frac`) and batch size: latency at `recall_oracle@k` 0.90 and 0.95 with the two bracketing points named, or why not; `n95` per SilverTorch curve, the smallest measured `n_probe` with recall ≥ 0.95 — the value the campaign writes into `suites.yaml` (`tab:matched_recall`) A curve is emitted once per *timed* batch size, so a curve with no perf entries (a `perf: false` suite: `n95`, `bloomwidth`) is not emitted and neither is its `n95`; the `n95` suite's value is read off the records with [`n95.py`](../artifacts/campaign-v2/v-pubmed/n95.py) |
+| `matched` | `tables/tab-matched_recall.tex`, `matched_recall.json` | per recall curve (SilverTorch along `n_probe`, one curve per `n_lists` / filter kind / backend / suite; V3 along `candidate_pool` or `candidate_pool_frac`) and batch size: latency at `recall_oracle@k` 0.90 and 0.95 with the two bracketing points named, or why not; `n95` per SilverTorch curve, the smallest measured `n_probe` with recall ≥ 0.95 — the value the campaign writes into `suites.yaml` (`tab:matched_recall`) A curve is emitted once per *timed* batch size, so a curve with no perf entries (a `perf: false` suite: `n95`, `bloomwidth`) is not emitted and neither is its `n95`; the `n95` suite's value is read off the records with [`n95.py`](../artifacts/campaign-v2/v-pubmed/n95.py); with `--bands e1,e2,…` also `tables/tab-matched_bands.tex` / `matched_bands.json`: QPS at `recall_oracle@k` 0.95 per selectivity band (`[0, e1)`, …, `[e_last, 1]`), each band's recall the mean per-query recall of the cell's queries whose own pass rate (`pass_count / n_items`) falls in it (≥ 20 queries, else `---`) against the cell's latency, interpolated as above; exact arms (V1, V2) at their own latency, recall shown where below 0.95 (EXHIBITS idea #6) |
 | `t1` | `tables/tab-t1_claims.tex` | T1, the claims table: per claim C1–C7 of [`evaluation/claims.yaml`](../../evaluation/claims.yaml) the original number and source, "ours" from the yaml's record selectors, the hand-written verdict (`---` while `null`) |
 | `t2` | `tables/tab-t2_<dataset>.tex` | T2, real filters (`filter` suite, goodreads / arxiv / yfcc10m / pubmed): per sweep, every arm at the operating point (SilverTorch `n_probe` 24) and SilverTorch at matched recall 0.95, recall@100 and p50 at bs 1 and 16 |
-| `t3` | `tables/tab-t3.tex` | T3, official vs Triton (`h2h` suite): per cell, `k`, `bs`, arm and mode: p50 with CI, the paired ratio over Triton eager, kernel-only µs and launches (`kernels_us` / `kernels_calls`, every kernel of the `--profile` call; a record without them shows the top-8 sum marked $^{8}$), `index_mib`, `peak_fwd_mib`, `ids_sha256_canon` identity with Triton eager per common seed: `=` (equal up to tied-id order), `= (ties)` (equal up to boundary ties: where the hash differs, `quality_score_max_abs_diff` is exactly 0, so only a tied id at the k-th cut differs), else `≠`; jaccard, max score difference |
+| `t3` | `tables/tab-t3.tex` | T3, official vs Triton (`h2h` suite): per cell, `k`, `bs`, arm and mode: p50 with CI, the paired ratio over Triton eager, kernel-only µs and launches (`kernels_us` / `kernels_calls`, every kernel of the `--profile` call; a record without them shows the top-8 sum marked $^{8}$), the like-for-like scorer µs (`kernel_scopes["scorer"]`, H-SCOPE; `---` on records without scopes), `index_mib`, `peak_fwd_mib`, `ids_sha256_canon` identity with Triton eager per common seed: `=` (equal up to tied-id order), `= (ties)` (equal up to boundary ties: where the hash differs, `quality_score_max_abs_diff` is exactly 0, so only a tied id at the k-th cut differs), else `≠`; jaccard, max score difference |
 | `f1` | `figures/fig-f1-latency-vs-pass-rate.png` | F1: p50 vs pass rate on the `*-synth` datasets (log x), one panel per scale × bs; V1, V2, V3 per pool, postfilter per alpha, SilverTorch Triton at matched recall 0.95 |
 | `f2` | `figures/fig-f2-recall-vs-pass-rate.png` | F2: `recall_oracle@100` vs pass rate; synth SilverTorch per measured `n_probe` and V3 per pool, the real `filter` sweeps overlaid as per-query pass-rate buckets from the sidecars |
 | `f3` | `figures/fig-f3-pareto.png` | F3: the `deep` suite's recall–latency curves (matched-recall curves), one panel per (dataset, sweep) × bs (one row per sweep), filter kinds as separate curves, 0.90 / 0.95 marked |

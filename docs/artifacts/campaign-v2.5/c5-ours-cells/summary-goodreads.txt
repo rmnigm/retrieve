@@ -1,0 +1,22 @@
+records: 18 ok: 18 unstable: 18 code_version: ['472f2fc6']
+sweep             np bs mode   partial     full           full/partial    MiB p    MiB f ids
+c0_genre           8  1 eager    0.730    0.939    1.293 [1.283,1.311]     0.17     0.26 equal
+c0_genre           8  1 graph    0.142    0.142    0.999 [0.998,1.004]        -        - equal
+c0_genre           8 16 eager    0.757    0.967    1.278 [1.276,1.285]     2.61     4.35 equal
+c0_genre           8 16 graph    0.141    0.143    1.019 [1.008,1.020]        -        - equal
+c0_genre          32  1 eager    0.744    0.956    1.284 [1.281,1.285]     0.31     0.41 equal
+c0_genre          32  1 graph    0.141    0.141    1.005 [1.001,1.011]        -        - equal
+c0_genre          32 16 eager    0.753    0.964    1.281 [1.273,1.282]     4.68     6.42 equal
+c0_genre          32 16 graph    0.167    0.173    1.043 [1.038,1.044]        -        - equal
+c0_genre         128  1 eager    0.734    0.946    1.288 [1.287,1.292]     0.78     0.88 equal
+c0_genre         128  1 graph    0.142    0.143    1.013 [1.006,1.014]        -        - equal
+c0_genre         128 16 eager    0.756    0.969    1.282 [1.280,1.282]    11.35    12.90 equal
+c0_genre         128 16 graph    0.322    0.311    0.965 [0.963,0.967]        -        - equal
+recall_oracle@100 (median over seeds):
+  ('c0_genre', 8, 'full') 0.8258
+  ('c0_genre', 8, 'partial') 0.8258
+  ('c0_genre', 32, 'full') 0.9601
+  ('c0_genre', 32, 'partial') 0.9601
+  ('c0_genre', 128, 'full') 0.9832
+  ('c0_genre', 128, 'partial') 0.9832
+windows 216, below 1410 MHz 90, min 1140.0

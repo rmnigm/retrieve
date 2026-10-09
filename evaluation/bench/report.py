@@ -776,9 +776,124 @@ def tab_matched(c) -> list[Path]:
             + STATS_NOTE,
         ]),
     )  # fmt: skip
-    return [
+    written = [
         _write(c.out / "tables" / "tab-matched_recall.tex", tex),
         _write(c.out / "matched_recall.json", json.dumps(dump, indent=1) + "\n"),
+    ]
+    return written + (tab_matched_bands(c) if getattr(c, "bands", None) else [])
+
+
+BAND_MIN_QUERIES = 20  # a band with fewer of a cell's queries is left blank
+BAND_TARGET = 0.95
+EXACT_ARMS = ("linr_v1_filter_mask", "linr_v2")
+
+
+def _band_edges(bands: tuple[float, ...]) -> list[tuple[float, float]]:
+    """``(0.01, 0.1, 0.5)`` → ``[0, 0.01), [0.01, 0.1), [0.1, 0.5), [0.5, 1]``."""
+    cuts = (0.0, *bands, float("inf"))
+    return list(zip(cuts, cuts[1:], strict=False))
+
+
+def _band_label(lo: float, hi: float) -> str:
+    return (
+        f"p < {hi:g}" if lo == 0 else (f"p >= {lo:g}" if hi == float("inf") else f"{lo:g}-{hi:g}")
+    )
+
+
+def _band_recall(c, rows: list[dict[str, Any]], k: int) -> list[tuple[float | None, int]]:
+    """Per band: the mean ``recall_oracle@k`` over the cell's queries whose own pass rate
+    (``pass_count / n_items``) falls in it (averaged over the arm's distinct sidecars, as
+    ``_recall``), and their count; ``None`` below ``BAND_MIN_QUERIES`` or without sidecars."""
+    paths = tuple(sorted({r["_rec"]["per_query"] for r in rows if r["_rec"].get("per_query")}))
+    edges = _band_edges(c.bands)
+    if not paths:
+        return [(None, 0)] * len(edges)
+    cars = [_sidecar(c.results_dir / p) for p in paths]
+    rec = np.stack([z[f"recall_oracle@{k}"] for z in cars]).mean(axis=0)
+    rate = cars[0]["pass_count"] / rows[0]["_rec"]["n_items"]
+    out = []
+    for lo, hi in edges:
+        m = (rate >= lo) & (rate < hi) & ~np.isnan(rec) & (cars[0]["pass_count"] >= 0)
+        n = int(m.sum())
+        out.append((float(rec[m].mean()) if n >= BAND_MIN_QUERIES else None, n))
+    return out
+
+
+def _qps_cell(bs: int, hit: dict[str, Any]) -> str:
+    if hit.get("latency") is None:
+        return _esc(hit.get("reason", "---"))
+    return f"${bs * 1000 / hit['latency']:,.0f}$ ({_esc(' .. '.join(hit['bracket']))})".replace(
+        ",", "{,}"
+    )
+
+
+def tab_matched_bands(c) -> list[Path]:
+    """QPS at recall_oracle@k = 0.95 per selectivity band (Big-ANN style; EXHIBITS idea #6):
+    per curve, per band, the band's recall at each point from the per-query sidecars against
+    the cell's own latency, interpolated at 0.95; the exact arms at their own latency."""
+    edges = _band_edges(c.bands)
+    body, dump = [], []
+    for cv in curves(c, c.rows, c.k):
+        band_q = [(x, _band_recall(c, _cells(rs), c.k), rs) for x, _, rs in cv["points"]]
+        bss = sorted({r["perf_bs"] for _, _, rs in cv["points"] for r in rs if r.get("perf_bs")})
+        for bs in bss:
+            hits = []
+            for b in range(len(edges)):
+                pts = []
+                for x, bq, rs in band_q:
+                    t = _lat(_timed(rs, bs, c.k)[0])
+                    if bq[b][0] is not None and t is not None:
+                        pts.append((bq[b][0], t["value"], f"{cv['axis']}={x}"))
+                hits.append(
+                    stats.at_recall(pts, BAND_TARGET) if pts else {"latency": None, "reason": "---"}
+                )
+            body.append([
+                f"{DATASET_LABEL.get(cv['dataset'], cv['dataset'])} d{cv['dim']}",
+                f"{_esc(cv['sweep'])} ({cv['filter_kind']}, {_esc(cv['suite'])})",
+                _curve_label(cv), f"${bs}$", *[_qps_cell(bs, h) for h in hits],
+            ])  # fmt: skip
+            bands = [{"band": _band_label(*e), **h} for e, h in zip(edges, hits, strict=True)]
+            dump.append({"dataset": cv["dataset"], "sweep": cv["sweep"], "algo": cv["algo"],
+                         "backend": cv["backend"], "params": json.loads(cv["rest"]), "bs": bs,
+                         "bands": bands})  # fmt: skip
+    exact = [r for r in c.rows if r["algo"] in EXACT_ARMS and r.get("filter_kind") != "none"]
+    for key in sorted({(r["dataset"], r["dim"], r["suite"], r["filter_kind"], r["sweep"], r["algo"],
+                        r["backend"]) for r in exact}):  # fmt: skip
+        ds, dim, suite, fk, sw, algo, be = key
+        rs = [r for r in exact if (r["dataset"], r["dim"], r["suite"], r["filter_kind"], r["sweep"],
+                                   r["algo"], r["backend"]) == key]  # fmt: skip
+        bq = _band_recall(c, _cells(rs), c.k)
+        for bs in sorted({r["perf_bs"] for r in rs if r.get("perf_bs")}):
+            t = _lat(_timed(rs, bs, c.k)[0])
+            cells = []
+            for q, _ in bq:
+                if q is None or t is None:
+                    cells.append("---")
+                else:
+                    qps = f"${bs * 1000 / t['value']:,.0f}$".replace(",", "{,}")
+                    cells.append(qps if q >= BAND_TARGET else f"{qps} (recall {q:.3f})")
+            body.append([f"{DATASET_LABEL.get(ds, ds)} d{dim}", f"{_esc(sw)} ({fk}, {_esc(suite)})",
+                         f"{ALGO_LABEL.get(algo, algo)} (exact)", f"${bs}$", *cells])  # fmt: skip
+    tex = _table(
+        c.prov, c.results_dir,
+        caption=f"QPS at \\texttt{{recall\\_oracle@{c.k}}} $= {BAND_TARGET}$ per selectivity "
+                "band ($B \\cdot 1000$ / latency at matched recall).",
+        label="tab:matched_bands",
+        colspec="lllc" + "c" * len(edges),
+        header=["Dataset", "Sweep", "Curve", "$B$", *[_esc(_band_label(*e)) for e in edges]],
+        body=body,
+        notes=_legend([
+            "A band's recall is the mean per-query \\texttt{recall\\_oracle} over the cell's "
+            f"queries whose own pass rate falls in it (at least {BAND_MIN_QUERIES}, else ---), "
+            "taken against the cell's latency over all its queries: per-query recall in a band "
+            "with per-cell latency, an assumption, not a band-only measurement. Interpolated "
+            "between the two bracketing points (named), never extrapolated; exact arms at their "
+            "own latency, recall shown where below the target. " + STATS_NOTE,
+        ]),
+    )  # fmt: skip
+    return [
+        _write(c.out / "tables" / "tab-matched_bands.tex", tex),
+        _write(c.out / "matched_bands.json", json.dumps(dump, indent=1) + "\n"),
     ]
 
 
@@ -1096,6 +1211,18 @@ def _ids_identity(sub: list[dict[str, Any]], ref: list[dict[str, Any]]) -> str:
     return "$\\neq$"
 
 
+def _scorer(rows: list[dict[str, Any]]) -> float | None:
+    """The like-for-like scorer time (us) of one eager call, median over seeds: the entry's
+    ``kernel_scopes["scorer"]`` (H-SCOPE: ours with its fused bloom test, Meta's scoring with its
+    payload and bloom-search kernels). ``None`` for records profiled before the scopes existed."""
+    us = [
+        e["kernel_scopes"]["scorer"]["us"]
+        for r in rows
+        if (e := r["_entry"]) and e.get("kernel_scopes")
+    ]
+    return statistics.median(us) if us else None
+
+
 def tab_t3(c) -> list[Path]:
     """T3: official against our Triton reimplementation, from the interleaved ``h2h`` suite."""
     rows = _sel(c.rows, suite="h2h")
@@ -1114,6 +1241,7 @@ def tab_t3(c) -> list[Path]:
                         if t is None:
                             continue
                         us, calls, top8 = _kernels(sub)
+                        scorer = _scorer(sub)
                         cell = _cells(sub)[0]
                         body.append(
                             [
@@ -1127,6 +1255,7 @@ def tab_t3(c) -> list[Path]:
                                 if be == "triton" and mode == "eager"
                                 else _ratio_tex(*_ratio(sub, ref)),
                                 "---" if us is None else f"${us:.1f}" + ("^{8}$" if top8 else "$"),
+                                "---" if scorer is None else f"${scorer:.1f}$",
                                 "---" if calls is None else f"${calls}$",
                                 _f(cell.get("index_mib"), 1),
                                 _f(cell.get("perf_peak_fwd_mib"), 1),
@@ -1142,7 +1271,7 @@ def tab_t3(c) -> list[Path]:
         caption="Official SilverTorch against our Triton reimplementation (\\texttt{h2h}, arms "
         "timed interleaved in one process).",
         label="tab:t3",
-        colspec="lllcccccccc" + "c",
+        colspec="lllccccccccc" + "c",
         header=[
             "Cell",
             "Arm",
@@ -1150,6 +1279,7 @@ def tab_t3(c) -> list[Path]:
             "p50 (ms)",
             "/ triton eager",
             "kernel ($\\mu$s)",
+            "scorer ($\\mu$s)",
             "launches",
             "index MiB",
             "peak MiB",
@@ -1162,7 +1292,10 @@ def tab_t3(c) -> list[Path]:
             [
                 "Kernel-only time and launches: one eager call under \\texttt{torch.profiler}, the "
                 "sum over every device kernel, median over seeds; $^{8}$: a record profiled "
-                "before every kernel was summed, the top-8 kernels only (a lower bound). ids: "
+                "before every kernel was summed, the top-8 kernels only (a lower bound). scorer: "
+                "the like-for-like scoring kernels of the same call (ours with its fused bloom "
+                "test; official's cluster scoring, payload and bloom-search kernels), median over "
+                "seeds; --- on records profiled without the scope split. ids: "
                 "the sha256 of the returned ids on the fixed probe batches equals ($=$) the "
                 "Triton eager arm's at every common seed; $=$ (ties): equal up to boundary ties "
                 "(where it differs the scores are bit-equal, $|\\Delta s|_{\\max}=0$, so only a "
@@ -1958,7 +2091,12 @@ def generate(
 @click.option("--bs", default=1, show_default=True, type=int, help="batch size for the tables")
 @click.option("--mode", default="eager", type=click.Choice(("eager", "graph")), show_default=True)
 @click.option("--backend", default="triton", show_default=True)
-def report(root, out, gate, manifest, only, dim, k, bs, mode, backend) -> None:
+@click.option(
+    "--bands",
+    default=None,
+    help="selectivity band edges for the matched artifact's QPS@0.95 table, e.g. 0.01,0.1,0.5",
+)
+def report(root, out, gate, manifest, only, dim, k, bs, mode, backend, bands) -> None:
     """Paper tables and figures from the records (docs/system/evaluation.md § Report)."""
     results_dir = Path(root)
     if not results_dir.is_dir():
@@ -1974,6 +2112,7 @@ def report(root, out, gate, manifest, only, dim, k, bs, mode, backend) -> None:
         bs=bs,
         mode=mode,
         backend=backend,
+        bands=tuple(float(b) for b in bands.split(",")) if bands else None,
     )
     for path in c.written:
         click.echo(str(path))

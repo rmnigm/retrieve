@@ -48,6 +48,7 @@ def load_inputs(ds: Dataset, device: torch.device, *, with_filters: bool = True)
     qa = item_attrs = reverse = None
     if with_filters and ds.attrs is not None:
         qa = layout.load_query_attrs(ds.query_attrs, queries.shape[0])
+        layout.check_synth_rates(ds.attrs)
         item_attrs, reverse = layout.load_item_attrs(
             ds.attrs, ds.reverse, int(item_embs.shape[0]), device
         )

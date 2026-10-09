@@ -944,17 +944,17 @@ As measured; `plan` from its
 | fp16 item shards | 15 GB (10 × 1 M) |
 | attrs | 1.5 GB (`[10 M, 5, 4]` int64) |
 | encode | a fresh encode is ~2.9 A100-hours at 958 docs/s (the 15 M one took 15,663 s); this catalog was `reshard`ed from it in 34 s |
-| on the device | items fp32 30.7 GB, plus the oracle's transposed copy; the cell reserved 64 GB |
+| on the device | items fp32 30.7 GB; the cell (run before the item-chunked oracle) reserved 64 GB |
 
-**What fits the harness.** `load_inputs` holds items fp32 on the device and the oracle
-adds a transposed fp32 copy, so a run needs ~2 × N × D × 4 B plus attrs and workspace: at
-768-d that is ~11–12 M items on the 80 GB A100. 50 M (307 GB) and 15 M (92 GB) do not
-fit; pubmed's 10 M (57 GB) does. Before that, the loader itself peaked at three copies
-(fp16 + `.float()` + `F.normalize`, 107 GB at 15 M); `layout.load_text_items` now
-normalises a sharded matrix shard by shard into one fp32 buffer (`load_sharded(...,
-normalize=True)`, `torch.equal` to the old path on 3 M real rows), which is what got the
-15 M run as far as the oracle. So E3 runs at 10 M: `prep --keep-items 10000000`, then
-`reshard --from-dir` the 15 M catalog's vectors.
+**What fits the harness.** `load_inputs` holds items fp32 on the device: N × D × 4 B plus
+attrs and workspace. When the 15 M catalog was built, the then one-shot oracle added a
+transposed fp32 copy, which capped 768-d at ~11–12 M items on the 80 GB A100, so E3 was cut
+to 10 M (`prep --keep-items 10000000`, then `reshard --from-dir` the 15 M vectors). The
+item-chunked oracle has no such copy ([evaluation](evaluation.md#oracle-blob-v4)). The
+loader itself once peaked at three copies (fp16 + `.float()` + `F.normalize`, 107 GB at
+15 M); `layout.load_text_items` normalises a sharded matrix shard by shard into one fp32
+buffer (`load_sharded(..., normalize=True)`, `torch.equal` to the old path on 3 M real
+rows), so a large catalog is written sharded.
 
 ```
 data/openalex/
@@ -1007,15 +1007,15 @@ writes four files into the dataset's `data_dir`:
 
 | file | content |
 |---|---|
-| `item_attrs_synth.pt` | `[N, 7, 1]` int64, 1 = pass, 0 = fail; clause `j` is rate `j` of `(0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0)` |
+| `item_attrs_synth.pt` | `[N, 10, 1]` int64, 1 = pass, 0 = fail; clause `j` is rate `j` of `layout.SYNTH_RATES` = `(0.001, 0.003, 0.01, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5, 1.0)` |
 | `synth_u.pt` | the `[N]` `u` vector |
-| `query_attrs_synth.pt` | `[U_full, 7]` int64, all ones, aligned 1:1 with the full test split like `eval_split.parquet` |
+| `query_attrs_synth.pt` | `[U_full, 10]` int64, all ones, aligned 1:1 with the full test split like `eval_split.parquet` |
 | `synth_filter.json` | rates, seed, `n_items`, `n_queries`, achieved `pass_counts` / `pass_rates` per rate |
 
-All seven columns are always written. A dataset picks its rates in YAML:
+All ten columns are always written, and the harness refuses attrs whose `synth_filter.json` names another rate list (`layout.check_synth_rates`: the YAMLs index columns, so attrs built before SYNTH-TRIM's ten rates must be rebuilt). The YAMLs name every column (`p0001` … `p1`, `p005` = 0.05, `p02` = 0.2, `p05` = 0.5); the `synth` suite picks the rates per dataset:
 [`goodreads-synth.yaml`](../../evaluation/config/goodreads-synth.yaml),
 [`arxiv-synth.yaml`](../../evaluation/config/arxiv-synth.yaml) and
-[`yfcc10m-synth.yaml`](../../evaluation/config/yfcc10m-synth.yaml) (five
+[`yfcc10m-synth.yaml`](../../evaluation/config/yfcc10m-synth.yaml) (the suite runs five
 rates). Each keeps the parent's `data_dir`, encoder and `users_limit`, so
 it shares the parent's encode cache. Its sweeps are named `p0001` … `p1`,
 so they cannot collide with the parent's names in the shared `gt_d{dim}`,
@@ -1124,10 +1124,10 @@ EVAL_REPOS = {
 }
 ```
 
-`yfcc10m`'s repo is registered but **not published** — the upstream files
-are already public and unauthenticated, so `yfcc download` is the fetch
-path; the entry exists so the local directory layout resolves like every
-other dataset's.
+`pinkmeme/eval-yfcc10m` (private) holds the staged dataset (`content_d192`,
+attrs, tag CSR, `gt_shipped.pt`), but the upstream files are public and
+unauthenticated, so `yfcc download` is the documented fetch path. What may be
+published from each repo: [release and licenses](../paper/release-and-licenses.md).
 
 `pinkmeme/eval-pubmed` is **registered but not published**; the 10 M slice
 is rebuilt with `eval-data pubmed`. `pinkmeme/eval-openalex` likewise. `pinkmeme/eval-kuairand` (private) holds only the

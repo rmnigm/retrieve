@@ -47,12 +47,12 @@ def make_probe_family(b, n_lists, max_size, n_probe, *, empty_rate=0.1, seed=7):
     return ProbeLayout(probe_ids, offsets, sort_perm, probe_width(sizes, n_probe), n)
 
 
-def make_bloom(n, b, *, m_bits=512, k_hash=5, seed=3):
+def make_bloom(n, b, *, m_bits=512, k_hash=5, seed=3, n_vocab=50):
     """Bloom inputs over ``n`` cluster-sorted items: ``(query_bit_positions [B, C·k_hash],
     bloom_transposed [m_bits, ceil(N/64)], sigs [N, W], qb [B, W])`` — the last two the
     row-wise form, the independent oracle of the transposed subset test."""
-    attrs = make_attrs(n, c=2, a_max=2, seed=seed)
-    q_attrs = make_query_attrs(b, c=2, seed=seed + 1)
+    attrs = make_attrs(n, c=2, a_max=2, seed=seed, n_vocab=n_vocab)
+    q_attrs = make_query_attrs(b, c=2, seed=seed + 1, n_vocab=n_vocab)
     seeds = generate_seeds(k_hash=k_hash, device=attrs.device)
     w = m_bits // 64
     sigs = build_signatures(attrs.long(), seeds, m_bits=m_bits, k_hash=k_hash, word_count=w)

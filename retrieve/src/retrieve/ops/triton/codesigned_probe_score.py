@@ -15,6 +15,7 @@ from torch.library import triton_op, wrap_triton
 from retrieve.ops.triton._host import (
     ProbeLaunch,
     check_contiguous,
+    gate_pays,
     probe_prep,
     probe_topk,
     tile_for_width,
@@ -52,6 +53,7 @@ def _codesigned_probe_score_kernel(
     item_codes_ptr,
     qpos_ptr,
     bloom_t_ptr,
+    bit_freq_ptr,
     out_scores_ptr,
     global_scale,
     n_probe,
@@ -70,6 +72,8 @@ def _codesigned_probe_score_kernel(
     BLOCK_P: tl.constexpr,
     BLOCK_D: tl.constexpr,
     SKIP: tl.constexpr,
+    GATED: tl.constexpr,
+    NQB: tl.constexpr,
     WIDE: tl.constexpr,
 ):
     # Batch on grid_x, so the rows' early probes run together and share clusters in L2; tiles
@@ -78,6 +82,12 @@ def _codesigned_probe_score_kernel(
     t = tl.program_id(2) * tiles_y + tl.program_id(1)
     pos, slot, valid, tail = probe_tile(probe_ids_ptr, offsets_ptr, bid, t, n_probe, NPP, BLOCK_P)
     out_row = row_base(out_scores_ptr, bid, stride_ob, WIDE)
+    if GATED and HAS_QB:
+        # Every queried bit must be set: p <= the rarest bit's frequency. Loaded first, so the
+        # latency overlaps the tile's own loads.
+        qi = tl.arange(0, NQB)
+        qbits = tl.load(qpos_ptr + bid * stride_qpos + qi, mask=qi < n_qbits, other=-1)
+        bound = tl.min(tl.load(bit_freq_ptr + qbits, mask=qbits >= 0, other=1.0), axis=0)
     if tail:
         # Past the row's clusters (most of the width on a skewed IVF): the -inf tail.
         tl.store(out_row + slot, tl.full([BLOCK_P], float("-inf"), tl.float32), mask=slot < width)
@@ -89,12 +99,20 @@ def _codesigned_probe_score_kernel(
             bit = pos & 63
             for i in range(n_qbits):
                 m = tl.load(qpos_ptr + bid * stride_qpos + i)  # -1: an inactive clause's slot
-                w = tl.load(bloom_t_ptr + m * stride_tm + word, mask=keep & (m >= 0), other=-1)
+                # Masked by `valid`, not the running `keep`, so the bits' loads do not wait on
+                # each other (kernels.md § codesigned_probe_score).
+                w = tl.load(bloom_t_ptr + m * stride_tm + word, mask=valid & (m >= 0), other=-1)
                 keep = keep & (((w >> bit) & 1) != 0)
 
         any_pass = 1  # a Python int when the skip is off, so the branch folds away
         if SKIP and HAS_QB:
             any_pass = tl.max(keep.to(tl.int32), axis=0)
+        elif GATED and HAS_QB:
+            # Vote only where under one passing lane per tile is expected (kernels.md § SilverTorch
+            # kernels, "Gated tile skip").
+            any_pass = tl.full([], 1, tl.int32)
+            if bound * BLOCK_P < 1.0:
+                any_pass = tl.max(keep.to(tl.int32), axis=0)
         if any_pass == 0:
             # No lane passes the filter: no code load, no dot (kernels.md § SilverTorch
             # kernels, "Tile skip").
@@ -136,6 +154,7 @@ def _cps_prep(
     query_bit_positions: Tensor | None,
     bloom_transposed: Tensor | None,
     cfg: CodesignedProbeScoreConfig,
+    bit_freq: Tensor | None = None,
 ) -> ProbeLaunch:
     """``_host.probe_prep`` plus the bloom arguments. The one place inputs are checked —
     shared by ``_codesigned_probe_score_impl`` and both ``@triton_op`` wrappers (which keep only
@@ -163,9 +182,16 @@ def _cps_prep(
     else:
         # HAS_QB=False gates every load through these pointers, so any int64 tensor stands in.
         qpos = bloom_transposed = probe_ids
+    # The pass-rate gate where the tile skip is not on unconditionally (D_PAD <= 256), and only on
+    # grids of several waves: below that a skipped tile does not shorten the critical path.
+    gated = has_qb and bit_freq is not None and not cfg.skip and gate_pays(launch)
     launch.kwargs.update(
         qpos_ptr=qpos,
         bloom_t_ptr=bloom_transposed,
+        # GATED=False compiles the loads out, so any fp32 tensor stands in.
+        bit_freq_ptr=bit_freq if gated else launch.kwargs["q_scales_ptr"],
+        GATED=gated,
+        NQB=triton.next_power_of_2(max(qpos.shape[1], 1)),
         n_qbits=qpos.shape[1],
         stride_qpos=qpos.stride(0),
         stride_tm=bloom_transposed.stride(0),
@@ -186,6 +212,7 @@ def _codesigned_probe_score_impl(
     *,
     query_bit_positions: Tensor | None = None,
     bloom_transposed: Tensor | None = None,
+    bloom_bit_freq: Tensor | None = None,
     config: CodesignedProbeScoreConfig | None = None,
 ) -> tuple[Tensor, Tensor]:
     """Fused phase-2+3 of SilverTorch's co-designed int8 ANN + optional bloom filter (paper
@@ -196,7 +223,8 @@ def _codesigned_probe_score_impl(
     Inputs: query [B, D] fp32 (int8-quantized here), probe_ids [B, n_probe], cluster_offsets
     [n_lists + 1], item_codes [N, D] int8 cluster-sorted, sort_perm [N], global_scale, k,
     width (the compact probe width, >= k), query_bit_positions [B, C·k_hash] (-1 = none) and
-    bloom_transposed [m_bits, ceil(N/64)] (both or neither). Returns (ids [B, K], scores
+    bloom_transposed [m_bits, ceil(N/64)] (both or neither), and optionally bloom_bit_freq [m_bits]
+    (``indexing.selectivity.bloom_bit_freq``; None: no pass-rate gate). Returns (ids [B, K], scores
     [B, K]).
 
     Eager entry point for tune scripts / parity tests; the compiled path goes through the
@@ -217,6 +245,7 @@ def _codesigned_probe_score_impl(
         query_bit_positions=query_bit_positions,
         bloom_transposed=bloom_transposed,
         cfg=cfg,
+        bit_freq=bloom_bit_freq,
     )
     _codesigned_probe_score_kernel[launch.grid](**launch.kwargs)
     fin = probe_topk(launch, k, probe_ids, cluster_offsets, sort_perm)
@@ -265,6 +294,7 @@ def codesigned_probe_score_bloom(
     sort_perm: Tensor,
     query_bit_positions: Tensor,
     bloom_transposed: Tensor,
+    bloom_bit_freq: Tensor,
     global_scale: float,
     k: int,
     width: int,
@@ -283,6 +313,7 @@ def codesigned_probe_score_bloom(
         query_bit_positions=query_bit_positions,
         bloom_transposed=bloom_transposed,
         cfg=tile_for_width(CONFIGS, query.shape[1], query.shape[0], width),
+        bit_freq=bloom_bit_freq,
     )
     wrap_triton(_codesigned_probe_score_kernel)[launch.grid](**launch.kwargs)
     fin = probe_topk(launch, k, probe_ids, cluster_offsets, sort_perm)

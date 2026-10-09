@@ -12,12 +12,14 @@ import pytest
 import torch
 
 from retrieve.indexing.quantize import quantize_int8, quantize_int8_global
+from retrieve.indexing.selectivity import bloom_bit_freq
 from retrieve.ops import reference
-from retrieve.ops.triton._host import width_tiles
+from retrieve.ops.triton._host import tile_for_width, width_tiles
 from retrieve.ops.triton.codesigned_probe_score import (
     CONFIGS,
     CodesignedProbeScoreConfig,
     _codesigned_probe_score_impl,
+    _cps_prep,
     codesigned_probe_score,
     codesigned_probe_score_bloom,
 )
@@ -90,9 +92,11 @@ def _bloom_rowwise(qb, sigs, r, pos):
 def test_codesigned_with_bloom_matches_ref(n_lists, max_size, n_probe, d, k, b):
     query, lay, codes, gs = _scored(b, n_lists, max_size, n_probe, d)
     qpos, bt, sigs, qb = make_bloom(lay.n, b)
-    out = codesigned_probe_score_bloom(query, *_args(lay, codes), qpos, bt, gs, k, lay.width)
+    out = codesigned_probe_score_bloom(
+        query, *_args(lay, codes), qpos, bt, bloom_bit_freq(bt, lay.n), gs, k, lay.width
+    )
     ref = reference.codesigned_probe_score_bloom(
-        query, *_args(lay, codes), qpos, bt, gs, k, lay.width
+        query, *_args(lay, codes), qpos, bt, bloom_bit_freq(bt, lay.n), gs, k, lay.width
     )
     assert_topk_equal(*out, *ref)
     keep = partial(_bloom_rowwise, qb, sigs)
@@ -128,10 +132,12 @@ def test_empty_score_buffer_does_not_leak(monkeypatch, with_bloom):
     qpos, bt, _, _ = make_bloom(lay.n, b)
     if with_bloom:
         ref = reference.codesigned_probe_score_bloom(
-            query, *_args(lay, codes), qpos, bt, gs, k, lay.width
+            query, *_args(lay, codes), qpos, bt, bloom_bit_freq(bt, lay.n), gs, k, lay.width
         )
         hits = poison_empty(monkeypatch, (b, lay.width))
-        out = codesigned_probe_score_bloom(query, *_args(lay, codes), qpos, bt, gs, k, lay.width)
+        out = codesigned_probe_score_bloom(
+            query, *_args(lay, codes), qpos, bt, bloom_bit_freq(bt, lay.n), gs, k, lay.width
+        )
     else:
         ref = reference.codesigned_probe_score(query, *_args(lay, codes), gs, k, lay.width)
         hits = poison_empty(monkeypatch, (b, lay.width))
@@ -148,7 +154,14 @@ def test_all_pass_query_bloom_equals_no_bloom():
     qpos, bt, _, _ = make_bloom(lay.n, query.shape[0])
     k = 16
     out = codesigned_probe_score_bloom(
-        query, *_args(lay, codes), torch.full_like(qpos, -1), bt, gs, k, lay.width
+        query,
+        *_args(lay, codes),
+        torch.full_like(qpos, -1),
+        bt,
+        bloom_bit_freq(bt, lay.n),
+        gs,
+        k,
+        lay.width,
     )
     assert_topk_equal(*out, *codesigned_probe_score(query, *_args(lay, codes), gs, k, lay.width))
 
@@ -214,3 +227,28 @@ def test_degenerate_rows_give_exact_sentinels():
     assert ids[1, 0].item() == sort_perm[0].item() and torch.isfinite(scores[1, 0])
     tail = torch.cat([scores[0], scores[1, 1:]])
     assert torch.equal(tail, torch.full_like(tail, float("-inf")))
+
+
+@pytest.mark.parametrize("d", [64, 192])
+def test_gated_skip_engages_and_is_exact(d):
+    """Pins the bloom pass-rate gate at D_PAD <= 256 (kernels.md § SilverTorch kernels, "Gated
+    tile skip"): with rare values at 8192 bits every queried bit is rarer than one item a
+    256-lane tile, so the gate votes and skips tiles; the gated op equals the reference and the
+    ungated ``_impl``."""
+    query, lay, codes, gs = _scored(16, 64, 1200, 32, d)
+    qpos, bt, _, _ = make_bloom(lay.n, 16, m_bits=8192, n_vocab=4096)
+    bf = bloom_bit_freq(bt, lay.n)
+    bound = bf[qpos.clamp_min(0)].where(qpos >= 0, 1.0).amin(dim=1)
+    assert (bound * 256 < 1).all(), "gate regime not hit"
+    args = (query, *_args(lay, codes))
+    cfg = tile_for_width(CONFIGS, d, 16, lay.width)
+    launch = _cps_prep(*args, gs, lay.width, query_bit_positions=qpos, bloom_transposed=bt, cfg=cfg,
+                       bit_freq=bf)  # fmt: skip
+    assert launch.kwargs["GATED"], "the launch is not gated (too few programs?)"
+    out = codesigned_probe_score_bloom(*args, qpos, bt, bf, gs, 32, lay.width)
+    ungated = _codesigned_probe_score_impl(
+        *args, gs, 32, lay.width, query_bit_positions=qpos, bloom_transposed=bt
+    )
+    ref = reference.codesigned_probe_score_bloom(*args, qpos, bt, bf, gs, 32, lay.width)
+    assert_topk_equal(*out, *ref)
+    assert torch.equal(out[0], ungated[0]) and torch.equal(out[1], ungated[1])
