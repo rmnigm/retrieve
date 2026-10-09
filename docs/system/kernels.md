@@ -99,13 +99,14 @@ All kernels follow the same conventions.
   production ops, not just `_impl`. (`bloom_match` is the one
   exception: a single-op ~80-line file with no `_impl`, no Config, no
   prep — see its section.)
-- Graph-break behavior. Ten ops are registered across the eight Triton
+- Graph-break behavior. Thirteen ops are registered across the nine Triton
   kernel files (the official backend registers no op of ours; it calls
   `torch.ops.st.*`), in two flavours.
 
-  **Eight on `@torch.library.triton_op`**, each with a textually-inline
+  **Eleven on `@torch.library.triton_op`**, each with a textually-inline
   `wrap_triton(_kernel)[grid](**launch.kwargs)` launch: `clause_mask`,
-  `fused_masked_knn_topk`, `bloom_match`, `codesigned_probe_score`,
+  `clause_mask_scores`, `fused_masked_knn_topk`, `bloom_match`,
+  `bloom_match_scores`, `bloom_full_mask`, `codesigned_probe_score`,
   `codesigned_probe_score_bloom`, `codesigned_probe_score_exact`,
   `oporp_1bit_match_topk_full`, `oporp_1bit_match_topk_indirect`. The
   decorator stops dynamo from graph-breaking at the wrapper boundary, so
@@ -1410,6 +1411,45 @@ regime axes are `(N, B, C, A_MAX, D)` (repeatable `--regime`, one `D` per
 run). The score buffer is `torch.empty([B, width])`, written in
 full, with the same id epilogue.
 
+
+### `bloom_full_mask` — the full-N mask (`bloom_path="full"`)
+
+[`ops/triton/bloom_full_mask.py`](../../retrieve/src/retrieve/ops/triton/bloom_full_mask.py).
+`SilverTorch(bloom_path="full")` (bloom, triton or torch) is the
+co-design ablation inside our own kernels (roadmap C5-OURS). The subset
+test first runs over every item. The probe scorer then reads that
+result instead of evaluating the filter on the probed slots. This
+separates the co-design idea from Meta's host-bound partial-mask path,
+which is what the official `bloom_path` compares (V-PROF3).
+
+The mask is the AND of the query's rows of `bloom_transposed`:
+
+```
+mask[b, w] = AND over active i of bloom_transposed[qpos[b, i], w]   # [B, ceil(N / 64)] int64
+```
+
+So bit `n % 64` of word `n // 64` is item `n`'s subset test (cluster-sorted
+order, as the scorer addresses it). One program covers 1,024 words of one
+row and reads `C · k_hash` rows of the index: `B · C · k_hash · N / 8`
+bytes, the full-N cost the partial path avoids. A query with no active
+clause gets an all-ones row.
+
+**The scorer is unchanged.** The layer passes the mask to
+`codesigned_probe_score_bloom` as a one-row table per query:
+- `query_bit_positions = [[b]]`;
+- `bloom_transposed = mask`;
+- `bloom_bit_freq` = the partial path's own bound, `min` over the query's
+  active bits.
+
+Each slot then loads one mask word instead of `C · k_hash` index words.
+The skip gate makes the same decisions, and the keep set and the dot are
+the same, so `full` equals `partial` bit for bit: ids and scores, triton
+and torch
+([`test_bloom_full_mask.py`](../../retrieve/tests/parity/test_bloom_full_mask.py)).
+The default `partial` path calls the same op with the same tensors as
+before the option existed. The forward is graph-capturable, with no
+skips or breaks
+([`test_silvertorch_compile.py`](../../retrieve/tests/compile/test_silvertorch_compile.py)).
 
 ### `official` — Meta's `torch.ops.st.*` kernels as the reference backend
 
