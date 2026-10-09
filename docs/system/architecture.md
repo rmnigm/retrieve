@@ -235,7 +235,7 @@ is settable after registration; `capturable = True` is a class attribute
 
 | class | composition | `forward` |
 |---|---|---|
-| `LiNRV1(k, *, filter=None, backend)` | `PostfilterKNN` (`idx`) + `filter.evaluate_mask` | dense dot (fp16 inputs, fp32 scores), mask, top-k |
+| `LiNRV1(k, *, filter=None, backend)` | `PostfilterKNN` (`idx`, its `score`) + `filter.mask_scores` | dense dot (fp16 inputs, fp32 scores), the filter folded into one pass writing `score` or `-inf`, top-k (`masked_topk(masked=True)`) |
 | `LiNRV2(k, *, filter, backend)` | `PrefilterKNN` (`idx`) over `filter.evaluate_indices` | `query_clause_attrs` required — the filter is the candidate source |
 | `LiNRV3(k, *, candidate_pool=5000, seed=0, filter=None, backend)` | `OneBitKNN(k=candidate_pool)` (`stage1`) → `PrefilterKNN(k)` (`stage2`); the filter's candidates feed stage 1, stage 2 is bounded by the survivors' count | `set_query_params(candidate_pool=…)` re-validates against `N` |
 
@@ -526,7 +526,7 @@ not a kernel of ours at all:
 [`ops/official/`](../../retrieve/src/retrieve/ops/official/adapter.py)
 adapts Meta's `torch.ops.st.*` ops (measured on the A100: 19 launches
 and 3 host syncs per unfiltered forward, ≈ 32 launches and ≥ 5 syncs
-with bloom). Eight of the ten ops are registered with
+with bloom). Ten of the twelve ops are registered with
 `@torch.library.triton_op` so inductor can see the `@triton.jit` body; the
 two stream-compaction kernels (`clause_compact`, `bloom_compact`) are
 opaque `@torch.library.custom_op`s instead, because their data-dependent
@@ -540,8 +540,10 @@ mechanism, in [kernels.md](kernels.md).
 | `ops.triton` | [`oporp_1bit_match_topk_full` / `_indirect`](../../retrieve/src/retrieve/ops/triton/oporp_1bit_match_topk.py) — XOR + popcount, both bit-KNN paths | `OneBitKNN` / `SimHashKNN` |
 | `ops.triton` | [`clause_compact`](../../retrieve/src/retrieve/ops/triton/clause_compact.py) — fused clause eval + stream compaction | `ExactAttributeFilter.evaluate_indices` |
 | `ops.triton` | [`clause_mask`](../../retrieve/src/retrieve/ops/triton/clause_mask.py) — fused clause eval emitting `[B, N]` bool | `ExactAttributeFilter.evaluate_mask`; `SilverTorch(backend="official", filter_mode="exact")` |
+| `ops.triton` | [`clause_mask_scores`](../../retrieve/src/retrieve/ops/triton/clause_mask.py) — the same pass writing `scores` or `-inf` | `ExactAttributeFilter.mask_scores` (`LiNRV1`) |
 | `ops.triton` | [`bloom_compact`](../../retrieve/src/retrieve/ops/triton/bloom_compact.py) — fused subset-test + stream compaction | `BloomFilter.evaluate_indices` |
 | `ops.triton` | [`bloom_match`](../../retrieve/src/retrieve/ops/triton/bloom_match.py) — bool subset test | `BloomFilter.evaluate_mask` |
+| `ops.triton` | [`bloom_match_scores`](../../retrieve/src/retrieve/ops/triton/bloom_match.py) — the same test writing `scores` or `-inf` | `BloomFilter.mask_scores` (`LiNRV1`) |
 | `ops.triton` | [`codesigned_probe_score` / `_bloom`](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py) — fused IVF + INT8 (+ Bloom) | `SilverTorch(filter_mode="none" \| "bloom")` |
 | `ops.triton` | [`codesigned_probe_score_exact`](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score_exact.py) — fused IVF + INT8 + exact AND-of-OR | `SilverTorch(filter_mode="exact")` |
 | `ops.official` | [`official_probe_score`, `bloom_partial_masks`, `bloom_filtering_mask`, …](../../retrieve/src/retrieve/ops/official/adapter.py) — adapter over Meta's `torch.ops.st.fused_kmean_ann*` / bloom ops (no kernel of ours; eager-only) | `SilverTorch(backend="official")` |

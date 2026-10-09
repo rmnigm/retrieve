@@ -5,8 +5,10 @@ the same name is reached with ``from retrieve.ops.triton.<op> import ...``."""
 from retrieve.ops.triton._load import (
     bloom_compact,
     bloom_match,
+    bloom_match_scores,
     clause_compact,
     clause_mask,
+    clause_mask_scores,
     codesigned_probe_score,
     codesigned_probe_score_bloom,
     codesigned_probe_score_exact,
@@ -18,8 +20,10 @@ from retrieve.ops.triton._load import (
 __all__ = [
     "bloom_compact",
     "bloom_match",
+    "bloom_match_scores",
     "clause_compact",
     "clause_mask",
+    "clause_mask_scores",
     "codesigned_probe_score",
     "codesigned_probe_score_bloom",
     "codesigned_probe_score_exact",

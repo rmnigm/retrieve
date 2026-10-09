@@ -33,7 +33,9 @@ the k chunks on a second grid axis instead: `BLOCK_K` 16 / `BLOCK_N` 512 / 4 war
   cumulative ends), at bs 1 and 16. The whole op agrees with the torch reference op at bs 1 (scores `torch.equal`, ids up
   to ties). The reference materializes `[B, width, D]`, hence bs 1 and D 128.
 
-**Library suite** on pod b: 787 passed (parity files 55 / 55, the d64 / d768 graph-capture tests included).
+**Library suite** on pod b: 787 passed (parity files 55 / 55, the d64 / d768 graph-capture tests included), rerun on a
+fresh inductor cache. The first run reused a cache the first cut had compiled into, so its compile tests may have replayed
+the old epilogue (testing.md § Running).
 
 **Compile time, cold** ([`compile_time.py`](compile_time.py), [`compile_sweep.sh`](compile_sweep.sh)). CPU only, an
 explicit sm_80 target, a fresh `TRITON_CACHE_DIR` and one core (96-191, away from the timed jobs) per variant;

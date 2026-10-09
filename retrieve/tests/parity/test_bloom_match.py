@@ -12,7 +12,7 @@ import torch
 
 from retrieve.indexing.bloom_hash import build_signatures
 from retrieve.modules import BloomFilter
-from retrieve.ops.triton.bloom_match import bloom_match
+from retrieve.ops.triton.bloom_match import bloom_match, bloom_match_scores
 from tests.conftest import make_attrs, make_query_attrs
 from tests.parity.conftest import make_words
 
@@ -62,3 +62,17 @@ def test_bloom_match_non_power_of_two_words(w):
     out = bloom_match(qb, sigs)
     assert torch.equal(out, ref)
     assert out.any() and not out.all()
+
+
+@pytest.mark.parametrize("w", [3, 8])
+def test_bloom_match_scores_is_where_over_the_mask(w):
+    sigs, qb = make_words(4096, w, seed=w)
+    g = torch.Generator(device="cuda").manual_seed(w)
+    scores = torch.randn(qb.shape[0], sigs.shape[0], generator=g, device="cuda").round(decimals=2)
+    scores[:, ::97] = float("-inf")  # a genuine -inf on a passing item stays -inf
+    out = bloom_match_scores(scores, qb, sigs)
+    ref = torch.where(bloom_match(qb, sigs), scores, float("-inf"))
+    assert out.dtype == torch.float32 and torch.equal(out, ref)
+    assert 0 < int(torch.isfinite(out).sum()) < int(torch.isfinite(scores).sum())
+    with pytest.raises(ValueError, match="scores must be"):
+        bloom_match_scores(scores.half(), qb, sigs)
