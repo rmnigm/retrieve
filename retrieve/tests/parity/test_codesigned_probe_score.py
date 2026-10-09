@@ -69,7 +69,15 @@ def _oracle(query, lay: ProbeLayout, codes, global_scale, k, keep=None):
 
 @pytest.mark.parametrize(
     "n_lists,max_size,n_probe,d,k",
-    [(64, 40, 4, 64, 8), (128, 700, 16, 128, 32), (128, 700, 16, 192, 32), (64, 300, 8, 768, 32)],
+    [
+        (64, 40, 4, 64, 8),
+        (128, 700, 16, 128, 32),
+        (128, 700, 16, 192, 32),
+        (64, 300, 8, 768, 32),
+        (512, 60, 300, 128, 32),
+        (512, 60, 300, 192, 32),
+        (512, 60, 300, 768, 32),
+    ],
 )
 @pytest.mark.parametrize("b", [1, 16])
 def test_codesigned_no_filters_matches_ref(n_lists, max_size, n_probe, d, k, b):
@@ -86,7 +94,15 @@ def _bloom_rowwise(qb, sigs, r, pos):
 
 @pytest.mark.parametrize(
     "n_lists,max_size,n_probe,d,k",
-    [(64, 80, 4, 64, 16), (128, 700, 16, 128, 32), (128, 700, 16, 192, 32), (64, 300, 8, 768, 32)],
+    [
+        (64, 80, 4, 64, 16),
+        (128, 700, 16, 128, 32),
+        (128, 700, 16, 192, 32),
+        (64, 300, 8, 768, 32),
+        (512, 60, 300, 128, 32),
+        (512, 60, 300, 192, 32),
+        (512, 60, 300, 768, 32),
+    ],
 )
 @pytest.mark.parametrize("b", [1, 16])
 def test_codesigned_with_bloom_matches_ref(n_lists, max_size, n_probe, d, k, b):
@@ -242,8 +258,8 @@ def test_gated_skip_engages_and_is_exact(d):
     assert (bound * 256 < 1).all(), "gate regime not hit"
     args = (query, *_args(lay, codes))
     cfg = tile_for_width(CONFIGS, d, 16, lay.width)
-    launch = _cps_prep(*args, gs, lay.width, query_bit_positions=qpos, bloom_transposed=bt, cfg=cfg,
-                       bit_freq=bf)  # fmt: skip
+    launch, _ = _cps_prep(*args, gs, lay.width, query_bit_positions=qpos, bloom_transposed=bt,
+                          cfg=cfg, bit_freq=bf)  # fmt: skip
     assert launch.kwargs["GATED"], "the launch is not gated (too few programs?)"
     out = codesigned_probe_score_bloom(*args, qpos, bt, bf, gs, 32, lay.width)
     ungated = _codesigned_probe_score_impl(

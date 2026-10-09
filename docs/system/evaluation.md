@@ -414,7 +414,7 @@ unfiltered `quality` suite ([decisions](../decisions.md#harness)); synth's
 |---|---|---|---|
 | `filter` | goodreads, arxiv, yfcc10m, pubmed, three kept sweeps each (yfcc10m: `tags_and`) | V1, V2, V3 (pool 5000) triton; `silvertorch` triton clause + bloom and official bloom at the dataset's tuned `n_lists` and `n_probe` {24, n95} ([IVF tuning](#ivf-tuning)); `silvertorch` torch (#12) and torch compiled (#13) at 24 on the same `n_lists`, goodreads + arxiv only; `postfilter` alpha {1, 8} | T2, C3, C6 |
 | `deep` | goodreads, arxiv, yfcc10m, kept sweeps | `silvertorch` triton clause + bloom, official bloom: `n_lists` per dataset (goodreads {1024, 4096}, arxiv {1664, 8192}, yfcc10m {4096, 16384}) × `n_probe` {8, 16, 32, 64, 128}; V3 `candidate_pool_frac` {0.005, 0.01, 0.02, 0.05, 0.1} | F3, C6 |
-| `synth` | goodreads-, arxiv-, yfcc10m-synth (uniform) and arxiv-corr-synth (cluster-correlated, `c001` `c003` `c01`, d128, arxiv-synth's `n_lists` so the two curves pair) ([datasets](datasets.md#synthetic-selectivity-attrs)); sized by claim (SYNTH-TRIM, 2026-10-10): seed 0 everywhere but goodreads-synth's first seven rates (seeds 0-2, the pilot's cells) | **arxiv-synth** (`p0001 p001 p005 p01 p02 p05 p1`, 46 cells): V1, V2 triton clause; `silvertorch` triton clause `n_probe` {24, 64, 256, 1024}; triton and official bloom `n_probe` 24 at `p001`, `p1`. **yfcc10m-synth** (`p001 p01 p02 p05 p1`, k 100, 25 cells): V1, V2 triton clause; `silvertorch` triton clause {24, 256, 1024}. **arxiv-corr-synth** (42 cells): V3 `candidate_pool_frac` {0.01, 0.05}; `silvertorch` triton clause {24, 64, 128, 256, 512, 1024}; `postfilter` {1, 8}. **goodreads-synth** (all ten rates, 558 cells): on the first seven, V1, V2 triton clause + bloom, V3, `silvertorch` triton clause {24, 64, 128, 256, 512, 1024} and triton + official bloom {24, 256}, `postfilter`, V1 / V2 torch eager and compiled on `p001, p01, p1`; on `p005 p02 p05` V1, V2 clause and the SilverTorch clause sweep. Every SilverTorch arm at its real dataset's tuned `n_lists`. k 1000 is dropped where N·p < 4000 (goodreads `p0001`, `p0003`; arxiv `p0001`) | F1, F2, C1, C6 (C2 on corr) |
+| `synth` | goodreads-, arxiv-, yfcc10m-synth (uniform) and arxiv-corr-synth (cluster-correlated, `c001` `c003` `c01`, d128, arxiv-synth's `n_lists` so the two curves pair) ([datasets](datasets.md#synthetic-selectivity-attrs)); sized by claim (SYNTH-TRIM, 2026-10-10): seed 0 everywhere but goodreads-synth's first seven rates (seeds 0-2, the pilot's cells) | **arxiv-synth** (`p0001 p001 p005 p01 p02 p05 p1`, 46 cells): V1, V2 triton clause; `silvertorch` triton clause `n_probe` {24, 64, 256, 1024}; triton and official bloom `n_probe` 24 at `p001`, `p1`. **yfcc10m-synth** (`p0001 p0003 p001 p003 p005 p01 p02 p05 p1`, k 100, 45 cells): V1, V2 triton clause; `silvertorch` triton clause {24, 256, 1024}. **arxiv-corr-synth** (42 cells): V3 `candidate_pool_frac` {0.01, 0.05}; `silvertorch` triton clause {24, 64, 128, 256, 512, 1024}; `postfilter` {1, 8}. **goodreads-synth** (all ten rates, 558 cells): on the first seven, V1, V2 triton clause + bloom, V3, `silvertorch` triton clause {24, 64, 128, 256, 512, 1024} and triton + official bloom {24, 256}, `postfilter`, V1 / V2 torch eager and compiled on `p001, p01, p1`; on `p005 p02 p05` V1, V2 clause and the SilverTorch clause sweep. Every SilverTorch arm at its real dataset's tuned `n_lists`. k 1000 is dropped where N·p < 4000 (goodreads `p0001`, `p0003`; arxiv `p0001`) | F1, F2, C1, C6 (C2 on corr) |
 | `codesign` | arxiv (kept sweeps), goodreads (`c0_genre, c2_format, c3_year`) | official and triton bloom, `bloom_path` {partial, full} × `n_probe` {8, 32, 128}, `n_lists` arxiv 1664 / goodreads 1024, k 100 | F4b, C5 |
 | `bloomwidth` | goodreads `c0_genre`, arxiv kept, pubmed `c0_mesh` | `silvertorch` triton bloom `m_bits` {64 … 2048} × `k_hash` {3, 5}; official bloom `k_hash` {3, 5} (its width is `OfficialConfig.b_multiplier`, not `m_bits`); bs 16; quality only (`perf: false`) | F4a, C4 |
 | `bloomwidth-timed` | the same | the same widths at `k_hash` 5 (official: its one width), k 100, bs 16, timed | F4a |
@@ -692,8 +692,8 @@ latency_kw=None, device=None) -> Counter` runs the jobs in order:
    entries' under-load `sm_mhz` samples; `memory_reserved_mib`; one
    `records.append_record`; the samples sidecar; `torch._dynamo.reset()`
    per bs;
-6. after each job: drop the module, `gc.collect()`, `torch._dynamo.reset()`,
-   `empty_cache()`.
+6. after each unit (one job, or one interleave group): release its arms
+   ([Arm release](#arm-release)).
 
 Any exception inside a cell (an OOM on the torch path included) becomes a
 `status: failed` record with the traceback and `stage` (`build`,
@@ -717,6 +717,29 @@ samples line is appended *before* its record, so a crash between the two
 cannot leave a resumable record without its vector; `read_keys` ignores
 (and logs) one torn trailing line — the cell in flight when the process
 died — and raises on a malformed line anywhere else.
+
+### Arm release
+
+A unit's modules (index, filter, compiled and captured callables) die before
+the next unit builds, so one process runs several 10-30 M arms in a row
+(roadmap H-ARMFREE: laion30m and V-ROUTER PubMed ran out of memory when the
+last arm's index stayed resident). `run.py` notes `torch.cuda.memory_allocated()`
+once the unit's inputs and sweep assets are ready (`base`); at the unit's end
+it drops every name that still holds an arm (`built` and the per-arm
+`module` / `b` locals), then `gc.collect()`, `torch._dynamo.reset()`,
+`empty_cache()`, and raises if more than `ARM_FREE_SLACK_MIB` (256 MiB) over
+`base` is still allocated: a leaked index fails the run loudly instead of the
+next build failing on an out-of-memory error. The arms of one interleave group stay resident
+together by design (they are timed round-robin).
+
+A failure frees its tensors too. The build, cell and perf failure paths release
+*after* their `except` block, once the exception (whose traceback holds the
+half-built tensors) is gone, and they log through `run._log_failure`
+(`logger.error` with `traceback.format_exception`) instead of
+`logger.exception`: loguru's default `diagnose` reads `run`'s own `f_locals`,
+and on Python 3.11 that snapshot stays cached on the frame, keeping `exc`
+and with it the failed arm's tensors for the rest of the run (each retry of a
+failed 30 M build saw more memory held).
 
 ### Interleaved groups
 

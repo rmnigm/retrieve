@@ -56,10 +56,15 @@ def qps_at(points, bs):
 def per_sweep(recs, rows):
     curves = collections.defaultdict(list)
     for r in recs:
-        if r["suite"] != "deep" or r["status"] != "ok" or recall(r) is None:
+        if (
+            r["suite"] != "deep"
+            or r["status"] not in ("ok", "partial")
+            or recall(r) is None
+        ):
             continue
         x = r["params"].get(
-            "n_probe", r["params"].get("candidate_pool", r["params"].get("candidate_pool_frac"))
+            "n_probe",
+            r["params"].get("candidate_pool", r["params"].get("candidate_pool_frac")),
         )
         nl = r["params"].get("n_lists", "")
         curves[

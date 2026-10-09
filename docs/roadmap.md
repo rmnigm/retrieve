@@ -309,27 +309,16 @@ co-design.
   (divides 768) brackets LiNR's 512 from below. PubMed `filter` kept
   sweeps, V3 triton, pool {1 %, 5 %}, seed 0. After V-SEEDS arXiv.
   **≈ 1-2 GPU-h.**
-- [ ] **H-ARMFREE: one `bench run` frees each arm before the next** (2026-10-10:
-  laion30m and V-ROUTER PubMed OOMed when one process ran several arms; each
-  arm's 10 M-30 M index stayed resident and the next arm's allocation
-  failed). The run loop releases the finished job's module, index and
-  caches before building the next (and asserts the reserved memory is back
-  near the shared inputs'); drivers stop needing one process per arm.
-  Gates: harness suite; one multi-arm 10 M run without OOM; records
-  byte-identical to a per-arm run on two cells.
 - [ ] **OFFICIAL-O3: Meta's extension built with `-O3`** (OF-11: Meta's setup passes no
   `-O`, host code at gcc `-O0`; `-O3` is 0.77-0.98 of the shipped time, outputs
   bit-identical). New official legs build their own venv with
   `scripts/build_official_o3.sh`; `env.official_build` records the loaded
   extension's sha256 and flags. Remaining: rebuild the shared venvs between legs.
-- [ ] **ST-WIDE: our d768 probe scorer at wide probes** (C7 at v2.7, PubMed bloom
-  `c0_mesh`, bs 16 eager: official / Triton 0.705 at `n_probe` 1024, while
-  Triton wins 1.7-2.8x everywhere else; `_codesigned_probe_score_kernel`
-  dominates). Find why Meta's `process_cluster<…, 768, …>` scales better at
-  `B · n_probe` ≈ 16 k clusters (tile shape, D-loop order, occupancy at
-  D_PAD 1024, the bloom word loads) and fix ours: bit-exact, keep rule across
-  `n_probe` {24, 256, 1024} × bs {1, 16} at d768 and unchanged at d128 / d192.
-  Tag after its gate.
+- [ ] **ST-WIDE-2: the bloom two-pass at `D_PAD` ≤ 256** (ST-WIDE engaged it only at
+  d768; at 30 M d256, n_probe 128, bs 64 Meta -O3 is 1.8-2.0x faster). Bit-exact;
+  keep rule across d128 / d192 / d256 × n_probe × bs incl. narrow cells; narrow
+  SASS unchanged where it does not engage. Then cross-query cluster sharing
+  only if the 30 M gap remains.
 - [ ] **C5-OURS-30M + C1 re-time at v2.7**: codesign-laion30m's triton half
   (our partial vs full at 30 M, beside Meta's, on one box; per-sweep processes
   until H-ARMFREE lands) and arxiv-synth's V1 / V2 cells re-timed (C1's 3 M
@@ -346,6 +335,21 @@ co-design.
   novelty, availability) mapped to the paper section, table or artifact
   that answers it, with gaps named; a new page ecir-criteria.md under docs/paper. F5
   writes against it.
+- [ ] **AFTER-QUEUE: more experiments and kernel work, ranked by paper value**
+  (user, 2026-10-11: once the planned work is done, more experiments, deeper
+  sweeps and Triton kernel performance work, staying close to what the
+  reproducibility paper needs). In order:
+  1. **Close the provisional cells**: every T1 / figure number still marked
+     pre-ST-WIDE or pre-CLAUSE-SKIP re-timed at the newest tag.
+  2. **Sharpen the figures the paper leads with**: F1 / F2 at 10 M and 30 M
+     with the low and middle pass rates (0.001, 0.003, 0.03, 0.05) on uniform
+     synth; the probe curve at 30 M (n_probe 64 / 256); seeds 0-2 on the cells
+     a T2 confidence interval rests on.
+  3. **Triton kernel work where ours trails Meta's or the compiler**:
+     cross-query cluster sharing in the probe scorer (30 M d256, n_probe 128,
+     bs 64: Meta 1.8-2.0x); the top-k epilogue (ours 1.18 ms vs Meta's 0.79
+     at 30 M); V1 at bs 1 (`torch.compile` 1.77x faster, C3). Each bit-exact
+     plus the keep rule, then a tag.
 - [ ] **F-REPRO: the final pass.** When the library stops changing: tag the
   final version, rerun the redo ledger (or the whole grid if the ledger is
   most of it) at that tag into `campaign-final/`, write *campaign.yaml* for

@@ -1090,8 +1090,8 @@ writes four files into the dataset's `data_dir`:
 All ten columns are always written, and the harness refuses attrs whose `synth_filter.json` names another rate list (`layout.check_synth_rates`: the YAMLs index columns, so attrs built before SYNTH-TRIM's ten rates must be rebuilt). The YAMLs name every column (`p0001` … `p1`, `p005` = 0.05, `p02` = 0.2, `p05` = 0.5); the `synth` suite picks the rates per dataset:
 [`goodreads-synth.yaml`](../../evaluation/config/goodreads-synth.yaml),
 [`arxiv-synth.yaml`](../../evaluation/config/arxiv-synth.yaml) and
-[`yfcc10m-synth.yaml`](../../evaluation/config/yfcc10m-synth.yaml) (the suite runs five
-rates); [`laion30m-synth.yaml`](../../evaluation/config/laion30m-synth.yaml) runs four (0.1, 0.2, 0.5, 1.0;
+[`yfcc10m-synth.yaml`](../../evaluation/config/yfcc10m-synth.yaml) (the suite runs nine:
+0.001, 0.003, 0.01, 0.03, 0.05, 0.1, 0.2, 0.5, 1.0, at k 100); [`laion30m-synth.yaml`](../../evaluation/config/laion30m-synth.yaml) runs four (0.1, 0.2, 0.5, 1.0;
 clause only) in its own `laion30m-synth` suite. Each keeps the parent's `data_dir`, encoder and `users_limit`, so
 it shares the parent's encode cache. Its sweeps are named `p0001` … `p1`,
 so they cannot collide with the parent's names in the shared `gt_d{dim}`,
