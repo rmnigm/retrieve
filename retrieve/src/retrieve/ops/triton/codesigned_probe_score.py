@@ -372,7 +372,7 @@ def _cps_prep(
         stride_tm=bloom_transposed.stride(0),
         HAS_QB=has_qb,
     )
-    if not (has_qb and cfg.skip and launch.table is not None):
+    if not (has_qb and launch.table is not None):
         return launch, None
     kw = launch.kwargs
     b, tiles_y, tiles_x = launch.grid
