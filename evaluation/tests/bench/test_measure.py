@@ -254,10 +254,12 @@ def test_graph_callable_refuses_without_cuda():
 
 @pytest.mark.skipif(torch.cuda.is_available(), reason="CPU-only branch")
 def test_profile_once_is_empty_without_cuda():
+    zero = {"us": 0.0, "calls": 0}
     assert bench.profile_once(lambda: torch.ones(2) + 1) == {
         "kernels": [],
         "kernels_us": 0.0,
         "kernels_calls": 0,
+        "kernel_scopes": dict.fromkeys(("scorer", "topk", "epilogue", "other"), zero),
     }
 
 
@@ -288,6 +290,55 @@ def test_kernel_summary_skips_compiled_graph_ranges_in_the_sums():
     out = bench.kernel_summary(events, top=8)
     assert out["kernels"][0]["kernel"].startswith("## Call CompiledFxGraph")
     assert out["kernels_us"] == 265.0 and out["kernels_calls"] == 3
+
+
+def test_kernel_scopes_split_the_full_sum_like_for_like():
+    """H-SCOPE: real kernel names from the H-KSUM and V-PROF3 tables. Ours fuses the bloom test into
+    its scorer; Meta's scorer is process_cluster + payload kernels + the separate bloom_search
+    kernels. The four scopes add up to kernels_us / kernels_calls; ranges and sentinels count
+    nowhere."""
+    ev = lambda key, us, n=1: SimpleNamespace(key=key, self_device_time_total=us, count=n)  # noqa: E731
+    fk = "st::ops::fused_kmean_ann::(anonymous namespace)::"
+    bs = "st::ops::bloom_search::(anonymous namespace)::"
+    at = "void at::native::"
+    scorer = [
+        ev("_codesigned_probe_score_kernel", 100.0),
+        ev(f"void {fk}process_cluster<signed char, c10::Half, 128, true, int, false>", 25.0),
+        ev(f"void {fk}process_cluster_remaining<signed char, c10::Half, 128, true>", 4.6),
+        ev(f"{fk}generate_remaining_payload_kernel", 8.5),
+        ev(f"{fk}generate_warp_payload_kernel", 3.5),
+        ev(f"{fk}generate_cluster_warp_size", 2.3),
+        ev(f"void {bs}process_documents<long, 16, true>", 21.5),
+        ev(f"void {bs}process_documents_on_assigned_cluster_columns_kernel<16, true>", 9.6),
+        ev(f"{bs}generate_column_info_for_clusters_kernel", 2.7),
+    ]
+    topk = [
+        ev(f"{at}mbtopk::computeBlockDigitCounts<float, unsigned int, unsigned int, 2>", 23.9, 4),
+        ev("at::native::mbtopk::computeDigitCumSum(short*, unsigned int*, unsigned int)", 15.0, 4),
+        ev(f"{at}sbtopk::gatherTopK<float, unsigned int, 2, false>", 16.8),
+        ev(f"{at}radixSortKVInPlace<2, -1, 32, 4, float, long, unsigned int>", 8.9),
+        ev(f"{at}bitonicSortKVInPlace<2, -1, 16, 16, float, long>", 7.6),
+    ]
+    epilogue = [
+        ev(f"{at}index_elementwise_kernel<128, 4, at::native::gpu_index_kernel<...>>", 20.8, 2),
+        ev(f"{at}_scatter_gather_elementwise_kernel<128, 8, ...>", 8.4),
+    ]
+    other = [
+        ev("probe_ids_kernel", 11.0),
+        ev("void gemmSN_TN_kernel<float, 128, 16, 2, 4, 8, 9, false>", 7.2),
+        ev(f"{at}unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda>", 15.3, 3),
+        ev("Memcpy DtoH (Device -> Pinned)", 5.9, 3),
+    ]
+    noise = [ev("## Call CompiledFxGraph fabc123 ##", 500.0), ev(bench.SENTINEL, 1e6, 2)]
+    out = bench.kernel_summary(scorer + topk + epilogue + other + noise)
+    want = {"scorer": scorer, "topk": topk, "epilogue": epilogue, "other": other}
+    for scope, evs in want.items():
+        got = out["kernel_scopes"][scope]
+        assert got["us"] == pytest.approx(sum(e.self_device_time_total for e in evs)), scope
+        assert got["calls"] == sum(e.count for e in evs), scope
+        assert all(bench.kernel_scope(e.key) == scope for e in evs)
+    assert sum(v["us"] for v in out["kernel_scopes"].values()) == pytest.approx(out["kernels_us"])
+    assert sum(v["calls"] for v in out["kernel_scopes"].values()) == out["kernels_calls"]
 
 
 @pytest.mark.gpu
