@@ -29,9 +29,8 @@ from tests.parity.conftest import assert_topk_equal
 
 # (filter_mode, backend, D, wide): D = 64 takes the probe scorers' single dot, D = 768 their D loop
 # and tile skip (kernels.md § SilverTorch kernels, "The D loop"). "bloom-full" is bloom_path="full".
-# wide: 4 rows x 128 probes with the per-row table forced (the layout is under TABLE_MIN_WORK)
-# and (bloom) the two-pass ("Probe table"; at D 64 with every batch taken as sparse, "Bloom
-# two-pass").
+# wide: 4 rows x 128 probes, the per-row table and (bloom) the two-pass ("Probe table"; at D 64
+# with every batch taken as sparse, "Bloom two-pass").
 MODES = [
     ("none", "triton", 64, False),
     ("bloom", "triton", 64, False),
@@ -80,7 +79,6 @@ def test_compiled_forward_matches_eager(filter_mode, backend, d, wide, monkeypat
     b, c = 4, 2
     if wide:
         monkeypatch.setattr(silvertorch_mod, "SPARSE_PASS_BOUND", 2.0)
-        monkeypatch.setattr("retrieve.ops.triton._host.TABLE_MIN_WORK", 0)
     eager = _build(filter_mode, backend, d=d, **(WIDE if wide else {}))
     inputs = partial(_inputs, eager, filter_mode, b, c, eager.item_codes.shape[1])
     torch._dynamo.reset()
@@ -107,7 +105,6 @@ def test_no_graph_breaks_on_forward(filter_mode, backend, d, wide, monkeypatch):
     """
     if wide:
         monkeypatch.setattr(silvertorch_mod, "SPARSE_PASS_BOUND", 2.0)
-        monkeypatch.setattr("retrieve.ops.triton._host.TABLE_MIN_WORK", 0)
     eager = _build(filter_mode, backend, d=d, **(WIDE if wide else {}))
     b, c = 4, 2
     query, prepared = _inputs(eager, filter_mode, b, c, eager.item_codes.shape[1], 1)

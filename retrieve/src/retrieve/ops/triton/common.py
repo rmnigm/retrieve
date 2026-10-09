@@ -8,10 +8,11 @@ invariant is what lets one helper serve kernels with very different launch shape
 Helpers: ``row_base``, ``tile_rows``, ``probe_tile``, ``probe_tile_table``,
 ``probe_tiles_table``, ``probe_dots``, ``or_combine``, ``popcount_int64``, ``bloom_subset_pass``,
 ``clause_pass``, ``compact_store``, ``compact_stash``; plus three launched kernels:
-``probe_table_kernel`` (the wide-probe scorers' per-row layout), ``compact_scatter_kernel`` (the
-predicate-free second phase both compaction ops share, driven by ``_host.compact_finish``) and
-``probe_ids_kernel`` (the probe scorers' id epilogue). Per-helper semantics and the call-site
-map live in docs/system/kernels.md § Shared kernel helpers.
+``probe_prep_kernel`` (the probe scorers' int8 query and per-row layout),
+``compact_scatter_kernel`` (the predicate-free second phase both compaction ops share, driven by
+``_host.compact_finish``) and ``probe_ids_kernel`` (the probe scorers' id epilogue).
+Per-helper semantics and the call-site map live in docs/system/kernels.md § Shared kernel
+helpers.
 """
 
 import triton
@@ -76,38 +77,60 @@ def probe_tile(
     return pos, slot, valid, tail
 
 
+# fp32(1 / 127), exactly as eager torch's ``abs_max / 127.0`` multiplies by it.
+INV_127 = tl.constexpr(0.007874015718698502)
+
+
 @triton.jit
-def probe_table_kernel(
+def probe_prep_kernel(
+    query_ptr,
+    q_codes_ptr,
+    q_scales_ptr,
     probe_ids_ptr,
     offsets_ptr,
     table_ptr,
     count_ptr,
+    stride_qb,
     n_probe,
+    D: tl.constexpr,
+    D_PAD: tl.constexpr,
     NPP: tl.constexpr,
     BLOCK_P: tl.constexpr,
+    TABLE: tl.constexpr,
     ZERO_COUNT: tl.constexpr,
 ):
-    """One program per row: the row's probe layout as ``[3, n_probe]`` int64 rows (tile ends,
-    slot ends, cluster starts) for ``probe_tile_table``, so the wide-probe scorers build it once
-    per row, not once per tile (kernels.md § SilverTorch kernels, "Probe table"). ``ZERO_COUNT``:
-    also zero the bloom two-pass's passing-tile count, saving a memset launch."""
+    """One program per row, the probe scorers' one prep launch (kernels.md § SilverTorch
+    kernels, "Probe prep"): the row's int8 query, bit for bit ``indexing.quantize_int8`` (fp32
+    abs-max clamped at 1e-8, scale = abs-max times fp32 1/127; the fp64 quotient rounded to
+    fp32, times 127, rounded half to even), and with ``TABLE`` the row's probe layout as
+    ``[3, n_probe]`` int64 rows (tile ends, slot ends, cluster starts) for ``probe_tile_table``.
+    ``ZERO_COUNT`` zeroes the bloom two-pass's passing-tile count."""
     bid = tl.program_id(0)
-    i = tl.arange(0, NPP)
-    live = i < n_probe
-    c = tl.load(probe_ids_ptr + bid * n_probe + i, mask=live, other=0)
-    lo = tl.load(offsets_ptr + c, mask=live, other=0)
-    size = tl.load(offsets_ptr + c + 1, mask=live, other=0) - lo
-    row = table_ptr + bid * 3 * n_probe
-    tl.store(row + i, tl.cumsum((size + BLOCK_P - 1) // BLOCK_P, 0), mask=live)
-    tl.store(row + n_probe + i, tl.cumsum(size, 0), mask=live)
-    tl.store(row + 2 * n_probe + i, lo, mask=live)
+    d = tl.arange(0, D_PAD)
+    x = tl.load(query_ptr + bid * stride_qb + d, mask=d < D, other=0.0)
+    abs_max = tl.maximum(tl.max(tl.abs(x), axis=0), 1e-8)
+    # Eager torch divides by a Python scalar as a multiply by its fp32 reciprocal.
+    tl.store(q_scales_ptr + bid, abs_max * INV_127)
+    ratio = libdevice.div_rn(x.to(tl.float64), abs_max.to(tl.float64)).to(tl.float32)
+    codes = tl.minimum(tl.maximum(libdevice.rint(ratio * 127.0), -128.0), 127.0)
+    tl.store(q_codes_ptr + bid * D + d, codes.to(tl.int8), mask=d < D)
+    if TABLE:
+        i = tl.arange(0, NPP)
+        live = i < n_probe
+        c = tl.load(probe_ids_ptr + bid * n_probe + i, mask=live, other=0)
+        lo = tl.load(offsets_ptr + c, mask=live, other=0)
+        size = tl.load(offsets_ptr + c + 1, mask=live, other=0) - lo
+        row = table_ptr + bid * 3 * n_probe
+        tl.store(row + i, tl.cumsum((size + BLOCK_P - 1) // BLOCK_P, 0), mask=live)
+        tl.store(row + n_probe + i, tl.cumsum(size, 0), mask=live)
+        tl.store(row + 2 * n_probe + i, lo, mask=live)
     if ZERO_COUNT and bid == 0:
         tl.store(count_ptr, 0)
 
 
 @triton.jit
 def probe_tile_table(table_ptr, bid, t, n_probe, FAN: tl.constexpr, BLOCK_P: tl.constexpr):
-    """``probe_tile`` read from ``probe_table_kernel``'s row: the tile's cluster by a two-level
+    """``probe_tile`` read from ``probe_prep_kernel``'s table row: the tile's cluster by a two-level
     ``FAN``-ary search over the tile ends (``FAN ** 2 >= n_probe``), two dependent vector loads of
     ``FAN`` lanes instead of the row's whole table per tile. Same ``(pos, slot, valid, tail)``."""
     row = table_ptr + bid * 3 * n_probe

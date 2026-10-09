@@ -14,7 +14,7 @@ import torch
 from retrieve.indexing.quantize import quantize_int8, quantize_int8_global
 from retrieve.indexing.selectivity import bloom_bit_freq
 from retrieve.ops import reference
-from retrieve.ops.triton._host import tile_for_width, width_tiles
+from retrieve.ops.triton._host import probe_prep, tile_for_width, width_tiles
 from retrieve.ops.triton.codesigned_probe_score import (
     CONFIGS,
     CodesignedProbeScoreConfig,
@@ -23,6 +23,7 @@ from retrieve.ops.triton.codesigned_probe_score import (
     codesigned_probe_score,
     codesigned_probe_score_bloom,
 )
+from retrieve.ops.triton.common import probe_prep_kernel
 from tests.conftest import make_index, make_query
 from tests.parity.conftest import (
     POISON,
@@ -270,3 +271,27 @@ def test_gated_skip_engages_and_is_exact(d):
     ref = reference.codesigned_probe_score_bloom(*args, qpos, bt, bf, gs, 32, lay.width)
     assert_topk_equal(*out, *ref)
     assert torch.equal(out[0], ungated[0]) and torch.equal(out[1], ungated[1])
+
+
+@pytest.mark.parametrize("d", [64, 128, 192, 768])
+def test_prep_quantizes_as_quantize_int8(d):
+    """The prep launch's int8 query equals ``quantize_int8``'s bit for bit (codes and scales),
+    including a zero row (the 1e-8 clamp), a constant row, extreme magnitudes and rows whose
+    quotients land on rounding ties."""
+    g = torch.Generator(device="cuda").manual_seed(5)
+    q = torch.randn(64, d, device="cuda", generator=g)
+    q[0] = 0.0
+    q[1] = 3.0
+    q[2] *= 1e30
+    q[3] *= 1e-30
+    q[4] = torch.arange(d, device="cuda", dtype=torch.float32) - d / 2  # ties at x / amax * 127
+    q[5] = torch.linspace(-254.0, 254.0, d, device="cuda").round()
+    lay = make_probe_family(64, 32, 20, 4)
+    codes = torch.zeros((lay.n, d), dtype=torch.int8, device="cuda")
+    launch = probe_prep(q, lay.probe_ids, lay.cluster_offsets, codes, lay.sort_perm, 1.0,
+                        lay.width, block_p=64, num_warps=4, num_stages=2, block_d=256,
+                        skip=False)  # fmt: skip
+    probe_prep_kernel[launch.prep.grid](**launch.prep.kwargs)
+    want_codes, want_scales = quantize_int8(q)
+    assert torch.equal(launch.kwargs["q_codes_ptr"], want_codes)
+    assert torch.equal(launch.kwargs["q_scales_ptr"], want_scales)
