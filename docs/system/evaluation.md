@@ -692,8 +692,8 @@ latency_kw=None, device=None) -> Counter` runs the jobs in order:
    entries' under-load `sm_mhz` samples; `memory_reserved_mib`; one
    `records.append_record`; the samples sidecar; `torch._dynamo.reset()`
    per bs;
-6. after each job: drop the module, `gc.collect()`, `torch._dynamo.reset()`,
-   `empty_cache()`.
+6. after each unit (one job, or one interleave group): release its arms
+   ([Arm release](#arm-release)).
 
 Any exception inside a cell (an OOM on the torch path included) becomes a
 `status: failed` record with the traceback and `stage` (`build`,
@@ -717,6 +717,29 @@ samples line is appended *before* its record, so a crash between the two
 cannot leave a resumable record without its vector; `read_keys` ignores
 (and logs) one torn trailing line — the cell in flight when the process
 died — and raises on a malformed line anywhere else.
+
+### Arm release
+
+A unit's modules (index, filter, compiled and captured callables) die before
+the next unit builds, so one process runs several 10-30 M arms in a row
+(roadmap H-ARMFREE: laion30m and V-ROUTER PubMed ran out of memory when the
+last arm's index stayed resident). `run.py` notes `torch.cuda.memory_allocated()`
+once the unit's inputs and sweep assets are ready (`base`); at the unit's end
+it drops every name that still holds an arm (`built` and the per-arm
+`module` / `b` locals), then `gc.collect()`, `torch._dynamo.reset()`,
+`empty_cache()`, and raises if more than `ARM_FREE_SLACK_MIB` (256 MiB) over
+`base` is still allocated: a leaked index fails the run loudly instead of the
+next build failing on an out-of-memory error. The arms of one interleave group stay resident
+together by design (they are timed round-robin).
+
+A failure frees its tensors too. The build, cell and perf failure paths release
+*after* their `except` block, once the exception (whose traceback holds the
+half-built tensors) is gone, and they log through `run._log_failure`
+(`logger.error` with `traceback.format_exception`) instead of
+`logger.exception`: loguru's default `diagnose` reads `run`'s own `f_locals`,
+and on Python 3.11 that snapshot stays cached on the frame, keeping `exc`
+and with it the failed arm's tensors for the rest of the run (each retry of a
+failed 30 M build saw more memory held).
 
 ### Interleaved groups
 

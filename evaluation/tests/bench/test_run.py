@@ -18,9 +18,11 @@ recorded as partial and re-run by resume). ``test_cli.py`` drives the same fixtu
 from __future__ import annotations
 
 import dataclasses
+import gc
 import hashlib
 import json
 import math
+import weakref
 from pathlib import Path
 
 import numpy as np
@@ -815,3 +817,49 @@ def test_score_path_arms_share_the_triton_parity_spill(tiny_configs, tmp_path):
     for sp in ("fp16", "int32"):
         out = run.parity(tmp_path, off, {"score_path": sp}, ids, sc, [2])
         assert out["parity"] == "vs_torch" and out["jaccard_vs_first@2"] == 1.0
+
+
+def test_each_finished_arm_is_freed_before_the_next_is_built(tiny_configs, tmp_path, monkeypatch):
+    """Roadmap H-ARMFREE: no module of a finished unit is alive when the next unit builds, so
+    one process can run several 10-30 M arms in a row."""
+    jobs = _jobs(tiny_configs, algos=["linr_v1_filter_mask"])
+    assert len(jobs) == 3
+    real_build, built = run.build_module, []
+
+    def build(*a, **kw):
+        assert [r for r in built if r() is not None] == []
+        m = real_build(*a, **kw)
+        built.append(weakref.ref(m))
+        return m
+
+    monkeypatch.setattr(run, "build_module", build)
+    assert dict(run.run(jobs, out_dir=tmp_path / "results", modes=EAGER, **KW)) == {"partial": 3}
+    assert len(built) == 3
+
+
+def test_a_failed_build_is_released_after_its_traceback_is_gone(
+    tiny_configs, tmp_path, monkeypatch
+):
+    """Roadmap H-ARMFREE: the release after a failed build runs once the exception (whose
+    traceback holds the half-built tensors) is gone, so a retry does not see them held."""
+    jobs = _jobs(tiny_configs, algos=["linr_v1_filter_mask"])
+    real_build, real_release, held, seen = run.build_module, run._release, [], []
+
+    def build(*a, **kw):
+        if not held:
+            partial_index = torch.zeros(1024)
+            held.append(weakref.ref(partial_index))
+            raise RuntimeError("out of memory (simulated)")
+        return real_build(*a, **kw)
+
+    def release():
+        gc.collect()  # what the real release does first: can it free them yet?
+        if held:  # the releases after the failure
+            seen.append(held[0]() is None)
+        real_release()
+
+    monkeypatch.setattr(run, "build_module", build)
+    monkeypatch.setattr(run, "_release", release)
+    counts = run.run(jobs, out_dir=tmp_path / "results", modes=EAGER, **KW)
+    assert dict(counts) == {"failed": 1, "partial": 2}
+    assert seen[0] is True
