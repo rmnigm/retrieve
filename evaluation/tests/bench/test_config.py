@@ -354,6 +354,7 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("deep", "goodreads"): (42, 210),
     ("deep", "arxiv"): (72, 360),
     ("deep", "yfcc10m"): (9, 45),
+    ("deep", "pubmed"): (9, 36),
     ("synth", "goodreads-synth"): (312, 558),
     ("synth", "arxiv-synth"): (25, 46),
     ("synth", "arxiv-corr-synth"): (15, 42),
@@ -432,7 +433,9 @@ def test_grid_counts_and_invariants(suite, dataset):
     tuned = IVF.get(dataset, (None, None))[1]
     # synth sweeps n_probe; laion30m carries the 30 M probe curve (F3, controller 2026-10-11)
     synth = suite in ("synth", "laion30m-synth", "laion30m", "laion30m-bs1")
-    assert synth or not any(p.get("n_probe") == 256 != tuned for _, p in cells)
+    # deep on pubmed: the F3 / C6 10 M IVF curve up to the n_lists / 4 cap (controller, 2026-10-11)
+    curve = suite == "deep" and dataset == "pubmed"
+    assert synth or curve or not any(p.get("n_probe") == 256 != tuned for _, p in cells)
     assert not any(j.narrowed for j in jobs)
     if suite in ("filter", "deep") and dataset in KEPT:
         assert {j.sweep for j in jobs} == KEPT[dataset] or (
@@ -728,3 +731,11 @@ def test_exact_gate_is_yfcc_synths_below_k_1000():
 
 def _ds_dim(f: Path) -> int:
     return yaml.safe_load(f.read_text())["dims"][0]
+
+
+def test_deep_pubmed_is_the_triton_clause_ivf_curve():
+    """F3 / C6 at 10 M: PubMed `deep` = SilverTorch triton clause, 4096 lists, n_probe 24-1024."""
+    pm = _real("deep", "pubmed")
+    assert {(j.algo, j.backend, j.filter_kind) for j in pm} == {("silvertorch", "triton", "clause")}
+    assert {j.build["n_lists"] for j in pm} == {4096} and {j.sweep for j in pm} == KEPT["pubmed"]
+    assert {q["n_probe"] for j in pm for q in j.query} == {24, 64, 256, 1024}

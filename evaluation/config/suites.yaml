@@ -74,8 +74,11 @@ filter:                        # headline (T2, C3, C6)
     - {algo: postfilter, backends: [torch], query: {alpha: [1, 8]}}   # the generic-torch baseline
 
 deep:                          # recall-vs-latency Pareto (F3, C6)
-  datasets: [goodreads, arxiv, yfcc10m]
-  dims: [128, 192]
+  # PubMed (F3 / C6 10 M panel, controller 2026-10-11): SilverTorch triton clause at n_lists 4096 along n_probe
+  # 24 / 64 / 256 / 1024 on its `filter` kept sweeps, its own arm (clause only), so the other datasets' keys are unchanged;
+  # the exact V1 / V2 references come from `filter` at the same version.
+  datasets: [goodreads, arxiv, yfcc10m, pubmed]
+  dims: [128, 192, 768]
   filter_kinds: [clause, bloom]
   ks: [100, 1000]
   batch_sizes: [1, 16]
@@ -84,6 +87,7 @@ deep:                          # recall-vs-latency Pareto (F3, C6)
     goodreads: [c0_genre, c1_lang_reverse, all4]
     arxiv: [c3_nversions, c0_maincat, all4]
     yfcc10m: [tags_and]
+    pubmed: [c0_mesh, c3_journal_reverse, all5]
   arms:
     - algo: silvertorch        # n_lists ~ sqrt(N) and 4x that
       backends: [triton]
@@ -103,6 +107,12 @@ deep:                          # recall-vs-latency Pareto (F3, C6)
     - algo: linr_v3            # candidate_pool as a fraction of the sweep's mean passing items
       backends: [triton]
       query: {candidate_pool_frac: [0.005, 0.01, 0.02, 0.05, 0.1]}
+      datasets: {goodreads: {}, arxiv: {}, yfcc10m: {}}
+    - algo: silvertorch        # PubMed 10 M: the IVF curve up to the 25 % cap (n_lists / 4)
+      backends: [triton]
+      filter_kinds: [clause]
+      query: {n_probe: [24, 64, 256, 1024]}
+      datasets: {pubmed: {build: {n_lists: [4096]}}}
 
 synth:                         # pass rate as the x axis (F1, F2, C1, C6)
   # SYNTH-TRIM, sized by claim (controller 2026-10-10, claims first): C1's crossover (V1 + V2 at every rate, clause) and
