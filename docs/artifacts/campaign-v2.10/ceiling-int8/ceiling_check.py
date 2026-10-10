@@ -41,13 +41,23 @@ m = run.build_module(job, inp, assets, 100, params)
 m.k = 100
 shipped = run.quality(m, inp, assets, [100], dev)[0]["oracle"]["recall@100"]
 
-perm = m.sort_perm
-x = inp["item_embs"][perm]  # sorted (cluster-major) space, as the module's codes
-codes_g = m.item_codes.to(torch.float16)  # global-scale int8 codes, exact in fp16
-codes_r, scales_r = quantize_int8(x.float())
-codes_r = codes_r.to(torch.float16)
-x16 = x.to(torch.float16)
-del x
+perm = m.sort_perm  # sorted (cluster-major) space, as the module's codes
+# items scored in blocks: no [N, D] fp16 copy (10 M d768 is 15 GB each)
+n, BLOCK = perm.numel(), 1 << 20
+codes_r = torch.empty_like(m.item_codes)
+scales_r = torch.empty(n, dtype=torch.float32, device=dev)
+for b in range(0, n, BLOCK):
+    c, s = quantize_int8(inp["item_embs"][perm[b : b + BLOCK]].float())
+    codes_r[b : b + BLOCK], scales_r[b : b + BLOCK] = c, s
+
+
+def blocked(rows, fn):
+    out = torch.empty((rows, n), dtype=torch.float32, device=dev)
+    for b in range(0, n, BLOCK):
+        out[:, b : b + BLOCK] = fn(b, min(n, b + BLOCK))
+    return out
+
+
 cluster_of = torch.repeat_interleave(
     torch.arange(m.n_lists, device=dev), m.cluster_offsets.diff()
 )
@@ -67,11 +77,29 @@ with torch.inference_mode():
         allowed = probed[:, cluster_of] & filt.evaluate_mask(qa)[:, perm]
         q_codes, q_scales = quantize_int8(q.float())
         q_codes = q_codes.to(torch.float16)
+        q16 = q.to(torch.float16)
+
+        def mm(lhs, codes):
+            return blocked(
+                lhs.shape[0],
+                lambda b, e: torch.mm(
+                    lhs, codes(b, e).to(torch.float16).t(), out_dtype=torch.float32
+                ),
+            )
+
         variants = {
-            "global": lambda: torch.mm(q_codes, codes_g.t(), out_dtype=torch.float32) * q_scales[:, None] * m._global_scale_f,
-            "per_row": lambda: torch.mm(q_codes, codes_r.t(), out_dtype=torch.float32) * q_scales[:, None] * scales_r[None, :],
-            "fp16": lambda: torch.mm(q.to(torch.float16), x16.t(), out_dtype=torch.float32),
-        }  # fmt: skip
+            "global": lambda: (
+                mm(q_codes, lambda b, e: m.item_codes[b:e])
+                * q_scales[:, None]
+                * m._global_scale_f
+            ),
+            "per_row": lambda: (
+                mm(q_codes, lambda b, e: codes_r[b:e])
+                * q_scales[:, None]
+                * scales_r[None, :]
+            ),
+            "fp16": lambda: mm(q16, lambda b, e: inp["item_embs"][perm[b:e]]),
+        }  # fmt: skip (same arithmetic and order as before, per item block)
         idx = orow.nonzero().reshape(-1).to(dev)
         targets = assets["blob"]["topk"][sel][orow].to(dev)
         for v, score in variants.items():
