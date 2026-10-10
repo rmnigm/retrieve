@@ -225,21 +225,6 @@ co-design.
   filter-cluster alignment (GLS) to explain F2's real-vs-synth gap, with
   V-AX-CORR; Big-ANN-style QPS at recall 0.95 per selectivity band, and a
   reproduction defect ledger.
-- [ ] **V-V3BITS: V3 at LiNR's bit budget, next to our deviation**: what is
-  left is goodreads' 48 cells (goodreads-synth holds in
-  [validation](validation.md)); our V3 runs `k_bits` = D = 128 against
-  LiNR's 512 (LN-8). `k_bits` must divide D
-  (`quantize.py` `_oporp_k_bits`), so at D 128 only {64, 128} exist without a
-  library change: goodreads-synth and goodreads `filter` V3 at `k_bits`
-  {64, 128}, pool {1 %, 5 %}, quality first, then the timed cells, to show
-  the recall-vs-bits slope. LN-8 stays the campaign's setting.
-  **≈ 1 GPU-h.**
-- [ ] **D3: `bloomwidth`**: what is left is PubMed `bloomwidth-timed` at
-  `campaign-v2.2` or later (the v2.1 run tripped the surprise gate; the
-  other legs hold in [validation](validation.md)):
-  both blooms, `m_bits` 64-2048 × `k_hash` {3, 5}, quality-only plus one
-  timed point per width at bs 16. F4a, C4. **≈ 3-5 GPU-h**, GPU 1 (the
-  timed points on GPU 0).
 - [ ] **SYNTH-TRIM: a smaller synth grid, dense in the middle** (user,
   2026-10-10: the lowest rates add little, 0.1 / 0.2 / 0.5 matter more).
   arxiv-synth rates {0.001, 0.01, 0.05, 0.1, 0.2, 0.5, 1.0}, yfcc10m-synth
