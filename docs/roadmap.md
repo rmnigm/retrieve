@@ -225,21 +225,6 @@ co-design.
   filter-cluster alignment (GLS) to explain F2's real-vs-synth gap, with
   V-AX-CORR; Big-ANN-style QPS at recall 0.95 per selectivity band, and a
   reproduction defect ledger.
-- [ ] **V-V3BITS: V3 at LiNR's bit budget, next to our deviation**: what is
-  left is goodreads' 48 cells (goodreads-synth holds in
-  [validation](validation.md)); our V3 runs `k_bits` = D = 128 against
-  LiNR's 512 (LN-8). `k_bits` must divide D
-  (`quantize.py` `_oporp_k_bits`), so at D 128 only {64, 128} exist without a
-  library change: goodreads-synth and goodreads `filter` V3 at `k_bits`
-  {64, 128}, pool {1 %, 5 %}, quality first, then the timed cells, to show
-  the recall-vs-bits slope. LN-8 stays the campaign's setting.
-  **≈ 1 GPU-h.**
-- [ ] **D3: `bloomwidth`**: what is left is PubMed `bloomwidth-timed` at
-  `campaign-v2.2` or later (the v2.1 run tripped the surprise gate; the
-  other legs hold in [validation](validation.md)):
-  both blooms, `m_bits` 64-2048 × `k_hash` {3, 5}, quality-only plus one
-  timed point per width at bs 16. F4a, C4. **≈ 3-5 GPU-h**, GPU 1 (the
-  timed points on GPU 0).
 - [ ] **SYNTH-TRIM: a smaller synth grid, dense in the middle** (user,
   2026-10-10: the lowest rates add little, 0.1 / 0.2 / 0.5 matter more).
   arxiv-synth rates {0.001, 0.01, 0.05, 0.1, 0.2, 0.5, 1.0}, yfcc10m-synth
@@ -336,9 +321,13 @@ co-design.
      a T2 confidence interval rests on.
   3. **Triton kernel work where ours trails Meta's or the compiler**:
      cross-query cluster sharing in the probe scorer (30 M d256, n_probe 128,
-     bs 64: Meta 1.8-2.0x); the top-k epilogue (ours 1.18 ms vs Meta's 0.79
-     at 30 M); V1 at bs 1 (`torch.compile` 1.77x faster, C3). Each bit-exact
-     plus the keep rule, then a tag.
+     bs 64: Meta 1.8-2.0x); the top-k epilogue (ST-TOPK, `dev/st-topk`: ours
+     1.18 ms vs Meta's 0.79 at 30 M d256 `n_probe` 128 bs 64 in
+     `artifacts/c7-laion30m-interleaved` is Meta on its default fp16 score
+     path; at int32, the bit-exact comparison, the two top-ks are within
+     2-12 % on PubMed / arXiv, and the target is our own two-level top-k);
+     V1 at bs 1 (`torch.compile` 1.77x faster, C3). Each bit-exact plus the
+     keep rule, then a tag.
 - [ ] **F-REPRO: the final pass.** When the library stops changing: tag the
   final version, rerun the redo ledger (or the whole grid if the ledger is
   most of it) at that tag into `campaign-final/`, write *campaign.yaml* for
