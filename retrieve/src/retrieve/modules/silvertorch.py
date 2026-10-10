@@ -72,6 +72,9 @@ __all__ = ["FilterMode", "OfficialConfig", "SilverTorch", "SilverTorchBuilder"]
 # Where the bloom two-pass beat the one-pass scorer at D 128-256; at one row its extra launches
 # cost more than it saves in eager (kernels.md § SilverTorch kernels, "Bloom two-pass").
 SPARSE_TILE_FRAC = 0.6
+# Or when every row's rarest queried bit is set on fewer than this share of items (an upper bound
+# on its pass rate): under one passing item per 256-item tile, whatever the clustering.
+SPARSE_PASS_BOUND = 1 / 256
 
 
 class SilverTorch(RetrievalModule):
@@ -425,7 +428,10 @@ class SilverTorch(RetrievalModule):
             return PreparedFilter(query_attrs=query_clause_attrs.long().contiguous())
         if self.backend != "official":
             bits = self._query_bit_positions(query_clause_attrs)
-            sparse = bits.shape[0] > 1 and bool(self._tile_frac(bits).max() < SPARSE_TILE_FRAC)
+            bound = torch.where(bits >= 0, self.bloom_bit_freq[bits.clamp_min(0)], 1.0).amin(1)
+            sparse = bits.shape[0] > 1 and bool(
+                (bound.max() < SPARSE_PASS_BOUND) | (self._tile_frac(bits).max() < SPARSE_TILE_FRAC)
+            )
             return PreparedFilter(query_bits=bits, sparse=sparse)
         if self.bloom_index.numel() == 0:
             raise RuntimeError(
