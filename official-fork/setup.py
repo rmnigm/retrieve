@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
-# Modified by the retrieve authors, 2026-10-14: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; builds is_topk / fresh_index_post_processing; -O3 host code; metadata in pyproject.toml (official-fork/CHANGES.md).
+# Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; builds is_topk / fresh_index_post_processing; -O3 host code; metadata in pyproject.toml (official-fork/CHANGES.md).
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
