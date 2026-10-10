@@ -32,4 +32,12 @@ for ds in SWEEPS:
         (out / f"{ds}.yaml").symlink_to(Path(f"config/{ds}.yaml").resolve())
 for ds in SWEEPS:
     jobs = load_matrix(out / f"{ds}.yaml", out / "suites.yaml", "tune")
-    print("tune", ds, len(jobs), "jobs", sum(len(j.query) for j in jobs), "cells", file=sys.stderr)
+    print(
+        "tune",
+        ds,
+        len(jobs),
+        "jobs",
+        sum(len(j.query) for j in jobs),
+        "cells",
+        file=sys.stderr,
+    )
