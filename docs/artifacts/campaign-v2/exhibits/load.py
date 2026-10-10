@@ -19,6 +19,7 @@ CV_LABEL = {
     "78cfbc72": "v2.8",
     "e8958bd2": "v2.9",
     "a3bec4a5": "v2.10",
+    "1d390792": "v2.11",
     "72e5a90c": "d1",
     "c0e42d1a": "d1-c0e4",
 }
@@ -115,20 +116,35 @@ def pre_st_wide(r, bs):
     )
 
 
-# ST-WIDE-2 (campaign-v2.10) fused the probe prep and added a sparse two-pass at D_PAD <= 256; bit-exact.
-# Redo ledger: SilverTorch Triton perf before v2.10 where B * n_probe >= 512 (every width), or on sparse
-# batches at D_PAD <= 256 (eager mostly, 0.74-1.00 of v2.9). A record does not say whether its batches were
-# sparse, so filtered cells at D <= 256 are labelled as possibly affected (roadmap redo ledger, 2026-10-10).
-def redo_st_wide2(r, bs):
-    if (
-        r["algo"] != "silvertorch"
-        or r["backend"] != "triton"
-        or cv(r) not in PRE_ST_WIDE + ("v2.9", "d1", "d1-c0e4")
-    ):
+PRE_V210 = PRE_ST_WIDE + ("v2.9", "d1", "d1-c0e4")
+PRE_V211 = PRE_V210 + ("v2.10",)
+TOPK_MIN_SLOTS, TOPK_BLOCK, TOPK_MIN_RATIO = 1 << 23, 256, 8  # ops/triton/_host.py
+
+
+def redo(r, bs, k=100):
+    """The redo-ledger rows a SilverTorch Triton timing falls under (roadmap, "Redo ledger").
+    ST-WIDE-2 (v2.10; bit-exact): before v2.10, `wide` where B * n_probe >= 512, `sparse?` on filtered
+    cells at D <= 256 (the sparse two-pass engages on sparse batches; a record cannot say which).
+    ST-TOPK (v2.11; bit-exact): before v2.11, where the [B, width] score buffer reaches 2^23 slots with
+    >= 8 blocks of 256 per top-k slot. width = the sum of the n_probe largest clusters, which a record
+    does not carry; the mean list size gives a lower bound: `topk` where that bound engages, `topk?`
+    where it is within 4x (30 M d256 n_probe 128 bs 16 engages at 0.45x of the bound)."""
+    if r["algo"] != "silvertorch" or r["backend"] != "triton":
         return ""
-    if bs * r["params"].get("n_probe", 24) >= 512:
-        return "wide"
-    return "sparse?" if r["filter_kind"] != "none" and r["dim"] <= 256 else ""
+    out = []
+    n_probe = r["params"].get("n_probe", 24)
+    if cv(r) in PRE_V210:
+        if bs * n_probe >= 512:
+            out.append("wide")
+        elif r["filter_kind"] != "none" and r["dim"] <= 256:
+            out.append("sparse?")
+    if cv(r) in PRE_V211 and r["params"].get("n_lists"):
+        w = n_probe * r["n_items"] / r["params"]["n_lists"]
+        for f, tag in ((1, "topk"), (4, "topk?")):
+            if bs * w * f >= TOPK_MIN_SLOTS and w * f >= TOPK_MIN_RATIO * TOPK_BLOCK * k:
+                out.append(tag)
+                break
+    return "+".join(out)
 
 
 def arm(r):
