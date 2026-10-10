@@ -51,3 +51,15 @@ def test_calibration_rows_stay_in_range_past_2_24(n):
     assert rows.dtype == torch.int64
     assert rows[0].item() == 0 and rows[-1].item() == n - 1
     assert (rows[1:] > rows[:-1]).all() and (rows < n).all()
+
+
+def test_register_index_past_2_24_items():
+    """``register_index`` on a table past 2^24 items (d 16, 1 GB): the check's rows stay in range
+    (the float32 ``linspace`` row choice hit a device assert on 30 M tables) and single-query
+    scores are cuBLAS's."""
+    n, d = 2**24 + 5, 16
+    knn = PostfilterKNN(k=10)
+    knn.register_index(torch.randn(n, d, device="cuda"))
+    q = make_query(1, d)
+    want = torch.mm(q.half(), knn.item_embs_t, out_dtype=torch.float32)
+    assert torch.equal(knn.score(q), want)
