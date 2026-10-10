@@ -1362,12 +1362,27 @@ d128 and 1.36 at d192 at p 1). At d768 the dot dominates, and the
 two-pass stays on: PubMed `c2_year` 0.95-1.02, `c0_mesh` / `c0c2`
 0.56-0.84. So at `D_PAD ≤ 256` the op takes it only when its `sparse`
 argument is set. `SilverTorch.prepare_queries` sets `PreparedFilter.sparse`
-outside the timed call when every row's rarest queried bit is set on under
-`SPARSE_PASS_BOUND` = 1/256 of the items, under one passing item per
-256-item tile. That bound is the gated skip's, an upper bound on the row's
-pass rate: tight on one-clause queries, loose on several clauses (arXiv
-`all4`: median bound 0.11 against a true rate of 0.005), so the switch can
-miss a win but not take a loss. Under compile the flag is a guarded Python
+outside the timed call when either of two rules holds:
+
+- **Pass-rate bound.** Every row's rarest queried bit is set on under
+  `SPARSE_PASS_BOUND` = 1/256 of the items. This is an upper bound on the
+  row's pass rate, tight on one clause.
+- **Tile estimate (B > 1 only).** Every row's estimated share of the
+  index's 256-item tiles holding a passing item is under
+  `SPARSE_TILE_FRAC` = 0.6. Per cluster, `bloom_cluster_counts`
+  (`[n_lists, m_bits]` per-cluster bit counts, built at `register_index`)
+  give the product over the row's clauses of the clause's rarest-bit share.
+  Times the cluster's size and capped at its tiles, these are summed over
+  the index.
+
+The estimate catches what the bound cannot. Passing items cluster in the
+IVF lists on real filters: arXiv `all4` has an estimate of 0.48 but a
+median bound of 0.11 against a true rate of 0.0085, and its two-pass runs
+at 0.44–0.74 at bs 16 / 64. It does not see which clusters a row probes,
+since prep runs before phase 1. On a category clause the probed clusters
+are those dense in the category, so `c0_maincat` (estimate 0.73) lost
+1.07–1.16 at small probe fractions; hence 0.6. At one row the two-pass's
+extra launches cost 1.04–1.06 in eager, hence B > 1 for the estimate. Under compile the flag is a guarded Python
 bool: at most two graphs per shape.
 
 **Launch grid** `(B, tiles_y, tiles_x)` via `_host.grid_batch_tiles`, the
