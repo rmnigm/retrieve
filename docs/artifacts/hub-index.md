@@ -260,6 +260,7 @@ re-upload of a subtree replaces its row.
 | `artifacts/v1-bs1` | V1-BS1 (pod b, NOT CITABLE): `gate/` the final gate against staging 1cba173 (`f_*`; `g` = graph), `earlier/` the first gate runs (before the GEMV int64 fix / early cuBLAS handle), `prof/` V1 breakdowns (`p_*`, `p2_*` after the batched mask), `probe/` cuBLAS kernel / accumulation-order / GEMV-speed probes, `pytest/` suite logs | 95 | 241,026 | `017d25770d9ecd4670d1836aebf2b89e32bd893298740620465f19dee0512201` |
 | `artifacts/v1-bs1-v211` | V1-BS1 re-gate against campaign-v2.11 (pod b, NOT CITABLE): `gate/` 68 cells (`f_*`; `g` = graph), `pytest/` the library suite on the v2.11-merged tree | 31 | 68,254 | `56ee714f1c477f7618b4606f5673ee254fa2eadc792db46b2dabd80cf3eb99d9` |
 | `artifacts/v1-bs1-fix` | V1-BS1 after the 2^24 calibration-row fix (pod b, NOT CITABLE): `gate/` 52 cells against campaign-v2.11 (`f_*`), `pytest/` the fix tests and the library suite | 20 | 52,713 | `fceaee1f33e6bc218acc6737601a043bced2f71b324c57278e66b0582d5da145` |
+| `artifacts/v1-topk` | V1-TOPK (pod b, NOT CITABLE): `gate/` against dev/v1-bs1 11242c7 (`t_*` V1, `s_*` SilverTorch; `g` = graph), `sass/` narrow hashes, `pytest/` suite logs, `prefix/` the superseded first runs against the pre-fix dev/v1-bs1 | 86 | 235,187 | `b2f7300eaedccdda8dc83c3a046b5b88827800cc64df9940b4ebac6f37131b45` |
 
 The `d1-a` and `artifacts/*` subtrees were published by
 [H1](h1-results-storage/README.md) on 2026-09-26; their file counts and bytes

@@ -10,8 +10,10 @@ mapping, and pad_to_k both ways. Device-agnostic math — CPU tensors suffice
 
 from __future__ import annotations
 
+import pytest
 import torch
 
+from retrieve import functional
 from retrieve.functional import counts_to_valid, masked_topk
 
 NEG_INF = float("-inf")
@@ -159,3 +161,21 @@ def test_output_dtypes():
     gather_ids = torch.tensor([[7, 9]], dtype=torch.int64)
     ids, _ = masked_topk(scores, 2, gather_ids=gather_ids)
     assert ids.dtype == torch.int64
+
+
+@pytest.mark.parametrize("p", [256 * 40, 256 * 40 + 77])
+@pytest.mark.parametrize("k", [4, 5])
+def test_two_level_topk_equals_topk_up_to_ties(monkeypatch, p, k):
+    """The block top-k (thresholds lowered so it engages) returns ``torch.topk``'s scores
+    exactly, ids up to ties, with a ragged tail, heavy ties and ``-inf`` rows."""
+    monkeypatch.setattr(functional, "TOPK_MIN_SLOTS", 0)
+    g = torch.Generator(device="cuda").manual_seed(3)
+    scores = torch.randint(0, 6, (6, p), device="cuda", generator=g).float()  # heavy ties
+    scores[0, :] = float("-inf")
+    scores[1, : p - 3] = float("-inf")  # the only finite items in the tail
+    scores[2, -1] = 99.0  # the max in the tail
+    top, at = functional.two_level_topk(scores, k)
+    want, _ = torch.topk(scores, k, dim=1)
+    assert torch.equal(top, want)
+    assert torch.equal(scores.gather(1, at), top)
+    assert all(at[r].unique().numel() == k for r in range(scores.shape[0]))

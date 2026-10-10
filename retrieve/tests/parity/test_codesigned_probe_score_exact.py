@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-import retrieve.ops.triton._host as host
+from retrieve import functional
 from retrieve.indexing.quantize import quantize_int8_global
 from retrieve.ops import reference
 from retrieve.ops.triton._host import width_tiles
@@ -179,11 +179,11 @@ def test_two_level_topk_ties_and_finite_count_boundary(d, delta, monkeypatch):
     kernels, "Top-k") under heavy ties (four distinct code rows) and with exactly ``k + delta``
     passing items a row (every list probed, one clause value): scores ``torch.equal`` to the
     whole-width reference, ids up to ties, ``-1`` / ``-inf`` past the finite count."""
-    monkeypatch.setattr(host, "TOPK_MIN_SLOTS", 0)
+    monkeypatch.setattr(functional, "TOPK_MIN_SLOTS", 0)
     b, k, n_lists = 4, 4, 512
     lay = make_probe_family(b, n_lists, 60, n_lists)
-    width = -(-lay.width // host.TOPK_BLOCK) * host.TOPK_BLOCK
-    assert width // host.TOPK_BLOCK >= host.TOPK_MIN_RATIO * k, (
+    width = -(-lay.width // functional.TOPK_BLOCK) * functional.TOPK_BLOCK
+    assert width // functional.TOPK_BLOCK >= functional.TOPK_MIN_RATIO * k, (
         "the two-level top-k does not engage"
     )
     g = torch.Generator(device="cuda").manual_seed(11)
