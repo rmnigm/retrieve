@@ -14,6 +14,12 @@ from retrieve.functional import masked_topk, post_filter_topk
 from retrieve.interfaces import LinrBackend, RetrievalModule, check_backend, ops_for
 
 
+def calibration_rows(n: int, device: torch.device) -> Tensor:
+    """8 item rows spread over ``[0, n)``, first and last included, in int64 arithmetic: a float32
+    ``linspace`` rounds ``n - 1`` up to ``n`` past 2^24 items."""
+    return torch.arange(8, device=device) * (n - 1) // 7
+
+
 class PostfilterKNN(RetrievalModule):
     """Dense scoring (``query @ item_embs.T``) + optional boolean mask + top-K; fp16 inputs, fp32
     scores (module docstring). cuBLAS scores every batch, except a single query on the triton
@@ -44,8 +50,7 @@ class PostfilterKNN(RetrievalModule):
         """Whether the triton GEMV reproduces cuBLAS's single-query scores on this table: cuBLAS
         picks its kernel by shape, and only its sequential-FMA ``gemv2N`` has the GEMV's order.
         Checked on 8 item rows taken as queries (a kernel's order does not depend on the data)."""
-        n = self.item_embs_t.shape[1]
-        rows = torch.linspace(0, n - 1, 8, device=self.item_embs_t.device).long()
+        rows = calibration_rows(self.item_embs_t.shape[1], self.item_embs_t.device)
         return all(
             torch.equal(
                 ops_for("triton").gemv_scores(q, self.item_embs_t),

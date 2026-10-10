@@ -1,36 +1,32 @@
-# Harness v2 suites, the campaign-v2 grid (user decisions 2026-10-08; docs/system/evaluation.md
-# § Config). A suite = the cells run on every listed dataset at the dims both list. Each entry of
-# `arms` is one algo on its backends, optionally narrowed to `filter_kinds` / `sweeps`, with
-# `build:` (rebuilds the index) and `query:` (n_probe / candidate_pool / candidate_pool_frac /
-# alpha, applied with set_query_params) grids. An arm with `datasets:` runs only on the datasets
-# it lists, each with optional `build` / `query` / `sweeps` overrides merged over the arm's.
-# algos.PATHS drops (algo, filter_kind, backend) triples with no code path. Algo defaults:
-# silvertorch n_lists=1024 n_probe=24 n_iter=10, linr_v3 candidate_pool=5000.
+# The final grid (F-REPRO, campaign-final; user directive 2026-10-10, docs/system/evaluation.md § Config). A suite = the
+# cells run on every listed dataset at the dims both list. Each entry of `arms` is one algo on its backends, optionally
+# narrowed to `filter_kinds` / `sweeps`, with `build:` (rebuilds the index) and `query:` (n_probe / candidate_pool /
+# candidate_pool_frac / alpha, applied with set_query_params) grids. An arm with `datasets:` runs only on the datasets it
+# lists, each with optional `build` / `query` / `sweeps` overrides merged over the arm's. algos.PATHS drops (algo,
+# filter_kind, backend) triples with no code path. Algo defaults: silvertorch n_lists=1024 n_probe=24 n_iter=10,
+# linr_v3 candidate_pool=5000.
 #
-# Global rules: seeds {0, 1, 2} everywhere but the laion30m suites (seed 0, claims first) (codesign: timing repeats); bs {1, 16}; k {100, 1000};
-# no n_probe 4 / 256 (synth's SilverTorch sweep aside, user), no bs 8, no k 500, no openalex.
-# Official SilverTorch runs `none` / `bloom` only: its clause cells time our pack_mask adapter
-# (the old records stay readable). One backend per algo (`triton`, measured fastest everywhere)
-# except silvertorch, whose official-vs-ours comparison is the paper, and the C3 torch arms
-# named below.
-#
-# IVF-TUNE (docs/artifacts/campaign-v2/ivf-tune): SilverTorch's n_lists and n95 per dataset, where
-# n95 = the smallest n_probe reaching recall_oracle@100 >= 0.95 on the dataset's median kept sweep,
-# tuned with n_probe capped at n_lists / 4 (user: at most 25 % scanned). n_lists ~ 4 sqrt(N) to a
-# power of two; goodreads is tuned (4096 / 64). n95 / n_lists depends on the pass rate, not only on
-# N (goodreads 1/64 at 0.33; PubMed all5 > 1/16 at 0.018), so arXiv's, YFCC's and PubMed's n95 slots
-# stay open until measured (part B).
+# Global rules (final pass, controller 2026-10-13):
+# - seed 0 everywhere; seeds {0, 1, 2} only in `filter`, the T2 headline whose confidence intervals rest on them;
+#   interleaved rounds (seed × window) are the timing repeats elsewhere.
+# - bs {1, 16}; bs 64 only in C5 / C7's 30 M regime and the timed tune; k {100, 1000}, k 100 where N·p < 4·1000.
+# - SilverTorch scans at most a quarter of the lists: n_probe <= n_lists / 4 (user). n_lists and n95 per dataset come
+#   from the tune (`tune-q`, `tune-timed`; validation, night-queue item 8); 24 is the paper's n_probe.
+# - Official SilverTorch runs `none` / `bloom` only (its clause cells would time our pack_mask adapter), in one stream
+#   with the triton backend (they share a parity spill); one backend per algo (`triton`) except silvertorch, whose
+#   official-vs-ours comparison is the paper, and the C3 torch arms.
+# - No openalex, no bs 8, no k 500.
 
 # Kept sweeps (one high pass rate, one low, one conjunctive / reverse), from measured pass rates:
 # arxiv c3_nversions 0.444, c0_maincat 0.136, all4 0.0094; pubmed c0_mesh 0.0002,
 # c3_journal_reverse 0.9993, all5 0.018. Bloom keeps the forward ones among them.
-filter:                        # headline (T2, C3, C6)
+filter:                        # headline (T2, C6, C7)
   datasets: [goodreads, arxiv, yfcc10m, pubmed]
   dims: [128, 192, 768]        # each dataset's one native / chosen width; no dim ablation
   filter_kinds: [clause, bloom]
   ks: [100, 1000]
   batch_sizes: [1, 16]
-  seeds: [0, 1, 2]
+  seeds: [0, 1, 2]             # T2's confidence intervals
   sweeps:
     goodreads: [c0_genre, c1_lang_reverse, all4]
     arxiv: [c3_nversions, c0_maincat, all4]
@@ -46,102 +42,90 @@ filter:                        # headline (T2, C3, C6)
     - algo: silvertorch
       backends: [triton]
       query: {n_probe: [24]}                                  # 24 = the paper's; n95 per dataset
-      datasets:                                             # IVF-TUNE: n_lists by size, n_probe {24, n95}
+      datasets:                                               # tune: n_lists by size, n_probe {24, n95}
         goodreads: {build: {n_lists: [4096]}, query: {n_probe: [24, 64]}}
-        arxiv: {build: {n_lists: [2048]}, query: {n_probe: [24, 256]}}   # n95 256 (quick check, 2048 fewest items)
-        yfcc10m: {build: {n_lists: [4096]}, query: {n_probe: [24, 1024]}}   # 0.95 not reached: the 25 % cap, runnable at k 1000
-        pubmed: {build: {n_lists: [4096]}, query: {n_probe: [24, 1024]}}    # 0.95 not reached: the 25 % cap (0.873)
+        arxiv: {build: {n_lists: [2048]}, query: {n_probe: [24, 256]}}
+        yfcc10m: {build: {n_lists: [4096]}, query: {n_probe: [24, 1024]}}   # 0.95 not reached: the 25 % cap
+        pubmed: {build: {n_lists: [4096]}, query: {n_probe: [24, 512, 1024]}}   # 512: c0_mesh's tuned 0.90 point (v2.11 fronts)
+    - {algo: silvertorch, backends: [triton], filter_kinds: [clause], datasets: {pubmed: {sweeps: [all5], build: {n_lists: [16384]}, query: {n_probe: [2048]}}}}   # all5's tuned 0.80
+    - {algo: silvertorch, backends: [triton], filter_kinds: [clause], datasets: {pubmed: {sweeps: [c3_journal_reverse], build: {n_lists: [65536]}, query: {n_probe: [1024]}}}}   # its tuned 0.90
     - algo: silvertorch
       backends: [official]
       filter_kinds: [bloom]
-      query: {n_probe: [24]}                                  # 24 = the paper's; n95 per dataset
-      datasets:                                             # IVF-TUNE: n_lists by size, n_probe {24, n95}
+      query: {n_probe: [24]}
+      datasets:
         goodreads: {build: {n_lists: [4096]}, query: {n_probe: [24, 64]}}
-        arxiv: {build: {n_lists: [2048]}, query: {n_probe: [24, 256]}}   # n95 256 (quick check, 2048 fewest items)
-        yfcc10m: {build: {n_lists: [4096]}, query: {n_probe: [24, 1024]}}   # 0.95 not reached: the 25 % cap, runnable at k 1000
-        pubmed: {build: {n_lists: [4096]}, query: {n_probe: [24, 1024]}}    # 0.95 not reached: the 25 % cap (0.873)
-    # C3's torch arms on goodreads + arxiv only (measured: 515-917 s a cell at 0.8 M; the 10 M
-    # catalogs would take hours a cell); add yfcc10m / pubmed here if C3 stays ambiguous.
-    - algo: silvertorch                                       # #12: plain-torch IVF
-      backends: [torch]
-      query: {n_probe: [24]}
-      datasets: {goodreads: {build: {n_lists: [4096]}}, arxiv: {build: {n_lists: [2048]}}}   # the triton arm's index
-    - algo: silvertorch                                       # #13: the same, torch.compile'd
-      backends: [torch]
-      build: {compile: [max-autotune]}
-      query: {n_probe: [24]}
-      datasets: {goodreads: {build: {n_lists: [4096]}}, arxiv: {build: {n_lists: [2048]}}}   # the triton arm's index
-    - {algo: postfilter, backends: [torch], query: {alpha: [1, 8]}}   # the generic-torch baseline
+        arxiv: {build: {n_lists: [2048]}, query: {n_probe: [24, 256]}}
+        yfcc10m: {build: {n_lists: [4096]}, query: {n_probe: [24, 1024]}}
+        pubmed: {build: {n_lists: [4096]}, query: {n_probe: [24, 512, 1024]}}
+    - {algo: postfilter, backends: [torch], query: {alpha: [1, 8]}}   # the generic-torch baseline (T2)
 
-deep:                          # recall-vs-latency Pareto (F3, C6)
-  # PubMed (F3 / C6 10 M panel, controller 2026-10-11): SilverTorch triton clause at n_lists 4096 along n_probe
-  # 24 / 64 / 256 / 1024 on its `filter` kept sweeps, its own arm (clause only), so the other datasets' keys are unchanged;
-  # the exact V1 / V2 references come from `filter` at the same version.
+deep:                          # recall-vs-latency Pareto (F3, C6): SilverTorch along n_probe at the tuned n_lists
+  # n_lists from the tune (goodreads 4096, arXiv 2048, YFCC 4096; PubMed its timed fronts), n_probe up to the n_lists / 4 cap; the exact
+  # V1 / V2 references come from `filter` at the same version. Clause and bloom (PubMed: clause, its bloom equals clause).
   datasets: [goodreads, arxiv, yfcc10m, pubmed]
   dims: [128, 192, 768]
   filter_kinds: [clause, bloom]
   ks: [100, 1000]
   batch_sizes: [1, 16]
-  seeds: [0, 1, 2]
+  seeds: [0]
   sweeps:
     goodreads: [c0_genre, c1_lang_reverse, all4]
     arxiv: [c3_nversions, c0_maincat, all4]
     yfcc10m: [tags_and]
     pubmed: [c0_mesh, c3_journal_reverse, all5]
+  interleave:                  # C7: triton vs official bloom along the same curve
+    - {by: backend, values: [triton, official]}
   arms:
-    - algo: silvertorch        # n_lists ~ sqrt(N) and 4x that
-      backends: [triton]
-      query: {n_probe: [8, 16, 32, 64, 128]}
-      datasets:
-        goodreads: {build: {n_lists: [1024, 4096]}}
-        arxiv: {build: {n_lists: [1664, 8192]}}
-        yfcc10m: {build: {n_lists: [4096, 16384]}}
     - algo: silvertorch
+      backends: [triton]
+      datasets:
+        goodreads: {build: {n_lists: [4096]}, query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024]}}
+        arxiv: {build: {n_lists: [2048]}, query: {n_probe: [8, 16, 32, 64, 128, 256, 512]}}
+        yfcc10m: {build: {n_lists: [4096]}, query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024]}}
+    - algo: silvertorch        # F3's official curve (C7); YFCC has no bloom block, PubMed's deep is clause only
       backends: [official]
       filter_kinds: [bloom]
-      query: {n_probe: [8, 16, 32, 64, 128]}
       datasets:
-        goodreads: {build: {n_lists: [1024, 4096]}}
-        arxiv: {build: {n_lists: [1664, 8192]}}
-        yfcc10m: {build: {n_lists: [4096, 16384]}}
-    - algo: linr_v3            # candidate_pool as a fraction of the sweep's mean passing items
-      backends: [triton]
-      query: {candidate_pool_frac: [0.005, 0.01, 0.02, 0.05, 0.1]}
-      datasets: {goodreads: {}, arxiv: {}, yfcc10m: {}}
-    - algo: silvertorch        # PubMed 10 M: the IVF curve up to the 25 % cap (n_lists / 4)
-      backends: [triton]
-      filter_kinds: [clause]
-      query: {n_probe: [24, 64, 256, 1024]}
-      datasets: {pubmed: {build: {n_lists: [4096]}}}
+        goodreads: {build: {n_lists: [4096]}, query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024]}}
+        arxiv: {build: {n_lists: [2048]}, query: {n_probe: [8, 16, 32, 64, 128, 256, 512]}}
+    # PubMed: the points on its clause Pareto fronts (graph, bs 1 / 16 / 64; campaign-v2.11/pubmed-tune-timed), per sweep and
+    # n_lists: no single n_lists is best (low p 4096-16384, p ~ 1 65536)
+    - {algo: silvertorch, backends: [triton], filter_kinds: [clause], build: {n_lists: [1024]}, datasets: {pubmed: {sweeps: [all5], query: {n_probe: [256]}}}}
+    - {algo: silvertorch, backends: [triton], filter_kinds: [clause], build: {n_lists: [4096]}, datasets: {pubmed: {sweeps: [all5], query: {n_probe: [1024]}}}}
+    - {algo: silvertorch, backends: [triton], filter_kinds: [clause], build: {n_lists: [16384]}, datasets: {pubmed: {sweeps: [all5], query: {n_probe: [2048, 4096]}}}}
+    - {algo: silvertorch, backends: [triton], filter_kinds: [clause], build: {n_lists: [65536]}, datasets: {pubmed: {sweeps: [all5], query: {n_probe: [4096]}}}}
+    - {algo: silvertorch, backends: [triton], filter_kinds: [clause], build: {n_lists: [1024]}, datasets: {pubmed: {sweeps: [c0_mesh], query: {n_probe: [64]}}}}
+    - {algo: silvertorch, backends: [triton], filter_kinds: [clause], build: {n_lists: [4096]}, datasets: {pubmed: {sweeps: [c0_mesh], query: {n_probe: [256, 512, 1024]}}}}
+    - {algo: silvertorch, backends: [triton], filter_kinds: [clause], build: {n_lists: [16384]}, datasets: {pubmed: {sweeps: [c0_mesh], query: {n_probe: [512, 2048, 4096]}}}}
+    - {algo: silvertorch, backends: [triton], filter_kinds: [clause], build: {n_lists: [65536]}, datasets: {pubmed: {sweeps: [c0_mesh], query: {n_probe: [2048, 4096]}}}}
+    - {algo: silvertorch, backends: [triton], filter_kinds: [clause], build: {n_lists: [4096]}, datasets: {pubmed: {sweeps: [c3_journal_reverse], query: {n_probe: [32]}}}}
+    - {algo: silvertorch, backends: [triton], filter_kinds: [clause], build: {n_lists: [16384]}, datasets: {pubmed: {sweeps: [c3_journal_reverse], query: {n_probe: [64, 512, 1024]}}}}
+    - {algo: silvertorch, backends: [triton], filter_kinds: [clause], build: {n_lists: [65536]}, datasets: {pubmed: {sweeps: [c3_journal_reverse], query: {n_probe: [64, 1024, 2048]}}}}
 
-synth:                         # pass rate as the x axis (F1, F2, C1, C6)
-  # SYNTH-TRIM, sized by claim (controller 2026-10-10, claims first): C1's crossover (V1 + V2 at every rate, clause) and
-  # C6 / F2 (SilverTorch triton clause over n_probe); C2 and C4 are decided, so no V3 and bloom only at two rates. goodreads-synth
-  # keeps the pilot's cells (its first seven rates, seeds 0-2, every arm) and adds 0.05 / 0.2 / 0.5 for C1 and C6 only;
-  # arxiv-corr-synth runs the arms whose recall the correlated pass set moves (V3, SilverTorch clause, postfilter).
+synth:                         # pass rate as the x axis (F1, F2, C1, C2, C6, C7)
+  # C1's crossover: V1 + V2 at every rate, clause (nine rates on arxiv-synth / yfcc10m-synth, ten on goodreads-synth);
+  # C6 / F2: SilverTorch triton clause over n_probe; C2: V3 on goodreads-synth's seven pilot rates and the correlated
+  # synth; C7: triton vs official bloom on arxiv-synth at two rates; C3's V2 torch arms (V1's are in `c3`).
   datasets: [goodreads-synth, arxiv-synth, arxiv-corr-synth, yfcc10m-synth]
   dims: [128, 192]
   filter_kinds: [clause, bloom]
   ks: [100, 1000]
   batch_sizes: [1, 16]
   seeds: [0]
-  seeds_by_sweep:              # the pilot's seeds on goodreads-synth's first seven rates
-    goodreads-synth: {p0001: [0, 1, 2], p0003: [0, 1, 2], p001: [0, 1, 2], p003: [0, 1, 2], p01: [0, 1, 2], p03: [0, 1, 2], p1: [0, 1, 2]}
   sweeps:                      # goodreads-synth all ten rates; arxiv-corr-synth its three
-    arxiv-synth: [p0001, p001, p005, p01, p02, p05, p1]
-    yfcc10m-synth: [p0001, p0003, p001, p003, p005, p01, p02, p05, p1]   # 0.001 / 0.003 / 0.03 / 0.05: AFTER-QUEUE 2 (v2.9)
+    arxiv-synth: [p0001, p0003, p001, p003, p005, p01, p02, p05, p1]
+    yfcc10m-synth: [p0001, p0003, p001, p003, p005, p01, p02, p05, p1]
   ks_by_sweep:                 # k = 1000 dropped where N*p < 4*1000: "return every passing item"; YFCC at k 100 only
     goodreads-synth: {p0001: [100], p0003: [100]}            # N 797,084
     arxiv-synth: {p0001: [100]}                              # N 2,988,996
     yfcc10m-synth: {p0001: [100], p0003: [100], p001: [100], p003: [100], p005: [100], p01: [100], p02: [100], p05: [100], p1: [100]}
-  interleave:                  # V1 vs V2 per backend and compile mode; triton vs official bloom
+  interleave:                  # V1 vs V2; triton vs official bloom
     - {by: algo, values: [linr_v1_filter_mask, linr_v2]}
     - {by: backend, values: [triton, official]}
   arms:
     - {algo: linr_v1_filter_mask, backends: [triton], filter_kinds: [clause], datasets: {goodreads-synth: {}, arxiv-synth: {}, yfcc10m-synth: {}}}
     - {algo: linr_v2, backends: [triton], filter_kinds: [clause], datasets: {goodreads-synth: {}, arxiv-synth: {}, yfcc10m-synth: {}}}
-    - {algo: linr_v1_filter_mask, backends: [triton], filter_kinds: [bloom], datasets: {goodreads-synth: {sweeps: [p0001, p0003, p001, p003, p01, p03, p1]}}}
-    - {algo: linr_v2, backends: [triton], filter_kinds: [bloom], datasets: {goodreads-synth: {sweeps: [p0001, p0003, p001, p003, p01, p03, p1]}}}
     - algo: linr_v3
       backends: [triton]
       query: {candidate_pool_frac: [0.01, 0.05]}
@@ -150,41 +134,68 @@ synth:                         # pass rate as the x axis (F1, F2, C1, C6)
       backends: [triton]
       filter_kinds: [clause]
       query: {n_probe: [24, 64, 256, 1024]}                 # an explicit sweep, not n95 (user; SYNTH-TRIM)
-      datasets:                                             # n_lists from IVF-TUNE (real dataset's)
-        goodreads-synth: {build: {n_lists: [4096]}, query: {n_probe: [24, 64, 128, 256, 512, 1024]}}
-        arxiv-synth: {build: {n_lists: [2048]}}
-        arxiv-corr-synth: {build: {n_lists: [2048]}, query: {n_probe: [24, 64, 128, 256, 512, 1024]}}
+      datasets:                                             # n_lists from the tune (real dataset's)
+        goodreads-synth: {build: {n_lists: [4096]}}
+        arxiv-synth: {build: {n_lists: [2048]}, query: {n_probe: [24, 64, 256, 512]}}        # the 25 % cap
+        arxiv-corr-synth: {build: {n_lists: [2048]}, query: {n_probe: [24, 64, 256, 512]}}
         yfcc10m-synth: {build: {n_lists: [4096]}, query: {n_probe: [24, 256, 1024]}}
     - algo: silvertorch
-      backends: [triton]
+      backends: [triton, official]
       filter_kinds: [bloom]
-      query: {n_probe: [24, 256]}
-      datasets: {goodreads-synth: {build: {n_lists: [4096]}, sweeps: [p0001, p0003, p001, p003, p01, p03, p1]}, arxiv-synth: {build: {n_lists: [2048]}, query: {n_probe: [24]}, sweeps: [p001, p1]}}
-    - algo: silvertorch
-      backends: [official]
-      filter_kinds: [bloom]
-      query: {n_probe: [24, 256]}
-      datasets: {goodreads-synth: {build: {n_lists: [4096]}, sweeps: [p0001, p0003, p001, p003, p01, p03, p1]}, arxiv-synth: {build: {n_lists: [2048]}, query: {n_probe: [24]}, sweeps: [p001, p1]}}
+      query: {n_probe: [24]}
+      datasets: {arxiv-synth: {build: {n_lists: [2048]}, sweeps: [p001, p1]}}
     - {algo: postfilter, backends: [torch], query: {alpha: [1, 8]}, datasets: {goodreads-synth: {sweeps: [p0001, p0003, p001, p003, p01, p03, p1]}, arxiv-corr-synth: {}}}
-    # C3 (native torch vs our kernels) as a function of p, eager and compiled: the pilot's goodreads-synth cells
-    - {algo: linr_v1_filter_mask, backends: [torch], sweeps: [p001, p01, p1], datasets: {goodreads-synth: {}}}
+    # C3's V2 side as a function of p, eager and compiled (V1's: suite `c3`)
     - {algo: linr_v2, backends: [torch], sweeps: [p001, p01, p1], datasets: {goodreads-synth: {}}}
-    - {algo: linr_v1_filter_mask, backends: [torch], sweeps: [p001, p01, p1], build: {compile: [max-autotune]}, datasets: {goodreads-synth: {}}}
     - {algo: linr_v2, backends: [torch], sweeps: [p001, p01, p1], build: {compile: [max-autotune]}, datasets: {goodreads-synth: {}}}
 
+c3:                            # C3 across N: V1 Triton vs torch.compile max-autotune (plain torch at 0.8 M), uniform synth
+  datasets: [goodreads-synth, arxiv-synth, yfcc10m-synth, laion30m-synth]
+  dims: [128, 192, 256]
+  filter_kinds: [clause]
+  ks: [100]
+  batch_sizes: [1, 16]
+  seeds: [0]
+  sweeps:
+    goodreads-synth: [p001, p01, p1]
+    arxiv-synth: [p001, p01, p1]
+    yfcc10m-synth: [p001, p01, p1]
+    laion30m-synth: [p001, p01, p1]
+  arms:
+    - {algo: linr_v1_filter_mask, backends: [triton]}
+    - {algo: linr_v1_filter_mask, backends: [torch], build: {compile: [max-autotune]}}
+    - {algo: linr_v1_filter_mask, backends: [torch], datasets: {goodreads-synth: {}}}
+
+c3-real:                       # C3 on real filters: V1 Triton vs torch.compile max-autotune, the `filter` kept sweeps
+  datasets: [goodreads, arxiv, yfcc10m, pubmed]
+  dims: [128, 192, 768]
+  filter_kinds: [clause]
+  ks: [100]
+  batch_sizes: [1, 16]
+  seeds: [0]
+  sweeps:
+    goodreads: [c0_genre, c1_lang_reverse, all4]
+    arxiv: [c3_nversions, c0_maincat, all4]
+    yfcc10m: [tags_and]
+    pubmed: [c0_mesh, all5, c3_journal_reverse]
+  ks_by_sweep:                 # YFCC's exact gate holds at k_max 1000 (fp16 ties at k 100)
+    yfcc10m: {tags_and: [100, 1000]}
+  arms:
+    - {algo: linr_v1_filter_mask, backends: [triton]}
+    - {algo: linr_v1_filter_mask, backends: [torch], build: {compile: [max-autotune]}}
+
 codesign:                      # S9 / F4b, C5: the bloom path, partial vs full masks
-  # `bloom_path` exists on silvertorch / bloom on official (Meta's partial-mask ops vs its full
-  # mask) and triton (C5-OURS: our fused scorer vs bloom_full_mask, then the same scorer); anything
-  # else is a ConfigError. Every cell carries it in `params`, so no key collides with filter / deep.
+  # `bloom_path` exists on silvertorch / bloom on official (Meta's partial-mask ops vs its full mask) and triton (C5-OURS:
+  # our fused scorer vs bloom_full_mask, then the same scorer). Every cell carries it in `params`.
   datasets: [arxiv, goodreads]
   dims: [128]
   filter_kinds: [bloom]
   ks: [100]
   batch_sizes: [1, 16]
-  seeds: [0, 1, 2]
+  seeds: [0]
   sweeps:
     arxiv: [c3_nversions, c0_maincat, all4]
-    goodreads: [c0_genre, c2_format, c3_year]
+    goodreads: [c0_genre]
   interleave: [{by: bloom_path}]   # partial vs full, timed round-robin under --interleave
   arms:
     - algo: silvertorch
@@ -195,16 +206,30 @@ codesign:                      # S9 / F4b, C5: the bloom path, partial vs full m
         arxiv: {build: {n_lists: [1664]}}
         goodreads: {build: {n_lists: [1024]}}
 
-h2h:                           # H2H-final / T3, C7: official vs our Triton on the release code
-  # Run with --interleave --profile: one group of the three arms per cell, timed round-robin, and
-  # the kernel-only split. `score_path` is a build param of silvertorch / official only (fp16 is
-  # the library default the paper reports, int32 the bit-exact parity path). Seeds are repeats.
+codesign-pubmed:               # C5 ours at 10 M d768: the `filter` SilverTorch bloom slot (c0_mesh, n_lists 4096)
+  datasets: [pubmed]
+  dims: [768]
+  filter_kinds: [bloom]
+  ks: [100]
+  batch_sizes: [1, 16]
+  seeds: [0]
+  sweeps: {pubmed: [c0_mesh]}
+  interleave: [{by: bloom_path}]
+  arms:
+    - algo: silvertorch
+      backends: [triton]
+      build: {bloom_path: [partial, full], n_lists: [4096]}
+      query: {n_probe: [24, 1024]}
+
+h2h:                           # T3, C7: official vs our Triton on the release code
+  # Run with --interleave --profile: one group of the three arms per cell, timed round-robin, and the kernel-only split.
+  # `score_path` is a build param of silvertorch / official only (fp16 is Meta's default, int32 the bit-exact parity path).
   datasets: [goodreads, arxiv]
   dims: [128]
   filter_kinds: [none, bloom]
   ks: [100, 1000]
   batch_sizes: [1, 16]
-  seeds: [0, 1, 2, 3, 4]
+  seeds: [0]
   sweeps:
     goodreads: [c0_genre]      # the b3 / kernel-opt cell
     arxiv: [c0_maincat]        # its median kept sweep
@@ -223,7 +248,7 @@ bloomwidth:                    # D3 / F4a, C4: bloom width vs FPR and recall
   filter_kinds: [bloom]
   ks: [100, 1000]
   batch_sizes: [16]
-  seeds: [0, 1, 2]
+  seeds: [0]
   sweeps:
     goodreads: [c0_genre]
     arxiv: [c3_nversions, c0_maincat, all4]
@@ -242,7 +267,7 @@ bloomwidth-timed:              # one timed point per width
   filter_kinds: [bloom]
   ks: [100]
   batch_sizes: [16]
-  seeds: [0, 1, 2]
+  seeds: [0]
   sweeps:
     goodreads: [c0_genre]
     arxiv: [c3_nversions, c0_maincat, all4]
@@ -253,17 +278,14 @@ bloomwidth-timed:              # one timed point per width
       build: {m_bits: [64, 128, 256, 512, 1024, 2048], k_hash: [5]}
     - {algo: silvertorch, backends: [official], build: {k_hash: [5]}}   # its one width
 
-v3bits:                        # V-V3BITS, C2: V3 at k_bits 64 vs our LN-8 default (k_bits = D = 128); LiNR's
-  # 512 needs a library change (declined 2026-10-08). k_bits is a harness build param: algos.build
-  # swaps V3's OPORP stage 1. The real-filter half reads goodreads `filter`'s kept sweeps.
-  # V3-BITS-PUBMED: PubMed d768 at k_bits 256 (divides 768; brackets LiNR's 512 from below) vs the default 768, clause only
-  # (bloom adds false-positive noise to a bits question), its `filter` kept sweeps; run at seed 0.
+v3bits:                        # C2: V3 at k_bits 64 vs the default (k_bits = D = 128) on goodreads; PubMed d768 at 256
+  # (divides 768; brackets LiNR's 512 from below) vs the default 768, clause only. k_bits is a harness build param.
   datasets: [goodreads-synth, goodreads, pubmed]
   dims: [128, 768]
   filter_kinds: [clause, bloom]
   ks: [100, 1000]
   batch_sizes: [1, 16]
-  seeds: [0, 1, 2]
+  seeds: [0]
   sweeps:
     goodreads: [c0_genre, c1_lang_reverse, all4]
     pubmed: [c0_mesh, c3_journal_reverse, all5]
@@ -354,3 +376,332 @@ codesign-laion30m:
       backends: [official, triton]
       build: {bloom_path: [partial, full], n_lists: [16384]}
       query: {n_probe: [32, 128]}
+
+# V-LAION30 at bs 1 + 16: IVF vs exact at recall 0.95 inside one leg (C6). Run per sweep as two processes: V2 + SilverTorch
+# interleaved (`--algo linr_v2 --algo silvertorch --interleave`), then V1 alone (V1 + V2 + SilverTorch at 30 M exceed one A100-80GB).
+laion30m-x:
+  datasets: [laion30m]
+  dims: [256]
+  filter_kinds: [clause]
+  ks: [100]
+  batch_sizes: [1, 16]
+  seeds: [0]
+  sweeps:
+    laion30m: [c0_domain, tags4]
+  interleave:
+    - {by: [algo, n_lists]}
+  arms:
+    - {algo: linr_v1_filter_mask, backends: [triton]}
+    - {algo: linr_v2, backends: [triton]}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, query: {n_probe: [4096]}}
+
+# C7 at 30 M by Meta's score path: ours triton vs Meta at fp16 (its default) and int32 (parity), one interleave group per
+# sweep, bloom partial path, eager over eager (official is not capturable); run with --interleave --profile.
+c7-scorepath:
+  datasets: [laion30m]
+  dims: [256]
+  filter_kinds: [bloom]
+  ks: [100]
+  batch_sizes: [16, 64]
+  seeds: [0]
+  sweeps:
+    laion30m: [c0_domain, tags4]
+  interleave: [{by: [backend, score_path]}]
+  arms:
+    - {algo: silvertorch, backends: [triton], build: {bloom_path: [partial], n_lists: [16384]}, query: {n_probe: [32, 128]}}
+    - {algo: silvertorch, backends: [official], build: {bloom_path: [partial], n_lists: [16384], score_path: [fp16, int32]}, query: {n_probe: [32, 128]}}
+
+# Per-bench SilverTorch tuning, quality only (generated: docs/artifacts/campaign-final/build_tune.py).
+tune-q:
+  perf: false
+  datasets: [goodreads, goodreads-synth, arxiv, arxiv-synth, arxiv-corr-synth, yfcc10m, yfcc10m-synth, pubmed]
+  dims: [128, 192, 768]
+  filter_kinds: [clause, bloom]
+  ks: [100]
+  batch_sizes: [16]
+  seeds: [0]
+  sweeps:
+    goodreads: [all4, c0_genre, c1_lang_reverse]
+    goodreads-synth: [p001, p01, p1]
+    arxiv: [all4, c0_maincat, c3_nversions]
+    arxiv-synth: [p001, p01, p1]
+    arxiv-corr-synth: [c001, c003, c01]
+    yfcc10m: [tags_and]
+    yfcc10m-synth: [p001, p01, p1]
+    pubmed: [all5, c0_mesh, c3_journal_reverse]
+  arms:
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {arxiv: {sweeps: [c3_nversions, c0_maincat, all4]}, arxiv-corr-synth: {sweeps: [c001, c003, c01]}, arxiv-synth: {sweeps: [p001, p01, p1]}, goodreads: {sweeps: [c0_genre, c1_lang_reverse, all4]}, goodreads-synth: {sweeps: [p001, p01, p1]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {arxiv: {sweeps: [c3_nversions, c0_maincat, all4]}, arxiv-corr-synth: {sweeps: [c001, c003, c01]}, arxiv-synth: {sweeps: [p001, p01, p1]}, goodreads: {sweeps: [c0_genre]}, goodreads-synth: {sweeps: [p001, p01, p1]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {arxiv: {sweeps: [c3_nversions, c0_maincat, all4]}, arxiv-corr-synth: {sweeps: [c001, c003, c01]}, arxiv-synth: {sweeps: [p001, p01, p1]}, goodreads: {sweeps: [c0_genre, c1_lang_reverse, all4]}, goodreads-synth: {sweeps: [p001, p01, p1]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {arxiv: {sweeps: [c3_nversions, c0_maincat, all4]}, arxiv-corr-synth: {sweeps: [c001, c003, c01]}, arxiv-synth: {sweeps: [p001, p01, p1]}, goodreads: {sweeps: [c0_genre]}, goodreads-synth: {sweeps: [p001, p01, p1]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {arxiv: {sweeps: [c3_nversions, c0_maincat, all4]}, arxiv-corr-synth: {sweeps: [c001, c003, c01]}, arxiv-synth: {sweeps: [p001, p01, p1]}, goodreads: {sweeps: [c0_genre, c1_lang_reverse, all4]}, goodreads-synth: {sweeps: [p001, p01, p1]}, pubmed: {sweeps: [c0_mesh, c3_journal_reverse, all5]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32, 64, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {arxiv: {sweeps: [c3_nversions, c0_maincat, all4]}, arxiv-corr-synth: {sweeps: [c001, c003, c01]}, arxiv-synth: {sweeps: [p001, p01, p1]}, goodreads: {sweeps: [c0_genre]}, goodreads-synth: {sweeps: [p001, p01, p1]}, pubmed: {sweeps: [c0_mesh]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 32, 64, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {arxiv: {sweeps: [c3_nversions, c0_maincat, all4]}, arxiv-corr-synth: {sweeps: [c001, c003, c01]}, arxiv-synth: {sweeps: [p001, p01, p1]}, goodreads: {sweeps: [c0_genre, c1_lang_reverse, all4]}, goodreads-synth: {sweeps: [p001, p01, p1]}, yfcc10m: {sweeps: [tags_and]}, yfcc10m-synth: {sweeps: [p001, p01, p1]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32, 64, 128, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {arxiv: {sweeps: [c3_nversions, c0_maincat, all4]}, arxiv-corr-synth: {sweeps: [c001, c003, c01]}, arxiv-synth: {sweeps: [p001, p01, p1]}, goodreads: {sweeps: [c0_genre]}, goodreads-synth: {sweeps: [p001, p01, p1]}, yfcc10m-synth: {sweeps: [p001, p01, p1]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 32, 64, 128, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {arxiv: {sweeps: [c3_nversions, c0_maincat, all4]}, arxiv-corr-synth: {sweeps: [c001, c003, c01]}, arxiv-synth: {sweeps: [p001, p01, p1]}, goodreads: {sweeps: [c0_genre, c1_lang_reverse, all4]}, goodreads-synth: {sweeps: [p001, p01, p1]}, pubmed: {sweeps: [c0_mesh, c3_journal_reverse, all5]}, yfcc10m: {sweeps: [tags_and]}, yfcc10m-synth: {sweeps: [p001, p01, p1]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {arxiv: {sweeps: [c3_nversions, c0_maincat, all4]}, arxiv-corr-synth: {sweeps: [c001, c003, c01]}, arxiv-synth: {sweeps: [p001, p01, p1]}, goodreads: {sweeps: [c0_genre]}, goodreads-synth: {sweeps: [p001, p01, p1]}, pubmed: {sweeps: [c0_mesh]}, yfcc10m-synth: {sweeps: [p001, p01, p1]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {arxiv: {sweeps: [c3_nversions, c0_maincat, all4]}, arxiv-corr-synth: {sweeps: [c001, c003, c01]}, arxiv-synth: {sweeps: [p001, p01, p1]}, goodreads: {sweeps: [c0_genre, c1_lang_reverse, all4]}, goodreads-synth: {sweeps: [p001, p01, p1]}, yfcc10m: {sweeps: [tags_and]}, yfcc10m-synth: {sweeps: [p001, p01, p1]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {arxiv: {sweeps: [c3_nversions, c0_maincat, all4]}, arxiv-corr-synth: {sweeps: [c001, c003, c01]}, arxiv-synth: {sweeps: [p001, p01, p1]}, goodreads: {sweeps: [c0_genre]}, goodreads-synth: {sweeps: [p001, p01, p1]}, yfcc10m-synth: {sweeps: [p001, p01, p1]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {arxiv: {sweeps: [c3_nversions, c0_maincat, all4]}, arxiv-corr-synth: {sweeps: [c001, c003, c01]}, arxiv-synth: {sweeps: [p001, p01, p1]}, goodreads: {sweeps: [c0_genre, c1_lang_reverse, all4]}, goodreads-synth: {sweeps: [p001, p01, p1]}, pubmed: {sweeps: [c0_mesh, c3_journal_reverse, all5]}, yfcc10m: {sweeps: [tags_and]}, yfcc10m-synth: {sweeps: [p001, p01, p1]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {arxiv: {sweeps: [c3_nversions, c0_maincat, all4]}, arxiv-corr-synth: {sweeps: [c001, c003, c01]}, arxiv-synth: {sweeps: [p001, p01, p1]}, goodreads: {sweeps: [c0_genre]}, goodreads-synth: {sweeps: [p001, p01, p1]}, pubmed: {sweeps: [c0_mesh]}, yfcc10m-synth: {sweeps: [p001, p01, p1]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [65536]}, datasets: {pubmed: {sweeps: [c0_mesh, c3_journal_reverse, all5]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [65536]}, datasets: {pubmed: {sweeps: [c0_mesh]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]}}
+
+# The timed Pareto points of the tuning (generated: docs/artifacts/campaign-final/build_tune.py).
+tune-timed:
+  datasets: [arxiv, arxiv-corr-synth, arxiv-synth, goodreads, goodreads-synth, pubmed, yfcc10m, yfcc10m-synth]
+  dims: [128, 192, 768]
+  filter_kinds: [clause, bloom]
+  ks: [100]
+  batch_sizes: [1, 16, 64]
+  seeds: [0]
+  sweeps:
+    arxiv: [all4, c0_maincat, c3_nversions]
+    arxiv-corr-synth: [c001, c003, c01]
+    arxiv-synth: [p001, p01, p1]
+    goodreads: [all4, c0_genre, c1_lang_reverse]
+    goodreads-synth: [p001, p01, p1]
+    pubmed: [all5, c0_mesh, c3_journal_reverse]
+    yfcc10m: [tags_and]
+    yfcc10m-synth: [p001, p01, p1]
+  arms:
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {arxiv: {sweeps: [all4]}}, filter_kinds: [bloom], query: {n_probe: [16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {arxiv: {sweeps: [all4]}}, filter_kinds: [bloom], query: {n_probe: [32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {arxiv: {sweeps: [all4]}}, filter_kinds: [bloom], query: {n_probe: [32, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {arxiv: {sweeps: [all4]}}, filter_kinds: [bloom], query: {n_probe: [64, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {arxiv: {sweeps: [all4]}}, filter_kinds: [bloom], query: {n_probe: [128, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {arxiv: {sweeps: [all4]}}, filter_kinds: [bloom], query: {n_probe: [256, 512, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {arxiv: {sweeps: [all4]}}, filter_kinds: [bloom], query: {n_probe: [512, 1024, 4096]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {arxiv: {sweeps: [all4]}}, filter_kinds: [clause], query: {n_probe: [16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {arxiv: {sweeps: [all4]}}, filter_kinds: [clause], query: {n_probe: [32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {arxiv: {sweeps: [all4]}}, filter_kinds: [clause], query: {n_probe: [32, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {arxiv: {sweeps: [all4]}}, filter_kinds: [clause], query: {n_probe: [64, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {arxiv: {sweeps: [all4]}}, filter_kinds: [clause], query: {n_probe: [128, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {arxiv: {sweeps: [all4]}}, filter_kinds: [clause], query: {n_probe: [256, 512, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {arxiv: {sweeps: [all4]}}, filter_kinds: [clause], query: {n_probe: [512, 1024, 4096]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {arxiv: {sweeps: [c0_maincat]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {arxiv: {sweeps: [c0_maincat]}}, filter_kinds: [bloom], query: {n_probe: [8, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {arxiv: {sweeps: [c0_maincat]}}, filter_kinds: [bloom], query: {n_probe: [16, 32, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {arxiv: {sweeps: [c0_maincat]}}, filter_kinds: [bloom], query: {n_probe: [16, 64, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {arxiv: {sweeps: [c0_maincat]}}, filter_kinds: [bloom], query: {n_probe: [32, 128, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {arxiv: {sweeps: [c0_maincat]}}, filter_kinds: [bloom], query: {n_probe: [32, 128, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {arxiv: {sweeps: [c0_maincat]}}, filter_kinds: [bloom], query: {n_probe: [64, 256, 1024, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {arxiv: {sweeps: [c0_maincat]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {arxiv: {sweeps: [c0_maincat]}}, filter_kinds: [clause], query: {n_probe: [8, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {arxiv: {sweeps: [c0_maincat]}}, filter_kinds: [clause], query: {n_probe: [16, 32, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {arxiv: {sweeps: [c0_maincat]}}, filter_kinds: [clause], query: {n_probe: [16, 64, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {arxiv: {sweeps: [c0_maincat]}}, filter_kinds: [clause], query: {n_probe: [32, 128, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {arxiv: {sweeps: [c0_maincat]}}, filter_kinds: [clause], query: {n_probe: [32, 128, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {arxiv: {sweeps: [c0_maincat]}}, filter_kinds: [clause], query: {n_probe: [64, 256, 1024, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {arxiv: {sweeps: [c3_nversions]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {arxiv: {sweeps: [c3_nversions]}}, filter_kinds: [bloom], query: {n_probe: [8, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {arxiv: {sweeps: [c3_nversions]}}, filter_kinds: [bloom], query: {n_probe: [16, 32, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {arxiv: {sweeps: [c3_nversions]}}, filter_kinds: [bloom], query: {n_probe: [32, 64, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {arxiv: {sweeps: [c3_nversions]}}, filter_kinds: [bloom], query: {n_probe: [32, 128, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {arxiv: {sweeps: [c3_nversions]}}, filter_kinds: [bloom], query: {n_probe: [64, 128, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {arxiv: {sweeps: [c3_nversions]}}, filter_kinds: [bloom], query: {n_probe: [64, 256, 1024, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {arxiv: {sweeps: [c3_nversions]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {arxiv: {sweeps: [c3_nversions]}}, filter_kinds: [clause], query: {n_probe: [8, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {arxiv: {sweeps: [c3_nversions]}}, filter_kinds: [clause], query: {n_probe: [16, 32, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {arxiv: {sweeps: [c3_nversions]}}, filter_kinds: [clause], query: {n_probe: [32, 64, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {arxiv: {sweeps: [c3_nversions]}}, filter_kinds: [clause], query: {n_probe: [32, 128, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {arxiv: {sweeps: [c3_nversions]}}, filter_kinds: [clause], query: {n_probe: [64, 128, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {arxiv: {sweeps: [c3_nversions]}}, filter_kinds: [clause], query: {n_probe: [64, 256, 1024, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {arxiv-corr-synth: {sweeps: [c001]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 32]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {arxiv-corr-synth: {sweeps: [c001]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {arxiv-corr-synth: {sweeps: [c001]}}, filter_kinds: [bloom], query: {n_probe: [16, 32, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {arxiv-corr-synth: {sweeps: [c001]}}, filter_kinds: [bloom], query: {n_probe: [16, 64, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {arxiv-corr-synth: {sweeps: [c001]}}, filter_kinds: [bloom], query: {n_probe: [32, 64, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {arxiv-corr-synth: {sweeps: [c001]}}, filter_kinds: [bloom], query: {n_probe: [32, 128, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {arxiv-corr-synth: {sweeps: [c001]}}, filter_kinds: [bloom], query: {n_probe: [64, 256, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {arxiv-corr-synth: {sweeps: [c001]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {arxiv-corr-synth: {sweeps: [c001]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {arxiv-corr-synth: {sweeps: [c001]}}, filter_kinds: [clause], query: {n_probe: [16, 32, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {arxiv-corr-synth: {sweeps: [c001]}}, filter_kinds: [clause], query: {n_probe: [16, 64, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {arxiv-corr-synth: {sweeps: [c001]}}, filter_kinds: [clause], query: {n_probe: [32, 64, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {arxiv-corr-synth: {sweeps: [c001]}}, filter_kinds: [clause], query: {n_probe: [32, 128, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {arxiv-corr-synth: {sweeps: [c001]}}, filter_kinds: [clause], query: {n_probe: [64, 256, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {arxiv-corr-synth: {sweeps: [c003]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {arxiv-corr-synth: {sweeps: [c003]}}, filter_kinds: [bloom], query: {n_probe: [8, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {arxiv-corr-synth: {sweeps: [c003]}}, filter_kinds: [bloom], query: {n_probe: [16, 32, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {arxiv-corr-synth: {sweeps: [c003]}}, filter_kinds: [bloom], query: {n_probe: [16, 64, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {arxiv-corr-synth: {sweeps: [c003]}}, filter_kinds: [bloom], query: {n_probe: [32, 128, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {arxiv-corr-synth: {sweeps: [c003]}}, filter_kinds: [bloom], query: {n_probe: [32, 128, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {arxiv-corr-synth: {sweeps: [c003]}}, filter_kinds: [bloom], query: {n_probe: [64, 256, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {arxiv-corr-synth: {sweeps: [c003]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {arxiv-corr-synth: {sweeps: [c003]}}, filter_kinds: [clause], query: {n_probe: [8, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {arxiv-corr-synth: {sweeps: [c003]}}, filter_kinds: [clause], query: {n_probe: [16, 32, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {arxiv-corr-synth: {sweeps: [c003]}}, filter_kinds: [clause], query: {n_probe: [16, 64, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {arxiv-corr-synth: {sweeps: [c003]}}, filter_kinds: [clause], query: {n_probe: [32, 128, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {arxiv-corr-synth: {sweeps: [c003]}}, filter_kinds: [clause], query: {n_probe: [32, 128, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {arxiv-corr-synth: {sweeps: [c003]}}, filter_kinds: [clause], query: {n_probe: [64, 256, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {arxiv-corr-synth: {sweeps: [c01]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {arxiv-corr-synth: {sweeps: [c01]}}, filter_kinds: [bloom], query: {n_probe: [8, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {arxiv-corr-synth: {sweeps: [c01]}}, filter_kinds: [bloom], query: {n_probe: [16, 32, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {arxiv-corr-synth: {sweeps: [c01]}}, filter_kinds: [bloom], query: {n_probe: [16, 64, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {arxiv-corr-synth: {sweeps: [c01]}}, filter_kinds: [bloom], query: {n_probe: [32, 128, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {arxiv-corr-synth: {sweeps: [c01]}}, filter_kinds: [bloom], query: {n_probe: [32, 128, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {arxiv-corr-synth: {sweeps: [c01]}}, filter_kinds: [bloom], query: {n_probe: [64, 256, 1024, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {arxiv-corr-synth: {sweeps: [c01]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {arxiv-corr-synth: {sweeps: [c01]}}, filter_kinds: [clause], query: {n_probe: [8, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {arxiv-corr-synth: {sweeps: [c01]}}, filter_kinds: [clause], query: {n_probe: [16, 32, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {arxiv-corr-synth: {sweeps: [c01]}}, filter_kinds: [clause], query: {n_probe: [16, 64, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {arxiv-corr-synth: {sweeps: [c01]}}, filter_kinds: [clause], query: {n_probe: [32, 128, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {arxiv-corr-synth: {sweeps: [c01]}}, filter_kinds: [clause], query: {n_probe: [32, 128, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {arxiv-corr-synth: {sweeps: [c01]}}, filter_kinds: [clause], query: {n_probe: [64, 256, 1024, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {arxiv-synth: {sweeps: [p001]}}, filter_kinds: [bloom], query: {n_probe: [16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {arxiv-synth: {sweeps: [p001]}}, filter_kinds: [bloom], query: {n_probe: [32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {arxiv-synth: {sweeps: [p001]}}, filter_kinds: [bloom], query: {n_probe: [64, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {arxiv-synth: {sweeps: [p001]}}, filter_kinds: [bloom], query: {n_probe: [128, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {arxiv-synth: {sweeps: [p001]}}, filter_kinds: [bloom], query: {n_probe: [256, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {arxiv-synth: {sweeps: [p001]}}, filter_kinds: [bloom], query: {n_probe: [256, 512, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {arxiv-synth: {sweeps: [p001]}}, filter_kinds: [bloom], query: {n_probe: [512, 1024, 2048, 4096]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {arxiv-synth: {sweeps: [p001]}}, filter_kinds: [clause], query: {n_probe: [16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {arxiv-synth: {sweeps: [p001]}}, filter_kinds: [clause], query: {n_probe: [32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {arxiv-synth: {sweeps: [p001]}}, filter_kinds: [clause], query: {n_probe: [64, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {arxiv-synth: {sweeps: [p001]}}, filter_kinds: [clause], query: {n_probe: [128, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {arxiv-synth: {sweeps: [p001]}}, filter_kinds: [clause], query: {n_probe: [256, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {arxiv-synth: {sweeps: [p001]}}, filter_kinds: [clause], query: {n_probe: [256, 512, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {arxiv-synth: {sweeps: [p001]}}, filter_kinds: [clause], query: {n_probe: [512, 1024, 2048, 4096]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {arxiv-synth: {sweeps: [p01]}}, filter_kinds: [bloom], query: {n_probe: [8, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {arxiv-synth: {sweeps: [p01]}}, filter_kinds: [bloom], query: {n_probe: [16, 32, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {arxiv-synth: {sweeps: [p01]}}, filter_kinds: [bloom], query: {n_probe: [32, 64, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {arxiv-synth: {sweeps: [p01]}}, filter_kinds: [bloom], query: {n_probe: [32, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {arxiv-synth: {sweeps: [p01]}}, filter_kinds: [bloom], query: {n_probe: [64, 128, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {arxiv-synth: {sweeps: [p01]}}, filter_kinds: [bloom], query: {n_probe: [128, 256, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {arxiv-synth: {sweeps: [p01]}}, filter_kinds: [bloom], query: {n_probe: [128, 512, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {arxiv-synth: {sweeps: [p01]}}, filter_kinds: [clause], query: {n_probe: [8, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {arxiv-synth: {sweeps: [p01]}}, filter_kinds: [clause], query: {n_probe: [16, 32, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {arxiv-synth: {sweeps: [p01]}}, filter_kinds: [clause], query: {n_probe: [32, 64, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {arxiv-synth: {sweeps: [p01]}}, filter_kinds: [clause], query: {n_probe: [32, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {arxiv-synth: {sweeps: [p01]}}, filter_kinds: [clause], query: {n_probe: [64, 128, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {arxiv-synth: {sweeps: [p01]}}, filter_kinds: [clause], query: {n_probe: [128, 256, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {arxiv-synth: {sweeps: [p01]}}, filter_kinds: [clause], query: {n_probe: [128, 512, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {arxiv-synth: {sweeps: [p1]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {arxiv-synth: {sweeps: [p1]}}, filter_kinds: [bloom], query: {n_probe: [8, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {arxiv-synth: {sweeps: [p1]}}, filter_kinds: [bloom], query: {n_probe: [16, 32, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {arxiv-synth: {sweeps: [p1]}}, filter_kinds: [bloom], query: {n_probe: [16, 64, 128, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {arxiv-synth: {sweeps: [p1]}}, filter_kinds: [bloom], query: {n_probe: [32, 64, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {arxiv-synth: {sweeps: [p1]}}, filter_kinds: [bloom], query: {n_probe: [32, 128, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {arxiv-synth: {sweeps: [p1]}}, filter_kinds: [bloom], query: {n_probe: [64, 128, 512, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {arxiv-synth: {sweeps: [p1]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {arxiv-synth: {sweeps: [p1]}}, filter_kinds: [clause], query: {n_probe: [8, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {arxiv-synth: {sweeps: [p1]}}, filter_kinds: [clause], query: {n_probe: [16, 32, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {arxiv-synth: {sweeps: [p1]}}, filter_kinds: [clause], query: {n_probe: [16, 64, 128, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {arxiv-synth: {sweeps: [p1]}}, filter_kinds: [clause], query: {n_probe: [32, 64, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {arxiv-synth: {sweeps: [p1]}}, filter_kinds: [clause], query: {n_probe: [32, 128, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {arxiv-synth: {sweeps: [p1]}}, filter_kinds: [clause], query: {n_probe: [64, 128, 512, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {goodreads: {sweeps: [all4]}}, filter_kinds: [clause], query: {n_probe: [32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {goodreads: {sweeps: [all4]}}, filter_kinds: [clause], query: {n_probe: [64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {goodreads: {sweeps: [all4]}}, filter_kinds: [clause], query: {n_probe: [64, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {goodreads: {sweeps: [all4]}}, filter_kinds: [clause], query: {n_probe: [128, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {goodreads: {sweeps: [all4]}}, filter_kinds: [clause], query: {n_probe: [256, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {goodreads: {sweeps: [all4]}}, filter_kinds: [clause], query: {n_probe: [256, 1024, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {goodreads: {sweeps: [all4]}}, filter_kinds: [clause], query: {n_probe: [512, 1024, 2048, 4096]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {goodreads: {sweeps: [c0_genre]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 32]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {goodreads: {sweeps: [c0_genre]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {goodreads: {sweeps: [c0_genre]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {goodreads: {sweeps: [c0_genre]}}, filter_kinds: [bloom], query: {n_probe: [16, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {goodreads: {sweeps: [c0_genre]}}, filter_kinds: [bloom], query: {n_probe: [16, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {goodreads: {sweeps: [c0_genre]}}, filter_kinds: [bloom], query: {n_probe: [32, 64, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {goodreads: {sweeps: [c0_genre]}}, filter_kinds: [bloom], query: {n_probe: [32, 64, 128, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {goodreads: {sweeps: [c0_genre]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {goodreads: {sweeps: [c0_genre]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {goodreads: {sweeps: [c0_genre]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {goodreads: {sweeps: [c0_genre]}}, filter_kinds: [clause], query: {n_probe: [16, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {goodreads: {sweeps: [c0_genre]}}, filter_kinds: [clause], query: {n_probe: [16, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {goodreads: {sweeps: [c0_genre]}}, filter_kinds: [clause], query: {n_probe: [32, 64, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {goodreads: {sweeps: [c0_genre]}}, filter_kinds: [clause], query: {n_probe: [32, 64, 128, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {goodreads: {sweeps: [c1_lang_reverse]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {goodreads: {sweeps: [c1_lang_reverse]}}, filter_kinds: [clause], query: {n_probe: [16, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {goodreads: {sweeps: [c1_lang_reverse]}}, filter_kinds: [clause], query: {n_probe: [32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {goodreads: {sweeps: [c1_lang_reverse]}}, filter_kinds: [clause], query: {n_probe: [32, 64, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {goodreads: {sweeps: [c1_lang_reverse]}}, filter_kinds: [clause], query: {n_probe: [64, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {goodreads: {sweeps: [c1_lang_reverse]}}, filter_kinds: [clause], query: {n_probe: [64, 128, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {goodreads: {sweeps: [c1_lang_reverse]}}, filter_kinds: [clause], query: {n_probe: [128, 256, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {goodreads-synth: {sweeps: [p001]}}, filter_kinds: [bloom], query: {n_probe: [32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {goodreads-synth: {sweeps: [p001]}}, filter_kinds: [bloom], query: {n_probe: [32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {goodreads-synth: {sweeps: [p001]}}, filter_kinds: [bloom], query: {n_probe: [64, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {goodreads-synth: {sweeps: [p001]}}, filter_kinds: [bloom], query: {n_probe: [128, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {goodreads-synth: {sweeps: [p001]}}, filter_kinds: [bloom], query: {n_probe: [256, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {goodreads-synth: {sweeps: [p001]}}, filter_kinds: [bloom], query: {n_probe: [256, 512, 1024, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {goodreads-synth: {sweeps: [p001]}}, filter_kinds: [bloom], query: {n_probe: [512, 1024, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {goodreads-synth: {sweeps: [p001]}}, filter_kinds: [clause], query: {n_probe: [32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {goodreads-synth: {sweeps: [p001]}}, filter_kinds: [clause], query: {n_probe: [32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {goodreads-synth: {sweeps: [p001]}}, filter_kinds: [clause], query: {n_probe: [64, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {goodreads-synth: {sweeps: [p001]}}, filter_kinds: [clause], query: {n_probe: [128, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {goodreads-synth: {sweeps: [p001]}}, filter_kinds: [clause], query: {n_probe: [256, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {goodreads-synth: {sweeps: [p001]}}, filter_kinds: [clause], query: {n_probe: [256, 512, 1024, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {goodreads-synth: {sweeps: [p001]}}, filter_kinds: [clause], query: {n_probe: [512, 1024, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {goodreads-synth: {sweeps: [p01]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {goodreads-synth: {sweeps: [p01]}}, filter_kinds: [bloom], query: {n_probe: [16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {goodreads-synth: {sweeps: [p01]}}, filter_kinds: [bloom], query: {n_probe: [16, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {goodreads-synth: {sweeps: [p01]}}, filter_kinds: [bloom], query: {n_probe: [32, 64, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {goodreads-synth: {sweeps: [p01]}}, filter_kinds: [bloom], query: {n_probe: [32, 64, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {goodreads-synth: {sweeps: [p01]}}, filter_kinds: [bloom], query: {n_probe: [64, 128, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {goodreads-synth: {sweeps: [p01]}}, filter_kinds: [bloom], query: {n_probe: [128, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {goodreads-synth: {sweeps: [p01]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {goodreads-synth: {sweeps: [p01]}}, filter_kinds: [clause], query: {n_probe: [16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {goodreads-synth: {sweeps: [p01]}}, filter_kinds: [clause], query: {n_probe: [16, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {goodreads-synth: {sweeps: [p01]}}, filter_kinds: [clause], query: {n_probe: [32, 64, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {goodreads-synth: {sweeps: [p01]}}, filter_kinds: [clause], query: {n_probe: [32, 64, 128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {goodreads-synth: {sweeps: [p01]}}, filter_kinds: [clause], query: {n_probe: [64, 128, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {goodreads-synth: {sweeps: [p01]}}, filter_kinds: [clause], query: {n_probe: [128, 256, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {goodreads-synth: {sweeps: [p1]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 32]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {goodreads-synth: {sweeps: [p1]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 32]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {goodreads-synth: {sweeps: [p1]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {goodreads-synth: {sweeps: [p1]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {goodreads-synth: {sweeps: [p1]}}, filter_kinds: [bloom], query: {n_probe: [16, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {goodreads-synth: {sweeps: [p1]}}, filter_kinds: [bloom], query: {n_probe: [16, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {goodreads-synth: {sweeps: [p1]}}, filter_kinds: [bloom], query: {n_probe: [16, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [256]}, datasets: {goodreads-synth: {sweeps: [p1]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [512]}, datasets: {goodreads-synth: {sweeps: [p1]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {goodreads-synth: {sweeps: [p1]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {goodreads-synth: {sweeps: [p1]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {goodreads-synth: {sweeps: [p1]}}, filter_kinds: [clause], query: {n_probe: [16, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {goodreads-synth: {sweeps: [p1]}}, filter_kinds: [clause], query: {n_probe: [16, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {goodreads-synth: {sweeps: [p1]}}, filter_kinds: [clause], query: {n_probe: [16, 32, 64, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {pubmed: {sweeps: [all5]}}, filter_kinds: [clause], query: {n_probe: [256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {pubmed: {sweeps: [all5]}}, filter_kinds: [clause], query: {n_probe: [1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {pubmed: {sweeps: [all5]}}, filter_kinds: [clause], query: {n_probe: [2048, 4096]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [65536]}, datasets: {pubmed: {sweeps: [all5]}}, filter_kinds: [clause], query: {n_probe: [4096]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {pubmed: {sweeps: [c0_mesh]}}, filter_kinds: [bloom], query: {n_probe: [64, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {pubmed: {sweeps: [c0_mesh]}}, filter_kinds: [bloom], query: {n_probe: [256, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {pubmed: {sweeps: [c0_mesh]}}, filter_kinds: [bloom], query: {n_probe: [512, 2048, 4096]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [65536]}, datasets: {pubmed: {sweeps: [c0_mesh]}}, filter_kinds: [bloom], query: {n_probe: [2048, 4096]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {pubmed: {sweeps: [c0_mesh]}}, filter_kinds: [clause], query: {n_probe: [64, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {pubmed: {sweeps: [c0_mesh]}}, filter_kinds: [clause], query: {n_probe: [256, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {pubmed: {sweeps: [c0_mesh]}}, filter_kinds: [clause], query: {n_probe: [512, 2048, 4096]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [65536]}, datasets: {pubmed: {sweeps: [c0_mesh]}}, filter_kinds: [clause], query: {n_probe: [2048, 4096]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [1024]}, datasets: {pubmed: {sweeps: [c3_journal_reverse]}}, filter_kinds: [clause], query: {n_probe: [16, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {pubmed: {sweeps: [c3_journal_reverse]}}, filter_kinds: [clause], query: {n_probe: [32, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {pubmed: {sweeps: [c3_journal_reverse]}}, filter_kinds: [clause], query: {n_probe: [64, 512, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [65536]}, datasets: {pubmed: {sweeps: [c3_journal_reverse]}}, filter_kinds: [clause], query: {n_probe: [64, 1024, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {yfcc10m: {sweeps: [tags_and]}}, filter_kinds: [clause], query: {n_probe: [128, 512]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {yfcc10m: {sweeps: [tags_and]}}, filter_kinds: [clause], query: {n_probe: [256, 1024]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {yfcc10m: {sweeps: [tags_and]}}, filter_kinds: [clause], query: {n_probe: [512, 2048]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {yfcc10m: {sweeps: [tags_and]}}, filter_kinds: [clause], query: {n_probe: [1024, 4096]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {yfcc10m-synth: {sweeps: [p001]}}, filter_kinds: [bloom], query: {n_probe: [8, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {yfcc10m-synth: {sweeps: [p001]}}, filter_kinds: [bloom], query: {n_probe: [16, 32, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {yfcc10m-synth: {sweeps: [p001]}}, filter_kinds: [bloom], query: {n_probe: [32, 64, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {yfcc10m-synth: {sweeps: [p001]}}, filter_kinds: [bloom], query: {n_probe: [128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {yfcc10m-synth: {sweeps: [p001]}}, filter_kinds: [clause], query: {n_probe: [8, 32, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {yfcc10m-synth: {sweeps: [p001]}}, filter_kinds: [clause], query: {n_probe: [16, 32, 128]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {yfcc10m-synth: {sweeps: [p001]}}, filter_kinds: [clause], query: {n_probe: [32, 64, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {yfcc10m-synth: {sweeps: [p001]}}, filter_kinds: [clause], query: {n_probe: [128, 256]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {yfcc10m-synth: {sweeps: [p01]}}, filter_kinds: [bloom], query: {n_probe: [32]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {yfcc10m-synth: {sweeps: [p01]}}, filter_kinds: [bloom], query: {n_probe: [8, 32]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {yfcc10m-synth: {sweeps: [p01]}}, filter_kinds: [bloom], query: {n_probe: [16, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {yfcc10m-synth: {sweeps: [p01]}}, filter_kinds: [bloom], query: {n_probe: [64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {yfcc10m-synth: {sweeps: [p01]}}, filter_kinds: [clause], query: {n_probe: [8, 32]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {yfcc10m-synth: {sweeps: [p01]}}, filter_kinds: [clause], query: {n_probe: [8, 32]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {yfcc10m-synth: {sweeps: [p01]}}, filter_kinds: [clause], query: {n_probe: [16, 64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {yfcc10m-synth: {sweeps: [p01]}}, filter_kinds: [clause], query: {n_probe: [64]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {yfcc10m-synth: {sweeps: [p1]}}, filter_kinds: [bloom], query: {n_probe: [16]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {yfcc10m-synth: {sweeps: [p1]}}, filter_kinds: [bloom], query: {n_probe: [16]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {yfcc10m-synth: {sweeps: [p1]}}, filter_kinds: [bloom], query: {n_probe: [16]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {yfcc10m-synth: {sweeps: [p1]}}, filter_kinds: [bloom], query: {n_probe: [16]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [2048]}, datasets: {yfcc10m-synth: {sweeps: [p1]}}, filter_kinds: [clause], query: {n_probe: [16]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [4096]}, datasets: {yfcc10m-synth: {sweeps: [p1]}}, filter_kinds: [clause], query: {n_probe: [16]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [8192]}, datasets: {yfcc10m-synth: {sweeps: [p1]}}, filter_kinds: [clause], query: {n_probe: [16]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, datasets: {yfcc10m-synth: {sweeps: [p1]}}, filter_kinds: [clause], query: {n_probe: [16]}}

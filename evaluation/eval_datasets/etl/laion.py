@@ -131,7 +131,9 @@ def _with_domain(df: pl.DataFrame) -> pl.DataFrame:
     domains = pl.DataFrame(
         {"host": hosts, "domain": [registered_domain(h) for h in hosts.to_list()]}
     )
-    return df.with_columns(host=host).join(domains, on="host", how="left").drop("host")
+    # prep then picks items and queries by position: the join must keep the rank order
+    joined = df.with_columns(host=host).join(domains, on="host", how="left", maintain_order="left")
+    return joined.drop("host")
 
 
 def cmd_prep(args: argparse.Namespace) -> int:
