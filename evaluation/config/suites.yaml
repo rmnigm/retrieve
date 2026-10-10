@@ -74,6 +74,8 @@ deep:                          # recall-vs-latency Pareto (F3, C6): SilverTorch 
     arxiv: [c3_nversions, c0_maincat, all4]
     yfcc10m: [tags_and]
     pubmed: [c0_mesh, c3_journal_reverse, all5]
+  interleave:                  # C7: triton vs official bloom along the same curve
+    - {by: backend, values: [triton, official]}
   arms:
     - algo: silvertorch
       backends: [triton]
@@ -81,6 +83,12 @@ deep:                          # recall-vs-latency Pareto (F3, C6): SilverTorch 
         goodreads: {build: {n_lists: [4096]}, query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024]}}
         arxiv: {build: {n_lists: [2048]}, query: {n_probe: [8, 16, 32, 64, 128, 256, 512]}}
         yfcc10m: {build: {n_lists: [4096]}, query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024]}}
+    - algo: silvertorch        # F3's official curve (C7); YFCC has no bloom block, PubMed's deep is clause only
+      backends: [official]
+      filter_kinds: [bloom]
+      datasets:
+        goodreads: {build: {n_lists: [4096]}, query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024]}}
+        arxiv: {build: {n_lists: [2048]}, query: {n_probe: [8, 16, 32, 64, 128, 256, 512]}}
     # PubMed: the points on its clause Pareto fronts (graph, bs 1 / 16 / 64; campaign-v2.11/pubmed-tune-timed), per sweep and
     # n_lists: no single n_lists is best (low p 4096-16384, p ~ 1 65536)
     - {algo: silvertorch, backends: [triton], filter_kinds: [clause], build: {n_lists: [1024]}, datasets: {pubmed: {sweeps: [all5], query: {n_probe: [256]}}}}

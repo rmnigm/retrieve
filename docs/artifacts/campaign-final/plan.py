@@ -35,7 +35,7 @@ LEGS = [
     ("d0", "C3", "synth", ["goodreads-synth"], ["linr_v2"], "torch", "", "C3's V2 side, same box as V2 triton"),
     *[("d0", "T2", "synth", [d], ["postfilter"], None, "", "") for d in ["goodreads-synth", "arxiv-corr-synth"]],
     *[("d1", "C6+C7", "filter", [d], ["silvertorch"], None, "--interleave", "triton then official in one stream (parity spill); official from the -O3 venv") for d in REAL],
-    *[("d1", "C6", "deep", [d], None, None, "", "") for d in REAL],
+    *[("d1", "C6+C7", "deep", [d], None, None, "--interleave", "official bloom curve paired with triton (goodreads, arXiv)") for d in REAL],
     *[("d1", "C6+C7", "synth", [d], ["silvertorch"], None, "--interleave", "") for d in ["goodreads-synth", "arxiv-synth", "arxiv-corr-synth", "yfcc10m-synth"]],
     ("d1", "C6", "laion30m", ["laion30m"], ["silvertorch"], None, "", ""),
     ("d1", "C6", "laion30m-bs1", ["laion30m"], None, None, "", ""),
@@ -95,7 +95,7 @@ def main():
             after.append(out[0]["id"])  # M1 (d0's first leg) passes before d1 times anything
         out.append({"id": lid, "gpu": gpu, "pod": pod, "index": idx, "family": fam, "suite": suite, "dataset": ds,
                     "after": sorted(set(after)), "cells": cells, "gpu_h": round(h, 2),
-                    "official": "official" in str(algos) or (algos and "silvertorch" in algos and suite in ("filter", "synth")) or suite in ("h2h", "c7-scorepath", "codesign", "codesign-laion30m", "bloomwidth", "bloomwidth-timed"),
+                    "official": "official" in str(algos) or (algos and "silvertorch" in algos and suite in ("filter", "synth")) or suite in ("h2h", "c7-scorepath", "codesign", "codesign-laion30m", "bloomwidth", "bloomwidth-timed", "deep"),
                     "command": " ".join(cmd.split()), "upload": f"campaign-final/{ds}-{suite}" + (f"-{gpu}" if algos else ""), "note": note})  # fmt: skip
         prev[gpu] = lid
         totals[gpu] += h

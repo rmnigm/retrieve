@@ -302,47 +302,51 @@ legs:
   - id: d1-05-deep-goodreads
     pod: a100-x2-d
     index: 1
-    family: C6
+    family: C6+C7
     suite: deep
     dataset: goodreads
     after: [d1-04-filter-pubmed-st, stage-a100-x2-d]
-    env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, UV_PROJECT_ENVIRONMENT: /venvs/final}
-    command: "uv run bench campaign --suite deep --dataset goodreads --dim 128 --out /scratch/final/gpu1 --resume"
+    env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
+    command: "uv run bench campaign --suite deep --dataset goodreads --dim 128 --interleave --out /scratch/final/gpu1 --resume"
     upload: campaign-final/goodreads-deep
-    expect: {cells: 32, gpu_h: 0.51}
+    expect: {cells: 40, gpu_h: 0.65}
+    note: "official bloom curve paired with triton (goodreads, arXiv)"
   - id: d1-06-deep-arxiv
     pod: a100-x2-d
     index: 1
-    family: C6
+    family: C6+C7
     suite: deep
     dataset: arxiv
     after: [d1-05-deep-goodreads, stage-a100-x2-d]
-    env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, UV_PROJECT_ENVIRONMENT: /venvs/final}
-    command: "uv run bench campaign --suite deep --dataset arxiv --dim 128 --out /scratch/final/gpu1 --resume"
+    env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
+    command: "uv run bench campaign --suite deep --dataset arxiv --dim 128 --interleave --out /scratch/final/gpu1 --resume"
     upload: campaign-final/arxiv-deep
-    expect: {cells: 42, gpu_h: 0.88}
+    expect: {cells: 63, gpu_h: 1.25}
+    note: "official bloom curve paired with triton (goodreads, arXiv)"
   - id: d1-07-deep-yfcc10m
     pod: a100-x2-d
     index: 1
-    family: C6
+    family: C6+C7
     suite: deep
     dataset: yfcc10m
     after: [d1-06-deep-arxiv, stage-a100-x2-d]
-    env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, UV_PROJECT_ENVIRONMENT: /venvs/final}
-    command: "uv run bench campaign --suite deep --dataset yfcc10m --dim 192 --out /scratch/final/gpu1 --resume"
+    env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
+    command: "uv run bench campaign --suite deep --dataset yfcc10m --dim 192 --interleave --out /scratch/final/gpu1 --resume"
     upload: campaign-final/yfcc10m-deep
     expect: {cells: 8, gpu_h: 0.26}
+    note: "official bloom curve paired with triton (goodreads, arXiv)"
   - id: d1-08-deep-pubmed
     pod: a100-x2-d
     index: 1
-    family: C6
+    family: C6+C7
     suite: deep
     dataset: pubmed
     after: [d1-07-deep-yfcc10m, stage-a100-x2-d]
-    env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, UV_PROJECT_ENVIRONMENT: /venvs/final}
-    command: "uv run bench campaign --suite deep --dataset pubmed --dim 768 --out /scratch/final/gpu1 --resume"
+    env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
+    command: "uv run bench campaign --suite deep --dataset pubmed --dim 768 --interleave --out /scratch/final/gpu1 --resume"
     upload: campaign-final/pubmed-deep
     expect: {cells: 21, gpu_h: 0.64}
+    note: "official bloom curve paired with triton (goodreads, arXiv)"
   - id: d1-09-synth-goodreads-synth-st
     pod: a100-x2-d
     index: 1
@@ -939,7 +943,7 @@ legs:
 totals_gpu_h:                           # per GPU, incl. the 1.45 process overhead; wall-clock = the largest
   b: 8.8
   d0: 19.8
-  d1: 17.6
+  d1: 18.1
   p1: 15.6
 
 gates:                                 # D1-G over campaign-final/ after the last leg

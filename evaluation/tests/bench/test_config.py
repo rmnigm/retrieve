@@ -349,8 +349,8 @@ GRID = {  # (suite, dataset): (jobs, cells), the final pass's sizing input; chan
     ("filter", "arxiv"): (99, 144),
     ("filter", "yfcc10m"): (15, 21),
     ("filter", "pubmed"): (69, 111),
-    ("deep", "goodreads"): (4, 32),
-    ("deep", "arxiv"): (6, 42),
+    ("deep", "goodreads"): (5, 40),
+    ("deep", "arxiv"): (9, 63),
     ("deep", "yfcc10m"): (1, 8),
     ("deep", "pubmed"): (11, 21),
     ("synth", "goodreads-synth"): (70, 128),
@@ -526,7 +526,10 @@ def test_deep_suite_is_silvertorch_at_the_tuned_n_lists():
     want = {"goodreads": (4096, 1024), "arxiv": (2048, 512), "yfcc10m": (4096, 1024)}
     for dataset, (n_lists, top) in want.items():
         jobs = _real("deep", dataset)
-        assert {(j.algo, j.backend) for j in jobs} == {("silvertorch", "triton")}
+        # F3's official curve (YFCC has no bloom block)
+        official = {("silvertorch", "official")} if dataset != "yfcc10m" else set()
+        assert {(j.algo, j.backend) for j in jobs} == {("silvertorch", "triton")} | official
+        assert all(j.filter_kind == "bloom" for j in jobs if j.backend == "official")
         assert {j.build["n_lists"] for j in jobs} == {n_lists}
         probes = tuple(n for n in (8, 16, 32, 64, 128, 256, 512, 1024) if n <= top)
         assert all(j.query == tuple({"n_probe": n} for n in probes) for j in jobs)

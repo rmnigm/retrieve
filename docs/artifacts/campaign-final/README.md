@@ -12,7 +12,7 @@ D1-G passes.
 
 ## The final grid
 
-[`evaluation/config/suites.yaml`](../../../evaluation/config/suites.yaml) holds 3,653 cells in 22 suites. The table is
+[`evaluation/config/suites.yaml`](../../../evaluation/config/suites.yaml) holds 3,682 cells in 22 suites. The table is
 [evaluation § Config](../../system/evaluation.md#config-one-yaml-per-dataset--suitesyaml), and the counts are pinned
 in `evaluation/tests/bench/test_config.py` (`GRID`).
 
@@ -21,7 +21,7 @@ Seeds: seed 0 everywhere, with seeds 0-2 in `filter` only (T2's CIs).
 **Folded in:** `c3`, `c3-real`, `codesign-pubmed`, `laion30m-x`, `c7-scorepath` (plus n_probe 32), `tune-q`, `tune-timed`. `v1v2` is covered by `synth`.
 
 **Dropped:**
-- `deep`'s V3 and official arms, and its untuned n_lists grids;
+- `deep`'s V3 arm and its untuned n_lists grids (its official bloom curve stays, paired with triton: F3, C7);
 - `filter`'s SilverTorch torch arms (C3 runs on V1 / V2 in `c3` / `c3-real`);
 - goodreads-synth's bloom V1 / V2 and its SilverTorch / official bloom arms;
 - goodreads-synth SilverTorch n_probe 128 / 512;
@@ -35,12 +35,12 @@ Seeds: seed 0 everywhere, with seeds 0-2 in `filter` only (T2's CIs).
 
 ## Sizing
 
-61.8 GPU-h including the measured 1.45 process overhead. Quality-only tune legs are priced from their measured runs.
+62.3 GPU-h including the measured 1.45 process overhead. Quality-only tune legs are priced from their measured runs.
 
 | GPU | GPU-h |
 |---|---|
 | pod d GPU 0 | 19.8 |
-| pod d GPU 1 | 17.6 |
+| pod d GPU 1 | 18.1 |
 | pod 1 | 15.6 |
 | pod b | 8.8 |
 
