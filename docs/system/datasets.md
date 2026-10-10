@@ -557,6 +557,16 @@ clause value, so a frequency-descending order would hand every query "humans"
 Language is parsed and stored in `articles.parquet` + `lang_vocab.json` but is
 *not* one of the five clauses.
 
+**Vocab order.** Every vocab id is a total, seed-independent order of the inputs:
+MeSH by count descending, ties in first-seen order over the item-id-ordered article
+rows (`Counter.most_common`); journal and language by count descending, **ties by
+name** (`group_by` returns groups in a thread-dependent order, so a count-only sort
+gave tied journals different ids, and a different top-5k cut, on every build). Two
+builds of the same inputs are byte-identical (`test_attrs_two_builds_are_byte_identical`).
+The staged `/data/pubmed-medcpt` predates the tie rule: its journal / language ids are
+one draw of the old order and stay canonical (controller, 2026-10-10), so a rebuild
+with this code is not byte-equal to it.
+
 #### Query sets
 
 `queries` builds `queries.parquet` (`query_id`, `text`, `target_id`) from two

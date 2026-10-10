@@ -415,6 +415,38 @@ def test_attrs_mesh_category_clause_uses_the_descriptor_file(converted, tmp_path
         assert narrow[row, 1, 0].item() == expect
 
 
+def _stage_medline(out, rows):
+    (out / "medline").mkdir(exist_ok=True)
+    pmid, journal, language = zip(*rows, strict=True)
+    pl.DataFrame(
+        {"pmid": pmid, "journal": journal, "language": language},
+        schema={"pmid": pl.Int64, "journal": pl.Utf8, "language": pl.Utf8},
+    ).write_parquet(out / "medline" / "pubmed26n0001.parquet")
+
+
+def test_attrs_two_builds_are_byte_identical(raw_root, tmp_path):
+    # every journal and language occurs once: all tied, so only the tie rule fixes their ids
+    rows = [(1000000, "J Beta", "fre"), (1000001, "J Alpha", "eng"), (1000002, "J Gamma", "ger")]
+    _write_shard(raw_root, 0)
+    builds = []
+    for name, order in (("a", rows), ("b", rows[::-1])):
+        out = tmp_path / name
+        assert pubmed.cmd_convert(_convert_args(out, skip_embeds=True)) == 0
+        _stage_medline(out, order)
+        assert pubmed.cmd_attrs(_attrs_args(out, mesh_desc=str(tmp_path / "nope.gz"))) == 0
+        builds.append(out)
+    files = sorted(
+        p.relative_to(builds[0])
+        for p in builds[0].rglob("*")
+        if p.is_file() and p.parent.name != "medline" and p.name != "prep_log.json"
+    )
+    assert any(f.name == "journal_vocab.json" for f in files)
+    for f in files:
+        assert (builds[0] / f).read_bytes() == (builds[1] / f).read_bytes(), f
+    names = json.loads((builds[0] / "journal_vocab.json").read_text())["names"]
+    assert names == ["J Alpha", "J Beta", "J Gamma"]
+
+
 def test_attrs_eval_split_matches_heldout_and_the_narrow_tensor(converted, tmp_path):
     assert pubmed.cmd_attrs(_attrs_args(converted, mesh_desc=str(tmp_path / "nope.gz"))) == 0
     heldout = pl.read_parquet(converted / "heldout.parquet")
