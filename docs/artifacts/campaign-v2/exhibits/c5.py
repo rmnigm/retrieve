@@ -14,7 +14,7 @@ import statistics as st
 import sys
 from pathlib import Path
 
-from load import cv, load, official_build, recall, redo_st_wide2, score_path
+from load import cv, load, official_build, recall, redo, score_path
 
 from bench import stats
 
@@ -74,7 +74,7 @@ def main():
                 c["f"] += ef["window_medians_ms"]
                 c["p"] += ep["window_medians_ms"]
             c["rec"].append((recall(f), recall(p)))
-            c["redo"] = redo_st_wide2(f, ef["bs"])
+            c["redo"] = redo(f, ef["bs"], ef["k"])
             c["mhz"] |= {
                 int(x)
                 for x in (ef.get("window_sm_mhz") or []) + (ep.get("window_sm_mhz") or [])
