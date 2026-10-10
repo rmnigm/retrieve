@@ -91,9 +91,9 @@ footer { font-size: 13px; color: var(--ink-3); border-top: 1px solid var(--rule)
 <div class="wrap">
 <header>
   <span class="stamp">DRAFT · NOT CITABLE</span>
-  <p class="eyebrow">Reproducibility study · LiNR (CIKM '24) and SilverTorch (SIGIR '26)</p>
+  <p class="eyebrow">Reproducibility study · model-based retrieval · LiNR (CIKM '24) and SilverTorch (SIGIR '26)</p>
   <h1>Industrial retrieval claims are regime claims</h1>
-  <p class="lede">We reimplemented LinkedIn's LiNR and Meta's SilverTorch from their papers, ran Meta's released kernels beside ours, and tested every claim we could on five public datasets from 0.8 M to 30 M items. Most claims hold where the papers measured them: tens of millions of items, batched queries, multi-term filters. Several flip at the sizes public benchmarks use. Three knobs decide which: how many items, how many queries per batch, and how selective the filter is for each query.</p>
+  <p class="lede">Both papers do <em>model-based retrieval</em>: filtered retrieval as operations inside the model graph on the GPU, not a separate nearest-neighbour service. We reimplemented LinkedIn's LiNR and Meta's SilverTorch from their papers, ran Meta's released kernels beside ours, and tested every claim we could on five public datasets from 0.8 M to 30 M items. Most claims hold where the papers measured them: tens of millions of items, batched queries, multi-term filters. Several flip at the sizes public benchmarks use. Three knobs decide which: how many items, how many queries per batch, and how selective the filter is for each query.</p>
   <p class="meta">Exploration numbers: a final pass at one frozen code version reruns every cell before anything is cited. Timings compare only within one machine, ratios inside one interleaved run; recall is top-100 against an exact filtered oracle. Meta's numbers use its default fp16 score path unless marked int32. Most of our IVF timings come from a kernel version two bit-exact updates old; those updates only make our batched timings faster.</p>
 </header>
 
@@ -259,6 +259,7 @@ footer { font-size: 13px; color: var(--ink-3); border-top: 1px solid var(--rule)
   <p class="eyebrow">Open points</p>
   <h2>Where Meta's code and the papers' text stand</h2>
   <div class="points">
+    <p><b>Scope.</b> We compare what can run inside a model graph: plain and compiled PyTorch, both papers' methods, and Meta's kernels. Standalone nearest-neighbour libraries such as Faiss, cuVS or HNSW are services outside the graph, so they are not baselines here, although SilverTorch compares against them.</p>
     <p><b>Meta's released code.</b> It cannot run in a CUDA graph (its ops synchronise with the host inside), ignores the bloom width setting, builds its bloom per document bundle, and compiles its host code unoptimised; an optimised build of the same kernels gives identical outputs in 0.77–0.98 of the time.</p>
     <p><b>The papers' text.</b> SilverTorch's two bloom false-positive figures at 1,024 bits cannot both hold. LiNR's V3 bit budget reads as one bit per dimension in one place and 512 bits on d128 in another; we run one bit per dimension.</p>
     <p><b>How we time.</b> Kernels only inside the timed call, preparation measured apart; ratios from interleaved runs in one process; comparisons within one machine; clock speeds, which cannot be locked in the container, sampled and flagged.</p>
