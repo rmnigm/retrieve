@@ -6,10 +6,10 @@
 #   setsid nohup flock -n /scratch/gpu1.lock bash driver.sh > /scratch/v211/v1-bs1-30m.driver.log 2>&1 &
 set -u
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-R=/scratch/campaign-v211/v1-bs1-30m
-declare -A REPO=([A]=/scratch/wt/v211-tag [B]=/scratch/wt/v1-bs1-9b7e451)
-declare -A PY=([A]=/venvs/d-run-v211/bin/python [B]=/venvs/d-run-v1bs1/bin/python)
-declare -A CV=([A]=1d390792 [B]=a5c67b68)
+R=${R:-/scratch/campaign-v211/v1-bs1-30m}
+declare -A REPO=([A]=/scratch/wt/v211-tag [B]=${B_REPO:-/scratch/wt/v1-bs1-9b7e451})
+declare -A PY=([A]=/venvs/d-run-v211/bin/python [B]=${B_PY:-/venvs/d-run-v1bs1/bin/python})
+declare -A CV=([A]=1d390792 [B]=${B_CV:-a5c67b68})
 DS=("laion30m:256" "laion30m-synth:256" "yfcc10m-synth:192")
 mkdir -p "$R/logs"
 echo "pod-d v1-bs1-30m (cross-tree v2.11 / v1-bs1 9b7e451) on GPU 1 (taskset -c 96-127) since $(date -Is), driver $0" > /scratch/gpu1-holder
@@ -30,7 +30,7 @@ for round in 1 2 3; do
   for s in $order; do
     for dd in "${DS[@]}"; do
       ds=${dd%%:*}; dim=${dd#*:}; t0=$(date +%s)
-      ( cd "${REPO[$s]}/evaluation" && CUDA_VISIBLE_DEVICES=1 HF_HOME=/scratch/hf TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/v1g-$s \
+      ( cd "${REPO[$s]}/evaluation" && CUDA_VISIBLE_DEVICES=1 HF_HOME=/scratch/hf TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/v1g-$s${INDUCTOR_SUFFIX:-} \
           taskset -c 96-127 ${PY[$s]} -m bench.cli run --config-dir /scratch/v211/v1g-config-$s --dataset $ds --dim $dim --suite v1g \
           --algo linr_v1_filter_mask --backend triton --force --out "$R/r$round-$s" ) >> "$R/logs/r$round-$s-$ds.log" 2>&1 < /dev/null
       rc=$?
@@ -40,7 +40,7 @@ for round in 1 2 3; do
   done
 done
 for s in A B; do
-  ( cd "${REPO[$s]}/evaluation" && CUDA_VISIBLE_DEVICES=1 HF_HOME=/scratch/hf TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/v1g-$s taskset -c 96-127 \
+  ( cd "${REPO[$s]}/evaluation" && CUDA_VISIBLE_DEVICES=1 HF_HOME=/scratch/hf TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/v1g-$s${INDUCTOR_SUFFIX:-} taskset -c 96-127 \
       ${PY[$s]} "$HERE/score_dump.py" dump /scratch/v211/v1g-config-$s "$R/scores-$s.pt" ) >> "$R/logs/scores-$s.log" 2>&1 < /dev/null
   rc=$?; echo "$(date -Is) score dump $s rc=$rc"; [ $rc -eq 0 ] || exit $rc
 done
