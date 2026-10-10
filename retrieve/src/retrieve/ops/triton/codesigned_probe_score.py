@@ -58,6 +58,9 @@ CONFIGS = {
 # program, and resident dot programs per SM.
 TWO_PASS_LANES = 4096
 DOT_PROGRAMS_PER_SM = 8
+# The item two-pass (prototype, ST-XQ): compact passing items in the filter pass, dot over them.
+ITEM_TWO_PASS = False
+ITEM_CHUNK = 64
 
 
 @triton.jit
@@ -308,12 +311,138 @@ def _bloom_dot_kernel(
         tl.store(row_base(out_scores_ptr, bid, stride_ob, WIDE) + slot, dots, mask=valid)
 
 
+@triton.jit
+def _bloom_filter_items_kernel(
+    table_ptr,
+    qpos_ptr,
+    bloom_t_ptr,
+    out_scores_ptr,
+    keep_ptr,
+    rowcount_ptr,
+    pos_list_ptr,
+    slot_list_ptr,
+    n_probe,
+    width,
+    n_tiles_grid,
+    cap,
+    n_qbits,
+    stride_qpos,
+    stride_tm,
+    stride_ob,
+    FAN: tl.constexpr,
+    TPP: tl.constexpr,
+    BLOCK_P: tl.constexpr,
+    NW: tl.constexpr,
+    WIDE: tl.constexpr,
+):
+    # Pass 1, item level: -inf over every slot, the tile vote on its bloom words, and for a
+    # program with a passing tile the per-lane test, its passing (position, slot) pairs
+    # appended to the row's lists (kernels.md § SilverTorch kernels, "Item two-pass").
+    bid = tl.program_id(0)
+    tt = tl.program_id(1) * TPP + tl.arange(0, TPP)
+    pos0, n_valid, slot0, tail = probe_tiles_table(table_ptr, bid, tt, n_probe, FAN, BLOCK_P)
+    lane = tl.arange(0, BLOCK_P)
+    slot = slot0[:, None] + lane[None, :]
+    in_grid = tt < n_tiles_grid
+    valid = (lane[None, :] < n_valid[:, None]) & in_grid[:, None]
+    keep_slot = valid | (tail[:, None] & (slot < width) & in_grid[:, None])
+    tl.store(
+        row_base(out_scores_ptr, bid, stride_ob, WIDE) + slot,
+        tl.full([TPP, BLOCK_P], float("-inf"), tl.float32),
+        mask=keep_slot,
+    )
+    word = (pos0 >> 6)[:, None] + tl.arange(0, NW)[None, :]
+    lo_b = tl.minimum(tl.maximum(pos0[:, None] - word * 64, 0), 64)
+    hi_b = tl.minimum(tl.maximum((pos0 + n_valid)[:, None] - word * 64, 0), 64)
+    one = tl.full([TPP, NW], 1, tl.int64)
+    span = tl.where(hi_b >= 64, -1, (one << hi_b) - 1) & ~tl.where(
+        lo_b >= 64, -1, (one << lo_b) - 1
+    )
+    acc_w = span & bloom_words(
+        qpos_ptr + bid * stride_qpos, n_qbits, bloom_t_ptr, stride_tm, word, span != 0
+    )
+    tile_pass = (tl.max((acc_w != 0).to(tl.int32), axis=1) > 0) & in_grid
+    if tl.max(tile_pass.to(tl.int32), axis=0) > 0:
+        pos = pos0[:, None] + lane[None, :]
+        live = valid & tile_pass[:, None]
+        acc = bloom_words(
+            qpos_ptr + bid * stride_qpos, n_qbits, bloom_t_ptr, stride_tm, pos >> 6, live
+        )
+        keep = live & (((acc >> (pos & 63)) & 1) != 0)
+        # Through memory, as the tile vote (kernels.md § SilverTorch kernels, "Bloom two-pass"):
+        # the append's address must not trace back to the bloom loads.
+        k_off = (bid.to(tl.int64) * n_tiles_grid + tt)[:, None] * BLOCK_P + lane[None, :]
+        tl.store(keep_ptr + k_off, keep.to(tl.int8))
+        tl.debug_barrier()
+        flat = tl.reshape(tl.load(keep_ptr + k_off) != 0, [TPP * BLOCK_P])
+        n_keep = tl.sum(flat.to(tl.int32), axis=0)
+        base = tl.atomic_add(rowcount_ptr + bid, n_keep)
+        at = bid.to(tl.int64) * cap + base + tl.cumsum(flat.to(tl.int32), axis=0) - 1
+        tl.store(pos_list_ptr + at, tl.reshape(pos, [TPP * BLOCK_P]), mask=flat)
+        tl.store(slot_list_ptr + at, tl.reshape(slot, [TPP * BLOCK_P]), mask=flat)
+
+
+@triton.jit
+def _bloom_items_dot_kernel(
+    rowcount_ptr,
+    pos_list_ptr,
+    slot_list_ptr,
+    q_codes_ptr,
+    q_scales_ptr,
+    item_codes_ptr,
+    out_scores_ptr,
+    global_scale,
+    B,
+    cap,
+    stride_qcb,
+    stride_cn,
+    stride_ob,
+    D: tl.constexpr,
+    D_PAD: tl.constexpr,
+    BLOCK_D: tl.constexpr,
+    CHUNK: tl.constexpr,
+    N_PROGRAMS: tl.constexpr,
+    WIDE: tl.constexpr,
+):
+    # Pass 2, persistent: each row's passing items in CHUNK-item gathers, the one-pass kernel's
+    # dot and epilogue (every listed item passes).
+    for bid in range(0, B):
+        n_b = tl.load(rowcount_ptr + bid)
+        for c0 in range(tl.program_id(0) * CHUNK, n_b, N_PROGRAMS * CHUNK):
+            i = c0 + tl.arange(0, CHUNK)
+            m = i < n_b
+            row = bid.to(tl.int64) * cap
+            pos = tl.load(pos_list_ptr + row + i, mask=m, other=0)
+            slot = tl.load(slot_list_ptr + row + i, mask=m, other=0)
+            dots_i32, q_scale = probe_dots(
+                q_codes_ptr + bid * stride_qcb,
+                q_scales_ptr,
+                bid,
+                item_codes_ptr,
+                pos,
+                stride_cn,
+                m,
+                D,
+                D_PAD,
+                BLOCK_D,
+                CHUNK,
+            )
+            dots = (
+                dots_i32.to(tl.float32)
+                * tl.cast(q_scale, tl.float32)
+                * tl.cast(global_scale, tl.float32)
+            )
+            tl.store(row_base(out_scores_ptr, bid, stride_ob, WIDE) + slot, dots, mask=m)
+
+
 @dataclass(frozen=True)
 class BloomTwoPass:
     filter_grid: tuple[int, int]
     filter_kwargs: dict[str, object]
     dot_grid: tuple[int]
     dot_kwargs: dict[str, object]
+    filter_kernel: object  # the tile pair, or the item pair (ITEM_TWO_PASS)
+    dot_kernel: object
 
 
 def _cps_prep(
@@ -414,8 +543,61 @@ def _cps_prep(
             "num_stages": cfg.num_stages,
         }
     )
+    grid_f = (b, triton.cdiv(n_tiles_grid, tpp))
+    if not ITEM_TWO_PASS:
+        two_pass = BloomTwoPass(
+            grid_f,
+            filter_kwargs,
+            (n_programs,),
+            dot_kwargs,
+            _bloom_filter_kernel,
+            _bloom_dot_kernel,
+        )
+        return launch, two_pass
+    cap = n_tiles_grid * cfg.block_p
+    dev = query.device
+    rowcount = torch.zeros(b, dtype=torch.int32, device=dev)
+    pos_list = torch.empty((b, cap), dtype=torch.int64, device=dev)
+    slot_list = torch.empty((b, cap), dtype=torch.int64, device=dev)
+    keys_f = ("table_ptr", "qpos_ptr", "bloom_t_ptr", "out_scores_ptr", "n_probe", "width")
+    keys_f += ("n_tiles_grid", "n_qbits", "stride_qpos", "stride_tm", "stride_ob", "FAN", "TPP")
+    keys_f += ("BLOCK_P", "NW", "WIDE", "num_warps")
+    item_filter = {k: filter_kwargs[k] for k in keys_f} | {
+        "keep_ptr": torch.empty(b * cap, dtype=torch.int8, device=dev),
+        "rowcount_ptr": rowcount,
+        "pos_list_ptr": pos_list,
+        "slot_list_ptr": slot_list,
+        "cap": cap,
+    }
+    item_dot = {
+        "rowcount_ptr": rowcount,
+        "pos_list_ptr": pos_list,
+        "slot_list_ptr": slot_list,
+        "q_codes_ptr": kw["q_codes_ptr"],
+        "q_scales_ptr": kw["q_scales_ptr"],
+        "item_codes_ptr": kw["item_codes_ptr"],
+        "out_scores_ptr": kw["out_scores_ptr"],
+        "global_scale": kw["global_scale"],
+        "B": b,
+        "cap": cap,
+        "stride_qcb": kw["stride_qcb"],
+        "stride_cn": kw["stride_cn"],
+        "stride_ob": kw["stride_ob"],
+        "D": kw["D"],
+        "D_PAD": kw["D_PAD"],
+        "BLOCK_D": cfg.block_d,
+        "CHUNK": ITEM_CHUNK,
+        "N_PROGRAMS": n_programs,
+        "WIDE": kw["WIDE"],
+        "num_warps": 4,
+    }
     two_pass = BloomTwoPass(
-        (b, triton.cdiv(n_tiles_grid, tpp)), filter_kwargs, (n_programs,), dot_kwargs
+        grid_f,
+        item_filter,
+        (n_programs,),
+        item_dot,
+        _bloom_filter_items_kernel,
+        _bloom_items_dot_kernel,
     )
     return launch, two_pass
 
@@ -471,8 +653,8 @@ def _codesigned_probe_score_impl(
     )
     probe_prep_kernel[launch.prep.grid](**launch.prep.kwargs)
     if two_pass is not None:
-        _bloom_filter_kernel[two_pass.filter_grid](**two_pass.filter_kwargs)
-        _bloom_dot_kernel[two_pass.dot_grid](**two_pass.dot_kwargs)
+        two_pass.filter_kernel[two_pass.filter_grid](**two_pass.filter_kwargs)
+        two_pass.dot_kernel[two_pass.dot_grid](**two_pass.dot_kwargs)
     else:
         _codesigned_probe_score_kernel[launch.grid](**launch.kwargs)
     fin = probe_topk(launch, k, probe_ids, cluster_offsets, sort_perm)
@@ -508,8 +690,8 @@ def codesigned_probe_score(
     )
     wrap_triton(probe_prep_kernel)[launch.prep.grid](**launch.prep.kwargs)
     if two_pass is not None:
-        wrap_triton(_bloom_filter_kernel)[two_pass.filter_grid](**two_pass.filter_kwargs)
-        wrap_triton(_bloom_dot_kernel)[two_pass.dot_grid](**two_pass.dot_kwargs)
+        wrap_triton(two_pass.filter_kernel)[two_pass.filter_grid](**two_pass.filter_kwargs)
+        wrap_triton(two_pass.dot_kernel)[two_pass.dot_grid](**two_pass.dot_kwargs)
     else:
         wrap_triton(_codesigned_probe_score_kernel)[launch.grid](**launch.kwargs)
     fin = probe_topk(launch, k, probe_ids, cluster_offsets, sort_perm)
@@ -551,8 +733,8 @@ def codesigned_probe_score_bloom(
     )
     wrap_triton(probe_prep_kernel)[launch.prep.grid](**launch.prep.kwargs)
     if two_pass is not None:
-        wrap_triton(_bloom_filter_kernel)[two_pass.filter_grid](**two_pass.filter_kwargs)
-        wrap_triton(_bloom_dot_kernel)[two_pass.dot_grid](**two_pass.dot_kwargs)
+        wrap_triton(two_pass.filter_kernel)[two_pass.filter_grid](**two_pass.filter_kwargs)
+        wrap_triton(two_pass.dot_kernel)[two_pass.dot_grid](**two_pass.dot_kwargs)
     else:
         wrap_triton(_codesigned_probe_score_kernel)[launch.grid](**launch.kwargs)
     fin = probe_topk(launch, k, probe_ids, cluster_offsets, sort_perm)

@@ -7,7 +7,7 @@ slot (the identical-code floor); `slice=D` keeps the first D embedding dims (a k
 staged data, e.g. 192 from arXiv's 256).
 
     cd evaluation && PYTHONPATH=.:../retrieve/src:PKGS python gate.py DATASET DIM KIND SWEEPS N_LISTS MODE NPROBES BSS OUT.json \
-        [graph] [swap] [aa] [slice=D] [k=K] [sparse=B]
+        [graph] [swap] [aa] [slice=D] [k=K] [sparse=B] [items]
       e.g. arxiv-synth 256 bloom p001,p01,p1 2048 bloom 24,128,256 1,16,64 out.json graph
 """
 
@@ -29,7 +29,9 @@ CALLS, ROUNDS, N_POOL = 30, 8, 16
 flags = {
     a
     for a in sys.argv[1:]
-    if a in ("graph", "swap", "aa") or a.startswith(("slice=", "k=", "sparse="))
+    if a in ("graph", "swap", "aa")
+    or a.startswith(("slice=", "k=", "sparse="))
+    or a == "items"
 }
 GRAPH, SWAP, AA = "graph" in flags, "swap" in flags, "aa" in flags
 SLICE = next((int(a[6:]) for a in flags if a.startswith("slice=")), None)
@@ -40,6 +42,12 @@ if SPARSE is not None:
     import retrieve.modules.silvertorch as after_silvertorch
 
     after_silvertorch.SPARSE_PASS_BOUND = SPARSE
+if "items" in flags:  # the after arm takes the item two-pass (ST-XQ prototype)
+    import importlib
+
+    importlib.import_module(
+        "retrieve.ops.triton.codesigned_probe_score"
+    ).ITEM_TWO_PASS = True
 ds, dim, kind, sweeps, n_lists, mode, nprobes, bss, out = [
     a for a in sys.argv[1:] if a not in flags
 ]
