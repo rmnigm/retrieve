@@ -34,6 +34,19 @@ status() {  # rewrite d-run's note from the markers
       else printf '| %s | queued (after %s) | | %s | |\n' "$id" "$deps" "$hub"; fi
     done < /scratch/final/d1-legs.tsv; } > $NOTE
 }
+upload_leg() {  # controller CORRECTION 15:20Z: the recipe's --results <out>/<suite> uploads 0 records; stage this leg's files as $T/<suite>/
+  local suite ds dim out T n rc
+  suite=$(grep -oP -- '--suite \K\S+' <<<"$cmd") || { ( cd $WT/evaluation && env $env bash -c "$up" ); return; }  # ceiling: no records, recipe form
+  ds=$(grep -oP -- '--dataset \K\S+' <<<"$cmd"); dim=$(grep -oP -- '--dim \K\S+' <<<"$cmd"); out=$(grep -oP -- '--out \K\S+' <<<"$cmd")
+  T=$(mktemp -d /scratch/final/upload.XXXXXX); mkdir -p $T/$suite
+  cp -al $out/$suite/$ds-d$dim* $T/$suite/ || return 5
+  n=$(wc -l < $out/$suite/$ds-d$dim.jsonl)
+  ( cd $WT/evaluation && env $env bash -c "\"\$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo $hub --verify" ) > $T.log 2>&1; rc=$?; cat $T.log; [ $rc -eq 0 ] || return 6
+  grep -q " $n record(s) -> " $T.log || { echo "n_records != $n"; return 7; }
+  grep -q 'results.parquet' $T.log || { echo "no results.parquet"; return 8; }
+  grep -qE '^  (CITABLE|NOT CITABLE)' $T.log || { echo "no provenance line"; return 9; }
+  echo "checked: n_records $n, results.parquet, provenance"; rm -rf $T $T.log
+}
 status "starting"
 while IFS=$'\t' read -r id deps env cmd up hub; do
   [ -e /scratch/final/done/$id ] && continue
@@ -45,7 +58,7 @@ while IFS=$'\t' read -r id deps env cmd up hub; do
   ( cd $dir && flock /scratch/gpu1.lock env $env bash -c "echo \"d-run final $id on GPU 1 since $(date -Is)\" > /scratch/gpu1-holder; $cmd" ) > /scratch/final/logs-$id.log 2>&1 < /dev/null
   rc=$?; echo "$(date -Is) $id rc=$rc s=$(( $(date +%s) - t0 ))"
   if [ $rc -ne 0 ]; then RUNNING=; status "**FAILED: $id rc=$rc** (log /scratch/final/logs-$id.log); runner stopped"; exit $rc; fi
-  ( cd $WT/evaluation && env $env bash -c "$up" ) > /scratch/final/upload-$id.log 2>&1 < /dev/null
+  upload_leg > /scratch/final/upload-$id.log 2>&1 < /dev/null
   urc=$?; man=$(grep -o 'MANIFEST.json sha256 [0-9a-f]*' /scratch/final/upload-$id.log | awk '{print $3}')
   if [ $urc -ne 0 ] || ! grep -q 'round trip verified' /scratch/final/upload-$id.log; then RUNNING=; status "**FAILED upload of $id** (/scratch/final/upload-$id.log); runner stopped"; exit 4; fi
   printf '%s\n%s\n' "$(( $(date +%s) - t0 ))" "$man" > /scratch/final/done/$id; RUNNING=; status "$id done"
