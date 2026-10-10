@@ -33,6 +33,13 @@ IDS_BLOCK_N = 512
 # SilverTorch kernels, "Probe table").
 TABLE_MIN_PAIRS = 512
 
+# The two-level top-k (kernels.md § SilverTorch kernels, "Top-k"): from TOPK_MIN_SLOTS slots of
+# [B, width] the score buffer is padded to whole TOPK_BLOCK-slot blocks, and where a row has at
+# least TOPK_MIN_RATIO blocks per top-k slot the top-k runs on the items of its k best blocks.
+TOPK_BLOCK = 256
+TOPK_MIN_SLOTS = 1 << 23
+TOPK_MIN_RATIO = 8
+
 
 def gate_pays(launch: ProbeLaunch) -> bool:
     """Whether a probe scorer's pass-rate-gated tile skip can pay: at least ``MIN_PROGRAMS``
@@ -72,7 +79,7 @@ def tile_for_width(configs: dict[int, tuple[Cfg, ...]], d: int, b: int, width: i
 class ProbeLaunch:
     grid: tuple[int, int, int]  # (B, tiles_y, tiles_x) over the cluster-aligned + tail tiles
     kwargs: dict[str, object]  # every kernel arg: tensors, strides, constexprs, cfg
-    all_scores: Tensor
+    all_scores: Tensor  # [B, width], padded to whole TOPK_BLOCKs for the two-level top-k
     prep: ProbePrep  # launched first: the int8 query and, with "TABLE", the per-row table
 
 
@@ -132,6 +139,9 @@ def probe_prep(
     query = query.contiguous()
     q_codes = torch.empty((b, d), dtype=torch.int8, device=query.device)
     q_scales = torch.empty(b, dtype=torch.float32, device=query.device)
+    if b * width >= TOPK_MIN_SLOTS:
+        # The scorer's -inf tail covers the pad: the grid and the tail mask follow the width.
+        width = triton.cdiv(width, TOPK_BLOCK) * TOPK_BLOCK
     all_scores = torch.empty((b, width), dtype=torch.float32, device=query.device)
     # Cluster-aligned tiles: at most one partial tile per probe, so n_probe extra tiles cover
     # the rounding and the -inf tail past the row's items.
@@ -196,6 +206,25 @@ def probe_prep(
     return ProbeLaunch(grid, kwargs, all_scores, prep)
 
 
+def _two_level_topk(all_scores: Tensor, k: int) -> tuple[Tensor, Tensor]:
+    """``torch.topk(all_scores, k)`` up to ties. On a buffer ``probe_prep`` padded to whole
+    ``TOPK_BLOCK``s with at least ``TOPK_MIN_RATIO`` blocks per slot: each block's max, the
+    row's ``k`` best blocks, and the top-k of their items, which hold the row's top-k (an item
+    in it has its block's max at least as large; were that block not among the ``k`` best,
+    ``k`` other blocks would each hold an item as large). Scores ``torch.equal``, ids equal up
+    to ties (kernels.md § SilverTorch kernels, "Top-k")."""
+    b, width = all_scores.shape
+    n_blocks = width // TOPK_BLOCK
+    if width % TOPK_BLOCK or b * width < TOPK_MIN_SLOTS or n_blocks < TOPK_MIN_RATIO * k:
+        return torch.topk(all_scores, k, dim=1)
+    block_max = all_scores.view(b, n_blocks, TOPK_BLOCK).amax(dim=2)
+    blocks = torch.topk(block_max, k, dim=1, sorted=False).indices
+    lane = torch.arange(TOPK_BLOCK, device=all_scores.device)
+    cand_slots = (blocks.unsqueeze(2) * TOPK_BLOCK + lane).view(b, k * TOPK_BLOCK)
+    scores, at = torch.topk(all_scores.gather(1, cand_slots), k, dim=1)
+    return scores, cand_slots.gather(1, at)
+
+
 def probe_topk(
     launch: ProbeLaunch, k: int, probe_ids: Tensor, cluster_offsets: Tensor, sort_perm: Tensor
 ) -> ProbeIds:
@@ -205,7 +234,7 @@ def probe_topk(
     Triton backend meets ``interfaces.py``'s "``-1`` / ``-inf`` are the no-item sentinels" as
     ``masked_topk`` does for the other backends. The caller launches it (the op bodies keep
     their ``wrap_triton`` lines inline). Capture-safe: no host sync, no data-dependent branch."""
-    scores, slots = torch.topk(launch.all_scores, k, dim=1)
+    scores, slots = _two_level_topk(launch.all_scores, k)
     block_k = min(triton.next_power_of_2(k), IDS_BLOCK_K)
     ids = torch.empty_like(slots)
     n_probe = probe_ids.shape[1]

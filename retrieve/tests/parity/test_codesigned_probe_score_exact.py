@@ -6,6 +6,7 @@ from __future__ import annotations
 import pytest
 import torch
 
+import retrieve.ops.triton._host as host
 from retrieve.indexing.quantize import quantize_int8_global
 from retrieve.ops import reference
 from retrieve.ops.triton._host import width_tiles
@@ -169,3 +170,32 @@ def test_degenerate_rows_give_exact_sentinels():
     assert ids[1, 0].item() == perm[0].item() and torch.isfinite(scores[1, 0])
     tail = torch.cat([scores[0], scores[1, 1:]])
     assert torch.equal(tail, torch.full_like(tail, float("-inf")))
+
+
+@pytest.mark.parametrize("d", [64, 768])
+@pytest.mark.parametrize("delta", [-1, 0, 1])
+def test_two_level_topk_ties_and_finite_count_boundary(d, delta, monkeypatch):
+    """The two-level top-k (block maxima, then the best blocks' items; kernels.md § SilverTorch
+    kernels, "Top-k") under heavy ties (four distinct code rows) and with exactly ``k + delta``
+    passing items a row (every list probed, one clause value): scores ``torch.equal`` to the
+    whole-width reference, ids up to ties, ``-1`` / ``-inf`` past the finite count."""
+    monkeypatch.setattr(host, "TOPK_MIN_SLOTS", 0)
+    b, k, n_lists = 4, 4, 512
+    lay = make_probe_family(b, n_lists, 60, n_lists)
+    width = -(-lay.width // host.TOPK_BLOCK) * host.TOPK_BLOCK
+    assert width // host.TOPK_BLOCK >= host.TOPK_MIN_RATIO * k, (
+        "the two-level top-k does not engage"
+    )
+    g = torch.Generator(device="cuda").manual_seed(11)
+    base = torch.randint(-127, 128, (4, d), dtype=torch.int8, device="cuda", generator=g)
+    codes = base[torch.randint(0, 4, (lay.n,), device="cuda", generator=g)].contiguous()
+    attrs = torch.zeros((lay.n, 1, 1), dtype=torch.long, device="cuda")
+    attrs[torch.randperm(lay.n, device="cuda", generator=g)[: k + delta]] = 1
+    rev = torch.tensor([False], device="cuda")
+    q_attrs = torch.ones((b, 1), dtype=torch.long, device="cuda")
+    args = (make_query(b, d), lay.probe_ids, lay.cluster_offsets, codes, lay.sort_perm, attrs,
+            rev, q_attrs, 0.01)  # fmt: skip
+    out = codesigned_probe_score_exact(*args, k, lay.width)
+    ref = reference.codesigned_probe_score_exact(*args, k, lay.width)
+    assert_topk_equal(*out, *ref)
+    assert (torch.isfinite(out[1]).sum(1) == min(k, k + delta)).all()
