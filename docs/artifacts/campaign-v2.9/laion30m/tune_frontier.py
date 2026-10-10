@@ -19,7 +19,9 @@ for f in sorted(Path(sys.argv[1]).rglob("*.jsonl")):
         continue
     for line in open(f):
         r = json.loads(line)
-        if r["status"] != "ok":
+        if r["status"] != "ok" and r["partial_reasons"] != [
+            "modes"
+        ]:  # graph-only runs are partial by modes
             continue
         ms = {p["bs"]: p["median_ms"] for p in r["perf"] or [] if p["mode"] == "graph"}
         key = (r["dataset"], r["sweep"], r["filter_kind"])
