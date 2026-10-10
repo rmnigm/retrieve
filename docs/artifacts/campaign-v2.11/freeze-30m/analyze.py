@@ -22,10 +22,10 @@ for f in sorted(root.glob("r*-[AB]/*/*.jsonl")):
         for p in r["perf"]:
             if p.get("median_ms") is not None:
                 cells.setdefault(
-                    (r["dataset"], r["sweep"], p["bs"], p["mode"]), {}
+                    (f"{r['algo']}:{r['dataset']}", r["sweep"], p["bs"], p["mode"]), {}
                 ).setdefault(tree, {})[rnd] = p
 print(
-    "| dataset | sweep | bs | mode | v2.11 ms | V1-BS1 ms | V1-BS1 / v2.11 | ids A = B | flag |"
+    "| algo:dataset | sweep | bs | mode | v2.11 ms | e16512f5 ms | e16512f5 / v2.11 | ids A = B | flag |"
 )
 print("|---|---|---|---|---|---|---|---|---|")
 flags = 0
