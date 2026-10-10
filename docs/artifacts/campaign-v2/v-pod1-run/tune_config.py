@@ -26,10 +26,20 @@ suites["tune-q"] = {**copy.deepcopy(base), "perf": False, "arms": [
      "datasets": {"yfcc10m-synth": {}}},
 ]}  # fmt: skip
 if len(sys.argv) > 2:
-    arms = []
+    groups: dict[tuple, list[int]] = {}
     for ds, sw, fk, nl, npb in json.loads(Path(sys.argv[2]).read_text()):
-        arms.append({"algo": "silvertorch", "backends": ["triton"], "filter_kinds": [fk], "build": {"n_lists": [nl]},
-                     "query": {"n_probe": [npb]}, "datasets": {ds: {"sweeps": [sw]}}})  # fmt: skip
+        groups.setdefault((ds, sw, fk, nl), []).append(npb)
+    arms = [
+        {
+            "algo": "silvertorch",
+            "backends": ["triton"],
+            "filter_kinds": [fk],
+            "build": {"n_lists": [nl]},
+            "query": {"n_probe": sorted(nps)},
+            "datasets": {ds: {"sweeps": [sw]}},
+        }
+        for (ds, sw, fk, nl), nps in sorted(groups.items())
+    ]  # fmt: skip (one build per (dataset, sweep, kind, n_lists))
     suites["tune"] = {**copy.deepcopy(base), "arms": arms}
 out.mkdir(parents=True, exist_ok=True)
 (out / "suites.yaml").write_text(yaml.safe_dump(suites, sort_keys=False))
