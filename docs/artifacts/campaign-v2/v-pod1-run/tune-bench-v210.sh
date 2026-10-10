@@ -7,10 +7,11 @@ TAG=${TAG:-campaign-v2.10}
 REPO=${REPO:-/scratch/wt/tree-v210}
 PY=${PY:-/venvs/v210/bin/python}
 . "$(dirname "$(readlink -f "$0")")/common.sh"
-for bench in goodreads arxiv; do
+for bench in ${BENCHES:-goodreads arxiv}; do  # BENCHES / DSS narrow a rerun
   C=$LOG/config-$bench
   $PY "$HERE/tune_bench_config.py" "$C" $bench || exit 1
   case $bench in goodreads) dss="goodreads goodreads-synth" ;; arxiv) dss="arxiv arxiv-synth arxiv-corr-synth" ;; esac
+  dss=${DSS:-$dss}
   old_oracles $dss
   for ds in $dss; do step "oracle-$ds" oracle --config-dir "$C" --dataset $ds --suite tune-q; done
   for ds in $dss; do step "q-$ds" run --config-dir "$C" --dataset $ds --dim 128 --suite tune-q --seed 0 --resume --out "$R"; done
