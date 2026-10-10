@@ -1,0 +1,58 @@
+# Draft schema of the F-REPRO recipe.yaml (not read by any code yet). One file pins everything a
+# rerun needs: the tag, the boxes, the data, the cells, the commands. Values below are examples.
+recipe: 1
+tag: campaign-final                       # git tag; library tree hash checked before every leg
+library_tree: <git rev-parse TAG:retrieve/src/retrieve>
+hub: {repo: pinkmeme/eval-results, prefix: campaign-final/}
+image: {torch: 2.10.0+cu128, triton: 3.6.0, cuda: "12.8", python: "3.11"}
+official: {build: scripts/build_official_o3.sh, so_sha256: <sha of the -O3 _C.so>}   # every Meta leg
+
+pods:                                     # one box per comparison family (decisions: timings compare within one box)
+  - name: a100-x2-d
+    host: 38f5e1                          # env.host prefix the records carry
+    gpus:
+      - {index: 0, sm_max_mhz: 1410}
+      - {index: 1, sm_max_mhz: 1410}
+  - {name: a100-x1-eval, host: e75980, gpus: [{index: 0, sm_max_mhz: 1410}]}
+  - {name: a100-x1-b, host: 1ffe3d, gpus: [{index: 0, sm_max_mhz: 1410}]}
+
+datasets:                                 # pinned by source revision + the oracle fingerprints bench check reports
+  goodreads:
+    source: {hub: pinkmeme/eval-goodreads-work-id, revision: <commit>}
+    dims: [128]
+    inputs: sasrec-ssm-logq-d128          # the record key's `inputs`
+    oracle: {c0_genre: <fingerprint[:16]>, c1_lang_reverse: <...>, all4: <...>}
+  pubmed:
+    source: {copy_from: a100-x1-b:/data/pubmed, sha256_manifest: <file>}   # not on the Hub (registered, unpublished)
+    dims: [768]
+    inputs: content_d768
+  # ... arxiv, yfcc10m, laion30m, and each *-synth (attrs file sha256 + its base dataset)
+
+families:                                 # the unit of placement: every cell of a family runs on one box
+  C1:                                     # V1 / V2, interleaved in one process per cell
+    box: a100-x2-d
+    gpu: 0
+    suites: [synth, laion30m-synth, v1v2, filter, laion30m]
+    arms: [linr_v1_filter_mask, linr_v2]
+    feeds: [T1.C1, F1, c1-across-n, c1-real]
+  # C2, C3, C4, C5, C6, C7, tune: the same shape
+
+legs:                                     # ordered per GPU; a leg = one `bench campaign` invocation
+  - id: d0-01-c1-synth
+    gpu: {pod: a100-x2-d, index: 0}
+    after: [d1-00-tune]                   # dependencies (tune fixes n_lists / n95 before C5 / C6 / C7)
+    suite: synth
+    datasets: [arxiv-synth, yfcc10m-synth, goodreads-synth]
+    seeds: [0, 1, 2]
+    env: {CUDA_VISIBLE_DEVICES: "0", TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: >-
+      uv run --directory evaluation bench campaign --suite synth --interleave
+      --results /scratch/final/gpu0 --resume
+    upload: {path_in_repo: campaign-final/{dataset}-{suite}, verify: true}
+    expect: {cells: 0, gpu_h: 0.0}        # from sizing.py; the leg fails review if off by > 50 %
+
+gates:                                    # D1-G after the last leg
+  - eager-vs-graph ids from stored hashes
+  - byte-identical quality subset per leg (--force into a scratch tree)
+  - median_ms(bs=16) < 16 x median_ms(bs=1)
+  - bench report --manifest over campaign-final/
