@@ -34,7 +34,9 @@ Raw outputs are on the Hub at `artifacts/v1-bs1` ([hub-index](../../hub-index.md
 - **Batched-row masks** (B > 1): `clause_mask_scores` and `bloom_match_scores`. One program per item tile loads its
   attrs / signature words once for 16 rows. At B = 1 the per-row kernels are unchanged.
 
-## 3. Gate (`gate_v1.py` against staging 1cba173, library a3bec4a5 = campaign-v2.10; one process, swapped build order, 8 windows)
+## 3. Gate (`gate_v1.py` against campaign-v2.11, library 1d390792; one process, swapped build order, 8 windows)
+Rerun at v2.11 (Hub `artifacts/v1-bs1-v211`) after a first run against staging 1cba173 (= v2.10) with the same
+numbers; ST-TOPK, the only library change between the two, does not touch V1's paths.
 68 cells. Ids and scores are `torch.equal` in every cell, none slower:
 
 | cells | after / before |
