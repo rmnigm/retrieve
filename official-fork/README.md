@@ -1,3 +1,4 @@
+<!-- Modified by the retrieve authors, 2026-10-14: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork (official-fork/FORK.md). -->
 ```text
 ███████╗██╗██╗     ██╗   ██╗███████╗██████╗ ████████╗ ██████╗ ██████╗  ██████╗██╗  ██╗
 ██╔════╝██║██║     ██║   ██║██╔════╝██╔══██╗╚══██╔══╝██╔═══██╗██╔══██╗██╔════╝██║  ██║
@@ -74,10 +75,10 @@ pip install --no-build-isolation -e .
 ### 3. Verify the install
 
 ```python
-import silvertorch.ops._load_ops  # loads silvertorch._C, registers torch.ops.st.*
+import silvertorch_fork.ops._load_ops  # loads silvertorch_fork._C, registers torch.ops.stfork.*
 import torch
-assert hasattr(torch.ops.st, "bloom_index_build")
-assert hasattr(torch.ops.st, "bloom_index_search_batch")
+assert hasattr(torch.ops.stfork, "bloom_index_build")
+assert hasattr(torch.ops.stfork, "bloom_index_search_batch")
 print("SilverTorch ready —", "GPU" if torch.cuda.is_available() else "CPU only")
 ```
 
@@ -107,7 +108,7 @@ a packed bloom index once, then evaluate boolean queries (`AND`, `OR`,
 ### Example 1 — Low-level ops API (recommended for production pipelines)
 
 ```python
-import silvertorch.ops._load_ops  # noqa: F401  registers torch.ops.st.*
+import silvertorch_fork.ops._load_ops  # noqa: F401  registers torch.ops.stfork.*
 import torch
 
 # ----- 1. Describe a small corpus of 4 documents over 2 features -----
@@ -150,7 +151,7 @@ B_MULTIPLIER = 5.0  # bloom width = max_features_per_doc * K * B_MULTIPLIER
                     # Higher = fewer false positives, more memory.
                     # Rule of thumb: start at 5–10 for production corpora.
 
-bloom_index, bundle_b_offsets = torch.ops.st.bloom_index_build(
+bloom_index, bundle_b_offsets = torch.ops.stfork.bloom_index_build(
     feature_ids,
     feature_offsets,
     feature_values,
@@ -167,7 +168,7 @@ queries = [
 ]
 silvertorch_ks = torch.full((len(queries),), K, dtype=torch.long)
 
-_, [plans_data, plans_offsets] = torch.ops.st.parse_expression_query_batch(
+_, [plans_data, plans_offsets] = torch.ops.stfork.parse_expression_query_batch(
     queries,
     silvertorch_ks,
     HASH_K,
@@ -177,7 +178,7 @@ _, [plans_data, plans_offsets] = torch.ops.st.parse_expression_query_batch(
 
 # ----- 4. Search the index -----
 # Returns a [num_queries, num_docs] bool mask.
-mask = torch.ops.st.bloom_index_search_batch(
+mask = torch.ops.stfork.bloom_index_search_batch(
     bloom_index,
     bundle_b_offsets,
     plans_data,
@@ -217,9 +218,9 @@ re-defines the same 4-document corpus from Example 1 so you can run it
 standalone:
 
 ```python
-import silvertorch.ops._load_ops  # noqa: F401
+import silvertorch_fork.ops._load_ops  # noqa: F401
 import torch
-from silvertorch.modules import (
+from silvertorch_fork.modules import (
     BloomIndexSearchModule,
     FilterQueryParserModule,
 )
@@ -239,7 +240,7 @@ K, HASH_K = 3, 7
 # 1. Build the index (using the ops API as in Example 1). Use B_MULTIPLIER=5.0
 #    or higher to keep the bloom-filter false-positive rate low — see the
 #    note under Example 1.
-bloom_index, bundle_b_offsets = torch.ops.st.bloom_index_build(
+bloom_index, bundle_b_offsets = torch.ops.stfork.bloom_index_build(
     feature_ids, feature_offsets, feature_values, 5.0, K
 )
 
@@ -269,8 +270,8 @@ for q, m in zip(queries, mask[:, :num_docs]):
 ```
 
 For end-to-end CPU/GPU consistency tests and batched-query examples, see
-`silvertorch/ops/csrc/tests/test_bloom_search_integration.py` and
-`silvertorch/ops/csrc/tests/bloom_index_bench.py`.
+`silvertorch_fork/ops/csrc/tests/test_bloom_search_integration.py` and
+`silvertorch_fork/ops/csrc/tests/bloom_index_bench.py`.
 
 ---
 

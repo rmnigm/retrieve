@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
+# Modified by the retrieve authors, 2026-10-14: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork (official-fork/FORK.md).
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -27,25 +28,25 @@ from torch.utils.cpp_extension import (
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 cpu_sources = [
-    "silvertorch/ops/csrc/bloom_index_util.cpp",
-    "silvertorch/ops/csrc/bloom_indexer.cpp",
-    "silvertorch/ops/csrc/bloom_index_search.cpp",
-    "silvertorch/ops/csrc/expression_query_parser.cpp",
-    "silvertorch/ops/csrc/fused_kmean_ann.cpp",
+    "silvertorch_fork/ops/csrc/bloom_index_util.cpp",
+    "silvertorch_fork/ops/csrc/bloom_indexer.cpp",
+    "silvertorch_fork/ops/csrc/bloom_index_search.cpp",
+    "silvertorch_fork/ops/csrc/expression_query_parser.cpp",
+    "silvertorch_fork/ops/csrc/fused_kmean_ann.cpp",
 ]
 
 cuda_sources = [
-    "silvertorch/ops/csrc/bloom_indexer_cuda.cu",
-    "silvertorch/ops/csrc/bloom_index_search_cuda.cu",
-    "silvertorch/ops/csrc/expression_query_parser_cuda.cu",
-    "silvertorch/ops/csrc/faster_repeat_interleave.cu",
-    "silvertorch/ops/csrc/fused_kmean_ann_cuda.cu",
+    "silvertorch_fork/ops/csrc/bloom_indexer_cuda.cu",
+    "silvertorch_fork/ops/csrc/bloom_index_search_cuda.cu",
+    "silvertorch_fork/ops/csrc/expression_query_parser_cuda.cu",
+    "silvertorch_fork/ops/csrc/faster_repeat_interleave.cu",
+    "silvertorch_fork/ops/csrc/fused_kmean_ann_cuda.cu",
 ]
 
 # Resolve paths relative to this file
 cpu_sources = [os.path.join(ROOT_DIR, s) for s in cpu_sources]
 cuda_sources = [os.path.join(ROOT_DIR, s) for s in cuda_sources]
-include_dirs = [os.path.join(ROOT_DIR, "silvertorch", "ops", "csrc")]
+include_dirs = [os.path.join(ROOT_DIR, "silvertorch_fork", "ops", "csrc")]
 
 extra_compile_args = {
     "cxx": [
@@ -66,7 +67,7 @@ if CUDA_HOME is not None:
     ]
     ext_modules = [
         CUDAExtension(
-            name="silvertorch._C",
+            name="silvertorch_fork._C",
             sources=cpu_sources + cuda_sources,
             include_dirs=include_dirs,
             extra_compile_args=extra_compile_args,
@@ -75,7 +76,7 @@ if CUDA_HOME is not None:
 else:
     ext_modules = [
         CppExtension(
-            name="silvertorch._C",
+            name="silvertorch_fork._C",
             sources=cpu_sources,
             include_dirs=include_dirs,
             extra_compile_args=extra_compile_args,
@@ -83,20 +84,20 @@ else:
     ]
 
 setup(
-    name="silvertorch",
+    name="silvertorch-fork",
     version="1.0.0",
     description="SilverTorch: GPU Retrieval Library",
     packages=[
-        "silvertorch",
-        "silvertorch.ops",
-        "silvertorch.modules",
-        "silvertorch.modules.tests",
+        "silvertorch_fork",
+        "silvertorch_fork.ops",
+        "silvertorch_fork.modules",
+        "silvertorch_fork.modules.tests",
     ],
     package_dir={
-        "silvertorch": "silvertorch",
-        "silvertorch.ops": "silvertorch/ops",
-        "silvertorch.modules": "silvertorch/modules",
-        "silvertorch.modules.tests": "silvertorch/modules/tests",
+        "silvertorch_fork": "silvertorch_fork",
+        "silvertorch_fork.ops": "silvertorch_fork/ops",
+        "silvertorch_fork.modules": "silvertorch_fork/modules",
+        "silvertorch_fork.modules.tests": "silvertorch_fork/modules/tests",
     },
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension},

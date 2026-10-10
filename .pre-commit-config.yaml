@@ -15,9 +15,9 @@ repos:
         args: [--maxkb=1024]  # raw outputs live on the Hub (docs/system/evaluation.md)
       # Frozen or recorded bytes are never rewritten: the papers, raw artifacts, the golden cells.
       - id: end-of-file-fixer
-        exclude: ^(articles|docs/artifacts|evaluation/golden)/
+        exclude: ^(articles|docs/artifacts|evaluation/golden|official-fork)/
       - id: trailing-whitespace
-        exclude: ^(articles|docs/artifacts|evaluation/golden)/
+        exclude: ^(articles|docs/artifacts|evaluation/golden|official-fork)/
 
   - repo: local
     hooks:
