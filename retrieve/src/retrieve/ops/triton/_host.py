@@ -37,7 +37,7 @@ TABLE_MIN_PAIRS = 512
 # [B, width] the score buffer is padded to whole TOPK_BLOCK-slot blocks, and where a row has at
 # least TOPK_MIN_RATIO blocks per top-k slot the top-k runs on the items of its k best blocks.
 TOPK_BLOCK = 256
-TOPK_MIN_SLOTS = 1 << 22
+TOPK_MIN_SLOTS = 1 << 23
 TOPK_MIN_RATIO = 8
 
 
