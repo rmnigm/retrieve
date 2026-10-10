@@ -63,8 +63,12 @@ LEGS = [
     ("d1", "C1+C6", "laion30m-synth", ["laion30m-synth"], None, None, "--interleave", "V1 / V2 (C1) and SilverTorch (C6) at 30 M synth"),
     *[("d1", "C7", "h2h", [d], None, None, "--interleave --profile", "") for d in ["goodreads", "arxiv"]],
     ("d1", "C7", "c7-scorepath", ["laion30m"], None, None, "--interleave --profile --mode eager", ""),
-    *[("d1", "C2", "filter", [d], ["linr_v3"], None, "", "V3 / V2 against d0's V2, same host") for d in REAL],
-    *[("d1", "C2", "synth", [d], ["linr_v3"], None, "", "") for d in ["goodreads-synth", "arxiv-corr-synth"]],
+    *[("d1", "C2", "filter", [d], ["linr_v3"], None, "", "V3 / V2 against d0's V2, same host") for d in ["goodreads", "yfcc10m"]],
+    ("d1", "C2", "synth", ["arxiv-corr-synth"], ["linr_v3"], None, "", ""),
+    # pod d rebalance (controller 2026-10-13): three C2 legs moved d1 -> d0 (same host, so V3 / V2 stays one box), end of
+    # laion's queue; d1 keeps its other ids (holes at 20, 22, 23, see SKIP)
+    *[("d0", "C2", "filter", [d], ["linr_v3"], None, "", "V3 / V2 against V2, same host; moved from d1 (rebalance)") for d in ["arxiv", "pubmed"]],
+    ("d0", "C2", "synth", ["goodreads-synth"], ["linr_v3"], None, "", "moved from d1 (rebalance)"),
     *[("b", "tune", s, [d], None, None, "--skip-perf" if s == "tune-q" else "", "") for s in ("tune-q", "tune-timed") for d in ["pubmed", "yfcc10m", "yfcc10m-synth"]],
     # the goodreads bench moved off pod 1 (controller 2026-10-13: v2.11 timed tune slower than sized, pod 1 needs arXiv headroom)
     *[("b", "tune", s, [d], None, None, "--skip-perf" if s == "tune-q" else "", "") for s in ("tune-q", "tune-timed") for d in ["goodreads", "goodreads-synth"]],
@@ -93,6 +97,8 @@ SHORT = {"linr_v1_filter_mask": "v1", "linr_v2": "v2", "linr_v3": "v3", "silvert
 # (validation: goodreads + arXiv 9 min, YFCC 3 min, PubMed 21 min, LAION 44 min); LAION has no tune leg in the final grid
 CEILING = {"goodreads": (["goodreads", "goodreads-synth"], 0.08), "arxiv": (["arxiv", "arxiv-synth"], 0.08),
            "yfcc10m": (["yfcc10m", "yfcc10m-synth"], 0.05), "pubmed": (["pubmed"], 0.35), "laion30m": ([], 0.75)}  # fmt: skip
+# leg numbers left unused so the running workers' ids stay stable after the pod d rebalance (d1-20 / -22 / -23 moved to d0)
+SKIP = {"d1": {20, 22, 23}}
 GPUS = {"d0": ("a100-x2-d", 0), "d1": ("a100-x2-d", 1), "b": ("a100-x1-b", 0), "p1": ("a100-x1-eval", 0)}
 WORKER = {"d0": "laion", "d1": "d-run", "b": "v-pubmed", "p1": "v-pod1-run"}  # the final-pass brief's table
 BENCH = '"$VENV/bin/python" -m bench.cli'  # the leg venv's own interpreter: `uv run` masks bench's exit code
@@ -117,6 +123,14 @@ def price(inv, suite, ds, algos, backend):
     return cells, h
 
 
+def next_id(out, gpu):
+    used = {int(x["id"].split("-")[1]) for x in out if x["gpu"] == gpu}
+    n = 1
+    while n in used or n in SKIP.get(gpu, ()):
+        n += 1
+    return n
+
+
 def main():
     inv = list(csv.DictReader(open(sys.argv[1])))
     out, totals, prev = [], collections.Counter(), {}
@@ -127,7 +141,7 @@ def main():
         if fam == "M1":
             cells, h = 0, 0.5
         pod, idx = GPUS[gpu]
-        lid = f"{gpu}-{len([x for x in out if x['gpu'] == gpu]) + 1:02d}-{suite}-{ds}" + (f"-{'-'.join(SHORT[a] for a in algos)}" if algos else "") + (f"-{backend}" if backend else "")
+        lid = f"{gpu}-{next_id(out, gpu):02d}-{suite}-{ds}" + (f"-{'-'.join(SHORT[a] for a in algos)}" if algos else "") + (f"-{backend}" if backend else "")
         res = f"/scratch/final/gpu{idx}" if pod == "a100-x2-d" else "/scratch/final/gpu0"
         if algos is None:
             cmd = f"{BENCH} campaign --suite {suite} --dataset {ds} --dim {dim} {flags} --out {res} --resume"
@@ -145,7 +159,7 @@ def main():
         totals[gpu] += h
     for bench, (tuned, h) in CEILING.items():
         tune = [x["id"] for x in out if x["suite"] == "tune-timed" and x["dataset"] in tuned]
-        lid = f"d1-{len([x for x in out if x['gpu'] == 'd1']) + 1:02d}-ceiling-{bench}"
+        lid = f"d1-{next_id(out, 'd1'):02d}-ceiling-{bench}"
         res = f"/scratch/final/gpu1/ceiling-int8-{bench}"
         out.append({"id": lid, "gpu": "d1", "pod": "a100-x2-d", "index": 1, "worker": WORKER["d1"], "res": res, "dim": 0, "family": "C6", "suite": "ceiling-script",
                     "dataset": bench, "after": sorted({"stage-a100-x2-d", prev["d1"], *tune}), "cells": 0, "gpu_h": h,

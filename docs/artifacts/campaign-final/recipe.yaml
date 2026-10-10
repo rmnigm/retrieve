@@ -594,21 +594,6 @@ legs:
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu1/filter/goodreads-d128* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-filter-d1 --verify && rm -rf $T"
     expect: {cells: 12, records: 42, gpu_h: 0.38}
     note: "V3 / V2 against d0's V2, same host"
-  - id: d1-20-filter-arxiv-v3
-    pod: a100-x2-d
-    index: 1
-    worker: d-run
-    family: C2
-    suite: filter
-    dataset: arxiv
-    tree: FINAL_TAG
-    after: [d1-19-filter-goodreads-v3, stage-a100-x2-d]
-    env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
-    command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv --dim 128 --suite filter --algo linr_v3 --out /scratch/final/gpu1 --resume"
-    upload: campaign-final/arxiv-filter-d1
-    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu1/filter/arxiv-d128* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-filter-d1 --verify && rm -rf $T"
-    expect: {cells: 18, records: 72, gpu_h: 1.9}
-    note: "V3 / V2 against d0's V2, same host"
   - id: d1-21-filter-yfcc10m-v3
     pod: a100-x2-d
     index: 1
@@ -617,42 +602,13 @@ legs:
     suite: filter
     dataset: yfcc10m
     tree: FINAL_TAG
-    after: [d1-20-filter-arxiv-v3, stage-a100-x2-d]
+    after: [d1-19-filter-goodreads-v3, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset yfcc10m --dim 192 --suite filter --algo linr_v3 --out /scratch/final/gpu1 --resume"
     upload: campaign-final/yfcc10m-filter-d1
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu1/filter/yfcc10m-d192* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/yfcc10m-filter-d1 --verify && rm -rf $T"
     expect: {cells: 3, records: 9, gpu_h: 0.88}
     note: "V3 / V2 against d0's V2, same host"
-  - id: d1-22-filter-pubmed-v3
-    pod: a100-x2-d
-    index: 1
-    worker: d-run
-    family: C2
-    suite: filter
-    dataset: pubmed
-    tree: FINAL_TAG
-    after: [d1-21-filter-yfcc10m-v3, stage-a100-x2-d]
-    env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
-    command: "\"$VENV/bin/python\" -m bench.cli run --dataset pubmed --dim 768 --suite filter --algo linr_v3 --out /scratch/final/gpu1 --resume"
-    upload: campaign-final/pubmed-filter-d1
-    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu1/filter/pubmed-d768* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/pubmed-filter-d1 --verify && rm -rf $T"
-    expect: {cells: 12, records: 63, gpu_h: 1.22}
-    note: "V3 / V2 against d0's V2, same host"
-  - id: d1-23-synth-goodreads-synth-v3
-    pod: a100-x2-d
-    index: 1
-    worker: d-run
-    family: C2
-    suite: synth
-    dataset: goodreads-synth
-    tree: FINAL_TAG
-    after: [d1-22-filter-pubmed-v3, stage-a100-x2-d]
-    env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
-    command: "\"$VENV/bin/python\" -m bench.cli run --dataset goodreads-synth --dim 128 --suite synth --algo linr_v3 --out /scratch/final/gpu1 --resume"
-    upload: campaign-final/goodreads-synth-synth-d1
-    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/synth && cp -al /scratch/final/gpu1/synth/goodreads-synth-d128* $T/synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-synth-synth-d1 --verify && rm -rf $T"
-    expect: {cells: 28, records: 68, gpu_h: 1.12}
   - id: d1-24-synth-arxiv-corr-synth-v3
     pod: a100-x2-d
     index: 1
@@ -661,12 +617,57 @@ legs:
     suite: synth
     dataset: arxiv-corr-synth
     tree: FINAL_TAG
-    after: [d1-23-synth-goodreads-synth-v3, stage-a100-x2-d]
+    after: [d1-21-filter-yfcc10m-v3, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv-corr-synth --dim 128 --suite synth --algo linr_v3 --out /scratch/final/gpu1 --resume"
     upload: campaign-final/arxiv-corr-synth-synth-d1
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/synth && cp -al /scratch/final/gpu1/synth/arxiv-corr-synth-d128* $T/synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-corr-synth-synth-d1 --verify && rm -rf $T"
     expect: {cells: 12, records: 24, gpu_h: 0.36}
+  - id: d0-19-filter-arxiv-v3
+    pod: a100-x2-d
+    index: 0
+    worker: laion
+    family: C2
+    suite: filter
+    dataset: arxiv
+    tree: FINAL_TAG
+    after: [d0-18-synth-arxiv-corr-synth-pf, stage-a100-x2-d]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv --dim 128 --suite filter --algo linr_v3 --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/arxiv-filter-d0
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu0/filter/arxiv-d128* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-filter-d0 --verify && rm -rf $T"
+    expect: {cells: 18, records: 90, gpu_h: 1.9}
+    note: "V3 / V2 against V2, same host; moved from d1 (rebalance)"
+  - id: d0-20-filter-pubmed-v3
+    pod: a100-x2-d
+    index: 0
+    worker: laion
+    family: C2
+    suite: filter
+    dataset: pubmed
+    tree: FINAL_TAG
+    after: [d0-19-filter-arxiv-v3, stage-a100-x2-d]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli run --dataset pubmed --dim 768 --suite filter --algo linr_v3 --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/pubmed-filter-d0
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu0/filter/pubmed-d768* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/pubmed-filter-d0 --verify && rm -rf $T"
+    expect: {cells: 12, records: 60, gpu_h: 1.22}
+    note: "V3 / V2 against V2, same host; moved from d1 (rebalance)"
+  - id: d0-21-synth-goodreads-synth-v3
+    pod: a100-x2-d
+    index: 0
+    worker: laion
+    family: C2
+    suite: synth
+    dataset: goodreads-synth
+    tree: FINAL_TAG
+    after: [d0-20-filter-pubmed-v3, stage-a100-x2-d]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli run --dataset goodreads-synth --dim 128 --suite synth --algo linr_v3 --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/goodreads-synth-synth-d0
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/synth && cp -al /scratch/final/gpu0/synth/goodreads-synth-d128* $T/synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-synth-synth-d0 --verify && rm -rf $T"
+    expect: {cells: 28, records: 88, gpu_h: 1.12}
+    note: "moved from d1 (rebalance)"
   - id: b-01-tune-q-pubmed
     pod: a100-x1-b
     index: 0
@@ -1529,8 +1530,8 @@ legs:
 
 totals_gpu_h:                           # per GPU, incl. the 1.45 process overhead; wall-clock = the largest
   b: 18.2
-  d0: 19.8
-  d1: 19.4
+  d0: 24.1
+  d1: 15.2
   p1: 17.1
 
 gates:                                 # D1-G over campaign-final/ after the last leg
