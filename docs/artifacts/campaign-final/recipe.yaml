@@ -31,7 +31,7 @@ datasets:                              # oracle fingerprints: `bench check` + `b
 
 stage:                                 # per pod, before its first leg (id stage-<pod>; every leg of the pod is after it)
   a100-x2-d: {owner: d-run, steps: [copy pubmed from a100-x1-b, bench check + bench oracle for every dataset pod d runs]}
-  a100-x1-b: {owner: v-pubmed, steps: [fetch yfcc10m, build yfcc10m-synth / goodreads-synth attrs, bench check + oracle]}
+  a100-x1-b: {owner: v-pubmed, steps: [fetch yfcc10m, build yfcc10m-synth / goodreads-synth attrs, bench check + oracle (goodreads, goodreads-synth, yfcc10m, yfcc10m-synth, pubmed)]}
   a100-x1-eval: {owner: v-pod1-run, steps: [replace pod 1's PubMed with the canonical copy from a100-x1-b, laion30m copied from a100-x2-d (steward), bench check + oracle]}
 
 families:                              # one box (host) each; the T1 rows they feed
@@ -43,7 +43,7 @@ families:                              # one box (host) each; the T1 rows they f
   C6: {box: a100-x2-d, feeds: [T1.C6, F2, F3, QPS bands, local pass rate]}
   C7: {box: a100-x2-d, feeds: [T1.C7, T3]}
   T2: {box: a100-x2-d, feeds: [T2]}
-  tune: {box: [a100-x1-b (pubmed, yfcc10m, yfcc10m-synth), a100-x1-eval (goodreads, arxiv benches)], feeds: [n_lists / n95 slots, tune fronts]}
+  tune: {box: [a100-x1-b (pubmed, yfcc10m, goodreads benches), a100-x1-eval (arxiv bench)], feeds: [n_lists / n95 slots, tune fronts]}
 
 legs:
   - id: d0-01-filter-arxiv-st-v2
@@ -691,42 +691,94 @@ legs:
     upload: campaign-final/yfcc10m-synth-tune-timed
     upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/tune-timed --path-in-repo campaign-final/yfcc10m-synth-tune-timed --verify"
     expect: {cells: 43, gpu_h: 0.44}
-  - id: b-07-v3bits-goodreads-synth
+  - id: b-07-tune-q-goodreads
+    pod: a100-x1-b
+    index: 0
+    worker: v-pubmed
+    family: tune
+    suite: tune-q
+    dataset: goodreads
+    after: [b-06-tune-timed-yfcc10m-synth, stage-a100-x1-b]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-q --dataset goodreads --dim 128 --skip-perf --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/goodreads-tune-q
+    upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/tune-q --path-in-repo campaign-final/goodreads-tune-q --verify"
+    expect: {cells: 196, gpu_h: 0.2}
+  - id: b-08-tune-q-goodreads-synth
+    pod: a100-x1-b
+    index: 0
+    worker: v-pubmed
+    family: tune
+    suite: tune-q
+    dataset: goodreads-synth
+    after: [b-07-tune-q-goodreads, stage-a100-x1-b]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-q --dataset goodreads-synth --dim 128 --skip-perf --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/goodreads-synth-tune-q
+    upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/tune-q --path-in-repo campaign-final/goodreads-synth-tune-q --verify"
+    expect: {cells: 294, gpu_h: 0.22}
+  - id: b-09-tune-timed-goodreads
+    pod: a100-x1-b
+    index: 0
+    worker: v-pubmed
+    family: tune
+    suite: tune-timed
+    dataset: goodreads
+    after: [b-08-tune-q-goodreads-synth, stage-a100-x1-b]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset goodreads --dim 128 --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/goodreads-tune-timed
+    upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/tune-timed --path-in-repo campaign-final/goodreads-tune-timed --verify"
+    expect: {cells: 100, gpu_h: 1.69}
+  - id: b-10-tune-timed-goodreads-synth
+    pod: a100-x1-b
+    index: 0
+    worker: v-pubmed
+    family: tune
+    suite: tune-timed
+    dataset: goodreads-synth
+    after: [b-09-tune-timed-goodreads, stage-a100-x1-b]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset goodreads-synth --dim 128 --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/goodreads-synth-tune-timed
+    upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/tune-timed --path-in-repo campaign-final/goodreads-synth-tune-timed --verify"
+    expect: {cells: 146, gpu_h: 2.23}
+  - id: b-11-v3bits-goodreads-synth
     pod: a100-x1-b
     index: 0
     worker: v-pubmed
     family: C2
     suite: v3bits
     dataset: goodreads-synth
-    after: [b-06-tune-timed-yfcc10m-synth, stage-a100-x1-b]
+    after: [b-10-tune-timed-goodreads-synth, stage-a100-x1-b]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite v3bits --dataset goodreads-synth --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/goodreads-synth-v3bits
     upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/v3bits --path-in-repo campaign-final/goodreads-synth-v3bits --verify"
     expect: {cells: 56, gpu_h: 1.99}
     note: "k_bits variants against each other"
-  - id: b-08-v3bits-goodreads
+  - id: b-12-v3bits-goodreads
     pod: a100-x1-b
     index: 0
     worker: v-pubmed
     family: C2
     suite: v3bits
     dataset: goodreads
-    after: [b-07-v3bits-goodreads-synth, stage-a100-x1-b]
+    after: [b-11-v3bits-goodreads-synth, stage-a100-x1-b]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite v3bits --dataset goodreads --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/goodreads-v3bits
     upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/v3bits --path-in-repo campaign-final/goodreads-v3bits --verify"
     expect: {cells: 16, gpu_h: 0.38}
     note: "k_bits variants against each other"
-  - id: b-09-v3bits-pubmed
+  - id: b-13-v3bits-pubmed
     pod: a100-x1-b
     index: 0
     worker: v-pubmed
     family: C2
     suite: v3bits
     dataset: pubmed
-    after: [b-08-v3bits-goodreads, stage-a100-x1-b]
+    after: [b-12-v3bits-goodreads, stage-a100-x1-b]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite v3bits --dataset pubmed --dim 768 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/pubmed-v3bits
@@ -968,131 +1020,79 @@ legs:
     upload: campaign-final/pubmed-bloomwidth-timed
     upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/bloomwidth-timed --path-in-repo campaign-final/pubmed-bloomwidth-timed --verify"
     expect: {cells: 7, gpu_h: 0.04}
-  - id: p1-19-tune-q-goodreads
-    pod: a100-x1-eval
-    index: 0
-    worker: v-pod1-run
-    family: tune
-    suite: tune-q
-    dataset: goodreads
-    after: [p1-18-bloomwidth-timed-pubmed, stage-a100-x1-eval]
-    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
-    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-q --dataset goodreads --dim 128 --skip-perf --out /scratch/final/gpu0 --resume"
-    upload: campaign-final/goodreads-tune-q
-    upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/tune-q --path-in-repo campaign-final/goodreads-tune-q --verify"
-    expect: {cells: 196, gpu_h: 0.2}
-  - id: p1-20-tune-q-goodreads-synth
-    pod: a100-x1-eval
-    index: 0
-    worker: v-pod1-run
-    family: tune
-    suite: tune-q
-    dataset: goodreads-synth
-    after: [p1-19-tune-q-goodreads, stage-a100-x1-eval]
-    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
-    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-q --dataset goodreads-synth --dim 128 --skip-perf --out /scratch/final/gpu0 --resume"
-    upload: campaign-final/goodreads-synth-tune-q
-    upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/tune-q --path-in-repo campaign-final/goodreads-synth-tune-q --verify"
-    expect: {cells: 294, gpu_h: 0.22}
-  - id: p1-21-tune-q-arxiv
+  - id: p1-19-tune-q-arxiv
     pod: a100-x1-eval
     index: 0
     worker: v-pod1-run
     family: tune
     suite: tune-q
     dataset: arxiv
-    after: [p1-20-tune-q-goodreads-synth, stage-a100-x1-eval]
+    after: [p1-18-bloomwidth-timed-pubmed, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-q --dataset arxiv --dim 128 --skip-perf --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-tune-q
     upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/tune-q --path-in-repo campaign-final/arxiv-tune-q --verify"
     expect: {cells: 294, gpu_h: 0.25}
-  - id: p1-22-tune-q-arxiv-synth
+  - id: p1-20-tune-q-arxiv-synth
     pod: a100-x1-eval
     index: 0
     worker: v-pod1-run
     family: tune
     suite: tune-q
     dataset: arxiv-synth
-    after: [p1-21-tune-q-arxiv, stage-a100-x1-eval]
+    after: [p1-19-tune-q-arxiv, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-q --dataset arxiv-synth --dim 128 --skip-perf --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-synth-tune-q
     upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/tune-q --path-in-repo campaign-final/arxiv-synth-tune-q --verify"
     expect: {cells: 294, gpu_h: 0.22}
-  - id: p1-23-tune-q-arxiv-corr-synth
+  - id: p1-21-tune-q-arxiv-corr-synth
     pod: a100-x1-eval
     index: 0
     worker: v-pod1-run
     family: tune
     suite: tune-q
     dataset: arxiv-corr-synth
-    after: [p1-22-tune-q-arxiv-synth, stage-a100-x1-eval]
+    after: [p1-20-tune-q-arxiv-synth, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-q --dataset arxiv-corr-synth --dim 128 --skip-perf --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-corr-synth-tune-q
     upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/tune-q --path-in-repo campaign-final/arxiv-corr-synth-tune-q --verify"
     expect: {cells: 294, gpu_h: 0.21}
-  - id: p1-24-tune-timed-goodreads
-    pod: a100-x1-eval
-    index: 0
-    worker: v-pod1-run
-    family: tune
-    suite: tune-timed
-    dataset: goodreads
-    after: [p1-23-tune-q-arxiv-corr-synth, stage-a100-x1-eval]
-    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
-    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset goodreads --dim 128 --out /scratch/final/gpu0 --resume"
-    upload: campaign-final/goodreads-tune-timed
-    upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/tune-timed --path-in-repo campaign-final/goodreads-tune-timed --verify"
-    expect: {cells: 100, gpu_h: 1.69}
-  - id: p1-25-tune-timed-goodreads-synth
-    pod: a100-x1-eval
-    index: 0
-    worker: v-pod1-run
-    family: tune
-    suite: tune-timed
-    dataset: goodreads-synth
-    after: [p1-24-tune-timed-goodreads, stage-a100-x1-eval]
-    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
-    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset goodreads-synth --dim 128 --out /scratch/final/gpu0 --resume"
-    upload: campaign-final/goodreads-synth-tune-timed
-    upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/tune-timed --path-in-repo campaign-final/goodreads-synth-tune-timed --verify"
-    expect: {cells: 146, gpu_h: 2.23}
-  - id: p1-26-tune-timed-arxiv
+  - id: p1-22-tune-timed-arxiv
     pod: a100-x1-eval
     index: 0
     worker: v-pod1-run
     family: tune
     suite: tune-timed
     dataset: arxiv
-    after: [p1-25-tune-timed-goodreads-synth, stage-a100-x1-eval]
+    after: [p1-21-tune-q-arxiv-corr-synth, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset arxiv --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-tune-timed
     upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/tune-timed --path-in-repo campaign-final/arxiv-tune-timed --verify"
     expect: {cells: 142, gpu_h: 2.16}
-  - id: p1-27-tune-timed-arxiv-synth
+  - id: p1-23-tune-timed-arxiv-synth
     pod: a100-x1-eval
     index: 0
     worker: v-pod1-run
     family: tune
     suite: tune-timed
     dataset: arxiv-synth
-    after: [p1-26-tune-timed-arxiv, stage-a100-x1-eval]
+    after: [p1-22-tune-timed-arxiv, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset arxiv-synth --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-synth-tune-timed
     upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/tune-timed --path-in-repo campaign-final/arxiv-synth-tune-timed --verify"
     expect: {cells: 144, gpu_h: 2.19}
-  - id: p1-28-tune-timed-arxiv-corr-synth
+  - id: p1-24-tune-timed-arxiv-corr-synth
     pod: a100-x1-eval
     index: 0
     worker: v-pod1-run
     family: tune
     suite: tune-timed
     dataset: arxiv-corr-synth
-    after: [p1-27-tune-timed-arxiv-synth, stage-a100-x1-eval]
+    after: [p1-23-tune-timed-arxiv-synth, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset arxiv-corr-synth --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-corr-synth-tune-timed
@@ -1105,7 +1105,7 @@ legs:
     family: C6
     suite: ceiling-script
     dataset: goodreads
-    after: [d1-24-synth-arxiv-corr-synth-v3, p1-24-tune-timed-goodreads, p1-25-tune-timed-goodreads-synth, stage-a100-x2-d]
+    after: [b-09-tune-timed-goodreads, b-10-tune-timed-goodreads-synth, d1-24-synth-arxiv-corr-synth-v3, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "bash docs/artifacts/campaign-final/ceiling.sh goodreads /scratch/final/gpu1/ceiling-int8-goodreads"
     upload: campaign-final/ceiling-int8-goodreads
@@ -1119,7 +1119,7 @@ legs:
     family: C6
     suite: ceiling-script
     dataset: arxiv
-    after: [d1-25-ceiling-goodreads, p1-26-tune-timed-arxiv, p1-27-tune-timed-arxiv-synth, stage-a100-x2-d]
+    after: [d1-25-ceiling-goodreads, p1-22-tune-timed-arxiv, p1-23-tune-timed-arxiv-synth, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "bash docs/artifacts/campaign-final/ceiling.sh arxiv /scratch/final/gpu1/ceiling-int8-arxiv"
     upload: campaign-final/ceiling-int8-arxiv
@@ -1170,10 +1170,10 @@ legs:
     note: "quality only; not grid cells; no LAION tune leg (its point is the calibration's 16384 / 4096)"
 
 totals_gpu_h:                           # per GPU, incl. the 1.45 process overhead; wall-clock = the largest
-  b: 8.8
+  b: 13.1
   d0: 19.8
   d1: 19.4
-  p1: 15.6
+  p1: 11.2
 
 gates:                                 # D1-G over campaign-final/ after the last leg
   - eager-vs-graph ids from the stored hashes

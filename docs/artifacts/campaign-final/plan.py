@@ -45,6 +45,8 @@ LEGS = [
     *[("d1", "C2", "filter", [d], ["linr_v3"], None, "", "V3 / V2 against d0's V2, same host") for d in REAL],
     *[("d1", "C2", "synth", [d], ["linr_v3"], None, "", "") for d in ["goodreads-synth", "arxiv-corr-synth"]],
     *[("b", "tune", s, [d], None, None, "--skip-perf" if s == "tune-q" else "", "") for s in ("tune-q", "tune-timed") for d in ["pubmed", "yfcc10m", "yfcc10m-synth"]],
+    # the goodreads bench moved off pod 1 (controller 2026-10-13: v2.11 timed tune slower than sized, pod 1 needs arXiv headroom)
+    *[("b", "tune", s, [d], None, None, "--skip-perf" if s == "tune-q" else "", "") for s in ("tune-q", "tune-timed") for d in ["goodreads", "goodreads-synth"]],
     *[("b", "C2", "v3bits", [d], None, None, "", "k_bits variants against each other") for d in ["goodreads-synth", "goodreads", "pubmed"]],
     *[("p1", "C3", "c3", [d], None, None, "", "") for d in ["goodreads-synth", "arxiv-synth", "yfcc10m-synth", "laion30m-synth"]],
     *[("p1", "C3", "c3-real", [d], None, None, "", "") for d in REAL],
@@ -53,7 +55,7 @@ LEGS = [
     ("p1", "C5", "codesign-laion30m", ["laion30m"], None, None, "--interleave --mode eager", "needs LAION on pod 1, else runs on d1"),
     *[("p1", "C4", s, [d], None, None, "", "") for s in ("bloomwidth", "bloomwidth-timed") for d in ["goodreads", "arxiv", "pubmed"]],
     *[("p1", "tune", s, [d], None, None, "--skip-perf" if s == "tune-q" else "", "") for s in ("tune-q", "tune-timed")
-      for d in ["goodreads", "goodreads-synth", "arxiv", "arxiv-synth", "arxiv-corr-synth"]],
+      for d in ["arxiv", "arxiv-synth", "arxiv-corr-synth"]],
 ]  # fmt: skip
 SHORT = {"linr_v1_filter_mask": "v1", "linr_v2": "v2", "linr_v3": "v3", "silvertorch": "st", "postfilter": "pf"}
 # C6 ceiling checks (script legs, quality only): one per bench on C6's GPU, after the bench's tune; GPU-h from the measured runs
@@ -153,7 +155,7 @@ def render(legs, totals):
          "",
          "stage:                                 # per pod, before its first leg (id stage-<pod>; every leg of the pod is after it)",
          "  a100-x2-d: {owner: d-run, steps: [copy pubmed from a100-x1-b, bench check + bench oracle for every dataset pod d runs]}",
-         "  a100-x1-b: {owner: v-pubmed, steps: [fetch yfcc10m, build yfcc10m-synth / goodreads-synth attrs, bench check + oracle]}",
+         "  a100-x1-b: {owner: v-pubmed, steps: [fetch yfcc10m, build yfcc10m-synth / goodreads-synth attrs, bench check + oracle (goodreads, goodreads-synth, yfcc10m, yfcc10m-synth, pubmed)]}",
          "  a100-x1-eval: {owner: v-pod1-run, steps: [replace pod 1's PubMed with the canonical copy from a100-x1-b, laion30m copied from a100-x2-d (steward), bench check + oracle]}",
          "",
          "families:                              # one box (host) each; the T1 rows they feed",
@@ -165,7 +167,7 @@ def render(legs, totals):
          "  C6: {box: a100-x2-d, feeds: [T1.C6, F2, F3, QPS bands, local pass rate]}",
          "  C7: {box: a100-x2-d, feeds: [T1.C7, T3]}",
          "  T2: {box: a100-x2-d, feeds: [T2]}",
-         "  tune: {box: [a100-x1-b (pubmed, yfcc10m, yfcc10m-synth), a100-x1-eval (goodreads, arxiv benches)], feeds: [n_lists / n95 slots, tune fronts]}",
+         "  tune: {box: [a100-x1-b (pubmed, yfcc10m, goodreads benches), a100-x1-eval (arxiv bench)], feeds: [n_lists / n95 slots, tune fronts]}",
          "",
          "legs:"]  # fmt: skip
     for lg in legs:

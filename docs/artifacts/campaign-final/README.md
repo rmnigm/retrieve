@@ -42,7 +42,7 @@ Seeds: seed 0 everywhere, with seeds 0-2 in `filter` only (T2's CIs).
 |---|---|
 | pod d GPU 0 | 19.8 |
 | pod d GPU 1 | 19.4 |
-| pod 1 | 15.6 |
-| pod b | 8.8 |
+| pod 1 | 11.2 |
+| pod b | 13.1 |
 
 So about 20 h wall, if M1 lets pod d time on both GPUs at once; otherwise pod d runs its two GPU queues in turn, about 37 h.
