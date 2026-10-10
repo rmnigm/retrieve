@@ -20,6 +20,9 @@ DIM = {"goodreads": 128, "goodreads-synth": 128, "arxiv": 128, "arxiv-synth": 12
 # quality-only tune legs are build-bound, which elapsed_s misses: the measured legs (validation, night-queue item 8)
 TUNE_Q_MEASURED = {"pubmed": 2.19, "yfcc10m": 0.4, "yfcc10m-synth": 0.32, "goodreads": 0.2, "goodreads-synth": 0.22,
                    "arxiv": 0.25, "arxiv-synth": 0.22, "arxiv-corr-synth": 0.21}  # fmt: skip
+# timed tune legs measured at v2.11 (campaign-v2.11/{goodreads,yfcc10m}-tune-timed: elapsed x OVERHEAD over the final grid's
+# capped cells; pubmed-tune-timed: its leg's 3.25 GPU-h); arXiv's is not measured yet
+TUNE_T_MEASURED = {"goodreads": 1.51, "goodreads-synth": 2.25, "yfcc10m": 1.16, "yfcc10m-synth": 0.72, "pubmed": 3.25}  # fmt: skip
 REAL = ["goodreads", "arxiv", "yfcc10m", "pubmed"]
 OFFICIAL_VENV = "/venvs/final-o3"  # scripts/build_official_o3.sh; env.official_build records the .so sha
 
@@ -79,6 +82,8 @@ def price(inv, suite, ds, algos, backend):
         h += float(r["gpu_h_cells"]) * OVERHEAD
     if suite == "tune-q":
         h = TUNE_Q_MEASURED[ds]
+    if suite == "tune-timed" and ds in TUNE_T_MEASURED:
+        h = TUNE_T_MEASURED[ds]
     return cells, h
 
 
