@@ -21,8 +21,11 @@ for l in r["legs"]:
     env = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in l["env"].items())
     print("\t".join([l["id"], ",".join(l.get("after") or []), env, l["command"], l["upload_command"], l["upload"]]))
 PY
-done_dep() { [ -e /scratch/final/done/$1 ] || [ -e /scratch/final/deps-ok/$1 ] || grep -E "$1([^a-z0-9-]|$)" $CH/*.md 2>/dev/null | grep -vE "queued|running|waiting|failed|FAILED" | grep -qwE "done|DONE" 2>/dev/null; }
+done_dep() {  # strict: "<id> done" at line start (or a "| <id> | done" row) in another worker's note
+  [ -e /scratch/final/done/$1 ] || [ -e /scratch/final/deps-ok/$1 ] ||
+    ls $CH/*.md | grep -v -- '-d-run-' | xargs grep -qE "^[[:space:]*|-]*\`?$1\`?[[:space:]]*\|?[[:space:]]*(done|DONE)([^a-zA-Z]|$)" 2>/dev/null; }
 status() {  # rewrite d-run's note from the markers
+  local id deps env cmd up hub
   { printf -- '---\nchain: "campaign-final"\nbranch: "d-run"\ncreated: "%s"\n---\n\n# d-run final pass (pod d GPU 1): d1 legs\n\n**Never print secrets** (AGENTS.md rule 9).\n\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     printf 'Tree /scratch/wt/final at campaign-v2.12 (library %s). Updated %s. %s\n\n| leg | state | wall s | Hub | MANIFEST sha256 |\n|---|---|---|---|---|\n' "${LIB:0:8}" "$(date -Is)" "$1"
     while IFS=$'\t' read -r id deps env cmd up hub; do
