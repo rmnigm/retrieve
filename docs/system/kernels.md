@@ -323,10 +323,12 @@ its own tile shape, launch grid, or masking policy:
   table built in-kernel ([SilverTorch kernels](#silvertorch-kernels)).
 - `probe_tile_table(table_ptr, bid, t, n_probe, FAN, BLOCK_P)` /
   `probe_tiles_table(…, tt, …)` — the same slice (one tile / a vector of
-  tiles) read from `probe_table_kernel`'s per-row table ("Probe table").
-- `probe_table_kernel` — a *launched* kernel, one program per row: the
-  row's tile ends, slot ends and cluster starts for the lookups above;
-  it also zeroes the bloom two-pass's list count.
+  tiles) read from the per-row table `probe_prep_kernel` writes ("Probe table").
+- `probe_prep_kernel` — a *launched* kernel, one program per row, the probe
+  scorers' first launch: the row's int8 query (bit for bit
+  [`quantize_int8`](#quantize_int8-retrieveindexing)), and with the table on the
+  row's tile ends, slot ends and cluster starts; it also zeroes the bloom
+  two-pass's list count ("Probe prep").
 - `probe_dots(q_row_ptr, q_scales_ptr, bid, item_codes_ptr, pos, stride_cn, keep, D, D_PAD,
   BLOCK_D, BLOCK_P) → (int32 [BLOCK_P], q_scale)` — both probe scorers' int8 dot: one
   `tl.dot` at `D_PAD ≤ 256` (loads in the v2.1 order, which fixes that path's SASS), a
@@ -1059,9 +1061,10 @@ OPORP/SimHash parity tests stay bit-exact.
 
 ### [`quantize_int8`](../../retrieve/src/retrieve/indexing/quantize.py) (`retrieve.indexing`)
 
-Per-row symmetric int8 of the queries, called at query time by every
-SilverTorch path (the Triton and torch probe scorers, the candidate re-rank,
-and the official adapter). Codes are `round(x / abs_max * 127)`, so an
+Per-row symmetric int8 of the queries, called at query time by the torch
+probe scorers, the candidate re-rank and the official adapter. The Triton
+probe scorers compute the same codes and scales in their prep launch
+(`probe_prep_kernel`, "Probe prep" under [SilverTorch kernels](#silvertorch-kernels)). Codes are `round(x / abs_max * 127)`, so an
 element whose quotient sits on a half-integer flips a code when the
 division is off by one ulp. Eager uses PyTorch's correctly rounded fp32
 division; under `torch.compile`, inductor emits Triton's `/`, which lowers to
@@ -1220,9 +1223,8 @@ largest cluster holds 25,480 items (TF-9).
 `SilverTorch.register_index` / `set_query_params` raise unless
 `width ≥ k`, so `topk(k)` needs no pad path.
 
-**How a program finds its items** (`common.probe_tile`). Below
-`_host.TABLE_MIN_PAIRS` (512) `(row, probe)` pairs there is no table. Each
-program loads its row's `n_probe` cluster ids as one vector
+**How a program finds its items** (`common.probe_tile`). Without the
+probe table (below), each program loads its row's `n_probe` cluster ids as one vector
 (`NPP`, the next power of two), gathers their offsets, and builds the
 row's tile and slot prefix sums with `tl.cumsum`. Its tile is then
 located by a masked vector reduction. Tiles are **cluster-aligned**: a
@@ -1234,24 +1236,45 @@ the width on goodreads. A lane past its cluster's end holds the next
 cluster's slot, so the score store is masked by in-cluster validity, not
 by the predicate.
 
-**Probe table** (`common.probe_table_kernel`, `probe_tile_table`). From
-`B · n_probe ≥ 512` the in-kernel build is O(`n_probe`) work in every one
-of the `B · (cdiv(width, BLOCK_P) + n_probe)` programs: three `NPP`-wide
-gathers and two `tl.cumsum`s per tile, about 262k programs at C7's PubMed
-cell (`n_probe` 1024, bs 16, width 3.93 M). There one extra launch, one program
-per row, writes the row's `[3, n_probe]` int64 table (tile ends, slot
-ends, cluster starts), and each tile finds its cluster by a two-level
-`FAN`-ary count over the tile ends (`FAN = 2^⌊bit_length(NPP)/2⌋`, so
-`FAN² ≥ NPP`): two dependent `FAN`-lane loads, then the cluster's four
-scalars. A binary search was 11 dependent scalar loads and measured
-slower. Positions and slots are the same integers, so outputs are
-`torch.equal`. Below the threshold the extra launch and the lookup's
-latency cost more than the build saves (bs 1, `n_probe` 256: 1.07–1.09×
-at d128 and d768), so those launches compile the in-kernel build
+**Probe table** (`common.probe_prep_kernel`, `probe_tile_table`). The
+in-kernel build is O(`n_probe`) work in every one of the
+`B · (cdiv(width, BLOCK_P) + n_probe)` programs: three `NPP`-wide gathers
+and two `tl.cumsum`s per tile, about 262k programs at C7's PubMed cell
+(`n_probe` 1024, bs 16, width 3.93 M). From `_host.TABLE_MIN_PAIRS` = 512
+`(row, probe)` pairs, the prep launch also writes each row's `[3,
+n_probe]` int64 table (tile ends, slot ends, cluster starts). Each tile
+then finds its cluster by a two-level `FAN`-ary count over the tile ends
+(`FAN = 2^⌊bit_length(NPP)/2⌋`, so `FAN² ≥ NPP`): two dependent
+`FAN`-lane loads, then the cluster's four scalars. A binary search was 11
+dependent scalar loads and measured slower. Positions and slots are the
+same integers, so outputs are `torch.equal`. Below 512 pairs, the lookup's
+latency costs more than the build saves (bs 1, `n_probe` 256: 1.07–1.09×
+at d128 and d768). Those launches compile the in-kernel build
 (`TABLE=False`) unchanged.
 
-**Bloom two-pass** (`codesigned_probe_score`, a tile-skip config with the
-probe table, so `D_PAD > 256` and `B · n_probe ≥ 512`). In the one-pass
+**Probe prep** (`common.probe_prep_kernel`, one program per row, the first
+launch of both probe scorers). It writes the row's int8 query and scale,
+the per-row table when it is on, and the two-pass count. The query
+quantization was about ten torch launches (`quantize_int8`), and the
+table was its own launch at first (ST-WIDE). At about 15 µs of host time
+per Triton launch plus about 6 µs of prep, that launch made host-bound
+eager forwards slower: goodreads 0.8 M bs 16, `n_probe` 32–128, ran
+1.085–1.105× against v2.8 (+35–40 µs on a 0.41 ms forward), while graph
+replay was faster. Folding both into one launch leaves the scorer with
+fewer launches than before the table. The quantization is
+`quantize_int8` bit for bit, `torch.equal` on codes and scales
+(`test_prep_quantizes_as_quantize_int8`):
+
+- the fp32 abs-max, clamped at 1e-8;
+- the scale as abs-max times fp32 `1/127` (eager torch divides by a Python
+  scalar as a multiply by its fp32 reciprocal; a correctly rounded
+  division differed in the last ulp);
+- the fp64 quotient rounded to fp32, times 127, then `rint` (half to
+  even, as `torch.round`), clamped, cast.
+
+**Bloom two-pass** (`codesigned_probe_score`, with the probe table:
+always on a tile-skip config, `D_PAD > 256`; at
+`D_PAD ≤ 256` only on a `sparse` batch, below). In the one-pass
 kernel a skipped tile still costs its program: about 11 ns of device time
 a tile at C7's cell, where under 4 % of tiles have a passing item. The
 program is a latency chain (table lookup, the query's bit slots, the bloom
@@ -1284,6 +1307,24 @@ dot is the same int32 sum and fp32 epilogue, so the scores are
 `torch.equal` to the one-pass kernel's; the list order varies run to run
 but each slot is written once. Smaller two-pass tiles (64, 128) made the
 filter pass costlier than the dot pass saved.
+
+**When the two-pass pays at `D_PAD ≤ 256`.** Once most tiles hold a
+passing item, the filter pass's `-inf` fill and vote add to a full dot
+pass. Measured against the one-pass kernel with the table on arxiv-synth
+(graph replay, `n_probe` 128-1024, bs 16-64), it pays up to a pass rate of
+0.003 (d128 0.57-0.89, d192 / d256 0.60-0.89). It breaks even at 0.01
+(d128 0.89-0.95, d256 1.00-1.10), and it loses above that (up to 1.23 at
+d128 and 1.36 at d192 at p 1). At d768 the dot dominates, and the
+two-pass stays on: PubMed `c2_year` 0.95-1.02, `c0_mesh` / `c0c2`
+0.56-0.84. So at `D_PAD ≤ 256` the op takes it only when its `sparse`
+argument is set. `SilverTorch.prepare_queries` sets `PreparedFilter.sparse`
+outside the timed call when every row's rarest queried bit is set on under
+`SPARSE_PASS_BOUND` = 1/256 of the items, under one passing item per
+256-item tile. That bound is the gated skip's, an upper bound on the row's
+pass rate: tight on one-clause queries, loose on several clauses (arXiv
+`all4`: median bound 0.11 against a true rate of 0.005), so the switch can
+miss a win but not take a loss. Under compile the flag is a guarded Python
+bool: at most two graphs per shape.
 
 **Launch grid** `(B, tiles_y, tiles_x)` via `_host.grid_batch_tiles`, the
 batch on `grid_x`. The rows' early probes then run concurrently, and
