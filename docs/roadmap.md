@@ -311,6 +311,34 @@ co-design.
   novelty, availability) mapped to the paper section, table or artifact
   that answers it, with gaps named; a new page ecir-criteria.md under docs/paper. F5
   writes against it.
+- [ ] **META-FORK: a fork of Meta's SilverTorch with its bottlenecks
+  removed** (user, 2026-10-10;
+  [decisions](decisions.md#goal-and-scheduling)), the paper's improved
+  SilverTorch baseline. One GPU worker, st-dloop.
+  - **The final pass continues** at campaign-v2.12 / campaign-final: it
+    measures Meta's code as shipped (+ -O3), the fork's baseline, and
+    Triton for the record.
+  - **GPU:** design, code and CPU tests first; it takes pod b's GPU when
+    pod b's last final leg ends, then pod b stays up for it while the other
+    pods stop as they finish. No GPU use before that (pod b is timing).
+  - **Scope:** remove the measured bottlenecks
+    ([deviations](paper/reproduction-deviations.md),
+    [official vs ours](paper/official-vs-reimplementation.md)): host syncs
+    and launches per call, the per-call plan decode, eager-only ops (make
+    it CUDA-graph capturable), the per-2048-doc bloom false positives
+    (OF-1 / OF-12), `m_bits` not followed (OF-10). *Gate*: bit-exact
+    (`torch.equal`) against Meta's int32 path wherever the change is not a
+    bloom change; bloom changes report recall against the exact oracle
+    instead; the official parity gate reruns on the fork.
+  - **Where:** a new uv workspace member `official-fork/`, keeping Meta's
+    code and licence apart from ours (Meta's LICENSE and headers kept, our
+    changes listed in a CHANGES file), exposed in the library as
+    `backend="official-fork"` through the existing official adapter path.
+  - **Measurements:** 10 M (PubMed d768, YFCC d192) and 30 M (LAION d256):
+    fork vs Meta -O3 vs our Triton at the v2.12 records, C5 / C7 cells
+    first.
+  - **Cost:** one GPU only; checkpoints pushed often; persistence as
+    before.
 - [ ] **AFTER-QUEUE: more experiments and kernel work, ranked by paper value**
   (user, 2026-10-11: once the planned work is done, more experiments, deeper
   sweeps and Triton kernel performance work, staying close to what the
@@ -321,7 +349,8 @@ co-design.
      with the low and middle pass rates (0.001, 0.003, 0.03, 0.05) on uniform
      synth; the probe curve at 30 M (n_probe 64 / 256); seeds 0-2 on the cells
      a T2 confidence interval rests on.
-  3. **Triton kernel work where ours trails Meta's or the compiler**:
+  3. **Stopped (user, 2026-10-10, META-FORK; ST-XQ cancelled).** Triton
+     kernel work where ours trails Meta's or the compiler:
      cross-query cluster sharing in the probe scorer (30 M d256, n_probe 128,
      bs 64, with ST-TOPK: ours / Meta -O3 0.907 / 1.068 at int32 and
      1.064 / 1.256 against Meta's default fp16, c0_domain / tags4, Hub

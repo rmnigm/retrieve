@@ -21,9 +21,18 @@ decisions.
 ## Goal and scheduling
 
 - **The goal is a reproducibility paper** on SilverTorch (Meta) and LiNR
-  (LinkedIn): our Triton reimplementation from the papers' text, Meta's
-  official kernels as the reference, one correct harness, public datasets
-  up to the papers' scale.
+  (LinkedIn): one correct harness, public datasets up to the papers' scale.
+  **The SilverTorch arm is Meta's public code, forked and improved** (user,
+  2026-10-10, roadmap META-FORK): the paper's improved baseline is a fork of
+  `meta-recsys/silvertorch` with its measured bottlenecks removed, next to
+  Meta's code as shipped. LiNR stays a reimplementation from the paper's
+  text (it has no public code).
+- **Our Triton SilverTorch reimplementation stays in the repo but is
+  probably not in the paper** (user, 2026-10-10): it wins on fewer launches
+  and syncs, not on its scorer, and at 30 M bs 64 Meta's kernels are level
+  or ahead. No Triton code or result is deleted; the final pass still
+  measures it for the record. New Triton kernel work is stopped (ST-XQ is
+  cancelled).
 - **No dates.** Every roadmap step is done, in order; nothing is optional
   or conditional on a deadline. The GPU is the bottleneck, so GPU steps
   are ordered first and CPU steps run beside them.
