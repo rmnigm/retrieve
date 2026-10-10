@@ -7,8 +7,9 @@ invariant is what lets one helper serve kernels with very different launch shape
 
 Helpers: ``row_base``, ``tile_rows``, ``probe_tile``, ``probe_tile_table``,
 ``probe_tiles_table``, ``probe_dots``, ``or_combine``, ``popcount_int64``, ``bloom_subset_pass``,
-``clause_pass``, ``compact_store``, ``compact_stash``; plus three launched kernels:
+``clause_pass``, ``compact_store``, ``compact_stash``; plus four launched kernels:
 ``probe_prep_kernel`` (the probe scorers' int8 query and per-row layout),
+``probe_candidates_kernel`` (the two-level top-k's gather),
 ``compact_scatter_kernel`` (the predicate-free second phase both compaction ops share, driven by
 ``_host.compact_finish``) and ``probe_ids_kernel`` (the probe scorers' id epilogue).
 Per-helper semantics and the call-site map live in docs/system/kernels.md § Shared kernel
@@ -186,6 +187,43 @@ def probe_tiles_table(table_ptr, bid, tt, n_probe, FAN: tl.constexpr, BLOCK_P: t
     slot0 = tl.where(tail, total + (tt - n_tiles) * BLOCK_P, slot_start + off)
     n_valid = tl.where(tail, 0, tl.minimum(size - off, BLOCK_P))
     return lo + off, n_valid, slot0, tail
+
+
+@triton.jit
+def probe_candidates_kernel(
+    top_tiles_ptr,
+    scores_ptr,
+    table_ptr,
+    probe_ids_ptr,
+    offsets_ptr,
+    cand_scores_ptr,
+    cand_slots_ptr,
+    n_probe,
+    k_tiles,
+    stride_ob,
+    NPP: tl.constexpr,
+    FAN: tl.constexpr,
+    BLOCK_P: tl.constexpr,
+    TABLE: tl.constexpr,
+    WIDE: tl.constexpr,
+):
+    """One program per row and selected tile, the two-level top-k's gather: the tile's
+    in-cluster scores and their slots, ``-inf`` on its other lanes (a tail tile's, and those past
+    its cluster, whose slots belong to the next tile) so no slot is a candidate twice
+    (kernels.md § SilverTorch kernels, "Top-k")."""
+    bid = tl.program_id(0)
+    j = tl.program_id(1)
+    t = tl.load(top_tiles_ptr + bid * k_tiles + j).to(tl.int32)
+    if TABLE:
+        pos, slot, valid, tail = probe_tile_table(table_ptr, bid, t, n_probe, FAN, BLOCK_P)
+    else:
+        pos, slot, valid, tail = probe_tile(
+            probe_ids_ptr, offsets_ptr, bid, t, n_probe, NPP, BLOCK_P
+        )
+    s = tl.load(row_base(scores_ptr, bid, stride_ob, WIDE) + slot, mask=valid, other=float("-inf"))
+    out = bid.to(tl.int64) * k_tiles * BLOCK_P + j * BLOCK_P + tl.arange(0, BLOCK_P)
+    tl.store(cand_scores_ptr + out, s)
+    tl.store(cand_slots_ptr + out, slot.to(tl.int64))
 
 
 @triton.jit

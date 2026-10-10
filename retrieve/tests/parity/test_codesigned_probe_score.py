@@ -261,8 +261,8 @@ def test_gated_skip_engages_and_is_exact(d):
     assert (bound * 256 < 1).all(), "gate regime not hit"
     args = (query, *_args(lay, codes))
     cfg = tile_for_width(CONFIGS, d, 16, lay.width)
-    launch, _ = _cps_prep(*args, gs, lay.width, query_bit_positions=qpos, bloom_transposed=bt,
-                          cfg=cfg, bit_freq=bf)  # fmt: skip
+    launch, _ = _cps_prep(*args, gs, 32, lay.width, query_bit_positions=qpos,
+                          bloom_transposed=bt, cfg=cfg, bit_freq=bf)  # fmt: skip
     assert launch.kwargs["GATED"], "the launch is not gated (too few programs?)"
     out = codesigned_probe_score_bloom(*args, qpos, bt, bf, gs, 32, lay.width)
     ungated = _codesigned_probe_score_impl(
@@ -290,7 +290,7 @@ def test_prep_quantizes_as_quantize_int8(d):
     codes = torch.zeros((lay.n, d), dtype=torch.int8, device="cuda")
     launch = probe_prep(q, lay.probe_ids, lay.cluster_offsets, codes, lay.sort_perm, 1.0,
                         lay.width, block_p=64, num_warps=4, num_stages=2, block_d=256,
-                        skip=False)  # fmt: skip
+                        skip=False, k=8)  # fmt: skip
     probe_prep_kernel[launch.prep.grid](**launch.prep.kwargs)
     want_codes, want_scales = quantize_int8(q)
     assert torch.equal(launch.kwargs["q_codes_ptr"], want_codes)

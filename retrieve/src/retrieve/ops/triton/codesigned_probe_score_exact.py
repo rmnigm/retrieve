@@ -14,12 +14,14 @@ from torch.library import triton_op, wrap_triton
 from retrieve.ops.triton._host import (
     ProbeLaunch,
     check_contiguous,
+    probe_candidates,
     probe_prep,
     probe_topk,
     tile_for_width,
 )
 from retrieve.ops.triton.common import (
     clause_pass,
+    probe_candidates_kernel,
     probe_dots,
     probe_ids_kernel,
     probe_prep_kernel,
@@ -62,10 +64,12 @@ def _codesigned_probe_score_exact_kernel(
     is_reverse_ptr,
     query_attrs_ptr,
     out_scores_ptr,
+    tile_max_ptr,
     global_scale,
     n_probe,
     width,
     tiles_y,
+    n_tiles_grid,
     D: tl.constexpr,
     D_PAD: tl.constexpr,
     NPP: tl.constexpr,
@@ -85,6 +89,7 @@ def _codesigned_probe_score_exact_kernel(
     BLOCK_D: tl.constexpr,
     SKIP: tl.constexpr,
     WIDE: tl.constexpr,
+    TILE_MAX: tl.constexpr,
 ):
     # Batch on grid_x, so the rows' early probes run together and share clusters in L2; tiles
     # split across grid_y × grid_z (kernels.md § SilverTorch kernels).
@@ -100,6 +105,8 @@ def _codesigned_probe_score_exact_kernel(
     if tail:
         # Past the row's clusters (most of the width on a skewed IVF): the -inf tail.
         tl.store(out_row + slot, tl.full([BLOCK_P], float("-inf"), tl.float32), mask=slot < width)
+        if TILE_MAX:
+            tl.store(tile_max_ptr + bid * n_tiles_grid + t, tl.full([], float("-inf"), tl.float32))
     else:
         keep = clause_pass(
             item_attrs_ptr,
@@ -124,6 +131,10 @@ def _codesigned_probe_score_exact_kernel(
             # No lane passes the filter: no code load, no dot (kernels.md § SilverTorch
             # kernels, "Tile skip").
             tl.store(out_row + slot, tl.full([BLOCK_P], float("-inf"), tl.float32), mask=valid)
+            if TILE_MAX:
+                tl.store(
+                    tile_max_ptr + bid * n_tiles_grid + t, tl.full([], float("-inf"), tl.float32)
+                )
         else:
             dots_i32, q_scale = probe_dots(
                 q_codes_ptr + bid * stride_qcb,
@@ -147,6 +158,10 @@ def _codesigned_probe_score_exact_kernel(
             dots = tl.where(keep, dots, float("-inf"))
             # Lanes past the cluster's end hold the next cluster's slots: leave them to its tile.
             tl.store(out_row + slot, dots, mask=valid)
+            if TILE_MAX:
+                # The two-level top-k's tile max (kernels.md § SilverTorch kernels, "Top-k").
+                tile_max = tl.max(tl.where(valid, dots, float("-inf")), axis=0)
+                tl.store(tile_max_ptr + bid * n_tiles_grid + t, tile_max)
 
 
 def _cpse_prep(
@@ -156,6 +171,7 @@ def _cpse_prep(
     item_codes: Tensor,
     sort_perm: Tensor,
     global_scale: float,
+    k: int,
     width: int,
     *,
     item_clause_attrs: Tensor,
@@ -192,6 +208,7 @@ def _cpse_prep(
         num_stages=cfg.num_stages,
         block_d=cfg.block_d,
         skip=cfg.skip,
+        k=k,
     )
     query_clause_attrs = query_clause_attrs.contiguous()
     launch.kwargs.update(
@@ -249,6 +266,7 @@ def _codesigned_probe_score_exact_impl(
         item_codes,
         sort_perm,
         global_scale,
+        k,
         width,
         item_clause_attrs=item_clause_attrs,
         clause_is_reverse=clause_is_reverse,
@@ -257,7 +275,10 @@ def _codesigned_probe_score_exact_impl(
     )
     probe_prep_kernel[launch.prep.grid](**launch.prep.kwargs)
     _codesigned_probe_score_exact_kernel[launch.grid](**launch.kwargs)
-    fin = probe_topk(launch, k, probe_ids, cluster_offsets, sort_perm)
+    cands = probe_candidates(launch, k)
+    if cands is not None:
+        probe_candidates_kernel[cands.grid](**cands.kwargs)
+    fin = probe_topk(launch, k, probe_ids, cluster_offsets, sort_perm, cands)
     probe_ids_kernel[fin.grid](**fin.kwargs)
     return fin.ids, fin.scores
 
@@ -287,6 +308,7 @@ def codesigned_probe_score_exact(
         item_codes,
         sort_perm,
         global_scale,
+        k,
         width,
         item_clause_attrs=item_clause_attrs,
         clause_is_reverse=clause_is_reverse,
@@ -295,6 +317,9 @@ def codesigned_probe_score_exact(
     )
     wrap_triton(probe_prep_kernel)[launch.prep.grid](**launch.prep.kwargs)
     wrap_triton(_codesigned_probe_score_exact_kernel)[launch.grid](**launch.kwargs)
-    fin = probe_topk(launch, k, probe_ids, cluster_offsets, sort_perm)
+    cands = probe_candidates(launch, k)
+    if cands is not None:
+        wrap_triton(probe_candidates_kernel)[cands.grid](**cands.kwargs)
+    fin = probe_topk(launch, k, probe_ids, cluster_offsets, sort_perm, cands)
     wrap_triton(probe_ids_kernel)[fin.grid](**fin.kwargs)
     return fin.ids, fin.scores

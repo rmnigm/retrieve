@@ -347,9 +347,13 @@ co-design.
      a T2 confidence interval rests on.
   3. **Triton kernel work where ours trails Meta's or the compiler**:
      cross-query cluster sharing in the probe scorer (30 M d256, n_probe 128,
-     bs 64: Meta 1.8-2.0x); the top-k epilogue (ours 1.18 ms vs Meta's 0.79
-     at 30 M); V1 at bs 1 (`torch.compile` 1.77x faster, C3). Each bit-exact
-     plus the keep rule, then a tag.
+     bs 64: Meta 1.8-2.0x); the top-k epilogue (ST-TOPK, `dev/st-topk`: ours
+     1.18 ms vs Meta's 0.79 at 30 M d256 `n_probe` 128 bs 64 in
+     `artifacts/c7-laion30m-interleaved` is Meta on its default fp16 score
+     path; at int32, the bit-exact comparison, the two top-ks are within
+     2-12 % on PubMed / arXiv, and the target is our own two-level top-k);
+     V1 at bs 1 (`torch.compile` 1.77x faster, C3). Each bit-exact plus the
+     keep rule, then a tag.
 - [ ] **F-REPRO: the final pass.** When the library stops changing: tag the
   final version, rerun the redo ledger (or the whole grid if the ledger is
   most of it) at that tag into `campaign-final/`, write *campaign.yaml* for
