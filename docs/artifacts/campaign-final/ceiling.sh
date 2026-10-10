@@ -3,9 +3,11 @@
 # $CEIL_CFG and 32-query scoring batches) at each point of ceiling-points.json for one bench, quality only, from evaluation/ of the
 # FINAL_TAG worktree. LAION's synth p001 has no SilverTorch job in the final grid, so its points read a scratch config with a `ceil`
 # suite (as the v2.11 driver did); every other point reads the final config/suites.yaml.
-# usage: ceiling.sh BENCH OUT_DIR   (env: CUDA_VISIBLE_DEVICES, UV_PROJECT_ENVIRONMENT as for every leg)
+# usage: ceiling.sh BENCH OUT_DIR   (env: CUDA_VISIBLE_DEVICES, VENV as for every leg; $VENV/bin/python, not `uv run`, so failures exit nonzero)
 set -euo pipefail
 BENCH=$1 OUT=$2
+: "${VENV:?the leg venv}"
+PY=$VENV/bin/python
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../../.." && pwd)
 mkdir -p "$OUT"
@@ -29,13 +31,13 @@ ceil:
     - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, query: {n_probe: [4096]}}
 YAML
 fi
-uv run python - "$HERE/ceiling-points.json" "$BENCH" <<'PY' > "$OUT/points.txt"
+"$PY" - "$HERE/ceiling-points.json" "$BENCH" <<'PY' > "$OUT/points.txt"
 import json, sys
 for ds, suite, sw, nl, npb in json.load(open(sys.argv[1]))[sys.argv[2]]: print(ds, suite, sw, nl, npb)
 PY
 while read -r ds suite sw nl npb; do
   t0=$(date +%s)
-  uv run python "$REPO/docs/artifacts/campaign-v2.11/ceiling-int8-laion30m/ceiling_check.py" "$ds" "$suite" "$sw" "$nl" "$npb" \
+  "$PY" "$REPO/docs/artifacts/campaign-v2.11/ceiling-int8-laion30m/ceiling_check.py" "$ds" "$suite" "$sw" "$nl" "$npb" \
     "$OUT/ceiling-$ds-$sw.json" > "$OUT/ceiling-$ds-$sw.log" 2>&1 < /dev/null
   echo "$(date -Is) $ds/$sw rc=0 s=$(( $(date +%s) - t0 ))"
 done < "$OUT/points.txt"
