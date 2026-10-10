@@ -123,7 +123,27 @@ def main():
                     "note": "quality only; not grid cells" + ("" if tuned else "; no LAION tune leg (its point is the calibration's 16384 / 4096)")})  # fmt: skip
         prev["d1"] = lid
         totals["d1"] += h
+    seen = collections.Counter()
+    for lg in out:
+        key = (lg["gpu"], lg["suite"], lg["dataset"])
+        seen[key] += lg["cells"]
+        lg["records"] = seen[key]  # the suite file holds this leg's and the GPU's earlier legs' records
     print(render(out, totals))
+
+
+def upload_command(lg):
+    """The brief's corrected form (CORRECTION, controller 15:20Z): `bench upload` globs
+    <results>/<suite>/*.jsonl, so this leg's suite files are hardlinked into a fresh <T>/<suite>/
+    and <T> is uploaded; MANIFEST n_records must equal expect.records. A ceiling leg's directory
+    holds JSON artifacts, no records: it is uploaded as is (n_records 0)."""
+    if lg["suite"] == "ceiling-script":
+        return f"{BENCH} upload --results {lg['res']} --path-in-repo {lg['upload']} --verify"
+    pattern = f"{lg['res']}/{lg['suite']}/{lg['dataset']}-d{DIM[lg['dataset']]}*"
+    return (
+        f"T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/{lg['suite']} && "
+        f"cp -al {pattern} $T/{lg['suite']}/ && "
+        f"{BENCH} upload --results $T --path-in-repo {lg['upload']} --verify && rm -rf $T"
+    )
 
 
 def render(legs, totals):
@@ -131,14 +151,19 @@ def render(legs, totals):
          "# inventory; code_version = FINAL_TAG until the library freezes (controller, the final-pass directive). NOT CITABLE",
          "# until D1-G. Every leg runs from evaluation/ of the FINAL_TAG worktree with its env (CUDA_VISIBLE_DEVICES, its own",
          "# inductor dir, VENV = the leg venv; commands call $VENV/bin/python directly, since `uv run` masks bench's exit code),",
-         "# cores pinned NUMA-local; then its upload_command (records the manifest sha) and a hub-index row (steward).",
+         "# cores pinned NUMA-local; then its upload_command (records the manifest sha; MANIFEST n_records must equal",
+         "# expect.records: the suite file also holds the GPU's earlier legs of that suite and dataset) and a hub-index row.",
          "recipe: 1",
          "tag: FINAL_TAG                          # git tag campaign-final; `git rev-parse FINAL_TAG:retrieve/src/retrieve` = library_tree",
          "library_tree: FINAL_TAG_LIBRARY_TREE",
          "campaign_yaml: evaluation/campaign.yaml   # pinned to the one code_version (quality + perf) before the first leg",
          "hub: {repo: pinkmeme/eval-results, prefix: campaign-final/, aggregate: campaign-final/results.parquet}",
          "image: {torch: 2.10.0+cu128, triton: 3.6.0, cuda: '12.8', python: '3.11'}",
-         f"official: {{build: scripts/build_official_o3.sh, venv: {OFFICIAL_VENV}, flags: '-O3 -Xcompiler -O3', so_sha256: FINAL_O3_SO_SHA}}",
+         f"official: {{build: scripts/build_official_o3.sh, venv: {OFFICIAL_VENV}, flags: '-O3 -Xcompiler -O3'}}   # check env.official_build.nvcc_append_flags per record",
+         "official_so_sha256:                     # per pod: each build differs (and so do the shipped wheels); filled from the records' env.official_build",
+         "  a100-x1-eval: 805ab73e…                # verified -O3 (controller 2026-10-13)",
+         "  a100-x2-d: FILL_FROM_RECORDS            # d-run's rebuild",
+         "  a100-x1-b: FILL_FROM_RECORDS",
          "worktree: /scratch/wt/final           # git worktree at FINAL_TAG on every pod; venv /venvs/final (uv sync --extra official --all-packages)",
          "",
          "pods:",
@@ -184,10 +209,8 @@ def render(legs, totals):
         y.append(f"    env: {{CUDA_VISIBLE_DEVICES: '{lg['index']}', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu{lg['index']}, VENV: {venv}, UV_PROJECT_ENVIRONMENT: {venv}}}")
         y.append(f"    command: {json.dumps(lg['command'])}")
         y.append(f"    upload: {lg['upload']}")
-        src = lg["res"] if lg["suite"] == "ceiling-script" else f"{lg['res']}/{lg['suite']}"
-        up = BENCH + " upload --results " + src + " --path-in-repo " + lg["upload"] + " --verify"
-        y.append(f"    upload_command: {json.dumps(up)}")
-        y.append(f"    expect: {{cells: {lg['cells']}, gpu_h: {lg['gpu_h']}}}")
+        y.append(f"    upload_command: {json.dumps(upload_command(lg))}")
+        y.append(f"    expect: {{cells: {lg['cells']}, records: {lg['records']}, gpu_h: {lg['gpu_h']}}}")
         if lg["note"]:
             y.append(f"    note: {json.dumps(lg['note'])}")
     y += ["", "totals_gpu_h:                           # per GPU, incl. the 1.45 process overhead; wall-clock = the largest"]

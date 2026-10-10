@@ -38,9 +38,10 @@ decisions.
   roadmap F-CRIT. Beside the paper: an open-source library of the methods
   and an easy way to benchmark them on more datasets (roadmap
   H-ADDDATA).
-- **Scope: retrieval as torch ops inside the model graph** (user,
-  2026-10-10), the frame both papers use (SilverTorch: retrieval as
-  PyTorch model ops; LiNR: retrieval as a model on the GPU). Baselines are
+- **Scope: model-based retrieval, i.e. retrieval as torch ops inside the
+  model graph** (user, 2026-10-10), the frame both papers use (SilverTorch:
+  retrieval as PyTorch model ops; LiNR: retrieval as a model on the GPU).
+  The paper names it "model-based retrieval", not "ANN on GPU". Baselines are
   what a practitioner can put in that graph (generic torch, compiled
   torch, the torch reference backends); standalone ANN libraries (Faiss,
   cuVS, HNSW) are outside that frame and stay out

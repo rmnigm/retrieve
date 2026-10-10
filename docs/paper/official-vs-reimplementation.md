@@ -415,7 +415,7 @@ gate is green the item is not paper material (CLAUDE.md rule 2).
 | the full unfiltered (`quality`-suite) sweep; B3 narrowed it to `k = 100`, `bs ∈ {1, 8, 16}` | **D1-c** |
 | the controlled S9 co-design ablation (`bloom_path="full"` vs `"partial"`, latency and scratch vs probe count) | roadmap V-CODESIGN (campaign v2) |
 | bloom FPR and memory against filter width on real attributes, both blooms (S8) | **D3** |
-| external baselines at matched recall (Faiss GPU/CPU, HNSW, cuVS) | out of the study ([backlog](../backlog.md#baselines-outside-the-study)); the baseline is generic torch plus the torch-importable arms ([decisions](../decisions.md#campaign-v2-user-2026-10-08)) (P G5, G13, G14) |
+| external baselines at matched recall (Faiss GPU/CPU, HNSW, cuVS) | out of the study: model-based retrieval compares ops that run inside a model graph, and these are standalone ANN services ([backlog](../backlog.md#baselines-outside-the-study)); the baseline is generic torch plus the torch-importable arms ([decisions](../decisions.md#campaign-v2-user-2026-10-08)) (P G5, G13, G14) |
 | a Triton transposed bloom index, and any claim that the §5 phase-2 gap has been closed | **G-a** (O §8 TF-1): built on `dev/kernel-opt`, kernel-only numbers in [validation](../validation.md#official-against-our-triton-reimplementation-citable-contested), not yet paper material |
 | any post-fix number for the padded probe layout (TF-9) or for `pack_mask` (§8a) | TF-9: as TF-1, same row of [validation](../validation.md#official-against-our-triton-reimplementation-citable-contested). `pack_mask`: **Phase G**. A library change invalidates every recorded cell through the tree-hash resume key |
 | scale beyond 3.0 M items | **G-b** (P G10); the large datasets are **E2**–**E4** |
