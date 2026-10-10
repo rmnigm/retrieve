@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
-# Modified by the retrieve authors, 2026-10-14: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork (official-fork/FORK.md).
+# Modified by the retrieve authors, 2026-10-14: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; the two half-stripped load_library calls closed into comments (official-fork/FORK.md).
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,12 +20,8 @@ import unittest
 import silvertorch_fork.ops._load_ops  # noqa: F401
 import torch
 
-torch.ops.load_library(
-    "//silvertorch/oss/ops/csrc:fresh_index_post_processing"
-# @oss-disable[end= ]: )
-torch.ops.load_library(
-    "//silvertorch/oss/ops/csrc:fresh_index_post_processing_gpu"
-# @oss-disable[end= ]: )
+# @oss-disable[end= ]: torch.ops.load_library("//silvertorch/oss/ops/csrc:fresh_index_post_processing")  (fork: the strip left this call open, OF-6)
+# @oss-disable[end= ]: torch.ops.load_library("//silvertorch/oss/ops/csrc:fresh_index_post_processing_gpu")  (fork: the strip left this call open, OF-6)
 
 HAS_CUDA = torch.cuda.is_available()
 

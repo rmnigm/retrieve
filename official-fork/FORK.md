@@ -17,3 +17,4 @@ parity gates and the interleaved timing compare the two in one process.
 | change | files | what |
 |---|---|---|
 | rename | every file under `silvertorch_fork/`, `setup.py`, `README.md` | package `silvertorch` → `silvertorch_fork`, distribution `silvertorch` → `silvertorch-fork`, op namespace `st` → `stfork`; no behaviour change |
+| F8 (OF-6) | `ops/csrc/tests/test_bloom_search_integration.py`, `ops/csrc/tests/test_fresh_index_post_processing.py`, `setup.py` | the two test files upstream ships unparsable (Meta's line-based `@oss-disable` strip left two `torch.ops.load_library("//…")` calls open) get those calls commented out like their siblings; `is_topk` and `fresh_index_post_processing` (`take_top_k_and_gather_from_main_and_fresh`), registered upstream but not built, join `setup.py`'s sources |

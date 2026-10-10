@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
-# Modified by the retrieve authors, 2026-10-14: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork (official-fork/FORK.md).
+# Modified by the retrieve authors, 2026-10-14: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; builds is_topk / fresh_index_post_processing (official-fork/FORK.md).
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -33,6 +33,9 @@ cpu_sources = [
     "silvertorch_fork/ops/csrc/bloom_index_search.cpp",
     "silvertorch_fork/ops/csrc/expression_query_parser.cpp",
     "silvertorch_fork/ops/csrc/fused_kmean_ann.cpp",
+    # fork (OF-6): registered upstream but absent from its build
+    "silvertorch_fork/ops/csrc/is_topk.cpp",
+    "silvertorch_fork/ops/csrc/fresh_index_post_processing.cpp",
 ]
 
 cuda_sources = [
@@ -41,6 +44,9 @@ cuda_sources = [
     "silvertorch_fork/ops/csrc/expression_query_parser_cuda.cu",
     "silvertorch_fork/ops/csrc/faster_repeat_interleave.cu",
     "silvertorch_fork/ops/csrc/fused_kmean_ann_cuda.cu",
+    # fork (OF-6): registered upstream but absent from its build
+    "silvertorch_fork/ops/csrc/is_topk.cu",
+    "silvertorch_fork/ops/csrc/fresh_index_post_processing.cu",
 ]
 
 # Resolve paths relative to this file
