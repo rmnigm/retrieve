@@ -939,11 +939,71 @@ legs:
     command: "uv run bench campaign --suite tune-timed --dataset arxiv-corr-synth --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-corr-synth-tune-timed
     expect: {cells: 150, gpu_h: 2.29}
+  - id: d1-25-ceiling-goodreads
+    pod: a100-x2-d
+    index: 1
+    family: C6
+    suite: ceiling-script
+    dataset: goodreads
+    after: [d1-24-synth-arxiv-corr-synth-v3, p1-24-tune-timed-goodreads, p1-25-tune-timed-goodreads-synth, stage-a100-x2-d]
+    env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "bash docs/artifacts/campaign-final/ceiling.sh goodreads /scratch/final/gpu1/ceiling-int8-goodreads"
+    upload: campaign-final/ceiling-int8-goodreads
+    expect: {cells: 0, gpu_h: 0.08}
+    note: "quality only; not grid cells"
+  - id: d1-26-ceiling-arxiv
+    pod: a100-x2-d
+    index: 1
+    family: C6
+    suite: ceiling-script
+    dataset: arxiv
+    after: [d1-25-ceiling-goodreads, p1-26-tune-timed-arxiv, p1-27-tune-timed-arxiv-synth, stage-a100-x2-d]
+    env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "bash docs/artifacts/campaign-final/ceiling.sh arxiv /scratch/final/gpu1/ceiling-int8-arxiv"
+    upload: campaign-final/ceiling-int8-arxiv
+    expect: {cells: 0, gpu_h: 0.08}
+    note: "quality only; not grid cells"
+  - id: d1-27-ceiling-yfcc10m
+    pod: a100-x2-d
+    index: 1
+    family: C6
+    suite: ceiling-script
+    dataset: yfcc10m
+    after: [b-05-tune-timed-yfcc10m, b-06-tune-timed-yfcc10m-synth, d1-26-ceiling-arxiv, stage-a100-x2-d]
+    env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "bash docs/artifacts/campaign-final/ceiling.sh yfcc10m /scratch/final/gpu1/ceiling-int8-yfcc10m"
+    upload: campaign-final/ceiling-int8-yfcc10m
+    expect: {cells: 0, gpu_h: 0.05}
+    note: "quality only; not grid cells"
+  - id: d1-28-ceiling-pubmed
+    pod: a100-x2-d
+    index: 1
+    family: C6
+    suite: ceiling-script
+    dataset: pubmed
+    after: [b-04-tune-timed-pubmed, d1-27-ceiling-yfcc10m, stage-a100-x2-d]
+    env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "bash docs/artifacts/campaign-final/ceiling.sh pubmed /scratch/final/gpu1/ceiling-int8-pubmed"
+    upload: campaign-final/ceiling-int8-pubmed
+    expect: {cells: 0, gpu_h: 0.35}
+    note: "quality only; not grid cells"
+  - id: d1-29-ceiling-laion30m
+    pod: a100-x2-d
+    index: 1
+    family: C6
+    suite: ceiling-script
+    dataset: laion30m
+    after: [d1-28-ceiling-pubmed, stage-a100-x2-d]
+    env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "bash docs/artifacts/campaign-final/ceiling.sh laion30m /scratch/final/gpu1/ceiling-int8-laion30m"
+    upload: campaign-final/ceiling-int8-laion30m
+    expect: {cells: 0, gpu_h: 0.75}
+    note: "quality only; not grid cells; no LAION tune leg (its point is the calibration's 16384 / 4096)"
 
 totals_gpu_h:                           # per GPU, incl. the 1.45 process overhead; wall-clock = the largest
   b: 8.8
   d0: 19.8
-  d1: 18.1
+  d1: 19.4
   p1: 15.6
 
 gates:                                 # D1-G over campaign-final/ after the last leg
