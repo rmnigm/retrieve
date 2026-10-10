@@ -78,7 +78,7 @@ def test_compiled_forward_matches_eager(filter_mode, backend, d, wide, monkeypat
 
     b, c = 4, 2
     if wide:
-        monkeypatch.setattr(silvertorch_mod, "SPARSE_PASS_BOUND", 2.0)
+        monkeypatch.setattr(silvertorch_mod, "SPARSE_TILE_FRAC", 2.0)
     eager = _build(filter_mode, backend, d=d, **(WIDE if wide else {}))
     inputs = partial(_inputs, eager, filter_mode, b, c, eager.item_codes.shape[1])
     torch._dynamo.reset()
@@ -104,7 +104,7 @@ def test_no_graph_breaks_on_forward(filter_mode, backend, d, wide, monkeypatch):
     a host sync (``.item()`` on global_scale, Optional Tensor branching).
     """
     if wide:
-        monkeypatch.setattr(silvertorch_mod, "SPARSE_PASS_BOUND", 2.0)
+        monkeypatch.setattr(silvertorch_mod, "SPARSE_TILE_FRAC", 2.0)
     eager = _build(filter_mode, backend, d=d, **(WIDE if wide else {}))
     b, c = 4, 2
     query, prepared = _inputs(eager, filter_mode, b, c, eager.item_codes.shape[1], 1)

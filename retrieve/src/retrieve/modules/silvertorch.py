@@ -20,7 +20,7 @@ from retrieve.indexing.bloom_hash import (
 from retrieve.indexing.ivf import csr_layout, probe_width
 from retrieve.indexing.kmeans import KMeans, KMeansInit
 from retrieve.indexing.quantize import quantize_int8, quantize_int8_global
-from retrieve.indexing.selectivity import bloom_bit_freq
+from retrieve.indexing.selectivity import bloom_bit_freq, bloom_cluster_counts
 from retrieve.interfaces import (
     RetrievalModule,
     SilverTorchBackend,
@@ -41,9 +41,9 @@ class PreparedFilter(NamedTuple):
     (exact, every backend), or the official parser's CPU ``plans_data`` / ``plans_offsets`` (bloom
     on official; Meta's search decodes plans on the host, kernels.md § official). On the partial
     bloom path the plans are one per distinct expression and ``plan_index`` ``[B]`` (device int64)
-    maps each row to its plan. ``sparse`` (bloom, triton / torch): every row's pass-rate bound is
-    under ``SPARSE_PASS_BOUND``, so the scorer may take its two-pass at any width (kernels.md §
-    SilverTorch kernels, "Bloom two-pass")."""
+    maps each row to its plan. ``sparse`` (bloom, triton / torch): every row's estimated share of
+    tiles holding a passing item is under ``SPARSE_TILE_FRAC``, so the scorer may take its two-pass
+    at any width (kernels.md § SilverTorch kernels, "Bloom two-pass")."""
 
     query_bits: Tensor | None = None
     query_attrs: Tensor | None = None
@@ -66,11 +66,12 @@ class PreparedFilter(NamedTuple):
 
 __all__ = ["FilterMode", "OfficialConfig", "SilverTorch", "SilverTorchBuilder"]
 
-# A batch is sparse when every row's rarest queried bit is set on fewer than this share of items
-# (an upper bound on the row's pass rate): under one passing item per 256-item tile, where the
-# bloom two-pass beat the one-pass scorer at D 128-256 (kernels.md § SilverTorch kernels, "Bloom
+# A batch is sparse when every row's estimated share of 256-item tiles holding a passing item,
+# over the whole index, is under this: per cluster the product over the row's clauses of the
+# clause's rarest-bit share, times the cluster's size, capped at its tiles. Where the bloom
+# two-pass beat the one-pass scorer at D 128-256 (kernels.md § SilverTorch kernels, "Bloom
 # two-pass").
-SPARSE_PASS_BOUND = 1 / 256
+SPARSE_TILE_FRAC = 0.75
 
 
 class SilverTorch(RetrievalModule):
@@ -123,6 +124,9 @@ class SilverTorch(RetrievalModule):
     bundle_b_offsets: Tensor  # official + bloom: [n_bundles + 1] int64
     bloom_transposed: Tensor  # triton / torch + bloom: [m_bits, ceil(N / 64)] int64
     bloom_bit_freq: Tensor  # triton / torch + bloom: [m_bits] fp32, the skip gate's bound
+    bloom_cluster_counts: (
+        Tensor  # triton / torch + bloom: [n_lists, m_bits] int32 (prepare_queries)
+    )
     hash_seeds: Tensor
     clause_salt: Tensor
     item_clause_attrs: Tensor
@@ -384,6 +388,11 @@ class SilverTorch(RetrievalModule):
             self.register_buffer("bloom_transposed", build_transposed_sigs(sigs))
             # The scorer's pass-rate bound for its tile-skip gate (kernels.md § SilverTorch).
             self.register_buffer("bloom_bit_freq", bloom_bit_freq(self.bloom_transposed, n))
+            # The two-pass decision's per-cluster bit counts (prepare_queries).
+            self.register_buffer(
+                "bloom_cluster_counts",
+                bloom_cluster_counts(self.bloom_transposed, self.cluster_offsets, n),
+            )
             self.register_buffer("hash_seeds", seeds)
             # Registered (not rebuilt per call) so the bloom forward issues no
             # host→device copy — see bloom_hash.generate_clause_salt.
@@ -416,8 +425,9 @@ class SilverTorch(RetrievalModule):
             return PreparedFilter(query_attrs=query_clause_attrs.long().contiguous())
         if self.backend != "official":
             bits = self._query_bit_positions(query_clause_attrs)
-            bound = torch.where(bits >= 0, self.bloom_bit_freq[bits.clamp_min(0)], 1.0).amin(1)
-            return PreparedFilter(query_bits=bits, sparse=bool(bound.max() < SPARSE_PASS_BOUND))
+            return PreparedFilter(
+                query_bits=bits, sparse=bool(self._tile_frac(bits).max() < SPARSE_TILE_FRAC)
+            )
         if self.bloom_index.numel() == 0:
             raise RuntimeError(
                 "this official bloom index was registered without item_clause_attrs, so there "
@@ -475,6 +485,18 @@ class SilverTorch(RetrievalModule):
         cent_scores = query @ self.centroids.t()
         _, probe_ids = torch.topk(cent_scores, self.n_probe, dim=1)
         return probe_ids
+
+    def _tile_frac(self, bits: Tensor) -> Tensor:
+        """``[B]`` estimated share of the index's 256-item tiles holding a passing item (see
+        ``SPARSE_TILE_FRAC``). ``bits`` is clause-major ``[B, C * k_hash]``, ``-1`` inactive."""
+        b = bits.shape[0]
+        sizes = self.cluster_offsets.diff().double()
+        tiles = torch.ceil(sizes / 256)
+        clause_bits = bits.view(b, -1, self.k_hash)
+        active = (clause_bits >= 0).all(2)  # [B, C]
+        rarest = self.bloom_cluster_counts.t()[clause_bits.clamp_min(0)].amin(2).double()
+        share = torch.where(active[:, :, None], rarest / sizes.clamp_min(1), 1.0).prod(1)
+        return torch.minimum(tiles, share * sizes).sum(1) / tiles.sum()
 
     def _query_bit_positions(self, query_clause_attrs: Tensor) -> Tensor:
         """``[B, C]`` query attrs → ``[B, C·k_hash]`` set-bit positions of the query signature
