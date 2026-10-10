@@ -1,5 +1,5 @@
-"""Importing this module imports every kernel file, which registers the fourteen ``retrieve::*`` ops
-(twelve ``@triton_op``, two opaque ``@custom_op``) — the one side-effecting import, as Meta's
+"""Importing this module imports every kernel file, which registers the fifteen ``retrieve::*`` ops
+(thirteen ``@triton_op``, two opaque ``@custom_op``) — the one side-effecting import, as Meta's
 ``silvertorch.ops._load_ops``. ``retrieve.ops.triton`` re-exports the ops from here; each kernel
 file's private ``_impl`` / ``Config`` is reached through the file
 (``from retrieve.ops.triton.<kernel> import ...``)."""
@@ -15,6 +15,7 @@ from retrieve.ops.triton.codesigned_probe_score import (
 )
 from retrieve.ops.triton.codesigned_probe_score_exact import codesigned_probe_score_exact
 from retrieve.ops.triton.fused_masked_knn_topk import fused_masked_knn_topk
+from retrieve.ops.triton.gemv_scores import gemv_scores
 from retrieve.ops.triton.oporp_1bit_match_topk import (
     oporp_1bit_match_topk_full,
     oporp_1bit_match_topk_indirect,
@@ -33,6 +34,7 @@ __all__ = [
     "codesigned_probe_score_bloom",
     "codesigned_probe_score_exact",
     "fused_masked_knn_topk",
+    "gemv_scores",
     "oporp_1bit_match_topk_full",
     "oporp_1bit_match_topk_indirect",
 ]

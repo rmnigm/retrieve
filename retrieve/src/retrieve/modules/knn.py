@@ -15,11 +15,13 @@ from retrieve.interfaces import LinrBackend, RetrievalModule, check_backend, ops
 
 
 class PostfilterKNN(RetrievalModule):
-    """Pure-torch dense scoring (``query @ item_embs.T``) + optional boolean mask + top-K; fp16
-    inputs, fp32 scores (module docstring). The ``backend=`` flag is accepted for API
-    symmetry but has no effect — cuBLAS + CUB already match a fused kernel here."""
+    """Dense scoring (``query @ item_embs.T``) + optional boolean mask + top-K; fp16 inputs, fp32
+    scores (module docstring). cuBLAS scores every batch, except a single query on the triton
+    backend where ``register_index`` found ``ops.gemv_scores`` equal to cuBLAS bit for bit on this
+    table (``gemv_exact``; kernels.md § gemv_scores)."""
 
     item_embs_t: Tensor
+    gemv_exact: bool = False  # set by register_index; False on a module loaded from a state dict
 
     def __init__(self, k: int, backend: LinrBackend = "triton") -> None:
         super().__init__()
@@ -31,10 +33,27 @@ class PostfilterKNN(RetrievalModule):
         # Pre-transpose to a contiguous D×N buffer; a .t() view at call time dispatches a different
         # kernel whose accumulator order can flip K-th-place tiebreaks at the noise floor.
         self.register_buffer("item_embs_t", item_embs.to(torch.float16).t().contiguous())
+        self.gemv_exact = self.backend == "triton" and item_embs.is_cuda and self._gemv_matches()
+
+    def _gemv_matches(self) -> bool:
+        """Whether the triton GEMV reproduces cuBLAS's single-query scores on this table: cuBLAS
+        picks its kernel by shape, and only its sequential-FMA ``gemv2N`` has the GEMV's order.
+        Checked on 8 item rows taken as queries (a kernel's order does not depend on the data)."""
+        n = self.item_embs_t.shape[1]
+        rows = torch.linspace(0, n - 1, 8, device=self.item_embs_t.device).long()
+        return all(
+            torch.equal(
+                ops_for("triton").gemv_scores(q, self.item_embs_t),
+                torch.mm(q, self.item_embs_t, out_dtype=torch.float32),
+            )
+            for q in self.item_embs_t[:, rows].t().contiguous().split(1)
+        )
 
     def score(self, query: Tensor) -> Tensor:
         """``[B, N]`` fp32 scores, every item."""
         query = query.to(torch.float16)
+        if query.is_cuda and query.shape[0] == 1 and self.gemv_exact:
+            return ops_for("triton").gemv_scores(query, self.item_embs_t)
         if query.is_cuda:
             return torch.mm(query, self.item_embs_t, out_dtype=torch.float32)
         return torch.mm(query.float(), self.item_embs_t.float())  # aten::mm.dtype: no CPU kernel
