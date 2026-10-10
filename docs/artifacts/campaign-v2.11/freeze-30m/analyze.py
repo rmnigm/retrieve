@@ -34,6 +34,12 @@ for (ds, sw, bs, mode), t in sorted(cells.items()):
     a = np.array([t["A"][r]["median_ms"] for r in rounds])
     b = np.array([t["B"][r]["median_ms"] for r in rounds])
     x = b / a
+    if (
+        len(x) == 1
+    ):  # one round (option (a)): the three windows' per-round ratios as the spread
+        x = np.array(t["B"][rounds[0]]["window_medians_ms"]) / np.array(
+            t["A"][rounds[0]]["window_medians_ms"]
+        )
     h = T95[len(x) - 1] * x.std(ddof=1) / np.sqrt(len(x))
     ids = all(t["A"][r]["ids_sha256"] == t["B"][r]["ids_sha256"] for r in rounds)
     flag = "**> 1.00**" if x.mean() > 1.0 else ""
