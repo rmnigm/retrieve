@@ -5,6 +5,7 @@ ids + scores for the first 64 kept queries at bs 1 (first 8), 16 and 64; compare
     python score_dump.py dump CONFIG_DIR OUT.pt        (from the tree's evaluation/, its venv)
     python score_dump.py compare A.pt B.pt"""
 
+import os
 import sys
 from pathlib import Path
 
@@ -18,12 +19,17 @@ def dump(cfg: Path, out: Path) -> None:
 
     dev = torch.device("cuda")
     res = {}
+    part = os.environ.get(
+        "PART"
+    )  # "v1:<dataset>" or "st:laion30m": one 30 M module set per process (one process holding several OOMs)
     for ds, dim in DATASETS.items():
+        if part and part.split(":")[1] != ds:
+            continue
         jobs = config.load_matrix(
             cfg / f"{ds}.yaml", cfg / "suites.yaml", "v1g", dims=[dim]
         )
         inp = inputs.load_inputs(jobs[0].data, dev)
-        for j in jobs:
+        for j in jobs if not part or part.startswith("v1:") else []:
             assets = run.sweep_assets(j, inp, 100, dev)
             m = run.build_module(j, inp, assets, 100, {})
             gemv = [
@@ -47,7 +53,7 @@ def dump(cfg: Path, out: Path) -> None:
             print(ds, j.sweep, "gemv_exact", gemv, flush=True)
             del m, assets
             torch.cuda.empty_cache()
-        if ds == "laion30m":
+        if ds == "laion30m" and (not part or part.startswith("st:")):
             for j in config.load_matrix(
                 cfg / "laion30m.yaml", cfg / "suites.yaml", "stg", dims=[dim]
             ):
@@ -74,7 +80,17 @@ def dump(cfg: Path, out: Path) -> None:
 
 
 def compare(a: Path, b: Path) -> None:
-    x, y = torch.load(a), torch.load(b)
+    """A / B are files, or a directory + glob prefix pair `DIR/scores-A-*` (one file per PART) merged."""
+
+    def load(p):
+        if p.exists():
+            return torch.load(p)
+        out = {}
+        for f in sorted(p.parent.glob(p.name + "*.pt")):
+            out.update(torch.load(f))
+        return out
+
+    x, y = load(a), load(b)
     for k in sorted((k for k in x if k[2] != "gemv_exact"), key=str):
         print(
             k,
