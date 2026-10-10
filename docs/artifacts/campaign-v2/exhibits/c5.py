@@ -14,7 +14,7 @@ import statistics as st
 import sys
 from pathlib import Path
 
-from load import cv, load, official_build, recall
+from load import cv, load, official_build, recall, score_path
 
 from bench import stats
 
@@ -36,6 +36,7 @@ def main():
             r["params"].get("n_lists"),
             r["seed"],
             official_build(r),
+            score_path(r),
         )
         pairs[k][r["params"]["bloom_path"]] = r
     cells = collections.defaultdict(
@@ -68,7 +69,7 @@ def main():
             )
             if not ep or ef.get("median_ms") is None or ep.get("median_ms") is None:
                 continue
-            c = cells[k[:6] + (ef["bs"], ef["mode"], k[7])]
+            c = cells[k[:6] + (ef["bs"], ef["mode"], k[7], k[8])]
             if same_group and len(ef["window_medians_ms"]) == len(ep["window_medians_ms"]):
                 c["f"] += ef["window_medians_ms"]
                 c["p"] += ep["window_medians_ms"]
@@ -99,6 +100,7 @@ def main():
                 "bs": k[6],
                 "mode": k[7],
                 "official_build": k[8],
+                "score_path": k[9],
                 "rounds": len(c["f"]),
                 "full_over_partial": "" if not ci else round(ci[0], 3),
                 "ci_lo": "" if not ci else round(ci[1], 3),
