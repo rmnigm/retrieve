@@ -11,3 +11,5 @@ ceilings on goodreads and arXiv the one global int8 item scale? Quality only. Hu
 | [`ceiling-v210.sh`](ceiling-v210.sh) | the driver, one check per point, under `common.sh` (GPU lock, code_version, clocks) |
 
 Outcome (pod 1, 2026-10-10, library `a3bec4a5`): fp16 on the same probes reaches 0.998-1.000 wherever p ≥ 0.1 (0.987-0.995 on the most selective sweeps), against 0.952-0.989 shipped; the global int8 recompute equals the shipped module, and per-row int8 recovers about a third of the gap. The ceilings are the global int8 item scale.
+
+PubMed 10 M d768 (2026-10-10): at p ≈ 1 the ceiling is the int8 scale (`c3_journal_reverse` 0.922 → fp16 0.9955); at low p it is mostly the probes at the 25 % cap (`c0_mesh` fp16 0.976, `all5` fp16 0.903).
