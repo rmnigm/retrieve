@@ -235,6 +235,15 @@ paper.
   FPR against width (both blooms showed zero false positives, so S8 needs
   roadmap D3), seeds 1-2, k in {500, 1000}.
 
+## META-FORK: `backend="official-fork"` (not yet validated)
+
+Our fork of Meta's SilverTorch ([`official-fork/`](../official-fork/CHANGES.md), branch `dev/meta-fork`): one row per
+change of its CHANGES table. NOT CITABLE until fork-review accepts and the gates below are green.
+
+| change | state | notes |
+|---|---|---|
+| upstream sync 21aa35e → 22c2007 | **applied, CPU-checked only.** Upstream's one commit since the vendored base applies verbatim to `bloom_indexer_cuda.cu` (`git apply`, offsets of one line from our notice line); `git ls-remote` HEAD = `22c2007` on 2026-10-10 | the compiled path on CUDA 12.8 (`CUB_VERSION < 200800`) is upstream's old one (nvcc 12.8.93 ships `CUB_VERSION 200700`); the build and the A/A against upstream `-O3` are C0's (GPU, pending). The pinned `backend="official"` stays at 21aa35e |
+
 ## Campaign v2 (Phase V): not yet validated
 
 Every row is at the code_version it names (campaign-v2 `408b1188` unless it says otherwise) and NOT CITABLE until D1-G.
