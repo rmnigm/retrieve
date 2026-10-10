@@ -11,8 +11,8 @@
 # the record reuse rule (docs/decisions.md § Campaign v2); `log` records every mid-campaign change.
 
 default:
-  quality: {code_version: a3bec4a50c1a3bb06dd9e99ab638867a42b29e29, hub: "campaign-v2.10/{dataset}-{suite}"}  # tag campaign-v2.10
-  perf: {code_version: a3bec4a50c1a3bb06dd9e99ab638867a42b29e29, hub: "campaign-v2.10/{dataset}-{suite}"}
+  quality: {code_version: 1d390792d2f05a82c5b7bc7ce39d23a0a2a09d03, hub: "campaign-v2.11/{dataset}-{suite}"}  # tag campaign-v2.11
+  perf: {code_version: 1d390792d2f05a82c5b7bc7ce39d23a0a2a09d03, hub: "campaign-v2.11/{dataset}-{suite}"}
 
 # Reuse entries from docs/artifacts/campaign-v2/reuse (reuse.py over the Hub subtrees). An entry
 # exists only where old records cover every v2 cell of its match (all seeds and params) and no
@@ -74,3 +74,4 @@ log:
   - {date: 2026-10-11, change: "tag campaign-v2.8 (library 78cfbc72): OFFICIAL-REWORK M2-M4, the official epilogue (top-k on raw scores, [B,k] dequant and id-map) and partial-path plan dedup; bit-exact", rerun: ["official perf (every path)"]}
   - {date: 2026-10-11, change: "tag campaign-v2.9 (library e8958bd2): ST-WIDE, per-row probe table + bloom two-pass for wide probes (B*n_probe >= 512; narrow configs unchanged); bit-exact", rerun: ["SilverTorch triton perf at B*n_probe >= 512 (every width; the two-pass at d768)"]}
   - {date: 2026-10-10, change: "tag campaign-v2.10 (library a3bec4a5): ST-WIDE-2, probe_prep_kernel fuses the probe prep (int8 query, per-row table, two-pass count) into one launch + sparse two-pass at D_PAD <= 256; bit-exact", rerun: ["SilverTorch triton perf where B*n_probe >= 512", "SilverTorch triton perf on sparse batches at D_PAD <= 256 (the two-pass engages; eager mostly)"]}
+  - {date: 2026-10-10, change: "tag campaign-v2.11 (library 1d390792): ST-TOPK, two-level top-k over 256-slot blocks of the padded score buffer from 2^23 slots (host only; scorer kernels unchanged); bit-exact", rerun: ["SilverTorch triton perf where the score buffer reaches 2^23 slots (>= 8 blocks per top-k slot)"]}
