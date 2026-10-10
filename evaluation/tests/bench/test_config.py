@@ -398,10 +398,10 @@ GRID = {  # (suite, dataset): (jobs, cells), the final pass's sizing input; chan
     ("nsweep-codesign", "laion3m"): (8, 16),
     ("nsweep-codesign", "laion10m"): (8, 16),
     ("nsweep-codesign", "laion30m"): (8, 16),
-    ("seeds-c1", "arxiv-synth"): (8, 8),
-    ("seeds-c1", "yfcc10m-synth"): (8, 8),
-    ("seeds-c1-laion30m", "laion30m-synth"): (8, 8),
-    ("seeds-c7", "laion30m"): (12, 24),
+    ("seeds-c1", "arxiv-synth"): (12, 12),
+    ("seeds-c1", "yfcc10m-synth"): (12, 12),
+    ("seeds-c1-laion30m", "laion30m-synth"): (12, 12),
+    ("seeds-c7", "laion30m"): (18, 36),
     ("tune-q", "goodreads"): (28, 196),
     ("tune-q", "goodreads-synth"): (42, 294),
     ("tune-q", "arxiv"): (42, 294),
@@ -451,8 +451,8 @@ def test_grid_counts_and_invariants(suite, dataset):
     assert (len(jobs), sum(len(j.query) for j in jobs)) == GRID[suite, dataset]
     cells = [(j, {**j.build, **q}) for j in jobs for q in j.query]
     # seed 0 everywhere; seeds 0-2 only in `filter`, the T2 headline whose CIs rest on them
-    # seeds 1-2 also in the seed-extension suites (C1 crossover cells, C7's 30 M bs 64 cell)
-    want_seeds = {0, 1, 2} if suite == "filter" else {1, 2} if suite.startswith("seeds-") else {0}
+    # seeds 0-2 also in the seed-extension suites (C1 crossover cells, C7's 30 M bs 64 cell)
+    want_seeds = {0, 1, 2} if suite == "filter" or suite.startswith("seeds-") else {0}
     assert {j.seed for j in jobs} == want_seeds
     bs64 = ("codesign-laion30m", "c7-scorepath", "nsweep-codesign", "seeds-c7", "tune-timed")
     big = {64} if suite in bs64 else set()

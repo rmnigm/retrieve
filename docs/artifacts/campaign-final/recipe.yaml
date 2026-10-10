@@ -7,7 +7,7 @@
 recipe: 1
 tag: FINAL_TAG                          # git tag campaign-final; `git rev-parse FINAL_TAG:retrieve/src/retrieve` = library_tree
 library_tree: FINAL_TAG_LIBRARY_TREE
-extension_tag: campaign-final          # the N-sweep and seeds-1-2 legs' tree: tagged after dev/final-nsweep merges, same library (e16512f5) as FINAL_TAG
+extension_tag: campaign-final          # the N-sweep and seeds-0-2 legs' tree: tagged after dev/final-nsweep merges, same library (e16512f5) as FINAL_TAG
 campaign_yaml: evaluation/campaign.yaml   # pinned to the one code_version (quality + perf) before the first leg
 hub: {repo: pinkmeme/eval-results, prefix: campaign-final/, aggregate: campaign-final/results.parquet}
 image: {torch: 2.10.0+cu128, triton: 3.6.0, cuda: '12.8', python: '3.11'}
@@ -865,7 +865,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite seeds-c1 --dataset arxiv-synth --dim 128 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-synth-seeds-c1
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/seeds-c1 && cp -al /scratch/final/gpu0/seeds-c1/arxiv-synth-d128* $T/seeds-c1/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-synth-seeds-c1 --verify && rm -rf $T"
-    expect: {cells: 8, records: 8, gpu_h: 0.1}
+    expect: {cells: 12, records: 12, gpu_h: 0.15}
   - id: b-15-seeds-c1-yfcc10m-synth
     pod: a100-x1-b
     index: 0
@@ -879,7 +879,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite seeds-c1 --dataset yfcc10m-synth --dim 192 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/yfcc10m-synth-seeds-c1
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/seeds-c1 && cp -al /scratch/final/gpu0/seeds-c1/yfcc10m-synth-d192* $T/seeds-c1/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/yfcc10m-synth-seeds-c1 --verify && rm -rf $T"
-    expect: {cells: 8, records: 8, gpu_h: 0.27}
+    expect: {cells: 12, records: 12, gpu_h: 0.4}
   - id: b-16-seeds-c1-laion30m-laion30m-synth
     pod: a100-x1-b
     index: 0
@@ -893,7 +893,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite seeds-c1-laion30m --dataset laion30m-synth --dim 256 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion30m-synth-seeds-c1-laion30m
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/seeds-c1-laion30m && cp -al /scratch/final/gpu0/seeds-c1-laion30m/laion30m-synth-d256* $T/seeds-c1-laion30m/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-synth-seeds-c1-laion30m --verify && rm -rf $T"
-    expect: {cells: 8, records: 8, gpu_h: 0.81}
+    expect: {cells: 12, records: 12, gpu_h: 1.22}
     note: "needs LAION 30 M on pod b"
   - id: b-17-seeds-c7-laion30m
     pod: a100-x1-b
@@ -908,7 +908,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite seeds-c7 --dataset laion30m --dim 256 --interleave --profile --mode eager --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion30m-seeds-c7
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/seeds-c7 && cp -al /scratch/final/gpu0/seeds-c7/laion30m-d256* $T/seeds-c7/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-seeds-c7 --verify && rm -rf $T"
-    expect: {cells: 24, records: 24, gpu_h: 0.34}
+    expect: {cells: 36, records: 36, gpu_h: 0.51}
     note: "official from the -O3 venv; needs LAION 30 M on pod b"
   - id: p1-01-c3-goodreads-synth
     pod: a100-x1-eval
@@ -1528,7 +1528,7 @@ legs:
     note: "quality only; not grid cells; no LAION tune leg (its point is the calibration's 16384 / 4096)"
 
 totals_gpu_h:                           # per GPU, incl. the 1.45 process overhead; wall-clock = the largest
-  b: 17.4
+  b: 18.2
   d0: 19.8
   d1: 19.4
   p1: 17.1

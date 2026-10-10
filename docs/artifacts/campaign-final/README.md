@@ -13,7 +13,7 @@ D1-G passes.
 
 ## The final grid
 
-[`evaluation/config/suites.yaml`](../../../evaluation/config/suites.yaml) holds 3,992 cells in 28 suites: 3,682 in the final grid proper, plus the fixed-d N-sweep extension's 262 (`nsweep-synth`, `nsweep`, `nsweep-codesign` on the seeded LAION subsets laion1m / 3m / 10m, laion30m itself and arXiv 3 M at d256, one box) and the seeds-1-2 extension's 48 (`seeds-c1`, `seeds-c1-laion30m`, `seeds-c7`); the extension legs run from the `campaign-final` tag (same library); [datasets § Subsets](../../system/datasets.md#subsets)). The table is
+[`evaluation/config/suites.yaml`](../../../evaluation/config/suites.yaml) holds 4,016 cells in 28 suites: 3,682 in the final grid proper, plus the fixed-d N-sweep extension's 262 (`nsweep-synth`, `nsweep`, `nsweep-codesign` on the seeded LAION subsets laion1m / 3m / 10m, laion30m itself and arXiv 3 M at d256, one box) and the seeds extension's 72 (`seeds-c1`, `seeds-c1-laion30m`, `seeds-c7`, seeds 0-2 on one box); the extension legs run from the `campaign-final` tag (same library); [datasets § Subsets](../../system/datasets.md#subsets)). The table is
 [evaluation § Config](../../system/evaluation.md#config-one-yaml-per-dataset--suitesyaml), and the counts are pinned
 in `evaluation/tests/bench/test_config.py` (`GRID`).
 
@@ -36,13 +36,13 @@ Seeds: seed 0 everywhere, with seeds 0-2 in `filter` only (T2's CIs).
 
 ## Sizing
 
-73.8 GPU-h including the measured 1.45 process overhead. Quality-only tune legs, and the timed tune legs v2.11 measured (goodreads, YFCC, PubMed), are priced from their measured runs; arXiv's timed tune is not measured yet.
+74.6 GPU-h including the measured 1.45 process overhead. Quality-only tune legs, and the timed tune legs v2.11 measured (goodreads, YFCC, PubMed), are priced from their measured runs; arXiv's timed tune is not measured yet.
 
 | GPU | GPU-h |
 |---|---|
 | pod d GPU 0 | 19.8 |
 | pod d GPU 1 | 19.4 |
 | pod 1 | 17.1 (incl. the N-sweep's 5.8) |
-| pod b | 17.4 (incl. the seeds legs' 1.5) |
+| pod b | 18.2 (incl. the seeds legs' 2.3) |
 
 So about 20 h wall, if M1 lets pod d time on both GPUs at once; otherwise pod d runs its two GPU queues in turn, about 37 h.

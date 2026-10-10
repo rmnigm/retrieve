@@ -37,9 +37,9 @@ NSWEEP_CELL_S = {
     ("nsweep-synth", "laion30m-synth"): 18 * 252 + 12 * 34, ("nsweep", "laion30m", "linr_v2", "silvertorch"): 2 * 151 + 8 * 35,
     ("nsweep", "laion30m", "linr_v1_filter_mask"): 2 * 257,
     ("nsweep-codesign", "laion30m"): 16 * 28,
-    # seeds legs (bs 16 / 64 only, so these are upper bounds): arXiv 3 M 32 s, YFCC synth 83 s, LAION 30 M synth 252 s, c7 35 s
-    ("seeds-c1", "arxiv-synth"): 8 * 32, ("seeds-c1", "yfcc10m-synth"): 8 * 83,
-    ("seeds-c1-laion30m", "laion30m-synth"): 8 * 252, ("seeds-c7", "laion30m"): 24 * 35,
+    # seeds legs, seeds 0-2 (bs 16 / 64 only, so upper bounds): arXiv 3 M 32 s, YFCC synth 83 s, LAION 30 M synth 252 s, c7 35 s
+    ("seeds-c1", "arxiv-synth"): 12 * 32, ("seeds-c1", "yfcc10m-synth"): 12 * 83,
+    ("seeds-c1-laion30m", "laion30m-synth"): 12 * 252, ("seeds-c7", "laion30m"): 36 * 35,
 }  # fmt: skip
 REAL = ["goodreads", "arxiv", "yfcc10m", "pubmed"]
 OFFICIAL_VENV = "/venvs/final-o3"  # scripts/build_official_o3.sh; env.official_build records the .so sha
@@ -69,7 +69,7 @@ LEGS = [
     # the goodreads bench moved off pod 1 (controller 2026-10-13: v2.11 timed tune slower than sized, pod 1 needs arXiv headroom)
     *[("b", "tune", s, [d], None, None, "--skip-perf" if s == "tune-q" else "", "") for s in ("tune-q", "tune-timed") for d in ["goodreads", "goodreads-synth"]],
     *[("b", "C2", "v3bits", [d], None, None, "", "k_bits variants against each other") for d in ["goodreads-synth", "goodreads", "pubmed"]],
-    # seeds 1-2 where a CI rests on them (controller 2026-10-13): C1's crossover cells, C7's 30 M bs 64 cell
+    # seeds 0-2 on one box where a CI rests on them (controller 2026-10-13): C1's crossover cells, C7's 30 M bs 64 cell
     *[("b", "C1 seeds", "seeds-c1", [d], None, None, "--interleave", "") for d in ["arxiv-synth", "yfcc10m-synth"]],
     ("b", "C1 seeds", "seeds-c1-laion30m", ["laion30m-synth"], None, None, "--interleave", "needs LAION 30 M on pod b"),
     ("b", "C7 seeds", "seeds-c7", ["laion30m"], None, None, "--interleave --profile --mode eager", "official from the -O3 venv; needs LAION 30 M on pod b"),
@@ -187,7 +187,7 @@ def render(legs, totals):
          "recipe: 1",
          "tag: FINAL_TAG                          # git tag campaign-final; `git rev-parse FINAL_TAG:retrieve/src/retrieve` = library_tree",
          "library_tree: FINAL_TAG_LIBRARY_TREE",
-         "extension_tag: campaign-final          # the N-sweep and seeds-1-2 legs' tree: tagged after dev/final-nsweep merges, same library (e16512f5) as FINAL_TAG",
+         "extension_tag: campaign-final          # the N-sweep and seeds-0-2 legs' tree: tagged after dev/final-nsweep merges, same library (e16512f5) as FINAL_TAG",
          "campaign_yaml: evaluation/campaign.yaml   # pinned to the one code_version (quality + perf) before the first leg",
          "hub: {repo: pinkmeme/eval-results, prefix: campaign-final/, aggregate: campaign-final/results.parquet}",
          "image: {torch: 2.10.0+cu128, triton: 3.6.0, cuda: '12.8', python: '3.11'}",
