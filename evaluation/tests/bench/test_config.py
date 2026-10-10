@@ -344,36 +344,63 @@ def test_arm_errors_are_named(tmp_path, arms, match):
 
 # ----- the real grid (campaign-v2, user decisions 2026-10-08) ---------------------------
 
-GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change it deliberately
-    ("h2h", "goodreads"): (30, 30),
-    ("h2h", "arxiv"): (30, 30),
-    ("filter", "goodreads"): (87, 114),
-    ("filter", "arxiv"): (135, 180),
+GRID = {  # (suite, dataset): (jobs, cells), the final pass's sizing input; change it deliberately
+    ("filter", "goodreads"): (63, 90),
+    ("filter", "arxiv"): (99, 144),
     ("filter", "yfcc10m"): (15, 21),
-    ("filter", "pubmed"): (63, 90),
-    ("deep", "goodreads"): (42, 210),
-    ("deep", "arxiv"): (72, 360),
-    ("deep", "yfcc10m"): (9, 45),
-    ("deep", "pubmed"): (9, 36),
-    ("synth", "goodreads-synth"): (312, 558),
-    ("synth", "arxiv-synth"): (25, 46),
-    ("synth", "arxiv-corr-synth"): (15, 42),
+    ("filter", "pubmed"): (69, 111),
+    ("deep", "goodreads"): (5, 40),
+    ("deep", "arxiv"): (9, 63),
+    ("deep", "yfcc10m"): (1, 8),
+    ("deep", "pubmed"): (11, 21),
+    ("synth", "goodreads-synth"): (70, 128),
+    ("synth", "arxiv-synth"): (31, 58),
+    ("synth", "arxiv-corr-synth"): (15, 36),
     ("synth", "yfcc10m-synth"): (27, 45),  # 9 rates x (V1, V2, SilverTorch at 3 n_probe)
-    ("codesign", "arxiv"): (36, 108),  # official + triton (C5-OURS)
-    ("codesign", "goodreads"): (36, 108),
-    ("bloomwidth", "goodreads"): (42, 42),
-    ("bloomwidth", "arxiv"): (126, 126),
-    ("bloomwidth", "pubmed"): (42, 42),
-    ("bloomwidth-timed", "goodreads"): (21, 21),
-    ("bloomwidth-timed", "arxiv"): (63, 63),
-    ("bloomwidth-timed", "pubmed"): (21, 21),
-    ("v3bits", "goodreads-synth"): (84, 168),
-    ("v3bits", "goodreads"): (24, 48),
-    ("v3bits", "pubmed"): (18, 36),
-    ("laion30m", "laion30m"): (6, 14),  # claims first: seed 0 (user 2026-10-10)
+    ("c3", "goodreads-synth"): (18, 18),
+    ("c3", "arxiv-synth"): (12, 12),
+    ("c3", "yfcc10m-synth"): (6, 6),
+    ("c3", "laion30m-synth"): (6, 6),
+    ("c3-real", "goodreads"): (6, 6),
+    ("c3-real", "arxiv"): (6, 6),
+    ("c3-real", "yfcc10m"): (2, 2),
+    ("c3-real", "pubmed"): (6, 6),
+    ("codesign", "arxiv"): (12, 36),  # official + triton (C5-OURS)
+    ("codesign", "goodreads"): (4, 12),
+    ("codesign-pubmed", "pubmed"): (2, 4),
+    ("h2h", "goodreads"): (6, 6),
+    ("h2h", "arxiv"): (6, 6),
+    ("bloomwidth", "goodreads"): (14, 14),
+    ("bloomwidth", "arxiv"): (42, 42),
+    ("bloomwidth", "pubmed"): (14, 14),
+    ("bloomwidth-timed", "goodreads"): (7, 7),
+    ("bloomwidth-timed", "arxiv"): (21, 21),
+    ("bloomwidth-timed", "pubmed"): (7, 7),
+    ("v3bits", "goodreads-synth"): (28, 56),
+    ("v3bits", "goodreads"): (8, 16),
+    ("v3bits", "pubmed"): (6, 12),
+    ("laion30m", "laion30m"): (6, 14),
     ("laion30m-bs1", "laion30m"): (2, 10),
     ("laion30m-synth", "laion30m-synth"): (22, 30),  # V1 + V2 at nine rates, SilverTorch at four
     ("codesign-laion30m", "laion30m"): (8, 16),  # C5 at 30 M: 2 sweeps x 2 backends x 2 paths
+    ("laion30m-x", "laion30m"): (6, 6),
+    ("c7-scorepath", "laion30m"): (6, 12),
+    ("tune-q", "goodreads"): (28, 196),
+    ("tune-q", "goodreads-synth"): (42, 294),
+    ("tune-q", "arxiv"): (42, 294),
+    ("tune-q", "arxiv-synth"): (42, 294),
+    ("tune-q", "arxiv-corr-synth"): (42, 294),
+    ("tune-q", "yfcc10m"): (4, 34),
+    ("tune-q", "yfcc10m-synth"): (24, 204),
+    ("tune-q", "pubmed"): (16, 136),
+    ("tune-timed", "goodreads"): (28, 100),
+    ("tune-timed", "goodreads-synth"): (42, 146),
+    ("tune-timed", "arxiv"): (42, 142),
+    ("tune-timed", "arxiv-synth"): (42, 144),
+    ("tune-timed", "arxiv-corr-synth"): (42, 150),
+    ("tune-timed", "yfcc10m"): (4, 8),
+    ("tune-timed", "yfcc10m-synth"): (24, 43),
+    ("tune-timed", "pubmed"): (16, 35),
 }
 KEPT = {
     "goodreads": {"c0_genre", "c1_lang_reverse", "all4"},
@@ -382,7 +409,7 @@ KEPT = {
     "yfcc10m": {"tags_and"},
 }
 SYNTH_N = {"goodreads-synth": 797_084, "arxiv-synth": 2_988_996, "arxiv-corr-synth": 2_988_996,
-           "yfcc10m-synth": 10_000_000}  # fmt: skip
+           "yfcc10m-synth": 10_000_000, "laion30m-synth": 30_000_000}  # fmt: skip
 RATE = {"p0001": 0.001, "p0003": 0.003, "p001": 0.01, "p003": 0.03, "p005": 0.05, "p01": 0.1,
         "p02": 0.2, "p03": 0.3, "p05": 0.5, "p1": 1.0,
         "c001": 0.01, "c003": 0.03, "c01": 0.1}  # fmt: skip
@@ -401,23 +428,14 @@ def test_grid_covers_every_suite_and_dataset():
 
 @pytest.mark.parametrize(("suite", "dataset"), list(GRID))
 def test_grid_counts_and_invariants(suite, dataset):
-    """G-grid: the job / cell counts and the user's 2026-10-08 rules on every expanded cell."""
+    """G-grid: the job / cell counts and the final pass's rules (controller 2026-10-13) on every
+    expanded cell."""
     jobs = _real(suite, dataset)
     assert (len(jobs), sum(len(j.query) for j in jobs)) == GRID[suite, dataset]
     cells = [(j, {**j.build, **q}) for j in jobs for q in j.query]
-    by_seed: dict[tuple, set[int]] = {}
-    for j, p in cells:
-        cell = (j.dim, j.algo, j.backend, j.filter_kind, j.sweep, json.dumps(p, sort_keys=True))
-        by_seed.setdefault(cell, set()).add(j.seed)
-    spec = yaml.safe_load((CFG / "suites.yaml").read_text())[suite]
-    by_sweep = (spec.get("seeds_by_sweep") or {}).get(dataset, {})
-    for (
-        cell,
-        got,
-    ) in by_seed.items():  # h2h: 5 repeats; synth: seed 0, 0-2 where variance is the question
-        assert got == set(by_sweep.get(cell[4], spec["seeds"])), cell
-    # bs 64 only in C5's 30 M regime (controller 2026-10-10, C5-META-CHECK)
-    big = {64} if suite == "codesign-laion30m" else set()
+    # seed 0 everywhere; seeds 0-2 only in `filter`, the T2 headline whose CIs rest on them
+    assert {j.seed for j in jobs} == ({0, 1, 2} if suite == "filter" else {0})
+    big = {64} if suite in ("codesign-laion30m", "c7-scorepath", "tune-timed") else set()
     assert all(set(j.batch_sizes) <= {1, 16} | big and set(j.ks) <= {100, 1000} for j in jobs)
     if suite in ("filter", "deep", "synth", "codesign"):
         assert all(j.batch_sizes == (1, 16) for j in jobs)
@@ -429,60 +447,57 @@ def test_grid_counts_and_invariants(suite, dataset):
         "silvertorch",
         "postfilter",
     }
-    assert not any(p.get("n_probe") == 4 for _, p in cells)
-    tuned = IVF.get(dataset, (None, None))[1]
-    # synth sweeps n_probe; laion30m carries the 30 M probe curve (F3, controller 2026-10-11)
-    synth = suite in ("synth", "laion30m-synth", "laion30m", "laion30m-bs1")
-    # deep on pubmed: the F3 / C6 10 M IVF curve up to the n_lists / 4 cap (controller, 2026-10-11)
-    curve = suite == "deep" and dataset == "pubmed"
-    assert synth or curve or not any(p.get("n_probe") == 256 != tuned for _, p in cells)
+    # the user's cap: SilverTorch scans at most a quarter of the lists
+    for j, p in cells:
+        if j.algo == "silvertorch" and "n_probe" in p:
+            assert p["n_probe"] <= p.get("n_lists", 1024) // 4, (j.sweep, p)
     assert not any(j.narrowed for j in jobs)
-    if suite in ("filter", "deep") and dataset in KEPT:
-        assert {j.sweep for j in jobs} == KEPT[dataset] or (
-            suite == "deep" and {j.sweep for j in jobs} <= KEPT[dataset]
-        )
-    c3_torch = {j.algo for j in jobs if j.backend == "torch" and j.algo != "postfilter"}
-    if suite == "filter":  # addendum 2: C3's torch arms on goodreads + arxiv only
-        assert bool(c3_torch) == (dataset in ("goodreads", "arxiv"))
-    if suite == "synth":  # SYNTH-TRIM sized by claim (controller 2026-10-10)
-        assert bool(c3_torch) == (dataset == "goodreads-synth")
+    if suite in ("filter", "deep", "c3-real") and dataset in KEPT:
+        assert {j.sweep for j in jobs} == KEPT[dataset]
+    st_torch = {j.algo for j in jobs if j.backend == "torch" and j.algo == "silvertorch"}
+    assert not st_torch  # C3 runs on V1 / V2 (`c3`, `c3-real`, synth's V2 arms)
+    if suite in (
+        "synth",
+        "laion30m-synth",
+    ):  # k 1000 where N * p >= 4 * 1000; YFCC / LAION synth at k 100
         for j in jobs:
             big_enough = SYNTH_N[dataset] * RATE[j.sweep] >= 4 * 1000
-            assert (1000 in j.ks) == (big_enough and dataset != "yfcc10m-synth"), j.sweep
-            if j.backend == "torch" and j.algo != "postfilter":
-                assert j.sweep in {"p001", "p01", "p1"}
+            k100_only = dataset in ("yfcc10m-synth", "laion30m-synth")
+            assert (1000 in j.ks) == (big_enough and not k100_only), j.sweep
+    if suite == "synth":
         torch_arms = {(j.algo, json.dumps(j.build)) for j in jobs if j.backend == "torch"}
         assert torch_arms == {
             "goodreads-synth": {
                 ("postfilter", "{}"),
-                ("linr_v1_filter_mask", "{}"),
                 ("linr_v2", "{}"),
-                ("linr_v1_filter_mask", '{"compile": "max-autotune"}'),
                 ("linr_v2", '{"compile": "max-autotune"}'),
             },
             "arxiv-corr-synth": {("postfilter", "{}")},
         }.get(dataset, set())
-        assert (
-            {j.algo for j in jobs if j.algo.startswith("linr_v")}
-            & {"linr_v1_filter_mask", "linr_v2"}
-        ) == (set() if dataset == "arxiv-corr-synth" else {"linr_v1_filter_mask", "linr_v2"})
+        exact = {
+            j.algo
+            for j in jobs
+            if j.algo in ("linr_v1_filter_mask", "linr_v2") and j.backend == "triton"
+        }
+        assert exact == (
+            set() if dataset == "arxiv-corr-synth" else {"linr_v1_filter_mask", "linr_v2"}
+        )
         assert any(j.algo == "linr_v3" for j in jobs) == (
             dataset in ("goodreads-synth", "arxiv-corr-synth")
         )
-        full = (24, 64, 128, 256, 512, 1024)
         st = {(j.backend, j.filter_kind): tuple(q["n_probe"] for q in j.query)
               for j in jobs if j.algo == "silvertorch"}  # fmt: skip
         assert st == {
-            "goodreads-synth": {("triton", "clause"): full, ("triton", "bloom"): (24, 256),
-                                ("official", "bloom"): (24, 256)},
-            "arxiv-synth": {("triton", "clause"): (24, 64, 256, 1024), ("triton", "bloom"): (24,),
+            "goodreads-synth": {("triton", "clause"): (24, 64, 256, 1024)},
+            "arxiv-synth": {("triton", "clause"): (24, 64, 256, 512), ("triton", "bloom"): (24,),
                             ("official", "bloom"): (24,)},
-            "arxiv-corr-synth": {("triton", "clause"): full},
+            "arxiv-corr-synth": {("triton", "clause"): (24, 64, 256, 512)},
             "yfcc10m-synth": {("triton", "clause"): (24, 256, 1024)},
         }[dataset]  # fmt: skip
-        bloom = {j.sweep for j in jobs if j.filter_kind == "bloom"}
-        if dataset == "arxiv-synth":
-            assert bloom == {"p001", "p1"}
+        if dataset in ("arxiv-synth", "yfcc10m-synth"):  # C1's nine rates
+            assert {j.sweep for j in jobs if j.algo == "linr_v2"} == {
+                "p0001", "p0003", "p001", "p003", "p005", "p01", "p02", "p05", "p1"
+            }  # fmt: skip
 
 
 IVF_ARXIV = ({"n_probe": 24}, {"n_probe": 256})
@@ -498,16 +513,6 @@ def test_filter_suite_arms():
         for a in ("linr_v1_filter_mask", "linr_v2", "linr_v3"):
             want.add((a, "triton", fk, "{}", json.dumps(({},))))
         want.add(("silvertorch", "triton", fk, '{"n_lists": 2048}', json.dumps(IVF_ARXIV)))
-        want.add(("silvertorch", "torch", fk, '{"n_lists": 2048}', json.dumps(({"n_probe": 24},))))
-        want.add(
-            (
-                "silvertorch",
-                "torch",
-                fk,
-                '{"compile": "max-autotune", "n_lists": 2048}',
-                json.dumps(({"n_probe": 24},)),
-            )
-        )
         want.add(("postfilter", "torch", fk, "{}", json.dumps(({"alpha": 1}, {"alpha": 8}))))
     want.add(("silvertorch", "official", "bloom", '{"n_lists": 2048}', json.dumps(IVF_ARXIV)))
     assert arms == want
@@ -516,23 +521,23 @@ def test_filter_suite_arms():
     assert all(j.bloom == {"m_bits": 1024, "k_hash": 5} for j in jobs)
 
 
-def test_deep_suite_per_dataset_n_lists_and_pool_fractions():
-    n_lists = {"goodreads": [1024, 4096], "arxiv": [1664, 8192], "yfcc10m": [4096, 16384]}
-    for dataset, want in n_lists.items():
-        jobs = _real("deep", dataset, seeds=[0])
-        st = [j for j in jobs if j.algo == "silvertorch"]
-        assert sorted({j.build["n_lists"] for j in st}) == want
-        assert all(j.query == tuple({"n_probe": n} for n in (8, 16, 32, 64, 128)) for j in st)
-        v3 = [j for j in jobs if j.algo == "linr_v3"]
-        assert v3 and all(
-            j.query == tuple({"candidate_pool_frac": f} for f in (0.005, 0.01, 0.02, 0.05, 0.1))
-            for j in v3
-        )
+def test_deep_suite_is_silvertorch_at_the_tuned_n_lists():
+    """F3: SilverTorch triton along n_probe at the tune's n_lists, up to the n_lists / 4 cap."""
+    want = {"goodreads": (4096, 1024), "arxiv": (2048, 512), "yfcc10m": (4096, 1024)}
+    for dataset, (n_lists, top) in want.items():
+        jobs = _real("deep", dataset)
+        # F3's official curve (YFCC has no bloom block)
+        official = {("silvertorch", "official")} if dataset != "yfcc10m" else set()
+        assert {(j.algo, j.backend) for j in jobs} == {("silvertorch", "triton")} | official
+        assert all(j.filter_kind == "bloom" for j in jobs if j.backend == "official")
+        assert {j.build["n_lists"] for j in jobs} == {n_lists}
+        probes = tuple(n for n in (8, 16, 32, 64, 128, 256, 512, 1024) if n <= top)
+        assert all(j.query == tuple({"n_probe": n} for n in probes) for j in jobs)
 
 
 def test_codesign_and_bloomwidth_suites():
     cd = _real("codesign", "goodreads", seeds=[0])
-    assert {j.sweep for j in cd} == {"c0_genre", "c2_format", "c3_year"}
+    assert {j.sweep for j in cd} == {"c0_genre"}
     assert {(j.backend, j.build["n_lists"], j.build["bloom_path"]) for j in cd} == {
         ("official", 1024, "partial"),
         ("official", 1024, "full"),
@@ -565,8 +570,6 @@ OLD_KEYS = [
     ("filter", "goodreads", '{"algo":"postfilter","backend":"torch","code_version":"CV","dataset":"goodreads","dim":128,"filter_kind":"clause","inputs":"sasrec-ssm-logq-d128","params":{"alpha":8},"seed":0,"suite":"filter","sweep":"c1_lang_reverse"}'),  # noqa: E501
     ("filter", "goodreads", '{"algo":"linr_v1_filter_mask","backend":"triton","code_version":"CV","dataset":"goodreads","dim":128,"filter_kind":"clause","inputs":"sasrec-ssm-logq-d128","params":{},"seed":2,"suite":"filter","sweep":"all4"}'),  # noqa: E501
     ("filter", "pubmed", '{"algo":"linr_v2","backend":"triton","code_version":"CV","dataset":"pubmed","dim":768,"filter_kind":"clause","inputs":"content_d768","params":{},"seed":0,"suite":"filter","sweep":"all5"}'),  # noqa: E501
-    ("deep", "arxiv", '{"algo":"silvertorch","backend":"triton","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"clause","inputs":"content_d128","params":{"n_lists":1664,"n_probe":8},"seed":2,"suite":"deep","sweep":"c0_maincat"}'),  # noqa: E501
-    ("deep", "arxiv", '{"algo":"silvertorch","backend":"official","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"bloom","inputs":"content_d128","params":{"n_lists":8192,"n_probe":128},"seed":1,"suite":"deep","sweep":"all4"}'),  # noqa: E501
     ("codesign", "arxiv", '{"algo":"silvertorch","backend":"official","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"bloom","inputs":"content_d128","params":{"bloom_path":"full","n_lists":1664,"n_probe":32},"seed":0,"suite":"codesign","sweep":"c3_nversions"}'),  # noqa: E501
 ]  # fmt: skip
 
@@ -609,7 +612,7 @@ def test_interleave_groups_of_the_real_suites():
     group is per seed, and every arm keeps the key it has without ``--interleave``."""
     units = interleave_units(_real("h2h", "goodreads"))
     groups = [m for by, m in units if by]
-    assert len(groups) == len(units) == 2 * 5  # none + bloom, five seeds
+    assert len(groups) == len(units) == 2  # none + bloom, seed 0
     for m in groups:
         assert [(j.backend, j.build.get("score_path")) for j in m] == [
             ("triton", None), ("official", "fp16"), ("official", "int32")
@@ -620,7 +623,7 @@ def test_interleave_groups_of_the_real_suites():
         "silvertorch/official/score_path=int32",
     ]  # fmt: skip
     cd = [m for by, m in interleave_units(_real("codesign", "arxiv")) if by]
-    assert len(cd) == 18 and all(
+    assert len(cd) == 6 and all(
         [j.build["bloom_path"] for j in m] == ["partial", "full"]
         and len({j.backend for j in m}) == 1
         for m in cd
@@ -635,10 +638,9 @@ def test_interleave_groups_of_the_real_suites():
         ("arxiv", 128, ("linr_v1_filter_mask", "linr_v2"), ("triton",)),
         ("arxiv", 128, ("linr_v3",), ("triton",)),
         ("arxiv", 128, ("silvertorch",), ("triton", "official")),
-        ("arxiv", 128, ("silvertorch",), ("torch",)),
         ("arxiv", 128, ("postfilter",), ("torch",)),
     ]
-    assert len(cli._children(_real("filter", "arxiv"), False)) == 7  # one per Job.group
+    assert len(cli._children(_real("filter", "arxiv"), False)) == 6  # one per Job.group
 
 
 @pytest.mark.parametrize(
@@ -692,12 +694,21 @@ IVF = {
 
 @pytest.mark.parametrize("dataset", list(IVF))
 def test_filter_silvertorch_runs_at_the_tuned_ivf(dataset):
+    """`filter` runs SilverTorch at {24, n95} on the tuned n_lists; PubMed (0.95 out of reach) at
+    24, c0_mesh's tuned 512 and the cap 1024, plus all5 / c3_journal_reverse at their own tuned
+    points (v2.11 timed fronts)."""
     n_lists, n95 = IVF[dataset]
     st = [j for j in _real("filter", dataset, seeds=[0]) if j.algo == "silvertorch"]
-    assert st and {j.build.get("n_lists") for j in st} == {n_lists}
-    for j in st:
-        want = {24} if j.backend == "torch" or n95 is None else {24, n95}
-        assert {q["n_probe"] for q in j.query} == want
+    main = [j for j in st if j.build.get("n_lists") == n_lists]
+    want = {24, 512, 1024} if dataset == "pubmed" else {24, n95}
+    assert main and all({q["n_probe"] for q in j.query} == want for j in main)
+    extra = {
+        (j.sweep, j.build["n_lists"], tuple(q["n_probe"] for q in j.query))
+        for j in st
+        if j not in main
+    }
+    tuned = {("all5", 16384, (2048,)), ("c3_journal_reverse", 65536, (1024,))}
+    assert extra == (tuned if dataset == "pubmed" else set())
 
 
 @pytest.mark.parametrize("dataset", ["goodreads", "arxiv", "yfcc10m"])
@@ -733,9 +744,15 @@ def _ds_dim(f: Path) -> int:
     return yaml.safe_load(f.read_text())["dims"][0]
 
 
-def test_deep_pubmed_is_the_triton_clause_ivf_curve():
-    """F3 / C6 at 10 M: PubMed `deep` = SilverTorch triton clause, 4096 lists, n_probe 24-1024."""
+def test_deep_pubmed_is_its_timed_pareto_fronts():
+    """F3 / C6 at 10 M: PubMed `deep` = SilverTorch triton clause at the points of its v2.11
+    timed fronts."""
     pm = _real("deep", "pubmed")
     assert {(j.algo, j.backend, j.filter_kind) for j in pm} == {("silvertorch", "triton", "clause")}
-    assert {j.build["n_lists"] for j in pm} == {4096} and {j.sweep for j in pm} == KEPT["pubmed"]
-    assert {q["n_probe"] for j in pm for q in j.query} == {24, 64, 256, 1024}
+    got = {(j.sweep, j.build["n_lists"], q["n_probe"]) for j in pm for q in j.query}
+    assert len(got) == 21 and {sw for sw, _, _ in got} == KEPT["pubmed"]
+    assert {
+        ("c0_mesh", 4096, 512),
+        ("c3_journal_reverse", 65536, 1024),
+        ("all5", 16384, 2048),
+    } <= got

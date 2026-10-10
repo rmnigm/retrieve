@@ -81,6 +81,13 @@ def pre_clause_skip(r):
     )
 
 
+# Pod 1's PubMed copy was a different ETL build from pod b's canonical one (vocab id order differs, so attrs and
+# eval_split differ; controller 2026-10-13): its records (campaign-v2.10/pubmed-c3-real) are not comparable with the
+# canonical PubMed cells. Every other PubMed record ran on pod b.
+def pod1_pubmed(r):
+    return r["dataset"] == "pubmed" and box(r) == "e75980"
+
+
 def official_build(r):
     """How Meta's extension was built for an official record: the recorded flags once the env field
     exists (campaign-v2.8 adds the -O3 build, OF-11), else "unrecorded" (shipped -O0 host code before

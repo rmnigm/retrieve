@@ -152,6 +152,11 @@ now on; the [roadmap](roadmap.md) holds the steps.
   and reuse it across seeds, perf repeats per seed. Postfilter α ∈ {1, 8}.
   *Contested:* during exploration the extra seeds are deferred to the
   final pass (user, 2026-10-10; roadmap V-SEEDS, SYNTH-TRIM).
+  *Final pass* (controller decision 2026-10-13 on the user's final-pass
+  directive of 2026-10-10): seed 0 everywhere, seeds {0, 1, 2} only where a
+  T2 confidence interval rests on them (`filter`); every SilverTorch cell at
+  `n_probe` ≤ `n_lists` / 4; n_lists / n_probe from the tune
+  ([evaluation](system/evaluation.md#ivf-tuning)).
 - **Headline SilverTorch operating point**: the paper's `n_probe` 24 plus
   the matched-recall `n95` (the smallest `n_probe` reaching
   `recall_oracle@100` ≥ 0.95 on the dataset's median sweep), not {24, 32}:
