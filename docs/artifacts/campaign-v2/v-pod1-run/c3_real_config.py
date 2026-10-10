@@ -1,5 +1,5 @@
 """Scratch config for C3 coverage on real filters at campaign-v2.10 (controller 2026-10-12, as d-run's C3 leg on synth): suite `c3-real`,
-LiNR V1 (linr_v1_filter_mask) Triton vs torch.compile max-autotune (no plain torch), clause, k 100, bs {1, 16}, seed 0, on the real kept
+LiNR V1 (linr_v1_filter_mask) Triton vs torch.compile max-autotune (no plain torch), clause, k 100 (YFCC k {100, 1000}: its exact gate at k_max 100 fails on fp16 ties, 0.9886), bs {1, 16}, seed 0, on the real kept
 sweeps of goodreads / arXiv / YFCC and PubMed 10 M d768 (c0_mesh, all5, c3_journal_reverse). Usage (from evaluation/): python c3_real_config.py OUT"""
 
 import sys
@@ -13,7 +13,7 @@ SWEEPS = {"goodreads": ["c0_genre", "c1_lang_reverse", "all4"], "arxiv": ["c3_nv
 out = Path(sys.argv[1])
 real = yaml.safe_load(Path("config/suites.yaml").read_text())
 suite = {"datasets": list(SWEEPS), "dims": [128, 192, 768], "filter_kinds": ["clause"], "ks": [100], "batch_sizes": [1, 16], "seeds": [0],
-         "sweeps": SWEEPS, "arms": [{"algo": "linr_v1_filter_mask", "backends": ["triton"]},
+         "sweeps": SWEEPS, "ks_by_sweep": {"yfcc10m": {"tags_and": [100, 1000]}}, "arms": [{"algo": "linr_v1_filter_mask", "backends": ["triton"]},
                                     {"algo": "linr_v1_filter_mask", "backends": ["torch"], "build": {"compile": ["max-autotune"]}}]}  # fmt: skip
 out.mkdir(parents=True, exist_ok=True)
 (out / "suites.yaml").write_text(
