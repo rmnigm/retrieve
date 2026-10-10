@@ -9,7 +9,7 @@
 set -u
 WT=/scratch/wt/final; CH=/workspace/retrieve/.chains/campaign-final
 NOTE=$CH/2026-10-10-153000000-d-run-final-pass.md
-mkdir -p /scratch/final/done /scratch/final/deps-ok
+mkdir -p /scratch/final/done /scratch/final/deps-ok /scratch/final/moved
 LIB=e16512f5b379fc7e2d370cc8a57c68b9854a06d7
 [ "$(git -C $WT rev-parse HEAD:retrieve/src/retrieve)" = "$LIB" ] || { echo "worktree not at $LIB, refusing"; exit 2; }
 /venvs/final-o3/bin/python - "$WT/docs/artifacts/campaign-final/recipe.yaml" > /scratch/final/d1-legs.tsv <<'PY'
@@ -22,14 +22,15 @@ for l in r["legs"]:
     print("\t".join([l["id"], ",".join(l.get("after") or []), env, l["command"], l["upload_command"], l["upload"]]))
 PY
 done_dep() {  # strict: "<id> done" at line start (or a "| <id> | done" row) in another worker's note
-  [ -e /scratch/final/done/$1 ] || [ -e /scratch/final/deps-ok/$1 ] ||
+  [ -e /scratch/final/done/$1 ] || [ -e /scratch/final/moved/$1 ] || [ -e /scratch/final/deps-ok/$1 ] ||
     ls $CH/*.md | grep -v -- '-d-run-' | xargs grep -qE "^[[:space:]*|-]*\`?$1\`?[[:space:]]*\|?[[:space:]]*(done|DONE)([^a-zA-Z]|$)" 2>/dev/null; }
 status() {  # rewrite d-run's note from the markers
   local id deps env cmd up hub
   { printf -- '---\nchain: "campaign-final"\nbranch: "d-run"\ncreated: "%s"\n---\n\n# d-run final pass (pod d GPU 1): d1 legs\n\n**Never print secrets** (AGENTS.md rule 9).\n\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     printf 'Tree /scratch/wt/final at campaign-v2.12 (library %s). Updated %s. %s\n\n| leg | state | wall s | Hub | MANIFEST sha256 |\n|---|---|---|---|---|\n' "${LIB:0:8}" "$(date -Is)" "$1"
     while IFS=$'\t' read -r id deps env cmd up hub; do
-      if [ -e /scratch/final/done/$id ]; then printf '| %s | done | %s | %s | %s |\n' "$id" "$(sed -n 1p /scratch/final/done/$id)" "$hub" "$(sed -n 2p /scratch/final/done/$id)"
+      if [ -e /scratch/final/moved/$id ]; then printf '| %s | moved: %s | | | |\n' "$id" "$(cat /scratch/final/moved/$id)"
+      elif [ -e /scratch/final/done/$id ]; then printf '| %s | done | %s | %s | %s |\n' "$id" "$(sed -n 1p /scratch/final/done/$id)" "$hub" "$(sed -n 2p /scratch/final/done/$id)"
       elif [ "$id" = "${RUNNING:-}" ]; then printf '| %s | running since %s | | %s | |\n' "$id" "$T0S" "$hub"
       else printf '| %s | queued (after %s) | | %s | |\n' "$id" "$deps" "$hub"; fi
     done < /scratch/final/d1-legs.tsv; } > $NOTE
@@ -49,7 +50,7 @@ upload_leg() {  # controller CORRECTION 15:20Z: the recipe's --results <out>/<su
 }
 status "starting"
 while IFS=$'\t' read -r id deps env cmd up hub; do
-  [ -e /scratch/final/done/$id ] && continue
+  [ -e /scratch/final/done/$id ] || [ -e /scratch/final/moved/$id ] && continue
   for d in ${deps//,/ }; do
     until done_dep $d; do status "waiting for $d before $id"; sleep 60; done
   done
