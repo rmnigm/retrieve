@@ -11,8 +11,8 @@
 # the record reuse rule (docs/decisions.md § Campaign v2); `log` records every mid-campaign change.
 
 default:
-  quality: {code_version: 1d390792d2f05a82c5b7bc7ce39d23a0a2a09d03, hub: "campaign-v2.11/{dataset}-{suite}"}  # tag campaign-v2.11
-  perf: {code_version: 1d390792d2f05a82c5b7bc7ce39d23a0a2a09d03, hub: "campaign-v2.11/{dataset}-{suite}"}
+  quality: {code_version: e16512f5b379fc7e2d370cc8a57c68b9854a06d7, hub: "campaign-v2.12/{dataset}-{suite}"}  # tag campaign-v2.12
+  perf: {code_version: e16512f5b379fc7e2d370cc8a57c68b9854a06d7, hub: "campaign-v2.12/{dataset}-{suite}"}
 
 # Reuse entries from docs/artifacts/campaign-v2/reuse (reuse.py over the Hub subtrees). An entry
 # exists only where old records cover every v2 cell of its match (all seeds and params) and no
@@ -75,3 +75,4 @@ log:
   - {date: 2026-10-11, change: "tag campaign-v2.9 (library e8958bd2): ST-WIDE, per-row probe table + bloom two-pass for wide probes (B*n_probe >= 512; narrow configs unchanged); bit-exact", rerun: ["SilverTorch triton perf at B*n_probe >= 512 (every width; the two-pass at d768)"]}
   - {date: 2026-10-10, change: "tag campaign-v2.10 (library a3bec4a5): ST-WIDE-2, probe_prep_kernel fuses the probe prep (int8 query, per-row table, two-pass count) into one launch + sparse two-pass at D_PAD <= 256; bit-exact", rerun: ["SilverTorch triton perf where B*n_probe >= 512", "SilverTorch triton perf on sparse batches at D_PAD <= 256 (the two-pass engages; eager mostly)"]}
   - {date: 2026-10-10, change: "tag campaign-v2.11 (library 1d390792): ST-TOPK, two-level top-k over 256-slot blocks of the padded score buffer from 2^23 slots (host only; scorer kernels unchanged); bit-exact", rerun: ["SilverTorch triton perf where the score buffer reaches 2^23 slots (>= 8 blocks per top-k slot)"]}
+  - {date: 2026-10-10, change: "tag campaign-v2.12 (library e16512f5): V1-BS1 (B = 1 GEMV in gemv2N order, register-time equality check, batched-row clause / bloom masks, int64 calibration rows) + V1-TOPK (shared functional.two_level_topk for V1 and SilverTorch); bit-exact; the FINAL library of the final pass", rerun: ["V1 triton perf (every cell)", "SilverTorch triton perf where two_level_topk engages"]}
