@@ -31,13 +31,33 @@ from load import CV_LABEL, redo  # noqa: E402
 from bench import config, records  # noqa: E402
 
 CFG = HERE.parents[2] / "evaluation" / "config"
-ORDER = ["d1", "d1-c0e4", "v2", "v2.1", "v2.2", "v2.3", "v2.4", "v2.5", "v2.6", "v2.7", "v2.8",
-         "v2.9", "v2.10", "v2.11"]  # fmt: skip
+ORDER = [
+    "d1",
+    "d1-c0e4",
+    "v2",
+    "v2.1",
+    "v2.2",
+    "v2.3",
+    "v2.4",
+    "v2.5",
+    "v2.6",
+    "v2.7",
+    "v2.8",
+    "v2.9",
+    "v2.10",
+    "v2.11",
+]
 RECENT = {"v2.9", "v2.10", "v2.11"}
 EXCLUDED_SCRATCH = {"stw2-laion30m", "stt-laion30m", "v1g"}  # library gates, not campaign cells
-OBSOLETE_SCRATCH = {"ivf-tune": "superseded by `tune` / `tune-q`", "n95": "superseded by `tune`",
-                    "router": "the router is dropped (decisions)", "c7-laion30m": "superseded by `c7-scorepath`"}
-GROUP = collections.defaultdict(set)  # interleave group id -> its records' keys: they share its elapsed_s
+OBSOLETE_SCRATCH = {
+    "ivf-tune": "superseded by `tune` / `tune-q`",
+    "n95": "superseded by `tune`",
+    "router": "the router is dropped (decisions)",
+    "c7-laion30m": "superseded by `c7-scorepath`",
+}
+GROUP = collections.defaultdict(
+    set
+)  # interleave group id -> its records' keys: they share its elapsed_s
 LEDGER = {"wide": 0.97, "sparse?": 0.9, "topk": 0.8, "topk?": 0.8}
 
 
@@ -155,7 +175,9 @@ def overhead(legs):
         pairs = set(re.findall(r"load_matrix:\d+ - (\S+): \d+ jobs", "\n".join(text)))
         if len(stamps) < 2 or not done or len(pairs) != 1:
             continue
-        wall = (datetime.fromisoformat(done[-1].split()[0]) - datetime.fromisoformat(stamps[0])).total_seconds()
+        wall = (
+            datetime.fromisoformat(done[-1].split()[0]) - datetime.fromisoformat(stamps[0])
+        ).total_seconds()
         el = 0.0
         for f in d.rglob("*.jsonl"):
             if not f.name.endswith(".samples.jsonl"):
@@ -178,9 +200,27 @@ def main():
             for job in config.load_matrix(CFG / f"{ds}.yaml", CFG / "suites.yaml", s):
                 for p in job.cells():
                     planned.append(
-                        (s, ds, arm_of(job.algo, job.backend, job.filter_kind, p), canon(job.key(p)), job.seed, job)
+                        (
+                            s,
+                            ds,
+                            arm_of(job.algo, job.backend, job.filter_kind, p),
+                            canon(job.key(p)),
+                            job.seed,
+                            job,
+                        )
                     )
-    rows = collections.defaultdict(lambda: {"cells": 0, "ran": 0, "recent": 0, "s": [], "est": 0, "cv": collections.Counter(), "s0": 0.0, "s0n": 0})
+    rows = collections.defaultdict(
+        lambda: {
+            "cells": 0,
+            "ran": 0,
+            "recent": 0,
+            "s": [],
+            "est": 0,
+            "cv": collections.Counter(),
+            "s0": 0.0,
+            "s0n": 0,
+        }
+    )
     durations = {}
     for s, ds, arm, k, seed, job in planned:
         g = rows[(s, ds, arm)]
@@ -224,30 +264,87 @@ def main():
         if s in suites:
             for k, r in recs.items():
                 if k not in planned_keys:
-                    off[(s, r["dataset"], arm_of(r["algo"], r["backend"], r["filter_kind"], r["params"]))] += 1
+                    off[
+                        (
+                            s,
+                            r["dataset"],
+                            arm_of(r["algo"], r["backend"], r["filter_kind"], r["params"]),
+                        )
+                    ] += 1
     scratch = collections.defaultdict(lambda: {"cells": 0, "s": 0.0, "cv": collections.Counter()})
     for s, recs in by_suite.items():
         if s in suites:
             continue
         for k, r in recs.items():
-            g = scratch[(s, r["dataset"], arm_of(r["algo"], r["backend"], r["filter_kind"], r["params"]))]
+            g = scratch[
+                (s, r["dataset"], arm_of(r["algo"], r["backend"], r["filter_kind"], r["params"]))
+            ]
             g["cells"] += 1
             g["s"] += scaled(r)
             g["cv"][r["_cv"]] += 1
     ov = overhead(legs)
     with open(out / "inventory.csv", "w", newline="") as fh:
         w = csv.writer(fh)
-        w.writerow(["source", "family", "suite", "dataset", "arm", "cells", "with_record", "record_v2.9+",
-                    "estimated", "gpu_h_cells", "seed0_cells", "seed0_gpu_h", "newest_cv"])  # fmt: skip
+        w.writerow(
+            [
+                "source",
+                "family",
+                "suite",
+                "dataset",
+                "arm",
+                "cells",
+                "with_record",
+                "record_v2.9+",
+                "estimated",
+                "gpu_h_cells",
+                "seed0_cells",
+                "seed0_gpu_h",
+                "newest_cv",
+            ]
+        )
         for (s, ds, arm), g in sorted(rows.items()):
-            w.writerow(["suites.yaml", family(s, arm), s, ds, arm, g["cells"], g["ran"], g["recent"], g["est"],
-                        round(sum(g["s"]) / 3600, 3), g["s0n"], round(g["s0"] / 3600, 3),
-                        " ".join(f"{c}:{n}" for c, n in sorted(g["cv"].items()))])  # fmt: skip
+            w.writerow(
+                [
+                    "suites.yaml",
+                    family(s, arm),
+                    s,
+                    ds,
+                    arm,
+                    g["cells"],
+                    g["ran"],
+                    g["recent"],
+                    g["est"],
+                    round(sum(g["s"]) / 3600, 3),
+                    g["s0n"],
+                    round(g["s0"] / 3600, 3),
+                    " ".join(f"{c}:{n}" for c, n in sorted(g["cv"].items())),
+                ]
+            )
         for (s, ds, arm), g in sorted(scratch.items()):
-            tag = " (excluded)" if s in EXCLUDED_SCRATCH else " (obsolete)" if s in OBSOLETE_SCRATCH else ""
-            w.writerow(["scratch" + tag, family(s, arm), s, ds, arm, g["cells"], g["cells"],
-                        sum(n for c, n in g["cv"].items() if c in RECENT), 0, round(g["s"] / 3600, 3),
-                        g["cells"], round(g["s"] / 3600, 3), " ".join(f"{c}:{n}" for c, n in sorted(g["cv"].items()))])  # fmt: skip
+            tag = (
+                " (excluded)"
+                if s in EXCLUDED_SCRATCH
+                else " (obsolete)"
+                if s in OBSOLETE_SCRATCH
+                else ""
+            )
+            w.writerow(
+                [
+                    "scratch" + tag,
+                    family(s, arm),
+                    s,
+                    ds,
+                    arm,
+                    g["cells"],
+                    g["cells"],
+                    sum(n for c, n in g["cv"].items() if c in RECENT),
+                    0,
+                    round(g["s"] / 3600, 3),
+                    g["cells"],
+                    round(g["s"] / 3600, 3),
+                    " ".join(f"{c}:{n}" for c, n in sorted(g["cv"].items())),
+                ]
+            )
     with open(out / "off-grid.csv", "w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(["suite", "dataset", "arm", "records_off_current_grid"])
@@ -258,8 +355,10 @@ def main():
         w.writerow(["leg", "wall_over_sum_elapsed"])
         w.writerows((a, round(b, 3)) for a, b in ov)
     tot = sum(sum(g["s"]) for g in rows.values()) / 3600
-    print(f"{len(planned)} planned cells, {sum(g['ran'] for g in rows.values())} with a record, "
-          f"{tot:.1f} cell-GPU-h; overhead median {st.median(b for _, b in ov):.2f} over {len(ov)} legs")  # fmt: skip
+    print(
+        f"{len(planned)} planned cells, {sum(g['ran'] for g in rows.values())} with a record, "
+        f"{tot:.1f} cell-GPU-h; overhead median {st.median(b for _, b in ov):.2f} over {len(ov)} legs"
+    )
 
 
 if __name__ == "__main__":
