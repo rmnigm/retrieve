@@ -17,14 +17,12 @@ from retrieve.ops.triton._host import (
     ProbeLaunch,
     check_contiguous,
     gate_pays,
-    probe_candidates,
     probe_prep,
     probe_topk,
     sm_count,
     tile_for_width,
 )
 from retrieve.ops.triton.common import (
-    probe_candidates_kernel,
     probe_dots,
     probe_ids_kernel,
     probe_prep_kernel,
@@ -74,12 +72,10 @@ def _codesigned_probe_score_kernel(
     bloom_t_ptr,
     bit_freq_ptr,
     out_scores_ptr,
-    tile_max_ptr,
     global_scale,
     n_probe,
     width,
     tiles_y,
-    n_tiles_grid,
     n_qbits,
     D: tl.constexpr,
     D_PAD: tl.constexpr,
@@ -98,7 +94,6 @@ def _codesigned_probe_score_kernel(
     GATED: tl.constexpr,
     NQB: tl.constexpr,
     WIDE: tl.constexpr,
-    TILE_MAX: tl.constexpr,
 ):
     # Batch on grid_x, so the rows' early probes run together and share clusters in L2; tiles
     # split across grid_y × grid_z (kernels.md § SilverTorch kernels).
@@ -120,8 +115,6 @@ def _codesigned_probe_score_kernel(
     if tail:
         # Past the row's clusters (most of the width on a skewed IVF): the -inf tail.
         tl.store(out_row + slot, tl.full([BLOCK_P], float("-inf"), tl.float32), mask=slot < width)
-        if TILE_MAX:
-            tl.store(tile_max_ptr + bid * n_tiles_grid + t, tl.full([], float("-inf"), tl.float32))
     else:
         keep = valid
         if HAS_QB:
@@ -148,10 +141,6 @@ def _codesigned_probe_score_kernel(
             # No lane passes the filter: no code load, no dot (kernels.md § SilverTorch
             # kernels, "Tile skip").
             tl.store(out_row + slot, tl.full([BLOCK_P], float("-inf"), tl.float32), mask=valid)
-            if TILE_MAX:
-                tl.store(
-                    tile_max_ptr + bid * n_tiles_grid + t, tl.full([], float("-inf"), tl.float32)
-                )
         else:
             dots_i32, q_scale = probe_dots(
                 q_codes_ptr + bid * stride_qcb,
@@ -175,10 +164,6 @@ def _codesigned_probe_score_kernel(
             dots = tl.where(keep, dots, float("-inf"))
             # Lanes past the cluster's end hold the next cluster's slots: leave them to its tile.
             tl.store(out_row + slot, dots, mask=valid)
-            if TILE_MAX:
-                # The two-level top-k's tile max (kernels.md § SilverTorch kernels, "Top-k").
-                tile_max = tl.max(tl.where(valid, dots, float("-inf")), axis=0)
-                tl.store(tile_max_ptr + bid * n_tiles_grid + t, tile_max)
 
 
 @triton.jit
@@ -207,7 +192,6 @@ def _bloom_filter_kernel(
     qpos_ptr,
     bloom_t_ptr,
     out_scores_ptr,
-    tile_max_ptr,
     vote_ptr,
     list_ptr,
     count_ptr,
@@ -223,7 +207,6 @@ def _bloom_filter_kernel(
     BLOCK_P: tl.constexpr,
     NW: tl.constexpr,
     WIDE: tl.constexpr,
-    TILE_MAX: tl.constexpr,
 ):
     # Pass 1, TPP tiles of one row per program: -inf over every slot, then the tile's bloom
     # test on the NW words it spans, and a passing tile appended to the list.
@@ -240,12 +223,6 @@ def _bloom_filter_kernel(
         tl.full([TPP, BLOCK_P], float("-inf"), tl.float32),
         mask=keep_slot & in_grid[:, None],
     )
-    if TILE_MAX:
-        tl.store(
-            tile_max_ptr + bid * n_tiles_grid + tt,
-            tl.full([TPP], float("-inf"), tl.float32),
-            mask=in_grid,
-        )
     # Each word's bits inside [pos0, pos0 + n_valid); the shifts stay below 64.
     word = (pos0 >> 6)[:, None] + tl.arange(0, NW)[None, :]
     lo_b = tl.minimum(tl.maximum(pos0[:, None] - word * 64, 0), 64)
@@ -282,7 +259,6 @@ def _bloom_dot_kernel(
     qpos_ptr,
     bloom_t_ptr,
     out_scores_ptr,
-    tile_max_ptr,
     global_scale,
     n_probe,
     n_tiles_grid,
@@ -299,7 +275,6 @@ def _bloom_dot_kernel(
     BLOCK_D: tl.constexpr,
     N_PROGRAMS: tl.constexpr,
     WIDE: tl.constexpr,
-    TILE_MAX: tl.constexpr,
 ):
     # Pass 2, persistent: the listed tiles' per-lane bloom test and dot, as the one-pass kernel.
     for i in range(tl.program_id(0), tl.load(count_ptr), N_PROGRAMS):
@@ -331,9 +306,6 @@ def _bloom_dot_kernel(
         )
         dots = tl.where(keep, dots, float("-inf"))
         tl.store(row_base(out_scores_ptr, bid, stride_ob, WIDE) + slot, dots, mask=valid)
-        if TILE_MAX:
-            tile_max = tl.max(tl.where(valid, dots, float("-inf")), axis=0)
-            tl.store(tile_max_ptr + bid * n_tiles_grid + t, tile_max)
 
 
 @dataclass(frozen=True)
@@ -351,7 +323,6 @@ def _cps_prep(
     item_codes: Tensor,
     sort_perm: Tensor,
     global_scale: float,
-    k: int,
     width: int,
     *,
     query_bit_positions: Tensor | None,
@@ -378,7 +349,6 @@ def _cps_prep(
         num_stages=cfg.num_stages,
         block_d=cfg.block_d,
         skip=cfg.skip,
-        k=k,
     )
     has_qb = query_bit_positions is not None
     if has_qb != (bloom_transposed is not None):
@@ -421,7 +391,6 @@ def _cps_prep(
         k: kw[k] for k in ("stride_qpos", "stride_tm", "stride_ob", "FAN", "BLOCK_P", "WIDE")
     }
     shared["n_tiles_grid"] = n_tiles_grid
-    shared |= {k: kw[k] for k in ("tile_max_ptr", "TILE_MAX")}
     filter_kwargs = shared | {
         "vote_ptr": torch.empty(b * n_tiles_grid, dtype=torch.int8, device=query.device),
         "width": kw["width"],
@@ -493,7 +462,6 @@ def _codesigned_probe_score_impl(
         item_codes,
         sort_perm,
         global_scale,
-        k,
         width,
         query_bit_positions=query_bit_positions,
         bloom_transposed=bloom_transposed,
@@ -507,10 +475,7 @@ def _codesigned_probe_score_impl(
         _bloom_dot_kernel[two_pass.dot_grid](**two_pass.dot_kwargs)
     else:
         _codesigned_probe_score_kernel[launch.grid](**launch.kwargs)
-    cands = probe_candidates(launch, k)
-    if cands is not None:
-        probe_candidates_kernel[cands.grid](**cands.kwargs)
-    fin = probe_topk(launch, k, probe_ids, cluster_offsets, sort_perm, cands)
+    fin = probe_topk(launch, k, probe_ids, cluster_offsets, sort_perm)
     probe_ids_kernel[fin.grid](**fin.kwargs)
     return fin.ids, fin.scores
 
@@ -536,7 +501,6 @@ def codesigned_probe_score(
         item_codes,
         sort_perm,
         global_scale,
-        k,
         width,
         query_bit_positions=None,
         bloom_transposed=None,
@@ -548,10 +512,7 @@ def codesigned_probe_score(
         wrap_triton(_bloom_dot_kernel)[two_pass.dot_grid](**two_pass.dot_kwargs)
     else:
         wrap_triton(_codesigned_probe_score_kernel)[launch.grid](**launch.kwargs)
-    cands = probe_candidates(launch, k)
-    if cands is not None:
-        wrap_triton(probe_candidates_kernel)[cands.grid](**cands.kwargs)
-    fin = probe_topk(launch, k, probe_ids, cluster_offsets, sort_perm, cands)
+    fin = probe_topk(launch, k, probe_ids, cluster_offsets, sort_perm)
     wrap_triton(probe_ids_kernel)[fin.grid](**fin.kwargs)
     return fin.ids, fin.scores
 
@@ -581,7 +542,6 @@ def codesigned_probe_score_bloom(
         item_codes,
         sort_perm,
         global_scale,
-        k,
         width,
         query_bit_positions=query_bit_positions,
         bloom_transposed=bloom_transposed,
@@ -595,9 +555,6 @@ def codesigned_probe_score_bloom(
         wrap_triton(_bloom_dot_kernel)[two_pass.dot_grid](**two_pass.dot_kwargs)
     else:
         wrap_triton(_codesigned_probe_score_kernel)[launch.grid](**launch.kwargs)
-    cands = probe_candidates(launch, k)
-    if cands is not None:
-        wrap_triton(probe_candidates_kernel)[cands.grid](**cands.kwargs)
-    fin = probe_topk(launch, k, probe_ids, cluster_offsets, sort_perm, cands)
+    fin = probe_topk(launch, k, probe_ids, cluster_offsets, sort_perm)
     wrap_triton(probe_ids_kernel)[fin.grid](**fin.kwargs)
     return fin.ids, fin.scores

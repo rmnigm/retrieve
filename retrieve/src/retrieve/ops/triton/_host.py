@@ -33,10 +33,12 @@ IDS_BLOCK_N = 512
 # SilverTorch kernels, "Probe table").
 TABLE_MIN_PAIRS = 512
 
-# From this many tiles per top-k slot the scorers write per-tile maxima and the top-k runs on the
-# items of each row's k best tiles instead of the whole width (kernels.md § SilverTorch kernels,
-# "Top-k").
-TILE_TOPK_MIN_RATIO = 8
+# The two-level top-k (kernels.md § SilverTorch kernels, "Top-k"): from TOPK_MIN_SLOTS slots of
+# [B, width] the score buffer is padded to whole TOPK_BLOCK-slot blocks, and where a row has at
+# least TOPK_MIN_RATIO blocks per top-k slot the top-k runs on the items of its k best blocks.
+TOPK_BLOCK = 256
+TOPK_MIN_SLOTS = 1 << 22
+TOPK_MIN_RATIO = 8
 
 
 def gate_pays(launch: ProbeLaunch) -> bool:
@@ -77,9 +79,8 @@ def tile_for_width(configs: dict[int, tuple[Cfg, ...]], d: int, b: int, width: i
 class ProbeLaunch:
     grid: tuple[int, int, int]  # (B, tiles_y, tiles_x) over the cluster-aligned + tail tiles
     kwargs: dict[str, object]  # every kernel arg: tensors, strides, constexprs, cfg
-    all_scores: Tensor
+    all_scores: Tensor  # [B, width], padded to whole TOPK_BLOCKs for the two-level top-k
     prep: ProbePrep  # launched first: the int8 query and, with "TABLE", the per-row table
-    tile_max: Tensor | None  # [B, tiles] per-tile maxima: the top-k runs on the best tiles' items
 
 
 @dataclass(frozen=True)
@@ -119,7 +120,6 @@ def probe_prep(
     num_stages: int,
     block_d: int,
     skip: bool,
-    k: int,
 ) -> ProbeLaunch:
     """The half of both probe scorers' prep that is the same: validation, the per-row int8
     query, the ``[B, width]`` score buffer (``torch.empty``: the kernel writes every slot, a
@@ -139,17 +139,13 @@ def probe_prep(
     query = query.contiguous()
     q_codes = torch.empty((b, d), dtype=torch.int8, device=query.device)
     q_scales = torch.empty(b, dtype=torch.float32, device=query.device)
+    if b * width >= TOPK_MIN_SLOTS:
+        # The scorer's -inf tail covers the pad: the grid and the tail mask follow the width.
+        width = triton.cdiv(width, TOPK_BLOCK) * TOPK_BLOCK
     all_scores = torch.empty((b, width), dtype=torch.float32, device=query.device)
     # Cluster-aligned tiles: at most one partial tile per probe, so n_probe extra tiles cover
     # the rounding and the -inf tail past the row's items.
     grid, tiles_y = grid_batch_tiles(b, triton.cdiv(width, block_p) + n_probe, 1)
-    n_tiles_grid = grid[1] * grid[2]
-    # TILE_MAX=False compiles the stores out, so any fp32 tensor stands in.
-    tile_max = (
-        torch.empty((b, n_tiles_grid), dtype=torch.float32, device=query.device)
-        if n_tiles_grid >= TILE_TOPK_MIN_RATIO * k
-        else None
-    )
     npp = triton.next_power_of_2(n_probe)
     probe_ids = probe_ids.contiguous()
     use_table = b * n_probe >= TABLE_MIN_PAIRS
@@ -192,8 +188,6 @@ def probe_prep(
         "n_probe": n_probe,
         "width": width,
         "tiles_y": tiles_y,
-        "n_tiles_grid": n_tiles_grid,
-        "tile_max_ptr": all_scores if tile_max is None else tile_max,
         "D": d,
         "D_PAD": triton.next_power_of_2(d),
         "NPP": npp,
@@ -206,78 +200,41 @@ def probe_prep(
         "BLOCK_D": block_d,
         "SKIP": skip,
         "WIDE": wide(all_scores),
-        "TILE_MAX": tile_max is not None,
         "num_warps": num_warps,
         "num_stages": num_stages,
     }
-    return ProbeLaunch(grid, kwargs, all_scores, prep, tile_max)
+    return ProbeLaunch(grid, kwargs, all_scores, prep)
 
 
-@dataclass(frozen=True)
-class ProbeCandidates:
-    grid: tuple[int, int]  # (B, k_tiles): one program per row and selected tile
-    kwargs: dict[str, object]  # common.probe_candidates_kernel's args
-    scores: Tensor  # [B, k_tiles * BLOCK_P] fp32, -inf past a tile's in-cluster lanes
-    slots: Tensor  # [B, k_tiles * BLOCK_P] int64, the scores' slots in the [B, width] buffer
-
-
-def probe_candidates(launch: ProbeLaunch, k: int) -> ProbeCandidates | None:
-    """The first level of the two-level top-k, where the scorer wrote tile maxima: each row's
-    ``k`` tiles of largest max (``torch.topk``, unsorted), and the launch that gathers their
-    in-cluster scores and slots. The row's top-k items all lie in those tiles, so the second
-    level's ``torch.topk`` over the ``[B, k · BLOCK_P]`` candidates returns the same scores,
-    ids equal up to ties (kernels.md § SilverTorch kernels, "Top-k"). ``None``: no tile maxima,
-    the top-k runs on the whole width."""
-    if launch.tile_max is None:
-        return None
-    kw = launch.kwargs
-    b, n_tiles = launch.tile_max.shape
-    k_tiles = min(k, n_tiles)
-    top_tiles = torch.topk(launch.tile_max, k_tiles, dim=1, sorted=False).indices
-    n = k_tiles * kw["BLOCK_P"]
-    scores = torch.empty((b, n), dtype=torch.float32, device=top_tiles.device)
-    slots = torch.empty((b, n), dtype=torch.int64, device=top_tiles.device)
-    kwargs: dict[str, object] = {
-        "top_tiles_ptr": top_tiles,
-        "scores_ptr": launch.all_scores,
-        "table_ptr": kw["table_ptr"],
-        "probe_ids_ptr": kw["probe_ids_ptr"],
-        "offsets_ptr": kw["offsets_ptr"],
-        "cand_scores_ptr": scores,
-        "cand_slots_ptr": slots,
-        "n_probe": kw["n_probe"],
-        "k_tiles": k_tiles,
-        "stride_ob": kw["stride_ob"],
-        "NPP": kw["NPP"],
-        "FAN": kw["FAN"],
-        "BLOCK_P": kw["BLOCK_P"],
-        "TABLE": kw["TABLE"],
-        "WIDE": kw["WIDE"],
-        "num_warps": 4,
-    }
-    return ProbeCandidates((b, k_tiles), kwargs, scores, slots)
+def _two_level_topk(all_scores: Tensor, k: int) -> tuple[Tensor, Tensor]:
+    """``torch.topk(all_scores, k)`` up to ties. On a buffer ``probe_prep`` padded to whole
+    ``TOPK_BLOCK``s with at least ``TOPK_MIN_RATIO`` blocks per slot: each block's max, the
+    row's ``k`` best blocks, and the top-k of their items, which hold the row's top-k (an item
+    in it has its block's max at least as large; were that block not among the ``k`` best,
+    ``k`` other blocks would each hold an item as large). Scores ``torch.equal``, ids equal up
+    to ties (kernels.md § SilverTorch kernels, "Top-k")."""
+    b, width = all_scores.shape
+    n_blocks = width // TOPK_BLOCK
+    if width % TOPK_BLOCK or b * width < TOPK_MIN_SLOTS or n_blocks < TOPK_MIN_RATIO * k:
+        return torch.topk(all_scores, k, dim=1)
+    block_max = all_scores.view(b, n_blocks, TOPK_BLOCK).amax(dim=2)
+    blocks = torch.topk(block_max, k, dim=1, sorted=False).indices
+    lane = torch.arange(TOPK_BLOCK, device=all_scores.device)
+    cand_slots = (blocks.unsqueeze(2) * TOPK_BLOCK + lane).view(b, k * TOPK_BLOCK)
+    scores, at = torch.topk(all_scores.gather(1, cand_slots), k, dim=1)
+    return scores, cand_slots.gather(1, at)
 
 
 def probe_topk(
-    launch: ProbeLaunch,
-    k: int,
-    probe_ids: Tensor,
-    cluster_offsets: Tensor,
-    sort_perm: Tensor,
-    candidates: ProbeCandidates | None = None,
+    launch: ProbeLaunch, k: int, probe_ids: Tensor, cluster_offsets: Tensor, sort_perm: Tensor
 ) -> ProbeIds:
-    """``torch.topk`` over the compact slots (``width >= k`` by the layer's probe-pool check), or
-    over the two-level top-k's ``candidates`` (whose launch the caller ran), and the
-    ``common.probe_ids_kernel`` launch that turns the winning slots into original ids,
+    """``torch.topk`` over the compact slots (``width >= k`` by the layer's probe-pool check)
+    and the ``common.probe_ids_kernel`` launch that turns the winning slots into original ids,
     ``-1`` at every ``-inf`` slot — a rejected item or a slot past the row's items — so the
     Triton backend meets ``interfaces.py``'s "``-1`` / ``-inf`` are the no-item sentinels" as
     ``masked_topk`` does for the other backends. The caller launches it (the op bodies keep
     their ``wrap_triton`` lines inline). Capture-safe: no host sync, no data-dependent branch."""
-    if candidates is None:
-        scores, slots = torch.topk(launch.all_scores, k, dim=1)
-    else:
-        scores, at = torch.topk(candidates.scores, k, dim=1)
-        slots = candidates.slots.gather(1, at)
+    scores, slots = _two_level_topk(launch.all_scores, k)
     block_k = min(triton.next_power_of_2(k), IDS_BLOCK_K)
     ids = torch.empty_like(slots)
     n_probe = probe_ids.shape[1]

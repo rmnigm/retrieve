@@ -329,6 +329,10 @@ its own tile shape, launch grid, or masking policy:
   [`quantize_int8`](#quantize_int8-retrieveindexing)), and with the table on the
   row's tile ends, slot ends and cluster starts; it also zeroes the bloom
   two-pass's list count ("Probe prep").
+- `probe_candidates_kernel` — a *launched* kernel, one program per (row,
+  selected tile): the two-level top-k's gather of the k best tiles'
+  in-cluster scores and slots ([SilverTorch kernels](#silvertorch-kernels),
+  "Top-k").
 - `probe_dots(q_row_ptr, q_scales_ptr, bid, item_codes_ptr, pos, stride_cn, keep, D, D_PAD,
   BLOCK_D, BLOCK_P) → (int32 [BLOCK_P], q_scale)` — both probe scorers' int8 dot: one
   `tl.dot` at `D_PAD ≤ 256` (loads in the v2.1 order, which fixes that path's SASS), a
@@ -1332,6 +1336,39 @@ batch-mates that probe the same clusters read them from L2 (a 16-query
 arXiv batch probes 321 distinct of 384 `(row, cluster)` pairs). Measured
 against a tile-first grid: arXiv none 112 → 91 µs, bloom 126 → 107 µs
 ([artifacts](../artifacts/kernel-opt/predictions.md)).
+
+**Top-k** (`_host.probe_candidates`, `common.probe_candidates_kernel`,
+`_host.probe_topk`). `torch.topk` over the `[B, width]` buffer costs ∝
+`B · width`: four 8-bit radix passes plus a gather. At C7's PubMed cell
+(`n_probe` 1024, bs 16) that is 1.7 of 2.7 ms, though 99.97 % of the slots
+are `-inf`. Meta's arm runs the same radix select on its raw output: 2–12 %
+faster at int32 (integer keys), and about half the passes on its default
+fp16 keys, which a bit-exact path cannot use.
+
+From `_host.TILE_TOPK_MIN_RATIO` = 8 tiles per top-k slot, the top-k is
+two-level. Every scorer program also stores its tile's max under the
+`TILE_MAX` constexpr, over its in-cluster lanes, `-inf` for a skipped or
+tail tile. The two-pass filter writes `-inf` for all tiles, and its dot
+pass then writes the listed tiles' maxima. Then:
+
+1. `torch.topk` over the `[B, tiles]` maxima picks each row's k tiles
+   (unsorted).
+2. One program per (row, tile) gathers those tiles' in-cluster scores and
+   slots into `[B, k · BLOCK_P]`. Lanes past the cluster, which belong to
+   the next tile, and tail lanes read `-inf`, so no slot is gathered twice.
+3. `torch.topk` over the candidates gives the winners, and their slots go
+   to the id epilogue as before.
+
+**Why it is exact.** If an item x is in the row's top-k, its tile's max is
+at least x. If that tile were not among the k largest maxima, k other tiles
+would each hold an item at least as large as x. So the candidates hold the
+top-k multiset: scores are `torch.equal` to the whole-width top-k, and ids
+differ only among tied scores. Rows with fewer than k finite items fill
+with `-inf` / `-1` as before (`test_two_level_topk_ties_and_finite_count_boundary`:
+four distinct code rows, exactly k − 1 / k / k + 1 passing items).
+
+Below the ratio the scorers compile with `TILE_MAX=False`, the stores
+compile out, and the top-k runs on the whole width.
 
 **Ids after the top-k** (`common.probe_ids_kernel`, one launch after
 `torch.topk`). The scorer writes scores only. A one-program-per-row

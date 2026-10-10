@@ -6,15 +6,15 @@ from __future__ import annotations
 import pytest
 import torch
 
+import retrieve.ops.triton._host as host
 from retrieve.indexing.quantize import quantize_int8_global
 from retrieve.ops import reference
-from retrieve.ops.triton._host import tile_for_width, width_tiles
+from retrieve.ops.triton._host import width_tiles
 from retrieve.ops.triton.codesigned_probe_score import codesigned_probe_score
 from retrieve.ops.triton.codesigned_probe_score_exact import (
     CONFIGS,
     CodesignedProbeScoreExactConfig,
     _codesigned_probe_score_exact_impl,
-    _cpse_prep,
     codesigned_probe_score_exact,
 )
 from tests.conftest import make_index, make_query
@@ -174,13 +174,18 @@ def test_degenerate_rows_give_exact_sentinels():
 
 @pytest.mark.parametrize("d", [64, 768])
 @pytest.mark.parametrize("delta", [-1, 0, 1])
-def test_two_level_topk_ties_and_finite_count_boundary(d, delta):
-    """The two-level top-k (tile maxima, then the best tiles' items; kernels.md § SilverTorch
+def test_two_level_topk_ties_and_finite_count_boundary(d, delta, monkeypatch):
+    """The two-level top-k (block maxima, then the best blocks' items; kernels.md § SilverTorch
     kernels, "Top-k") under heavy ties (four distinct code rows) and with exactly ``k + delta``
     passing items a row (every list probed, one clause value): scores ``torch.equal`` to the
     whole-width reference, ids up to ties, ``-1`` / ``-inf`` past the finite count."""
-    b, k, n_lists = 4, 32, 512
+    monkeypatch.setattr(host, "TOPK_MIN_SLOTS", 0)
+    b, k, n_lists = 4, 4, 512
     lay = make_probe_family(b, n_lists, 60, n_lists)
+    width = -(-lay.width // host.TOPK_BLOCK) * host.TOPK_BLOCK
+    assert width // host.TOPK_BLOCK >= host.TOPK_MIN_RATIO * k, (
+        "the two-level top-k does not engage"
+    )
     g = torch.Generator(device="cuda").manual_seed(11)
     base = torch.randint(-127, 128, (4, d), dtype=torch.int8, device="cuda", generator=g)
     codes = base[torch.randint(0, 4, (lay.n,), device="cuda", generator=g)].contiguous()
@@ -190,10 +195,6 @@ def test_two_level_topk_ties_and_finite_count_boundary(d, delta):
     q_attrs = torch.ones((b, 1), dtype=torch.long, device="cuda")
     args = (make_query(b, d), lay.probe_ids, lay.cluster_offsets, codes, lay.sort_perm, attrs,
             rev, q_attrs, 0.01)  # fmt: skip
-    cfg = tile_for_width(CONFIGS, d, b, lay.width)
-    launch = _cpse_prep(*args[:5], 0.01, k, lay.width, item_clause_attrs=attrs,
-                        clause_is_reverse=rev, query_clause_attrs=q_attrs, cfg=cfg)  # fmt: skip
-    assert launch.tile_max is not None, "the two-level top-k does not engage"
     out = codesigned_probe_score_exact(*args, k, lay.width)
     ref = reference.codesigned_probe_score_exact(*args, k, lay.width)
     assert_topk_equal(*out, *ref)
