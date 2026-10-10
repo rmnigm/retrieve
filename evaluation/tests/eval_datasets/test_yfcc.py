@@ -438,6 +438,22 @@ class TestPrepAttrsLayout:
         log = json.loads((out / "prep_log.json").read_text())
         assert log["attrs"]["cap"]["max_tags"] == 2 and "gt_fidelity" in log["attrs"]
 
+    def test_prep_attrs_two_builds_are_byte_identical(self, raw_root, tmp_path):
+        # tag ranks break ties by upstream id (a stable argsort): deterministic before and after
+        # the ETL tie-rule pass (docs/system/datasets.md § yfcc10m)
+        builds = [tmp_path / "a", tmp_path / "b"]
+        for out in builds:
+            assert yfcc.cmd_prep(_ns(output_dir=str(out))) == 0
+            assert yfcc.cmd_attrs(_ns(output_dir=str(out), max_tags=2)) == 0
+        files = sorted(
+            p.relative_to(builds[0])
+            for p in builds[0].rglob("*")
+            if p.is_file() and p.name != "prep_log.json"
+        )
+        assert any(f.name == "tag_vocab.json" for f in files)
+        for f in files:
+            assert (builds[0] / f).read_bytes() == (builds[1] / f).read_bytes(), f
+
 
 def _ns(**kw):
     return argparse.Namespace(**kw)

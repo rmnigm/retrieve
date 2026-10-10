@@ -674,7 +674,8 @@ def cmd_attrs(args) -> int:
         )
         .filter(pl.col("main0") != "")
     )
-    main_freq = leaf0.group_by("main0").len().sort("len", descending=True)
+    # group_by order varies per run: count ties break by name (datasets.md § arxiv)
+    main_freq = leaf0.group_by("main0").len().sort(["len", "main0"], descending=[True, False])
     cat_main_names = main_freq["main0"].to_list()
     cat_main_vocab = {n: i for i, n in enumerate(cat_main_names)}
     with open(output / "cat_main_vocab.json", "w") as f:
@@ -720,7 +721,11 @@ def cmd_attrs(args) -> int:
     auth_explode = pa.explode("auth_top2").filter(
         pl.col("auth_top2").is_not_null() & (pl.col("auth_top2") != "")
     )
-    auth_freq = auth_explode.group_by("auth_top2").len().sort("len", descending=True)
+    auth_freq = (
+        auth_explode.group_by("auth_top2")
+        .len()
+        .sort(["len", "auth_top2"], descending=[True, False])
+    )
     author_keys = auth_freq["auth_top2"].to_list()
     # 0-indexed dense; -1 reserved as padding.
     author_vocab = {k: i for i, k in enumerate(author_keys)}
@@ -733,7 +738,7 @@ def cmd_attrs(args) -> int:
         schema={"auth_top2": pl.Utf8, "author_id": pl.Int64},
     )
     pa_authors = (
-        auth_explode.join(auth_remap, on="auth_top2", how="inner")
+        auth_explode.join(auth_remap, on="auth_top2", how="inner", maintain_order="left")
         .group_by("item_id", maintain_order=True)
         .agg(pl.col("author_id").head(2).alias("author_ids"))
     )
@@ -862,7 +867,7 @@ def cmd_attrs(args) -> int:
         .filter(pl.col("cat_list").is_not_null() & (pl.col("cat_list") != ""))
         .rename({"cat_list": "leaf"})
     )
-    leaf_freq = leaves_long.group_by("leaf").len().sort("len", descending=True)
+    leaf_freq = leaves_long.group_by("leaf").len().sort(["len", "leaf"], descending=[True, False])
     # Drop long tail (count < args.wide_min_count). Default 50.
     leaf_freq_kept = leaf_freq.filter(pl.col("len") >= args.wide_min_count)
     wide_names = leaf_freq_kept["leaf"].to_list()

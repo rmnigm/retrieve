@@ -95,3 +95,16 @@ def test_prep_then_ingest_pass_validate_layout(raw, tmp_path):
     attrs = torch.load(out / "item_attrs_narrow.pt")
     assert attrs.shape == (50, len(laion.CLAUSES), 1)
     assert torch.equal(attrs[:, 0], attrs[:, 3])  # domain and its reverse clause
+
+
+def test_prep_two_builds_are_byte_identical(raw, tmp_path, monkeypatch):
+    # prep picks items / queries by position after the domain join, which now keeps the left
+    # order explicitly; today's polars kept it anyway, so this also passes on the old code
+    args = argparse.Namespace(parts="0-1", keep_items=50, n_heldout=8, seed=0)
+    outs = []
+    for name in ("a", "b"):
+        monkeypatch.setattr(laion, "WORK", tmp_path / name)
+        assert laion.cmd_prep(args) == 0
+        outs.append(tmp_path / name)
+    for f in ("items.parquet", "queries.parquet"):
+        assert (outs[0] / f).read_bytes() == (outs[1] / f).read_bytes(), f
