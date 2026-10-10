@@ -56,6 +56,10 @@ LEGS = [
       for d in ["goodreads", "goodreads-synth", "arxiv", "arxiv-synth", "arxiv-corr-synth"]],
 ]  # fmt: skip
 SHORT = {"linr_v1_filter_mask": "v1", "linr_v2": "v2", "linr_v3": "v3", "silvertorch": "st", "postfilter": "pf"}
+# C6 ceiling checks (script legs, quality only): one per bench on C6's GPU, after the bench's tune; GPU-h from the measured runs
+# (validation: goodreads + arXiv 9 min, YFCC 3 min, PubMed 21 min, LAION 44 min); LAION has no tune leg in the final grid
+CEILING = {"goodreads": (["goodreads", "goodreads-synth"], 0.08), "arxiv": (["arxiv", "arxiv-synth"], 0.08),
+           "yfcc10m": (["yfcc10m", "yfcc10m-synth"], 0.05), "pubmed": (["pubmed"], 0.35), "laion30m": ([], 0.75)}  # fmt: skip
 GPUS = {"d0": ("a100-x2-d", 0), "d1": ("a100-x2-d", 1), "b": ("a100-x1-b", 0), "p1": ("a100-x1-eval", 0)}
 
 
@@ -99,6 +103,17 @@ def main():
                     "command": " ".join(cmd.split()), "upload": f"campaign-final/{ds}-{suite}" + (f"-{gpu}" if algos else ""), "note": note})  # fmt: skip
         prev[gpu] = lid
         totals[gpu] += h
+    for bench, (tuned, h) in CEILING.items():
+        tune = [x["id"] for x in out if x["suite"] == "tune-timed" and x["dataset"] in tuned]
+        lid = f"d1-{len([x for x in out if x['gpu'] == 'd1']) + 1:02d}-ceiling-{bench}"
+        res = f"/scratch/final/gpu1/ceiling-int8-{bench}"
+        out.append({"id": lid, "gpu": "d1", "pod": "a100-x2-d", "index": 1, "family": "C6", "suite": "ceiling-script",
+                    "dataset": bench, "after": sorted({"stage-a100-x2-d", prev["d1"], *tune}), "cells": 0, "gpu_h": h,
+                    "official": False, "command": f"bash docs/artifacts/campaign-final/ceiling.sh {bench} {res}",
+                    "upload": f"campaign-final/ceiling-int8-{bench}",
+                    "note": "quality only; not grid cells" + ("" if tuned else "; no LAION tune leg (its point is the calibration's 16384 / 4096)")})  # fmt: skip
+        prev["d1"] = lid
+        totals["d1"] += h
     print(render(out, totals))
 
 
