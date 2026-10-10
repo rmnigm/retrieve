@@ -1012,7 +1012,8 @@ def cmd_attrs(args: argparse.Namespace) -> int:
             med.filter(pl.col("journal") != "")
             .group_by("journal")
             .len()
-            .sort("len", descending=True)
+            # group_by order varies per run: ties break by name (datasets.md § pubmed)
+            .sort(["len", "journal"], descending=[True, False])
             .head(args.journal_vocab)
         )
         journal_names = jfreq["journal"].to_list()
@@ -1020,7 +1021,7 @@ def cmd_attrs(args: argparse.Namespace) -> int:
             med.filter(pl.col("language") != "")
             .group_by("language")
             .len()
-            .sort("len", descending=True)
+            .sort(["len", "language"], descending=[True, False])
         )
         lang_names = lfreq["language"].to_list()
         jl = med.select(
