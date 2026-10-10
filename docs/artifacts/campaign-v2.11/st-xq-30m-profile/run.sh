@@ -4,6 +4,7 @@
 # bounds) and st-topk/prof.py with official int32 (kernel splits, ours + Meta's), pod d GPU 1. Hub artifacts/st-xq-30m-profile.
 #   flock /scratch/gpu1.lock bash run.sh
 set -u
+[ -e /scratch/v211/st-xq.skip ] && { echo "$(date -Is) skipped (controller: laion runs this profile on GPU 0)"; exit 0; }
 W=/scratch/wt/v1-topk-8c9b336; PY=/venvs/d-run-v1topk/bin/python
 R=/scratch/campaign-v211/st-xq-30m-profile; mkdir -p "$R"
 echo "pod-d st-xq-30m-profile on GPU 1 (taskset -c 96-127) since $(date -Is), driver $0" > /scratch/gpu1-holder
