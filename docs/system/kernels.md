@@ -452,18 +452,41 @@ scores ([check](../artifacts/campaign-v2/v-pilot/v3_seed_check.py)). V3 store (`
 on every forward, so the torch reference and the Triton kernel see byte-for-
 byte identical bits.
 
-## PostfilterKNN dense path — pure torch, no kernel
+## PostfilterKNN dense path — cuBLAS, and `gemv_scores` for one query
 
 `PostfilterKNN`'s forward is `torch.mm(query_fp16, item_embs_t,
 out_dtype=torch.float32)` (fp32 operands on CPU, § Score conventions) + optional `masked_fill(-inf)` + `torch.topk`
 over the fp32 scores (§ Score conventions) — implemented directly in
-[`PostfilterKNN`](../../retrieve/src/retrieve/modules/knn.py).
-There is no Triton kernel here because one that only fuses the matmul
-still materializes the full `[B, N]` score buffer and calls the same
-host-side `torch.topk`, so its memory traffic and selection cost match
-cuBLAS + CUB exactly. `PostfilterKNN` accepts the
-`backend=` flag for API symmetry but both values dispatch to this same
-pure-torch path.
+[`PostfilterKNN`](../../retrieve/src/retrieve/modules/knn.py). The one
+exception is a single query on the triton backend, below.
+
+### `gemv_scores` — the single-query GEMV ([file](../../retrieve/src/retrieve/ops/triton/gemv_scores.py))
+
+At B = 1 cuBLAS picks its kernel by shape. At D 128 / 256 (0.8–3 M items)
+that is `gemv2N`, a CUDA-core kernel at about half the memory bandwidth:
+1.04 ms of a 1.3 ms LiNR V1 forward on arXiv 3 M d128. At D 768 / 10 M
+and some other shapes it is a cutlass tensor-core GEMM. Its fp32
+accumulation is one FMA per k, k = 0 … D−1 in order (found by trying
+split, interleaved, FMA / mul-add orders against it; `order_probe.py` in
+the [artifact](../artifacts/campaign-v2.10/v1-bs1/README.md)).
+`gemv_scores` runs that order with one item per lane and `BLOCK_N` = 1024
+items a program. That gives `torch.equal` scores at 2.0–2.2× the speed
+(goodreads 287 → 137 µs, arXiv d128 1041 → 478, d256 1886 → 937).
+
+Because the kernel choice depends on (B, N, D), `register_index` checks
+the GEMV against `torch.mm` on 8 item rows taken as queries, and sets
+`gemv_exact`; a kernel's accumulation order does not depend on the data.
+The triton backend's `score()` takes the GEMV only at B = 1 with
+`gemv_exact`, and cuBLAS otherwise. So scores are cuBLAS's bit for bit
+whatever the shape: PubMed d768 / 10 M keeps cuBLAS. `register_index`
+first creates the cuBLAS handle with a 1×1 `mm`. The handle allocates
+outside the caching allocator, and the check would otherwise make the
+process's first cuBLAS call at the build's memory peak
+(`CUBLAS_STATUS_NOT_INITIALIZED` on PubMed 10 M d768 in a two-layer
+process). A module loaded from a state dict has `gemv_exact` False
+(cuBLAS) until `register_index`. `interfaces.DISPATCH` keeps the label
+`cublas`: the two backends' scores are still equal, so the harness's
+collapse of `linr_v1` triton / torch stays valid.
 
 ## `fused_masked_knn_topk` — PrefilterKNN sparse path
 
@@ -845,6 +868,19 @@ reduces over the `C × A_max` clause-attribute grid in registers. No
 clauses, reverse XOR, inactive override. The epilogue is a single
 `tl.store` of the `pass_mask` tile — no cumsum, no atomics.
 
+**Batched rows** (`_clause_mask_scores_batched_kernel`, `clause_mask_scores`
+at B > 1). The per-row kernel is one program per (row, item tile). Each
+row reloads the tile's int64 `[BLOCK_N, C, A_max]` attrs and redoes the
+compares, so a selective multi-clause batch cost B× the attr traffic:
+LiNR V1 `all4` bs 16, mask 1336 µs of a 2.0 ms forward on goodreads and
+5226 of 7.4 ms on arXiv. The batched kernel is one program per item tile
+and `BLOCK_B` = 16 rows. It loads each clause's attrs once, compares them
+with every row's value (`[BLOCK_B, BLOCK_N]`), skips a clause no row of
+the block queries, and writes each row's masked scores. The predicate is
+the same boolean, so the output is `torch.equal`. Mask: goodreads `all4`
+bs 16 1336 → 253 µs, arXiv 5226 → 877 µs. At B = 1 the per-row kernel
+runs unchanged.
+
 **Tile config.** `ClauseMaskConfig(block_n, num_warps, num_stages)` —
 shipped as `DEFAULT_CONFIG` (the bool form) and `SCORES_CONFIG` (the
 `clause_mask_scores` form, 128 lanes on 4 warps: the bool tile ran the
@@ -956,6 +992,14 @@ one regime; there is correspondingly no `tune-kernels` subcommand. The
 fused `bloom_compact` (next section) shares this kernel's inner
 subset-test helper and its 3-D grid, and adds `clause_compact`'s
 two-phase compaction.
+
+**Batched rows** (`_bloom_match_scores_batched_kernel`,
+`bloom_match_scores` at B > 1). As for `clause_mask`: one program per item
+tile loads the tile's `[BLOCK_N, W]` signature words once and tests them
+against each of `BLOCK_B` = 16 rows (`bloom_subset_pass` per row). The
+per-row kernel reloads them per row. Outputs are `torch.equal`, and LiNR
+V1 bloom bs 16 / 64 on arXiv runs 0.82 / 0.78 of before. B = 1 keeps the
+per-row kernel.
 
 ## `bloom_compact` — fused subset test + stream compaction
 
