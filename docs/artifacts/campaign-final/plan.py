@@ -15,7 +15,8 @@ import json
 import sys
 
 OVERHEAD = 1.45  # median wall / summed cell time over 20 legs (sizing.py, overhead.csv)
-DIM = {"goodreads": 128, "goodreads-synth": 128, "arxiv": 128, "arxiv-synth": 128, "arxiv-corr-synth": 128,
+DIM = {"laion1m": 256, "laion3m": 256, "laion10m": 256, "laion1m-synth": 256, "laion3m-synth": 256,
+       "laion10m-synth": 256, "goodreads": 128, "goodreads-synth": 128, "arxiv": 128, "arxiv-synth": 128, "arxiv-corr-synth": 128,
        "yfcc10m": 192, "yfcc10m-synth": 192, "pubmed": 768, "laion30m": 256, "laion30m-synth": 256}  # fmt: skip
 # quality-only tune legs are build-bound, which elapsed_s misses: the measured legs (validation, night-queue item 8)
 TUNE_Q_MEASURED = {"pubmed": 2.19, "yfcc10m": 0.4, "yfcc10m-synth": 0.32, "goodreads": 0.2, "goodreads-synth": 0.22,
@@ -23,6 +24,17 @@ TUNE_Q_MEASURED = {"pubmed": 2.19, "yfcc10m": 0.4, "yfcc10m-synth": 0.32, "goodr
 # timed tune legs measured at v2.11 (campaign-v2.11/{goodreads,yfcc10m}-tune-timed: elapsed x OVERHEAD over the final grid's
 # capped cells; pubmed-tune-timed: its leg's 3.25 GPU-h); arXiv's is not measured yet
 TUNE_T_MEASURED = {"goodreads": 1.51, "goodreads-synth": 2.25, "yfcc10m": 1.16, "yfcc10m-synth": 0.72, "pubmed": 3.25}  # fmt: skip
+# the N-sweep (never run): per-leg cell seconds from the 30 M analogues (sizing inventory): exact arms laion30m-synth
+# 252 s/cell and laion30m-x 257 / 151 s scaled by N / 30 M with a 30 s floor (arXiv 3 M d128 measured 32 s), arXiv d256 at
+# 1.5x its d128 cells; SilverTorch and co-design cells ~flat (30 M: 34 / 35 / 28 s)
+NSWEEP_CELL_S = {
+    ("nsweep-synth", "laion1m-synth"): 18 * 30 + 12 * 34, ("nsweep-synth", "laion3m-synth"): 18 * 30 + 12 * 34,
+    ("nsweep-synth", "laion10m-synth"): 18 * 84 + 12 * 34, ("nsweep-synth", "arxiv-synth"): 18 * 47 + 12 * 44,
+    ("nsweep", "laion1m"): 4 * 30 + 8 * 35, ("nsweep", "laion3m"): 4 * 30 + 8 * 35,
+    ("nsweep", "laion10m"): 2 * 86 + 2 * 50 + 8 * 35,
+    ("nsweep-codesign", "laion1m"): 16 * 28, ("nsweep-codesign", "laion3m"): 16 * 28,
+    ("nsweep-codesign", "laion10m"): 16 * 28,
+}  # fmt: skip
 REAL = ["goodreads", "arxiv", "yfcc10m", "pubmed"]
 OFFICIAL_VENV = "/venvs/final-o3"  # scripts/build_official_o3.sh; env.official_build records the .so sha
 
@@ -59,6 +71,10 @@ LEGS = [
     *[("p1", "C4", s, [d], None, None, "", "") for s in ("bloomwidth", "bloomwidth-timed") for d in ["goodreads", "arxiv", "pubmed"]],
     *[("p1", "tune", s, [d], None, None, "--skip-perf" if s == "tune-q" else "", "") for s in ("tune-q", "tune-timed")
       for d in ["arxiv", "arxiv-synth", "arxiv-corr-synth"]],
+    # the fixed-d N-sweep extension (controller 2026-10-13): all of it on pod 1, one box across 1 / 3 / 10 M
+    *[("p1", "N-sweep C1+C6", "nsweep-synth", [d], None, None, "--interleave", "") for d in ["laion1m-synth", "laion3m-synth", "laion10m-synth", "arxiv-synth"]],
+    *[("p1", "N-sweep C6", "nsweep", [d], None, None, "--interleave", "V1, V2 and SilverTorch in one group per sweep") for d in ["laion1m", "laion3m", "laion10m"]],
+    *[("p1", "N-sweep C5", "nsweep-codesign", [d], None, None, "--interleave --mode eager", "official from the -O3 venv") for d in ["laion1m", "laion3m", "laion10m"]],
 ]  # fmt: skip
 SHORT = {"linr_v1_filter_mask": "v1", "linr_v2": "v2", "linr_v3": "v3", "silvertorch": "st", "postfilter": "pf"}
 # C6 ceiling checks (script legs, quality only): one per bench on C6's GPU, after the bench's tune; GPU-h from the measured runs
@@ -82,6 +98,8 @@ def price(inv, suite, ds, algos, backend):
         h += float(r["gpu_h_cells"]) * OVERHEAD
     if suite == "tune-q":
         h = TUNE_Q_MEASURED[ds]
+    if suite.startswith("nsweep"):
+        h = NSWEEP_CELL_S[(suite, ds)] * OVERHEAD / 3600
     if suite == "tune-timed" and ds in TUNE_T_MEASURED:
         h = TUNE_T_MEASURED[ds]
     return cells, h
@@ -92,6 +110,7 @@ def main():
     out, totals, prev = [], collections.Counter(), {}
     for n, (gpu, fam, suite, dss, algos, backend, flags, note) in enumerate(LEGS):
         (ds,) = dss
+        dim = 256 if suite.startswith("nsweep") else DIM[ds]
         cells, h = price(inv, suite, ds, algos, backend)
         if fam == "M1":
             cells, h = 0, 0.5
@@ -99,16 +118,16 @@ def main():
         lid = f"{gpu}-{len([x for x in out if x['gpu'] == gpu]) + 1:02d}-{suite}-{ds}" + (f"-{'-'.join(SHORT[a] for a in algos)}" if algos else "") + (f"-{backend}" if backend else "")
         res = f"/scratch/final/gpu{idx}" if pod == "a100-x2-d" else "/scratch/final/gpu0"
         if algos is None:
-            cmd = f"{BENCH} campaign --suite {suite} --dataset {ds} --dim {DIM[ds]} {flags} --out {res} --resume"
+            cmd = f"{BENCH} campaign --suite {suite} --dataset {ds} --dim {dim} {flags} --out {res} --resume"
         else:
-            cmd = (f"{BENCH} run --dataset {ds} --dim {DIM[ds]} --suite {suite} " + " ".join(f"--algo {a}" for a in algos)
+            cmd = (f"{BENCH} run --dataset {ds} --dim {dim} --suite {suite} " + " ".join(f"--algo {a}" for a in algos)
                    + (f" --backend {backend}" if backend else "") + f" {flags} --out {res} --resume")  # fmt: skip
         after = [f"stage-{pod}"] + ([prev[gpu]] if gpu in prev else [])
         if gpu == "d1" and gpu not in prev:
             after.append(out[0]["id"])  # M1 (d0's first leg) passes before d1 times anything
-        out.append({"id": lid, "gpu": gpu, "pod": pod, "index": idx, "worker": WORKER[gpu], "res": res, "family": fam, "suite": suite, "dataset": ds,
+        out.append({"id": lid, "gpu": gpu, "pod": pod, "index": idx, "worker": WORKER[gpu], "res": res, "dim": dim, "family": fam, "suite": suite, "dataset": ds,
                     "after": sorted(set(after)), "cells": cells, "gpu_h": round(h, 2),
-                    "official": "official" in str(algos) or (algos and "silvertorch" in algos and suite in ("filter", "synth")) or suite in ("h2h", "c7-scorepath", "codesign", "codesign-laion30m", "bloomwidth", "bloomwidth-timed", "deep"),
+                    "official": "official" in str(algos) or (algos and "silvertorch" in algos and suite in ("filter", "synth")) or suite in ("h2h", "c7-scorepath", "codesign", "codesign-laion30m", "bloomwidth", "bloomwidth-timed", "deep", "nsweep-codesign"),
                     "command": " ".join(cmd.split()), "upload": f"campaign-final/{ds}-{suite}" + (f"-{gpu}" if algos else ""), "note": note})  # fmt: skip
         prev[gpu] = lid
         totals[gpu] += h
@@ -116,7 +135,7 @@ def main():
         tune = [x["id"] for x in out if x["suite"] == "tune-timed" and x["dataset"] in tuned]
         lid = f"d1-{len([x for x in out if x['gpu'] == 'd1']) + 1:02d}-ceiling-{bench}"
         res = f"/scratch/final/gpu1/ceiling-int8-{bench}"
-        out.append({"id": lid, "gpu": "d1", "pod": "a100-x2-d", "index": 1, "worker": WORKER["d1"], "res": res, "family": "C6", "suite": "ceiling-script",
+        out.append({"id": lid, "gpu": "d1", "pod": "a100-x2-d", "index": 1, "worker": WORKER["d1"], "res": res, "dim": 0, "family": "C6", "suite": "ceiling-script",
                     "dataset": bench, "after": sorted({"stage-a100-x2-d", prev["d1"], *tune}), "cells": 0, "gpu_h": h,
                     "official": False, "command": f"bash docs/artifacts/campaign-final/ceiling.sh {bench} {res}",
                     "upload": f"campaign-final/ceiling-int8-{bench}",
@@ -138,7 +157,7 @@ def upload_command(lg):
     holds JSON artifacts, no records: it is uploaded as is (n_records 0)."""
     if lg["suite"] == "ceiling-script":
         return f"{BENCH} upload --results {lg['res']} --path-in-repo {lg['upload']} --verify"
-    pattern = f"{lg['res']}/{lg['suite']}/{lg['dataset']}-d{DIM[lg['dataset']]}*"
+    pattern = f"{lg['res']}/{lg['suite']}/{lg['dataset']}-d{lg['dim']}*"
     return (
         f"T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/{lg['suite']} && "
         f"cp -al {pattern} $T/{lg['suite']}/ && "
@@ -177,6 +196,10 @@ def render(legs, totals):
          "  yfcc10m: {dim: 192, inputs: content_d192, source: {hub: pinkmeme/eval-yfcc10m, revision: 88e4d89a2f9571ab15fbb8deffbb06bf4ed05441}}",
          "  pubmed: {dim: 768, inputs: content_d768, source: {copy_from: 'a100-x1-b:/data/pubmed', sha256_manifest: FILL_AT_STAGING}}   # not on the Hub",
          "  laion30m: {dim: 256, inputs: content_d256, source: {copy_from: 'a100-x2-d:/data/laion30m', sha256_manifest: FILL_AT_STAGING}}   # not on the Hub",
+         "  laion1m: {dim: 256, inputs: content_d256, source: {built: 'eval-data subset laion30m laion1m --n-items 1000000 --seed 20261013', on: a100-x2-d, manifest_sha256: 00b61268f187e1ef206f5c2bdb4ed73c814c2a1bde24d032cddf6239a09ab191, rows_sha256: 48164da6e98c27d0474e1d5e9feb697cbdcb7a0a34bceab1e8a9c944f8087cb7}}",
+         "  laion3m: {dim: 256, inputs: content_d256, source: {built: 'eval-data subset laion30m laion3m --n-items 3000000 --seed 20261013', on: a100-x2-d, manifest_sha256: 277a1c15acd7a5a263723c6621b7cddf122db069ff356144b79e771f0aec8235, rows_sha256: 6730af14e11ba92200cbc562268c4c90509ce16dfcc10fbad0667d37ddb6fc76}}",
+         "  laion10m: {dim: 256, inputs: content_d256, source: {built: 'eval-data subset laion30m laion10m --n-items 10000000 --seed 20261013', on: a100-x2-d, manifest_sha256: 2fccfc39578a6ecadcbdbcd275be9a028f0f18a84836a2871bc85fc4ec237cde, rows_sha256: 9a0c7374a603dd12e71b9481cb6c24bbe1106b146194e17ac9b8121ff4d256bd}}",
+         "  laion1m-synth / laion3m-synth / laion10m-synth: {base: 'laion1m / 3m / 10m', attrs: \"the parent's synth rows (data/laionNm/item_attrs_synth.pt)\"}",
          "  goodreads-synth: {base: goodreads, attrs: 'eval-data synth-filter', sha256: FILL_AT_STAGING}",
          "  arxiv-synth: {base: arxiv, attrs: 'eval-data synth-filter', sha256: FILL_AT_STAGING}",
          "  arxiv-corr-synth: {base: arxiv, attrs: 'eval-data synth-filter --correlated (seed 20261008)', sha256: {item_attrs_corr.pt: 4025c823…, query_attrs_corr.pt: bef4e61e…, synth_corr.json: 036aca8a…}}",
@@ -187,6 +210,7 @@ def render(legs, totals):
          "  a100-x2-d: {owner: d-run, steps: [copy pubmed from a100-x1-b, bench check + bench oracle for every dataset pod d runs]}",
          "  a100-x1-b: {owner: v-pubmed, steps: [fetch yfcc10m, build yfcc10m-synth / goodreads-synth attrs, bench check + oracle (goodreads, goodreads-synth, yfcc10m, yfcc10m-synth, pubmed)]}",
          "  a100-x1-eval: {owner: v-pod1-run, steps: [replace pod 1's PubMed with the canonical copy from a100-x1-b, laion30m copied from a100-x2-d (steward), bench check + oracle]}",
+         "  a100-x1-eval-nsweep: {owner: v-pod1-run, before: p1 N-sweep legs, steps: ['laion1m / laion3m / laion10m copied from a100-x2-d:/data (steward; MANIFEST.sha256 checked on arrival)', 'arxiv-papers content (d256) present', bench check + oracle per N-sweep dataset]}",
          "",
          "families:                              # one box (host) each; the T1 rows they feed",
          "  C1: {box: a100-x2-d, feeds: [T1.C1, F1, c1-across-n, c1-real, exact refs of C6 / QPS bands]}",

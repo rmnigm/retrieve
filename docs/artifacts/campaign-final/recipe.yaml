@@ -28,6 +28,10 @@ datasets:                              # oracle fingerprints: `bench check` + `b
   yfcc10m: {dim: 192, inputs: content_d192, source: {hub: pinkmeme/eval-yfcc10m, revision: 88e4d89a2f9571ab15fbb8deffbb06bf4ed05441}}
   pubmed: {dim: 768, inputs: content_d768, source: {copy_from: 'a100-x1-b:/data/pubmed', sha256_manifest: FILL_AT_STAGING}}   # not on the Hub
   laion30m: {dim: 256, inputs: content_d256, source: {copy_from: 'a100-x2-d:/data/laion30m', sha256_manifest: FILL_AT_STAGING}}   # not on the Hub
+  laion1m: {dim: 256, inputs: content_d256, source: {built: 'eval-data subset laion30m laion1m --n-items 1000000 --seed 20261013', on: a100-x2-d, manifest_sha256: 00b61268f187e1ef206f5c2bdb4ed73c814c2a1bde24d032cddf6239a09ab191, rows_sha256: 48164da6e98c27d0474e1d5e9feb697cbdcb7a0a34bceab1e8a9c944f8087cb7}}
+  laion3m: {dim: 256, inputs: content_d256, source: {built: 'eval-data subset laion30m laion3m --n-items 3000000 --seed 20261013', on: a100-x2-d, manifest_sha256: 277a1c15acd7a5a263723c6621b7cddf122db069ff356144b79e771f0aec8235, rows_sha256: 6730af14e11ba92200cbc562268c4c90509ce16dfcc10fbad0667d37ddb6fc76}}
+  laion10m: {dim: 256, inputs: content_d256, source: {built: 'eval-data subset laion30m laion10m --n-items 10000000 --seed 20261013', on: a100-x2-d, manifest_sha256: 2fccfc39578a6ecadcbdbcd275be9a028f0f18a84836a2871bc85fc4ec237cde, rows_sha256: 9a0c7374a603dd12e71b9481cb6c24bbe1106b146194e17ac9b8121ff4d256bd}}
+  laion1m-synth / laion3m-synth / laion10m-synth: {base: 'laion1m / 3m / 10m', attrs: "the parent's synth rows (data/laionNm/item_attrs_synth.pt)"}
   goodreads-synth: {base: goodreads, attrs: 'eval-data synth-filter', sha256: FILL_AT_STAGING}
   arxiv-synth: {base: arxiv, attrs: 'eval-data synth-filter', sha256: FILL_AT_STAGING}
   arxiv-corr-synth: {base: arxiv, attrs: 'eval-data synth-filter --correlated (seed 20261008)', sha256: {item_attrs_corr.pt: 4025c823…, query_attrs_corr.pt: bef4e61e…, synth_corr.json: 036aca8a…}}
@@ -38,6 +42,7 @@ stage:                                 # per pod, before its first leg (id stage
   a100-x2-d: {owner: d-run, steps: [copy pubmed from a100-x1-b, bench check + bench oracle for every dataset pod d runs]}
   a100-x1-b: {owner: v-pubmed, steps: [fetch yfcc10m, build yfcc10m-synth / goodreads-synth attrs, bench check + oracle (goodreads, goodreads-synth, yfcc10m, yfcc10m-synth, pubmed)]}
   a100-x1-eval: {owner: v-pod1-run, steps: [replace pod 1's PubMed with the canonical copy from a100-x1-b, laion30m copied from a100-x2-d (steward), bench check + oracle]}
+  a100-x1-eval-nsweep: {owner: v-pod1-run, before: p1 N-sweep legs, steps: ['laion1m / laion3m / laion10m copied from a100-x2-d:/data (steward; MANIFEST.sha256 checked on arrival)', 'arxiv-papers content (d256) present', bench check + oracle per N-sweep dataset]}
 
 families:                              # one box (host) each; the T1 rows they feed
   C1: {box: a100-x2-d, feeds: [T1.C1, F1, c1-across-n, c1-real, exact refs of C6 / QPS bands]}
@@ -1076,7 +1081,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset arxiv --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-tune-timed
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/tune-timed && cp -al /scratch/final/gpu0/tune-timed/arxiv-d128* $T/tune-timed/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-tune-timed --verify && rm -rf $T"
-    expect: {cells: 142, records: 142, gpu_h: 2.16}
+    expect: {cells: 142, records: 142, gpu_h: 2.2}
   - id: p1-23-tune-timed-arxiv-synth
     pod: a100-x1-eval
     index: 0
@@ -1089,7 +1094,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset arxiv-synth --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-synth-tune-timed
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/tune-timed && cp -al /scratch/final/gpu0/tune-timed/arxiv-synth-d128* $T/tune-timed/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-synth-tune-timed --verify && rm -rf $T"
-    expect: {cells: 144, records: 144, gpu_h: 2.19}
+    expect: {cells: 144, records: 144, gpu_h: 2.23}
   - id: p1-24-tune-timed-arxiv-corr-synth
     pod: a100-x1-eval
     index: 0
@@ -1102,7 +1107,143 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset arxiv-corr-synth --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-corr-synth-tune-timed
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/tune-timed && cp -al /scratch/final/gpu0/tune-timed/arxiv-corr-synth-d128* $T/tune-timed/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-corr-synth-tune-timed --verify && rm -rf $T"
-    expect: {cells: 150, records: 150, gpu_h: 2.29}
+    expect: {cells: 150, records: 150, gpu_h: 2.33}
+  - id: p1-25-nsweep-synth-laion1m-synth
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C1+C6
+    suite: nsweep-synth
+    dataset: laion1m-synth
+    after: [p1-24-tune-timed-arxiv-corr-synth, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-synth --dataset laion1m-synth --dim 256 --interleave --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion1m-synth-nsweep-synth
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-synth && cp -al /scratch/final/gpu0/nsweep-synth/laion1m-synth-d256* $T/nsweep-synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion1m-synth-nsweep-synth --verify && rm -rf $T"
+    expect: {cells: 30, records: 30, gpu_h: 0.38}
+  - id: p1-26-nsweep-synth-laion3m-synth
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C1+C6
+    suite: nsweep-synth
+    dataset: laion3m-synth
+    after: [p1-25-nsweep-synth-laion1m-synth, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-synth --dataset laion3m-synth --dim 256 --interleave --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion3m-synth-nsweep-synth
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-synth && cp -al /scratch/final/gpu0/nsweep-synth/laion3m-synth-d256* $T/nsweep-synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion3m-synth-nsweep-synth --verify && rm -rf $T"
+    expect: {cells: 30, records: 30, gpu_h: 0.38}
+  - id: p1-27-nsweep-synth-laion10m-synth
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C1+C6
+    suite: nsweep-synth
+    dataset: laion10m-synth
+    after: [p1-26-nsweep-synth-laion3m-synth, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-synth --dataset laion10m-synth --dim 256 --interleave --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion10m-synth-nsweep-synth
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-synth && cp -al /scratch/final/gpu0/nsweep-synth/laion10m-synth-d256* $T/nsweep-synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion10m-synth-nsweep-synth --verify && rm -rf $T"
+    expect: {cells: 30, records: 30, gpu_h: 0.77}
+  - id: p1-28-nsweep-synth-arxiv-synth
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C1+C6
+    suite: nsweep-synth
+    dataset: arxiv-synth
+    after: [p1-27-nsweep-synth-laion10m-synth, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-synth --dataset arxiv-synth --dim 256 --interleave --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/arxiv-synth-nsweep-synth
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-synth && cp -al /scratch/final/gpu0/nsweep-synth/arxiv-synth-d256* $T/nsweep-synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-synth-nsweep-synth --verify && rm -rf $T"
+    expect: {cells: 30, records: 30, gpu_h: 0.55}
+  - id: p1-29-nsweep-laion1m
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C6
+    suite: nsweep
+    dataset: laion1m
+    after: [p1-28-nsweep-synth-arxiv-synth, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep --dataset laion1m --dim 256 --interleave --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion1m-nsweep
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep && cp -al /scratch/final/gpu0/nsweep/laion1m-d256* $T/nsweep/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion1m-nsweep --verify && rm -rf $T"
+    expect: {cells: 12, records: 12, gpu_h: 0.16}
+    note: "V1, V2 and SilverTorch in one group per sweep"
+  - id: p1-30-nsweep-laion3m
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C6
+    suite: nsweep
+    dataset: laion3m
+    after: [p1-29-nsweep-laion1m, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep --dataset laion3m --dim 256 --interleave --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion3m-nsweep
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep && cp -al /scratch/final/gpu0/nsweep/laion3m-d256* $T/nsweep/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion3m-nsweep --verify && rm -rf $T"
+    expect: {cells: 12, records: 12, gpu_h: 0.16}
+    note: "V1, V2 and SilverTorch in one group per sweep"
+  - id: p1-31-nsweep-laion10m
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C6
+    suite: nsweep
+    dataset: laion10m
+    after: [p1-30-nsweep-laion3m, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep --dataset laion10m --dim 256 --interleave --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion10m-nsweep
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep && cp -al /scratch/final/gpu0/nsweep/laion10m-d256* $T/nsweep/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion10m-nsweep --verify && rm -rf $T"
+    expect: {cells: 12, records: 12, gpu_h: 0.22}
+    note: "V1, V2 and SilverTorch in one group per sweep"
+  - id: p1-32-nsweep-codesign-laion1m
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C5
+    suite: nsweep-codesign
+    dataset: laion1m
+    after: [p1-31-nsweep-laion10m, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-codesign --dataset laion1m --dim 256 --interleave --mode eager --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion1m-nsweep-codesign
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-codesign && cp -al /scratch/final/gpu0/nsweep-codesign/laion1m-d256* $T/nsweep-codesign/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion1m-nsweep-codesign --verify && rm -rf $T"
+    expect: {cells: 16, records: 16, gpu_h: 0.18}
+    note: "official from the -O3 venv"
+  - id: p1-33-nsweep-codesign-laion3m
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C5
+    suite: nsweep-codesign
+    dataset: laion3m
+    after: [p1-32-nsweep-codesign-laion1m, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-codesign --dataset laion3m --dim 256 --interleave --mode eager --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion3m-nsweep-codesign
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-codesign && cp -al /scratch/final/gpu0/nsweep-codesign/laion3m-d256* $T/nsweep-codesign/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion3m-nsweep-codesign --verify && rm -rf $T"
+    expect: {cells: 16, records: 16, gpu_h: 0.18}
+    note: "official from the -O3 venv"
+  - id: p1-34-nsweep-codesign-laion10m
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C5
+    suite: nsweep-codesign
+    dataset: laion10m
+    after: [p1-33-nsweep-codesign-laion3m, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-codesign --dataset laion10m --dim 256 --interleave --mode eager --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion10m-nsweep-codesign
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-codesign && cp -al /scratch/final/gpu0/nsweep-codesign/laion10m-d256* $T/nsweep-codesign/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion10m-nsweep-codesign --verify && rm -rf $T"
+    expect: {cells: 16, records: 16, gpu_h: 0.18}
+    note: "official from the -O3 venv"
   - id: d1-25-ceiling-goodreads
     pod: a100-x2-d
     index: 1
@@ -1178,7 +1319,7 @@ totals_gpu_h:                           # per GPU, incl. the 1.45 process overhe
   b: 15.9
   d0: 19.8
   d1: 19.4
-  p1: 11.2
+  p1: 14.5
 
 gates:                                 # D1-G over campaign-final/ after the last leg
   - eager-vs-graph ids from the stored hashes
