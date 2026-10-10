@@ -19,6 +19,36 @@ if TYPE_CHECKING:
     from retrieve.interfaces import FilterModule
 
 
+# The two-level top-k (docs/system/kernels.md § SilverTorch kernels, "Top-k"): from TOPK_MIN_SLOTS
+# slots of [B, P], where a row has at least TOPK_MIN_RATIO whole TOPK_BLOCK-slot blocks per top-k
+# slot, the top-k runs on the items of its k best blocks (and the ragged tail).
+TOPK_BLOCK = 256
+TOPK_MIN_SLOTS = 1 << 23
+TOPK_MIN_RATIO = 8
+
+
+def two_level_topk(scores: Tensor, k: int) -> tuple[Tensor, Tensor]:
+    """``torch.topk(scores, k, dim=1)`` up to ties: each whole block's max, the row's ``k`` best
+    blocks, and the top-k of their items plus the ``< TOPK_BLOCK`` tail slots. They hold the
+    row's top-k: an item in it has its block's max at least as large, and were that block not
+    among the ``k`` best, ``k`` other blocks would each hold an item as large. Scores
+    ``torch.equal``, ids equal up to ties. Below the thresholds, plain ``torch.topk``."""
+    b, p = scores.shape
+    n_blocks = p // TOPK_BLOCK
+    if b * p < TOPK_MIN_SLOTS or n_blocks < TOPK_MIN_RATIO * k:
+        return torch.topk(scores, k, dim=1)
+    full = n_blocks * TOPK_BLOCK
+    block_max = scores[:, :full].view(b, n_blocks, TOPK_BLOCK).amax(dim=2)
+    blocks = torch.topk(block_max, k, dim=1, sorted=False).indices
+    lane = torch.arange(TOPK_BLOCK, device=scores.device)
+    cand = (blocks.unsqueeze(2) * TOPK_BLOCK + lane).view(b, k * TOPK_BLOCK)
+    if full < p:
+        tail = torch.arange(full, p, device=scores.device).expand(b, p - full)
+        cand = torch.cat([cand, tail], dim=1)
+    top, at = torch.topk(scores.gather(1, cand), k, dim=1)
+    return top, cand.gather(1, at)
+
+
 def counts_to_valid(counts: Tensor, p: int) -> Tensor:
     """[B] counts → [B, p] bool prefix mask."""
     return torch.arange(p, device=counts.device).unsqueeze(0) < counts.unsqueeze(1)
@@ -46,7 +76,7 @@ def masked_topk(
         # One pass; masked_fill(~valid) clones the scores and inverts the mask first.
         scores = torch.where(valid, scores, float("-inf"))
     actual_k = min(k, p)
-    topk_scores, topk_local = torch.topk(scores, actual_k, dim=1)
+    topk_scores, topk_local = two_level_topk(scores, actual_k)
     topk_ids = gather_ids.gather(1, topk_local) if gather_ids is not None else topk_local
     if valid is not None or masked or actual_k < k:
         topk_ids = torch.where(torch.isfinite(topk_scores), topk_ids, topk_ids.new_full((), -1))
