@@ -24,8 +24,13 @@ rows = []  # (check, severity, where, numbers)
 KNOWN = [  # (check, substring of where, reason): documented in validation / hub-index
     ("status", "d1:pubmed/filter", "V3 build OOM at 10 M x 768 (hub-index d1/pubmed)"),
     (
+        "status",
+        "v2.6:laion30m/codesign-laion30m",
+        "pre-BLOOM-BUILD-CHUNK triton build OOM (hub-index artifacts/codesign-laion30m-v26-official)",
+    ),
+    (
         "exact_recall",
-        "d1:yfcc10m",
+        ":yfcc10m/",
         "fp16 quanta: the YFCC gate is on @1000 (0.9944 since L1, validation)",
     ),
     (

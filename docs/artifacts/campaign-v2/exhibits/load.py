@@ -91,6 +91,14 @@ def official_build(r):
     return f"{b.get('nvcc_append_flags') or 'shipped flags'} so:{(b.get('so_sha256') or '?')[:8]}"
 
 
+def score_path(r):
+    """Meta's score path for an official record: the suite's `score_path`, else Meta's default fp16
+    (`OfficialConfig.score_path`; st-dloop, 2026-10-12); int32 is the parity path. Blank otherwise."""
+    if r["backend"] != "official":
+        return ""
+    return r["params"].get("score_path", "fp16")
+
+
 # ST-WIDE (campaign-v2.9) changed SilverTorch Triton only at B * n_probe >= 512 (per-row probe table, and
 # at d768 the bloom two-pass); narrow configs' opcodes are unchanged. Wide timings before v2.9 are
 # provisional for any claim that leans on them (controller, 2026-10-11).
