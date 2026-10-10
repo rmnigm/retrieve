@@ -36,13 +36,13 @@ Seeds: seed 0 everywhere, with seeds 0-2 in `filter` only (T2's CIs).
 
 ## Sizing
 
-74.6 GPU-h including the measured 1.45 process overhead. Quality-only tune legs, and the timed tune legs v2.11 measured (goodreads, YFCC, PubMed), are priced from their measured runs; arXiv's timed tune is not measured yet.
+73.5 GPU-h: cells plus index builds (`elapsed_s` excludes `build_s`, ≈ 400 s per 30 M job), times the measured 1.15 process overhead (wall over cells + builds). Quality-only tune legs, and the timed tune legs v2.11 measured (goodreads, YFCC, PubMed), are priced from their measured runs; arXiv's timed tune is not measured yet.
 
 | GPU | GPU-h |
 |---|---|
-| pod d GPU 0 | 19.8 |
-| pod d GPU 1 | 19.4 |
-| pod 1 | 17.1 (incl. the N-sweep's 5.8) |
-| pod b | 18.2 (incl. the seeds legs' 2.3) |
+| pod d GPU 0 | 16.1 |
+| pod d GPU 1 | 21.5 |
+| pod 1 | 17.4 (incl. the N-sweep's 6.6) |
+| pod b | 18.6 (incl. the seeds legs' 4.1) |
 
 So about 20 h wall, if M1 lets pod d time on both GPUs at once; otherwise pod d runs its two GPU queues in turn, about 37 h.

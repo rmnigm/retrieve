@@ -48,6 +48,9 @@ ORDER = [
     "v2.11",
 ]
 RECENT = {"v2.9", "v2.10", "v2.11"}
+# catalogue sizes for the build fallback of datasets without records (the N-sweep subsets)
+N_ITEMS = {"laion1m": 1_000_000, "laion1m-synth": 1_000_000, "laion3m": 3_000_000, "laion3m-synth": 3_000_000,
+           "laion10m": 10_000_000, "laion10m-synth": 10_000_000}  # fmt: skip
 EXCLUDED_SCRATCH = {"stw2-laion30m", "stt-laion30m", "v1g"}  # library gates, not campaign cells
 OBSOLETE_SCRATCH = {
     "ivf-tune": "superseded by `tune` / `tune-q`",
@@ -165,8 +168,8 @@ def scan(legs):
 
 
 def overhead(legs):
-    """Per-leg wall / sum(elapsed) where the driver log has a start and a `driver done` stamp and
-    names one (dataset, suite)."""
+    """Per-leg wall / (sum(elapsed) + sum(builds, once per job)) where the driver log has a start
+    and a `driver done` stamp and names one (dataset, suite)."""
     out = []
     for d in sorted(Path(legs).iterdir()):
         log = d / "logs" / "driver.log"
@@ -181,10 +184,17 @@ def overhead(legs):
         wall = (
             datetime.fromisoformat(done[-1].split()[0]) - datetime.fromisoformat(stamps[0])
         ).total_seconds()
-        el = 0.0
+        el, builds = 0.0, {}
         for f in d.rglob("*.jsonl"):
             if not f.name.endswith(".samples.jsonl"):
-                el += sum(own(json.loads(x)) for x in open(f) if x.strip())
+                for x in open(f):
+                    if not x.strip():
+                        continue
+                    r = json.loads(x)
+                    el += own(r)
+                    if r.get("build_s"):  # once per job: its cells share one build_s
+                        builds[(r["algo"], r["backend"], r["sweep"], r["seed"], r["build_s"])] = r["build_s"]
+        el += sum(builds.values())
         if el > 0 and wall > 0:
             out.append((d.name, wall / el))
     return out
@@ -260,6 +270,45 @@ def main():
             g["s0n"] += 1
         g.setdefault("unknown", 0)
         g["unknown"] = g.get("unknown", 0) + (v is None)
+    # index builds: `elapsed_s` excludes them (`build_s`, once per job, every arm of a group its own). A job's build is its
+    # matched records' build_s, else the median over records of the same (dataset, algo, backend, n_lists), else of the
+    # same (dataset, algo, backend), else of the same (algo, backend, n_lists) at a comparable N (within 1.5x; a dataset
+    # never built, e.g. a new subset), else of (algo, backend) at a comparable N, else 0 (counted as unknown)
+    by_cfg, by_arm = collections.defaultdict(list), collections.defaultdict(list)
+    near = []  # (algo, backend, n_lists, n_items, build_s)
+    for r in best.values():
+        if r.get("build_s"):
+            by_cfg[(r["dataset"], r["algo"], r["backend"], r["params"].get("n_lists"))].append(r["build_s"])
+            by_arm[(r["dataset"], r["algo"], r["backend"])].append(r["build_s"])
+            near.append((r["algo"], r["backend"], r["params"].get("n_lists"), r["n_items"], r["build_s"]))
+
+    def comparable(job, n_lists):
+        n = job.data_n if hasattr(job, "data_n") else None
+        n = n or N_ITEMS.get(job.dataset)
+        if not n:
+            return []
+        close = [x for x in near if x[0] == job.algo and x[1] == job.backend and n / 1.5 <= x[3] <= n * 1.5]
+        same = [x[4] for x in close if x[2] == n_lists]
+        return same or [x[4] for x in close]
+    jobs = {}
+    for s_, ds, arm, k, seed, job in planned:
+        jobs.setdefault(id(job), (s_, ds, arm, seed, job, []))[5].append(k)
+    for s_, ds, arm, seed, job, keys in jobs.values():
+        got = [best[k]["build_s"] for k in keys if k in best and best[k].get("build_s")]
+        nl = job.build.get("n_lists")
+        pool = (
+            got
+            or by_cfg.get((ds, job.algo, job.backend, nl))
+            or by_arm.get((ds, job.algo, job.backend))
+            or comparable(job, nl)
+        )
+        b = st.median(pool) if pool else 0.0
+        g = rows[(s_, ds, arm)]
+        g["build"] = g.get("build", 0.0) + b
+        g["build_unknown"] = g.get("build_unknown", 0) + (not pool)
+        if seed == 0:
+            g["build0"] = g.get("build0", 0.0) + b
+
     # records under suites.yaml suites that no planned cell matches (off the current grid)
     planned_keys = {k for _, _, _, k, _, _ in planned}
     off = collections.Counter()
@@ -300,6 +349,8 @@ def main():
                 "record_v2.9+",
                 "estimated",
                 "gpu_h_cells",
+                "gpu_h_build",
+                "build_unknown_jobs",
                 "seed0_cells",
                 "seed0_gpu_h",
                 "newest_cv",
@@ -318,8 +369,10 @@ def main():
                     g["recent"],
                     g["est"],
                     round(sum(g["s"]) / 3600, 3),
+                    round(g.get("build", 0.0) / 3600, 3),
+                    g.get("build_unknown", 0),
                     g["s0n"],
-                    round(g["s0"] / 3600, 3),
+                    round((g["s0"] + g.get("build0", 0.0)) / 3600, 3),
                     " ".join(f"{c}:{n}" for c, n in sorted(g["cv"].items())),
                 ]
             )
@@ -343,6 +396,8 @@ def main():
                     sum(n for c, n in g["cv"].items() if c in RECENT),
                     0,
                     round(g["s"] / 3600, 3),
+                    "",
+                    "",
                     g["cells"],
                     round(g["s"] / 3600, 3),
                     " ".join(f"{c}:{n}" for c, n in sorted(g["cv"].items())),
@@ -357,7 +412,7 @@ def main():
         w = csv.writer(fh)
         w.writerow(["leg", "wall_over_sum_elapsed"])
         w.writerows((a, round(b, 3)) for a, b in ov)
-    tot = sum(sum(g["s"]) for g in rows.values()) / 3600
+    tot = sum(sum(g["s"]) + g.get("build", 0.0) for g in rows.values()) / 3600
     print(
         f"{len(planned)} planned cells, {sum(g['ran'] for g in rows.values())} with a record, "
         f"{tot:.1f} cell-GPU-h; overhead median {st.median(b for _, b in ov):.2f} over {len(ov)} legs"
