@@ -1110,6 +1110,26 @@ narrow-only).
 There is a hard cap on `N`: above it the attribute tensors exceed
 comfortable host RAM during construction.
 
+### Subsets
+
+`eval-data subset PARENT NAME --n-items N [--seed S]` ([`subset.py`](../../evaluation/eval_datasets/subset.py)) stages
+`data/NAME` as a seeded row subset of a staged dataset, plus `config/NAME.yaml` and `config/NAME-synth.yaml` (the
+parent's configs on the new data dir). It exists for the fixed-d N-sweep: LAION 30 M d256 at 1 / 3 / 10 M (`laion1m`,
+`laion3m`, `laion10m`, seed 20261013).
+
+- **Rows:** the sorted first N of one `randperm(N_parent)` from `torch.Generator().manual_seed(seed)`, so the subsets
+  of one seed nest (1 M ⊂ 3 M ⊂ 10 M) and two builds are byte-identical
+  (`tests/eval_datasets/test_subset.py`).
+- **Copied as the parent's rows:** the fp16 item vectors (re-sharded at 1 M rows, not renormalised), `item_attrs_narrow.pt`,
+  `item_attrs_synth.pt` and `synth_u.pt` (each item keeps its `u_i`, so its pass / fail at every rate; the sidecar's
+  pass counts are recomputed).
+- **Copied whole:** the queries, `query_attrs_synth.pt`, the reverse flags, `vocab.json` (codes and counts are the
+  parent's) and the queries' real attrs in `eval_split.parquet`.
+- **Recomputed:** the held-out targets, by ingest's rule over the subset (exact unfiltered top-1 by inner product, fp32,
+  ties to the lowest id). The oracle is built per sweep by `bench oracle` where the legs run, as for any dataset.
+- **Provenance:** `prep_log.json`'s `subset` entry (parent, seed, N, the sha256 of the row ids) and `MANIFEST.sha256`
+  over every written file; a copy to another pod is checked against it.
+
 ### Synthetic selectivity attrs
 
 `eval-data synth-filter --dataset <goodreads|arxiv|yfcc10m> [--rates …]

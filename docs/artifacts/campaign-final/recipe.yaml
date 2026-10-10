@@ -7,6 +7,7 @@
 recipe: 1
 tag: FINAL_TAG                          # git tag campaign-final; `git rev-parse FINAL_TAG:retrieve/src/retrieve` = library_tree
 library_tree: FINAL_TAG_LIBRARY_TREE
+extension_tag: campaign-final          # the N-sweep and seeds-0-2 legs' tree: tagged after dev/final-nsweep merges, same library (e16512f5) as FINAL_TAG
 campaign_yaml: evaluation/campaign.yaml   # pinned to the one code_version (quality + perf) before the first leg
 hub: {repo: pinkmeme/eval-results, prefix: campaign-final/, aggregate: campaign-final/results.parquet}
 image: {torch: 2.10.0+cu128, triton: 3.6.0, cuda: '12.8', python: '3.11'}
@@ -15,7 +16,7 @@ official_so_sha256:                     # per pod: each build differs (and so do
   a100-x1-eval: 805ab73e…                # verified -O3 (controller 2026-10-13)
   a100-x2-d: FILL_FROM_RECORDS            # d-run's rebuild
   a100-x1-b: FILL_FROM_RECORDS
-worktree: /scratch/wt/final           # git worktree at FINAL_TAG on every pod; venv /venvs/final (uv sync --extra official --all-packages)
+worktree: /scratch/wt/final           # git worktree at FINAL_TAG on every pod; venv /venvs/final (uv sync --extra official --all-packages); the extension legs (tree: campaign-final) run from a worktree at that tag (same library, its suites.yaml / configs)
 
 pods:
   - {name: a100-x2-d, host: 38f5e1, gpus: [0, 1], disk: /data + /scratch on the 400 GB container disk}
@@ -28,6 +29,10 @@ datasets:                              # oracle fingerprints: `bench check` + `b
   yfcc10m: {dim: 192, inputs: content_d192, source: {hub: pinkmeme/eval-yfcc10m, revision: 88e4d89a2f9571ab15fbb8deffbb06bf4ed05441}}
   pubmed: {dim: 768, inputs: content_d768, source: {copy_from: 'a100-x1-b:/data/pubmed', sha256_manifest: FILL_AT_STAGING}}   # not on the Hub
   laion30m: {dim: 256, inputs: content_d256, source: {copy_from: 'a100-x2-d:/data/laion30m', sha256_manifest: FILL_AT_STAGING}}   # not on the Hub
+  laion1m: {dim: 256, inputs: content_d256, source: {built: 'eval-data subset laion30m laion1m --n-items 1000000 --seed 20261013', on: a100-x2-d, manifest_sha256: 00b61268f187e1ef206f5c2bdb4ed73c814c2a1bde24d032cddf6239a09ab191, rows_sha256: 48164da6e98c27d0474e1d5e9feb697cbdcb7a0a34bceab1e8a9c944f8087cb7}}
+  laion3m: {dim: 256, inputs: content_d256, source: {built: 'eval-data subset laion30m laion3m --n-items 3000000 --seed 20261013', on: a100-x2-d, manifest_sha256: 277a1c15acd7a5a263723c6621b7cddf122db069ff356144b79e771f0aec8235, rows_sha256: 6730af14e11ba92200cbc562268c4c90509ce16dfcc10fbad0667d37ddb6fc76}}
+  laion10m: {dim: 256, inputs: content_d256, source: {built: 'eval-data subset laion30m laion10m --n-items 10000000 --seed 20261013', on: a100-x2-d, manifest_sha256: 2fccfc39578a6ecadcbdbcd275be9a028f0f18a84836a2871bc85fc4ec237cde, rows_sha256: 9a0c7374a603dd12e71b9481cb6c24bbe1106b146194e17ac9b8121ff4d256bd}}
+  laion1m-synth / laion3m-synth / laion10m-synth: {base: 'laion1m / 3m / 10m', attrs: "the parent's synth rows (data/laionNm/item_attrs_synth.pt)"}
   goodreads-synth: {base: goodreads, attrs: 'eval-data synth-filter', sha256: FILL_AT_STAGING}
   arxiv-synth: {base: arxiv, attrs: 'eval-data synth-filter', sha256: FILL_AT_STAGING}
   arxiv-corr-synth: {base: arxiv, attrs: 'eval-data synth-filter --correlated (seed 20261008)', sha256: {item_attrs_corr.pt: 4025c823…, query_attrs_corr.pt: bef4e61e…, synth_corr.json: 036aca8a…}}
@@ -38,6 +43,8 @@ stage:                                 # per pod, before its first leg (id stage
   a100-x2-d: {owner: d-run, steps: [copy pubmed from a100-x1-b, bench check + bench oracle for every dataset pod d runs]}
   a100-x1-b: {owner: v-pubmed, steps: [fetch yfcc10m, build yfcc10m-synth / goodreads-synth attrs, bench check + oracle (goodreads, goodreads-synth, yfcc10m, yfcc10m-synth, pubmed)]}
   a100-x1-eval: {owner: v-pod1-run, steps: [replace pod 1's PubMed with the canonical copy from a100-x1-b, laion30m copied from a100-x2-d (steward), bench check + oracle]}
+  a100-x1-b-seeds: {owner: v-pubmed, before: b seeds legs, steps: ['laion30m copied from a100-x2-d (steward; sha256 manifest checked)', arxiv-synth attrs present, bench check + oracle (arxiv-synth d128, yfcc10m-synth, laion30m-synth, laion30m bloom)]}
+  a100-x1-eval-nsweep: {owner: v-pod1-run, before: p1 N-sweep legs, steps: ['laion1m / laion3m / laion10m copied from a100-x2-d:/data (steward; MANIFEST.sha256 checked on arrival)', 'arxiv-papers content (d256) present', bench check + oracle per N-sweep dataset]}
 
 families:                              # one box (host) each; the T1 rows they feed
   C1: {box: a100-x2-d, feeds: [T1.C1, F1, c1-across-n, c1-real, exact refs of C6 / QPS bands]}
@@ -58,6 +65,7 @@ legs:
     family: M1
     suite: filter
     dataset: arxiv
+    tree: FINAL_TAG
     after: [stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv --dim 128 --suite filter --algo silvertorch --algo linr_v2 --out /scratch/final/gpu0 --resume"
@@ -72,6 +80,7 @@ legs:
     family: C1
     suite: filter
     dataset: goodreads
+    tree: FINAL_TAG
     after: [d0-01-filter-arxiv-st-v2, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset goodreads --dim 128 --suite filter --algo linr_v1_filter_mask --algo linr_v2 --interleave --out /scratch/final/gpu0 --resume"
@@ -85,6 +94,7 @@ legs:
     family: C1
     suite: filter
     dataset: arxiv
+    tree: FINAL_TAG
     after: [d0-02-filter-goodreads-v1-v2, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv --dim 128 --suite filter --algo linr_v1_filter_mask --algo linr_v2 --interleave --out /scratch/final/gpu0 --resume"
@@ -98,6 +108,7 @@ legs:
     family: C1
     suite: filter
     dataset: yfcc10m
+    tree: FINAL_TAG
     after: [d0-03-filter-arxiv-v1-v2, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset yfcc10m --dim 192 --suite filter --algo linr_v1_filter_mask --algo linr_v2 --interleave --out /scratch/final/gpu0 --resume"
@@ -111,6 +122,7 @@ legs:
     family: C1
     suite: filter
     dataset: pubmed
+    tree: FINAL_TAG
     after: [d0-04-filter-yfcc10m-v1-v2, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset pubmed --dim 768 --suite filter --algo linr_v1_filter_mask --algo linr_v2 --interleave --out /scratch/final/gpu0 --resume"
@@ -124,6 +136,7 @@ legs:
     family: C1
     suite: synth
     dataset: goodreads-synth
+    tree: FINAL_TAG
     after: [d0-05-filter-pubmed-v1-v2, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset goodreads-synth --dim 128 --suite synth --algo linr_v1_filter_mask --algo linr_v2 --backend triton --interleave --out /scratch/final/gpu0 --resume"
@@ -137,6 +150,7 @@ legs:
     family: C1
     suite: synth
     dataset: arxiv-synth
+    tree: FINAL_TAG
     after: [d0-06-synth-goodreads-synth-v1-v2-triton, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv-synth --dim 128 --suite synth --algo linr_v1_filter_mask --algo linr_v2 --backend triton --interleave --out /scratch/final/gpu0 --resume"
@@ -150,6 +164,7 @@ legs:
     family: C1
     suite: synth
     dataset: yfcc10m-synth
+    tree: FINAL_TAG
     after: [d0-07-synth-arxiv-synth-v1-v2-triton, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset yfcc10m-synth --dim 192 --suite synth --algo linr_v1_filter_mask --algo linr_v2 --backend triton --interleave --out /scratch/final/gpu0 --resume"
@@ -163,6 +178,7 @@ legs:
     family: C1
     suite: laion30m
     dataset: laion30m
+    tree: FINAL_TAG
     after: [d0-08-synth-yfcc10m-synth-v1-v2-triton, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset laion30m --dim 256 --suite laion30m --algo linr_v1_filter_mask --algo linr_v2 --interleave --out /scratch/final/gpu0 --resume"
@@ -177,6 +193,7 @@ legs:
     family: C6
     suite: laion30m-x
     dataset: laion30m
+    tree: FINAL_TAG
     after: [d0-09-laion30m-laion30m-v1-v2, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset laion30m --dim 256 --suite laion30m-x --algo linr_v2 --algo silvertorch --interleave --out /scratch/final/gpu0 --resume"
@@ -191,6 +208,7 @@ legs:
     family: C1
     suite: laion30m-x
     dataset: laion30m
+    tree: FINAL_TAG
     after: [d0-10-laion30m-x-laion30m-v2-st, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset laion30m --dim 256 --suite laion30m-x --algo linr_v1_filter_mask --out /scratch/final/gpu0 --resume"
@@ -204,6 +222,7 @@ legs:
     family: T2
     suite: filter
     dataset: goodreads
+    tree: FINAL_TAG
     after: [d0-11-laion30m-x-laion30m-v1, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset goodreads --dim 128 --suite filter --algo postfilter --out /scratch/final/gpu0 --resume"
@@ -218,6 +237,7 @@ legs:
     family: T2
     suite: filter
     dataset: arxiv
+    tree: FINAL_TAG
     after: [d0-12-filter-goodreads-pf, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv --dim 128 --suite filter --algo postfilter --out /scratch/final/gpu0 --resume"
@@ -232,6 +252,7 @@ legs:
     family: T2
     suite: filter
     dataset: yfcc10m
+    tree: FINAL_TAG
     after: [d0-13-filter-arxiv-pf, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset yfcc10m --dim 192 --suite filter --algo postfilter --out /scratch/final/gpu0 --resume"
@@ -246,6 +267,7 @@ legs:
     family: T2
     suite: filter
     dataset: pubmed
+    tree: FINAL_TAG
     after: [d0-14-filter-yfcc10m-pf, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset pubmed --dim 768 --suite filter --algo postfilter --out /scratch/final/gpu0 --resume"
@@ -260,6 +282,7 @@ legs:
     family: C3
     suite: synth
     dataset: goodreads-synth
+    tree: FINAL_TAG
     after: [d0-15-filter-pubmed-pf, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset goodreads-synth --dim 128 --suite synth --algo linr_v2 --backend torch --out /scratch/final/gpu0 --resume"
@@ -274,6 +297,7 @@ legs:
     family: T2
     suite: synth
     dataset: goodreads-synth
+    tree: FINAL_TAG
     after: [d0-16-synth-goodreads-synth-v2-torch, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset goodreads-synth --dim 128 --suite synth --algo postfilter --out /scratch/final/gpu0 --resume"
@@ -287,6 +311,7 @@ legs:
     family: T2
     suite: synth
     dataset: arxiv-corr-synth
+    tree: FINAL_TAG
     after: [d0-17-synth-goodreads-synth-pf, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv-corr-synth --dim 128 --suite synth --algo postfilter --out /scratch/final/gpu0 --resume"
@@ -300,6 +325,7 @@ legs:
     family: C6+C7
     suite: filter
     dataset: goodreads
+    tree: FINAL_TAG
     after: [d0-01-filter-arxiv-st-v2, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset goodreads --dim 128 --suite filter --algo silvertorch --interleave --out /scratch/final/gpu1 --resume"
@@ -314,6 +340,7 @@ legs:
     family: C6+C7
     suite: filter
     dataset: arxiv
+    tree: FINAL_TAG
     after: [d1-01-filter-goodreads-st, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv --dim 128 --suite filter --algo silvertorch --interleave --out /scratch/final/gpu1 --resume"
@@ -328,6 +355,7 @@ legs:
     family: C6+C7
     suite: filter
     dataset: yfcc10m
+    tree: FINAL_TAG
     after: [d1-02-filter-arxiv-st, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset yfcc10m --dim 192 --suite filter --algo silvertorch --interleave --out /scratch/final/gpu1 --resume"
@@ -342,6 +370,7 @@ legs:
     family: C6+C7
     suite: filter
     dataset: pubmed
+    tree: FINAL_TAG
     after: [d1-03-filter-yfcc10m-st, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset pubmed --dim 768 --suite filter --algo silvertorch --interleave --out /scratch/final/gpu1 --resume"
@@ -356,6 +385,7 @@ legs:
     family: C6+C7
     suite: deep
     dataset: goodreads
+    tree: FINAL_TAG
     after: [d1-04-filter-pubmed-st, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite deep --dataset goodreads --dim 128 --interleave --out /scratch/final/gpu1 --resume"
@@ -370,6 +400,7 @@ legs:
     family: C6+C7
     suite: deep
     dataset: arxiv
+    tree: FINAL_TAG
     after: [d1-05-deep-goodreads, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite deep --dataset arxiv --dim 128 --interleave --out /scratch/final/gpu1 --resume"
@@ -384,6 +415,7 @@ legs:
     family: C6+C7
     suite: deep
     dataset: yfcc10m
+    tree: FINAL_TAG
     after: [d1-06-deep-arxiv, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite deep --dataset yfcc10m --dim 192 --interleave --out /scratch/final/gpu1 --resume"
@@ -398,6 +430,7 @@ legs:
     family: C6+C7
     suite: deep
     dataset: pubmed
+    tree: FINAL_TAG
     after: [d1-07-deep-yfcc10m, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite deep --dataset pubmed --dim 768 --interleave --out /scratch/final/gpu1 --resume"
@@ -412,6 +445,7 @@ legs:
     family: C6+C7
     suite: synth
     dataset: goodreads-synth
+    tree: FINAL_TAG
     after: [d1-08-deep-pubmed, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset goodreads-synth --dim 128 --suite synth --algo silvertorch --interleave --out /scratch/final/gpu1 --resume"
@@ -425,6 +459,7 @@ legs:
     family: C6+C7
     suite: synth
     dataset: arxiv-synth
+    tree: FINAL_TAG
     after: [d1-09-synth-goodreads-synth-st, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv-synth --dim 128 --suite synth --algo silvertorch --interleave --out /scratch/final/gpu1 --resume"
@@ -438,6 +473,7 @@ legs:
     family: C6+C7
     suite: synth
     dataset: arxiv-corr-synth
+    tree: FINAL_TAG
     after: [d1-10-synth-arxiv-synth-st, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv-corr-synth --dim 128 --suite synth --algo silvertorch --interleave --out /scratch/final/gpu1 --resume"
@@ -451,6 +487,7 @@ legs:
     family: C6+C7
     suite: synth
     dataset: yfcc10m-synth
+    tree: FINAL_TAG
     after: [d1-11-synth-arxiv-corr-synth-st, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset yfcc10m-synth --dim 192 --suite synth --algo silvertorch --interleave --out /scratch/final/gpu1 --resume"
@@ -464,6 +501,7 @@ legs:
     family: C6
     suite: laion30m
     dataset: laion30m
+    tree: FINAL_TAG
     after: [d1-12-synth-yfcc10m-synth-st, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset laion30m --dim 256 --suite laion30m --algo silvertorch --out /scratch/final/gpu1 --resume"
@@ -477,6 +515,7 @@ legs:
     family: C6
     suite: laion30m-bs1
     dataset: laion30m
+    tree: FINAL_TAG
     after: [d1-13-laion30m-laion30m-st, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite laion30m-bs1 --dataset laion30m --dim 256 --out /scratch/final/gpu1 --resume"
@@ -490,6 +529,7 @@ legs:
     family: C1+C6
     suite: laion30m-synth
     dataset: laion30m-synth
+    tree: FINAL_TAG
     after: [d1-14-laion30m-bs1-laion30m, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite laion30m-synth --dataset laion30m-synth --dim 256 --interleave --out /scratch/final/gpu1 --resume"
@@ -504,6 +544,7 @@ legs:
     family: C7
     suite: h2h
     dataset: goodreads
+    tree: FINAL_TAG
     after: [d1-15-laion30m-synth-laion30m-synth, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite h2h --dataset goodreads --dim 128 --interleave --profile --out /scratch/final/gpu1 --resume"
@@ -517,6 +558,7 @@ legs:
     family: C7
     suite: h2h
     dataset: arxiv
+    tree: FINAL_TAG
     after: [d1-16-h2h-goodreads, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite h2h --dataset arxiv --dim 128 --interleave --profile --out /scratch/final/gpu1 --resume"
@@ -530,6 +572,7 @@ legs:
     family: C7
     suite: c7-scorepath
     dataset: laion30m
+    tree: FINAL_TAG
     after: [d1-17-h2h-arxiv, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite c7-scorepath --dataset laion30m --dim 256 --interleave --profile --mode eager --out /scratch/final/gpu1 --resume"
@@ -543,6 +586,7 @@ legs:
     family: C2
     suite: filter
     dataset: goodreads
+    tree: FINAL_TAG
     after: [d1-18-c7-scorepath-laion30m, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset goodreads --dim 128 --suite filter --algo linr_v3 --out /scratch/final/gpu1 --resume"
@@ -557,6 +601,7 @@ legs:
     family: C2
     suite: filter
     dataset: arxiv
+    tree: FINAL_TAG
     after: [d1-19-filter-goodreads-v3, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv --dim 128 --suite filter --algo linr_v3 --out /scratch/final/gpu1 --resume"
@@ -571,6 +616,7 @@ legs:
     family: C2
     suite: filter
     dataset: yfcc10m
+    tree: FINAL_TAG
     after: [d1-20-filter-arxiv-v3, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset yfcc10m --dim 192 --suite filter --algo linr_v3 --out /scratch/final/gpu1 --resume"
@@ -585,6 +631,7 @@ legs:
     family: C2
     suite: filter
     dataset: pubmed
+    tree: FINAL_TAG
     after: [d1-21-filter-yfcc10m-v3, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset pubmed --dim 768 --suite filter --algo linr_v3 --out /scratch/final/gpu1 --resume"
@@ -599,6 +646,7 @@ legs:
     family: C2
     suite: synth
     dataset: goodreads-synth
+    tree: FINAL_TAG
     after: [d1-22-filter-pubmed-v3, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset goodreads-synth --dim 128 --suite synth --algo linr_v3 --out /scratch/final/gpu1 --resume"
@@ -612,6 +660,7 @@ legs:
     family: C2
     suite: synth
     dataset: arxiv-corr-synth
+    tree: FINAL_TAG
     after: [d1-23-synth-goodreads-synth-v3, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv-corr-synth --dim 128 --suite synth --algo linr_v3 --out /scratch/final/gpu1 --resume"
@@ -625,6 +674,7 @@ legs:
     family: tune
     suite: tune-q
     dataset: pubmed
+    tree: FINAL_TAG
     after: [stage-a100-x1-b]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-q --dataset pubmed --dim 768 --skip-perf --out /scratch/final/gpu0 --resume"
@@ -638,6 +688,7 @@ legs:
     family: tune
     suite: tune-q
     dataset: yfcc10m
+    tree: FINAL_TAG
     after: [b-01-tune-q-pubmed, stage-a100-x1-b]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-q --dataset yfcc10m --dim 192 --skip-perf --out /scratch/final/gpu0 --resume"
@@ -651,6 +702,7 @@ legs:
     family: tune
     suite: tune-q
     dataset: yfcc10m-synth
+    tree: FINAL_TAG
     after: [b-02-tune-q-yfcc10m, stage-a100-x1-b]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-q --dataset yfcc10m-synth --dim 192 --skip-perf --out /scratch/final/gpu0 --resume"
@@ -664,6 +716,7 @@ legs:
     family: tune
     suite: tune-timed
     dataset: pubmed
+    tree: FINAL_TAG
     after: [b-03-tune-q-yfcc10m-synth, stage-a100-x1-b]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset pubmed --dim 768 --out /scratch/final/gpu0 --resume"
@@ -677,6 +730,7 @@ legs:
     family: tune
     suite: tune-timed
     dataset: yfcc10m
+    tree: FINAL_TAG
     after: [b-04-tune-timed-pubmed, stage-a100-x1-b]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset yfcc10m --dim 192 --out /scratch/final/gpu0 --resume"
@@ -690,6 +744,7 @@ legs:
     family: tune
     suite: tune-timed
     dataset: yfcc10m-synth
+    tree: FINAL_TAG
     after: [b-05-tune-timed-yfcc10m, stage-a100-x1-b]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset yfcc10m-synth --dim 192 --out /scratch/final/gpu0 --resume"
@@ -703,6 +758,7 @@ legs:
     family: tune
     suite: tune-q
     dataset: goodreads
+    tree: FINAL_TAG
     after: [b-06-tune-timed-yfcc10m-synth, stage-a100-x1-b]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-q --dataset goodreads --dim 128 --skip-perf --out /scratch/final/gpu0 --resume"
@@ -716,6 +772,7 @@ legs:
     family: tune
     suite: tune-q
     dataset: goodreads-synth
+    tree: FINAL_TAG
     after: [b-07-tune-q-goodreads, stage-a100-x1-b]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-q --dataset goodreads-synth --dim 128 --skip-perf --out /scratch/final/gpu0 --resume"
@@ -729,6 +786,7 @@ legs:
     family: tune
     suite: tune-timed
     dataset: goodreads
+    tree: FINAL_TAG
     after: [b-08-tune-q-goodreads-synth, stage-a100-x1-b]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset goodreads --dim 128 --out /scratch/final/gpu0 --resume"
@@ -742,6 +800,7 @@ legs:
     family: tune
     suite: tune-timed
     dataset: goodreads-synth
+    tree: FINAL_TAG
     after: [b-09-tune-timed-goodreads, stage-a100-x1-b]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset goodreads-synth --dim 128 --out /scratch/final/gpu0 --resume"
@@ -755,6 +814,7 @@ legs:
     family: C2
     suite: v3bits
     dataset: goodreads-synth
+    tree: FINAL_TAG
     after: [b-10-tune-timed-goodreads-synth, stage-a100-x1-b]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite v3bits --dataset goodreads-synth --dim 128 --out /scratch/final/gpu0 --resume"
@@ -769,6 +829,7 @@ legs:
     family: C2
     suite: v3bits
     dataset: goodreads
+    tree: FINAL_TAG
     after: [b-11-v3bits-goodreads-synth, stage-a100-x1-b]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite v3bits --dataset goodreads --dim 128 --out /scratch/final/gpu0 --resume"
@@ -783,6 +844,7 @@ legs:
     family: C2
     suite: v3bits
     dataset: pubmed
+    tree: FINAL_TAG
     after: [b-12-v3bits-goodreads, stage-a100-x1-b]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite v3bits --dataset pubmed --dim 768 --out /scratch/final/gpu0 --resume"
@@ -790,6 +852,64 @@ legs:
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/v3bits && cp -al /scratch/final/gpu0/v3bits/pubmed-d768* $T/v3bits/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/pubmed-v3bits --verify && rm -rf $T"
     expect: {cells: 12, records: 12, gpu_h: 1.32}
     note: "k_bits variants against each other"
+  - id: b-14-seeds-c1-arxiv-synth
+    pod: a100-x1-b
+    index: 0
+    worker: v-pubmed
+    family: C1 seeds
+    suite: seeds-c1
+    dataset: arxiv-synth
+    tree: campaign-final
+    after: [b-13-v3bits-pubmed, stage-a100-x1-b]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite seeds-c1 --dataset arxiv-synth --dim 128 --interleave --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/arxiv-synth-seeds-c1
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/seeds-c1 && cp -al /scratch/final/gpu0/seeds-c1/arxiv-synth-d128* $T/seeds-c1/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-synth-seeds-c1 --verify && rm -rf $T"
+    expect: {cells: 12, records: 12, gpu_h: 0.15}
+  - id: b-15-seeds-c1-yfcc10m-synth
+    pod: a100-x1-b
+    index: 0
+    worker: v-pubmed
+    family: C1 seeds
+    suite: seeds-c1
+    dataset: yfcc10m-synth
+    tree: campaign-final
+    after: [b-14-seeds-c1-arxiv-synth, stage-a100-x1-b]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite seeds-c1 --dataset yfcc10m-synth --dim 192 --interleave --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/yfcc10m-synth-seeds-c1
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/seeds-c1 && cp -al /scratch/final/gpu0/seeds-c1/yfcc10m-synth-d192* $T/seeds-c1/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/yfcc10m-synth-seeds-c1 --verify && rm -rf $T"
+    expect: {cells: 12, records: 12, gpu_h: 0.4}
+  - id: b-16-seeds-c1-laion30m-laion30m-synth
+    pod: a100-x1-b
+    index: 0
+    worker: v-pubmed
+    family: C1 seeds
+    suite: seeds-c1-laion30m
+    dataset: laion30m-synth
+    tree: campaign-final
+    after: [b-15-seeds-c1-yfcc10m-synth, stage-a100-x1-b]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite seeds-c1-laion30m --dataset laion30m-synth --dim 256 --interleave --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion30m-synth-seeds-c1-laion30m
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/seeds-c1-laion30m && cp -al /scratch/final/gpu0/seeds-c1-laion30m/laion30m-synth-d256* $T/seeds-c1-laion30m/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-synth-seeds-c1-laion30m --verify && rm -rf $T"
+    expect: {cells: 12, records: 12, gpu_h: 1.22}
+    note: "needs LAION 30 M on pod b"
+  - id: b-17-seeds-c7-laion30m
+    pod: a100-x1-b
+    index: 0
+    worker: v-pubmed
+    family: C7 seeds
+    suite: seeds-c7
+    dataset: laion30m
+    tree: campaign-final
+    after: [b-16-seeds-c1-laion30m-laion30m-synth, stage-a100-x1-b]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite seeds-c7 --dataset laion30m --dim 256 --interleave --profile --mode eager --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion30m-seeds-c7
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/seeds-c7 && cp -al /scratch/final/gpu0/seeds-c7/laion30m-d256* $T/seeds-c7/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-seeds-c7 --verify && rm -rf $T"
+    expect: {cells: 36, records: 36, gpu_h: 0.51}
+    note: "official from the -O3 venv; needs LAION 30 M on pod b"
   - id: p1-01-c3-goodreads-synth
     pod: a100-x1-eval
     index: 0
@@ -797,6 +917,7 @@ legs:
     family: C3
     suite: c3
     dataset: goodreads-synth
+    tree: FINAL_TAG
     after: [stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite c3 --dataset goodreads-synth --dim 128 --out /scratch/final/gpu0 --resume"
@@ -810,6 +931,7 @@ legs:
     family: C3
     suite: c3
     dataset: arxiv-synth
+    tree: FINAL_TAG
     after: [p1-01-c3-goodreads-synth, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite c3 --dataset arxiv-synth --dim 128 --out /scratch/final/gpu0 --resume"
@@ -823,6 +945,7 @@ legs:
     family: C3
     suite: c3
     dataset: yfcc10m-synth
+    tree: FINAL_TAG
     after: [p1-02-c3-arxiv-synth, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite c3 --dataset yfcc10m-synth --dim 192 --out /scratch/final/gpu0 --resume"
@@ -836,6 +959,7 @@ legs:
     family: C3
     suite: c3
     dataset: laion30m-synth
+    tree: FINAL_TAG
     after: [p1-03-c3-yfcc10m-synth, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite c3 --dataset laion30m-synth --dim 256 --out /scratch/final/gpu0 --resume"
@@ -849,6 +973,7 @@ legs:
     family: C3
     suite: c3-real
     dataset: goodreads
+    tree: FINAL_TAG
     after: [p1-04-c3-laion30m-synth, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite c3-real --dataset goodreads --dim 128 --out /scratch/final/gpu0 --resume"
@@ -862,6 +987,7 @@ legs:
     family: C3
     suite: c3-real
     dataset: arxiv
+    tree: FINAL_TAG
     after: [p1-05-c3-real-goodreads, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite c3-real --dataset arxiv --dim 128 --out /scratch/final/gpu0 --resume"
@@ -875,6 +1001,7 @@ legs:
     family: C3
     suite: c3-real
     dataset: yfcc10m
+    tree: FINAL_TAG
     after: [p1-06-c3-real-arxiv, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite c3-real --dataset yfcc10m --dim 192 --out /scratch/final/gpu0 --resume"
@@ -888,6 +1015,7 @@ legs:
     family: C3
     suite: c3-real
     dataset: pubmed
+    tree: FINAL_TAG
     after: [p1-07-c3-real-yfcc10m, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite c3-real --dataset pubmed --dim 768 --out /scratch/final/gpu0 --resume"
@@ -901,6 +1029,7 @@ legs:
     family: C5
     suite: codesign
     dataset: arxiv
+    tree: FINAL_TAG
     after: [p1-08-c3-real-pubmed, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite codesign --dataset arxiv --dim 128 --interleave --out /scratch/final/gpu0 --resume"
@@ -914,6 +1043,7 @@ legs:
     family: C5
     suite: codesign
     dataset: goodreads
+    tree: FINAL_TAG
     after: [p1-09-codesign-arxiv, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite codesign --dataset goodreads --dim 128 --interleave --out /scratch/final/gpu0 --resume"
@@ -927,6 +1057,7 @@ legs:
     family: C5
     suite: codesign-pubmed
     dataset: pubmed
+    tree: FINAL_TAG
     after: [p1-10-codesign-goodreads, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite codesign-pubmed --dataset pubmed --dim 768 --interleave --out /scratch/final/gpu0 --resume"
@@ -940,6 +1071,7 @@ legs:
     family: C5
     suite: codesign-laion30m
     dataset: laion30m
+    tree: FINAL_TAG
     after: [p1-11-codesign-pubmed-pubmed, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite codesign-laion30m --dataset laion30m --dim 256 --interleave --mode eager --out /scratch/final/gpu0 --resume"
@@ -954,6 +1086,7 @@ legs:
     family: C4
     suite: bloomwidth
     dataset: goodreads
+    tree: FINAL_TAG
     after: [p1-12-codesign-laion30m-laion30m, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite bloomwidth --dataset goodreads --dim 128 --out /scratch/final/gpu0 --resume"
@@ -967,6 +1100,7 @@ legs:
     family: C4
     suite: bloomwidth
     dataset: arxiv
+    tree: FINAL_TAG
     after: [p1-13-bloomwidth-goodreads, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite bloomwidth --dataset arxiv --dim 128 --out /scratch/final/gpu0 --resume"
@@ -980,6 +1114,7 @@ legs:
     family: C4
     suite: bloomwidth
     dataset: pubmed
+    tree: FINAL_TAG
     after: [p1-14-bloomwidth-arxiv, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite bloomwidth --dataset pubmed --dim 768 --out /scratch/final/gpu0 --resume"
@@ -993,6 +1128,7 @@ legs:
     family: C4
     suite: bloomwidth-timed
     dataset: goodreads
+    tree: FINAL_TAG
     after: [p1-15-bloomwidth-pubmed, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite bloomwidth-timed --dataset goodreads --dim 128 --out /scratch/final/gpu0 --resume"
@@ -1006,6 +1142,7 @@ legs:
     family: C4
     suite: bloomwidth-timed
     dataset: arxiv
+    tree: FINAL_TAG
     after: [p1-16-bloomwidth-timed-goodreads, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite bloomwidth-timed --dataset arxiv --dim 128 --out /scratch/final/gpu0 --resume"
@@ -1019,6 +1156,7 @@ legs:
     family: C4
     suite: bloomwidth-timed
     dataset: pubmed
+    tree: FINAL_TAG
     after: [p1-17-bloomwidth-timed-arxiv, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite bloomwidth-timed --dataset pubmed --dim 768 --out /scratch/final/gpu0 --resume"
@@ -1032,6 +1170,7 @@ legs:
     family: tune
     suite: tune-q
     dataset: arxiv
+    tree: FINAL_TAG
     after: [p1-18-bloomwidth-timed-pubmed, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-q --dataset arxiv --dim 128 --skip-perf --out /scratch/final/gpu0 --resume"
@@ -1045,6 +1184,7 @@ legs:
     family: tune
     suite: tune-q
     dataset: arxiv-synth
+    tree: FINAL_TAG
     after: [p1-19-tune-q-arxiv, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-q --dataset arxiv-synth --dim 128 --skip-perf --out /scratch/final/gpu0 --resume"
@@ -1058,6 +1198,7 @@ legs:
     family: tune
     suite: tune-q
     dataset: arxiv-corr-synth
+    tree: FINAL_TAG
     after: [p1-20-tune-q-arxiv-synth, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-q --dataset arxiv-corr-synth --dim 128 --skip-perf --out /scratch/final/gpu0 --resume"
@@ -1071,12 +1212,13 @@ legs:
     family: tune
     suite: tune-timed
     dataset: arxiv
+    tree: FINAL_TAG
     after: [p1-21-tune-q-arxiv-corr-synth, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset arxiv --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-tune-timed
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/tune-timed && cp -al /scratch/final/gpu0/tune-timed/arxiv-d128* $T/tune-timed/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-tune-timed --verify && rm -rf $T"
-    expect: {cells: 142, records: 142, gpu_h: 2.16}
+    expect: {cells: 142, records: 142, gpu_h: 2.2}
   - id: p1-23-tune-timed-arxiv-synth
     pod: a100-x1-eval
     index: 0
@@ -1084,12 +1226,13 @@ legs:
     family: tune
     suite: tune-timed
     dataset: arxiv-synth
+    tree: FINAL_TAG
     after: [p1-22-tune-timed-arxiv, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset arxiv-synth --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-synth-tune-timed
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/tune-timed && cp -al /scratch/final/gpu0/tune-timed/arxiv-synth-d128* $T/tune-timed/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-synth-tune-timed --verify && rm -rf $T"
-    expect: {cells: 144, records: 144, gpu_h: 2.19}
+    expect: {cells: 144, records: 144, gpu_h: 2.23}
   - id: p1-24-tune-timed-arxiv-corr-synth
     pod: a100-x1-eval
     index: 0
@@ -1097,12 +1240,217 @@ legs:
     family: tune
     suite: tune-timed
     dataset: arxiv-corr-synth
+    tree: FINAL_TAG
     after: [p1-23-tune-timed-arxiv-synth, stage-a100-x1-eval]
     env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset arxiv-corr-synth --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-corr-synth-tune-timed
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/tune-timed && cp -al /scratch/final/gpu0/tune-timed/arxiv-corr-synth-d128* $T/tune-timed/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-corr-synth-tune-timed --verify && rm -rf $T"
-    expect: {cells: 150, records: 150, gpu_h: 2.29}
+    expect: {cells: 150, records: 150, gpu_h: 2.33}
+  - id: p1-25-nsweep-synth-laion1m-synth
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C1+C6
+    suite: nsweep-synth
+    dataset: laion1m-synth
+    tree: campaign-final
+    after: [p1-24-tune-timed-arxiv-corr-synth, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-synth --dataset laion1m-synth --dim 256 --interleave --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion1m-synth-nsweep-synth
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-synth && cp -al /scratch/final/gpu0/nsweep-synth/laion1m-synth-d256* $T/nsweep-synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion1m-synth-nsweep-synth --verify && rm -rf $T"
+    expect: {cells: 30, records: 30, gpu_h: 0.38}
+  - id: p1-26-nsweep-synth-laion3m-synth
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C1+C6
+    suite: nsweep-synth
+    dataset: laion3m-synth
+    tree: campaign-final
+    after: [p1-25-nsweep-synth-laion1m-synth, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-synth --dataset laion3m-synth --dim 256 --interleave --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion3m-synth-nsweep-synth
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-synth && cp -al /scratch/final/gpu0/nsweep-synth/laion3m-synth-d256* $T/nsweep-synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion3m-synth-nsweep-synth --verify && rm -rf $T"
+    expect: {cells: 30, records: 30, gpu_h: 0.38}
+  - id: p1-27-nsweep-synth-laion10m-synth
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C1+C6
+    suite: nsweep-synth
+    dataset: laion10m-synth
+    tree: campaign-final
+    after: [p1-26-nsweep-synth-laion3m-synth, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-synth --dataset laion10m-synth --dim 256 --interleave --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion10m-synth-nsweep-synth
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-synth && cp -al /scratch/final/gpu0/nsweep-synth/laion10m-synth-d256* $T/nsweep-synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion10m-synth-nsweep-synth --verify && rm -rf $T"
+    expect: {cells: 30, records: 30, gpu_h: 0.77}
+  - id: p1-28-nsweep-synth-laion30m-synth
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C1+C6
+    suite: nsweep-synth
+    dataset: laion30m-synth
+    tree: campaign-final
+    after: [p1-27-nsweep-synth-laion10m-synth, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-synth --dataset laion30m-synth --dim 256 --interleave --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion30m-synth-nsweep-synth
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-synth && cp -al /scratch/final/gpu0/nsweep-synth/laion30m-synth-d256* $T/nsweep-synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-synth-nsweep-synth --verify && rm -rf $T"
+    expect: {cells: 30, records: 30, gpu_h: 1.99}
+  - id: p1-29-nsweep-synth-arxiv-synth
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C1+C6
+    suite: nsweep-synth
+    dataset: arxiv-synth
+    tree: campaign-final
+    after: [p1-28-nsweep-synth-laion30m-synth, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-synth --dataset arxiv-synth --dim 256 --interleave --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/arxiv-synth-nsweep-synth
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-synth && cp -al /scratch/final/gpu0/nsweep-synth/arxiv-synth-d256* $T/nsweep-synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-synth-nsweep-synth --verify && rm -rf $T"
+    expect: {cells: 30, records: 30, gpu_h: 0.55}
+  - id: p1-30-nsweep-laion1m
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C6
+    suite: nsweep
+    dataset: laion1m
+    tree: campaign-final
+    after: [p1-29-nsweep-synth-arxiv-synth, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep --dataset laion1m --dim 256 --interleave --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion1m-nsweep
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep && cp -al /scratch/final/gpu0/nsweep/laion1m-d256* $T/nsweep/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion1m-nsweep --verify && rm -rf $T"
+    expect: {cells: 12, records: 12, gpu_h: 0.16}
+    note: "V1, V2 and SilverTorch in one group per sweep"
+  - id: p1-31-nsweep-laion3m
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C6
+    suite: nsweep
+    dataset: laion3m
+    tree: campaign-final
+    after: [p1-30-nsweep-laion1m, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep --dataset laion3m --dim 256 --interleave --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion3m-nsweep
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep && cp -al /scratch/final/gpu0/nsweep/laion3m-d256* $T/nsweep/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion3m-nsweep --verify && rm -rf $T"
+    expect: {cells: 12, records: 12, gpu_h: 0.16}
+    note: "V1, V2 and SilverTorch in one group per sweep"
+  - id: p1-32-nsweep-laion10m
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C6
+    suite: nsweep
+    dataset: laion10m
+    tree: campaign-final
+    after: [p1-31-nsweep-laion3m, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep --dataset laion10m --dim 256 --interleave --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion10m-nsweep
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep && cp -al /scratch/final/gpu0/nsweep/laion10m-d256* $T/nsweep/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion10m-nsweep --verify && rm -rf $T"
+    expect: {cells: 12, records: 12, gpu_h: 0.22}
+    note: "V1, V2 and SilverTorch in one group per sweep"
+  - id: p1-33-nsweep-laion30m-v2-st
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C6
+    suite: nsweep
+    dataset: laion30m
+    tree: campaign-final
+    after: [p1-32-nsweep-laion10m, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli run --dataset laion30m --dim 256 --suite nsweep --algo linr_v2 --algo silvertorch --interleave --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion30m-nsweep-p1
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep && cp -al /scratch/final/gpu0/nsweep/laion30m-d256* $T/nsweep/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-nsweep-p1 --verify && rm -rf $T"
+    expect: {cells: 10, records: 10, gpu_h: 0.23}
+    note: "30 M: V1 + V2 + SilverTorch exceed one A100; V1 alone next"
+  - id: p1-34-nsweep-laion30m-v1
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C6
+    suite: nsweep
+    dataset: laion30m
+    tree: campaign-final
+    after: [p1-33-nsweep-laion30m-v2-st, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
+    command: "\"$VENV/bin/python\" -m bench.cli run --dataset laion30m --dim 256 --suite nsweep --algo linr_v1_filter_mask --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion30m-nsweep-p1
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep && cp -al /scratch/final/gpu0/nsweep/laion30m-d256* $T/nsweep/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-nsweep-p1 --verify && rm -rf $T"
+    expect: {cells: 2, records: 12, gpu_h: 0.21}
+  - id: p1-35-nsweep-codesign-laion1m
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C5
+    suite: nsweep-codesign
+    dataset: laion1m
+    tree: campaign-final
+    after: [p1-34-nsweep-laion30m-v1, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-codesign --dataset laion1m --dim 256 --interleave --mode eager --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion1m-nsweep-codesign
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-codesign && cp -al /scratch/final/gpu0/nsweep-codesign/laion1m-d256* $T/nsweep-codesign/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion1m-nsweep-codesign --verify && rm -rf $T"
+    expect: {cells: 16, records: 16, gpu_h: 0.18}
+    note: "official from the -O3 venv"
+  - id: p1-36-nsweep-codesign-laion3m
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C5
+    suite: nsweep-codesign
+    dataset: laion3m
+    tree: campaign-final
+    after: [p1-35-nsweep-codesign-laion1m, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-codesign --dataset laion3m --dim 256 --interleave --mode eager --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion3m-nsweep-codesign
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-codesign && cp -al /scratch/final/gpu0/nsweep-codesign/laion3m-d256* $T/nsweep-codesign/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion3m-nsweep-codesign --verify && rm -rf $T"
+    expect: {cells: 16, records: 16, gpu_h: 0.18}
+    note: "official from the -O3 venv"
+  - id: p1-37-nsweep-codesign-laion10m
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C5
+    suite: nsweep-codesign
+    dataset: laion10m
+    tree: campaign-final
+    after: [p1-36-nsweep-codesign-laion3m, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-codesign --dataset laion10m --dim 256 --interleave --mode eager --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion10m-nsweep-codesign
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-codesign && cp -al /scratch/final/gpu0/nsweep-codesign/laion10m-d256* $T/nsweep-codesign/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion10m-nsweep-codesign --verify && rm -rf $T"
+    expect: {cells: 16, records: 16, gpu_h: 0.18}
+    note: "official from the -O3 venv"
+  - id: p1-38-nsweep-codesign-laion30m
+    pod: a100-x1-eval
+    index: 0
+    worker: v-pod1-run
+    family: N-sweep C5
+    suite: nsweep-codesign
+    dataset: laion30m
+    tree: campaign-final
+    after: [p1-37-nsweep-codesign-laion10m, stage-a100-x1-eval]
+    env: {CUDA_VISIBLE_DEVICES: '0', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu0, VENV: /venvs/final-o3, UV_PROJECT_ENVIRONMENT: /venvs/final-o3}
+    command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-codesign --dataset laion30m --dim 256 --interleave --mode eager --out /scratch/final/gpu0 --resume"
+    upload: campaign-final/laion30m-nsweep-codesign
+    upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-codesign && cp -al /scratch/final/gpu0/nsweep-codesign/laion30m-d256* $T/nsweep-codesign/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-nsweep-codesign --verify && rm -rf $T"
+    expect: {cells: 16, records: 16, gpu_h: 0.18}
+    note: "official from the -O3 venv"
   - id: d1-25-ceiling-goodreads
     pod: a100-x2-d
     index: 1
@@ -1110,6 +1458,7 @@ legs:
     family: C6
     suite: ceiling-script
     dataset: goodreads
+    tree: FINAL_TAG
     after: [b-09-tune-timed-goodreads, b-10-tune-timed-goodreads-synth, d1-24-synth-arxiv-corr-synth-v3, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "bash docs/artifacts/campaign-final/ceiling.sh goodreads /scratch/final/gpu1/ceiling-int8-goodreads"
@@ -1124,6 +1473,7 @@ legs:
     family: C6
     suite: ceiling-script
     dataset: arxiv
+    tree: FINAL_TAG
     after: [d1-25-ceiling-goodreads, p1-22-tune-timed-arxiv, p1-23-tune-timed-arxiv-synth, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "bash docs/artifacts/campaign-final/ceiling.sh arxiv /scratch/final/gpu1/ceiling-int8-arxiv"
@@ -1138,6 +1488,7 @@ legs:
     family: C6
     suite: ceiling-script
     dataset: yfcc10m
+    tree: FINAL_TAG
     after: [b-05-tune-timed-yfcc10m, b-06-tune-timed-yfcc10m-synth, d1-26-ceiling-arxiv, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "bash docs/artifacts/campaign-final/ceiling.sh yfcc10m /scratch/final/gpu1/ceiling-int8-yfcc10m"
@@ -1152,6 +1503,7 @@ legs:
     family: C6
     suite: ceiling-script
     dataset: pubmed
+    tree: FINAL_TAG
     after: [b-04-tune-timed-pubmed, d1-27-ceiling-yfcc10m, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "bash docs/artifacts/campaign-final/ceiling.sh pubmed /scratch/final/gpu1/ceiling-int8-pubmed"
@@ -1166,6 +1518,7 @@ legs:
     family: C6
     suite: ceiling-script
     dataset: laion30m
+    tree: FINAL_TAG
     after: [d1-28-ceiling-pubmed, stage-a100-x2-d]
     env: {CUDA_VISIBLE_DEVICES: '1', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu1, VENV: /venvs/final, UV_PROJECT_ENVIRONMENT: /venvs/final}
     command: "bash docs/artifacts/campaign-final/ceiling.sh laion30m /scratch/final/gpu1/ceiling-int8-laion30m"
@@ -1175,10 +1528,10 @@ legs:
     note: "quality only; not grid cells; no LAION tune leg (its point is the calibration's 16384 / 4096)"
 
 totals_gpu_h:                           # per GPU, incl. the 1.45 process overhead; wall-clock = the largest
-  b: 15.9
+  b: 18.2
   d0: 19.8
   d1: 19.4
-  p1: 11.2
+  p1: 17.1
 
 gates:                                 # D1-G over campaign-final/ after the last leg
   - eager-vs-graph ids from the stored hashes

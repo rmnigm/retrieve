@@ -1,0 +1,19 @@
+# Written by `eval-data subset laion30m laion1m` (eval_datasets/subset.py): laion30m-synth's config on the seeded row subset data/laion1m (docs/system/datasets.md § Subsets).
+data_dir: data/laion1m
+content_dir: content_d256
+dims: [256]
+users_limit: 10000
+filters:
+  attrs: item_attrs_synth.pt
+  query_attrs: query_attrs_synth.pt
+  clause:
+    p0001: [0]
+    p0003: [1]
+    p001: [2]
+    p003: [3]
+    p005: [4]
+    p01: [5]
+    p02: [6]
+    p03: [7]
+    p05: [8]
+    p1: [9]
