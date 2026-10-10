@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Final-pass leg runner, pod d GPU 0 (laion): for each LEG_ID, the tag's recipe.yaml gives env, command and upload_command; each runs
 # exactly as written, pinned to cores 64-95, logs under /scratch/final/logs/<leg>.log, wall time and the manifest sha appended to
-# $NOTE. Stops on the first non-zero rc (reported, not worked around). Launch under the GPU 0 lock:
+# $NOTE as '<leg> done ...' lines (d-run's runner matches them). Stops on the first non-zero rc (reported, not worked around). Launch under the GPU 0 lock:
 #   NOTE=<chain note> setsid nohup flock -n /scratch/gpu0.lock bash legs.sh d0-01-... d0-02-... > LOG 2>&1 &
 set -u
 : "${NOTE:?NOTE=the worker chain note}"
@@ -34,13 +34,13 @@ PY
   taskset -c 64-95 bash -c "$CMD" >> "$LOGD/$leg.log" 2>&1 < /dev/null
   rc=$?
   echo "$(date -Is) $leg run rc=$rc s=$(( $(date +%s) - t0 ))"
-  [ $rc -eq 0 ] || { printf '| %s | **FAILED** rc=%s (run) | %ss | |\n' "$leg" "$rc" "$(( $(date +%s) - t0 ))" >> "$NOTE"; exit $rc; }
+  [ $rc -eq 0 ] || { printf -- '- %s FAILED rc=%s (run) after %ss\n' "$leg" "$rc" "$(( $(date +%s) - t0 ))" >> "$NOTE"; exit $rc; }
   kill -STOP $SMI 2>/dev/null
   up=$(bash -c "$UPC" 2>&1 | tee -a "$LOGD/$leg.upload.log" | grep -E "MANIFEST|round trip")
   kill -CONT $SMI 2>/dev/null
   sha=$(sed -n 's/.*MANIFEST.json sha256 \([0-9a-f]*\).*/\1/p' <<< "$up")
   echo "$(date -Is) $leg upload $UPP: $up"
-  grep -q "round trip verified" <<< "$up" || { printf '| %s | **upload failed** | %ss | |\n' "$leg" "$(( $(date +%s) - t0 ))" >> "$NOTE"; exit 4; }
-  printf '| %s | done %s | %ss | `%s` %s |\n' "$leg" "$(date -u +%H:%MZ)" "$(( $(date +%s) - t0 ))" "$UPP" "$sha" >> "$NOTE"
+  grep -q "round trip verified" <<< "$up" || { printf -- '- %s upload FAILED after %ss\n' "$leg" "$(( $(date +%s) - t0 ))" >> "$NOTE"; exit 4; }
+  printf -- '- %s done %s, %ss, `%s` MANIFEST %s\n' "$leg" "$(date -u +%H:%MZ)" "$(( $(date +%s) - t0 ))" "$UPP" "$sha" >> "$NOTE"
 done
 echo "$(date -Is) legs rc=0"
