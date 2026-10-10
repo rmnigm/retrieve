@@ -1,6 +1,6 @@
 """Pod 1's final-pass runner: stage-a100-x1-eval (bench check + bench oracle per (dataset, suite) of the p1 legs), then every
 p1-* leg of the tag's recipe.yaml in order with the leg's env and its exact command under flock /scratch/gpu0.lock, then
-its upload_command. A leg is skipped when its done marker exists; any non-zero rc stops the queue. Usage (from the
+its upload in the corrected form (upload_leg.sh; the recipe's upload_command passes the suite dir and uploads 0 records). A leg is skipped when its done marker exists; any non-zero rc stops the queue. Usage (from the
 FINAL_TAG worktree's evaluation/): python run_p1.py RECIPE LIBRARY_TREE OUT_LOG_DIR"""
 
 import json
@@ -17,6 +17,7 @@ recipe, tree, logs = yaml.safe_load(Path(sys.argv[1]).read_text()), sys.argv[2],
 logs.mkdir(parents=True, exist_ok=True)
 driver = open(logs / "driver.log", "a", buffering=1)
 say = lambda s: driver.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S+00:00', time.gmtime())} {s}\n")  # noqa: E731
+UPLOAD = str(Path(__file__).with_name("upload_leg.sh"))
 legs = [leg for leg in recipe["legs"] if leg["id"].startswith("p1-")]
 got = subprocess.run(["git", "rev-parse", "HEAD:retrieve/src/retrieve"], capture_output=True, text=True, check=True).stdout.strip()
 if got != tree:
@@ -53,7 +54,9 @@ for leg in legs:
     if env["VENV"].endswith("-o3") and not list(Path(env["VENV"]).glob("lib/python*/site-packages/silvertorch/_build_flags.json")):
         say(f"stopped at {leg['id']}: {env['VENV']} has no -O3 build flags file")
         sys.exit(1)
-    if sh(leg["id"], leg["command"], env, True) or sh(f"{leg['id']}-upload", leg["upload_command"], env, False):
+    dim = re.search(r"--dim (\d+)", leg["command"])[1]
+    up = f"{UPLOAD} {leg['id']} {leg['upload']} {leg['suite']} {leg['dataset']} {dim} {env['VENV']} /scratch/final/gpu0 {tree}"
+    if sh(leg["id"], leg["command"], env, True) or sh(f"{leg['id']}-upload", up, env, False):
         say(f"stopped at {leg['id']}")
         sys.exit(1)
     sha = re.findall(r"MANIFEST.json sha256 (\w+)", (logs / f"{leg['id']}-upload.log").read_text())
