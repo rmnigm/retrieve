@@ -36,6 +36,7 @@ step bounds "$A/campaign-v2.12/st-xq-30m/bounds_share.py" laion30m 256 c0_domain
 for sw in c0_domain tags4; do
   step "prof-$sw" "$A/campaign-v2.10/st-topk/prof.py" laion30m 256 bloom $sw 16384 bloom 128 16,64 "$R/prof-$sw.json" official
 done
+kill $SMI 2>/dev/null; wait $SMI 2>/dev/null  # the trace must stop before the upload hashes it
 up=$($PY -m bench.cli upload --results "$R" --path-in-repo artifacts/st-xq-30m-profile --verify 2>&1 | tee "$L/upload.log" | grep -E "MANIFEST|round trip")
 echo "$(date -Is) upload: $up"
 grep -q "round trip verified" <<< "$up" || exit 4
