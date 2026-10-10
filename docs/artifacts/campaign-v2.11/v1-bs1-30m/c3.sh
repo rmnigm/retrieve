@@ -21,6 +21,6 @@ for dd in laion30m-synth:256 yfcc10m-synth:192; do
       --force --out "$R" ) >> "$R/logs/$ds.log" 2>&1 < /dev/null
   rc=$?; echo "$(date -Is) $ds rc=$rc s=$(( $(date +%s) - t0 ))"; [ $rc -eq 0 ] || exit $rc
 done
-cd "$REPO/evaluation" && $PY -m bench.cli upload --results "$R" --path-in-repo artifacts/v1-bs1-c3 --verify 2>&1 | grep -E "MANIFEST|round trip"
+cd "$REPO/evaluation" && $PY -m bench.cli upload --results "$R" --path-in-repo ${UP_PATH:-artifacts/v1-bs1-c3} --verify 2>&1 | grep -E "MANIFEST|round trip"
 echo "$(date -Is) driver done"
 rm -f /scratch/gpu1-holder
