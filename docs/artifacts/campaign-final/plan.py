@@ -34,6 +34,12 @@ NSWEEP_CELL_S = {
     ("nsweep", "laion10m"): 2 * 86 + 2 * 50 + 8 * 35,
     ("nsweep-codesign", "laion1m"): 16 * 28, ("nsweep-codesign", "laion3m"): 16 * 28,
     ("nsweep-codesign", "laion10m"): 16 * 28,
+    ("nsweep-synth", "laion30m-synth"): 18 * 252 + 12 * 34, ("nsweep", "laion30m", "linr_v2", "silvertorch"): 2 * 151 + 8 * 35,
+    ("nsweep", "laion30m", "linr_v1_filter_mask"): 2 * 257,
+    ("nsweep-codesign", "laion30m"): 16 * 28,
+    # seeds legs (bs 16 / 64 only, so these are upper bounds): arXiv 3 M 32 s, YFCC synth 83 s, LAION 30 M synth 252 s, c7 35 s
+    ("seeds-c1", "arxiv-synth"): 8 * 32, ("seeds-c1", "yfcc10m-synth"): 8 * 83,
+    ("seeds-c1-laion30m", "laion30m-synth"): 8 * 252, ("seeds-c7", "laion30m"): 24 * 35,
 }  # fmt: skip
 REAL = ["goodreads", "arxiv", "yfcc10m", "pubmed"]
 OFFICIAL_VENV = "/venvs/final-o3"  # scripts/build_official_o3.sh; env.official_build records the .so sha
@@ -63,6 +69,10 @@ LEGS = [
     # the goodreads bench moved off pod 1 (controller 2026-10-13: v2.11 timed tune slower than sized, pod 1 needs arXiv headroom)
     *[("b", "tune", s, [d], None, None, "--skip-perf" if s == "tune-q" else "", "") for s in ("tune-q", "tune-timed") for d in ["goodreads", "goodreads-synth"]],
     *[("b", "C2", "v3bits", [d], None, None, "", "k_bits variants against each other") for d in ["goodreads-synth", "goodreads", "pubmed"]],
+    # seeds 1-2 where a CI rests on them (controller 2026-10-13): C1's crossover cells, C7's 30 M bs 64 cell
+    *[("b", "C1 seeds", "seeds-c1", [d], None, None, "--interleave", "") for d in ["arxiv-synth", "yfcc10m-synth"]],
+    ("b", "C1 seeds", "seeds-c1-laion30m", ["laion30m-synth"], None, None, "--interleave", "needs LAION 30 M on pod b"),
+    ("b", "C7 seeds", "seeds-c7", ["laion30m"], None, None, "--interleave --profile --mode eager", "official from the -O3 venv; needs LAION 30 M on pod b"),
     *[("p1", "C3", "c3", [d], None, None, "", "") for d in ["goodreads-synth", "arxiv-synth", "yfcc10m-synth", "laion30m-synth"]],
     *[("p1", "C3", "c3-real", [d], None, None, "", "") for d in REAL],
     *[("p1", "C5", "codesign", [d], None, None, "--interleave", "") for d in ["arxiv", "goodreads"]],
@@ -72,9 +82,11 @@ LEGS = [
     *[("p1", "tune", s, [d], None, None, "--skip-perf" if s == "tune-q" else "", "") for s in ("tune-q", "tune-timed")
       for d in ["arxiv", "arxiv-synth", "arxiv-corr-synth"]],
     # the fixed-d N-sweep extension (controller 2026-10-13): all of it on pod 1, one box across 1 / 3 / 10 M
-    *[("p1", "N-sweep C1+C6", "nsweep-synth", [d], None, None, "--interleave", "") for d in ["laion1m-synth", "laion3m-synth", "laion10m-synth", "arxiv-synth"]],
+    *[("p1", "N-sweep C1+C6", "nsweep-synth", [d], None, None, "--interleave", "") for d in ["laion1m-synth", "laion3m-synth", "laion10m-synth", "laion30m-synth", "arxiv-synth"]],
     *[("p1", "N-sweep C6", "nsweep", [d], None, None, "--interleave", "V1, V2 and SilverTorch in one group per sweep") for d in ["laion1m", "laion3m", "laion10m"]],
-    *[("p1", "N-sweep C5", "nsweep-codesign", [d], None, None, "--interleave --mode eager", "official from the -O3 venv") for d in ["laion1m", "laion3m", "laion10m"]],
+    ("p1", "N-sweep C6", "nsweep", ["laion30m"], ["linr_v2", "silvertorch"], None, "--interleave", "30 M: V1 + V2 + SilverTorch exceed one A100; V1 alone next"),
+    ("p1", "N-sweep C6", "nsweep", ["laion30m"], ["linr_v1_filter_mask"], None, "", ""),
+    *[("p1", "N-sweep C5", "nsweep-codesign", [d], None, None, "--interleave --mode eager", "official from the -O3 venv") for d in ["laion1m", "laion3m", "laion10m", "laion30m"]],
 ]  # fmt: skip
 SHORT = {"linr_v1_filter_mask": "v1", "linr_v2": "v2", "linr_v3": "v3", "silvertorch": "st", "postfilter": "pf"}
 # C6 ceiling checks (script legs, quality only): one per bench on C6's GPU, after the bench's tune; GPU-h from the measured runs
@@ -98,8 +110,8 @@ def price(inv, suite, ds, algos, backend):
         h += float(r["gpu_h_cells"]) * OVERHEAD
     if suite == "tune-q":
         h = TUNE_Q_MEASURED[ds]
-    if suite.startswith("nsweep"):
-        h = NSWEEP_CELL_S[(suite, ds)] * OVERHEAD / 3600
+    if suite.startswith(("nsweep", "seeds-")):
+        h = NSWEEP_CELL_S[(suite, ds) if algos is None else (suite, ds, *algos)] * OVERHEAD / 3600
     if suite == "tune-timed" and ds in TUNE_T_MEASURED:
         h = TUNE_T_MEASURED[ds]
     return cells, h
@@ -127,7 +139,7 @@ def main():
             after.append(out[0]["id"])  # M1 (d0's first leg) passes before d1 times anything
         out.append({"id": lid, "gpu": gpu, "pod": pod, "index": idx, "worker": WORKER[gpu], "res": res, "dim": dim, "family": fam, "suite": suite, "dataset": ds,
                     "after": sorted(set(after)), "cells": cells, "gpu_h": round(h, 2),
-                    "official": "official" in str(algos) or (algos and "silvertorch" in algos and suite in ("filter", "synth")) or suite in ("h2h", "c7-scorepath", "codesign", "codesign-laion30m", "bloomwidth", "bloomwidth-timed", "deep", "nsweep-codesign"),
+                    "official": "official" in str(algos) or (algos and "silvertorch" in algos and suite in ("filter", "synth")) or suite in ("h2h", "c7-scorepath", "codesign", "codesign-laion30m", "bloomwidth", "bloomwidth-timed", "deep", "nsweep-codesign", "seeds-c7"),
                     "command": " ".join(cmd.split()), "upload": f"campaign-final/{ds}-{suite}" + (f"-{gpu}" if algos else ""), "note": note})  # fmt: skip
         prev[gpu] = lid
         totals[gpu] += h
@@ -175,6 +187,7 @@ def render(legs, totals):
          "recipe: 1",
          "tag: FINAL_TAG                          # git tag campaign-final; `git rev-parse FINAL_TAG:retrieve/src/retrieve` = library_tree",
          "library_tree: FINAL_TAG_LIBRARY_TREE",
+         "extension_tag: campaign-final          # the N-sweep and seeds-1-2 legs' tree: tagged after dev/final-nsweep merges, same library (e16512f5) as FINAL_TAG",
          "campaign_yaml: evaluation/campaign.yaml   # pinned to the one code_version (quality + perf) before the first leg",
          "hub: {repo: pinkmeme/eval-results, prefix: campaign-final/, aggregate: campaign-final/results.parquet}",
          "image: {torch: 2.10.0+cu128, triton: 3.6.0, cuda: '12.8', python: '3.11'}",
@@ -183,7 +196,7 @@ def render(legs, totals):
          "  a100-x1-eval: 805ab73e…                # verified -O3 (controller 2026-10-13)",
          "  a100-x2-d: FILL_FROM_RECORDS            # d-run's rebuild",
          "  a100-x1-b: FILL_FROM_RECORDS",
-         "worktree: /scratch/wt/final           # git worktree at FINAL_TAG on every pod; venv /venvs/final (uv sync --extra official --all-packages)",
+         "worktree: /scratch/wt/final           # git worktree at FINAL_TAG on every pod; venv /venvs/final (uv sync --extra official --all-packages); the extension legs (tree: campaign-final) run from a worktree at that tag (same library, its suites.yaml / configs)",
          "",
          "pods:",
          "  - {name: a100-x2-d, host: 38f5e1, gpus: [0, 1], disk: /data + /scratch on the 400 GB container disk}",
@@ -210,6 +223,7 @@ def render(legs, totals):
          "  a100-x2-d: {owner: d-run, steps: [copy pubmed from a100-x1-b, bench check + bench oracle for every dataset pod d runs]}",
          "  a100-x1-b: {owner: v-pubmed, steps: [fetch yfcc10m, build yfcc10m-synth / goodreads-synth attrs, bench check + oracle (goodreads, goodreads-synth, yfcc10m, yfcc10m-synth, pubmed)]}",
          "  a100-x1-eval: {owner: v-pod1-run, steps: [replace pod 1's PubMed with the canonical copy from a100-x1-b, laion30m copied from a100-x2-d (steward), bench check + oracle]}",
+         "  a100-x1-b-seeds: {owner: v-pubmed, before: b seeds legs, steps: ['laion30m copied from a100-x2-d (steward; sha256 manifest checked)', arxiv-synth attrs present, bench check + oracle (arxiv-synth d128, yfcc10m-synth, laion30m-synth, laion30m bloom)]}",
          "  a100-x1-eval-nsweep: {owner: v-pod1-run, before: p1 N-sweep legs, steps: ['laion1m / laion3m / laion10m copied from a100-x2-d:/data (steward; MANIFEST.sha256 checked on arrival)', 'arxiv-papers content (d256) present', bench check + oracle per N-sweep dataset]}",
          "",
          "families:                              # one box (host) each; the T1 rows they feed",
@@ -228,6 +242,8 @@ def render(legs, totals):
         y.append(f"  - id: {lg['id']}")
         for k in ("pod", "index", "worker", "family", "suite", "dataset"):
             y.append(f"    {k}: {lg[k]}")
+        ext = lg["suite"].startswith(("nsweep", "seeds-"))
+        y.append(f"    tree: {'campaign-final' if ext else 'FINAL_TAG'}")
         y.append(f"    after: [{', '.join(lg['after'])}]")
         venv = OFFICIAL_VENV if lg["official"] else "/venvs/final"
         y.append(f"    env: {{CUDA_VISIBLE_DEVICES: '{lg['index']}', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu{lg['index']}, VENV: {venv}, UV_PROJECT_ENVIRONMENT: {venv}}}")
