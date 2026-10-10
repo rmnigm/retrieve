@@ -174,6 +174,7 @@ def _op_args() -> dict[str, tuple]:
         ),  # fmt: skip
         "codesigned_probe_score_exact": (query, *probe, attrs, rev, q_attrs, gs, k, lay.width),
         "fused_masked_knn_topk": (query, embs, pos, counts, k),
+        "gemv_scores": (query[:1].half(), embs.half().t().contiguous()),
         "oporp_1bit_match_topk_full": (q_bits, item_bits, k),
         "oporp_1bit_match_topk_indirect": (q_bits, item_bits, k, pos, counts),
     }

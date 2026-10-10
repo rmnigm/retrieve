@@ -563,7 +563,9 @@ adds `"official"` → `retrieve.ops.official` through a table built once in
 The importable truth is
 [`interfaces.DISPATCH`](../../retrieve/src/retrieve/interfaces.py):
 `{class name: {backend: "triton" | "torch" | "cublas" | "official" | None}}`,
-`"cublas"` where the flag is a no-op and `None` where the constructor raises
+`"cublas"` where both backends score with cuBLAS (on triton, a single query takes the
+`gemv_scores` GEMV where it equals cuBLAS bit for bit, so the two still match) and `None`
+where the constructor raises
 (`tests/correctness/test_boundary.py` checks that every `None` raises and
 every key is a `retrieve.modules` class). The same table, with the op each
 label stands for:
@@ -572,12 +574,12 @@ label stands for:
 |---|---|---|---|
 | `SilverTorch` | fused Triton (`ops.triton.codesigned_probe_score*`) | eager torch (`ops.reference`) | Meta's `torch.ops.st.*` (eager-only) |
 | `LiNRV2` / `LiNRV3` | the primitives' Triton ops below | eager (`ops.reference`) | raises `ValueError` |
-| `LiNRV1` | cuBLAS (flag is a no-op; a filter cell adds the filter's own path) | same | raises `ValueError` |
+| `LiNRV1` | cuBLAS; one query on `gemv_scores` where `register_index` found it bit-exact ([kernels](kernels.md), `gemv_scores`); a filter cell adds the filter's own path | cuBLAS | raises `ValueError` |
 | `PrefilterKNN` | `fused_masked_knn_topk` | eager (`ops.reference`) | raises `ValueError` |
 | `OneBitKNN` / `SimHashKNN` | `oporp_1bit_match_topk` | eager (`ops.reference`) | raises `ValueError` |
 | `ExactAttributeFilter` | `clause_mask` / `clause_compact` | eager (`ops.reference`) | raises `ValueError` |
 | `BloomFilter` | `bloom_match` / `bloom_compact` | eager (`ops.reference`) | raises `ValueError` |
-| `PostfilterKNN` | cuBLAS (flag is a no-op) | same | raises `ValueError` |
+| `PostfilterKNN` | cuBLAS; one query on `gemv_scores` where bit-exact | cuBLAS | raises `ValueError` |
 
 A cell labelled `backend="official"` for anything other than
 `SilverTorch` therefore cannot exist. The eval harness mirrors that

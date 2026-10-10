@@ -14,6 +14,7 @@ from retrieve.ops.reference.codesigned_probe_score import (
 )
 from retrieve.ops.reference.codesigned_probe_score_exact import codesigned_probe_score_exact
 from retrieve.ops.reference.fused_masked_knn_topk import fused_masked_knn_topk
+from retrieve.ops.reference.gemv_scores import gemv_scores
 from retrieve.ops.reference.oporp_1bit_match_topk import (
     oporp_1bit_match_topk_full,
     oporp_1bit_match_topk_indirect,
@@ -32,6 +33,7 @@ __all__ = [
     "codesigned_probe_score_bloom",
     "codesigned_probe_score_exact",
     "fused_masked_knn_topk",
+    "gemv_scores",
     "oporp_1bit_match_topk_full",
     "oporp_1bit_match_topk_indirect",
 ]
