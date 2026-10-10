@@ -86,7 +86,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset goodreads --dim 128 --suite filter --algo linr_v1_filter_mask --algo linr_v2 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/goodreads-filter-d0
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu0/filter/goodreads-d128* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-filter-d0 --verify && rm -rf $T"
-    expect: {cells: 24, records: 24, gpu_h: 0.54}
+    expect: {cells: 24, records: 24, gpu_h: 0.43}
   - id: d0-03-filter-arxiv-v1-v2
     pod: a100-x2-d
     index: 0
@@ -100,7 +100,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv --dim 128 --suite filter --algo linr_v1_filter_mask --algo linr_v2 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-filter-d0
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu0/filter/arxiv-d128* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-filter-d0 --verify && rm -rf $T"
-    expect: {cells: 36, records: 36, gpu_h: 2.85}
+    expect: {cells: 36, records: 36, gpu_h: 2.26}
   - id: d0-04-filter-yfcc10m-v1-v2
     pod: a100-x2-d
     index: 0
@@ -114,7 +114,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset yfcc10m --dim 192 --suite filter --algo linr_v1_filter_mask --algo linr_v2 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/yfcc10m-filter-d0
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu0/filter/yfcc10m-d192* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/yfcc10m-filter-d0 --verify && rm -rf $T"
-    expect: {cells: 6, records: 6, gpu_h: 1.79}
+    expect: {cells: 6, records: 6, gpu_h: 1.42}
   - id: d0-05-filter-pubmed-v1-v2
     pod: a100-x2-d
     index: 0
@@ -128,7 +128,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset pubmed --dim 768 --suite filter --algo linr_v1_filter_mask --algo linr_v2 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/pubmed-filter-d0
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu0/filter/pubmed-d768* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/pubmed-filter-d0 --verify && rm -rf $T"
-    expect: {cells: 24, records: 24, gpu_h: 3.78}
+    expect: {cells: 24, records: 24, gpu_h: 3.0}
   - id: d0-06-synth-goodreads-synth-v1-v2-triton
     pod: a100-x2-d
     index: 0
@@ -142,7 +142,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset goodreads-synth --dim 128 --suite synth --algo linr_v1_filter_mask --algo linr_v2 --backend triton --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/goodreads-synth-synth-d0
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/synth && cp -al /scratch/final/gpu0/synth/goodreads-synth-d128* $T/synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-synth-synth-d0 --verify && rm -rf $T"
-    expect: {cells: 20, records: 20, gpu_h: 0.46}
+    expect: {cells: 20, records: 20, gpu_h: 0.36}
   - id: d0-07-synth-arxiv-synth-v1-v2-triton
     pod: a100-x2-d
     index: 0
@@ -156,7 +156,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv-synth --dim 128 --suite synth --algo linr_v1_filter_mask --algo linr_v2 --backend triton --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-synth-synth-d0
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/synth && cp -al /scratch/final/gpu0/synth/arxiv-synth-d128* $T/synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-synth-synth-d0 --verify && rm -rf $T"
-    expect: {cells: 18, records: 18, gpu_h: 0.23}
+    expect: {cells: 18, records: 18, gpu_h: 0.18}
   - id: d0-08-synth-yfcc10m-synth-v1-v2-triton
     pod: a100-x2-d
     index: 0
@@ -170,7 +170,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset yfcc10m-synth --dim 192 --suite synth --algo linr_v1_filter_mask --algo linr_v2 --backend triton --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/yfcc10m-synth-synth-d0
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/synth && cp -al /scratch/final/gpu0/synth/yfcc10m-synth-d192* $T/synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/yfcc10m-synth-synth-d0 --verify && rm -rf $T"
-    expect: {cells: 18, records: 18, gpu_h: 0.6}
+    expect: {cells: 18, records: 18, gpu_h: 0.48}
   - id: d0-09-laion30m-laion30m-v1-v2
     pod: a100-x2-d
     index: 0
@@ -184,7 +184,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset laion30m --dim 256 --suite laion30m --algo linr_v1_filter_mask --algo linr_v2 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion30m-laion30m-d0
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/laion30m && cp -al /scratch/final/gpu0/laion30m/laion30m-d256* $T/laion30m/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-laion30m-d0 --verify && rm -rf $T"
-    expect: {cells: 4, records: 4, gpu_h: 0.27}
+    expect: {cells: 4, records: 4, gpu_h: 0.21}
     note: "one process per sweep (68 GB)"
   - id: d0-10-laion30m-x-laion30m-v2-st
     pod: a100-x2-d
@@ -199,7 +199,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset laion30m --dim 256 --suite laion30m-x --algo linr_v2 --algo silvertorch --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion30m-laion30m-x-d0
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/laion30m-x && cp -al /scratch/final/gpu0/laion30m-x/laion30m-d256* $T/laion30m-x/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-laion30m-x-d0 --verify && rm -rf $T"
-    expect: {cells: 4, records: 4, gpu_h: 0.2}
+    expect: {cells: 4, records: 4, gpu_h: 0.41}
     note: "per sweep; then V1 alone (next leg)"
   - id: d0-11-laion30m-x-laion30m-v1
     pod: a100-x2-d
@@ -214,7 +214,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset laion30m --dim 256 --suite laion30m-x --algo linr_v1_filter_mask --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion30m-laion30m-x-d0
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/laion30m-x && cp -al /scratch/final/gpu0/laion30m-x/laion30m-d256* $T/laion30m-x/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-laion30m-x-d0 --verify && rm -rf $T"
-    expect: {cells: 2, records: 6, gpu_h: 0.21}
+    expect: {cells: 2, records: 6, gpu_h: 0.16}
   - id: d0-12-filter-goodreads-pf
     pod: a100-x2-d
     index: 0
@@ -228,7 +228,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset goodreads --dim 128 --suite filter --algo postfilter --out /scratch/final/gpu0 --resume"
     upload: campaign-final/goodreads-filter-d0
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu0/filter/goodreads-d128* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-filter-d0 --verify && rm -rf $T"
-    expect: {cells: 24, records: 48, gpu_h: 0.71}
+    expect: {cells: 24, records: 48, gpu_h: 0.56}
     note: "T2's generic-torch column, same box as the exact arms"
   - id: d0-13-filter-arxiv-pf
     pod: a100-x2-d
@@ -243,7 +243,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv --dim 128 --suite filter --algo postfilter --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-filter-d0
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu0/filter/arxiv-d128* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-filter-d0 --verify && rm -rf $T"
-    expect: {cells: 36, records: 72, gpu_h: 1.05}
+    expect: {cells: 36, records: 72, gpu_h: 0.83}
     note: "T2's generic-torch column, same box as the exact arms"
   - id: d0-14-filter-yfcc10m-pf
     pod: a100-x2-d
@@ -258,7 +258,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset yfcc10m --dim 192 --suite filter --algo postfilter --out /scratch/final/gpu0 --resume"
     upload: campaign-final/yfcc10m-filter-d0
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu0/filter/yfcc10m-d192* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/yfcc10m-filter-d0 --verify && rm -rf $T"
-    expect: {cells: 6, records: 12, gpu_h: 0.17}
+    expect: {cells: 6, records: 12, gpu_h: 0.14}
     note: "T2's generic-torch column, same box as the exact arms"
   - id: d0-15-filter-pubmed-pf
     pod: a100-x2-d
@@ -273,7 +273,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset pubmed --dim 768 --suite filter --algo postfilter --out /scratch/final/gpu0 --resume"
     upload: campaign-final/pubmed-filter-d0
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu0/filter/pubmed-d768* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/pubmed-filter-d0 --verify && rm -rf $T"
-    expect: {cells: 24, records: 48, gpu_h: 3.62}
+    expect: {cells: 24, records: 48, gpu_h: 2.88}
     note: "T2's generic-torch column, same box as the exact arms"
   - id: d0-16-synth-goodreads-synth-v2-torch
     pod: a100-x2-d
@@ -288,7 +288,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset goodreads-synth --dim 128 --suite synth --algo linr_v2 --backend torch --out /scratch/final/gpu0 --resume"
     upload: campaign-final/goodreads-synth-synth-d0
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/synth && cp -al /scratch/final/gpu0/synth/goodreads-synth-d128* $T/synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-synth-synth-d0 --verify && rm -rf $T"
-    expect: {cells: 12, records: 32, gpu_h: 0.9}
+    expect: {cells: 12, records: 32, gpu_h: 0.71}
     note: "C3's V2 side, same box as V2 triton"
   - id: d0-17-synth-goodreads-synth-pf
     pod: a100-x2-d
@@ -303,7 +303,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset goodreads-synth --dim 128 --suite synth --algo postfilter --out /scratch/final/gpu0 --resume"
     upload: campaign-final/goodreads-synth-synth-d0
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/synth && cp -al /scratch/final/gpu0/synth/goodreads-synth-d128* $T/synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-synth-synth-d0 --verify && rm -rf $T"
-    expect: {cells: 28, records: 60, gpu_h: 1.63}
+    expect: {cells: 28, records: 60, gpu_h: 1.29}
   - id: d0-18-synth-arxiv-corr-synth-pf
     pod: a100-x2-d
     index: 0
@@ -317,7 +317,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv-corr-synth --dim 128 --suite synth --algo postfilter --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-corr-synth-synth-d0
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/synth && cp -al /scratch/final/gpu0/synth/arxiv-corr-synth-d128* $T/synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-corr-synth-synth-d0 --verify && rm -rf $T"
-    expect: {cells: 12, records: 12, gpu_h: 0.32}
+    expect: {cells: 12, records: 12, gpu_h: 0.26}
   - id: d1-01-filter-goodreads-st
     pod: a100-x2-d
     index: 1
@@ -331,7 +331,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset goodreads --dim 128 --suite filter --algo silvertorch --interleave --out /scratch/final/gpu1 --resume"
     upload: campaign-final/goodreads-filter-d1
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu1/filter/goodreads-d128* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-filter-d1 --verify && rm -rf $T"
-    expect: {cells: 30, records: 30, gpu_h: 0.54}
+    expect: {cells: 30, records: 30, gpu_h: 0.43}
     note: "triton then official in one stream (parity spill); official from the -O3 venv"
   - id: d1-02-filter-arxiv-st
     pod: a100-x2-d
@@ -346,7 +346,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv --dim 128 --suite filter --algo silvertorch --interleave --out /scratch/final/gpu1 --resume"
     upload: campaign-final/arxiv-filter-d1
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu1/filter/arxiv-d128* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-filter-d1 --verify && rm -rf $T"
-    expect: {cells: 54, records: 54, gpu_h: 1.02}
+    expect: {cells: 54, records: 54, gpu_h: 0.84}
     note: "triton then official in one stream (parity spill); official from the -O3 venv"
   - id: d1-03-filter-yfcc10m-st
     pod: a100-x2-d
@@ -361,7 +361,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset yfcc10m --dim 192 --suite filter --algo silvertorch --interleave --out /scratch/final/gpu1 --resume"
     upload: campaign-final/yfcc10m-filter-d1
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu1/filter/yfcc10m-d192* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/yfcc10m-filter-d1 --verify && rm -rf $T"
-    expect: {cells: 6, records: 6, gpu_h: 0.33}
+    expect: {cells: 6, records: 6, gpu_h: 0.29}
     note: "triton then official in one stream (parity spill); official from the -O3 venv"
   - id: d1-04-filter-pubmed-st
     pod: a100-x2-d
@@ -376,7 +376,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset pubmed --dim 768 --suite filter --algo silvertorch --interleave --out /scratch/final/gpu1 --resume"
     upload: campaign-final/pubmed-filter-d1
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu1/filter/pubmed-d768* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/pubmed-filter-d1 --verify && rm -rf $T"
-    expect: {cells: 51, records: 51, gpu_h: 3.52}
+    expect: {cells: 51, records: 51, gpu_h: 4.87}
     note: "triton then official in one stream (parity spill); official from the -O3 venv"
   - id: d1-05-deep-goodreads
     pod: a100-x2-d
@@ -391,7 +391,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite deep --dataset goodreads --dim 128 --interleave --out /scratch/final/gpu1 --resume"
     upload: campaign-final/goodreads-deep
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/deep && cp -al /scratch/final/gpu1/deep/goodreads-d128* $T/deep/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-deep --verify && rm -rf $T"
-    expect: {cells: 40, records: 40, gpu_h: 0.65}
+    expect: {cells: 40, records: 40, gpu_h: 0.52}
     note: "official bloom curve paired with triton (goodreads, arXiv)"
   - id: d1-06-deep-arxiv
     pod: a100-x2-d
@@ -406,7 +406,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite deep --dataset arxiv --dim 128 --interleave --out /scratch/final/gpu1 --resume"
     upload: campaign-final/arxiv-deep
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/deep && cp -al /scratch/final/gpu1/deep/arxiv-d128* $T/deep/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-deep --verify && rm -rf $T"
-    expect: {cells: 63, records: 63, gpu_h: 1.25}
+    expect: {cells: 63, records: 63, gpu_h: 1.01}
     note: "official bloom curve paired with triton (goodreads, arXiv)"
   - id: d1-07-deep-yfcc10m
     pod: a100-x2-d
@@ -421,7 +421,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite deep --dataset yfcc10m --dim 192 --interleave --out /scratch/final/gpu1 --resume"
     upload: campaign-final/yfcc10m-deep
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/deep && cp -al /scratch/final/gpu1/deep/yfcc10m-d192* $T/deep/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/yfcc10m-deep --verify && rm -rf $T"
-    expect: {cells: 8, records: 8, gpu_h: 0.26}
+    expect: {cells: 8, records: 8, gpu_h: 0.21}
     note: "official bloom curve paired with triton (goodreads, arXiv)"
   - id: d1-08-deep-pubmed
     pod: a100-x2-d
@@ -436,7 +436,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite deep --dataset pubmed --dim 768 --interleave --out /scratch/final/gpu1 --resume"
     upload: campaign-final/pubmed-deep
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/deep && cp -al /scratch/final/gpu1/deep/pubmed-d768* $T/deep/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/pubmed-deep --verify && rm -rf $T"
-    expect: {cells: 21, records: 21, gpu_h: 0.64}
+    expect: {cells: 21, records: 21, gpu_h: 2.28}
     note: "official bloom curve paired with triton (goodreads, arXiv)"
   - id: d1-09-synth-goodreads-synth-st
     pod: a100-x2-d
@@ -465,7 +465,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv-synth --dim 128 --suite synth --algo silvertorch --interleave --out /scratch/final/gpu1 --resume"
     upload: campaign-final/arxiv-synth-synth-d1
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/synth && cp -al /scratch/final/gpu1/synth/arxiv-synth-d128* $T/synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-synth-synth-d1 --verify && rm -rf $T"
-    expect: {cells: 40, records: 40, gpu_h: 0.7}
+    expect: {cells: 40, records: 40, gpu_h: 0.57}
   - id: d1-11-synth-arxiv-corr-synth-st
     pod: a100-x2-d
     index: 1
@@ -479,7 +479,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv-corr-synth --dim 128 --suite synth --algo silvertorch --interleave --out /scratch/final/gpu1 --resume"
     upload: campaign-final/arxiv-corr-synth-synth-d1
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/synth && cp -al /scratch/final/gpu1/synth/arxiv-corr-synth-d128* $T/synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-corr-synth-synth-d1 --verify && rm -rf $T"
-    expect: {cells: 12, records: 12, gpu_h: 0.25}
+    expect: {cells: 12, records: 12, gpu_h: 0.2}
   - id: d1-12-synth-yfcc10m-synth-st
     pod: a100-x2-d
     index: 1
@@ -493,7 +493,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset yfcc10m-synth --dim 192 --suite synth --algo silvertorch --interleave --out /scratch/final/gpu1 --resume"
     upload: campaign-final/yfcc10m-synth-synth-d1
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/synth && cp -al /scratch/final/gpu1/synth/yfcc10m-synth-d192* $T/synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/yfcc10m-synth-synth-d1 --verify && rm -rf $T"
-    expect: {cells: 27, records: 27, gpu_h: 0.35}
+    expect: {cells: 27, records: 27, gpu_h: 0.36}
   - id: d1-13-laion30m-laion30m-st
     pod: a100-x2-d
     index: 1
@@ -507,7 +507,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset laion30m --dim 256 --suite laion30m --algo silvertorch --out /scratch/final/gpu1 --resume"
     upload: campaign-final/laion30m-laion30m-d1
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/laion30m && cp -al /scratch/final/gpu1/laion30m/laion30m-d256* $T/laion30m/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-laion30m-d1 --verify && rm -rf $T"
-    expect: {cells: 10, records: 10, gpu_h: 0.13}
+    expect: {cells: 10, records: 10, gpu_h: 0.36}
   - id: d1-14-laion30m-bs1-laion30m
     pod: a100-x2-d
     index: 1
@@ -521,7 +521,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite laion30m-bs1 --dataset laion30m --dim 256 --out /scratch/final/gpu1 --resume"
     upload: campaign-final/laion30m-laion30m-bs1
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/laion30m-bs1 && cp -al /scratch/final/gpu1/laion30m-bs1/laion30m-d256* $T/laion30m-bs1/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-laion30m-bs1 --verify && rm -rf $T"
-    expect: {cells: 10, records: 10, gpu_h: 0.07}
+    expect: {cells: 10, records: 10, gpu_h: 0.31}
   - id: d1-15-laion30m-synth-laion30m-synth
     pod: a100-x2-d
     index: 1
@@ -535,7 +535,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite laion30m-synth --dataset laion30m-synth --dim 256 --interleave --out /scratch/final/gpu1 --resume"
     upload: campaign-final/laion30m-synth-laion30m-synth
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/laion30m-synth && cp -al /scratch/final/gpu1/laion30m-synth/laion30m-synth-d256* $T/laion30m-synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-synth-laion30m-synth --verify && rm -rf $T"
-    expect: {cells: 30, records: 30, gpu_h: 1.99}
+    expect: {cells: 30, records: 30, gpu_h: 2.09}
     note: "V1 / V2 (C1) and SilverTorch (C6) at 30 M synth"
   - id: d1-16-h2h-goodreads
     pod: a100-x2-d
@@ -550,7 +550,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite h2h --dataset goodreads --dim 128 --interleave --profile --out /scratch/final/gpu1 --resume"
     upload: campaign-final/goodreads-h2h
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/h2h && cp -al /scratch/final/gpu1/h2h/goodreads-d128* $T/h2h/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-h2h --verify && rm -rf $T"
-    expect: {cells: 6, records: 6, gpu_h: 0.17}
+    expect: {cells: 6, records: 6, gpu_h: 0.14}
   - id: d1-17-h2h-arxiv
     pod: a100-x2-d
     index: 1
@@ -564,7 +564,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite h2h --dataset arxiv --dim 128 --interleave --profile --out /scratch/final/gpu1 --resume"
     upload: campaign-final/arxiv-h2h
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/h2h && cp -al /scratch/final/gpu1/h2h/arxiv-d128* $T/h2h/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-h2h --verify && rm -rf $T"
-    expect: {cells: 6, records: 6, gpu_h: 0.18}
+    expect: {cells: 6, records: 6, gpu_h: 0.15}
   - id: d1-18-c7-scorepath-laion30m
     pod: a100-x2-d
     index: 1
@@ -578,7 +578,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite c7-scorepath --dataset laion30m --dim 256 --interleave --profile --mode eager --out /scratch/final/gpu1 --resume"
     upload: campaign-final/laion30m-c7-scorepath
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/c7-scorepath && cp -al /scratch/final/gpu1/c7-scorepath/laion30m-d256* $T/c7-scorepath/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-c7-scorepath --verify && rm -rf $T"
-    expect: {cells: 12, records: 12, gpu_h: 0.17}
+    expect: {cells: 12, records: 12, gpu_h: 0.9}
   - id: d1-19-filter-goodreads-v3
     pod: a100-x2-d
     index: 1
@@ -592,7 +592,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset goodreads --dim 128 --suite filter --algo linr_v3 --out /scratch/final/gpu1 --resume"
     upload: campaign-final/goodreads-filter-d1
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu1/filter/goodreads-d128* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-filter-d1 --verify && rm -rf $T"
-    expect: {cells: 12, records: 42, gpu_h: 0.38}
+    expect: {cells: 12, records: 42, gpu_h: 0.3}
     note: "V3 / V2 against d0's V2, same host"
   - id: d1-21-filter-yfcc10m-v3
     pod: a100-x2-d
@@ -607,7 +607,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset yfcc10m --dim 192 --suite filter --algo linr_v3 --out /scratch/final/gpu1 --resume"
     upload: campaign-final/yfcc10m-filter-d1
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu1/filter/yfcc10m-d192* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/yfcc10m-filter-d1 --verify && rm -rf $T"
-    expect: {cells: 3, records: 9, gpu_h: 0.88}
+    expect: {cells: 3, records: 9, gpu_h: 0.7}
     note: "V3 / V2 against d0's V2, same host"
   - id: d1-24-synth-arxiv-corr-synth-v3
     pod: a100-x2-d
@@ -622,7 +622,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv-corr-synth --dim 128 --suite synth --algo linr_v3 --out /scratch/final/gpu1 --resume"
     upload: campaign-final/arxiv-corr-synth-synth-d1
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/synth && cp -al /scratch/final/gpu1/synth/arxiv-corr-synth-d128* $T/synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-corr-synth-synth-d1 --verify && rm -rf $T"
-    expect: {cells: 12, records: 24, gpu_h: 0.36}
+    expect: {cells: 12, records: 24, gpu_h: 0.28}
   - id: d0-19-filter-arxiv-v3
     pod: a100-x2-d
     index: 0
@@ -636,7 +636,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset arxiv --dim 128 --suite filter --algo linr_v3 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-filter-d0
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu0/filter/arxiv-d128* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-filter-d0 --verify && rm -rf $T"
-    expect: {cells: 18, records: 90, gpu_h: 1.9}
+    expect: {cells: 18, records: 90, gpu_h: 1.51}
     note: "V3 / V2 against V2, same host; moved from d1 (rebalance)"
   - id: d0-20-filter-pubmed-v3
     pod: a100-x2-d
@@ -651,7 +651,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset pubmed --dim 768 --suite filter --algo linr_v3 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/pubmed-filter-d0
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/filter && cp -al /scratch/final/gpu0/filter/pubmed-d768* $T/filter/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/pubmed-filter-d0 --verify && rm -rf $T"
-    expect: {cells: 12, records: 60, gpu_h: 1.22}
+    expect: {cells: 12, records: 60, gpu_h: 0.97}
     note: "V3 / V2 against V2, same host; moved from d1 (rebalance)"
   - id: d0-21-synth-goodreads-synth-v3
     pod: a100-x2-d
@@ -666,7 +666,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset goodreads-synth --dim 128 --suite synth --algo linr_v3 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/goodreads-synth-synth-d0
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/synth && cp -al /scratch/final/gpu0/synth/goodreads-synth-d128* $T/synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-synth-synth-d0 --verify && rm -rf $T"
-    expect: {cells: 28, records: 88, gpu_h: 1.12}
+    expect: {cells: 28, records: 88, gpu_h: 0.89}
     note: "moved from d1 (rebalance)"
   - id: b-01-tune-q-pubmed
     pod: a100-x1-b
@@ -737,7 +737,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset yfcc10m --dim 192 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/yfcc10m-tune-timed
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/tune-timed && cp -al /scratch/final/gpu0/tune-timed/yfcc10m-d192* $T/tune-timed/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/yfcc10m-tune-timed --verify && rm -rf $T"
-    expect: {cells: 8, records: 8, gpu_h: 1.16}
+    expect: {cells: 8, records: 8, gpu_h: 0.98}
   - id: b-06-tune-timed-yfcc10m-synth
     pod: a100-x1-b
     index: 0
@@ -751,7 +751,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset yfcc10m-synth --dim 192 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/yfcc10m-synth-tune-timed
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/tune-timed && cp -al /scratch/final/gpu0/tune-timed/yfcc10m-synth-d192* $T/tune-timed/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/yfcc10m-synth-tune-timed --verify && rm -rf $T"
-    expect: {cells: 43, records: 43, gpu_h: 0.72}
+    expect: {cells: 43, records: 43, gpu_h: 0.98}
   - id: b-07-tune-q-goodreads
     pod: a100-x1-b
     index: 0
@@ -793,7 +793,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset goodreads --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/goodreads-tune-timed
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/tune-timed && cp -al /scratch/final/gpu0/tune-timed/goodreads-d128* $T/tune-timed/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-tune-timed --verify && rm -rf $T"
-    expect: {cells: 100, records: 100, gpu_h: 1.51}
+    expect: {cells: 100, records: 100, gpu_h: 1.22}
   - id: b-10-tune-timed-goodreads-synth
     pod: a100-x1-b
     index: 0
@@ -807,7 +807,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset goodreads-synth --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/goodreads-synth-tune-timed
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/tune-timed && cp -al /scratch/final/gpu0/tune-timed/goodreads-synth-d128* $T/tune-timed/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-synth-tune-timed --verify && rm -rf $T"
-    expect: {cells: 146, records: 146, gpu_h: 2.25}
+    expect: {cells: 146, records: 146, gpu_h: 1.81}
   - id: b-11-v3bits-goodreads-synth
     pod: a100-x1-b
     index: 0
@@ -821,7 +821,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite v3bits --dataset goodreads-synth --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/goodreads-synth-v3bits
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/v3bits && cp -al /scratch/final/gpu0/v3bits/goodreads-synth-d128* $T/v3bits/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-synth-v3bits --verify && rm -rf $T"
-    expect: {cells: 56, records: 56, gpu_h: 1.99}
+    expect: {cells: 56, records: 56, gpu_h: 1.58}
     note: "k_bits variants against each other"
   - id: b-12-v3bits-goodreads
     pod: a100-x1-b
@@ -836,7 +836,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite v3bits --dataset goodreads --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/goodreads-v3bits
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/v3bits && cp -al /scratch/final/gpu0/v3bits/goodreads-d128* $T/v3bits/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-v3bits --verify && rm -rf $T"
-    expect: {cells: 16, records: 16, gpu_h: 0.38}
+    expect: {cells: 16, records: 16, gpu_h: 0.3}
     note: "k_bits variants against each other"
   - id: b-13-v3bits-pubmed
     pod: a100-x1-b
@@ -851,7 +851,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite v3bits --dataset pubmed --dim 768 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/pubmed-v3bits
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/v3bits && cp -al /scratch/final/gpu0/v3bits/pubmed-d768* $T/v3bits/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/pubmed-v3bits --verify && rm -rf $T"
-    expect: {cells: 12, records: 12, gpu_h: 1.32}
+    expect: {cells: 12, records: 12, gpu_h: 1.05}
     note: "k_bits variants against each other"
   - id: b-14-seeds-c1-arxiv-synth
     pod: a100-x1-b
@@ -866,7 +866,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite seeds-c1 --dataset arxiv-synth --dim 128 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-synth-seeds-c1
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/seeds-c1 && cp -al /scratch/final/gpu0/seeds-c1/arxiv-synth-d128* $T/seeds-c1/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-synth-seeds-c1 --verify && rm -rf $T"
-    expect: {cells: 12, records: 12, gpu_h: 0.15}
+    expect: {cells: 12, records: 12, gpu_h: 0.12}
   - id: b-15-seeds-c1-yfcc10m-synth
     pod: a100-x1-b
     index: 0
@@ -880,7 +880,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite seeds-c1 --dataset yfcc10m-synth --dim 192 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/yfcc10m-synth-seeds-c1
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/seeds-c1 && cp -al /scratch/final/gpu0/seeds-c1/yfcc10m-synth-d192* $T/seeds-c1/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/yfcc10m-synth-seeds-c1 --verify && rm -rf $T"
-    expect: {cells: 12, records: 12, gpu_h: 0.4}
+    expect: {cells: 12, records: 12, gpu_h: 0.32}
   - id: b-16-seeds-c1-laion30m-laion30m-synth
     pod: a100-x1-b
     index: 0
@@ -894,7 +894,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite seeds-c1-laion30m --dataset laion30m-synth --dim 256 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion30m-synth-seeds-c1-laion30m
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/seeds-c1-laion30m && cp -al /scratch/final/gpu0/seeds-c1-laion30m/laion30m-synth-d256* $T/seeds-c1-laion30m/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-synth-seeds-c1-laion30m --verify && rm -rf $T"
-    expect: {cells: 12, records: 12, gpu_h: 1.22}
+    expect: {cells: 12, records: 12, gpu_h: 0.97}
     note: "needs LAION 30 M on pod b"
   - id: b-17-seeds-c7-laion30m
     pod: a100-x1-b
@@ -909,7 +909,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite seeds-c7 --dataset laion30m --dim 256 --interleave --profile --mode eager --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion30m-seeds-c7
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/seeds-c7 && cp -al /scratch/final/gpu0/seeds-c7/laion30m-d256* $T/seeds-c7/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-seeds-c7 --verify && rm -rf $T"
-    expect: {cells: 36, records: 36, gpu_h: 0.51}
+    expect: {cells: 36, records: 36, gpu_h: 2.7}
     note: "official from the -O3 venv; needs LAION 30 M on pod b"
   - id: p1-01-c3-goodreads-synth
     pod: a100-x1-eval
@@ -924,7 +924,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite c3 --dataset goodreads-synth --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/goodreads-synth-c3
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/c3 && cp -al /scratch/final/gpu0/c3/goodreads-synth-d128* $T/c3/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-synth-c3 --verify && rm -rf $T"
-    expect: {cells: 18, records: 18, gpu_h: 0.19}
+    expect: {cells: 18, records: 18, gpu_h: 0.15}
   - id: p1-02-c3-arxiv-synth
     pod: a100-x1-eval
     index: 0
@@ -938,7 +938,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite c3 --dataset arxiv-synth --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-synth-c3
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/c3 && cp -al /scratch/final/gpu0/c3/arxiv-synth-d128* $T/c3/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-synth-c3 --verify && rm -rf $T"
-    expect: {cells: 12, records: 12, gpu_h: 0.14}
+    expect: {cells: 12, records: 12, gpu_h: 0.11}
   - id: p1-03-c3-yfcc10m-synth
     pod: a100-x1-eval
     index: 0
@@ -952,7 +952,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite c3 --dataset yfcc10m-synth --dim 192 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/yfcc10m-synth-c3
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/c3 && cp -al /scratch/final/gpu0/c3/yfcc10m-synth-d192* $T/c3/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/yfcc10m-synth-c3 --verify && rm -rf $T"
-    expect: {cells: 6, records: 6, gpu_h: 0.18}
+    expect: {cells: 6, records: 6, gpu_h: 0.14}
   - id: p1-04-c3-laion30m-synth
     pod: a100-x1-eval
     index: 0
@@ -966,7 +966,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite c3 --dataset laion30m-synth --dim 256 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion30m-synth-c3
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/c3 && cp -al /scratch/final/gpu0/c3/laion30m-synth-d256* $T/c3/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-synth-c3 --verify && rm -rf $T"
-    expect: {cells: 6, records: 6, gpu_h: 0.57}
+    expect: {cells: 6, records: 6, gpu_h: 0.45}
   - id: p1-05-c3-real-goodreads
     pod: a100-x1-eval
     index: 0
@@ -980,7 +980,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite c3-real --dataset goodreads --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/goodreads-c3-real
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/c3-real && cp -al /scratch/final/gpu0/c3-real/goodreads-d128* $T/c3-real/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-c3-real --verify && rm -rf $T"
-    expect: {cells: 6, records: 6, gpu_h: 0.05}
+    expect: {cells: 6, records: 6, gpu_h: 0.04}
   - id: p1-06-c3-real-arxiv
     pod: a100-x1-eval
     index: 0
@@ -994,7 +994,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite c3-real --dataset arxiv --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-c3-real
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/c3-real && cp -al /scratch/final/gpu0/c3-real/arxiv-d128* $T/c3-real/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-c3-real --verify && rm -rf $T"
-    expect: {cells: 6, records: 6, gpu_h: 0.1}
+    expect: {cells: 6, records: 6, gpu_h: 0.08}
   - id: p1-07-c3-real-yfcc10m
     pod: a100-x1-eval
     index: 0
@@ -1008,7 +1008,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite c3-real --dataset yfcc10m --dim 192 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/yfcc10m-c3-real
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/c3-real && cp -al /scratch/final/gpu0/c3-real/yfcc10m-d192* $T/c3-real/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/yfcc10m-c3-real --verify && rm -rf $T"
-    expect: {cells: 2, records: 2, gpu_h: 0.47}
+    expect: {cells: 2, records: 2, gpu_h: 0.37}
   - id: p1-08-c3-real-pubmed
     pod: a100-x1-eval
     index: 0
@@ -1022,7 +1022,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite c3-real --dataset pubmed --dim 768 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/pubmed-c3-real
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/c3-real && cp -al /scratch/final/gpu0/c3-real/pubmed-d768* $T/c3-real/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/pubmed-c3-real --verify && rm -rf $T"
-    expect: {cells: 6, records: 6, gpu_h: 0.4}
+    expect: {cells: 6, records: 6, gpu_h: 0.32}
   - id: p1-09-codesign-arxiv
     pod: a100-x1-eval
     index: 0
@@ -1036,7 +1036,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite codesign --dataset arxiv --dim 128 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-codesign
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/codesign && cp -al /scratch/final/gpu0/codesign/arxiv-d128* $T/codesign/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-codesign --verify && rm -rf $T"
-    expect: {cells: 36, records: 36, gpu_h: 0.3}
+    expect: {cells: 36, records: 36, gpu_h: 0.25}
   - id: p1-10-codesign-goodreads
     pod: a100-x1-eval
     index: 0
@@ -1050,7 +1050,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite codesign --dataset goodreads --dim 128 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/goodreads-codesign
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/codesign && cp -al /scratch/final/gpu0/codesign/goodreads-d128* $T/codesign/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-codesign --verify && rm -rf $T"
-    expect: {cells: 12, records: 12, gpu_h: 0.1}
+    expect: {cells: 12, records: 12, gpu_h: 0.08}
   - id: p1-11-codesign-pubmed-pubmed
     pod: a100-x1-eval
     index: 0
@@ -1064,7 +1064,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite codesign-pubmed --dataset pubmed --dim 768 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/pubmed-codesign-pubmed
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/codesign-pubmed && cp -al /scratch/final/gpu0/codesign-pubmed/pubmed-d768* $T/codesign-pubmed/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/pubmed-codesign-pubmed --verify && rm -rf $T"
-    expect: {cells: 4, records: 4, gpu_h: 0.05}
+    expect: {cells: 4, records: 4, gpu_h: 0.09}
   - id: p1-12-codesign-laion30m-laion30m
     pod: a100-x1-eval
     index: 0
@@ -1078,7 +1078,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite codesign-laion30m --dataset laion30m --dim 256 --interleave --mode eager --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion30m-codesign-laion30m
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/codesign-laion30m && cp -al /scratch/final/gpu0/codesign-laion30m/laion30m-d256* $T/codesign-laion30m/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-codesign-laion30m --verify && rm -rf $T"
-    expect: {cells: 16, records: 16, gpu_h: 0.18}
+    expect: {cells: 16, records: 16, gpu_h: 1.17}
     note: "needs LAION on pod 1, else runs on d1"
   - id: p1-13-bloomwidth-goodreads
     pod: a100-x1-eval
@@ -1093,7 +1093,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite bloomwidth --dataset goodreads --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/goodreads-bloomwidth
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/bloomwidth && cp -al /scratch/final/gpu0/bloomwidth/goodreads-d128* $T/bloomwidth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-bloomwidth --verify && rm -rf $T"
-    expect: {cells: 14, records: 14, gpu_h: 0.38}
+    expect: {cells: 14, records: 14, gpu_h: 0.3}
   - id: p1-14-bloomwidth-arxiv
     pod: a100-x1-eval
     index: 0
@@ -1107,7 +1107,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite bloomwidth --dataset arxiv --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-bloomwidth
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/bloomwidth && cp -al /scratch/final/gpu0/bloomwidth/arxiv-d128* $T/bloomwidth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-bloomwidth --verify && rm -rf $T"
-    expect: {cells: 42, records: 42, gpu_h: 0.34}
+    expect: {cells: 42, records: 42, gpu_h: 0.3}
   - id: p1-15-bloomwidth-pubmed
     pod: a100-x1-eval
     index: 0
@@ -1121,7 +1121,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite bloomwidth --dataset pubmed --dim 768 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/pubmed-bloomwidth
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/bloomwidth && cp -al /scratch/final/gpu0/bloomwidth/pubmed-d768* $T/bloomwidth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/pubmed-bloomwidth --verify && rm -rf $T"
-    expect: {cells: 14, records: 14, gpu_h: 0.01}
+    expect: {cells: 14, records: 14, gpu_h: 0.11}
   - id: p1-16-bloomwidth-timed-goodreads
     pod: a100-x1-eval
     index: 0
@@ -1135,7 +1135,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite bloomwidth-timed --dataset goodreads --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/goodreads-bloomwidth-timed
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/bloomwidth-timed && cp -al /scratch/final/gpu0/bloomwidth-timed/goodreads-d128* $T/bloomwidth-timed/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/goodreads-bloomwidth-timed --verify && rm -rf $T"
-    expect: {cells: 7, records: 7, gpu_h: 0.3}
+    expect: {cells: 7, records: 7, gpu_h: 0.24}
   - id: p1-17-bloomwidth-timed-arxiv
     pod: a100-x1-eval
     index: 0
@@ -1149,7 +1149,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite bloomwidth-timed --dataset arxiv --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-bloomwidth-timed
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/bloomwidth-timed && cp -al /scratch/final/gpu0/bloomwidth-timed/arxiv-d128* $T/bloomwidth-timed/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-bloomwidth-timed --verify && rm -rf $T"
-    expect: {cells: 21, records: 21, gpu_h: 0.11}
+    expect: {cells: 21, records: 21, gpu_h: 0.1}
   - id: p1-18-bloomwidth-timed-pubmed
     pod: a100-x1-eval
     index: 0
@@ -1163,7 +1163,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite bloomwidth-timed --dataset pubmed --dim 768 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/pubmed-bloomwidth-timed
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/bloomwidth-timed && cp -al /scratch/final/gpu0/bloomwidth-timed/pubmed-d768* $T/bloomwidth-timed/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/pubmed-bloomwidth-timed --verify && rm -rf $T"
-    expect: {cells: 7, records: 7, gpu_h: 0.04}
+    expect: {cells: 7, records: 7, gpu_h: 0.08}
   - id: p1-19-tune-q-arxiv
     pod: a100-x1-eval
     index: 0
@@ -1219,7 +1219,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset arxiv --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-tune-timed
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/tune-timed && cp -al /scratch/final/gpu0/tune-timed/arxiv-d128* $T/tune-timed/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-tune-timed --verify && rm -rf $T"
-    expect: {cells: 142, records: 142, gpu_h: 2.2}
+    expect: {cells: 142, records: 142, gpu_h: 1.86}
   - id: p1-23-tune-timed-arxiv-synth
     pod: a100-x1-eval
     index: 0
@@ -1233,7 +1233,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset arxiv-synth --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-synth-tune-timed
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/tune-timed && cp -al /scratch/final/gpu0/tune-timed/arxiv-synth-d128* $T/tune-timed/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-synth-tune-timed --verify && rm -rf $T"
-    expect: {cells: 144, records: 144, gpu_h: 2.23}
+    expect: {cells: 144, records: 144, gpu_h: 1.87}
   - id: p1-24-tune-timed-arxiv-corr-synth
     pod: a100-x1-eval
     index: 0
@@ -1247,7 +1247,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset arxiv-corr-synth --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-corr-synth-tune-timed
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/tune-timed && cp -al /scratch/final/gpu0/tune-timed/arxiv-corr-synth-d128* $T/tune-timed/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-corr-synth-tune-timed --verify && rm -rf $T"
-    expect: {cells: 150, records: 150, gpu_h: 2.33}
+    expect: {cells: 150, records: 150, gpu_h: 1.95}
   - id: p1-25-nsweep-synth-laion1m-synth
     pod: a100-x1-eval
     index: 0
@@ -1261,7 +1261,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-synth --dataset laion1m-synth --dim 256 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion1m-synth-nsweep-synth
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-synth && cp -al /scratch/final/gpu0/nsweep-synth/laion1m-synth-d256* $T/nsweep-synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion1m-synth-nsweep-synth --verify && rm -rf $T"
-    expect: {cells: 30, records: 30, gpu_h: 0.38}
+    expect: {cells: 30, records: 30, gpu_h: 0.3}
   - id: p1-26-nsweep-synth-laion3m-synth
     pod: a100-x1-eval
     index: 0
@@ -1275,7 +1275,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-synth --dataset laion3m-synth --dim 256 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion3m-synth-nsweep-synth
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-synth && cp -al /scratch/final/gpu0/nsweep-synth/laion3m-synth-d256* $T/nsweep-synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion3m-synth-nsweep-synth --verify && rm -rf $T"
-    expect: {cells: 30, records: 30, gpu_h: 0.38}
+    expect: {cells: 30, records: 30, gpu_h: 0.31}
   - id: p1-27-nsweep-synth-laion10m-synth
     pod: a100-x1-eval
     index: 0
@@ -1289,7 +1289,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-synth --dataset laion10m-synth --dim 256 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion10m-synth-nsweep-synth
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-synth && cp -al /scratch/final/gpu0/nsweep-synth/laion10m-synth-d256* $T/nsweep-synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion10m-synth-nsweep-synth --verify && rm -rf $T"
-    expect: {cells: 30, records: 30, gpu_h: 0.77}
+    expect: {cells: 30, records: 30, gpu_h: 0.65}
   - id: p1-28-nsweep-synth-laion30m-synth
     pod: a100-x1-eval
     index: 0
@@ -1303,7 +1303,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-synth --dataset laion30m-synth --dim 256 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion30m-synth-nsweep-synth
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-synth && cp -al /scratch/final/gpu0/nsweep-synth/laion30m-synth-d256* $T/nsweep-synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-synth-nsweep-synth --verify && rm -rf $T"
-    expect: {cells: 30, records: 30, gpu_h: 1.99}
+    expect: {cells: 30, records: 30, gpu_h: 2.09}
   - id: p1-29-nsweep-synth-arxiv-synth
     pod: a100-x1-eval
     index: 0
@@ -1317,7 +1317,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-synth --dataset arxiv-synth --dim 256 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/arxiv-synth-nsweep-synth
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-synth && cp -al /scratch/final/gpu0/nsweep-synth/arxiv-synth-d256* $T/nsweep-synth/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/arxiv-synth-nsweep-synth --verify && rm -rf $T"
-    expect: {cells: 30, records: 30, gpu_h: 0.55}
+    expect: {cells: 30, records: 30, gpu_h: 0.44}
   - id: p1-30-nsweep-laion1m
     pod: a100-x1-eval
     index: 0
@@ -1331,7 +1331,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep --dataset laion1m --dim 256 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion1m-nsweep
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep && cp -al /scratch/final/gpu0/nsweep/laion1m-d256* $T/nsweep/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion1m-nsweep --verify && rm -rf $T"
-    expect: {cells: 12, records: 12, gpu_h: 0.16}
+    expect: {cells: 12, records: 12, gpu_h: 0.13}
     note: "V1, V2 and SilverTorch in one group per sweep"
   - id: p1-31-nsweep-laion3m
     pod: a100-x1-eval
@@ -1346,7 +1346,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep --dataset laion3m --dim 256 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion3m-nsweep
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep && cp -al /scratch/final/gpu0/nsweep/laion3m-d256* $T/nsweep/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion3m-nsweep --verify && rm -rf $T"
-    expect: {cells: 12, records: 12, gpu_h: 0.16}
+    expect: {cells: 12, records: 12, gpu_h: 0.13}
     note: "V1, V2 and SilverTorch in one group per sweep"
   - id: p1-32-nsweep-laion10m
     pod: a100-x1-eval
@@ -1361,7 +1361,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep --dataset laion10m --dim 256 --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion10m-nsweep
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep && cp -al /scratch/final/gpu0/nsweep/laion10m-d256* $T/nsweep/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion10m-nsweep --verify && rm -rf $T"
-    expect: {cells: 12, records: 12, gpu_h: 0.22}
+    expect: {cells: 12, records: 12, gpu_h: 0.19}
     note: "V1, V2 and SilverTorch in one group per sweep"
   - id: p1-33-nsweep-laion30m-v2-st
     pod: a100-x1-eval
@@ -1376,7 +1376,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset laion30m --dim 256 --suite nsweep --algo linr_v2 --algo silvertorch --interleave --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion30m-nsweep-p1
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep && cp -al /scratch/final/gpu0/nsweep/laion30m-d256* $T/nsweep/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-nsweep-p1 --verify && rm -rf $T"
-    expect: {cells: 10, records: 10, gpu_h: 0.23}
+    expect: {cells: 10, records: 10, gpu_h: 0.44}
     note: "30 M: V1 + V2 + SilverTorch exceed one A100; V1 alone next"
   - id: p1-34-nsweep-laion30m-v1
     pod: a100-x1-eval
@@ -1391,7 +1391,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli run --dataset laion30m --dim 256 --suite nsweep --algo linr_v1_filter_mask --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion30m-nsweep-p1
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep && cp -al /scratch/final/gpu0/nsweep/laion30m-d256* $T/nsweep/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-nsweep-p1 --verify && rm -rf $T"
-    expect: {cells: 2, records: 12, gpu_h: 0.21}
+    expect: {cells: 2, records: 12, gpu_h: 0.16}
   - id: p1-35-nsweep-codesign-laion1m
     pod: a100-x1-eval
     index: 0
@@ -1405,7 +1405,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-codesign --dataset laion1m --dim 256 --interleave --mode eager --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion1m-nsweep-codesign
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-codesign && cp -al /scratch/final/gpu0/nsweep-codesign/laion1m-d256* $T/nsweep-codesign/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion1m-nsweep-codesign --verify && rm -rf $T"
-    expect: {cells: 16, records: 16, gpu_h: 0.18}
+    expect: {cells: 16, records: 16, gpu_h: 0.14}
     note: "official from the -O3 venv"
   - id: p1-36-nsweep-codesign-laion3m
     pod: a100-x1-eval
@@ -1420,7 +1420,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-codesign --dataset laion3m --dim 256 --interleave --mode eager --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion3m-nsweep-codesign
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-codesign && cp -al /scratch/final/gpu0/nsweep-codesign/laion3m-d256* $T/nsweep-codesign/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion3m-nsweep-codesign --verify && rm -rf $T"
-    expect: {cells: 16, records: 16, gpu_h: 0.18}
+    expect: {cells: 16, records: 16, gpu_h: 0.15}
     note: "official from the -O3 venv"
   - id: p1-37-nsweep-codesign-laion10m
     pod: a100-x1-eval
@@ -1435,7 +1435,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-codesign --dataset laion10m --dim 256 --interleave --mode eager --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion10m-nsweep-codesign
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-codesign && cp -al /scratch/final/gpu0/nsweep-codesign/laion10m-d256* $T/nsweep-codesign/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion10m-nsweep-codesign --verify && rm -rf $T"
-    expect: {cells: 16, records: 16, gpu_h: 0.18}
+    expect: {cells: 16, records: 16, gpu_h: 0.29}
     note: "official from the -O3 venv"
   - id: p1-38-nsweep-codesign-laion30m
     pod: a100-x1-eval
@@ -1450,7 +1450,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite nsweep-codesign --dataset laion30m --dim 256 --interleave --mode eager --out /scratch/final/gpu0 --resume"
     upload: campaign-final/laion30m-nsweep-codesign
     upload_command: "T=$(mktemp -d /scratch/final/upload.XXXXXX) && mkdir -p $T/nsweep-codesign && cp -al /scratch/final/gpu0/nsweep-codesign/laion30m-d256* $T/nsweep-codesign/ && \"$VENV/bin/python\" -m bench.cli upload --results $T --path-in-repo campaign-final/laion30m-nsweep-codesign --verify && rm -rf $T"
-    expect: {cells: 16, records: 16, gpu_h: 0.18}
+    expect: {cells: 16, records: 16, gpu_h: 1.16}
     note: "official from the -O3 venv"
   - id: d1-25-ceiling-goodreads
     pod: a100-x2-d
@@ -1529,10 +1529,10 @@ legs:
     note: "quality only; not grid cells; no LAION tune leg (its point is the calibration's 16384 / 4096)"
 
 totals_gpu_h:                           # per GPU, incl. the 1.45 process overhead; wall-clock = the largest
-  b: 18.2
-  d0: 24.1
-  d1: 15.2
-  p1: 17.1
+  b: 18.6
+  d0: 19.5
+  d1: 18.1
+  p1: 17.4
 
 gates:                                 # D1-G over campaign-final/ after the last leg
   - eager-vs-graph ids from the stored hashes

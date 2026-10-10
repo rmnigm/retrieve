@@ -16,6 +16,7 @@ controller's handoff notes. Every number here is NOT CITABLE.
   - It comes from the newest record at v2.9-v2.11 where one exists, else the newest older one.
   - SilverTorch Triton timing windows on the redo ledger are rescaled by the ledger's measured factor (`load.redo`: ST-WIDE-2 `wide` 0.97, `sparse?` 0.9 eager only; ST-TOPK 0.8 at bs ≥ 16). Only windows above 2 ms move, so this changes the total by under 1 %.
 - **A cell without a record** takes the median of its (suite, dataset, arm), then (suite, arm), then arm. These are mostly seeds 1-2, never run under claims first.
-- **Process overhead** (start, data load, oracle) is the per-leg wall over summed cell time.
-  - The median is 1.37 over 19 legs; most legs fall at 1.0-1.6.
-  - PubMed legs with few cells reach 3-4.5, since load and oracle are a fixed cost per leg. Plan with 1.37 plus a per-dataset load.
+- **Index builds** are added once per job: `elapsed_s` excludes them (`build_s`; ≈ 400 s per 30 M job). A job's build is its matched records' `build_s`, else the median of the same (dataset, algo, backend, n_lists), else of (algo, backend, n_lists) at a comparable N (within 1.5×). Column `gpu_h_build`.
+- **Process overhead** (start, data load, oracle) is the per-leg wall over summed cell time plus builds (median 1.15).
+  - The median is 1.15 over 20 legs, most at 1.0-1.4. Without the builds it read 1.37, and PubMed's tune leg 36×: the builds were the missing time.
+  - Checked against the final pass's first finished legs: measured wall is 0.78 of this pricing overall (30 M co-design 1.01 h vs 1.17 priced).

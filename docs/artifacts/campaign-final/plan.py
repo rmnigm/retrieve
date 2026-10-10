@@ -14,16 +14,16 @@ import csv
 import json
 import sys
 
-OVERHEAD = 1.45  # median wall / summed cell time over 20 legs (sizing.py, overhead.csv)
+OVERHEAD = 1.15  # median wall / (summed cell time + index builds) over 20 legs (sizing.py, overhead.csv)
 DIM = {"laion1m": 256, "laion3m": 256, "laion10m": 256, "laion1m-synth": 256, "laion3m-synth": 256,
        "laion10m-synth": 256, "goodreads": 128, "goodreads-synth": 128, "arxiv": 128, "arxiv-synth": 128, "arxiv-corr-synth": 128,
        "yfcc10m": 192, "yfcc10m-synth": 192, "pubmed": 768, "laion30m": 256, "laion30m-synth": 256}  # fmt: skip
 # quality-only tune legs are build-bound, which elapsed_s misses: the measured legs (validation, night-queue item 8)
 TUNE_Q_MEASURED = {"pubmed": 2.19, "yfcc10m": 0.4, "yfcc10m-synth": 0.32, "goodreads": 0.2, "goodreads-synth": 0.22,
                    "arxiv": 0.25, "arxiv-synth": 0.22, "arxiv-corr-synth": 0.21}  # fmt: skip
-# timed tune legs measured at v2.11 (campaign-v2.11/{goodreads,yfcc10m}-tune-timed: elapsed x OVERHEAD over the final grid's
-# capped cells; pubmed-tune-timed: its leg's 3.25 GPU-h); arXiv's is not measured yet
-TUNE_T_MEASURED = {"goodreads": 1.51, "goodreads-synth": 2.25, "yfcc10m": 1.16, "yfcc10m-synth": 0.72, "pubmed": 3.25}  # fmt: skip
+# timed tune legs measured at v2.11 (campaign-v2.11/{goodreads,yfcc10m}-tune-timed: (elapsed + builds) x OVERHEAD over the
+# final grid's capped cells; pubmed-tune-timed: its leg's 3.25 GPU-h wall); arXiv's is not measured yet
+TUNE_T_MEASURED = {"goodreads": 1.22, "goodreads-synth": 1.81, "yfcc10m": 0.98, "yfcc10m-synth": 0.98, "pubmed": 3.25}  # fmt: skip
 # the N-sweep (never run): per-leg cell seconds from the 30 M analogues (sizing inventory): exact arms laion30m-synth
 # 252 s/cell and laion30m-x 257 / 151 s scaled by N / 30 M with a 30 s floor (arXiv 3 M d128 measured 32 s), arXiv d256 at
 # 1.5x its d128 cells; SilverTorch and co-design cells ~flat (30 M: 34 / 35 / 28 s)
@@ -105,7 +105,7 @@ BENCH = '"$VENV/bin/python" -m bench.cli'  # the leg venv's own interpreter: `uv
 
 
 def price(inv, suite, ds, algos, backend):
-    cells, h = 0, 0.0
+    cells, h, build = 0, 0.0, 0.0
     for r in inv:
         if r["source"] != "suites.yaml" or r["suite"] != suite or r["dataset"] != ds:
             continue
@@ -113,11 +113,12 @@ def price(inv, suite, ds, algos, backend):
         if algos is not None and algo not in algos or backend and be != backend:
             continue
         cells += int(r["cells"])
-        h += float(r["gpu_h_cells"]) * OVERHEAD
+        build += float(r["gpu_h_build"])  # index builds: `elapsed_s` excludes them
+        h += (float(r["gpu_h_cells"]) + float(r["gpu_h_build"])) * OVERHEAD
     if suite == "tune-q":
         h = TUNE_Q_MEASURED[ds]
     if suite.startswith(("nsweep", "seeds-")):
-        h = NSWEEP_CELL_S[(suite, ds) if algos is None else (suite, ds, *algos)] * OVERHEAD / 3600
+        h = (NSWEEP_CELL_S[(suite, ds) if algos is None else (suite, ds, *algos)] / 3600 + build) * OVERHEAD
     if suite == "tune-timed" and ds in TUNE_T_MEASURED:
         h = TUNE_T_MEASURED[ds]
     return cells, h
