@@ -5,7 +5,8 @@ ceilings on goodreads and arXiv the one global int8 item scale? Quality only. Hu
 
 | file | what |
 |---|---|
-| [`ceiling_check.py`](ceiling_check.py) | one SilverTorch triton index at a given (n_lists, n_probe), its own probed clusters per query; recall_oracle@100 with the shipped module, the same global-int8 arithmetic recomputed densely (method check), per-row int8 item scales, and fp16 |
+| [`ceiling_check.py`](ceiling_check.py) | (items scored in 1 M blocks, so 10 M d768 fits; identical output to the unblocked version on goodreads `c0_genre`) one SilverTorch triton index at a given (n_lists, n_probe), its own probed clusters per query; recall_oracle@100 with the shipped module, the same global-int8 arithmetic recomputed densely (method check), per-row int8 item scales, and fp16 |
+| [`points-pubmed.json`](points-pubmed.json) | PubMed 10 M d768: the best clause point per real sweep in v-pubmed's `campaign-v2.10/pubmed-tune` (n_lists 16384 / n_probe 4096); Hub `artifacts/ceiling-int8-pubmed` |
 | [`points.json`](points.json) | per sweep, the best clause point of the v2.10 tuning grid (Hub `campaign-v2.10/{goodreads,arxiv}-tune`) |
 | [`ceiling-v210.sh`](ceiling-v210.sh) | the driver, one check per point, under `common.sh` (GPU lock, code_version, clocks) |
 
