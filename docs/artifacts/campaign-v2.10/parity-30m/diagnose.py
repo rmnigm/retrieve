@@ -67,13 +67,12 @@ for key in [
     m, ids, sc = run_module(key)
     keep[key] = (ids, sc)
     if key == ("triton", "partial"):
-        T = {"centroids": m.centroids.cpu(), "sort_perm": m.sort_perm.cpu(), "codes_sum": int(m.item_codes.long().sum()),
-             "offsets": m.cluster_offsets.cpu(), "seeds": m.hash_seeds, "salt": m.clause_salt, "m_bits": m.m_bits, "k_hash": m.k_hash,
+        T = {"centroids": m.centroids.cpu(), "sort_perm": m.sort_perm.cpu(), "offsets": m.cluster_offsets.cpu(), "seeds": m.hash_seeds, "salt": m.clause_salt, "m_bits": m.m_bits, "k_hash": m.k_hash,
              "words": m.word_count, "module": m}  # fmt: skip
         continue
     if key == ("official", "partial"):
         res["same_index"] = {"centroids": bool(torch.equal(T["centroids"], m.centroids.cpu())), "sort_perm": bool(torch.equal(T["sort_perm"], m.sort_perm.cpu())),
-                             "item_codes_sum": T["codes_sum"] == int(m.item_codes.long().sum())}  # fmt: skip
+                             "item_codes": bool(torch.equal(T["module"].item_codes, m.item_codes))}  # fmt: skip
         om = m
         continue
     del m
