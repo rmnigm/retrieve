@@ -66,12 +66,12 @@ class PreparedFilter(NamedTuple):
 
 __all__ = ["FilterMode", "OfficialConfig", "SilverTorch", "SilverTorchBuilder"]
 
-# A batch is sparse when every row's estimated share of 256-item tiles holding a passing item,
-# over the whole index, is under this: per cluster the product over the row's clauses of the
-# clause's rarest-bit share, times the cluster's size, capped at its tiles. Where the bloom
-# two-pass beat the one-pass scorer at D 128-256 (kernels.md § SilverTorch kernels, "Bloom
-# two-pass").
-SPARSE_TILE_FRAC = 0.75
+# A batch of more than one row is sparse when every row's estimated share of 256-item tiles
+# holding a passing item, over the whole index, is under this: per cluster the product over the
+# row's clauses of the clause's rarest-bit share, times the cluster's size, capped at its tiles.
+# Where the bloom two-pass beat the one-pass scorer at D 128-256; at one row its extra launches
+# cost more than it saves in eager (kernels.md § SilverTorch kernels, "Bloom two-pass").
+SPARSE_TILE_FRAC = 0.6
 
 
 class SilverTorch(RetrievalModule):
@@ -425,9 +425,8 @@ class SilverTorch(RetrievalModule):
             return PreparedFilter(query_attrs=query_clause_attrs.long().contiguous())
         if self.backend != "official":
             bits = self._query_bit_positions(query_clause_attrs)
-            return PreparedFilter(
-                query_bits=bits, sparse=bool(self._tile_frac(bits).max() < SPARSE_TILE_FRAC)
-            )
+            sparse = bits.shape[0] > 1 and bool(self._tile_frac(bits).max() < SPARSE_TILE_FRAC)
+            return PreparedFilter(query_bits=bits, sparse=sparse)
         if self.bloom_index.numel() == 0:
             raise RuntimeError(
                 "this official bloom index was registered without item_clause_attrs, so there "
