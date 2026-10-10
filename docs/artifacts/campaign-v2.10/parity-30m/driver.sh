@@ -17,7 +17,7 @@ got=$($PY -m bench.cli env | $PY -c 'import json,sys; d=json.load(sys.stdin); pr
 echo "$(date -Is) tree: $got"
 [ "$got" = "a3bec4a50c1a3bb06dd9e99ab638867a42b29e29 False" ] || { echo "code_version mismatch, refusing"; exit 2; }
 CUDA_VISIBLE_DEVICES=1 HF_HOME=/scratch/hf TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/parity-30m taskset -c 96-127 \
-  $PY "$HERE/diagnose.py" "$CFG" "$R/diagnose.json" 2000 25 > "$R/diagnose.log" 2>&1 < /dev/null
+  $PY "$HERE/diagnose.py" "$CFG" "$R/diagnose.json" 100000 40 > "$R/diagnose.log" 2>&1 < /dev/null
 rc=$?; echo "$(date -Is) diagnose rc=$rc"
 cp "$HERE/diagnose.py" "$R/"
 $PY -m bench.cli upload --results "$R" --path-in-repo artifacts/parity-30m --verify 2>&1 | grep -E "MANIFEST|round trip"

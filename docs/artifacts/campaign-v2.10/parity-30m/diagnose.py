@@ -4,7 +4,7 @@ compares their top-100 id sets on the first N kept queries (bs 16). For up to M 
 the other does not: (a) in a probed cluster (phase 1 is the same function on the same centroids, checked), (b) passes our bloom (recomputed from
 build_signatures, LSB-first words; sanity: every item ours returns must pass), Meta's bloom (bloom_index_search_batch, bool mask), the exact filter,
 (c) its exact int8 dot vs the score each side reports, (d) whether it is in the exact filtered oracle top-100.
-    python diagnose.py CONFIG_DIR OUT.json [N] [M]          (from evaluation/ of the campaign-v2.10 tree)"""
+    python diagnose.py CONFIG_DIR OUT.json [N] [M]    (N = all kept queries by default; the five exhibits rows are always analysed)          (from evaluation/ of the campaign-v2.10 tree)"""
 
 import json
 import sys
@@ -19,7 +19,7 @@ from retrieve.ops.official import adapter as official_adapter
 
 dev = torch.device("cuda")
 cfg, out = Path(sys.argv[1]), Path(sys.argv[2])
-NQ = int(sys.argv[3]) if len(sys.argv) > 3 else 2000
+NQ = int(sys.argv[3]) if len(sys.argv) > 3 else 100000
 MQ = int(sys.argv[4]) if len(sys.argv) > 4 else 25
 jobs = {
     (j.backend, j.build.get("bloom_path")): j
@@ -29,6 +29,13 @@ inp = inputs.load_inputs(next(iter(jobs.values())).data, dev)
 j0 = jobs["triton", "partial"]
 assets = run.sweep_assets(j0, inp, 100, dev)
 rows = assets["keep"].nonzero().reshape(-1)[:NQ]
+TARGETS = [
+    2570,
+    4406,
+    4606,
+    4845,
+    5845,
+]  # exhibits 150000000: the c0_domain rows whose sets differ (pass 88 / 1 / 57,907 / 4,404 / 5,841)
 qa_all = assets["qa_s"]
 filters = inputs.build_filters("bloom", inp, ["triton"], bloom=j0.bloom)
 exact = inputs.exact_filter("bloom", filters, inp, "triton")
@@ -98,7 +105,11 @@ attrs_sorted = inp["item_attrs"].long()[perm]
 cats = Counter()
 examples = []
 sane = Counter()
-for qi in dp[:MQ]:
+row_list = rows.tolist()
+focus = [row_list.index(t) for t in TARGETS if t in row_list]
+res["targets_kept"] = [row_list[i] for i in focus]
+res["targets_differ"] = {str(row_list[i]): i in dp for i in focus}
+for qi in list(dict.fromkeys(focus + dp))[:MQ]:
     r = rows[qi : qi + 1]
     q = inp["queries"][r].to(dev)
     qa = qa_all[r].to(dev)
