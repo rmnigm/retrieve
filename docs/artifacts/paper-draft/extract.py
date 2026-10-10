@@ -43,21 +43,25 @@ def st_recall(leg, dataset=None):
     return {k: st.median(v) for k, v in acc.items()}
 
 
-def v2_over_v1(leg):
-    """V2 / V1 ratio of graph p50 inside each interleave group, k 100."""
+def v2_over_v1(leg, sweeps=None):
+    """V2 / V1 ratio of graph p50 inside each interleave group, k 100; mean over seeds per sweep."""
     by = defaultdict(dict)
     for r in recs(leg):
         if r["algo"] in ("linr_v1_filter_mask", "linr_v2") and r["backend"] == "triton" and r["filter_kind"] == "clause":
-            by[(r["sweep"], r["seed"])][r["algo"]] = r
-    out = {}
+            if sweeps is None or r["sweep"] in sweeps:
+                by[(r["sweep"], r["seed"])][r["algo"]] = r
+    acc = defaultdict(list)
     for (sweep, _), d in by.items():
         if len(d) < 2:
             continue
         for bs in (1, 16):
             a, b = perf(d["linr_v1_filter_mask"], bs), perf(d["linr_v2"], bs)
             if a and b:
-                out.setdefault(bs, []).append({"p": d["linr_v2"]["pass_rate"], "sweep": sweep, "ratio": round(b / a, 3),
-                                               "v1_ms": round(a, 3), "v2_ms": round(b, 3)})
+                acc[(bs, sweep)].append((d["linr_v2"]["pass_rate"], b / a, a, b))
+    out = {}
+    for (bs, sweep), v in acc.items():
+        out.setdefault(bs, []).append({"p": v[0][0], "sweep": sweep, "ratio": round(st.mean(x[1] for x in v), 3),
+                                       "v1_ms": round(st.mean(x[2] for x in v), 3), "v2_ms": round(st.mean(x[3] for x in v), 3)})
     for v in out.values():
         v.sort(key=lambda x: x["p"])
     return out
@@ -96,11 +100,19 @@ data["yfcc_real"] = {f"{s}@{n}": round(v, 3) for (s, n), v in yf.items()}
 
 # V1 vs V2.
 data["c1"] = {
-    "3 M": v2_over_v1("campaign-v2.7/arxiv-synth-synth"),
-    "10 M YFCC": v2_over_v1("campaign-v2.7/yfcc10m-synth-synth"),
-    "30 M LAION": v2_over_v1("campaign-v2.7/laion30m-synth-laion30m-synth"),
-    "30 M LAION, real filters": v2_over_v1("campaign-v2.5/laion30m-filter"),
+    "0.8 M": v2_over_v1("campaign-v2.9/goodreads-synth-v1v2"),
+    "3 M": v2_over_v1("campaign-v2.9/arxiv-synth-v1v2-pod1"),
+    "10 M": v2_over_v1("campaign-v2.9/yfcc10m-synth-synth"),
+    "30 M": v2_over_v1("campaign-v2.9/laion30m-synth-v1v2"),
 }
+# Real single- and multi-clause filters at v2.9 (same code as the synth curves): one point per sweep, aggregate pass rate.
+real = []
+for leg, label in (("campaign-v2.9/goodreads-filter", "goodreads"), ("campaign-v2.9/arxiv-filter", "arXiv"),
+                   ("campaign-v2.9/yfcc10m-filter", "YFCC"), ("campaign-v2.9/laion30m-x", "LAION")):
+    for bs, rows in v2_over_v1(leg).items():
+        for r in rows:
+            real.append(dict(r, bs=bs, label=f"{label} {r['sweep']}"))
+data["c1_real"] = real
 
 # int8 mechanism on YFCC.
 data["int8"] = {s: json.load(open(HUB / f"artifacts/yfcc-int8/int8-{s}.json"))["recall_oracle@100"] for s in ("p1", "p001")}
@@ -170,11 +182,29 @@ if c7p:
 else:
     data["c7_d768"] = {24: {1: round(0.822 / 0.413, 3), 16: round(1.155 / 0.529, 3)}, 1024: {1: round(1.056 / 0.622, 3), 16: round(2.614 / 2.442, 3)}}
 
+# C7 at 30 M LAION d256, n_probe 128, bloom partial path: ours at v2.10 (ST-WIDE-2) vs Meta fp16 -O3, eager (repo table of ST-WIDE-2's gate).
+c7l = {}
+for line in (Path(__file__).parents[1] / "campaign-v2.9/st-wide-2-30m/st-wide-2-30m.md").read_text().splitlines():
+    c = [x.strip() for x in line.strip("|").split("|")]
+    if len(c) > 7 and c[2] == "eager" and c[1].isdigit():
+        c7l[f"{c[0]}|{c[1]}"] = round(float(c[5]) / float(c[4]), 3)
+data["c7_30m"] = c7l
+
 # V3 bits on PubMed d768.
 v3 = defaultdict(dict)
 for r in recs("campaign-v2.5/pubmed-v3bits"):
     v3[(r["sweep"], r["params"]["candidate_pool_frac"])][r["params"]["k_bits"]] = {"recall": round(recall(r), 4), "ms16": round(perf(r, 16), 2)}
 data["v3"] = {f"{s}|{pool}": d for (s, pool), d in v3.items()}
+# V3 (pool 1 %, 768 bits) against the cheaper exact arm per sweep and batch (V1 / V2 from the same box and code, separate leg).
+ex = defaultdict(dict)
+for r in recs("campaign-v2.5/pubmed-router"):
+    if r["status"] == "ok" and r["algo"] in ("linr_v1_filter_mask", "linr_v2"):
+        for bs in (1, 16):
+            ex[(r["sweep"], bs)][r["algo"]] = perf(r, bs)
+v3r = {(r["sweep"], bs): perf(r, bs) for r in recs("campaign-v2.5/pubmed-v3bits")
+       if r["params"]["candidate_pool_frac"] == 0.01 and r["params"]["k_bits"] == 768 for bs in (1, 16)}
+data["v3_vs_exact"] = {f"{sw}|{bs}": {"exact": min(d, key=d.get), "speedup": round(min(d.values()) / v3r[(sw, bs)], 3)}
+                       for (sw, bs), d in ex.items() if (sw, bs) in v3r}
 g3 = defaultdict(list)
 for r in recs("campaign-v2.2/goodreads-synth-v3bits"):
     if r["filter_kind"] == "clause" and r["params"]["candidate_pool_frac"] == 0.01:
