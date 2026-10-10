@@ -55,6 +55,8 @@ OBSOLETE_SCRATCH = {
     "router": "the router is dropped (decisions)",
     "c7-laion30m": "superseded by `c7-scorepath`",
 }
+# scratch suites the final grid renamed or folded: their records price the cells they became
+ALIAS = {"tune": "tune-timed", "tune-t": "tune-timed", "v1v2": "synth"}
 GROUP = collections.defaultdict(
     set
 )  # interleave group id -> its records' keys: they share its elapsed_s
@@ -64,7 +66,7 @@ LEDGER = {"wide": 0.97, "sparse?": 0.9, "topk": 0.8, "topk?": 0.8}
 def family(suite, arm):
     """The comparison family a cell belongs to (one box each in the plan) and the T1 claims it feeds."""
     algo, backend = arm.split()[0].split("/")
-    if suite in ("tune", "tune-q", "ivf-tune", "n95"):
+    if suite.startswith("tune") or suite in ("ivf-tune", "n95"):
         return "tune"
     if suite.startswith("bloomwidth"):
         return "C4 bloom width"
@@ -147,6 +149,7 @@ def scan(legs):
                 continue
             if "suite" not in r or "env" not in r:
                 continue
+            r["suite"] = ALIAS.get(r["suite"], r["suite"])
             r["_cv"] = label(r["env"]["code_version"])
             g = (r.get("interleave") or {}).get("group")
             if g:
