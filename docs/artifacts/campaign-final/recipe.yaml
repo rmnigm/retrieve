@@ -664,7 +664,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset pubmed --dim 768 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/pubmed-tune-timed
     upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/tune-timed --path-in-repo campaign-final/pubmed-tune-timed --verify"
-    expect: {cells: 35, gpu_h: 1.54}
+    expect: {cells: 35, gpu_h: 3.25}
   - id: b-05-tune-timed-yfcc10m
     pod: a100-x1-b
     index: 0
@@ -677,7 +677,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset yfcc10m --dim 192 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/yfcc10m-tune-timed
     upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/tune-timed --path-in-repo campaign-final/yfcc10m-tune-timed --verify"
-    expect: {cells: 8, gpu_h: 0.24}
+    expect: {cells: 8, gpu_h: 1.16}
   - id: b-06-tune-timed-yfcc10m-synth
     pod: a100-x1-b
     index: 0
@@ -690,7 +690,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset yfcc10m-synth --dim 192 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/yfcc10m-synth-tune-timed
     upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/tune-timed --path-in-repo campaign-final/yfcc10m-synth-tune-timed --verify"
-    expect: {cells: 43, gpu_h: 0.44}
+    expect: {cells: 43, gpu_h: 0.72}
   - id: b-07-tune-q-goodreads
     pod: a100-x1-b
     index: 0
@@ -729,7 +729,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset goodreads --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/goodreads-tune-timed
     upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/tune-timed --path-in-repo campaign-final/goodreads-tune-timed --verify"
-    expect: {cells: 100, gpu_h: 1.69}
+    expect: {cells: 100, gpu_h: 1.51}
   - id: b-10-tune-timed-goodreads-synth
     pod: a100-x1-b
     index: 0
@@ -742,7 +742,7 @@ legs:
     command: "\"$VENV/bin/python\" -m bench.cli campaign --suite tune-timed --dataset goodreads-synth --dim 128 --out /scratch/final/gpu0 --resume"
     upload: campaign-final/goodreads-synth-tune-timed
     upload_command: "\"$VENV/bin/python\" -m bench.cli upload --results /scratch/final/gpu0/tune-timed --path-in-repo campaign-final/goodreads-synth-tune-timed --verify"
-    expect: {cells: 146, gpu_h: 2.23}
+    expect: {cells: 146, gpu_h: 2.25}
   - id: b-11-v3bits-goodreads-synth
     pod: a100-x1-b
     index: 0
@@ -1170,7 +1170,7 @@ legs:
     note: "quality only; not grid cells; no LAION tune leg (its point is the calibration's 16384 / 4096)"
 
 totals_gpu_h:                           # per GPU, incl. the 1.45 process overhead; wall-clock = the largest
-  b: 13.1
+  b: 15.9
   d0: 19.8
   d1: 19.4
   p1: 11.2
