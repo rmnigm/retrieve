@@ -455,7 +455,9 @@ def cmd_prep(args) -> int:
         )
         .filter(pl.col("book_id").is_not_null() & pl.col("work_id").is_not_null())
     )
-    books_collected = books.unique(subset=["book_id"]).collect(engine="streaming")
+    books_collected = books.unique(subset=["book_id"], keep="first", maintain_order=True).collect(
+        engine="streaming"
+    )
     books_collected.write_parquet(output / "book_to_work.parquet", compression="zstd")
     print(f"  wrote book_to_work.parquet ({books_collected.height} rows)", flush=True)
 
@@ -830,7 +832,8 @@ def cmd_attrs(args) -> int:
         books.filter(pl.col("language_code") != "")
         .group_by("language_code")
         .len()
-        .sort("len", descending=True)
+        # group_by order varies per run: count ties break by name (datasets.md § goodreads)
+        .sort(["len", "language_code"], descending=[True, False])
         .head(30)
     )
     lang_codes_top30 = lang_freq["language_code"].to_list()
@@ -842,7 +845,7 @@ def cmd_attrs(args) -> int:
 
     # ---- C2 format vocab + per-book c2 -------------------------------------
     print("STEP C2 format buckets", flush=True)
-    fmt_unique = books.select(pl.col("format")).unique()["format"].to_list()
+    fmt_unique = books.select(pl.col("format")).unique().sort("format")["format"].to_list()
     fmt_lookup = {f: _format_to_bucket(f) for f in fmt_unique}
     with open(output / "format_vocab.json", "w") as f:
         json.dump(
@@ -871,7 +874,9 @@ def cmd_attrs(args) -> int:
     )
     # global author frequency (only counting in-catalog editions)
     auth_freq = (
-        ab_pairs.group_by("author_id_str").agg(pl.len().alias("freq")).sort("freq", descending=True)
+        ab_pairs.group_by("author_id_str")
+        .agg(pl.len().alias("freq"))
+        .sort(["freq", "author_id_str"], descending=[True, False])
     )
     author_ids_str = auth_freq["author_id_str"].to_list()
     # 0-indexed dense ids; -1 reserved as padding sentinel.
@@ -926,7 +931,7 @@ def cmd_attrs(args) -> int:
 
     # Top-2 author ids per book.
     pb_authors = (
-        ab_pairs.join(auth_remap, on="author_id_str", how="inner")
+        ab_pairs.join(auth_remap, on="author_id_str", how="inner", maintain_order="left")
         .group_by("book_id", maintain_order=True)
         .agg(pl.col("author_id").head(2).alias("author_ids"))
     )
@@ -959,7 +964,7 @@ def cmd_attrs(args) -> int:
     )
     glong = glong.join(genre_remap, on="genre_name", how="inner")
     # per-book top-4 by count
-    glong = glong.sort(["book_id", "count"], descending=[False, True])
+    glong = glong.sort(["book_id", "count", "genre_id"], descending=[False, True, False])
     pb_genres = glong.group_by("book_id", maintain_order=True).agg(
         pl.col("genre_id").head(4).alias("genre_ids"),
         pl.col("count").head(4).alias("genre_counts"),
@@ -986,7 +991,7 @@ def cmd_attrs(args) -> int:
     g_per_work = (
         g_explode.group_by(["item_id", "genre_ids"])
         .agg(pl.col("genre_counts").sum().alias("total"))
-        .sort(["item_id", "total"], descending=[False, True])
+        .sort(["item_id", "total", "genre_ids"], descending=[False, True, False])
         .group_by("item_id", maintain_order=True)
         .agg(pl.col("genre_ids").head(4).alias("c0_genre"))
     )
@@ -1125,7 +1130,7 @@ def cmd_attrs(args) -> int:
     work_shelf = (
         shelves_long.group_by(["item_id", "name"])
         .agg(pl.col("count").sum().alias("count"))
-        .sort(["item_id", "count"], descending=[False, True])
+        .sort(["item_id", "count", "name"], descending=[False, True, False])
     )
     # Build wide-shelf vocab from the union of all per-work top-32 names
     # (sorted by global aggregated count desc; 0-indexed dense ids).
@@ -1138,7 +1143,7 @@ def cmd_attrs(args) -> int:
         .explode(["name", "count"])
         .group_by("name")
         .agg(pl.col("count").sum().alias("global_count"))
-        .sort("global_count", descending=True)
+        .sort(["global_count", "name"], descending=[True, False])
     )
     wide_names = used_names_freq["name"].to_list()
     wide_counts = used_names_freq["global_count"].to_list()
@@ -1159,7 +1164,7 @@ def cmd_attrs(args) -> int:
         schema={"name": pl.Utf8, "shelf_id": pl.Int64},
     )
     work_shelf_ids = (
-        work_shelf.join(wide_remap, on="name", how="inner")
+        work_shelf.join(wide_remap, on="name", how="inner", maintain_order="left")
         .group_by("item_id", maintain_order=True)
         .agg(pl.col("shelf_id").head(WIDE_BAG_SIZE).alias("shelf_ids"))
     )

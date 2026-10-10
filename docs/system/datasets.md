@@ -206,6 +206,17 @@ tied items survive the 200-item cut, change from run to run; a re-run
 differs from the Hub copy only there
 ([validation](../validation.md#trainer-inputs-with-timestamps-data-gates-not-citable)).
 
+**Vocab order (`attrs`).** Every vocab and top-k cut is a total order of its inputs: language,
+author and wide-shelf vocab by count descending, **ties by name**; per-book and per-work genre
+top-4 and per-work shelf top-32 by count descending, ties by genre id / shelf name; the joins
+that feed a `head(k)` keep the left order (`maintain_order="left"`); `prep`'s `book_to_work`
+keeps the first row per `book_id`. Before this, `group_by` handed back tied values in a
+thread-dependent order, so their ids (C1 language, C4 author, the wide shelves) and the genre
+picked among tied counts changed from build to build. Two builds are byte-identical
+(`tests/eval_datasets/test_goodreads.py`). The staged copy stays canonical, pinned by Hub
+revision `pinkmeme/eval-goodreads-work-id@4714e9b5` (`item_attrs_narrow.pt` sha256
+`584993bd…`, `eval_split.parquet` `f1208e12…`); a rebuild with this code is **not byte-equal** to it.
+
 > `prep` deliberately passes `drop_non_train_items=False`, mirroring
 > `yambda.preprocess`. Setting it `True` makes polars re-evaluate an
 > imploded set per row and blows the job past a 129 GB cgroup limit.
@@ -231,6 +242,14 @@ goodreads bloom sweeps exclude it.
 `download` → `convert` → `prep` → `encode_text` → `encode_queries` →
 `attrs`, or `uv run eval-data arxiv all --output-dir data/arxiv-papers` (the
 `data_dir` of [`config/arxiv.yaml`](../../evaluation/config/arxiv.yaml)).
+
+**Vocab order (`attrs`).** Main-category, author and wide-leaf vocab by count descending, **ties
+by name**; the author join before each paper's `head(2)` keeps the left order. Before this the
+tied values (about 1.5 M authors, most of them tied) got thread-dependent ids, so C4 author ids
+and, through the query side, `eval_split.parquet` changed from build to build. Two builds are
+byte-identical (`tests/eval_datasets/test_arxiv.py`). The staged copy stays canonical, pinned by
+Hub revision `pinkmeme/eval-arxiv-papers@354e6937` (`item_attrs_narrow.pt` sha256 `7f5f2f4d…`,
+`eval_split.parquet` `91b58ab2…`); a rebuild with this code is **not byte-equal** to it.
 
 Arxiv has **no user sequences**, so `prep` does no interactions and no
 time-split — it emits `item_id_map.json`, `papers.parquet`, and a
@@ -280,6 +299,11 @@ non-null item's bucket is unchanged.
 
 `download` → `convert` → `prep` → `attrs`, or
 `uv run eval-data yfcc all --output-dir data/yfcc10m`.
+
+**Vocab order.** The tag rank is a stable `argsort` of the query frequency over ascending upstream
+tag ids, so ties break by tag id: deterministic, unchanged by the ETL tie-rule pass; two builds are
+byte-identical (`test_prep_attrs_two_builds_are_byte_identical`). The staged copy is pinned by Hub
+revision `pinkmeme/eval-yfcc10m@88e4d89a`; this pass does not change its code path.
 
 The NeurIPS'23 Big-ANN **filtered-search** track set: 10M CLIP image
 descriptors, 192-d uint8, plus a bag of tags per image drawn from a
@@ -563,9 +587,10 @@ rows (`Counter.most_common`); journal and language by count descending, **ties b
 name** (`group_by` returns groups in a thread-dependent order, so a count-only sort
 gave tied journals different ids, and a different top-5k cut, on every build). Two
 builds of the same inputs are byte-identical (`test_attrs_two_builds_are_byte_identical`).
-The staged `/data/pubmed-medcpt` predates the tie rule: its journal / language ids are
-one draw of the old order and stay canonical (controller, 2026-10-10), so a rebuild
-with this code is not byte-equal to it.
+The staged `/data/pubmed-medcpt` (pod b) predates the tie rule: its journal / language ids are
+one draw of the old order and stay canonical (controller, 2026-10-10), pinned by sha256
+(`item_attrs_narrow.pt` `8a3bce0f…`, `eval_split.parquet` `3a83c6f9…`; `pinkmeme/eval-pubmed` is
+not published). Pods that need it copy it; a rebuild with this code is **not byte-equal** to it.
 
 #### Query sets
 
@@ -992,6 +1017,14 @@ steps below (Re-LAION may be shared as vectors only, and the user decides whethe
 [release](../paper/release-and-licenses.md)).** Roadmap V-LAION30: a 30 M scale point at d256, `filter` only
 ([decisions](../decisions.md#datasets)). Nothing here is citable. The first dataset staged
 through the [generic ingest](#the-generic-ingest-eval-data-ingest).
+
+**Order.** The clause codes come from the generic ingest (count descending, ties by value), so
+they are deterministic. `prep` picks items (`head(keep_items)`) and queries (`df[chosen]`) by row
+position after the domain join, which now keeps the left (rank) order explicitly. polars 1.40
+already kept it, so this guards a future polars rather than changing today's output. Two `prep`
+runs are byte-identical (`test_prep_two_builds_are_byte_identical`). The pod-d copy stays canonical.
+It is not on the Hub, so it is pinned by its files' sha256 at copy time; byte-equality of a
+rebuild with it is expected but not verified.
 
 `download` → `prep` → `encode_text` → `encode_queries` → `ingest`
 ([`etl/laion.py`](../../evaluation/eval_datasets/etl/laion.py)). The LAION-specific steps write
