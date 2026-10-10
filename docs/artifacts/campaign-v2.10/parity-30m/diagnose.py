@@ -118,7 +118,7 @@ def cmd_items(key, diffp, out):
         attrs = inp["item_attrs"].long()
     res = []
     for row in sorted({p["row"] for p in pairs}):
-        r = torch.tensor([row], device=dev)
+        r = torch.tensor([row])
         q = inp["queries"][r].to(dev)
         qa = assets["qa_s"][r].to(dev)
         probes = m._phase1_probe_ids(q)[0]
