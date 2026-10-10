@@ -35,6 +35,10 @@ class ClauseMaskConfig:
 DEFAULT_CONFIG = ClauseMaskConfig(block_n=512, num_warps=2)
 # clause_mask_scores streams fp32 scores in and out: its own tile (kernels.md § clause_mask).
 SCORES_CONFIG = ClauseMaskConfig(block_n=128, num_warps=4)
+# B > 1 masked scores: one program per item tile and BLOCK_B rows (kernels.md § clause_mask,
+# "Batched rows").
+BATCHED_CONFIG = ClauseMaskConfig(block_n=128, num_warps=4)
+BLOCK_B = 16
 
 
 @triton.jit
@@ -96,11 +100,64 @@ def _clause_mask_kernel(
         tl.store(out, pass_mask, mask=n_valid)
 
 
+@triton.jit
+def _clause_mask_scores_batched_kernel(
+    item_attrs_ptr,  # [N, C, A_max] int64
+    is_reverse_ptr,  # [C] int8
+    query_attrs_ptr,  # [B, C] int64
+    scores_ptr,  # [B, N] fp32
+    out_ptr,  # [B, N] fp32
+    B,
+    N,
+    C: tl.constexpr,
+    A_MAX: tl.constexpr,
+    stride_in,
+    stride_ic,
+    stride_ia,
+    stride_qb,
+    stride_qc,
+    stride_sb,
+    stride_ob,
+    BLOCK_B: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+):
+    # One item tile for BLOCK_B rows: each clause's attrs are loaded once and matched against
+    # every row's value, where the per-row kernel reloads them per row.
+    n = tl.program_id(0).to(tl.int64) * BLOCK_N + tl.arange(0, BLOCK_N)
+    b = tl.program_id(1) * BLOCK_B + tl.arange(0, BLOCK_B)
+    n_valid = n < N
+    b_valid = b < B
+    keep = b_valid[:, None] & n_valid[None, :]
+    for c in tl.static_range(C):
+        q_c = tl.load(query_attrs_ptr + b * stride_qb + c * stride_qc, mask=b_valid, other=-1)
+        active = q_c != -1
+        # Skip a clause no row of the block queries (an inactive clause passes, as clause_pass).
+        if tl.max(active.to(tl.int32), axis=0) > 0:
+            rev_c = tl.load(is_reverse_ptr + c).to(tl.int1)
+            clause_match = tl.zeros([BLOCK_B, BLOCK_N], tl.int1)
+            for a in tl.static_range(A_MAX):
+                ia = tl.load(
+                    item_attrs_ptr + n * stride_in + c * stride_ic + a * stride_ia,
+                    mask=n_valid,
+                    other=-1,
+                )
+                clause_match = clause_match | (ia[None, :] == q_c[:, None])
+            keep = keep & ((clause_match ^ rev_c) | ~active[:, None])
+    both = b_valid[:, None] & n_valid[None, :]
+    s = tl.load(scores_ptr + b[:, None].to(tl.int64) * stride_sb + n[None, :], mask=both)
+    tl.store(
+        out_ptr + b[:, None].to(tl.int64) * stride_ob + n[None, :],
+        tl.where(keep, s, float("-inf")),
+        mask=both,
+    )
+
+
 @dataclass(frozen=True)
 class _ClauseMaskLaunch:
     grid: tuple[int, int, int]
     kwargs: dict[str, object]  # every kernel arg: tensors, strides, constexprs, cfg
     out: Tensor
+    batched: bool = False  # the launch is _clause_mask_scores_batched_kernel's
 
 
 def _clause_mask_prep(
@@ -137,6 +194,32 @@ def _clause_mask_prep(
     out = torch.empty((b, n), dtype=dtype, device=query_clause_attrs.device)
     src = out if scores is None else scores  # an unread pointer when not HAS_SCORES
 
+    if scores is not None and b > 1:
+        # Batched rows: one program per item tile and BLOCK_B rows.
+        kwargs_b = {
+            "item_attrs_ptr": item_clause_attrs,
+            "is_reverse_ptr": clause_is_reverse,
+            "query_attrs_ptr": query_clause_attrs,
+            "scores_ptr": scores,
+            "out_ptr": out,
+            "B": b,
+            "N": n,
+            "C": c,
+            "A_MAX": a_max,
+            "stride_in": item_clause_attrs.stride(0),
+            "stride_ic": item_clause_attrs.stride(1),
+            "stride_ia": item_clause_attrs.stride(2),
+            "stride_qb": query_clause_attrs.stride(0),
+            "stride_qc": query_clause_attrs.stride(1),
+            "stride_sb": scores.stride(0),
+            "stride_ob": out.stride(0),
+            "BLOCK_B": BLOCK_B,
+            "BLOCK_N": BATCHED_CONFIG.block_n,
+            "num_warps": BATCHED_CONFIG.num_warps,
+            "num_stages": BATCHED_CONFIG.num_stages,
+        }
+        grid_b = (triton.cdiv(n, BATCHED_CONFIG.block_n), triton.cdiv(b, BLOCK_B), 1)
+        return _ClauseMaskLaunch(grid_b, kwargs_b, out, batched=True)
     grid, tiles_y = grid_batch_tiles(b, n, cfg.block_n)
 
     kwargs = {
@@ -182,7 +265,10 @@ def _clause_mask_impl(
     launch = _clause_mask_prep(
         item_clause_attrs, clause_is_reverse, query_clause_attrs, cfg=cfg, scores=scores
     )
-    _clause_mask_kernel[launch.grid](**launch.kwargs)
+    if launch.batched:
+        _clause_mask_scores_batched_kernel[launch.grid](**launch.kwargs)
+    else:
+        _clause_mask_kernel[launch.grid](**launch.kwargs)
     return launch.out
 
 
@@ -215,7 +301,10 @@ def clause_mask_scores(
     launch = _clause_mask_prep(
         item_clause_attrs, clause_is_reverse, query_clause_attrs, cfg=SCORES_CONFIG, scores=scores
     )
-    wrap_triton(_clause_mask_kernel)[launch.grid](**launch.kwargs)  # keep inline (export)
+    if launch.batched:
+        wrap_triton(_clause_mask_scores_batched_kernel)[launch.grid](**launch.kwargs)
+    else:
+        wrap_triton(_clause_mask_kernel)[launch.grid](**launch.kwargs)  # keep inline (export)
     return launch.out
 
 

@@ -61,6 +61,54 @@ def _bloom_match_kernel(
         tl.store(out, pass_all, mask=valid)
 
 
+# B > 1 masked scores: one program per item tile and BLOCK_B rows (kernels.md § bloom_match,
+# "Batched rows").
+BLOCK_B = 16
+BATCHED_BLOCK_N = 128
+
+
+@triton.jit
+def _bloom_match_scores_batched_kernel(
+    qb_ptr,
+    sigs_ptr,
+    scores_ptr,  # [B, N] fp32
+    out_ptr,  # [B, N] fp32
+    B,
+    N,
+    W: tl.constexpr,
+    W_PAD: tl.constexpr,
+    stride_qb_b,
+    stride_s_n,
+    stride_sc_b,
+    stride_o_b,
+    BLOCK_B: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+):
+    # One item tile's signatures, loaded once and tested against each of BLOCK_B rows, where the
+    # per-row kernel reloads them per row.
+    n = tl.program_id(0).to(tl.int64) * BLOCK_N + tl.arange(0, BLOCK_N)
+    valid = n < N
+    w_off = tl.arange(0, W_PAD)
+    w_in = w_off < W
+    sigs = tl.load(
+        sigs_ptr + n[:, None] * stride_s_n + w_off[None, :],
+        mask=valid[:, None] & w_in[None, :],
+        other=0,
+    )
+    b0 = tl.program_id(1) * BLOCK_B
+    for i in tl.static_range(BLOCK_B):
+        b = b0 + i
+        if b < B:
+            qb = tl.load(qb_ptr + b * stride_qb_b + w_off, mask=w_in, other=0)
+            pass_all = bloom_subset_pass(qb, sigs)
+            sc = tl.load(scores_ptr + b.to(tl.int64) * stride_sc_b + n, mask=valid)
+            tl.store(
+                out_ptr + b.to(tl.int64) * stride_o_b + n,
+                tl.where(pass_all, sc, float("-inf")),
+                mask=valid,
+            )
+
+
 def _prep(
     qb: Tensor, sigs: Tensor, scores: Tensor | None, *, block_n: int = 128, num_warps: int = 4
 ) -> tuple[tuple, dict, Tensor]:
@@ -121,8 +169,39 @@ def bloom_match_scores(scores: Tensor, qb: Tensor, sigs: Tensor) -> Tensor:
     predicate never leaves the kernel as a ``[B, N]`` bool. Functional (a new buffer), so
     inductor has no in-place mask to copy."""
     grid, kwargs, out = _prep(qb, sigs, scores)
-    wrap_triton(_bloom_match_kernel)[grid](**kwargs)  # keep inline (export)
+    if qb.shape[0] > 1:
+        bgrid, bkwargs = _batched_args(kwargs, qb.shape[0])
+        wrap_triton(_bloom_match_scores_batched_kernel)[bgrid](**bkwargs)  # keep inline (export)
+    else:
+        wrap_triton(_bloom_match_kernel)[grid](**kwargs)  # keep inline (export)
     return out
+
+
+def _batched_args(kwargs: dict, b: int) -> tuple[tuple, dict]:
+    """The batched-rows launch from ``_prep``'s args (contiguous rows: unit word and item
+    strides)."""
+    n = kwargs["N"]
+    grid = (triton.cdiv(n, BATCHED_BLOCK_N), triton.cdiv(b, BLOCK_B), 1)
+    keys = (
+        "qb_ptr",
+        "sigs_ptr",
+        "scores_ptr",
+        "out_ptr",
+        "W",
+        "W_PAD",
+        "stride_qb_b",
+        "stride_s_n",
+    )
+    args = {k: kwargs[k] for k in keys} | {
+        "B": b,
+        "N": n,
+        "stride_sc_b": kwargs["stride_sc_b"],
+        "stride_o_b": kwargs["stride_o_b"],
+        "BLOCK_B": BLOCK_B,
+        "BLOCK_N": BATCHED_BLOCK_N,
+        "num_warps": 4,
+    }
+    return grid, args
 
 
 def _bloom_match_scores_impl(
