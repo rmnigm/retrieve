@@ -15,6 +15,7 @@ from retrieve.ops.triton._load import (
     codesigned_probe_score_bloom,
     codesigned_probe_score_exact,
     fused_masked_knn_topk,
+    gemv_scores,
     oporp_1bit_match_topk_full,
     oporp_1bit_match_topk_indirect,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "codesigned_probe_score_bloom",
     "codesigned_probe_score_exact",
     "fused_masked_knn_topk",
+    "gemv_scores",
     "oporp_1bit_match_topk_full",
     "oporp_1bit_match_topk_indirect",
 ]

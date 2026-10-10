@@ -113,7 +113,7 @@ multi-GPU numbers are comparable at all.
 is still improving, legs run at the current tag (the `default` of
 [campaign.yaml](../evaluation/campaign.yaml), Hub `<tag>/<dataset>-<suite>`;
 its `log` lists every tag, its library code_version and what it changed;
-now `campaign-v2.10`, library `a3bec4a5`) to see how everything behaves and to make the charts. A new tag does not stop or
+now `campaign-v2.11`, library `1d390792`) to see how everything behaves and to make the charts. A new tag does not stop or
 invalidate anything: every record keeps its code_version, and a change adds
 rows to the **redo ledger** below only for the cells it actually changes.
 The final repro pass (F-REPRO) reruns the ledger, or the whole grid at the
@@ -149,6 +149,7 @@ leg runs one library.
 | SilverTorch Triton bloom perf before v2.5 (all widths; 0 to −10 %) | ST-LANE (bit-exact; none / exact SASS unchanged) | Triton bloom perf |
 | V2 Triton perf at `D_PAD` ≤ 256 before v2.5 (incl. C1's crossover; 0.22-0.97 of v2.4) | V2-FILL (bit-exact) | V2 perf |
 | SilverTorch Triton perf before v2.10 where `B · n_probe` ≥ 512 (every width) or on sparse batches at `D_PAD` ≤ 256 (eager mostly; 0.74-1.00 of v2.9) | ST-WIDE-2 (bit-exact; fused probe prep, sparse two-pass) | Triton perf |
+| SilverTorch Triton perf before v2.11 where the padded score buffer reaches 2^23 slots (≥ 8 blocks per top-k slot; 30 M d256 n_probe 128 bs 16 / 64: 0.76-0.84 of v2.10) | ST-TOPK (bit-exact; two-level top-k, host only) | Triton perf |
 | graph-mode ids of SilverTorch records at `408b1188` | quantize fix | ids (D1-G's id gate) |
 
 ### Stop rules
@@ -321,12 +322,10 @@ co-design.
      a T2 confidence interval rests on.
   3. **Triton kernel work where ours trails Meta's or the compiler**:
      cross-query cluster sharing in the probe scorer (30 M d256, n_probe 128,
-     bs 64: Meta 1.8-2.0x); the top-k epilogue (ST-TOPK, `dev/st-topk`: ours
-     1.18 ms vs Meta's 0.79 at 30 M d256 `n_probe` 128 bs 64 in
-     `artifacts/c7-laion30m-interleaved` is Meta on its default fp16 score
-     path; at int32, the bit-exact comparison, the two top-ks are within
-     2-12 % on PubMed / arXiv, and the target is our own two-level top-k);
-     V1 at bs 1 (`torch.compile` 1.77x faster, C3). Each bit-exact plus the
+     bs 64, with ST-TOPK: ours / Meta -O3 0.907 / 1.068 at int32 and
+     1.064 / 1.256 against Meta's default fp16, c0_domain / tags4, Hub
+     `artifacts/st-topk-30m`; the remaining gap is our scorer, 2.2 vs 0.3 ms
+     at v2.10, `campaign-v2.10/laion30m-c7-scorepath`); V1 at bs 1 (`torch.compile` 1.77x faster, C3). Each bit-exact plus the
      keep rule, then a tag.
 - [ ] **F-REPRO: the final pass.** When the library stops changing: tag the
   final version, rerun the redo ledger (or the whole grid if the ledger is
