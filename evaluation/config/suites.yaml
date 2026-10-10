@@ -129,11 +129,11 @@ synth:                         # pass rate as the x axis (F1, F2, C1, C6)
     goodreads-synth: {p0001: [0, 1, 2], p0003: [0, 1, 2], p001: [0, 1, 2], p003: [0, 1, 2], p01: [0, 1, 2], p03: [0, 1, 2], p1: [0, 1, 2]}
   sweeps:                      # goodreads-synth all ten rates; arxiv-corr-synth its three
     arxiv-synth: [p0001, p001, p005, p01, p02, p05, p1]
-    yfcc10m-synth: [p001, p01, p02, p05, p1]
+    yfcc10m-synth: [p0001, p0003, p001, p003, p005, p01, p02, p05, p1]   # 0.001 / 0.003 / 0.03 / 0.05: AFTER-QUEUE 2 (v2.9)
   ks_by_sweep:                 # k = 1000 dropped where N*p < 4*1000: "return every passing item"; YFCC at k 100 only
     goodreads-synth: {p0001: [100], p0003: [100]}            # N 797,084
     arxiv-synth: {p0001: [100]}                              # N 2,988,996
-    yfcc10m-synth: {p001: [100], p01: [100], p02: [100], p05: [100], p1: [100]}
+    yfcc10m-synth: {p0001: [100], p0003: [100], p001: [100], p003: [100], p005: [100], p01: [100], p02: [100], p05: [100], p1: [100]}
   interleave:                  # V1 vs V2 per backend and compile mode; triton vs official bloom
     - {by: algo, values: [linr_v1_filter_mask, linr_v2]}
     - {by: backend, values: [triton, official]}
@@ -288,7 +288,7 @@ bloom: {m_bits: 1024, k_hash: 5}   # shared defaults; a suite may override with 
 # V-LAION30 (claims first, user 2026-10-10): how SilverTorch / V1 / V2 scale to 30 M under a site
 # filter (c0_domain, pass 5e-7 ... 4e-2) and a bucket conjunction (tags4). Seed 0, k 100, clause only;
 # SilverTorch alone at bs 1 (laion30m-bs1). n_lists ~ 4 sqrt(30 M) to a power of two; n_probe
-# under the 25 % cap, set from the calibration cells (docs/validation.md, laion30m).
+# under the 25 % cap, set from the calibration cells (docs/validation.md, laion30m); 64 and 256 complete the 30 M probe curve (F3).
 laion30m:
   datasets: [laion30m]
   dims: [256]
@@ -303,7 +303,7 @@ laion30m:
   arms:
     - {algo: linr_v1_filter_mask, backends: [triton]}
     - {algo: linr_v2, backends: [triton]}
-    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, query: {n_probe: [24, 1024, 4096]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, query: {n_probe: [24, 64, 256, 1024, 4096]}}
 
 laion30m-bs1:
   datasets: [laion30m]
@@ -315,7 +315,7 @@ laion30m-bs1:
   sweeps:
     laion30m: [c0_domain, tags4]
   arms:
-    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, query: {n_probe: [24, 1024, 4096]}}
+    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, query: {n_probe: [24, 64, 256, 1024, 4096]}}
 
 # laion30m on uniform synth attrs (user 2026-10-10: the real filters are too harsh), the rates yfcc10m-synth's `synth`
 # cells share, so pass rate is fixed across 0.8 / 3 / 10 / 30 M. Its own suite: `synth`'s dims would add d256 jobs

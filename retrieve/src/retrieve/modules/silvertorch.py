@@ -41,13 +41,16 @@ class PreparedFilter(NamedTuple):
     (exact, every backend), or the official parser's CPU ``plans_data`` / ``plans_offsets`` (bloom
     on official; Meta's search decodes plans on the host, kernels.md § official). On the partial
     bloom path the plans are one per distinct expression and ``plan_index`` ``[B]`` (device int64)
-    maps each row to its plan."""
+    maps each row to its plan. ``sparse`` (bloom, triton / torch): every row's pass-rate bound is
+    under ``SPARSE_PASS_BOUND``, so the scorer may take its two-pass at any width (kernels.md §
+    SilverTorch kernels, "Bloom two-pass")."""
 
     query_bits: Tensor | None = None
     query_attrs: Tensor | None = None
     plans_data: Tensor | None = None
     plans_offsets: Tensor | None = None
     plan_index: Tensor | None = None
+    sparse: bool = False
 
     def select(self, rows: Tensor) -> PreparedFilter:
         """The prepared filter of a row subset (device ``index_select``; not for official plans)."""
@@ -57,10 +60,17 @@ class PreparedFilter(NamedTuple):
         return PreparedFilter(
             query_bits=None if bits is None else bits.index_select(0, rows),
             query_attrs=None if attrs is None else attrs.index_select(0, rows),
+            sparse=self.sparse,  # a subset's bounds are among the batch's
         )
 
 
 __all__ = ["FilterMode", "OfficialConfig", "SilverTorch", "SilverTorchBuilder"]
+
+# A batch is sparse when every row's rarest queried bit is set on fewer than this share of items
+# (an upper bound on the row's pass rate): under one passing item per 256-item tile, where the
+# bloom two-pass beat the one-pass scorer at D 128-256 (kernels.md § SilverTorch kernels, "Bloom
+# two-pass").
+SPARSE_PASS_BOUND = 1 / 256
 
 
 class SilverTorch(RetrievalModule):
@@ -405,7 +415,9 @@ class SilverTorch(RetrievalModule):
         if self.filter_mode == "exact":
             return PreparedFilter(query_attrs=query_clause_attrs.long().contiguous())
         if self.backend != "official":
-            return PreparedFilter(query_bits=self._query_bit_positions(query_clause_attrs))
+            bits = self._query_bit_positions(query_clause_attrs)
+            bound = torch.where(bits >= 0, self.bloom_bit_freq[bits.clamp_min(0)], 1.0).amin(1)
+            return PreparedFilter(query_bits=bits, sparse=bool(bound.max() < SPARSE_PASS_BOUND))
         if self.bloom_index.numel() == 0:
             raise RuntimeError(
                 "this official bloom index was registered without item_clause_attrs, so there "
@@ -508,7 +520,7 @@ class SilverTorch(RetrievalModule):
                 freq = torch.where(qpos >= 0, freq[qpos.clamp_min(0)], 1.0).amin(dim=1)
                 qpos = torch.arange(qpos.shape[0], device=qpos.device).unsqueeze(1)
             return ops.codesigned_probe_score_bloom(
-                query, *layout, self.sort_perm, qpos, table, freq, *tail
+                query, *layout, self.sort_perm, qpos, table, freq, *tail, prepared.sparse
             )
         return ops.codesigned_probe_score(query, *layout, self.sort_perm, *tail)
 

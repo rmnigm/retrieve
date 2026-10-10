@@ -22,7 +22,7 @@ from retrieve.ops.triton.common import (
     clause_pass,
     probe_dots,
     probe_ids_kernel,
-    probe_table_kernel,
+    probe_prep_kernel,
     probe_tile,
     probe_tile_table,
     row_base,
@@ -255,8 +255,7 @@ def _codesigned_probe_score_exact_impl(
         query_clause_attrs=query_clause_attrs,
         cfg=cfg,
     )
-    if launch.table is not None:
-        probe_table_kernel[launch.table.grid](**launch.table.kwargs)
+    probe_prep_kernel[launch.prep.grid](**launch.prep.kwargs)
     _codesigned_probe_score_exact_kernel[launch.grid](**launch.kwargs)
     fin = probe_topk(launch, k, probe_ids, cluster_offsets, sort_perm)
     probe_ids_kernel[fin.grid](**fin.kwargs)
@@ -294,8 +293,7 @@ def codesigned_probe_score_exact(
         query_clause_attrs=query_clause_attrs,
         cfg=tile_for_width(CONFIGS, query.shape[1], query.shape[0], width),
     )
-    if launch.table is not None:
-        wrap_triton(probe_table_kernel)[launch.table.grid](**launch.table.kwargs)
+    wrap_triton(probe_prep_kernel)[launch.prep.grid](**launch.prep.kwargs)
     wrap_triton(_codesigned_probe_score_exact_kernel)[launch.grid](**launch.kwargs)
     fin = probe_topk(launch, k, probe_ids, cluster_offsets, sort_perm)
     wrap_triton(probe_ids_kernel)[fin.grid](**fin.kwargs)

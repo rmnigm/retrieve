@@ -358,7 +358,7 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("synth", "goodreads-synth"): (312, 558),
     ("synth", "arxiv-synth"): (25, 46),
     ("synth", "arxiv-corr-synth"): (15, 42),
-    ("synth", "yfcc10m-synth"): (15, 25),
+    ("synth", "yfcc10m-synth"): (27, 45),  # 9 rates x (V1, V2, SilverTorch at 3 n_probe)
     ("codesign", "arxiv"): (36, 108),  # official + triton (C5-OURS)
     ("codesign", "goodreads"): (36, 108),
     ("bloomwidth", "goodreads"): (42, 42),
@@ -370,8 +370,8 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("v3bits", "goodreads-synth"): (84, 168),
     ("v3bits", "goodreads"): (24, 48),
     ("v3bits", "pubmed"): (18, 36),
-    ("laion30m", "laion30m"): (6, 10),  # claims first: seed 0 (user 2026-10-10)
-    ("laion30m-bs1", "laion30m"): (2, 6),
+    ("laion30m", "laion30m"): (6, 14),  # claims first: seed 0 (user 2026-10-10)
+    ("laion30m-bs1", "laion30m"): (2, 10),
     ("laion30m-synth", "laion30m-synth"): (12, 20),
     ("codesign-laion30m", "laion30m"): (8, 16),  # C5 at 30 M: 2 sweeps x 2 backends x 2 paths
 }
@@ -431,7 +431,8 @@ def test_grid_counts_and_invariants(suite, dataset):
     }
     assert not any(p.get("n_probe") == 4 for _, p in cells)
     tuned = IVF.get(dataset, (None, None))[1]
-    synth = suite in ("synth", "laion30m-synth")
+    # synth sweeps n_probe; laion30m carries the 30 M probe curve (F3, controller 2026-10-11)
+    synth = suite in ("synth", "laion30m-synth", "laion30m", "laion30m-bs1")
     # deep on pubmed: the F3 / C6 10 M IVF curve up to the n_lists / 4 cap (controller, 2026-10-11)
     curve = suite == "deep" and dataset == "pubmed"
     assert synth or curve or not any(p.get("n_probe") == 256 != tuned for _, p in cells)

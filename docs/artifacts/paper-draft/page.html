@@ -106,7 +106,7 @@ a { color: var(--accent); }
     <ul>
       <li>LiNR's V1/V2 trade-off: the full scan wins at high pass rates, the gather-first scan at low ones.</li>
       <li>SilverTorch's int8 IVF tops out below 0.95 recall, and unaligned selective filters need more probes.</li>
-      <li>Co-design's ~1.8× speed-up, at the paper's own scale and filter complexity, in Meta's code (ours too, provisional).</li>
+      <li>Co-design's ~1.8× speed-up, at the paper's own scale and filter complexity, in Meta's code and in ours.</li>
       <li>Our Triton kernels match Meta's int32 path bit for bit.</li>
     </ul>
   </div>
@@ -141,7 +141,7 @@ a { color: var(--accent); }
       <tr><td class="id">C2</td><td>LiNR V3 keeps ~1 % for rescoring: ~10 % faster, near-parity recall</td><td>No gain at low pass rates. Near-parity recall needs one bit per dimension. Large gains only when most items pass.</td><td><span class="pill part">partly</span></td></tr>
       <tr><td class="id">C3</td><td>A custom filter kernel is ~100× faster than native masking</td><td>1.4–12× over plain and compiled PyTorch.</td><td><span class="pill bad">does not hold</span></td></tr>
       <tr><td class="id">C4</td><td>Bloom filter: low false positives at 1024 bits, flat latency in width</td><td>Zero false positives from 256 bits on two datasets; latency flat in width. The inverted-index comparison is not testable.</td><td><span class="pill part">partly</span></td></tr>
-      <tr><td class="id">C5</td><td>Co-design (probe, then filter) is 1.79–2.15× faster</td><td>2.1× at 30 M with multi-term filters in Meta's code, 2.4× in ours (provisional); reversed at 0.8–3 M in Meta's code (0.79–0.86), at most 1.1× in ours below 30 M.</td><td><span class="pill part">holds at scale</span></td></tr>
+      <tr><td class="id">C5</td><td>Co-design (probe, then filter) is 1.79–2.15× faster</td><td>2.1× at 30 M with multi-term filters in Meta's code, 2.4× in ours; reversed at 0.8–3 M in Meta's code (0.79–0.86), at most 1.1× in ours below 30 M.</td><td><span class="pill part">holds at scale</span></td></tr>
       <tr><td class="id">C6</td><td>Int8 IVF cannot reach 0.95; selective filters need more probes</td><td>Holds from 0.8 M to 30 M. The cause on YFCC is the global int8 scale.</td><td><span class="pill good">holds</span></td></tr>
       <tr><td class="id">C7</td><td>Ours (our claim): bit-exact with Meta's int32, faster end to end, Meta's scorer faster alone</td><td>Bit-exact holds. Faster end to end everywhere measured: 1.4–2.1× at d128 (1.4–1.8× on device), 1.1–2.2× at d768.</td><td><span class="pill part">partly</span></td></tr>
     </tbody>
@@ -199,9 +199,9 @@ a { color: var(--accent); }
     <div class="fn">Each dot is one interleaved pair (sweep × probes × batch). Meta's code runs eager only; ours in CUDA graph. Shaded band: the paper's 1.79–2.15×. Recall is identical on every pair.</div></div>
   <div class="text">
     <p>Meta's co-design path does extra host work per call, synchronising inside its ops. Below 3 M that fixed cost outweighs the masking it saves, and co-design is 14–21 % slower. At 30 M with a four-term filter the saved work dominates: 2.1× at batch 16, the top of the paper's 1.79–2.15×, and 4.2–5.3× at batch 64. With a single filter term the gain at batch 16 is under 1.1×.</p>
-    <p>Our own backend shows the same scale dependence. Below 10 M our kernels fold the filter test into the scorer, so there is little separate mask work to save: 0.98–1.05× at 0.8–3 M, slightly slower (0.84–0.95×) at 128 probes and batch 16, and 1.01–1.11× at 10 M. At 30 M the full mask over every item becomes the cost, and co-design gives 1.45–1.67× with one filter term and 2.4–3.3× with four at 32 probes. With 128 probes, more of the index is scanned anyway and the gain shrinks to 1.0–1.45×.</p>
+    <p>Our own backend shows the same scale dependence. Below 10 M our kernels fold the filter test into the scorer, so there is little separate mask work to save: 0.98–1.05× at 0.8–3 M, slightly slower (0.84–0.95×) at 128 probes and batch 16, and 1.01–1.11× at 10 M. At 30 M the full mask over every item becomes the cost, and co-design gives 1.45–1.70× with one filter term and 2.4–3.4× with four at 32 probes. With 128 probes, more of the index is scanned anyway and the gain shrinks to 1.1–1.6×.</p>
   </div>
-  <p class="caveat">Every Meta point runs on the final adapter and Meta's optimised build. Meta's 0.8–3 M points cover one sweep per dataset (arXiv main category, goodreads genre). Our 30 M points are provisional: at batch 16 and above they run many probes per batch, the regime our wide-probe scorer fix changes, and both paths of each pair will be re-timed with it.</p>
+  <p class="caveat">Every Meta point runs on the final adapter and Meta's optimised build. Meta's 0.8–3 M points cover one sweep per dataset (arXiv main category, goodreads genre).</p>
 </section>
 
 <section class="take" id="v1v2">
@@ -387,8 +387,8 @@ function draw() {
     ["Meta · 30 M · 4 terms", c => c.who === "Meta's code" && c.dataset === "laion30m" && c.sweep === "tags4"],
     ["ours · 0.8–3 M", c => c.who !== "Meta's code" && !["pubmed", "laion30m"].includes(c.dataset)],
     ["ours · 10 M", c => c.who !== "Meta's code" && c.dataset === "pubmed"],
-    ["ours · 30 M · 1 term (prov.)", c => c.who !== "Meta's code" && c.dataset === "laion30m" && c.sweep === "c0_domain"],
-    ["ours · 30 M · 4 terms (prov.)", c => c.who !== "Meta's code" && c.dataset === "laion30m" && c.sweep === "tags4"],
+    ["ours · 30 M · 1 term", c => c.who !== "Meta's code" && c.dataset === "laion30m" && c.sweep === "c0_domain"],
+    ["ours · 30 M · 4 terms", c => c.who !== "Meta's code" && c.dataset === "laion30m" && c.sweep === "tags4"],
   ];
   const jit = (i, n) => (n > 1 ? (i / (n - 1) - 0.5) * 0.5 : 0);
   const bsColor = { 1: S[2], 16: S[0], 64: S[4] };
