@@ -29,9 +29,15 @@ flags = {a for a in sys.argv[1:] if a in ("graph", "swap")}
 GRAPH, SWAP = "graph" in flags, "swap" in flags
 ds, dim, kind, sweeps, mode, bss, out = [a for a in sys.argv[1:] if a not in flags]
 cfg_path = Path(f"config/{ds}.yaml")
+# On the host, the items fp16 there: each arm moves a 2-byte table over when it builds, so the GPU
+# never holds the fp32 one (10 M d768 is 30 GB fp32).
 inp = inputs.load_inputs(
-    config.load_dataset(cfg_path, int(dim)), DEV, with_filters=True
+    config.load_dataset(cfg_path, int(dim)), torch.device("cpu"), with_filters=True
 )
+items16 = inp.pop("item_embs").half()
+attrs = inp["item_attrs"].to(
+    DEV
+)  # shared by both arms (the filters keep a contiguous input)
 sweep_cfg = yaml.safe_load(cfg_path.read_text())["filters"][kind]
 
 
@@ -43,10 +49,11 @@ def build(linr, filters):
     )
     m = linr.LiNRV1(k=100, filter=f)
     m.register_index(
-        inp["item_embs"].to(DEV),
-        inp["item_attrs"].to(DEV),
-        inp["clause_is_reverse"].to(DEV),
+        items16.to(DEV),
+        attrs,
+        inp["clause_is_reverse"].to(DEV) if mode == "clause" else None,
     )
+    torch.cuda.empty_cache()
     return m
 
 
@@ -54,7 +61,7 @@ mods = {"after": (after_linr, after_filters), "before": (before_linr, before_fil
 arms = {
     a: build(*mods[a]) for a in (("before", "after") if SWAP else ("after", "before"))
 }
-del inp["item_embs"]
+items16 = None  # free the host copy
 torch.cuda.empty_cache()
 
 

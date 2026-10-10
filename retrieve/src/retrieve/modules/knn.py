@@ -30,6 +30,11 @@ class PostfilterKNN(RetrievalModule):
         self.backend = backend
 
     def register_index(self, item_embs: Tensor) -> None:
+        if item_embs.is_cuda:
+            # Create cuBLAS's handle while memory is free: it allocates outside the caching
+            # allocator, and the check below would otherwise make the first cuBLAS call at the
+            # build's peak.
+            torch.mm(item_embs[:1, :1].half(), item_embs[:1, :1].half().t())
         # Pre-transpose to a contiguous D×N buffer; a .t() view at call time dispatches a different
         # kernel whose accumulator order can flip K-th-place tiebreaks at the noise floor.
         self.register_buffer("item_embs_t", item_embs.to(torch.float16).t().contiguous())

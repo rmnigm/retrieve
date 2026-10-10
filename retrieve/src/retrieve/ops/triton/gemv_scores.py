@@ -23,7 +23,7 @@ def _gemv_scores_kernel(q_ptr, e_ptr, out_ptr, N, D: tl.constexpr, BLOCK_N: tl.c
     acc = tl.zeros([BLOCK_N], tl.float32)
     for k in tl.range(0, D):
         qk = tl.load(q_ptr + k).to(tl.float32)
-        ek = tl.load(e_ptr + k * N + n, mask=live, other=0.0).to(tl.float32)
+        ek = tl.load(e_ptr + k.to(tl.int64) * N + n, mask=live, other=0.0).to(tl.float32)
         acc = tl.fma(qk, ek, acc)
     tl.store(out_ptr + n, acc, mask=live)
 
