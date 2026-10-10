@@ -1,7 +1,7 @@
 # laion30m on synthetic selectivity attrs (docs/system/datasets.md § Synthetic selectivity attrs): the parent's
 # data_dir, embeddings and queries; the attrs are `eval-data synth-filter --dataset laion30m`'s. Clause j passes item i
 # iff u_i < rates[j], rates `synth_filter.RATES` (0.001, 0.003, 0.01, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5, 1.0); the query
-# side is all ones. The synth suite picks four of the ten rates (user: the real filters are too harsh for laion).
+# side is all ones. Its own suite runs nine of the ten rates for V1 / V2 (C1) and four for SilverTorch.
 data_dir: data/laion30m
 content_dir: content_d256
 dims: [256]

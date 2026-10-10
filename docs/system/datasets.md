@@ -1091,7 +1091,7 @@ All ten columns are always written, and the harness refuses attrs whose `synth_f
 [`goodreads-synth.yaml`](../../evaluation/config/goodreads-synth.yaml),
 [`arxiv-synth.yaml`](../../evaluation/config/arxiv-synth.yaml) and
 [`yfcc10m-synth.yaml`](../../evaluation/config/yfcc10m-synth.yaml) (the suite runs nine:
-0.001, 0.003, 0.01, 0.03, 0.05, 0.1, 0.2, 0.5, 1.0, at k 100); [`laion30m-synth.yaml`](../../evaluation/config/laion30m-synth.yaml) runs four (0.1, 0.2, 0.5, 1.0;
+0.001, 0.003, 0.01, 0.03, 0.05, 0.1, 0.2, 0.5, 1.0, at k 100); [`laion30m-synth.yaml`](../../evaluation/config/laion30m-synth.yaml) runs nine (0.001 … 1.0 without 0.3, C1's points; SilverTorch at 0.1 / 0.2 / 0.5 / 1;
 clause only) in its own `laion30m-synth` suite. Each keeps the parent's `data_dir`, encoder and `users_limit`, so
 it shares the parent's encode cache. Its sweeps are named `p0001` … `p1`,
 so they cannot collide with the parent's names in the shared `gt_d{dim}`,

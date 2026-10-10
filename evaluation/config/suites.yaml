@@ -328,13 +328,13 @@ laion30m-synth:
   batch_sizes: [1, 16]
   seeds: [0]
   sweeps:
-    laion30m-synth: [p01, p02, p05, p1]
+    laion30m-synth: [p0001, p0003, p001, p003, p005, p01, p02, p05, p1]   # C1's nine rates (3 M / 10 M share them)
   interleave:
     - {by: algo, values: [linr_v1_filter_mask, linr_v2]}
   arms:
     - {algo: linr_v1_filter_mask, backends: [triton]}
     - {algo: linr_v2, backends: [triton]}
-    - {algo: silvertorch, backends: [triton], build: {n_lists: [16384]}, query: {n_probe: [24, 256, 1024]}}
+    - {algo: silvertorch, backends: [triton], sweeps: [p01, p02, p05, p1], build: {n_lists: [16384]}, query: {n_probe: [24, 256, 1024]}}
 
 # C5 in the paper's regime (controller 2026-10-10, C5-META-CHECK): co-design partial vs full mask at 30 M,
 # Meta's official kernels and our Triton ones, interleaved per backend. Sub-queries per expression: 1

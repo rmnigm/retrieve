@@ -372,7 +372,7 @@ GRID = {  # (suite, dataset): (jobs, cells), the planner's GPU-h input; change i
     ("v3bits", "pubmed"): (18, 36),
     ("laion30m", "laion30m"): (6, 14),  # claims first: seed 0 (user 2026-10-10)
     ("laion30m-bs1", "laion30m"): (2, 10),
-    ("laion30m-synth", "laion30m-synth"): (12, 20),
+    ("laion30m-synth", "laion30m-synth"): (22, 30),  # V1 + V2 at nine rates, SilverTorch at four
     ("codesign-laion30m", "laion30m"): (8, 16),  # C5 at 30 M: 2 sweeps x 2 backends x 2 paths
 }
 KEPT = {
