@@ -403,7 +403,7 @@ resolves at each of its dims.
 suite and dataset the campaign drew claims from, the scratch suites it ran folded in, the arms it never needed dropped.
 Seed 0 everywhere; seeds `{0, 1, 2}` only in `filter`, the T2 headline whose confidence intervals rest on them (the
 interleaved rounds are the timing repeats elsewhere). Batch sizes are `{1, 16}` (bs 64 only in `codesign-laion30m`,
-`c7-scorepath` and `tune-timed`) and ks `{100, 1000}` or a subset. Every SilverTorch cell scans at most a quarter of the
+`c7-scorepath`, `nsweep-codesign` and `tune-timed`) and ks `{100, 1000}` or a subset. Every SilverTorch cell scans at most a quarter of the
 lists (`n_probe` ≤ `n_lists` / 4, user), and its `n_lists` / `n_probe` come from the tune ([IVF tuning](#ivf-tuning)).
 No LiNR V4 and no openalex (`config/openalex.yaml` and its ETL are backlog). Official SilverTorch runs only `none` /
 `bloom` cells: its clause cells timed our `pack_mask` adapter. The official clause path stays in `PATHS` and the library,
@@ -429,6 +429,9 @@ so the old records still read. There is no unfiltered `quality` suite ([decision
 | `laion30m-x` | laion30m `c0_domain`, `tags4`, bs 1 + 16 | V2 + `silvertorch` 16384 / 4096 interleaved in one process (`--algo linr_v2 --algo silvertorch --interleave`), then V1 alone | C6: IVF vs exact at 0.95 |
 | `codesign-laion30m` | laion30m `c0_domain`, `tags4`, bs 16 + 64, eager | official and triton bloom `bloom_path` {partial, full}, 16384 × {32, 128} | C5 at 30 M |
 | `c7-scorepath` | laion30m `c0_domain`, `tags4`, bs 16 + 64 | triton vs official at `score_path` {fp16, int32}, bloom partial, 16384 × {32, 128}, one group per sweep; `--interleave --profile` | C7 at 30 M |
+| `nsweep-synth` | laion1m-, laion3m-, laion10m-synth and arxiv-synth at d256, nine rates; seeded nested LAION subsets ([datasets](datasets.md#subsets)) | V1, V2 triton interleaved (C1); `silvertorch` triton on `p01 p02 p05 p1` at `n_lists` scaled to the 30 M list size (512 / 2048 / 4096; arXiv 2048) × `n_probe` {24, L/64, L/16} | C1 / C6 across N at fixed d (the extension) |
+| `nsweep` | laion1m / 3m / 10m `c0_domain`, `tags4`, bs 1 + 16 | V1, V2 and `silvertorch` (`n_probe` {24, L/64, L/16, L/4}) in one interleave group per sweep (IVF vs exact) | C6 across N |
+| `nsweep-codesign` | laion1m / 3m / 10m `c0_domain`, `tags4`, bs 16 + 64, eager | official and triton bloom `bloom_path` {partial, full} × `n_probe` {32, 128} at the scaled `n_lists` | C5 across N |
 | `tune-q` | the eight benches (goodreads, arxiv, yfcc10m, pubmed and their synth tables) | `silvertorch` triton, `n_lists` per bench × `n_probe` {8 … 4096} ≤ `n_lists` / 4, clause + bloom, quality only | the tune (n_lists, n95) |
 | `tune-timed` | the same | the timed Pareto candidates (`docs/artifacts/campaign-final/tune-timed-candidates.json`), one arm per (dataset, sweep, kind, n_lists), bs {1, 16, 64} | the tune's fronts, F3 |
 

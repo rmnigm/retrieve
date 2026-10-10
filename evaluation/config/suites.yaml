@@ -411,6 +411,82 @@ c7-scorepath:
     - {algo: silvertorch, backends: [triton], build: {bloom_path: [partial], n_lists: [16384]}, query: {n_probe: [32, 128]}}
     - {algo: silvertorch, backends: [official], build: {bloom_path: [partial], n_lists: [16384], score_path: [fp16, int32]}, query: {n_probe: [32, 128]}}
 
+# Fixed-d N-sweep (final-pass extension, controller 2026-10-13): LAION d256 at 1 / 3 / 10 M, seeded nested row subsets of
+# laion30m (`eval-data subset`, docs/system/datasets.md § Subsets), beside the 30 M cells, plus arXiv 3 M at d256 (same N
+# and d, other data). n_lists scaled to the 30 M list size (16384 lists, ~1,831 items each): 1 M 512, 3 M 2048, 10 M 4096
+# (arXiv 2048); n_probe at 30 M's scan fractions: synth {24, L/64, L/16} (30 M: 24, 256, 1024), real {24, L/64, L/16, L/4}
+# (L/4 = the cap = tags4's n95 at 30 M). Seed 0, k 100.
+nsweep-synth:                  # C1 (V1 / V2 at the nine rates) and C6 (SilverTorch at four) across N at d256
+  datasets: [laion1m-synth, laion3m-synth, laion10m-synth, arxiv-synth]
+  dims: [256]
+  filter_kinds: [clause]
+  ks: [100]
+  batch_sizes: [1, 16]
+  seeds: [0]
+  sweeps:
+    laion1m-synth: [p0001, p0003, p001, p003, p005, p01, p02, p05, p1]
+    laion3m-synth: [p0001, p0003, p001, p003, p005, p01, p02, p05, p1]
+    laion10m-synth: [p0001, p0003, p001, p003, p005, p01, p02, p05, p1]
+    arxiv-synth: [p0001, p0003, p001, p003, p005, p01, p02, p05, p1]
+  interleave:
+    - {by: algo, values: [linr_v1_filter_mask, linr_v2]}
+  arms:
+    - {algo: linr_v1_filter_mask, backends: [triton]}
+    - {algo: linr_v2, backends: [triton]}
+    - algo: silvertorch
+      backends: [triton]
+      sweeps: [p01, p02, p05, p1]
+      datasets:
+        laion1m-synth: {build: {n_lists: [512]}, query: {n_probe: [8, 24, 32]}}
+        laion3m-synth: {build: {n_lists: [2048]}, query: {n_probe: [24, 32, 128]}}
+        laion10m-synth: {build: {n_lists: [4096]}, query: {n_probe: [24, 64, 256]}}
+        arxiv-synth: {build: {n_lists: [2048]}, query: {n_probe: [24, 32, 128]}}
+
+nsweep:                        # C6 on the real filters with the matched exact arms, one process per sweep and N
+  datasets: [laion1m, laion3m, laion10m]
+  dims: [256]
+  filter_kinds: [clause]
+  ks: [100]
+  batch_sizes: [1, 16]
+  seeds: [0]
+  sweeps:
+    laion1m: [c0_domain, tags4]
+    laion3m: [c0_domain, tags4]
+    laion10m: [c0_domain, tags4]
+  interleave:
+    - {by: [algo, n_lists]}    # V1, V2 and SilverTorch in one group (laion30m-x's IVF-vs-exact comparison)
+  arms:
+    - {algo: linr_v1_filter_mask, backends: [triton]}
+    - {algo: linr_v2, backends: [triton]}
+    - algo: silvertorch
+      backends: [triton]
+      datasets:
+        laion1m: {build: {n_lists: [512]}, query: {n_probe: [8, 24, 32, 128]}}
+        laion3m: {build: {n_lists: [2048]}, query: {n_probe: [24, 32, 128, 512]}}
+        laion10m: {build: {n_lists: [4096]}, query: {n_probe: [24, 64, 256, 1024]}}
+
+nsweep-codesign:               # C5 across N: partial vs full masks, Meta's kernels and ours, eager (run with --mode eager)
+  datasets: [laion1m, laion3m, laion10m]
+  dims: [256]
+  filter_kinds: [bloom]
+  ks: [100]
+  batch_sizes: [16, 64]
+  seeds: [0]
+  sweeps:
+    laion1m: [c0_domain, tags4]
+    laion3m: [c0_domain, tags4]
+    laion10m: [c0_domain, tags4]
+  interleave: [{by: bloom_path}]
+  arms:
+    - algo: silvertorch
+      backends: [official, triton]
+      build: {bloom_path: [partial, full]}
+      query: {n_probe: [32, 128]}
+      datasets:
+        laion1m: {build: {n_lists: [512]}}
+        laion3m: {build: {n_lists: [2048]}}
+        laion10m: {build: {n_lists: [4096]}}
+
 # Per-bench SilverTorch tuning, quality only (generated: docs/artifacts/campaign-final/build_tune.py).
 tune-q:
   perf: false

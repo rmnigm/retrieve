@@ -385,6 +385,16 @@ GRID = {  # (suite, dataset): (jobs, cells), the final pass's sizing input; chan
     ("codesign-laion30m", "laion30m"): (8, 16),  # C5 at 30 M: 2 sweeps x 2 backends x 2 paths
     ("laion30m-x", "laion30m"): (6, 6),
     ("c7-scorepath", "laion30m"): (6, 12),
+    ("nsweep-synth", "laion1m-synth"): (22, 30),
+    ("nsweep-synth", "laion3m-synth"): (22, 30),
+    ("nsweep-synth", "laion10m-synth"): (22, 30),
+    ("nsweep-synth", "arxiv-synth"): (22, 30),
+    ("nsweep", "laion1m"): (6, 12),
+    ("nsweep", "laion3m"): (6, 12),
+    ("nsweep", "laion10m"): (6, 12),
+    ("nsweep-codesign", "laion1m"): (8, 16),
+    ("nsweep-codesign", "laion3m"): (8, 16),
+    ("nsweep-codesign", "laion10m"): (8, 16),
     ("tune-q", "goodreads"): (28, 196),
     ("tune-q", "goodreads-synth"): (42, 294),
     ("tune-q", "arxiv"): (42, 294),
@@ -435,7 +445,11 @@ def test_grid_counts_and_invariants(suite, dataset):
     cells = [(j, {**j.build, **q}) for j in jobs for q in j.query]
     # seed 0 everywhere; seeds 0-2 only in `filter`, the T2 headline whose CIs rest on them
     assert {j.seed for j in jobs} == ({0, 1, 2} if suite == "filter" else {0})
-    big = {64} if suite in ("codesign-laion30m", "c7-scorepath", "tune-timed") else set()
+    big = (
+        {64}
+        if suite in ("codesign-laion30m", "c7-scorepath", "nsweep-codesign", "tune-timed")
+        else set()
+    )
     assert all(set(j.batch_sizes) <= {1, 16} | big and set(j.ks) <= {100, 1000} for j in jobs)
     if suite in ("filter", "deep", "synth", "codesign"):
         assert all(j.batch_sizes == (1, 16) for j in jobs)
@@ -756,3 +770,19 @@ def test_deep_pubmed_is_its_timed_pareto_fronts():
         ("c3_journal_reverse", 65536, 1024),
         ("all5", 16384, 2048),
     } <= got
+
+
+def test_nsweep_scales_n_lists_to_the_30m_list_size():
+    """The fixed-d N-sweep: n_lists ~ N / 1,831 (30 M's 16384 lists) to a power of two, and the
+    probes at 30 M's scan fractions (synth {24, L/64, L/16}; real {24, L/64, L/16, L/4})."""
+    n_lists = {"laion1m": 512, "laion3m": 2048, "laion10m": 4096}
+    for ds, nl in n_lists.items():
+        st = [j for j in _real("nsweep", ds) if j.algo == "silvertorch"]
+        assert {j.build["n_lists"] for j in st} == {nl}
+        assert {q["n_probe"] for j in st for q in j.query} == {24, nl // 64, nl // 16, nl // 4}
+        syn = [j for j in _real("nsweep-synth", f"{ds}-synth") if j.algo == "silvertorch"]
+        assert {q["n_probe"] for j in syn for q in j.query} == {24, nl // 64, nl // 16}
+        cd = _real("nsweep-codesign", ds)
+        assert {(j.backend, j.build["bloom_path"], j.build["n_lists"]) for j in cd} == {
+            (b, p, nl) for b in ("official", "triton") for p in ("partial", "full")
+        }
