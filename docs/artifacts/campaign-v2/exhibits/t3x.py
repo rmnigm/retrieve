@@ -13,7 +13,7 @@ import statistics as st
 import sys
 from pathlib import Path
 
-from load import cv, load, official_build
+from load import cv, load, official_build, score_path
 
 from bench import stats
 
@@ -55,7 +55,7 @@ def cell_key(r, e):
         r["filter_kind"],
         r["sweep"],
         r["backend"],
-        r["params"].get("score_path"),
+        score_path(r),
         r["seed"],
         e["k"],
         e["bs"],
@@ -63,7 +63,7 @@ def cell_key(r, e):
 
 
 def arm_of(r, mode):
-    return (r["backend"], r["params"].get("score_path"), mode)
+    return (r["backend"], score_path(r) or None, mode)
 
 
 def main():
