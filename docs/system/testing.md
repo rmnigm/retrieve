@@ -807,7 +807,7 @@ holds the poison** — the scatter writes nothing there
 
 CUDA is required. The whole suite is GPU-gated.
 
-The repo is a uv workspace ([root pyproject](../../pyproject.toml)); `retrieve/` and `evaluation/` share a single `.venv` at the workspace root. Running `uv` from inside `retrieve/` discovers the workspace root automatically — no per-subdir sync needed.
+The repo is a uv workspace ([root pyproject](../../pyproject.toml)); `retrieve/`, `evaluation/` and `official-fork/` share a single `.venv` at the workspace root. Running `uv` from inside `retrieve/` discovers the workspace root automatically — no per-subdir sync needed.
 
 ```bash
 cd retrieve   # or, from the root: uv run --directory retrieve <cmd>

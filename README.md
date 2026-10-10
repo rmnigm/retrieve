@@ -6,10 +6,11 @@ The library half is the package `torchretrieve` (not yet published on PyPI; rele
 
 ## Layout
 
-This repo is a [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/) with two members sharing a single `.venv` at the workspace root:
+This repo is a [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/) with three members sharing a single `.venv` at the workspace root:
 
 - [`retrieve/`](retrieve/) — the library: kernels, modules, correctness tests. Package `torchretrieve` (not yet on PyPI); imports as `retrieve`.
 - [`evaluation/`](evaluation/) — training and benchmark harness; depends on `retrieve` editable. Not published.
+- [`official-fork/`](official-fork/) — our fork of Meta's `meta-recsys/silvertorch` (Apache-2.0, Meta's licence and headers kept; changes in [`official-fork/CHANGES.md`](official-fork/CHANGES.md)): package `silvertorch_fork`, ops `torch.ops.stfork.*`, installed by the `official` extra beside the pinned upstream.
 
 Datasets, virtual environments and campaign scratch live *outside* the repo, on
 the GPU pod's container disk (pods are launched with [`infra/runpod/pod.sh`](infra/runpod/pod.sh)) — see [`docs/system/storage.md`](docs/system/storage.md)
@@ -30,7 +31,7 @@ Source-only distribution — Triton kernels JIT-compile on first call. Requires 
 For working on the library or running the evaluation harness:
 
 ```bash
-uv sync --extra official --all-packages   # from this directory — populates ./.venv with both packages installed editable, Meta's official extension, and pytest (in the members' dev groups)
+uv sync --extra official --all-packages   # from this directory — populates ./.venv with both packages installed editable, Meta's official extension and our fork of it, and pytest (in the members' dev groups)
 ```
 
 After `uv sync`, run from anywhere in the workspace:

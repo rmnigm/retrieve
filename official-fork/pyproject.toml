@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
+# Modified by the retrieve authors, 2026-10-14: static [project] metadata, a uv workspace member (official-fork/CHANGES.md).
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,6 +12,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+[project]
+name = "silvertorch-fork"
+version = "1.0.0"
+description = "SilverTorch: GPU Retrieval Library (retrieve's fork of meta-recsys/silvertorch @ 21aa35e)"
+license = { file = "LICENSE" }
+requires-python = ">=3.8"
+dependencies = ["torch>=2.0"]
 
 [build-system]
 requires = ["setuptools>=61", "wheel", "torch>=2.0"]

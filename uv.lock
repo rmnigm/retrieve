@@ -18,6 +18,7 @@ resolution-markers = [
 members = [
     "retrieve-evaluation",
     "retrieve-workspace",
+    "silvertorch-fork",
     "torchretrieve",
 ]
 
@@ -2608,6 +2609,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "silvertorch-fork"
+version = "1.0.0"
+source = { editable = "official-fork" }
+dependencies = [
+    { name = "torch" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "torch", specifier = ">=2.0" }]
+
+[[package]]
 name = "six"
 version = "1.17.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2813,6 +2825,7 @@ dependencies = [
 [package.optional-dependencies]
 official = [
     { name = "silvertorch" },
+    { name = "silvertorch-fork" },
 ]
 
 [package.dev-dependencies]
@@ -2826,6 +2839,7 @@ dev = [
 requires-dist = [
     { name = "click", specifier = ">=8.1" },
     { name = "silvertorch", marker = "extra == 'official'", git = "https://github.com/meta-recsys/silvertorch?rev=21aa35e28b6dd9a91e9ee35efb0857715e86bda7" },
+    { name = "silvertorch-fork", marker = "extra == 'official'", editable = "official-fork" },
     { name = "torch", specifier = ">=2.10,<3" },
     { name = "triton", specifier = ">=3.6" },
 ]

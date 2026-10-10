@@ -17,10 +17,10 @@ official = [
 
 [tool.uv]
 package = false
-# silvertorch's build backend imports torch (setup.py picks CUDAExtension when
+# silvertorch's (and the fork's) build backend imports torch (setup.py picks CUDAExtension when
 # CUDA_HOME is set), so it must build against the torch already in this env
 # rather than an isolated one that would pull a different CUDA build.
-no-build-isolation-package = ["silvertorch"]
+no-build-isolation-package = ["silvertorch", "silvertorch-fork"]
 
 # Static metadata for silvertorch, so `uv lock` never has to run its setup.py
 # (which imports torch and probes for nvcc). Matches setup.py at the pinned sha:
@@ -31,11 +31,13 @@ version = "1.0.0"
 requires-dist = ["torch>=2.0"]
 
 [tool.uv.workspace]
-members = ["retrieve", "evaluation"]
+members = ["retrieve", "evaluation", "official-fork"]
 
 [tool.uv.sources]
 torchretrieve = { workspace = true }
 retrieve-evaluation = { workspace = true }
+# Our fork of it (official-fork/CHANGES.md): Apache-2.0, ops under torch.ops.stfork.*, loads beside it.
+silvertorch-fork = { workspace = true }
 # Meta's official SilverTorch, pinned to the full sha of `main` @ 21aa35e
 # (2026-07-23). Not on PyPI; no tags upstream. Bumping this is a deliberate PR
 # that reruns the official parity gate (docs/decisions.md, Library).

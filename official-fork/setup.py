@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
-# Modified by the retrieve authors, 2026-10-14: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; builds is_topk / fresh_index_post_processing (official-fork/FORK.md).
+# Modified by the retrieve authors, 2026-10-14: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; builds is_topk / fresh_index_post_processing; -O3 host code; metadata in pyproject.toml (official-fork/CHANGES.md).
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -56,6 +56,7 @@ include_dirs = [os.path.join(ROOT_DIR, "silvertorch_fork", "ops", "csrc")]
 
 extra_compile_args = {
     "cxx": [
+        "-O3",
         "-Wall",
         "-Wextra",
         "-Wno-sign-conversion",
@@ -67,7 +68,11 @@ extra_compile_args = {
 }
 
 if CUDA_HOME is not None:
+    # fork (OF-11): upstream passes no -O to nvcc, so the .cu host code built at gcc's -O0
     extra_compile_args["nvcc"] = [
+        "-O3",
+        "-Xcompiler",
+        "-O3",
         "--expt-extended-lambda",
         "--expt-relaxed-constexpr",
     ]
@@ -90,9 +95,6 @@ else:
     ]
 
 setup(
-    name="silvertorch-fork",
-    version="1.0.0",
-    description="SilverTorch: GPU Retrieval Library",
     packages=[
         "silvertorch_fork",
         "silvertorch_fork.ops",
@@ -107,6 +109,4 @@ setup(
     },
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension},
-    python_requires=">=3.8",
-    install_requires=["torch>=2.0"],
 )
