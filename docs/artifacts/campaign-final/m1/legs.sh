@@ -17,7 +17,7 @@ SMI=$!
 trap 'kill $SMI 2>/dev/null; rm -f /scratch/gpu0-holder' EXIT
 for leg in "$@"; do
   echo "pod-d laion final leg $leg on GPU 0 (taskset -c 64-95) since $(date -Is), driver $0" > /scratch/gpu0-holder
-  eval "$(python3 - "$T/docs/artifacts/campaign-final/recipe.yaml" "$leg" <<'PY'
+  spec=$(python3 - "$T/docs/artifacts/campaign-final/recipe.yaml" "$leg" <<'PY'
 import shlex, sys, yaml
 leg = next(l for l in yaml.safe_load(open(sys.argv[1]))["legs"] if l["id"] == sys.argv[2])
 assert leg["worker"] == "laion" and leg["index"] == 0, leg["id"]
@@ -27,9 +27,11 @@ print(f"CMD={shlex.quote(leg['command'])}")
 import re
 print(f"UPP={shlex.quote(leg['upload'])}")
 print(f"SUITE={shlex.quote(leg['suite'])}")
-print(f"STEM={shlex.quote(leg['dataset'] + '-d' + re.search(r'--dim (\\d+)', leg['command']).group(1))}")
+stem = leg["dataset"] + "-d" + re.search(r"--dim (\d+)", leg["command"]).group(1)
+print(f"STEM={shlex.quote(stem)}")
 PY
-)" || { echo "$(date -Is) $leg: not in the recipe for laion / GPU 0"; exit 5; }
+) || { echo "$(date -Is) $leg: recipe parse failed or not a laion / GPU 0 leg"; exit 5; }
+  eval "$spec"
   mkdir -p "$TORCHINDUCTOR_CACHE_DIR"
   t0=$(date +%s)
   echo "=== $CMD" >> "$LOGD/$leg.log"
