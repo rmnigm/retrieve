@@ -66,7 +66,7 @@ class PreparedFilter(NamedTuple):
 
 __all__ = ["FilterMode", "OfficialConfig", "SilverTorch", "SilverTorchBuilder"]
 
-# A batch of more than one row is sparse when every row's estimated share of 256-item tiles
+# A batch of more than one row is also sparse when every row's estimated share of 256-item tiles
 # holding a passing item, over the whole index, is under this: per cluster the product over the
 # row's clauses of the clause's rarest-bit share, times the cluster's size, capped at its tiles.
 # Where the bloom two-pass beat the one-pass scorer at D 128-256; at one row its extra launches
@@ -429,8 +429,8 @@ class SilverTorch(RetrievalModule):
         if self.backend != "official":
             bits = self._query_bit_positions(query_clause_attrs)
             bound = torch.where(bits >= 0, self.bloom_bit_freq[bits.clamp_min(0)], 1.0).amin(1)
-            sparse = bits.shape[0] > 1 and bool(
-                (bound.max() < SPARSE_PASS_BOUND) | (self._tile_frac(bits).max() < SPARSE_TILE_FRAC)
+            sparse = bool(bound.max() < SPARSE_PASS_BOUND) or (
+                bits.shape[0] > 1 and bool(self._tile_frac(bits).max() < SPARSE_TILE_FRAC)
             )
             return PreparedFilter(query_bits=bits, sparse=sparse)
         if self.bloom_index.numel() == 0:
