@@ -4,7 +4,8 @@
 # notes) or /scratch/final/deps-ok/<leg id> exists. Bench commands run from evaluation/, `bash docs/...` from the repo root. Stops on the first
 # non-zero rc (leg or upload) and says so in d-run's note. Rerun after a crash: finished legs (marker /scratch/final/done/<id>) are skipped and the
 # legs' --resume skips finished cells.
-#   setsid nohup flock /scratch/gpu1.lock bash d1-runner.sh > /scratch/final/d1-runner.log 2>&1 &
+# GPU 1's lock is taken per leg (not while waiting on a dependency: laion's M1 needs both pod d locks before d0-01).
+#   setsid nohup bash d1-runner.sh > /scratch/final/d1-runner.log 2>&1 &
 set -u
 WT=/scratch/wt/final; CH=/workspace/retrieve/.chains/campaign-final
 NOTE=$CH/2026-10-10-153000000-d-run-final-pass.md
@@ -38,7 +39,7 @@ while IFS=$'\t' read -r id deps env cmd up hub; do
   done
   RUNNING=$id; T0S=$(date -Is); t0=$(date +%s); status "running $id"
   case "$cmd" in bash\ *) dir=$WT ;; *) dir=$WT/evaluation ;; esac
-  ( cd $dir && env $env bash -c "$cmd" ) > /scratch/final/logs-$id.log 2>&1 < /dev/null
+  ( cd $dir && flock /scratch/gpu1.lock env $env bash -c "echo \"d-run final $id on GPU 1 since $(date -Is)\" > /scratch/gpu1-holder; $cmd" ) > /scratch/final/logs-$id.log 2>&1 < /dev/null
   rc=$?; echo "$(date -Is) $id rc=$rc s=$(( $(date +%s) - t0 ))"
   if [ $rc -ne 0 ]; then RUNNING=; status "**FAILED: $id rc=$rc** (log /scratch/final/logs-$id.log); runner stopped"; exit $rc; fi
   ( cd $WT/evaluation && env $env bash -c "$up" ) > /scratch/final/upload-$id.log 2>&1 < /dev/null
