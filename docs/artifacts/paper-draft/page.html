@@ -65,6 +65,7 @@ section.take { display: grid; gap: 16px; }
 .take .claim b { color: var(--ink-2); font-weight: 600; }
 .figure { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 16px 16px 10px; display: grid; gap: 8px; min-width: 0; }
 .figs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.figs3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .figure .ft { font-family: var(--f-display); font-stretch: 90%; font-weight: 600; font-size: 15px; }
 .figure .fn { font-size: 13px; color: var(--ink-3); }
 .canvas-box { position: relative; height: 300px; }
@@ -83,7 +84,7 @@ a { color: var(--accent); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 @media (max-width: 760px) {
-  .story, .figs, .ledger { grid-template-columns: minmax(0, 1fr); }
+  .story, .figs, .figs3, .ledger { grid-template-columns: minmax(0, 1fr); }
   .ledger { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .story > div + div { padding-left: 0; border-left: 0; border-top: 1px solid var(--rule); }
   .wrap { padding-inline: 16px; gap: 44px; }
@@ -97,7 +98,7 @@ a { color: var(--accent); }
   <p class="eyebrow">Reproducibility study · LiNR (CIKM '24) and SilverTorch (SIGIR '26)</p>
   <h1>Filtered GPU retrieval, reproduced: what holds, what breaks, what is new</h1>
   <p class="lede">We reimplemented LinkedIn's LiNR and Meta's SilverTorch in Triton from the papers' text, ran Meta's released kernels next to ours, and tested every claim we could on five public datasets from 0.8 M to 30 M items on one A100.</p>
-  <p class="meta">These are exploration numbers. A final pass at one frozen code version reruns every cell before anything is cited. Every timing comparison here is read inside one machine and, where it is a ratio, inside one interleaved run. Recall is at top-100 against an exact filtered fp32 oracle.</p>
+  <p class="meta">These are exploration numbers. A final pass at one frozen code version reruns every cell before anything is cited. Every timing comparison here is read inside one machine and, where it is a ratio, inside one interleaved run. Recall is at top-100 against an exact filtered fp32 oracle. Our IVF timings come from the version before the latest kernel update, which is bit-exact and is being re-timed; it is expected to speed up our eager timings and leave CUDA-graph timings about the same. Meta's numbers use its default fp16 score path unless marked int32.</p>
 </header>
 
 <section class="story" aria-label="Summary">
@@ -114,7 +115,7 @@ a { color: var(--accent); }
     <h3><span class="dot" style="background:var(--bad)"></span>Does not reproduce</h3>
     <ul>
       <li>The ~100× gap between a custom filter kernel and native PyTorch masking. We see 1.4–12×.</li>
-      <li>V3's "keep 1 %, gain ~10 %" at low pass rates. It pays only when most items pass.</li>
+      <li>V3's "keep 1 %, gain ~10 %" below 10 M items or at very low pass rates. At 10 M and a 1.8 % pass rate it does hold.</li>
       <li>Co-design below a few million items: Meta's code is 14–21 % slower with it.</li>
       <li>The bloom false-positive figures: the paper's two numbers disagree, and ours are far lower.</li>
     </ul>
@@ -122,10 +123,10 @@ a { color: var(--accent); }
   <div>
     <h3><span class="dot" style="background:var(--accent)"></span>New</h3>
     <ul>
-      <li>IVF recall follows each query's <em>local</em> pass rate, not the global one.</li>
+      <li>IVF recall follows each query's <em>local</em> pass rate, not the global one. On real filters the per-query spread also moves LiNR's V1/V2 crossover: at batch 16 the batch's heaviest query sets V2's cost.</li>
       <li>SilverTorch's recall ceiling comes from its single global int8 scale. Per-row scales recover half the loss, fp16 nearly all.</li>
       <li>At 30 M with selective real filters, IVF needs a quarter of the index to reach 0.95 recall and is then only 1.3× faster than exact filtered search, against 3–11× at 0.8–3 M.</li>
-      <li>Meta's released path is host-bound. An independent 600-line Triton version is faster end to end in every cell we measure.</li>
+      <li>Meta's released path is host-bound. An independent 600-line Triton version is faster end to end almost everywhere; Meta wins only at 30 M with 128 probes and batch 64.</li>
     </ul>
   </div>
 </section>
@@ -137,13 +138,13 @@ a { color: var(--accent); }
   <table>
     <thead><tr><th>id</th><th>claim (paper)</th><th>what we see</th><th>verdict</th></tr></thead>
     <tbody>
-      <tr><td class="id">C1</td><td>LiNR V1 beats V2 at high pass rate, V2 wins at low</td><td>Holds at batch 16; the crossover moves to lower pass rates as N grows. At batch 1 V2 wins almost everywhere.</td><td><span class="pill good">holds</span></td></tr>
-      <tr><td class="id">C2</td><td>LiNR V3 keeps ~1 % for rescoring: ~10 % faster, near-parity recall</td><td>No gain at low pass rates. Near-parity recall needs one bit per dimension. Large gains only when most items pass.</td><td><span class="pill part">partly</span></td></tr>
+      <tr><td class="id">C1</td><td>LiNR V1 beats V2 at high pass rate, V2 wins at low</td><td>Holds at batch 16 at every N on two machines; the crossover falls from p ≈ 0.27 (0.8–3 M) to 0.12–0.14 (10–30 M). At batch 1 V2 wins up to 3 M at every pass rate.</td><td><span class="pill good">holds</span></td></tr>
+      <tr><td class="id">C2</td><td>LiNR V3 keeps ~1 % for rescoring: ~10 % faster, near-parity recall</td><td>At 10 M and 1.8 % pass, 17 % faster than V2 at recall 0.990. No gain at 0.8 M or at very low pass rates; near-parity recall needs one bit per dimension.</td><td><span class="pill part">partly</span></td></tr>
       <tr><td class="id">C3</td><td>A custom filter kernel is ~100× faster than native masking</td><td>1.4–12× over plain and compiled PyTorch.</td><td><span class="pill bad">does not hold</span></td></tr>
       <tr><td class="id">C4</td><td>Bloom filter: low false positives at 1024 bits, flat latency in width</td><td>Zero false positives from 256 bits on two datasets; latency flat in width. The inverted-index comparison is not testable.</td><td><span class="pill part">partly</span></td></tr>
       <tr><td class="id">C5</td><td>Co-design (probe, then filter) is 1.79–2.15× faster</td><td>2.1× at 30 M with multi-term filters in Meta's code, 2.4× in ours; reversed at 0.8–3 M in Meta's code (0.79–0.86), at most 1.1× in ours below 30 M.</td><td><span class="pill part">holds at scale</span></td></tr>
       <tr><td class="id">C6</td><td>Int8 IVF cannot reach 0.95; selective filters need more probes</td><td>Holds from 0.8 M to 30 M. The cause on YFCC is the global int8 scale.</td><td><span class="pill good">holds</span></td></tr>
-      <tr><td class="id">C7</td><td>Ours (our claim): bit-exact with Meta's int32, faster end to end, Meta's scorer faster alone</td><td>Bit-exact holds. Faster end to end everywhere measured: 1.4–2.1× at d128 (1.4–1.8× on device), 1.1–2.2× at d768.</td><td><span class="pill part">partly</span></td></tr>
+      <tr><td class="id">C7</td><td>Ours (our claim): bit-exact with Meta's int32, faster end to end, Meta's scorer faster alone</td><td>Bit-exact holds. Faster end to end at d128 (1.4–2.1×, fp16 and int32 alike), at d768 (1.1–2.2×) and on real filters (1.5–2.2×). Not at 30 M with 128 probes and batch 64, where Meta is 1.4–1.6× faster.</td><td><span class="pill part">partly</span></td></tr>
     </tbody>
   </table>
   </div>
@@ -176,7 +177,7 @@ a { color: var(--accent); }
   </div>
   <div class="text">
     <p>At a fixed 24 probes IVF scans ever less of a growing index, so its raw speed edge over a full scan widens from about 5× at 0.8 M to about 80× at 30 M. Its recall falls in step, and matching 0.95 recall eats the edge.</p>
-    <p>At 0.8–3 M with broad filters, IVF at 0.95 is 3–11× faster than exact search; at 3 M with a 0.1 % uniform filter the two are already even. At 10 M on YFCC it never gets there. At 30 M with selective real filters it needs a quarter of the index to reach 0.95, and is then only 1.3× faster than exact V2 at batch 16 (2.8× at batch 1); where the filter is a single term it never reaches 0.95.</p>
+    <p>At 0.8–3 M with broad filters, IVF at 0.95 is 3–11× faster than exact search; at 3 M with a 0.1 % uniform filter the two are already even. At 10 M it never gets there, on YFCC (best 0.72) or on PubMed (best 0.94 with a quarter of the index). At 30 M with selective real filters it needs a quarter of the index to reach 0.95, and is then only 1.3× faster than exact V2 at batch 16 (2.8× at batch 1); where the filter is a single term it never reaches 0.95.</p>
   </div>
   <p class="caveat">Each bar compares IVF and exact search timed on the same machine. The 3 M uniform-filter bars at p 0.01 and 0.001 interpolate the probe count; those bars and the 0.8 M exact time come from older kernel versions and will be re-timed on the current ones. The 30 M bar's two arms ran in the same run on current code, one after the other rather than interleaved.</p>
 </section>
@@ -209,45 +210,47 @@ a { color: var(--accent); }
   <h2>V1 vs V2: the crossover moves to lower pass rates as N grows</h2>
   <div class="figs">
     <div class="figure"><div class="ft">V2 time ÷ V1 time, batch 16</div><div class="canvas-box"><canvas id="ch-c1-16" aria-label="V2 over V1 at batch 16"></canvas></div>
-      <div class="fn">Above 1 = the full scan (V1) is faster. Each line is one interleaved run on one machine.</div></div>
+      <div class="fn">Above 1 = the full scan (V1) is faster. Lines: uniform synthetic filters, nine pass rates, each N one interleaved run. Diamonds: real filters at their aggregate pass rate.</div></div>
     <div class="figure"><div class="ft">V2 time ÷ V1 time, batch 1</div><div class="canvas-box"><canvas id="ch-c1-1" aria-label="V2 over V1 at batch 1"></canvas></div>
       <div class="fn">LiNR's own point: 15.5 M items, ~11 % passing, unfused ops, V2 3× slower than V1.</div></div>
   </div>
   <div class="text">
-    <p>With fused kernels V2 wins at low pass rates everywhere, and V1 wins at high ones at batch 16: near p 0.27 at 3 M and near p 0.12–0.14 at 10–30 M. At batch 1 a crossover appears only from 10 M, close to the unfiltered end (p ≈ 0.87–0.96).</p>
-    <p>LiNR's 15.5 M high-pass set (11 % passing, V1 faster) sits right at our 10–30 M batch-16 crossover. Its batch-1 gap (V2 3× slower) is larger than anything we measure; the paper notes its numbers use unfused ops, and fusing narrows V2's penalty. Item count and dimension grow together in our series (d128, d192, d256).</p>
+    <p>With fused kernels V2 wins at low pass rates everywhere, and V1 wins at high ones at batch 16: near p 0.27 at 0.8 and 3 M, near p 0.12–0.14 at 10–30 M. At batch 1 V2 wins at every pass rate up to 3 M; from 10 M a crossover appears close to the unfiltered end (p ≈ 0.87–0.96). LiNR's 15.5 M high-pass set (11 % passing, V1 faster) sits right at our 10–30 M crossover.</p>
+    <p>Real filters cross at lower aggregate pass rates than the synthetic curves predict. Each query has its own pass rate, and at batch 16 a batch costs V2 as much as its heaviest query: evaluating the synthetic curve on the per-query pass rates reproduces single-clause filters within 0.03–0.09. Multi-clause filters add per-item clause work on top.</p>
   </div>
-  <p class="caveat">All three synthetic lines ran on one machine with the same code; each ratio is read inside one interleaved run.</p>
+  <p class="caveat">0.8 and 30 M ran on one machine, 3 and 10 M on another; each ratio is read inside one interleaved run, and 3 M agrees within 0.01 across the two machines. Item count and dimension grow together (d128, d192, d256).</p>
 </section>
 
 <section class="take" id="c7">
   <p class="eyebrow">C7 · official vs ours</p>
-  <h2>Meta's kernels against our Triton: ours is faster in every cell measured</h2>
-  <div class="figs">
+  <h2>Meta's kernels against our Triton: ours is faster almost everywhere; Meta wins at 30 M with many probes and large batches</h2>
+  <div class="figs figs3">
     <div class="figure"><div class="ft">Meta's time ÷ our time, d128 (above 1 = ours faster)</div><div class="canvas-box"><canvas id="ch-c7" aria-label="Official over Triton time ratios at d128"></canvas></div>
-      <div class="fn">arXiv 3 M and goodreads 0.8 M, eager, top-100, interleaved. End to end = wall time per call; device = sum of every GPU kernel. Final adapter; Meta's extension built with optimisation.</div></div>
+      <div class="fn">arXiv 3 M and goodreads 0.8 M, eager, top-100, interleaved. End to end = wall time per call; device = sum of every GPU kernel. Meta fp16; its int32 path gives the same end-to-end ratios.</div></div>
     <div class="figure"><div class="ft">Meta's time ÷ our time, PubMed 10 M d768</div><div class="canvas-box"><canvas id="ch-c7p" aria-label="Official over Triton time ratios at d768"></canvas></div>
-      <div class="fn">Bloom filter (0.02 % pass), 4096 lists, eager end to end, top-100, interleaved. Final adapter; Meta's extension built with optimisation (-O3, build hash recorded in every record); our kernels at v2.9.</div></div>
+      <div class="fn">Bloom filter (0.02 % pass), 4096 lists, eager end to end, top-100, interleaved. Meta fp16.</div></div>
+    <div class="figure"><div class="ft">Meta's time ÷ our time, LAION 30 M d256, 128 probes</div><div class="canvas-box"><canvas id="ch-c7l" aria-label="Official over Triton time ratios at 30 M"></canvas></div>
+      <div class="fn">Bloom filter, co-design path, eager, interleaved; our latest kernel version, Meta fp16.</div></div>
   </div>
   <div class="text">
     <p>At d128 ours is 1.4–2.1× faster end to end and 1.4–1.8× on device time alone; the gap is widest with the bloom filter, where Meta runs its probe list, bloom search and scoring as separate kernels with host work between them, and ours fuses them. Meta's path cannot be captured in a CUDA graph; ours in graph mode is a further 3.9–6.9× faster than Meta's eager.</p>
-    <p>At d768 ours is 2.0–2.2× faster at the paper's 24 probes and 1.7× at 1024 probes with batch 1. At 1024 probes with batch 16 the margin is 7 % (2.44 vs 2.61 ms, one seed): there the top-k over all ten million scores, which both sides run, is now our largest cost.</p>
+    <p>At d768 ours is 2.0–2.2× faster at the paper's 24 probes and 1.1–1.7× at 1024. At 30 M with 128 probes ours wins at batch 4 (2.5–2.7×) and batch 16 (1.4–1.5×), but at batch 64 Meta is 1.4–1.6× faster, even against our CUDA-graph timing. Across the real-filter sweeps ours is 1.5–2.2× faster.</p>
   </div>
-  <p class="caveat">Both panels: final adapter, Meta's optimised build, one seed per cell, timed interleaved in one process. Bit-exactness against Meta's int32 path is checked separately and holds.</p>
+  <p class="caveat">Every panel: final adapter, Meta's optimised build, one seed per cell, timed interleaved in one process. Outside the d128 panel Meta runs its default fp16 scores against our exact int32 scores; bit-exactness is checked against Meta's int32 path and holds.</p>
 </section>
 
 <section class="take" id="v3">
   <p class="eyebrow">C2</p>
-  <h2>V3's bit budget: one bit per dimension, and gains only where most items pass</h2>
+  <h2>V3 pays at scale: 10 M items, moderate pass rates, one bit per dimension</h2>
   <div class="figs">
     <div class="figure"><div class="ft">V3 recall@100, goodreads d128, 1 % kept</div><div class="canvas-box"><canvas id="ch-v3g" aria-label="V3 recall by bits and pass rate"></canvas></div>
       <div class="fn">64 bits (half the dimension) vs 128 (one per dimension).</div></div>
-    <div class="figure"><div class="ft">V3 speed-up over exact V2, PubMed 10 M d768</div><div class="canvas-box"><canvas id="ch-v3p" aria-label="V3 speed-up over V2 by sweep"></canvas></div>
-      <div class="fn">768 bits, 1 % kept, batch 16, CUDA graph. Recall 0.990–0.998 for V3.</div></div>
+    <div class="figure"><div class="ft">V3 speed-up over the cheaper exact scan, PubMed 10 M d768</div><div class="canvas-box"><canvas id="ch-v3p" aria-label="V3 speed-up over the cheaper exact arm by sweep"></canvas></div>
+      <div class="fn">768 bits, 1 % kept, CUDA graph. Exact = V2 at low pass rates, V1 at 99.9 %. Recall 0.990–0.998 for V3. Same machine and code, separate runs.</div></div>
   </div>
   <div class="text">
     <p>Our 1-bit codes give at most one bit per dimension; LiNR used 512 bits on d128. Halving the bits saves 1–3 % of the time and costs up to 26 recall points, and at d768 a third of the bits buys no speed at low pass rates.</p>
-    <p>V3 only pays where the filter keeps most of the corpus: 5.9× on the 99.9 %-pass PubMed sweep, 1.2× at 1.8 %, nothing at 0.02 %.</p>
+    <p>At 10 M with 1.8 % of items passing, V3 is 17 % faster than V2 at batch 16 with recall 0.990, the gain LiNR claims. Where most items pass, the cheaper exact scan is V1: V3 beats it 3.9× at batch 1 but loses at batch 16. At 0.02 % pass and at 0.8 M there is no gain.</p>
   </div>
 </section>
 
@@ -284,7 +287,7 @@ const D = /*DATA*/null;
 const REAL_AT24 = [
   { n: 0.8, r: 0.94, label: "goodreads · genre (33 %)" },
   { n: 3, r: 0.87, label: "arXiv · main category (14 %)" },
-  { n: 10, r: 0.66, label: "PubMed · MeSH (0.02 %)" },
+  { n: 10, r: 0.554, label: "PubMed · MeSH (0.02 %)" },
   { n: 10, r: 0.451, label: "YFCC · tags (1.9 %)" },
   { n: 30, r: D.laion["c0_domain@24"], label: "LAION · domain (0.95 %)" },
 ];
@@ -295,6 +298,7 @@ const MATCH = [
   { k: "3 M · uniform p 0.01", v: 2.60 / 1.96 },
   { k: "3 M · uniform p 0.001", v: 2.57 / 3.3 },
   { k: "10 M · YFCC tags", v: null, best: D.yfcc_real["tags_and@1024"] },
+  { k: "10 M · PubMed MeSH", v: null, best: 0.941 },
   { k: "30 M · LAION tags (4 terms)", v: D.laion_x["linr_v2|tags4"]["16"] / D.laion_x["silvertorch|tags4"]["16"] },
   { k: "30 M · LAION domain", v: null, best: D.laion["c0_domain@4096"] },
 ];
@@ -408,18 +412,19 @@ function draw() {
 
   // C1
   const C = D.c1, names = Object.keys(C);
-  const style = { 0: [S[0], []], 1: [S[3], []], 2: [S[1], []], 3: [S[1], []] };
+  const c1col = [S[2], S[0], S[3], S[1]];
   for (const bs of ["16", "1"]) {
-    const ds = names.map((nm, j) => C[nm][bs] ? Object.assign(line(nm, C[nm][bs].map(r => ({ x: r.p, y: r.ratio, r })), style[j][0], { borderDash: style[j][1] }),
-      j === 3 ? { showLine: false, pointStyle: "rectRot", pointRadius: 7 } : {}) : null).filter(Boolean);
+    const ds = names.map((nm, j) => line(nm, (C[nm][bs] || []).map(r => ({ x: r.p, y: r.ratio, r })), c1col[j]));
+    ds.push(Object.assign(line("real filters", D.c1_real.filter(r => String(r.bs) === bs).map(r => ({ x: r.p, y: r.ratio, r })), css("--ink-2")),
+      { showLine: false, pointStyle: "rectRot", pointRadius: 6 }));
     ds.push(refLine("equal", 0.0008, 1.2, 1));
     if (bs === "1") ds.push({ label: "LiNR paper (15.5 M, unfused)", data: [{ x: 0.11, y: 14.6 / 4.8 }], type: "scatter", pointStyle: "crossRot", pointRadius: 9, borderWidth: 2.5, borderColor: css("--ink"), backgroundColor: css("--ink") });
     charts.push(new Chart(document.getElementById("ch-c1-" + bs), { type: "line", data: { datasets: ds },
       options: base({ scales: {
         x: axis({ title: "pass rate", extra: { type: "logarithmic", min: 0.0008, max: 1.2, ticks: Object.assign(axis().ticks, logTicks(Object.assign([0.001, 0.01, 0.1, 1], { fmt: pct }))) } }),
-        y: axis({ title: "V2 ÷ V1 (log)", extra: { type: "logarithmic", min: 0.2, max: 4, ticks: Object.assign(axis().ticks, logTicks([0.25, 0.5, 1, 2, 3, 4])) } }) },
+        y: axis({ title: "V2 ÷ V1 (log)", extra: { type: "logarithmic", min: 0.15, max: 4.5, ticks: Object.assign(axis().ticks, logTicks([0.25, 0.5, 1, 2, 4])) } }) },
         plugins: Object.assign(base().plugins, { legend: { display: bs === "16", labels: base().plugins.legend.labels },
-          tooltip: Object.assign(base().plugins.tooltip, { callbacks: { title: i => "pass rate " + pct(i[0].parsed.x), label: i => `${i.dataset.label}: ${i.parsed.y.toFixed(2)}` + (i.raw.r ? ` (V1 ${i.raw.r.v1_ms} ms, V2 ${i.raw.r.v2_ms} ms)` : "") } }) }) }) }));
+          tooltip: Object.assign(base().plugins.tooltip, { callbacks: { title: i => (i[0].raw.r && i[0].raw.r.label ? i[0].raw.r.label + " · " : "") + "pass rate " + pct(i[0].parsed.x), label: i => `${i.dataset.label}: ${i.parsed.y.toFixed(2)}` + (i.raw.r ? ` (V1 ${i.raw.r.v1_ms} ms, V2 ${i.raw.r.v2_ms} ms)` : "") } }) }) }) }));
   }
 
   // C7
@@ -439,6 +444,16 @@ function draw() {
       y: axis({ title: "Meta ÷ ours (log)", extra: { type: "logarithmic", min: 0.25, max: 4, ticks: Object.assign(axis().ticks, logTicks([0.25, 0.5, 1, 2, 4])) } }) },
     plugins: Object.assign(base().plugins, { tooltip: Object.assign(base().plugins.tooltip, { filter: i => i.dataset.label !== "equal", callbacks: { label: i => i.parsed.y >= 1 ? `${i.dataset.label}: ours ${i.parsed.y.toFixed(2)}× faster` : `${i.dataset.label}: Meta ${(1 / i.parsed.y).toFixed(2)}× faster` } }) }) }) }));
 
+  // C7 30 M
+  const L = D.c7_30m;
+  charts.push(new Chart(document.getElementById("ch-c7l"), { type: "bar", data: { labels: ["batch 4", "batch 16", "batch 64"], datasets: [
+    { label: "1 term", data: [4, 16, 64].map(b => L["c0_domain|" + b]), backgroundColor: S[2], borderRadius: 4, borderSkipped: "start", categoryPercentage: 0.6, barPercentage: 0.9 },
+    { label: "4 terms", data: [4, 16, 64].map(b => L["tags4|" + b]), backgroundColor: S[0], borderRadius: 4, borderSkipped: "start", categoryPercentage: 0.6, barPercentage: 0.9 },
+    Object.assign(refLine("equal", -0.5, 2.5, 1), { xAxisID: "x2" }),
+  ] }, options: base({ scales: { x: axis({ extra: { grid: { display: false } } }), x2: { type: "linear", min: -0.5, max: 2.5, display: false },
+      y: axis({ title: "Meta ÷ ours (log)", extra: { type: "logarithmic", min: 0.25, max: 4, ticks: Object.assign(axis().ticks, logTicks([0.25, 0.5, 1, 2, 4])) } }) },
+    plugins: Object.assign(base().plugins, { tooltip: Object.assign(base().plugins.tooltip, { filter: i => i.dataset.label !== "equal", callbacks: { label: i => i.parsed.y >= 1 ? `${i.dataset.label}: ours ${i.parsed.y.toFixed(2)}× faster` : `${i.dataset.label}: Meta ${(1 / i.parsed.y).toFixed(2)}× faster` } }) }) }) }));
+
   // V3 goodreads
   const vg = bits => D.v3_goodreads.filter(r => r[0] === bits).map(r => ({ x: r[1], y: r[2] }));
   charts.push(new Chart(document.getElementById("ch-v3g"), { type: "line", data: { datasets: [
@@ -448,14 +463,13 @@ function draw() {
       y: axis({ title: "recall@100", extra: { min: 0.5, max: 1 } }) },
       plugins: Object.assign(base().plugins, { tooltip: Object.assign(base().plugins.tooltip, { callbacks: { title: i => "pass rate " + pct(i[0].parsed.x), label: i => `${i.dataset.label}: ${i.parsed.y.toFixed(3)}` } }) }) }) }));
 
-  // V3 PubMed vs V2 (V2 graph bs 16 from the V-PUBMED filter leg, same code version)
-  const V2MS = { c0_mesh: 13.47, all5: 16.66, c3_journal_reverse: 167.1 };
-  const vp = [["c0_mesh", "MeSH · 0.02 % pass"], ["all5", "5 terms · 1.8 %"], ["c3_journal_reverse", "journal reverse · 99.9 %"]]
-    .map(([s, l]) => ({ l, v: V2MS[s] / D.v3[s + "|0.01"]["768"].ms16, r: D.v3[s + "|0.01"]["768"].recall }));
-  charts.push(new Chart(document.getElementById("ch-v3p"), { type: "bar", data: { labels: vp.map(x => x.l), datasets: [{
-    label: "V2 time ÷ V3 time", data: vp.map(x => x.v), backgroundColor: S[0], borderRadius: 4, borderSkipped: "start", barPercentage: 0.6 }] },
-    options: base({ scales: { y: axis({ title: "speed-up over V2 (log)", extra: { type: "logarithmic", min: 0.8, max: 8, ticks: Object.assign(axis().ticks, logTicks([1, 2, 4, 8])) } }), x: axis({ extra: { grid: { display: false } } }) },
-      plugins: Object.assign(base().plugins, { legend: { display: false }, tooltip: Object.assign(base().plugins.tooltip, { callbacks: { label: i => `${vp[i.dataIndex].v.toFixed(2)}× · V3 recall ${vp[i.dataIndex].r.toFixed(3)}` } }) }) }) }));
+  // V3 PubMed vs the cheaper exact arm
+  const VS = [["c0_mesh", "MeSH · 0.02 %"], ["all5", "5 terms · 1.8 %"], ["c3_journal_reverse", "journal reverse · 99.9 %"]];
+  charts.push(new Chart(document.getElementById("ch-v3p"), { type: "bar", data: { labels: VS.map(v => v[1]), datasets: [1, 16].map((bs, j) => ({
+    label: "batch " + bs, data: VS.map(([sw]) => D.v3_vs_exact[sw + "|" + bs].speedup), backgroundColor: [S[2], S[0]][j], borderRadius: 4, borderSkipped: "start", categoryPercentage: 0.6, barPercentage: 0.9 })).concat([
+    Object.assign(refLine("equal", -0.5, 2.5, 1), { xAxisID: "x2" })]) },
+    options: base({ scales: { y: axis({ title: "exact time ÷ V3 time (log)", extra: { type: "logarithmic", min: 0.5, max: 5, ticks: Object.assign(axis().ticks, logTicks([0.5, 1, 2, 4])) } }), x: axis({ extra: { grid: { display: false } } }), x2: { type: "linear", min: -0.5, max: 2.5, display: false } },
+      plugins: Object.assign(base().plugins, { tooltip: Object.assign(base().plugins.tooltip, { filter: i => i.dataset.label !== "equal", callbacks: { label: i => { const e = D.v3_vs_exact[VS[i.dataIndex][0] + "|" + (i.datasetIndex ? 16 : 1)]; return `${i.dataset.label}: ${e.speedup.toFixed(2)}× vs ${e.exact === "linr_v2" ? "V2" : "V1"}`; } } }) }) }) }));
 
   // FPR
   const fp = ds => D.fpr.filter(r => r[0] === ds && r[1] === 5 && r[3] > 0).map(r => ({ x: r[2], y: r[3] }));

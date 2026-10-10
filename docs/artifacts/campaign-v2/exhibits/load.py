@@ -18,6 +18,7 @@ CV_LABEL = {
     "641ec3b8": "v2.7",
     "78cfbc72": "v2.8",
     "e8958bd2": "v2.9",
+    "a3bec4a5": "v2.10",
     "72e5a90c": "d1",
     "c0e42d1a": "d1-c0e4",
 }
@@ -91,6 +92,14 @@ def official_build(r):
     return f"{b.get('nvcc_append_flags') or 'shipped flags'} so:{(b.get('so_sha256') or '?')[:8]}"
 
 
+def score_path(r):
+    """Meta's score path for an official record: the suite's `score_path`, else Meta's default fp16
+    (`OfficialConfig.score_path`; st-dloop, 2026-10-12); int32 is the parity path. Blank otherwise."""
+    if r["backend"] != "official":
+        return ""
+    return r["params"].get("score_path", "fp16")
+
+
 # ST-WIDE (campaign-v2.9) changed SilverTorch Triton only at B * n_probe >= 512 (per-row probe table, and
 # at d768 the bloom two-pass); narrow configs' opcodes are unchanged. Wide timings before v2.9 are
 # provisional for any claim that leans on them (controller, 2026-10-11).
@@ -104,6 +113,22 @@ def pre_st_wide(r, bs):
         and cv(r) in PRE_ST_WIDE
         and bs * r["params"].get("n_probe", 24) >= 512
     )
+
+
+# ST-WIDE-2 (campaign-v2.10) fused the probe prep and added a sparse two-pass at D_PAD <= 256; bit-exact.
+# Redo ledger: SilverTorch Triton perf before v2.10 where B * n_probe >= 512 (every width), or on sparse
+# batches at D_PAD <= 256 (eager mostly, 0.74-1.00 of v2.9). A record does not say whether its batches were
+# sparse, so filtered cells at D <= 256 are labelled as possibly affected (roadmap redo ledger, 2026-10-10).
+def redo_st_wide2(r, bs):
+    if (
+        r["algo"] != "silvertorch"
+        or r["backend"] != "triton"
+        or cv(r) not in PRE_ST_WIDE + ("v2.9", "d1", "d1-c0e4")
+    ):
+        return ""
+    if bs * r["params"].get("n_probe", 24) >= 512:
+        return "wide"
+    return "sparse?" if r["filter_kind"] != "none" and r["dim"] <= 256 else ""
 
 
 def arm(r):

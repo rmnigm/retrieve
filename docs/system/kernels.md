@@ -1333,6 +1333,44 @@ arXiv batch probes 321 distinct of 384 `(row, cluster)` pairs). Measured
 against a tile-first grid: arXiv none 112 → 91 µs, bloom 126 → 107 µs
 ([artifacts](../artifacts/kernel-opt/predictions.md)).
 
+**Top-k** (`_host.probe_topk`, `_two_level_topk`). `torch.topk` over the
+`[B, width]` buffer costs ∝ `B · width`: four 8-bit radix passes and a
+gather. At C7's PubMed cell (`n_probe` 1024, bs 16) that was 1.7 of 2.7 ms,
+though 99.97 % of the slots are `-inf`. Meta's arm runs the same radix
+select on its raw output: 2–12 % faster at int32 (integer keys), and about
+half the passes on its default fp16 keys, which a bit-exact path cannot
+use.
+
+From `_host.TOPK_MIN_SLOTS` = 2²³ (8.4 M) slots of `[B, width]`, `probe_prep`
+pads the width to whole `TOPK_BLOCK` = 256-slot blocks. Only the grid and
+the tail mask change, so the scorer's `-inf` tail covers the pad and the
+scorer code is unchanged. Where a row has at least `TOPK_MIN_RATIO` = 8
+blocks per top-k slot, the top-k is two-level:
+
+1. each block's max (one `amax` over a `[B, blocks, 256]` view, a single
+   read of the buffer);
+2. `torch.topk` over the maxima, picking each row's k blocks (unsorted);
+3. a gather of those blocks' contiguous slots;
+4. the final `torch.topk` over `k · 256` candidates. The winning slots go
+   to the id epilogue as before, and pad slots are `-inf`, so `-1`.
+
+**Why it is exact.** If an item x is in the row's top-k, its block's max is
+at least x. If that block were not among the k largest maxima, k other
+blocks would each hold an item at least as large as x. So the candidates
+hold the top-k multiset: scores are `torch.equal` to the whole-width
+top-k, and ids differ only within the group tied at the k-th score. Rows
+with fewer than k finite items fill with `-inf` / `-1` as before
+(`test_two_level_topk_ties_and_finite_count_boundary`: four distinct code
+rows, exactly k − 1 / k / k + 1 passing items).
+
+**Rejected: tile maxima from the scorer.** A first cut had every scorer
+program store its tile's max (a `TILE_MAX` constexpr) and gather
+cluster-aligned tiles. The top-k fell as much (arXiv d256 `n_probe` 1024
+bs 64: 2573 → 229 µs), but the extra reduction and store slowed the d256
+one-pass scorer by 37 % (10.3 → 14.1 ms) and changed a narrow cubin's
+SASS. Fixed-size blocks over the finished buffer keep the scorers
+untouched.
+
 **Ids after the top-k** (`common.probe_ids_kernel`, one launch after
 `torch.topk`). The scorer writes scores only. A one-program-per-row
 kernel maps each winning slot back to its sorted position with the same

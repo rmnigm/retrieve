@@ -112,8 +112,8 @@ multi-GPU numbers are comparable at all.
 [decisions](decisions.md#campaign-v2-user-2026-10-08)). While the library
 is still improving, legs run at the current tag (the `default` of
 [campaign.yaml](../evaluation/campaign.yaml), Hub `<tag>/<dataset>-<suite>`;
-its `log` lists every tag, its library code_version and what it changed)
-to see how everything behaves and to make the charts. A new tag does not stop or
+its `log` lists every tag, its library code_version and what it changed;
+now `campaign-v2.10`, library `a3bec4a5`) to see how everything behaves and to make the charts. A new tag does not stop or
 invalidate anything: every record keeps its code_version, and a change adds
 rows to the **redo ledger** below only for the cells it actually changes.
 The final repro pass (F-REPRO) reruns the ledger, or the whole grid at the
@@ -148,6 +148,7 @@ leg runs one library.
 | synth clause perf (V1, V2, SilverTorch exact) on the 10-clause synth tables before v2.7 | CLAUSE-SKIP (inactive clauses were loaded) | clause perf |
 | SilverTorch Triton bloom perf before v2.5 (all widths; 0 to −10 %) | ST-LANE (bit-exact; none / exact SASS unchanged) | Triton bloom perf |
 | V2 Triton perf at `D_PAD` ≤ 256 before v2.5 (incl. C1's crossover; 0.22-0.97 of v2.4) | V2-FILL (bit-exact) | V2 perf |
+| SilverTorch Triton perf before v2.10 where `B · n_probe` ≥ 512 (every width) or on sparse batches at `D_PAD` ≤ 256 (eager mostly; 0.74-1.00 of v2.9) | ST-WIDE-2 (bit-exact; fused probe prep, sparse two-pass) | Triton perf |
 | graph-mode ids of SilverTorch records at `408b1188` | quantize fix | ids (D1-G's id gate) |
 
 ### Stop rules
@@ -307,11 +308,6 @@ co-design.
   bit-identical). New official legs build their own venv with
   `scripts/build_official_o3.sh`; `env.official_build` records the loaded
   extension's sha256 and flags. Remaining: rebuild the shared venvs between legs.
-- [ ] **ST-WIDE-2: the bloom two-pass at `D_PAD` ≤ 256** (ST-WIDE engaged it only at
-  d768; at 30 M d256, n_probe 128, bs 64 Meta -O3 is 1.8-2.0x faster). Bit-exact;
-  keep rule across d128 / d192 / d256 × n_probe × bs incl. narrow cells; narrow
-  SASS unchanged where it does not engage. Then cross-query cluster sharing
-  only if the 30 M gap remains.
 - [ ] **C5-OURS-30M + C1 re-time at v2.7**: codesign-laion30m's triton half
   (our partial vs full at 30 M, beside Meta's, on one box; per-sweep processes
   until H-ARMFREE lands) and arxiv-synth's V1 / V2 cells re-timed (C1's 3 M
@@ -340,9 +336,13 @@ co-design.
      a T2 confidence interval rests on.
   3. **Triton kernel work where ours trails Meta's or the compiler**:
      cross-query cluster sharing in the probe scorer (30 M d256, n_probe 128,
-     bs 64: Meta 1.8-2.0x); the top-k epilogue (ours 1.18 ms vs Meta's 0.79
-     at 30 M); V1 at bs 1 (`torch.compile` 1.77x faster, C3). Each bit-exact
-     plus the keep rule, then a tag.
+     bs 64: Meta 1.8-2.0x); the top-k epilogue (ST-TOPK, `dev/st-topk`: ours
+     1.18 ms vs Meta's 0.79 at 30 M d256 `n_probe` 128 bs 64 in
+     `artifacts/c7-laion30m-interleaved` is Meta on its default fp16 score
+     path; at int32, the bit-exact comparison, the two top-ks are within
+     2-12 % on PubMed / arXiv, and the target is our own two-level top-k);
+     V1 at bs 1 (`torch.compile` 1.77x faster, C3). Each bit-exact plus the
+     keep rule, then a tag.
 - [ ] **F-REPRO: the final pass.** When the library stops changing: tag the
   final version, rerun the redo ledger (or the whole grid if the ledger is
   most of it) at that tag into `campaign-final/`, write *campaign.yaml* for

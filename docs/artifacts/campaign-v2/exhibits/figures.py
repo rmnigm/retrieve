@@ -16,7 +16,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-from load import ALGO, box, cv, load, pass_p, perf, pre_clause_skip, recall  # noqa: E402
+from load import UNIFORM_SYNTH, ALGO, box, cv, load, pass_p, perf, pre_clause_skip, recall  # noqa: E402
 
 from bench import stats  # noqa: E402  (load.py put evaluation/ on sys.path)
 
@@ -213,7 +213,7 @@ def f1x(recs):
     v = [
         r
         for r in recs
-        if r["suite"] == "synth"
+        if r["dataset"] in UNIFORM_SYNTH  # laion30m-synth runs as its own suite
         and r["status"] == "ok"
         and r["backend"] == "triton"
         and r["algo"] in ("linr_v1_filter_mask", "linr_v2")
@@ -263,7 +263,7 @@ def f1x(recs):
                     if ci:
                         ratio_pts.append((p, *ci))
                         out.append(
-                            (ds, n, c, FIX_A.get(c, c), fk, bs, p, *ci, len(a), stats.differs(ci))
+                            (ds, n, c, bx, FIX_A.get(c, c), fk, bs, p, *ci, len(a), stats.differs(ci))
                         )
                 if ratio_pts:
                     ax = axes[i][2]
@@ -309,6 +309,7 @@ def f1x(recs):
             "dataset",
             "n_items",
             "code_version",
+            "box",
             "v2_state",
             "filter_kind",
             "bs",
