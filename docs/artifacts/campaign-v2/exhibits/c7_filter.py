@@ -12,7 +12,7 @@ import csv
 import sys
 from pathlib import Path
 
-from load import box, cv, load, official_build, recall, score_path
+from load import box, cv, load, official_build, recall, redo_st_wide2, score_path
 from bench import stats
 
 
@@ -92,6 +92,7 @@ def main():
                         "triton_graph_ms": ""
                         if not eg or eg.get("median_ms") is None
                         else round(eg["median_ms"], 4),
+                        "triton_redo": redo_st_wide2(t, eo["bs"]),
                         "recall_official": recall(o),
                         "recall_triton": recall(t),
                         "unstable": bool(eo.get("unstable")) + bool(et.get("unstable")),
