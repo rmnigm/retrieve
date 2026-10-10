@@ -1561,13 +1561,123 @@
   }
  },
  "c7_30m": {
-  "c0_domain|4": 2.5,
-  "c0_domain|16": 1.475,
-  "c0_domain|64": 0.735,
-  "tags4|4": 2.719,
-  "tags4|16": 1.378,
-  "tags4|64": 0.637
+  "c0_domain|1|fp16": 2.476,
+  "c0_domain|1|int32": 2.485,
+  "c0_domain|16|fp16": 1.794,
+  "c0_domain|16|int32": 1.82,
+  "c0_domain|64|fp16": 0.942,
+  "c0_domain|64|int32": 1.104,
+  "tags4|1|fp16": 2.766,
+  "tags4|1|int32": 2.782,
+  "tags4|16|fp16": 1.663,
+  "tags4|16|int32": 1.685,
+  "tags4|64|fp16": 0.796,
+  "tags4|64|int32": 0.937
  },
+ "c3_real": [
+  {
+   "dataset": "arxiv",
+   "sweep": "all4",
+   "p": 0.0094,
+   "bs1": 0.553,
+   "bs16": 0.851
+  },
+  {
+   "dataset": "arxiv",
+   "sweep": "c0_maincat",
+   "p": 0.1363,
+   "bs1": 0.641,
+   "bs16": 1.763
+  },
+  {
+   "dataset": "arxiv",
+   "sweep": "c3_nversions",
+   "p": 0.4444,
+   "bs1": 0.64,
+   "bs16": 1.763
+  },
+  {
+   "dataset": "goodreads",
+   "sweep": "all4",
+   "p": 0.0409,
+   "bs1": 0.538,
+   "bs16": 0.865
+  },
+  {
+   "dataset": "goodreads",
+   "sweep": "c0_genre",
+   "p": 0.3307,
+   "bs1": 0.601,
+   "bs16": 1.646
+  },
+  {
+   "dataset": "goodreads",
+   "sweep": "c1_lang_reverse",
+   "p": 0.6205,
+   "bs1": 0.6,
+   "bs16": 1.645
+  },
+  {
+   "dataset": "pubmed",
+   "sweep": "all5",
+   "p": 0.0181,
+   "bs1": 0.964,
+   "bs16": 1.285
+  },
+  {
+   "dataset": "pubmed",
+   "sweep": "c0_mesh",
+   "p": 0.0002,
+   "bs1": 1.023,
+   "bs16": 1.802
+  },
+  {
+   "dataset": "pubmed",
+   "sweep": "c3_journal_reverse",
+   "p": 0.9993,
+   "bs1": 1.023,
+   "bs16": 1.799
+  },
+  {
+   "dataset": "yfcc10m",
+   "sweep": "tags_and",
+   "p": 0.0185,
+   "bs1": 1.044,
+   "bs16": 0.949
+  }
+ ],
+ "ceiling": [
+  {
+   "label": "goodreads 0.8 M \u00b7 genre",
+   "shipped": 0.9846,
+   "per_row": 0.9914,
+   "fp16": 0.9996
+  },
+  {
+   "label": "arXiv 3 M \u00b7 main category",
+   "shipped": 0.9549,
+   "per_row": 0.9688,
+   "fp16": 0.998
+  },
+  {
+   "label": "YFCC 10 M \u00b7 unfiltered",
+   "shipped": 0.5438,
+   "per_row": 0.753,
+   "fp16": 0.9724
+  },
+  {
+   "label": "PubMed 10 M \u00b7 journal reverse",
+   "shipped": 0.9219,
+   "per_row": 0.9381,
+   "fp16": 0.9955
+  },
+  {
+   "label": "PubMed 10 M \u00b7 MeSH (0.02 %)",
+   "shipped": 0.946,
+   "per_row": 0.9531,
+   "fp16": 0.9757
+  }
+ ],
  "v3": {
   "c0_mesh|0.01": {
    "256": {

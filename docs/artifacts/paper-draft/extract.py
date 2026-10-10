@@ -182,13 +182,37 @@ if c7p:
 else:
     data["c7_d768"] = {24: {1: round(0.822 / 0.413, 3), 16: round(1.155 / 0.529, 3)}, 1024: {1: round(1.056 / 0.622, 3), 16: round(2.614 / 2.442, 3)}}
 
-# C7 at 30 M LAION d256, n_probe 128, bloom partial path: ours at v2.10 (ST-WIDE-2) vs Meta fp16 -O3, eager (repo table of ST-WIDE-2's gate).
+# C7 at 30 M LAION d256, n_probe 128, bloom partial path: ours with ST-TOPK (v2.11 library) vs Meta -O3 fp16 and int32, eager,
+# one process (repo table of ST-TOPK's 30 M gate). Value = Meta time / our time.
 c7l = {}
-for line in (Path(__file__).parents[1] / "campaign-v2.9/st-wide-2-30m/st-wide-2-30m.md").read_text().splitlines():
+for line in (Path(__file__).parents[1] / "campaign-v2.10/st-topk-30m/st-topk-30m.md").read_text().splitlines():
     c = [x.strip() for x in line.strip("|").split("|")]
-    if len(c) > 7 and c[2] == "eager" and c[1].isdigit():
-        c7l[f"{c[0]}|{c[1]}"] = round(float(c[5]) / float(c[4]), 3)
+    if len(c) > 11 and c[2] == "eager" and c[1].isdigit():
+        c7l[f"{c[0]}|{c[1]}|fp16"] = round(float(c[8]) / float(c[4]), 3)
+        c7l[f"{c[0]}|{c[1]}|int32"] = round(float(c[10]) / float(c[4]), 3)
 data["c7_30m"] = c7l
+
+# C3 on real filters (v2.10): torch.compile(max-autotune) V1 / our Triton V1, eager over eager, k 100.
+c3 = defaultdict(dict)
+for ds in ("goodreads", "arxiv", "yfcc10m", "pubmed"):
+    for r in recs(f"campaign-v2.10/{ds}-c3-real"):
+        if r["status"] == "ok":
+            c3[(ds, r["sweep"])]["compiled" if r["backend"] == "torch" else "triton"] = r
+data["c3_real"] = [{"dataset": ds, "sweep": sw, "p": round(d["triton"]["pass_rate"], 4),
+                    "bs1": round(perf(d["compiled"], 1, "eager") / perf(d["triton"], 1, "eager"), 3),
+                    "bs16": round(perf(d["compiled"], 16, "eager") / perf(d["triton"], 16, "eager"), 3)}
+                   for (ds, sw), d in sorted(c3.items()) if len(d) == 2]
+
+# C6 ceilings: recall at each sweep's best tuned point, by item-score precision on the same probes.
+ceil = []
+for label, f in (("goodreads 0.8 M · genre", "artifacts/ceiling-int8-gr-ax/ceiling-goodreads-c0_genre.json"),
+                 ("arXiv 3 M · main category", "artifacts/ceiling-int8-gr-ax/ceiling-arxiv-c0_maincat.json"),
+                 ("YFCC 10 M · unfiltered", "artifacts/yfcc-int8/int8-p1.json"),
+                 ("PubMed 10 M · journal reverse", "artifacts/ceiling-int8-pubmed/ceiling-pubmed-c3_journal_reverse.json"),
+                 ("PubMed 10 M · MeSH (0.02 %)", "artifacts/ceiling-int8-pubmed/ceiling-pubmed-c0_mesh.json")):
+    r = json.load(open(HUB / f))["recall_oracle@100"]
+    ceil.append({"label": label, **{k: round(r[k], 4) for k in ("shipped", "per_row", "fp16")}})
+data["ceiling"] = ceil
 
 # V3 bits on PubMed d768.
 v3 = defaultdict(dict)

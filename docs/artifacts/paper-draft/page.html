@@ -98,7 +98,7 @@ a { color: var(--accent); }
   <p class="eyebrow">Reproducibility study · LiNR (CIKM '24) and SilverTorch (SIGIR '26)</p>
   <h1>Filtered GPU retrieval, reproduced: what holds, what breaks, what is new</h1>
   <p class="lede">We reimplemented LinkedIn's LiNR and Meta's SilverTorch in Triton from the papers' text, ran Meta's released kernels next to ours, and tested every claim we could on five public datasets from 0.8 M to 30 M items on one A100.</p>
-  <p class="meta">These are exploration numbers. A final pass at one frozen code version reruns every cell before anything is cited. Every timing comparison here is read inside one machine and, where it is a ratio, inside one interleaved run. Recall is at top-100 against an exact filtered fp32 oracle. Our IVF timings come from the version before the latest kernel update, which is bit-exact and is being re-timed; it is expected to speed up our eager timings and leave CUDA-graph timings about the same. Meta's numbers use its default fp16 score path unless marked int32.</p>
+  <p class="meta">These are exploration numbers. A final pass at one frozen code version reruns every cell before anything is cited. Every timing comparison here is read inside one machine and, where it is a ratio, inside one interleaved run. Recall is at top-100 against an exact filtered fp32 oracle. Most of our IVF timings come from an earlier kernel version; two later versions are bit-exact and are being re-timed. They are expected to make our batched and eager timings faster, not slower. Meta's numbers use its default fp16 score path unless marked int32.</p>
 </header>
 
 <section class="story" aria-label="Summary">
@@ -108,13 +108,13 @@ a { color: var(--accent); }
       <li>LiNR's V1/V2 trade-off: the full scan wins at high pass rates, the gather-first scan at low ones.</li>
       <li>SilverTorch's int8 IVF tops out below 0.95 recall, and unaligned selective filters need more probes.</li>
       <li>Co-design's ~1.8× speed-up, at the paper's own scale and filter complexity, in Meta's code and in ours.</li>
-      <li>Our Triton kernels match Meta's int32 path bit for bit.</li>
+      <li>Our Triton kernels match Meta's int32 path bit for bit in the scorer, and end to end with clause filters.</li>
     </ul>
   </div>
   <div>
     <h3><span class="dot" style="background:var(--bad)"></span>Does not reproduce</h3>
     <ul>
-      <li>The ~100× gap between a custom filter kernel and native PyTorch masking. We see 1.4–12×.</li>
+      <li>The ~100× gap between a custom filter kernel and native PyTorch masking. We see 1.4–12× over plain PyTorch, and torch.compile beats our kernel at batch 1 below 10 M items.</li>
       <li>V3's "keep 1 %, gain ~10 %" below 10 M items or at very low pass rates. At 10 M and a 1.8 % pass rate it does hold.</li>
       <li>Co-design below a few million items: Meta's code is 14–21 % slower with it.</li>
       <li>The bloom false-positive figures: the paper's two numbers disagree, and ours are far lower.</li>
@@ -124,9 +124,9 @@ a { color: var(--accent); }
     <h3><span class="dot" style="background:var(--accent)"></span>New</h3>
     <ul>
       <li>IVF recall follows each query's <em>local</em> pass rate, not the global one. On real filters the per-query spread also moves LiNR's V1/V2 crossover: at batch 16 the batch's heaviest query sets V2's cost.</li>
-      <li>SilverTorch's recall ceiling comes from its single global int8 scale. Per-row scales recover half the loss, fp16 nearly all.</li>
+      <li>SilverTorch's recall ceiling comes from its single global int8 scale, on every bench: with fp16 item scores on the same probes, recall reaches 0.97–1.00 wherever the filter is broad.</li>
       <li>At 30 M with selective real filters, IVF needs a quarter of the index to reach 0.95 recall and is then only 1.3× faster than exact filtered search, against 3–11× at 0.8–3 M.</li>
-      <li>Meta's released path is host-bound. An independent 600-line Triton version is faster end to end almost everywhere; Meta wins only at 30 M with 128 probes and batch 64.</li>
+      <li>Meta's released path is host-bound. An independent 600-line Triton version is faster end to end almost everywhere; at 30 M with 128 probes and batch 64 Meta's fp16 path is 6–26 % faster, and its int32 path is even with ours.</li>
     </ul>
   </div>
 </section>
@@ -140,11 +140,11 @@ a { color: var(--accent); }
     <tbody>
       <tr><td class="id">C1</td><td>LiNR V1 beats V2 at high pass rate, V2 wins at low</td><td>Holds at batch 16 at every N on two machines; the crossover falls from p ≈ 0.27 (0.8–3 M) to 0.12–0.14 (10–30 M). At batch 1 V2 wins up to 3 M at every pass rate.</td><td><span class="pill good">holds</span></td></tr>
       <tr><td class="id">C2</td><td>LiNR V3 keeps ~1 % for rescoring: ~10 % faster, near-parity recall</td><td>At 10 M and 1.8 % pass, 17 % faster than V2 at recall 0.990. No gain at 0.8 M or at very low pass rates; near-parity recall needs one bit per dimension.</td><td><span class="pill part">partly</span></td></tr>
-      <tr><td class="id">C3</td><td>A custom filter kernel is ~100× faster than native masking</td><td>1.4–12× over plain and compiled PyTorch.</td><td><span class="pill bad">does not hold</span></td></tr>
+      <tr><td class="id">C3</td><td>A custom filter kernel is ~100× faster than native masking</td><td>1.4–12× over plain PyTorch. Against torch.compile ours wins 1.6–1.8× at batch 16 on most filters, but loses at batch 1 below 10 M and on selective conjunctions at batch 16.</td><td><span class="pill bad">does not hold</span></td></tr>
       <tr><td class="id">C4</td><td>Bloom filter: low false positives at 1024 bits, flat latency in width</td><td>Zero false positives from 256 bits on two datasets; latency flat in width. The inverted-index comparison is not testable.</td><td><span class="pill part">partly</span></td></tr>
       <tr><td class="id">C5</td><td>Co-design (probe, then filter) is 1.79–2.15× faster</td><td>2.1× at 30 M with multi-term filters in Meta's code, 2.4× in ours; reversed at 0.8–3 M in Meta's code (0.79–0.86), at most 1.1× in ours below 30 M.</td><td><span class="pill part">holds at scale</span></td></tr>
-      <tr><td class="id">C6</td><td>Int8 IVF cannot reach 0.95; selective filters need more probes</td><td>Holds from 0.8 M to 30 M. The cause on YFCC is the global int8 scale.</td><td><span class="pill good">holds</span></td></tr>
-      <tr><td class="id">C7</td><td>Ours (our claim): bit-exact with Meta's int32, faster end to end, Meta's scorer faster alone</td><td>Bit-exact holds. Faster end to end at d128 (1.4–2.1×, fp16 and int32 alike), at d768 (1.1–2.2×) and on real filters (1.5–2.2×). Not at 30 M with 128 probes and batch 64, where Meta is 1.4–1.6× faster.</td><td><span class="pill part">partly</span></td></tr>
+      <tr><td class="id">C6</td><td>Int8 IVF cannot reach 0.95; selective filters need more probes</td><td>Holds from 0.8 M to 30 M: 0.99 is reached nowhere, 0.95 never on PubMed or YFCC. The ceiling is the global int8 scale, plus the scan cap for very selective filters.</td><td><span class="pill good">holds</span></td></tr>
+      <tr><td class="id">C7</td><td>Ours (our claim): bit-exact with Meta's int32, faster end to end, Meta's scorer faster alone</td><td>Bit-exact in the scorer and end to end with clause filters; with bloom filters the two blooms admit different false positives by design. Faster end to end almost everywhere; at 30 M, 128 probes, batch 64 Meta fp16 is 6–26 % faster, Meta int32 even.</td><td><span class="pill part">partly</span></td></tr>
     </tbody>
   </table>
   </div>
@@ -177,18 +177,19 @@ a { color: var(--accent); }
   </div>
   <div class="text">
     <p>At a fixed 24 probes IVF scans ever less of a growing index, so its raw speed edge over a full scan widens from about 5× at 0.8 M to about 80× at 30 M. Its recall falls in step, and matching 0.95 recall eats the edge.</p>
-    <p>At 0.8–3 M with broad filters, IVF at 0.95 is 3–11× faster than exact search; at 3 M with a 0.1 % uniform filter the two are already even. At 10 M it never gets there, on YFCC (best 0.72) or on PubMed (best 0.94 with a quarter of the index). At 30 M with selective real filters it needs a quarter of the index to reach 0.95, and is then only 1.3× faster than exact V2 at batch 16 (2.8× at batch 1); where the filter is a single term it never reaches 0.95.</p>
+    <p>At 0.8–3 M with broad filters, IVF at 0.95 is 3–11× faster than exact search; at 3 M with a 0.1 % uniform filter the two are already even. At 10 M it never gets there, on YFCC (best 0.72) or on PubMed (best 0.946 with a quarter of the index). At 30 M with selective real filters it needs a quarter of the index to reach 0.95, and is then only 1.3× faster than exact V2 at batch 16 (2.8× at batch 1); where the filter is a single term it never reaches 0.95. Over the full tuning grid (256 to 65,536 lists, up to a quarter of the index scanned), 0.99 is reached on no bench.</p>
   </div>
   <p class="caveat">Each bar compares IVF and exact search timed on the same machine. The 3 M uniform-filter bars at p 0.01 and 0.001 interpolate the probe count; those bars and the 0.8 M exact time come from older kernel versions and will be re-timed on the current ones. The 30 M bar's two arms ran in the same run on current code, one after the other rather than interleaved.</p>
 </section>
 
 <section class="take" id="int8">
   <p class="eyebrow">Mechanism · C6</p>
-  <h2>The YFCC ceiling is SilverTorch's single global int8 scale</h2>
-  <div class="figure"><div class="ft">Recall@100 on YFCC 10 M at the same 256 probes, by item precision</div><div class="canvas-box"><canvas id="ch-int8" aria-label="Recall by quantization scheme"></canvas></div>
-    <div class="fn">Same index, same probed lists; only the item score precision changes. Uniform synthetic filters.</div></div>
+  <h2>The recall ceiling is SilverTorch's single global int8 scale, on every bench</h2>
+  <div class="figure"><div class="ft">Recall@100 at each bench's best tuned point, by item precision on the same probes</div><div class="canvas-box"><canvas id="ch-int8" aria-label="Recall by quantization scheme on five benches"></canvas></div>
+    <div class="fn">Same index, same probed lists; only the item score precision changes. YFCC at 256 probes; the others at their best point of the tuning grid (up to a quarter of the index).</div></div>
   <div class="text">
-    <p>On YFCC's CLIP embeddings, more probes stop helping early: recall sits near 0.55–0.76 whatever the probe count. Holding the probes fixed and changing only item precision moves it: per-row int8 scales recover about half the gap and fp16 nearly all of it.</p>
+    <p>Holding the probed lists fixed and changing only the item score precision moves recall to 0.97–1.00 with fp16 wherever the filter is broad, on all four benches. Per-row int8 scales recover a third to half of the gap. The effect grows with the embedding's score resolution: a few points at d128, nearly half the recall on YFCC's CLIP embeddings.</p>
+    <p>Only very selective filters keep a residual from the scan cap: on PubMed's 0.02 % MeSH filter fp16 reaches 0.976 with a quarter of the index probed.</p>
     <p>SilverTorch states the ceiling but not its cause. Its released kernel already carries an unused per-embedding scale, which is the fix.</p>
   </div>
 </section>
@@ -218,25 +219,36 @@ a { color: var(--accent); }
     <p>With fused kernels V2 wins at low pass rates everywhere, and V1 wins at high ones at batch 16: near p 0.27 at 0.8 and 3 M, near p 0.12–0.14 at 10–30 M. At batch 1 V2 wins at every pass rate up to 3 M; from 10 M a crossover appears close to the unfiltered end (p ≈ 0.87–0.96). LiNR's 15.5 M high-pass set (11 % passing, V1 faster) sits right at our 10–30 M crossover.</p>
     <p>Real filters cross at lower aggregate pass rates than the synthetic curves predict. Each query has its own pass rate, and at batch 16 a batch costs V2 as much as its heaviest query: evaluating the synthetic curve on the per-query pass rates reproduces single-clause filters within 0.03–0.09. Multi-clause filters add per-item clause work on top.</p>
   </div>
-  <p class="caveat">0.8 and 30 M ran on one machine, 3 and 10 M on another; each ratio is read inside one interleaved run, and 3 M agrees within 0.01 across the two machines. Item count and dimension grow together (d128, d192, d256).</p>
+  <p class="caveat">0.8 and 30 M ran on one machine, 3 and 10 M on another; each ratio is read inside one interleaved run, and 3 M agrees within 0.01 across the two machines. At 10 M three seeds put the batch-16 crossover at p 0.117 (95 % CI 0.114–0.119). Item count and dimension grow together (d128, d192, d256).</p>
+</section>
+
+<section class="take" id="c3">
+  <p class="eyebrow">C3</p>
+  <h2>A custom filter kernel against compiled PyTorch: it wins batched, not single-query</h2>
+  <div class="figure"><div class="ft">torch.compile time ÷ our Triton time for LiNR V1, real filters (above 1 = ours faster)</div><div class="canvas-box"><canvas id="ch-c3" aria-label="Compiled torch over Triton V1 time on real filters"></canvas></div>
+    <div class="fn">max-autotune compile of the same V1 ops, eager over eager (the compiled arm already replays CUDA graphs), top-100; recall equal in every cell.</div></div>
+  <div class="text">
+    <p>LiNR reports a ~100× gap between its custom filter kernel and native masking. Against plain PyTorch ours is 1.4–12× faster. Against torch.compile, which fuses the mask into one masked matrix-vector product, ours wins 1.6–1.8× at batch 16 on most filters, but loses at batch 1 below 10 M items (compiled runs in 0.54–0.64 of our time) and on selective multi-term filters at batch 16; at 10 M the two tie at batch 1.</p>
+    <p>A single-query kernel for our V1 now in its gate runs in 0.57–0.77 of the current time at batch 1, which would close most of that gap.</p>
+  </div>
 </section>
 
 <section class="take" id="c7">
   <p class="eyebrow">C7 · official vs ours</p>
-  <h2>Meta's kernels against our Triton: ours is faster almost everywhere; Meta wins at 30 M with many probes and large batches</h2>
+  <h2>Meta's kernels against our Triton: ours is faster almost everywhere; at 30 M with large batches Meta's fp16 path leads</h2>
   <div class="figs figs3">
     <div class="figure"><div class="ft">Meta's time ÷ our time, d128 (above 1 = ours faster)</div><div class="canvas-box"><canvas id="ch-c7" aria-label="Official over Triton time ratios at d128"></canvas></div>
       <div class="fn">arXiv 3 M and goodreads 0.8 M, eager, top-100, interleaved. End to end = wall time per call; device = sum of every GPU kernel. Meta fp16; its int32 path gives the same end-to-end ratios.</div></div>
     <div class="figure"><div class="ft">Meta's time ÷ our time, PubMed 10 M d768</div><div class="canvas-box"><canvas id="ch-c7p" aria-label="Official over Triton time ratios at d768"></canvas></div>
       <div class="fn">Bloom filter (0.02 % pass), 4096 lists, eager end to end, top-100, interleaved. Meta fp16.</div></div>
     <div class="figure"><div class="ft">Meta's time ÷ our time, LAION 30 M d256, 128 probes</div><div class="canvas-box"><canvas id="ch-c7l" aria-label="Official over Triton time ratios at 30 M"></canvas></div>
-      <div class="fn">Bloom filter, co-design path, eager, interleaved; our latest kernel version, Meta fp16.</div></div>
+      <div class="fn">Bloom filter, co-design path, eager, interleaved; our latest kernel version against Meta's fp16 (solid) and int32 (light) score paths.</div></div>
   </div>
   <div class="text">
     <p>At d128 ours is 1.4–2.1× faster end to end and 1.4–1.8× on device time alone; the gap is widest with the bloom filter, where Meta runs its probe list, bloom search and scoring as separate kernels with host work between them, and ours fuses them. Meta's path cannot be captured in a CUDA graph; ours in graph mode is a further 3.9–6.9× faster than Meta's eager.</p>
-    <p>At d768 ours is 2.0–2.2× faster at the paper's 24 probes and 1.1–1.7× at 1024. At 30 M with 128 probes ours wins at batch 4 (2.5–2.7×) and batch 16 (1.4–1.5×), but at batch 64 Meta is 1.4–1.6× faster, even against our CUDA-graph timing. Across the real-filter sweeps ours is 1.5–2.2× faster.</p>
+    <p>At d768 ours is 2.0–2.2× faster at the paper's 24 probes and 1.1–1.7× at 1024. At 30 M with 128 probes ours wins at batch 1 (2.5–2.8×) and batch 16 (1.7–1.8×); at batch 64 Meta's fp16 path is 6–26 % faster, and against its int32 path, which scores exactly like ours, the two are even (0.94–1.10). Across the real-filter sweeps ours is 1.5–2.2× faster.</p>
   </div>
-  <p class="caveat">Every panel: final adapter, Meta's optimised build, one seed per cell, timed interleaved in one process. Outside the d128 panel Meta runs its default fp16 scores against our exact int32 scores; bit-exactness is checked against Meta's int32 path and holds.</p>
+  <p class="caveat">Every panel: final adapter, Meta's optimised build, one seed per cell, timed interleaved in one process. Outside the d128 panel and the light 30 M bars, Meta runs its default fp16 scores against our exact int32 scores. Bit-exactness against Meta's int32 path holds for the scorer and end to end with clause filters. With bloom filters the two sides build different blooms and so admit different false positives: at 30 M, Meta's bundle bloom displaced 20 true top-100 items over 283 of 9,722 queries.</p>
 </section>
 
 <section class="take" id="v3">
@@ -261,7 +273,7 @@ a { color: var(--accent); }
     <div class="fn">Our transposed bloom index on real attributes. A missing point means no false positive among all candidates checked. Grey marks: the paper's two figures at 1024 bits, read as percent.</div></div>
   <div class="text">
     <p>On arXiv and goodreads no false positive survives from 128 bits with 5 hashes; on PubMed, whose MeSH attributes are far richer, the rate drops by more than a decade per doubling and reaches 6×10⁻⁸ at 1024 bits. Latency is flat in width, as the paper says.</p>
-    <p>SilverTorch reports 0.067 at 1024 bits in one section and 0.00173 % in another; neither can be pinned without the authors.</p>
+    <p>SilverTorch reports 0.067 at 1024 bits in one section and 0.00173 % in another; neither can be pinned without the authors. Meta's released bloom is built per 2048-document bundle and admits false positives that ours rejects.</p>
   </div>
 </section>
 
@@ -298,7 +310,7 @@ const MATCH = [
   { k: "3 M · uniform p 0.01", v: 2.60 / 1.96 },
   { k: "3 M · uniform p 0.001", v: 2.57 / 3.3 },
   { k: "10 M · YFCC tags", v: null, best: D.yfcc_real["tags_and@1024"] },
-  { k: "10 M · PubMed MeSH", v: null, best: 0.941 },
+  { k: "10 M · PubMed MeSH", v: null, best: 0.946 },
   { k: "30 M · LAION tags (4 terms)", v: D.laion_x["linr_v2|tags4"]["16"] / D.laion_x["silvertorch|tags4"]["16"] },
   { k: "30 M · LAION domain", v: null, best: D.laion["c0_domain@4096"] },
 ];
@@ -376,13 +388,14 @@ function draw() {
       scales: { x: axis({ title: "exact time ÷ IVF time (log)", extra: { type: "logarithmic", min: 0.12, max: 16, ticks: Object.assign(axis().ticks, logTicks([0.25, 0.5, 1, 2, 4, 8, 16])) } }),
         y: axis({ extra: { grid: { display: false }, ticks: Object.assign(axis().ticks, { callback(v) { const m = MATCH[v]; return m.v == null ? m.k + " · not reached" : m.k; } }) } }) } }) }));
 
-  // int8
-  const I = D.int8;
+  // int8 ceilings
+  const CE = D.ceiling;
   const keys = [["shipped", "shipped (global int8)"], ["per_row", "per-row int8"], ["fp16", "fp16"]];
-  charts.push(new Chart(document.getElementById("ch-int8"), { type: "bar", data: { labels: ["unfiltered (p 1)", "1 % pass (p 0.01)"], datasets: keys.map(([k, l], j) => ({
-    label: l, data: [I.p1[k], I.p001[k]], backgroundColor: [S[1], S[3], S[0]][j], borderRadius: 4, borderSkipped: "start", categoryPercentage: 0.6, barPercentage: 0.9 })) },
-    options: base({ scales: { y: axis({ title: "recall@100", extra: { min: 0, max: 1 } }), x: axis({ extra: { grid: { display: false } } }) },
-      plugins: Object.assign(base().plugins, { tooltip: Object.assign(base().plugins.tooltip, { callbacks: { label: i => `${i.dataset.label}: ${i.parsed.y.toFixed(3)}` } }) }) }) }));
+  charts.push(new Chart(document.getElementById("ch-int8"), { type: "bar", data: { labels: CE.map(c => c.label), datasets: keys.map(([k, l], j) => ({
+    label: l, data: CE.map(c => c[k]), backgroundColor: [S[1], S[3], S[0]][j], borderRadius: 4, borderSkipped: "start", categoryPercentage: 0.7, barPercentage: 0.9 })).concat([
+    Object.assign(refLine("recall 0.95", -0.5, CE.length - 0.5, 0.95), { xAxisID: "x2" })]) },
+    options: base({ scales: { y: axis({ title: "recall@100", extra: { min: 0.5, max: 1 } }), x: axis({ extra: { grid: { display: false }, ticks: Object.assign(axis().ticks, { maxRotation: 30, minRotation: 0 }) } }), x2: { type: "linear", min: -0.5, max: CE.length - 0.5, display: false } },
+      plugins: Object.assign(base().plugins, { tooltip: Object.assign(base().plugins.tooltip, { filter: i => i.dataset.label !== "recall 0.95", callbacks: { label: i => `${i.dataset.label}: ${i.parsed.y.toFixed(3)}` } }) }) }) }));
 
   // Co-design
   const groups = [
@@ -427,6 +440,16 @@ function draw() {
           tooltip: Object.assign(base().plugins.tooltip, { callbacks: { title: i => (i[0].raw.r && i[0].raw.r.label ? i[0].raw.r.label + " · " : "") + "pass rate " + pct(i[0].parsed.x), label: i => `${i.dataset.label}: ${i.parsed.y.toFixed(2)}` + (i.raw.r ? ` (V1 ${i.raw.r.v1_ms} ms, V2 ${i.raw.r.v2_ms} ms)` : "") } }) }) }) }));
   }
 
+  // C3 real filters
+  const C3R = D.c3_real, c3lab = r => ({ goodreads: "goodreads", arxiv: "arXiv", yfcc10m: "YFCC", pubmed: "PubMed" }[r.dataset] + " · " + r.sweep.replace(/_/g, " "));
+  charts.push(new Chart(document.getElementById("ch-c3"), { type: "bar", data: { labels: C3R.map(c3lab), datasets: [
+    { label: "batch 1", data: C3R.map(r => r.bs1), backgroundColor: S[2], borderRadius: 4, borderSkipped: "start", categoryPercentage: 0.7, barPercentage: 0.9 },
+    { label: "batch 16", data: C3R.map(r => r.bs16), backgroundColor: S[0], borderRadius: 4, borderSkipped: "start", categoryPercentage: 0.7, barPercentage: 0.9 },
+    Object.assign(refLine("equal", -0.5, C3R.length - 0.5, 1), { xAxisID: "x2" }),
+  ] }, options: base({ scales: { x: axis({ extra: { grid: { display: false }, ticks: Object.assign(axis().ticks, { maxRotation: 40, minRotation: 0 }) } }), x2: { type: "linear", min: -0.5, max: C3R.length - 0.5, display: false },
+      y: axis({ title: "compiled ÷ ours (log)", extra: { type: "logarithmic", min: 0.4, max: 2.5, ticks: Object.assign(axis().ticks, logTicks([0.5, 1, 2])) } }) },
+    plugins: Object.assign(base().plugins, { tooltip: Object.assign(base().plugins.tooltip, { filter: i => i.dataset.label !== "equal", callbacks: { label: i => i.parsed.y >= 1 ? `${i.dataset.label}: ours ${i.parsed.y.toFixed(2)}× faster` : `${i.dataset.label}: compiled ${(1 / i.parsed.y).toFixed(2)}× faster` } }) }) }) }));
+
   // C7
   const c7 = D.c7;
   charts.push(new Chart(document.getElementById("ch-c7"), { type: "bar", data: { labels: c7.map(r => r.cell.replace("arxiv", "arXiv").replace("none", "no filter")), datasets: [
@@ -445,13 +468,15 @@ function draw() {
     plugins: Object.assign(base().plugins, { tooltip: Object.assign(base().plugins.tooltip, { filter: i => i.dataset.label !== "equal", callbacks: { label: i => i.parsed.y >= 1 ? `${i.dataset.label}: ours ${i.parsed.y.toFixed(2)}× faster` : `${i.dataset.label}: Meta ${(1 / i.parsed.y).toFixed(2)}× faster` } }) }) }) }));
 
   // C7 30 M
-  const L = D.c7_30m;
-  charts.push(new Chart(document.getElementById("ch-c7l"), { type: "bar", data: { labels: ["batch 4", "batch 16", "batch 64"], datasets: [
-    { label: "1 term", data: [4, 16, 64].map(b => L["c0_domain|" + b]), backgroundColor: S[2], borderRadius: 4, borderSkipped: "start", categoryPercentage: 0.6, barPercentage: 0.9 },
-    { label: "4 terms", data: [4, 16, 64].map(b => L["tags4|" + b]), backgroundColor: S[0], borderRadius: 4, borderSkipped: "start", categoryPercentage: 0.6, barPercentage: 0.9 },
+  const L = D.c7_30m, LB = [1, 16, 64];
+  const lc = (k, path, col, light) => ({ label: (k === "c0_domain" ? "1 term" : "4 terms") + " · Meta " + path, data: LB.map(b => L[k + "|" + b + "|" + path]),
+    backgroundColor: col, borderColor: col, borderWidth: light ? 1.5 : 0, borderRadius: 4, borderSkipped: "start", categoryPercentage: 0.75, barPercentage: 0.9 });
+  const lite = c => c + "55";
+  charts.push(new Chart(document.getElementById("ch-c7l"), { type: "bar", data: { labels: LB.map(b => "batch " + b), datasets: [
+    lc("c0_domain", "fp16", S[2]), lc("c0_domain", "int32", lite(S[2]), true), lc("tags4", "fp16", S[0]), lc("tags4", "int32", lite(S[0]), true),
     Object.assign(refLine("equal", -0.5, 2.5, 1), { xAxisID: "x2" }),
   ] }, options: base({ scales: { x: axis({ extra: { grid: { display: false } } }), x2: { type: "linear", min: -0.5, max: 2.5, display: false },
-      y: axis({ title: "Meta ÷ ours (log)", extra: { type: "logarithmic", min: 0.25, max: 4, ticks: Object.assign(axis().ticks, logTicks([0.25, 0.5, 1, 2, 4])) } }) },
+      y: axis({ title: "Meta ÷ ours (log)", extra: { type: "logarithmic", min: 0.5, max: 4, ticks: Object.assign(axis().ticks, logTicks([0.5, 1, 2, 4])) } }) },
     plugins: Object.assign(base().plugins, { tooltip: Object.assign(base().plugins.tooltip, { filter: i => i.dataset.label !== "equal", callbacks: { label: i => i.parsed.y >= 1 ? `${i.dataset.label}: ours ${i.parsed.y.toFixed(2)}× faster` : `${i.dataset.label}: Meta ${(1 / i.parsed.y).toFixed(2)}× faster` } }) }) }) }));
 
   // V3 goodreads
