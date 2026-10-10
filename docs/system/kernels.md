@@ -1377,7 +1377,7 @@ arXiv batch probes 321 distinct of 384 `(row, cluster)` pairs). Measured
 against a tile-first grid: arXiv none 112 → 91 µs, bloom 126 → 107 µs
 ([artifacts](../artifacts/kernel-opt/predictions.md)).
 
-**Top-k** (`_host.probe_topk`, `_two_level_topk`). `torch.topk` over the
+**Top-k** (`_host.probe_topk`, `functional.two_level_topk`, shared with LiNR V1's `masked_topk`). `torch.topk` over the
 `[B, width]` buffer costs ∝ `B · width`: four 8-bit radix passes and a
 gather. At C7's PubMed cell (`n_probe` 1024, bs 16) that was 1.7 of 2.7 ms,
 though 99.97 % of the slots are `-inf`. Meta's arm runs the same radix
@@ -1397,6 +1397,15 @@ blocks per top-k slot, the top-k is two-level:
 3. a gather of those blocks' contiguous slots;
 4. the final `torch.topk` over `k · 256` candidates. The winning slots go
    to the id epilogue as before, and pad slots are `-inf`, so `-1`.
+
+The helper lives in `retrieve.functional`. LiNR V1 reaches it through
+`masked_topk`, over its unpadded `[B, N]` scores, so it takes a ragged
+tail: the fewer than 256 slots past the last whole block are always
+candidates, and the block maxima cover whole blocks only. SilverTorch's
+padded buffer has no tail, so its ops are unchanged. On LiNR V1 the gain
+is 0.55–0.63 on arXiv / goodreads `all4` and single-clause cells at bs
+16 / 64, 0.67 at k 1000, and 0.81–0.98 on PubMed
+([validation](../validation.md), V1-TOPK).
 
 **Why it is exact.** If an item x is in the row's top-k, its block's max is
 at least x. If that block were not among the k largest maxima, k other
