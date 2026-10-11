@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
-# Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork (official-fork/CHANGES.md).
+# Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; the setup.py test checks the renamed packages (official-fork/CHANGES.md).
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -104,7 +104,7 @@ class TestSetupPyStructure(unittest.TestCase):
         try:
             import silvertorch_fork.oss
 
-            search_dir = os.path.dirname(silvertorch.oss.__file__)
+            search_dir = os.path.dirname(silvertorch_fork.oss.__file__)
         except ImportError:
             # OSS layout: setup.py is two levels up from this test file
             # (silvertorch/ops/csrc/tests/ -> silvertorch/ -> repo root)
@@ -118,5 +118,5 @@ class TestSetupPyStructure(unittest.TestCase):
         with open(setup_path) as f:
             content = f.read()
         self.assertIn("package_dir", content)
-        self.assertIn('"silvertorch.ops"', content)
-        self.assertIn('"silvertorch.modules"', content)
+        self.assertIn('"silvertorch_fork.ops"', content)
+        self.assertIn('"silvertorch_fork.modules"', content)

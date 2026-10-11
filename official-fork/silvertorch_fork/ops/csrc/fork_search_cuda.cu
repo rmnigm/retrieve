@@ -39,6 +39,295 @@ struct MaxOp {
   }
 };
 
+// K fix 2: the top-k as a radix select per row chunk in one CTA, its [B, k] epilogue fused. A
+// score's key is a uint32 that orders like the score (int32: sign bit flipped; fp16: the IEEE
+// order trick on the bits; a slot the scorer never wrote ranks lowest, INT_MIN on int32, -inf
+// on fp16). Four 8-bit histogram passes find the k-th largest key T; keys above T are taken,
+// and keys equal to T in index order until k, so the choice is deterministic (a graph replay
+// picks the ids eager picks). The k winners are sorted by (key desc, slot asc) with a bitonic
+// sort. A row wider than kSelectChunk slots is selected per chunk first (stage 1, its k winners
+// per chunk sorted the same way), then once over the chunks' winners (stage 2): the row's top-k
+// lies in the union of its chunks' top-ks.
+constexpr int kSelectThreads = 256;
+constexpr int kSelectItems = 16; // keys a thread holds in registers
+constexpr int64_t kSelectChunk = kSelectThreads * kSelectItems;
+constexpr int64_t kSelectMaxK = 1024;
+
+__device__ __forceinline__ uint32_t score_key(int32_t v) {
+  return static_cast<uint32_t>(v) ^ 0x80000000u;
+}
+
+__device__ __forceinline__ uint32_t score_key(c10::Half v) {
+  const uint16_t h = v.x;
+  return static_cast<uint32_t>((h & 0x8000) ? static_cast<uint16_t>(~h) : (h | 0x8000)) << 16;
+}
+
+// (key desc, slot asc) in one uint64 that sorts descending; 0 is below every real entry.
+__device__ __forceinline__ uint64_t composite(uint32_t key, uint32_t slot) {
+  return (static_cast<uint64_t>(key) << 32) | (0xffffffffu - slot);
+}
+
+__device__ __forceinline__ uint32_t composite_slot(uint64_t c) {
+  return 0xffffffffu - static_cast<uint32_t>(c);
+}
+
+// Raw scores of row `row`, slots [first, first + n): the key, -inf's on fp16 for unwritten slots.
+template <typename T>
+struct RawKeys {
+  const T* raw;
+  const int32_t* idx;
+  int64_t width;
+  __device__ __forceinline__ uint32_t key(int64_t row, int64_t slot) const {
+    if constexpr (std::is_same_v<T, int32_t>) {
+      return score_key(raw[row * width + slot]);
+    } else {
+      return idx[row * width + slot] >= 0 ? score_key(raw[row * width + slot])
+                                          : 0x03ffu << 16;
+    }
+  }
+  __device__ __forceinline__ uint32_t slot(int64_t /*row*/, int64_t s) const {
+    return static_cast<uint32_t>(s);
+  }
+};
+
+// Stage-1 winners [B, chunks * k] (composites) as the stage-2 input.
+struct CompositeKeys {
+  const uint64_t* cand;
+  int64_t per_row;
+  __device__ __forceinline__ uint32_t key(int64_t row, int64_t i) const {
+    return static_cast<uint32_t>(cand[row * per_row + i] >> 32);
+  }
+  __device__ __forceinline__ uint32_t slot(int64_t row, int64_t i) const {
+    return composite_slot(cand[row * per_row + i]);
+  }
+};
+
+struct SelectShared {
+  uint32_t hist[256];
+  uint64_t best[kSelectMaxK];
+  uint32_t digit;
+  int64_t need;
+  int64_t taken;
+  int64_t eq_seen;
+};
+
+// The k (<= kSelectMaxK, <= n) largest of entries [first, first + n) of `row`, sorted into
+// sh.best[0, k) by (key desc, slot asc); sh.best[k, pow2) holds 0.
+// Entry i of the CTA's range is read as key(i); with n <= kSelectChunk each thread holds its
+// kSelectItems keys in registers after one load (CACHED), else every pass reloads them.
+template <bool CACHED, typename KEYS>
+__device__ void select_topk(
+    const KEYS& keys,
+    int64_t row,
+    int64_t first,
+    int64_t n,
+    int64_t k,
+    SelectShared& sh) {
+  using Scan = cub::BlockScan<int32_t, kSelectThreads>;
+  __shared__ typename Scan::TempStorage scan;
+  const int tid = threadIdx.x;
+  const int64_t iters = (n + kSelectThreads - 1) / kSelectThreads;
+  uint32_t cache[CACHED ? kSelectItems : 1];
+  if constexpr (CACHED) {
+#pragma unroll
+    for (int it = 0; it < kSelectItems; ++it) {
+      const int64_t i = it * kSelectThreads + tid;
+      cache[it] = i < n ? keys.key(row, first + i) : 0;
+    }
+  }
+  auto key_at = [&](int64_t it) -> uint32_t {
+    if constexpr (CACHED) {
+      return cache[it];
+    } else {
+      const int64_t i = it * kSelectThreads + tid;
+      return i < n ? keys.key(row, first + i) : 0;
+    }
+  };
+  uint32_t prefix = 0;
+  uint32_t mask = 0;
+  if (tid == 0) {
+    sh.need = k;
+  }
+  for (int shift = 24; shift >= 0; shift -= 8) {
+    for (int d = tid; d < 256; d += kSelectThreads) {
+      sh.hist[d] = 0;
+    }
+    __syncthreads();
+    // scores share their top digits, so lanes with one digit add once (warp-aggregated)
+#pragma unroll
+    for (int64_t it = 0; it < (CACHED ? kSelectItems : iters); ++it) {
+      if (it >= iters) {
+        break; // uniform: iters is the CTA's
+      }
+      const int64_t i = it * kSelectThreads + tid;
+      const uint32_t key = key_at(it);
+      const bool in = i < n && (key & mask) == prefix;
+      const uint32_t digit = in ? (key >> shift) & 0xff : 256;
+      const uint32_t peers = __match_any_sync(0xffffffff, digit);
+      if (in && (__ffs(peers) - 1) == static_cast<int>(threadIdx.x % 32)) {
+        atomicAdd(&sh.hist[digit], static_cast<uint32_t>(__popc(peers)));
+      }
+    }
+    __syncthreads();
+    if (tid < 32) {
+      // lane l owns bins [255 - 8l - 7, 255 - 8l]; the first lane (from the top) whose
+      // cumulative count reaches `need` scans its own bins
+      uint32_t own = 0;
+      for (int b = 0; b < 8; ++b) {
+        own += sh.hist[255 - 8 * tid - b];
+      }
+      uint32_t cum = own;
+      for (int off = 1; off < 32; off <<= 1) {
+        const uint32_t up = __shfl_up_sync(0xffffffff, cum, off);
+        if (tid >= off) {
+          cum += up;
+        }
+      }
+      const int64_t need = sh.need;
+      const uint32_t hit = __ballot_sync(0xffffffff, cum >= need);
+      const int lane = hit ? __ffs(hit) - 1 : 31;
+      if (tid == lane) {
+        int64_t above = cum - own;
+        int d = 255 - 8 * tid;
+        for (int b = 0; b < 7; ++b, --d) {
+          if (above + sh.hist[d] >= need) {
+            break;
+          }
+          above += sh.hist[d];
+        }
+        sh.digit = d;
+        sh.need = need - above;
+      }
+    }
+    __syncthreads();
+    prefix |= sh.digit << shift;
+    mask |= 0xffu << shift;
+  }
+  const uint32_t threshold = prefix;
+  const int64_t ties = sh.need; // how many entries equal to the threshold to take
+  int64_t pow2 = 1;
+  while (pow2 < k) {
+    pow2 <<= 1;
+  }
+  for (int64_t j = tid; j < pow2; j += kSelectThreads) {
+    sh.best[j] = 0;
+  }
+  if (tid == 0) {
+    sh.taken = 0;
+    sh.eq_seen = 0;
+  }
+  __syncthreads();
+#pragma unroll
+  for (int64_t it = 0; it < (CACHED ? kSelectItems : iters); ++it) {
+    if (it >= iters) {
+      break; // uniform: iters is the CTA's
+    }
+    const int64_t i = it * kSelectThreads + tid;
+    const uint32_t key = key_at(it);
+    const int32_t is_eq = (i < n && key == threshold) ? 1 : 0;
+    int32_t eq_rank;
+    int32_t eq_total;
+    Scan(scan).ExclusiveSum(is_eq, eq_rank, eq_total);
+    if (i < n && key > threshold) {
+      const int64_t pos = atomicAdd(reinterpret_cast<unsigned long long*>(&sh.taken), 1ull);
+      sh.best[pos] = composite(key, keys.slot(row, first + i));
+    } else if (is_eq && sh.eq_seen + eq_rank < ties) {
+      sh.best[(k - ties) + sh.eq_seen + eq_rank] =
+          composite(key, keys.slot(row, first + i));
+    }
+    __syncthreads();
+    if (tid == 0) {
+      sh.eq_seen += eq_total;
+    }
+    __syncthreads();
+  }
+  // bitonic sort of best[0, pow2), descending
+  for (int64_t size = 2; size <= pow2; size <<= 1) {
+    for (int64_t stride = size >> 1; stride > 0; stride >>= 1) {
+      for (int64_t j = tid; j < pow2; j += kSelectThreads) {
+        const int64_t partner = j ^ stride;
+        if (partner > j) {
+          const bool descending = (j & size) == 0;
+          const uint64_t a = sh.best[j];
+          const uint64_t b = sh.best[partner];
+          if ((a < b) == descending) {
+            sh.best[j] = b;
+            sh.best[partner] = a;
+          }
+        }
+      }
+      __syncthreads();
+    }
+  }
+}
+
+// Stage 1: one CTA per (row, chunk), its k winners to cand[row, chunk * k + j].
+template <typename T>
+__global__ void __launch_bounds__(kSelectThreads) select_chunk_kernel(
+    RawKeys<T> keys,
+    int64_t chunks,
+    int64_t k,
+    uint64_t* __restrict__ cand) {
+  __shared__ SelectShared sh;
+  const int64_t row = blockIdx.x / chunks;
+  const int64_t chunk = blockIdx.x % chunks;
+  const int64_t first = chunk * kSelectChunk;
+  const int64_t rest = keys.width - first;
+  const int64_t n = rest < kSelectChunk ? rest : kSelectChunk;
+  const int64_t kk = std::min(k, n);
+  select_topk<true>(keys, row, first, n, kk, sh);
+  for (int64_t j = threadIdx.x; j < k; j += kSelectThreads) {
+    cand[row * chunks * k + chunk * k + j] = j < kk ? sh.best[j] : 0;
+  }
+}
+
+// Final stage: one CTA per row, select over KEYS, then official_probe_score's epilogue on the
+// sorted winners (see epilogue_kernel).
+template <typename T, typename KEYS>
+__global__ void __launch_bounds__(kSelectThreads) select_epilogue_kernel(
+    KEYS keys,
+    int64_t n,
+    const T* __restrict__ raw,
+    const int32_t* __restrict__ idx,
+    int64_t width,
+    const int64_t* __restrict__ sort_perm,
+    const float* __restrict__ q_scales,
+    const float* __restrict__ global_scale,
+    int64_t divisor,
+    int64_t k,
+    int64_t* __restrict__ ids,
+    float* __restrict__ scores) {
+  __shared__ SelectShared sh;
+  const int64_t row = blockIdx.x;
+  const int64_t kk = std::min(k, n);
+  if (n <= kSelectChunk) {
+    select_topk<true>(keys, row, 0, n, kk, sh);
+  } else {
+    select_topk<false>(keys, row, 0, n, kk, sh);
+  }
+  for (int64_t j = threadIdx.x; j < k; j += kSelectThreads) {
+    int64_t id = -1;
+    float score = -INFINITY;
+    if (j < kk && sh.best[j] != 0) {
+      const uint32_t slot = composite_slot(sh.best[j]);
+      const int32_t pos = slot < width ? idx[row * width + slot] : -1;
+      if (pos >= 0) {
+        id = sort_perm[pos];
+        const float dot = static_cast<float>(raw[row * width + slot]);
+        score = divisor == -1
+            ? __fmul_rn(__fmul_rn(dot, q_scales[row]), *global_scale)
+            : __fmul_rn(
+                  dot,
+                  __fmul_rn(
+                      __fmul_rn(q_scales[row], static_cast<float>(divisor)),
+                      *global_scale));
+      }
+    }
+    ids[row * k + j] = id;
+    scores[row * k + j] = score;
+  }
+}
+
 // official_probe_score's [B, k] epilogue in one launch: a winner is valid when its slot is in the
 // row and the scorer wrote it (index >= 0); its id is sort_perm[index], its score
 // (fp32(dot) * q_scale) * global_scale, or fp32(dot / divisor) * ((q_scale * divisor) *
@@ -765,12 +1054,57 @@ std::tuple<Tensor, Tensor> search_cuda(
   const bool int32_path = raw.scalar_type() == at::kInt;
   const int64_t rows = raw.size(0);
   const int64_t actual_k = std::min<int64_t>(k, raw.size(1));
-  auto [top_raw, top_slot] = raw_topk(raw, idx, actual_k);
-  top_raw = top_raw.contiguous();
-  top_slot = top_slot.contiguous();
   Tensor ids = at::empty({rows, k}, sort_perm.options());
   Tensor scores = at::empty({rows, k}, query.options());
   Tensor gs = global_scale.to(at::kFloat).contiguous();
+  if (rows > 0 && k <= kSelectMaxK) {
+    const int64_t w = raw.size(1);
+    const int64_t chunks = (w + kSelectChunk - 1) / kSelectChunk;
+    auto stream = at::cuda::getCurrentCUDAStream();
+    auto launch = [&](auto zero) {
+      using T = decltype(zero);
+      const T* raw_ptr = reinterpret_cast<const T*>(raw.const_data_ptr());
+      const RawKeys<T> keys{raw_ptr, idx.const_data_ptr<int32_t>(), w};
+      auto finish = [&](auto final_keys, int64_t n) {
+        select_epilogue_kernel<T, decltype(final_keys)>
+            <<<rows, kSelectThreads, 0, stream>>>(
+                final_keys,
+                n,
+                raw_ptr,
+                idx.const_data_ptr<int32_t>(),
+                w,
+                sort_perm.const_data_ptr<int64_t>(),
+                q_scales.const_data_ptr<float>(),
+                gs.const_data_ptr<float>(),
+                divisor_for_int8,
+                k,
+                ids.mutable_data_ptr<int64_t>(),
+                scores.mutable_data_ptr<float>());
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      };
+      if (chunks <= 1) {
+        finish(keys, w);
+        return;
+      }
+      Tensor cand = at::empty({rows, chunks * k}, raw.options().dtype(at::kLong));
+      uint64_t* cand_ptr = reinterpret_cast<uint64_t*>(cand.mutable_data_ptr<int64_t>());
+      select_chunk_kernel<T><<<rows * chunks, kSelectThreads, 0, stream>>>(
+          keys, chunks, k, cand_ptr);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      finish(CompositeKeys{cand_ptr, chunks * k}, chunks * k);
+    };
+    if (int32_path) {
+      launch(int32_t{0});
+    } else {
+      launch(c10::Half{0.0f});
+    }
+    return {ids, scores};
+  }
+  Tensor top_raw;
+  Tensor top_slot;
+  std::tie(top_raw, top_slot) = raw_topk(raw, idx, actual_k);
+  top_raw = top_raw.contiguous();
+  top_slot = top_slot.contiguous();
   if (rows * k > 0) {
     const int64_t blocks = (rows * k + 255) / 256;
     auto launch = [&](auto zero) {
