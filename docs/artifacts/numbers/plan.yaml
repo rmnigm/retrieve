@@ -229,6 +229,8 @@ legs:
     upload: numbers/T9-arxiv-dsweep
     est_gpu_h: 2.0
 
+totals:
+  tail_gpu_h: 3.2         # T9, not in all_gpu_h: conditional
   linr_only_gpu_h: 9.3
   adapted_gpu_h: 38.6      # A0 0.4 + A1 11.9 + A1b 0.5 + A2 24.0 + A2b 0.8 + A3 1.0
   all_gpu_h: 47.9          # +20 % process start / data load / compile -> ~56
