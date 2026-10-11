@@ -46,10 +46,10 @@ struct MaxOp {
 // and keys equal to T in index order until k (as torch's top-k), so the choice is deterministic
 // (a graph replay picks the ids eager picks). The k winners are sorted by (key desc, slot asc) with a bitonic
 // sort. A row wider than kSelectChunk slots is selected per chunk first (stage 1, its k winners
-// per chunk sorted the same way), then once over the chunks' winners (stage 2): the row's top-k
-// lies in the union of its chunks' top-ks.
+// per chunk in index order, unsorted), then once over the chunks' winners (stage 2): the row's
+// top-k lies in the union of its chunks' top-ks.
 constexpr int kSelectThreads = 256;
-constexpr int kSelectItems = 16; // keys a thread holds in registers
+constexpr int kSelectItems = 32; // keys a thread holds in registers
 constexpr int64_t kSelectChunk = kSelectThreads * kSelectItems;
 constexpr int64_t kSelectMaxK = 1024;
 
@@ -115,7 +115,11 @@ struct SelectShared {
 // Entry i of the CTA's range is read as key(i); thread t's it-th entry is it * kSelectThreads + t
 // (coalesced). With n <= kSelectChunk (CACHED) a thread holds its kSelectItems keys in registers
 // after one load, else every pass reloads them.
-template <bool CACHED, typename KEYS>
+// SORT: best[0, k) sorted by (key desc, slot asc). Without it (stage 1, CACHED only) best[0, k)
+// holds the keys above the threshold in index order, then the tied ones in index order: a
+// deterministic layout whose index order, chunk after chunk, keeps the row's index order for any
+// stage-2 tie (a chunk's entries equal to a stage-2 threshold are all in one of its two parts).
+template <bool CACHED, bool SORT, typename KEYS>
 __device__ void select_topk(
     const KEYS& keys,
     int64_t row,
@@ -248,23 +252,26 @@ __device__ void select_topk(
     const int lane = tid % 32;
     const int warp = tid / 32;
     const uint32_t below = (1u << lane) - 1;
+    __shared__ int32_t slab_warp_gt[kSelectItems * kWarps];
     uint32_t eq_bits[kSelectItems];
+    uint32_t gt_bits[kSelectItems];
 #pragma unroll
     for (int it = 0; it < kSelectItems; ++it) {
       eq_bits[it] = __ballot_sync(0xffffffff, index_of(it) < n && cache[it] == threshold);
+      gt_bits[it] = __ballot_sync(0xffffffff, index_of(it) < n && cache[it] > threshold);
       if (lane == 0) {
         slab_warp[it * kWarps + warp] = __popc(eq_bits[it]);
+        slab_warp_gt[it * kWarps + warp] = __popc(gt_bits[it]);
       }
     }
     __syncthreads();
     if (tid < 32) {
-      // exclusive prefix over the kSelectItems * kWarps counts, slab-major
       constexpr int kPer = kSelectItems * kWarps / 32;
       int32_t local[kPer];
       int32_t sum = 0;
 #pragma unroll
       for (int e = 0; e < kPer; ++e) {
-        local[e] = slab_warp[tid * kPer + e];
+        local[e] = slab_warp_gt[tid * kPer + e];
         sum += local[e];
       }
       int32_t inc = sum;
@@ -277,15 +284,51 @@ __device__ void select_topk(
       int32_t run = inc - sum;
 #pragma unroll
       for (int e = 0; e < kPer; ++e) {
-        slab_warp[tid * kPer + e] = run;
+        slab_warp_gt[tid * kPer + e] = run;
+        run += local[e];
+      }
+    }
+    if (tid >= 32 && tid < 64) {
+      const int t = tid - 32;
+      // exclusive prefix over the kSelectItems * kWarps counts, slab-major
+      constexpr int kPer = kSelectItems * kWarps / 32;
+      int32_t local[kPer];
+      int32_t sum = 0;
+#pragma unroll
+      for (int e = 0; e < kPer; ++e) {
+        local[e] = slab_warp[t * kPer + e];
+        sum += local[e];
+      }
+      int32_t inc = sum;
+      for (int off = 1; off < 32; off <<= 1) {
+        const int32_t up = __shfl_up_sync(0xffffffff, inc, off);
+        if (t >= off) {
+          inc += up;
+        }
+      }
+      int32_t run = inc - sum;
+#pragma unroll
+      for (int e = 0; e < kPer; ++e) {
+        slab_warp[t * kPer + e] = run;
         run += local[e];
       }
     }
     __syncthreads();
 #pragma unroll
     for (int it = 0; it < kSelectItems; ++it) {
-      int32_t eq_rank = slab_warp[it * kWarps + warp] + __popc(eq_bits[it] & below);
-      take(it, eq_rank);
+      const int64_t i = index_of(it);
+      if (i >= n) {
+        continue;
+      }
+      if ((gt_bits[it] >> lane) & 1) {
+        const int32_t r = slab_warp_gt[it * kWarps + warp] + __popc(gt_bits[it] & below);
+        sh.best[r] = composite(cache[it], keys.slot(row, first + i));
+      } else if ((eq_bits[it] >> lane) & 1) {
+        const int32_t r = slab_warp[it * kWarps + warp] + __popc(eq_bits[it] & below);
+        if (r < ties) {
+          sh.best[(k - ties) + r] = composite(cache[it], keys.slot(row, first + i));
+        }
+      }
     }
   } else {
     int64_t eq_seen = 0;
@@ -301,6 +344,9 @@ __device__ void select_topk(
     }
   }
   __syncthreads();
+  if constexpr (!SORT) {
+    return;
+  }
   // bitonic sort of best[0, pow2), descending
   for (int64_t size = 2; size <= pow2; size <<= 1) {
     for (int64_t stride = size >> 1; stride > 0; stride >>= 1) {
@@ -335,7 +381,7 @@ __global__ void __launch_bounds__(kSelectThreads) select_chunk_kernel(
   const int64_t rest = keys.width - first;
   const int64_t n = rest < kSelectChunk ? rest : kSelectChunk;
   const int64_t kk = std::min(k, n);
-  select_topk<true>(keys, row, first, n, kk, sh);
+  select_topk<true, false>(keys, row, first, n, kk, sh);
   for (int64_t j = threadIdx.x; j < k; j += kSelectThreads) {
     cand[row * chunks * k + chunk * k + j] = j < kk ? sh.best[j] : 0;
   }
@@ -361,9 +407,9 @@ __global__ void __launch_bounds__(kSelectThreads) select_epilogue_kernel(
   const int64_t row = blockIdx.x;
   const int64_t kk = std::min(k, n);
   if (n <= kSelectChunk) {
-    select_topk<true>(keys, row, 0, n, kk, sh);
+    select_topk<true, true>(keys, row, 0, n, kk, sh);
   } else {
-    select_topk<false>(keys, row, 0, n, kk, sh);
+    select_topk<false, true>(keys, row, 0, n, kk, sh);
   }
   for (int64_t j = threadIdx.x; j < k; j += kSelectThreads) {
     int64_t id = -1;
