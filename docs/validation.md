@@ -368,6 +368,9 @@ in `test_algos.py` / `test_config.py`).
 
 ### Cross-scale filter comparison (not yet validated)
 
+Its SilverTorch figures are Triton records (not in the study; re-measured on the adapted
+backend in FORK-RERUN); its LiNR figures stand.
+
 The four `filter` legs at the same operating point, over the cells every
 arm completed; table and script on the Hub in `artifacts/d1-campaign`
 ([hub-index](artifacts/hub-index.md)). Redone at roadmap D1-G. Goodreads
