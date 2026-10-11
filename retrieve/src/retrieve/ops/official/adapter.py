@@ -432,6 +432,71 @@ def official_probe_score(
     return ids, scores
 
 
+class ForkBloom(NamedTuple):
+    """The fork's bloom filter for one forward: the official index, the prepared plans with their
+    row → plan index (partial path), the search ``k`` and stored hashes, and the path."""
+
+    bloom_index: Tensor
+    bundle_b_offsets: Tensor
+    plans: DevicePlans
+    plan_index: Tensor | None
+    k: int
+    hash_k: int
+    partial: bool
+
+
+def fork_search(
+    query: Tensor,
+    probe_ids: Tensor,
+    cluster_offsets: Tensor,
+    cluster_sizes: Tensor,
+    item_codes_sorted: Tensor,
+    sort_perm: Tensor,
+    global_scale: Tensor,
+    k: int,
+    max_tensor_size_per_row: int,
+    *,
+    score_path: ScorePath = "int32",
+    divisor: int | None = None,
+    filtering_bit_mask: Tensor | None = None,
+    bloom: ForkBloom | None = None,
+) -> tuple[Tensor, Tensor]:
+    """Phases 2+3 on the fork in one call, ``torch.ops.stfork.search``: query int8, the probed
+    clusters, the filter (a full-``N`` ``filtering_bit_mask``, or the bloom over prepared plans),
+    payloads + scorer, top-k on the raw scores and the ``[B, k]`` epilogue of
+    :func:`official_probe_score` → ``(ids int64 [B, k], scores fp32 [B, k])``, ``-1`` / ``-inf``
+    pads (kernels.md § official-fork)."""
+    st = ensure_loaded("official-fork")
+    div = (
+        -1
+        if score_path == "int32"
+        else (default_divisor(item_codes_sorted.shape[1]) if divisor is None else int(divisor))
+    )
+    b = bloom
+    return st.search(
+        query,
+        probe_ids,
+        cluster_offsets,
+        cluster_sizes,
+        item_codes_sorted,
+        sort_perm,
+        global_scale,
+        int(k),
+        int(max_tensor_size_per_row),
+        div,
+        filtering_bit_mask,
+        None if b is None else b.bloom_index,
+        None if b is None else b.bundle_b_offsets,
+        None if b is None else b.plans.blob,
+        0 if b is None else b.plans.slots,
+        0 if b is None else b.plans.max_stack_size,
+        None if b is None else b.plan_index,
+        0 if b is None else int(b.k),
+        0 if b is None else int(b.hash_k),
+        True if b is None else bool(b.partial),
+    )
+
+
 # --- bloom search ---------------------------------------------------------------------
 
 

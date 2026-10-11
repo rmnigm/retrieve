@@ -259,6 +259,7 @@ def __getattr__(name: str):
 
 from retrieve.ops.official.adapter import (  # noqa: E402  (needs the loader above)
     DevicePlans,
+    ForkBloom,
     attrs_to_features,
     bloom_filtering_mask,
     bloom_full_mask,
@@ -267,6 +268,7 @@ from retrieve.ops.official.adapter import (  # noqa: E402  (needs the loader abo
     build_bloom_index,
     default_divisor,
     dequantize_scores,
+    fork_search,
     fused_scores,
     max_partial_columns,
     official_probe_score,
@@ -285,6 +287,7 @@ from retrieve.ops.official.adapter import (  # noqa: E402  (needs the loader abo
 __all__ = [
     "BLOOM_OUTPUT_BIT_ORDER",
     "DevicePlans",
+    "ForkBloom",
     "DEFAULT_CONFIG",
     "MASK_BIT_ORDER",
     "MAX_SEARCH_K",
@@ -302,6 +305,7 @@ __all__ = [
     "default_divisor",
     "dequantize_scores",
     "ensure_loaded",
+    "fork_search",
     "fused_scores",
     "max_partial_columns",
     "is_available",

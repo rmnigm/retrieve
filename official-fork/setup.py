@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
-# Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; builds is_topk / fresh_index_post_processing; -O3 host code; metadata in pyproject.toml (official-fork/CHANGES.md).
+# Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; builds is_topk / fresh_index_post_processing; -O3 host code; metadata in pyproject.toml; C5: builds fork_search (official-fork/CHANGES.md).
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,6 +36,8 @@ cpu_sources = [
     # fork (OF-6): registered upstream but absent from its build
     "silvertorch_fork/ops/csrc/is_topk.cpp",
     "silvertorch_fork/ops/csrc/fresh_index_post_processing.cpp",
+    # fork (C5): stfork::search
+    "silvertorch_fork/ops/csrc/fork_search.cpp",
 ]
 
 cuda_sources = [
@@ -47,6 +49,8 @@ cuda_sources = [
     # fork (OF-6): registered upstream but absent from its build
     "silvertorch_fork/ops/csrc/is_topk_cuda.cu",
     "silvertorch_fork/ops/csrc/fresh_index_post_processing_cuda.cu",
+    # fork (C5): stfork::search
+    "silvertorch_fork/ops/csrc/fork_search_cuda.cu",
 ]
 
 # Resolve paths relative to this file

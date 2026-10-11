@@ -1,5 +1,5 @@
 # Copyright (c) the retrieve authors. Licensed under the Apache License, Version 2.0, as the
-# rest of this package (official-fork/LICENSE); added in the fork (official-fork/CHANGES.md, C4).
+# rest of this package (official-fork/LICENSE); added in the fork (official-fork/CHANGES.md, C4, C5).
 
 """Shape functions of the ops a SilverTorch forward calls, so ``torch.compile`` traces it whole
 (the harness ``graph`` mode): every output shape follows from the input shapes and the int
@@ -61,4 +61,16 @@ def _(bloom_index, bloom_bundle_b_offsets, plans, plan_count, max_stack_size,
         bloom_index.new_empty((clusters,), dtype=torch.int32),
         bloom_index.new_empty((clusters,), dtype=torch.int8),
         bloom_index.new_empty((max_columns,), dtype=torch.int64),
+    )
+
+
+@torch.library.register_fake("stfork::search")
+def _(query, probe_ids, cluster_offsets, cluster_sizes, item_codes, sort_perm, global_scale, k,
+      max_tensor_size_per_row, divisor_for_int8=-1, filtering_bit_mask=None, bloom_index=None,
+      bloom_bundle_b_offsets=None, plans=None, plan_count=0, max_stack_size=0,
+      query_plan_index=None, bloom_k=0, hash_k=0, bloom_partial=True):  # fmt: skip
+    rows = query.shape[0]
+    return (
+        query.new_empty((rows, k), dtype=torch.int64),
+        query.new_empty((rows, k), dtype=torch.float32),
     )

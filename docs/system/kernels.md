@@ -1833,8 +1833,16 @@ file. `CHANGES.md` lists every change; each has its gate row in
 [validation](../validation.md#meta-fork-backendofficial-fork-not-yet-validated).
 `SilverTorch(backend="official-fork")` selects it.
 
-**Adapter today.** The fork registers the same six ops as upstream, under `stfork::` with
-upstream's schema strings, and the adapter of the [`official`
+**Forward: one op.** `SilverTorch(backend="official-fork")` runs phase 1 (ours) and then one
+`torch.ops.stfork.search` call (`adapter.fork_search`; `fork_search_cuda.cu`): query int8 (our
+`quantize_int8`, op for op), the probed clusters' lengths, the filter's masks (bloom over the
+prepared plans, partial or full; `exact` passes our Triton `clause_mask_packed` as the full-`N`
+mask), payloads + scorer, top-k on the raw scores and the `[B, k]` epilogue of
+`official_probe_score` in its order, returning `(ids int64 [B, k], scores fp32 [B, k])` with
+`-1` / `-inf` pads. `official_probe_score` stays for `"official"`.
+
+**Upstream-shaped ops.** The fork still registers the same six ops as upstream, under `stfork::`
+with upstream's schema strings (the parity gates call them), and the adapter of the [`official`
 section](#official--metas-torchopsst-kernels-as-the-reference-backend) calls them unchanged:
 `ensure_loaded(backend)` / `is_available(backend)` are memoized per backend
 (`PACKAGES = {backend: (package, namespace)}`) and every op-calling adapter function takes
