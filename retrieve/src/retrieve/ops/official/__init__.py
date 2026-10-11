@@ -72,6 +72,7 @@ from retrieve.interfaces import OFFICIAL_BACKENDS, OfficialBackend
 BitOrder = Literal["high_first", "low_first"]
 ScorePath = Literal["int32", "fp16"]
 BloomPath = Literal["partial", "full"]
+BloomWidth = Literal["configured", "upstream"]
 
 # backend -> (package, op namespace)
 PACKAGES: dict[str, tuple[str, str]] = {
@@ -146,6 +147,10 @@ class OfficialConfig:
     - ``max_sub_queries``: parser fan-out bound per AND/OR node (semantics unchanged).
     - ``fast_build``: the CUDA builder's single-pass signature-free build (ignored by the
       CPU builder).
+    - ``bloom_width``: ``"upstream"`` → each 2048-doc bundle ``max_terms · k · b_multiplier``
+      bits wide per doc (OF-10); ``"configured"`` → ``m_bits`` bits per doc in every bundle (our
+      fork, META-FORK C12; the layer's ``m_bits`` is then required). ``None`` → the backend's
+      own: ``"upstream"`` on ``official`` (its only width), ``"configured"`` on ``official-fork``.
 
     The expression parse is query preparation: ``SilverTorch.prepare_queries`` runs it once
     per batch, outside ``forward``."""
@@ -158,6 +163,7 @@ class OfficialConfig:
     max_sub_queries: int = 5
     fast_build: bool = False
     n_stored_hashes: int = 7
+    bloom_width: BloomWidth | None = None
 
     def __post_init__(self) -> None:
         if self.score_path not in ("int32", "fp16"):
@@ -178,6 +184,19 @@ class OfficialConfig:
             raise ValueError(f"build_k must be in [1, {MAX_SEARCH_K}], got {self.build_k}")
         if self.max_sub_queries <= 0:
             raise ValueError(f"max_sub_queries must be positive, got {self.max_sub_queries}")
+        if self.bloom_width not in (None, "configured", "upstream"):
+            raise ValueError(
+                f"bloom_width must be 'configured' or 'upstream', got {self.bloom_width!r}"
+            )
+
+    def width_for(self, backend: OfficialBackend) -> BloomWidth:
+        """The bloom width this config gives ``backend``: its own default when unset; Meta's
+        ``official`` build has only the upstream one."""
+        if backend == "official":
+            if self.bloom_width == "configured":
+                raise ValueError("bloom_width='configured' needs backend='official-fork'")
+            return "upstream"
+        return self.bloom_width or "configured"
 
 
 DEFAULT_CONFIG = OfficialConfig()

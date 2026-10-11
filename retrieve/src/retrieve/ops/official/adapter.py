@@ -64,18 +64,30 @@ def build_bloom_index(
     b_multiplier: float,
     build_k: int,
     fast_build: bool = False,
+    bits_per_doc: int | None = None,
     backend: OfficialBackend = "official",
 ) -> tuple[Tensor, Tensor]:
     """``bloom_index_build`` over cluster-sorted attrs → ``(bloom_index int64 [W],
     bundle_b_offsets int64 [n_bundles+1])`` on ``attrs.device`` (the CUDA builder needs
     CUDA inputs; the CPU builder is a single-threaded loop). ``W = Σ_bundles B_bundle ·
-    32`` words, i.e. ``B_bundle / 8`` bytes per doc."""
+    32`` words, i.e. ``B_bundle / 8`` bytes per doc. ``bits_per_doc`` (the fork's configured
+    width, CUDA only) makes every ``B_bundle`` that many bits and ignores ``b_multiplier``."""
     st = ensure_loaded(backend)
     if not b_multiplier > 1.0:
         raise ValueError(f"b_multiplier must be > 1.0, got {b_multiplier}")
     if not 0 < build_k <= MAX_SEARCH_K:
         raise ValueError(f"build_k must be in [1, {MAX_SEARCH_K}], got {build_k}")
     feature_ids, feature_offsets, feature_values = attrs_to_features(attrs)
+    if bits_per_doc is not None:
+        bloom_index, bundle_b_offsets = st.bloom_index_build_fixed(
+            feature_ids,
+            feature_offsets,
+            feature_values,
+            int(bits_per_doc),
+            int(build_k),
+            fast_build,
+        )
+        return bloom_index.contiguous(), bundle_b_offsets.contiguous()
     bloom_index, bundle_b_offsets = st.bloom_index_build(
         feature_ids, feature_offsets, feature_values, float(b_multiplier), int(build_k), fast_build
     )

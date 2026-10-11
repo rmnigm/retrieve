@@ -1,5 +1,5 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork (official-fork/CHANGES.md).
+// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C12: the bloom_index_build_fixed schema (official-fork/CHANGES.md).
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -120,6 +120,17 @@ TORCH_LIBRARY_FRAGMENT(stfork, m) {
       "Tensor feature_offsets, "
       "Tensor feature_values, "
       "float b_multiplier, "
+      "int k, "
+      "bool fast_build=False"
+      ") -> (Tensor, Tensor)");
+  // fork (C12), CUDA only: every bundle bits_per_doc bits wide (our m_bits) instead of
+  // max terms in the bundle x k x b_multiplier.
+  m.def(
+      "bloom_index_build_fixed("
+      "Tensor feature_ids, "
+      "Tensor feature_offsets, "
+      "Tensor feature_values, "
+      "int bits_per_doc, "
       "int k, "
       "bool fast_build=False"
       ") -> (Tensor, Tensor)");

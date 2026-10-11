@@ -1856,6 +1856,12 @@ file. `CHANGES.md` lists every change; each has its gate row in
 It returns `(ids int64 [B, k], scores fp32 [B, k])` with `-1` / `-inf` pads.
 `official_probe_score` stays for `"official"`.
 
+**Bloom width (C12).** `OfficialConfig.bloom_width`: `"configured"` (the fork's default) builds the
+official bloom with `bloom_index_build_fixed`, every 2048-doc bundle `m_bits` bits per doc (the
+layer's `m_bits` is then required), so its index is `N · m_bits / 8` bytes like Triton's;
+`"upstream"` keeps Meta's `max terms · k · b_multiplier` per bundle (OF-10), the only width
+`"official"` has.
+
 **Upstream-shaped ops.** The fork still registers the same six ops as upstream, under `stfork::`
 with upstream's schema strings (the parity gates call them), and the adapter of the [`official`
 section](#official--metas-torchopsst-kernels-as-the-reference-backend) calls them unchanged:

@@ -181,10 +181,11 @@ class SilverTorch(RetrievalModule):
             # On the official backend the bloom width comes from OfficialConfig.b_multiplier,
             # so m_bits is optional there; k_hash is the search-time `k` of the official
             # index (≤ MAX_K_V2, an unchecked upstream limit).
-            if k_hash is None or (m_bits is None and not is_official):
+            configured = is_official and self.official.width_for(backend) == "configured"
+            if k_hash is None or (m_bits is None and (configured or not is_official)):
                 raise ValueError(
-                    "filter_mode='bloom' requires both m_bits and k_hash (m_bits is "
-                    "optional on backend='official', whose width is OfficialConfig.b_multiplier)"
+                    "filter_mode='bloom' requires both m_bits and k_hash (m_bits is optional "
+                    "where the official bloom width is upstream's, OfficialConfig.b_multiplier)"
                 )
             check_bloom_params(m_bits, k_hash)
             if is_official and k_hash > official_mod.MAX_SEARCH_K:
@@ -375,11 +376,13 @@ class SilverTorch(RetrievalModule):
                 bloom_index = torch.empty(0, dtype=torch.int64, device=device)
                 bundle_b_offsets = torch.zeros(1, dtype=torch.int64, device=device)
             else:
+                configured = cfg.width_for(self.backend) == "configured"
                 bloom_index, bundle_b_offsets = official_mod.build_bloom_index(
                     attrs,
                     b_multiplier=cfg.b_multiplier,
                     build_k=cfg.build_k if cfg.build_k is not None else self.k_hash,
                     fast_build=cfg.fast_build,
+                    bits_per_doc=self.m_bits if configured else None,
                     backend=self.backend,
                 )
             self.register_buffer("bloom_index", bloom_index)

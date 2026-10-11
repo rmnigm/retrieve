@@ -1,5 +1,5 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork (official-fork/CHANGES.md).
+// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C12: bloom_index_build_fixed, a configured width (official-fork/CHANGES.md).
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -295,6 +295,7 @@ __global__ void generate_column_b_and_signature_sizes_kernel(
     int64_t column_count,
     int64_t k,
     double b_multiplier,
+    int64_t fixed_b,
     int64_t* b_sizes,
     int64_t* signature_sizes) {
   uint32_t thread_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -326,8 +327,11 @@ __global__ void generate_column_b_and_signature_sizes_kernel(
         WarpReduce(temp_storage[warp_id % BLOOM_BUILD_V2_WARP_PER_BLOCK])
             .Reduce(max_feature_count, ST_CUB_MAXIMUM());
     if (tidx == 0) {
-      int64_t b_size =
-          static_cast<int64_t>(column_max_feature_count * k * b_multiplier);
+      // fork (C12): fixed_b > 0 is the configured width in bits per doc (m_bits) for every
+      // bundle; 0 keeps upstream's max terms in the column x k x b_multiplier
+      int64_t b_size = fixed_b > 0
+          ? fixed_b
+          : static_cast<int64_t>(column_max_feature_count * k * b_multiplier);
       CUDA_KERNEL_ASSERT(b_size <= MAX_B_V2 && "b_size exceeds MAX_B_V2");
       b_sizes[i + 1] = b_size;
       signature_sizes[i + 1] = round_bits_to_bytes(b_size);
@@ -349,7 +353,8 @@ std::tuple<Tensor, Tensor> generate_column_b_and_signature_offsets(
     int64_t document_count,
     int64_t column_count,
     int64_t k,
-    double b_multiplier) {
+    double b_multiplier,
+    int64_t fixed_b) {
   int64_t block_size = BLOOM_BUILD_BLOCK_THREADS;
   int64_t grid_size = std::min(
       at::ceil_div(column_count, BLOOM_BUILD_V2_WARP_PER_BLOCK),
@@ -373,6 +378,7 @@ std::tuple<Tensor, Tensor> generate_column_b_and_signature_offsets(
       column_count,
       k,
       b_multiplier,
+      fixed_b,
       b_sizes.data_ptr<int64_t>(),
       signature_sizes.data_ptr<int64_t>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -794,7 +800,8 @@ std::tuple<Tensor, Tensor> bloom_index_build_common(
     // end bloom index v1 only parameters.
     int64_t k,
     bool fast_build,
-    const Tensor* aligned_feature_indices) {
+    const Tensor* aligned_feature_indices,
+    int64_t fixed_b = 0) {
   bloom_index_feature_check(feature_ids, feature_offsets, feature_values);
   at::cuda::OptionalCUDAGuard device_guard;
   device_guard.set_index(feature_ids.device().index());
@@ -821,7 +828,8 @@ std::tuple<Tensor, Tensor> bloom_index_build_common(
             document_count,
             compute_column_count,
             k,
-            b_multiplier);
+            b_multiplier,
+            fixed_b);
     column_bundle_b_offsets = std::move(bundle_b_offsets);
     column_bundle_signature_offsets = std::move(bundle_signature_offsets);
     column_bundle_b_offsets_ptr = column_bundle_b_offsets.data_ptr<int64_t>();
@@ -930,11 +938,37 @@ std::tuple<Tensor, Tensor> bloom_index_build_cuda(
       nullptr);
 }
 
+// fork (C12): the bloom index at a configured width, bits_per_doc bits per doc in every bundle.
+std::tuple<Tensor, Tensor> bloom_index_build_fixed_cuda(
+    const Tensor& feature_ids,
+    const Tensor& feature_offsets,
+    const Tensor& feature_values,
+    int64_t bits_per_doc,
+    int64_t k,
+    bool fast_build) {
+  TORCH_CHECK(bits_per_doc > 0, "bits_per_doc must be positive");
+  return bloom_index_build_common<true>(
+      feature_ids,
+      feature_offsets,
+      feature_values,
+      /*b_multiplier=*/2.0,
+      -1,
+      -1,
+      k,
+      fast_build,
+      nullptr,
+      bits_per_doc);
+}
+
 TORCH_LIBRARY_IMPL(stfork, CUDA, m) {
   m.impl(
       "bloom_index_build",
       torch::dispatch(
           c10::DispatchKey::CUDA, TORCH_FN(bloom_index_build_cuda)));
+  m.impl(
+      "bloom_index_build_fixed",
+      torch::dispatch(
+          c10::DispatchKey::CUDA, TORCH_FN(bloom_index_build_fixed_cuda)));
 }
 
 } // namespace bloom_indexer

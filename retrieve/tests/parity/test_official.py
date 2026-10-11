@@ -657,6 +657,35 @@ def test_c8_fork_bloom_search_equals_upstream(partial, score_path):
     _assert_bitexact(of.fork_search(*args, score_path=score_path, bloom=bloom), ref)
 
 
+def test_c12_fork_configured_bloom_width():
+    """META-FORK C12: ``bloom_width="configured"`` builds every bundle ``m_bits`` bits per doc
+    (the index is ``N · m_bits / 8`` bytes rounded to whole bundles, as Triton's at equal
+    ``m_bits``), keeps no false negatives against the exact predicate, and
+    ``bloom_width="upstream"`` on the fork builds Meta's index ``torch.equal``; ``official``
+    refuses ``"configured"``."""
+    if OB != "official-fork":
+        pytest.skip("fork-only gate (META-FORK C12)")
+    require_official("official")
+    attrs, offsets, sizes, index, boff = _bloom_corpus()
+    n = attrs.shape[0]
+    fidx, fboff = ofb.build_bloom_index(attrs, b_multiplier=B_MULT, build_k=K_SEARCH)
+    assert torch.equal(fidx, index) and torch.equal(fboff, boff)
+    for m_bits in (64, 512, 2048):
+        cidx, cboff = ofb.build_bloom_index(
+            attrs, b_multiplier=B_MULT, build_k=K_SEARCH, bits_per_doc=m_bits
+        )
+        bundles = -(-n // 2048)
+        assert torch.equal(cboff, torch.arange(bundles + 1, device="cuda") * m_bits)
+        assert cidx.numel() * 8 == bundles * 2048 * m_bits // 8
+        qa = make_query_attrs(32, c=attrs.shape[1], n_vocab=50, seed=45)
+        plans = ofb.parse_plans(of.queries_to_expressions(qa), HASH_K)
+        bloom = ofb.bloom_full_mask(cidx, cboff, plans, K_SEARCH, HASH_K, return_bool_mask=True)
+        exact = clause_mask(attrs, torch.zeros(attrs.shape[1], dtype=torch.bool, device="cuda"), qa)
+        assert not (exact & ~bloom[:, :n]).any(), "a bloom false negative"
+    with pytest.raises(ValueError, match="official-fork"):
+        OfficialConfig(bloom_width="configured").width_for("official")
+
+
 @pytest.mark.parametrize("d", [128, 192, 768])
 def test_c6_fork_probe_prep_equals_reference(d):
     """META-FORK C6: the fork's prep kernel (``stfork.probe_prep``, ``search``'s first launch)
@@ -756,7 +785,8 @@ def _layer(data, backend, filter_mode="none", *, reverse=None, official=None, **
     if filter_mode == "bloom":
         args.update(
             filter_mode="bloom",
-            m_bits=None if backend in OFFICIAL_BACKENDS else 512,
+            # Meta's own width on official; the fork's configured width is m_bits (C12)
+            m_bits=None if backend == "official" else 512,
             k_hash=K_SEARCH,
         )
     if filter_mode == "exact":
@@ -836,7 +866,7 @@ def test_t6_layer_bloom(data, bloom_path, record_property):
     )
     tri = _layer(data, "triton", "exact")
     off = _layer(data, OB, "bloom", official=cfg)
-    assert off.m_bits == 0 and off.k_hash == K_SEARCH
+    assert off.m_bits == (0 if OB == "official" else 512) and off.k_hash == K_SEARCH
     assert off.bloom_index.dtype == torch.int64 and off.bundle_b_offsets.numel() == N // 2048 + 1
     _transplant(off, tri)
     ids_o, sc_o = off(data["query"], off.prepare_queries(data["q_attrs"]))
