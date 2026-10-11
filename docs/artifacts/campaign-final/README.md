@@ -11,6 +11,7 @@ D1-G passes.
 | [`ceiling.sh`](ceiling.sh) | the C6 recall-ceiling checks as script legs, one per bench (`campaign-v2.11/ceiling-int8-laion30m/ceiling_check.py`, quality only) at the points of [`ceiling-points.json`](ceiling-points.json) (the measured ones: goodreads / arXiv and their synth at the v2.10 tune's best clause point, PubMed 16384 / 4096, YFCC synth 4096 / 256, LAION 16384 / 4096); on C6's GPU after the bench's tune legs; LAION's synth p001 reads a scratch `ceil` suite, as the v2.11 driver did |
 | [`oracles.txt`](oracles.txt) | the oracle blobs (`ds dim sweep fp16`) present on pod d at the final pass; `plan.py` writes them into the recipe |
 | [`aggregate.py`](aggregate.py) | the one table: every fetched `campaign-final/*` subtree deduplicated by record key into one tree and `results.parquet`, with the recipe checked against what arrived ([below](#after-all-legs)) |
+| [`coverage.py`](coverage.py) | the final grid (`load_matrix` over suites.yaml) against the merged tree: missing and off-grid cells |
 | [`d1g_quality.py`](d1g_quality.py) | D1-G's byte-identical quality subset: `plan` picks one cheap (filter kind, sweep, seed) job per grid leg, `compare` checks each rerun record's `quality` against the final record's |
 | [`d1g_run.sh`](d1g_run.sh) | runs those picks on pod d, one job per GPU under its lock, `bench run --skip-perf --force` into a scratch tree |
 | [`build_tune.py`](build_tune.py) | writes the `tune-q` / `tune-timed` blocks of `evaluation/config/suites.yaml` from the per-bench grids and [`tune-timed-candidates.json`](tune-timed-candidates.json) (goodreads / arXiv / synth from the v2.10 quality grid, YFCC its v2.9 frontier, PubMed its v2.10 candidates; points past the n_lists / 4 cap dropped) |
@@ -59,7 +60,9 @@ So about 20 h wall, if M1 lets pod d time on both GPUs at once; otherwise pod d 
    - every record must be at the library;
    - the recipe's paths and record counts are checked.
 
-   The result went up as `campaign-final/results.parquet` with `dedup.json`, `dedup.csv` and `coverage.json`. The three
+   `coverage.py CONFIG_DIR TREE OUT.json` sets the merged tree against every cell `load_matrix` expands from suites.yaml.
+   The table is `campaign-final/merged-4016` (`results.parquet` with `dedup.json`, `dedup.csv`, `coverage.json`): 4,016
+   records, 0 missing. The first aggregate at the `campaign-final` root (4,001 records) lacked the 15 c3 d256 cells. The three
    `*-d1-st` subtrees are the prefer set. They restore d-run's legs d1-02 / d1-04 / d1-09, whose recipe paths a later
    leg's upload replaced.
 2. `bench report --manifest` over the merged tree, with `evaluation/campaign.yaml` set to the one code_version.
