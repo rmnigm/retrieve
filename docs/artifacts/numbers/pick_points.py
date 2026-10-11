@@ -1,6 +1,7 @@
 """Timed points from the quality-only curves (README.md): per (dataset, kind, sweep, n_lists) the smallest n_probe reaching
 recall 0.90 and 0.95 (oracle recall@100 and @1000), the largest n_probe that ran (the cap), and the paper's 24 at the
-dataset's smallest n_lists. Writes the `n-timed` and `n-st-k2048` suites, each SilverTorch arm interleaved with LiNR V1 / V2.
+dataset's smallest n_lists. Curves split over suites (n-curve-q + n-curve-q-wide) merge by
+(dataset, kind, sweep, n_lists, n_probe); a group whose curve stops short of the cap n_lists / 4 is skipped. Writes the `n-timed` and `n-st-k2048` suites, each SilverTorch arm interleaved with LiNR V1 / V2.
 
 usage: pick_points.py CURVE_PARQUET [...] > suites-timed.yaml
 """
@@ -31,6 +32,14 @@ df = df.drop_duplicates(["dataset", "filter_kind", "sweep", "n_lists", "n_probe"
 points = {}
 for (ds, kind, sw, nl), g in df.groupby(["dataset", "filter_kind", "sweep", "n_lists"]):
     g = g.sort_values("n_probe")
+    if (
+        g.n_probe.max() < nl // 4
+    ):  # a split curve (n-curve-q + n-curve-q-wide) whose wide half has not landed yet
+        print(
+            f"# skipped {ds} {kind} {sw} n_lists {nl}: curve ends at {g.n_probe.max()} < cap {nl // 4}",
+            file=sys.stderr,
+        )
+        continue
     pick = {int(g.n_probe.max())}
     for col in ("oracle_recall@100", "oracle_recall@1000"):
         for t in TARGETS:
