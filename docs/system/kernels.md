@@ -1838,7 +1838,11 @@ file. `CHANGES.md` lists every change; each has its gate row in
 (`probe_prep_kernel`: per query row the int8 codes and scale exactly as eager torch computes our
 `quantize_int8` — the code quotient in fp64 rounded to fp32, the scale `abs_max · fp32(1/127)` as
 torch divides by a CPU scalar — and one block for the probed clusters' ids, lengths, offsets,
-warp sizes and the scorer's three cumsums; `stfork::probe_prep` exposes it), the filter's masks (bloom over the
+warp sizes and the scorer's three cumsums; `stfork::probe_prep` exposes it), the filter (on the
+partial bloom path the payload kernels evaluate the prepared plan on the ≤ 2 bloom columns each
+warp's docs span and cut the same mask bits upstream's payload kernels cut from
+`column_mask_response`, so no column search runs; the full path's mask, or `exact`'s, is a
+full-`N` mask as before) (bloom over the
 prepared plans, partial or full; `exact` passes our Triton `clause_mask_packed` as the full-`N`
 mask), payloads + scorer, top-k on the raw scores (two-level from `B · width ≥ 2²³` with ≥ 8
 blocks of 256 slots per top-k slot: a block-max kernel, `topk` over the maxima, the k best blocks'

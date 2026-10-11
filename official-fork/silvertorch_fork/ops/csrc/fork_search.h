@@ -12,6 +12,23 @@
 // fused_kmean_ann_cuda.cu and bloom_index_search_cuda.cu.
 namespace st::ops::fused_kmean_ann {
 
+std::tuple<at::Tensor, at::Tensor> fused_kmean_ann_run_payloads(
+    const at::Tensor& selected_cluster_ids,
+    const at::Tensor& embeddings,
+    const at::Tensor& queries,
+    int64_t max_tensor_size_per_row,
+    int64_t invalid_index_value,
+    int64_t divisor_for_int8,
+    bool has_filtering_bitmask,
+    const at::Tensor& warp_payloads,
+    int64_t total_needed_warps,
+    const int32_t* total_needed_warps_ptr,
+    const at::Tensor& remaining_payloads,
+    int64_t remaining_docs,
+    const int32_t* remaining_docs_ptr,
+    const std::optional<at::Tensor>& per_embedding_scale,
+    bool query_on_shared_mem);
+
 std::tuple<at::Tensor, at::Tensor> fused_kmean_ann_cuda_precomputed(
     const at::Tensor& cluster_offsets,
     const at::Tensor& cluster_ids,
@@ -73,5 +90,22 @@ bloom_index_search_batch_return_partial_response_prepared_cuda(
     int64_t onebit_hash_k,
     const std::optional<at::Tensor>& query_plan_index,
     int64_t max_columns);
+
+std::tuple<at::Tensor, int64_t, at::Tensor, int64_t> bloom_partial_payloads_prepared_cuda(
+    const at::Tensor& bloom_index,
+    const at::Tensor& bloom_bundle_b_offsets,
+    const at::Tensor& plans,
+    int64_t plan_count,
+    int64_t max_stack_size,
+    const std::optional<at::Tensor>& query_plan_index,
+    int64_t k,
+    int64_t onebit_hash_k,
+    const at::Tensor& cluster_offsets,
+    const at::Tensor& cluster_ids,
+    const at::Tensor& cluster_length,
+    const at::Tensor& warp_rounded_length_cumsum,
+    const at::Tensor& remaining_length_cumsum,
+    const at::Tensor& warp_size_cumsum,
+    int64_t max_tensor_size_per_row);
 
 } // namespace st::ops::bloom_search

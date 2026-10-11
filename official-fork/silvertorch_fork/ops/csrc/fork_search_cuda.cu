@@ -299,6 +299,12 @@ std::tuple<Tensor, Tensor> raw_topk(const Tensor& raw, const Tensor& idx, int64_
   return {top_raw, cand_slot.gather(1, cand_pos)};
 }
 
+const int32_t* last_element(const Tensor& inclusive_cumsum) {
+  return inclusive_cumsum.numel() == 0
+      ? nullptr
+      : inclusive_cumsum.const_data_ptr<int32_t>() + inclusive_cumsum.numel() - 1;
+}
+
 struct Prep {
   Tensor codes;
   Tensor scales;
@@ -398,43 +404,42 @@ std::tuple<Tensor, Tensor> search_cuda(
   Tensor raw;
   Tensor idx;
   if (plans.has_value() && bloom_partial) {
+    // C8: the payload kernels evaluate the bloom over the probed docs themselves
     TORCH_CHECK(bloom_index.has_value() && bloom_bundle_b_offsets.has_value());
-    const int64_t max_columns = cluster_ids.size(0) *
-        (max_tensor_size_per_row / 64 + 2 * cluster_ids.size(1));
-    auto [cumsum, first, columns] = st::ops::bloom_search::
-        bloom_index_search_batch_return_partial_response_prepared_cuda(
+    const int64_t width = (max_tensor_size_per_row + 31) / 32 * 32;
+    auto [warp_payloads, warps, remaining_payloads, remainders] =
+        st::ops::bloom_search::bloom_partial_payloads_prepared_cuda(
             *bloom_index,
             *bloom_bundle_b_offsets,
             *plans,
             plan_count,
             max_stack_size,
-            prep.selected_offsets,
-            cluster_length,
+            query_plan_index,
             bloom_k,
             hash_k,
-            query_plan_index,
-            max_columns);
-    std::tie(raw, idx) =
-        st::ops::fused_kmean_ann::fused_kmean_ann_cuda_with_partial_masks(
             offsets,
             cluster_ids,
             cluster_length,
-            item_codes,
-            q_codes,
-            max_tensor_size_per_row,
-            cumsum,
-            first,
-            columns,
-            /*invalid_index_value=*/-1,
-            divisor_for_int8,
-            std::nullopt,
-            std::nullopt,
-            prep.warp_size,
             prep.warp_rounded_length_cumsum,
             prep.remaining_length_cumsum,
             prep.warp_size_cumsum,
-            0,
-            0);
+            width);
+    std::tie(raw, idx) = st::ops::fused_kmean_ann::fused_kmean_ann_run_payloads(
+        cluster_ids,
+        item_codes,
+        q_codes,
+        width,
+        /*invalid_index_value=*/-1,
+        divisor_for_int8,
+        /*has_filtering_bitmask=*/true,
+        warp_payloads,
+        warps,
+        last_element(prep.warp_size_cumsum),
+        remaining_payloads,
+        remainders,
+        last_element(prep.remaining_length_cumsum),
+        std::nullopt,
+        /*query_on_shared_mem=*/false);
   } else {
     std::optional<Tensor> mask = filtering_bit_mask;
     if (plans.has_value()) {

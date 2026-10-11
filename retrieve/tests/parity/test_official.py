@@ -613,6 +613,50 @@ def test_c4_fork_prepared_searches_equal_upstream():
                           torch.device("cuda"), slots=b)  # fmt: skip
 
 
+@pytest.mark.parametrize("partial", [True, False])
+@pytest.mark.parametrize("score_path", ["int32", "fp16"])
+def test_c8_fork_bloom_search_equals_upstream(partial, score_path):
+    """META-FORK C5 / C8, gate X end to end on the bloom paths: ``stfork.search`` (prep kernel,
+    payloads that evaluate the bloom in place on the partial path, the prepared full mask
+    otherwise, scorer, epilogue) against upstream's search ops + scorer + the adapter's epilogue,
+    on ragged clusters starting mid-column with repeated expressions: ids and scores
+    ``torch.equal`` up to ties."""
+    if OB != "official-fork":
+        pytest.skip("fork-only gate (META-FORK C8)")
+    require_official("official")
+    g = torch.Generator(device="cuda").manual_seed(15)
+    n_lists, p, b, c, d, k = 64, 12, 16, 3, 128, 50
+    sizes = torch.randint(0, 300, (n_lists,), generator=g, device="cuda")
+    offsets = torch.cat([sizes.new_zeros(1), sizes.cumsum(0)])
+    n = int(offsets[-1])
+    attrs = make_attrs(n, c=c, a_max=2, n_vocab=8, seed=43)
+    index, boff = of.build_bloom_index(attrs, b_multiplier=B_MULT, build_k=K_SEARCH)
+    codes, _ = quantize_int8_global(make_index(n, d))
+    scale = torch.tensor(0.02, device="cuda")
+    perm = torch.randperm(n, generator=g, device="cuda")
+    q = make_query(b, d)
+    qa = make_query_attrs(b, c=c, n_vocab=8, seed=44)
+    qa[::3] = qa[1::3]
+    exprs = of.queries_to_expressions(qa)
+    probe = torch.rand(b, n_lists, generator=g, device="cuda").argsort(1)[:, :p]
+    width = int(sizes.sort(descending=True).values[:p].sum())
+    args = (q, probe, offsets, sizes, codes, perm, scale, k, width)
+    if partial:
+        unique = list(dict.fromkeys(exprs))
+        row_plan = torch.tensor([unique.index(e) for e in exprs], device="cuda")
+        masks = of.bloom_partial_masks(index, boff, of.parse_plans(unique, HASH_K), offsets[probe],
+                                       sizes[probe], K_SEARCH, HASH_K, row_plan)  # fmt: skip
+        ref = of.official_probe_score(*args, score_path=score_path, partial=masks)
+        dp = ofb.prepare_plans(unique, HASH_K, 5, c, torch.device("cuda"), slots=b)
+    else:
+        row_plan = None
+        mask = of.bloom_filtering_mask(index, boff, of.parse_plans(exprs, HASH_K), K_SEARCH, HASH_K)
+        ref = of.official_probe_score(*args, score_path=score_path, filtering_bit_mask=mask)
+        dp = ofb.prepare_plans(exprs, HASH_K, 5, c, torch.device("cuda"), slots=b)
+    bloom = of.ForkBloom(index, boff, dp, row_plan, K_SEARCH, HASH_K, partial)
+    _assert_bitexact(of.fork_search(*args, score_path=score_path, bloom=bloom), ref)
+
+
 @pytest.mark.parametrize("d", [128, 192, 768])
 def test_c6_fork_probe_prep_equals_reference(d):
     """META-FORK C6: the fork's prep kernel (``stfork.probe_prep``, ``search``'s first launch)
