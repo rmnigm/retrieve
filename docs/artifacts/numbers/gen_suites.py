@@ -104,6 +104,34 @@ def curve_arms(datasets, wide):
     return arms
 
 
+SMALL_LISTS = {
+    "laion1m": [4096, 8192],
+    "laion3m": [8192, 16384],
+}  # A1b (user: go bigger at 1-3 M too)
+
+
+def small_lists_arms(wide, backend="official-fork"):
+    arms = []
+    for kind in ("clause", "bloom"):
+        for ds, lists in SMALL_LISTS.items():
+            for n in lists:
+                probes = [
+                    p for p in P if p <= n // 4 and (wide is None or (p > 1024) == wide)
+                ]
+                if probes:
+                    arms.append(
+                        {
+                            "algo": "silvertorch",
+                            "backends": [backend],
+                            "filter_kinds": [kind],
+                            "build": {"n_lists": [n]},
+                            "query": {"n_probe": probes},
+                            "datasets": {ds: {}},
+                        }
+                    )
+    return arms
+
+
 ALL = list(BENCH)
 BIG = [d for d in ALL if BENCH[d][1] == BIG_LISTS]
 blocks = {
@@ -204,6 +232,45 @@ blocks = {
         [100, 1000],
         [16],
         kinds=("clause", "bloom"),
+        perf=False,
+    ),
+    "n-curve-q-laion-small": suite(
+        list(SMALL_LISTS),
+        small_lists_arms(False),
+        [100, 1000],
+        [16],
+        kinds=("clause", "bloom"),
+        perf=False,
+    ),
+    "n-curve-q-laion-small-wide": suite(
+        list(SMALL_LISTS),
+        small_lists_arms(True),
+        [100, 1000],
+        [16],
+        kinds=("clause", "bloom"),
+        perf=False,
+    ),
+    # C6 ceiling check (ceiling_check.py): one Triton index at the largest n_lists and its cap; quality only, same ids as official-fork
+    "n-ceil-laion-small": suite(
+        list(SMALL_LISTS),
+        [
+            {
+                "algo": "silvertorch",
+                "backends": ["triton"],
+                "build": {"n_lists": [8192]},
+                "query": {"n_probe": [2048]},
+                "datasets": {"laion1m": {}},
+            },
+            {
+                "algo": "silvertorch",
+                "backends": ["triton"],
+                "build": {"n_lists": [16384]},
+                "query": {"n_probe": [4096]},
+                "datasets": {"laion3m": {}},
+            },
+        ],
+        [100],
+        [16],
         perf=False,
     ),
     "n-curve-q-all": suite(
