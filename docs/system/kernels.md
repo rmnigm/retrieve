@@ -1847,11 +1847,19 @@ file. `CHANGES.md` lists every change; each has its gate row in
    tested over the probed docs only, one warp per 32-doc payload with `__brev(__ballot_sync(…))`
    as its mask, an inactive clause a warp-uniform skip. Full bloom: the prepared search's full-`N`
    mask, read by the scorer as upstream's.
-3. **Scorer**: upstream's payload scorer (`process_cluster` / `_remaining`).
-4. **Top-k on the raw scores**: two-level from `B · width ≥ 2²³` with ≥ 8 blocks of 256 slots per
-   top-k slot (a block-max kernel, `topk` over the maxima, the k best blocks' slots gathered, a
-   final `topk`; exact for the reason our Triton epilogue's is), else `where` + `topk`.
-5. **Epilogue**: `official_probe_score`'s `[B, k]` dequantize and `sort_perm` map, in its order.
+3. **Scorer**: upstream's payload scorer (`process_cluster` / `_remaining`). On `search`'s path its
+   `[B, width]` buffers are not pre-filled: lanes failing the filter write the sentinels themselves
+   and each row's written width (from the prep kernel) bounds what the select reads. Payload
+   kernels use a warp-parallel cluster search, or one warp per cluster at wide probes.
+4. **Top-k on the raw scores, ours (k ≤ 1024)**: a radix select per row chunk of 8192 slots in a
+   512-thread CTA (keys that order like the scores, held in registers; four 8-bit warp-aggregated
+   histogram passes; keys equal to the k-th taken in index order, as `torch.topk` takes them, so
+   the result is deterministic and graph replays equal eager), repeated over the chunks' winners
+   until one CTA holds them, then the final select with a register bitonic sort and the `[B, k]`
+   epilogue (`official_probe_score`'s, its fp32 multiplies in its order) fused. Rows with ≥ 8
+   blocks of 256 slots per top-k slot are first cut to their k best blocks, whose maxima the
+   scorer folds as it writes. Above k 1024, `topk` (two-level from `B · width ≥ 2²³`) and a
+   one-kernel epilogue.
 
 It returns `(ids int64 [B, k], scores fp32 [B, k])` with `-1` / `-inf` pads.
 `official_probe_score` stays for `"official"`.
