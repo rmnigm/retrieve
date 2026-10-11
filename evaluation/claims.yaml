@@ -9,7 +9,7 @@
 # `metric` is latency | recall | matched:<recall target> | field:<column>; `vs` (optional)
 # selects the denominator of a ratio; `bs` (default 1) and `k` (default 100).
 # Section numbers marked "section: planner" are not yet traced to the paper text
-# (docs/paper/, roadmap claims matrix).
+# (research/paper/, roadmap claims matrix).
 
 claims:
   - id: C1

@@ -156,7 +156,7 @@ parquet schema (nested `primary_topic.field.id` etc.) and runs `prep` →
 
 ### yambda
 
-Yambda is out of the study ([decisions](../decisions.md#datasets)); its
+Yambda is out of the study ([decisions](../../research/decisions.md#datasets)); its
 ETL, configs and checkpoints stay.
 
 `uv run eval-data yambda prep --variant {50m,500m,5b} --output-dir data/yambda/<v>`
@@ -204,7 +204,7 @@ Nothing breaks ties between one user's events at the same second, and
 goodreads has many (bulk shelving), so the order inside a tie, and which
 tied items survive the 200-item cut, change from run to run; a re-run
 differs from the Hub copy only there
-([validation](../validation.md#trainer-inputs-with-timestamps-data-gates-not-citable)).
+([validation](../../research/validation.md#trainer-inputs-with-timestamps-data-gates-not-citable)).
 
 **Vocab order (`attrs`).** Every vocab and top-k cut is a total order of its inputs: language,
 author and wide-shelf vocab by count descending, **ties by name**; per-book and per-work genre
@@ -291,7 +291,7 @@ with a null license (15.1 %) carried INT64_MIN in the published file, and
 so did the 1,528 `eval_split.parquet` queries whose target is one of them,
 instead of bucket 9 `none`. C2 and C3 had the same latent pattern, but
 the source has no nulls there. The corrected C1 is re-derived by
-[`patch_license_clause.py`](../artifacts/arxiv-etl-fix/patch_license_clause.py),
+[`patch_license_clause.py`](../../research/artifacts/arxiv-etl-fix/patch_license_clause.py),
 which rewrites only C1 and the matching query column and asserts that every
 non-null item's bucket is unchanged.
 
@@ -416,7 +416,7 @@ attribute (tags) and no wide-bloom bag, so the dead artifacts below do
 not exist for it.
 
 **Validating the shipped GT** (the dataset's staging gate; its state is
-in [validation](../validation.md#datasets)).
+in [validation](../../research/validation.md#datasets)).
 
 ```bash
 uv run --directory evaluation eval-data yfcc-check-gt \
@@ -459,8 +459,8 @@ exact-duplicate vectors), gave `linr_v1_filter_mask` only
 `recall_oracle@1000 ≈ 0.96` against the fp32 oracle, and `QualityGateError`
 ended the run before the other algos. The oracle is right (0.9998 against
 fp64). The exact scorers now return fp32 scores
-([decisions](../decisions.md#library)), which pass the gate at 0.9944; the
-residual is the fp16 item storage ([validation](../validation.md#datasets)).
+([decisions](../../research/decisions.md#library)), which pass the gate at 0.9944; the
+residual is the fp16 item storage ([validation](../../research/validation.md#datasets)).
 
 ### pubmed
 
@@ -468,7 +468,7 @@ residual is the fp16 item storage ([validation](../validation.md#datasets)).
 `$RETRIEVE_DATA_ROOT/pubmed-medcpt`: `bench check` passes. A rebuild from
 source on a fresh pod (63 min, CPU) gives D1's slice, embeddings included
 (an exact V1 cell bit-equal to `d1/pubmed`'s);
-state in [validation](../validation.md#datasets). The dataset is not on
+state in [validation](../../research/validation.md#datasets). The dataset is not on
 the Hub. Nothing below is citable.
 
 `plan` → `download --what pmids` → `convert --fetch --delete-raw` →
@@ -497,7 +497,7 @@ width 768, and the row count must equal `len(pmids_chunk_i.json)`. The MEDLINE
 baseline *does* publish `.md5` and `verify --medline` checks those.
 
 **No dimensionality reduction.** Every dataset is benchmarked at its encoder's
-native dim ([decisions](../decisions.md#datasets): no PCA), so pubmed has
+native dim ([decisions](../../research/decisions.md#datasets): no PCA), so pubmed has
 exactly one content dir, `content_d768`.
 [`config/pubmed.yaml`](../../evaluation/config/pubmed.yaml) is the dataset
 file, listed in the `filter` suite at 768.
@@ -620,7 +620,7 @@ the unfiltered cross-check sweep is meaningful rather than an identity lookup.
 
 Computed by `eval-data pubmed plan --medline --keep-items N`
 from the server's own sizes (the JSON reports are in
-[dataset-candidates-artifacts/pubmed/](../artifacts/dataset-candidates/pubmed/)),
+[dataset-candidates-artifacts/pubmed/](../../research/artifacts/dataset-candidates/pubmed/)),
 at the 23.9 MB/s a single-stream 64 MB probe measured that day (an earlier
 `curl` probe saw 41 MB/s; the range is the honest number):
 
@@ -656,25 +656,25 @@ beside it. On disk: 17 GB under `pubmed-medcpt/` (15 GB of fp16 shards,
 1.5 GB of attrs, 0.7 GB of `staging/` article parquets, 0.1 GB of MEDLINE
 parquet), plus 0.4 GB of PMID lists kept in `_raw/pubmed/`. The exact
 `c0_mesh` oracle (k_gt 1000, 10,000 queries) builds in 23 s
-([artifacts/e2-pubmed/](../artifacts/e2-pubmed/)). The item budget above
+([artifacts/e2-pubmed/](../../research/artifacts/e2-pubmed/)). The item budget above
 leaves little room for the index builds' own temporaries: SilverTorch's
 one-shot int8 quantize (two more 28.6 GiB fp32 copies) and LiNR V3's
 one-shot 1-bit build both OOMed here. Both now quantize chunk by chunk in
 the library, with `bench/` and the slice unchanged
-([validation](../validation.md#library-gates), rows *Build-time int8
+([validation](../../research/validation.md#library-gates), rows *Build-time int8
 quantization* and *Build-time 1-bit quantization*).
 
 ### kuairand
 
-**Status: out of the study** ([decisions](../decisions.md#datasets)); its ETL, config and
+**Status: out of the study** ([decisions](../../research/decisions.md#datasets)); its ETL, config and
 trainer inputs stay. The eval inputs are rebuilt with `eval-data kuairand all` (~20 min); only
 the trainer inputs are on the Hub ([HuggingFace I/O](#huggingface-io)), and the d64
-`train_on_val` checkpoint was not kept ([validation](../validation.md#final-models-the-e1c-recipe);
-its flags are in [its command.sh](../artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh)).
+`train_on_val` checkpoint was not kept ([validation](../../research/validation.md#final-models-the-e1c-recipe);
+its flags are in [its command.sh](../../research/artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh)).
 d128 does not fit. The one filter cell recorded ran on the deleted gSASRec `gsasrec-d128-shared`
 checkpoint and is not reproducible.
 Nothing below is citable. The staging scripts and the gSASRec run's config and metrics are in
-[artifacts/e4-kuairand/](../artifacts/e4-kuairand/).
+[artifacts/e4-kuairand/](../../research/artifacts/e4-kuairand/).
 
 `uv run eval-data kuairand all --output-dir data/kuairand`, or the four
 subcommands in turn. Sources, both CC BY 4.0 on Zenodo and md5-checked by
@@ -775,18 +775,18 @@ are `t_*` over C0–C3 and `b_*` over C4–C6. Bloom runs `t_cat1`, `t_tag`,
 two separate tables fit (62.6 GB peak on the 80 GB H100). At d128 even one
 shared table (`reuse_item_embeddings`) does not: weight, two AdamW moments
 and the two dense gradients it receives in backward exceed 80 GB
-([probe](../artifacts/seqrec-encoder/k128-probe-oom/README.md)). Every epoch
+([probe](../../research/artifacts/seqrec-encoder/k128-probe-oom/README.md)). Every epoch
 also scores the full catalog for the val users, so `eval_max_users` bounds
 that cost. The final
 KuaiRand model is refit with `train_on_val=true` at the epoch count chosen
 on val, because next-day clicks drift and the val day is otherwise never
-trained on ([validation](../validation.md#kuairand-temporal-drift)). The
-commands are the [train-only run](../artifacts/seqrec-encoder/k64-sasrec-ssm-logq/command.sh)
+trained on ([validation](../../research/validation.md#kuairand-temporal-drift)). The
+commands are the [train-only run](../../research/artifacts/seqrec-encoder/k64-sasrec-ssm-logq/command.sh)
 that picks the epoch count and the
-[refit](../artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh).
+[refit](../../research/artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh).
 
 The d64 refit takes ~261 s/epoch at 62.7 GB peak on the H100 (4 epochs); its test
-numbers and the drift diagnosis are in [validation](../validation.md#final-models-the-e1c-recipe).
+numbers and the drift diagnosis are in [validation](../../research/validation.md#final-models-the-e1c-recipe).
 
 ```
 data/kuairand/
@@ -808,13 +808,13 @@ data/kuairand/
 ### openalex
 
 **Status: built at 10 M, `bench check` clean, one filter cell run; not on the Hub; dropped from the
-study (user, 2026-10-08; [backlog](../backlog.md#datasets-not-in-the-study)).** The OpenAlex fallback (no Semantic Scholar key), a 10 M catalog like pubmed's.
+study (user, 2026-10-08; [backlog](../../research/backlog.md#datasets-not-in-the-study)).** The OpenAlex fallback (no Semantic Scholar key), a 10 M catalog like pubmed's.
 `convert --sample-rate 0.35 --workers 64` streamed all 2,040 files of release 2026-09-23
 (297.1 GB read in 572 s, 0 failures); a 15 M catalog was prepped and encoded
 (`encode_text` 15,663 s on the A100, 958 docs/s), did not fit the harness (below), and was
 cut to 10 M: `prep --keep-items 10000000` (374 s), `reshard --from-dir` the 15 M vectors
 (34 s, no encode; all 10 M rows `torch.equal` to their source rows,
-[`check_reshard.py`](../artifacts/e3-openalex/check_reshard.py)), `encode_queries`,
+[`check_reshard.py`](../../research/artifacts/e3-openalex/check_reshard.py)), `encode_queries`,
 `attrs`. `verify_prep.py` re-derives every query with no mismatch, and
 `bench check --dataset openalex` reports `openalex d768: ok`. The dataset is in the `filter`
 suite. One cell, `linr_v1_filter_mask`/triton clause `field_era`, eager, `--skip-perf` (so
@@ -838,9 +838,9 @@ passes the query's field and era clauses for every query (subfield 75 %). The su
 15 M run (`run15m-*` logs) held 4.77 in-catalog references per query, 2.85 same field +
 earlier era.
 
-The dry run (artifacts in [e3-openalex/](../artifacts/e3-openalex/)):
+The dry run (artifacts in [e3-openalex/](../../research/artifacts/e3-openalex/)):
 `convert` on 8 real snapshot files (50,304 records) staged 4,581 works; a few thousand
-rows barely cite each other, so [`api_citation_topup.py`](../artifacts/e3-openalex/api_citation_topup.py)
+rows barely cite each other, so [`api_citation_topup.py`](../../research/artifacts/e3-openalex/api_citation_topup.py)
 added the 1,060 eligible works that 60 pool papers really cite (OpenAlex API, same
 `stage_table`). `prep --keep-items 5073` held out 75 papers with 994 in-catalog
 references (405 same field, earlier era), `verify_prep.py` re-derived all of it with no
@@ -920,7 +920,7 @@ of them are drawn with the seed. Per query:
 
 Recall is measured against the harness's exact filtered oracle, as everywhere; the qrels
 carry the citation relevance for the multi-target metrics the harness does not yet read.
-[`verify_prep.py`](../artifacts/e3-openalex/verify_prep.py) re-derives every query's qrels,
+[`verify_prep.py`](../../research/artifacts/e3-openalex/verify_prep.py) re-derives every query's qrels,
 flags and target from `item_id_map.json`, `papers.parquet` and the staged `refs`.
 
 #### Attribute semantics
@@ -951,7 +951,7 @@ harness oracle is built from the same attrs, so recall stays exact for that filt
 
 #### Encoding
 
-`nomic-embed-text-v1.5` at its native 768 dims (no truncation, [decisions](../decisions.md#datasets)),
+`nomic-embed-text-v1.5` at its native 768 dims (no truncation, [decisions](../../research/decisions.md#datasets)),
 `"search_document: "` / `"search_query: "` prefixes as on arxiv, text
 `"{prefix}{title}. {abstract[:1500]}"`, 512 tokens, bf16 weights, fp16 L2-normalised
 output. `encode_text` writes `content_d768/text_emb_shard_NNN.pt` of `--shard-rows`
@@ -973,7 +973,7 @@ As measured; `plan` from its
 | | 10 M catalog |
 |---|---|
 | read over S3 | **297.1 GB** of projected columns (all files; the slice is a hash, not a prefix) |
-| `convert` wall time | **572 s** at `--workers 64`, 526 MB/s average (the 20 s probes of [`stream_probe.py`](../artifacts/e3-openalex/stream_probe.py) saw 176–230 MB/s; `plan`'s threaded rate, 20 MB/s, is GIL-bound) |
+| `convert` wall time | **572 s** at `--workers 64`, 526 MB/s average (the 20 s probes of [`stream_probe.py`](../../research/artifacts/e3-openalex/stream_probe.py) saw 176–230 MB/s; `plan`'s threaded rate, 20 MB/s, is GIL-bound) |
 | sample rate | 0.35 → 29.9 M staged; any rate that stages N × (1 + margin) gives the same catalog |
 | staging parquet | 16 GB (`_raw/openalex/staging`, deletable once no smaller catalog is wanted) |
 | `prep` | 374 s; `papers.parquet` 6.3 GB, `item_id_map.json` 209 MB |
@@ -1014,8 +1014,8 @@ data/openalex/
 
 **Status: built, `bench check` ok; not on the Hub, so a pod that needs it rebuilds it with the
 steps below (Re-LAION may be shared as vectors only, and the user decides whether:
-[release](../paper/release-and-licenses.md)).** Roadmap V-LAION30: a 30 M scale point at d256, `filter` only
-([decisions](../decisions.md#datasets)). Nothing here is citable. The first dataset staged
+[release](../../research/paper/release-and-licenses.md)).** Roadmap V-LAION30: a 30 M scale point at d256, `filter` only
+([decisions](../../research/decisions.md#datasets)). Nothing here is citable. The first dataset staged
 through the [generic ingest](#the-generic-ingest-eval-data-ingest).
 
 **Order.** The clause codes come from the generic ingest (count descending, ties by value), so
@@ -1163,7 +1163,7 @@ never touches `item_attrs_narrow.pt`, whose digest keys every existing
 oracle and record. With one value per clause a bloom filter has almost no
 false positives here, so synth bloom cells measure only what the bloom
 path costs as the pass rate changes. Measured pass counts per rate:
-[validation](../validation.md#harness-gates). yfcc10m is built on its
+[validation](../../research/validation.md#harness-gates). yfcc10m is built on its
 campaign pod (it is not staged everywhere). The files are not on the Hub.
 
 **Cluster-correlated variant.** `eval-data synth-filter --dataset arxiv
@@ -1189,7 +1189,7 @@ files beside the uniform ones and touches no existing file:
 [`arxiv-corr-synth.yaml`](../../evaluation/config/arxiv-corr-synth.yaml)
 reads them at d128 only (the clusters are d128's) with sweeps `c001`,
 `c003` and `c01`. Achieved pass rates:
-[validation](../validation.md#harness-gates).
+[validation](../../research/validation.md#harness-gates).
 
 ### On-disk layout the harness expects
 
@@ -1268,7 +1268,7 @@ EVAL_REPOS = {
 `pinkmeme/eval-yfcc10m` (private) holds the staged dataset (`content_d192`,
 attrs, tag CSR, `gt_shipped.pt`), but the upstream files are public and
 unauthenticated, so `yfcc download` is the documented fetch path. What may be
-published from each repo: [release and licenses](../paper/release-and-licenses.md).
+published from each repo: [release and licenses](../../research/paper/release-and-licenses.md).
 
 `pinkmeme/eval-pubmed` is **registered but not published**; the 10 M slice
 is rebuilt with `eval-data pubmed`. `pinkmeme/eval-openalex` likewise. `pinkmeme/eval-kuairand` (private) holds only the
@@ -1278,7 +1278,7 @@ staged laion30m (vectors, attrs, vocab; the captions and urls stay under `_raw/`
 `checkpoints/gsasrec-d128-shared` was deleted from it to free space (user decision).
 
 **Trainer inputs** sit under `trainer/` in the private eval repos, uploaded with
-`upload_folder` ([script](../artifacts/seqrec-encoder/hub-upload/trainer_upload.py);
+`upload_folder` ([script](../../research/artifacts/seqrec-encoder/hub-upload/trainer_upload.py);
 `hub.py` has no helper for them). The trainer's `data_dir` needs
 `train/val/test.parquet` and `item_id_map.json` in one directory:
 
@@ -1333,7 +1333,7 @@ uv run --directory evaluation train run data_dir=/data/yambda-500m/trainer loss=
 ```
 
 The defaults are the E1c recipe
-([artifact](../artifacts/seqrec-encoder/e1c-yambda-d64-sasrec-ssm-logq/config.json)):
+([artifact](../../research/artifacts/seqrec-encoder/e1c-yambda-d64-sasrec-ssm-logq/config.json)):
 d64, 2 blocks, 2 heads, ffn 256, dropout 0.5; `loss=sampled_softmax` with
 `normalize`, `temperature=0.05`, `num_negatives=8192`,
 `inbatch_negatives=4096`, `logq`; lr 1e-3, batch 256, L 200, warmup 1000,
@@ -1408,7 +1408,7 @@ Negatives are uniform over `1..N`, drawn on the GPU inside the step.
   the positive class in fp32, hence float64. One `[K]` vector shared by the
   batch does not train: only K table rows get a negative gradient per step,
   and on yambda-500m d64 the user queries collapse onto a few popular items
-  ([validation](../validation.md#seqrec-encoder)).
+  ([validation](../../research/validation.md#seqrec-encoder)).
 - `sampled_softmax` — cross-entropy of the positive against one candidate
   vector shared by the batch: `inbatch_negatives` positives of the batch (a
   random subset) plus `num_negatives` uniform ids, at `temperature` (default 0.05), in fp32 outside

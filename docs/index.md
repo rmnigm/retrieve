@@ -1,35 +1,34 @@
 ---
 title: index
-created: 2026-09-26
+created: 2026-10-11
 updated: 2026-10-11
 type: summary
-tags: [process]
-sources: [docs/]
+tags: [library, harness]
+sources: [docs/, retrieve/docs/]
 ---
 
-# retrieve documentation wiki
+# retrieve documentation
 
-> Last updated: 2026-10-11 | Total pages: 17
+> Last updated: 2026-10-11 | Total pages: 9
 
-What is true now about the code and the project. The study: Meta's
-official SilverTorch code, adapted, against LiNR V1-V3
-([decisions](decisions.md#goal-and-scheduling)). Conventions, page
-format and tags: [SCHEMA.md](SCHEMA.md). Structural changes:
-[log.md](log.md).
+How the `retrieve` library (package `torchretrieve`) and the `evaluation`
+harness work, kept in sync with the code. The research behind it (the
+work queue, decisions, measured results, the paper drafts) is a separate
+wiki in [research/](../research/index.md).
 
-## Start here
+## Library user guide
 
-- [roadmap](roadmap.md): the open work queue, its gates, GPU-hour
-  estimates and dependencies, and how GPU work runs on a pod.
-- [backlog](backlog.md): known work that is not queued (unscheduled
-  defects, post-paper work, background reading).
-- [decisions](decisions.md): standing decisions and constraints, and why.
-- [validation](validation.md): which gates pass now, and the measured
-  results that stand (citable or not yet).
+Ships in the sdist, written for someone who installed the package:
+[getting started](../retrieve/docs/getting-started.md),
+[modules](../retrieve/docs/modules.md),
+[filtering and quantization](../retrieve/docs/filtering-and-quantization.md),
+[indexing and ops](../retrieve/docs/indexing-and-ops.md),
+[benchmarking your own dataset](../retrieve/docs/adding-a-dataset.md).
 
 ## System
 
-How the code works today. Code comments cite these pages by section.
+How the code works today. Code comments cite these pages by section, so
+their headings are stable.
 
 - [architecture](system/architecture.md): the `retrieve` package map,
   modules, filter composition, backend dispatch, module layout.
@@ -43,36 +42,15 @@ How the code works today. Code comments cite these pages by section.
 - [evaluation](system/evaluation.md): the `bench` harness: measurement
   protocol, config and suites, CLI, cell loop, records, report, upload.
 - [datasets](system/datasets.md): `eval_datasets` ETL per dataset, the
-  on-disk layout contract, Hub I/O, gSASRec training.
-- [checkpoints](system/checkpoints.md): which encoder checkpoint each dataset reads (E1c), the kept gSASRec ones, loading,
-  embeddings, evaluation, Hub transfer.
-- [storage](system/storage.md): the GPU pods' disks, what lives where, the
-  budget, the Hub quota.
+  on-disk layout contract, Hub I/O, encoder training.
+- [checkpoints](system/checkpoints.md): which encoder checkpoint each
+  dataset reads, loading, embeddings, evaluation, Hub transfer.
+- [storage](system/storage.md): where the harness keeps data, results and
+  caches, and the environment variables that point it there.
 
-## Contracts
+## Contributing
 
-- [agent-orchestration](contracts/agent-orchestration.md): one
-  orchestrator, at most three constrained workers, model routing, where
-  work lands.
-- [coding-guidelines](contracts/coding-guidelines.md): priorities, thin
-  code, no compatibility with ourselves, tests as gates, what is not the
-  goal.
-
-## Related, not wiki pages
-
-- [paper/](paper/): the reproducibility paper's sections
-  ([deviations](paper/reproduction-deviations.md),
-  [provenance](paper/provenance-and-disclosure.md),
-  [Meta as published vs adapted](paper/meta-published-vs-adapted.md),
-  [claims](paper/claims.md),
-  [results draft](paper/results.md),
-  [abstract (submitted)](paper/abstract.md),
-  [ECIR criteria](paper/ecir-criteria.md),
-  [release and licenses](paper/release-and-licenses.md)).
-- [artifacts/](artifacts/): raw scripts behind measured numbers, one
-  directory per plan; the raw outputs are on the Hub
-  ([hub-index.md](artifacts/hub-index.md)).
-- [`retrieve/docs/`](../retrieve/docs/): the library user guide shipped in
-  the sdist.
-- [`articles/`](../articles/): the SilverTorch and LiNR papers, frozen.
-  Gitignored (not shipped in git); present locally, not after a fresh clone.
+The coding guidelines ([research/contracts](../research/contracts/coding-guidelines.md))
+apply to every change; a change to behaviour updates the matching
+`docs/system` page in the same commit, and
+`python3 scripts/check_doc_links.py` stays at zero broken links.

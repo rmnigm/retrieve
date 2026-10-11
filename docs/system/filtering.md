@@ -21,7 +21,7 @@ the hash math `retrieve.indexing.bloom_hash`, the composition helpers `retrieve.
 This brief covers **filtering only**; KNN scoring, quantization, and training
 are out of scope here. SilverTorch ships on Meta's official code, adapted
 (its bloom is Meta's bundle bloom with a configured width and an exact
-recheck, its exact mode runs inside Meta's search op; [decisions](../decisions.md#goal-and-scheduling));
+recheck, its exact mode runs inside Meta's search op; [decisions](../../research/decisions.md#goal-and-scheduling));
 the Triton SilverTorch filter paths below are in this tree but not in the
 release.
 

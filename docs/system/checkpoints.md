@@ -25,16 +25,16 @@ run writes out) see [datasets.md](datasets.md#training--evaluationtraining).
 
 The sequential datasets are encoded
 with the current trainer's E1c checkpoints (gSASRec body, sampled softmax
-with logQ, L2-normalized; [decisions](../decisions.md#sequential-encoder)).
-Metrics: [validation](../validation.md#final-models-the-e1c-recipe) (not
+with logQ, L2-normalized; [decisions](../../research/decisions.md#sequential-encoder)).
+Metrics: [validation](../../research/validation.md#final-models-the-e1c-recipe) (not
 yet validated, not citable). Which older records this invalidates:
-[validation](../validation.md#encoder-switch-evals-to-redo).
+[validation](../../research/validation.md#encoder-switch-evals-to-redo).
 
 | dataset config | ckpt-id | D | where it is |
 |---|---|---|---|
 | `goodreads.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | Hub (private) `pinkmeme/eval-goodreads-work-id` `checkpoints/` |
 | `yambda-500m.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | Hub (private) `pinkmeme/eval-yambda-500m` `checkpoints/`; yambda is out of the study |
-| `kuairand.yaml` | `sasrec-ssm-logq-d64-trainval` | 64 | not kept anywhere (user); KuaiRand is out of the study ([refit command.sh](../artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh)) |
+| `kuairand.yaml` | `sasrec-ssm-logq-d64-trainval` | 64 | not kept anywhere (user); KuaiRand is out of the study ([refit command.sh](../../research/artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh)) |
 | `yambda-5b.yaml` | `gsasrec-d{dim}` | 64, 128 | Hub `pinkmeme/eval-yambda-5b`; no E1c model trained |
 
 Each E1c dir holds `best_model.pt`, `item_embs.pt`, `config.json`,
@@ -50,7 +50,7 @@ hf download pinkmeme/eval-goodreads-work-id --repo-type dataset \
 
 Trained by the retired trainer with gBCE (per-position negatives). They
 are the bars the E1c models were measured against
-([bars](../validation.md#bars)), and the inputs of every record made
+([bars](../../research/validation.md#bars)), and the inputs of every record made
 before the switch: the golden goodreads cells and D1's `d1/goodreads` leg
 use `gsasrec-d128-drop0.5-id`.
 
@@ -67,7 +67,7 @@ The yambda-500m ones as recorded at training time (Listen+, full-catalog
 ranking against all 1,866,170 items, no history masking, the
 [Yambda paper](https://arxiv.org/abs/2505.22238) Table 2 protocol). Their
 test numbers came from a split no longer on disk; re-scored on today's
-file they are the [bars](../validation.md#bars):
+file they are the [bars](../../research/validation.md#bars):
 
 | ckpt-id | Dim | Dropout | Best epoch | Test NDCG@10 | NDCG@100 | Recall@10 | Recall@100 |
 |---|---|---|---|---|---|---|---|

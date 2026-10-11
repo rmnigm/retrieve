@@ -8,15 +8,15 @@
 # algo and backend, optionally filter_kind and sweep; the most specific match wins. `hub` is the
 # pinkmeme/eval-results subtree that holds those records ({field} = the cell's key field).
 # Reuse entries keep an old record's quality, and its perf where it passes the clock clause, under
-# the record reuse rule (docs/decisions.md § Campaign v2); `log` records every mid-campaign change.
+# the record reuse rule (research/decisions.md § Campaign v2); `log` records every mid-campaign change.
 
 default:
   quality: {code_version: e16512f5b379fc7e2d370cc8a57c68b9854a06d7, hub: "campaign-final"}  # tags campaign-v2.12 + campaign-final
   perf: {code_version: e16512f5b379fc7e2d370cc8a57c68b9854a06d7, hub: "campaign-final"}
 
 # The final pass (F-REPRO): every cell re-run at the one library code_version, so no entry reuses an older record. The
-# records are the per-leg subtrees under campaign-final/ (docs/artifacts/campaign-final/recipe.yaml) and their one
-# deduplicated table campaign-final/results.parquet (docs/artifacts/campaign-final/aggregate.py).
+# records are the per-leg subtrees under campaign-final/ (research/artifacts/campaign-final/recipe.yaml) and their one
+# deduplicated table campaign-final/results.parquet (research/artifacts/campaign-final/aggregate.py).
 entries: []
 
 log:

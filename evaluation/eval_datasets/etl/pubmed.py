@@ -42,7 +42,7 @@ Subcommands::
                     (``--device cuda``) → content_d768/query_emb.pt.
 
 **No dimensionality reduction.** Every dataset is benchmarked at its encoder's
-native dim (docs/decisions.md § datasets); there is no PCA step here.
+native dim (research/decisions.md § datasets); there is no PCA step here.
 
 **Why streaming, and what it costs (docs/system/datasets.md § pubmed).** Raw
 (163.7 GB) plus the fp16 item matrix (35.9 M × 768 × 2 B = 55.2 GB) would be

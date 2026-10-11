@@ -703,7 +703,8 @@ def test_score_path_is_an_official_build_param():
         official_config("silvertorch", "bloom", "triton", {"score_path": "int32"})
 
 
-# IVF-TUNE (docs/artifacts/campaign-v2/ivf-tune): SilverTorch n_lists / n95 per dataset; None = open
+# IVF-TUNE (research/artifacts/campaign-v2/ivf-tune): SilverTorch n_lists / n95 per dataset;
+# None = open
 IVF = {
     "goodreads": (4096, 64),
     "arxiv": (2048, 256),

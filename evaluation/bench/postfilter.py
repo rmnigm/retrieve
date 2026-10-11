@@ -1,4 +1,4 @@
-"""The generic-torch baseline (docs/decisions.md § Harness; docs/system/evaluation.md
+"""The generic-torch baseline (research/decisions.md § Harness; docs/system/evaluation.md
 § The postfilter baseline): what a practitioner writes without a retrieval library. Dense
 scoring over the whole item table, ``torch.topk(alpha * k)``, the filter checked on those
 candidates only, the first ``k`` survivors kept in rank order, short rows padded with the

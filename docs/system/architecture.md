@@ -9,12 +9,12 @@ sources: [retrieve/src/retrieve/]
 
 # `retrieve` architecture
 
-This is the high-level map of the `retrieve` package (on PyPI as
-`torchretrieve`): what each retrieval module does, how filters compose, and
+This is the high-level map of the `retrieve` package (distribution
+`torchretrieve`, not yet on PyPI): what each retrieval module does, how filters compose, and
 which kernels back which paths. For per-kernel detail (launch grids, tile
 shapes, autotune keys, numerics) see [kernels.md](kernels.md).
 
-**What ships** ([decisions](../decisions.md#goal-and-scheduling)): the
+**What ships** ([decisions](../../research/decisions.md#goal-and-scheduling)): the
 release carries LiNR V1-V3 with their filters and kernels, and
 `SilverTorch` on Meta's official SilverTorch code, adapted
 (`backend="official-fork"`, the `official-fork/` workspace member, on
@@ -91,7 +91,7 @@ CUDA extension and registers nine `torch.ops.st.*` ops. The adapter is the
 needs an nvcc that matches the torch wheel (`CUDA_HOME=/usr/local/cuda-12.8`
 for the cu128 wheel — upstream's README insists on the match), `ninja` and
 `setuptools`; see
-[../artifacts/official-silvertorch/README.md](../artifacts/official-silvertorch/README.md)
+[../artifacts/official-silvertorch/README.md](../../research/artifacts/official-silvertorch/README.md)
 for the pin, the build record and the upstream-suite result.
 
 `"official"` is not a universal third path: it exists solely for
@@ -372,7 +372,7 @@ Constructed directly (`SilverTorch(k, n_lists, n_probe, filter_mode="none",
 m_bits=None, k_hash=None, n_iter=10, seed=0, kmeans_init="random",
 backend="triton", official=None)`; `kmeans_init="kmeans++"` opts into D²
 seeding, the default stays random because every recorded number was taken
-on it, [decisions](../decisions.md#library)) or through `SilverTorchBuilder(**those)` →
+on it, [decisions](../../research/decisions.md#library)) or through `SilverTorchBuilder(**those)` →
 `.set_item_embeddings(x)` [+ `.set_item_attributes(attrs, clause_is_reverse)`]
 or `.set_state_dict(sd)` → [`.set_backend(b, official=None)`,
 `.set_device(d)`] → `.build()`, which is construct → `register_index` (or the
@@ -632,12 +632,12 @@ call it; no caller crosses quantizer families (the bit-KNNs never see INT8,
 while the package attribute `retrieve.ops.triton.<kernel>` is the op of
 the same name. Op schemas, buffer names and registration order are
 stable, so a state dict written by an earlier release loads into the
-current modules ([decisions](../decisions.md#library)); state is added,
+current modules ([decisions](../../research/decisions.md#library)); state is added,
 never renamed (the composites' `filter.` prefix).
 
 ## Which page owns what
 
-One home per fact (AGENTS.md rule 4, [coding guidelines](../contracts/coding-guidelines.md)):
+One home per fact (AGENTS.md rule 4, [coding guidelines](../../research/contracts/coding-guidelines.md)):
 when a code area's behaviour changes, this is the `docs/system` page to
 update in the same commit.
 
@@ -650,7 +650,7 @@ update in the same commit.
 | `evaluation/bench/` (the harness CLI, `PATHS`, the cell loop) | [evaluation.md](evaluation.md) |
 | `evaluation/eval_datasets/` (ETL, Hub transfer) | [datasets.md](datasets.md) |
 | training (`evaluation/training/`) and checkpoints | [checkpoints.md](checkpoints.md) |
-| disks, venvs, the space budget | [storage.md](storage.md) |
-| standing decisions and constraints (why, not what) | [decisions.md](../decisions.md) |
-| what gates pass and the measured results that stand | [validation.md](../validation.md) |
-| the open work queue | [roadmap.md](../roadmap.md) |
+| where the harness keeps data, its environment variables | [storage.md](storage.md) |
+| standing decisions and constraints (why, not what) | [decisions.md](../../research/decisions.md) |
+| what gates pass and the measured results that stand | [validation.md](../../research/validation.md) |
+| the open work queue | [roadmap.md](../../research/roadmap.md) |

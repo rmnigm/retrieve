@@ -1,17 +1,17 @@
 # AGENTS.md — how to work in this repository
 
-Read this, then [`docs/roadmap.md`](docs/roadmap.md) (the one ordered work
+Read this, then [`research/roadmap.md`](research/roadmap.md) (the one ordered work
 queue: open steps, gates and dependencies), then only the wiki pages your
 step names. Do not start work that the roadmap does not list or that sits
 behind an open dependency.
 
 ## What this is
 
-`retrieve/` is a GPU retrieval library (PyTorch + Triton; on PyPI as
-`torchretrieve`, imports as `retrieve`). `evaluation/` is the benchmark and
+`retrieve/` is a GPU retrieval library (PyTorch + Triton; package
+`torchretrieve`, not yet on PyPI (roadmap F4); imports as `retrieve`). `evaluation/` is the benchmark and
 training harness that produces the numbers for a master's thesis
 (its sources are kept out of this repository) and, now, a reproducibility paper
-([`docs/decisions.md`](docs/decisions.md#goal-and-scheduling)). It is a uv
+([`research/decisions.md`](research/decisions.md#goal-and-scheduling)). It is a uv
 workspace with one `.venv` at the root; `README.md` has the layout and the
 install commands.
 
@@ -30,64 +30,70 @@ Naming that must stay straight in code, docs and prose:
   listed in CHANGES)", never "a fork".
 - **Meta's code as published** is `backend="official"`, pinned `21aa35e`:
   the bit-exact parity reference and the "as published" column of
-  [Meta as published vs adapted](docs/paper/meta-published-vs-adapted.md),
+  [Meta as published vs adapted](research/paper/meta-published-vs-adapted.md),
   not an arm of the study.
 - **Our Triton SilverTorch reimplementation** (`SilverTorch(backend="triton")`
   and its `backend="torch"` reference: SilverTorch Algorithm 1
   reimplemented, called QuantizedIVF in the thesis — retired 2026-09-15 in
-  the thesis and `docs/paper/`; the already-delivered defense talk still
+  the thesis and `research/paper/`; the already-delivered defense talk still
   says it and stays that way) is **out of the paper and out of the
   released code**. It stays in the repository, recorded and unused, until
   the roadmap deletes it (rule 5); its records are never cited.
 - **LiNR** variants are V1–V3 as in the paper (our int8 V4 left the
-  library in campaign v2; [decisions](docs/decisions.md#campaign-v2-user-2026-10-08)).
+  library in campaign v2; [decisions](research/decisions.md#campaign-v2-user-2026-10-08)).
 
 ## Where things are documented
 
-`docs/` is a wiki of what is true **now**: current state, standing
-decisions, the open queue. No history. [`docs/index.md`](docs/index.md)
-lists every page; [`docs/SCHEMA.md`](docs/SCHEMA.md) holds the conventions
-(page frontmatter, tags, links, the contradiction policy).
+Two trees, one set of conventions ([`research/SCHEMA.md`](research/SCHEMA.md):
+page frontmatter, tags, links, the contradiction policy). Both say what is
+true **now**; no history.
 
-- [`docs/roadmap.md`](docs/roadmap.md): **what to do next**, the one ordered
+- **`research/`** is the agentic research wiki: the queue, the decisions,
+  what was measured, the paper drafts, the process. Not for users of the
+  release. [`research/index.md`](research/index.md) lists every page.
+- **`docs/`** is the released project's documentation (how the library and
+  the harness work), and [`retrieve/docs/`](retrieve/docs/) the library user
+  guide that ships in the sdist. [`docs/index.md`](docs/index.md) lists them.
+  Project pages may link into `research/` for a rationale or a measured
+  number; they never carry run state (a branch, a pod, a step's progress).
+
+In `research/`:
+
+- [`research/roadmap.md`](research/roadmap.md): **what to do next**, the one ordered
   queue of open steps with their gates and dependencies, and the decisions
   waiting on the user. A finished step leaves it.
-- [`docs/decisions.md`](docs/decisions.md): **why**, the standing decisions
+- [`research/decisions.md`](research/decisions.md): **why**, the standing decisions
   and constraints, not reopened without the user.
-- [`docs/validation.md`](docs/validation.md): **what holds**, every gate's
+- [`research/validation.md`](research/validation.md): **what holds**, every gate's
   current state and the measured results that stand, each marked citable
   or not.
-- `docs/system/*.md`: **how the code works today**, kept in sync with the
-  code in the same commit. `architecture.md` (module map, backend
-  dispatch), `kernels.md`, `filtering.md`, `testing.md`, `evaluation.md`
-  (harness), `datasets.md`, `checkpoints.md`, `storage.md`. Code comments
-  cite these pages by section, so keep their headings stable. If code and
-  a system page disagree, the code is right and the page is a bug: fix
-  the page.
-- `docs/contracts/`: two contracts that order nothing and apply
-  everywhere: [`agent-orchestration.md`](docs/contracts/agent-orchestration.md)
+- `research/contracts/`: two contracts that order nothing and apply
+  everywhere: [`agent-orchestration.md`](research/contracts/agent-orchestration.md)
   (who runs a step, on which model, how many at once, where the output
-  lands) and [`coding-guidelines.md`](docs/contracts/coding-guidelines.md)
+  lands) and [`coding-guidelines.md`](research/contracts/coding-guidelines.md)
   (what the code should look like, and what is deliberately not the goal).
-- `docs/artifacts/<plan>/`: raw scripts behind measured numbers, kept so
+- `research/artifacts/<plan>/`: raw scripts behind measured numbers, kept so
   they can be re-derived; the raw outputs (records, JSON dumps, logs) are
   on the Hub under `artifacts/<plan>/`, listed in
-  [`docs/artifacts/hub-index.md`](docs/artifacts/hub-index.md).
-- `retrieve/docs/`: the library user guide that ships in the sdist.
-- `docs/paper/`: the reproducibility paper's own sections, each number
-  traced to [`validation.md`](docs/validation.md) or an artifact:
-  [`claims.md`](docs/paper/claims.md) (the papers' claims and C1–C7 for
+  [`research/artifacts/hub-index.md`](research/artifacts/hub-index.md).
+- `research/paper/`: the reproducibility paper's own sections, each number
+  traced to [`validation.md`](research/validation.md) or an artifact:
+  [`claims.md`](research/paper/claims.md) (the papers' claims and C1–C7 for
   this study),
-  [`reproduction-deviations.md`](docs/paper/reproduction-deviations.md) (paper
+  [`reproduction-deviations.md`](research/paper/reproduction-deviations.md) (paper
   vs us, Meta's code vs Meta's paper, defects reproducing found in our own
   code, and the unexplained residuals),
-  [`meta-published-vs-adapted.md`](docs/paper/meta-published-vs-adapted.md)
+  [`meta-published-vs-adapted.md`](research/paper/meta-published-vs-adapted.md)
   (what our adaptation of Meta's code changed, and the parity gate that
   holds it to the published code),
-  [`provenance-and-disclosure.md`](docs/paper/provenance-and-disclosure.md)
+  [`provenance-and-disclosure.md`](research/paper/provenance-and-disclosure.md)
   (hardware, software, what may be cited, what was and was not compared),
-  [`ecir-criteria.md`](docs/paper/ecir-criteria.md) and
-  [`release-and-licenses.md`](docs/paper/release-and-licenses.md).
+  [`results.md`](research/paper/results.md) (the results draft),
+  [`abstract.md`](research/paper/abstract.md) (the submitted abstract),
+  [`ecir-criteria.md`](research/paper/ecir-criteria.md) and
+  [`release-and-licenses.md`](research/paper/release-and-licenses.md).
+- [`research/environment/storage.md`](research/environment/storage.md): the
+  GPU pods' disks, what lives where, the budget, the Hub quota.
 - `articles/`: pandoc renderings of the papers. Frozen; cite, never edit.
   Gitignored, not shipped in git (likely copyrighted third-party text) —
   present on a working box, but a fresh clone won't have it; citations to
@@ -95,8 +101,21 @@ lists every page; [`docs/SCHEMA.md`](docs/SCHEMA.md) holds the conventions
 - Campaign records: written as JSONL to a gitignored local results tree
   during a run, aggregated into `results.parquet`, and kept on the
   private Hub repo `pinkmeme/eval-results` (`bench upload` / `bench
-  fetch`; [`docs/artifacts/hub-index.md`](docs/artifacts/hub-index.md));
+  fetch`; [`research/artifacts/hub-index.md`](research/artifacts/hub-index.md));
   `evaluation/golden/`: the golden baseline cells.
+
+In `docs/`:
+
+- `docs/system/*.md`: **how the code works today**, kept in sync with the
+  code in the same commit. `architecture.md` (module map, backend
+  dispatch), `kernels.md`, `filtering.md`, `testing.md`, `evaluation.md`
+  (harness), `datasets.md`, `checkpoints.md`, `storage.md` (where the
+  harness keeps data). Code comments cite these pages by section, so keep
+  their headings stable (`check_doc_links.py` checks every `§` citation).
+  If code and a system page disagree, the code is right and the page is a
+  bug: fix the page.
+- `retrieve/docs/`: the library user guide that ships in the sdist,
+  written for someone who installed the package and has no clone.
 
 ## Hard rules
 
@@ -111,16 +130,16 @@ lists every page; [`docs/SCHEMA.md`](docs/SCHEMA.md) holds the conventions
    pod GPU and records it: SM clocks **cannot be locked** in the container
    (`nvidia-smi -lgc` is denied, no sudo) — record the sampled `sm_mhz`
    and the `unstable` flag instead
-   ([`docs/decisions.md`](docs/decisions.md#harness)); `ncu` is blocked,
+   ([`research/decisions.md`](research/decisions.md#harness)); `ncu` is blocked,
    use `torch.profiler`. Serialize per GPU, not per pod: one job per GPU
    at a time, each with its own `CUDA_VISIBLE_DEVICES`, inductor cache
-   and results path ([`docs/roadmap.md`](docs/roadmap.md#multi-gpu-execution)).
-   Disk: `/workspace` is small (measured in `docs/system/storage.md`);
+   and results path ([`research/roadmap.md`](research/roadmap.md#multi-gpu-execution)).
+   Disk: `/workspace` is small (measured in `research/environment/storage.md`);
    data, venvs and scratch go on the container disk (`/data`, `/venvs/`,
    `/scratch`).
 2. **Nothing is citable until its gate passed.** Harness numbers from a
    branch are not paper material until their gate is green in
-   [`docs/validation.md`](docs/validation.md). Say "not yet validated"
+   [`research/validation.md`](research/validation.md). Say "not yet validated"
    rather than quoting them.
 3. **Correctness gates are bit-exact where the gate says so** (`torch.equal`
    on scores; ids equal up to ties). Do not loosen a tolerance to make a
@@ -130,7 +149,7 @@ lists every page; [`docs/SCHEMA.md`](docs/SCHEMA.md) holds the conventions
    checked by `python3 scripts/check_doc_links.py` (also a pre-commit
    hook); keep it at zero broken links. One home per fact: when you rename
    a branch, path, flag or count, grep `AGENTS.md`, `docs/`,
-   `retrieve/docs/` and `README.md` for the old wording and fix every
+   `research/`, `retrieve/docs/` and `README.md` for the old wording and fix every
    copy, not just the page you were already editing.
 5. **Deletion is gated.** Never delete a kernel that still has no
    validated replacement. The model: the two hand-written SilverTorch
@@ -138,18 +157,18 @@ lists every page; [`docs/SCHEMA.md`](docs/SCHEMA.md) holds the conventions
    gate (B2) was green; tag `cuda-cute-backends-final` holds them. The
    Triton SilverTorch backend goes the same way, after the adapted
    official backend's review ACCEPT and its NUMBERS legs, behind the tag
-   `triton-silvertorch-final` ([roadmap](docs/roadmap.md)).
+   `triton-silvertorch-final` ([roadmap](research/roadmap.md)).
 6. **Commits and branches.** Commit only when the user asks. One branch per
    roadmap step (`dev/<step>`) off `staging`. Session scripts go under
-   `docs/artifacts/<plan>/`, not in the packages; raw outputs (records,
+   `research/artifacts/<plan>/`, not in the packages; raw outputs (records,
    JSON dumps, logs) never go in git — publish them with `bench upload`
    to `pinkmeme/eval-results` (campaign legs as `<leg>/`, plan outputs as
    `artifacts/<plan>/`) and add the manifest's sha256 to
-   [`docs/artifacts/hub-index.md`](docs/artifacts/hub-index.md).
+   [`research/artifacts/hub-index.md`](research/artifacts/hub-index.md).
    **All work ends up
    on `staging` at `origin`**: whatever branch or worktree produced it, a
    step is not finished until it is merged into `staging` and pushed
-   ([`docs/contracts/agent-orchestration.md`](docs/contracts/agent-orchestration.md)
+   ([`research/contracts/agent-orchestration.md`](research/contracts/agent-orchestration.md)
    §6). The pods are rented; the repository is the only durable artifact.
 7. **One orchestrator, constrained workers.** One user-controlled
    orchestrator session dispatches workers that do code, tests,
@@ -164,13 +183,13 @@ lists every page; [`docs/SCHEMA.md`](docs/SCHEMA.md) holds the conventions
    two levels**, with exactly one exception: a **`sonnet`** nested subagent
    for web deep research. **On the pods the user's override is in force:**
    opus for every worker, at most two agents, no subagents
-   ([contract §3](docs/contracts/agent-orchestration.md#3-model-routing)).
+   ([contract §3](research/contracts/agent-orchestration.md#3-model-routing)).
    Briefs and reports live in `.chains/` as a branch per agent (§5).
    Every worker's result lands in the repository
-   as current state in [`docs/validation.md`](docs/validation.md) and the
+   as current state in [`research/validation.md`](research/validation.md) and the
    affected `docs/system` page; a run recorded only in a transcript did
    not happen. Full contract:
-   [`docs/contracts/agent-orchestration.md`](docs/contracts/agent-orchestration.md).
+   [`research/contracts/agent-orchestration.md`](research/contracts/agent-orchestration.md).
 8. **Thin code, documented outside it.** Priorities in order: correct code,
    clean architecture, evals that run. Little defensive programming —
    validate at the boundary, then let it fail loudly. No backward
@@ -179,12 +198,12 @@ lists every page; [`docs/SCHEMA.md`](docs/SCHEMA.md) holds the conventions
    replacement's parity gate). No abstraction level without a written
    reason. **No multi-line comment slop — prefer no comment at all**; a
    short one only where the code is genuinely surprising, and it says why.
-   The documentation is the `docs/` wiki: `docs/system` for what the code
-   does today, `docs/decisions.md` and `docs/validation.md` for why and
+   The documentation lives outside the code: `docs/system` for what the code
+   does today, `research/decisions.md` and `research/validation.md` for why and
    what was measured, kept current. Tests are the gates a step names, not a
    deliverable. Not the goal: coverage, cosmetic polish, unscheduled
    baselines, paper speculation. Full contract:
-   [`docs/contracts/coding-guidelines.md`](docs/contracts/coding-guidelines.md).
+   [`research/contracts/coding-guidelines.md`](research/contracts/coding-guidelines.md).
 
 9. **Never print secrets.** Do not `cat`, `grep`, `head` or otherwise dump an env or
    secrets file (`/etc/retrieve-pod.env`, `/workspace/.pod-home/secrets.env`, any `.env`),
@@ -214,17 +233,17 @@ python3 scripts/check_doc_links.py
 
 ## When you finish a step
 
-Update [`docs/validation.md`](docs/validation.md) to the new state of every
+Update [`research/validation.md`](research/validation.md) to the new state of every
 gate the step touched (what passes now, on which environment, what was
 skipped, what is still unverified), put the raw scripts under
-`docs/artifacts/<plan>/` and the raw outputs on the Hub (`bench upload`, a
-row in `docs/artifacts/hub-index.md`), update the affected `docs/system` page, remove
-the step from [`docs/roadmap.md`](docs/roadmap.md) and add any new open
+`research/artifacts/<plan>/` and the raw outputs on the Hub (`bench upload`, a
+row in `research/artifacts/hub-index.md`), update the affected `docs/system` page, remove
+the step from [`research/roadmap.md`](research/roadmap.md) and add any new open
 work there, run the link checker, and state plainly in your report what
 passed, what was skipped, and what is still unverified. Write current
 state, not a narrative of the run: replace a superseded result rather
 than appending to it.
 
-If you are a **worker** (rule 7): update `docs/validation.md` and the
+If you are a **worker** (rule 7): update `research/validation.md` and the
 system page, leave the roadmap alone (the orchestrator edits it after the
 merge), and hand back the branch plus the plain statement above.

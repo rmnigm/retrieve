@@ -15,15 +15,15 @@ repos:
         args: [--maxkb=1024]  # raw outputs live on the Hub (docs/system/evaluation.md)
       # Frozen or recorded bytes are never rewritten: the papers, raw artifacts, the golden cells.
       - id: end-of-file-fixer
-        exclude: ^(articles|docs/artifacts|evaluation/golden)/
+        exclude: ^(articles|research/artifacts|evaluation/golden)/
       - id: trailing-whitespace
-        exclude: ^(articles|docs/artifacts|evaluation/golden)/
+        exclude: ^(articles|research/artifacts|evaluation/golden)/
 
   - repo: local
     hooks:
       - id: check-doc-links
-        name: check doc links, repo paths and CLI subcommands
+        name: check doc links, repo paths, CLI subcommands and § citations
         entry: python3 scripts/check_doc_links.py
         language: system
-        files: \.(md|py)$
+        files: \.(md|py|ya?ml|toml)$
         pass_filenames: false

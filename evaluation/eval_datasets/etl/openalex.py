@@ -357,7 +357,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
     staged_rows = est_eligible * sample_rate
     staged_bpr = sum(s["staged_bytes"] for s in samples) / kept
     # Threads share the GIL with the abstract parsing, so this understates `convert`'s spawned
-    # processes several-fold (docs/artifacts/e3-openalex/stream_probe.py measures those).
+    # processes several-fold (research/artifacts/e3-openalex/stream_probe.py measures those).
     mbps = sample_bytes / t_wall / 1e6
     cpu_per_row = stage_cpu / rows  # at sample rate 1; the real run parses fewer abstracts
     report = {

@@ -4,7 +4,7 @@ These JSONs are the **reference quality numbers of the pre-v2 evaluation
 harness**, produced by roadmap step **A1** (WP-0 of the harness v2 plan,
 H §6, which also closed steps 4-7 of the refactor validation runbook).
 What they are validated against now is in
-[validation](../../docs/validation.md#harness-gates).
+[validation](../../research/validation.md#harness-gates).
 
 The harness is being rewritten (roadmap Phase C). The rewrite changes the
 measurement protocol *and* the output schema, so there is exactly one
@@ -36,7 +36,7 @@ live under tag `linr-v4-final`. `_logs/provenance.txt` (commit, host, UTC, `nvid
 torch/triton versions) ties them to the run that produced them; the
 stdout/stderr log per cell, the driver log and the clock trace are on the
 Hub under `artifacts/golden-logs/`
-([hub index](../../docs/artifacts/hub-index.md)).
+([hub index](../../research/artifacts/hub-index.md)).
 
 `_main/` holds the same cells run from a throwaway worktree off
 `main` — the other half of handoff step 6, below. It is **gitignored**:
@@ -58,7 +58,7 @@ dataset was on the box). The runbook does all of it in five stages:
 | `step5` | per-kernel `tune-kernels` +-5 % gates on both sides, behind a wall-time estimate | **deferred** (same); estimate 332 points/side, ~44 min both | `.../a1/step5/` |
 
 (`.../a1/` is
-[../../docs/artifacts/evaluation-harness-v2/a1/](../../docs/artifacts/evaluation-harness-v2/README.md).)
+[../../docs/artifacts/evaluation-harness-v2/a1/](../../research/artifacts/evaluation-harness-v2/README.md).)
 
 **Why `main` needed patching.** Step 6 diffs `main` against the refactor
 track, and the `users_limit` bug below made `main` unable to run a
@@ -95,10 +95,10 @@ sampled-`sm_mhz` fallback is used instead. The script that does all of it,
 including the per-cell logs, the clock sampler and a skip-if-present resume:
 
 ```bash
-bash docs/artifacts/evaluation-harness-v2/a1_golden_run.sh
+bash research/artifacts/evaluation-harness-v2/a1_golden_run.sh
 # the 2026-09-15 re-derive ran this copy instead (GPU lock, /venvs/golden,
 # private inductor cache, golden stage only):
-STAGES=golden bash docs/artifacts/evaluation-harness-v2/a1-rederive/a1_golden_rerun.sh
+STAGES=golden bash research/artifacts/evaluation-harness-v2/a1-rederive/a1_golden_rerun.sh
 ```
 
 Stages are selectable (`STAGES="golden step4 step7 step6 step5"`), the
@@ -125,7 +125,7 @@ uv run evaluate --config config/arxiv/d128-filter.yaml \
 The working directory matters: both configs' `data_dir` and filter
 `attrs_path` are cwd-relative (`retrieval.loaders.resolve_path`).
 
-**Against the v2 harness** (the comparison [validation](../../docs/validation.md#harness-gates)
+**Against the v2 harness** (the comparison [validation](../../research/validation.md#harness-gates)
 records), from `evaluation/`, quality only. The goodreads cells are pinned to the
 checkpoint they were produced on, which `config/goodreads.yaml` no longer names; the
 records carry it as `inputs: gsasrec-d128-drop0.5-id`. `--seed 0` matters: `c0_genre` and
@@ -151,15 +151,15 @@ what moved, is below the table.
 |---|---|
 | cells produced at | `87a9b38` on the throwaway branch `tmp/golden-rederive` = `origin/dev/a1-golden` (`1ccdb27`, the old harness) with the **current library** swapped in (`git checkout 4f52972 -- retrieve/`; library tree `28fda5ae`). Every row carries `87a9b38` in `extra.commit`. The branch is never merged; it exists so the run can be repeated |
 | library under test | `4f52972:retrieve` — deterministic k-means, `clause_compact` / `bloom_compact` as opaque custom ops, the O §14.7 `-1` id sentinel (the three C4 library fixes merged at `7a21095`) |
-| harness | unchanged from A1: `origin/dev/a1-golden`. One porting change, typing only: `retrieve.interfaces.Backend` is gone from the current library (split into `LinrBackend` / `SilverTorchBackend` at B4), so the harness declares the old literal locally — copy at [`../../docs/artifacts/evaluation-harness-v2/a1-rederive/harness_compat_backend.py`](../../docs/artifacts/evaluation-harness-v2/a1-rederive/harness_compat_backend.py) |
+| harness | unchanged from A1: `origin/dev/a1-golden`. One porting change, typing only: `retrieve.interfaces.Backend` is gone from the current library (split into `LinrBackend` / `SilverTorchBackend` at B4), so the harness declares the old literal locally — copy at [`../../docs/artifacts/evaluation-harness-v2/a1-rederive/harness_compat_backend.py`](../../research/artifacts/evaluation-harness-v2/a1-rederive/harness_compat_backend.py) |
 | box | A100-SXM4-80GB, driver 580.159.04, nvcc 12.4, torch 2.10.0+cu128, triton 3.6.0, Python 3.11 |
 | inputs | identical to A1: the same `encoded_queries_test.pt` blob (cache hit — the checkpoint's mtime was set to the blob's recorded `ckpt_mtime` so no re-encode could perturb the queries) and the same cached oracles `gt_d128/gt_topk_v3_{c0_genre,c0_maincat}.pt` (fingerprint hit). goodreads keeps 9,859 / 10,000 users, arxiv 10,000 / 10,000 — both as in A1 |
 | clocks | **still not locked — this container cannot** (`nvidia-smi -lgc` denied, no `sudo`). H §7's fallback: sampled every 30 s into `_logs/clocks.csv` (on the Hub, `artifacts/golden-logs/clocks.csv`). **1155 MHz** median under load (A1: 1140), 1410 MHz peak, 210 MHz idle, 26-39 °C. `c4_gate.py --golden-sm-mhz` must be given **1155**, not its 1140 default. Quality is unaffected; **the latency columns are not clock-controlled**, and this run also shared the GPU with a second worker through `flock /workspace/gpu.lock` (serialised, but the thermal state between cells was not controlled) |
 | wall time | 29.4 min of cell time for the 11 cells, 2.4-3.1 min each, 33 min end to end including lock waits |
-| runbook | [`a1-rederive/a1_golden_rerun.sh`](../../docs/artifacts/evaluation-harness-v2/a1-rederive/a1_golden_rerun.sh), `STAGES=golden` — a copy of [`a1_golden_run.sh`](../../docs/artifacts/evaluation-harness-v2/a1_golden_run.sh) with the GPU lock, `uv run --no-sync` against `/venvs/golden`, a private inductor cache, and stages 4-7 dropped |
+| runbook | [`a1-rederive/a1_golden_rerun.sh`](../../research/artifacts/evaluation-harness-v2/a1-rederive/a1_golden_rerun.sh), `STAGES=golden` — a copy of [`a1_golden_run.sh`](../../research/artifacts/evaluation-harness-v2/a1_golden_run.sh) with the GPU lock, `uv run --no-sync` against `/venvs/golden`, a private inductor cache, and stages 4-7 dropped |
 | exact HEAD, host and UTC of the run | `_logs/provenance.txt` |
 | run record | H §11 (A1's own record is §10); the numbers are in the quality diff below |
-| quality diff vs A1 | [`a1-rederive/quality-diff.md`](../../docs/artifacts/evaluation-harness-v2/a1-rederive/quality-diff.md) |
+| quality diff vs A1 | [`a1-rederive/quality-diff.md`](../../research/artifacts/evaluation-harness-v2/a1-rederive/quality-diff.md) |
 
 **Two cells were re-derived again at roadmap L3 (2026-09-15):**
 `goodreads-d128-c0_genre-linr_v2-triton.json` and
@@ -177,7 +177,7 @@ files are run 1. Against the 2026-09-15 originals they moved by ≤ 6.1e-7
 (`linr_v2`) and ≤ 5.9e-5 (`linr_v3`) — inside the old noise band, which is why
 the originals could not be kept: they were one arbitrary sample of it. The two
 runs, logs, clock trace and provenance are in
-[`deterministic-compaction/golden-rederive/`](../../docs/artifacts/deterministic-compaction/golden-rederive/);
+[`deterministic-compaction/golden-rederive/`](../../research/artifacts/deterministic-compaction/golden-rederive/);
 Run 1's two cell logs are on the Hub under `artifacts/golden-logs/`. Sampled SM clock median during those cells:
 1155 MHz (same as the re-derive). Both files were **superseded at R-RES (2026-10-08)**, below.
 
@@ -192,7 +192,7 @@ the library swapped in as a clean replace — `retrieve/` tree `928df69`, equal 
 `dev/l1-l2:retrieve` (L1 + L2's library). One harness port, imports only: the
 library has dropped the `retrieve.layers` re-export shims, so the old harness's
 two `retrieve.layers` imports now name the same classes in `retrieve.modules`
-([diff](../../docs/artifacts/l1-l2/golden-rederive/harness_port.diff)). Run
+([diff](../../research/artifacts/l1-l2/golden-rederive/harness_port.diff)). Run
 **twice**, one process and a fresh inductor cache each; the two are identical on
 every quality column; the committed file is run 1 (`extra.commit` `c72bfe5`).
 Every quality column moved **up**, by at most 1.5e-4:
@@ -204,7 +204,7 @@ Every quality column moved **up**, by at most 1.5e-4:
 | 1000 | 0.999627452 → 0.999781421 (+1.5e-4) | 0.999696314 → 0.999821829 (+1.3e-4) |
 
 These equal, to the last printed digit, what the v2 harness measures for the same
-cell on the same library ([artifact](../../docs/artifacts/l1-l2/README.md#golden-cells)).
+cell on the same library ([artifact](../../research/artifacts/l1-l2/README.md#golden-cells)).
 Inputs: the cached oracle `gt_d128/gt_topk_v3_c0_genre.pt` hit its fingerprint
 (which samples the query rows). The query cache did **not** hit: the checkpoint
 was restaged on 2026-09-26 with a new mtime and the mtime was not reset first, so
@@ -216,7 +216,7 @@ rows equal A1's; the old blob itself is gone, so equality with it on every row i
 inferred, not compared. 9,859 / 10,000 users kept, as before. Sampled SM clock
 1095-1410 MHz (three 30 s samples, the cells run ~40 s): the latency columns are
 not clock-controlled. Provenance and clock trace:
-[`l1-l2/golden-rederive/`](../../docs/artifacts/l1-l2/golden-rederive/); both
+[`l1-l2/golden-rederive/`](../../research/artifacts/l1-l2/golden-rederive/); both
 runs' JSONs and logs are on the Hub under `artifacts/l1-l2/golden-rederive/`.
 
 **The same two cells were re-derived again at R-RES (2026-10-08):**
@@ -226,12 +226,12 @@ before L5 gave `fused_masked_knn_topk` fp32 accumulation (it had reduced in fp16
 [kernels](../../docs/system/kernels.md#score-conventions)), so every later tree missed
 them by 4.5e-4 (V2) and 1.7e-5 (V3). That was the L5 fix, not a defect: the frozen tree
 with the fp16 sum put back lands on both old files exactly
-([R-RES](../../docs/artifacts/campaign-v2/r-res/README.md)). Same method as L1 and L3:
+([R-RES](../../research/artifacts/campaign-v2/r-res/README.md)). Same method as L1 and L3:
 the old harness on a throwaway branch (`tmp/golden-rederive-cv2` @ `58474f1`, off
 `tmp/golden-rederive-l1l2`, never merged or pushed) with `retrieve/` replaced by tag
 `campaign-v2`'s, tree `408b1188` = the frozen code_version, unpatched. One harness port:
 LiNR V4 out of the registry and the goodreads config, since the library has no
-`PostfilterKNNInt8` ([diff](../../docs/artifacts/campaign-v2/r-res/golden_harness_port.diff)).
+`PostfilterKNNInt8` ([diff](../../research/artifacts/campaign-v2/r-res/golden_harness_port.diff)).
 Run **twice**, one process and a fresh inductor cache each; the two are identical on
 every quality column; the committed files are run 1 (`extra.commit` `58474f1`). Only the
 quality columns L5 moved changed, plus `extra`, latency and memory (context only);
@@ -244,7 +244,7 @@ the other three cell runs hit both.
 Sampled SM clock 285-1410 MHz, median 1140 (ten 30 s samples): the latency columns are
 not clock-controlled. Provenance, clocks, both runs' JSONs and logs: Hub
 `artifacts/r-res/golden-rederive/`; runbook
-[`golden_rederive.sh`](../../docs/artifacts/campaign-v2/r-res/golden_rederive.sh).
+[`golden_rederive.sh`](../../research/artifacts/campaign-v2/r-res/golden_rederive.sh).
 
 ### Why they were re-derived
 
