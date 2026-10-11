@@ -446,7 +446,7 @@ def official_probe_score(
 
 class ForkBloom(NamedTuple):
     """The fork's bloom filter for one forward: the official index, the prepared plans with their
-    row → plan index (partial path), the search ``k`` and stored hashes, and the path."""
+    row → plan index (``None``: a plan per row), the search ``k`` and the stored hashes."""
 
     bloom_index: Tensor
     bundle_b_offsets: Tensor
@@ -454,7 +454,6 @@ class ForkBloom(NamedTuple):
     plan_index: Tensor | None
     k: int
     hash_k: int
-    partial: bool
 
 
 def fork_search(
@@ -508,7 +507,6 @@ def fork_search(
         None if b is None else b.plan_index,
         0 if b is None else int(b.k),
         0 if b is None else int(b.hash_k),
-        True if b is None else bool(b.partial),
         *(exact if exact is not None else (None, None, None)),
     )
 

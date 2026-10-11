@@ -1277,7 +1277,6 @@ std::tuple<Tensor, Tensor> search_cuda(
     const std::optional<Tensor>& query_plan_index,
     int64_t bloom_k,
     int64_t hash_k,
-    bool bloom_partial,
     const std::optional<Tensor>& item_clause_attrs,
     const std::optional<Tensor>& clause_is_reverse,
     const std::optional<Tensor>& query_clause_attrs) {
@@ -1303,47 +1302,36 @@ std::tuple<Tensor, Tensor> search_cuda(
   std::optional<std::tuple<Tensor, int64_t, Tensor, int64_t>> payloads;
   std::optional<Tensor> mask = filtering_bit_mask;
   if (plans.has_value()) {
+    // the bloom over the probed clusters' columns only (C8): what the scorer reads of Meta's
+    // full-N mask, so the full path's result too, without its scan of all N (K fix 17)
     TORCH_CHECK(bloom_index.has_value() && bloom_bundle_b_offsets.has_value());
-    if (bloom_partial) {
-      std::optional<std::tuple<Tensor, Tensor, Tensor>> recheck;
-      if (exact) {
-        recheck = std::make_tuple(
-            item_clause_attrs->contiguous(),
-            clause_is_reverse->contiguous(),
-            query_clause_attrs->contiguous());
-      }
-      payloads = st::ops::bloom_search::bloom_partial_payloads_prepared_cuda(
-          *bloom_index,
-          *bloom_bundle_b_offsets,
-          *plans,
-          plan_count,
-          max_stack_size,
-          query_plan_index,
-          bloom_k,
-          hash_k,
-          offsets,
-          cluster_ids,
-          cluster_length,
-          prep.warp_rounded_length_cumsum,
-          prep.remaining_length_cumsum,
-          prep.warp_size_cumsum,
-          width,
-          recheck);
-    } else {
-      // the packed search output is high-first words, the scorer's mask order
-      mask = st::ops::bloom_search::bloom_index_search_batch_prepared_cuda(
-          *bloom_index,
-          *bloom_bundle_b_offsets,
-          *plans,
-          plan_count,
-          max_stack_size,
-          bloom_k,
-          hash_k,
-          /*return_bool_mask=*/false);
+    std::optional<std::tuple<Tensor, Tensor, Tensor>> recheck;
+    if (exact) {
+      recheck = std::make_tuple(
+          item_clause_attrs->contiguous(),
+          clause_is_reverse->contiguous(),
+          query_clause_attrs->contiguous());
     }
+    payloads = st::ops::bloom_search::bloom_partial_payloads_prepared_cuda(
+        *bloom_index,
+        *bloom_bundle_b_offsets,
+        *plans,
+        plan_count,
+        max_stack_size,
+        query_plan_index,
+        bloom_k,
+        hash_k,
+        offsets,
+        cluster_ids,
+        cluster_length,
+        prep.warp_rounded_length_cumsum,
+        prep.remaining_length_cumsum,
+        prep.warp_size_cumsum,
+        width,
+        recheck);
   }
   if (!payloads && exact) {
-    // the exact test; on the full bloom path its mask pre-filters (C13's recheck)
+    // the exact test; a given full-N mask pre-filters it
     payloads = exact_payloads(
         *item_clause_attrs,
         *clause_is_reverse,

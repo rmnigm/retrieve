@@ -653,7 +653,7 @@ def test_c8_fork_bloom_search_equals_upstream(partial, score_path):
         mask = of.bloom_filtering_mask(index, boff, of.parse_plans(exprs, HASH_K), K_SEARCH, HASH_K)
         ref = of.official_probe_score(*args, score_path=score_path, filtering_bit_mask=mask)
         dp = ofb.prepare_plans(exprs, HASH_K, 5, c, torch.device("cuda"), slots=b)
-    bloom = of.ForkBloom(index, boff, dp, row_plan, K_SEARCH, HASH_K, partial)
+    bloom = of.ForkBloom(index, boff, dp, row_plan, K_SEARCH, HASH_K)
     _assert_bitexact(of.fork_search(*args, score_path=score_path, bloom=bloom), ref)
 
 

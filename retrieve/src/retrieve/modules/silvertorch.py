@@ -475,18 +475,15 @@ class SilverTorch(RetrievalModule):
         self, expressions: list[str], query_clause_attrs: Tensor
     ) -> PreparedFilter:
         """The fork's plans, uploaded once into a blob of one shape per batch shape: one plan per
-        row (full path) or per distinct expression with the row → plan index (partial)."""
+        distinct expression with the row → plan index (both bloom paths)."""
         cfg = self.official
         rows, n_clauses = query_clause_attrs.shape
-        index = None
-        if cfg.bloom_path == "partial":
-            unique = list(dict.fromkeys(expressions))
-            row_plan = {e: i for i, e in enumerate(unique)}
-            index = torch.tensor([row_plan[e] for e in expressions], dtype=torch.int64)
-            index = index.to(query_clause_attrs.device, non_blocking=True)
-            expressions = unique
+        unique = list(dict.fromkeys(expressions))
+        row_plan = {e: i for i, e in enumerate(unique)}
+        index = torch.tensor([row_plan[e] for e in expressions], dtype=torch.int64)
+        index = index.to(query_clause_attrs.device, non_blocking=True)
         plans = official_mod.prepare_plans(
-            expressions,
+            unique,
             cfg.n_stored_hashes,
             cfg.max_sub_queries,
             n_clauses,
@@ -659,7 +656,8 @@ class SilverTorch(RetrievalModule):
     ) -> tuple[Tensor, Tensor]:
         """Phases 2+3 on our fork of Meta's ops in one ``torch.ops.stfork.search`` call
         (kernels.md § official-fork): ``bloom`` → the plans ``prepare_queries`` put on the device,
-        partial or full by ``OfficialConfig.bloom_path``, its survivors rechecked exactly unless
+        evaluated over the probed clusters for either ``OfficialConfig.bloom_path`` (the full
+        path's result is the same), its survivors rechecked exactly unless
         ``OfficialConfig.recheck`` is off; ``exact`` → the clauses tested over the probed docs
         inside the fork."""
         probe_ids = self._phase1_probe_ids(query)
@@ -679,7 +677,6 @@ class SilverTorch(RetrievalModule):
                 prepared.plan_index,
                 self.k_hash,
                 cfg.n_stored_hashes,
-                cfg.bloom_path == "partial",
             )
             if prepared.query_attrs is not None:
                 exact = (self.item_clause_attrs, self.clause_is_reverse, prepared.query_attrs)

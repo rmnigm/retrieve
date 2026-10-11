@@ -1841,12 +1841,14 @@ file. `CHANGES.md` lists every change; each has its gate row in
    fp64 rounded to fp32; the scale `abs_max · fp32(1/127)`, as torch divides by a CPU scalar), and
    one block for the probed clusters' ids, lengths and offsets, the warp sizes and the scorer's
    three cumsums.
-2. **Filter, into the payloads.** Partial bloom: the payload kernels evaluate the prepared plan on
-   the ≤ 2 bloom columns a payload's docs span and cut the same mask bits upstream's payload
-   kernels cut from `column_mask_response`, so no column search runs. `exact`: the clauses are
+2. **Filter, into the payloads.** Bloom (either `bloom_path`): the payload kernels evaluate the
+   prepared plan (one per distinct expression) on the ≤ 2 bloom columns a payload's docs span and
+   cut the same mask bits upstream's payload kernels cut from `column_mask_response`, so no column
+   search runs; the scorer reads no other bit of Meta's full-`N` mask, so the full path returns
+   the same result without scanning all `N` (Meta's full path stays on `backend="official"`). `exact`: the clauses are
    tested over the probed docs only, one warp per 32-doc payload with `__brev(__ballot_sync(…))`
-   as its mask, an inactive clause a warp-uniform skip. Full bloom: the prepared search's full-`N`
-   mask, read by the scorer as upstream's.
+   as its mask, an inactive clause a warp-uniform skip. A given full-`N` `filtering_bit_mask`
+   is read by the scorer as upstream's.
 3. **Scorer**: upstream's payload scorer (`process_cluster` / `_remaining`), except that for
    D ≥ 128 full warps go to `process_cluster_coop` (`scorer_coop`, `STFORK_COOP=0/1` forces it):
    the warp reads its 32 consecutive rows linearly (≤ 256 bytes a row a chunk) into a padded
@@ -1881,8 +1883,7 @@ layer's `m_bits` is then required), so its index is `N · m_bits / 8` bytes like
 beside the bloom index, and `search` tests the bloom's survivors exactly (partial path: a warp takes up
 to 32 consecutive payloads, as many as keep ≥ 64 warps an SM, lane l evaluating payload l's bloom
 columns; the warp then walks its payloads, skipping those without bloom survivors, each lane
-testing one bloom-passing doc; full path: the exact payload kernels take the bloom mask as a
-pre-filter). Bloom ∧ exact is the exact
+testing one bloom-passing doc). Bloom ∧ exact is the exact
 filter, so the fork's bloom returns no false positive; the parity gate against Meta's bloom runs
 with `bloom_width="upstream", recheck=False`.
 
