@@ -148,7 +148,7 @@ Not scheduled work; candidates for citations or a one-time check.
 - For the paper: Meta's public SilverTorch numbers
   (`github.com/meta-recsys/silvertorch`, an Engineering-at-Meta post) as
   target figures for
-  [official-vs-reimplementation](paper/official-vs-reimplementation.md);
+  [Meta as published vs adapted](paper/meta-published-vs-adapted.md);
   two ANN-benchmark trustworthiness critiques (arXiv 2507.00379, a
   YDB.tech write-up) for
   [provenance-and-disclosure](paper/provenance-and-disclosure.md). No

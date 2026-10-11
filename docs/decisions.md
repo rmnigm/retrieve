@@ -20,19 +20,43 @@ decisions.
 
 ## Goal and scheduling
 
-- **The goal is a reproducibility paper** on SilverTorch (Meta) and LiNR
-  (LinkedIn): one correct harness, public datasets up to the papers' scale.
-  **The SilverTorch arm is Meta's public code, forked and improved** (user,
-  2026-10-10, roadmap META-FORK): the paper's improved baseline is a fork of
-  `meta-recsys/silvertorch` with its measured bottlenecks removed, next to
-  Meta's code as shipped. LiNR stays a reimplementation from the paper's
-  text (it has no public code).
-- **Our Triton SilverTorch reimplementation stays in the repo but is
-  probably not in the paper** (user, 2026-10-10): it wins on fewer launches
-  and syncs, not on its scorer, and at 30 M bs 64 Meta's kernels are level
-  or ahead. No Triton code or result is deleted; the final pass still
-  measures it for the record. New Triton kernel work is stopped (ST-XQ is
-  cancelled).
+- **The study: Meta's official SilverTorch code, adapted, against LiNR**
+  (user, 2026-10-11). The paper is a reproducibility study of SilverTorch
+  (Meta) and LiNR (LinkedIn) on public datasets, one correct harness, up to
+  the papers' scale. Its two arms:
+  - **SilverTorch** is Meta's officially published code
+    (`meta-recsys/silvertorch`, synced to `22c2007`), adapted by us with a
+    listed set of improvements (host syncs removed, CUDA-graph capturable,
+    one-call search, `m_bits` honoured, an exact recheck of bloom
+    survivors, kernel tuning; each change with its gate). In prose it is
+    "Meta's official SilverTorch code, adapted", never "a fork". In code it
+    is still the `official-fork/` workspace member, package
+    `silvertorch_fork`, `backend="official-fork"`, until roadmap
+    [RENAME](roadmap.md#3-rename-the-adapted-backend-becomes-silvertorchs-default).
+  - **LiNR** is V1-V3, our implementation from the paper's text (LiNR has
+    no public code). Its kernels stay, whatever they are written in.
+
+  The comparison of the two is the paper.
+- **Our Triton SilverTorch reimplementation is out of the paper and out of
+  the released code** (user, 2026-10-11): `SilverTorch(backend="triton")`
+  and `backend="torch"` (our Algorithm 1 kernels and their eager
+  reference) are neither a result nor a shipped backend. Until its
+  deletion step the code stays in the repository, recorded and unused; it
+  is deleted under CLAUDE.md rule 5 only after the adapted backend's review
+  ACCEPT and its rerun, behind the tag `triton-silvertorch-final`
+  ([roadmap](roadmap.md#4-triton-st-delete-delete-the-triton-silvertorch-reimplementation)).
+  Its records stay on the Hub (`campaign-final` and earlier), never
+  deleted, never cited. No new Triton SilverTorch kernel work.
+- **Meta's code as published (`backend="official"`, pinned `21aa35e`,
+  built `-O3`) is the parity reference, not an arm.** The adapted code is
+  gated bit-exact against it, and the paper's "Meta as published vs
+  adapted" table ([paper](paper/meta-published-vs-adapted.md)) reports
+  what the adaptation changed. Meta's code as published is not a separate
+  arm of the study.
+- **Paper numbers.** SilverTorch's come from the adapted-official rerun of
+  every SilverTorch cell of the final grid (roadmap
+  [FORK-RERUN](roadmap.md#2-fork-rerun-every-silvertorch-cell-on-the-adapted-backend));
+  LiNR's from `campaign-final` (not rerun); one final parquet holds both.
 - **No dates.** Every roadmap step is done, in order; nothing is optional
   or conditional on a deadline. The GPU is the bottleneck, so GPU steps
   are ordered first and CPU steps run beside them.
@@ -69,13 +93,15 @@ decisions.
 ## Campaign v2 (user, 2026-10-08)
 
 - **T3 reports device time and end-to-end, as measured** (controller,
-  2026-10-09, user away and delegating): official SilverTorch eager is
-  host-bound (device kernels 0.18-0.31 ms of 1.1-1.85 ms end to end at v2.1;
-  its windows read ~1140 MHz because the GPU idles, and its end-to-end
-  moves with host load at the same device time), so clock-normalising would
-  correct a symptom. T3 gives kernel-only and end-to-end side by side, as
-  measured, with the host-bound mechanism stated; F4b (official vs official,
-  interleaved) is reported as measured.
+  2026-10-09, user away and delegating): Meta's code as published is
+  host-bound in eager (device kernels 0.18-0.31 ms of 1.1-1.85 ms end to
+  end at v2.1; its windows read ~1140 MHz because the GPU idles, and its
+  end-to-end moves with host load at the same device time), so
+  clock-normalising would correct a symptom. T3 (now Meta as published vs
+  adapted, [claims](paper/claims.md)) gives kernel-only and end-to-end side
+  by side, as measured, with the host-bound mechanism stated; F4b
+  (co-design, partial vs full on one backend, interleaved) is reported as
+  measured.
 - **Exploration first, one final repro pass** (user, 2026-10-09): while the
   library improves, legs run at the current tag to collect behaviour,
   comparisons and charts; a library change does not stop or invalidate
@@ -167,10 +193,16 @@ now on; the [roadmap](roadmap.md) holds the steps.
   T2 confidence interval rests on them (`filter`); every SilverTorch cell at
   `n_probe` ≤ `n_lists` / 4; n_lists / n_probe from the tune
   ([evaluation](system/evaluation.md#ivf-tuning)).
-- **Headline SilverTorch operating point**: the paper's `n_probe` 24 plus
-  the matched-recall `n95` (the smallest `n_probe` reaching
-  `recall_oracle@100` ≥ 0.95 on the dataset's median sweep), not {24, 32}:
-  a fixed `n_probe` across 0.8M-10M compares different recall levels.
+- **SilverTorch is reported at its tuned point per dataset size** (user,
+  2026-10-11): the matched-recall point from the IVF tune (below), with the
+  recall each filter and k actually reaches, read off per-filter probe
+  curves (roadmap FORK-RERUN item 1). The paper's `n_probe` 24 is one
+  reference row only, not the headline: a fixed `n_probe` across 0.8-30 M
+  compares different recall levels. Recall targets reported: 0.90 and 0.95,
+  0.99 a stretch (user, 2026-10-11). At 10-30 M the cluster count is swept
+  (`n_lists` {4096, 16384, 65536}, `n_probe` doubling to the 25 % cap, the
+  k 1000 check per `n_lists`) and the tuned point per size picked from it
+  (user, 2026-10-11; roadmap FORK-RERUN item 2).
 - **IVF tuned per dataset size** (user, 2026-10-08): `n_lists` and
   `n_probe` depend on N and are tuned, not fixed at the library default
   1024. The sweep runs on **one small and one big dataset only** (user):
@@ -198,26 +230,34 @@ now on; the [roadmap](roadmap.md) holds the steps.
   (2048-8192 all reach 0.95 at ≈ 12.7 % scanned), YFCC and PubMed 4096 /
   1024 = the cap, 0.95 not reached (0.72, 0.873): at k 1000 the probe
   scorers run `n_probe` ≤ 1024, which makes 4096 the largest `n_lists` whose
-  25 % cap runs.
-- **Official SilverTorch runs only on `none` and `bloom`.** Its clause and
-  exact cells time our `pack_mask` adapter, not Meta's code; the existing
-  official-clause records stay as an "adapter-bound upper bound" footnote.
-- **Timing**: CUDA-graph is the headline mode, eager the secondary; the
-  official backend is eager-only (its ops cannot be captured), said in T3.
+  25 % cap runs. These picks hold for the final pass's records; for the
+  adapted-official rerun at 10-30 M the `n_lists` sweep under the operating
+  point above replaces them.
+- **Meta's code as published runs only on `none` and `bloom`.** Its
+  clause and exact cells time our `pack_mask` adapter, not Meta's code; the
+  existing official-clause records stay as an "adapter-bound upper bound"
+  footnote. The adapted code runs `exact` inside its own search op (its
+  CHANGES row C9), so the study's SilverTorch arm has all three filter
+  modes.
+- **Timing**: CUDA-graph is the headline mode, eager the secondary. The
+  adapted backend captures (its compile and capture gates); Meta's code as
+  published is eager-only (its ops cannot be captured), so "Meta as
+  published vs adapted" compares eager with eager and says so.
   Every ratio claim (C1, C5, C7) is timed interleaved: the arms of one
   comparison run round-robin (ABAB) in one process, so clock drift cancels.
 - **Baselines stay torch-importable; no Faiss** (user): the generic-torch
-  postfilter, LiNR V1/V2 on the torch backend (the native floor), the
-  SilverTorch torch-reference backend (unfused IVF) and a
-  `torch.compile(mode="max-autotune")` arm of the torch-reference ops. The
-  paper states the scope once in the setup and once in threats to
-  validity.
+  postfilter, LiNR V1/V2 on the torch backend (the native floor) and a
+  `torch.compile(mode="max-autotune")` arm of LiNR's torch-reference ops.
+  The SilverTorch torch-reference backend (unfused IVF) leaves with the
+  Triton reimplementation it mirrors (Goal above). The paper states the
+  scope once in the setup and once in threats to validity.
 - **LiNR V4 leaves the library** (user): it is ours, not LiNR's. The code
   stays under the git tag `linr-v4-final`.
-- **H2H-final replaces b3 and the kernel-opt head-to-head** as the only
-  source of T3 (official vs Triton): goodreads E1c and arXiv, release code,
-  interleaved, 5 repeats, official in both `score_path` modes (fp16, the
-  default the paper reports; int32, parity).
+- **T3 is Meta as published vs adapted**, from the rerun's `h2h` cells
+  (the adapted backend against `backend="official"` at `-O3`, interleaved,
+  both `score_path` modes: fp16, Meta's default; int32, parity). b3,
+  the kernel-opt head-to-head and H2H-FINAL (official vs our Triton) are
+  history: not in the paper.
 - **Execution**: code and GPU testing run on the 1×A100 development pod;
   the long evaluations run on pods the user creates, one sequential
   timed driver on GPU 0, quality-only work on GPU 1, and timed work on a
@@ -225,19 +265,29 @@ now on; the [roadmap](roadmap.md) holds the steps.
 
 ## Library
 
-- **Meta's `meta-recsys/silvertorch` ops are the reference backend**,
-  `backend="official"`, installed by the `official` extra and pinned to one
-  commit (`21aa35e`, see [pyproject.toml](../pyproject.toml)). Bumping the
-  pin is a deliberate change that reruns the official parity gate.
-- **Triton is our implementation and gets the kernel effort.** The
-  hand-written CUDA C++ and CuTe DSL SilverTorch backends were deleted once
-  the official backend's parity gate was green; the git tag
-  `cuda-cute-backends-final` holds them.
+- **SilverTorch ships as Meta's official code, adapted** (Goal above):
+  the `official-fork/` uv workspace member (Apache-2.0, Meta's `LICENSE`
+  and file headers kept, each changed file marked, every change a row of
+  its `CHANGES.md` with its gate in [validation](validation.md)), reached
+  through `SilverTorch(backend="official-fork")` and the `official` extra.
+  Our phase 1 (k-means, int8 codes, probe selection) stays ours, as for
+  `backend="official"`.
+- **Meta's `meta-recsys/silvertorch` as published is the parity
+  reference**, `backend="official"`, installed by the `official` extra and
+  pinned to one commit (`21aa35e`, see [pyproject.toml](../pyproject.toml)).
+  Bumping the pin is a deliberate change that reruns the official parity
+  gate.
+- **Our kernel effort goes to LiNR and to the adapted SilverTorch code.**
+  The hand-written CUDA C++ and CuTe DSL SilverTorch backends were deleted
+  once the official backend's parity gate was green (tag
+  `cuda-cute-backends-final`); the Triton SilverTorch backend follows the
+  same path (Goal above).
 - **Meta's shape**: `retrieve.modules` (the `nn.Module`s and builders) and
   `retrieve.ops` (registered kernels, one namespace per backend: `triton`,
   `reference`, `official`), plus `retrieve.indexing` and
-  `retrieve.functional`. Meta's modules and ops are imported and wired in,
-  never copied. See [architecture](system/architecture.md).
+  `retrieve.functional`. Meta's code never enters `retrieve/`: the
+  published version installs from its pin, the adapted version is its own
+  workspace member. See [architecture](system/architecture.md).
 - **LiNR V1-V3 are library modules**; the harness keeps only a name to
   class table. V4 leaves (Campaign v2 above).
 - **Op names, module names, buffer names and op schemas are stable.** A
@@ -294,17 +344,19 @@ now on; the [roadmap](roadmap.md) holds the steps.
 - **Three packages, one dependency direction**: `bench` → `training` →
   `eval_datasets`, enforced by `tests/test_dependency_direction.py`. The
   library retrieves; the harness measures.
-- **`triton` is the algorithms' campaign backend**, because it is the
-  fastest arm on every algorithm measured (eager median torch/triton
-  4.16× on V1, 7.27× on V2, 10.19× on V3). `silvertorch` runs
-  `[triton, official]`, because that comparison is the paper; the torch
-  arms return only as the baselines of Campaign v2 above (V1/V2 torch on
-  three synth pass rates, the SilverTorch torch reference at the headline
-  point), not as a backend matrix.
+- **`triton` is LiNR's campaign backend**, because it is the fastest arm
+  on every LiNR algorithm measured (eager median torch/triton 4.16× on V1,
+  7.27× on V2, 10.19× on V3). `silvertorch` runs the adapted backend
+  (`official-fork`), with `official` (Meta as published) beside it only
+  where a cell feeds the parity gate or T3 (Goal above). The torch arms
+  return only as the baselines of Campaign v2 above (V1/V2 torch on three
+  synth pass rates), not as a backend matrix. The final pass's
+  `silvertorch` `triton` and `torch` arms are records, not results.
 - **No unfiltered `quality` suite.** The synth suite's p = 1.0 point is
   the unfiltered cell on goodreads, arXiv and YFCC.
-- **Modes: `eager` everywhere, `graph` on `triton`**; graph is the
-  headline (Campaign v2 above). Graph-only was rejected: the official ops
+- **Modes: `eager` everywhere, `graph` on every capturable arm** (LiNR
+  `triton`, the adapted SilverTorch backend); graph is the headline
+  (Campaign v2 above). Graph-only was rejected: Meta's ops as published
   cannot be captured. A run with a narrowed mode set records
   `status: partial`, which the report treats as not citable; whether a
   deliberate, recorded narrowing should read differently is open (see the

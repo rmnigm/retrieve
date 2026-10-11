@@ -4,12 +4,16 @@ GPU retrieval framework for recommender systems (PyTorch + Triton). My master's 
 
 The library half is the package `torchretrieve` (not yet published on PyPI; release is roadmap F4); this repo also holds the training / evaluation harness used in the thesis.
 
+**The study.** A reproducibility study of two industrial GPU retrieval papers: **SilverTorch** (Meta), run as Meta's official SilverTorch code adapted by us (improvements listed in its CHANGES file, each gated bit-exact against the published code), against **LiNR** (LinkedIn) V1–V3, implemented here from the paper's text. Our earlier Triton reimplementation of SilverTorch is not part of the paper or of the released code ([decisions](docs/decisions.md#goal-and-scheduling)).
+
 ## Layout
 
 This repo is a [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/) with two members sharing a single `.venv` at the workspace root:
 
 - [`retrieve/`](retrieve/) — the library: kernels, modules, correctness tests. Package `torchretrieve` (not yet on PyPI); imports as `retrieve`.
 - [`evaluation/`](evaluation/) — training and benchmark harness; depends on `retrieve` editable. Not published.
+
+A third member, `official-fork/` — Meta's official SilverTorch code, adapted (Apache-2.0, Meta's licence and headers kept) — joins when its review accepts (roadmap META-FORK).
 
 Datasets, virtual environments and campaign scratch live *outside* the repo, on
 the GPU pod's container disk (pods are launched with [`infra/runpod/pod.sh`](infra/runpod/pod.sh)) — see [`docs/system/storage.md`](docs/system/storage.md)
@@ -73,7 +77,7 @@ scripts and outputs behind the numbers are in
 sync with the code:
 
 - [`architecture.md`](docs/system/architecture.md) — module map, what each retrieval family does.
-- [`kernels.md`](docs/system/kernels.md) — Triton kernel internals and the official-backend adapter.
+- [`kernels.md`](docs/system/kernels.md) — Triton kernel internals (LiNR and the filters) and the adapter over Meta's SilverTorch ops.
 - [`filtering.md`](docs/system/filtering.md) — clause / Bloom filter semantics, paper vs. implementation.
 - [`testing.md`](docs/system/testing.md) — the correctness / parity / compile suites.
 - [`evaluation.md`](docs/system/evaluation.md) — the benchmark harness.

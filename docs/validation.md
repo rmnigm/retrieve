@@ -174,7 +174,9 @@ The head-to-head on goodreads (797,084 items) and arXiv (2,988,996 items),
 d128 (goodreads on the gSASRec `gsasrec-d128-drop0.5-id` embeddings, since replaced as the
 harness encoder: [encoder switch](#encoder-switch-evals-to-redo)), `n_lists 1024`, `n_probe` 24 and 32, k = 100. Full tables:
 [artifacts/official-silvertorch/b3/tables.md](artifacts/official-silvertorch/b3/tables.md).
-The paper's account is [paper/official-vs-reimplementation.md](paper/official-vs-reimplementation.md).
+Not in the study (Triton SilverTorch is out of the paper,
+[decisions](decisions.md#goal-and-scheduling)); the paper's account of
+Meta's code is [Meta as published vs adapted](paper/meta-published-vs-adapted.md).
 
 Contested: the head-to-head's own run record called these numbers "not
 citable until the gate is re-run", while the paper section treats them as
