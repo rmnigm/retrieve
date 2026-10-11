@@ -103,6 +103,9 @@ struct RawKeys {
   __device__ __forceinline__ uint32_t slot(int64_t /*row*/, int64_t s) const {
     return static_cast<uint32_t>(s);
   }
+  __device__ __forceinline__ int64_t row_end(int64_t row) const {
+    return limit[row];
+  }
 };
 
 // Stage-1 winners [B, chunks * k] (composites) as the stage-2 input.
@@ -114,6 +117,9 @@ struct CompositeKeys {
   }
   __device__ __forceinline__ uint32_t slot(int64_t row, int64_t i) const {
     return composite_slot(cand[row * per_row + i]);
+  }
+  __device__ __forceinline__ int64_t row_end(int64_t /*row*/) const {
+    return per_row;
   }
 };
 
@@ -134,7 +140,7 @@ struct SelectShared {
 // holds the keys above the threshold in index order, then the tied ones in index order: a
 // deterministic layout whose index order, chunk after chunk, keeps the row's index order for any
 // stage-2 tie (a chunk's entries equal to a stage-2 threshold are all in one of its two parts).
-template <bool CACHED, bool SORT, typename KEYS>
+template <bool CACHED, bool SORT, typename KEYS, int ITEMS = kSelectItems>
 __device__ void select_topk(
     const KEYS& keys,
     int64_t row,
@@ -146,14 +152,14 @@ __device__ void select_topk(
   __shared__ typename Scan::TempStorage scan;
   const int tid = threadIdx.x;
   const int64_t iters = (n + kSelectThreads - 1) / kSelectThreads;
-  uint32_t cache[CACHED ? kSelectItems : 1];
+  uint32_t cache[CACHED ? ITEMS : 1];
   // entry index of a thread's it-th key
   auto index_of = [&](int64_t it) -> int64_t {
     return it * kSelectThreads + tid;
   };
   if constexpr (CACHED) {
 #pragma unroll
-    for (int it = 0; it < kSelectItems; ++it) {
+    for (int it = 0; it < ITEMS; ++it) {
       const int64_t i = index_of(it);
       cache[it] = i < n ? keys.key(row, first + i) : 0;
     }
@@ -178,7 +184,7 @@ __device__ void select_topk(
     __syncthreads();
     // scores share their top digits, so lanes with one digit add once (warp-aggregated)
 #pragma unroll
-    for (int64_t it = 0; it < (CACHED ? kSelectItems : iters); ++it) {
+    for (int64_t it = 0; it < (CACHED ? ITEMS : iters); ++it) {
       if (it >= iters) {
         break; // uniform: iters is the CTA's
       }
@@ -263,13 +269,13 @@ __device__ void select_topk(
   };
   if constexpr (CACHED) {
     constexpr int kWarps = kSelectThreads / 32;
-    __shared__ int32_t slab_warp[kSelectItems * kWarps];
+    __shared__ int32_t slab_warp[ITEMS * kWarps];
     const int lane = tid % 32;
     const int warp = tid / 32;
     const uint32_t below = (1u << lane) - 1;
-    __shared__ int32_t slab_warp_gt[kSelectItems * kWarps];
+    __shared__ int32_t slab_warp_gt[ITEMS * kWarps];
 #pragma unroll
-    for (int it = 0; it < kSelectItems; ++it) {
+    for (int it = 0; it < ITEMS; ++it) {
       const uint32_t eq = __ballot_sync(0xffffffff, index_of(it) < n && cache[it] == threshold);
       const uint32_t gt = __ballot_sync(0xffffffff, index_of(it) < n && cache[it] > threshold);
       if (lane == 0) {
@@ -279,7 +285,7 @@ __device__ void select_topk(
     }
     __syncthreads();
     if (tid < 32) {
-      constexpr int kPer = kSelectItems * kWarps / 32;
+      constexpr int kPer = ITEMS * kWarps / 32;
       int32_t local[kPer];
       int32_t sum = 0;
 #pragma unroll
@@ -303,8 +309,8 @@ __device__ void select_topk(
     }
     if (tid >= 32 && tid < 64) {
       const int t = tid - 32;
-      // exclusive prefix over the kSelectItems * kWarps counts, slab-major
-      constexpr int kPer = kSelectItems * kWarps / 32;
+      // exclusive prefix over the ITEMS * kWarps counts, slab-major
+      constexpr int kPer = ITEMS * kWarps / 32;
       int32_t local[kPer];
       int32_t sum = 0;
 #pragma unroll
@@ -328,7 +334,7 @@ __device__ void select_topk(
     }
     __syncthreads();
 #pragma unroll
-    for (int it = 0; it < kSelectItems; ++it) {
+    for (int it = 0; it < ITEMS; ++it) {
       const int64_t i = index_of(it);
       const uint32_t eq = __ballot_sync(0xffffffff, i < n && cache[it] == threshold);
       const uint32_t gt = __ballot_sync(0xffffffff, i < n && cache[it] > threshold);
@@ -450,6 +456,12 @@ __global__ void __launch_bounds__(kSelectThreads, 2) select_chunk_kernel(
   const int64_t rest = n_row - first;
   const int64_t n = rest < kSelectChunk ? rest : kSelectChunk;
   const int64_t kk = std::min(k, n);
+  if (first >= keys.row_end(row)) { // all past the row's written width: no winners
+    for (int64_t j = threadIdx.x; j < k; j += kSelectThreads) {
+      cand[row * chunks * k + chunk * k + j] = 0;
+    }
+    return;
+  }
   select_topk<true, false>(keys, row, first, n, kk, sh);
   for (int64_t j = threadIdx.x; j < k; j += kSelectThreads) {
     cand[row * chunks * k + chunk * k + j] = j < kk ? sh.best[j] : 0;
@@ -557,6 +569,8 @@ __global__ void __launch_bounds__(kSelectThreads) select_epilogue_kernel(
   const int64_t kk = std::min(k, n);
   if (n <= kSelectChunk) {
     select_topk<true, true>(keys, row, 0, n, kk, sh);
+  } else if (n <= 2 * kSelectChunk) {
+    select_topk<true, true, KEYS, 2 * kSelectItems>(keys, row, 0, n, kk, sh);
   } else {
     select_topk<false, true>(keys, row, 0, n, kk, sh);
   }
@@ -1455,7 +1469,7 @@ std::tuple<Tensor, Tensor> search_cuda(
         C10_CUDA_KERNEL_LAUNCH_CHECK();
         per_row = chunks * k;
       }
-      while (per_row > kSelectChunk) {
+      while (per_row > 2 * kSelectChunk) { // the final stage holds up to 2 chunks
         const int64_t next_chunks = (per_row + kSelectChunk - 1) / kSelectChunk;
         Tensor next = at::empty({rows, next_chunks * k}, cand.options());
         uint64_t* next_ptr = reinterpret_cast<uint64_t*>(next.mutable_data_ptr<int64_t>());
