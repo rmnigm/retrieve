@@ -1941,7 +1941,7 @@ std::tuple<Tensor, int64_t, Tensor, int64_t> bloom_partial_payloads_prepared_cud
     C10_CUDA_KERNEL_LAUNCH_CHECK();                                               \
   }
     // wide probes (capacity >= 40 full warps a cluster): a warp per cluster
-    const bool per_cluster = warps >= 40 * n_clusters;
+    const bool per_cluster = warps >= 40 * n_clusters && n_clusters >= 1024;
     if (max_stack_size <= C_FAST_ROUTE_STACK_SIZE_FIRST_LEVEL) {
       if (per_cluster) {
         LAUNCH_RECHECK_PAYLOADS(C_FAST_ROUTE_STACK_SIZE_FIRST_LEVEL, true);

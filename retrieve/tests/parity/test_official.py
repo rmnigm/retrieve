@@ -746,21 +746,23 @@ def test_c6_fork_probe_prep_equals_reference(d):
     assert torch.equal(out[8], warps.cumsum(0, dtype=torch.int32))
 
 
+@pytest.mark.parametrize("k", [100, 1000])
 @pytest.mark.parametrize("score_path", ["int32", "fp16"])
 @pytest.mark.parametrize("delta", [-1, 0, 1])
-def test_c7_fork_two_level_topk_equals_upstream(score_path, delta):
-    """META-FORK C7: ``stfork.search`` with its two-level top-k engaged (B · width ≥ 2²³, ≥ 8
-    blocks of 256 slots per top-k slot) against upstream's scorer + the adapter's whole-width
-    top-k, under heavy ties (four distinct code rows) and with exactly ``k + delta`` passing items
-    a row (a full-``N`` mask): scores ``torch.equal``, ids up to ties, ``-1`` / ``-inf`` past the
-    finite count."""
+def test_c7_fork_two_level_topk_equals_upstream(k, score_path, delta):
+    """META-FORK C7 / K fixes 2-7: ``stfork.search``'s top-k on wide rows (the chunked radix
+    select over ~34 chunks of 8192 slots; at k 1000 its candidates take a second round) against
+    upstream's scorer + the adapter's whole-width ``torch.topk``, under heavy ties (four distinct
+    code rows) and with exactly ``k + delta`` passing items a row (a full-``N`` mask): scores
+    ``torch.equal``, ids up to ties (the boundary tie group included: both take ties in index
+    order), ``-1`` / ``-inf`` past the finite count."""
     if OB != "official-fork":
         pytest.skip("fork-only gate (META-FORK C7)")
     require_official("official")
-    b, k, d, n_lists = 64, 100, 64, 1024
+    b, d, n_lists = 64, 64, 1024
     lay = make_probe_family(b, n_lists, 600, n_lists)
     width = of.padded_rows(lay.width)
-    assert b * width >= 1 << 23 and width // 256 >= 8 * k, "the two-level top-k does not engage"
+    assert width > 8192 * 8 and (width // 8192 + 1) * k > (8192 if k == 1000 else 0), "one round"
     g = torch.Generator(device="cuda").manual_seed(13)
     base = torch.randint(-127, 128, (4, d), dtype=torch.int8, device="cuda", generator=g)
     codes = base[torch.randint(0, 4, (lay.n,), device="cuda", generator=g)].contiguous()

@@ -35,6 +35,8 @@ namespace {
 constexpr int kPrepThreads = 1024;
 // Average full warps per probed cluster from which the payload kernels run a warp per cluster.
 constexpr int64_t kPerClusterWarps = 40;
+// ... and only with enough clusters (warps) to fill the GPU.
+constexpr int64_t kPerClusterMinClusters = 1024;
 
 
 struct MaxOp {
@@ -423,10 +425,12 @@ __device__ void select_topk(
   __syncthreads();
 }
 
-// Stage 1: one CTA per (row, chunk), its k winners to cand[row, chunk * k + j].
+// Stage 1: one CTA per (row, chunk) of the row's n_row entries, its k winners to
+// cand[row, chunk * k + j]; repeated over the winners while they exceed one chunk.
 template <typename T>
 __global__ void __launch_bounds__(kSelectThreads, 2) select_chunk_kernel(
-    RawKeys<T> keys,
+    T keys,
+    int64_t n_row,
     int64_t chunks,
     int64_t k,
     uint64_t* __restrict__ cand) {
@@ -434,7 +438,7 @@ __global__ void __launch_bounds__(kSelectThreads, 2) select_chunk_kernel(
   const int64_t row = blockIdx.x / chunks;
   const int64_t chunk = blockIdx.x % chunks;
   const int64_t first = chunk * kSelectChunk;
-  const int64_t rest = keys.width - first;
+  const int64_t rest = n_row - first;
   const int64_t n = rest < kSelectChunk ? rest : kSelectChunk;
   const int64_t kk = std::min(k, n);
   select_topk<true, false>(keys, row, first, n, kk, sh);
@@ -1015,7 +1019,7 @@ std::tuple<Tensor, int64_t, Tensor, int64_t> exact_payloads(
             reinterpret_cast<WarpPayload*>(warp_payloads.mutable_data_ptr<int8_t>()));
 
   };
-  if (warps >= kPerClusterWarps * n_clusters) {
+  if (warps >= kPerClusterWarps * n_clusters && n_clusters >= kPerClusterMinClusters) {
     launch_warps(std::true_type{});
   } else {
     launch_warps(std::false_type{});
@@ -1308,10 +1312,22 @@ std::tuple<Tensor, Tensor> search_cuda(
       }
       Tensor cand = at::empty({rows, chunks * k}, raw.options().dtype(at::kLong));
       uint64_t* cand_ptr = reinterpret_cast<uint64_t*>(cand.mutable_data_ptr<int64_t>());
-      select_chunk_kernel<T><<<rows * chunks, kSelectThreads, 0, stream>>>(
-          keys, chunks, k, cand_ptr);
+      select_chunk_kernel<RawKeys<T>><<<rows * chunks, kSelectThreads, 0, stream>>>(
+          keys, w, chunks, k, cand_ptr);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
-      finish(CompositeKeys{cand_ptr, chunks * k}, chunks * k);
+      int64_t per_row = chunks * k;
+      while (per_row > kSelectChunk) {
+        const int64_t next_chunks = (per_row + kSelectChunk - 1) / kSelectChunk;
+        Tensor next = at::empty({rows, next_chunks * k}, cand.options());
+        uint64_t* next_ptr = reinterpret_cast<uint64_t*>(next.mutable_data_ptr<int64_t>());
+        select_chunk_kernel<CompositeKeys><<<rows * next_chunks, kSelectThreads, 0, stream>>>(
+            CompositeKeys{cand_ptr, per_row}, per_row, next_chunks, k, next_ptr);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+        cand = next;
+        cand_ptr = next_ptr;
+        per_row = next_chunks * k;
+      }
+      finish(CompositeKeys{cand_ptr, per_row}, per_row);
     };
     if (int32_path) {
       launch(int32_t{0});
