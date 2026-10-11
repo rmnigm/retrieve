@@ -431,7 +431,7 @@ class SilverTorch(RetrievalModule):
         """``nn.Module.compile`` — refused on the official backend (eager-only)."""
         if self.backend == "official":
             raise RuntimeError(
-                f"SilverTorch(backend={self.backend!r}) is eager-only: every official op syncs the "
+                "SilverTorch(backend='official') is eager-only: every official op syncs the "
                 "host and re-uploads its plans per call, so there is no torch.compile / "
                 "CUDA-graph path. Use backend='triton' or 'torch' for compiled runs."
             )
@@ -529,7 +529,7 @@ class SilverTorch(RetrievalModule):
             )
         if self.backend == "official" and torch.compiler.is_compiling():
             raise RuntimeError(
-                f"SilverTorch(backend={self.backend!r}) is eager-only and cannot be traced by "
+                "SilverTorch(backend='official') is eager-only and cannot be traced by "
                 "torch.compile / torch.export: Meta's scorers sync the host (kernels.md § "
                 "official). Call the module eagerly, or use backend='triton' / 'torch'."
             )

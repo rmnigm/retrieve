@@ -9,9 +9,10 @@ attribute → feature / expression mapping, mask packing and the eager scoring w
 outputs go through the same ``masked_topk`` epilogue as every other backend in ``adapter``
 (re-exported below). ``retrieve.ops.official.st`` is ``torch.ops.st`` once loaded.
 
-``backend="official-fork"`` runs the same adapter on our fork of those ops (``official-fork/``,
-package ``silvertorch_fork``, ``torch.ops.stfork.*``, same schemas until the fork's own API
-replaces them; ``official-fork/CHANGES.md``); both load in one process.
+``backend="official-fork"`` runs the adapter on our fork of those ops (``official-fork/``,
+package ``silvertorch_fork``, ``torch.ops.stfork.*``): the upstream-shaped ops under the same
+schemas, plus the fork's own (``search``, the whole forward after phase 1; the prepared bloom
+searches; ``probe_prep``; ``official-fork/CHANGES.md``); both load in one process.
 
 Op schemas matched against the upstream registrations (``TORCH_LIBRARY_FRAGMENT(st,
 …)`` at 21aa35e):
@@ -55,8 +56,9 @@ Op schemas matched against the upstream registrations (``TORCH_LIBRARY_FRAGMENT(
   ``[B·P]``, ``first_item_offset_in_column`` int8 ``[B·P]``, ``column_mask_response``
   int64 ``[Σ columns]``.
 
-Everything here is **eager only**: each op syncs the host, so there is no
-``torch.compile`` / CUDA-graph path; the layer refuses to compile this backend.
+On ``official`` everything here is **eager only**: each upstream op syncs the host, so there is
+no ``torch.compile`` / CUDA-graph path and the layer refuses to compile it. The fork's ops do
+not sync and have shape functions, so ``official-fork`` captures and compiles.
 """
 
 from __future__ import annotations

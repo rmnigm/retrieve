@@ -1,7 +1,8 @@
 """The official-backend adapter proper: attributes → features / expressions, mask packing, the
 bloom searches and the scoring wrappers over ``torch.ops.st.*`` or the fork's ``torch.ops.stfork.*``
 (each op-calling function takes ``backend``; loader, ``OfficialConfig`` and
-the upstream constants live in the package ``__init__``). Everything is eager only.
+the upstream constants live in the package ``__init__``). Eager only on ``official``; the
+fork's ops capture and compile.
 """
 
 from __future__ import annotations
