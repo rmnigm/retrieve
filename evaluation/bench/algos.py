@@ -5,13 +5,14 @@ filter kinds and backends, ``PATHS`` derived from ``retrieve.interfaces.DISPATCH
 
 ``PATHS[(algo, filter_kind, backend)]`` is the code path that actually runs, or ``None`` when there
 is no such cell: ``DISPATCH``'s label for the module's backend (``cublas`` where the flag is a
-no-op, ``None`` where the constructor raises — ``official`` outside SilverTorch), suffixed with the
+no-op, ``None`` where the constructor raises — ``official`` / ``official-fork`` outside
+SilverTorch), suffixed with the
 filter's backend on filter cells of the cuBLAS algos (``cublas+triton``: cuBLAS scoring, Triton
 ``clause_mask``), and ``None`` on ``linr_v2 / none`` — its candidate source *is* the filter.
 ``postfilter`` is the harness's own baseline (``bench.postfilter``), not a library module:
 ``DISPATCH`` gains its row here, torch only, filter cells only. ``tests/bench/test_paths.py`` pins
-the derived table. The standalone filter modules of ``official`` cells are Triton (O §6.2):
-``filter_backend``.
+the derived table. The standalone filter modules of ``official`` / ``official-fork`` cells are
+Triton (O §6.2): ``filter_backend``.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ from retrieve import (
     SilverTorch,
 )
 from retrieve.interfaces import DISPATCH as LIBRARY_DISPATCH
-from retrieve.interfaces import FilterModule
+from retrieve.interfaces import OFFICIAL_BACKENDS, FilterModule
 
 ALGOS: dict[str, type[nn.Module]] = {
     "linr_v1_filter_mask": LiNRV1,
@@ -43,17 +44,17 @@ ALGOS: dict[str, type[nn.Module]] = {
 }
 DISPATCH = {
     **LIBRARY_DISPATCH,
-    "Postfilter": {"triton": None, "torch": "cublas", "official": None},
+    "Postfilter": {"triton": None, "torch": "cublas", "official": None, "official-fork": None},
 }
 FILTER_KINDS = ("none", "clause", "bloom")
-BACKENDS = ("triton", "torch", "official")
+BACKENDS = ("triton", "torch", *OFFICIAL_BACKENDS)
 FILTER_MODE = {"none": "none", "clause": "exact", "bloom": "bloom"}  # filter_kind → filter_mode
 SILVERTORCH_DEFAULTS = {"n_lists": 1024, "n_probe": 24, "n_iter": 10}
 BLOOM_DEFAULTS = {"m_bits": 1024, "k_hash": 5}
 
 
 def filter_backend(backend: str) -> str:
-    return "triton" if backend == "official" else backend
+    return "triton" if backend in OFFICIAL_BACKENDS else backend
 
 
 def _path(algo: str, filter_kind: str, backend: str) -> str | None:
@@ -78,24 +79,27 @@ def official_config(
     algo: str, filter_kind: str, backend: str, params: dict[str, Any]
 ) -> OfficialConfig | None:
     """The ``bloom_path`` (the S9 co-design ablation) and ``score_path`` (fp16 | int32, the
-    H2H-final arms) build params as ``OfficialConfig`` on the official backend; ``None`` (the
-    library default, ``partial`` / ``fp16``) when both keys are absent or the backend is triton.
-    ``bloom_path`` means something on ``silvertorch / bloom`` on official and triton (there the
-    layer's own ``bloom_path``, C5-OURS), ``score_path`` on ``silvertorch / official``; each
-    raises anywhere else."""
+    H2H-final arms) build params as ``OfficialConfig`` on the two official backends; ``None``
+    (the library default, ``partial`` / ``fp16``) when both keys are absent or the backend is
+    triton. ``bloom_path`` means something on ``silvertorch / bloom`` on official, official-fork
+    and triton (there the layer's own ``bloom_path``, C5-OURS), ``score_path`` on ``silvertorch``
+    on the official backends; each raises anywhere else."""
     kw = {k: params[k] for k in ("bloom_path", "score_path") if k in params}
     if not kw:
         return None
     if "bloom_path" in kw and (
-        (algo, filter_kind) != ("silvertorch", "bloom") or backend not in ("official", "triton")
+        (algo, filter_kind) != ("silvertorch", "bloom")
+        or backend not in (*OFFICIAL_BACKENDS, "triton")
     ):
         raise ValueError(
-            f"bloom_path applies to silvertorch/bloom on official or triton only, got "
+            f"bloom_path applies to silvertorch/bloom on the official backends or triton only, got "
             f"{algo}/{filter_kind}/{backend}"
         )
-    if "score_path" in kw and (algo, backend) != ("silvertorch", "official"):
-        raise ValueError(f"score_path applies to silvertorch/official only, got {algo}/{backend}")
-    return OfficialConfig(**kw) if backend == "official" else None
+    if "score_path" in kw and (algo != "silvertorch" or backend not in OFFICIAL_BACKENDS):
+        raise ValueError(
+            f"score_path applies to silvertorch on the official backends only, got {algo}/{backend}"
+        )
+    return OfficialConfig(**kw) if backend in OFFICIAL_BACKENDS else None
 
 
 def build_filter(
@@ -198,6 +202,7 @@ __all__ = [
     "DISPATCH",
     "FILTER_KINDS",
     "FILTER_MODE",
+    "OFFICIAL_BACKENDS",
     "PATHS",
     "SILVERTORCH_DEFAULTS",
     "build",

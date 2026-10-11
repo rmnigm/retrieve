@@ -9,6 +9,10 @@ attribute → feature / expression mapping, mask packing and the eager scoring w
 outputs go through the same ``masked_topk`` epilogue as every other backend in ``adapter``
 (re-exported below). ``retrieve.ops.official.st`` is ``torch.ops.st`` once loaded.
 
+``backend="official-fork"`` runs the same adapter on our fork of those ops (``official-fork/``,
+package ``silvertorch_fork``, ``torch.ops.stfork.*``, same schemas until the fork's own API
+replaces them; ``official-fork/CHANGES.md``); both load in one process.
+
 Op schemas matched against the upstream registrations (``TORCH_LIBRARY_FRAGMENT(st,
 …)`` at 21aa35e):
 
@@ -57,14 +61,23 @@ Everything here is **eager only**: each op syncs the host, so there is no
 
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass
 from typing import Literal
 
 import torch
 
+from retrieve.interfaces import OFFICIAL_BACKENDS, OfficialBackend
+
 BitOrder = Literal["high_first", "low_first"]
 ScorePath = Literal["int32", "fp16"]
 BloomPath = Literal["partial", "full"]
+
+# backend -> (package, op namespace)
+PACKAGES: dict[str, tuple[str, str]] = {
+    "official": ("silvertorch", "st"),
+    "official-fork": ("silvertorch_fork", "stfork"),
+}
 
 # Bit order the official *scorer* uses when it reads a ``filtering_bit_mask`` word (and the
 # partial column masks): doc ``d`` is bit ``63 - d % 64`` of word ``d // 64`` — "lower doc id
@@ -172,63 +185,65 @@ DEFAULT_CONFIG = OfficialConfig()
 
 # --- availability ---------------------------------------------------------------------
 
-_LOAD_MEMO: object | None = None
+_LOAD_MEMO: dict[str, object] = {}
 
 
-def _try_load():
-    """One import attempt; returns ``torch.ops.st`` or the exception to memoize."""
+def _try_load(backend: OfficialBackend):
+    """One import attempt; returns the op namespace or the exception to memoize."""
+    package, namespace = PACKAGES[backend]
     if not torch.cuda.is_available():
         return OfficialMissing(
             "torch reports no CUDA device; the official SilverTorch backend runs its "
             "scorer on CUDA only (the CPU reference ops are not oracles)."
         )
     try:
-        import silvertorch.ops._load_ops  # noqa: F401  (registers torch.ops.st.*)
+        importlib.import_module(f"{package}.ops._load_ops")  # registers torch.ops.<namespace>.*
     except ModuleNotFoundError as e:
-        if (e.name or "").split(".")[0] == "silvertorch":
+        if (e.name or "").split(".")[0] == package:
             return OfficialMissing(
-                "meta-recsys/silvertorch is not installed; sync the `official` extra "
+                f"{package} is not installed; sync the `official` extra "
                 f"(`uv sync --extra official`). Underlying error: {e}"
             )
-        failure = ImportError(f"silvertorch import failed on a dependency:\n{e}")
+        failure = ImportError(f"{package} import failed on a dependency:\n{e}")
         failure.__cause__ = e
         return failure
     except ImportError as e:
-        # `silvertorch` is importable but `silvertorch._C` is not: the extension did
-        # not build. That is a real failure, not an absent optional dependency.
+        # The package is importable but its `_C` is not: the extension did not build. That
+        # is a real failure, not an absent optional dependency.
         failure = ImportError(
-            "silvertorch is installed but its C++/CUDA extension failed to load "
+            f"{package} is installed but its C++/CUDA extension failed to load "
             f"(build against the running torch with `--no-build-isolation`):\n{e}"
         )
         failure.__cause__ = e
         return failure
-    st = torch.ops.st
-    missing = [name for name in REQUIRED_OPS if not hasattr(st, name)]
+    ops = getattr(torch.ops, namespace)
+    missing = [name for name in REQUIRED_OPS if not hasattr(ops, name)]
     if missing:
         return ImportError(
-            f"silvertorch loaded but torch.ops.st lacks {missing}; the pinned sha "
-            "does not match the one this adapter was written against (21aa35e)."
+            f"{package} loaded but torch.ops.{namespace} lacks {missing}; the source does "
+            "not match the one this adapter was written against (21aa35e)."
         )
-    return st
+    return ops
 
 
-def ensure_loaded():
-    """Load the official ops (memoized) and return the ``torch.ops.st`` namespace.
+def ensure_loaded(backend: OfficialBackend = "official"):
+    """Load ``backend``'s ops (memoized) and return their namespace, ``torch.ops.st`` or
+    ``torch.ops.stfork``.
 
     Raises :class:`OfficialMissing` when the package cannot run here and a plain
     ``ImportError`` when it is present but broken."""
-    global _LOAD_MEMO
-    if _LOAD_MEMO is None:
-        _LOAD_MEMO = _try_load()
-    if isinstance(_LOAD_MEMO, BaseException):
-        raise _LOAD_MEMO
-    return _LOAD_MEMO
+    if backend not in _LOAD_MEMO:
+        _LOAD_MEMO[backend] = _try_load(backend)
+    ops = _LOAD_MEMO[backend]
+    if isinstance(ops, BaseException):
+        raise ops
+    return ops
 
 
-def is_available() -> bool:
-    """True iff the official ops load here (flattens "missing" and "broken")."""
+def is_available(backend: OfficialBackend = "official") -> bool:
+    """True iff ``backend``'s ops load here (flattens "missing" and "broken")."""
     try:
-        ensure_loaded()
+        ensure_loaded(backend)
     except ImportError:
         return False
     return True
@@ -237,6 +252,8 @@ def is_available() -> bool:
 def __getattr__(name: str):
     if name == "st":
         return ensure_loaded()
+    if name == "stfork":
+        return ensure_loaded("official-fork")
     raise AttributeError(f"module 'retrieve.ops.official' has no attribute {name!r}")
 
 
@@ -266,6 +283,9 @@ __all__ = [
     "DEFAULT_CONFIG",
     "MASK_BIT_ORDER",
     "MAX_SEARCH_K",
+    "OFFICIAL_BACKENDS",
+    "PACKAGES",
+    "OfficialBackend",
     "OfficialConfig",
     "OfficialMissing",
     "attrs_to_features",

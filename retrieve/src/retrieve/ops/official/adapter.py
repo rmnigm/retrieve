@@ -1,5 +1,6 @@
 """The official-backend adapter proper: attributes → features / expressions, mask packing, the
-bloom searches and the scoring wrappers over ``torch.ops.st.*`` (loader, ``OfficialConfig`` and
+bloom searches and the scoring wrappers over ``torch.ops.st.*`` or the fork's ``torch.ops.stfork.*``
+(each op-calling function takes ``backend``; loader, ``OfficialConfig`` and
 the upstream constants live in the package ``__init__``). Everything is eager only.
 """
 
@@ -19,6 +20,7 @@ from retrieve.ops.official import (
     MAX_SEARCH_K,
     WARP,
     BitOrder,
+    OfficialBackend,
     ScorePath,
     ensure_loaded,
 )
@@ -61,12 +63,13 @@ def build_bloom_index(
     b_multiplier: float,
     build_k: int,
     fast_build: bool = False,
+    backend: OfficialBackend = "official",
 ) -> tuple[Tensor, Tensor]:
     """``bloom_index_build`` over cluster-sorted attrs → ``(bloom_index int64 [W],
     bundle_b_offsets int64 [n_bundles+1])`` on ``attrs.device`` (the CUDA builder needs
     CUDA inputs; the CPU builder is a single-threaded loop). ``W = Σ_bundles B_bundle ·
     32`` words, i.e. ``B_bundle / 8`` bytes per doc."""
-    st = ensure_loaded()
+    st = ensure_loaded(backend)
     if not b_multiplier > 1.0:
         raise ValueError(f"b_multiplier must be > 1.0, got {b_multiplier}")
     if not 0 < build_k <= MAX_SEARCH_K:
@@ -112,13 +115,17 @@ def queries_to_expressions(
 
 
 def parse_plans(
-    expressions: list[str], hash_k: int, max_sub_queries: int = 5
+    expressions: list[str],
+    hash_k: int,
+    max_sub_queries: int = 5,
+    *,
+    backend: OfficialBackend = "official",
 ) -> tuple[Tensor, Tensor]:
     """``(plans_data int8, plans_offsets int64)`` on **CPU** for a batch of expressions, one call
     into Meta's CPU parser (≈ 59 µs at B=16). The search ops decode plans on the host per call
     (``bloom_index_search_cuda.cu:1045``), so CPU plans spare them a D2H. Query preparation:
     ``SilverTorch.prepare_queries`` runs it outside ``forward``."""
-    st = ensure_loaded()
+    st = ensure_loaded(backend)
     # `silvertorch_ks` is accepted and ignored upstream (expression_query_parser.cpp:395).
     ks = torch.ones(len(expressions), dtype=torch.int64)
     _max_stack, plans = st.parse_expression_query_batch(
@@ -188,12 +195,13 @@ def fused_scores(
     divisor: int = -1,
     filtering_bit_mask: Tensor | None = None,
     partial: tuple[Tensor, Tensor, Tensor] | None = None,
+    backend: OfficialBackend = "official",
 ) -> tuple[Tensor, Tensor]:
     """Raw call into the official scorer: ``(scores, indices)`` as the op returns them —
     int32 or fp16 ``[B, padded_rows]``, int32 sorted-table positions with ``-1`` pads and
     filtered-out slots. ``partial`` selects ``fused_kmean_ann_with_partial_masks``;
     otherwise ``fused_kmean_ann`` with an optional full-``N`` ``filtering_bit_mask``."""
-    st = ensure_loaded()
+    st = ensure_loaded(backend)
     if q_codes.dtype != torch.int8 or item_codes_sorted.dtype != torch.int8:
         raise TypeError("official scorer takes int8 queries and int8 embeddings")
     cluster_ids = probe_ids.to(torch.int64).contiguous()
@@ -269,6 +277,7 @@ def official_scores_full(
     divisor: int | None = None,
     filtering_bit_mask: Tensor | None = None,
     partial: tuple[Tensor, Tensor, Tensor] | None = None,
+    backend: OfficialBackend = "official",
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Phases 2+3 on the official ops with our quantization and epilogue, **before** the
     top-k: ``(scores fp32 [B, M], ids int64 [B, M], valid bool [B, M])`` with ``M =
@@ -290,6 +299,7 @@ def official_scores_full(
         divisor=div,
         filtering_bit_mask=filtering_bit_mask,
         partial=partial,
+        backend=backend,
     )
     return dequantize_scores(raw, idx, q_scales, global_scale, sort_perm, div)
 
@@ -309,6 +319,7 @@ def official_probe_score(
     divisor: int | None = None,
     filtering_bit_mask: Tensor | None = None,
     partial: tuple[Tensor, Tensor, Tensor] | None = None,
+    backend: OfficialBackend = "official",
 ) -> tuple[Tensor, Tensor]:
     """The official scorer + our top-k epilogue → ``(ids int64 [B, k], scores fp32 [B, k])`` with
     ``-1`` / ``-inf`` pads, like every other backend. The top-k runs on the scorer's raw ``[B, M]``
@@ -332,6 +343,7 @@ def official_probe_score(
         divisor=div,
         filtering_bit_mask=filtering_bit_mask,
         partial=partial,
+        backend=backend,
     )
     valid = idx >= 0
     floor = torch.iinfo(raw.dtype).min if raw.dtype == torch.int32 else float("-inf")
@@ -364,6 +376,8 @@ def bloom_partial_masks(
     k: int,
     hash_k: int,
     query_plan_index: Tensor | None = None,
+    *,
+    backend: OfficialBackend = "official",
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Phase 2 of the paper's co-design: the official bloom evaluated **only over the
     probed clusters**, returned as the ``(column_counts_cumsum int32 [B·P],
@@ -373,7 +387,7 @@ def bloom_partial_masks(
     ``cluster_sizes[probe_ids]``). ``query_plan_index`` (int64 ``[B]`` on the device) maps each
     row to its plan, so ``plans`` may hold one plan per distinct expression
     (``bloom_index_search_cuda.cu:1230``)."""
-    st = ensure_loaded()
+    st = ensure_loaded(backend)
     if not 0 < k <= MAX_SEARCH_K:
         raise ValueError(
             f"k must be in [1, {MAX_SEARCH_K}] (MAX_K_V2, unchecked upstream), got {k}"
@@ -400,10 +414,11 @@ def bloom_full_mask(
     hash_k: int,
     *,
     return_bool_mask: bool = False,
+    backend: OfficialBackend = "official",
 ) -> Tensor:
     """``bloom_index_search_batch`` over the whole index: bool ``[B, n_bundles·2048]`` or
     the packed int64 ``[B, n_bundles·32]`` (high-first words)."""
-    st = ensure_loaded()
+    st = ensure_loaded(backend)
     if not 0 < k <= MAX_SEARCH_K:
         raise ValueError(
             f"k must be in [1, {MAX_SEARCH_K}] (MAX_K_V2, unchecked upstream), got {k}"
@@ -420,12 +435,14 @@ def bloom_filtering_mask(
     plans: tuple[Tensor, Tensor],
     k: int,
     hash_k: int,
+    *,
+    backend: OfficialBackend = "official",
 ) -> Tensor:
     """The full-``N`` official bloom mask in the scorer's ``filtering_bit_mask`` order —
     the packed search output, bit-reversed per word only if :data:`MASK_BIT_ORDER` ever
     differs from :data:`BLOOM_OUTPUT_BIT_ORDER` (both high-first at 21aa35e)."""
     packed = bloom_full_mask(
-        bloom_index, bundle_b_offsets, plans, k, hash_k, return_bool_mask=False
+        bloom_index, bundle_b_offsets, plans, k, hash_k, return_bool_mask=False, backend=backend
     )
     if MASK_BIT_ORDER != BLOOM_OUTPUT_BIT_ORDER:
         packed = reverse_bits64(packed)

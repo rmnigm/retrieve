@@ -1822,6 +1822,36 @@ scorer 10.9–17.8× ours on goodreads) was our former padded probe layout,
 and it closed with TF-9 / TF-1. The current kernel-only numbers, re-run on
 the b3 methodology, are in the same validation section.
 
+### `official-fork` — our fork of Meta's ops
+
+[`official-fork/`](../../official-fork/CHANGES.md) is a uv workspace member: Meta's
+`meta-recsys/silvertorch` vendored at `21aa35e`, synced to upstream `22c2007`, renamed so it
+loads beside the pinned upstream in one process (package `silvertorch_fork`, ops
+`torch.ops.stfork.*`, C++ namespace `st::ops` kept, extensions loaded `RTLD_LOCAL`), Apache-2.0
+with Meta's `LICENSE` and headers and one "Modified by the retrieve authors" line per changed
+file. `CHANGES.md` lists every change; each has its gate row in
+[validation](../validation.md#meta-fork-backendofficial-fork-not-yet-validated).
+`SilverTorch(backend="official-fork")` selects it.
+
+**Adapter today.** The fork registers the same six ops as upstream, under `stfork::` with
+upstream's schema strings, and the adapter of the [`official`
+section](#official--metas-torchopsst-kernels-as-the-reference-backend) calls them unchanged:
+`ensure_loaded(backend)` / `is_available(backend)` are memoized per backend
+(`PACKAGES = {backend: (package, namespace)}`) and every op-calling adapter function takes
+`backend=`. So everything that section says (ops, scores, filter modes, bit order, eager only)
+holds for the fork until a change below replaces it. Builds: the fork's `setup.py` compiles host
+code at `-O3` (OF-11) and adds `is_topk` / `fresh_index_post_processing` to the sources;
+`env.official_fork_build` records its `.so`.
+
+| op (adapter caller) | fork state |
+|---|---|
+| `fused_kmean_ann` (`fused_scores`) | upstream's |
+| `fused_kmean_ann_with_partial_masks` (`fused_scores(partial=…)`) | upstream's |
+| `bloom_index_build` (`build_bloom_index`) | upstream's (22c2007: CCCL 3 guards, old cub path on CUDA 12.8) |
+| `parse_expression_query_batch` (`parse_plans`) | upstream's |
+| `bloom_index_search_batch` (`bloom_full_mask`) | upstream's |
+| `bloom_index_search_batch_return_partial_response` (`bloom_partial_masks`) | upstream's |
+
 ### Deleted backends
 
 A hand-written CUDA C++ SilverTorch backend and its one-to-one port into

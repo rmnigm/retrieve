@@ -243,6 +243,7 @@ change of its CHANGES table. NOT CITABLE until fork-review accepts and the gates
 | change | state | notes |
 |---|---|---|
 | upstream sync 21aa35e → 22c2007 | **applied, CPU-checked only.** Upstream's one commit since the vendored base applies verbatim to `bloom_indexer_cuda.cu` (`git apply`, offsets of one line from our notice line); `git ls-remote` HEAD = `22c2007` on 2026-10-10 | the compiled path on CUDA 12.8 (`CUB_VERSION < 200800`) is upstream's old one (nvcc 12.8.93 ships `CUB_VERSION 200700`); the build and the A/A against upstream `-O3` are C0's (GPU, pending). The pinned `backend="official"` stays at 21aa35e |
+| C1: `backend="official-fork"` (library + harness) | **CPU parts green, GPU pending.** Harness suite (`CUDA_VISIBLE_DEVICES=""`, pod b CPU): 963 passed, 3 skipped after the fix of the 4 tests that pinned the three-backend table (`test_paths`, `test_config` ×2, `test_dependency_direction`: `OFFICIAL_BACKENDS` joins the allowed `retrieve.interfaces` names); the arm round-trips through `algos.PATHS` / `official_config` / `filter_backend`. `ruff` clean | GPU, pending pod b: `test_official.py` once per official backend (the fork's six schemas equal upstream's under `stfork::`), and C0's A/A through the layer. The fork stays eager-only (`capturable` False, `compile` refused) until C4 |
 
 ## Campaign v2 (Phase V): not yet validated
 

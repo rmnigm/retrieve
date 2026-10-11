@@ -22,6 +22,7 @@ from retrieve.indexing.kmeans import KMeans, KMeansInit
 from retrieve.indexing.quantize import quantize_int8, quantize_int8_global
 from retrieve.indexing.selectivity import bloom_bit_freq
 from retrieve.interfaces import (
+    OFFICIAL_BACKENDS,
     RetrievalModule,
     SilverTorchBackend,
     check_backend,
@@ -100,7 +101,8 @@ class SilverTorch(RetrievalModule):
     constraints. ``triton`` and ``torch`` register the same buffers
     (a checkpoint is portable between them in every ``filter_mode``); an official state_dict
     is portable to them only without bloom (``bloom_index`` / ``bundle_b_offsets`` instead of
-    ``bloom_transposed``).
+    ``bloom_transposed``). ``backend="official-fork"`` runs the same official path on our fork of
+    Meta's ops (``official-fork/``, ``torch.ops.stfork.*``; kernels.md § official-fork).
     ``load_state_dict`` into a
     module of the same shape (one whose ``register_index`` already ran) re-derives the two
     Python-scalar caches the forwards read (``_global_scale_f``, ``_probe_width``) from
@@ -110,7 +112,7 @@ class SilverTorch(RetrievalModule):
     phases (``kmeans_s``, ``assemble_s``, ``quantize_s``, ``filter_s``; device-synchronised)
     and ``set_query_params(n_probe=...)`` changes the probe width without a rebuild. ``k`` is a
     plain attribute, settable at any time. ``capturable`` says whether a forward can be
-    CUDA-graph captured / compiled: every backend but ``official``."""
+    CUDA-graph captured / compiled: every backend but the two official ones."""
 
     centroids: Tensor
     item_codes: Tensor
@@ -149,11 +151,14 @@ class SilverTorch(RetrievalModule):
                 f"filter_mode must be 'none', 'bloom', or 'exact', got {filter_mode!r}"
             )
         check_backend(backend, SilverTorchBackend)
-        if official is not None and backend != "official":
-            raise ValueError("official=OfficialConfig(...) only applies to backend='official'")
+        is_official = backend in OFFICIAL_BACKENDS
+        if official is not None and not is_official:
+            raise ValueError(
+                "official=OfficialConfig(...) only applies to backend='official' / 'official-fork'"
+            )
         if bloom_path not in ("partial", "full"):
             raise ValueError(f"bloom_path must be 'partial' or 'full', got {bloom_path!r}")
-        if bloom_path == "full" and (filter_mode != "bloom" or backend == "official"):
+        if bloom_path == "full" and (filter_mode != "bloom" or is_official):
             raise ValueError(
                 "bloom_path='full' applies to filter_mode='bloom' on backend='triton' or 'torch' "
                 "(the official backend takes OfficialConfig(bloom_path=...))"
@@ -162,8 +167,8 @@ class SilverTorch(RetrievalModule):
         # extension: OfficialMissing when the package cannot run here, ImportError when it is
         # present but broken) so failures surface at construction, not at the first forward.
         ops_for(backend)
-        if backend == "official":
-            official_mod.ensure_loaded()
+        if is_official:
+            official_mod.ensure_loaded(backend)
             ops_for("triton")  # exact mode packs our clause_mask into the official bit mask
         self.official: OfficialConfig = official if official is not None else OFFICIAL_DEFAULT
 
@@ -171,15 +176,15 @@ class SilverTorch(RetrievalModule):
             # On the official backend the bloom width comes from OfficialConfig.b_multiplier,
             # so m_bits is optional there; k_hash is the search-time `k` of the official
             # index (≤ MAX_K_V2, an unchecked upstream limit).
-            if k_hash is None or (m_bits is None and backend != "official"):
+            if k_hash is None or (m_bits is None and not is_official):
                 raise ValueError(
                     "filter_mode='bloom' requires both m_bits and k_hash (m_bits is "
                     "optional on backend='official', whose width is OfficialConfig.b_multiplier)"
                 )
             check_bloom_params(m_bits, k_hash)
-            if backend == "official" and k_hash > official_mod.MAX_SEARCH_K:
+            if is_official and k_hash > official_mod.MAX_SEARCH_K:
                 raise ValueError(
-                    f"k_hash must be <= {official_mod.MAX_SEARCH_K} on backend='official' "
+                    f"k_hash must be <= {official_mod.MAX_SEARCH_K} on backend={backend!r} "
                     f"(MAX_K_V2 in the official search kernel, unchecked upstream), got {k_hash}"
                 )
             self.m_bits = m_bits if m_bits is not None else 0
@@ -210,6 +215,7 @@ class SilverTorch(RetrievalModule):
             "triton": self._forward_ops,
             "torch": self._forward_ops,
             "official": self._forward_official,
+            "official-fork": self._forward_official,
         }[backend]
         # The two Python-scalar caches below (_global_scale_f, _probe_width) are set by
         # register_index; a state-dict load replaces the buffers they were derived from, so
@@ -218,7 +224,11 @@ class SilverTorch(RetrievalModule):
 
     @property
     def capturable(self) -> bool:
-        return self.backend != "official"
+        return not self.is_official
+
+    @property
+    def is_official(self) -> bool:
+        return self.backend in OFFICIAL_BACKENDS
 
     @property
     def has_bloom(self) -> bool:
@@ -352,7 +362,7 @@ class SilverTorch(RetrievalModule):
         ``clause_is_reverse``, read by our kernels or, on official, by ``clause_mask``."""
         device = self.item_codes.device  # same device as item_embs
         attrs = None if item_clause_attrs is None else item_clause_attrs.long()[perm].contiguous()
-        if self.filter_mode == "bloom" and self.backend == "official":
+        if self.filter_mode == "bloom" and self.is_official:
             cfg = self.official
             if attrs is None:
                 # No attributes at build time: an empty index. A later query with
@@ -365,6 +375,7 @@ class SilverTorch(RetrievalModule):
                     b_multiplier=cfg.b_multiplier,
                     build_k=cfg.build_k if cfg.build_k is not None else self.k_hash,
                     fast_build=cfg.fast_build,
+                    backend=self.backend,
                 )
             self.register_buffer("bloom_index", bloom_index)
             self.register_buffer("bundle_b_offsets", bundle_b_offsets)
@@ -396,10 +407,10 @@ class SilverTorch(RetrievalModule):
             self.register_buffer("clause_is_reverse", clause_is_reverse)
 
     def compile(self, *args, **kwargs):
-        """``nn.Module.compile`` — refused on the official backend (eager-only)."""
-        if self.backend == "official":
+        """``nn.Module.compile`` — refused on the official backends (eager-only)."""
+        if self.is_official:
             raise RuntimeError(
-                "SilverTorch(backend='official') is eager-only: every official op syncs the "
+                f"SilverTorch(backend={self.backend!r}) is eager-only: every official op syncs the "
                 "host and re-uploads its plans per call, so there is no torch.compile / "
                 "CUDA-graph path. Use backend='triton' or 'torch' for compiled runs."
             )
@@ -414,7 +425,7 @@ class SilverTorch(RetrievalModule):
             raise ValueError("prepare_queries needs filter_mode='bloom' or filter_mode='exact'")
         if self.filter_mode == "exact":
             return PreparedFilter(query_attrs=query_clause_attrs.long().contiguous())
-        if self.backend != "official":
+        if not self.is_official:
             bits = self._query_bit_positions(query_clause_attrs)
             bound = torch.where(bits >= 0, self.bloom_bit_freq[bits.clamp_min(0)], 1.0).amin(1)
             return PreparedFilter(query_bits=bits, sparse=bool(bound.max() < SPARSE_PASS_BOUND))
@@ -427,13 +438,15 @@ class SilverTorch(RetrievalModule):
         expressions = official_mod.queries_to_expressions(query_clause_attrs)
         if cfg.bloom_path == "full":  # Meta's full search takes one plan per row
             data, offsets = official_mod.parse_plans(
-                expressions, cfg.n_stored_hashes, cfg.max_sub_queries
+                expressions, cfg.n_stored_hashes, cfg.max_sub_queries, backend=self.backend
             )
             return PreparedFilter(plans_data=data, plans_offsets=offsets)
         # One plan per distinct expression, as a server batching shared filters would send.
         unique = list(dict.fromkeys(expressions))
         row_plan = {e: i for i, e in enumerate(unique)}
-        data, offsets = official_mod.parse_plans(unique, cfg.n_stored_hashes, cfg.max_sub_queries)
+        data, offsets = official_mod.parse_plans(
+            unique, cfg.n_stored_hashes, cfg.max_sub_queries, backend=self.backend
+        )
         index = torch.tensor([row_plan[e] for e in expressions], dtype=torch.int64)
         return PreparedFilter(
             plans_data=data,
@@ -462,9 +475,9 @@ class SilverTorch(RetrievalModule):
             raise ValueError(
                 "a prepared filter requires filter_mode='bloom' or filter_mode='exact'"
             )
-        if self.backend == "official" and torch.compiler.is_compiling():
+        if self.is_official and torch.compiler.is_compiling():
             raise RuntimeError(
-                "SilverTorch(backend='official') is eager-only and cannot be traced by "
+                f"SilverTorch(backend={self.backend!r}) is eager-only and cannot be traced by "
                 "torch.compile / torch.export: Meta's scorers sync the host (kernels.md § "
                 "official). Call the module eagerly, or use backend='triton' / 'torch'."
             )
@@ -561,10 +574,16 @@ class SilverTorch(RetrievalModule):
                     self.k_hash,
                     cfg.n_stored_hashes,
                     prepared.plan_index,
+                    backend=self.backend,
                 )
             else:
                 filtering_bit_mask = official_mod.bloom_filtering_mask(
-                    self.bloom_index, self.bundle_b_offsets, plans, self.k_hash, cfg.n_stored_hashes
+                    self.bloom_index,
+                    self.bundle_b_offsets,
+                    plans,
+                    self.k_hash,
+                    cfg.n_stored_hashes,
+                    backend=self.backend,
                 )
 
         return official_mod.official_probe_score(
@@ -581,6 +600,7 @@ class SilverTorch(RetrievalModule):
             divisor=cfg.divisor,
             filtering_bit_mask=filtering_bit_mask,
             partial=partial,
+            backend=self.backend,
         )
 
     def _forward_candidates(

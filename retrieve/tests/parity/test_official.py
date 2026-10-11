@@ -1,7 +1,8 @@
 """Meta's official SilverTorch ops (``torch.ops.st.*``, meta-recsys/silvertorch @ 21aa35e)
-vs the pure-torch reference, the Triton kernels and the ``SilverTorch`` layer — the
-T1–T7 gates (the retired silvertorch-official-integration plan; see the "Official against our
-Triton reimplementation" section of docs/validation.md).
+and our fork of them (``torch.ops.stfork.*``, ``official-fork/``) vs the pure-torch reference,
+the Triton kernels and the ``SilverTorch`` layer — the T1–T7 gates (the retired
+silvertorch-official-integration plan; see the "Official against our Triton reimplementation"
+section of docs/validation.md).
 
 The official scorer and the Triton kernels read the same **cluster-sorted** int8 table
 through the same CSR (``cluster_offsets``), built here by ``make_probe_family``, so both arms
@@ -13,9 +14,10 @@ error bound instead. The official bloom is a different hash from ours, so it is 
 bit-compared: the gates are semantic (no false negatives vs the exact predicate, FPR
 recorded, partial-mask ≡ full-mask scores).
 
-Every test is gated by ``require_official()``: it skips when the ``official`` extra is
-not installed (or there is no CUDA device) and fails when the package is present but
-its extension is broken.
+Every test runs once per official backend (``OB``, set by the autouse fixture; ``ofb`` is the
+adapter with ``backend=OB`` bound) and is gated by ``require_official(OB)``: it skips when the
+``official`` extra is not installed (or there is no CUDA device) and fails when the package is
+present but its extension is broken.
 """
 
 from __future__ import annotations
@@ -24,12 +26,14 @@ import os
 import sys
 import tempfile
 import warnings
+from functools import partial
 
 import pytest
 import torch
 
 from retrieve.functional import clause_subset_match, masked_topk
 from retrieve.indexing.quantize import quantize_int8, quantize_int8_global
+from retrieve.interfaces import OFFICIAL_BACKENDS
 from retrieve.modules.silvertorch import OfficialConfig, SilverTorch, SilverTorchBuilder
 from retrieve.ops import official as of, reference
 from retrieve.ops.triton.clause_mask import clause_mask
@@ -72,13 +76,33 @@ def _prep(module, qa):
     return None if qa is None else module.prepare_queries(qa)
 
 
-@pytest.fixture(autouse=True)
-def _needs_official():
-    require_official()
+OB: of.OfficialBackend = "official"  # the backend under test, set per test by _needs_official
+_OP_CALLING = {
+    "build_bloom_index", "parse_plans", "fused_scores", "official_scores_full",
+    "official_probe_score", "bloom_partial_masks", "bloom_full_mask", "bloom_filtering_mask",
+}  # fmt: skip
+
+
+class _Bound:
+    """``retrieve.ops.official`` with ``backend=OB`` bound on every op-calling function."""
+
+    def __getattr__(self, name):
+        fn = getattr(of, name)
+        return partial(fn, backend=OB) if name in _OP_CALLING else fn
+
+
+ofb = _Bound()
+
+
+@pytest.fixture(autouse=True, params=OFFICIAL_BACKENDS)
+def _needs_official(request, monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "OB", request.param)
+    require_official(request.param)
 
 
 # The schemas of every op the adapter calls, at the pinned sha (pyproject: 21aa35e28b6d…). A
 # different installed build fails here, before any gate reads a renamed or re-ordered argument.
+# The fork registers the same strings under its own namespace until its own API replaces them.
 PINNED_SCHEMAS = {
     "fused_kmean_ann": (
         "st::fused_kmean_ann(Tensor cluster_offsets, Tensor cluster_ids, Tensor cluster_length, "
@@ -123,9 +147,11 @@ PINNED_SCHEMAS = {
 
 def test_official_op_schemas_are_pinned():
     assert sorted(PINNED_SCHEMAS) == sorted(of.REQUIRED_OPS)
-    st = torch.ops.st
+    namespace = of.PACKAGES[OB][1]
+    ops = getattr(torch.ops, namespace)
     for name, schema in PINNED_SCHEMAS.items():
-        assert str(getattr(st, name).default._schema) == schema, name
+        want = schema.replace("st::", f"{namespace}::", 1)
+        assert str(getattr(ops, name).default._schema) == want, name
 
 
 # --- helpers ----------------------------------------------------------------------------
@@ -151,13 +177,13 @@ class Family:
         return self.query, self.probe_ids, self.offsets, self.codes, self.sort_perm
 
     def official(self, k, **kw):
-        return of.official_probe_score(
+        return ofb.official_probe_score(
             self.query, self.probe_ids, self.offsets, self.sizes, self.codes, self.sort_perm,
             self.global_scale, k, self.width, **kw,
         )  # fmt: skip
 
     def official_full(self, **kw):
-        return of.official_scores_full(
+        return ofb.official_scores_full(
             self.query, self.probe_ids, self.offsets, self.sizes, self.codes, self.sort_perm,
             self.global_scale, self.width, **kw,
         )  # fmt: skip
@@ -267,7 +293,7 @@ def test_t1_raw_output_contract():
     cluster, and the multiset of returned positions equal to the probed candidate set."""
     f = Family(4, 16, 90, 4, 64)
     q_codes, _ = quantize_int8(f.query)
-    raw, idx = of.fused_scores(q_codes, f.probe_ids, f.offsets, f.sizes, f.codes, f.width)
+    raw, idx = ofb.fused_scores(q_codes, f.probe_ids, f.offsets, f.sizes, f.codes, f.width)
     assert raw.dtype == torch.int32 and idx.dtype == torch.int32
     assert raw.shape == idx.shape == (4, of.padded_rows(f.width))
     pad = idx < 0
@@ -326,14 +352,14 @@ def test_t3_bloom_output_word_order():
     README's expected hits on its own corpus."""
     assert of.BLOOM_OUTPUT_BIT_ORDER == OFFICIAL_BIT_ORDER
     attrs = _readme_corpus()
-    index, boff = of.build_bloom_index(attrs, b_multiplier=5.0, build_k=3)
+    index, boff = ofb.build_bloom_index(attrs, b_multiplier=5.0, build_k=3)
     assert of.bloom_index_docs(boff) == of.DOCS_PER_BUNDLE
-    plans = of.parse_plans(README_QUERIES, hash_k=7)
-    full = of.bloom_full_mask(index, boff, plans, 3, 7, return_bool_mask=True)
+    plans = ofb.parse_plans(README_QUERIES, hash_k=7)
+    full = ofb.bloom_full_mask(index, boff, plans, 3, 7, return_bool_mask=True)
     assert full.dtype == torch.bool and full.shape == (3, of.DOCS_PER_BUNDLE)
     for row, hits in zip(full[:, :4].tolist(), README_HITS, strict=True):
         assert [i for i, h in enumerate(row) if h] == hits
-    packed = of.bloom_full_mask(index, boff, plans, 3, 7, return_bool_mask=False)
+    packed = ofb.bloom_full_mask(index, boff, plans, 3, 7, return_bool_mask=False)
     assert packed.dtype == torch.int64 and packed.shape == (3, of.WORDS_PER_BUNDLE)
     assert torch.equal(of.pack_mask(full, OFFICIAL_BIT_ORDER), packed), (
         f"packed bloom output is not {OFFICIAL_BIT_ORDER} — A3's measurement no longer holds"
@@ -356,7 +382,7 @@ def _scored_docs(doc: int, bit_order: of.BitOrder) -> list[int]:
     mask = torch.zeros(1, n, dtype=torch.bool, device="cuda")
     mask[0, doc] = True
     packed = of.pack_mask(mask, bit_order)
-    _, idx = of.fused_scores(q_codes, probe, offsets, sizes, codes, n, filtering_bit_mask=packed)
+    _, idx = ofb.fused_scores(q_codes, probe, offsets, sizes, codes, n, filtering_bit_mask=packed)
     return sorted(idx[idx >= 0].tolist())
 
 
@@ -386,12 +412,12 @@ def test_t3_partial_mask_decode_order(bit_order):
     triple) agrees with the bool full mask under the pinned bloom output order and not the
     other: README corpus as two 2-doc clusters, probed by every query."""
     attrs = _readme_corpus()
-    index, boff = of.build_bloom_index(attrs, b_multiplier=5.0, build_k=3)
-    plans = of.parse_plans(README_QUERIES, hash_k=7)
-    full = of.bloom_full_mask(index, boff, plans, 3, 7, return_bool_mask=True)[:, :4]
+    index, boff = ofb.build_bloom_index(attrs, b_multiplier=5.0, build_k=3)
+    plans = ofb.parse_plans(README_QUERIES, hash_k=7)
+    full = ofb.bloom_full_mask(index, boff, plans, 3, 7, return_bool_mask=True)[:, :4]
     sel_off = torch.tensor([[0, 2]] * 3, device="cuda")
     sel_len = torch.tensor([[2, 2]] * 3, device="cuda")
-    cumsum, first, words = of.bloom_partial_masks(index, boff, plans, sel_off, sel_len, 3, 7)
+    cumsum, first, words = ofb.bloom_partial_masks(index, boff, plans, sel_off, sel_len, 3, 7)
     assert cumsum.dtype == torch.int32 and first.dtype == torch.int8 and words.dtype == torch.int64
     assert cumsum.shape == first.shape == (6,)
     assert cumsum.tolist() == [1, 2, 3, 4, 5, 6] and first.tolist() == [0, 2] * 3
@@ -418,7 +444,7 @@ def _bloom_corpus(n=4096, c=2, a_max=2, n_vocab=50, cluster=256):
     n_lists = n // cluster
     offsets = torch.arange(0, n + 1, cluster, device="cuda")
     sizes = torch.full((n_lists,), cluster, device="cuda")
-    index, boff = of.build_bloom_index(attrs, b_multiplier=B_MULT, build_k=K_SEARCH)
+    index, boff = ofb.build_bloom_index(attrs, b_multiplier=B_MULT, build_k=K_SEARCH)
     return attrs, offsets, sizes, index, boff
 
 
@@ -431,8 +457,8 @@ def test_t4_bloom_superset_of_exact_and_fpr(record_property):
     n, c, _ = attrs.shape
     qa = make_query_attrs(32, c=c, n_vocab=50, inactive_rate=0.0, seed=42)
     rev = torch.zeros(c, dtype=torch.bool, device="cuda")
-    plans = of.parse_plans(of.queries_to_expressions(qa), HASH_K)
-    full = of.bloom_full_mask(index, boff, plans, K_SEARCH, HASH_K, return_bool_mask=True)[:, :n]
+    plans = ofb.parse_plans(of.queries_to_expressions(qa), HASH_K)
+    full = ofb.bloom_full_mask(index, boff, plans, K_SEARCH, HASH_K, return_bool_mask=True)[:, :n]
     exact = clause_mask(attrs, rev, qa)
     assert not (exact & ~full).any(), "official bloom has false negatives vs the exact predicate"
     fpr = float((full & ~exact).sum().item() / max(int((~exact).sum().item()), 1))
@@ -444,7 +470,7 @@ def test_t4_bloom_superset_of_exact_and_fpr(record_property):
     g = torch.Generator(device="cuda").manual_seed(43)
     n_probe, max_size = 4, int(sizes[0].item())
     probe_ids = torch.randint(0, sizes.numel(), (32, n_probe), generator=g, device="cuda")
-    cumsum, first, words = of.bloom_partial_masks(
+    cumsum, first, words = ofb.bloom_partial_masks(
         index, boff, plans, offsets[probe_ids], sizes[probe_ids], K_SEARCH, HASH_K
     )
     partial = of.unpack_partial_mask(cumsum, first, words, sizes[probe_ids], max_size)
@@ -466,9 +492,9 @@ def test_t4_not_expressions_have_no_false_positives(record_property):
     qa = make_query_attrs(32, c=c, n_vocab=50, inactive_rate=0.0, seed=44)
     qa[:, 1] = -1  # single NOT term on clause 0
     rev = torch.tensor([True, False], dtype=torch.bool, device="cuda")
-    plans = of.parse_plans(of.queries_to_expressions(qa, rev), HASH_K)
+    plans = ofb.parse_plans(of.queries_to_expressions(qa, rev), HASH_K)
     assert plans[0].device.type == "cpu"
-    bloom_not = of.bloom_full_mask(index, boff, plans, K_SEARCH, HASH_K, return_bool_mask=True)[
+    bloom_not = ofb.bloom_full_mask(index, boff, plans, K_SEARCH, HASH_K, return_bool_mask=True)[
         :, :n
     ]
     exact_not = clause_mask(attrs, rev, qa)
@@ -484,13 +510,13 @@ def test_t4_expression_mapping():
     assert of.queries_to_expressions(qa) == ["0:7", "0:7 AND 1:9", ""]
     rev = torch.tensor([False, True], device="cuda")
     assert of.queries_to_expressions(qa, rev) == ["0:7", "0:7 AND NOT 1:9", ""]
-    a, b = of.parse_plans(["0:7", ""], HASH_K)
-    a2, b2 = of.parse_plans(["0:7", ""], HASH_K)
+    a, b = ofb.parse_plans(["0:7", ""], HASH_K)
+    a2, b2 = ofb.parse_plans(["0:7", ""], HASH_K)
     assert torch.equal(a2, a) and torch.equal(b2, b) and a.device.type == "cpu"
     # EMPTY plan = match all.
     attrs = _readme_corpus()
-    index, boff = of.build_bloom_index(attrs, b_multiplier=5.0, build_k=3)
-    full = of.bloom_full_mask(index, boff, of.parse_plans([""], 7), 3, 7, return_bool_mask=True)
+    index, boff = ofb.build_bloom_index(attrs, b_multiplier=5.0, build_k=3)
+    full = ofb.bloom_full_mask(index, boff, ofb.parse_plans([""], 7), 3, 7, return_bool_mask=True)
     assert full[0, :4].all()
 
 
@@ -514,16 +540,16 @@ def test_t5_partial_masks_equal_full_mask_scores(b):
     probe_ids = torch.randint(0, n_lists, (b, n_probe), generator=g, device="cuda")
     sort_perm = torch.arange(n, device="cuda")  # the corpus is already cluster-sorted
     qa = make_query_attrs(b, c=c, n_vocab=50, inactive_rate=0.2, seed=46)
-    plans = of.parse_plans(of.queries_to_expressions(qa), HASH_K)
-    partial = of.bloom_partial_masks(
+    plans = ofb.parse_plans(of.queries_to_expressions(qa), HASH_K)
+    partial = ofb.bloom_partial_masks(
         index, boff, plans, offsets[probe_ids], sizes[probe_ids], K_SEARCH, HASH_K
     )
-    full = of.bloom_filtering_mask(index, boff, plans, K_SEARCH, HASH_K)
+    full = ofb.bloom_filtering_mask(index, boff, plans, K_SEARCH, HASH_K)
     args = (query, probe_ids, offsets, sizes, codes, sort_perm, gs, n_probe * max_size)
-    s_p, i_p, v_p = of.official_scores_full(*args, partial=partial)
-    s_f, i_f, v_f = of.official_scores_full(*args, filtering_bit_mask=full)
+    s_p, i_p, v_p = ofb.official_scores_full(*args, partial=partial)
+    s_f, i_f, v_f = ofb.official_scores_full(*args, filtering_bit_mask=full)
     assert torch.equal(v_p, v_f) and torch.equal(i_p, i_f) and torch.equal(s_p, s_f)
-    s_n, i_n, v_n = of.official_scores_full(*args)
+    s_n, i_n, v_n = ofb.official_scores_full(*args)
     bool_mask = of.unpack_mask(full, n, of.MASK_BIT_ORDER)
     keep = v_n & bool_mask.gather(1, i_n.clamp_min(0))
     assert torch.equal(v_f, keep)
@@ -563,7 +589,9 @@ def _layer(data, backend, filter_mode="none", *, reverse=None, official=None, **
     args.update(kw)
     if filter_mode == "bloom":
         args.update(
-            filter_mode="bloom", m_bits=512 if backend != "official" else None, k_hash=K_SEARCH
+            filter_mode="bloom",
+            m_bits=None if backend in OFFICIAL_BACKENDS else 512,
+            k_hash=K_SEARCH,
         )
     if filter_mode == "exact":
         args.update(filter_mode="exact")
@@ -601,9 +629,7 @@ def test_t6_layer_int32_bitexact_vs_triton(d, filter_mode, reverse):
     data = _make_data(d)
     rev = torch.tensor([True, False], device="cuda") if reverse else None
     tri = _layer(data, "triton", filter_mode, reverse=rev)
-    off = _layer(
-        data, "official", filter_mode, reverse=rev, official=OfficialConfig(score_path="int32")
-    )
+    off = _layer(data, OB, filter_mode, reverse=rev, official=OfficialConfig(score_path="int32"))
     _transplant(off, tri)
     qa = data["q_attrs"] if filter_mode != "none" else None
     _assert_bitexact(off(data["query"], _prep(off, qa)), tri(data["query"], _prep(tri, qa)))
@@ -620,7 +646,7 @@ def test_t6_layer_fp16_default_ranks_like_triton(data, filter_mode):
     """The default (fp16, timed) path against Triton on the same index: shapes and dtypes
     as every backend, ``jaccard@K ≥ 0.99`` on the id sets."""
     tri = _layer(data, "triton", filter_mode)
-    off = _layer(data, "official", filter_mode)
+    off = _layer(data, OB, filter_mode)
     assert off.official.score_path == "fp16"
     _transplant(off, tri)
     qa = data["q_attrs"] if filter_mode != "none" else None
@@ -643,7 +669,7 @@ def test_t6_layer_bloom(data, bloom_path, record_property):
         score_path="int32", bloom_path=bloom_path, b_multiplier=B_MULT, n_stored_hashes=HASH_K
     )
     tri = _layer(data, "triton", "exact")
-    off = _layer(data, "official", "bloom", official=cfg)
+    off = _layer(data, OB, "bloom", official=cfg)
     assert off.m_bits == 0 and off.k_hash == K_SEARCH
     assert off.bloom_index.dtype == torch.int64 and off.bundle_b_offsets.numel() == N // 2048 + 1
     _transplant(off, tri)
@@ -674,7 +700,7 @@ def test_t6_layer_bloom(data, bloom_path, record_property):
         # The partial path: same result.
         off_p = _layer(
             data,
-            "official",
+            OB,
             "bloom",
             official=OfficialConfig(
                 score_path="int32", b_multiplier=B_MULT, n_stored_hashes=HASH_K
@@ -688,7 +714,7 @@ def test_t6_layer_bloom(data, bloom_path, record_property):
 
 def test_t6_layer_contract(data):
     """Buffers, candidates path, attribute-less bloom index, state-dict round trip."""
-    off = _layer(data, "official", "none")
+    off = _layer(data, OB, "none")
     assert list(off.state_dict()) == [
         "centroids",
         "item_codes",
@@ -712,7 +738,7 @@ def test_t6_layer_contract(data):
     # State-dict round trip into a freshly registered module of the same shape (the CSR
     # layout's buffer shapes do not depend on the k-means outcome); the load hook
     # re-derives the cached scalars, nothing is patched by hand.
-    twin = _layer(data, "official", "none")
+    twin = _layer(data, OB, "none")
     twin.load_state_dict(off.state_dict())
     assert twin._probe_width == off._probe_width
     assert twin._global_scale_f == off._global_scale_f
@@ -726,7 +752,7 @@ def test_t6_layer_contract(data):
         filter_mode="bloom",
         k_hash=K_SEARCH,
         n_iter=3,
-        backend="official",
+        backend=OB,
     )
     bare.register_index(data["embs"])
     assert bare.bloom_index.numel() == 0
@@ -740,7 +766,7 @@ def test_t6_layer_contract(data):
             n_probe=N_PROBE,
             filter_mode="bloom",
             k_hash=11,
-            backend="official",
+            backend=OB,
         )
 
 
@@ -753,7 +779,7 @@ def test_t7_compile_refused(data):
     ``Unsupported``, both ``RuntimeError``s), and a default-mode ``torch.compile`` either
     raises or falls back to eager with identical results — never a silently different
     path."""
-    off = _layer(data, "official", "none")
+    off = _layer(data, OB, "none")
     with pytest.raises(RuntimeError, match="eager-only"):
         off.compile()
     eager_ids, eager_scores = off(data["query"])
@@ -818,30 +844,30 @@ def test_t7_sync_count_per_op(record_property):
     probe_ids = torch.randint(0, sizes.numel(), (4, 4), generator=g, device="cuda")
     qa = make_query_attrs(4, c=c, n_vocab=50, seed=48)
     expressions = of.queries_to_expressions(qa)
-    plans = of.parse_plans(expressions, HASH_K)
+    plans = ofb.parse_plans(expressions, HASH_K)
     max_row = 4 * int(sizes[0].item())
-    partial = of.bloom_partial_masks(
+    partial = ofb.bloom_partial_masks(
         index, boff, plans, offsets[probe_ids], sizes[probe_ids], K_SEARCH, HASH_K
     )
     counts = {
         # The parse (prepare_queries' work): a CPU op, so 0 device syncs is the expected record;
         # the plan upload is the search ops'.
-        "parse_expression_query_batch": _count_syncs(lambda: of.parse_plans(expressions, HASH_K)),
+        "parse_expression_query_batch": _count_syncs(lambda: ofb.parse_plans(expressions, HASH_K)),
         "fused_kmean_ann": _count_syncs(
-            lambda: of.fused_scores(q_codes, probe_ids, offsets, sizes, codes, max_row)
+            lambda: ofb.fused_scores(q_codes, probe_ids, offsets, sizes, codes, max_row)
         ),
         "bloom_index_search_batch_return_partial_response": _count_syncs(
-            lambda: of.bloom_partial_masks(
+            lambda: ofb.bloom_partial_masks(
                 index, boff, plans, offsets[probe_ids], sizes[probe_ids], K_SEARCH, HASH_K
             )
         ),
         "fused_kmean_ann_with_partial_masks": _count_syncs(
-            lambda: of.fused_scores(
+            lambda: ofb.fused_scores(
                 q_codes, probe_ids, offsets, sizes, codes, max_row, partial=partial
             )
         ),
         "bloom_index_search_batch": _count_syncs(
-            lambda: of.bloom_full_mask(index, boff, plans, K_SEARCH, HASH_K)
+            lambda: ofb.bloom_full_mask(index, boff, plans, K_SEARCH, HASH_K)
         ),
     }
     for name, n_sync in counts.items():
@@ -859,14 +885,12 @@ def test_t7_layer_forward_sync_count(data, record_property):
     (kernels.md § official)."""
     cfg = {"b_multiplier": B_MULT, "n_stored_hashes": HASH_K}
     modules = {
-        "none": _layer(data, "official", "none"),
-        "exact": _layer(data, "official", "exact"),
+        "none": _layer(data, OB, "none"),
+        "exact": _layer(data, OB, "exact"),
         "bloom[partial]": _layer(
-            data, "official", "bloom", official=OfficialConfig(bloom_path="partial", **cfg)
+            data, OB, "bloom", official=OfficialConfig(bloom_path="partial", **cfg)
         ),
-        "bloom[full]": _layer(
-            data, "official", "bloom", official=OfficialConfig(bloom_path="full", **cfg)
-        ),
+        "bloom[full]": _layer(data, OB, "bloom", official=OfficialConfig(bloom_path="full", **cfg)),
     }
     for name, module in modules.items():
         prepared = None if name == "none" else module.prepare_queries(data["q_attrs"])

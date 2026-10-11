@@ -29,7 +29,7 @@ retrieve/src/retrieve/
 ├── functional.py          masked_topk, counts_to_valid, compact_mask, combine_masks, combine_indices,
 │                          post_filter_topk, popcount_int64, clause_subset_match, bloom_subset_match
 ├── modules/
-│   ├── silvertorch.py     SilverTorch (Algorithm 1; triton | torch | official), SilverTorchBuilder, OfficialConfig
+│   ├── silvertorch.py     SilverTorch (Algorithm 1; triton | torch | official | official-fork), SilverTorchBuilder, OfficialConfig
 │   ├── linr.py            LiNRV1–LiNRV3 (the paper variants over the primitives + a filter), LiNRBuilder
 │   ├── knn.py             PostfilterKNN, PrefilterKNN, FullScanKNN
 │   ├── bit_knn.py         OneBitKNN, SimHashKNN (+ the _PackedBitsKNN base)
@@ -40,7 +40,7 @@ retrieve/src/retrieve/
 │   ├── triton/            _load.py (imports every kernel file → registers retrieve::*), _host.py (shared
 │   │                      launch scaffold), common.py (@triton.jit helpers), one file per kernel
 │   ├── reference/         the same op names and signatures in pure torch: the "torch" backend + parity oracle
-│   ├── official/          __init__.py (loader, OfficialConfig, constants, `st`), adapter.py (the adapter)
+│   ├── official/          __init__.py (loader per backend, OfficialConfig, constants, `st` / `stfork`), adapter.py (the adapter)
 │   └── tune.py            the autotune CLI (`tune-kernels`)
 └── indexing/              kmeans.py (KMeans, init random | kmeans++), ivf.py (csr_layout, probe_width), quantize.py, bloom_hash.py
 ```
@@ -63,13 +63,16 @@ and selecting their compute path via a `backend=` flag on `__init__`
 [`interfaces.py`](../../retrieve/src/retrieve/interfaces.py):
 `LinrBackend = Literal["torch", "triton"]` for the LiNR layers and the
 standalone filters, `SilverTorchBackend = Literal["torch", "triton",
-"official"]` for `SilverTorch`; every constructor validates its own):
+OfficialBackend]` with `OfficialBackend = Literal["official", "official-fork"]`
+(and its tuple `OFFICIAL_BACKENDS`) for `SilverTorch`; every constructor
+validates its own):
 
 | `backend=` | meaning | who accepts it |
 |---|---|---|
 | `"triton"` | fused Triton kernels. The default everywhere. | every module |
 | `"torch"` | pure-torch eager equivalent, same semantics, larger intermediates | every module |
 | `"official"` | Meta's own `meta-recsys/silvertorch` ops (`torch.ops.st.*`) for phases 2+3 — the reference backend; eager-only; needs the `official` extra | **`SilverTorch` only** |
+| `"official-fork"` | our fork of those ops ([`official-fork/`](../../official-fork/CHANGES.md), package `silvertorch_fork`, `torch.ops.stfork.*`) through the same adapter; loads beside `"official"` in one process; eager-only until the fork's capture gate (META-FORK C4, [validation](../validation.md#meta-fork-backendofficial-fork-not-yet-validated)); needs the `official` extra | **`SilverTorch` only** |
 
 The `"official"` backend needs an optional extra: `torchretrieve[official]`
 (`uv sync --extra official`) installs Meta's own `meta-recsys/silvertorch`,
@@ -83,9 +86,9 @@ for the cu128 wheel — upstream's README insists on the match), `ninja` and
 [../artifacts/official-silvertorch/README.md](../artifacts/official-silvertorch/README.md)
 for the pin, the build record and the upstream-suite result.
 
-`"official"` is not a universal third path: it exists solely for
+`"official"` / `"official-fork"` are not universal paths: they exist solely for
 `SilverTorch`'s probe-scoring kernel. Every other class takes
-`LinrBackend` and raises `ValueError` on anything else — `"official"`
+`LinrBackend` and raises `ValueError` on anything else — both official backends
 included — so there is no silent torch fallback. See
 [Backend dispatch](#backend-dispatch) below.
 
@@ -338,7 +341,7 @@ The predicate, `filter_mode ∈ {"none", "bloom", "exact"}`:
   no false positives, bandwidth-cheaper per item at small `C × A_max`,
   trades the bloom hash flexibility for exact-value match.
 
-The implementation, `backend ∈ {"triton", "torch", "official"}`:
+The implementation, `backend ∈ {"triton", "torch", "official", "official-fork"}`:
 
 - `"triton"` (default) — phases 2+3 fused into one Triton launch, no
   probe intermediate on HBM.
@@ -356,6 +359,11 @@ The implementation, `backend ∈ {"triton", "torch", "official"}`:
   `"int32"` (bit-identical to Triton), `bloom_path` `"partial"` /
   `"full"`, `b_multiplier`, `n_stored_hashes`, …). Details in
   [kernels.md](kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend).
+- `"official-fork"` — the same adapter on our fork's `torch.ops.stfork.*`
+  (`ensure_loaded(backend)`; every op-calling adapter function takes
+  `backend=`), with the same `OfficialConfig`; the same eager-only refusals
+  until the fork is capturable. See
+  [kernels.md](kernels.md#official-fork--our-fork-of-metas-ops).
 
 Constructed directly (`SilverTorch(k, n_lists, n_probe, filter_mode="none",
 m_bits=None, k_hash=None, n_iter=10, seed=0, kmeans_init="random",

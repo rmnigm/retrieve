@@ -111,7 +111,7 @@ def test_provenance_fields():
     expected = {
         "gpu", "driver", "cuda", "torch", "triton", "commit", "dirty", "repo_dirty",
         "git_branch", "code_version", "host", "python", "started", "official_commit",
-        "official_build",
+        "official_build", "official_fork_build",
     }  # fmt: skip
     assert expected <= set(p)
     assert p["torch"] == torch.__version__
@@ -466,5 +466,8 @@ def test_official_build_records_the_extension_and_its_flags(monkeypatch, tmp_pat
     flags = {"nvcc_append_flags": "-O3 -Xcompiler -O3"}
     (pkg / bench.OFFICIAL_BUILD_FLAGS).write_text(json.dumps(flags))
     assert bench.official_build()["nvcc_append_flags"] == "-O3 -Xcompiler -O3"
-    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
+    monkeypatch.setattr(
+        importlib.util, "find_spec", lambda name: spec if name == "silvertorch_fork" else None
+    )
     assert bench.official_build() is None
+    assert bench.official_build("silvertorch_fork")["so_bytes"] == len(b"not really an elf")

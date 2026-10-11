@@ -12,11 +12,13 @@ from retrieve.functional import compact_mask
 
 # Two backend vocabularies, one per family. Every LiNR layer and every standalone filter
 # has exactly a Triton path and a torch path; only ``SilverTorch`` also routes to Meta's
-# official ops. Each constructor validates its own literal via ``check_backend`` so a
-# typo — or a SilverTorch-only value handed to a LiNR module — raises instead of
-# silently running the torch path.
+# official ops and to our fork of them (``official-fork``). Each constructor validates its
+# own literal via ``check_backend`` so a typo — or a SilverTorch-only value handed to a LiNR
+# module — raises instead of silently running the torch path.
 LinrBackend = Literal["torch", "triton"]
-SilverTorchBackend = Literal["torch", "triton", "official"]
+OfficialBackend = Literal["official", "official-fork"]
+OFFICIAL_BACKENDS: tuple[str, ...] = get_args(OfficialBackend)
+SilverTorchBackend = Literal["torch", "triton", OfficialBackend]
 
 
 def check_backend(backend: str, allowed: object) -> None:
@@ -30,6 +32,7 @@ _OPS_NAMESPACE = {
     "triton": "retrieve.ops.triton",
     "torch": "retrieve.ops.reference",
     "official": "retrieve.ops.official",
+    "official-fork": "retrieve.ops.official",
 }
 _OPS_LOADED: dict[str, ModuleType] = {}
 
@@ -49,17 +52,23 @@ def ops_for(backend: str) -> ModuleType:
 # no-op, ``None`` where the constructor raises. Keyed by class name so the table is plain data
 # with no import of ``retrieve.modules``; the harness derives its ``PATHS`` from it
 # (docs/system/architecture.md § Backend dispatch).
+_NO_OFFICIAL: dict[str, str | None] = {"official": None, "official-fork": None}
 DISPATCH: dict[str, dict[str, str | None]] = {
-    "SilverTorch": {"triton": "triton", "torch": "torch", "official": "official"},
-    "LiNRV1": {"triton": "cublas", "torch": "cublas", "official": None},
-    "LiNRV2": {"triton": "triton", "torch": "torch", "official": None},
-    "LiNRV3": {"triton": "triton", "torch": "torch", "official": None},
-    "PostfilterKNN": {"triton": "cublas", "torch": "cublas", "official": None},
-    "PrefilterKNN": {"triton": "triton", "torch": "torch", "official": None},
-    "OneBitKNN": {"triton": "triton", "torch": "torch", "official": None},
-    "SimHashKNN": {"triton": "triton", "torch": "torch", "official": None},
-    "ExactAttributeFilter": {"triton": "triton", "torch": "torch", "official": None},
-    "BloomFilter": {"triton": "triton", "torch": "torch", "official": None},
+    "SilverTorch": {
+        "triton": "triton",
+        "torch": "torch",
+        "official": "official",
+        "official-fork": "official-fork",
+    },
+    "LiNRV1": {"triton": "cublas", "torch": "cublas", **_NO_OFFICIAL},
+    "LiNRV2": {"triton": "triton", "torch": "torch", **_NO_OFFICIAL},
+    "LiNRV3": {"triton": "triton", "torch": "torch", **_NO_OFFICIAL},
+    "PostfilterKNN": {"triton": "cublas", "torch": "cublas", **_NO_OFFICIAL},
+    "PrefilterKNN": {"triton": "triton", "torch": "torch", **_NO_OFFICIAL},
+    "OneBitKNN": {"triton": "triton", "torch": "torch", **_NO_OFFICIAL},
+    "SimHashKNN": {"triton": "triton", "torch": "torch", **_NO_OFFICIAL},
+    "ExactAttributeFilter": {"triton": "triton", "torch": "torch", **_NO_OFFICIAL},
+    "BloomFilter": {"triton": "triton", "torch": "torch", **_NO_OFFICIAL},
 }
 
 
