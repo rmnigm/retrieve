@@ -1159,7 +1159,8 @@ __global__ void process_cluster_remaining(
         indices + write_index,
         remaining_payload.filtering_mask,
         write_failed);
-    if (block_keys.keys != nullptr && remaining_payload.filtering_mask) {
+    // without FILTER the payload's mask is never set (upstream leaves it uninitialised)
+    if (block_keys.keys != nullptr && (!FILTER || remaining_payload.filtering_mask)) {
       const int64_t row = remaining_payload.cluster_ids_row;
       const int64_t slot = write_index - row * block_keys.width;
       const uint32_t key = order_key(results[write_index]);

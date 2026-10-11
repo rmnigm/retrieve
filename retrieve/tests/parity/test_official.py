@@ -748,12 +748,13 @@ def test_c6_fork_probe_prep_equals_reference(d):
 
 @pytest.mark.parametrize("k", [100, 1000])
 @pytest.mark.parametrize("score_path", ["int32", "fp16"])
-@pytest.mark.parametrize("delta", [-1, 0, 1])
+@pytest.mark.parametrize("delta", [-1, 0, 1, None])
 def test_c7_fork_two_level_topk_equals_upstream(k, score_path, delta):
     """META-FORK C7 / K fixes 2-7: ``stfork.search``'s top-k on wide rows (the chunked radix
     select over ~34 chunks of 8192 slots; at k 1000 its candidates take a second round) against
     upstream's scorer + the adapter's whole-width ``torch.topk``, under heavy ties (four distinct
-    code rows) and with exactly ``k + delta`` passing items a row (a full-``N`` mask): scores
+    code rows) and with exactly ``k + delta`` passing items a row (a full-``N`` mask; ``delta``
+    None: no filter, the unfiltered scorer with the block prefilter at k 100): scores
     ``torch.equal``, ids up to ties (the boundary tie group included: both take ties in index
     order), ``-1`` / ``-inf`` past the finite count."""
     if OB != "official-fork":
@@ -766,9 +767,11 @@ def test_c7_fork_two_level_topk_equals_upstream(k, score_path, delta):
     g = torch.Generator(device="cuda").manual_seed(13)
     base = torch.randint(-127, 128, (4, d), dtype=torch.int8, device="cuda", generator=g)
     codes = base[torch.randint(0, 4, (lay.n,), device="cuda", generator=g)].contiguous()
-    passing = torch.zeros(lay.n, dtype=torch.bool, device="cuda")
-    passing[torch.randperm(lay.n, device="cuda", generator=g)[: k + delta]] = True
-    mask = of.pack_mask(passing.unsqueeze(0).expand(b, -1).contiguous())
+    mask = None
+    if delta is not None:
+        passing = torch.zeros(lay.n, dtype=torch.bool, device="cuda")
+        passing[torch.randperm(lay.n, device="cuda", generator=g)[: k + delta]] = True
+        mask = of.pack_mask(passing.unsqueeze(0).expand(b, -1).contiguous())
     sizes = lay.cluster_offsets.diff()
     scale = torch.tensor(0.01, device="cuda")
     q = make_query(b, d)
@@ -778,7 +781,8 @@ def test_c7_fork_two_level_topk_equals_upstream(k, score_path, delta):
         *args, score_path=score_path, filtering_bit_mask=mask, backend="official"
     )
     _assert_bitexact(out, ref)
-    assert (torch.isfinite(out[1]).sum(1) == min(k, k + delta)).all()
+    want = k if delta is None else min(k, k + delta)
+    assert (torch.isfinite(out[1]).sum(1) == want).all()
 
 
 N, D, B, K = 4096, 128, 16, 64
