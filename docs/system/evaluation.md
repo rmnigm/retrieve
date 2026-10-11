@@ -1235,12 +1235,10 @@ violin figure is empty under `--manifest`. `hub` names the
 `pinkmeme/eval-results` subtree holding an entry's records (`{field}` = the
 cell's key field) for the planner's `bench fetch`; the report does not read
 it. Without `--manifest` the report takes the latest record per resume key,
-for scratch trees and smokes. The shipped manifest's `default` is the `campaign-v2.1` tag's tree hash
-(`f01255f1…`, hub `campaign-v2.1/{dataset}-{suite}`; `campaign-v2` was
-`408b1188…`); its 12 reuse
-entries keep `d1/arxiv`'s `72e5a90` quality and perf for arXiv `filter`
-V1-V3 on `c0_maincat` / `all4`
-([artifact](../artifacts/campaign-v2/README.md#reuse-entries)). A `match`
+for scratch trees and smokes. The shipped manifest's `default` is the final pass's library tree hash
+(`e16512f5…`, tags `campaign-v2.12` / `campaign-final`, hub `campaign-final`)
+and it has no `entries`: every cell of the final grid has its own record at that
+library ([artifact](../artifacts/campaign-final/README.md#after-all-legs)). A `match`
 cannot name `params` or `seed`, so an entry covers every seed and grid
 point under it: one is written only where old records cover them all.
 

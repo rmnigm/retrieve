@@ -26,6 +26,9 @@ REAL_SYNTH = {
     "yfcc10m": "yfcc10m-synth",
     "arxiv": "arxiv-synth",
     "laion30m": "laion30m-synth",
+    "laion1m": "laion1m-synth",
+    "laion3m": "laion3m-synth",
+    "laion10m": "laion10m-synth",
     "goodreads": "goodreads-synth",
     "pubmed": None,
 }
@@ -109,7 +112,9 @@ def main():
                 "v2_ms": round(perf(v2, bs, 100, "graph")["median_ms"], 3),
                 "measured": round(meas, 3),
                 "measured_how": how,
-                "synth": f"{REAL_SYNTH[ds]} same box" if s else "none at this code / box",
+                "synth": f"{REAL_SYNTH[ds]} same box"
+                if s
+                else "none at this code / box",
             }
             if s:
                 c1, c2 = curve(s, "linr_v1_filter_mask", bs), curve(s, "linr_v2", bs)
@@ -117,12 +122,16 @@ def main():
                 v1_pred = float(np.median(at(c1, batches.mean(1))))
                 row["agg"] = round(float(at(c2, pq.mean()) / at(c1, pq.mean())), 3)
                 if bs == 1:
-                    row["median_q"] = round(float(np.median(at(c2, batches[:, 0]))) / v1_pred, 3)
+                    row["median_q"] = round(
+                        float(np.median(at(c2, batches[:, 0]))) / v1_pred, 3
+                    )
                 else:
                     row["batch_mean"] = round(
                         float(np.median(at(c2, batches.mean(1)))) / v1_pred, 3
                     )
-                    row["batch_max"] = round(float(np.median(at(c2, batches.max(1)))) / v1_pred, 3)
+                    row["batch_max"] = round(
+                        float(np.median(at(c2, batches.max(1)))) / v1_pred, 3
+                    )
                 row["v1_pred_ms"] = round(v1_pred, 3)
             rows.append(row)
     cols = list(dict.fromkeys(k for r in rows for k in r))
