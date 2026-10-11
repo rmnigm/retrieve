@@ -1,5 +1,5 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork (official-fork/CHANGES.md).
+// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; the compile gate: is_topk_output declared mutable (official-fork/CHANGES.md).
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -85,7 +85,7 @@ TORCH_LIBRARY_FRAGMENT(stfork, m) {
       "is_topk("
       "Tensor scores, "
       "Tensor ks, "
-      "Tensor is_topk_output, "
+      "Tensor(a!) is_topk_output, "
       "bool largest = True) "
       "-> ()");
 }

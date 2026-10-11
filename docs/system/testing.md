@@ -70,6 +70,9 @@ retrieve/tests/
 │   └── test_oporp_1bit_match_topk.py
 └── compile/               # torch.compile / torch.export gates
     ├── test_linr_compile.py        # compiled LiNR V1–V3 × clause/bloom: cudagraph_skips == 0, replays == eager
+    ├── test_official_fork_compile.py # META-FORK compile gate: opcheck on all 16 stfork ops; the official-fork
+    │                               #   layer fullgraph, 0 graph breaks, default / reduce-overhead × dynamic,
+    │                               #   torch.equal to eager; torch.export
     ├── test_silvertorch_compile.py # compiled replays == eager + zero graph breaks, filter_mode × backend
     └── test_export_kernel_ref.py   # torch.export preserves the kernel reference (triton_op); the op-registry gates
 ```

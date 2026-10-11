@@ -5,7 +5,7 @@
 #   gpu.sh <timed 0|1> <log> <cmd...>
 set -u
 TIMED=$1 LOG=$2; shift 2
-TREE=/scratch/wt/meta-fork-build
+TREE=${TREE:-/scratch/wt/meta-fork-build}
 PHASE=/scratch/gpu0.fork-coder-phase WANT=/scratch/gpu0.fork-coder-wants
 touch "$PHASE" "$WANT"
 trap 'rm -f "$PHASE" "$WANT"' EXIT

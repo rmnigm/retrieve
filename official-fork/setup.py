@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
-# Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; builds is_topk / fresh_index_post_processing; -O3 host code; metadata in pyproject.toml; C5: builds fork_search (official-fork/CHANGES.md).
+# Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; builds is_topk / fresh_index_post_processing; -O3 host code; metadata in pyproject.toml; C5: builds fork_search; relative source paths (official-fork/CHANGES.md).
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -53,9 +53,8 @@ cuda_sources = [
     "silvertorch_fork/ops/csrc/fork_search_cuda.cu",
 ]
 
-# Resolve paths relative to this file
-cpu_sources = [os.path.join(ROOT_DIR, s) for s in cpu_sources]
-cuda_sources = [os.path.join(ROOT_DIR, s) for s in cuda_sources]
+# fork: sources stay relative to this file (setuptools' editable build rejects absolute paths;
+# the build runs from this directory)
 include_dirs = [os.path.join(ROOT_DIR, "silvertorch_fork", "ops", "csrc")]
 
 extra_compile_args = {
