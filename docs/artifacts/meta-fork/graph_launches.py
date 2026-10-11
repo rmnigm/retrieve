@@ -82,7 +82,8 @@ def harness_gate(m, pool, preps, eager):
     torch._dynamo.reset()
     c = graph_callable(m, pool[0], preps[0])
     with torch.inference_mode():
-        outs = [c(pool[i], preps[i]) for i in range(N_POOL)]
+        # cudagraph trees reuse the output buffers on the next replay
+        outs = [tuple(t.clone() for t in c(pool[i], preps[i])) for i in range(N_POOL)]
         torch.cuda.synchronize()
         with profile(activities=[ProfilerActivity.CPU]) as prof:
             for i in range(N_POOL):
