@@ -956,7 +956,7 @@ __device__ __forceinline__ bool pre_mask_bit(
       ((pre_mask[row * pre_mask_columns + doc / 64] >> (63 - doc % 64)) & 1);
 }
 template <bool PER_CLUSTER>
-__global__ void exact_warp_payload_kernel(
+__device__ __forceinline__ void exact_warp_payload_body(
     const int64_t* __restrict__ attrs,
     int64_t n_clauses,
     int64_t a_max,
@@ -971,7 +971,9 @@ __global__ void exact_warp_payload_kernel(
     const int32_t* __restrict__ warp_rounded_length_cumsum,
     const int32_t* __restrict__ warp_size_cumsum,
     int64_t max_tensor_size_per_row,
-    WarpPayload* __restrict__ payloads) {
+    WarpPayload* __restrict__ payloads,
+    int64_t block,
+    int64_t grid) {
   const int64_t total = warp_size_cumsum[n_clusters - 1];
   const int lane = threadIdx.x % 32;
   // PER_CLUSTER: one warp per probed cluster looping its full warps (wide probes, many warps a
@@ -998,9 +1000,9 @@ __global__ void exact_warp_payload_kernel(
       }
   };
   if constexpr (PER_CLUSTER) {
-    for (int64_t c = (static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x) / 32;
+    for (int64_t c = (block * blockDim.x + threadIdx.x) / 32;
          c < n_clusters;
-         c += static_cast<int64_t>(gridDim.x) * blockDim.x / 32) {
+         c += grid * blockDim.x / 32) {
       const int32_t ci = static_cast<int32_t>(c);
       const int64_t w_first = ci == 0 ? 0 : warp_size_cumsum[ci - 1];
       for (int64_t w = w_first; w < warp_size_cumsum[ci]; ++w) {
@@ -1008,9 +1010,9 @@ __global__ void exact_warp_payload_kernel(
       }
     }
   } else {
-    for (int64_t w = (static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x) / 32;
+    for (int64_t w = (block * blockDim.x + threadIdx.x) / 32;
          w < total;
-         w += static_cast<int64_t>(gridDim.x) * blockDim.x / 32) {
+         w += grid * blockDim.x / 32) {
       const int32_t ci = warp_find_cluster(warp_size_cumsum, n_clusters, w, lane);
       payload(ci, w, ci == 0 ? 0 : warp_size_cumsum[ci - 1]);
     }
@@ -1019,7 +1021,7 @@ __global__ void exact_warp_payload_kernel(
 }
 
 // One warp per probed cluster: lane j writes the payload of the cluster's tail doc j (< 32).
-__global__ void exact_remaining_payload_kernel(
+__device__ __forceinline__ void exact_remaining_payload_body(
     const int64_t* __restrict__ attrs,
     int64_t n_clauses,
     int64_t a_max,
@@ -1035,11 +1037,13 @@ __global__ void exact_remaining_payload_kernel(
     const int32_t* __restrict__ warp_rounded_length_cumsum,
     const int32_t* __restrict__ remaining_length_cumsum,
     int64_t max_tensor_size_per_row,
-    RemainingPayload* __restrict__ payloads) {
+    RemainingPayload* __restrict__ payloads,
+    int64_t block,
+    int64_t grid) {
   const int lane = threadIdx.x % 32;
-  for (int64_t i = (static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x) / 32;
+  for (int64_t i = (block * blockDim.x + threadIdx.x) / 32;
        i < n_clusters;
-       i += static_cast<int64_t>(gridDim.x) * blockDim.x / 32) {
+       i += grid * blockDim.x / 32) {
     const int32_t row = static_cast<int32_t>(i / clusters_per_row);
     const int32_t length = static_cast<int32_t>(cluster_length[i]);
     const int32_t handled = length / 32 * 32;
@@ -1059,6 +1063,42 @@ __global__ void exact_remaining_payload_kernel(
     p.filtering_mask = pre_mask_bit(pre_mask, pre_mask_columns, row, doc) &&
         exact_pass(attrs, n_clauses, a_max, reverse, query_attrs + row * n_clauses, doc);
     reinterpret_cast<int4*>(payloads)[out_offset + lane] = p.payload;
+  }
+}
+
+// The full-warp and remainder payloads in one launch (K fix 18, as bloom_payloads_kernel).
+template <bool PER_CLUSTER>
+__global__ void exact_payloads_kernel(
+    const int64_t* __restrict__ attrs,
+    int64_t n_clauses,
+    int64_t a_max,
+    const bool* __restrict__ reverse,
+    const int64_t* __restrict__ query_attrs,
+    const uint64_t* __restrict__ pre_mask,
+    int64_t pre_mask_columns,
+    const int64_t* __restrict__ cluster_offsets,
+    const int64_t* __restrict__ cluster_ids,
+    const int64_t* __restrict__ cluster_length,
+    int64_t clusters_per_row,
+    int32_t n_clusters,
+    const int32_t* __restrict__ warp_rounded_length_cumsum,
+    const int32_t* __restrict__ warp_size_cumsum,
+    const int32_t* __restrict__ remaining_length_cumsum,
+    int64_t max_tensor_size_per_row,
+    WarpPayload* __restrict__ warp_payloads,
+    RemainingPayload* __restrict__ remaining_payloads,
+    int64_t warp_blocks) {
+  if (blockIdx.x < warp_blocks) {
+    exact_warp_payload_body<PER_CLUSTER>(
+        attrs, n_clauses, a_max, reverse, query_attrs, pre_mask, pre_mask_columns,
+        cluster_offsets, cluster_ids, clusters_per_row, n_clusters, warp_rounded_length_cumsum,
+        warp_size_cumsum, max_tensor_size_per_row, warp_payloads, blockIdx.x, warp_blocks);
+  } else {
+    exact_remaining_payload_body(
+        attrs, n_clauses, a_max, reverse, query_attrs, pre_mask, pre_mask_columns,
+        cluster_offsets, cluster_ids, cluster_length, clusters_per_row, n_clusters,
+        warp_rounded_length_cumsum, remaining_length_cumsum, max_tensor_size_per_row,
+        remaining_payloads, blockIdx.x - warp_blocks, gridDim.x - warp_blocks);
   }
 }
 
@@ -1103,11 +1143,13 @@ std::tuple<Tensor, int64_t, Tensor, int64_t> exact_payloads(
       128L * at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   auto stream = at::cuda::getCurrentCUDAStream();
   // wide probes (capacity >= kPerClusterWarps full warps a cluster): a warp per cluster
-  auto launch_warps = [&](auto per_cluster) {
+  const int64_t remaining_blocks = std::min(max_grid, (n_clusters * 32 + 255) / 256);
+  auto launch = [&](auto per_cluster) {
     constexpr bool kPerCluster = decltype(per_cluster)::value;
     const int64_t threads = (kPerCluster ? n_clusters : warps) * 32;
-    exact_warp_payload_kernel<kPerCluster>
-        <<<std::min(max_grid, (threads + 255) / 256), 256, 0, stream>>>(
+    const int64_t warp_blocks = std::max<int64_t>(1, std::min(max_grid, (threads + 255) / 256));
+    exact_payloads_kernel<kPerCluster>
+        <<<warp_blocks + remaining_blocks, 256, 0, stream>>>(
             attrs.const_data_ptr<int64_t>(),
             attrs.size(1),
             attrs.size(2),
@@ -1117,41 +1159,22 @@ std::tuple<Tensor, int64_t, Tensor, int64_t> exact_payloads(
             pre_columns,
             cluster_offsets.const_data_ptr<int64_t>(),
             cluster_ids.const_data_ptr<int64_t>(),
+            cluster_length.const_data_ptr<int64_t>(),
             per_row,
             static_cast<int32_t>(n_clusters),
             warp_rounded_length_cumsum.const_data_ptr<int32_t>(),
             warp_size_cumsum.const_data_ptr<int32_t>(),
+            remaining_length_cumsum.const_data_ptr<int32_t>(),
             max_tensor_size_per_row,
-            reinterpret_cast<WarpPayload*>(warp_payloads.mutable_data_ptr<int8_t>()));
-
+            reinterpret_cast<WarpPayload*>(warp_payloads.mutable_data_ptr<int8_t>()),
+            reinterpret_cast<RemainingPayload*>(remaining_payloads.mutable_data_ptr<int8_t>()),
+            warp_blocks);
   };
   if (warps >= kPerClusterWarps * n_clusters && n_clusters >= kPerClusterMinClusters) {
-    launch_warps(std::true_type{});
+    launch(std::true_type{});
   } else {
-    launch_warps(std::false_type{});
+    launch(std::false_type{});
   }
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
-  exact_remaining_payload_kernel<<<
-      std::min(max_grid, (n_clusters * 32 + 255) / 256),
-      256,
-      0,
-      stream>>>(
-      attrs.const_data_ptr<int64_t>(),
-      attrs.size(1),
-      attrs.size(2),
-      rev.const_data_ptr<bool>(),
-      q.const_data_ptr<int64_t>(),
-      pre,
-      pre_columns,
-      cluster_offsets.const_data_ptr<int64_t>(),
-      cluster_ids.const_data_ptr<int64_t>(),
-      cluster_length.const_data_ptr<int64_t>(),
-      per_row,
-      n_clusters,
-      warp_rounded_length_cumsum.const_data_ptr<int32_t>(),
-      remaining_length_cumsum.const_data_ptr<int32_t>(),
-      max_tensor_size_per_row,
-      reinterpret_cast<RemainingPayload*>(remaining_payloads.mutable_data_ptr<int8_t>()));
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return {warp_payloads, warps, remaining_payloads, remainders};
 }

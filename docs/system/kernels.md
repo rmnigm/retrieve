@@ -1845,7 +1845,9 @@ file. `CHANGES.md` lists every change; each has its gate row in
    prepared plan (one per distinct expression) on the ≤ 2 bloom columns a payload's docs span and
    cut the same mask bits upstream's payload kernels cut from `column_mask_response`, so no column
    search runs; the scorer reads no other bit of Meta's full-`N` mask, so the full path returns
-   the same result without scanning all `N` (Meta's full path stays on `backend="official"`). `exact`: the clauses are
+   the same result without scanning all `N` (Meta's full path stays on `backend="official"`).
+   Each filter's full-warp and remainder payload kernels are one launch (the blocks split
+   between the two), so their latencies overlap at small batches. `exact`: the clauses are
    tested over the probed docs only, one warp per 32-doc payload with `__brev(__ballot_sync(…))`
    as its mask, an inactive clause a warp-uniform skip. A given full-`N` `filtering_bit_mask`
    is read by the scorer as upstream's.

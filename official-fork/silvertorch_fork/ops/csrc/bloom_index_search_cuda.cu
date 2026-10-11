@@ -843,7 +843,7 @@ __device__ __forceinline__ uint64_t column_result(
 }
 
 template <int32_t STACK_SIZE>
-__global__ void bloom_warp_payload_kernel(
+__device__ __forceinline__ void bloom_warp_payload_body(
     const int64_t* __restrict__ bloom_index,
     int64_t index_total_column_count,
     const int64_t* __restrict__ bundle_b_offsets,
@@ -858,10 +858,12 @@ __global__ void bloom_warp_payload_kernel(
     const int32_t* __restrict__ warp_rounded_length_cumsum,
     const int32_t* __restrict__ warp_size_cumsum,
     int64_t max_tensor_size_per_row,
-    WarpPayload* __restrict__ payloads) {
+    WarpPayload* __restrict__ payloads,
+    int64_t block,
+    int64_t grid) {
   const int64_t total = warp_size_cumsum[n_clusters - 1];
-  for (int64_t w = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; w < total;
-       w += static_cast<int64_t>(blockDim.x) * gridDim.x) {
+  for (int64_t w = block * blockDim.x + threadIdx.x; w < total;
+       w += static_cast<int64_t>(blockDim.x) * grid) {
     int32_t lo = 0;
     int32_t hi = n_clusters - 1;
     while (lo < hi) {
@@ -905,7 +907,7 @@ __global__ void bloom_warp_payload_kernel(
 }
 
 template <int32_t STACK_SIZE>
-__global__ void bloom_remaining_payload_kernel(
+__device__ __forceinline__ void bloom_remaining_payload_body(
     const int64_t* __restrict__ bloom_index,
     int64_t index_total_column_count,
     const int64_t* __restrict__ bundle_b_offsets,
@@ -921,11 +923,13 @@ __global__ void bloom_remaining_payload_kernel(
     const int32_t* __restrict__ warp_rounded_length_cumsum,
     const int32_t* __restrict__ remaining_length_cumsum,
     int64_t max_tensor_size_per_row,
-    RemainingPayload* __restrict__ payloads) {
+    RemainingPayload* __restrict__ payloads,
+    int64_t block,
+    int64_t grid) {
   const int lane = threadIdx.x % 32;
-  for (int64_t i = (static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x) / 32;
+  for (int64_t i = (block * blockDim.x + threadIdx.x) / 32;
        i < n_clusters;
-       i += static_cast<int64_t>(gridDim.x) * blockDim.x / 32) {
+       i += grid * blockDim.x / 32) {
     const int32_t row = static_cast<int32_t>(i / clusters_per_row);
     const int32_t length = static_cast<int32_t>(cluster_length[i]);
     const int32_t handled = length / 32 * 32;
@@ -970,6 +974,45 @@ __global__ void bloom_remaining_payload_kernel(
   }
 }
 
+// fork (K fix 18): the full-warp and remainder payloads in one launch, blocks [0, warp_blocks)
+// the former, the rest the latter: independent, so at small batches their latencies overlap
+// instead of adding up.
+template <int32_t STACK_SIZE>
+__global__ void bloom_payloads_kernel(
+    const int64_t* __restrict__ bloom_index,
+    int64_t index_total_column_count,
+    const int64_t* __restrict__ bundle_b_offsets,
+    EncodedQueryPlans plans,
+    const int64_t* __restrict__ query_plan_index,
+    int64_t k,
+    int64_t p_k,
+    const int64_t* __restrict__ cluster_offsets,
+    const int64_t* __restrict__ cluster_ids,
+    const int64_t* __restrict__ cluster_length,
+    int64_t clusters_per_row,
+    int32_t n_clusters,
+    const int32_t* __restrict__ warp_rounded_length_cumsum,
+    const int32_t* __restrict__ warp_size_cumsum,
+    const int32_t* __restrict__ remaining_length_cumsum,
+    int64_t max_tensor_size_per_row,
+    WarpPayload* __restrict__ warp_payloads,
+    RemainingPayload* __restrict__ remaining_payloads,
+    int64_t warp_blocks) {
+  if (blockIdx.x < warp_blocks) {
+    bloom_warp_payload_body<STACK_SIZE>(
+        bloom_index, index_total_column_count, bundle_b_offsets, plans, query_plan_index, k,
+        p_k, cluster_offsets, cluster_ids, clusters_per_row, n_clusters,
+        warp_rounded_length_cumsum, warp_size_cumsum, max_tensor_size_per_row, warp_payloads,
+        blockIdx.x, warp_blocks);
+  } else {
+    bloom_remaining_payload_body<STACK_SIZE>(
+        bloom_index, index_total_column_count, bundle_b_offsets, plans, query_plan_index, k,
+        p_k, cluster_offsets, cluster_ids, cluster_length, clusters_per_row, n_clusters,
+        warp_rounded_length_cumsum, remaining_length_cumsum, max_tensor_size_per_row,
+        remaining_payloads, blockIdx.x - warp_blocks, gridDim.x - warp_blocks);
+  }
+}
+
 // fork (K fix 7): the cluster of warp slot w (first i with inclusive_cumsum[i] > w), searched
 // by the 32 lanes of a warp together: each step every lane tests one of 32 evenly spaced
 // positions, so ~log32(n) dependent loads instead of log2(n). Every lane gets the result.
@@ -1002,7 +1045,7 @@ __device__ __forceinline__ int32_t warp_find_cluster(
 using st::ops::fork_filters::ExactClauses;
 
 template <int32_t STACK_SIZE>
-__global__ void bloom_recheck_warp_payload_kernel(
+__device__ __forceinline__ void bloom_recheck_warp_payload_body(
     const int64_t* __restrict__ bloom_index,
     int64_t index_total_column_count,
     const int64_t* __restrict__ bundle_b_offsets,
@@ -1019,12 +1062,14 @@ __global__ void bloom_recheck_warp_payload_kernel(
     const int32_t* __restrict__ warp_size_cumsum,
     int64_t max_tensor_size_per_row,
     WarpPayload* __restrict__ payloads,
-    int per_warp) {
+    int per_warp,
+    int64_t block,
+    int64_t grid) {
   const int64_t total = warp_size_cumsum[n_clusters - 1];
   const int lane = threadIdx.x % 32;
-  for (int64_t base = (static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x) / 32 * per_warp;
+  for (int64_t base = (block * blockDim.x + threadIdx.x) / 32 * per_warp;
        base < total;
-       base += static_cast<int64_t>(blockDim.x) * gridDim.x / 32 * per_warp) {
+       base += static_cast<int64_t>(blockDim.x) * grid / 32 * per_warp) {
     const int64_t w = base + lane;
     const int count = static_cast<int>(total - base < per_warp ? total - base : per_warp);
     // the warp's payloads lie in clusters [first, last]: two warp searches, then each lane
@@ -1095,7 +1140,7 @@ __global__ void bloom_recheck_warp_payload_kernel(
 }
 
 template <int32_t STACK_SIZE>
-__global__ void bloom_recheck_remaining_payload_kernel(
+__device__ __forceinline__ void bloom_recheck_remaining_payload_body(
     const int64_t* __restrict__ bloom_index,
     int64_t index_total_column_count,
     const int64_t* __restrict__ bundle_b_offsets,
@@ -1112,11 +1157,13 @@ __global__ void bloom_recheck_remaining_payload_kernel(
     const int32_t* __restrict__ warp_rounded_length_cumsum,
     const int32_t* __restrict__ remaining_length_cumsum,
     int64_t max_tensor_size_per_row,
-    RemainingPayload* __restrict__ payloads) {
+    RemainingPayload* __restrict__ payloads,
+    int64_t block,
+    int64_t grid) {
   const int lane = threadIdx.x % 32;
-  for (int64_t i = (static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x) / 32;
+  for (int64_t i = (block * blockDim.x + threadIdx.x) / 32;
        i < n_clusters;
-       i += static_cast<int64_t>(gridDim.x) * blockDim.x / 32) {
+       i += grid * blockDim.x / 32) {
     const int32_t row = static_cast<int32_t>(i / clusters_per_row);
     const int32_t length = static_cast<int32_t>(cluster_length[i]);
     const int32_t handled = length / 32 * 32;
@@ -1159,6 +1206,46 @@ __global__ void bloom_recheck_remaining_payload_kernel(
     p.filtering_mask = get_bit_64_bit_mask(columns, doc - first_column * 64) &&
         clauses.pass(row, doc);
     reinterpret_cast<int4*>(payloads)[out_offset + lane] = p.payload;
+  }
+}
+
+// The recheck's full-warp and remainder payloads in one launch, as bloom_payloads_kernel.
+template <int32_t STACK_SIZE>
+__global__ void bloom_recheck_payloads_kernel(
+    const int64_t* __restrict__ bloom_index,
+    int64_t index_total_column_count,
+    const int64_t* __restrict__ bundle_b_offsets,
+    EncodedQueryPlans plans,
+    const int64_t* __restrict__ query_plan_index,
+    int64_t k,
+    int64_t p_k,
+    ExactClauses clauses,
+    const int64_t* __restrict__ cluster_offsets,
+    const int64_t* __restrict__ cluster_ids,
+    const int64_t* __restrict__ cluster_length,
+    int64_t clusters_per_row,
+    int32_t n_clusters,
+    const int32_t* __restrict__ warp_rounded_length_cumsum,
+    const int32_t* __restrict__ warp_size_cumsum,
+    const int32_t* __restrict__ remaining_length_cumsum,
+    int64_t max_tensor_size_per_row,
+    WarpPayload* __restrict__ warp_payloads,
+    RemainingPayload* __restrict__ remaining_payloads,
+    int per_warp,
+    int64_t warp_blocks) {
+  if (blockIdx.x < warp_blocks) {
+    bloom_recheck_warp_payload_body<STACK_SIZE>(
+        bloom_index, index_total_column_count, bundle_b_offsets, plans, query_plan_index, k,
+        p_k, clauses, cluster_offsets, cluster_ids, clusters_per_row, n_clusters,
+        warp_rounded_length_cumsum, warp_size_cumsum, max_tensor_size_per_row, warp_payloads,
+        per_warp, blockIdx.x, warp_blocks);
+  } else {
+    bloom_recheck_remaining_payload_body<STACK_SIZE>(
+        bloom_index, index_total_column_count, bundle_b_offsets, plans, query_plan_index, k,
+        p_k, clauses, cluster_offsets, cluster_ids, cluster_length, clusters_per_row,
+        n_clusters, warp_rounded_length_cumsum, remaining_length_cumsum,
+        max_tensor_size_per_row, remaining_payloads, blockIdx.x - warp_blocks,
+        gridDim.x - warp_blocks);
   }
 }
 
@@ -1907,52 +1994,33 @@ std::tuple<Tensor, int64_t, Tensor, int64_t> bloom_partial_payloads_prepared_cud
         query_attrs.const_data_ptr<int64_t>()};
 #define LAUNCH_RECHECK_PAYLOADS(STACK_SIZE)                                       \
   {                                                                               \
-    bloom_recheck_warp_payload_kernel<STACK_SIZE><<<                              \
-        std::min(max_grid, ((warps + per_warp - 1) / per_warp * 32 + 255) / 256),  \
-        256,                                                                      \
-        0,                                                                        \
-        stream>>>(                                                                \
-        bloom_index.const_data_ptr<int64_t>(),                                    \
-        index_total_column_count,                                                 \
-        bloom_bundle_b_offsets.const_data_ptr<int64_t>(),                         \
-        encoded,                                                                  \
-        plan_index_ptr,                                                           \
-        k,                                                                        \
-        onebit_hash_k,                                                            \
-        clauses,                                                                  \
-        cluster_offsets.const_data_ptr<int64_t>(),                                \
-        cluster_ids.const_data_ptr<int64_t>(),                                    \
-        per_row,                                                                  \
-        static_cast<int32_t>(n_clusters),                                         \
-        warp_rounded_length_cumsum.const_data_ptr<int32_t>(),                     \
-        warp_size_cumsum.const_data_ptr<int32_t>(),                               \
-        max_tensor_size_per_row,                                                  \
-        reinterpret_cast<WarpPayload*>(warp_payloads.mutable_data_ptr<int8_t>()), \
-        per_warp);                                                                \
-    C10_CUDA_KERNEL_LAUNCH_CHECK();                                               \
-    bloom_recheck_remaining_payload_kernel<STACK_SIZE><<<                         \
-        std::min(max_grid, (n_clusters * 32 + 255) / 256),                             \
-        256,                                                                      \
-        0,                                                                        \
-        stream>>>(                                                                \
-        bloom_index.const_data_ptr<int64_t>(),                                    \
-        index_total_column_count,                                                 \
-        bloom_bundle_b_offsets.const_data_ptr<int64_t>(),                         \
-        encoded,                                                                  \
-        plan_index_ptr,                                                           \
-        k,                                                                        \
-        onebit_hash_k,                                                            \
-        clauses,                                                                  \
-        cluster_offsets.const_data_ptr<int64_t>(),                                \
-        cluster_ids.const_data_ptr<int64_t>(),                                    \
-        cluster_length.const_data_ptr<int64_t>(),                                 \
-        per_row,                                                                  \
-        n_clusters,                                                               \
-        warp_rounded_length_cumsum.const_data_ptr<int32_t>(),                     \
-        remaining_length_cumsum.const_data_ptr<int32_t>(),                        \
-        max_tensor_size_per_row,                                                  \
-        reinterpret_cast<RemainingPayload*>(                                      \
-            remaining_payloads.mutable_data_ptr<int8_t>()));                      \
+    const int64_t warp_blocks = std::max<int64_t>(                                \
+        1, std::min(max_grid, ((warps + per_warp - 1) / per_warp * 32 + 255) / 256)); \
+    const int64_t remaining_blocks = std::min(max_grid, (n_clusters * 32 + 255) / 256); \
+    bloom_recheck_payloads_kernel<STACK_SIZE>                                     \
+        <<<warp_blocks + remaining_blocks, 256, 0, stream>>>(                     \
+            bloom_index.const_data_ptr<int64_t>(),                                \
+            index_total_column_count,                                             \
+            bloom_bundle_b_offsets.const_data_ptr<int64_t>(),                     \
+            encoded,                                                              \
+            plan_index_ptr,                                                       \
+            k,                                                                    \
+            onebit_hash_k,                                                        \
+            clauses,                                                              \
+            cluster_offsets.const_data_ptr<int64_t>(),                            \
+            cluster_ids.const_data_ptr<int64_t>(),                                \
+            cluster_length.const_data_ptr<int64_t>(),                             \
+            per_row,                                                              \
+            static_cast<int32_t>(n_clusters),                                     \
+            warp_rounded_length_cumsum.const_data_ptr<int32_t>(),                 \
+            warp_size_cumsum.const_data_ptr<int32_t>(),                           \
+            remaining_length_cumsum.const_data_ptr<int32_t>(),                    \
+            max_tensor_size_per_row,                                              \
+            reinterpret_cast<WarpPayload*>(warp_payloads.mutable_data_ptr<int8_t>()), \
+            reinterpret_cast<RemainingPayload*>(                                  \
+                remaining_payloads.mutable_data_ptr<int8_t>()),                   \
+            per_warp,                                                             \
+            warp_blocks);                                                         \
     C10_CUDA_KERNEL_LAUNCH_CHECK();                                               \
   }
     // payloads a warp: as many as keep >= 64 warps an SM (K fix 15)
@@ -1966,51 +2034,32 @@ std::tuple<Tensor, int64_t, Tensor, int64_t> bloom_partial_payloads_prepared_cud
 #undef LAUNCH_RECHECK_PAYLOADS
     return {warp_payloads, warps, remaining_payloads, remainders};
   }
+  const int64_t warp_blocks = std::max<int64_t>(1, std::min(max_grid, (warps + 255) / 256));
+  const int64_t remaining_blocks = std::min(max_grid, (n_clusters * 32 + 255) / 256);
 #define LAUNCH_BLOOM_PAYLOADS(STACK_SIZE)                                         \
   {                                                                               \
-    bloom_warp_payload_kernel<STACK_SIZE><<<                                      \
-        std::min(max_grid, (warps + 255) / 256),                                  \
-        256,                                                                      \
-        0,                                                                        \
-        stream>>>(                                                                \
-        bloom_index.const_data_ptr<int64_t>(),                                    \
-        index_total_column_count,                                                 \
-        bloom_bundle_b_offsets.const_data_ptr<int64_t>(),                         \
-        encoded,                                                                  \
-        plan_index_ptr,                                                           \
-        k,                                                                        \
-        onebit_hash_k,                                                            \
-        cluster_offsets.const_data_ptr<int64_t>(),                                \
-        cluster_ids.const_data_ptr<int64_t>(),                                    \
-        per_row,                                                                  \
-        static_cast<int32_t>(n_clusters),                                         \
-        warp_rounded_length_cumsum.const_data_ptr<int32_t>(),                     \
-        warp_size_cumsum.const_data_ptr<int32_t>(),                               \
-        max_tensor_size_per_row,                                                  \
-        reinterpret_cast<WarpPayload*>(warp_payloads.mutable_data_ptr<int8_t>())); \
-    C10_CUDA_KERNEL_LAUNCH_CHECK();                                               \
-    bloom_remaining_payload_kernel<STACK_SIZE><<<                                 \
-        std::min(max_grid, (n_clusters * 32 + 255) / 256),                             \
-        256,                                                                      \
-        0,                                                                        \
-        stream>>>(                                                                \
-        bloom_index.const_data_ptr<int64_t>(),                                    \
-        index_total_column_count,                                                 \
-        bloom_bundle_b_offsets.const_data_ptr<int64_t>(),                         \
-        encoded,                                                                  \
-        plan_index_ptr,                                                           \
-        k,                                                                        \
-        onebit_hash_k,                                                            \
-        cluster_offsets.const_data_ptr<int64_t>(),                                \
-        cluster_ids.const_data_ptr<int64_t>(),                                    \
-        cluster_length.const_data_ptr<int64_t>(),                                 \
-        per_row,                                                                  \
-        n_clusters,                                                               \
-        warp_rounded_length_cumsum.const_data_ptr<int32_t>(),                     \
-        remaining_length_cumsum.const_data_ptr<int32_t>(),                        \
-        max_tensor_size_per_row,                                                  \
-        reinterpret_cast<RemainingPayload*>(                                      \
-            remaining_payloads.mutable_data_ptr<int8_t>()));                      \
+    bloom_payloads_kernel<STACK_SIZE>                                             \
+        <<<warp_blocks + remaining_blocks, 256, 0, stream>>>(                     \
+            bloom_index.const_data_ptr<int64_t>(),                                \
+            index_total_column_count,                                             \
+            bloom_bundle_b_offsets.const_data_ptr<int64_t>(),                     \
+            encoded,                                                              \
+            plan_index_ptr,                                                       \
+            k,                                                                    \
+            onebit_hash_k,                                                        \
+            cluster_offsets.const_data_ptr<int64_t>(),                            \
+            cluster_ids.const_data_ptr<int64_t>(),                                \
+            cluster_length.const_data_ptr<int64_t>(),                             \
+            per_row,                                                              \
+            static_cast<int32_t>(n_clusters),                                     \
+            warp_rounded_length_cumsum.const_data_ptr<int32_t>(),                 \
+            warp_size_cumsum.const_data_ptr<int32_t>(),                           \
+            remaining_length_cumsum.const_data_ptr<int32_t>(),                    \
+            max_tensor_size_per_row,                                              \
+            reinterpret_cast<WarpPayload*>(warp_payloads.mutable_data_ptr<int8_t>()), \
+            reinterpret_cast<RemainingPayload*>(                                  \
+                remaining_payloads.mutable_data_ptr<int8_t>()),                   \
+            warp_blocks);                                                         \
     C10_CUDA_KERNEL_LAUNCH_CHECK();                                               \
   }
   if (max_stack_size <= C_FAST_ROUTE_STACK_SIZE_FIRST_LEVEL) {
