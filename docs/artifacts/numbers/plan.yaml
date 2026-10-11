@@ -21,9 +21,9 @@ trees:
 gpus: [d0, d1, p1]          # pod d GPU 0, pod d GPU 1, pod 1 GPU 0; pod b (b0) joins after fork-coder's done note
 queues:                     # LiNR-only legs first; ends balanced at ~15-16 GPU-h each
   d0: [L2-v3pool, L2b-v3pool-laion, A1-laion30m, A2-laion30m-real]
-  d1: [L1-linr-bs64, A0-k1000-check, A1-laion30m-synth, A1-laion10m, A2-laion10m, A2-yfcc]
+  d1: [L1-linr-bs64, A0-k1000-check, A1-laion10m, A2-laion10m, A2-yfcc]
   p1: [L1b-linr-bs64-laion, L3-linr-corr, L4-linr-k2048, A1-small, A1-pubmed, A1-yfcc, A2-small, A1b-laion-small-lists, A2b-laion-small-lists, A2-pubmed, A3-st-k2048]
-  b0: [A2-laion30m-synth]   # if pod b never frees up, d0 runs it last (+~4 h on d0)
+  b0: [A1-laion30m-synth, A2-laion30m-synth]   # controller 2026-10-11 19:10Z: A1-laion30m-synth moved from d1 (unless laion had started it)
 
 legs:
   # ---------------- LiNR-only (start now, tree linr) ----------------
@@ -207,4 +207,4 @@ totals:
   linr_only_gpu_h: 9.3
   adapted_gpu_h: 38.6      # A0 0.4 + A1 11.9 + A1b 0.5 + A2 24.0 + A2b 0.8 + A3 1.0
   all_gpu_h: 47.9          # +20 % process start / data load / compile -> ~56
-  per_queue_gpu_h: {d0: 13.0, d1: 14.9, p1: 16.0, b0: 4.0}   # d0 17.0 if it also runs A2-laion30m-synth
+  per_queue_gpu_h: {d0: 13.0, d1: 11.9, p1: 16.0, b0: 7.0}   # d0 17.0 if it also runs A2-laion30m-synth
