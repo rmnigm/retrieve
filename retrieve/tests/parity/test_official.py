@@ -636,7 +636,7 @@ def test_c8_fork_bloom_search_equals_upstream(partial, score_path):
     perm = torch.randperm(n, generator=g, device="cuda")
     q = make_query(b, d)
     qa = make_query_attrs(b, c=c, n_vocab=8, seed=44)
-    qa[::3] = qa[1::3]
+    qa[1::2] = qa[::2]  # every expression twice: fewer plans than rows
     exprs = of.queries_to_expressions(qa)
     probe = torch.rand(b, n_lists, generator=g, device="cuda").argsort(1)[:, :p]
     width = int(sizes.sort(descending=True).values[:p].sum())
