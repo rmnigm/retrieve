@@ -1,5 +1,5 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C4: prepared-plan search ops, no host sync; C8: bloom-evaluating payload kernels; C13: their exact recheck (official-fork/CHANGES.md).
+// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C4: prepared-plan search ops, no host sync; C8: bloom-evaluating payload kernels; C13: their exact recheck; K fix 4: signature_match loads after resolving (official-fork/CHANGES.md).
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -333,9 +333,16 @@ __inline__ __device__ uint64_t signature_match<true>(
     }
     if (!duplicate) {
       used_b_p[resolved++] = b_p;
-      result &= bloom_index
-          [(bundle_b_start + b_p) * C_BLOOM_V2_COL_BUNDLE_SIZE +
-           column_in_bundle];
+    }
+  }
+  // fork (K fix 4): the k index words loaded after the positions are resolved, so the loads
+  // are independent and overlap (upstream loads each one inside the resolve loop); same bits.
+#pragma unroll
+  for (int32_t i = 0; i < MAX_K_V2; ++i) {
+    if (i < resolved) {
+      result &= __ldg(
+          bloom_index + (bundle_b_start + used_b_p[i]) * C_BLOOM_V2_COL_BUNDLE_SIZE +
+          column_in_bundle);
     }
   }
   return result;

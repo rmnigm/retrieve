@@ -43,8 +43,8 @@ struct MaxOp {
 // score's key is a uint32 that orders like the score (int32: sign bit flipped; fp16: the IEEE
 // order trick on the bits; a slot the scorer never wrote ranks lowest, INT_MIN on int32, -inf
 // on fp16). Four 8-bit histogram passes find the k-th largest key T; keys above T are taken,
-// and keys equal to T in index order until k, so the choice is deterministic (a graph replay
-// picks the ids eager picks). The k winners are sorted by (key desc, slot asc) with a bitonic
+// and keys equal to T in index order until k (as torch's top-k), so the choice is deterministic
+// (a graph replay picks the ids eager picks). The k winners are sorted by (key desc, slot asc) with a bitonic
 // sort. A row wider than kSelectChunk slots is selected per chunk first (stage 1, its k winners
 // per chunk sorted the same way), then once over the chunks' winners (stage 2): the row's top-k
 // lies in the union of its chunks' top-ks.
@@ -108,13 +108,13 @@ struct SelectShared {
   uint32_t digit;
   int64_t need;
   int64_t taken;
-  int64_t eq_seen;
 };
 
 // The k (<= kSelectMaxK, <= n) largest of entries [first, first + n) of `row`, sorted into
 // sh.best[0, k) by (key desc, slot asc); sh.best[k, pow2) holds 0.
-// Entry i of the CTA's range is read as key(i); with n <= kSelectChunk each thread holds its
-// kSelectItems keys in registers after one load (CACHED), else every pass reloads them.
+// Entry i of the CTA's range is read as key(i); thread t's it-th entry is it * kSelectThreads + t
+// (coalesced). With n <= kSelectChunk (CACHED) a thread holds its kSelectItems keys in registers
+// after one load, else every pass reloads them.
 template <bool CACHED, typename KEYS>
 __device__ void select_topk(
     const KEYS& keys,
@@ -128,10 +128,14 @@ __device__ void select_topk(
   const int tid = threadIdx.x;
   const int64_t iters = (n + kSelectThreads - 1) / kSelectThreads;
   uint32_t cache[CACHED ? kSelectItems : 1];
+  // entry index of a thread's it-th key
+  auto index_of = [&](int64_t it) -> int64_t {
+    return it * kSelectThreads + tid;
+  };
   if constexpr (CACHED) {
 #pragma unroll
     for (int it = 0; it < kSelectItems; ++it) {
-      const int64_t i = it * kSelectThreads + tid;
+      const int64_t i = index_of(it);
       cache[it] = i < n ? keys.key(row, first + i) : 0;
     }
   }
@@ -139,7 +143,7 @@ __device__ void select_topk(
     if constexpr (CACHED) {
       return cache[it];
     } else {
-      const int64_t i = it * kSelectThreads + tid;
+      const int64_t i = index_of(it);
       return i < n ? keys.key(row, first + i) : 0;
     }
   };
@@ -159,7 +163,7 @@ __device__ void select_topk(
       if (it >= iters) {
         break; // uniform: iters is the CTA's
       }
-      const int64_t i = it * kSelectThreads + tid;
+      const int64_t i = index_of(it);
       const uint32_t key = key_at(it);
       const bool in = i < n && (key & mask) == prefix;
       const uint32_t digit = in ? (key >> shift) & 0xff : 256;
@@ -214,33 +218,89 @@ __device__ void select_topk(
   }
   if (tid == 0) {
     sh.taken = 0;
-    sh.eq_seen = 0;
   }
   __syncthreads();
-#pragma unroll
-  for (int64_t it = 0; it < (CACHED ? kSelectItems : iters); ++it) {
-    if (it >= iters) {
-      break; // uniform: iters is the CTA's
+  // Collect: keys above the threshold anywhere in best[0, k - ties) (the sort orders them);
+  // keys equal to it, `ties` of them, in index order (what torch's top-k takes; deterministic,
+  // so graph and eager agree). Index order is slab-major (slab it = entries [it * T, (it + 1) * T)):
+  // when CACHED each warp's per-slab counts go to shared memory, one warp prefix-sums them in
+  // slab-major order, and a lane's rank adds its rank in the warp's ballot; otherwise one scan
+  // per slab.
+  auto take = [&](int64_t it, int32_t& eq_rank) {
+    const int64_t i = index_of(it);
+    if (i >= n) {
+      return;
     }
-    const int64_t i = it * kSelectThreads + tid;
     const uint32_t key = key_at(it);
-    const int32_t is_eq = (i < n && key == threshold) ? 1 : 0;
-    int32_t eq_rank;
-    int32_t eq_total;
-    Scan(scan).ExclusiveSum(is_eq, eq_rank, eq_total);
-    if (i < n && key > threshold) {
+    if (key > threshold) {
       const int64_t pos = atomicAdd(reinterpret_cast<unsigned long long*>(&sh.taken), 1ull);
       sh.best[pos] = composite(key, keys.slot(row, first + i));
-    } else if (is_eq && sh.eq_seen + eq_rank < ties) {
-      sh.best[(k - ties) + sh.eq_seen + eq_rank] =
-          composite(key, keys.slot(row, first + i));
+    } else if (key == threshold) {
+      if (eq_rank < ties) {
+        sh.best[(k - ties) + eq_rank] = composite(key, keys.slot(row, first + i));
+      }
+      ++eq_rank;
+    }
+  };
+  if constexpr (CACHED) {
+    constexpr int kWarps = kSelectThreads / 32;
+    __shared__ int32_t slab_warp[kSelectItems * kWarps];
+    const int lane = tid % 32;
+    const int warp = tid / 32;
+    const uint32_t below = (1u << lane) - 1;
+    uint32_t eq_bits[kSelectItems];
+#pragma unroll
+    for (int it = 0; it < kSelectItems; ++it) {
+      eq_bits[it] = __ballot_sync(0xffffffff, index_of(it) < n && cache[it] == threshold);
+      if (lane == 0) {
+        slab_warp[it * kWarps + warp] = __popc(eq_bits[it]);
+      }
     }
     __syncthreads();
-    if (tid == 0) {
-      sh.eq_seen += eq_total;
+    if (tid < 32) {
+      // exclusive prefix over the kSelectItems * kWarps counts, slab-major
+      constexpr int kPer = kSelectItems * kWarps / 32;
+      int32_t local[kPer];
+      int32_t sum = 0;
+#pragma unroll
+      for (int e = 0; e < kPer; ++e) {
+        local[e] = slab_warp[tid * kPer + e];
+        sum += local[e];
+      }
+      int32_t inc = sum;
+      for (int off = 1; off < 32; off <<= 1) {
+        const int32_t up = __shfl_up_sync(0xffffffff, inc, off);
+        if (tid >= off) {
+          inc += up;
+        }
+      }
+      int32_t run = inc - sum;
+#pragma unroll
+      for (int e = 0; e < kPer; ++e) {
+        slab_warp[tid * kPer + e] = run;
+        run += local[e];
+      }
     }
     __syncthreads();
+#pragma unroll
+    for (int it = 0; it < kSelectItems; ++it) {
+      int32_t eq_rank = slab_warp[it * kWarps + warp] + __popc(eq_bits[it] & below);
+      take(it, eq_rank);
+    }
+  } else {
+    int64_t eq_seen = 0;
+    for (int64_t it = 0; it < iters; ++it) {
+      const int32_t is_eq = (index_of(it) < n && key_at(it) == threshold) ? 1 : 0;
+      int32_t eq_rank;
+      int32_t eq_total;
+      Scan(scan).ExclusiveSum(is_eq, eq_rank, eq_total);
+      eq_rank += static_cast<int32_t>(eq_seen);
+      take(it, eq_rank);
+      eq_seen += eq_total;
+      __syncthreads();
+    }
   }
+  __syncthreads();
   // bitonic sort of best[0, pow2), descending
   for (int64_t size = 2; size <= pow2; size <<= 1) {
     for (int64_t stride = size >> 1; stride > 0; stride >>= 1) {
