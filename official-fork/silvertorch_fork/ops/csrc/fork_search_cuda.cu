@@ -347,24 +347,76 @@ __device__ void select_topk(
   if constexpr (!SORT) {
     return;
   }
-  // bitonic sort of best[0, pow2), descending
+  // bitonic sort of best[0, pow2), descending. Thread t holds entries j = r * T + t: a stride
+  // below 32 pairs lanes of one warp (shuffles), one of T or more pairs a thread's own registers,
+  // and only strides in [32, T) go through shared memory.
+  constexpr int kMaxPer = kSelectMaxK / kSelectThreads;
+  const int per = pow2 >= kSelectThreads ? static_cast<int>(pow2 / kSelectThreads) : 1;
+  uint64_t v[kMaxPer];
+#pragma unroll
+  for (int r = 0; r < kMaxPer; ++r) {
+    const int64_t j = r * kSelectThreads + tid;
+    v[r] = (r < per && j < pow2) ? sh.best[j] : 0;
+  }
   for (int64_t size = 2; size <= pow2; size <<= 1) {
     for (int64_t stride = size >> 1; stride > 0; stride >>= 1) {
-      for (int64_t j = tid; j < pow2; j += kSelectThreads) {
-        const int64_t partner = j ^ stride;
-        if (partner > j) {
-          const bool descending = (j & size) == 0;
-          const uint64_t a = sh.best[j];
-          const uint64_t b = sh.best[partner];
-          if ((a < b) == descending) {
-            sh.best[j] = b;
-            sh.best[partner] = a;
+      if (stride >= kSelectThreads) {
+        const int rs = static_cast<int>(stride / kSelectThreads);
+#pragma unroll
+        for (int r = 0; r < kMaxPer; ++r) {
+          const int64_t j = r * kSelectThreads + tid;
+          if (r < per && (r & rs) == 0) {
+            const bool descending = (j & size) == 0;
+            const uint64_t a = v[r];
+            const uint64_t b = v[r + rs];
+            if ((a < b) == descending) {
+              v[r] = b;
+              v[r + rs] = a;
+            }
+          }
+        }
+      } else if (stride >= 32) {
+        __syncthreads();
+#pragma unroll
+        for (int r = 0; r < kMaxPer; ++r) {
+          if (r < per) {
+            sh.best[r * kSelectThreads + tid] = v[r];
+          }
+        }
+        __syncthreads();
+#pragma unroll
+        for (int r = 0; r < kMaxPer; ++r) {
+          const int64_t j = r * kSelectThreads + tid;
+          if (r < per && j < pow2) {
+            const uint64_t b = sh.best[j ^ stride];
+            const bool descending = (j & size) == 0;
+            const bool low = (j & stride) == 0;
+            v[r] = (low == descending) == (v[r] < b) ? b : v[r];
+          }
+        }
+      } else {
+#pragma unroll
+        for (int r = 0; r < kMaxPer; ++r) {
+          const int64_t j = r * kSelectThreads + tid;
+          const uint64_t b = __shfl_xor_sync(0xffffffff, v[r], static_cast<int>(stride));
+          if (r < per && j < pow2) {
+            const bool descending = (j & size) == 0;
+            const bool low = (j & stride) == 0;
+            v[r] = (low == descending) == (v[r] < b) ? b : v[r];
           }
         }
       }
-      __syncthreads();
     }
   }
+  __syncthreads();
+#pragma unroll
+  for (int r = 0; r < kMaxPer; ++r) {
+    const int64_t j = r * kSelectThreads + tid;
+    if (r < per && j < pow2) {
+      sh.best[j] = v[r];
+    }
+  }
+  __syncthreads();
 }
 
 // Stage 1: one CTA per (row, chunk), its k winners to cand[row, chunk * k + j].
