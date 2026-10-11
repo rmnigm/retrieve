@@ -8,6 +8,8 @@
 #include <optional>
 #include <tuple>
 
+#include "fused_kmean_ann.cuh"
+
 // The upstream-file entry points stfork::search (fork_search_cuda.cu) composes, defined in
 // fused_kmean_ann_cuda.cu and bloom_index_search_cuda.cu.
 namespace st::ops::fused_kmean_ann {
@@ -28,7 +30,8 @@ std::tuple<at::Tensor, at::Tensor> fused_kmean_ann_run_payloads(
     const int32_t* remaining_docs_ptr,
     const std::optional<at::Tensor>& per_embedding_scale,
     bool query_on_shared_mem,
-    bool write_failed);
+    bool write_failed,
+    BlockKeys block_keys);
 
 std::tuple<at::Tensor, at::Tensor> fused_kmean_ann_cuda_precomputed(
     const at::Tensor& cluster_offsets,
@@ -43,7 +46,8 @@ std::tuple<at::Tensor, at::Tensor> fused_kmean_ann_cuda_precomputed(
     const at::Tensor& cluster_remaining_length_cumsum,
     const at::Tensor& cluster_warp_size_cumsum,
     bool query_on_shared_mem,
-    bool write_failed);
+    bool write_failed,
+    BlockKeys block_keys);
 
 } // namespace st::ops::fused_kmean_ann
 

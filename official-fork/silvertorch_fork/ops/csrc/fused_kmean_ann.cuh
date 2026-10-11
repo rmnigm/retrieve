@@ -1,5 +1,5 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C3: payload helpers take the warp-size cumsum and return capacities (official-fork/CHANGES.md).
+// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C3: payload helpers take the warp-size cumsum and return capacities; K fix 12: BlockKeys (official-fork/CHANGES.md).
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,6 +43,14 @@ union RemainingPayload {
     bool filtering_mask;
   };
   int4 payload;
+};
+
+// fork (K fix 12): where the scorer folds the order key of each score it writes into the max of
+// its 256-slot block (row-major [B, n_blocks] uint32, zeroed by the caller); keys null = off.
+struct BlockKeys {
+  uint32_t* keys = nullptr;
+  int64_t width = 0;
+  int64_t n_blocks = 0;
 };
 
 std::tuple<at::Tensor, int64_t> generate_warp_payload(

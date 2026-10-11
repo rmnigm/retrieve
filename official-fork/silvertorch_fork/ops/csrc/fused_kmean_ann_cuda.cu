@@ -1,5 +1,5 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C3: no host sync in fused_kmean_ann / _with_partial_masks; C6: fused_kmean_ann_cuda_precomputed; K fix 3: warp-per-cluster remaining payloads; K fix 10: no pre-fill under write_failed (official-fork/CHANGES.md).
+// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C3: no host sync in fused_kmean_ann / _with_partial_masks; C6: fused_kmean_ann_cuda_precomputed; K fix 3: warp-per-cluster remaining payloads; K fix 10: no pre-fill under write_failed; K fix 12: block keys folded by the scorer (official-fork/CHANGES.md).
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -902,6 +902,38 @@ std::tuple<Tensor, int64_t> generate_remaining_payload_with_partial_masks(
 
 namespace {
 
+// K fix 12: the order key of a written score (as the search's select ranks it) and its fold
+// into the slot's 256-slot block max.
+__device__ __forceinline__ uint32_t order_key(int32_t v) {
+  return static_cast<uint32_t>(v) ^ 0x80000000u;
+}
+__device__ __forceinline__ uint32_t order_key(c10::Half v) {
+  const uint16_t h = v.x;
+  return static_cast<uint32_t>((h & 0x8000) ? static_cast<uint16_t>(~h) : (h | 0x8000)) << 16;
+}
+template <typename T>
+__device__ __forceinline__ uint32_t order_key(T) {
+  return 0; // only int32 / fp16 scores carry block keys
+}
+
+// One warp's 32 consecutive slots (they span at most two blocks): one atomicMax per block.
+template <typename RETURN_T>
+__device__ __forceinline__ void fold_block_keys_warp(
+    const BlockKeys& bk,
+    int64_t row,
+    int64_t write_index,
+    bool written,
+    const RETURN_T* results) {
+  const int64_t slot = write_index - row * bk.width;
+  const uint32_t key = written ? order_key(results[write_index]) : 0;
+  const int64_t block = row * bk.n_blocks + slot / 256;
+  const uint32_t peers = __match_any_sync(0xffffffff, static_cast<uint32_t>(slot / 256));
+  const uint32_t top = __reduce_max_sync(peers, key);
+  if ((__ffs(peers) - 1) == static_cast<int>(threadIdx.x % 32) && top != 0) {
+    atomicMax(bk.keys + block, top);
+  }
+}
+
 template <bool FILTER>
 __inline__ __device__ bool get_filtering_mask(
     uint32_t /* filtering_mask */,
@@ -1019,6 +1051,7 @@ __global__ void process_cluster(
     const int32_t* __restrict__ total_needed_warps_ptr,
     DIVISOR_INPUT divisor_for_int8,
     bool write_failed,
+    BlockKeys block_keys,
     TORCH_DSA_KERNEL_ARGS) {
   constexpr int kWarpsInBlock = kBlockSize / kWarpThreadCount;
   __shared__ EMBEDDING_T shared_queries[kWarpsInBlock][DIM];
@@ -1073,6 +1106,14 @@ __global__ void process_cluster(
           get_filtering_mask<FILTER>(warp_payload.filtering_mask, threadIdx.x),
           write_failed);
     }
+    if (block_keys.keys != nullptr) {
+      fold_block_keys_warp<RETURN_T>(
+          block_keys,
+          warp_payload.cluster_ids_row,
+          write_index,
+          get_filtering_mask<FILTER>(warp_payload.filtering_mask, threadIdx.x),
+          results);
+    }
   }
 }
 
@@ -1091,6 +1132,7 @@ __global__ void process_cluster_remaining(
     const int32_t* __restrict__ remaining_docs_ptr,
     DIVISOR_INPUT divisor_for_int8,
     bool write_failed,
+    BlockKeys block_keys,
     TORCH_DSA_KERNEL_ARGS) {
   const int32_t remaining_docs = *remaining_docs_ptr;
   for (uint32_t process_index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1117,6 +1159,14 @@ __global__ void process_cluster_remaining(
         indices + write_index,
         remaining_payload.filtering_mask,
         write_failed);
+    if (block_keys.keys != nullptr && remaining_payload.filtering_mask) {
+      const int64_t row = remaining_payload.cluster_ids_row;
+      const int64_t slot = write_index - row * block_keys.width;
+      const uint32_t key = order_key(results[write_index]);
+      if (key != 0) {
+        atomicMax(block_keys.keys + row * block_keys.n_blocks + slot / 256, key);
+      }
+    }
   }
 }
 
@@ -1285,7 +1335,8 @@ inline bool try_launch_pipelined_kernel(
           indices.mutable_data_ptr<int32_t>(),
           remaining_docs_ptr,
           divisor_for_int8,
-          false);
+          false,
+          BlockKeys{});
       return true;
     }
   }
@@ -1308,7 +1359,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
     const int32_t* remaining_docs_ptr,
     const std::optional<Tensor>& per_embedding_scale,
     bool query_on_shared_mem = false,
-    bool write_failed = false) {
+    bool write_failed = false,
+    BlockKeys block_keys = BlockKeys{}) {
 #if defined(USE_ROCM)
   query_on_shared_mem = true;
 #endif
@@ -1358,7 +1410,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
             indices.mutable_data_ptr<int32_t>(),                              \
             total_needed_warps_ptr,                                           \
             per_embedding_scale.value().mutable_data_ptr<at::Half>(),         \
-            write_failed);                                                    \
+            write_failed,                                                     \
+            block_keys);                                                      \
       } else {                                                                \
         MAYBE_TORCH_DSA_KERNEL_LAUNCH(                                        \
             (process_cluster<                                                 \
@@ -1379,7 +1432,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
             indices.mutable_data_ptr<int32_t>(),                              \
             total_needed_warps_ptr,                                           \
             per_embedding_scale.value().mutable_data_ptr<at::Half>(),         \
-            write_failed);                                                    \
+            write_failed,                                                     \
+            block_keys);                                                      \
       }                                                                       \
                                                                               \
       MAYBE_TORCH_DSA_KERNEL_LAUNCH(                                          \
@@ -1401,7 +1455,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
           indices.mutable_data_ptr<int32_t>(),                                \
           remaining_docs_ptr,                                                 \
           per_embedding_scale.value().mutable_data_ptr<at::Half>(),           \
-          write_failed);                                                      \
+          write_failed,                                                       \
+          block_keys);                                                        \
     } else {                                                                  \
       if (query_on_shared_mem) {                                              \
         MAYBE_TORCH_DSA_KERNEL_LAUNCH(                                        \
@@ -1423,7 +1478,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
             indices.mutable_data_ptr<int32_t>(),                              \
             total_needed_warps_ptr,                                           \
             static_cast<int32_t>(divisor_for_int8),                           \
-            write_failed);                                                    \
+            write_failed,                                                     \
+            block_keys);                                                      \
       } else {                                                                \
         MAYBE_TORCH_DSA_KERNEL_LAUNCH(                                        \
             (process_cluster<                                                 \
@@ -1444,7 +1500,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
             indices.mutable_data_ptr<int32_t>(),                              \
             total_needed_warps_ptr,                                           \
             static_cast<int32_t>(divisor_for_int8),                           \
-            write_failed);                                                    \
+            write_failed,                                                     \
+            block_keys);                                                      \
       }                                                                       \
                                                                               \
       MAYBE_TORCH_DSA_KERNEL_LAUNCH(                                          \
@@ -1466,7 +1523,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
           indices.mutable_data_ptr<int32_t>(),                                \
           remaining_docs_ptr,                                                 \
           static_cast<int32_t>(divisor_for_int8),                             \
-          write_failed);                                                      \
+          write_failed,                                                       \
+          block_keys);                                                        \
     }                                                                         \
   }
 
@@ -2015,7 +2073,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_cuda_precomputed(
     const Tensor& cluster_remaining_length_cumsum,
     const Tensor& cluster_warp_size_cumsum,
     bool query_on_shared_mem,
-    bool write_failed) {
+    bool write_failed,
+    BlockKeys block_keys) {
   const uint64_t* filtering_bitmask_ptr = nullptr;
   int64_t filtering_bitmask_column = 0;
   if (filtering_bit_mask) {
@@ -2067,7 +2126,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_cuda_precomputed(
       last_element_ptr(cluster_remaining_length_cumsum),
       std::nullopt,
       query_on_shared_mem,
-      write_failed);
+      write_failed,
+      block_keys);
 }
 
 std::tuple<Tensor, Tensor> fused_kmean_ann_cuda_with_partial_masks(
