@@ -1308,6 +1308,7 @@ __global__ void __launch_bounds__(kCoopBlockSize) process_cluster_coop(
     int32_t divisor_for_int8,
     bool write_failed,
     BlockKeys block_keys,
+    int batch,
     TORCH_DSA_KERNEL_ARGS) {
   constexpr int kWarpsInBlock = kCoopBlockSize / kWarpThreadCount;
   constexpr int kRow = DIM / 16; // int4s a row
@@ -1317,67 +1318,80 @@ __global__ void __launch_bounds__(kCoopBlockSize) process_cluster_coop(
   const int lane = threadIdx.x % kWarpThreadCount;
   const int warp = threadIdx.x / kWarpThreadCount;
   const int32_t total = *total_needed_warps_ptr;
-  for (int64_t w = static_cast<int64_t>(blockIdx.x) * kWarpsInBlock + warp; w < total;
-       w += static_cast<int64_t>(gridDim.x) * kWarpsInBlock) {
-    WarpPayload payload;
-    payload.payload =
-        __ldg(reinterpret_cast<const int4* __restrict__>(warp_payloads) + w);
-    const int64_t doc = payload.doc_start_index + lane;
-    const int64_t write = payload.write_index + lane;
-    const bool pass = get_filtering_mask<FILTER>(payload.filtering_mask, lane);
-    if (FILTER && __popc(payload.filtering_mask) < 16) {
-      store<int8_t, RETURN_T, DIM, FILTER, int32_t>(
-          embeddings,
-          queries,
-          doc,
-          static_cast<int64_t>(payload.cluster_ids_row),
-          divisor_for_int8,
-          results + write,
-          indices + write,
-          pass,
-          write_failed);
-    } else {
-      const int4* base = reinterpret_cast<const int4*>(
-          embeddings + static_cast<int64_t>(payload.doc_start_index) * DIM);
-      const int4* query = reinterpret_cast<const int4*>(
-          queries + static_cast<int64_t>(payload.cluster_ids_row) * DIM);
-      int32_t acc = 0;
-#pragma unroll 1
-      for (int c = 0; c < kRow; c += kPart) {
-        int4 staged[kPart];
-#pragma unroll
-        for (int i = 0; i < kPart; ++i) {
-          const int l = lane + kWarpThreadCount * i;
-          staged[i] = __ldg(base + (l / kPart) * kRow + c + l % kPart);
-        }
-#pragma unroll
-        for (int i = 0; i < kPart; ++i) {
-          const int l = lane + kWarpThreadCount * i;
-          tile[warp][(l / kPart) * kPitch + l % kPart] = staged[i];
-        }
-        __syncwarp();
-#pragma unroll
-        for (int part = 0; part < kPart; ++part) {
-          const int4 e = tile[warp][lane * kPitch + part];
-          const int4 q = __ldg(query + c + part);
-          acc = __dp4a(e.x, q.x, acc);
-          acc = __dp4a(e.y, q.y, acc);
-          acc = __dp4a(e.z, q.z, acc);
-          acc = __dp4a(e.w, q.w, acc);
-        }
-        __syncwarp();
-      }
-      if (pass) {
-        results[write] = post_process<int32_t, RETURN_T, int32_t>(acc, divisor_for_int8);
-        indices[write] = static_cast<int32_t>(doc);
-      } else if (write_failed) {
-        results[write] = cuda_mm_types<RETURN_T>::C_MIN_NEG;
-        indices[write] = -1;
-      }
+  // The warp takes `batch` (≤ 32) consecutive payloads at a time, one coalesced load (K fix 16):
+  // filtered payloads mostly only write sentinels, so a load per payload left it latency-bound.
+  for (int64_t first = (static_cast<int64_t>(blockIdx.x) * kWarpsInBlock + warp) * batch;
+       first < total;
+       first += static_cast<int64_t>(gridDim.x) * kWarpsInBlock * batch) {
+    WarpPayload loaded;
+    if (lane < batch && first + lane < total) {
+      loaded.payload =
+          __ldg(reinterpret_cast<const int4* __restrict__>(warp_payloads) + first + lane);
     }
-    if (block_keys.keys != nullptr) {
-      fold_block_keys_warp<RETURN_T>(
-          block_keys, payload.cluster_ids_row, write, pass, results);
+    const int count = static_cast<int>(total - first < batch ? total - first : batch);
+    for (int b = 0; b < count; ++b) {
+      WarpPayload payload;
+      payload.payload.x = __shfl_sync(0xffffffff, loaded.payload.x, b);
+      payload.payload.y = __shfl_sync(0xffffffff, loaded.payload.y, b);
+      payload.payload.z = __shfl_sync(0xffffffff, loaded.payload.z, b);
+      payload.payload.w = __shfl_sync(0xffffffff, loaded.payload.w, b);
+      const int64_t doc = payload.doc_start_index + lane;
+      const int64_t write = payload.write_index + lane;
+      const bool pass = get_filtering_mask<FILTER>(payload.filtering_mask, lane);
+      if (FILTER && __popc(payload.filtering_mask) < 16) {
+        store<int8_t, RETURN_T, DIM, FILTER, int32_t>(
+            embeddings,
+            queries,
+            doc,
+            static_cast<int64_t>(payload.cluster_ids_row),
+            divisor_for_int8,
+            results + write,
+            indices + write,
+            pass,
+            write_failed);
+      } else {
+        const int4* base = reinterpret_cast<const int4*>(
+            embeddings + static_cast<int64_t>(payload.doc_start_index) * DIM);
+        const int4* query = reinterpret_cast<const int4*>(
+            queries + static_cast<int64_t>(payload.cluster_ids_row) * DIM);
+        int32_t acc = 0;
+  #pragma unroll 1
+        for (int c = 0; c < kRow; c += kPart) {
+          int4 staged[kPart];
+  #pragma unroll
+          for (int i = 0; i < kPart; ++i) {
+            const int l = lane + kWarpThreadCount * i;
+            staged[i] = __ldg(base + (l / kPart) * kRow + c + l % kPart);
+          }
+  #pragma unroll
+          for (int i = 0; i < kPart; ++i) {
+            const int l = lane + kWarpThreadCount * i;
+            tile[warp][(l / kPart) * kPitch + l % kPart] = staged[i];
+          }
+          __syncwarp();
+  #pragma unroll
+          for (int part = 0; part < kPart; ++part) {
+            const int4 e = tile[warp][lane * kPitch + part];
+            const int4 q = __ldg(query + c + part);
+            acc = __dp4a(e.x, q.x, acc);
+            acc = __dp4a(e.y, q.y, acc);
+            acc = __dp4a(e.z, q.z, acc);
+            acc = __dp4a(e.w, q.w, acc);
+          }
+          __syncwarp();
+        }
+        if (pass) {
+          results[write] = post_process<int32_t, RETURN_T, int32_t>(acc, divisor_for_int8);
+          indices[write] = static_cast<int32_t>(doc);
+        } else if (write_failed) {
+          results[write] = cuda_mm_types<RETURN_T>::C_MIN_NEG;
+          indices[write] = -1;
+        }
+      }
+      if (block_keys.keys != nullptr) {
+        fold_block_keys_warp<RETURN_T>(
+            block_keys, payload.cluster_ids_row, write, pass, results);
+      }
     }
   }
 }
@@ -1497,6 +1511,12 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
     results = write_failed ? at::empty({total_result_size}, opts)
         : half             ? at::full({total_result_size}, cuda_mm_types<c10::Half>::C_MIN_NEG, opts)
                            : at::full({total_result_size}, cuda_mm_types<int32_t>::C_MIN_NEG, opts);
+    const int64_t sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+    // filtered: payloads a warp loads at once, keeping >= 64 warps an SM (K fix 16)
+    const int batch = has_filtering_bitmask
+        ? static_cast<int>(std::clamp<int64_t>(total_needed_warps / (64 * sms), 1, 32))
+        : 1;
+    const int64_t warps_needed = (total_needed_warps + batch - 1) / batch;
     auto launch = [&](auto ret, auto dim, auto filter) {
       using R = decltype(ret);
       constexpr int D = decltype(dim)::value;
@@ -1504,8 +1524,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
       MAYBE_TORCH_DSA_KERNEL_LAUNCH(
           (process_cluster_coop<R, D, F>),
           std::min(
-              (total_needed_warps * kWarpThreadCount + kCoopBlockSize - 1) / kCoopBlockSize,
-              384L * at::cuda::getCurrentDeviceProperties()->multiProcessorCount),
+              (warps_needed * kWarpThreadCount + kCoopBlockSize - 1) / kCoopBlockSize,
+              384L * sms),
           kCoopBlockSize,
           0,
           at::cuda::getCurrentCUDAStream(),
@@ -1517,7 +1537,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
           total_needed_warps_ptr,
           static_cast<int32_t>(divisor_for_int8),
           write_failed,
-          block_keys);
+          block_keys,
+          batch);
       MAYBE_TORCH_DSA_KERNEL_LAUNCH(
           (process_cluster_remaining<int8_t, R, D, F, int32_t>),
           remaining_grid_size,

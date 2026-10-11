@@ -1852,7 +1852,8 @@ file. `CHANGES.md` lists every change; each has its gate row in
    the warp reads its 32 consecutive rows linearly (≤ 256 bytes a row a chunk) into a padded
    shared tile and each lane takes its row's `dp4a` dot from there; a payload with < 16 passing
    docs keeps upstream's per-lane loads, and the int32 sum and `post_process` are upstream's, so
-   scores are equal. On `search`'s path its `[B, width]` buffers are not pre-filled: lanes failing
+   scores are equal. Filtered, a warp loads up to 32 consecutive payloads at once (as many as keep
+   ≥ 64 warps an SM) and walks them by shuffle, since most filtered payloads only write sentinels. On `search`'s path its `[B, width]` buffers are not pre-filled: lanes failing
    the filter write the sentinels themselves and each row's written width (from the prep kernel)
    bounds what the select reads. Payload kernels use a warp-parallel cluster search, or one warp
    per cluster at wide probes (≥ 40 full warps a cluster and ≥ 8192 probed clusters).
@@ -1877,9 +1878,11 @@ layer's `m_bits` is then required), so its index is `N · m_bits / 8` bytes like
 
 **Exact recheck (C13).** `OfficialConfig.recheck` (the fork's default; `"official"` has none):
 `prepare_queries` also keeps the query attrs and the layer keeps the cluster-sorted exact attrs
-beside the bloom index, and `search` tests the bloom's survivors exactly (partial path: one warp
-per payload, lanes 0 / 1 evaluate the bloom columns, each lane tests its bloom-passing doc; full
-path: the exact payload kernels take the bloom mask as a pre-filter). Bloom ∧ exact is the exact
+beside the bloom index, and `search` tests the bloom's survivors exactly (partial path: a warp takes up
+to 32 consecutive payloads, as many as keep ≥ 64 warps an SM, lane l evaluating payload l's bloom
+columns; the warp then walks its payloads, skipping those without bloom survivors, each lane
+testing one bloom-passing doc; full path: the exact payload kernels take the bloom mask as a
+pre-filter). Bloom ∧ exact is the exact
 filter, so the fork's bloom returns no false positive; the parity gate against Meta's bloom runs
 with `bloom_width="upstream", recheck=False`.
 
