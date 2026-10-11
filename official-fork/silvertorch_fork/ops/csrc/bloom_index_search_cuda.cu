@@ -964,7 +964,7 @@ __global__ void bloom_remaining_payload_kernel(
 }
 
 // C13: the same payloads with the bloom's survivors rechecked exactly (bloom ∧ exact = exact,
-// the bloom having no false negatives; it only spares the exact test its failing docs). One
+// the bloom having no false negatives). One
 // warp per full-warp payload: lanes 0 / 1 evaluate the ≤ 2 columns, every lane tests its own
 // bloom-passing doc, the bit-reversed ballot is the mask.
 using st::ops::fork_filters::ExactClauses;

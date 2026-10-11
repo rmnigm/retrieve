@@ -1,5 +1,5 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C3: no host sync in fused_kmean_ann / _with_partial_masks; C6: fused_kmean_ann_cuda_precomputed (official-fork/CHANGES.md).
+// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C3: no host sync in fused_kmean_ann / _with_partial_masks; C6: fused_kmean_ann_cuda_precomputed; K fix 3: warp-per-cluster remaining payloads (official-fork/CHANGES.md).
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -387,13 +387,19 @@ __global__ void generate_remaining_payload_kernel(
     const uint64_t* filtering_bitmask_index_ptr,
     int64_t max_tensor_size_per_row,
     TORCH_DSA_KERNEL_ARGS) {
+  // fork (K fix 3): one warp per selected cluster, lane i writes remaining doc i's payload
+  // (upstream: one thread loops a cluster's < 32 remaining docs); the same payloads.
   int64_t cluster_length_column_count = selected_cluster_lengths.size(1);
   int64_t total_selected_clusters =
       selected_cluster_lengths.size(0) * cluster_length_column_count;
+  const int32_t lane = threadIdx.x % kWarpThreadCount;
 
-  for (int64_t process_index = blockIdx.x * blockDim.x + threadIdx.x;
+  for (int64_t process_index =
+           (static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x) /
+           kWarpThreadCount;
        process_index < total_selected_clusters;
-       process_index += blockDim.x * gridDim.x) {
+       process_index += static_cast<int64_t>(blockDim.x) * gridDim.x /
+           kWarpThreadCount) {
     int32_t row =
         static_cast<int32_t>(process_index / cluster_length_column_count);
     int32_t column =
@@ -402,12 +408,15 @@ __global__ void generate_remaining_payload_kernel(
         static_cast<int32_t>(selected_cluster_lengths[row][column]);
     int32_t needed_warp_count = cur_cluster_length / kWarpThreadCount;
     int32_t already_handled_docs = needed_warp_count * kWarpThreadCount;
+    int32_t remaining_docs = cur_cluster_length - already_handled_docs;
+    if (lane >= remaining_docs) {
+      continue;
+    }
 
     int64_t cluster_id = selected_cluster_ids[row][column];
     int32_t cluster_id_start_index =
         static_cast<int32_t>(cluster_offsets[cluster_id]);
     int32_t doc_idex_start = cluster_id_start_index + already_handled_docs;
-    int32_t remaining_docs = cur_cluster_length - already_handled_docs;
 
     int32_t remaining_payloads_offset = (process_index == 0)
         ? 0
@@ -426,44 +435,23 @@ __global__ void generate_remaining_payload_kernel(
                                           [cluster_length_column_count - 1];
     write_index_offset += remaining_payloads_offset_in_row;
 
-    static constexpr int32_t kBitMaskSizePerUInt64 = 64;
-    int32_t next_filtering_bitmask_index =
-        (doc_idex_start + kBitMaskSizePerUInt64 - 1) / kBitMaskSizePerUInt64 *
-        kBitMaskSizePerUInt64;
-    uint64_t filtering_bitmask = 0;
-    if (filtering_bitmask_ptr != nullptr) {
+    RemainingPayload remaining_payload;
+    remaining_payload.doc_index = doc_idex_start + lane;
+    remaining_payload.cluster_ids_row = row;
+    remaining_payload.write_index = write_index_offset + lane;
+    if (filtering_bitmask_column) {
+      static constexpr int32_t kBitMaskSizePerUInt64 = 64;
       int32_t final_row = filtering_bitmask_index_ptr == nullptr
           ? row
           : static_cast<int32_t>(*(filtering_bitmask_index_ptr + row));
-      filtering_bitmask =
+      remaining_payload.filtering_mask = get_bit_64_bit_mask(
           *(filtering_bitmask_ptr + final_row * filtering_bitmask_column +
-            doc_idex_start / kBitMaskSizePerUInt64);
+            remaining_payload.doc_index / kBitMaskSizePerUInt64),
+          remaining_payload.doc_index);
     }
-
-    for (int32_t i = 0; i < remaining_docs; ++i) {
-      RemainingPayload remaining_payload;
-      remaining_payload.doc_index = doc_idex_start + i;
-      remaining_payload.cluster_ids_row = row;
-      remaining_payload.write_index = write_index_offset + i;
-
-      if (filtering_bitmask_column) {
-        if (remaining_payload.doc_index == next_filtering_bitmask_index) {
-          int32_t final_row = filtering_bitmask_index_ptr == nullptr
-              ? row
-              : static_cast<int32_t>(*(filtering_bitmask_index_ptr + row));
-          filtering_bitmask =
-              *(filtering_bitmask_ptr + final_row * filtering_bitmask_column +
-                remaining_payload.doc_index / kBitMaskSizePerUInt64);
-        }
-
-        remaining_payload.filtering_mask =
-            get_bit_64_bit_mask(filtering_bitmask, remaining_payload.doc_index);
-      }
-
-      reinterpret_cast<int4*>(
-          remaining_payloads)[remaining_payloads_offset + i] =
-          remaining_payload.payload;
-    }
+    reinterpret_cast<int4*>(
+        remaining_payloads)[remaining_payloads_offset + lane] =
+        remaining_payload.payload;
   }
 }
 
@@ -524,7 +512,8 @@ std::tuple<Tensor, int64_t> generate_remaining_payload(
       at::MemoryFormat::Contiguous);
 
   auto grid_size = std::min(
-      (selected_cluster_lengths.numel() + kBlockSize - 1) / kBlockSize,
+      (selected_cluster_lengths.numel() * kWarpThreadCount + kBlockSize - 1) /
+          kBlockSize,
       128L * at::cuda::getCurrentDeviceProperties()->multiProcessorCount);
 
   MAYBE_TORCH_DSA_KERNEL_LAUNCH(

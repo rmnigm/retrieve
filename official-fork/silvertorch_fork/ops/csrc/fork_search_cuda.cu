@@ -31,7 +31,7 @@ using at::Tensor;
 
 namespace {
 
-constexpr int kPrepThreads = 256;
+constexpr int kPrepThreads = 1024;
 
 struct MaxOp {
   __device__ __forceinline__ float operator()(float a, float b) const {
