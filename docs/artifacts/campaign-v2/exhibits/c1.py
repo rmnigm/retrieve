@@ -33,15 +33,33 @@ def main():
         for r in csv.DictReader(open(out / "f1x-v2-over-v1.csv"))
         if r["code_version"] == c and r["filter_kind"] == "clause"
     ]
-    series = sorted({(int(r["n_items"]), r["dataset"], r["box"]) for r in rows})
+    series = sorted(
+        {
+            (int(r["n_items"]), r["dataset"], r["dim"], r["suite"], r["box"])
+            for r in rows
+        }
+    )
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), sharey=True)
     table = []
     for ax, bs in zip(axes, ("1", "16")):
-        for n, ds, bx in series:
+        for n, ds, dim, suite, bx in series:
             pts = sorted(
-                (float(r["p"]), float(r["v2_over_v1"]), float(r["ci_lo"]), float(r["ci_hi"]))
+                (
+                    float(r["p"]),
+                    float(r["v2_over_v1"]),
+                    float(r["ci_lo"]),
+                    float(r["ci_hi"]),
+                )
                 for r in rows
-                if (int(r["n_items"]), r["dataset"], r["box"], r["bs"]) == (n, ds, bx, bs)
+                if (
+                    int(r["n_items"]),
+                    r["dataset"],
+                    r["dim"],
+                    r["suite"],
+                    r["box"],
+                    r["bs"],
+                )
+                == (n, ds, dim, suite, bx, bs)
             )
             if not pts:
                 continue
@@ -52,10 +70,24 @@ def main():
                 marker="o",
                 ms=4,
                 capsize=2,
-                label=f"{n / 1e6:.0f} M {ds} (box {bx})",
+                label=f"{n / 1e6:.0f} M {ds} d{dim} {suite} (box {bx})",
             )
             x = crossover([(q[0], q[1]) for q in pts])
-            table.append((c, ds, n, bx, bs, len(pts), pts[0][1], pts[-1][1], *(x or ("", ""))))
+            table.append(
+                (
+                    c,
+                    ds,
+                    n,
+                    dim,
+                    suite,
+                    bx,
+                    bs,
+                    len(pts),
+                    pts[0][1],
+                    pts[-1][1],
+                    *(x or ("", "")),
+                )
+            )
         ax.axhline(1.0, color="k", lw=0.7)
         ax.set_xscale("log")
         ax.set_yscale("log")
@@ -81,6 +113,8 @@ def main():
                 "code_version",
                 "dataset",
                 "n_items",
+                "dim",
+                "suite",
                 "box",
                 "bs",
                 "rates",

@@ -20,6 +20,7 @@ CV_LABEL = {
     "e8958bd2": "v2.9",
     "a3bec4a5": "v2.10",
     "1d390792": "v2.11",
+    "e16512f5": "v2.12",
     "72e5a90c": "d1",
     "c0e42d1a": "d1-c0e4",
 }
@@ -64,7 +65,8 @@ CLOCK_UNKNOWN = (("38f5e1", "laion30m", ("v2.5", "v2.6")),)
 
 def clock_unknown(r):
     return any(
-        box(r) == b and r["dataset"].startswith(d) and cv(r) in vs for b, d, vs in CLOCK_UNKNOWN
+        box(r) == b and r["dataset"].startswith(d) and cv(r) in vs
+        for b, d, vs in CLOCK_UNKNOWN
     )
 
 
@@ -72,12 +74,22 @@ def clock_unknown(r):
 # kernels load every clause per item whatever the query uses (+~0.7 ms at bs 16 on 3 M, flat in p;
 # controller 2026-10-10). Records carry no width field: uniform synth records at v2.5 / v2.6 are the
 # 10-clause, pre-CLAUSE-SKIP ones; their clause timings carry the width cost, their recall does not.
-UNIFORM_SYNTH = ("arxiv-synth", "goodreads-synth", "yfcc10m-synth", "laion30m-synth")
+UNIFORM_SYNTH = (
+    "arxiv-synth",
+    "goodreads-synth",
+    "yfcc10m-synth",
+    "laion30m-synth",
+    "laion1m-synth",
+    "laion3m-synth",
+    "laion10m-synth",
+)
 
 
 def pre_clause_skip(r):
     return (
-        r["dataset"] in UNIFORM_SYNTH and r["filter_kind"] == "clause" and cv(r) in ("v2.5", "v2.6")
+        r["dataset"] in UNIFORM_SYNTH
+        and r["filter_kind"] == "clause"
+        and cv(r) in ("v2.5", "v2.6")
     )
 
 
@@ -148,7 +160,10 @@ def redo(r, bs, k=100):
     if cv(r) in PRE_V211 and r["params"].get("n_lists"):
         w = n_probe * r["n_items"] / r["params"]["n_lists"]
         for f, tag in ((1, "topk"), (4, "topk?")):
-            if bs * w * f >= TOPK_MIN_SLOTS and w * f >= TOPK_MIN_RATIO * TOPK_BLOCK * k:
+            if (
+                bs * w * f >= TOPK_MIN_SLOTS
+                and w * f >= TOPK_MIN_RATIO * TOPK_BLOCK * k
+            ):
                 out.append(tag)
                 break
     return "+".join(out)
@@ -157,7 +172,9 @@ def redo(r, bs, k=100):
 def arm(r):
     p = {k: v for k, v in r["params"].items()}
     s = f"{ALGO.get(r['algo'], r['algo'])}/{r['backend']}"
-    return s + ("" if not p else " " + ",".join(f"{k}={v}" for k, v in sorted(p.items())))
+    return s + (
+        "" if not p else " " + ",".join(f"{k}={v}" for k, v in sorted(p.items()))
+    )
 
 
 def key(r, drop=()):
@@ -169,15 +186,15 @@ def key(r, drop=()):
         r["sweep"],
         r["algo"],
         r["backend"],
-        json.dumps({k: v for k, v in r["params"].items() if k not in drop}, sort_keys=True),
+        json.dumps(
+            {k: v for k, v in r["params"].items() if k not in drop}, sort_keys=True
+        ),
         r["seed"],
     )
 
 
 def short(r):
-    return (
-        f"{cv(r)}:{r['dataset']}/{r['suite']}/{r['filter_kind']}/{r['sweep']}/{arm(r)}/s{r['seed']}"
-    )
+    return f"{cv(r)}:{r['dataset']}/{r['suite']}/{r['filter_kind']}/{r['sweep']}/{arm(r)}/s{r['seed']}"
 
 
 def recall(r, k=100):
@@ -187,7 +204,12 @@ def recall(r, k=100):
 
 def perf(r, bs, k, mode):
     for e in r.get("perf") or []:
-        if e["bs"] == bs and e["k"] == k and e["mode"] == mode and e.get("median_ms") is not None:
+        if (
+            e["bs"] == bs
+            and e["k"] == k
+            and e["mode"] == mode
+            and e.get("median_ms") is not None
+        ):
             return e
     return None
 

@@ -16,7 +16,17 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-from load import UNIFORM_SYNTH, ALGO, box, cv, load, pass_p, perf, pre_clause_skip, recall  # noqa: E402
+from load import (
+    UNIFORM_SYNTH,
+    ALGO,
+    box,
+    cv,
+    load,
+    pass_p,
+    perf,
+    pre_clause_skip,
+    recall,
+)  # noqa: E402
 
 from bench import stats  # noqa: E402  (load.py put evaluation/ on sys.path)
 
@@ -111,7 +121,10 @@ def f2x(recs):
         if r["suite"] == "synth"
         and r["filter_kind"] == "clause"
         # recall only: a quality-only record (`skip_perf`) is complete for this figure
-        and (r["status"] == "ok" or set(r.get("partial_reasons") or []) <= {"skip_perf", "ks_bs"})
+        and (
+            r["status"] == "ok"
+            or set(r.get("partial_reasons") or []) <= {"skip_perf", "ks_bs"}
+        )
         and r["status"] != "failed"
     ]
     dss = sorted({(r["dataset"], r["_tree"]) for r in synth})
@@ -128,12 +141,17 @@ def f2x(recs):
                 and r["backend"] in ("triton", "torch", "official")
                 and not r["params"].get("compile")
                 and not (
-                    r["algo"] in ("linr_v1_filter_mask", "linr_v2") and r["backend"] == "torch"
+                    r["algo"] in ("linr_v1_filter_mask", "linr_v2")
+                    and r["backend"] == "torch"
                 )
             ):
                 lab = (
                     ALGO[r["algo"]]
-                    + (f" n_probe={r['params']['n_probe']}" if "n_probe" in r["params"] else "")
+                    + (
+                        f" n_probe={r['params']['n_probe']}"
+                        if "n_probe" in r["params"]
+                        else ""
+                    )
                     + (
                         f" pool={r['params']['candidate_pool_frac']:g}"
                         if "candidate_pool_frac" in r["params"]
@@ -148,7 +166,10 @@ def f2x(recs):
             ys = [med(by[p]) for p in ps]
             ls = "--" if lab.startswith("PF") else "-"
             ax.plot(ps, ys, ls, marker="o", ms=4, label=f"synth {lab}")
-            rows += [(ds, cv_tree(tree), "synth", lab, p, y, len(by[p])) for p, y in zip(ps, ys)]
+            rows += [
+                (ds, cv_tree(tree), "synth", lab, p, y, len(by[p]))
+                for p, y in zip(ps, ys)
+            ]
         real = [
             r
             for r in recs
@@ -174,7 +195,11 @@ def f2x(recs):
             if not rs:
                 continue
             b = buckets(rs)
-            lab = ALGO[algo] + "".join(f" {k}={v}" for k, v in extra.items()) + f" ({cv(rs[0])})"
+            lab = (
+                ALGO[algo]
+                + "".join(f" {k}={v}" for k, v in extra.items())
+                + f" ({cv(rs[0])})"
+            )
             if b:
                 ax.scatter(
                     [x for x, _, _ in b],
@@ -183,7 +208,9 @@ def f2x(recs):
                     s=30,
                     label=f"real {lab}",
                 )
-                rows += [(REAL[ds], cv(rs[0]), "real-bucket", lab, x, y, n) for x, y, n in b]
+                rows += [
+                    (REAL[ds], cv(rs[0]), "real-bucket", lab, x, y, n) for x, y, n in b
+                ]
         ax.set_xscale("log")
         ax.set_ylim(0, 1.02)
         ax.set_xlabel("pass rate (synth: target p; real: each query's own pass rate)")
@@ -207,6 +234,14 @@ def f2x(recs):
 FIX_A = {"v2": "V2 pre-Fix A", "v2.1": "V2 post-Fix A"}
 
 
+def _positive(ax):
+    return any(
+        y is not None and y == y and y > 0
+        for ln in ax.lines
+        for y in ln.get_ydata(orig=True)
+    )
+
+
 def f1x(recs):
     """C1: V1 and V2 [triton] p50 vs pass rate, one row per (synth dataset, code_version), with the
     paired V2/V1 ratio over interleaved rounds (seed x window) and its 95 % CI."""
@@ -218,14 +253,24 @@ def f1x(recs):
         and r["backend"] == "triton"
         and r["algo"] in ("linr_v1_filter_mask", "linr_v2")
     ]
-    rows_ = sorted({(r["n_items"], r["dataset"], cv(r), box(r)) for r in v})
+    # one row per (N, dataset, dim, suite): the N-sweep runs arxiv-synth at d256 beside synth's d128
+    rows_ = sorted(
+        {(r["n_items"], r["dataset"], r["dim"], r["suite"], cv(r), box(r)) for r in v}
+    )
     if not rows_:
         return
-    fig, axes = plt.subplots(len(rows_), 3, figsize=(15, 3.8 * len(rows_)), squeeze=False)
+    fig, axes = plt.subplots(
+        len(rows_), 3, figsize=(15, 3.8 * len(rows_)), squeeze=False
+    )
     out = []
-    for i, (n, ds, c, bx) in enumerate(rows_):
-        rs = [r for r in v if (r["n_items"], r["dataset"], cv(r), box(r)) == (n, ds, c, bx)]
-        width = ", 10-clause table, pre-CLAUSE-SKIP" if any(pre_clause_skip(r) for r in rs) else ""
+    for i, (n, ds, dim, suite, c, bx) in enumerate(rows_):
+        rs = [r for r in v if (r["n_items"], r["dataset"], r["dim"], r["suite"], cv(r), box(r))
+              == (n, ds, dim, suite, c, bx)]  # fmt: skip
+        width = (
+            ", 10-clause table, pre-CLAUSE-SKIP"
+            if any(pre_clause_skip(r) for r in rs)
+            else ""
+        )
         for fk, ls in (("clause", "-"), ("bloom", "--")):
             g = collections.defaultdict(lambda: collections.defaultdict(list))
             pair = collections.defaultdict(lambda: ([], []))
@@ -237,7 +282,9 @@ def f1x(recs):
                 for algo, by in sorted(g.items()):
                     ps = sorted(by)
                     ys = [lat(by[p], bs) for p in ps]
-                    axes[i][j].plot(ps, ys, ls, marker="o", ms=3, label=f"{ALGO[algo]} {fk}")
+                    axes[i][j].plot(
+                        ps, ys, ls, marker="o", ms=3, label=f"{ALGO[algo]} {fk}"
+                    )
                 ratio_pts = []
                 for p in sorted(g.get("linr_v2", {})):
                     a, b = pair[(p, bs)]
@@ -247,7 +294,10 @@ def f1x(recs):
                             for x in g.get("linr_v1_filter_mask", {}).get(p, [])
                             if x["seed"] == r2["seed"]
                         ]
-                        e2, e1 = perf(r2, bs, 100, "graph"), r1 and perf(r1[0], bs, 100, "graph")
+                        e2, e1 = (
+                            perf(r2, bs, 100, "graph"),
+                            r1 and perf(r1[0], bs, 100, "graph"),
+                        )
                         same = r1 and (r2.get("interleave") or {}).get("group") == (
                             r1[0].get("interleave") or {}
                         ).get("group")
@@ -255,7 +305,8 @@ def f1x(recs):
                             e2
                             and e1
                             and same
-                            and len(e2["window_medians_ms"]) == len(e1["window_medians_ms"])
+                            and len(e2["window_medians_ms"])
+                            == len(e1["window_medians_ms"])
                         ):
                             a += e2["window_medians_ms"]
                             b += e1["window_medians_ms"]
@@ -263,7 +314,21 @@ def f1x(recs):
                     if ci:
                         ratio_pts.append((p, *ci))
                         out.append(
-                            (ds, n, c, bx, FIX_A.get(c, c), fk, bs, p, *ci, len(a), stats.differs(ci))
+                            (
+                                ds,
+                                n,
+                                dim,
+                                suite,
+                                c,
+                                bx,
+                                FIX_A.get(c, c),
+                                fk,
+                                bs,
+                                p,
+                                *ci,
+                                len(a),
+                                stats.differs(ci),
+                            )  # fmt: skip
                         )
                 if ratio_pts:
                     ax = axes[i][2]
@@ -271,7 +336,10 @@ def f1x(recs):
                     ax.errorbar(
                         x,
                         [q[1] for q in ratio_pts],
-                        yerr=[[q[1] - q[2] for q in ratio_pts], [q[3] - q[1] for q in ratio_pts]],
+                        yerr=[
+                            [q[1] - q[2] for q in ratio_pts],
+                            [q[3] - q[1] for q in ratio_pts],
+                        ],
                         fmt=ls + ("o" if bs == 1 else "s"),
                         ms=3,
                         capsize=2,
@@ -279,10 +347,13 @@ def f1x(recs):
                     )
         for j, bs in enumerate((1, 16)):
             ax = axes[i][j]
-            ax.set_xscale("log")
-            ax.set_yscale("log")
+            if _positive(
+                ax
+            ):  # a suite without this batch size (the seeds suites: bs 16) leaves it empty
+                ax.set_xscale("log")
+                ax.set_yscale("log")
             ax.set_title(
-                f"{ds}, N {n / 1e6:.1f} M ({c}, {FIX_A.get(c, c)}, box {bx}{width}), B={bs}",
+                f"{ds} d{dim} {suite}, N {n / 1e6:.1f} M ({c}, box {bx}{width}), B={bs}",
                 fontsize=9,
             )
             ax.set_xlabel("pass rate p")
@@ -292,7 +363,9 @@ def f1x(recs):
         ax = axes[i][2]
         ax.axhline(1.0, color="k", lw=0.7)
         ax.set_xscale("log")
-        ax.set_title(f"V2/V1 paired over interleaved rounds ({c}, {FIX_A.get(c, c)})", fontsize=9)
+        ax.set_title(
+            f"V2/V1 paired over interleaved rounds ({c}, {FIX_A.get(c, c)})", fontsize=9
+        )
         ax.set_xlabel("pass rate p")
         ax.set_ylabel("V2 / V1 (< 1: V2 faster), 95 % CI")
         ax.grid(alpha=0.3, which="both")
@@ -308,6 +381,8 @@ def f1x(recs):
         [
             "dataset",
             "n_items",
+            "dim",
+            "suite",
             "code_version",
             "box",
             "v2_state",
@@ -337,7 +412,10 @@ def cv_tree(t):
         "v28": "v2.8 78cfbc72",
         "v29": "v2.9 e8958bd2",
         "d1": "d1 72e5a90",
-    }.get(t, t.split("__")[0].replace("campaign-", "") if t.startswith("campaign-v") else t)
+    }.get(
+        t,
+        t.split("__")[0].replace("campaign-", "") if t.startswith("campaign-v") else t,
+    )
 
 
 def f3x(recs):
@@ -348,7 +426,9 @@ def f3x(recs):
         return
     panels = sorted({(r["dataset"], r["_tree"], r["sweep"]) for r in deep})
     bss = [1, 16]
-    fig, axes = plt.subplots(len(panels), 2, figsize=(11, 3.4 * len(panels)), squeeze=False)
+    fig, axes = plt.subplots(
+        len(panels), 2, figsize=(11, 3.4 * len(panels)), squeeze=False
+    )
     rows = []
     for i, (ds, tree, sw) in enumerate(panels):
         for j, bs in enumerate(bss):
@@ -368,7 +448,8 @@ def f3x(recs):
                 else:
                     c, x = (
                         (f"V3 [{r['backend']}]", r["filter_kind"]),
-                        r["params"].get("candidate_pool") or r["params"].get("candidate_pool_frac"),
+                        r["params"].get("candidate_pool")
+                        or r["params"].get("candidate_pool_frac"),
                     )
                 g[c][x].append(r)
             for (lab, fk), by in sorted(g.items()):
@@ -422,7 +503,9 @@ def g1(recs):
     v1 = [
         r
         for r in recs
-        if r["algo"] == "linr_v1_filter_mask" and r["backend"] == "triton" and r["status"] == "ok"
+        if r["algo"] == "linr_v1_filter_mask"
+        and r["backend"] == "triton"
+        and r["status"] == "ok"
     ]
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.4))
     rows = []

@@ -13,6 +13,7 @@ import collections
 import csv
 import json
 import sys
+from pathlib import Path
 
 OVERHEAD = 1.15  # median wall / (summed cell time + index builds) over 20 legs (sizing.py, overhead.csv)
 DIM = {"laion1m": 256, "laion3m": 256, "laion10m": 256, "laion1m-synth": 256, "laion3m-synth": 256,
@@ -92,15 +93,31 @@ LEGS = [
     ("p1", "N-sweep C6", "nsweep", ["laion30m"], ["linr_v1_filter_mask"], None, "", ""),
     *[("p1", "N-sweep C5", "nsweep-codesign", [d], None, None, "--interleave --mode eager", "official from the -O3 venv") for d in ["laion1m", "laion3m", "laion10m", "laion30m"]],
 ]  # fmt: skip
-SHORT = {"linr_v1_filter_mask": "v1", "linr_v2": "v2", "linr_v3": "v3", "silvertorch": "st", "postfilter": "pf"}
+SHORT = {
+    "linr_v1_filter_mask": "v1",
+    "linr_v2": "v2",
+    "linr_v3": "v3",
+    "silvertorch": "st",
+    "postfilter": "pf",
+}
 # C6 ceiling checks (script legs, quality only): one per bench on C6's GPU, after the bench's tune; GPU-h from the measured runs
 # (validation: goodreads + arXiv 9 min, YFCC 3 min, PubMed 21 min, LAION 44 min); LAION has no tune leg in the final grid
 CEILING = {"goodreads": (["goodreads", "goodreads-synth"], 0.08), "arxiv": (["arxiv", "arxiv-synth"], 0.08),
            "yfcc10m": (["yfcc10m", "yfcc10m-synth"], 0.05), "pubmed": (["pubmed"], 0.35), "laion30m": ([], 0.75)}  # fmt: skip
 # leg numbers left unused so the running workers' ids stay stable after the pod d rebalance (d1-20 / -22 / -23 moved to d0)
 SKIP = {"d1": {20, 22, 23}}
-GPUS = {"d0": ("a100-x2-d", 0), "d1": ("a100-x2-d", 1), "b": ("a100-x1-b", 0), "p1": ("a100-x1-eval", 0)}
-WORKER = {"d0": "laion", "d1": "d-run", "b": "v-pubmed", "p1": "v-pod1-run"}  # the final-pass brief's table
+GPUS = {
+    "d0": ("a100-x2-d", 0),
+    "d1": ("a100-x2-d", 1),
+    "b": ("a100-x1-b", 0),
+    "p1": ("a100-x1-eval", 0),
+}
+WORKER = {
+    "d0": "laion",
+    "d1": "d-run",
+    "b": "v-pubmed",
+    "p1": "v-pod1-run",
+}  # the final-pass brief's table
 BENCH = '"$VENV/bin/python" -m bench.cli'  # the leg venv's own interpreter: `uv run` masks bench's exit code
 
 
@@ -118,7 +135,10 @@ def price(inv, suite, ds, algos, backend):
     if suite == "tune-q":
         h = TUNE_Q_MEASURED[ds]
     if suite.startswith(("nsweep", "seeds-")):
-        h = (NSWEEP_CELL_S[(suite, ds) if algos is None else (suite, ds, *algos)] / 3600 + build) * OVERHEAD
+        h = (
+            NSWEEP_CELL_S[(suite, ds) if algos is None else (suite, ds, *algos)] / 3600
+            + build
+        ) * OVERHEAD
     if suite == "tune-timed" and ds in TUNE_T_MEASURED:
         h = TUNE_T_MEASURED[ds]
     return cells, h
@@ -142,8 +162,14 @@ def main():
         if fam == "M1":
             cells, h = 0, 0.5
         pod, idx = GPUS[gpu]
-        lid = f"{gpu}-{next_id(out, gpu):02d}-{suite}-{ds}" + (f"-{'-'.join(SHORT[a] for a in algos)}" if algos else "") + (f"-{backend}" if backend else "")
-        res = f"/scratch/final/gpu{idx}" if pod == "a100-x2-d" else "/scratch/final/gpu0"
+        lid = (
+            f"{gpu}-{next_id(out, gpu):02d}-{suite}-{ds}"
+            + (f"-{'-'.join(SHORT[a] for a in algos)}" if algos else "")
+            + (f"-{backend}" if backend else "")
+        )
+        res = (
+            f"/scratch/final/gpu{idx}" if pod == "a100-x2-d" else "/scratch/final/gpu0"
+        )
         if algos is None:
             cmd = f"{BENCH} campaign --suite {suite} --dataset {ds} --dim {dim} {flags} --out {res} --resume"
         else:
@@ -151,7 +177,9 @@ def main():
                    + (f" --backend {backend}" if backend else "") + f" {flags} --out {res} --resume")  # fmt: skip
         after = [f"stage-{pod}"] + ([prev[gpu]] if gpu in prev else [])
         if gpu == "d1" and gpu not in prev:
-            after.append(out[0]["id"])  # M1 (d0's first leg) passes before d1 times anything
+            after.append(
+                out[0]["id"]
+            )  # M1 (d0's first leg) passes before d1 times anything
         out.append({"id": lid, "gpu": gpu, "pod": pod, "index": idx, "worker": WORKER[gpu], "res": res, "dim": dim, "family": fam, "suite": suite, "dataset": ds,
                     "after": sorted(set(after)), "cells": cells, "gpu_h": round(h, 2),
                     "official": "official" in str(algos) or (algos and "silvertorch" in algos and suite in ("filter", "synth")) or suite in ("h2h", "c7-scorepath", "codesign", "codesign-laion30m", "bloomwidth", "bloomwidth-timed", "deep", "nsweep-codesign", "seeds-c7"),
@@ -159,7 +187,9 @@ def main():
         prev[gpu] = lid
         totals[gpu] += h
     for bench, (tuned, h) in CEILING.items():
-        tune = [x["id"] for x in out if x["suite"] == "tune-timed" and x["dataset"] in tuned]
+        tune = [
+            x["id"] for x in out if x["suite"] == "tune-timed" and x["dataset"] in tuned
+        ]
         lid = f"d1-{next_id(out, 'd1'):02d}-ceiling-{bench}"
         res = f"/scratch/final/gpu1/ceiling-int8-{bench}"
         out.append({"id": lid, "gpu": "d1", "pod": "a100-x2-d", "index": 1, "worker": WORKER["d1"], "res": res, "dim": 0, "family": "C6", "suite": "ceiling-script",
@@ -173,7 +203,9 @@ def main():
     for lg in out:
         key = (lg["gpu"], lg["suite"], lg["dataset"])
         seen[key] += lg["cells"]
-        lg["records"] = seen[key]  # the suite file holds this leg's and the GPU's earlier legs' records
+        lg["records"] = seen[
+            key
+        ]  # the suite file holds this leg's and the GPU's earlier legs' records
     print(render(out, totals))
 
 
@@ -194,45 +226,46 @@ def upload_command(lg):
 
 def render(legs, totals):
     y = ["# The final pass (F-REPRO): pods, datasets, families, legs per GPU, gates. Generated by plan.py from the sizing",
-         "# inventory; code_version = FINAL_TAG until the library freezes (controller, the final-pass directive). NOT CITABLE",
-         "# until D1-G. Every leg runs from evaluation/ of the FINAL_TAG worktree with its env (CUDA_VISIBLE_DEVICES, its own",
+         "# inventory, as run (placeholders filled after the pass, 2026-10-11). NOT CITABLE until D1-G. Every leg runs from",
+         "# evaluation/ of its tree's worktree (campaign-v2.12, or campaign-final for the extension) with its env (CUDA_VISIBLE_DEVICES, its own",
          "# inductor dir, VENV = the leg venv; commands call $VENV/bin/python directly, since `uv run` masks bench's exit code),",
          "# cores pinned NUMA-local; then its upload_command (records the manifest sha; MANIFEST n_records must equal",
          "# expect.records: the suite file also holds the GPU's earlier legs of that suite and dataset) and a hub-index row.",
          "recipe: 1",
-         "tag: FINAL_TAG                          # git tag campaign-final; `git rev-parse FINAL_TAG:retrieve/src/retrieve` = library_tree",
-         "library_tree: FINAL_TAG_LIBRARY_TREE",
-         "extension_tag: campaign-final          # the N-sweep and seeds-0-2 legs' tree: tagged after dev/final-nsweep merges, same library (e16512f5) as FINAL_TAG",
+         "tag: campaign-v2.12                     # commit b70907ef15daceaa12c7202a7f74e01f4cfcd53d; `git rev-parse campaign-v2.12:retrieve/src/retrieve` = library_tree",
+         "library_tree: e16512f5b379fc7e2d370cc8a57c68b9854a06d7   # every final record's env.code_version",
+         "extension_tag: campaign-final          # commit e6781332b17cccfc4eea8b78f9dae278fc6f7082: the N-sweep and seeds-0-2 legs' tree, same library",
          "campaign_yaml: evaluation/campaign.yaml   # pinned to the one code_version (quality + perf) before the first leg",
          "hub: {repo: pinkmeme/eval-results, prefix: campaign-final/, aggregate: campaign-final/results.parquet}",
          "image: {torch: 2.10.0+cu128, triton: 3.6.0, cuda: '12.8', python: '3.11'}",
          f"official: {{build: scripts/build_official_o3.sh, venv: {OFFICIAL_VENV}, flags: '-O3 -Xcompiler -O3'}}   # check env.official_build.nvcc_append_flags per record",
          "official_so_sha256:                     # per pod: each build differs (and so do the shipped wheels); filled from the records' env.official_build",
-         "  a100-x1-eval: 805ab73e…                # verified -O3 (controller 2026-10-13)",
-         "  a100-x2-d: FILL_FROM_RECORDS            # d-run's rebuild",
-         "  a100-x1-b: FILL_FROM_RECORDS",
-         "worktree: /scratch/wt/final           # git worktree at FINAL_TAG on every pod; venv /venvs/final (uv sync --extra official --all-packages); the extension legs (tree: campaign-final) run from a worktree at that tag (same library, its suites.yaml / configs)",
+         "  a100-x1-eval: 805ab73e1e96acb1077aa384b190ed7dca318f690635359c85a6e08ca8a50b87   # 47 official records; every record's flags -O3 -Xcompiler -O3",
+         "  a100-x2-d: a42f784890cfca924d14384c3b9b8e25b1c1288259d2b1f45b5d868013e3302f   # 80 official records",
+         "  a100-x1-b: b4602c572e7e2b0986fcd4968551ec4de3fc2e2997ac5df9dae6098abd941bdb   # 24 (seeds-c7, the extension venv)",
+         "  a100-x1-eval-extension: a69a6c4f0dd489888be892c5cdc78cf5ee3db88cb779f77dac71b3ddd5ed9e62   # 32 (nsweep-codesign, the extension venv)",
+         "worktree: /scratch/wt/final           # git worktree at campaign-v2.12 on every pod; venv /venvs/final (uv sync --extra official --all-packages); the extension legs (tree: campaign-final) run from a worktree at that tag (same library, its suites.yaml / configs)",
          "",
          "pods:",
          "  - {name: a100-x2-d, host: 38f5e1, gpus: [0, 1], disk: /data + /scratch on the 400 GB container disk}",
          "  - {name: a100-x1-b, host: 1ffe3d, gpus: [0]}",
          "  - {name: a100-x1-eval, host: e75980, gpus: [0]}",
          "",
-         "datasets:                              # oracle fingerprints: `bench check` + `bench oracle` at staging, written back here",
-         "  goodreads: {dim: 128, inputs: sasrec-ssm-logq-d128, source: {hub: pinkmeme/eval-goodreads-work-id, revision: 4714e9b5fa75327eb7eb952cb5a259f8879cb6fe}}",
-         "  arxiv: {dim: 128, inputs: content_d128, source: {hub: pinkmeme/eval-arxiv-papers, revision: 354e6937eec39103773b2a8c538d7d28a3cc0ecc}}",
-         "  yfcc10m: {dim: 192, inputs: content_d192, source: {hub: pinkmeme/eval-yfcc10m, revision: 88e4d89a2f9571ab15fbb8deffbb06bf4ed05441}}",
-         "  pubmed: {dim: 768, inputs: content_d768, source: {copy_from: 'a100-x1-b:/data/pubmed', sha256_manifest: FILL_AT_STAGING}}   # not on the Hub",
-         "  laion30m: {dim: 256, inputs: content_d256, source: {copy_from: 'a100-x2-d:/data/laion30m', sha256_manifest: FILL_AT_STAGING}}   # not on the Hub",
+         "datasets:                              # listing = sha256 of `sha256sum` over the top-level files and the content dir (steward's method), computed on pod d after the pass",
+         "  goodreads: {dim: 128, inputs: sasrec-ssm-logq-d128, source: {hub: pinkmeme/eval-goodreads-work-id, revision: 4714e9b5fa75327eb7eb952cb5a259f8879cb6fe}, listing_sha256: dfd41c2df90a8839572318531b5ddd0f6b35b43160cb5e636affcd48864f498c}",
+         "  arxiv: {dim: 128, inputs: content_d128, source: {hub: pinkmeme/eval-arxiv-papers, revision: 354e6937eec39103773b2a8c538d7d28a3cc0ecc}, listing_sha256: a97cb83261488523da9fe4cb4304c76b1e36f171a84edd7ae0f5d1f92c3acedc}",
+         "  yfcc10m: {dim: 192, inputs: content_d192, source: {hub: pinkmeme/eval-yfcc10m, revision: 88e4d89a2f9571ab15fbb8deffbb06bf4ed05441}, listing_sha256: 3b6e14d80b0c0006483496e353d6eca97e04c42c570f587a8523f28772ae7fae}",
+         "  pubmed: {dim: 768, inputs: content_d768, source: {copy_from: 'a100-x1-b:/data/pubmed-medcpt', listing_sha256: 8fb070c56d23c5be859799576c85b1bf83670212b9e6b4457c9fff5cd425dc5e}}   # equal on pods 1, b, d (steward); not on the Hub",
+         "  laion30m: {dim: 256, inputs: content_d256, source: {copy_from: 'a100-x2-d:/data/laion30m', listing_sha256: c1e096f5b2b6f1bccdf33c43f5ba2cf36bf70165f078a623ed6eae0cf10b6ecf}}   # not on the Hub",
          "  laion1m: {dim: 256, inputs: content_d256, source: {built: 'eval-data subset laion30m laion1m --n-items 1000000 --seed 20261013', on: a100-x2-d, manifest_sha256: 00b61268f187e1ef206f5c2bdb4ed73c814c2a1bde24d032cddf6239a09ab191, rows_sha256: 48164da6e98c27d0474e1d5e9feb697cbdcb7a0a34bceab1e8a9c944f8087cb7}}",
          "  laion3m: {dim: 256, inputs: content_d256, source: {built: 'eval-data subset laion30m laion3m --n-items 3000000 --seed 20261013', on: a100-x2-d, manifest_sha256: 277a1c15acd7a5a263723c6621b7cddf122db069ff356144b79e771f0aec8235, rows_sha256: 6730af14e11ba92200cbc562268c4c90509ce16dfcc10fbad0667d37ddb6fc76}}",
          "  laion10m: {dim: 256, inputs: content_d256, source: {built: 'eval-data subset laion30m laion10m --n-items 10000000 --seed 20261013', on: a100-x2-d, manifest_sha256: 2fccfc39578a6ecadcbdbcd275be9a028f0f18a84836a2871bc85fc4ec237cde, rows_sha256: 9a0c7374a603dd12e71b9481cb6c24bbe1106b146194e17ac9b8121ff4d256bd}}",
          "  laion1m-synth / laion3m-synth / laion10m-synth: {base: 'laion1m / 3m / 10m', attrs: \"the parent's synth rows (data/laionNm/item_attrs_synth.pt)\"}",
-         "  goodreads-synth: {base: goodreads, attrs: 'eval-data synth-filter', sha256: FILL_AT_STAGING}",
-         "  arxiv-synth: {base: arxiv, attrs: 'eval-data synth-filter', sha256: FILL_AT_STAGING}",
+         "  goodreads-synth: {base: goodreads, attrs: 'eval-data synth-filter (seed 20261008)', sha256: 'in the goodreads listing (item_attrs_synth.pt, synth_u.pt, query_attrs_synth.pt, synth_filter.json)'}",
+         "  arxiv-synth: {base: arxiv, attrs: 'eval-data synth-filter (seed 20261008)', sha256: 'in the arxiv listing (item_attrs_synth.pt, synth_u.pt, query_attrs_synth.pt, synth_filter.json)'}",
          "  arxiv-corr-synth: {base: arxiv, attrs: 'eval-data synth-filter --correlated (seed 20261008)', sha256: {item_attrs_corr.pt: 4025c823…, query_attrs_corr.pt: bef4e61e…, synth_corr.json: 036aca8a…}}",
-         "  yfcc10m-synth: {base: yfcc10m, attrs: 'eval-data synth-filter', sha256: FILL_AT_STAGING}",
-         "  laion30m-synth: {base: laion30m, attrs: 'eval-data synth-filter', sha256: FILL_AT_STAGING}",
+         "  yfcc10m-synth: {base: yfcc10m, attrs: 'eval-data synth-filter (seed 20261008)', sha256: 'in the yfcc10m listing (item_attrs_synth.pt, synth_u.pt, query_attrs_synth.pt, synth_filter.json)'}",
+         "  laion30m-synth: {base: laion30m, attrs: 'eval-data synth-filter (seed 20261008)', sha256: 'in the laion30m listing (item_attrs_synth.pt, synth_u.pt, query_attrs_synth.pt, synth_filter.json)'}",
          "",
          "stage:                                 # per pod, before its first leg (id stage-<pod>; every leg of the pod is after it)",
          "  a100-x2-d: {owner: d-run, steps: [copy pubmed from a100-x1-b, bench check + bench oracle for every dataset pod d runs]}",
@@ -258,17 +291,32 @@ def render(legs, totals):
         for k in ("pod", "index", "worker", "family", "suite", "dataset"):
             y.append(f"    {k}: {lg[k]}")
         ext = lg["suite"].startswith(("nsweep", "seeds-"))
-        y.append(f"    tree: {'campaign-final' if ext else 'FINAL_TAG'}")
+        y.append(f"    tree: {'campaign-final' if ext else 'campaign-v2.12'}")
         y.append(f"    after: [{', '.join(lg['after'])}]")
         venv = OFFICIAL_VENV if lg["official"] else "/venvs/final"
-        y.append(f"    env: {{CUDA_VISIBLE_DEVICES: '{lg['index']}', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu{lg['index']}, VENV: {venv}, UV_PROJECT_ENVIRONMENT: {venv}}}")
+        y.append(
+            f"    env: {{CUDA_VISIBLE_DEVICES: '{lg['index']}', TORCHINDUCTOR_CACHE_DIR: /scratch/inductor/final-gpu{lg['index']}, VENV: {venv}, UV_PROJECT_ENVIRONMENT: {venv}}}"
+        )
         y.append(f"    command: {json.dumps(lg['command'])}")
         y.append(f"    upload: {lg['upload']}")
         y.append(f"    upload_command: {json.dumps(upload_command(lg))}")
-        y.append(f"    expect: {{cells: {lg['cells']}, records: {lg['records']}, gpu_h: {lg['gpu_h']}}}")
+        y.append(
+            f"    expect: {{cells: {lg['cells']}, records: {lg['records']}, gpu_h: {lg['gpu_h']}}}"
+        )
         if lg["note"]:
             y.append(f"    note: {json.dumps(lg['note'])}")
-    y += ["", "totals_gpu_h:                           # per GPU, incl. the 1.45 process overhead; wall-clock = the largest"]
+    orc = Path(__file__).with_name("oracles.txt")
+    if orc.exists():
+        y += ["", "oracle_fingerprints:                    # oracle v4 blob fingerprint[:16] per (data dir, dim, sweep), current on pod d after the pass",
+              "  # (the LAION subsets' oracles were built on pod 1, where their legs ran: pod 1's bundle)"]  # fmt: skip
+        y += [
+            f"  - [{ds}, {dim}, {sw}, {fp}]"
+            for ds, dim, sw, fp in (ln.split() for ln in orc.read_text().splitlines())
+        ]
+    y += [
+        "",
+        "totals_gpu_h:                           # per GPU, incl. the 1.45 process overhead; wall-clock = the largest",
+    ]
     y += [f"  {g}: {round(h, 1)}" for g, h in sorted(totals.items())]
     y += ["", "gates:                                 # D1-G over campaign-final/ after the last leg",
           "  - eager-vs-graph ids from the stored hashes",
