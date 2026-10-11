@@ -32,6 +32,9 @@ using at::Tensor;
 namespace {
 
 constexpr int kPrepThreads = 1024;
+// Average full warps per probed cluster from which the payload kernels run a warp per cluster.
+constexpr int64_t kPerClusterWarps = 40;
+
 
 struct MaxOp {
   __device__ __forceinline__ float operator()(float a, float b) const {
@@ -48,8 +51,8 @@ struct MaxOp {
 // sort. A row wider than kSelectChunk slots is selected per chunk first (stage 1, its k winners
 // per chunk in index order, unsorted), then once over the chunks' winners (stage 2): the row's
 // top-k lies in the union of its chunks' top-ks.
-constexpr int kSelectThreads = 256;
-constexpr int kSelectItems = 32; // keys a thread holds in registers
+constexpr int kSelectThreads = 512;
+constexpr int kSelectItems = 16; // keys a thread holds in registers
 constexpr int64_t kSelectChunk = kSelectThreads * kSelectItems;
 constexpr int64_t kSelectMaxK = 1024;
 
@@ -253,15 +256,13 @@ __device__ void select_topk(
     const int warp = tid / 32;
     const uint32_t below = (1u << lane) - 1;
     __shared__ int32_t slab_warp_gt[kSelectItems * kWarps];
-    uint32_t eq_bits[kSelectItems];
-    uint32_t gt_bits[kSelectItems];
 #pragma unroll
     for (int it = 0; it < kSelectItems; ++it) {
-      eq_bits[it] = __ballot_sync(0xffffffff, index_of(it) < n && cache[it] == threshold);
-      gt_bits[it] = __ballot_sync(0xffffffff, index_of(it) < n && cache[it] > threshold);
+      const uint32_t eq = __ballot_sync(0xffffffff, index_of(it) < n && cache[it] == threshold);
+      const uint32_t gt = __ballot_sync(0xffffffff, index_of(it) < n && cache[it] > threshold);
       if (lane == 0) {
-        slab_warp[it * kWarps + warp] = __popc(eq_bits[it]);
-        slab_warp_gt[it * kWarps + warp] = __popc(gt_bits[it]);
+        slab_warp[it * kWarps + warp] = __popc(eq);
+        slab_warp_gt[it * kWarps + warp] = __popc(gt);
       }
     }
     __syncthreads();
@@ -317,14 +318,16 @@ __device__ void select_topk(
 #pragma unroll
     for (int it = 0; it < kSelectItems; ++it) {
       const int64_t i = index_of(it);
+      const uint32_t eq = __ballot_sync(0xffffffff, i < n && cache[it] == threshold);
+      const uint32_t gt = __ballot_sync(0xffffffff, i < n && cache[it] > threshold);
       if (i >= n) {
         continue;
       }
-      if ((gt_bits[it] >> lane) & 1) {
-        const int32_t r = slab_warp_gt[it * kWarps + warp] + __popc(gt_bits[it] & below);
+      if ((gt >> lane) & 1) {
+        const int32_t r = slab_warp_gt[it * kWarps + warp] + __popc(gt & below);
         sh.best[r] = composite(cache[it], keys.slot(row, first + i));
-      } else if ((eq_bits[it] >> lane) & 1) {
-        const int32_t r = slab_warp[it * kWarps + warp] + __popc(eq_bits[it] & below);
+      } else if ((eq >> lane) & 1) {
+        const int32_t r = slab_warp[it * kWarps + warp] + __popc(eq & below);
         if (r < ties) {
           sh.best[(k - ties) + r] = composite(cache[it], keys.slot(row, first + i));
         }
@@ -421,7 +424,7 @@ __device__ void select_topk(
 
 // Stage 1: one CTA per (row, chunk), its k winners to cand[row, chunk * k + j].
 template <typename T>
-__global__ void __launch_bounds__(kSelectThreads) select_chunk_kernel(
+__global__ void __launch_bounds__(kSelectThreads, 2) select_chunk_kernel(
     RawKeys<T> keys,
     int64_t chunks,
     int64_t k,
@@ -807,6 +810,29 @@ using st::ops::fork_filters::exact_pass;
 using st::ops::fused_kmean_ann::RemainingPayload;
 using st::ops::fused_kmean_ann::WarpPayload;
 
+// fork (K fix 7): the cluster of warp slot w (first i with inclusive_cumsum[i] > w), searched
+// by the 32 lanes of a warp together: each step every lane tests one of 32 evenly spaced
+// positions, so ~log32(n) dependent loads instead of log2(n). Every lane gets the result.
+__device__ __forceinline__ int32_t warp_find_cluster(
+    const int32_t* __restrict__ inclusive_cumsum,
+    int32_t n,
+    int64_t w,
+    int lane) {
+  int32_t lo = 0;
+  int32_t hi = n - 1;
+  while (hi - lo >= 32) {
+    const int32_t step = (hi - lo + 30) / 31; // lane 31 reaches hi
+    const int32_t p = min(lo + lane * step, hi);
+    const uint32_t above = __ballot_sync(0xffffffff, inclusive_cumsum[p] > w);
+    const int f = __ffs(above) - 1; // the last lane's position hi is always above
+    hi = min(lo + f * step, hi);
+    lo = f == 0 ? lo : lo + (f - 1) * step + 1;
+  }
+  const int32_t p = min(lo + lane, hi);
+  const uint32_t above = __ballot_sync(0xffffffff, inclusive_cumsum[p] > w);
+  return lo + __ffs(above) - 1;
+}
+
 // One warp per full-warp payload: lane l tests doc start + l; the ballot, bit-reversed, is the
 // payload's high-first 32-bit mask (doc start at bit 31, as get_bit_32_bit_mask reads it). With a
 // full-N `pre_mask` (C13: the bloom's, high-first words) only its passing docs are tested.
@@ -818,7 +844,7 @@ __device__ __forceinline__ bool pre_mask_bit(
   return pre_mask == nullptr ||
       ((pre_mask[row * pre_mask_columns + doc / 64] >> (63 - doc % 64)) & 1);
 }
-
+template <bool PER_CLUSTER>
 __global__ void exact_warp_payload_kernel(
     const int64_t* __restrict__ attrs,
     int64_t n_clauses,
@@ -837,41 +863,48 @@ __global__ void exact_warp_payload_kernel(
     WarpPayload* __restrict__ payloads) {
   const int64_t total = warp_size_cumsum[n_clusters - 1];
   const int lane = threadIdx.x % 32;
-  for (int64_t w = (static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x) / 32;
-       w < total;
-       w += static_cast<int64_t>(gridDim.x) * blockDim.x / 32) {
-    int32_t lo = 0;
-    int32_t hi = n_clusters - 1;
-    while (lo < hi) {
-      int32_t mid = (lo + hi) >> 1;
-      if (warp_size_cumsum[mid] > w) {
-        hi = mid;
-      } else {
-        lo = mid + 1;
+  // PER_CLUSTER: one warp per probed cluster looping its full warps (wide probes, many warps a
+  // cluster); else one warp per full warp, its cluster found by warp_find_cluster.
+  auto payload = [&](int32_t ci, int64_t w, int64_t w_first) {
+      const int32_t row = static_cast<int32_t>(ci / clusters_per_row);
+      const int64_t col = ci % clusters_per_row;
+      const int32_t doc_offset = static_cast<int32_t>((w - w_first) * 32);
+      const int32_t doc_start =
+          static_cast<int32_t>(cluster_offsets[cluster_ids[ci]]) + doc_offset;
+      const int64_t doc = doc_start + lane;
+      const bool pass = pre_mask_bit(pre_mask, pre_mask_columns, row, doc) &&
+          exact_pass(attrs, n_clauses, a_max, reverse, query_attrs + row * n_clauses, doc);
+      const uint32_t mask = __brev(__ballot_sync(0xffffffff, pass));
+      if (lane == 0) {
+        WarpPayload p;
+        p.doc_start_index = doc_start;
+        p.write_index = static_cast<int32_t>(
+            row * max_tensor_size_per_row +
+            (col == 0 ? 0 : warp_rounded_length_cumsum[ci - 1]) + doc_offset);
+        p.cluster_ids_row = row;
+        p.filtering_mask = mask;
+        reinterpret_cast<int4*>(payloads)[w] = p.payload;
+      }
+  };
+  if constexpr (PER_CLUSTER) {
+    for (int64_t c = (static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x) / 32;
+         c < n_clusters;
+         c += static_cast<int64_t>(gridDim.x) * blockDim.x / 32) {
+      const int32_t ci = static_cast<int32_t>(c);
+      const int64_t w_first = ci == 0 ? 0 : warp_size_cumsum[ci - 1];
+      for (int64_t w = w_first; w < warp_size_cumsum[ci]; ++w) {
+        payload(ci, w, w_first);
       }
     }
-    const int32_t ci = lo;
-    const int32_t row = static_cast<int32_t>(ci / clusters_per_row);
-    const int64_t col = ci % clusters_per_row;
-    const int32_t doc_offset = static_cast<int32_t>(
-        (w - (ci == 0 ? 0 : warp_size_cumsum[ci - 1])) * 32);
-    const int32_t doc_start =
-        static_cast<int32_t>(cluster_offsets[cluster_ids[ci]]) + doc_offset;
-    const int64_t doc = doc_start + lane;
-    const bool pass = pre_mask_bit(pre_mask, pre_mask_columns, row, doc) &&
-        exact_pass(attrs, n_clauses, a_max, reverse, query_attrs + row * n_clauses, doc);
-    const uint32_t mask = __brev(__ballot_sync(0xffffffff, pass));
-    if (lane == 0) {
-      WarpPayload p;
-      p.doc_start_index = doc_start;
-      p.write_index = static_cast<int32_t>(
-          row * max_tensor_size_per_row +
-          (col == 0 ? 0 : warp_rounded_length_cumsum[ci - 1]) + doc_offset);
-      p.cluster_ids_row = row;
-      p.filtering_mask = mask;
-      reinterpret_cast<int4*>(payloads)[w] = p.payload;
+  } else {
+    for (int64_t w = (static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x) / 32;
+         w < total;
+         w += static_cast<int64_t>(gridDim.x) * blockDim.x / 32) {
+      const int32_t ci = warp_find_cluster(warp_size_cumsum, n_clusters, w, lane);
+      payload(ci, w, ci == 0 ? 0 : warp_size_cumsum[ci - 1]);
     }
   }
+
 }
 
 // One warp per probed cluster: lane j writes the payload of the cluster's tail doc j (< 32).
@@ -958,22 +991,34 @@ std::tuple<Tensor, int64_t, Tensor, int64_t> exact_payloads(
   const int64_t max_grid =
       128L * at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   auto stream = at::cuda::getCurrentCUDAStream();
-  exact_warp_payload_kernel<<<std::min(max_grid, (warps * 32 + 255) / 256), 256, 0, stream>>>(
-      attrs.const_data_ptr<int64_t>(),
-      attrs.size(1),
-      attrs.size(2),
-      rev.const_data_ptr<bool>(),
-      q.const_data_ptr<int64_t>(),
-      pre,
-      pre_columns,
-      cluster_offsets.const_data_ptr<int64_t>(),
-      cluster_ids.const_data_ptr<int64_t>(),
-      per_row,
-      static_cast<int32_t>(n_clusters),
-      warp_rounded_length_cumsum.const_data_ptr<int32_t>(),
-      warp_size_cumsum.const_data_ptr<int32_t>(),
-      max_tensor_size_per_row,
-      reinterpret_cast<WarpPayload*>(warp_payloads.mutable_data_ptr<int8_t>()));
+  // wide probes (capacity >= kPerClusterWarps full warps a cluster): a warp per cluster
+  auto launch_warps = [&](auto per_cluster) {
+    constexpr bool kPerCluster = decltype(per_cluster)::value;
+    const int64_t threads = (kPerCluster ? n_clusters : warps) * 32;
+    exact_warp_payload_kernel<kPerCluster>
+        <<<std::min(max_grid, (threads + 255) / 256), 256, 0, stream>>>(
+            attrs.const_data_ptr<int64_t>(),
+            attrs.size(1),
+            attrs.size(2),
+            rev.const_data_ptr<bool>(),
+            q.const_data_ptr<int64_t>(),
+            pre,
+            pre_columns,
+            cluster_offsets.const_data_ptr<int64_t>(),
+            cluster_ids.const_data_ptr<int64_t>(),
+            per_row,
+            static_cast<int32_t>(n_clusters),
+            warp_rounded_length_cumsum.const_data_ptr<int32_t>(),
+            warp_size_cumsum.const_data_ptr<int32_t>(),
+            max_tensor_size_per_row,
+            reinterpret_cast<WarpPayload*>(warp_payloads.mutable_data_ptr<int8_t>()));
+
+  };
+  if (warps >= kPerClusterWarps * n_clusters) {
+    launch_warps(std::true_type{});
+  } else {
+    launch_warps(std::false_type{});
+  }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   exact_remaining_payload_kernel<<<
       std::min(max_grid, (n_clusters * 32 + 255) / 256),

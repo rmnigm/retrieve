@@ -970,13 +970,36 @@ __global__ void bloom_remaining_payload_kernel(
   }
 }
 
+// fork (K fix 7): the cluster of warp slot w (first i with inclusive_cumsum[i] > w), searched
+// by the 32 lanes of a warp together: each step every lane tests one of 32 evenly spaced
+// positions, so ~log32(n) dependent loads instead of log2(n). Every lane gets the result.
+__device__ __forceinline__ int32_t warp_find_cluster(
+    const int32_t* __restrict__ inclusive_cumsum,
+    int32_t n,
+    int64_t w,
+    int lane) {
+  int32_t lo = 0;
+  int32_t hi = n - 1;
+  while (hi - lo >= 32) {
+    const int32_t step = (hi - lo + 30) / 31; // lane 31 reaches hi
+    const int32_t p = min(lo + lane * step, hi);
+    const uint32_t above = __ballot_sync(0xffffffff, inclusive_cumsum[p] > w);
+    const int f = __ffs(above) - 1; // the last lane's position hi is always above
+    hi = min(lo + f * step, hi);
+    lo = f == 0 ? lo : lo + (f - 1) * step + 1;
+  }
+  const int32_t p = min(lo + lane, hi);
+  const uint32_t above = __ballot_sync(0xffffffff, inclusive_cumsum[p] > w);
+  return lo + __ffs(above) - 1;
+}
+
 // C13: the same payloads with the bloom's survivors rechecked exactly (bloom ∧ exact = exact,
 // the bloom having no false negatives). One
 // warp per full-warp payload: lanes 0 / 1 evaluate the ≤ 2 columns, every lane tests its own
 // bloom-passing doc, the bit-reversed ballot is the mask.
 using st::ops::fork_filters::ExactClauses;
 
-template <int32_t STACK_SIZE>
+template <int32_t STACK_SIZE, bool PER_CLUSTER>
 __global__ void bloom_recheck_warp_payload_kernel(
     const int64_t* __restrict__ bloom_index,
     int64_t index_total_column_count,
@@ -996,58 +1019,65 @@ __global__ void bloom_recheck_warp_payload_kernel(
     WarpPayload* __restrict__ payloads) {
   const int64_t total = warp_size_cumsum[n_clusters - 1];
   const int lane = threadIdx.x % 32;
-  for (int64_t w = (static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x) / 32;
-       w < total;
-       w += static_cast<int64_t>(gridDim.x) * blockDim.x / 32) {
-    int32_t lo = 0;
-    int32_t hi = n_clusters - 1;
-    while (lo < hi) {
-      int32_t mid = (lo + hi) >> 1;
-      if (warp_size_cumsum[mid] > w) {
-        hi = mid;
-      } else {
-        lo = mid + 1;
+  // PER_CLUSTER: one warp per probed cluster looping its full warps (wide probes, many warps a
+  // cluster); else one warp per full warp, its cluster found by warp_find_cluster.
+  auto payload = [&](int32_t ci, int64_t w, int64_t w_first) {
+      const int32_t row = static_cast<int32_t>(ci / clusters_per_row);
+      const int64_t col = ci % clusters_per_row;
+      const int32_t doc_offset = static_cast<int32_t>((w - w_first) * 32);
+      const int32_t doc_start =
+          static_cast<int32_t>(cluster_offsets[cluster_ids[ci]]) + doc_offset;
+      const int64_t first_column = doc_start / 64;
+      const int64_t pos = doc_start % 64;
+      uint64_t mine = 0;
+      if (lane == 0 || (lane == 1 && pos > 32)) {
+        const auto plan = plans[query_plan_index == nullptr ? row : query_plan_index[row]];
+        mine = column_result<STACK_SIZE>(
+            bloom_index,
+            index_total_column_count,
+            bundle_b_offsets,
+            first_column + lane,
+            k,
+            p_k,
+            plan);
+      }
+      uint64_t columns[2];
+      columns[0] = __shfl_sync(0xffffffff, mine, 0);
+      columns[1] = __shfl_sync(0xffffffff, mine, 1);
+      const uint32_t bloom = get_next_32_bit_mask(columns, pos);
+      const bool pass =
+          ((bloom >> (31 - lane)) & 1) && clauses.pass(row, doc_start + lane);
+      const uint32_t mask = __brev(__ballot_sync(0xffffffff, pass));
+      if (lane == 0) {
+        WarpPayload p;
+        p.doc_start_index = doc_start;
+        p.write_index = static_cast<int32_t>(
+            row * max_tensor_size_per_row +
+            (col == 0 ? 0 : warp_rounded_length_cumsum[ci - 1]) + doc_offset);
+        p.cluster_ids_row = row;
+        p.filtering_mask = mask;
+        reinterpret_cast<int4*>(payloads)[w] = p.payload;
+      }
+  };
+  if constexpr (PER_CLUSTER) {
+    for (int64_t c = (static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x) / 32;
+         c < n_clusters;
+         c += static_cast<int64_t>(gridDim.x) * blockDim.x / 32) {
+      const int32_t ci = static_cast<int32_t>(c);
+      const int64_t w_first = ci == 0 ? 0 : warp_size_cumsum[ci - 1];
+      for (int64_t w = w_first; w < warp_size_cumsum[ci]; ++w) {
+        payload(ci, w, w_first);
       }
     }
-    const int32_t ci = lo;
-    const int32_t row = static_cast<int32_t>(ci / clusters_per_row);
-    const int64_t col = ci % clusters_per_row;
-    const int32_t doc_offset = static_cast<int32_t>(
-        (w - (ci == 0 ? 0 : warp_size_cumsum[ci - 1])) * 32);
-    const int32_t doc_start =
-        static_cast<int32_t>(cluster_offsets[cluster_ids[ci]]) + doc_offset;
-    const int64_t first_column = doc_start / 64;
-    const int64_t pos = doc_start % 64;
-    uint64_t mine = 0;
-    if (lane == 0 || (lane == 1 && pos > 32)) {
-      const auto plan = plans[query_plan_index == nullptr ? row : query_plan_index[row]];
-      mine = column_result<STACK_SIZE>(
-          bloom_index,
-          index_total_column_count,
-          bundle_b_offsets,
-          first_column + lane,
-          k,
-          p_k,
-          plan);
-    }
-    uint64_t columns[2];
-    columns[0] = __shfl_sync(0xffffffff, mine, 0);
-    columns[1] = __shfl_sync(0xffffffff, mine, 1);
-    const uint32_t bloom = get_next_32_bit_mask(columns, pos);
-    const bool pass =
-        ((bloom >> (31 - lane)) & 1) && clauses.pass(row, doc_start + lane);
-    const uint32_t mask = __brev(__ballot_sync(0xffffffff, pass));
-    if (lane == 0) {
-      WarpPayload p;
-      p.doc_start_index = doc_start;
-      p.write_index = static_cast<int32_t>(
-          row * max_tensor_size_per_row +
-          (col == 0 ? 0 : warp_rounded_length_cumsum[ci - 1]) + doc_offset);
-      p.cluster_ids_row = row;
-      p.filtering_mask = mask;
-      reinterpret_cast<int4*>(payloads)[w] = p.payload;
+  } else {
+    for (int64_t w = (static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x) / 32;
+         w < total;
+         w += static_cast<int64_t>(gridDim.x) * blockDim.x / 32) {
+      const int32_t ci = warp_find_cluster(warp_size_cumsum, n_clusters, w, lane);
+      payload(ci, w, ci == 0 ? 0 : warp_size_cumsum[ci - 1]);
     }
   }
+
 }
 
 template <int32_t STACK_SIZE>
@@ -1861,10 +1891,10 @@ std::tuple<Tensor, int64_t, Tensor, int64_t> bloom_partial_payloads_prepared_cud
         attrs.size(2),
         reverse.const_data_ptr<bool>(),
         query_attrs.const_data_ptr<int64_t>()};
-#define LAUNCH_RECHECK_PAYLOADS(STACK_SIZE)                                       \
+#define LAUNCH_RECHECK_PAYLOADS(STACK_SIZE, PER_CLUSTER)                          \
   {                                                                               \
-    bloom_recheck_warp_payload_kernel<STACK_SIZE><<<                              \
-        std::min(max_grid, (warps * 32 + 255) / 256),                             \
+    bloom_recheck_warp_payload_kernel<STACK_SIZE, PER_CLUSTER><<<                 \
+        std::min(max_grid, ((PER_CLUSTER ? n_clusters : warps) * 32 + 255) / 256), \
         256,                                                                      \
         0,                                                                        \
         stream>>>(                                                                \
@@ -1910,10 +1940,18 @@ std::tuple<Tensor, int64_t, Tensor, int64_t> bloom_partial_payloads_prepared_cud
             remaining_payloads.mutable_data_ptr<int8_t>()));                      \
     C10_CUDA_KERNEL_LAUNCH_CHECK();                                               \
   }
+    // wide probes (capacity >= 40 full warps a cluster): a warp per cluster
+    const bool per_cluster = warps >= 40 * n_clusters;
     if (max_stack_size <= C_FAST_ROUTE_STACK_SIZE_FIRST_LEVEL) {
-      LAUNCH_RECHECK_PAYLOADS(C_FAST_ROUTE_STACK_SIZE_FIRST_LEVEL);
+      if (per_cluster) {
+        LAUNCH_RECHECK_PAYLOADS(C_FAST_ROUTE_STACK_SIZE_FIRST_LEVEL, true);
+      } else {
+        LAUNCH_RECHECK_PAYLOADS(C_FAST_ROUTE_STACK_SIZE_FIRST_LEVEL, false);
+      }
+    } else if (per_cluster) {
+      LAUNCH_RECHECK_PAYLOADS(0, true);
     } else {
-      LAUNCH_RECHECK_PAYLOADS(0);
+      LAUNCH_RECHECK_PAYLOADS(0, false);
     }
 #undef LAUNCH_RECHECK_PAYLOADS
     return {warp_payloads, warps, remaining_payloads, remainders};
