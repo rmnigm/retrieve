@@ -106,6 +106,7 @@ std::tuple<at::Tensor, int64_t, at::Tensor, int64_t> bloom_partial_payloads_prep
     const at::Tensor& warp_rounded_length_cumsum,
     const at::Tensor& remaining_length_cumsum,
     const at::Tensor& warp_size_cumsum,
-    int64_t max_tensor_size_per_row);
+    int64_t max_tensor_size_per_row,
+    const std::optional<std::tuple<at::Tensor, at::Tensor, at::Tensor>>& recheck);
 
 } // namespace st::ops::bloom_search

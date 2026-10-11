@@ -1,5 +1,5 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C4: prepared-plan search ops, no host sync; C8: bloom-evaluating payload kernels (official-fork/CHANGES.md).
+// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C4: prepared-plan search ops, no host sync; C8: bloom-evaluating payload kernels; C13: their exact recheck (official-fork/CHANGES.md).
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@
 #define BLOOM_INDEX_CUDA
 #include "bloom_index_util.cuh"
 #include "bloom_index_util.h"
+#include "fork_filters.cuh"
 #include "fused_kmean_ann.cuh"
 
 namespace st {
@@ -958,6 +959,150 @@ __global__ void bloom_remaining_payload_kernel(
   }
 }
 
+// C13: the same payloads with the bloom's survivors rechecked exactly (bloom ∧ exact = exact,
+// the bloom having no false negatives; it only spares the exact test its failing docs). One
+// warp per full-warp payload: lanes 0 / 1 evaluate the ≤ 2 columns, every lane tests its own
+// bloom-passing doc, the bit-reversed ballot is the mask.
+using st::ops::fork_filters::ExactClauses;
+
+template <int32_t STACK_SIZE>
+__global__ void bloom_recheck_warp_payload_kernel(
+    const int64_t* __restrict__ bloom_index,
+    int64_t index_total_column_count,
+    const int64_t* __restrict__ bundle_b_offsets,
+    EncodedQueryPlans plans,
+    const int64_t* __restrict__ query_plan_index,
+    int64_t k,
+    int64_t p_k,
+    ExactClauses clauses,
+    const int64_t* __restrict__ cluster_offsets,
+    const int64_t* __restrict__ cluster_ids,
+    int64_t clusters_per_row,
+    int32_t n_clusters,
+    const int32_t* __restrict__ warp_rounded_length_cumsum,
+    const int32_t* __restrict__ warp_size_cumsum,
+    int64_t max_tensor_size_per_row,
+    WarpPayload* __restrict__ payloads) {
+  const int64_t total = warp_size_cumsum[n_clusters - 1];
+  const int lane = threadIdx.x % 32;
+  for (int64_t w = (static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x) / 32;
+       w < total;
+       w += static_cast<int64_t>(gridDim.x) * blockDim.x / 32) {
+    int32_t lo = 0;
+    int32_t hi = n_clusters - 1;
+    while (lo < hi) {
+      int32_t mid = (lo + hi) >> 1;
+      if (warp_size_cumsum[mid] > w) {
+        hi = mid;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    const int32_t ci = lo;
+    const int32_t row = static_cast<int32_t>(ci / clusters_per_row);
+    const int64_t col = ci % clusters_per_row;
+    const int32_t doc_offset = static_cast<int32_t>(
+        (w - (ci == 0 ? 0 : warp_size_cumsum[ci - 1])) * 32);
+    const int32_t doc_start =
+        static_cast<int32_t>(cluster_offsets[cluster_ids[ci]]) + doc_offset;
+    const int64_t first_column = doc_start / 64;
+    const int64_t pos = doc_start % 64;
+    uint64_t mine = 0;
+    if (lane == 0 || (lane == 1 && pos > 32)) {
+      const auto plan = plans[query_plan_index == nullptr ? row : query_plan_index[row]];
+      mine = column_result<STACK_SIZE>(
+          bloom_index,
+          index_total_column_count,
+          bundle_b_offsets,
+          first_column + lane,
+          k,
+          p_k,
+          plan);
+    }
+    uint64_t columns[2];
+    columns[0] = __shfl_sync(0xffffffff, mine, 0);
+    columns[1] = __shfl_sync(0xffffffff, mine, 1);
+    const uint32_t bloom = get_next_32_bit_mask(columns, pos);
+    const bool pass =
+        ((bloom >> (31 - lane)) & 1) && clauses.pass(row, doc_start + lane);
+    const uint32_t mask = __brev(__ballot_sync(0xffffffff, pass));
+    if (lane == 0) {
+      WarpPayload p;
+      p.doc_start_index = doc_start;
+      p.write_index = static_cast<int32_t>(
+          row * max_tensor_size_per_row +
+          (col == 0 ? 0 : warp_rounded_length_cumsum[ci - 1]) + doc_offset);
+      p.cluster_ids_row = row;
+      p.filtering_mask = mask;
+      reinterpret_cast<int4*>(payloads)[w] = p.payload;
+    }
+  }
+}
+
+template <int32_t STACK_SIZE>
+__global__ void bloom_recheck_remaining_payload_kernel(
+    const int64_t* __restrict__ bloom_index,
+    int64_t index_total_column_count,
+    const int64_t* __restrict__ bundle_b_offsets,
+    EncodedQueryPlans plans,
+    const int64_t* __restrict__ query_plan_index,
+    int64_t k,
+    int64_t p_k,
+    ExactClauses clauses,
+    const int64_t* __restrict__ cluster_offsets,
+    const int64_t* __restrict__ cluster_ids,
+    const int64_t* __restrict__ cluster_length,
+    int64_t clusters_per_row,
+    int64_t n_clusters,
+    const int32_t* __restrict__ warp_rounded_length_cumsum,
+    const int32_t* __restrict__ remaining_length_cumsum,
+    int64_t max_tensor_size_per_row,
+    RemainingPayload* __restrict__ payloads) {
+  for (int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; i < n_clusters;
+       i += static_cast<int64_t>(blockDim.x) * gridDim.x) {
+    const int32_t row = static_cast<int32_t>(i / clusters_per_row);
+    const int32_t length = static_cast<int32_t>(cluster_length[i]);
+    const int32_t handled = length / 32 * 32;
+    const int32_t remaining = length - handled;
+    if (remaining == 0) {
+      continue;
+    }
+    const int32_t doc_start =
+        static_cast<int32_t>(cluster_offsets[cluster_ids[i]]) + handled;
+    const int32_t out_offset = i == 0 ? 0 : remaining_length_cumsum[i - 1];
+    const int32_t row_first =
+        row == 0 ? 0 : remaining_length_cumsum[row * clusters_per_row - 1];
+    const int32_t write = static_cast<int32_t>(row * max_tensor_size_per_row) +
+        warp_rounded_length_cumsum[row * clusters_per_row + clusters_per_row - 1] +
+        (out_offset - row_first);
+    const auto plan = plans[query_plan_index == nullptr ? row : query_plan_index[row]];
+    const int64_t first_column = doc_start / 64;
+    uint64_t columns[2];
+    columns[0] = column_result<STACK_SIZE>(
+        bloom_index, index_total_column_count, bundle_b_offsets, first_column, k, p_k, plan);
+    columns[1] = (doc_start + remaining - 1) / 64 != first_column
+        ? column_result<STACK_SIZE>(
+              bloom_index,
+              index_total_column_count,
+              bundle_b_offsets,
+              first_column + 1,
+              k,
+              p_k,
+              plan)
+        : 0;
+    for (int32_t j = 0; j < remaining; ++j) {
+      RemainingPayload p;
+      p.doc_index = doc_start + j;
+      p.cluster_ids_row = row;
+      p.write_index = write + j;
+      p.filtering_mask =
+          get_bit_64_bit_mask(columns, doc_start + j - first_column * 64) &&
+          clauses.pass(row, doc_start + j);
+      reinterpret_cast<int4*>(payloads)[out_offset + j] = p.payload;
+    }
+  }
+}
+
 // Copies the device data pointers of a list of tensors into a single device
 // buffer with one HostToDevice copy, exposing them to kernels as a T**.
 template <typename T>
@@ -1666,7 +1811,8 @@ std::tuple<Tensor, int64_t, Tensor, int64_t> bloom_partial_payloads_prepared_cud
     const Tensor& warp_rounded_length_cumsum,
     const Tensor& remaining_length_cumsum,
     const Tensor& warp_size_cumsum,
-    int64_t max_tensor_size_per_row) {
+    int64_t max_tensor_size_per_row,
+    const std::optional<std::tuple<Tensor, Tensor, Tensor>>& recheck) {
   const int64_t rows = cluster_ids.size(0);
   const int64_t per_row = cluster_ids.size(1);
   const int64_t n_clusters = rows * per_row;
@@ -1689,6 +1835,74 @@ std::tuple<Tensor, int64_t, Tensor, int64_t> bloom_partial_payloads_prepared_cud
       CHECK_NOTNULL(at::cuda::getCurrentDeviceProperties())->multiProcessorCount;
   auto stream = at::cuda::getCurrentCUDAStream();
   const EncodedQueryPlans encoded = encoded_plans(plans, plan_count);
+  if (recheck) {
+    const auto& [attrs, reverse, query_attrs] = *recheck;
+    TORCH_CHECK(attrs.dim() == 3 && attrs.scalar_type() == at::kLong && attrs.is_contiguous());
+    TORCH_CHECK(reverse.scalar_type() == at::kBool && reverse.is_contiguous());
+    TORCH_CHECK(query_attrs.scalar_type() == at::kLong && query_attrs.is_contiguous());
+    const ExactClauses clauses{
+        attrs.const_data_ptr<int64_t>(),
+        attrs.size(1),
+        attrs.size(2),
+        reverse.const_data_ptr<bool>(),
+        query_attrs.const_data_ptr<int64_t>()};
+#define LAUNCH_RECHECK_PAYLOADS(STACK_SIZE)                                       \
+  {                                                                               \
+    bloom_recheck_warp_payload_kernel<STACK_SIZE><<<                              \
+        std::min(max_grid, (warps * 32 + 255) / 256),                             \
+        256,                                                                      \
+        0,                                                                        \
+        stream>>>(                                                                \
+        bloom_index.const_data_ptr<int64_t>(),                                    \
+        index_total_column_count,                                                 \
+        bloom_bundle_b_offsets.const_data_ptr<int64_t>(),                         \
+        encoded,                                                                  \
+        plan_index_ptr,                                                           \
+        k,                                                                        \
+        onebit_hash_k,                                                            \
+        clauses,                                                                  \
+        cluster_offsets.const_data_ptr<int64_t>(),                                \
+        cluster_ids.const_data_ptr<int64_t>(),                                    \
+        per_row,                                                                  \
+        static_cast<int32_t>(n_clusters),                                         \
+        warp_rounded_length_cumsum.const_data_ptr<int32_t>(),                     \
+        warp_size_cumsum.const_data_ptr<int32_t>(),                               \
+        max_tensor_size_per_row,                                                  \
+        reinterpret_cast<WarpPayload*>(warp_payloads.mutable_data_ptr<int8_t>())); \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                               \
+    bloom_recheck_remaining_payload_kernel<STACK_SIZE><<<                         \
+        std::min(max_grid, (n_clusters + 255) / 256),                             \
+        256,                                                                      \
+        0,                                                                        \
+        stream>>>(                                                                \
+        bloom_index.const_data_ptr<int64_t>(),                                    \
+        index_total_column_count,                                                 \
+        bloom_bundle_b_offsets.const_data_ptr<int64_t>(),                         \
+        encoded,                                                                  \
+        plan_index_ptr,                                                           \
+        k,                                                                        \
+        onebit_hash_k,                                                            \
+        clauses,                                                                  \
+        cluster_offsets.const_data_ptr<int64_t>(),                                \
+        cluster_ids.const_data_ptr<int64_t>(),                                    \
+        cluster_length.const_data_ptr<int64_t>(),                                 \
+        per_row,                                                                  \
+        n_clusters,                                                               \
+        warp_rounded_length_cumsum.const_data_ptr<int32_t>(),                     \
+        remaining_length_cumsum.const_data_ptr<int32_t>(),                        \
+        max_tensor_size_per_row,                                                  \
+        reinterpret_cast<RemainingPayload*>(                                      \
+            remaining_payloads.mutable_data_ptr<int8_t>()));                      \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                               \
+  }
+    if (max_stack_size <= C_FAST_ROUTE_STACK_SIZE_FIRST_LEVEL) {
+      LAUNCH_RECHECK_PAYLOADS(C_FAST_ROUTE_STACK_SIZE_FIRST_LEVEL);
+    } else {
+      LAUNCH_RECHECK_PAYLOADS(0);
+    }
+#undef LAUNCH_RECHECK_PAYLOADS
+    return {warp_payloads, warps, remaining_payloads, remainders};
+  }
 #define LAUNCH_BLOOM_PAYLOADS(STACK_SIZE)                                         \
   {                                                                               \
     bloom_warp_payload_kernel<STACK_SIZE><<<                                      \

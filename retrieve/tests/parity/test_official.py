@@ -686,6 +686,32 @@ def test_c12_fork_configured_bloom_width():
         OfficialConfig(bloom_width="configured").width_for("official")
 
 
+@pytest.mark.parametrize("bloom_path", ["partial", "full"])
+def test_c13_fork_recheck_equals_exact(data, bloom_path, record_property):
+    """META-FORK C13: the fork's bloom with its survivors rechecked (``OfficialConfig.recheck``,
+    the fork's default) returns the exact filter's result on the same index: ids and scores
+    ``torch.equal`` up to ties to the fork's own exact path and to Triton's exact path at int32,
+    with no false positive; without the recheck, the bloom's false positives are recorded."""
+    if OB != "official-fork":
+        pytest.skip("fork-only gate (META-FORK C13)")
+    cfg = {"score_path": "int32", "bloom_path": bloom_path, "n_stored_hashes": HASH_K}
+    tri = _layer(data, "triton", "exact")
+    exact = _layer(data, OB, "exact", official=OfficialConfig(score_path="int32"))
+    rechecked = _layer(data, OB, "bloom", official=OfficialConfig(**cfg), m_bits=64)
+    plain = _layer(data, OB, "bloom", official=OfficialConfig(recheck=False, **cfg), m_bits=64)
+    for m in (exact, rechecked, plain):
+        _transplant(m, tri)
+    q, qa = data["query"], data["q_attrs"]
+    want = tri(q, tri.prepare_queries(qa))
+    _assert_bitexact(exact(q, exact.prepare_queries(qa)), want)
+    _assert_bitexact(rechecked(q, rechecked.prepare_queries(qa)), want)
+    ids, _ = plain(q, plain.prepare_queries(qa))
+    passing = clause_subset_match(data["attrs"][ids.clamp_min(0)], qa, tri.clause_is_reverse)
+    fp = int(((ids >= 0) & ~passing).sum())
+    record_property("bloom_m64_false_positives_without_recheck", fp)
+    print(f"C13 {bloom_path}: {fp} false positives at m_bits 64 without the recheck, 0 with it")
+
+
 @pytest.mark.parametrize("d", [128, 192, 768])
 def test_c6_fork_probe_prep_equals_reference(d):
     """META-FORK C6: the fork's prep kernel (``stfork.probe_prep``, ``search``'s first launch)
@@ -786,7 +812,7 @@ def _layer(data, backend, filter_mode="none", *, reverse=None, official=None, **
         args.update(
             filter_mode="bloom",
             # Meta's own width on official; the fork's configured width is m_bits (C12)
-            m_bits=None if backend == "official" else 512,
+            m_bits=kw.get("m_bits", None if backend == "official" else 512),
             k_hash=K_SEARCH,
         )
     if filter_mode == "exact":
@@ -941,6 +967,7 @@ def test_t6_layer_contract(data):
     a, b = off(data["query"]), twin(data["query"])
     assert torch.equal(a[0], b[0]) and torch.equal(a[1], b[1])
     # Bloom configured without attributes: plain queries work, attribute queries raise.
+    fork_width = {} if OB == "official" else {"m_bits": 512}  # the fork's configured width
     bare = SilverTorch(
         k=K,
         n_lists=N_LISTS,
@@ -949,6 +976,7 @@ def test_t6_layer_contract(data):
         k_hash=K_SEARCH,
         n_iter=3,
         backend=OB,
+        **fork_width,
     )
     bare.register_index(data["embs"])
     assert bare.bloom_index.numel() == 0
@@ -963,6 +991,7 @@ def test_t6_layer_contract(data):
             filter_mode="bloom",
             k_hash=11,
             backend=OB,
+            **fork_width,
         )
 
 

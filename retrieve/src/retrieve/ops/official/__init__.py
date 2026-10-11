@@ -151,6 +151,11 @@ class OfficialConfig:
       bits wide per doc (OF-10); ``"configured"`` → ``m_bits`` bits per doc in every bundle (our
       fork, META-FORK C12; the layer's ``m_bits`` is then required). ``None`` → the backend's
       own: ``"upstream"`` on ``official`` (its only width), ``"configured"`` on ``official-fork``.
+    - ``recheck``: test the bloom's survivors exactly (the fork, META-FORK C13): bloom ∧ exact is
+      the exact filter, so no false positive is returned and the bloom only spares the exact
+      test its failing docs; the layer then keeps the exact attrs beside the bloom index.
+      ``None`` → the backend's own: off on ``official`` (Meta's bloom, false positives
+      included), on for ``official-fork``.
 
     The expression parse is query preparation: ``SilverTorch.prepare_queries`` runs it once
     per batch, outside ``forward``."""
@@ -164,6 +169,7 @@ class OfficialConfig:
     fast_build: bool = False
     n_stored_hashes: int = 7
     bloom_width: BloomWidth | None = None
+    recheck: bool | None = None
 
     def __post_init__(self) -> None:
         if self.score_path not in ("int32", "fp16"):
@@ -197,6 +203,14 @@ class OfficialConfig:
                 raise ValueError("bloom_width='configured' needs backend='official-fork'")
             return "upstream"
         return self.bloom_width or "configured"
+
+    def recheck_for(self, backend: OfficialBackend) -> bool:
+        """Whether ``backend`` rechecks the bloom's survivors exactly under this config."""
+        if backend == "official":
+            if self.recheck:
+                raise ValueError("recheck=True needs backend='official-fork'")
+            return False
+        return True if self.recheck is None else self.recheck
 
 
 DEFAULT_CONFIG = OfficialConfig()

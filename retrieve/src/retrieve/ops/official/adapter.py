@@ -475,9 +475,10 @@ def fork_search(
     exact: tuple[Tensor, Tensor, Tensor] | None = None,
 ) -> tuple[Tensor, Tensor]:
     """Phases 2+3 on the fork in one call, ``torch.ops.stfork.search``: query int8, the probed
-    clusters, the filter (at most one: the bloom over prepared plans; ``exact`` = the
-    cluster-sorted ``(item_clause_attrs, clause_is_reverse, query_clause_attrs)``, tested over the
-    probed docs only; or a full-``N`` ``filtering_bit_mask``), payloads + scorer, top-k on the
+    clusters, the filter (the bloom over prepared plans; ``exact`` = the cluster-sorted
+    ``(item_clause_attrs, clause_is_reverse, query_clause_attrs)``, tested over the probed docs
+    only, alone or as the bloom's recheck; or a full-``N`` ``filtering_bit_mask``), payloads +
+    scorer, top-k on the
     raw scores and the ``[B, k]`` epilogue of :func:`official_probe_score` → ``(ids int64 [B, k],
     scores fp32 [B, k])``, ``-1`` / ``-inf`` pads (kernels.md § official-fork)."""
     st = ensure_loaded("official-fork")

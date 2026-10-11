@@ -1862,6 +1862,14 @@ layer's `m_bits` is then required), so its index is `N · m_bits / 8` bytes like
 `"upstream"` keeps Meta's `max terms · k · b_multiplier` per bundle (OF-10), the only width
 `"official"` has.
 
+**Exact recheck (C13).** `OfficialConfig.recheck` (the fork's default; `"official"` has none):
+`prepare_queries` also keeps the query attrs and the layer keeps the cluster-sorted exact attrs
+beside the bloom index, and `search` tests the bloom's survivors exactly (partial path: one warp
+per payload, lanes 0 / 1 evaluate the bloom columns, each lane tests its bloom-passing doc; full
+path: the exact payload kernels take the bloom mask as a pre-filter). Bloom ∧ exact is the exact
+filter, so the fork's bloom returns no false positive; the parity gate against Meta's bloom runs
+with `bloom_width="upstream", recheck=False`.
+
 **Upstream-shaped ops.** The fork still registers the same six ops as upstream, under `stfork::`
 with upstream's schema strings (the parity gates call them), and the adapter of the [`official`
 section](#official--metas-torchopsst-kernels-as-the-reference-backend) calls them unchanged:

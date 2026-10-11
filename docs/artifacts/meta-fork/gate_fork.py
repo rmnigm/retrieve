@@ -14,7 +14,12 @@ Per sweep x n_probe x bs x k, on 16 pool batches (``inputs.query_pool``, seed 0)
             order, builds included); eager for every arm, and ``--graph`` replays of one CUDA graph per pool
             batch for the arms that capture (``capturable``); median ms per arm, ratios fork / upstream and
             fork / triton, the SM clock sampled after every round (clocks cannot be locked).
-``--aa`` replaces upstream with a second fork module (the identical-code floor).
+``--aa`` replaces upstream with a second fork module (the identical-code floor). Bloom: ``--fork-bloom
+meta`` gives the fork Meta's semantics (``bloom_width="upstream"``, no recheck; the parity gate X, where
+the two builds must be ``torch.equal``), ``default`` its own (``m_bits`` bits per doc, survivors rechecked,
+C12 / C13); ``--m-bits`` is the fork's configured and Triton's width. ``--recall`` (gate R) adds a Triton
+exact module on the same layout as the oracle at the same probes and records per arm recall@k against it
+and the false positives (returned ids failing the exact predicate).
 
     cd evaluation && PYTHONPATH=.:../retrieve/src:PKGS python gate_fork.py DATASET DIM MODE SWEEPS N_LISTS \
         NPROBES BSS OUT.json [--k 100,1000] [--arms fork,upstream,triton] [--graph] [--swap] [--aa] \
@@ -38,6 +43,7 @@ import yaml
 from bench import config, inputs
 
 from retrieve import OfficialConfig, SilverTorch
+from retrieve.functional import clause_subset_match
 
 DEV = torch.device("cuda")
 CALLS, ROUNDS, N_POOL = 30, 8, 16
@@ -99,7 +105,9 @@ def compare(xs, ys) -> dict[str, bool]:
     }
 
 
-def make_arm(name, base, mode, attrs, reverse, kw, score_path, bloom_path):
+def make_arm(
+    name, base, mode, attrs, reverse, kw, score_path, bloom_path, fork_bloom, m_bits
+):
     backend = BACKEND[name]
     cls = (
         importlib.import_module("retrieve_v212.modules.silvertorch").SilverTorch
@@ -107,13 +115,21 @@ def make_arm(name, base, mode, attrs, reverse, kw, score_path, bloom_path):
         else SilverTorch
     )
     official = backend != "triton"
+    meta = backend == "official" or (
+        backend == "official-fork" and fork_bloom == "meta"
+    )
     mkw = dict(kw)
     if mode == "bloom":
-        mkw |= {"k_hash": 5, "m_bits": None if official else 1024}
+        mkw |= {"k_hash": 5, "m_bits": None if meta else m_bits}
         if not official and bloom_path == "full":
             mkw["bloom_path"] = "full"
+    semantics = (
+        {"bloom_width": "upstream", "recheck": False}
+        if backend == "official-fork" and meta
+        else {}
+    )
     cfg = (
-        OfficialConfig(score_path=score_path, bloom_path=bloom_path)
+        OfficialConfig(score_path=score_path, bloom_path=bloom_path, **semantics)
         if official
         else None
     )
@@ -131,6 +147,21 @@ def make_arm(name, base, mode, attrs, reverse, kw, score_path, bloom_path):
             attrs.shape[0], attrs, reverse if mode == "exact" else None, base.sort_perm
         )
     return m
+
+
+def recall_fp(outs, oracle, item_attrs, qa_pool):
+    """Mean recall@k against the oracle's valid ids, and the returned ids failing the exact
+    predicate (bloom false positives), over the pool."""
+    recall, fp = [], 0
+    for (ids, _), (want, _), qa in zip(outs, oracle, qa_pool, strict=True):
+        for r in range(ids.shape[0]):
+            w = set(want[r][want[r] >= 0].tolist())
+            got = set(ids[r][ids[r] >= 0].tolist())
+            recall.append(len(w & got) / len(w) if w else 1.0)
+        rev = torch.zeros(qa.shape[1], dtype=torch.bool, device=qa.device)
+        passing = clause_subset_match(item_attrs[ids.clamp_min(0)], qa, rev)
+        fp += int(((ids >= 0) & ~passing).sum())
+    return statistics.fmean(recall), fp
 
 
 def capture(m, pool, prep):
@@ -184,6 +215,9 @@ def main():
     ap.add_argument("--aa", action="store_true")
     ap.add_argument("--score-path", default="int32")
     ap.add_argument("--bloom-path", default="partial")
+    ap.add_argument("--fork-bloom", choices=("meta", "default"), default="meta")
+    ap.add_argument("--m-bits", type=int, default=1024)
+    ap.add_argument("--recall", action="store_true")
     a = ap.parse_args()
     names = [("fork2" if (a.aa and n == "upstream") else n) for n in a.arms.split(",")]
     if a.swap:
@@ -200,9 +234,20 @@ def main():
     attrs = None if a.mode == "none" else inp["item_attrs"].to(DEV)
     reverse = inp.get("clause_is_reverse")
     arms = {
-        n: make_arm(n, base, a.mode, attrs, reverse, kw, a.score_path, a.bloom_path)
+        n: make_arm(n, base, a.mode, attrs, reverse, kw, a.score_path, a.bloom_path,
+                    a.fork_bloom, a.m_bits)
         for n in names
-    }
+    }  # fmt: skip
+    oracle = None
+    if a.recall and a.mode != "none":
+        oracle = SilverTorch(filter_mode="exact", **kw)
+        for b in LAYOUT:
+            oracle.register_buffer(b, getattr(base, b))
+        oracle._global_scale_f, oracle._probe_width = (
+            base._global_scale_f,
+            base._probe_width,
+        )
+        oracle._register_filter_buffers(attrs.shape[0], attrs, None, base.sort_perm)
     bloom_equal = None
     if a.mode == "bloom" and {"fork", "upstream"} <= set(arms):
         bloom_equal = torch.equal(
@@ -222,7 +267,7 @@ def main():
                 else inputs.sweep_qa(inp["qa"], tuple(sweep_cfg[sweep]))
             )
             for n_probe in map(int, a.nprobes.split(",")):
-                for m in arms.values():
+                for m in [*arms.values(), *([oracle] if oracle is not None else [])]:
                     m.set_query_params(n_probe=n_probe)
                 for bs in map(int, a.bss.split(",")):
                     pool, qa_pool = inputs.query_pool(
@@ -240,7 +285,20 @@ def main():
                         row = {"dataset": a.dataset, "dim": int(a.dim), "mode": a.mode, "sweep": sweep,
                                "bloom_path": a.bloom_path, "score_path": a.score_path, "n_probe": n_probe,
                                "bs": bs, "k": k, "width": base._probe_width, "swap": a.swap, "aa": a.aa,
-                               "arms": names, "bloom_index_equal": bloom_equal}  # fmt: skip
+                               "arms": names, "bloom_index_equal": bloom_equal, "fork_bloom": a.fork_bloom,
+                               "m_bits": a.m_bits}  # fmt: skip
+                        if oracle is not None:
+                            oracle.k = k
+                            want = [oracle(pool[i], oracle.prepare_queries(qa_pool[i]))
+                                    for i in range(N_POOL)]  # fmt: skip
+                            for n in outs:
+                                rec, fp = recall_fp(
+                                    outs[n], want, inp["item_attrs"].to(DEV), qa_pool
+                                )
+                                row[f"recall_{n}"], row[f"false_positives_{n}"] = (
+                                    rec,
+                                    fp,
+                                )
                         ref = "fork2" if a.aa else "upstream"
                         if "fork" in outs and ref in outs:
                             row["vs_upstream"] = compare(outs["fork"], outs[ref])

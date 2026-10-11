@@ -387,6 +387,13 @@ class SilverTorch(RetrievalModule):
                 )
             self.register_buffer("bloom_index", bloom_index)
             self.register_buffer("bundle_b_offsets", bundle_b_offsets)
+            if attrs is not None and cfg.recheck_for(self.backend):
+                # the exact recheck of the bloom's survivors (official-fork, C13)
+                self.register_buffer("item_clause_attrs", attrs)
+                self.register_buffer(
+                    "clause_is_reverse",
+                    torch.zeros(attrs.shape[1], dtype=torch.bool, device=device),
+                )
         elif self.filter_mode == "bloom":
             seeds = generate_seeds(self.k_hash, device=device)
             if attrs is None:
@@ -487,7 +494,9 @@ class SilverTorch(RetrievalModule):
             slots=rows,
             backend=self.backend,
         )
+        recheck = cfg.recheck_for(self.backend)
         return PreparedFilter(
+            query_attrs=query_clause_attrs.long().contiguous() if recheck else None,
             plan_index=index,
             plan_blob=plans.blob,
             plan_slots=plans.slots,
@@ -650,8 +659,9 @@ class SilverTorch(RetrievalModule):
     ) -> tuple[Tensor, Tensor]:
         """Phases 2+3 on our fork of Meta's ops in one ``torch.ops.stfork.search`` call
         (kernels.md § official-fork): ``bloom`` → the plans ``prepare_queries`` put on the device,
-        partial or full by ``OfficialConfig.bloom_path``; ``exact`` → the clauses tested over the
-        probed docs inside the fork."""
+        partial or full by ``OfficialConfig.bloom_path``, its survivors rechecked exactly unless
+        ``OfficialConfig.recheck`` is off; ``exact`` → the clauses tested over the probed docs
+        inside the fork."""
         probe_ids = self._phase1_probe_ids(query)
         cfg = self.official
         exact = None
@@ -671,6 +681,8 @@ class SilverTorch(RetrievalModule):
                 cfg.n_stored_hashes,
                 cfg.bloom_path == "partial",
             )
+            if prepared.query_attrs is not None:
+                exact = (self.item_clause_attrs, self.clause_is_reverse, prepared.query_attrs)
         return official_mod.fork_search(
             query,
             probe_ids,
