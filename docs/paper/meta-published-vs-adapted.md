@@ -59,7 +59,7 @@ and itself bit-exact).
 | OF-4: launch count (19 per unfiltered forward, ≈ 32 with bloom) | C5: the forward after phase 1 as one op, `stfork::search`; C6: query prep in one kernel; C7: two-level top-k; C8: the partial bloom mask built inside the payload kernels; K fixes 1-14 (one-kernel epilogue, our own top-k select, per-width scorer variants, row-parallel prep) | bit-exact |
 | our adapter's full-`N` exact mask in front of Meta's scorer (exact is not in Meta's paper; [ST-3](reproduction-deviations.md#3-silvertorch-as-we-run-it--deviations-from-the-paper)) | C9: the exact clause filter over the probed docs only, inside `search` | bit-exact |
 | OF-10: `m_bits` ignored (width per 2048-doc bundle from its max term count) | C12: a configured bloom width (`bloom_width="configured"`); `"upstream"` keeps Meta's | bloom change |
-| OF-12 (from OF-1): bundle-bloom false positives in the results | C13: an exact recheck of the bloom's survivors; the adapted backend's default (controller; the user confirms, [roadmap](../roadmap.md#needs-the-user)) | bloom change |
+| OF-12 (from OF-1): bundle-bloom false positives in the results | C13: an exact recheck of the bloom's survivors; the adapted backend's default; Meta's bloom by a flag, for the parity gate and C7 ([decisions](../decisions.md#goal-and-scheduling)) | bloom change |
 | — (scorer configuration) | C10: none (Meta's scorer already skips failing lanes); C11: scorer variant per `D`, cooperative loads for `D` ≥ 128 (K fix 14) | bit-exact |
 | no fake (meta) implementations, an undeclared mutation in `is_topk` | the compile gate: shape functions for all 16 `stfork` ops, `is_topk`'s mutation declared | `torch.compile` / `torch.export` |
 

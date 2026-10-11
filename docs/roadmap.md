@@ -38,22 +38,6 @@ GPU at the same time as the others (see
 
 ## Needs the user
 
-- **D1-G with 25 batching failures.** Three of D1-G's four checks are green
-  on the final pass; `median_ms(bs=16) < 16 × median_ms(bs=1)` fails on 25
-  entries: 24 YFCC `tags_and` LiNR V2 / V3 cells at about 18× (bs 1 times
-  the median query, a bs 16 batch its heaviest) and one goodreads-synth V2
-  torch `compile=max-autotune` cell (an autotune pick on the baseline).
-  Nothing was loosened. Whether D1-G is green with them is the user's call
-  ([validation](validation.md#campaign-v2-phase-v-not-yet-validated), D1-G row).
-- **The adapted backend's bloom default (C13).** The controller made the
-  exact recheck of bloom survivors the adapted backend's default (no false
-  positives: a different filter from Meta's bloom), with Meta's bloom
-  semantics selectable by a flag for the parity gate. Confirm or reverse
-  before [FORK-RERUN](#2-fork-rerun-every-silvertorch-cell-on-the-adapted-backend):
-  it decides which bloom the paper's SilverTorch cells use.
-- **The adapted arm's score path.** The study's SilverTorch cells run
-  int32 (bit-exact with the published int32 path) or fp16 (Meta's
-  default); T3 times both. Decide before FORK-RERUN.
 - **Contact the original authors** (re-plan decision 7): the LinkedIn LiNR
   team and Meta's SilverTorch team — filter-set details, the V1/V2 setup,
   the SilverTorch paper's FPR inconsistency (0.067 % vs 0.00173 %) — and
@@ -196,7 +180,9 @@ tune-timed, `laion30m`, the N-sweep, `seeds-c7`, the C6 ceiling checks;
 `bloomwidth` for C4. Meta's code as published (`official`, `-O3`) runs
 beside it only in the cells that feed T3 and the parity spill (`h2h`,
 `codesign`). LiNR cells are not rerun, except as the interleaved partner
-of item 5. Bloom semantics and score path as the user decides (Needs the user).
+of item 5. The study's cells run the int32 score path with the exact recheck of
+bloom survivors on (C13); fp16 only as a reported variant where cheap
+([decisions](decisions.md#goal-and-scheduling)).
 Recall targets reported: 0.90 and 0.95, 0.99 a stretch (user,
 2026-10-11).
 
@@ -223,7 +209,7 @@ stop short of 0.95 (results draft, provisional).
    rule across N (≈ 4√N to a power of two) and item 1's curves: the
    paper's N axis.
 4. **Time the released configuration**: the shipped bloom default
-   (configured width C12 + exact recheck C13) is what the paper's
+   (configured width C12 + exact recheck C13, decided) is what the paper's
    SilverTorch bloom numbers use; Meta's semantics stay only in the "as
    published vs adapted" table.
 5. **Interleaved SilverTorch vs LiNR**: SilverTorch and LiNR (V1, V2, the
@@ -306,8 +292,9 @@ re-stated in [claims](paper/claims.md), T3 as Meta as published vs adapted
 (its scorer column from `kernel_scopes`: H-SCOPE's one GPU test on a real
 call is left). **≈ 4 GPU-h** for D1-G's reruns, both GPUs.
 
-*Gate*: D1-G's four checks (with the user's decision on the batching
-failures), 0 manifest gaps.
+*Gate*: D1-G's four checks (the batching check as the user declared it
+for the final pass: green with its 25 listed, explained failures), 0
+manifest gaps.
 
 ### 6. The paper
 
@@ -344,5 +331,5 @@ SilverTorch work.
 paper abstract (paper-draft) ─┐
 1 META-FORK ─> tag campaign-fork, merge ─┴─> 2 FORK-RERUN ─┬─> 3 RENAME ─> 4 TRITON-ST-DELETE ─┬─> 5 FINAL-AGG ─> 6 F2, F4, F5
                                                            └─> 2b GRID-EXT ────────────────────┘                └─> 7 AFTER-QUEUE (beside 6)
-Needs the user: C13 default and score path before 2; D1-G's batching failures before 5's gate; release decisions before F4
+Needs the user: release decisions before F4
 ```

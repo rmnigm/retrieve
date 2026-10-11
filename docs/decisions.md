@@ -53,6 +53,20 @@ decisions.
   adapted" table ([paper](paper/meta-published-vs-adapted.md)) reports
   what the adaptation changed. Meta's code as published is not a separate
   arm of the study.
+- **The adapted arm's configuration in the study** (controller and user,
+  2026-10-11): the int32 score path (gated bit-exact against Meta's
+  published code everywhere); fp16, Meta's default, only as a reported
+  variant where it is cheap. Bloom: the exact recheck of the bloom's
+  survivors is on by default (CHANGES C13: no false positives, a different
+  filter from Meta's bloom); Meta's bloom semantics stay selectable by a
+  flag and are used for the parity gate and C7 only.
+- **D1-G is green for the final pass** (user, 2026-10-11): three checks
+  pass outright; `median_ms(bs=16) < 16 × median_ms(bs=1)` fails on 25
+  listed, explained entries (24 YFCC `tags_and` LiNR V2 / V3 at about 18×,
+  the per-query spread; one goodreads-synth V2 `torch.compile`
+  max-autotune cell, an autotune pick on the baseline), which the user
+  accepted without loosening the check. Validation's row is written on
+  `dev/d1g-green`.
 - **Paper numbers.** SilverTorch's come from the adapted-official rerun of
   every SilverTorch cell of the final grid (roadmap
   [FORK-RERUN](roadmap.md#2-fork-rerun-every-silvertorch-cell-on-the-adapted-backend));
