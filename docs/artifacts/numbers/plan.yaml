@@ -24,6 +24,7 @@ queues:                     # LiNR-only legs first; ends balanced at ~15-16 GPU-
   d1: [L1-linr-bs64, A0-k1000-check, A1-laion10m, A2-laion10m, A2-yfcc]
   p1: [L1b-linr-bs64-laion, L3-linr-corr, L4-linr-k2048, A1-small, A1-pubmed, A1-yfcc, A2-small, A1b-laion-small-lists, A2b-laion-small-lists, A2-pubmed, A3-st-k2048]
   b0: [A1-laion30m-synth, A2-laion30m-synth]   # controller 2026-10-11 19:10Z: A1-laion30m-synth moved from d1 (unless laion had started it)
+  tail: [T9-arxiv-encode, T9-arxiv-dsweep]   # item 9; on the first GPU whose queue ends (likely b0), only if it delays no NUMBERS leg
 
 legs:
   # ---------------- LiNR-only (start now, tree linr) ----------------
@@ -205,7 +206,29 @@ legs:
     upload: numbers/A3-st-k2048
     est_gpu_h: 1.0
 
-totals:
+  # ---------------- tail (item 9, user 2026-10-11: runs only if it does not delay the numbers) ----------------
+  - id: T9-arxiv-encode
+    item: 9
+    tree: linr        # any tree with eval-data; the encode is model inference, not the library
+    depends_on: "a GPU whose NUMBERS queue has ended"
+    cmds:
+      - "cd $TREE/evaluation && CUDA_VISIBLE_DEVICES=$GPU docs/artifacts/numbers/dsweep.sh encode /data /scratch/numbers/t9   # from a dev/numbers checkout; aborts if the rebuilt item_id_map / heldout differ from the staged ones"
+    needs: "network (HF open-index/open-arxiv raw shards + nomic-embed-text-v1.5); disk ~15 GB (raw + processed + 2.99 M x 768 fp16 = 4.6 GB); check `eval-data arxiv --help` for where download / convert write"
+    upload: none      # embeddings are an input; record their sha256 in the T9-arxiv-dsweep upload's notes
+    est_gpu_h: 1.2    # ~2.99 M docs at ~950 docs/s on the A100 (nomic, measured on openalex) + model load; download / convert / prep are CPU
+  - id: T9-arxiv-dsweep
+    item: 9
+    tree: fork
+    depends_on: T9-arxiv-encode   # and a pick_points.py run over its curves (results-draft)
+    cmds:
+      - "dsweep.sh config $OUT/config   # after prep_config.sh: arxiv.yaml gains dim 768 for this leg only"
+      - "bench check --dataset arxiv --dim 768 && bench oracle --dataset arxiv --dim 768   # with --config-dir $OUT/config"
+      - "RUN --suite n-curve-q --dataset arxiv --dim 768   # 5 jobs; arXiv d128 / d256 curves already exist (A1-small ran both dims)"
+      - "RUN --suite n-timed-d256 --interleave --dataset arxiv   # picks already in suites-timed.yaml"
+      - "RUN --suite n-timed-d768 --interleave --dataset arxiv   # after the re-pick over the d768 curves"
+    upload: numbers/T9-arxiv-dsweep
+    est_gpu_h: 2.0
+
   linr_only_gpu_h: 9.3
   adapted_gpu_h: 38.6      # A0 0.4 + A1 11.9 + A1b 0.5 + A2 24.0 + A2b 0.8 + A3 1.0
   all_gpu_h: 47.9          # +20 % process start / data load / compile -> ~56

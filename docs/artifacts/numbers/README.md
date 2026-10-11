@@ -17,3 +17,15 @@ graph, interleaved with LiNR. The k 1000 check runs first: today's scorers stop 
 
 **Order.** The LiNR-only legs need no adapted code, so they run first in every queue. The adapted legs wait for the frozen adapted-code
 head. Each timed leg waits for its curve leg and a `pick_points.py` run.
+
+**Timed suites are per dim.** A dataset config may list several dims (goodreads and arXiv list 128 and 256), so `pick_points.py`
+picks per (dataset, dim) and writes `n-timed-d<dim>` / `n-st-k2048-d<dim>`, each pinned to one dim. A timed leg runs its dataset's own
+dim; the extra d256 curves of goodreads / arXiv feed the item 9 tail only.
+
+**Item 9 tail (arXiv d-sweep).** [`dsweep.sh`](dsweep.sh) rebuilds arXiv's text with the ETL, stops if the rebuilt rows differ from the
+staged ones, encodes once at nomic's native 768, and patches `arxiv.yaml` for that leg only. It runs on the first GPU whose queue
+ends, only if no NUMBERS leg waits for it (plan.yaml `tail`).
+
+**Left for the final full rerun (user, 2026-10-11).** Seeds and error bars: every NUMBERS leg runs seed 0, and the final full rerun adds
+the seeds and the confidence intervals. Not in the study: a GPU ANN library baseline, a separate index memory / build-time leg, a d4096
+cross-check, a second GPU model.
