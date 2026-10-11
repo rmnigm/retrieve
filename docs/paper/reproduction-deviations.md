@@ -164,7 +164,7 @@ A reproducibility paper is worth more with these in it than without.
 - **No performance comparison.** Meta's code as published against the
   adapted code is [meta-published-vs-adapted.md](meta-published-vs-adapted.md)
   (roadmap **F2**); SilverTorch against LiNR is the results section, from
-  `bench report` over the final parquet (roadmap FINAL-AGG). Nothing in
+  `bench report` over the final parquet (roadmap FULL-RERUN, the last step). Nothing in
   §3–§5 above may be read as a speed claim.
 - **No campaign numbers.** Every quality and latency table in the paper
   comes from `bench report` over the final parquet. The thesis's tables were

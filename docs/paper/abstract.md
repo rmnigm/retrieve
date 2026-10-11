@@ -11,7 +11,7 @@ sources: [docs/paper/results.md, docs/paper/claims.md, docs/paper/ecir-criteria.
 
 **Draft, NOT CITABLE.** The findings below are stated in words, with no
 numbers, as agreed with the user: the SilverTorch-vs-LiNR numbers wait for
-the adapted official code's rerun. Each finding is a reading of the
+the adapted official code's measurement legs (roadmap NUMBERS). Each finding is a reading of the
 provisional [results draft](results.md), and the
 [status table](#what-each-sentence-rests-on) gives its source and its
 state. Choose one of the three versions; the other two can supply
@@ -43,23 +43,23 @@ GPU Filtered Retrieval*
 
 Every finding is **provisional**. The LiNR findings wait on D1-G being
 declared green. The SilverTorch findings wait on the adapted code's
-acceptance and rerun; until then its latency is bridged from the Triton
+acceptance and its NUMBERS legs; until then its latency is bridged from the Triton
 campaign ([results](results.md#where-the-numbers-come-from)).
 
-| phrase (version) | source | state | could change after the rerun? |
+| phrase (version) | source | state | could change after NUMBERS? |
 |---|---|---|---|
 | five public datasets, 0.8-30M items, 128-768 dimensions; one A100 (all) | Goodreads 0.8 M, arXiv 3 M, PubMed 10 M d768, YFCC-10M d192, Re-LAION 1-30 M d256 ([datasets](../system/datasets.md)); the A100 reference GPU (AGENTS.md rule 1) | setup fact | the adapted SilverTorch has no LAION cells yet. If they do not land, the head-to-head range ends at 10 M, and the 30 M point is LiNR and Meta's code only |
-| adapted to remove host overheads, "returning the same results" (all) | `official-fork/CHANGES.md` on the META-FORK branch; the gate grid: ids equal to Meta's on every gate cell ([results](results.md#where-the-numbers-come-from)) | **not yet validated**: the META-FORK rows are "not yet validated" and the review has not accepted | if the review or rerun finds a mismatch, the phrase becomes "returning Meta's results up to ties" or is dropped |
+| adapted to remove host overheads, "returning the same results" (all) | `official-fork/CHANGES.md` on the META-FORK branch; the gate grid: ids equal to Meta's on every gate cell ([results](results.md#where-the-numbers-come-from)) | **not yet validated**: the META-FORK rows are "not yet validated" and the review has not accepted | if the review or the NUMBERS legs find a mismatch, the phrase becomes "returning Meta's results up to ties" or is dropped |
 | LiNR's custom filter kernel beats native masking "by far less than reported" / "a small factor, not two orders of magnitude" (main, A) | C3 in [results](results.md#claim-verification) | LiNR, NOT CITABLE until D1-G | unlikely (LiNR records are final-pass) |
 | V1/V2 crossover "for single queries but fades at larger batches" (A) | C1 | as above | unlikely |
 | 1-bit variant "helps only in part" (A) | C2 | as above | unlikely |
 | Bloom filter "more accurate than reported" (A) | C4 (our false-positive rate is lower than the paper's) | measured with Meta's code; the adapted code's bloom recall gate is still running | no: the adapted default adds an exact recheck, so its false-positive rate is zero by construction; the sentence is about Meta's design |
 | co-design pays off "only at large indexes and batches" (main, A) | C5: holds for Meta's code at 10-30 M and bs 64, reversed at 0.8-3 M | Meta's code as published: measured; adapted: provisional (neutral at bs 1, a gain at bs 64) | the sentence is about Meta's code. If the paper's C5 verdict moves to the adapted code, write "pays off at large batches" |
-| int8 reaches high recall "only with far more probes" than production (A) | C6, `c6_ceiling.csv` | SilverTorch recall comes from the Triton records (ids shown equal); provisional | the rerun adds the adapted code's deep probe curves |
-| at the production probe count SilverTorch is "always faster, but often far from exact" (B) | [results](results.md#at-silvertorchs-production-setting-24-probes): faster in every gated cell, recall from 0.05 to about 0.95 | bridged latency; provisional | the direction is wide (1.3-50×) and unlikely to flip; check after the rerun |
+| int8 reaches high recall "only with far more probes" than production (A) | C6, `c6_ceiling.csv` | SilverTorch recall comes from the Triton records (ids shown equal); provisional | the NUMBERS legs add the adapted code's deep probe curves |
+| at the production probe count SilverTorch is "always faster, but often far from exact" (B) | [results](results.md#at-silvertorchs-production-setting-24-probes): faster in every gated cell, recall from 0.05 to about 0.95 | bridged latency; provisional | the direction is wide (1.3-50×) and unlikely to flip; check after NUMBERS |
 | SilverTorch wins broad filters "up to a few million items" (all) | matched recall 0.95, k 100: Goodreads and arXiv, real and synthetic filters with pass rate ≥ 0.01 | bridged; provisional | the margins are 0.23-0.93 of LiNR's time; recheck the cells near 0.9 |
 | exact LiNR wins "highly selective filters" (all) | pass rate 0.001 (synthetic), PubMed `c0_mesh` | provisional | holds while SilverTorch's recall at the gated probes stays below target |
-| exact LiNR wins "at the largest indexes" / "once the index reaches ten million items" (main, B) | PubMed and YFCC 10 M: SilverTorch does not reach 0.95 within the gated probes | **the weakest sentence.** With 16384 lists and 4096 probes the Triton records reach 0.89-0.96 at 10-30 M, so the outcome depends on the probe budget | **likely to change.** The rerun's deep probe curves decide it. If SilverTorch reaches the target at 10 M, rewrite as "and at ten million items only when the probe budget is capped" or drop the clause |
+| exact LiNR wins "at the largest indexes" / "once the index reaches ten million items" (main, B) | PubMed and YFCC 10 M: SilverTorch does not reach 0.95 within the gated probes | **the weakest sentence.** With 16384 lists and 4096 probes the Triton records reach 0.89-0.96 at 10-30 M, so the outcome depends on the probe budget | **likely to change.** The NUMBERS legs' probe curves decide it. If SilverTorch reaches the target at 10 M, rewrite as "and at ten million items only when the probe budget is capped" or drop the clause |
 | "larger batches favour the IVF and larger k favours the scan" (B) | [results](results.md#how-the-parameters-move-the-crossover) (batch size, k) | provisional | unlikely to flip |
 | "both evaluate only on internal data" / "neither tests on public data" (main, B) | [claims](claims.md): Meta's 10 M / 80 M pools and LinkedIn's 15.5 M jobs are internal | **to check** against SilverTorch §6.2: the dataset of the 20 M × 128 kernel benchmark is not named in our claims table | if that set is public, write "both report their system results on internal data" |
 | "LiNR has no public code" (main, A) | [ECIR criteria](ecir-criteria.md#impact) | as of 2026-10-10 | recheck before submission |
@@ -72,8 +72,8 @@ Read against the 19 abstracts in
 
 1. **No numbers is the norm.** 17 of 19 reproducibility abstracts give no
    measured result. They give counts and ranges instead. So the drafts
-   lose nothing by waiting for the rerun. Only setup ranges appear (items,
-   dimensions, one A100). One headline ratio can be added after the rerun
+   lose nothing by waiting for the NUMBERS legs. Only setup ranges appear (items,
+   dimensions, one A100). One headline ratio can be added after the NUMBERS legs
    if it is robust (BERT4Rec and SEATER each carry one).
 2. **The five usual moves, in order.** Motivation → what is reproduced
    and why it was hard (internal data, no LiNR code) → setup in counts →
@@ -114,7 +114,7 @@ Read against the 19 abstracts in
 - The **main version** fits ECIR's reliability and novelty questions
   best, and it is safe whichever way the 10 M rows go once that clause is
   edited.
-- **Alternate A** is the safest before the rerun: its SilverTorch
+- **Alternate A** is the safest before the NUMBERS legs: its SilverTorch
   sentences rest on Meta's code and on recall, not on the bridged
   latency.
 - **Alternate B** is the strongest pitch, but it rests most on the
@@ -122,12 +122,12 @@ Read against the 19 abstracts in
 
 ## Open before this page is final
 
-- The adapted code's rerun: replace every "provisional" row above and
+- The adapted code's NUMBERS legs: replace every "provisional" row above and
   settle the 10 M sentence.
 - D1-G green: the LiNR findings.
 - META-FORK accepted: "returning the same results".
 - The two checks marked **to check** above (SilverTorch's 20 M data and
   its GPU baselines).
 - The user: which version; the title; whether one headline ratio goes in
-  after the rerun. Also the ECIR 2027 dates, which this research could not
+  after the NUMBERS legs. Also the ECIR 2027 dates, which this research could not
   confirm (no official 2027 call was found on 2026-10-11).
