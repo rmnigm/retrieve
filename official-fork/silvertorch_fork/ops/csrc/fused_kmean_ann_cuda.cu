@@ -1,5 +1,5 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C3: no host sync in fused_kmean_ann / _with_partial_masks; C6: fused_kmean_ann_cuda_precomputed; K fix 3: warp-per-cluster remaining payloads (official-fork/CHANGES.md).
+// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C3: no host sync in fused_kmean_ann / _with_partial_masks; C6: fused_kmean_ann_cuda_precomputed; K fix 3: warp-per-cluster remaining payloads; K fix 10: no pre-fill under write_failed (official-fork/CHANGES.md).
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -237,9 +237,15 @@ __inline__ __device__ void store(
     DIVISOR_T divisor_for_int8,
     RETURN_T* results,
     int32_t* indices,
-    bool filtering_mask) {
+    bool filtering_mask,
+    bool write_failed = false) {
   if constexpr (FILTER) {
     if (!filtering_mask) {
+      // fork (K fix 10): the search op writes the unwritten-slot sentinels itself, no pre-fill
+      if (write_failed) {
+        *results = cuda_mm_types<RETURN_T>::C_MIN_NEG;
+        *indices = -1;
+      }
       return;
     }
   }
@@ -270,9 +276,15 @@ __inline__ __device__ void store_with_direct_query(
     DIVISOR_T divisor_for_int8,
     RETURN_T* results,
     int32_t* indices,
-    bool filtering_mask) {
+    bool filtering_mask,
+    bool write_failed = false) {
   if constexpr (FILTER) {
     if (!filtering_mask) {
+      // fork (K fix 10): the search op writes the unwritten-slot sentinels itself, no pre-fill
+      if (write_failed) {
+        *results = cuda_mm_types<RETURN_T>::C_MIN_NEG;
+        *indices = -1;
+      }
       return;
     }
   }
@@ -1006,6 +1018,7 @@ __global__ void process_cluster(
     int32_t* indices,
     const int32_t* __restrict__ total_needed_warps_ptr,
     DIVISOR_INPUT divisor_for_int8,
+    bool write_failed,
     TORCH_DSA_KERNEL_ARGS) {
   constexpr int kWarpsInBlock = kBlockSize / kWarpThreadCount;
   __shared__ EMBEDDING_T shared_queries[kWarpsInBlock][DIM];
@@ -1046,7 +1059,8 @@ __global__ void process_cluster(
           divisor_value,
           results + write_index,
           indices + write_index,
-          get_filtering_mask<FILTER>(warp_payload.filtering_mask, threadIdx.x));
+          get_filtering_mask<FILTER>(warp_payload.filtering_mask, threadIdx.x),
+          write_failed);
     } else {
       store<EMBEDDING_T, RETURN_T, DIM, FILTER, decltype(divisor_value)>(
           embeddings,
@@ -1056,7 +1070,8 @@ __global__ void process_cluster(
           divisor_value,
           results + write_index,
           indices + write_index,
-          get_filtering_mask<FILTER>(warp_payload.filtering_mask, threadIdx.x));
+          get_filtering_mask<FILTER>(warp_payload.filtering_mask, threadIdx.x),
+          write_failed);
     }
   }
 }
@@ -1075,6 +1090,7 @@ __global__ void process_cluster_remaining(
     int32_t* indices,
     const int32_t* __restrict__ remaining_docs_ptr,
     DIVISOR_INPUT divisor_for_int8,
+    bool write_failed,
     TORCH_DSA_KERNEL_ARGS) {
   const int32_t remaining_docs = *remaining_docs_ptr;
   for (uint32_t process_index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1099,7 +1115,8 @@ __global__ void process_cluster_remaining(
         divisor_value,
         results + write_index,
         indices + write_index,
-        remaining_payload.filtering_mask);
+        remaining_payload.filtering_mask,
+        write_failed);
   }
 }
 
@@ -1267,7 +1284,8 @@ inline bool try_launch_pipelined_kernel(
           results.mutable_data_ptr<RETURN_TYPE>(),
           indices.mutable_data_ptr<int32_t>(),
           remaining_docs_ptr,
-          divisor_for_int8);
+          divisor_for_int8,
+          false);
       return true;
     }
   }
@@ -1289,7 +1307,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
     int64_t remaining_docs,
     const int32_t* remaining_docs_ptr,
     const std::optional<Tensor>& per_embedding_scale,
-    bool query_on_shared_mem = false) {
+    bool query_on_shared_mem = false,
+    bool write_failed = false) {
 #if defined(USE_ROCM)
   query_on_shared_mem = true;
 #endif
@@ -1303,11 +1322,17 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
       (remaining_docs + kBlockSize - 1) / kBlockSize,
       192L * at::cuda::getCurrentDeviceProperties()->multiProcessorCount);
   Tensor results;
-  Tensor indices = at::full(
-      {total_result_size},
-      static_cast<int32_t>(invalid_index_value),
-      c10::TensorOptions().dtype(at::kInt).device(
-          selected_cluster_ids.device()));
+  // write_failed (fork search): every slot below a row's written width is written by the scorer
+  // (failing lanes write the sentinels), the caller ignores the rest, so nothing is pre-filled
+  Tensor indices = write_failed
+      ? at::empty(
+            {total_result_size},
+            c10::TensorOptions().dtype(at::kInt).device(selected_cluster_ids.device()))
+      : at::full(
+            {total_result_size},
+            static_cast<int32_t>(invalid_index_value),
+            c10::TensorOptions().dtype(at::kInt).device(
+                selected_cluster_ids.device()));
 
 #define INVOKE_KERNEL_WITH_TYPE_DIM_FILTER(                                   \
     EMBEDDING_TYPE, RETURN_TYPE, DIM, FILTER)                                 \
@@ -1332,7 +1357,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
             results.mutable_data_ptr<RETURN_TYPE>(),                          \
             indices.mutable_data_ptr<int32_t>(),                              \
             total_needed_warps_ptr,                                           \
-            per_embedding_scale.value().mutable_data_ptr<at::Half>());        \
+            per_embedding_scale.value().mutable_data_ptr<at::Half>(),         \
+            write_failed);                                                    \
       } else {                                                                \
         MAYBE_TORCH_DSA_KERNEL_LAUNCH(                                        \
             (process_cluster<                                                 \
@@ -1352,7 +1378,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
             results.mutable_data_ptr<RETURN_TYPE>(),                          \
             indices.mutable_data_ptr<int32_t>(),                              \
             total_needed_warps_ptr,                                           \
-            per_embedding_scale.value().mutable_data_ptr<at::Half>());        \
+            per_embedding_scale.value().mutable_data_ptr<at::Half>(),         \
+            write_failed);                                                    \
       }                                                                       \
                                                                               \
       MAYBE_TORCH_DSA_KERNEL_LAUNCH(                                          \
@@ -1373,7 +1400,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
           results.mutable_data_ptr<RETURN_TYPE>(),                            \
           indices.mutable_data_ptr<int32_t>(),                                \
           remaining_docs_ptr,                                                 \
-          per_embedding_scale.value().mutable_data_ptr<at::Half>());          \
+          per_embedding_scale.value().mutable_data_ptr<at::Half>(),           \
+          write_failed);                                                      \
     } else {                                                                  \
       if (query_on_shared_mem) {                                              \
         MAYBE_TORCH_DSA_KERNEL_LAUNCH(                                        \
@@ -1394,7 +1422,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
             results.mutable_data_ptr<RETURN_TYPE>(),                          \
             indices.mutable_data_ptr<int32_t>(),                              \
             total_needed_warps_ptr,                                           \
-            static_cast<int32_t>(divisor_for_int8));                          \
+            static_cast<int32_t>(divisor_for_int8),                           \
+            write_failed);                                                    \
       } else {                                                                \
         MAYBE_TORCH_DSA_KERNEL_LAUNCH(                                        \
             (process_cluster<                                                 \
@@ -1414,7 +1443,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
             results.mutable_data_ptr<RETURN_TYPE>(),                          \
             indices.mutable_data_ptr<int32_t>(),                              \
             total_needed_warps_ptr,                                           \
-            static_cast<int32_t>(divisor_for_int8));                          \
+            static_cast<int32_t>(divisor_for_int8),                           \
+            write_failed);                                                    \
       }                                                                       \
                                                                               \
       MAYBE_TORCH_DSA_KERNEL_LAUNCH(                                          \
@@ -1435,7 +1465,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
           results.mutable_data_ptr<RETURN_TYPE>(),                            \
           indices.mutable_data_ptr<int32_t>(),                                \
           remaining_docs_ptr,                                                 \
-          static_cast<int32_t>(divisor_for_int8));                            \
+          static_cast<int32_t>(divisor_for_int8),                             \
+          write_failed);                                                      \
     }                                                                         \
   }
 
@@ -1453,12 +1484,18 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
 #define INVOKE_KERNEL_WITH_SCALAR_TYPE_DIM(                        \
     EMBEDDING_TYPE, RETURN_SCALAR_TYPE, RETURN_TYPE, DIM)          \
   {                                                                \
-    results = at::full(                                            \
-        {total_result_size},                                       \
-        cuda_mm_types<RETURN_TYPE>::C_MIN_NEG,                     \
-        c10::TensorOptions()                                       \
-            .dtype(RETURN_SCALAR_TYPE)                             \
-            .device(selected_cluster_ids.device()));               \
+    results = write_failed                                         \
+        ? at::empty(                                               \
+              {total_result_size},                                 \
+              c10::TensorOptions()                                 \
+                  .dtype(RETURN_SCALAR_TYPE)                       \
+                  .device(selected_cluster_ids.device()))          \
+        : at::full(                                                \
+              {total_result_size},                                 \
+              cuda_mm_types<RETURN_TYPE>::C_MIN_NEG,               \
+              c10::TensorOptions()                                 \
+                  .dtype(RETURN_SCALAR_TYPE)                       \
+                  .device(selected_cluster_ids.device()));         \
     INVOKE_KERNEL_WITH_TYPE_DIM(EMBEDDING_TYPE, RETURN_TYPE, DIM); \
   }
 
@@ -1977,7 +2014,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_cuda_precomputed(
     const Tensor& cluster_warp_rounded_length_cumsum,
     const Tensor& cluster_remaining_length_cumsum,
     const Tensor& cluster_warp_size_cumsum,
-    bool query_on_shared_mem) {
+    bool query_on_shared_mem,
+    bool write_failed) {
   const uint64_t* filtering_bitmask_ptr = nullptr;
   int64_t filtering_bitmask_column = 0;
   if (filtering_bit_mask) {
@@ -2028,7 +2066,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_cuda_precomputed(
       remaining_docs,
       last_element_ptr(cluster_remaining_length_cumsum),
       std::nullopt,
-      query_on_shared_mem);
+      query_on_shared_mem,
+      write_failed);
 }
 
 std::tuple<Tensor, Tensor> fused_kmean_ann_cuda_with_partial_masks(

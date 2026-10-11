@@ -58,6 +58,10 @@ constexpr int kSelectThreads = 512;
 constexpr int kSelectItems = 16; // keys a thread holds in registers
 constexpr int64_t kSelectChunk = kSelectThreads * kSelectItems;
 constexpr int64_t kSelectMaxK = 1024;
+// the two-level block size and thresholds (C7, K fix 9)
+constexpr int64_t kTopkBlock = 256;
+constexpr int64_t kTopkMinSlots = int64_t{1} << 23;
+constexpr int64_t kTopkMinRatio = 8;
 
 __device__ __forceinline__ uint32_t score_key(int32_t v) {
   return static_cast<uint32_t>(v) ^ 0x80000000u;
@@ -78,12 +82,17 @@ __device__ __forceinline__ uint32_t composite_slot(uint64_t c) {
 }
 
 // Raw scores of row `row`, slots [first, first + n): the key, -inf's on fp16 for unwritten slots.
+// `limit[row]` (K fix 10): the row's written width; slots past it are empty (lowest key).
 template <typename T>
 struct RawKeys {
   const T* raw;
   const int32_t* idx;
   int64_t width;
+  const int32_t* limit;
   __device__ __forceinline__ uint32_t key(int64_t row, int64_t slot) const {
+    if (slot >= limit[row]) {
+      return 0;
+    }
     if constexpr (std::is_same_v<T, int32_t>) {
       return score_key(raw[row * width + slot]);
     } else {
@@ -447,6 +456,112 @@ __global__ void __launch_bounds__(kSelectThreads, 2) select_chunk_kernel(
   }
 }
 
+// K fix 9: very wide rows (>= kTopkMinRatio blocks of kTopkBlock slots per top-k slot) are cut
+// to the slots of their k best blocks first (C7's two-level argument: a block holding a slot above
+// the k-th score has a larger max than any block without one). Blocks tied at the k-th max are
+// taken in index order and the chosen blocks gathered in ascending order, so the earliest tied
+// slots stay candidates and the tie choice is still torch's.
+struct ArrayKeys {
+  const uint32_t* keys;
+  int64_t per_row;
+  __device__ __forceinline__ uint32_t key(int64_t row, int64_t i) const {
+    return keys[row * per_row + i];
+  }
+  __device__ __forceinline__ uint32_t slot(int64_t /*row*/, int64_t i) const {
+    return static_cast<uint32_t>(i);
+  }
+};
+
+// One warp per block of kTopkBlock slots: the max key.
+template <typename T>
+__global__ void block_max_key_kernel(
+    RawKeys<T> keys,
+    int64_t rows,
+    int64_t n_blocks,
+    uint32_t* __restrict__ out) {
+  const int lane = threadIdx.x % 32;
+  for (int64_t w = (static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x) / 32;
+       w < rows * n_blocks;
+       w += static_cast<int64_t>(gridDim.x) * blockDim.x / 32) {
+    const int64_t row = w / n_blocks;
+    const int64_t first = (w % n_blocks) * kTopkBlock;
+    uint32_t m = 0;
+    for (int64_t j = lane; j < kTopkBlock && first + j < keys.width; j += 32) {
+      m = max(m, keys.key(row, first + j));
+    }
+#pragma unroll
+    for (int off = 16; off > 0; off /= 2) {
+      m = max(m, __shfl_xor_sync(0xffffffff, m, off));
+    }
+    if (lane == 0) {
+      out[w] = m;
+    }
+  }
+}
+
+// One CTA per row: the k best blocks (ties in index order), written in ascending block order.
+__global__ void __launch_bounds__(kSelectThreads) select_blocks_kernel(
+    ArrayKeys keys,
+    int64_t n_blocks,
+    int64_t k,
+    int64_t* __restrict__ blocks) {
+  __shared__ SelectShared sh;
+  extern __shared__ uint32_t chosen[]; // one bit per block
+  const int64_t row = blockIdx.x;
+  const int64_t words = (n_blocks + 31) / 32;
+  for (int64_t i = threadIdx.x; i < words; i += kSelectThreads) {
+    chosen[i] = 0;
+  }
+  if (n_blocks <= kSelectChunk) {
+    select_topk<true, false>(keys, row, 0, n_blocks, k, sh);
+  } else {
+    select_topk<false, true>(keys, row, 0, n_blocks, k, sh);
+  }
+  for (int64_t j = threadIdx.x; j < k; j += kSelectThreads) {
+    const uint32_t b = composite_slot(sh.best[j]);
+    atomicOr(&chosen[b / 32], 1u << (b % 32));
+  }
+  __syncthreads();
+  // compaction in index order: thread t owns words [t * per, (t + 1) * per)
+  using Scan = cub::BlockScan<int32_t, kSelectThreads>;
+  __shared__ typename Scan::TempStorage scan;
+  const int64_t per = (words + kSelectThreads - 1) / kSelectThreads;
+  int32_t mine = 0;
+  for (int64_t i = threadIdx.x * per; i < (threadIdx.x + 1) * per && i < words; ++i) {
+    mine += __popc(chosen[i]);
+  }
+  int32_t pos;
+  Scan(scan).ExclusiveSum(mine, pos);
+  for (int64_t i = threadIdx.x * per; i < (threadIdx.x + 1) * per && i < words; ++i) {
+    uint32_t bits = chosen[i];
+    while (bits) {
+      const int b = __ffs(bits) - 1;
+      bits &= bits - 1;
+      blocks[row * k + pos++] = i * 32 + b;
+    }
+  }
+}
+
+// The chosen blocks' slots as composites [rows, k * kTopkBlock], ascending slot order (0 past the
+// row's width).
+template <typename T>
+__global__ void gather_blocks_kernel(
+    RawKeys<T> keys,
+    const int64_t* __restrict__ blocks,
+    int64_t rows,
+    int64_t k,
+    uint64_t* __restrict__ cand) {
+  const int64_t total = rows * k * kTopkBlock;
+  for (int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; i < total;
+       i += static_cast<int64_t>(gridDim.x) * blockDim.x) {
+    const int64_t row = i / (k * kTopkBlock);
+    const int64_t slot = blocks[row * k + (i / kTopkBlock) % k] * kTopkBlock + i % kTopkBlock;
+    cand[i] = slot < keys.width
+        ? composite(keys.key(row, slot), static_cast<uint32_t>(slot))
+        : 0;
+  }
+}
+
 // Final stage: one CTA per row, select over KEYS, then official_probe_score's epilogue on the
 // sorted winners (see epilogue_kernel).
 template <typename T, typename KEYS>
@@ -456,6 +571,7 @@ __global__ void __launch_bounds__(kSelectThreads) select_epilogue_kernel(
     const T* __restrict__ raw,
     const int32_t* __restrict__ idx,
     int64_t width,
+    const int32_t* __restrict__ limit,
     const int64_t* __restrict__ sort_perm,
     const float* __restrict__ q_scales,
     const float* __restrict__ global_scale,
@@ -476,7 +592,7 @@ __global__ void __launch_bounds__(kSelectThreads) select_epilogue_kernel(
     float score = -INFINITY;
     if (j < kk && sh.best[j] != 0) {
       const uint32_t slot = composite_slot(sh.best[j]);
-      const int32_t pos = slot < width ? idx[row * width + slot] : -1;
+      const int32_t pos = slot < limit[row] ? idx[row * width + slot] : -1;
       if (pos >= 0) {
         id = sort_perm[pos];
         const float dot = static_cast<float>(raw[row * width + slot]);
@@ -564,7 +680,8 @@ __global__ void __launch_bounds__(kPrepThreads) probe_prep_kernel(
     int32_t* __restrict__ warp_size,
     int32_t* __restrict__ warp_rounded_length_cumsum,
     int32_t* __restrict__ remaining_length_cumsum,
-    int32_t* __restrict__ warp_size_cumsum) {
+    int32_t* __restrict__ warp_size_cumsum,
+    int32_t* __restrict__ row_written) {
   using Reduce = cub::BlockReduce<float, kPrepThreads>;
   using Scan = cub::BlockScan<int64_t, kPrepThreads>;
   __shared__ union {
@@ -657,6 +774,13 @@ __global__ void __launch_bounds__(kPrepThreads) probe_prep_kernel(
     }
     __syncthreads();
   }
+  // the slots the scorer writes in each row: its full warps' docs, then its remainders
+  for (int64_t r = threadIdx.x; r < rows; r += kPrepThreads) {
+    const int64_t last = r * n_probe + n_probe - 1;
+    row_written[r] = n_probe == 0 ? 0
+                                  : warp_rounded_length_cumsum[last] + remaining_length_cumsum[last] -
+            (r == 0 ? 0 : remaining_length_cumsum[r * n_probe - 1]);
+  }
 }
 
 // The two-level top-k (C7; our Triton epilogue's, kernels.md § SilverTorch kernels "Top-k"):
@@ -664,9 +788,6 @@ __global__ void __launch_bounds__(kPrepThreads) probe_prep_kernel(
 // blocks per top-k slot, the top-k runs on the slots of the row's k best blocks. Exact: every
 // block holding a slot above the k-th score has a larger max than any block without one, and
 // there are fewer than k of them.
-constexpr int64_t kTopkBlock = 256;
-constexpr int64_t kTopkMinSlots = int64_t{1} << 23;
-constexpr int64_t kTopkMinRatio = 8;
 
 template <typename T>
 using TopkAcc = std::conditional_t<std::is_same_v<T, int32_t>, int32_t, float>;
@@ -1080,6 +1201,7 @@ struct Prep {
   Tensor warp_rounded_length_cumsum;
   Tensor remaining_length_cumsum;
   Tensor warp_size_cumsum;
+  Tensor row_written;
 };
 
 Prep probe_prep(
@@ -1106,7 +1228,8 @@ Prep probe_prep(
       at::empty({rows * n_probe}, i32),
       at::empty({rows, n_probe}, i32),
       at::empty({rows * n_probe}, i32),
-      at::empty({rows * n_probe}, i32)};
+      at::empty({rows * n_probe}, i32),
+      at::empty({rows}, i32)};
   probe_prep_kernel<<<
       rows + 1,
       kPrepThreads,
@@ -1127,7 +1250,8 @@ Prep probe_prep(
       p.warp_size.mutable_data_ptr<int32_t>(),
       p.warp_rounded_length_cumsum.mutable_data_ptr<int32_t>(),
       p.remaining_length_cumsum.mutable_data_ptr<int32_t>(),
-      p.warp_size_cumsum.mutable_data_ptr<int32_t>());
+      p.warp_size_cumsum.mutable_data_ptr<int32_t>(),
+      p.row_written.mutable_data_ptr<int32_t>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return p;
 }
@@ -1236,6 +1360,8 @@ std::tuple<Tensor, Tensor> search_cuda(
   }
 
   const bool query_shared = scorer_query_on_shared_mem(item_codes.size(1), cluster_ids.size(0));
+  // our select reads only each row's written slots, so the scorer need not pre-fill (K fix 10)
+  const bool write_failed = k <= kSelectMaxK;
   Tensor raw;
   Tensor idx;
   if (payloads) {
@@ -1255,7 +1381,8 @@ std::tuple<Tensor, Tensor> search_cuda(
         remainders,
         last_element(prep.remaining_length_cumsum),
         std::nullopt,
-        query_shared);
+        query_shared,
+        write_failed);
   } else {
     std::tie(raw, idx) =
         st::ops::fused_kmean_ann::fused_kmean_ann_cuda_precomputed(
@@ -1270,7 +1397,8 @@ std::tuple<Tensor, Tensor> search_cuda(
             prep.warp_rounded_length_cumsum,
             prep.remaining_length_cumsum,
             prep.warp_size_cumsum,
-            query_shared);
+            query_shared,
+            write_failed);
   }
 
   // The epilogue of retrieve.ops.official.official_probe_score: top-k on the raw scores (pads at
@@ -1288,7 +1416,8 @@ std::tuple<Tensor, Tensor> search_cuda(
     auto launch = [&](auto zero) {
       using T = decltype(zero);
       const T* raw_ptr = reinterpret_cast<const T*>(raw.const_data_ptr());
-      const RawKeys<T> keys{raw_ptr, idx.const_data_ptr<int32_t>(), w};
+      const RawKeys<T> keys{
+          raw_ptr, idx.const_data_ptr<int32_t>(), w, prep.row_written.const_data_ptr<int32_t>()};
       auto finish = [&](auto final_keys, int64_t n) {
         select_epilogue_kernel<T, decltype(final_keys)>
             <<<rows, kSelectThreads, 0, stream>>>(
@@ -1297,6 +1426,7 @@ std::tuple<Tensor, Tensor> search_cuda(
                 raw_ptr,
                 idx.const_data_ptr<int32_t>(),
                 w,
+                prep.row_written.const_data_ptr<int32_t>(),
                 sort_perm.const_data_ptr<int64_t>(),
                 q_scales.const_data_ptr<float>(),
                 gs.const_data_ptr<float>(),
@@ -1310,12 +1440,40 @@ std::tuple<Tensor, Tensor> search_cuda(
         finish(keys, w);
         return;
       }
-      Tensor cand = at::empty({rows, chunks * k}, raw.options().dtype(at::kLong));
-      uint64_t* cand_ptr = reinterpret_cast<uint64_t*>(cand.mutable_data_ptr<int64_t>());
-      select_chunk_kernel<RawKeys<T>><<<rows * chunks, kSelectThreads, 0, stream>>>(
-          keys, w, chunks, k, cand_ptr);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-      int64_t per_row = chunks * k;
+      Tensor cand;
+      uint64_t* cand_ptr;
+      int64_t per_row;
+      const int64_t n_blocks = (w + kTopkBlock - 1) / kTopkBlock;
+      if (w / kTopkBlock >= kTopkMinRatio * k) {
+        Tensor block_keys = at::empty({rows, n_blocks}, raw.options().dtype(at::kInt));
+        uint32_t* bk = reinterpret_cast<uint32_t*>(block_keys.mutable_data_ptr<int32_t>());
+        const int64_t sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+        block_max_key_kernel<T>
+            <<<std::min(64 * sms, (rows * n_blocks * 32 + 255) / 256), 256, 0, stream>>>(
+                keys, rows, n_blocks, bk);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+        Tensor blocks = at::empty({rows, k}, raw.options().dtype(at::kLong));
+        select_blocks_kernel<<<
+            rows,
+            kSelectThreads,
+            ((n_blocks + 31) / 32) * sizeof(uint32_t),
+            stream>>>(ArrayKeys{bk, n_blocks}, n_blocks, k, blocks.mutable_data_ptr<int64_t>());
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+        per_row = k * kTopkBlock;
+        cand = at::empty({rows, per_row}, raw.options().dtype(at::kLong));
+        cand_ptr = reinterpret_cast<uint64_t*>(cand.mutable_data_ptr<int64_t>());
+        gather_blocks_kernel<T>
+            <<<std::min(64 * sms, (rows * per_row + 255) / 256), 256, 0, stream>>>(
+                keys, blocks.const_data_ptr<int64_t>(), rows, k, cand_ptr);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      } else {
+        cand = at::empty({rows, chunks * k}, raw.options().dtype(at::kLong));
+        cand_ptr = reinterpret_cast<uint64_t*>(cand.mutable_data_ptr<int64_t>());
+        select_chunk_kernel<RawKeys<T>><<<rows * chunks, kSelectThreads, 0, stream>>>(
+            keys, w, chunks, k, cand_ptr);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+        per_row = chunks * k;
+      }
       while (per_row > kSelectChunk) {
         const int64_t next_chunks = (per_row + kSelectChunk - 1) / kSelectChunk;
         Tensor next = at::empty({rows, next_chunks * k}, cand.options());
