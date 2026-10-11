@@ -12,6 +12,19 @@
 // fused_kmean_ann_cuda.cu and bloom_index_search_cuda.cu.
 namespace st::ops::fused_kmean_ann {
 
+std::tuple<at::Tensor, at::Tensor> fused_kmean_ann_cuda_precomputed(
+    const at::Tensor& cluster_offsets,
+    const at::Tensor& cluster_ids,
+    const at::Tensor& cluster_length,
+    const at::Tensor& embeddings,
+    const at::Tensor& queries,
+    int64_t max_tensor_size_per_row,
+    const std::optional<at::Tensor>& filtering_bit_mask,
+    int64_t divisor_for_int8,
+    const at::Tensor& cluster_warp_rounded_length_cumsum,
+    const at::Tensor& cluster_remaining_length_cumsum,
+    const at::Tensor& cluster_warp_size_cumsum);
+
 std::tuple<at::Tensor, at::Tensor> fused_kmean_ann_cuda_with_partial_masks(
     const at::Tensor& cluster_offsets,
     const at::Tensor& cluster_ids,

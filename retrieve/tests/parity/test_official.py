@@ -613,6 +613,40 @@ def test_c4_fork_prepared_searches_equal_upstream():
                           torch.device("cuda"), slots=b)  # fmt: skip
 
 
+@pytest.mark.parametrize("d", [128, 192, 768])
+def test_c6_fork_probe_prep_equals_reference(d):
+    """META-FORK C6: the fork's prep kernel (``stfork.probe_prep``, ``search``'s first launch)
+    against our torch path, ``torch.equal`` throughout: codes and scales against
+    ``quantize_int8`` on 10,000 queries (Gaussian, plus rows of zeros, of one tiny value and of
+    exact ``.5`` code quotients), the probed clusters' ids / lengths / offsets against the
+    gathers, and the warp sizes and three cumsums against ``round_cluster_to_warp`` + cumsum."""
+    if OB != "official-fork":
+        pytest.skip("fork-only gate (META-FORK C6)")
+    g = torch.Generator(device="cuda").manual_seed(9)
+    q = torch.randn(10_000, d, generator=g, device="cuda")
+    q[0] = 0.0
+    q[1] = 0.0
+    q[1, 3] = 1e-30
+    q[2] = torch.arange(d, device="cuda") % 3 - 1.0
+    q[2, 0] = 2.54  # 127 · x / 2.54 lands on .5 for x = ±0.01, 1.27 ...
+    q[2, 1:5] = torch.tensor([0.01, -0.01, 1.27, -1.27], device="cuda")
+    n_lists, p = 300, 24
+    sizes = torch.randint(0, 150, (n_lists,), generator=g, device="cuda")
+    offsets = torch.cat([sizes.new_zeros(1), sizes.cumsum(0)])
+    probe = torch.rand(q.shape[0], n_lists, generator=g, device="cuda").argsort(1)[:, :p]
+    out = torch.ops.stfork.probe_prep(q, probe, offsets, sizes)
+    codes, scales = quantize_int8(q)
+    assert torch.equal(out[0], codes) and torch.equal(out[1], scales)
+    length = sizes[probe]
+    assert torch.equal(out[2], probe) and torch.equal(out[3], length)
+    assert torch.equal(out[4], offsets[probe])
+    warps = (length // 32).to(torch.int32).flatten()
+    assert torch.equal(out[5], warps)
+    assert torch.equal(out[6], (warps * 32).view_as(probe).cumsum(1, dtype=torch.int32))
+    assert torch.equal(out[7], (length % 32).flatten().cumsum(0, dtype=torch.int32))
+    assert torch.equal(out[8], warps.cumsum(0, dtype=torch.int32))
+
+
 N, D, B, K = 4096, 128, 16, 64
 N_LISTS, N_PROBE = 64, 8
 C, A_MAX = 2, 2

@@ -1834,8 +1834,11 @@ file. `CHANGES.md` lists every change; each has its gate row in
 `SilverTorch(backend="official-fork")` selects it.
 
 **Forward: one op.** `SilverTorch(backend="official-fork")` runs phase 1 (ours) and then one
-`torch.ops.stfork.search` call (`adapter.fork_search`; `fork_search_cuda.cu`): query int8 (our
-`quantize_int8`, op for op), the probed clusters' lengths, the filter's masks (bloom over the
+`torch.ops.stfork.search` call (`adapter.fork_search`; `fork_search_cuda.cu`): one prep launch
+(`probe_prep_kernel`: per query row the int8 codes and scale exactly as eager torch computes our
+`quantize_int8` — the code quotient in fp64 rounded to fp32, the scale `abs_max · fp32(1/127)` as
+torch divides by a CPU scalar — and one block for the probed clusters' ids, lengths, offsets,
+warp sizes and the scorer's three cumsums; `stfork::probe_prep` exposes it), the filter's masks (bloom over the
 prepared plans, partial or full; `exact` passes our Triton `clause_mask_packed` as the full-`N`
 mask), payloads + scorer, top-k on the raw scores and the `[B, k]` epilogue of
 `official_probe_score` in its order, returning `(ids int64 [B, k], scores fp32 [B, k])` with

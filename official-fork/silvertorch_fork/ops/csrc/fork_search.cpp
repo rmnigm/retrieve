@@ -31,4 +31,14 @@ TORCH_LIBRARY_FRAGMENT(stfork, m) {
       "int hash_k=0, "
       "bool bloom_partial=True)"
       "-> (Tensor, Tensor)");
+
+  // search's first launch (C6), exposed for its gate: int8 codes, scales, the probed clusters'
+  // ids / lengths / offsets, warp sizes and the three cumsums the scorer reads.
+  m.def(
+      "probe_prep("
+      "Tensor query, "
+      "Tensor probe_ids, "
+      "Tensor cluster_offsets, "
+      "Tensor cluster_sizes)"
+      "-> (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor)");
 }

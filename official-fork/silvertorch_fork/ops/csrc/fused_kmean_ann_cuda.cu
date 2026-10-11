@@ -1,5 +1,5 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C3: no host sync in fused_kmean_ann / _with_partial_masks (official-fork/CHANGES.md).
+// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C3: no host sync in fused_kmean_ann / _with_partial_masks; C6: fused_kmean_ann_cuda_precomputed (official-fork/CHANGES.md).
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1971,6 +1971,73 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_cuda(
       remaining_docs,
       last_element_ptr(cluster_remaining_length_cumsum),
       per_embedding_scale,
+      /*query_on_shared_mem=*/false);
+}
+
+// fork (C6): fused_kmean_ann with the warp rounding and its cumsums already computed (by
+// stfork::search's prep kernel), an optional full-N mask, no per-embedding scale.
+std::tuple<Tensor, Tensor> fused_kmean_ann_cuda_precomputed(
+    const Tensor& cluster_offsets,
+    const Tensor& cluster_ids,
+    const Tensor& cluster_length,
+    const Tensor& embeddings,
+    const Tensor& queries,
+    int64_t max_tensor_size_per_row,
+    const std::optional<Tensor>& filtering_bit_mask,
+    int64_t divisor_for_int8,
+    const Tensor& cluster_warp_rounded_length_cumsum,
+    const Tensor& cluster_remaining_length_cumsum,
+    const Tensor& cluster_warp_size_cumsum) {
+  const uint64_t* filtering_bitmask_ptr = nullptr;
+  int64_t filtering_bitmask_column = 0;
+  if (filtering_bit_mask) {
+    TORCH_CHECK(filtering_bit_mask->scalar_type() == at::kLong);
+    TORCH_CHECK(filtering_bit_mask->is_contiguous());
+    TORCH_CHECK(filtering_bit_mask->dim() == 2);
+    TORCH_CHECK(filtering_bit_mask->size(0) == cluster_ids.size(0));
+    filtering_bitmask_ptr = reinterpret_cast<const uint64_t*>(
+        filtering_bit_mask->data_ptr<int64_t>());
+    filtering_bitmask_column = filtering_bit_mask->size(1);
+  }
+  max_tensor_size_per_row = (max_tensor_size_per_row + kWarpThreadCount - 1) /
+      kWarpThreadCount * kWarpThreadCount;
+  at::cuda::OptionalCUDAGuard device_guard;
+  device_guard.set_index(cluster_ids.get_device());
+
+  auto [warp_payloads, total_needed_warps] = generate_warp_payload(
+      cluster_warp_size_cumsum,
+      cluster_offsets,
+      cluster_ids,
+      cluster_warp_rounded_length_cumsum,
+      filtering_bitmask_ptr,
+      filtering_bitmask_column,
+      nullptr,
+      max_tensor_size_per_row);
+  auto [remaining_payloads, remaining_docs] = generate_remaining_payload(
+      cluster_length,
+      cluster_offsets,
+      cluster_ids,
+      cluster_warp_rounded_length_cumsum,
+      cluster_remaining_length_cumsum,
+      filtering_bitmask_ptr,
+      filtering_bitmask_column,
+      nullptr,
+      max_tensor_size_per_row);
+  return fused_kmean_ann_run_payloads(
+      cluster_ids,
+      embeddings,
+      queries,
+      max_tensor_size_per_row,
+      /*invalid_index_value=*/-1,
+      divisor_for_int8,
+      filtering_bitmask_ptr != nullptr,
+      warp_payloads,
+      total_needed_warps,
+      last_element_ptr(cluster_warp_size_cumsum),
+      remaining_payloads,
+      remaining_docs,
+      last_element_ptr(cluster_remaining_length_cumsum),
+      std::nullopt,
       /*query_on_shared_mem=*/false);
 }
 
