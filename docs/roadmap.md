@@ -19,10 +19,11 @@ step names. Who executes a step is
 
 **The study** ([decisions](decisions.md#goal-and-scheduling)): Meta's
 official SilverTorch code, adapted by us, against LiNR V1-V3. The queue
-below finishes the adapted SilverTorch backend, reruns every SilverTorch
-cell on it, removes our Triton SilverTorch reimplementation from the code,
-and writes the paper. LiNR's numbers come from the final pass
-(`campaign-final`, library `e16512f5`) and are not rerun.
+below finishes the adapted SilverTorch backend, measures it for the paper
+(LiNR's numbers until then come from the final pass, `campaign-final`,
+library `e16512f5`), lets the user write the paper, removes our Triton
+SilverTorch reimplementation from the code, and ends with one full rerun
+of everything at the last repo version.
 
 **Rules.** No dates: every step is done, in the order given, and nothing
 is optional. Do not start a step whose dependencies are open. When a step
@@ -137,28 +138,27 @@ one pod.
 
 ## The queue
 
-### 1. META-FORK: finish, review, ACCEPT, tag
+The order is the user's (2026-10-11): numbers for the paper first, from
+measurement legs on the adapted backend; the paper written on them; the
+code cleaned; and **the full rerun of everything, pinned to the last repo
+version, as the very last step**.
+
+### 1. META-FORK: review, ACCEPT, tag
 
 Meta's official SilverTorch code, adapted (`official-fork/`,
 `backend="official-fork"`, branch `dev/meta-fork`): the chain fork-coder →
 GPU gate runner → fork-review, one agent at a time (chain notes under
 `.chains/meta-fork/`). What the adaptation changes and its parity gate:
-[Meta as published vs adapted](paper/meta-published-vs-adapted.md).
+[Meta as published vs adapted](paper/meta-published-vs-adapted.md). The
+bar is the user's: bit-exact against Meta's published code, no host syncs,
+CUDA-graph capturable with the compile gate, a clean API, faster than
+Meta's `-O3` build. Being at least as fast as our Triton SilverTorch is
+no longer a target (Triton is out of the study, controller 2026-10-11): no
+new K fixes; the cells still slower than Triton are listed with their
+cause, for the record.
 
-- [ ] **K fixes on the four loss clusters** (fork-coder): the cells where
-  the adapted code is still slower than our Triton SilverTorch at
-  campaign-v2.12, each with its measured cause in the GPU runner's status
-  note: (1) wide unfiltered scans at d ≥ 192 (Meta's scorer; PubMed d768,
-  arXiv d256, YFCC d192 at wide probes); (2) the bloom **full** path on
-  multi-clause filters (Meta's full-N bloom search); (3) the partial bloom
-  path at bs 1 under CUDA graph (the payload kernels); (4) the exact filter
-  at wide probes, bs 1 (C9's per-doc check). Each fix bit-exact, its row in
-  CHANGES, a cell that still loses listed with cause, never hidden.
-- [ ] **Re-gate** (GPU runner): the four clusters at ≤ 10 M on pod b, the
-  rest of the grid only where X-relevant code changed; gate R (C12 / C13:
-  recall against the exact oracle, false positives, index bytes at D3's
-  widths on goodreads / arXiv / PubMed); the 30 M cells (LAION d256, pod d,
-  running at head 82fafb6), at the final head.
+- [ ] **fork-coder's done note**: what is in flight finished, every gate
+  result, the Triton-relative cells with cause.
 - [ ] **fork-review**: the branch against the plan's definition of done
   (X bit-exact, R, zero host syncs, capture, the compile gate, one clean
   API, licence and headers, docs). Fixes go back to fork-coder, then
@@ -168,29 +168,26 @@ GPU gate runner → fork-review, one agent at a time (chain notes under
   `kernels.md`'s adapted-backend section).
 
 *Gate*: fork-review's ACCEPT note, every gate row green in validation's
-META-FORK section. *GPU*: pod b (≤ 10 M), pod d (30 M); one job per GPU.
+META-FORK section.
 
-### 2. FORK-RERUN: every SilverTorch cell on the adapted backend
+### 2. NUMBERS: adapted SilverTorch over the study grid
 
-Needs 1, and runs after the paper's abstract (paper-draft; it needs claim
-verdicts, not numbers). Rerun every SilverTorch cell of the final grid with
-`backend="official-fork"` at the `campaign-fork` tag, in place of our
-Triton SilverTorch: `filter`, `deep`, `synth`, `codesign`, `h2h`,
-tune-timed, `laion30m`, the N-sweep, `seeds-c7`, the C6 ceiling checks;
-`bloomwidth` for C4. Meta's code as published (`official`, `-O3`) runs
-beside it only in the cells that feed T3 and the parity spill (`h2h`,
-`codesign`). LiNR cells are not rerun, except as the interleaved partner
-of item 5. The study's cells run the int32 score path with the exact recheck of
-bloom survivors on (C13); fp16 only as a reported variant where cheap
-([decisions](decisions.md#goal-and-scheduling)).
-Recall targets reported: 0.90 and 0.95, 0.99 a stretch (user,
-2026-10-11).
+Needs 1. Measurement legs at the `campaign-fork` tag, uploaded as Hub
+artifacts / `numbers-*` legs, that give the paper its numbers: SilverTorch
+on `backend="official-fork"` over the study grid (`filter`, `deep`,
+`synth`, `codesign`, `h2h`, tune-timed, `laion30m`, the N-sweep,
+`seeds-c7`, the C6 ceiling checks, `bloomwidth` for C4). LiNR's numbers
+come from `campaign-final` (not rerun here), except where an item below
+runs it beside SilverTorch. Meta's code as published (`official`, `-O3`)
+runs only in the cells that feed T3 and the parity spill (`h2h`,
+`codesign`). Configuration: int32 score path, exact recheck of bloom
+survivors on (C13); fp16 only as a reported variant where cheap
+([decisions](decisions.md#goal-and-scheduling)). Recall targets reported:
+0.90 and 0.95, 0.99 a stretch.
 
-The grid extension the user approved (2026-10-11; plan
-`.chains/results-draft/2026-10-11-163000000-grid-plan.md`) folds in here:
-it changes which cells run, not the number of legs. Why: at one tuned
-point SilverTorch's recall swings across filters and k, and the 10 M rows
-stop short of 0.95 (results draft, provisional).
+The grid plan the user approved (2026-10-11; plan
+`.chains/results-draft/2026-10-11-163000000-grid-plan.md`), items 1-8 and
+10 (item 9, d apart from the dataset, is not scheduled):
 
 1. **Per-filter probe curves**: every filter sweep (real and synth),
    `n_probe` doubling from 8 to the cap `n_lists` / 4, k 100 and 1000,
@@ -215,24 +212,6 @@ stop short of 0.95 (results draft, provisional).
 5. **Interleaved SilverTorch vs LiNR**: SilverTorch and LiNR (V1, V2, the
    best per cell) interleaved in one process per cell group (ABAB rounds,
    as `seeds-c1`), so every SilverTorch / LiNR ratio has a paired CI.
-
-- Size it first from the final pass's per-cell wall times (the method of
-  [F-REPRO sizing](artifacts/f-repro/README.md)), then a recipe of legs per
-  GPU like [campaign-final](artifacts/campaign-final/README.md).
-- After each leg: `bench upload --verify`, a [hub-index](artifacts/hub-index.md)
-  row, the validation row; then rebuild the results draft
-  (its `build_results.py` under the results-draft artifacts, on
-  `dev/results-draft`).
-
-*Gate*: every planned cell `ok`; eager-vs-graph ids equal on every
-adapted cell; the int32 cells' scores `torch.equal` to the published code
-where both ran. *Estimate*: not sized yet.
-
-### 2b. GRID-EXT: small legs after the rerun
-
-Needs 2. Items 6-10 of the grid plan, each a small separate leg, both
-families (adapted SilverTorch, LiNR on Triton):
-
 6. **bs 64** (and 256 where LiNR fits at 10 M) on the real filters and the
    LAION sweep.
 7. **LiNR V3 as a curve**: candidate pool 0.5 / 1 / 2 / 5 / 10 / 20 % on the
@@ -240,31 +219,58 @@ families (adapted SilverTorch, LiNR on Triton):
    approximate-vs-approximate comparison at matched recall.
 8. **Correlated filters**: `arxiv-corr-synth` gains LiNR V1 / V2 and the
    adapted SilverTorch.
-9. **d apart from the dataset**: one dataset at several widths (proposed
-   arXiv d 128 / 256 / 768, same N and filters); the adapted code's known
-   loss regime is wide scans at d ≥ 192.
 10. **The papers' own k**: k 2048 on a subset (LiNR reports recall@2000;
     SilverTorch top-k 1024-4096).
 
-*Gate*: every planned cell `ok`, Hub rows, validation rows. *Estimate*:
-sized with FORK-RERUN's grid.
+The figures the paper leads with also get their points here (user,
+2026-10-11): F1 / F2 at 10 M and 30 M with the low and middle pass rates
+(0.001, 0.003, 0.03, 0.05) on uniform synth, the probe curve at 30 M, seeds
+0-2 on the cells a T2 confidence interval rests on.
 
-### 3. RENAME: the adapted backend becomes SilverTorch's default
+- Size the legs from the final pass's per-cell wall times (the method of
+  [F-REPRO sizing](artifacts/f-repro/README.md)).
+- After each leg: `bench upload --verify`, a [hub-index](artifacts/hub-index.md)
+  row, the validation row.
 
-Needs 2. `backend="official-fork"` becomes the default `SilverTorch`
-backend under a name decided in this step; the package, distribution and
-op-namespace names (`silvertorch_fork`, `silvertorch-fork`, `stfork`)
-likewise. Records keep the names they were written with; the report maps
-them. Every copy of the old names in `AGENTS.md`, `README.md`, `docs/`
-and `retrieve/docs/` follows (rule 4).
+*Gate*: every planned cell `ok`; eager-vs-graph ids equal on every
+adapted cell; the int32 cells' scores `torch.equal` to the published code
+where both ran. *Estimate*: not sized yet.
+
+### 3. RESULTS: the results draft on the real numbers, the abstract fixed
+
+Needs 2. Rebuild the results draft from NUMBERS' legs and LiNR's
+`campaign-final` records (`build_results.py` under the results-draft
+artifacts, on `dev/results-draft`), refresh [results](paper/results.md) and the
+story page, restate C1-C7's status in [claims](paper/claims.md), and fix
+the abstract's sentences ([abstract](paper/abstract.md)) to what the
+numbers say. CPU.
+
+### 4. PAPER: the user writes it
+
+Needs 3. The user writes the paper (ECIR 2027 reproducibility format, 12
+pages LNCS) on RESULTS' numbers, against the
+[ECIR criteria](paper/ecir-criteria.md); agents support with tables,
+figures and the `docs/paper/` sections on request (F2: the
+[Meta as published vs adapted](paper/meta-published-vs-adapted.md) section
+from T3 and the META-FORK gates, with CIs and paired tests). The final
+tables are regenerated from FULL-RERUN's parquet (step 7).
+
+### 5. RENAME: the adapted backend becomes SilverTorch's default
+
+Needs 2 (beside 3-4, on its own branch). `backend="official-fork"` becomes
+the default `SilverTorch` backend under a name decided in this step; the
+package, distribution and op-namespace names (`silvertorch_fork`,
+`silvertorch-fork`, `stfork`) likewise. Records keep the names they were
+written with; the report maps them. Every copy of the old names in
+`AGENTS.md`, `README.md`, `docs/` and `retrieve/docs/` follows (rule 4).
 
 *Gate*: library and harness suites green, Meta's suite on the renamed
 package, the compile gate, outputs `torch.equal` before / after on the
 gate grid's int32 cells (a rename changes no behaviour).
 
-### 4. TRITON-ST-DELETE: delete the Triton SilverTorch reimplementation
+### 6. TRITON-ST-DELETE: delete the Triton SilverTorch reimplementation
 
-Needs 3 (rule 5: the adapted backend is accepted and its rerun is done).
+Needs 5 (rule 5: the adapted backend is accepted and NUMBERS measured it).
 Tag `triton-silvertorch-final` on `staging` first, then delete
 `SilverTorch`'s `backend="triton"` and `backend="torch"` paths: the
 `codesigned_probe_score*` and `bloom_full_mask` kernels and their
@@ -281,55 +287,38 @@ LiNR's kernels stay.
 *Gate*: library and harness suites green, `interfaces.DISPATCH` without
 the deleted backends, `ruff`, links 0.
 
-### 5. FINAL-AGG: one parquet, D1-G, T1
+### 7. FULL-RERUN: everything, pinned to the last repo version (the very last step)
 
-Needs 4 and 2b. One `results.parquet`: the adapted SilverTorch cells
-(FORK-RERUN, GRID-EXT), the new LiNR cells of GRID-EXT and item 5, and LiNR's (`campaign-final`), plus the published-code cells T3 needs; the
-manifest names, per (dataset, suite, algo, backend), the accepted subtree.
-D1-G's checks over it (eager-vs-graph ids, a byte-identical quality subset
-per leg, batch scaling, `bench report --manifest`), T1 with C1-C7 as
-re-stated in [claims](paper/claims.md), T3 as Meta as published vs adapted
-(its scorer column from `kernel_scopes`: H-SCOPE's one GPU test on a real
-call is left). **≈ 4 GPU-h** for D1-G's reruns, both GPUs.
+Needs 4 and 6. Tag the last repo version and rerun everything at it: LiNR,
+the adapted SilverTorch (under its final name) and the grid of NUMBERS,
+into one `results.parquet` with its recipe (a leg list per GPU like
+[campaign-final](artifacts/campaign-final/README.md)) and a manifest that
+names, per (dataset, suite, algo, backend), the accepted subtree. Then
+D1-G's checks (eager-vs-graph ids, a byte-identical quality subset per
+leg, batch scaling, `bench report --manifest`), T1 with C1-C7, T3 as Meta
+as published vs adapted (its scorer column from `kernel_scopes`: H-SCOPE's
+one GPU test on a real call is left). The paper's tables are regenerated
+from this parquet; a number that moves against RESULTS' is reported, not
+smoothed.
 
-*Gate*: D1-G's four checks (the batching check as the user declared it
-for the final pass: green with its 25 listed, explained failures), 0
-manifest gaps.
+*Gate*: every planned cell `ok`, D1-G's four checks, 0 manifest gaps.
+*Estimate*: sized at the step's start from NUMBERS' and the final pass's
+wall times.
 
-### 6. The paper
+### 8. F4: package the artifacts
 
-Needs 5.
-
-- [ ] **F2: the "Meta as published vs adapted" section** from T3 and the
-  META-FORK gates, with CIs and paired tests
-  ([paper](paper/meta-published-vs-adapted.md)).
-- [ ] **F4: package the artifacts**: the results public, the PubMed slice
-  or its build recipe with checksums, a tagged `torchretrieve` release
-  (LiNR plus the adapted SilverTorch; the adapted code keeps Meta's
-  Apache-2.0 licence and headers), a Zenodo DOI including the adapted
-  source and Meta's pinned sdist, a one-command reproduction, an
-  anonymised mirror (anonymous.4open.science) for the double-blind review.
-  Needs the user's accounts and the release decisions.
-- [ ] **F5: write the paper** (ECIR 2027 reproducibility format, 12 pages
-  LNCS): every table from `bench report`, the `docs/paper/` drafts
-  rewritten against C1-C7 as re-stated, against the
-  [ECIR criteria](paper/ecir-criteria.md).
-
-### 7. AFTER-QUEUE: sharpen the figures the paper leads with
-
-Beside 6, GPU only for cells a figure needs (user, 2026-10-11: once the
-planned work is done, more experiments and deeper sweeps, close to what
-the paper needs): F1 / F2 at 10 M and 30 M with the low and middle pass
-rates (0.001, 0.003, 0.03, 0.05) on uniform synth, the probe curve at 30 M
-(n_probe 64 / 256), seeds 0-2 on the cells a T2 confidence interval rests
-on. SilverTorch on the adapted backend, LiNR on Triton; no Triton
-SilverTorch work.
+Needs 7. The results public, the PubMed slice or its build recipe with
+checksums, a tagged `torchretrieve` release (LiNR plus the adapted
+SilverTorch; the adapted code keeps Meta's Apache-2.0 licence and
+headers), a Zenodo DOI including the adapted source and Meta's pinned
+sdist, a one-command reproduction, an anonymised mirror
+(anonymous.4open.science) for the double-blind review. Needs the user's
+accounts and the release decisions.
 
 ## Dependencies
 
 ```
-paper abstract (paper-draft) ─┐
-1 META-FORK ─> tag campaign-fork, merge ─┴─> 2 FORK-RERUN ─┬─> 3 RENAME ─> 4 TRITON-ST-DELETE ─┬─> 5 FINAL-AGG ─> 6 F2, F4, F5
-                                                           └─> 2b GRID-EXT ────────────────────┘                └─> 7 AFTER-QUEUE (beside 6)
+1 META-FORK ─> tag campaign-fork, merge ─> 2 NUMBERS ─> 3 RESULTS ─> 4 PAPER (user) ─┐
+                                              └─> 5 RENAME ─> 6 TRITON-ST-DELETE ──┴─> 7 FULL-RERUN (last) ─> 8 F4
 Needs the user: release decisions before F4
 ```

@@ -137,7 +137,7 @@ lists every page; [`docs/SCHEMA.md`](docs/SCHEMA.md) holds the conventions
    backends went at roadmap B4 only after the official backend's parity
    gate (B2) was green; tag `cuda-cute-backends-final` holds them. The
    Triton SilverTorch backend goes the same way, after the adapted
-   official backend's review ACCEPT and rerun, behind the tag
+   official backend's review ACCEPT and its NUMBERS legs, behind the tag
    `triton-silvertorch-final` ([roadmap](docs/roadmap.md)).
 6. **Commits and branches.** Commit only when the user asks. One branch per
    roadmap step (`dev/<step>`) off `staging`. Session scripts go under

@@ -48,13 +48,13 @@ paper (deadline 19 October) must stand behind each sentence:
 | LiNR pre- vs post-filtering: holds for single queries, largely disappears in batches | C1 ([claims](claims.md), [results](results.md#claim-verification)) | LiNR final pass; D1-G green ([validation](../validation.md)) |
 | LiNR 1-bit variant: faster only for batched queries, recall recovered with enough bits | C2 | LiNR final pass; our code length is capped at the embedding dimension against LiNR's 512 bits ([LN-8](reproduction-deviations.md#4-linr-v1v4--deviations)): say so in the paper |
 | SilverTorch co-design beats filtering the full index first only at 30M items | C5, Meta's code as published | measured on the published code; the adapted code is not yet timed on it |
-| recall at the default probe count falls with filter selectivity | C6 | to be re-read on the adapted code's rerun |
-| at matched recall, IVF faster for broad filters, exhaustive scan for highly selective ones | the head-to-head in [results](results.md#who-wins-where-head-to-head) | **provisional** until the adapted code's rerun |
+| recall at the default probe count falls with filter selectivity | C6 | to be re-read on the adapted code's NUMBERS legs |
+| at matched recall, IVF faster for broad filters, exhaustive scan for highly selective ones | the head-to-head in [results](results.md#who-wins-where-head-to-head) | **provisional** until the adapted code's NUMBERS legs |
 | we release all code and measurements | [release and licenses](release-and-licenses.md) | the anonymous mirror must exist by the paper deadline |
 
 ## Open before the paper
 
-- The adapted code's rerun: confirms or changes the matched-recall sentence.
+- The adapted code's NUMBERS legs: confirms or changes the matched-recall sentence.
 - `results.md` still carries "NOT CITABLE until D1-G"; D1-G is green.
 - The anonymous code mirror for review.
 - A GenAI statement may be requested at camera-ready (drafted in the

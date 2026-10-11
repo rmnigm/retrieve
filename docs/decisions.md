@@ -32,7 +32,7 @@ decisions.
     "Meta's official SilverTorch code, adapted", never "a fork". In code it
     is still the `official-fork/` workspace member, package
     `silvertorch_fork`, `backend="official-fork"`, until roadmap
-    [RENAME](roadmap.md#3-rename-the-adapted-backend-becomes-silvertorchs-default).
+    [RENAME](roadmap.md#5-rename-the-adapted-backend-becomes-silvertorchs-default).
   - **LiNR** is V1-V3, our implementation from the paper's text (LiNR has
     no public code). Its kernels stay, whatever they are written in.
 
@@ -43,8 +43,8 @@ decisions.
   reference) are neither a result nor a shipped backend. Until its
   deletion step the code stays in the repository, recorded and unused; it
   is deleted under CLAUDE.md rule 5 only after the adapted backend's review
-  ACCEPT and its rerun, behind the tag `triton-silvertorch-final`
-  ([roadmap](roadmap.md#4-triton-st-delete-delete-the-triton-silvertorch-reimplementation)).
+  ACCEPT and its NUMBERS legs, behind the tag `triton-silvertorch-final`
+  ([roadmap](roadmap.md#6-triton-st-delete-delete-the-triton-silvertorch-reimplementation)).
   Its records stay on the Hub (`campaign-final` and earlier), never
   deleted, never cited. No new Triton SilverTorch kernel work.
 - **Meta's code as published (`backend="official"`, pinned `21aa35e`,
@@ -67,10 +67,15 @@ decisions.
   max-autotune cell, an autotune pick on the baseline), which the user
   accepted without loosening the check. Validation's row is written on
   `dev/d1g-green`.
-- **Paper numbers.** SilverTorch's come from the adapted-official rerun of
-  every SilverTorch cell of the final grid (roadmap
-  [FORK-RERUN](roadmap.md#2-fork-rerun-every-silvertorch-cell-on-the-adapted-backend));
-  LiNR's from `campaign-final` (not rerun); one final parquet holds both.
+- **Paper numbers, and the full rerun last** (user, 2026-10-11): the paper
+  is written on measurement legs first: SilverTorch on the adapted backend
+  over the study grid (roadmap
+  [NUMBERS](roadmap.md#2-numbers-adapted-silvertorch-over-the-study-grid)),
+  LiNR from `campaign-final`. The full rerun of everything (LiNR, the
+  adapted SilverTorch, the grid), pinned to the last repo version, into one
+  parquet with its recipe, D1-G, T1 and T3, is the very last step
+  ([FULL-RERUN](roadmap.md#7-full-rerun-everything-pinned-to-the-last-repo-version-the-very-last-step));
+  the paper's final tables are regenerated from it.
 - **No dates.** Every roadmap step is done, in order; nothing is optional
   or conditional on a deadline. The GPU is the bottleneck, so GPU steps
   are ordered first and CPU steps run beside them.
@@ -210,13 +215,13 @@ now on; the [roadmap](roadmap.md) holds the steps.
 - **SilverTorch is reported at its tuned point per dataset size** (user,
   2026-10-11): the matched-recall point from the IVF tune (below), with the
   recall each filter and k actually reaches, read off per-filter probe
-  curves (roadmap FORK-RERUN item 1). The paper's `n_probe` 24 is one
+  curves (roadmap NUMBERS item 1). The paper's `n_probe` 24 is one
   reference row only, not the headline: a fixed `n_probe` across 0.8-30 M
   compares different recall levels. Recall targets reported: 0.90 and 0.95,
   0.99 a stretch (user, 2026-10-11). At 10-30 M the cluster count is swept
   (`n_lists` {4096, 16384, 65536}, `n_probe` doubling to the 25 % cap, the
   k 1000 check per `n_lists`) and the tuned point per size picked from it
-  (user, 2026-10-11; roadmap FORK-RERUN item 2).
+  (user, 2026-10-11; roadmap NUMBERS item 2).
 - **IVF tuned per dataset size** (user, 2026-10-08): `n_lists` and
   `n_probe` depend on N and are tuned, not fixed at the library default
   1024. The sweep runs on **one small and one big dataset only** (user):
@@ -245,7 +250,7 @@ now on; the [roadmap](roadmap.md) holds the steps.
   1024 = the cap, 0.95 not reached (0.72, 0.873): at k 1000 the probe
   scorers run `n_probe` ≤ 1024, which makes 4096 the largest `n_lists` whose
   25 % cap runs. These picks hold for the final pass's records; for the
-  adapted-official rerun at 10-30 M the `n_lists` sweep under the operating
+  adapted backend at 10-30 M the `n_lists` sweep under the operating
   point above replaces them.
 - **Meta's code as published runs only on `none` and `bloom`.** Its
   clause and exact cells time our `pack_mask` adapter, not Meta's code; the
@@ -267,7 +272,8 @@ now on; the [roadmap](roadmap.md) holds the steps.
   scope once in the setup and once in threats to validity.
 - **LiNR V4 leaves the library** (user): it is ours, not LiNR's. The code
   stays under the git tag `linr-v4-final`.
-- **T3 is Meta as published vs adapted**, from the rerun's `h2h` cells
+- **T3 is Meta as published vs adapted**, from the `h2h` cells (NUMBERS,
+  then FULL-RERUN)
   (the adapted backend against `backend="official"` at `-O3`, interleaved,
   both `score_path` modes: fp16, Meta's default; int32, parity). b3,
   the kernel-opt head-to-head and H2H-FINAL (official vs our Triton) are

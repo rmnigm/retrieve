@@ -11,7 +11,7 @@ sources: [docs/artifacts/results-draft/build_results.py, docs/artifacts/hub-inde
 
 **NOT CITABLE.** The LiNR numbers wait on D1-G being declared green
 ([validation](../validation.md)). Every SilverTorch number on this page is
-**provisional** until the adapted official code is accepted and rerun over
+**provisional** until the adapted official code is accepted and measured (roadmap NUMBERS) over
 every SilverTorch cell (the META-FORK chain in the [roadmap](../roadmap.md)).
 
 The study compares two families of filtered retrieval on one A100:
@@ -38,7 +38,7 @@ not part of the study.
   scores and the same ids up to ties as the Triton arm.
 - **The script:** [`build_results.py`](../artifacts/results-draft/build_results.py)
   writes every table and figure to Hub `artifacts/results-draft/20261011`
-  ([hub-index](../artifacts/hub-index.md)). When the rerun's parquet is
+  ([hub-index](../artifacts/hub-index.md)). When the NUMBERS legs' records are
   passed as an extra argument, its `official-fork` records replace the
   bridge, and the same tables fill with measured numbers.
 - **The story page:** a short, chart-led reading of these tables
@@ -96,7 +96,7 @@ From the final pass `filter` records (`memory.csv`): SilverTorch's int8
 index (Meta's code as published) takes about half of LiNR's fp16 index
 (arXiv 483 vs 1,095 MiB, PubMed 7,965 vs 15,869 MiB). It needs a k-means
 build (2 s at 0.8 M, 85 s at 10 M d768); LiNR builds in under 1.1 s. The
-adapted code's own index size and build time come with the rerun.
+adapted code's own index size and build time come with the NUMBERS legs.
 
 ## How the parameters move the crossover
 
@@ -160,7 +160,7 @@ The four paper claims tested only by arithmetic or not testable here
 
 ## Open before this page is citable
 
-- The adapted code's rerun over every SilverTorch cell (replaces the
+- The adapted code's NUMBERS legs over every SilverTorch cell (replaces the
   bridge; brings LAION 1-30 M, index memory and build time, and the deep
   probe curves that decide the 0.95 rows at 10 M).
 - The adapted code's LAION 30 M gate cells.
