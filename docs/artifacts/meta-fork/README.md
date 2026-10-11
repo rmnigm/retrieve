@@ -16,6 +16,11 @@ A100-SXM4-80GB, pod b GPU 0; SM clocks cannot be locked, every script samples th
 | [`build.sh`](build.sh) | builds the fork at one commit (CPU): the build tree `/scratch/wt/meta-fork-build` detached at the commit, `silvertorch-fork` editable into `/venvs/meta-fork` (a copy of the final pass's `/venvs/final-ext-o3`, whose `silvertorch` is the `-O3` upstream arm), both `.so` sha256 recorded | every gate |
 | [`gpu.sh`](gpu.sh) | one GPU block on pod b GPU 0: phase flag set and trap-removed, `flock /scratch/gpu0.lock`, `/scratch/gpu0.timed` around timed jobs, the build tree on `PYTHONPATH`, an inductor cache per commit | every gate |
 | [`make_pkg.sh`](make_pkg.sh) | a tagged library as a renamed package (`make_pkg.sh <repo> campaign-v2.12 retrieve_v212 <dir>`) | the Triton arm |
+| [`devtime.py`](devtime.py) | device time per kernel of one forward, fork vs Triton v2.12, under `torch.profiler` (`devtime.py BS NP MODE DATASET DIM N_LISTS SWEEP`; env `K`, `FORK_BLOOM=meta`, `BLOOM_PATH=full`) | every K fix's profile |
+| [`run_grid.sh`](run_grid.sh) | one `gate_fork.py` block per spec line (`DATASET DIM MODE SWEEPS N_LISTS NPROBE BSS [args]`), each under the 900 s block limit; the specs of the pod b grids are in [`grids/`](grids/) | the timed grids |
+| [`summ_grid.py`](summ_grid.py) | a grid directory's X failures, R cells below recall 1 or with false positives, and the cells where the fork is above Triton | the grid summaries |
+| [`recheck_vs_exact.py`](recheck_vs_exact.py) | the fork's rechecked bloom against the fork's exact path on one real cell, `torch.equal` | gate R (bloom ∧ exact = exact) |
+| [`triton_vs_fork_exact.py`](triton_vs_fork_exact.py) | the fork's exact path against Triton's: sorted scores equal, every differing id at the k-th score | gate R (recall below 1 = ties) |
 
 Arms in one process: `silvertorch` (the pinned upstream, built `-O3` in the final pass's venv) and `silvertorch_fork`
 register disjoint op namespaces (`torch.ops.st`, `torch.ops.stfork`).

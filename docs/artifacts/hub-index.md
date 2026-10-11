@@ -265,6 +265,8 @@ re-upload of a subtree replaces its row.
 | `artifacts/v1-bs1-v211` | V1-BS1 re-gate against campaign-v2.11 (pod b, NOT CITABLE): `gate/` 68 cells (`f_*`; `g` = graph), `pytest/` the library suite on the v2.11-merged tree | 31 | 68,254 | `56ee714f1c477f7618b4606f5673ee254fa2eadc792db46b2dabd80cf3eb99d9` |
 | `artifacts/v1-bs1-fix` | V1-BS1 after the 2^24 calibration-row fix (pod b, NOT CITABLE): `gate/` 52 cells against campaign-v2.11 (`f_*`), `pytest/` the fix tests and the library suite | 20 | 52,713 | `fceaee1f33e6bc218acc6737601a043bced2f71b324c57278e66b0582d5da145` |
 | `artifacts/v1-topk` | V1-TOPK (pod b, NOT CITABLE): `gate/` against dev/v1-bs1 11242c7 (`t_*` V1, `s_*` SilverTorch; `g` = graph), `sass/` narrow hashes, `pytest/` suite logs, `prefix/` the superseded first runs against the pre-fix dev/v1-bs1 | 86 | 235,187 | `b2f7300eaedccdda8dc83c3a046b5b88827800cc64df9940b4ebac6f37131b45` |
+| `artifacts/meta-fork/pod-b-32c0d61` | META-FORK on pod b: the timed grids (`gate_fork.py`) at `8ff11e0` (arXiv d128 / d256, goodreads; PubMed d768, YFCC d192) and at the head `32c0d61` (336 cells, X 336 / 336), the R sweep (fork default bloom, m_bits 64 … 2048), the head S (`syncs.py`) and capture (`graph_launches.py`) gates, the tie checks; NOT CITABLE | 233 | 2,041,897 | `08a49315b7e7a35def20d30e490b6d21bac9adabc87826d90be08181e78e782b` |
+| `artifacts/meta-fork/laion30m-82fafb6` | META-FORK at 30 M on pod d (laion): LAION d256 none / exact / bloom partial + full at `82fafb6`, X 168 / 168, profiles of the losing cells; NOT CITABLE | 30 | - | `42db88e78f8675f5c3507eacd954c0e12f9a588577abd69d5af4938544b2d2a3` |
 
 The `d1-a` and `artifacts/*` subtrees were published by
 [H1](h1-results-storage/README.md) on 2026-09-26; their file counts and bytes
