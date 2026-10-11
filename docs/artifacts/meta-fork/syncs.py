@@ -47,7 +47,7 @@ def build(backend, mode, path, items, attrs, score_path):
     official = backend in OFFICIAL_BACKENDS
     kw = {"filter_mode": mode}
     if mode == "bloom":
-        kw |= {"k_hash": 5, "m_bits": None if official else 1024}
+        kw |= {"k_hash": 5, "m_bits": None if backend == "official" else 1024}
         if not official:
             kw["bloom_path"] = path
     cfg = (

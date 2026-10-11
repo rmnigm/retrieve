@@ -39,6 +39,53 @@ struct MaxOp {
   }
 };
 
+// official_probe_score's [B, k] epilogue in one launch: a winner is valid when its slot is in the
+// row and the scorer wrote it (index >= 0); its id is sort_perm[index], its score
+// (fp32(dot) * q_scale) * global_scale, or fp32(dot / divisor) * ((q_scale * divisor) *
+// global_scale) on the fp16 path, the same fp32 multiplies in the same order; else -1 / -inf,
+// as for the k - actual_k pad columns.
+template <typename T>
+__global__ void epilogue_kernel(
+    const T* __restrict__ top_raw,
+    const int64_t* __restrict__ top_slot,
+    int64_t actual_k,
+    const int32_t* __restrict__ idx,
+    int64_t width,
+    const int64_t* __restrict__ sort_perm,
+    const float* __restrict__ q_scales,
+    const float* __restrict__ global_scale,
+    int64_t divisor,
+    int64_t rows,
+    int64_t k,
+    int64_t* __restrict__ ids,
+    float* __restrict__ scores) {
+  const int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (i >= rows * k) {
+    return;
+  }
+  const int64_t row = i / k;
+  const int64_t j = i % k;
+  int64_t id = -1;
+  float score = -INFINITY;
+  if (j < actual_k) {
+    const int64_t slot = top_slot[row * actual_k + j];
+    const int32_t pos = slot >= 0 ? idx[row * width + slot] : -1;
+    if (pos >= 0) {
+      id = sort_perm[pos];
+      const float dot = static_cast<float>(top_raw[row * actual_k + j]);
+      score = divisor == -1
+          ? __fmul_rn(__fmul_rn(dot, q_scales[row]), *global_scale)
+          : __fmul_rn(
+                dot,
+                __fmul_rn(
+                    __fmul_rn(q_scales[row], static_cast<float>(divisor)),
+                    *global_scale));
+    }
+  }
+  ids[i] = id;
+  scores[i] = score;
+}
+
 // One launch for everything before the masks (C6). Blocks [0, B): row b's int8 codes and scale,
 // bit for bit retrieve.indexing.quantize.quantize_int8 as eager torch computes it: abs max
 // clamped at fp32(1e-8); scale = abs_max * fp32(1 / 127) (torch divides by a CPU scalar as a
@@ -243,10 +290,15 @@ std::tuple<Tensor, Tensor> raw_topk(const Tensor& raw, const Tensor& idx, int64_
   const int64_t rows = raw.size(0);
   const int64_t width = raw.size(1);
   if (!use_two_level_topk(rows, width, k)) {
-    Tensor floored = int32_path
-        ? at::where(idx.ge(0), raw, at::Scalar(std::numeric_limits<int32_t>::min()))
-        : at::where(idx.ge(0), raw, at::Scalar(-std::numeric_limits<double>::infinity()));
-    return at::topk(floored, k, /*dim=*/1);
+    if (int32_path) {
+      // the scorer pre-fills every slot it does not write with INT_MIN, the floor itself
+      return at::topk(raw, k, /*dim=*/1);
+    }
+    // fp16 pre-fills -65504, a finite score; pads rank below it at -inf
+    return at::topk(
+        at::where(idx.ge(0), raw, at::Scalar(-std::numeric_limits<double>::infinity())),
+        k,
+        /*dim=*/1);
   }
   const int64_t n_blocks = (width + kTopkBlock - 1) / kTopkBlock;
   const int64_t candidates = k * kTopkBlock;
@@ -375,6 +427,7 @@ __global__ void exact_warp_payload_kernel(
   }
 }
 
+// One warp per probed cluster: lane j writes the payload of the cluster's tail doc j (< 32).
 __global__ void exact_remaining_payload_kernel(
     const int64_t* __restrict__ attrs,
     int64_t n_clauses,
@@ -392,35 +445,29 @@ __global__ void exact_remaining_payload_kernel(
     const int32_t* __restrict__ remaining_length_cumsum,
     int64_t max_tensor_size_per_row,
     RemainingPayload* __restrict__ payloads) {
-  for (int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; i < n_clusters;
-       i += static_cast<int64_t>(blockDim.x) * gridDim.x) {
+  const int lane = threadIdx.x % 32;
+  for (int64_t i = (static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x) / 32;
+       i < n_clusters;
+       i += static_cast<int64_t>(gridDim.x) * blockDim.x / 32) {
     const int32_t row = static_cast<int32_t>(i / clusters_per_row);
     const int32_t length = static_cast<int32_t>(cluster_length[i]);
     const int32_t handled = length / 32 * 32;
-    const int32_t remaining = length - handled;
-    const int32_t doc_start =
-        static_cast<int32_t>(cluster_offsets[cluster_ids[i]]) + handled;
+    if (lane >= length - handled) {
+      continue;
+    }
+    const int32_t doc = static_cast<int32_t>(cluster_offsets[cluster_ids[i]]) + handled + lane;
     const int32_t out_offset = i == 0 ? 0 : remaining_length_cumsum[i - 1];
     const int32_t row_first =
         row == 0 ? 0 : remaining_length_cumsum[row * clusters_per_row - 1];
-    const int32_t write = static_cast<int32_t>(row * max_tensor_size_per_row) +
+    RemainingPayload p;
+    p.doc_index = doc;
+    p.cluster_ids_row = row;
+    p.write_index = static_cast<int32_t>(row * max_tensor_size_per_row) +
         warp_rounded_length_cumsum[row * clusters_per_row + clusters_per_row - 1] +
-        (out_offset - row_first);
-    for (int32_t j = 0; j < remaining; ++j) {
-      RemainingPayload p;
-      p.doc_index = doc_start + j;
-      p.cluster_ids_row = row;
-      p.write_index = write + j;
-      p.filtering_mask = pre_mask_bit(pre_mask, pre_mask_columns, row, doc_start + j) &&
-          exact_pass(
-                             attrs,
-                             n_clauses,
-                             a_max,
-                             reverse,
-                             query_attrs + row * n_clauses,
-                             doc_start + j);
-      reinterpret_cast<int4*>(payloads)[out_offset + j] = p.payload;
-    }
+        (out_offset - row_first) + lane;
+    p.filtering_mask = pre_mask_bit(pre_mask, pre_mask_columns, row, doc) &&
+        exact_pass(attrs, n_clauses, a_max, reverse, query_attrs + row * n_clauses, doc);
+    reinterpret_cast<int4*>(payloads)[out_offset + lane] = p.payload;
   }
 }
 
@@ -481,7 +528,11 @@ std::tuple<Tensor, int64_t, Tensor, int64_t> exact_payloads(
       max_tensor_size_per_row,
       reinterpret_cast<WarpPayload*>(warp_payloads.mutable_data_ptr<int8_t>()));
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-  exact_remaining_payload_kernel<<<std::min(max_grid, (n_clusters + 255) / 256), 256, 0, stream>>>(
+  exact_remaining_payload_kernel<<<
+      std::min(max_grid, (n_clusters * 32 + 255) / 256),
+      256,
+      0,
+      stream>>>(
       attrs.const_data_ptr<int64_t>(),
       attrs.size(1),
       attrs.size(2),
@@ -712,29 +763,39 @@ std::tuple<Tensor, Tensor> search_cuda(
   // The epilogue of retrieve.ops.official.official_probe_score: top-k on the raw scores (pads at
   // the dtype's minimum; two-level from kTopkMinSlots), then dequantize only the [B, k] winners.
   const bool int32_path = raw.scalar_type() == at::kInt;
+  const int64_t rows = raw.size(0);
   const int64_t actual_k = std::min<int64_t>(k, raw.size(1));
   auto [top_raw, top_slot] = raw_topk(raw, idx, actual_k);
-  Tensor top_idx = idx.gather(1, top_slot.clamp_min(0));
-  Tensor top_valid = top_slot.ge(0).logical_and(top_idx.ge(0));
-  Tensor pos = top_idx.to(at::kLong).clamp_min(0);
-  Tensor ids = at::where(
-      top_valid, sort_perm.index_select(0, pos.view(-1)).view(pos.sizes()), -1);
-  Tensor scores = int32_path
-      ? top_raw.to(at::kFloat).mul(q_scales.unsqueeze(1)).mul(global_scale)
-      : top_raw.to(at::kFloat).mul(
-            q_scales.mul(static_cast<double>(divisor_for_int8))
-                .mul(global_scale)
-                .unsqueeze(1));
-  scores = at::where(
-      top_valid, scores, at::Scalar(-std::numeric_limits<double>::infinity()));
-  if (actual_k < k) {
-    ids = at::cat({ids, ids.new_full({ids.size(0), k - actual_k}, -1)}, 1);
-    scores = at::cat(
-        {scores,
-         scores.new_full(
-             {scores.size(0), k - actual_k},
-             -std::numeric_limits<float>::infinity())},
-        1);
+  top_raw = top_raw.contiguous();
+  top_slot = top_slot.contiguous();
+  Tensor ids = at::empty({rows, k}, sort_perm.options());
+  Tensor scores = at::empty({rows, k}, query.options());
+  Tensor gs = global_scale.to(at::kFloat).contiguous();
+  if (rows * k > 0) {
+    const int64_t blocks = (rows * k + 255) / 256;
+    auto launch = [&](auto zero) {
+      using T = decltype(zero);
+      epilogue_kernel<T><<<blocks, 256, 0, at::cuda::getCurrentCUDAStream()>>>(
+          reinterpret_cast<const T*>(top_raw.const_data_ptr()),
+          top_slot.const_data_ptr<int64_t>(),
+          actual_k,
+          idx.const_data_ptr<int32_t>(),
+          idx.size(1),
+          sort_perm.const_data_ptr<int64_t>(),
+          q_scales.const_data_ptr<float>(),
+          gs.const_data_ptr<float>(),
+          divisor_for_int8,
+          rows,
+          k,
+          ids.mutable_data_ptr<int64_t>(),
+          scores.mutable_data_ptr<float>());
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    };
+    if (int32_path) {
+      launch(int32_t{0});
+    } else {
+      launch(c10::Half{0.0f});
+    }
   }
   return {ids, scores};
 }
