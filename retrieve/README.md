@@ -51,7 +51,8 @@ For attribute-filtered retrieval, swap to `filter_mode="bloom"` (with `m_bits` /
 
 Triton is the default backend; modules that have a pure-PyTorch path accept
 `backend="torch"` for `torch.compile` / Inductor users, and `SilverTorch` also
-accepts `backend="official"` (Meta's kernels, eager-only). The package is two
+accepts `backend="official"` (Meta's kernels, eager-only) and `backend="official-fork"`
+(our fork of them, capturable). The package is two
 public layers — `retrieve.modules` (re-exported at the top level) and
 `retrieve.ops` — plus `retrieve.indexing` (index-build math) and
 `retrieve.functional` (query-time glue).
