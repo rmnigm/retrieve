@@ -1,5 +1,5 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork (official-fork/CHANGES.md).
+// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C4: prepared-plan search ops, no host sync (official-fork/CHANGES.md).
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,29 +47,92 @@ namespace {
 static constexpr int32_t C_FAST_ROUTE_STACK_SIZE_FIRST_LEVEL = 16;
 static constexpr int32_t C_NUM_OFFSETS_PER_PLAN = 8;
 
+// A read-only 1-d view the kernels index like the PackedTensorAccessor32 it replaces, but
+// constructible on the device (the prepared-plan path builds plans per thread).
+template <typename T>
+struct DeviceSpan {
+  T* ptr;
+  int32_t n;
+  C10_HOST_DEVICE T& operator[](int64_t i) const {
+    return ptr[i];
+  }
+  C10_HOST_DEVICE int32_t size(int /*dim*/) const {
+    return n;
+  }
+  C10_HOST_DEVICE T* data() const {
+    return ptr;
+  }
+};
+
+template <typename T>
+DeviceSpan<T> span_of(PackedTensorAccessor32<T, 1> a) {
+  return DeviceSpan<T>{a.data(), static_cast<int32_t>(a.size(0))};
+}
+
 template <bool is_bloom_index_v2>
 struct QueryPlanCuda {
  public:
+  using OneBits = typename QueryPlanOneBitsPType<is_bloom_index_v2>::type;
   QueryPlanCuda(
       PackedTensorAccessor32<uint8_t, 1> operators,
       PackedTensorAccessor32<int32_t, 1> offsets,
       PackedTensorAccessor32<int32_t, 1> parameters,
-      PackedTensorAccessor32<
-          typename QueryPlanOneBitsPType<is_bloom_index_v2>::type,
-          1> oneBitsPosition)
+      PackedTensorAccessor32<OneBits, 1> oneBitsPosition)
+      : operators(span_of(operators)),
+        offsets(span_of(offsets)),
+        parameters(span_of(parameters)),
+        oneBitsPosition(span_of(oneBitsPosition)) {}
+  __device__ QueryPlanCuda(
+      DeviceSpan<uint8_t> operators,
+      DeviceSpan<int32_t> offsets,
+      DeviceSpan<int32_t> parameters,
+      DeviceSpan<OneBits> oneBitsPosition)
       : operators(operators),
         offsets(offsets),
         parameters(parameters),
         oneBitsPosition(oneBitsPosition) {}
 
-  PackedTensorAccessor32<uint8_t, 1> operators;
-  PackedTensorAccessor32<int32_t, 1> offsets;
-  PackedTensorAccessor32<int32_t, 1> parameters;
-  PackedTensorAccessor32<
-      typename QueryPlanOneBitsPType<is_bloom_index_v2>::type,
-      1>
-      oneBitsPosition;
+  DeviceSpan<uint8_t> operators;
+  DeviceSpan<int32_t> offsets;
+  DeviceSpan<int32_t> parameters;
+  DeviceSpan<OneBits> oneBitsPosition;
 };
+
+// Plans in the parser's own encoding (expression_query_parser: per plan 8 byte offsets
+// [ops, offsets, parameters, oneBitsPosition] x [start, end) into the data, each segment
+// 8-aligned), read in place on the device: plan i is built per thread, with no host decode.
+// The prepared blob is int64 [8 * plan_count + data words]: the offsets, then the data.
+struct EncodedQueryPlans {
+  const int64_t* __restrict__ offsets;
+  const int8_t* __restrict__ data;
+
+  __device__ __forceinline__ QueryPlanCuda<true> operator[](int64_t i) const {
+    const int64_t* o = offsets + 8 * i;
+    int8_t* base = const_cast<int8_t*>(data);
+    return QueryPlanCuda<true>(
+        DeviceSpan<uint8_t>{
+            reinterpret_cast<uint8_t*>(base + o[0]),
+            static_cast<int32_t>(o[1] - o[0])},
+        DeviceSpan<int32_t>{
+            reinterpret_cast<int32_t*>(base + o[2]),
+            static_cast<int32_t>((o[3] - o[2]) / sizeof(int32_t))},
+        DeviceSpan<int32_t>{
+            reinterpret_cast<int32_t*>(base + o[4]),
+            static_cast<int32_t>((o[5] - o[4]) / sizeof(int32_t))},
+        DeviceSpan<uint64_t>{
+            reinterpret_cast<uint64_t*>(base + o[6]),
+            static_cast<int32_t>((o[7] - o[6]) / sizeof(uint64_t))});
+  }
+};
+
+EncodedQueryPlans encoded_plans(const Tensor& plans, int64_t plan_count) {
+  TORCH_CHECK(plans.is_cuda() && plans.scalar_type() == at::kLong);
+  TORCH_CHECK(plans.dim() == 1 && plans.is_contiguous());
+  TORCH_CHECK(plans.numel() >= 8 * plan_count);
+  const int64_t* base = plans.const_data_ptr<int64_t>();
+  return EncodedQueryPlans{
+      base, reinterpret_cast<const int8_t*>(base + 8 * plan_count)};
+}
 
 // This class is created to allocate cuda memory once and copy once to improve
 // performance. This class is using visitor pattern. usage:
@@ -573,7 +636,11 @@ store<bool>(bool* dest, uint64_t result, int64_t column) {
   reinterpret_cast<MaskBlock*>(dest)[column] = mask;
 }
 
-template <typename RETURN_T, int32_t STACK_SIZE, bool is_bloom_index_v2>
+template <
+    typename RETURN_T,
+    int32_t STACK_SIZE,
+    bool is_bloom_index_v2,
+    typename PLANS = const QueryPlanCuda<is_bloom_index_v2>*>
 __global__ void process_documents(
     const int64_t* bloom_index, // if v1, its 2d, if v2, its 1d.
     const bool* column_mask_ptr,
@@ -583,7 +650,7 @@ __global__ void process_documents(
     const int64_t total_column_count,
     const int64_t* bundle_b_offsets, // useful for bloom index v2 only.
     PackedTensorAccessor64<RETURN_T, 2> document_mask,
-    const QueryPlanCuda<is_bloom_index_v2>* query_plan,
+    PLANS query_plan,
     int64_t k,
     int64_t p_k, // useful for bloom index v2 only.
     TORCH_DSA_KERNEL_ARGS) {
@@ -686,6 +753,61 @@ __global__ void process_documents_on_assigned_cluster_columns_kernel(
         p_k,
         query_plan[query_id]);
     store<int64_t>(column_mask_response.data() + column_index, result, 0);
+  }
+}
+
+// The prepared-plan partial search: one thread per probed column, its cluster found by a
+// binary search over the device column cumsum (no host repeat_interleave), the total read on
+// the device; the grid comes from the caller's static column capacity.
+template <int32_t STACK_SIZE>
+__global__ void process_documents_on_probed_columns_kernel(
+    const int64_t* __restrict__ bloom_index,
+    const int64_t index_total_column_count,
+    const int64_t* __restrict__ bundle_b_offsets,
+    const int32_t* __restrict__ column_counts_cumsum,
+    const int32_t* __restrict__ start_column_ids,
+    int32_t cluster_count,
+    int64_t cluster_count_per_query,
+    int64_t* __restrict__ column_mask_response,
+    EncodedQueryPlans query_plans,
+    int64_t k,
+    int64_t p_k,
+    const int64_t* __restrict__ query_plan_index_ptr,
+    TORCH_DSA_KERNEL_ARGS) {
+  const int64_t total_column_count = column_counts_cumsum[cluster_count - 1];
+  for (int64_t column_index =
+           static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+       column_index < total_column_count;
+       column_index += static_cast<int64_t>(blockDim.x) * gridDim.x) {
+    int32_t lo = 0;
+    int32_t hi = cluster_count - 1;
+    while (lo < hi) {
+      int32_t mid = (lo + hi) >> 1;
+      if (column_counts_cumsum[mid] > column_index) {
+        hi = mid;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    const int64_t assigned_cluster_index = lo;
+    int64_t query_id = assigned_cluster_index / cluster_count_per_query;
+    query_id = query_plan_index_ptr == nullptr ? query_id
+                                               : query_plan_index_ptr[query_id];
+    int64_t col_idx_in_local_cluster = column_index -
+        (assigned_cluster_index == 0
+             ? 0
+             : column_counts_cumsum[assigned_cluster_index - 1]);
+    int64_t column_id =
+        start_column_ids[assigned_cluster_index] + col_idx_in_local_cluster;
+    uint64_t result = run_query_plan<STACK_SIZE, true>(
+        bloom_index,
+        index_total_column_count,
+        bundle_b_offsets,
+        column_id,
+        k,
+        p_k,
+        query_plans[query_id]);
+    store<int64_t>(column_mask_response + column_index, result, 0);
   }
 }
 
@@ -938,12 +1060,14 @@ std::tuple<Tensor, Tensor, Tensor> generate_column_info_for_clusters(
       std::move(first_item_offsets_in_column));
 }
 
-template <bool is_bloom_index_v2>
+template <
+    bool is_bloom_index_v2,
+    typename PLANS = const QueryPlanCuda<is_bloom_index_v2>*>
 Tensor bloom_index_search_common(
     const Tensor& bloom_index,
     const Tensor*
         bloom_bundle_b_offsets, // only used when is_bloom_index_v2 is true
-    const QueryPlanCuda<is_bloom_index_v2>* query_plan_cuda,
+    PLANS query_plan_cuda,
     size_t query_plans_size,
     int32_t query_plans_max_stack_size,
     int64_t k,
@@ -992,7 +1116,11 @@ Tensor bloom_index_search_common(
 #define LAUNCH_KERNEL_WITH_RETURN_TYPE_STACK_SIZE(RETURN_TYPE, STACK_SIZE) \
   {                                                                        \
     TORCH_DSA_KERNEL_LAUNCH(                                               \
-        (process_documents<RETURN_TYPE, STACK_SIZE, is_bloom_index_v2>),   \
+        (process_documents<                                                \
+            RETURN_TYPE,                                                   \
+            STACK_SIZE,                                                    \
+            is_bloom_index_v2,                                             \
+            PLANS>),                                                       \
         grid_size,                                                         \
         block_size,                                                        \
         0,                                                                 \
@@ -1258,6 +1386,119 @@ bloom_index_search_batch_return_partial_response_cuda(
       k,
       onebit_hash_k,
       query_plan_index_ptr);
+}
+
+// bloom_index_search_batch over prepared plans (SilverTorch.prepare_queries uploads the
+// parser's encoding once, outside the timed call): one plan per row, no host decode, no
+// copy, no sync.
+Tensor bloom_index_search_batch_prepared_cuda(
+    const Tensor& bloom_index,
+    const Tensor& bloom_bundle_b_offsets,
+    const Tensor& plans,
+    int64_t plan_count,
+    int64_t max_stack_size,
+    int64_t k,
+    int64_t onebit_hash_k,
+    bool return_bool_mask) {
+  TORCH_CHECK(bloom_index.is_cuda());
+  TORCH_CHECK(bloom_index.dim() == 1);
+  TORCH_CHECK(bloom_index.is_contiguous());
+  at::cuda::OptionalCUDAGuard device_guard;
+  device_guard.set_index(bloom_index.get_device());
+  return bloom_index_search_common<true, EncodedQueryPlans>(
+      bloom_index,
+      &bloom_bundle_b_offsets,
+      encoded_plans(plans, plan_count),
+      static_cast<size_t>(plan_count),
+      static_cast<int32_t>(max_stack_size),
+      k,
+      onebit_hash_k,
+      return_bool_mask);
+}
+
+// bloom_index_search_batch_return_partial_response over prepared plans, with no host sync:
+// column_mask_response has the caller's static capacity max_columns (a row's probed clusters
+// span at most max_tensor_size_per_row / 64 + 2 * P columns); its tail past the device total
+// stays zero and is never read (the scorer addresses columns through the cumsum).
+std::tuple<Tensor, Tensor, Tensor>
+bloom_index_search_batch_return_partial_response_prepared_cuda(
+    const Tensor& bloom_index,
+    const Tensor& bloom_bundle_b_offsets,
+    const Tensor& plans,
+    int64_t plan_count,
+    int64_t max_stack_size,
+    const Tensor& selected_cluster_offsets,
+    const Tensor& selected_cluster_lengths,
+    int64_t k,
+    int64_t onebit_hash_k,
+    const std::optional<Tensor>& query_plan_index,
+    int64_t max_columns) {
+  TORCH_CHECK(bloom_index.is_cuda());
+  TORCH_CHECK(bloom_index.dim() == 1);
+  TORCH_CHECK(bloom_index.is_contiguous());
+  TORCH_CHECK(selected_cluster_offsets.is_cuda());
+  TORCH_CHECK(selected_cluster_lengths.is_cuda());
+  TORCH_CHECK(selected_cluster_lengths.dim() == 2);
+  const int64_t* query_plan_index_ptr = nullptr;
+  if (query_plan_index) {
+    TORCH_CHECK(query_plan_index->size(0) == selected_cluster_lengths.size(0));
+    TORCH_CHECK(query_plan_index->is_cuda());
+    TORCH_CHECK(query_plan_index->dim() == 1);
+    TORCH_CHECK(query_plan_index->scalar_type() == at::kLong);
+    query_plan_index_ptr = query_plan_index->const_data_ptr<int64_t>();
+  }
+  at::cuda::OptionalCUDAGuard device_guard;
+  device_guard.set_index(bloom_index.get_device());
+
+  auto [column_counts, start_column_ids, first_item_offsets_in_column] =
+      generate_column_info_for_clusters(
+          selected_cluster_offsets, selected_cluster_lengths);
+  Tensor column_counts_cumsum =
+      column_counts.cumsum(/*dim=*/0, /*dtype=*/at::kInt);
+  Tensor column_mask_response = at::zeros(
+      {max_columns},
+      c10::TensorOptions().dtype(at::kLong).device(bloom_index.device()));
+
+  const int64_t cluster_count = selected_cluster_lengths.numel();
+  constexpr int64_t kThreads = 256L;
+  const int64_t grid_size = std::min(
+      128L *
+          CHECK_NOTNULL(at::cuda::getCurrentDeviceProperties())
+              ->multiProcessorCount,
+      (max_columns + kThreads - 1) / kThreads);
+  const int64_t index_total_column_count =
+      (bloom_bundle_b_offsets.numel() - 1) * C_BLOOM_V2_COL_BUNDLE_SIZE;
+  if (cluster_count > 0 && grid_size > 0) {
+#define LAUNCH_PROBED_COLUMNS(STACK_SIZE)                          \
+  TORCH_DSA_KERNEL_LAUNCH(                                         \
+      process_documents_on_probed_columns_kernel<STACK_SIZE>,      \
+      grid_size,                                                   \
+      kThreads,                                                    \
+      0,                                                           \
+      at::cuda::getCurrentCUDAStream(),                            \
+      bloom_index.const_data_ptr<int64_t>(),                       \
+      index_total_column_count,                                    \
+      bloom_bundle_b_offsets.const_data_ptr<int64_t>(),            \
+      column_counts_cumsum.const_data_ptr<int32_t>(),              \
+      start_column_ids.const_data_ptr<int32_t>(),                  \
+      static_cast<int32_t>(cluster_count),                         \
+      selected_cluster_lengths.size(1),                            \
+      column_mask_response.mutable_data_ptr<int64_t>(),            \
+      encoded_plans(plans, plan_count),                            \
+      k,                                                           \
+      onebit_hash_k,                                               \
+      query_plan_index_ptr);
+    if (max_stack_size <= C_FAST_ROUTE_STACK_SIZE_FIRST_LEVEL) {
+      LAUNCH_PROBED_COLUMNS(C_FAST_ROUTE_STACK_SIZE_FIRST_LEVEL);
+    } else {
+      LAUNCH_PROBED_COLUMNS(0);
+    }
+#undef LAUNCH_PROBED_COLUMNS
+  }
+  return std::make_tuple(
+      std::move(column_counts_cumsum),
+      std::move(first_item_offsets_in_column),
+      std::move(column_mask_response));
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, std::vector<int64_t>>
@@ -1670,6 +1911,20 @@ TORCH_LIBRARY_IMPL(stfork, CUDA, m) {
       torch::dispatch(
           c10::DispatchKey::CUDA,
           TORCH_FN(bloom_index_search_batch_return_partial_response_cuda)));
+}
+
+TORCH_LIBRARY_IMPL(stfork, CUDA, m) {
+  m.impl(
+      "bloom_index_search_batch_prepared",
+      torch::dispatch(
+          c10::DispatchKey::CUDA,
+          TORCH_FN(bloom_index_search_batch_prepared_cuda)));
+  m.impl(
+      "bloom_index_search_batch_return_partial_response_prepared",
+      torch::dispatch(
+          c10::DispatchKey::CUDA,
+          TORCH_FN(
+              bloom_index_search_batch_return_partial_response_prepared_cuda)));
 }
 
 TORCH_LIBRARY_IMPL(stfork, CUDA, m) {

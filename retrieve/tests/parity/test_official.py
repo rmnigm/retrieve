@@ -558,6 +558,61 @@ def test_t5_partial_masks_equal_full_mask_scores(b):
 
 # --- T6: the layer ----------------------------------------------------------------------------
 
+
+def test_c4_fork_prepared_searches_equal_upstream():
+    """META-FORK C4, gate X on the masks: the fork's prepared searches against the pinned
+    upstream's on one index and one batch of plans, over ragged clusters that start mid-column.
+    Full mask (packed and bool) ``torch.equal``; the partial triple equal up to the prepared
+    response's zero tail (cumsum and first offsets ``torch.equal``, the first ``cumsum[-1]`` words
+    ``torch.equal``, the rest 0), with one plan per distinct expression and a row → plan index;
+    the two bloom builds ``torch.equal``; every parsed plan within ``plan_capacity_bytes``."""
+    if OB != "official-fork":
+        pytest.skip("fork-only gate (META-FORK C4)")
+    require_official("official")
+    g = torch.Generator(device="cuda").manual_seed(5)
+    n_lists, p, b, c = 40, 6, 16, 3
+    sizes = torch.randint(0, 200, (n_lists,), generator=g, device="cuda")
+    offsets = torch.cat([sizes.new_zeros(1), sizes.cumsum(0)])
+    attrs = make_attrs(int(offsets[-1]), c=c, a_max=2, seed=41)
+    index, boff = of.build_bloom_index(attrs, b_multiplier=B_MULT, build_k=K_SEARCH)
+    fidx, fboff = ofb.build_bloom_index(attrs, b_multiplier=B_MULT, build_k=K_SEARCH)
+    assert torch.equal(index, fidx) and torch.equal(boff, fboff)
+    qa = make_query_attrs(b, c=c, seed=6)
+    qa[::4] = qa[1::4]  # repeated expressions: fewer plans than rows on the partial path
+    exprs = of.queries_to_expressions(qa)
+    probe = torch.rand(b, n_lists, generator=g, device="cuda").argsort(1)[:, :p]
+    sel_off, sel_len = offsets[probe], sizes[probe]
+    width = int(sizes.sort(descending=True).values[:p].sum())
+
+    for bool_mask in (False, True):
+        up = of.bloom_full_mask(index, boff, of.parse_plans(exprs, HASH_K), K_SEARCH, HASH_K,
+                                return_bool_mask=bool_mask)  # fmt: skip
+        dp = ofb.prepare_plans(exprs, HASH_K, 5, c, torch.device("cuda"), slots=b)
+        fk = ofb.bloom_full_mask(index, boff, dp, K_SEARCH, HASH_K, return_bool_mask=bool_mask)
+        assert torch.equal(up, fk)
+
+    unique = list(dict.fromkeys(exprs))
+    row_plan = torch.tensor([unique.index(e) for e in exprs], device="cuda")
+    up = of.bloom_partial_masks(
+        index, boff, of.parse_plans(unique, HASH_K), sel_off, sel_len, K_SEARCH, HASH_K, row_plan
+    )
+    dp = ofb.prepare_plans(unique, HASH_K, 5, c, torch.device("cuda"), slots=b)
+    cap = of.max_partial_columns(b, p, width)
+    fk = ofb.bloom_partial_masks(
+        index, boff, dp, sel_off, sel_len, K_SEARCH, HASH_K, row_plan, max_columns=cap
+    )
+    total = int(up[0][-1])
+    assert torch.equal(up[0], fk[0]) and torch.equal(up[1], fk[1])
+    assert fk[2].shape == (cap,) and total <= cap
+    assert torch.equal(up[2], fk[2][:total]) and not fk[2][total:].any()
+
+    for n_clauses in (1, 2, 5, 8, 12):
+        q = make_query_attrs(b, c=n_clauses, inactive_rate=0.1, seed=7 + n_clauses)
+        rev = torch.arange(n_clauses, device="cuda") % 2 == 1
+        ofb.prepare_plans(of.queries_to_expressions(q, rev), HASH_K, 5, n_clauses,
+                          torch.device("cuda"), slots=b)  # fmt: skip
+
+
 N, D, B, K = 4096, 128, 16, 64
 N_LISTS, N_PROBE = 64, 8
 C, A_MAX = 2, 2
@@ -778,11 +833,19 @@ def test_t7_compile_refused(data):
     ``fullgraph`` ``torch.compile`` of the forward raises (our error or dynamo's
     ``Unsupported``, both ``RuntimeError``s), and a default-mode ``torch.compile`` either
     raises or falls back to eager with identical results — never a silently different
-    path."""
+    path. The fork (META-FORK C4) compiles ``fullgraph`` to eager's exact result instead."""
     off = _layer(data, OB, "none")
+    eager_ids, eager_scores = off(data["query"])
+    if OB == "official-fork":
+        torch._dynamo.reset()
+        try:
+            out_ids, out_scores = torch.compile(off, fullgraph=True)(data["query"])
+        finally:
+            torch._dynamo.reset()
+        assert torch.equal(out_ids, eager_ids) and torch.equal(out_scores, eager_scores)
+        return
     with pytest.raises(RuntimeError, match="eager-only"):
         off.compile()
-    eager_ids, eager_scores = off(data["query"])
     torch._dynamo.reset()
     try:
         with pytest.raises(RuntimeError):
@@ -835,7 +898,8 @@ def test_t7_sync_count_per_op(record_property):
     ``torch.cuda.set_sync_debug_mode("warn")`` — the fact behind D7 (plan §3 expects 2 for
     ``fused_kmean_ann``, ≥ 1 for the partial-response search and the partial-mask scorer).
     Asserted only to be > 0 for the scorer, which is what makes the backend uncapturable;
-    the exact numbers are A3's to confirm and are printed here."""
+    the exact numbers are A3's to confirm and are printed here. On the fork both scorers sync
+    0 times (META-FORK C3); its upstream-shaped searches are upstream's and are only recorded."""
     attrs, offsets, sizes, index, boff = _bloom_corpus()
     n, c, _ = attrs.shape
     codes, _ = quantize_int8_global(make_index(n, 64))
@@ -873,6 +937,9 @@ def test_t7_sync_count_per_op(record_property):
     for name, n_sync in counts.items():
         record_property(f"syncs_{name}", n_sync)
         print(f"T7 syncs per call — {name}: {n_sync}")
+    if OB == "official-fork":
+        assert counts["fused_kmean_ann"] == counts["fused_kmean_ann_with_partial_masks"] == 0
+        return
     assert counts["fused_kmean_ann"] > 0, (
         "plan §3: the scorer syncs the host (repeat_interleave + .item())"
     )
@@ -882,7 +949,7 @@ def test_t7_layer_forward_sync_count(data, record_property):
     """Host syncs of one ``SilverTorch(backend="official")`` forward per filter path, the filter
     prepared beforehand (``prepare_queries``): the numbers behind plan D7's "eager only". Our
     part (phase 1, the packed exact mask, the epilogue) adds none, so every count is Meta's ops'
-    (kernels.md § official)."""
+    (kernels.md § official). The fork's forward syncs 0 times on every path (META-FORK C3 / C4)."""
     cfg = {"b_multiplier": B_MULT, "n_stored_hashes": HASH_K}
     modules = {
         "none": _layer(data, OB, "none"),
@@ -898,4 +965,4 @@ def test_t7_layer_forward_sync_count(data, record_property):
         n_sync = _count_syncs(lambda m=module, p=prepared: m(data["query"], p))
         record_property(f"forward_syncs_{name}", n_sync)
         print(f"T7 forward syncs — {name}: {n_sync}")
-        assert n_sync > 0
+        assert n_sync == 0 if OB == "official-fork" else n_sync > 0

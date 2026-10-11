@@ -1849,8 +1849,20 @@ code at `-O3` (OF-11) and adds `is_topk` / `fresh_index_post_processing` to the 
 | `fused_kmean_ann_with_partial_masks` (`fused_scores(partial=…)`) | upstream's |
 | `bloom_index_build` (`build_bloom_index`) | upstream's (22c2007: CCCL 3 guards, old cub path on CUDA 12.8) |
 | `parse_expression_query_batch` (`parse_plans`) | upstream's |
-| `bloom_index_search_batch` (`bloom_full_mask`) | upstream's |
-| `bloom_index_search_batch_return_partial_response` (`bloom_partial_masks`) | upstream's |
+| `bloom_index_search_batch` (`bloom_full_mask`) | upstream's; the fork forward calls `bloom_index_search_batch_prepared` instead (C4) |
+| `bloom_index_search_batch_return_partial_response` (`bloom_partial_masks`) | upstream's; the fork forward calls `bloom_index_search_batch_return_partial_response_prepared` instead (C4) |
+
+**No host sync (C3, C4; gates pending).** `fused_kmean_ann` and `_with_partial_masks` find each warp
+slot's probed cluster by a binary search over the device warp cumsum instead of a host
+`repeat_interleave`, size their payload buffers by static capacities (a row holds at most
+`max_tensor_size_per_row / 32` full warps and `min(31·P, max_tensor_size_per_row)` remainder docs) and
+read the totals on the device. Bloom plans are prepared once: `prepare_queries` runs Meta's parser and
+uploads its encoding (`adapter.prepare_plans`, `DevicePlans`: an int64 blob of 8 byte offsets per plan
+slot, then the data, padded to `slots · plan_capacity_bytes(C, n_stored_hashes)` so a batch shape has
+one blob shape); the `*_prepared` searches build each plan per thread from it. The partial search's
+`column_mask_response` has the static length `max_partial_columns(B, P, width) = B · (width / 64 + 2P)`
+with a zero tail. `official-fork/silvertorch_fork/ops/_fake.py` gives the four ops' shape functions,
+so the fork forward is `capturable` and compiles (`backend="official"` stays eager-only).
 
 ### Deleted backends
 

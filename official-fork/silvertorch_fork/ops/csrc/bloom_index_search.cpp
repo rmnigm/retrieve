@@ -1,5 +1,5 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork (official-fork/CHANGES.md).
+// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C4: the prepared-plan search schemas (official-fork/CHANGES.md).
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -569,6 +569,35 @@ TORCH_LIBRARY_FRAGMENT(stfork, m) {
       "int k, "
       "int hash_k, "
       "Tensor? query_plan_index=None)"
+      "-> (Tensor, Tensor, Tensor)");
+
+  // fork (C4): the searches over plans prepared once on the device (the parser's encoding,
+  // uploaded by SilverTorch.prepare_queries); CUDA only, no host sync.
+  m.def(
+      "bloom_index_search_batch_prepared("
+      "Tensor bloom_index, "
+      "Tensor bloom_bundle_b_offsets, "
+      "Tensor plans, "
+      "int plan_count, "
+      "int max_stack_size, "
+      "int k, "
+      "int hash_k, "
+      "bool return_bool_mask=False)"
+      "-> Tensor");
+
+  m.def(
+      "bloom_index_search_batch_return_partial_response_prepared("
+      "Tensor bloom_index, "
+      "Tensor bloom_bundle_b_offsets, "
+      "Tensor plans, "
+      "int plan_count, "
+      "int max_stack_size, "
+      "Tensor selected_cluster_offsets, "
+      "Tensor selected_cluster_lengths, "
+      "int k, "
+      "int hash_k, "
+      "Tensor? query_plan_index, "
+      "int max_columns)"
       "-> (Tensor, Tensor, Tensor)");
 
   m.def(

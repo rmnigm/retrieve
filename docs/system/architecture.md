@@ -72,7 +72,7 @@ validates its own):
 | `"triton"` | fused Triton kernels. The default everywhere. | every module |
 | `"torch"` | pure-torch eager equivalent, same semantics, larger intermediates | every module |
 | `"official"` | Meta's own `meta-recsys/silvertorch` ops (`torch.ops.st.*`) for phases 2+3 — the reference backend; eager-only; needs the `official` extra | **`SilverTorch` only** |
-| `"official-fork"` | our fork of those ops ([`official-fork/`](../../official-fork/CHANGES.md), package `silvertorch_fork`, `torch.ops.stfork.*`) through the same adapter; loads beside `"official"` in one process; eager-only until the fork's capture gate (META-FORK C4, [validation](../validation.md#meta-fork-backendofficial-fork-not-yet-validated)); needs the `official` extra | **`SilverTorch` only** |
+| `"official-fork"` | our fork of those ops ([`official-fork/`](../../official-fork/CHANGES.md), package `silvertorch_fork`, `torch.ops.stfork.*`) through the same adapter; loads beside `"official"` in one process; CUDA-graph capturable and compilable (META-FORK C4, [validation](../validation.md#meta-fork-backendofficial-fork-not-yet-validated)); needs the `official` extra | **`SilverTorch` only** |
 
 The `"official"` backend needs an optional extra: `torchretrieve[official]`
 (`uv sync --extra official`) installs Meta's own `meta-recsys/silvertorch`,
@@ -361,8 +361,9 @@ The implementation, `backend ∈ {"triton", "torch", "official", "official-fork"
   [kernels.md](kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend).
 - `"official-fork"` — the same adapter on our fork's `torch.ops.stfork.*`
   (`ensure_loaded(backend)`; every op-calling adapter function takes
-  `backend=`), with the same `OfficialConfig`; the same eager-only refusals
-  until the fork is capturable. See
+  `backend=`), with the same `OfficialConfig`; bloom plans prepared once
+  on the device, no host sync in the forward, so it captures and compiles
+  (the eager-only refusals are `"official"`'s alone). See
   [kernels.md](kernels.md#official-fork--our-fork-of-metas-ops).
 
 Constructed directly (`SilverTorch(k, n_lists, n_probe, filter_mode="none",

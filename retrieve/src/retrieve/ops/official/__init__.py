@@ -258,6 +258,7 @@ def __getattr__(name: str):
 
 
 from retrieve.ops.official.adapter import (  # noqa: E402  (needs the loader above)
+    DevicePlans,
     attrs_to_features,
     bloom_filtering_mask,
     bloom_full_mask,
@@ -267,11 +268,14 @@ from retrieve.ops.official.adapter import (  # noqa: E402  (needs the loader abo
     default_divisor,
     dequantize_scores,
     fused_scores,
+    max_partial_columns,
     official_probe_score,
     official_scores_full,
     pack_mask,
     padded_rows,
     parse_plans,
+    plan_capacity_bytes,
+    prepare_plans,
     queries_to_expressions,
     reverse_bits64,
     unpack_mask,
@@ -280,6 +284,7 @@ from retrieve.ops.official.adapter import (  # noqa: E402  (needs the loader abo
 
 __all__ = [
     "BLOOM_OUTPUT_BIT_ORDER",
+    "DevicePlans",
     "DEFAULT_CONFIG",
     "MASK_BIT_ORDER",
     "MAX_SEARCH_K",
@@ -298,12 +303,15 @@ __all__ = [
     "dequantize_scores",
     "ensure_loaded",
     "fused_scores",
+    "max_partial_columns",
     "is_available",
     "official_probe_score",
     "official_scores_full",
     "pack_mask",
     "padded_rows",
     "parse_plans",
+    "plan_capacity_bytes",
+    "prepare_plans",
     "queries_to_expressions",
     "reverse_bits64",
     "unpack_mask",

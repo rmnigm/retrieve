@@ -39,10 +39,12 @@ class PreparedFilter(NamedTuple):
     """A batch's filter, prepared outside ``forward`` by ``SilverTorch.prepare_queries`` (the
     query-side work of the filter: hashing, expression parsing). Exactly one form is set:
     ``query_bits`` ``[B, C·k_hash]`` (bloom on triton / torch), ``query_attrs`` ``[B, C]`` int64
-    (exact, every backend), or the official parser's CPU ``plans_data`` / ``plans_offsets`` (bloom
-    on official; Meta's search decodes plans on the host, kernels.md § official). On the partial
-    bloom path the plans are one per distinct expression and ``plan_index`` ``[B]`` (device int64)
-    maps each row to its plan. ``sparse`` (bloom, triton / torch): every row's pass-rate bound is
+    (exact, every backend), the official parser's CPU ``plans_data`` / ``plans_offsets`` (bloom
+    on official; Meta's search decodes plans on the host, kernels.md § official), or the fork's
+    device ``plan_blob`` with its ``plan_slots`` / ``plan_stack`` (bloom on official-fork, read in
+    place by its prepared searches; kernels.md § official-fork). On the partial bloom path the
+    plans are one per distinct expression and ``plan_index`` ``[B]`` (device int64) maps each row
+    to its plan. ``sparse`` (bloom, triton / torch): every row's pass-rate bound is
     under ``SPARSE_PASS_BOUND``, so the scorer may take its two-pass at any width (kernels.md §
     SilverTorch kernels, "Bloom two-pass")."""
 
@@ -52,10 +54,13 @@ class PreparedFilter(NamedTuple):
     plans_offsets: Tensor | None = None
     plan_index: Tensor | None = None
     sparse: bool = False
+    plan_blob: Tensor | None = None
+    plan_slots: int = 0
+    plan_stack: int = 0
 
     def select(self, rows: Tensor) -> PreparedFilter:
         """The prepared filter of a row subset (device ``index_select``; not for official plans)."""
-        if self.plans_data is not None:
+        if self.plans_data is not None or self.plan_blob is not None:
             raise ValueError("official bloom plans are not row-sliceable; prepare the subset")
         bits, attrs = self.query_bits, self.query_attrs
         return PreparedFilter(
@@ -112,7 +117,7 @@ class SilverTorch(RetrievalModule):
     phases (``kmeans_s``, ``assemble_s``, ``quantize_s``, ``filter_s``; device-synchronised)
     and ``set_query_params(n_probe=...)`` changes the probe width without a rebuild. ``k`` is a
     plain attribute, settable at any time. ``capturable`` says whether a forward can be
-    CUDA-graph captured / compiled: every backend but the two official ones."""
+    CUDA-graph captured / compiled: every backend but ``official``."""
 
     centroids: Tensor
     item_codes: Tensor
@@ -224,7 +229,7 @@ class SilverTorch(RetrievalModule):
 
     @property
     def capturable(self) -> bool:
-        return not self.is_official
+        return self.backend != "official"
 
     @property
     def is_official(self) -> bool:
@@ -407,8 +412,8 @@ class SilverTorch(RetrievalModule):
             self.register_buffer("clause_is_reverse", clause_is_reverse)
 
     def compile(self, *args, **kwargs):
-        """``nn.Module.compile`` — refused on the official backends (eager-only)."""
-        if self.is_official:
+        """``nn.Module.compile`` — refused on the official backend (eager-only)."""
+        if self.backend == "official":
             raise RuntimeError(
                 f"SilverTorch(backend={self.backend!r}) is eager-only: every official op syncs the "
                 "host and re-uploads its plans per call, so there is no torch.compile / "
@@ -436,6 +441,8 @@ class SilverTorch(RetrievalModule):
             )
         cfg = self.official
         expressions = official_mod.queries_to_expressions(query_clause_attrs)
+        if self.backend == "official-fork":
+            return self._prepare_device_plans(expressions, query_clause_attrs)
         if cfg.bloom_path == "full":  # Meta's full search takes one plan per row
             data, offsets = official_mod.parse_plans(
                 expressions, cfg.n_stored_hashes, cfg.max_sub_queries, backend=self.backend
@@ -452,6 +459,36 @@ class SilverTorch(RetrievalModule):
             plans_data=data,
             plans_offsets=offsets,
             plan_index=index.to(query_clause_attrs.device, non_blocking=True),
+        )
+
+    def _prepare_device_plans(
+        self, expressions: list[str], query_clause_attrs: Tensor
+    ) -> PreparedFilter:
+        """The fork's plans, uploaded once into a blob of one shape per batch shape: one plan per
+        row (full path) or per distinct expression with the row → plan index (partial)."""
+        cfg = self.official
+        rows, n_clauses = query_clause_attrs.shape
+        index = None
+        if cfg.bloom_path == "partial":
+            unique = list(dict.fromkeys(expressions))
+            row_plan = {e: i for i, e in enumerate(unique)}
+            index = torch.tensor([row_plan[e] for e in expressions], dtype=torch.int64)
+            index = index.to(query_clause_attrs.device, non_blocking=True)
+            expressions = unique
+        plans = official_mod.prepare_plans(
+            expressions,
+            cfg.n_stored_hashes,
+            cfg.max_sub_queries,
+            n_clauses,
+            query_clause_attrs.device,
+            slots=rows,
+            backend=self.backend,
+        )
+        return PreparedFilter(
+            plan_index=index,
+            plan_blob=plans.blob,
+            plan_slots=plans.slots,
+            plan_stack=plans.max_stack_size,
         )
 
     def forward(
@@ -475,7 +512,7 @@ class SilverTorch(RetrievalModule):
             raise ValueError(
                 "a prepared filter requires filter_mode='bloom' or filter_mode='exact'"
             )
-        if self.is_official and torch.compiler.is_compiling():
+        if self.backend == "official" and torch.compiler.is_compiling():
             raise RuntimeError(
                 f"SilverTorch(backend={self.backend!r}) is eager-only and cannot be traced by "
                 "torch.compile / torch.export: Meta's scorers sync the host (kernels.md § "
@@ -563,7 +600,13 @@ class SilverTorch(RetrievalModule):
                 self.item_clause_attrs, self.clause_is_reverse, prepared.query_attrs
             )  # high-first words over cluster-sorted ids = the scorer's read order
         elif self.has_bloom and prepared is not None:
-            plans = (prepared.plans_data, prepared.plans_offsets)
+            plans = (
+                (prepared.plans_data, prepared.plans_offsets)
+                if prepared.plan_blob is None
+                else official_mod.DevicePlans(
+                    prepared.plan_blob, prepared.plan_slots, prepared.plan_stack
+                )
+            )
             if cfg.bloom_path == "partial":
                 partial = official_mod.bloom_partial_masks(
                     self.bloom_index,
@@ -574,6 +617,9 @@ class SilverTorch(RetrievalModule):
                     self.k_hash,
                     cfg.n_stored_hashes,
                     prepared.plan_index,
+                    max_columns=official_mod.max_partial_columns(
+                        query.shape[0], self.n_probe, self._probe_width
+                    ),
                     backend=self.backend,
                 )
             else:

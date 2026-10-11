@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
-# Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork (official-fork/CHANGES.md).
+# Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C4: the shape functions in _fake.py load with the ops (official-fork/CHANGES.md).
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -41,3 +41,5 @@ except ImportError as _e:
             "silvertorch C++ ops not found. "
             "Please install silvertorch: pip install silvertorch"
         ) from _e
+
+importlib.import_module("silvertorch_fork.ops._fake")  # fork (C4): shape functions for torch.compile

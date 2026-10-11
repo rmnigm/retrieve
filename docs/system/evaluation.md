@@ -298,8 +298,9 @@ one row the library does not have, the harness's `Postfilter` (torch only;
 is `False` there), so its `graph` perf entries are `null` with `reason:
 not_capturable`. `official-fork` (our fork of Meta's ops, `official-fork/`)
 is the same arm on the fork: the same `OfficialConfig` params
-(`bloom_path`, `score_path`), Triton standalone filters, and eager-only
-until the fork's capture gate (META-FORK C4). Its sources are outside
+(`bloom_path`, `score_path`) and Triton standalone filters; unlike
+`official` it is capturable (META-FORK C4: no host sync, shape functions
+for compile), so it also records `graph` entries (gate pending). Its sources are outside
 `LIB`, so `code_version` does not see a fork change; the record's
 `env.official_fork_build.so_sha256` identifies the fork build.
 
