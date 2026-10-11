@@ -18,6 +18,7 @@
 #include <limits>
 #include <optional>
 #include <tuple>
+#include <type_traits>
 
 #include "fork_search.h"
 #include "fused_kmean_ann.cuh"
@@ -152,6 +153,150 @@ __global__ void __launch_bounds__(kPrepThreads) probe_prep_kernel(
     }
     __syncthreads();
   }
+}
+
+// The two-level top-k (C7; our Triton epilogue's, kernels.md § SilverTorch kernels "Top-k"):
+// from kTopkMinSlots slots of [B, W], where a row has at least kTopkMinRatio whole kTopkBlock-slot
+// blocks per top-k slot, the top-k runs on the slots of the row's k best blocks. Exact: every
+// block holding a slot above the k-th score has a larger max than any block without one, and
+// there are fewer than k of them.
+constexpr int64_t kTopkBlock = 256;
+constexpr int64_t kTopkMinSlots = int64_t{1} << 23;
+constexpr int64_t kTopkMinRatio = 8;
+
+template <typename T>
+using TopkAcc = std::conditional_t<std::is_same_v<T, int32_t>, int32_t, float>;
+
+// One warp per block of kTopkBlock slots: the max of the slots' floored scores (a slot the
+// scorer never wrote, index -1, counts as `floor`, as the single-level path's where()).
+template <typename T>
+__global__ void topk_block_max_kernel(
+    const T* __restrict__ raw,
+    const int32_t* __restrict__ idx,
+    int64_t width,
+    int64_t n_blocks,
+    int64_t total_blocks,
+    TopkAcc<T> floor,
+    T* __restrict__ block_max) {
+  const int lane = threadIdx.x % 32;
+  for (int64_t w = (static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x) / 32;
+       w < total_blocks;
+       w += static_cast<int64_t>(gridDim.x) * blockDim.x / 32) {
+    const int64_t row = w / n_blocks;
+    const int64_t first = (w % n_blocks) * kTopkBlock;
+    TopkAcc<T> m = floor;
+    for (int64_t j = lane; j < kTopkBlock && first + j < width; j += 32) {
+      const int64_t slot = row * width + first + j;
+      if (idx[slot] >= 0) {
+        const TopkAcc<T> v = static_cast<TopkAcc<T>>(raw[slot]);
+        m = v > m ? v : m;
+      }
+    }
+#pragma unroll
+    for (int off = 16; off > 0; off /= 2) {
+      const TopkAcc<T> o = __shfl_xor_sync(0xffffffff, m, off);
+      m = o > m ? o : m;
+    }
+    if (lane == 0) {
+      block_max[w] = static_cast<T>(m);
+    }
+  }
+}
+
+// The chosen blocks' slots as candidates [B, k * kTopkBlock]: floored scores and slot indices
+// (-1 past the row's width).
+template <typename T>
+__global__ void topk_gather_kernel(
+    const T* __restrict__ raw,
+    const int32_t* __restrict__ idx,
+    int64_t width,
+    const int64_t* __restrict__ blocks,
+    int64_t k,
+    int64_t total,
+    TopkAcc<T> floor,
+    T* __restrict__ cand_val,
+    int64_t* __restrict__ cand_slot) {
+  for (int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; i < total;
+       i += static_cast<int64_t>(gridDim.x) * blockDim.x) {
+    const int64_t row = i / (k * kTopkBlock);
+    const int64_t slot =
+        blocks[row * k + (i / kTopkBlock) % k] * kTopkBlock + i % kTopkBlock;
+    const bool in_row = slot < width;
+    T v = static_cast<T>(floor);
+    if (in_row && idx[row * width + slot] >= 0) {
+      v = raw[row * width + slot];
+    }
+    cand_val[i] = v;
+    cand_slot[i] = in_row ? slot : -1;
+  }
+}
+
+bool use_two_level_topk(int64_t rows, int64_t width, int64_t k) {
+  return rows * width >= kTopkMinSlots && width / kTopkBlock >= kTopkMinRatio * k;
+}
+
+// (top raw scores [B, k], their slots [B, k], -1 for a candidate past the row's width).
+std::tuple<Tensor, Tensor> raw_topk(const Tensor& raw, const Tensor& idx, int64_t k) {
+  const bool int32_path = raw.scalar_type() == at::kInt;
+  const int64_t rows = raw.size(0);
+  const int64_t width = raw.size(1);
+  if (!use_two_level_topk(rows, width, k)) {
+    Tensor floored = int32_path
+        ? at::where(idx.ge(0), raw, at::Scalar(std::numeric_limits<int32_t>::min()))
+        : at::where(idx.ge(0), raw, at::Scalar(-std::numeric_limits<double>::infinity()));
+    return at::topk(floored, k, /*dim=*/1);
+  }
+  const int64_t n_blocks = (width + kTopkBlock - 1) / kTopkBlock;
+  const int64_t candidates = k * kTopkBlock;
+  Tensor block_max = at::empty({rows, n_blocks}, raw.options());
+  Tensor cand_val = at::empty({rows, candidates}, raw.options());
+  Tensor cand_slot = at::empty({rows, candidates}, raw.options().dtype(at::kLong));
+  const int64_t sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  auto stream = at::cuda::getCurrentCUDAStream();
+  const int64_t max_grid = 32 * sms;
+  auto launch = [&](auto zero) {
+    using T = decltype(zero);
+    const TopkAcc<T> floor = int32_path
+        ? static_cast<TopkAcc<T>>(std::numeric_limits<int32_t>::min())
+        : static_cast<TopkAcc<T>>(-std::numeric_limits<float>::infinity());
+    const T* raw_ptr = reinterpret_cast<const T*>(raw.const_data_ptr());
+    topk_block_max_kernel<T><<<
+        std::min(max_grid, (rows * n_blocks * 32 + 255) / 256),
+        256,
+        0,
+        stream>>>(
+        raw_ptr,
+        idx.const_data_ptr<int32_t>(),
+        width,
+        n_blocks,
+        rows * n_blocks,
+        floor,
+        reinterpret_cast<T*>(block_max.mutable_data_ptr()));
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    Tensor blocks = std::get<1>(at::topk(block_max, k, 1, true, /*sorted=*/false)).contiguous();
+    topk_gather_kernel<T><<<
+        std::min(max_grid, (rows * candidates + 255) / 256),
+        256,
+        0,
+        stream>>>(
+        raw_ptr,
+        idx.const_data_ptr<int32_t>(),
+        width,
+        blocks.const_data_ptr<int64_t>(),
+        k,
+        rows * candidates,
+        floor,
+        reinterpret_cast<T*>(cand_val.mutable_data_ptr()),
+        cand_slot.mutable_data_ptr<int64_t>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  };
+  if (int32_path) {
+    launch(int32_t{0});
+  } else {
+    launch(c10::Half{0.0f});
+  }
+  auto [top_raw, cand_pos] = at::topk(cand_val, k, /*dim=*/1);
+  return {top_raw, cand_slot.gather(1, cand_pos)};
 }
 
 struct Prep {
@@ -320,17 +465,14 @@ std::tuple<Tensor, Tensor> search_cuda(
             prep.warp_size_cumsum);
   }
 
-  // The epilogue of retrieve.ops.official.official_probe_score, op for op: top-k on the raw
-  // scores (pads at the dtype's minimum), then dequantize only the [B, k] winners.
-  Tensor valid = idx.ge(0);
+  // The epilogue of retrieve.ops.official.official_probe_score: top-k on the raw scores (pads at
+  // the dtype's minimum; two-level from kTopkMinSlots), then dequantize only the [B, k] winners.
   const bool int32_path = raw.scalar_type() == at::kInt;
-  Tensor floored = int32_path
-      ? at::where(valid, raw, at::Scalar(std::numeric_limits<int32_t>::min()))
-      : at::where(valid, raw, at::Scalar(-std::numeric_limits<double>::infinity()));
   const int64_t actual_k = std::min<int64_t>(k, raw.size(1));
-  auto [top_raw, top_slot] = at::topk(floored, actual_k, /*dim=*/1);
-  Tensor top_valid = valid.gather(1, top_slot);
-  Tensor pos = idx.gather(1, top_slot).to(at::kLong).clamp_min(0);
+  auto [top_raw, top_slot] = raw_topk(raw, idx, actual_k);
+  Tensor top_idx = idx.gather(1, top_slot.clamp_min(0));
+  Tensor top_valid = top_slot.ge(0).logical_and(top_idx.ge(0));
+  Tensor pos = top_idx.to(at::kLong).clamp_min(0);
   Tensor ids = at::where(
       top_valid, sort_perm.index_select(0, pos.view(-1)).view(pos.sizes()), -1);
   Tensor scores = int32_path

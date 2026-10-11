@@ -249,7 +249,8 @@ change of its CHANGES table. NOT CITABLE until fork-review accepts and the gates
 | C3: no host sync in `fused_kmean_ann` (F1) | **code written, not built** (no extension builds while pod b times the final pass) | gates X (every path vs upstream `-O3`), S (0 syncs on full and partial `fused_kmean_ann`), K: pending pod b |
 | C4: prepared plans, no host sync in the bloom search (F2; F3 with C3) | **code written, not built.** The static plan capacity (`plan_capacity_bytes`: ≤ 3C + 1 operators, ≤ 4C + 1 parameters, `hash_k` hashes a term) holds against Meta's parser on CPU for C ∈ {1, 2, 3, 5, 8, 12}, plain, mixed and all-negated conjunctions and `""` | gates X (masks and end to end vs upstream), S (0 syncs; whole-forward capture on every path; harness `graph` mode on `official-fork`), K: pending pod b |
 | C5: one-call `stfork::search` (F10) | **code written, not built** | gates X (`torch.equal` to upstream int32 / fp16 through the layer), S, K (launch count recorded): pending pod b |
-| C6: query prep in one kernel | **code written, not built** | gates: codes / scales `torch.equal` to `quantize_int8` (10,000 queries, `test_c6_fork_probe_prep_equals_reference`, and arXiv queries in the gate script), X, K: pending pod b |
+| C6: query prep in one kernel | **code written, compiles** (one-file `nvcc` check) | gates: codes / scales `torch.equal` to `quantize_int8` (10,000 queries, `test_c6_fork_probe_prep_equals_reference`, and arXiv queries in the gate script), X, K: pending pod b |
+| C7: two-level top-k in `search` | **code written, compiles** (one-file `nvcc` check) | gates X (`test_c7_fork_two_level_topk_equals_upstream`: ties, k − 1 / k / k + 1 passing, int32 and fp16; and the grid), K (threshold re-measured): pending pod b |
 
 ## Campaign v2 (Phase V): not yet validated
 

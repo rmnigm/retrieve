@@ -647,6 +647,39 @@ def test_c6_fork_probe_prep_equals_reference(d):
     assert torch.equal(out[8], warps.cumsum(0, dtype=torch.int32))
 
 
+@pytest.mark.parametrize("score_path", ["int32", "fp16"])
+@pytest.mark.parametrize("delta", [-1, 0, 1])
+def test_c7_fork_two_level_topk_equals_upstream(score_path, delta):
+    """META-FORK C7: ``stfork.search`` with its two-level top-k engaged (B · width ≥ 2²³, ≥ 8
+    blocks of 256 slots per top-k slot) against upstream's scorer + the adapter's whole-width
+    top-k, under heavy ties (four distinct code rows) and with exactly ``k + delta`` passing items
+    a row (a full-``N`` mask): scores ``torch.equal``, ids up to ties, ``-1`` / ``-inf`` past the
+    finite count."""
+    if OB != "official-fork":
+        pytest.skip("fork-only gate (META-FORK C7)")
+    require_official("official")
+    b, k, d, n_lists = 64, 100, 64, 1024
+    lay = make_probe_family(b, n_lists, 600, n_lists)
+    width = of.padded_rows(lay.width)
+    assert b * width >= 1 << 23 and width // 256 >= 8 * k, "the two-level top-k does not engage"
+    g = torch.Generator(device="cuda").manual_seed(13)
+    base = torch.randint(-127, 128, (4, d), dtype=torch.int8, device="cuda", generator=g)
+    codes = base[torch.randint(0, 4, (lay.n,), device="cuda", generator=g)].contiguous()
+    passing = torch.zeros(lay.n, dtype=torch.bool, device="cuda")
+    passing[torch.randperm(lay.n, device="cuda", generator=g)[: k + delta]] = True
+    mask = of.pack_mask(passing.unsqueeze(0).expand(b, -1).contiguous())
+    sizes = lay.cluster_offsets.diff()
+    scale = torch.tensor(0.01, device="cuda")
+    q = make_query(b, d)
+    args = (q, lay.probe_ids, lay.cluster_offsets, sizes, codes, lay.sort_perm, scale, k, lay.width)
+    out = of.fork_search(*args, score_path=score_path, filtering_bit_mask=mask)
+    ref = of.official_probe_score(
+        *args, score_path=score_path, filtering_bit_mask=mask, backend="official"
+    )
+    _assert_bitexact(out, ref)
+    assert (torch.isfinite(out[1]).sum(1) == min(k, k + delta)).all()
+
+
 N, D, B, K = 4096, 128, 16, 64
 N_LISTS, N_PROBE = 64, 8
 C, A_MAX = 2, 2
