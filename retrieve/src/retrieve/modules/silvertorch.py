@@ -647,16 +647,14 @@ class SilverTorch(RetrievalModule):
     ) -> tuple[Tensor, Tensor]:
         """Phases 2+3 on our fork of Meta's ops in one ``torch.ops.stfork.search`` call
         (kernels.md § official-fork): ``bloom`` → the plans ``prepare_queries`` put on the device,
-        partial or full by ``OfficialConfig.bloom_path``; ``exact`` → our Triton
-        ``clause_mask_packed`` as the full-``N`` mask, as on ``official``."""
+        partial or full by ``OfficialConfig.bloom_path``; ``exact`` → the clauses tested over the
+        probed docs inside the fork."""
         probe_ids = self._phase1_probe_ids(query)
         cfg = self.official
-        mask = None
+        exact = None
         bloom = None
         if self.has_exact and prepared is not None:
-            mask = ops_for("triton").clause_mask_packed(
-                self.item_clause_attrs, self.clause_is_reverse, prepared.query_attrs
-            )
+            exact = (self.item_clause_attrs, self.clause_is_reverse, prepared.query_attrs)
         elif self.has_bloom and prepared is not None:
             plans = official_mod.DevicePlans(
                 prepared.plan_blob, prepared.plan_slots, prepared.plan_stack
@@ -682,8 +680,8 @@ class SilverTorch(RetrievalModule):
             self._probe_width,
             score_path=cfg.score_path,
             divisor=cfg.divisor,
-            filtering_bit_mask=mask,
             bloom=bloom,
+            exact=exact,
         )
 
     def _forward_candidates(

@@ -68,7 +68,8 @@ def _(bloom_index, bloom_bundle_b_offsets, plans, plan_count, max_stack_size,
 def _(query, probe_ids, cluster_offsets, cluster_sizes, item_codes, sort_perm, global_scale, k,
       max_tensor_size_per_row, divisor_for_int8=-1, filtering_bit_mask=None, bloom_index=None,
       bloom_bundle_b_offsets=None, plans=None, plan_count=0, max_stack_size=0,
-      query_plan_index=None, bloom_k=0, hash_k=0, bloom_partial=True):  # fmt: skip
+      query_plan_index=None, bloom_k=0, hash_k=0, bloom_partial=True, item_clause_attrs=None,
+      clause_is_reverse=None, query_clause_attrs=None):  # fmt: skip
     rows = query.shape[0]
     return (
         query.new_empty((rows, k), dtype=torch.int64),

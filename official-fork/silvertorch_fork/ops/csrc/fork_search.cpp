@@ -4,8 +4,10 @@
 #include <torch/library.h>
 
 // stfork::search (fork_search_cuda.cu, CUDA only): the whole forward after phase 1 in one call.
-// Filter: none; a full-N filtering_bit_mask (exact); or bloom over prepared plans (`plans`,
-// partial over the probed clusters when bloom_partial, else the full-N mask). Returns
+// Filter (at most one): none; bloom over prepared plans (`plans`, partial over the probed
+// clusters when bloom_partial, else the full-N mask); exact (`query_clause_attrs` against the
+// cluster-sorted `item_clause_attrs` / `clause_is_reverse`, over the probed docs only); or a
+// given full-N `filtering_bit_mask`. Returns
 // (ids int64 [B, k], scores fp32 [B, k]) with -1 / -inf pads, like every SilverTorch backend.
 TORCH_LIBRARY_FRAGMENT(stfork, m) {
   m.def(
@@ -29,7 +31,10 @@ TORCH_LIBRARY_FRAGMENT(stfork, m) {
       "Tensor? query_plan_index=None, "
       "int bloom_k=0, "
       "int hash_k=0, "
-      "bool bloom_partial=True)"
+      "bool bloom_partial=True, "
+      "Tensor? item_clause_attrs=None, "
+      "Tensor? clause_is_reverse=None, "
+      "Tensor? query_clause_attrs=None)"
       "-> (Tensor, Tensor)");
 
   // search's first launch (C6), exposed for its gate: int8 codes, scales, the probed clusters'

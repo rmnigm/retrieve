@@ -460,12 +460,14 @@ def fork_search(
     divisor: int | None = None,
     filtering_bit_mask: Tensor | None = None,
     bloom: ForkBloom | None = None,
+    exact: tuple[Tensor, Tensor, Tensor] | None = None,
 ) -> tuple[Tensor, Tensor]:
     """Phases 2+3 on the fork in one call, ``torch.ops.stfork.search``: query int8, the probed
-    clusters, the filter (a full-``N`` ``filtering_bit_mask``, or the bloom over prepared plans),
-    payloads + scorer, top-k on the raw scores and the ``[B, k]`` epilogue of
-    :func:`official_probe_score` → ``(ids int64 [B, k], scores fp32 [B, k])``, ``-1`` / ``-inf``
-    pads (kernels.md § official-fork)."""
+    clusters, the filter (at most one: the bloom over prepared plans; ``exact`` = the
+    cluster-sorted ``(item_clause_attrs, clause_is_reverse, query_clause_attrs)``, tested over the
+    probed docs only; or a full-``N`` ``filtering_bit_mask``), payloads + scorer, top-k on the
+    raw scores and the ``[B, k]`` epilogue of :func:`official_probe_score` → ``(ids int64 [B, k],
+    scores fp32 [B, k])``, ``-1`` / ``-inf`` pads (kernels.md § official-fork)."""
     st = ensure_loaded("official-fork")
     div = (
         -1
@@ -494,6 +496,7 @@ def fork_search(
         0 if b is None else int(b.k),
         0 if b is None else int(b.hash_k),
         True if b is None else bool(b.partial),
+        *(exact if exact is not None else (None, None, None)),
     )
 
 

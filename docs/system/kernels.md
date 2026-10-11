@@ -1834,21 +1834,27 @@ file. `CHANGES.md` lists every change; each has its gate row in
 `SilverTorch(backend="official-fork")` selects it.
 
 **Forward: one op.** `SilverTorch(backend="official-fork")` runs phase 1 (ours) and then one
-`torch.ops.stfork.search` call (`adapter.fork_search`; `fork_search_cuda.cu`): one prep launch
-(`probe_prep_kernel`: per query row the int8 codes and scale exactly as eager torch computes our
-`quantize_int8` — the code quotient in fp64 rounded to fp32, the scale `abs_max · fp32(1/127)` as
-torch divides by a CPU scalar — and one block for the probed clusters' ids, lengths, offsets,
-warp sizes and the scorer's three cumsums; `stfork::probe_prep` exposes it), the filter (on the
-partial bloom path the payload kernels evaluate the prepared plan on the ≤ 2 bloom columns each
-warp's docs span and cut the same mask bits upstream's payload kernels cut from
-`column_mask_response`, so no column search runs; the full path's mask, or `exact`'s, is a
-full-`N` mask as before) (bloom over the
-prepared plans, partial or full; `exact` passes our Triton `clause_mask_packed` as the full-`N`
-mask), payloads + scorer, top-k on the raw scores (two-level from `B · width ≥ 2²³` with ≥ 8
-blocks of 256 slots per top-k slot: a block-max kernel, `topk` over the maxima, the k best blocks'
-slots gathered, a final `topk`; exact for the reason our Triton epilogue's is) and the `[B, k]`
-epilogue of `official_probe_score` in its order, returning `(ids int64 [B, k], scores fp32 [B, k])` with
-`-1` / `-inf` pads. `official_probe_score` stays for `"official"`.
+`torch.ops.stfork.search` call (`adapter.fork_search`; `fork_search_cuda.cu`). In order:
+
+1. **Prep, one launch** (`probe_prep_kernel`; `stfork::probe_prep` exposes it): per query row the
+   int8 codes and scale exactly as eager torch computes our `quantize_int8` (the code quotient in
+   fp64 rounded to fp32; the scale `abs_max · fp32(1/127)`, as torch divides by a CPU scalar), and
+   one block for the probed clusters' ids, lengths and offsets, the warp sizes and the scorer's
+   three cumsums.
+2. **Filter, into the payloads.** Partial bloom: the payload kernels evaluate the prepared plan on
+   the ≤ 2 bloom columns a payload's docs span and cut the same mask bits upstream's payload
+   kernels cut from `column_mask_response`, so no column search runs. `exact`: the clauses are
+   tested over the probed docs only, one warp per 32-doc payload with `__brev(__ballot_sync(…))`
+   as its mask, an inactive clause a warp-uniform skip. Full bloom: the prepared search's full-`N`
+   mask, read by the scorer as upstream's.
+3. **Scorer**: upstream's payload scorer (`process_cluster` / `_remaining`).
+4. **Top-k on the raw scores**: two-level from `B · width ≥ 2²³` with ≥ 8 blocks of 256 slots per
+   top-k slot (a block-max kernel, `topk` over the maxima, the k best blocks' slots gathered, a
+   final `topk`; exact for the reason our Triton epilogue's is), else `where` + `topk`.
+5. **Epilogue**: `official_probe_score`'s `[B, k]` dequantize and `sort_perm` map, in its order.
+
+It returns `(ids int64 [B, k], scores fp32 [B, k])` with `-1` / `-inf` pads.
+`official_probe_score` stays for `"official"`.
 
 **Upstream-shaped ops.** The fork still registers the same six ops as upstream, under `stfork::`
 with upstream's schema strings (the parity gates call them), and the adapter of the [`official`

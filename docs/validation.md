@@ -252,6 +252,7 @@ change of its CHANGES table. NOT CITABLE until fork-review accepts and the gates
 | C6: query prep in one kernel | **code written, compiles** (one-file `nvcc` check) | gates: codes / scales `torch.equal` to `quantize_int8` (10,000 queries, `test_c6_fork_probe_prep_equals_reference`, and arXiv queries in the gate script), X, K: pending pod b |
 | C7: two-level top-k in `search` | **code written, compiles** (one-file `nvcc` check) | gates X (`test_c7_fork_two_level_topk_equals_upstream`: ties, k − 1 / k / k + 1 passing, int32 and fp16; and the grid), K (threshold re-measured): pending pod b |
 | C8: bloom evaluated in the payload kernels (partial path) | **code written, compiles** (one-file `nvcc` check) | gates X (`test_c8_fork_bloom_search_equals_upstream`, partial and full, int32 and fp16; and the grid), S, K (launches recorded): pending pod b |
+| C9: the exact filter over the probed docs, inside `search` (F9) | **code written, compiles** (one-file `nvcc` check) | gates X (T6's layer tests on the fork: exact, reverse clauses, all-inactive queries, `torch.equal` to Triton at int32; and the grid), S, K: pending pod b |
 
 ## Campaign v2 (Phase V): not yet validated
 
