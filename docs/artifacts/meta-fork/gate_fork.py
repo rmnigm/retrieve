@@ -77,19 +77,25 @@ def sm_mhz() -> int:
 
 def same_up_to_ties(x, y) -> bool:
     (ia, sa), (ib, _) = x, y
-    for r in range(ia.shape[0]):
-        kth = sa[r, -1]
-        for v in sa[r][sa[r] > kth].unique():
-            sel = sa[r] == v
-            if not torch.equal(ia[r][sel].sort().values, ib[r][sel].sort().values):
-                return False
-        tied = sa[r] == kth
-        for ids in (ia[r][tied], ib[r][tied]):
-            if kth == float("-inf"):
-                if not (ids == -1).all():
-                    return False
-            elif ids.unique().numel() != ids.numel():
-                return False
+    kth = sa[:, -1:]
+    pad = kth == float("-inf")
+    canon = []
+    for ids in (ia, ib):
+        # (score desc, id asc) per row: stable sort by id, then stable sort by score
+        by_id = ids.sort(dim=1, stable=True).indices
+        s = sa.gather(1, by_id)
+        by_score = s.sort(dim=1, descending=True, stable=True).indices
+        canon.append((ids.gather(1, by_id).gather(1, by_score), s.gather(1, by_score)))
+    (ca, s), (cb, _) = canon
+    above, tied = s > kth, s == kth
+    if not torch.equal(ca.masked_fill(~above, 0), cb.masked_fill(~above, 0)):
+        return False
+    for c, _ in canon:
+        if (tied & pad & (c != -1)).any():
+            return False
+        run = tied[:, 1:] & tied[:, :-1] & ~pad
+        if (run & (c[:, 1:] == c[:, :-1])).any():
+            return False
     return True
 
 
